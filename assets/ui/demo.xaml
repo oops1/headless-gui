@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    PAM System — главный диалог авторизации
+    Разрешение холста: 1920 × 1024
+    Все координаты абсолютные (пиксели холста).
+-->
+<Panel Name="root" Width="1920" Height="1024" Background="Transparent">
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Главное окно (Win10, полупрозрачный фон)
+         ═══════════════════════════════════════════════════════════════ -->
+    <Panel Name="mainWin"
+           Left="100" Top="80" Right="1820" Bottom="944"
+           Style="Win10"/>
+
+    <!-- ── Строка заголовка ──────────────────────────────────────────── -->
+    <Panel Name="titleBar"
+           Left="100" Top="80" Right="1820" Bottom="126"
+           Background="#0078D7">
+
+        <Label Name="winTitle"
+               Left="118" Top="93" Right="1700" Bottom="115"
+               Text="PAM System — Privileged Access Management"
+               Foreground="White"/>
+
+        <!-- Кнопки окна (декоративные) -->
+        <Panel Name="btnClose"  Left="1784" Top="80" Right="1820" Bottom="126" Background="#C42B1C">
+            <Label Left="1793" Top="92" Right="1818" Bottom="114" Text="×" Foreground="White"/>
+        </Panel>
+        <Panel Name="btnMaximize" Left="1748" Top="80" Right="1784" Bottom="126" Background="#373737">
+            <Label Left="1757" Top="92" Right="1782" Bottom="114" Text="□" Foreground="#C8C8C8"/>
+        </Panel>
+        <Panel Name="btnMinimize" Left="1712" Top="80" Right="1748" Bottom="126" Background="#373737">
+            <Label Left="1721" Top="92" Right="1746" Bottom="114" Text="—" Foreground="#C8C8C8"/>
+        </Panel>
+
+    </Panel>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Левая панель — форма авторизации
+         ═══════════════════════════════════════════════════════════════ -->
+    <Panel Name="leftPanel"
+           Left="110" Top="136" Right="700" Bottom="934"
+           Style="Win10">
+
+        <Label Name="formTitle"
+               Left="130" Top="150" Right="660" Bottom="174"
+               Text="Авторизация"
+               Foreground="#B4D2FF"/>
+
+        <!-- Акцентный разделитель под заголовком -->
+        <Rectangle Left="130" Top="178" Right="680" Bottom="180"
+                   Fill="#0078D7"/>
+
+        <!-- Логин -->
+        <Label Left="130" Top="196" Right="550" Bottom="216"
+               Text="Имя пользователя:"/>
+        <TextBox Name="loginInput"
+                 Left="130" Top="220" Right="676" Bottom="254"
+                 Placeholder="user@domain.com"
+                 Focused="True"/>
+
+        <!-- Пароль -->
+        <Label Left="130" Top="272" Right="550" Bottom="292"
+               Text="Пароль:"/>
+        <PasswordBox Name="passInput"
+                     Left="130" Top="296" Right="676" Bottom="330"/>
+
+        <!-- Домен -->
+        <Label Left="130" Top="348" Right="550" Bottom="368"
+               Text="Домен:"/>
+        <TextBox Name="domainInput"
+                 Left="130" Top="372" Right="676" Bottom="406"
+                 Text="corp.example.com"/>
+
+        <!-- Роль -->
+        <Label Left="130" Top="424" Right="550" Bottom="444"
+               Text="Роль пользователя:"/>
+        <ComboBox Name="roleDD"
+                  Left="130" Top="448" Right="676" Bottom="482">
+            <Item>Administrator</Item>
+            <Item>Operator</Item>
+            <Item>Auditor</Item>
+            <Item>Read-only</Item>
+        </ComboBox>
+
+        <!-- CheckBox: запомнить меня -->
+        <CheckBox Name="cbRemember"
+                  Left="130" Top="500" Right="400" Bottom="524"
+                  Content="Запомнить меня" IsChecked="True"/>
+
+        <!-- RadioButton: тип входа -->
+        <Label Left="130" Top="536" Right="400" Bottom="556"
+               Text="Тип аутентификации:" Foreground="#B4B4B4"/>
+        <RadioButton Name="rbLDAP"
+                     Left="130" Top="560" Right="350" Bottom="584"
+                     Content="LDAP / AD" GroupName="authType" IsChecked="True"/>
+        <RadioButton Name="rbOTP"
+                     Left="130" Top="588" Right="350" Bottom="612"
+                     Content="Одноразовый пароль" GroupName="authType"/>
+        <RadioButton Name="rbCert"
+                     Left="130" Top="616" Right="350" Bottom="640"
+                     Content="Сертификат" GroupName="authType"/>
+
+        <!-- Кнопки действия -->
+        <Button Name="btnLogin"
+                Left="130" Top="660" Right="310" Bottom="700"
+                Content="  Войти  "
+                Style="Accent"/>
+        <Button Name="btnCancel"
+                Left="328" Top="660" Right="490" Bottom="700"
+                Content="Отмена"/>
+
+        <!-- Разделитель -->
+        <Separator Left="130" Top="718" Right="680" Bottom="720"/>
+
+        <!-- Вспомогательный текст -->
+        <Label Name="hintLbl"
+               Left="130" Top="730" Right="676" Bottom="750"
+               Text="Используйте корпоративный аккаунт Active Directory"
+               Foreground="#828282"/>
+
+    </Panel>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Правая панель — статистика движка
+         ═══════════════════════════════════════════════════════════════ -->
+    <Panel Name="rightPanel"
+           Left="720" Top="136" Right="1810" Bottom="934"
+           Style="Win10">
+
+        <Label Name="statsTitle"
+               Left="740" Top="150" Right="1200" Bottom="174"
+               Text="Статистика движка"
+               Foreground="#B4D2FF"/>
+
+        <Rectangle Left="740" Top="178" Right="1800" Bottom="180"
+                   Fill="#0078D7"/>
+
+        <!-- Метрики -->
+        <Label Name="frameLabel"
+               Left="740" Top="196" Right="1200" Bottom="218"
+               Text="Кадр: —"
+               Background="#2B2B2BDC"/>
+
+        <Label Name="tilesLabel"
+               Left="740" Top="226" Right="1200" Bottom="248"
+               Text="Тайлов: —"
+               Background="#2B2B2BDC"/>
+
+        <Label Name="bytesLabel"
+               Left="740" Top="256" Right="1200" Bottom="278"
+               Text="Байт/кадр: —"
+               Background="#2B2B2BDC"/>
+
+        <Separator Left="740" Top="298" Right="1800" Bottom="300"/>
+
+        <!-- Прогресс-бар -->
+        <Label Left="740" Top="310" Right="1000" Bottom="330"
+               Text="Загрузка системы:"/>
+        <ProgressBar Name="pb"
+                     Left="740" Top="338" Right="1800" Bottom="368"/>
+        <Label Name="pbPct"
+               Left="740" Top="382" Right="900" Bottom="402"
+               Text="0%"
+               Background="#2B2B2BDC"/>
+
+        <Separator Left="740" Top="420" Right="1800" Bottom="422"/>
+
+        <!-- Статус -->
+        <Label Name="statusLabel"
+               Left="740" Top="434" Right="1800" Bottom="456"
+               Text="Status: ожидание…"
+               Background="#2B2B2BDC"/>
+
+        <!-- Панель инструментов -->
+        <Button Name="btnReset"
+                Left="740" Top="480" Right="900" Bottom="518"
+                Content="Сброс"/>
+        <Button Name="btnExport"
+                Left="918" Top="480" Right="1090" Bottom="518"
+                Content="Экспорт"
+                Style="Accent"/>
+        <Button Name="btnThemeToggle"
+                Left="1108" Top="480" Right="1340" Bottom="518"
+                Content="Светлая тема"/>
+
+        <!-- ═══ Новые виджеты ═══ -->
+        <Separator Left="740" Top="536" Right="1800" Bottom="538"/>
+
+        <Label Left="740" Top="548" Right="1200" Bottom="568"
+               Text="Демо новых виджетов"
+               Foreground="#B4D2FF"/>
+
+        <!-- ToggleSwitch -->
+        <ToggleSwitch Name="tsAutoRefresh"
+                      Left="740" Top="578" Right="1100" Bottom="604"
+                      Content="Авто-обновление" IsOn="True"/>
+
+        <ToggleSwitch Name="tsNotify"
+                      Left="740" Top="612" Right="1100" Bottom="638"
+                      Content="Уведомления"/>
+
+        <!-- Slider -->
+        <Label Left="740" Top="650" Right="1000" Bottom="670"
+               Text="Скорость обновления:"/>
+        <Slider Name="sliderSpeed"
+                Left="740" Top="674" Right="1100" Bottom="704"
+                Minimum="1" Maximum="60" Value="20"/>
+        <Label Name="lblSpeedVal"
+               Left="1110" Top="680" Right="1250" Bottom="700"
+               Text="20 FPS"
+               Background="#2B2B2BDC"/>
+
+        <!-- ListView -->
+        <Label Left="740" Top="718" Right="1100" Bottom="738"
+               Text="Журнал событий:"/>
+        <ListView Name="eventLog"
+                  Left="740" Top="742" Right="1200" Bottom="920"
+                  ItemHeight="24"/>
+
+        <!-- Счётчики справа от ListView -->
+        <Label Left="1220" Top="548" Right="1800" Bottom="568"
+               Text="Настройки сессии"
+               Foreground="#B4D2FF"/>
+
+        <CheckBox Name="cbVerbose"
+                  Left="1220" Top="578" Right="1500" Bottom="602"
+                  Content="Verbose логирование"/>
+        <CheckBox Name="cbCompress"
+                  Left="1220" Top="610" Right="1500" Bottom="634"
+                  Content="Сжатие тайлов" IsChecked="True"/>
+        <CheckBox Name="cbEncrypt"
+                  Left="1220" Top="642" Right="1500" Bottom="666"
+                  Content="Шифрование"/>
+
+        <!-- RadioButton: формат экспорта -->
+        <Label Left="1220" Top="682" Right="1500" Bottom="702"
+               Text="Формат экспорта:" Foreground="#B4B4B4"/>
+        <RadioButton Name="rbPNG"
+                     Left="1220" Top="706" Right="1500" Bottom="730"
+                     Content="PNG" GroupName="exportFmt" IsChecked="True"/>
+        <RadioButton Name="rbJPEG"
+                     Left="1220" Top="734" Right="1500" Bottom="758"
+                     Content="JPEG" GroupName="exportFmt"/>
+        <RadioButton Name="rbRAW"
+                     Left="1220" Top="762" Right="1500" Bottom="786"
+                     Content="RAW RGBA" GroupName="exportFmt"/>
+
+        <!-- Второй Slider: качество -->
+        <Label Left="1220" Top="802" Right="1500" Bottom="822"
+               Text="Качество:"/>
+        <Slider Name="sliderQuality"
+                Left="1220" Top="826" Right="1600" Bottom="856"
+                Minimum="1" Maximum="100" Value="80"/>
+        <Label Name="lblQualityVal"
+               Left="1610" Top="832" Right="1790" Bottom="852"
+               Text="80%"
+               Background="#2B2B2BDC"/>
+
+    </Panel>
+
+</Panel>

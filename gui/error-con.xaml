@@ -1,0 +1,33 @@
+<!-- error-con.xaml — диалог ошибки подключения.
+     Модальное окно 480×220; движок центрирует при ShowModal.
+     Caption → встроенный заголовок.
+     Плоская структура — ShowModal сдвигает только прямых потомков. -->
+<Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Name="root" Width="480" Height="190"
+        Background="#2D2D30"
+        BorderBrush="#555569" BorderThickness="1" CornerRadius="8"
+        Caption="Неожиданная ситуация">
+
+    <!-- Тело сообщения (под хедером 32px) -->
+    <TextBlock x:Name="lblMsg1"
+               Canvas.Left="20" Canvas.Top="42" Width="440" Height="22"
+               Text="Возникли проблемы с этим подключением." Foreground="#D0D0D8"/>
+
+    <TextBlock x:Name="lblMsg2"
+               Canvas.Left="20" Canvas.Top="68" Width="440" Height="22"
+               Text="Попробуйте подключиться позже," Foreground="#D0D0D8"/>
+
+    <TextBlock x:Name="lblMsg3"
+               Canvas.Left="20" Canvas.Top="94" Width="440" Height="22"
+               Text="или обратитесь к системному администратору." Foreground="#D0D0D8"/>
+
+    <!-- Разделитель -->
+    <Separator Canvas.Left="14" Canvas.Top="134" Width="452" Height="1"/>
+
+    <!-- Кнопка OK -->
+    <Button x:Name="btnOK"
+            Canvas.Left="200" Canvas.Top="146" Width="80" Height="34"
+            Content=" OK " Tag="Accent"/>
+
+</Canvas>

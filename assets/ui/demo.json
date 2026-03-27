@@ -1,0 +1,261 @@
+{
+  "type": "panel",
+  "id": "root",
+  "bounds": [0, 0, 1920, 1024],
+  "style": "transparent",
+  "children": [
+    {
+      "type": "panel",
+      "id": "mainWin",
+      "bounds": [100, 80, 1820, 944],
+      "style": "win10"
+    },
+    {
+      "type": "panel",
+      "id": "titleBar",
+      "bounds": [100, 80, 1820, 126],
+      "bgColor": "#0078D7FF",
+      "children": [
+        {
+          "type": "label",
+          "id": "winTitle",
+          "bounds": [118, 93, 1400, 115],
+          "text": "PAM System — Privileged Access Management",
+          "textColor": "#FFFFFF"
+        },
+        {
+          "type": "panel",
+          "id": "btnClose",
+          "bounds": [1784, 80, 1820, 126],
+          "bgColor": "#C42B1CFF",
+          "children": [
+            {
+              "type": "label",
+              "id": "closeIcon",
+              "bounds": [1793, 89, 1818, 113],
+              "text": "×",
+              "textColor": "#FFFFFF"
+            }
+          ]
+        },
+        {
+          "type": "panel",
+          "id": "btnMax",
+          "bounds": [1748, 80, 1784, 126],
+          "bgColor": "#373737FF",
+          "children": [
+            {
+              "type": "label",
+              "id": "maxIcon",
+              "bounds": [1757, 89, 1782, 113],
+              "text": "□",
+              "textColor": "#C8C8C8"
+            }
+          ]
+        },
+        {
+          "type": "panel",
+          "id": "btnMin",
+          "bounds": [1712, 80, 1748, 126],
+          "bgColor": "#373737FF",
+          "children": [
+            {
+              "type": "label",
+              "id": "minIcon",
+              "bounds": [1721, 89, 1746, 113],
+              "text": "—",
+              "textColor": "#C8C8C8"
+            }
+          ]
+        }
+      ]
+    },
+
+    {
+      "type": "panel",
+      "id": "leftPanel",
+      "bounds": [110, 136, 700, 934],
+      "style": "win10",
+      "children": [
+        {
+          "type": "label",
+          "id": "formTitle",
+          "bounds": [130, 150, 660, 174],
+          "text": "Авторизация",
+          "textColor": "#B4D2FF"
+        },
+        {
+          "type": "panel",
+          "id": "sep1",
+          "bounds": [130, 178, 680, 180],
+          "bgColor": "#0078D7FF"
+        },
+
+        {
+          "type": "label",
+          "id": "loginLbl",
+          "bounds": [130, 196, 550, 216],
+          "text": "Имя пользователя:"
+        },
+        {
+          "type": "textinput",
+          "id": "loginInput",
+          "bounds": [130, 220, 676, 254],
+          "placeholder": "user@domain.com",
+          "focused": true
+        },
+
+        {
+          "type": "label",
+          "id": "passLbl",
+          "bounds": [130, 272, 550, 292],
+          "text": "Пароль:"
+        },
+        {
+          "type": "textinput",
+          "id": "passInput",
+          "bounds": [130, 296, 676, 330],
+          "placeholder": "••••••••"
+        },
+
+        {
+          "type": "label",
+          "id": "roleLbl",
+          "bounds": [130, 356, 550, 376],
+          "text": "Роль:"
+        },
+        {
+          "type": "dropdown",
+          "id": "roleDD",
+          "bounds": [130, 380, 676, 414],
+          "items": ["Administrator", "Operator", "Auditor", "Read-only"]
+        },
+
+        {
+          "type": "button",
+          "id": "btnLogin",
+          "bounds": [130, 450, 330, 492],
+          "text": "  Войти  ",
+          "style": "accent"
+        },
+        {
+          "type": "button",
+          "id": "btnCancel",
+          "bounds": [348, 450, 520, 492],
+          "text": "Отмена"
+        },
+
+        {
+          "type": "panel",
+          "id": "sep2",
+          "bounds": [130, 510, 680, 512],
+          "bgColor": "#4C4C4CFF"
+        },
+        {
+          "type": "label",
+          "id": "hintLbl",
+          "bounds": [130, 522, 676, 542],
+          "text": "Используйте корпоративный аккаунт AD",
+          "textColor": "#828282"
+        }
+      ]
+    },
+
+    {
+      "type": "panel",
+      "id": "rightPanel",
+      "bounds": [720, 136, 1810, 934],
+      "style": "win10",
+      "children": [
+        {
+          "type": "label",
+          "id": "statsTitle",
+          "bounds": [740, 150, 1200, 174],
+          "text": "Статистика движка",
+          "textColor": "#B4D2FF"
+        },
+        {
+          "type": "panel",
+          "id": "sep3",
+          "bounds": [740, 178, 1800, 180],
+          "bgColor": "#0078D7FF"
+        },
+
+        {
+          "type": "label",
+          "id": "frameLabel",
+          "bounds": [740, 196, 1200, 218],
+          "text": "Кадр: —",
+          "bgColor": "#2B2B2BDC"
+        },
+        {
+          "type": "label",
+          "id": "tilesLabel",
+          "bounds": [740, 226, 1200, 248],
+          "text": "Тайлов: —",
+          "bgColor": "#2B2B2BDC"
+        },
+        {
+          "type": "label",
+          "id": "bytesLabel",
+          "bounds": [740, 256, 1200, 278],
+          "text": "Байт/кадр: —",
+          "bgColor": "#2B2B2BDC"
+        },
+
+        {
+          "type": "panel",
+          "id": "sep4",
+          "bounds": [740, 298, 1800, 300],
+          "bgColor": "#4C4C4CFF"
+        },
+        {
+          "type": "label",
+          "id": "pbLbl",
+          "bounds": [740, 310, 1000, 330],
+          "text": "Анимация:"
+        },
+        {
+          "type": "progressbar",
+          "id": "pb",
+          "bounds": [740, 338, 1800, 370]
+        },
+        {
+          "type": "label",
+          "id": "pbPct",
+          "bounds": [740, 382, 900, 402],
+          "text": "0%",
+          "bgColor": "#2B2B2BDC"
+        },
+
+        {
+          "type": "panel",
+          "id": "sep5",
+          "bounds": [740, 420, 1800, 422],
+          "bgColor": "#4C4C4CFF"
+        },
+        {
+          "type": "label",
+          "id": "statusLabel",
+          "bounds": [740, 434, 1800, 456],
+          "text": "Status: ожидание…",
+          "bgColor": "#2B2B2BDC"
+        },
+
+        {
+          "type": "button",
+          "id": "btnReset",
+          "bounds": [740, 480, 900, 520],
+          "text": "Сброс"
+        },
+        {
+          "type": "button",
+          "id": "btnExport",
+          "bounds": [918, 480, 1100, 520],
+          "text": "Экспорт",
+          "style": "accent"
+        }
+      ]
+    }
+  ]
+}

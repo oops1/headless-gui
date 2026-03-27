@@ -1,0 +1,314 @@
+// Package engine — диспетчер событий ввода (мышь, клавиатура, фокус).
+package engine
+
+import (
+	"image"
+	"sync"
+
+	"headless-gui/widget"
+)
+
+// ─── Focus manager ───────────────────────────────────────────────────────────
+
+// focusManager хранит текущий виджет с фокусом и управляет передачей фокуса.
+type focusManager struct {
+	mu      sync.Mutex
+	focused widget.Widget // nil — нет фокуса
+}
+
+// set устанавливает фокус на w; снимает фокус с предыдущего (если реализует Focusable).
+func (fm *focusManager) set(w widget.Widget) {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+
+	if fm.focused == w {
+		return
+	}
+	// Снимаем фокус со старого
+	if fm.focused != nil {
+		if f, ok := fm.focused.(widget.Focusable); ok {
+			f.SetFocused(false)
+		}
+	}
+	fm.focused = w
+	// Даём фокус новому
+	if w != nil {
+		if f, ok := w.(widget.Focusable); ok {
+			f.SetFocused(true)
+		}
+	}
+}
+
+func (fm *focusManager) get() widget.Widget {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	return fm.focused
+}
+
+// ─── Mouse Capture ──────────────────────────────────────────────────────────
+
+// SetCapture направляет все события мыши на указанный виджет.
+func (e *Engine) SetCapture(w widget.Widget) {
+	e.capMu.Lock()
+	e.captured = w
+	e.capMu.Unlock()
+}
+
+// ReleaseCapture отменяет захват мыши.
+func (e *Engine) ReleaseCapture() {
+	e.capMu.Lock()
+	e.captured = nil
+	e.capMu.Unlock()
+}
+
+func (e *Engine) getCaptured() widget.Widget {
+	e.capMu.Lock()
+	w := e.captured
+	e.capMu.Unlock()
+	return w
+}
+
+// ─── SetFocus / SendKeyEvent ─────────────────────────────────────────────────
+
+// SetFocus передаёт фокус ввода виджету w.
+// Если w == nil — фокус снимается со всех виджетов.
+func (e *Engine) SetFocus(w widget.Widget) {
+	e.focus.set(w)
+}
+
+// SendKeyEvent доставляет клавиатурное событие виджету с фокусом.
+// Tab / Shift+Tab перехватываются для переключения фокуса между виджетами.
+func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
+	// Tab-навигация: перехватываем Tab до доставки виджету.
+	// При активном модальном виджете Tab циклит только внутри него.
+	if ev.Code == widget.KeyTab && ev.Pressed {
+		var tabRoot widget.Widget
+		if m := e.topModal(); m != nil {
+			tabRoot = m
+		} else {
+			e.mu.RLock()
+			tabRoot = e.root
+			e.mu.RUnlock()
+		}
+		if tabRoot != nil {
+			reverse := ev.Mod&widget.ModShift != 0
+			e.tabCycle(tabRoot, reverse)
+		}
+		return
+	}
+
+	// Escape закрывает верхний модальный виджет
+	if ev.Code == widget.KeyEscape && ev.Pressed {
+		if m := e.topModal(); m != nil {
+			e.CloseModal(nil) // закрывает верхний
+			return
+		}
+	}
+
+	w := e.focus.get()
+	if w == nil {
+		return
+	}
+	if kh, ok := w.(widget.KeyHandler); ok {
+		kh.OnKeyEvent(ev)
+	}
+}
+
+// tabCycle переключает фокус на следующий (или предыдущий) Focusable-виджет.
+func (e *Engine) tabCycle(root widget.Widget, reverse bool) {
+	all := widget.CollectFocusables(root)
+	if len(all) == 0 {
+		return
+	}
+
+	current := e.focus.get()
+	idx := -1
+	for i, w := range all {
+		if w == current {
+			idx = i
+			break
+		}
+	}
+
+	var next int
+	if idx < 0 {
+		// Нет текущего фокуса — ставим на первый/последний
+		if reverse {
+			next = len(all) - 1
+		} else {
+			next = 0
+		}
+	} else if reverse {
+		next = (idx - 1 + len(all)) % len(all)
+	} else {
+		next = (idx + 1) % len(all)
+	}
+
+	e.focus.set(all[next])
+}
+
+// ─── Mouse events ────────────────────────────────────────────────────────────
+
+// SendMouseMove уведомляет всё дерево виджетов о перемещении курсора в (x, y).
+// Если есть виджет, захвативший мышь — событие идёт только ему.
+// Если активен модальный виджет — broadcast только внутри него.
+// Иначе — broadcast всему дереву.
+func (e *Engine) SendMouseMove(x, y int) {
+	// Если мышь захвачена — только захватчику
+	if cap := e.getCaptured(); cap != nil {
+		if mm, ok := cap.(widget.MouseMoveHandler); ok {
+			mm.OnMouseMove(x, y)
+		}
+		return
+	}
+
+	// Модальный виджет: ограничиваем broadcast
+	if m := e.topModal(); m != nil {
+		broadcastMouseMove(m, x, y)
+		return
+	}
+
+	e.mu.RLock()
+	root := e.root
+	e.mu.RUnlock()
+	if root == nil {
+		return
+	}
+	broadcastMouseMove(root, x, y)
+}
+
+// SendMouseButton уведомляет дерево о нажатии/отпускании кнопки мыши в (x, y).
+// Если мышь захвачена — событие идёт только захватчику.
+// Иначе: проверяем, хочет ли какой-либо предок захватить мышь (WantsCapture),
+// затем передаём событие самому верхнему виджету под курсором.
+func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool) {
+	ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed}
+
+	// Если мышь захвачена — только захватчику
+	if cap := e.getCaptured(); cap != nil {
+		if mc, ok := cap.(widget.MouseClickHandler); ok {
+			mc.OnMouseButton(ev)
+		}
+		return
+	}
+
+	// Определяем корень для dispatch'а: модальный виджет или root
+	var dispatchRoot widget.Widget
+	if m := e.topModal(); m != nil {
+		dispatchRoot = m
+	} else {
+		e.mu.RLock()
+		dispatchRoot = e.root
+		e.mu.RUnlock()
+	}
+	if dispatchRoot == nil {
+		return
+	}
+
+	// Проверяем, хочет ли кто-то из предков захватить мышь (drag handle)
+	if pressed && btn == widget.MouseLeft {
+		if capturer := findCapturer(dispatchRoot, x, y, ev); capturer != nil {
+			e.SetCapture(capturer)
+			if mc, ok := capturer.(widget.MouseClickHandler); ok {
+				mc.OnMouseButton(ev)
+			}
+			return
+		}
+	}
+
+	// Получаем путь от корня до самого глубокого виджета под курсором
+	path := hitTestPath(dispatchRoot, x, y)
+	if len(path) == 0 {
+		return
+	}
+	hit := path[len(path)-1]
+
+	// При нажатии — передаём фокус
+	if pressed && btn == widget.MouseLeft {
+		if _, ok := hit.(widget.Focusable); ok {
+			e.focus.set(hit)
+		} else {
+			e.focus.set(nil)
+		}
+	}
+
+	// Доставляем событие с bubbling: от самого глубокого виджета к корню.
+	// Если виджет поглотил событие (вернул true) — bubbling останавливается.
+	for i := len(path) - 1; i >= 0; i-- {
+		if mc, ok := path[i].(widget.MouseClickHandler); ok {
+			if mc.OnMouseButton(ev) {
+				return
+			}
+		}
+	}
+}
+
+// ─── Hit testing ─────────────────────────────────────────────────────────────
+
+// hitTest возвращает самый верхний виджет (последний дочерний в Z-порядке),
+// чьи bounds содержат точку (x, y). Возвращает nil, если точка вне дерева.
+func hitTest(w widget.Widget, x, y int) widget.Widget {
+	if !image.Pt(x, y).In(w.Bounds()) {
+		return nil
+	}
+	// Дети рисуются поверх родителя — проверяем в обратном порядке
+	children := w.Children()
+	for i := len(children) - 1; i >= 0; i-- {
+		if hit := hitTest(children[i], x, y); hit != nil {
+			return hit
+		}
+	}
+	return w
+}
+
+// hitTestPath возвращает путь от корня до самого глубокого виджета под (x, y).
+// Путь: [root, ..., parent, hit]. Пустой срез — точка вне дерева.
+// Используется для event bubbling.
+func hitTestPath(w widget.Widget, x, y int) []widget.Widget {
+	if !image.Pt(x, y).In(w.Bounds()) {
+		return nil
+	}
+	// Проверяем детей в обратном Z-порядке
+	children := w.Children()
+	for i := len(children) - 1; i >= 0; i-- {
+		if path := hitTestPath(children[i], x, y); path != nil {
+			return append([]widget.Widget{w}, path...)
+		}
+	}
+	return []widget.Widget{w}
+}
+
+// findCapturer ищет виджет, который хочет захватить мышь, в цепочке предков
+// от корня до hit-виджета. Возвращает ближайшего к hit (самого вложенного).
+func findCapturer(w widget.Widget, x, y int, ev widget.MouseEvent) widget.Widget {
+	pt := image.Pt(x, y)
+	if !pt.In(w.Bounds()) {
+		return nil
+	}
+	// Рекурсивно проверяем потомков (в обратном Z-порядке)
+	children := w.Children()
+	for i := len(children) - 1; i >= 0; i-- {
+		if found := findCapturer(children[i], x, y, ev); found != nil {
+			return found
+		}
+	}
+	// Проверяем сам виджет
+	if cr, ok := w.(widget.CaptureRequester); ok {
+		if cr.WantsCapture(ev) {
+			return w
+		}
+	}
+	return nil
+}
+
+// broadcastMouseMove рекурсивно доставляет событие перемещения мыши
+// всему дереву виджетов (не только тем, что под курсором).
+// Каждый виджет сам определяет своё hover-состояние через image.Pt(x,y).In(bounds).
+func broadcastMouseMove(w widget.Widget, x, y int) {
+	if mm, ok := w.(widget.MouseMoveHandler); ok {
+		mm.OnMouseMove(x, y)
+	}
+	for _, child := range w.Children() {
+		broadcastMouseMove(child, x, y)
+	}
+}

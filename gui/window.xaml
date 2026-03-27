@@ -1,0 +1,57 @@
+<Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Name="root" Width="1920" Height="1024" Background="Transparent">
+
+    <!-- Центральная панель входа.
+         Caption → встроенный заголовок панели (Windows-стиль по умолчанию).
+         Дочерние координаты относительны этой панели. -->
+    <Border x:Name="mainWin"
+            Canvas.Left="685" Canvas.Top="262" Width="550" Height="300"
+            BorderBrush="#55556A" BorderThickness="1"
+            CornerRadius="10" Tag="Win10"
+            Caption="Avanpost SmartPam [Authentication] ver.1.2.3">
+        <Canvas Width="550" Height="300">
+
+            <!-- ── Подзаголовок (под хедером 32px) ────────────────────── -->
+            <TextBlock x:Name="lblSubtitle"
+                       Canvas.Left="20" Canvas.Top="40" Width="510" Height="18"
+                       Text="Введите логин и пароль"
+                       Foreground="#9090A0"/>
+
+            <!-- ── Логин ──────────────────────────────────────────────── -->
+            <TextBox x:Name="login"
+                     Canvas.Left="20" Canvas.Top="66" Width="510" Height="36"
+                     Tag="user@domain.com"/>
+
+            <!-- ── Пароль ─────────────────────────────────────────────── -->
+            <PasswordBox x:Name="password"
+                         Canvas.Left="20" Canvas.Top="116" Width="510" Height="36"
+                         Tag="Пароль"/>
+
+            <!-- ── Доступные серверы ───────────────────────────────────── -->
+            <ComboBox x:Name="servers"
+                      Canvas.Left="20" Canvas.Top="166" Width="510" Height="32">
+                <ComboBoxItem Content="192.168.1.5"/>
+                <ComboBoxItem Content="192.168.31.190"/>
+                <ComboBoxItem Content="10.0.0.50"/>
+            </ComboBox>
+
+            <!-- ── Кнопки действий ─────────────────────────────────────── -->
+            <Button x:Name="btnOK"
+                    Canvas.Left="20" Canvas.Top="214" Width="160" Height="40"
+                    Content="  Войти  " Tag="Accent"/>
+
+            <Button x:Name="btnCancel"
+                    Canvas.Left="190" Canvas.Top="214" Width="130" Height="40"
+                    Content="Отмена"/>
+
+            <!-- ── Подсказка ───────────────────────────────────────────── -->
+            <TextBlock x:Name="lblHint"
+                       Canvas.Left="20" Canvas.Top="270" Width="510" Height="18"
+                       Text="Tab / Shift+Tab — переключение полей"
+                       Foreground="#606070"/>
+
+        </Canvas>
+    </Border>
+
+</Canvas>
