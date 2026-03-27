@@ -13,7 +13,6 @@ headless-gui/          ← main module
 
 headless-gui/window/   ← separate module: native window (Ebiten v2)
 ```
-
 ---
 
 ## Quick Start
