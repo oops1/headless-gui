@@ -5,7 +5,7 @@ import (
 	"image"
 	"sync"
 
-	"headless-gui/widget"
+	"github.com/oops1/headless-gui/widget"
 )
 
 // ─── Focus manager ───────────────────────────────────────────────────────────

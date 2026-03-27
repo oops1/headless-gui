@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"headless-gui/output"
-	"headless-gui/widget"
+	"github.com/oops1/headless-gui/output"
+	"github.com/oops1/headless-gui/widget"
 )
 
 // Engine управляет холстом, деревом виджетов и циклом рендеринга.
@@ -32,7 +32,7 @@ import (
 type Engine struct {
 	canvas    *Canvas
 	fontCache *FontCache
-	bgSrc     image.Image  // исходный фон (до масштабирования); нужен при SetResolution
+	bgSrc     image.Image // исходный фон (до масштабирования); нужен при SetResolution
 	root      widget.Widget
 	mu        sync.RWMutex // защищает root, canvas, bgSrc при изменении
 
@@ -48,8 +48,8 @@ type Engine struct {
 	quit     chan struct{}
 	done     chan struct{}
 
-	fps     int         // целевой FPS, 1–120
-	saveDir string      // если не пусто — сохранять PNG в эту директорию
+	fps     int          // целевой FPS, 1–120
+	saveDir string       // если не пусто — сохранять PNG в эту директорию
 	saveCh  chan saveJob // канал для асинхронного сохранения
 }
 

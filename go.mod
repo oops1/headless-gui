@@ -1,4 +1,4 @@
-module headless-gui
+module github.com/oops1/headless-gui
 
 go 1.22
 

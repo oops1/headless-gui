@@ -15,8 +15,8 @@ import (
 	"log"
 	"time"
 
-	"headless-gui/engine"
-	"headless-gui/widget"
+	"github.com/oops1/headless-gui/engine"
+	"github.com/oops1/headless-gui/widget"
 )
 
 func main() {

@@ -21,19 +21,19 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 
-	"headless-gui/output"
+	"github.com/oops1/headless-gui/output"
 )
 
 // Canvas — off-screen RGBA-холст с двойной буферизацией.
 // Реализует интерфейс widget.DrawContext.
 type Canvas struct {
-	front      *image.RGBA            // последний отправленный кадр
-	back       *image.RGBA            // текущий рендер-таргет
-	bgImage    *image.RGBA            // фоновое изображение (масштабировано под холст)
-	fontCache  *FontCache             // кэш шрифта по умолчанию
-	namedFonts map[string]*FontCache  // именованные шрифты (FontFamily из XAML)
-	clip       image.Rectangle        // активная область отсечения
-	hasClip    bool                   // включено ли отсечение
+	front      *image.RGBA           // последний отправленный кадр
+	back       *image.RGBA           // текущий рендер-таргет
+	bgImage    *image.RGBA           // фоновое изображение (масштабировано под холст)
+	fontCache  *FontCache            // кэш шрифта по умолчанию
+	namedFonts map[string]*FontCache // именованные шрифты (FontFamily из XAML)
+	clip       image.Rectangle       // активная область отсечения
+	hasClip    bool                  // включено ли отсечение
 	scaleTmp   *image.RGBA           // переиспользуемый буфер для DrawImageScaled
 	W, H       int
 	tilesX     int
@@ -132,9 +132,9 @@ type clippedRGBA struct {
 	clip image.Rectangle
 }
 
-func (w *clippedRGBA) ColorModel() color.Model        { return w.img.ColorModel() }
-func (w *clippedRGBA) Bounds() image.Rectangle        { return w.clip }
-func (w *clippedRGBA) At(x, y int) color.Color        { return w.img.At(x, y) }
+func (w *clippedRGBA) ColorModel() color.Model { return w.img.ColorModel() }
+func (w *clippedRGBA) Bounds() image.Rectangle { return w.clip }
+func (w *clippedRGBA) At(x, y int) color.Color { return w.img.At(x, y) }
 func (w *clippedRGBA) Set(x, y int, col color.Color) {
 	if image.Pt(x, y).In(w.clip) {
 		w.img.Set(x, y, col)
@@ -185,8 +185,8 @@ func (c *Canvas) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
 		inset := r - int(math.Round(math.Sqrt(rf*rf-dy*dy)))
 		lineW := w - 2*inset
 		if lineW > 0 {
-			c.FillRect(x+inset, y+i, lineW, 1, col)       // верх
-			c.FillRect(x+inset, y+h-1-i, lineW, 1, col)   // низ
+			c.FillRect(x+inset, y+i, lineW, 1, col)     // верх
+			c.FillRect(x+inset, y+h-1-i, lineW, 1, col) // низ
 		}
 	}
 }
@@ -204,10 +204,10 @@ func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
 		r = h / 2
 	}
 	// Прямые стороны
-	c.DrawHLine(x+r, y, w-2*r, col)       // верх
-	c.DrawHLine(x+r, y+h-1, w-2*r, col)   // низ
-	c.DrawVLine(x, y+r, h-2*r, col)       // лево
-	c.DrawVLine(x+w-1, y+r, h-2*r, col)   // право
+	c.DrawHLine(x+r, y, w-2*r, col)     // верх
+	c.DrawHLine(x+r, y+h-1, w-2*r, col) // низ
+	c.DrawVLine(x, y+r, h-2*r, col)     // лево
+	c.DrawVLine(x+w-1, y+r, h-2*r, col) // право
 	// Углы: четверти окружности
 	rf := float64(r)
 	for i := 0; i <= r; i++ {
