@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"image"
 	_ "image/jpeg" // декодер JPEG для SetBackgroundFile
-	_ "image/png"  // декодер PNG для SetBackgroundFile
+	"image/png"
 	"os"
 	"path/filepath"
 	"sync"
@@ -48,14 +48,16 @@ type Engine struct {
 	quit     chan struct{}
 	done     chan struct{}
 
-	fps     int          // целевой FPS, 1–120
-	saveDir string       // если не пусто — сохранять PNG в эту директорию
-	saveCh  chan saveJob // канал для асинхронного сохранения
+	fps      int          // целевой FPS, 1–120
+	saveDir  string       // если не пусто — сохранять PNG в эту директорию
+	saveCh   chan saveJob // канал для асинхронного сохранения
+	saveDone chan struct{} // закрывается, когда saveWorker завершил запись всех PNG
 }
 
 type saveJob struct {
 	path string
 	seq  uint64
+	snap *image.RGBA // снапшот front-буфера на момент рендера
 }
 
 // New создаёт движок.
@@ -147,10 +149,12 @@ func (e *Engine) SetBackgroundFile(path string) error {
 }
 
 // SaveFrames включает сохранение каждого изменившегося кадра как PNG в директорию dir.
-// Вызывать до Start().
+// Вызывать до Start(). Все кадры гарантированно сохраняются (отправка блокирующая).
+// Stop() дожидается записи всех оставшихся PNG перед возвратом.
 func (e *Engine) SaveFrames(dir string) {
 	e.saveDir = dir
-	e.saveCh = make(chan saveJob, 16)
+	e.saveCh = make(chan saveJob, 512)
+	e.saveDone = make(chan struct{})
 }
 
 // RegisterFont регистрирует именованный шрифт (TTF-данные) в движке.
@@ -219,7 +223,8 @@ func (e *Engine) Stop() {
 	<-e.done
 	close(e.frames)
 	if e.saveCh != nil {
-		close(e.saveCh)
+		close(e.saveCh)   // saveWorker дочитает оставшиеся задачи
+		<-e.saveDone      // ждём пока все PNG записаны на диск
 	}
 }
 
@@ -280,12 +285,23 @@ func (e *Engine) topModal() widget.ModalWidget {
 // ─── внутренние методы ───────────────────────────────────────────────────────
 
 func (e *Engine) saveWorker() {
+	defer close(e.saveDone)
 	if err := mkdirAll(e.saveDir); err != nil {
 		return
 	}
 	for job := range e.saveCh {
-		_ = e.canvas.saveFront(job.path)
+		savePNG(job.snap, job.path)
 	}
+}
+
+// savePNG кодирует RGBA-изображение в PNG-файл.
+func savePNG(img *image.RGBA, path string) {
+	f, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_ = png.Encode(f, img)
 }
 
 func (e *Engine) loop() {
@@ -350,11 +366,11 @@ func (e *Engine) renderFrame() output.Frame {
 	seq := e.frameSeq.Add(1)
 
 	if e.saveDir != "" && len(tiles) > 0 {
+		// Снимаем копию front-буфера СЕЙЧАС, пока он актуален.
+		snap := image.NewRGBA(e.canvas.front.Rect)
+		copy(snap.Pix, e.canvas.front.Pix)
 		path := filepath.Join(e.saveDir, fmt.Sprintf("frame_%06d.png", seq))
-		select {
-		case e.saveCh <- saveJob{path: path, seq: seq}:
-		default:
-		}
+		e.saveCh <- saveJob{path: path, seq: seq, snap: snap}
 	}
 
 	return output.Frame{
