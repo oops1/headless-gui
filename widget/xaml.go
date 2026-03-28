@@ -420,10 +420,40 @@ func buildXAMLButton(el xElement) Widget {
 	}
 	// Стиль кнопки: через Tag="Accent" (стандартный WPF) или Style="Accent" (наш).
 	style := strings.ToLower(el.attr("Tag", "Style"))
+	var btn *Button
 	if style == "accent" || style == "primary" {
-		return NewWin10AccentButton(text)
+		btn = NewWin10AccentButton(text)
+	} else {
+		btn = NewButton(text)
 	}
-	return NewButton(text)
+
+	// Кастомные цвета из XAML-атрибутов.
+	if bg := el.attr("Background"); bg != "" {
+		if c, err := parseXAMLColor(bg); err == nil {
+			btn.Background = c
+		}
+	}
+	if fg := el.attr("Foreground"); fg != "" {
+		if c, err := parseXAMLColor(fg); err == nil {
+			btn.TextColor = c
+		}
+	}
+	if hbg := el.attr("HoverBG", "HoverBackground"); hbg != "" {
+		if c, err := parseXAMLColor(hbg); err == nil {
+			btn.HoverBG = c
+		}
+	}
+	if pbg := el.attr("PressedBG", "PressedBackground"); pbg != "" {
+		if c, err := parseXAMLColor(pbg); err == nil {
+			btn.PressedBG = c
+		}
+	}
+	if bc := el.attr("BorderBrush"); bc != "" {
+		if c, err := parseXAMLColor(bc); err == nil {
+			btn.BorderColor = c
+		}
+	}
+	return btn
 }
 
 func buildXAMLTextInput(el xElement, isPassword bool) Widget {
