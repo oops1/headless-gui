@@ -38,7 +38,8 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/png"
+	_ "image/jpeg" // поддержка JPEG в image.Decode
+	_ "image/png"  // поддержка PNG в image.Decode
 	"os"
 	"path/filepath"
 	"strconv"
@@ -379,22 +380,27 @@ func buildXAMLPanel(el xElement, baseDir string) Widget {
 		if !filepath.IsAbs(imgPath) {
 			imgPath = filepath.Join(baseDir, imgPath)
 		}
-		if img, err := loadPNGFile(imgPath); err == nil {
+		if img, err := loadImageFile(imgPath); err == nil {
 			p.BackgroundImage = img
+			fmt.Printf("xaml: BackgroundImage loaded: %s (%dx%d)\n", imgPath, img.Bounds().Dx(), img.Bounds().Dy())
+		} else {
+			fmt.Printf("xaml: BackgroundImage FAILED: %s — %v\n", imgPath, err)
 		}
 	}
 
 	return p
 }
 
-// loadPNGFile загружает PNG-файл и возвращает *image.RGBA.
-func loadPNGFile(path string) (*image.RGBA, error) {
+// loadImageFile загружает PNG или JPEG файл и возвращает *image.RGBA.
+func loadImageFile(path string) (*image.RGBA, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	img, err := png.Decode(f)
+
+	// image.Decode использует зарегистрированные декодеры (png, jpeg).
+	img, _, err := image.Decode(f)
 	if err != nil {
 		return nil, err
 	}

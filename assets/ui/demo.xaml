@@ -4,7 +4,7 @@
     Разрешение холста: 1920 × 1024
     Координаты дочерних элементов — относительные (стандарт WPF Canvas).
 -->
-<Panel Name="root" Width="1920" Height="1024" Background="Transparent">
+<Panel Name="root" Width="1920" Height="1024" Background="Transparent" BackgroundImage="149013-1920x1200.jpg">
 
     <!-- ═══════════════════════════════════════════════════════════════
          Главное окно (Win10, полупрозрачный фон)
