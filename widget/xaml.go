@@ -410,6 +410,20 @@ func buildXAMLLabel(el xElement) Widget {
 			lbl.Background = c
 		}
 	}
+
+	// TextWrapping="Wrap" или TextWrapping="WrapWithOverflow" — перенос по словам.
+	wrap := strings.ToLower(el.attr("TextWrapping"))
+	if wrap == "wrap" || wrap == "wrapwithoverflow" {
+		lbl.WrapText = true
+	}
+
+	// FontSize
+	if fs := el.attr("FontSize"); fs != "" {
+		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
+			lbl.FontSize = v
+		}
+	}
+
 	return lbl
 }
 
