@@ -382,9 +382,6 @@ func buildXAMLPanel(el xElement, baseDir string) Widget {
 		}
 		if img, err := loadImageFile(imgPath); err == nil {
 			p.BackgroundImage = img
-			fmt.Printf("xaml: BackgroundImage loaded: %s (%dx%d)\n", imgPath, img.Bounds().Dx(), img.Bounds().Dy())
-		} else {
-			fmt.Printf("xaml: BackgroundImage FAILED: %s — %v\n", imgPath, err)
 		}
 	}
 
