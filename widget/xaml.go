@@ -38,7 +38,9 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/png"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -151,17 +153,25 @@ func LoadUIFromXAMLFile(path string) (Widget, map[string]Widget, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("xaml: read %q: %w", path, err)
 	}
-	return LoadUIFromXAML(data)
+	baseDir := filepath.Dir(path)
+	return LoadUIFromXAMLWithBase(data, baseDir)
 }
 
 // LoadUIFromXAML разбирает XAML и строит дерево виджетов.
+// Ресурсы (изображения) не могут загружаться — baseDir пустой.
 func LoadUIFromXAML(data []byte) (Widget, map[string]Widget, error) {
+	return LoadUIFromXAMLWithBase(data, "")
+}
+
+// LoadUIFromXAMLWithBase разбирает XAML и строит дерево виджетов.
+// baseDir используется для загрузки ресурсов (BackgroundImage и пр.).
+func LoadUIFromXAMLWithBase(data []byte, baseDir string) (Widget, map[string]Widget, error) {
 	root, err := parseXAML(data)
 	if err != nil {
 		return nil, nil, err
 	}
 	registry := make(map[string]Widget)
-	w, err := buildXAMLWidget(*root, registry, image.Point{})
+	w, err := buildXAMLWidget(*root, registry, image.Point{}, baseDir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -176,7 +186,7 @@ func LoadUIFromXAML(data []byte) (Widget, map[string]Widget, error) {
 // относительные и сдвигаются на parentOff, что соответствует поведению
 // WPF Canvas и позволяет открывать XAML-файлы в Blend.
 // Для корневого элемента parentOff = image.Point{}.
-func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point) (Widget, error) {
+func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
 	tag := strings.ToLower(el.Tag)
 
 	// Игнорируем теги-свойства WPF (Panel.Children, Grid.RowDefinitions, …)
@@ -191,7 +201,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point) 
 	// window / usercontrol — корневые элементы WPF/Blend; трактуем как Canvas.
 	case "window", "usercontrol",
 		"panel", "canvas", "grid", "stackpanel", "border", "dockpanel", "viewbox":
-		w = buildXAMLPanel(el)
+		w = buildXAMLPanel(el, baseDir)
 
 	// ── Текст ────────────────────────────────────────────────────────────────
 	case "label", "textblock", "text", "run":
@@ -226,7 +236,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point) 
 
 	// ── TabControl ───────────────────────────────────────────────────────────
 	case "tabcontrol":
-		return buildXAMLTabControl(el, reg, parentOff)
+		return buildXAMLTabControl(el, reg, parentOff, baseDir)
 
 	// ── Slider ───────────────────────────────────────────────────────────────
 	case "slider":
@@ -279,7 +289,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point) 
 		if strings.Contains(childTag, ".") {
 			// WPF property element — пропускаем сам тег, но обрабатываем его потомков
 			for _, inner := range child.Children {
-				cw, err := buildXAMLWidget(inner, reg, childOff)
+				cw, err := buildXAMLWidget(inner, reg, childOff, baseDir)
 				if err != nil {
 					return nil, err
 				}
@@ -289,7 +299,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point) 
 			}
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, childOff)
+		cw, err := buildXAMLWidget(child, reg, childOff, baseDir)
 		if err != nil {
 			return nil, err
 		}
@@ -303,7 +313,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point) 
 
 // ─── Построители конкретных виджетов ────────────────────────────────────────
 
-func buildXAMLPanel(el xElement) Widget {
+func buildXAMLPanel(el xElement, baseDir string) Widget {
 	style := strings.ToLower(el.attr("Tag", "Style"))
 	bgStr := el.attr("Background", "Fill", "Color")
 	cr := xatoi(el.attr("CornerRadius"))
@@ -363,7 +373,43 @@ func buildXAMLPanel(el xElement) Widget {
 		p.HeaderHeight = hh
 	}
 
+	// BackgroundImage — фоновая картинка из файла (относительно XAML-файла).
+	if bgImg := el.attr("BackgroundImage"); bgImg != "" && baseDir != "" {
+		imgPath := bgImg
+		if !filepath.IsAbs(imgPath) {
+			imgPath = filepath.Join(baseDir, imgPath)
+		}
+		if img, err := loadPNGFile(imgPath); err == nil {
+			p.BackgroundImage = img
+		}
+	}
+
 	return p
+}
+
+// loadPNGFile загружает PNG-файл и возвращает *image.RGBA.
+func loadPNGFile(path string) (*image.RGBA, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil {
+		return nil, err
+	}
+	if rgba, ok := img.(*image.RGBA); ok {
+		return rgba, nil
+	}
+	// Конвертируем в RGBA
+	b := img.Bounds()
+	rgba := image.NewRGBA(b)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			rgba.Set(x, y, img.At(x, y))
+		}
+	}
+	return rgba, nil
 }
 
 func buildXAMLImage(el xElement) Widget {
@@ -669,7 +715,7 @@ func buildXAMLListView(el xElement) Widget {
 	return lv
 }
 
-func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Point) (Widget, error) {
+func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
 	tc := NewTabControl()
 	absBounds := el.bounds().Add(parentOff)
 	tc.SetBounds(absBounds)
@@ -697,7 +743,7 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 				if strings.Contains(innerTag, ".") {
 					continue
 				}
-				cw, err := buildXAMLWidget(inner, reg, childOff)
+				cw, err := buildXAMLWidget(inner, reg, childOff, baseDir)
 				if err != nil {
 					return nil, err
 				}
@@ -709,7 +755,7 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 			tc.AddTab(header, content)
 		} else if !strings.Contains(childTag, ".") {
 			// Обычные дочерние виджеты (не TabItem)
-			cw, err := buildXAMLWidget(child, reg, childOff)
+			cw, err := buildXAMLWidget(child, reg, childOff, baseDir)
 			if err != nil {
 				return nil, err
 			}

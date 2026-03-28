@@ -15,10 +15,11 @@ type DrawContextAlpha interface {
 // Panel — контейнер с фоновым цветом, опциональной рамкой и скруглением углов.
 type Panel struct {
 	Base
-	Background   color.RGBA
-	BorderColor  color.RGBA
-	ShowBorder   bool
-	CornerRadius int  // радиус скругления углов в пикселях (0 = острые)
+	Background      color.RGBA
+	BackgroundImage *image.RGBA // фоновое изображение (масштабируется под bounds)
+	BorderColor     color.RGBA
+	ShowBorder      bool
+	CornerRadius    int  // радиус скругления углов в пикселях (0 = острые)
 	// UseAlpha=true: рисовать фон через Over (смешивание), иначе Src (непрозрачно)
 	UseAlpha bool
 
@@ -87,6 +88,11 @@ func (p *Panel) Draw(ctx DrawContext) {
 		if p.ShowBorder {
 			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), p.BorderColor)
 		}
+	}
+
+	// ── Фоновое изображение ─────────────────────────────────────────────────
+	if p.BackgroundImage != nil {
+		ctx.DrawImageScaled(p.BackgroundImage, b.Min.X, b.Min.Y, b.Dx(), b.Dy())
 	}
 
 	// ── Заголовок ───────────────────────────────────────────────────────────
