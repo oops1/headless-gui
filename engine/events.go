@@ -223,13 +223,21 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	}
 	hit := path[len(path)-1]
 
-	// При нажатии — передаём фокус
+	// При нажатии — передаём фокус и закрываем overlay'и вне пути.
 	if pressed && btn == widget.MouseLeft {
 		if _, ok := hit.(widget.Focusable); ok {
 			e.focus.set(hit)
 		} else {
 			e.focus.set(nil)
 		}
+
+		// Закрываем все Dismissable-виджеты, которые НЕ лежат на пути
+		// от корня до целевого виджета (dropdown/popup/menu вне клика).
+		pathSet := make(map[widget.Widget]struct{}, len(path))
+		for _, w := range path {
+			pathSet[w] = struct{}{}
+		}
+		dismissOutside(dispatchRoot, pathSet)
 	}
 
 	// Доставляем событие с bubbling: от самого глубокого виджета к корню.
@@ -240,6 +248,22 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 				return
 			}
 		}
+	}
+}
+
+// ─── Dismiss ─────────────────────────────────────────────────────────────────
+
+// dismissOutside рекурсивно закрывает все Dismissable-виджеты, которые
+// не входят в набор keep (виджеты на пути от корня до клика).
+// Это гарантирует закрытие popup/dropdown/menu при клике в другое место.
+func dismissOutside(w widget.Widget, keep map[widget.Widget]struct{}) {
+	if _, inPath := keep[w]; !inPath {
+		if d, ok := w.(widget.Dismissable); ok {
+			d.Dismiss()
+		}
+	}
+	for _, child := range w.Children() {
+		dismissOutside(child, keep)
 	}
 }
 

@@ -372,6 +372,82 @@ img.Stretch = widget.ImageStretchFill     // stretch to fill (default)
               widget.ImageStretchNone     // original size
 ```
 
+### PopupMenu
+
+Context / popup menu. Renders as an overlay on top of the entire UI.
+
+```go
+menu := widget.NewPopupMenu()
+menu.AddItem("Copy", func() { /* ... */ })
+menu.AddItem("Paste", func() { /* ... */ })
+menu.AddSeparator()
+menu.AddItem("Delete", func() { /* ... */ })
+
+menu.OnSelect = func(idx int, text string) {
+    log.Printf("Selected: %s", text)
+}
+
+menu.Show(x, y)          // show at coordinates
+menu.ShowBelow(button)    // show below a widget
+menu.ShowRight(widget)    // show to the right of a widget
+menu.Close()              // close
+```
+
+XAML:
+
+```xml
+<PopupMenu Name="ctxMenu">
+    <MenuItem Text="Copy"/>
+    <MenuItem Text="Paste"/>
+    <MenuItem Separator="True"/>
+    <MenuItem Text="Disabled item" Disabled="True"/>
+    <MenuItem Text="Delete"/>
+</PopupMenu>
+```
+
+Closes on click outside or Escape. Arrow keys and Enter for keyboard navigation.
+
+### MenuBar
+
+Horizontal menu bar (classic Windows-style). Each top-level item opens a PopupMenu with sub-items. When hovering over an adjacent item, the submenu automatically switches.
+
+```go
+menu := widget.NewMenuBar()
+menu.AddMenu("File",
+    widget.MenuItem{Text: "New"},
+    widget.MenuItem{Text: "Open"},
+    widget.MenuItem{Separator: true},
+    widget.MenuItem{Text: "Exit"},
+)
+menu.AddMenu("Edit",
+    widget.MenuItem{Text: "Copy"},
+    widget.MenuItem{Text: "Paste"},
+)
+
+menu.OnSelect = func(topIdx, subIdx int, text string) {
+    log.Printf("Menu: %s", text)
+}
+```
+
+XAML:
+
+```xml
+<Menu Name="mainMenu" Left="0" Top="0" Width="800" Height="28">
+    <MenuItem Header="File">
+        <MenuItem Text="New"/>
+        <MenuItem Text="Open"/>
+        <MenuItem Separator="True"/>
+        <MenuItem Text="Exit"/>
+    </MenuItem>
+    <MenuItem Header="Edit">
+        <MenuItem Text="Copy"/>
+        <MenuItem Text="Paste"/>
+    </MenuItem>
+</Menu>
+```
+
+Navigation: Left/Right switches sections, Up/Down/Enter for sub-items, Escape to close.
+
 ### Separator
 
 In XAML: `<Separator Width="400" Height="1" Background="#FF0000"/>`.
@@ -484,6 +560,8 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `ScrollViewer` | ScrollView | `ContentHeight`, `Background` |
 | `ListView`, `ListBox` | ListView | `Items`, `SelectedIndex`, `ItemHeight`, child `<ListViewItem>` |
 | `Image` | Image | `Source`, `Stretch` (Fill/Uniform/None) |
+| `PopupMenu`, `ContextMenu` | PopupMenu | child `<MenuItem Text="..." Separator="True" Disabled="True"/>` |
+| `Menu`, `MenuBar`, `MainMenu` | MenuBar | child `<MenuItem Header="...">` with nested `<MenuItem>` |
 | `Separator`, `Line`, `Rectangle` | Separator | `Background` |
 
 Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`.

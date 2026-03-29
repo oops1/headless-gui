@@ -38,6 +38,8 @@ Go-based headless GUI engine with XAML support, tile-based delta rendering, and 
 | ScrollView | `ScrollViewer` | Scrollbar, mouse wheel, `ContentHeight` |
 | ListView | `ListView`, `ListBox` | Selection, keyboard nav, scrollbar |
 | Image | `Image` | PNG/JPEG, stretch modes (Fill/Uniform/None) |
+| PopupMenu | `PopupMenu`, `ContextMenu` | Context/popup menu, overlay, keyboard nav |
+| MenuBar | `Menu`, `MenuBar`, `MainMenu` | Horizontal menu bar with dropdown submenus |
 | Separator | `Separator`, `Line`, `Rectangle` | Divider line |
 | MessageBox | — (code only) | OK / YesNo / YesNoCancel |
 | Dialog | — (code only) | Modal base, custom content |
