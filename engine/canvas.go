@@ -21,7 +21,7 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 
-	"github.com/oops1/headless-gui/output"
+	"github.com/oops1/headless-gui/v3/output"
 )
 
 // Canvas — off-screen RGBA-холст с двойной буферизацией.

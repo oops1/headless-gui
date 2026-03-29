@@ -4,8 +4,8 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/engine"
-	"github.com/oops1/headless-gui/widget"
+	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // ─── Dialog ──────────────────────────────────────────────────────────────────

@@ -17,9 +17,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/oops1/headless-gui/engine"
-	"github.com/oops1/headless-gui/widget"
-	"github.com/oops1/headless-gui/window"
+	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v3/window"
 )
 
 func main() {
@@ -86,6 +86,13 @@ func main() {
 		log.Println(msg)
 	}
 
+	// ─── MenuBar ────────────────────────────────────────────────────────────
+	if menu, ok := reg["mainMenu"].(*widget.MenuBar); ok {
+		menu.OnSelect = func(topIdx, subIdx int, text string) {
+			addLog("Меню: %s (раздел %d, пункт %d)", text, topIdx, subIdx)
+		}
+	}
+
 	// ─── TAB 1: Ввод данных — Кнопки ────────────────────────────────────────
 	if b := btn("btnAccent"); b != nil {
 		b.OnClick = func() {
@@ -124,6 +131,26 @@ func main() {
 	if b := btn("btnExport"); b != nil {
 		b.OnClick = func() {
 			addLog("Экспорт настроек...")
+		}
+	}
+
+	// ─── PopupMenu ──────────────────────────────────────────────────────────
+	if pm, ok := reg["ctxMenu"].(*widget.PopupMenu); ok {
+		pm.OnSelect = func(idx int, text string) {
+			addLog("PopupMenu: «%s» (idx=%d)", text, idx)
+		}
+
+		if b := btn("btnShowPopup"); b != nil {
+			b.OnClick = func() {
+				pm.ShowBelow(b)
+				addLog("PopupMenu открыто (ShowBelow)")
+			}
+		}
+		if b := btn("btnShowPopup2"); b != nil {
+			b.OnClick = func() {
+				pm.ShowRight(b)
+				addLog("PopupMenu открыто (ShowRight)")
+			}
 		}
 	}
 

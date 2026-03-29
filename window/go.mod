@@ -1,10 +1,10 @@
-module github.com/oops1/headless-gui/window
+module github.com/oops1/headless-gui/v3/window
 
 go 1.22.0
 
 require (
 	github.com/hajimehoshi/ebiten/v2 v2.7.10
-	github.com/oops1/headless-gui v0.0.0
+	github.com/oops1/headless-gui/v3 v3.0.0
 )
 
 require (
@@ -18,4 +18,4 @@ require (
 	golang.org/x/text v0.19.0 // indirect
 )
 
-replace github.com/oops1/headless-gui => ../
+replace github.com/oops1/headless-gui/v3 => ../

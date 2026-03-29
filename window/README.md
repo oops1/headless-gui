@@ -20,9 +20,9 @@ import (
     "image/color"
     "log"
 
-    "github.com/oops1/headless-gui/engine"
-    "github.com/oops1/headless-gui/widget"
-    "github.com/oops1/headless-gui/window"
+    "github.com/oops1/headless-gui/v3/engine"
+    "github.com/oops1/headless-gui/v3/widget"
+    "github.com/oops1/headless-gui/v3/window"
 )
 
 func main() {
@@ -66,21 +66,21 @@ go build -ldflags="-H windowsgui" -o showcase.exe ../cmd/showcase
 Добавьте в `go.mod`:
 
 ```
-require github.com/oops1/headless-gui/window v0.x.x
+require github.com/oops1/headless-gui/v3/window v0.x.x
 ```
 
 Для локальной разработки:
 
 ```
-require github.com/oops1/headless-gui/window v0.0.0
-replace github.com/oops1/headless-gui/window => ../GuiEngine/window
+require github.com/oops1/headless-gui/v3/window v0.0.0
+replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
 ```
 
 ## Структура
 
 ```
 GuiEngine/window/
-  go.mod        модуль github.com/oops1/headless-gui/window
+  go.mod        модуль github.com/oops1/headless-gui/v3/window
   window.go     Window, EngineAPI интерфейс, маппинг ввода
 
 GuiEngine/cmd/

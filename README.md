@@ -38,6 +38,8 @@ Go-based headless GUI engine with XAML support, tile-based delta rendering, and 
 | ScrollView | `ScrollViewer` | Scrollbar, mouse wheel, `ContentHeight` |
 | ListView | `ListView`, `ListBox` | Selection, keyboard nav, scrollbar |
 | Image | `Image` | PNG/JPEG, stretch modes (Fill/Uniform/None) |
+| PopupMenu | `PopupMenu`, `ContextMenu` | Context/popup menu, overlay, keyboard nav |
+| MenuBar | `Menu`, `MenuBar`, `MainMenu` | Horizontal menu bar with dropdown submenus |
 | Separator | `Separator`, `Line`, `Rectangle` | Divider line |
 | MessageBox | — (code only) | OK / YesNo / YesNoCancel |
 | Dialog | — (code only) | Modal base, custom content |
@@ -93,8 +95,8 @@ package main
 import (
     "image"
     "image/color"
-    "github.com/oops1/headless-gui/engine"
-    "github.com/oops1/headless-gui/widget"
+    "github.com/oops1/headless-gui/v3/engine"
+    "github.com/oops1/headless-gui/v3/widget"
 )
 
 func main() {
@@ -159,8 +161,8 @@ Coordinates inside containers are relative (standard WPF Canvas behavior).
 
 | Module | Dependency |
 |---|---|
-| `github.com/oops1/headless-gui` | `golang.org/x/image` |
-| `github.com/oops1/headless-gui/window` | `github.com/hajimehoshi/ebiten/v2` |
+| `github.com/oops1/headless-gui/v3` | `golang.org/x/image` |
+| `github.com/oops1/headless-gui/v3/window` | `github.com/hajimehoshi/ebiten/v2` |
 
 Go 1.22+. The `window/` module is optional — the core engine has zero CGO dependencies.
 
