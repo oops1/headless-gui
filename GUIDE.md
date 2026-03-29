@@ -407,6 +407,47 @@ XAML:
 
 Меню закрывается по клику за пределами или по Escape. Навигация стрелками и Enter.
 
+### MenuBar
+
+Горизонтальная полоса меню (как в классических Windows-приложениях). Каждый пункт верхнего уровня раскрывает PopupMenu с подпунктами. При наведении на соседний пункт подменю автоматически переключается.
+
+```go
+menu := widget.NewMenuBar()
+menu.AddMenu("Файл",
+    widget.MenuItem{Text: "Новый"},
+    widget.MenuItem{Text: "Открыть"},
+    widget.MenuItem{Separator: true},
+    widget.MenuItem{Text: "Выход"},
+)
+menu.AddMenu("Правка",
+    widget.MenuItem{Text: "Копировать"},
+    widget.MenuItem{Text: "Вставить"},
+)
+
+menu.OnSelect = func(topIdx, subIdx int, text string) {
+    log.Printf("Меню: %s", text)
+}
+```
+
+XAML:
+
+```xml
+<Menu Name="mainMenu" Left="0" Top="0" Width="800" Height="28">
+    <MenuItem Header="Файл">
+        <MenuItem Text="Новый"/>
+        <MenuItem Text="Открыть"/>
+        <MenuItem Separator="True"/>
+        <MenuItem Text="Выход"/>
+    </MenuItem>
+    <MenuItem Header="Правка">
+        <MenuItem Text="Копировать"/>
+        <MenuItem Text="Вставить"/>
+    </MenuItem>
+</Menu>
+```
+
+Навигация: Left/Right переключает разделы, Up/Down/Enter — по подменю, Escape — закрыть.
+
 ### Separator
 
 В XAML: `<Separator Width="400" Height="1" Background="#FF0000"/>`.
@@ -520,6 +561,7 @@ root Canvas (0,0)
 | `ListView`, `ListBox` | ListView | `Items`, `SelectedIndex`, `ItemHeight`, дочерние `<ListViewItem>` |
 | `Image` | Image | `Source`, `Stretch` (Fill/Uniform/None) |
 | `PopupMenu`, `ContextMenu` | PopupMenu | дочерние `<MenuItem Text="..." Separator="True" Disabled="True"/>` |
+| `Menu`, `MenuBar`, `MainMenu` | MenuBar | дочерние `<MenuItem Header="...">` с вложенными `<MenuItem>` |
 | `Separator`, `Line`, `Rectangle` | Separator | `Background` |
 
 Общие атрибуты: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`.

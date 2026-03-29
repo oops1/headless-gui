@@ -86,6 +86,13 @@ func main() {
 		log.Println(msg)
 	}
 
+	// ─── MenuBar ────────────────────────────────────────────────────────────
+	if menu, ok := reg["mainMenu"].(*widget.MenuBar); ok {
+		menu.OnSelect = func(topIdx, subIdx int, text string) {
+			addLog("Меню: %s (раздел %d, пункт %d)", text, topIdx, subIdx)
+		}
+	}
+
 	// ─── TAB 1: Ввод данных — Кнопки ────────────────────────────────────────
 	if b := btn("btnAccent"); b != nil {
 		b.OnClick = func() {
