@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Grid demo — тест табличной раскладки.
+    3 строки × 3 столбца:
+      Row 0: 48px  (заголовок)
+      Row 1: *     (основной контент)
+      Row 2: 40px  (кнопки)
+
+      Col 0: 200px (сайдбар)
+      Col 1: *     (центр)
+      Col 2: 150px (правая панель)
+
+    ShowGridLines="True" для отладки.
+-->
+<Panel Name="root" Width="1920" Height="1080" Background="#1B2838">
+
+    <Grid Name="mainGrid"
+          Left="100" Top="100" Width="800" Height="500"
+          Background="#2D2D30"
+          ShowGridLines="True">
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="40"/>
+        </Grid.RowDefinitions>
+
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="150"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Row 0, Col 0..2 (заголовок на всю ширину) -->
+        <Label Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3"
+               Text="Grid Layout Demo"
+               Foreground="White" Background="#0078D7"/>
+
+        <!-- Row 1, Col 0 (сайдбар) -->
+        <Label Grid.Row="1" Grid.Column="0"
+               Text="Sidebar"
+               Foreground="#C8C8C8" Background="#3C3C3C"/>
+
+        <!-- Row 1, Col 1 (центр) -->
+        <TextBox Grid.Row="1" Grid.Column="1"
+                 Name="mainInput"
+                 Placeholder="Type here..."/>
+
+        <!-- Row 1, Col 2 (правая панель) -->
+        <Label Grid.Row="1" Grid.Column="2"
+               Text="Right panel"
+               Foreground="#C8C8C8" Background="#383838"/>
+
+        <!-- Row 2, Col 0 (статус) -->
+        <Label Grid.Row="2" Grid.Column="0"
+               Text="Status: OK"
+               Foreground="#50FF50"/>
+
+        <!-- Row 2, Col 1..2 (кнопки) -->
+        <Button Grid.Row="2" Grid.Column="1"
+                Name="btnOK"
+                Content="OK"
+                Style="Accent"/>
+
+        <Button Grid.Row="2" Grid.Column="2"
+                Name="btnCancel"
+                Content="Cancel"/>
+
+    </Grid>
+
+</Panel>

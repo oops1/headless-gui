@@ -56,6 +56,21 @@ func NewTabControl(tabs ...TabItem) *TabControl {
 	}
 }
 
+// Children возвращает содержимое активной вкладки как дочерний виджет.
+// Это переопределение Base.Children() необходимо, чтобы движок мог
+// выполнять hit-test и доставлять события (мышь, клавиатура) до виджетов
+// внутри вкладки.
+func (tc *TabControl) Children() []Widget {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if tc.active >= 0 && tc.active < len(tc.tabs) {
+		if c := tc.tabs[tc.active].Content; c != nil {
+			return []Widget{c}
+		}
+	}
+	return nil
+}
+
 // AddTab добавляет вкладку.
 func (tc *TabControl) AddTab(header string, content Widget) {
 	tc.mu.Lock()
@@ -66,10 +81,11 @@ func (tc *TabControl) AddTab(header string, content Widget) {
 // SetActive устанавливает активную вкладку по индексу.
 func (tc *TabControl) SetActive(idx int) {
 	tc.mu.Lock()
-	defer tc.mu.Unlock()
 	if idx >= 0 && idx < len(tc.tabs) {
 		tc.active = idx
 	}
+	tc.mu.Unlock()
+	tc.layoutContent()
 }
 
 // Active возвращает индекс активной вкладки.
@@ -84,6 +100,24 @@ func (tc *TabControl) TabCount() int {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	return len(tc.tabs)
+}
+
+// SetBounds устанавливает границы TabControl и обновляет bounds активного контента.
+func (tc *TabControl) SetBounds(r image.Rectangle) {
+	tc.bounds = r
+	tc.layoutContent()
+}
+
+// layoutContent обновляет bounds содержимого активной вкладки.
+func (tc *TabControl) layoutContent() {
+	cr := tc.contentRect()
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if tc.active >= 0 && tc.active < len(tc.tabs) {
+		if c := tc.tabs[tc.active].Content; c != nil {
+			c.SetBounds(cr)
+		}
+	}
 }
 
 // tabRects вычисляет прямоугольники заголовков вкладок.
@@ -208,6 +242,8 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 				if tc.OnTabChange != nil {
 					go tc.OnTabChange(i, tc.tabs[i].Header)
 				}
+				// Обновляем bounds нового контента
+				go tc.layoutContent()
 			}
 			return true
 		}
