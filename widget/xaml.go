@@ -899,7 +899,8 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 		reg[id] = tc
 	}
 
-	childOff := absBounds.Min
+	// contentOff — смещение для содержимого вкладок (ниже полосы табов).
+	contentOff := image.Pt(absBounds.Min.X, absBounds.Min.Y+tc.TabHeight)
 
 	// Обрабатываем TabItem дочерние элементы
 	for _, child := range el.Children {
@@ -910,14 +911,15 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 				header = child.Text
 			}
 
-			// Содержимое вкладки — первый дочерний элемент TabItem
+			// Содержимое вкладки — первый дочерний элемент TabItem.
+			// Координаты дочерних виджетов относительно области контента (ниже табов).
 			var content Widget
 			for _, inner := range child.Children {
 				innerTag := strings.ToLower(inner.Tag)
 				if strings.Contains(innerTag, ".") {
 					continue
 				}
-				cw, err := buildXAMLWidget(inner, reg, childOff, baseDir)
+				cw, err := buildXAMLWidget(inner, reg, contentOff, baseDir)
 				if err != nil {
 					return nil, err
 				}
@@ -929,7 +931,7 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 			tc.AddTab(header, content)
 		} else if !strings.Contains(childTag, ".") {
 			// Обычные дочерние виджеты (не TabItem)
-			cw, err := buildXAMLWidget(child, reg, childOff, baseDir)
+			cw, err := buildXAMLWidget(child, reg, contentOff, baseDir)
 			if err != nil {
 				return nil, err
 			}
