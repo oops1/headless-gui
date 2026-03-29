@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"headless-gui/widget"
+	"github.com/oops1/headless-gui/widget"
 )
 
 // ─── Base ───────────────────────────────────────────────────────────────────

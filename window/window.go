@@ -24,8 +24,8 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
-	"headless-gui/output"
-	"headless-gui/widget"
+	"github.com/oops1/headless-gui/output"
+	"github.com/oops1/headless-gui/widget"
 )
 
 // EngineAPI — интерфейс движка, необходимый для оконного рендеринга.

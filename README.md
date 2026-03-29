@@ -8,16 +8,39 @@ Go-based headless GUI engine with XAML support, tile-based delta rendering, and 
 
 ## Features
 
-
 - **Off-screen rendering** — no OS window required; output via `<-chan output.Frame`
 - **Delta tile streaming** — only changed 64x64 regions are sent each frame
-- **25 widgets** — Panel, Button, TextInput, PasswordBox, Label, Dropdown, ProgressBar, CheckBox, RadioButton, TabControl, Slider, ToggleSwitch, ScrollView, ListView, ImageWidget, MessageBox, Dialog, and more
 - **XAML layout** — load UI from WPF-compatible `.xaml` files (opens in Blend / Visual Studio)
+- **Grid layout** — WPF-style `<Grid>` with Pixel / Star / Auto sizing, `Grid.Row`, `Grid.Column`, spans
 - **Theming** — built-in Dark and Light themes, 60+ customizable color tokens
 - **Drag & drop** — panels are draggable with recursive child movement
 - **Modal dialogs** — centered overlay with background dim, input isolation
 - **Font support** — TTF fonts via `golang.org/x/image/font`; custom registration by name
 - **Native window** — optional Ebiten v2 backend (`window/` module) for desktop preview
+
+## Widget List
+
+| Widget | XAML Tag | Description |
+|---|---|---|
+| Panel | `Canvas`, `Border`, `StackPanel`, `DockPanel` | Container, drag, rounded corners, title bar, background image |
+| Grid | `Grid` | WPF-style grid with RowDefinitions/ColumnDefinitions (Pixel/Star/Auto) |
+| Label | `Label`, `TextBlock` | Static text, word wrap (`TextWrapping="Wrap"`) |
+| Button | `Button`, `ToggleButton`, `RepeatButton` | Click handler, hover/press/accent states, custom colors |
+| TextInput | `TextBox`, `TextInput` | Selection, clipboard, Home/End |
+| PasswordBox | `PasswordBox` | Masked input |
+| Dropdown | `ComboBox`, `Dropdown` | Overlay popup, keyboard nav |
+| ProgressBar | `ProgressBar` | `Value` 0.0..1.0, custom fill color |
+| CheckBox | `CheckBox` | Toggle with label |
+| RadioButton | `RadioButton` | Mutual exclusion by `GroupName` |
+| ToggleSwitch | `ToggleSwitch` | On/Off with animated knob |
+| Slider | `Slider` | Min/Max/Value, drag thumb |
+| TabControl | `TabControl` / `TabItem` | Multiple tabs with content widgets |
+| ScrollView | `ScrollViewer` | Scrollbar, mouse wheel, `ContentHeight` |
+| ListView | `ListView`, `ListBox` | Selection, keyboard nav, scrollbar |
+| Image | `Image` | PNG/JPEG, stretch modes (Fill/Uniform/None) |
+| Separator | `Separator`, `Line`, `Rectangle` | Divider line |
+| MessageBox | — (code only) | OK / YesNo / YesNoCancel |
+| Dialog | — (code only) | Modal base, custom content |
 
 ## Quick Start
 
@@ -32,29 +55,34 @@ go run main.go
 
 ```bash
 cd window
-go run ../cmd/guiview/main.go
+go run ../cmd/showcase        # Full widget showcase
+go run ../cmd/guiview         # Interactive demo with modals
+go run ../cmd/griddemo        # Grid layout demo
 ```
 
 Windows binary without console:
 
 ```bash
 cd window
-go build -ldflags="-H windowsgui" -o guiview.exe ../cmd/guiview
+go build -ldflags="-H windowsgui" -o showcase.exe ../cmd/showcase
 ```
 
 ## Project Structure
 
 ```
 headless-gui/
-  engine/       Core: canvas, render loop, event dispatch, font manager
-  widget/       All widgets, themes, XAML loader, drag support
-  output/       Frame + DirtyTile types for delta streaming
-  window/       Ebiten v2 native window (separate go.mod)
-  cmd/guiview/  Demo app with native window
-  gui/          XAML demo files (login window, modal dialogs)
-  assets/       Fonts, demo layouts
-  tests/        Unit tests (engine, widgets, drag, modals)
-  main.go       Headless demo entry point
+  engine/          Core: canvas, render loop, event dispatch, font manager
+  widget/          All widgets, themes, XAML loader, Grid layout, drag support
+  output/          Frame + DirtyTile types for delta streaming
+  window/          Ebiten v2 native window (separate go.mod)
+  cmd/
+    showcase/      Full widget showcase (all widgets + live animation)
+    guiview/       Interactive demo with XAML modals
+    griddemo/      Grid layout demo
+  assets/ui/       XAML demo layouts (demo.xaml, grid_demo.xaml, showcase.xaml)
+  gui/             XAML files for RDP UI (login, block, error dialogs)
+  tests/           Unit tests (engine, widgets, drag, modals)
+  main.go          Headless demo entry point
 ```
 
 ## Minimal Example
@@ -63,6 +91,7 @@ headless-gui/
 package main
 
 import (
+    "image"
     "image/color"
     "github.com/oops1/headless-gui/engine"
     "github.com/oops1/headless-gui/widget"
@@ -83,10 +112,8 @@ func main() {
     eng.Start()
     defer eng.Stop()
 
-    // Consume frames
     for frame := range eng.Frames() {
-        // frame.Tiles contains only changed 64x64 regions
-        _ = frame
+        _ = frame // frame.Tiles contains only changed 64x64 regions
     }
 }
 ```
@@ -96,18 +123,25 @@ func main() {
 UI can be defined in WPF-compatible XAML and loaded at runtime:
 
 ```xml
-<Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="400" Height="300" Background="#2D2D30"
-        Caption="My Window" CornerRadius="8">
+<Canvas Name="root" Width="800" Height="600" Background="#1E1E2E">
 
-    <TextBlock Canvas.Left="20" Canvas.Top="42"
-               Width="360" Height="20"
-               Text="Hello, World!" Foreground="White"/>
+    <Grid Left="50" Top="50" Width="700" Height="500" ShowGridLines="True">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="40"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
 
-    <Button x:Name="btnOK" Canvas.Left="150" Canvas.Top="240"
-            Width="100" Height="36"
-            Content="OK" Tag="Accent"/>
+        <Label Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
+               Text="Header" Foreground="White" Background="#0078D4"/>
+        <TextBox Grid.Row="1" Grid.Column="1" Placeholder="Type here..."/>
+        <Button Grid.Row="2" Grid.Column="1" Content="OK" Style="Accent"/>
+    </Grid>
+
 </Canvas>
 ```
 
@@ -121,57 +155,6 @@ eng.SetRoot(root)
 
 Coordinates inside containers are relative (standard WPF Canvas behavior).
 
-## Widget List
-
-| Widget | Constructor | Notes |
-|---|---|---|
-| Panel | `NewPanel(bg)` / `NewWin10Panel()` | Container, drag, rounded corners, title bar |
-| Button | `NewButton(text)` / `NewWin10AccentButton(text)` | Click handler, hover/press states |
-| TextInput | `NewTextInput(placeholder)` | Selection, clipboard, Home/End |
-| PasswordBox | `NewPasswordInput(placeholder)` | Masked input |
-| Label | `NewLabel(text, color)` / `NewWin10Label(text)` | Static text |
-| Dropdown | `NewDropdown(items...)` | Overlay popup, keyboard nav |
-| ProgressBar | `NewProgressBar()` | `SetValue(0.0 .. 1.0)` |
-| CheckBox | `NewCheckBox(text)` | Toggle with label |
-| RadioButton | `NewRadioButton(text, group)` | Mutual exclusion by group |
-| TabControl | `NewTabControl()` | `AddTab(header, content)` |
-| Slider | `NewSlider()` | Min/Max/Value, drag thumb |
-| ToggleSwitch | `NewToggleSwitch(text)` | On/Off with animation |
-| ScrollView | `NewScrollView()` | Scrollbar, mouse wheel |
-| ListView | `NewListView(items...)` | Selection, keyboard nav |
-| ImageWidget | `NewImageWidget()` | PNG/JPEG, stretch modes |
-| MessageBox | `NewMessageBox(eng)` | OK / YesNo / YesNoCancel |
-| Dialog | `NewDialog(title, w, h)` | Modal base, custom content |
-
-## Themes
-
-```go
-eng.SetTheme(widget.DarkTheme())   // Windows 10 Dark (default)
-eng.SetTheme(widget.LightTheme())  // Windows 10 Light
-```
-
-60+ color tokens: accent, window background, button states, input focus, scrollbar, etc.
-
-## Output Format
-
-Each frame contains only changed tiles:
-
-```go
-type DirtyTile struct {
-    X, Y int    // Position on canvas
-    W, H int    // Size (up to 64x64)
-    Data []byte // Raw RGBA pixels
-}
-
-type Frame struct {
-    Seq       uint64
-    Timestamp time.Time
-    Tiles     []DirtyTile
-}
-```
-
-Consume via `eng.Frames()` channel (buffered, depth 8).
-
 ## Dependencies
 
 | Module | Dependency |
@@ -183,12 +166,11 @@ Go 1.22+. The `window/` module is optional — the core engine has zero CGO depe
 
 ## Documentation
 
-Full developer guide with widget API, XAML reference, theming, event system, font registration, and architecture details:
+Full developer guide with widget API, XAML reference, Grid layout, theming, event system, font registration, and architecture details:
 
-- [GUIDE_EN.md](GUIDE_EN.md) — English
 - [GUIDE.md](GUIDE.md) — Русский
+- [GUIDE_EN.md](GUIDE_EN.md) — English
 
 ## License
 
 [MIT](LICENSE)
-                                          

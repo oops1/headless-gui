@@ -1,0 +1,502 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    GuiEngine — Widget Showcase
+    Демонстрация ВСЕХ доступных виджетов движка.
+    WPF-совместимый XAML.
+-->
+<Canvas Name="root" Width="1280" Height="900" Background="#0D0D1A">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         HEADER BAR
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <Panel Name="header" Left="0" Top="0" Width="1280" Height="52"
+           Background="#0078D4">
+        <Label Left="20" Top="14" Width="500" Height="24"
+               Text="GuiEngine — Widget Showcase" Foreground="White"/>
+        <Label Name="headerClock" Left="1080" Top="14" Width="180" Height="24"
+               Text="00:00:00" Foreground="#B0D4FF"/>
+    </Panel>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         SIDEBAR — навигация
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <Panel Name="sidebar" Left="0" Top="52" Width="220" Height="812"
+           Background="#16162B">
+        <Label Left="16" Top="16" Width="188" Height="20"
+               Text="ВИДЖЕТЫ" Foreground="#5B6078"/>
+        <Separator Left="16" Top="42" Width="188" Height="1" Background="#2A2A44"/>
+
+        <Label Left="16" Top="56" Width="188" Height="22"
+               Text="  Ввод данных" Foreground="#CDD6F4"/>
+        <Label Left="16" Top="84" Width="188" Height="22"
+               Text="  Элементы управления" Foreground="#CDD6F4"/>
+        <Label Left="16" Top="112" Width="188" Height="22"
+               Text="  Индикаторы" Foreground="#CDD6F4"/>
+        <Label Left="16" Top="140" Width="188" Height="22"
+               Text="  Контейнеры" Foreground="#CDD6F4"/>
+        <Label Left="16" Top="168" Width="188" Height="22"
+               Text="  Списки" Foreground="#CDD6F4"/>
+
+        <Separator Left="16" Top="206" Width="188" Height="1" Background="#2A2A44"/>
+
+        <Label Left="16" Top="222" Width="188" Height="20"
+               Text="ИНФОРМАЦИЯ" Foreground="#5B6078"/>
+        <Label Name="sideInfo1" Left="16" Top="248" Width="188" Height="20"
+               Text="Виджетов: 16" Foreground="#7F849C"/>
+        <Label Name="sideInfo2" Left="16" Top="272" Width="188" Height="20"
+               Text="XAML: showcase.xaml" Foreground="#7F849C"/>
+        <Label Name="sideInfo3" Left="16" Top="296" Width="188" Height="20"
+               Text="Разрешение: 1280×900" Foreground="#7F849C"/>
+    </Panel>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         MAIN CONTENT — TabControl
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <TabControl Name="mainTabs" Left="220" Top="52" Width="1060" Height="812"
+                SelectedIndex="0">
+
+        <!-- ─── TAB 1: Ввод данных ──────────────────────────────────────── -->
+        <TabItem Header="Ввод данных">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+
+                <!-- Секция: TextBox / TextInput -->
+                <Label Left="30" Top="20" Width="200" Height="20"
+                       Text="TextBox" Foreground="#89B4FA"/>
+                <Separator Left="30" Top="44" Width="460" Height="1" Background="#313244"/>
+
+                <Label Left="30" Top="56" Width="120" Height="20"
+                       Text="Логин:" Foreground="#BAC2DE"/>
+                <TextBox Name="txtLogin" Left="30" Top="78" Width="460" Height="36"
+                         Placeholder="user@example.com"/>
+
+                <Label Left="30" Top="126" Width="120" Height="20"
+                       Text="Пароль:" Foreground="#BAC2DE"/>
+                <PasswordBox Name="txtPassword" Left="30" Top="148" Width="460" Height="36"
+                             Placeholder="Введите пароль..."/>
+
+                <Label Left="30" Top="196" Width="120" Height="20"
+                       Text="Комментарий:" Foreground="#BAC2DE"/>
+                <TextBox Name="txtComment" Left="30" Top="218" Width="460" Height="36"
+                         Placeholder="Любой текст для проверки ввода..."/>
+
+                <!-- Секция: ComboBox / Dropdown -->
+                <Label Left="30" Top="280" Width="200" Height="20"
+                       Text="ComboBox" Foreground="#89B4FA"/>
+                <Separator Left="30" Top="304" Width="460" Height="1" Background="#313244"/>
+
+                <Label Left="30" Top="316" Width="140" Height="20"
+                       Text="Роль пользователя:" Foreground="#BAC2DE"/>
+                <ComboBox Name="ddRole" Left="30" Top="338" Width="460" Height="32">
+                    <ComboBoxItem Content="Администратор"/>
+                    <ComboBoxItem Content="Оператор"/>
+                    <ComboBoxItem Content="Пользователь"/>
+                    <ComboBoxItem Content="Гость"/>
+                </ComboBox>
+
+                <Label Left="30" Top="386" Width="140" Height="20"
+                       Text="Протокол:" Foreground="#BAC2DE"/>
+                <ComboBox Name="ddProtocol" Left="30" Top="408" Width="460" Height="32"
+                          Items="RDP,VNC,SSH,HTTP,HTTPS" SelectedIndex="0"/>
+
+                <!-- Секция: Кнопки -->
+                <Label Left="30" Top="466" Width="200" Height="20"
+                       Text="Button" Foreground="#89B4FA"/>
+                <Separator Left="30" Top="490" Width="460" Height="1" Background="#313244"/>
+
+                <Button Name="btnAccent" Left="30" Top="504" Width="140" Height="40"
+                        Content="Войти" Style="Accent"
+                        HoverBG="#1A8CFF" PressedBG="#005A9E"/>
+
+                <Button Name="btnDefault" Left="186" Top="504" Width="140" Height="40"
+                        Content="Отмена"
+                        HoverBG="#3A3A52" PressedBG="#2A2A3E"/>
+
+                <Button Name="btnDanger" Left="342" Top="504" Width="148" Height="40"
+                        Content="Удалить" Background="#C42B1C" Foreground="White"
+                        HoverBG="#E03524" PressedBG="#A01E14"
+                        BorderBrush="#E03524"/>
+
+                <Button Name="btnDisabled" Left="30" Top="558" Width="220" Height="36"
+                        Content="Сбросить форму"
+                        HoverBG="#3A3A52"/>
+
+                <Button Name="btnExport" Left="266" Top="558" Width="224" Height="36"
+                        Content="Экспорт настроек" Style="Accent"
+                        HoverBG="#1A8CFF"/>
+
+                <!-- ──── Правая колонка: Текст с переносом ──────────────── -->
+                <Label Left="540" Top="20" Width="200" Height="20"
+                       Text="Label / TextBlock" Foreground="#89B4FA"/>
+                <Separator Left="540" Top="44" Width="480" Height="1" Background="#313244"/>
+
+                <Label Left="540" Top="56" Width="480" Height="20"
+                       Text="Обычный текст (одна строка)" Foreground="#CDD6F4"/>
+
+                <Label Left="540" Top="88" Width="480" Height="100"
+                       Text="Длинный текст с переносом строк (TextWrapping=Wrap). Движок headless-gui поддерживает пиксельно-точный перенос слов по ширине контейнера. Это позволяет создавать информационные панели и диалоги с динамическим содержимым."
+                       Foreground="#A6ADC8" TextWrapping="Wrap" Background="#181828"/>
+
+                <Label Left="540" Top="204" Width="480" Height="60"
+                       Text="Ещё один блок текста. Шрифт по умолчанию, светлый фон для контраста. Проверка переноса при различных размерах."
+                       Foreground="#1E1E32" TextWrapping="Wrap" Background="#CDD6F4"/>
+
+                <!-- Image -->
+                <Label Left="540" Top="280" Width="200" Height="20"
+                       Text="Image" Foreground="#89B4FA"/>
+                <Separator Left="540" Top="304" Width="480" Height="1" Background="#313244"/>
+
+                <Panel Left="540" Top="316" Width="480" Height="240" Background="#11112A"
+                       CornerRadius="6" BorderBrush="#313244">
+                    <Label Left="12" Top="12" Width="456" Height="216"
+                           Text="[ Область для изображения — Image Source='path' ]"
+                           Foreground="#585B70" TextWrapping="Wrap"/>
+                </Panel>
+
+                <!-- Separator demo -->
+                <Label Left="540" Top="572" Width="200" Height="20"
+                       Text="Separator" Foreground="#89B4FA"/>
+                <Separator Left="540" Top="596" Width="480" Height="1" Background="#F38BA8"/>
+                <Separator Left="540" Top="608" Width="480" Height="2" Background="#89B4FA"/>
+                <Separator Left="540" Top="622" Width="480" Height="1" Background="#A6E3A1"/>
+                <Separator Left="540" Top="636" Width="480" Height="3" Background="#F9E2AF"/>
+
+            </Canvas>
+        </TabItem>
+
+        <!-- ─── TAB 2: Элементы управления ──────────────────────────────── -->
+        <TabItem Header="Управление">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+
+                <!-- CheckBox -->
+                <Label Left="30" Top="20" Width="200" Height="20"
+                       Text="CheckBox" Foreground="#89B4FA"/>
+                <Separator Left="30" Top="44" Width="460" Height="1" Background="#313244"/>
+
+                <CheckBox Name="cbRemember" Left="30" Top="58" Width="460" Height="28"
+                          Content="Запомнить учётные данные" IsChecked="true"/>
+                <CheckBox Name="cbAutoConnect" Left="30" Top="92" Width="460" Height="28"
+                          Content="Автоматическое подключение при запуске"/>
+                <CheckBox Name="cbVerbose" Left="30" Top="126" Width="460" Height="28"
+                          Content="Подробное логирование (verbose)"/>
+                <CheckBox Name="cbCompress" Left="30" Top="160" Width="460" Height="28"
+                          Content="Сжатие данных при передаче" IsChecked="true"/>
+
+                <!-- RadioButton -->
+                <Label Left="30" Top="210" Width="200" Height="20"
+                       Text="RadioButton" Foreground="#89B4FA"/>
+                <Separator Left="30" Top="234" Width="460" Height="1" Background="#313244"/>
+
+                <Label Left="30" Top="248" Width="200" Height="20"
+                       Text="Метод аутентификации:" Foreground="#BAC2DE"/>
+                <RadioButton Name="rbLDAP" Left="30" Top="274" Width="460" Height="26"
+                             Content="LDAP / Active Directory" GroupName="auth" IsChecked="true"/>
+                <RadioButton Name="rbOTP" Left="30" Top="306" Width="460" Height="26"
+                             Content="Одноразовый пароль (OTP)" GroupName="auth"/>
+                <RadioButton Name="rbCert" Left="30" Top="338" Width="460" Height="26"
+                             Content="Сертификат (X.509)" GroupName="auth"/>
+
+                <Label Left="30" Top="382" Width="200" Height="20"
+                       Text="Качество изображения:" Foreground="#BAC2DE"/>
+                <RadioButton Name="rbHigh" Left="30" Top="408" Width="220" Height="26"
+                             Content="Высокое" GroupName="quality" IsChecked="true"/>
+                <RadioButton Name="rbMedium" Left="250" Top="408" Width="220" Height="26"
+                             Content="Среднее" GroupName="quality"/>
+                <RadioButton Name="rbLow" Left="30" Top="440" Width="220" Height="26"
+                             Content="Низкое" GroupName="quality"/>
+
+                <!-- ToggleSwitch -->
+                <Label Left="30" Top="492" Width="200" Height="20"
+                       Text="ToggleSwitch" Foreground="#89B4FA"/>
+                <Separator Left="30" Top="516" Width="460" Height="1" Background="#313244"/>
+
+                <ToggleSwitch Name="tsAutoRefresh" Left="30" Top="530" Width="460" Height="28"
+                              Content="Авто-обновление" IsOn="true"/>
+                <ToggleSwitch Name="tsNotify" Left="30" Top="566" Width="460" Height="28"
+                              Content="Уведомления"/>
+                <ToggleSwitch Name="tsDarkMode" Left="30" Top="602" Width="460" Height="28"
+                              Content="Тёмная тема" IsOn="true"/>
+                <ToggleSwitch Name="tsFullscreen" Left="30" Top="638" Width="460" Height="28"
+                              Content="Полноэкранный режим"/>
+
+                <!-- ──── Правая колонка: Slider ────────────────────────── -->
+                <Label Left="540" Top="20" Width="200" Height="20"
+                       Text="Slider" Foreground="#89B4FA"/>
+                <Separator Left="540" Top="44" Width="480" Height="1" Background="#313244"/>
+
+                <Label Left="540" Top="58" Width="200" Height="20"
+                       Text="Скорость (FPS):" Foreground="#BAC2DE"/>
+                <Slider Name="sliderSpeed" Left="540" Top="84" Width="400" Height="28"
+                        Minimum="1" Maximum="60" Value="30"/>
+                <Label Name="lblSpeedVal" Left="950" Top="84" Width="70" Height="20"
+                       Text="30 FPS" Foreground="#A6E3A1"/>
+
+                <Label Left="540" Top="124" Width="200" Height="20"
+                       Text="Качество (%):" Foreground="#BAC2DE"/>
+                <Slider Name="sliderQuality" Left="540" Top="150" Width="400" Height="28"
+                        Minimum="10" Maximum="100" Value="80"/>
+                <Label Name="lblQualityVal" Left="950" Top="150" Width="70" Height="20"
+                       Text="80%" Foreground="#F9E2AF"/>
+
+                <Label Left="540" Top="190" Width="200" Height="20"
+                       Text="Громкость:" Foreground="#BAC2DE"/>
+                <Slider Name="sliderVolume" Left="540" Top="216" Width="400" Height="28"
+                        Minimum="0" Maximum="100" Value="65"/>
+                <Label Name="lblVolumeVal" Left="950" Top="216" Width="70" Height="20"
+                       Text="65" Foreground="#89B4FA"/>
+
+                <!-- ProgressBar -->
+                <Label Left="540" Top="274" Width="200" Height="20"
+                       Text="ProgressBar" Foreground="#89B4FA"/>
+                <Separator Left="540" Top="298" Width="480" Height="1" Background="#313244"/>
+
+                <Label Left="540" Top="312" Width="200" Height="20"
+                       Text="Загрузка данных:" Foreground="#BAC2DE"/>
+                <ProgressBar Name="pbMain" Left="540" Top="338" Width="400" Height="18"
+                             Value="0.65"/>
+                <Label Name="lblPbVal" Left="950" Top="336" Width="70" Height="20"
+                       Text="65%" Foreground="#CDD6F4"/>
+
+                <Label Left="540" Top="370" Width="200" Height="20"
+                       Text="Установка обновлений:" Foreground="#BAC2DE"/>
+                <ProgressBar Name="pbSecondary" Left="540" Top="396" Width="400" Height="18"
+                             Value="0.33" Foreground="#A6E3A1"/>
+                <Label Name="lblPb2Val" Left="950" Top="394" Width="70" Height="20"
+                       Text="33%" Foreground="#CDD6F4"/>
+
+                <Label Left="540" Top="428" Width="200" Height="20"
+                       Text="Резервное копирование:" Foreground="#BAC2DE"/>
+                <ProgressBar Name="pbTertiary" Left="540" Top="454" Width="400" Height="18"
+                             Value="0.88" Foreground="#F38BA8"/>
+                <Label Name="lblPb3Val" Left="950" Top="452" Width="70" Height="20"
+                       Text="88%" Foreground="#CDD6F4"/>
+
+                <!-- ScrollViewer -->
+                <Label Left="540" Top="500" Width="200" Height="20"
+                       Text="ScrollViewer" Foreground="#89B4FA"/>
+                <Separator Left="540" Top="524" Width="480" Height="1" Background="#313244"/>
+
+                <ScrollViewer Name="scrollDemo" Left="540" Top="538" Width="480" Height="200"
+                              ContentHeight="500" Background="#181828">
+                    <Label Left="12" Top="8" Width="440" Height="480"
+                           Text="Это содержимое ScrollViewer. Прокрутите вниз чтобы увидеть весь текст. Скроллер поддерживает колёсико мыши и перетаскивание полосы прокрутки. Высота контента задаётся через ContentHeight и может быть больше видимой области. Это позволяет размещать длинные списки, логи, документацию и другой контент произвольной длины внутри ограниченной области экрана. Виджет работает аналогично ScrollViewer из WPF."
+                           Foreground="#A6ADC8" TextWrapping="Wrap"/>
+                </ScrollViewer>
+
+            </Canvas>
+        </TabItem>
+
+        <!-- ─── TAB 3: Данные и контейнеры ──────────────────────────────── -->
+        <TabItem Header="Данные">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+
+                <!-- ListView -->
+                <Label Left="30" Top="20" Width="200" Height="20"
+                       Text="ListView / ListBox" Foreground="#89B4FA"/>
+                <Separator Left="30" Top="44" Width="460" Height="1" Background="#313244"/>
+
+                <ListView Name="eventLog" Left="30" Top="58" Width="460" Height="300">
+                    <ListViewItem Content="[09:00:01] Движок запущен"/>
+                    <ListViewItem Content="[09:00:01] XAML загружен: showcase.xaml"/>
+                    <ListViewItem Content="[09:00:02] Подключение к серверу..."/>
+                    <ListViewItem Content="[09:00:03] Соединение установлено"/>
+                    <ListViewItem Content="[09:00:03] Аутентификация: LDAP"/>
+                    <ListViewItem Content="[09:00:04] Сессия открыта"/>
+                    <ListViewItem Content="[09:00:05] Загрузка профиля пользователя"/>
+                    <ListViewItem Content="[09:00:06] Профиль загружен"/>
+                    <ListViewItem Content="[09:00:07] Инициализация рабочего стола"/>
+                    <ListViewItem Content="[09:00:08] Готов к работе"/>
+                </ListView>
+
+                <Button Name="btnAddEvent" Left="30" Top="370" Width="224" Height="36"
+                        Content="Добавить запись" Style="Accent"
+                        HoverBG="#1A8CFF"/>
+                <Button Name="btnClearLog" Left="266" Top="370" Width="224" Height="36"
+                        Content="Очистить журнал"
+                        HoverBG="#3A3A52"/>
+
+                <!-- Grid layout demo -->
+                <Label Left="30" Top="430" Width="200" Height="20"
+                       Text="Grid Layout" Foreground="#89B4FA"/>
+                <Separator Left="30" Top="454" Width="460" Height="1" Background="#313244"/>
+
+                <Grid Name="demoGrid" Left="30" Top="468" Width="460" Height="280"
+                      Background="#181828" ShowGridLines="True">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="40"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="36"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="120"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Header row -->
+                    <Label Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3"
+                           Text="  Сетка 4×3 (Grid с ShowGridLines)"
+                           Foreground="White" Background="#0078D4"/>
+
+                    <!-- Content cells -->
+                    <Label Grid.Row="1" Grid.Column="0"
+                           Text="Ячейка (1,0)" Foreground="#BAC2DE" Background="#1E1E38"/>
+                    <Label Grid.Row="1" Grid.Column="1"
+                           Text="Ячейка (1,1)" Foreground="#BAC2DE" Background="#222240"/>
+                    <Label Grid.Row="1" Grid.Column="2"
+                           Text="(1,2)" Foreground="#BAC2DE" Background="#1E1E38"/>
+
+                    <Label Grid.Row="2" Grid.Column="0"
+                           Text="Star *" Foreground="#A6E3A1" Background="#222240"/>
+                    <Label Grid.Row="2" Grid.Column="1"
+                           Text="Star *" Foreground="#F9E2AF" Background="#1E1E38"/>
+                    <Label Grid.Row="2" Grid.Column="2"
+                           Text="120px" Foreground="#F38BA8" Background="#222240"/>
+
+                    <!-- Footer row -->
+                    <Button Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
+                            Content="Кнопка в Grid (ColumnSpan=2)" Style="Accent"/>
+                    <Button Grid.Row="3" Grid.Column="2"
+                            Content="OK" HoverBG="#3A3A52"/>
+                </Grid>
+
+                <!-- ──── Правая колонка: TabControl вложенный ──────────── -->
+                <Label Left="540" Top="20" Width="200" Height="20"
+                       Text="TabControl (вложенный)" Foreground="#89B4FA"/>
+                <Separator Left="540" Top="44" Width="480" Height="1" Background="#313244"/>
+
+                <TabControl Name="innerTabs" Left="540" Top="58" Width="480" Height="300">
+                    <TabItem Header="Сервер">
+                        <Canvas Width="480" Height="250" Background="#181828">
+                            <Label Left="16" Top="16" Width="448" Height="20"
+                                   Text="Настройки сервера" Foreground="#CDD6F4"/>
+                            <Separator Left="16" Top="40" Width="448" Height="1" Background="#313244"/>
+                            <Label Left="16" Top="56" Width="120" Height="20"
+                                   Text="Адрес:" Foreground="#BAC2DE"/>
+                            <TextBox Name="txtServer" Left="16" Top="78" Width="448" Height="32"
+                                     Text="192.168.1.100" Placeholder="IP или имя хоста"/>
+                            <Label Left="16" Top="122" Width="120" Height="20"
+                                   Text="Порт:" Foreground="#BAC2DE"/>
+                            <TextBox Name="txtPort" Left="16" Top="144" Width="200" Height="32"
+                                     Text="3389" Placeholder="Номер порта"/>
+                            <CheckBox Name="cbSSL" Left="16" Top="192" Width="448" Height="26"
+                                      Content="Использовать SSL/TLS" IsChecked="true"/>
+                        </Canvas>
+                    </TabItem>
+                    <TabItem Header="Дисплей">
+                        <Canvas Width="480" Height="250" Background="#181828">
+                            <Label Left="16" Top="16" Width="448" Height="20"
+                                   Text="Настройки дисплея" Foreground="#CDD6F4"/>
+                            <Separator Left="16" Top="40" Width="448" Height="1" Background="#313244"/>
+                            <ComboBox Name="ddResolution" Left="16" Top="56" Width="448" Height="32"
+                                      Items="1920×1080,1680×1050,1440×900,1280×720,1024×768"
+                                      SelectedIndex="0"/>
+                            <Label Left="16" Top="104" Width="200" Height="20"
+                                   Text="Цветность:" Foreground="#BAC2DE"/>
+                            <RadioButton Name="rb32bit" Left="16" Top="130" Width="140" Height="24"
+                                         Content="32 бит" GroupName="color" IsChecked="true"/>
+                            <RadioButton Name="rb16bit" Left="170" Top="130" Width="140" Height="24"
+                                         Content="16 бит" GroupName="color"/>
+                            <ToggleSwitch Name="tsSmooth" Left="16" Top="170" Width="448" Height="28"
+                                          Content="Сглаживание шрифтов" IsOn="true"/>
+                        </Canvas>
+                    </TabItem>
+                    <TabItem Header="Звук">
+                        <Canvas Width="480" Height="250" Background="#181828">
+                            <Label Left="16" Top="16" Width="448" Height="20"
+                                   Text="Аудио настройки" Foreground="#CDD6F4"/>
+                            <Separator Left="16" Top="40" Width="448" Height="1" Background="#313244"/>
+                            <ToggleSwitch Name="tsAudio" Left="16" Top="56" Width="448" Height="28"
+                                          Content="Перенаправление звука" IsOn="true"/>
+                            <Label Left="16" Top="100" Width="200" Height="20"
+                                   Text="Громкость воспроизведения:" Foreground="#BAC2DE"/>
+                            <Slider Name="sliderPlayback" Left="16" Top="126" Width="380" Height="28"
+                                    Minimum="0" Maximum="100" Value="75"/>
+                            <Label Left="16" Top="170" Width="200" Height="20"
+                                   Text="Громкость записи:" Foreground="#BAC2DE"/>
+                            <Slider Name="sliderRecord" Left="16" Top="196" Width="380" Height="28"
+                                    Minimum="0" Maximum="100" Value="50"/>
+                        </Canvas>
+                    </TabItem>
+                </TabControl>
+
+                <!-- Панель с рамкой и скруглением -->
+                <Label Left="540" Top="378" Width="200" Height="20"
+                       Text="Panel / Border" Foreground="#89B4FA"/>
+                <Separator Left="540" Top="402" Width="480" Height="1" Background="#313244"/>
+
+                <Panel Name="cardPanel1" Left="540" Top="416" Width="230" Height="160"
+                       Background="#252540" CornerRadius="8" BorderBrush="#45475A">
+                    <Label Left="16" Top="14" Width="198" Height="20"
+                           Text="Карточка 1" Foreground="#CDD6F4"/>
+                    <Separator Left="16" Top="38" Width="198" Height="1" Background="#45475A"/>
+                    <Label Left="16" Top="50" Width="198" Height="80"
+                           Text="Панель с CornerRadius=8 и рамкой. Поддержка alpha-прозрачности."
+                           Foreground="#A6ADC8" TextWrapping="Wrap"/>
+                    <ProgressBar Left="16" Top="132" Width="198" Height="12"
+                                 Value="0.72" Foreground="#A6E3A1"/>
+                </Panel>
+
+                <Panel Name="cardPanel2" Left="790" Top="416" Width="230" Height="160"
+                       Background="#402525" CornerRadius="8" BorderBrush="#6B3030">
+                    <Label Left="16" Top="14" Width="198" Height="20"
+                           Text="Карточка 2" Foreground="#F38BA8"/>
+                    <Separator Left="16" Top="38" Width="198" Height="1" Background="#6B3030"/>
+                    <Label Left="16" Top="50" Width="198" Height="80"
+                           Text="Другой стиль оформления. Фон, рамка и текст — всё настраивается через XAML."
+                           Foreground="#D4A0A0" TextWrapping="Wrap"/>
+                    <Button Left="16" Top="132" Width="198" Height="24"
+                            Content="Действие" Background="#C42B1C" Foreground="White"
+                            HoverBG="#E03524"/>
+                </Panel>
+
+                <!-- Status cards row -->
+                <Panel Left="540" Top="596" Width="150" Height="140"
+                       Background="#1A3A20" CornerRadius="6" BorderBrush="#2D5A36">
+                    <Label Left="16" Top="12" Width="118" Height="20"
+                           Text="CPU" Foreground="#A6E3A1"/>
+                    <Label Name="lblCPU" Left="16" Top="44" Width="118" Height="40"
+                           Text="24%" Foreground="#A6E3A1" FontSize="28"/>
+                    <ProgressBar Name="pbCPU" Left="16" Top="100" Width="118" Height="10"
+                                 Value="0.24" Foreground="#A6E3A1"/>
+                </Panel>
+
+                <Panel Left="705" Top="596" Width="150" Height="140"
+                       Background="#1A2A3A" CornerRadius="6" BorderBrush="#2D4A6B">
+                    <Label Left="16" Top="12" Width="118" Height="20"
+                           Text="RAM" Foreground="#89B4FA"/>
+                    <Label Name="lblRAM" Left="16" Top="44" Width="118" Height="40"
+                           Text="68%" Foreground="#89B4FA" FontSize="28"/>
+                    <ProgressBar Name="pbRAM" Left="16" Top="100" Width="118" Height="10"
+                                 Value="0.68" Foreground="#89B4FA"/>
+                </Panel>
+
+                <Panel Left="870" Top="596" Width="150" Height="140"
+                       Background="#3A2A1A" CornerRadius="6" BorderBrush="#6B4A2D">
+                    <Label Left="16" Top="12" Width="118" Height="20"
+                           Text="DISK" Foreground="#F9E2AF"/>
+                    <Label Name="lblDisk" Left="16" Top="44" Width="118" Height="40"
+                           Text="45%" Foreground="#F9E2AF" FontSize="28"/>
+                    <ProgressBar Name="pbDisk" Left="16" Top="100" Width="118" Height="10"
+                                 Value="0.45" Foreground="#F9E2AF"/>
+                </Panel>
+
+            </Canvas>
+        </TabItem>
+
+    </TabControl>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         STATUS BAR
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <Panel Name="statusBar" Left="0" Top="864" Width="1280" Height="36"
+           Background="#11111B">
+        <Label Name="lblStatus" Left="16" Top="8" Width="600" Height="20"
+               Text="Готов · Widget Showcase · headless-gui" Foreground="#6C7086"/>
+        <ProgressBar Name="pbStatus" Left="800" Top="12" Width="300" Height="12"
+                     Value="1.0" Foreground="#0078D4"/>
+        <Label Name="lblFPS" Left="1120" Top="8" Width="140" Height="20"
+               Text="60 FPS" Foreground="#585B70"/>
+    </Panel>
+
+</Canvas>

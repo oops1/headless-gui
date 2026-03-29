@@ -88,6 +88,16 @@ func (lv *ListView) AddItem(text string) {
 	lv.items = append(lv.items, text)
 }
 
+// Clear удаляет все элементы из списка и сбрасывает выделение.
+func (lv *ListView) Clear() {
+	lv.mu.Lock()
+	defer lv.mu.Unlock()
+	lv.items = lv.items[:0]
+	lv.selected = -1
+	lv.hoverIdx = -1
+	lv.scrollY = 0
+}
+
 // Selected возвращает индекс выделенного элемента (-1 если нет).
 func (lv *ListView) Selected() int {
 	lv.mu.Lock()

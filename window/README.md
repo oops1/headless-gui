@@ -6,9 +6,9 @@
 
 | ОС | Рендер | CGO |
 |---|---|---|
-| **Windows** | DirectX 11 | ❌ не нужен |
-| Linux | OpenGL | ✅ нужен (libGL, X11 или Wayland) |
-| macOS | Metal | ✅ нужен |
+| **Windows** | DirectX 11 | не нужен |
+| Linux | OpenGL | нужен (libGL, X11 или Wayland) |
+| macOS | Metal | нужен |
 
 ## Быстрый старт
 
@@ -20,15 +20,14 @@ import (
     "image/color"
     "log"
 
-    "headless-gui/engine"
-    "headless-gui/widget"
-    "headless-gui/window"
+    "github.com/oops1/headless-gui/engine"
+    "github.com/oops1/headless-gui/widget"
+    "github.com/oops1/headless-gui/window"
 )
 
 func main() {
     eng := engine.New(1280, 720, 30)
 
-    // Строим UI
     root := widget.NewPanel(color.RGBA{R: 30, G: 30, B: 46, A: 255})
     root.SetBounds(image.Rect(0, 0, 1280, 720))
 
@@ -41,7 +40,6 @@ func main() {
     eng.Start()
     defer eng.Stop()
 
-    // Открываем окно (блокирует до закрытия)
     win := window.New(eng, "Моё приложение")
     win.SetMaxFPS(60)
     if err := win.Run(); err != nil {
@@ -50,58 +48,61 @@ func main() {
 }
 ```
 
-## Запуск демо
+## Демо-приложения
+
+Из директории `GuiEngine/window` (здесь лежит go.mod с Ebiten):
 
 ```bash
-# Из директории GuiEngine/window (там лежит go.mod с ebiten)
-go run ../cmd/guiview/main.go
+go run ../cmd/showcase        # все виджеты + живая анимация
+go run ../cmd/guiview         # интерактивное демо с модальными окнами
+go run ../cmd/griddemo        # Grid-раскладка
 
 # Бинарник без консольного окна (Windows)
-go build -ldflags="-H windowsgui" -o guiview.exe ../cmd/guiview
+go build -ldflags="-H windowsgui" -o showcase.exe ../cmd/showcase
 ```
 
-## Использование с rdp-ui
+## Использование в своём проекте
 
-Добавьте в `rdp/go.mod`:
+Добавьте в `go.mod`:
+
 ```
-require headless-gui/window v0.0.0
-
-replace headless-gui/window => ../GuiEngine/window
+require github.com/oops1/headless-gui/window v0.x.x
 ```
 
-## Структура модуля
+Для локальной разработки:
+
+```
+require github.com/oops1/headless-gui/window v0.0.0
+replace github.com/oops1/headless-gui/window => ../GuiEngine/window
+```
+
+## Структура
 
 ```
 GuiEngine/window/
-  go.mod        — модуль headless-gui/window (ebiten v2.7.x)
-  window.go     — Window, EngineAPI интерфейс, маппинг ввода
-  README.md     — эта документация
+  go.mod        модуль github.com/oops1/headless-gui/window
+  window.go     Window, EngineAPI интерфейс, маппинг ввода
 
-GuiEngine/cmd/guiview/
-  main.go       — демо-приложение (запускается из директории window/)
+GuiEngine/cmd/
+  showcase/     полная демонстрация всех виджетов
+  guiview/      интерактивное демо с XAML-модалками
+  griddemo/     демо Grid-раскладки
 ```
 
 ## API
 
 ```go
-// Создать окно
-win := window.New(eng, "Заголовок")
+win := window.New(eng, "Заголовок")   // создать окно
+win.SetMaxFPS(60)                     // ограничить FPS (по умолчанию 60)
+win.SetResizable(true)                // разрешить изменение размера
 
-// Настройки (опционально)
-win.SetMaxFPS(60)
-win.SetResizable(true)
-
-// Открыть (блокирует до закрытия)
-err := win.Run()
-
-// Снимок текущего кадра
-snap := win.FullFrameSnapshot() // *image.RGBA
+err := win.Run()                      // открыть (блокирует до закрытия)
+snap := win.FullFrameSnapshot()       // *image.RGBA — снимок текущего кадра
 ```
 
-## EngineAPI интерфейс
+## EngineAPI
 
-`window.New` принимает `EngineAPI` — не конкретный `*engine.Engine`, а интерфейс.
-Это позволяет подключить любой совместимый источник кадров:
+`window.New` принимает `EngineAPI` — интерфейс, а не конкретный `*engine.Engine`. Это позволяет подключить любой совместимый источник кадров:
 
 ```go
 type EngineAPI interface {
