@@ -27,8 +27,8 @@ headless-gui/
 import (
     "image"
     "image/color"
-    "github.com/oops1/headless-gui/engine"
-    "github.com/oops1/headless-gui/widget"
+    "github.com/oops1/headless-gui/v3/engine"
+    "github.com/oops1/headless-gui/v3/widget"
 )
 
 eng := engine.New(1920, 1080, 30)   // width, height, FPS
@@ -573,7 +573,7 @@ Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `W
 Separate module based on Ebiten v2. On Windows — DirectX 11, no CGO required.
 
 ```go
-import "github.com/oops1/headless-gui/window"
+import "github.com/oops1/headless-gui/v3/window"
 
 eng := engine.New(1280, 720, 30)
 // ... build UI, eng.Start() ...
@@ -648,31 +648,31 @@ ctx.ClearClip()
 ## Module Structure
 
 ```
-go.mod:  module github.com/oops1/headless-gui
+go.mod:  module github.com/oops1/headless-gui/v3
   require golang.org/x/image
 
-go.mod:  module github.com/oops1/headless-gui/window
-  require github.com/oops1/headless-gui => ../
+go.mod:  module github.com/oops1/headless-gui/v3/window
+  require github.com/oops1/headless-gui/v3 => ../
   require github.com/hajimehoshi/ebiten/v2
 ```
 
 Consumer application imports the main module:
 
 ```
-require github.com/oops1/headless-gui v0.x.x
+require github.com/oops1/headless-gui/v3 v0.x.x
 ```
 
 If native window is needed:
 
 ```
-require github.com/oops1/headless-gui/window v0.x.x
+require github.com/oops1/headless-gui/v3/window v0.x.x
 ```
 
 For local development use `replace`:
 
 ```
-replace github.com/oops1/headless-gui => ../GuiEngine
-replace github.com/oops1/headless-gui/window => ../GuiEngine/window
+replace github.com/oops1/headless-gui/v3 => ../GuiEngine
+replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
 ```
 
 ---

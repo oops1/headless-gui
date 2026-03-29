@@ -15,9 +15,9 @@ package main
 import (
 	"log"
 
-	"github.com/oops1/headless-gui/engine"
-	"github.com/oops1/headless-gui/widget"
-	"github.com/oops1/headless-gui/window"
+	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v3/window"
 )
 
 func main() {

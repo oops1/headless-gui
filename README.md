@@ -95,8 +95,8 @@ package main
 import (
     "image"
     "image/color"
-    "github.com/oops1/headless-gui/engine"
-    "github.com/oops1/headless-gui/widget"
+    "github.com/oops1/headless-gui/v3/engine"
+    "github.com/oops1/headless-gui/v3/widget"
 )
 
 func main() {
@@ -161,8 +161,8 @@ Coordinates inside containers are relative (standard WPF Canvas behavior).
 
 | Module | Dependency |
 |---|---|
-| `github.com/oops1/headless-gui` | `golang.org/x/image` |
-| `github.com/oops1/headless-gui/window` | `github.com/hajimehoshi/ebiten/v2` |
+| `github.com/oops1/headless-gui/v3` | `golang.org/x/image` |
+| `github.com/oops1/headless-gui/v3/window` | `github.com/hajimehoshi/ebiten/v2` |
 
 Go 1.22+. The `window/` module is optional — the core engine has zero CGO dependencies.
 
