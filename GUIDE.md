@@ -372,6 +372,41 @@ img.Stretch = widget.ImageStretchFill     // растянуть (по умолч
               widget.ImageStretchNone     // оригинальный размер
 ```
 
+### PopupMenu
+
+Контекстное / всплывающее меню. Рисуется как overlay поверх всего UI.
+
+```go
+menu := widget.NewPopupMenu()
+menu.AddItem("Копировать", func() { /* ... */ })
+menu.AddItem("Вставить", func() { /* ... */ })
+menu.AddSeparator()
+menu.AddItem("Удалить", func() { /* ... */ })
+
+menu.OnSelect = func(idx int, text string) {
+    log.Printf("Выбрано: %s", text)
+}
+
+menu.Show(x, y)          // показать в координатах
+menu.ShowBelow(button)    // показать под виджетом
+menu.ShowRight(widget)    // показать справа от виджета
+menu.Close()              // закрыть
+```
+
+XAML:
+
+```xml
+<PopupMenu Name="ctxMenu">
+    <MenuItem Text="Копировать"/>
+    <MenuItem Text="Вставить"/>
+    <MenuItem Separator="True"/>
+    <MenuItem Text="Отключено" Disabled="True"/>
+    <MenuItem Text="Удалить"/>
+</PopupMenu>
+```
+
+Меню закрывается по клику за пределами или по Escape. Навигация стрелками и Enter.
+
 ### Separator
 
 В XAML: `<Separator Width="400" Height="1" Background="#FF0000"/>`.
@@ -484,6 +519,7 @@ root Canvas (0,0)
 | `ScrollViewer` | ScrollView | `ContentHeight`, `Background` |
 | `ListView`, `ListBox` | ListView | `Items`, `SelectedIndex`, `ItemHeight`, дочерние `<ListViewItem>` |
 | `Image` | Image | `Source`, `Stretch` (Fill/Uniform/None) |
+| `PopupMenu`, `ContextMenu` | PopupMenu | дочерние `<MenuItem Text="..." Separator="True" Disabled="True"/>` |
 | `Separator`, `Line`, `Rectangle` | Separator | `Background` |
 
 Общие атрибуты: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`.

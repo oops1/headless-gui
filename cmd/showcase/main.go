@@ -127,6 +127,26 @@ func main() {
 		}
 	}
 
+	// ─── PopupMenu ──────────────────────────────────────────────────────────
+	if pm, ok := reg["ctxMenu"].(*widget.PopupMenu); ok {
+		pm.OnSelect = func(idx int, text string) {
+			addLog("PopupMenu: «%s» (idx=%d)", text, idx)
+		}
+
+		if b := btn("btnShowPopup"); b != nil {
+			b.OnClick = func() {
+				pm.ShowBelow(b)
+				addLog("PopupMenu открыто (ShowBelow)")
+			}
+		}
+		if b := btn("btnShowPopup2"); b != nil {
+			b.OnClick = func() {
+				pm.ShowRight(b)
+				addLog("PopupMenu открыто (ShowRight)")
+			}
+		}
+	}
+
 	// ─── TAB 2: Элементы управления ──────────────────────────────────────────
 
 	// CheckBox

@@ -267,6 +267,10 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	case "separator", "line", "rectangle":
 		w = buildXAMLSeparator(el)
 
+	// ── PopupMenu ────────────────────────────────────────────────────────────
+	case "popupmenu", "contextmenu":
+		return buildXAMLPopupMenu(el, reg, parentOff)
+
 	default:
 		return nil, fmt.Errorf("xaml: неизвестный элемент <%s>", el.Tag)
 	}
@@ -948,6 +952,50 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 	}
 
 	return tc, nil
+}
+
+// ─── PopupMenu ──────────────────────────────────────────────────────────────
+
+func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Point) (Widget, error) {
+	pm := NewPopupMenu()
+	absBounds := el.bounds().Add(parentOff)
+	pm.SetBounds(absBounds)
+
+	if id := el.name(); id != "" {
+		reg[id] = pm
+	}
+
+	// Парсим дочерние <MenuItem> элементы.
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+		if childTag != "menuitem" && childTag != "item" {
+			continue
+		}
+
+		sep := strings.EqualFold(child.attr("Separator"), "True")
+		if sep {
+			pm.AddSeparator()
+			continue
+		}
+
+		text := child.attr("Header", "Text", "Content")
+		if text == "" {
+			text = child.Text
+		}
+
+		disabled := strings.EqualFold(child.attr("IsEnabled"), "False") ||
+			strings.EqualFold(child.attr("Disabled"), "True")
+
+		item := MenuItem{
+			Text:     text,
+			Disabled: disabled,
+		}
+		pm.mu.Lock()
+		pm.items = append(pm.items, item)
+		pm.mu.Unlock()
+	}
+
+	return pm, nil
 }
 
 // ─── Парсинг цветов ──────────────────────────────────────────────────────────

@@ -372,6 +372,41 @@ img.Stretch = widget.ImageStretchFill     // stretch to fill (default)
               widget.ImageStretchNone     // original size
 ```
 
+### PopupMenu
+
+Context / popup menu. Renders as an overlay on top of the entire UI.
+
+```go
+menu := widget.NewPopupMenu()
+menu.AddItem("Copy", func() { /* ... */ })
+menu.AddItem("Paste", func() { /* ... */ })
+menu.AddSeparator()
+menu.AddItem("Delete", func() { /* ... */ })
+
+menu.OnSelect = func(idx int, text string) {
+    log.Printf("Selected: %s", text)
+}
+
+menu.Show(x, y)          // show at coordinates
+menu.ShowBelow(button)    // show below a widget
+menu.ShowRight(widget)    // show to the right of a widget
+menu.Close()              // close
+```
+
+XAML:
+
+```xml
+<PopupMenu Name="ctxMenu">
+    <MenuItem Text="Copy"/>
+    <MenuItem Text="Paste"/>
+    <MenuItem Separator="True"/>
+    <MenuItem Text="Disabled item" Disabled="True"/>
+    <MenuItem Text="Delete"/>
+</PopupMenu>
+```
+
+Closes on click outside or Escape. Arrow keys and Enter for keyboard navigation.
+
 ### Separator
 
 In XAML: `<Separator Width="400" Height="1" Background="#FF0000"/>`.
@@ -484,6 +519,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `ScrollViewer` | ScrollView | `ContentHeight`, `Background` |
 | `ListView`, `ListBox` | ListView | `Items`, `SelectedIndex`, `ItemHeight`, child `<ListViewItem>` |
 | `Image` | Image | `Source`, `Stretch` (Fill/Uniform/None) |
+| `PopupMenu`, `ContextMenu` | PopupMenu | child `<MenuItem Text="..." Separator="True" Disabled="True"/>` |
 | `Separator`, `Line`, `Rectangle` | Separator | `Background` |
 
 Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`.
