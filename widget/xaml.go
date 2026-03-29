@@ -271,6 +271,10 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	case "popupmenu", "contextmenu":
 		return buildXAMLPopupMenu(el, reg, parentOff)
 
+	// ── MenuBar (горизонтальное меню) ────────────────────────────────────────
+	case "menu", "menubar", "mainmenu":
+		return buildXAMLMenuBar(el, reg, parentOff)
+
 	default:
 		return nil, fmt.Errorf("xaml: неизвестный элемент <%s>", el.Tag)
 	}
@@ -952,6 +956,63 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 	}
 
 	return tc, nil
+}
+
+// ─── MenuBar ────────────────────────────────────────────────────────────────
+
+func buildXAMLMenuBar(el xElement, reg map[string]Widget, parentOff image.Point) (Widget, error) {
+	mb := NewMenuBar()
+	absBounds := el.bounds().Add(parentOff)
+	mb.SetBounds(absBounds)
+
+	if id := el.name(); id != "" {
+		reg[id] = mb
+	}
+
+	// Парсим верхнеуровневые <MenuItem Header="..."> с вложенными подпунктами.
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+		if childTag != "menuitem" && childTag != "item" {
+			continue
+		}
+
+		header := child.attr("Header", "Text", "Content")
+		if header == "" {
+			header = child.Text
+		}
+
+		// Собираем подпункты (вложенные MenuItem).
+		var subItems []MenuItem
+		for _, sub := range child.Children {
+			subTag := strings.ToLower(sub.Tag)
+			if subTag != "menuitem" && subTag != "item" {
+				continue
+			}
+
+			sep := strings.EqualFold(sub.attr("Separator"), "True")
+			if sep {
+				subItems = append(subItems, MenuItem{Separator: true})
+				continue
+			}
+
+			text := sub.attr("Header", "Text", "Content")
+			if text == "" {
+				text = sub.Text
+			}
+
+			disabled := strings.EqualFold(sub.attr("IsEnabled"), "False") ||
+				strings.EqualFold(sub.attr("Disabled"), "True")
+
+			subItems = append(subItems, MenuItem{
+				Text:     text,
+				Disabled: disabled,
+			})
+		}
+
+		mb.AddMenu(header, subItems...)
+	}
+
+	return mb, nil
 }
 
 // ─── PopupMenu ──────────────────────────────────────────────────────────────
