@@ -27,8 +27,8 @@ headless-gui/
 import (
     "image"
     "image/color"
-    "github.com/oops1/headless-gui/engine"
-    "github.com/oops1/headless-gui/widget"
+    "github.com/oops1/headless-gui/v3/engine"
+    "github.com/oops1/headless-gui/v3/widget"
 )
 
 eng := engine.New(1920, 1080, 30)   // ширина, высота, FPS
@@ -573,7 +573,7 @@ root Canvas (0,0)
 Отдельный модуль на базе Ebiten v2. На Windows — DirectX 11 без CGO.
 
 ```go
-import "github.com/oops1/headless-gui/window"
+import "github.com/oops1/headless-gui/v3/window"
 
 eng := engine.New(1280, 720, 30)
 // ... строим UI, eng.Start() ...
@@ -648,31 +648,31 @@ ctx.ClearClip()
 ## Структура модулей
 
 ```
-go.mod:  module github.com/oops1/headless-gui
+go.mod:  module github.com/oops1/headless-gui/v3
   require golang.org/x/image
 
-go.mod:  module github.com/oops1/headless-gui/window
-  require github.com/oops1/headless-gui => ../
+go.mod:  module github.com/oops1/headless-gui/v3/window
+  require github.com/oops1/headless-gui/v3 => ../
   require github.com/hajimehoshi/ebiten/v2
 ```
 
 Приложение-потребитель подключает основной модуль:
 
 ```
-require github.com/oops1/headless-gui v0.x.x
+require github.com/oops1/headless-gui/v3 v0.x.x
 ```
 
 Если нужно нативное окно:
 
 ```
-require github.com/oops1/headless-gui/window v0.x.x
+require github.com/oops1/headless-gui/v3/window v0.x.x
 ```
 
 Для локальной разработки используйте `replace`:
 
 ```
-replace github.com/oops1/headless-gui => ../GuiEngine
-replace github.com/oops1/headless-gui/window => ../GuiEngine/window
+replace github.com/oops1/headless-gui/v3 => ../GuiEngine
+replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
 ```
 
 ---
