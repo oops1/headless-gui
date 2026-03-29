@@ -198,10 +198,14 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	var w Widget
 
 	switch tag {
+	// ── Grid ────────────────────────────────────────────────────────────────
+	case "grid":
+		return buildXAMLGrid(el, reg, parentOff, baseDir)
+
 	// ── Контейнеры ──────────────────────────────────────────────────────────
 	// window / usercontrol — корневые элементы WPF/Blend; трактуем как Canvas.
 	case "window", "usercontrol",
-		"panel", "canvas", "grid", "stackpanel", "border", "dockpanel", "viewbox":
+		"panel", "canvas", "stackpanel", "border", "dockpanel", "viewbox":
 		w = buildXAMLPanel(el, baseDir)
 
 	// ── Текст ────────────────────────────────────────────────────────────────
@@ -272,6 +276,9 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	absBounds := el.bounds().Add(parentOff)
 	w.SetBounds(absBounds)
 
+	// Grid attached properties: Grid.Row, Grid.Column, Grid.RowSpan, Grid.ColumnSpan.
+	applyGridAttachedProps(w, el)
+
 	// Регистрация по имени
 	if id := el.name(); id != "" {
 		reg[id] = w
@@ -310,6 +317,170 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	}
 
 	return w, nil
+}
+
+// ─── Grid attached properties ───────────────────────────────────────────────
+
+// applyGridAttachedProps читает Grid.Row, Grid.Column и т.д. из XAML-атрибутов
+// и устанавливает их в Base виджета.
+func applyGridAttachedProps(w Widget, el xElement) {
+	type gridSetter interface {
+		GetGridRow() int // наличие этого метода означает, что Base встроен
+	}
+	// Все наши виджеты встраивают Base, поэтому можно писать напрямую.
+	// Используем рефлексию через интерфейс не нужно — у нас есть конкретный тип.
+	// Простой подход: пишем через указатель на Base.
+	type baseAccessor interface {
+		Widget
+		GetGridRow() int
+	}
+	if _, ok := w.(baseAccessor); !ok {
+		return
+	}
+
+	row := xatoi(el.attr("Grid.Row"))
+	col := xatoi(el.attr("Grid.Column"))
+	rowSpan := xatoi(el.attr("Grid.RowSpan"))
+	colSpan := xatoi(el.attr("Grid.ColumnSpan"))
+
+	// Нужно добраться до Base. Используем сеттер-интерфейс.
+	type gridPropsSetter interface {
+		SetGridProps(row, col, rowSpan, colSpan int)
+	}
+	if gs, ok := w.(gridPropsSetter); ok {
+		gs.SetGridProps(row, col, rowSpan, colSpan)
+	}
+}
+
+// ─── buildXAMLGrid ─────────────────────────────────────────────────────────
+
+// buildXAMLGrid создаёт Grid из XAML-элемента, парсит RowDefinitions/ColumnDefinitions,
+// создаёт потомков и вызывает layout.
+func buildXAMLGrid(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	g := NewGrid()
+
+	// Фон
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+		if strings.EqualFold(bgStr, "transparent") {
+			g.UseAlpha = true
+		} else if c, err := parseXAMLColor(bgStr); err == nil {
+			g.Background = c
+			g.UseAlpha = c.A < 255
+		}
+	} else {
+		g.UseAlpha = true
+	}
+
+	// ShowGridLines
+	if strings.EqualFold(el.attr("ShowGridLines"), "true") {
+		g.ShowGridLines = true
+	}
+
+	// Парсим Grid.RowDefinitions и Grid.ColumnDefinitions (property elements).
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+		switch childTag {
+		case "grid.rowdefinitions":
+			for _, rd := range child.Children {
+				if strings.ToLower(rd.Tag) == "rowdefinition" {
+					g.RowDefs = append(g.RowDefs, parseGridDef(rd, "Height"))
+				}
+			}
+		case "grid.columndefinitions":
+			for _, cd := range child.Children {
+				if strings.ToLower(cd.Tag) == "columndefinition" {
+					g.ColDefs = append(g.ColDefs, parseGridDef(cd, "Width"))
+				}
+			}
+		}
+	}
+
+	// Bounds
+	absBounds := el.bounds().Add(parentOff)
+	g.SetBounds(absBounds) // вызовет layout() — но дети ещё не добавлены
+
+	// Регистрация по имени
+	if id := el.name(); id != "" {
+		reg[id] = g
+	}
+
+	// Дочерние виджеты.
+	// Для Grid НЕ используем childOff — Grid сам расставляет потомков через layout.
+	// Передаём parentOff = image.Point{} (нулевой), т.к. координаты потомков
+	// будут заданы Grid.layout() по ячейкам. Но если у потомка есть Left/Top,
+	// они будут смещением внутри ячейки (не используем для Grid-потомков).
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+
+		// Пропускаем property elements
+		if strings.Contains(childTag, ".") {
+			continue
+		}
+		// Пропускаем Item-подобные теги
+		if childTag == "item" || childTag == "comboboxitem" || childTag == "listboxitem" {
+			continue
+		}
+
+		// Для дочерних виджетов Grid передаём parentOff=0, т.к. Grid.layout()
+		// сам задаст bounds через SetBounds.
+		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			g.AddChild(cw)
+		}
+	}
+
+	// Перезапускаем layout с добавленными потомками.
+	g.layout()
+
+	return g, nil
+}
+
+// parseGridDef парсит <RowDefinition Height="..."/> или <ColumnDefinition Width="..."/>.
+//
+// Форматы значений:
+//
+//	"Auto"       → GridSizeAuto
+//	"*"          → GridSizeStar, Value=1
+//	"2*"         → GridSizeStar, Value=2
+//	"100"        → GridSizePixel, Value=100
+func parseGridDef(el xElement, sizeAttr string) GridDefinition {
+	raw := strings.TrimSpace(el.attr(sizeAttr))
+	d := GridDefinition{Mode: GridSizeStar, Value: 1} // default = 1*
+
+	if raw == "" || raw == "*" {
+		// default star
+	} else if strings.EqualFold(raw, "auto") {
+		d.Mode = GridSizeAuto
+		d.Value = 0
+	} else if strings.HasSuffix(raw, "*") {
+		d.Mode = GridSizeStar
+		numStr := strings.TrimSuffix(raw, "*")
+		if numStr == "" {
+			d.Value = 1
+		} else {
+			v, _ := strconv.ParseFloat(numStr, 64)
+			if v <= 0 {
+				v = 1
+			}
+			d.Value = v
+		}
+	} else {
+		// Pixel
+		v, _ := strconv.ParseFloat(raw, 64)
+		if v > 0 {
+			d.Mode = GridSizePixel
+			d.Value = v
+		}
+	}
+
+	// Min/Max
+	d.Min = xatoi(el.attr("MinHeight", "MinWidth"))
+	d.Max = xatoi(el.attr("MaxHeight", "MaxWidth"))
+
+	return d
 }
 
 // ─── Построители конкретных виджетов ────────────────────────────────────────
