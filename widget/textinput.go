@@ -58,7 +58,14 @@ type TextInput struct {
 	PaddingX int
 	PaddingY int
 
-	// OnEnter вызывается при нажатии Enter.
+	FontName string // именованный шрифт (RegisterFont); "" → default
+	FontSize float64 // размер шрифта в pt (0 → DefaultFontSizePt)
+
+	// AcceptsReturn: true — многострочный режим (WPF AcceptsReturn="True").
+	// Enter вставляет перевод строки вместо вызова OnEnter.
+	AcceptsReturn bool
+
+	// OnEnter вызывается при нажатии Enter (только если AcceptsReturn=false).
 	OnEnter func()
 	// OnChange вызывается при каждом изменении текста.
 	OnChange func(text string)
@@ -282,7 +289,15 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 		}
 
 	case KeyEnter:
-		if t.OnEnter != nil {
+		if t.AcceptsReturn {
+			// Многострочный режим: вставляем перевод строки
+			t.deleteSel()
+			t.runes = append(t.runes, 0) // расширяем
+			copy(t.runes[t.caretPos+1:], t.runes[t.caretPos:])
+			t.runes[t.caretPos] = '\n'
+			t.caretPos++
+			changed = true
+		} else if t.OnEnter != nil {
 			go t.OnEnter()
 		}
 

@@ -231,6 +231,12 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	case "gridsplitter":
 		w = buildXAMLSeparator(el)
 
+	// ── ToolBarTray / ToolBar → горизонтальный StackPanel (WPF ToolBar) ────
+	case "toolbartray":
+		return buildXAMLToolBarTray(el, reg, parentOff, baseDir)
+	case "toolbar":
+		return buildXAMLToolBar(el, reg, parentOff, baseDir)
+
 	// ── StatusBar → StackPanel (горизонтальный) ────────────────────────────
 	case "statusbar":
 		return buildXAMLStatusBar(el, reg, parentOff, baseDir)
@@ -243,9 +249,13 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	case "border":
 		return buildXAMLBorder(el, reg, parentOff, baseDir)
 
+	// ── Canvas — контейнер с абсолютным позиционированием (WPF Canvas) ──────
+	case "canvas":
+		return buildXAMLCanvas(el, reg, parentOff, baseDir)
+
 	// ── Контейнеры ──────────────────────────────────────────────────────────
 	case "usercontrol",
-		"panel", "canvas", "viewbox":
+		"panel", "viewbox":
 		w = buildXAMLPanel(el, baseDir)
 
 	// ── Текст ────────────────────────────────────────────────────────────────
@@ -324,10 +334,11 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	absBounds := el.bounds().Add(parentOff)
 	w.SetBounds(absBounds)
 
-	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin
+	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin, Alignment
 	applyGridAttachedProps(w, el)
 	applyDockAttachedProp(w, el)
 	applyMargin(w, el)
+	applyAlignment(w, el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
@@ -760,6 +771,153 @@ func buildXAMLPanel(el xElement, baseDir string) Widget {
 	return p
 }
 
+// ─── Canvas builder ─────────────────────────────────────────────────────────
+
+// buildXAMLCanvas строит Canvas виджет из XAML-элемента.
+// Canvas размещает дочерние виджеты по абсолютным координатам (Canvas.Left, Canvas.Top, и т.д.).
+// Это полноценный аналог WPF Canvas, в отличие от Panel — Canvas сам управляет layout.
+func buildXAMLCanvas(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	cv := NewCanvas()
+
+	// Background
+	if bgStr := el.attr("Background", "Fill", "Color"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			cv.Background = c
+			cv.UseAlpha = c.A < 255
+		}
+	}
+
+	// ClipToBounds (WPF default = false)
+	if clip := el.attr("ClipToBounds"); clip != "" {
+		cv.ClipToBounds = strings.EqualFold(clip, "true") || clip == "1"
+	}
+
+	// Bounds Canvas — абсолютные координаты
+	absBounds := el.bounds().Add(parentOff)
+	cv.SetBounds(absBounds)
+
+	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin
+	applyGridAttachedProps(cv, el)
+	applyDockAttachedProp(cv, el)
+	applyMargin(cv, el)
+
+	// Регистрация по имени
+	if id := el.name(); id != "" {
+		reg[id] = cv
+	}
+
+	// ── Дочерние виджеты ────────────────────────────────────────────────────
+	// Canvas передаёт image.Point{} как parentOff для дочерних виджетов,
+	// потому что Canvas сам управляет позиционированием через attached properties.
+	// el.bounds() внутри buildXAMLWidget уже читает Canvas.Left/Top как Left/Top,
+	// что приводит к двойному учёту позиции. Поэтому parentOff=0 и десятка
+	// полагается на Width/Height для desiredSize, а позицию задаёт Canvas layout.
+	zeroOff := image.Point{}
+
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+
+		// Пропускаем WPF property elements, но обрабатываем их потомков
+		if strings.Contains(childTag, ".") {
+			for _, inner := range child.Children {
+				if err := addCanvasChild(cv, inner, reg, zeroOff, baseDir); err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+
+		if err := addCanvasChild(cv, child, reg, zeroOff, baseDir); err != nil {
+			return nil, err
+		}
+	}
+
+	return cv, nil
+}
+
+// addCanvasChild строит дочерний виджет и добавляет его в Canvas с учётом
+// Canvas.Left / Canvas.Top / Canvas.Right / Canvas.Bottom attached properties.
+//
+// Важно: дочерний виджет строится с parentOff=image.Point{} (нулевое смещение),
+// потому что Canvas сам управляет позиционированием. buildXAMLWidget прибавит
+// атрибуты Left/Top к parentOff, но нам нужно только Width/Height.
+func addCanvasChild(cv *Canvas, child xElement, reg map[string]Widget, canvasOff image.Point, baseDir string) error {
+	// ── Извлекаем Canvas attached properties ────────────────────────────────
+	props := CanvasAttached{
+		Left:   xatoiOrNeg1(child.attr("Canvas.Left")),
+		Top:    xatoiOrNeg1(child.attr("Canvas.Top")),
+		Right:  xatoiOrNeg1(child.attr("Canvas.Right")),
+		Bottom: xatoiOrNeg1(child.attr("Canvas.Bottom")),
+	}
+
+	// Если Canvas.Left/Top не указаны, пробуем Left/Top/X/Y (упрощённый синтаксис)
+	if props.Left < 0 {
+		if v := child.attr("Left", "X"); v != "" {
+			props.Left = xatoi(v)
+		}
+	}
+	if props.Top < 0 {
+		if v := child.attr("Top", "Y"); v != "" {
+			props.Top = xatoi(v)
+		}
+	}
+	if props.Right < 0 {
+		if v := child.attr("Right"); v != "" {
+			props.Right = xatoi(v)
+		}
+	}
+	if props.Bottom < 0 {
+		if v := child.attr("Bottom"); v != "" {
+			props.Bottom = xatoi(v)
+		}
+	}
+
+	// ── Желаемый размер из XAML атрибутов ───────────────────────────────────
+	desiredW := xatoi(child.attr("Width"))
+	desiredH := xatoi(child.attr("Height"))
+
+	// ── Строим дочерний виджет ──────────────────────────────────────────────
+	// Передаём canvasOff как parentOff — buildXAMLWidget использует его
+	// для абсолютных координат. Это нужно чтобы вложенные контейнеры
+	// (Canvas внутри Canvas, Grid внутри Canvas) получили правильный offset.
+	// Для leaf-виджетов buildXAMLWidget вычислит bounds через el.bounds().Add(parentOff),
+	// но Canvas потом переопределит позицию через layout.
+	cw, err := buildXAMLWidget(child, reg, canvasOff, baseDir)
+	if err != nil {
+		return err
+	}
+	if cw == nil {
+		return nil
+	}
+
+	// Если Width/Height не были заданы явно в XAML, попробуем взять
+	// из bounds, которые buildXAMLWidget мог установить
+	if desiredW <= 0 {
+		desiredW = cw.Bounds().Dx()
+	}
+	if desiredH <= 0 {
+		desiredH = cw.Bounds().Dy()
+	}
+
+	// Сбрасываем bounds — Canvas сам расставит через layout
+	cw.SetBounds(image.Rect(0, 0, desiredW, desiredH))
+
+	cv.AddChildAt(cw, props, desiredW, desiredH)
+	return nil
+}
+
+// xatoiOrNeg1 парсит строку как int; при пустой строке или ошибке возвращает -1.
+func xatoiOrNeg1(s string) int {
+	if s == "" {
+		return -1
+	}
+	v := xatoi(s)
+	if v == 0 && s != "0" {
+		return -1
+	}
+	return v
+}
+
 // loadImageFile загружает PNG или JPEG файл и возвращает *image.RGBA.
 func loadImageFile(path string) (*image.RGBA, error) {
 	f, err := os.Open(path)
@@ -845,6 +1003,30 @@ func buildXAMLLabel(el xElement) Widget {
 		}
 	}
 
+	// FontFamily — именованный шрифт (зарегистрированный через RegisterFont)
+	if ff := el.attr("FontFamily"); ff != "" {
+		lbl.FontName = ff
+	}
+
+	// Padding — внутренний отступ (WPF Thickness).
+	// Поддерживает: "N" (все стороны), "H,V" (горизонтальный, вертикальный), "L,T,R,B".
+	if pad := el.attr("Padding"); pad != "" {
+		parts := strings.Split(pad, ",")
+		switch len(parts) {
+		case 1:
+			v := xatoi(strings.TrimSpace(parts[0]))
+			lbl.PaddingX = v
+			lbl.PaddingY = v
+		case 2:
+			lbl.PaddingX = xatoi(strings.TrimSpace(parts[0]))
+			lbl.PaddingY = xatoi(strings.TrimSpace(parts[1]))
+		case 4:
+			lbl.PaddingX = xatoi(strings.TrimSpace(parts[0])) // Left
+			lbl.PaddingY = xatoi(strings.TrimSpace(parts[1])) // Top
+			// Right и Bottom игнорируются (Label использует симметричные PaddingX/Y)
+		}
+	}
+
 	return lbl
 }
 
@@ -918,6 +1100,36 @@ func buildXAMLTextInput(el xElement, isPassword bool) Widget {
 			ti.TextColor = c
 		}
 	}
+
+	// Background
+	if bgStr := el.attr("Background"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			ti.Background = c
+		}
+	}
+
+	// FontFamily — именованный шрифт
+	if ff := el.attr("FontFamily"); ff != "" {
+		ti.FontName = ff
+	}
+
+	// FontSize
+	if fs := el.attr("FontSize"); fs != "" {
+		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
+			ti.FontSize = v
+		}
+	}
+
+	// AcceptsReturn — многострочный режим (WPF TextBox.AcceptsReturn)
+	if strings.EqualFold(el.attr("AcceptsReturn"), "true") {
+		ti.AcceptsReturn = true
+	}
+
+	// TextWrapping — в WPF влияет на перенос строк в TextBox (здесь как индикатор multiline)
+	if wrap := strings.ToLower(el.attr("TextWrapping")); wrap == "wrap" || wrap == "wrapwithoverflow" {
+		ti.AcceptsReturn = true // WPF: Wrap на TextBox подразумевает многострочность
+	}
+
 	return ti
 }
 
@@ -1326,6 +1538,42 @@ func applyMargin(w Widget, el xElement) {
 	}
 }
 
+// applyAlignment читает HorizontalAlignment и VerticalAlignment из XAML-атрибутов.
+func applyAlignment(w Widget, el xElement) {
+	type alignSetter interface {
+		SetHAlign(a HorizontalAlignment)
+		SetVAlign(a VerticalAlignment)
+	}
+	as, ok := w.(alignSetter)
+	if !ok {
+		return
+	}
+	if ha := el.attr("HorizontalAlignment"); ha != "" {
+		switch strings.ToLower(ha) {
+		case "left":
+			as.SetHAlign(HAlignLeft)
+		case "center":
+			as.SetHAlign(HAlignCenter)
+		case "right":
+			as.SetHAlign(HAlignRight)
+		case "stretch":
+			as.SetHAlign(HAlignStretch)
+		}
+	}
+	if va := el.attr("VerticalAlignment"); va != "" {
+		switch strings.ToLower(va) {
+		case "top":
+			as.SetVAlign(VAlignTop)
+		case "center":
+			as.SetVAlign(VAlignCenter)
+		case "bottom":
+			as.SetVAlign(VAlignBottom)
+		case "stretch":
+			as.SetVAlign(VAlignStretch)
+		}
+	}
+}
+
 // ─── DockPanel.Dock attached property ───────────────────────────────────────
 
 // applyDockAttachedProp читает DockPanel.Dock из XAML-атрибутов и устанавливает в Base.
@@ -1484,6 +1732,121 @@ func buildXAMLStatusBar(el xElement, reg map[string]Widget, parentOff image.Poin
 	}
 
 	// Дочерние виджеты (parentOff=0 — StackPanel.layout() сам расставит)
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+		if strings.Contains(childTag, ".") {
+			continue
+		}
+		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			sp.AddChild(cw)
+		}
+	}
+
+	return sp, nil
+}
+
+// ─── buildXAMLToolBarTray ───────────────────────────────────────────────────
+
+// buildXAMLToolBarTray строит ToolBarTray из XAML-элемента <ToolBarTray>.
+//
+// WPF ToolBarTray — контейнер для одного или нескольких ToolBar.
+// Реализуется как горизонтальный StackPanel, в который вкладываются
+// дочерние ToolBar (каждый тоже горизонтальный StackPanel с кнопками).
+//
+// Поддерживаемые WPF-совместимые атрибуты:
+//
+//	Background — цвет фона (#RRGGBB / имя)
+//	Orientation — Horizontal (default) | Vertical
+func buildXAMLToolBarTray(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	sp := NewStackPanel(OrientationHorizontal)
+	sp.Spacing = 0
+	sp.Padding = 0
+
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			sp.Background = c
+			sp.UseAlpha = c.A < 255
+		}
+	} else {
+		sp.UseAlpha = true
+	}
+
+	// Bounds
+	absBounds := el.bounds().Add(parentOff)
+	sp.SetBounds(absBounds)
+
+	// Attached properties
+	applyGridAttachedProps(sp, el)
+	applyDockAttachedProp(sp, el)
+	applyMargin(sp, el)
+
+	if id := el.name(); id != "" {
+		reg[id] = sp
+	}
+
+	// Дочерние элементы (ToolBar-ы и другие)
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+		if strings.Contains(childTag, ".") {
+			continue
+		}
+		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			sp.AddChild(cw)
+		}
+	}
+
+	return sp, nil
+}
+
+// ─── buildXAMLToolBar ──────────────────────────────────────────────────────
+
+// buildXAMLToolBar строит ToolBar из XAML-элемента <ToolBar>.
+//
+// WPF ToolBar — горизонтальная панель с кнопками, разделителями и другими элементами.
+// Реализуется как горизонтальный StackPanel с небольшим spacing.
+// Separator внутри ToolBar рендерится как вертикальная линия-разделитель.
+//
+// Поддерживаемые WPF-совместимые атрибуты:
+//
+//	Background — цвет фона
+//	Band       — номер полосы (игнорируется, layout упрощён)
+//	BandIndex  — позиция в полосе (игнорируется)
+func buildXAMLToolBar(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	sp := NewStackPanel(OrientationHorizontal)
+	sp.Spacing = 2
+	sp.Padding = 4
+
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			sp.Background = c
+			sp.UseAlpha = c.A < 255
+		}
+	} else {
+		// Прозрачный фон по умолчанию — ToolBar наследует фон от ToolBarTray
+		sp.UseAlpha = true
+	}
+
+	// Bounds
+	absBounds := el.bounds().Add(parentOff)
+	sp.SetBounds(absBounds)
+
+	applyGridAttachedProps(sp, el)
+	applyDockAttachedProp(sp, el)
+	applyMargin(sp, el)
+
+	if id := el.name(); id != "" {
+		reg[id] = sp
+	}
+
+	// Дочерние виджеты: кнопки, разделители, и т.д.
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
 		if strings.Contains(childTag, ".") {

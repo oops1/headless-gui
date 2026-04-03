@@ -2,6 +2,26 @@ package widget
 
 import "image"
 
+// HorizontalAlignment — WPF HorizontalAlignment (позиционирование внутри родителя).
+type HorizontalAlignment int
+
+const (
+	HAlignStretch HorizontalAlignment = iota // растянуть (default)
+	HAlignLeft                               // прижать к левому краю
+	HAlignCenter                             // по центру
+	HAlignRight                              // прижать к правому краю
+)
+
+// VerticalAlignment — WPF VerticalAlignment (позиционирование внутри родителя).
+type VerticalAlignment int
+
+const (
+	VAlignStretch VerticalAlignment = iota // растянуть (default)
+	VAlignTop                              // прижать к верхнему краю
+	VAlignCenter                           // по центру
+	VAlignBottom                           // прижать к нижнему краю
+)
+
 // DockSide определяет сторону прикрепления в DockPanel (WPF DockPanel.Dock).
 type DockSide int
 
@@ -35,6 +55,11 @@ type Base struct {
 
 	// Margin — внешние отступы (WPF Margin).
 	WidgetMargin Margin
+
+	// HorizontalAlignment — WPF HorizontalAlignment (Left, Center, Right, Stretch).
+	HAlign HorizontalAlignment
+	// VerticalAlignment — WPF VerticalAlignment (Top, Center, Bottom, Stretch).
+	VAlign VerticalAlignment
 }
 
 func (b *Base) Bounds() image.Rectangle     { return b.bounds }
@@ -75,6 +100,74 @@ func (b *Base) SetDock(d DockSide)   { b.Dock = d }
 
 func (b *Base) GetMargin() Margin      { return b.WidgetMargin }
 func (b *Base) SetMargin(m Margin)     { b.WidgetMargin = m }
+
+// ── Alignment ───────────────────────────────────────────────────────────────
+
+func (b *Base) GetHAlign() HorizontalAlignment { return b.HAlign }
+func (b *Base) SetHAlign(a HorizontalAlignment) { b.HAlign = a }
+func (b *Base) GetVAlign() VerticalAlignment   { return b.VAlign }
+func (b *Base) SetVAlign(a VerticalAlignment)  { b.VAlign = a }
+
+// applyAlignmentRect корректирует прямоугольник r на основе
+// HorizontalAlignment / VerticalAlignment виджета и его текущего размера.
+// Если alignment = Stretch — возвращает r без изменений.
+// Если alignment = Left/Center/Right — использует текущий Dx() виджета как ширину.
+func applyAlignmentRect(w Widget, r image.Rectangle) image.Rectangle {
+	type alignGetter interface {
+		GetHAlign() HorizontalAlignment
+		GetVAlign() VerticalAlignment
+	}
+	ag, ok := w.(alignGetter)
+	if !ok {
+		return r
+	}
+
+	ha := ag.GetHAlign()
+	va := ag.GetVAlign()
+
+	// Текущий размер виджета (из XAML Width/Height)
+	wb := w.Bounds()
+	ww := wb.Dx()
+	wh := wb.Dy()
+
+	// Горизонтальное выравнивание
+	switch ha {
+	case HAlignLeft:
+		if ww > 0 && ww < r.Dx() {
+			r.Max.X = r.Min.X + ww
+		}
+	case HAlignCenter:
+		if ww > 0 && ww < r.Dx() {
+			cx := r.Min.X + (r.Dx()-ww)/2
+			r.Min.X = cx
+			r.Max.X = cx + ww
+		}
+	case HAlignRight:
+		if ww > 0 && ww < r.Dx() {
+			r.Min.X = r.Max.X - ww
+		}
+	}
+
+	// Вертикальное выравнивание
+	switch va {
+	case VAlignTop:
+		if wh > 0 && wh < r.Dy() {
+			r.Max.Y = r.Min.Y + wh
+		}
+	case VAlignCenter:
+		if wh > 0 && wh < r.Dy() {
+			cy := r.Min.Y + (r.Dy()-wh)/2
+			r.Min.Y = cy
+			r.Max.Y = cy + wh
+		}
+	case VAlignBottom:
+		if wh > 0 && wh < r.Dy() {
+			r.Min.Y = r.Max.Y - wh
+		}
+	}
+
+	return r
+}
 
 // drawChildren рендерит всех потомков в тот же контекст.
 // Вызывается конкретными виджетами в конце своего Draw.
