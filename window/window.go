@@ -1,7 +1,9 @@
 // Package window предоставляет нативное OS-окно для GUI-движка headless-gui.
 //
-// Использует Ebiten v2 — на Windows рендеринг через DirectX 11 (без CGO),
-// на Linux/macOS — через OpenGL.
+// Использует собственные нативные бэкенды:
+//   - Windows: Win32 API (user32/gdi32), чистый Go без CGO
+//   - Linux:   X11 протокол напрямую через Unix socket, без CGO
+//   - macOS:   Cocoa через purego (Objective-C runtime), без CGO
 //
 // Использование:
 //
@@ -21,9 +23,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/inpututil"
-
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -33,12 +32,13 @@ import (
 type EngineAPI interface {
 	Frames() <-chan output.Frame
 	CanvasSize() (w, h int)
+	Root() widget.Widget
 	SendMouseMove(x, y int)
 	SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	SendKeyEvent(e widget.KeyEvent)
 }
 
-// Window — нативное окно на базе Ebiten v2.
+// Window — нативное окно ОС для GUI-движка.
 //
 // Жизненный цикл:
 //
@@ -51,25 +51,26 @@ type Window struct {
 	title string
 	w, h  int
 
+	native NativeWindow
+
 	// Текущий полный кадр (накапливаем dirty-тайлы).
 	mu      sync.Mutex
 	current *image.RGBA
 
-	// Ebiten-текстура для отрисовки.
-	ebitenImg *ebiten.Image
-
-	// Флаг: есть ли обновлённые данные для Draw.
-	hasUpdate atomic.Bool
+	// Флаг: запрошено закрытие окна (кнопка ×).
+	closeRequested atomic.Bool
 
 	// Настройки окна.
 	maxFPS    int
 	resizable bool
 
-	// Предыдущее состояние ввода (для edge-detection).
-	prevMX, prevMY int
-	prevLMB        bool
-	prevRMB        bool
-	prevMMB        bool
+	// Состояние модификаторов (обновляется в onKeyDown/onKeyUp).
+	modShift   atomic.Bool
+	modCtrl    atomic.Bool
+	modAlt     atomic.Bool
+
+	// Предыдущие координаты мыши (для drag).
+	lastMX, lastMY int
 }
 
 // New создаёт окно для заданного движка с указанным заголовком.
@@ -98,132 +99,277 @@ func (win *Window) SetResizable(v bool) *Window {
 	return win
 }
 
-// Run открывает окно и запускает цикл событий Ebiten.
+// Run открывает нативное окно и запускает цикл событий.
 // Блокирует вызывающую горутину до закрытия окна.
 // ВАЖНО: вызывать из главной горутины (main).
 func (win *Window) Run() error {
-	ebiten.SetWindowSize(win.w, win.h)
-	ebiten.SetWindowTitle(win.title)
-	ebiten.SetTPS(win.maxFPS)
+	win.native = NewNativeWindow()
 
-	if win.resizable {
-		ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-	} else {
-		ebiten.SetWindowResizingMode(ebiten.WindowResizingModeDisabled)
+	// Если корень — widget.Window, синхронизируем параметры:
+	// нативное окно получает размер, заголовок и resizable из XAML,
+	// а widget.Window получает bounds = (0,0)-(w,h) нативного окна.
+	win.syncFromWidgetWindow()
+
+	// Создаём окно с актуальными размерами
+	if err := win.native.Create(win.title, win.w, win.h); err != nil {
+		return err
 	}
 
-	return ebiten.RunGame(win)
+	// Подключаем виджет-окно (drag, close, minimize, maximize)
+	win.setupWidgetWindow()
+
+	// Подключаем callbacks ввода
+	win.setupInputCallbacks()
+
+	// Запускаем горутину чтения кадров из движка
+	go win.framePump()
+
+	// Блокирующий цикл событий (возврат = окно закрыто)
+	return win.native.RunEventLoop()
 }
 
-// ─── ebiten.Game ─────────────────────────────────────────────────────────────
+// syncFromWidgetWindow считывает параметры из widget.Window (XAML <Window>)
+// и синхронизирует их с нативным окном.
+// Вызывается до Create() — чтобы нативное окно создалось с правильными размерами.
+func (win *Window) syncFromWidgetWindow() {
+	root := win.eng.Root()
+	if root == nil {
+		return
+	}
+	ww, ok := root.(*widget.Window)
+	if !ok {
+		return
+	}
 
-// Update вызывается Ebiten каждый тик (обработка ввода + получение кадров).
-func (win *Window) Update() error {
-	// ── Читаем все готовые кадры из движка (non-blocking) ──────────────────
-	frames := win.eng.Frames()
-	for {
-		select {
-		case frame, ok := <-frames:
-			if !ok {
-				// Канал закрыт — движок остановлен.
-				return ebiten.Termination
-			}
-			win.applyFrame(frame)
-			win.hasUpdate.Store(true)
-		default:
-			goto doneFrames
+	// ── Заголовок из XAML (если не задан вручную через New) ──────────────
+	if ww.Title != "" && ww.Title != "Caption" {
+		win.title = ww.Title
+	}
+
+	// ── Размер из XAML <Window Width="..." Height="..."> ────────────────
+	b := ww.Bounds()
+	if b.Dx() > 0 && b.Dy() > 0 {
+		win.w = b.Dx()
+		win.h = b.Dy()
+	}
+
+	// ── Обновляем canvas движка под размер widget.Window ─────────────────
+	if rs, ok := win.eng.(interface{ SetResolution(w, h int) }); ok {
+		rs.SetResolution(win.w, win.h)
+	}
+
+	// ── Пересоздаём буфер ───────────────────────────────────────────────
+	win.mu.Lock()
+	win.current = image.NewRGBA(image.Rect(0, 0, win.w, win.h))
+	win.mu.Unlock()
+
+	// ── widget.Window bounds = полная область нативного окна (0,0)-(w,h)
+	// Это ключевой момент: виджет должен занимать всё окно.
+	ww.SetBounds(image.Rect(0, 0, win.w, win.h))
+
+	// ── ResizeMode → resizable ──────────────────────────────────────────
+	switch ww.Resize {
+	case widget.ResizeModeCanResize:
+		win.resizable = true
+	case widget.ResizeModeNoResize:
+		win.resizable = false
+	case widget.ResizeModeCanMinimize:
+		win.resizable = false
+	}
+}
+
+// setupWidgetWindow подключает drag/close/minimize/maximize
+// если корневой виджет — widget.Window.
+func (win *Window) setupWidgetWindow() {
+	root := win.eng.Root()
+	if root == nil {
+		return
+	}
+	ww, ok := root.(*widget.Window)
+	if !ok {
+		return
+	}
+
+	// Drag за заголовок → перемещение нативного окна.
+	ww.OnDragMove = func(dx, dy int) {
+		x, y := win.native.GetPosition()
+		win.native.SetPosition(x+dx, y+dy)
+	}
+
+	// Кнопка × → закрытие.
+	if ww.OnClose == nil {
+		ww.OnClose = func() {
+			win.closeRequested.Store(true)
+			win.native.Close()
 		}
 	}
-doneFrames:
 
-	// ── Мышь: движение ─────────────────────────────────────────────────────
-	mx, my := ebiten.CursorPosition()
-	if mx != win.prevMX || my != win.prevMY {
-		win.eng.SendMouseMove(mx, my)
-		win.prevMX, win.prevMY = mx, my
-	}
-
-	// ── Мышь: кнопки ───────────────────────────────────────────────────────
-	lmb := ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft)
-	if lmb != win.prevLMB {
-		win.eng.SendMouseButton(mx, my, widget.MouseLeft, lmb)
-		win.prevLMB = lmb
-	}
-	rmb := ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight)
-	if rmb != win.prevRMB {
-		win.eng.SendMouseButton(mx, my, widget.MouseRight, rmb)
-		win.prevRMB = rmb
-	}
-	mmb := ebiten.IsMouseButtonPressed(ebiten.MouseButtonMiddle)
-	if mmb != win.prevMMB {
-		win.eng.SendMouseButton(mx, my, widget.MouseMiddle, mmb)
-		win.prevMMB = mmb
+	// Кнопка ─ → свернуть.
+	if ww.OnMinimize == nil {
+		ww.OnMinimize = func() {
+			win.native.Minimize()
+		}
 	}
 
-	// ── Клавиатура: навигационные клавиши (just-pressed) ───────────────────
-	mod := currentModifiers()
-	for _, key := range inpututil.AppendJustPressedKeys(nil) {
-		code := ebitenKeyCode(key)
+	// Кнопка □ → развернуть / восстановить.
+	if ww.OnMaximize == nil {
+		ww.OnMaximize = func() {
+			if win.native.IsMaximized() {
+				win.native.Restore()
+			} else {
+				win.native.Maximize()
+			}
+		}
+	}
+}
+
+// setupInputCallbacks подключает callback'и ввода от нативного окна к движку.
+func (win *Window) setupInputCallbacks() {
+	// ── Resize ───────────────────────────────────────────────────────────────
+	win.native.SetOnResize(func(newW, newH int) {
+		if newW <= 0 || newH <= 0 {
+			return
+		}
+		win.w = newW
+		win.h = newH
+
+		// Пересоздаём буфер
+		win.mu.Lock()
+		win.current = image.NewRGBA(image.Rect(0, 0, newW, newH))
+		win.mu.Unlock()
+
+		// Обновляем размер canvas движка
+		if rs, ok := win.eng.(interface{ SetResolution(w, h int) }); ok {
+			rs.SetResolution(newW, newH)
+		}
+
+		// Обновляем bounds корневого виджета (widget.Window заполняет всё окно)
+		if root := win.eng.Root(); root != nil {
+			root.SetBounds(image.Rect(0, 0, newW, newH))
+		}
+	})
+
+	// ── Close ────────────────────────────────────────────────────────────────
+	win.native.SetOnClose(func() bool {
+		win.closeRequested.Store(true)
+		return true // разрешаем закрытие
+	})
+
+	// ── Mouse move ───────────────────────────────────────────────────────────
+	win.native.SetOnMouseMove(func(x, y int) {
+		win.lastMX = x
+		win.lastMY = y
+		win.eng.SendMouseMove(x, y)
+	})
+
+	// ── Mouse buttons ────────────────────────────────────────────────────────
+	win.native.SetOnMouseButton(func(x, y, button int, pressed bool) {
+		win.lastMX = x
+		win.lastMY = y
+
+		var btn widget.MouseButton
+		switch button {
+		case 0:
+			btn = widget.MouseLeft
+		case 1:
+			btn = widget.MouseRight
+		case 2:
+			btn = widget.MouseMiddle
+		default:
+			return
+		}
+		win.eng.SendMouseButton(x, y, btn, pressed)
+	})
+
+	// ── Key down ─────────────────────────────────────────────────────────────
+	win.native.SetOnKeyDown(func(vk int) {
+		// Обновляем модификаторы
+		switch vk {
+		case VK_SHIFT:
+			win.modShift.Store(true)
+		case VK_CONTROL:
+			win.modCtrl.Store(true)
+		case VK_ALT:
+			win.modAlt.Store(true)
+		}
+
+		code := vkToKeyCode(vk)
 		if code != widget.KeyUnknown {
 			win.eng.SendKeyEvent(widget.KeyEvent{
 				Code:    code,
 				Rune:    0,
-				Mod:     mod,
+				Mod:     win.currentMod(),
 				Pressed: true,
 			})
 		}
-	}
-	for _, key := range inpututil.AppendJustReleasedKeys(nil) {
-		code := ebitenKeyCode(key)
+	})
+
+	// ── Key up ───────────────────────────────────────────────────────────────
+	win.native.SetOnKeyUp(func(vk int) {
+		// Обновляем модификаторы
+		switch vk {
+		case VK_SHIFT:
+			win.modShift.Store(false)
+		case VK_CONTROL:
+			win.modCtrl.Store(false)
+		case VK_ALT:
+			win.modAlt.Store(false)
+		}
+
+		code := vkToKeyCode(vk)
 		if code != widget.KeyUnknown {
 			win.eng.SendKeyEvent(widget.KeyEvent{
 				Code:    code,
 				Rune:    0,
-				Mod:     mod,
+				Mod:     win.currentMod(),
 				Pressed: false,
 			})
 		}
-	}
+	})
 
-	// ── Клавиатура: ввод символов (Unicode, учитывает раскладку) ──────────
-	// AppendInputChars даёт реальные символы с учётом Shift, CapsLock, IME.
-	for _, r := range ebiten.AppendInputChars(nil) {
+	// ── Char (Unicode символ) ────────────────────────────────────────────────
+	win.native.SetOnChar(func(r rune) {
 		if r >= 32 {
 			win.eng.SendKeyEvent(widget.KeyEvent{
 				Code:    widget.KeyUnknown,
 				Rune:    r,
-				Mod:     mod,
+				Mod:     win.currentMod(),
 				Pressed: true,
 			})
 		}
-	}
-
-	return nil
+	})
 }
 
-// Draw вызывается Ebiten для отрисовки кадра на экране.
-func (win *Window) Draw(screen *ebiten.Image) {
-	if !win.hasUpdate.Swap(false) && win.ebitenImg != nil {
-		// Нет новых данных — рисуем предыдущий кадр.
-		screen.DrawImage(win.ebitenImg, nil)
-		return
-	}
+// framePump читает кадры из движка и отправляет на отрисовку.
+// Запускается в отдельной горутине.
+func (win *Window) framePump() {
+	frames := win.eng.Frames()
+	for frame := range frames {
+		win.applyFrame(frame)
 
-	win.mu.Lock()
-	pix := make([]byte, len(win.current.Pix))
-	copy(pix, win.current.Pix)
-	win.mu.Unlock()
+		// Отправляем текущий буфер на отрисовку
+		win.mu.Lock()
+		snap := image.NewRGBA(win.current.Bounds())
+		copy(snap.Pix, win.current.Pix)
+		win.mu.Unlock()
 
-	if win.ebitenImg == nil {
-		win.ebitenImg = ebiten.NewImage(win.w, win.h)
+		win.native.BlitRGBA(snap)
 	}
-	win.ebitenImg.WritePixels(pix)
-	screen.DrawImage(win.ebitenImg, nil)
 }
 
-// Layout возвращает логический размер холста.
-func (win *Window) Layout(outsideW, outsideH int) (int, int) {
-	return win.w, win.h
+// currentMod возвращает текущие модификаторы клавиатуры.
+func (win *Window) currentMod() widget.KeyMod {
+	var mod widget.KeyMod
+	if win.modCtrl.Load() {
+		mod |= widget.ModCtrl
+	}
+	if win.modShift.Load() {
+		mod |= widget.ModShift
+	}
+	if win.modAlt.Load() {
+		mod |= widget.ModAlt
+	}
+	return mod
 }
 
 // ─── Внутренние методы ───────────────────────────────────────────────────────
@@ -236,72 +382,62 @@ func (win *Window) applyFrame(frame output.Frame) {
 		rowBytes := tile.W * 4
 		for row := 0; row < tile.H; row++ {
 			srcOff := row * rowBytes
-			dstOff := win.current.PixOffset(tile.X, tile.Y+row)
-			copy(win.current.Pix[dstOff:dstOff+rowBytes], tile.Data[srcOff:srcOff+rowBytes])
+			dstY := tile.Y + row
+			if dstY >= win.current.Bounds().Dy() {
+				break
+			}
+			dstOff := win.current.PixOffset(tile.X, dstY)
+			dstEnd := dstOff + rowBytes
+			if dstEnd > len(win.current.Pix) {
+				break
+			}
+			copy(win.current.Pix[dstOff:dstEnd], tile.Data[srcOff:srcOff+rowBytes])
 		}
 	}
 }
 
-// ─── Маппинг ввода ───────────────────────────────────────────────────────────
+// ─── Маппинг VK → widget.KeyCode ────────────────────────────────────────────
 
-// ebitenKeyCode переводит ebiten.Key в widget.KeyCode.
-// Возвращает KeyUnknown для печатаемых символов — они обрабатываются через AppendInputChars.
-func ebitenKeyCode(k ebiten.Key) widget.KeyCode {
-	switch k {
-	case ebiten.KeyBackspace:
+// vkToKeyCode переводит VK_* код в widget.KeyCode.
+// VK_* константы специально совпадают с widget.KeyCode, поэтому маппинг прямой.
+func vkToKeyCode(vk int) widget.KeyCode {
+	switch vk {
+	case VK_BACKSPACE:
 		return widget.KeyBackspace
-	case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
-		return widget.KeyEnter
-	case ebiten.KeyEscape:
-		return widget.KeyEscape
-	case ebiten.KeyTab:
+	case VK_TAB:
 		return widget.KeyTab
-	case ebiten.KeySpace:
+	case VK_ENTER:
+		return widget.KeyEnter
+	case VK_ESCAPE:
+		return widget.KeyEscape
+	case VK_SPACE:
 		return widget.KeySpace
-	case ebiten.KeyArrowLeft:
+	case VK_LEFT:
 		return widget.KeyLeft
-	case ebiten.KeyArrowRight:
-		return widget.KeyRight
-	case ebiten.KeyArrowUp:
+	case VK_UP:
 		return widget.KeyUp
-	case ebiten.KeyArrowDown:
+	case VK_RIGHT:
+		return widget.KeyRight
+	case VK_DOWN:
 		return widget.KeyDown
-	case ebiten.KeyHome:
-		return widget.KeyHome
-	case ebiten.KeyEnd:
-		return widget.KeyEnd
-	case ebiten.KeyDelete:
+	case VK_DELETE:
 		return widget.KeyDelete
-
-	// Ctrl-комбинации (A, C, V, X, Z) — отправляем как KeyCode.
-	// Движок проверяет Mod&ModCtrl чтобы не путать с обычным вводом.
-	case ebiten.KeyA:
+	case VK_HOME:
+		return widget.KeyHome
+	case VK_END:
+		return widget.KeyEnd
+	case VK_A:
 		return widget.KeyA
-	case ebiten.KeyC:
+	case VK_C:
 		return widget.KeyC
-	case ebiten.KeyV:
+	case VK_V:
 		return widget.KeyV
-	case ebiten.KeyX:
+	case VK_X:
 		return widget.KeyX
-	case ebiten.KeyZ:
+	case VK_Z:
 		return widget.KeyZ
 	}
 	return widget.KeyUnknown
-}
-
-// currentModifiers возвращает текущие модификаторы клавиатуры.
-func currentModifiers() widget.KeyMod {
-	var mod widget.KeyMod
-	if ebiten.IsKeyPressed(ebiten.KeyControl) || ebiten.IsKeyPressed(ebiten.KeyControlLeft) || ebiten.IsKeyPressed(ebiten.KeyControlRight) {
-		mod |= widget.ModCtrl
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyShift) || ebiten.IsKeyPressed(ebiten.KeyShiftLeft) || ebiten.IsKeyPressed(ebiten.KeyShiftRight) {
-		mod |= widget.ModShift
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyAlt) || ebiten.IsKeyPressed(ebiten.KeyAltLeft) || ebiten.IsKeyPressed(ebiten.KeyAltRight) {
-		mod |= widget.ModAlt
-	}
-	return mod
 }
 
 // ─── Утилиты ─────────────────────────────────────────────────────────────────
@@ -313,4 +449,9 @@ func (win *Window) FullFrameSnapshot() *image.RGBA {
 	snap := image.NewRGBA(win.current.Bounds())
 	stdraw.Draw(snap, snap.Bounds(), win.current, image.Point{}, stdraw.Src)
 	return snap
+}
+
+// Native возвращает нативное окно для прямого доступа (опционально).
+func (win *Window) Native() NativeWindow {
+	return win.native
 }

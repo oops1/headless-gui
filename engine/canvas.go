@@ -87,13 +87,23 @@ func (c *Canvas) setBackground(src image.Image) {
 	c.bgImage = dst
 }
 
-// blitBackground копирует сохранённый фон в back-буфер.
+// blitBackground очищает back-буфер и копирует фон (если задан).
 // Вызывается до отрисовки виджетов — перезаписывает весь back.
+// Если фонового изображения нет — заливает буфер чёрным цветом,
+// чтобы при перемещении виджетов старые пиксели не оставались.
 func (c *Canvas) blitBackground() {
-	if c.bgImage == nil {
-		return
+	if c.bgImage != nil {
+		copy(c.back.Pix, c.bgImage.Pix)
+	} else {
+		// Очищаем буфер чёрным (RGBA = 0,0,0,255)
+		pix := c.back.Pix
+		for i := 0; i < len(pix); i += 4 {
+			pix[i+0] = 0   // R
+			pix[i+1] = 0   // G
+			pix[i+2] = 0   // B
+			pix[i+3] = 255 // A
+		}
 	}
-	copy(c.back.Pix, c.bgImage.Pix)
 }
 
 // ─── Clip ───────────────────────────────────────────────────────────────────

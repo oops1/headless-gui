@@ -216,6 +216,20 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 		}
 	}
 
+	// Сначала проверяем: есть ли виджет с активным overlay под курсором.
+	if overlayW := findOverlayAt(dispatchRoot, x, y); overlayW != nil {
+		if pressed && btn == widget.MouseLeft {
+			if _, ok := overlayW.(widget.Focusable); ok {
+				e.focus.set(overlayW)
+			}
+		}
+		if mc, ok := overlayW.(widget.MouseClickHandler); ok {
+			if mc.OnMouseButton(ev) {
+				return
+			}
+		}
+	}
+
 	// Получаем путь от корня до самого глубокого виджета под курсором
 	path := hitTestPath(dispatchRoot, x, y)
 	if len(path) == 0 {
@@ -322,6 +336,31 @@ func findCapturer(w widget.Widget, x, y int, ev widget.MouseEvent) widget.Widget
 			return w
 		}
 	}
+	return nil
+}
+
+// findOverlayAt ищет виджет с активным overlay (popup/dropdown/menu),
+// чьи расширенные bounds (включая overlay) содержат точку (x, y).
+// Overlay имеет приоритет над обычным Z-порядком дерева виджетов.
+// Возвращает nil, если ни один overlay не содержит точку.
+func findOverlayAt(w widget.Widget, x, y int) widget.Widget {
+	pt := image.Pt(x, y)
+
+	// Проверяем детей в обратном Z-порядке (верхние первыми).
+	children := w.Children()
+	for i := len(children) - 1; i >= 0; i-- {
+		if found := findOverlayAt(children[i], x, y); found != nil {
+			return found
+		}
+	}
+
+	// Проверяем сам виджет: есть ли активный overlay и попадает ли точка в него.
+	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
+		if pt.In(w.Bounds()) {
+			return w
+		}
+	}
+
 	return nil
 }
 

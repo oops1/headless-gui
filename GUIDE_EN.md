@@ -9,11 +9,12 @@ headless-gui/
   engine/              render loop, canvas, events, fonts
   widget/              widgets, themes, XAML loader, Grid layout
   output/              Frame / DirtyTile types
-  window/              native Ebiten v2 window (separate go.mod)
+  window/              native window Win32/Cocoa/X11 (separate go.mod, CGO-free)
   cmd/
     showcase/          full widget showcase (all widgets + live animation)
     guiview/           interactive demo with modal windows
     griddemo/          Grid layout demo
+    smartgit/          SmartGit-like UI (Window + Menu + TreeView + DataGrid)
   assets/ui/           XAML layouts (demo.xaml, grid_demo.xaml, showcase.xaml)
   gui/                 XAML files for RDP UI (login, block, error dialogs)
   tests/               unit tests
@@ -100,6 +101,40 @@ Every widget embeds `widget.Base`, which implements `SetBounds`, `AddChild`, `Ch
 w.SetBounds(image.Rect(x, y, x+w, y+h))  // required before first frame
 parent.AddChild(child)
 ```
+
+### Window
+
+Root element for native OS window. Replaces Canvas/Panel as root when working with native window.
+
+```go
+// XAML loading (recommended)
+root, reg, _ := widget.LoadUIFromXAMLFile("ui/app.xaml")
+eng.SetRoot(root)
+
+// Programmatically
+ww := widget.NewWindow()
+ww.Title = "My Application"
+ww.TitleStyle = widget.WindowTitleWin  // or WindowTitleMac
+ww.Resize = widget.ResizeModeCanResize
+```
+
+In XAML:
+
+```xml
+<Window Title="Application" Width="1100" Height="700"
+        TitleStyle="Win" ResizeMode="CanResize" Background="#1E1E1E">
+    <DockPanel>
+        <Menu DockPanel.Dock="Top">...</Menu>
+        <Grid>...</Grid>
+    </DockPanel>
+</Window>
+```
+
+Title bar styles:
+- `WindowTitleWin` — Windows: text on left, buttons ─ □ × on right
+- `WindowTitleMac` — macOS: traffic lights ● ● ● on left, centered text
+
+Resize modes: `CanResize`, `NoResize`, `CanMinimize`.
 
 ### Panel
 
@@ -446,7 +481,22 @@ XAML:
 </Menu>
 ```
 
-Navigation: Left/Right switches sections, Up/Down/Enter for sub-items, Escape to close.
+Cascading submenus (nested MenuItem):
+
+```xml
+<Menu Name="mainMenu">
+    <MenuItem Header="Settings">
+        <MenuItem Header="Theme">
+            <MenuItem Header="Dark"/>
+            <MenuItem Header="Light"/>
+        </MenuItem>
+    </MenuItem>
+</Menu>
+```
+
+Items with nested submenus display an arrow ▸ on the right. On hover, the child menu opens.
+
+Navigation: Left/Right switches sections, Up/Down/Enter for sub-items, Right to enter cascading submenu, Left to exit, Escape to close.
 
 ### Separator
 
@@ -506,6 +556,20 @@ eng.SetTheme(t)
 ```
 
 `SetTheme` applies colors to all existing widgets via `ApplyTheme(t)` and updates global defaults for newly created widgets.
+
+The theme contains 80+ color tokens, grouped by widget:
+
+- Window/panels: `WindowBG`, `PanelBG`, `TitleBG`, `TitleText`, `Border`, `ShadowColor`
+- Buttons: `BtnBG`, `BtnHoverBG`, `BtnPressedBG`, `BtnText`, `BtnBorder`
+- Text inputs: `InputBG`, `InputText`, `InputFocus`, `InputCaret`, `InputPlaceholder`
+- Dropdown/PopupMenu: `DropBG`, `DropText`, `DropBorder`
+- TreeView: `TreeText`, `TreeArrow`
+- ListView/ScrollView: `ListItemHover`, `ListItemSelect`, `ScrollTrackBG`, `ScrollThumbBG`
+- Dialog: `DialogBG`, `DialogTitleBG`, `DialogDim`
+- GridSplitter: `SplitterBG`, `SplitterHoverBG`
+- StatusBar: `StatusBarBG`, `StatusBarText`
+- DataGrid header: `HeaderBG`, `HeaderText`
+- System: `Accent`, `Disabled`, `Scrollbar`
 
 ---
 
@@ -568,9 +632,9 @@ Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `W
 
 ---
 
-## Native Window (window)
+## Native Window (window) — Win32 / Cocoa / X11
 
-Separate module based on Ebiten v2. On Windows — DirectX 11, no CGO required.
+Separate module with platform-native backends. CGO-free on all platforms (Windows: Win32 API, macOS: Cocoa via purego, Linux: X11 protocol).
 
 ```go
 import "github.com/oops1/headless-gui/v3/window"
@@ -653,7 +717,7 @@ go.mod:  module github.com/oops1/headless-gui/v3
 
 go.mod:  module github.com/oops1/headless-gui/v3/window
   require github.com/oops1/headless-gui/v3 => ../
-  require github.com/hajimehoshi/ebiten/v2
+  require github.com/ebitengine/purego, golang.org/x/sys
 ```
 
 Consumer application imports the main module:
@@ -679,15 +743,14 @@ replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
 
 ## Demo Applications
 
-Run from the `window/` directory (where the Ebiten go.mod is located):
+Run from the root `GuiEngine` directory:
 
 ```bash
-cd GuiEngine/window
-
-go run ../cmd/showcase    # all widgets + live animation
-go run ../cmd/guiview     # interactive demo with modal XAML windows
-go run ../cmd/griddemo    # Grid layout
+go run ./cmd/showcase    # all widgets + live animation
+go run ./cmd/guiview     # interactive demo with modal XAML windows
+go run ./cmd/griddemo    # Grid layout
+go run ./cmd/smartgit    # SmartGit-like UI
 
 # Windows binary without console
-go build -ldflags="-H windowsgui" -o showcase.exe ../cmd/showcase
+go build -ldflags="-H windowsgui" -o showcase.exe ./cmd/showcase
 ```
