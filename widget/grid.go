@@ -129,7 +129,8 @@ func (g *Grid) layout() {
 			y1 -= m.Bottom
 		}
 
-		child.SetBounds(image.Rect(x0, y0, x1, y1))
+		cellRect := image.Rect(x0, y0, x1, y1)
+		child.SetBounds(applyAlignmentRect(child, cellRect))
 	}
 }
 
