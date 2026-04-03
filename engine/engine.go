@@ -100,6 +100,13 @@ func injectCaptureManager(w widget.Widget, cm widget.CaptureManager) {
 	}
 }
 
+// Root возвращает текущий корневой виджет (или nil).
+func (e *Engine) Root() widget.Widget {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.root
+}
+
 // Frames возвращает канал только для чтения.
 // Каждый кадр в канале содержит только изменившиеся тайлы.
 // Канал закрывается после Stop().

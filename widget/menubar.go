@@ -370,3 +370,17 @@ func (mb *MenuBar) Dismiss() {
 
 func (mb *MenuBar) SetFocused(v bool) {}
 func (mb *MenuBar) IsFocused() bool   { return atomic.LoadInt32(&mb.activeIdx) >= 0 }
+
+// ─── Themeable ──────────────────────────────────────────────────────────────
+
+// ApplyTheme обновляет цвета MenuBar и вложенного PopupMenu из темы.
+func (mb *MenuBar) ApplyTheme(t *Theme) {
+	mb.Background = t.PanelBG
+	mb.TextColor = t.TitleText
+	mb.HoverBG = t.ListItemHover
+	mb.ActiveBG = t.DropBG
+	mb.BorderColor = t.Border
+	if mb.popup != nil {
+		mb.popup.ApplyTheme(t)
+	}
+}

@@ -2,6 +2,22 @@ package widget
 
 import "image"
 
+// DockSide определяет сторону прикрепления в DockPanel (WPF DockPanel.Dock).
+type DockSide int
+
+const (
+	DockTop    DockSide = iota // по умолчанию
+	DockBottom
+	DockLeft
+	DockRight
+	DockFill // последний элемент заполняет оставшееся пространство
+)
+
+// Margin — отступы виджета (WPF Thickness: Left, Top, Right, Bottom).
+type Margin struct {
+	Left, Top, Right, Bottom int
+}
+
 // Base — общие поля и тривиальные реализации интерфейса Widget.
 // Встраивается во все конкретные виджеты.
 type Base struct {
@@ -13,6 +29,12 @@ type Base struct {
 	GridColumn  int // Grid.Column  (0-based)
 	GridRowSpan int // Grid.RowSpan (по умолчанию 1)
 	GridColSpan int // Grid.ColumnSpan (по умолчанию 1)
+
+	// DockPanel attached property.
+	Dock DockSide
+
+	// Margin — внешние отступы (WPF Margin).
+	WidgetMargin Margin
 }
 
 func (b *Base) Bounds() image.Rectangle     { return b.bounds }
@@ -43,6 +65,16 @@ func (b *Base) GetGridColSpan() int {
 	}
 	return b.GridColSpan
 }
+
+// ── DockPanel attached property ─────────────────────────────────────────────
+
+func (b *Base) GetDock() DockSide    { return b.Dock }
+func (b *Base) SetDock(d DockSide)   { b.Dock = d }
+
+// ── Margin ──────────────────────────────────────────────────────────────────
+
+func (b *Base) GetMargin() Margin      { return b.WidgetMargin }
+func (b *Base) SetMargin(m Margin)     { b.WidgetMargin = m }
 
 // drawChildren рендерит всех потомков в тот же контекст.
 // Вызывается конкретными виджетами в конце своего Draw.

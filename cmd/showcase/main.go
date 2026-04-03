@@ -32,7 +32,7 @@ func main() {
 	eng := engine.New(screenW, screenH, 30)
 
 	// ─── Загрузка UI из XAML ────────────────────────────────────────────────
-	root, reg, err := widget.LoadUIFromXAMLFile("../assets/ui/showcase.xaml")
+	root, reg, err := widget.LoadUIFromXAMLFile("./assets/ui/showcase.xaml")
 	if err != nil {
 		log.Fatalf("ошибка загрузки showcase.xaml: %v", err)
 	}
