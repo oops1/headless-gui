@@ -78,10 +78,11 @@ func (dp *DockPanel) layout() {
 
 		// Последний элемент заполняет оставшееся пространство
 		if isLast {
-			child.SetBounds(image.Rect(
+			r := image.Rect(
 				remaining.Min.X+m.Left, remaining.Min.Y+m.Top,
 				remaining.Max.X-m.Right, remaining.Max.Y-m.Bottom,
-			))
+			)
+			child.SetBounds(applyAlignmentRect(child, r))
 			break
 		}
 

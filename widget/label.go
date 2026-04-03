@@ -19,8 +19,9 @@ type Label struct {
 	HasBG      bool
 	Background color.RGBA
 
-	WrapText bool // true — переносить текст по словам в пределах bounds
-	FontSize float64
+	WrapText bool    // true — переносить текст по словам в пределах bounds
+	FontSize float64 // размер шрифта в pt (0 → DefaultFontSizePt)
+	FontName string  // именованный шрифт (зарегистрированный через RegisterFont); "" → default
 
 	PaddingX int
 	PaddingY int
@@ -76,21 +77,65 @@ func (l *Label) Draw(ctx DrawContext) {
 	}
 
 	if !l.WrapText {
-		ctx.DrawTextSize(text, b.Min.X+l.PaddingX, b.Min.Y+l.PaddingY, fontSize, l.TextColor)
+		if l.FontName != "" {
+			ctx.DrawTextFont(text, b.Min.X+l.PaddingX, b.Min.Y+l.PaddingY, fontSize, l.FontName, l.TextColor)
+		} else {
+			ctx.DrawTextSize(text, b.Min.X+l.PaddingX, b.Min.Y+l.PaddingY, fontSize, l.TextColor)
+		}
 	} else {
 		maxW := b.Dx() - l.PaddingX*2
-		lines := wrapTextPixel(ctx, text, fontSize, maxW)
+		lines := wrapTextPixelFont(ctx, text, fontSize, l.FontName, maxW)
 		lineH := int(fontSize*1.5 + 0.5) // межстрочный интервал
 		y := b.Min.Y + l.PaddingY
 		for _, line := range lines {
 			if y+lineH > b.Max.Y {
 				break // не вылезаем за границы
 			}
-			ctx.DrawTextSize(line, b.Min.X+l.PaddingX, y, fontSize, l.TextColor)
+			if l.FontName != "" {
+				ctx.DrawTextFont(line, b.Min.X+l.PaddingX, y, fontSize, l.FontName, l.TextColor)
+			} else {
+				ctx.DrawTextSize(line, b.Min.X+l.PaddingX, y, fontSize, l.TextColor)
+			}
 			y += lineH
 		}
 	}
 	l.drawChildren(ctx)
+}
+
+// wrapTextPixelFont разбивает text на строки с именованным шрифтом.
+func wrapTextPixelFont(ctx DrawContext, text string, sizePt float64, fontName string, maxW int) []string {
+	if fontName == "" {
+		return wrapTextPixel(ctx, text, sizePt, maxW)
+	}
+	if maxW <= 0 {
+		return []string{text}
+	}
+	var result []string
+	for _, paragraph := range strings.Split(text, "\n") {
+		words := splitWords(paragraph)
+		if len(words) == 0 {
+			result = append(result, "")
+			continue
+		}
+		var line string
+		for _, word := range words {
+			candidate := line
+			if candidate != "" {
+				candidate += " "
+			}
+			candidate += word
+			if ctx.MeasureTextFont(candidate, sizePt, fontName) > maxW && line != "" {
+				result = append(result, line)
+				line = word
+			} else {
+				line = candidate
+			}
+		}
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+	return result
 }
 
 // wrapTextPixel разбивает text на строки, чтобы каждая влезала в maxW пикселей.
