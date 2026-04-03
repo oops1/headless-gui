@@ -202,10 +202,50 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	case "grid":
 		return buildXAMLGrid(el, reg, parentOff, baseDir)
 
+	// ── Window — корневой элемент нативного окна ────────────────────────────
+	case "window":
+		return buildXAMLWindow(el, reg, parentOff, baseDir)
+
+	// ── StackPanel — контейнер с автораскладкой ─────────────────────────────
+	case "stackpanel":
+		return buildXAMLStackPanel(el, reg, parentOff, baseDir)
+
+	// ── TreeView — иерархический список ─────────────────────────────────────
+	case "treeview":
+		return buildXAMLTreeView(el, reg, parentOff)
+
+	// ── TreeViewItem вне TreeView — игнорируем ──────────────────────────────
+	case "treeviewitem":
+		return nil, nil
+
+	// ── DataGrid column definitions — игнорируем вне DataGrid ───────────────
+	case "datagridtextcolumn", "datagridtemplatecolumn",
+		"datagridcheckboxcolumn", "datagridcomboboxcolumn":
+		return nil, nil
+
+	// ── DockPanel — контейнер с dock-layout ────────────────────────────────
+	case "dockpanel":
+		return buildXAMLDockPanel(el, reg, parentOff, baseDir)
+
+	// ── GridSplitter → Separator (визуальный разделитель) ───────────────────
+	case "gridsplitter":
+		w = buildXAMLSeparator(el)
+
+	// ── StatusBar → StackPanel (горизонтальный) ────────────────────────────
+	case "statusbar":
+		return buildXAMLStatusBar(el, reg, parentOff, baseDir)
+
+	// ── DataGrid → ListView (приближение) ──────────────────────────────────
+	case "datagrid":
+		w = buildXAMLListViewFromDataGrid(el)
+
+	// ── Border — контейнер с фоном и одним потомком ─────────────────────────
+	case "border":
+		return buildXAMLBorder(el, reg, parentOff, baseDir)
+
 	// ── Контейнеры ──────────────────────────────────────────────────────────
-	// window / usercontrol — корневые элементы WPF/Blend; трактуем как Canvas.
-	case "window", "usercontrol",
-		"panel", "canvas", "stackpanel", "border", "dockpanel", "viewbox":
+	case "usercontrol",
+		"panel", "canvas", "viewbox":
 		w = buildXAMLPanel(el, baseDir)
 
 	// ── Текст ────────────────────────────────────────────────────────────────
@@ -284,8 +324,10 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	absBounds := el.bounds().Add(parentOff)
 	w.SetBounds(absBounds)
 
-	// Grid attached properties: Grid.Row, Grid.Column, Grid.RowSpan, Grid.ColumnSpan.
+	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin
 	applyGridAttachedProps(w, el)
+	applyDockAttachedProp(w, el)
+	applyMargin(w, el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
@@ -407,6 +449,11 @@ func buildXAMLGrid(el xElement, reg map[string]Widget, parentOff image.Point, ba
 	absBounds := el.bounds().Add(parentOff)
 	g.SetBounds(absBounds) // вызовет layout() — но дети ещё не добавлены
 
+	// Attached properties — важно для вложенных Grid'ов внутри родительского Grid.
+	applyGridAttachedProps(g, el)
+	applyDockAttachedProp(g, el)
+	applyMargin(g, el)
+
 	// Регистрация по имени
 	if id := el.name(); id != "" {
 		reg[id] = g
@@ -492,6 +539,152 @@ func parseGridDef(el xElement, sizeAttr string) GridDefinition {
 }
 
 // ─── Построители конкретных виджетов ────────────────────────────────────────
+
+// buildXAMLWindow строит виджет Window из XAML-элемента <Window>.
+//
+// Window — корневой элемент нативного окна. Не является контейнером-рабочим столом
+// (в отличие от Canvas/Panel). Создаёт одно независимое окно приложения
+// с собственным chrome (заголовок, рамка, кнопки управления).
+//
+// Поддерживаемые WPF-совместимые атрибуты:
+//
+//	Title            — заголовок окна
+//	WindowStyle      — SingleBorderWindow | None | ToolWindow
+//	TitleStyle       — Win | Mac  (расширение; WPF не имеет)
+//	ResizeMode       — CanResize | NoResize | CanMinimize
+//	Background       — цвет фона клиентской области (#RRGGBB / #RRGGBBAA)
+//	BorderBrush      — цвет рамки
+//	CornerRadius     — радиус скругления
+//	TitleBarHeight   — высота заголовка (0 = авто)
+//	TitleBackground  — цвет фона заголовка
+//	TitleForeground  — цвет текста заголовка
+//
+// Дочерние виджеты размещаются в клиентской области (ContentBounds).
+func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	b := el.bounds()
+	if b.Empty() {
+		b = image.Rect(0, 0, 800, 600) // default
+	}
+	win := NewWindow(el.attr("Title", "Caption"), b.Dx(), b.Dy())
+
+	// WindowStyle: SingleBorderWindow (default) | None | ToolWindow
+	switch strings.ToLower(el.attr("WindowStyle")) {
+	case "none":
+		win.Style = WindowStyleNone
+	case "toolwindow":
+		win.Style = WindowStyleToolWindow
+	default:
+		win.Style = WindowStyleSingleBorder
+	}
+
+	// TitleStyle: Win (default) | Mac
+	switch strings.ToLower(el.attr("TitleStyle")) {
+	case "mac":
+		win.TitleStyle = WindowTitleMac
+	default:
+		win.TitleStyle = WindowTitleWin
+	}
+
+	// ResizeMode: CanResize (default) | NoResize | CanMinimize
+	switch strings.ToLower(el.attr("ResizeMode")) {
+	case "noresize":
+		win.Resize = ResizeModeNoResize
+	case "canminimize":
+		win.Resize = ResizeModeCanMinimize
+	default:
+		win.Resize = ResizeModeCanResize
+	}
+
+	// Background
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			win.Background = c
+		}
+	}
+
+	// BorderBrush
+	if bc := el.attr("BorderBrush"); bc != "" {
+		if c, err := parseXAMLColor(bc); err == nil {
+			win.BorderColor = c
+		}
+	}
+
+	// CornerRadius
+	if cr := xatoi(el.attr("CornerRadius")); cr > 0 {
+		win.CornerRadius = cr
+	}
+
+	// TitleBarHeight
+	if h := xatoi(el.attr("TitleBarHeight")); h > 0 {
+		win.TitleBarHeight = h
+	}
+
+	// TitleBackground / TitleForeground
+	if tbg := el.attr("TitleBackground"); tbg != "" {
+		if c, err := parseXAMLColor(tbg); err == nil {
+			win.TitleBG = c
+		}
+	}
+	if tfc := el.attr("TitleForeground"); tfc != "" {
+		if c, err := parseXAMLColor(tfc); err == nil {
+			win.TitleColor = c
+		}
+	}
+
+	// Bounds (с учётом parentOff — обычно 0,0 для корня)
+	absBounds := b.Add(parentOff)
+	win.SetBounds(absBounds)
+
+	// Регистрация по имени
+	if id := el.name(); id != "" {
+		reg[id] = win
+	}
+
+	// Дочерние виджеты размещаются относительно ContentBounds.
+	contentOff := win.ContentBounds().Min
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+
+		// Пропускаем property elements
+		if strings.Contains(childTag, ".") {
+			// Но обрабатываем потомков property element (например Window.Resources)
+			for _, inner := range child.Children {
+				cw, err := buildXAMLWidget(inner, reg, contentOff, baseDir)
+				if err != nil {
+					return nil, err
+				}
+				if cw != nil {
+					win.AddChild(cw)
+				}
+			}
+			continue
+		}
+		// Пропускаем Item-подобные теги
+		if childTag == "item" || childTag == "comboboxitem" {
+			continue
+		}
+
+		cw, err := buildXAMLWidget(child, reg, contentOff, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			win.AddChild(cw)
+		}
+	}
+
+	// WPF-поведение: Content-элемент без явного размера заполняет клиентскую область.
+	// Для Grid это особенно важно — SetBounds запустит layout() с правильными размерами.
+	cb := win.ContentBounds()
+	for _, child := range win.Children() {
+		childB := child.Bounds()
+		if childB.Dx() <= 0 || childB.Dy() <= 0 || childB.Empty() {
+			child.SetBounds(cb)
+		}
+	}
+
+	return win, nil
+}
 
 func buildXAMLPanel(el xElement, baseDir string) Widget {
 	style := strings.ToLower(el.attr("Tag", "Style"))
@@ -969,6 +1162,24 @@ func buildXAMLMenuBar(el xElement, reg map[string]Widget, parentOff image.Point)
 		reg[id] = mb
 	}
 
+	// Foreground
+	if fgStr := el.attr("Foreground"); fgStr != "" {
+		if c, err := parseXAMLColor(fgStr); err == nil {
+			mb.TextColor = c
+		}
+	}
+
+	// Background
+	if bgStr := el.attr("Background"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			mb.Background = c
+		}
+	}
+
+	// Attached properties
+	applyDockAttachedProp(mb, el)
+	applyMargin(mb, el)
+
 	// Парсим верхнеуровневые <MenuItem Header="..."> с вложенными подпунктами.
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
@@ -981,38 +1192,50 @@ func buildXAMLMenuBar(el xElement, reg map[string]Widget, parentOff image.Point)
 			header = child.Text
 		}
 
-		// Собираем подпункты (вложенные MenuItem).
-		var subItems []MenuItem
-		for _, sub := range child.Children {
-			subTag := strings.ToLower(sub.Tag)
-			if subTag != "menuitem" && subTag != "item" {
-				continue
-			}
-
-			sep := strings.EqualFold(sub.attr("Separator"), "True")
-			if sep {
-				subItems = append(subItems, MenuItem{Separator: true})
-				continue
-			}
-
-			text := sub.attr("Header", "Text", "Content")
-			if text == "" {
-				text = sub.Text
-			}
-
-			disabled := strings.EqualFold(sub.attr("IsEnabled"), "False") ||
-				strings.EqualFold(sub.attr("Disabled"), "True")
-
-			subItems = append(subItems, MenuItem{
-				Text:     text,
-				Disabled: disabled,
-			})
-		}
-
+		// Рекурсивно собираем подпункты.
+		subItems := parseMenuItems(child)
 		mb.AddMenu(header, subItems...)
 	}
 
 	return mb, nil
+}
+
+// parseMenuItems рекурсивно собирает MenuItem из дочерних <MenuItem>.
+func parseMenuItems(parent xElement) []MenuItem {
+	var items []MenuItem
+	for _, sub := range parent.Children {
+		subTag := strings.ToLower(sub.Tag)
+		if subTag != "menuitem" && subTag != "item" {
+			continue
+		}
+
+		sep := strings.EqualFold(sub.attr("Separator"), "True")
+		if sep {
+			items = append(items, MenuItem{Separator: true})
+			continue
+		}
+
+		text := sub.attr("Header", "Text", "Content")
+		if text == "" {
+			text = sub.Text
+		}
+
+		disabled := strings.EqualFold(sub.attr("IsEnabled"), "False") ||
+			strings.EqualFold(sub.attr("Disabled"), "True")
+
+		item := MenuItem{
+			Text:     text,
+			Disabled: disabled,
+		}
+
+		// Рекурсивные подменю (3+ уровень).
+		if len(sub.Children) > 0 {
+			item.SubItems = parseMenuItems(sub)
+		}
+
+		items = append(items, item)
+	}
+	return items
 }
 
 // ─── PopupMenu ──────────────────────────────────────────────────────────────
@@ -1059,6 +1282,435 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 	return pm, nil
 }
 
+// ─── Margin ────────────────────────────────────────────────────────────────
+
+// parseMargin разбирает WPF Margin: "5", "5,10", "1,2,3,4".
+func parseMargin(s string) Margin {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return Margin{}
+	}
+	parts := strings.Split(s, ",")
+	switch len(parts) {
+	case 1:
+		v := xatoi(parts[0])
+		return Margin{Left: v, Top: v, Right: v, Bottom: v}
+	case 2:
+		h := xatoi(parts[0])
+		v := xatoi(parts[1])
+		return Margin{Left: h, Top: v, Right: h, Bottom: v}
+	case 4:
+		return Margin{
+			Left:   xatoi(parts[0]),
+			Top:    xatoi(parts[1]),
+			Right:  xatoi(parts[2]),
+			Bottom: xatoi(parts[3]),
+		}
+	default:
+		return Margin{}
+	}
+}
+
+// applyMargin читает Margin из XAML-атрибутов и устанавливает в Base.
+func applyMargin(w Widget, el xElement) {
+	ms := el.attr("Margin")
+	if ms == "" {
+		return
+	}
+	m := parseMargin(ms)
+	type marginSetter interface {
+		SetMargin(m Margin)
+	}
+	if setter, ok := w.(marginSetter); ok {
+		setter.SetMargin(m)
+	}
+}
+
+// ─── DockPanel.Dock attached property ───────────────────────────────────────
+
+// applyDockAttachedProp читает DockPanel.Dock из XAML-атрибутов и устанавливает в Base.
+func applyDockAttachedProp(w Widget, el xElement) {
+	dock := el.attr("DockPanel.Dock")
+	if dock == "" {
+		return
+	}
+	type dockSetter interface {
+		SetDock(d DockSide)
+	}
+	if ds, ok := w.(dockSetter); ok {
+		switch strings.ToLower(dock) {
+		case "top":
+			ds.SetDock(DockTop)
+		case "bottom":
+			ds.SetDock(DockBottom)
+		case "left":
+			ds.SetDock(DockLeft)
+		case "right":
+			ds.SetDock(DockRight)
+		}
+	}
+}
+
+// ─── buildXAMLDockPanel ────────────────────────────────────────────────────
+
+// buildXAMLDockPanel строит DockPanel из XAML-элемента <DockPanel>.
+// Последний дочерний элемент заполняет оставшееся пространство (LastChildFill).
+func buildXAMLDockPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	dp := NewDockPanel()
+
+	// Background
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+		if strings.EqualFold(bgStr, "transparent") {
+			dp.UseAlpha = true
+		} else if c, err := parseXAMLColor(bgStr); err == nil {
+			dp.Background = c
+			dp.UseAlpha = c.A < 255
+		}
+	}
+
+	// Bounds
+	absBounds := el.bounds().Add(parentOff)
+	dp.SetBounds(absBounds)
+
+	// Attached properties
+	applyGridAttachedProps(dp, el)
+	applyDockAttachedProp(dp, el)
+
+	// Регистрация
+	if id := el.name(); id != "" {
+		reg[id] = dp
+	}
+
+	// Дочерние виджеты (parentOff=0 — DockPanel.layout() сам расставит)
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+		if strings.Contains(childTag, ".") {
+			continue
+		}
+		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			dp.AddChild(cw) // AddChild → layout()
+		}
+	}
+
+	return dp, nil
+}
+
+// ─── buildXAMLBorder ───────────────────────────────────────────────────────
+
+// buildXAMLBorder строит Border — контейнер с фоном/рамкой и одним потомком.
+// В WPF Border.Child заполняет всю область Border.
+// Реализуем через DockPanel (последний ребёнок заполняет оставшееся пространство).
+func buildXAMLBorder(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	dp := NewDockPanel()
+
+	// Background
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+		if strings.EqualFold(bgStr, "transparent") {
+			dp.UseAlpha = true
+		} else if c, err := parseXAMLColor(bgStr); err == nil {
+			dp.Background = c
+			dp.UseAlpha = c.A < 255
+		}
+	} else {
+		dp.UseAlpha = true
+	}
+
+	// Bounds
+	absBounds := el.bounds().Add(parentOff)
+	dp.SetBounds(absBounds)
+
+	// Attached properties
+	applyGridAttachedProps(dp, el)
+	applyDockAttachedProp(dp, el)
+	applyMargin(dp, el)
+
+	// Регистрация
+	if id := el.name(); id != "" {
+		reg[id] = dp
+	}
+
+	// Дочерние виджеты — DockPanel.layout() заполнит последнего ребёнка.
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+		if strings.Contains(childTag, ".") {
+			continue
+		}
+		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			dp.AddChild(cw)
+		}
+	}
+
+	return dp, nil
+}
+
+// ─── buildXAMLStatusBar ────────────────────────────────────────────────────
+
+// buildXAMLStatusBar строит StatusBar как горизонтальный StackPanel.
+// WPF StatusBar — набор StatusBarItem. Мы упрощаем: строим StackPanel Horizontal.
+func buildXAMLStatusBar(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	sp := NewStackPanel(OrientationHorizontal)
+	sp.Spacing = 10
+	sp.Padding = 6
+
+	// Background
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			sp.Background = c
+			sp.UseAlpha = c.A < 255
+		}
+	} else {
+		sp.UseAlpha = true
+	}
+
+	// Bounds
+	absBounds := el.bounds().Add(parentOff)
+	sp.SetBounds(absBounds)
+
+	// Attached properties
+	applyGridAttachedProps(sp, el)
+	applyDockAttachedProp(sp, el)
+
+	// Регистрация
+	if id := el.name(); id != "" {
+		reg[id] = sp
+	}
+
+	// Дочерние виджеты (parentOff=0 — StackPanel.layout() сам расставит)
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+		if strings.Contains(childTag, ".") {
+			continue
+		}
+		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			sp.AddChild(cw)
+		}
+	}
+
+	return sp, nil
+}
+
+// ─── buildXAMLStackPanel ────────────────────────────────────────────────────
+
+// buildXAMLStackPanel строит StackPanel из XAML-элемента <StackPanel>.
+//
+// Поддерживаемые атрибуты:
+//
+//	Orientation  — Horizontal | Vertical (default: Vertical)
+//	Background   — цвет фона (#RRGGBB / имя)
+//	Spacing      — расстояние между элементами (px)
+//	Padding      — внутренний отступ (px)
+//	Margin       — внешний отступ (игнорируется в текущей реализации)
+func buildXAMLStackPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	orient := OrientationVertical
+	if strings.EqualFold(el.attr("Orientation"), "horizontal") {
+		orient = OrientationHorizontal
+	}
+
+	sp := NewStackPanel(orient)
+
+	// Background
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+		if strings.EqualFold(bgStr, "transparent") {
+			sp.UseAlpha = true
+		} else if c, err := parseXAMLColor(bgStr); err == nil {
+			sp.Background = c
+			sp.UseAlpha = c.A < 255
+		}
+	} else {
+		sp.UseAlpha = true
+	}
+
+	// Spacing
+	if s := xatoi(el.attr("Spacing")); s > 0 {
+		sp.Spacing = s
+	}
+
+	// Padding
+	if p := xatoi(el.attr("Padding")); p > 0 {
+		sp.Padding = p
+	}
+
+	// Bounds
+	absBounds := el.bounds().Add(parentOff)
+	sp.SetBounds(absBounds) // вызовет layout(), но дети ещё не добавлены
+
+	// Регистрация по имени
+	if id := el.name(); id != "" {
+		reg[id] = sp
+	}
+
+	// Attached properties
+	applyGridAttachedProps(sp, el)
+	applyDockAttachedProp(sp, el)
+	applyMargin(sp, el)
+
+	// Дочерние виджеты. StackPanel сам расставляет детей через layout(),
+	// поэтому передаём parentOff = image.Point{} (аналогично Grid).
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+
+		// Пропускаем property elements
+		if strings.Contains(childTag, ".") {
+			continue
+		}
+
+		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			sp.AddChild(cw) // AddChild вызывает layout()
+		}
+	}
+
+	return sp, nil
+}
+
+// ─── buildXAMLTreeView ─────────────────────────────────────────────────────
+
+// buildXAMLTreeView строит TreeView из XAML-элемента <TreeView>.
+//
+// Рекурсивно разбирает вложенные <TreeViewItem Header="..."> в TreeNode-дерево.
+//
+// Поддерживаемые атрибуты:
+//
+//	Background   — цвет фона (#RRGGBB / имя)
+//	Foreground   — цвет текста
+//	ItemHeight   — высота строки (px)
+func buildXAMLTreeView(el xElement, reg map[string]Widget, parentOff image.Point) (Widget, error) {
+	tv := NewTreeView()
+
+	// Background
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			tv.Background = c
+		}
+	}
+
+	// Foreground
+	if fgStr := el.attr("Foreground"); fgStr != "" {
+		if c, err := parseXAMLColor(fgStr); err == nil {
+			tv.Foreground = c
+		}
+	}
+
+	// ItemHeight
+	if ih := xatoi(el.attr("ItemHeight")); ih > 0 {
+		tv.ItemHeight = ih
+	}
+
+	// Bounds
+	absBounds := el.bounds().Add(parentOff)
+	tv.SetBounds(absBounds)
+
+	// Attached properties
+	applyGridAttachedProps(tv, el)
+	applyDockAttachedProp(tv, el)
+	applyMargin(tv, el)
+
+	// Регистрация по имени
+	if id := el.name(); id != "" {
+		reg[id] = tv
+	}
+
+	// Рекурсивный парсинг TreeViewItem → TreeNode
+	for _, child := range el.Children {
+		if strings.EqualFold(child.Tag, "TreeViewItem") {
+			node := parseTreeViewItem(child)
+			tv.AddRoot(node)
+		}
+	}
+
+	return tv, nil
+}
+
+// parseTreeViewItem рекурсивно строит TreeNode из <TreeViewItem>.
+func parseTreeViewItem(el xElement) *TreeNode {
+	header := el.attr("Header", "Text", "Content")
+	if header == "" {
+		header = el.Text
+	}
+	node := NewTreeNode(header)
+
+	// IsExpanded
+	if strings.EqualFold(el.attr("IsExpanded"), "true") {
+		node.Expanded = true
+	}
+
+	// Вложенные TreeViewItem
+	for _, child := range el.Children {
+		if strings.EqualFold(child.Tag, "TreeViewItem") {
+			node.AddChild(parseTreeViewItem(child))
+		}
+	}
+
+	return node
+}
+
+// ─── buildXAMLListViewFromDataGrid ─────────────────────────────────────────
+
+// buildXAMLListViewFromDataGrid аппроксимирует WPF <DataGrid> как ListView.
+//
+// DataGrid — сложный табличный виджет. Наш движок не имеет полноценной таблицы,
+// поэтому мы строим ListView, заголовки колонок формируем из дочерних
+// <DataGridTextColumn Header="..."/>.
+func buildXAMLListViewFromDataGrid(el xElement) Widget {
+	var columns []string
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+		// DataGrid.Columns property element
+		if childTag == "datagrid.columns" {
+			for _, col := range child.Children {
+				header := col.attr("Header", "Text")
+				if header != "" {
+					columns = append(columns, header)
+				}
+			}
+			continue
+		}
+		// Прямые колонки (DataGridTextColumn и др.)
+		if strings.HasPrefix(childTag, "datagridtext") ||
+			strings.HasPrefix(childTag, "datagridtemplate") ||
+			strings.HasPrefix(childTag, "datagridcheck") ||
+			strings.HasPrefix(childTag, "datagridcombo") {
+			header := child.attr("Header", "Text")
+			if header != "" {
+				columns = append(columns, header)
+			}
+		}
+	}
+
+	// Формируем строку-заголовок из названий колонок
+	var items []string
+	if len(columns) > 0 {
+		items = append(items, strings.Join(columns, "  |  "))
+	}
+
+	lv := NewListView(items...)
+	lv.ItemHeight = 26
+
+	// Background / Foreground
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			lv.Background = c
+		}
+	}
+
+	return lv
+}
+
 // ─── Парсинг цветов ──────────────────────────────────────────────────────────
 
 // parseXAMLColor разбирает строку цвета: "#RRGGBB", "#RRGGBBAA" или именованный цвет.
@@ -1080,10 +1732,38 @@ func parseXAMLColor(s string) (color.RGBA, error) {
 		return color.RGBA{B: 255, A: 255}, nil
 	case "gray", "grey":
 		return color.RGBA{R: 128, G: 128, B: 128, A: 255}, nil
+	case "lightgray", "lightgrey":
+		return color.RGBA{R: 211, G: 211, B: 211, A: 255}, nil
 	case "darkgray", "darkgrey":
 		return color.RGBA{R: 43, G: 43, B: 43, A: 220}, nil
+	case "silver":
+		return color.RGBA{R: 192, G: 192, B: 192, A: 255}, nil
 	case "dodgerblue", "accent":
 		return color.RGBA{R: 0, G: 120, B: 215, A: 255}, nil
+	case "yellow":
+		return color.RGBA{R: 255, G: 255, A: 255}, nil
+	case "orange":
+		return color.RGBA{R: 255, G: 165, A: 255}, nil
+	case "cyan", "aqua":
+		return color.RGBA{G: 255, B: 255, A: 255}, nil
+	case "magenta", "fuchsia":
+		return color.RGBA{R: 255, B: 255, A: 255}, nil
+	case "navy":
+		return color.RGBA{B: 128, A: 255}, nil
+	case "teal":
+		return color.RGBA{G: 128, B: 128, A: 255}, nil
+	case "maroon":
+		return color.RGBA{R: 128, A: 255}, nil
+	case "olive":
+		return color.RGBA{R: 128, G: 128, A: 255}, nil
+	case "purple":
+		return color.RGBA{R: 128, B: 128, A: 255}, nil
+	case "lime":
+		return color.RGBA{G: 255, A: 255}, nil
+	case "cornflowerblue":
+		return color.RGBA{R: 100, G: 149, B: 237, A: 255}, nil
+	case "wheat":
+		return color.RGBA{R: 245, G: 222, B: 179, A: 255}, nil
 	default:
 		return parseColor(s) // из loader.go: "#RRGGBB" / "#RRGGBBAA"
 	}

@@ -9,11 +9,12 @@ headless-gui/
   engine/              рендер-цикл, canvas, события, шрифты
   widget/              виджеты, темы, XAML-загрузчик, Grid layout
   output/              типы Frame / DirtyTile
-  window/              нативное окно Ebiten v2 (отдельный go.mod)
+  window/              нативное окно Win32/Cocoa/X11 (отдельный go.mod, без CGO)
   cmd/
     showcase/          полная демонстрация всех виджетов
     guiview/           интерактивное демо с модальными окнами
     griddemo/          демо Grid-раскладки
+    smartgit/          SmartGit-подобный UI (Window + Menu + TreeView + DataGrid)
   assets/ui/           XAML-макеты (demo.xaml, grid_demo.xaml, showcase.xaml)
   gui/                 XAML для RDP UI (логин, блокировка, ошибки)
   tests/               юнит-тесты
@@ -100,6 +101,40 @@ eng.CloseModal(m widget.ModalWidget)
 w.SetBounds(image.Rect(x, y, x+w, y+h))  // обязательно перед первым кадром
 parent.AddChild(child)
 ```
+
+### Window
+
+Корневой элемент нативного окна. Заменяет Canvas/Panel как корень при работе с нативным окном ОС.
+
+```go
+// XAML-загрузка (рекомендуемый способ)
+root, reg, _ := widget.LoadUIFromXAMLFile("ui/app.xaml")
+eng.SetRoot(root)
+
+// Программно
+ww := widget.NewWindow()
+ww.Title = "Моё приложение"
+ww.TitleStyle = widget.WindowTitleWin  // или WindowTitleMac
+ww.Resize = widget.ResizeModeCanResize
+```
+
+В XAML:
+
+```xml
+<Window Title="Приложение" Width="1100" Height="700"
+        TitleStyle="Win" ResizeMode="CanResize" Background="#1E1E1E">
+    <DockPanel>
+        <Menu DockPanel.Dock="Top">...</Menu>
+        <Grid>...</Grid>
+    </DockPanel>
+</Window>
+```
+
+Стили заголовка:
+- `WindowTitleWin` — Windows: текст слева, кнопки ─ □ × справа
+- `WindowTitleMac` — macOS: traffic lights ● ● ● слева, текст по центру
+
+Режимы изменения размера: `CanResize`, `NoResize`, `CanMinimize`.
 
 ### Panel
 
@@ -446,7 +481,22 @@ XAML:
 </Menu>
 ```
 
-Навигация: Left/Right переключает разделы, Up/Down/Enter — по подменю, Escape — закрыть.
+Каскадные подменю (вложенные MenuItem):
+
+```xml
+<Menu Name="mainMenu">
+    <MenuItem Header="Settings">
+        <MenuItem Header="Theme">
+            <MenuItem Header="Dark"/>
+            <MenuItem Header="Light"/>
+        </MenuItem>
+    </MenuItem>
+</Menu>
+```
+
+Пункты с вложенными подменю отображают стрелку ▸ справа. При наведении раскрывается дочернее меню.
+
+Навигация: Left/Right переключает разделы, Up/Down/Enter — по подменю, Right — войти в каскадное подменю, Left — выйти, Escape — закрыть.
 
 ### Separator
 
@@ -506,6 +556,20 @@ eng.SetTheme(t)
 ```
 
 `SetTheme` применяет цвета ко всем существующим виджетам через `ApplyTheme(t)` и обновляет глобальные дефолты для новых.
+
+Тема содержит 80+ цветовых токенов, сгруппированных по виджетам:
+
+- Окно/панели: `WindowBG`, `PanelBG`, `TitleBG`, `TitleText`, `Border`, `ShadowColor`
+- Кнопки: `BtnBG`, `BtnHoverBG`, `BtnPressedBG`, `BtnText`, `BtnBorder`
+- Текстовые поля: `InputBG`, `InputText`, `InputFocus`, `InputCaret`, `InputPlaceholder`
+- Выпадающие списки/PopupMenu: `DropBG`, `DropText`, `DropBorder`
+- TreeView: `TreeText`, `TreeArrow`
+- ListView/ScrollView: `ListItemHover`, `ListItemSelect`, `ScrollTrackBG`, `ScrollThumbBG`
+- Dialog: `DialogBG`, `DialogTitleBG`, `DialogDim`
+- GridSplitter: `SplitterBG`, `SplitterHoverBG`
+- StatusBar: `StatusBarBG`, `StatusBarText`
+- DataGrid header: `HeaderBG`, `HeaderText`
+- Системные: `Accent`, `Disabled`, `Scrollbar`
 
 ---
 
@@ -568,9 +632,9 @@ root Canvas (0,0)
 
 ---
 
-## Нативное окно (window)
+## Нативное окно (window) — Win32 / Cocoa / X11
 
-Отдельный модуль на базе Ebiten v2. На Windows — DirectX 11 без CGO.
+Отдельный модуль с платформенными бэкендами. Без CGO на всех платформах (Windows: Win32 API, macOS: Cocoa через purego, Linux: X11 protocol).
 
 ```go
 import "github.com/oops1/headless-gui/v3/window"
@@ -653,7 +717,7 @@ go.mod:  module github.com/oops1/headless-gui/v3
 
 go.mod:  module github.com/oops1/headless-gui/v3/window
   require github.com/oops1/headless-gui/v3 => ../
-  require github.com/hajimehoshi/ebiten/v2
+  require github.com/ebitengine/purego, golang.org/x/sys
 ```
 
 Приложение-потребитель подключает основной модуль:
@@ -679,15 +743,14 @@ replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
 
 ## Демо-приложения
 
-Запуск из директории `window/` (где лежит go.mod с Ebiten):
+Запуск из корневой директории `GuiEngine`:
 
 ```bash
-cd GuiEngine/window
-
-go run ../cmd/showcase    # все виджеты + живая анимация
-go run ../cmd/guiview     # интерактивное демо с модальными XAML-окнами
-go run ../cmd/griddemo    # Grid-раскладка
+go run ./cmd/showcase    # все виджеты + живая анимация
+go run ./cmd/guiview     # интерактивное демо с модальными XAML-окнами
+go run ./cmd/griddemo    # Grid-раскладка
+go run ./cmd/smartgit    # SmartGit-подобный UI
 
 # Бинарник без консоли (Windows)
-go build -ldflags="-H windowsgui" -o showcase.exe ../cmd/showcase
+go build -ldflags="-H windowsgui" -o showcase.exe ./cmd/showcase
 ```

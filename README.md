@@ -1,6 +1,6 @@
 # headless-gui
 
-Go-based headless GUI engine with XAML support, tile-based delta rendering, and pluggable output backends (RDP, WebSocket, Ebiten).
+Go-based headless GUI engine with XAML support, tile-based delta rendering, and pluggable output backends (RDP, WebSocket, native platform windows).
 
 ## Overview
 
@@ -12,11 +12,12 @@ Go-based headless GUI engine with XAML support, tile-based delta rendering, and 
 - **Delta tile streaming** — only changed 64x64 regions are sent each frame
 - **XAML layout** — load UI from WPF-compatible `.xaml` files (opens in Blend / Visual Studio)
 - **Grid layout** — WPF-style `<Grid>` with Pixel / Star / Auto sizing, `Grid.Row`, `Grid.Column`, spans
-- **Theming** — built-in Dark and Light themes, 60+ customizable color tokens
+- **Theming** — built-in Dark and Light themes, 80+ customizable color tokens
 - **Drag & drop** — panels are draggable with recursive child movement
 - **Modal dialogs** — centered overlay with background dim, input isolation
 - **Font support** — TTF fonts via `golang.org/x/image/font`; custom registration by name
-- **Native window** — optional Ebiten v2 backend (`window/` module) for desktop preview
+- **Cascading menus** — nested submenus with arrow indicators and keyboard navigation
+- **Native window** — platform-native backends (Win32/Cocoa/X11), zero CGO on all platforms
 
 ## Widget List
 
@@ -43,6 +44,11 @@ Go-based headless GUI engine with XAML support, tile-based delta rendering, and 
 | Separator | `Separator`, `Line`, `Rectangle` | Divider line |
 | MessageBox | — (code only) | OK / YesNo / YesNoCancel |
 | Dialog | — (code only) | Modal base, custom content |
+| Window | `Window` | Native OS window with title bar (Win/Mac style), resize, minimize/maximize |
+| TreeView | `TreeView` | Expandable tree with arrow indicators |
+| GridSplitter | `GridSplitter` | Resizable splitter between Grid cells |
+| StatusBar | `StatusBar` | Bottom status bar with text |
+| DataGrid | `DataGrid` | Column headers with data rows (maps to ListView) |
 
 ## Quick Start
 
@@ -53,20 +59,17 @@ go run main.go
 # Renders demo UI, writes PNG frames to out_test/
 ```
 
-### Native Window (Ebiten)
+### Native Window
 
 ```bash
-cd window
-go run ../cmd/showcase        # Full widget showcase
-go run ../cmd/guiview         # Interactive demo with modals
-go run ../cmd/griddemo        # Grid layout demo
+go run ./cmd/showcase    # Full widget showcase
+go run ./cmd/smartgit    # SmartGit-like UI demo
 ```
 
 Windows binary without console:
 
 ```bash
-cd window
-go build -ldflags="-H windowsgui" -o showcase.exe ../cmd/showcase
+go build -ldflags="-H windowsgui" -o showcase.exe ./cmd/showcase
 ```
 
 ## Project Structure
@@ -76,11 +79,10 @@ headless-gui/
   engine/          Core: canvas, render loop, event dispatch, font manager
   widget/          All widgets, themes, XAML loader, Grid layout, drag support
   output/          Frame + DirtyTile types for delta streaming
-  window/          Ebiten v2 native window (separate go.mod)
+  window/          Native window (Win32/Cocoa/X11, zero CGO)
   cmd/
     showcase/      Full widget showcase (all widgets + live animation)
-    guiview/       Interactive demo with XAML modals
-    griddemo/      Grid layout demo
+    smartgit/      SmartGit-like UI (Window + Menu + TreeView + DataGrid)
   assets/ui/       XAML demo layouts (demo.xaml, grid_demo.xaml, showcase.xaml)
   gui/             XAML files for RDP UI (login, block, error dialogs)
   tests/           Unit tests (engine, widgets, drag, modals)
@@ -162,9 +164,9 @@ Coordinates inside containers are relative (standard WPF Canvas behavior).
 | Module | Dependency |
 |---|---|
 | `github.com/oops1/headless-gui/v3` | `golang.org/x/image` |
-| `github.com/oops1/headless-gui/v3/window` | `github.com/hajimehoshi/ebiten/v2` |
+| `github.com/oops1/headless-gui/v3/window` | `golang.org/x/sys/windows`, `github.com/ebitengine/purego` |
 
-Go 1.22+. The `window/` module is optional — the core engine has zero CGO dependencies.
+Go 1.22+. The `window/` module is optional — the core engine has zero CGO dependencies. The window module is also CGO-free on all platforms.
 
 ## Documentation
 

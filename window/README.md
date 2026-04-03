@@ -1,14 +1,14 @@
 # headless-gui/window
 
-Нативное OS-окно для `headless-gui` движка на базе **[Ebiten v2](https://ebitengine.org/)**.
+Нативное OS-окно для headless-gui движка на базе платформенных API (Win32, Cocoa, X11). Без CGO на всех платформах.
 
 ## Платформы
 
 | ОС | Рендер | CGO |
 |---|---|---|
-| **Windows** | DirectX 11 | не нужен |
-| Linux | OpenGL | нужен (libGL, X11 или Wayland) |
-| macOS | Metal | нужен |
+| **Windows** | Win32 API (StretchDIBits) | не нужен |
+| **macOS** | Cocoa (NSWindow + purego) | не нужен |
+| **Linux** | X11 (PutImage, direct socket) | не нужен |
 
 ## Быстрый старт
 
@@ -50,15 +50,16 @@ func main() {
 
 ## Демо-приложения
 
-Из директории `GuiEngine/window` (здесь лежит go.mod с Ebiten):
+Из корневой директории GuiEngine:
 
 ```bash
-go run ../cmd/showcase        # все виджеты + живая анимация
-go run ../cmd/guiview         # интерактивное демо с модальными окнами
-go run ../cmd/griddemo        # Grid-раскладка
+go run ./cmd/showcase        # все виджеты + живая анимация
+go run ./cmd/smartgit        # SmartGit-подобный UI
+go run ./cmd/guiview         # интерактивное демо с модальными окнами
+go run ./cmd/griddemo        # Grid-раскладка
 
 # Бинарник без консольного окна (Windows)
-go build -ldflags="-H windowsgui" -o showcase.exe ../cmd/showcase
+go build -ldflags="-H windowsgui" -o showcase.exe ./cmd/showcase
 ```
 
 ## Использование в своём проекте
@@ -68,6 +69,8 @@ go build -ldflags="-H windowsgui" -o showcase.exe ../cmd/showcase
 ```
 require github.com/oops1/headless-gui/v3/window v0.x.x
 ```
+
+Модуль больше не зависит от Ebiten — только платформенные API (Win32, Cocoa, X11).
 
 Для локальной разработки:
 
@@ -80,13 +83,11 @@ replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
 
 ```
 GuiEngine/window/
-  go.mod        модуль github.com/oops1/headless-gui/v3/window
-  window.go     Window, EngineAPI интерфейс, маппинг ввода
-
-GuiEngine/cmd/
-  showcase/     полная демонстрация всех виджетов
-  guiview/      интерактивное демо с XAML-модалками
-  griddemo/     демо Grid-раскладки
+  go.mod              модуль github.com/oops1/headless-gui/v3/window
+  window.go           Window, NativeWindow интерфейс, маппинг ввода
+  native_windows.go   Win32 API (WS_POPUP, StretchDIBits, WndProc)
+  native_darwin.go    Cocoa через purego (NSWindow, NSApplication)
+  native_linux.go     X11 протокол (direct socket, PutImage)
 ```
 
 ## API

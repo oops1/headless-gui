@@ -109,8 +109,11 @@ func (d *Dialog) Draw(ctx DrawContext) {
 
 // ApplyTheme обновляет цвета Dialog.
 func (d *Dialog) ApplyTheme(t *Theme) {
-	d.BorderColor = t.Border
+	d.Background = t.DialogBG
+	d.TitleBG = t.DialogTitleBG
 	d.TitleColor = t.TitleText
+	d.BorderColor = t.Border
+	d.Dim = t.DialogDim
 }
 
 // ─── Хелперы для быстрого создания диалогов ─────────────────────────────────

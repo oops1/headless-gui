@@ -117,6 +117,18 @@ func (g *Grid) layout() {
 		x1 := b.Min.X + g.colOffsets[endCol]
 		y1 := b.Min.Y + g.rowOffsets[endRow]
 
+		// Учитываем Margin ребёнка.
+		type marginGetter interface {
+			GetMargin() Margin
+		}
+		if mg, ok := child.(marginGetter); ok {
+			m := mg.GetMargin()
+			x0 += m.Left
+			y0 += m.Top
+			x1 -= m.Right
+			y1 -= m.Bottom
+		}
+
 		child.SetBounds(image.Rect(x0, y0, x1, y1))
 	}
 }
