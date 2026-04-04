@@ -223,7 +223,42 @@ func (c *Canvas) layoutChild(idx int) {
 		}
 	}
 
-	child.SetBounds(image.Rect(x, y, x+cw, y+ch))
+	oldBounds := child.Bounds()
+	newBounds := image.Rect(x, y, x+cw, y+ch)
+	child.SetBounds(newBounds)
+
+	// Если позиция виджета изменилась — рекурсивно сдвигаем всех потомков.
+	// Это необходимо для контейнеров (Panel и т.д.), чьи дочерние виджеты
+	// используют абсолютные координаты и не пересчитываются автоматически
+	// при вызове SetBounds на родителе.
+	dx := newBounds.Min.X - oldBounds.Min.X
+	dy := newBounds.Min.Y - oldBounds.Min.Y
+	if (dx != 0 || dy != 0) && !oldBounds.Empty() {
+		shiftDescendants(child, dx, dy)
+	}
+}
+
+// shiftDescendants рекурсивно сдвигает bounds всех потомков виджета на (dx, dy).
+// Для виджетов с собственным layout (Canvas, Grid, DockPanel, TabControl, StackPanel)
+// вызов SetBounds уже перестраивает дочерние позиции, поэтому рекурсия не нужна.
+func shiftDescendants(w Widget, dx, dy int) {
+	delta := image.Pt(dx, dy)
+	for _, child := range w.Children() {
+		child.SetBounds(child.Bounds().Add(delta))
+		if !HasOwnLayout(child) {
+			shiftDescendants(child, dx, dy)
+		}
+	}
+}
+
+// HasOwnLayout возвращает true для контейнеров, которые сами пересчитывают
+// позиции дочерних виджетов при вызове SetBounds (через layout / layoutContent).
+func HasOwnLayout(w Widget) bool {
+	switch w.(type) {
+	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window:
+		return true
+	}
+	return false
 }
 
 // Draw рисует фон Canvas и все дочерние виджеты.

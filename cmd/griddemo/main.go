@@ -30,7 +30,7 @@ func main() {
 	eng := engine.New(screenW, screenH, 30)
 
 	// ─── UI из XAML ─────────────────────────────────────────────────────────
-	root, named, err := widget.LoadUIFromXAMLFile("../assets/ui/grid_demo.xaml")
+	root, named, err := widget.LoadUIFromXAMLFile("./assets/ui/grid_demo.xaml")
 	if err != nil {
 		log.Fatalf("ошибка загрузки grid_demo.xaml: %v", err)
 	}

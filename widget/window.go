@@ -124,6 +124,11 @@ type Window struct {
 	dragging   bool
 	dragStartX int
 	dragStartY int
+	dragWinX   int // позиция окна при начале drag (для headless self-drag)
+	dragWinY   int
+
+	// capMgr — CaptureManager для корректного освобождения захвата мыши.
+	capMgr CaptureManager
 
 	// ── Внутреннее состояние ─────────────────────────────────────────────────
 
@@ -484,20 +489,66 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 	ctx.DrawText(w.Title, textX, textY, tc)
 }
 
+// ─── Drag / Capture ─────────────────────────────────────────────────────────
+
+// WantsCapture возвращает true при клике в drag-зону заголовка.
+// Это позволяет движку захватить мышь для Window (аналогично Panel.WantsCapture).
+func (w *Window) WantsCapture(e MouseEvent) bool {
+	if w.Style == WindowStyleNone {
+		return false
+	}
+	pt := image.Pt(e.X, e.Y)
+	tb := w.titleBarRect()
+	if tb.Empty() || !pt.In(tb) {
+		return false
+	}
+	// Не захватываем если клик по кнопкам управления
+	if pt.In(w.CloseBtnRect()) {
+		return false
+	}
+	if r := w.MinBtnRect(); !r.Empty() && pt.In(r) {
+		return false
+	}
+	if r := w.MaxBtnRect(); !r.Empty() && pt.In(r) {
+		return false
+	}
+	return true
+}
+
+// SetCaptureManager сохраняет CaptureManager для освобождения захвата при отпускании.
+func (w *Window) SetCaptureManager(cm CaptureManager) {
+	w.capMgr = cm
+}
+
 // ─── Mouse events ───────────────────────────────────────────────────────────
 
 // OnMouseMove обновляет hover-состояние кнопок заголовка и обрабатывает drag.
 func (w *Window) OnMouseMove(x, y int) {
-	// Drag за заголовок: перемещение нативного окна
+	// Drag за заголовок
 	if w.dragging {
 		dx := x - w.dragStartX
 		dy := y - w.dragStartY
-		if w.OnDragMove != nil && (dx != 0 || dy != 0) {
-			w.OnDragMove(dx, dy)
+		if dx == 0 && dy == 0 {
+			return
 		}
-		// Не обновляем dragStart — координаты мыши относительны окна,
-		// а окно уже сдвинулось, так что следующий OnMouseMove будет
-		// с теми же локальными координатами если мышь стоит.
+		if w.OnDragMove != nil {
+			// Нативный режим: делегируем движение нативному окну.
+			// Не обновляем dragStart — координаты мыши относительны окна.
+			w.OnDragMove(dx, dy)
+		} else {
+			// Headless self-drag: перемещаем виджет по Canvas/Panel.
+			// Используем абсолютные координаты: новая позиция = начальная + дельта мыши.
+			newX := w.dragWinX + (x - w.dragStartX)
+			newY := w.dragWinY + (y - w.dragStartY)
+			b := w.Bounds()
+			shiftX := newX - b.Min.X
+			shiftY := newY - b.Min.Y
+			if shiftX != 0 || shiftY != 0 {
+				// Window.SetBounds сам пересчитает ContentBounds → дочерние виджеты.
+				// Рекурсивный ShiftWidget не нужен — Window управляет layout.
+				w.SetBounds(image.Rect(newX, newY, newX+b.Dx(), newY+b.Dy()))
+			}
+		}
 		return
 	}
 
@@ -540,6 +591,9 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 	if !e.Pressed {
 		if w.dragging {
 			w.dragging = false
+			if w.capMgr != nil {
+				w.capMgr.ReleaseCapture()
+			}
 			return true
 		}
 		return false
@@ -567,9 +621,13 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 
 	// Нажатие на заголовок (не на кнопку) — начинаем drag
 	if pt.In(w.titleBarRect()) {
+		DismissAll(w) // закрываем dropdown/popup перед drag
 		w.dragging = true
 		w.dragStartX = e.X
 		w.dragStartY = e.Y
+		b := w.Bounds()
+		w.dragWinX = b.Min.X
+		w.dragWinY = b.Min.Y
 		return true
 	}
 
