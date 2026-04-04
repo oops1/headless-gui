@@ -264,7 +264,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 	// ── Кнопки ───────────────────────────────────────────────────────────────
 	case "button", "togglebutton", "repeatbutton":
-		w = buildXAMLButton(el)
+		w = buildXAMLButton(el, baseDir)
 
 	// ── Ввод текста ──────────────────────────────────────────────────────────
 	case "textbox", "textinput", "input", "richtextbox":
@@ -1039,7 +1039,7 @@ func buildXAMLLabel(el xElement) Widget {
 	return lbl
 }
 
-func buildXAMLButton(el xElement) Widget {
+func buildXAMLButton(el xElement, baseDir string) Widget {
 	text := el.attr("Content", "Text")
 	if text == "" {
 		text = el.Text
@@ -1079,6 +1079,30 @@ func buildXAMLButton(el xElement) Widget {
 			btn.BorderColor = c
 		}
 	}
+
+	// ── Иконка ─────────────────────────────────────────────────────────────
+	if iconSrc := el.attr("Icon", "IconSource"); iconSrc != "" {
+		path := iconSrc
+		if !filepath.IsAbs(path) && baseDir != "" {
+			path = filepath.Join(baseDir, iconSrc)
+		}
+		if img, err := loadImageFile(path); err == nil {
+			btn.Icon = img
+			btn.IconPath = iconSrc
+		}
+	}
+	// IconPosition: Left (default), Top, Only
+	switch strings.ToLower(el.attr("IconPosition", "IconPos")) {
+	case "top":
+		btn.IconPos = IconTop
+	case "only", "icononly":
+		btn.IconPos = IconOnly
+	}
+	// IconSize
+	if sz := xatoi(el.attr("IconSize")); sz > 0 {
+		btn.IconSize = sz
+	}
+
 	return btn
 }
 

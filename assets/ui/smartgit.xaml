@@ -32,11 +32,11 @@
         <!-- Toolbar -->
         <DockPanel Grid.Row="0" Background="#2D2D30">
             <StackPanel Orientation="Horizontal" Margin="5">
-                <Button Content="Commit" Margin="2"/>
-                <Button Content="Pull" Margin="2"/>
-                <Button Content="Push" Margin="2"/>
-                <Button Content="Branch" Margin="2"/>
-                <Button Content="Log" Margin="2"/>
+                <Button Content="Commit" Icon="img/commit.png" Margin="2"/>
+                <Button Content="Pull" Icon="img/pull.png" Margin="2"/>
+                <Button Content="Push" Icon="img/push.png" Margin="2"/>
+                <Button Content="Branch" Icon="img/branch.png" Margin="2"/>
+                <Button Content="Log" Icon="img/log.png" Margin="2"/>
             </StackPanel>
         </DockPanel>
 
