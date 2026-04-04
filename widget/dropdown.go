@@ -155,6 +155,7 @@ func (d *Dropdown) Draw(ctx DrawContext) {
 	// См. DrawOverlay / HasOverlay ниже.
 
 	d.drawChildren(ctx)
+	d.drawDisabledOverlay(ctx)
 }
 
 // HasOverlay возвращает true, когда список раскрыт.
@@ -236,7 +237,7 @@ func (d *Dropdown) IsFocused() bool {
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
 func (d *Dropdown) OnKeyEvent(e KeyEvent) {
-	if !e.Pressed {
+	if !d.IsEnabled() || !e.Pressed {
 		return
 	}
 
@@ -317,6 +318,9 @@ func (d *Dropdown) Bounds() image.Rectangle {
 
 // OnMouseButton реализует widget.MouseClickHandler.
 func (d *Dropdown) OnMouseButton(e MouseEvent) bool {
+	if !d.IsEnabled() {
+		return false
+	}
 	if e.Button != MouseLeft || !e.Pressed {
 		return false
 	}

@@ -176,10 +176,15 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 	if sv.ShowBorder {
 		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), sv.BorderColor)
 	}
+
+	sv.drawDisabledOverlay(ctx)
 }
 
 // OnMouseButton обрабатывает клик на скроллбаре (drag ползунка).
 func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
+	if !sv.IsEnabled() {
+		return false
+	}
 	if e.Button != MouseLeft {
 		return false
 	}

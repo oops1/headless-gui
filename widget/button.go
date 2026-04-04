@@ -6,6 +6,18 @@ import (
 	"sync/atomic"
 )
 
+// IconPosition определяет расположение иконки относительно текста.
+type IconPosition int
+
+const (
+	// IconLeft — иконка слева от текста (по умолчанию).
+	IconLeft IconPosition = iota
+	// IconTop — иконка над текстом.
+	IconTop
+	// IconOnly — только иконка, текст не отображается.
+	IconOnly
+)
+
 // Button — кнопка в стиле Windows 10 Dark.
 // Pressed и Hovered меняются атомарно — можно вызывать из любой горутины.
 type Button struct {
@@ -19,6 +31,12 @@ type Button struct {
 	BorderColor   color.RGBA
 	HighlightTop  color.RGBA // 1-пиксельная акцентная линия сверху
 	ShowHighlight bool
+
+	// Icon — иконка кнопки (PNG/JPEG). Если не nil, рисуется рядом с текстом.
+	Icon     image.Image
+	IconPath string       // путь к файлу (заполняется из XAML атрибута Icon=)
+	IconPos  IconPosition // расположение иконки (Left, Top, IconOnly)
+	IconSize int          // размер иконки в пикселях (0 = авто: высота кнопки - 8)
 
 	pressed int32 // 0 | 1, атомарно
 	hovered int32 // 0 | 1, атомарно
@@ -81,6 +99,10 @@ func (btn *Button) IsHovered() bool {
 
 // OnMouseMove реализует MouseMoveHandler — обновляет hover-состояние.
 func (btn *Button) OnMouseMove(x, y int) {
+	if !btn.IsEnabled() {
+		btn.SetHovered(false)
+		return
+	}
 	btn.SetHovered(image.Pt(x, y).In(btn.bounds))
 }
 
@@ -106,24 +128,82 @@ func (btn *Button) Draw(ctx DrawContext) {
 		ctx.DrawHLine(b.Min.X+1, b.Min.Y, b.Dx()-2, btn.HighlightTop)
 	}
 
-	// Центрирование текста с учётом реальной ширины TTF-шрифта
+	// ── Размер иконки ──────────────────────────────────────────────────────
+	iconSz := btn.IconSize
+	if iconSz <= 0 {
+		iconSz = b.Dy() - 8 // авто: высота кнопки − 8px padding
+		if iconSz < 12 {
+			iconSz = 12
+		}
+	}
+	hasIcon := btn.Icon != nil
+	hasText := btn.Text != "" && btn.IconPos != IconOnly
+
 	const textH = 13
-	textW := ctx.MeasureText(btn.Text, DefaultFontSizePt)
-	textX := b.Min.X + (b.Dx()-textW)/2
-	textY := b.Min.Y + (b.Dy()-textH)/2
-	if textX < b.Min.X+4 {
-		textX = b.Min.X + 4
+	textW := 0
+	if hasText {
+		textW = ctx.MeasureText(btn.Text, DefaultFontSizePt)
 	}
-	if textY < b.Min.Y+2 {
-		textY = b.Min.Y + 2
+	iconGap := 4 // зазор между иконкой и текстом
+
+	// ── Расположение контента ───────────────────────────────────────────
+	switch {
+	case hasIcon && hasText && btn.IconPos == IconLeft:
+		// Иконка слева, текст справа — оба центрированы по вертикали
+		totalW := iconSz + iconGap + textW
+		startX := b.Min.X + (b.Dx()-totalW)/2
+		if startX < b.Min.X+4 {
+			startX = b.Min.X + 4
+		}
+		iconY := b.Min.Y + (b.Dy()-iconSz)/2
+		ctx.DrawImageScaled(btn.Icon, startX, iconY, iconSz, iconSz)
+		textX := startX + iconSz + iconGap
+		textY := b.Min.Y + (b.Dy()-textH)/2
+		ctx.DrawText(btn.Text, textX, textY, btn.TextColor)
+
+	case hasIcon && hasText && btn.IconPos == IconTop:
+		// Иконка сверху, текст снизу — оба центрированы по горизонтали
+		totalH := iconSz + iconGap + textH
+		startY := b.Min.Y + (b.Dy()-totalH)/2
+		if startY < b.Min.Y+2 {
+			startY = b.Min.Y + 2
+		}
+		iconX := b.Min.X + (b.Dx()-iconSz)/2
+		ctx.DrawImageScaled(btn.Icon, iconX, startY, iconSz, iconSz)
+		textX := b.Min.X + (b.Dx()-textW)/2
+		textY := startY + iconSz + iconGap
+		ctx.DrawText(btn.Text, textX, textY, btn.TextColor)
+
+	case hasIcon && !hasText:
+		// Только иконка — центрирована
+		iconX := b.Min.X + (b.Dx()-iconSz)/2
+		iconY := b.Min.Y + (b.Dy()-iconSz)/2
+		ctx.DrawImageScaled(btn.Icon, iconX, iconY, iconSz, iconSz)
+
+	default:
+		// Только текст (или нет ничего)
+		textX := b.Min.X + (b.Dx()-textW)/2
+		textY := b.Min.Y + (b.Dy()-textH)/2
+		if textX < b.Min.X+4 {
+			textX = b.Min.X + 4
+		}
+		if textY < b.Min.Y+2 {
+			textY = b.Min.Y + 2
+		}
+		if hasText {
+			ctx.DrawText(btn.Text, textX, textY, btn.TextColor)
+		}
 	}
-	ctx.DrawText(btn.Text, textX, textY, btn.TextColor)
 
 	btn.drawChildren(ctx)
+	btn.drawDisabledOverlay(ctx)
 }
 
 // OnMouseButton реализует widget.MouseClickHandler — вызывает OnClick при нажатии.
 func (btn *Button) OnMouseButton(e MouseEvent) bool {
+	if !btn.IsEnabled() {
+		return false
+	}
 	if e.Button == MouseLeft {
 		btn.SetPressed(e.Pressed)
 		if !e.Pressed && btn.OnClick != nil {
@@ -151,7 +231,7 @@ func (btn *Button) IsFocused() bool {
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
 func (btn *Button) OnKeyEvent(e KeyEvent) {
-	if !e.Pressed {
+	if !btn.IsEnabled() || !e.Pressed {
 		return
 	}
 	// Enter или Space активируют кнопку
