@@ -177,6 +177,8 @@ func (mb *MenuBar) Draw(ctx DrawContext) {
 		textY := r.Min.Y + (r.Dy()-13)/2
 		ctx.DrawText(item.Text, r.Min.X+mb.ItemPaddingX, textY, mb.TextColor)
 	}
+
+	mb.drawDisabledOverlay(ctx)
 }
 
 // ─── События мыши ────────────────────────────────────────────────────────────
@@ -195,6 +197,9 @@ func (mb *MenuBar) hitTopItem(x, y int) int {
 }
 
 func (mb *MenuBar) OnMouseMove(x, y int) {
+	if !mb.IsEnabled() {
+		return
+	}
 	// Если курсор в полосе — обновляем hover и переключаем подменю.
 	if image.Pt(x, y).In(mb.Base.Bounds()) {
 		idx := mb.hitTopItem(x, y)
@@ -215,6 +220,9 @@ func (mb *MenuBar) OnMouseMove(x, y int) {
 }
 
 func (mb *MenuBar) OnMouseButton(e MouseEvent) bool {
+	if !mb.IsEnabled() {
+		return false
+	}
 	// Клик в полосе меню.
 	if image.Pt(e.X, e.Y).In(mb.Base.Bounds()) {
 		if e.Button != MouseLeft || e.Pressed {

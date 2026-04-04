@@ -199,7 +199,7 @@ func (t *TextInput) clampCaret() {
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
 func (t *TextInput) OnKeyEvent(e KeyEvent) {
-	if !e.Pressed {
+	if !t.IsEnabled() || !e.Pressed {
 		return
 	}
 	ctrl := e.Mod&ModCtrl != 0
@@ -362,6 +362,9 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 // ─── MouseClickHandler ───────────────────────────────────────────────────────
 
 func (t *TextInput) OnMouseButton(e MouseEvent) bool {
+	if !t.IsEnabled() {
+		return false
+	}
 	if e.Button != MouseLeft || !e.Pressed {
 		return false
 	}
@@ -541,6 +544,7 @@ func (t *TextInput) Draw(ctx DrawContext) {
 	}
 
 	t.drawChildren(ctx)
+	t.drawDisabledOverlay(ctx)
 }
 
 // drawEyeButton рисует кнопку показа/скрытия пароля в правой части поля.

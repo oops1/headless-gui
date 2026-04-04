@@ -375,12 +375,16 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 // Draw — основной виджет невидим (всё рисуется через DrawOverlay).
 func (m *PopupMenu) Draw(ctx DrawContext) {
 	// PopupMenu не имеет основного рендеринга — только overlay.
+	m.drawDisabledOverlay(ctx)
 }
 
 // ─── События ────────────────────────────────────────────────────────────────
 
 // OnMouseMove обрабатывает hover по пунктам и каскадные подменю.
 func (m *PopupMenu) OnMouseMove(x, y int) {
+	if !m.IsEnabled() {
+		return
+	}
 	if atomic.LoadInt32(&m.open) == 0 {
 		return
 	}
@@ -421,6 +425,9 @@ func (m *PopupMenu) OnMouseMove(x, y int) {
 
 // OnMouseButton обрабатывает клик: выбор пункта или закрытие.
 func (m *PopupMenu) OnMouseButton(e MouseEvent) bool {
+	if !m.IsEnabled() {
+		return false
+	}
 	if atomic.LoadInt32(&m.open) == 0 {
 		return false
 	}

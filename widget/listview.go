@@ -263,10 +263,15 @@ func (lv *ListView) Draw(ctx DrawContext) {
 	if lv.ShowBorder {
 		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), lv.BorderColor)
 	}
+
+	lv.drawDisabledOverlay(ctx)
 }
 
 // OnMouseButton обрабатывает клик по элементу или скроллбару.
 func (lv *ListView) OnMouseButton(e MouseEvent) bool {
+	if !lv.IsEnabled() {
+		return false
+	}
 	if e.Button != MouseLeft {
 		return false
 	}
@@ -315,6 +320,9 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 
 // OnMouseMove обрабатывает hover и drag скроллбара.
 func (lv *ListView) OnMouseMove(x, y int) {
+	if !lv.IsEnabled() {
+		return
+	}
 	lv.mu.Lock()
 	defer lv.mu.Unlock()
 
@@ -344,7 +352,7 @@ func (lv *ListView) OnMouseMove(x, y int) {
 
 // OnKeyEvent обрабатывает клавиатурную навигацию (Up/Down, Enter, Home/End).
 func (lv *ListView) OnKeyEvent(e KeyEvent) {
-	if !e.Pressed {
+	if !lv.IsEnabled() || !e.Pressed {
 		return
 	}
 	lv.mu.Lock()

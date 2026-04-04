@@ -99,6 +99,10 @@ func (btn *Button) IsHovered() bool {
 
 // OnMouseMove реализует MouseMoveHandler — обновляет hover-состояние.
 func (btn *Button) OnMouseMove(x, y int) {
+	if !btn.IsEnabled() {
+		btn.SetHovered(false)
+		return
+	}
 	btn.SetHovered(image.Pt(x, y).In(btn.bounds))
 }
 
@@ -192,10 +196,14 @@ func (btn *Button) Draw(ctx DrawContext) {
 	}
 
 	btn.drawChildren(ctx)
+	btn.drawDisabledOverlay(ctx)
 }
 
 // OnMouseButton реализует widget.MouseClickHandler — вызывает OnClick при нажатии.
 func (btn *Button) OnMouseButton(e MouseEvent) bool {
+	if !btn.IsEnabled() {
+		return false
+	}
 	if e.Button == MouseLeft {
 		btn.SetPressed(e.Pressed)
 		if !e.Pressed && btn.OnClick != nil {
@@ -223,7 +231,7 @@ func (btn *Button) IsFocused() bool {
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
 func (btn *Button) OnKeyEvent(e KeyEvent) {
-	if !e.Pressed {
+	if !btn.IsEnabled() || !e.Pressed {
 		return
 	}
 	// Enter или Space активируют кнопку

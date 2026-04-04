@@ -141,6 +141,7 @@ func (s *Slider) Draw(ctx DrawContext) {
 	}
 
 	s.drawChildren(ctx)
+	s.drawDisabledOverlay(ctx)
 }
 
 // valueFromX вычисляет значение по позиции мыши.
@@ -161,6 +162,9 @@ func (s *Slider) valueFromX(x int) float64 {
 
 // OnMouseButton обрабатывает клик — начало/конец перетаскивания.
 func (s *Slider) OnMouseButton(e MouseEvent) bool {
+	if !s.IsEnabled() {
+		return false
+	}
 	if e.Button != MouseLeft {
 		return false
 	}
@@ -185,6 +189,9 @@ func (s *Slider) OnMouseButton(e MouseEvent) bool {
 
 // OnMouseMove обрабатывает drag и hover.
 func (s *Slider) OnMouseMove(x, y int) {
+	if !s.IsEnabled() {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -208,7 +215,7 @@ func (s *Slider) OnMouseMove(x, y int) {
 
 // OnKeyEvent обрабатывает клавиши ←/→ для изменения значения.
 func (s *Slider) OnKeyEvent(e KeyEvent) {
-	if !e.Pressed {
+	if !s.IsEnabled() || !e.Pressed {
 		return
 	}
 	s.mu.Lock()

@@ -213,10 +213,15 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 
 	// Рамка вокруг содержимого
 	ctx.DrawBorder(cr.Min.X, cr.Min.Y, cr.Dx(), cr.Dy(), tc.TabBorder)
+
+	tc.drawDisabledOverlay(ctx)
 }
 
 // OnMouseButton обрабатывает клик по вкладке.
 func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
+	if !tc.IsEnabled() {
+		return false
+	}
 	if e.Button != MouseLeft || e.Pressed {
 		return false
 	}
