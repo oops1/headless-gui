@@ -245,13 +245,25 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 	b := m.Bounds()
 	cx := (e.canvas.W - b.Dx()) / 2
 	cy := (e.canvas.H - b.Dy()) / 2
+
+	// Запоминаем позицию первого ребёнка ДО SetBounds.
+	// Если SetBounds сам пересчитает позиции дочерних виджетов
+	// (Canvas, Grid, DockPanel через собственный layout) — ручной сдвиг не нужен.
+	// Если нет (Panel) — сдвигаем вручную.
+	children := m.Children()
+	var firstChildBefore image.Rectangle
+	if len(children) > 0 {
+		firstChildBefore = children[0].Bounds()
+	}
+
 	m.SetBounds(image.Rect(cx, cy, cx+b.Dx(), cy+b.Dy()))
 
-	// Пересчитываем bounds дочерних виджетов относительно новой позиции
-	contentOff := image.Pt(cx-b.Min.X, cy-b.Min.Y)
-	for _, child := range m.Children() {
-		cb := child.Bounds()
-		child.SetBounds(cb.Add(contentOff))
+	if len(children) > 0 && children[0].Bounds() == firstChildBefore {
+		contentOff := image.Pt(cx-b.Min.X, cy-b.Min.Y)
+		for _, child := range children {
+			cb := child.Bounds()
+			child.SetBounds(cb.Add(contentOff))
+		}
 	}
 
 	injectCaptureManager(m, e)

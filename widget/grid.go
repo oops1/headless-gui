@@ -87,6 +87,8 @@ func (g *Grid) SetBounds(r image.Rectangle) {
 // layout пересчитывает позиции строк и столбцов.
 func (g *Grid) layout() {
 	b := g.bounds
+	// Для Auto строк/столбцов: измеряем содержимое дочерних виджетов.
+	g.measureAutoSizes()
 	g.rowOffsets = resolveDefinitions(g.RowDefs, b.Dy())
 	g.colOffsets = resolveDefinitions(g.ColDefs, b.Dx())
 
@@ -191,6 +193,71 @@ func (g *Grid) Draw(ctx DrawContext) {
 
 // ApplyTheme — Grid не имеет темизируемых элементов.
 func (g *Grid) ApplyTheme(t *Theme) {}
+
+// measureAutoSizes проходит по дочерним виджетам и устанавливает Min для Auto строк/столбцов
+// на основе размеров дочерних виджетов (bounds, которые были заданы XAML-парсером).
+//
+// WPF Grid Auto: строка/столбец получает размер наибольшего дочернего виджета в этой строке/столбце.
+// Если у ребёнка нет размера — используется дефолтный (30px для строк, 80px для столбцов).
+func (g *Grid) measureAutoSizes() {
+	// Сбрасываем Min для Auto определений
+	for i := range g.RowDefs {
+		if g.RowDefs[i].Mode == GridSizeAuto {
+			g.RowDefs[i].Min = 0
+		}
+	}
+	for i := range g.ColDefs {
+		if g.ColDefs[i].Mode == GridSizeAuto {
+			g.ColDefs[i].Min = 0
+		}
+	}
+
+	for _, child := range g.children {
+		row, col, _, _ := g.childCell(child)
+		rows := g.Rows()
+		cols := g.Cols()
+		if row >= rows {
+			row = rows - 1
+		}
+		if col >= cols {
+			col = cols - 1
+		}
+
+		cb := child.Bounds()
+
+		// Margin
+		var m Margin
+		type marginGetter interface {
+			GetMargin() Margin
+		}
+		if mg, ok := child.(marginGetter); ok {
+			m = mg.GetMargin()
+		}
+
+		// Auto строка: берём высоту ребёнка + margin.
+		// Для виджетов без явного размера (bounds пуст) — используем desiredHeight.
+		if row < len(g.RowDefs) && g.RowDefs[row].Mode == GridSizeAuto {
+			h := cb.Dy() + m.Top + m.Bottom
+			if h <= 0 {
+				h = desiredHeight(child)
+			}
+			if h > g.RowDefs[row].Min {
+				g.RowDefs[row].Min = h
+			}
+		}
+
+		// Auto столбец: берём ширину ребёнка + margin
+		if col < len(g.ColDefs) && g.ColDefs[col].Mode == GridSizeAuto {
+			w := cb.Dx() + m.Left + m.Right
+			if w <= 0 {
+				w = desiredWidth(child)
+			}
+			if w > g.ColDefs[col].Min {
+				g.ColDefs[col].Min = w
+			}
+		}
+	}
+}
 
 // ─── Resolve definitions ────────────────────────────────────────────────────
 
