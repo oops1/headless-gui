@@ -13,9 +13,7 @@ import (
 	"image"
 	"image/color"
 	stdraw "image/draw"
-	"image/png"
 	"math"
-	"os"
 
 	"golang.org/x/image/draw"
 	"golang.org/x/image/font"
@@ -404,17 +402,3 @@ func (c *Canvas) syncTile(x, y, w, h int) {
 	}
 }
 
-// ─── Image export ────────────────────────────────────────────────────────────
-
-// saveFront сохраняет текущий полный кадр (front-буфер) как PNG-файл.
-func (c *Canvas) saveFront(path string) error {
-	snapshot := image.NewRGBA(image.Rect(0, 0, c.W, c.H))
-	copy(snapshot.Pix, c.front.Pix)
-
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return png.Encode(f, snapshot)
-}

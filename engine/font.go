@@ -18,8 +18,11 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
+// DefaultDPI — DPI по умолчанию для рендеринга шрифтов.
+const DefaultDPI = 96.0
+
 // DefaultFontSize — размер шрифта по умолчанию (в пунктах) для DrawText.
-// При 96 DPI соответствует ~13 px высоты — как basicfont.Face7x13.
+// При DefaultDPI (96) соответствует ~13 px высоты — как basicfont.Face7x13.
 const DefaultFontSize = 10.0
 
 // FontCache кэширует font.Face для разных размеров одного TTF-файла.
@@ -34,7 +37,7 @@ type FontCache struct {
 // newFontCache создаёт кэш, загружая шрифт из assetsDir или используя встроенный.
 func newFontCache(assetsDir string) *FontCache {
 	data := loadFontData(assetsDir)
-	return newFontCacheFromData(data, 96)
+	return newFontCacheFromData(data, DefaultDPI)
 }
 
 // newFontCacheFromData создаёт FontCache из TTF-байт и заданного DPI.
