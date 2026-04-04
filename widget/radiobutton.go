@@ -85,6 +85,10 @@ func (rb *RadioButton) IsHovered() bool {
 }
 
 func (rb *RadioButton) OnMouseMove(x, y int) {
+	if !rb.IsEnabled() {
+		rb.SetHovered(false)
+		return
+	}
 	rb.SetHovered(image.Pt(x, y).In(rb.bounds))
 }
 
@@ -134,10 +138,14 @@ func (rb *RadioButton) Draw(ctx DrawContext) {
 	ctx.DrawText(rb.Text, textX, textY, rb.TextColor)
 
 	rb.drawChildren(ctx)
+	rb.drawDisabledOverlay(ctx)
 }
 
 // OnMouseButton обрабатывает клик — выбирает этот RadioButton.
 func (rb *RadioButton) OnMouseButton(e MouseEvent) bool {
+	if !rb.IsEnabled() {
+		return false
+	}
 	if e.Button == MouseLeft && !e.Pressed {
 		if !rb.IsSelected() {
 			rb.SetSelected(true)
@@ -167,7 +175,7 @@ func (rb *RadioButton) IsFocused() bool {
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
 func (rb *RadioButton) OnKeyEvent(e KeyEvent) {
-	if !e.Pressed {
+	if !rb.IsEnabled() || !e.Pressed {
 		return
 	}
 	if e.Code == KeySpace {

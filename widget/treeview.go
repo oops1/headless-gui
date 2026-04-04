@@ -196,6 +196,8 @@ func (tv *TreeView) Draw(ctx DrawContext) {
 		textY := y + (ih-13)/2
 		ctx.DrawText(fn.node.Text, textX, textY, tv.Foreground)
 	}
+
+	tv.drawDisabledOverlay(ctx)
 }
 
 // drawArrowRight рисует треугольник ▸ (свёрнуто).
@@ -231,6 +233,9 @@ func abs(x int) int {
 
 // OnMouseMove обновляет hover-индекс.
 func (tv *TreeView) OnMouseMove(x, y int) {
+	if !tv.IsEnabled() {
+		return
+	}
 	b := tv.Bounds()
 	if !image.Pt(x, y).In(b) {
 		tv.hoverIdx.Store(-1)
@@ -251,6 +256,9 @@ func (tv *TreeView) OnMouseMove(x, y int) {
 
 // OnMouseButton обрабатывает клик: раскрытие/свёртывание или выделение.
 func (tv *TreeView) OnMouseButton(e MouseEvent) bool {
+	if !tv.IsEnabled() {
+		return false
+	}
 	if e.Button != MouseLeft || !e.Pressed {
 		return false
 	}

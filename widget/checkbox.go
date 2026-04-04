@@ -66,6 +66,10 @@ func (cb *CheckBox) IsHovered() bool {
 }
 
 func (cb *CheckBox) OnMouseMove(x, y int) {
+	if !cb.IsEnabled() {
+		cb.SetHovered(false)
+		return
+	}
 	cb.SetHovered(image.Pt(x, y).In(cb.bounds))
 }
 
@@ -119,10 +123,14 @@ func (cb *CheckBox) Draw(ctx DrawContext) {
 	ctx.DrawText(cb.Text, textX, textY, cb.TextColor)
 
 	cb.drawChildren(ctx)
+	cb.drawDisabledOverlay(ctx)
 }
 
 // OnMouseButton обрабатывает клик — переключает состояние.
 func (cb *CheckBox) OnMouseButton(e MouseEvent) bool {
+	if !cb.IsEnabled() {
+		return false
+	}
 	if e.Button == MouseLeft && !e.Pressed {
 		newState := !cb.IsChecked()
 		cb.SetChecked(newState)
@@ -151,7 +159,7 @@ func (cb *CheckBox) IsFocused() bool {
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
 func (cb *CheckBox) OnKeyEvent(e KeyEvent) {
-	if !e.Pressed {
+	if !cb.IsEnabled() || !e.Pressed {
 		return
 	}
 	if e.Code == KeySpace {

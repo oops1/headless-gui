@@ -1,6 +1,9 @@
 package widget
 
-import "image"
+import (
+	"image"
+	"image/color"
+)
 
 // HorizontalAlignment — WPF HorizontalAlignment (позиционирование внутри родителя).
 type HorizontalAlignment int
@@ -44,6 +47,10 @@ type Base struct {
 	bounds   image.Rectangle
 	children []Widget
 
+	// disabled=true → виджет отключён (WPF IsEnabled="False").
+	// По умолчанию false (т.е. виджет включён), что соответствует WPF IsEnabled=True.
+	disabled bool
+
 	// Grid layout (attached properties, как в WPF).
 	GridRow     int // Grid.Row     (0-based)
 	GridColumn  int // Grid.Column  (0-based)
@@ -66,6 +73,13 @@ func (b *Base) Bounds() image.Rectangle     { return b.bounds }
 func (b *Base) SetBounds(r image.Rectangle) { b.bounds = r }
 func (b *Base) Children() []Widget          { return b.children }
 func (b *Base) AddChild(w Widget)           { b.children = append(b.children, w) }
+
+// IsEnabled возвращает true, если виджет включён (WPF IsEnabled).
+// По умолчанию все виджеты включены.
+func (b *Base) IsEnabled() bool { return !b.disabled }
+
+// SetEnabled включает/выключает виджет (WPF IsEnabled).
+func (b *Base) SetEnabled(v bool) { b.disabled = !v }
 
 // ── Grid attached properties ────────────────────────────────────────────────
 
@@ -231,5 +245,15 @@ func desiredWidth(w Widget) int {
 func (b *Base) drawChildren(ctx DrawContext) {
 	for _, child := range b.children {
 		child.Draw(ctx)
+	}
+}
+
+// drawDisabledOverlay рисует полупрозрачный серый оверлей поверх виджета,
+// визуально показывая что он отключён (аналог WPF IsEnabled=False).
+func (b *Base) drawDisabledOverlay(ctx DrawContext) {
+	if b.disabled {
+		r := b.bounds
+		ctx.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(),
+			color.RGBA{R: 30, G: 30, B: 30, A: 140})
 	}
 }

@@ -73,6 +73,10 @@ func (ts *ToggleSwitch) IsHovered() bool {
 }
 
 func (ts *ToggleSwitch) OnMouseMove(x, y int) {
+	if !ts.IsEnabled() {
+		ts.SetHovered(false)
+		return
+	}
 	ts.SetHovered(image.Pt(x, y).In(ts.bounds))
 }
 
@@ -107,10 +111,14 @@ func (ts *ToggleSwitch) Draw(ctx DrawContext) {
 	}
 
 	ts.drawChildren(ctx)
+	ts.drawDisabledOverlay(ctx)
 }
 
 // OnMouseButton обрабатывает клик — переключает состояние.
 func (ts *ToggleSwitch) OnMouseButton(e MouseEvent) bool {
+	if !ts.IsEnabled() {
+		return false
+	}
 	if e.Button == MouseLeft && !e.Pressed {
 		newState := !ts.IsOn()
 		ts.SetOn(newState)
@@ -139,7 +147,7 @@ func (ts *ToggleSwitch) IsFocused() bool {
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
 func (ts *ToggleSwitch) OnKeyEvent(e KeyEvent) {
-	if !e.Pressed {
+	if !ts.IsEnabled() || !e.Pressed {
 		return
 	}
 	if e.Code == KeySpace {
