@@ -1,29 +1,39 @@
-<!-- block.xaml — диалог блокировки доступа.
-     Модальное окно 440×200; движок центрирует при ShowModal.
-     Caption → встроенный заголовок.
-     Плоская структура — ShowModal сдвигает только прямых потомков. -->
-<Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        x:Name="root" Width="440" Height="170"
+        x:Name="root"
+        Width="440" Height="170"
         Background="#2D2D30"
-        BorderBrush="#555569" BorderThickness="1" CornerRadius="8"
-        Caption="Ай яй яй.....">
+        BorderBrush="#555569"
+        BorderThickness="1"
+        Title="Ай яй яй....."
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize">
 
-    <!-- Тело сообщения (под хедером 32px) -->
-    <TextBlock x:Name="lblMsg1"
-               Canvas.Left="20" Canvas.Top="42" Width="400" Height="22"
-               Text="Вы не оправдали наше доверие" Foreground="#D0D0D8"/>
+    <!-- Контейнер для Canvas-позиционирования -->
+    <Canvas>
 
-    <TextBlock x:Name="lblMsg2"
-               Canvas.Left="20" Canvas.Top="68" Width="400" Height="22"
-               Text="и были отлучены от нашего сервера." Foreground="#D0D0D8"/>
+        <!-- Тело сообщения -->
+        <TextBlock x:Name="lblMsg1"
+                   Canvas.Left="20" Canvas.Top="10"
+                   Width="400"
+                   Text="Вы не оправдали наше доверие"
+                   Foreground="#D0D0D8"/>
 
-    <!-- Разделитель -->
-    <Separator Canvas.Left="14" Canvas.Top="108" Width="412" Height="1"/>
+        <TextBlock x:Name="lblMsg2"
+                   Canvas.Left="20" Canvas.Top="36"
+                   Width="400"
+                   Text="и были отлучены от нашего сервера."
+                   Foreground="#D0D0D8"/>
 
-    <!-- Кнопка OK -->
-    <Button x:Name="btnOK"
-            Canvas.Left="180" Canvas.Top="120" Width="80" Height="34"
-            Content=" OK " Tag="Accent"/>
+        <!-- Разделитель -->
+        <Separator Canvas.Left="14" Canvas.Top="76"
+                   Width="412" Height="1"/>
 
-</Canvas>
+        <!-- Кнопка OK -->
+        <Button x:Name="btnOK"
+                Canvas.Left="180" Canvas.Top="88"
+                Width="80" Height="34"
+                Content="OK"/>
+
+    </Canvas>
+</Window>

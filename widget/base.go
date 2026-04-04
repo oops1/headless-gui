@@ -169,6 +169,63 @@ func applyAlignmentRect(w Widget, r image.Rectangle) image.Rectangle {
 	return r
 }
 
+// ── Desired size (Auto-измерение) ───────────────────────────────────────────
+
+// desiredHeight возвращает желаемую высоту виджета для Auto-измерения в Grid/DockPanel.
+// Для Label — высота текста + padding. Для контейнеров — максимум из детей.
+// Если не можем определить — возвращаем дефолт 26px.
+func desiredHeight(w Widget) int {
+	switch v := w.(type) {
+	case *Label:
+		fs := v.FontSize
+		if fs <= 0 {
+			fs = DefaultFontSizePt
+		}
+		return int(fs*1.5+0.5) + v.PaddingY*2
+	case *Button:
+		return 32
+	case *TextInput:
+		return 26
+	default:
+		// Для контейнеров — максимальная высота среди детей
+		children := w.Children()
+		if len(children) > 0 {
+			maxH := 0
+			for _, ch := range children {
+				h := ch.Bounds().Dy()
+				if h <= 0 {
+					h = desiredHeight(ch)
+				}
+				if h > maxH {
+					maxH = h
+				}
+			}
+			if maxH > 0 {
+				return maxH
+			}
+		}
+		return 26
+	}
+}
+
+// desiredWidth возвращает желаемую ширину виджета для Auto-измерения.
+// Для Label/TextBlock — ширина текста (приблизительно), для остальных — дефолт.
+func desiredWidth(w Widget) int {
+	switch v := w.(type) {
+	case *Label:
+		// Примерная ширина: длина текста * средняя ширина символа + padding
+		text := v.Text()
+		charW := 7 // средняя ширина символа при дефолтном шрифте
+		return len(text)*charW + v.PaddingX*2
+	case *Button:
+		return 80
+	case *TextInput:
+		return 120
+	default:
+		return 80
+	}
+}
+
 // drawChildren рендерит всех потомков в тот же контекст.
 // Вызывается конкретными виджетами в конце своего Draw.
 func (b *Base) drawChildren(ctx DrawContext) {

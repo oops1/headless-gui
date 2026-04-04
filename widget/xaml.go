@@ -331,8 +331,12 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 	// Координаты в XAML относительны родительского Canvas/Panel (стандарт WPF).
 	// Прибавляем parentOff чтобы получить абсолютные экранные координаты.
+	// Если el.bounds() пуст (нет координат в XAML) — не затираем bounds,
+	// которые виджет мог установить сам (напр. Separator с дефолтным размером).
 	absBounds := el.bounds().Add(parentOff)
-	w.SetBounds(absBounds)
+	if !absBounds.Empty() {
+		w.SetBounds(absBounds)
+	}
 
 	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin, Alignment
 	applyGridAttachedProps(w, el)
@@ -346,7 +350,11 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	}
 
 	// Смещение для дочерних виджетов — Min текущего элемента.
+	// Если absBounds пуст — берём из реальных bounds виджета.
 	childOff := absBounds.Min
+	if absBounds.Empty() {
+		childOff = w.Bounds().Min
+	}
 
 	// Дочерние виджеты (пропускаем <Item>, <TabItem> — уже обработаны)
 	for _, child := range el.Children {
@@ -899,8 +907,9 @@ func addCanvasChild(cv *Canvas, child xElement, reg map[string]Widget, canvasOff
 		desiredH = cw.Bounds().Dy()
 	}
 
-	// Сбрасываем bounds — Canvas сам расставит через layout
-	cw.SetBounds(image.Rect(0, 0, desiredW, desiredH))
+	// Не сбрасываем bounds — Canvas.layoutChild пересчитает позицию
+	// и сдвинет потомков на правильную дельту через shiftDescendants.
+	// Если сбросить bounds в (0,0), дельта будет неверной для контейнеров.
 
 	cv.AddChildAt(cw, props, desiredW, desiredH)
 	return nil
@@ -1190,6 +1199,24 @@ func buildXAMLSeparator(el xElement) Widget {
 		}
 	}
 	p := NewPanel(c)
+	p.ShowHeader = false
+
+	// Если Width/Height не заданы в XAML — задаём дефолтный тонкий размер.
+	// Separator в WPF по умолчанию: горизонтальная линия (height=1).
+	// В ToolBar (горизонтальный контейнер) — вертикальная линия (width=1, height=stretch).
+	w := xatoi(el.attr("Width"))
+	h := xatoi(el.attr("Height"))
+	if w <= 0 && h <= 0 {
+		// Дефолт: тонкая вертикальная линия для ToolBar
+		p.SetBounds(image.Rect(0, 0, 1, 24))
+	} else if w > 0 && h <= 0 {
+		// Горизонтальный разделитель: задана ширина → высота = 1px
+		p.SetBounds(image.Rect(0, 0, w, 1))
+	} else if h > 0 && w <= 0 {
+		p.SetBounds(image.Rect(0, 0, 1, h))
+	} else if w > 0 && h > 0 {
+		p.SetBounds(image.Rect(0, 0, w, h))
+	}
 	return p
 }
 
@@ -1289,6 +1316,14 @@ func buildXAMLListView(el xElement) Widget {
 		}
 	}
 	lv := NewListView(items...)
+
+	// Background
+	if bgStr := el.attr("Background"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			lv.Background = c
+		}
+	}
+
 	if sel := el.attr("SelectedIndex", "Selected"); sel != "" {
 		if idx, err := strconv.Atoi(sel); err == nil {
 			lv.SetSelected(idx)

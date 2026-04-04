@@ -59,7 +59,7 @@ func (dp *DockPanel) layout() {
 		isLast := i == len(children)-1
 
 		// Получаем Dock через интерфейс
-		dock := DockTop // default
+		dock := DockLeft // default (WPF standard: DockPanel.Dock default = Left)
 		type dockGetter interface {
 			GetDock() DockSide
 		}
@@ -91,7 +91,7 @@ func (dp *DockPanel) layout() {
 		case DockTop:
 			h := cb.Dy()
 			if h <= 0 {
-				h = 30 // default
+				h = desiredHeight(child)
 			}
 			child.SetBounds(image.Rect(
 				remaining.Min.X+m.Left, remaining.Min.Y+m.Top,
@@ -102,7 +102,7 @@ func (dp *DockPanel) layout() {
 		case DockBottom:
 			h := cb.Dy()
 			if h <= 0 {
-				h = 30
+				h = desiredHeight(child)
 			}
 			child.SetBounds(image.Rect(
 				remaining.Min.X+m.Left, remaining.Max.Y-m.Bottom-h,
@@ -113,7 +113,7 @@ func (dp *DockPanel) layout() {
 		case DockLeft:
 			w := cb.Dx()
 			if w <= 0 {
-				w = 200
+				w = desiredWidth(child)
 			}
 			child.SetBounds(image.Rect(
 				remaining.Min.X+m.Left, remaining.Min.Y+m.Top,
@@ -124,7 +124,7 @@ func (dp *DockPanel) layout() {
 		case DockRight:
 			w := cb.Dx()
 			if w <= 0 {
-				w = 200
+				w = desiredWidth(child)
 			}
 			child.SetBounds(image.Rect(
 				remaining.Max.X-m.Right-w, remaining.Min.Y+m.Top,
