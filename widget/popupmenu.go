@@ -374,6 +374,10 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 
 // Draw — основной виджет невидим (всё рисуется через DrawOverlay).
 func (m *PopupMenu) Draw(ctx DrawContext) {
+	b := m.bounds
+	if b.Empty() {
+		return
+	}
 	// PopupMenu не имеет основного рендеринга — только overlay.
 	m.drawDisabledOverlay(ctx)
 }

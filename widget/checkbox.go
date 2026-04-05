@@ -76,6 +76,9 @@ func (cb *CheckBox) OnMouseMove(x, y int) {
 // Draw рисует CheckBox: квадратик 16×16 слева + текст справа.
 func (cb *CheckBox) Draw(ctx DrawContext) {
 	b := cb.bounds
+	if b.Empty() {
+		return
+	}
 	boxSize := 16
 	boxX := b.Min.X
 	boxY := b.Min.Y + (b.Dy()-boxSize)/2

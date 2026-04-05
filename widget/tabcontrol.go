@@ -144,6 +144,9 @@ func (tc *TabControl) contentRect() image.Rectangle {
 // Draw рисует TabControl: полосу вкладок + содержимое активной.
 func (tc *TabControl) Draw(ctx DrawContext) {
 	b := tc.bounds
+	if b.Empty() {
+		return
+	}
 	tc.mu.Lock()
 	tabs := tc.tabs
 	active := tc.active

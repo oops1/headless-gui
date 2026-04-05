@@ -213,6 +213,18 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 		w.SetBounds(absBounds)
 	}
 
+	// Сохраняем явные XAML Width/Height для alignment (даже если bounds пуст).
+	type xamlSizeSetter interface {
+		SetXAMLSize(w, h int)
+	}
+	if xss, ok := w.(xamlSizeSetter); ok {
+		xw := xatoi(el.attr("Width"))
+		xh := xatoi(el.attr("Height"))
+		if xw > 0 || xh > 0 {
+			xss.SetXAMLSize(xw, xh)
+		}
+	}
+
 	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin, Alignment
 	applyGridAttachedProps(w, el)
 	applyDockAttachedProp(w, el)
@@ -352,6 +364,19 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 	if text == "" {
 		text = el.Text
 	}
+
+	// ── WPF Content Model: парсим вложенные элементы ───────────────────────
+	// <Button> может содержать <StackPanel> с <Image> + <TextBlock>,
+	// или напрямую <Image> / <TextBlock> как дочерние элементы.
+	bc := extractButtonContent(el)
+	if text == "" {
+		text = bc.Text
+	}
+	// Иконка из атрибута имеет приоритет
+	iconSrc := el.attr("Icon", "IconSource")
+	if iconSrc == "" {
+		iconSrc = bc.IconSrc
+	}
 	style := strings.ToLower(el.attr("Tag", "Style"))
 	var btn *Button
 	if style == "accent" || style == "primary" {
@@ -366,8 +391,23 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 	applyColor(&btn.PressedBG, el, "PressedBG", "PressedBackground")
 	applyColor(&btn.BorderColor, el, "BorderBrush")
 
+	// ── ToolTip ────────────────────────────────────────────────────────────
+	if tip := el.attr("ToolTip"); tip != "" {
+		btn.ToolTip = tip
+	}
+
+	// ── Padding ────────────────────────────────────────────────────────────
+	if pad := el.attr("Padding"); pad != "" {
+		btn.Padding = parseMargin(pad)
+	}
+
+	// ── CornerRadius ───────────────────────────────────────────────────────
+	if cr := xatoi(el.attr("CornerRadius")); cr > 0 {
+		btn.CornerRadius = cr
+	}
+
 	// ── Иконка ─────────────────────────────────────────────────────────────
-	if iconSrc := el.attr("Icon", "IconSource"); iconSrc != "" {
+	if iconSrc != "" {
 		path := iconSrc
 		if !filepath.IsAbs(path) && baseDir != "" {
 			path = filepath.Join(baseDir, iconSrc)
@@ -377,6 +417,20 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 			btn.IconPath = iconSrc
 		}
 	}
+	// Размер иконки из вложенного <Image Width="..." Height="...">
+	if btn.IconSize <= 0 && bc.IconW > 0 {
+		btn.IconSize = bc.IconW
+	}
+	if btn.IconSize <= 0 && bc.IconH > 0 {
+		btn.IconSize = bc.IconH
+	}
+	// Foreground из вложенного TextBlock (если не задан на самой кнопке)
+	if bc.Foreground != "" && el.attr("Foreground") == "" {
+		if c, err := parseXAMLColor(bc.Foreground); err == nil {
+			btn.TextColor = c
+		}
+	}
+
 	switch strings.ToLower(el.attr("IconPosition", "IconPos")) {
 	case "top":
 		btn.IconPos = IconTop
@@ -388,6 +442,60 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 	}
 
 	return btn
+}
+
+// buttonContent содержит информацию, извлечённую из дочерних элементов Button.
+type buttonContent struct {
+	Text       string     // текст из TextBlock/Label
+	IconSrc    string     // Source из Image
+	IconW      int        // Width из Image
+	IconH      int        // Height из Image
+	Foreground string     // Foreground из TextBlock (для цвета текста кнопки)
+}
+
+// extractButtonContent рекурсивно обходит дочерние элементы Button,
+// извлекая текст из TextBlock и путь к иконке из Image.
+// Поддерживает WPF Content Model: <Button> → <StackPanel> → <Image> + <TextBlock>.
+func extractButtonContent(el xElement) buttonContent {
+	var bc buttonContent
+	extractButtonContentRec(el, &bc)
+	return bc
+}
+
+func extractButtonContentRec(el xElement, bc *buttonContent) {
+	for _, child := range el.Children {
+		tag := strings.ToLower(child.Tag)
+		if strings.Contains(tag, ".") {
+			continue
+		}
+		switch tag {
+		case "textblock", "label", "run":
+			if bc.Text == "" {
+				if t := child.attr("Text", "Content"); t != "" {
+					bc.Text = t
+				} else if child.Text != "" {
+					bc.Text = child.Text
+				}
+			}
+			if bc.Foreground == "" {
+				bc.Foreground = child.attr("Foreground")
+			}
+		case "image":
+			if bc.IconSrc == "" {
+				if src := child.attr("Source", "Src"); src != "" {
+					bc.IconSrc = src
+				}
+			}
+			if bc.IconW == 0 {
+				bc.IconW = xatoi(child.attr("Width"))
+			}
+			if bc.IconH == 0 {
+				bc.IconH = xatoi(child.attr("Height"))
+			}
+		case "stackpanel", "wrappanel", "dockpanel", "grid":
+			extractButtonContentRec(child, bc)
+		}
+	}
 }
 
 func buildXAMLTextInput(el xElement, isPassword bool) Widget {
@@ -573,8 +681,18 @@ func buildXAMLListView(el xElement) Widget {
 	}
 	for _, child := range el.Children {
 		t := strings.ToLower(child.Tag)
-		if t == "item" || t == "listviewitem" || t == "listboxitem" {
+		switch {
+		case t == "item" || t == "listviewitem" || t == "listboxitem":
 			v := child.attr("Content", "Value")
+			if v == "" {
+				v = strings.TrimSpace(child.Text)
+			}
+			if v != "" {
+				items = append(items, v)
+			}
+		case t == "textblock" || t == "label" || t == "run":
+			// WPF: <ListView><TextBlock>text</TextBlock></ListView>
+			v := child.attr("Text")
 			if v == "" {
 				v = strings.TrimSpace(child.Text)
 			}

@@ -62,6 +62,9 @@ func NewWin10Panel() *Panel {
 
 func (p *Panel) Draw(ctx DrawContext) {
 	b := p.bounds
+	if b.Empty() {
+		return
+	}
 	r := p.CornerRadius
 
 	if r > 0 {
