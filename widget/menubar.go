@@ -145,6 +145,9 @@ func (mb *MenuBar) DrawOverlay(ctx DrawContext) {
 
 func (mb *MenuBar) Draw(ctx DrawContext) {
 	b := mb.bounds
+	if b.Empty() {
+		return
+	}
 
 	// Фон полосы.
 	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), mb.Background)

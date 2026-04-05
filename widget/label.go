@@ -62,11 +62,15 @@ func (l *Label) Text() string {
 }
 
 func (l *Label) Draw(ctx DrawContext) {
+	b := l.bounds
+	if b.Empty() {
+		return
+	}
+
 	l.mu.RLock()
 	text := l.text
 	l.mu.RUnlock()
 
-	b := l.bounds
 	if l.HasBG {
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), l.Background)
 	}

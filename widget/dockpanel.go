@@ -145,6 +145,9 @@ func (dp *DockPanel) layout() {
 // Draw рисует фон и дочерние виджеты.
 func (dp *DockPanel) Draw(ctx DrawContext) {
 	b := dp.bounds
+	if b.Empty() {
+		return
+	}
 	if dp.Background.A > 0 {
 		if dp.UseAlpha && dp.Background.A < 255 {
 			if ac, ok := ctx.(DrawContextAlpha); ok {

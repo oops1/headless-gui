@@ -199,6 +199,9 @@ func (lv *ListView) itemIndexAt(x, y int) int {
 // Draw рисует ListView с элементами, выделением и скроллбаром.
 func (lv *ListView) Draw(ctx DrawContext) {
 	b := lv.bounds
+	if b.Empty() {
+		return
+	}
 	lv.mu.Lock()
 	items := lv.items
 	selected := lv.selected

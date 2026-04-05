@@ -114,6 +114,11 @@ func (s *Slider) Draw(ctx DrawContext) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	b := s.bounds
+	if b.Empty() {
+		return
+	}
+
 	tr := s.trackRect()
 
 	// Дорожка (фон)
