@@ -163,6 +163,9 @@ func (g *Grid) childCell(w Widget) (row, col, rowSpan, colSpan int) {
 // Draw рисует фон, потомков и опционально линии сетки.
 func (g *Grid) Draw(ctx DrawContext) {
 	b := g.bounds
+	if b.Empty() {
+		return
+	}
 
 	// Фон
 	if g.UseAlpha && g.Background.A < 255 {

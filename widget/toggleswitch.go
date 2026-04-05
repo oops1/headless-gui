@@ -83,6 +83,9 @@ func (ts *ToggleSwitch) OnMouseMove(x, y int) {
 // Draw рисует ToggleSwitch: капсула + кружок + текст.
 func (ts *ToggleSwitch) Draw(ctx DrawContext) {
 	b := ts.bounds
+	if b.Empty() {
+		return
+	}
 	capY := b.Min.Y + (b.Dy()-toggleH)/2
 
 	// Фон капсулы

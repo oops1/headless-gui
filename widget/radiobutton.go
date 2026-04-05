@@ -110,6 +110,9 @@ func (rb *RadioButton) deselectOthers() {
 // Draw рисует RadioButton: кружок 16×16 слева + текст справа.
 func (rb *RadioButton) Draw(ctx DrawContext) {
 	b := rb.bounds
+	if b.Empty() {
+		return
+	}
 	const diam = 16
 	cx := b.Min.X + diam/2
 	cy := b.Min.Y + b.Dy()/2

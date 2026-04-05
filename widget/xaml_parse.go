@@ -99,9 +99,13 @@ func parseXAML(data []byte) (*xElement, error) {
 
 func parseXAMLEl(d *xml.Decoder, start xml.StartElement, el *xElement) error {
 	el.Tag = start.Name.Local
-	el.attrs = make(map[string]string, len(start.Attr))
+	el.attrs = make(map[string]string, len(start.Attr)*2)
 	for _, a := range start.Attr {
 		el.attrs[a.Name.Local] = a.Value
+		// WPF attached properties: namespace="DockPanel", local="Dock" → "DockPanel.Dock"
+		if a.Name.Space != "" {
+			el.attrs[a.Name.Space+"."+a.Name.Local] = a.Value
+		}
 	}
 	for {
 		tok, err := d.Token()

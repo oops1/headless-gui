@@ -38,6 +38,13 @@ type Button struct {
 	IconPos  IconPosition // расположение иконки (Left, Top, IconOnly)
 	IconSize int          // размер иконки в пикселях (0 = авто: высота кнопки - 8)
 
+	// ToolTip — всплывающая подсказка (WPF ToolTip).
+	ToolTip string
+	// Padding — внутренние отступы (WPF Padding: Left,Top,Right,Bottom).
+	Padding Margin
+	// CornerRadius — радиус скругления углов (0 = прямые).
+	CornerRadius int
+
 	pressed int32 // 0 | 1, атомарно
 	hovered int32 // 0 | 1, атомарно
 	focused int32 // 0 | 1, атомарно
@@ -108,6 +115,9 @@ func (btn *Button) OnMouseMove(x, y int) {
 
 func (btn *Button) Draw(ctx DrawContext) {
 	b := btn.bounds
+	if b.Empty() {
+		return
+	}
 
 	bg := btn.Background
 	switch {
@@ -117,11 +127,21 @@ func (btn *Button) Draw(ctx DrawContext) {
 		bg = btn.HoverBG
 	}
 
-	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
-	if btn.IsFocused() {
-		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), btn.HighlightTop)
+	cr := btn.CornerRadius
+	if cr > 0 {
+		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, bg)
+		if btn.IsFocused() {
+			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, btn.HighlightTop)
+		} else if btn.BorderColor.A > 0 {
+			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, btn.BorderColor)
+		}
 	} else {
-		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), btn.BorderColor)
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
+		if btn.IsFocused() {
+			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), btn.HighlightTop)
+		} else {
+			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), btn.BorderColor)
+		}
 	}
 
 	if btn.ShowHighlight && !btn.IsPressed() {

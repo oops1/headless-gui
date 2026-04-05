@@ -50,6 +50,9 @@ func (pb *ProgressBar) Value() float64 {
 
 func (pb *ProgressBar) Draw(ctx DrawContext) {
 	b := pb.bounds
+	if b.Empty() {
+		return
+	}
 	v := pb.Value()
 
 	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), pb.Background)

@@ -67,6 +67,11 @@ type Base struct {
 	HAlign HorizontalAlignment
 	// VerticalAlignment — WPF VerticalAlignment (Top, Center, Bottom, Stretch).
 	VAlign VerticalAlignment
+
+	// XAMLWidth / XAMLHeight — явно заданные Width/Height из XAML.
+	// Используются applyAlignmentRect когда bounds ещё не установлены контейнером.
+	XAMLWidth  int
+	XAMLHeight int
 }
 
 func (b *Base) Bounds() image.Rectangle     { return b.bounds }
@@ -122,6 +127,12 @@ func (b *Base) SetHAlign(a HorizontalAlignment) { b.HAlign = a }
 func (b *Base) GetVAlign() VerticalAlignment   { return b.VAlign }
 func (b *Base) SetVAlign(a VerticalAlignment)  { b.VAlign = a }
 
+// GetXAMLSize возвращает явно заданные Width/Height из XAML.
+func (b *Base) GetXAMLSize() (int, int) { return b.XAMLWidth, b.XAMLHeight }
+
+// SetXAMLSize сохраняет явные Width/Height из XAML.
+func (b *Base) SetXAMLSize(w, h int) { b.XAMLWidth = w; b.XAMLHeight = h }
+
 // applyAlignmentRect корректирует прямоугольник r на основе
 // HorizontalAlignment / VerticalAlignment виджета и его текущего размера.
 // Если alignment = Stretch — возвращает r без изменений.
@@ -139,10 +150,23 @@ func applyAlignmentRect(w Widget, r image.Rectangle) image.Rectangle {
 	ha := ag.GetHAlign()
 	va := ag.GetVAlign()
 
-	// Текущий размер виджета (из XAML Width/Height)
+	// Текущий размер виджета: сначала пробуем XAMLWidth/XAMLHeight,
+	// затем текущие bounds, затем desiredWidth/desiredHeight.
+	type xamlSizeGetter interface {
+		GetXAMLSize() (int, int)
+	}
 	wb := w.Bounds()
 	ww := wb.Dx()
 	wh := wb.Dy()
+	if xsg, ok2 := w.(xamlSizeGetter); ok2 {
+		xw, xh := xsg.GetXAMLSize()
+		if xw > 0 {
+			ww = xw
+		}
+		if xh > 0 {
+			wh = xh
+		}
+	}
 
 	// Горизонтальное выравнивание
 	switch ha {
@@ -189,6 +213,17 @@ func applyAlignmentRect(w Widget, r image.Rectangle) image.Rectangle {
 // Для Label — высота текста + padding. Для контейнеров — максимум из детей.
 // Если не можем определить — возвращаем дефолт 26px.
 func desiredHeight(w Widget) int {
+	// Если явно задан Height в XAML — используем его.
+	type xamlSizeGetter interface {
+		GetXAMLSize() (int, int)
+	}
+	if xsg, ok := w.(xamlSizeGetter); ok {
+		_, xh := xsg.GetXAMLSize()
+		if xh > 0 {
+			return xh
+		}
+	}
+
 	switch v := w.(type) {
 	case *Label:
 		fs := v.FontSize
@@ -200,6 +235,28 @@ func desiredHeight(w Widget) int {
 		return 32
 	case *TextInput:
 		return 26
+	case *MenuBar:
+		return 28
+	case *StackPanel:
+		// StackPanel: максимальная высота ребёнка + padding (для горизонтального)
+		pad := v.Padding
+		children := w.Children()
+		if len(children) > 0 {
+			maxH := 0
+			for _, ch := range children {
+				h := ch.Bounds().Dy()
+				if h <= 0 {
+					h = desiredHeight(ch)
+				}
+				if h > maxH {
+					maxH = h
+				}
+			}
+			if maxH > 0 {
+				return maxH + pad*2
+			}
+		}
+		return 30 + pad*2
 	default:
 		// Для контейнеров — максимальная высота среди детей
 		children := w.Children()
@@ -225,6 +282,17 @@ func desiredHeight(w Widget) int {
 // desiredWidth возвращает желаемую ширину виджета для Auto-измерения.
 // Для Label/TextBlock — ширина текста (приблизительно), для остальных — дефолт.
 func desiredWidth(w Widget) int {
+	// Если явно задан Width в XAML — используем его.
+	type xamlSizeGetter interface {
+		GetXAMLSize() (int, int)
+	}
+	if xsg, ok := w.(xamlSizeGetter); ok {
+		xw, _ := xsg.GetXAMLSize()
+		if xw > 0 {
+			return xw
+		}
+	}
+
 	switch v := w.(type) {
 	case *Label:
 		// Примерная ширина: длина текста * средняя ширина символа + padding
@@ -244,6 +312,9 @@ func desiredWidth(w Widget) int {
 // Вызывается конкретными виджетами в конце своего Draw.
 func (b *Base) drawChildren(ctx DrawContext) {
 	for _, child := range b.children {
+		if child.Bounds().Empty() {
+			continue
+		}
 		child.Draw(ctx)
 	}
 }

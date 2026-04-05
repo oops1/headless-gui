@@ -120,6 +120,9 @@ func (d *Dropdown) OnMouseMove(x, y int) {
 
 func (d *Dropdown) Draw(ctx DrawContext) {
 	b := d.bounds
+	if b.Empty() {
+		return
+	}
 
 	isOpen := atomic.LoadInt32(&d.open) == 1
 
