@@ -31,7 +31,10 @@ type TextInput struct {
 	selStart  int    // начало выделения (-1 = нет)
 	selEnd    int    // конец выделения
 	scrollX   int    // горизонтальный сдвиг, пикселей
-	clipboard []rune // внутренний буфер обмена
+	dragging bool // true — идёт выделение мышью (зажата ЛКМ)
+
+	// Контекстное меню (правый клик).
+	contextMenu *PopupMenu
 
 	// Позиции символов от последнего Draw: positions[i] = X-сдвиг i-го символа от начала текста.
 	// Обновляется в Draw(), используется в OnMouseButton().
@@ -202,6 +205,13 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	if !t.IsEnabled() || !e.Pressed {
 		return
 	}
+
+	// Если контекстное меню открыто — делегируем клавиши ему.
+	if t.contextMenu != nil && t.contextMenu.IsOpen() {
+		t.contextMenu.OnKeyEvent(e)
+		return
+	}
+
 	ctrl := e.Mod&ModCtrl != 0
 	shift := e.Mod&ModShift != 0
 
@@ -312,25 +322,25 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 				// В режиме пароля копирование запрещено
 				if !t.isPassword && t.selActive() {
 					lo, hi := t.normSel()
-					t.clipboard = make([]rune, hi-lo)
-					copy(t.clipboard, t.runes[lo:hi])
+					ClipboardSetText(string(t.runes[lo:hi]))
 				}
 			case KeyX:
 				// В режиме пароля вырезание запрещено
 				if !t.isPassword && t.selActive() {
 					lo, hi := t.normSel()
-					t.clipboard = make([]rune, hi-lo)
-					copy(t.clipboard, t.runes[lo:hi])
+					ClipboardSetText(string(t.runes[lo:hi]))
 					t.deleteSel()
 					changed = true
 				}
 			case KeyV:
-				if len(t.clipboard) > 0 {
+				clipText := ClipboardGetText()
+				if len(clipText) > 0 {
 					t.deleteSel()
-					n := len(t.clipboard)
+					paste := []rune(clipText)
+					n := len(paste)
 					ins := make([]rune, len(t.runes)+n)
 					copy(ins, t.runes[:t.caretPos])
-					copy(ins[t.caretPos:], t.clipboard)
+					copy(ins[t.caretPos:], paste)
 					copy(ins[t.caretPos+n:], t.runes[t.caretPos:])
 					t.runes = ins
 					t.caretPos += n
@@ -359,36 +369,19 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	}
 }
 
-// ─── MouseClickHandler ───────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-func (t *TextInput) OnMouseButton(e MouseEvent) bool {
-	if !t.IsEnabled() {
-		return false
-	}
-	if e.Button != MouseLeft || !e.Pressed {
-		return false
-	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
+// charIndexAtX возвращает индекс символа (позицию каретки) для абсолютной X-координаты.
+// Вызывать под t.mu.Lock().
+func (t *TextInput) charIndexAtX(absX int) int {
 	b := t.bounds
-
-	// Клик по кнопке-глазику (правая часть поля)
-	if t.isPassword && e.X >= b.Max.X-eyeButtonWidth && e.X <= b.Max.X {
-		t.showPassword = !t.showPassword
-		return true
-	}
-
 	textX := b.Min.X + t.PaddingX - t.scrollX
-	relX := e.X - textX
+	relX := absX - textX
 
 	pos := t.charPositions
 	if len(pos) == 0 {
-		return true
+		return 0
 	}
-
-	// Ищем ближайший символ к позиции клика
 	best := len(pos) - 1
 	for i := 0; i < len(pos)-1; i++ {
 		mid := (pos[i] + pos[i+1]) / 2
@@ -397,15 +390,182 @@ func (t *TextInput) OnMouseButton(e MouseEvent) bool {
 			break
 		}
 	}
-	t.caretPos = best
-	t.selStart = -1
+	return best
+}
+
+// ─── MouseClickHandler ───────────────────────────────────────────────────────
+
+func (t *TextInput) OnMouseButton(e MouseEvent) bool {
+	if !t.IsEnabled() {
+		return false
+	}
+
+	// Если контекстное меню открыто — делегируем ему клики.
+	if t.contextMenu != nil && t.contextMenu.IsOpen() {
+		// Поглощаем отпускание правой кнопки — это та же кнопка,
+		// которой открыли меню; без этого popup закроется мгновенно.
+		if e.Button == MouseRight && !e.Pressed {
+			return true
+		}
+		pr := t.contextMenu.Bounds()
+		if image.Pt(e.X, e.Y).In(pr) {
+			return t.contextMenu.OnMouseButton(e)
+		}
+		// Клик за пределами меню — закрываем.
+		t.contextMenu.Close()
+		// Не возвращаем true: пусть клик обработается нормально.
+	}
+
+	// Правый клик — контекстное меню.
+	if e.Button == MouseRight && e.Pressed {
+		t.showContextMenu(e.X, e.Y)
+		return true
+	}
+
+	if e.Button != MouseLeft {
+		return false
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	b := t.bounds
+
+	if e.Pressed {
+		// ── MouseDown (ЛКМ) ──
+
+		// Клик по кнопке-глазику (правая часть поля)
+		if t.isPassword && e.X >= b.Max.X-eyeButtonWidth && e.X <= b.Max.X {
+			t.showPassword = !t.showPassword
+			return true
+		}
+
+		idx := t.charIndexAtX(e.X)
+		t.caretPos = idx
+		t.selStart = idx // якорь выделения
+		t.selEnd = idx   // пока совпадает — выделения нет
+		t.dragging = true
+	} else {
+		// ── MouseUp (ЛКМ) ──
+		t.dragging = false
+		// Если selStart == selEnd → выделения не было, сбрасываем.
+		if t.selStart == t.selEnd {
+			t.selStart = -1
+		}
+	}
 	return true
 }
 
-// OnMouseMove обрабатывает hover для кнопки-глазика.
+// showContextMenu создаёт и показывает контекстное меню (Cut/Copy/Paste/Select All).
+func (t *TextInput) showContextMenu(x, y int) {
+	t.mu.Lock()
+	hasSel := t.selActive()
+	hasText := len(t.runes) > 0
+	isPwd := t.isPassword
+	t.mu.Unlock()
+
+	clipText := ClipboardGetText()
+	hasClip := len(clipText) > 0
+
+	menu := NewPopupMenu()
+
+	// Cut
+	menu.SetItems([]MenuItem{
+		{
+			Text:     "Cut",
+			Disabled: !hasSel || isPwd,
+			OnClick: func() {
+				t.mu.Lock()
+				if t.selActive() && !t.isPassword {
+					lo, hi := t.normSel()
+					ClipboardSetText(string(t.runes[lo:hi]))
+					t.deleteSel()
+					t.clampCaret()
+					text := string(t.runes)
+					onCh := t.OnChange
+					t.mu.Unlock()
+					if onCh != nil {
+						go onCh(text)
+					}
+				} else {
+					t.mu.Unlock()
+				}
+			},
+		},
+		{
+			Text:     "Copy",
+			Disabled: !hasSel || isPwd,
+			OnClick: func() {
+				t.mu.Lock()
+				if t.selActive() && !t.isPassword {
+					lo, hi := t.normSel()
+					ClipboardSetText(string(t.runes[lo:hi]))
+				}
+				t.mu.Unlock()
+			},
+		},
+		{
+			Text:     "Paste",
+			Disabled: !hasClip,
+			OnClick: func() {
+				ct := ClipboardGetText()
+				if len(ct) == 0 {
+					return
+				}
+				t.mu.Lock()
+				t.deleteSel()
+				paste := []rune(ct)
+				n := len(paste)
+				ins := make([]rune, len(t.runes)+n)
+				copy(ins, t.runes[:t.caretPos])
+				copy(ins[t.caretPos:], paste)
+				copy(ins[t.caretPos+n:], t.runes[t.caretPos:])
+				t.runes = ins
+				t.caretPos += n
+				t.clampCaret()
+				text := string(t.runes)
+				onCh := t.OnChange
+				t.mu.Unlock()
+				if onCh != nil {
+					go onCh(text)
+				}
+			},
+		},
+		{Separator: true},
+		{
+			Text:     "Select All",
+			Disabled: !hasText,
+			OnClick: func() {
+				t.mu.Lock()
+				t.selStart = 0
+				t.selEnd = len(t.runes)
+				t.caretPos = len(t.runes)
+				t.mu.Unlock()
+			},
+		},
+	})
+
+	menu.Show(x, y)
+	t.contextMenu = menu
+}
+
+// OnMouseMove обрабатывает hover для кнопки-глазика, контекстного меню и drag-выделение.
 func (t *TextInput) OnMouseMove(x, y int) {
+	// Делегируем hover контекстному меню.
+	if t.contextMenu != nil && t.contextMenu.IsOpen() {
+		t.contextMenu.OnMouseMove(x, y)
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Drag-выделение: если ЛКМ зажата — обновляем selEnd и caretPos.
+	if t.dragging {
+		idx := t.charIndexAtX(x)
+		t.selEnd = idx
+		t.caretPos = idx
+	}
+
 	if t.isPassword {
 		b := t.bounds
 		t.eyeHovered = x >= b.Max.X-eyeButtonWidth && x <= b.Max.X &&
@@ -619,6 +779,45 @@ func sqrt1minus(x float64) float64 {
 		guess = (guess + v/guess) / 2
 	}
 	return guess
+}
+
+// ─── Bounds (расширенные при открытом контекстном меню) ─────────────────────
+
+// Bounds возвращает расширенный прямоугольник, включая popup контекстного меню,
+// чтобы hitTest и findOverlayAt (engine/events.go) находили виджет при клике
+// на пункты контекстного меню.
+func (t *TextInput) Bounds() image.Rectangle {
+	b := t.Base.Bounds()
+	if t.contextMenu != nil && t.contextMenu.IsOpen() {
+		return b.Union(t.contextMenu.Bounds())
+	}
+	return b
+}
+
+// BaseBounds возвращает базовый прямоугольник поля (без popup).
+func (t *TextInput) BaseBounds() image.Rectangle {
+	return t.Base.Bounds()
+}
+
+// ─── Overlay (контекстное меню) ──────────────────────────────────────────────
+
+// HasOverlay возвращает true когда контекстное меню открыто.
+func (t *TextInput) HasOverlay() bool {
+	return t.contextMenu != nil && t.contextMenu.IsOpen()
+}
+
+// DrawOverlay рисует контекстное меню поверх всего UI.
+func (t *TextInput) DrawOverlay(ctx DrawContext) {
+	if t.contextMenu != nil && t.contextMenu.IsOpen() {
+		t.contextMenu.DrawOverlay(ctx)
+	}
+}
+
+// Dismiss закрывает контекстное меню. Реализует Dismissable.
+func (t *TextInput) Dismiss() {
+	if t.contextMenu != nil && t.contextMenu.IsOpen() {
+		t.contextMenu.Close()
+	}
 }
 
 // ─── Themeable ───────────────────────────────────────────────────────────────
