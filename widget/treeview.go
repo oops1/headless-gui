@@ -142,6 +142,9 @@ func collectVisible(n *TreeNode, depth int, out *[]flatNode) {
 
 func (tv *TreeView) Draw(ctx DrawContext) {
 	b := tv.Bounds()
+	if b.Empty() {
+		return
+	}
 	ih := tv.itemH()
 	indent := tv.indentW()
 

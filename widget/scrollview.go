@@ -126,6 +126,9 @@ func (sv *ScrollView) thumbRect() image.Rectangle {
 // Draw рисует ScrollView с клиппингом и скроллбаром.
 func (sv *ScrollView) Draw(ctx DrawContext) {
 	b := sv.bounds
+	if b.Empty() {
+		return
+	}
 	sv.mu.Lock()
 	scrollY := sv.scrollY
 	sv.mu.Unlock()

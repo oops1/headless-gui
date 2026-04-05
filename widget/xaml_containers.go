@@ -971,6 +971,10 @@ func buildXAMLToolBar(el xElement, reg map[string]Widget, parentOff image.Point,
 			return nil, err
 		}
 		if cw != nil {
+			// Кнопки в ToolBar получают скруглённые углы по умолчанию
+			if btn, ok := cw.(*Button); ok && btn.CornerRadius == 0 {
+				btn.CornerRadius = 4
+			}
 			sp.AddChild(cw)
 		}
 	}

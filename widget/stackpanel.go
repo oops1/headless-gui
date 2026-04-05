@@ -135,6 +135,9 @@ func (sp *StackPanel) layout() {
 // Draw рисует фон и дочерние виджеты.
 func (sp *StackPanel) Draw(ctx DrawContext) {
 	b := sp.Bounds()
+	if b.Empty() {
+		return
+	}
 
 	if sp.Background.A > 0 {
 		if sp.UseAlpha && sp.Background.A < 255 {

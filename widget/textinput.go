@@ -437,6 +437,9 @@ func (t *TextInput) Draw(ctx DrawContext) {
 	}
 
 	b := t.bounds
+	if b.Empty() {
+		return
+	}
 
 	// Фон
 	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.Background)
