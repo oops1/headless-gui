@@ -136,6 +136,12 @@ func applyDockAttachedProp(w Widget, el xElement) {
 	}
 }
 
+// LoadImageFile загружает PNG или JPEG файл и возвращает *image.RGBA.
+// Экспортирован для использования в приложениях (иконки TreeView, и т.д.).
+func LoadImageFile(path string) (*image.RGBA, error) {
+	return loadImageFile(path)
+}
+
 // loadImageFile загружает PNG или JPEG файл и возвращает *image.RGBA.
 func loadImageFile(path string) (*image.RGBA, error) {
 	f, err := os.Open(path)
