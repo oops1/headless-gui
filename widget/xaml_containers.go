@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
+	tvPkg "github.com/oops1/headless-gui/v3/widget/treeview"
 )
 
 // ─── buildXAMLGrid ─────────────────────────────────────────────────────────
@@ -1075,84 +1076,165 @@ func buildXAMLStackPanel(el xElement, reg map[string]Widget, parentOff image.Poi
 
 // ─── buildXAMLTreeView ─────────────────────────────────────────────────────
 
-// buildXAMLTreeView строит TreeView из XAML-элемента <TreeView>.
+// buildXAMLTreeView строит TreeViewWidget из XAML-элемента <TreeView>.
 //
-// Рекурсивно разбирает вложенные <TreeViewItem Header="..."> в TreeNode-дерево.
+// Поддерживаемые WPF-совместимые атрибуты:
 //
-// Поддерживаемые атрибуты:
+//	Background           — цвет фона (#RRGGBB / имя)
+//	Foreground           — цвет текста
+//	ItemHeight           — высота строки (px)
+//	IndentSize           — отступ уровня вложенности (px)
+//	IsReadOnly           — только чтение (True/False)
+//	ShowIndentGuides     — показывать линии иерархии (True/False)
 //
-//	Background   — цвет фона (#RRGGBB / имя)
-//	Foreground   — цвет текста
-//	ItemHeight   — высота строки (px)
+// Вложенные элементы:
+//
+//	<TreeViewItem>       — статические узлы дерева
+//	<TreeView.ItemTemplate> — HierarchicalDataTemplate для data binding
 func buildXAMLTreeView(el xElement, reg map[string]Widget, parentOff image.Point) (Widget, error) {
-	tv := NewTreeView()
+	tw := NewTreeViewWidget()
 
 	// Background
 	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
-			tv.Background = c
+			tw.Tree.Theme.Background = c
 		}
 	}
 
 	// Foreground
 	if fgStr := el.attr("Foreground"); fgStr != "" {
 		if c, err := parseXAMLColor(fgStr); err == nil {
-			tv.Foreground = c
+			tw.Tree.Theme.Foreground = c
 		}
 	}
 
 	// ItemHeight
 	if ih := xatoi(el.attr("ItemHeight")); ih > 0 {
-		tv.ItemHeight = ih
+		tw.Tree.ItemHeight = ih
+	}
+
+	// IndentSize
+	if is := xatoi(el.attr("IndentSize")); is > 0 {
+		tw.Tree.IndentSize = is
+	}
+
+	// IsReadOnly
+	if strings.EqualFold(el.attr("IsReadOnly"), "true") {
+		tw.Tree.IsReadOnly = true
+	}
+
+	// ShowIndentGuides
+	if strings.EqualFold(el.attr("ShowIndentGuides"), "true") {
+		tw.Tree.ShowIndentGuides = true
 	}
 
 	// Bounds
 	absBounds := el.bounds().Add(parentOff)
-	tv.SetBounds(absBounds)
+	tw.SetBounds(absBounds)
 
 	// Attached properties
-	applyGridAttachedProps(tv, el)
-	applyDockAttachedProp(tv, el)
-	applyMargin(tv, el)
-	applyIsEnabled(tv, el)
+	applyGridAttachedProps(tw, el)
+	applyDockAttachedProp(tw, el)
+	applyMargin(tw, el)
+	applyIsEnabled(tw, el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
-		reg[id] = tv
+		reg[id] = tw
 	}
 
-	// Рекурсивный парсинг TreeViewItem → TreeNode
+	// Рекурсивный парсинг дочерних элементов
 	for _, child := range el.Children {
-		if strings.EqualFold(child.Tag, "TreeViewItem") {
-			node := parseTreeViewItem(child)
-			tv.AddRoot(node)
+		childTag := strings.ToLower(child.Tag)
+
+		switch {
+		case childTag == "treeviewitem":
+			item := parseTreeViewItemNew(child)
+			tw.Tree.AddRoot(item)
+
+		case childTag == "treeview.itemtemplate":
+			// <TreeView.ItemTemplate> → HierarchicalDataTemplate
+			for _, tmplEl := range child.Children {
+				if strings.EqualFold(tmplEl.Tag, "HierarchicalDataTemplate") {
+					tmpl := parseHierarchicalDataTemplate(tmplEl)
+					tw.Tree.SetItemTemplate(tmpl)
+				}
+			}
 		}
 	}
 
-	return tv, nil
+	return tw, nil
 }
 
-// parseTreeViewItem рекурсивно строит TreeNode из <TreeViewItem>.
-func parseTreeViewItem(el xElement) *TreeNode {
+// parseTreeViewItemNew рекурсивно строит TreeViewItem из <TreeViewItem>.
+func parseTreeViewItemNew(el xElement) *tvPkg.TreeViewItem {
 	header := el.attr("Header", "Text", "Content")
 	if header == "" {
 		header = el.Text
 	}
-	node := NewTreeNode(header)
+	item := tvPkg.NewItem(header)
 
 	// IsExpanded
 	if strings.EqualFold(el.attr("IsExpanded"), "true") {
-		node.Expanded = true
+		item.Expanded = true
+	}
+
+	// IsEnabled
+	if strings.EqualFold(el.attr("IsEnabled"), "false") {
+		item.IsEnabled = false
 	}
 
 	// Вложенные TreeViewItem
 	for _, child := range el.Children {
 		if strings.EqualFold(child.Tag, "TreeViewItem") {
-			node.AddChild(parseTreeViewItem(child))
+			item.AddChild(parseTreeViewItemNew(child))
 		}
 	}
 
-	return node
+	return item
+}
+
+// parseHierarchicalDataTemplate парсит <HierarchicalDataTemplate> из XAML.
+func parseHierarchicalDataTemplate(el xElement) *tvPkg.HierarchicalDataTemplate {
+	tmpl := &tvPkg.HierarchicalDataTemplate{}
+
+	// ItemsSource="{Binding Children}"
+	if is := el.attr("ItemsSource"); is != "" {
+		tmpl.ItemsSourcePath = parseBindingPath(is)
+	}
+
+	// Ищем вложенные элементы для определения HeaderPath и IconPath
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+
+		switch {
+		case childTag == "stackpanel":
+			// <StackPanel Orientation="Horizontal">
+			//   <Image Source="{Binding Icon}"/>
+			//   <TextBlock Text="{Binding Name}"/>
+			for _, inner := range child.Children {
+				innerTag := strings.ToLower(inner.Tag)
+				switch innerTag {
+				case "image":
+					if src := inner.attr("Source"); src != "" {
+						tmpl.IconPath = parseBindingPath(src)
+					}
+				case "textblock":
+					if txt := inner.attr("Text"); txt != "" {
+						tmpl.HeaderPath = parseBindingPath(txt)
+					}
+				}
+			}
+
+		case childTag == "textblock":
+			// Прямой TextBlock как содержимое шаблона
+			if txt := child.attr("Text"); txt != "" {
+				tmpl.HeaderPath = parseBindingPath(txt)
+			}
+		}
+	}
+
+	return tmpl
 }
 
 // ─── buildXAMLDataGrid ─────────────────────────────────────────────────────
