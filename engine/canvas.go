@@ -401,4 +401,3 @@ func (c *Canvas) syncTile(x, y, w, h int) {
 		copy(c.front.Pix[dst:dst+rowBytes], c.back.Pix[src:src+rowBytes])
 	}
 }
-
