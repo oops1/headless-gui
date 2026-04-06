@@ -29,9 +29,9 @@ const (
 type DockSide int
 
 const (
-	DockTop    DockSide = iota // по умолчанию
+	DockLeft   DockSide = iota // 0 — по умолчанию (WPF standard: DockPanel.Dock default = Left)
+	DockTop
 	DockBottom
-	DockLeft
 	DockRight
 	DockFill // последний элемент заполняет оставшееся пространство
 )
@@ -238,8 +238,11 @@ func desiredHeight(w Widget) int {
 	case *MenuBar:
 		return 28
 	case *StackPanel:
-		// StackPanel: максимальная высота ребёнка + padding (для горизонтального)
+		// StackPanel: максимальная высота ребёнка + margin + padding (для горизонтального)
 		pad := v.Padding
+		type marginGetter interface {
+			GetMargin() Margin
+		}
 		children := w.Children()
 		if len(children) > 0 {
 			maxH := 0
@@ -247,6 +250,10 @@ func desiredHeight(w Widget) int {
 				h := ch.Bounds().Dy()
 				if h <= 0 {
 					h = desiredHeight(ch)
+				}
+				if mg, ok := ch.(marginGetter); ok {
+					m := mg.GetMargin()
+					h += m.Top + m.Bottom
 				}
 				if h > maxH {
 					maxH = h
@@ -258,14 +265,22 @@ func desiredHeight(w Widget) int {
 		}
 		return 30 + pad*2
 	default:
-		// Для контейнеров — максимальная высота среди детей
+		// Для контейнеров — максимальная высота среди детей + их margin.
 		children := w.Children()
 		if len(children) > 0 {
+			type marginGetter interface {
+				GetMargin() Margin
+			}
 			maxH := 0
 			for _, ch := range children {
 				h := ch.Bounds().Dy()
 				if h <= 0 {
 					h = desiredHeight(ch)
+				}
+				// Учитываем margin дочернего элемента.
+				if mg, ok := ch.(marginGetter); ok {
+					m := mg.GetMargin()
+					h += m.Top + m.Bottom
 				}
 				if h > maxH {
 					maxH = h

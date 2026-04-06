@@ -226,8 +226,6 @@ func (g *Grid) measureAutoSizes() {
 			col = cols - 1
 		}
 
-		cb := child.Bounds()
-
 		// Margin
 		var m Margin
 		type marginGetter interface {
@@ -237,24 +235,19 @@ func (g *Grid) measureAutoSizes() {
 			m = mg.GetMargin()
 		}
 
-		// Auto строка: берём высоту ребёнка + margin.
-		// Для виджетов без явного размера (bounds пуст) — используем desiredHeight.
+		// Auto строка: используем desiredHeight (учитывает XAML Height, содержимое
+		// и margin дочерних элементов). Добавляем margin самого ребёнка в Grid.
 		if row < len(g.RowDefs) && g.RowDefs[row].Mode == GridSizeAuto {
-			h := cb.Dy() + m.Top + m.Bottom
-			if h <= 0 {
-				h = desiredHeight(child)
-			}
+			dh := desiredHeight(child)
+			h := dh + m.Top + m.Bottom
 			if h > g.RowDefs[row].Min {
 				g.RowDefs[row].Min = h
 			}
 		}
 
-		// Auto столбец: берём ширину ребёнка + margin
+		// Auto столбец: аналогично desiredWidth + margin.
 		if col < len(g.ColDefs) && g.ColDefs[col].Mode == GridSizeAuto {
-			w := cb.Dx() + m.Left + m.Right
-			if w <= 0 {
-				w = desiredWidth(child)
-			}
+			w := desiredWidth(child) + m.Left + m.Right
 			if w > g.ColDefs[col].Min {
 				g.ColDefs[col].Min = w
 			}

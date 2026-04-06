@@ -30,10 +30,11 @@ type TabControl struct {
 	TabHeight int // высота полосы вкладок (по умолчанию 32)
 	TabPadH   int // горизонтальный padding текста вкладки
 
-	mu       sync.Mutex
-	tabs     []TabItem
-	active   int // индекс активной вкладки
-	hoverIdx int // индекс вкладки под курсором
+	mu        sync.Mutex
+	tabs      []TabItem
+	active    int   // индекс активной вкладки
+	hoverIdx  int   // индекс вкладки под курсором
+	tabWidths []int // реальные ширины вкладок (обновляются в Draw)
 
 	OnTabChange func(index int, header string)
 }
@@ -161,11 +162,13 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 	// Полоса вкладок — фон
 	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), tc.TabHeight, tc.TabBG)
 
-	// Рисуем каждую вкладку
+	// Рисуем каждую вкладку и сохраняем реальные ширины для hit-test.
+	widths := make([]int, len(tabs))
 	tabX := b.Min.X
 	for i, tab := range tabs {
 		textW := ctx.MeasureText(tab.Header, DefaultFontSizePt)
 		tabW := textW + tc.TabPadH*2
+		widths[i] = tabW
 		tabRect := image.Rect(tabX, b.Min.Y, tabX+tabW, b.Min.Y+tc.TabHeight)
 
 		// Фон вкладки
@@ -199,6 +202,11 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 
 		tabX += tabW
 	}
+
+	// Сохраняем реальные ширины для hit-test в OnMouseButton/OnMouseMove.
+	tc.mu.Lock()
+	tc.tabWidths = widths
+	tc.mu.Unlock()
 
 	// Линия под вкладками
 	ctx.DrawHLine(b.Min.X, b.Min.Y+tc.TabHeight-1, b.Dx(), tc.TabBorder)
@@ -238,12 +246,13 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
-	// Находим вкладку по X-позиции
+	// Находим вкладку по X-позиции (используем реальные ширины из Draw).
 	tabX := b.Min.X
-	for i, tab := range tc.tabs {
-		textW := 80 // примерная ширина; используем фиксированную оценку
-		_ = tab
-		tabW := textW + tc.TabPadH*2
+	for i := range tc.tabs {
+		tabW := tc.TabPadH*2 + 80 // fallback
+		if i < len(tc.tabWidths) {
+			tabW = tc.tabWidths[i]
+		}
 		if e.X >= tabX && e.X < tabX+tabW {
 			if tc.active != i {
 				tc.active = i
@@ -273,7 +282,11 @@ func (tc *TabControl) OnMouseMove(x, y int) {
 
 	tabX := b.Min.X
 	for i, tab := range tc.tabs {
-		tabW := len(tab.Header)*8 + tc.TabPadH*2 // оценка ширины
+		tabW := len(tab.Header)*8 + tc.TabPadH*2 // fallback
+		if i < len(tc.tabWidths) {
+			tabW = tc.tabWidths[i]
+		}
+		_ = tab
 		if x >= tabX && x < tabX+tabW {
 			tc.hoverIdx = i
 			return
