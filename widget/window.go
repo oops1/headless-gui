@@ -10,7 +10,7 @@
 // WPF-совместимые атрибуты:
 //
 //	<Window Title="Настройки" Width="800" Height="600"
-//	        WindowStyle="SingleBorderWindow" TitleStyle="Win"
+//	        WindowStyle="SingleBorderWindow" TitleStyle="Auto"
 //	        ResizeMode="CanResize" Background="#1E1E2E">
 //	    <Grid>...</Grid>
 //	</Window>
@@ -40,8 +40,12 @@ const (
 type WindowTitleStyle int
 
 const (
+	// WindowTitleAuto — автоматический выбор стиля по текущей ОС:
+	// macOS → Mac-стиль, Windows/Linux → Windows-стиль.
+	// Это значение по умолчанию (zero value).
+	WindowTitleAuto WindowTitleStyle = iota
 	// WindowTitleWin — Windows: текст слева, кнопки ─ □ × справа.
-	WindowTitleWin WindowTitleStyle = iota
+	WindowTitleWin
 	// WindowTitleMac — macOS: traffic lights ● ● ● слева, текст по центру.
 	WindowTitleMac
 )
@@ -138,17 +142,37 @@ type Window struct {
 }
 
 // NewWindow создаёт окно с заданным заголовком и размером.
+// TitleStyle по умолчанию = WindowTitleAuto (определяется по текущей ОС).
 func NewWindow(title string, width, height int) *Window {
 	w := &Window{
 		Title:       title,
 		Style:       WindowStyleSingleBorder,
-		TitleStyle:  WindowTitleWin,
+		TitleStyle:  WindowTitleAuto, // авто-определение по ОС
 		Resize:      ResizeModeCanResize,
 		Background:  win10.WindowBG,
 		BorderColor: win10.Border,
 	}
 	w.SetBounds(image.Rect(0, 0, width, height))
 	return w
+}
+
+// resolvedTitleStyle возвращает конкретный стиль заголовка.
+// Если TitleStyle == WindowTitleAuto, определяет по текущей ОС.
+func (w *Window) resolvedTitleStyle() WindowTitleStyle {
+	if w.TitleStyle == WindowTitleAuto {
+		return detectedTitleStyle()
+	}
+	return w.TitleStyle
+}
+
+// DetectedOS возвращает строковое имя текущей ОС ("windows", "darwin", "linux").
+func DetectedOS() string {
+	return detectedOS()
+}
+
+// DetectedTitleStyle возвращает стиль заголовка, соответствующий текущей ОС.
+func DetectedTitleStyle() WindowTitleStyle {
+	return detectedTitleStyle()
 }
 
 // SetBounds обновляет bounds окна и перестраивает дочерние виджеты
@@ -237,7 +261,7 @@ func (w *Window) btnCount() int {
 
 // CloseBtnRect возвращает bounds кнопки закрытия (×).
 func (w *Window) CloseBtnRect() image.Rectangle {
-	if w.TitleStyle == WindowTitleMac {
+	if w.resolvedTitleStyle() == WindowTitleMac {
 		b := w.Bounds()
 		th := w.titleH()
 		cx := b.Min.X + macStartX
@@ -256,7 +280,7 @@ func (w *Window) MinBtnRect() image.Rectangle {
 	if w.btnCount() < 2 {
 		return image.Rectangle{}
 	}
-	if w.TitleStyle == WindowTitleMac {
+	if w.resolvedTitleStyle() == WindowTitleMac {
 		b := w.Bounds()
 		th := w.titleH()
 		cx := b.Min.X + macStartX + macSpacing
@@ -276,7 +300,7 @@ func (w *Window) MaxBtnRect() image.Rectangle {
 	if w.btnCount() < 3 {
 		return image.Rectangle{}
 	}
-	if w.TitleStyle == WindowTitleMac {
+	if w.resolvedTitleStyle() == WindowTitleMac {
 		b := w.Bounds()
 		th := w.titleH()
 		cx := b.Min.X + macStartX + macSpacing*2
@@ -308,7 +332,7 @@ func (w *Window) Draw(ctx DrawContext) {
 
 	// ── Заголовок ───────────────────────────────────────────────────────────
 	if th > 0 {
-		switch w.TitleStyle {
+		switch w.resolvedTitleStyle() {
 		case WindowTitleWin:
 			w.drawWinTitleBar(ctx)
 		case WindowTitleMac:
