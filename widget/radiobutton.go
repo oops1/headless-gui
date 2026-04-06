@@ -27,6 +27,7 @@ type RadioButton struct {
 	selected int32 // 0 | 1
 	hovered  int32 // 0 | 1
 	focused  int32 // 0 | 1
+	pressing int32 // 1 — press был на этом виджете
 
 	OnChange func(selected bool)
 }
@@ -145,18 +146,26 @@ func (rb *RadioButton) Draw(ctx DrawContext) {
 }
 
 // OnMouseButton обрабатывает клик — выбирает этот RadioButton.
+//
+// WPF-совместимое поведение: переключение только если press был
+// на этом же RadioButton (защита от «пролётного» release).
 func (rb *RadioButton) OnMouseButton(e MouseEvent) bool {
 	if !rb.IsEnabled() {
 		return false
 	}
-	if e.Button == MouseLeft && !e.Pressed {
-		if !rb.IsSelected() {
+	if e.Button == MouseLeft {
+		if e.Pressed {
+			atomic.StoreInt32(&rb.pressing, 1)
+			return true
+		}
+		wasDown := atomic.SwapInt32(&rb.pressing, 0) != 0
+		if wasDown && !rb.IsSelected() {
 			rb.SetSelected(true)
 			if rb.OnChange != nil {
 				rb.OnChange(true)
 			}
 		}
-		return true
+		return wasDown
 	}
 	return false
 }

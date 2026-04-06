@@ -20,9 +20,10 @@ type ToggleSwitch struct {
 	ThumbColor color.RGBA // кружок
 	BorderCol  color.RGBA // рамка капсулы
 
-	on      int32 // 0 | 1
-	hovered int32 // 0 | 1
-	focused int32 // 0 | 1
+	on       int32 // 0 | 1
+	hovered  int32 // 0 | 1
+	focused  int32 // 0 | 1
+	pressing int32 // 1 — press был на этом виджете
 
 	OnChange func(on bool)
 }
@@ -118,17 +119,27 @@ func (ts *ToggleSwitch) Draw(ctx DrawContext) {
 }
 
 // OnMouseButton обрабатывает клик — переключает состояние.
+//
+// WPF-совместимое поведение: переключение только если press был
+// на этом же ToggleSwitch (защита от «пролётного» release).
 func (ts *ToggleSwitch) OnMouseButton(e MouseEvent) bool {
 	if !ts.IsEnabled() {
 		return false
 	}
-	if e.Button == MouseLeft && !e.Pressed {
-		newState := !ts.IsOn()
-		ts.SetOn(newState)
-		if ts.OnChange != nil {
-			ts.OnChange(newState)
+	if e.Button == MouseLeft {
+		if e.Pressed {
+			atomic.StoreInt32(&ts.pressing, 1)
+			return true
 		}
-		return true
+		wasDown := atomic.SwapInt32(&ts.pressing, 0) != 0
+		if wasDown {
+			newState := !ts.IsOn()
+			ts.SetOn(newState)
+			if ts.OnChange != nil {
+				ts.OnChange(newState)
+			}
+		}
+		return wasDown
 	}
 	return false
 }

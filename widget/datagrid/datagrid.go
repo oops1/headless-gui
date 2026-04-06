@@ -683,6 +683,10 @@ func (dg *DataGrid) Draw(ctx DrawContextBridge) {
 		return
 	}
 
+	// Глобальный клип по bounds — ничто не выйдет за пределы DataGrid.
+	ctx.SetClip(b)
+	defer ctx.ClearClip()
+
 	// Пересчитываем ширину колонок
 	if dg.dirty {
 		dg.layoutColumns()
@@ -695,7 +699,7 @@ func (dg *DataGrid) Draw(ctx DrawContextBridge) {
 	// Заголовок
 	dg.drawHeader(ctx)
 
-	// Строки данных (с виртуализацией)
+	// Строки данных (с виртуализацией) — собственный клип внутри
 	dg.drawRows(ctx)
 
 	// Скроллбар
@@ -712,7 +716,7 @@ func (dg *DataGrid) drawHeader(ctx DrawContextBridge) {
 	hr := dg.headerRect()
 	ctx.FillRect(hr.Min.X, hr.Min.Y, hr.Dx(), hr.Dy(), dg.HeaderBG)
 
-	// Клиппинг
+	// Клиппинг по области заголовка (без скроллбара)
 	dataW := dg.bounds.Dx()
 	if dg.needsScrollbar() {
 		dataW -= scrollbarWidth
@@ -745,7 +749,8 @@ func (dg *DataGrid) drawHeader(ctx DrawContextBridge) {
 		x += w
 	}
 
-	ctx.ClearClip()
+	// Восстанавливаем глобальный клип по bounds
+	ctx.SetClip(dg.bounds)
 
 	// Горизонтальная линия под заголовком
 	ctx.DrawHLine(hr.Min.X, hr.Max.Y-1, hr.Dx(), dg.BorderColor)
@@ -803,6 +808,13 @@ func (dg *DataGrid) drawRows(ctx DrawContextBridge) {
 			w := col.ActualWidth()
 			cellRect := image.Rect(cellX, rowY, cellX+w, rowY+dg.RowHeight)
 
+			// Per-cell clip = пересечение ячейки с областью данных,
+			// чтобы текст не вылезал ни за пределы ячейки, ни за хедер/нижнюю границу.
+			cellClip := cellRect.Intersect(clipRect)
+			if !cellClip.Empty() {
+				ctx.SetClip(cellClip)
+			}
+
 			// Режим редактирования?
 			if dg.isEditing && dg.editingRow == row && dg.editingCol == colIdx {
 				dg.drawEditCell(ctx, cellRect)
@@ -826,11 +838,15 @@ func (dg *DataGrid) drawRows(ctx DrawContextBridge) {
 			cellX += w
 		}
 
+		// Восстанавливаем data-area clip после ячеек строки
+		ctx.SetClip(clipRect)
+
 		// Горизонтальная линия строки
 		ctx.DrawHLine(dr.Min.X, rowY+dg.RowHeight-1, dataW, dg.GridLineColor)
 	}
 
-	ctx.ClearClip()
+	// Восстанавливаем глобальный клип по bounds
+	ctx.SetClip(dg.bounds)
 }
 
 // drawEditCell рисует ячейку в режиме редактирования.

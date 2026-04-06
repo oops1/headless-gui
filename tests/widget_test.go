@@ -267,9 +267,12 @@ func TestCheckBox_OnMouseButton_Toggle(t *testing.T) {
 	var lastState bool
 	cb.OnChange = func(checked bool) { lastState = checked }
 
-	// Отпускание левой кнопки переключает
-	ev := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
-	consumed := cb.OnMouseButton(ev)
+	// WPF-совместимо: press → release переключает
+	press := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: true}
+	release := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
+
+	cb.OnMouseButton(press)
+	consumed := cb.OnMouseButton(release)
 	if !consumed {
 		t.Fatal("should be consumed")
 	}
@@ -281,17 +284,30 @@ func TestCheckBox_OnMouseButton_Toggle(t *testing.T) {
 	}
 
 	// Повторное переключение
-	cb.OnMouseButton(ev)
+	cb.OnMouseButton(press)
+	cb.OnMouseButton(release)
 	if cb.IsChecked() {
 		t.Fatal("should be unchecked after second click")
 	}
 }
 
-func TestCheckBox_OnMouseButton_PressIgnored(t *testing.T) {
+func TestCheckBox_OnMouseButton_PressConsumed(t *testing.T) {
 	cb := widget.NewCheckBox("C")
 	ev := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: true}
+	if !cb.OnMouseButton(ev) {
+		t.Fatal("press should be consumed (WPF-compatible)")
+	}
+}
+
+func TestCheckBox_OnMouseButton_ReleaseWithoutPress(t *testing.T) {
+	cb := widget.NewCheckBox("C")
+	// Release без предшествующего press — не должен переключать
+	ev := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
 	if cb.OnMouseButton(ev) {
-		t.Fatal("press should not be consumed")
+		t.Fatal("release without press should not be consumed")
+	}
+	if cb.IsChecked() {
+		t.Fatal("should not toggle on naked release")
 	}
 }
 
@@ -409,8 +425,12 @@ func TestRadioButton_OnMouseButton(t *testing.T) {
 	var changed bool
 	rb.OnChange = func(selected bool) { changed = selected }
 
-	ev := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
-	consumed := rb.OnMouseButton(ev)
+	// WPF-совместимо: press → release активирует
+	press := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: true}
+	release := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
+
+	rb.OnMouseButton(press)
+	consumed := rb.OnMouseButton(release)
 	if !consumed {
 		t.Fatal("should be consumed")
 	}
@@ -419,6 +439,18 @@ func TestRadioButton_OnMouseButton(t *testing.T) {
 	}
 	if !changed {
 		t.Fatal("OnChange should have been called")
+	}
+}
+
+func TestRadioButton_OnMouseButton_ReleaseWithoutPress(t *testing.T) {
+	rb := widget.NewRadioButton("A", "grp_no_naked")
+	defer rb.RemoveFromGroup()
+	ev := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
+	if rb.OnMouseButton(ev) {
+		t.Fatal("release without press should not be consumed")
+	}
+	if rb.IsSelected() {
+		t.Fatal("should not select on naked release")
 	}
 }
 
@@ -473,8 +505,12 @@ func TestToggleSwitch_OnMouseButton_Toggle(t *testing.T) {
 	var lastState bool
 	ts.OnChange = func(on bool) { lastState = on }
 
-	ev := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
-	consumed := ts.OnMouseButton(ev)
+	// WPF-совместимо: press → release переключает
+	press := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: true}
+	release := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
+
+	ts.OnMouseButton(press)
+	consumed := ts.OnMouseButton(release)
 	if !consumed {
 		t.Fatal("should be consumed")
 	}
@@ -486,9 +522,21 @@ func TestToggleSwitch_OnMouseButton_Toggle(t *testing.T) {
 	}
 
 	// Повторное нажатие — выключение
-	ts.OnMouseButton(ev)
+	ts.OnMouseButton(press)
+	ts.OnMouseButton(release)
 	if ts.IsOn() {
 		t.Fatal("should be off after second toggle")
+	}
+}
+
+func TestToggleSwitch_OnMouseButton_ReleaseWithoutPress(t *testing.T) {
+	ts := widget.NewToggleSwitch("T")
+	ev := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
+	if ts.OnMouseButton(ev) {
+		t.Fatal("release without press should not be consumed")
+	}
+	if ts.IsOn() {
+		t.Fatal("should not toggle on naked release")
 	}
 }
 
