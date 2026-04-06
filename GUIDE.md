@@ -8,6 +8,8 @@
 headless-gui/
   engine/              рендер-цикл, canvas, события, шрифты
   widget/              виджеты, темы, XAML-загрузчик, Grid layout
+    treeview/          ядро TreeView (модель, шаблоны, рендер, ввод)
+    datagrid/          ядро DataGrid (ObservableCollection, PropertyNotifier)
   output/              типы Frame / DirtyTile
   window/              нативное окно Win32/Cocoa/X11 (отдельный go.mod, без CGO)
   cmd/
@@ -498,6 +500,305 @@ XAML:
 
 Навигация: Left/Right переключает разделы, Up/Down/Enter — по подменю, Right — войти в каскадное подменю, Left — выйти, Escape — закрыть.
 
+### TreeView
+
+WPF-совместимый иерархический список с виртуализацией, HierarchicalDataTemplate, иконками и клавиатурной навигацией. Архитектура: ядро в `widget/treeview/`, обёртка `widget.TreeViewWidget`.
+
+```go
+tw := widget.NewTreeViewWidget()
+tw.SetBounds(image.Rect(0, 0, 300, 500))
+
+// Создание узлов
+root := widget.NewTreeNode("Корень")
+child1 := widget.NewTreeNode("Ветка 1")
+child2 := widget.NewTreeNode("Ветка 2")
+leaf := widget.NewTreeNode("Лист")
+
+child1.AddChild(leaf)
+root.AddChild(child1)
+root.AddChild(child2)
+root.Expanded = true
+
+tw.Tree.AddRoot(root)
+```
+
+Свойства узла (TreeViewItem / TreeNode):
+
+```go
+item.Text       // текст
+item.Header     // WPF-алиас для Text
+item.Icon       // image.Image (иконка перед текстом)
+item.Expanded   // раскрыт ли
+item.IsSelected // выбран ли
+item.IsEnabled  // активен ли
+item.Tag        // произвольные данные
+item.DataContext // объект для data binding
+item.Children   // дочерние []*TreeViewItem
+```
+
+Методы узла:
+
+```go
+item.AddChild(child)
+item.InsertChild(idx, child)
+item.RemoveChild(child)
+item.RemoveChildAt(idx)
+item.ClearChildren()
+item.HasChildren() bool
+item.Parent() *TreeViewItem
+item.Depth() int
+item.DisplayText() string  // Header → Text → fmt.Sprint(DataContext)
+```
+
+Свойства TreeView (через `tw.Tree`):
+
+```go
+tw.Tree.ItemHeight       // высота строки (px), по умолчанию 22
+tw.Tree.IndentSize       // отступ уровня (px), по умолчанию 18
+tw.Tree.FontSize         // размер шрифта, по умолчанию 10
+tw.Tree.IconSize         // размер иконки (px), по умолчанию 16
+tw.Tree.IsReadOnly       // только чтение
+tw.Tree.ShowIndentGuides // линии иерархии
+```
+
+Управление деревом:
+
+```go
+tw.Tree.AddRoot(item)
+tw.Tree.SetRoots(items)
+tw.Tree.ClearRoots()
+tw.Tree.Roots() []*TreeViewItem
+tw.Tree.SelectedItem() *TreeViewItem
+tw.Tree.SetSelectedItem(item)
+tw.Tree.ExpandItem(item)
+tw.Tree.CollapseItem(item)
+tw.Tree.ToggleExpand(item)
+```
+
+События:
+
+```go
+tw.Tree.OnSelect = func(item *treeview.TreeViewItem) { ... }
+
+tw.Tree.OnSelectedItemChanged = func(e treeview.SelectedItemChangedEvent) {
+    // e.OldItem, e.NewItem
+}
+tw.Tree.OnExpanded = func(e treeview.ExpandedEvent) { ... }
+tw.Tree.OnCollapsed = func(e treeview.CollapsedEvent) { ... }
+tw.Tree.OnItemInvoked = func(e treeview.ItemInvokedEvent) { ... } // двойной клик
+```
+
+Data Binding с HierarchicalDataTemplate:
+
+```go
+import "github.com/oops1/headless-gui/v3/widget/treeview"
+
+tmpl := &treeview.HierarchicalDataTemplate{
+    ItemsSourcePath: "Children",
+    HeaderPath:      "Name",
+    IconPath:        "Icon",
+}
+tw.Tree.SetItemTemplate(tmpl)
+
+// ObservableCollection
+coll := datagrid.NewObservableCollection()
+coll.Add(myDataObject)
+tw.Tree.SetItemsSource(coll)
+```
+
+Клавиатура: ↑/↓ перемещение, ←/→ свёртывание/раскрытие и переход к родителю/ребёнку, Home/End, PageUp/PageDown, Enter/Space — переключение + invoke.
+
+Мышь: клик — выделение, двойной клик — раскрытие/свёртывание, клик по стрелке — toggle.
+
+В XAML:
+
+```xml
+<TreeView Name="tree" Width="300" Height="500"
+          IndentSize="20" ShowIndentGuides="True">
+    <TreeViewItem Header="Корень" IsExpanded="True">
+        <TreeViewItem Header="Ветка 1">
+            <TreeViewItem Header="Лист"/>
+        </TreeViewItem>
+        <TreeViewItem Header="Ветка 2"/>
+    </TreeViewItem>
+</TreeView>
+```
+
+С HierarchicalDataTemplate:
+
+```xml
+<TreeView Name="tree" Width="300" Height="500">
+    <TreeView.ItemTemplate>
+        <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+            <StackPanel Orientation="Horizontal">
+                <Image Source="{Binding Icon}" Width="16" Height="16"/>
+                <TextBlock Text="{Binding Name}"/>
+            </StackPanel>
+        </HierarchicalDataTemplate>
+    </TreeView.ItemTemplate>
+</TreeView>
+```
+
+Виртуализация: рендерятся только видимые строки. Поддержка 10 000+ узлов.
+
+### DataGrid
+
+WPF-совместимая таблица данных с колонками, сортировкой, редактированием ячеек, изменением ширины колонок и виртуализацией. Архитектура: ядро в `widget/datagrid/`, обёртка `widget.DataGridWidget`.
+
+```go
+dg := widget.NewDataGridWidget()
+dg.SetBounds(image.Rect(0, 0, 800, 400))
+
+// Добавление колонок
+dg.Grid.AddColumn(datagrid.NewTextColumn("Имя", "Name"))
+dg.Grid.AddColumn(datagrid.NewTextColumn("Возраст", "Age"))
+dg.Grid.AddColumn(datagrid.NewCheckBoxColumn("Активен", "IsActive"))
+
+// Источник данных
+coll := datagrid.NewObservableCollection()
+coll.Add(&User{Name: "Алексей", Age: 30, IsActive: true})
+coll.Add(&User{Name: "Мария", Age: 25, IsActive: false})
+dg.Grid.SetItemsSource(coll)
+```
+
+Типы колонок:
+
+```go
+// Текстовая колонка — отображает и редактирует строковые значения
+datagrid.NewTextColumn("Заголовок", "BindingPath")
+
+// Чекбокс-колонка — отображает bool как флажок
+datagrid.NewCheckBoxColumn("Активен", "IsActive")
+
+// Шаблонная колонка — пользовательский рендер ячеек
+datagrid.NewTemplateColumn("Действия", func(cdc datagrid.CellDrawContext) {
+    // рисуем через cdc.DrawCtx...
+})
+```
+
+Ширина колонок (WPF-стиль):
+
+```go
+col.SetWidth(datagrid.StarWidth(1))    // пропорциональная (*)
+col.SetWidth(datagrid.StarWidth(2))    // двойной вес (2*)
+col.SetWidth(datagrid.PixelWidth(150)) // фиксированная 150px
+col.SetWidth(datagrid.AutoWidth())     // по содержимому
+```
+
+Свойства DataGrid (через `dg.Grid`):
+
+```go
+dg.Grid.AutoGenerateColumns  // автогенерация колонок из структуры данных
+dg.Grid.IsReadOnly           // только чтение
+dg.Grid.CanUserSortColumns   // сортировка по клику на заголовок (по умолчанию true)
+dg.Grid.CanUserResizeColumns // изменение ширины колонок (по умолчанию true)
+dg.Grid.SelectionMode        // SelectionSingle или SelectionExtended
+dg.Grid.RowHeight            // высота строки (по умолчанию 28px)
+dg.Grid.HeaderHeight         // высота заголовка (по умолчанию 30px)
+dg.Grid.FontSize             // размер шрифта (по умолчанию 10)
+```
+
+Управление данными:
+
+```go
+dg.Grid.SetItemsSource(coll)           // задать источник данных
+dg.Grid.ItemsSource()                  // получить ObservableCollection
+dg.Grid.SelectedItem() interface{}     // текущий выбранный элемент
+dg.Grid.SelectedItems() []interface{}  // все выбранные (Extended)
+dg.Grid.SetSelectedIndex(idx)          // выбрать строку по индексу
+```
+
+ObservableCollection — коллекция с уведомлениями об изменениях:
+
+```go
+coll := datagrid.NewObservableCollection()
+coll.Add(item)            // добавить
+coll.Insert(idx, item)    // вставить по индексу
+coll.RemoveAt(idx)        // удалить по индексу
+coll.Set(idx, item)       // заменить
+coll.Clear()              // очистить
+coll.Count() int          // количество
+coll.Get(idx) interface{} // получить по индексу
+
+coll.AddCollectionChanged(func(e datagrid.CollectionChangedEvent) {
+    // e.Action: CollectionAdd, CollectionRemove, CollectionReplace, CollectionReset
+})
+```
+
+Data Binding — привязка свойств объектов:
+
+```go
+// Binding с Path, Converter, StringFormat
+b := &datagrid.Binding{
+    Path:         "User.Name",        // вложенные пути через точку
+    Mode:         datagrid.TwoWay,    // OneWay, TwoWay, OneTime
+    StringFormat: "%.2f",             // формат вывода (необязательно)
+}
+
+// IValueConverter — преобразование значений
+type MyConverter struct{}
+func (c *MyConverter) Convert(value interface{}) interface{} { ... }
+func (c *MyConverter) ConvertBack(value interface{}) interface{} { ... }
+```
+
+INotifyPropertyChanged — уведомления об изменении свойств объектов:
+
+```go
+type User struct {
+    datagrid.PropertyNotifier
+    name string
+}
+
+func (u *User) SetName(name string) {
+    u.name = name
+    u.NotifyPropertyChanged(u, "Name")
+}
+```
+
+События:
+
+```go
+dg.Grid.OnSelectionChanged = func(e datagrid.SelectionChangedEvent) {
+    // e.SelectedIndex, e.SelectedItem
+}
+dg.Grid.OnSorting = func(e *datagrid.SortingEvent) {
+    // e.Column, e.Direction; e.Handled = true чтобы отменить
+}
+dg.Grid.OnCellEditEnding = func(e *datagrid.CellEditEndingEvent) {
+    // e.RowIndex, e.Column, e.Item, e.NewValue; e.Cancel = true чтобы отменить
+}
+dg.Grid.OnRowEditEnding = func(rowIndex int, item interface{}) { ... }
+```
+
+Клавиатура: ↑/↓/←/→ навигация, Home/End, PageUp/PageDown, Tab/Shift+Tab между ячейками, Enter — начать/завершить редактирование, Escape — отмена, Ctrl+A — выделить все (Extended).
+
+Мышь: клик — выделение, двойной клик — редактирование, перетаскивание грани колонки — изменение ширины, клик по заголовку — сортировка.
+
+В XAML:
+
+```xml
+<DataGrid Name="grid" Width="800" Height="400"
+          AutoGenerateColumns="False"
+          CanUserSortColumns="True"
+          CanUserResizeColumns="True"
+          SelectionMode="Extended"
+          IsReadOnly="False"
+          RowHeight="28" HeaderHeight="30">
+    <DataGrid.Columns>
+        <DataGridTextColumn Header="Имя"
+                           Binding="{Binding Name}" Width="*"/>
+        <DataGridTextColumn Header="Возраст"
+                           Binding="{Binding Age}" Width="100"/>
+        <DataGridCheckBoxColumn Header="Активен"
+                               Binding="{Binding IsActive}" Width="60"/>
+    </DataGrid.Columns>
+</DataGrid>
+```
+
+Форматы привязки: `{Binding Name}`, `{Binding Path=User.Name}`, `"Name"` (без фигурных скобок).
+
+Форматы ширины: `"*"`, `"2*"`, `"Auto"`, `"150"` (пиксели).
+
 ### Separator
 
 В XAML: `<Separator Width="400" Height="1" Background="#FF0000"/>`.
@@ -626,6 +927,13 @@ root Canvas (0,0)
 | `Image` | Image | `Source`, `Stretch` (Fill/Uniform/None) |
 | `PopupMenu`, `ContextMenu` | PopupMenu | дочерние `<MenuItem Text="..." Separator="True" Disabled="True"/>` |
 | `Menu`, `MenuBar`, `MainMenu` | MenuBar | дочерние `<MenuItem Header="...">` с вложенными `<MenuItem>` |
+| `TreeView` | TreeViewWidget | `IndentSize`, `IsReadOnly`, `ShowIndentGuides`, дочерние `<TreeViewItem>`, `<TreeView.ItemTemplate>` |
+| `TreeViewItem` | TreeViewItem | `Header`, `IsExpanded`, `Icon`, `IsEnabled` |
+| `HierarchicalDataTemplate` | HierarchicalDataTemplate | `ItemsSource="{Binding ...}"`, дочерние `<StackPanel>` с `<Image>` + `<TextBlock>` |
+| `DataGrid` | DataGridWidget | `AutoGenerateColumns`, `IsReadOnly`, `CanUserSortColumns`, `CanUserResizeColumns`, `SelectionMode`, `RowHeight`, `HeaderHeight` |
+| `DataGridTextColumn` | DataGridTextColumn | `Header`, `Binding`, `Width`, `IsReadOnly`, `SortMemberPath` |
+| `DataGridCheckBoxColumn` | DataGridCheckBoxColumn | `Header`, `Binding`, `Width`, `IsReadOnly` |
+| `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
 | `Separator`, `Line`, `Rectangle` | Separator | `Background` |
 
 Общие атрибуты: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`.
