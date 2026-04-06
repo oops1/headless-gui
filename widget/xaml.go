@@ -116,9 +116,9 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	case "statusbar":
 		return buildXAMLStatusBar(el, reg, parentOff, baseDir)
 
-	// ── DataGrid → ListView (приближение) ──────────────────────────────────
+	// ── DataGrid — полноценный табличный виджет ─────────────────────────────
 	case "datagrid":
-		w = buildXAMLListViewFromDataGrid(el)
+		w = buildXAMLDataGrid(el)
 
 	// ── Border — контейнер с фоном и одним потомком ─────────────────────────
 	case "border":
