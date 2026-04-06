@@ -23,8 +23,8 @@ func TestNewWindow(t *testing.T) {
 	if w.Style != widget.WindowStyleSingleBorder {
 		t.Fatalf("default Style = %d, want SingleBorder(0)", w.Style)
 	}
-	if w.TitleStyle != widget.WindowTitleWin {
-		t.Fatalf("default TitleStyle = %d, want Win(0)", w.TitleStyle)
+	if w.TitleStyle != widget.WindowTitleAuto {
+		t.Fatalf("default TitleStyle = %d, want Auto(0)", w.TitleStyle)
 	}
 	if w.Resize != widget.ResizeModeCanResize {
 		t.Fatalf("default Resize = %d, want CanResize(0)", w.Resize)

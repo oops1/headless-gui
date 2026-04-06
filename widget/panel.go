@@ -26,8 +26,9 @@ type Panel struct {
 	// ── Заголовок (title bar) ───────────────────────────────────────────────
 	Caption      string     // текст заголовка
 	ShowHeader   bool       // показывать заголовок (по умолчанию true в конструкторах)
-	MacStyle     bool       // true = стиль macOS (traffic lights + текст по центру),
-	                        //        false = стиль Windows (текст слева)
+	TitleStyle   WindowTitleStyle // WindowTitleAuto (по умолчанию, определяется по ОС),
+	                              // WindowTitleWin или WindowTitleMac
+	MacStyle     bool            // deprecated: используйте TitleStyle. Сохранено для совместимости.
 	HeaderHeight int        // высота заголовка в пикселях (0 → по умолчанию 32)
 	HeaderBG     color.RGBA // фон заголовка (если A=0, берётся из темы)
 	CaptionColor color.RGBA // цвет текста заголовка (если A=0, берётся из темы)
@@ -58,6 +59,18 @@ func NewWin10Panel() *Panel {
 		UseAlpha:    true,
 		ShowHeader:  true,
 	}
+}
+
+// resolvedTitleStyle возвращает конкретный стиль заголовка для панели.
+// Приоритет: TitleStyle (если не Auto) → MacStyle (deprecated) → авто по ОС.
+func (p *Panel) resolvedTitleStyle() WindowTitleStyle {
+	if p.TitleStyle != WindowTitleAuto {
+		return p.TitleStyle
+	}
+	if p.MacStyle {
+		return WindowTitleMac
+	}
+	return detectedTitleStyle()
 }
 
 func (p *Panel) Draw(ctx DrawContext) {
@@ -134,7 +147,7 @@ func (p *Panel) drawHeader(ctx DrawContext) {
 		tc = win10.TitleText
 	}
 
-	if p.MacStyle {
+	if p.resolvedTitleStyle() == WindowTitleMac {
 		p.drawMacHeader(ctx, b, hh, hbg, tc)
 	} else {
 		p.drawWinHeader(ctx, b, hh, hbg, tc)
@@ -279,7 +292,7 @@ func (p *Panel) isCloseButtonHit(x, y int) bool {
 	if y < b.Min.Y || y >= b.Min.Y+hh {
 		return false
 	}
-	if p.MacStyle {
+	if p.resolvedTitleStyle() == WindowTitleMac {
 		// Mac: кнопка закрытия — красный кружок (первый traffic light)
 		// Центр: (b.Min.X + 18, b.Min.Y + hh/2). Зона попадания ±10px.
 		cx := b.Min.X + 18
