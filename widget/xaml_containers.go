@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
 )
 
 // ─── buildXAMLGrid ─────────────────────────────────────────────────────────
@@ -1153,54 +1155,215 @@ func parseTreeViewItem(el xElement) *TreeNode {
 	return node
 }
 
-// ─── buildXAMLListViewFromDataGrid ─────────────────────────────────────────
+// ─── buildXAMLDataGrid ─────────────────────────────────────────────────────
 
-// buildXAMLListViewFromDataGrid аппроксимирует WPF <DataGrid> как ListView.
+// buildXAMLDataGrid строит полноценный DataGrid из XAML-элемента <DataGrid>.
 //
-// DataGrid — сложный табличный виджет. Наш движок не имеет полноценной таблицы,
-// поэтому мы строим ListView, заголовки колонок формируем из дочерних
-// <DataGridTextColumn Header="..."/>.
-func buildXAMLListViewFromDataGrid(el xElement) Widget {
-	var columns []string
+// Поддерживаемые WPF-совместимые атрибуты:
+//
+//	AutoGenerateColumns — автогенерация колонок из модели (True/False)
+//	IsReadOnly          — только чтение (True/False)
+//	CanUserSortColumns  — сортировка по клику на заголовок (True/False)
+//	CanUserResizeColumns — изменение ширины колонок мышью (True/False)
+//	SelectionMode       — Single | Extended
+//	RowHeight           — высота строки (пиксели)
+//	HeaderHeight        — высота заголовка (пиксели)
+//	Background          — цвет фона
+//
+// Колонки объявляются внутри <DataGrid.Columns>:
+//
+//	<DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" />
+//	<DataGridCheckBoxColumn Header="Active" Binding="{Binding IsActive}" Width="60" />
+//	<DataGridTemplateColumn Header="Actions" Width="100" />
+func buildXAMLDataGrid(el xElement) Widget {
+	dg := NewDataGridWidget()
+
+	// ── Свойства ────────────────────────────────────────────────────────
+
+	// AutoGenerateColumns
+	if strings.EqualFold(el.attr("AutoGenerateColumns"), "true") {
+		dg.Grid.AutoGenerateColumns = true
+	}
+
+	// IsReadOnly
+	if strings.EqualFold(el.attr("IsReadOnly"), "true") {
+		dg.Grid.IsReadOnly = true
+	}
+
+	// CanUserSortColumns (по умолчанию true)
+	if strings.EqualFold(el.attr("CanUserSortColumns"), "false") {
+		dg.Grid.CanUserSortColumns = false
+	}
+
+	// CanUserResizeColumns (по умолчанию true)
+	if strings.EqualFold(el.attr("CanUserResizeColumns"), "false") {
+		dg.Grid.CanUserResizeColumns = false
+	}
+
+	// SelectionMode
+	if strings.EqualFold(el.attr("SelectionMode"), "extended") {
+		dg.Grid.SelectionMode = dgridPkg.SelectionExtended
+	}
+
+	// RowHeight
+	if rh := xatoi(el.attr("RowHeight")); rh > 0 {
+		dg.Grid.RowHeight = rh
+	}
+
+	// HeaderHeight
+	if hh := xatoi(el.attr("HeaderHeight")); hh > 0 {
+		dg.Grid.HeaderHeight = hh
+	}
+
+	// Background
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			dg.Grid.Background = c
+		}
+	}
+
+	// ── Колонки ─────────────────────────────────────────────────────────
+
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
-		// DataGrid.Columns property element
+
+		// <DataGrid.Columns> property element
 		if childTag == "datagrid.columns" {
-			for _, col := range child.Children {
-				header := col.attr("Header", "Text")
-				if header != "" {
-					columns = append(columns, header)
+			for _, colEl := range child.Children {
+				col := parseDataGridColumn(colEl)
+				if col != nil {
+					dg.Grid.AddColumn(col)
 				}
 			}
 			continue
 		}
-		// Прямые колонки (DataGridTextColumn и др.)
-		if strings.HasPrefix(childTag, "datagridtext") ||
-			strings.HasPrefix(childTag, "datagridtemplate") ||
-			strings.HasPrefix(childTag, "datagridcheck") ||
-			strings.HasPrefix(childTag, "datagridcombo") {
-			header := child.attr("Header", "Text")
-			if header != "" {
-				columns = append(columns, header)
-			}
+
+		// Прямые колонки (DataGridTextColumn и др.) — альтернативный синтаксис
+		col := parseDataGridColumn(child)
+		if col != nil {
+			dg.Grid.AddColumn(col)
 		}
 	}
 
-	// Формируем строку-заголовок из названий колонок
-	var items []string
-	if len(columns) > 0 {
-		items = append(items, strings.Join(columns, "  |  "))
+	return dg
+}
+
+// parseDataGridColumn парсит один элемент-колонку из XAML.
+func parseDataGridColumn(el xElement) dgridPkg.Column {
+	tag := strings.ToLower(el.Tag)
+	header := el.attr("Header", "Text")
+
+	// Binding path: разбираем "{Binding PropertyName}"
+	bindingPath := parseBindingPath(el.attr("Binding"))
+	if bindingPath == "" {
+		bindingPath = el.attr("SortMemberPath")
 	}
 
-	lv := NewListView(items...)
-	lv.ItemHeight = 26
+	// Width: "Auto", "*", "2*", "150"
+	width := parseColumnWidth(el.attr("Width"))
 
-	// Background / Foreground
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
-		if c, err := parseXAMLColor(bgStr); err == nil {
-			lv.Background = c
+	// IsReadOnly
+	readOnly := strings.EqualFold(el.attr("IsReadOnly"), "true")
+
+	// SortMemberPath
+	sortPath := el.attr("SortMemberPath")
+	if sortPath == "" {
+		sortPath = bindingPath
+	}
+
+	switch {
+	case strings.HasPrefix(tag, "datagridtextcolumn"),
+		strings.HasPrefix(tag, "datagridtext"):
+		col := dgridPkg.NewTextColumn(header, bindingPath)
+		col.SetWidth(width)
+		if readOnly {
+			col.SetReadOnly(true)
 		}
+		if sortPath != "" {
+			col.SetSortPath(sortPath)
+		}
+		return col
+
+	case strings.HasPrefix(tag, "datagridcheckboxcolumn"),
+		strings.HasPrefix(tag, "datagridcheckbox"):
+		col := dgridPkg.NewCheckBoxColumn(header, bindingPath)
+		col.SetWidth(width)
+		if readOnly {
+			col.SetReadOnly(true)
+		}
+		return col
+
+	case strings.HasPrefix(tag, "datagridtemplatecolumn"),
+		strings.HasPrefix(tag, "datagridtemplate"):
+		col := dgridPkg.NewTemplateColumn(header, nil)
+		col.SetWidth(width)
+		return col
 	}
 
-	return lv
+	return nil
+}
+
+// parseBindingPath извлекает путь из WPF binding-синтаксиса.
+// "{Binding Name}" → "Name"
+// "{Binding Path=User.Name}" → "User.Name"
+// "Name" → "Name" (прямое указание без скобок)
+func parseBindingPath(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+
+	// Удаляем { } если есть
+	if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
+		s = strings.TrimPrefix(s, "{")
+		s = strings.TrimSuffix(s, "}")
+		s = strings.TrimSpace(s)
+	}
+
+	// Удаляем "Binding " префикс
+	if strings.HasPrefix(s, "Binding ") {
+		s = strings.TrimPrefix(s, "Binding ")
+		s = strings.TrimSpace(s)
+	} else if s == "Binding" {
+		return ""
+	}
+
+	// Проверяем Path=
+	if strings.HasPrefix(s, "Path=") {
+		s = strings.TrimPrefix(s, "Path=")
+		// Может содержать запятую (другие параметры binding)
+		if idx := strings.Index(s, ","); idx >= 0 {
+			s = s[:idx]
+		}
+		return strings.TrimSpace(s)
+	}
+
+	// Может содержать запятую (Mode=TwoWay и т.д.)
+	if idx := strings.Index(s, ","); idx >= 0 {
+		s = s[:idx]
+	}
+
+	return strings.TrimSpace(s)
+}
+
+// parseColumnWidth парсит ширину колонки: "Auto", "*", "2*", "150".
+func parseColumnWidth(s string) dgridPkg.ColumnWidth {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.EqualFold(s, "auto") {
+		return dgridPkg.AutoWidth()
+	}
+	if s == "*" {
+		return dgridPkg.StarWidth(1)
+	}
+	if strings.HasSuffix(s, "*") {
+		numStr := strings.TrimSuffix(s, "*")
+		if n := xatoi(numStr); n > 0 {
+			return dgridPkg.StarWidth(float64(n))
+		}
+		return dgridPkg.StarWidth(1)
+	}
+	if n := xatoi(s); n > 0 {
+		return dgridPkg.PixelWidth(float64(n))
+	}
+	return dgridPkg.StarWidth(1)
 }
