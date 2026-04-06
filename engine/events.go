@@ -184,6 +184,27 @@ func (e *Engine) SendMouseMove(x, y int) {
 func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool) {
 	ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed}
 
+	// Если мышь захвачена — только захватчику.
+	// ВАЖНО: эта проверка ПЕРЕД pressConsumer, потому что capture-виджет
+	// (TextInput, Slider) ожидает release для освобождения захвата.
+	// Если pressConsumer проглотит release до capture — захват залипнет
+	// и мышь перестанет работать.
+	if cap := e.getCaptured(); cap != nil {
+		// Сбрасываем pressConsumer — capture-виджет обработает release сам.
+		if !pressed && btn == widget.MouseLeft {
+			e.pressConsumer = nil
+		}
+		if mc, ok := cap.(widget.MouseClickHandler); ok {
+			mc.OnMouseButton(ev)
+		}
+		// Движок гарантирует снятие capture при отпускании ЛКМ —
+		// даже если виджет не вызвал ReleaseCapture (например, capMgr == nil).
+		if !pressed && btn == widget.MouseLeft {
+			e.ReleaseCapture()
+		}
+		return
+	}
+
 	// Если предыдущий press был поглощён виджетом, а этот виджет
 	// больше не находится под курсором (был закрыт/удалён) — проглатываем
 	// release, чтобы он не попал на виджет под закрывшимся окном.
@@ -214,14 +235,6 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 				return
 			}
 		}
-	}
-
-	// Если мышь захвачена — только захватчику
-	if cap := e.getCaptured(); cap != nil {
-		if mc, ok := cap.(widget.MouseClickHandler); ok {
-			mc.OnMouseButton(ev)
-		}
-		return
 	}
 
 	// Определяем корень для dispatch'а: модальный виджет или root
