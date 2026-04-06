@@ -209,6 +209,22 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	if pressed && btn == widget.MouseLeft {
 		if capturer := findCapturer(dispatchRoot, x, y, ev); capturer != nil {
 			e.SetCapture(capturer)
+
+			// Устанавливаем фокус на захватчик (TextInput и т.д.)
+			if _, ok := capturer.(widget.Focusable); ok {
+				e.focus.set(capturer)
+			}
+
+			// Закрываем Dismissable-виджеты вне пути к захватчику
+			capPath := hitTestPath(dispatchRoot, x, y)
+			if len(capPath) > 0 {
+				pathSet := make(map[widget.Widget]struct{}, len(capPath))
+				for _, w := range capPath {
+					pathSet[w] = struct{}{}
+				}
+				dismissOutside(dispatchRoot, pathSet)
+			}
+
 			if mc, ok := capturer.(widget.MouseClickHandler); ok {
 				mc.OnMouseButton(ev)
 			}
