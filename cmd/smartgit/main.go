@@ -101,8 +101,8 @@ func main() {
 	}
 
 	// ─── TreeView обработчик ────────────────────────────────────────────────
-	if tv, ok := reg["repoTree"].(*widget.TreeView); ok {
-		tv.OnSelect = func(node *widget.TreeNode) {
+	if tw, ok := reg["repoTree"].(*widget.TreeViewWidget); ok {
+		tw.Tree.OnSelect = func(node *widget.TreeNode) {
 			log.Printf("TreeView select: %s", node.Text)
 			if l := lbl("lblStatus"); l != nil {
 				l.SetText(fmt.Sprintf("Selected: %s", node.Text))
