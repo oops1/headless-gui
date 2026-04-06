@@ -215,10 +215,7 @@ func (c *DataGridTextColumn) DrawCell(cdc CellDrawContext) {
 		return
 	}
 
-	// Клиппинг по ячейке
-	cdc.DrawCtx.SetClip(r)
-	defer cdc.DrawCtx.ClearClip()
-
+	// Клиппинг по ячейке устанавливается вызывающей стороной (drawRows).
 	textX := r.Min.X + 6
 	textY := r.Min.Y + (r.Dy()-14)/2
 	cdc.DrawCtx.DrawTextSize(text, textX, textY, cdc.FontSize, cdc.TextColor)

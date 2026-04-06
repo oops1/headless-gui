@@ -40,6 +40,12 @@ type Engine struct {
 	captured widget.Widget // виджет, захвативший мышь (drag)
 	capMu    sync.Mutex
 
+	// pressConsumer — виджет, поглотивший последний press ЛКМ.
+	// При release: если этот виджет больше не под курсором
+	// (удалён/закрыт), событие проглатывается, чтобы не пролетело
+	// на виджет, оказавшийся под курсором после закрытия.
+	pressConsumer widget.Widget
+
 	modals []widget.ModalWidget // стек модальных виджетов (последний = верхний)
 	modMu  sync.Mutex
 

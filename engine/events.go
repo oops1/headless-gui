@@ -184,6 +184,38 @@ func (e *Engine) SendMouseMove(x, y int) {
 func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool) {
 	ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed}
 
+	// Если предыдущий press был поглощён виджетом, а этот виджет
+	// больше не находится под курсором (был закрыт/удалён) — проглатываем
+	// release, чтобы он не попал на виджет под закрывшимся окном.
+	if !pressed && btn == widget.MouseLeft && e.pressConsumer != nil {
+		consumer := e.pressConsumer
+		e.pressConsumer = nil
+
+		// Проверяем, есть ли ещё поглотитель в пути под курсором
+		var dispRoot widget.Widget
+		if m := e.topModal(); m != nil {
+			dispRoot = m
+		} else {
+			e.mu.RLock()
+			dispRoot = e.root
+			e.mu.RUnlock()
+		}
+		if dispRoot != nil {
+			path := hitTestPath(dispRoot, x, y)
+			found := false
+			for _, w := range path {
+				if w == consumer {
+					found = true
+					break
+				}
+			}
+			if !found {
+				// Виджет-поглотитель исчез — проглатываем release
+				return
+			}
+		}
+	}
+
 	// Если мышь захвачена — только захватчику
 	if cap := e.getCaptured(); cap != nil {
 		if mc, ok := cap.(widget.MouseClickHandler); ok {
@@ -275,6 +307,11 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	for i := len(path) - 1; i >= 0; i-- {
 		if mc, ok := path[i].(widget.MouseClickHandler); ok {
 			if mc.OnMouseButton(ev) {
+				// Запоминаем поглотивший виджет, чтобы при release проверить,
+				// остался ли он под курсором (иначе release проглатывается).
+				if pressed && btn == widget.MouseLeft {
+					e.pressConsumer = path[i]
+				}
 				return
 			}
 		}
