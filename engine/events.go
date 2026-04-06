@@ -257,6 +257,10 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 				dismissOutside(dispatchRoot, pathSet)
 			}
 
+			// Запоминаем capturer как pressConsumer — если capturer
+			// будет закрыт/удалён, release не пролетит на виджет снизу.
+			e.pressConsumer = capturer
+
 			if mc, ok := capturer.(widget.MouseClickHandler); ok {
 				mc.OnMouseButton(ev)
 			}
@@ -273,6 +277,10 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 		}
 		if mc, ok := overlayW.(widget.MouseClickHandler); ok {
 			if mc.OnMouseButton(ev) {
+				// Overlay поглотил press — запоминаем для release-проверки.
+				if pressed && btn == widget.MouseLeft {
+					e.pressConsumer = overlayW
+				}
 				return
 			}
 		}
