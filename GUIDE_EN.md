@@ -8,6 +8,8 @@
 headless-gui/
   engine/              render loop, canvas, events, fonts
   widget/              widgets, themes, XAML loader, Grid layout
+    treeview/          TreeView core (model, templates, rendering, input)
+    datagrid/          DataGrid core (ObservableCollection, PropertyNotifier)
   output/              Frame / DirtyTile types
   window/              native window Win32/Cocoa/X11 (separate go.mod, CGO-free)
   cmd/
@@ -498,6 +500,305 @@ Items with nested submenus display an arrow ▸ on the right. On hover, the chil
 
 Navigation: Left/Right switches sections, Up/Down/Enter for sub-items, Right to enter cascading submenu, Left to exit, Escape to close.
 
+### TreeView
+
+WPF-compatible hierarchical tree with virtualization, HierarchicalDataTemplate, icons, and keyboard navigation. Architecture: core logic in `widget/treeview/`, wrapper `widget.TreeViewWidget`.
+
+```go
+tw := widget.NewTreeViewWidget()
+tw.SetBounds(image.Rect(0, 0, 300, 500))
+
+// Create nodes
+root := widget.NewTreeNode("Root")
+child1 := widget.NewTreeNode("Branch 1")
+child2 := widget.NewTreeNode("Branch 2")
+leaf := widget.NewTreeNode("Leaf")
+
+child1.AddChild(leaf)
+root.AddChild(child1)
+root.AddChild(child2)
+root.Expanded = true
+
+tw.Tree.AddRoot(root)
+```
+
+Node properties (TreeViewItem / TreeNode):
+
+```go
+item.Text       // text
+item.Header     // WPF alias for Text
+item.Icon       // image.Image (icon before text)
+item.Expanded   // expanded state
+item.IsSelected // selected state
+item.IsEnabled  // enabled state
+item.Tag        // arbitrary data
+item.DataContext // data object for binding
+item.Children   // children []*TreeViewItem
+```
+
+Node methods:
+
+```go
+item.AddChild(child)
+item.InsertChild(idx, child)
+item.RemoveChild(child)
+item.RemoveChildAt(idx)
+item.ClearChildren()
+item.HasChildren() bool
+item.Parent() *TreeViewItem
+item.Depth() int
+item.DisplayText() string  // Header → Text → fmt.Sprint(DataContext)
+```
+
+TreeView properties (via `tw.Tree`):
+
+```go
+tw.Tree.ItemHeight       // row height (px), default 22
+tw.Tree.IndentSize       // indent per level (px), default 18
+tw.Tree.FontSize         // font size, default 10
+tw.Tree.IconSize         // icon size (px), default 16
+tw.Tree.IsReadOnly       // read-only mode
+tw.Tree.ShowIndentGuides // show hierarchy lines
+```
+
+Tree management:
+
+```go
+tw.Tree.AddRoot(item)
+tw.Tree.SetRoots(items)
+tw.Tree.ClearRoots()
+tw.Tree.Roots() []*TreeViewItem
+tw.Tree.SelectedItem() *TreeViewItem
+tw.Tree.SetSelectedItem(item)
+tw.Tree.ExpandItem(item)
+tw.Tree.CollapseItem(item)
+tw.Tree.ToggleExpand(item)
+```
+
+Events:
+
+```go
+tw.Tree.OnSelect = func(item *treeview.TreeViewItem) { ... }
+
+tw.Tree.OnSelectedItemChanged = func(e treeview.SelectedItemChangedEvent) {
+    // e.OldItem, e.NewItem
+}
+tw.Tree.OnExpanded = func(e treeview.ExpandedEvent) { ... }
+tw.Tree.OnCollapsed = func(e treeview.CollapsedEvent) { ... }
+tw.Tree.OnItemInvoked = func(e treeview.ItemInvokedEvent) { ... } // double-click
+```
+
+Data Binding with HierarchicalDataTemplate:
+
+```go
+import "github.com/oops1/headless-gui/v3/widget/treeview"
+
+tmpl := &treeview.HierarchicalDataTemplate{
+    ItemsSourcePath: "Children",
+    HeaderPath:      "Name",
+    IconPath:        "Icon",
+}
+tw.Tree.SetItemTemplate(tmpl)
+
+// ObservableCollection
+coll := datagrid.NewObservableCollection()
+coll.Add(myDataObject)
+tw.Tree.SetItemsSource(coll)
+```
+
+Keyboard: ↑/↓ navigation, ←/→ collapse/expand and parent/child traversal, Home/End, PageUp/PageDown, Enter/Space toggle + invoke.
+
+Mouse: click to select, double-click to expand/collapse, click arrow zone to toggle.
+
+In XAML:
+
+```xml
+<TreeView Name="tree" Width="300" Height="500"
+          IndentSize="20" ShowIndentGuides="True">
+    <TreeViewItem Header="Root" IsExpanded="True">
+        <TreeViewItem Header="Branch 1">
+            <TreeViewItem Header="Leaf"/>
+        </TreeViewItem>
+        <TreeViewItem Header="Branch 2"/>
+    </TreeViewItem>
+</TreeView>
+```
+
+With HierarchicalDataTemplate:
+
+```xml
+<TreeView Name="tree" Width="300" Height="500">
+    <TreeView.ItemTemplate>
+        <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+            <StackPanel Orientation="Horizontal">
+                <Image Source="{Binding Icon}" Width="16" Height="16"/>
+                <TextBlock Text="{Binding Name}"/>
+            </StackPanel>
+        </HierarchicalDataTemplate>
+    </TreeView.ItemTemplate>
+</TreeView>
+```
+
+Virtualization: only visible rows are rendered. Supports 10,000+ nodes.
+
+### DataGrid
+
+WPF-compatible data table with columns, sorting, cell editing, column resizing, and virtualization. Architecture: core logic in `widget/datagrid/`, wrapper `widget.DataGridWidget`.
+
+```go
+dg := widget.NewDataGridWidget()
+dg.SetBounds(image.Rect(0, 0, 800, 400))
+
+// Add columns
+dg.Grid.AddColumn(datagrid.NewTextColumn("Name", "Name"))
+dg.Grid.AddColumn(datagrid.NewTextColumn("Age", "Age"))
+dg.Grid.AddColumn(datagrid.NewCheckBoxColumn("Active", "IsActive"))
+
+// Data source
+coll := datagrid.NewObservableCollection()
+coll.Add(&User{Name: "Alice", Age: 30, IsActive: true})
+coll.Add(&User{Name: "Bob", Age: 25, IsActive: false})
+dg.Grid.SetItemsSource(coll)
+```
+
+Column types:
+
+```go
+// Text column — displays and edits string values
+datagrid.NewTextColumn("Header", "BindingPath")
+
+// CheckBox column — displays bool as a checkbox
+datagrid.NewCheckBoxColumn("Active", "IsActive")
+
+// Template column — custom cell rendering
+datagrid.NewTemplateColumn("Actions", func(cdc datagrid.CellDrawContext) {
+    // draw via cdc.DrawCtx...
+})
+```
+
+Column widths (WPF-style):
+
+```go
+col.SetWidth(datagrid.StarWidth(1))    // proportional (*)
+col.SetWidth(datagrid.StarWidth(2))    // double weight (2*)
+col.SetWidth(datagrid.PixelWidth(150)) // fixed 150px
+col.SetWidth(datagrid.AutoWidth())     // fit content
+```
+
+DataGrid properties (via `dg.Grid`):
+
+```go
+dg.Grid.AutoGenerateColumns  // auto-generate columns from data structure
+dg.Grid.IsReadOnly           // read-only mode
+dg.Grid.CanUserSortColumns   // sort by header click (default true)
+dg.Grid.CanUserResizeColumns // resize column widths (default true)
+dg.Grid.SelectionMode        // SelectionSingle or SelectionExtended
+dg.Grid.RowHeight            // row height (default 28px)
+dg.Grid.HeaderHeight         // header height (default 30px)
+dg.Grid.FontSize             // font size (default 10)
+```
+
+Data management:
+
+```go
+dg.Grid.SetItemsSource(coll)           // set data source
+dg.Grid.ItemsSource()                  // get ObservableCollection
+dg.Grid.SelectedItem() interface{}     // current selected item
+dg.Grid.SelectedItems() []interface{}  // all selected (Extended)
+dg.Grid.SetSelectedIndex(idx)          // select row by index
+```
+
+ObservableCollection — collection with change notifications:
+
+```go
+coll := datagrid.NewObservableCollection()
+coll.Add(item)            // append
+coll.Insert(idx, item)    // insert at index
+coll.RemoveAt(idx)        // remove by index
+coll.Set(idx, item)       // replace
+coll.Clear()              // clear all
+coll.Count() int          // count
+coll.Get(idx) interface{} // get by index
+
+coll.AddCollectionChanged(func(e datagrid.CollectionChangedEvent) {
+    // e.Action: CollectionAdd, CollectionRemove, CollectionReplace, CollectionReset
+})
+```
+
+Data Binding — property binding for data objects:
+
+```go
+// Binding with Path, Converter, StringFormat
+b := &datagrid.Binding{
+    Path:         "User.Name",        // nested paths via dot
+    Mode:         datagrid.TwoWay,    // OneWay, TwoWay, OneTime
+    StringFormat: "%.2f",             // output format (optional)
+}
+
+// IValueConverter — value transformation
+type MyConverter struct{}
+func (c *MyConverter) Convert(value interface{}) interface{} { ... }
+func (c *MyConverter) ConvertBack(value interface{}) interface{} { ... }
+```
+
+INotifyPropertyChanged — property change notifications:
+
+```go
+type User struct {
+    datagrid.PropertyNotifier
+    name string
+}
+
+func (u *User) SetName(name string) {
+    u.name = name
+    u.NotifyPropertyChanged(u, "Name")
+}
+```
+
+Events:
+
+```go
+dg.Grid.OnSelectionChanged = func(e datagrid.SelectionChangedEvent) {
+    // e.SelectedIndex, e.SelectedItem
+}
+dg.Grid.OnSorting = func(e *datagrid.SortingEvent) {
+    // e.Column, e.Direction; e.Handled = true to prevent default
+}
+dg.Grid.OnCellEditEnding = func(e *datagrid.CellEditEndingEvent) {
+    // e.RowIndex, e.Column, e.Item, e.NewValue; e.Cancel = true to cancel
+}
+dg.Grid.OnRowEditEnding = func(rowIndex int, item interface{}) { ... }
+```
+
+Keyboard: ↑/↓/←/→ navigation, Home/End, PageUp/PageDown, Tab/Shift+Tab between cells, Enter to start/commit editing, Escape to cancel, Ctrl+A select all (Extended).
+
+Mouse: click to select, double-click to edit, drag column edge to resize, click header to sort.
+
+In XAML:
+
+```xml
+<DataGrid Name="grid" Width="800" Height="400"
+          AutoGenerateColumns="False"
+          CanUserSortColumns="True"
+          CanUserResizeColumns="True"
+          SelectionMode="Extended"
+          IsReadOnly="False"
+          RowHeight="28" HeaderHeight="30">
+    <DataGrid.Columns>
+        <DataGridTextColumn Header="Name"
+                           Binding="{Binding Name}" Width="*"/>
+        <DataGridTextColumn Header="Age"
+                           Binding="{Binding Age}" Width="100"/>
+        <DataGridCheckBoxColumn Header="Active"
+                               Binding="{Binding IsActive}" Width="60"/>
+    </DataGrid.Columns>
+</DataGrid>
+```
+
+Binding formats: `{Binding Name}`, `{Binding Path=User.Name}`, `"Name"` (no braces).
+
+Width formats: `"*"`, `"2*"`, `"Auto"`, `"150"` (pixels).
+
 ### Separator
 
 In XAML: `<Separator Width="400" Height="1" Background="#FF0000"/>`.
@@ -626,6 +927,13 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `Image` | Image | `Source`, `Stretch` (Fill/Uniform/None) |
 | `PopupMenu`, `ContextMenu` | PopupMenu | child `<MenuItem Text="..." Separator="True" Disabled="True"/>` |
 | `Menu`, `MenuBar`, `MainMenu` | MenuBar | child `<MenuItem Header="...">` with nested `<MenuItem>` |
+| `TreeView` | TreeViewWidget | `IndentSize`, `IsReadOnly`, `ShowIndentGuides`, child `<TreeViewItem>`, `<TreeView.ItemTemplate>` |
+| `TreeViewItem` | TreeViewItem | `Header`, `IsExpanded`, `Icon`, `IsEnabled` |
+| `HierarchicalDataTemplate` | HierarchicalDataTemplate | `ItemsSource="{Binding ...}"`, child `<StackPanel>` with `<Image>` + `<TextBlock>` |
+| `DataGrid` | DataGridWidget | `AutoGenerateColumns`, `IsReadOnly`, `CanUserSortColumns`, `CanUserResizeColumns`, `SelectionMode`, `RowHeight`, `HeaderHeight` |
+| `DataGridTextColumn` | DataGridTextColumn | `Header`, `Binding`, `Width`, `IsReadOnly`, `SortMemberPath` |
+| `DataGridCheckBoxColumn` | DataGridCheckBoxColumn | `Header`, `Binding`, `Width`, `IsReadOnly` |
+| `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
 | `Separator`, `Line`, `Rectangle` | Separator | `Background` |
 
 Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`.

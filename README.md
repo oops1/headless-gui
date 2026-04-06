@@ -1,3 +1,8 @@
+<a href="https://github.com/oops1/headless-gui">
+     <img width="1280" height="640" alt="claude-skills" src="https://github.com/oops1/headless-gui/blob/main/social_preview.png" />
+</a>
+
+
 # headless-gui
 
 Go-based headless GUI engine with XAML support, tile-based delta rendering, and pluggable output backends (RDP, WebSocket, native platform windows).
@@ -45,10 +50,10 @@ Go-based headless GUI engine with XAML support, tile-based delta rendering, and 
 | MessageBox | — (code only) | OK / YesNo / YesNoCancel |
 | Dialog | — (code only) | Modal base, custom content |
 | Window | `Window` | Native OS window with title bar (Win/Mac style), resize, minimize/maximize |
-| TreeView | `TreeView` | Expandable tree with arrow indicators |
+| TreeView | `TreeView` | WPF-compatible hierarchical tree with virtualization, HierarchicalDataTemplate, icons, keyboard nav |
 | GridSplitter | `GridSplitter` | Resizable splitter between Grid cells |
 | StatusBar | `StatusBar` | Bottom status bar with text |
-| DataGrid | `DataGrid` | Column headers with data rows (maps to ListView) |
+| DataGrid | `DataGrid` | WPF-compatible data table with columns, sorting, cell editing, resize, Data Binding, ObservableCollection |
 
 ## Quick Start
 
@@ -78,6 +83,8 @@ go build -ldflags="-H windowsgui" -o showcase.exe ./cmd/showcase
 headless-gui/
   engine/          Core: canvas, render loop, event dispatch, font manager
   widget/          All widgets, themes, XAML loader, Grid layout, drag support
+    treeview/      WPF-compatible TreeView (core logic, no widget dependency)
+    datagrid/      DataGrid core logic (ObservableCollection, PropertyNotifier)
   output/          Frame + DirtyTile types for delta streaming
   window/          Native window (Win32/Cocoa/X11, zero CGO)
   cmd/
