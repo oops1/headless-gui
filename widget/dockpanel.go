@@ -82,7 +82,8 @@ func (dp *DockPanel) layout() {
 				remaining.Min.X+m.Left, remaining.Min.Y+m.Top,
 				remaining.Max.X-m.Right, remaining.Max.Y-m.Bottom,
 			)
-			child.SetBounds(applyAlignmentRect(child, r))
+			aligned := applyAlignmentRect(child, r)
+			child.SetBounds(aligned)
 			break
 		}
 

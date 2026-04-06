@@ -161,7 +161,7 @@ func parseGridDef(el xElement, sizeAttr string) GridDefinition {
 //
 //	Title            — заголовок окна
 //	WindowStyle      — SingleBorderWindow | None | ToolWindow
-//	TitleStyle       — Win | Mac  (расширение; WPF не имеет)
+//	TitleStyle       — Auto | Win | Mac  (расширение; WPF не имеет; Auto = по ОС)
 //	ResizeMode       — CanResize | NoResize | CanMinimize
 //	Background       — цвет фона клиентской области (#RRGGBB / #RRGGBBAA)
 //	BorderBrush      — цвет рамки
@@ -188,12 +188,14 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 		win.Style = WindowStyleSingleBorder
 	}
 
-	// TitleStyle: Win (default) | Mac
+	// TitleStyle: Auto (default, по ОС) | Win | Mac
 	switch strings.ToLower(el.attr("TitleStyle")) {
-	case "mac":
+	case "win", "windows":
+		win.TitleStyle = WindowTitleWin
+	case "mac", "macos":
 		win.TitleStyle = WindowTitleMac
 	default:
-		win.TitleStyle = WindowTitleWin
+		win.TitleStyle = WindowTitleAuto // авто-определение по ОС
 	}
 
 	// ResizeMode: CanResize (default) | NoResize | CanMinimize
@@ -351,9 +353,18 @@ func buildXAMLPanel(el xElement, baseDir string) Widget {
 	if sh := el.attr("ShowHeader"); sh != "" {
 		p.ShowHeader = strings.EqualFold(sh, "true") || sh == "1"
 	}
-	// MacStyle: по умолчанию false.
-	if ms := el.attr("MacStyle"); ms != "" {
-		p.MacStyle = strings.EqualFold(ms, "true") || ms == "1"
+	// TitleStyle: Auto (default) | Win | Mac
+	// Также поддерживается legacy-атрибут MacStyle="True"
+	switch strings.ToLower(el.attr("TitleStyle")) {
+	case "win", "windows":
+		p.TitleStyle = WindowTitleWin
+	case "mac", "macos":
+		p.TitleStyle = WindowTitleMac
+	default:
+		// Fallback: legacy-атрибут MacStyle
+		if ms := el.attr("MacStyle"); ms != "" {
+			p.MacStyle = strings.EqualFold(ms, "true") || ms == "1"
+		}
 	}
 	// HeaderHeight
 	if hh := xatoi(el.attr("HeaderHeight")); hh > 0 {

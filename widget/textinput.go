@@ -31,7 +31,8 @@ type TextInput struct {
 	selStart  int    // начало выделения (-1 = нет)
 	selEnd    int    // конец выделения
 	scrollX   int    // горизонтальный сдвиг, пикселей
-	dragging bool // true — идёт выделение мышью (зажата ЛКМ)
+	dragging bool           // true — идёт выделение мышью (зажата ЛКМ)
+	capMgr   CaptureManager // инжектится движком через SetCaptureManager
 
 	// Контекстное меню (правый клик).
 	contextMenu *PopupMenu
@@ -369,6 +370,29 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	}
 }
 
+// ─── Mouse Capture (drag-выделение текста) ──────────────────────────────────
+
+// SetCaptureManager инжектит менеджер захвата мыши (вызывается движком при SetRoot).
+func (t *TextInput) SetCaptureManager(cm CaptureManager) {
+	t.capMgr = cm
+}
+
+// WantsCapture возвращает true для ЛКМ внутри текстового поля —
+// захватываем мышь, чтобы mouseUp и mouseMove приходили сюда даже за пределами bounds.
+func (t *TextInput) WantsCapture(e MouseEvent) bool {
+	if e.Button != MouseLeft || !e.Pressed {
+		return false
+	}
+	// Не захватываем, если клик по глазику
+	if t.isPassword {
+		b := t.bounds
+		if e.X >= b.Max.X-eyeButtonWidth && e.X <= b.Max.X {
+			return false
+		}
+	}
+	return true
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 // charIndexAtX возвращает индекс символа (позицию каретки) для абсолютной X-координаты.
@@ -451,6 +475,10 @@ func (t *TextInput) OnMouseButton(e MouseEvent) bool {
 		// Если selStart == selEnd → выделения не было, сбрасываем.
 		if t.selStart == t.selEnd {
 			t.selStart = -1
+		}
+		// Освобождаем захват мыши.
+		if t.capMgr != nil {
+			t.capMgr.ReleaseCapture()
 		}
 	}
 	return true
@@ -685,7 +713,7 @@ func (t *TextInput) Draw(ctx DrawContext) {
 			}
 			selX0 := textX + positions[lo]
 			selX1 := textX + positions[hi]
-			ctx.FillRectAlpha(selX0, textY-1, selX1-selX0, textH+2, t.SelColor)
+			ctx.FillRectAlpha(selX0, textY-1, selX1-selX0, textH+5, t.SelColor)
 		}
 		ctx.DrawText(displayText, textX, textY, t.TextColor)
 	}
