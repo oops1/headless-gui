@@ -28,6 +28,7 @@ type TreeNode struct {
 	Text     string
 	Children []*TreeNode
 	Expanded bool
+	Icon     image.Image // опциональная иконка (отображается перед текстом)
 }
 
 // NewTreeNode создаёт узел с заданным текстом.
@@ -194,8 +195,16 @@ func (tv *TreeView) Draw(ctx DrawContext) {
 			}
 		}
 
-		// Текст
+		// Иконка (если есть)
 		textX := x + 14
+		if fn.node.Icon != nil {
+			iconSz := 16
+			iconY := y + (ih-iconSz)/2
+			ctx.DrawImageScaled(fn.node.Icon, textX, iconY, iconSz, iconSz)
+			textX += iconSz + 4
+		}
+
+		// Текст
 		textY := y + (ih-13)/2
 		ctx.DrawText(fn.node.Text, textX, textY, tv.Foreground)
 	}
