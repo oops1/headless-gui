@@ -1,0 +1,41 @@
+<Window x:Class="Demo.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DataGrid Demo" Height="400" Width="600">
+
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Заголовок -->
+        <TextBlock Text="Список пользователей"
+                   FontSize="16"
+                   FontWeight="Bold"
+                   Margin="0,0,0,10"/>
+
+        <!-- DataGrid -->
+        <DataGrid Grid.Row="1"
+                  ItemsSource="{Binding Users}"
+                  AutoGenerateColumns="False"
+                  CanUserSortColumns="True"
+                  IsReadOnly="False">
+
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Имя"
+                                    Binding="{Binding Name}"
+                                    Width="*" />
+
+                <DataGridTextColumn Header="Возраст"
+                                    Binding="{Binding Age}"
+                                    Width="100" />
+
+                <DataGridCheckBoxColumn Header="Активен"
+                                        Binding="{Binding IsActive}"
+                                        Width="100" />
+            </DataGrid.Columns>
+
+        </DataGrid>
+    </Grid>
+</Window>
