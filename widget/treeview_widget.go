@@ -181,3 +181,13 @@ func (w *TreeViewWidget) ClearRoots() {
 func (w *TreeViewWidget) SelectedNode() *treeview.TreeViewItem {
 	return w.Tree.SelectedItem()
 }
+
+// BeginUpdate приостанавливает отрисовку дерева (двойная буферизация).
+func (w *TreeViewWidget) BeginUpdate() {
+	w.Tree.BeginUpdate()
+}
+
+// EndUpdate возобновляет отрисовку дерева.
+func (w *TreeViewWidget) EndUpdate() {
+	w.Tree.EndUpdate()
+}

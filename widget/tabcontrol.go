@@ -35,6 +35,7 @@ type TabControl struct {
 	active    int   // индекс активной вкладки
 	hoverIdx  int   // индекс вкладки под курсором
 	tabWidths []int // реальные ширины вкладок (обновляются в Draw)
+	capMgr    CaptureManager // для инжекции в контент всех вкладок
 
 	OnTabChange func(index int, header string)
 }
@@ -75,8 +76,13 @@ func (tc *TabControl) Children() []Widget {
 // AddTab добавляет вкладку.
 func (tc *TabControl) AddTab(header string, content Widget) {
 	tc.mu.Lock()
-	defer tc.mu.Unlock()
+	cm := tc.capMgr
 	tc.tabs = append(tc.tabs, TabItem{Header: header, Content: content})
+	tc.mu.Unlock()
+	// Если CaptureManager уже инжектирован — раздаём его новому контенту.
+	if cm != nil && content != nil {
+		injectCaptureManagerTree(content, cm)
+	}
 }
 
 // SetActive устанавливает активную вкладку по индексу.
@@ -292,6 +298,34 @@ func (tc *TabControl) OnMouseMove(x, y int) {
 			return
 		}
 		tabX += tabW
+	}
+}
+
+// ─── CaptureAware ──────────────────────────────────────────────────────────
+
+// SetCaptureManager сохраняет CaptureManager и рекурсивно раздаёт его
+// контенту ВСЕХ вкладок (не только активной), чтобы виджеты на неактивных
+// вкладках тоже могли корректно освобождать захват мыши.
+func (tc *TabControl) SetCaptureManager(cm CaptureManager) {
+	tc.capMgr = cm
+	tc.mu.Lock()
+	tabs := make([]TabItem, len(tc.tabs))
+	copy(tabs, tc.tabs)
+	tc.mu.Unlock()
+	for _, tab := range tabs {
+		if tab.Content != nil {
+			injectCaptureManagerTree(tab.Content, cm)
+		}
+	}
+}
+
+// injectCaptureManagerTree рекурсивно раздаёт CaptureManager по дереву.
+func injectCaptureManagerTree(w Widget, cm CaptureManager) {
+	if ca, ok := w.(CaptureAware); ok {
+		ca.SetCaptureManager(cm)
+	}
+	for _, child := range w.Children() {
+		injectCaptureManagerTree(child, cm)
 	}
 }
 

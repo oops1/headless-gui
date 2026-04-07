@@ -230,6 +230,17 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 					break
 				}
 			}
+			// Если не найден в обычном дереве — проверяем overlay-виджеты.
+			// MenuBar (и другие OverlayDrawer) владеют popup как полем, а не дочерним
+			// виджетом, поэтому hitTestPath их не находит в области popup'а.
+			if !found {
+				if od, ok := consumer.(widget.OverlayDrawer); ok && od.HasOverlay() {
+					pt := image.Pt(x, y)
+					if pt.In(consumer.Bounds()) {
+						found = true
+					}
+				}
+			}
 			if !found {
 				// Виджет-поглотитель исчез — проглатываем release
 				return

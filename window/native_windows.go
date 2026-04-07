@@ -178,6 +178,7 @@ var (
 	procPostMessageW        = user32.NewProc("PostMessageW")
 	procSetWindowLongPtrW   = user32.NewProc("SetWindowLongPtrW")
 	procGetWindowLongPtrW   = user32.NewProc("GetWindowLongPtrW")
+	procScreenToClient      = user32.NewProc("ScreenToClient")
 
 	procStretchDIBits     = gdi32.NewProc("StretchDIBits")
 	procSetStretchBltMode = gdi32.NewProc("SetStretchBltMode")
@@ -593,6 +594,27 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		y := int(int16((lparam >> 16) & 0xFFFF))
 		if w.onMouseButton != nil {
 			w.onMouseButton(x, y, 2, false)
+		}
+		return 0
+
+	case wmMousewheel:
+		// Для WM_MOUSEWHEEL координаты в lparam заданы в экранных координатах.
+		// Конвертируем их в клиентские, чтобы hit-test виджетов был корректным.
+		pt := point{
+			X: int32(int16(lparam & 0xFFFF)),
+			Y: int32(int16((lparam >> 16) & 0xFFFF)),
+		}
+		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+
+		delta := int16((wparam >> 16) & 0xFFFF)
+		if w.onMouseButton != nil {
+			if delta > 0 {
+				w.onMouseButton(int(pt.X), int(pt.Y), 3, true)
+				w.onMouseButton(int(pt.X), int(pt.Y), 3, false)
+			} else if delta < 0 {
+				w.onMouseButton(int(pt.X), int(pt.Y), 4, true)
+				w.onMouseButton(int(pt.X), int(pt.Y), 4, false)
+			}
 		}
 		return 0
 
