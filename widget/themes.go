@@ -228,8 +228,8 @@ func DarkTheme() *Theme {
 		// ScrollView / ListView / TreeView
 		ScrollTrackBG:  color.RGBA{R: 37, G: 37, B: 38, A: 255},  // #252526
 		ScrollThumbBG:  color.RGBA{R: 78, G: 78, B: 78, A: 255},  // #4E4E4E
-		ListItemHover:  color.RGBA{R: 45, G: 45, B: 48, A: 255},  // #2D2D30
-		ListItemSelect: color.RGBA{R: 0, G: 120, B: 215, A: 100}, // #0078D7 полупрозрачный
+		ListItemHover:  color.RGBA{R: 55, G: 55, B: 58, A: 255},  // #37373A — чуть светлее фона
+		ListItemSelect: color.RGBA{R: 0, G: 90, B: 158, A: 180},  // #005A9E — насыщенный синий
 
 		// TreeView
 		TreeText:  color.RGBA{R: 212, G: 212, B: 212, A: 255}, // #D4D4D4
@@ -332,8 +332,8 @@ func LightTheme() *Theme {
 		// ScrollView / ListView / TreeView
 		ScrollTrackBG:  color.RGBA{R: 245, G: 245, B: 245, A: 255}, // #F5F5F5
 		ScrollThumbBG:  color.RGBA{R: 200, G: 200, B: 200, A: 255}, // #C8C8C8
-		ListItemHover:  color.RGBA{R: 242, G: 242, B: 242, A: 255}, // #F2F2F2
-		ListItemSelect: color.RGBA{R: 0, G: 120, B: 215, A: 60},    // #0078D7 полупрозрачный
+		ListItemHover:  color.RGBA{R: 229, G: 243, B: 255, A: 255}, // #E5F3FF — Windows Explorer hover
+		ListItemSelect: color.RGBA{R: 204, G: 232, B: 255, A: 255}, // #CCE8FF — Windows Explorer selected
 
 		// TreeView
 		TreeText:  color.RGBA{R: 32, G: 32, B: 32, A: 255},    // #202020

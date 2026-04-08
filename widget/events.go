@@ -13,6 +13,8 @@ const (
 	MouseLeft   MouseButton = 0
 	MouseRight  MouseButton = 1
 	MouseMiddle MouseButton = 2
+	MouseWheelUp   MouseButton = 3
+	MouseWheelDown MouseButton = 4
 )
 
 // MouseEvent содержит данные события мыши.

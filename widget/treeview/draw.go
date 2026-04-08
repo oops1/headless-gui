@@ -13,6 +13,12 @@ func (tv *TreeView) Draw(ctx DrawContextBridge) {
 	if b.Empty() {
 		return
 	}
+	// Пропускаем отрисовку во время batch-обновления (BeginUpdate/EndUpdate).
+	// Рисуем только фон, чтобы не было артефактов.
+	if tv.updating {
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), tv.Theme.Background)
+		return
+	}
 
 	ih := tv.itemH()
 	indent := tv.indentW()
