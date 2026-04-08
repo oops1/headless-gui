@@ -219,17 +219,29 @@ func (btn *Button) Draw(ctx DrawContext) {
 	btn.drawDisabledOverlay(ctx)
 }
 
-// OnMouseButton реализует widget.MouseClickHandler — вызывает OnClick при нажатии.
+// OnMouseButton реализует widget.MouseClickHandler — вызывает OnClick при отпускании.
+//
+// WPF-совместимое поведение: OnClick срабатывает только если press был
+// на этой же кнопке. Без этой проверки release от закрытого окна/диалога
+// может «пролететь» к кнопке, оказавшейся под курсором.
 func (btn *Button) OnMouseButton(e MouseEvent) bool {
 	if !btn.IsEnabled() {
 		return false
 	}
 	if e.Button == MouseLeft {
-		btn.SetPressed(e.Pressed)
-		if !e.Pressed && btn.OnClick != nil {
+		if e.Pressed {
+			btn.SetPressed(true)
+			return true
+		}
+		// Release: стреляем OnClick только если press был на нас.
+		wasPressed := btn.IsPressed()
+		btn.SetPressed(false)
+		if wasPressed && btn.OnClick != nil {
 			btn.OnClick()
 		}
-		return true
+		// Поглощаем release только если мы «владели» этим кликом.
+		// Иначе — пропускаем дальше (bubbling).
+		return wasPressed
 	}
 	return false
 }

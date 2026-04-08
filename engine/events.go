@@ -184,12 +184,68 @@ func (e *Engine) SendMouseMove(x, y int) {
 func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool) {
 	ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed}
 
-	// Если мышь захвачена — только захватчику
+	// Если мышь захвачена — только захватчику.
+	// ВАЖНО: эта проверка ПЕРЕД pressConsumer, потому что capture-виджет
+	// (TextInput, Slider) ожидает release для освобождения захвата.
+	// Если pressConsumer проглотит release до capture — захват залипнет
+	// и мышь перестанет работать.
 	if cap := e.getCaptured(); cap != nil {
+		// Сбрасываем pressConsumer — capture-виджет обработает release сам.
+		if !pressed && btn == widget.MouseLeft {
+			e.pressConsumer = nil
+		}
 		if mc, ok := cap.(widget.MouseClickHandler); ok {
 			mc.OnMouseButton(ev)
 		}
+		// Движок гарантирует снятие capture при отпускании ЛКМ —
+		// даже если виджет не вызвал ReleaseCapture (например, capMgr == nil).
+		if !pressed && btn == widget.MouseLeft {
+			e.ReleaseCapture()
+		}
 		return
+	}
+
+	// Если предыдущий press был поглощён виджетом, а этот виджет
+	// больше не находится под курсором (был закрыт/удалён) — проглатываем
+	// release, чтобы он не попал на виджет под закрывшимся окном.
+	if !pressed && btn == widget.MouseLeft && e.pressConsumer != nil {
+		consumer := e.pressConsumer
+		e.pressConsumer = nil
+
+		// Проверяем, есть ли ещё поглотитель в пути под курсором
+		var dispRoot widget.Widget
+		if m := e.topModal(); m != nil {
+			dispRoot = m
+		} else {
+			e.mu.RLock()
+			dispRoot = e.root
+			e.mu.RUnlock()
+		}
+		if dispRoot != nil {
+			path := hitTestPath(dispRoot, x, y)
+			found := false
+			for _, w := range path {
+				if w == consumer {
+					found = true
+					break
+				}
+			}
+			// Если не найден в обычном дереве — проверяем overlay-виджеты.
+			// MenuBar (и другие OverlayDrawer) владеют popup как полем, а не дочерним
+			// виджетом, поэтому hitTestPath их не находит в области popup'а.
+			if !found {
+				if od, ok := consumer.(widget.OverlayDrawer); ok && od.HasOverlay() {
+					pt := image.Pt(x, y)
+					if pt.In(consumer.Bounds()) {
+						found = true
+					}
+				}
+			}
+			if !found {
+				// Виджет-поглотитель исчез — проглатываем release
+				return
+			}
+		}
 	}
 
 	// Определяем корень для dispatch'а: модальный виджет или root
@@ -225,6 +281,10 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 				dismissOutside(dispatchRoot, pathSet)
 			}
 
+			// Запоминаем capturer как pressConsumer — если capturer
+			// будет закрыт/удалён, release не пролетит на виджет снизу.
+			e.pressConsumer = capturer
+
 			if mc, ok := capturer.(widget.MouseClickHandler); ok {
 				mc.OnMouseButton(ev)
 			}
@@ -241,6 +301,10 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 		}
 		if mc, ok := overlayW.(widget.MouseClickHandler); ok {
 			if mc.OnMouseButton(ev) {
+				// Overlay поглотил press — запоминаем для release-проверки.
+				if pressed && btn == widget.MouseLeft {
+					e.pressConsumer = overlayW
+				}
 				return
 			}
 		}
@@ -275,6 +339,11 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	for i := len(path) - 1; i >= 0; i-- {
 		if mc, ok := path[i].(widget.MouseClickHandler); ok {
 			if mc.OnMouseButton(ev) {
+				// Запоминаем поглотивший виджет, чтобы при release проверить,
+				// остался ли он под курсором (иначе release проглатывается).
+				if pressed && btn == widget.MouseLeft {
+					e.pressConsumer = path[i]
+				}
 				return
 			}
 		}

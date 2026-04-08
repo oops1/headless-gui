@@ -79,6 +79,19 @@ func (b *Base) SetBounds(r image.Rectangle) { b.bounds = r }
 func (b *Base) Children() []Widget          { return b.children }
 func (b *Base) AddChild(w Widget)           { b.children = append(b.children, w) }
 
+// RemoveChild удаляет дочерний виджет из контейнера (по указателю).
+// Возвращает true, если виджет был найден и удалён.
+// Используется, например, при закрытии Panel-«окна» внутри Canvas.
+func (b *Base) RemoveChild(w Widget) bool {
+	for i, child := range b.children {
+		if child == w {
+			b.children = append(b.children[:i], b.children[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
 // IsEnabled возвращает true, если виджет включён (WPF IsEnabled).
 // По умолчанию все виджеты включены.
 func (b *Base) IsEnabled() bool { return !b.disabled }
@@ -334,6 +347,12 @@ func (b *Base) drawChildren(ctx DrawContext) {
 	}
 }
 
+// DrawChildren рендерит всех потомков в тот же контекст.
+// Экспортированная версия для использования во внешних виджетах.
+func (b *Base) DrawChildren(ctx DrawContext) {
+	b.drawChildren(ctx)
+}
+
 // drawDisabledOverlay рисует полупрозрачный серый оверлей поверх виджета,
 // визуально показывая что он отключён (аналог WPF IsEnabled=False).
 func (b *Base) drawDisabledOverlay(ctx DrawContext) {
@@ -342,4 +361,10 @@ func (b *Base) drawDisabledOverlay(ctx DrawContext) {
 		ctx.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(),
 			color.RGBA{R: 30, G: 30, B: 30, A: 140})
 	}
+}
+
+// DrawDisabledOverlay рисует полупрозрачный серый оверлей если виджет отключён.
+// Экспортированная версия для использования во внешних виджетах.
+func (b *Base) DrawDisabledOverlay(ctx DrawContext) {
+	b.drawDisabledOverlay(ctx)
 }

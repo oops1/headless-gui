@@ -19,9 +19,10 @@ type CheckBox struct {
 	HoverBG    color.RGBA
 	AccentBG   color.RGBA // фон квадратика когда checked
 
-	checked int32 // 0 | 1
-	hovered int32 // 0 | 1
-	focused int32 // 0 | 1
+	checked  int32 // 0 | 1
+	hovered  int32 // 0 | 1
+	focused  int32 // 0 | 1
+	pressing int32 // 1 — press был на этом виджете, ожидаем release
 
 	OnChange func(checked bool)
 }
@@ -130,17 +131,27 @@ func (cb *CheckBox) Draw(ctx DrawContext) {
 }
 
 // OnMouseButton обрабатывает клик — переключает состояние.
+//
+// WPF-совместимое поведение: переключение срабатывает только если
+// press был на этом же CheckBox (защита от «пролётного» release).
 func (cb *CheckBox) OnMouseButton(e MouseEvent) bool {
 	if !cb.IsEnabled() {
 		return false
 	}
-	if e.Button == MouseLeft && !e.Pressed {
-		newState := !cb.IsChecked()
-		cb.SetChecked(newState)
-		if cb.OnChange != nil {
-			cb.OnChange(newState)
+	if e.Button == MouseLeft {
+		if e.Pressed {
+			atomic.StoreInt32(&cb.pressing, 1)
+			return true
 		}
-		return true
+		wasDown := atomic.SwapInt32(&cb.pressing, 0) != 0
+		if wasDown {
+			newState := !cb.IsChecked()
+			cb.SetChecked(newState)
+			if cb.OnChange != nil {
+				cb.OnChange(newState)
+			}
+		}
+		return wasDown
 	}
 	return false
 }

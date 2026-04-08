@@ -35,12 +35,15 @@ const (
 	wmPaint       = 0x000F
 	wmErasebkgnd  = 0x0014
 	wmMousemove   = 0x0200
-	wmLbuttondown = 0x0201
-	wmLbuttonup   = 0x0202
-	wmRbuttondown = 0x0204
-	wmRbuttonup   = 0x0205
-	wmMbuttondown = 0x0207
-	wmMbuttonup   = 0x0208
+	wmLbuttondown    = 0x0201
+	wmLbuttonup      = 0x0202
+	wmLbuttondblclk  = 0x0203
+	wmRbuttondown    = 0x0204
+	wmRbuttonup      = 0x0205
+	wmRbuttondblclk  = 0x0206
+	wmMbuttondown    = 0x0207
+	wmMbuttonup      = 0x0208
+	wmMbuttondblclk  = 0x0209
 	wmMousewheel  = 0x020A
 	wmKeydown     = 0x0100
 	wmKeyup       = 0x0101
@@ -178,9 +181,12 @@ var (
 	procPostMessageW        = user32.NewProc("PostMessageW")
 	procSetWindowLongPtrW   = user32.NewProc("SetWindowLongPtrW")
 	procGetWindowLongPtrW   = user32.NewProc("GetWindowLongPtrW")
+	procScreenToClient      = user32.NewProc("ScreenToClient")
 
-	procStretchDIBits = gdi32.NewProc("StretchDIBits")
+	procStretchDIBits     = gdi32.NewProc("StretchDIBits")
 	procSetStretchBltMode = gdi32.NewProc("SetStretchBltMode")
+	procSetCapture        = user32.NewProc("SetCapture")
+	procReleaseCapture    = user32.NewProc("ReleaseCapture")
 )
 
 // ─── Win32Window ────────────────────────────────────────────────────────────
@@ -194,6 +200,12 @@ type Win32Window struct {
 	title  string
 
 	maximized bool
+
+	// pendingClose: Close() был вызван из кода (не от ОС).
+	// Вместо синхронного DestroyWindow мы отправляем PostMessage(WM_CLOSE),
+	// чтобы окно не уничтожалось во время обработки WM_LBUTTONDOWN
+	// (иначе WM_LBUTTONUP пролетает в окно ОС под курсором).
+	pendingClose bool
 
 	mu      sync.Mutex
 	frameBuf []byte // BGRA пиксели для StretchDIBits (перевёрнуто по Y)
@@ -291,9 +303,14 @@ func (w *Win32Window) RunEventLoop() error {
 }
 
 func (w *Win32Window) Close() {
-	if w.hwnd != 0 {
-		procDestroyWindow.Call(uintptr(w.hwnd))
-		w.hwnd = 0
+	if w.hwnd != 0 && !w.pendingClose {
+		// Не вызываем DestroyWindow синхронно — это уничтожило бы окно
+		// во время обработки WM_LBUTTONDOWN, и WM_LBUTTONUP пролетел бы
+		// в окно ОС под курсором (click-through).
+		// PostMessage отложит закрытие: сначала придёт WM_LBUTTONUP,
+		// затем WM_CLOSE → DestroyWindow.
+		w.pendingClose = true
+		procPostMessageW.Call(uintptr(w.hwnd), uintptr(wmClose), 0, 0)
 	}
 }
 
@@ -482,6 +499,13 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmClose:
+		if w.pendingClose {
+			// Close() был вызван из кода (напр. из OnClose виджета) —
+			// колбэк уже отработал, просто уничтожаем окно.
+			procDestroyWindow.Call(hwnd)
+			return 0
+		}
+		// Закрытие от ОС (Alt+F4, taskbar, etc.) — спрашиваем колбэк.
 		if w.onClose != nil {
 			if w.onClose() {
 				procDestroyWindow.Call(hwnd)
@@ -524,7 +548,15 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 
-	case wmLbuttondown:
+	case wmLbuttondown, wmLbuttondblclk:
+		// Захватываем мышь — гарантируем, что WM_LBUTTONUP придёт к нам,
+		// даже если окно будет уничтожено/скрыто во время обработки press.
+		//
+		// WM_LBUTTONDBLCLK обрабатывается идентично WM_LBUTTONDOWN:
+		// Windows присылает dblclk вместо второго down при быстром повторном клике.
+		// Если не обработать — движок не увидит press, pressConsumer останется nil,
+		// и последующий WM_LBUTTONUP пролетит на виджет под закрытым окном.
+		procSetCapture.Call(uintptr(hwnd))
 		x := int(int16(lparam & 0xFFFF))
 		y := int(int16((lparam >> 16) & 0xFFFF))
 		if w.onMouseButton != nil {
@@ -533,6 +565,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmLbuttonup:
+		procReleaseCapture.Call()
 		x := int(int16(lparam & 0xFFFF))
 		y := int(int16((lparam >> 16) & 0xFFFF))
 		if w.onMouseButton != nil {
@@ -540,7 +573,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 
-	case wmRbuttondown:
+	case wmRbuttondown, wmRbuttondblclk:
 		x := int(int16(lparam & 0xFFFF))
 		y := int(int16((lparam >> 16) & 0xFFFF))
 		if w.onMouseButton != nil {
@@ -556,7 +589,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 
-	case wmMbuttondown:
+	case wmMbuttondown, wmMbuttondblclk:
 		x := int(int16(lparam & 0xFFFF))
 		y := int(int16((lparam >> 16) & 0xFFFF))
 		if w.onMouseButton != nil {
@@ -569,6 +602,27 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		y := int(int16((lparam >> 16) & 0xFFFF))
 		if w.onMouseButton != nil {
 			w.onMouseButton(x, y, 2, false)
+		}
+		return 0
+
+	case wmMousewheel:
+		// Для WM_MOUSEWHEEL координаты в lparam заданы в экранных координатах.
+		// Конвертируем их в клиентские, чтобы hit-test виджетов был корректным.
+		pt := point{
+			X: int32(int16(lparam & 0xFFFF)),
+			Y: int32(int16((lparam >> 16) & 0xFFFF)),
+		}
+		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+
+		delta := int16((wparam >> 16) & 0xFFFF)
+		if w.onMouseButton != nil {
+			if delta > 0 {
+				w.onMouseButton(int(pt.X), int(pt.Y), 3, true)
+				w.onMouseButton(int(pt.X), int(pt.Y), 3, false)
+			} else if delta < 0 {
+				w.onMouseButton(int(pt.X), int(pt.Y), 4, true)
+				w.onMouseButton(int(pt.X), int(pt.Y), 4, false)
+			}
 		}
 		return 0
 
