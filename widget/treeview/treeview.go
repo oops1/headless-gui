@@ -71,9 +71,10 @@ type TreeView struct {
 	OnSelect func(item *TreeViewItem)
 
 	// ── Внутреннее ───────────────────────────────────────────────────────
-	mu      sync.Mutex
-	focused bool
-	dirty   bool // нужен пересчёт flat-списка
+	mu       sync.Mutex
+	focused  bool
+	dirty    bool // нужен пересчёт flat-списка
+	updating bool // true между BeginUpdate/EndUpdate — Draw пропускается
 }
 
 // New создаёт TreeView с настройками по умолчанию.
@@ -90,6 +91,33 @@ func New() *TreeView {
 
 func (tv *TreeView) Bounds() image.Rectangle     { return tv.bounds }
 func (tv *TreeView) SetBounds(r image.Rectangle)  { tv.bounds = r; tv.dirty = true }
+
+// ─── Batch update (двойная буферизация) ────────────────────────────────────
+
+// BeginUpdate приостанавливает отрисовку.
+// Все структурные изменения (AddRoot, ClearRoots, SetRoots, AddChild и т.д.)
+// накапливаются, а Draw возвращается сразу без отрисовки.
+// Вызовите EndUpdate, чтобы применить изменения и отрисовать дерево целиком.
+func (tv *TreeView) BeginUpdate() {
+	tv.mu.Lock()
+	defer tv.mu.Unlock()
+	tv.updating = true
+}
+
+// EndUpdate возобновляет отрисовку и помечает дерево для пересчёта.
+func (tv *TreeView) EndUpdate() {
+	tv.mu.Lock()
+	defer tv.mu.Unlock()
+	tv.updating = false
+	tv.dirty = true
+}
+
+// IsUpdating возвращает true, если отрисовка приостановлена.
+func (tv *TreeView) IsUpdating() bool {
+	tv.mu.Lock()
+	defer tv.mu.Unlock()
+	return tv.updating
+}
 
 // ─── Roots management ──────────────────────────────────────────────────────
 

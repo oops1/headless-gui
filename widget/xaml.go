@@ -201,6 +201,17 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 		return buildXAMLMenuBar(el, reg, parentOff)
 
 	default:
+		// Проверяем реестр пользовательских виджетов.
+		if builder, ok := lookupCustomXAML(tag); ok {
+			cw, err := builder(newXAMLAttrs(&el))
+			if err != nil {
+				return nil, fmt.Errorf("xaml: custom <%s>: %w", el.Tag, err)
+			}
+			if cw != nil {
+				w = cw
+				break
+			}
+		}
 		return nil, fmt.Errorf("xaml: неизвестный элемент <%s>", el.Tag)
 	}
 

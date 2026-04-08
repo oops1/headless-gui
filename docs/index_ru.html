@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>headless-gui v3 — Документация API</title>
+<style>
+:root{--bg:#1e1e2e;--surface:#2a2a3e;--card:#313147;--border:#45455a;--text:#cdd6f4;--dim:#a6adc8;--accent:#89b4fa;--accent2:#f5c2e7;--green:#a6e3a1;--yellow:#f9e2af;--red:#f38ba8;--code-bg:#1a1a2e;--sidebar-w:280px;--header-h:60px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+
+/* Header */
+.top-header{position:fixed;top:0;left:0;right:0;height:var(--header-h);background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;z-index:100;gap:16px}
+.top-header h1{font-size:1.2rem;color:var(--accent)}
+.top-header .ver{font-size:.85rem;color:var(--dim);background:var(--card);padding:2px 10px;border-radius:12px}
+.lang-switch{margin-left:auto;display:flex;gap:8px}
+.lang-switch a{padding:4px 12px;border-radius:6px;font-size:.85rem;border:1px solid var(--border)}
+.lang-switch a.active{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+
+/* Sidebar */
+.sidebar{position:fixed;top:var(--header-h);left:0;bottom:0;width:var(--sidebar-w);background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;padding:16px 0;z-index:90;font-size:.88rem}
+.sidebar::-webkit-scrollbar{width:6px}.sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.sidebar .group{padding:8px 20px 4px;color:var(--dim);font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.sidebar a{display:block;padding:4px 20px 4px 28px;color:var(--text);transition:background .15s}
+.sidebar a:hover{background:var(--card);text-decoration:none}
+.sidebar a.l2{padding-left:44px;font-size:.82rem;color:var(--dim)}
+
+/* Main */
+.main{margin-left:var(--sidebar-w);margin-top:var(--header-h);padding:32px 40px 80px;max-width:960px}
+h2{font-size:1.6rem;margin:48px 0 16px;padding-bottom:8px;border-bottom:2px solid var(--accent);color:var(--accent)}
+h3{font-size:1.2rem;margin:32px 0 12px;color:var(--accent2)}
+h4{font-size:1rem;margin:20px 0 8px;color:var(--yellow)}
+p{margin:8px 0}
+ul,ol{margin:8px 0 8px 24px}li{margin:4px 0}
+
+/* Code */
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:16px;overflow-x:auto;font-size:.88rem;line-height:1.6;margin:12px 0}
+code{font-family:'Cascadia Code','Fira Code','JetBrains Mono',monospace;font-size:.88em}
+p code,li code,td code{background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:.85em;border:1px solid var(--border)}
+
+/* Tables */
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:.9rem}
+th{background:var(--card);text-align:left;padding:10px 12px;border:1px solid var(--border);color:var(--accent);font-weight:600}
+td{padding:8px 12px;border:1px solid var(--border);vertical-align:top}
+tr:hover td{background:rgba(137,180,250,.05)}
+
+/* Cards */
+.widget-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:24px;margin:20px 0}
+.widget-card h3{margin-top:0;color:var(--accent)}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;margin:0 4px}
+.badge-interface{background:rgba(137,180,250,.15);color:var(--accent)}
+.badge-struct{background:rgba(166,227,161,.15);color:var(--green)}
+.badge-func{background:rgba(245,194,175,.15);color:var(--accent2)}
+
+/* Responsive */
+@media(max-width:900px){.sidebar{display:none}.main{margin-left:0;padding:24px 16px}}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header class="top-header">
+  <h1>headless-gui</h1>
+  <span class="ver">v3</span>
+  <span style="color:var(--dim);font-size:.85rem">Go Off-Screen GUI Engine</span>
+  <div class="lang-switch">
+    <a class="active" href="index_ru.html">RU</a>
+    <a href="index_en.html">EN</a>
+  </div>
+</header>
+
+<!-- ═══════════════ SIDEBAR ═══════════════ -->
+<nav class="sidebar">
+  <div class="group">Обзор</div>
+  <a href="#overview">О проекте</a>
+  <a href="#quickstart">Быстрый старт</a>
+  <a href="#architecture">Архитектура</a>
+  <a href="#xaml">XAML-загрузчик</a>
+  <a href="#themes">Темы</a>
+  <a href="#events">События и ввод</a>
+
+  <div class="group">Engine</div>
+  <a href="#engine">Engine</a>
+  <a href="#engine-canvas">Canvas (DrawContext)</a>
+  <a href="#engine-font">Шрифты (FontCache)</a>
+  <a href="#output-frame">output.Frame</a>
+  <a href="#native-window">Нативное окно</a>
+
+  <div class="group">Виджеты: Базовые</div>
+  <a href="#widget-base">Base</a>
+  <a href="#widget-button">Button</a>
+  <a href="#widget-label">Label</a>
+  <a href="#widget-textinput">TextInput</a>
+  <a href="#widget-checkbox">CheckBox</a>
+  <a href="#widget-radiobutton">RadioButton</a>
+  <a href="#widget-toggleswitch">ToggleSwitch</a>
+  <a href="#widget-slider">Slider</a>
+  <a href="#widget-progressbar">ProgressBar</a>
+  <a href="#widget-imagewidget">ImageWidget</a>
+
+  <div class="group">Виджеты: Выбор</div>
+  <a href="#widget-dropdown">Dropdown</a>
+  <a href="#widget-listview">ListView</a>
+  <a href="#widget-popupmenu">PopupMenu</a>
+
+  <div class="group">Контейнеры</div>
+  <a href="#widget-panel">Panel</a>
+  <a href="#widget-window">Window</a>
+  <a href="#widget-canvas">Canvas</a>
+  <a href="#widget-grid">Grid</a>
+  <a href="#widget-stackpanel">StackPanel</a>
+  <a href="#widget-dockpanel">DockPanel</a>
+  <a href="#widget-scrollview">ScrollView</a>
+  <a href="#widget-tabcontrol">TabControl</a>
+
+  <div class="group">Модальные</div>
+  <a href="#widget-dialog">Dialog</a>
+  <a href="#widget-messagebox">MessageBox</a>
+  <a href="#widget-modaladapter">ModalAdapter</a>
+
+  <div class="group">Меню</div>
+  <a href="#widget-menubar">MenuBar</a>
+
+  <div class="group">Данные</div>
+  <a href="#widget-datagrid">DataGrid</a>
+  <a href="#widget-treeview">TreeView</a>
+
+  <div class="group">Расширение</div>
+  <a href="#xaml-registry">XAML-реестр</a>
+  <a href="#interfaces">Интерфейсы</a>
+</nav>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<main class="main">
+
+<!-- ─── Обзор ─── -->
+<h2 id="overview">О проекте</h2>
+<p><strong>headless-gui</strong> — off-screen GUI-движок на Go. Рендерит виджеты в RGBA-буфер и выдаёт только изменившиеся тайлы (64&times;64 px). Не зависит от оконной системы — вывод можно подключить к чему угодно: нативное окно Win32/Cocoa/X11, WebSocket, RDP-сессия.</p>
+
+<p>Модуль: <code>github.com/oops1/headless-gui/v3</code></p>
+
+<p>Зависимости: <code>ebitengine/purego</code>, <code>golang.org/x/image</code>, <code>golang.org/x/sys</code>. Без CGO.</p>
+
+<h3>Структура пакетов</h3>
+<table>
+<tr><th>Пакет</th><th>Описание</th></tr>
+<tr><td><code>engine/</code></td><td>Рендер-цикл, canvas, диспатч событий, шрифты</td></tr>
+<tr><td><code>widget/</code></td><td>Все виджеты, темы, XAML-загрузчик, Grid layout</td></tr>
+<tr><td><code>widget/datagrid/</code></td><td>Ядро DataGrid: ObservableCollection, привязки, колонки</td></tr>
+<tr><td><code>widget/treeview/</code></td><td>Ядро TreeView: модель, шаблоны, рендер, ввод</td></tr>
+<tr><td><code>output/</code></td><td>Типы Frame / DirtyTile</td></tr>
+<tr><td><code>window/</code></td><td>Нативное окно Win32/Cocoa/X11 (без CGO)</td></tr>
+</table>
+
+<!-- ─── Быстрый старт ─── -->
+<h2 id="quickstart">Быстрый старт</h2>
+<pre><code>import (
+    "image"
+    "image/color"
+    "github.com/oops1/headless-gui/v3/engine"
+    "github.com/oops1/headless-gui/v3/widget"
+)
+
+eng := engine.New(1920, 1080, 30) // ширина, высота, FPS
+
+root := widget.NewPanel(color.RGBA{R: 30, G: 30, B: 46, A: 255})
+root.SetBounds(image.Rect(0, 0, 1920, 1080))
+
+btn := widget.NewWin10AccentButton("Войти")
+btn.SetBounds(image.Rect(860, 500, 1060, 540))
+btn.OnClick = func() { fmt.Println("Клик!") }
+root.AddChild(btn)
+
+eng.SetRoot(root)
+eng.Start()
+defer eng.Stop()
+
+for frame := range eng.Frames() {
+    for _, tile := range frame.Tiles {
+        sendToClient(tile) // tile.X, tile.Y, tile.W, tile.H, tile.Data
+    }
+}</code></pre>
+
+<h3>С нативным окном</h3>
+<pre><code>import "github.com/oops1/headless-gui/v3/window"
+
+win := window.New(eng, "Моё приложение")
+win.SetMaxFPS(60)
+if err := win.Run(); err != nil {
+    log.Fatal(err)
+}</code></pre>
+
+<h3>С XAML</h3>
+<pre><code>root, registry, err := widget.LoadUIFromXAMLFile("./ui/layout.xaml")
+if err != nil { log.Fatal(err) }
+
+// registry — map[string]Widget по x:Name
+if btn, ok := registry["btnOK"].(*widget.Button); ok {
+    btn.OnClick = func() { fmt.Println("OK!") }
+}
+
+eng.SetRoot(root)</code></pre>
+
+<!-- ─── Архитектура ─── -->
+<h2 id="architecture">Архитектура</h2>
+<p>Движок работает в цикле с заданным FPS. На каждом кадре:</p>
+<ol>
+<li>Обрабатываются входные события (мышь, клавиатура)</li>
+<li>Дерево виджетов рисуется на внутренний RGBA-буфер через <code>DrawContext</code></li>
+<li>Буфер разбивается на тайлы 64&times;64. Изменившиеся тайлы отправляются в канал <code>Frames()</code></li>
+</ol>
+<p>Все координаты — абсолютные пиксели. Виджеты располагаются через <code>SetBounds(image.Rectangle)</code> вручную или через XAML-контейнеры (Grid, StackPanel, DockPanel, Canvas).</p>
+
+<!-- ─── XAML ─── -->
+<h2 id="xaml">XAML-загрузчик</h2>
+<p>Поддерживает подмножество WPF XAML. Загрузка:</p>
+<pre><code>// Из файла
+root, reg, err := widget.LoadUIFromXAMLFile("layout.xaml")
+
+// Из байтов
+root, reg, err := widget.LoadUIFromXAML(data)
+
+// С указанием baseDir для относительных путей (Image.Source)
+root, reg, err := widget.LoadUIFromXAMLWithBase(data, "/assets")</code></pre>
+
+<h4>Поддерживаемые теги</h4>
+<table>
+<tr><th>XAML-тег</th><th>Go-тип</th></tr>
+<tr><td><code>&lt;Panel&gt;</code></td><td>Panel</td></tr>
+<tr><td><code>&lt;Grid&gt;</code></td><td>Grid</td></tr>
+<tr><td><code>&lt;StackPanel&gt;</code></td><td>StackPanel</td></tr>
+<tr><td><code>&lt;DockPanel&gt;</code></td><td>DockPanel</td></tr>
+<tr><td><code>&lt;Canvas&gt;</code></td><td>Canvas</td></tr>
+<tr><td><code>&lt;ScrollViewer&gt;</code></td><td>ScrollView</td></tr>
+<tr><td><code>&lt;Button&gt;</code></td><td>Button</td></tr>
+<tr><td><code>&lt;TextBlock&gt;</code>, <code>&lt;Label&gt;</code></td><td>Label</td></tr>
+<tr><td><code>&lt;TextBox&gt;</code></td><td>TextInput</td></tr>
+<tr><td><code>&lt;PasswordBox&gt;</code></td><td>TextInput (password)</td></tr>
+<tr><td><code>&lt;CheckBox&gt;</code></td><td>CheckBox</td></tr>
+<tr><td><code>&lt;RadioButton&gt;</code></td><td>RadioButton</td></tr>
+<tr><td><code>&lt;ToggleSwitch&gt;</code></td><td>ToggleSwitch</td></tr>
+<tr><td><code>&lt;Slider&gt;</code></td><td>Slider</td></tr>
+<tr><td><code>&lt;ProgressBar&gt;</code></td><td>ProgressBar</td></tr>
+<tr><td><code>&lt;Image&gt;</code></td><td>ImageWidget</td></tr>
+<tr><td><code>&lt;ComboBox&gt;</code></td><td>Dropdown</td></tr>
+<tr><td><code>&lt;ListBox&gt;</code>, <code>&lt;ListView&gt;</code></td><td>ListView</td></tr>
+<tr><td><code>&lt;TabControl&gt;</code></td><td>TabControl</td></tr>
+<tr><td><code>&lt;Menu&gt;</code></td><td>MenuBar</td></tr>
+<tr><td><code>&lt;ContextMenu&gt;</code></td><td>PopupMenu</td></tr>
+<tr><td><code>&lt;Window&gt;</code></td><td>Window</td></tr>
+<tr><td><code>&lt;DataGrid&gt;</code></td><td>DataGridWidget</td></tr>
+<tr><td><code>&lt;TreeView&gt;</code></td><td>TreeViewWidget</td></tr>
+</table>
+
+<h4>Общие XAML-атрибуты</h4>
+<table>
+<tr><th>Атрибут</th><th>Описание</th></tr>
+<tr><td><code>x:Name</code></td><td>Идентификатор (ключ в registry map)</td></tr>
+<tr><td><code>Width</code>, <code>Height</code></td><td>Желаемый размер (px)</td></tr>
+<tr><td><code>Margin</code></td><td><code>"left,top,right,bottom"</code></td></tr>
+<tr><td><code>HorizontalAlignment</code></td><td>Left / Center / Right / Stretch</td></tr>
+<tr><td><code>VerticalAlignment</code></td><td>Top / Center / Bottom / Stretch</td></tr>
+<tr><td><code>Grid.Row</code>, <code>Grid.Column</code></td><td>Позиция в Grid</td></tr>
+<tr><td><code>Grid.RowSpan</code>, <code>Grid.ColumnSpan</code></td><td>Объединение ячеек</td></tr>
+<tr><td><code>DockPanel.Dock</code></td><td>Left / Top / Right / Bottom</td></tr>
+<tr><td><code>IsEnabled</code></td><td><code>"False"</code> для отключения</td></tr>
+</table>
+
+<!-- ─── Темы ─── -->
+<h2 id="themes">Темы</h2>
+<pre><code>// Встроенные темы
+theme := widget.DarkTheme()   // тёмная (по умолчанию)
+theme := widget.LightTheme()  // светлая
+
+// Применение через движок
+eng.SetTheme(theme)
+
+// Глобальное применение ко всем виджетам в дереве
+widget.ApplyGlobalTheme(theme)</code></pre>
+
+<p>Тема содержит 60+ цветовых полей (все <code>color.RGBA</code>). Ключевые группы:</p>
+<table>
+<tr><th>Группа</th><th>Поля</th></tr>
+<tr><td>Окно</td><td><code>WindowBG</code>, <code>PanelBG</code>, <code>TitleBG</code>, <code>TitleText</code>, <code>Border</code></td></tr>
+<tr><td>Кнопки</td><td><code>BtnBG</code>, <code>BtnBorder</code>, <code>BtnHoverBG</code>, <code>BtnPressedBG</code>, <code>BtnText</code></td></tr>
+<tr><td>Ввод</td><td><code>InputBG</code>, <code>InputBorder</code>, <code>InputFocus</code>, <code>InputText</code>, <code>InputCaret</code>, <code>InputPlaceholder</code></td></tr>
+<tr><td>Чекбоксы</td><td><code>CheckBG</code>, <code>CheckBorder</code>, <code>CheckMark</code>, <code>CheckHoverBG</code>, <code>CheckText</code></td></tr>
+<tr><td>Вкладки</td><td><code>TabBG</code>, <code>TabActiveBG</code>, <code>TabBorder</code>, <code>TabText</code>, <code>TabActiveText</code></td></tr>
+<tr><td>Слайдер</td><td><code>SliderTrackBG</code>, <code>SliderFill</code>, <code>SliderThumb</code>, <code>SliderBorder</code></td></tr>
+<tr><td>Тоггл</td><td><code>ToggleBG</code>, <code>ToggleOnBG</code>, <code>ToggleThumb</code>, <code>ToggleBorder</code></td></tr>
+<tr><td>Скроллбар</td><td><code>ScrollTrackBG</code>, <code>ScrollThumbBG</code></td></tr>
+<tr><td>Списки</td><td><code>ListItemHover</code>, <code>ListItemSelect</code></td></tr>
+<tr><td>Диалог</td><td><code>DialogBG</code>, <code>DialogTitleBG</code>, <code>DialogDim</code></td></tr>
+<tr><td>Общие</td><td><code>Accent</code>, <code>Disabled</code>, <code>ShadowColor</code></td></tr>
+</table>
+
+<p>Виджеты, реализующие интерфейс <code>Themeable</code>, автоматически обновляют свои цвета при вызове <code>ApplyTheme(t *Theme)</code>.</p>
+
+<!-- ─── События ─── -->
+<h2 id="events">События и ввод</h2>
+
+<h4>MouseEvent</h4>
+<pre><code>type MouseEvent struct {
+    X, Y    int         // координаты
+    Button  MouseButton // MouseLeft, MouseRight, MouseMiddle
+    Pressed bool        // true = нажатие, false = отпускание
+}</code></pre>
+
+<h4>KeyEvent</h4>
+<pre><code>type KeyEvent struct {
+    Code    KeyCode // KeyEnter, KeyEscape, KeyTab, ...
+    Rune    rune    // символ (для ввода текста)
+    Mod     KeyMod  // ModNone, ModShift, ModCtrl, ModAlt, ModMeta
+    Pressed bool
+}</code></pre>
+
+<h4>Интерфейсы событий</h4>
+<table>
+<tr><th>Интерфейс</th><th>Метод</th><th>Описание</th></tr>
+<tr><td><code>MouseClickHandler</code></td><td><code>OnMouseButton(e MouseEvent) bool</code></td><td>Обработка кликов. Возвращает true = событие поглощено</td></tr>
+<tr><td><code>MouseMoveHandler</code></td><td><code>OnMouseMove(x, y int)</code></td><td>Движение мыши</td></tr>
+<tr><td><code>KeyHandler</code></td><td><code>OnKeyEvent(e KeyEvent)</code></td><td>Клавиатурный ввод</td></tr>
+<tr><td><code>Focusable</code></td><td><code>SetFocused(bool)</code>, <code>IsFocused() bool</code></td><td>Управление фокусом</td></tr>
+<tr><td><code>CaptureRequester</code></td><td><code>WantsCapture(e MouseEvent) bool</code></td><td>Запрос захвата мыши (для drag)</td></tr>
+<tr><td><code>CaptureAware</code></td><td><code>SetCaptureManager(cm CaptureManager)</code></td><td>Инъекция менеджера захвата</td></tr>
+</table>
+
+<p>Bubbling: при клике событие доставляется от самого глубокого виджета вверх по дереву. Первый вернувший <code>true</code> останавливает всплытие.</p>
+
+<!-- ═══════════════ ENGINE ═══════════════ -->
+<h2 id="engine">Engine</h2>
+<div class="widget-card">
+<h3>engine.Engine <span class="badge badge-struct">struct</span></h3>
+<p>Главный объект. Управляет рендер-циклом, деревом виджетов, вводом, модальными окнами.</p>
+
+<h4>Конструктор</h4>
+<pre><code>eng := engine.New(width, height, fps int) *Engine</code></pre>
+
+<h4>Методы</h4>
+<table>
+<tr><th>Метод</th><th>Описание</th></tr>
+<tr><td><code>SetRoot(w Widget)</code></td><td>Задать корневой виджет</td></tr>
+<tr><td><code>Root() Widget</code></td><td>Получить корневой виджет</td></tr>
+<tr><td><code>Start()</code></td><td>Запустить рендер-цикл</td></tr>
+<tr><td><code>Stop()</code></td><td>Остановить (закрывает канал Frames)</td></tr>
+<tr><td><code>Frames() &lt;-chan output.Frame</code></td><td>Канал кадров с изменёнными тайлами</td></tr>
+<tr><td><code>CanvasSize() (w, h int)</code></td><td>Текущий размер холста</td></tr>
+<tr><td><code>SetResolution(w, h int)</code></td><td>Изменить разрешение на лету</td></tr>
+<tr><td><code>SetBackgroundFile(path string) error</code></td><td>Фоновое изображение (PNG/JPEG)</td></tr>
+<tr><td><code>SetTheme(t *Theme)</code></td><td>Применить тему</td></tr>
+<tr><td><code>RegisterFont(name string, ttf []byte)</code></td><td>Зарегистрировать TTF-шрифт</td></tr>
+<tr><td><code>RegisterFontFile(name, path string) error</code></td><td>Загрузить TTF из файла</td></tr>
+<tr><td><code>SetDPI(dpi float64)</code></td><td>Установить DPI (по умолчанию 96)</td></tr>
+<tr><td><code>SaveFrames(dir string)</code></td><td>Отладка: сохранять кадры в PNG</td></tr>
+<tr><td><code>SetFocus(w Widget)</code></td><td>Установить фокус ввода</td></tr>
+<tr><td><code>SendKeyEvent(e KeyEvent)</code></td><td>Отправить клавиатурное событие</td></tr>
+<tr><td><code>SendMouseButton(x, y int, btn, pressed)</code></td><td>Отправить клик мыши</td></tr>
+<tr><td><code>SendMouseMove(x, y int)</code></td><td>Отправить перемещение мыши</td></tr>
+<tr><td><code>SetCapture(w Widget)</code></td><td>Захватить мышь виджетом</td></tr>
+<tr><td><code>ReleaseCapture()</code></td><td>Освободить захват</td></tr>
+<tr><td><code>ShowModal(m ModalWidget)</code></td><td>Показать модальный виджет</td></tr>
+<tr><td><code>CloseModal(m ModalWidget)</code></td><td>Закрыть модальный виджет</td></tr>
+</table>
+</div>
+
+<h2 id="engine-canvas">Canvas (DrawContext)</h2>
+<div class="widget-card">
+<h3>DrawContext <span class="badge badge-interface">interface</span></h3>
+<p>Интерфейс рисования, который получает каждый виджет в методе <code>Draw(ctx DrawContext)</code>.</p>
+<table>
+<tr><th>Метод</th><th>Описание</th></tr>
+<tr><td><code>FillRect(x, y, w, h int, col color.RGBA)</code></td><td>Залить прямоугольник</td></tr>
+<tr><td><code>FillRectAlpha(x, y, w, h int, col color.RGBA)</code></td><td>Залить с альфа-смешиванием</td></tr>
+<tr><td><code>FillRoundRect(x, y, w, h, r int, col color.RGBA)</code></td><td>Залить скруглённый прямоугольник</td></tr>
+<tr><td><code>DrawBorder(x, y, w, h int, col color.RGBA)</code></td><td>Нарисовать рамку</td></tr>
+<tr><td><code>DrawRoundBorder(x, y, w, h, r int, col color.RGBA)</code></td><td>Скруглённая рамка</td></tr>
+<tr><td><code>SetPixel(x, y int, col color.RGBA)</code></td><td>Установить пиксель</td></tr>
+<tr><td><code>DrawHLine(x, y, length int, col color.RGBA)</code></td><td>Горизонтальная линия</td></tr>
+<tr><td><code>DrawVLine(x, y, length int, col color.RGBA)</code></td><td>Вертикальная линия</td></tr>
+<tr><td><code>DrawImage(src image.Image, x, y int)</code></td><td>Нарисовать изображение</td></tr>
+<tr><td><code>DrawImageScaled(src image.Image, x, y, w, h int)</code></td><td>Масштабированное изображение</td></tr>
+<tr><td><code>DrawText(text string, x, y int, col color.RGBA)</code></td><td>Текст (размер по умолчанию)</td></tr>
+<tr><td><code>DrawTextSize(text, x, y int, sizePt float64, col)</code></td><td>Текст заданного размера</td></tr>
+<tr><td><code>DrawTextFont(text, x, y, sizePt, fontName, col)</code></td><td>Текст заданным шрифтом</td></tr>
+<tr><td><code>MeasureText(text string, sizePt float64) int</code></td><td>Ширина текста в пикселях</td></tr>
+<tr><td><code>MeasureTextFont(text, sizePt, fontName) int</code></td><td>Ширина указанным шрифтом</td></tr>
+<tr><td><code>MeasureRunePositions(text, sizePt) []int</code></td><td>Позиции каждого символа</td></tr>
+<tr><td><code>SetClip(r image.Rectangle)</code></td><td>Установить область отсечения</td></tr>
+<tr><td><code>ClearClip()</code></td><td>Снять отсечение</td></tr>
+</table>
+</div>
+
+<h2 id="engine-font">Шрифты (FontCache)</h2>
+<p>Шрифты регистрируются через движок. По умолчанию — встроенный шрифт (DejaVu-подобный). DPI по умолчанию — 96.</p>
+<pre><code>eng.RegisterFontFile("Roboto", "./fonts/Roboto-Regular.ttf")
+eng.SetDPI(120)</code></pre>
+<p>В виджетах размер указывается в <code>FontSize</code> (пунктах). По умолчанию <code>DefaultFontSizePt = 10.0</code>.</p>
+
+<h2 id="output-frame">output.Frame</h2>
+<pre><code>type Frame struct {
+    Seq       uint64
+    Timestamp time.Time
+    Tiles     []DirtyTile
+}
+
+type DirtyTile struct {
+    X, Y, W, H int
+    Data        []byte // RGBA-пиксели
+}</code></pre>
+
+<h2 id="native-window">Нативное окно</h2>
+<pre><code>import "github.com/oops1/headless-gui/v3/window"
+
+win := window.New(eng, "Заголовок")
+win.SetMaxFPS(60)
+win.Run() // блокирующий вызов</code></pre>
+<p>Поддерживает Win32 (GDI), macOS (Cocoa через purego), Linux (X11). Без CGO.</p>
+
+<!-- ═══════════════ ВИДЖЕТЫ ═══════════════ -->
+
+<!-- ─── Base ─── -->
+<h2 id="widget-base">Base</h2>
+<div class="widget-card">
+<h3>widget.Base <span class="badge badge-struct">struct</span></h3>
+<p>Базовая структура, встроенная во все виджеты. Реализует <code>Widget</code> interface.</p>
+
+<h4>Поля (public через get/set)</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>GridRow</code></td><td>int</td><td>Строка в Grid</td></tr>
+<tr><td><code>GridColumn</code></td><td>int</td><td>Столбец в Grid</td></tr>
+<tr><td><code>GridRowSpan</code></td><td>int</td><td>Объединение строк</td></tr>
+<tr><td><code>GridColSpan</code></td><td>int</td><td>Объединение столбцов</td></tr>
+<tr><td><code>Dock</code></td><td>DockSide</td><td>Прикрепление в DockPanel</td></tr>
+<tr><td><code>WidgetMargin</code></td><td>Margin</td><td>Отступы {Left, Top, Right, Bottom}</td></tr>
+<tr><td><code>HAlign</code></td><td>HorizontalAlignment</td><td>Горизонтальное выравнивание</td></tr>
+<tr><td><code>VAlign</code></td><td>VerticalAlignment</td><td>Вертикальное выравнивание</td></tr>
+<tr><td><code>XAMLWidth</code></td><td>int</td><td>Желаемая ширина (из XAML)</td></tr>
+<tr><td><code>XAMLHeight</code></td><td>int</td><td>Желаемая высота (из XAML)</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><th>Метод</th><th>Описание</th></tr>
+<tr><td><code>Bounds() image.Rectangle</code></td><td>Прямоугольник виджета</td></tr>
+<tr><td><code>SetBounds(r image.Rectangle)</code></td><td>Установить позицию и размер</td></tr>
+<tr><td><code>Children() []Widget</code></td><td>Дочерние виджеты</td></tr>
+<tr><td><code>AddChild(w Widget)</code></td><td>Добавить дочерний виджет</td></tr>
+<tr><td><code>RemoveChild(w Widget) bool</code></td><td>Удалить дочерний виджет</td></tr>
+<tr><td><code>IsEnabled() bool</code></td><td>Активен ли виджет</td></tr>
+<tr><td><code>SetEnabled(v bool)</code></td><td>Включить/отключить</td></tr>
+<tr><td><code>SetGridProps(row, col, rowSpan, colSpan)</code></td><td>Задать Grid-свойства</td></tr>
+<tr><td><code>DrawChildren(ctx DrawContext)</code></td><td>Нарисовать дочерние виджеты</td></tr>
+<tr><td><code>DrawDisabledOverlay(ctx DrawContext)</code></td><td>Затемнение для disabled</td></tr>
+</table>
+</div>
+
+<!-- ─── Button ─── -->
+<h2 id="widget-button">Button</h2>
+<div class="widget-card">
+<h3>widget.Button <span class="badge badge-struct">struct</span></h3>
+<p>Кнопка в стиле Windows 10. Поддерживает иконки, подсказки, акцентные стили.</p>
+
+<h4>Конструкторы</h4>
+<pre><code>btn := widget.NewButton("Текст")            // стандартная
+btn := widget.NewWin10AccentButton("Войти")   // акцентная (синяя)</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Text</code></td><td>string</td><td>Текст кнопки</td></tr>
+<tr><td><code>TextColor</code></td><td>color.RGBA</td><td>Цвет текста</td></tr>
+<tr><td><code>Background</code></td><td>color.RGBA</td><td>Фон</td></tr>
+<tr><td><code>HoverBG</code></td><td>color.RGBA</td><td>Фон при наведении</td></tr>
+<tr><td><code>PressedBG</code></td><td>color.RGBA</td><td>Фон при нажатии</td></tr>
+<tr><td><code>BorderColor</code></td><td>color.RGBA</td><td>Цвет рамки</td></tr>
+<tr><td><code>HighlightTop</code></td><td>color.RGBA</td><td>Подсветка верхней грани</td></tr>
+<tr><td><code>ShowHighlight</code></td><td>bool</td><td>Показывать подсветку</td></tr>
+<tr><td><code>Icon</code></td><td>image.Image</td><td>Иконка</td></tr>
+<tr><td><code>IconPath</code></td><td>string</td><td>Путь к иконке</td></tr>
+<tr><td><code>IconPos</code></td><td>IconPosition</td><td>IconLeft / IconTop / IconOnly</td></tr>
+<tr><td><code>IconSize</code></td><td>int</td><td>Размер иконки</td></tr>
+<tr><td><code>ToolTip</code></td><td>string</td><td>Всплывающая подсказка</td></tr>
+<tr><td><code>Padding</code></td><td>int</td><td>Внутренний отступ</td></tr>
+<tr><td><code>CornerRadius</code></td><td>int</td><td>Скругление углов</td></tr>
+<tr><td><code>OnClick</code></td><td>func()</td><td>Обработчик клика (fire на RELEASE)</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><th>Метод</th><th>Описание</th></tr>
+<tr><td><code>SetPressed(v bool)</code></td><td>Установить состояние нажатия</td></tr>
+<tr><td><code>IsPressed() bool</code></td><td>Нажата ли</td></tr>
+<tr><td><code>SetHovered(v bool)</code></td><td>Установить состояние наведения</td></tr>
+<tr><td><code>IsHovered() bool</code></td><td>Наведена ли</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;Button Content="Текст" CornerRadius="4" ToolTip="Подсказка"/&gt;</code></p>
+</div>
+
+<!-- ─── Label ─── -->
+<h2 id="widget-label">Label</h2>
+<div class="widget-card">
+<h3>widget.Label <span class="badge badge-struct">struct</span></h3>
+<p>Текстовая метка. Поддерживает перенос, кастомные шрифты, фоновую заливку.</p>
+
+<h4>Конструкторы</h4>
+<pre><code>lbl := widget.NewLabel("Текст", color.RGBA{255,255,255,255})
+lbl := widget.NewWin10Label("Текст") // белый текст</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>TextColor</code></td><td>color.RGBA</td><td>Цвет текста</td></tr>
+<tr><td><code>HasBG</code></td><td>bool</td><td>Рисовать фон</td></tr>
+<tr><td><code>Background</code></td><td>color.RGBA</td><td>Цвет фона</td></tr>
+<tr><td><code>WrapText</code></td><td>bool</td><td>Перенос по словам</td></tr>
+<tr><td><code>FontSize</code></td><td>float64</td><td>Размер шрифта (pt)</td></tr>
+<tr><td><code>FontName</code></td><td>string</td><td>Имя шрифта</td></tr>
+<tr><td><code>PaddingX</code></td><td>int</td><td>Горизонтальный отступ</td></tr>
+<tr><td><code>PaddingY</code></td><td>int</td><td>Вертикальный отступ</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><th>Метод</th><th>Описание</th></tr>
+<tr><td><code>SetText(text string)</code></td><td>Установить текст (thread-safe)</td></tr>
+<tr><td><code>Text() string</code></td><td>Получить текст</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;TextBlock Text="Привет" FontSize="14" TextWrapping="Wrap"/&gt;</code></p>
+</div>
+
+<!-- ─── TextInput ─── -->
+<h2 id="widget-textinput">TextInput</h2>
+<div class="widget-card">
+<h3>widget.TextInput <span class="badge badge-struct">struct</span></h3>
+<p>Однострочное поле ввода. Поддерживает выделение, clipboard, пароль, контекстное меню.</p>
+
+<h4>Конструкторы</h4>
+<pre><code>ti := widget.NewTextInput("Введите имя...")
+ti := widget.NewPasswordInput("Пароль...")</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Placeholder</code></td><td>string</td><td>Подсказка</td></tr>
+<tr><td><code>Background</code></td><td>color.RGBA</td><td>Фон</td></tr>
+<tr><td><code>BorderColor</code></td><td>color.RGBA</td><td>Рамка</td></tr>
+<tr><td><code>FocusBorder</code></td><td>color.RGBA</td><td>Рамка при фокусе</td></tr>
+<tr><td><code>TextColor</code></td><td>color.RGBA</td><td>Цвет текста</td></tr>
+<tr><td><code>PlaceColor</code></td><td>color.RGBA</td><td>Цвет placeholder</td></tr>
+<tr><td><code>CaretColor</code></td><td>color.RGBA</td><td>Цвет курсора</td></tr>
+<tr><td><code>SelColor</code></td><td>color.RGBA</td><td>Цвет выделения</td></tr>
+<tr><td><code>MaskRune</code></td><td>rune</td><td>Символ маски (для пароля)</td></tr>
+<tr><td><code>PaddingX</code></td><td>int</td><td>Горизонтальный отступ</td></tr>
+<tr><td><code>PaddingY</code></td><td>int</td><td>Вертикальный отступ</td></tr>
+<tr><td><code>FontName</code></td><td>string</td><td>Шрифт</td></tr>
+<tr><td><code>FontSize</code></td><td>float64</td><td>Размер шрифта</td></tr>
+<tr><td><code>AcceptsReturn</code></td><td>bool</td><td>Многострочный режим</td></tr>
+<tr><td><code>OnEnter</code></td><td>func(string)</td><td>Обработчик Enter</td></tr>
+<tr><td><code>OnChange</code></td><td>func(string)</td><td>Обработчик изменения</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><th>Метод</th><th>Описание</th></tr>
+<tr><td><code>SetText(text string)</code></td><td>Установить текст</td></tr>
+<tr><td><code>GetText() string</code></td><td>Получить текст</td></tr>
+<tr><td><code>SetPasswordMode(v bool)</code></td><td>Режим пароля</td></tr>
+<tr><td><code>IsPasswordMode() bool</code></td><td>Пароль ли</td></tr>
+<tr><td><code>SetShowPassword(v bool)</code></td><td>Показать/скрыть пароль</td></tr>
+<tr><td><code>ToggleShowPassword()</code></td><td>Переключить видимость</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;TextBox PlaceholderText="Имя" FontSize="12"/&gt;</code><br>
+<code>&lt;PasswordBox PlaceholderText="Пароль"/&gt;</code></p>
+</div>
+
+<!-- ─── CheckBox ─── -->
+<h2 id="widget-checkbox">CheckBox</h2>
+<div class="widget-card">
+<h3>widget.CheckBox <span class="badge badge-struct">struct</span></h3>
+
+<h4>Конструктор</h4>
+<pre><code>cb := widget.NewCheckBox("Запомнить меня")</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Text</code></td><td>string</td><td>Текст</td></tr>
+<tr><td><code>TextColor</code>, <code>BoxBG</code>, <code>BoxBorder</code>, <code>CheckColor</code>, <code>HoverBG</code>, <code>AccentBG</code></td><td>color.RGBA</td><td>Цвета</td></tr>
+<tr><td><code>OnChange</code></td><td>func(bool)</td><td>Обработчик изменения</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>SetChecked(v bool)</code></td><td>Установить состояние</td></tr>
+<tr><td><code>IsChecked() bool</code></td><td>Получить состояние</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;CheckBox Content="Опция" IsChecked="True"/&gt;</code></p>
+</div>
+
+<!-- ─── RadioButton ─── -->
+<h2 id="widget-radiobutton">RadioButton</h2>
+<div class="widget-card">
+<h3>widget.RadioButton <span class="badge badge-struct">struct</span></h3>
+<p>Радиокнопка. Группировка через <code>GroupName</code> — при выборе одной в группе остальные сбрасываются.</p>
+
+<h4>Конструктор</h4>
+<pre><code>rb := widget.NewRadioButton("LDAP", "authGroup")</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Text</code></td><td>string</td><td>Текст</td></tr>
+<tr><td><code>GroupName</code></td><td>string</td><td>Имя группы</td></tr>
+<tr><td><code>OnChange</code></td><td>func(bool)</td><td>Обработчик</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>SetSelected(v bool)</code></td><td>Установить выбор</td></tr>
+<tr><td><code>IsSelected() bool</code></td><td>Выбрана ли</td></tr>
+<tr><td><code>RemoveFromGroup()</code></td><td>Удалить из группы</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;RadioButton Content="LDAP" GroupName="auth"/&gt;</code></p>
+</div>
+
+<!-- ─── ToggleSwitch ─── -->
+<h2 id="widget-toggleswitch">ToggleSwitch</h2>
+<div class="widget-card">
+<h3>widget.ToggleSwitch <span class="badge badge-struct">struct</span></h3>
+
+<h4>Конструктор</h4>
+<pre><code>ts := widget.NewToggleSwitch("Тёмная тема")</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Text</code></td><td>string</td><td>Текст</td></tr>
+<tr><td><code>OffBG</code>, <code>OnBG</code>, <code>ThumbColor</code>, <code>BorderCol</code></td><td>color.RGBA</td><td>Цвета</td></tr>
+<tr><td><code>OnChange</code></td><td>func(bool)</td><td>Обработчик</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>SetOn(v bool)</code></td><td>Установить состояние</td></tr>
+<tr><td><code>IsOn() bool</code></td><td>Получить состояние</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;ToggleSwitch Header="Режим" IsOn="True"/&gt;</code></p>
+</div>
+
+<!-- ─── Slider ─── -->
+<h2 id="widget-slider">Slider</h2>
+<div class="widget-card">
+<h3>widget.Slider <span class="badge badge-struct">struct</span></h3>
+
+<h4>Конструкторы</h4>
+<pre><code>s := widget.NewSlider()                // 0..100
+s := widget.NewSliderRange(0.0, 1.0)   // кастомный диапазон</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Min</code>, <code>Max</code></td><td>float64</td><td>Диапазон</td></tr>
+<tr><td><code>TrackBG</code>, <code>FillColor</code>, <code>ThumbColor</code>, <code>ThumbHover</code>, <code>BorderColor</code></td><td>color.RGBA</td><td>Цвета</td></tr>
+<tr><td><code>TrackHeight</code></td><td>int</td><td>Высота трека</td></tr>
+<tr><td><code>ThumbRadius</code></td><td>int</td><td>Радиус бегунка</td></tr>
+<tr><td><code>OnChange</code></td><td>func(float64)</td><td>Обработчик</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>SetValue(v float64)</code></td><td>Установить значение</td></tr>
+<tr><td><code>Value() float64</code></td><td>Получить значение</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;Slider Minimum="0" Maximum="100" Value="50"/&gt;</code></p>
+</div>
+
+<!-- ─── ProgressBar ─── -->
+<h2 id="widget-progressbar">ProgressBar</h2>
+<div class="widget-card">
+<h3>widget.ProgressBar <span class="badge badge-struct">struct</span></h3>
+
+<h4>Конструкторы</h4>
+<pre><code>pb := widget.NewProgressBar()
+pb := widget.NewProgressBarColor(color.RGBA{0, 180, 80, 255})</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Background</code></td><td>color.RGBA</td><td>Фон трека</td></tr>
+<tr><td><code>FillColor</code></td><td>color.RGBA</td><td>Цвет заполнения</td></tr>
+<tr><td><code>BorderColor</code></td><td>color.RGBA</td><td>Рамка</td></tr>
+<tr><td><code>ShowBorder</code></td><td>bool</td><td>Показывать рамку</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>SetValue(v float64)</code></td><td>0.0 .. 1.0 (thread-safe, atomic)</td></tr>
+<tr><td><code>Value() float64</code></td><td>Текущее значение</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;ProgressBar Value="0.5"/&gt;</code></p>
+</div>
+
+<!-- ─── ImageWidget ─── -->
+<h2 id="widget-imagewidget">ImageWidget</h2>
+<div class="widget-card">
+<h3>widget.ImageWidget <span class="badge badge-struct">struct</span></h3>
+
+<h4>Конструктор</h4>
+<pre><code>img := widget.NewImageWidget()</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Source</code></td><td>string</td><td>Путь к изображению</td></tr>
+<tr><td><code>Stretch</code></td><td>ImageStretch</td><td>Fill / Uniform / None</td></tr>
+<tr><td><code>Fallback</code></td><td>color.RGBA</td><td>Цвет при отсутствии изображения</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>SetSource(path string) error</code></td><td>Загрузить из файла</td></tr>
+<tr><td><code>SetImage(img image.Image)</code></td><td>Установить программно</td></tr>
+<tr><td><code>Image() image.Image</code></td><td>Получить изображение</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;Image Source="logo.png" Stretch="Uniform"/&gt;</code></p>
+</div>
+
+<!-- ─── Dropdown ─── -->
+<h2 id="widget-dropdown">Dropdown</h2>
+<div class="widget-card">
+<h3>widget.Dropdown <span class="badge badge-struct">struct</span></h3>
+<p>Выпадающий список (ComboBox).</p>
+
+<h4>Конструктор</h4>
+<pre><code>dd := widget.NewDropdown("Пункт 1", "Пункт 2", "Пункт 3")</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Background</code>, <code>BorderColor</code>, <code>TextColor</code>, <code>ArrowColor</code></td><td>color.RGBA</td><td>Цвета</td></tr>
+<tr><td><code>FocusBorder</code>, <code>HoverItemBG</code>, <code>HoverBG</code></td><td>color.RGBA</td><td>Цвета состояний</td></tr>
+<tr><td><code>PaddingX</code></td><td>int</td><td>Отступ</td></tr>
+<tr><td><code>OnChange</code></td><td>func(int, string)</td><td>Обработчик (index, text)</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>SetSelected(idx int)</code></td><td>Выбрать элемент</td></tr>
+<tr><td><code>Selected() int</code></td><td>Индекс выбранного</td></tr>
+<tr><td><code>SelectedText() string</code></td><td>Текст выбранного</td></tr>
+<tr><td><code>IsOpen() bool</code></td><td>Открыт ли список</td></tr>
+<tr><td><code>SetOpen(v bool)</code></td><td>Открыть/закрыть</td></tr>
+</table>
+
+<p><strong>XAML:</strong></p>
+<pre><code>&lt;ComboBox SelectedIndex="0"&gt;
+    &lt;ComboBoxItem&gt;Вариант 1&lt;/ComboBoxItem&gt;
+    &lt;ComboBoxItem&gt;Вариант 2&lt;/ComboBoxItem&gt;
+&lt;/ComboBox&gt;</code></pre>
+</div>
+
+<!-- ─── ListView ─── -->
+<h2 id="widget-listview">ListView</h2>
+<div class="widget-card">
+<h3>widget.ListView <span class="badge badge-struct">struct</span></h3>
+<p>Прокручиваемый список строк со встроенным скроллбаром.</p>
+
+<h4>Конструктор</h4>
+<pre><code>lv := widget.NewListView("item1", "item2", "item3")</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Background</code>, <code>TextColor</code>, <code>HoverColor</code>, <code>SelectColor</code>, <code>BorderColor</code></td><td>color.RGBA</td><td>Цвета</td></tr>
+<tr><td><code>ShowBorder</code></td><td>bool</td><td>Показывать рамку</td></tr>
+<tr><td><code>ItemHeight</code></td><td>int</td><td>Высота элемента (px)</td></tr>
+<tr><td><code>OnSelect</code></td><td>func(int, string)</td><td>Обработчик выбора</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>SetItems(items []string)</code></td><td>Заменить все элементы</td></tr>
+<tr><td><code>Items() []string</code></td><td>Получить элементы</td></tr>
+<tr><td><code>AddItem(text string)</code></td><td>Добавить элемент</td></tr>
+<tr><td><code>Clear()</code></td><td>Очистить список</td></tr>
+<tr><td><code>Selected() int</code></td><td>Индекс выбранного</td></tr>
+<tr><td><code>SelectedText() string</code></td><td>Текст выбранного</td></tr>
+<tr><td><code>SetSelected(idx int)</code></td><td>Выбрать элемент</td></tr>
+<tr><td><code>ScrollBy(delta int)</code></td><td>Прокрутка</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;ListBox&gt;&lt;ListBoxItem&gt;A&lt;/ListBoxItem&gt;...&lt;/ListBox&gt;</code></p>
+</div>
+
+<!-- ─── PopupMenu ─── -->
+<h2 id="widget-popupmenu">PopupMenu</h2>
+<div class="widget-card">
+<h3>widget.PopupMenu <span class="badge badge-struct">struct</span></h3>
+<p>Контекстное / всплывающее меню с подменю и разделителями.</p>
+
+<h4>Конструктор</h4>
+<pre><code>pm := widget.NewPopupMenu()</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Background</code>, <code>BorderColor</code>, <code>TextColor</code>, <code>HoverBG</code>, <code>SeparatorColor</code></td><td>color.RGBA</td><td>Цвета</td></tr>
+<tr><td><code>ItemHeight</code>, <code>MinWidth</code></td><td>int</td><td>Размеры</td></tr>
+<tr><td><code>OnSelect</code></td><td>func(int, string)</td><td>Обработчик</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>AddItem(text string, onClick func())</code></td><td>Добавить пункт</td></tr>
+<tr><td><code>AddSeparator()</code></td><td>Добавить разделитель</td></tr>
+<tr><td><code>SetItems(items []MenuItem)</code></td><td>Заменить все пункты</td></tr>
+<tr><td><code>Show(x, y int)</code></td><td>Показать в координатах</td></tr>
+<tr><td><code>ShowBelow(w Widget)</code></td><td>Показать под виджетом</td></tr>
+<tr><td><code>ShowRight(w Widget)</code></td><td>Показать справа от виджета</td></tr>
+<tr><td><code>Close()</code></td><td>Закрыть</td></tr>
+<tr><td><code>IsOpen() bool</code></td><td>Открыто ли</td></tr>
+</table>
+
+<p><strong>MenuItem</strong>: <code>Text string</code>, <code>Icon image.Image</code>, <code>Separator bool</code>, <code>Disabled bool</code>, <code>OnClick func()</code>, <code>SubItems []MenuItem</code>.</p>
+</div>
+
+<!-- ─── Panel ─── -->
+<h2 id="widget-panel">Panel</h2>
+<div class="widget-card">
+<h3>widget.Panel <span class="badge badge-struct">struct</span></h3>
+<p>Панель-контейнер. Может иметь заголовок с кнопкой закрытия (стиль Win/Mac).</p>
+
+<h4>Конструкторы</h4>
+<pre><code>p := widget.NewPanel(color.RGBA{30, 30, 46, 255})
+p := widget.NewWin10Panel()</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Background</code></td><td>color.RGBA</td><td>Фон</td></tr>
+<tr><td><code>BackgroundImage</code></td><td>image.Image</td><td>Фоновое изображение</td></tr>
+<tr><td><code>BorderColor</code></td><td>color.RGBA</td><td>Рамка</td></tr>
+<tr><td><code>ShowBorder</code></td><td>bool</td><td>Показывать рамку</td></tr>
+<tr><td><code>CornerRadius</code></td><td>int</td><td>Скругление</td></tr>
+<tr><td><code>UseAlpha</code></td><td>bool</td><td>Альфа-смешивание</td></tr>
+<tr><td><code>Caption</code></td><td>string</td><td>Заголовок</td></tr>
+<tr><td><code>ShowHeader</code></td><td>bool</td><td>Показывать заголовок</td></tr>
+<tr><td><code>TitleStyle</code></td><td>WindowTitleStyle</td><td>Стиль кнопок заголовка</td></tr>
+<tr><td><code>MacStyle</code></td><td>bool</td><td>macOS-стиль</td></tr>
+<tr><td><code>HeaderHeight</code></td><td>int</td><td>Высота заголовка</td></tr>
+<tr><td><code>OnClose</code></td><td>func()</td><td>Обработчик закрытия</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>ContentBounds() image.Rectangle</code></td><td>Область содержимого (под заголовком)</td></tr>
+</table>
+</div>
+
+<!-- ─── Window ─── -->
+<h2 id="widget-window">Window</h2>
+<div class="widget-card">
+<h3>widget.Window <span class="badge badge-struct">struct</span></h3>
+<p>Виджет-окно внутри движка (не нативное окно ОС). Перетаскивается, имеет кнопки закрытия/свёрнутия/развёрнутия.</p>
+
+<h4>Конструктор</h4>
+<pre><code>w := widget.NewWindow("Заголовок", 600, 400)</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Title</code></td><td>string</td><td>Заголовок</td></tr>
+<tr><td><code>Style</code></td><td>WindowStyle</td><td>SingleBorder / None / ToolWindow</td></tr>
+<tr><td><code>TitleStyle</code></td><td>WindowTitleStyle</td><td>Auto / Win / Mac</td></tr>
+<tr><td><code>Resize</code></td><td>ResizeMode</td><td>CanResize / NoResize / CanMinimize</td></tr>
+<tr><td><code>Background</code></td><td>color.RGBA</td><td>Фон</td></tr>
+<tr><td><code>BorderColor</code></td><td>color.RGBA</td><td>Рамка</td></tr>
+<tr><td><code>CornerRadius</code></td><td>int</td><td>Скругление</td></tr>
+<tr><td><code>TitleBarHeight</code></td><td>int</td><td>Высота заголовка</td></tr>
+<tr><td><code>TitleBG</code>, <code>TitleColor</code></td><td>color.RGBA</td><td>Цвета заголовка</td></tr>
+<tr><td><code>OnClose</code></td><td>func()</td><td>Обработчик закрытия</td></tr>
+<tr><td><code>OnMinimize</code></td><td>func()</td><td>Обработчик свёрнутия</td></tr>
+<tr><td><code>OnMaximize</code></td><td>func()</td><td>Обработчик развёрнутия</td></tr>
+<tr><td><code>OnDragMove</code></td><td>func(dx, dy int)</td><td>Обработчик перетаскивания</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>ContentBounds() image.Rectangle</code></td><td>Область содержимого</td></tr>
+<tr><td><code>CloseBtnRect() image.Rectangle</code></td><td>Прямоугольник кнопки ×</td></tr>
+<tr><td><code>MinBtnRect() image.Rectangle</code></td><td>Прямоугольник кнопки —</td></tr>
+<tr><td><code>MaxBtnRect() image.Rectangle</code></td><td>Прямоугольник кнопки □</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;Window Title="Окно" Width="600" Height="400" Style="SingleBorderWindow" TitleStyle="Win"/&gt;</code></p>
+</div>
+
+<!-- ─── Canvas ─── -->
+<h2 id="widget-canvas">Canvas (контейнер)</h2>
+<div class="widget-card">
+<h3>widget.Canvas <span class="badge badge-struct">struct</span></h3>
+<p>Контейнер с абсолютным позиционированием. Аналог WPF Canvas.</p>
+
+<h4>Конструктор</h4>
+<pre><code>c := widget.NewCanvas()</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><td><code>Background</code></td><td>color.RGBA</td><td>Фон</td></tr>
+<tr><td><code>UseAlpha</code></td><td>bool</td><td>Альфа-смешивание</td></tr>
+<tr><td><code>ClipToBounds</code></td><td>bool</td><td>Обрезать содержимое</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>AddChildAt(w Widget, props CanvasAttached, desiredW, desiredH int)</code></td><td>Добавить с позицией</td></tr>
+<tr><td><code>SetChildCanvasProps(idx int, props CanvasAttached)</code></td><td>Изменить позицию</td></tr>
+<tr><td><code>GetChildCanvasProps(idx int) CanvasAttached</code></td><td>Получить позицию</td></tr>
+</table>
+
+<p><strong>CanvasAttached</strong>: <code>Left, Top, Right, Bottom int</code></p>
+</div>
+
+<!-- ─── Grid ─── -->
+<h2 id="widget-grid">Grid</h2>
+<div class="widget-card">
+<h3>widget.Grid <span class="badge badge-struct">struct</span></h3>
+<p>Сетка с определяемыми строками и столбцами (Pixel / Star / Auto).</p>
+
+<h4>Конструктор</h4>
+<pre><code>g := widget.NewGrid()</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Background</code></td><td>color.RGBA</td><td>Фон</td></tr>
+<tr><td><code>UseAlpha</code></td><td>bool</td><td>Альфа-смешивание</td></tr>
+<tr><td><code>ShowGridLines</code></td><td>bool</td><td>Показывать линии сетки</td></tr>
+<tr><td><code>GridLineColor</code></td><td>color.RGBA</td><td>Цвет линий</td></tr>
+<tr><td><code>RowDefs</code></td><td>[]GridDefinition</td><td>Определения строк</td></tr>
+<tr><td><code>ColDefs</code></td><td>[]GridDefinition</td><td>Определения столбцов</td></tr>
+</table>
+
+<p><strong>GridDefinition</strong>: <code>Mode GridSizeMode</code> (GridSizePixel / GridSizeStar / GridSizeAuto), <code>Value float64</code>, <code>Min int</code>, <code>Max int</code>.</p>
+
+<h4>XAML</h4>
+<pre><code>&lt;Grid&gt;
+    &lt;Grid.RowDefinitions&gt;
+        &lt;RowDefinition Height="40"/&gt;
+        &lt;RowDefinition Height="*"/&gt;
+        &lt;RowDefinition Height="Auto"/&gt;
+    &lt;/Grid.RowDefinitions&gt;
+    &lt;Grid.ColumnDefinitions&gt;
+        &lt;ColumnDefinition Width="200"/&gt;
+        &lt;ColumnDefinition Width="2*"/&gt;
+    &lt;/Grid.ColumnDefinitions&gt;
+    &lt;Button Grid.Row="0" Grid.Column="1" Content="OK"/&gt;
+&lt;/Grid&gt;</code></pre>
+</div>
+
+<!-- ─── StackPanel ─── -->
+<h2 id="widget-stackpanel">StackPanel</h2>
+<div class="widget-card">
+<h3>widget.StackPanel <span class="badge badge-struct">struct</span></h3>
+<p>Укладывает дочерние виджеты вертикально или горизонтально.</p>
+
+<h4>Конструктор</h4>
+<pre><code>sp := widget.NewStackPanel(widget.OrientationVertical)</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><td><code>Orientation</code></td><td>Orientation</td><td>Vertical / Horizontal</td></tr>
+<tr><td><code>Spacing</code></td><td>int</td><td>Отступ между элементами</td></tr>
+<tr><td><code>Padding</code></td><td>Margin</td><td>Внутренние отступы</td></tr>
+<tr><td><code>Background</code></td><td>color.RGBA</td><td>Фон</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;StackPanel Orientation="Horizontal" Spacing="8"&gt;...&lt;/StackPanel&gt;</code></p>
+</div>
+
+<!-- ─── DockPanel ─── -->
+<h2 id="widget-dockpanel">DockPanel</h2>
+<div class="widget-card">
+<h3>widget.DockPanel <span class="badge badge-struct">struct</span></h3>
+<p>Прикрепляет дочерние виджеты к сторонам. Последний элемент заполняет оставшееся пространство.</p>
+
+<h4>Конструктор</h4>
+<pre><code>dp := widget.NewDockPanel()</code></pre>
+
+<h4>XAML</h4>
+<pre><code>&lt;DockPanel&gt;
+    &lt;Menu DockPanel.Dock="Top"/&gt;
+    &lt;Panel DockPanel.Dock="Left" Width="200"/&gt;
+    &lt;Panel/&gt; &lt;!-- заполнит остаток --&gt;
+&lt;/DockPanel&gt;</code></pre>
+</div>
+
+<!-- ─── ScrollView ─── -->
+<h2 id="widget-scrollview">ScrollView</h2>
+<div class="widget-card">
+<h3>widget.ScrollView <span class="badge badge-struct">struct</span></h3>
+<p>Прокручиваемая область со скроллбаром.</p>
+
+<h4>Конструктор</h4>
+<pre><code>sv := widget.NewScrollView()</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><td><code>ContentHeight</code></td><td>int</td><td>Высота содержимого</td></tr>
+<tr><td><code>ShowBorder</code></td><td>bool</td><td>Рамка</td></tr>
+<tr><td><code>Background</code>, <code>TrackColor</code>, <code>ThumbColor</code></td><td>color.RGBA</td><td>Цвета</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>ScrollY() int</code></td><td>Текущая прокрутка</td></tr>
+<tr><td><code>SetScrollY(y int)</code></td><td>Установить прокрутку</td></tr>
+<tr><td><code>ScrollBy(delta int)</code></td><td>Прокрутить</td></tr>
+</table>
+</div>
+
+<!-- ─── TabControl ─── -->
+<h2 id="widget-tabcontrol">TabControl</h2>
+<div class="widget-card">
+<h3>widget.TabControl <span class="badge badge-struct">struct</span></h3>
+<p>Контейнер с вкладками.</p>
+
+<h4>Конструктор</h4>
+<pre><code>tc := widget.NewTabControl(
+    widget.TabItem{Header: "Tab 1", Content: panel1},
+    widget.TabItem{Header: "Tab 2", Content: panel2},
+)</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><td><code>TabBG</code>, <code>TabActiveBG</code>, <code>TabBorder</code>, <code>TabText</code>, <code>TabActiveText</code>, <code>ContentBG</code>, <code>AccentColor</code></td><td>color.RGBA</td><td>Цвета</td></tr>
+<tr><td><code>TabHeight</code>, <code>TabPadH</code></td><td>int</td><td>Размеры вкладок</td></tr>
+<tr><td><code>OnTabChange</code></td><td>func(int, string)</td><td>Обработчик (index, header)</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>AddTab(header string, content Widget)</code></td><td>Добавить вкладку</td></tr>
+<tr><td><code>SetActive(idx int)</code></td><td>Активировать вкладку</td></tr>
+<tr><td><code>Active() int</code></td><td>Индекс активной вкладки</td></tr>
+<tr><td><code>TabCount() int</code></td><td>Количество вкладок</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;TabControl&gt;&lt;TabItem Header="Tab 1"&gt;...&lt;/TabItem&gt;&lt;/TabControl&gt;</code></p>
+</div>
+
+<!-- ─── Dialog ─── -->
+<h2 id="widget-dialog">Dialog</h2>
+<div class="widget-card">
+<h3>widget.Dialog <span class="badge badge-struct">struct</span></h3>
+<p>Модальный диалог с затемнением фона. Реализует <code>ModalWidget</code>.</p>
+
+<h4>Конструкторы</h4>
+<pre><code>dlg := widget.NewDialog("Подтверждение", 400, 200)
+dlg := widget.NewConfirmDialog("Удалить?", "Уверены?", func(ok bool) { ... })</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><td><code>Title</code></td><td>string</td><td>Заголовок</td></tr>
+<tr><td><code>Background</code>, <code>BorderColor</code>, <code>TitleColor</code>, <code>TitleBG</code>, <code>Dim</code></td><td>color.RGBA</td><td>Цвета</td></tr>
+<tr><td><code>TitleHeight</code></td><td>int</td><td>Высота заголовка (32)</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>IsModal() bool</code></td><td>Активен ли модальный режим</td></tr>
+<tr><td><code>DimColor() color.RGBA</code></td><td>Цвет затемнения</td></tr>
+<tr><td><code>SetModal(v bool)</code></td><td>Управление модальностью</td></tr>
+<tr><td><code>ContentBounds() image.Rectangle</code></td><td>Область содержимого</td></tr>
+</table>
+
+<pre><code>eng.ShowModal(dlg) // показать
+eng.CloseModal(dlg) // закрыть</code></pre>
+</div>
+
+<!-- ─── MessageBox ─── -->
+<h2 id="widget-messagebox">MessageBox</h2>
+<div class="widget-card">
+<h3>widget.MessageBox <span class="badge badge-struct">struct</span></h3>
+<p>Готовые диалоги сообщений (OK, OK/Cancel, Yes/No, Yes/No/Cancel).</p>
+
+<h4>Конструктор</h4>
+<pre><code>mb := widget.NewMessageBox(eng) // eng реализует ModalShower</code></pre>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>Show(caption, message string) *Dialog</code></td><td>OK</td></tr>
+<tr><td><code>ShowOKCancel(caption, message, onResult func(MessageBoxResult)) *Dialog</code></td><td>OK / Отмена</td></tr>
+<tr><td><code>ShowYesNo(caption, message, onResult) *Dialog</code></td><td>Да / Нет</td></tr>
+<tr><td><code>ShowYesNoCancel(caption, message, onResult) *Dialog</code></td><td>Да / Нет / Отмена</td></tr>
+<tr><td><code>ShowDialog(caption, message, buttons, onResult) *Dialog</code></td><td>Произвольные кнопки</td></tr>
+</table>
+
+<p><strong>MessageBoxResult</strong>: <code>MBResultOK</code>, <code>MBResultCancel</code>, <code>MBResultYes</code>, <code>MBResultNo</code></p>
+</div>
+
+<!-- ─── ModalAdapter ─── -->
+<h2 id="widget-modaladapter">ModalAdapter</h2>
+<div class="widget-card">
+<h3>widget.ModalAdapter <span class="badge badge-struct">struct</span></h3>
+<p>Обёртка, превращающая любой Widget в ModalWidget.</p>
+<pre><code>ma := widget.NewModalAdapter(myWidget)
+ma := widget.NewModalAdapterWithDim(myWidget, color.RGBA{0,0,0,120})</code></pre>
+</div>
+
+<!-- ─── MenuBar ─── -->
+<h2 id="widget-menubar">MenuBar</h2>
+<div class="widget-card">
+<h3>widget.MenuBar <span class="badge badge-struct">struct</span></h3>
+<p>Главное меню приложения. Поддерживает выпадающие подменю и отдельные пункты.</p>
+
+<h4>Конструктор</h4>
+<pre><code>menu := widget.NewMenuBar()</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><td><code>Background</code>, <code>TextColor</code>, <code>HoverBG</code>, <code>ActiveBG</code>, <code>BorderColor</code></td><td>color.RGBA</td><td>Цвета</td></tr>
+<tr><td><code>ItemPaddingX</code></td><td>int</td><td>Отступ пунктов</td></tr>
+<tr><td><code>Height</code></td><td>int</td><td>Высота (28 по умолчанию)</td></tr>
+<tr><td><code>OnSelect</code></td><td>func(topIdx, subIdx int, text string)</td><td>Обработчик</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>AddMenu(text string, items ...MenuItem)</code></td><td>Добавить меню с подпунктами</td></tr>
+<tr><td><code>AddTopItem(text string, onClick func())</code></td><td>Пункт без подменю</td></tr>
+</table>
+
+<h4>XAML</h4>
+<pre><code>&lt;Menu&gt;
+    &lt;MenuItem Header="Файл"&gt;
+        &lt;MenuItem Header="Открыть"/&gt;
+        &lt;Separator/&gt;
+        &lt;MenuItem Header="Выход"/&gt;
+    &lt;/MenuItem&gt;
+    &lt;MenuItem Header="Справка"/&gt;
+&lt;/Menu&gt;</code></pre>
+</div>
+
+<!-- ─── DataGrid ─── -->
+<h2 id="widget-datagrid">DataGrid</h2>
+<div class="widget-card">
+<h3>widget.DataGridWidget <span class="badge badge-struct">struct</span></h3>
+<p>Мощная таблица данных в стиле WPF DataGrid. Поддерживает сортировку, редактирование, виртуализацию, привязку данных.</p>
+
+<h4>Конструктор</h4>
+<pre><code>dg := widget.NewDataGridWidget()</code></pre>
+
+<h4>Внутренний DataGrid (<code>dg.Grid *datagrid.DataGrid</code>)</h4>
+
+<h4>Основные поля (datagrid.DataGrid)</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>AutoGenerateColumns</code></td><td>bool</td><td>Автогенерация столбцов</td></tr>
+<tr><td><code>IsReadOnly</code></td><td>bool</td><td>Только чтение</td></tr>
+<tr><td><code>CanUserSortColumns</code></td><td>bool</td><td>Сортировка по клику</td></tr>
+<tr><td><code>CanUserResizeColumns</code></td><td>bool</td><td>Изменение ширины</td></tr>
+<tr><td><code>SelectionMode</code></td><td>SelectionMode</td><td>Single / Extended</td></tr>
+<tr><td><code>RowHeight</code></td><td>int</td><td>Высота строки</td></tr>
+<tr><td><code>HeaderHeight</code></td><td>int</td><td>Высота заголовка</td></tr>
+<tr><td><code>FontSize</code></td><td>float64</td><td>Размер шрифта</td></tr>
+<tr><td><code>OnSelectionChanged</code></td><td>func(SelectionChangedEvent)</td><td>Обработчик выделения</td></tr>
+<tr><td><code>OnSorting</code></td><td>func(*SortingEvent)</td><td>Обработчик сортировки</td></tr>
+<tr><td><code>OnCellEditEnding</code></td><td>func(*CellEditEndingEvent)</td><td>Обработчик редактирования</td></tr>
+</table>
+
+<h4>Методы DataGrid</h4>
+<table>
+<tr><td><code>AddColumn(col Column)</code></td><td>Добавить столбец</td></tr>
+<tr><td><code>Columns() []Column</code></td><td>Получить столбцы</td></tr>
+<tr><td><code>SetItemsSource(oc *ObservableCollection)</code></td><td>Привязать данные</td></tr>
+<tr><td><code>SelectedItem() interface{}</code></td><td>Выделенный элемент</td></tr>
+<tr><td><code>SelectedItems() []interface{}</code></td><td>Выделенные элементы</td></tr>
+<tr><td><code>SetSelectedIndex(idx int)</code></td><td>Выделить строку</td></tr>
+</table>
+
+<h4>Типы столбцов</h4>
+<pre><code>col := datagrid.NewTextColumn("Имя", "Name")
+col := datagrid.NewCheckBoxColumn("Активен", "IsActive")
+col := datagrid.NewTemplateColumn("Custom", func(cdc CellDrawContext) { ... })</code></pre>
+
+<h4>Привязка данных</h4>
+<pre><code>oc := datagrid.NewObservableCollection()
+oc.Add(MyStruct{Name: "Alice", Age: 30})
+oc.Add(MyStruct{Name: "Bob", Age: 25})
+dg.Grid.SetItemsSource(oc)
+
+// Уведомления об изменениях
+oc.AddCollectionChanged(func(e datagrid.CollectionChangedEvent) {
+    fmt.Println("Коллекция изменена:", e.Action)
+})</code></pre>
+</div>
+
+<!-- ─── TreeView ─── -->
+<h2 id="widget-treeview">TreeView</h2>
+<div class="widget-card">
+<h3>widget.TreeViewWidget <span class="badge badge-struct">struct</span></h3>
+<p>Иерархическое дерево. Поддерживает шаблоны, data binding, иконки, expand/collapse.</p>
+
+<h4>Конструктор</h4>
+<pre><code>tv := widget.NewTreeViewWidget()</code></pre>
+
+<h4>Внутренний TreeView (<code>tv.Tree *treeview.TreeView</code>)</h4>
+
+<h4>Основные поля (treeview.TreeView)</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>ItemHeight</code></td><td>int</td><td>Высота элемента (24)</td></tr>
+<tr><td><code>IndentSize</code></td><td>int</td><td>Отступ уровня (20)</td></tr>
+<tr><td><code>FontSize</code></td><td>float64</td><td>Размер шрифта</td></tr>
+<tr><td><code>IconSize</code></td><td>int</td><td>Размер иконки</td></tr>
+<tr><td><code>IsReadOnly</code></td><td>bool</td><td>Только чтение</td></tr>
+<tr><td><code>ShowIndentGuides</code></td><td>bool</td><td>Линии уровней</td></tr>
+<tr><td><code>OnSelectedItemChanged</code></td><td>func(SelectedItemChangedEvent)</td><td>Смена выделения</td></tr>
+<tr><td><code>OnExpanded</code></td><td>func(ExpandedEvent)</td><td>Раскрытие узла</td></tr>
+<tr><td><code>OnCollapsed</code></td><td>func(CollapsedEvent)</td><td>Сворачивание узла</td></tr>
+<tr><td><code>OnItemInvoked</code></td><td>func(ItemInvokedEvent)</td><td>Двойной клик</td></tr>
+<tr><td><code>OnSelect</code></td><td>func(*TreeViewItem)</td><td>Простой обработчик выбора</td></tr>
+</table>
+
+<h4>TreeViewItem</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Text</code>, <code>Header</code></td><td>string</td><td>Текст (Header приоритетнее)</td></tr>
+<tr><td><code>Icon</code></td><td>image.Image</td><td>Иконка</td></tr>
+<tr><td><code>Expanded</code></td><td>bool</td><td>Раскрыт ли узел</td></tr>
+<tr><td><code>IsSelected</code></td><td>bool</td><td>Выделен ли</td></tr>
+<tr><td><code>IsEnabled</code></td><td>bool</td><td>Активен ли</td></tr>
+<tr><td><code>Tag</code></td><td>interface{}</td><td>Произвольные данные</td></tr>
+<tr><td><code>DataContext</code></td><td>interface{}</td><td>Данные (для привязки)</td></tr>
+<tr><td><code>Children</code></td><td>[]*TreeViewItem</td><td>Дочерние узлы</td></tr>
+</table>
+
+<h4>Пример</h4>
+<pre><code>tv := widget.NewTreeViewWidget()
+
+root := treeview.NewItem("Проект")
+root.Expanded = true
+
+src := treeview.NewItem("src")
+src.AddChild(treeview.NewItem("main.go"))
+src.AddChild(treeview.NewItem("utils.go"))
+root.AddChild(src)
+
+tv.AddRoot(root)</code></pre>
+</div>
+
+<!-- ─── XAML Registry ─── -->
+<h2 id="xaml-registry">XAML-реестр расширений</h2>
+<div class="widget-card">
+<h3>Пользовательские XAML-теги <span class="badge badge-func">extension</span></h3>
+<p>Позволяет регистрировать собственные виджеты для использования в XAML.</p>
+
+<pre><code>// Интерфейс для чтения атрибутов XAML-элемента
+type XAMLAttrs interface {
+    Attr(names ...string) string   // значение атрибута
+    Tag() string                    // имя тега
+    Text() string                   // внутренний текст
+    ChildCount() int                // число дочерних тегов
+    ChildAttrs(index int) XAMLAttrs // атрибуты дочернего тега
+}
+
+// Тип функции-строителя
+type XAMLWidgetBuilder func(attrs XAMLAttrs) (Widget, error)
+
+// Регистрация
+widget.RegisterXAMLWidget("MyWidget", func(attrs XAMLAttrs) (Widget, error) {
+    w := NewMyWidget()
+    if v := attrs.Attr("Color"); v != "" {
+        w.Color = parseColor(v)
+    }
+    return w, nil
+})
+
+// Отмена регистрации
+widget.UnregisterXAMLWidget("MyWidget")</code></pre>
+
+<p>После регистрации тег <code>&lt;MyWidget Color="#FF0000"/&gt;</code> будет обрабатываться вашим builder'ом.</p>
+</div>
+
+<!-- ─── Интерфейсы ─── -->
+<h2 id="interfaces">Интерфейсы</h2>
+
+<h4>Основные</h4>
+<table>
+<tr><th>Интерфейс</th><th>Методы</th><th>Описание</th></tr>
+<tr><td><code>Widget</code></td><td>Draw, Bounds, SetBounds, Children, AddChild</td><td>Базовый интерфейс виджета</td></tr>
+<tr><td><code>ModalWidget</code></td><td>Widget + IsModal, DimColor</td><td>Модальный виджет</td></tr>
+<tr><td><code>ModalShower</code></td><td>ShowModal, CloseModal</td><td>Показ модалов (движок)</td></tr>
+<tr><td><code>Themeable</code></td><td>ApplyTheme(*Theme)</td><td>Поддержка тем</td></tr>
+<tr><td><code>OverlayDrawer</code></td><td>HasOverlay, DrawOverlay</td><td>Overlay (меню, dropdown)</td></tr>
+</table>
+
+<h4>Ввод</h4>
+<table>
+<tr><th>Интерфейс</th><th>Методы</th><th>Описание</th></tr>
+<tr><td><code>MouseClickHandler</code></td><td>OnMouseButton(MouseEvent) bool</td><td>Обработка кликов</td></tr>
+<tr><td><code>MouseMoveHandler</code></td><td>OnMouseMove(x, y int)</td><td>Движение мыши</td></tr>
+<tr><td><code>KeyHandler</code></td><td>OnKeyEvent(KeyEvent)</td><td>Клавиатура</td></tr>
+<tr><td><code>Focusable</code></td><td>SetFocused(bool), IsFocused() bool</td><td>Фокус</td></tr>
+<tr><td><code>CaptureRequester</code></td><td>WantsCapture(MouseEvent) bool</td><td>Запрос захвата мыши</td></tr>
+<tr><td><code>CaptureManager</code></td><td>SetCapture(Widget), ReleaseCapture()</td><td>Менеджер захвата</td></tr>
+<tr><td><code>CaptureAware</code></td><td>SetCaptureManager(CaptureManager)</td><td>Инъекция менеджера</td></tr>
+<tr><td><code>TabIndexProvider</code></td><td>TabIndex() int</td><td>Порядок Tab</td></tr>
+</table>
+
+<h4>Данные (datagrid)</h4>
+<table>
+<tr><th>Интерфейс</th><th>Методы</th><th>Описание</th></tr>
+<tr><td><code>Column</code></td><td>Header, Width, DrawCell, GetCellValue, ...</td><td>Столбец DataGrid</td></tr>
+<tr><td><code>INotifyPropertyChanged</code></td><td>AddPropertyChanged, RemovePropertyChanged</td><td>Уведомление об изменении свойств</td></tr>
+<tr><td><code>IValueConverter</code></td><td>Convert, ConvertBack</td><td>Конвертер привязки</td></tr>
+<tr><td><code>PropertyGetter</code></td><td>GetProperty(name) (interface{}, bool)</td><td>Получение свойства</td></tr>
+</table>
+
+<!-- Footer -->
+<hr style="margin-top:64px;border-color:var(--border)">
+<p style="color:var(--dim);font-size:.85rem;text-align:center;margin-top:16px">
+headless-gui v3 &mdash; <code>github.com/oops1/headless-gui/v3</code> &mdash; Go &ge; 1.22 &mdash; MIT License
+</p>
+
+</main>
+</body>
+</html>

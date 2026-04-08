@@ -275,6 +275,10 @@ func (win *Window) setupInputCallbacks() {
 			btn = widget.MouseRight
 		case 2:
 			btn = widget.MouseMiddle
+		case 3:
+			btn = widget.MouseWheelUp
+		case 4:
+			btn = widget.MouseWheelDown
 		default:
 			return
 		}
