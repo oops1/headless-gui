@@ -30,9 +30,9 @@ func main() {
 	eng := engine.New(screenW, screenH, fps)
 
 	// ── Фон ─────────────────────────────────────────────────────────────────
-	if err := eng.SetBackgroundFile("gui/149013-1920x1200.jpg"); err != nil {
-		log.Printf("предупреждение: фон не загружен: %v", err)
-	}
+	//if err := eng.SetBackgroundFile("gui/149013-1920x1200.jpg"); err != nil {
+	//	log.Printf("предупреждение: фон не загружен: %v", err)
+	//}
 
 	// ── Загрузка UI из XAML ──────────────────────────────────────────────────
 	root, registry, err := widget.LoadUIFromXAMLFile("assets/ui/demo.xaml")

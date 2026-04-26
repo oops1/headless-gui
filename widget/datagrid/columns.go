@@ -123,8 +123,15 @@ type Column interface {
 	MinWidth() int
 	MaxWidth() int
 
-	// IsReadOnly возвращает true, если колонка только для чтения.
+	// IsReadOnly возвращает текущее значение признака read-only колонки.
+	// Если IsReadOnlyExplicit() == false, это значение не должно
+	// учитываться отдельно — колонка наследует DataGrid.IsReadOnly.
 	IsReadOnly() bool
+
+	// IsReadOnlyExplicit возвращает true, если IsReadOnly был выставлен
+	// на колонке ЯВНО. В этом случае значение IsReadOnly() перекрывает
+	// DataGrid.IsReadOnly в обе стороны (WPF-совместимая семантика).
+	IsReadOnlyExplicit() bool
 
 	// SortMemberPath возвращает путь к свойству для сортировки.
 	SortMemberPath() string
@@ -149,16 +156,26 @@ type Column interface {
 // ─── ColumnBase ────────────────────────────────────────────────────────────
 
 // ColumnBase — общая реализация базовых свойств колонки.
+//
+// Поле readOnly реализует tri-state с readOnlyExplicit:
+//
+//	readOnlyExplicit=false → колонка наследует IsReadOnly грида
+//	readOnlyExplicit=true,  readOnly=true  → жёстко RO (даже при grid.IsReadOnly=false)
+//	readOnlyExplicit=true,  readOnly=false → жёстко editable (даже при grid.IsReadOnly=true)
+//
+// Это совпадает с поведением WPF DataGrid: per-column IsReadOnly
+// перекрывает DataGrid.IsReadOnly в обе стороны.
 type ColumnBase struct {
-	header        string
-	width         ColumnWidth
-	actualWidth   int
-	minWidth      int
-	maxWidth      int
-	readOnly      bool
-	sortPath      string
-	binding       *Binding
-	sortDirection SortDirection
+	header           string
+	width            ColumnWidth
+	actualWidth      int
+	minWidth         int
+	maxWidth         int
+	readOnly         bool
+	readOnlyExplicit bool // true — IsReadOnly выставлено явно (см. SetReadOnly / SetReadOnlyExplicit)
+	sortPath         string
+	binding          *Binding
+	sortDirection    SortDirection
 }
 
 func (c *ColumnBase) Header() string                   { return c.header }
@@ -174,7 +191,27 @@ func (c *ColumnBase) SortMemberPath() string           { return c.sortPath }
 func (c *ColumnBase) GetBinding() *Binding             { return c.binding }
 func (c *ColumnBase) GetSortDirection() SortDirection  { return c.sortDirection }
 func (c *ColumnBase) SetSortDirection(d SortDirection) { c.sortDirection = d }
-func (c *ColumnBase) SetReadOnly(v bool)               { c.readOnly = v }
+
+// SetReadOnly выставляет признак read-only ЯВНО.
+// После вызова значение перекрывает DataGrid.IsReadOnly в обе стороны
+// (WPF-семантика). Если нужно сбросить колонку обратно в режим
+// «наследую от грида» — используйте ResetReadOnly.
+func (c *ColumnBase) SetReadOnly(v bool) {
+	c.readOnly = v
+	c.readOnlyExplicit = true
+}
+
+// ResetReadOnly сбрасывает явную установку IsReadOnly для колонки —
+// после этого колонка снова наследует значение DataGrid.IsReadOnly.
+func (c *ColumnBase) ResetReadOnly() {
+	c.readOnly = false
+	c.readOnlyExplicit = false
+}
+
+// IsReadOnlyExplicit сообщает, было ли IsReadOnly выставлено
+// на колонке явно (через SetReadOnly). DataGrid.beginEdit использует
+// это для решения «брать значение колонки или наследовать от грида».
+func (c *ColumnBase) IsReadOnlyExplicit() bool { return c.readOnlyExplicit }
 func (c *ColumnBase) SetSortPath(path string)          { c.sortPath = path }
 func (c *ColumnBase) SetMinWidth(px int)               { c.minWidth = px }
 func (c *ColumnBase) SetMaxWidth(px int)               { c.maxWidth = px }
