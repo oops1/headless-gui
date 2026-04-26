@@ -340,15 +340,19 @@ func TestXAMLWindow_CustomColors(t *testing.T) {
 
 // ─── Window vs Canvas — различие типов ──────────────────────────────────────
 
-func TestXAMLCanvas_StillReturnsPanel(t *testing.T) {
+// TestXAMLCanvas_ReturnsCanvas — раньше <Canvas> в XAML строился как
+// *widget.Panel (старая семантика, тест назывался StillReturnsPanel).
+// После выделения отдельного Canvas-виджета (свободное позиционирование
+// по Left/Top вместо grid/dock) тест обновлён под актуальный контракт:
+// корень типа *widget.Canvas.
+func TestXAMLCanvas_ReturnsCanvas(t *testing.T) {
 	xaml := `<Canvas Width="1920" Height="1024" Background="#1E1E2E"/>`
 	root, _, err := widget.LoadUIFromXAML([]byte(xaml))
 	if err != nil {
 		t.Fatalf("LoadUIFromXAML: %v", err)
 	}
-	_, ok := root.(*widget.Panel)
-	if !ok {
-		t.Fatalf("Canvas root type = %T, want *widget.Panel", root)
+	if _, ok := root.(*widget.Canvas); !ok {
+		t.Fatalf("Canvas root type = %T, want *widget.Canvas", root)
 	}
 }
 
@@ -487,6 +491,28 @@ func TestXAMLWindow_WithGrid(t *testing.T) {
 	}
 	if _, ok := reg["mainGrid"]; !ok {
 		t.Fatal("mainGrid not found in registry")
+	}
+	if _, ok := reg["btnOK"]; !ok {
+		t.Fatal("btnOK not found in registry")
+	}
+}
+		</Grid>
+	</Window>`
+	root, reg, err := widget.LoadUIFromXAML([]byte(xaml))
+	if err != nil {
+		t.Fatalf("LoadUIFromXAML: %v", err)
+	}
+	if _, ok := root.(*widget.Window); !ok {
+		t.Fatalf("root type = %T, want *widget.Window", root)
+	}
+	if reg["mainGrid"] == nil {
+		t.Fatal("mainGrid not registered")
+	}
+	if reg["btnOK"] == nil {
+		t.Fatal("btnOK not registered")
+	}
+}
+und in registry")
 	}
 	if _, ok := reg["btnOK"]; !ok {
 		t.Fatal("btnOK not found in registry")

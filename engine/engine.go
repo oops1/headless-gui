@@ -85,10 +85,38 @@ func New(width, height, fps int) *Engine {
 	}
 }
 
-// SetRoot устанавливает корневой виджет и задаёт ему bounds равным всему холсту.
+// SetRoot устанавливает корневой виджет.
+//
+// Поведение bounds:
+//
+//   - Если у переданного виджета bounds пустые (нулевой Rect) — что
+//     характерно для виджетов, созданных через NewXxx() без явного
+//     SetBounds — корню назначается прямоугольник всего холста.
+//   - Если bounds непустые (например XAML-загрузчик уже выставил
+//     Width/Height из <Window Width=… Height=…/>) — они сохраняются.
+//     Это позволяет XAML-разработчику задать «логический размер окна»
+//     меньше канваса (типичный сценарий: окно по центру холста)
+//     или больше канваса (виртуальная сцена под скроллом).
+//
 // Безопасно вызывать до Start() или во время работы движка.
 // Рекурсивно инжектит CaptureManager виджетам, поддерживающим CaptureAware.
+//
+// Если нужно безусловно растянуть корень на весь канвас независимо
+// от XAML — используйте SetRootFullCanvas.
 func (e *Engine) SetRoot(w widget.Widget) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.root = w
+	if w.Bounds().Empty() {
+		w.SetBounds(image.Rect(0, 0, e.canvas.W, e.canvas.H))
+	}
+	injectCaptureManager(w, e)
+}
+
+// SetRootFullCanvas устанавливает корневой виджет и принудительно
+// растягивает его на весь холст (старое поведение SetRoot до фикса A9).
+// Используйте, когда XAML задал размеры, но вам нужен fullscreen.
+func (e *Engine) SetRootFullCanvas(w widget.Widget) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.root = w
@@ -360,9 +388,11 @@ func (e *Engine) renderFrame() output.Frame {
 
 	e.canvas.blitBackground()
 
+	// Корневое дерево: рисуем root и его overlay-слой (popup/dropdown).
+	// Без этого вызова на канвасе остаётся только blitBackground —
+	// именно сюда «уехал» баг с чёрным экраном при последнем appendF.
 	if e.root != nil {
 		e.root.Draw(e.canvas)
-		// Overlay-слой: рисуем popup-элементы (dropdown-списки и пр.) поверх всего дерева.
 		drawOverlays(e.root, e.canvas)
 	}
 

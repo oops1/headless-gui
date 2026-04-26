@@ -1068,6 +1068,13 @@ func TestTextInput_PasswordMode(t *testing.T) {
 }
 
 func TestTextInput_PasswordMode_NoCopy(t *testing.T) {
+	// Clipboard — глобальное состояние, любой предыдущий тест мог
+	// оставить там текст. Принудительно ставим маркер, который должен
+	// остаться нетронутым после Ctrl+C по password-полю (если копия
+	// заблокирована — буфер сохранит маркер).
+	const sentinel = "__password_test_sentinel__"
+	widget.ClipboardSetText(sentinel)
+
 	ti := widget.NewPasswordInput("")
 	ti.SetText("secret")
 
@@ -1077,13 +1084,23 @@ func TestTextInput_PasswordMode_NoCopy(t *testing.T) {
 	ctrlC := widget.KeyEvent{Code: widget.KeyC, Mod: widget.ModCtrl, Pressed: true}
 	ti.OnKeyEvent(ctrlC)
 
-	// Clear text, try paste — clipboard should be empty (copy was blocked)
+	// Проверяем напрямую через буфер — там должен остаться sentinel,
+	// "secret" не должен туда попасть.
+	if got := widget.ClipboardGetText(); got != sentinel {
+		t.Fatalf("password mode must not copy to clipboard; want sentinel %q, got %q",
+			sentinel, got)
+	}
+
+	// И вторая проверка — paste в чистое поле даст sentinel, не "secret".
 	ti.SetText("")
 	ctrlV := widget.KeyEvent{Code: widget.KeyV, Mod: widget.ModCtrl, Pressed: true}
 	ti.OnKeyEvent(ctrlV)
-	if ti.GetText() != "" {
-		t.Fatalf("password copy should be blocked, but paste gave: %q", ti.GetText())
+	if got := ti.GetText(); got == "secret" {
+		t.Fatalf("paste returned the secret — copy was NOT blocked: %q", got)
 	}
+
+	// Cleanup — не оставляем sentinel другим тестам.
+	widget.ClipboardSetText("")
 }
 
 func TestTextInput_OnChange(t *testing.T) {
@@ -1226,6 +1243,39 @@ func TestPanel_DragEnabled(t *testing.T) {
 	p := widget.NewWin10Panel()
 	p.Drag.Enabled = true
 	p.Drag.HandleHeight = 30
+	p.SetBounds(image.Rect(100, 100, 400, 400))
+
+	// WantsCapture в drag handle зоне
+	ev := widget.MouseEvent{X: 200, Y: 110, Button: widget.MouseLeft, Pressed: true}
+	if !p.WantsCapture(ev) {
+		t.Fatal("should want capture in handle area")
+	}
+
+	// Вне drag handle зоны
+	ev.Y = 200 // за пределами 30px handle
+	if p.WantsCapture(ev) {
+		t.Fatal("should not want capture outside handle area")
+	}
+}
+
+func TestPanel_DragDisabled(t *testing.T) {
+	p := widget.NewWin10Panel()
+	p.Drag.Enabled = false
+	ev := widget.MouseEvent{X: 200, Y: 110, Button: widget.MouseLeft, Pressed: true}
+	if p.WantsCapture(ev) {
+		t.Fatal("should not want capture when drag disabled")
+	}
+}
+
+func TestPanel_OnMouseButton_DragDisabled(t *testing.T) {
+	p := widget.NewWin10Panel()
+	p.Drag.Enabled = false
+	ev := widget.MouseEvent{X: 200, Y: 110, Button: widget.MouseLeft, Pressed: true}
+	if p.OnMouseButton(ev) {
+		t.Fatal("should not consume event when drag disabled")
+	}
+}
+ = 30
 	p.SetBounds(image.Rect(100, 100, 400, 400))
 
 	// WantsCapture в drag handle зоне

@@ -25,6 +25,22 @@ type ListView struct {
 
 	ItemHeight int // высота одного элемента (по умолчанию 28)
 
+	// AutoScrollToBottom — режим «live tail»: после SetItems / AddItem
+	// прокрутка автоматически встаёт в конец, если пользователь
+	// уже находился у нижнего края списка. Если пользователь
+	// проскроллил вверх — позиция сохраняется (не «убегает» под
+	// добавлением новых строк). Поведение совпадает с типичным
+	// логгером: WPF DataGrid.AutoScrollIntoView, Win32 ListBox c
+	// LBS_NOTIFY и т.п.
+	AutoScrollToBottom bool
+
+	// PreserveScrollOnSetItems — если true, SetItems НЕ сбрасывает
+	// scrollY в 0 (старое поведение по умолчанию). Используется,
+	// когда коллекция перестраивается, но визуально остаётся
+	// сравнимой (например, фильтрация/сортировка in-place).
+	// AutoScrollToBottom имеет приоритет над этим флагом.
+	PreserveScrollOnSetItems bool
+
 	mu       sync.Mutex
 	items    []string
 	selected int // индекс выделенного элемента (-1 = нет)
@@ -64,11 +80,64 @@ func NewListView(items ...string) *ListView {
 }
 
 // SetItems заменяет список элементов.
+//
+// Поведение прокрутки определяется флагами:
+//
+//   - AutoScrollToBottom=true и пользователь был у нижнего края до вызова —
+//     scrollY устанавливается в конец (live-tail режим).
+//   - PreserveScrollOnSetItems=true — scrollY сохраняется (но clamp'ится
+//     по новому maxScroll).
+//   - иначе — старое поведение: scrollY=0, как при «новом списке».
+//
+// Selection всегда сбрасывается (-1), потому что индексы могут уже
+// не указывать на тот же элемент.
 func (lv *ListView) SetItems(items []string) {
 	lv.mu.Lock()
 	defer lv.mu.Unlock()
+
+	wasAtBottom := lv.isAtBottom()
+
 	lv.items = items
 	lv.selected = -1
+
+	switch {
+	case lv.AutoScrollToBottom && wasAtBottom:
+		lv.scrollY = lv.maxScroll()
+	case lv.PreserveScrollOnSetItems:
+		lv.clampScroll()
+	default:
+		lv.scrollY = 0
+	}
+}
+
+// isAtBottom возвращает true, если scrollY уже у нижнего края
+// (с допуском в одну строку, чтобы покрыть рассинхрон в один пиксель
+// после fractional thumb-drag). Должна вызываться под lv.mu.
+func (lv *ListView) isAtBottom() bool {
+	maxS := lv.maxScroll()
+	if maxS <= 0 {
+		// Нет необходимости в скроллбаре — формально всегда «в конце».
+		return true
+	}
+	tol := lv.ItemHeight
+	if tol <= 0 {
+		tol = 1
+	}
+	return lv.scrollY >= maxS-tol
+}
+
+// ScrollToBottom прокручивает список до самого низа.
+// Безопасно вызывать из любой goroutine.
+func (lv *ListView) ScrollToBottom() {
+	lv.mu.Lock()
+	defer lv.mu.Unlock()
+	lv.scrollY = lv.maxScroll()
+}
+
+// ScrollToTop прокручивает список в начало.
+func (lv *ListView) ScrollToTop() {
+	lv.mu.Lock()
+	defer lv.mu.Unlock()
 	lv.scrollY = 0
 }
 
@@ -82,10 +151,16 @@ func (lv *ListView) Items() []string {
 }
 
 // AddItem добавляет элемент в конец списка.
+// Если AutoScrollToBottom=true и пользователь был у нижнего края —
+// прокрутка автоматически встанет в конец после добавления.
 func (lv *ListView) AddItem(text string) {
 	lv.mu.Lock()
 	defer lv.mu.Unlock()
+	wasAtBottom := lv.isAtBottom()
 	lv.items = append(lv.items, text)
+	if lv.AutoScrollToBottom && wasAtBottom {
+		lv.scrollY = lv.maxScroll()
+	}
 }
 
 // Clear удаляет все элементы из списка и сбрасывает выделение.
