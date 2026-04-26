@@ -422,12 +422,18 @@ func TestDataGrid_XAML_AsListView(t *testing.T) {
 		t.Fatalf("LoadUIFromXAML: %v", err)
 	}
 
-	lv, ok := reg["dg"].(*widget.ListView)
+	// XAML <DataGrid> теперь строит полноценный *widget.DataGridWidget
+	// (раньше был эмулирован через ListView). Тест обновлён под новый
+	// контракт — см. buildXAMLDataGrid в widget/xaml_containers.go.
+	dg, ok := reg["dg"].(*widget.DataGridWidget)
 	if !ok {
 		t.Fatalf("dg not found or wrong type: %T", reg["dg"])
 	}
-	if lv == nil {
-		t.Fatal("ListView is nil")
+	if dg == nil {
+		t.Fatal("DataGridWidget is nil")
+	}
+	if got := len(dg.Grid.Columns()); got != 3 {
+		t.Errorf("expected 3 columns from XAML, got %d", got)
 	}
 }
 
@@ -452,14 +458,14 @@ func TestSmartGit_XAML_Loads(t *testing.T) {
 	}
 
 	var (
-		hasDockPanel  bool
-		hasMenuBar    bool
-		hasGrid       bool
-		hasStackPanel bool
-		hasTreeView   bool
-		hasButton     bool
-		hasListView   bool
-		totalWidgets  int
+		hasDockPanel    bool
+		hasMenuBar      bool
+		hasGrid         bool
+		hasStackPanel   bool
+		hasTreeView     bool
+		hasButton       bool
+		hasDataGrid     bool // smartgit.xaml использует <DataGrid> → *widget.DataGridWidget
+		totalWidgets    int
 	)
 
 	var walk func(w widget.Widget)
@@ -478,8 +484,8 @@ func TestSmartGit_XAML_Loads(t *testing.T) {
 			hasTreeView = true
 		case *widget.Button:
 			hasButton = true
-		case *widget.ListView:
-			hasListView = true
+		case *widget.DataGridWidget:
+			hasDataGrid = true
 		}
 		for _, child := range w.Children() {
 			walk(child)
@@ -505,8 +511,8 @@ func TestSmartGit_XAML_Loads(t *testing.T) {
 	if !hasButton {
 		t.Error("expected Button in widget tree")
 	}
-	if !hasListView {
-		t.Error("expected ListView (DataGrid) in widget tree")
+	if !hasDataGrid {
+		t.Error("expected DataGridWidget in widget tree (built from <DataGrid>)")
 	}
 
 	t.Logf("Total widgets in tree: %d", totalWidgets)

@@ -271,6 +271,13 @@ func resolveDefinitions(defs []GridDefinition, totalPx int) []int {
 	var totalStar float64
 
 	// 1-й проход: Pixel и Auto.
+	//
+	// WPF-семантика для Star:
+	//   Value < 0  — некорректное значение, считаем как 1* (defaults).
+	//   Value == 0 — явное "сворачивание": столбец/строка получает 0px
+	//                и не участвует в распределении остатка
+	//                (аналог Width="0" / Visibility="Collapsed").
+	//   Value > 0  — нормальная пропорция.
 	for i, d := range defs {
 		switch d.Mode {
 		case GridSizePixel:
@@ -285,9 +292,10 @@ func resolveDefinitions(defs []GridDefinition, totalPx int) []int {
 			remaining -= px
 		case GridSizeStar:
 			v := d.Value
-			if v <= 0 {
+			if v < 0 {
 				v = 1
 			}
+			// v == 0 — Star-столбец свёрнут (0px), в totalStar не идёт.
 			totalStar += v
 		}
 	}
@@ -296,18 +304,25 @@ func resolveDefinitions(defs []GridDefinition, totalPx int) []int {
 		remaining = 0
 	}
 
-	// 2-й проход: Star.
+	// 2-й проход: Star (только с Value > 0).
 	if totalStar > 0 {
 		for i, d := range defs {
-			if d.Mode == GridSizeStar {
-				v := d.Value
-				if v <= 0 {
-					v = 1
-				}
-				px := int(float64(remaining) * v / totalStar)
-				px = clampDef(px, d)
-				sizes[i] = px
+			if d.Mode != GridSizeStar {
+				continue
 			}
+			v := d.Value
+			if v < 0 {
+				v = 1
+			}
+			if v == 0 {
+				// Свёрнутый Star — нулевая ширина, без clamp по Min
+				// (явный 0 имеет приоритет над Min, как в WPF Collapsed).
+				sizes[i] = 0
+				continue
+			}
+			px := int(float64(remaining) * v / totalStar)
+			px = clampDef(px, d)
+			sizes[i] = px
 		}
 	}
 

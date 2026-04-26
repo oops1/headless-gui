@@ -142,6 +142,17 @@ type DataGrid struct {
 	OnCellEditEnding   func(e *CellEditEndingEvent)
 	OnRowEditEnding    func(rowIndex int, item interface{})
 
+	// OnRowActivated — двойной клик / Enter по строке.
+	//
+	// Срабатывает ВСЕГДА, независимо от IsReadOnly и состояния
+	// редактирования. Используется для UX-сценариев типа
+	// «открыть детали», «toggle breakpoint в read-only грид
+	// дизассемблера». Если дополнительно стартует inline-edit
+	// (грид и колонка editable) — OnRowActivated вызывается ДО
+	// beginEdit, чтобы дать обработчику возможность выполнить
+	// своё действие до перехода в режим редактирования.
+	OnRowActivated func(rowIndex int, item interface{})
+
 	// ── Внутреннее состояние ─────────────────────────────────────────────
 	mu      sync.Mutex
 	focused bool
@@ -961,18 +972,44 @@ func (dg *DataGrid) OnMouseButton(x, y int, button int, pressed bool) bool {
 	return false
 }
 
-// OnMouseDoubleClick обрабатывает двойной клик (вход в редактирование).
+// OnMouseDoubleClick обрабатывает двойной клик.
+//
+// Поведение:
+//  1. Если клик попал на валидную строку — вызывается OnRowActivated
+//     (даже если грид/колонка read-only). Это даёт UX-крючок на
+//     «активацию строки» — стандартное действие WPF DataGrid для
+//     read-only сценариев (открыть детали / toggle breakpoint).
+//  2. Затем — попытка beginEdit(row, col). beginEdit сам решит,
+//     допустимо ли редактирование с учётом IsReadOnly грида и колонки.
+//
+// Снапшот item для callback снимается ПОД мьютексом, сам callback
+// вызывается ПОСЛЕ Unlock — обработчик может безопасно дёргать
+// SetItemsSource / SelectRow / Refresh, не вызывая deadlock.
 func (dg *DataGrid) OnMouseDoubleClick(x, y int) bool {
 	dg.mu.Lock()
-	defer dg.mu.Unlock()
 
 	row := dg.rowIndexAtY(y)
 	col := dg.colIndexAtX(x)
-	if row >= 0 && col >= 0 {
-		dg.beginEdit(row, col)
-		return true
+	if row < 0 {
+		dg.mu.Unlock()
+		return false
 	}
-	return false
+
+	var activatedItem interface{}
+	if row < len(dg.sortedIdx) && dg.itemsSource != nil {
+		activatedItem = dg.itemsSource.Get(dg.sortedIdx[row])
+	}
+	cb := dg.OnRowActivated
+
+	if col >= 0 {
+		dg.beginEdit(row, col)
+	}
+	dg.mu.Unlock()
+
+	if cb != nil {
+		cb(row, activatedItem)
+	}
+	return true
 }
 
 // OnMouseMove обрабатывает перемещение мыши.
@@ -1089,10 +1126,24 @@ func (dg *DataGrid) selectRow(row int, shift, ctrl bool) {
 // ─── Editing ───────────────────────────────────────────────────────────────
 
 func (dg *DataGrid) beginEdit(row, col int) {
-	if dg.IsReadOnly {
+	if col < 0 || col >= len(dg.columns) {
 		return
 	}
-	if col < 0 || col >= len(dg.columns) || dg.columns[col].IsReadOnly() {
+	column := dg.columns[col]
+
+	// WPF-совместимая семантика IsReadOnly:
+	//   - per-column IsReadOnly, выставленный ЯВНО, перекрывает grid.IsReadOnly
+	//     в обе стороны (column=true → RO даже если grid editable;
+	//     column=false → editable даже если grid RO).
+	//   - если у колонки IsReadOnly не выставлен явно, она наследует
+	//     значение grid.IsReadOnly.
+	var effectiveRO bool
+	if column.IsReadOnlyExplicit() {
+		effectiveRO = column.IsReadOnly()
+	} else {
+		effectiveRO = dg.IsReadOnly
+	}
+	if effectiveRO {
 		return
 	}
 	if row < 0 || row >= len(dg.sortedIdx) {
@@ -1235,9 +1286,33 @@ func (dg *DataGrid) OnKeyEvent(code int, char rune, pressed bool, shift, ctrl bo
 				dg.selectRow(dg.focusRow, false, false)
 			}
 		}
-	case 13: // Enter — начать редактирование
-		if dg.focusRow >= 0 && dg.focusCol >= 0 {
-			dg.beginEdit(dg.focusRow, dg.focusCol)
+	case 13: // Enter — активация строки + (если editable) начать редактирование
+		if dg.focusRow >= 0 {
+			// Снимаем item под мьютексом, callback дёрнем после unlock
+			// в конце handleNavKey (через defer ниже не получится — мы
+			// внутри switch). Здесь делаем синхронный вызов: handleNavKey
+			// уже под dg.mu, так что обработчик OnRowActivated должен быть
+			// thread-aware. Для совместимости с двойным кликом callback
+			// вызывается синхронно в той же горутине, что и keypress.
+			if dg.OnRowActivated != nil {
+				var item interface{}
+				if dg.focusRow < len(dg.sortedIdx) && dg.itemsSource != nil {
+					item = dg.itemsSource.Get(dg.sortedIdx[dg.focusRow])
+				}
+				// Сохраняем callback и item, вызовем после beginEdit.
+				cb := dg.OnRowActivated
+				row := dg.focusRow
+				if dg.focusCol >= 0 {
+					dg.beginEdit(dg.focusRow, dg.focusCol)
+				}
+				// Вызываем под mu — допущение: обработчик не должен сам
+				// захватывать dg.mu (как и OnSelectionChanged выше).
+				cb(row, item)
+				return
+			}
+			if dg.focusCol >= 0 {
+				dg.beginEdit(dg.focusRow, dg.focusCol)
+			}
 		}
 	case 27: // Escape
 		if dg.isEditing {

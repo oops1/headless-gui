@@ -3,6 +3,7 @@ package widget
 import (
 	"image"
 	"image/color"
+	"sync"
 	"sync/atomic"
 )
 
@@ -48,7 +49,24 @@ type Button struct {
 	pressed int32 // 0 | 1, атомарно
 	hovered int32 // 0 | 1, атомарно
 	focused int32 // 0 | 1, атомарно
+
+	// OnClick — основной обработчик клика (back-compat).
+	// Если нужно несколько подписчиков — используйте AddClickHandler /
+	// RemoveClickHandler. OnClick всегда вызывается ДО handlers.
 	OnClick func()
+
+	// handlersMu защищает clickHandlers; модификация подписки и
+	// вызов из разных goroutine (OnMouseButton/OnKeyEvent) безопасны.
+	handlersMu    sync.Mutex
+	clickHandlers []clickHandler
+	nextHandlerID uint64
+}
+
+// clickHandler — внутренняя обёртка над пользовательским колбэком,
+// хранящая стабильный ID для последующего RemoveClickHandler.
+type clickHandler struct {
+	id uint64
+	fn func()
 }
 
 // NewButton создаёт кнопку в стиле Windows 10 Dark.
@@ -236,14 +254,77 @@ func (btn *Button) OnMouseButton(e MouseEvent) bool {
 		// Release: стреляем OnClick только если press был на нас.
 		wasPressed := btn.IsPressed()
 		btn.SetPressed(false)
-		if wasPressed && btn.OnClick != nil {
-			btn.OnClick()
+		if wasPressed {
+			btn.fireClick()
 		}
 		// Поглощаем release только если мы «владели» этим кликом.
 		// Иначе — пропускаем дальше (bubbling).
 		return wasPressed
 	}
 	return false
+}
+
+
+// AddClickHandler подписывает дополнительный обработчик на клик кнопки.
+// Возвращает идентификатор, по которому подписку можно снять
+// через RemoveClickHandler. OnClick (поле) сохраняется для
+// обратной совместимости и вызывается всегда первым.
+//
+// Все обработчики вызываются синхронно в порядке регистрации.
+// Безопасно вызывать из любой goroutine.
+func (btn *Button) AddClickHandler(fn func()) uint64 {
+	if fn == nil {
+		return 0
+	}
+	btn.handlersMu.Lock()
+	defer btn.handlersMu.Unlock()
+	btn.nextHandlerID++
+	id := btn.nextHandlerID
+	btn.clickHandlers = append(btn.clickHandlers, clickHandler{id: id, fn: fn})
+	return id
+}
+
+// RemoveClickHandler удаляет ранее зарегистрированный обработчик по id.
+// Возвращает true, если обработчик был найден и удалён.
+func (btn *Button) RemoveClickHandler(id uint64) bool {
+	if id == 0 {
+		return false
+	}
+	btn.handlersMu.Lock()
+	defer btn.handlersMu.Unlock()
+	for i, h := range btn.clickHandlers {
+		if h.id == id {
+			btn.clickHandlers = append(btn.clickHandlers[:i], btn.clickHandlers[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// ClearClickHandlers удаляет всех подписчиков, добавленных через AddClickHandler.
+// Поле OnClick не трогается.
+func (btn *Button) ClearClickHandlers() {
+	btn.handlersMu.Lock()
+	defer btn.handlersMu.Unlock()
+	btn.clickHandlers = nil
+}
+
+// fireClick вызывает OnClick и всех зарегистрированных подписчиков.
+// Снапшот списка снимается под Mutex, чтобы безопасно итерировать
+// при возможной отписке внутри обработчика.
+func (btn *Button) fireClick() {
+	if btn.OnClick != nil {
+		btn.OnClick()
+	}
+	btn.handlersMu.Lock()
+	handlers := make([]clickHandler, len(btn.clickHandlers))
+	copy(handlers, btn.clickHandlers)
+	btn.handlersMu.Unlock()
+	for _, h := range handlers {
+		if h.fn != nil {
+			h.fn()
+		}
+	}
 }
 
 // ─── Focusable ───────────────────────────────────────────────────────────────
@@ -262,15 +343,19 @@ func (btn *Button) IsFocused() bool {
 
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
+// OnKeyEvent — Enter или Space активируют кнопку.
+//
+// Поведение совпадает с mouse-path (см. OnMouseButton): обработчики вызываются
+// синхронно. Раньше keyboard-путь стартовал OnClick в новой goroutine
+// (`go btn.OnClick()`), что давало разную модель исполнения для одинакового
+// API-события — пользовательский код OnClick был обязан быть thread-safe
+// только из-за одного нестандартного кодового пути. Теперь — единая модель.
 func (btn *Button) OnKeyEvent(e KeyEvent) {
 	if !btn.IsEnabled() || !e.Pressed {
 		return
 	}
-	// Enter или Space активируют кнопку
 	if e.Code == KeyEnter || e.Code == KeySpace {
-		if btn.OnClick != nil {
-			go btn.OnClick()
-		}
+		btn.fireClick()
 	}
 }
 

@@ -489,11 +489,67 @@ All event callbacks are executed in goroutines (non-blocking). Modify UI state s
 // Button click (fires on RELEASE, not press)
 Button.OnClick func()
 
+// Multiple click subscribers (back-compat with OnClick).
+// Returns id usable with RemoveClickHandler. Handlers fire in
+// registration order, AFTER OnClick (the field).
+id := Button.AddClickHandler(func() { ... })
+Button.RemoveClickHandler(id)
+Button.ClearClickHandlers()
+
 // TextInput when Enter pressed (if AcceptsReturn=false)
 TextInput.OnEnter func()
 
 // TextInput on any text change
 TextInput.OnChange func(text string)
+```
+
+### DataGrid row activation (NEW: A3 fix)
+
+```go
+// Fires on double-click OR Enter, regardless of IsReadOnly.
+// Useful for read-only grids: open details, toggle breakpoint, etc.
+dg.OnRowActivated = func(row int, item interface{}) { ... }
+```
+
+### Per-column IsReadOnly tri-state (NEW: A4 fix)
+
+```go
+col.SetReadOnly(true)        // explicit RO — overrides grid.IsReadOnly=false
+col.SetReadOnly(false)       // explicit editable — overrides grid.IsReadOnly=true
+col.ResetReadOnly()          // back to inheriting grid.IsReadOnly
+col.IsReadOnlyExplicit()     // was IsReadOnly set explicitly?
+```
+
+XAML: `<DataGridTextColumn IsReadOnly="False" />` now overrides
+`<DataGrid IsReadOnly="True">`. If the column omits `IsReadOnly`, it
+inherits the grid value.
+
+### ListView live-tail (NEW: A6 fix)
+
+```go
+lv.AutoScrollToBottom = true       // SetItems / AddItem keep scroll at bottom
+                                    // if user was already at bottom
+lv.PreserveScrollOnSetItems = true // keep current scrollY across SetItems
+lv.ScrollToBottom()                 // force jump to end
+lv.ScrollToTop()
+```
+
+### Grid Star=0 collapse (NEW: A1 fix)
+
+```go
+g.ColDefs = []widget.GridDefinition{
+    {Mode: widget.GridSizeStar, Value: 0}, // collapsed (0px), not "1*"
+    {Mode: widget.GridSizeStar, Value: 1},
+}
+```
+XAML: `<ColumnDefinition Width="0*"/>` works as expected; column gets
+0 px and is excluded from the star-distribution.
+
+### Engine.SetRoot bounds preservation (NEW: A9 fix)
+
+```go
+eng.SetRoot(root)            // if root.Bounds is non-empty, KEEP it
+eng.SetRootFullCanvas(root)  // legacy: always stretch to canvas
 ```
 
 ### Selection Events
@@ -1058,18 +1114,26 @@ tree.SetItemsSource(collection)
 grid.SetItemsSource(collection)
 ```
 
-### Callbacks are Async (Goroutines)
+### Callback Execution Model (sync vs goroutine)
 
-All event callbacks (`OnClick`, `OnChange`, etc.) are invoked in goroutines:
+The model differs by widget. **As of GUI_ISSUES A5/A7 fix, Button is fully synchronous on both mouse and keyboard paths.** Older callbacks
+on other widgets may still spawn a goroutine on the keyboard path; this is being unified.
+
+| Widget | Mouse path | Keyboard path | Notes |
+|---|---|---|---|
+| `Button.OnClick` | sync | sync | Use `AddClickHandler(fn)` for multiple subscribers; OnClick (field) fires first, then handlers in registration order. |
+| `CheckBox.OnChange(checked bool)` | sync | goroutine (Space) | The field is `OnChange`, **not** `OnClick`. Tracks tri-state press → release. |
+| `ListView.OnSelect` | goroutine | goroutine | Long-running work OK. |
+| `DataGrid.OnRowActivated(row, item)` | sync (after Unlock) | sync | NEW. Fires on dbl-click and Enter, even if grid is read-only. Use for "open detail / toggle breakpoint" UX. |
+| `DataGrid.OnSelectionChanged` | goroutine | goroutine | |
+
+Treat the callback as potentially concurrent — guard shared state with a mutex.
+For Button specifically you can rely on synchronous semantics:
 
 ```go
-btn.OnClick = func() {
-    // This runs in a separate goroutine
-    // Safe to block, but don't block UI indefinitely
-}
+btn.OnClick = func() { /* runs in caller goroutine */ }
+btn.AddClickHandler(func() { /* runs after OnClick, same goroutine */ })
 ```
-
-For immediate synchronous behavior within callbacks, keep them short.
 
 ### SetRoot Must Be Called Before Start
 

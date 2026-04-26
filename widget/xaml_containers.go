@@ -1344,8 +1344,20 @@ func parseDataGridColumn(el xElement) dgridPkg.Column {
 	// Width: "Auto", "*", "2*", "150"
 	width := parseColumnWidth(el.attr("Width"))
 
-	// IsReadOnly
-	readOnly := strings.EqualFold(el.attr("IsReadOnly"), "true")
+	// IsReadOnly: tri-state.
+	//   - атрибут отсутствует → колонка НАСЛЕДУЕТ значение DataGrid.IsReadOnly
+	//   - IsReadOnly="True"  → жёстко RO (перекрывает grid.IsReadOnly=false)
+	//   - IsReadOnly="False" → жёстко editable (перекрывает grid.IsReadOnly=true)
+	//
+	// applyReadOnly выставляет SetReadOnly(...) только если атрибут
+	// действительно присутствует в XAML, и пропускает в противном случае.
+	roAttr := el.attr("IsReadOnly")
+	applyReadOnly := func(setROFn func(bool)) {
+		if roAttr == "" {
+			return
+		}
+		setROFn(strings.EqualFold(roAttr, "true"))
+	}
 
 	// SortMemberPath
 	sortPath := el.attr("SortMemberPath")
@@ -1358,9 +1370,7 @@ func parseDataGridColumn(el xElement) dgridPkg.Column {
 		strings.HasPrefix(tag, "datagridtext"):
 		col := dgridPkg.NewTextColumn(header, bindingPath)
 		col.SetWidth(width)
-		if readOnly {
-			col.SetReadOnly(true)
-		}
+		applyReadOnly(col.SetReadOnly)
 		if sortPath != "" {
 			col.SetSortPath(sortPath)
 		}
@@ -1370,15 +1380,14 @@ func parseDataGridColumn(el xElement) dgridPkg.Column {
 		strings.HasPrefix(tag, "datagridcheckbox"):
 		col := dgridPkg.NewCheckBoxColumn(header, bindingPath)
 		col.SetWidth(width)
-		if readOnly {
-			col.SetReadOnly(true)
-		}
+		applyReadOnly(col.SetReadOnly)
 		return col
 
 	case strings.HasPrefix(tag, "datagridtemplatecolumn"),
 		strings.HasPrefix(tag, "datagridtemplate"):
 		col := dgridPkg.NewTemplateColumn(header, nil)
 		col.SetWidth(width)
+		applyReadOnly(col.SetReadOnly)
 		return col
 	}
 
