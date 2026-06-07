@@ -22,10 +22,23 @@ import (
 	stdraw "image/draw"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/widget"
 )
+
+// localeProvider — опциональная возможность нативного окна сообщать и
+// переключать раскладку клавиатуры ОС. Реализуется бэкендами Windows/Linux;
+// на платформах без поддержки локаль управляется только из приложения.
+type localeProvider interface {
+	// CurrentLocaleCode возвращает код активной раскладки ("EN","RU",…) или "".
+	CurrentLocaleCode() string
+	// AvailableLocaleCodes возвращает установленные в ОС раскладки.
+	AvailableLocaleCodes() []string
+	// ActivateLocaleCode переключает раскладку ОС; true при успехе.
+	ActivateLocaleCode(code string) bool
+}
 
 // EngineAPI — интерфейс движка, необходимый для оконного рендеринга.
 // Реализуется *engine.Engine.
@@ -120,6 +133,9 @@ func (win *Window) Run() error {
 
 	// Подключаем callbacks ввода
 	win.setupInputCallbacks()
+
+	// Синхронизация локали с раскладкой клавиатуры ОС (Windows/Linux).
+	win.setupLocaleSync()
 
 	// Запускаем горутину чтения кадров из движка
 	go win.framePump()
@@ -342,6 +358,54 @@ func (win *Window) setupInputCallbacks() {
 			})
 		}
 	})
+}
+
+// setupLocaleSync подключает раскладку клавиатуры ОС к индикатору локали.
+//
+// Если нативное окно поддерживает localeProvider:
+//   - заполняет список доступных локалей (для контекстного меню);
+//   - выставляет начальную локаль из активной раскладки ОС;
+//   - регистрирует applier — выбор в меню переключает раскладку ОС;
+//   - запускает поллер: переключение системной комбинацией клавиш
+//     отражается на индикаторе автоматически.
+//
+// В headless-режиме (без нативного окна) этот код не вызывается — там
+// источником истины остаётся widget.SetLocale из приложения.
+func (win *Window) setupLocaleSync() {
+	lp, ok := win.native.(localeProvider)
+	if !ok {
+		return
+	}
+	codes := lp.AvailableLocaleCodes()
+	if len(codes) > 0 {
+		widget.SetAvailableLocales(codes)
+	}
+	if cur := lp.CurrentLocaleCode(); cur != "" {
+		widget.SetLocale(cur)
+	} else if len(codes) > 0 {
+		// ОС не сообщает активную раскладку (напр. Linux без XKB-привязок) —
+		// берём первую доступную как начальную.
+		widget.SetLocale(codes[0])
+	}
+	widget.SetLocaleApplier(func(code string) bool {
+		return lp.ActivateLocaleCode(code)
+	})
+	go win.localePoll(lp)
+}
+
+// localePoll периодически опрашивает раскладку ОС и отражает её на индикаторе.
+// Останавливается при закрытии окна.
+func (win *Window) localePoll(lp localeProvider) {
+	t := time.NewTicker(300 * time.Millisecond)
+	defer t.Stop()
+	for range t.C {
+		if win.closeRequested.Load() {
+			return
+		}
+		if cur := lp.CurrentLocaleCode(); cur != "" {
+			widget.SetLocale(cur) // no-op, если не изменилась
+		}
+	}
 }
 
 // framePump читает кадры из движка и отправляет на отрисовку.

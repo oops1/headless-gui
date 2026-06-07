@@ -1314,6 +1314,34 @@ panel.ShowLocaleIndicator = true
 XAML: `<Window ... ShowLocaleIndicator="False">`. Applies to `Window`,
 `Dialog`, `Panel`.
 
+**OS keyboard-layout sync + context menu.** In windowed mode the `window`
+package binds the badge to the OS keyboard layout:
+
+- The badge shows the **current OS input language** and updates live when the
+  user switches layout with the **system hotkey** (e.g. Alt+Shift / Win+Space on
+  Windows) — a poller reflects it. (Windows: full live sync. Linux: switching via
+  the in-app menu works through `setxkbmap`; live following of the system hotkey
+  is limited without XKB bindings. macOS: app-driven only.)
+- **Right-click the title bar** (or click the badge) opens a **context menu**
+  listing the OS-installed layouts; picking one switches the OS layout AND the
+  badge. The list is `widget.AvailableLocales()`.
+
+Programmatic API:
+
+```go
+widget.SetLocale("RU")              // reflect a locale (no OS switch) — headless source of truth
+widget.RequestLocale("RU")          // user intent: switch OS layout (if applier set) + reflect
+widget.SetAvailableLocales([]string{"EN","RU","DE"}) // menu list (window pkg fills from OS)
+widget.AvailableLocales()           // current list
+widget.AddLocaleListener(func(code string){ /* re-translate UI, etc. */ })
+widget.SetLocaleApplier(func(code string) bool { /* custom OS switch */ return true })
+```
+
+In **headless** mode there is no native window, so `SetLocale`/`RequestLocale`
+are the source of truth and `AddLocaleListener` lets the app react (switch
+translated strings) when the locale changes. The context menu still works
+(it is rendered by the engine and driven by mouse events).
+
 ### Font Glyph Fallback — BUG-2
 
 Missing glyphs (✓ ✗ ⚠, box-drawing, arrows ▲ ▼ →) no longer render as tofu.
