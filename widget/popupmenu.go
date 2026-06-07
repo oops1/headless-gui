@@ -59,6 +59,30 @@ type PopupMenu struct {
 	OnSelect func(index int, text string)
 }
 
+// ─── Размер экрана (для удержания меню в пределах канваса) ───────────────────
+
+var (
+	screenMu     sync.Mutex
+	screenWidth  int
+	screenHeight int
+)
+
+// SetScreenBounds сообщает виджетам размер канваса (вызывается движком при
+// создании/смене разрешения). Используется popup-меню и другими overlay'ами,
+// чтобы не выходить за границы экрана.
+func SetScreenBounds(w, h int) {
+	screenMu.Lock()
+	screenWidth, screenHeight = w, h
+	screenMu.Unlock()
+}
+
+// getScreenBounds возвращает размер канваса (0,0 если ещё не задан).
+func getScreenBounds() (int, int) {
+	screenMu.Lock()
+	defer screenMu.Unlock()
+	return screenWidth, screenHeight
+}
+
 // NewPopupMenu создаёт пустое popup-меню.
 func NewPopupMenu() *PopupMenu {
 	return &PopupMenu{
@@ -115,10 +139,27 @@ func (m *PopupMenu) IsOpen() bool {
 }
 
 // Show открывает popup-меню в указанных абсолютных координатах.
+// Позиция корректируется так, чтобы меню целиком помещалось в канвасе
+// (сдвиг влево/вверх у правого/нижнего края — меню не обрезается границей окна).
 func (m *PopupMenu) Show(x, y int) {
 	m.mu.RLock()
 	w, h := m.calcSize()
 	m.mu.RUnlock()
+
+	if sw, sh := getScreenBounds(); sw > 0 && sh > 0 {
+		if x+w > sw {
+			x = sw - w
+		}
+		if x < 0 {
+			x = 0
+		}
+		if y+h > sh {
+			y = sh - h
+		}
+		if y < 0 {
+			y = 0
+		}
+	}
 
 	m.popupX = x
 	m.popupY = y
@@ -192,8 +233,16 @@ func (m *PopupMenu) openChild(idx int) {
 	child.OnSelect = m.OnSelect
 
 	// Позиция: справа от текущего popup, на уровне пункта.
+	// Если справа не помещается — открываем слева от родителя (как в WPF/ОС).
+	child.mu.RLock()
+	cw, _ := child.calcSize()
+	child.mu.RUnlock()
 	itemY := m.itemYForIndex(idx)
-	child.Show(m.popupX+m.popupW-2, itemY)
+	x := m.popupX + m.popupW - 2
+	if sw, _ := getScreenBounds(); sw > 0 && x+cw > sw {
+		x = m.popupX - cw + 2
+	}
+	child.Show(x, itemY)
 
 	m.child = child
 	m.childForIdx = idx

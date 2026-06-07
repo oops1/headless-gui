@@ -23,6 +23,10 @@ type Panel struct {
 	// UseAlpha=true: рисовать фон через Over (смешивание), иначе Src (непрозрачно)
 	UseAlpha bool
 
+	// Gradient — градиентный фон (LinearGradientBrush). Если задан, рисуется
+	// вместо сплошного Background.
+	Gradient *LinearGradient
+
 	// ── Заголовок (title bar) ───────────────────────────────────────────────
 	Caption      string     // текст заголовка
 	ShowHeader   bool       // показывать заголовок (по умолчанию true в конструкторах)
@@ -86,6 +90,26 @@ func (p *Panel) Draw(ctx DrawContext) {
 		return
 	}
 	r := p.CornerRadius
+
+	// Градиентный фон имеет приоритет над сплошным.
+	if p.Gradient != nil {
+		drawLinearGradient(ctx, b, p.Gradient)
+		if p.ShowBorder {
+			if r > 0 {
+				ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), r, p.BorderColor)
+			} else {
+				ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), p.BorderColor)
+			}
+		}
+		if p.BackgroundImage != nil {
+			ctx.DrawImageScaled(p.BackgroundImage, b.Min.X, b.Min.Y, b.Dx(), b.Dy())
+		}
+		if p.ShowHeader && p.Caption != "" {
+			p.drawHeader(ctx)
+		}
+		p.drawChildren(ctx)
+		return
+	}
 
 	if r > 0 {
 		if p.UseAlpha && p.Background.A < 255 {

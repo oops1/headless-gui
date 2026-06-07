@@ -23,8 +23,36 @@ type Label struct {
 	FontSize float64 // размер шрифта в pt (0 → DefaultFontSizePt)
 	FontName string  // именованный шрифт (зарегистрированный через RegisterFont); "" → default
 
+	Bold      bool // FontWeight="Bold"
+	Italic    bool // FontStyle="Italic"
+	Underline bool // TextDecorations="Underline"
+
 	PaddingX int
 	PaddingY int
+}
+
+// Встроенные имена шрифтов для жирного/курсива (регистрируются движком из gofont).
+const (
+	BuiltinFontBold       = "$hg_bold"
+	BuiltinFontItalic     = "$hg_italic"
+	BuiltinFontBoldItalic = "$hg_bolditalic"
+)
+
+// effectiveFont выбирает шрифт: явный FontName важнее; иначе встроенный
+// жирный/курсивный вариант по флагам Bold/Italic.
+func (l *Label) effectiveFont() string {
+	if l.FontName != "" {
+		return l.FontName
+	}
+	switch {
+	case l.Bold && l.Italic:
+		return BuiltinFontBoldItalic
+	case l.Bold:
+		return BuiltinFontBold
+	case l.Italic:
+		return BuiltinFontItalic
+	}
+	return ""
 }
 
 // NewLabel создаёт метку с явным цветом текста.
@@ -80,30 +108,42 @@ func (l *Label) Draw(ctx DrawContext) {
 		fontSize = DefaultFontSizePt
 	}
 
+	font := l.effectiveFont()
 	if !l.WrapText {
-		if l.FontName != "" {
-			ctx.DrawTextFont(text, b.Min.X+l.PaddingX, b.Min.Y+l.PaddingY, fontSize, l.FontName, l.TextColor)
-		} else {
-			ctx.DrawTextSize(text, b.Min.X+l.PaddingX, b.Min.Y+l.PaddingY, fontSize, l.TextColor)
-		}
+		l.drawLine(ctx, text, b.Min.X+l.PaddingX, b.Min.Y+l.PaddingY, fontSize, font)
 	} else {
 		maxW := b.Dx() - l.PaddingX*2
-		lines := wrapTextPixelFont(ctx, text, fontSize, l.FontName, maxW)
+		lines := wrapTextPixelFont(ctx, text, fontSize, font, maxW)
 		lineH := int(fontSize*1.5 + 0.5) // межстрочный интервал
 		y := b.Min.Y + l.PaddingY
 		for _, line := range lines {
 			if y+lineH > b.Max.Y {
 				break // не вылезаем за границы
 			}
-			if l.FontName != "" {
-				ctx.DrawTextFont(line, b.Min.X+l.PaddingX, y, fontSize, l.FontName, l.TextColor)
-			} else {
-				ctx.DrawTextSize(line, b.Min.X+l.PaddingX, y, fontSize, l.TextColor)
-			}
+			l.drawLine(ctx, line, b.Min.X+l.PaddingX, y, fontSize, font)
 			y += lineH
 		}
 	}
 	l.drawChildren(ctx)
+}
+
+// drawLine рисует одну строку нужным шрифтом, при необходимости — подчёркивание.
+func (l *Label) drawLine(ctx DrawContext, text string, x, y int, sizePt float64, font string) {
+	if font != "" {
+		ctx.DrawTextFont(text, x, y, sizePt, font, l.TextColor)
+	} else {
+		ctx.DrawTextSize(text, x, y, sizePt, l.TextColor)
+	}
+	if l.Underline && text != "" {
+		var tw int
+		if font != "" {
+			tw = ctx.MeasureTextFont(text, sizePt, font)
+		} else {
+			tw = ctx.MeasureText(text, sizePt)
+		}
+		uy := y + int(sizePt*1.35+0.5)
+		ctx.DrawHLine(x, uy, tw, l.TextColor)
+	}
 }
 
 // wrapTextPixelFont разбивает text на строки с именованным шрифтом.
