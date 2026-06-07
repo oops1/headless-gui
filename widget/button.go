@@ -39,9 +39,8 @@ type Button struct {
 	IconPos  IconPosition // расположение иконки (Left, Top, IconOnly)
 	IconSize int          // размер иконки в пикселях (0 = авто: высота кнопки - 8)
 
-	// ToolTip — всплывающая подсказка (WPF ToolTip).
-	ToolTip string
 	// Padding — внутренние отступы (WPF Padding: Left,Top,Right,Bottom).
+	// (ToolTip унаследован из Base — единый для всех виджетов.)
 	Padding Margin
 	// CornerRadius — радиус скругления углов (0 = прямые).
 	CornerRadius int

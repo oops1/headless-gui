@@ -496,25 +496,3 @@ func TestXAMLWindow_WithGrid(t *testing.T) {
 		t.Fatal("btnOK not found in registry")
 	}
 }
-		</Grid>
-	</Window>`
-	root, reg, err := widget.LoadUIFromXAML([]byte(xaml))
-	if err != nil {
-		t.Fatalf("LoadUIFromXAML: %v", err)
-	}
-	if _, ok := root.(*widget.Window); !ok {
-		t.Fatalf("root type = %T, want *widget.Window", root)
-	}
-	if reg["mainGrid"] == nil {
-		t.Fatal("mainGrid not registered")
-	}
-	if reg["btnOK"] == nil {
-		t.Fatal("btnOK not registered")
-	}
-}
-und in registry")
-	}
-	if _, ok := reg["btnOK"]; !ok {
-		t.Fatal("btnOK not found in registry")
-	}
-}

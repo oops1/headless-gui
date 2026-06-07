@@ -19,6 +19,7 @@ package widget
 import (
 	"image"
 	"image/color"
+	"sync"
 	"sync/atomic"
 )
 
@@ -109,6 +110,10 @@ type Window struct {
 	// TitleColor — цвет текста заголовка (A=0 → из темы: win10.TitleText).
 	TitleColor color.RGBA
 
+	// ShowLocaleIndicator — показывать индикатор текущей локали (напр. «EN»)
+	// в заголовке окна. По умолчанию true; отключаемое свойство.
+	ShowLocaleIndicator bool
+
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
 	// OnClose вызывается при клике по кнопке закрытия (×).
@@ -139,18 +144,25 @@ type Window struct {
 	hoverClose atomic.Int32 // 1 = курсор над ×
 	hoverMin   atomic.Int32 // 1 = курсор над ─
 	hoverMax   atomic.Int32 // 1 = курсор над □
+
+	// ── Контекстное меню выбора локали ───────────────────────────────────────
+	localeMu        sync.Mutex
+	localeBadgeRect image.Rectangle   // прямоугольник плашки локали (для hit-теста)
+	localeMenuOpen  bool              // открыт ли выпадающий список выбора локали
+	localeItemRects []image.Rectangle // прямоугольники пунктов меню (для hit-теста)
 }
 
 // NewWindow создаёт окно с заданным заголовком и размером.
 // TitleStyle по умолчанию = WindowTitleAuto (определяется по текущей ОС).
 func NewWindow(title string, width, height int) *Window {
 	w := &Window{
-		Title:       title,
-		Style:       WindowStyleSingleBorder,
-		TitleStyle:  WindowTitleAuto, // авто-определение по ОС
-		Resize:      ResizeModeCanResize,
-		Background:  win10.WindowBG,
-		BorderColor: win10.Border,
+		Title:               title,
+		Style:               WindowStyleSingleBorder,
+		TitleStyle:          WindowTitleAuto, // авто-определение по ОС
+		Resize:              ResizeModeCanResize,
+		Background:          win10.WindowBG,
+		BorderColor:         win10.Border,
+		ShowLocaleIndicator: true,
 	}
 	w.SetBounds(image.Rect(0, 0, width, height))
 	return w
@@ -388,6 +400,16 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	textY := y + (th-13)/2
 	ctx.DrawText(w.Title, x+12, textY, tc)
 
+	// Индикатор локали — слева от кнопок управления.
+	if w.ShowLocaleIndicator {
+		nc0 := w.btnCount()
+		rightX := b.Max.X - 8
+		if nc0 > 0 {
+			rightX = b.Max.X - w.btnWidth()*nc0 - 8
+		}
+		w.setLocaleBadgeRect(drawLocaleBadge(ctx, rightX, y, th, tc))
+	}
+
 	// Кнопки управления
 	btnW := w.btnWidth()
 	btnH := th - 1
@@ -511,6 +533,11 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 	textX := x + (bw-textW)/2
 	textY := y + (th-13)/2
 	ctx.DrawText(w.Title, textX, textY, tc)
+
+	// Индикатор локали — в правом верхнем углу (traffic lights слева в Mac-стиле).
+	if w.ShowLocaleIndicator {
+		w.setLocaleBadgeRect(drawLocaleBadge(ctx, b.Max.X-8, y, th, tc))
+	}
 }
 
 // ─── Drag / Capture ─────────────────────────────────────────────────────────
@@ -606,6 +633,11 @@ func (w *Window) titleBarRect() image.Rectangle {
 
 // OnMouseButton обрабатывает клик по кнопкам заголовка и начало drag.
 func (w *Window) OnMouseButton(e MouseEvent) bool {
+	// Контекстное меню выбора локали (правый клик по заголовку / клик по плашке).
+	if consumed, handled := w.handleLocaleMouse(e); handled {
+		return consumed
+	}
+
 	if e.Button != MouseLeft {
 		return false
 	}
@@ -656,6 +688,102 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 	}
 
 	return false
+}
+
+// ─── Контекстное меню выбора локали ─────────────────────────────────────────
+
+// setLocaleBadgeRect сохраняет прямоугольник плашки локали (для hit-теста).
+func (w *Window) setLocaleBadgeRect(r image.Rectangle) {
+	w.localeMu.Lock()
+	w.localeBadgeRect = r
+	w.localeMu.Unlock()
+}
+
+// localeMenuList возвращает список локалей для меню (из ОС или дефолт).
+func localeMenuList() []string {
+	items := AvailableLocales()
+	if len(items) == 0 {
+		items = []string{"EN", "RU"}
+	}
+	return items
+}
+
+// HasOverlay реализует OverlayDrawer — true, когда открыто меню выбора локали.
+func (w *Window) HasOverlay() bool {
+	w.localeMu.Lock()
+	defer w.localeMu.Unlock()
+	return w.localeMenuOpen && w.ShowLocaleIndicator
+}
+
+// DrawOverlay рисует выпадающий список выбора локали поверх всего окна.
+func (w *Window) DrawOverlay(ctx DrawContext) {
+	w.localeMu.Lock()
+	open := w.localeMenuOpen
+	badge := w.localeBadgeRect
+	w.localeMu.Unlock()
+	if !open || badge.Empty() {
+		return
+	}
+	rects := drawLocaleMenu(ctx, badge, localeMenuList(), Locale())
+	w.localeMu.Lock()
+	w.localeItemRects = rects
+	w.localeMu.Unlock()
+}
+
+// Dismiss реализует Dismissable — закрывает меню локали при клике в стороне.
+func (w *Window) Dismiss() {
+	w.localeMu.Lock()
+	w.localeMenuOpen = false
+	w.localeMu.Unlock()
+}
+
+// handleLocaleMouse обрабатывает клики, связанные с меню локали.
+// Возвращает (consumed, handled): handled=true означает, что клик относится
+// к меню локали и дальнейшая обработка в OnMouseButton не нужна.
+func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
+	if !w.ShowLocaleIndicator || !e.Pressed {
+		return false, false
+	}
+	pt := image.Pt(e.X, e.Y)
+
+	w.localeMu.Lock()
+	open := w.localeMenuOpen
+	badge := w.localeBadgeRect
+	itemRects := append([]image.Rectangle(nil), w.localeItemRects...)
+	w.localeMu.Unlock()
+
+	if open {
+		// Клик по пункту меню → выбор локали.
+		for i, r := range itemRects {
+			if pt.In(r) {
+				items := localeMenuList()
+				w.localeMu.Lock()
+				w.localeMenuOpen = false
+				w.localeMu.Unlock()
+				if i < len(items) {
+					RequestLocale(items[i])
+				}
+				return true, true
+			}
+		}
+		// Клик мимо меню → закрыть и поглотить.
+		w.localeMu.Lock()
+		w.localeMenuOpen = false
+		w.localeMu.Unlock()
+		return true, true
+	}
+
+	// Открытие: правый клик по заголовку (контекстное меню) или клик по плашке.
+	inBadge := !badge.Empty() && pt.In(badge)
+	openReq := (e.Button == MouseRight && pt.In(w.titleBarRect())) ||
+		(e.Button == MouseLeft && inBadge)
+	if openReq {
+		w.localeMu.Lock()
+		w.localeMenuOpen = true
+		w.localeMu.Unlock()
+		return true, true
+	}
+	return false, false
 }
 
 // ─── Themeable ──────────────────────────────────────────────────────────────

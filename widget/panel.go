@@ -33,6 +33,11 @@ type Panel struct {
 	HeaderBG     color.RGBA // фон заголовка (если A=0, берётся из темы)
 	CaptionColor color.RGBA // цвет текста заголовка (если A=0, берётся из темы)
 
+	// ShowLocaleIndicator — показывать индикатор текущей локали (напр. «EN»)
+	// в заголовке панели-окна. По умолчанию true; отключаемое свойство.
+	// Действует только когда показан заголовок (ShowHeader && Caption != "").
+	ShowLocaleIndicator bool
+
 	// OnClose вызывается при клике по кнопке «×» (закрыть) в заголовке.
 	// Если nil — кнопка декоративная (без действия).
 	OnClose func()
@@ -45,19 +50,21 @@ type Panel struct {
 func NewPanel(bg color.RGBA) *Panel {
 	return &Panel{
 		Background:  bg,
-		BorderColor: win10.Border,
-		ShowHeader:  true,
+		BorderColor:         win10.Border,
+		ShowHeader:          true,
+		ShowLocaleIndicator: true,
 	}
 }
 
 // NewWin10Panel создаёт полупрозрачную панель в стиле Windows 10 Dark с рамкой.
 func NewWin10Panel() *Panel {
 	return &Panel{
-		Background:  win10.PanelBG,
-		BorderColor: win10.Border,
-		ShowBorder:  true,
-		UseAlpha:    true,
-		ShowHeader:  true,
+		Background:          win10.PanelBG,
+		BorderColor:         win10.Border,
+		ShowBorder:          true,
+		UseAlpha:            true,
+		ShowHeader:          true,
+		ShowLocaleIndicator: true,
 	}
 }
 
@@ -178,6 +185,11 @@ func (p *Panel) drawWinHeader(ctx DrawContext, b image.Rectangle, hh int, bg, tc
 	textY := y + (hh-13)/2
 	ctx.DrawText(p.Caption, x+12, textY, tc)
 
+	// Индикатор локали — слева от декоративных кнопок управления (3×46px).
+	if p.ShowLocaleIndicator {
+		drawLocaleBadge(ctx, x+w-46*3-8, y, hh, tc)
+	}
+
 	// Кнопки управления окном (декоративные): ─ □ ×
 	btnW := 46
 	btnH := hh - 1
@@ -245,6 +257,11 @@ func (p *Panel) drawMacHeader(ctx DrawContext, b image.Rectangle, hh int, bg, tc
 	textX := x + (w-textW)/2
 	textY := y + (hh-13)/2
 	ctx.DrawText(p.Caption, textX, textY, tc)
+
+	// Индикатор локали — в правом верхнем углу (traffic lights слева в Mac-стиле).
+	if p.ShowLocaleIndicator {
+		drawLocaleBadge(ctx, x+w-8, y, hh, tc)
+	}
 }
 
 // ContentBounds возвращает прямоугольник для размещения дочерних виджетов

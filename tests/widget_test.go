@@ -1275,36 +1275,3 @@ func TestPanel_OnMouseButton_DragDisabled(t *testing.T) {
 		t.Fatal("should not consume event when drag disabled")
 	}
 }
- = 30
-	p.SetBounds(image.Rect(100, 100, 400, 400))
-
-	// WantsCapture в drag handle зоне
-	ev := widget.MouseEvent{X: 200, Y: 110, Button: widget.MouseLeft, Pressed: true}
-	if !p.WantsCapture(ev) {
-		t.Fatal("should want capture in handle area")
-	}
-
-	// Вне drag handle зоны
-	ev.Y = 200 // за пределами 30px handle
-	if p.WantsCapture(ev) {
-		t.Fatal("should not want capture outside handle area")
-	}
-}
-
-func TestPanel_DragDisabled(t *testing.T) {
-	p := widget.NewWin10Panel()
-	p.Drag.Enabled = false
-	ev := widget.MouseEvent{X: 200, Y: 110, Button: widget.MouseLeft, Pressed: true}
-	if p.WantsCapture(ev) {
-		t.Fatal("should not want capture when drag disabled")
-	}
-}
-
-func TestPanel_OnMouseButton_DragDisabled(t *testing.T) {
-	p := widget.NewWin10Panel()
-	p.Drag.Enabled = false
-	ev := widget.MouseEvent{X: 200, Y: 110, Button: widget.MouseLeft, Pressed: true}
-	if p.OnMouseButton(ev) {
-		t.Fatal("should not consume event when drag disabled")
-	}
-}
