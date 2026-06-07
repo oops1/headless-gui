@@ -32,6 +32,8 @@ type Slider struct {
 	hovered  bool
 	focused  bool
 
+	capMgr CaptureManager // менеджер захвата мыши (для корректного drag)
+
 	OnChange func(value float64)
 }
 
@@ -188,8 +190,27 @@ func (s *Slider) OnMouseButton(e MouseEvent) bool {
 		return true
 	}
 
+	// Отпускание: прекращаем drag и освобождаем захват мыши.
 	s.dragging = false
+	cm := s.capMgr
+	if cm != nil {
+		cm.ReleaseCapture()
+	}
 	return true
+}
+
+// WantsCapture — слайдер захватывает мышь при нажатии ЛКМ, чтобы drag работал
+// даже когда курсор уходит за пределы контрола (иначе после ухода курсора
+// отпускание не доходит до слайдера и он «залипает» в режиме перетаскивания).
+func (s *Slider) WantsCapture(e MouseEvent) bool {
+	return s.IsEnabled() && e.Button == MouseLeft && e.Pressed
+}
+
+// SetCaptureManager сохраняет менеджер захвата мыши (инжектится движком).
+func (s *Slider) SetCaptureManager(cm CaptureManager) {
+	s.mu.Lock()
+	s.capMgr = cm
+	s.mu.Unlock()
 }
 
 // OnMouseMove обрабатывает drag и hover.

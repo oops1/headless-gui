@@ -6,6 +6,32 @@
 -->
 <Canvas Name="root" Width="1280" Height="900" Background="#0D0D1A">
 
+    <!-- Ресурсы и горячие клавиши для вкладки «3.2.4» (новый функционал) -->
+    <Canvas.Resources>
+        <SolidColorBrush x:Key="Accent324" Color="#0E639C"/>
+        <Style x:Key="H324" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#89B4FA"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+        <Style x:Key="Status324" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#A6E3A1"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Status}" Value="ERROR">
+                    <Setter Property="Foreground" Value="#F38BA8"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <ControlTemplate x:Key="Card324">
+            <Border Background="{TemplateBinding Background}" BorderBrush="#5A5A6A" BorderThickness="1">
+                <ContentPresenter/>
+            </Border>
+        </ControlTemplate>
+    </Canvas.Resources>
+    <Canvas.InputBindings>
+        <KeyBinding Modifiers="Ctrl" Key="S" Command="{Binding SaveCommand}"/>
+    </Canvas.InputBindings>
+
     <!-- ═══════════════════════════════════════════════════════════════════════
          HEADER BAR
          ═══════════════════════════════════════════════════════════════════════ -->
@@ -547,6 +573,105 @@
                     <ProgressBar Name="pbDisk" Left="16" Top="100" Width="118" Height="10"
                                  Value="0.45" Foreground="#F9E2AF"/>
                 </Panel>
+
+            </Canvas>
+        </TabItem>
+
+        <!-- ════════════ TAB 3.2.4 — новый функционал движка ════════════ -->
+        <TabItem Header="3.2.4">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+
+                <!-- ─── Левая колонка: привязки / стили / триггеры / команды ─── -->
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="Привязки · стили · триггеры · команды"/>
+                <Separator Left="24" Top="40" Width="490" Height="1" Background="#313244"/>
+
+                <TextBlock Left="24" Top="54" Foreground="#9399B2" Text="TextBox (TwoWay) →"/>
+                <TextBox Name="userBox324" Left="190" Top="50" Width="320" Height="28"
+                         Text="{Binding Username, Mode=TwoWay}" ToolTip="Двусторонняя привязка"/>
+                <TextBlock Left="24" Top="86" Foreground="#CDD6F4" FontSize="14"
+                           Text="{Binding Username, StringFormat=Привет, %s! (живой OneWay + INPC)}"/>
+
+                <Slider Name="vol324" Left="24" Top="120" Width="430" Height="24"
+                        Minimum="0" Maximum="1" Value="0.4" ToolTip="ElementName + Converter"/>
+                <TextBlock Left="466" Top="124" Width="60" Foreground="#FAB387"
+                           Text="{Binding Value, ElementName=vol324, Converter={StaticResource Pct}}"/>
+
+                <Button Name="saveBtn324" Left="24" Top="158" Width="250" Height="34"
+                        Content="Save (Ctrl+S, ICommand)" Style="Accent" HoverBG="#1A8CFF"
+                        Command="{Binding SaveCommand}" ToolTip="Команда + горячая клавиша"/>
+                <Button Name="errBtn324" Left="284" Top="158" Width="120" Height="34"
+                        Content="Trigger ERROR" HoverBG="#3A3A52" ToolTip="DataTrigger покрасит статус"/>
+                <TextBlock Left="24" Top="204" Style="{StaticResource Status324}"
+                           Text="{Binding Status}"/>
+
+                <GroupBox Header="GroupBox" Left="24" Top="234" Width="240" Height="86">
+                    <StackPanel Padding="8" Spacing="6">
+                        <CheckBox Content="Опция 1" Foreground="#CDD6F4"/>
+                        <CheckBox Content="Опция 2" Foreground="#CDD6F4"/>
+                    </StackPanel>
+                </GroupBox>
+                <Expander Header="Expander" Left="280" Top="234" Width="234" Height="86" IsExpanded="True">
+                    <StackPanel Padding="8" Spacing="4">
+                        <TextBlock Text="Содержимое панели" Foreground="#CDD6F4"/>
+                        <TextBlock Text="(сворачивается по клику)" Foreground="#9399B2"/>
+                    </StackPanel>
+                </Expander>
+
+                <ContentControl Template="{StaticResource Card324}" Background="#2E7D32"
+                                Left="24" Top="334" Width="490" Height="40"
+                                Content="ControlTemplate + ContentPresenter + TemplateBinding"/>
+
+                <Panel Left="24" Top="386" Width="490" Height="36">
+                    <Panel.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                            <GradientStop Color="#1565C0" Offset="0"/>
+                            <GradientStop Color="#7E1565" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Panel.Background>
+                </Panel>
+
+                <StackPanel Left="24" Top="436" Width="490" Height="28"
+                            Orientation="Horizontal" Spacing="16">
+                    <TextBlock Text="Normal" Foreground="#CDD6F4"/>
+                    <TextBlock Text="Bold" Foreground="#CDD6F4" FontWeight="Bold"/>
+                    <TextBlock Text="Italic" Foreground="#CDD6F4" FontStyle="Italic"/>
+                    <TextBlock Text="Underline" Foreground="#89B4FA" TextDecorations="Underline"/>
+                    <TextBlock Text="Символы ✓ ✗ ⚠ ▲ ▼ →" Foreground="#9399B2"/>
+                </StackPanel>
+
+                <!-- ─── Правая колонка: ItemsControl + DataTemplate + панели ─── -->
+                <TextBlock Left="556" Top="16" Style="{StaticResource H324}"
+                           Text="ItemsControl + DataTemplate (живой)"/>
+                <Separator Left="556" Top="40" Width="470" Height="1" Background="#313244"/>
+
+                <ItemsControl Name="ic324" Left="556" Top="50" Width="470" Height="170"
+                              ItemsSource="{Binding Items}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <TextBlock Text="{Binding Side}" Foreground="#89B4FA" FontSize="13"/>
+                                <TextBlock Text="{Binding Symbol}" Foreground="#CDD6F4" FontSize="13"/>
+                                <TextBlock Text="{Binding Price, StringFormat=$%.2f}" Foreground="#FAB387" FontSize="13"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Button Name="addBtn324" Left="556" Top="226" Width="220" Height="32"
+                        Content="Добавить строку (live)" HoverBG="#3A3A52"/>
+
+                <TextBlock Left="556" Top="276" Style="{StaticResource H324}" Text="WrapPanel / UniformGrid"/>
+                <Separator Left="556" Top="300" Width="470" Height="1" Background="#313244"/>
+                <WrapPanel Left="556" Top="312" Width="470" Height="40" Spacing="6">
+                    <Button Content="One" Width="84" Height="30"/>
+                    <Button Content="Two" Width="84" Height="30"/>
+                    <Button Content="Three" Width="84" Height="30"/>
+                    <Button Content="Four" Width="84" Height="30"/>
+                </WrapPanel>
+                <UniformGrid Left="556" Top="362" Width="470" Height="64" Columns="3" Spacing="6">
+                    <Button Content="A"/><Button Content="B"/><Button Content="C"/>
+                </UniformGrid>
 
             </Canvas>
         </TabItem>

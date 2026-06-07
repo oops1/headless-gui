@@ -251,6 +251,7 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 	applyToolTip(win, el)
 	applyVisibility(win, el)
 	applyLocaleIndicator(win, el)
+	win.InputBindings = parseInputBindings(el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
@@ -264,7 +265,11 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 		// Пропускаем property elements
 		if strings.Contains(childTag, ".") {
-			// Но обрабатываем потомков property element (например Window.Resources)
+			// Ресурсы и InputBindings уже собраны отдельно — не строим как виджеты.
+			if strings.HasSuffix(childTag, ".resources") || strings.HasSuffix(childTag, ".inputbindings") {
+				continue
+			}
+			// Но обрабатываем потомков property element (например Window.Content)
 			for _, inner := range child.Children {
 				cw, err := buildXAMLWidget(inner, reg, contentOff, baseDir)
 				if err != nil {
@@ -301,6 +306,42 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 	}
 
 	return win, nil
+}
+
+// parseInputBindings разбирает <Window.InputBindings><KeyBinding .../>.
+// Command может быть {Binding Path} (резолвится после загрузки) или пусто.
+func parseInputBindings(el xElement) []InputBinding {
+	var out []InputBinding
+	for i := range el.Children {
+		c := &el.Children[i]
+		if !strings.HasSuffix(strings.ToLower(c.Tag), ".inputbindings") {
+			continue
+		}
+		for j := range c.Children {
+			kb := &c.Children[j]
+			if !strings.EqualFold(kb.Tag, "KeyBinding") {
+				continue
+			}
+			ib := InputBinding{
+				Key:  parseKeyName(kb.attr("Key", "Gesture")),
+				Mods: parseModifiers(kb.attr("Modifiers")),
+			}
+			// Gesture="Ctrl+S" — комбинированная запись.
+			if g := kb.attr("Gesture"); g != "" && strings.Contains(g, "+") {
+				parts := strings.Split(g, "+")
+				ib.Key = parseKeyName(parts[len(parts)-1])
+				ib.Mods = parseModifiers(g)
+			}
+			cmd := kb.attr("Command")
+			if strings.HasPrefix(strings.TrimSpace(cmd), "{Binding") {
+				ib.CommandPath = parseBindingPath(cmd)
+			}
+			if ib.Key != KeyUnknown {
+				out = append(out, ib)
+			}
+		}
+	}
+	return out
 }
 
 // ─── buildXAMLPanel ────────────────────────────────────────────────────────
@@ -344,6 +385,13 @@ func buildXAMLPanel(el xElement, baseDir string) Widget {
 			p = NewPanel(color.RGBA{})
 			p.UseAlpha = true
 			p.CornerRadius = cr
+		}
+	}
+
+	// ── Градиентный фон (LinearGradientBrush через property-element) ─────────
+	if g := el.attr("__gradient"); g != "" {
+		if grad := parseGradient(g); grad != nil {
+			p.Gradient = grad
 		}
 	}
 
@@ -415,6 +463,7 @@ func buildXAMLCanvas(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin, ToolTip, …
 	applyCommonProps(cv, el)
+	cv.InputBindings = parseInputBindings(el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
@@ -1056,6 +1105,165 @@ func buildXAMLStackPanel(el xElement, reg map[string]Widget, parentOff image.Poi
 	}
 
 	return sp, nil
+}
+
+// ─── buildXAMLGroupBox ──────────────────────────────────────────────────────
+
+// buildXAMLGroupBox строит GroupBox (Header + один контент).
+func buildXAMLGroupBox(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	header := el.attr("Header", "Title")
+	gb := NewGroupBox(header)
+	if bgStr := el.attr("Background"); bgStr != "" && !strings.EqualFold(bgStr, "transparent") {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			gb.Background = c
+		}
+	}
+	applyColor(&gb.BorderColor, el, "BorderBrush")
+	applyColor(&gb.HeaderColor, el, "Foreground")
+	gb.SetBounds(el.bounds().Add(parentOff))
+	applyCommonProps(gb, el)
+	if id := el.name(); id != "" {
+		reg[id] = gb
+	}
+	contentOff := gb.ContentBounds().Min
+	for _, child := range el.Children {
+		ct := strings.ToLower(child.Tag)
+		if strings.Contains(ct, ".") {
+			continue
+		}
+		cw, err := buildXAMLWidget(child, reg, contentOff, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			gb.AddChild(cw)
+		}
+	}
+	cb := gb.ContentBounds()
+	for _, c := range gb.Children() {
+		if c.Bounds().Empty() {
+			c.SetBounds(cb)
+		}
+	}
+	return gb, nil
+}
+
+// ─── buildXAMLExpander ──────────────────────────────────────────────────────
+
+// buildXAMLExpander строит Expander (Header, IsExpanded + контент).
+func buildXAMLExpander(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	header := el.attr("Header", "Title")
+	ex := NewExpander(header)
+	if strings.EqualFold(el.attr("IsExpanded"), "true") {
+		ex.IsExpanded = true
+	}
+	applyColor(&ex.HeaderBG, el, "Background")
+	applyColor(&ex.TextColor, el, "Foreground")
+	ex.SetBounds(el.bounds().Add(parentOff))
+	applyCommonProps(ex, el)
+	if id := el.name(); id != "" {
+		reg[id] = ex
+	}
+	contentOff := image.Pt(0, 0)
+	if cb := ex.ContentBounds(); !cb.Empty() {
+		contentOff = cb.Min
+	}
+	for _, child := range el.Children {
+		ct := strings.ToLower(child.Tag)
+		if strings.Contains(ct, ".") {
+			continue
+		}
+		cw, err := buildXAMLWidget(child, reg, contentOff, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			ex.AddChild(cw)
+		}
+	}
+	ex.SetBounds(ex.Bounds()) // разложить контент по ContentBounds
+	return ex, nil
+}
+
+// ─── buildXAMLWrapPanel ─────────────────────────────────────────────────────
+
+// buildXAMLWrapPanel строит WrapPanel из XAML (Orientation, Background, Spacing).
+func buildXAMLWrapPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	orient := OrientationHorizontal
+	if strings.EqualFold(el.attr("Orientation"), "vertical") {
+		orient = OrientationVertical
+	}
+	wp := NewWrapPanel(orient)
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" && !strings.EqualFold(bgStr, "transparent") {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			wp.Background = c
+			wp.UseAlpha = c.A < 255
+		}
+	}
+	if s := xatoi(el.attr("Spacing", "ItemSpacing")); s > 0 {
+		wp.Spacing = s
+		wp.LineSpacing = s
+	}
+	if s := xatoi(el.attr("LineSpacing")); s > 0 {
+		wp.LineSpacing = s
+	}
+	if p := xatoi(el.attr("Padding")); p > 0 {
+		wp.Padding = p
+	}
+	wp.SetBounds(el.bounds().Add(parentOff))
+	applyCommonProps(wp, el)
+	if id := el.name(); id != "" {
+		reg[id] = wp
+	}
+	for _, child := range el.Children {
+		if strings.Contains(strings.ToLower(child.Tag), ".") {
+			continue
+		}
+		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			wp.AddChild(cw)
+		}
+	}
+	return wp, nil
+}
+
+// ─── buildXAMLUniformGrid ───────────────────────────────────────────────────
+
+// buildXAMLUniformGrid строит UniformGrid из XAML (Rows, Columns, Background).
+func buildXAMLUniformGrid(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	ug := NewUniformGrid()
+	ug.Rows = xatoi(el.attr("Rows"))
+	ug.Columns = xatoi(el.attr("Columns"))
+	if bgStr := el.attr("Background", "Fill"); bgStr != "" && !strings.EqualFold(bgStr, "transparent") {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			ug.Background = c
+			ug.UseAlpha = c.A < 255
+		}
+	}
+	if s := xatoi(el.attr("Spacing")); s > 0 {
+		ug.Spacing = s
+	}
+	ug.SetBounds(el.bounds().Add(parentOff))
+	applyCommonProps(ug, el)
+	if id := el.name(); id != "" {
+		reg[id] = ug
+	}
+	for _, child := range el.Children {
+		if strings.Contains(strings.ToLower(child.Tag), ".") {
+			continue
+		}
+		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			ug.AddChild(cw)
+		}
+	}
+	return ug, nil
 }
 
 // ─── buildXAMLTreeView ─────────────────────────────────────────────────────

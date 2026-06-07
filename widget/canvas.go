@@ -59,6 +59,20 @@ type Canvas struct {
 
 	// childInfos хранит Canvas attached properties и желаемый размер для каждого дочернего виджета.
 	childInfos []canvasChildInfo
+
+	// InputBindings — горячие клавиши (WPF InputBindings), когда Canvas — корень.
+	InputBindings []InputBinding
+}
+
+// HandleInputBinding выполняет команду горячей клавиши (KeyBinding).
+// Возвращает true, если клавиша обработана.
+func (c *Canvas) HandleInputBinding(code KeyCode, mod KeyMod) bool {
+	cmd, param, ok := matchInputBinding(c.InputBindings, code, mod)
+	if ok && cmd.CanExecute(param) {
+		cmd.Execute(param)
+		return true
+	}
+	return false
 }
 
 // NewCanvas создаёт пустой Canvas с прозрачным фоном.
@@ -205,6 +219,51 @@ func (c *Canvas) layoutChild(idx int) {
 		y = cb.Min.Y // по умолчанию — верхний край
 	}
 
+	// ── Stretch (расширение headless-gui для адаптивной вёрстки, BUG-6) ──────
+	// Потомок с ЯВНЫМ HorizontalAlignment/VerticalAlignment="Stretch"
+	// заполняет Canvas по соответствующей оси (учитывая Left/Top/Right/Bottom
+	// как отступы). Это позволяет контенту растягиваться при resize окна без
+	// фиксированной ширины. Если заданы оба якоря (Left+Right / Top+Bottom),
+	// размер уже вычислен выше — stretch не требуется.
+	type alignInfo interface {
+		GetHAlign() HorizontalAlignment
+		GetVAlign() VerticalAlignment
+		HAlignExplicit() bool
+		VAlignExplicit() bool
+	}
+	if ai, ok := child.(alignInfo); ok {
+		if ai.HAlignExplicit() && ai.GetHAlign() == HAlignStretch && !(hasLeft && hasRight) {
+			leftInset := 0
+			if hasLeft {
+				leftInset = props.Left
+			}
+			rightInset := 0
+			if hasRight {
+				rightInset = props.Right
+			}
+			x = cb.Min.X + leftInset
+			cw = canvasW - leftInset - rightInset
+			if cw < 0 {
+				cw = 0
+			}
+		}
+		if ai.VAlignExplicit() && ai.GetVAlign() == VAlignStretch && !(hasTop && hasBottom) {
+			topInset := 0
+			if hasTop {
+				topInset = props.Top
+			}
+			bottomInset := 0
+			if hasBottom {
+				bottomInset = props.Bottom
+			}
+			y = cb.Min.Y + topInset
+			ch = canvasH - topInset - bottomInset
+			if ch < 0 {
+				ch = 0
+			}
+		}
+	}
+
 	// Margin — дополнительные отступы (WPF Margin работает и внутри Canvas)
 	type marginGetter interface {
 		GetMargin() Margin
@@ -255,7 +314,7 @@ func shiftDescendants(w Widget, dx, dy int) {
 // позиции дочерних виджетов при вызове SetBounds (через layout / layoutContent).
 func HasOwnLayout(w Widget) bool {
 	switch w.(type) {
-	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window:
+	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander:
 		return true
 	}
 	return false

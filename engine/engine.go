@@ -11,6 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/image/font/gofont/gobold"
+	"golang.org/x/image/font/gofont/gobolditalic"
+	"golang.org/x/image/font/gofont/goitalic"
+
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -101,6 +105,12 @@ func New(width, height, fps int) *Engine {
 			e.canvas.AddFallbackFont(data)
 		}
 	}
+	// Встроенные жирный/курсивный шрифты для FontWeight/FontStyle (P1).
+	e.canvas.RegisterFont(widget.BuiltinFontBold, gobold.TTF)
+	e.canvas.RegisterFont(widget.BuiltinFontItalic, goitalic.TTF)
+	e.canvas.RegisterFont(widget.BuiltinFontBoldItalic, gobolditalic.TTF)
+	// Сообщаем виджетам размер канваса (для удержания popup-меню в пределах экрана).
+	widget.SetScreenBounds(width, height)
 	return e
 }
 
@@ -186,6 +196,7 @@ func (e *Engine) SetResolution(width, height int) {
 	if e.root != nil {
 		e.root.SetBounds(image.Rect(0, 0, width, height))
 	}
+	widget.SetScreenBounds(width, height)
 }
 
 // SetBackgroundFile загружает изображение (PNG или JPEG) из файла и масштабирует его

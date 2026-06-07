@@ -114,6 +114,9 @@ type Window struct {
 	// в заголовке окна. По умолчанию true; отключаемое свойство.
 	ShowLocaleIndicator bool
 
+	// InputBindings — горячие клавиши окна (WPF Window.InputBindings).
+	InputBindings []InputBinding
+
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
 	// OnClose вызывается при клике по кнопке закрытия (×).
@@ -784,6 +787,17 @@ func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
 		return true, true
 	}
 	return false, false
+}
+
+// HandleInputBinding выполняет команду, привязанную к горячей клавише (KeyBinding).
+// Возвращает true, если клавиша обработана.
+func (w *Window) HandleInputBinding(code KeyCode, mod KeyMod) bool {
+	cmd, param, ok := matchInputBinding(w.InputBindings, code, mod)
+	if ok && cmd.CanExecute(param) {
+		cmd.Execute(param)
+		return true
+	}
+	return false
 }
 
 // ─── Themeable ──────────────────────────────────────────────────────────────

@@ -73,18 +73,19 @@ func (c *Canvas) AddFallbackFont(ttfData []byte) bool {
 }
 
 // fcForRune возвращает FontCache, содержащий глиф для руны r: сначала primary,
-// затем fallback-цепочку. Если ни один не содержит глиф — возвращает primary
-// (нарисуется .notdef, но без падения).
-func (c *Canvas) fcForRune(primary *FontCache, r rune) *FontCache {
+// затем fallback-цепочку. Второе значение — найден ли глиф вообще: если false,
+// ни один шрифт не покрывает руну (вызывающий код пропускает отрисовку, чтобы
+// не рисовать уродливый .notdef-квадрат «тофу»).
+func (c *Canvas) fcForRune(primary *FontCache, r rune) (*FontCache, bool) {
 	if primary.HasGlyph(r) {
-		return primary
+		return primary, true
 	}
 	for _, fb := range c.fallbacks {
 		if fb.HasGlyph(r) {
-			return fb
+			return fb, true
 		}
 	}
-	return primary
+	return primary, false
 }
 
 func newCanvas(w, h int, fc *FontCache) *Canvas {
@@ -305,30 +306,39 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 	baseY := fixed.I(y + primaryFace.Metrics().Ascent.Round())
 	penX := fixed.I(x)
 	for _, r := range text {
-		chosen := c.fcForRune(fc, r)
+		chosen, found := c.fcForRune(fc, r)
 		face := chosen.Face(sizePt)
-		d := font.Drawer{
-			Dst:  dst,
-			Src:  src,
-			Face: face,
-			Dot:  fixed.Point26_6{X: penX, Y: baseY},
+		if found {
+			d := font.Drawer{
+				Dst:  dst,
+				Src:  src,
+				Face: face,
+				Dot:  fixed.Point26_6{X: penX, Y: baseY},
+			}
+			d.DrawString(string(r))
 		}
-		d.DrawString(string(r))
+		// Отсутствующий глиф не рисуем (без .notdef-квадрата), но сохраняем
+		// интервал по ширине пробела, чтобы текст не «слипался».
 		adv, ok := face.GlyphAdvance(r)
-		if !ok {
-			adv, _ = primaryFace.GlyphAdvance(r)
+		if !ok || !found {
+			if sp, ok2 := primaryFace.GlyphAdvance(' '); ok2 {
+				adv = sp
+			}
 		}
 		penX += adv
 	}
 }
 
 // runeAdvance возвращает ширину руны в выбранном (с учётом fallback) шрифте.
+// Для непокрытых рун использует ширину пробела (соответствует drawTextWithFont).
 func (c *Canvas) runeAdvance(fc *FontCache, r rune, sizePt float64) fixed.Int26_6 {
-	chosen := c.fcForRune(fc, r)
+	chosen, found := c.fcForRune(fc, r)
 	face := chosen.Face(sizePt)
 	a, ok := face.GlyphAdvance(r)
-	if !ok {
-		a, _ = fc.Face(sizePt).GlyphAdvance('?')
+	if !ok || !found {
+		if sp, ok2 := fc.Face(sizePt).GlyphAdvance(' '); ok2 {
+			return sp
+		}
 	}
 	return a
 }
