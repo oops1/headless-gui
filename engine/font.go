@@ -177,8 +177,11 @@ func systemFallbackFontPaths() []string {
 		fonts := filepath.Join(root, "Fonts")
 		return []string{
 			filepath.Join(fonts, "seguisym.ttf"), // Segoe UI Symbol: ✓✗⚠, стрелки, box-drawing
-			filepath.Join(fonts, "arial.ttf"),     // широкое покрытие латиницы/кириллицы/символов
-			filepath.Join(fonts, "seguiemj.ttf"),  // Segoe UI Emoji (контурные глифы)
+			filepath.Join(fonts, "l_10646.ttf"),   // Lucida Sans Unicode: ✓✗ и пр.
+			filepath.Join(fonts, "arialuni.ttf"),  // Arial Unicode MS (если установлен)
+			filepath.Join(fonts, "DejaVuSans.ttf"),
+			filepath.Join(fonts, "arial.ttf"), // широкое покрытие латиницы/кириллицы/стрелок
+			filepath.Join(fonts, "seguiemj.ttf"),
 		}
 	case "darwin":
 		return []string{

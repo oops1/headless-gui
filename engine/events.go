@@ -105,6 +105,25 @@ func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
 		}
 	}
 
+	// Горячие клавиши окна (WPF InputBindings/KeyBinding) — до фокус-диспатча.
+	if ev.Pressed {
+		var hostRoot widget.Widget
+		if m := e.topModal(); m != nil {
+			hostRoot = m
+		} else {
+			e.mu.RLock()
+			hostRoot = e.root
+			e.mu.RUnlock()
+		}
+		if h, ok := hostRoot.(interface {
+			HandleInputBinding(widget.KeyCode, widget.KeyMod) bool
+		}); ok {
+			if h.HandleInputBinding(ev.Code, ev.Mod) {
+				return
+			}
+		}
+	}
+
 	w := e.focus.get()
 	if w == nil {
 		return

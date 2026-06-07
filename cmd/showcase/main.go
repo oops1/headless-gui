@@ -19,8 +19,41 @@ import (
 
 	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/widget"
+	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
 	"github.com/oops1/headless-gui/v3/window"
 )
+
+// ─── DataContext для вкладки «3.2.4» (новый функционал) ──────────────────────
+
+// Order — элемент списка для ItemsControl + DataTemplate.
+type Order struct {
+	Side   string
+	Symbol string
+	Price  float64
+}
+
+// showcaseVM — модель с уведомлениями для живого биндинга/триггеров/команд.
+type showcaseVM struct {
+	dg.PropertyNotifier
+	username string
+	status   string
+	Items    *dg.ObservableCollection
+	SaveCommand *widget.RelayCommand
+}
+
+func (v *showcaseVM) GetUsername() string  { return v.username }
+func (v *showcaseVM) SetUsername(s string) { v.username = s; v.NotifyPropertyChanged(v, "Username") }
+func (v *showcaseVM) GetStatus() string    { return v.status }
+func (v *showcaseVM) SetStatus(s string)   { v.status = s; v.NotifyPropertyChanged(v, "Status") }
+
+// pctConv — конвертер доли 0..1 → проценты (для {Binding ..., Converter=}).
+type pctConv struct{}
+
+func (pctConv) Convert(v interface{}) interface{} {
+	f, _ := v.(float64)
+	return fmt.Sprintf("%.0f%%", f*100)
+}
+func (pctConv) ConvertBack(v interface{}) interface{} { return v }
 
 func main() {
 	const (
@@ -31,8 +64,20 @@ func main() {
 	// ─── Движок ─────────────────────────────────────────────────────────────
 	eng := engine.New(screenW, screenH, 30)
 
-	// ─── Загрузка UI из XAML ────────────────────────────────────────────────
-	root, reg, err := widget.LoadUIFromXAMLFile("./assets/ui/showcase.xaml")
+	// ─── DataContext + локаль + конвертер (для вкладки «3.2.4») ──────────────
+	widget.SetLocale("RU")
+	widget.RegisterValueConverter("Pct", pctConv{})
+	items := dg.NewObservableCollection()
+	items.Add(Order{"BUY", "BTCUSDT", 64231.5})
+	items.Add(Order{"SELL", "ETHUSDT", 3120.0})
+	items.Add(Order{"BUY", "SOLUSDT", 148.25})
+	vm := &showcaseVM{username: "trader", status: "Готов — Ctrl+S для сохранения", Items: items}
+	vm.SaveCommand = widget.NewRelayCommand(func() {
+		vm.SetStatus("Сохранено в " + time.Now().Format("15:04:05"))
+	})
+
+	// ─── Загрузка UI из XAML (с DataContext для живых привязок) ──────────────
+	root, reg, _, err := widget.LoadUIFromXAMLFileBindings("./assets/ui/showcase.xaml", vm)
 	if err != nil {
 		log.Fatalf("ошибка загрузки showcase.xaml: %v", err)
 	}
@@ -297,6 +342,23 @@ func main() {
 		eventLog.OnSelect = func(idx int, text string) {
 			log.Printf("ListView select: [%d] %q", idx, text)
 		}
+	}
+
+	// ─── TAB 3.2.4: новый функционал ─────────────────────────────────────────
+	if b := btn("errBtn324"); b != nil {
+		b.OnClick = func() {
+			vm.SetStatus("ERROR") // DataTrigger покрасит статус в красный
+			addLog("3.2.4: статус → ERROR (DataTrigger)")
+		}
+	}
+	if b := btn("addBtn324"); b != nil {
+		b.OnClick = func() {
+			vm.Items.Add(Order{"BUY", "NEWPAIR", 1.23}) // ItemsControl обновится вживую
+			addLog("3.2.4: строка добавлена (live ItemsControl)")
+		}
+	}
+	if b := btn("saveBtn324"); b != nil {
+		b.AddClickHandler(func() { addLog("3.2.4: команда Save выполнена") })
 	}
 
 	// Фокус на поле логина

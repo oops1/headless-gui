@@ -1420,6 +1420,304 @@ stretch automatically.
 
 ---
 
+## WPF Resources, Styles & Binding (P0)
+
+The XAML loader now supports the WPF resource/style/binding foundation via a
+pre-processing pass over the parsed tree (no behavior change for files that
+don't use these features).
+
+### Resources & `{StaticResource}` / `{DynamicResource}`
+
+```xml
+<Window.Resources>            <!-- or <Grid.Resources>, <ResourceDictionary> -->
+  <SolidColorBrush x:Key="Accent" Color="#FF8800"/>
+  <Color x:Key="Bg">#202830</Color>
+  <sys:Double x:Key="Big">18</sys:Double>
+</Window.Resources>
+...
+<StackPanel Background="{StaticResource Bg}">
+  <Button Background="{StaticResource Accent}" FontSize="{StaticResource Big}"/>
+</StackPanel>
+```
+
+Scalar resources (brushes/colors/strings/numbers) are resolved into attribute
+values. `{DynamicResource}` is treated as static (no live swap yet).
+`{x:Null}` resolves to empty.
+
+### Styles (`<Style>` / `<Setter>`)
+
+```xml
+<Window.Resources>
+  <Style x:Key="Card" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource Accent}"/>
+    <Setter Property="Foreground" Value="#FFFFFF"/>
+    <Setter Property="Height" Value="40"/>
+  </Style>
+  <Style TargetType="TextBlock">           <!-- implicit: applies to ALL TextBlocks -->
+    <Setter Property="Foreground" Value="#9CDCFE"/>
+    <Setter Property="FontSize" Value="16"/>
+  </Style>
+  <Style x:Key="BigCard" TargetType="Button" BasedOn="{StaticResource Card}">
+    <Setter Property="FontSize" Value="20"/>
+  </Style>
+</Window.Resources>
+...
+<Button Style="{StaticResource Card}" Content="Styled"/>
+```
+
+- **Keyed** styles applied via `Style="{StaticResource key}"`.
+- **Implicit** styles (TargetType, no key) apply to every element of that type.
+- **BasedOn** chains setters (base first, derived overrides).
+- Setters are merged as element attribute defaults — **explicit attributes win**.
+- Setter `Property` names match the attributes builders read (`Background`,
+  `Foreground`, `FontSize`, `Content`, `Width`, `Height`, `Padding`,
+  `IsEnabled`, `Visibility`, `ToolTip`, `CornerRadius`, …).
+
+### Live `{Binding}` with DataContext (OneWay / TwoWay / OneTime)
+
+```go
+type VM struct {
+    datagrid.PropertyNotifier        // optional: enables live UI auto-refresh
+    title string
+}
+func (v *VM) GetTitle() string  { return v.title }
+func (v *VM) SetTitle(s string) { v.title = s; v.NotifyPropertyChanged(v, "Title") }
+
+vm := &VM{title: "Hello"}
+root, reg, err := widget.LoadUIFromXAMLWithContext(xamlBytes, vm)
+// scope variant for manual control:
+root, reg, scope, err := widget.LoadUIFromXAMLBindings(xamlBytes, vm)
+// widget.LoadUIFromXAMLFileWithContext / LoadUIFromXAMLFileBindings also exist
+```
+
+```xml
+<TextBlock Text="{Binding Title}"/>                          <!-- OneWay (default) -->
+<TextBox   Text="{Binding Title, Mode=TwoWay}"/>             <!-- UI -> model too -->
+<CheckBox  IsChecked="{Binding IsOn, Mode=TwoWay}"/>
+<Slider    Value="{Binding Volume, Mode=TwoWay}"/>
+<TextBlock Text="{Binding Count, StringFormat=Count = %d}"/> <!-- Go fmt -->
+<TextBlock Text="{Binding User.Name}"/>                       <!-- dotted paths -->
+```
+
+- Paths resolve via `datagrid.GetPropertyValue` (struct fields, `Get<Prop>()`
+  methods, maps, `PropertyGetter`, dotted paths).
+- **OneWay/OneTime/TwoWay** via `Mode=`. **StringFormat** is a Go format string.
+- **Live model→UI:** if the DataContext implements `INotifyPropertyChanged`
+  (embed `datagrid.PropertyNotifier`, call `NotifyPropertyChanged`), bound
+  widgets refresh automatically.
+- **TwoWay UI→model** for `TextBox`, `CheckBox`, `ToggleButton`, `RadioButton`,
+  `Slider`, `ComboBox.SelectedIndex` (a feedback-loop guard prevents cycles).
+- `BindingScope.SetDataContext(obj)` / `.Refresh()` for manual control. Bound
+  properties: `Text`/`Content`, `IsChecked`, `Value`, `Foreground`,
+  `Background`, `IsEnabled`, `Visibility`, `ToolTip`, `SelectedIndex`.
+
+**Not yet (next increments):** `{RelativeSource}`/`{TemplateBinding}`,
+`ControlTemplate`/`ContentPresenter`, property `Trigger`/`EventTrigger`,
+live `ItemsControl` updates on `ObservableCollection` change.
+
+### Value Converters (`IValueConverter`)
+
+```go
+type PctConverter struct{}
+func (PctConverter) Convert(v interface{}) interface{}     { return fmt.Sprintf("%.0f%%", v.(float64)*100) }
+func (PctConverter) ConvertBack(v interface{}) interface{} { return v }
+
+widget.RegisterValueConverter("Pct", PctConverter{})   // register by key, then use in XAML
+```
+
+```xml
+<TextBlock Text="{Binding Ratio, Converter={StaticResource Pct}}"/>
+```
+
+`Convert` runs model→UI (all binding paths incl. DataTemplate items);
+`ConvertBack` runs UI→model on TwoWay write-back. Converters are Go objects
+registered by key (custom types can't be instantiated from XAML in Go).
+
+### Element-to-Element Binding (`{Binding ElementName}`)
+
+```xml
+<Slider Name="vol" Minimum="0" Maximum="1" Value="0.3"/>
+<TextBlock Text="{Binding Value, ElementName=vol, Converter={StaticResource Pct}}"/>
+```
+
+Binds a property to another named element's property (one-way, live). The
+source element must have `Name`/`x:Name`. Supported source properties: `Text`,
+`Value`, `IsChecked`, `SelectedIndex`. Updates when the source raises its
+change callback (Slider/TextBox/CheckBox/ToggleButton/RadioButton/ComboBox).
+
+### DataTriggers (`Style.Triggers`)
+
+```xml
+<Style x:Key="StatusStyle" TargetType="TextBlock">
+  <Setter Property="Foreground" Value="#80FF80"/>          <!-- base (inactive) -->
+  <Style.Triggers>
+    <DataTrigger Binding="{Binding Status}" Value="ERROR">
+      <Setter Property="Foreground" Value="#FF5050"/>       <!-- active when Status==ERROR -->
+    </DataTrigger>
+  </Style.Triggers>
+</Style>
+```
+
+`DataTrigger` setters apply when the bound value equals `Value`, and revert to
+the base setter value otherwise. Re-evaluated on `INotifyPropertyChanged`
+(same engine as bindings).
+
+**Property `Trigger`** reacts to the styled control's own property:
+
+```xml
+<Style TargetType="CheckBox">
+  <Setter Property="Foreground" Value="#888888"/>
+  <Style.Triggers>
+    <Trigger Property="IsChecked" Value="True">
+      <Setter Property="Foreground" Value="#40FF40"/>
+    </Trigger>
+  </Style.Triggers>
+</Style>
+```
+
+Supported trigger properties: `IsChecked`, `Value`, `SelectedIndex`,
+`IsEnabled`, `Text`. Live for properties with a change callback
+(CheckBox/ToggleButton/RadioButton/Slider/ComboBox/TextBox); `IsEnabled` and
+others are evaluated at refresh time. `EventTrigger`/`MultiTrigger` are not yet
+supported (parsed-but-ignored).
+
+### ItemsControl + DataTemplate
+
+```go
+type Order struct{ Name string; Price float64 }
+items := datagrid.NewObservableCollection()
+items.Add(Order{"Widget A", 19.99})
+vm := &VM{Items: items}
+root, _, _ := widget.LoadUIFromXAMLWithContext(xaml, vm)
+```
+
+```xml
+<ItemsControl ItemsSource="{Binding Items}">
+  <ItemsControl.ItemTemplate>
+    <DataTemplate>
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <TextBlock Text="{Binding Name}"/>
+        <TextBlock Text="{Binding Price, StringFormat=$%.2f}"/>
+      </StackPanel>
+    </DataTemplate>
+  </ItemsControl.ItemTemplate>
+</ItemsControl>
+```
+
+For each item of the bound collection (`ObservableCollection` or a slice), the
+`DataTemplate` is cloned and bound to that item (one-way, with `StringFormat`),
+then laid out in a vertical `StackPanel`. Live updates on collection change are
+a follow-up (reload or rebuild for now).
+
+---
+
+## WPF Feature Coverage (P1 batch)
+
+### New layout panels & controls
+
+| XAML | Notes |
+|------|-------|
+| `<WrapPanel Orientation="..." Spacing="..">` | Wraps children to new lines/columns |
+| `<UniformGrid Rows=".." Columns="..">` | Equal cells; auto rows/cols if omitted |
+| `<GroupBox Header="..">` | Bordered container with title |
+| `<Expander Header=".." IsExpanded="True">` | Collapsible; click header toggles |
+| `<ContentControl Template=".." Content="..">` | ControlTemplate host (see below) |
+
+### Text styling
+
+```xml
+<TextBlock Text="Bold"      FontWeight="Bold"/>
+<TextBlock Text="Italic"    FontStyle="Italic"/>
+<TextBlock Text="Both"      FontWeight="Bold" FontStyle="Italic"/>
+<TextBlock Text="Link"      TextDecorations="Underline"/>
+```
+
+Bold/italic use built-in Go Bold/Italic faces (registered automatically). Works
+on `Label`/`TextBlock`.
+
+### Brushes via property elements + gradients
+
+```xml
+<Button.Background><SolidColorBrush Color="#C04000"/></Button.Background>
+
+<Panel.Background>
+  <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#1565C0" Offset="0"/>
+    <GradientStop Color="#000814" Offset="1"/>
+  </LinearGradientBrush>
+</Panel.Background>
+```
+
+Property-element syntax `<X.Prop><...></X.Prop>` is lifted to attributes for
+scalar brush properties (Background/Foreground/BorderBrush/Fill/CornerRadius/…).
+`LinearGradientBrush` (2+ stops, vertical/horizontal) renders on `Panel`
+backgrounds. `Opacity`, `RadialGradientBrush`, `ImageBrush` are not supported
+(the renderer composites opaque solid fills only).
+
+### Commands & hotkeys
+
+```go
+vm := &VM{ SaveCmd: widget.NewRelayCommand(func(){ /* save */ }) }
+```
+
+```xml
+<Window.InputBindings>
+  <KeyBinding Modifiers="Ctrl" Key="S" Command="{Binding SaveCmd}"/>
+</Window.InputBindings>
+...
+<Button Content="Save" Command="{Binding SaveCmd}"/>
+```
+
+`Button.Command` (ICommand) runs on click if `CanExecute`. `Window.InputBindings`
+(`KeyBinding`) are routed by the engine before focus dispatch. Implement
+`widget.ICommand` or use `widget.NewRelayCommand`/`widget.RelayCommand`.
+
+### MultiTrigger
+
+```xml
+<Style.Triggers>
+  <MultiDataTrigger>
+    <MultiDataTrigger.Conditions>
+      <Condition Binding="{Binding A}" Value="on"/>
+      <Condition Binding="{Binding B}" Value="ready"/>
+    </MultiDataTrigger.Conditions>
+    <Setter Property="Foreground" Value="#40FF40"/>
+  </MultiDataTrigger>
+</Style.Triggers>
+```
+
+`<MultiTrigger>` (property conditions) and `<MultiDataTrigger>` (data
+conditions) apply setters when ALL conditions match.
+
+### ControlTemplate + ContentPresenter + TemplateBinding
+
+```xml
+<ControlTemplate x:Key="Card">
+  <Border Background="{TemplateBinding Background}" BorderBrush="#FFF" BorderThickness="1">
+    <ContentPresenter/>
+  </Border>
+</ControlTemplate>
+...
+<ContentControl Template="{StaticResource Card}" Background="#2E7D32" Content="Hi"/>
+```
+
+`ContentControl` with a `ControlTemplate` renders the template's visual tree.
+`ContentPresenter` is replaced by the control's content (child elements or
+`Content` text). `{TemplateBinding Prop}` and
+`{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Prop}` pull from
+the templated control's properties. (ControlTemplate on interactive controls
+like Button keeps default click behavior — templating is supported on
+`ContentControl`.)
+
+### Still not supported (engine/scope limits)
+
+`Opacity` & per-widget alpha compositing, `RadialGradientBrush`/`ImageBrush`,
+animations/`Storyboard`/`EventTrigger`/`VisualStateManager`, `RelativeSource
+AncestorType`, rich-text inlines (`<Run>/<Bold>` inside TextBlock),
+`RenderTransform`/`LayoutTransform`.
+
+---
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

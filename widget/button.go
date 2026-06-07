@@ -54,6 +54,10 @@ type Button struct {
 	// RemoveClickHandler. OnClick всегда вызывается ДО handlers.
 	OnClick func()
 
+	// Command — команда (WPF ICommand), выполняется при клике, если CanExecute.
+	Command          ICommand
+	CommandParameter interface{}
+
 	// handlersMu защищает clickHandlers; модификация подписки и
 	// вызов из разных goroutine (OnMouseButton/OnKeyEvent) безопасны.
 	handlersMu    sync.Mutex
@@ -323,6 +327,10 @@ func (btn *Button) fireClick() {
 		if h.fn != nil {
 			h.fn()
 		}
+	}
+	// WPF Command: выполняется при клике, если доступна.
+	if btn.Command != nil && btn.Command.CanExecute(btn.CommandParameter) {
+		btn.Command.Execute(btn.CommandParameter)
 	}
 }
 

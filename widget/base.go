@@ -107,6 +107,9 @@ func (b *Base) RemoveChild(w Widget) bool {
 	return false
 }
 
+// ClearChildren удаляет всех потомков (используется при перестроении ItemsControl).
+func (b *Base) ClearChildren() { b.children = nil }
+
 // IsEnabled возвращает true, если виджет включён (WPF IsEnabled).
 // По умолчанию все виджеты включены.
 func (b *Base) IsEnabled() bool { return !b.disabled }

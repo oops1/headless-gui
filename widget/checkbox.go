@@ -98,25 +98,23 @@ func (cb *CheckBox) Draw(ctx DrawContext) {
 		ctx.DrawBorder(boxX, boxY, boxSize, boxSize, cb.BoxBorder)
 	}
 
-	// Галочка (рисуем простой чек-марк линиями)
+	// Галочка ✓: короткое плечо идёт ВНИЗ-вправо к нижней вершине,
+	// затем длинное плечо — ВВЕРХ-вправо (а не «домиком», как было раньше).
 	if cb.IsChecked() {
-		cx := boxX + 3
-		cy := boxY + 8
-		// Рисуем V-образную галочку
-		for i := 0; i < 3; i++ {
-			ctx.SetPixel(cx+i, cy-i, cb.CheckColor)
-			ctx.SetPixel(cx+i, cy-i+1, cb.CheckColor)
+		col := cb.CheckColor
+		// Короткое плечо: (boxX+4, boxY+7) → (boxX+7, boxY+10), вниз-вправо.
+		for i := 0; i <= 3; i++ {
+			x := boxX + 4 + i
+			y := boxY + 7 + i
+			ctx.SetPixel(x, y, col)
+			ctx.SetPixel(x, y+1, col) // утолщение
 		}
-		for i := 0; i < 6; i++ {
-			ctx.SetPixel(cx+2+i, cy-2+i, cb.CheckColor)
-			ctx.SetPixel(cx+2+i, cy-2+i+1, cb.CheckColor)
-		}
-		// Утолщённая версия для видимости
-		for i := 0; i < 3; i++ {
-			ctx.SetPixel(cx+i+1, cy-i, cb.CheckColor)
-		}
-		for i := 0; i < 6; i++ {
-			ctx.SetPixel(cx+2+i+1, cy-2+i, cb.CheckColor)
+		// Длинное плечо: (boxX+7, boxY+10) → (boxX+12, boxY+5), вверх-вправо.
+		for i := 0; i <= 5; i++ {
+			x := boxX + 7 + i
+			y := boxY + 10 - i
+			ctx.SetPixel(x, y, col)
+			ctx.SetPixel(x, y+1, col) // утолщение
 		}
 	}
 

@@ -36,22 +36,97 @@ func LoadUIFromXAMLFile(path string) (Widget, map[string]Widget, error) {
 // LoadUIFromXAML разбирает XAML и строит дерево виджетов.
 // Ресурсы (изображения) не могут загружаться — baseDir пустой.
 func LoadUIFromXAML(data []byte) (Widget, map[string]Widget, error) {
-	return LoadUIFromXAMLWithBase(data, "")
+	w, reg, _, err := loadUIFromXAML(data, "", nil)
+	return w, reg, err
 }
 
 // LoadUIFromXAMLWithBase разбирает XAML и строит дерево виджетов.
 // baseDir используется для загрузки ресурсов (BackgroundImage и пр.).
 func LoadUIFromXAMLWithBase(data []byte, baseDir string) (Widget, map[string]Widget, error) {
+	w, reg, _, err := loadUIFromXAML(data, baseDir, nil)
+	return w, reg, err
+}
+
+// LoadUIFromXAMLWithContext разбирает XAML и привязывает {Binding Path} к
+// dataContext. Привязки живые: при INotifyPropertyChanged у dataContext UI
+// обновляется автоматически, TwoWay-поля пишут обратно в модель.
+// Возвращаемый BindingScope удерживается подписками, поэтому привязки работают
+// даже если scope не сохранён вызывающим кодом.
+func LoadUIFromXAMLWithContext(data []byte, dataContext interface{}) (Widget, map[string]Widget, error) {
+	w, reg, _, err := loadUIFromXAML(data, "", dataContext)
+	return w, reg, err
+}
+
+// LoadUIFromXAMLBindings — как LoadUIFromXAMLWithContext, но возвращает BindingScope
+// для ручного управления (SetDataContext / Refresh).
+func LoadUIFromXAMLBindings(data []byte, dataContext interface{}) (Widget, map[string]Widget, *BindingScope, error) {
+	return loadUIFromXAML(data, "", dataContext)
+}
+
+// LoadUIFromXAMLFileWithContext — как LoadUIFromXAMLFile, но с DataContext для {Binding}.
+func LoadUIFromXAMLFileWithContext(path string, dataContext interface{}) (Widget, map[string]Widget, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("xaml: read %q: %w", path, err)
+	}
+	w, reg, _, err := loadUIFromXAML(data, filepath.Dir(path), dataContext)
+	return w, reg, err
+}
+
+// LoadUIFromXAMLFileBindings — как LoadUIFromXAMLFileWithContext, но с BindingScope.
+func LoadUIFromXAMLFileBindings(path string, dataContext interface{}) (Widget, map[string]Widget, *BindingScope, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("xaml: read %q: %w", path, err)
+	}
+	return loadUIFromXAML(data, filepath.Dir(path), dataContext)
+}
+
+// loadUIFromXAML — общая реализация: парсинг → пред-обработка (Resources/Style/
+// markup/{Binding}) → построение дерева → активация живых привязок.
+func loadUIFromXAML(data []byte, baseDir string, dataContext interface{}) (Widget, map[string]Widget, *BindingScope, error) {
 	root, err := parseXAML(data)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
+	env := preprocessXAML(root, dataContext)
 	registry := make(map[string]Widget)
 	w, err := buildXAMLWidget(*root, registry, image.Point{}, baseDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return w, registry, nil
+	scope := newBindingScope(dataContext, env, registry, baseDir)
+	scope.activate()
+	resolveWindowInputCommands(w, dataContext)
+	return w, registry, scope, nil
+}
+
+// resolveWindowInputCommands связывает CommandPath из Window/Canvas.InputBindings
+// с объектами-командами из DataContext.
+func resolveWindowInputCommands(root Widget, ctx interface{}) {
+	if ctx == nil {
+		return
+	}
+	var bindings []InputBinding
+	switch t := root.(type) {
+	case *Window:
+		bindings = t.InputBindings
+	case *Canvas:
+		bindings = t.InputBindings
+	default:
+		return
+	}
+	for i := range bindings {
+		p := bindings[i].CommandPath
+		if p == "" {
+			continue
+		}
+		if v, ok := dgridGetProperty(ctx, p); ok {
+			if cmd, ok := v.(ICommand); ok {
+				bindings[i].Command = cmd
+			}
+		}
+	}
 }
 
 // ─── Построитель виджетов ───────────────────────────────────────────────────
@@ -70,6 +145,14 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 		return nil, nil // пропускаем как дочерний виджет
 	}
 
+	// Ресурсы/стили обрабатываются в preprocessXAML — как виджеты не строим.
+	switch tag {
+	case "style", "setter", "resourcedictionary", "solidcolorbrush",
+		"lineargradientbrush", "radialgradientbrush", "gradientstop", "color",
+		"keybinding", "mousebinding", "controltemplate", "contentpresenter":
+		return nil, nil
+	}
+
 	var w Widget
 
 	switch tag {
@@ -84,6 +167,28 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	// ── StackPanel — контейнер с автораскладкой ─────────────────────────────
 	case "stackpanel":
 		return buildXAMLStackPanel(el, reg, parentOff, baseDir)
+
+	// ── ItemsControl — список объектов по DataTemplate ──────────────────────
+	// preprocessXAML разворачивает его в StackPanel (по элементам ItemsSource);
+	// неразвёрнутый (нет шаблона/контекста) строится как пустой StackPanel.
+	case "itemscontrol":
+		return buildXAMLStackPanel(el, reg, parentOff, baseDir)
+
+	// ── WrapPanel — контейнер с переносом ───────────────────────────────────
+	case "wrappanel":
+		return buildXAMLWrapPanel(el, reg, parentOff, baseDir)
+
+	// ── UniformGrid — равномерная сетка ─────────────────────────────────────
+	case "uniformgrid":
+		return buildXAMLUniformGrid(el, reg, parentOff, baseDir)
+
+	// ── GroupBox — рамка с заголовком ───────────────────────────────────────
+	case "groupbox":
+		return buildXAMLGroupBox(el, reg, parentOff, baseDir)
+
+	// ── Expander — раскрывающаяся панель ────────────────────────────────────
+	case "expander":
+		return buildXAMLExpander(el, reg, parentOff, baseDir)
 
 	// ── TreeView — иерархический список ─────────────────────────────────────
 	case "treeview":
@@ -130,7 +235,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 	// ── Контейнеры ──────────────────────────────────────────────────────────
 	case "usercontrol",
-		"panel", "viewbox":
+		"panel", "viewbox", "contentcontrol", "headeredcontentcontrol":
 		w = buildXAMLPanel(el, baseDir)
 
 	// ── Текст ────────────────────────────────────────────────────────────────
@@ -260,6 +365,10 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 			continue
 		}
 		if strings.Contains(childTag, ".") {
+			// Ресурсы уже собраны в preprocessXAML — не строим как виджеты.
+			if strings.HasSuffix(childTag, ".resources") {
+				continue
+			}
 			// WPF property element — пропускаем сам тег, но обрабатываем его потомков
 			for _, inner := range child.Children {
 				cw, err := buildXAMLWidget(inner, reg, childOff, baseDir)
@@ -345,6 +454,17 @@ func buildXAMLLabel(el xElement) Widget {
 	// FontFamily — именованный шрифт (зарегистрированный через RegisterFont)
 	if ff := el.attr("FontFamily"); ff != "" {
 		lbl.FontName = ff
+	}
+
+	// FontWeight / FontStyle / TextDecorations (P1)
+	if fw := strings.ToLower(el.attr("FontWeight")); fw == "bold" || fw == "semibold" || fw == "black" || fw == "heavy" {
+		lbl.Bold = true
+	}
+	if fs := strings.ToLower(el.attr("FontStyle")); fs == "italic" || fs == "oblique" {
+		lbl.Italic = true
+	}
+	if td := strings.ToLower(el.attr("TextDecorations")); strings.Contains(td, "underline") {
+		lbl.Underline = true
 	}
 
 	// Padding
