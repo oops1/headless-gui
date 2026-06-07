@@ -142,6 +142,13 @@ type DataGrid struct {
 	OnCellEditEnding   func(e *CellEditEndingEvent)
 	OnRowEditEnding    func(rowIndex int, item interface{})
 
+	// RowStyleSelector — условная раскраска строк по значению модели (BUG-3).
+	// Вызывается для каждой видимой строки перед отрисовкой её содержимого.
+	// item — элемент модели, rowIndex — индекс в исходной коллекции.
+	// Если ok=true, bg используется как фон строки (вместо AlternatingRowBackground);
+	// выделение и hover рисуются поверх. Аналог WPF RowStyle/RowBackground.
+	RowStyleSelector func(item interface{}, rowIndex int) (bg color.RGBA, ok bool)
+
 	// OnRowActivated — двойной клик / Enter по строке.
 	//
 	// Срабатывает ВСЕГДА, независимо от IsReadOnly и состояния
@@ -805,12 +812,23 @@ func (dg *DataGrid) drawRows(ctx DrawContextBridge) {
 		isSelected := dg.selectedRows[row]
 		isHovered := row == dg.hoverRow
 
+		// Базовый фон строки: пользовательский RowStyleSelector (BUG-3) имеет
+		// приоритет над стандартным чередованием AlternatingRowBackground.
+		drewBase := false
+		if dg.RowStyleSelector != nil {
+			if bg, ok := dg.RowStyleSelector(item, dataIdx); ok {
+				ctx.FillRect(dr.Min.X, rowY, dataW, dg.RowHeight, bg)
+				drewBase = true
+			}
+		}
+		if !drewBase && row%2 == 1 {
+			ctx.FillRect(dr.Min.X, rowY, dataW, dg.RowHeight, dg.AlternateBG)
+		}
+		// Выделение / hover рисуются поверх базового фона.
 		if isSelected {
 			ctx.FillRectAlpha(dr.Min.X, rowY, dataW, dg.RowHeight, dg.SelectColor)
 		} else if isHovered {
 			ctx.FillRect(dr.Min.X, rowY, dataW, dg.RowHeight, dg.HoverColor)
-		} else if row%2 == 1 {
-			ctx.FillRect(dr.Min.X, rowY, dataW, dg.RowHeight, dg.AlternateBG)
 		}
 
 		// Ячейки

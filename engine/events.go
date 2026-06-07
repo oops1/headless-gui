@@ -154,6 +154,9 @@ func (e *Engine) tabCycle(root widget.Widget, reverse bool) {
 // Если активен модальный виджет — broadcast только внутри него.
 // Иначе — broadcast всему дереву.
 func (e *Engine) SendMouseMove(x, y int) {
+	// Запоминаем позицию курсора и сбрасываем таймер всплывающей подсказки.
+	e.recordMouse(x, y)
+
 	// Если мышь захвачена — только захватчику
 	if cap := e.getCaptured(); cap != nil {
 		if mm, ok := cap.(widget.MouseMoveHandler); ok {
@@ -371,6 +374,9 @@ func dismissOutside(w widget.Widget, keep map[widget.Widget]struct{}) {
 // hitTest возвращает самый верхний виджет (последний дочерний в Z-порядке),
 // чьи bounds содержат точку (x, y). Возвращает nil, если точка вне дерева.
 func hitTest(w widget.Widget, x, y int) widget.Widget {
+	if !widget.IsWidgetVisible(w) {
+		return nil
+	}
 	if !image.Pt(x, y).In(w.Bounds()) {
 		return nil
 	}
@@ -388,6 +394,9 @@ func hitTest(w widget.Widget, x, y int) widget.Widget {
 // Путь: [root, ..., parent, hit]. Пустой срез — точка вне дерева.
 // Используется для event bubbling.
 func hitTestPath(w widget.Widget, x, y int) []widget.Widget {
+	if !widget.IsWidgetVisible(w) {
+		return nil
+	}
 	if !image.Pt(x, y).In(w.Bounds()) {
 		return nil
 	}
@@ -404,6 +413,9 @@ func hitTestPath(w widget.Widget, x, y int) []widget.Widget {
 // findCapturer ищет виджет, который хочет захватить мышь, в цепочке предков
 // от корня до hit-виджета. Возвращает ближайшего к hit (самого вложенного).
 func findCapturer(w widget.Widget, x, y int, ev widget.MouseEvent) widget.Widget {
+	if !widget.IsWidgetVisible(w) {
+		return nil
+	}
 	pt := image.Pt(x, y)
 	if !pt.In(w.Bounds()) {
 		return nil
@@ -429,6 +441,9 @@ func findCapturer(w widget.Widget, x, y int, ev widget.MouseEvent) widget.Widget
 // Overlay имеет приоритет над обычным Z-порядком дерева виджетов.
 // Возвращает nil, если ни один overlay не содержит точку.
 func findOverlayAt(w widget.Widget, x, y int) widget.Widget {
+	if !widget.IsWidgetVisible(w) {
+		return nil
+	}
 	pt := image.Pt(x, y)
 
 	// Проверяем детей в обратном Z-порядке (верхние первыми).
@@ -453,6 +468,9 @@ func findOverlayAt(w widget.Widget, x, y int) widget.Widget {
 // всему дереву виджетов (не только тем, что под курсором).
 // Каждый виджет сам определяет своё hover-состояние через image.Pt(x,y).In(bounds).
 func broadcastMouseMove(w widget.Widget, x, y int) {
+	if !widget.IsWidgetVisible(w) {
+		return
+	}
 	if mm, ok := w.(widget.MouseMoveHandler); ok {
 		mm.OnMouseMove(x, y)
 	}

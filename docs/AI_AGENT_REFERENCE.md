@@ -1243,6 +1243,183 @@ Avoid modifying child bounds after adding to auto-layout containers.
 
 ---
 
+## Recent Engine Additions (Tooltips, Visibility, Locale, Fonts, Layout)
+
+This section documents features added on top of the base API. They are
+WPF-compatible where WPF defines equivalent behavior, with documented
+headless-only extensions.
+
+### ToolTips (all widgets)
+
+Every widget embeds `Base`, which now carries a `ToolTip string` field plus
+`GetToolTip()/SetToolTip(s)`. The engine renders a tooltip box near the cursor
+after it rests over a widget with a non-empty tooltip.
+
+```go
+btn := widget.NewButton("Save")
+btn.ToolTip = "Save the current document"   // or btn.SetToolTip("...")
+```
+
+XAML (works on ANY element, not just Button):
+
+```xml
+<Button Content="Save" ToolTip="Save the current document"/>
+<TextBox ToolTip="Enter your name"/>
+```
+
+Engine control (global, toggleable):
+
+```go
+eng.SetTooltipsEnabled(true)               // default true
+eng.SetTooltipDelay(600 * time.Millisecond) // hover delay before showing
+```
+
+Tooltips are detected via the hit-test path (deepest widget wins), respect
+widget visibility, and draw above modal dialogs.
+
+### Visibility (Show/Hide) — BUG-5
+
+`Base` exposes WPF-style visibility:
+
+```go
+w.SetVisible(false)  // hide: not drawn, excluded from hit-test (≈ Visibility="Collapsed")
+w.SetVisible(true)   // show (default)
+w.IsVisible()        // current state
+```
+
+XAML:
+
+```xml
+<Button Content="Hidden" Visibility="Collapsed"/>   <!-- or "Hidden" -->
+<Button Content="Shown"  Visibility="Visible"/>
+```
+
+Helper for custom containers: `widget.IsWidgetVisible(child) bool`.
+
+### Locale Indicator (windows & dialogs) — toggleable
+
+A global current-locale label (e.g. "EN", "RU") is shown as a small badge in
+the title bar of `Window`, `Dialog`, and header-`Panel`. It is a toggleable
+property per widget.
+
+```go
+widget.SetLocale("RU")          // global; thread-safe; normalized to upper-case
+widget.Locale()                  // "RU"
+
+win.ShowLocaleIndicator = false  // disable badge on this window
+dlg.ShowLocaleIndicator = true   // Dialog default true (MessageBox uses Dialog)
+panel.ShowLocaleIndicator = true
+```
+
+XAML: `<Window ... ShowLocaleIndicator="False">`. Applies to `Window`,
+`Dialog`, `Panel`.
+
+**OS keyboard-layout sync + context menu.** In windowed mode the `window`
+package binds the badge to the OS keyboard layout:
+
+- The badge shows the **current OS input language** and updates live when the
+  user switches layout with the **system hotkey** (e.g. Alt+Shift / Win+Space on
+  Windows) — a poller reflects it. (Windows: full live sync. Linux: switching via
+  the in-app menu works through `setxkbmap`; live following of the system hotkey
+  is limited without XKB bindings. macOS: app-driven only.)
+- **Right-click the title bar** (or click the badge) opens a **context menu**
+  listing the OS-installed layouts; picking one switches the OS layout AND the
+  badge. The list is `widget.AvailableLocales()`.
+
+Programmatic API:
+
+```go
+widget.SetLocale("RU")              // reflect a locale (no OS switch) — headless source of truth
+widget.RequestLocale("RU")          // user intent: switch OS layout (if applier set) + reflect
+widget.SetAvailableLocales([]string{"EN","RU","DE"}) // menu list (window pkg fills from OS)
+widget.AvailableLocales()           // current list
+widget.AddLocaleListener(func(code string){ /* re-translate UI, etc. */ })
+widget.SetLocaleApplier(func(code string) bool { /* custom OS switch */ return true })
+```
+
+In **headless** mode there is no native window, so `SetLocale`/`RequestLocale`
+are the source of truth and `AddLocaleListener` lets the app react (switch
+translated strings) when the locale changes. The context menu still works
+(it is rendered by the engine and driven by mouse events).
+
+### Font Glyph Fallback — BUG-2
+
+Missing glyphs (✓ ✗ ⚠, box-drawing, arrows ▲ ▼ →) no longer render as tofu.
+The engine auto-loads system fonts with wide coverage as a fallback chain
+(Segoe UI Symbol/Arial on Windows, DejaVu/Noto on Linux, Apple Symbols/Arial
+Unicode on macOS). You can register more:
+
+```go
+eng.RegisterFallbackFont(ttfBytes)        // append to fallback chain
+eng.RegisterFallbackFontFile("symbols.ttf")
+```
+
+Per-rune resolution: primary font → fallbacks in order → primary (.notdef).
+`MeasureText`/`MeasureRunePositions` are fallback-aware so layout stays correct.
+Note: color/emoji fonts (e.g. Segoe UI Emoji) rasterize as outline glyphs only.
+
+### TabControl Runtime API — BUG-4
+
+```go
+tc.SetTabHeader(i, "CARRY (3)")  // change header at runtime (badges/counters)
+tc.TabHeader(i)                   // read header
+tc.TabContent(i)                  // get content widget
+tc.SetTabVisible(i, false)        // hide a tab from the strip (auto-switches active)
+tc.IsTabVisible(i)
+tc.RemoveTab(i)                   // remove a tab
+tc.ClearTabs()                   // remove all
+```
+
+`TabItem` gained a `Hidden bool` field.
+
+### TabControl honors Grid.Row/Column — BUG-1
+
+`<TabControl>` (and all container builders: Grid, Canvas, StackPanel, DockPanel,
+Border, ToolBar, StatusBar, MenuBar, TreeView, PopupMenu) now apply the full set
+of attached properties (Grid.Row/Column/Span, DockPanel.Dock, Margin, Alignment,
+ToolTip, Visibility) via a shared `applyCommonProps`. Previously container
+builders skipped Grid.Row, so a `<TabControl Grid.Row="1">` drew from the top of
+the window. Fixed — no Canvas wrapper workaround needed.
+
+### DataGrid Conditional Row Coloring — BUG-3
+
+```go
+grid := widget.NewDataGridWidget()
+grid.Grid.RowStyleSelector = func(item interface{}, rowIndex int) (color.RGBA, bool) {
+    o := item.(Order)
+    if o.Side == "BUY" {
+        return color.RGBA{R: 20, G: 60, B: 20, A: 255}, true // green row
+    }
+    return color.RGBA{R: 70, G: 25, B: 25, A: 255}, true     // red row
+}
+```
+
+Returns `(bg, true)` to paint the row background (overrides
+AlternatingRowBackground); selection/hover render on top. Return `(_, false)`
+to fall back to default striping.
+
+### Adaptive Layout: Canvas Stretch + Resize — BUG-6
+
+A Canvas child with an EXPLICIT `HorizontalAlignment="Stretch"` /
+`VerticalAlignment="Stretch"` fills the Canvas along that axis (respecting
+Canvas.Left/Top/Right/Bottom and Margin as insets). This is a headless-gui
+extension to WPF Canvas. Default (unset) alignment keeps fixed Width/Height, so
+existing layouts are unaffected.
+
+```xml
+<Canvas Width="1500" Height="800">
+  <DataGrid Canvas.Left="10" Canvas.Top="10" Canvas.Bottom="10"
+            HorizontalAlignment="Stretch"/>  <!-- fills width on window resize -->
+</Canvas>
+```
+
+Existing both-anchor stretch still works: setting both `Canvas.Left` and
+`Canvas.Right` (or `Top`+`Bottom`) computes the size from the Canvas dimensions.
+On window resize, `Window.SetBounds → Canvas.SetBounds → layout` re-applies
+stretch automatically.
+
+---
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

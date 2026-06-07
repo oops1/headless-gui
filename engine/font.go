@@ -9,12 +9,14 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -32,6 +34,11 @@ type FontCache struct {
 	ttf   *opentype.Font
 	cache map[float64]font.Face
 	dpi   float64
+
+	// glyphPresent кэширует наличие глифа для руны (cmap-проверка),
+	// чтобы не дёргать sfnt на каждый символ при отрисовке/измерении.
+	glyphPresent map[rune]bool
+	buf          sfnt.Buffer // переиспользуемый буфер для GlyphIndex
 }
 
 // newFontCache создаёт кэш, загружая шрифт из assetsDir или используя встроенный.
@@ -131,6 +138,62 @@ func (fc *FontCache) SetDPI(dpi float64) {
 	defer fc.mu.Unlock()
 	fc.dpi = dpi
 	fc.cache = make(map[float64]font.Face) // очищаем кэш
+}
+
+// HasGlyph сообщает, есть ли в шрифте глиф для руны r (cmap-проверка).
+// Результат кэшируется. Потокобезопасно. Для пробела всегда true.
+func (fc *FontCache) HasGlyph(r rune) bool {
+	if fc == nil || fc.ttf == nil {
+		return false
+	}
+	if r == ' ' {
+		return true
+	}
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	if fc.glyphPresent == nil {
+		fc.glyphPresent = make(map[rune]bool)
+	}
+	if v, ok := fc.glyphPresent[r]; ok {
+		return v
+	}
+	gi, err := fc.ttf.GlyphIndex(&fc.buf, r)
+	present := err == nil && gi != 0
+	fc.glyphPresent[r] = present
+	return present
+}
+
+// systemFallbackFontPaths возвращает список путей к системным шрифтам с широким
+// покрытием символов (✓ ✗ ⚠, box-drawing, стрелки и т.п.), которые движок
+// пытается подгрузить как fallback к встроенному Go Regular. Best-effort:
+// отсутствующие файлы молча пропускаются (BUG-2).
+func systemFallbackFontPaths() []string {
+	switch runtime.GOOS {
+	case "windows":
+		root := os.Getenv("SystemRoot")
+		if root == "" {
+			root = `C:\Windows`
+		}
+		fonts := filepath.Join(root, "Fonts")
+		return []string{
+			filepath.Join(fonts, "seguisym.ttf"), // Segoe UI Symbol: ✓✗⚠, стрелки, box-drawing
+			filepath.Join(fonts, "arial.ttf"),     // широкое покрытие латиницы/кириллицы/символов
+			filepath.Join(fonts, "seguiemj.ttf"),  // Segoe UI Emoji (контурные глифы)
+		}
+	case "darwin":
+		return []string{
+			"/System/Library/Fonts/Apple Symbols.ttf",
+			"/Library/Fonts/Arial Unicode.ttf",
+			"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+		}
+	default: // linux и прочие unix
+		return []string{
+			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+			"/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+			"/usr/share/fonts/TTF/DejaVuSans.ttf",
+			"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+		}
+	}
 }
 
 // loadFontData читает TTF из файла; если не удаётся — возвращает встроенный Go Regular.

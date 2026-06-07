@@ -5,6 +5,7 @@ package window
 import (
 	"image"
 	"runtime"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -187,7 +188,33 @@ var (
 	procSetStretchBltMode = gdi32.NewProc("SetStretchBltMode")
 	procSetCapture        = user32.NewProc("SetCapture")
 	procReleaseCapture    = user32.NewProc("ReleaseCapture")
+
+	// Раскладка клавиатуры (локаль).
+	procGetKeyboardLayout        = user32.NewProc("GetKeyboardLayout")
+	procGetKeyboardLayoutList    = user32.NewProc("GetKeyboardLayoutList")
+	procGetWindowThreadProcessId = user32.NewProc("GetWindowThreadProcessId")
 )
+
+// WM_INPUTLANGCHANGEREQUEST — просьба окну сменить язык ввода (раскладку).
+// Обрабатывается DefWindowProc: переключает раскладку потока окна.
+const wmInputlangchangerequest = 0x0050
+
+// langidToCode сопоставляет primary LANGID (нижние 10 бит LANGID) → код локали.
+var langidToCode = map[uint32]string{
+	0x01: "AR", 0x02: "BG", 0x03: "CA", 0x04: "ZH", 0x05: "CS",
+	0x06: "DA", 0x07: "DE", 0x08: "EL", 0x09: "EN", 0x0A: "ES",
+	0x0B: "FI", 0x0C: "FR", 0x0D: "HE", 0x0E: "HU", 0x0F: "IS",
+	0x10: "IT", 0x11: "JA", 0x12: "KO", 0x13: "NL", 0x14: "NO",
+	0x15: "PL", 0x16: "PT", 0x18: "RO", 0x19: "RU", 0x1A: "HR",
+	0x1B: "SK", 0x1D: "SV", 0x1E: "TH", 0x1F: "TR", 0x22: "UK",
+	0x24: "SL", 0x25: "ET", 0x26: "LV", 0x27: "LT", 0x29: "FA",
+	0x2A: "VI", 0x2D: "EU", 0x39: "HI",
+}
+
+// langidCode возвращает код локали по LANGID (низкое слово HKL) или "".
+func langidCode(langid uint32) string {
+	return langidToCode[langid&0x3FF]
+}
 
 // ─── Win32Window ────────────────────────────────────────────────────────────
 
@@ -649,6 +676,63 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 
 	ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
 	return ret
+}
+
+// ─── localeProvider: раскладка клавиатуры ОС ────────────────────────────────
+
+// CurrentLocaleCode возвращает код активной раскладки потока окна ("EN","RU",…).
+// Работает из любого потока: берём раскладку через thread id окна, поэтому
+// переключение системной комбинацией клавиш корректно отражается.
+func (w *Win32Window) CurrentLocaleCode() string {
+	if w.hwnd == 0 {
+		return ""
+	}
+	tid, _, _ := procGetWindowThreadProcessId.Call(uintptr(w.hwnd), 0)
+	hkl, _, _ := procGetKeyboardLayout.Call(tid)
+	return langidCode(uint32(hkl) & 0xFFFF)
+}
+
+// AvailableLocaleCodes возвращает установленные в системе раскладки.
+func (w *Win32Window) AvailableLocaleCodes() []string {
+	list := w.keyboardLayoutList()
+	var out []string
+	seen := map[string]bool{}
+	for _, hkl := range list {
+		c := langidCode(uint32(hkl) & 0xFFFF)
+		if c != "" && !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// ActivateLocaleCode переключает раскладку окна на соответствующую коду.
+// Используем PostMessage(WM_INPUTLANGCHANGEREQUEST) — корректно работает
+// межпоточно (поток окна сам переключит язык ввода).
+func (w *Win32Window) ActivateLocaleCode(code string) bool {
+	if w.hwnd == 0 {
+		return false
+	}
+	want := strings.ToUpper(strings.TrimSpace(code))
+	for _, hkl := range w.keyboardLayoutList() {
+		if langidCode(uint32(hkl)&0xFFFF) == want {
+			procPostMessageW.Call(uintptr(w.hwnd), uintptr(wmInputlangchangerequest), 0, hkl)
+			return true
+		}
+	}
+	return false
+}
+
+// keyboardLayoutList возвращает список HKL установленных раскладок.
+func (w *Win32Window) keyboardLayoutList() []uintptr {
+	n, _, _ := procGetKeyboardLayoutList.Call(0, 0)
+	if n == 0 {
+		return nil
+	}
+	list := make([]uintptr, int(n))
+	procGetKeyboardLayoutList.Call(n, uintptr(unsafe.Pointer(&list[0])))
+	return list
 }
 
 // getSystemMetrics вызывает GetSystemMetrics.

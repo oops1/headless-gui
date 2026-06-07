@@ -43,6 +43,10 @@ type Dialog struct {
 	Dim         color.RGBA // затемнение фона
 	TitleHeight int
 
+	// ShowLocaleIndicator — показывать индикатор текущей локали (напр. «EN»)
+	// в заголовке диалога. По умолчанию true; отключаемое свойство.
+	ShowLocaleIndicator bool
+
 	modal bool // управляется движком: true пока диалог показан
 }
 
@@ -55,9 +59,10 @@ func NewDialog(title string, width, height int) *Dialog {
 		BorderColor: color.RGBA{R: 100, G: 100, B: 110, A: 255},
 		TitleColor:  color.RGBA{R: 255, G: 255, B: 255, A: 255},
 		TitleBG:     color.RGBA{R: 35, G: 35, B: 38, A: 255},
-		Dim:         color.RGBA{R: 0, G: 0, B: 0, A: 120},
-		TitleHeight: 32,
-		modal:       true,
+		Dim:                 color.RGBA{R: 0, G: 0, B: 0, A: 120},
+		TitleHeight:         32,
+		ShowLocaleIndicator: true,
+		modal:               true,
 		Base: Base{
 			bounds: image.Rect(0, 0, width, height),
 		},
@@ -97,6 +102,10 @@ func (d *Dialog) Draw(ctx DrawContext) {
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), d.TitleHeight, d.TitleBG)
 		textY := b.Min.Y + (d.TitleHeight-13)/2
 		ctx.DrawText(d.Title, b.Min.X+10, textY, d.TitleColor)
+		// Индикатор локали — в правом краю заголовка
+		if d.ShowLocaleIndicator {
+			drawLocaleBadge(ctx, b.Max.X-8, b.Min.Y, d.TitleHeight, d.TitleColor)
+		}
 		// Разделитель
 		ctx.DrawHLine(b.Min.X, b.Min.Y+d.TitleHeight, b.Dx(), d.BorderColor)
 	}

@@ -30,6 +30,7 @@ type Canvas struct {
 	bgImage    *image.RGBA           // фоновое изображение (масштабировано под холст)
 	fontCache  *FontCache            // кэш шрифта по умолчанию
 	namedFonts map[string]*FontCache // именованные шрифты (FontFamily из XAML)
+	fallbacks  []*FontCache          // fallback-шрифты для отсутствующих глифов (BUG-2)
 	clip       image.Rectangle       // активная область отсечения
 	hasClip    bool                  // включено ли отсечение
 	scaleTmp   *image.RGBA           // переиспользуемый буфер для DrawImageScaled
@@ -58,6 +59,32 @@ func (c *Canvas) fontFor(fontName string) *FontCache {
 		}
 	}
 	return c.fontCache
+}
+
+// AddFallbackFont добавляет fallback-шрифт из TTF/OTF-данных (BUG-2).
+// Используется для рун, отсутствующих в основном шрифте.
+func (c *Canvas) AddFallbackFont(ttfData []byte) bool {
+	fc := newFontCacheFromData(ttfData, c.fontCache.dpi)
+	if fc == nil {
+		return false
+	}
+	c.fallbacks = append(c.fallbacks, fc)
+	return true
+}
+
+// fcForRune возвращает FontCache, содержащий глиф для руны r: сначала primary,
+// затем fallback-цепочку. Если ни один не содержит глиф — возвращает primary
+// (нарисуется .notdef, но без падения).
+func (c *Canvas) fcForRune(primary *FontCache, r rune) *FontCache {
+	if primary.HasGlyph(r) {
+		return primary
+	}
+	for _, fb := range c.fallbacks {
+		if fb.HasGlyph(r) {
+			return fb
+		}
+	}
+	return primary
 }
 
 func newCanvas(w, h int, fc *FontCache) *Canvas {
@@ -256,31 +283,92 @@ func (c *Canvas) DrawTextFont(text string, x, y int, sizePt float64, fontName st
 }
 
 func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt float64, col color.RGBA) {
-	face := fc.Face(sizePt)
-	ascent := face.Metrics().Ascent.Round()
-	d := font.Drawer{
-		Dst:  c.dstFor(),
-		Src:  &image.Uniform{C: col},
-		Face: face,
-		Dot:  fixed.P(x, y+ascent),
+	// Быстрый путь: нет fallback-шрифтов — рисуем строку одним вызовом.
+	if len(c.fallbacks) == 0 {
+		face := fc.Face(sizePt)
+		ascent := face.Metrics().Ascent.Round()
+		d := font.Drawer{
+			Dst:  c.dstFor(),
+			Src:  &image.Uniform{C: col},
+			Face: face,
+			Dot:  fixed.P(x, y+ascent),
+		}
+		d.DrawString(text)
+		return
 	}
-	d.DrawString(text)
+
+	// Fallback-путь: рисуем по рунам, выбирая шрифт с нужным глифом.
+	// Baseline берём от основного шрифта, чтобы все руны стояли на одной линии.
+	dst := c.dstFor()
+	src := &image.Uniform{C: col}
+	primaryFace := fc.Face(sizePt)
+	baseY := fixed.I(y + primaryFace.Metrics().Ascent.Round())
+	penX := fixed.I(x)
+	for _, r := range text {
+		chosen := c.fcForRune(fc, r)
+		face := chosen.Face(sizePt)
+		d := font.Drawer{
+			Dst:  dst,
+			Src:  src,
+			Face: face,
+			Dot:  fixed.Point26_6{X: penX, Y: baseY},
+		}
+		d.DrawString(string(r))
+		adv, ok := face.GlyphAdvance(r)
+		if !ok {
+			adv, _ = primaryFace.GlyphAdvance(r)
+		}
+		penX += adv
+	}
+}
+
+// runeAdvance возвращает ширину руны в выбранном (с учётом fallback) шрифте.
+func (c *Canvas) runeAdvance(fc *FontCache, r rune, sizePt float64) fixed.Int26_6 {
+	chosen := c.fcForRune(fc, r)
+	face := chosen.Face(sizePt)
+	a, ok := face.GlyphAdvance(r)
+	if !ok {
+		a, _ = fc.Face(sizePt).GlyphAdvance('?')
+	}
+	return a
+}
+
+// measureWithFallback измеряет ширину строки с учётом fallback-шрифтов.
+func (c *Canvas) measureWithFallback(fc *FontCache, text string, sizePt float64) int {
+	if len(c.fallbacks) == 0 {
+		return fc.Measure(text, sizePt)
+	}
+	var w fixed.Int26_6
+	for _, r := range text {
+		w += c.runeAdvance(fc, r, sizePt)
+	}
+	return w.Round()
 }
 
 // MeasureText возвращает ширину строки в пикселях (шрифт по умолчанию, sizePt).
 func (c *Canvas) MeasureText(text string, sizePt float64) int {
-	return c.fontCache.Measure(text, sizePt)
+	return c.measureWithFallback(c.fontCache, text, sizePt)
 }
 
 // MeasureTextFont возвращает ширину строки именованным шрифтом.
 func (c *Canvas) MeasureTextFont(text string, sizePt float64, fontName string) int {
-	return c.fontFor(fontName).Measure(text, sizePt)
+	return c.measureWithFallback(c.fontFor(fontName), text, sizePt)
 }
 
 // MeasureRunePositions возвращает накопленную ширину после каждого символа.
 // Результат: len(runes)+1 элементов; positions[0]==0, positions[n] — ширина text[:n].
 func (c *Canvas) MeasureRunePositions(text string, sizePt float64) []int {
-	return c.fontCache.MeasureRunes(text, sizePt)
+	if len(c.fallbacks) == 0 {
+		return c.fontCache.MeasureRunes(text, sizePt)
+	}
+	runes := []rune(text)
+	pos := make([]int, len(runes)+1)
+	var w fixed.Int26_6
+	for i, r := range runes {
+		w += c.runeAdvance(c.fontCache, r, sizePt)
+		pos[i+1] = w.Round()
+	}
+	return pos
 }
 
 // SetPixel устанавливает цвет одного пикселя (с учётом clip).
