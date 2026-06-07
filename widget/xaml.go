@@ -236,12 +236,9 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 		}
 	}
 
-	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin, Alignment
-	applyGridAttachedProps(w, el)
-	applyDockAttachedProp(w, el)
-	applyMargin(w, el)
-	applyAlignment(w, el)
-	applyIsEnabled(w, el)
+	// Attached properties: Grid.*, DockPanel.Dock, Margin, Alignment, IsEnabled,
+	// ToolTip, Visibility, ShowLocaleIndicator.
+	applyCommonProps(w, el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {

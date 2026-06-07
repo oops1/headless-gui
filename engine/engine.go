@@ -58,6 +58,15 @@ type Engine struct {
 	saveDir  string       // если не пусто — сохранять PNG в эту директорию
 	saveCh   chan saveJob // канал для асинхронного сохранения
 	saveDone chan struct{} // закрывается, когда saveWorker завершил запись всех PNG
+
+	// ── Tooltip ─────────────────────────────────────────────────────────────
+	ttMu       sync.Mutex
+	ttEnabled  bool          // показывать всплывающие подсказки
+	ttDelay    time.Duration // задержка появления после остановки курсора
+	ttMouseX   int
+	ttMouseY   int
+	ttLastMove time.Time
+	ttHasMouse bool // курсор хотя бы раз входил на холст
 }
 
 type saveJob struct {
@@ -75,14 +84,24 @@ func New(width, height, fps int) *Engine {
 		fps = 20
 	}
 	fc := newFontCache("assets")
-	return &Engine{
+	e := &Engine{
 		fontCache: fc,
 		canvas:    newCanvas(width, height, fc),
 		frames:    make(chan output.Frame, 8),
 		quit:      make(chan struct{}),
 		done:      make(chan struct{}),
 		fps:       fps,
+		ttEnabled: true,
+		ttDelay:   600 * time.Millisecond,
 	}
+	// Best-effort: подгружаем системные шрифты с широким покрытием символов
+	// (✓ ✗ ⚠, box-drawing, стрелки) как fallback к встроенному Go Regular (BUG-2).
+	for _, p := range systemFallbackFontPaths() {
+		if data, err := os.ReadFile(p); err == nil {
+			e.canvas.AddFallbackFont(data)
+		}
+	}
+	return e
 }
 
 // SetRoot устанавливает корневой виджет.
@@ -214,6 +233,27 @@ func (e *Engine) RegisterFontFile(fontName, path string) error {
 		return fmt.Errorf("RegisterFontFile %q: %w", path, err)
 	}
 	e.RegisterFont(fontName, data)
+	return nil
+}
+
+// RegisterFallbackFont добавляет fallback-шрифт (TTF/OTF-данные) для рун,
+// отсутствующих в основном шрифте (BUG-2). Fallback-шрифты применяются
+// в порядке регистрации после встроенного и системных. Вызывать до Start().
+func (e *Engine) RegisterFallbackFont(ttfData []byte) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.canvas.AddFallbackFont(ttfData)
+}
+
+// RegisterFallbackFontFile добавляет fallback-шрифт из TTF/OTF-файла.
+func (e *Engine) RegisterFallbackFontFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("RegisterFallbackFontFile %q: %w", path, err)
+	}
+	if !e.RegisterFallbackFont(data) {
+		return fmt.Errorf("RegisterFallbackFontFile %q: невалидный шрифт", path)
+	}
 	return nil
 }
 
@@ -415,6 +455,9 @@ func (e *Engine) renderFrame() output.Frame {
 		m.Draw(e.canvas)
 		drawOverlays(m, e.canvas)
 	}
+
+	// Всплывающая подсказка (поверх всего, включая модальные диалоги).
+	e.drawTooltip()
 
 	tiles := e.canvas.diffAndSync()
 

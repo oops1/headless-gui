@@ -10,6 +10,7 @@ import (
 type TabItem struct {
 	Header  string
 	Content Widget // корневой виджет содержимого вкладки
+	Hidden  bool   // true → вкладка скрыта из полосы заголовков (SetTabVisible)
 }
 
 // TabControl — виджет с вкладками в стиле Windows 10.
@@ -85,6 +86,101 @@ func (tc *TabControl) AddTab(header string, content Widget) {
 	}
 }
 
+// SetTabHeader меняет заголовок вкладки idx в рантайме (BUG-4).
+// Удобно для динамических счётчиков, напр. "CARRY (3)".
+func (tc *TabControl) SetTabHeader(idx int, header string) {
+	tc.mu.Lock()
+	if idx >= 0 && idx < len(tc.tabs) {
+		tc.tabs[idx].Header = header
+	}
+	tc.mu.Unlock()
+}
+
+// TabHeader возвращает текущий заголовок вкладки idx (или "" вне диапазона).
+func (tc *TabControl) TabHeader(idx int) string {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if idx >= 0 && idx < len(tc.tabs) {
+		return tc.tabs[idx].Header
+	}
+	return ""
+}
+
+// TabContent возвращает контент вкладки idx (или nil вне диапазона).
+func (tc *TabControl) TabContent(idx int) Widget {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if idx >= 0 && idx < len(tc.tabs) {
+		return tc.tabs[idx].Content
+	}
+	return nil
+}
+
+// SetTabVisible показывает/скрывает вкладку idx в полосе заголовков (BUG-4).
+// Скрытая вкладка не рисуется и не реагирует на клики. Если скрывается
+// активная вкладка — активной становится первая видимая (если есть).
+func (tc *TabControl) SetTabVisible(idx int, visible bool) {
+	tc.mu.Lock()
+	if idx < 0 || idx >= len(tc.tabs) {
+		tc.mu.Unlock()
+		return
+	}
+	tc.tabs[idx].Hidden = !visible
+	// Если скрыли активную — переключаемся на первую видимую.
+	switchTo := -1
+	if !visible && tc.active == idx {
+		for i := range tc.tabs {
+			if !tc.tabs[i].Hidden {
+				switchTo = i
+				break
+			}
+		}
+	}
+	if switchTo >= 0 {
+		tc.active = switchTo
+	}
+	tc.mu.Unlock()
+	tc.layoutContent()
+}
+
+// IsTabVisible сообщает, видима ли вкладка idx (по умолчанию true).
+func (tc *TabControl) IsTabVisible(idx int) bool {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if idx >= 0 && idx < len(tc.tabs) {
+		return !tc.tabs[idx].Hidden
+	}
+	return false
+}
+
+// RemoveTab удаляет вкладку idx (BUG-4). Активная вкладка корректируется,
+// чтобы оставаться в допустимом диапазоне.
+func (tc *TabControl) RemoveTab(idx int) {
+	tc.mu.Lock()
+	if idx < 0 || idx >= len(tc.tabs) {
+		tc.mu.Unlock()
+		return
+	}
+	tc.tabs = append(tc.tabs[:idx], tc.tabs[idx+1:]...)
+	if tc.active >= len(tc.tabs) {
+		tc.active = len(tc.tabs) - 1
+	}
+	if tc.active < 0 {
+		tc.active = 0
+	}
+	tc.mu.Unlock()
+	tc.layoutContent()
+}
+
+// ClearTabs удаляет все вкладки (BUG-4).
+func (tc *TabControl) ClearTabs() {
+	tc.mu.Lock()
+	tc.tabs = nil
+	tc.active = 0
+	tc.tabWidths = nil
+	tc.mu.Unlock()
+}
+
 // SetActive устанавливает активную вкладку по индексу.
 func (tc *TabControl) SetActive(idx int) {
 	tc.mu.Lock()
@@ -116,13 +212,31 @@ func (tc *TabControl) SetBounds(r image.Rectangle) {
 }
 
 // layoutContent обновляет bounds содержимого активной вкладки.
+//
+// Для контейнеров с собственной раскладкой (Grid, Canvas, …) достаточно
+// SetBounds — они сами пересчитают потомков. Для контента без своей
+// раскладки (Panel) нужно дополнительно сдвинуть потомков на дельту, иначе
+// они останутся на старых абсолютных координатах (актуально, когда TabControl
+// как потомок Grid получает финальные bounds позже момента сборки контента —
+// см. BUG-1).
 func (tc *TabControl) layoutContent() {
 	cr := tc.contentRect()
 	tc.mu.Lock()
-	defer tc.mu.Unlock()
+	var c Widget
 	if tc.active >= 0 && tc.active < len(tc.tabs) {
-		if c := tc.tabs[tc.active].Content; c != nil {
-			c.SetBounds(cr)
+		c = tc.tabs[tc.active].Content
+	}
+	tc.mu.Unlock()
+	if c == nil {
+		return
+	}
+	old := c.Bounds()
+	c.SetBounds(cr)
+	if !HasOwnLayout(c) && !old.Empty() {
+		dx := cr.Min.X - old.Min.X
+		dy := cr.Min.Y - old.Min.Y
+		if dx != 0 || dy != 0 {
+			shiftDescendants(c, dx, dy)
 		}
 	}
 }
@@ -172,6 +286,11 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 	widths := make([]int, len(tabs))
 	tabX := b.Min.X
 	for i, tab := range tabs {
+		// Скрытые вкладки не занимают места в полосе заголовков (ширина 0).
+		if tab.Hidden {
+			widths[i] = 0
+			continue
+		}
 		textW := ctx.MeasureText(tab.Header, DefaultFontSizePt)
 		tabW := textW + tc.TabPadH*2
 		widths[i] = tabW
@@ -255,6 +374,9 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 	// Находим вкладку по X-позиции (используем реальные ширины из Draw).
 	tabX := b.Min.X
 	for i := range tc.tabs {
+		if tc.tabs[i].Hidden {
+			continue
+		}
 		tabW := tc.TabPadH*2 + 80 // fallback
 		if i < len(tc.tabWidths) {
 			tabW = tc.tabWidths[i]
@@ -288,11 +410,13 @@ func (tc *TabControl) OnMouseMove(x, y int) {
 
 	tabX := b.Min.X
 	for i, tab := range tc.tabs {
+		if tab.Hidden {
+			continue
+		}
 		tabW := len(tab.Header)*8 + tc.TabPadH*2 // fallback
 		if i < len(tc.tabWidths) {
 			tabW = tc.tabWidths[i]
 		}
-		_ = tab
 		if x >= tabX && x < tabX+tabW {
 			tc.hoverIdx = i
 			return

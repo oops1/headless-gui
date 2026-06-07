@@ -109,6 +109,10 @@ type Window struct {
 	// TitleColor — цвет текста заголовка (A=0 → из темы: win10.TitleText).
 	TitleColor color.RGBA
 
+	// ShowLocaleIndicator — показывать индикатор текущей локали (напр. «EN»)
+	// в заголовке окна. По умолчанию true; отключаемое свойство.
+	ShowLocaleIndicator bool
+
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
 	// OnClose вызывается при клике по кнопке закрытия (×).
@@ -145,12 +149,13 @@ type Window struct {
 // TitleStyle по умолчанию = WindowTitleAuto (определяется по текущей ОС).
 func NewWindow(title string, width, height int) *Window {
 	w := &Window{
-		Title:       title,
-		Style:       WindowStyleSingleBorder,
-		TitleStyle:  WindowTitleAuto, // авто-определение по ОС
-		Resize:      ResizeModeCanResize,
-		Background:  win10.WindowBG,
-		BorderColor: win10.Border,
+		Title:               title,
+		Style:               WindowStyleSingleBorder,
+		TitleStyle:          WindowTitleAuto, // авто-определение по ОС
+		Resize:              ResizeModeCanResize,
+		Background:          win10.WindowBG,
+		BorderColor:         win10.Border,
+		ShowLocaleIndicator: true,
 	}
 	w.SetBounds(image.Rect(0, 0, width, height))
 	return w
@@ -388,6 +393,16 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	textY := y + (th-13)/2
 	ctx.DrawText(w.Title, x+12, textY, tc)
 
+	// Индикатор локали — слева от кнопок управления.
+	if w.ShowLocaleIndicator {
+		nc0 := w.btnCount()
+		rightX := b.Max.X - 8
+		if nc0 > 0 {
+			rightX = b.Max.X - w.btnWidth()*nc0 - 8
+		}
+		drawLocaleBadge(ctx, rightX, y, th, tc)
+	}
+
 	// Кнопки управления
 	btnW := w.btnWidth()
 	btnH := th - 1
@@ -511,6 +526,11 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 	textX := x + (bw-textW)/2
 	textY := y + (th-13)/2
 	ctx.DrawText(w.Title, textX, textY, tc)
+
+	// Индикатор локали — в правом верхнем углу (traffic lights слева в Mac-стиле).
+	if w.ShowLocaleIndicator {
+		drawLocaleBadge(ctx, b.Max.X-8, y, th, tc)
+	}
 }
 
 // ─── Drag / Capture ─────────────────────────────────────────────────────────

@@ -94,6 +94,85 @@ func applyAlignment(w Widget, el xElement) {
 	}
 }
 
+// ─── ToolTip ──────────────────────────────────────────────────────────────
+
+// applyToolTip читает ToolTip из XAML-атрибутов и устанавливает в Base.
+// Поддерживает простой синтаксис ToolTip="текст".
+func applyToolTip(w Widget, el xElement) {
+	tip := el.attr("ToolTip", "ToolTipService.ToolTip")
+	if tip == "" {
+		return
+	}
+	type tipSetter interface {
+		SetToolTip(s string)
+	}
+	if ts, ok := w.(tipSetter); ok {
+		ts.SetToolTip(tip)
+	}
+}
+
+// ─── Visibility ─────────────────────────────────────────────────────────────
+
+// applyVisibility читает Visibility из XAML-атрибутов (WPF):
+// "Visible" (default), "Collapsed", "Hidden" → скрытие виджета.
+func applyVisibility(w Widget, el xElement) {
+	v := el.attr("Visibility")
+	if v == "" {
+		return
+	}
+	type visSetter interface {
+		SetVisible(b bool)
+	}
+	vs, ok := w.(visSetter)
+	if !ok {
+		return
+	}
+	switch strings.ToLower(v) {
+	case "collapsed", "hidden":
+		vs.SetVisible(false)
+	case "visible":
+		vs.SetVisible(true)
+	}
+}
+
+// ─── ShowLocaleIndicator ────────────────────────────────────────────────────
+
+// applyLocaleIndicator читает ShowLocaleIndicator из XAML-атрибутов и
+// устанавливает соответствующее поле у Window/Dialog/Panel.
+func applyLocaleIndicator(w Widget, el xElement) {
+	v := el.attr("ShowLocaleIndicator", "ShowLocale")
+	if v == "" {
+		return
+	}
+	on := strings.EqualFold(v, "true") || v == "1"
+	switch t := w.(type) {
+	case *Window:
+		t.ShowLocaleIndicator = on
+	case *Dialog:
+		t.ShowLocaleIndicator = on
+	case *Panel:
+		t.ShowLocaleIndicator = on
+	}
+}
+
+// ─── Общий набор attached-свойств ──────────────────────────────────────────
+
+// applyCommonProps применяет полный набор общих XAML-свойств к виджету:
+// Grid.*, DockPanel.Dock, Margin, Alignment, IsEnabled, ToolTip, Visibility,
+// ShowLocaleIndicator. Используется как контейнерами, так и листовыми виджетами,
+// чтобы поведение было единообразным (см. BUG-1: контейнеры раньше пропускали
+// часть свойств, из-за чего TabControl игнорировал Grid.Row).
+func applyCommonProps(w Widget, el xElement) {
+	applyGridAttachedProps(w, el)
+	applyDockAttachedProp(w, el)
+	applyMargin(w, el)
+	applyAlignment(w, el)
+	applyIsEnabled(w, el)
+	applyToolTip(w, el)
+	applyVisibility(w, el)
+	applyLocaleIndicator(w, el)
+}
+
 // ─── IsEnabled ──────────────────────────────────────────────────────────────
 
 // applyIsEnabled читает IsEnabled из XAML-атрибутов и устанавливает в Base.

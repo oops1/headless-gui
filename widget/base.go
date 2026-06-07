@@ -51,6 +51,15 @@ type Base struct {
 	// По умолчанию false (т.е. виджет включён), что соответствует WPF IsEnabled=True.
 	disabled bool
 
+	// hidden=true → виджет скрыт (WPF Visibility="Collapsed"/"Hidden").
+	// Хранится инвертированно, чтобы zero value (false) означал «видим» —
+	// все виджеты по умолчанию видимы, как в WPF.
+	hidden bool
+
+	// ToolTip — всплывающая подсказка (WPF ToolTip). Пустая строка = нет подсказки.
+	// Единый источник для всех виджетов; движок рисует её при наведении курсора.
+	ToolTip string
+
 	// Grid layout (attached properties, как в WPF).
 	GridRow     int // Grid.Row     (0-based)
 	GridColumn  int // Grid.Column  (0-based)
@@ -67,6 +76,12 @@ type Base struct {
 	HAlign HorizontalAlignment
 	// VerticalAlignment — WPF VerticalAlignment (Top, Center, Bottom, Stretch).
 	VAlign VerticalAlignment
+
+	// hAlignSet/vAlignSet — было ли выравнивание задано явно (через XAML/код).
+	// Нужно, чтобы отличить явный Stretch от значения по умолчанию: Canvas
+	// растягивает потомка только при ЯВНОМ HorizontalAlignment="Stretch" (BUG-6).
+	hAlignSet bool
+	vAlignSet bool
 
 	// XAMLWidth / XAMLHeight — явно заданные Width/Height из XAML.
 	// Используются applyAlignmentRect когда bounds ещё не установлены контейнером.
@@ -98,6 +113,24 @@ func (b *Base) IsEnabled() bool { return !b.disabled }
 
 // SetEnabled включает/выключает виджет (WPF IsEnabled).
 func (b *Base) SetEnabled(v bool) { b.disabled = !v }
+
+// ── Visibility (WPF Visibility) ─────────────────────────────────────────────
+
+// IsVisible возвращает true, если виджет видим (по умолчанию true).
+// Скрытые виджеты не рисуются и не участвуют в hit-тесте.
+func (b *Base) IsVisible() bool { return !b.hidden }
+
+// SetVisible показывает (true) или скрывает (false) виджет.
+// Аналог WPF Visibility: true ↔ Visible, false ↔ Collapsed.
+func (b *Base) SetVisible(v bool) { b.hidden = !v }
+
+// ── ToolTip (WPF ToolTip) ───────────────────────────────────────────────────
+
+// GetToolTip возвращает текст всплывающей подсказки (пустая строка = нет).
+func (b *Base) GetToolTip() string { return b.ToolTip }
+
+// SetToolTip задаёт текст всплывающей подсказки.
+func (b *Base) SetToolTip(s string) { b.ToolTip = s }
 
 // ── Grid attached properties ────────────────────────────────────────────────
 
@@ -135,10 +168,14 @@ func (b *Base) SetMargin(m Margin)     { b.WidgetMargin = m }
 
 // ── Alignment ───────────────────────────────────────────────────────────────
 
-func (b *Base) GetHAlign() HorizontalAlignment { return b.HAlign }
-func (b *Base) SetHAlign(a HorizontalAlignment) { b.HAlign = a }
-func (b *Base) GetVAlign() VerticalAlignment   { return b.VAlign }
-func (b *Base) SetVAlign(a VerticalAlignment)  { b.VAlign = a }
+func (b *Base) GetHAlign() HorizontalAlignment  { return b.HAlign }
+func (b *Base) SetHAlign(a HorizontalAlignment) { b.HAlign = a; b.hAlignSet = true }
+func (b *Base) GetVAlign() VerticalAlignment    { return b.VAlign }
+func (b *Base) SetVAlign(a VerticalAlignment)   { b.VAlign = a; b.vAlignSet = true }
+
+// HAlignExplicit / VAlignExplicit сообщают, было ли выравнивание задано явно.
+func (b *Base) HAlignExplicit() bool { return b.hAlignSet }
+func (b *Base) VAlignExplicit() bool { return b.vAlignSet }
 
 // GetXAMLSize возвращает явно заданные Width/Height из XAML.
 func (b *Base) GetXAMLSize() (int, int) { return b.XAMLWidth, b.XAMLHeight }
@@ -338,13 +375,26 @@ func desiredWidth(w Widget) int {
 
 // drawChildren рендерит всех потомков в тот же контекст.
 // Вызывается конкретными виджетами в конце своего Draw.
+// Скрытые потомки (SetVisible(false) / Visibility=Collapsed) пропускаются.
 func (b *Base) drawChildren(ctx DrawContext) {
 	for _, child := range b.children {
 		if child.Bounds().Empty() {
 			continue
 		}
+		if !IsWidgetVisible(child) {
+			continue
+		}
 		child.Draw(ctx)
 	}
+}
+
+// IsWidgetVisible возвращает false, если виджет реализует IsVisible() и скрыт.
+// Виджеты без этого метода считаются видимыми.
+func IsWidgetVisible(w Widget) bool {
+	if v, ok := w.(interface{ IsVisible() bool }); ok {
+		return v.IsVisible()
+	}
+	return true
 }
 
 // DrawChildren рендерит всех потомков в тот же контекст.

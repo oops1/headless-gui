@@ -63,10 +63,7 @@ func buildXAMLGrid(el xElement, reg map[string]Widget, parentOff image.Point, ba
 	g.SetBounds(absBounds) // вызовет layout() — но дети ещё не добавлены
 
 	// Attached properties — важно для вложенных Grid'ов внутри родительского Grid.
-	applyGridAttachedProps(g, el)
-	applyDockAttachedProp(g, el)
-	applyMargin(g, el)
-	applyIsEnabled(g, el)
+	applyCommonProps(g, el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
@@ -251,6 +248,9 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 	absBounds := b.Add(parentOff)
 	win.SetBounds(absBounds)
 	applyIsEnabled(win, el)
+	applyToolTip(win, el)
+	applyVisibility(win, el)
+	applyLocaleIndicator(win, el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
@@ -413,11 +413,8 @@ func buildXAMLCanvas(el xElement, reg map[string]Widget, parentOff image.Point, 
 	absBounds := el.bounds().Add(parentOff)
 	cv.SetBounds(absBounds)
 
-	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin
-	applyGridAttachedProps(cv, el)
-	applyDockAttachedProp(cv, el)
-	applyMargin(cv, el)
-	applyIsEnabled(cv, el)
+	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin, ToolTip, …
+	applyCommonProps(cv, el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
@@ -531,7 +528,12 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 	tc := NewTabControl()
 	absBounds := el.bounds().Add(parentOff)
 	tc.SetBounds(absBounds)
-	applyIsEnabled(tc, el)
+	// Общие свойства (включая Grid.Row/Column — без этого TabControl как прямой
+	// потомок Grid игнорировал ячейку и рисовался от верха окна; см. BUG-1).
+	applyCommonProps(tc, el)
+	if xw, xh := xatoi(el.attr("Width")), xatoi(el.attr("Height")); xw > 0 || xh > 0 {
+		tc.SetXAMLSize(xw, xh)
+	}
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
@@ -615,9 +617,7 @@ func buildXAMLMenuBar(el xElement, reg map[string]Widget, parentOff image.Point)
 	}
 
 	// Attached properties
-	applyDockAttachedProp(mb, el)
-	applyMargin(mb, el)
-	applyIsEnabled(mb, el)
+	applyCommonProps(mb, el)
 
 	// Парсим верхнеуровневые <MenuItem Header="..."> с вложенными подпунктами.
 	for _, child := range el.Children {
@@ -683,7 +683,7 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 	pm := NewPopupMenu()
 	absBounds := el.bounds().Add(parentOff)
 	pm.SetBounds(absBounds)
-	applyIsEnabled(pm, el)
+	applyCommonProps(pm, el)
 
 	if id := el.name(); id != "" {
 		reg[id] = pm
@@ -744,9 +744,7 @@ func buildXAMLDockPanel(el xElement, reg map[string]Widget, parentOff image.Poin
 	dp.SetBounds(absBounds)
 
 	// Attached properties
-	applyGridAttachedProps(dp, el)
-	applyDockAttachedProp(dp, el)
-	applyIsEnabled(dp, el)
+	applyCommonProps(dp, el)
 
 	// Регистрация
 	if id := el.name(); id != "" {
@@ -796,10 +794,7 @@ func buildXAMLBorder(el xElement, reg map[string]Widget, parentOff image.Point, 
 	dp.SetBounds(absBounds)
 
 	// Attached properties
-	applyGridAttachedProps(dp, el)
-	applyDockAttachedProp(dp, el)
-	applyMargin(dp, el)
-	applyIsEnabled(dp, el)
+	applyCommonProps(dp, el)
 
 	// Регистрация
 	if id := el.name(); id != "" {
@@ -848,9 +843,7 @@ func buildXAMLStatusBar(el xElement, reg map[string]Widget, parentOff image.Poin
 	sp.SetBounds(absBounds)
 
 	// Attached properties
-	applyGridAttachedProps(sp, el)
-	applyDockAttachedProp(sp, el)
-	applyIsEnabled(sp, el)
+	applyCommonProps(sp, el)
 
 	// Регистрация
 	if id := el.name(); id != "" {
@@ -906,10 +899,7 @@ func buildXAMLToolBarTray(el xElement, reg map[string]Widget, parentOff image.Po
 	sp.SetBounds(absBounds)
 
 	// Attached properties
-	applyGridAttachedProps(sp, el)
-	applyDockAttachedProp(sp, el)
-	applyMargin(sp, el)
-	applyIsEnabled(sp, el)
+	applyCommonProps(sp, el)
 
 	if id := el.name(); id != "" {
 		reg[id] = sp
@@ -965,10 +955,7 @@ func buildXAMLToolBar(el xElement, reg map[string]Widget, parentOff image.Point,
 	absBounds := el.bounds().Add(parentOff)
 	sp.SetBounds(absBounds)
 
-	applyGridAttachedProps(sp, el)
-	applyDockAttachedProp(sp, el)
-	applyMargin(sp, el)
-	applyIsEnabled(sp, el)
+	applyCommonProps(sp, el)
 
 	if id := el.name(); id != "" {
 		reg[id] = sp
@@ -1047,10 +1034,7 @@ func buildXAMLStackPanel(el xElement, reg map[string]Widget, parentOff image.Poi
 	}
 
 	// Attached properties
-	applyGridAttachedProps(sp, el)
-	applyDockAttachedProp(sp, el)
-	applyMargin(sp, el)
-	applyIsEnabled(sp, el)
+	applyCommonProps(sp, el)
 
 	// Дочерние виджеты. StackPanel сам расставляет детей через layout(),
 	// поэтому передаём parentOff = image.Point{} (аналогично Grid).
@@ -1133,10 +1117,7 @@ func buildXAMLTreeView(el xElement, reg map[string]Widget, parentOff image.Point
 	tw.SetBounds(absBounds)
 
 	// Attached properties
-	applyGridAttachedProps(tw, el)
-	applyDockAttachedProp(tw, el)
-	applyMargin(tw, el)
-	applyIsEnabled(tw, el)
+	applyCommonProps(tw, el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
