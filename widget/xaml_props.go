@@ -155,6 +155,20 @@ func applyLocaleIndicator(w Widget, el xElement) {
 	}
 }
 
+// ─── TabIndex ───────────────────────────────────────────────────────────────
+
+// applyTabIndex читает TabIndex из XAML и задаёт порядок Tab-навигации.
+func applyTabIndex(w Widget, el xElement) {
+	v := el.attr("TabIndex")
+	if v == "" {
+		return
+	}
+	type tabSetter interface{ SetTabIndex(int) }
+	if ts, ok := w.(tabSetter); ok {
+		ts.SetTabIndex(xatoi(v))
+	}
+}
+
 // ─── Общий набор attached-свойств ──────────────────────────────────────────
 
 // applyCommonProps применяет полный набор общих XAML-свойств к виджету:
@@ -171,6 +185,7 @@ func applyCommonProps(w Widget, el xElement) {
 	applyToolTip(w, el)
 	applyVisibility(w, el)
 	applyLocaleIndicator(w, el)
+	applyTabIndex(w, el)
 }
 
 // ─── IsEnabled ──────────────────────────────────────────────────────────────

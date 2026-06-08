@@ -197,6 +197,75 @@ func (g *Grid) Draw(ctx DrawContext) {
 // ApplyTheme — Grid не имеет темизируемых элементов.
 func (g *Grid) ApplyTheme(t *Theme) {}
 
+// ─── Resize (для GridSplitter) ──────────────────────────────────────────────
+
+// ColPixelWidth возвращает текущую пиксельную ширину столбца col.
+func (g *Grid) ColPixelWidth(col int) int {
+	if col >= 0 && col+1 < len(g.colOffsets) {
+		return g.colOffsets[col+1] - g.colOffsets[col]
+	}
+	return 0
+}
+
+// RowPixelHeight возвращает текущую пиксельную высоту строки row.
+func (g *Grid) RowPixelHeight(row int) int {
+	if row >= 0 && row+1 < len(g.rowOffsets) {
+		return g.rowOffsets[row+1] - g.rowOffsets[row]
+	}
+	return 0
+}
+
+// ResizeColumnsAround сдвигает границу между столбцами splitterCol-1 и
+// splitterCol+1 на delta пикселей (GridSplitter в столбце splitterCol).
+// Затронутые столбцы фиксируются в пиксельном режиме. Прочие не меняются.
+func (g *Grid) ResizeColumnsAround(splitterCol, delta int) {
+	prev, next := splitterCol-1, splitterCol+1
+	const minSize = 20
+	if prev < 0 || prev >= len(g.ColDefs) {
+		return
+	}
+	pw := g.ColPixelWidth(prev) + delta
+	if pw < minSize {
+		pw = minSize
+	}
+	g.ColDefs[prev].Mode = GridSizePixel
+	g.ColDefs[prev].Value = float64(pw)
+	if next < len(g.ColDefs) {
+		nw := g.ColPixelWidth(next) - delta
+		if nw < minSize {
+			nw = minSize
+		}
+		g.ColDefs[next].Mode = GridSizePixel
+		g.ColDefs[next].Value = float64(nw)
+	}
+	g.layout()
+}
+
+// ResizeRowsAround сдвигает границу между строками splitterRow-1 и splitterRow+1
+// на delta пикселей (GridSplitter в строке splitterRow).
+func (g *Grid) ResizeRowsAround(splitterRow, delta int) {
+	prev, next := splitterRow-1, splitterRow+1
+	const minSize = 20
+	if prev < 0 || prev >= len(g.RowDefs) {
+		return
+	}
+	ph := g.RowPixelHeight(prev) + delta
+	if ph < minSize {
+		ph = minSize
+	}
+	g.RowDefs[prev].Mode = GridSizePixel
+	g.RowDefs[prev].Value = float64(ph)
+	if next < len(g.RowDefs) {
+		nh := g.RowPixelHeight(next) - delta
+		if nh < minSize {
+			nh = minSize
+		}
+		g.RowDefs[next].Mode = GridSizePixel
+		g.RowDefs[next].Value = float64(nh)
+	}
+	g.layout()
+}
+
 // measureAutoSizes проходит по дочерним виджетам и устанавливает Min для Auto строк/столбцов
 // на основе размеров дочерних виджетов (bounds, которые были заданы XAML-парсером).
 //

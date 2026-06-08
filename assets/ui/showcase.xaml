@@ -39,7 +39,11 @@
            Background="#0078D4">
         <Label Left="20" Top="14" Width="500" Height="24"
                Text="GuiEngine — Widget Showcase" Foreground="White"/>
-        <Label Name="headerClock" Left="1080" Top="14" Width="180" Height="24"
+        <Button Name="langToggle" Left="940" Top="10" Width="120" Height="32"
+                Content="Язык: RU" Background="#005A9E" Foreground="White"
+                HoverBG="#1A8CFF" PressedBG="#004578" BorderBrush="#1A8CFF"
+                ToolTip="Переключить язык интерфейса / Switch UI language"/>
+        <Label Name="headerClock" Left="1090" Top="14" Width="180" Height="24"
                Text="00:00:00" Foreground="#B0D4FF"/>
     </Panel>
 
@@ -605,13 +609,13 @@
                 <TextBlock Left="24" Top="204" Style="{StaticResource Status324}"
                            Text="{Binding Status}"/>
 
-                <GroupBox Header="GroupBox" Left="24" Top="234" Width="240" Height="86">
+                <GroupBox Header="GroupBox" Left="24" Top="234" Width="240" Height="104">
                     <StackPanel Padding="8" Spacing="6">
                         <CheckBox Content="Опция 1" Foreground="#CDD6F4"/>
                         <CheckBox Content="Опция 2" Foreground="#CDD6F4"/>
                     </StackPanel>
                 </GroupBox>
-                <Expander Header="Expander" Left="280" Top="234" Width="234" Height="86" IsExpanded="True">
+                <Expander Header="Expander" Left="280" Top="234" Width="234" Height="104" IsExpanded="True">
                     <StackPanel Padding="8" Spacing="4">
                         <TextBlock Text="Содержимое панели" Foreground="#CDD6F4"/>
                         <TextBlock Text="(сворачивается по клику)" Foreground="#9399B2"/>
@@ -619,7 +623,7 @@
                 </Expander>
 
                 <ContentControl Template="{StaticResource Card324}" Background="#2E7D32"
-                                Left="24" Top="334" Width="490" Height="40"
+                                Left="24" Top="344" Width="490" Height="36"
                                 Content="ControlTemplate + ContentPresenter + TemplateBinding"/>
 
                 <Panel Left="24" Top="386" Width="490" Height="36">
@@ -672,6 +676,83 @@
                 <UniformGrid Left="556" Top="362" Width="470" Height="64" Columns="3" Spacing="6">
                     <Button Content="A"/><Button Content="B"/><Button Content="C"/>
                 </UniformGrid>
+
+            </Canvas>
+        </TabItem>
+
+        <!-- ════════════ TAB 3.2.5 — локализация / Tier B ════════════ -->
+        <TabItem Header="3.2.5">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+
+                <!-- ─── Локализация (динамические строки {Loc}) ─── -->
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}" Text="{Loc T325_Header}"/>
+                <Separator Left="24" Top="40" Width="490" Height="1" Background="#313244"/>
+
+                <TextBlock Left="24" Top="54" FontSize="20" Foreground="#CDD6F4" Text="{Loc T325_Hello}"/>
+                <Button Name="langRu325" Left="24" Top="92" Width="150" Height="32"
+                        Content="Русский" HoverBG="#3A3A52" ToolTip="{Loc T325_LangTip}"/>
+                <Button Name="langEn325" Left="184" Top="92" Width="150" Height="32"
+                        Content="English" HoverBG="#3A3A52" ToolTip="{Loc T325_LangTip}"/>
+                <Button Name="save325" Left="344" Top="92" Width="166" Height="32"
+                        Content="{Loc T325_Save}" Style="Accent" HoverBG="#1A8CFF"/>
+                <TextBlock Left="24" Top="134" Foreground="#9399B2" Text="{Loc T325_Hint}"/>
+
+                <!-- ─── NumericUpDown ─── -->
+                <TextBlock Left="24" Top="176" Style="{StaticResource H324}" Text="NumericUpDown"/>
+                <Separator Left="24" Top="200" Width="490" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="216" Foreground="#9399B2" Text="Количество:"/>
+                <NumericUpDown Name="qty325" Left="160" Top="212" Width="150" Height="28"
+                               Minimum="0" Maximum="100" Increment="1" Value="10"
+                               ToolTip="Целое 0..100, шаг 1"/>
+                <TextBlock Left="330" Top="216" Foreground="#9399B2" Text="Цена:"/>
+                <NumericUpDown Name="price325" Left="396" Top="212" Width="118" Height="28"
+                               Minimum="0" Maximum="1000" Increment="0.5" Decimals="2" Value="9.99"
+                               ToolTip="Дробное, шаг 0.5"/>
+
+                <!-- ─── Валидация (IDataErrorInfo) ─── -->
+                <TextBlock Left="24" Top="262" Style="{StaticResource H324}" Text="Валидация (IDataErrorInfo)"/>
+                <Separator Left="24" Top="286" Width="490" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="300" Foreground="#9399B2" Text="E-mail (обязательно «@»):"/>
+                <TextBox Name="email325" Left="24" Top="322" Width="360" Height="30"
+                         Text="{Binding Email, Mode=TwoWay, ValidatesOnDataErrors=True}"
+                         ToolTip="Введите адрес с @"/>
+                <TextBlock Left="24" Top="360" Foreground="#6C7086"
+                           Text="Неверный ввод → красная рамка + подсказка с текстом ошибки"/>
+
+                <!-- ─── TextBox: MaxLength / Undo-Redo / выбор слова ─── -->
+                <TextBlock Left="24" Top="404" Style="{StaticResource H324}"
+                           Text="TextBox: MaxLength · Undo/Redo · 2×клик"/>
+                <Separator Left="24" Top="428" Width="490" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="444" Foreground="#9399B2" Text="Макс. 10 символов:"/>
+                <TextBox Name="maxlen325" Left="200" Top="440" Width="314" Height="30"
+                         MaxLength="10" Text="Привет"
+                         ToolTip="MaxLength=10; Ctrl+Z/Ctrl+Y; двойной клик — слово"/>
+                <TextBlock Left="24" Top="482" Foreground="#6C7086"
+                           Text="Ctrl+Z — отменить · Ctrl+Y — повторить · двойной клик — выделить слово"/>
+
+                <!-- ─── CollectionView + виртуализация ─── -->
+                <TextBlock Left="556" Top="16" Style="{StaticResource H324}" Text="CollectionView + виртуализация"/>
+                <Separator Left="556" Top="40" Width="470" Height="1" Background="#313244"/>
+                <Button Name="vfilter325" Left="556" Top="50" Width="150" Height="30"
+                        Content="Возраст ≥ 30" HoverBG="#3A3A52"/>
+                <Button Name="vsort325" Left="716" Top="50" Width="150" Height="30"
+                        Content="Сортировать A→Я" HoverBG="#3A3A52"/>
+                <Button Name="vreset325" Left="876" Top="50" Width="150" Height="30"
+                        Content="Сброс" HoverBG="#3A3A52"/>
+                <TextBlock Left="556" Top="88" Foreground="#9399B2"
+                           Text="1000 элементов — материализуются только видимые строки"/>
+
+                <VirtualizingItemsControl Name="vlist325" Left="556" Top="112" Width="470" Height="300"
+                                          ItemHeight="26" ItemsSource="{Binding People}">
+                    <VirtualizingItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <TextBlock Text="{Binding Name}" Foreground="#CDD6F4" FontSize="13"/>
+                                <TextBlock Text="{Binding Age, StringFormat=%d лет}" Foreground="#FAB387" FontSize="13"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </VirtualizingItemsControl.ItemTemplate>
+                </VirtualizingItemsControl>
 
             </Canvas>
         </TabItem>

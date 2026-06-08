@@ -176,6 +176,14 @@ func (c *Canvas) ClearClip() {
 	c.hasClip = false
 }
 
+// Clip возвращает текущую область отсечения (или полные границы холста).
+func (c *Canvas) Clip() image.Rectangle {
+	if c.hasClip {
+		return c.clip
+	}
+	return c.back.Bounds()
+}
+
 // clampRect пересекает r с текущей областью отсечения (или bounds холста).
 func (c *Canvas) clampRect(r image.Rectangle) image.Rectangle {
 	if c.hasClip {

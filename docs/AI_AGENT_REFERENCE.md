@@ -441,8 +441,10 @@ Mapping of XAML tags to Go types with key attributes.
 |----------|---------|-----------------|
 | `<Button>` | `Button` | `Content`, `Width`, `Height`, `Background`, `Foreground` |
 | `<Label>` | `Label` | `Content`, `Foreground`, `Background`, `FontSize` |
-| `<TextBox>` | `TextInput` | `Text`, `PlaceholderText`, `Width`, `Height`, `AcceptsReturn` |
+| `<TextBox>` | `TextInput` | `Text`, `PlaceholderText`, `Width`, `Height`, `AcceptsReturn`, `MaxLength` |
 | `<PasswordBox>` | `TextInput` | (created with NewPasswordInput) |
+| `<NumericUpDown>` (`<IntegerUpDown>`/`<DoubleUpDown>`) | `NumericUpDown` | `Minimum`, `Maximum`, `Increment`, `Decimals`, `Value` |
+| `<VirtualizingItemsControl>` | `VirtualizingItemsControl` | `ItemHeight`, `Buffer`, `ItemsSource`, `ItemTemplate` |
 | `<CheckBox>` | `CheckBox` | `Content`, `IsChecked`, `Foreground` |
 | `<RadioButton>` | `RadioButton` | `Content`, `GroupName`, `IsChecked` |
 | `<ToggleButton>` | `ToggleSwitch` | `Content`, `IsChecked` |
@@ -1231,6 +1233,8 @@ Avoid modifying child bounds after adding to auto-layout containers.
 | CheckBox | `NewCheckBox(text)` | Checked, OnChange | SetChecked | OnChange |
 | RadioButton | `NewRadioButton(text, group)` | Selected | SetSelected | OnChange |
 | Slider | `NewSlider()` | Value, Min, Max | SetValue, Value | OnChange |
+| NumericUpDown | `NewNumericUpDown()` | Min, Max, Step, Decimals | SetValue, Value | OnChange |
+| VirtualizingItemsControl | `NewVirtualizingItemsControl()` | ItemHeight, Buffer | SetItems, SetItemBuilder, BindCollectionView | - |
 | Dropdown | `NewDropdown(items...)` | Items, Selected | SetSelected, Items | OnChange |
 | ListView | `NewListView(items...)` | Items, Selected | SetSelected, Items | OnSelect |
 | Panel | `NewPanel(bg)` | Background | AddChild | OnClose |
@@ -1341,6 +1345,58 @@ In **headless** mode there is no native window, so `SetLocale`/`RequestLocale`
 are the source of truth and `AddLocaleListener` lets the app react (switch
 translated strings) when the locale changes. The context menu still works
 (it is rendered by the engine and driven by mouse events).
+
+### Localized string resources (`{Loc Key}`) — backward-compatible
+
+A string-table mechanism for UI translation. **Opt-in and fully
+backward-compatible**: plain text in XAML/code is never touched — only attributes
+written as `{Loc Key}` (or `widget.Tr` calls) are translated. If no table is
+registered, `Tr` returns the key itself, so adding `{Loc ...}` never crashes.
+
+> **UI language ≠ keyboard layout.** Two independent axes:
+> - `widget.SetLanguage("RU")` / `Language()` / `AddLanguageListener` — the
+>   language the **UI is displayed in** (drives `Tr` and `{Loc}`).
+> - `widget.SetLocale(...)` / `Locale()` — the **keyboard input layout** shown by
+>   the locale badge (and switched via the badge menu / OS poller).
+>
+> An app can be in Russian while the user types English or Chinese — changing one
+> never changes the other. `{Loc}`/`Tr` follow **Language**, not Locale.
+
+```go
+// Register tables (merge-on-register). Language codes are upper-cased.
+widget.RegisterStrings("EN", map[string]string{"Greeting": "Hello", "Save": "Save"})
+widget.RegisterStrings("RU", map[string]string{"Greeting": "Привет", "Save": "Сохранить"})
+widget.SetFallbackLanguage("EN")         // used when current language lacks the key (default "EN")
+
+widget.SetLanguage("RU")                  // UI language (NOT keyboard layout)
+widget.Tr("Greeting")                    // "Привет"
+widget.Tr("Missing")                     // "Missing"  (key returned as-is)
+widget.Trf("Count", 5)                   // printf-style: table "Count"="Items: %d" → "Items: 5"
+widget.TrIn("DE", "Greeting")            // explicit language lookup
+widget.Translation("RU", "Save")         // (value, ok) without key-fallback
+
+// Load from JSON ({"key":"value"}):
+widget.LoadStringsJSON("RU", jsonBytes)
+widget.LoadStringsFile("RU", "i18n/ru.json")
+widget.LoadStringsDir("i18n")            // every <locale>.json in the dir (ru.json → "RU")
+```
+
+XAML markup — resolved at load **and re-applied automatically on locale change**:
+
+```xml
+<TextBlock Text="{Loc Greeting}"/>       <!-- updates live when SetLocale is called -->
+<Button    Content="{Loc Save}"/>
+<TextBox   ToolTip="{Loc NameHint}"/>    <!-- works on any string attribute -->
+```
+
+Lookup chain for `Tr(key)`: current language table → fallback language table →
+the key itself. Lifecycle: the XAML loader collects every `{Loc}` attribute,
+applies the initial translation, and subscribes to language changes via
+`AddLanguageListener`, so switching `widget.SetLanguage(...)` re-translates the
+whole tree (verified with `TextBlock`/`Button`). Inside a `DataTemplate` the
+value is resolved once per row at build time. `widget.ClearStrings()` resets all
+tables (useful in tests). (`SetFallbackLocale`/`FallbackLocale` remain as
+deprecated aliases of the `*Language` functions.)
 
 ### Font Glyph Fallback — BUG-2
 
@@ -1715,6 +1771,222 @@ like Button keeps default click behavior — templating is supported on
 animations/`Storyboard`/`EventTrigger`/`VisualStateManager`, `RelativeSource
 AncestorType`, rich-text inlines (`<Run>/<Bold>` inside TextBlock),
 `RenderTransform`/`LayoutTransform`.
+
+---
+
+## Interaction polish (Tier A)
+
+- **GridSplitter** — now a real draggable splitter (was visual-only). Place it in
+  its own thin Grid column/row; dragging resizes the adjacent cells.
+  ```xml
+  <Grid.ColumnDefinitions>
+    <ColumnDefinition Width="*"/><ColumnDefinition Width="6"/><ColumnDefinition Width="*"/>
+  </Grid.ColumnDefinitions>
+  <Panel Grid.Column="0"/><GridSplitter Grid.Column="1"/><Panel Grid.Column="2"/>
+  ```
+- **ContextMenu (right-click)** — attach a menu to any widget; the engine shows it
+  at the cursor on right-click (one context menu open at a time).
+  ```xml
+  <Button Content="...">
+    <Button.ContextMenu>
+      <ContextMenu>
+        <MenuItem Header="Copy"/><MenuItem Header="Paste"/>
+        <MenuItem Separator="True"/><MenuItem Header="Delete"/>
+      </ContextMenu>
+    </Button.ContextMenu>
+  </Button>
+  ```
+  Also `widget.Base.SetContextMenu(pm)` in code.
+- **ScrollViewer mouse wheel** — `ScrollView` scrolls on wheel up/down.
+- **Mouse cursors** — widgets implement `widget.CursorProvider` (`Cursor(x,y)`):
+  TextBox → I-beam, GridSplitter → resize. `Engine.CursorAt(x,y)` computes it; the
+  Windows backend applies it natively (Linux/macOS: no-op for now).
+- **TabIndex** — `<TextBox TabIndex="1"/>` controls focus order; negative excludes
+  from Tab navigation. Honored by `CollectFocusables` (stable sort by TabIndex).
+
+---
+
+## Vector shapes
+
+Real WPF shape elements (render via built-in primitives) with `Fill`, `Stroke`,
+`StrokeThickness`:
+
+```xml
+<Ellipse   Left="20" Top="20" Width="120" Height="80" Fill="#E06C75" Stroke="white" StrokeThickness="3"/>
+<Rectangle Left="20" Top="20" Width="160" Height="80" Fill="#98C379" RadiusX="14"/>
+<Line      X1="20" Y1="140" X2="200" Y2="200" Stroke="#E5C07B" StrokeThickness="4"/>
+<Polygon   Points="280,130 340,210 220,210" Fill="#C678DD" Stroke="white"/>
+<Polyline  Points="360,200 380,150 400,200" Stroke="#56B6C2" StrokeThickness="3"/>
+```
+
+`Ellipse`/`Rectangle` are bounds-based (work in any layout container);
+`Line`/`Polygon`/`Polyline` use explicit coordinates (intended for `Canvas`).
+Go types: `widget.Ellipse`, `widget.RectangleShape`, `widget.Line`,
+`widget.Polygon`, `widget.Polyline`.
+
+---
+
+## Editing maturity (Tier B)
+
+### TextBox / TextInput
+
+- **MaxLength** — caps the character count (typing and paste are both clamped):
+  ```xml
+  <TextBox MaxLength="20"/>
+  ```
+  Go: `ti.MaxLength = 20`.
+- **Undo / Redo** — `Ctrl+Z` undoes, `Ctrl+Y` *or* `Ctrl+Shift+Z` redoes. Each
+  text change pushes one step (cap 200). Starting a new edit clears the redo
+  stack (WPF behaviour). Selection-only moves are not recorded.
+- **Double-click word select** — a double left-click (≤400 ms, ≤4 px apart)
+  selects the whole word under the cursor; word runes are letters, digits, `_`,
+  and any non-ASCII (Cyrillic etc.).
+
+### NumericUpDown (Extended-Toolkit-style spinner)
+
+```xml
+<NumericUpDown Minimum="0" Maximum="100" Increment="1"  Value="42"/>
+<NumericUpDown Minimum="0" Maximum="10"  Increment="0.5" Decimals="1" Value="3.5"/>
+```
+
+- Aliases: `<IntegerUpDown>`, `<DoubleUpDown>`.
+- Attributes: `Minimum`/`Min`, `Maximum`/`Max`, `Increment`/`Step`,
+  `Decimals`/`DecimalPlaces` (or infer from `FormatString="F2"`), `Value`.
+- Interaction: click the ▲/▼ spinner, mouse-wheel, or `Up`/`Down` arrows when
+  focused; type a number directly and press `Enter` to commit. Value is always
+  clamped to `[Min, Max]`; `Enter`/focus-loss parse the typed buffer.
+- Go: `n := widget.NewNumericUpDown(); n.Min, n.Max, n.Step = 0, 100, 1`
+  `n.SetValue(42)`, `n.Value()`, `n.OnChange = func(v float64){…}`.
+
+### Input validation (IDataErrorInfo / ValidatesOnDataErrors)
+
+WPF-style validation on TwoWay bindings. The `DataContext` model implements
+`DataErrorInfo` (analogue of `IDataErrorInfo`); a binding marked
+`ValidatesOnDataErrors=True` queries it after each write-back and puts the target
+widget into an error state (red border + the message as ToolTip).
+
+```go
+type Form struct {
+    datagrid.PropertyNotifier
+    Age int
+}
+func (f *Form) DataError(prop string) string { // "" == valid
+    if prop == "Age" && (f.Age < 0 || f.Age > 150) {
+        return "Age must be 0..150"
+    }
+    return ""
+}
+```
+
+```xml
+<TextBox Text="{Binding Age, Mode=TwoWay, ValidatesOnDataErrors=True}"/>
+```
+
+- Interfaces (`widget` package): `DataErrorInfo{ DataError(prop string) string }`
+  and `ValidationAware{ SetValidationError(msg string); ValidationError() string }`
+  (implemented by `TextInput`).
+- `scope.Validate() bool` re-checks every `ValidatesOnDataErrors` binding against
+  the current model and returns `true` when all are valid — call it before
+  committing/saving a form. Initial state is validated automatically on load.
+- `TextInput.ErrorBorder` is the error colour (default Win10 red `#E81123`);
+  `TextInput.SetValidationError("")` clears the state.
+
+> Note: `TextInput.OnChange` is dispatched asynchronously (`go onChange`), so the
+> red border / model write-back land a moment after the keystroke (one frame in
+> practice). This is intentional to keep typing non-blocking.
+
+### CollectionView (sort / filter / group)
+
+`widget.CollectionView` is the engine's analogue of WPF `ICollectionView` /
+`CollectionViewSource`. It wraps an `ObservableCollection` (or a plain slice) and
+produces a derived view with **filtering**, **multi-key sorting**, and
+**grouping**. Bind an `ItemsControl` to the view (via a `DataContext` property)
+and it rebuilds automatically whenever the source changes *or* the view
+parameters change.
+
+```go
+view := widget.NewCollectionView(people)            // people: *datagrid.ObservableCollection
+
+view.SetFilter(func(it any) bool {                  // keep adults
+    return it.(*Person).Age >= 18
+})
+view.SetSort(                                       // City asc, then Age desc
+    widget.SortDescription{Property: "City"},
+    widget.SortDescription{Property: "Age", Direction: widget.Descending},
+)
+view.SetGroup("City")                               // optional grouping
+
+view.Items()   // []any — current filtered+sorted view
+view.Groups()  // []CollectionViewGroup{ Name, Items }
+view.Count()
+view.Refresh() // force recompute (also fires automatically)
+```
+
+```xml
+<!-- VM exposes  People *widget.CollectionView -->
+<ItemsControl ItemsSource="{Binding People}">
+  <ItemsControl.ItemTemplate>
+    <DataTemplate><TextBlock Text="{Binding Name}"/></DataTemplate>
+  </ItemsControl.ItemTemplate>
+</ItemsControl>
+```
+
+- Sorting: numbers compared numerically, strings case-insensitively, `bool`
+  `false < true`; multiple `SortDescription`s act as primary/secondary keys.
+  `AddSort` appends, `SetSort` replaces, `ClearSort` removes.
+- Filtering: `SetFilter(nil)` clears. Filter runs before sort before group.
+- Live updates: when the source is an `ObservableCollection`, the view subscribes
+  to its changes; subscribe to the view yourself via `AddViewChanged(func())`.
+- `collectionItems` (used by `ItemsControl` expansion) recognises `*CollectionView`
+  transparently, so anywhere an `ItemsSource` accepts a collection it also accepts
+  a view.
+
+> `DataGrid.SetItemsSource` still takes a raw `*ObservableCollection` (the
+> `datagrid` package cannot import `widget`); for grids, apply sort/filter on the
+> collection you hand it, or feed `view.Items()` into a fresh collection.
+
+### UI virtualization (VirtualizingItemsControl)
+
+`widget.VirtualizingItemsControl` is the engine's `VirtualizingStackPanel`
+equivalent: it materialises a widget **only for the visible window** (+a small
+buffer), so a list of 100 000 rows keeps ~15 live widgets. Scrolling recycles the
+window; widgets are cached by item index.
+
+```go
+v := widget.NewVirtualizingItemsControl()
+v.ItemHeight = 28                          // fixed row height (required)
+v.Buffer = 2                               // extra rows above/below the viewport
+v.SetItemBuilder(func(item any, i int) widget.Widget {
+    return widget.NewLabel(item.(*Person).Name, white)
+})
+v.SetItems(people)                         // []any
+v.BindCollectionView(view)                 // or: auto-refresh from a CollectionView
+```
+
+```xml
+<!-- VM exposes  People *widget.CollectionView (or *ObservableCollection) -->
+<VirtualizingItemsControl ItemHeight="24" Width="240" Height="320"
+                          ItemsSource="{Binding People}">
+  <VirtualizingItemsControl.ItemTemplate>
+    <DataTemplate><TextBlock Text="{Binding Name}"/></DataTemplate>
+  </VirtualizingItemsControl.ItemTemplate>
+</VirtualizingItemsControl>
+```
+
+- Built-in vertical scrollbar + mouse-wheel + thumb drag (capture-aware);
+  `ScrollBy(px)`, `ScrollY()`, `ItemCount()`.
+- Clicks route to the per-row child widgets normally (they are real children for
+  the visible window only).
+- The `DataTemplate` is built per visible row via the same machinery as
+  `ItemsControl`, so `{Binding}` paths, styles and converters work inside rows.
+- Live updates: bound to a `CollectionView` it refreshes on sort/filter/group; to
+  an `ObservableCollection` on add/remove.
+- Note: requires a **fixed `ItemHeight`** (no per-item variable height yet) and a
+  plain `ItemsControl` is still the right choice for short lists.
+
+> The string-based `ListView` was already virtualized in its `Draw` (it only
+> paints the visible rows); `VirtualizingItemsControl` extends that to arbitrary
+> templated widgets.
 
 ---
 

@@ -101,6 +101,13 @@ func buildXAMLGrid(el xElement, reg map[string]Widget, parentOff image.Point, ba
 	// Перезапускаем layout с добавленными потомками.
 	g.layout()
 
+	// Передаём GridSplitter'ам ссылку на родительский Grid (для drag-resize).
+	for _, child := range g.children {
+		if sp, ok := child.(*GridSplitter); ok {
+			sp.SetGrid(g)
+		}
+	}
+
 	return g, nil
 }
 

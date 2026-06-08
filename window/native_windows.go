@@ -85,8 +85,15 @@ const (
 	csVredraw = 0x0001
 	csOwndc   = 0x0020
 
-	// Cursor
-	idcArrow = 32512
+	// Cursors (IDC_*)
+	idcArrow  = 32512
+	idcIBeam  = 32513
+	idcSizeNS = 32645
+	idcSizeWE = 32644
+	idcHand   = 32649
+
+	// WM_SETCURSOR
+	wmSetcursor = 0x0020
 )
 
 // ─── Win32 API структуры ────────────────────────────────────────────────────
@@ -188,6 +195,7 @@ var (
 	procSetStretchBltMode = gdi32.NewProc("SetStretchBltMode")
 	procSetCapture        = user32.NewProc("SetCapture")
 	procReleaseCapture    = user32.NewProc("ReleaseCapture")
+	procSetCursor         = user32.NewProc("SetCursor")
 
 	// Раскладка клавиатуры (локаль).
 	procGetKeyboardLayout        = user32.NewProc("GetKeyboardLayout")
@@ -236,6 +244,9 @@ type Win32Window struct {
 
 	mu      sync.Mutex
 	frameBuf []byte // BGRA пиксели для StretchDIBits (перевёрнуто по Y)
+
+	cursorHandle uintptr            // текущий желаемый курсор (HCURSOR)
+	cursorCache  map[int]uintptr    // кэш загруженных IDC-курсоров
 
 	// Callbacks
 	onResize      func(w, h int)
@@ -564,6 +575,16 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
 		return 0
 
+	case wmSetcursor:
+		// Удерживаем выбранную форму курсора в клиентской области.
+		// Младшее слово lParam = hit-test; HTCLIENT=1.
+		if (lparam&0xFFFF) == 1 && w.cursorHandle != 0 {
+			procSetCursor.Call(w.cursorHandle)
+			return 1
+		}
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+		return ret
+
 	case wmErasebkgnd:
 		return 1 // Не стираем фон (мы рисуем сами)
 
@@ -733,6 +754,34 @@ func (w *Win32Window) keyboardLayoutList() []uintptr {
 	list := make([]uintptr, int(n))
 	procGetKeyboardLayoutList.Call(n, uintptr(unsafe.Pointer(&list[0])))
 	return list
+}
+
+// SetCursor задаёт форму курсора по коду widget.Cursor (0=Arrow,1=IBeam,
+// 2=Hand,3=SizeWE,4=SizeNS). Реальное применение — в WndProc (WM_SETCURSOR).
+func (w *Win32Window) SetCursor(c int) {
+	idc := idcArrow
+	switch c {
+	case 1:
+		idc = idcIBeam
+	case 2:
+		idc = idcHand
+	case 3:
+		idc = idcSizeWE
+	case 4:
+		idc = idcSizeNS
+	}
+	if w.cursorCache == nil {
+		w.cursorCache = map[int]uintptr{}
+	}
+	h, ok := w.cursorCache[idc]
+	if !ok {
+		h, _, _ = procLoadCursorW.Call(0, uintptr(idc))
+		w.cursorCache[idc] = h
+	}
+	if w.cursorHandle != h {
+		w.cursorHandle = h
+		procSetCursor.Call(h) // применяем сразу (и далее держим через WM_SETCURSOR)
+	}
 }
 
 // getSystemMetrics вызывает GetSystemMetrics.

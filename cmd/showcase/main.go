@@ -15,6 +15,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
@@ -32,6 +33,12 @@ type Order struct {
 	Price  float64
 }
 
+// Trader — элемент для CollectionView + VirtualizingItemsControl (вкладка 3.2.5).
+type Trader struct {
+	Name string
+	Age  int
+}
+
 // showcaseVM — модель с уведомлениями для живого биндинга/триггеров/команд.
 type showcaseVM struct {
 	dg.PropertyNotifier
@@ -39,12 +46,29 @@ type showcaseVM struct {
 	status   string
 	Items    *dg.ObservableCollection
 	SaveCommand *widget.RelayCommand
+
+	// Вкладка 3.2.5
+	Email  string                 // валидируется через DataError (IDataErrorInfo)
+	People *widget.CollectionView // источник для CollectionView/виртуализации
 }
 
 func (v *showcaseVM) GetUsername() string  { return v.username }
 func (v *showcaseVM) SetUsername(s string) { v.username = s; v.NotifyPropertyChanged(v, "Username") }
 func (v *showcaseVM) GetStatus() string    { return v.status }
 func (v *showcaseVM) SetStatus(s string)   { v.status = s; v.NotifyPropertyChanged(v, "Status") }
+
+// DataError реализует widget.DataErrorInfo (аналог WPF IDataErrorInfo).
+func (v *showcaseVM) DataError(prop string) string {
+	if prop == "Email" {
+		if v.Email == "" {
+			return "E-mail не может быть пустым"
+		}
+		if !strings.Contains(v.Email, "@") {
+			return "E-mail должен содержать «@»"
+		}
+	}
+	return ""
+}
 
 // pctConv — конвертер доли 0..1 → проценты (для {Binding ..., Converter=}).
 type pctConv struct{}
@@ -65,13 +89,51 @@ func main() {
 	eng := engine.New(screenW, screenH, 30)
 
 	// ─── DataContext + локаль + конвертер (для вкладки «3.2.4») ──────────────
-	widget.SetLocale("RU")
 	widget.RegisterValueConverter("Pct", pctConv{})
+
+	// Локализованные строки для вкладки 3.2.5 (динамическое переключение ЯЗЫКА
+	// ИНТЕРФЕЙСА — независимо от раскладки клавиатуры).
+	widget.SetFallbackLanguage("EN")
+	widget.RegisterStrings("EN", map[string]string{
+		"T325_Header":  "Localization (dynamic {Loc})",
+		"T325_Hello":   "Hello! Switch the language →",
+		"T325_Save":    "Save",
+		"T325_Hint":    "Buttons change widget.Locale — {Loc} strings update live",
+		"T325_LangTip": "Switch UI language",
+	})
+	widget.RegisterStrings("RU", map[string]string{
+		"T325_Header":  "Локализация (динамические {Loc})",
+		"T325_Hello":   "Привет! Переключите язык →",
+		"T325_Save":    "Сохранить",
+		"T325_Hint":    "Кнопки меняют язык интерфейса (widget.Language) — строки {Loc} обновляются вживую",
+		"T325_LangTip": "Сменить язык интерфейса (не раскладку клавиатуры)",
+	})
+	widget.SetLanguage("RU") // язык интерфейса (надписи)
+	widget.SetLocale("RU")   // раскладка клавиатуры (индикатор) — независимо
+
 	items := dg.NewObservableCollection()
 	items.Add(Order{"BUY", "BTCUSDT", 64231.5})
 	items.Add(Order{"SELL", "ETHUSDT", 3120.0})
 	items.Add(Order{"BUY", "SOLUSDT", 148.25})
-	vm := &showcaseVM{username: "trader", status: "Готов — Ctrl+S для сохранения", Items: items}
+
+	// 1000 трейдеров для CollectionView + виртуализации (вкладка 3.2.5).
+	traders := make([]interface{}, 1000)
+	firstNames := []string{"Alice", "Bob", "Carol", "Dmitry", "Elena", "Igor", "Olga", "Pavel"}
+	for i := range traders {
+		traders[i] = &Trader{
+			Name: fmt.Sprintf("%s #%d", firstNames[i%len(firstNames)], i),
+			Age:  18 + (i*7)%50,
+		}
+	}
+	people := widget.NewCollectionView(dg.NewObservableCollectionFrom(traders))
+
+	vm := &showcaseVM{
+		username: "trader",
+		status:   "Готов — Ctrl+S для сохранения",
+		Items:    items,
+		Email:    "user@example.com",
+		People:   people,
+	}
 	vm.SaveCommand = widget.NewRelayCommand(func() {
 		vm.SetStatus("Сохранено в " + time.Now().Format("15:04:05"))
 	})
@@ -360,6 +422,76 @@ func main() {
 	if b := btn("saveBtn324"); b != nil {
 		b.AddClickHandler(func() { addLog("3.2.4: команда Save выполнена") })
 	}
+
+	// ─── TAB 3.2.5: локализация / Tier B ─────────────────────────────────────
+	if b := btn("langRu325"); b != nil {
+		b.OnClick = func() {
+			widget.SetLanguage("RU")
+			addLog("3.2.5: язык интерфейса → RU ({Loc} обновлены вживую)")
+		}
+	}
+	if b := btn("langEn325"); b != nil {
+		b.OnClick = func() {
+			widget.SetLanguage("EN")
+			addLog("3.2.5: язык интерфейса → EN ({Loc} обновлены вживую)")
+		}
+	}
+	if b := btn("save325"); b != nil {
+		b.OnClick = func() { addLog("3.2.5: Save (локализованная кнопка)") }
+	}
+	if nud, ok := reg["qty325"].(*widget.NumericUpDown); ok {
+		nud.OnChange = func(v float64) { addLog("3.2.5: количество = %.0f", v) }
+	}
+	if nud, ok := reg["price325"].(*widget.NumericUpDown); ok {
+		nud.OnChange = func(v float64) { addLog("3.2.5: цена = %.2f", v) }
+	}
+	if b := btn("vfilter325"); b != nil {
+		b.OnClick = func() {
+			vm.People.SetFilter(func(it interface{}) bool { return it.(*Trader).Age >= 30 })
+			addLog("3.2.5: фильтр возраст ≥ 30 (видно %d)", vm.People.Count())
+		}
+	}
+	if b := btn("vsort325"); b != nil {
+		b.OnClick = func() {
+			vm.People.SetSort(widget.SortDescription{Property: "Name"})
+			addLog("3.2.5: сортировка по имени")
+		}
+	}
+	if b := btn("vreset325"); b != nil {
+		b.OnClick = func() {
+			vm.People.SetFilter(nil)
+			vm.People.ClearSort()
+			addLog("3.2.5: фильтр/сортировка сброшены (%d)", vm.People.Count())
+		}
+	}
+	if ti, ok := reg["maxlen325"].(*widget.TextInput); ok {
+		ti.OnChange = func(s string) {
+			addLog("3.2.5: TextBox = %q (%d симв.)", s, len([]rune(s)))
+		}
+	}
+
+	// ─── Кнопка переключения ЯЗЫКА ИНТЕРФЕЙСА в шапке ────────────────────────
+	// Важно: язык интерфейса (надписи) НЕ связан с раскладкой клавиатуры —
+	// приложение может быть на русском, а ввод вестись на любом языке.
+	updateLangBtn := func() {
+		if b := btn("langToggle"); b != nil {
+			b.Text = "Язык: " + widget.Language()
+		}
+	}
+	if b := btn("langToggle"); b != nil {
+		b.OnClick = func() {
+			if widget.Language() == "RU" {
+				widget.SetLanguage("EN")
+			} else {
+				widget.SetLanguage("RU")
+			}
+		}
+	}
+	widget.AddLanguageListener(func(code string) {
+		updateLangBtn()
+		addLog("Язык интерфейса → %s", code)
+	})
+	updateLangBtn()
 
 	// Фокус на поле логина
 	if ti, ok := reg["txtLogin"].(*widget.TextInput); ok {

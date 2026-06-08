@@ -49,6 +49,7 @@ type EngineAPI interface {
 	SendMouseMove(x, y int)
 	SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	SendKeyEvent(e widget.KeyEvent)
+	CursorAt(x, y int) widget.Cursor
 }
 
 // Window — нативное окно ОС для GUI-движка.
@@ -276,6 +277,10 @@ func (win *Window) setupInputCallbacks() {
 		win.lastMX = x
 		win.lastMY = y
 		win.eng.SendMouseMove(x, y)
+		// Обновляем форму курсора под указателем (если бэкенд поддерживает).
+		if sc, ok := win.native.(interface{ SetCursor(c int) }); ok {
+			sc.SetCursor(int(win.eng.CursorAt(x, y)))
+		}
 	})
 
 	// ── Mouse buttons ────────────────────────────────────────────────────────

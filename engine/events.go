@@ -166,6 +166,29 @@ func (e *Engine) tabCycle(root widget.Widget, reverse bool) {
 	e.focus.set(all[next])
 }
 
+// CursorAt возвращает форму курсора для точки (x, y): курсор самого глубокого
+// виджета под точкой, реализующего widget.CursorProvider (иначе — стрелка).
+func (e *Engine) CursorAt(x, y int) widget.Cursor {
+	var disp widget.Widget
+	if m := e.topModal(); m != nil {
+		disp = m
+	} else {
+		e.mu.RLock()
+		disp = e.root
+		e.mu.RUnlock()
+	}
+	if disp == nil {
+		return widget.CursorArrow
+	}
+	path := hitTestPath(disp, x, y)
+	for i := len(path) - 1; i >= 0; i-- {
+		if cp, ok := path[i].(widget.CursorProvider); ok {
+			return cp.Cursor(x, y)
+		}
+	}
+	return widget.CursorArrow
+}
+
 // ─── Mouse events ────────────────────────────────────────────────────────────
 
 // SendMouseMove уведомляет всё дерево виджетов о перемещении курсора в (x, y).
@@ -281,6 +304,20 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	}
 	if dispatchRoot == nil {
 		return
+	}
+
+	// Правый клик (по отпусканию, как в ОС): показываем привязанное контекстное
+	// меню (WPF ContextMenu) самого глубокого виджета под курсором.
+	if !pressed && btn == widget.MouseRight {
+		path := hitTestPath(dispatchRoot, x, y)
+		for i := len(path) - 1; i >= 0; i-- {
+			if h, ok := path[i].(interface{ GetContextMenu() *widget.PopupMenu }); ok {
+				if pm := h.GetContextMenu(); pm != nil {
+					pm.Show(x, y)
+					return
+				}
+			}
+		}
 	}
 
 	// Проверяем, хочет ли кто-то из предков захватить мышь (drag handle)
