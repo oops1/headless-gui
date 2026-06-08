@@ -14,6 +14,7 @@ import (
 	"image/color"
 	stdraw "image/draw"
 	"math"
+	"sort"
 
 	"golang.org/x/image/draw"
 	"golang.org/x/image/font"
@@ -59,6 +60,36 @@ func (c *Canvas) fontFor(fontName string) *FontCache {
 		}
 	}
 	return c.fontCache
+}
+
+// hasFont сообщает, зарегистрирован ли именованный шрифт.
+func (c *Canvas) hasFont(name string) bool {
+	_, ok := c.namedFonts[name]
+	return ok
+}
+
+// SetDefaultFont делает зарегистрированный именованный шрифт шрифтом по умолчанию
+// (используется DrawText/DrawTextSize и как primary для fallback). Возвращает
+// false, если шрифт с таким именем не зарегистрирован.
+func (c *Canvas) SetDefaultFont(name string) bool {
+	if name == "" {
+		return false
+	}
+	if fc, ok := c.namedFonts[name]; ok && fc != nil {
+		c.fontCache = fc
+		return true
+	}
+	return false
+}
+
+// fontNames возвращает отсортированный список зарегистрированных именованных шрифтов.
+func (c *Canvas) fontNames() []string {
+	out := make([]string, 0, len(c.namedFonts))
+	for k := range c.namedFonts {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // AddFallbackFont добавляет fallback-шрифт из TTF/OTF-данных (BUG-2).

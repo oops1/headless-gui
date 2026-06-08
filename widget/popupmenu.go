@@ -67,6 +67,14 @@ var (
 	screenHeight int
 )
 
+// activeRootPopup — единственное открытое корневое контекстное меню.
+// Гарантирует, что одновременно показано не более одного контекстного меню:
+// при открытии нового предыдущее закрывается (подменю не считаются — у них parent != nil).
+var (
+	activePopupMu   sync.Mutex
+	activeRootPopup *PopupMenu
+)
+
 // SetScreenBounds сообщает виджетам размер канваса (вызывается движком при
 // создании/смене разрешения). Используется popup-меню и другими overlay'ами,
 // чтобы не выходить за границы экрана.
@@ -142,6 +150,17 @@ func (m *PopupMenu) IsOpen() bool {
 // Позиция корректируется так, чтобы меню целиком помещалось в канвасе
 // (сдвиг влево/вверх у правого/нижнего края — меню не обрезается границей окна).
 func (m *PopupMenu) Show(x, y int) {
+	// Закрываем предыдущее корневое контекстное меню (одно меню за раз).
+	if m.parent == nil {
+		activePopupMu.Lock()
+		prev := activeRootPopup
+		activeRootPopup = m
+		activePopupMu.Unlock()
+		if prev != nil && prev != m {
+			prev.Close()
+		}
+	}
+
 	m.mu.RLock()
 	w, h := m.calcSize()
 	m.mu.RUnlock()
@@ -186,6 +205,13 @@ func (m *PopupMenu) Close() {
 	m.closeChild()
 	atomic.StoreInt32(&m.open, 0)
 	atomic.StoreInt32(&m.hoverIdx, -1)
+	if m.parent == nil {
+		activePopupMu.Lock()
+		if activeRootPopup == m {
+			activeRootPopup = nil
+		}
+		activePopupMu.Unlock()
+	}
 }
 
 // closeChild закрывает дочернее подменю, если открыто.
