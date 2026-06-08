@@ -23,6 +23,15 @@ Go-based headless GUI engine with XAML support, tile-based delta rendering, and 
 - **Font support** — TTF fonts via `golang.org/x/image/font`; custom registration by name
 - **Cascading menus** — nested submenus with arrow indicators and keyboard navigation
 - **Native window** — platform-native backends (Win32/Cocoa/X11), zero CGO on all platforms
+- **Data binding** — `{Binding}` OneWay/TwoWay/OneTime, `INotifyPropertyChanged`, `StringFormat`, `IValueConverter`, `ElementName`/`RelativeSource`, live `ItemsControl`
+- **Styles, triggers & templates** — `<Style>`/`<Setter>`, `DataTrigger`/`MultiTrigger`, `ControlTemplate` + `ContentPresenter` + `TemplateBinding`, `StaticResource`
+- **Commands & input bindings** — `ICommand`/`RelayCommand`, `Button.Command`, `<KeyBinding>` hotkeys
+- **Localization** — UI language **independent of keyboard layout**; `{Loc Key}` markup + string tables (JSON), live re-translation
+- **Validation** — `IDataErrorInfo` / `ValidatesOnDataErrors=True` with red error adorner
+- **CollectionView & UI virtualization** — sort/filter/group over a collection; `VirtualizingItemsControl` renders only visible rows (100k+ items)
+- **Vector shapes** — `Ellipse`, `Rectangle`, `Line`, `Polygon`, `Polyline` with `Fill`/`Stroke`
+- **Tooltips & cursors** — `ToolTip` on every widget; per-widget mouse cursors
+- **Free bundled fonts** — Roboto (default), Open Sans, Inter + system glyph fallback chain (no tofu)
 
 ## Widget List
 
@@ -40,13 +49,20 @@ Go-based headless GUI engine with XAML support, tile-based delta rendering, and 
 | RadioButton | `RadioButton` | Mutual exclusion by `GroupName` |
 | ToggleSwitch | `ToggleSwitch` | On/Off with animated knob |
 | Slider | `Slider` | Min/Max/Value, drag thumb |
+| NumericUpDown | `NumericUpDown` / `IntegerUpDown` / `DoubleUpDown` | Spinner ▲/▼, wheel, typing, Min/Max/Increment/Decimals |
 | TabControl | `TabControl` / `TabItem` | Multiple tabs with content widgets |
 | ScrollView | `ScrollViewer` | Scrollbar, mouse wheel, `ContentHeight` |
-| ListView | `ListView`, `ListBox` | Selection, keyboard nav, scrollbar |
+| ListView | `ListView`, `ListBox` | Selection, keyboard nav, scrollbar (virtualized) |
+| VirtualizingItemsControl | `VirtualizingItemsControl` | UI virtualization — materializes only visible rows; CollectionView-aware |
 | Image | `Image` | PNG/JPEG, stretch modes (Fill/Uniform/None) |
 | PopupMenu | `PopupMenu`, `ContextMenu` | Context/popup menu, overlay, keyboard nav |
 | MenuBar | `Menu`, `MenuBar`, `MainMenu` | Horizontal menu bar with dropdown submenus |
-| Separator | `Separator`, `Line`, `Rectangle` | Divider line |
+| WrapPanel | `WrapPanel` | Flow layout, wraps children to next line |
+| UniformGrid | `UniformGrid` | Equal-sized cells, `Rows`/`Columns` |
+| GroupBox | `GroupBox` | Titled bordered container (content clipped to bounds) |
+| Expander | `Expander` | Collapsible panel with header arrow |
+| Shapes | `Ellipse`, `Rectangle`, `Line`, `Polygon`, `Polyline` | Vector shapes with `Fill`/`Stroke`/`StrokeThickness` |
+| Separator | `Separator` | Divider line |
 | MessageBox | — (code only) | OK / YesNo / YesNoCancel |
 | Dialog | — (code only) | Modal base, custom content |
 | Window | `Window` | Native OS window with title bar (Win/Mac style), resize, minimize/maximize |

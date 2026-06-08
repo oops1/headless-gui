@@ -101,7 +101,11 @@ func (e *Expander) Draw(ctx DrawContext) {
 
 	if e.IsExpanded {
 		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), e.BorderColor)
+		// Содержимое отсекается по внутренней области, чтобы не выходить за рамку.
+		save := ctx.Clip()
+		ctx.SetClip(e.ContentBounds().Intersect(save))
 		e.drawChildren(ctx)
+		ctx.SetClip(save)
 	} else {
 		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), hh, e.BorderColor)
 	}

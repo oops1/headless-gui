@@ -283,6 +283,10 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	case "numericupdown", "integerupdown", "doubleupdown":
 		w = buildXAMLNumericUpDown(el)
 
+	// ── VirtualizingItemsControl (UI-виртуализация длинных списков) ───────────
+	case "virtualizingitemscontrol":
+		w = buildXAMLVirtualizingItemsControl(el)
+
 	// ── ToggleSwitch ─────────────────────────────────────────────────────────
 	case "toggleswitch":
 		w = buildXAMLToggleSwitch(el)
@@ -814,6 +818,25 @@ func buildXAMLSlider(el xElement) Widget {
 		}
 	}
 	return s
+}
+
+func buildXAMLVirtualizingItemsControl(el xElement) Widget {
+	v := NewVirtualizingItemsControl()
+	if ih := el.attr("ItemHeight"); ih != "" {
+		if n := xatoi(ih); n > 0 {
+			v.ItemHeight = n
+		}
+	}
+	if bf := el.attr("Buffer"); bf != "" {
+		if n := xatoi(bf); n >= 0 {
+			v.Buffer = n
+		}
+	}
+	if strings.EqualFold(el.attr("ShowBorder"), "false") {
+		v.ShowBorder = false
+	}
+	applyColor(&v.Background, el, "Background")
+	return v
 }
 
 func buildXAMLNumericUpDown(el xElement) Widget {

@@ -46,6 +46,7 @@ type TextInput struct {
 	Background  color.RGBA
 	BorderColor color.RGBA
 	FocusBorder color.RGBA
+	ErrorBorder color.RGBA // рамка при ошибке валидации (красная)
 	TextColor   color.RGBA
 	PlaceColor  color.RGBA
 	CaretColor  color.RGBA
@@ -80,6 +81,9 @@ type TextInput struct {
 	lastClickMs int64
 	lastClickX  int
 
+	// Состояние ошибки валидации (WPF Validation.HasError). "" = нет ошибки.
+	validationError string
+
 	// OnEnter вызывается при нажатии Enter (только если AcceptsReturn=false).
 	OnEnter func()
 	// OnChange вызывается при каждом изменении текста.
@@ -99,6 +103,7 @@ func NewTextInput(placeholder string) *TextInput {
 		Background:  win10.InputBG,
 		BorderColor: win10.InputBorder,
 		FocusBorder: win10.InputFocus,
+		ErrorBorder: color.RGBA{R: 232, G: 17, B: 35, A: 255}, // #E81123 Win10 error red
 		TextColor:   win10.InputText,
 		PlaceColor:  win10.InputPlaceholder,
 		CaretColor:  win10.InputCaret,
@@ -251,6 +256,24 @@ func (t *TextInput) redo() {
 	t.runes = []rune(next.text)
 	t.caretPos = next.caret
 	t.selStart = -1
+}
+
+// ─── ValidationAware ──────────────────────────────────────────────────────────
+
+// SetValidationError переводит поле в состояние ошибки (красная рамка) и
+// помещает текст ошибки в ToolTip. Пустая строка снимает ошибку.
+func (t *TextInput) SetValidationError(msg string) {
+	t.mu.Lock()
+	t.validationError = msg
+	t.mu.Unlock()
+	t.SetToolTip(msg)
+}
+
+// ValidationError возвращает текущий текст ошибки ("" если поле корректно).
+func (t *TextInput) ValidationError() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.validationError
 }
 
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
@@ -765,6 +788,7 @@ func (t *TextInput) Draw(ctx DrawContext) {
 	showPwd := t.showPassword
 	maskRune := t.MaskRune
 	eyeHov := t.eyeHovered
+	hasError := t.validationError != ""
 	t.mu.Unlock()
 
 	if maskRune == 0 {
@@ -780,7 +804,11 @@ func (t *TextInput) Draw(ctx DrawContext) {
 	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.Background)
 
 	// Рамка
-	if isFocused {
+	if hasError {
+		// Ошибка валидации — красная рамка (двойная для заметности).
+		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.ErrorBorder)
+		ctx.DrawBorder(b.Min.X+1, b.Min.Y+1, b.Dx()-2, b.Dy()-2, t.ErrorBorder)
+	} else if isFocused {
 		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.FocusBorder)
 		ctx.DrawHLine(b.Min.X, b.Max.Y-2, b.Dx(), t.FocusBorder)
 	} else {

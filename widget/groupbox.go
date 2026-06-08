@@ -60,7 +60,12 @@ func (g *GroupBox) Draw(ctx DrawContext) {
 	hh := g.headerH()
 	ctx.DrawText(g.Header, b.Min.X+6, b.Min.Y+(hh-13)/2, g.HeaderColor)
 	ctx.DrawBorder(b.Min.X, b.Min.Y+hh, b.Dx(), b.Dy()-hh, g.BorderColor)
+
+	// Содержимое отсекается по внутренней области, чтобы не выходить за рамку.
+	save := ctx.Clip()
+	ctx.SetClip(g.ContentBounds().Intersect(save))
 	g.drawChildren(ctx)
+	ctx.SetClip(save)
 }
 
 // ApplyTheme обновляет цвета.

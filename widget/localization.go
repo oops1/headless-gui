@@ -22,11 +22,59 @@ import (
 
 var (
 	localeMu         sync.RWMutex
-	currentLocale    = "EN"      // текущая локаль интерфейса
-	availableLocales []string    // список доступных локалей (для контекстного меню)
-	localeListeners  []func(string) // подписчики на смену локали
-	localeApplier    func(string) bool // применение локали к ОС (раскладка клавиатуры)
+	currentLocale    = "EN"      // текущая РАСКЛАДКА КЛАВИАТУРЫ (язык ввода)
+	availableLocales []string    // список доступных раскладок (для контекстного меню)
+	localeListeners  []func(string) // подписчики на смену раскладки
+	localeApplier    func(string) bool // применение раскладки к ОС (клавиатура)
 )
+
+// ─── Язык интерфейса (перевод строк) — НЕЗАВИСИМ от раскладки клавиатуры ─────
+//
+// Важно: язык интерфейса (на котором показаны надписи) и раскладка клавиатуры
+// (на каком языке пользователь ВВОДИТ текст) — разные вещи. Приложение может
+// быть на русском, а ввод вестись на английском или китайском. Поэтому перевод
+// строк ({Loc}/Tr) управляется отдельным «языком интерфейса» (Language), а
+// индикатор раскладки (Locale) отражает клавиатуру ОС.
+var (
+	langMu            sync.RWMutex
+	currentLanguage   = "EN"
+	languageListeners []func(string)
+)
+
+// SetLanguage задаёт ЯЗЫК ИНТЕРФЕЙСА (для перевода строк {Loc}/Tr) и уведомляет
+// подписчиков. НЕ влияет на раскладку клавиатуры (см. SetLocale). Потокобезопасно.
+func SetLanguage(code string) {
+	code = normLocale(code)
+	langMu.Lock()
+	changed := code != currentLanguage
+	currentLanguage = code
+	var ls []func(string)
+	if changed {
+		ls = append(ls, languageListeners...)
+	}
+	langMu.Unlock()
+	for _, l := range ls {
+		l(code)
+	}
+}
+
+// Language возвращает текущий язык интерфейса. Потокобезопасно.
+func Language() string {
+	langMu.RLock()
+	defer langMu.RUnlock()
+	return currentLanguage
+}
+
+// AddLanguageListener подписывает колбэк на смену языка интерфейса. Колбэк
+// вызывается из горутины, изменившей язык. Потокобезопасно.
+func AddLanguageListener(fn func(code string)) {
+	if fn == nil {
+		return
+	}
+	langMu.Lock()
+	languageListeners = append(languageListeners, fn)
+	langMu.Unlock()
+}
 
 // normLocale нормализует код локали: обрезает пробелы, приводит к верхнему регистру.
 func normLocale(code string) string {
