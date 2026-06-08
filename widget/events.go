@@ -60,6 +60,7 @@ const (
 	KeyC         KeyCode = 67
 	KeyV         KeyCode = 86
 	KeyX         KeyCode = 88
+	KeyY         KeyCode = 89
 	KeyZ         KeyCode = 90
 )
 

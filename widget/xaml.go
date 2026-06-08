@@ -279,6 +279,10 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	case "slider":
 		w = buildXAMLSlider(el)
 
+	// ── NumericUpDown (Extended Toolkit IntegerUpDown / DoubleUpDown) ─────────
+	case "numericupdown", "integerupdown", "doubleupdown":
+		w = buildXAMLNumericUpDown(el)
+
 	// ── ToggleSwitch ─────────────────────────────────────────────────────────
 	case "toggleswitch":
 		w = buildXAMLToggleSwitch(el)
@@ -295,9 +299,21 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	case "image":
 		w = buildXAMLImage(el)
 
-	// ── Разделители / фигуры ─────────────────────────────────────────────────
-	case "separator", "line", "rectangle":
+	// ── Разделитель ──────────────────────────────────────────────────────────
+	case "separator":
 		w = buildXAMLSeparator(el)
+
+	// ── Векторные фигуры (WPF Shapes) ────────────────────────────────────────
+	case "rectangle":
+		w = buildXAMLRectangleShape(el)
+	case "ellipse":
+		w = buildXAMLEllipse(el)
+	case "line":
+		return buildXAMLLine(el, reg, parentOff), nil
+	case "polygon":
+		return buildXAMLPolygon(el, reg, parentOff), nil
+	case "polyline":
+		return buildXAMLPolyline(el, reg, parentOff), nil
 
 	// ── PopupMenu ────────────────────────────────────────────────────────────
 	case "popupmenu", "contextmenu":
@@ -679,6 +695,11 @@ func buildXAMLTextInput(el xElement, isPassword bool) Widget {
 	if wrap := strings.ToLower(el.attr("TextWrapping")); wrap == "wrap" || wrap == "wrapwithoverflow" {
 		ti.AcceptsReturn = true
 	}
+	if ml := el.attr("MaxLength"); ml != "" {
+		if v, err := strconv.Atoi(strings.TrimSpace(ml)); err == nil && v > 0 {
+			ti.MaxLength = v
+		}
+	}
 
 	return ti
 }
@@ -793,6 +814,43 @@ func buildXAMLSlider(el xElement) Widget {
 		}
 	}
 	return s
+}
+
+func buildXAMLNumericUpDown(el xElement) Widget {
+	n := NewNumericUpDown()
+	if min := el.attr("Minimum", "Min"); min != "" {
+		if v, err := strconv.ParseFloat(min, 64); err == nil {
+			n.Min = v
+		}
+	}
+	if max := el.attr("Maximum", "Max"); max != "" {
+		if v, err := strconv.ParseFloat(max, 64); err == nil {
+			n.Max = v
+		}
+	}
+	if inc := el.attr("Increment", "Step"); inc != "" {
+		if v, err := strconv.ParseFloat(inc, 64); err == nil {
+			n.Step = v
+		}
+	}
+	// Decimals напрямую, либо вывод из FormatString вида "F2".
+	if d := el.attr("Decimals", "DecimalPlaces"); d != "" {
+		if v, err := strconv.Atoi(strings.TrimSpace(d)); err == nil && v >= 0 {
+			n.Decimals = v
+		}
+	} else if fs := el.attr("FormatString", "StringFormat"); len(fs) >= 2 {
+		if c := fs[0]; c == 'F' || c == 'f' || c == 'N' || c == 'n' {
+			if v, err := strconv.Atoi(fs[1:]); err == nil && v >= 0 {
+				n.Decimals = v
+			}
+		}
+	}
+	if val := el.attr("Value"); val != "" {
+		if v, err := strconv.ParseFloat(val, 64); err == nil {
+			n.SetValue(v)
+		}
+	}
+	return n
 }
 
 func buildXAMLToggleSwitch(el xElement) Widget {

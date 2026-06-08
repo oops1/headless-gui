@@ -441,8 +441,9 @@ Mapping of XAML tags to Go types with key attributes.
 |----------|---------|-----------------|
 | `<Button>` | `Button` | `Content`, `Width`, `Height`, `Background`, `Foreground` |
 | `<Label>` | `Label` | `Content`, `Foreground`, `Background`, `FontSize` |
-| `<TextBox>` | `TextInput` | `Text`, `PlaceholderText`, `Width`, `Height`, `AcceptsReturn` |
+| `<TextBox>` | `TextInput` | `Text`, `PlaceholderText`, `Width`, `Height`, `AcceptsReturn`, `MaxLength` |
 | `<PasswordBox>` | `TextInput` | (created with NewPasswordInput) |
+| `<NumericUpDown>` (`<IntegerUpDown>`/`<DoubleUpDown>`) | `NumericUpDown` | `Minimum`, `Maximum`, `Increment`, `Decimals`, `Value` |
 | `<CheckBox>` | `CheckBox` | `Content`, `IsChecked`, `Foreground` |
 | `<RadioButton>` | `RadioButton` | `Content`, `GroupName`, `IsChecked` |
 | `<ToggleButton>` | `ToggleSwitch` | `Content`, `IsChecked` |
@@ -1231,6 +1232,7 @@ Avoid modifying child bounds after adding to auto-layout containers.
 | CheckBox | `NewCheckBox(text)` | Checked, OnChange | SetChecked | OnChange |
 | RadioButton | `NewRadioButton(text, group)` | Selected | SetSelected | OnChange |
 | Slider | `NewSlider()` | Value, Min, Max | SetValue, Value | OnChange |
+| NumericUpDown | `NewNumericUpDown()` | Min, Max, Step, Decimals | SetValue, Value | OnChange |
 | Dropdown | `NewDropdown(items...)` | Items, Selected | SetSelected, Items | OnChange |
 | ListView | `NewListView(items...)` | Items, Selected | SetSelected, Items | OnSelect |
 | Panel | `NewPanel(bg)` | Background | AddChild | OnClose |
@@ -1747,6 +1749,60 @@ AncestorType`, rich-text inlines (`<Run>/<Bold>` inside TextBlock),
   Windows backend applies it natively (Linux/macOS: no-op for now).
 - **TabIndex** — `<TextBox TabIndex="1"/>` controls focus order; negative excludes
   from Tab navigation. Honored by `CollectFocusables` (stable sort by TabIndex).
+
+---
+
+## Vector shapes
+
+Real WPF shape elements (render via built-in primitives) with `Fill`, `Stroke`,
+`StrokeThickness`:
+
+```xml
+<Ellipse   Left="20" Top="20" Width="120" Height="80" Fill="#E06C75" Stroke="white" StrokeThickness="3"/>
+<Rectangle Left="20" Top="20" Width="160" Height="80" Fill="#98C379" RadiusX="14"/>
+<Line      X1="20" Y1="140" X2="200" Y2="200" Stroke="#E5C07B" StrokeThickness="4"/>
+<Polygon   Points="280,130 340,210 220,210" Fill="#C678DD" Stroke="white"/>
+<Polyline  Points="360,200 380,150 400,200" Stroke="#56B6C2" StrokeThickness="3"/>
+```
+
+`Ellipse`/`Rectangle` are bounds-based (work in any layout container);
+`Line`/`Polygon`/`Polyline` use explicit coordinates (intended for `Canvas`).
+Go types: `widget.Ellipse`, `widget.RectangleShape`, `widget.Line`,
+`widget.Polygon`, `widget.Polyline`.
+
+---
+
+## Editing maturity (Tier B)
+
+### TextBox / TextInput
+
+- **MaxLength** — caps the character count (typing and paste are both clamped):
+  ```xml
+  <TextBox MaxLength="20"/>
+  ```
+  Go: `ti.MaxLength = 20`.
+- **Undo / Redo** — `Ctrl+Z` undoes, `Ctrl+Y` *or* `Ctrl+Shift+Z` redoes. Each
+  text change pushes one step (cap 200). Starting a new edit clears the redo
+  stack (WPF behaviour). Selection-only moves are not recorded.
+- **Double-click word select** — a double left-click (≤400 ms, ≤4 px apart)
+  selects the whole word under the cursor; word runes are letters, digits, `_`,
+  and any non-ASCII (Cyrillic etc.).
+
+### NumericUpDown (Extended-Toolkit-style spinner)
+
+```xml
+<NumericUpDown Minimum="0" Maximum="100" Increment="1"  Value="42"/>
+<NumericUpDown Minimum="0" Maximum="10"  Increment="0.5" Decimals="1" Value="3.5"/>
+```
+
+- Aliases: `<IntegerUpDown>`, `<DoubleUpDown>`.
+- Attributes: `Minimum`/`Min`, `Maximum`/`Max`, `Increment`/`Step`,
+  `Decimals`/`DecimalPlaces` (or infer from `FormatString="F2"`), `Value`.
+- Interaction: click the ▲/▼ spinner, mouse-wheel, or `Up`/`Down` arrows when
+  focused; type a number directly and press `Enter` to commit. Value is always
+  clamped to `[Min, Max]`; `Enter`/focus-loss parse the typed buffer.
+- Go: `n := widget.NewNumericUpDown(); n.Min, n.Max, n.Step = 0, 100, 1`
+  `n.SetValue(42)`, `n.Value()`, `n.OnChange = func(v float64){…}`.
 
 ---
 
