@@ -183,10 +183,26 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 	sv.drawDisabledOverlay(ctx)
 }
 
-// OnMouseButton обрабатывает клик на скроллбаре (drag ползунка).
+// OnMouseButton обрабатывает клик на скроллбаре (drag ползунка) и колесо мыши.
 func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 	if !sv.IsEnabled() {
 		return false
+	}
+	// Колесо мыши: прокрутка содержимого (движок шлёт press+release).
+	if e.Button == MouseWheelUp || e.Button == MouseWheelDown {
+		if !e.Pressed {
+			return true
+		}
+		if !sv.needsScrollbar() {
+			return false // нечего прокручивать — пусть событие всплывёт выше
+		}
+		const wheelStep = 40
+		if e.Button == MouseWheelUp {
+			sv.ScrollBy(-wheelStep)
+		} else {
+			sv.ScrollBy(wheelStep)
+		}
+		return true
 	}
 	if e.Button != MouseLeft {
 		return false

@@ -69,10 +69,27 @@ type TextInput struct {
 	// Enter вставляет перевод строки вместо вызова OnEnter.
 	AcceptsReturn bool
 
+	// MaxLength — максимум символов (0 = без ограничения, WPF MaxLength).
+	MaxLength int
+
+	// История правок для Undo/Redo (Ctrl+Z / Ctrl+Y).
+	undoStack []textEdit
+	redoStack []textEdit
+
+	// Для детекции двойного клика (выделение слова).
+	lastClickMs int64
+	lastClickX  int
+
 	// OnEnter вызывается при нажатии Enter (только если AcceptsReturn=false).
 	OnEnter func()
 	// OnChange вызывается при каждом изменении текста.
 	OnChange func(text string)
+}
+
+// textEdit — снимок состояния поля для Undo/Redo.
+type textEdit struct {
+	text  string
+	caret int
 }
 
 // NewTextInput создаёт текстовое поле в стиле Windows 10 Dark.
@@ -152,6 +169,14 @@ func (t *TextInput) GetText() string {
 	return string(t.runes)
 }
 
+// Cursor возвращает текстовый курсор (I-beam) над полем ввода (CursorProvider).
+func (t *TextInput) Cursor(x, y int) Cursor {
+	if t.IsEnabled() {
+		return CursorIBeam
+	}
+	return CursorArrow
+}
+
 // ─── Focusable ───────────────────────────────────────────────────────────────
 
 func (t *TextInput) SetFocused(focused bool) {
@@ -200,6 +225,34 @@ func (t *TextInput) clampCaret() {
 	}
 }
 
+// undo откатывает последнее изменение (вызывать под t.mu).
+func (t *TextInput) undo() {
+	if len(t.undoStack) == 0 {
+		return
+	}
+	cur := textEdit{text: string(t.runes), caret: t.caretPos}
+	last := t.undoStack[len(t.undoStack)-1]
+	t.undoStack = t.undoStack[:len(t.undoStack)-1]
+	t.redoStack = append(t.redoStack, cur)
+	t.runes = []rune(last.text)
+	t.caretPos = last.caret
+	t.selStart = -1
+}
+
+// redo повторяет отменённое изменение (вызывать под t.mu).
+func (t *TextInput) redo() {
+	if len(t.redoStack) == 0 {
+		return
+	}
+	cur := textEdit{text: string(t.runes), caret: t.caretPos}
+	next := t.redoStack[len(t.redoStack)-1]
+	t.redoStack = t.redoStack[:len(t.redoStack)-1]
+	t.undoStack = append(t.undoStack, cur)
+	t.runes = []rune(next.text)
+	t.caretPos = next.caret
+	t.selStart = -1
+}
+
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
 func (t *TextInput) OnKeyEvent(e KeyEvent) {
@@ -218,6 +271,8 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 
 	t.mu.Lock()
 	changed := false
+	isUndoRedo := false
+	before := textEdit{text: string(t.runes), caret: t.caretPos}
 
 	switch e.Code {
 	case KeyLeft:
@@ -315,6 +370,18 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	default:
 		if ctrl {
 			switch e.Code {
+			case KeyZ:
+				if shift {
+					t.redo()
+				} else {
+					t.undo()
+				}
+				isUndoRedo = true
+				changed = true
+			case KeyY:
+				t.redo()
+				isUndoRedo = true
+				changed = true
 			case KeyA:
 				t.selStart = 0
 				t.selEnd = len(t.runes)
@@ -338,26 +405,47 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 				if len(clipText) > 0 {
 					t.deleteSel()
 					paste := []rune(clipText)
-					n := len(paste)
-					ins := make([]rune, len(t.runes)+n)
-					copy(ins, t.runes[:t.caretPos])
-					copy(ins[t.caretPos:], paste)
-					copy(ins[t.caretPos+n:], t.runes[t.caretPos:])
-					t.runes = ins
-					t.caretPos += n
-					changed = true
+					if t.MaxLength > 0 { // обрезаем под лимит
+						room := t.MaxLength - len(t.runes)
+						if room < 0 {
+							room = 0
+						}
+						if len(paste) > room {
+							paste = paste[:room]
+						}
+					}
+					if n := len(paste); n > 0 {
+						ins := make([]rune, len(t.runes)+n)
+						copy(ins, t.runes[:t.caretPos])
+						copy(ins[t.caretPos:], paste)
+						copy(ins[t.caretPos+n:], t.runes[t.caretPos:])
+						t.runes = ins
+						t.caretPos += n
+						changed = true
+					}
 				}
 			}
 		} else if e.Rune >= 32 {
 			t.deleteSel()
-			ins := make([]rune, len(t.runes)+1)
-			copy(ins, t.runes[:t.caretPos])
-			ins[t.caretPos] = e.Rune
-			copy(ins[t.caretPos+1:], t.runes[t.caretPos:])
-			t.runes = ins
-			t.caretPos++
-			changed = true
+			if t.MaxLength <= 0 || len(t.runes) < t.MaxLength {
+				ins := make([]rune, len(t.runes)+1)
+				copy(ins, t.runes[:t.caretPos])
+				ins[t.caretPos] = e.Rune
+				copy(ins[t.caretPos+1:], t.runes[t.caretPos:])
+				t.runes = ins
+				t.caretPos++
+				changed = true
+			}
 		}
+	}
+
+	// Запись в историю Undo (кроме самих операций undo/redo).
+	if changed && !isUndoRedo {
+		t.undoStack = append(t.undoStack, before)
+		if len(t.undoStack) > 200 {
+			t.undoStack = t.undoStack[1:]
+		}
+		t.redoStack = nil
 	}
 
 	t.clampCaret()
@@ -417,6 +505,46 @@ func (t *TextInput) charIndexAtX(absX int) int {
 	return best
 }
 
+// wordBoundsAt возвращает [lo, hi) — границы слова под индексом idx.
+// Вызывать под t.mu.Lock().
+func (t *TextInput) wordBoundsAt(idx int) (int, int) {
+	n := len(t.runes)
+	if n == 0 {
+		return 0, 0
+	}
+	if idx >= n {
+		idx = n - 1
+	}
+	if idx < 0 {
+		idx = 0
+	}
+	cls := isWordRune(t.runes[idx])
+	lo := idx
+	for lo > 0 && isWordRune(t.runes[lo-1]) == cls {
+		lo--
+	}
+	hi := idx + 1
+	for hi < n && isWordRune(t.runes[hi]) == cls {
+		hi++
+	}
+	return lo, hi
+}
+
+// isWordRune — true для букв/цифр/подчёркивания (символы одного «слова»).
+func isWordRune(r rune) bool {
+	if r == '_' {
+		return true
+	}
+	if r >= '0' && r <= '9' {
+		return true
+	}
+	if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
+		return true
+	}
+	// Не-ASCII (кириллица и т.п.) считаем частью слова, пробелы — нет.
+	return r > 127 && r != ' '
+}
+
 // ─── MouseClickHandler ───────────────────────────────────────────────────────
 
 func (t *TextInput) OnMouseButton(e MouseEvent) bool {
@@ -465,6 +593,25 @@ func (t *TextInput) OnMouseButton(e MouseEvent) bool {
 		}
 
 		idx := t.charIndexAtX(e.X)
+
+		// Детекция двойного клика → выделение слова.
+		nowMs := time.Now().UnixMilli()
+		dx := e.X - t.lastClickX
+		if dx < 0 {
+			dx = -dx
+		}
+		if nowMs-t.lastClickMs <= 400 && dx <= 4 {
+			lo, hi := t.wordBoundsAt(idx)
+			t.selStart = lo
+			t.selEnd = hi
+			t.caretPos = hi
+			t.dragging = false
+			t.lastClickMs = 0 // сбрасываем, чтобы тройной клик не путался
+			return true
+		}
+		t.lastClickMs = nowMs
+		t.lastClickX = e.X
+
 		t.caretPos = idx
 		t.selStart = idx // якорь выделения
 		t.selEnd = idx   // пока совпадает — выделения нет
