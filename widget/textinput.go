@@ -152,6 +152,14 @@ func (t *TextInput) GetText() string {
 	return string(t.runes)
 }
 
+// Cursor возвращает текстовый курсор (I-beam) над полем ввода (CursorProvider).
+func (t *TextInput) Cursor(x, y int) Cursor {
+	if t.IsEnabled() {
+		return CursorIBeam
+	}
+	return CursorArrow
+}
+
 // ─── Focusable ───────────────────────────────────────────────────────────────
 
 func (t *TextInput) SetFocused(focused bool) {

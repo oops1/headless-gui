@@ -60,6 +60,10 @@ type Base struct {
 	// Единый источник для всех виджетов; движок рисует её при наведении курсора.
 	ToolTip string
 
+	// ContextMenu — контекстное меню (WPF ContextMenu), показывается движком
+	// по правому клику над виджетом. nil = нет меню.
+	ContextMenu *PopupMenu
+
 	// Grid layout (attached properties, как в WPF).
 	GridRow     int // Grid.Row     (0-based)
 	GridColumn  int // Grid.Column  (0-based)
@@ -82,6 +86,10 @@ type Base struct {
 	// растягивает потомка только при ЯВНОМ HorizontalAlignment="Stretch" (BUG-6).
 	hAlignSet bool
 	vAlignSet bool
+
+	// TabIndexValue — порядок обхода Tab (WPF TabIndex). 0 по умолчанию.
+	// Отрицательное значение исключает виджет из Tab-навигации.
+	TabIndexValue int
 
 	// XAMLWidth / XAMLHeight — явно заданные Width/Height из XAML.
 	// Используются applyAlignmentRect когда bounds ещё не установлены контейнером.
@@ -135,6 +143,12 @@ func (b *Base) GetToolTip() string { return b.ToolTip }
 // SetToolTip задаёт текст всплывающей подсказки.
 func (b *Base) SetToolTip(s string) { b.ToolTip = s }
 
+// GetContextMenu возвращает контекстное меню виджета (или nil).
+func (b *Base) GetContextMenu() *PopupMenu { return b.ContextMenu }
+
+// SetContextMenu задаёт контекстное меню (показывается по правому клику).
+func (b *Base) SetContextMenu(m *PopupMenu) { b.ContextMenu = m }
+
 // ── Grid attached properties ────────────────────────────────────────────────
 
 func (b *Base) SetGridProps(row, col, rowSpan, colSpan int) {
@@ -179,6 +193,12 @@ func (b *Base) SetVAlign(a VerticalAlignment)   { b.VAlign = a; b.vAlignSet = tr
 // HAlignExplicit / VAlignExplicit сообщают, было ли выравнивание задано явно.
 func (b *Base) HAlignExplicit() bool { return b.hAlignSet }
 func (b *Base) VAlignExplicit() bool { return b.vAlignSet }
+
+// TabIndex возвращает порядок Tab-навигации (WPF TabIndex).
+func (b *Base) TabIndex() int { return b.TabIndexValue }
+
+// SetTabIndex задаёт порядок Tab-навигации (отрицательный — исключить из обхода).
+func (b *Base) SetTabIndex(i int) { b.TabIndexValue = i }
 
 // GetXAMLSize возвращает явно заданные Width/Height из XAML.
 func (b *Base) GetXAMLSize() (int, int) { return b.XAMLWidth, b.XAMLHeight }

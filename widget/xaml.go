@@ -207,9 +207,11 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	case "dockpanel":
 		return buildXAMLDockPanel(el, reg, parentOff, baseDir)
 
-	// ── GridSplitter → Separator (визуальный разделитель) ───────────────────
+	// ── GridSplitter — перетаскиваемый разделитель ячеек Grid ───────────────
 	case "gridsplitter":
-		w = buildXAMLSeparator(el)
+		s := NewGridSplitter()
+		applyColor(&s.Background, el, "Background")
+		w = s
 
 	// ── ToolBarTray / ToolBar → горизонтальный StackPanel (WPF ToolBar) ────
 	case "toolbartray":
@@ -362,6 +364,22 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 		childTag := strings.ToLower(child.Tag)
 		if childTag == "item" || childTag == "comboboxitem" || childTag == "listboxitem" ||
 			childTag == "tabitem" || childTag == "listviewitem" {
+			continue
+		}
+		// Attached ContextMenu: <X.ContextMenu><ContextMenu>…</ContextMenu></X.ContextMenu>
+		if strings.HasSuffix(childTag, ".contextmenu") {
+			for _, inner := range child.Children {
+				cw, err := buildXAMLWidget(inner, reg, childOff, baseDir)
+				if err != nil {
+					return nil, err
+				}
+				if pm, ok := cw.(*PopupMenu); ok {
+					if h, ok := w.(interface{ SetContextMenu(*PopupMenu) }); ok {
+						h.SetContextMenu(pm)
+					}
+					w.AddChild(pm) // в дереве — чтобы движок рисовал overlay и ловил клики
+				}
+			}
 			continue
 		}
 		if strings.Contains(childTag, ".") {

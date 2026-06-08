@@ -1718,6 +1718,38 @@ AncestorType`, rich-text inlines (`<Run>/<Bold>` inside TextBlock),
 
 ---
 
+## Interaction polish (Tier A)
+
+- **GridSplitter** — now a real draggable splitter (was visual-only). Place it in
+  its own thin Grid column/row; dragging resizes the adjacent cells.
+  ```xml
+  <Grid.ColumnDefinitions>
+    <ColumnDefinition Width="*"/><ColumnDefinition Width="6"/><ColumnDefinition Width="*"/>
+  </Grid.ColumnDefinitions>
+  <Panel Grid.Column="0"/><GridSplitter Grid.Column="1"/><Panel Grid.Column="2"/>
+  ```
+- **ContextMenu (right-click)** — attach a menu to any widget; the engine shows it
+  at the cursor on right-click (one context menu open at a time).
+  ```xml
+  <Button Content="...">
+    <Button.ContextMenu>
+      <ContextMenu>
+        <MenuItem Header="Copy"/><MenuItem Header="Paste"/>
+        <MenuItem Separator="True"/><MenuItem Header="Delete"/>
+      </ContextMenu>
+    </Button.ContextMenu>
+  </Button>
+  ```
+  Also `widget.Base.SetContextMenu(pm)` in code.
+- **ScrollViewer mouse wheel** — `ScrollView` scrolls on wheel up/down.
+- **Mouse cursors** — widgets implement `widget.CursorProvider` (`Cursor(x,y)`):
+  TextBox → I-beam, GridSplitter → resize. `Engine.CursorAt(x,y)` computes it; the
+  Windows backend applies it natively (Linux/macOS: no-op for now).
+- **TabIndex** — `<TextBox TabIndex="1"/>` controls focus order; negative excludes
+  from Tab navigation. Honored by `CollectFocusables` (stable sort by TabIndex).
+
+---
+
 ## Fonts
 
 The engine ships with the built-in **Go Regular** font and registers bold/italic

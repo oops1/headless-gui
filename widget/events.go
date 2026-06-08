@@ -4,6 +4,8 @@
 // циклических импортов: engine → widget, widget ⊄ engine.
 package widget
 
+import "sort"
+
 // ─── Mouse ───────────────────────────────────────────────────────────────────
 
 // MouseButton идентифицирует кнопку мыши.
@@ -125,13 +127,24 @@ type TabIndexProvider interface {
 	TabIndex() int
 }
 
-// CollectFocusables собирает все Focusable-виджеты из поддерева w
-// в порядке DFS (depth-first, порядок отрисовки).
-// Виджеты с TabIndex < 0 исключаются.
+// CollectFocusables собирает все Focusable-виджеты из поддерева w.
+// Порядок: по возрастанию TabIndex (WPF TabIndex), при равенстве — порядок DFS
+// (стабильная сортировка). Виджеты с TabIndex < 0 исключаются.
 func CollectFocusables(w Widget) []Widget {
 	var result []Widget
 	collectFocusablesDFS(w, &result)
+	sort.SliceStable(result, func(i, j int) bool {
+		return tabIndexOf(result[i]) < tabIndexOf(result[j])
+	})
 	return result
+}
+
+// tabIndexOf возвращает TabIndex виджета (0, если не задан).
+func tabIndexOf(w Widget) int {
+	if tip, ok := w.(TabIndexProvider); ok {
+		return tip.TabIndex()
+	}
+	return 0
 }
 
 func collectFocusablesDFS(w Widget, out *[]Widget) {
