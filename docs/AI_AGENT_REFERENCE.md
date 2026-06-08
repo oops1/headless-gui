@@ -1718,6 +1718,39 @@ AncestorType`, rich-text inlines (`<Run>/<Bold>` inside TextBlock),
 
 ---
 
+## Fonts
+
+The engine ships with the built-in **Go Regular** font and registers bold/italic
+variants automatically. Adding or switching fonts:
+
+```go
+// 1. Drop *.ttf/*.otf into assets/fonts/ — auto-registered at engine.New():
+//      Roboto-Regular.ttf  -> usable as "Roboto" AND "Roboto-Regular"
+//    If Roboto-Regular.ttf is present, it becomes the DEFAULT font.
+eng := engine.New(1280, 800, 30)
+
+eng.SetDefaultFont("Inter")              // switch the default font
+eng.RegisterFontFile("Roboto", path)     // register a single named font
+eng.RegisterFontDir("my/fonts")          // register a whole directory
+eng.AvailableFonts()                      // []string of registered names
+eng.RegisterFallbackFont(ttfBytes)        // glyph fallback (✓✗⚠, …)
+```
+
+XAML uses the family name via `FontFamily`:
+
+```xml
+<TextBlock Text="Hi" FontFamily="Roboto"/>
+<TextBox FontFamily="Inter" FontSize="16"/>
+```
+
+**Recommended free fonts** (place the TTF in `assets/fonts/`; see
+`assets/fonts/README.md`): Roboto (Apache-2.0, default), Open Sans (Apache-2.0),
+Inter (SIL OFL-1.1). These are free/redistributable but **not MIT** — fonts are
+licensed under OFL or Apache, both permissive. **Google Sans is proprietary and
+must not be bundled** — use Inter instead.
+
+---
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

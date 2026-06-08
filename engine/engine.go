@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -111,6 +112,11 @@ func New(width, height, fps int) *Engine {
 	e.canvas.RegisterFont(widget.BuiltinFontBoldItalic, gobolditalic.TTF)
 	// Сообщаем виджетам размер канваса (для удержания popup-меню в пределах экрана).
 	widget.SetScreenBounds(width, height)
+	// Авто-регистрация пользовательских шрифтов из assets/fonts (Roboto, Inter, …).
+	e.loadFontDirectory(filepath.Join("assets", "fonts"))
+	// Шрифт по умолчанию — Roboto, если он есть в assets/fonts; иначе остаётся
+	// встроенный Go Regular.
+	e.canvas.SetDefaultFont("Roboto")
 	return e
 }
 
@@ -245,6 +251,71 @@ func (e *Engine) RegisterFontFile(fontName, path string) error {
 	}
 	e.RegisterFont(fontName, data)
 	return nil
+}
+
+// loadFontDirectory регистрирует все .ttf/.otf из каталога dir как именованные
+// шрифты. Имя = имя файла без расширения (напр. "Roboto-Regular"). Для файлов
+// вида "Семейство-Regular" дополнительно регистрируется псевдоним-семейство
+// ("Roboto"), чтобы XAML FontFamily="Roboto" работал из коробки.
+func (e *Engine) loadFontDirectory(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, ent := range entries {
+		if ent.IsDir() {
+			continue
+		}
+		name := ent.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != ".ttf" && ext != ".otf" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		stem := strings.TrimSuffix(name, filepath.Ext(name))
+		e.canvas.RegisterFont(stem, data)
+		if fam := fontFamilyAlias(stem); fam != "" && fam != stem && !e.canvas.hasFont(fam) {
+			e.canvas.RegisterFont(fam, data) // семейство → Regular-вес
+		}
+	}
+}
+
+// fontFamilyAlias возвращает имя семейства для файла-стема (только для Regular-веса):
+// "Roboto-Regular" → "Roboto"; "Inter" → "Inter"; "Roboto-Bold" → "".
+func fontFamilyAlias(stem string) string {
+	if i := strings.IndexByte(stem, '-'); i > 0 {
+		if strings.EqualFold(stem[i+1:], "regular") {
+			return stem[:i]
+		}
+		return ""
+	}
+	return stem
+}
+
+// RegisterFontDir регистрирует все шрифты из каталога (TTF/OTF) как именованные.
+// Вызывать до Start().
+func (e *Engine) RegisterFontDir(dir string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.loadFontDirectory(dir)
+}
+
+// SetDefaultFont делает зарегистрированный шрифт шрифтом по умолчанию.
+// Возвращает false, если шрифт с таким именем не зарегистрирован.
+func (e *Engine) SetDefaultFont(name string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.canvas.SetDefaultFont(name)
+}
+
+// AvailableFonts возвращает список зарегистрированных именованных шрифтов.
+func (e *Engine) AvailableFonts() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.canvas.fontNames()
 }
 
 // RegisterFallbackFont добавляет fallback-шрифт (TTF/OTF-данные) для рун,
