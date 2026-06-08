@@ -58,6 +58,8 @@ type xamlEnv struct {
 	bindings []pendingBinding // собранные {Binding} для живой привязки
 	triggers []pendingTrigger // собранные DataTrigger для динамических сеттеров
 	items    []pendingItems   // ItemsControl'ы для живого перестроения
+	virtuals []pendingVirtual // VirtualizingItemsControl'ы (виртуализация)
+	locs     []pendingLoc     // {Loc Key} — локализованные строки (динамические)
 	nameSeq  int              // счётчик авто-имён для безымянных элементов
 
 	// inItemTemplate=true внутри клонов DataTemplate: биндинги резолвятся
@@ -316,11 +318,50 @@ func (env *xamlEnv) process(el *xElement, ctx interface{}) {
 		return
 	}
 
+	// VirtualizingItemsControl: НЕ материализуем элементы в пре-пассе — шаблон и
+	// источник сохраняются, виджеты строятся лениво по видимому окну в рантайме.
+	if tag == "virtualizingitemscontrol" {
+		env.registerVirtual(el, ctx)
+		env.resolveAttrs(el, ctx)
+		env.applyStyleTo(el, ctx)
+		return
+	}
+
 	env.resolveAttrs(el, ctx)
 	env.applyStyleTo(el, ctx)
 	for i := range el.Children {
 		env.process(&el.Children[i], ctx)
 	}
+}
+
+// registerVirtual сохраняет шаблон и путь источника VirtualizingItemsControl для
+// последующей ленивой материализации; удаляет ItemTemplate/ItemsSource из узла.
+func (env *xamlEnv) registerVirtual(el *xElement, ctx interface{}) {
+	tmpl := findDataTemplateRoot(el)
+	src := strings.TrimSpace(el.attr("ItemsSource"))
+	name := env.ensureName(el)
+
+	// Убираем .ItemTemplate из детей — рантайм строит строки сам.
+	var keep []xElement
+	for _, c := range el.Children {
+		if strings.HasSuffix(strings.ToLower(c.Tag), ".itemtemplate") {
+			continue
+		}
+		keep = append(keep, c)
+	}
+	el.Children = keep
+	delete(el.attrs, "ItemsSource")
+
+	if tmpl == nil || !strings.HasPrefix(src, "{Binding") {
+		return // нет шаблона/привязки — останется пустой виртуализованный список
+	}
+	path := parseBindingPath(src)
+	env.virtuals = append(env.virtuals, pendingVirtual{
+		name:       name,
+		template:   cloneXElement(tmpl),
+		sourcePath: path,
+		env:        env,
+	})
 }
 
 // liftableProps — скалярные свойства, которые можно поднять из property-element
@@ -407,6 +448,17 @@ func (env *xamlEnv) resolveAttrs(el *xElement, ctx interface{}) {
 			el.attrs[k] = resolveBindingFull(tv, ctx) // начальное значение с форматом
 			continue
 		}
+		if tv == "{Loc}" || strings.HasPrefix(tv, "{Loc ") || strings.HasPrefix(tv, "{Loc}") {
+			key := parseLocKey(tv)
+			if env.inItemTemplate {
+				el.attrs[k] = Tr(key) // внутри DataTemplate — одноразовый перевод
+				continue
+			}
+			name := env.ensureName(el)
+			env.locs = append(env.locs, pendingLoc{name: name, prop: k, key: key})
+			el.attrs[k] = Tr(key) // начальное значение для первого рендера
+			continue
+		}
 		if nv, ok := env.resolveMarkup(v, ctx); ok {
 			el.attrs[k] = nv
 		}
@@ -488,8 +540,11 @@ func findDataTemplateRoot(el *xElement) *xElement {
 	return nil
 }
 
-// collectionItems извлекает элементы из ObservableCollection или среза.
+// collectionItems извлекает элементы из CollectionView, ObservableCollection или среза.
 func collectionItems(v interface{}) []interface{} {
+	if cv, ok := v.(*CollectionView); ok {
+		return cv.Items()
+	}
 	if oc, ok := v.(*dgridPkg.ObservableCollection); ok {
 		return oc.Items()
 	}

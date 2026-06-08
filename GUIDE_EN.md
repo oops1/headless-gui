@@ -921,9 +921,16 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `RadioButton` | RadioButton | `Content`, `GroupName`, `IsChecked` |
 | `TabControl` | TabControl | `SelectedIndex`, child `<TabItem Header="...">` |
 | `Slider` | Slider | `Minimum`, `Maximum`, `Value` |
+| `NumericUpDown`, `IntegerUpDown`, `DoubleUpDown` | NumericUpDown | `Minimum`, `Maximum`, `Increment`, `Decimals`, `Value` |
 | `ToggleSwitch` | ToggleSwitch | `Content`, `IsOn` |
 | `ScrollViewer` | ScrollView | `ContentHeight`, `Background` |
 | `ListView`, `ListBox` | ListView | `Items`, `SelectedIndex`, `ItemHeight`, child `<ListViewItem>` |
+| `VirtualizingItemsControl` | VirtualizingItemsControl | `ItemHeight`, `Buffer`, `ItemsSource`, `VirtualizingItemsControl.ItemTemplate` |
+| `WrapPanel` | WrapPanel | `Spacing`, `Orientation` |
+| `UniformGrid` | UniformGrid | `Rows`, `Columns`, `Spacing` |
+| `GroupBox` | GroupBox | `Header` |
+| `Expander` | Expander | `Header`, `IsExpanded` |
+| `Ellipse`, `Rectangle`, `Line`, `Polygon`, `Polyline` | Shapes | `Fill`, `Stroke`, `StrokeThickness`, `Points`, `RadiusX` |
 | `Image` | Image | `Source`, `Stretch` (Fill/Uniform/None) |
 | `PopupMenu`, `ContextMenu` | PopupMenu | child `<MenuItem Text="..." Separator="True" Disabled="True"/>` |
 | `Menu`, `MenuBar`, `MainMenu` | MenuBar | child `<MenuItem Header="...">` with nested `<MenuItem>` |
@@ -934,9 +941,9 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `DataGridTextColumn` | DataGridTextColumn | `Header`, `Binding`, `Width`, `IsReadOnly`, `SortMemberPath` |
 | `DataGridCheckBoxColumn` | DataGridCheckBoxColumn | `Header`, `Binding`, `Width`, `IsReadOnly` |
 | `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
-| `Separator`, `Line`, `Rectangle` | Separator | `Background` |
+| `Separator` | Separator | `Background` |
 
-Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`.
+Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`, `ToolTip`, `Visibility`, `IsEnabled`, `TabIndex`. `{Binding ...}` and `{Loc Key}` localization work on any string attribute.
 
 ---
 
@@ -1013,6 +1020,275 @@ ctx.MeasureRunePositions(text string, pt float64) []int
 // Clipping
 ctx.SetClip(r image.Rectangle)
 ctx.ClearClip()
+ctx.Clip() image.Rectangle   // current clip rect (for nested clipping)
+```
+
+---
+
+## New Features
+
+This section covers functionality added after the first revision of the guide:
+data binding, styles/triggers/templates, commands, localization, validation,
+`CollectionView`, virtualization, and new widgets.
+
+### New widgets
+
+#### NumericUpDown
+
+Numeric spinner field (WPF Extended Toolkit style). XAML tags:
+`<NumericUpDown>`, `<IntegerUpDown>`, `<DoubleUpDown>`.
+
+```go
+n := widget.NewNumericUpDown()
+n.Min, n.Max, n.Step, n.Decimals = 0, 100, 0.5, 2
+n.SetValue(9.99)
+n.Value()                       // float64
+n.OnChange = func(v float64) { ... }
+```
+
+```xml
+<NumericUpDown Minimum="0" Maximum="100" Increment="1" Value="10"/>
+<NumericUpDown Minimum="0" Maximum="10" Increment="0.5" Decimals="1" Value="3.5"/>
+```
+
+Interaction: ▲/▼ spinner, mouse wheel, Up/Down keys when focused, direct typing
+committed on Enter. Value is always clamped to `[Min, Max]`.
+
+#### VirtualizingItemsControl — UI virtualization
+
+A list that materializes widgets only for the visible window (+a buffer). Handles
+tens of thousands of rows.
+
+```go
+v := widget.NewVirtualizingItemsControl()
+v.ItemHeight = 28
+v.SetItemBuilder(func(item any, i int) widget.Widget {
+    return widget.NewLabel(item.(*Person).Name, white)
+})
+v.SetItems(people)              // []any
+v.BindCollectionView(view)      // auto-refresh from a CollectionView
+```
+
+```xml
+<VirtualizingItemsControl ItemHeight="24" Width="240" Height="320"
+                          ItemsSource="{Binding People}">
+    <VirtualizingItemsControl.ItemTemplate>
+        <DataTemplate><TextBlock Text="{Binding Name}"/></DataTemplate>
+    </VirtualizingItemsControl.ItemTemplate>
+</VirtualizingItemsControl>
+```
+
+Requires a fixed `ItemHeight`. Has a built-in scrollbar, mouse wheel, and thumb
+dragging.
+
+#### WrapPanel / UniformGrid
+
+```xml
+<WrapPanel Spacing="6">
+    <Button Content="One" Width="84" Height="30"/>
+    <Button Content="Two" Width="84" Height="30"/>
+</WrapPanel>
+<UniformGrid Columns="3" Spacing="6">
+    <Button Content="A"/><Button Content="B"/><Button Content="C"/>
+</UniformGrid>
+```
+
+`WrapPanel` flows children to the next line; `UniformGrid` lays them out in
+equal-sized cells (`Rows`/`Columns`).
+
+#### GroupBox / Expander
+
+```xml
+<GroupBox Header="Group" Width="240" Height="104">
+    <StackPanel Padding="8" Spacing="6">
+        <CheckBox Content="Option 1"/>
+        <CheckBox Content="Option 2"/>
+    </StackPanel>
+</GroupBox>
+<Expander Header="Expand" IsExpanded="True" Width="234" Height="104">
+    <StackPanel Padding="8"><TextBlock Text="Content"/></StackPanel>
+</Expander>
+```
+
+`GroupBox` is a titled border; `Expander` is a click-collapsible panel. Both
+**clip their content to the inner area** so it never bleeds past the border.
+
+#### Vector shapes
+
+```xml
+<Ellipse   Left="20" Top="20" Width="120" Height="80" Fill="#E06C75" Stroke="white" StrokeThickness="3"/>
+<Rectangle Left="20" Top="20" Width="160" Height="80" Fill="#98C379" RadiusX="14"/>
+<Line      X1="20" Y1="140" X2="200" Y2="200" Stroke="#E5C07B" StrokeThickness="4"/>
+<Polygon   Points="280,130 340,210 220,210" Fill="#C678DD" Stroke="white"/>
+<Polyline  Points="360,200 380,150 400,200" Stroke="#56B6C2" StrokeThickness="3"/>
+```
+
+Go types: `widget.Ellipse`, `widget.RectangleShape`, `widget.Line`,
+`widget.Polygon`, `widget.Polyline`.
+
+### TextBox maturity
+
+- **MaxLength** — caps length (typing & paste): `<TextBox MaxLength="20"/>`.
+- **Undo/Redo** — `Ctrl+Z` undo, `Ctrl+Y` or `Ctrl+Shift+Z` redo.
+- **Double-click** — selects the word under the cursor.
+
+### Data binding ({Binding})
+
+Loading XAML with a DataContext makes bindings live:
+
+```go
+root, reg, scope, err := widget.LoadUIFromXAMLBindings(data, viewModel)
+scope.SetDataContext(other)   // swap the source
+scope.Refresh()               // force-refresh the UI
+```
+
+```xml
+<TextBox  Text="{Binding Name, Mode=TwoWay}"/>
+<TextBlock Text="{Binding Price, StringFormat=$%.2f}"/>
+<TextBlock Text="{Binding Value, ElementName=slider1, Converter={StaticResource Pct}}"/>
+```
+
+- Modes: `OneWay` (default), `TwoWay`, `OneTime`.
+- `INotifyPropertyChanged` (via `datagrid.PropertyNotifier`) refreshes the UI.
+- `IValueConverter`: `widget.RegisterValueConverter("Pct", conv)`.
+- `ElementName` and `RelativeSource Self` bind to another element's property.
+- An `ItemsControl` with `ItemsSource="{Binding Coll}"` + `<DataTemplate>` rebuilds
+  live when the `ObservableCollection` changes.
+
+### Resources, styles, triggers, templates
+
+```xml
+<Canvas.Resources>
+    <SolidColorBrush x:Key="Accent" Color="#0E639C"/>
+    <Style x:Key="H1" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="15"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Status}" Value="ERROR">
+                <Setter Property="Foreground" Value="#F38BA8"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+    <ControlTemplate x:Key="Card">
+        <Border Background="{TemplateBinding Background}" BorderBrush="#5A5A6A" BorderThickness="1">
+            <ContentPresenter/>
+        </Border>
+    </ControlTemplate>
+</Canvas.Resources>
+```
+
+Supported: `StaticResource`, implicit styles by `TargetType`, `BasedOn`,
+`Trigger`/`DataTrigger`/`MultiTrigger`/`MultiDataTrigger`, `ControlTemplate` +
+`ContentPresenter` + `TemplateBinding`, property-element syntax
+(`<X.Background><SolidColorBrush/></X.Background>`), `LinearGradientBrush`.
+
+### Commands and hotkeys
+
+```go
+vm.SaveCommand = widget.NewRelayCommand(func() { /* ... */ })
+```
+
+```xml
+<Canvas.InputBindings>
+    <KeyBinding Modifiers="Ctrl" Key="S" Command="{Binding SaveCommand}"/>
+</Canvas.InputBindings>
+<Button Content="Save" Command="{Binding SaveCommand}"/>
+```
+
+### Localization: UI language ≠ keyboard layout
+
+Two **independent axes**:
+
+| What | API | Purpose |
+|---|---|---|
+| UI language | `SetLanguage` / `Language` / `AddLanguageListener` | language of **labels**; drives `Tr` and `{Loc}` |
+| Keyboard layout | `SetLocale` / `Locale` (+ badge/OS applier) | language used to **type** text |
+
+An app can be in Russian while the user types English/Chinese — changing one
+never changes the other.
+
+```go
+widget.RegisterStrings("EN", map[string]string{"Greeting": "Hello", "Save": "Save"})
+widget.RegisterStrings("RU", map[string]string{"Greeting": "Привет", "Save": "Сохранить"})
+widget.SetFallbackLanguage("EN")
+widget.SetLanguage("RU")
+widget.Tr("Greeting")            // "Привет" (missing → EN fallback → key itself)
+widget.Trf("Count", 5)           // printf: "Count"="Items: %d" → "Items: 5"
+widget.LoadStringsDir("i18n")    // ru.json, en.json → tables by file name
+```
+
+In XAML — `{Loc Key}` markup, re-applied **live** on `SetLanguage`:
+
+```xml
+<TextBlock Text="{Loc Greeting}"/>
+<Button Content="{Loc Save}"/>
+```
+
+**Backward compatible:** plain strings are untouched — only `{Loc ...}` is
+translated; with no tables `Tr` returns the key itself.
+
+### Validation (IDataErrorInfo)
+
+The `DataContext` model implements `widget.DataErrorInfo`; a binding with
+`ValidatesOnDataErrors=True` queries the error text after each write and puts the
+widget into an error state (red border + tooltip).
+
+```go
+func (m *Form) DataError(prop string) string { // "" == valid
+    if prop == "Email" && !strings.Contains(m.Email, "@") {
+        return "E-mail must contain '@'"
+    }
+    return ""
+}
+```
+
+```xml
+<TextBox Text="{Binding Email, Mode=TwoWay, ValidatesOnDataErrors=True}"/>
+```
+
+`scope.Validate() bool` re-checks every validating binding (handy before saving a
+form).
+
+### CollectionView (sort/filter/group)
+
+```go
+view := widget.NewCollectionView(people)          // *ObservableCollection or slice
+view.SetFilter(func(it any) bool { return it.(*Person).Age >= 18 })
+view.SetSort(
+    widget.SortDescription{Property: "City"},
+    widget.SortDescription{Property: "Age", Direction: widget.Descending},
+)
+view.SetGroup("City")
+view.Items()    // current view
+view.Groups()   // []CollectionViewGroup{Name, Items}
+```
+
+`ItemsControl` and `VirtualizingItemsControl` bound to a `CollectionView` rebuild
+when the filter/sort/group changes.
+
+### Tooltips, cursors, locale indicator
+
+- `ToolTip="..."` on any widget; delay/toggle via
+  `eng.SetTooltipsEnabled`/`SetTooltipDelay`.
+- Mouse cursors: widgets implement `Cursor() widget.Cursor` (TextBox → I-beam,
+  GridSplitter → resize); `eng.CursorAt(x, y)`.
+- Keyboard-layout indicator in windows/dialogs — `ShowLocaleIndicator` property
+  with a switch context menu.
+
+### Fonts
+
+Bundled free fonts: Roboto (default), Open Sans, Inter. Auto-loaded from
+`assets/fonts/`, with a system glyph fallback chain for symbols/emoji (no tofu).
+
+```go
+eng.SetDefaultFont("Inter")
+eng.RegisterFontFile("Roboto", path)
+eng.RegisterFontDir("my/fonts")
+eng.AvailableFonts()
+```
+
+```xml
+<TextBlock FontFamily="Roboto" FontSize="16"/>
 ```
 
 ---

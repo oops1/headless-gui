@@ -921,9 +921,16 @@ root Canvas (0,0)
 | `RadioButton` | RadioButton | `Content`, `GroupName`, `IsChecked` |
 | `TabControl` | TabControl | `SelectedIndex`, дочерние `<TabItem Header="...">` |
 | `Slider` | Slider | `Minimum`, `Maximum`, `Value` |
+| `NumericUpDown`, `IntegerUpDown`, `DoubleUpDown` | NumericUpDown | `Minimum`, `Maximum`, `Increment`, `Decimals`, `Value` |
 | `ToggleSwitch` | ToggleSwitch | `Content`, `IsOn` |
 | `ScrollViewer` | ScrollView | `ContentHeight`, `Background` |
 | `ListView`, `ListBox` | ListView | `Items`, `SelectedIndex`, `ItemHeight`, дочерние `<ListViewItem>` |
+| `VirtualizingItemsControl` | VirtualizingItemsControl | `ItemHeight`, `Buffer`, `ItemsSource`, `VirtualizingItemsControl.ItemTemplate` |
+| `WrapPanel` | WrapPanel | `Spacing`, `Orientation` |
+| `UniformGrid` | UniformGrid | `Rows`, `Columns`, `Spacing` |
+| `GroupBox` | GroupBox | `Header` |
+| `Expander` | Expander | `Header`, `IsExpanded` |
+| `Ellipse`, `Rectangle`, `Line`, `Polygon`, `Polyline` | Shapes | `Fill`, `Stroke`, `StrokeThickness`, `Points`, `RadiusX` |
 | `Image` | Image | `Source`, `Stretch` (Fill/Uniform/None) |
 | `PopupMenu`, `ContextMenu` | PopupMenu | дочерние `<MenuItem Text="..." Separator="True" Disabled="True"/>` |
 | `Menu`, `MenuBar`, `MainMenu` | MenuBar | дочерние `<MenuItem Header="...">` с вложенными `<MenuItem>` |
@@ -934,9 +941,9 @@ root Canvas (0,0)
 | `DataGridTextColumn` | DataGridTextColumn | `Header`, `Binding`, `Width`, `IsReadOnly`, `SortMemberPath` |
 | `DataGridCheckBoxColumn` | DataGridCheckBoxColumn | `Header`, `Binding`, `Width`, `IsReadOnly` |
 | `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
-| `Separator`, `Line`, `Rectangle` | Separator | `Background` |
+| `Separator` | Separator | `Background` |
 
-Общие атрибуты: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`.
+Общие атрибуты: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`, `ToolTip`, `Visibility`, `IsEnabled`, `TabIndex`. Привязки `{Binding ...}` и локализация `{Loc Key}` работают на любом строковом атрибуте.
 
 ---
 
@@ -1013,6 +1020,276 @@ ctx.MeasureRunePositions(text string, pt float64) []int
 // Clip
 ctx.SetClip(r image.Rectangle)
 ctx.ClearClip()
+ctx.Clip() image.Rectangle   // текущая область отсечения (для вложенного клиппинга)
+```
+
+---
+
+## Новые возможности
+
+Раздел описывает функционал, добавленный после первой версии руководства:
+привязки данных, стили/триггеры/шаблоны, команды, локализацию, валидацию,
+`CollectionView`, виртуализацию и новые виджеты.
+
+### Новые виджеты
+
+#### NumericUpDown
+
+Числовое поле со «спиннером» (аналог WPF Extended Toolkit). XAML-теги:
+`<NumericUpDown>`, `<IntegerUpDown>`, `<DoubleUpDown>`.
+
+```go
+n := widget.NewNumericUpDown()
+n.Min, n.Max, n.Step, n.Decimals = 0, 100, 0.5, 2
+n.SetValue(9.99)
+n.Value()                       // float64
+n.OnChange = func(v float64) { ... }
+```
+
+```xml
+<NumericUpDown Minimum="0" Maximum="100" Increment="1" Value="10"/>
+<NumericUpDown Minimum="0" Maximum="10" Increment="0.5" Decimals="1" Value="3.5"/>
+```
+
+Управление: стрелки ▲/▼, колесо мыши, клавиши Up/Down при фокусе, прямой ввод с
+фиксацией по Enter. Значение всегда зажимается в `[Min, Max]`.
+
+#### VirtualizingItemsControl — UI-виртуализация
+
+Список, материализующий виджеты только для видимого окна (+буфер). Подходит для
+десятков тысяч строк.
+
+```go
+v := widget.NewVirtualizingItemsControl()
+v.ItemHeight = 28
+v.SetItemBuilder(func(item any, i int) widget.Widget {
+    return widget.NewLabel(item.(*Person).Name, white)
+})
+v.SetItems(people)              // []any
+v.BindCollectionView(view)      // авто-обновление из CollectionView
+```
+
+```xml
+<VirtualizingItemsControl ItemHeight="24" Width="240" Height="320"
+                          ItemsSource="{Binding People}">
+    <VirtualizingItemsControl.ItemTemplate>
+        <DataTemplate><TextBlock Text="{Binding Name}"/></DataTemplate>
+    </VirtualizingItemsControl.ItemTemplate>
+</VirtualizingItemsControl>
+```
+
+Требуется фиксированная высота строки `ItemHeight`. Есть встроенный скроллбар,
+колесо мыши, перетаскивание ползунка.
+
+#### WrapPanel / UniformGrid
+
+```xml
+<WrapPanel Spacing="6">
+    <Button Content="One" Width="84" Height="30"/>
+    <Button Content="Two" Width="84" Height="30"/>
+</WrapPanel>
+<UniformGrid Columns="3" Spacing="6">
+    <Button Content="A"/><Button Content="B"/><Button Content="C"/>
+</UniformGrid>
+```
+
+`WrapPanel` переносит дочерние элементы на новую строку; `UniformGrid`
+раскладывает их по равным ячейкам (`Rows`/`Columns`).
+
+#### GroupBox / Expander
+
+```xml
+<GroupBox Header="Группа" Width="240" Height="104">
+    <StackPanel Padding="8" Spacing="6">
+        <CheckBox Content="Опция 1"/>
+        <CheckBox Content="Опция 2"/>
+    </StackPanel>
+</GroupBox>
+<Expander Header="Развернуть" IsExpanded="True" Width="234" Height="104">
+    <StackPanel Padding="8"><TextBlock Text="Содержимое"/></StackPanel>
+</Expander>
+```
+
+`GroupBox` — рамка с заголовком; `Expander` — сворачиваемая по клику панель.
+Содержимое обоих **отсекается по внутренней области** и не выходит за рамку.
+
+#### Векторные фигуры
+
+```xml
+<Ellipse   Left="20" Top="20" Width="120" Height="80" Fill="#E06C75" Stroke="white" StrokeThickness="3"/>
+<Rectangle Left="20" Top="20" Width="160" Height="80" Fill="#98C379" RadiusX="14"/>
+<Line      X1="20" Y1="140" X2="200" Y2="200" Stroke="#E5C07B" StrokeThickness="4"/>
+<Polygon   Points="280,130 340,210 220,210" Fill="#C678DD" Stroke="white"/>
+<Polyline  Points="360,200 380,150 400,200" Stroke="#56B6C2" StrokeThickness="3"/>
+```
+
+Go-типы: `widget.Ellipse`, `widget.RectangleShape`, `widget.Line`,
+`widget.Polygon`, `widget.Polyline`.
+
+### Зрелость TextBox
+
+- **MaxLength** — ограничение длины (ввод и вставка): `<TextBox MaxLength="20"/>`.
+- **Undo/Redo** — `Ctrl+Z` отменить, `Ctrl+Y` или `Ctrl+Shift+Z` повторить.
+- **Двойной клик** — выделение слова под курсором.
+
+### Привязка данных ({Binding})
+
+Загрузка XAML с DataContext делает привязки «живыми»:
+
+```go
+root, reg, scope, err := widget.LoadUIFromXAMLBindings(data, viewModel)
+scope.SetDataContext(other)   // сменить источник
+scope.Refresh()               // принудительно обновить UI
+```
+
+```xml
+<TextBox  Text="{Binding Name, Mode=TwoWay}"/>
+<TextBlock Text="{Binding Price, StringFormat=$%.2f}"/>
+<TextBlock Text="{Binding Value, ElementName=slider1, Converter={StaticResource Pct}}"/>
+```
+
+- Режимы: `OneWay` (по умолчанию), `TwoWay`, `OneTime`.
+- `INotifyPropertyChanged` (через `datagrid.PropertyNotifier`) обновляет UI.
+- `IValueConverter`: `widget.RegisterValueConverter("Pct", conv)`.
+- `ElementName` и `RelativeSource Self` — привязка к свойству другого элемента.
+- `ItemsControl` с `ItemsSource="{Binding Coll}"` + `<DataTemplate>` живо
+  перестраивается при изменении `ObservableCollection`.
+
+### Ресурсы, стили, триггеры, шаблоны
+
+```xml
+<Canvas.Resources>
+    <SolidColorBrush x:Key="Accent" Color="#0E639C"/>
+    <Style x:Key="H1" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="15"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Status}" Value="ERROR">
+                <Setter Property="Foreground" Value="#F38BA8"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+    <ControlTemplate x:Key="Card">
+        <Border Background="{TemplateBinding Background}" BorderBrush="#5A5A6A" BorderThickness="1">
+            <ContentPresenter/>
+        </Border>
+    </ControlTemplate>
+</Canvas.Resources>
+```
+
+Поддержаны `StaticResource`, неявные стили по `TargetType`, `BasedOn`,
+`Trigger`/`DataTrigger`/`MultiTrigger`/`MultiDataTrigger`, `ControlTemplate` +
+`ContentPresenter` + `TemplateBinding`, property-element синтаксис
+(`<X.Background><SolidColorBrush/></X.Background>`), `LinearGradientBrush`.
+
+### Команды и горячие клавиши
+
+```go
+vm.SaveCommand = widget.NewRelayCommand(func() { /* ... */ })
+```
+
+```xml
+<Canvas.InputBindings>
+    <KeyBinding Modifiers="Ctrl" Key="S" Command="{Binding SaveCommand}"/>
+</Canvas.InputBindings>
+<Button Content="Save" Command="{Binding SaveCommand}"/>
+```
+
+### Локализация: язык интерфейса ≠ раскладка клавиатуры
+
+Это **две независимые оси**:
+
+| Что | API | Назначение |
+|---|---|---|
+| Язык интерфейса | `SetLanguage` / `Language` / `AddLanguageListener` | язык **надписей**; управляет `Tr` и `{Loc}` |
+| Раскладка клавиатуры | `SetLocale` / `Locale` (+ бейдж/applier ОС) | язык **ввода** текста |
+
+Приложение может быть на русском, а ввод вестись на английском/китайском —
+смена одного не меняет другое.
+
+```go
+widget.RegisterStrings("EN", map[string]string{"Greeting": "Hello", "Save": "Save"})
+widget.RegisterStrings("RU", map[string]string{"Greeting": "Привет", "Save": "Сохранить"})
+widget.SetFallbackLanguage("EN")
+widget.SetLanguage("RU")
+widget.Tr("Greeting")            // "Привет" (нет перевода → откат на EN → сам ключ)
+widget.Trf("Count", 5)           // printf: "Count"="Элементов: %d" → "Элементов: 5"
+widget.LoadStringsDir("i18n")    // ru.json, en.json → таблицы по имени файла
+```
+
+В XAML — markup `{Loc Key}`, обновляется **вживую** при `SetLanguage`:
+
+```xml
+<TextBlock Text="{Loc Greeting}"/>
+<Button Content="{Loc Save}"/>
+```
+
+**Обратная совместимость:** обычные строки не трогаются — переводится только то,
+что помечено `{Loc ...}`; без таблиц `Tr` возвращает сам ключ.
+
+### Валидация (IDataErrorInfo)
+
+Модель `DataContext` реализует `widget.DataErrorInfo`; привязка с
+`ValidatesOnDataErrors=True` после записи спрашивает текст ошибки и переводит
+виджет в состояние ошибки (красная рамка + подсказка).
+
+```go
+func (m *Form) DataError(prop string) string { // "" == корректно
+    if prop == "Email" && !strings.Contains(m.Email, "@") {
+        return "E-mail должен содержать «@»"
+    }
+    return ""
+}
+```
+
+```xml
+<TextBox Text="{Binding Email, Mode=TwoWay, ValidatesOnDataErrors=True}"/>
+```
+
+`scope.Validate() bool` перепроверяет все валидируемые привязки (удобно перед
+сохранением формы).
+
+### CollectionView (сортировка/фильтр/группировка)
+
+```go
+view := widget.NewCollectionView(people)          // *ObservableCollection или срез
+view.SetFilter(func(it any) bool { return it.(*Person).Age >= 18 })
+view.SetSort(
+    widget.SortDescription{Property: "City"},
+    widget.SortDescription{Property: "Age", Direction: widget.Descending},
+)
+view.SetGroup("City")
+view.Items()    // текущее представление
+view.Groups()   // []CollectionViewGroup{Name, Items}
+```
+
+`ItemsControl` и `VirtualizingItemsControl`, привязанные к `CollectionView`,
+перестраиваются при изменении фильтра/сортировки/группы.
+
+### Подсказки, курсоры, индикатор локали
+
+- `ToolTip="..."` на любом виджете; задержка/вкл-выкл через
+  `eng.SetTooltipsEnabled`/`SetTooltipDelay`.
+- Курсоры мыши: виджеты реализуют `Cursor() widget.Cursor` (TextBox → I-beam,
+  GridSplitter → resize); `eng.CursorAt(x, y)`.
+- Индикатор раскладки в окнах/диалогах — свойство `ShowLocaleIndicator`,
+  контекстное меню переключения.
+
+### Шрифты
+
+В комплекте свободные шрифты Roboto (по умолчанию), Open Sans, Inter. Авто-загрузка
+из `assets/fonts/`, цепочка фолбэка системных шрифтов для символов/эмодзи (нет
+«тофу»).
+
+```go
+eng.SetDefaultFont("Inter")
+eng.RegisterFontFile("Roboto", path)
+eng.RegisterFontDir("my/fonts")
+eng.AvailableFonts()
+```
+
+```xml
+<TextBlock FontFamily="Roboto" FontSize="16"/>
 ```
 
 ---

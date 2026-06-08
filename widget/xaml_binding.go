@@ -86,6 +86,7 @@ type bindingSpec struct {
 	converterKey string // ключ зарегистрированного IValueConverter (или "")
 	elementName  string // источник {Binding ElementName=...} (или "")
 	relativeSelf bool   // {Binding ..., RelativeSource={RelativeSource Self}}
+	validates    bool   // ValidatesOnDataErrors=True — проверять через DataErrorInfo
 }
 
 // pendingBinding — привязка, ожидающая резолва имени → виджета после build.
@@ -160,6 +161,38 @@ type itemsTarget struct {
 	baseDir    string
 }
 
+// pendingLoc — {Loc Key} на свойстве элемента, ожидающий резолва имени → виджета.
+type pendingLoc struct {
+	name string
+	prop string
+	key  string
+}
+
+// locTarget — связанная локализованная строка (виджет + свойство + ключ).
+type locTarget struct {
+	w    Widget
+	prop string
+	key  string
+}
+
+// pendingVirtual — VirtualizingItemsControl, ожидающий резолва имени → виджета.
+type pendingVirtual struct {
+	name       string
+	template   xElement
+	sourcePath string
+	env        *xamlEnv
+}
+
+// virtualTarget — связанный VirtualizingItemsControl с шаблоном строки.
+type virtualTarget struct {
+	vic        *VirtualizingItemsControl
+	template   xElement
+	sourcePath string
+	env        *xamlEnv
+	reg        map[string]Widget
+	baseDir    string
+}
+
 // BindingScope управляет набором привязок одного загруженного XAML-дерева.
 type BindingScope struct {
 	mu       sync.Mutex
@@ -168,6 +201,8 @@ type BindingScope struct {
 	elemTgts []elemBindingTarget
 	triggers []triggerTarget
 	items    []itemsTarget
+	virtuals []virtualTarget
+	locs     []locTarget
 	cmdTgts  []commandTarget
 	reg      map[string]Widget
 	baseDir  string
@@ -227,6 +262,21 @@ func newBindingScope(ctx interface{}, env *xamlEnv, reg map[string]Widget, baseD
 			})
 		}
 	}
+	for _, pv := range env.virtuals {
+		if w, ok := reg[pv.name]; ok {
+			if vic, ok2 := w.(*VirtualizingItemsControl); ok2 {
+				s.virtuals = append(s.virtuals, virtualTarget{
+					vic: vic, template: pv.template, sourcePath: pv.sourcePath,
+					env: pv.env, reg: reg, baseDir: baseDir,
+				})
+			}
+		}
+	}
+	for _, pl := range env.locs {
+		if w, ok := reg[pl.name]; ok {
+			s.locs = append(s.locs, locTarget{w: w, prop: pl.prop, key: pl.key})
+		}
+	}
 	return s
 }
 
@@ -240,9 +290,73 @@ func (s *BindingScope) activate() {
 	s.wireElementSources()
 	s.wireTriggerSources()
 	s.wireItems()
+	s.wireVirtuals()
+	s.wireLocs()
 	s.wireCommands()
 	s.subscribe()
 	s.Refresh()
+	s.Validate() // начальная проверка ValidatesOnDataErrors-привязок
+}
+
+// wireLocs применяет локализованные строки {Loc Key} и подписывается на смену
+// ЯЗЫКА ИНТЕРФЕЙСА (не раскладки клавиатуры) для динамического перевода.
+func (s *BindingScope) wireLocs() {
+	if len(s.locs) == 0 {
+		return
+	}
+	s.applyLocs()
+	AddLanguageListener(func(string) { s.applyLocs() })
+}
+
+// applyLocs устанавливает текущие переводы во все {Loc}-цели.
+func (s *BindingScope) applyLocs() {
+	s.mu.Lock()
+	locs := make([]locTarget, len(s.locs))
+	copy(locs, s.locs)
+	s.mu.Unlock()
+	for _, lt := range locs {
+		setWidgetProperty(lt.w, lt.prop, Tr(lt.key))
+	}
+}
+
+// wireVirtuals настраивает фабрику строк VirtualizingItemsControl (по шаблону
+// DataTemplate) и заполняет элементы из источника, подписываясь на изменения.
+func (s *BindingScope) wireVirtuals() {
+	for _, vt := range s.virtuals {
+		vt := vt
+		vt.vic.SetItemBuilder(func(item interface{}, _ int) Widget {
+			c := cloneXElement(&vt.template)
+			re := &xamlEnv{
+				scalars:        vt.env.scalars,
+				keyedStyles:    vt.env.keyedStyles,
+				implicitStyles: vt.env.implicitStyles,
+				inItemTemplate: true,
+			}
+			re.process(&c, item)
+			w, err := buildXAMLWidget(c, vt.reg, image.Point{}, vt.baseDir)
+			if err != nil {
+				return nil
+			}
+			return w
+		})
+		if s.ctx == nil {
+			continue
+		}
+		val, ok := dgridPkg.GetPropertyValue(s.ctx, vt.sourcePath)
+		if !ok {
+			continue
+		}
+		vic := vt.vic
+		vic.SetItems(collectionItems(val))
+		switch src := val.(type) {
+		case *CollectionView:
+			src.AddViewChanged(func() { vic.SetItems(collectionItems(val)) })
+		case *dgridPkg.ObservableCollection:
+			src.AddCollectionChanged(func(dgridPkg.CollectionChangedEvent) {
+				vic.SetItems(collectionItems(val))
+			})
+		}
+	}
 }
 
 // wireCommands присваивает Button.Command объект-команду из DataContext.
@@ -272,9 +386,13 @@ func (s *BindingScope) wireItems() {
 		if !ok {
 			continue
 		}
-		if oc, ok := val.(*dgridPkg.ObservableCollection); ok {
-			t := it
-			oc.AddCollectionChanged(func(ev dgridPkg.CollectionChangedEvent) {
+		t := it
+		switch src := val.(type) {
+		case *CollectionView:
+			// Перестроение при изменении представления (filter/sort/group/source).
+			src.AddViewChanged(func() { s.rebuildItems(t) })
+		case *dgridPkg.ObservableCollection:
+			src.AddCollectionChanged(func(ev dgridPkg.CollectionChangedEvent) {
 				s.rebuildItems(t)
 			})
 		}
@@ -443,7 +561,8 @@ func (s *BindingScope) subscribe() {
 
 // writeBack записывает значение из UI в модель (TwoWay), применяя ConvertBack.
 // Игнорируется во время Refresh, чтобы программное обновление не зациклилось.
-func (s *BindingScope) writeBack(spec bindingSpec, value interface{}) {
+// w — целевой виджет (для отображения ошибки валидации); может быть nil.
+func (s *BindingScope) writeBack(spec bindingSpec, value interface{}, w Widget) {
 	if s.updating.Load() {
 		return
 	}
@@ -454,6 +573,50 @@ func (s *BindingScope) writeBack(spec bindingSpec, value interface{}) {
 		return
 	}
 	dgridPkg.SetPropertyValue(ctx, spec.path, applyConvertBack(spec, value))
+	if spec.validates && w != nil {
+		s.validateOne(ctx, spec, w)
+	}
+}
+
+// validateOne спрашивает у модели текст ошибки для свойства spec.path и
+// применяет/снимает состояние ошибки у виджета w.
+func (s *BindingScope) validateOne(ctx interface{}, spec bindingSpec, w Widget) {
+	if !spec.validates {
+		return
+	}
+	msg := ""
+	if dei, ok := ctx.(DataErrorInfo); ok {
+		msg = dei.DataError(spec.path)
+	}
+	setValidationState(w, msg)
+}
+
+// Validate перепроверяет все TwoWay-привязки с ValidatesOnDataErrors против
+// текущей модели и возвращает true, если ошибок нет (удобно перед сохранением).
+func (s *BindingScope) Validate() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	ctx := s.ctx
+	targets := make([]bindingTarget, len(s.targets))
+	copy(targets, s.targets)
+	s.mu.Unlock()
+	ok := true
+	for _, t := range targets {
+		if !t.spec.validates {
+			continue
+		}
+		msg := ""
+		if dei, dok := ctx.(DataErrorInfo); dok {
+			msg = dei.DataError(t.spec.path)
+		}
+		setValidationState(t.w, msg)
+		if msg != "" {
+			ok = false
+		}
+	}
+	return ok
 }
 
 // wireTwoWay подключает обратную запись UI → модель для редактируемых виджетов.
@@ -463,27 +626,28 @@ func (s *BindingScope) wireTwoWay() {
 			continue
 		}
 		spec := t.spec
+		tw := t.w
 		switch strings.ToLower(t.prop) {
 		case "text":
 			if ti, ok := t.w.(*TextInput); ok {
-				ti.OnChange = func(v string) { s.writeBack(spec, v) }
+				ti.OnChange = func(v string) { s.writeBack(spec, v, tw) }
 			}
 		case "ischecked", "checked":
 			switch cw := t.w.(type) {
 			case *CheckBox:
-				cw.OnChange = func(b bool) { s.writeBack(spec, b) }
+				cw.OnChange = func(b bool) { s.writeBack(spec, b, tw) }
 			case *ToggleSwitch:
-				cw.OnChange = func(b bool) { s.writeBack(spec, b) }
+				cw.OnChange = func(b bool) { s.writeBack(spec, b, tw) }
 			case *RadioButton:
-				cw.OnChange = func(b bool) { s.writeBack(spec, b) }
+				cw.OnChange = func(b bool) { s.writeBack(spec, b, tw) }
 			}
 		case "value":
 			if sl, ok := t.w.(*Slider); ok {
-				sl.OnChange = func(v float64) { s.writeBack(spec, v) }
+				sl.OnChange = func(v float64) { s.writeBack(spec, v, tw) }
 			}
 		case "selectedindex":
 			if dd, ok := t.w.(*Dropdown); ok {
-				dd.OnChange = func(idx int, _ string) { s.writeBack(spec, idx) }
+				dd.OnChange = func(idx int, _ string) { s.writeBack(spec, idx, tw) }
 			}
 		}
 	}
@@ -743,6 +907,9 @@ func parseBindingSpec(expr string) bindingSpec {
 		if strings.Contains(rs, "Self") {
 			sp.relativeSelf = true
 		}
+	}
+	if v := bindingParam(inner, "ValidatesOnDataErrors="); v != "" {
+		sp.validates = parseXAMLBool(v)
 	}
 	if i := strings.Index(inner, "StringFormat="); i >= 0 {
 		sf := strings.TrimSpace(inner[i+len("StringFormat="):])
