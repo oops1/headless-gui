@@ -1,5 +1,7 @@
 package widget
 
+import "sync"
+
 // clipboard.go — кросс-платформенный буфер обмена.
 //
 // Абстракция для работы с системным буфером обмена.
@@ -39,10 +41,27 @@ func ClipboardSetText(s string) {
 	defaultClipboard.SetText(s)
 }
 
-// memoryClipboard — fallback реализация (в памяти, без OS интеграции).
+// UseMemoryClipboard переключает буфер обмена на детерминированную in-memory
+// реализацию (без интеграции с ОС). Предназначено для тестов и headless-сценариев,
+// где зависимость от глобального системного буфера обмена даёт нестабильность.
+func UseMemoryClipboard() {
+	SetClipboardProvider(&memoryClipboard{})
+}
+
+// memoryClipboard — реализация в памяти (без OS интеграции). Потокобезопасна.
 type memoryClipboard struct {
+	mu   sync.Mutex
 	text string
 }
 
-func (c *memoryClipboard) GetText() string  { return c.text }
-func (c *memoryClipboard) SetText(s string) { c.text = s }
+func (c *memoryClipboard) GetText() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.text
+}
+
+func (c *memoryClipboard) SetText(s string) {
+	c.mu.Lock()
+	c.text = s
+	c.mu.Unlock()
+}
