@@ -561,10 +561,10 @@ func (m *PopupMenu) OnMouseButton(e MouseEvent) bool {
 		m.closeAll()
 
 		if item.OnClick != nil {
-			go item.OnClick()
+			item.OnClick() // синхронно — меню уже закрыто, локи отпущены
 		}
 		if m.OnSelect != nil {
-			go m.OnSelect(idx, item.Text)
+			m.OnSelect(idx, item.Text)
 		}
 	}
 
@@ -659,10 +659,10 @@ func (m *PopupMenu) OnKeyEvent(e KeyEvent) {
 				}
 				m.closeAll()
 				if item.OnClick != nil {
-					go item.OnClick()
+					item.OnClick() // синхронно — меню уже закрыто, локи отпущены
 				}
 				if m.OnSelect != nil {
-					go m.OnSelect(hover, item.Text)
+					m.OnSelect(hover, item.Text)
 				}
 			}
 		}

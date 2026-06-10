@@ -27,6 +27,12 @@ type CheckBox struct {
 	OnChange func(checked bool)
 }
 
+// SetText задаёт текст метки флажка.
+func (c *CheckBox) SetText(s string) { c.Text = s }
+
+// GetText возвращает текущий текст метки.
+func (c *CheckBox) GetText() string { return c.Text }
+
 // NewCheckBox создаёт флажок с текстовой меткой.
 func NewCheckBox(text string) *CheckBox {
 	return &CheckBox{
@@ -178,7 +184,7 @@ func (cb *CheckBox) OnKeyEvent(e KeyEvent) {
 		newState := !cb.IsChecked()
 		cb.SetChecked(newState)
 		if cb.OnChange != nil {
-			go cb.OnChange(newState)
+			cb.OnChange(newState) // синхронно — единая модель с mouse-path
 		}
 	}
 }

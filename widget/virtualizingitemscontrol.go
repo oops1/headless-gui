@@ -225,6 +225,7 @@ func (v *VirtualizingItemsControl) updateVisible() {
 	for _, c := range children {
 		v.AddChild(c)
 	}
+	notifyUIChanged() // окно строк изменилось (on-demand рендер)
 }
 
 func (v *VirtualizingItemsControl) thumbRectLocked() image.Rectangle {

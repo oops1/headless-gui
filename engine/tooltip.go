@@ -49,8 +49,8 @@ func (e *Engine) recordMouse(x, y int) {
 
 // drawTooltip рисует всплывающую подсказку, если курсор достаточно долго
 // неподвижен над виджетом с непустым ToolTip. Вызывается из renderFrame
-// (под e.mu.RLock) — поэтому НЕ берёт e.mu повторно.
-func (e *Engine) drawTooltip() {
+// (под e.frameMu); canvas и root — снапшоты кадра.
+func (e *Engine) drawTooltip(c *Canvas, root widget.Widget) {
 	e.ttMu.Lock()
 	enabled := e.ttEnabled
 	hasMouse := e.ttHasMouse
@@ -64,11 +64,8 @@ func (e *Engine) drawTooltip() {
 	}
 
 	// Корень hit-теста: верхний модальный диалог или корневой виджет.
-	var root widget.Widget
 	if m := e.topModal(); m != nil {
 		root = m
-	} else {
-		root = e.root
 	}
 	if root == nil {
 		return
@@ -78,7 +75,20 @@ func (e *Engine) drawTooltip() {
 	if tip == "" {
 		return
 	}
-	e.drawTooltipBox(tip, mx, my)
+	e.drawTooltipBox(c, tip, mx, my)
+}
+
+// tooltipMayAppear — true, пока подсказка «дозревает»: курсор остановился,
+// задержка ещё не истекла (плюс один кадр сверху, чтобы успеть нарисовать
+// появившуюся подсказку). Используется on-demand циклом, чтобы не пропустить
+// момент появления tooltip без явной инвалидации.
+func (e *Engine) tooltipMayAppear(frameInterval time.Duration) bool {
+	e.ttMu.Lock()
+	defer e.ttMu.Unlock()
+	if !e.ttEnabled || !e.ttHasMouse {
+		return false
+	}
+	return time.Since(e.ttLastMove) <= e.ttDelay+frameInterval
 }
 
 // tooltipAt возвращает ToolTip самого глубокого видимого виджета под (x, y).
@@ -95,8 +105,7 @@ func tooltipAt(root widget.Widget, x, y int) string {
 }
 
 // drawTooltipBox рисует плашку подсказки рядом с курсором, не выходя за холст.
-func (e *Engine) drawTooltipBox(text string, mx, my int) {
-	c := e.canvas
+func (e *Engine) drawTooltipBox(c *Canvas, text string, mx, my int) {
 	const padX, padY = 8, 5
 	tw := c.MeasureText(text, DefaultFontSize)
 	bw := tw + padX*2

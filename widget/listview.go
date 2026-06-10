@@ -355,7 +355,6 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 	}
 
 	lv.mu.Lock()
-	defer lv.mu.Unlock()
 
 	b := lv.bounds
 
@@ -367,6 +366,7 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 				lv.dragging = true
 				lv.dragStartY = e.Y
 				lv.dragStartScr = lv.scrollY
+				lv.mu.Unlock()
 				return true
 			}
 			trackX := b.Max.X - lv.scrollbarWidth
@@ -374,6 +374,7 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 				ratio := float64(e.Y-b.Min.Y) / float64(b.Dy())
 				lv.scrollY = int(ratio * float64(lv.contentHeight()))
 				lv.clampScroll()
+				lv.mu.Unlock()
 				return true
 			}
 		}
@@ -382,17 +383,22 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 		idx := lv.itemIndexAt(e.X, e.Y)
 		if idx >= 0 {
 			lv.selected = idx
-			if lv.OnSelect != nil {
-				go lv.OnSelect(idx, lv.items[idx])
+			onSel := lv.OnSelect
+			text := lv.items[idx]
+			lv.mu.Unlock()
+			if onSel != nil {
+				onSel(idx, text) // синхронно — вне lv.mu
 			}
 			return true
 		}
 	} else {
 		if lv.dragging {
 			lv.dragging = false
+			lv.mu.Unlock()
 			return true
 		}
 	}
+	lv.mu.Unlock()
 	return false
 }
 
@@ -434,12 +440,15 @@ func (lv *ListView) OnKeyEvent(e KeyEvent) {
 		return
 	}
 	lv.mu.Lock()
-	defer lv.mu.Unlock()
 
 	count := len(lv.items)
 	if count == 0 {
+		lv.mu.Unlock()
 		return
 	}
+
+	// Отложенный вызов OnSelect — после освобождения lv.mu (синхронно).
+	fireIdx, fireText, fire := -1, "", false
 
 	switch e.Code {
 	case KeyUp:
@@ -460,8 +469,14 @@ func (lv *ListView) OnKeyEvent(e KeyEvent) {
 		lv.ensureVisible(lv.selected)
 	case KeyEnter:
 		if lv.selected >= 0 && lv.selected < count && lv.OnSelect != nil {
-			go lv.OnSelect(lv.selected, lv.items[lv.selected])
+			fireIdx, fireText, fire = lv.selected, lv.items[lv.selected], true
 		}
+	}
+	onSel := lv.OnSelect
+	lv.mu.Unlock()
+
+	if fire && onSel != nil {
+		onSel(fireIdx, fireText)
 	}
 }
 

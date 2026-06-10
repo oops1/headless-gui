@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // NumericUpDown — числовое поле со «спиннером» (стрелки вверх/вниз),
@@ -37,7 +38,7 @@ type NumericUpDown struct {
 	value       float64
 	editing     string // буфер редактирования (когда в фокусе)
 	isEditing   bool
-	focused     bool
+	focused     int32 // 0 | 1, атомарно
 	upHovered   bool
 	downHovered bool
 }
@@ -286,18 +287,18 @@ func (n *NumericUpDown) OnMouseButton(e MouseEvent) bool {
 // ─── Focusable ──────────────────────────────────────────────────────────────
 
 func (n *NumericUpDown) SetFocused(v bool) {
-	n.mu.Lock()
-	n.focused = v
-	n.mu.Unlock()
+	var i int32
+	if v {
+		i = 1
+	}
+	atomic.StoreInt32(&n.focused, i)
 	if !v {
 		n.commit() // фиксируем ввод при потере фокуса
 	}
 }
 
 func (n *NumericUpDown) IsFocused() bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return n.focused
+	return atomic.LoadInt32(&n.focused) == 1
 }
 
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
@@ -352,8 +353,12 @@ func (n *NumericUpDown) OnKeyEvent(e KeyEvent) {
 	}
 }
 
-// Cursor — поле ввода показывает I-beam.
-func (n *NumericUpDown) Cursor() Cursor {
+// Cursor — I-beam над текстовой частью, стрелка над спиннером (CursorProvider).
+func (n *NumericUpDown) Cursor(x, y int) Cursor {
+	b := n.Bounds()
+	if x >= b.Max.X-nudSpinnerWidth {
+		return CursorArrow
+	}
 	return CursorIBeam
 }
 

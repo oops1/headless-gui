@@ -72,6 +72,12 @@ type clickHandler struct {
 	fn func()
 }
 
+// SetText задаёт текст кнопки (для биндингов и программного обновления).
+func (b *Button) SetText(s string) { b.Text = s }
+
+// GetText возвращает текущий текст кнопки.
+func (b *Button) GetText() string { return b.Text }
+
 // NewButton создаёт кнопку в стиле Windows 10 Dark.
 func NewButton(text string) *Button {
 	return &Button{

@@ -38,6 +38,12 @@ var (
 	radioGroups = make(map[string][]*RadioButton)
 )
 
+// SetText задаёт текст метки переключателя.
+func (r *RadioButton) SetText(s string) { r.Text = s }
+
+// GetText возвращает текущий текст метки.
+func (r *RadioButton) GetText() string { return r.Text }
+
 // NewRadioButton создаёт переключатель с меткой и именем группы.
 func NewRadioButton(text, group string) *RadioButton {
 	rb := &RadioButton{
@@ -194,7 +200,7 @@ func (rb *RadioButton) OnKeyEvent(e KeyEvent) {
 		if !rb.IsSelected() {
 			rb.SetSelected(true)
 			if rb.OnChange != nil {
-				go rb.OnChange(true)
+				rb.OnChange(true) // синхронно — единая модель с mouse-path
 			}
 		}
 	}

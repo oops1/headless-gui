@@ -84,6 +84,10 @@ type TextInput struct {
 	// Состояние ошибки валидации (WPF Validation.HasError). "" = нет ошибки.
 	validationError string
 
+	// fireEnter взводится внутри OnKeyEvent (под t.mu) и вызывает OnEnter
+	// после освобождения мьютекса — синхронно, но без риска дедлока.
+	fireEnter bool
+
 	// OnEnter вызывается при нажатии Enter (только если AcceptsReturn=false).
 	OnEnter func()
 	// OnChange вызывается при каждом изменении текста.
@@ -258,6 +262,12 @@ func (t *TextInput) redo() {
 	t.selStart = -1
 }
 
+// NeedsAnimation — пока поле в фокусе, мигает каретка: в on-demand режиме
+// движок не должен пропускать кадры (Animated).
+func (t *TextInput) NeedsAnimation() bool {
+	return t.IsFocused()
+}
+
 // ─── ValidationAware ──────────────────────────────────────────────────────────
 
 // SetValidationError переводит поле в состояние ошибки (красная рамка) и
@@ -387,7 +397,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 			t.caretPos++
 			changed = true
 		} else if t.OnEnter != nil {
-			go t.OnEnter()
+			t.fireEnter = true // вызовем после t.mu.Unlock (в конце OnKeyEvent)
 		}
 
 	default:
@@ -474,10 +484,18 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	t.clampCaret()
 	text := string(t.runes)
 	onCh := t.OnChange
+	fireEnter := t.fireEnter
+	t.fireEnter = false
+	onEnter := t.OnEnter
 	t.mu.Unlock()
 
+	// Синхронный вызов вне t.mu: сохраняет порядок изменений (writeBack в
+	// модель идёт строго в порядке нажатий) и единую модель исполнения.
 	if changed && onCh != nil {
-		go onCh(text)
+		onCh(text)
+	}
+	if fireEnter && onEnter != nil {
+		onEnter()
 	}
 }
 
@@ -683,7 +701,7 @@ func (t *TextInput) showContextMenu(x, y int) {
 					onCh := t.OnChange
 					t.mu.Unlock()
 					if onCh != nil {
-						go onCh(text)
+						onCh(text) // синхронно — вне t.mu
 					}
 				} else {
 					t.mu.Unlock()
@@ -713,6 +731,15 @@ func (t *TextInput) showContextMenu(x, y int) {
 				t.mu.Lock()
 				t.deleteSel()
 				paste := []rune(ct)
+				if t.MaxLength > 0 { // обрезаем под лимит (как при Ctrl+V)
+					room := t.MaxLength - len(t.runes)
+					if room < 0 {
+						room = 0
+					}
+					if len(paste) > room {
+						paste = paste[:room]
+					}
+				}
 				n := len(paste)
 				ins := make([]rune, len(t.runes)+n)
 				copy(ins, t.runes[:t.caretPos])
@@ -725,7 +752,7 @@ func (t *TextInput) showContextMenu(x, y int) {
 				onCh := t.OnChange
 				t.mu.Unlock()
 				if onCh != nil {
-					go onCh(text)
+					onCh(text) // синхронно — вне t.mu
 				}
 			},
 		},

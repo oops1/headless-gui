@@ -1,9 +1,11 @@
 package tests
 
 import (
+	"image"
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v3/widget/datagrid"
 )
 
 func TestNumericUpDown_StepClamp(t *testing.T) {
@@ -54,6 +56,61 @@ func TestNumericUpDown_OnChange(t *testing.T) {
 	n.OnKeyEvent(widget.KeyEvent{Code: widget.KeyUp, Pressed: true})
 	if got != 1 {
 		t.Fatalf("OnChange: got %v want 1", got)
+	}
+}
+
+// Compile-time: NumericUpDown реализует CursorProvider.
+var _ widget.CursorProvider = (*widget.NumericUpDown)(nil)
+
+func TestNumericUpDown_CursorProvider(t *testing.T) {
+	n := widget.NewNumericUpDown()
+	n.SetBounds(image.Rect(0, 0, 100, 24))
+	// Над спиннером (последние nudSpinnerWidth=18 пикселей) — Arrow.
+	if got := n.Cursor(85, 12); got != widget.CursorArrow {
+		t.Fatalf("над спиннером Cursor = %v, want CursorArrow", got)
+	}
+	// Над текстовым полем — IBeam.
+	if got := n.Cursor(30, 12); got != widget.CursorIBeam {
+		t.Fatalf("над полем Cursor = %v, want CursorIBeam", got)
+	}
+}
+
+// nudBindingModel — модель с PropertyNotifier для теста биндинга NumericUpDown.
+type nudBindingModel struct {
+	datagrid.PropertyNotifier
+	Qty float64
+}
+
+func TestNumericUpDown_Binding(t *testing.T) {
+	m := &nudBindingModel{Qty: 42}
+
+	const xaml = `<Canvas xmlns="clr">
+		<NumericUpDown Name="n" Minimum="0" Maximum="100" Value="{Binding Qty, Mode=TwoWay}"/>
+	</Canvas>`
+
+	_, reg, scope, err := widget.LoadUIFromXAMLBindings([]byte(xaml), m)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	_ = scope
+	n := reg["n"].(*widget.NumericUpDown)
+
+	// Начальное значение из модели.
+	if n.Value() != 42 {
+		t.Fatalf("начальный Value = %v, want 42", n.Value())
+	}
+
+	// UI → модель (TwoWay writeBack синхронный).
+	n.SetValue(50)
+	if m.Qty != 50 {
+		t.Fatalf("после SetValue(50): Qty = %v, want 50", m.Qty)
+	}
+
+	// Модель → UI (через NotifyPropertyChanged).
+	m.Qty = 70
+	m.NotifyPropertyChanged(m, "Qty")
+	if n.Value() != 70 {
+		t.Fatalf("после Notify: Value = %v, want 70", n.Value())
 	}
 }
 

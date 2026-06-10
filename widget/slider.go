@@ -176,16 +176,20 @@ func (s *Slider) OnMouseButton(e MouseEvent) bool {
 		return false
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if e.Pressed {
 		s.dragging = true
+		fire := false
+		var val float64
 		newVal := s.valueFromX(e.X)
 		if newVal != s.value {
 			s.value = s.clamp(newVal)
-			if s.OnChange != nil {
-				go s.OnChange(s.value)
-			}
+			fire, val = s.OnChange != nil, s.value
+		}
+		onCh := s.OnChange
+		s.mu.Unlock()
+		if fire && onCh != nil {
+			onCh(val) // синхронно — вне s.mu
 		}
 		return true
 	}
@@ -193,6 +197,7 @@ func (s *Slider) OnMouseButton(e MouseEvent) bool {
 	// Отпускание: прекращаем drag и освобождаем захват мыши.
 	s.dragging = false
 	cm := s.capMgr
+	s.mu.Unlock()
 	if cm != nil {
 		cm.ReleaseCapture()
 	}
@@ -219,15 +224,19 @@ func (s *Slider) OnMouseMove(x, y int) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if s.dragging {
+		fire := false
+		var val float64
 		newVal := s.valueFromX(x)
 		if newVal != s.value {
 			s.value = s.clamp(newVal)
-			if s.OnChange != nil {
-				go s.OnChange(s.value)
-			}
+			fire, val = s.OnChange != nil, s.value
+		}
+		onCh := s.OnChange
+		s.mu.Unlock()
+		if fire && onCh != nil {
+			onCh(val) // синхронно — вне s.mu
 		}
 		return
 	}
@@ -237,6 +246,7 @@ func (s *Slider) OnMouseMove(x, y int) {
 	dx := x - cx
 	dy := y - cy
 	s.hovered = dx*dx+dy*dy <= s.ThumbRadius*s.ThumbRadius
+	s.mu.Unlock()
 }
 
 // OnKeyEvent обрабатывает клавиши ←/→ для изменения значения.
@@ -245,7 +255,6 @@ func (s *Slider) OnKeyEvent(e KeyEvent) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	step := (s.Max - s.Min) / 20 // 5% шаг
 	if e.Mod&ModShift != 0 {
@@ -262,11 +271,15 @@ func (s *Slider) OnKeyEvent(e KeyEvent) {
 	case KeyEnd:
 		s.value = s.Max
 	default:
+		s.mu.Unlock()
 		return
 	}
 
-	if s.OnChange != nil {
-		go s.OnChange(s.value)
+	onCh := s.OnChange
+	val := s.value
+	s.mu.Unlock()
+	if onCh != nil {
+		onCh(val) // синхронно — вне s.mu
 	}
 }
 

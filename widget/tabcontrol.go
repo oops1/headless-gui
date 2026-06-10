@@ -369,9 +369,11 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 	}
 
 	tc.mu.Lock()
-	defer tc.mu.Unlock()
 
 	// Находим вкладку по X-позиции (используем реальные ширины из Draw).
+	// Колбэк и layoutContent (сам берёт tc.mu) вызываем ПОСЛЕ Unlock.
+	clicked, changed := -1, false
+	header := ""
 	tabX := b.Min.X
 	for i := range tc.tabs {
 		if tc.tabs[i].Hidden {
@@ -382,19 +384,30 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 			tabW = tc.tabWidths[i]
 		}
 		if e.X >= tabX && e.X < tabX+tabW {
+			clicked = i
 			if tc.active != i {
 				tc.active = i
-				if tc.OnTabChange != nil {
-					go tc.OnTabChange(i, tc.tabs[i].Header)
-				}
-				// Обновляем bounds нового контента
-				go tc.layoutContent()
+				changed = true
+				header = tc.tabs[i].Header
 			}
-			return true
+			break
 		}
 		tabX += tabW
 	}
-	return false
+	onTab := tc.OnTabChange
+	tc.mu.Unlock()
+
+	if clicked < 0 {
+		return false
+	}
+	if changed {
+		// Обновляем bounds нового контента (layoutContent берёт tc.mu сам).
+		tc.layoutContent()
+		if onTab != nil {
+			onTab(clicked, header) // синхронно — вне tc.mu
+		}
+	}
+	return true
 }
 
 // OnMouseMove обрабатывает hover по вкладкам.

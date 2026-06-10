@@ -1275,6 +1275,31 @@ when the filter/sort/group changes.
 - Keyboard-layout indicator in windows/dialogs — `ShowLocaleIndicator` property
   with a switch context menu.
 
+### Render-on-demand and invalidation
+
+By default the engine redraws every tick (unchanged behavior). On-demand mode
+skips frames while the UI is unchanged — near-zero idle CPU:
+
+```go
+eng.SetRenderOnDemand(true)
+
+eng.Invalidate()        // mark the frame changed (cheap, atomic)
+eng.InvalidateRect(r)   // declare a changed region — the frame's diff is
+                        // limited to tiles touching it
+eng.RenderCount()       // frames actually rendered (diagnostics)
+```
+
+Tracked automatically: input events and focus, SetRoot/SetTheme/SetResolution/
+modals, the data layer (binding Refresh, `{Loc}`, live collections,
+locale/language switches), the blinking caret (`widget.Animated`) and a
+"ripening" tooltip. An explicit `Invalidate()` is only needed when mutating
+widgets directly from app code in on-demand mode.
+
+Locking: a frame no longer holds the engine's main mutex — `SetRoot`/event
+dispatch are never blocked by rendering; structural operations (SetResolution,
+RegisterFont*, SetTheme) serialize with the frame via a dedicated internal
+mutex.
+
 ### Fonts
 
 Bundled free fonts: Roboto (default), Open Sans, Inter. Auto-loaded from

@@ -1565,7 +1565,13 @@ root, reg, scope, err := widget.LoadUIFromXAMLBindings(xamlBytes, vm)
   `Slider`, `ComboBox.SelectedIndex` (a feedback-loop guard prevents cycles).
 - `BindingScope.SetDataContext(obj)` / `.Refresh()` for manual control. Bound
   properties: `Text`/`Content`, `IsChecked`, `Value`, `Foreground`,
-  `Background`, `IsEnabled`, `Visibility`, `ToolTip`, `SelectedIndex`.
+  `Background`, `IsEnabled`, `Visibility`, `ToolTip`, `SelectedIndex`,
+  `IsExpanded` (Expander), `Header` (Expander/GroupBox),
+  `Value` (NumericUpDown — TwoWay-ready).
+- **`BindingScope.Dispose()`** — unsubscribes from model and language listener.
+  Call when the loaded XAML tree is discarded (UI reload) to prevent leaks.
+- **Duplicate-free subscriptions**: `SetDataContext` can be called repeatedly
+  with the same model — no duplicate `PropertyChanged` handlers are created.
 
 **Not yet (next increments):** `{RelativeSource}`/`{TemplateBinding}`,
 `ControlTemplate`/`ContentPresenter`, property `Trigger`/`EventTrigger`,
@@ -1891,9 +1897,11 @@ func (f *Form) DataError(prop string) string { // "" == valid
 - `TextInput.ErrorBorder` is the error colour (default Win10 red `#E81123`);
   `TextInput.SetValidationError("")` clears the state.
 
-> Note: `TextInput.OnChange` is dispatched asynchronously (`go onChange`), so the
-> red border / model write-back land a moment after the keystroke (one frame in
-> practice). This is intentional to keep typing non-blocking.
+> Note: all widget callbacks (`OnChange`, `OnSelect`, `OnClick`, `OnTabChange`,
+> DataGrid events, …) are dispatched **synchronously**, outside the widget's own
+> mutex — write-backs reach the model in exact input order, and a handler may
+> safely call back into the widget. Don't block inside a handler (it runs on the
+> event thread); spawn your own goroutine for slow work.
 
 ### CollectionView (sort / filter / group)
 
@@ -1990,6 +1998,42 @@ v.BindCollectionView(view)                 // or: auto-refresh from a Collection
 
 ---
 
+## Render-on-demand & invalidation
+
+By default the engine redraws every tick (full backward compatibility). Enable
+on-demand rendering to skip frames while the UI is unchanged — near-zero CPU on
+idle:
+
+```go
+eng.SetRenderOnDemand(true)
+
+eng.Invalidate()                 // mark the whole frame changed (cheap, atomic)
+eng.InvalidateRect(r)            // declare a changed region; the next frame's
+                                 // tile-diff is limited to tiles touching it
+eng.RenderCount()                // frames actually rendered (diagnostics)
+```
+
+What is tracked automatically (no Invalidate needed):
+- input events (`SendMouseMove/SendMouseButton/SendKeyEvent`), `SetFocus`;
+- `SetRoot`, `SetTheme`, `SetResolution`, `SetBackgroundFile`, modals;
+- the data layer via `widget.SetUIChangeNotifier` (registered by the engine):
+  `BindingScope.Refresh`, `{Loc}` re-translation, live `ItemsControl` /
+  `VirtualizingItemsControl` rebuilds, `SetLocale`/`SetLanguage`;
+- time-driven visuals: while the focused widget implements `widget.Animated`
+  with `NeedsAnimation()==true` (TextInput caret, DataGrid cell editor) or a
+  tooltip is "ripening", frames keep flowing.
+
+**You must call `Invalidate()` yourself** only when mutating widgets directly
+from app code in on-demand mode (e.g. `label.SetText` from your own goroutine).
+In the default mode nothing changes.
+
+Locking note: a frame no longer holds the engine's main lock — `SetRoot`/`Root`
+and event dispatch are never blocked by rendering. Structural operations
+(`SetResolution`, `RegisterFont*`, `SetTheme`, `SetBackgroundFile`) serialize
+with the frame via an internal `frameMu`.
+
+---
+
 ## Fonts
 
 The engine ships with the built-in **Go Regular** font and registers bold/italic
@@ -2020,6 +2064,74 @@ XAML uses the family name via `FontFamily`:
 Inter (SIL OFL-1.1). These are free/redistributable but **not MIT** — fonts are
 licensed under OFL or Apache, both permissive. **Google Sans is proprietary and
 must not be bundled** — use Inter instead.
+
+---
+
+## New APIs (v3 increments)
+
+### PropertyNotifier — Handle-based subscriptions
+
+```go
+// Register handler; returns an ID for later removal.
+id := notifier.AddPropertyChangedHandle(handler)
+notifier.RemovePropertyChangedHandle(id)
+notifier.HandlerCount() int  // number of active subscriptions (useful in tests)
+```
+
+Old `AddPropertyChanged` / `RemovePropertyChanged` still work (no breaking change).
+
+### Language/Locale listener removal
+
+```go
+id := widget.AddLanguageListener(fn)   // returns int id
+widget.RemoveLanguageListener(id)
+
+id := widget.AddLocaleListener(fn)
+widget.RemoveLocaleListener(id)
+```
+
+### BindingScope.Dispose
+
+```go
+scope.Dispose()  // unsubscribes from model + language listener
+```
+
+Call when the XAML tree is replaced (e.g., on navigation) to prevent memory leaks.
+
+### XAML Cursor attribute
+
+Any widget in XAML can declare its cursor shape:
+
+```xml
+<Button Cursor="Hand"/>
+<TextInput Cursor="IBeam"/>
+<GridSplitter Cursor="SizeWE"/>
+```
+
+Values: `Arrow`, `IBeam`, `Hand`, `SizeWE`, `SizeNS`.
+Programmatically: `widget.SetCursor(c Cursor)` / `widget.CursorOverride() (Cursor, bool)` on `Base`.
+
+### NumericUpDown bindings
+
+```xml
+<NumericUpDown Value="{Binding Qty, Mode=TwoWay}" Minimum="0" Maximum="100"/>
+```
+
+`Value` is now fully bindable (OneWay, TwoWay, ElementName source).
+
+### Expander / GroupBox bindings
+
+```xml
+<Expander Header="{Binding Title}" IsExpanded="{Binding Open}"/>
+<GroupBox Header="{Binding SectionName}"/>
+```
+
+`IsExpanded` can also serve as an ElementName source for other widgets.
+
+### SetText API on interactive widgets
+
+`Button`, `CheckBox`, `RadioButton`, `ToggleSwitch` now expose `SetText(s string)` / `GetText() string`
+for uniform programmatic text updates (XAML binding internally calls `SetText`).
 
 ---
 

@@ -164,6 +164,31 @@ type DataGrid struct {
 	mu      sync.Mutex
 	focused bool
 	dirty   bool // layout нужно пересчитать
+
+	// pending — колбэки, накопленные под dg.mu; вызываются синхронно ПОСЛЕ
+	// освобождения мьютекса (см. firePending) — обработчик может безопасно
+	// дёргать методы DataGrid, не рискуя дедлоком.
+	pending []func()
+}
+
+// IsEditing сообщает, идёт ли сейчас редактирование ячейки (мигает каретка).
+func (dg *DataGrid) IsEditing() bool {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	return dg.isEditing
+}
+
+// firePending вызывает накопленные колбэки вне dg.mu. Регистрируется через
+// defer ДО dg.mu.Lock() в публичных обработчиках событий (LIFO: Unlock
+// выполнится раньше).
+func (dg *DataGrid) firePending() {
+	dg.mu.Lock()
+	fs := dg.pending
+	dg.pending = nil
+	dg.mu.Unlock()
+	for _, f := range fs {
+		f()
+	}
 }
 
 // ─── Конструктор ───────────────────────────────────────────────────────────
@@ -915,6 +940,7 @@ func (dg *DataGrid) drawScrollbar(ctx DrawContextBridge) {
 // OnMouseButton обрабатывает нажатие/отпускание кнопки мыши.
 // Возвращает true, если событие поглощено.
 func (dg *DataGrid) OnMouseButton(x, y int, button int, pressed bool) bool {
+	defer dg.firePending() // LIFO: выполнится ПОСЛЕ Unlock — колбэки вне dg.mu
 	dg.mu.Lock()
 	defer dg.mu.Unlock()
 
@@ -1004,6 +1030,7 @@ func (dg *DataGrid) OnMouseButton(x, y int, button int, pressed bool) bool {
 // вызывается ПОСЛЕ Unlock — обработчик может безопасно дёргать
 // SetItemsSource / SelectRow / Refresh, не вызывая deadlock.
 func (dg *DataGrid) OnMouseDoubleClick(x, y int) bool {
+	defer dg.firePending() // колбэки — после явных Unlock внутри
 	dg.mu.Lock()
 
 	row := dg.rowIndexAtY(y)
@@ -1128,16 +1155,15 @@ func (dg *DataGrid) selectRow(row int, shift, ctrl bool) {
 	dg.focusRow = row
 	dg.ensureVisible(row)
 
-	// Callback
+	// Callback — откладываем до выхода из-под dg.mu (см. firePending).
 	if dg.OnSelectionChanged != nil {
 		var item interface{}
 		if row >= 0 && row < len(dg.sortedIdx) {
 			item = dg.itemsSource.Get(dg.sortedIdx[row])
 		}
-		go dg.OnSelectionChanged(SelectionChangedEvent{
-			SelectedIndex: row,
-			SelectedItem:  item,
-		})
+		cb := dg.OnSelectionChanged
+		ev := SelectionChangedEvent{SelectedIndex: row, SelectedItem: item}
+		dg.pending = append(dg.pending, func() { cb(ev) })
 	}
 }
 
@@ -1207,9 +1233,11 @@ func (dg *DataGrid) commitEdit() {
 	// Записываем значение в модель
 	col.SetCellValue(item, dg.editingValue)
 
-	// Уведомляем о завершении редактирования строки
+	// Уведомляем о завершении редактирования строки — после выхода из-под dg.mu.
 	if dg.OnRowEditEnding != nil {
-		go dg.OnRowEditEnding(dataIdx, item)
+		cb := dg.OnRowEditEnding
+		di, it := dataIdx, item
+		dg.pending = append(dg.pending, func() { cb(di, it) })
 	}
 
 	dg.isEditing = false
@@ -1231,6 +1259,7 @@ func (dg *DataGrid) OnKeyEvent(code int, char rune, pressed bool, shift, ctrl bo
 		return
 	}
 
+	defer dg.firePending() // LIFO: выполнится ПОСЛЕ Unlock — колбэки вне dg.mu
 	dg.mu.Lock()
 	defer dg.mu.Unlock()
 

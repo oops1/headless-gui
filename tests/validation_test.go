@@ -8,7 +8,9 @@ import (
 	"github.com/oops1/headless-gui/v3/widget/datagrid"
 )
 
-// waitFor опрашивает cond до 1 с (OnChange у TextInput асинхронный — go onCh).
+// waitFor опрашивает cond до 1 с (исторически OnChange был асинхронным;
+// теперь он синхронный и условие истинно сразу — хелпер оставлен для
+// устойчивости тестов).
 func waitFor(cond func() bool) bool {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -20,13 +22,11 @@ func waitFor(cond func() bool) bool {
 	return cond()
 }
 
-// typeKeys печатает строку посимвольно с паузой — TextInput.OnChange асинхронный
-// (go onCh), поэтому моментальный ввод в цикле может дать гонку порядка записи;
-// человек печатает с интервалами, что воспроизводим здесь.
+// typeKeys печатает строку посимвольно. OnChange синхронный, поэтому паузы
+// между нажатиями не нужны — writeBack идёт строго в порядке нажатий.
 func typeKeys(ti *widget.TextInput, s string) {
 	for _, r := range s {
 		ti.OnKeyEvent(widget.KeyEvent{Rune: r, Pressed: true})
-		time.Sleep(8 * time.Millisecond)
 	}
 }
 
@@ -86,6 +86,27 @@ func TestValidation_ClearsWhenValid(t *testing.T) {
 	}
 }
 
+// Регрессия: при мгновенном вводе (без пауз) TwoWay-запись в модель идёт
+// строго в порядке нажатий — раньше go-горутины OnChange могли завершаться
+// не по порядку и модель оседала как "Jo" вместо "John".
+func TestValidation_InstantTypingOrdered(t *testing.T) {
+	m := &vForm{Name: ""}
+	_, reg, _, err := widget.LoadUIFromXAMLBindings([]byte(valXAML), m)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	ti := reg["nameBox"].(*widget.TextInput)
+	for _, r := range "John Ronald Reuel Tolkien" {
+		ti.OnKeyEvent(widget.KeyEvent{Rune: r, Pressed: true})
+	}
+	if m.Name != "John Ronald Reuel Tolkien" {
+		t.Fatalf("модель отстала/перепуталась: %q", m.Name)
+	}
+	if ti.ValidationError() != "" {
+		t.Fatalf("валидная строка, но ошибка: %q", ti.ValidationError())
+	}
+}
+
 func TestValidation_ReappearsWhenInvalid(t *testing.T) {
 	m := &vForm{Name: "John"}
 	_, reg, _, err := widget.LoadUIFromXAMLBindings([]byte(valXAML), m)
@@ -98,7 +119,6 @@ func TestValidation_ReappearsWhenInvalid(t *testing.T) {
 	}
 	// Стираем до "Jo" (len 2) → снова ошибка.
 	ti.OnKeyEvent(widget.KeyEvent{Code: widget.KeyBackspace, Pressed: true}) // Joh
-	time.Sleep(8 * time.Millisecond)
 	ti.OnKeyEvent(widget.KeyEvent{Code: widget.KeyBackspace, Pressed: true}) // Jo
 	if !waitFor(func() bool { return ti.ValidationError() != "" }) {
 		t.Fatal("error should reappear for short Name")

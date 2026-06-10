@@ -279,7 +279,7 @@ func (d *Dropdown) OnKeyEvent(e KeyEvent) {
 	}
 }
 
-// fireOnChange вызывает OnChange в горутине (если задан).
+// fireOnChange вызывает OnChange синхронно (если задан) — вне d.mu.
 func (d *Dropdown) fireOnChange(idx int) {
 	if d.OnChange == nil {
 		return
@@ -290,7 +290,7 @@ func (d *Dropdown) fireOnChange(idx int) {
 		text = d.items[idx]
 	}
 	d.mu.RUnlock()
-	go d.OnChange(idx, text)
+	d.OnChange(idx, text)
 }
 
 // BaseBounds возвращает базовый прямоугольник заголовка (без выпавшего списка).
@@ -354,7 +354,7 @@ func (d *Dropdown) OnMouseButton(e MouseEvent) bool {
 					text = d.items[i]
 				}
 				d.mu.RUnlock()
-				go d.OnChange(i, text)
+				d.OnChange(i, text) // синхронно — вне d.mu
 			}
 			return true
 		}

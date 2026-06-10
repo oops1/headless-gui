@@ -276,7 +276,7 @@ func (mb *MenuBar) openSubmenu(idx int) {
 		// Нет подменю — просто выполняем OnClick.
 		mb.closeSubmenu()
 		if item.OnClick != nil {
-			go item.OnClick()
+			item.OnClick() // синхронно — вне mb.mu
 		}
 		return
 	}
