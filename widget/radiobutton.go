@@ -124,21 +124,34 @@ func (rb *RadioButton) Draw(ctx DrawContext) {
 	cx := b.Min.X + diam/2
 	cy := b.Min.Y + b.Dy()/2
 
-	// Фон кружка
-	bg := rb.CircleBG
-	if rb.IsSelected() {
-		bg = rb.AccentBG
-	} else if rb.IsHovered() {
-		bg = rb.HoverBG
-	}
+	st := currentStyle()
+	if st.Classic3D {
+		// Классика Win2000: утопленный белый круг (как чекбокс) — двойное
+		// направленное кольцо: тёмные дуги сверху-слева, светлые снизу-справа,
+		// чёрная точка выбора.
+		drawFilledCircle(ctx, cx, cy, diam/2-1, rb.CircleBG)
+		drawSunkenRing(ctx, cx, cy, diam/2, st.BevelShadow, st.BevelLight)
+		drawSunkenRing(ctx, cx, cy, diam/2-1, st.BevelDark, win10.WindowBG)
+		if rb.IsSelected() {
+			drawFilledCircle(ctx, cx, cy, 3, win10.CheckMark) // классика: тёмная точка
+		}
+	} else {
+		// Фон кружка
+		bg := rb.CircleBG
+		if rb.IsSelected() {
+			bg = rb.AccentBG
+		} else if rb.IsHovered() {
+			bg = rb.HoverBG
+		}
 
-	// Рисуем закрашенный круг
-	drawFilledCircle(ctx, cx, cy, diam/2, bg)
-	drawCircleOutline(ctx, cx, cy, diam/2, rb.CircleBord)
+		// Рисуем закрашенный круг
+		drawFilledCircle(ctx, cx, cy, diam/2, bg)
+		drawCircleOutline(ctx, cx, cy, diam/2, rb.CircleBord)
 
-	// Точка выбора (маленький белый кружок внутри)
-	if rb.IsSelected() {
-		drawFilledCircle(ctx, cx, cy, 4, rb.DotColor)
+		// Точка выбора (маленький белый кружок внутри)
+		if rb.IsSelected() {
+			drawFilledCircle(ctx, cx, cy, 4, rb.DotColor)
+		}
 	}
 
 	// Текст
@@ -146,6 +159,12 @@ func (rb *RadioButton) Draw(ctx DrawContext) {
 	textX := b.Min.X + diam + textPad
 	textY := b.Min.Y + (b.Dy()-13)/2
 	ctx.DrawText(rb.Text, textX, textY, rb.TextColor)
+
+	// Классика Win2000: пунктирная рамка фокуса вокруг текста метки.
+	if st.Classic3D && rb.IsFocused() && rb.Text != "" {
+		tw := ctx.MeasureText(rb.Text, DefaultFontSizePt)
+		drawDottedRect(ctx, textX-2, textY-2, tw+5, 17, st.BevelDark)
+	}
 
 	rb.drawChildren(ctx)
 	rb.drawDisabledOverlay(ctx)

@@ -827,19 +827,41 @@ func (t *TextInput) Draw(ctx DrawContext) {
 		return
 	}
 
-	// Фон
-	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.Background)
+	st := currentStyle()
 
-	// Рамка
-	if hasError {
-		// Ошибка валидации — красная рамка (двойная для заметности).
-		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.ErrorBorder)
-		ctx.DrawBorder(b.Min.X+1, b.Min.Y+1, b.Dx()-2, b.Dy()-2, t.ErrorBorder)
-	} else if isFocused {
-		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.FocusBorder)
-		ctx.DrawHLine(b.Min.X, b.Max.Y-2, b.Dx(), t.FocusBorder)
-	} else {
-		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.BorderColor)
+	// Фон + рамка по стилю темы.
+	switch {
+	case st.Classic3D:
+		// Классика: утопленное поле (sunken bevel), прямые углы.
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.Background)
+		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		if hasError {
+			ctx.DrawBorder(b.Min.X+2, b.Min.Y+2, b.Dx()-4, b.Dy()-4, t.ErrorBorder)
+		}
+	case st.ControlCorner > 0:
+		cr := st.ControlCorner
+		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, t.Background)
+		switch {
+		case hasError:
+			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, t.ErrorBorder)
+			ctx.DrawRoundBorder(b.Min.X+1, b.Min.Y+1, b.Dx()-2, b.Dy()-2, cr-1, t.ErrorBorder)
+		case isFocused:
+			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, t.FocusBorder)
+		default:
+			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, t.BorderColor)
+		}
+	default:
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.Background)
+		if hasError {
+			// Ошибка валидации — красная рамка (двойная для заметности).
+			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.ErrorBorder)
+			ctx.DrawBorder(b.Min.X+1, b.Min.Y+1, b.Dx()-2, b.Dy()-2, t.ErrorBorder)
+		} else if isFocused {
+			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.FocusBorder)
+			ctx.DrawHLine(b.Min.X, b.Max.Y-2, b.Dx(), t.FocusBorder)
+		} else {
+			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.BorderColor)
+		}
 	}
 
 	const sizePt = DefaultFontSizePt

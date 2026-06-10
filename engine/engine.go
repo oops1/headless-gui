@@ -396,20 +396,18 @@ func (e *Engine) SetTheme(t *widget.Theme) {
 	root := e.root
 	e.mu.RUnlock()
 	if root != nil {
-		applyThemeToTree(root, t)
+		widget.ApplyThemeTree(root, t)
+	}
+	// Модальные виджеты живут вне дерева root — темизируем отдельно.
+	e.modMu.Lock()
+	modals := make([]widget.ModalWidget, len(e.modals))
+	copy(modals, e.modals)
+	e.modMu.Unlock()
+	for _, m := range modals {
+		widget.ApplyThemeTree(m, t)
 	}
 	e.frameMu.Unlock()
 	e.Invalidate()
-}
-
-// applyThemeToTree рекурсивно применяет тему к дереву виджетов.
-func applyThemeToTree(w widget.Widget, t *widget.Theme) {
-	if th, ok := w.(widget.Themeable); ok {
-		th.ApplyTheme(t)
-	}
-	for _, child := range w.Children() {
-		applyThemeToTree(child, t)
-	}
 }
 
 // Start запускает цикл рендеринга в отдельной горутине.

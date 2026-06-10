@@ -54,16 +54,43 @@ func (pb *ProgressBar) Draw(ctx DrawContext) {
 		return
 	}
 	v := pb.Value()
+	st := currentStyle()
 
-	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), pb.Background)
-
-	fillW := int(math.Round(float64(b.Dx()) * v))
-	if fillW > 0 {
-		ctx.FillRect(b.Min.X, b.Min.Y, fillW, b.Dy(), pb.FillColor)
-	}
-
-	if pb.ShowBorder {
-		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), pb.BorderColor)
+	switch {
+	case st.Classic3D:
+		// Классика: утопленная дорожка, заполнение «блоками» Win2000.
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), pb.Background)
+		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		innerW := b.Dx() - 6
+		fillW := int(math.Round(float64(innerW) * v))
+		blockW, gap := 8, 2
+		for x := 0; x+blockW <= fillW; x += blockW + gap {
+			ctx.FillRect(b.Min.X+3+x, b.Min.Y+3, blockW, b.Dy()-6, pb.FillColor)
+		}
+	case st.ControlCorner > 0:
+		cr := st.ControlCorner
+		if cr > b.Dy()/2 {
+			cr = b.Dy() / 2
+		}
+		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, pb.Background)
+		fillW := int(math.Round(float64(b.Dx()) * v))
+		if fillW > cr*2 {
+			ctx.FillRoundRect(b.Min.X, b.Min.Y, fillW, b.Dy(), cr, pb.FillColor)
+		} else if fillW > 0 {
+			ctx.FillRect(b.Min.X+1, b.Min.Y+1, fillW, b.Dy()-2, pb.FillColor)
+		}
+		if pb.ShowBorder {
+			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, pb.BorderColor)
+		}
+	default:
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), pb.Background)
+		fillW := int(math.Round(float64(b.Dx()) * v))
+		if fillW > 0 {
+			ctx.FillRect(b.Min.X, b.Min.Y, fillW, b.Dy(), pb.FillColor)
+		}
+		if pb.ShowBorder {
+			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), pb.BorderColor)
+		}
 	}
 
 	pb.drawChildren(ctx)

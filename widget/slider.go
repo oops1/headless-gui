@@ -122,29 +122,45 @@ func (s *Slider) Draw(ctx DrawContext) {
 	}
 
 	tr := s.trackRect()
+	st := currentStyle()
 
-	// Дорожка (фон)
-	ctx.FillRoundRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), 2, s.TrackBG)
+	if st.Classic3D {
+		// Классика Win2000: утопленный жёлоб + прямоугольный выпуклый ползунок.
+		ctx.FillRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), s.TrackBG)
+		drawBevelSunken(ctx, tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), st)
+		fillW := int(math.Round(s.ratio() * float64(tr.Dx())))
+		if fillW > 4 {
+			ctx.FillRect(tr.Min.X+2, tr.Min.Y+2, fillW-4, tr.Dy()-4, s.FillColor)
+		}
+		cx, cy := s.thumbCenter()
+		tw, th := 11, s.ThumbRadius*2+4
+		tx, ty := cx-tw/2, cy-th/2
+		ctx.FillRect(tx, ty, tw, th, s.ThumbColor)
+		drawBevelRaised(ctx, tx, ty, tw, th, st)
+	} else {
+		// Дорожка (фон)
+		ctx.FillRoundRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), 2, s.TrackBG)
 
-	// Заполненная часть
-	fillW := int(math.Round(s.ratio() * float64(tr.Dx())))
-	if fillW > 0 {
-		ctx.FillRoundRect(tr.Min.X, tr.Min.Y, fillW, tr.Dy(), 2, s.FillColor)
-	}
+		// Заполненная часть
+		fillW := int(math.Round(s.ratio() * float64(tr.Dx())))
+		if fillW > 0 {
+			ctx.FillRoundRect(tr.Min.X, tr.Min.Y, fillW, tr.Dy(), 2, s.FillColor)
+		}
 
-	// Ползунок
-	cx, cy := s.thumbCenter()
-	thumbCol := s.ThumbColor
-	if s.hovered || s.dragging {
-		thumbCol = s.ThumbHover
-	}
-	drawFilledCircle(ctx, cx, cy, s.ThumbRadius, thumbCol)
-	drawCircleOutline(ctx, cx, cy, s.ThumbRadius, s.BorderColor)
+		// Ползунок
+		cx, cy := s.thumbCenter()
+		thumbCol := s.ThumbColor
+		if s.hovered || s.dragging {
+			thumbCol = s.ThumbHover
+		}
+		drawFilledCircle(ctx, cx, cy, s.ThumbRadius, thumbCol)
+		drawCircleOutline(ctx, cx, cy, s.ThumbRadius, s.BorderColor)
 
-	// Меньший белый кружок в центре для красоты
-	innerR := s.ThumbRadius - 3
-	if innerR > 2 {
-		drawFilledCircle(ctx, cx, cy, innerR, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		// Меньший белый кружок в центре для красоты
+		innerR := s.ThumbRadius - 3
+		if innerR > 2 {
+			drawFilledCircle(ctx, cx, cy, innerR, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		}
 	}
 
 	s.drawChildren(ctx)

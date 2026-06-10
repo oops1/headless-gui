@@ -199,15 +199,17 @@ func (p *Panel) drawWinHeader(ctx DrawContext, b image.Rectangle, hh int, bg, tc
 		// восстанавливаем фон тела панели под линией заголовка.
 		ctx.FillRect(x, y+hh, w, r, p.Background)
 	} else {
-		ctx.FillRect(x, y, w, hh, bg)
+		// Классика Win2000 — градиент navy→голубой (Theme.TitleBG2).
+		fillTitleBar(ctx, image.Rect(x, y, x+w, y+hh), bg)
 	}
 
 	// Разделительная линия
 	ctx.DrawHLine(x, y+hh-1, w, p.BorderColor)
 
 	// Текст: вертикально по центру заголовка, отступ 12px слева
+	// (в классике — жирный, как в Win2000).
 	textY := y + (hh-13)/2
-	ctx.DrawText(p.Caption, x+12, textY, tc)
+	drawTitleText(ctx, p.Caption, x+12, textY, tc)
 
 	// Индикатор локали — слева от декоративных кнопок управления (3×46px).
 	if p.ShowLocaleIndicator {
@@ -298,10 +300,13 @@ func (p *Panel) ContentBounds() image.Rectangle {
 	return b
 }
 
-// ApplyTheme применяет тему к панели (Win10-стиль — обновляет цвета панели и рамки).
+// ApplyTheme применяет тему к панели: непрозрачный фон перекрашивается в
+// PanelBG темы (как и у остальных виджетов, явные XAML-цвета заменяются при
+// SetTheme — иначе после смены темы остаются «чужие» островки).
 func (p *Panel) ApplyTheme(t *Theme) {
-	if p.UseAlpha {
+	if p.Background.A > 0 || p.UseAlpha {
 		p.Background = t.PanelBG
+		p.UseAlpha = t.PanelBG.A < 255
 	}
 	p.BorderColor = t.Border
 	// Если пользователь не задал явно — будет использоваться win10.TitleBG / win10.TitleText

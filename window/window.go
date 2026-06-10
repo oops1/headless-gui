@@ -113,6 +113,16 @@ func (win *Window) SetResizable(v bool) *Window {
 	return win
 }
 
+// Close программно закрывает окно: Run() вернётся, приложение завершится
+// штатно (аналог нажатия ×). Безопасно вызывать из обработчиков UI;
+// до Run() — no-op.
+func (win *Window) Close() {
+	win.closeRequested.Store(true)
+	if win.native != nil {
+		win.native.Close()
+	}
+}
+
 // Run открывает нативное окно и запускает цикл событий.
 // Блокирует вызывающую горутину до закрытия окна.
 // ВАЖНО: вызывать из главной горутины (main).

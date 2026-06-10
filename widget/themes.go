@@ -13,6 +13,7 @@ type Theme struct {
 	WindowBG    color.RGBA // Window.Background — основной фон окна
 	PanelBG     color.RGBA // Panel.Background, MenuBar.Background — фон панелей и менюбара
 	TitleBG     color.RGBA // Window title bar — фон заголовка окна
+	TitleBG2    color.RGBA // второй цвет градиента заголовка (A=0 — без градиента; Win2000: navy→голубой)
 	TitleText   color.RGBA // Window title bar, MenuBar.TextColor, Dialog.TitleColor — текст заголовка
 	Border      color.RGBA // Window, Panel, ListView, Dialog, ScrollView, MenuBar — рамки
 	ShadowColor color.RGBA // PopupMenu, Dialog — тень под overlay-элементами
@@ -61,6 +62,10 @@ type Theme struct {
 	DropText   color.RGBA // Dropdown, PopupMenu.TextColor — текст в списке/попапе
 	DropArrow  color.RGBA // Dropdown — стрелка раскрытия ▼
 	DropItemBG color.RGBA // Dropdown — фон выделенного пункта в списке
+
+	MenuHoverBG   color.RGBA // PopupMenu/MenuBar — фон пункта под курсором (Win2000 — navy)
+	MenuHoverText color.RGBA // PopupMenu/MenuBar — текст пункта под курсором (Win2000 — белый)
+	MenuBG        color.RGBA // PopupMenu — фон попап-меню (классика — «лицо» #D4D0C8, не белый список)
 
 	// ═══════════════════════════════════════════════════════════════════════
 	// Чекбокс (CheckBox) и Радиокнопка (RadioButton)
@@ -153,6 +158,12 @@ type Theme struct {
 	Accent    color.RGBA // ScrollView hover, Slider, ProgressBar, Focus border — акцентный цвет (Win10 blue)
 	Scrollbar color.RGBA // глобальный цвет скроллбара (fallback)
 	Disabled  color.RGBA // все виджеты — цвет текста/элементов в отключённом состоянии
+
+	// ═══════════════════════════════════════════════════════════════════════
+	// Стиль отрисовки (форма контролов: скругления, классический bevel)
+	// ═══════════════════════════════════════════════════════════════════════
+
+	Style ThemeStyle // см. themes_presets.go (Win10/Win11/Win2000/Mac)
 }
 
 // ─── Dark Theme (Windows 10 Dark Mode) ──────────────────────────────────────
@@ -197,6 +208,10 @@ func DarkTheme() *Theme {
 		DropText:   color.RGBA{R: 212, G: 212, B: 212, A: 255}, // #D4D4D4
 		DropArrow:  color.RGBA{R: 180, G: 180, B: 180, A: 255}, // стрелка
 		DropItemBG: color.RGBA{R: 0, G: 120, B: 215, A: 200},   // #0078D7 — выделенный пункт
+
+		MenuHoverBG:   color.RGBA{R: 62, G: 62, B: 70, A: 255},    // #3E3E46
+		MenuHoverText: color.RGBA{R: 230, G: 230, B: 230, A: 255}, // как DropText
+		MenuBG:        color.RGBA{R: 44, G: 44, B: 49, A: 250},    // #2C2C31 — фон попап-меню
 
 		// CheckBox / RadioButton
 		CheckBG:      color.RGBA{R: 37, G: 37, B: 38, A: 255},    // #252526
@@ -256,6 +271,9 @@ func DarkTheme() *Theme {
 		Accent:    color.RGBA{R: 0, G: 120, B: 215, A: 255},   // #0078D7 — Windows 10 blue
 		Scrollbar: color.RGBA{R: 78, G: 78, B: 78, A: 255},    // #4E4E4E
 		Disabled:  color.RGBA{R: 109, G: 109, B: 109, A: 255}, // #6D6D6D
+
+		// Стиль: плоский Win10 (прямые углы)
+		Style: ThemeStyle{Name: "Win10 Dark"},
 	}
 }
 
@@ -301,6 +319,10 @@ func LightTheme() *Theme {
 		DropText:   color.RGBA{R: 32, G: 32, B: 32, A: 255},    // #202020
 		DropArrow:  color.RGBA{R: 100, G: 100, B: 100, A: 255}, // #646464
 		DropItemBG: color.RGBA{R: 229, G: 243, B: 255, A: 255}, // #E5F3FF
+
+		MenuHoverBG:   color.RGBA{R: 229, G: 243, B: 255, A: 255}, // #E5F3FF
+		MenuHoverText: color.RGBA{R: 32, G: 32, B: 32, A: 255},    // #202020
+		MenuBG:        color.RGBA{R: 255, G: 255, B: 255, A: 255}, // белый
 
 		// CheckBox / RadioButton
 		CheckBG:      color.RGBA{R: 255, G: 255, B: 255, A: 255}, // белый
@@ -360,12 +382,30 @@ func LightTheme() *Theme {
 		Accent:    color.RGBA{R: 0, G: 120, B: 215, A: 255},   // #0078D7
 		Scrollbar: color.RGBA{R: 200, G: 200, B: 200, A: 255}, // #C8C8C8
 		Disabled:  color.RGBA{R: 170, G: 170, B: 170, A: 255}, // #AAAAAA
+
+		// Стиль: плоский Win10 (прямые углы)
+		Style: ThemeStyle{Name: "Win10 Light"},
 	}
 }
 
 // Themeable — виджет, поддерживающий применение темы.
 type Themeable interface {
 	ApplyTheme(t *Theme)
+}
+
+// ApplyThemeTree рекурсивно применяет тему к виджету и его дочерним элементам.
+// Контейнеры, скрывающие часть детей из Children() (TabControl — неактивные
+// вкладки, Expander — свёрнутое содержимое), темизируют их сами в ApplyTheme.
+func ApplyThemeTree(w Widget, t *Theme) {
+	if w == nil {
+		return
+	}
+	if th, ok := w.(Themeable); ok {
+		th.ApplyTheme(t)
+	}
+	for _, child := range w.Children() {
+		ApplyThemeTree(child, t)
+	}
 }
 
 // ApplyGlobalTheme обновляет глобальные цвета по умолчанию (используются в New*-конструкторах).
@@ -375,6 +415,7 @@ func ApplyGlobalTheme(t *Theme) {
 	win10.WindowBG = t.WindowBG
 	win10.PanelBG = t.PanelBG
 	win10.TitleBG = t.TitleBG
+	win10.TitleBG2 = t.TitleBG2
 	win10.TitleText = t.TitleText
 	win10.Border = t.Border
 	win10.ShadowColor = t.ShadowColor
@@ -408,6 +449,9 @@ func ApplyGlobalTheme(t *Theme) {
 	win10.DropText = t.DropText
 	win10.DropArrow = t.DropArrow
 	win10.DropItemBG = t.DropItemBG
+	win10.MenuHoverBG = t.MenuHoverBG
+	win10.MenuHoverText = t.MenuHoverText
+	win10.MenuBG = t.MenuBG
 
 	// CheckBox / RadioButton
 	win10.CheckBG = t.CheckBG
@@ -467,4 +511,7 @@ func ApplyGlobalTheme(t *Theme) {
 	win10.Accent = t.Accent
 	win10.Scrollbar = t.Scrollbar
 	win10.Disabled = t.Disabled
+
+	// Стиль отрисовки (скругления / классический bevel)
+	win10.Style = t.Style
 }

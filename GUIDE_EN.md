@@ -1275,6 +1275,34 @@ when the filter/sort/group changes.
 - Keyboard-layout indicator in windows/dialogs — `ShowLocaleIndicator` property
   with a switch context menu.
 
+### Theme presets and control styling (Win10/Win11/Win2000/Mac)
+
+A theme is not just a palette: `Theme.Style` (`widget.ThemeStyle`) controls the
+**shape** of controls:
+
+- `ControlCorner` — corner radius of Button/TextBox/ComboBox/ProgressBar
+  (0 = square; Win11 = 6, Mac = 8); an explicit XAML `CornerRadius` wins;
+- `Classic3D` — Win2000 classic: square corners, raised bevel buttons (sunken
+  when pressed), sunken text fields and checkboxes, a raised arrow button in
+  ComboBox, a blocky ProgressBar, no hover tinting.
+
+```go
+widget.ThemeNames()            // ["Win10 Dark", ..., "Win2000", "Mac"]
+eng.SetTheme(widget.ThemeByName("Win2000"))
+widget.CurrentThemeStyle()     // active theme's style (for custom widgets)
+```
+
+Constructors: `Win10DarkTheme/Win10LightTheme/Win11DarkTheme/Win11LightTheme/
+Win2000Theme/MacTheme` (`DarkTheme`/`LightTheme` == Win10). Mac: #007AFF accent
+and a green ToggleSwitch; Win2000: silver #D4D0C8 + navy.
+
+`SetTheme` semantics: container backgrounds follow the theme too — an opaque
+`Canvas` background is repainted to `WindowBG`, `Panel` to `PanelBG` (explicit
+XAML colors are replaced, consistent with all other widgets).
+
+`window.Window.Close()` closes the native window programmatically (`Run()`
+returns) — for a "File → Exit" menu item.
+
 ### Render-on-demand and invalidation
 
 By default the engine redraws every tick (unchanged behavior). On-demand mode

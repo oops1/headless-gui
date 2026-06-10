@@ -1998,6 +1998,52 @@ v.BindCollectionView(view)                 // or: auto-refresh from a Collection
 
 ---
 
+## Theme presets & control styling (Win10/Win11/Win2000/Mac)
+
+A theme is no longer just a palette — `Theme.Style` (`widget.ThemeStyle`)
+controls the **shape** of controls:
+
+- `ControlCorner int` — corner radius of Button/TextBox/ComboBox/ProgressBar
+  (0 = square; Win11 = 6, Mac = 8). An explicit `Button.CornerRadius` (XAML)
+  takes precedence.
+- `Classic3D bool` + `BevelLight/BevelShadow/BevelDark` — classic Win9x/2000
+  rendering: square corners, raised bevel buttons (sunken when pressed), sunken
+  text fields and checkboxes, a raised arrow button inside ComboBox, a blocky
+  segmented ProgressBar, **no hover tinting**.
+
+Built-in presets (colors + style):
+
+```go
+widget.ThemeNames()            // ["Win10 Dark","Win10 Light","Win11 Dark","Win11 Light","Win2000","Mac"]
+widget.ThemeByName("Win2000")  // fresh *Theme copy (case-insensitive), nil if unknown
+eng.SetTheme(widget.ThemeByName("Mac"))
+// Direct constructors: Win10DarkTheme/Win10LightTheme/Win11DarkTheme/
+// Win11LightTheme/Win2000Theme/MacTheme. DarkTheme/LightTheme == Win10.
+widget.CurrentThemeStyle()     // style of the active theme (for custom widgets)
+```
+
+Mac preset: #007AFF accent, green (#34C759) ToggleSwitch. Win11: #4CC2FF /
+#005FB8 accents on Mica-like backgrounds. Win2000: silver `#D4D0C8` face,
+navy title/selection.
+
+Classic (Win2000) extras: scrollbars get ▲/▼ arrow buttons (click = one step;
+ScrollView/ListView/VirtualizingItemsControl), title bars use a horizontal
+navy→#A6CAF0 gradient (`Theme.TitleBG2`, A=0 disables) with **bold** caption
+text (Window/Dialog/Panel headers), focus is a dotted rectangle (Button inner
+rect; CheckBox/RadioButton around the label), menus are face-colored with a
+raised 3D border and navy hover (`Theme.MenuBG`/`MenuHoverBG`/`MenuHoverText`),
+tabs are compact labels hugging a raised page.
+
+Note on `SetTheme` semantics: container backgrounds follow the theme too —
+`Canvas.ApplyTheme` repaints an opaque Background to `WindowBG`,
+`Panel.ApplyTheme` to `PanelBG` (explicit XAML colors are replaced, consistent
+with all other widgets). MenuBar text uses `LabelText`.
+
+`window.Window.Close()` closes the native window programmatically (`Run()`
+returns) — use it for a "File → Exit" menu item.
+
+---
+
 ## Render-on-demand & invalidation
 
 By default the engine redraws every tick (full backward compatibility). Enable

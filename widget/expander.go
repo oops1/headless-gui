@@ -125,9 +125,15 @@ func (e *Expander) OnMouseButton(ev MouseEvent) bool {
 	return false
 }
 
-// ApplyTheme обновляет цвета.
+// ApplyTheme обновляет цвета. Содержимое темизируется явно: в свёрнутом
+// состоянии Children() возвращает nil и общий обход темы детей не видит.
 func (e *Expander) ApplyTheme(t *Theme) {
 	e.HeaderBG = t.TabBG
 	e.BorderColor = t.Border
-	e.TextColor = t.TitleText
+	e.TextColor = t.LabelText
+	if !e.IsExpanded {
+		for _, c := range e.children {
+			ApplyThemeTree(c, t)
+		}
+	}
 }

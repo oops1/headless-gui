@@ -1275,6 +1275,34 @@ view.Groups()   // []CollectionViewGroup{Name, Items}
 - Индикатор раскладки в окнах/диалогах — свойство `ShowLocaleIndicator`,
   контекстное меню переключения.
 
+### Преднастроенные темы и стиль контролов (Win10/Win11/Win2000/Mac)
+
+Тема — не только палитра: поле `Theme.Style` (`widget.ThemeStyle`) задаёт
+**форму** контролов:
+
+- `ControlCorner` — радиус скругления Button/TextBox/ComboBox/ProgressBar
+  (0 — прямые; Win11 = 6, Mac = 8); явный `CornerRadius` из XAML приоритетнее;
+- `Classic3D` — классика Win2000: прямые углы, выпуклые bevel-кнопки
+  (утопленные при нажатии), утопленные поля ввода и чекбоксы, выпуклая кнопка
+  со стрелкой в ComboBox, «блочный» ProgressBar, без hover-подсветки.
+
+```go
+widget.ThemeNames()            // ["Win10 Dark", ..., "Win2000", "Mac"]
+eng.SetTheme(widget.ThemeByName("Win2000"))
+widget.CurrentThemeStyle()     // стиль активной темы (для своих виджетов)
+```
+
+Конструкторы: `Win10DarkTheme/Win10LightTheme/Win11DarkTheme/Win11LightTheme/
+Win2000Theme/MacTheme` (`DarkTheme`/`LightTheme` — это Win10). Mac: акцент
+#007AFF и зелёный ToggleSwitch; Win2000: серебро #D4D0C8 + navy.
+
+Семантика `SetTheme`: фоны контейнеров тоже следуют теме — непрозрачный фон
+`Canvas` перекрашивается в `WindowBG`, `Panel` — в `PanelBG` (явные XAML-цвета
+заменяются, единообразно с остальными виджетами).
+
+`window.Window.Close()` программно закрывает нативное окно (Run() вернётся) —
+для пункта меню «Файл → Выход».
+
 ### Рендер по запросу (on-demand) и инвалидация
 
 По умолчанию движок перерисовывает кадр каждый тик (поведение прежнее).

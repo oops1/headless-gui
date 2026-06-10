@@ -193,10 +193,54 @@ func main() {
 		log.Println(msg)
 	}
 
+	// win заполняется ниже (перед Run); нужен обработчикам меню для «Выход».
+	var win *window.Window
+
 	// ─── MenuBar ────────────────────────────────────────────────────────────
 	if menu, ok := reg["mainMenu"].(*widget.MenuBar); ok {
 		menu.OnSelect = func(topIdx, subIdx int, text string) {
 			addLog("Меню: %s (раздел %d, пункт %d)", text, topIdx, subIdx)
+			if text == "Выход" && win != nil {
+				win.Close() // штатное закрытие нативного окна → Run() вернётся
+			}
+		}
+	}
+
+	// ─── Смена темы (Win10/Win11/Win2000/Mac) ────────────────────────────────
+	// applyHeaderStyle подгоняет шапку приложения под тему: в классике —
+	// градиентный заголовок Win2000 (navy→голубой) с белым жирным текстом.
+	applyHeaderStyle := func(t *widget.Theme) {
+		hdr, _ := reg["header"].(*widget.Panel)
+		title, _ := reg["headerTitle"].(*widget.Label)
+		if hdr == nil || title == nil {
+			return
+		}
+		if t.Style.Classic3D {
+			hdr.Gradient = &widget.LinearGradient{
+				Horizontal: true,
+				Stops: []widget.GradientStop{
+					{Offset: 0, Color: t.TitleBG},
+					{Offset: 1, Color: t.TitleBG2},
+				},
+			}
+			title.TextColor = t.TitleText
+			title.Bold = true
+		} else {
+			hdr.Gradient = nil
+			title.TextColor = t.TitleText
+			title.Bold = false
+		}
+		if clock, ok := reg["headerClock"].(*widget.Label); ok {
+			clock.TextColor = t.TitleText
+		}
+	}
+	if dd, ok := reg["themeSelect"].(*widget.Dropdown); ok {
+		dd.OnChange = func(_ int, name string) {
+			if t := widget.ThemeByName(name); t != nil {
+				eng.SetTheme(t)
+				applyHeaderStyle(t)
+				addLog("Тема: %s", name)
+			}
 		}
 	}
 
@@ -559,7 +603,7 @@ func main() {
 	}()
 
 	// ─── Нативное окно ──────────────────────────────────────────────────────
-	win := window.New(eng, "GuiEngine — Widget Showcase")
+	win = window.New(eng, "GuiEngine — Widget Showcase")
 	win.SetMaxFPS(60)
 
 	if err := win.Run(); err != nil {

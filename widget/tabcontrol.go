@@ -279,11 +279,24 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 		return
 	}
 
-	// Полоса вкладок — фон
-	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), tc.TabHeight, tc.TabBG)
+	st := currentStyle()
+
+	// classicTabH — высота компактного ярлыка классики Win2000 (активный;
+	// неактивные на 2px ниже). Ярлыки прижаты к странице, остаток полосы пуст.
+	const classicTabH = 21
+
+	// Полоса вкладок — фон. В классике ярлыки лежат прямо на «лице»
+	// (отдельной полосы нет — как в System Properties Win2000).
+	if st.Classic3D {
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), tc.TabHeight, tc.ContentBG)
+	} else {
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), tc.TabHeight, tc.TabBG)
+	}
 
 	// Рисуем каждую вкладку и сохраняем реальные ширины для hit-test.
 	widths := make([]int, len(tabs))
+	var activeRect image.Rectangle
+	activeHeader := ""
 	tabX := b.Min.X
 	for i, tab := range tabs {
 		// Скрытые вкладки не занимают места в полосе заголовков (ширина 0).
@@ -297,12 +310,43 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 		tabRect := image.Rect(tabX, b.Min.Y, tabX+tabW, b.Min.Y+tc.TabHeight)
 
 		// Фон вкладки
-		if i == active {
+		switch {
+		case st.Classic3D:
+			// Классика Win2000: ярлыки КОМПАКТНЫЕ (~21px) и прижаты к
+			// странице — верх полосы остаётся пустым «лицом». Активный
+			// рисуется ПОЗЖЕ — поверх рамки страницы (шире и выше соседей).
+			pageTop := b.Min.Y + tc.TabHeight
+			top := pageTop - classicTabH // верх активного ярлыка
+			if i == active {
+				activeRect = image.Rect(tabRect.Min.X, top, tabRect.Max.X, pageTop)
+				activeHeader = tab.Header
+				tabX += tabW
+				continue
+			}
+			tr2 := image.Rect(tabRect.Min.X, top+2, tabRect.Max.X, pageTop)
+			ctx.FillRect(tr2.Min.X, tr2.Min.Y+1, tr2.Dx(), tr2.Dy()-1, tc.TabActiveBG)
+			// Верхняя грань со «срезанными» углами (имитация скругления).
+			ctx.DrawHLine(tr2.Min.X+2, tr2.Min.Y, tr2.Dx()-4, st.BevelLight)
+			ctx.SetPixel(tr2.Min.X+1, tr2.Min.Y+1, st.BevelLight)
+			ctx.SetPixel(tr2.Max.X-2, tr2.Min.Y+1, st.BevelDark)
+			// Левая светлая грань — только у первого ярлыка: примыкающие
+			// разделяет одна тёмная грань соседа (как в оригинале).
+			if i == 0 {
+				ctx.DrawVLine(tr2.Min.X, tr2.Min.Y+2, tr2.Dy()-2, st.BevelLight)
+			}
+			// Правая грань — одна тёмная линия.
+			ctx.DrawVLine(tr2.Max.X-1, tr2.Min.Y+2, tr2.Dy()-2, st.BevelShadow)
+			// Текст неактивного ярлыка — по центру компактного ярлыка.
+			ctx.DrawText(tab.Header, tabRect.Min.X+tc.TabPadH,
+				tr2.Min.Y+(tr2.Dy()-13)/2, tc.TabText)
+			tabX += tabW
+			continue
+		case i == active:
 			ctx.FillRect(tabRect.Min.X, tabRect.Min.Y, tabRect.Dx(), tabRect.Dy(), tc.TabActiveBG)
 			// Акцентная линия сверху
 			ctx.DrawHLine(tabRect.Min.X, tabRect.Min.Y, tabRect.Dx(), tc.AccentColor)
 			ctx.DrawHLine(tabRect.Min.X, tabRect.Min.Y+1, tabRect.Dx(), tc.AccentColor)
-		} else if i == hoverIdx {
+		case i == hoverIdx:
 			bg := tc.TabBG
 			// Слегка светлее при наведении
 			bg.R = clampAdd(bg.R, 15)
@@ -320,8 +364,8 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 		textY := tabRect.Min.Y + (tc.TabHeight-13)/2
 		ctx.DrawText(tab.Header, textX, textY, textColor)
 
-		// Разделитель между вкладками
-		if i < len(tabs)-1 {
+		// Разделитель между вкладками (в классике грани ярлыков сами разделяют).
+		if !st.Classic3D && i < len(tabs)-1 {
 			ctx.DrawVLine(tabRect.Max.X-1, tabRect.Min.Y+4, tabRect.Dy()-8, tc.TabBorder)
 		}
 
@@ -333,8 +377,10 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 	tc.tabWidths = widths
 	tc.mu.Unlock()
 
-	// Линия под вкладками
-	ctx.DrawHLine(b.Min.X, b.Min.Y+tc.TabHeight-1, b.Dx(), tc.TabBorder)
+	// Линия под вкладками (в классике её роль играет верхняя грань страницы).
+	if !st.Classic3D {
+		ctx.DrawHLine(b.Min.X, b.Min.Y+tc.TabHeight-1, b.Dx(), tc.TabBorder)
+	}
 
 	// Область содержимого
 	cr := tc.contentRect()
@@ -347,8 +393,38 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 		ctx.ClearClip()
 	}
 
-	// Рамка вокруг содержимого
-	ctx.DrawBorder(cr.Min.X, cr.Min.Y, cr.Dx(), cr.Dy(), tc.TabBorder)
+	if st.Classic3D {
+		// Классика: страница — выпуклая 3D-панель. Рисуем ПОСЛЕ контента
+		// (фон контент-канвы иначе затирает грань), активный ярлык — самым
+		// последним: он «прорезает» верхнюю грань страницы и сливается с ней.
+		drawBevelRaised(ctx, cr.Min.X, cr.Min.Y, cr.Dx(), cr.Dy(), st)
+
+		if !activeRect.Empty() {
+			ar := activeRect
+			ar.Min.X -= 2 // активный шире соседей на 2px с каждой стороны
+			ar.Max.X += 2
+			if ar.Min.X < b.Min.X {
+				ar.Min.X = b.Min.X
+			}
+			bot := cr.Min.Y + 1 // перекрываем светлую грань страницы
+
+			ctx.FillRect(ar.Min.X+1, ar.Min.Y+1, ar.Dx()-2, bot-ar.Min.Y-1, tc.TabActiveBG)
+			// Верхняя грань со срезанными углами.
+			ctx.DrawHLine(ar.Min.X+2, ar.Min.Y, ar.Dx()-4, st.BevelLight)
+			ctx.SetPixel(ar.Min.X+1, ar.Min.Y+1, st.BevelLight)
+			ctx.SetPixel(ar.Max.X-2, ar.Min.Y+1, st.BevelDark)
+			// Боковые грани — до самой страницы.
+			ctx.DrawVLine(ar.Min.X, ar.Min.Y+2, bot-ar.Min.Y-2, st.BevelLight)
+			ctx.DrawVLine(ar.Max.X-1, ar.Min.Y+2, bot-ar.Min.Y-2, st.BevelDark)
+			ctx.DrawVLine(ar.Max.X-2, ar.Min.Y+2, bot-ar.Min.Y-2, st.BevelShadow)
+			// Текст активного ярлыка (позиция исходного слота — не сдвигается).
+			ctx.DrawText(activeHeader, activeRect.Min.X+tc.TabPadH,
+				activeRect.Min.Y+(activeRect.Dy()-13)/2, tc.TabActiveText)
+		}
+	} else {
+		// Рамка вокруг содержимого.
+		ctx.DrawBorder(cr.Min.X, cr.Min.Y, cr.Dx(), cr.Dy(), tc.TabBorder)
+	}
 
 	tc.drawDisabledOverlay(ctx)
 }
@@ -475,6 +551,21 @@ func (tc *TabControl) ApplyTheme(t *Theme) {
 	tc.TabActiveText = t.TabActiveText
 	tc.ContentBG = t.TabContentBG
 	tc.AccentColor = t.Accent
+
+	// Children() отдаёт только активную вкладку (для hit-test) — обход темы
+	// движком не доберётся до остальных. Темизируем содержимое НЕАКТИВНЫХ
+	// вкладок сами (активную обработает общий обход через Children()).
+	tc.mu.Lock()
+	var inactive []Widget
+	for i := range tc.tabs {
+		if i != tc.active && tc.tabs[i].Content != nil {
+			inactive = append(inactive, tc.tabs[i].Content)
+		}
+	}
+	tc.mu.Unlock()
+	for _, c := range inactive {
+		ApplyThemeTree(c, t)
+	}
 }
 
 // clampAdd добавляет v к a с ограничением до 255.

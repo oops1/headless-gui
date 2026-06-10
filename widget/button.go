@@ -146,32 +146,54 @@ func (btn *Button) Draw(ctx DrawContext) {
 		return
 	}
 
+	st := currentStyle()
+
 	bg := btn.Background
 	switch {
 	case btn.IsPressed():
 		bg = btn.PressedBG
-	case btn.IsHovered() && btn.HoverBG.A > 0:
-		bg = btn.HoverBG
+	case btn.IsHovered() && btn.HoverBG.A > 0 && !st.Classic3D:
+		bg = btn.HoverBG // классика Win2000 не подсвечивает hover
 	}
 
-	cr := btn.CornerRadius
-	if cr > 0 {
-		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, bg)
-		if btn.IsFocused() {
-			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, btn.HighlightTop)
-		} else if btn.BorderColor.A > 0 {
-			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, btn.BorderColor)
-		}
-	} else {
+	switch {
+	case st.Classic3D:
+		// Классическая объёмная кнопка: прямые углы, bevel-рамка;
+		// нажатие показывается инверсией граней (sunken).
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
-		if btn.IsFocused() {
-			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), btn.HighlightTop)
+		if btn.IsPressed() {
+			drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		} else {
-			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), btn.BorderColor)
+			drawBevelRaised(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		}
+		if btn.IsFocused() {
+			// Пунктирная рамка фокуса (классика Win2000).
+			drawDottedRect(ctx, b.Min.X+3, b.Min.Y+3, b.Dx()-6, b.Dy()-6, st.BevelDark)
+		}
+	default:
+		// Скругление: приоритет у явного CornerRadius (XAML), иначе — тема.
+		cr := btn.CornerRadius
+		if cr == 0 {
+			cr = st.ControlCorner
+		}
+		if cr > 0 {
+			ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, bg)
+			if btn.IsFocused() {
+				ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, btn.HighlightTop)
+			} else if btn.BorderColor.A > 0 {
+				ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, btn.BorderColor)
+			}
+		} else {
+			ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
+			if btn.IsFocused() {
+				ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), btn.HighlightTop)
+			} else {
+				ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), btn.BorderColor)
+			}
 		}
 	}
 
-	if btn.ShowHighlight && !btn.IsPressed() {
+	if btn.ShowHighlight && !btn.IsPressed() && !st.Classic3D {
 		ctx.DrawHLine(b.Min.X+1, b.Min.Y, b.Dx()-2, btn.HighlightTop)
 	}
 
