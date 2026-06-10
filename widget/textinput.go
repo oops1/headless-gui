@@ -84,6 +84,10 @@ type TextInput struct {
 	// Состояние ошибки валидации (WPF Validation.HasError). "" = нет ошибки.
 	validationError string
 
+	// fireEnter взводится внутри OnKeyEvent (под t.mu) и вызывает OnEnter
+	// после освобождения мьютекса — синхронно, но без риска дедлока.
+	fireEnter bool
+
 	// OnEnter вызывается при нажатии Enter (только если AcceptsReturn=false).
 	OnEnter func()
 	// OnChange вызывается при каждом изменении текста.
@@ -258,6 +262,12 @@ func (t *TextInput) redo() {
 	t.selStart = -1
 }
 
+// NeedsAnimation — пока поле в фокусе, мигает каретка: в on-demand режиме
+// движок не должен пропускать кадры (Animated).
+func (t *TextInput) NeedsAnimation() bool {
+	return t.IsFocused()
+}
+
 // ─── ValidationAware ──────────────────────────────────────────────────────────
 
 // SetValidationError переводит поле в состояние ошибки (красная рамка) и
@@ -387,7 +397,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 			t.caretPos++
 			changed = true
 		} else if t.OnEnter != nil {
-			go t.OnEnter()
+			t.fireEnter = true // вызовем после t.mu.Unlock (в конце OnKeyEvent)
 		}
 
 	default:
@@ -474,10 +484,18 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	t.clampCaret()
 	text := string(t.runes)
 	onCh := t.OnChange
+	fireEnter := t.fireEnter
+	t.fireEnter = false
+	onEnter := t.OnEnter
 	t.mu.Unlock()
 
+	// Синхронный вызов вне t.mu: сохраняет порядок изменений (writeBack в
+	// модель идёт строго в порядке нажатий) и единую модель исполнения.
 	if changed && onCh != nil {
-		go onCh(text)
+		onCh(text)
+	}
+	if fireEnter && onEnter != nil {
+		onEnter()
 	}
 }
 
@@ -683,7 +701,7 @@ func (t *TextInput) showContextMenu(x, y int) {
 					onCh := t.OnChange
 					t.mu.Unlock()
 					if onCh != nil {
-						go onCh(text)
+						onCh(text) // синхронно — вне t.mu
 					}
 				} else {
 					t.mu.Unlock()
@@ -713,6 +731,15 @@ func (t *TextInput) showContextMenu(x, y int) {
 				t.mu.Lock()
 				t.deleteSel()
 				paste := []rune(ct)
+				if t.MaxLength > 0 { // обрезаем под лимит (как при Ctrl+V)
+					room := t.MaxLength - len(t.runes)
+					if room < 0 {
+						room = 0
+					}
+					if len(paste) > room {
+						paste = paste[:room]
+					}
+				}
 				n := len(paste)
 				ins := make([]rune, len(t.runes)+n)
 				copy(ins, t.runes[:t.caretPos])
@@ -725,7 +752,7 @@ func (t *TextInput) showContextMenu(x, y int) {
 				onCh := t.OnChange
 				t.mu.Unlock()
 				if onCh != nil {
-					go onCh(text)
+					onCh(text) // синхронно — вне t.mu
 				}
 			},
 		},
@@ -800,19 +827,41 @@ func (t *TextInput) Draw(ctx DrawContext) {
 		return
 	}
 
-	// Фон
-	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.Background)
+	st := currentStyle()
 
-	// Рамка
-	if hasError {
-		// Ошибка валидации — красная рамка (двойная для заметности).
-		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.ErrorBorder)
-		ctx.DrawBorder(b.Min.X+1, b.Min.Y+1, b.Dx()-2, b.Dy()-2, t.ErrorBorder)
-	} else if isFocused {
-		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.FocusBorder)
-		ctx.DrawHLine(b.Min.X, b.Max.Y-2, b.Dx(), t.FocusBorder)
-	} else {
-		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.BorderColor)
+	// Фон + рамка по стилю темы.
+	switch {
+	case st.Classic3D:
+		// Классика: утопленное поле (sunken bevel), прямые углы.
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.Background)
+		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		if hasError {
+			ctx.DrawBorder(b.Min.X+2, b.Min.Y+2, b.Dx()-4, b.Dy()-4, t.ErrorBorder)
+		}
+	case st.ControlCorner > 0:
+		cr := st.ControlCorner
+		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, t.Background)
+		switch {
+		case hasError:
+			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, t.ErrorBorder)
+			ctx.DrawRoundBorder(b.Min.X+1, b.Min.Y+1, b.Dx()-2, b.Dy()-2, cr-1, t.ErrorBorder)
+		case isFocused:
+			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, t.FocusBorder)
+		default:
+			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, t.BorderColor)
+		}
+	default:
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.Background)
+		if hasError {
+			// Ошибка валидации — красная рамка (двойная для заметности).
+			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.ErrorBorder)
+			ctx.DrawBorder(b.Min.X+1, b.Min.Y+1, b.Dx()-2, b.Dy()-2, t.ErrorBorder)
+		} else if isFocused {
+			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.FocusBorder)
+			ctx.DrawHLine(b.Min.X, b.Max.Y-2, b.Dx(), t.FocusBorder)
+		} else {
+			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.BorderColor)
+		}
 	}
 
 	const sizePt = DefaultFontSizePt

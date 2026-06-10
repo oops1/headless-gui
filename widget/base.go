@@ -95,6 +95,10 @@ type Base struct {
 	// Используются applyAlignmentRect когда bounds ещё не установлены контейнером.
 	XAMLWidth  int
 	XAMLHeight int
+
+	// cursorOverride — принудительная форма курсора (задаётся через XAML Cursor= или SetCursor).
+	cursorOverride    Cursor
+	hasCursorOverride bool
 }
 
 func (b *Base) Bounds() image.Rectangle     { return b.bounds }
@@ -205,6 +209,12 @@ func (b *Base) GetXAMLSize() (int, int) { return b.XAMLWidth, b.XAMLHeight }
 
 // SetXAMLSize сохраняет явные Width/Height из XAML.
 func (b *Base) SetXAMLSize(w, h int) { b.XAMLWidth = w; b.XAMLHeight = h }
+
+// SetCursor задаёт принудительную форму курсора над виджетом (XAML Cursor).
+func (b *Base) SetCursor(c Cursor) { b.cursorOverride, b.hasCursorOverride = c, true }
+
+// CursorOverride возвращает принудительный курсор и признак, что он задан.
+func (b *Base) CursorOverride() (Cursor, bool) { return b.cursorOverride, b.hasCursorOverride }
 
 // applyAlignmentRect корректирует прямоугольник r на основе
 // HorizontalAlignment / VerticalAlignment виджета и его текущего размера.

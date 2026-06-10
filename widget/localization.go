@@ -20,11 +20,18 @@ import (
 	"sync"
 )
 
+// localeEntry — запись слушателя раскладки с уникальным id.
+type localeEntry struct {
+	id int
+	fn func(string)
+}
+
 var (
 	localeMu         sync.RWMutex
-	currentLocale    = "EN"      // текущая РАСКЛАДКА КЛАВИАТУРЫ (язык ввода)
-	availableLocales []string    // список доступных раскладок (для контекстного меню)
-	localeListeners  []func(string) // подписчики на смену раскладки
+	currentLocale    = "EN"        // текущая РАСКЛАДКА КЛАВИАТУРЫ (язык ввода)
+	availableLocales []string      // список доступных раскладок (для контекстного меню)
+	localeListeners  []localeEntry // подписчики на смену раскладки
+	localeNextID     int
 	localeApplier    func(string) bool // применение раскладки к ОС (клавиатура)
 )
 
@@ -35,10 +42,18 @@ var (
 // быть на русском, а ввод вестись на английском или китайском. Поэтому перевод
 // строк ({Loc}/Tr) управляется отдельным «языком интерфейса» (Language), а
 // индикатор раскладки (Locale) отражает клавиатуру ОС.
+
+// langEntry — запись слушателя языка с уникальным id.
+type langEntry struct {
+	id int
+	fn func(string)
+}
+
 var (
 	langMu            sync.RWMutex
 	currentLanguage   = "EN"
-	languageListeners []func(string)
+	languageListeners []langEntry
+	langNextID        int
 )
 
 // SetLanguage задаёт ЯЗЫК ИНТЕРФЕЙСА (для перевода строк {Loc}/Tr) и уведомляет
@@ -50,11 +65,16 @@ func SetLanguage(code string) {
 	currentLanguage = code
 	var ls []func(string)
 	if changed {
-		ls = append(ls, languageListeners...)
+		for _, e := range languageListeners {
+			ls = append(ls, e.fn)
+		}
 	}
 	langMu.Unlock()
 	for _, l := range ls {
 		l(code)
+	}
+	if changed {
+		notifyUIChanged() // надписи могли смениться (on-demand рендер)
 	}
 }
 
@@ -65,14 +85,29 @@ func Language() string {
 	return currentLanguage
 }
 
-// AddLanguageListener подписывает колбэк на смену языка интерфейса. Колбэк
-// вызывается из горутины, изменившей язык. Потокобезопасно.
-func AddLanguageListener(fn func(code string)) {
+// AddLanguageListener подписывает колбэк на смену языка интерфейса и возвращает
+// id для отписки. Колбэк вызывается из горутины, изменившей язык. Потокобезопасно.
+func AddLanguageListener(fn func(code string)) int {
 	if fn == nil {
-		return
+		return -1
 	}
 	langMu.Lock()
-	languageListeners = append(languageListeners, fn)
+	id := langNextID
+	langNextID++
+	languageListeners = append(languageListeners, langEntry{id: id, fn: fn})
+	langMu.Unlock()
+	return id
+}
+
+// RemoveLanguageListener отписывает слушателя по id (no-op, если нет). Потокобезопасно.
+func RemoveLanguageListener(id int) {
+	langMu.Lock()
+	for i, e := range languageListeners {
+		if e.id == id {
+			languageListeners = append(languageListeners[:i], languageListeners[i+1:]...)
+			break
+		}
+	}
 	langMu.Unlock()
 }
 
@@ -93,11 +128,16 @@ func SetLocale(code string) {
 	currentLocale = code
 	var ls []func(string)
 	if changed {
-		ls = append(ls, localeListeners...)
+		for _, e := range localeListeners {
+			ls = append(ls, e.fn)
+		}
 	}
 	localeMu.Unlock()
 	for _, l := range ls {
 		l(code)
+	}
+	if changed {
+		notifyUIChanged() // индикатор раскладки перерисуется (on-demand рендер)
 	}
 }
 
@@ -157,16 +197,30 @@ func AvailableLocales() []string {
 	return out
 }
 
-// AddLocaleListener подписывает колбэк на смену локали (вызывается при каждом
-// изменении). Удобно для приложений, переключающих переводы строк, и для
-// перерисовки UI. Потокобезопасно. Колбэк вызывается из горутины, изменившей
+// AddLocaleListener подписывает колбэк на смену локали и возвращает id для
+// отписки. Потокобезопасно. Колбэк вызывается из горутины, изменившей
 // локаль (может быть поллер ОС) — оборачивайте доступ к UI-состоянию мьютексом.
-func AddLocaleListener(fn func(code string)) {
+func AddLocaleListener(fn func(code string)) int {
 	if fn == nil {
-		return
+		return -1
 	}
 	localeMu.Lock()
-	localeListeners = append(localeListeners, fn)
+	id := localeNextID
+	localeNextID++
+	localeListeners = append(localeListeners, localeEntry{id: id, fn: fn})
+	localeMu.Unlock()
+	return id
+}
+
+// RemoveLocaleListener отписывает слушателя по id (no-op, если нет). Потокобезопасно.
+func RemoveLocaleListener(id int) {
+	localeMu.Lock()
+	for i, e := range localeListeners {
+		if e.id == id {
+			localeListeners = append(localeListeners[:i], localeListeners[i+1:]...)
+			break
+		}
+	}
 	localeMu.Unlock()
 }
 

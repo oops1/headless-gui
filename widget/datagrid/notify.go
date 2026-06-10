@@ -21,6 +21,12 @@ type INotifyPropertyChanged interface {
 
 // ─── PropertyNotifier (базовая реализация) ─────────────────────────────────
 
+// pcEntry — запись обработчика с уникальным id.
+type pcEntry struct {
+	id int
+	h  PropertyChangedHandler
+}
+
 // PropertyNotifier — встраиваемая структура для реализации INotifyPropertyChanged.
 // Использование:
 //
@@ -34,35 +40,65 @@ type INotifyPropertyChanged interface {
 //	    u.NotifyPropertyChanged(u, "Name")
 //	}
 type PropertyNotifier struct {
-	mu       sync.RWMutex
-	handlers []PropertyChangedHandler
+	mu      sync.RWMutex
+	entries []pcEntry
+	nextID  int
 }
 
-// AddPropertyChanged регистрирует обработчик изменений.
-func (pn *PropertyNotifier) AddPropertyChanged(handler PropertyChangedHandler) {
+// AddPropertyChangedHandle регистрирует обработчик и возвращает id для удаления.
+func (pn *PropertyNotifier) AddPropertyChangedHandle(handler PropertyChangedHandler) int {
 	pn.mu.Lock()
 	defer pn.mu.Unlock()
-	pn.handlers = append(pn.handlers, handler)
+	id := pn.nextID
+	pn.nextID++
+	pn.entries = append(pn.entries, pcEntry{id: id, h: handler})
+	return id
 }
 
-// RemovePropertyChanged убирает обработчик (по указателю функции — не сравнивается).
-// Для упрощения удаляет последний добавленный handler.
+// RemovePropertyChangedHandle удаляет обработчик по id (no-op, если нет).
+func (pn *PropertyNotifier) RemovePropertyChangedHandle(id int) {
+	pn.mu.Lock()
+	defer pn.mu.Unlock()
+	for i, e := range pn.entries {
+		if e.id == id {
+			pn.entries = append(pn.entries[:i], pn.entries[i+1:]...)
+			return
+		}
+	}
+}
+
+// HandlerCount возвращает число подписчиков (для тестов).
+func (pn *PropertyNotifier) HandlerCount() int {
+	pn.mu.RLock()
+	defer pn.mu.RUnlock()
+	return len(pn.entries)
+}
+
+// AddPropertyChanged регистрирует обработчик (id игнорируется; для совместимости).
+func (pn *PropertyNotifier) AddPropertyChanged(handler PropertyChangedHandler) {
+	pn.AddPropertyChangedHandle(handler)
+}
+
+// RemovePropertyChanged убирает последний добавленный обработчик (старое поведение).
+// Сохраняет совместимость с интерфейсом INotifyPropertyChanged.
 func (pn *PropertyNotifier) RemovePropertyChanged(handler PropertyChangedHandler) {
 	pn.mu.Lock()
 	defer pn.mu.Unlock()
-	if len(pn.handlers) > 0 {
-		pn.handlers = pn.handlers[:len(pn.handlers)-1]
+	if len(pn.entries) > 0 {
+		pn.entries = pn.entries[:len(pn.entries)-1]
 	}
 }
 
 // NotifyPropertyChanged уведомляет все зарегистрированные обработчики.
 func (pn *PropertyNotifier) NotifyPropertyChanged(sender interface{}, propertyName string) {
 	pn.mu.RLock()
-	handlers := make([]PropertyChangedHandler, len(pn.handlers))
-	copy(handlers, pn.handlers)
+	snap := make([]PropertyChangedHandler, len(pn.entries))
+	for i, e := range pn.entries {
+		snap[i] = e.h
+	}
 	pn.mu.RUnlock()
 
-	for _, h := range handlers {
+	for _, h := range snap {
 		h(sender, propertyName)
 	}
 }

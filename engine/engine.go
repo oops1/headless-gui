@@ -39,7 +39,21 @@ type Engine struct {
 	fontCache *FontCache
 	bgSrc     image.Image // исходный фон (до масштабирования); нужен при SetResolution
 	root      widget.Widget
-	mu        sync.RWMutex // защищает root, canvas, bgSrc при изменении
+	mu        sync.RWMutex // защищает УКАЗАТЕЛИ root/canvas/bgSrc (короткие секции)
+
+	// frameMu сериализует кадр (draw+diff) со структурными операциями над
+	// канвасом/шрифтами (SetResolution, RegisterFont*, SetTheme и т.п.).
+	// В отличие от прежней схемы, e.mu больше НЕ удерживается на весь кадр —
+	// SetRoot/Root и события не блокируются рендером.
+	// Порядок захвата: frameMu → e.mu (никогда наоборот).
+	frameMu sync.Mutex
+
+	// ── Рендер по запросу (см. invalidate.go) ───────────────────────────────
+	onDemand  atomic.Bool
+	invGen    atomic.Uint64
+	damageMu  sync.Mutex
+	damage    image.Rectangle // объединение InvalidateRect с прошлого кадра
+	damageAll bool            // Invalidate() — полный diff
 
 	focus    focusManager  // текущий виджет с фокусом
 	captured widget.Widget // виджет, захвативший мышь (drag)
@@ -117,6 +131,10 @@ func New(width, height, fps int) *Engine {
 	// Шрифт по умолчанию — Roboto, если он есть в assets/fonts; иначе остаётся
 	// встроенный Go Regular.
 	e.canvas.SetDefaultFont("Roboto")
+	// Слой данных (биндинги/{Loc}/live-коллекции) сообщает об изменениях UI —
+	// нужно для рендера по запросу (см. invalidate.go). Последний созданный
+	// движок выигрывает (на процесс — один активный движок).
+	widget.SetUIChangeNotifier(e.Invalidate)
 	return e
 }
 
@@ -139,24 +157,34 @@ func New(width, height, fps int) *Engine {
 // Если нужно безусловно растянуть корень на весь канвас независимо
 // от XAML — используйте SetRootFullCanvas.
 func (e *Engine) SetRoot(w widget.Widget) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.root = w
+	// Готовим виджет ДО публикации указателя: рендер-горутина видит либо
+	// старый root, либо полностью подготовленный новый (лейаут + capture).
+	e.mu.RLock()
+	cw, ch := e.canvas.W, e.canvas.H
+	e.mu.RUnlock()
 	if w.Bounds().Empty() {
-		w.SetBounds(image.Rect(0, 0, e.canvas.W, e.canvas.H))
+		w.SetBounds(image.Rect(0, 0, cw, ch))
 	}
 	injectCaptureManager(w, e)
+	e.mu.Lock()
+	e.root = w
+	e.mu.Unlock()
+	e.Invalidate()
 }
 
 // SetRootFullCanvas устанавливает корневой виджет и принудительно
 // растягивает его на весь холст (старое поведение SetRoot до фикса A9).
 // Используйте, когда XAML задал размеры, но вам нужен fullscreen.
 func (e *Engine) SetRootFullCanvas(w widget.Widget) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.root = w
-	w.SetBounds(image.Rect(0, 0, e.canvas.W, e.canvas.H))
+	e.mu.RLock()
+	cw, ch := e.canvas.W, e.canvas.H
+	e.mu.RUnlock()
+	w.SetBounds(image.Rect(0, 0, cw, ch))
 	injectCaptureManager(w, e)
+	e.mu.Lock()
+	e.root = w
+	e.mu.Unlock()
+	e.Invalidate()
 }
 
 // injectCaptureManager рекурсивно раздаёт CaptureManager по дереву виджетов.
@@ -193,6 +221,8 @@ func (e *Engine) CanvasSize() (w, h int) {
 // Если был установлен фон, он автоматически перемасштабируется под новый размер.
 // Корневой виджет получает обновлённые bounds.
 func (e *Engine) SetResolution(width, height int) {
+	e.frameMu.Lock() // ждём конца текущего кадра — буферы меняются
+	defer e.frameMu.Unlock()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.canvas = newCanvas(width, height, e.fontCache)
@@ -203,6 +233,7 @@ func (e *Engine) SetResolution(width, height int) {
 		e.root.SetBounds(image.Rect(0, 0, width, height))
 	}
 	widget.SetScreenBounds(width, height)
+	e.Invalidate()
 }
 
 // SetBackgroundFile загружает изображение (PNG или JPEG) из файла и масштабирует его
@@ -218,10 +249,13 @@ func (e *Engine) SetBackgroundFile(path string) error {
 	if err != nil {
 		return err
 	}
+	e.frameMu.Lock() // фон читается blitBackground — меняем между кадрами
 	e.mu.Lock()
 	e.bgSrc = img
 	e.canvas.setBackground(img)
 	e.mu.Unlock()
+	e.frameMu.Unlock()
+	e.Invalidate()
 	return nil
 }
 
@@ -238,8 +272,8 @@ func (e *Engine) SaveFrames(dir string) {
 // fontName соответствует FontFamily в XAML (например "Segoe UI", "Roboto").
 // Шрифт будет использоваться виджетами через DrawTextFont.
 func (e *Engine) RegisterFont(fontName string, ttfData []byte) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.frameMu.Lock() // кэш шрифтов читается отрисовкой — меняем между кадрами
+	defer e.frameMu.Unlock()
 	e.canvas.RegisterFont(fontName, ttfData)
 }
 
@@ -298,23 +332,27 @@ func fontFamilyAlias(stem string) string {
 // RegisterFontDir регистрирует все шрифты из каталога (TTF/OTF) как именованные.
 // Вызывать до Start().
 func (e *Engine) RegisterFontDir(dir string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.frameMu.Lock()
+	defer e.frameMu.Unlock()
 	e.loadFontDirectory(dir)
 }
 
 // SetDefaultFont делает зарегистрированный шрифт шрифтом по умолчанию.
 // Возвращает false, если шрифт с таким именем не зарегистрирован.
 func (e *Engine) SetDefaultFont(name string) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.canvas.SetDefaultFont(name)
+	e.frameMu.Lock()
+	defer e.frameMu.Unlock()
+	ok := e.canvas.SetDefaultFont(name)
+	if ok {
+		e.Invalidate()
+	}
+	return ok
 }
 
 // AvailableFonts возвращает список зарегистрированных именованных шрифтов.
 func (e *Engine) AvailableFonts() []string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.frameMu.Lock()
+	defer e.frameMu.Unlock()
 	return e.canvas.fontNames()
 }
 
@@ -322,8 +360,8 @@ func (e *Engine) AvailableFonts() []string {
 // отсутствующих в основном шрифте (BUG-2). Fallback-шрифты применяются
 // в порядке регистрации после встроенного и системных. Вызывать до Start().
 func (e *Engine) RegisterFallbackFont(ttfData []byte) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.frameMu.Lock()
+	defer e.frameMu.Unlock()
 	return e.canvas.AddFallbackFont(ttfData)
 }
 
@@ -342,9 +380,10 @@ func (e *Engine) RegisterFallbackFontFile(path string) error {
 // SetDPI изменяет DPI для рендеринга шрифтов (по умолчанию 96).
 // Вызывать до Start(). Сбрасывает кэш шрифтов.
 func (e *Engine) SetDPI(dpi float64) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.frameMu.Lock()
+	defer e.frameMu.Unlock()
 	e.fontCache.SetDPI(dpi)
+	e.Invalidate()
 }
 
 // SetTheme применяет тему к глобальным цветам и ко всему дереву виджетов.
@@ -352,27 +391,29 @@ func (e *Engine) SetDPI(dpi float64) {
 // с обновлёнными цветами по умолчанию.
 func (e *Engine) SetTheme(t *widget.Theme) {
 	widget.ApplyGlobalTheme(t)
-	e.mu.Lock()
+	e.frameMu.Lock() // массовая мутация цветов дерева — не во время отрисовки
+	e.mu.RLock()
 	root := e.root
+	e.mu.RUnlock()
 	if root != nil {
-		applyThemeToTree(root, t)
+		widget.ApplyThemeTree(root, t)
 	}
-	e.mu.Unlock()
-}
-
-// applyThemeToTree рекурсивно применяет тему к дереву виджетов.
-func applyThemeToTree(w widget.Widget, t *widget.Theme) {
-	if th, ok := w.(widget.Themeable); ok {
-		th.ApplyTheme(t)
+	// Модальные виджеты живут вне дерева root — темизируем отдельно.
+	e.modMu.Lock()
+	modals := make([]widget.ModalWidget, len(e.modals))
+	copy(modals, e.modals)
+	e.modMu.Unlock()
+	for _, m := range modals {
+		widget.ApplyThemeTree(m, t)
 	}
-	for _, child := range w.Children() {
-		applyThemeToTree(child, t)
-	}
+	e.frameMu.Unlock()
+	e.Invalidate()
 }
 
 // Start запускает цикл рендеринга в отдельной горутине.
 // Вызывать не более одного раза.
 func (e *Engine) Start() {
+	e.Invalidate() // гарантируем рендер первого кадра в любом режиме
 	if e.saveDir != "" {
 		go e.saveWorker()
 	}
@@ -398,9 +439,12 @@ func (e *Engine) Stop() {
 // CaptureManager инжектится автоматически.
 func (e *Engine) ShowModal(m widget.ModalWidget) {
 	// Центрируем диалог
+	e.mu.RLock()
+	cw, ch := e.canvas.W, e.canvas.H
+	e.mu.RUnlock()
 	b := m.Bounds()
-	cx := (e.canvas.W - b.Dx()) / 2
-	cy := (e.canvas.H - b.Dy()) / 2
+	cx := (cw - b.Dx()) / 2
+	cy := (ch - b.Dy()) / 2
 
 	// Запоминаем позицию первого ребёнка ДО SetBounds.
 	// Если SetBounds сам пересчитает позиции дочерних виджетов
@@ -427,11 +471,13 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 	e.modMu.Lock()
 	e.modals = append(e.modals, m)
 	e.modMu.Unlock()
+	e.Invalidate()
 }
 
 // CloseModal закрывает указанный модальный виджет (удаляет из стека).
 // Если m == nil — закрывает верхний модальный виджет.
 func (e *Engine) CloseModal(m widget.ModalWidget) {
+	defer e.Invalidate()
 	e.modMu.Lock()
 	defer e.modMu.Unlock()
 
@@ -486,9 +532,20 @@ func (e *Engine) loop() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	// lastGen — поколение инвалидации, отрендеренное последним кадром
+	// (on-demand). Сентинел гарантирует рендер первого кадра.
+	lastGen := ^uint64(0)
+
 	for {
 		select {
 		case <-ticker.C:
+			if e.onDemand.Load() {
+				gen := e.invGen.Load()
+				if gen == lastGen && !e.animationNeeded(interval) {
+					continue // UI не менялся — пропускаем кадр целиком
+				}
+				lastGen = gen // снимаем ДО рендера: инвалидация во время кадра не потеряется
+			}
 			frame := e.renderFrame()
 			if len(frame.Tiles) == 0 {
 				continue
@@ -505,17 +562,27 @@ func (e *Engine) loop() {
 }
 
 func (e *Engine) renderFrame() output.Frame {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	// frameMu гарантирует целостность канваса на время кадра; e.mu берётся
+	// лишь на мгновение — снять указатели. SetRoot/Root/события рендером
+	// больше не блокируются.
+	e.frameMu.Lock()
+	defer e.frameMu.Unlock()
 
-	e.canvas.blitBackground()
+	e.mu.RLock()
+	canvas := e.canvas
+	root := e.root
+	e.mu.RUnlock()
+
+	damage, damageAll := e.consumeDamage()
+
+	canvas.blitBackground()
 
 	// Корневое дерево: рисуем root и его overlay-слой (popup/dropdown).
 	// Без этого вызова на канвасе остаётся только blitBackground —
 	// именно сюда «уехал» баг с чёрным экраном при последнем appendF.
-	if e.root != nil {
-		e.root.Draw(e.canvas)
-		drawOverlays(e.root, e.canvas)
+	if root != nil {
+		root.Draw(canvas)
+		drawOverlays(root, canvas)
 	}
 
 	// Модальные виджеты: затемнение + диалог поверх всего
@@ -531,24 +598,31 @@ func (e *Engine) renderFrame() output.Frame {
 		// Затемнение фона
 		dim := m.DimColor()
 		if dim.A > 0 {
-			e.canvas.FillRectAlpha(0, 0, e.canvas.W, e.canvas.H, dim)
+			canvas.FillRectAlpha(0, 0, canvas.W, canvas.H, dim)
 		}
 		// Отрисовка модального виджета
-		m.Draw(e.canvas)
-		drawOverlays(m, e.canvas)
+		m.Draw(canvas)
+		drawOverlays(m, canvas)
 	}
 
 	// Всплывающая подсказка (поверх всего, включая модальные диалоги).
-	e.drawTooltip()
+	e.drawTooltip(canvas, root)
 
-	tiles := e.canvas.diffAndSync()
+	// Diff: в on-demand режиме при частичном повреждении сравниваем только
+	// тайлы, пересекающие заявленную область (контракт InvalidateRect).
+	var tiles []output.DirtyTile
+	if e.onDemand.Load() && !damageAll && !damage.Empty() {
+		tiles = canvas.diffAndSyncIn(damage)
+	} else {
+		tiles = canvas.diffAndSync()
+	}
 
 	seq := e.frameSeq.Add(1)
 
 	if e.saveDir != "" && len(tiles) > 0 {
 		// Снимаем копию front-буфера СЕЙЧАС, пока он актуален.
-		snap := image.NewRGBA(e.canvas.front.Rect)
-		copy(snap.Pix, e.canvas.front.Pix)
+		snap := image.NewRGBA(canvas.front.Rect)
+		copy(snap.Pix, canvas.front.Pix)
 		path := filepath.Join(e.saveDir, fmt.Sprintf("frame_%06d.png", seq))
 		e.saveCh <- saveJob{path: path, seq: seq, snap: snap}
 	}

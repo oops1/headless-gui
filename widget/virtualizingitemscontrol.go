@@ -225,6 +225,7 @@ func (v *VirtualizingItemsControl) updateVisible() {
 	for _, c := range children {
 		v.AddChild(c)
 	}
+	notifyUIChanged() // окно строк изменилось (on-demand рендер)
 }
 
 func (v *VirtualizingItemsControl) thumbRectLocked() image.Rectangle {
@@ -232,20 +233,23 @@ func (v *VirtualizingItemsControl) thumbRectLocked() image.Rectangle {
 	if !v.needsScrollbarLocked() {
 		return image.Rectangle{}
 	}
-	viewH := b.Dy()
 	ch := v.contentHeightLocked()
 	trackX := b.Max.X - v.scrollbarWidth
-	ratio := float64(viewH) / float64(ch)
-	thumbH := int(ratio * float64(viewH))
+	top, workH := sbWorkArea(b, v.scrollbarWidth) // в классике — между кнопками ▲▼
+	ratio := float64(b.Dy()) / float64(ch)
+	thumbH := int(ratio * float64(workH))
 	if thumbH < 20 {
 		thumbH = 20
+	}
+	if thumbH > workH {
+		thumbH = workH
 	}
 	maxS := v.maxScrollLocked()
 	var thumbY int
 	if maxS > 0 {
-		thumbY = int(float64(v.scrollY) / float64(maxS) * float64(viewH-thumbH))
+		thumbY = int(float64(v.scrollY) / float64(maxS) * float64(workH-thumbH))
 	}
-	return image.Rect(trackX, b.Min.Y+thumbY, b.Max.X, b.Min.Y+thumbY+thumbH)
+	return image.Rect(trackX, top+thumbY, b.Max.X, top+thumbY+thumbH)
 }
 
 // ─── Draw ─────────────────────────────────────────────────────────────────────
@@ -277,7 +281,12 @@ func (v *VirtualizingItemsControl) Draw(ctx DrawContext) {
 		if v.thumbHovered || v.dragging {
 			tc = v.ThumbHoverBG
 		}
-		ctx.FillRoundRect(tr.Min.X+1, tr.Min.Y+1, tr.Dx()-2, tr.Dy()-2, 3, tc)
+		if st := currentStyle(); st.Classic3D {
+			track := image.Rect(trackX, b.Min.Y, b.Max.X, b.Max.Y)
+			drawClassicScrollbar(ctx, track, tr, st, v.ThumbColor, win10.LabelText)
+		} else {
+			ctx.FillRoundRect(tr.Min.X+1, tr.Min.Y+1, tr.Dx()-2, tr.Dy()-2, 3, tc)
+		}
 	}
 
 	if v.ShowBorder {
@@ -325,7 +334,26 @@ func (v *VirtualizingItemsControl) OnMouseButton(e MouseEvent) bool {
 			}
 			trackX := b.Max.X - v.scrollbarWidth
 			if e.X >= trackX {
-				ratio := float64(e.Y-b.Min.Y) / float64(b.Dy())
+				if currentStyle().Classic3D {
+					// Кнопки ▲/▼ классического скроллбара — шаг на строку.
+					btn := classicSBBtnH(v.scrollbarWidth)
+					if e.Y < b.Min.Y+btn {
+						v.scrollY -= v.ih()
+						v.clampScrollLocked()
+						v.mu.Unlock()
+						v.updateVisible()
+						return true
+					}
+					if e.Y >= b.Max.Y-btn {
+						v.scrollY += v.ih()
+						v.clampScrollLocked()
+						v.mu.Unlock()
+						v.updateVisible()
+						return true
+					}
+				}
+				top, workH := sbWorkArea(b, v.scrollbarWidth)
+				ratio := float64(e.Y-top) / float64(workH)
 				v.scrollY = int(ratio * float64(v.contentHeightLocked()))
 				v.clampScrollLocked()
 				v.mu.Unlock()
@@ -353,9 +381,9 @@ func (v *VirtualizingItemsControl) OnMouseMove(x, y int) {
 	v.mu.Lock()
 	if v.dragging {
 		dy := y - v.dragStartY
-		viewH := v.bounds.Dy()
+		_, workH := sbWorkArea(v.bounds, v.scrollbarWidth)
 		tr := v.thumbRectLocked()
-		trackUsable := viewH - tr.Dy()
+		trackUsable := workH - tr.Dy()
 		if trackUsable > 0 {
 			delta := int(float64(dy) / float64(trackUsable) * float64(v.maxScrollLocked()))
 			v.scrollY = v.dragStartScr + delta

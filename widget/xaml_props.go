@@ -173,9 +173,8 @@ func applyTabIndex(w Widget, el xElement) {
 
 // applyCommonProps применяет полный набор общих XAML-свойств к виджету:
 // Grid.*, DockPanel.Dock, Margin, Alignment, IsEnabled, ToolTip, Visibility,
-// ShowLocaleIndicator. Используется как контейнерами, так и листовыми виджетами,
-// чтобы поведение было единообразным (см. BUG-1: контейнеры раньше пропускали
-// часть свойств, из-за чего TabControl игнорировал Grid.Row).
+// ShowLocaleIndicator, Cursor. Используется как контейнерами, так и листовыми
+// виджетами, чтобы поведение было единообразным (см. BUG-1).
 func applyCommonProps(w Widget, el xElement) {
 	applyGridAttachedProps(w, el)
 	applyDockAttachedProp(w, el)
@@ -186,6 +185,31 @@ func applyCommonProps(w Widget, el xElement) {
 	applyVisibility(w, el)
 	applyLocaleIndicator(w, el)
 	applyTabIndex(w, el)
+	applyCursor(w, el)
+}
+
+// applyCursor читает XAML-атрибут Cursor= и задаёт принудительный курсор виджету.
+func applyCursor(w Widget, el xElement) {
+	cs := strings.ToLower(strings.TrimSpace(el.attr("Cursor")))
+	if cs == "" {
+		return
+	}
+	sc, ok := w.(interface{ SetCursor(Cursor) })
+	if !ok {
+		return
+	}
+	switch cs {
+	case "ibeam":
+		sc.SetCursor(CursorIBeam)
+	case "hand":
+		sc.SetCursor(CursorHand)
+	case "sizewe":
+		sc.SetCursor(CursorSizeWE)
+	case "sizens":
+		sc.SetCursor(CursorSizeNS)
+	case "arrow":
+		sc.SetCursor(CursorArrow)
+	}
 }
 
 // ─── IsEnabled ──────────────────────────────────────────────────────────────

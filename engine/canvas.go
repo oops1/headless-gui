@@ -480,11 +480,32 @@ func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
 
 // diffAndSync сравнивает back с front по тайлам и возвращает изменившиеся.
 func (c *Canvas) diffAndSync() []output.DirtyTile {
+	return c.diffTiles(0, 0, c.tilesX-1, c.tilesY-1)
+}
+
+// diffAndSyncIn — как diffAndSync, но сравнивает только тайлы, пересекающие
+// region (damage-область из InvalidateRect). Тайлы вне region не сравниваются
+// и НЕ синхронизируются — контракт: вызывающий заявил все изменённые области.
+func (c *Canvas) diffAndSyncIn(region image.Rectangle) []output.DirtyTile {
+	region = region.Intersect(image.Rect(0, 0, c.W, c.H))
+	if region.Empty() {
+		return nil
+	}
+	ts := output.TileSize
+	tx0 := region.Min.X / ts
+	ty0 := region.Min.Y / ts
+	tx1 := (region.Max.X - 1) / ts
+	ty1 := (region.Max.Y - 1) / ts
+	return c.diffTiles(tx0, ty0, tx1, ty1)
+}
+
+// diffTiles сравнивает тайлы в диапазоне индексов [tx0..tx1]×[ty0..ty1].
+func (c *Canvas) diffTiles(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
 	ts := output.TileSize
 	var tiles []output.DirtyTile
 
-	for ty := 0; ty < c.tilesY; ty++ {
-		for tx := 0; tx < c.tilesX; tx++ {
+	for ty := ty0; ty <= ty1 && ty < c.tilesY; ty++ {
+		for tx := tx0; tx <= tx1 && tx < c.tilesX; tx++ {
 			px := tx * ts
 			py := ty * ts
 			pw := min(ts, c.W-px)

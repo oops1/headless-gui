@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -436,7 +437,9 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 func buildXAMLImage(el xElement) Widget {
 	iw := NewImageWidget()
 	if src := el.attr("Source"); src != "" {
-		_ = iw.SetSource(src)
+		if err := iw.SetSource(src); err != nil {
+			log.Printf("xaml: Image Source=%q: %v", src, err)
+		}
 		iw.Source = src
 	}
 	switch strings.ToLower(el.attr("Stretch")) {

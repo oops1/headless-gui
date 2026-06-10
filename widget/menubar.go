@@ -53,6 +53,7 @@ type MenuBar struct {
 	Background      color.RGBA
 	TextColor       color.RGBA
 	HoverBG         color.RGBA
+	HoverTextColor  color.RGBA // текст пункта под курсором (Win2000 — белый на navy)
 	ActiveBG        color.RGBA
 	BorderColor     color.RGBA
 	ItemPaddingX    int // горизонтальный padding текста пункта
@@ -170,15 +171,30 @@ func (mb *MenuBar) Draw(ctx DrawContext) {
 		r := rects[i]
 
 		// Подсветка активного/hover.
-		if i == active {
+		textCol := mb.TextColor
+		if st := currentStyle(); st.Classic3D {
+			// Классика Win2000: hover — выпуклая рамка, открытое меню —
+			// утопленная; фон не меняется, текст остаётся чёрным.
+			if i == active {
+				drawBevelSunken(ctx, r.Min.X, r.Min.Y+1, r.Dx(), r.Dy()-2, st)
+			} else if i == hover {
+				ctx.DrawHLine(r.Min.X, r.Min.Y+1, r.Dx(), st.BevelLight)
+				ctx.DrawVLine(r.Min.X, r.Min.Y+1, r.Dy()-2, st.BevelLight)
+				ctx.DrawHLine(r.Min.X, r.Max.Y-2, r.Dx(), st.BevelShadow)
+				ctx.DrawVLine(r.Max.X-1, r.Min.Y+1, r.Dy()-2, st.BevelShadow)
+			}
+		} else if i == active {
 			ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), mb.ActiveBG)
 		} else if i == hover {
 			ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), mb.HoverBG)
+			if mb.HoverTextColor.A > 0 {
+				textCol = mb.HoverTextColor
+			}
 		}
 
 		// Текст по центру вертикали.
 		textY := r.Min.Y + (r.Dy()-13)/2
-		ctx.DrawText(item.Text, r.Min.X+mb.ItemPaddingX, textY, mb.TextColor)
+		ctx.DrawText(item.Text, r.Min.X+mb.ItemPaddingX, textY, textCol)
 	}
 
 	mb.drawDisabledOverlay(ctx)
@@ -276,7 +292,7 @@ func (mb *MenuBar) openSubmenu(idx int) {
 		// Нет подменю — просто выполняем OnClick.
 		mb.closeSubmenu()
 		if item.OnClick != nil {
-			go item.OnClick()
+			item.OnClick() // синхронно — вне mb.mu
 		}
 		return
 	}
@@ -387,9 +403,12 @@ func (mb *MenuBar) IsFocused() bool   { return atomic.LoadInt32(&mb.activeIdx) >
 // ApplyTheme обновляет цвета MenuBar и вложенного PopupMenu из темы.
 func (mb *MenuBar) ApplyTheme(t *Theme) {
 	mb.Background = t.PanelBG
-	mb.TextColor = t.TitleText
-	mb.HoverBG = t.ListItemHover
-	mb.ActiveBG = t.DropBG
+	// Текст меню — цвет обычного текста (TitleText рассчитан на цветной
+	// заголовок окна: в Win2000 он белый на navy и нечитаем на серой полосе).
+	mb.TextColor = t.LabelText
+	mb.HoverBG = t.MenuHoverBG
+	mb.HoverTextColor = t.MenuHoverText
+	mb.ActiveBG = t.MenuBG
 	mb.BorderColor = t.Border
 	if mb.popup != nil {
 		mb.popup.ApplyTheme(t)

@@ -67,6 +67,46 @@ func TestStrings_LoadJSON(t *testing.T) {
 	}
 }
 
+func TestStrings_RemoveLanguageListener(t *testing.T) {
+	widget.SetLanguage("EN")
+	called := false
+	id := widget.AddLanguageListener(func(string) { called = true })
+	widget.RemoveLanguageListener(id)
+	widget.SetLanguage("RU")
+	if called {
+		t.Fatal("слушатель вызван после RemoveLanguageListener")
+	}
+	widget.SetLanguage("EN")
+}
+
+func TestBindingScope_DisposeStopsLocUpdates(t *testing.T) {
+	widget.ClearStrings()
+	widget.RegisterStrings("EN", map[string]string{"DisposeKey": "Hello"})
+	widget.RegisterStrings("RU", map[string]string{"DisposeKey": "Привет"})
+	widget.SetLanguage("EN")
+
+	const xaml = `<Canvas xmlns="clr">
+		<TextBlock Name="lbl" Text="{Loc DisposeKey}"/>
+	</Canvas>`
+
+	_, reg, scope, err := widget.LoadUIFromXAMLBindings([]byte(xaml), nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	lbl := reg["lbl"].(*widget.Label)
+
+	if lbl.Text() != "Hello" {
+		t.Fatalf("начальный текст = %q, want Hello", lbl.Text())
+	}
+
+	scope.Dispose()
+	widget.SetLanguage("RU")
+	if lbl.Text() != "Hello" {
+		t.Fatalf("после Dispose текст изменился на %q, want Hello (не должно меняться)", lbl.Text())
+	}
+	widget.SetLanguage("EN")
+}
+
 func TestStrings_Trf(t *testing.T) {
 	widget.ClearStrings()
 	widget.RegisterString("EN", "Count", "Items: %d")

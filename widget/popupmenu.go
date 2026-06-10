@@ -41,13 +41,14 @@ type PopupMenu struct {
 	parent       *PopupMenu // родительское меню (nil для корневого)
 
 	// Стиль.
-	Background    color.RGBA
-	BorderColor   color.RGBA
-	TextColor     color.RGBA
-	DisabledColor color.RGBA
-	HoverBG       color.RGBA
+	Background     color.RGBA
+	BorderColor    color.RGBA
+	TextColor      color.RGBA
+	DisabledColor  color.RGBA
+	HoverBG        color.RGBA
+	HoverTextColor color.RGBA // текст пункта под курсором (Win2000 — белый на navy)
 	SeparatorColor color.RGBA
-	ShadowColor   color.RGBA
+	ShadowColor    color.RGBA
 
 	ItemHeight    int // высота обычного пункта (по умолчанию 30)
 	SeparatorH    int // высота разделителя (по умолчанию 9)
@@ -93,22 +94,30 @@ func getScreenBounds() (int, int) {
 
 // NewPopupMenu создаёт пустое popup-меню.
 func NewPopupMenu() *PopupMenu {
-	return &PopupMenu{
+	// Цвета — из активной темы: контекстные меню создаются на лету
+	// (TextInput и др.) и должны следовать текущей теме, а не Win10 Dark.
+	m := &PopupMenu{
 		hoverIdx:       -1,
 		childForIdx:    -1,
-		Background:     color.RGBA{R: 44, G: 44, B: 49, A: 250},
-		BorderColor:    color.RGBA{R: 70, G: 70, B: 78, A: 255},
-		TextColor:      color.RGBA{R: 230, G: 230, B: 230, A: 255},
-		DisabledColor:  color.RGBA{R: 110, G: 110, B: 115, A: 255},
-		HoverBG:        color.RGBA{R: 62, G: 62, B: 70, A: 255},
-		SeparatorColor: color.RGBA{R: 70, G: 70, B: 78, A: 255},
-		ShadowColor:    color.RGBA{R: 0, G: 0, B: 0, A: 60},
+		Background:     win10.MenuBG,
+		BorderColor:    win10.DropBorder,
+		TextColor:      win10.DropText,
+		DisabledColor:  win10.Disabled,
+		HoverBG:        win10.MenuHoverBG,
+		HoverTextColor: win10.MenuHoverText,
+		SeparatorColor: win10.DropBorder,
+		ShadowColor:    win10.ShadowColor,
 		ItemHeight:     30,
 		SeparatorH:     9,
 		PaddingX:       16,
 		MinWidth:       160,
 		ArrowPadding:   20,
 	}
+	if win10.Style.Classic3D {
+		m.ItemHeight = 22 // классика: компактные пункты меню
+		m.SeparatorH = 7
+	}
+	return m
 }
 
 // AddItem добавляет пункт меню.
@@ -246,6 +255,7 @@ func (m *PopupMenu) openChild(idx int) {
 	child.Background = m.Background
 	child.BorderColor = m.BorderColor
 	child.TextColor = m.TextColor
+	child.HoverTextColor = m.HoverTextColor
 	child.DisabledColor = m.DisabledColor
 	child.HoverBG = m.HoverBG
 	child.SeparatorColor = m.SeparatorColor
@@ -405,8 +415,12 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 	// Фон popup.
 	ctx.FillRect(px, py, pw, ph, m.Background)
 
-	// Рамка.
-	ctx.DrawBorder(px, py, pw, ph, m.BorderColor)
+	// Рамка: классика — выпуклый 3D-бордюр (как меню Win2000), иначе плоская.
+	if st := currentStyle(); st.Classic3D {
+		drawBevelRaised(ctx, px, py, pw, ph, st)
+	} else {
+		ctx.DrawBorder(px, py, pw, ph, m.BorderColor)
+	}
 
 	// Пункты.
 	curY := py + 2
@@ -420,13 +434,17 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 
 		// Hover-подсветка (а также подсветка пункта с открытым дочерним подменю).
 		isChildOpen := m.childForIdx == i && m.child != nil && m.child.IsOpen()
-		if (i == hover || isChildOpen) && !item.Disabled {
+		hovered := (i == hover || isChildOpen) && !item.Disabled
+		if hovered {
 			ctx.FillRect(px+2, curY, pw-4, m.ItemHeight, m.HoverBG)
 		}
 
 		// Текст.
 		textY := curY + (m.ItemHeight-13)/2
 		textCol := m.TextColor
+		if hovered && m.HoverTextColor.A > 0 {
+			textCol = m.HoverTextColor // классика: белый на navy
+		}
 		if item.Disabled {
 			textCol = m.DisabledColor
 		}
@@ -561,10 +579,10 @@ func (m *PopupMenu) OnMouseButton(e MouseEvent) bool {
 		m.closeAll()
 
 		if item.OnClick != nil {
-			go item.OnClick()
+			item.OnClick() // синхронно — меню уже закрыто, локи отпущены
 		}
 		if m.OnSelect != nil {
-			go m.OnSelect(idx, item.Text)
+			m.OnSelect(idx, item.Text)
 		}
 	}
 
@@ -659,10 +677,10 @@ func (m *PopupMenu) OnKeyEvent(e KeyEvent) {
 				}
 				m.closeAll()
 				if item.OnClick != nil {
-					go item.OnClick()
+					item.OnClick() // синхронно — меню уже закрыто, локи отпущены
 				}
 				if m.OnSelect != nil {
-					go m.OnSelect(hover, item.Text)
+					m.OnSelect(hover, item.Text)
 				}
 			}
 		}
@@ -709,8 +727,19 @@ func (m *PopupMenu) IsFocused() bool   { return m.IsOpen() }
 
 // ApplyTheme обновляет цвета из темы.
 func (m *PopupMenu) ApplyTheme(t *Theme) {
-	m.Background = t.DropBG
+	m.Background = t.MenuBG
 	m.BorderColor = t.DropBorder
 	m.TextColor = t.DropText
-	m.HoverBG = t.ListItemHover
+	m.DisabledColor = t.Disabled
+	m.HoverBG = t.MenuHoverBG
+	m.HoverTextColor = t.MenuHoverText
+	m.SeparatorColor = t.DropBorder
+	m.ShadowColor = t.ShadowColor
+	if t.Style.Classic3D {
+		m.ItemHeight = 22 // классика: компактные пункты
+		m.SeparatorH = 7
+	} else {
+		m.ItemHeight = 30
+		m.SeparatorH = 9
+	}
 }
