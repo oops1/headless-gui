@@ -97,11 +97,11 @@ func (d *Dialog) Draw(ctx DrawContext) {
 	// Фон диалога
 	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), d.Background)
 
-	// Заголовок
+	// Заголовок (в классике — градиент navy→голубой и жирный текст)
 	if d.TitleHeight > 0 {
-		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), d.TitleHeight, d.TitleBG)
+		fillTitleBar(ctx, image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+d.TitleHeight), d.TitleBG)
 		textY := b.Min.Y + (d.TitleHeight-13)/2
-		ctx.DrawText(d.Title, b.Min.X+10, textY, d.TitleColor)
+		drawTitleText(ctx, d.Title, b.Min.X+10, textY, d.TitleColor)
 		// Индикатор локали — в правом краю заголовка
 		if d.ShowLocaleIndicator {
 			drawLocaleBadge(ctx, b.Max.X-8, b.Min.Y, d.TitleHeight, d.TitleColor)

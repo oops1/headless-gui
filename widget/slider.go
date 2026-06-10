@@ -122,29 +122,45 @@ func (s *Slider) Draw(ctx DrawContext) {
 	}
 
 	tr := s.trackRect()
+	st := currentStyle()
 
-	// Дорожка (фон)
-	ctx.FillRoundRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), 2, s.TrackBG)
+	if st.Classic3D {
+		// Классика Win2000: утопленный жёлоб + прямоугольный выпуклый ползунок.
+		ctx.FillRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), s.TrackBG)
+		drawBevelSunken(ctx, tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), st)
+		fillW := int(math.Round(s.ratio() * float64(tr.Dx())))
+		if fillW > 4 {
+			ctx.FillRect(tr.Min.X+2, tr.Min.Y+2, fillW-4, tr.Dy()-4, s.FillColor)
+		}
+		cx, cy := s.thumbCenter()
+		tw, th := 11, s.ThumbRadius*2+4
+		tx, ty := cx-tw/2, cy-th/2
+		ctx.FillRect(tx, ty, tw, th, s.ThumbColor)
+		drawBevelRaised(ctx, tx, ty, tw, th, st)
+	} else {
+		// Дорожка (фон)
+		ctx.FillRoundRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), 2, s.TrackBG)
 
-	// Заполненная часть
-	fillW := int(math.Round(s.ratio() * float64(tr.Dx())))
-	if fillW > 0 {
-		ctx.FillRoundRect(tr.Min.X, tr.Min.Y, fillW, tr.Dy(), 2, s.FillColor)
-	}
+		// Заполненная часть
+		fillW := int(math.Round(s.ratio() * float64(tr.Dx())))
+		if fillW > 0 {
+			ctx.FillRoundRect(tr.Min.X, tr.Min.Y, fillW, tr.Dy(), 2, s.FillColor)
+		}
 
-	// Ползунок
-	cx, cy := s.thumbCenter()
-	thumbCol := s.ThumbColor
-	if s.hovered || s.dragging {
-		thumbCol = s.ThumbHover
-	}
-	drawFilledCircle(ctx, cx, cy, s.ThumbRadius, thumbCol)
-	drawCircleOutline(ctx, cx, cy, s.ThumbRadius, s.BorderColor)
+		// Ползунок
+		cx, cy := s.thumbCenter()
+		thumbCol := s.ThumbColor
+		if s.hovered || s.dragging {
+			thumbCol = s.ThumbHover
+		}
+		drawFilledCircle(ctx, cx, cy, s.ThumbRadius, thumbCol)
+		drawCircleOutline(ctx, cx, cy, s.ThumbRadius, s.BorderColor)
 
-	// Меньший белый кружок в центре для красоты
-	innerR := s.ThumbRadius - 3
-	if innerR > 2 {
-		drawFilledCircle(ctx, cx, cy, innerR, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		// Меньший белый кружок в центре для красоты
+		innerR := s.ThumbRadius - 3
+		if innerR > 2 {
+			drawFilledCircle(ctx, cx, cy, innerR, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		}
 	}
 
 	s.drawChildren(ctx)
@@ -176,16 +192,20 @@ func (s *Slider) OnMouseButton(e MouseEvent) bool {
 		return false
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if e.Pressed {
 		s.dragging = true
+		fire := false
+		var val float64
 		newVal := s.valueFromX(e.X)
 		if newVal != s.value {
 			s.value = s.clamp(newVal)
-			if s.OnChange != nil {
-				go s.OnChange(s.value)
-			}
+			fire, val = s.OnChange != nil, s.value
+		}
+		onCh := s.OnChange
+		s.mu.Unlock()
+		if fire && onCh != nil {
+			onCh(val) // синхронно — вне s.mu
 		}
 		return true
 	}
@@ -193,6 +213,7 @@ func (s *Slider) OnMouseButton(e MouseEvent) bool {
 	// Отпускание: прекращаем drag и освобождаем захват мыши.
 	s.dragging = false
 	cm := s.capMgr
+	s.mu.Unlock()
 	if cm != nil {
 		cm.ReleaseCapture()
 	}
@@ -219,15 +240,19 @@ func (s *Slider) OnMouseMove(x, y int) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if s.dragging {
+		fire := false
+		var val float64
 		newVal := s.valueFromX(x)
 		if newVal != s.value {
 			s.value = s.clamp(newVal)
-			if s.OnChange != nil {
-				go s.OnChange(s.value)
-			}
+			fire, val = s.OnChange != nil, s.value
+		}
+		onCh := s.OnChange
+		s.mu.Unlock()
+		if fire && onCh != nil {
+			onCh(val) // синхронно — вне s.mu
 		}
 		return
 	}
@@ -237,6 +262,7 @@ func (s *Slider) OnMouseMove(x, y int) {
 	dx := x - cx
 	dy := y - cy
 	s.hovered = dx*dx+dy*dy <= s.ThumbRadius*s.ThumbRadius
+	s.mu.Unlock()
 }
 
 // OnKeyEvent обрабатывает клавиши ←/→ для изменения значения.
@@ -245,7 +271,6 @@ func (s *Slider) OnKeyEvent(e KeyEvent) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	step := (s.Max - s.Min) / 20 // 5% шаг
 	if e.Mod&ModShift != 0 {
@@ -262,11 +287,15 @@ func (s *Slider) OnKeyEvent(e KeyEvent) {
 	case KeyEnd:
 		s.value = s.Max
 	default:
+		s.mu.Unlock()
 		return
 	}
 
-	if s.OnChange != nil {
-		go s.OnChange(s.value)
+	onCh := s.OnChange
+	val := s.value
+	s.mu.Unlock()
+	if onCh != nil {
+		onCh(val) // синхронно — вне s.mu
 	}
 }
 

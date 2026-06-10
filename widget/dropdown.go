@@ -125,18 +125,29 @@ func (d *Dropdown) Draw(ctx DrawContext) {
 	}
 
 	isOpen := atomic.LoadInt32(&d.open) == 1
+	st := currentStyle()
 
 	bg := d.Background
-	if atomic.LoadInt32(&d.isHover) == 1 && !isOpen && d.HoverBG.A > 0 {
+	if atomic.LoadInt32(&d.isHover) == 1 && !isOpen && d.HoverBG.A > 0 && !st.Classic3D {
 		bg = d.HoverBG
 	}
-	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
 
 	border := d.BorderColor
 	if isOpen {
 		border = d.FocusBorder
 	}
-	ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), border)
+	switch {
+	case st.Classic3D:
+		// Классика: утопленное поле + выпуклая «кнопка» со стрелкой справа.
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
+		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+	case st.ControlCorner > 0:
+		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st.ControlCorner, bg)
+		ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st.ControlCorner, border)
+	default:
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
+		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), border)
+	}
 
 	// Текст выбранного пункта
 	selText := d.SelectedText()
@@ -149,10 +160,17 @@ func (d *Dropdown) Draw(ctx DrawContext) {
 	// Стрелка ▼
 	arrowX := b.Max.X - 16
 	arrowY := b.Min.Y + b.Dy()/2 - 1
-	drawArrowDown(ctx, arrowX, arrowY, d.ArrowColor)
-
-	// Разделитель перед стрелкой
-	ctx.DrawVLine(b.Max.X-20, b.Min.Y+2, b.Dy()-4, d.BorderColor)
+	if st.Classic3D {
+		// Классика: выпуклая кнопка со стрелкой внутри утопленного поля.
+		btnX := b.Max.X - 19
+		ctx.FillRect(btnX, b.Min.Y+2, 17, b.Dy()-4, win10.BtnBG)
+		drawBevelRaised(ctx, btnX, b.Min.Y+2, 17, b.Dy()-4, st)
+		drawArrowDown(ctx, arrowX+1, arrowY, d.ArrowColor)
+	} else {
+		drawArrowDown(ctx, arrowX, arrowY, d.ArrowColor)
+		// Разделитель перед стрелкой
+		ctx.DrawVLine(b.Max.X-20, b.Min.Y+2, b.Dy()-4, d.BorderColor)
+	}
 
 	// Раскрытый список рисуется через overlay (поверх всех виджетов).
 	// См. DrawOverlay / HasOverlay ниже.
@@ -279,7 +297,7 @@ func (d *Dropdown) OnKeyEvent(e KeyEvent) {
 	}
 }
 
-// fireOnChange вызывает OnChange в горутине (если задан).
+// fireOnChange вызывает OnChange синхронно (если задан) — вне d.mu.
 func (d *Dropdown) fireOnChange(idx int) {
 	if d.OnChange == nil {
 		return
@@ -290,7 +308,7 @@ func (d *Dropdown) fireOnChange(idx int) {
 		text = d.items[idx]
 	}
 	d.mu.RUnlock()
-	go d.OnChange(idx, text)
+	d.OnChange(idx, text)
 }
 
 // BaseBounds возвращает базовый прямоугольник заголовка (без выпавшего списка).
@@ -354,7 +372,7 @@ func (d *Dropdown) OnMouseButton(e MouseEvent) bool {
 					text = d.items[i]
 				}
 				d.mu.RUnlock()
-				go d.OnChange(i, text)
+				d.OnChange(i, text) // синхронно — вне d.mu
 			}
 			return true
 		}

@@ -37,8 +37,11 @@
          ═══════════════════════════════════════════════════════════════════════ -->
     <Panel Name="header" Left="0" Top="0" Width="1280" Height="52"
            Background="#0078D4">
-        <Label Left="20" Top="14" Width="500" Height="24"
+        <Label Name="headerTitle" Left="20" Top="14" Width="500" Height="24"
                Text="GuiEngine — Widget Showcase" Foreground="White"/>
+        <ComboBox Name="themeSelect" Left="690" Top="10" Width="235" Height="32"
+                  Items="Win10 Dark,Win10 Light,Win11 Dark,Win11 Light,Win2000,Mac"
+                  SelectedIndex="0" ToolTip="Сменить тему оформления"/>
         <Button Name="langToggle" Left="940" Top="10" Width="120" Height="32"
                 Content="Язык: RU" Background="#005A9E" Foreground="White"
                 HoverBG="#1A8CFF" PressedBG="#004578" BorderBrush="#1A8CFF"

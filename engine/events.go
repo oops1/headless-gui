@@ -74,11 +74,13 @@ func (e *Engine) getCaptured() widget.Widget {
 // Если w == nil — фокус снимается со всех виджетов.
 func (e *Engine) SetFocus(w widget.Widget) {
 	e.focus.set(w)
+	e.Invalidate() // рамка фокуса меняет картинку (on-demand рендер)
 }
 
 // SendKeyEvent доставляет клавиатурное событие виджету с фокусом.
 // Tab / Shift+Tab перехватываются для переключения фокуса между виджетами.
 func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
+	e.Invalidate() // ввод меняет картинку (on-demand рендер)
 	// Tab-навигация: перехватываем Tab до доставки виджету.
 	// При активном модальном виджете Tab циклит только внутри него.
 	if ev.Code == widget.KeyTab && ev.Pressed {
@@ -182,6 +184,11 @@ func (e *Engine) CursorAt(x, y int) widget.Cursor {
 	}
 	path := hitTestPath(disp, x, y)
 	for i := len(path) - 1; i >= 0; i-- {
+		if ov, ok := path[i].(interface{ CursorOverride() (widget.Cursor, bool) }); ok {
+			if c, has := ov.CursorOverride(); has {
+				return c
+			}
+		}
 		if cp, ok := path[i].(widget.CursorProvider); ok {
 			return cp.Cursor(x, y)
 		}
@@ -196,6 +203,8 @@ func (e *Engine) CursorAt(x, y int) widget.Cursor {
 // Если активен модальный виджет — broadcast только внутри него.
 // Иначе — broadcast всему дереву.
 func (e *Engine) SendMouseMove(x, y int) {
+	e.Invalidate() // hover/drag меняют картинку (on-demand рендер)
+
 	// Запоминаем позицию курсора и сбрасываем таймер всплывающей подсказки.
 	e.recordMouse(x, y)
 
@@ -227,6 +236,7 @@ func (e *Engine) SendMouseMove(x, y int) {
 // Иначе: проверяем, хочет ли какой-либо предок захватить мышь (WantsCapture),
 // затем передаём событие самому верхнему виджету под курсором.
 func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool) {
+	e.Invalidate() // клики меняют картинку (on-demand рендер)
 	ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed}
 
 	// Если мышь захвачена — только захватчику.

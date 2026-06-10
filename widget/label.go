@@ -236,6 +236,11 @@ func splitWords(s string) []string {
 }
 
 // ApplyTheme обновляет цвет текста в соответствии с темой.
+// Непрозрачный фон следует за темой (как у Panel/Canvas) — иначе после
+// переключения остаются «островки» прежней палитры.
 func (l *Label) ApplyTheme(t *Theme) {
 	l.TextColor = t.LabelText
+	if l.Background.A > 0 {
+		l.Background = t.PanelBG
+	}
 }

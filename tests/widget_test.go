@@ -8,9 +8,41 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v3/widget/datagrid"
 )
 
 // ─── Base ───────────────────────────────────────────────────────────────────
+
+// setTextModel — тестовая модель для проверки SetText-биндингов.
+type setTextModel struct {
+	datagrid.PropertyNotifier
+	Label string
+}
+
+func TestButton_SetTextBinding(t *testing.T) {
+	m := &setTextModel{Label: "Save"}
+
+	const xaml = `<Canvas xmlns="clr">
+		<Button Name="btn" Content="{Binding Label}"/>
+	</Canvas>`
+
+	_, reg, scope, err := widget.LoadUIFromXAMLBindings([]byte(xaml), m)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	_ = scope
+	btn := reg["btn"].(*widget.Button)
+
+	if btn.Text != "Save" {
+		t.Fatalf("начальный текст = %q, want Save", btn.Text)
+	}
+
+	m.Label = "Cancel"
+	m.NotifyPropertyChanged(m, "Label")
+	if btn.Text != "Cancel" {
+		t.Fatalf("после Notify: Text = %q, want Cancel", btn.Text)
+	}
+}
 
 func TestBase_BoundsAndChildren(t *testing.T) {
 	p := widget.NewPanel(widget.DarkTheme().PanelBG)

@@ -207,6 +207,11 @@ type BindingScope struct {
 	reg      map[string]Widget
 	baseDir  string
 	updating atomic.Bool // защита от петли обратной связи во время Refresh
+
+	subCtx    interface{} // контекст, на который оформлена подписка
+	subHandle int         // id подписки (для отписки, -1 если нет)
+
+	langListenerID int // id подписки на смену языка (-1 если не подписан)
 }
 
 // commandTarget — привязка Button.Command к объекту-команде из DataContext.
@@ -218,7 +223,7 @@ type commandTarget struct {
 // newBindingScope строит scope из собранных в env привязок/триггеров/ItemsControl,
 // резолвя имена элементов в registry.
 func newBindingScope(ctx interface{}, env *xamlEnv, reg map[string]Widget, baseDir string) *BindingScope {
-	s := &BindingScope{ctx: ctx, reg: reg, baseDir: baseDir}
+	s := &BindingScope{ctx: ctx, reg: reg, baseDir: baseDir, langListenerID: -1, subHandle: -1}
 	if env == nil {
 		return s
 	}
@@ -305,7 +310,32 @@ func (s *BindingScope) wireLocs() {
 		return
 	}
 	s.applyLocs()
-	AddLanguageListener(func(string) { s.applyLocs() })
+	id := AddLanguageListener(func(string) { s.applyLocs() })
+	s.mu.Lock()
+	s.langListenerID = id
+	s.mu.Unlock()
+}
+
+// Dispose отписывает scope от модели и слушателя языка. Вызывать, когда
+// загруженное XAML-дерево больше не используется (перезагрузка UI).
+func (s *BindingScope) Dispose() {
+	s.mu.Lock()
+	langID := s.langListenerID
+	subCtx := s.subCtx
+	subHandle := s.subHandle
+	s.langListenerID = -1
+	s.subCtx = nil
+	s.subHandle = -1
+	s.mu.Unlock()
+
+	if langID >= 0 {
+		RemoveLanguageListener(langID)
+	}
+	if subCtx != nil {
+		if r, ok := subCtx.(interface{ RemovePropertyChangedHandle(int) }); ok && subHandle >= 0 {
+			r.RemovePropertyChangedHandle(subHandle)
+		}
+	}
 }
 
 // applyLocs устанавливает текущие переводы во все {Loc}-цели.
@@ -317,6 +347,7 @@ func (s *BindingScope) applyLocs() {
 	for _, lt := range locs {
 		setWidgetProperty(lt.w, lt.prop, Tr(lt.key))
 	}
+	notifyUIChanged()
 }
 
 // wireVirtuals настраивает фабрику строк VirtualizingItemsControl (по шаблону
@@ -429,6 +460,7 @@ func (s *BindingScope) rebuildItems(it itemsTarget) {
 		}
 	}
 	it.panel.SetBounds(it.panel.Bounds()) // перелейаут
+	notifyUIChanged()
 }
 
 // wireTriggerSources подключает перевычисление property-триггеров при изменении
@@ -538,6 +570,8 @@ func (s *BindingScope) Refresh() {
 			}
 		}
 	}
+
+	notifyUIChanged() // данные → UI: сообщаем движку (on-demand рендер)
 }
 
 // valueEquals сравнивает значение модели со строкой триггера (без учёта регистра).
@@ -546,17 +580,47 @@ func valueEquals(cv interface{}, s string) bool {
 }
 
 // subscribe подписывается на INotifyPropertyChanged DataContext (если поддерживает).
+// Повторный вызов с тем же ctx — no-op (без дублей). При смене ctx — отписка от старого.
 func (s *BindingScope) subscribe() {
 	s.mu.Lock()
 	ctx := s.ctx
+	subCtx := s.subCtx
+	subHandle := s.subHandle
 	s.mu.Unlock()
-	if n, ok := ctx.(interface {
-		AddPropertyChanged(dgridPkg.PropertyChangedHandler)
-	}); ok {
-		n.AddPropertyChanged(func(sender interface{}, prop string) {
-			s.Refresh()
-		})
+
+	if ctx == subCtx {
+		return // уже подписаны
 	}
+
+	// Отписываемся от старого контекста.
+	if subCtx != nil {
+		if r, ok := subCtx.(interface{ RemovePropertyChangedHandle(int) }); ok && subHandle >= 0 {
+			r.RemovePropertyChangedHandle(subHandle)
+		}
+	}
+
+	// Подписываемся на новый контекст.
+	newHandle := -1
+	if ctx != nil {
+		if a, ok := ctx.(interface {
+			AddPropertyChangedHandle(dgridPkg.PropertyChangedHandler) int
+		}); ok {
+			newHandle = a.AddPropertyChangedHandle(func(_ interface{}, _ string) {
+				s.Refresh()
+			})
+		} else if n, ok := ctx.(interface {
+			AddPropertyChanged(dgridPkg.PropertyChangedHandler)
+		}); ok {
+			n.AddPropertyChanged(func(_ interface{}, _ string) {
+				s.Refresh()
+			})
+		}
+	}
+
+	s.mu.Lock()
+	s.subCtx = ctx
+	s.subHandle = newHandle
+	s.mu.Unlock()
 }
 
 // writeBack записывает значение из UI в модель (TwoWay), применяя ConvertBack.
@@ -645,6 +709,9 @@ func (s *BindingScope) wireTwoWay() {
 			if sl, ok := t.w.(*Slider); ok {
 				sl.OnChange = func(v float64) { s.writeBack(spec, v, tw) }
 			}
+			if nud, ok := t.w.(*NumericUpDown); ok {
+				nud.OnChange = func(v float64) { s.writeBack(spec, v, tw) }
+			}
 		case "selectedindex":
 			if dd, ok := t.w.(*Dropdown); ok {
 				dd.OnChange = func(idx int, _ string) { s.writeBack(spec, idx, tw) }
@@ -713,6 +780,22 @@ func hookSourceChange(w Widget, cb func()) {
 			}
 			cb()
 		}
+	case *NumericUpDown:
+		prev := t.OnChange
+		t.OnChange = func(v float64) {
+			if prev != nil {
+				prev(v)
+			}
+			cb()
+		}
+	case *Expander:
+		prev := t.OnExpandedChanged
+		t.OnExpandedChanged = func(b bool) {
+			if prev != nil {
+				prev(b)
+			}
+			cb()
+		}
 	}
 }
 
@@ -734,6 +817,8 @@ func getWidgetProperty(w Widget, prop string) (interface{}, bool) {
 			return t.Value(), true
 		case *ProgressBar:
 			return t.Value(), true
+		case *NumericUpDown:
+			return t.Value(), true
 		}
 	case "ischecked", "checked":
 		switch t := w.(type) {
@@ -754,6 +839,17 @@ func getWidgetProperty(w Widget, prop string) (interface{}, bool) {
 	case "isenabled":
 		if e, ok := w.(interface{ IsEnabled() bool }); ok {
 			return e.IsEnabled(), true
+		}
+	case "isexpanded":
+		if ex, ok := w.(*Expander); ok {
+			return ex.IsExpanded, true
+		}
+	case "header":
+		switch t := w.(type) {
+		case *Expander:
+			return t.Header, true
+		case *GroupBox:
+			return t.Header, true
 		}
 	}
 	return nil, false
@@ -783,6 +879,8 @@ func setWidgetProperty(w Widget, prop, val string) {
 			case *Slider:
 				t.SetValue(f)
 			case *ProgressBar:
+				t.SetValue(f)
+			case *NumericUpDown:
 				t.SetValue(f)
 			}
 		}
@@ -816,6 +914,17 @@ func setWidgetProperty(w Widget, prop, val string) {
 				t.SetSelected(i)
 			}
 		}
+	case "isexpanded":
+		if ex, ok := w.(*Expander); ok {
+			ex.SetExpanded(parseXAMLBool(val))
+		}
+	case "header":
+		switch t := w.(type) {
+		case *Expander:
+			t.Header = val
+		case *GroupBox:
+			t.Header = val
+		}
 	}
 }
 
@@ -824,15 +933,15 @@ func setWidgetText(w Widget, s string) {
 	case *Label:
 		t.SetText(s)
 	case *Button:
-		t.Text = s
+		t.SetText(s)
 	case *TextInput:
 		t.SetText(s)
 	case *CheckBox:
-		t.Text = s
+		t.SetText(s)
 	case *RadioButton:
-		t.Text = s
+		t.SetText(s)
 	case *ToggleSwitch:
-		t.Text = s
+		t.SetText(s)
 	}
 }
 

@@ -35,6 +35,12 @@ const (
 	togglePad    = 4  // отступ кружка от края
 )
 
+// SetText задаёт текст метки переключателя.
+func (t *ToggleSwitch) SetText(s string) { t.Text = s }
+
+// GetText возвращает текущий текст метки.
+func (t *ToggleSwitch) GetText() string { return t.Text }
+
 // NewToggleSwitch создаёт переключатель с текстовой меткой.
 func NewToggleSwitch(text string) *ToggleSwitch {
 	return &ToggleSwitch{
@@ -168,7 +174,7 @@ func (ts *ToggleSwitch) OnKeyEvent(e KeyEvent) {
 		newState := !ts.IsOn()
 		ts.SetOn(newState)
 		if ts.OnChange != nil {
-			go ts.OnChange(newState)
+			ts.OnChange(newState) // синхронно — единая модель с mouse-path
 		}
 	}
 }

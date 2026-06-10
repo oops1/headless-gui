@@ -150,6 +150,11 @@ func (w *DataGridWidget) IsFocused() bool {
 	return w.Grid.IsFocused()
 }
 
+// NeedsAnimation — каретка мигает в режиме редактирования ячейки (Animated).
+func (w *DataGridWidget) NeedsAnimation() bool {
+	return w.Grid.IsEditing()
+}
+
 // ─── Scroll ────────────────────────────────────────────────────────────────
 
 // ScrollBy прокручивает DataGrid на delta пикселей (для колеса мыши).

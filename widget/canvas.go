@@ -346,5 +346,12 @@ func (c *Canvas) Draw(ctx DrawContext) {
 	c.drawChildren(ctx)
 }
 
-// ApplyTheme — Canvas не имеет темизируемых элементов (только фон).
-func (c *Canvas) ApplyTheme(t *Theme) {}
+// ApplyTheme перекрашивает непрозрачный фон Canvas в WindowBG темы:
+// при смене темы «полотно» должно следовать за ней, как и контролы
+// (явные XAML-цвета заменяются — поведение SetTheme единое для всех виджетов).
+func (c *Canvas) ApplyTheme(t *Theme) {
+	if c.Background.A > 0 {
+		c.Background = t.WindowBG
+		c.UseAlpha = t.WindowBG.A < 255
+	}
+}

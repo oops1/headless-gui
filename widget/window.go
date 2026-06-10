@@ -396,12 +396,14 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 		// Восстанавливаем фон клиентской области под заголовком
 		ctx.FillRect(x+1, y+th, bw-2, cr, w.Background)
 	} else {
-		ctx.FillRect(x, y, bw, th, tbg)
+		// Классика Win2000 — градиент navy→голубой (Theme.TitleBG2).
+		fillTitleBar(ctx, image.Rect(x, y, x+bw, y+th), tbg)
 	}
 
 	// Текст заголовка: вертикально по центру, отступ 12px слева
+	// (в классике — жирный, как в Win2000).
 	textY := y + (th-13)/2
-	ctx.DrawText(w.Title, x+12, textY, tc)
+	drawTitleText(ctx, w.Title, x+12, textY, tc)
 
 	// Индикатор локали — слева от кнопок управления.
 	if w.ShowLocaleIndicator {

@@ -103,24 +103,24 @@ func (sv *ScrollView) thumbRect() image.Rectangle {
 		return image.Rectangle{}
 	}
 
-	viewH := b.Dy()
 	trackX := b.Max.X - sv.scrollbarWidth
-	ratio := float64(viewH) / float64(sv.ContentHeight)
-	thumbH := int(ratio * float64(viewH))
+	top, workH := sbWorkArea(b, sv.scrollbarWidth) // в классике — между кнопками ▲▼
+	ratio := float64(b.Dy()) / float64(sv.ContentHeight)
+	thumbH := int(ratio * float64(workH))
 	if thumbH < 20 {
 		thumbH = 20
 	}
-	if thumbH > viewH {
-		thumbH = viewH
+	if thumbH > workH {
+		thumbH = workH
 	}
 
 	maxS := sv.maxScroll()
 	var thumbY int
 	if maxS > 0 {
-		thumbY = int(float64(sv.scrollY) / float64(maxS) * float64(viewH-thumbH))
+		thumbY = int(float64(sv.scrollY) / float64(maxS) * float64(workH-thumbH))
 	}
 
-	return image.Rect(trackX, b.Min.Y+thumbY, b.Max.X, b.Min.Y+thumbY+thumbH)
+	return image.Rect(trackX, top+thumbY, b.Max.X, top+thumbY+thumbH)
 }
 
 // Draw рисует ScrollView с клиппингом и скроллбаром.
@@ -172,7 +172,13 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 		if sv.thumbHovered || sv.dragging {
 			tc = sv.ThumbHoverBG
 		}
-		ctx.FillRoundRect(tr.Min.X+1, tr.Min.Y+1, tr.Dx()-2, tr.Dy()-2, 3, tc)
+		if st := currentStyle(); st.Classic3D {
+			// Классика: кнопки ▲/▼ на концах + выпуклый ползунок.
+			track := image.Rect(trackX, b.Min.Y, b.Max.X, b.Max.Y)
+			drawClassicScrollbar(ctx, track, tr, st, sv.ThumbColor, win10.LabelText)
+		} else {
+			ctx.FillRoundRect(tr.Min.X+1, tr.Min.Y+1, tr.Dx()-2, tr.Dy()-2, 3, tc)
+		}
 	}
 
 	// Рамка
@@ -220,11 +226,24 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 			sv.dragStartScr = sv.scrollY
 			return true
 		}
-		// Клик на треке — прыжок к позиции
+		// Клик на скроллбаре: кнопки ▲/▼ (классика) или прыжок по треку.
 		b := sv.bounds
 		trackX := b.Max.X - sv.scrollbarWidth
-		if e.X >= trackX && e.X <= b.Max.X {
-			ratio := float64(e.Y-b.Min.Y) / float64(b.Dy())
+		if e.X >= trackX && e.X <= b.Max.X && sv.needsScrollbar() {
+			if currentStyle().Classic3D {
+				btn := classicSBBtnH(sv.scrollbarWidth)
+				const arrowStep = 40
+				if e.Y < b.Min.Y+btn {
+					sv.setScrollYLocked(sv.scrollY - arrowStep)
+					return true
+				}
+				if e.Y >= b.Max.Y-btn {
+					sv.setScrollYLocked(sv.scrollY + arrowStep)
+					return true
+				}
+			}
+			top, workH := sbWorkArea(b, sv.scrollbarWidth)
+			ratio := float64(e.Y-top) / float64(workH)
 			sv.setScrollYLocked(int(ratio * float64(sv.ContentHeight)))
 			return true
 		}
@@ -244,10 +263,10 @@ func (sv *ScrollView) OnMouseMove(x, y int) {
 
 	if sv.dragging {
 		dy := y - sv.dragStartY
-		viewH := sv.bounds.Dy()
+		_, workH := sbWorkArea(sv.bounds, sv.scrollbarWidth)
 		tr := sv.thumbRect()
 		thumbH := tr.Dy()
-		trackUsable := viewH - thumbH
+		trackUsable := workH - thumbH
 		if trackUsable > 0 {
 			scrollDelta := int(float64(dy) / float64(trackUsable) * float64(sv.maxScroll()))
 			sv.setScrollYLocked(sv.dragStartScr + scrollDelta)
@@ -275,4 +294,8 @@ func (sv *ScrollView) ApplyTheme(t *Theme) {
 	sv.ThumbColor = t.ScrollThumbBG
 	sv.ThumbHoverBG = t.Accent
 	sv.BorderColor = t.Border
+	// Непрозрачный фон следует за темой (единая семантика SetTheme).
+	if sv.Background.A > 0 {
+		sv.Background = t.PanelBG
+	}
 }
