@@ -411,6 +411,10 @@ func (w *CocoaWindow) IsMaximized() bool {
 	return w.maximized
 }
 
+// SetCornerRadius — скругление окна на macOS (пока no-op; Cocoa скругляет
+// стандартные окна сама).
+func (w *CocoaWindow) SetCornerRadius(int) {}
+
 func (w *CocoaWindow) BlitRGBA(img *image.RGBA) {
 	if w.nsView == 0 || img == nil {
 		return

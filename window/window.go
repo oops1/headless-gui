@@ -75,8 +75,9 @@ type Window struct {
 	closeRequested atomic.Bool
 
 	// Настройки окна.
-	maxFPS    int
-	resizable bool
+	maxFPS       int
+	resizable    bool
+	cornerRadius int // скругление углов окна (0 = прямые); применяется после Create
 
 	// Состояние модификаторов (обновляется в onKeyDown/onKeyUp).
 	modShift   atomic.Bool
@@ -123,6 +124,16 @@ func (win *Window) Close() {
 	}
 }
 
+// SetCornerRadius задаёт скругление углов нативного окна (0 = прямые).
+// Удобно вызывать при смене темы: win.SetCornerRadius(theme.Style.WindowCorner).
+// До Run() запоминается и применяется после создания окна.
+func (win *Window) SetCornerRadius(r int) {
+	win.cornerRadius = r
+	if win.native != nil {
+		win.native.SetCornerRadius(r)
+	}
+}
+
 // Run открывает нативное окно и запускает цикл событий.
 // Блокирует вызывающую горутину до закрытия окна.
 // ВАЖНО: вызывать из главной горутины (main).
@@ -137,6 +148,11 @@ func (win *Window) Run() error {
 	// Создаём окно с актуальными размерами
 	if err := win.native.Create(win.title, win.w, win.h); err != nil {
 		return err
+	}
+
+	// Применяем скругление углов, если задано до Create.
+	if win.cornerRadius > 0 {
+		win.native.SetCornerRadius(win.cornerRadius)
 	}
 
 	// Подключаем виджет-окно (drag, close, minimize, maximize)
@@ -178,6 +194,11 @@ func (win *Window) syncFromWidgetWindow() {
 	if b.Dx() > 0 && b.Dy() > 0 {
 		win.w = b.Dx()
 		win.h = b.Dy()
+	}
+
+	// ── Скругление окна из widget.Window.CornerRadius (задаётся темой) ───
+	if ww.CornerRadius > 0 && win.cornerRadius == 0 {
+		win.cornerRadius = ww.CornerRadius
 	}
 
 	// ── Обновляем canvas движка под размер widget.Window ─────────────────
