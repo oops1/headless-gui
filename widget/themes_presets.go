@@ -34,6 +34,14 @@ type ThemeStyle struct {
 	BevelLight  color.RGBA // светлая грань (внешняя верх/лево у выпуклых)
 	BevelShadow color.RGBA // тёмная грань (низ/право)
 	BevelDark   color.RGBA // самая тёмная (внутренняя грань тени)
+
+	// WindowCorner — радиус скругления углов окна (widget.Window). 0 — острые.
+	// Win11 ≈ 8, Mac ≈ 10. Применяется через Window.ApplyTheme.
+	WindowCorner int
+
+	// MacTitleBar — заголовок окна в стиле macOS (traffic lights слева, текст
+	// по центру). Win-стиль при false. Применяется через Window.ApplyTheme.
+	MacTitleBar bool
 }
 
 // currentStyle возвращает стиль активной темы (для Draw виджетов).
@@ -206,7 +214,7 @@ func Win10LightTheme() *Theme {
 // смягчённая палитра Mica, голубой акцент.
 func Win11DarkTheme() *Theme {
 	t := DarkTheme()
-	t.Style = ThemeStyle{Name: "Win11 Dark", ControlCorner: 6}
+	t.Style = ThemeStyle{Name: "Win11 Dark", ControlCorner: 6, WindowCorner: 8}
 
 	t.WindowBG = color.RGBA{R: 32, G: 32, B: 32, A: 255}    // #202020 — Mica
 	t.PanelBG = color.RGBA{R: 43, G: 43, B: 43, A: 255}     // #2B2B2B
@@ -246,7 +254,7 @@ func Win11DarkTheme() *Theme {
 // Win11LightTheme — Windows 11, светлая: скруглённые контролы, акцент #005FB8.
 func Win11LightTheme() *Theme {
 	t := LightTheme()
-	t.Style = ThemeStyle{Name: "Win11 Light", ControlCorner: 6}
+	t.Style = ThemeStyle{Name: "Win11 Light", ControlCorner: 6, WindowCorner: 8}
 
 	t.WindowBG = color.RGBA{R: 243, G: 243, B: 243, A: 255} // #F3F3F3 — Mica
 	t.PanelBG = color.RGBA{R: 251, G: 251, B: 251, A: 255}  // #FBFBFB
@@ -376,7 +384,7 @@ func Win2000Theme() *Theme {
 // синий акцент #007AFF, зелёный ToggleSwitch (#34C759).
 func MacTheme() *Theme {
 	t := LightTheme()
-	t.Style = ThemeStyle{Name: "Mac", ControlCorner: 8}
+	t.Style = ThemeStyle{Name: "Mac", ControlCorner: 8, WindowCorner: 10, MacTitleBar: true}
 
 	t.WindowBG = color.RGBA{R: 236, G: 236, B: 236, A: 255} // #ECECEC
 	t.PanelBG = color.RGBA{R: 246, G: 246, B: 246, A: 255}  // #F6F6F6

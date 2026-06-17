@@ -2026,6 +2026,12 @@ Mac preset: #007AFF accent, green (#34C759) ToggleSwitch. Win11: #4CC2FF /
 #005FB8 accents on Mica-like backgrounds. Win2000: silver `#D4D0C8` face,
 navy title/selection.
 
+Window shape follows the theme via `Window.ApplyTheme`: `ThemeStyle.WindowCorner`
+rounds the window (Win11 = 8, Mac = 10, others 0) and `ThemeStyle.MacTitleBar`
+switches the title bar to macOS traffic-lights (Mac theme) vs Windows-style
+(everything else). Win2000 title buttons (─ □ ×) render as raised bevel buttons
+with black glyphs so they stay visible on the navy gradient.
+
 Classic (Win2000) extras: scrollbars get ▲/▼ arrow buttons (click = one step;
 ScrollView/ListView/VirtualizingItemsControl), title bars use a horizontal
 navy→#A6CAF0 gradient (`Theme.TitleBG2`, A=0 disables) with **bold** caption

@@ -45,6 +45,34 @@ func TestThemes_StyleParameters(t *testing.T) {
 	if st := widget.ThemeByName("Win10 Dark").Style; st.ControlCorner != 0 || st.Classic3D {
 		t.Fatalf("Win10 Dark style: %+v", st)
 	}
+	// Скругление окна и Mac-заголовок.
+	if st := widget.ThemeByName("Win11 Dark").Style; st.WindowCorner != 8 || st.MacTitleBar {
+		t.Fatalf("Win11 window style: %+v", st)
+	}
+	if st := widget.ThemeByName("Mac").Style; st.WindowCorner != 10 || !st.MacTitleBar {
+		t.Fatalf("Mac window style: %+v", st)
+	}
+	if st := widget.ThemeByName("Win2000").Style; st.WindowCorner != 0 || st.MacTitleBar {
+		t.Fatalf("Win2000 window style: %+v", st)
+	}
+}
+
+// Window.ApplyTheme переносит форму окна из темы: скругление + стиль заголовка.
+func TestThemes_WindowApplyShape(t *testing.T) {
+	w := &widget.Window{Title: "x"}
+
+	w.ApplyTheme(widget.ThemeByName("Mac"))
+	if w.CornerRadius != 10 || w.TitleStyle != widget.WindowTitleMac {
+		t.Fatalf("Mac: corner=%d style=%v", w.CornerRadius, w.TitleStyle)
+	}
+	w.ApplyTheme(widget.ThemeByName("Win11 Light"))
+	if w.CornerRadius != 8 || w.TitleStyle != widget.WindowTitleWin {
+		t.Fatalf("Win11: corner=%d style=%v", w.CornerRadius, w.TitleStyle)
+	}
+	w.ApplyTheme(widget.ThemeByName("Win2000"))
+	if w.CornerRadius != 0 || w.TitleStyle != widget.WindowTitleWin {
+		t.Fatalf("Win2000: corner=%d style=%v", w.CornerRadius, w.TitleStyle)
+	}
 }
 
 // Переключение всех тем на живом движке: рендер не падает, пиксели меняются.
