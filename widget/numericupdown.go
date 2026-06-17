@@ -161,14 +161,11 @@ func (n *NumericUpDown) Draw(ctx DrawContext) {
 	if spinX < b.Min.X {
 		spinX = b.Min.X
 	}
-
-	// Поле ввода.
-	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), n.FieldBG)
-	border := n.Border
-	if n.IsFocused() {
-		border = n.AccentBG
-	}
-	ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), border)
+	st := currentStyle()
+	midY := b.Min.Y + b.Dy()/2
+	cx := spinX + nudSpinnerWidth/2
+	upCy := b.Min.Y + (midY-b.Min.Y)/2
+	downCy := midY + (b.Max.Y-midY)/2
 
 	// Текст значения.
 	n.mu.Lock()
@@ -180,26 +177,46 @@ func (n *NumericUpDown) Draw(ctx DrawContext) {
 	}
 	n.mu.Unlock()
 	textY := b.Min.Y + (b.Dy()-13)/2
-	ctx.DrawText(txt, b.Min.X+6, textY, n.TextColor)
 
-	// Спиннер: две половинки.
-	midY := b.Min.Y + b.Dy()/2
-	// Разделитель по вертикали и горизонтали.
-	ctx.FillRect(spinX, b.Min.Y, 1, b.Dy(), n.Border)
-	if n.upHovered {
-		ctx.FillRect(spinX+1, b.Min.Y+1, nudSpinnerWidth-2, midY-b.Min.Y-1, n.HoverBG)
-	}
-	if n.downHovered {
-		ctx.FillRect(spinX+1, midY, nudSpinnerWidth-2, b.Max.Y-midY-1, n.HoverBG)
-	}
-	ctx.FillRect(spinX, midY, nudSpinnerWidth, 1, n.Border)
+	if st.Classic3D {
+		// Классика Win2000: утопленное поле + две выпуклые bevel-кнопки ▲▼.
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), n.FieldBG)
+		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		ctx.DrawText(txt, b.Min.X+6, textY, n.TextColor)
 
-	// Стрелки ▲ / ▼ (маленькие треугольники).
-	cx := spinX + nudSpinnerWidth/2
-	upCy := b.Min.Y + (midY-b.Min.Y)/2
-	downCy := midY + (b.Max.Y-midY)/2
-	n.drawTriangle(ctx, cx, upCy, true, n.TextColor)
-	n.drawTriangle(ctx, cx, downCy, false, n.TextColor)
+		bw := nudSpinnerWidth
+		face := win10.PanelBG
+		// Верхняя кнопка ▲.
+		ctx.FillRect(spinX, b.Min.Y+1, bw-1, midY-b.Min.Y-1, face)
+		drawBevelRaised(ctx, spinX, b.Min.Y+1, bw-1, midY-b.Min.Y-1, st)
+		// Нижняя кнопка ▼.
+		ctx.FillRect(spinX, midY, bw-1, b.Max.Y-midY-1, face)
+		drawBevelRaised(ctx, spinX, midY, bw-1, b.Max.Y-midY-1, st)
+		glyph := color.RGBA{R: 0, G: 0, B: 0, A: 255}
+		n.drawTriangle(ctx, cx-1, upCy, true, glyph)
+		n.drawTriangle(ctx, cx-1, downCy, false, glyph)
+	} else {
+		// Плоский стиль (Win10/11/Mac).
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), n.FieldBG)
+		border := n.Border
+		if n.IsFocused() {
+			border = n.AccentBG
+		}
+		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), border)
+		ctx.DrawText(txt, b.Min.X+6, textY, n.TextColor)
+
+		// Спиннер: две половинки.
+		ctx.FillRect(spinX, b.Min.Y, 1, b.Dy(), n.Border)
+		if n.upHovered {
+			ctx.FillRect(spinX+1, b.Min.Y+1, nudSpinnerWidth-2, midY-b.Min.Y-1, n.HoverBG)
+		}
+		if n.downHovered {
+			ctx.FillRect(spinX+1, midY, nudSpinnerWidth-2, b.Max.Y-midY-1, n.HoverBG)
+		}
+		ctx.FillRect(spinX, midY, nudSpinnerWidth, 1, n.Border)
+		n.drawTriangle(ctx, cx, upCy, true, n.TextColor)
+		n.drawTriangle(ctx, cx, downCy, false, n.TextColor)
+	}
 
 	n.drawChildren(ctx)
 	n.drawDisabledOverlay(ctx)

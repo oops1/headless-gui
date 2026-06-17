@@ -321,6 +321,9 @@ func (w *X11Window) IsMaximized() bool {
 	return w.maximized
 }
 
+// SetCornerRadius — скругление окна на X11 (пока no-op).
+func (w *X11Window) SetCornerRadius(int) {}
+
 func (w *X11Window) BlitRGBA(img *image.RGBA) {
 	if w.wid == 0 || img == nil {
 		return

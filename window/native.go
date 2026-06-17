@@ -59,6 +59,10 @@ type NativeWindow interface {
 	// IsMaximized возвращает true, если окно развёрнуто.
 	IsMaximized() bool
 
+	// SetCornerRadius задаёт радиус скругления углов окна (0 = прямые).
+	// На платформах без поддержки — no-op.
+	SetCornerRadius(r int)
+
 	// ── Рендеринг ────────────────────────────────────────────────────────────
 
 	// BlitRGBA выводит RGBA-буфер в клиентскую область окна.

@@ -44,8 +44,8 @@ func NewDropdown(items ...string) *Dropdown {
 		TextColor:   win10.DropText,
 		ArrowColor:  win10.DropArrow,
 		FocusBorder: win10.Accent,
-		HoverItemBG: color.RGBA{R: 45, G: 45, B: 80, A: 255},
-		HoverBG:     color.RGBA{R: 55, G: 55, B: 60, A: 255},
+		HoverItemBG: win10.MenuHoverBG,
+		HoverBG:     win10.ListItemHover,
 		PaddingX:    6,
 	}
 }
@@ -210,14 +210,19 @@ func (d *Dropdown) drawOpenList(ctx DrawContext) {
 
 	for i, item := range items {
 		iy := listY + i*itemH
+		textCol := d.TextColor
 		switch {
 		case i == hov && d.HoverItemBG.A > 0:
 			ctx.FillRect(b.Min.X+2, iy, listW-4, itemH, d.HoverItemBG)
+			if win10.MenuHoverText.A > 0 {
+				textCol = win10.MenuHoverText // контрастный текст на подсветке
+			}
 		case i == sel:
 			ctx.FillRect(b.Min.X+2, iy, listW-4, itemH, win10.DropItemBG)
+			textCol = contrastText(win10.DropItemBG) // читаемый текст на выделении
 		}
 		// Текст — вертикально по центру элемента
-		ctx.DrawText(item, b.Min.X+d.PaddingX, iy+(itemH-13)/2, d.TextColor)
+		ctx.DrawText(item, b.Min.X+d.PaddingX, iy+(itemH-13)/2, textCol)
 	}
 
 	// Одна общая рамка вокруг всего списка
@@ -239,6 +244,8 @@ func (d *Dropdown) ApplyTheme(t *Theme) {
 	d.TextColor = t.DropText
 	d.ArrowColor = t.DropArrow
 	d.FocusBorder = t.Accent
+	d.HoverItemBG = t.MenuHoverBG  // подсветка пункта списка (следует теме)
+	d.HoverBG = t.ListItemHover    // подсветка заголовка при наведении
 }
 
 // ─── Focusable ───────────────────────────────────────────────────────────────
