@@ -163,6 +163,7 @@ type bitmapInfo struct {
 var (
 	user32 = windows.NewLazySystemDLL("user32.dll")
 	gdi32  = windows.NewLazySystemDLL("gdi32.dll")
+	dwmapi = windows.NewLazySystemDLL("dwmapi.dll")
 
 	procRegisterClassExW    = user32.NewProc("RegisterClassExW")
 	procCreateWindowExW     = user32.NewProc("CreateWindowExW")
@@ -193,6 +194,9 @@ var (
 
 	procStretchDIBits     = gdi32.NewProc("StretchDIBits")
 	procSetStretchBltMode = gdi32.NewProc("SetStretchBltMode")
+	procCreateRoundRectRgn    = gdi32.NewProc("CreateRoundRectRgn")
+	procSetWindowRgn          = user32.NewProc("SetWindowRgn")
+	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 	procSetCapture        = user32.NewProc("SetCapture")
 	procReleaseCapture    = user32.NewProc("ReleaseCapture")
 	procSetCursor         = user32.NewProc("SetCursor")
@@ -235,6 +239,10 @@ type Win32Window struct {
 	title  string
 
 	maximized bool
+
+	// cornerRadius — радиус скругления углов окна (0 = прямые). Реализуется
+	// через регион окна (SetWindowRgn), переприменяется при resize.
+	cornerRadius int
 
 	// pendingClose: Close() был вызван из кода (не от ОС).
 	// Вместо синхронного DestroyWindow мы отправляем PostMessage(WM_CLOSE),
@@ -496,6 +504,66 @@ func (w *Win32Window) BlitRGBA(img *image.RGBA) {
 }
 
 // Callbacks
+// DWM-атрибут предпочтения формы углов (Windows 11+).
+const (
+	dwmwaWindowCornerPreference = 33 // DWMWA_WINDOW_CORNER_PREFERENCE
+	dwmwcpDoNotRound            = 1  // DWMWCP_DONOTROUND
+	dwmwcpRound                 = 2  // DWMWCP_ROUND (мягкие углы + тень)
+)
+
+// setDwmCorner просит DWM скруглить/не скруглять углы (Win11). Возвращает true,
+// если вызов успешен (S_OK) — значит ОС поддерживает атрибут и применила его.
+// На Windows 10 атрибут не поддерживается → возвращает false (нужен фолбэк).
+func (w *Win32Window) setDwmCorner(round bool) bool {
+	if w.hwnd == 0 {
+		return false
+	}
+	pref := int32(dwmwcpDoNotRound)
+	if round {
+		pref = dwmwcpRound
+	}
+	ret, _, _ := procDwmSetWindowAttribute.Call(
+		uintptr(w.hwnd), uintptr(dwmwaWindowCornerPreference),
+		uintptr(unsafe.Pointer(&pref)), unsafe.Sizeof(pref))
+	return ret == 0 // S_OK
+}
+
+// SetCornerRadius задаёт радиус скругления углов окна (0 = прямые).
+// На Windows 11 используется DWM (мягкие сглаженные углы + системная тень);
+// на Windows 10 — фолбэк через регион окна (чёткие углы). Безопасно в рантайме.
+func (w *Win32Window) SetCornerRadius(r int) {
+	w.cornerRadius = r
+	w.applyCorners()
+}
+
+// applyCorners применяет текущее скругление: сперва пробует DWM (Win11),
+// иначе — round-rect регион (Win10). Переприменяется при resize.
+func (w *Win32Window) applyCorners() {
+	if w.hwnd == 0 {
+		return
+	}
+	if w.cornerRadius <= 0 || w.maximized {
+		// Прямые углы (или развёрнутое окно): DWM → не скруглять, регион снять.
+		w.setDwmCorner(false)
+		procSetWindowRgn.Call(uintptr(w.hwnd), 0, 1)
+		return
+	}
+	// Win11: мягкие углы средствами DWM — без жёсткого региона.
+	if w.setDwmCorner(true) {
+		procSetWindowRgn.Call(uintptr(w.hwnd), 0, 1) // снимаем возможный старый регион
+		return
+	}
+	// Win10: фолбэк — чёткий round-rect регион.
+	d := uintptr(w.cornerRadius * 2)
+	rgn, _, _ := procCreateRoundRectRgn.Call(0, 0,
+		uintptr(w.width+1), uintptr(w.height+1), d, d)
+	if rgn == 0 {
+		return
+	}
+	// SetWindowRgn забирает владение регионом (удалять не нужно), bRedraw=TRUE.
+	procSetWindowRgn.Call(uintptr(w.hwnd), rgn, 1)
+}
+
 func (w *Win32Window) SetOnResize(fn func(w, h int))                              { w.onResize = fn }
 func (w *Win32Window) SetOnClose(fn func() bool)                                   { w.onClose = fn }
 func (w *Win32Window) SetOnMouseMove(fn func(x, y int))                            { w.onMouseMove = fn }
@@ -563,6 +631,9 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		if newW > 0 && newH > 0 {
 			w.width = newW
 			w.height = newH
+			// wparam: 2 = SIZE_MAXIMIZED, 0 = SIZE_RESTORED.
+			w.maximized = wparam == 2
+			w.applyCorners() // регион в координатах окна — пересоздаём под новый размер
 			if w.onResize != nil {
 				w.onResize(newW, newH)
 			}

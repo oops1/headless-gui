@@ -2032,6 +2032,16 @@ switches the title bar to macOS traffic-lights (Mac theme) vs Windows-style
 (everything else). Win2000 title buttons (─ □ ×) render as raised bevel buttons
 with black glyphs so they stay visible on the navy gradient.
 
+**Native OS window rounding.** The widget-level `Window.CornerRadius` only rounds
+the engine-drawn `widget.Window` chrome. To round the *actual borderless OS
+window* (whose root is a plain `Canvas`), call `window.Window.SetCornerRadius(r)`
+— on Windows it applies a round-rect region via `SetWindowRgn` (reapplied on
+resize, dropped when maximized); macOS/X11 are no-ops for now. A `widget.Window`
+root auto-propagates its `CornerRadius` to the native window. The showcase wires
+`win.SetCornerRadius(theme.Style.WindowCorner)` into the theme dropdown, so
+switching to Win11/Mac rounds the real app window (visible only when running on
+the OS — not in headless frames).
+
 Classic (Win2000) extras: scrollbars get ▲/▼ arrow buttons (click = one step;
 ScrollView/ListView/VirtualizingItemsControl), title bars use a horizontal
 navy→#A6CAF0 gradient (`Theme.TitleBG2`, A=0 disables) with **bold** caption

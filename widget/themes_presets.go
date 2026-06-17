@@ -451,6 +451,17 @@ func ThemeByName(name string) *Theme {
 	return nil
 }
 
+// contrastText возвращает чёрный или белый текст в зависимости от яркости
+// фона bg (для читаемости подписи на цветной подсветке/выделении).
+func contrastText(bg color.RGBA) color.RGBA {
+	// Воспринимаемая яркость (Rec. 601), 0..255.
+	lum := (299*int(bg.R) + 587*int(bg.G) + 114*int(bg.B)) / 1000
+	if lum > 140 {
+		return color.RGBA{R: 0, G: 0, B: 0, A: 255}
+	}
+	return color.RGBA{R: 255, G: 255, B: 255, A: 255}
+}
+
 // equalFoldASCII — сравнение без учёта регистра (ASCII достаточно для имён тем).
 func equalFoldASCII(a, b string) bool {
 	if len(a) != len(b) {

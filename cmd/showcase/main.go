@@ -260,6 +260,10 @@ func main() {
 			if t := widget.ThemeByName(name); t != nil {
 				eng.SetTheme(t)
 				applyHeaderStyle(t)
+				// Скругление НАСТОЯЩЕГО окна ОС по теме (Win11/Mac — скруглённое).
+				if win != nil {
+					win.SetCornerRadius(t.Style.WindowCorner)
+				}
 				addLog("Тема: %s", name)
 			}
 		}
