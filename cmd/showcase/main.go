@@ -14,6 +14,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"log"
 	"strings"
 	"time"
@@ -234,6 +235,26 @@ func main() {
 			clock.TextColor = t.TitleText
 		}
 	}
+	// Живое превью оформления окна (вкладка 3.2.5): настоящий widget.Window
+	// внутри showcase, который перерисовывается вместе с темой — видно
+	// скругление (Win11/Mac), traffic-lights (Mac), кнопки/градиент (Win2000).
+	if mount, ok := reg["winPreviewMount"].(*widget.Panel); ok {
+		prev := &widget.Window{
+			Title:  "Свойства системы",
+			Style:  widget.WindowStyleSingleBorder,
+			Resize: widget.ResizeModeCanResize,
+		}
+		mb := mount.Bounds()
+		prev.SetBounds(mb)
+		info := widget.NewLabel("Microsoft Windows · GuiEngine", widget.CurrentThemeStyle().BevelDark)
+		info.SetBounds(image.Rect(mb.Min.X+14, mb.Min.Y+44, mb.Max.X-14, mb.Min.Y+64))
+		prev.AddChild(info)
+		okBtn := widget.NewButton("OK")
+		okBtn.SetBounds(image.Rect(mb.Max.X-100, mb.Max.Y-40, mb.Max.X-12, mb.Max.Y-12))
+		prev.AddChild(okBtn)
+		mount.AddChild(prev)
+	}
+
 	if dd, ok := reg["themeSelect"].(*widget.Dropdown); ok {
 		dd.OnChange = func(_ int, name string) {
 			if t := widget.ThemeByName(name); t != nil {

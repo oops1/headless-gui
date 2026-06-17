@@ -757,6 +757,13 @@
                     </VirtualizingItemsControl.ItemTemplate>
                 </VirtualizingItemsControl>
 
+                <!-- ─── Превью оформления окна (меняется вместе с темой) ─── -->
+                <TextBlock Left="556" Top="430" Style="{StaticResource H324}"
+                           Text="Окно (chrome темы: углы / заголовок / кнопки)"/>
+                <Separator Left="556" Top="454" Width="470" Height="1" Background="#313244"/>
+                <Panel Name="winPreviewMount" Left="556" Top="466" Width="470" Height="150"
+                       Background="#00000000"/>
+
             </Canvas>
         </TabItem>
 
