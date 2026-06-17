@@ -274,6 +274,28 @@ func (w *Window) btnCount() int {
 	return 3 // ─ □ ×
 }
 
+// classicTitleBtnRects возвращает прямоугольники кнопок ×, □, ─ для
+// классического стиля Win2000 (общая геометрия для отрисовки и hit-test).
+// Отсутствующие кнопки возвращаются как пустой Rectangle.
+func (w *Window) classicTitleBtnRects() (closeR, maxR, minR image.Rectangle) {
+	const cbw, cbh, gap = 16, 14, 2
+	b := w.Bounds()
+	th := w.titleH()
+	nc := w.btnCount()
+	by := b.Min.Y + (th-cbh)/2
+	closeX := b.Max.X - 4 - cbw
+	closeR = image.Rect(closeX, by, closeX+cbw, by+cbh)
+	if nc >= 3 {
+		mxX := closeX - gap - cbw
+		maxR = image.Rect(mxX, by, mxX+cbw, by+cbh)
+		minR = image.Rect(mxX-cbw, by, mxX, by+cbh)
+	} else if nc == 2 {
+		mnX := closeX - gap - cbw
+		minR = image.Rect(mnX, by, mnX+cbw, by+cbh)
+	}
+	return closeR, maxR, minR
+}
+
 // CloseBtnRect возвращает bounds кнопки закрытия (×).
 func (w *Window) CloseBtnRect() image.Rectangle {
 	if w.resolvedTitleStyle() == WindowTitleMac {
@@ -282,6 +304,10 @@ func (w *Window) CloseBtnRect() image.Rectangle {
 		cx := b.Min.X + macStartX
 		cy := b.Min.Y + th/2
 		return image.Rect(cx-macHitSlop, cy-macHitSlop, cx+macHitSlop, cy+macHitSlop)
+	}
+	if currentStyle().Classic3D {
+		r, _, _ := w.classicTitleBtnRects()
+		return r
 	}
 	b := w.Bounds()
 	th := w.titleH()
@@ -302,6 +328,10 @@ func (w *Window) MinBtnRect() image.Rectangle {
 		cy := b.Min.Y + th/2
 		return image.Rect(cx-macHitSlop, cy-macHitSlop, cx+macHitSlop, cy+macHitSlop)
 	}
+	if currentStyle().Classic3D {
+		_, _, r := w.classicTitleBtnRects()
+		return r
+	}
 	b := w.Bounds()
 	th := w.titleH()
 	bw := w.btnWidth()
@@ -321,6 +351,10 @@ func (w *Window) MaxBtnRect() image.Rectangle {
 		cx := b.Min.X + macStartX + macSpacing*2
 		cy := b.Min.Y + th/2
 		return image.Rect(cx-macHitSlop, cy-macHitSlop, cx+macHitSlop, cy+macHitSlop)
+	}
+	if currentStyle().Classic3D {
+		_, r, _ := w.classicTitleBtnRects()
+		return r
 	}
 	b := w.Bounds()
 	th := w.titleH()
@@ -409,21 +443,34 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	if w.ShowLocaleIndicator {
 		nc0 := w.btnCount()
 		rightX := b.Max.X - 8
-		if nc0 > 0 {
+		if currentStyle().Classic3D {
+			if _, _, minR := w.classicTitleBtnRects(); !minR.Empty() {
+				rightX = minR.Min.X - 8
+			} else if closeR, _, _ := w.classicTitleBtnRects(); !closeR.Empty() {
+				rightX = closeR.Min.X - 8
+			}
+		} else if nc0 > 0 {
 			rightX = b.Max.X - w.btnWidth()*nc0 - 8
 		}
 		w.setLocaleBadgeRect(drawLocaleBadge(ctx, rightX, y, th, tc))
+	}
+
+	nc := w.btnCount()
+	if nc == 0 {
+		return
+	}
+
+	// Классика Win2000: кнопки управления — выпуклые bevel-кнопки на «лице»
+	// с чёрными глифами (иначе светло-серые глифы сливаются с navy-заголовком).
+	if st := currentStyle(); st.Classic3D {
+		w.drawClassicTitleButtons(ctx, st)
+		return
 	}
 
 	// Кнопки управления
 	btnW := w.btnWidth()
 	btnH := th - 1
 	lineColor := color.RGBA{R: 180, G: 180, B: 180, A: 255}
-
-	nc := w.btnCount()
-	if nc == 0 {
-		return
-	}
 
 	// Кнопки рисуются справа налево: ×, □, ─
 	bx := b.Max.X - btnW
@@ -468,6 +515,41 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	}
 	my := y + btnH/2
 	ctx.DrawHLine(bx2+btnW/2-7, my, 14, lineColor)
+}
+
+// drawClassicTitleButtons рисует кнопки ─ □ × в классическом стиле Win2000:
+// маленькие выпуклые bevel-кнопки на «лице» с чёрными глифами.
+func (w *Window) drawClassicTitleButtons(ctx DrawContext, st ThemeStyle) {
+	face := win10.PanelBG // «лицо» Win2000 (#D4D0C8)
+	glyph := color.RGBA{R: 0, G: 0, B: 0, A: 255}
+	closeR, maxR, minR := w.classicTitleBtnRects()
+
+	// Рисует одну bevel-кнопку и возвращает её центр.
+	drawBtn := func(r image.Rectangle) (int, int) {
+		ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), face)
+		drawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+		return r.Min.X + r.Dx()/2, r.Min.Y + r.Dy()/2
+	}
+
+	// × (закрыть).
+	cx, cy := drawBtn(closeR)
+	for i := -3; i <= 3; i++ {
+		ctx.SetPixel(cx+i, cy+i, glyph)
+		ctx.SetPixel(cx+i, cy-i, glyph)
+		ctx.SetPixel(cx+i+1, cy+i, glyph)
+	}
+	// □ (развернуть).
+	if !maxR.Empty() {
+		mcx, mcy := drawBtn(maxR)
+		ctx.DrawBorder(mcx-4, mcy-4, 9, 8, glyph)
+		ctx.DrawHLine(mcx-4, mcy-3, 9, glyph) // двойная верхняя грань заголовка
+	}
+	// ─ (свернуть).
+	if !minR.Empty() {
+		ncx, ncy := drawBtn(minR)
+		ctx.DrawHLine(ncx-4, ncy+3, 8, glyph)
+		ctx.DrawHLine(ncx-4, ncy+4, 8, glyph)
+	}
 }
 
 // closeBtnBG возвращает фон кнопки закрытия (красный при hover).
@@ -804,11 +886,20 @@ func (w *Window) HandleInputBinding(code KeyCode, mod KeyMod) bool {
 
 // ─── Themeable ──────────────────────────────────────────────────────────────
 
-// ApplyTheme обновляет цвета Window из темы.
+// ApplyTheme обновляет цвета и форму Window из темы.
 func (w *Window) ApplyTheme(t *Theme) {
 	w.Background = t.WindowBG
 	w.BorderColor = t.Border
 	// TitleBG и TitleColor обновляются только если пользователь не задал явно (A=0)
+
+	// Форма окна определяется темой: скругление углов (Win11/Mac) и стиль
+	// заголовка (Mac → traffic-lights, остальные → Windows-стиль).
+	w.CornerRadius = t.Style.WindowCorner
+	if t.Style.MacTitleBar {
+		w.TitleStyle = WindowTitleMac
+	} else {
+		w.TitleStyle = WindowTitleWin
+	}
 }
 
 // ─── Вспомогательные ────────────────────────────────────────────────────────
