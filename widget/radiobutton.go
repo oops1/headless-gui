@@ -39,7 +39,13 @@ var (
 )
 
 // SetText задаёт текст метки переключателя.
-func (r *RadioButton) SetText(s string) { r.Text = s }
+func (r *RadioButton) SetText(s string) {
+	if r.Text == s {
+		return
+	}
+	r.Text = s
+	r.Invalidate()
+}
 
 // GetText возвращает текущий текст метки.
 func (r *RadioButton) GetText() string { return r.Text }
@@ -65,12 +71,13 @@ func NewRadioButton(text, group string) *RadioButton {
 }
 
 // SetSelected потокобезопасно выбирает этот RadioButton и сбрасывает остальные в группе.
+// При фактическом изменении инвалидирует область виджета (авто-damage).
 func (rb *RadioButton) SetSelected(v bool) {
+	if atomic.SwapInt32(&rb.selected, b2i(v)) != b2i(v) {
+		rb.Invalidate()
+	}
 	if v {
-		atomic.StoreInt32(&rb.selected, 1)
 		rb.deselectOthers()
-	} else {
-		atomic.StoreInt32(&rb.selected, 0)
 	}
 }
 
@@ -80,10 +87,8 @@ func (rb *RadioButton) IsSelected() bool {
 }
 
 func (rb *RadioButton) SetHovered(v bool) {
-	if v {
-		atomic.StoreInt32(&rb.hovered, 1)
-	} else {
-		atomic.StoreInt32(&rb.hovered, 0)
+	if atomic.SwapInt32(&rb.hovered, b2i(v)) != b2i(v) {
+		rb.Invalidate()
 	}
 }
 
@@ -109,7 +114,10 @@ func (rb *RadioButton) deselectOthers() {
 	radioMu.Unlock()
 	for _, other := range group {
 		if other != rb {
-			atomic.StoreInt32(&other.selected, 0)
+			// Сброс выбора меняет отрисовку соседа — инвалидируем его область.
+			if atomic.SwapInt32(&other.selected, 0) != 0 {
+				other.Invalidate()
+			}
 		}
 	}
 }
@@ -198,10 +206,8 @@ func (rb *RadioButton) OnMouseButton(e MouseEvent) bool {
 // ─── Focusable ───────────────────────────────────────────────────────────────
 
 func (rb *RadioButton) SetFocused(v bool) {
-	if v {
-		atomic.StoreInt32(&rb.focused, 1)
-	} else {
-		atomic.StoreInt32(&rb.focused, 0)
+	if atomic.SwapInt32(&rb.focused, b2i(v)) != b2i(v) {
+		rb.Invalidate()
 	}
 }
 
@@ -254,16 +260,24 @@ func (rb *RadioButton) RemoveFromGroup() {
 
 // ─── Вспомогательные функции рисования кругов ────────────────────────────────
 
-// drawFilledCircle рисует закрашенный круг (Midpoint circle fill).
+// drawFilledCircle рисует закрашенный круг (AA при поддержке, иначе Midpoint fill).
 func drawFilledCircle(ctx DrawContext, cx, cy, r int, col color.RGBA) {
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.FillEllipseAA(cx, cy, r, r, col)
+		return
+	}
 	for dy := -r; dy <= r; dy++ {
 		halfW := int(math.Sqrt(float64(r*r - dy*dy)))
 		ctx.DrawHLine(cx-halfW, cy+dy, halfW*2+1, col)
 	}
 }
 
-// drawCircleOutline рисует контур круга (Midpoint circle algorithm).
+// drawCircleOutline рисует контур круга (AA при поддержке, иначе Midpoint).
 func drawCircleOutline(ctx DrawContext, cx, cy, r int, col color.RGBA) {
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.StrokeEllipseAA(cx, cy, r, r, 1.2, col)
+		return
+	}
 	x, y := r, 0
 	d := 1 - r
 	for x >= y {

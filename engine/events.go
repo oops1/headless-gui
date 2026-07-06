@@ -73,14 +73,30 @@ func (e *Engine) getCaptured() widget.Widget {
 // SetFocus передаёт фокус ввода виджету w.
 // Если w == nil — фокус снимается со всех виджетов.
 func (e *Engine) SetFocus(w widget.Widget) {
+	e.setFocusInvalidating(w)
+}
+
+// setFocusInvalidating переводит фокус и точечно инвалидирует области старого
+// и нового виджета (рамка фокуса). Виджеты дополнительно самоинвалидируются
+// в SetFocused — двойная инвалидация дешёвая (объединение damage-областей).
+func (e *Engine) setFocusInvalidating(w widget.Widget) {
+	if old := e.focus.get(); old != nil {
+		e.InvalidateRect(old.Bounds())
+	}
 	e.focus.set(w)
-	e.Invalidate() // рамка фокуса меняет картинку (on-demand рендер)
+	if w != nil {
+		e.InvalidateRect(w.Bounds())
+	}
 }
 
 // SendKeyEvent доставляет клавиатурное событие виджету с фокусом.
 // Tab / Shift+Tab перехватываются для переключения фокуса между виджетами.
+//
+// Полной инвалидации здесь нет: виджет с фокусом самоинвалидируется при
+// изменении своего состояния (текст, каретка, выделение), Tab-навигация
+// инвалидирует старый/новый фокус точечно, командные хоткеи — полностью
+// (команда может изменить что угодно).
 func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
-	e.Invalidate() // ввод меняет картинку (on-demand рендер)
 	// Tab-навигация: перехватываем Tab до доставки виджету.
 	// При активном модальном виджете Tab циклит только внутри него.
 	if ev.Code == widget.KeyTab && ev.Pressed {
@@ -121,6 +137,8 @@ func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
 			HandleInputBinding(widget.KeyCode, widget.KeyMod) bool
 		}); ok {
 			if h.HandleInputBinding(ev.Code, ev.Mod) {
+				// Команда хоткея может изменить произвольную часть UI.
+				e.Invalidate()
 				return
 			}
 		}
@@ -165,12 +183,25 @@ func (e *Engine) tabCycle(root widget.Widget, reverse bool) {
 		next = (idx + 1) % len(all)
 	}
 
-	e.focus.set(all[next])
+	e.setFocusInvalidating(all[next])
 }
 
-// CursorAt возвращает форму курсора для точки (x, y): курсор самого глубокого
-// виджета под точкой, реализующего widget.CursorProvider (иначе — стрелка).
+// toLogical переводит физические координаты события (пиксели окна/кадра)
+// в логические координаты виджетов (HiDPI). При Scale == 1 тождественно.
+// Lock-free (scaleBits) — события не конкурируют с мьютексом движка.
+func (e *Engine) toLogical(x, y int) (int, int) {
+	k := e.Scale()
+	if k == 1 {
+		return x, y
+	}
+	return int(float64(x) / k), int(float64(y) / k)
+}
+
+// CursorAt возвращает форму курсора для точки (x, y — физические пиксели):
+// курсор самого глубокого виджета под точкой, реализующего
+// widget.CursorProvider (иначе — стрелка).
 func (e *Engine) CursorAt(x, y int) widget.Cursor {
+	x, y = e.toLogical(x, y)
 	var disp widget.Widget
 	if m := e.topModal(); m != nil {
 		disp = m
@@ -202,8 +233,17 @@ func (e *Engine) CursorAt(x, y int) widget.Cursor {
 // Если есть виджет, захвативший мышь — событие идёт только ему.
 // Если активен модальный виджет — broadcast только внутри него.
 // Иначе — broadcast всему дереву.
+//
+// Полной инвалидации здесь больше нет: hover-изменения виджеты сообщают сами
+// (Base.Invalidate при фактической смене состояния), drag двигает панели через
+// SetBounds (авто-инвалидация old∪new). Кадры рендерятся только когда картинка
+// действительно меняется.
 func (e *Engine) SendMouseMove(x, y int) {
-	e.Invalidate() // hover/drag меняют картинку (on-demand рендер)
+	x, y = e.toLogical(x, y)
+
+	// Если на экране висит подсказка — стираем её (движение мыши сбрасывает
+	// таймер, следующий кадр рисуется без плашки).
+	e.invalidateShownTooltip()
 
 	// Запоминаем позицию курсора и сбрасываем таймер всплывающей подсказки.
 	e.recordMouse(x, y)
@@ -236,7 +276,12 @@ func (e *Engine) SendMouseMove(x, y int) {
 // Иначе: проверяем, хочет ли какой-либо предок захватить мышь (WantsCapture),
 // затем передаём событие самому верхнему виджету под курсором.
 func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool) {
-	e.Invalidate() // клики меняют картинку (on-demand рендер)
+	x, y = e.toLogical(x, y)
+
+	// Клик оставляет ПОЛНУЮ инвалидацию сознательно: он может открыть/закрыть
+	// overlay (dropdown, меню), сместить фокус, выполнить команду — задеть
+	// произвольные области. Клики редки, полный кадр здесь дёшев и надёжен.
+	e.Invalidate()
 	ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed}
 
 	// Если мышь захвачена — только захватчику.

@@ -84,16 +84,22 @@ func (tc *TabControl) AddTab(header string, content Widget) {
 	if cm != nil && content != nil {
 		injectCaptureManagerTree(content, cm)
 	}
+	tc.Invalidate() // в полосе появился новый заголовок
 }
 
 // SetTabHeader меняет заголовок вкладки idx в рантайме (BUG-4).
 // Удобно для динамических счётчиков, напр. "CARRY (3)".
 func (tc *TabControl) SetTabHeader(idx int, header string) {
 	tc.mu.Lock()
-	if idx >= 0 && idx < len(tc.tabs) {
+	changed := false
+	if idx >= 0 && idx < len(tc.tabs) && tc.tabs[idx].Header != header {
 		tc.tabs[idx].Header = header
+		changed = true
 	}
 	tc.mu.Unlock()
+	if changed {
+		tc.Invalidate()
+	}
 }
 
 // TabHeader возвращает текущий заголовок вкладки idx (или "" вне диапазона).
@@ -125,6 +131,7 @@ func (tc *TabControl) SetTabVisible(idx int, visible bool) {
 		tc.mu.Unlock()
 		return
 	}
+	changed := tc.tabs[idx].Hidden == visible // состояние фактически меняется
 	tc.tabs[idx].Hidden = !visible
 	// Если скрыли активную — переключаемся на первую видимую.
 	switchTo := -1
@@ -141,6 +148,9 @@ func (tc *TabControl) SetTabVisible(idx int, visible bool) {
 	}
 	tc.mu.Unlock()
 	tc.layoutContent()
+	if changed {
+		tc.Invalidate()
+	}
 }
 
 // IsTabVisible сообщает, видима ли вкладка idx (по умолчанию true).
@@ -170,25 +180,35 @@ func (tc *TabControl) RemoveTab(idx int) {
 	}
 	tc.mu.Unlock()
 	tc.layoutContent()
+	tc.Invalidate() // вкладка удалена — полоса и контент изменились
 }
 
 // ClearTabs удаляет все вкладки (BUG-4).
 func (tc *TabControl) ClearTabs() {
 	tc.mu.Lock()
+	changed := len(tc.tabs) > 0
 	tc.tabs = nil
 	tc.active = 0
 	tc.tabWidths = nil
 	tc.mu.Unlock()
+	if changed {
+		tc.Invalidate()
+	}
 }
 
 // SetActive устанавливает активную вкладку по индексу.
 func (tc *TabControl) SetActive(idx int) {
 	tc.mu.Lock()
-	if idx >= 0 && idx < len(tc.tabs) {
+	changed := false
+	if idx >= 0 && idx < len(tc.tabs) && idx != tc.active {
 		tc.active = idx
+		changed = true
 	}
 	tc.mu.Unlock()
 	tc.layoutContent()
+	if changed {
+		tc.Invalidate()
+	}
 }
 
 // Active возвращает индекс активной вкладки.
@@ -479,6 +499,7 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 	if changed {
 		// Обновляем bounds нового контента (layoutContent берёт tc.mu сам).
 		tc.layoutContent()
+		tc.Invalidate() // полоса вкладок и область контента изменились
 		if onTab != nil {
 			onTab(clicked, header) // синхронно — вне tc.mu
 		}
@@ -491,6 +512,14 @@ func (tc *TabControl) OnMouseMove(x, y int) {
 	b := tc.bounds
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
+
+	// Авто-инвалидация при смене hover-вкладки (LIFO — выполняется до Unlock).
+	oldHover := tc.hoverIdx
+	defer func() {
+		if tc.hoverIdx != oldHover {
+			tc.Invalidate()
+		}
+	}()
 
 	tc.hoverIdx = -1
 	if y < b.Min.Y || y >= b.Min.Y+tc.TabHeight {

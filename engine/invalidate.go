@@ -1,15 +1,22 @@
 // invalidate.go — рендер по запросу (on-demand) и damage-трекинг.
 //
-// По умолчанию движок перерисовывает кадр на каждый тик (полная обратная
-// совместимость). В режиме SetRenderOnDemand(true) кадр рендерится только
-// когда UI инвалидирован:
+// Рендер по запросу — режим по умолчанию (с v3.5): кадр рендерится только
+// когда UI инвалидирован, причём частично — в пределах damage-области.
+// Прежнее поведение «рендер каждый тик» доступно через SetRenderOnDemand(false).
 //
-//   - события ввода (мышь/клавиатура), фокус, модалки, SetRoot/SetTheme и
-//     прочие API движка инвалидируют автоматически;
+// Источники инвалидации:
+//
+//   - виджеты самоинвалидируются: сеттеры (SetText/SetValue/SetHovered/...)
+//     и Base.SetBounds сообщают свой прямоугольник при фактическом изменении
+//     (widget.SetUIRectChangeNotifier → InvalidateRect);
+//   - события ввода: hover/drag — точечно через виджеты, клики и командные
+//     хоткеи — полной инвалидацией, Tab-фокус — областями старого/нового
+//     виджета; модалки, SetRoot/SetTheme и прочие API движка — автоматически;
 //   - слой данных (BindingScope.Refresh, {Loc}, live-коллекции, смена
 //     локали/языка) инвалидирует через widget.SetUIChangeNotifier;
-//   - прямые мутации виджетов из кода приложения (label.SetText из своей
-//     горутины) требуют явного Engine.Invalidate()/InvalidateRect().
+//   - прямые записи в ЭКСПОРТИРОВАННЫЕ ПОЛЯ виджетов (btn.Text = "...")
+//     движку не видны — после них нужен widget.Invalidate() либо
+//     Engine.Invalidate()/InvalidateRect().
 //
 // Анимации, привязанные ко времени (мигающая каретка TextInput/DataGrid,
 // дозревающий tooltip), учитываются отдельно: пока виджет с фокусом
@@ -24,6 +31,7 @@ package engine
 
 import (
 	"image"
+	"math"
 	"time"
 
 	"github.com/oops1/headless-gui/v3/widget"
@@ -50,12 +58,18 @@ func (e *Engine) Invalidate() {
 	e.invGen.Add(1)
 }
 
-// InvalidateRect помечает изменившейся прямоугольную область (в пикселях
-// холста). Diff ближайшего кадра ограничится тайлами, пересекающими
-// объединение заявленных областей.
+// InvalidateRect помечает изменившейся прямоугольную область (в ЛОГИЧЕСКИХ
+// пикселях холста — система координат виджетов). Отрисовка и diff ближайшего
+// кадра ограничатся тайлами, пересекающими объединение заявленных областей.
+// Внутри damage хранится в физических пикселях (масштабируется здесь).
 func (e *Engine) InvalidateRect(r image.Rectangle) {
 	if r.Empty() {
 		return
+	}
+	// Масштаб читается lock-free (scaleBits): InvalidateRect вызывается из
+	// сеттеров виджетов, в т.ч. когда движок уже держит e.mu.
+	if k := e.Scale(); k != 1 {
+		r = scaleRectF(r, k)
 	}
 	e.damageMu.Lock()
 	if !e.damageAll {
@@ -63,6 +77,17 @@ func (e *Engine) InvalidateRect(r image.Rectangle) {
 	}
 	e.damageMu.Unlock()
 	e.invGen.Add(1)
+}
+
+// scaleRectF масштабирует логический прямоугольник в физический по краям
+// (та же математика, что canvas.sRect, но без доступа к канвасу).
+func scaleRectF(r image.Rectangle, k float64) image.Rectangle {
+	return image.Rect(
+		int(math.Round(float64(r.Min.X)*k)),
+		int(math.Round(float64(r.Min.Y)*k)),
+		int(math.Round(float64(r.Max.X)*k)),
+		int(math.Round(float64(r.Max.Y)*k)),
+	)
 }
 
 // consumeDamage атомарно забирает накопленное повреждение.

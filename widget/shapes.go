@@ -11,14 +11,22 @@ import (
 )
 
 // ─── Общие помощники рисования ──────────────────────────────────────────────
+//
+// Каждый помощник сначала проверяет, поддерживает ли DrawContext сглаженные
+// примитивы (AAShapes — реализует engine.Canvas); при отсутствии — прежняя
+// ступенчатая отрисовка (Bresenham/scanline).
 
-// drawThickLine рисует отрезок (x0,y0)-(x1,y1) толщиной t (Bresenham).
+// drawThickLine рисует отрезок (x0,y0)-(x1,y1) толщиной t.
 func drawThickLine(ctx DrawContext, x0, y0, x1, y1, t int, col color.RGBA) {
 	if col.A == 0 {
 		return
 	}
 	if t < 1 {
 		t = 1
+	}
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.DrawLineAA(x0, y0, x1, y1, float64(t), col)
+		return
 	}
 	dx := absInt(x1 - x0)
 	dy := -absInt(y1 - y0)
@@ -54,6 +62,10 @@ func fillEllipse(ctx DrawContext, cx, cy, rx, ry int, col color.RGBA) {
 	if col.A == 0 || rx <= 0 || ry <= 0 {
 		return
 	}
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.FillEllipseAA(cx, cy, rx, ry, col)
+		return
+	}
 	rx2 := float64(rx) * float64(rx)
 	for dy := -ry; dy <= ry; dy++ {
 		f := 1.0 - float64(dy*dy)/(float64(ry)*float64(ry))
@@ -76,6 +88,10 @@ func drawEllipseOutline(ctx DrawContext, cx, cy, rx, ry, t int, col color.RGBA) 
 	}
 	if t < 1 {
 		t = 1
+	}
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.StrokeEllipseAA(cx, cy, rx, ry, float64(t), col)
+		return
 	}
 	for dy := -ry; dy <= ry; dy++ {
 		fo := 1.0 - float64(dy*dy)/(float64(ry)*float64(ry))
@@ -104,6 +120,10 @@ func drawEllipseOutline(ctx DrawContext, cx, cy, rx, ry, t int, col color.RGBA) 
 // fillPolygon заливает многоугольник (scanline).
 func fillPolygon(ctx DrawContext, pts []image.Point, col color.RGBA) {
 	if col.A == 0 || len(pts) < 3 {
+		return
+	}
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.FillPolygonAA(pts, col)
 		return
 	}
 	minY, maxY := pts[0].Y, pts[0].Y
@@ -247,7 +267,20 @@ func (l *Line) Draw(ctx DrawContext) {
 	if th < 1 {
 		th = 1
 	}
-	drawThickLine(ctx, l.X1, l.Y1, l.X2, l.Y2, th, l.Stroke)
+	// Фигура следует за своими bounds: контейнер (Canvas/Grid/TabItem)
+	// мог сдвинуть виджет — смещаем геометрию на ту же дельту.
+	dx, dy := l.geomDelta()
+	drawThickLine(ctx, l.X1+dx, l.Y1+dy, l.X2+dx, l.Y2+dy, th, l.Stroke)
+}
+
+// geomDelta возвращает смещение bounds относительно «естественных» границ
+// геометрии (нулевое, если виджет не перемещали контейнером).
+func (l *Line) geomDelta() (int, int) {
+	if l.bounds.Empty() {
+		return 0, 0
+	}
+	nat := image.Rect(min(l.X1, l.X2), min(l.Y1, l.Y2), max(l.X1, l.X2)+1, max(l.Y1, l.Y2)+1)
+	return l.bounds.Min.X - nat.Min.X, l.bounds.Min.Y - nat.Min.Y
 }
 
 func (l *Line) ApplyTheme(t *Theme) {}
@@ -267,19 +300,39 @@ func (p *Polygon) Draw(ctx DrawContext) {
 	if len(p.Points) < 2 {
 		return
 	}
+	pts := shiftedPoints(p.Points, p.bounds)
 	if p.Fill.A > 0 {
-		fillPolygon(ctx, p.Points, p.Fill)
+		fillPolygon(ctx, pts, p.Fill)
 	}
 	if p.Stroke.A > 0 {
 		th := p.StrokeThickness
 		if th < 1 {
 			th = 1
 		}
-		for i := 0; i < len(p.Points); i++ {
-			a, b := p.Points[i], p.Points[(i+1)%len(p.Points)]
+		for i := 0; i < len(pts); i++ {
+			a, b := pts[i], pts[(i+1)%len(pts)]
 			drawThickLine(ctx, a.X, a.Y, b.X, b.Y, th, p.Stroke)
 		}
 	}
+}
+
+// shiftedPoints смещает точки фигуры на дельту между текущими bounds и
+// «естественными» границами геометрии: фигура следует за контейнером.
+// При нулевой дельте возвращает исходный срез без копирования.
+func shiftedPoints(pts []image.Point, bounds image.Rectangle) []image.Point {
+	if bounds.Empty() || len(pts) == 0 {
+		return pts
+	}
+	nat := pointsBounds(pts)
+	dx, dy := bounds.Min.X-nat.Min.X, bounds.Min.Y-nat.Min.Y
+	if dx == 0 && dy == 0 {
+		return pts
+	}
+	out := make([]image.Point, len(pts))
+	for i, p := range pts {
+		out[i] = image.Pt(p.X+dx, p.Y+dy)
+	}
+	return out
 }
 
 func (p *Polygon) ApplyTheme(t *Theme) {}
@@ -300,8 +353,9 @@ func (p *Polyline) Draw(ctx DrawContext) {
 	if th < 1 {
 		th = 1
 	}
-	for i := 0; i+1 < len(p.Points); i++ {
-		a, b := p.Points[i], p.Points[i+1]
+	pts := shiftedPoints(p.Points, p.bounds)
+	for i := 0; i+1 < len(pts); i++ {
+		a, b := pts[i], pts[i+1]
 		drawThickLine(ctx, a.X, a.Y, b.X, b.Y, th, p.Stroke)
 	}
 }

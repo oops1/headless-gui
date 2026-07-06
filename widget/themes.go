@@ -18,6 +18,13 @@ type Theme struct {
 	Border      color.RGBA // Window, Panel, ListView, Dialog, ScrollView, MenuBar — рамки
 	ShadowColor color.RGBA // PopupMenu, Dialog — тень под overlay-элементами
 
+	// Заголовок НЕАКТИВНОГО окна (без фокуса ОС). A=0 — автоматическое
+	// приглушение активного цвета. Win2000 задаёт явные классические
+	// цвета (серый градиент #808080→#C0C0C0, серебристый текст).
+	TitleBGInactive   color.RGBA
+	TitleBG2Inactive  color.RGBA
+	TitleTextInactive color.RGBA
+
 	// ═══════════════════════════════════════════════════════════════════════
 	// Кнопка (Button)
 	// ═══════════════════════════════════════════════════════════════════════
@@ -417,6 +424,9 @@ func ApplyGlobalTheme(t *Theme) {
 	win10.TitleBG = t.TitleBG
 	win10.TitleBG2 = t.TitleBG2
 	win10.TitleText = t.TitleText
+	win10.TitleBGInactive = t.TitleBGInactive
+	win10.TitleBG2Inactive = t.TitleBG2Inactive
+	win10.TitleTextInactive = t.TitleTextInactive
 	win10.Border = t.Border
 	win10.ShadowColor = t.ShadowColor
 

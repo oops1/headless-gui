@@ -38,9 +38,13 @@ func NewProgressBarColor(fill color.RGBA) *ProgressBar {
 }
 
 // SetValue задаёт значение [0.0, 1.0]. Потокобезопасно.
+// При фактическом изменении инвалидирует область виджета (авто-damage).
 func (pb *ProgressBar) SetValue(v float64) {
 	v = max01(v)
-	pb.value.Store(uint32(math.Round(v * float64(math.MaxUint32))))
+	nv := uint32(math.Round(v * float64(math.MaxUint32)))
+	if pb.value.Swap(nv) != nv {
+		pb.Invalidate()
+	}
 }
 
 // Value возвращает текущее значение [0.0, 1.0]. Потокобезопасно.

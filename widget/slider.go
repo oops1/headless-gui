@@ -62,10 +62,17 @@ func NewSliderRange(min, max float64) *Slider {
 }
 
 // SetValue задаёт значение с ограничением [Min, Max].
+// При фактическом изменении инвалидирует область виджета (авто-damage).
 func (s *Slider) SetValue(v float64) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.value = s.clamp(v)
+	nv := s.clamp(v)
+	if nv == s.value {
+		s.mu.Unlock()
+		return
+	}
+	s.value = nv
+	s.mu.Unlock()
+	s.Invalidate() // вне s.mu
 }
 
 // Value возвращает текущее значение.
@@ -194,6 +201,7 @@ func (s *Slider) OnMouseButton(e MouseEvent) bool {
 	s.mu.Lock()
 
 	if e.Pressed {
+		changed := !s.dragging // drag подсвечивает ползунок
 		s.dragging = true
 		fire := false
 		var val float64
@@ -201,9 +209,13 @@ func (s *Slider) OnMouseButton(e MouseEvent) bool {
 		if newVal != s.value {
 			s.value = s.clamp(newVal)
 			fire, val = s.OnChange != nil, s.value
+			changed = true
 		}
 		onCh := s.OnChange
 		s.mu.Unlock()
+		if changed {
+			s.Invalidate() // вне s.mu
+		}
 		if fire && onCh != nil {
 			onCh(val) // синхронно — вне s.mu
 		}
@@ -211,9 +223,13 @@ func (s *Slider) OnMouseButton(e MouseEvent) bool {
 	}
 
 	// Отпускание: прекращаем drag и освобождаем захват мыши.
+	wasDragging := s.dragging
 	s.dragging = false
 	cm := s.capMgr
 	s.mu.Unlock()
+	if wasDragging {
+		s.Invalidate() // подсветка ползунка гаснет
+	}
 	if cm != nil {
 		cm.ReleaseCapture()
 	}
@@ -243,14 +259,19 @@ func (s *Slider) OnMouseMove(x, y int) {
 
 	if s.dragging {
 		fire := false
+		changed := false
 		var val float64
 		newVal := s.valueFromX(x)
 		if newVal != s.value {
 			s.value = s.clamp(newVal)
 			fire, val = s.OnChange != nil, s.value
+			changed = true
 		}
 		onCh := s.OnChange
 		s.mu.Unlock()
+		if changed {
+			s.Invalidate() // вне s.mu
+		}
 		if fire && onCh != nil {
 			onCh(val) // синхронно — вне s.mu
 		}
@@ -261,8 +282,13 @@ func (s *Slider) OnMouseMove(x, y int) {
 	cx, cy := s.thumbCenter()
 	dx := x - cx
 	dy := y - cy
-	s.hovered = dx*dx+dy*dy <= s.ThumbRadius*s.ThumbRadius
+	hovered := dx*dx+dy*dy <= s.ThumbRadius*s.ThumbRadius
+	changed := hovered != s.hovered
+	s.hovered = hovered
 	s.mu.Unlock()
+	if changed {
+		s.Invalidate() // вне s.mu
+	}
 }
 
 // OnKeyEvent обрабатывает клавиши ←/→ для изменения значения.
@@ -277,6 +303,7 @@ func (s *Slider) OnKeyEvent(e KeyEvent) {
 		step = (s.Max - s.Min) / 100 // мелкий шаг
 	}
 
+	old := s.value
 	switch e.Code {
 	case KeyLeft:
 		s.value = s.clamp(s.value - step)
@@ -294,6 +321,9 @@ func (s *Slider) OnKeyEvent(e KeyEvent) {
 	onCh := s.OnChange
 	val := s.value
 	s.mu.Unlock()
+	if val != old {
+		s.Invalidate() // вне s.mu
+	}
 	if onCh != nil {
 		onCh(val) // синхронно — вне s.mu
 	}

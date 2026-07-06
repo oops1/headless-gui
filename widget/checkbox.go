@@ -28,7 +28,13 @@ type CheckBox struct {
 }
 
 // SetText задаёт текст метки флажка.
-func (c *CheckBox) SetText(s string) { c.Text = s }
+func (c *CheckBox) SetText(s string) {
+	if c.Text == s {
+		return
+	}
+	c.Text = s
+	c.Invalidate()
+}
 
 // GetText возвращает текущий текст метки.
 func (c *CheckBox) GetText() string { return c.Text }
@@ -47,11 +53,10 @@ func NewCheckBox(text string) *CheckBox {
 }
 
 // SetChecked потокобезопасно задаёт состояние.
+// При фактическом изменении инвалидирует область виджета (авто-damage).
 func (cb *CheckBox) SetChecked(v bool) {
-	if v {
-		atomic.StoreInt32(&cb.checked, 1)
-	} else {
-		atomic.StoreInt32(&cb.checked, 0)
+	if atomic.SwapInt32(&cb.checked, b2i(v)) != b2i(v) {
+		cb.Invalidate()
 	}
 }
 
@@ -61,10 +66,8 @@ func (cb *CheckBox) IsChecked() bool {
 }
 
 func (cb *CheckBox) SetHovered(v bool) {
-	if v {
-		atomic.StoreInt32(&cb.hovered, 1)
-	} else {
-		atomic.StoreInt32(&cb.hovered, 0)
+	if atomic.SwapInt32(&cb.hovered, b2i(v)) != b2i(v) {
+		cb.Invalidate()
 	}
 }
 
@@ -115,19 +118,28 @@ func (cb *CheckBox) Draw(ctx DrawContext) {
 	// затем длинное плечо — ВВЕРХ-вправо (а не «домиком», как было раньше).
 	if cb.IsChecked() {
 		col := cb.CheckColor
-		// Короткое плечо: (boxX+4, boxY+7) → (boxX+7, boxY+10), вниз-вправо.
-		for i := 0; i <= 3; i++ {
-			x := boxX + 4 + i
-			y := boxY + 7 + i
-			ctx.SetPixel(x, y, col)
-			ctx.SetPixel(x, y+1, col) // утолщение
-		}
-		// Длинное плечо: (boxX+7, boxY+10) → (boxX+12, boxY+5), вверх-вправо.
-		for i := 0; i <= 5; i++ {
-			x := boxX + 7 + i
-			y := boxY + 10 - i
-			ctx.SetPixel(x, y, col)
-			ctx.SetPixel(x, y+1, col) // утолщение
+		if aa, ok := ctx.(AAShapes); ok {
+			// Сглаженная ломаная той же геометрии.
+			aa.StrokePolylineAA([]image.Point{
+				{X: boxX + 4, Y: boxY + 7},
+				{X: boxX + 7, Y: boxY + 10},
+				{X: boxX + 12, Y: boxY + 5},
+			}, 1.8, false, col)
+		} else {
+			// Короткое плечо: (boxX+4, boxY+7) → (boxX+7, boxY+10), вниз-вправо.
+			for i := 0; i <= 3; i++ {
+				x := boxX + 4 + i
+				y := boxY + 7 + i
+				ctx.SetPixel(x, y, col)
+				ctx.SetPixel(x, y+1, col) // утолщение
+			}
+			// Длинное плечо: (boxX+7, boxY+10) → (boxX+12, boxY+5), вверх-вправо.
+			for i := 0; i <= 5; i++ {
+				x := boxX + 7 + i
+				y := boxY + 10 - i
+				ctx.SetPixel(x, y, col)
+				ctx.SetPixel(x, y+1, col) // утолщение
+			}
 		}
 	}
 
@@ -176,10 +188,8 @@ func (cb *CheckBox) OnMouseButton(e MouseEvent) bool {
 // ─── Focusable ───────────────────────────────────────────────────────────────
 
 func (cb *CheckBox) SetFocused(v bool) {
-	if v {
-		atomic.StoreInt32(&cb.focused, 1)
-	} else {
-		atomic.StoreInt32(&cb.focused, 0)
+	if atomic.SwapInt32(&cb.focused, b2i(v)) != b2i(v) {
+		cb.Invalidate()
 	}
 }
 

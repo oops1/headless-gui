@@ -1305,28 +1305,54 @@ returns) — for a "File → Exit" menu item.
 
 ### Render-on-demand and invalidation
 
-By default the engine redraws every tick (unchanged behavior). On-demand mode
-skips frames while the UI is unchanged — near-zero idle CPU:
+Render-on-demand is the **default mode** (since v3.5): frames render only when
+the UI actually changed, and only the damaged region is redrawn and diffed
+(auto-damage). Idle CPU is near zero; hover/typing cost microseconds instead
+of a full frame. The previous "render every tick" behavior:
+`eng.SetRenderOnDemand(false)`.
 
 ```go
-eng.SetRenderOnDemand(true)
-
-eng.Invalidate()        // mark the frame changed (cheap, atomic)
-eng.InvalidateRect(r)   // declare a changed region — the frame's diff is
-                        // limited to tiles touching it
+eng.Invalidate()        // mark the whole frame changed (cheap, atomic)
+eng.InvalidateRect(r)   // declare a changed region — both drawing and diff
+                        // are limited to it
 eng.RenderCount()       // frames actually rendered (diagnostics)
 ```
 
-Tracked automatically: input events and focus, SetRoot/SetTheme/SetResolution/
-modals, the data layer (binding Refresh, `{Loc}`, live collections,
-locale/language switches), the blinking caret (`widget.Animated`) and a
-"ripening" tooltip. An explicit `Invalidate()` is only needed when mutating
-widgets directly from app code in on-demand mode.
+Tracked automatically: widget setters (`SetText`, `SetValue`, `SetChecked`,
+hover/press/focus, `SetBounds` on move/resize — widgets self-invalidate on an
+actual change), input events and focus, SetRoot/SetTheme/SetResolution/modals,
+the data layer (binding Refresh, `{Loc}`, live collections, locale/language
+switches), the blinking caret (`widget.Animated`) and tooltips.
+
+IMPORTANT: direct writes to exported widget fields (`btn.Text = "..."`) are
+invisible to the engine — call `btn.Invalidate()` afterwards (available on all
+widgets via Base) or `eng.Invalidate()`. Custom widgets with their own visual
+state must call `Invalidate()` when it changes.
 
 Locking: a frame no longer holds the engine's main mutex — `SetRoot`/event
 dispatch are never blocked by rendering; structural operations (SetResolution,
 RegisterFont*, SetTheme) serialize with the frame via a dedicated internal
 mutex.
+
+### HiDPI
+
+Widgets live in LOGICAL pixels (like WPF DIPs); frame buffers are physical
+(logical × scale). Text rasterizes at the true physical size (crisper, not
+stretched); rounded corners and AA shapes scale smoothly.
+
+```go
+eng.SetScale(2.0)       // 200% (or 1.25/1.5/...)
+eng.CanvasSize()        // logical size (widget coordinate space)
+eng.PhysicalSize()      // physical size of frames/tiles
+```
+
+`Frames()` tiles and `SendMouse*` events are physical pixels (events are
+converted to logical inside the engine).
+
+The native window (`window.Run`) detects the scale automatically: on Windows
+per-monitor DPI awareness (v2) is enabled plus WM_DPICHANGED handling when
+the window moves between monitors; on X11/macOS set the
+`HEADLESS_GUI_SCALE=1.5` environment variable (auto-detection planned).
 
 ### Fonts
 

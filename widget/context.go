@@ -13,6 +13,23 @@ import (
 // Должен совпадать с engine.DefaultFontSize.
 const DefaultFontSizePt = 10.0
 
+// AAShapes — опциональные сглаженные (antialiased) примитивы рисования.
+// Реализуется engine.Canvas. Кастомные реализации DrawContext могут не
+// поддерживать интерфейс — код виджетов проверяет его type-assert'ом и
+// откатывается на ступенчатую отрисовку (Bresenham/scanline).
+type AAShapes interface {
+	// FillEllipseAA — залитый эллипс с центром (cx, cy) и полуосями rx, ry.
+	FillEllipseAA(cx, cy, rx, ry int, col color.RGBA)
+	// StrokeEllipseAA — контур эллипса толщиной thickness.
+	StrokeEllipseAA(cx, cy, rx, ry int, thickness float64, col color.RGBA)
+	// FillPolygonAA — залитый многоугольник.
+	FillPolygonAA(pts []image.Point, col color.RGBA)
+	// StrokePolylineAA — ломаная толщиной thickness (closed замыкает контур).
+	StrokePolylineAA(pts []image.Point, thickness float64, closed bool, col color.RGBA)
+	// DrawLineAA — отрезок толщиной thickness.
+	DrawLineAA(x1, y1, x2, y2 int, thickness float64, col color.RGBA)
+}
+
 // OverlayDrawer реализуется виджетами, которым нужно рисовать поверх всего дерева.
 // Например, раскрытый выпадающий список должен перекрывать соседние виджеты.
 //

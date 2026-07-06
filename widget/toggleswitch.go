@@ -36,7 +36,13 @@ const (
 )
 
 // SetText задаёт текст метки переключателя.
-func (t *ToggleSwitch) SetText(s string) { t.Text = s }
+func (t *ToggleSwitch) SetText(s string) {
+	if t.Text == s {
+		return
+	}
+	t.Text = s
+	t.Invalidate()
+}
 
 // GetText возвращает текущий текст метки.
 func (t *ToggleSwitch) GetText() string { return t.Text }
@@ -54,11 +60,10 @@ func NewToggleSwitch(text string) *ToggleSwitch {
 }
 
 // SetOn потокобезопасно задаёт состояние.
+// При фактическом изменении инвалидирует область виджета (авто-damage).
 func (ts *ToggleSwitch) SetOn(v bool) {
-	if v {
-		atomic.StoreInt32(&ts.on, 1)
-	} else {
-		atomic.StoreInt32(&ts.on, 0)
+	if atomic.SwapInt32(&ts.on, b2i(v)) != b2i(v) {
+		ts.Invalidate()
 	}
 }
 

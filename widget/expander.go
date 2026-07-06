@@ -79,6 +79,7 @@ func (e *Expander) SetExpanded(v bool) {
 	}
 	e.IsExpanded = v
 	e.SetBounds(e.bounds)
+	e.Invalidate() // guard выше гарантирует фактическую смену состояния
 	if e.OnExpandedChanged != nil {
 		e.OnExpandedChanged(v)
 	}

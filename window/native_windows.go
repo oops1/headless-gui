@@ -31,6 +31,7 @@ const (
 
 	// Messages
 	wmDestroy     = 0x0002
+	wmActivate    = 0x0006
 	wmSize        = 0x0005
 	wmClose       = 0x0010
 	wmPaint       = 0x000F
@@ -192,6 +193,10 @@ var (
 	procGetWindowLongPtrW   = user32.NewProc("GetWindowLongPtrW")
 	procScreenToClient      = user32.NewProc("ScreenToClient")
 
+	// HiDPI (Win10 1703+; отсутствие процедур не фатально — Call вернёт ошибку).
+	procSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
+	procGetDpiForSystem               = user32.NewProc("GetDpiForSystem")
+
 	procStretchDIBits     = gdi32.NewProc("StretchDIBits")
 	procSetStretchBltMode = gdi32.NewProc("SetStretchBltMode")
 	procCreateRoundRectRgn    = gdi32.NewProc("CreateRoundRectRgn")
@@ -258,6 +263,9 @@ type Win32Window struct {
 
 	// Callbacks
 	onResize      func(w, h int)
+	onExpose      func(r image.Rectangle)
+	onDpiChanged  func(scale float64)
+	onActivate    func(active bool)
 	onClose       func() bool
 	onMouseMove   func(x, y int)
 	onMouseButton func(x, y, button int, pressed bool)
@@ -484,10 +492,12 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 			dst[di+3] = srcRow[si+3] // A
 		}
 	}
-	w.mu.Unlock()
+	// Мьютекс удерживается до конца StretchDIBits: блит может прийти
+	// одновременно из framePump и из WM_PAINT (event loop).
 
 	hdc, _, _ := procGetDC.Call(uintptr(w.hwnd))
 	if hdc == 0 {
+		w.mu.Unlock()
 		return
 	}
 	defer procReleaseDC.Call(uintptr(w.hwnd), hdc)
@@ -511,7 +521,6 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	// Для bottom-up DIB YSrc отсчитывается от нижнего края изображения.
 	ySrc := height - dirty.Max.Y
 
-	w.mu.Lock()
 	procStretchDIBits.Call(
 		hdc,
 		uintptr(dirty.Min.X), uintptr(dirty.Min.Y), uintptr(dw), uintptr(dh), // dst rect
@@ -522,6 +531,34 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 		uintptr(srccopy),
 	)
 	w.mu.Unlock()
+}
+
+// SetOnExpose — колбэк перерисовки области по WM_PAINT (см. exposeNotifier).
+func (w *Win32Window) SetOnExpose(fn func(r image.Rectangle)) { w.onExpose = fn }
+
+// SetOnDpiChanged — колбэк смены DPI монитора (см. dpiChangeNotifier).
+func (w *Win32Window) SetOnDpiChanged(fn func(scale float64)) { w.onDpiChanged = fn }
+
+// SetOnActivate — колбэк смены активности окна (см. activationNotifier).
+func (w *Win32Window) SetOnActivate(fn func(active bool)) { w.onActivate = fn }
+
+// DetectScale включает per-monitor DPI awareness (v2) и возвращает
+// системный масштаб (DPI/96). На Windows до 1703 или при ошибке — 1.0.
+// Без awareness Windows растягивала бы наш кадр bitmap-скейлом (мыло).
+func (w *Win32Window) DetectScale() float64 {
+	// DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4 (псевдо-хендл).
+	const dpiAwarenessPerMonitorV2 = ^uintptr(3) // == uintptr(-4)
+	if procSetProcessDpiAwarenessContext.Find() == nil {
+		procSetProcessDpiAwarenessContext.Call(dpiAwarenessPerMonitorV2)
+	}
+	if procGetDpiForSystem.Find() != nil {
+		return 1
+	}
+	dpi, _, _ := procGetDpiForSystem.Call()
+	if dpi == 0 {
+		return 1
+	}
+	return float64(dpi) / 96.0
 }
 
 // Callbacks
@@ -662,9 +699,41 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmPaint:
+		// BeginPaint валидирует область и сообщает повреждённый прямоугольник;
+		// содержимое восстанавливается блитом из кэша кадра (см. window.go).
 		var ps paintstruct
 		procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
 		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+		if w.onExpose != nil {
+			r := image.Rect(int(ps.RcPaint.Left), int(ps.RcPaint.Top),
+				int(ps.RcPaint.Right), int(ps.RcPaint.Bottom))
+			if !r.Empty() {
+				w.onExpose(r)
+			}
+		}
+		return 0
+
+	case wmActivate:
+		// LOWORD(wparam): WA_INACTIVE=0, WA_ACTIVE=1, WA_CLICKACTIVE=2.
+		if w.onActivate != nil {
+			w.onActivate(wparam&0xFFFF != 0)
+		}
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+		return ret
+
+	case wmDpichanged:
+		// Окно перенесли на монитор с другим DPI. wparam: LOWORD = новый DPI;
+		// lparam → RECT с рекомендованным размером/позицией окна.
+		newDpi := wparam & 0xFFFF
+		if r := (*rect)(unsafe.Pointer(lparam)); r != nil {
+			procSetWindowPos.Call(hwnd, 0,
+				uintptr(r.Left), uintptr(r.Top),
+				uintptr(r.Right-r.Left), uintptr(r.Bottom-r.Top),
+				0x0004|0x0010) // SWP_NOZORDER | SWP_NOACTIVATE
+		}
+		if w.onDpiChanged != nil && newDpi > 0 {
+			w.onDpiChanged(float64(newDpi) / 96.0)
+		}
 		return 0
 
 	case wmSetcursor:

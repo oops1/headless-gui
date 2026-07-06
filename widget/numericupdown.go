@@ -72,6 +72,7 @@ func (n *NumericUpDown) Value() float64 {
 func (n *NumericUpDown) SetValue(v float64) {
 	n.mu.Lock()
 	old := n.value
+	wasEditing := n.isEditing
 	n.value = n.clamp(v)
 	n.isEditing = false
 	n.editing = ""
@@ -79,6 +80,9 @@ func (n *NumericUpDown) SetValue(v float64) {
 	nv := n.value
 	cb := n.OnChange
 	n.mu.Unlock()
+	if changed || wasEditing {
+		n.Invalidate() // значение или отображаемый буфер ввода изменились
+	}
 	if changed && cb != nil {
 		cb(nv)
 	}
@@ -104,6 +108,7 @@ func (n *NumericUpDown) format() string {
 // step изменяет значение на ±Step; commit редактирования сначала.
 func (n *NumericUpDown) step(dir float64) {
 	n.mu.Lock()
+	wasEditing := n.isEditing
 	n.commitLocked()
 	old := n.value
 	step := n.Step
@@ -115,6 +120,9 @@ func (n *NumericUpDown) step(dir float64) {
 	nv := n.value
 	cb := n.OnChange
 	n.mu.Unlock()
+	if changed || wasEditing {
+		n.Invalidate() // значение или отображаемый буфер ввода изменились
+	}
 	if changed && cb != nil {
 		cb(nv)
 	}
@@ -139,11 +147,15 @@ func (n *NumericUpDown) commitLocked() {
 func (n *NumericUpDown) commit() {
 	n.mu.Lock()
 	old := n.value
+	wasEditing := n.isEditing
 	n.commitLocked()
 	changed := n.value != old
 	nv := n.value
 	cb := n.OnChange
 	n.mu.Unlock()
+	if changed || wasEditing {
+		n.Invalidate() // значение или отображаемый буфер ввода изменились
+	}
 	if changed && cb != nil {
 		cb(nv)
 	}
@@ -244,15 +256,22 @@ func (n *NumericUpDown) drawTriangle(ctx DrawContext, cx, cy int, up bool, col c
 
 func (n *NumericUpDown) OnMouseMove(x, y int) {
 	if !n.IsEnabled() {
-		n.upHovered, n.downHovered = false, false
+		if n.upHovered || n.downHovered {
+			n.upHovered, n.downHovered = false, false
+			n.Invalidate()
+		}
 		return
 	}
 	b := n.bounds
 	spinX := b.Max.X - nudSpinnerWidth
 	midY := b.Min.Y + b.Dy()/2
 	in := image.Pt(x, y).In(b)
-	n.upHovered = in && x >= spinX && y < midY
-	n.downHovered = in && x >= spinX && y >= midY
+	up := in && x >= spinX && y < midY
+	down := in && x >= spinX && y >= midY
+	if up != n.upHovered || down != n.downHovered {
+		n.upHovered, n.downHovered = up, down
+		n.Invalidate() // подсветка кнопок спиннера изменилась
+	}
 }
 
 func (n *NumericUpDown) OnMouseButton(e MouseEvent) bool {
@@ -304,11 +323,9 @@ func (n *NumericUpDown) OnMouseButton(e MouseEvent) bool {
 // ─── Focusable ──────────────────────────────────────────────────────────────
 
 func (n *NumericUpDown) SetFocused(v bool) {
-	var i int32
-	if v {
-		i = 1
+	if atomic.SwapInt32(&n.focused, b2i(v)) != b2i(v) {
+		n.Invalidate() // цвет рамки зависит от фокуса
 	}
-	atomic.StoreInt32(&n.focused, i)
 	if !v {
 		n.commit() // фиксируем ввод при потере фокуса
 	}
@@ -340,11 +357,16 @@ func (n *NumericUpDown) OnKeyEvent(e KeyEvent) {
 			n.isEditing = true
 			n.editing = n.format()
 		}
+		changed := false
 		if len(n.editing) > 0 {
 			r := []rune(n.editing)
 			n.editing = string(r[:len(r)-1])
+			changed = true
 		}
 		n.mu.Unlock()
+		if changed {
+			n.Invalidate() // отображаемый буфер укоротился
+		}
 		return
 	}
 
@@ -367,6 +389,9 @@ func (n *NumericUpDown) OnKeyEvent(e KeyEvent) {
 			n.editing += string(e.Rune)
 		}
 		n.mu.Unlock()
+		if ok {
+			n.Invalidate() // отображаемый буфер изменился
+		}
 	}
 }
 

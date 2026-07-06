@@ -64,6 +64,7 @@ func (w *ImageWidget) SetSource(path string) error {
 	w.img = img
 	w.Source = path
 	w.mu.Unlock()
+	w.Invalidate() // новое изображение — перерисовать область
 	return nil
 }
 
@@ -72,6 +73,9 @@ func (w *ImageWidget) SetImage(img image.Image) {
 	w.mu.Lock()
 	w.img = img
 	w.mu.Unlock()
+	// Содержимое image.Image дёшево не сравнить (пиксели могли измениться
+	// даже при том же указателе) — инвалидируем безусловно.
+	w.Invalidate()
 }
 
 // Image возвращает текущее изображение (или nil).

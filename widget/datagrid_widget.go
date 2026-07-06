@@ -64,6 +64,10 @@ type DataGridWidget struct {
 	lastClickTime int64 // ms
 	lastClickX    int
 	lastClickY    int
+
+	// hoverInside — курсор был над виджетом на прошлом OnMouseMove
+	// (Grid ведёт hover строки внутри и не сообщает об изменениях).
+	hoverInside bool
 }
 
 // NewDataGridWidget создаёт виджет DataGrid.
@@ -113,6 +117,9 @@ func (w *DataGridWidget) OnMouseButton(e MouseEvent) bool {
 		w.lastClickY = e.Y
 	}
 
+	if consumed {
+		w.Invalidate() // выбор строки/скролл/resize — рисуются в bounds
+	}
 	return consumed
 }
 
@@ -122,6 +129,13 @@ func (w *DataGridWidget) OnMouseMove(x, y int) {
 		return
 	}
 	w.Grid.OnMouseMove(x, y)
+	// Grid не сообщает о смене hover-строки — инвалидируем при движении
+	// над виджетом (и один раз при выходе курсора за его пределы).
+	inside := image.Pt(x, y).In(w.Bounds())
+	if inside || w.hoverInside {
+		w.Invalidate()
+	}
+	w.hoverInside = inside
 }
 
 // ─── Keyboard handling ─────────────────────────────────────────────────────
@@ -136,13 +150,20 @@ func (w *DataGridWidget) OnKeyEvent(e KeyEvent) {
 	ctrl := e.Mod&ModCtrl != 0
 
 	w.Grid.OnKeyEvent(int(e.Code), e.Rune, e.Pressed, shift, ctrl)
+	if e.Pressed {
+		w.Invalidate() // навигация/редактирование меняют состояние в bounds
+	}
 }
 
 // ─── Focus ─────────────────────────────────────────────────────────────────
 
 // SetFocused реализует Focusable.
 func (w *DataGridWidget) SetFocused(v bool) {
+	changed := w.Grid.IsFocused() != v
 	w.Grid.SetFocused(v)
+	if changed {
+		w.Invalidate() // рамка фокуса — в bounds
+	}
 }
 
 // IsFocused реализует Focusable.
@@ -160,6 +181,7 @@ func (w *DataGridWidget) NeedsAnimation() bool {
 // ScrollBy прокручивает DataGrid на delta пикселей (для колеса мыши).
 func (w *DataGridWidget) ScrollBy(delta int) {
 	w.Grid.ScrollBy(delta)
+	w.Invalidate() // Grid не сообщает о клампе — инвалидируем всегда
 }
 
 // ─── Theme ─────────────────────────────────────────────────────────────────
