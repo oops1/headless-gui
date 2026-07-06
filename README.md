@@ -5,7 +5,7 @@
 
 # headless-gui
 
-Go-based headless GUI engine with XAML support, tile-based delta rendering, and pluggable output backends (RDP, WebSocket, native platform windows).
+Pure-Go headless GUI engine (zero CGO): WPF-style XAML, data binding, complex text shaping, antialiasing, HiDPI. Renders off-screen to 64×64 delta tiles for RDP/WebSocket streaming — or shows native windows (Win32 / X11 / Wayland / macOS).
 
 ## Overview
 
