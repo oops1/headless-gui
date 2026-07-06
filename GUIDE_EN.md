@@ -1334,6 +1334,26 @@ dispatch are never blocked by rendering; structural operations (SetResolution,
 RegisterFont*, SetTheme) serialize with the frame via a dedicated internal
 mutex.
 
+### HiDPI
+
+Widgets live in LOGICAL pixels (like WPF DIPs); frame buffers are physical
+(logical × scale). Text rasterizes at the true physical size (crisper, not
+stretched); rounded corners and AA shapes scale smoothly.
+
+```go
+eng.SetScale(2.0)       // 200% (or 1.25/1.5/...)
+eng.CanvasSize()        // logical size (widget coordinate space)
+eng.PhysicalSize()      // physical size of frames/tiles
+```
+
+`Frames()` tiles and `SendMouse*` events are physical pixels (events are
+converted to logical inside the engine).
+
+The native window (`window.Run`) detects the scale automatically: on Windows
+per-monitor DPI awareness (v2) is enabled plus WM_DPICHANGED handling when
+the window moves between monitors; on X11/macOS set the
+`HEADLESS_GUI_SCALE=1.5` environment variable (auto-detection planned).
+
 ### Fonts
 
 Bundled free fonts: Roboto (default), Open Sans, Inter. Auto-loaded from
