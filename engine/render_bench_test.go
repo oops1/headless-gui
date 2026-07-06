@@ -109,6 +109,18 @@ func BenchmarkRenderFrameHover(b *testing.B) {
 	}
 }
 
+// BenchmarkFillRoundRect — заливка кнопкоразмерного скругления (AA-углы из кэша).
+func BenchmarkFillRoundRect(b *testing.B) {
+	eng := New(640, 480, 20)
+	c := eng.canvas
+	col := color.RGBA{R: 0, G: 120, B: 212, A: 255}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c.FillRoundRect(10, 10, 120, 32, 8, col)
+	}
+}
+
 // BenchmarkDiffFullNoChange — чистая стоимость полного diff 1920×1080 без изменений.
 func BenchmarkDiffFullNoChange(b *testing.B) {
 	eng := New(1920, 1080, 20)

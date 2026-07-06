@@ -38,9 +38,15 @@ type Canvas struct {
 	baseClip   image.Rectangle       // базовый клип кадра (damage-область частичной перерисовки)
 	hasBase    bool                  // активен ли базовый клип
 	scaleTmp   *image.RGBA           // переиспользуемый буфер для DrawImageScaled
-	W, H       int
+	shaper     textShaper            // шейпинг сложного текста (RTL, лигатуры; см. shaper.go)
+	W, H       int                   // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
 	tilesX     int
 	tilesY     int
+
+	// HiDPI (см. scale.go): виджеты живут в логических пикселях,
+	// буферы — в физических. При scale == 1 пути тождественны прежним.
+	scale              float64
+	logicalW, logicalH int
 }
 
 // RegisterFont регистрирует именованный шрифт (TTF-данные) в реестре холста.
@@ -123,16 +129,30 @@ func (c *Canvas) fcForRune(primary *FontCache, r rune) (*FontCache, bool) {
 }
 
 func newCanvas(w, h int, fc *FontCache) *Canvas {
+	return newCanvasScaled(w, h, 1.0, fc)
+}
+
+// newCanvasScaled создаёт холст логического размера (w, h) с HiDPI-масштабом
+// scale: буферы аллоцируются в физических пикселях (w×scale, h×scale).
+func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
+	if scale <= 0 {
+		scale = 1
+	}
+	pw := int(math.Round(float64(w) * scale))
+	ph := int(math.Round(float64(h) * scale))
 	ts := output.TileSize
 	return &Canvas{
-		front:      image.NewRGBA(image.Rect(0, 0, w, h)),
-		back:       image.NewRGBA(image.Rect(0, 0, w, h)),
+		front:      image.NewRGBA(image.Rect(0, 0, pw, ph)),
+		back:       image.NewRGBA(image.Rect(0, 0, pw, ph)),
 		fontCache:  fc,
 		namedFonts: make(map[string]*FontCache),
-		W:          w,
-		H:          h,
-		tilesX:     (w + ts - 1) / ts,
-		tilesY:     (h + ts - 1) / ts,
+		W:          pw,
+		H:          ph,
+		tilesX:     (pw + ts - 1) / ts,
+		tilesY:     (ph + ts - 1) / ts,
+		scale:      scale,
+		logicalW:   w,
+		logicalH:   h,
 	}
 }
 
@@ -196,18 +216,20 @@ func (c *Canvas) blitBackgroundIn(r image.Rectangle) {
 
 // ─── Clip ───────────────────────────────────────────────────────────────────
 
-// SetClip ограничивает все последующие операции рисования прямоугольником r.
+// SetClip ограничивает все последующие операции рисования прямоугольником r
+// (ЛОГИЧЕСКИЕ координаты; внутренняя область отсечения — физическая).
 // При активном базовом клипе (частичная перерисовка) итоговая область —
 // пересечение r с базовым клипом: виджеты не могут рисовать вне damage.
 func (c *Canvas) SetClip(r image.Rectangle) {
+	pr := c.sRect(r)
 	if c.hasBase {
 		// hasClip остаётся true даже при пустом пересечении — рисовать
 		// вне damage нельзя (пустой clip == «не рисовать ничего»).
-		c.clip = r.Intersect(c.baseClip)
+		c.clip = pr.Intersect(c.baseClip)
 		c.hasClip = true
 		return
 	}
-	c.clip = r.Intersect(c.back.Bounds())
+	c.clip = pr.Intersect(c.back.Bounds())
 	c.hasClip = !c.clip.Empty()
 }
 
@@ -238,12 +260,13 @@ func (c *Canvas) clearBaseClip() {
 	c.hasClip = false
 }
 
-// Clip возвращает текущую область отсечения (или полные границы холста).
+// Clip возвращает текущую область отсечения в ЛОГИЧЕСКИХ координатах
+// (или полные логические границы холста).
 func (c *Canvas) Clip() image.Rectangle {
 	if c.hasClip {
-		return c.clip
+		return c.unRect(c.clip)
 	}
-	return c.back.Bounds()
+	return image.Rect(0, 0, c.logicalW, c.logicalH)
 }
 
 // clampRect пересекает r с текущей областью отсечения (или bounds холста).
@@ -256,28 +279,37 @@ func (c *Canvas) clampRect(r image.Rectangle) image.Rectangle {
 
 // ─── DrawContext ────────────────────────────────────────────────────────────
 
-// FillRect заливает прямоугольник сплошным цветом.
+// FillRect заливает прямоугольник сплошным цветом (координаты логические).
 func (c *Canvas) FillRect(x, y, w, h int, col color.RGBA) {
 	if col.A == 0 {
 		return
 	}
-	r := c.clampRect(image.Rect(x, y, x+w, y+h))
-	if r.Empty() {
-		return
-	}
-	stdraw.Draw(c.back, r, &image.Uniform{C: col}, image.Point{}, stdraw.Src)
+	c.fillRectPx(c.sRect(image.Rect(x, y, x+w, y+h)), col, false)
 }
 
 // FillRectAlpha заливает прямоугольник с альфа-смешиванием (Over).
 func (c *Canvas) FillRectAlpha(x, y, w, h int, col color.RGBA) {
-	r := c.clampRect(image.Rect(x, y, x+w, y+h))
+	c.fillRectPx(c.sRect(image.Rect(x, y, x+w, y+h)), col, true)
+}
+
+// fillRectPx — заливка в ФИЗИЧЕСКИХ координатах (внутренний примитив).
+func (c *Canvas) fillRectPx(r image.Rectangle, col color.RGBA, over bool) {
+	r = c.clampRect(r)
 	if r.Empty() {
 		return
 	}
-	stdraw.Draw(c.back, r, &image.Uniform{C: col}, image.Point{}, stdraw.Over)
+	op := stdraw.Src
+	if over {
+		op = stdraw.Over
+	}
+	stdraw.Draw(c.back, r, &image.Uniform{C: col}, image.Point{}, op)
 }
 
 // FillRoundRect заливает прямоугольник со скруглёнными углами радиуса r.
+// Углы сглажены (AA-маски, см. aa.go); прямоугольное тело заливается
+// быстрым Src-fill. Полупрозрачные цвета идут по старому не-AA пути,
+// чтобы не смешивать семантики Src (тело) и Over (углы).
+// Все входные координаты логические; при HiDPI скейлятся здесь единожды.
 func (c *Canvas) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
 	if r <= 0 {
 		c.FillRect(x, y, w, h, col)
@@ -289,22 +321,46 @@ func (c *Canvas) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
 	if r > h/2 {
 		r = h / 2
 	}
-	// Центральная полоса без скруглений
-	c.FillRect(x, y+r, w, h-2*r, col)
-	// Верхняя и нижняя полосы со скруглёнными углами
+	// Переход в физические координаты.
+	px, py := c.sx(x), c.sx(y)
+	pw, ph := c.sl(x, w), c.sl(y, h)
+	pr := c.st(r)
+	if pr > pw/2 {
+		pr = pw / 2
+	}
+	if pr > ph/2 {
+		pr = ph / 2
+	}
+	if col.A < 255 {
+		c.fillRoundRectLegacy(px, py, pw, ph, pr, col)
+		return
+	}
+	// Тело: средняя полоса на всю ширину + верх/низ между углами.
+	c.fillRectPx(image.Rect(px, py+pr, px+pw, py+ph-pr), col, false)
+	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+pr), col, false)
+	c.fillRectPx(image.Rect(px+pr, py+ph-pr, px+pw-pr, py+ph), col, false)
+	// Сглаженные углы.
+	c.drawCorners(cornersFor(pr, cornerFill), px, py, pw, ph, pr, col)
+}
+
+// fillRoundRectLegacy — прежняя ступенчатая заливка (для A<255).
+// Координаты ФИЗИЧЕСКИЕ.
+func (c *Canvas) fillRoundRectLegacy(x, y, w, h, r int, col color.RGBA) {
+	c.fillRectPx(image.Rect(x, y+r, x+w, y+h-r), col, false)
 	rf := float64(r)
 	for i := 0; i < r; i++ {
 		dy := float64(r - i - 1)
 		inset := r - int(math.Round(math.Sqrt(rf*rf-dy*dy)))
 		lineW := w - 2*inset
 		if lineW > 0 {
-			c.FillRect(x+inset, y+i, lineW, 1, col)     // верх
-			c.FillRect(x+inset, y+h-1-i, lineW, 1, col) // низ
+			c.fillRectPx(image.Rect(x+inset, y+i, x+inset+lineW, y+i+1), col, false)     // верх
+			c.fillRectPx(image.Rect(x+inset, y+h-1-i, x+inset+lineW, y+h-i), col, false) // низ
 		}
 	}
 }
 
-// DrawRoundBorder рисует 1-пиксельный контур со скруглёнными углами.
+// DrawRoundBorder рисует 1-пиксельный (логический) контур со скруглёнными
+// углами. Дуги углов сглажены (AA-маски четверть-кольца, см. aa.go).
 func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
 	if r <= 0 {
 		c.DrawBorder(x, y, w, h, col)
@@ -316,33 +372,53 @@ func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
 	if r > h/2 {
 		r = h / 2
 	}
-	// Прямые стороны
-	c.DrawHLine(x+r, y, w-2*r, col)     // верх
-	c.DrawHLine(x+r, y+h-1, w-2*r, col) // низ
-	c.DrawVLine(x, y+r, h-2*r, col)     // лево
-	c.DrawVLine(x+w-1, y+r, h-2*r, col) // право
-	// Углы: четверти окружности
+	// Переход в физические координаты.
+	px, py := c.sx(x), c.sx(y)
+	pw, ph := c.sl(x, w), c.sl(y, h)
+	pr := c.st(r)
+	if pr > pw/2 {
+		pr = pw / 2
+	}
+	if pr > ph/2 {
+		pr = ph / 2
+	}
+	t := c.st(1) // физическая толщина линии
+	// Прямые стороны.
+	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+t), col, false)       // верх
+	c.fillRectPx(image.Rect(px+pr, py+ph-t, px+pw-pr, py+ph), col, false) // низ
+	c.fillRectPx(image.Rect(px, py+pr, px+t, py+ph-pr), col, false)       // лево
+	c.fillRectPx(image.Rect(px+pw-t, py+pr, px+pw, py+ph-pr), col, false) // право
+	if col.A < 255 {
+		c.drawRoundBorderCornersLegacy(px, py, pw, ph, pr, col)
+		return
+	}
+	// Сглаженные дуги углов.
+	c.drawCorners(cornersFor(pr, cornerRing), px, py, pw, ph, pr, col)
+}
+
+// drawRoundBorderCornersLegacy — прежние ступенчатые дуги (для A<255).
+// Координаты ФИЗИЧЕСКИЕ.
+func (c *Canvas) drawRoundBorderCornersLegacy(x, y, w, h, r int, col color.RGBA) {
 	rf := float64(r)
 	for i := 0; i <= r; i++ {
 		dy := float64(r - i)
 		dx := int(math.Round(math.Sqrt(rf*rf - dy*dy)))
-		// Верхний левый угол
-		c.SetPixel(x+r-dx, y+i, col)
-		// Верхний правый угол
-		c.SetPixel(x+w-1-r+dx, y+i, col)
-		// Нижний левый угол
-		c.SetPixel(x+r-dx, y+h-1-i, col)
-		// Нижний правый угол
-		c.SetPixel(x+w-1-r+dx, y+h-1-i, col)
+		c.setPixelPx(x+r-dx, y+i, col)       // верхний левый
+		c.setPixelPx(x+w-1-r+dx, y+i, col)   // верхний правый
+		c.setPixelPx(x+r-dx, y+h-1-i, col)   // нижний левый
+		c.setPixelPx(x+w-1-r+dx, y+h-1-i, col) // нижний правый
 	}
 }
 
-// DrawBorder рисует 1-пиксельный контур прямоугольника.
+// DrawBorder рисует 1-пиксельный (логический) контур прямоугольника.
 func (c *Canvas) DrawBorder(x, y, w, h int, col color.RGBA) {
-	c.FillRect(x, y, w, 1, col)     // верх
-	c.FillRect(x, y+h-1, w, 1, col) // низ
-	c.FillRect(x, y, 1, h, col)     // лево
-	c.FillRect(x+w-1, y, 1, h, col) // право
+	px, py := c.sx(x), c.sx(y)
+	pw, ph := c.sl(x, w), c.sl(y, h)
+	t := c.st(1)
+	c.fillRectPx(image.Rect(px, py, px+pw, py+t), col, false)       // верх
+	c.fillRectPx(image.Rect(px, py+ph-t, px+pw, py+ph), col, false) // низ
+	c.fillRectPx(image.Rect(px, py, px+t, py+ph), col, false)       // лево
+	c.fillRectPx(image.Rect(px+pw-t, py, px+pw, py+ph), col, false) // право
 }
 
 // DrawText рисует строку TTF-шрифтом (Go Regular) размером DefaultFontSize.
@@ -363,23 +439,34 @@ func (c *Canvas) DrawTextFont(text string, x, y int, sizePt float64, fontName st
 func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt float64, col color.RGBA) {
 	// Обе ветки блиттируют кэшированные альфа-маски глифов (см. FontCache.Glyph)
 	// вместо повторной растеризации контуров через font.Drawer.
+	//
+	// HiDPI: позиция (x, y) логическая → физическая; метрики шрифта уже
+	// физические (DPI = 96 × scale), поэтому дальше всё в физических px.
+	px, py := c.sx(x), c.sx(y)
 	ascent, descent := fc.vMetrics(sizePt)
-	baseline := y + ascent
+	baseline := py + ascent
 
 	// Вертикальный отсев: строка целиком вне клипа — не итерируем руны вовсе
 	// (важно при частичной перерисовке, когда клип — небольшая damage-область).
 	// Запас 4px на глифы, выходящие за ascent/descent (акценты и т.п.).
 	if c.hasClip {
-		if y-4 >= c.clip.Max.Y || y+ascent+descent+4 <= c.clip.Min.Y {
+		if py-4 >= c.clip.Max.Y || py+ascent+descent+4 <= c.clip.Min.Y {
 			return
 		}
+	}
+
+	// Сложный текст (RTL, арабский, индийские скрипты, комбинируемые знаки) —
+	// через шейпер (см. shaper.go). При недоступности шейпинга (шрифт не
+	// распарсился typesetting'ом) — деградация на per-rune путь ниже.
+	if needsShaping(text) && c.drawShapedText(fc, text, px, baseline, sizePt, col) {
+		return
 	}
 
 	// Быстрый путь: нет fallback-шрифтов — один шрифт, с кернингом
 	// (поведение прежнего font.Drawer.DrawString; отсутствующий глиф
 	// пропускается без продвижения пера — как делал Drawer с opentype).
 	if len(c.fallbacks) == 0 {
-		pen := fixed.I(x)
+		pen := fixed.I(px)
 		prev := rune(-1)
 		for _, r := range text {
 			if prev >= 0 {
@@ -398,7 +485,7 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 
 	// Fallback-путь: по рунам, выбирая шрифт с нужным глифом.
 	// Baseline от основного шрифта, кернинг не применяется (прежнее поведение).
-	pen := fixed.I(x)
+	pen := fixed.I(px)
 	for _, r := range text {
 		chosen, found := c.fcForRune(fc, r)
 		g := chosen.Glyph(sizePt, r)
@@ -417,14 +504,19 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 	}
 }
 
-// drawGlyphMask альфа-блендит маску глифа цветом col в back-буфер (Over,
-// premultiplied — как image/draw для font.Drawer). Учитывает clip.
-// (gx, gy) — позиция левого верхнего угла маски на холсте.
+// drawGlyphMask альфа-блендит маску глифа из per-rune кэша.
 func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
 	if g.mask == nil {
 		return
 	}
-	mw, mh := g.mask.Rect.Dx(), g.mask.Rect.Dy()
+	c.drawAlphaMask(g.mask, gx, gy, col)
+}
+
+// drawAlphaMask альфа-блендит альфа-маску цветом col в back-буфер (Over,
+// premultiplied — как image/draw для font.Drawer). Учитывает clip.
+// (gx, gy) — позиция левого верхнего угла маски на холсте.
+func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
+	mw, mh := alpha.Rect.Dx(), alpha.Rect.Dy()
 	r := c.clampRect(image.Rect(gx, gy, gx+mw, gy+mh))
 	if r.Empty() {
 		return
@@ -434,8 +526,8 @@ func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
 	sb := uint32(col.B) * 0x101
 	sa := uint32(col.A) * 0x101
 	const m16 = 1<<16 - 1
-	mask := g.mask.Pix
-	mStride := g.mask.Stride
+	mask := alpha.Pix
+	mStride := alpha.Stride
 	dst := c.back.Pix
 	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
 		mRow := (yy - gy) * mStride
@@ -475,6 +567,12 @@ func (c *Canvas) runeAdvance(fc *FontCache, r rune, sizePt float64) fixed.Int26_
 
 // measureWithFallback измеряет ширину строки с учётом fallback-шрифтов.
 func (c *Canvas) measureWithFallback(fc *FontCache, text string, sizePt float64) int {
+	// Сложный текст: ширина после шейпинга (лигатуры меняют ширину строки).
+	if needsShaping(text) {
+		if l := c.shaper.layout(fc, c.fallbacks, text, sizePt); l != nil {
+			return l.width.Round()
+		}
+	}
 	if len(c.fallbacks) == 0 {
 		return fc.Measure(text, sizePt)
 	}
@@ -485,19 +583,120 @@ func (c *Canvas) measureWithFallback(fc *FontCache, text string, sizePt float64)
 	return w.Round()
 }
 
-// MeasureText возвращает ширину строки в пикселях (шрифт по умолчанию, sizePt).
+// drawShapedText рисует строку через шейпер: глифы в видимом порядке,
+// маски растеризуются по GID и кэшируются. baseline — Y базовой линии.
+// false — шейпинг недоступен, вызывающий код рисует per-rune путём.
+func (c *Canvas) drawShapedText(fc *FontCache, text string, x, baseline int, sizePt float64, col color.RGBA) bool {
+	l := c.shaper.layout(fc, c.fallbacks, text, sizePt)
+	if l == nil {
+		return false
+	}
+	sizePx := fixed.Int26_6(sizePt * fc.dpi / 72.0 * 64.0)
+	pen := fixed.I(x)
+	for _, g := range l.glyphs {
+		// GID 0 = .notdef: руна не покрыта ни одним шрифтом — не рисуем
+		// «тофу»-квадрат (философия BUG-2), но перо продвигаем.
+		if g.gid == 0 {
+			pen += g.adv
+			continue
+		}
+		m := c.shaper.glyphMaskFor(g.face, g.gid, sizePx)
+		if m.mask != nil {
+			// Точка отрисовки: перо + XOffset; YOffset положителен вверх.
+			gx := (pen + g.xOff).Round() + m.offX
+			gy := baseline - g.yOff.Round() + m.offY
+			c.drawAlphaMask(m.mask, gx, gy, col)
+		}
+		pen += g.adv
+	}
+	return true
+}
+
+// shapedRunePositions — накопленные ширины по логическим рунам для сложного
+// текста: advance каждого кластера распределяется поровну между его рунами.
+// Для RTL это ЛОГИЧЕСКИЕ позиции (для каретки TextInput), не визуальные.
+func (c *Canvas) shapedRunePositions(fc *FontCache, text string, sizePt float64) []int {
+	l := c.shaper.layout(fc, c.fallbacks, text, sizePt)
+	if l == nil {
+		return nil
+	}
+	runes := []rune(text)
+	n := len(runes)
+	// Суммарный advance по кластерам (cluster = индекс первой руны кластера).
+	clusterAdv := make(map[int]fixed.Int26_6, n)
+	for _, g := range l.glyphs {
+		clusterAdv[g.cluster] += g.adv
+	}
+	// Границы кластеров в логическом порядке.
+	starts := make([]int, 0, len(clusterAdv))
+	for s := range clusterAdv {
+		starts = append(starts, s)
+	}
+	sort.Ints(starts)
+
+	pos := make([]int, n+1)
+	var acc fixed.Int26_6
+	for ci, s := range starts {
+		end := n
+		if ci+1 < len(starts) {
+			end = starts[ci+1]
+		}
+		adv := clusterAdv[s]
+		cnt := end - s
+		if cnt <= 0 {
+			continue
+		}
+		for k := 1; k <= cnt; k++ {
+			pos[s+k] = (acc + adv*fixed.Int26_6(k)/fixed.Int26_6(cnt)).Round()
+		}
+		acc += adv
+	}
+	return pos
+}
+
+// MeasureText возвращает ширину строки в ЛОГИЧЕСКИХ пикселях (шрифт по
+// умолчанию, sizePt). Внутреннее измерение физическое (DPI × scale),
+// результат приводится к логическим с округлением вверх.
 func (c *Canvas) MeasureText(text string, sizePt float64) int {
-	return c.measureWithFallback(c.fontCache, text, sizePt)
+	return c.toLogicalLen(c.measureWithFallback(c.fontCache, text, sizePt))
 }
 
-// MeasureTextFont возвращает ширину строки именованным шрифтом.
+// MeasureTextFont возвращает ширину строки именованным шрифтом (логические px).
 func (c *Canvas) MeasureTextFont(text string, sizePt float64, fontName string) int {
-	return c.measureWithFallback(c.fontFor(fontName), text, sizePt)
+	return c.toLogicalLen(c.measureWithFallback(c.fontFor(fontName), text, sizePt))
 }
 
-// MeasureRunePositions возвращает накопленную ширину после каждого символа.
+// toLogicalLen переводит физическую длину в логическую (округление вверх:
+// зарезервированное по измерению место гарантированно вмещает текст).
+func (c *Canvas) toLogicalLen(px int) int {
+	if c.scale == 1 {
+		return px
+	}
+	return int(math.Ceil(float64(px) / c.scale))
+}
+
+// MeasureRunePositions возвращает накопленную ширину после каждого символа
+// (в ЛОГИЧЕСКИХ пикселях).
 // Результат: len(runes)+1 элементов; positions[0]==0, positions[n] — ширина text[:n].
+// Для сложного текста (шейпинг) позиции считаются по кластерам в ЛОГИЧЕСКОМ
+// порядке рун — визуальное позиционирование каретки в RTL не поддержано (v1).
 func (c *Canvas) MeasureRunePositions(text string, sizePt float64) []int {
+	pos := c.measureRunePositionsPx(text, sizePt)
+	if c.scale != 1 {
+		for i, p := range pos {
+			pos[i] = int(math.Round(float64(p) / c.scale))
+		}
+	}
+	return pos
+}
+
+// measureRunePositionsPx — позиции рун в физических пикселях.
+func (c *Canvas) measureRunePositionsPx(text string, sizePt float64) []int {
+	if needsShaping(text) {
+		if pos := c.shapedRunePositions(c.fontCache, text, sizePt); pos != nil {
+			return pos
+		}
+	}
 	if len(c.fallbacks) == 0 {
 		return c.fontCache.MeasureRunes(text, sizePt)
 	}
@@ -511,8 +710,18 @@ func (c *Canvas) MeasureRunePositions(text string, sizePt float64) []int {
 	return pos
 }
 
-// SetPixel устанавливает цвет одного пикселя (с учётом clip).
+// SetPixel устанавливает цвет одного ЛОГИЧЕСКОГО пикселя (при HiDPI —
+// блок физических пикселей соответствующего размера). Учитывает clip.
 func (c *Canvas) SetPixel(x, y int, col color.RGBA) {
+	if c.scale != 1 {
+		c.fillRectPx(image.Rect(c.sx(x), c.sx(y), c.sx(x+1), c.sx(y+1)), col, false)
+		return
+	}
+	c.setPixelPx(x, y, col)
+}
+
+// setPixelPx — один ФИЗИЧЕСКИЙ пиксель (внутренний примитив).
+func (c *Canvas) setPixelPx(x, y int, col color.RGBA) {
 	if c.hasClip {
 		if !image.Pt(x, y).In(c.clip) {
 			return
@@ -523,18 +732,23 @@ func (c *Canvas) SetPixel(x, y int, col color.RGBA) {
 	}
 }
 
-// DrawHLine рисует горизонтальную линию длиной length пикселей.
+// DrawHLine рисует горизонтальную линию длиной length логических пикселей.
 func (c *Canvas) DrawHLine(x, y, length int, col color.RGBA) {
 	c.FillRect(x, y, length, 1, col)
 }
 
-// DrawVLine рисует вертикальную линию длиной length пикселей.
+// DrawVLine рисует вертикальную линию длиной length логических пикселей.
 func (c *Canvas) DrawVLine(x, y, length int, col color.RGBA) {
 	c.FillRect(x, y, 1, length, col)
 }
 
-// DrawImage рисует произвольное изображение в позицию (x, y) в оригинальном размере.
+// DrawImage рисует изображение в (x, y); логический размер = размеру
+// картинки в пикселях (при HiDPI изображение растягивается на scale).
 func (c *Canvas) DrawImage(src image.Image, x, y int) {
+	if c.scale != 1 {
+		c.DrawImageScaled(src, x, y, src.Bounds().Dx(), src.Bounds().Dy())
+		return
+	}
 	r := c.clampRect(image.Rect(x, y, x+src.Bounds().Dx(), y+src.Bounds().Dy()))
 	if r.Empty() {
 		return
@@ -543,15 +757,17 @@ func (c *Canvas) DrawImage(src image.Image, x, y int) {
 	stdraw.Draw(c.back, r, src, offset, stdraw.Over)
 }
 
-// DrawImageScaled рисует изображение масштабированным до (w × h) в позицию (x, y).
-// Промежуточный буфер переиспользуется между вызовами если размер совпадает.
+// DrawImageScaled рисует изображение масштабированным до (w × h) логических
+// пикселей в позицию (x, y). Промежуточный буфер переиспользуется.
 func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
-	dstRect := c.clampRect(image.Rect(x, y, x+w, y+h))
+	px, py := c.sx(x), c.sx(y)
+	pw, ph := c.sl(x, w), c.sl(y, h)
+	dstRect := c.clampRect(image.Rect(px, py, px+pw, py+ph))
 	if dstRect.Empty() {
 		return
 	}
 	// Переиспользуем буфер если размер подходит.
-	need := image.Rect(0, 0, w, h)
+	need := image.Rect(0, 0, pw, ph)
 	tmp := c.scaleTmp
 	if tmp == nil || tmp.Bounds() != need {
 		tmp = image.NewRGBA(need)
@@ -563,7 +779,7 @@ func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
 		}
 	}
 	draw.BiLinear.Scale(tmp, tmp.Bounds(), src, src.Bounds(), stdraw.Src, nil)
-	offset := image.Pt(dstRect.Min.X-x, dstRect.Min.Y-y)
+	offset := image.Pt(dstRect.Min.X-px, dstRect.Min.Y-py)
 	stdraw.Draw(c.back, dstRect, tmp, offset, stdraw.Over)
 }
 

@@ -7,12 +7,14 @@
 package engine
 
 import (
+	"bytes"
 	"image"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
 
+	tsfont "github.com/go-text/typesetting/font"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/font/gofont/goregular"
@@ -47,6 +49,14 @@ type FontCache struct {
 	glyphs map[glyphKey]cachedGlyph
 	// metrics — кэш вертикальных метрик по размеру (Face.Metrics не бесплатен).
 	metrics map[float64]vMetric
+
+	// ── Шейпинг (go-text/typesetting) ────────────────────────────────────────
+	// ttfData — исходные байты шрифта: typesetting парсит их отдельно от
+	// x/image/opentype. shapeFace создаётся лениво — только когда встречается
+	// текст, требующий шейпинга (RTL, арабский, индийские скрипты...).
+	ttfData      []byte
+	shapeFace    *tsfont.Face
+	shapeFaceErr bool // парсинг не удался — не пытаться снова
 }
 
 // vMetric — вертикальные метрики шрифта одного размера (в пикселях).
@@ -82,21 +92,62 @@ func newFontCache(assetsDir string) *FontCache {
 	return newFontCacheFromData(data, DefaultDPI)
 }
 
-// newFontCacheFromData создаёт FontCache из TTF-байт и заданного DPI.
-// Возвращает nil, если данные невалидны.
+// newFontCacheFromData создаёт FontCache из TTF/OTF/TTC-байт и заданного DPI.
+// Для TTC-коллекций берётся первый шрифт. Возвращает nil, если данные невалидны.
 func newFontCacheFromData(data []byte, dpi float64) *FontCache {
 	parsed, err := opentype.Parse(data)
 	if err != nil {
-		parsed, err = opentype.Parse(goregular.TTF)
+		// TTC-коллекция (Nirmala.ttc и т.п.) — первый шрифт.
+		if coll, cerr := opentype.ParseCollection(data); cerr == nil {
+			if f, ferr := coll.Font(0); ferr == nil {
+				parsed, err = f, nil
+			}
+		}
+	}
+	if err != nil {
+		data = goregular.TTF
+		parsed, err = opentype.Parse(data)
 		if err != nil {
 			return nil
 		}
 	}
 	return &FontCache{
-		ttf:   parsed,
-		cache: make(map[float64]font.Face),
-		dpi:   dpi,
+		ttf:     parsed,
+		cache:   make(map[float64]font.Face),
+		dpi:     dpi,
+		ttfData: data,
 	}
+}
+
+// shaperFace возвращает typesetting-face для шейпинга (лениво, кэшируется).
+// nil — шрифт не удалось распарсить; вызывающий код откатывается на простой
+// (per-rune) путь отрисовки.
+func (fc *FontCache) shaperFace() *tsfont.Face {
+	fc.mu.RLock()
+	f, failed := fc.shapeFace, fc.shapeFaceErr
+	fc.mu.RUnlock()
+	if f != nil || failed {
+		return f
+	}
+
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	if fc.shapeFace != nil || fc.shapeFaceErr {
+		return fc.shapeFace
+	}
+	face, err := tsfont.ParseTTF(bytes.NewReader(fc.ttfData))
+	if err != nil {
+		// TTC-коллекция — первый шрифт (симметрично newFontCacheFromData).
+		if faces, cerr := tsfont.ParseTTC(bytes.NewReader(fc.ttfData)); cerr == nil && len(faces) > 0 {
+			face, err = faces[0], nil
+		}
+	}
+	if err != nil {
+		fc.shapeFaceErr = true
+		return nil
+	}
+	fc.shapeFace = face
+	return face
 }
 
 // Face возвращает font.Face для заданного размера (в пунктах).
@@ -305,7 +356,11 @@ func systemFallbackFontPaths() []string {
 			filepath.Join(fonts, "l_10646.ttf"),   // Lucida Sans Unicode: ✓✗ и пр.
 			filepath.Join(fonts, "arialuni.ttf"),  // Arial Unicode MS (если установлен)
 			filepath.Join(fonts, "DejaVuSans.ttf"),
-			filepath.Join(fonts, "arial.ttf"), // широкое покрытие латиницы/кириллицы/стрелок
+			filepath.Join(fonts, "arial.ttf"),    // латиница/кириллица/арабский/иврит
+			filepath.Join(fonts, "Nirmala.ttc"),  // Nirmala UI: индийские скрипты (деванагари и др.)
+			filepath.Join(fonts, "Nirmala.ttf"),  // вариант поставки одиночным TTF
+			filepath.Join(fonts, "LeelawUI.ttf"), // Leelawadee UI: тайский, лаосский, кхмерский
+			filepath.Join(fonts, "tahoma.ttf"),   // широкий запасной: тайский/иврит/арабский
 			filepath.Join(fonts, "seguiemj.ttf"),
 		}
 	case "darwin":
@@ -320,6 +375,11 @@ func systemFallbackFontPaths() []string {
 			"/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
 			"/usr/share/fonts/TTF/DejaVuSans.ttf",
 			"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+			// Скрипты, требующие шейпинга (см. shaper.go) — best-effort.
+			"/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+			"/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
+			"/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+			"/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",
 		}
 	}
 }

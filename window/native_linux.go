@@ -39,6 +39,7 @@ type X11Window struct {
 	// Callbacks
 	onResize      func(w, h int)
 	onExpose      func(r image.Rectangle)
+	onActivate    func(active bool)
 	onClose       func() bool
 	onMouseMove   func(x, y int)
 	onMouseButton func(x, y, button int, pressed bool)
@@ -233,6 +234,16 @@ func (w *X11Window) RunEventLoop() error {
 				w.onMouseMove(x, y)
 			}
 
+		case 9: // FocusIn
+			if w.onActivate != nil {
+				w.onActivate(true)
+			}
+
+		case 10: // FocusOut
+			if w.onActivate != nil {
+				w.onActivate(false)
+			}
+
 		case 12: // Expose
 			// ОС просит восстановить область окна — блитим из кэша кадра.
 			// Формат события: x@8, y@10, width@12, height@14 (little-endian).
@@ -395,6 +406,9 @@ func (w *X11Window) SetOnResize(fn func(w, h int))                              
 
 // SetOnExpose — колбэк перерисовки области по Expose (см. exposeNotifier).
 func (w *X11Window) SetOnExpose(fn func(r image.Rectangle)) { w.onExpose = fn }
+
+// SetOnActivate — колбэк смены активности окна (FocusIn/FocusOut).
+func (w *X11Window) SetOnActivate(fn func(active bool)) { w.onActivate = fn }
 func (w *X11Window) SetOnClose(fn func() bool)                                   { w.onClose = fn }
 func (w *X11Window) SetOnMouseMove(fn func(x, y int))                            { w.onMouseMove = fn }
 func (w *X11Window) SetOnMouseButton(fn func(x, y, button int, pressed bool))    { w.onMouseButton = fn }

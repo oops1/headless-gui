@@ -20,6 +20,8 @@ package window
 import (
 	"image"
 	stdraw "image/draw"
+	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,6 +54,73 @@ type EngineAPI interface {
 	CursorAt(x, y int) widget.Cursor
 }
 
+// engineScaler — опциональная поддержка HiDPI движком (реализует *engine.Engine).
+// CanvasSize при этом логический, кадры и события — физические.
+type engineScaler interface {
+	SetScale(k float64)
+	Scale() float64
+	PhysicalSize() (w, h int)
+}
+
+// scaleDetector — опциональная возможность бэкенда сообщить системный
+// масштаб монитора (Win32: DPI после включения per-monitor awareness).
+type scaleDetector interface {
+	DetectScale() float64
+}
+
+// dpiChangeNotifier — опциональное уведомление о смене DPI монитора
+// (перетаскивание окна между мониторами; Win32 WM_DPICHANGED).
+type dpiChangeNotifier interface {
+	SetOnDpiChanged(fn func(scale float64))
+}
+
+// activationNotifier — опциональное уведомление о смене активности окна
+// (Win32 WM_ACTIVATE, X11 FocusIn/FocusOut). widget.Window рисует
+// неактивный заголовок приглушённым (Win2000 — серый градиент).
+type activationNotifier interface {
+	SetOnActivate(fn func(active bool))
+}
+
+// setupActivation подключает активность нативного окна к widget.Window.
+func (win *Window) setupActivation() {
+	an, ok := win.native.(activationNotifier)
+	if !ok {
+		return
+	}
+	ww, ok := win.eng.Root().(*widget.Window)
+	if !ok {
+		return
+	}
+	an.SetOnActivate(func(active bool) {
+		ww.SetActive(active)
+	})
+}
+
+// detectScale возвращает HiDPI-масштаб: env HEADLESS_GUI_SCALE имеет
+// приоритет (ручное управление на X11/macOS), иначе — от бэкенда.
+func detectScale(native NativeWindow) float64 {
+	if v := os.Getenv("HEADLESS_GUI_SCALE"); v != "" {
+		if k, err := strconv.ParseFloat(v, 64); err == nil && k >= 0.5 && k <= 4 {
+			return k
+		}
+	}
+	if sd, ok := native.(scaleDetector); ok {
+		if k := sd.DetectScale(); k > 0 {
+			return k
+		}
+	}
+	return 1
+}
+
+// physicalSize возвращает физический размер кадра движка
+// (или логический, если движок не поддерживает HiDPI).
+func (win *Window) physicalSize() (int, int) {
+	if sa, ok := win.eng.(engineScaler); ok {
+		return sa.PhysicalSize()
+	}
+	return win.eng.CanvasSize()
+}
+
 // Window — нативное окно ОС для GUI-движка.
 //
 // Жизненный цикл:
@@ -81,6 +150,10 @@ type Window struct {
 	maxFPS       int
 	resizable    bool
 	cornerRadius int // скругление углов окна (0 = прямые); применяется после Create
+
+	// HiDPI: масштаб монитора (1.0 без HiDPI). win.w/h — логические,
+	// нативное окно и буфер кадра — физические (логические × scale).
+	scale float64
 
 	// Состояние модификаторов (обновляется в onKeyDown/onKeyUp).
 	modShift   atomic.Bool
@@ -143,14 +216,45 @@ func (win *Window) SetCornerRadius(r int) {
 func (win *Window) Run() error {
 	win.native = NewNativeWindow()
 
+	// HiDPI: определяем масштаб монитора (env HEADLESS_GUI_SCALE или
+	// бэкенд) и сообщаем движку ДО расчёта размеров окна.
+	win.scale = 1
+	if sa, ok := win.eng.(engineScaler); ok {
+		if k := detectScale(win.native); k != 1 {
+			sa.SetScale(k)
+		}
+		win.scale = sa.Scale()
+	}
+
 	// Если корень — widget.Window, синхронизируем параметры:
 	// нативное окно получает размер, заголовок и resizable из XAML,
 	// а widget.Window получает bounds = (0,0)-(w,h) нативного окна.
 	win.syncFromWidgetWindow()
 
-	// Создаём окно с актуальными размерами
-	if err := win.native.Create(win.title, win.w, win.h); err != nil {
+	// Создаём окно ФИЗИЧЕСКОГО размера (логический × scale).
+	pw, ph := win.physicalSize()
+	win.mu.Lock()
+	win.current = image.NewRGBA(image.Rect(0, 0, pw, ph))
+	win.mu.Unlock()
+	if err := win.native.Create(win.title, pw, ph); err != nil {
 		return err
+	}
+
+	// Смена DPI монитора (перенос окна) — перестраиваем масштаб и буферы.
+	if dn, ok := win.native.(dpiChangeNotifier); ok {
+		dn.SetOnDpiChanged(func(k float64) {
+			sa, ok := win.eng.(engineScaler)
+			if !ok || k <= 0 || k == win.scale {
+				return
+			}
+			sa.SetScale(k)
+			win.scale = k
+			npw, nph := win.physicalSize()
+			win.mu.Lock()
+			win.current = image.NewRGBA(image.Rect(0, 0, npw, nph))
+			win.mu.Unlock()
+			win.native.SetSize(npw, nph)
+		})
 	}
 
 	// Применяем скругление углов, если задано до Create.
@@ -166,6 +270,9 @@ func (win *Window) Run() error {
 
 	// Перерисовка по WM_PAINT/Expose из кэша последнего кадра.
 	win.setupExposeRedraw()
+
+	// Активность окна (фокус ОС) → приглушённый заголовок widget.Window.
+	win.setupActivation()
 
 	// Синхронизация локали с раскладкой клавиатуры ОС (Windows/Linux).
 	win.setupLocaleSync()
@@ -245,7 +352,12 @@ func (win *Window) setupWidgetWindow() {
 	}
 
 	// Drag за заголовок → перемещение нативного окна.
+	// dx/dy приходят в логических пикселях (виджет), позиция окна — физическая.
 	ww.OnDragMove = func(dx, dy int) {
+		if win.scale != 1 {
+			dx = int(float64(dx)*win.scale + 0.5)
+			dy = int(float64(dy)*win.scale + 0.5)
+		}
 		x, y := win.native.GetPosition()
 		win.native.SetPosition(x+dx, y+dy)
 	}
@@ -280,26 +392,34 @@ func (win *Window) setupWidgetWindow() {
 // setupInputCallbacks подключает callback'и ввода от нативного окна к движку.
 func (win *Window) setupInputCallbacks() {
 	// ── Resize ───────────────────────────────────────────────────────────────
+	// newW/newH — ФИЗИЧЕСКИЕ пиксели от ОС; движок и виджеты живут
+	// в логических (округление по масштабу).
 	win.native.SetOnResize(func(newW, newH int) {
 		if newW <= 0 || newH <= 0 {
 			return
 		}
-		win.w = newW
-		win.h = newH
-
-		// Пересоздаём буфер
-		win.mu.Lock()
-		win.current = image.NewRGBA(image.Rect(0, 0, newW, newH))
-		win.mu.Unlock()
-
-		// Обновляем размер canvas движка
-		if rs, ok := win.eng.(interface{ SetResolution(w, h int) }); ok {
-			rs.SetResolution(newW, newH)
+		lw, lh := newW, newH
+		if win.scale != 1 && win.scale > 0 {
+			lw = int(float64(newW)/win.scale + 0.5)
+			lh = int(float64(newH)/win.scale + 0.5)
 		}
+		win.w = lw
+		win.h = lh
+
+		// Обновляем размер canvas движка (логический).
+		if rs, ok := win.eng.(interface{ SetResolution(w, h int) }); ok {
+			rs.SetResolution(lw, lh)
+		}
+
+		// Пересоздаём буфер под физический размер кадра.
+		pw, ph := win.physicalSize()
+		win.mu.Lock()
+		win.current = image.NewRGBA(image.Rect(0, 0, pw, ph))
+		win.mu.Unlock()
 
 		// Обновляем bounds корневого виджета (widget.Window заполняет всё окно)
 		if root := win.eng.Root(); root != nil {
-			root.SetBounds(image.Rect(0, 0, newW, newH))
+			root.SetBounds(image.Rect(0, 0, lw, lh))
 		}
 	})
 

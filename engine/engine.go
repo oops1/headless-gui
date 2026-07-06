@@ -5,6 +5,7 @@ import (
 	"image"
 	_ "image/jpeg" // декодер JPEG для SetBackgroundFile
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,7 +74,14 @@ type Engine struct {
 	quit     chan struct{}
 	done     chan struct{}
 
-	fps      int          // целевой FPS, 1–120
+	fps     int     // целевой FPS, 1–120
+	userDPI float64 // пользовательский DPI шрифтов (без учёта HiDPI-масштаба)
+
+	// scaleBits — текущий HiDPI-масштаб (math.Float64bits) для lock-free
+	// чтения из InvalidateRect/toLogical: они вызываются из сеттеров
+	// виджетов, в т.ч. когда движок уже держит e.mu (например, root.SetBounds
+	// из SetResolution) — брать e.mu там нельзя (RWMutex нереентерабелен).
+	scaleBits atomic.Uint64
 	saveDir  string       // если не пусто — сохранять PNG в эту директорию
 	saveCh   chan saveJob // канал для асинхронного сохранения
 	saveDone chan struct{} // закрывается, когда saveWorker завершил запись всех PNG
@@ -111,9 +119,11 @@ func New(width, height, fps int) *Engine {
 		quit:      make(chan struct{}),
 		done:      make(chan struct{}),
 		fps:       fps,
+		userDPI:   DefaultDPI,
 		ttEnabled: true,
 		ttDelay:   600 * time.Millisecond,
 	}
+	e.scaleBits.Store(math.Float64bits(1))
 	// Рендер по запросу — режим по умолчанию (v3.5): виджеты самоинвалидируются
 	// (Base.Invalidate, авто-damage в SetBounds/сеттерах), события и слой данных
 	// инвалидируют через движок. Кадры рендерятся только при изменениях UI,
@@ -171,7 +181,7 @@ func (e *Engine) SetRoot(w widget.Widget) {
 	// Готовим виджет ДО публикации указателя: рендер-горутина видит либо
 	// старый root, либо полностью подготовленный новый (лейаут + capture).
 	e.mu.RLock()
-	cw, ch := e.canvas.W, e.canvas.H
+	cw, ch := e.canvas.LogicalSize()
 	e.mu.RUnlock()
 	if w.Bounds().Empty() {
 		w.SetBounds(image.Rect(0, 0, cw, ch))
@@ -188,7 +198,7 @@ func (e *Engine) SetRoot(w widget.Widget) {
 // Используйте, когда XAML задал размеры, но вам нужен fullscreen.
 func (e *Engine) SetRootFullCanvas(w widget.Widget) {
 	e.mu.RLock()
-	cw, ch := e.canvas.W, e.canvas.H
+	cw, ch := e.canvas.LogicalSize()
 	e.mu.RUnlock()
 	w.SetBounds(image.Rect(0, 0, cw, ch))
 	injectCaptureManager(w, e)
@@ -217,31 +227,69 @@ func (e *Engine) Root() widget.Widget {
 
 // Frames возвращает канал только для чтения.
 // Каждый кадр в канале содержит только изменившиеся тайлы.
+// Тайлы — в ФИЗИЧЕСКИХ пикселях (логические × Scale).
 // Канал закрывается после Stop().
 func (e *Engine) Frames() <-chan output.Frame {
 	return e.frames
 }
 
-// CanvasSize возвращает размер холста в пикселях.
+// CanvasSize возвращает ЛОГИЧЕСКИЙ размер холста (в нём живут виджеты).
+// При Scale == 1 совпадает с физическим.
 func (e *Engine) CanvasSize() (w, h int) {
+	return e.canvas.LogicalSize()
+}
+
+// PhysicalSize возвращает ФИЗИЧЕСКИЙ размер буферов кадра
+// (размер тайлов в Frames и нативного окна на HiDPI-мониторе).
+func (e *Engine) PhysicalSize() (w, h int) {
 	return e.canvas.W, e.canvas.H
 }
 
-// SetResolution изменяет разрешение холста.
+// Scale возвращает текущий HiDPI-масштаб (1.0 по умолчанию). Lock-free.
+func (e *Engine) Scale() float64 {
+	return math.Float64frombits(e.scaleBits.Load())
+}
+
+// SetScale задаёт HiDPI-масштаб: логический размер холста сохраняется,
+// физические буферы пересоздаются (логический × k), шрифты перерендериваются
+// в физическом DPI. События мыши принимаются в физических координатах и
+// переводятся в логические автоматически.
+func (e *Engine) SetScale(k float64) {
+	if k <= 0 {
+		k = 1
+	}
+	e.frameMu.Lock() // буферы меняются — ждём конца кадра
+	defer e.frameMu.Unlock()
+	e.mu.Lock()
+	if e.canvas.scale == k {
+		e.mu.Unlock()
+		return
+	}
+	lw, lh := e.canvas.LogicalSize()
+	e.canvas = e.canvas.cloneForSize(lw, lh, k, e.bgSrc)
+	e.canvas.setDPIAll(e.userDPI * k)
+	e.scaleBits.Store(math.Float64bits(k))
+	e.mu.Unlock()
+	e.Invalidate()
+}
+
+// SetResolution изменяет ЛОГИЧЕСКОЕ разрешение холста (масштаб сохраняется).
 // Вызывать до Start() или когда движок остановлен.
 // Если был установлен фон, он автоматически перемасштабируется под новый размер.
-// Корневой виджет получает обновлённые bounds.
+// Корневой виджет получает обновлённые bounds. Зарегистрированные шрифты
+// и fallback-цепочка сохраняются.
 func (e *Engine) SetResolution(width, height int) {
 	e.frameMu.Lock() // ждём конца текущего кадра — буферы меняются
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.canvas = newCanvas(width, height, e.fontCache)
-	if e.bgSrc != nil {
-		e.canvas.setBackground(e.bgSrc)
-	}
-	if e.root != nil {
-		e.root.SetBounds(image.Rect(0, 0, width, height))
+	e.canvas = e.canvas.cloneForSize(width, height, e.canvas.scale, e.bgSrc)
+	root := e.root
+	e.mu.Unlock()
+	// ВАЖНО: SetBounds — вне e.mu. Изменение bounds триггерит авто-damage
+	// (notifyRectChanged → InvalidateRect); повторный захват e.mu на том же
+	// потоке дал бы дедлок (см. scaleBits).
+	if root != nil {
+		root.SetBounds(image.Rect(0, 0, width, height))
 	}
 	widget.SetScreenBounds(width, height)
 	e.Invalidate()
@@ -388,12 +436,14 @@ func (e *Engine) RegisterFallbackFontFile(path string) error {
 	return nil
 }
 
-// SetDPI изменяет DPI для рендеринга шрифтов (по умолчанию 96).
-// Вызывать до Start(). Сбрасывает кэш шрифтов.
+// SetDPI изменяет пользовательский DPI для рендеринга шрифтов (по умолчанию
+// 96). Итоговый DPI растеризации = DPI × HiDPI-масштаб. Применяется ко всем
+// шрифтам (default, именованные, fallback), кэши сбрасываются.
 func (e *Engine) SetDPI(dpi float64) {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
-	e.fontCache.SetDPI(dpi)
+	e.userDPI = dpi
+	e.canvas.setDPIAll(dpi * e.canvas.scale)
 	e.Invalidate()
 }
 
@@ -449,9 +499,9 @@ func (e *Engine) Stop() {
 // Диалог центрируется на экране. Весь ввод ограничивается модальным виджетом.
 // CaptureManager инжектится автоматически.
 func (e *Engine) ShowModal(m widget.ModalWidget) {
-	// Центрируем диалог
+	// Центрируем диалог (в логических координатах)
 	e.mu.RLock()
-	cw, ch := e.canvas.W, e.canvas.H
+	cw, ch := e.canvas.LogicalSize()
 	e.mu.RUnlock()
 	b := m.Bounds()
 	cx := (cw - b.Dx()) / 2
@@ -622,10 +672,11 @@ func (e *Engine) renderFrame() output.Frame {
 		if !m.IsModal() {
 			continue
 		}
-		// Затемнение фона
+		// Затемнение фона (логические координаты)
 		dim := m.DimColor()
 		if dim.A > 0 {
-			canvas.FillRectAlpha(0, 0, canvas.W, canvas.H, dim)
+			lw, lh := canvas.LogicalSize()
+			canvas.FillRectAlpha(0, 0, lw, lh, dim)
 		}
 		// Отрисовка модального виджета
 		m.Draw(canvas)
