@@ -279,6 +279,9 @@ func (c *Canvas) FillRectAlpha(x, y, w, h int, col color.RGBA) {
 }
 
 // FillRoundRect заливает прямоугольник со скруглёнными углами радиуса r.
+// Углы сглажены (AA-маски, см. aa.go); прямоугольное тело заливается
+// быстрым FillRect. Полупрозрачные цвета идут по старому не-AA пути,
+// чтобы не смешивать семантики Src (тело) и Over (углы).
 func (c *Canvas) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
 	if r <= 0 {
 		c.FillRect(x, y, w, h, col)
@@ -290,9 +293,21 @@ func (c *Canvas) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
 	if r > h/2 {
 		r = h / 2
 	}
-	// Центральная полоса без скруглений
+	if col.A < 255 {
+		c.fillRoundRectLegacy(x, y, w, h, r, col)
+		return
+	}
+	// Тело: средняя полоса на всю ширину + верх/низ между углами.
 	c.FillRect(x, y+r, w, h-2*r, col)
-	// Верхняя и нижняя полосы со скруглёнными углами
+	c.FillRect(x+r, y, w-2*r, r, col)
+	c.FillRect(x+r, y+h-r, w-2*r, r, col)
+	// Сглаженные углы.
+	c.drawCorners(cornersFor(r, cornerFill), x, y, w, h, r, col)
+}
+
+// fillRoundRectLegacy — прежняя ступенчатая заливка (для A<255).
+func (c *Canvas) fillRoundRectLegacy(x, y, w, h, r int, col color.RGBA) {
+	c.FillRect(x, y+r, w, h-2*r, col)
 	rf := float64(r)
 	for i := 0; i < r; i++ {
 		dy := float64(r - i - 1)
@@ -306,6 +321,7 @@ func (c *Canvas) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
 }
 
 // DrawRoundBorder рисует 1-пиксельный контур со скруглёнными углами.
+// Дуги углов сглажены (AA-маски четверть-кольца, см. aa.go).
 func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
 	if r <= 0 {
 		c.DrawBorder(x, y, w, h, col)
@@ -322,19 +338,24 @@ func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
 	c.DrawHLine(x+r, y+h-1, w-2*r, col) // низ
 	c.DrawVLine(x, y+r, h-2*r, col)     // лево
 	c.DrawVLine(x+w-1, y+r, h-2*r, col) // право
-	// Углы: четверти окружности
+	if col.A < 255 {
+		c.drawRoundBorderCornersLegacy(x, y, w, h, r, col)
+		return
+	}
+	// Сглаженные дуги углов.
+	c.drawCorners(cornersFor(r, cornerRing), x, y, w, h, r, col)
+}
+
+// drawRoundBorderCornersLegacy — прежние ступенчатые дуги (для A<255).
+func (c *Canvas) drawRoundBorderCornersLegacy(x, y, w, h, r int, col color.RGBA) {
 	rf := float64(r)
 	for i := 0; i <= r; i++ {
 		dy := float64(r - i)
 		dx := int(math.Round(math.Sqrt(rf*rf - dy*dy)))
-		// Верхний левый угол
-		c.SetPixel(x+r-dx, y+i, col)
-		// Верхний правый угол
-		c.SetPixel(x+w-1-r+dx, y+i, col)
-		// Нижний левый угол
-		c.SetPixel(x+r-dx, y+h-1-i, col)
-		// Нижний правый угол
-		c.SetPixel(x+w-1-r+dx, y+h-1-i, col)
+		c.SetPixel(x+r-dx, y+i, col)       // верхний левый
+		c.SetPixel(x+w-1-r+dx, y+i, col)   // верхний правый
+		c.SetPixel(x+r-dx, y+h-1-i, col)   // нижний левый
+		c.SetPixel(x+w-1-r+dx, y+h-1-i, col) // нижний правый
 	}
 }
 
