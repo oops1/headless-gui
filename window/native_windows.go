@@ -258,6 +258,7 @@ type Win32Window struct {
 
 	// Callbacks
 	onResize      func(w, h int)
+	onExpose      func(r image.Rectangle)
 	onClose       func() bool
 	onMouseMove   func(x, y int)
 	onMouseButton func(x, y, button int, pressed bool)
@@ -484,10 +485,12 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 			dst[di+3] = srcRow[si+3] // A
 		}
 	}
-	w.mu.Unlock()
+	// Мьютекс удерживается до конца StretchDIBits: блит может прийти
+	// одновременно из framePump и из WM_PAINT (event loop).
 
 	hdc, _, _ := procGetDC.Call(uintptr(w.hwnd))
 	if hdc == 0 {
+		w.mu.Unlock()
 		return
 	}
 	defer procReleaseDC.Call(uintptr(w.hwnd), hdc)
@@ -511,7 +514,6 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	// Для bottom-up DIB YSrc отсчитывается от нижнего края изображения.
 	ySrc := height - dirty.Max.Y
 
-	w.mu.Lock()
 	procStretchDIBits.Call(
 		hdc,
 		uintptr(dirty.Min.X), uintptr(dirty.Min.Y), uintptr(dw), uintptr(dh), // dst rect
@@ -523,6 +525,9 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	)
 	w.mu.Unlock()
 }
+
+// SetOnExpose — колбэк перерисовки области по WM_PAINT (см. exposeNotifier).
+func (w *Win32Window) SetOnExpose(fn func(r image.Rectangle)) { w.onExpose = fn }
 
 // Callbacks
 // DWM-атрибут предпочтения формы углов (Windows 11+).
@@ -662,9 +667,18 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmPaint:
+		// BeginPaint валидирует область и сообщает повреждённый прямоугольник;
+		// содержимое восстанавливается блитом из кэша кадра (см. window.go).
 		var ps paintstruct
 		procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
 		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+		if w.onExpose != nil {
+			r := image.Rect(int(ps.RcPaint.Left), int(ps.RcPaint.Top),
+				int(ps.RcPaint.Right), int(ps.RcPaint.Bottom))
+			if !r.Empty() {
+				w.onExpose(r)
+			}
+		}
 		return 0
 
 	case wmSetcursor:
