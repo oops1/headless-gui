@@ -67,7 +67,15 @@ type x11Screen struct {
 	RootVisual    uint32
 }
 
+// NewNativeWindow выбирает бэкенд: Wayland при доступном композиторе
+// (WAYLAND_DISPLAY + живой сокет), иначе X11 (в т.ч. XWayland).
+// HEADLESS_GUI_X11=1 — принудительный X11.
 func NewNativeWindow() NativeWindow {
+	if os.Getenv("HEADLESS_GUI_X11") != "1" {
+		if ww := newWaylandWindow(); ww != nil {
+			return ww
+		}
+	}
 	return &X11Window{}
 }
 

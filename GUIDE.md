@@ -1354,6 +1354,31 @@ eng.PhysicalSize()      // физический размер кадров/тай
 переносе окна между мониторами; на X11/macOS масштаб задаётся переменной
 окружения `HEADLESS_GUI_SCALE=1.5` (автоопределение — в планах).
 
+### Accessibility (семантическое дерево)
+
+Движок строит семантический снапшот UI — роли, имена, значения и состояния
+всех видимых виджетов:
+
+```go
+tree := eng.AccessibilityTree() // *widget.AccessNode, сериализуем в JSON
+```
+
+Роли встроенных виджетов выводятся автоматически (button, checkbox,
+combobox, textinput, slider, tablist, …); состояния — checked/selected/
+disabled/focused/expanded/modal/inactive. Кастомный виджет может задать
+свою семантику, реализовав `widget.Accessible`:
+
+```go
+func (w *MyWidget) AccessInfo() widget.AccessInfo {
+    return widget.AccessInfo{Role: widget.RoleButton, Name: "Моя кнопка"}
+}
+```
+
+Применения: side-channel семантики в стриминговых сценариях (клиент
+озвучивает UI скринридером), поиск элементов в автотестах по роли/имени.
+Платформенные мосты (UI Automation / AT-SPI / NSAccessibility) — в планах;
+клавиатурная навигация (Tab/Shift+Tab, Enter/Space) работает уже сейчас.
+
 ### Шрифты
 
 В комплекте свободные шрифты Roboto (по умолчанию), Open Sans, Inter. Авто-загрузка
