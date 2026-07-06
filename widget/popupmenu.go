@@ -195,6 +195,7 @@ func (m *PopupMenu) Show(x, y int) {
 	m.popupH = h
 	atomic.StoreInt32(&m.hoverIdx, -1)
 	atomic.StoreInt32(&m.open, 1)
+	notifyUIChanged() // появление overlay-меню (вне bounds виджета)
 }
 
 // ShowBelow открывает popup-меню прямо под указанным виджетом.
@@ -212,7 +213,7 @@ func (m *PopupMenu) ShowRight(w Widget) {
 // Close закрывает меню и все дочерние подменю.
 func (m *PopupMenu) Close() {
 	m.closeChild()
-	atomic.StoreInt32(&m.open, 0)
+	wasOpen := atomic.SwapInt32(&m.open, 0) == 1
 	atomic.StoreInt32(&m.hoverIdx, -1)
 	if m.parent == nil {
 		activePopupMu.Lock()
@@ -220,6 +221,17 @@ func (m *PopupMenu) Close() {
 			activeRootPopup = nil
 		}
 		activePopupMu.Unlock()
+	}
+	if wasOpen {
+		notifyUIChanged() // исчезновение overlay-меню
+	}
+}
+
+// setHoverIdx обновляет hover-пункт меню. Пункты рисуются в overlay вне
+// bounds виджета — при фактическом изменении инвалидируется весь кадр.
+func (m *PopupMenu) setHoverIdx(idx int) {
+	if atomic.SwapInt32(&m.hoverIdx, int32(idx)) != int32(idx) {
+		notifyUIChanged()
 	}
 }
 
@@ -497,14 +509,14 @@ func (m *PopupMenu) OnMouseMove(x, y int) {
 
 	pr := m.popupRect()
 	if !image.Pt(x, y).In(pr) {
-		atomic.StoreInt32(&m.hoverIdx, -1)
+		m.setHoverIdx(-1)
 		return
 	}
 
 	m.mu.RLock()
 	idx := m.itemAtY(y)
 	m.mu.RUnlock()
-	atomic.StoreInt32(&m.hoverIdx, int32(idx))
+	m.setHoverIdx(idx)
 
 	// Если навели на пункт с SubItems — открываем дочернее подменю.
 	if idx >= 0 {
@@ -632,11 +644,11 @@ func (m *PopupMenu) OnKeyEvent(e KeyEvent) {
 
 	case KeyUp:
 		hover = m.prevActiveItem(hover)
-		atomic.StoreInt32(&m.hoverIdx, int32(hover))
+		m.setHoverIdx(hover)
 
 	case KeyDown:
 		hover = m.nextActiveItem(hover)
-		atomic.StoreInt32(&m.hoverIdx, int32(hover))
+		m.setHoverIdx(hover)
 
 	case KeyRight:
 		// Войти в подменю, если у текущего пункта есть SubItems.
@@ -649,7 +661,7 @@ func (m *PopupMenu) OnKeyEvent(e KeyEvent) {
 				// Устанавливаем hover на первый пункт дочернего меню.
 				if m.child != nil {
 					first := m.child.nextActiveItem(-1)
-					atomic.StoreInt32(&m.child.hoverIdx, int32(first))
+					m.child.setHoverIdx(first)
 				}
 			}
 		}
@@ -671,7 +683,7 @@ func (m *PopupMenu) OnKeyEvent(e KeyEvent) {
 					m.openChild(hover)
 					if m.child != nil {
 						first := m.child.nextActiveItem(-1)
-						atomic.StoreInt32(&m.child.hoverIdx, int32(first))
+						m.child.setHoverIdx(first)
 					}
 					return
 				}

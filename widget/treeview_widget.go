@@ -65,6 +65,10 @@ func (a *treeViewDrawAdapter) SetPixel(x, y int, col color.RGBA) {
 type TreeViewWidget struct {
 	Base
 	Tree *treeview.TreeView
+
+	// hoverInside — курсор был над виджетом на прошлом OnMouseMove
+	// (Tree ведёт hover строки внутри и не сообщает об изменениях).
+	hoverInside bool
 }
 
 // NewTreeViewWidget создаёт виджет TreeView.
@@ -103,7 +107,11 @@ func (w *TreeViewWidget) OnMouseButton(e MouseEvent) bool {
 	if e.Pressed {
 		pressed = 1
 	}
-	return w.Tree.OnMouseButton(e.X, e.Y, int(e.Button), pressed)
+	consumed := w.Tree.OnMouseButton(e.X, e.Y, int(e.Button), pressed)
+	if consumed {
+		w.Invalidate() // выбор/разворачивание узла/скролл — рисуются в bounds
+	}
+	return consumed
 }
 
 // OnMouseMove обрабатывает перемещение.
@@ -112,6 +120,13 @@ func (w *TreeViewWidget) OnMouseMove(x, y int) {
 		return
 	}
 	w.Tree.OnMouseMove(x, y)
+	// Tree не сообщает о смене hover-строки — инвалидируем при движении
+	// над виджетом (и один раз при выходе курсора за его пределы).
+	inside := image.Pt(x, y).In(w.Bounds())
+	if inside || w.hoverInside {
+		w.Invalidate()
+	}
+	w.hoverInside = inside
 }
 
 // ─── Keyboard handling ─────────────────────────────────────────────────────
@@ -126,13 +141,20 @@ func (w *TreeViewWidget) OnKeyEvent(e KeyEvent) {
 	ctrl := e.Mod&ModCtrl != 0
 
 	w.Tree.OnKeyEvent(int(e.Code), e.Rune, e.Pressed, shift, ctrl)
+	if e.Pressed {
+		w.Invalidate() // навигация/разворачивание меняют состояние в bounds
+	}
 }
 
 // ─── Focus ─────────────────────────────────────────────────────────────────
 
 // SetFocused реализует Focusable.
 func (w *TreeViewWidget) SetFocused(v bool) {
+	changed := w.Tree.IsFocused() != v
 	w.Tree.SetFocused(v)
+	if changed {
+		w.Invalidate() // рамка фокуса — в bounds
+	}
 }
 
 // IsFocused реализует Focusable.
@@ -145,6 +167,7 @@ func (w *TreeViewWidget) IsFocused() bool {
 // ScrollBy прокручивает TreeView на delta пикселей (для колеса мыши).
 func (w *TreeViewWidget) ScrollBy(delta int) {
 	w.Tree.ScrollBy(delta)
+	w.Invalidate() // Tree не сообщает о клампе — инвалидируем всегда
 }
 
 // ─── Theme ─────────────────────────────────────────────────────────────────

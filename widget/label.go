@@ -76,10 +76,16 @@ func NewWin10Label(text string) *Label {
 }
 
 // SetText потокобезопасно обновляет текст.
+// При фактическом изменении инвалидирует область виджета (авто-damage).
 func (l *Label) SetText(text string) {
 	l.mu.Lock()
+	if l.text == text {
+		l.mu.Unlock()
+		return
+	}
 	l.text = text
 	l.mu.Unlock()
+	l.Invalidate() // вне l.mu
 }
 
 // Text потокобезопасно возвращает текущий текст.
