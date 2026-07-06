@@ -30,6 +30,10 @@ type X11Window struct {
 	seqNum    uint16 // sequence number for requests
 	mu        sync.Mutex
 
+	// blitBuf — переиспользуемый буфер BGRA-конвертации для PutImage
+	// (раньше выделялся полный кадр на каждый блит).
+	blitBuf []byte
+
 	// Callbacks
 	onResize      func(w, h int)
 	onClose       func() bool
@@ -325,23 +329,39 @@ func (w *X11Window) IsMaximized() bool {
 func (w *X11Window) SetCornerRadius(int) {}
 
 func (w *X11Window) BlitRGBA(img *image.RGBA) {
+	if img == nil {
+		return
+	}
+	w.BlitRGBADirty(img, img.Bounds())
+}
+
+// BlitRGBADirty выводит только изменившуюся область dirty: BGRA-конвертация
+// и PutImage ограничены этой областью. Буфер конвертации переиспользуется.
+func (w *X11Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	if w.wid == 0 || img == nil {
 		return
 	}
-	b := img.Bounds()
-	width := b.Dx()
-	height := b.Dy()
+	dirty = dirty.Intersect(img.Bounds())
+	if dirty.Empty() {
+		return
+	}
+	dw := dirty.Dx()
+	dh := dirty.Dy()
 
-	// X11 PutImage: формат ZPixmap, depth=24, BGRA order
-	pixLen := width * height * 4
-	data := make([]byte, pixLen)
+	// X11 PutImage: формат ZPixmap, depth=24, BGRA order.
+	// Буфер содержит только dirty-область (строки шириной dw).
+	pixLen := dw * dh * 4
+	if cap(w.blitBuf) < pixLen {
+		w.blitBuf = make([]byte, pixLen)
+	}
+	data := w.blitBuf[:pixLen]
 
 	src := img.Pix
 	stride := img.Stride
-	for y := 0; y < height; y++ {
-		srcOff := y * stride
-		dstOff := y * width * 4
-		for x := 0; x < width; x++ {
+	for y := 0; y < dh; y++ {
+		srcOff := (dirty.Min.Y+y)*stride + dirty.Min.X*4
+		dstOff := y * dw * 4
+		for x := 0; x < dw; x++ {
 			si := srcOff + x*4
 			di := dstOff + x*4
 			data[di+0] = src[si+2] // B
@@ -351,7 +371,7 @@ func (w *X11Window) BlitRGBA(img *image.RGBA) {
 		}
 	}
 
-	w.x11PutImage(w.wid, w.gcID, width, height, data)
+	w.x11PutImage(w.wid, w.gcID, dirty.Min.X, dirty.Min.Y, dw, dh, data)
 }
 
 // Callbacks
@@ -604,7 +624,7 @@ func (w *X11Window) x11ToggleMaximize(maximize bool) {
 	w.x11Send(sendBuf)
 }
 
-func (w *X11Window) x11PutImage(drawable, gc uint32, width, height int, data []byte) {
+func (w *X11Window) x11PutImage(drawable, gc uint32, dstX, dstY, width, height int, data []byte) {
 	// PutImage opcode=72
 	// Для больших изображений отправляем полосами (X11 max request = 262140 bytes)
 	maxDataPerReq := 262140 - 24 // оставляем место для заголовка
@@ -632,10 +652,10 @@ func (w *X11Window) x11PutImage(drawable, gc uint32, width, height int, data []b
 		binary.LittleEndian.PutUint32(buf[8:12], gc)
 		binary.LittleEndian.PutUint16(buf[12:14], uint16(width))
 		binary.LittleEndian.PutUint16(buf[14:16], uint16(rows))
-		binary.LittleEndian.PutUint16(buf[16:18], 0)              // dst-x
-		binary.LittleEndian.PutUint16(buf[18:20], uint16(yOff))   // dst-y
-		buf[20] = 0                                                // left-pad
-		buf[21] = 24                                               // depth
+		binary.LittleEndian.PutUint16(buf[16:18], uint16(dstX))      // dst-x
+		binary.LittleEndian.PutUint16(buf[18:20], uint16(dstY+yOff)) // dst-y
+		buf[20] = 0                                                  // left-pad
+		buf[21] = 24                                                 // depth
 		// buf[22:24] = padding (0)
 
 		srcOff := yOff * rowBytes

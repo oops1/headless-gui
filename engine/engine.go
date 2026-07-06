@@ -575,7 +575,23 @@ func (e *Engine) renderFrame() output.Frame {
 
 	damage, damageAll := e.consumeDamage()
 
-	canvas.blitBackground()
+	// Частичная перерисовка: в on-demand режиме при InvalidateRect фон и
+	// дерево рисуются только в damage-области (базовый клип канваса). Вне
+	// damage back-буфер хранит прошлый кадр — он совпадает с front, поэтому
+	// и отрисовка, и diff вне damage не нужны (контракт InvalidateRect:
+	// вызывающий заявляет ВСЕ изменившиеся области).
+	partial := e.onDemand.Load() && !damageAll && !damage.Empty()
+	if partial {
+		damage = damage.Intersect(image.Rect(0, 0, canvas.W, canvas.H))
+		if damage.Empty() {
+			return output.Frame{Seq: e.frameSeq.Add(1), Timestamp: time.Now()}
+		}
+		canvas.blitBackgroundIn(damage)
+		canvas.setBaseClip(damage)
+		defer canvas.clearBaseClip()
+	} else {
+		canvas.blitBackground()
+	}
 
 	// Корневое дерево: рисуем root и его overlay-слой (popup/dropdown).
 	// Без этого вызова на канвасе остаётся только blitBackground —
@@ -608,10 +624,10 @@ func (e *Engine) renderFrame() output.Frame {
 	// Всплывающая подсказка (поверх всего, включая модальные диалоги).
 	e.drawTooltip(canvas, root)
 
-	// Diff: в on-demand режиме при частичном повреждении сравниваем только
-	// тайлы, пересекающие заявленную область (контракт InvalidateRect).
+	// Diff: при частичной перерисовке сравниваем только тайлы,
+	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
-	if e.onDemand.Load() && !damageAll && !damage.Empty() {
+	if partial {
 		tiles = canvas.diffAndSyncIn(damage)
 	} else {
 		tiles = canvas.diffAndSync()
