@@ -234,7 +234,8 @@ func (pl *placeList) Draw(ctx DrawContext) {
 		if it.path == cur {
 			fillSelRow(ctx, b.Min.X+6, y, b.Dx()-12, placeRowH-4)
 		}
-		ctx.DrawTextSize(it.title(), b.Min.X+16, y+(placeRowH-18)/2, 11, win10.InputText)
+		title := ellipsizeText(ctx, it.title(), b.Dx()-26, 11)
+		ctx.DrawTextSize(title, b.Min.X+16, y+(placeRowH-18)/2, 11, win10.InputText)
 		y += placeRowH
 	}
 }
@@ -255,6 +256,25 @@ func (pl *placeList) OnMouseButton(e MouseEvent) bool {
 		pl.OnNavigate(path)
 	}
 	return true
+}
+
+// ellipsizeText обрезает строку многоточием так, чтобы она умещалась
+// в maxW пикселей (шрифт default, sizePt).
+func ellipsizeText(ctx DrawContext, s string, maxW int, sizePt float64) string {
+	if maxW <= 0 || ctx.MeasureText(s, sizePt) <= maxW {
+		return s
+	}
+	r := []rune(s)
+	lo, hi := 0, len(r) // максимальный префикс, влезающий с «…»
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if ctx.MeasureText(string(r[:mid])+"…", sizePt) <= maxW {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return string(r[:lo]) + "…"
 }
 
 // fillSelRow — подсветка выбранной строки (тема ListItemSelect); при
@@ -360,7 +380,8 @@ func (ft *fileTable) Draw(ctx DrawContext) {
 			fillSelRow(ctx, b.Min.X+6, y, b.Dx()-12, ftRowH-2)
 		}
 		drawFileIcon(ctx, b.Min.X+14, y+7, e.dir)
-		ctx.DrawTextSize(e.name, b.Min.X+38, y+(ftRowH-16)/2, 11, win10.InputText)
+		name := ellipsizeText(ctx, e.name, sizeX-(b.Min.X+38)-10, 11)
+		ctx.DrawTextSize(name, b.Min.X+38, y+(ftRowH-16)/2, 11, win10.InputText)
 		if !e.dir {
 			ctx.DrawTextSize(humanSize(e.size), sizeX, y+(ftRowH-14)/2, 10, win10.InputPlaceholder)
 		}

@@ -554,7 +554,7 @@ func readDirEntries(dir string, showHidden bool) []fileEntry {
 	out := make([]fileEntry, 0, len(des))
 	for _, de := range des {
 		name := de.Name()
-		if !showHidden && strings.HasPrefix(name, ".") {
+		if !showHidden && (strings.HasPrefix(name, ".") || isHiddenFSEntry(dir, name)) {
 			continue
 		}
 		fe := fileEntry{name: name, dir: de.IsDir()}
