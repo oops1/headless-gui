@@ -267,7 +267,20 @@ func (l *Line) Draw(ctx DrawContext) {
 	if th < 1 {
 		th = 1
 	}
-	drawThickLine(ctx, l.X1, l.Y1, l.X2, l.Y2, th, l.Stroke)
+	// Фигура следует за своими bounds: контейнер (Canvas/Grid/TabItem)
+	// мог сдвинуть виджет — смещаем геометрию на ту же дельту.
+	dx, dy := l.geomDelta()
+	drawThickLine(ctx, l.X1+dx, l.Y1+dy, l.X2+dx, l.Y2+dy, th, l.Stroke)
+}
+
+// geomDelta возвращает смещение bounds относительно «естественных» границ
+// геометрии (нулевое, если виджет не перемещали контейнером).
+func (l *Line) geomDelta() (int, int) {
+	if l.bounds.Empty() {
+		return 0, 0
+	}
+	nat := image.Rect(min(l.X1, l.X2), min(l.Y1, l.Y2), max(l.X1, l.X2)+1, max(l.Y1, l.Y2)+1)
+	return l.bounds.Min.X - nat.Min.X, l.bounds.Min.Y - nat.Min.Y
 }
 
 func (l *Line) ApplyTheme(t *Theme) {}
@@ -287,19 +300,39 @@ func (p *Polygon) Draw(ctx DrawContext) {
 	if len(p.Points) < 2 {
 		return
 	}
+	pts := shiftedPoints(p.Points, p.bounds)
 	if p.Fill.A > 0 {
-		fillPolygon(ctx, p.Points, p.Fill)
+		fillPolygon(ctx, pts, p.Fill)
 	}
 	if p.Stroke.A > 0 {
 		th := p.StrokeThickness
 		if th < 1 {
 			th = 1
 		}
-		for i := 0; i < len(p.Points); i++ {
-			a, b := p.Points[i], p.Points[(i+1)%len(p.Points)]
+		for i := 0; i < len(pts); i++ {
+			a, b := pts[i], pts[(i+1)%len(pts)]
 			drawThickLine(ctx, a.X, a.Y, b.X, b.Y, th, p.Stroke)
 		}
 	}
+}
+
+// shiftedPoints смещает точки фигуры на дельту между текущими bounds и
+// «естественными» границами геометрии: фигура следует за контейнером.
+// При нулевой дельте возвращает исходный срез без копирования.
+func shiftedPoints(pts []image.Point, bounds image.Rectangle) []image.Point {
+	if bounds.Empty() || len(pts) == 0 {
+		return pts
+	}
+	nat := pointsBounds(pts)
+	dx, dy := bounds.Min.X-nat.Min.X, bounds.Min.Y-nat.Min.Y
+	if dx == 0 && dy == 0 {
+		return pts
+	}
+	out := make([]image.Point, len(pts))
+	for i, p := range pts {
+		out[i] = image.Pt(p.X+dx, p.Y+dy)
+	}
+	return out
 }
 
 func (p *Polygon) ApplyTheme(t *Theme) {}
@@ -320,8 +353,9 @@ func (p *Polyline) Draw(ctx DrawContext) {
 	if th < 1 {
 		th = 1
 	}
-	for i := 0; i+1 < len(p.Points); i++ {
-		a, b := p.Points[i], p.Points[i+1]
+	pts := shiftedPoints(p.Points, p.bounds)
+	for i := 0; i+1 < len(pts); i++ {
+		a, b := pts[i], pts[i+1]
 		drawThickLine(ctx, a.X, a.Y, b.X, b.Y, th, p.Stroke)
 	}
 }
