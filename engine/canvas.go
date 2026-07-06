@@ -14,10 +14,11 @@ import (
 	"image/color"
 	stdraw "image/draw"
 	"math"
+	"runtime"
 	"sort"
+	"sync"
 
 	"golang.org/x/image/draw"
-	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 
 	"github.com/oops1/headless-gui/v3/output"
@@ -34,6 +35,8 @@ type Canvas struct {
 	fallbacks  []*FontCache          // fallback-шрифты для отсутствующих глифов (BUG-2)
 	clip       image.Rectangle       // активная область отсечения
 	hasClip    bool                  // включено ли отсечение
+	baseClip   image.Rectangle       // базовый клип кадра (damage-область частичной перерисовки)
+	hasBase    bool                  // активен ли базовый клип
 	scaleTmp   *image.RGBA           // переиспользуемый буфер для DrawImageScaled
 	W, H       int
 	tilesX     int
@@ -163,16 +166,75 @@ func (c *Canvas) blitBackground() {
 	}
 }
 
+// blitBackgroundIn — как blitBackground, но только в области r (частичная
+// перерисовка): вне r back-буфер сохраняет прошлый кадр.
+func (c *Canvas) blitBackgroundIn(r image.Rectangle) {
+	r = r.Intersect(c.back.Bounds())
+	if r.Empty() {
+		return
+	}
+	if c.bgImage != nil {
+		// bgImage создаётся размером с холст — stride совпадает с back.
+		rowBytes := r.Dx() * 4
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			off := c.back.PixOffset(r.Min.X, y)
+			copy(c.back.Pix[off:off+rowBytes], c.bgImage.Pix[off:off+rowBytes])
+		}
+		return
+	}
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		off := c.back.PixOffset(r.Min.X, y)
+		row := c.back.Pix[off : off+r.Dx()*4]
+		for i := 0; i < len(row); i += 4 {
+			row[i+0] = 0
+			row[i+1] = 0
+			row[i+2] = 0
+			row[i+3] = 255
+		}
+	}
+}
+
 // ─── Clip ───────────────────────────────────────────────────────────────────
 
 // SetClip ограничивает все последующие операции рисования прямоугольником r.
+// При активном базовом клипе (частичная перерисовка) итоговая область —
+// пересечение r с базовым клипом: виджеты не могут рисовать вне damage.
 func (c *Canvas) SetClip(r image.Rectangle) {
+	if c.hasBase {
+		// hasClip остаётся true даже при пустом пересечении — рисовать
+		// вне damage нельзя (пустой clip == «не рисовать ничего»).
+		c.clip = r.Intersect(c.baseClip)
+		c.hasClip = true
+		return
+	}
 	c.clip = r.Intersect(c.back.Bounds())
 	c.hasClip = !c.clip.Empty()
 }
 
-// ClearClip снимает ограничение области рисования.
+// ClearClip снимает ограничение области рисования (до базового клипа,
+// если идёт частичная перерисовка).
 func (c *Canvas) ClearClip() {
+	if c.hasBase {
+		c.clip = c.baseClip
+		c.hasClip = true
+		return
+	}
+	c.hasClip = false
+}
+
+// setBaseClip включает базовый клип кадра: вся отрисовка (включая
+// SetClip/ClearClip виджетов) ограничивается прямоугольником r.
+// Используется движком для частичной перерисовки по damage-области.
+func (c *Canvas) setBaseClip(r image.Rectangle) {
+	c.baseClip = r.Intersect(c.back.Bounds())
+	c.hasBase = true
+	c.clip = c.baseClip
+	c.hasClip = true
+}
+
+// clearBaseClip выключает базовый клип (конец частичного кадра).
+func (c *Canvas) clearBaseClip() {
+	c.hasBase = false
 	c.hasClip = false
 }
 
@@ -190,30 +252,6 @@ func (c *Canvas) clampRect(r image.Rectangle) image.Rectangle {
 		return r.Intersect(c.clip)
 	}
 	return r.Intersect(c.back.Bounds())
-}
-
-// dstFor возвращает destination для font.Drawer: если clip активен —
-// обёртку, ограничивающую SetRGBA до области clip; иначе back напрямую.
-func (c *Canvas) dstFor() stdraw.Image {
-	if c.hasClip {
-		return &clippedRGBA{img: c.back, clip: c.clip}
-	}
-	return c.back
-}
-
-// clippedRGBA — draw.Image-обёртка над *image.RGBA с ограничением по clip.
-type clippedRGBA struct {
-	img  *image.RGBA
-	clip image.Rectangle
-}
-
-func (w *clippedRGBA) ColorModel() color.Model { return w.img.ColorModel() }
-func (w *clippedRGBA) Bounds() image.Rectangle { return w.clip }
-func (w *clippedRGBA) At(x, y int) color.Color { return w.img.At(x, y) }
-func (w *clippedRGBA) Set(x, y int, col color.Color) {
-	if image.Pt(x, y).In(w.clip) {
-		w.img.Set(x, y, col)
-	}
 }
 
 // ─── DrawContext ────────────────────────────────────────────────────────────
@@ -323,48 +361,101 @@ func (c *Canvas) DrawTextFont(text string, x, y int, sizePt float64, fontName st
 }
 
 func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt float64, col color.RGBA) {
-	// Быстрый путь: нет fallback-шрифтов — рисуем строку одним вызовом.
-	if len(c.fallbacks) == 0 {
-		face := fc.Face(sizePt)
-		ascent := face.Metrics().Ascent.Round()
-		d := font.Drawer{
-			Dst:  c.dstFor(),
-			Src:  &image.Uniform{C: col},
-			Face: face,
-			Dot:  fixed.P(x, y+ascent),
+	// Обе ветки блиттируют кэшированные альфа-маски глифов (см. FontCache.Glyph)
+	// вместо повторной растеризации контуров через font.Drawer.
+	ascent, descent := fc.vMetrics(sizePt)
+	baseline := y + ascent
+
+	// Вертикальный отсев: строка целиком вне клипа — не итерируем руны вовсе
+	// (важно при частичной перерисовке, когда клип — небольшая damage-область).
+	// Запас 4px на глифы, выходящие за ascent/descent (акценты и т.п.).
+	if c.hasClip {
+		if y-4 >= c.clip.Max.Y || y+ascent+descent+4 <= c.clip.Min.Y {
+			return
 		}
-		d.DrawString(text)
+	}
+
+	// Быстрый путь: нет fallback-шрифтов — один шрифт, с кернингом
+	// (поведение прежнего font.Drawer.DrawString; отсутствующий глиф
+	// пропускается без продвижения пера — как делал Drawer с opentype).
+	if len(c.fallbacks) == 0 {
+		pen := fixed.I(x)
+		prev := rune(-1)
+		for _, r := range text {
+			if prev >= 0 {
+				pen += fc.Kern(sizePt, prev, r)
+			}
+			g := fc.Glyph(sizePt, r)
+			if !g.ok {
+				continue
+			}
+			c.drawGlyphMask(g, pen.Round()+g.offX, baseline+g.offY, col)
+			pen += g.advance
+			prev = r
+		}
 		return
 	}
 
-	// Fallback-путь: рисуем по рунам, выбирая шрифт с нужным глифом.
-	// Baseline берём от основного шрифта, чтобы все руны стояли на одной линии.
-	dst := c.dstFor()
-	src := &image.Uniform{C: col}
-	primaryFace := fc.Face(sizePt)
-	baseY := fixed.I(y + primaryFace.Metrics().Ascent.Round())
-	penX := fixed.I(x)
+	// Fallback-путь: по рунам, выбирая шрифт с нужным глифом.
+	// Baseline от основного шрифта, кернинг не применяется (прежнее поведение).
+	pen := fixed.I(x)
 	for _, r := range text {
 		chosen, found := c.fcForRune(fc, r)
-		face := chosen.Face(sizePt)
-		if found {
-			d := font.Drawer{
-				Dst:  dst,
-				Src:  src,
-				Face: face,
-				Dot:  fixed.Point26_6{X: penX, Y: baseY},
-			}
-			d.DrawString(string(r))
+		g := chosen.Glyph(sizePt, r)
+		if found && g.ok {
+			c.drawGlyphMask(g, pen.Round()+g.offX, baseline+g.offY, col)
 		}
 		// Отсутствующий глиф не рисуем (без .notdef-квадрата), но сохраняем
 		// интервал по ширине пробела, чтобы текст не «слипался».
-		adv, ok := face.GlyphAdvance(r)
-		if !ok || !found {
-			if sp, ok2 := primaryFace.GlyphAdvance(' '); ok2 {
-				adv = sp
+		adv := g.advance
+		if !found || !g.ok {
+			if sp := fc.Glyph(sizePt, ' '); sp.ok {
+				adv = sp.advance
 			}
 		}
-		penX += adv
+		pen += adv
+	}
+}
+
+// drawGlyphMask альфа-блендит маску глифа цветом col в back-буфер (Over,
+// premultiplied — как image/draw для font.Drawer). Учитывает clip.
+// (gx, gy) — позиция левого верхнего угла маски на холсте.
+func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
+	if g.mask == nil {
+		return
+	}
+	mw, mh := g.mask.Rect.Dx(), g.mask.Rect.Dy()
+	r := c.clampRect(image.Rect(gx, gy, gx+mw, gy+mh))
+	if r.Empty() {
+		return
+	}
+	sr := uint32(col.R) * 0x101 // 16-бит premultiplied компоненты
+	sg := uint32(col.G) * 0x101
+	sb := uint32(col.B) * 0x101
+	sa := uint32(col.A) * 0x101
+	const m16 = 1<<16 - 1
+	mask := g.mask.Pix
+	mStride := g.mask.Stride
+	dst := c.back.Pix
+	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
+		mRow := (yy - gy) * mStride
+		dOff := c.back.PixOffset(r.Min.X, yy)
+		for xx := r.Min.X; xx < r.Max.X; xx++ {
+			ma := uint32(mask[mRow+(xx-gx)])
+			if ma == 0 {
+				dOff += 4
+				continue
+			}
+			ma |= ma << 8 // 0..0xffff
+			a := sa * ma / m16
+			inv := m16 - a
+			p := dst[dOff : dOff+4 : dOff+4]
+			p[0] = uint8((uint32(p[0])*0x101*inv/m16 + sr*ma/m16) >> 8)
+			p[1] = uint8((uint32(p[1])*0x101*inv/m16 + sg*ma/m16) >> 8)
+			p[2] = uint8((uint32(p[2])*0x101*inv/m16 + sb*ma/m16) >> 8)
+			p[3] = uint8((uint32(p[3])*0x101*inv/m16 + sa*ma/m16) >> 8)
+			dOff += 4
+		}
 	}
 }
 
@@ -500,12 +591,66 @@ func (c *Canvas) diffAndSyncIn(region image.Rectangle) []output.DirtyTile {
 }
 
 // diffTiles сравнивает тайлы в диапазоне индексов [tx0..tx1]×[ty0..ty1].
+// При достаточном объёме работа распараллеливается по рядам тайлов: каждый
+// воркер обрабатывает непересекающийся диапазон памяти (сравнение, извлечение
+// и синхронизация front — всё в границах своих рядов), поэтому гонок нет.
 func (c *Canvas) diffTiles(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
+	if ty1 >= c.tilesY {
+		ty1 = c.tilesY - 1
+	}
+	if tx1 >= c.tilesX {
+		tx1 = c.tilesX - 1
+	}
+	if ty0 > ty1 || tx0 > tx1 {
+		return nil
+	}
+
+	rows := ty1 - ty0 + 1
+	total := rows * (tx1 - tx0 + 1)
+	workers := runtime.GOMAXPROCS(0)
+	if workers > rows {
+		workers = rows
+	}
+	// Порог: параллелить только заметный объём — сравнение одного тайла
+	// это ~16 КБ memcmp, на мелких диффах горутины дороже выигрыша.
+	if workers <= 1 || total < 64 {
+		return c.diffTileRows(tx0, ty0, tx1, ty1)
+	}
+
+	results := make([][]output.DirtyTile, workers)
+	var wg sync.WaitGroup
+	chunk := (rows + workers - 1) / workers
+	for i := 0; i < workers; i++ {
+		r0 := ty0 + i*chunk
+		r1 := r0 + chunk - 1
+		if r1 > ty1 {
+			r1 = ty1
+		}
+		if r0 > r1 {
+			break
+		}
+		wg.Add(1)
+		go func(idx, a, b int) {
+			defer wg.Done()
+			results[idx] = c.diffTileRows(tx0, a, tx1, b)
+		}(i, r0, r1)
+	}
+	wg.Wait()
+
+	var tiles []output.DirtyTile
+	for _, part := range results {
+		tiles = append(tiles, part...)
+	}
+	return tiles
+}
+
+// diffTileRows — последовательный diff тайлов в диапазоне рядов [ty0..ty1].
+func (c *Canvas) diffTileRows(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
 	ts := output.TileSize
 	var tiles []output.DirtyTile
 
-	for ty := ty0; ty <= ty1 && ty < c.tilesY; ty++ {
-		for tx := tx0; tx <= tx1 && tx < c.tilesX; tx++ {
+	for ty := ty0; ty <= ty1; ty++ {
+		for tx := tx0; tx <= tx1; tx++ {
 			px := tx * ts
 			py := ty * ts
 			pw := min(ts, c.W-px)
