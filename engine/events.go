@@ -186,9 +186,23 @@ func (e *Engine) tabCycle(root widget.Widget, reverse bool) {
 	e.setFocusInvalidating(all[next])
 }
 
-// CursorAt возвращает форму курсора для точки (x, y): курсор самого глубокого
-// виджета под точкой, реализующего widget.CursorProvider (иначе — стрелка).
+// toLogical переводит физические координаты события (пиксели окна/кадра)
+// в логические координаты виджетов (HiDPI). При Scale == 1 тождественно.
+func (e *Engine) toLogical(x, y int) (int, int) {
+	e.mu.RLock()
+	k := e.canvas.scale
+	e.mu.RUnlock()
+	if k == 1 {
+		return x, y
+	}
+	return int(float64(x) / k), int(float64(y) / k)
+}
+
+// CursorAt возвращает форму курсора для точки (x, y — физические пиксели):
+// курсор самого глубокого виджета под точкой, реализующего
+// widget.CursorProvider (иначе — стрелка).
 func (e *Engine) CursorAt(x, y int) widget.Cursor {
+	x, y = e.toLogical(x, y)
 	var disp widget.Widget
 	if m := e.topModal(); m != nil {
 		disp = m
@@ -226,6 +240,8 @@ func (e *Engine) CursorAt(x, y int) widget.Cursor {
 // SetBounds (авто-инвалидация old∪new). Кадры рендерятся только когда картинка
 // действительно меняется.
 func (e *Engine) SendMouseMove(x, y int) {
+	x, y = e.toLogical(x, y)
+
 	// Если на экране висит подсказка — стираем её (движение мыши сбрасывает
 	// таймер, следующий кадр рисуется без плашки).
 	e.invalidateShownTooltip()
@@ -261,6 +277,8 @@ func (e *Engine) SendMouseMove(x, y int) {
 // Иначе: проверяем, хочет ли какой-либо предок захватить мышь (WantsCapture),
 // затем передаём событие самому верхнему виджету под курсором.
 func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool) {
+	x, y = e.toLogical(x, y)
+
 	// Клик оставляет ПОЛНУЮ инвалидацию сознательно: он может открыть/закрыть
 	// overlay (dropdown, меню), сместить фокус, выполнить команду — задеть
 	// произвольные области. Клики редки, полный кадр здесь дёшев и надёжен.

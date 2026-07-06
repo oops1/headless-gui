@@ -126,15 +126,16 @@ func (e *Engine) drawTooltipBox(c *Canvas, text string, mx, my int) {
 	bw := tw + padX*2
 	bh := 13 + padY*2
 
+	lw, lh := c.LogicalSize()
 	x := mx + 12
 	y := my + 20
-	if x+bw > c.W {
-		x = c.W - bw
+	if x+bw > lw {
+		x = lw - bw
 	}
 	if x < 0 {
 		x = 0
 	}
-	if y+bh > c.H {
+	if y+bh > lh {
 		y = my - bh - 6 // показываем над курсором, если снизу не помещается
 	}
 	if y < 0 {

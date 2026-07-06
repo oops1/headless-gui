@@ -157,30 +157,38 @@ func ellipsePath(z *vector.Rasterizer, cx, cy, rx, ry, offX, offY float32) {
 }
 
 // FillEllipseAA рисует сглаженный залитый эллипс с центром (cx, cy).
+// Координаты логические; при HiDPI скейлятся здесь.
 func (c *Canvas) FillEllipseAA(cx, cy, rx, ry int, col color.RGBA) {
 	if rx <= 0 || ry <= 0 {
 		return
 	}
-	bx, by := cx-rx-1, cy-ry-1
-	bw, bh := rx*2+3, ry*2+3
+	k := c.scale
+	fcx, fcy := (float64(cx)+0.5)*k, (float64(cy)+0.5)*k
+	frx, fry := float64(rx)*k, float64(ry)*k
+	bx, by := int(fcx-frx)-1, int(fcy-fry)-1
+	bw, bh := int(frx*2)+3, int(fry*2)+3
 	c.fillPath(bx, by, bw, bh, col, func(z *vector.Rasterizer, ox, oy float32) {
-		ellipsePath(z, float32(cx)+0.5, float32(cy)+0.5, float32(rx), float32(ry), ox, oy)
+		ellipsePath(z, float32(fcx), float32(fcy), float32(frx), float32(fry), ox, oy)
 	})
 }
 
-// StrokeEllipseAA рисует сглаженный контур эллипса толщиной thickness.
+// StrokeEllipseAA рисует сглаженный контур эллипса толщиной thickness
+// (логические единицы; при HiDPI скейлятся здесь).
 func (c *Canvas) StrokeEllipseAA(cx, cy, rx, ry int, thickness float64, col color.RGBA) {
 	if rx <= 0 || ry <= 0 || thickness <= 0 {
 		return
 	}
-	t := float32(thickness)
-	bx, by := cx-rx-1-int(thickness), cy-ry-1-int(thickness)
-	bw, bh := (rx+1+int(thickness))*2+1, (ry+1+int(thickness))*2+1
+	k := c.scale
+	t := float32(thickness * k)
+	fcx, fcy := (float64(cx)+0.5)*k, (float64(cy)+0.5)*k
+	frx, fry := float64(rx)*k, float64(ry)*k
+	pad := int(float64(t)) + 2
+	bx, by := int(fcx-frx)-pad, int(fcy-fry)-pad
+	bw, bh := int(frx*2)+2*pad+1, int(fry*2)+2*pad+1
 	c.fillPath(bx, by, bw, bh, col, func(z *vector.Rasterizer, ox, oy float32) {
-		fcx, fcy := float32(cx)+0.5, float32(cy)+0.5
 		// Внешний контур по часовой + внутренний против часовой = кольцо.
-		ellipsePath(z, fcx, fcy, float32(rx)+t/2, float32(ry)+t/2, ox, oy)
-		ellipsePathCCW(z, fcx, fcy, float32(rx)-t/2, float32(ry)-t/2, ox, oy)
+		ellipsePath(z, float32(fcx), float32(fcy), float32(frx)+t/2, float32(fry)+t/2, ox, oy)
+		ellipsePathCCW(z, float32(fcx), float32(fcy), float32(frx)-t/2, float32(fry)-t/2, ox, oy)
 	})
 }
 
@@ -203,31 +211,33 @@ func (c *Canvas) DrawLineAA(x1, y1, x2, y2 int, thickness float64, col color.RGB
 	c.StrokePolylineAA([]image.Point{{X: x1, Y: y1}, {X: x2, Y: y2}}, thickness, false, col)
 }
 
-// FillPolygonAA рисует сглаженный залитый полигон.
+// FillPolygonAA рисует сглаженный залитый полигон (логические координаты).
 func (c *Canvas) FillPolygonAA(pts []image.Point, col color.RGBA) {
 	if len(pts) < 3 {
 		return
 	}
-	bx, by, bw, bh := ptsBounds(pts, 1)
+	k := float32(c.scale)
+	bx, by, bw, bh := ptsBoundsScaled(pts, 1, c.scale)
 	c.fillPath(bx, by, bw, bh, col, func(z *vector.Rasterizer, ox, oy float32) {
-		z.MoveTo(float32(pts[0].X)+0.5-ox, float32(pts[0].Y)+0.5-oy)
+		z.MoveTo((float32(pts[0].X)+0.5)*k-ox, (float32(pts[0].Y)+0.5)*k-oy)
 		for _, p := range pts[1:] {
-			z.LineTo(float32(p.X)+0.5-ox, float32(p.Y)+0.5-oy)
+			z.LineTo((float32(p.X)+0.5)*k-ox, (float32(p.Y)+0.5)*k-oy)
 		}
 	})
 }
 
-// StrokePolylineAA рисует сглаженную ломаную толщиной thickness;
-// closed=true замыкает последний сегмент с первым.
+// StrokePolylineAA рисует сглаженную ломаную толщиной thickness (логические
+// единицы); closed=true замыкает последний сегмент с первым.
 // Сегменты рисуются прямоугольниками без стыковых сочленений (v1):
 // для непрозрачных цветов стыки визуально бесшовны.
 func (c *Canvas) StrokePolylineAA(pts []image.Point, thickness float64, closed bool, col color.RGBA) {
 	if len(pts) < 2 || thickness <= 0 {
 		return
 	}
-	pad := int(thickness) + 2
-	bx, by, bw, bh := ptsBounds(pts, pad)
-	half := float32(thickness) / 2
+	k := float32(c.scale)
+	pad := int(thickness*c.scale) + 2
+	bx, by, bw, bh := ptsBoundsScaled(pts, pad, c.scale)
+	half := float32(thickness*c.scale) / 2
 	c.fillPath(bx, by, bw, bh, col, func(z *vector.Rasterizer, ox, oy float32) {
 		n := len(pts)
 		last := n - 1
@@ -236,8 +246,8 @@ func (c *Canvas) StrokePolylineAA(pts []image.Point, thickness float64, closed b
 		}
 		for i := 0; i < last; i++ {
 			p1, p2 := pts[i], pts[(i+1)%n]
-			ax, ay := float32(p1.X)+0.5-ox, float32(p1.Y)+0.5-oy
-			bx2, by2 := float32(p2.X)+0.5-ox, float32(p2.Y)+0.5-oy
+			ax, ay := (float32(p1.X)+0.5)*k-ox, (float32(p1.Y)+0.5)*k-oy
+			bx2, by2 := (float32(p2.X)+0.5)*k-ox, (float32(p2.Y)+0.5)*k-oy
 			dx, dy := bx2-ax, by2-ay
 			l := float32(math.Hypot(float64(dx), float64(dy)))
 			if l == 0 {
@@ -254,8 +264,9 @@ func (c *Canvas) StrokePolylineAA(pts []image.Point, thickness float64, closed b
 	})
 }
 
-// ptsBounds возвращает bbox точек с запасом pad (клампится дальше в блите).
-func ptsBounds(pts []image.Point, pad int) (x, y, w, h int) {
+// ptsBoundsScaled возвращает bbox точек в ФИЗИЧЕСКИХ координатах с запасом
+// pad физических пикселей (клампится дальше в блите).
+func ptsBoundsScaled(pts []image.Point, pad int, k float64) (x, y, w, h int) {
 	minX, minY := pts[0].X, pts[0].Y
 	maxX, maxY := minX, minY
 	for _, p := range pts[1:] {
@@ -272,5 +283,9 @@ func ptsBounds(pts []image.Point, pad int) (x, y, w, h int) {
 			maxY = p.Y
 		}
 	}
-	return minX - pad, minY - pad, maxX - minX + 2*pad + 1, maxY - minY + 2*pad + 1
+	pMinX := int(float64(minX) * k)
+	pMinY := int(float64(minY) * k)
+	pMaxX := int(math.Ceil(float64(maxX+1) * k))
+	pMaxY := int(math.Ceil(float64(maxY+1) * k))
+	return pMinX - pad, pMinY - pad, pMaxX - pMinX + 2*pad, pMaxY - pMinY + 2*pad
 }

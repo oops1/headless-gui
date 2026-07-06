@@ -57,13 +57,17 @@ func (e *Engine) Invalidate() {
 	e.invGen.Add(1)
 }
 
-// InvalidateRect помечает изменившейся прямоугольную область (в пикселях
-// холста). Diff ближайшего кадра ограничится тайлами, пересекающими
-// объединение заявленных областей.
+// InvalidateRect помечает изменившейся прямоугольную область (в ЛОГИЧЕСКИХ
+// пикселях холста — система координат виджетов). Отрисовка и diff ближайшего
+// кадра ограничатся тайлами, пересекающими объединение заявленных областей.
+// Внутри damage хранится в физических пикселях (масштабируется здесь).
 func (e *Engine) InvalidateRect(r image.Rectangle) {
 	if r.Empty() {
 		return
 	}
+	e.mu.RLock()
+	r = e.canvas.sRect(r)
+	e.mu.RUnlock()
 	e.damageMu.Lock()
 	if !e.damageAll {
 		e.damage = e.damage.Union(r)
