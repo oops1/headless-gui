@@ -560,6 +560,16 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 
 	injectCaptureManager(m, e)
 
+	// Кнопка ✕ диалога закрывает модалку с семантикой отмены (как Escape).
+	if s, ok := m.(interface{ SetCloser(func()) }); ok {
+		s.SetCloser(func() {
+			if c, ok := m.(interface{ OnCancel() }); ok {
+				c.OnCancel()
+			}
+			e.CloseModal(m)
+		})
+	}
+
 	e.modMu.Lock()
 	e.modals = append(e.modals, m)
 	e.modMu.Unlock()
