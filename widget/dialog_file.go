@@ -197,7 +197,7 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 	var nameLbl *Label
 	var filterDD *Dropdown
 	if fd.opts.Mode == FileOpen {
-		nameLbl = NewLabel(Tr("dlg.file.name"), dlg.TitleColor)
+		nameLbl = NewLabel(Tr("dlg.file.name"), win10.LabelText)
 		nameLbl.FontSize = 11
 		nameLbl.SetBounds(image.Rect(padX, nameY+7, padX+42, nameY+25))
 		dlg.AddChild(nameLbl)

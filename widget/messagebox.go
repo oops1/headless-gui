@@ -124,12 +124,12 @@ func (mb *MessageBox) ShowSeverity(caption, message string, severity DialogSever
 		btnH       = 30     // высота кнопки
 		btnGap     = 8      // зазор между кнопками
 		btnPadBot  = 12     // отступ кнопок от нижнего края
-		minW       = 280
-		maxW       = 500
-		titleH     = dlgTitleH
-		maxLineLen = 52 // символов на строку для переноса
-		iconSize   = 32 // диаметр значка severity
-		iconGap    = 14 // зазор между значком и текстом
+		minW     = 280
+		maxW     = 500
+		titleH   = dlgTitleH
+		msgFS    = 11 // размер шрифта сообщения (pt)
+		iconSize = 32 // диаметр значка severity
+		iconGap  = 14 // зазор между значком и текстом
 	)
 
 	// Заголовок: пустой → локализованный по severity.
@@ -146,13 +146,16 @@ func (mb *MessageBox) ShowSeverity(caption, message string, severity DialogSever
 	}
 
 	// Абзацы: первый — основной тон, последующие — приглушённый.
+	// Перенос и ширина считаются точным замером текста (MeasureUIText),
+	// поэтому строки не выходят за границы диалога.
 	type msgLine struct {
 		text  string
 		muted bool
 	}
+	maxTextW := maxW - textLeft - padX
 	var lines []msgLine
 	for pi, para := range strings.Split(message, "\n") {
-		for _, l := range wrapText(para, maxLineLen) {
+		for _, l := range wrapTextPx(para, maxTextW, msgFS) {
 			lines = append(lines, msgLine{text: l, muted: pi > 0})
 		}
 	}
@@ -164,14 +167,14 @@ func (mb *MessageBox) ShowSeverity(caption, message string, severity DialogSever
 		msgH = iconSize // не ниже значка
 	}
 
-	// Ширина: максимальная строка * ~7px или минимум
-	maxLine := 0
+	// Ширина — по самой длинной строке (замер), в пределах [minW, maxW].
+	maxLineW := 0
 	for _, l := range lines {
-		if len([]rune(l.text)) > maxLine {
-			maxLine = len([]rune(l.text))
+		if w := MeasureUIText(l.text, msgFS); w > maxLineW {
+			maxLineW = w
 		}
 	}
-	dlgW := textLeft + maxLine*7 + padX
+	dlgW := textLeft + maxLineW + padX
 	if dlgW < minW {
 		dlgW = minW
 	}
@@ -200,9 +203,11 @@ func (mb *MessageBox) ShowSeverity(caption, message string, severity DialogSever
 		if line.muted {
 			lbl = newMutedLabel(line.text)
 		} else {
-			lbl = NewLabel(line.text, dlg.TitleColor)
+			// Основной цвет текста темы (НЕ цвет заголовка: в классике
+			// заголовок белый на синем, а тело диалога — светлое).
+			lbl = NewLabel(line.text, win10.LabelText)
 		}
-		lbl.FontSize = 11
+		lbl.FontSize = msgFS
 		lbl.SetBounds(r)
 		dlg.AddChild(lbl)
 		msgLabels = append(msgLabels, lbl)
@@ -284,9 +289,9 @@ func severityTitleKey(s DialogSeverity) string {
 	return ""
 }
 
-// mbBtnWidth — ширина кнопки под подпись (мин. 80, ~7px на символ + поля).
+// mbBtnWidth — ширина кнопки под подпись (мин. 80, точный замер + поля).
 func mbBtnWidth(label string) int {
-	w := len([]rune(label))*7 + 30
+	w := MeasureUIText(label, 11) + 28
 	if w < 80 {
 		w = 80
 	}
@@ -361,38 +366,3 @@ func mbButtonDefs(buttons MessageBoxButtons) []mbBtnDef {
 	}
 }
 
-// ─── Перенос текста ─────────────────────────────────────────────────────────
-
-// wrapText разбивает текст на строки длиной не более maxRunes символов.
-// Переносит по пробелам. Явные \n тоже учитываются.
-func wrapText(text string, maxRunes int) []string {
-	if maxRunes <= 0 {
-		maxRunes = 60
-	}
-	var result []string
-	for _, paragraph := range strings.Split(text, "\n") {
-		if paragraph == "" {
-			result = append(result, "")
-			continue
-		}
-		words := strings.Fields(paragraph)
-		if len(words) == 0 {
-			result = append(result, "")
-			continue
-		}
-		line := words[0]
-		for _, w := range words[1:] {
-			if len([]rune(line))+1+len([]rune(w)) > maxRunes {
-				result = append(result, line)
-				line = w
-			} else {
-				line += " " + w
-			}
-		}
-		result = append(result, line)
-	}
-	if len(result) == 0 {
-		result = []string{""}
-	}
-	return result
-}

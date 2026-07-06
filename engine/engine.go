@@ -156,6 +156,8 @@ func New(width, height, fps int) *Engine {
 	// Точечная инвалидация от виджетов (авто-damage): hover/press/фокус/сеттеры
 	// сообщают свой прямоугольник — кадр перерисовывается и диффается частично.
 	widget.SetUIRectChangeNotifier(e.InvalidateRect)
+	// Точный замер текста для компоновки до отрисовки (размеры диалогов).
+	widget.SetTextMeasurer(e.canvas.MeasureText)
 	return e
 }
 

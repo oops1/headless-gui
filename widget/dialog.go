@@ -305,7 +305,7 @@ func NewConfirmDialog(title, message string, onResult func(ok bool)) *Dialog {
 
 	// Все координаты дочерних виджетов — относительно (0,0) диалога.
 	// ShowModal сдвинет их при центрировании.
-	lbl := NewLabel(message, dlg.TitleColor)
+	lbl := NewLabel(message, win10.LabelText)
 	lbl.SetBounds(image.Rect(16, dlg.TitleHeight+12, dlgW-16, dlg.TitleHeight+52))
 
 	okBtn := NewWin10AccentButton("  OK  ")

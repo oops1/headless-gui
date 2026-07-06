@@ -57,7 +57,7 @@ func (mb *MessageBox) ShowProgress(title, status string, onCancel func()) *Progr
 	dlg := NewDialog(title, dlgW, dlgH)
 	dlg.ShowCloseButton = onCancel != nil // без отмены операция незакрываема
 
-	lbl := NewLabel(status, dlg.TitleColor)
+	lbl := NewLabel(status, win10.LabelText)
 	lbl.FontSize = 11
 	lbl.SetBounds(image.Rect(padX, statusY, dlgW-padX, statusY+18))
 	dlg.AddChild(lbl)
