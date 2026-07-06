@@ -111,22 +111,25 @@ func (mb *MessageBox) ShowDialog(caption, message string, buttons MessageBoxButt
 
 // ShowSeverity — самая полная версия: со значком severity.
 // Пустой caption берётся из локализованного заголовка по severity.
+//
+// Компоновка — принятый дизайн-мокап: значок слева, первый абзац сообщения
+// основным цветом, последующие абзацы (после «\n») — приглушённым, кнопки
+// прижаты к правому нижнему углу.
 func (mb *MessageBox) ShowSeverity(caption, message string, severity DialogSeverity, buttons MessageBoxButtons, onResult func(MessageBoxResult)) *Dialog {
 	// ── Определяем размеры ──────────────────────────────────────────────
 	const (
-		padX       = 20 // горизонтальный отступ текста
-		padTop     = 16 // отступ сообщения от заголовка
-		lineH      = 18 // высота строки текста
-		btnW       = 90 // ширина кнопки
-		btnH       = 32 // высота кнопки
-		btnGap     = 10 // зазор между кнопками
-		btnPadBot  = 14 // отступ кнопок от нижнего края
-		minW       = 300
+		padX       = dlgPad // горизонтальный отступ контента
+		padTop     = 14     // отступ сообщения от заголовка
+		lineH      = 19     // высота строки текста
+		btnH       = 30     // высота кнопки
+		btnGap     = 8      // зазор между кнопками
+		btnPadBot  = 12     // отступ кнопок от нижнего края
+		minW       = 280
 		maxW       = 500
-		titleH     = 32
-		maxLineLen = 60 // символов на строку для переноса
+		titleH     = dlgTitleH
+		maxLineLen = 52 // символов на строку для переноса
 		iconSize   = 32 // диаметр значка severity
-		iconGap    = 16 // зазор между значком и текстом
+		iconGap    = 14 // зазор между значком и текстом
 	)
 
 	// Заголовок: пустой → локализованный по severity.
@@ -137,13 +140,25 @@ func (mb *MessageBox) ShowSeverity(caption, message string, severity DialogSever
 	}
 
 	// Отступ текста слева: со значком — уступаем ему место.
-	textLeft := padX
+	textLeft := padX + 2
 	if severity != SeverityNone {
-		textLeft = padX + iconSize + iconGap
+		textLeft = padX + 2 + iconSize + iconGap
 	}
 
-	// Переносим длинные строки
-	lines := wrapText(message, maxLineLen)
+	// Абзацы: первый — основной тон, последующие — приглушённый.
+	type msgLine struct {
+		text  string
+		muted bool
+	}
+	var lines []msgLine
+	for pi, para := range strings.Split(message, "\n") {
+		for _, l := range wrapText(para, maxLineLen) {
+			lines = append(lines, msgLine{text: l, muted: pi > 0})
+		}
+	}
+	if len(lines) == 0 {
+		lines = []msgLine{{}}
+	}
 	msgH := len(lines) * lineH
 	if msgH < iconSize {
 		msgH = iconSize // не ниже значка
@@ -152,8 +167,8 @@ func (mb *MessageBox) ShowSeverity(caption, message string, severity DialogSever
 	// Ширина: максимальная строка * ~7px или минимум
 	maxLine := 0
 	for _, l := range lines {
-		if len([]rune(l)) > maxLine {
-			maxLine = len([]rune(l))
+		if len([]rune(l.text)) > maxLine {
+			maxLine = len([]rune(l.text))
 		}
 	}
 	dlgW := textLeft + maxLine*7 + padX
@@ -164,32 +179,45 @@ func (mb *MessageBox) ShowSeverity(caption, message string, severity DialogSever
 		dlgW = maxW
 	}
 
-	dlgH := titleH + padTop + msgH + 16 + btnH + btnPadBot
+	dlgH := titleH + padTop + msgH + 18 + btnH + btnPadBot
 
 	dlg := NewDialog(caption, dlgW, dlgH)
 
 	// ── Значок severity ──────────────────────────────────────────────────
 	if severity != SeverityNone {
 		icon := NewDialogIcon(severity)
-		iy := titleH + padTop
-		icon.SetBounds(image.Rect(padX, iy, padX+iconSize, iy+iconSize))
+		iy := titleH + padTop + 4
+		icon.SetBounds(image.Rect(padX+2, iy, padX+2+iconSize, iy+iconSize))
 		dlg.AddChild(icon)
 	}
 
-	// ── Метки для каждой строки сообщения ────────────────────────────────
+	// ── Метки для строк сообщения (вторичные абзацы — приглушённые) ──────
 	var msgLabels []*Label
 	for i, line := range lines {
-		lbl := NewLabel(line, dlg.TitleColor)
 		y := titleH + padTop + i*lineH
-		lbl.SetBounds(image.Rect(textLeft, y, dlgW-padX, y+lineH))
+		r := image.Rect(textLeft, y, dlgW-padX, y+lineH)
+		var lbl *Label
+		if line.muted {
+			lbl = newMutedLabel(line.text)
+		} else {
+			lbl = NewLabel(line.text, dlg.TitleColor)
+		}
+		lbl.FontSize = 11
+		lbl.SetBounds(r)
 		dlg.AddChild(lbl)
 		msgLabels = append(msgLabels, lbl)
 	}
 
-	// ── Кнопки (локализованные, живо переобновляются при смене языка) ────
+	// ── Кнопки (локализованные), прижаты к правому нижнему углу ──────────
 	btnDefs := mbButtonDefs(buttons)
-	totalBtnW := len(btnDefs)*btnW + (len(btnDefs)-1)*btnGap
-	startX := (dlgW - totalBtnW) / 2
+	widths := make([]int, len(btnDefs))
+	totalBtnW := 0
+	for i, def := range btnDefs {
+		widths[i] = mbBtnWidth(Tr(def.key))
+		totalBtnW += widths[i]
+	}
+	totalBtnW += (len(btnDefs) - 1) * btnGap
+	bx := dlgW - padX - totalBtnW
 	btnY := dlgH - btnPadBot - btnH
 
 	type btnBind struct {
@@ -198,9 +226,9 @@ func (mb *MessageBox) ShowSeverity(caption, message string, severity DialogSever
 	}
 	var binds []btnBind
 	for i, def := range btnDefs {
-		bx := startX + i*(btnW+btnGap)
 		btn := trBtn(def.key, def.accent)
-		btn.SetBounds(image.Rect(bx, btnY, bx+btnW, btnY+btnH))
+		btn.SetBounds(image.Rect(bx, btnY, bx+widths[i], btnY+btnH))
+		bx += widths[i] + btnGap
 
 		result := def.result // capture для замыкания
 		btn.OnClick = func() {
@@ -254,6 +282,15 @@ func severityTitleKey(s DialogSeverity) string {
 		return "dlg.title.error"
 	}
 	return ""
+}
+
+// mbBtnWidth — ширина кнопки под подпись (мин. 80, ~7px на символ + поля).
+func mbBtnWidth(label string) int {
+	w := len([]rune(label))*7 + 30
+	if w < 80 {
+		w = 80
+	}
+	return w
 }
 
 // mbDefaultResult возвращает результат кнопки по умолчанию (первая accent).

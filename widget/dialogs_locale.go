@@ -36,6 +36,7 @@ func init() {
 		"dlg.title.progress": "Operation in progress",
 
 		"dlg.file.name":      "Name:",
+		"dlg.file.filename":  "File name:",
 		"dlg.file.filter":    "File type:",
 		"dlg.file.overwrite": "A file with this name already exists — it will be overwritten.",
 		"dlg.file.col.name":  "Name",
@@ -45,6 +46,8 @@ func init() {
 		"dlg.file.refresh":   "Refresh",
 		"dlg.place.home":     "Home",
 		"dlg.place.root":     "This PC",
+		"dlg.place.docs":      "Documents",
+		"dlg.place.downloads": "Downloads",
 	})
 
 	RegisterStrings("RU", map[string]string{
@@ -69,6 +72,7 @@ func init() {
 		"dlg.title.progress": "Выполнение операции",
 
 		"dlg.file.name":      "Имя:",
+		"dlg.file.filename":  "Имя файла:",
 		"dlg.file.filter":    "Тип файла:",
 		"dlg.file.overwrite": "Файл с таким именем уже существует — будет перезаписан.",
 		"dlg.file.col.name":  "Имя",
@@ -78,5 +82,7 @@ func init() {
 		"dlg.file.refresh":   "Обновить",
 		"dlg.place.home":     "Домашняя",
 		"dlg.place.root":     "Компьютер",
+		"dlg.place.docs":      "Документы",
+		"dlg.place.downloads": "Загрузки",
 	})
 }
