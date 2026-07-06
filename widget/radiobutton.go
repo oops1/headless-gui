@@ -260,16 +260,24 @@ func (rb *RadioButton) RemoveFromGroup() {
 
 // ─── Вспомогательные функции рисования кругов ────────────────────────────────
 
-// drawFilledCircle рисует закрашенный круг (Midpoint circle fill).
+// drawFilledCircle рисует закрашенный круг (AA при поддержке, иначе Midpoint fill).
 func drawFilledCircle(ctx DrawContext, cx, cy, r int, col color.RGBA) {
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.FillEllipseAA(cx, cy, r, r, col)
+		return
+	}
 	for dy := -r; dy <= r; dy++ {
 		halfW := int(math.Sqrt(float64(r*r - dy*dy)))
 		ctx.DrawHLine(cx-halfW, cy+dy, halfW*2+1, col)
 	}
 }
 
-// drawCircleOutline рисует контур круга (Midpoint circle algorithm).
+// drawCircleOutline рисует контур круга (AA при поддержке, иначе Midpoint).
 func drawCircleOutline(ctx DrawContext, cx, cy, r int, col color.RGBA) {
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.StrokeEllipseAA(cx, cy, r, r, 1.2, col)
+		return
+	}
 	x, y := r, 0
 	d := 1 - r
 	for x >= y {

@@ -11,14 +11,22 @@ import (
 )
 
 // ─── Общие помощники рисования ──────────────────────────────────────────────
+//
+// Каждый помощник сначала проверяет, поддерживает ли DrawContext сглаженные
+// примитивы (AAShapes — реализует engine.Canvas); при отсутствии — прежняя
+// ступенчатая отрисовка (Bresenham/scanline).
 
-// drawThickLine рисует отрезок (x0,y0)-(x1,y1) толщиной t (Bresenham).
+// drawThickLine рисует отрезок (x0,y0)-(x1,y1) толщиной t.
 func drawThickLine(ctx DrawContext, x0, y0, x1, y1, t int, col color.RGBA) {
 	if col.A == 0 {
 		return
 	}
 	if t < 1 {
 		t = 1
+	}
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.DrawLineAA(x0, y0, x1, y1, float64(t), col)
+		return
 	}
 	dx := absInt(x1 - x0)
 	dy := -absInt(y1 - y0)
@@ -54,6 +62,10 @@ func fillEllipse(ctx DrawContext, cx, cy, rx, ry int, col color.RGBA) {
 	if col.A == 0 || rx <= 0 || ry <= 0 {
 		return
 	}
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.FillEllipseAA(cx, cy, rx, ry, col)
+		return
+	}
 	rx2 := float64(rx) * float64(rx)
 	for dy := -ry; dy <= ry; dy++ {
 		f := 1.0 - float64(dy*dy)/(float64(ry)*float64(ry))
@@ -76,6 +88,10 @@ func drawEllipseOutline(ctx DrawContext, cx, cy, rx, ry, t int, col color.RGBA) 
 	}
 	if t < 1 {
 		t = 1
+	}
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.StrokeEllipseAA(cx, cy, rx, ry, float64(t), col)
+		return
 	}
 	for dy := -ry; dy <= ry; dy++ {
 		fo := 1.0 - float64(dy*dy)/(float64(ry)*float64(ry))
@@ -104,6 +120,10 @@ func drawEllipseOutline(ctx DrawContext, cx, cy, rx, ry, t int, col color.RGBA) 
 // fillPolygon заливает многоугольник (scanline).
 func fillPolygon(ctx DrawContext, pts []image.Point, col color.RGBA) {
 	if col.A == 0 || len(pts) < 3 {
+		return
+	}
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.FillPolygonAA(pts, col)
 		return
 	}
 	minY, maxY := pts[0].Y, pts[0].Y
