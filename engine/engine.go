@@ -5,6 +5,7 @@ import (
 	"image"
 	_ "image/jpeg" // декодер JPEG для SetBackgroundFile
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,6 +76,12 @@ type Engine struct {
 
 	fps     int     // целевой FPS, 1–120
 	userDPI float64 // пользовательский DPI шрифтов (без учёта HiDPI-масштаба)
+
+	// scaleBits — текущий HiDPI-масштаб (math.Float64bits) для lock-free
+	// чтения из InvalidateRect/toLogical: они вызываются из сеттеров
+	// виджетов, в т.ч. когда движок уже держит e.mu (например, root.SetBounds
+	// из SetResolution) — брать e.mu там нельзя (RWMutex нереентерабелен).
+	scaleBits atomic.Uint64
 	saveDir  string       // если не пусто — сохранять PNG в эту директорию
 	saveCh   chan saveJob // канал для асинхронного сохранения
 	saveDone chan struct{} // закрывается, когда saveWorker завершил запись всех PNG
@@ -116,6 +123,7 @@ func New(width, height, fps int) *Engine {
 		ttEnabled: true,
 		ttDelay:   600 * time.Millisecond,
 	}
+	e.scaleBits.Store(math.Float64bits(1))
 	// Рендер по запросу — режим по умолчанию (v3.5): виджеты самоинвалидируются
 	// (Base.Invalidate, авто-damage в SetBounds/сеттерах), события и слой данных
 	// инвалидируют через движок. Кадры рендерятся только при изменениях UI,
@@ -237,11 +245,9 @@ func (e *Engine) PhysicalSize() (w, h int) {
 	return e.canvas.W, e.canvas.H
 }
 
-// Scale возвращает текущий HiDPI-масштаб (1.0 по умолчанию).
+// Scale возвращает текущий HiDPI-масштаб (1.0 по умолчанию). Lock-free.
 func (e *Engine) Scale() float64 {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.canvas.scale
+	return math.Float64frombits(e.scaleBits.Load())
 }
 
 // SetScale задаёт HiDPI-масштаб: логический размер холста сохраняется,
@@ -262,6 +268,7 @@ func (e *Engine) SetScale(k float64) {
 	lw, lh := e.canvas.LogicalSize()
 	e.canvas = e.canvas.cloneForSize(lw, lh, k, e.bgSrc)
 	e.canvas.setDPIAll(e.userDPI * k)
+	e.scaleBits.Store(math.Float64bits(k))
 	e.mu.Unlock()
 	e.Invalidate()
 }
@@ -275,10 +282,14 @@ func (e *Engine) SetResolution(width, height int) {
 	e.frameMu.Lock() // ждём конца текущего кадра — буферы меняются
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.canvas = e.canvas.cloneForSize(width, height, e.canvas.scale, e.bgSrc)
-	if e.root != nil {
-		e.root.SetBounds(image.Rect(0, 0, width, height))
+	root := e.root
+	e.mu.Unlock()
+	// ВАЖНО: SetBounds — вне e.mu. Изменение bounds триггерит авто-damage
+	// (notifyRectChanged → InvalidateRect); повторный захват e.mu на том же
+	// потоке дал бы дедлок (см. scaleBits).
+	if root != nil {
+		root.SetBounds(image.Rect(0, 0, width, height))
 	}
 	widget.SetScreenBounds(width, height)
 	e.Invalidate()

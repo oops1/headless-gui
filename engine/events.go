@@ -188,10 +188,9 @@ func (e *Engine) tabCycle(root widget.Widget, reverse bool) {
 
 // toLogical переводит физические координаты события (пиксели окна/кадра)
 // в логические координаты виджетов (HiDPI). При Scale == 1 тождественно.
+// Lock-free (scaleBits) — события не конкурируют с мьютексом движка.
 func (e *Engine) toLogical(x, y int) (int, int) {
-	e.mu.RLock()
-	k := e.canvas.scale
-	e.mu.RUnlock()
+	k := e.Scale()
 	if k == 1 {
 		return x, y
 	}

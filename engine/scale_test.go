@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -149,6 +150,33 @@ func TestScale_FramesPhysical(t *testing.T) {
 		if tile.X+tile.W <= 100 && tile.Y+tile.H <= 100 {
 			t.Errorf("тайл (%d,%d) целиком в верхне-левом физическом квадранте — damage не отскейлился", tile.X, tile.Y)
 		}
+	}
+}
+
+// SetResolution с установленным root не должна дедлочиться: root.SetBounds
+// триггерит авто-damage (notifyRectChanged → InvalidateRect), который раньше
+// брал e.mu.RLock под удерживаемым e.mu.Lock (регрессия HiDPI: окно showcase
+// зависало до создания).
+func TestEngine_SetResolutionNoDeadlock(t *testing.T) {
+	eng := New(100, 100, 20)
+	root := widget.NewPanel(color.RGBA{A: 255})
+	root.SetBounds(image.Rect(0, 0, 100, 100))
+	eng.SetRoot(root)
+
+	done := make(chan struct{})
+	go func() {
+		eng.SetResolution(200, 150) // bounds меняются → авто-инвалидация
+		eng.SetScale(1.5)
+		eng.SetResolution(300, 200)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("SetResolution/SetScale дедлок (авто-damage под e.mu)")
+	}
+	if w, h := eng.CanvasSize(); w != 300 || h != 200 {
+		t.Errorf("логический размер %dx%d, ожидался 300x200", w, h)
 	}
 }
 

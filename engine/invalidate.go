@@ -31,6 +31,7 @@ package engine
 
 import (
 	"image"
+	"math"
 	"time"
 
 	"github.com/oops1/headless-gui/v3/widget"
@@ -65,15 +66,28 @@ func (e *Engine) InvalidateRect(r image.Rectangle) {
 	if r.Empty() {
 		return
 	}
-	e.mu.RLock()
-	r = e.canvas.sRect(r)
-	e.mu.RUnlock()
+	// Масштаб читается lock-free (scaleBits): InvalidateRect вызывается из
+	// сеттеров виджетов, в т.ч. когда движок уже держит e.mu.
+	if k := e.Scale(); k != 1 {
+		r = scaleRectF(r, k)
+	}
 	e.damageMu.Lock()
 	if !e.damageAll {
 		e.damage = e.damage.Union(r)
 	}
 	e.damageMu.Unlock()
 	e.invGen.Add(1)
+}
+
+// scaleRectF масштабирует логический прямоугольник в физический по краям
+// (та же математика, что canvas.sRect, но без доступа к канвасу).
+func scaleRectF(r image.Rectangle, k float64) image.Rectangle {
+	return image.Rect(
+		int(math.Round(float64(r.Min.X)*k)),
+		int(math.Round(float64(r.Min.Y)*k)),
+		int(math.Round(float64(r.Max.X)*k)),
+		int(math.Round(float64(r.Max.Y)*k)),
+	)
 }
 
 // consumeDamage атомарно забирает накопленное повреждение.
