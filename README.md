@@ -51,6 +51,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **Cascading menus** — nested submenus with arrow indicators and keyboard navigation
 - **Native window** — platform-native backends (Win32/Cocoa/X11/**Wayland**), zero CGO on all platforms; Wayland speaks the raw wire protocol (xdg-shell + wl_shm) over a unix socket and is auto-selected when a compositor is available (`HEADLESS_GUI_X11=1` forces X11); window chrome follows the theme, reacts to OS focus (inactive title bar), repaints from the frame cache on expose (X11/Win32; Wayland retains content)
 - **Golden render tests** — pixel-exact snapshot tests of widgets/themes/AA/HiDPI guard against visual regressions (CI on Windows/Linux/macOS)
+- **Accessibility semantic tree** — `eng.AccessibilityTree()` returns a JSON-serializable snapshot (roles, names, values, states) for screen-reader side-channels in streaming scenarios and for UI test automation; full keyboard navigation (Tab/Enter/Space) built in
 - **Data binding** — `{Binding}` OneWay/TwoWay/OneTime, `INotifyPropertyChanged`, `StringFormat`, `IValueConverter`, `ElementName`/`RelativeSource`, live `ItemsControl`
 - **Styles, triggers & templates** — `<Style>`/`<Setter>`, `DataTrigger`/`MultiTrigger`, `ControlTemplate` + `ContentPresenter` + `TemplateBinding`, `StaticResource`
 - **Commands & input bindings** — `ICommand`/`RelayCommand`, `Button.Command`, `<KeyBinding>` hotkeys
