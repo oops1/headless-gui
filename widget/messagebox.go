@@ -81,28 +81,72 @@ func (mb *MessageBox) ShowYesNoCancel(caption, message string, onResult func(Mes
 	return mb.ShowDialog(caption, message, MBYesNoCancel, onResult)
 }
 
-// ShowDialog — полная версия: caption, message, набор кнопок, callback.
+// ─── Пресеты severity (иконка + локализованный заголовок по умолчанию) ──────
+
+// ShowInfo — информационное сообщение (синий значок «i», кнопка OK).
+// Пустой caption заменяется локализованным «Информация».
+func (mb *MessageBox) ShowInfo(caption, message string) *Dialog {
+	return mb.ShowSeverity(caption, message, SeverityInfo, MBOk, nil)
+}
+
+// ShowWarning — предупреждение (оранжевый треугольник «!»).
+func (mb *MessageBox) ShowWarning(caption, message string) *Dialog {
+	return mb.ShowSeverity(caption, message, SeverityWarning, MBOk, nil)
+}
+
+// ShowError — ошибка (красный значок «✕»).
+func (mb *MessageBox) ShowError(caption, message string) *Dialog {
+	return mb.ShowSeverity(caption, message, SeverityError, MBOk, nil)
+}
+
+// ShowQuestion — вопрос Да/Нет (зелёный значок «?»).
+func (mb *MessageBox) ShowQuestion(caption, message string, onResult func(MessageBoxResult)) *Dialog {
+	return mb.ShowSeverity(caption, message, SeverityQuestion, MBYesNo, onResult)
+}
+
+// ShowDialog — полная версия без значка: caption, message, набор кнопок, callback.
 func (mb *MessageBox) ShowDialog(caption, message string, buttons MessageBoxButtons, onResult func(MessageBoxResult)) *Dialog {
+	return mb.ShowSeverity(caption, message, SeverityNone, buttons, onResult)
+}
+
+// ShowSeverity — самая полная версия: со значком severity.
+// Пустой caption берётся из локализованного заголовка по severity.
+func (mb *MessageBox) ShowSeverity(caption, message string, severity DialogSeverity, buttons MessageBoxButtons, onResult func(MessageBoxResult)) *Dialog {
 	// ── Определяем размеры ──────────────────────────────────────────────
 	const (
-		padX        = 20  // горизонтальный отступ текста
-		padTop      = 16  // отступ сообщения от заголовка
-		lineH       = 18  // высота строки текста
-		btnW        = 90  // ширина кнопки
-		btnH        = 32  // высота кнопки
-		btnGap      = 10  // зазор между кнопками
-		btnPadBot   = 14  // отступ кнопок от нижнего края
-		minW        = 300
-		maxW        = 500
-		titleH      = 32
-		maxLineLen  = 60 // символов на строку для переноса
+		padX       = 20 // горизонтальный отступ текста
+		padTop     = 16 // отступ сообщения от заголовка
+		lineH      = 18 // высота строки текста
+		btnW       = 90 // ширина кнопки
+		btnH       = 32 // высота кнопки
+		btnGap     = 10 // зазор между кнопками
+		btnPadBot  = 14 // отступ кнопок от нижнего края
+		minW       = 300
+		maxW       = 500
+		titleH     = 32
+		maxLineLen = 60 // символов на строку для переноса
+		iconSize   = 32 // диаметр значка severity
+		iconGap    = 16 // зазор между значком и текстом
 	)
+
+	// Заголовок: пустой → локализованный по severity.
+	titleKey := ""
+	if caption == "" {
+		titleKey = severityTitleKey(severity)
+		caption = Tr(titleKey)
+	}
+
+	// Отступ текста слева: со значком — уступаем ему место.
+	textLeft := padX
+	if severity != SeverityNone {
+		textLeft = padX + iconSize + iconGap
+	}
 
 	// Переносим длинные строки
 	lines := wrapText(message, maxLineLen)
 	msgH := len(lines) * lineH
-	if msgH < lineH {
-		msgH = lineH
+	if msgH < iconSize {
+		msgH = iconSize // не ниже значка
 	}
 
 	// Ширина: максимальная строка * ~7px или минимум
@@ -112,7 +156,7 @@ func (mb *MessageBox) ShowDialog(caption, message string, buttons MessageBoxButt
 			maxLine = len([]rune(l))
 		}
 	}
-	dlgW := maxLine*7 + padX*2
+	dlgW := textLeft + maxLine*7 + padX
 	if dlgW < minW {
 		dlgW = minW
 	}
@@ -124,28 +168,38 @@ func (mb *MessageBox) ShowDialog(caption, message string, buttons MessageBoxButt
 
 	dlg := NewDialog(caption, dlgW, dlgH)
 
+	// ── Значок severity ──────────────────────────────────────────────────
+	if severity != SeverityNone {
+		icon := NewDialogIcon(severity)
+		iy := titleH + padTop
+		icon.SetBounds(image.Rect(padX, iy, padX+iconSize, iy+iconSize))
+		dlg.AddChild(icon)
+	}
+
 	// ── Метки для каждой строки сообщения ────────────────────────────────
+	var msgLabels []*Label
 	for i, line := range lines {
 		lbl := NewLabel(line, dlg.TitleColor)
 		y := titleH + padTop + i*lineH
-		lbl.SetBounds(image.Rect(padX, y, dlgW-padX, y+lineH))
+		lbl.SetBounds(image.Rect(textLeft, y, dlgW-padX, y+lineH))
 		dlg.AddChild(lbl)
+		msgLabels = append(msgLabels, lbl)
 	}
 
-	// ── Кнопки ──────────────────────────────────────────────────────────
+	// ── Кнопки (локализованные, живо переобновляются при смене языка) ────
 	btnDefs := mbButtonDefs(buttons)
 	totalBtnW := len(btnDefs)*btnW + (len(btnDefs)-1)*btnGap
 	startX := (dlgW - totalBtnW) / 2
 	btnY := dlgH - btnPadBot - btnH
 
+	type btnBind struct {
+		btn *Button
+		key string
+	}
+	var binds []btnBind
 	for i, def := range btnDefs {
 		bx := startX + i*(btnW+btnGap)
-		var btn *Button
-		if def.accent {
-			btn = NewWin10AccentButton(def.text)
-		} else {
-			btn = NewButton(def.text)
-		}
+		btn := trBtn(def.key, def.accent)
 		btn.SetBounds(image.Rect(bx, btnY, bx+btnW, btnY+btnH))
 
 		result := def.result // capture для замыкания
@@ -156,16 +210,91 @@ func (mb *MessageBox) ShowDialog(caption, message string, buttons MessageBoxButt
 			}
 		}
 		dlg.AddChild(btn)
+		binds = append(binds, btnBind{btn, def.key})
+	}
+
+	// Живая локализация: заголовок (если брался по severity) и подписи кнопок.
+	dlg.OnLanguageChange(func() {
+		if titleKey != "" {
+			dlg.Title = Tr(titleKey)
+		}
+		for _, b := range binds {
+			b.btn.SetText(Tr(b.key))
+		}
+	})
+
+	// Enter → кнопка по умолчанию (первая accent); Ctrl+C → дамп в буфер.
+	defResult, hasDefault := mbDefaultResult(btnDefs)
+	if hasDefault {
+		dlg.DefaultAction = func() {
+			mb.eng.CloseModal(dlg)
+			if onResult != nil {
+				onResult(defResult)
+			}
+		}
+	}
+	dlg.CopyText = func() string {
+		return messageBoxClipboard(dlg.Title, msgLabels, btnDefs)
 	}
 
 	mb.eng.ShowModal(dlg)
 	return dlg
 }
 
+// severityTitleKey возвращает КЛЮЧ локализации заголовка по умолчанию.
+func severityTitleKey(s DialogSeverity) string {
+	switch s {
+	case SeverityInfo:
+		return "dlg.title.info"
+	case SeverityQuestion:
+		return "dlg.title.question"
+	case SeverityWarning:
+		return "dlg.title.warning"
+	case SeverityError:
+		return "dlg.title.error"
+	}
+	return ""
+}
+
+// mbDefaultResult возвращает результат кнопки по умолчанию (первая accent).
+func mbDefaultResult(defs []mbBtnDef) (MessageBoxResult, bool) {
+	for _, d := range defs {
+		if d.accent {
+			return d.result, true
+		}
+	}
+	return 0, false
+}
+
+// messageBoxClipboard формирует текст для Ctrl+C в формате Windows MessageBox:
+// заголовок, разделители, текст, кнопки.
+func messageBoxClipboard(title string, msg []*Label, btns []mbBtnDef) string {
+	const sep = "---------------------------"
+	var b strings.Builder
+	b.WriteString(sep + "\r\n")
+	b.WriteString(title + "\r\n")
+	b.WriteString(sep + "\r\n")
+	for i, l := range msg {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString(l.Text())
+	}
+	b.WriteString("\r\n" + sep + "\r\n")
+	for i, d := range btns {
+		if i > 0 {
+			b.WriteString("   ")
+		}
+		b.WriteString(Tr(d.key))
+	}
+	b.WriteString("\r\n" + sep + "\r\n")
+	return b.String()
+}
+
 // ─── Внутренние типы ────────────────────────────────────────────────────────
 
 type mbBtnDef struct {
-	text   string
+	key    string // ключ локализации (напр. "dlg.ok")
 	result MessageBoxResult
 	accent bool // синяя кнопка (primary)
 }
@@ -174,23 +303,23 @@ func mbButtonDefs(buttons MessageBoxButtons) []mbBtnDef {
 	switch buttons {
 	case MBOkCancel:
 		return []mbBtnDef{
-			{text: "OK", result: MBResultOK, accent: true},
-			{text: "Отмена", result: MBResultCancel},
+			{key: "dlg.ok", result: MBResultOK, accent: true},
+			{key: "dlg.cancel", result: MBResultCancel},
 		}
 	case MBYesNo:
 		return []mbBtnDef{
-			{text: "Да", result: MBResultYes, accent: true},
-			{text: "Нет", result: MBResultNo},
+			{key: "dlg.yes", result: MBResultYes, accent: true},
+			{key: "dlg.no", result: MBResultNo},
 		}
 	case MBYesNoCancel:
 		return []mbBtnDef{
-			{text: "Да", result: MBResultYes, accent: true},
-			{text: "Нет", result: MBResultNo},
-			{text: "Отмена", result: MBResultCancel},
+			{key: "dlg.yes", result: MBResultYes, accent: true},
+			{key: "dlg.no", result: MBResultNo},
+			{key: "dlg.cancel", result: MBResultCancel},
 		}
 	default: // MBOk
 		return []mbBtnDef{
-			{text: "OK", result: MBResultOK, accent: true},
+			{key: "dlg.ok", result: MBResultOK, accent: true},
 		}
 	}
 }
