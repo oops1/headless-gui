@@ -38,6 +38,7 @@ type Canvas struct {
 	baseClip   image.Rectangle       // базовый клип кадра (damage-область частичной перерисовки)
 	hasBase    bool                  // активен ли базовый клип
 	scaleTmp   *image.RGBA           // переиспользуемый буфер для DrawImageScaled
+	shaper     textShaper            // шейпинг сложного текста (RTL, лигатуры; см. shaper.go)
 	W, H       int
 	tilesX     int
 	tilesY     int
@@ -375,6 +376,13 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 		}
 	}
 
+	// Сложный текст (RTL, арабский, индийские скрипты, комбинируемые знаки) —
+	// через шейпер (см. shaper.go). При недоступности шейпинга (шрифт не
+	// распарсился typesetting'ом) — деградация на per-rune путь ниже.
+	if needsShaping(text) && c.drawShapedText(fc, text, x, baseline, sizePt, col) {
+		return
+	}
+
 	// Быстрый путь: нет fallback-шрифтов — один шрифт, с кернингом
 	// (поведение прежнего font.Drawer.DrawString; отсутствующий глиф
 	// пропускается без продвижения пера — как делал Drawer с opentype).
@@ -417,14 +425,19 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 	}
 }
 
-// drawGlyphMask альфа-блендит маску глифа цветом col в back-буфер (Over,
-// premultiplied — как image/draw для font.Drawer). Учитывает clip.
-// (gx, gy) — позиция левого верхнего угла маски на холсте.
+// drawGlyphMask альфа-блендит маску глифа из per-rune кэша.
 func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
 	if g.mask == nil {
 		return
 	}
-	mw, mh := g.mask.Rect.Dx(), g.mask.Rect.Dy()
+	c.drawAlphaMask(g.mask, gx, gy, col)
+}
+
+// drawAlphaMask альфа-блендит альфа-маску цветом col в back-буфер (Over,
+// premultiplied — как image/draw для font.Drawer). Учитывает clip.
+// (gx, gy) — позиция левого верхнего угла маски на холсте.
+func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
+	mw, mh := alpha.Rect.Dx(), alpha.Rect.Dy()
 	r := c.clampRect(image.Rect(gx, gy, gx+mw, gy+mh))
 	if r.Empty() {
 		return
@@ -434,8 +447,8 @@ func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
 	sb := uint32(col.B) * 0x101
 	sa := uint32(col.A) * 0x101
 	const m16 = 1<<16 - 1
-	mask := g.mask.Pix
-	mStride := g.mask.Stride
+	mask := alpha.Pix
+	mStride := alpha.Stride
 	dst := c.back.Pix
 	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
 		mRow := (yy - gy) * mStride
@@ -475,6 +488,12 @@ func (c *Canvas) runeAdvance(fc *FontCache, r rune, sizePt float64) fixed.Int26_
 
 // measureWithFallback измеряет ширину строки с учётом fallback-шрифтов.
 func (c *Canvas) measureWithFallback(fc *FontCache, text string, sizePt float64) int {
+	// Сложный текст: ширина после шейпинга (лигатуры меняют ширину строки).
+	if needsShaping(text) {
+		if l := c.shaper.layout(fc, c.fallbacks, text, sizePt); l != nil {
+			return l.width.Round()
+		}
+	}
 	if len(c.fallbacks) == 0 {
 		return fc.Measure(text, sizePt)
 	}
@@ -483,6 +502,77 @@ func (c *Canvas) measureWithFallback(fc *FontCache, text string, sizePt float64)
 		w += c.runeAdvance(fc, r, sizePt)
 	}
 	return w.Round()
+}
+
+// drawShapedText рисует строку через шейпер: глифы в видимом порядке,
+// маски растеризуются по GID и кэшируются. baseline — Y базовой линии.
+// false — шейпинг недоступен, вызывающий код рисует per-rune путём.
+func (c *Canvas) drawShapedText(fc *FontCache, text string, x, baseline int, sizePt float64, col color.RGBA) bool {
+	l := c.shaper.layout(fc, c.fallbacks, text, sizePt)
+	if l == nil {
+		return false
+	}
+	sizePx := fixed.Int26_6(sizePt * fc.dpi / 72.0 * 64.0)
+	pen := fixed.I(x)
+	for _, g := range l.glyphs {
+		// GID 0 = .notdef: руна не покрыта ни одним шрифтом — не рисуем
+		// «тофу»-квадрат (философия BUG-2), но перо продвигаем.
+		if g.gid == 0 {
+			pen += g.adv
+			continue
+		}
+		m := c.shaper.glyphMaskFor(g.face, g.gid, sizePx)
+		if m.mask != nil {
+			// Точка отрисовки: перо + XOffset; YOffset положителен вверх.
+			gx := (pen + g.xOff).Round() + m.offX
+			gy := baseline - g.yOff.Round() + m.offY
+			c.drawAlphaMask(m.mask, gx, gy, col)
+		}
+		pen += g.adv
+	}
+	return true
+}
+
+// shapedRunePositions — накопленные ширины по логическим рунам для сложного
+// текста: advance каждого кластера распределяется поровну между его рунами.
+// Для RTL это ЛОГИЧЕСКИЕ позиции (для каретки TextInput), не визуальные.
+func (c *Canvas) shapedRunePositions(fc *FontCache, text string, sizePt float64) []int {
+	l := c.shaper.layout(fc, c.fallbacks, text, sizePt)
+	if l == nil {
+		return nil
+	}
+	runes := []rune(text)
+	n := len(runes)
+	// Суммарный advance по кластерам (cluster = индекс первой руны кластера).
+	clusterAdv := make(map[int]fixed.Int26_6, n)
+	for _, g := range l.glyphs {
+		clusterAdv[g.cluster] += g.adv
+	}
+	// Границы кластеров в логическом порядке.
+	starts := make([]int, 0, len(clusterAdv))
+	for s := range clusterAdv {
+		starts = append(starts, s)
+	}
+	sort.Ints(starts)
+
+	pos := make([]int, n+1)
+	var acc fixed.Int26_6
+	for ci, s := range starts {
+		end := n
+		if ci+1 < len(starts) {
+			end = starts[ci+1]
+		}
+		adv := clusterAdv[s]
+		cnt := end - s
+		if cnt <= 0 {
+			continue
+		}
+		for k := 1; k <= cnt; k++ {
+			pos[s+k] = (acc + adv*fixed.Int26_6(k)/fixed.Int26_6(cnt)).Round()
+		}
+		acc += adv
+	}
+	return pos
 }
 
 // MeasureText возвращает ширину строки в пикселях (шрифт по умолчанию, sizePt).
@@ -497,7 +587,14 @@ func (c *Canvas) MeasureTextFont(text string, sizePt float64, fontName string) i
 
 // MeasureRunePositions возвращает накопленную ширину после каждого символа.
 // Результат: len(runes)+1 элементов; positions[0]==0, positions[n] — ширина text[:n].
+// Для сложного текста (шейпинг) позиции считаются по кластерам в ЛОГИЧЕСКОМ
+// порядке рун — визуальное позиционирование каретки в RTL не поддержано (v1).
 func (c *Canvas) MeasureRunePositions(text string, sizePt float64) []int {
+	if needsShaping(text) {
+		if pos := c.shapedRunePositions(c.fontCache, text, sizePt); pos != nil {
+			return pos
+		}
+	}
 	if len(c.fallbacks) == 0 {
 		return c.fontCache.MeasureRunes(text, sizePt)
 	}
