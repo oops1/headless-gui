@@ -7,6 +7,8 @@
 //
 //	native_windows.go  — Win32 API (user32/gdi32), чистый Go без CGO
 //	native_linux.go    — X11 протокол напрямую через Unix socket, без CGO
+//	native_wayland.go  — Wayland (xdg-shell + wl_shm) напрямую через Unix
+//	                     socket, без CGO; выбирается при живом WAYLAND_DISPLAY
 //	native_darwin.go   — Cocoa через github.com/ebitengine/purego, без CGO
 //
 // Бэкенды могут дополнительно реализовать dirtyRectBlitter (см. window.go) —
