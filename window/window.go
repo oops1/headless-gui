@@ -70,6 +70,9 @@ type Window struct {
 	// Текущий полный кадр (накапливаем dirty-тайлы).
 	mu      sync.Mutex
 	current *image.RGBA
+	// pendingDirty — объединение областей тайлов, применённых с последнего
+	// блита; сбрасывается после отправки в нативное окно.
+	pendingDirty image.Rectangle
 
 	// Флаг: запрошено закрытие окна (кнопка ×).
 	closeRequested atomic.Bool
@@ -444,20 +447,50 @@ func (win *Window) localePoll(lp localeProvider) {
 	}
 }
 
+// dirtyRectBlitter — опциональная возможность нативного бэкенда выводить
+// только изменившуюся область кадра (вместо полного BlitRGBA).
+// Контракт: первый вызов после изменения размера буфера всегда получает
+// полный прямоугольник (framePump это гарантирует).
+type dirtyRectBlitter interface {
+	BlitRGBADirty(img *image.RGBA, dirty image.Rectangle)
+}
+
 // framePump читает кадры из движка и отправляет на отрисовку.
 // Запускается в отдельной горутине.
+//
+// Полное копирование кадра перед блитом не делается: applyFrame и блит
+// выполняются последовательно в этой же горутине, а при resize старый буфер
+// остаётся валидным для чтения (заменяется целиком, не мутируется).
 func (win *Window) framePump() {
 	frames := win.eng.Frames()
+	db, hasDirtyBlit := win.native.(dirtyRectBlitter)
+	var lastBounds image.Rectangle // границы буфера на момент прошлого блита
+
 	for frame := range frames {
 		win.applyFrame(frame)
 
-		// Отправляем текущий буфер на отрисовку
 		win.mu.Lock()
-		snap := image.NewRGBA(win.current.Bounds())
-		copy(snap.Pix, win.current.Pix)
+		cur := win.current
+		dirty := win.pendingDirty
+		win.pendingDirty = image.Rectangle{}
 		win.mu.Unlock()
 
-		win.native.BlitRGBA(snap)
+		full := cur.Bounds()
+		if full != lastBounds {
+			// Размер сменился (resize) — нативный буфер должен быть
+			// заполнен целиком, частичный блит недопустим.
+			dirty = full
+			lastBounds = full
+		}
+		dirty = dirty.Intersect(full)
+		if dirty.Empty() {
+			continue
+		}
+		if hasDirtyBlit && dirty != full {
+			db.BlitRGBADirty(cur, dirty)
+		} else {
+			win.native.BlitRGBA(cur)
+		}
 	}
 }
 
@@ -478,11 +511,14 @@ func (win *Window) currentMod() widget.KeyMod {
 
 // ─── Внутренние методы ───────────────────────────────────────────────────────
 
-// applyFrame накладывает dirty-тайлы кадра на текущий буфер.
+// applyFrame накладывает dirty-тайлы кадра на текущий буфер и копит
+// объединение их областей в pendingDirty (для частичного блита).
 func (win *Window) applyFrame(frame output.Frame) {
 	win.mu.Lock()
 	defer win.mu.Unlock()
 	for _, tile := range frame.Tiles {
+		win.pendingDirty = win.pendingDirty.Union(
+			image.Rect(tile.X, tile.Y, tile.X+tile.W, tile.Y+tile.H))
 		rowBytes := tile.W * 4
 		for row := 0; row < tile.H; row++ {
 			srcOff := row * rowBytes

@@ -6,8 +6,11 @@
 // Реализации:
 //
 //	native_windows.go  — Win32 API (user32/gdi32), чистый Go без CGO
-//	native_linux.go    — X11 через github.com/jezek/xgb, чистый Go без CGO
+//	native_linux.go    — X11 протокол напрямую через Unix socket, без CGO
 //	native_darwin.go   — Cocoa через github.com/ebitengine/purego, без CGO
+//
+// Бэкенды могут дополнительно реализовать dirtyRectBlitter (см. window.go) —
+// тогда окно передаёт им только изменившуюся область кадра.
 package window
 
 import "image"
