@@ -31,11 +31,14 @@ type X11Window struct {
 	mu        sync.Mutex
 
 	// blitBuf — переиспользуемый буфер BGRA-конвертации для PutImage
-	// (раньше выделялся полный кадр на каждый блит).
+	// (раньше выделялся полный кадр на каждый блит). blitMu сериализует
+	// блиты из framePump и из Expose-обработчика (event loop).
 	blitBuf []byte
+	blitMu  sync.Mutex
 
 	// Callbacks
 	onResize      func(w, h int)
+	onExpose      func(r image.Rectangle)
 	onClose       func() bool
 	onMouseMove   func(x, y int)
 	onMouseButton func(x, y, button int, pressed bool)
@@ -231,7 +234,17 @@ func (w *X11Window) RunEventLoop() error {
 			}
 
 		case 12: // Expose
-			// Ничего — перерисовка через BlitRGBA
+			// ОС просит восстановить область окна — блитим из кэша кадра.
+			// Формат события: x@8, y@10, width@12, height@14 (little-endian).
+			if w.onExpose != nil {
+				ex := int(binary.LittleEndian.Uint16(buf[8:10]))
+				ey := int(binary.LittleEndian.Uint16(buf[10:12]))
+				ew := int(binary.LittleEndian.Uint16(buf[12:14]))
+				eh := int(binary.LittleEndian.Uint16(buf[14:16]))
+				if ew > 0 && eh > 0 {
+					w.onExpose(image.Rect(ex, ey, ex+ew, ey+eh))
+				}
+			}
 
 		case 22: // ConfigureNotify
 			newW := int(binary.LittleEndian.Uint16(buf[20:22]))
@@ -348,6 +361,9 @@ func (w *X11Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	dw := dirty.Dx()
 	dh := dirty.Dy()
 
+	w.blitMu.Lock()
+	defer w.blitMu.Unlock()
+
 	// X11 PutImage: формат ZPixmap, depth=24, BGRA order.
 	// Буфер содержит только dirty-область (строки шириной dw).
 	pixLen := dw * dh * 4
@@ -376,6 +392,9 @@ func (w *X11Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 
 // Callbacks
 func (w *X11Window) SetOnResize(fn func(w, h int))                              { w.onResize = fn }
+
+// SetOnExpose — колбэк перерисовки области по Expose (см. exposeNotifier).
+func (w *X11Window) SetOnExpose(fn func(r image.Rectangle)) { w.onExpose = fn }
 func (w *X11Window) SetOnClose(fn func() bool)                                   { w.onClose = fn }
 func (w *X11Window) SetOnMouseMove(fn func(x, y int))                            { w.onMouseMove = fn }
 func (w *X11Window) SetOnMouseButton(fn func(x, y, button int, pressed bool))    { w.onMouseButton = fn }

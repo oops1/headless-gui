@@ -93,9 +93,22 @@ func NewListView(items ...string) *ListView {
 // не указывать на тот же элемент.
 func (lv *ListView) SetItems(items []string) {
 	lv.mu.Lock()
-	defer lv.mu.Unlock()
 
 	wasAtBottom := lv.isAtBottom()
+
+	// Guard авто-инвалидации: перерисовка нужна только если содержимое,
+	// выделение или прокрутка фактически изменились.
+	same := len(items) == len(lv.items)
+	if same {
+		for i := range items {
+			if items[i] != lv.items[i] {
+				same = false
+				break
+			}
+		}
+	}
+	changed := !same || lv.selected != -1
+	oldScroll := lv.scrollY
 
 	lv.items = items
 	lv.selected = -1
@@ -107,6 +120,12 @@ func (lv *ListView) SetItems(items []string) {
 		lv.clampScroll()
 	default:
 		lv.scrollY = 0
+	}
+	changed = changed || lv.scrollY != oldScroll
+	lv.mu.Unlock()
+
+	if changed {
+		lv.Invalidate()
 	}
 }
 
@@ -130,15 +149,24 @@ func (lv *ListView) isAtBottom() bool {
 // Безопасно вызывать из любой goroutine.
 func (lv *ListView) ScrollToBottom() {
 	lv.mu.Lock()
-	defer lv.mu.Unlock()
+	old := lv.scrollY
 	lv.scrollY = lv.maxScroll()
+	changed := lv.scrollY != old
+	lv.mu.Unlock()
+	if changed {
+		lv.Invalidate()
+	}
 }
 
 // ScrollToTop прокручивает список в начало.
 func (lv *ListView) ScrollToTop() {
 	lv.mu.Lock()
-	defer lv.mu.Unlock()
+	changed := lv.scrollY != 0
 	lv.scrollY = 0
+	lv.mu.Unlock()
+	if changed {
+		lv.Invalidate()
+	}
 }
 
 // Items возвращает копию списка элементов.
@@ -155,22 +183,28 @@ func (lv *ListView) Items() []string {
 // прокрутка автоматически встанет в конец после добавления.
 func (lv *ListView) AddItem(text string) {
 	lv.mu.Lock()
-	defer lv.mu.Unlock()
 	wasAtBottom := lv.isAtBottom()
 	lv.items = append(lv.items, text)
 	if lv.AutoScrollToBottom && wasAtBottom {
 		lv.scrollY = lv.maxScroll()
 	}
+	lv.mu.Unlock()
+	lv.Invalidate() // новый элемент всегда меняет содержимое/скроллбар
 }
 
 // Clear удаляет все элементы из списка и сбрасывает выделение.
 func (lv *ListView) Clear() {
 	lv.mu.Lock()
-	defer lv.mu.Unlock()
+	changed := len(lv.items) > 0 || lv.selected != -1 ||
+		lv.hoverIdx != -1 || lv.scrollY != 0
 	lv.items = lv.items[:0]
 	lv.selected = -1
 	lv.hoverIdx = -1
 	lv.scrollY = 0
+	lv.mu.Unlock()
+	if changed {
+		lv.Invalidate()
+	}
 }
 
 // Selected возвращает индекс выделенного элемента (-1 если нет).
@@ -193,9 +227,14 @@ func (lv *ListView) SelectedText() string {
 // SetSelected программно выделяет элемент.
 func (lv *ListView) SetSelected(idx int) {
 	lv.mu.Lock()
-	defer lv.mu.Unlock()
-	if idx >= -1 && idx < len(lv.items) {
+	changed := false
+	if idx >= -1 && idx < len(lv.items) && idx != lv.selected {
 		lv.selected = idx
+		changed = true
+	}
+	lv.mu.Unlock()
+	if changed {
+		lv.Invalidate()
 	}
 }
 
@@ -375,6 +414,7 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 				lv.dragStartY = e.Y
 				lv.dragStartScr = lv.scrollY
 				lv.mu.Unlock()
+				lv.Invalidate() // ползунок подсвечивается при drag
 				return true
 			}
 			trackX := b.Max.X - lv.scrollbarWidth
@@ -383,23 +423,38 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 					// Кнопки ▲/▼ классического скроллбара — шаг на строку.
 					btn := classicSBBtnH(lv.scrollbarWidth)
 					if e.Y < b.Min.Y+btn {
+						old := lv.scrollY
 						lv.scrollY -= lv.ItemHeight
 						lv.clampScroll()
+						changed := lv.scrollY != old
 						lv.mu.Unlock()
+						if changed {
+							lv.Invalidate()
+						}
 						return true
 					}
 					if e.Y >= b.Max.Y-btn {
+						old := lv.scrollY
 						lv.scrollY += lv.ItemHeight
 						lv.clampScroll()
+						changed := lv.scrollY != old
 						lv.mu.Unlock()
+						if changed {
+							lv.Invalidate()
+						}
 						return true
 					}
 				}
 				top, workH := sbWorkArea(b, lv.scrollbarWidth)
 				ratio := float64(e.Y-top) / float64(workH)
+				old := lv.scrollY
 				lv.scrollY = int(ratio * float64(lv.contentHeight()))
 				lv.clampScroll()
+				changed := lv.scrollY != old
 				lv.mu.Unlock()
+				if changed {
+					lv.Invalidate()
+				}
 				return true
 			}
 		}
@@ -407,10 +462,14 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 		// Клик по элементу
 		idx := lv.itemIndexAt(e.X, e.Y)
 		if idx >= 0 {
+			changed := lv.selected != idx
 			lv.selected = idx
 			onSel := lv.OnSelect
 			text := lv.items[idx]
 			lv.mu.Unlock()
+			if changed {
+				lv.Invalidate() // выделение переместилось
+			}
 			if onSel != nil {
 				onSel(idx, text) // синхронно — вне lv.mu
 			}
@@ -420,6 +479,7 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 		if lv.dragging {
 			lv.dragging = false
 			lv.mu.Unlock()
+			lv.Invalidate() // подсветка ползунка гаснет
 			return true
 		}
 	}
@@ -434,6 +494,14 @@ func (lv *ListView) OnMouseMove(x, y int) {
 	}
 	lv.mu.Lock()
 	defer lv.mu.Unlock()
+
+	// Авто-инвалидация при фактическом изменении (LIFO — выполняется до Unlock).
+	oldScroll, oldHover, oldThumb := lv.scrollY, lv.hoverIdx, lv.thumbHovered
+	defer func() {
+		if lv.scrollY != oldScroll || lv.hoverIdx != oldHover || lv.thumbHovered != oldThumb {
+			lv.Invalidate()
+		}
+	}()
 
 	if lv.dragging {
 		dy := y - lv.dragStartY
@@ -472,6 +540,9 @@ func (lv *ListView) OnKeyEvent(e KeyEvent) {
 		return
 	}
 
+	// Снимок для авто-инвалидации при фактическом изменении.
+	oldSel, oldScroll := lv.selected, lv.scrollY
+
 	// Отложенный вызов OnSelect — после освобождения lv.mu (синхронно).
 	fireIdx, fireText, fire := -1, "", false
 
@@ -498,8 +569,12 @@ func (lv *ListView) OnKeyEvent(e KeyEvent) {
 		}
 	}
 	onSel := lv.OnSelect
+	visChanged := lv.selected != oldSel || lv.scrollY != oldScroll
 	lv.mu.Unlock()
 
+	if visChanged {
+		lv.Invalidate()
+	}
 	if fire && onSel != nil {
 		onSel(fireIdx, fireText)
 	}
@@ -523,9 +598,14 @@ func (lv *ListView) ensureVisible(idx int) {
 // ScrollBy прокручивает список на delta пикселей.
 func (lv *ListView) ScrollBy(delta int) {
 	lv.mu.Lock()
-	defer lv.mu.Unlock()
+	old := lv.scrollY
 	lv.scrollY += delta
 	lv.clampScroll()
+	changed := lv.scrollY != old
+	lv.mu.Unlock()
+	if changed {
+		lv.Invalidate()
+	}
 }
 
 // SetFocused реализует Focusable.

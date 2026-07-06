@@ -67,12 +67,18 @@ func (s *GridSplitter) OnMouseButton(e MouseEvent) bool {
 		return false
 	}
 	if e.Pressed {
-		s.dragging = true
+		if !s.dragging {
+			s.dragging = true
+			s.Invalidate() // подсветка активного сплиттера
+		}
 		s.startX = e.X
 		s.startY = e.Y
 		return true
 	}
-	s.dragging = false
+	if s.dragging {
+		s.dragging = false
+		s.Invalidate() // подсветка гаснет
+	}
 	if s.capMgr != nil {
 		s.capMgr.ReleaseCapture()
 	}
@@ -90,17 +96,23 @@ func (s *GridSplitter) OnMouseMove(x, y int) {
 			if dx != 0 {
 				s.grid.ResizeColumnsAround(s.GetGridColumn(), dx)
 				s.startX = x
+				s.grid.Invalidate() // перекладка ячеек — перерисовать весь Grid
 			}
 		} else {
 			dy := y - s.startY
 			if dy != 0 {
 				s.grid.ResizeRowsAround(s.GetGridRow(), dy)
 				s.startY = y
+				s.grid.Invalidate() // перекладка ячеек — перерисовать весь Grid
 			}
 		}
 		return
 	}
-	s.hovered = image.Pt(x, y).In(s.bounds)
+	hovered := image.Pt(x, y).In(s.bounds)
+	if hovered != s.hovered {
+		s.hovered = hovered
+		s.Invalidate()
+	}
 }
 
 // Cursor возвращает курсор изменения размера (для CursorProvider).

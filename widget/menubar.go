@@ -98,10 +98,26 @@ func (mb *MenuBar) AddTopItem(text string, onClick func()) {
 
 // SetBounds переопределяет для пересчёта позиций пунктов.
 func (mb *MenuBar) SetBounds(r image.Rectangle) {
-	mb.bounds = r
+	mb.Base.SetBounds(r) // Base сам инвалидирует старую+новую область
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
 	mb.recalcRects()
+}
+
+// setHoverIdx обновляет hover-пункт верхнего уровня. Полоса меню лежит
+// в bounds — при фактическом изменении достаточно точечной инвалидации.
+func (mb *MenuBar) setHoverIdx(idx int) {
+	if atomic.SwapInt32(&mb.hoverIdx, int32(idx)) != int32(idx) {
+		mb.Invalidate()
+	}
+}
+
+// setActiveIdx обновляет индекс открытого пункта (подсветка в bounds полосы).
+// Само подменю — overlay: его показ/скрытие инвалидирует PopupMenu.
+func (mb *MenuBar) setActiveIdx(idx int) {
+	if atomic.SwapInt32(&mb.activeIdx, int32(idx)) != int32(idx) {
+		mb.Invalidate()
+	}
 }
 
 // recalcRects вычисляет прямоугольники каждого пункта. Вызывать под Lock.
@@ -222,7 +238,7 @@ func (mb *MenuBar) OnMouseMove(x, y int) {
 	// Если курсор в полосе — обновляем hover и переключаем подменю.
 	if image.Pt(x, y).In(mb.Base.Bounds()) {
 		idx := mb.hitTopItem(x, y)
-		atomic.StoreInt32(&mb.hoverIdx, int32(idx))
+		mb.setHoverIdx(idx)
 
 		// Если подменю уже открыто — переключаем при наведении.
 		if atomic.LoadInt32(&mb.activeIdx) >= 0 && idx >= 0 && idx != int(atomic.LoadInt32(&mb.activeIdx)) {
@@ -232,7 +248,7 @@ func (mb *MenuBar) OnMouseMove(x, y int) {
 	}
 
 	// Иначе — делегируем в popup.
-	atomic.StoreInt32(&mb.hoverIdx, -1)
+	mb.setHoverIdx(-1)
 	if mb.popup.IsOpen() {
 		mb.popup.OnMouseMove(x, y)
 	}
@@ -268,7 +284,7 @@ func (mb *MenuBar) OnMouseButton(e MouseEvent) bool {
 		handled := mb.popup.OnMouseButton(e)
 		if !mb.popup.IsOpen() {
 			// Popup закрылся (выбран пункт или клик за пределами).
-			atomic.StoreInt32(&mb.activeIdx, -1)
+			mb.setActiveIdx(-1)
 		}
 		return handled
 	}
@@ -297,13 +313,13 @@ func (mb *MenuBar) openSubmenu(idx int) {
 		return
 	}
 
-	atomic.StoreInt32(&mb.activeIdx, int32(idx))
+	mb.setActiveIdx(idx)
 
 	// Настраиваем popup: копируем пункты подменю, настраиваем OnSelect.
 	topIdx := idx
 	mb.popup.SetItems(item.Items)
 	mb.popup.OnSelect = func(subIdx int, text string) {
-		atomic.StoreInt32(&mb.activeIdx, -1)
+		mb.setActiveIdx(-1)
 		if mb.OnSelect != nil {
 			mb.OnSelect(topIdx, subIdx, text)
 		}
@@ -316,7 +332,7 @@ func (mb *MenuBar) openSubmenu(idx int) {
 
 func (mb *MenuBar) closeSubmenu() {
 	mb.popup.Close()
-	atomic.StoreInt32(&mb.activeIdx, -1)
+	mb.setActiveIdx(-1)
 }
 
 // ─── Клавиатура ──────────────────────────────────────────────────────────────
@@ -343,7 +359,7 @@ func (mb *MenuBar) OnKeyEvent(e KeyEvent) {
 		default:
 			mb.popup.OnKeyEvent(e)
 			if !mb.popup.IsOpen() {
-				atomic.StoreInt32(&mb.activeIdx, -1)
+				mb.setActiveIdx(-1)
 			}
 			return
 		}

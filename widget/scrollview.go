@@ -58,11 +58,16 @@ func (sv *ScrollView) ScrollY() int {
 // SetScrollY задаёт смещение прокрутки с ограничением.
 func (sv *ScrollView) SetScrollY(y int) {
 	sv.mu.Lock()
-	defer sv.mu.Unlock()
-	sv.setScrollYLocked(y)
+	changed := sv.setScrollYLocked(y)
+	sv.mu.Unlock()
+	if changed {
+		sv.Invalidate()
+	}
 }
 
-func (sv *ScrollView) setScrollYLocked(y int) {
+// setScrollYLocked зажимает и применяет scrollY; возвращает true,
+// если смещение фактически изменилось (для авто-инвалидации).
+func (sv *ScrollView) setScrollYLocked(y int) bool {
 	maxY := sv.maxScroll()
 	if y < 0 {
 		y = 0
@@ -70,7 +75,11 @@ func (sv *ScrollView) setScrollYLocked(y int) {
 	if y > maxY {
 		y = maxY
 	}
+	if sv.scrollY == y {
+		return false
+	}
 	sv.scrollY = y
+	return true
 }
 
 // maxScroll возвращает максимальное значение scrollY.
@@ -224,6 +233,7 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 			sv.dragging = true
 			sv.dragStartY = e.Y
 			sv.dragStartScr = sv.scrollY
+			sv.Invalidate() // ползунок подсвечивается при drag
 			return true
 		}
 		// Клик на скроллбаре: кнопки ▲/▼ (классика) или прыжок по треку.
@@ -234,22 +244,29 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 				btn := classicSBBtnH(sv.scrollbarWidth)
 				const arrowStep = 40
 				if e.Y < b.Min.Y+btn {
-					sv.setScrollYLocked(sv.scrollY - arrowStep)
+					if sv.setScrollYLocked(sv.scrollY - arrowStep) {
+						sv.Invalidate()
+					}
 					return true
 				}
 				if e.Y >= b.Max.Y-btn {
-					sv.setScrollYLocked(sv.scrollY + arrowStep)
+					if sv.setScrollYLocked(sv.scrollY + arrowStep) {
+						sv.Invalidate()
+					}
 					return true
 				}
 			}
 			top, workH := sbWorkArea(b, sv.scrollbarWidth)
 			ratio := float64(e.Y-top) / float64(workH)
-			sv.setScrollYLocked(int(ratio * float64(sv.ContentHeight)))
+			if sv.setScrollYLocked(int(ratio * float64(sv.ContentHeight))) {
+				sv.Invalidate()
+			}
 			return true
 		}
 	} else {
 		if sv.dragging {
 			sv.dragging = false
+			sv.Invalidate() // подсветка ползунка гаснет
 			return true
 		}
 	}
@@ -269,7 +286,9 @@ func (sv *ScrollView) OnMouseMove(x, y int) {
 		trackUsable := workH - thumbH
 		if trackUsable > 0 {
 			scrollDelta := int(float64(dy) / float64(trackUsable) * float64(sv.maxScroll()))
-			sv.setScrollYLocked(sv.dragStartScr + scrollDelta)
+			if sv.setScrollYLocked(sv.dragStartScr + scrollDelta) {
+				sv.Invalidate()
+			}
 		}
 		return
 	}
@@ -277,15 +296,22 @@ func (sv *ScrollView) OnMouseMove(x, y int) {
 	// Hover на ползунке
 	if sv.needsScrollbar() {
 		tr := sv.thumbRect()
-		sv.thumbHovered = image.Pt(x, y).In(tr)
+		hov := image.Pt(x, y).In(tr)
+		if hov != sv.thumbHovered {
+			sv.thumbHovered = hov
+			sv.Invalidate()
+		}
 	}
 }
 
 // ScrollBy прокручивает на delta пикселей (положительное — вниз).
 func (sv *ScrollView) ScrollBy(delta int) {
 	sv.mu.Lock()
-	defer sv.mu.Unlock()
-	sv.setScrollYLocked(sv.scrollY + delta)
+	changed := sv.setScrollYLocked(sv.scrollY + delta)
+	sv.mu.Unlock()
+	if changed {
+		sv.Invalidate()
+	}
 }
 
 // ApplyTheme обновляет цвета ScrollView.

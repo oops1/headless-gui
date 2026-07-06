@@ -131,11 +131,15 @@ func NewPasswordInput(placeholder string) *TextInput {
 // SetPasswordMode включает/выключает режим пароля.
 func (t *TextInput) SetPasswordMode(v bool) {
 	t.mu.Lock()
+	changed := t.isPassword != v || (!v && t.showPassword)
 	t.isPassword = v
 	if !v {
 		t.showPassword = false
 	}
 	t.mu.Unlock()
+	if changed {
+		t.Invalidate()
+	}
 }
 
 // IsPasswordMode возвращает true, если поле в режиме пароля.
@@ -148,8 +152,12 @@ func (t *TextInput) IsPasswordMode() bool {
 // SetShowPassword показывает/скрывает пароль (только в password mode).
 func (t *TextInput) SetShowPassword(v bool) {
 	t.mu.Lock()
+	changed := t.showPassword != v
 	t.showPassword = v
 	t.mu.Unlock()
+	if changed {
+		t.Invalidate()
+	}
 }
 
 // ToggleShowPassword переключает видимость пароля.
@@ -157,6 +165,7 @@ func (t *TextInput) ToggleShowPassword() {
 	t.mu.Lock()
 	t.showPassword = !t.showPassword
 	t.mu.Unlock()
+	t.Invalidate() // переключение всегда меняет отображение
 }
 
 // ─── Текст ───────────────────────────────────────────────────────────────────
@@ -164,11 +173,17 @@ func (t *TextInput) ToggleShowPassword() {
 // SetText устанавливает содержимое поля и сбрасывает курсор в конец.
 func (t *TextInput) SetText(text string) {
 	t.mu.Lock()
-	t.runes = []rune(text)
-	t.caretPos = len(t.runes)
+	runes := []rune(text)
+	changed := string(t.runes) != text || t.caretPos != len(runes) ||
+		t.selStart != -1 || t.scrollX != 0
+	t.runes = runes
+	t.caretPos = len(runes)
 	t.selStart = -1
 	t.scrollX = 0
 	t.mu.Unlock()
+	if changed {
+		t.Invalidate()
+	}
 }
 
 // GetText возвращает текущее содержимое поля.
@@ -190,8 +205,12 @@ func (t *TextInput) Cursor(x, y int) Cursor {
 
 func (t *TextInput) SetFocused(focused bool) {
 	t.mu.Lock()
+	changed := t.focused != focused
 	t.focused = focused
 	t.mu.Unlock()
+	if changed {
+		t.Invalidate() // рамка фокуса и каретка
+	}
 }
 
 func (t *TextInput) IsFocused() bool {
@@ -274,9 +293,13 @@ func (t *TextInput) NeedsAnimation() bool {
 // помещает текст ошибки в ToolTip. Пустая строка снимает ошибку.
 func (t *TextInput) SetValidationError(msg string) {
 	t.mu.Lock()
+	changed := t.validationError != msg
 	t.validationError = msg
 	t.mu.Unlock()
 	t.SetToolTip(msg)
+	if changed {
+		t.Invalidate() // появление/снятие красной рамки
+	}
 }
 
 // ValidationError возвращает текущий текст ошибки ("" если поле корректно).
@@ -306,6 +329,8 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	changed := false
 	isUndoRedo := false
 	before := textEdit{text: string(t.runes), caret: t.caretPos}
+	// Снимок визуального состояния — для авто-инвалидации при фактическом изменении.
+	caret0, sel0, sel1 := t.caretPos, t.selStart, t.selEnd
 
 	switch e.Code {
 	case KeyLeft:
@@ -482,12 +507,17 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	}
 
 	t.clampCaret()
+	visChanged := changed || t.caretPos != caret0 || t.selStart != sel0 || t.selEnd != sel1
 	text := string(t.runes)
 	onCh := t.OnChange
 	fireEnter := t.fireEnter
 	t.fireEnter = false
 	onEnter := t.OnEnter
 	t.mu.Unlock()
+
+	if visChanged {
+		t.Invalidate() // текст/каретка/выделение фактически изменились
+	}
 
 	// Синхронный вызов вне t.mu: сохраняет порядок изменений (writeBack в
 	// модель идёт строго в порядке нажатий) и единую модель исполнения.
@@ -622,6 +652,15 @@ func (t *TextInput) OnMouseButton(e MouseEvent) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	// Авто-инвалидация: defer выполняется до Unlock (LIFO), поля читаем ещё
+	// под мьютексом; инвалидируем только при фактическом изменении.
+	caret0, sel0, sel1, eye0 := t.caretPos, t.selStart, t.selEnd, t.showPassword
+	defer func() {
+		if t.caretPos != caret0 || t.selStart != sel0 || t.selEnd != sel1 || t.showPassword != eye0 {
+			t.Invalidate()
+		}
+	}()
+
 	b := t.bounds
 
 	if e.Pressed {
@@ -700,6 +739,7 @@ func (t *TextInput) showContextMenu(x, y int) {
 					text := string(t.runes)
 					onCh := t.OnChange
 					t.mu.Unlock()
+					t.Invalidate() // текст изменился (было выделение)
 					if onCh != nil {
 						onCh(text) // синхронно — вне t.mu
 					}
@@ -729,7 +769,7 @@ func (t *TextInput) showContextMenu(x, y int) {
 					return
 				}
 				t.mu.Lock()
-				t.deleteSel()
+				hadSel := t.deleteSel()
 				paste := []rune(ct)
 				if t.MaxLength > 0 { // обрезаем под лимит (как при Ctrl+V)
 					room := t.MaxLength - len(t.runes)
@@ -751,6 +791,9 @@ func (t *TextInput) showContextMenu(x, y int) {
 				text := string(t.runes)
 				onCh := t.OnChange
 				t.mu.Unlock()
+				if hadSel || n > 0 {
+					t.Invalidate() // текст фактически изменился
+				}
 				if onCh != nil {
 					onCh(text) // синхронно — вне t.mu
 				}
@@ -762,10 +805,15 @@ func (t *TextInput) showContextMenu(x, y int) {
 			Disabled: !hasText,
 			OnClick: func() {
 				t.mu.Lock()
+				changed := t.selStart != 0 || t.selEnd != len(t.runes) ||
+					t.caretPos != len(t.runes)
 				t.selStart = 0
 				t.selEnd = len(t.runes)
 				t.caretPos = len(t.runes)
 				t.mu.Unlock()
+				if changed {
+					t.Invalidate()
+				}
 			},
 		},
 	})
@@ -783,6 +831,14 @@ func (t *TextInput) OnMouseMove(x, y int) {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Авто-инвалидация при фактическом изменении (LIFO — выполняется до Unlock).
+	caret0, sel1, eye0 := t.caretPos, t.selEnd, t.eyeHovered
+	defer func() {
+		if t.caretPos != caret0 || t.selEnd != sel1 || t.eyeHovered != eye0 {
+			t.Invalidate()
+		}
+	}()
 
 	// Drag-выделение: если ЛКМ зажата — обновляем selEnd и caretPos.
 	if t.dragging {

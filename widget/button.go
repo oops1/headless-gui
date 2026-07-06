@@ -73,7 +73,13 @@ type clickHandler struct {
 }
 
 // SetText задаёт текст кнопки (для биндингов и программного обновления).
-func (b *Button) SetText(s string) { b.Text = s }
+func (b *Button) SetText(s string) {
+	if b.Text == s {
+		return
+	}
+	b.Text = s
+	b.Invalidate()
+}
 
 // GetText возвращает текущий текст кнопки.
 func (b *Button) GetText() string { return b.Text }
@@ -104,11 +110,10 @@ func NewWin10AccentButton(text string) *Button {
 }
 
 // SetPressed потокобезопасно меняет состояние нажатия.
+// При фактическом изменении инвалидирует область кнопки (авто-damage).
 func (btn *Button) SetPressed(v bool) {
-	if v {
-		atomic.StoreInt32(&btn.pressed, 1)
-	} else {
-		atomic.StoreInt32(&btn.pressed, 0)
+	if atomic.SwapInt32(&btn.pressed, b2i(v)) != b2i(v) {
+		btn.Invalidate()
 	}
 }
 
@@ -118,11 +123,10 @@ func (btn *Button) IsPressed() bool {
 }
 
 // SetHovered потокобезопасно меняет состояние наведения.
+// При фактическом изменении инвалидирует область кнопки (авто-damage).
 func (btn *Button) SetHovered(v bool) {
-	if v {
-		atomic.StoreInt32(&btn.hovered, 1)
-	} else {
-		atomic.StoreInt32(&btn.hovered, 0)
+	if atomic.SwapInt32(&btn.hovered, b2i(v)) != b2i(v) {
+		btn.Invalidate()
 	}
 }
 
@@ -365,10 +369,8 @@ func (btn *Button) fireClick() {
 // ─── Focusable ───────────────────────────────────────────────────────────────
 
 func (btn *Button) SetFocused(v bool) {
-	if v {
-		atomic.StoreInt32(&btn.focused, 1)
-	} else {
-		atomic.StoreInt32(&btn.focused, 0)
+	if atomic.SwapInt32(&btn.focused, b2i(v)) != b2i(v) {
+		btn.Invalidate()
 	}
 }
 

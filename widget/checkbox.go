@@ -28,7 +28,13 @@ type CheckBox struct {
 }
 
 // SetText задаёт текст метки флажка.
-func (c *CheckBox) SetText(s string) { c.Text = s }
+func (c *CheckBox) SetText(s string) {
+	if c.Text == s {
+		return
+	}
+	c.Text = s
+	c.Invalidate()
+}
 
 // GetText возвращает текущий текст метки.
 func (c *CheckBox) GetText() string { return c.Text }
@@ -47,11 +53,10 @@ func NewCheckBox(text string) *CheckBox {
 }
 
 // SetChecked потокобезопасно задаёт состояние.
+// При фактическом изменении инвалидирует область виджета (авто-damage).
 func (cb *CheckBox) SetChecked(v bool) {
-	if v {
-		atomic.StoreInt32(&cb.checked, 1)
-	} else {
-		atomic.StoreInt32(&cb.checked, 0)
+	if atomic.SwapInt32(&cb.checked, b2i(v)) != b2i(v) {
+		cb.Invalidate()
 	}
 }
 
@@ -61,10 +66,8 @@ func (cb *CheckBox) IsChecked() bool {
 }
 
 func (cb *CheckBox) SetHovered(v bool) {
-	if v {
-		atomic.StoreInt32(&cb.hovered, 1)
-	} else {
-		atomic.StoreInt32(&cb.hovered, 0)
+	if atomic.SwapInt32(&cb.hovered, b2i(v)) != b2i(v) {
+		cb.Invalidate()
 	}
 }
 
@@ -176,10 +179,8 @@ func (cb *CheckBox) OnMouseButton(e MouseEvent) bool {
 // ─── Focusable ───────────────────────────────────────────────────────────────
 
 func (cb *CheckBox) SetFocused(v bool) {
-	if v {
-		atomic.StoreInt32(&cb.focused, 1)
-	} else {
-		atomic.StoreInt32(&cb.focused, 0)
+	if atomic.SwapInt32(&cb.focused, b2i(v)) != b2i(v) {
+		cb.Invalidate()
 	}
 }
 

@@ -164,6 +164,9 @@ func (win *Window) Run() error {
 	// Подключаем callbacks ввода
 	win.setupInputCallbacks()
 
+	// Перерисовка по WM_PAINT/Expose из кэша последнего кадра.
+	win.setupExposeRedraw()
+
 	// Синхронизация локали с раскладкой клавиатуры ОС (Windows/Linux).
 	win.setupLocaleSync()
 
@@ -453,6 +456,38 @@ func (win *Window) localePoll(lp localeProvider) {
 // полный прямоугольник (framePump это гарантирует).
 type dirtyRectBlitter interface {
 	BlitRGBADirty(img *image.RGBA, dirty image.Rectangle)
+}
+
+// exposeNotifier — опциональная возможность бэкенда сообщать, что ОС просит
+// перерисовать область окна (WM_PAINT / X11 Expose: окно было перекрыто,
+// свёрнуто и т.п.). Окно отвечает блитом из кэша последнего кадра — не
+// дожидаясь нового кадра от движка (при статичном UI его может не быть).
+type exposeNotifier interface {
+	SetOnExpose(fn func(r image.Rectangle))
+}
+
+// setupExposeRedraw регистрирует перерисовку по запросу ОС из win.current.
+// macOS не требует этого: содержимое CALayer ретейнится композитором.
+func (win *Window) setupExposeRedraw() {
+	en, ok := win.native.(exposeNotifier)
+	if !ok {
+		return
+	}
+	en.SetOnExpose(func(r image.Rectangle) {
+		win.mu.Lock()
+		cur := win.current
+		win.mu.Unlock()
+
+		r = r.Intersect(cur.Bounds())
+		if r.Empty() {
+			return
+		}
+		if db, ok := win.native.(dirtyRectBlitter); ok && r != cur.Bounds() {
+			db.BlitRGBADirty(cur, r)
+		} else {
+			win.native.BlitRGBA(cur)
+		}
+	})
 }
 
 // framePump читает кадры из движка и отправляет на отрисовку.

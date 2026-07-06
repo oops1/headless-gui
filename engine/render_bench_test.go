@@ -84,6 +84,31 @@ func BenchmarkDrawText(b *testing.B) {
 	}
 }
 
+// BenchmarkRenderFrameHover — интерактивный сценарий: курсор попеременно над
+// двумя кнопками (hover on/off через самоинвалидацию виджетов) + кадр.
+// Метрика стоимости типичного взаимодействия при on-demand по умолчанию.
+func BenchmarkRenderFrameHover(b *testing.B) {
+	eng, root := benchTextScene(1280, 800)
+	p := root.(*widget.Panel)
+	b1 := widget.NewButton("Кнопка A")
+	b1.SetBounds(image.Rect(100, 750, 220, 780))
+	b2 := widget.NewButton("Кнопка B")
+	b2.SetBounds(image.Rect(300, 750, 420, 780))
+	p.AddChild(b1)
+	p.AddChild(b2)
+	eng.renderFrame()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if i%2 == 0 {
+			eng.SendMouseMove(160, 765) // над кнопкой A
+		} else {
+			eng.SendMouseMove(360, 765) // над кнопкой B
+		}
+		eng.renderFrame()
+	}
+}
+
 // BenchmarkDiffFullNoChange — чистая стоимость полного diff 1920×1080 без изменений.
 func BenchmarkDiffFullNoChange(b *testing.B) {
 	eng := New(1920, 1080, 20)

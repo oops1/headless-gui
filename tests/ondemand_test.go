@@ -38,13 +38,36 @@ func waitCount(eng *engine.Engine, want uint64) bool {
 	return false
 }
 
-// По умолчанию (без on-demand) движок рендерит каждый тик.
-func TestOnDemand_DefaultModeRendersContinuously(t *testing.T) {
+// Рендер по запросу — режим по умолчанию (v3.5): без изменений UI кадры
+// пропускаются. Прежнее поведение «каждый тик» доступно через
+// SetRenderOnDemand(false).
+func TestOnDemand_IsDefaultMode(t *testing.T) {
 	eng, _ := newOnDemandEngine()
+	if !eng.RenderOnDemand() {
+		t.Fatal("рендер по запросу должен быть режимом по умолчанию")
+	}
+	eng.Start()
+	defer eng.Stop()
+
+	if !waitCount(eng, 1) {
+		t.Fatal("первый кадр не отрендерился")
+	}
+	time.Sleep(100 * time.Millisecond)
+	base := eng.RenderCount()
+	time.Sleep(300 * time.Millisecond)
+	if got := eng.RenderCount(); got > base+1 {
+		t.Fatalf("по умолчанию без изменений кадры должны пропускаться: %d → %d", base, got)
+	}
+}
+
+// SetRenderOnDemand(false) возвращает прежнее поведение: рендер каждый тик.
+func TestOnDemand_OptOutRendersContinuously(t *testing.T) {
+	eng, _ := newOnDemandEngine()
+	eng.SetRenderOnDemand(false)
 	eng.Start()
 	defer eng.Stop()
 	if !waitCount(eng, 5) {
-		t.Fatalf("default mode: RenderCount = %d, want >= 5", eng.RenderCount())
+		t.Fatalf("continuous mode: RenderCount = %d, want >= 5", eng.RenderCount())
 	}
 }
 
@@ -85,9 +108,14 @@ func TestOnDemand_InvalidateTriggersFrame(t *testing.T) {
 	}
 }
 
-// События мыши/клавиатуры инвалидируют автоматически.
+// События инвалидируют точечно: движение мыши над пустым местом не рождает
+// кадров, наведение на виджет с hover-состоянием — рождает (самоинвалидация),
+// клик — инвалидирует полностью.
 func TestOnDemand_InputAutoInvalidates(t *testing.T) {
 	eng, _ := newOnDemandEngine()
+	btn := widget.NewButton("btn")
+	btn.SetBounds(image.Rect(200, 100, 300, 130))
+	eng.Root().AddChild(btn)
 	eng.SetRenderOnDemand(true)
 	eng.Start()
 	defer eng.Stop()
@@ -95,9 +123,26 @@ func TestOnDemand_InputAutoInvalidates(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	base := eng.RenderCount()
 
-	eng.SendMouseMove(50, 50)
+	// Движение над пустым местом: hover ни у кого не меняется — кадров нет.
+	eng.SendMouseMove(50, 170)
+	time.Sleep(150 * time.Millisecond)
+	if got := eng.RenderCount(); got > base+1 {
+		t.Fatalf("mousemove над пустым местом не должен рождать кадры: %d → %d", base, got)
+	}
+
+	// Наведение на кнопку: hover изменился → кадр обязан отрендериться.
+	base = eng.RenderCount()
+	eng.SendMouseMove(250, 115)
 	if !waitCount(eng, base+1) {
-		t.Fatalf("после SendMouseMove RenderCount не вырос (%d)", eng.RenderCount())
+		t.Fatalf("после наведения на кнопку RenderCount не вырос (%d)", eng.RenderCount())
+	}
+
+	// Клик: полная инвалидация → кадр.
+	time.Sleep(100 * time.Millisecond)
+	base = eng.RenderCount()
+	eng.SendMouseButton(250, 115, widget.MouseLeft, true)
+	if !waitCount(eng, base+1) {
+		t.Fatalf("после клика RenderCount не вырос (%d)", eng.RenderCount())
 	}
 }
 

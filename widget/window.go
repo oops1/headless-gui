@@ -171,6 +171,15 @@ func NewWindow(title string, width, height int) *Window {
 	return w
 }
 
+// SetTitle задаёт текст заголовка окна (для биндингов и программного
+// обновления). При фактическом изменении инвалидирует область окна.
+func (w *Window) SetTitle(s string) {
+	if w.Title != s {
+		w.Title = s
+		w.Invalidate()
+	}
+}
+
 // resolvedTitleStyle возвращает конкретный стиль заголовка.
 // Если TitleStyle == WindowTitleAuto, определяет по текущей ОС.
 func (w *Window) resolvedTitleStyle() WindowTitleStyle {
@@ -702,9 +711,14 @@ func (w *Window) OnMouseMove(x, y int) {
 	if r := w.MaxBtnRect(); !r.Empty() && pt.In(r) {
 		hx = 1
 	}
-	w.hoverClose.Store(hc)
-	w.hoverMin.Store(hm)
-	w.hoverMax.Store(hx)
+	// Кнопки заголовка рисуются в bounds окна — при фактической смене
+	// hover-состояния достаточно точечной инвалидации.
+	c1 := w.hoverClose.Swap(hc) != hc
+	c2 := w.hoverMin.Swap(hm) != hm
+	c3 := w.hoverMax.Swap(hx) != hx
+	if c1 || c2 || c3 {
+		w.Invalidate()
+	}
 }
 
 // titleBarRect возвращает прямоугольник заголовка (без кнопок управления).
@@ -820,8 +834,12 @@ func (w *Window) DrawOverlay(ctx DrawContext) {
 // Dismiss реализует Dismissable — закрывает меню локали при клике в стороне.
 func (w *Window) Dismiss() {
 	w.localeMu.Lock()
+	wasOpen := w.localeMenuOpen
 	w.localeMenuOpen = false
 	w.localeMu.Unlock()
+	if wasOpen {
+		notifyUIChanged() // закрытие overlay-меню локали
+	}
 }
 
 // handleLocaleMouse обрабатывает клики, связанные с меню локали.
@@ -847,6 +865,7 @@ func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
 				w.localeMu.Lock()
 				w.localeMenuOpen = false
 				w.localeMu.Unlock()
+				notifyUIChanged() // закрытие overlay-меню локали
 				if i < len(items) {
 					RequestLocale(items[i])
 				}
@@ -857,6 +876,7 @@ func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
 		w.localeMu.Lock()
 		w.localeMenuOpen = false
 		w.localeMu.Unlock()
+		notifyUIChanged() // закрытие overlay-меню локали
 		return true, true
 	}
 
@@ -868,6 +888,7 @@ func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
 		w.localeMu.Lock()
 		w.localeMenuOpen = true
 		w.localeMu.Unlock()
+		notifyUIChanged() // открытие overlay-меню локали
 		return true, true
 	}
 	return false, false

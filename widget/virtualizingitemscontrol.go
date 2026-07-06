@@ -367,7 +367,15 @@ func (v *VirtualizingItemsControl) OnMouseButton(e MouseEvent) bool {
 	// release
 	if v.dragging {
 		v.dragging = false
+		// Пересчитываем hover ползунка по точке отпускания: во время drag
+		// OnMouseMove его не обновляет, состояние могло устареть.
+		hovered := image.Pt(e.X, e.Y).In(v.thumbRectLocked())
+		changed := hovered != v.thumbHovered
+		v.thumbHovered = hovered
 		v.mu.Unlock()
+		if changed {
+			v.Invalidate() // подсветка ползунка — в bounds
+		}
 		return true
 	}
 	v.mu.Unlock()
@@ -393,10 +401,16 @@ func (v *VirtualizingItemsControl) OnMouseMove(x, y int) {
 		v.updateVisible()
 		return
 	}
+	changed := false
 	if v.needsScrollbarLocked() {
-		v.thumbHovered = image.Pt(x, y).In(v.thumbRectLocked())
+		hovered := image.Pt(x, y).In(v.thumbRectLocked())
+		changed = hovered != v.thumbHovered
+		v.thumbHovered = hovered
 	}
 	v.mu.Unlock()
+	if changed {
+		v.Invalidate() // подсветка ползунка скроллбара — в bounds
+	}
 }
 
 // WantsCapture захватывает мышь при перетаскивании ползунка.
