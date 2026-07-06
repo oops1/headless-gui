@@ -31,6 +31,7 @@ const (
 
 	// Messages
 	wmDestroy     = 0x0002
+	wmActivate    = 0x0006
 	wmSize        = 0x0005
 	wmClose       = 0x0010
 	wmPaint       = 0x000F
@@ -264,6 +265,7 @@ type Win32Window struct {
 	onResize      func(w, h int)
 	onExpose      func(r image.Rectangle)
 	onDpiChanged  func(scale float64)
+	onActivate    func(active bool)
 	onClose       func() bool
 	onMouseMove   func(x, y int)
 	onMouseButton func(x, y, button int, pressed bool)
@@ -537,6 +539,9 @@ func (w *Win32Window) SetOnExpose(fn func(r image.Rectangle)) { w.onExpose = fn 
 // SetOnDpiChanged — колбэк смены DPI монитора (см. dpiChangeNotifier).
 func (w *Win32Window) SetOnDpiChanged(fn func(scale float64)) { w.onDpiChanged = fn }
 
+// SetOnActivate — колбэк смены активности окна (см. activationNotifier).
+func (w *Win32Window) SetOnActivate(fn func(active bool)) { w.onActivate = fn }
+
 // DetectScale включает per-monitor DPI awareness (v2) и возвращает
 // системный масштаб (DPI/96). На Windows до 1703 или при ошибке — 1.0.
 // Без awareness Windows растягивала бы наш кадр bitmap-скейлом (мыло).
@@ -707,6 +712,14 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			}
 		}
 		return 0
+
+	case wmActivate:
+		// LOWORD(wparam): WA_INACTIVE=0, WA_ACTIVE=1, WA_CLICKACTIVE=2.
+		if w.onActivate != nil {
+			w.onActivate(wparam&0xFFFF != 0)
+		}
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+		return ret
 
 	case wmDpichanged:
 		// Окно перенесли на монитор с другим DPI. wparam: LOWORD = новый DPI;

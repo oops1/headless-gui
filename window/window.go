@@ -74,6 +74,28 @@ type dpiChangeNotifier interface {
 	SetOnDpiChanged(fn func(scale float64))
 }
 
+// activationNotifier — опциональное уведомление о смене активности окна
+// (Win32 WM_ACTIVATE, X11 FocusIn/FocusOut). widget.Window рисует
+// неактивный заголовок приглушённым (Win2000 — серый градиент).
+type activationNotifier interface {
+	SetOnActivate(fn func(active bool))
+}
+
+// setupActivation подключает активность нативного окна к widget.Window.
+func (win *Window) setupActivation() {
+	an, ok := win.native.(activationNotifier)
+	if !ok {
+		return
+	}
+	ww, ok := win.eng.Root().(*widget.Window)
+	if !ok {
+		return
+	}
+	an.SetOnActivate(func(active bool) {
+		ww.SetActive(active)
+	})
+}
+
 // detectScale возвращает HiDPI-масштаб: env HEADLESS_GUI_SCALE имеет
 // приоритет (ручное управление на X11/macOS), иначе — от бэкенда.
 func detectScale(native NativeWindow) float64 {
@@ -248,6 +270,9 @@ func (win *Window) Run() error {
 
 	// Перерисовка по WM_PAINT/Expose из кэша последнего кадра.
 	win.setupExposeRedraw()
+
+	// Активность окна (фокус ОС) → приглушённый заголовок widget.Window.
+	win.setupActivation()
 
 	// Синхронизация локали с раскладкой клавиатуры ОС (Windows/Linux).
 	win.setupLocaleSync()
