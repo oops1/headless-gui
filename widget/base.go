@@ -101,10 +101,35 @@ type Base struct {
 	hasCursorOverride bool
 }
 
-func (b *Base) Bounds() image.Rectangle     { return b.bounds }
-func (b *Base) SetBounds(r image.Rectangle) { b.bounds = r }
-func (b *Base) Children() []Widget          { return b.children }
-func (b *Base) AddChild(w Widget)           { b.children = append(b.children, w) }
+func (b *Base) Bounds() image.Rectangle { return b.bounds }
+
+// SetBounds задаёт границы виджета. Если границы фактически изменились —
+// инвалидируется объединение старой и новой области (перемещение/ресайз
+// перерисовываются точечно). Повторный вызов с теми же границами — no-op,
+// поэтому layout-проходы контейнеров не порождают лишних уведомлений.
+func (b *Base) SetBounds(r image.Rectangle) {
+	if r == b.bounds {
+		return
+	}
+	notifyRectChanged(b.bounds.Union(r))
+	b.bounds = r
+}
+
+func (b *Base) Children() []Widget { return b.children }
+
+// AddChild добавляет дочерний виджет и инвалидирует его область.
+func (b *Base) AddChild(w Widget) {
+	b.children = append(b.children, w)
+	notifyRectChanged(w.Bounds())
+}
+
+// Invalidate помечает область виджета изменившейся: движок перерисует её на
+// ближайшем кадре. Сеттеры виджетов вызывают его при фактическом изменении
+// визуального состояния; приложению он нужен после прямой мутации
+// экспортированных полей (btn.Text = ... → btn.Invalidate()).
+func (b *Base) Invalidate() {
+	notifyRectChanged(b.bounds)
+}
 
 // RemoveChild удаляет дочерний виджет из контейнера (по указателю).
 // Возвращает true, если виджет был найден и удалён.
@@ -113,6 +138,7 @@ func (b *Base) RemoveChild(w Widget) bool {
 	for i, child := range b.children {
 		if child == w {
 			b.children = append(b.children[:i], b.children[i+1:]...)
+			notifyRectChanged(w.Bounds())
 			return true
 		}
 	}
@@ -120,14 +146,23 @@ func (b *Base) RemoveChild(w Widget) bool {
 }
 
 // ClearChildren удаляет всех потомков (используется при перестроении ItemsControl).
-func (b *Base) ClearChildren() { b.children = nil }
+func (b *Base) ClearChildren() {
+	b.children = nil
+	b.Invalidate()
+}
 
 // IsEnabled возвращает true, если виджет включён (WPF IsEnabled).
 // По умолчанию все виджеты включены.
 func (b *Base) IsEnabled() bool { return !b.disabled }
 
 // SetEnabled включает/выключает виджет (WPF IsEnabled).
-func (b *Base) SetEnabled(v bool) { b.disabled = !v }
+func (b *Base) SetEnabled(v bool) {
+	if b.disabled == !v {
+		return
+	}
+	b.disabled = !v
+	b.Invalidate()
+}
 
 // ── Visibility (WPF Visibility) ─────────────────────────────────────────────
 
@@ -137,7 +172,13 @@ func (b *Base) IsVisible() bool { return !b.hidden }
 
 // SetVisible показывает (true) или скрывает (false) виджет.
 // Аналог WPF Visibility: true ↔ Visible, false ↔ Collapsed.
-func (b *Base) SetVisible(v bool) { b.hidden = !v }
+func (b *Base) SetVisible(v bool) {
+	if b.hidden == !v {
+		return
+	}
+	b.hidden = !v
+	b.Invalidate()
+}
 
 // ── ToolTip (WPF ToolTip) ───────────────────────────────────────────────────
 
