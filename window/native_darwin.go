@@ -9,16 +9,26 @@ macOS backend через purego — вызов Cocoa/AppKit API без CGO.
   objc.GetClass, objc.RegisterName, objc.ID.Send
 
 Минимальный набор классов:
-  NSApplication, NSWindow, NSView, NSEvent, NSImage, NSBitmapImageRep
+  NSApplication, NSWindow, NSView, NSEvent, CALayer, CATransaction
+
+Фреймворки AppKit/QuartzCore/CoreGraphics загружаются через dlopen —
+чистый Go-бинарь их не линкует, без явной загрузки objc.GetClass
+возвращает 0 и бэкенд не работает.
+
+Вывод кадра: CGImage → CALayer.contents (композитор). Старый путь
+NSBitmapImageRep + NSImage + lockFocus (deprecated с macOS 10.14)
+доступен через переменную окружения HEADLESS_GUI_COCOA_LEGACY=1.
 */
 
 import (
 	"fmt"
 	"image"
+	"os"
 	"runtime"
 	"sync"
 	"unsafe"
 
+	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
 )
 
@@ -55,7 +65,15 @@ type CocoaWindow struct {
 	onChar        func(r rune)
 
 	// Для BlitRGBA
-	frameBuf []byte
+	frameBuf []byte // legacy-путь (NSBitmapImageRep, с переворотом Y)
+
+	// CALayer-путь: слой contentView и двойной пиксельный буфер.
+	// Двойная буферизация нужна потому, что Core Animation может читать
+	// данные CGImage лениво — пишем следующий кадр в другой буфер.
+	nsLayer    objc.ID
+	layerBufs  [2][]byte
+	layerBufIx int
+	legacyBlit bool // HEADLESS_GUI_COCOA_LEGACY=1 — старый путь через lockFocus
 }
 
 // Cocoa selectors (кэшируем)
@@ -146,7 +164,75 @@ func initCocoaSelectors() {
 	selFlushGraphics = objc.RegisterName("flushGraphics")
 	selCurrentContext = objc.RegisterName("currentContext")
 
+	// CALayer selectors
+	selSetWantsLayer = objc.RegisterName("setWantsLayer:")
+	selLayer = objc.RegisterName("layer")
+	selSetContents = objc.RegisterName("setContents:")
+	selBegin = objc.RegisterName("begin")
+	selCommit = objc.RegisterName("commit")
+	selSetDisableActions = objc.RegisterName("setDisableActions:")
+
 	cocoaInited = true
+}
+
+// ─── Загрузка фреймворков и функций CoreGraphics ────────────────────────────
+
+var (
+	selSetWantsLayer     objc.SEL
+	selLayer             objc.SEL
+	selSetContents       objc.SEL
+	selBegin             objc.SEL
+	selCommit            objc.SEL
+	selSetDisableActions objc.SEL
+
+	// CoreGraphics: CGImage из сырого пиксельного буфера.
+	cgColorSpaceCreateDeviceRGB  func() uintptr
+	cgDataProviderCreateWithData func(info, data, size, releaseCallback uintptr) uintptr
+	cgDataProviderRelease        func(provider uintptr)
+	cgImageCreate                func(width, height, bitsPerComponent, bitsPerPixel, bytesPerRow,
+		colorSpace uintptr, bitmapInfo uint32, provider, decode uintptr,
+		shouldInterpolate uintptr, intent uintptr) uintptr
+	cgImageRelease func(img uintptr)
+
+	cgColorSpace uintptr // DeviceRGB, создаётся один раз
+
+	frameworksOnce sync.Once
+	frameworksErr  error
+)
+
+// kCGImageAlphaPremultipliedLast: порядок байт в памяти R,G,B,A
+// (premultiplied; альфа канваса всегда 255, так что эквивалентно straight).
+const cgBitmapRGBA8888 uint32 = 1
+
+// loadFrameworks загружает AppKit/QuartzCore/CoreGraphics в процесс и
+// биндит функции CoreGraphics. Обязательный шаг: Go-бинарь без CGO не
+// линкует фреймворки, и без dlopen классы Cocoa недоступны.
+func loadFrameworks() error {
+	frameworksOnce.Do(func() {
+		for _, lib := range []string{
+			"/System/Library/Frameworks/AppKit.framework/AppKit",
+			"/System/Library/Frameworks/QuartzCore.framework/QuartzCore",
+		} {
+			if _, err := purego.Dlopen(lib, purego.RTLD_LAZY|purego.RTLD_GLOBAL); err != nil {
+				frameworksErr = fmt.Errorf("cocoa: dlopen %s: %w", lib, err)
+				return
+			}
+		}
+		cg, err := purego.Dlopen(
+			"/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
+			purego.RTLD_LAZY|purego.RTLD_GLOBAL)
+		if err != nil {
+			frameworksErr = fmt.Errorf("cocoa: dlopen CoreGraphics: %w", err)
+			return
+		}
+		purego.RegisterLibFunc(&cgColorSpaceCreateDeviceRGB, cg, "CGColorSpaceCreateDeviceRGB")
+		purego.RegisterLibFunc(&cgDataProviderCreateWithData, cg, "CGDataProviderCreateWithData")
+		purego.RegisterLibFunc(&cgDataProviderRelease, cg, "CGDataProviderRelease")
+		purego.RegisterLibFunc(&cgImageCreate, cg, "CGImageCreate")
+		purego.RegisterLibFunc(&cgImageRelease, cg, "CGImageRelease")
+		cgColorSpace = cgColorSpaceCreateDeviceRGB()
+	})
+	return frameworksErr
 }
 
 // nsString создаёт NSString из Go-строки.
@@ -181,11 +267,15 @@ func NewNativeWindow() NativeWindow {
 
 func (w *CocoaWindow) Create(title string, width, height int) error {
 	runtime.LockOSThread()
+	if err := loadFrameworks(); err != nil {
+		return err
+	}
 	initCocoaSelectors()
 
 	w.title = title
 	w.width = width
 	w.height = height
+	w.legacyBlit = os.Getenv("HEADLESS_GUI_COCOA_LEGACY") == "1"
 
 	// NSApplication.sharedApplication
 	nsAppClass := objc.GetClass("NSApplication")
@@ -233,6 +323,16 @@ func (w *CocoaWindow) Create(title string, width, height int) error {
 
 	// Получаем contentView
 	w.nsView = w.nsWindow.Send(selContentView)
+
+	// Layer-backed view: кадры выводятся через CALayer.contents (композитор),
+	// без deprecated lockFocus. Слой запрашиваем после setWantsLayer.
+	if !w.legacyBlit {
+		w.nsView.Send(selSetWantsLayer, 1)
+		w.nsLayer = w.nsView.Send(selLayer)
+		if w.nsLayer == 0 {
+			w.legacyBlit = true // слой недоступен — откат на старый путь
+		}
+	}
 
 	return nil
 }
@@ -427,6 +527,61 @@ func (w *CocoaWindow) BlitRGBA(img *image.RGBA) {
 		return
 	}
 
+	if w.legacyBlit || w.nsLayer == 0 {
+		w.blitRGBALegacy(img, width, height)
+		return
+	}
+
+	// CALayer-путь: пиксели → CGImage → layer.contents.
+	// Без переворота Y: CGImage отображается в contents в естественной
+	// ориентации (строка 0 — верх). Копия нужна, т.к. img мутируется
+	// следующим кадром, а Core Animation может читать данные лениво;
+	// двойной буфер защищает и от чтения после подмены contents.
+	pixLen := height * img.Stride
+	w.mu.Lock()
+	w.layerBufIx ^= 1
+	buf := w.layerBufs[w.layerBufIx]
+	if len(buf) < pixLen {
+		buf = make([]byte, pixLen)
+		w.layerBufs[w.layerBufIx] = buf
+	}
+	copy(buf[:pixLen], img.Pix[:pixLen])
+	dataPtr := uintptr(unsafe.Pointer(&buf[0]))
+	w.mu.Unlock()
+
+	provider := cgDataProviderCreateWithData(0, dataPtr, uintptr(pixLen), 0)
+	if provider == 0 {
+		return
+	}
+	cgImg := cgImageCreate(
+		uintptr(width), uintptr(height),
+		8, 32, uintptr(img.Stride),
+		cgColorSpace, cgBitmapRGBA8888,
+		provider, 0,
+		0, // shouldInterpolate = false
+		0, // kCGRenderingIntentDefault
+	)
+	if cgImg == 0 {
+		cgDataProviderRelease(provider)
+		return
+	}
+
+	// Подмена contents в транзакции без implicit-анимаций.
+	caTransaction := objc.ID(objc.GetClass("CATransaction"))
+	caTransaction.Send(selBegin)
+	caTransaction.Send(selSetDisableActions, 1)
+	w.nsLayer.Send(selSetContents, uintptr(cgImg))
+	caTransaction.Send(selCommit)
+
+	// Слой удерживает contents; наши ссылки больше не нужны.
+	cgImageRelease(cgImg)
+	cgDataProviderRelease(provider)
+}
+
+// blitRGBALegacy — прежний путь вывода через NSBitmapImageRep + NSImage +
+// lockFocus (deprecated с macOS 10.14). Оставлен как аварийный фолбэк:
+// HEADLESS_GUI_COCOA_LEGACY=1.
+func (w *CocoaWindow) blitRGBALegacy(img *image.RGBA, width, height int) {
 	// Подготавливаем RGBA данные (Cocoa Y=0 внизу → переворачиваем)
 	pixLen := width * height * 4
 	w.mu.Lock()
