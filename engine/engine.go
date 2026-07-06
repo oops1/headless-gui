@@ -493,6 +493,37 @@ func (e *Engine) Stop() {
 	}
 }
 
+// ─── Accessibility ──────────────────────────────────────────────────────────
+
+// AccessibilityTree возвращает семантический снапшот UI: дерево ролей, имён,
+// значений и состояний (см. widget.BuildAccessTree). Модальные диалоги
+// добавляются детьми корня с состоянием modal. Снапшот сериализуем в JSON —
+// в стриминговых сценариях передаётся side-channel'ом рядом с тайлами кадра
+// и озвучивается скринридером на стороне клиента.
+func (e *Engine) AccessibilityTree() *widget.AccessNode {
+	e.mu.RLock()
+	root := e.root
+	e.mu.RUnlock()
+	focused := e.focus.get()
+
+	tree := widget.BuildAccessTree(root, focused)
+	if tree == nil {
+		return nil
+	}
+
+	e.modMu.Lock()
+	modals := make([]widget.ModalWidget, len(e.modals))
+	copy(modals, e.modals)
+	e.modMu.Unlock()
+	for _, m := range modals {
+		if mn := widget.BuildAccessTree(m, focused); mn != nil {
+			mn.States = append(mn.States, widget.StateModal)
+			tree.Children = append(tree.Children, mn)
+		}
+	}
+	return tree
+}
+
 // ─── Modal ──────────────────────────────────────────────────────────────────
 
 // ShowModal показывает модальный виджет поверх всего UI.
