@@ -47,7 +47,53 @@ type Dialog struct {
 	// в заголовке диалога. По умолчанию true; отключаемое свойство.
 	ShowLocaleIndicator bool
 
-	modal bool // управляется движком: true пока диалог показан
+	// DefaultAction вызывается по Enter (кнопка по умолчанию диалога).
+	DefaultAction func()
+	// CancelAction вызывается по Escape в дополнение к закрытию (может быть nil;
+	// само закрытие модалки по Escape выполняет движок).
+	CancelAction func()
+	// CopyText, если задан, вызывается по Ctrl+C и его результат кладётся
+	// в буфер обмена (MessageBox формирует Windows-подобный дамп).
+	CopyText func() string
+
+	modal      bool  // управляется движком: true пока диалог показан
+	localeSubs []int // id подписчиков на смену языка (снимаются при закрытии)
+}
+
+// OnLanguageChange регистрирует применение перевода при смене языка
+// интерфейса, пока диалог открыт. apply вызывается сразу (для текущего
+// языка) и далее при каждом SetLanguage; подписка снимается в SetModal(false).
+func (d *Dialog) OnLanguageChange(apply func()) {
+	apply()
+	id := AddLanguageListener(func(string) {
+		apply()
+		d.Invalidate()
+	})
+	d.localeSubs = append(d.localeSubs, id)
+}
+
+// OnCancel вызывается движком при закрытии диалога по Escape (после
+// CancelAction сообщает результат отмены). Клик по × движок не перехватывает —
+// у модального диалога кнопки закрытия нет, отмена идёт через Escape/кнопку.
+func (d *Dialog) OnCancel() {
+	if d.CancelAction != nil {
+		d.CancelAction()
+	}
+}
+
+// HandleInputBinding обрабатывает клавиши диалога до фокус-диспатча:
+// Enter → DefaultAction, Ctrl+C → копирование содержимого (см. CopyText).
+// Движок вызывает его у верхнего модального виджета (см. SendKeyEvent).
+func (d *Dialog) HandleInputBinding(code KeyCode, mod KeyMod) bool {
+	switch {
+	case code == KeyEnter && mod == 0 && d.DefaultAction != nil:
+		d.DefaultAction()
+		return true
+	case code == KeyC && mod&ModCtrl != 0 && d.CopyText != nil:
+		ClipboardSetText(d.CopyText())
+		return true
+	}
+	return false
 }
 
 // NewDialog создаёт модальный диалог заданного размера.
@@ -76,7 +122,16 @@ func (d *Dialog) IsModal() bool { return d.modal }
 func (d *Dialog) DimColor() color.RGBA { return d.Dim }
 
 // SetModal управляет модальным состоянием (вызывается движком).
-func (d *Dialog) SetModal(v bool) { d.modal = v }
+// При закрытии снимает подписки на смену языка.
+func (d *Dialog) SetModal(v bool) {
+	d.modal = v
+	if !v {
+		for _, id := range d.localeSubs {
+			RemoveLanguageListener(id)
+		}
+		d.localeSubs = nil
+	}
+}
 
 // ContentBounds возвращает прямоугольник для размещения дочерних виджетов
 // (под заголовком, с отступами).

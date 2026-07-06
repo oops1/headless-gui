@@ -573,12 +573,21 @@ func (e *Engine) CloseModal(m widget.ModalWidget) {
 	e.modMu.Lock()
 	defer e.modMu.Unlock()
 
+	// notifyClosed уведомляет диалог о закрытии (снимает подписки локали и т.п.).
+	notifyClosed := func(w widget.ModalWidget) {
+		if sm, ok := w.(interface{ SetModal(bool) }); ok {
+			sm.SetModal(false)
+		}
+	}
+
 	if m == nil && len(e.modals) > 0 {
+		notifyClosed(e.modals[len(e.modals)-1])
 		e.modals = e.modals[:len(e.modals)-1]
 		return
 	}
 	for i, modal := range e.modals {
 		if modal == m {
+			notifyClosed(modal)
 			e.modals = append(e.modals[:i], e.modals[i+1:]...)
 			return
 		}
