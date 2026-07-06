@@ -624,6 +624,14 @@ func main() {
 			if l := lbl("lblFPS"); l != nil {
 				l.SetText(fmt.Sprintf("%.0f FPS", 60.0))
 			}
+
+			// Вкладка «Текст и графика»: текущий HiDPI-масштаб.
+			if l := lbl("lblScale"); l != nil {
+				pw, ph := eng.PhysicalSize()
+				lw, lh := eng.CanvasSize()
+				l.SetText(fmt.Sprintf("Масштаб: %.0f%%  ·  логический %d×%d → физический %d×%d",
+					eng.Scale()*100, lw, lh, pw, ph))
+			}
 		}
 	}()
 

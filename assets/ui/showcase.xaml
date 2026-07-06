@@ -3,10 +3,21 @@
     GuiEngine — Widget Showcase
     Демонстрация ВСЕХ доступных виджетов движка.
     WPF-совместимый XAML.
+
+    Корень — <Window>: настоящий заголовок окна с кнопками ✕ ─ □,
+    перетаскиванием за тайтлбар и ресайзом (chrome рисует движок,
+    оформление следует выбранной теме — Win10/Win11/Win2000/Mac).
 -->
+<Window Name="rootWin" Title="GuiEngine — Widget Showcase" Width="1282" Height="934"
+        ResizeMode="CanResize" Background="#0D0D1A">
+
+    <Window.InputBindings>
+        <KeyBinding Modifiers="Ctrl" Key="S" Command="{Binding SaveCommand}"/>
+    </Window.InputBindings>
+
 <Canvas Name="root" Width="1280" Height="900" Background="#0D0D1A">
 
-    <!-- Ресурсы и горячие клавиши для вкладки «3.2.4» (новый функционал) -->
+    <!-- Ресурсы для вкладки «3.2.4» (новый функционал) -->
     <Canvas.Resources>
         <SolidColorBrush x:Key="Accent324" Color="#0E639C"/>
         <Style x:Key="H324" TargetType="TextBlock">
@@ -28,9 +39,6 @@
             </Border>
         </ControlTemplate>
     </Canvas.Resources>
-    <Canvas.InputBindings>
-        <KeyBinding Modifiers="Ctrl" Key="S" Command="{Binding SaveCommand}"/>
-    </Canvas.InputBindings>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
          HEADER BAR
@@ -767,6 +775,82 @@
             </Canvas>
         </TabItem>
 
+        <!-- ─────────────────────────────────────────────────────────────────
+             TAB «Текст и графика» — шейпинг (HarfBuzz), AA-фигуры, HiDPI
+             ───────────────────────────────────────────────────────────────── -->
+        <TabItem Header="Текст и графика">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+
+                <!-- ─── Левая колонка: шейпинг сложного текста ─────────────── -->
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="Шейпинг текста (HarfBuzz, чистый Go)"/>
+                <Separator Left="24" Top="40" Width="490" Height="1" Background="#313244"/>
+
+                <TextBlock Left="24" Top="56" Foreground="#9399B2" Text="Арабский (лигатуры, связные формы):"/>
+                <TextBlock Left="24" Top="78" FontSize="15" Foreground="#CDD6F4"
+                           Text="مرحبا بالعالم — لا إله إلا الله"/>
+
+                <TextBlock Left="24" Top="112" Foreground="#9399B2" Text="Иврит (RTL):"/>
+                <TextBlock Left="24" Top="134" FontSize="15" Foreground="#CDD6F4"
+                           Text="שלום עולם — כתיבה מימין לשמאל"/>
+
+                <TextBlock Left="24" Top="168" Foreground="#9399B2" Text="Деванагари (конъюнкты):"/>
+                <TextBlock Left="24" Top="190" FontSize="15" Foreground="#CDD6F4"
+                           Text="नमस्ते दुनिया — क्ष त्र ज्ञ"/>
+
+                <TextBlock Left="24" Top="224" Foreground="#9399B2" Text="Тайский (mark positioning):"/>
+                <TextBlock Left="24" Top="246" FontSize="15" Foreground="#CDD6F4"
+                           Text="สวัสดีชาวโลก"/>
+
+                <TextBlock Left="24" Top="280" Foreground="#9399B2" Text="Смешанный LTR + RTL (bidi):"/>
+                <TextBlock Left="24" Top="302" FontSize="15" Foreground="#A6E3A1"
+                           Text="User أحمد (роль: מנהל) — активен"/>
+
+                <TextBlock Left="24" Top="344" Width="490" Foreground="#6C7086"
+                           Text="Латиница и кириллица идут быстрым per-rune путём; шейпер включается только для скриптов, которым он нужен."/>
+
+                <!-- ─── Правая колонка: сглаженная графика ─────────────────── -->
+                <TextBlock Left="556" Top="16" Style="{StaticResource H324}"
+                           Text="Сглаженная графика (antialiasing)"/>
+                <Separator Left="556" Top="40" Width="470" Height="1" Background="#313244"/>
+
+                <TextBlock Left="556" Top="56" Foreground="#9399B2" Text="Ellipse (Fill / Stroke):"/>
+                <Ellipse Left="556" Top="80" Width="110" Height="70" Fill="#5AC878"/>
+                <Ellipse Left="686" Top="80" Width="110" Height="70"
+                         Stroke="#F09632" StrokeThickness="4"/>
+                <Ellipse Left="816" Top="80" Width="70" Height="70"
+                         Fill="#0078D4" Stroke="#CDD6F4" StrokeThickness="1"/>
+
+                <TextBlock Left="556" Top="170" Foreground="#9399B2" Text="Polygon / Line (толщина 1–5):"/>
+                <Polygon Left="564" Top="250" Width="93" Height="87"
+                         Points="610,250 622,282 656,284 630,304 640,336 610,318 580,336 590,304 564,284 598,282"
+                         Fill="#F09632"/>
+                <Line Left="700" Top="200" Width="321" Height="16"
+                      X1="700" Y1="200" X2="1020" Y2="215" Stroke="#CDD6F4" StrokeThickness="1"/>
+                <Line Left="700" Top="230" Width="321" Height="26"
+                      X1="700" Y1="230" X2="1020" Y2="255" Stroke="#89B4FA" StrokeThickness="2"/>
+                <Line Left="700" Top="265" Width="321" Height="36"
+                      X1="700" Y1="265" X2="1020" Y2="300" Stroke="#A6E3A1" StrokeThickness="3"/>
+                <Line Left="700" Top="305" Width="321" Height="46"
+                      X1="700" Y1="305" X2="1020" Y2="350" Stroke="#F38BA8" StrokeThickness="5"/>
+
+                <TextBlock Left="556" Top="366" Foreground="#9399B2" Text="Rectangle (RadiusX — AA-углы):"/>
+                <Rectangle Left="556" Top="390" Width="150" Height="52" RadiusX="14" Fill="#0E639C"/>
+                <Rectangle Left="726" Top="390" Width="150" Height="52" RadiusX="14"
+                           Stroke="#CDD6F4" StrokeThickness="1"/>
+
+                <!-- ─── Низ: HiDPI ─────────────────────────────────────────── -->
+                <Separator Left="24" Top="470" Width="1002" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="486" Style="{StaticResource H324}" Text="HiDPI"/>
+                <Label Name="lblScale" Left="24" Top="514" Width="400" Height="20"
+                       Text="Масштаб: 100%" Foreground="#A6E3A1"/>
+                <TextBlock Left="24" Top="540" Width="1002" Height="60" TextWrapping="Wrap"
+                           Foreground="#6C7086"
+                           Text="Виджеты живут в логических пикселях, кадр рендерится в физических. Windows: масштаб монитора подхватывается автоматически (per-monitor DPI v2). Ручной запуск: HEADLESS_GUI_SCALE=1.5 showcase.exe — текст растеризуется в физическом размере, а не растягивается."/>
+
+            </Canvas>
+        </TabItem>
+
     </TabControl>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -783,3 +867,4 @@
     </Panel>
 
 </Canvas>
+</Window>
