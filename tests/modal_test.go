@@ -61,10 +61,11 @@ func TestDialog_ContentBounds(t *testing.T) {
 
 func TestDialog_AddChildren(t *testing.T) {
 	dlg := widget.NewDialog("T", 400, 200)
+	base := len(dlg.Children()) // служебные дети (кнопка ✕)
 	btn := widget.NewButton("OK")
 	dlg.AddChild(btn)
-	if len(dlg.Children()) != 1 {
-		t.Fatal("dialog should have 1 child")
+	if len(dlg.Children()) != base+1 {
+		t.Fatalf("dialog should gain 1 child, got %d -> %d", base, len(dlg.Children()))
 	}
 }
 
@@ -92,9 +93,9 @@ func TestNewConfirmDialog_Structure(t *testing.T) {
 	if dlg.Title != "Подтверждение" {
 		t.Fatalf("Title = %q", dlg.Title)
 	}
-	// Должно быть: Label + OK кнопка + Cancel кнопка = 3 дочерних
-	if len(dlg.Children()) != 3 {
-		t.Fatalf("expected 3 children (label + 2 buttons), got %d", len(dlg.Children()))
+	// Label + OK + Cancel = 3 содержательных ребёнка (+ служебная кнопка close)
+	if len(dlg.Children()) != 4 {
+		t.Fatalf("expected 4 children (label + 2 buttons + close), got %d", len(dlg.Children()))
 	}
 	_ = result // используется в callback
 }

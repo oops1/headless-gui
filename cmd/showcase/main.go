@@ -587,7 +587,7 @@ func main() {
 	}
 	if b := btn("dlgInput"); b != nil {
 		b.OnClick = func() {
-			mbox.ShowInput("", "Новое имя элемента:", "report-2026.xlsx",
+			id := mbox.ShowInput("", "Новое имя элемента:", "report-2026.xlsx",
 				func(s string) string {
 					if strings.ContainsAny(s, `/\:*?`) {
 						return "Имя не может содержать / \\ : * ?"
@@ -601,19 +601,21 @@ func main() {
 						setResult("Ввод отменён")
 					}
 				})
+			id.SetHint("Имя не может содержать / \\ : * ?")
 		}
 	}
 	if b := btn("dlgProgress"); b != nil {
 		b.OnClick = func() {
-			pd := mbox.ShowProgress("", "Копирование файлов…", func() { setResult("Прогресс отменён") })
+			pd := mbox.ShowProgress("Копирование файлов", "backup/photos/IMG_2647.jpg", func() { setResult("Прогресс отменён") })
 			go func() {
 				for i := 0; i <= 100; i += 4 {
 					time.Sleep(60 * time.Millisecond)
 					pd.SetProgress(float64(i) / 100)
-					pd.SetStatus(fmt.Sprintf("Копирование файлов… %d%%", i))
+					pd.SetDetail(fmt.Sprintf("%d из 120 файлов · 61,4 МБ/с", i*120/100))
 				}
 				pd.SetIndeterminate(true)
 				pd.SetStatus("Проверка контрольных сумм…")
+				pd.SetDetail("")
 				time.Sleep(1200 * time.Millisecond)
 				pd.Close()
 				setResult("Копирование завершено")

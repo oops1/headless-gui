@@ -292,3 +292,21 @@ func TestDialog_FolderPick(t *testing.T) {
 		t.Fatalf("FolderPick: ok=%v path=%q, ожидался %q", gotOK, gotPath, dir)
 	}
 }
+
+// Кнопка ✕ в заголовке закрывает диалог с семантикой отмены (как Escape).
+func TestDialog_CloseButtonCancels(t *testing.T) {
+	eng := newDialogEngine()
+	mb := widget.NewMessageBox(eng)
+	gotOK := true
+	called := false
+	id := mb.ShowInput("", "name:", "abc", nil, func(_ string, ok bool) { called = true; gotOK = ok })
+	// ✕ расположен у правого края заголовка.
+	dlgB := id.Dialog().Bounds()
+	x := dlgB.Max.X - 18
+	y := dlgB.Min.Y + 17
+	eng.SendMouseButton(x, y, widget.MouseLeft, true)
+	eng.SendMouseButton(x, y, widget.MouseLeft, false)
+	if !called || gotOK {
+		t.Fatalf("close-btn должен отменять: called=%v ok=%v", called, gotOK)
+	}
+}
