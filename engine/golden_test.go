@@ -81,18 +81,48 @@ func goldenCompare(t *testing.T, name string, img *image.RGBA) {
 		return
 	}
 
-	// Расхождение: считаем отличающиеся пиксели и сохраняем полученный кадр.
-	diff := 0
+	// Допуск на кросс-архитектурные различия округления: на arm64 компилятор
+	// Go сливает a*b+c в FMA-инструкцию с другим округлением — младшие биты
+	// AA-покрытия (vector-растеризация) отличаются на единицы. Реальная
+	// регрессия рендера меняет тысячи пикселей и/или даёт большие дельты.
+	const (
+		maxChannelDelta = 3      // допустимое отклонение канала
+		maxDiffFraction = 0.005  // допустимая доля отличающихся пикселей (0.5%)
+	)
+	diff := 0        // пиксели с отличием в пределах допуска
+	hardDiff := 0    // пиксели с отличием сверх допуска
+	maxDelta := 0    // максимальная дельта канала
 	for i := 0; i < len(got.Pix); i += 4 {
-		if got.Pix[i] != want.Pix[i] || got.Pix[i+1] != want.Pix[i+1] ||
-			got.Pix[i+2] != want.Pix[i+2] || got.Pix[i+3] != want.Pix[i+3] {
-			diff++
+		d := 0
+		for k := 0; k < 4; k++ {
+			cd := int(got.Pix[i+k]) - int(want.Pix[i+k])
+			if cd < 0 {
+				cd = -cd
+			}
+			if cd > d {
+				d = cd
+			}
+		}
+		if d == 0 {
+			continue
+		}
+		diff++
+		if d > maxDelta {
+			maxDelta = d
+		}
+		if d > maxChannelDelta {
+			hardDiff++
 		}
 	}
+	total := len(got.Pix) / 4
+	if hardDiff == 0 && float64(diff) <= maxDiffFraction*float64(total) {
+		return // в пределах кросс-архитектурного допуска
+	}
+
 	gotPath := filepath.Join(os.TempDir(), fmt.Sprintf("golden_got_%s.png", name))
 	savePNG(img, gotPath)
-	t.Errorf("%s: %d пикселей отличаются от эталона %s; полученный кадр: %s",
-		name, diff, path, gotPath)
+	t.Errorf("%s: %d пикселей отличаются (сверх допуска: %d, макс. дельта %d) от эталона %s; полученный кадр: %s",
+		name, diff, hardDiff, maxDelta, path, gotPath)
 }
 
 // stdDraw копирует изображение в NRGBA-приёмник (нормализация формата).
