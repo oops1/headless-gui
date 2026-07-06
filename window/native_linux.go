@@ -36,6 +36,18 @@ type X11Window struct {
 	blitBuf []byte
 	blitMu  sync.Mutex
 
+	// Раскладка клавиатуры: GetKeyboardMapping (core-протокол).
+	// keysyms — матрица keycode × symsPerCode; колонки 0-1 — группа 1,
+	// 2-3 — группа 2 (группа берётся из бит 13-14 поля state события).
+	minKeycode  byte
+	symsPerCode int
+	keysyms     []uint32
+
+	// Диапазон клиентских ID из setup: каждый созданный объект обязан
+	// иметь id = ridBase | (n & ridMask), иначе сервер отвечает BadIDChoice.
+	ridBase, ridMask uint32
+	ridNext          uint32
+
 	// Callbacks
 	onResize      func(w, h int)
 	onExpose      func(r image.Rectangle)
@@ -122,6 +134,9 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.wid = w.x11GenID()
 	w.gcID = w.x11GenID()
 
+	// Раскладка клавиатуры (до появления событий — reply читается напрямую).
+	w.x11LoadKeyboardMapping()
+
 	// Intern atoms для WM-протоколов
 	w.atomWMProtocols = w.x11InternAtom("WM_PROTOCOLS")
 	w.atomWMDeleteWindow = w.x11InternAtom("WM_DELETE_WINDOW")
@@ -191,14 +206,20 @@ func (w *X11Window) RunEventLoop() error {
 		switch evType {
 		case 2: // KeyPress
 			keycode := buf[1]
+			state := binary.LittleEndian.Uint16(buf[28:30])
 			vk := x11KeycodeToVK(int(keycode))
 			if w.onKeyDown != nil && vk != 0 {
 				w.onKeyDown(vk)
 			}
-			// Для символьного ввода — упрощённый маппинг
+			// Символьный ввод: полноценный маппинг по GetKeyboardMapping
+			// (раскладка/Shift/Caps/группа); фолбэк — упрощённая таблица.
 			if w.onChar != nil {
-				if r := x11KeycodeToRune(int(keycode), buf[4]&1 != 0); r != 0 {
+				if r := w.x11RuneForKey(keycode, state); r >= 32 {
 					w.onChar(r)
+				} else if w.keysyms == nil {
+					if r := x11KeycodeToRune(int(keycode), state&1 != 0); r != 0 {
+						w.onChar(r)
+					}
 				}
 			}
 
@@ -460,10 +481,14 @@ func (w *X11Window) x11Setup() error {
 		total += n
 	}
 
-	// Парсим setup data (упрощённо)
-	// Offset 32: resource-id-base
-	// Offset 36: resource-id-mask
-	w.screen.Root = binary.LittleEndian.Uint32(addData[32:36])
+	// resource-id-base/mask — база для клиентских ID (см. x11GenID).
+	w.ridBase = binary.LittleEndian.Uint32(addData[4:8])
+	w.ridMask = binary.LittleEndian.Uint32(addData[8:12])
+
+	// min-keycode — байт 26 (для GetKeyboardMapping).
+	if len(addData) > 27 {
+		w.minKeycode = addData[26]
+	}
 
 	// Находим информацию об экране (после vendor и pixmap formats)
 	vendorLen := int(binary.LittleEndian.Uint16(addData[16:18]))
@@ -490,22 +515,24 @@ func (w *X11Window) x11Setup() error {
 	return nil
 }
 
-var nextID uint32 = 1
-
+// x11GenID выделяет клиентский ID ресурса: обязательно в диапазоне
+// resource-id-base|mask из setup — произвольные значения сервер отвергает
+// (BadIDChoice). Из-за этого бага (счётчик с единицы) CreateWindow не
+// работал до первой живой проверки бэкенда.
 func (w *X11Window) x11GenID() uint32 {
-	id := nextID
-	nextID++
-	return id
+	w.ridNext++
+	return w.ridBase | (w.ridNext & w.ridMask)
 }
 
 func (w *X11Window) x11CreateWindow(wid, parent uint32, x, y int16, width, height uint16, borderWidth uint16, valueMask uint32, values []uint32) {
-	// Opcode 1: CreateWindow
-	bodyLen := 8 + len(values)*4
-	reqLen := (bodyLen + 3) / 4
+	// Opcode 1: CreateWindow.
+	// Фиксированная часть тела (после 4-байтового заголовка) — 28 байт:
+	// wid(4) parent(4) x(2) y(2) w(2) h(2) border(2) class(2) visual(4) mask(4).
+	bodyLen := 28 + len(values)*4
 	buf := make([]byte, 4+bodyLen)
-	buf[0] = 1                                                        // opcode
-	buf[1] = w.screen.RootDepth                                       // depth
-	binary.LittleEndian.PutUint16(buf[2:4], uint16(reqLen+1))         // length in 4-byte units
+	buf[0] = 1                                                    // opcode
+	buf[1] = w.screen.RootDepth                                   // depth
+	binary.LittleEndian.PutUint16(buf[2:4], uint16((4+bodyLen)/4)) // length in 4-byte units
 	binary.LittleEndian.PutUint32(buf[4:8], wid)
 	binary.LittleEndian.PutUint32(buf[8:12], parent)
 	binary.LittleEndian.PutUint16(buf[12:14], uint16(x))
@@ -568,6 +595,101 @@ func (w *X11Window) x11ChangeProperty(wid, property, propType uint32, format int
 	binary.LittleEndian.PutUint32(buf[20:24], uint32(nElements))
 	copy(buf[24:], data)
 	w.x11Send(buf)
+}
+
+// x11LoadKeyboardMapping запрашивает таблицу keysym'ов (GetKeyboardMapping).
+// Вызывается при инициализации, до подписки на события — ответ читается
+// последовательно, как в x11InternAtom. Ошибки не фатальны: без таблицы
+// ввод символов деградирует до упрощённого маппинга.
+func (w *X11Window) x11LoadKeyboardMapping() {
+	first := w.minKeycode
+	if first == 0 {
+		first = 8
+	}
+	count := 255 - int(first) + 1
+
+	req := make([]byte, 8)
+	req[0] = 101 // GetKeyboardMapping
+	binary.LittleEndian.PutUint16(req[2:4], 2)
+	req[4] = first
+	req[5] = byte(count)
+	w.mu.Lock()
+	w.conn.Write(req)
+	w.seqNum++
+	w.mu.Unlock()
+
+	// Ответ: 32-байтовый заголовок + length*4 байт keysym'ов.
+	hdr := make([]byte, 32)
+	if !w.readFull(hdr) || hdr[0] != 1 {
+		return
+	}
+	symsPer := int(hdr[1])
+	length := int(binary.LittleEndian.Uint32(hdr[4:8])) * 4
+	data := make([]byte, length)
+	if !w.readFull(data) || symsPer == 0 {
+		return
+	}
+	syms := make([]uint32, length/4)
+	for i := range syms {
+		syms[i] = binary.LittleEndian.Uint32(data[i*4 : i*4+4])
+	}
+	w.minKeycode = first
+	w.symsPerCode = symsPer
+	w.keysyms = syms
+}
+
+// readFull дочитывает buf целиком (false — ошибка соединения).
+func (w *X11Window) readFull(buf []byte) bool {
+	got := 0
+	for got < len(buf) {
+		n, err := w.conn.Read(buf[got:])
+		if err != nil {
+			return false
+		}
+		got += n
+	}
+	return true
+}
+
+// x11RuneForKey возвращает руну для keycode с учётом state события
+// (бит 0 — Shift, бит 1 — CapsLock, биты 13-14 — группа/раскладка XKB).
+// 0 — непечатаемая клавиша или таблица не загружена.
+func (w *X11Window) x11RuneForKey(keycode byte, state uint16) rune {
+	if w.keysyms == nil || keycode < w.minKeycode {
+		return 0
+	}
+	row := int(keycode-w.minKeycode) * w.symsPerCode
+	if row+w.symsPerCode > len(w.keysyms) {
+		return 0
+	}
+	shift := state&1 != 0
+	caps := state&2 != 0
+	group := int(state>>13) & 3
+
+	col := group * 2
+	if col+1 >= w.symsPerCode { // группа за пределами таблицы — первая
+		col = 0
+	}
+	level := 0
+	if shift {
+		level = 1
+	}
+	sym := w.keysyms[row+col+level]
+	if sym == 0 { // NoSymbol на уровне Shift — базовый symbol
+		sym = w.keysyms[row+col]
+	}
+	r := keysymToRune(sym)
+	// CapsLock: инверсия регистра для букв.
+	if caps && isLetterRune(r) {
+		alt := w.keysyms[row+col]
+		if level == 0 {
+			alt = w.keysyms[row+col+1]
+		}
+		if ar := keysymToRune(alt); isLetterRune(ar) {
+			r = ar
+		}
+	}
+	return r
 }
 
 func (w *X11Window) x11InternAtom(name string) uint32 {

@@ -10,12 +10,13 @@
 
 ## 1. Критичные (блокируют реальные приложения)
 
-- [ ] **Полный ввод текста на Linux (xkb)** — сейчас упрощённый маппинг:
-      кириллица в TextBox под X11/Wayland не набирается.
-      Wayland: парсить keymap из `wl_keyboard.keymap` (fd, формат xkb_v1),
-      модификаторы/группа из события `modifiers` (живое переключение RU/EN).
-      X11: `GetKeyboardMapping` + state из события (заодно баг: shift сейчас
-      читается из байта времени). Windows уже полноценен (WM_CHAR).
+- [x] **Полный ввод текста на Linux (xkb)** — сделано 2026-07-06:
+      Wayland — парсер xkb_v1-keymap из fd + модификаторы/группы (живое
+      переключение раскладок); X11 — GetKeyboardMapping + state события
+      (починены баг shift-из-байта-времени и два day-one бага бэкенда:
+      буфер CreateWindow и клиентские resource-ID). Ограничение среды:
+      WSLg не меняет keymap на лету (переключение раскладки Windows) —
+      на настоящем Linux работает через группы/новый keymap.
 - [ ] **Файловые диалоги** (Open/Save/SelectFolder) — топ-запрос любого
       тулкита. Без CGO: Win32 `GetOpenFileNameW`/IFileDialog; macOS
       NSOpenPanel через purego; Linux — xdg-desktop-portal (D-Bus) с
