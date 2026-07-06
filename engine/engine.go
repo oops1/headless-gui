@@ -85,7 +85,8 @@ type Engine struct {
 	ttMouseX   int
 	ttMouseY   int
 	ttLastMove time.Time
-	ttHasMouse bool // курсор хотя бы раз входил на холст
+	ttHasMouse bool            // курсор хотя бы раз входил на холст
+	ttShownAt  image.Rectangle // область показанной подсказки (пустая — не показана)
 }
 
 type saveJob struct {
@@ -113,6 +114,13 @@ func New(width, height, fps int) *Engine {
 		ttEnabled: true,
 		ttDelay:   600 * time.Millisecond,
 	}
+	// Рендер по запросу — режим по умолчанию (v3.5): виджеты самоинвалидируются
+	// (Base.Invalidate, авто-damage в SetBounds/сеттерах), события и слой данных
+	// инвалидируют через движок. Кадры рендерятся только при изменениях UI,
+	// причём частично — в пределах damage-области. Прямые записи в
+	// экспортированные поля виджетов требуют Invalidate()/Engine.Invalidate().
+	// Опт-аут (прежнее поведение «рендер каждый тик»): SetRenderOnDemand(false).
+	e.onDemand.Store(true)
 	// Best-effort: подгружаем системные шрифты с широким покрытием символов
 	// (✓ ✗ ⚠, box-drawing, стрелки) как fallback к встроенному Go Regular (BUG-2).
 	for _, p := range systemFallbackFontPaths() {
@@ -135,6 +143,9 @@ func New(width, height, fps int) *Engine {
 	// нужно для рендера по запросу (см. invalidate.go). Последний созданный
 	// движок выигрывает (на процесс — один активный движок).
 	widget.SetUIChangeNotifier(e.Invalidate)
+	// Точечная инвалидация от виджетов (авто-damage): hover/press/фокус/сеттеры
+	// сообщают свой прямоугольник — кадр перерисовывается и диффается частично.
+	widget.SetUIRectChangeNotifier(e.InvalidateRect)
 	return e
 }
 

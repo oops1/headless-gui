@@ -7,6 +7,7 @@
 package engine
 
 import (
+	"image"
 	"image/color"
 	"time"
 
@@ -45,6 +46,20 @@ func (e *Engine) recordMouse(x, y int) {
 	e.ttLastMove = time.Now()
 	e.ttHasMouse = true
 	e.ttMu.Unlock()
+}
+
+// invalidateShownTooltip инвалидирует область показанной подсказки (стирание
+// при движении мыши) и забывает её. No-op, если подсказка не показана.
+// Инвалидация гарантирует кадр, на котором область перерисуется без плашки
+// (таймер уже сброшен recordMouse — drawTooltip её не нарисует).
+func (e *Engine) invalidateShownTooltip() {
+	e.ttMu.Lock()
+	r := e.ttShownAt
+	e.ttShownAt = image.Rectangle{}
+	e.ttMu.Unlock()
+	if !r.Empty() {
+		e.InvalidateRect(r)
+	}
 }
 
 // drawTooltip рисует всплывающую подсказку, если курсор достаточно долго
@@ -133,4 +148,9 @@ func (e *Engine) drawTooltipBox(c *Canvas, text string, mx, my int) {
 	c.FillRoundRect(x, y, bw, bh, 3, bg)
 	c.DrawRoundBorder(x, y, bw, bh, 3, border)
 	c.DrawText(text, x+padX, y+padY, fg)
+
+	// Запоминаем область плашки — SendMouseMove инвалидирует её для стирания.
+	e.ttMu.Lock()
+	e.ttShownAt = image.Rect(x, y, x+bw, y+bh)
+	e.ttMu.Unlock()
 }
