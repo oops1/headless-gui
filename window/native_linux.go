@@ -194,16 +194,23 @@ func (w *X11Window) Create(title string, width, height int) error {
 func (w *X11Window) RunEventLoop() error {
 	buf := make([]byte, 32)
 	for !w.closed {
-		_, err := w.conn.Read(buf)
-		if err != nil {
+		if !w.readFull(buf) {
 			if w.closed {
 				return nil
 			}
-			return fmt.Errorf("x11: read event: %w", err)
+			return fmt.Errorf("x11: read event: соединение закрыто")
 		}
+		w.handleX11Event(buf)
+	}
+	return nil
+}
 
-		evType := buf[0] & 0x7F
-		switch evType {
+// handleX11Event обрабатывает одно 32-байтовое событие X11. Выделено из
+// RunEventLoop, чтобы события, пришедшие между запросом и ответом (например,
+// при перечитывании раскладки по MappingNotify), не терялись.
+func (w *X11Window) handleX11Event(buf []byte) {
+	evType := buf[0] & 0x7F
+	switch evType {
 		case 2: // KeyPress
 			keycode := buf[1]
 			state := binary.LittleEndian.Uint16(buf[28:30])
@@ -303,16 +310,66 @@ func (w *X11Window) RunEventLoop() error {
 				if w.onClose != nil {
 					if w.onClose() {
 						w.closed = true
-						return nil
 					}
 				} else {
 					w.closed = true
-					return nil
 				}
 			}
+
+	case 34: // MappingNotify — раскладка/маппинг клавиатуры изменились
+		// (setxkbmap на лету, динамический remap xdotool и т.п.) —
+		// перечитываем таблицу keysym'ов.
+		w.x11ReloadKeyboardMapping()
+	}
+}
+
+// x11ReloadKeyboardMapping перечитывает GetKeyboardMapping во время работы
+// event loop: пакеты, оказавшиеся между запросом и ответом, — это обычные
+// события, они обрабатываются на месте (reply отличается типом 1).
+func (w *X11Window) x11ReloadKeyboardMapping() {
+	first := w.minKeycode
+	if first == 0 {
+		first = 8
+	}
+	count := 255 - int(first) + 1
+
+	req := make([]byte, 8)
+	req[0] = 101 // GetKeyboardMapping
+	binary.LittleEndian.PutUint16(req[2:4], 2)
+	req[4] = first
+	req[5] = byte(count)
+	w.mu.Lock()
+	w.conn.Write(req)
+	w.seqNum++
+	w.mu.Unlock()
+
+	pkt := make([]byte, 32)
+	for i := 0; i < 4096; i++ { // предохранитель от бесконечного цикла
+		if !w.readFull(pkt) {
+			return
+		}
+		switch pkt[0] {
+		case 1: // наш reply
+			symsPer := int(pkt[1])
+			length := int(binary.LittleEndian.Uint32(pkt[4:8])) * 4
+			data := make([]byte, length)
+			if !w.readFull(data) || symsPer == 0 {
+				return
+			}
+			syms := make([]uint32, length/4)
+			for j := range syms {
+				syms[j] = binary.LittleEndian.Uint32(data[j*4 : j*4+4])
+			}
+			w.minKeycode = first
+			w.symsPerCode = symsPer
+			w.keysyms = syms
+			return
+		case 0: // error-пакет (32 байта) — запрос отвергнут
+			return
+		default: // обычное событие — обрабатываем на месте
+			w.handleX11Event(pkt)
 		}
 	}
-	return nil
 }
 
 func (w *X11Window) Close() {
