@@ -114,6 +114,11 @@ type Window struct {
 	// в заголовке окна. По умолчанию true; отключаемое свойство.
 	ShowLocaleIndicator bool
 
+	// inactive — окно без фокуса ОС: заголовок рисуется приглушённым
+	// (Win2000 — серый градиент, Mac — серые «светофоры», прочие — dim).
+	// Zero value = активно; хранится инвертированно.
+	inactive bool
+
 	// InputBindings — горячие клавиши окна (WPF Window.InputBindings).
 	InputBindings []InputBinding
 
@@ -210,6 +215,62 @@ func (w *Window) SetBounds(r image.Rectangle) {
 	for _, child := range w.Children() {
 		child.SetBounds(cb)
 	}
+}
+
+// ─── Активность окна (фокус ОС) ─────────────────────────────────────────────
+
+// SetActive задаёт активность окна: неактивное (без фокуса ОС) рисует
+// приглушённый заголовок в стиле темы. Вызывается window.Window по
+// WM_ACTIVATE / X11 FocusIn/FocusOut.
+func (w *Window) SetActive(v bool) {
+	if w.inactive == !v {
+		return
+	}
+	w.inactive = !v
+	w.Invalidate()
+}
+
+// IsActive возвращает true, если окно активно (по умолчанию — да).
+func (w *Window) IsActive() bool { return !w.inactive }
+
+// titleColors возвращает эффективные цвета заголовка с учётом активности:
+// для неактивного окна — явные Inactive-токены темы либо автоматическое
+// приглушение (смешивание с серым/фоном).
+func (w *Window) titleColors() (bg, bg2, text color.RGBA) {
+	bg = w.resolveColor(w.TitleBG, win10.TitleBG)
+	bg2 = win10.TitleBG2
+	text = w.resolveColor(w.TitleColor, win10.TitleText)
+	if !w.inactive {
+		return bg, bg2, text
+	}
+	if t := win10.TitleBGInactive; t.A > 0 {
+		bg = t
+	} else {
+		bg = dimColor(bg)
+	}
+	if t := win10.TitleBG2Inactive; t.A > 0 {
+		bg2 = t
+	} else if bg2.A > 0 {
+		bg2 = dimColor(bg2)
+	}
+	if t := win10.TitleTextInactive; t.A > 0 {
+		text = t
+	} else {
+		text = mixRGBA(text, bg, 0.45)
+	}
+	return bg, bg2, text
+}
+
+// dimColor приглушает цвет: снижает насыщенность и тянет к серому.
+func dimColor(c color.RGBA) color.RGBA {
+	gray := uint8((uint32(c.R)*299 + uint32(c.G)*587 + uint32(c.B)*114) / 1000)
+	return mixRGBA(c, color.RGBA{R: gray, G: gray, B: gray, A: c.A}, 0.6)
+}
+
+// mixRGBA линейно смешивает a→b на долю t (0 = a, 1 = b).
+func mixRGBA(a, b color.RGBA, t float64) color.RGBA {
+	lerp := func(x, y uint8) uint8 { return uint8(float64(x) + (float64(y)-float64(x))*t) }
+	return color.RGBA{R: lerp(a.R, b.R), G: lerp(a.G, b.G), B: lerp(a.B, b.B), A: a.A}
 }
 
 // ─── Geometry ───────────────────────────────────────────────────────────────
@@ -403,6 +464,10 @@ func (w *Window) Draw(ctx DrawContext) {
 	// верхняя линия не нужна — заголовок уже заполняет верхний край.
 	if w.Style != WindowStyleNone {
 		bc := w.resolveColor(w.BorderColor, win10.Border)
+		if w.inactive {
+			// Рамка неактивного окна светлее (как в Win11).
+			bc = mixRGBA(bc, w.Background, 0.5)
+		}
 		if cr > 0 {
 			ctx.DrawRoundBorder(x, y, bw, bh, cr, bc)
 		} else {
@@ -429,8 +494,9 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	th := w.titleH()
 	cr := w.CornerRadius
 
-	tbg := w.resolveColor(w.TitleBG, win10.TitleBG)
-	tc := w.resolveColor(w.TitleColor, win10.TitleText)
+	// Эффективные цвета заголовка (учёт активности окна: без фокуса ОС
+	// заголовок приглушается — Win2000 серый градиент, прочие темы dim).
+	tbg, tbg2, tc := w.titleColors()
 
 	// Фон заголовка (со скруглёнными верхними углами)
 	if cr > 0 {
@@ -439,8 +505,8 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 		// Восстанавливаем фон клиентской области под заголовком
 		ctx.FillRect(x+1, y+th, bw-2, cr, w.Background)
 	} else {
-		// Классика Win2000 — градиент navy→голубой (Theme.TitleBG2).
-		fillTitleBar(ctx, image.Rect(x, y, x+bw, y+th), tbg)
+		// Классика Win2000 — градиент navy→голубой (серый у неактивного).
+		fillTitleBarColors(ctx, image.Rect(x, y, x+bw, y+th), tbg, tbg2)
 	}
 
 	// Текст заголовка: вертикально по центру, отступ 12px слева
@@ -577,8 +643,7 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 	th := w.titleH()
 	cr := w.CornerRadius
 
-	tbg := w.resolveColor(w.TitleBG, win10.TitleBG)
-	tc := w.resolveColor(w.TitleColor, win10.TitleText)
+	tbg, _, tc := w.titleColors()
 
 	// Фон заголовка
 	if cr > 0 {
@@ -617,7 +682,10 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 	for i, lt := range lights {
 		ccx := x + macStartX + i*macSpacing
 		col := lt.col
-		if lt.hoverFn() != 0 {
+		if w.inactive {
+			// Неактивное окно: серые «светофоры» (как в настоящем macOS).
+			col = color.RGBA{R: 178, G: 178, B: 178, A: 255}
+		} else if lt.hoverFn() != 0 {
 			// Чуть ярче при hover
 			col = brighten(col, 30)
 		}

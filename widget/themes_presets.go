@@ -97,10 +97,16 @@ func drawBevelSunken(ctx DrawContext, x, y, w, h int, st ThemeStyle) {
 // fillTitleBar заливает полосу заголовка: горизонтальный градиент
 // TitleBG→TitleBG2 (классика Win2000: navy→голубой) либо сплошной цвет.
 func fillTitleBar(ctx DrawContext, r image.Rectangle, bg color.RGBA) {
-	if g2 := win10.TitleBG2; g2.A > 0 {
+	fillTitleBarColors(ctx, r, bg, win10.TitleBG2)
+}
+
+// fillTitleBarColors — как fillTitleBar, но с явным вторым цветом градиента
+// (для неактивного окна: серый градиент Win2000).
+func fillTitleBarColors(ctx DrawContext, r image.Rectangle, bg, bg2 color.RGBA) {
+	if bg2.A > 0 {
 		drawLinearGradient(ctx, r, &LinearGradient{
 			Horizontal: true,
-			Stops:      []GradientStop{{Offset: 0, Color: bg}, {Offset: 1, Color: g2}},
+			Stops:      []GradientStop{{Offset: 0, Color: bg}, {Offset: 1, Color: bg2}},
 		})
 		return
 	}
@@ -298,8 +304,13 @@ func Win2000Theme() *Theme {
 		TitleBG:     navy,
 		TitleBG2:    color.RGBA{R: 166, G: 202, B: 240, A: 255}, // #A6CAF0 — градиент заголовка
 		TitleText:   white,
-		Border:      gray,
-		ShadowColor: color.RGBA{R: 0, G: 0, B: 0, A: 60},
+		// Классика: неактивное окно — серый градиент #808080→#C0C0C0,
+		// текст — серебристый (как в настоящей Windows 2000).
+		TitleBGInactive:   color.RGBA{R: 128, G: 128, B: 128, A: 255},
+		TitleBG2Inactive:  color.RGBA{R: 192, G: 192, B: 192, A: 255},
+		TitleTextInactive: color.RGBA{R: 212, G: 208, B: 200, A: 255}, // #D4D0C8
+		Border:            gray,
+		ShadowColor:       color.RGBA{R: 0, G: 0, B: 0, A: 60},
 
 		BtnBG:        face,
 		BtnBorder:    gray,
