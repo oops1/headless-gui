@@ -44,14 +44,12 @@ jobs:
           path: ${{ runner.temp }}/golden_got_*.png
           if-no-files-found: ignore
 
+      # -unsafeptr=false: Win32-код (wndProc lparam→указатель, clipboard)
+      # легитимно преобразует uintptr в указатели — unsafeptr-анализатор
+      # флагует этот канонический для WinAPI паттерн. Остальные проверки vet
+      # действуют в полном объёме.
       - name: Vet
-        run: go vet ./engine/... ./output/... ./window/... ./cmd/...
-
-      # widget/clipboard_windows.go содержит исторические предупреждения
-      # unsafe.Pointer — не валим сборку, но показываем.
-      - name: Vet widget (informational)
-        run: go vet ./widget/...
-        continue-on-error: true
+        run: go vet -unsafeptr=false ./...
 
   crosscompile:
     name: cross-compile (zero CGO)

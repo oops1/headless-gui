@@ -367,7 +367,13 @@ func (w *Window) classicTitleBtnRects() (closeR, maxR, minR image.Rectangle) {
 }
 
 // CloseBtnRect возвращает bounds кнопки закрытия (×).
+// Пустой прямоугольник для WindowStyleNone (кнопок нет). Явная проверка
+// обязательна: mac-ветка (хит-зона «светофора») не вырождается в пустую
+// при нулевой высоте заголовка — на darwin без неё кнопка «существовала».
 func (w *Window) CloseBtnRect() image.Rectangle {
+	if w.btnCount() == 0 {
+		return image.Rectangle{}
+	}
 	if w.resolvedTitleStyle() == WindowTitleMac {
 		b := w.Bounds()
 		th := w.titleH()
