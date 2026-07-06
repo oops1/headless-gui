@@ -17,10 +17,12 @@
       буфер CreateWindow и клиентские resource-ID). Ограничение среды:
       WSLg не меняет keymap на лету (переключение раскладки Windows) —
       на настоящем Linux работает через группы/новый keymap.
-- [ ] **Файловые диалоги** (Open/Save/SelectFolder) — топ-запрос любого
-      тулкита. Без CGO: Win32 `GetOpenFileNameW`/IFileDialog; macOS
-      NSOpenPanel через purego; Linux — xdg-desktop-portal (D-Bus) с
-      fallback на zenity/kdialog.
+- [x] **Файловые диалоги** (Open/Save/SelectFolder) — сделано 2026-07-06:
+      встроенный браузер на движке (работает headless/в стриминге — ФС
+      процесса/сервера), темизация + локализация, фильтры, breadcrumb,
+      двойной клик/Enter. Плюс MessageBox v2 (severity, Ctrl+C в
+      Windows-формате, Enter/Esc), InputDialog, ProgressDialog. Нативные
+      OS-диалоги — опционально позже.
 - [ ] **Многострочный TextBox** (TextWrapping, скролл, выделение по строкам,
       Ctrl+стрелки) — без него не сделать формы с комментариями/редакторы.
 

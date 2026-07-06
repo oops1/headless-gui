@@ -851,6 +851,37 @@
             </Canvas>
         </TabItem>
 
+        <TabItem Header="Диалоги">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="Стандартные диалоги (тема · локализация · Ctrl+C · Enter/Esc)"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+
+                <TextBlock Left="24" Top="58" Foreground="#9399B2"
+                           Text="MessageBox (значок severity, Ctrl+C копирует как в Windows):"/>
+                <Button Name="dlgInfo" Left="24" Top="82" Width="150" Height="34" Content="Информация"/>
+                <Button Name="dlgQuestion" Left="184" Top="82" Width="150" Height="34" Content="Вопрос (Да/Нет)"/>
+                <Button Name="dlgWarn" Left="344" Top="82" Width="150" Height="34" Content="Предупреждение"/>
+                <Button Name="dlgError" Left="504" Top="82" Width="150" Height="34" Content="Ошибка" Style="Accent"/>
+
+                <TextBlock Left="24" Top="140" Foreground="#9399B2" Text="Ввод и прогресс:"/>
+                <Button Name="dlgInput" Left="24" Top="164" Width="180" Height="34" Content="Ввод строки"/>
+                <Button Name="dlgProgress" Left="214" Top="164" Width="220" Height="34" Content="Прогресс (индикатор)"/>
+
+                <TextBlock Left="24" Top="222" Foreground="#9399B2" Text="Файловые диалоги (файловая система процесса):"/>
+                <Button Name="dlgOpen" Left="24" Top="246" Width="180" Height="34" Content="Открыть файл…"/>
+                <Button Name="dlgSave" Left="214" Top="246" Width="180" Height="34" Content="Сохранить как…"/>
+                <Button Name="dlgFolder" Left="404" Top="246" Width="180" Height="34" Content="Выбрать папку…"/>
+
+                <Label Name="dlgResult" Left="24" Top="310" Width="1010" Height="24"
+                       Text="Результат появится здесь" Foreground="#A6E3A1"/>
+
+                <TextBlock Left="24" Top="360" Width="1010" Height="60" TextWrapping="Wrap"
+                           Foreground="#6C7086"
+                           Text="Все диалоги — внутренние (движок рисует их поверх затемнения), поэтому работают в headless/стриминге и файловые диалоги показывают ФС сервера. Оформление следует теме приложения (попробуйте сменить тему в шапке), подписи локализованы (кнопка «Язык» в шапке переключает RU/EN вживую). В MessageBox: Enter — кнопка по умолчанию, Esc — отмена, Ctrl+C — копирование содержимого."/>
+            </Canvas>
+        </TabItem>
+
     </TabControl>
 
     <!-- ═══════════════════════════════════════════════════════════════════════

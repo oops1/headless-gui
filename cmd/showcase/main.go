@@ -562,6 +562,103 @@ func main() {
 	})
 	updateLangBtn()
 
+	// ─── TAB: Диалоги ────────────────────────────────────────────────────────
+	mbox := widget.NewMessageBox(eng)
+	setResult := func(format string, args ...any) {
+		if l := lbl("dlgResult"); l != nil {
+			l.SetText(fmt.Sprintf(format, args...))
+		}
+	}
+	if b := btn("dlgInfo"); b != nil {
+		b.OnClick = func() { mbox.ShowInfo("", "Документ сохранён. Резервная копия создана.") }
+	}
+	if b := btn("dlgQuestion"); b != nil {
+		b.OnClick = func() {
+			mbox.ShowQuestion("", "Сохранить изменения перед выходом?", func(r widget.MessageBoxResult) {
+				setResult("Вопрос → %v", r)
+			})
+		}
+	}
+	if b := btn("dlgWarn"); b != nil {
+		b.OnClick = func() { mbox.ShowWarning("", "Несохранённые изменения будут потеряны.") }
+	}
+	if b := btn("dlgError"); b != nil {
+		b.OnClick = func() { mbox.ShowError("", "Не удалось открыть файл: доступ запрещён (EACCES).") }
+	}
+	if b := btn("dlgInput"); b != nil {
+		b.OnClick = func() {
+			mbox.ShowInput("", "Новое имя элемента:", "report-2026.xlsx",
+				func(s string) string {
+					if strings.ContainsAny(s, `/\:*?`) {
+						return "Имя не может содержать / \\ : * ?"
+					}
+					return ""
+				},
+				func(text string, ok bool) {
+					if ok {
+						setResult("Ввод → %q", text)
+					} else {
+						setResult("Ввод отменён")
+					}
+				})
+		}
+	}
+	if b := btn("dlgProgress"); b != nil {
+		b.OnClick = func() {
+			pd := mbox.ShowProgress("", "Копирование файлов…", func() { setResult("Прогресс отменён") })
+			go func() {
+				for i := 0; i <= 100; i += 4 {
+					time.Sleep(60 * time.Millisecond)
+					pd.SetProgress(float64(i) / 100)
+					pd.SetStatus(fmt.Sprintf("Копирование файлов… %d%%", i))
+				}
+				pd.SetIndeterminate(true)
+				pd.SetStatus("Проверка контрольных сумм…")
+				time.Sleep(1200 * time.Millisecond)
+				pd.Close()
+				setResult("Копирование завершено")
+			}()
+		}
+	}
+	fileOpts := func() widget.FileDialogOptions {
+		return widget.FileDialogOptions{
+			Filters: []widget.FileFilter{
+				{Label: "Все файлы", Exts: nil},
+				{Label: "Таблицы", Exts: []string{".xlsx", ".csv"}},
+				{Label: "Изображения", Exts: []string{".png", ".jpg", ".jpeg"}},
+			},
+		}
+	}
+	if b := btn("dlgOpen"); b != nil {
+		b.OnClick = func() {
+			mbox.ShowOpenFile(fileOpts(), func(path string, ok bool) {
+				if ok {
+					setResult("Открыть → %s", path)
+				}
+			})
+		}
+	}
+	if b := btn("dlgSave"); b != nil {
+		b.OnClick = func() {
+			o := fileOpts()
+			o.InitialName = "report-final.xlsx"
+			mbox.ShowSaveFile(o, func(path string, ok bool) {
+				if ok {
+					setResult("Сохранить → %s", path)
+				}
+			})
+		}
+	}
+	if b := btn("dlgFolder"); b != nil {
+		b.OnClick = func() {
+			mbox.ShowPickFolder(widget.FileDialogOptions{}, func(path string, ok bool) {
+				if ok {
+					setResult("Папка → %s", path)
+				}
+			})
+		}
+	}
+
 	// Фокус на поле логина
 	if ti, ok := reg["txtLogin"].(*widget.TextInput); ok {
 		eng.SetFocus(ti)
