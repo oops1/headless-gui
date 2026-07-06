@@ -1,0 +1,88 @@
+# CI headless-gui: сборка, тесты (включая golden-снапшоты рендера) на трёх ОС,
+# кросс-компиляция и smoke-прогон бенчмарков.
+#
+# Движок рендерит на CPU без экрана — тесты не требуют дисплея/Xvfb.
+name: CI
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Test (race)
+        run: go test -race ./engine/ ./tests/
+
+      # Пиксельные эталоны при расхождении сохраняют полученный кадр во
+      # временную директорию — выгружаем для разбора.
+      - name: Upload golden diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-got-${{ matrix.os }}
+          path: ${{ runner.temp }}/golden_got_*.png
+          if-no-files-found: ignore
+
+      - name: Vet
+        run: go vet ./engine/... ./output/... ./window/... ./cmd/...
+
+      # widget/clipboard_windows.go содержит исторические предупреждения
+      # unsafe.Pointer — не валим сборку, но показываем.
+      - name: Vet widget (informational)
+        run: go vet ./widget/...
+        continue-on-error: true
+
+  crosscompile:
+    name: cross-compile (zero CGO)
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: windows/amd64
+        run: GOOS=windows GOARCH=amd64 go build ./...
+      - name: linux/amd64
+        run: GOOS=linux GOARCH=amd64 go build ./...
+      - name: linux/arm64
+        run: GOOS=linux GOARCH=arm64 go build ./...
+      - name: darwin/amd64
+        run: GOOS=darwin GOARCH=amd64 go build ./...
+      - name: darwin/arm64
+        run: GOOS=darwin GOARCH=arm64 go build ./...
+
+  bench:
+    name: benchmarks (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Bench 1x
+        run: go test ./engine/ -run XXX -bench . -benchtime 1x
