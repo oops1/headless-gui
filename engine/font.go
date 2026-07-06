@@ -7,6 +7,7 @@
 package engine
 
 import (
+	"image"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -39,7 +40,41 @@ type FontCache struct {
 	// чтобы не дёргать sfnt на каждый символ при отрисовке/измерении.
 	glyphPresent map[rune]bool
 	buf          sfnt.Buffer // переиспользуемый буфер для GlyphIndex
+
+	// glyphs — кэш растеризованных глифов по (размер, руна): opentype.Face
+	// растеризует векторный контур при каждом обращении, поэтому маска
+	// сохраняется один раз и дальше блиттируется из кэша.
+	glyphs map[glyphKey]cachedGlyph
+	// metrics — кэш вертикальных метрик по размеру (Face.Metrics не бесплатен).
+	metrics map[float64]vMetric
 }
+
+// vMetric — вертикальные метрики шрифта одного размера (в пикселях).
+type vMetric struct {
+	ascent  int // подъём базовой линии
+	descent int // спуск под базовую линию
+}
+
+// glyphKey — ключ кэша глифов: размер шрифта в пунктах + руна.
+type glyphKey struct {
+	size float64
+	r    rune
+}
+
+// cachedGlyph — растеризованный глиф: маска покрытия и метрики размещения.
+// Маска immutable после создания — читается без блокировки.
+type cachedGlyph struct {
+	mask    *image.Alpha  // плотная альфа-маска (nil для глифов без пикселей, напр. пробел)
+	offX    int           // смещение маски от целочисленной позиции пера
+	offY    int           // смещение маски от базовой линии
+	advance fixed.Int26_6 // продвижение пера
+	ok      bool          // false — глифа нет в шрифте
+}
+
+// maxGlyphCacheEntries — предел кэша глифов на один FontCache; при переполнении
+// кэш сбрасывается целиком (типичный UI использует сотни уникальных пар
+// размер×руна, маска ~200–800 байт — предел удерживает память в единицах МБ).
+const maxGlyphCacheEntries = 8192
 
 // newFontCache создаёт кэш, загружая шрифт из assetsDir или используя встроенный.
 func newFontCache(assetsDir string) *FontCache {
@@ -138,6 +173,96 @@ func (fc *FontCache) SetDPI(dpi float64) {
 	defer fc.mu.Unlock()
 	fc.dpi = dpi
 	fc.cache = make(map[float64]font.Face) // очищаем кэш
+	fc.glyphs = nil                        // маски зависят от DPI
+	fc.metrics = nil
+}
+
+// Ascent возвращает подъём базовой линии (в пикселях) для размера sizePt.
+// Кэшируется — Face.Metrics пересчитывает метрики при каждом вызове.
+func (fc *FontCache) Ascent(sizePt float64) int {
+	a, _ := fc.vMetrics(sizePt)
+	return a
+}
+
+// vMetrics возвращает (ascent, descent) в пикселях для размера sizePt (кэшируется).
+func (fc *FontCache) vMetrics(sizePt float64) (ascent, descent int) {
+	fc.mu.RLock()
+	if m, ok := fc.metrics[sizePt]; ok {
+		fc.mu.RUnlock()
+		return m.ascent, m.descent
+	}
+	fc.mu.RUnlock()
+
+	face := fc.Face(sizePt)
+	met := face.Metrics()
+	ascent = met.Ascent.Round()
+	descent = met.Descent.Round()
+
+	fc.mu.Lock()
+	if fc.metrics == nil {
+		fc.metrics = make(map[float64]vMetric)
+	}
+	fc.metrics[sizePt] = vMetric{ascent: ascent, descent: descent}
+	fc.mu.Unlock()
+	return ascent, descent
+}
+
+// Glyph возвращает растеризованный глиф руны r для размера sizePt.
+// Первое обращение растеризует контур через opentype и сохраняет плотную
+// копию альфа-маски; последующие — только чтение кэша.
+func (fc *FontCache) Glyph(sizePt float64, r rune) cachedGlyph {
+	k := glyphKey{size: sizePt, r: r}
+	fc.mu.RLock()
+	if g, ok := fc.glyphs[k]; ok {
+		fc.mu.RUnlock()
+		return g
+	}
+	fc.mu.RUnlock()
+
+	face := fc.Face(sizePt)
+
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	if g, ok := fc.glyphs[k]; ok {
+		return g
+	}
+	if fc.glyphs == nil {
+		fc.glyphs = make(map[glyphKey]cachedGlyph)
+	} else if len(fc.glyphs) >= maxGlyphCacheEntries {
+		fc.glyphs = make(map[glyphKey]cachedGlyph, maxGlyphCacheEntries/4)
+	}
+
+	// Растеризация в целочисленной позиции пера: при HintingFull advance
+	// квантуется до целых пикселей, поэтому дробная часть пера всегда 0 и
+	// маска, снятая в (0,0), корректна для любой целочисленной позиции.
+	dr, maskImg, maskPt, adv, ok := face.Glyph(fixed.Point26_6{}, r)
+	g := cachedGlyph{advance: adv, ok: ok}
+	if ok && !dr.Empty() {
+		g.offX, g.offY = dr.Min.X, dr.Min.Y
+		w, h := dr.Dx(), dr.Dy()
+		m := image.NewAlpha(image.Rect(0, 0, w, h))
+		if src, isAlpha := maskImg.(*image.Alpha); isAlpha {
+			for y := 0; y < h; y++ {
+				so := src.PixOffset(maskPt.X, maskPt.Y+y)
+				copy(m.Pix[y*m.Stride:y*m.Stride+w], src.Pix[so:so+w])
+			}
+		} else {
+			for y := 0; y < h; y++ {
+				for x := 0; x < w; x++ {
+					_, _, _, a := maskImg.At(maskPt.X+x, maskPt.Y+y).RGBA()
+					m.Pix[y*m.Stride+x] = uint8(a >> 8)
+				}
+			}
+		}
+		g.mask = m
+	}
+	fc.glyphs[k] = g
+	return g
+}
+
+// Kern возвращает кернинг пары рун для размера sizePt.
+func (fc *FontCache) Kern(sizePt float64, a, b rune) fixed.Int26_6 {
+	return fc.Face(sizePt).Kern(a, b)
 }
 
 // HasGlyph сообщает, есть ли в шрифте глиф для руны r (cmap-проверка).

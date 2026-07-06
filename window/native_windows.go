@@ -440,26 +440,42 @@ func (w *Win32Window) IsMaximized() bool {
 }
 
 func (w *Win32Window) BlitRGBA(img *image.RGBA) {
+	if img == nil {
+		return
+	}
+	w.BlitRGBADirty(img, img.Bounds())
+}
+
+// BlitRGBADirty выводит только изменившуюся область dirty: RGBA→BGRA
+// конвертация и StretchDIBits ограничиваются этой областью.
+// Буфер кадра переиспользуется между вызовами (полный кадр, bottom-up DIB).
+func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	if w.hwnd == 0 || img == nil {
 		return
 	}
 	b := img.Bounds()
 	width := b.Dx()
 	height := b.Dy()
+	dirty = dirty.Intersect(b)
+	if dirty.Empty() {
+		return
+	}
 
-	// Конвертируем RGBA → BGRA (Win32 DIB формат) и переворачиваем по Y.
+	// Конвертируем RGBA → BGRA (Win32 DIB формат) с переворотом по Y —
+	// только строки/столбцы dirty-области.
 	w.mu.Lock()
 	needed := width * height * 4
 	if len(w.frameBuf) < needed {
 		w.frameBuf = make([]byte, needed)
+		dirty = b // новый буфер — заполняем целиком
 	}
 	src := img.Pix
 	dst := w.frameBuf
 	stride := img.Stride
-	for y := 0; y < height; y++ {
-		srcRow := src[(height-1-y)*stride:]
-		dstOff := y * width * 4
-		for x := 0; x < width; x++ {
+	for y := dirty.Min.Y; y < dirty.Max.Y; y++ {
+		srcRow := src[y*stride:]
+		dstOff := (height - 1 - y) * width * 4
+		for x := dirty.Min.X; x < dirty.Max.X; x++ {
 			si := x * 4
 			di := dstOff + x*4
 			dst[di+0] = srcRow[si+2] // B
@@ -490,11 +506,16 @@ func (w *Win32Window) BlitRGBA(img *image.RGBA) {
 		},
 	}
 
+	dw := dirty.Dx()
+	dh := dirty.Dy()
+	// Для bottom-up DIB YSrc отсчитывается от нижнего края изображения.
+	ySrc := height - dirty.Max.Y
+
 	w.mu.Lock()
 	procStretchDIBits.Call(
 		hdc,
-		0, 0, uintptr(width), uintptr(height), // dst rect
-		0, 0, uintptr(width), uintptr(height), // src rect
+		uintptr(dirty.Min.X), uintptr(dirty.Min.Y), uintptr(dw), uintptr(dh), // dst rect
+		uintptr(dirty.Min.X), uintptr(ySrc), uintptr(dw), uintptr(dh), // src rect
 		uintptr(unsafe.Pointer(&w.frameBuf[0])),
 		uintptr(unsafe.Pointer(&bi)),
 		uintptr(dibRgbColors),
