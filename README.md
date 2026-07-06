@@ -11,10 +11,37 @@ Go-based headless GUI engine with XAML support, tile-based delta rendering, and 
 
 **headless-gui** renders a full widget UI off-screen into an RGBA buffer and streams only changed 64x64 tiles (delta compression). The engine knows nothing about displays or OS windows — you feed it mouse/keyboard events and consume rendered frames through a Go channel. This makes it suitable for remote desktop protocols, WebSocket-based thin clients, automated testing, and native windows alike.
 
+## Screenshots
+
+Rendered headlessly by the engine itself (no OS window involved):
+
+| Widget showcase | Text shaping & antialiased graphics |
+|---|---|
+| ![Widgets](docs/screenshots/showcase-widgets.png) | ![Text & graphics](docs/screenshots/showcase-text-graphics.png) |
+
+## Performance
+
+Software renderer, fully on CPU (Intel Core Ultra 7 265K, single engine):
+
+| Scenario | Cost |
+|---|---|
+| Idle UI (render-on-demand, default) | ~0 CPU — frames are skipped entirely |
+| Button hover (event + partial redraw + tile diff) | ~45 µs |
+| Partial frame via `InvalidateRect` | ~38 µs |
+| Full 1280×800 frame, ~180 text labels | ~2.2 ms |
+| Text line, 40 glyphs (cached) | ~13 µs / shaped Arabic ~3 µs |
+| Full-HD tile diff (no changes, parallel) | ~110 µs |
+
+Run `go test ./engine/ -bench .` to reproduce.
+
 ## Features
 
 - **Off-screen rendering** — no OS window required; output via `<-chan output.Frame`
 - **Delta tile streaming** — only changed 64x64 regions are sent each frame
+- **Render-on-demand by default** — widgets self-invalidate; only the damaged region is redrawn and diffed (idle UI costs ~0 CPU, a hover ~45 µs)
+- **Complex text shaping** — HarfBuzz-quality shaping in pure Go (go-text/typesetting): Arabic ligatures & joining, Hebrew RTL, Devanagari conjuncts, Thai marks, mixed-bidi strings; Latin/Cyrillic keep a fast per-rune glyph cache
+- **Antialiasing** — smooth rounded corners (cached quarter-disc masks), AA ellipses/lines/polygons via vector rasterization
+- **HiDPI** — widgets live in logical pixels (WPF DIP model), frames render at physical resolution; per-monitor DPI awareness (v2) + `WM_DPICHANGED` on Windows, `HEADLESS_GUI_SCALE` elsewhere
 - **XAML layout** — load UI from WPF-compatible `.xaml` files (opens in Blend / Visual Studio)
 - **Grid layout** — WPF-style `<Grid>` with Pixel / Star / Auto sizing, `Grid.Row`, `Grid.Column`, spans
 - **Theming** — built-in Dark and Light themes, 80+ customizable color tokens
@@ -22,7 +49,8 @@ Go-based headless GUI engine with XAML support, tile-based delta rendering, and 
 - **Modal dialogs** — centered overlay with background dim, input isolation
 - **Font support** — TTF fonts via `golang.org/x/image/font`; custom registration by name
 - **Cascading menus** — nested submenus with arrow indicators and keyboard navigation
-- **Native window** — platform-native backends (Win32/Cocoa/X11), zero CGO on all platforms
+- **Native window** — platform-native backends (Win32/Cocoa/X11), zero CGO on all platforms; window chrome follows the theme, reacts to OS focus (inactive title bar), repaints from the frame cache on expose
+- **Golden render tests** — pixel-exact snapshot tests of widgets/themes/AA/HiDPI guard against visual regressions (CI on Windows/Linux/macOS)
 - **Data binding** — `{Binding}` OneWay/TwoWay/OneTime, `INotifyPropertyChanged`, `StringFormat`, `IValueConverter`, `ElementName`/`RelativeSource`, live `ItemsControl`
 - **Styles, triggers & templates** — `<Style>`/`<Setter>`, `DataTrigger`/`MultiTrigger`, `ControlTemplate` + `ContentPresenter` + `TemplateBinding`, `StaticResource`
 - **Commands & input bindings** — `ICommand`/`RelayCommand`, `Button.Command`, `<KeyBinding>` hotkeys
