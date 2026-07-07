@@ -879,6 +879,16 @@
                 <TextBlock Left="24" Top="360" Width="1010" Height="60" TextWrapping="Wrap"
                            Foreground="#6C7086"
                            Text="Все диалоги — внутренние (движок рисует их поверх затемнения), поэтому работают в headless/стриминге и файловые диалоги показывают ФС сервера. Оформление следует теме приложения (попробуйте сменить тему в шапке), подписи локализованы (кнопка «Язык» в шапке переключает RU/EN вживую). В MessageBox: Enter — кнопка по умолчанию, Esc — отмена, Ctrl+C — копирование содержимого."/>
+
+                <TextBlock Left="24" Top="430" Style="{StaticResource H324}"
+                           Text="Многострочный TextBox"/>
+                <TextBox Name="editBox" AcceptsReturn="True" TextWrapping="Wrap"
+                         Left="24" Top="460" Width="500" Height="180"
+                         Tag="Введите многострочный текст…"/>
+                <TextBox Name="editBoxRO" AcceptsReturn="True" TextWrapping="Wrap" IsReadOnly="True"
+                         Left="540" Top="460" Width="320" Height="180"/>
+                <Label Name="editStats" Left="24" Top="646" Width="700" Height="20"
+                       Text="" Foreground="#6C7086"/>
             </Canvas>
         </TabItem>
 

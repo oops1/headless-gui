@@ -661,6 +661,27 @@ func main() {
 		}
 	}
 
+	// ─── Многострочный TextBox (вкладка «Диалоги») ────────────────────────────
+	if tb, ok := reg["editBox"].(*widget.TextBox); ok {
+		tb.SetText("Многострочный редактор движка.\n\n" +
+			"Перенос по словам, вертикальный скролл колесом и PgUp/PgDn, " +
+			"выделение мышью и Shift+стрелками, Ctrl+стрелки — по словам, " +
+			"Ctrl+Home/End — границы документа, Ctrl+C/X/V и Ctrl+Z/Y.\n\n" +
+			"Mixed content: English, русский и цифры 1234567890.")
+		tb.OnChange = func(text string) {
+			if l := lbl("editStats"); l != nil {
+				l.SetText(fmt.Sprintf("Символов: %d · строк (визуальных): %d",
+					len([]rune(text)), tb.LineCount()))
+			}
+		}
+	}
+	if ro, ok := reg["editBoxRO"].(*widget.TextBox); ok {
+		ro.SetText("Это поле ReadOnly: текст можно выделять и копировать (Ctrl+C, " +
+			"контекстное меню), но не редактировать.\n\n" +
+			"Редактор работает и в headless-режиме: ввод приходит через " +
+			"SendKeyEvent, компоновка считается без окна.")
+	}
+
 	// Фокус на поле логина
 	if ti, ok := reg["txtLogin"].(*widget.TextInput); ok {
 		eng.SetFocus(ti)
