@@ -1372,6 +1372,60 @@ eng.AvailableFonts()
 
 ---
 
+### Standard dialogs (MessageBox, input, progress, files)
+
+A complete set of modal dialogs drawn by the engine itself — they work
+headless/streamed (file dialogs show the process/server filesystem), follow
+the theme and are localized (`dlg.*` keys, EN/RU built in, live switching):
+
+```go
+mb := widget.NewMessageBox(eng)
+mb.ShowInfo("", "Document saved.")                    // severity icon + default title
+mb.ShowQuestion("", "Save changes?", func(r widget.MessageBoxResult) { ... })
+id := mb.ShowInput("", "Name:", "default", validate, onResult); id.SetHint("hint")
+pd := mb.ShowProgress("Copying", "file.jpg", onCancel)
+pd.SetDetail("34 of 120 · 61 MB/s"); pd.SetProgress(0.28) // or SetIndeterminate(true)
+mb.ShowOpenFile(widget.FileDialogOptions{Filters: ...}, func(path string, ok bool) { ... })
+mb.ShowSaveFile(widget.FileDialogOptions{InitialName: "a.txt"}, ...)  // compact form
+mb.ShowPickFolder(widget.FileDialogOptions{}, ...)
+```
+
+Hotkeys: Enter — default button, Escape/✕ — cancel, Ctrl+C in a MessageBox
+copies its content in the Windows format (`---` separators). The Open
+browser has a places sidebar (custom Places + home/drives), a clickable
+breadcrumb path, Name/Size/Modified columns and extension filters.
+
+### Multiline TextBox
+
+`widget.NewTextBox(placeholder)` — an editor: word wrap (`Wrap=false`
+gives horizontal scroll), vertical scrolling (wheel, PgUp/PgDn), selection
+by mouse and Shift+navigation, Ctrl+arrows word jumps, Ctrl+Home/End,
+Ctrl+A/C/X/V, Ctrl+Z/Y, double-click word select, context menu,
+`ReadOnly`. In XAML it is built by
+`<TextBox AcceptsReturn="True" TextWrapping="Wrap"/>` (without those
+attributes the tag still creates the single-line TextInput). Layout uses
+`widget.MeasureUIText`, so caret math and scrolling work headless.
+
+### Browser viewer (output/webstream)
+
+Any engine app can be shown in a browser with no client build:
+
+```go
+srv := webstream.New(eng)          // the sole consumer of eng.Frames()
+go srv.Run()
+http.ListenAndServe(":8091", srv)  // "/" — embedded viewer, "/ws" — stream
+```
+
+The WebSocket server is written from scratch (RFC 6455, zero deps).
+Protocol: binary `init` (canvas size) and tile batches (per-tile PNG with
+a u16 x/y/w/h header); the server keeps a composite of the screen and
+sends each new client a full keyframe, then only deltas; slow clients
+skip frames. Input comes back as JSON (mouse/wheel/keys; the browser's
+`e.keyCode` matches `widget.KeyCode`). Demo: `go run ./cmd/webdemo` →
+http://localhost:8091.
+
+---
+
 ## Module Structure
 
 ```
@@ -1413,6 +1467,7 @@ go run ./cmd/showcase    # all widgets + live animation
 go run ./cmd/guiview     # interactive demo with modal XAML windows
 go run ./cmd/griddemo    # Grid layout
 go run ./cmd/smartgit    # SmartGit-like UI
+go run ./cmd/webdemo     # stream the UI to a browser (http://localhost:8091)
 
 # Windows binary without console
 go build -ldflags="-H windowsgui" -o showcase.exe ./cmd/showcase

@@ -5,7 +5,9 @@
 
 # headless-gui
 
-Pure-Go headless GUI engine (zero CGO): WPF-style XAML, data binding, complex text shaping, antialiasing, HiDPI. Renders off-screen to 64×64 delta tiles for RDP/WebSocket streaming — or shows native windows (Win32 / X11 / Wayland / macOS).
+**English** · [Русский](README_RU.md)
+
+Pure-Go headless GUI engine (zero CGO): WPF-style XAML, data binding, complex text shaping, antialiasing, HiDPI. Renders off-screen to 64×64 delta tiles — stream the UI **to any web browser** (built-in WebSocket viewer), over RDP, or show native windows (Win32 / X11 / Wayland / macOS).
 
 ## Overview
 
@@ -38,6 +40,10 @@ Run `go test ./engine/ -bench .` to reproduce.
 
 - **Off-screen rendering** — no OS window required; output via `<-chan output.Frame`
 - **Delta tile streaming** — only changed 64x64 regions are sent each frame
+- **Browser viewer out of the box** — `output/webstream` streams the UI to any browser over WebSocket (zero-dep RFC 6455 server, per-tile PNG, keyframe for new clients, multiple concurrent viewers) and feeds mouse/keyboard back; one Go process on the server, no rebuild for the client (`go run ./cmd/webdemo`)
+- **Standard dialogs, fully engine-drawn** — MessageBox with severity icons (Enter/Esc, Windows-style Ctrl+C dump), input and progress dialogs, file Open/Save/Folder with a built-in browser (places sidebar, clickable breadcrumb, columns) — they work headless and show the *server's* filesystem when streaming; themed and localized (EN/RU built in, live language switch)
+- **Multiline TextBox editor** — word wrap or horizontal scroll, mouse/keyboard selection, Ctrl+arrows word jumps, PgUp/PgDn, clipboard, undo/redo, context menu; caret math works headless
+- **Full keyboard layouts on Linux** — Wayland xkb keymap parsing (live layout switching) and X11 `GetKeyboardMapping`, so Russian/US/… layouts type correctly in native windows
 - **Render-on-demand by default** — widgets self-invalidate; only the damaged region is redrawn and diffed (idle UI costs ~0 CPU, a hover ~45 µs)
 - **Complex text shaping** — HarfBuzz-quality shaping in pure Go (go-text/typesetting): Arabic ligatures & joining, Hebrew RTL, Devanagari conjuncts, Thai marks, mixed-bidi strings; Latin/Cyrillic keep a fast per-rune glyph cache
 - **Antialiasing** — smooth rounded corners (cached quarter-disc masks), AA ellipses/lines/polygons via vector rasterization
@@ -70,7 +76,8 @@ Run `go test ./engine/ -bench .` to reproduce.
 | Grid | `Grid` | WPF-style grid with RowDefinitions/ColumnDefinitions (Pixel/Star/Auto) |
 | Label | `Label`, `TextBlock` | Static text, word wrap (`TextWrapping="Wrap"`) |
 | Button | `Button`, `ToggleButton`, `RepeatButton` | Click handler, hover/press/accent states, custom colors |
-| TextInput | `TextBox`, `TextInput` | Selection, clipboard, Home/End |
+| TextInput | `TextBox`, `TextInput` | Single-line: selection, clipboard, Home/End, undo/redo, context menu |
+| TextBox | `TextBox AcceptsReturn="True"` / `TextWrapping="Wrap"` | Multiline editor: word wrap, vertical scroll, Ctrl+arrows, PgUp/PgDn, clipboard, undo/redo |
 | PasswordBox | `PasswordBox` | Masked input |
 | Dropdown | `ComboBox`, `Dropdown` | Overlay popup, keyboard nav |
 | ProgressBar | `ProgressBar` | `Value` 0.0..1.0, custom fill color |
@@ -92,8 +99,10 @@ Run `go test ./engine/ -bench .` to reproduce.
 | Expander | `Expander` | Collapsible panel with header arrow |
 | Shapes | `Ellipse`, `Rectangle`, `Line`, `Polygon`, `Polyline` | Vector shapes with `Fill`/`Stroke`/`StrokeThickness` |
 | Separator | `Separator` | Divider line |
-| MessageBox | — (code only) | OK / YesNo / YesNoCancel |
-| Dialog | — (code only) | Modal base, custom content |
+| MessageBox | — (code only) | Severity presets (Info/Question/Warning/Error), OK/YesNo/YesNoCancel, Enter/Esc, Ctrl+C dump |
+| InputDialog / ProgressDialog | — (code only) | Prompt with validation & hint; progress with detail line, percent, indeterminate |
+| FileDialog | — (code only) | Open / Save / Pick-folder with built-in browser (places, breadcrumb, columns, filters) |
+| Dialog | — (code only) | Modal base: rounded chrome + shadow, ✕ close, custom content |
 | Window | `Window` | Native OS window with title bar (Win/Mac style), resize, minimize/maximize |
 | TreeView | `TreeView` | WPF-compatible hierarchical tree with virtualization, HierarchicalDataTemplate, icons, keyboard nav |
 | GridSplitter | `GridSplitter` | Resizable splitter between Grid cells |
@@ -107,6 +116,13 @@ Run `go test ./engine/ -bench .` to reproduce.
 ```bash
 go run main.go
 # Renders demo UI, writes PNG frames to out_test/
+```
+
+### Browser (WebSocket streaming)
+
+```bash
+go run ./cmd/webdemo
+# open http://localhost:8091 — the UI runs on the server, no native window at all
 ```
 
 ### Native Window
@@ -131,9 +147,11 @@ headless-gui/
     treeview/      WPF-compatible TreeView (core logic, no widget dependency)
     datagrid/      DataGrid core logic (ObservableCollection, PropertyNotifier)
   output/          Frame + DirtyTile types for delta streaming
-  window/          Native window (Win32/Cocoa/X11, zero CGO)
+    webstream/     Browser viewer: WebSocket tile streaming + input (zero-dep)
+  window/          Native window (Win32/Cocoa/X11/Wayland, zero CGO)
   cmd/
     showcase/      Full widget showcase (all widgets + live animation)
+    webdemo/       Browser streaming demo (http://localhost:8091)
     smartgit/      SmartGit-like UI (Window + Menu + TreeView + DataGrid)
   assets/ui/       XAML demo layouts (demo.xaml, grid_demo.xaml, showcase.xaml)
   gui/             XAML files for RDP UI (login, block, error dialogs)
