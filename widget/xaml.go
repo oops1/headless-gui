@@ -251,7 +251,12 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 	// ── Ввод текста ──────────────────────────────────────────────────────────
 	case "textbox", "textinput", "input", "richtextbox":
-		w = buildXAMLTextInput(el, false)
+		// Многострочный (AcceptsReturn / TextWrapping="Wrap") → TextBox-редактор.
+		if xamlWantsMultiline(el) {
+			w = buildXAMLTextBox(el)
+		} else {
+			w = buildXAMLTextInput(el, false)
+		}
 
 	case "passwordbox":
 		w = buildXAMLTextInput(el, true)
@@ -709,6 +714,40 @@ func buildXAMLTextInput(el xElement, isPassword bool) Widget {
 	}
 
 	return ti
+}
+
+// xamlWantsMultiline — тег текстового поля описывает многострочный редактор.
+func xamlWantsMultiline(el xElement) bool {
+	if strings.EqualFold(el.attr("AcceptsReturn"), "true") {
+		return true
+	}
+	wrap := strings.ToLower(el.attr("TextWrapping"))
+	return wrap == "wrap" || wrap == "wrapwithoverflow"
+}
+
+// buildXAMLTextBox создаёт многострочный TextBox из XAML-элемента.
+func buildXAMLTextBox(el xElement) Widget {
+	tb := NewTextBox(el.attr("Tag", "Placeholder", "PlaceholderText", "Hint"))
+
+	wrap := strings.ToLower(el.attr("TextWrapping"))
+	tb.Wrap = wrap == "" || wrap == "wrap" || wrap == "wrapwithoverflow"
+	if strings.EqualFold(el.attr("IsReadOnly", "ReadOnly"), "true") {
+		tb.ReadOnly = true
+	}
+	if text := el.attr("Text"); text != "" {
+		tb.SetText(text)
+	}
+	if strings.EqualFold(el.attr("Focused", "IsFocused", "Focus"), "true") {
+		tb.SetFocused(true)
+	}
+	applyColor(&tb.TextColor, el, "Foreground")
+	applyColor(&tb.Background, el, "Background")
+	if fs := el.attr("FontSize"); fs != "" {
+		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
+			tb.FontSize = v
+		}
+	}
+	return tb
 }
 
 func buildXAMLDropdown(el xElement) Widget {

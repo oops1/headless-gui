@@ -693,7 +693,10 @@ func (s *BindingScope) wireTwoWay() {
 		tw := t.w
 		switch strings.ToLower(t.prop) {
 		case "text":
-			if ti, ok := t.w.(*TextInput); ok {
+			switch ti := t.w.(type) {
+			case *TextInput:
+				ti.OnChange = func(v string) { s.writeBack(spec, v, tw) }
+			case *TextBox:
 				ti.OnChange = func(v string) { s.writeBack(spec, v, tw) }
 			}
 		case "ischecked", "checked":
@@ -733,6 +736,14 @@ func (s *BindingScope) wireElementSources() {
 func hookSourceChange(w Widget, cb func()) {
 	switch t := w.(type) {
 	case *TextInput:
+		prev := t.OnChange
+		t.OnChange = func(v string) {
+			if prev != nil {
+				prev(v)
+			}
+			cb()
+		}
+	case *TextBox:
 		prev := t.OnChange
 		t.OnChange = func(v string) {
 			if prev != nil {
@@ -807,6 +818,8 @@ func getWidgetProperty(w Widget, prop string) (interface{}, bool) {
 		case *Label:
 			return t.Text(), true
 		case *TextInput:
+			return t.GetText(), true
+		case *TextBox:
 			return t.GetText(), true
 		case *Button:
 			return t.Text, true
@@ -936,6 +949,8 @@ func setWidgetText(w Widget, s string) {
 		t.SetText(s)
 	case *TextInput:
 		t.SetText(s)
+	case *TextBox:
+		t.SetText(s)
 	case *CheckBox:
 		t.SetText(s)
 	case *RadioButton:
@@ -952,6 +967,8 @@ func setWidgetForeground(w Widget, c color.RGBA) {
 	case *Button:
 		t.TextColor = c
 	case *TextInput:
+		t.TextColor = c
+	case *TextBox:
 		t.TextColor = c
 	case *CheckBox:
 		t.TextColor = c
@@ -970,6 +987,8 @@ func setWidgetBackground(w Widget, c color.RGBA) {
 		t.Background = c
 		t.UseAlpha = c.A < 255
 	case *TextInput:
+		t.Background = c
+	case *TextBox:
 		t.Background = c
 	case *Grid:
 		t.Background = c
