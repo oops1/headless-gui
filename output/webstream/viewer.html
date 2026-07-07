@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>headless-gui viewer</title>
+<style>
+  html,body { margin:0; height:100%; background:#15161e; color:#9399b2;
+              font:13px/1.4 system-ui,sans-serif; }
+  #wrap { display:flex; flex-direction:column; align-items:center; gap:8px;
+          padding:16px; }
+  canvas { background:#000; outline:none; box-shadow:0 8px 40px rgba(0,0,0,.6);
+           border-radius:6px; image-rendering:pixelated; }
+  #status { user-select:none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="screen" tabindex="0"></canvas>
+  <div id="status">подключение…</div>
+</div>
+<script>
+"use strict";
+const canvas = document.getElementById("screen");
+const ctx = canvas.getContext("2d");
+const status = document.getElementById("status");
+
+let tiles = 0, bytes = 0;
+const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+ws.binaryType = "arraybuffer";
+
+// Сообщения обрабатываются строго по порядку (createImageBitmap асинхронен).
+let queue = Promise.resolve();
+ws.onmessage = ev => {
+  if (typeof ev.data === "string") return;
+  queue = queue.then(() => handle(ev.data)).catch(console.error);
+};
+ws.onopen  = () => { status.textContent = "подключено"; canvas.focus(); };
+ws.onclose = () => { status.textContent = "соединение закрыто"; };
+
+async function handle(buf) {
+  const dv = new DataView(buf);
+  const type = dv.getUint8(0);
+  if (type === 0x02) {                    // init: размер холста
+    canvas.width = dv.getUint16(1);
+    canvas.height = dv.getUint16(3);
+    return;
+  }
+  if (type !== 0x01) return;              // tiles
+  const n = dv.getUint16(1);
+  let off = 3;
+  const jobs = [];
+  for (let i = 0; i < n; i++) {
+    const x = dv.getUint16(off), y = dv.getUint16(off + 2);
+    const len = dv.getUint32(off + 8);
+    off += 12;
+    const blob = new Blob([new Uint8Array(buf, off, len)], { type: "image/png" });
+    off += len;
+    jobs.push(createImageBitmap(blob).then(bmp => ({ bmp, x, y })));
+  }
+  for (const j of jobs) {
+    const { bmp, x, y } = await j;
+    ctx.drawImage(bmp, x, y);
+    if (bmp.close) bmp.close();
+  }
+  tiles += n; bytes += buf.byteLength;
+  status.textContent = `тайлов: ${tiles} · трафик: ${(bytes / 1024).toFixed(0)} КБ`;
+}
+
+// ─── Ввод ────────────────────────────────────────────────────────────────────
+function send(o) { if (ws.readyState === 1) ws.send(JSON.stringify(o)); }
+function pos(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: Math.round(e.clientX - r.left), y: Math.round(e.clientY - r.top) };
+}
+// JS button: 0 лев, 1 сред, 2 прав → widget.MouseButton: 0 лев, 1 прав, 2 сред.
+const btnMap = { 0: 0, 1: 2, 2: 1 };
+
+let moveScheduled = null;
+canvas.addEventListener("mousemove", e => {
+  moveScheduled = pos(e);
+  if (moveScheduled.sent) return;
+  requestAnimationFrame(() => {
+    if (moveScheduled) { send({ t: "mm", ...moveScheduled }); moveScheduled = null; }
+  });
+});
+canvas.addEventListener("mousedown", e => {
+  canvas.focus();
+  send({ t: "mb", ...pos(e), b: btnMap[e.button] ?? 0, p: true });
+  e.preventDefault();
+});
+canvas.addEventListener("mouseup", e => {
+  send({ t: "mb", ...pos(e), b: btnMap[e.button] ?? 0, p: false });
+  e.preventDefault();
+});
+canvas.addEventListener("wheel", e => {
+  send({ t: "wh", ...pos(e), d: Math.sign(e.deltaY) });
+  e.preventDefault();
+}, { passive: false });
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+
+function mods(e) { return (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) | (e.altKey ? 4 : 0); }
+canvas.addEventListener("keydown", e => {
+  const r = e.key.length === 1 ? e.key.codePointAt(0) : 0;
+  send({ t: "kd", c: e.keyCode, r, m: mods(e) });
+  e.preventDefault();
+});
+canvas.addEventListener("keyup", e => {
+  send({ t: "ku", c: e.keyCode, m: mods(e) });
+  e.preventDefault();
+});
+</script>
+</body>
+</html>

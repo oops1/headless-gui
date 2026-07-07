@@ -115,9 +115,13 @@ func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
 		return
 	}
 
-	// Escape закрывает верхний модальный виджет
+	// Escape закрывает верхний модальный виджет (и сообщает об отмене, если
+	// диалог задал CancelAction — например, InputDialog возвращает ok=false).
 	if ev.Code == widget.KeyEscape && ev.Pressed {
 		if m := e.topModal(); m != nil {
+			if c, ok := m.(interface{ OnCancel() }); ok {
+				c.OnCancel()
+			}
 			e.CloseModal(nil) // закрывает верхний
 			return
 		}

@@ -258,9 +258,9 @@ func DarkTheme() *Theme {
 		TreeArrow: color.RGBA{R: 160, G: 160, B: 160, A: 255}, // #A0A0A0
 
 		// Dialog
-		DialogBG:      color.RGBA{R: 45, G: 45, B: 48, A: 255},  // #2D2D30
-		DialogTitleBG: color.RGBA{R: 0, G: 120, B: 215, A: 255}, // #0078D7
-		DialogDim:     color.RGBA{R: 0, G: 0, B: 0, A: 128},     // полупрозрачное затемнение
+		DialogBG:      color.RGBA{R: 45, G: 45, B: 48, A: 255}, // #2D2D30
+		DialogTitleBG: color.RGBA{R: 35, G: 35, B: 38, A: 255}, // #232326 — тёмный заголовок (принятый дизайн)
+		DialogDim:     color.RGBA{R: 0, G: 0, B: 0, A: 128},    // полупрозрачное затемнение
 
 		// GridSplitter
 		SplitterBG:      color.RGBA{R: 63, G: 63, B: 70, A: 255},  // #3F3F46

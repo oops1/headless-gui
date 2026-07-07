@@ -156,6 +156,8 @@ func New(width, height, fps int) *Engine {
 	// Точечная инвалидация от виджетов (авто-damage): hover/press/фокус/сеттеры
 	// сообщают свой прямоугольник — кадр перерисовывается и диффается частично.
 	widget.SetUIRectChangeNotifier(e.InvalidateRect)
+	// Точный замер текста для компоновки до отрисовки (размеры диалогов).
+	widget.SetTextMeasurer(e.canvas.MeasureText)
 	return e
 }
 
@@ -560,6 +562,16 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 
 	injectCaptureManager(m, e)
 
+	// Кнопка ✕ диалога закрывает модалку с семантикой отмены (как Escape).
+	if s, ok := m.(interface{ SetCloser(func()) }); ok {
+		s.SetCloser(func() {
+			if c, ok := m.(interface{ OnCancel() }); ok {
+				c.OnCancel()
+			}
+			e.CloseModal(m)
+		})
+	}
+
 	e.modMu.Lock()
 	e.modals = append(e.modals, m)
 	e.modMu.Unlock()
@@ -573,12 +585,21 @@ func (e *Engine) CloseModal(m widget.ModalWidget) {
 	e.modMu.Lock()
 	defer e.modMu.Unlock()
 
+	// notifyClosed уведомляет диалог о закрытии (снимает подписки локали и т.п.).
+	notifyClosed := func(w widget.ModalWidget) {
+		if sm, ok := w.(interface{ SetModal(bool) }); ok {
+			sm.SetModal(false)
+		}
+	}
+
 	if m == nil && len(e.modals) > 0 {
+		notifyClosed(e.modals[len(e.modals)-1])
 		e.modals = e.modals[:len(e.modals)-1]
 		return
 	}
 	for i, modal := range e.modals {
 		if modal == m {
+			notifyClosed(modal)
 			e.modals = append(e.modals[:i], e.modals[i+1:]...)
 			return
 		}

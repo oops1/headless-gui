@@ -20,6 +20,7 @@ type Label struct {
 	Background color.RGBA
 
 	WrapText bool    // true — переносить текст по словам в пределах bounds
+	Muted    bool    // true — вторичный текст: тема красит в приглушённый цвет
 	FontSize float64 // размер шрифта в pt (0 → DefaultFontSizePt)
 	FontName string  // именованный шрифт (зарегистрированный через RegisterFont); "" → default
 
@@ -245,7 +246,11 @@ func splitWords(s string) []string {
 // Непрозрачный фон следует за темой (как у Panel/Canvas) — иначе после
 // переключения остаются «островки» прежней палитры.
 func (l *Label) ApplyTheme(t *Theme) {
-	l.TextColor = t.LabelText
+	if l.Muted {
+		l.TextColor = t.InputPlaceholder
+	} else {
+		l.TextColor = t.LabelText
+	}
 	if l.Background.A > 0 {
 		l.Background = t.PanelBG
 	}
