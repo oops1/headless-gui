@@ -562,6 +562,126 @@ func main() {
 	})
 	updateLangBtn()
 
+	// ─── TAB: Диалоги ────────────────────────────────────────────────────────
+	mbox := widget.NewMessageBox(eng)
+	setResult := func(format string, args ...any) {
+		if l := lbl("dlgResult"); l != nil {
+			l.SetText(fmt.Sprintf(format, args...))
+		}
+	}
+	if b := btn("dlgInfo"); b != nil {
+		b.OnClick = func() { mbox.ShowInfo("", "Документ сохранён. Резервная копия создана.") }
+	}
+	if b := btn("dlgQuestion"); b != nil {
+		b.OnClick = func() {
+			mbox.ShowQuestion("", "Сохранить изменения перед выходом?", func(r widget.MessageBoxResult) {
+				setResult("Вопрос → %v", r)
+			})
+		}
+	}
+	if b := btn("dlgWarn"); b != nil {
+		b.OnClick = func() { mbox.ShowWarning("", "Несохранённые изменения будут потеряны.") }
+	}
+	if b := btn("dlgError"); b != nil {
+		b.OnClick = func() { mbox.ShowError("", "Не удалось открыть файл: доступ запрещён (EACCES).") }
+	}
+	if b := btn("dlgInput"); b != nil {
+		b.OnClick = func() {
+			id := mbox.ShowInput("", "Новое имя элемента:", "report-2026.xlsx",
+				func(s string) string {
+					if strings.ContainsAny(s, `/\:*?`) {
+						return "Имя не может содержать / \\ : * ?"
+					}
+					return ""
+				},
+				func(text string, ok bool) {
+					if ok {
+						setResult("Ввод → %q", text)
+					} else {
+						setResult("Ввод отменён")
+					}
+				})
+			id.SetHint("Имя не может содержать / \\ : * ?")
+		}
+	}
+	if b := btn("dlgProgress"); b != nil {
+		b.OnClick = func() {
+			pd := mbox.ShowProgress("Копирование файлов", "backup/photos/IMG_2647.jpg", func() { setResult("Прогресс отменён") })
+			go func() {
+				for i := 0; i <= 100; i += 4 {
+					time.Sleep(60 * time.Millisecond)
+					pd.SetProgress(float64(i) / 100)
+					pd.SetDetail(fmt.Sprintf("%d из 120 файлов · 61,4 МБ/с", i*120/100))
+				}
+				pd.SetIndeterminate(true)
+				pd.SetStatus("Проверка контрольных сумм…")
+				pd.SetDetail("")
+				time.Sleep(1200 * time.Millisecond)
+				pd.Close()
+				setResult("Копирование завершено")
+			}()
+		}
+	}
+	fileOpts := func() widget.FileDialogOptions {
+		return widget.FileDialogOptions{
+			Filters: []widget.FileFilter{
+				{Label: "Все файлы", Exts: nil},
+				{Label: "Таблицы", Exts: []string{".xlsx", ".csv"}},
+				{Label: "Изображения", Exts: []string{".png", ".jpg", ".jpeg"}},
+			},
+		}
+	}
+	if b := btn("dlgOpen"); b != nil {
+		b.OnClick = func() {
+			mbox.ShowOpenFile(fileOpts(), func(path string, ok bool) {
+				if ok {
+					setResult("Открыть → %s", path)
+				}
+			})
+		}
+	}
+	if b := btn("dlgSave"); b != nil {
+		b.OnClick = func() {
+			o := fileOpts()
+			o.InitialName = "report-final.xlsx"
+			mbox.ShowSaveFile(o, func(path string, ok bool) {
+				if ok {
+					setResult("Сохранить → %s", path)
+				}
+			})
+		}
+	}
+	if b := btn("dlgFolder"); b != nil {
+		b.OnClick = func() {
+			mbox.ShowPickFolder(widget.FileDialogOptions{}, func(path string, ok bool) {
+				if ok {
+					setResult("Папка → %s", path)
+				}
+			})
+		}
+	}
+
+	// ─── Многострочный TextBox (вкладка «Диалоги») ────────────────────────────
+	if tb, ok := reg["editBox"].(*widget.TextBox); ok {
+		tb.SetText("Многострочный редактор движка.\n\n" +
+			"Перенос по словам, вертикальный скролл колесом и PgUp/PgDn, " +
+			"выделение мышью и Shift+стрелками, Ctrl+стрелки — по словам, " +
+			"Ctrl+Home/End — границы документа, Ctrl+C/X/V и Ctrl+Z/Y.\n\n" +
+			"Mixed content: English, русский и цифры 1234567890.")
+		tb.OnChange = func(text string) {
+			if l := lbl("editStats"); l != nil {
+				l.SetText(fmt.Sprintf("Символов: %d · строк (визуальных): %d",
+					len([]rune(text)), tb.LineCount()))
+			}
+		}
+	}
+	if ro, ok := reg["editBoxRO"].(*widget.TextBox); ok {
+		ro.SetText("Это поле ReadOnly: текст можно выделять и копировать (Ctrl+C, " +
+			"контекстное меню), но не редактировать.\n\n" +
+			"Редактор работает и в headless-режиме: ввод приходит через " +
+			"SendKeyEvent, компоновка считается без окна.")
+	}
+
 	// Фокус на поле логина
 	if ti, ok := reg["txtLogin"].(*widget.TextInput); ok {
 		eng.SetFocus(ti)

@@ -119,12 +119,15 @@ const (
 	VK_DELETE    = 0x2E
 	VK_HOME      = 0x24
 	VK_END       = 0x23
+	VK_PRIOR     = 0x21 // Page Up
+	VK_NEXT      = 0x22 // Page Down
 
 	// Буквенные клавиши (для Ctrl+C и т.д.)
 	VK_A = 0x41
 	VK_C = 0x43
 	VK_V = 0x56
 	VK_X = 0x58
+	VK_Y = 0x59
 	VK_Z = 0x5A
 
 	// Модификаторы

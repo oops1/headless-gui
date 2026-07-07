@@ -1398,6 +1398,61 @@ eng.AvailableFonts()
 
 ---
 
+### Стандартные диалоги (MessageBox, ввод, прогресс, файлы)
+
+Полный набор модальных диалогов, отрисованных самим движком — работают в
+headless/стриминге (файловые показывают ФС процесса/сервера), темизируются
+и локализованы (ключи `dlg.*`, EN/RU встроены, живое переключение):
+
+```go
+mb := widget.NewMessageBox(eng)
+mb.ShowInfo("", "Документ сохранён.")                 // значок i, заголовок по severity
+mb.ShowQuestion("", "Сохранить изменения?", func(r widget.MessageBoxResult) { ... })
+id := mb.ShowInput("", "Имя:", "default", validate, onResult); id.SetHint("подсказка")
+pd := mb.ShowProgress("Копирование", "file.jpg", onCancel)
+pd.SetDetail("34 из 120 · 61 МБ/с"); pd.SetProgress(0.28) // или SetIndeterminate(true)
+mb.ShowOpenFile(widget.FileDialogOptions{Filters: ...}, func(path string, ok bool) { ... })
+mb.ShowSaveFile(widget.FileDialogOptions{InitialName: "a.txt"}, ...)  // компактная форма
+mb.ShowPickFolder(widget.FileDialogOptions{}, ...)
+```
+
+Горячие клавиши: Enter — кнопка по умолчанию, Escape/✕ — отмена, Ctrl+C в
+MessageBox копирует содержимое в формате Windows (разделители `---`).
+Открытый браузер файлов: панель мест (Places в опциях + домашняя/диски),
+кликабельный breadcrumb-путь, колонки Имя/Размер/Изменён, фильтры.
+
+### Многострочный TextBox
+
+`widget.NewTextBox(placeholder)` — редактор: перенос по словам
+(`Wrap=false` — горизонтальный скролл), вертикальный скролл (колесо,
+PgUp/PgDn), выделение мышью и Shift+навигацией, Ctrl+стрелки по словам,
+Ctrl+Home/End, Ctrl+A/C/X/V, Ctrl+Z/Y, двойной клик — слово, контекстное
+меню, `ReadOnly`. В XAML строится тегом
+`<TextBox AcceptsReturn="True" TextWrapping="Wrap"/>` (без этих атрибутов
+тег по-прежнему создаёт однострочный TextInput). Компоновка считается
+через `widget.MeasureUIText`, поэтому каретка/скролл работают headless.
+
+### Вьювер в браузере (output/webstream)
+
+UI любого приложения на движке можно показать в браузере без пересборки
+клиента:
+
+```go
+srv := webstream.New(eng)          // единственный потребитель eng.Frames()
+go srv.Run()
+http.ListenAndServe(":8091", srv)  // "/" — встроенный вьювер, "/ws" — поток
+```
+
+WebSocket-сервер написан с нуля (RFC 6455, без зависимостей). Протокол:
+бинарные сообщения `init` (размер холста) и батчи тайлов (PNG на тайл с
+u16-заголовком x/y/w/h); сервер держит композит экрана и отдаёт новому
+клиенту полный keyframe, дальше — только дельты; медленные клиенты
+пропускают кадры. Ввод возвращается JSON-сообщениями (мышь/колесо/клавиши;
+`e.keyCode` браузера совпадает с `widget.KeyCode`). Демо:
+`go run ./cmd/webdemo` → http://localhost:8091.
+
+---
+
 ## Структура модулей
 
 ```
@@ -1439,6 +1494,7 @@ go run ./cmd/showcase    # все виджеты + живая анимация
 go run ./cmd/guiview     # интерактивное демо с модальными XAML-окнами
 go run ./cmd/griddemo    # Grid-раскладка
 go run ./cmd/smartgit    # SmartGit-подобный UI
+go run ./cmd/webdemo     # стриминг UI в браузер (http://localhost:8091)
 
 # Бинарник без консоли (Windows)
 go build -ldflags="-H windowsgui" -o showcase.exe ./cmd/showcase
