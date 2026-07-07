@@ -246,6 +246,8 @@ Full developer guide with widget API, XAML reference, Grid layout, theming, even
 - [GUIDE.md](GUIDE.md) — Русский
 - [GUIDE_EN.md](GUIDE_EN.md) — English
 
+AI-agent reference (API cheatsheet + repo working rules): [docs/AI_AGENT_REFERENCE.md](docs/AI_AGENT_REFERENCE.md).
+
 ## License
 
 [MIT](LICENSE)

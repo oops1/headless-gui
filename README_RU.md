@@ -245,7 +245,7 @@ Go 1.22+. Модуль `window/` опционален — ядро движка 
 - [GUIDE.md](GUIDE.md) — Русский
 - [GUIDE_EN.md](GUIDE_EN.md) — English
 
-Руководство для ИИ-агентов, работающих с кодовой базой: [CLAUDE.md](CLAUDE.md).
+Руководство для ИИ-агентов (API-справочник + правила работы с кодовой базой): [docs/AI_AGENT_REFERENCE.md](docs/AI_AGENT_REFERENCE.md).
 
 ## Лицензия
 

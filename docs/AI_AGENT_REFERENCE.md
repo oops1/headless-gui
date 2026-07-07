@@ -7,6 +7,92 @@
 
 ---
 
+---
+
+## Working Rules (READ FIRST — repo conventions for AI agents)
+
+Hard rules for any AI agent editing this codebase. Human docs: README.md /
+README_RU.md, GUIDE.md / GUIDE_EN.md; roadmap: TODO.md.
+
+1. **The headless contract is inviolable.** No feature may break:
+   `engine.Frames()` (64×64 delta tiles, physical pixels),
+   `SendMouseMove/SendMouseButton/SendKeyEvent`, logical widget coordinates,
+   and **zero CGO** in every module. Anything that needs an OS window lives
+   only under `window/` behind build tags.
+2. **Branches:** work happens on `develop`. The git-flow release leaves HEAD
+   on `master` — ALWAYS check `git branch --show-current` before committing
+   and `git checkout develop` if needed.
+3. **No mass formatting.** The repo is not gofmt-clean (CRLF); `gofmt -l`
+   flags almost every file — that is expected. Format only the lines you touch.
+4. **Verification matrix before any commit:**
+   ```bash
+   go build ./...
+   go test ./...
+   go test -race ./tests/ ./engine/
+   go vet -unsafeptr=false ./...          # -unsafeptr=false required (purego)
+   GOOS=linux  CGO_ENABLED=0 go build ./...
+   GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./...
+   ```
+5. **Verify visual changes by rendering:** build a tiny app,
+   `eng.SaveFrames(dir)` writes PNG frames — inspect them. Golden tests
+   (`tests/golden_*`) catch pixel regressions; regenerate goldens only for
+   intentional visual changes.
+
+### Load-bearing patterns
+
+- **Invalidation:** widget setters compare state and call
+  `Invalidate()`/`InvalidateRect` only on an actual change — the engine
+  renders on demand. A missed invalidate = "frozen" UI; a spurious one =
+  wasted CPU.
+- **Mutexes:** a widget holds its `mu` only around state; callbacks
+  (`OnChange`, `OnClick`) and `Invalidate()` are called AFTER Unlock.
+  `Draw` copies state under mu, then draws without it.
+- **Text measurement outside Draw:** `widget.MeasureUIText(text, sizePt)` —
+  the precise measurer registered by the engine (`SetTextMeasurer`). Use it
+  for layout computed before painting (dialogs, TextBox). Inside Draw use
+  `ctx.MeasureText`.
+- **Theming:** constructors read the global palette `win10.*` (updated by
+  `ApplyGlobalTheme`); `ApplyTheme(t *Theme)` recolors live widgets.
+  Internal helper widgets may read `win10.*` directly in Draw. Secondary
+  text: `Label.Muted = true` (theme paints it InputPlaceholder). Classic
+  Win2000 is a separate draw branch (`currentStyle().Classic3D`, bevel
+  helpers) — do not forget it.
+- **Translucent colors — the premultiplied trap:** Go's `color.RGBA` is
+  alpha-premultiplied. A color with channels above alpha (e.g.
+  `{0,120,215,90}`) overflows during Over blending and turns magenta on
+  light backgrounds. Build such colors via `premulAlpha(base, alpha)`
+  (widget/textbox.go). Also: `FillRoundRect` with A<255 takes a legacy
+  Src path (does NOT blend) — use `FillRectAlpha` for real blending.
+- **Modal dialogs:** `engine.ShowModal` centers the dialog and shifts its
+  children; Enter/Escape/Ctrl+C flow through
+  `Dialog.HandleInputBinding`/`OnCancel` BEFORE focus dispatch; the ✕
+  button is wired by the engine via `SetCloser`. Localization uses `dlg.*`
+  keys with live switching through `Dialog.OnLanguageChange`
+  (unsubscribed in `SetModal(false)`).
+- **Key codes:** `widget.KeyCode` values match Windows VK codes and the
+  browser's `e.keyCode`. A new key must be added to ALL mappings:
+  `window/native.go` (VK_*), `window/window.go` (vkToKeyCode),
+  `window/native_linux.go` (X11 keycode; Wayland reuses it via +8),
+  `window/native_darwin.go`.
+- **Headless input tests:** unit — call `w.OnKeyEvent/OnMouseButton`
+  directly; end-to-end — `eng.SetFocus(w)` + `eng.SendKeyEvent`
+  (see tests/*_test.go).
+
+### Environment quirks
+
+- `go vet` without `-unsafeptr=false` complains about purego — expected.
+- Tests create engines without windows — they run in CI and WSL.
+- On Windows shells, multi-line heredoc/patch strings can break on
+  encoding — run Python patchers as `py -3 -X utf8`.
+
+### Docs to update when adding a feature
+
+README.md + README_RU.md (keep them symmetric!), GUIDE.md + GUIDE_EN.md
+(the "New features" section), TODO.md (tick the item with a date), and
+this file — new APIs go into a version section below.
+
+---
+
 ## Table of Contents
 
 1. [Quick Reference Card](#quick-reference-card)
@@ -2194,6 +2280,104 @@ Programmatically: `widget.SetCursor(c Cursor)` / `widget.CursorOverride() (Curso
 
 `Button`, `CheckBox`, `RadioButton`, `ToggleSwitch` now expose `SetText(s string)` / `GetText() string`
 for uniform programmatic text updates (XAML binding internally calls `SetText`).
+
+---
+
+## v3.7.0 additions (dialogs, multiline TextBox, browser streaming)
+
+### Standard dialogs (engine-drawn, headless-capable)
+
+All dialogs are built from widgets and shown via `engine.ShowModal` — they
+work headless/streamed (file dialogs list the PROCESS/server filesystem),
+follow the theme, and are localized (`dlg.*` keys, EN/RU built in, live
+switch). Modern themes draw rounded chrome + soft shadow + close button;
+Win2000 keeps the classic bevel look.
+
+```go
+mb := widget.NewMessageBox(eng)
+
+// MessageBox: severity presets; empty caption -> localized default title.
+mb.ShowInfo(caption, msg)                        // blue "i"
+mb.ShowWarning(caption, msg)                     // orange triangle
+mb.ShowError(caption, msg)                       // red X
+mb.ShowQuestion(caption, msg, func(r widget.MessageBoxResult) {})   // Yes/No
+mb.ShowSeverity(caption, msg, widget.SeverityWarning, widget.MBYesNoCancel, onResult)
+// First paragraph = primary tone; paragraphs after "\n" render muted.
+// Enter = default (accent) button, Escape / close btn = cancel,
+// Ctrl+C = Windows-style dump ("---" separators, CRLF).
+
+// Input dialog: validator returns "" (ok) or an error message.
+id := mb.ShowInput(title, label, initial,
+    func(s string) string { return "" },
+    func(text string, ok bool) {})
+id.SetHint("gray persistent hint under the field")   // error replaces it in red
+
+// Progress dialog (thread-safe setters; onCancel nil -> no Cancel, no close btn).
+pd := mb.ShowProgress(title, status, onCancel)
+pd.SetStatus("file.jpg"); pd.SetDetail("34 of 120 - 61 MB/s")
+pd.SetProgress(0.28)          // updates the percent label
+pd.SetIndeterminate(true)     // running block, percent hidden
+pd.Close()                    // idempotent
+
+// File dialogs.
+opts := widget.FileDialogOptions{
+    StartDir: dir, InitialName: "a.txt", ShowHidden: false,
+    Filters: []widget.FileFilter{{Label: "Tables", Exts: []string{".xlsx", ".csv"}}},
+    Places:  []widget.FilePlace{{Label: "srv-share", Path: "//srv/share"}},
+}
+mb.ShowOpenFile(opts, func(path string, ok bool) {})  // places sidebar, breadcrumb,
+                                                      // Name/Size/Modified columns
+mb.ShowSaveFile(opts, onResult)                       // compact form + overwrite warning
+mb.ShowPickFolder(opts, onResult)
+```
+
+Hidden entries: dot-prefixed names everywhere; on Windows additionally the
+Hidden/System file attributes (like Explorer). Long names are ellipsized to
+the column. `Dialog` gained `DefaultAction`/`CancelAction`/`CopyText`,
+`ShowCloseButton`, `RequestClose()`, `OnLanguageChange(apply)`.
+
+### Multiline TextBox
+
+```go
+tb := widget.NewTextBox("placeholder")
+tb.Wrap = true        // word wrap (false -> horizontal scroll)
+tb.ReadOnly = false
+tb.SetText("line1\nline2"); tb.GetText(); tb.SelectedText()
+tb.CaretPosition(); tb.LineCount(); tb.ScrollTop()
+tb.OnChange = func(text string) {}
+```
+
+Keys: arrows (Up/Down keep a goal column), Ctrl+arrows word jumps,
+Home/End, Ctrl+Home/End, PgUp/PgDn, Shift+navigation selects,
+Ctrl+A/C/X/V, Ctrl+Z/Y, Enter inserts a newline. Mouse: click/drag
+selection, double-click word, wheel scroll, context menu. Layout uses
+`widget.MeasureUIText` -> caret math works headless.
+
+XAML: `<TextBox AcceptsReturn="True"/>` or `TextWrapping="Wrap"` builds
+this editor; a plain `<TextBox>` still builds the single-line TextInput.
+TwoWay `Text` binding supported for both.
+
+New key codes (mapped on ALL backends): `KeyPageUp` (33), `KeyPageDown`
+(34), `KeyY` (89 — Ctrl+Y redo).
+
+### Browser streaming (output/webstream)
+
+```go
+srv := webstream.New(eng)   // the SOLE consumer of eng.Frames()
+go srv.Run()
+http.ListenAndServe(":8091", srv)   // "/" embedded viewer, "/ws" stream
+```
+
+Zero-dep WebSocket server (RFC 6455: handshake, masked client frames,
+fragmentation, ping/pong). Binary protocol: `0x02 init [u16 w][u16 h]`,
+`0x01 tiles [u16 n] { [u16 x][u16 y][u16 w][u16 h][u32 len][PNG] }xn`
+(big-endian). The server keeps a composite image of the screen, so every
+new client receives a full keyframe, then deltas; slow clients skip
+frames (buffered chan, non-blocking send). Input events arrive as JSON
+text messages: `{"t":"mm","x":..,"y":..}`, `{"t":"mb",..,"b":0,"p":true}`,
+`{"t":"wh",..,"d":1}`, `{"t":"kd"/"ku","c":keyCode,"r":codepoint,"m":mods}`
+(mods: 1=Ctrl 2=Shift 4=Alt; browser `e.keyCode` == `widget.KeyCode`).
+Demo: `go run ./cmd/webdemo` -> http://localhost:8091.
 
 ---
 
