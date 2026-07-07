@@ -77,8 +77,12 @@ const (
 	wlPointerEvAxis   = 4
 
 	// wl_keyboard events
-	wlKeyboardEvKeymap = 0
-	wlKeyboardEvKey    = 3
+	wlKeyboardEvKeymap    = 0
+	wlKeyboardEvKey       = 3
+	wlKeyboardEvModifiers = 4
+
+	xkbModShift = 1 // фиксированные маски реальных модификаторов xkb
+	xkbModLock  = 2
 
 	// xdg_wm_base
 	xdgWmBaseGetXdgSurface = 2
@@ -154,6 +158,13 @@ type WaylandWindow struct {
 	ptrX, ptrY int
 
 	rxFDs []int // fd, принятые через SCM_RIGHTS (keymap и т.п.)
+
+	// Клавиатура: распарсенный xkb-keymap и состояние модификаторов
+	// (событие modifiers несёт и группу — активную раскладку).
+	keymap   *xkbKeymap
+	modShift bool
+	modCaps  bool
+	kbGroup  int
 
 	// Callbacks (интерфейс NativeWindow)
 	onResize      func(w, h int)
@@ -604,34 +615,75 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 	}
 }
 
-// handleKeyboard — клавиатура: keymap (fd закрываем — xkb не парсим),
-// key: linux evdev; та же таблица, что X11 (keycode = evdev + 8).
+// handleKeyboard — клавиатура. keymap (fd, формат xkb_v1) парсится в
+// таблицу «код → группы → уровни → руна» — полноценный ввод с раскладкой
+// (кириллица и пр.) и живым переключением групп через событие modifiers.
 func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 	switch opcode {
 	case wlKeyboardEvKeymap:
-		if fd := w.takeFD(); fd >= 0 {
-			unix.Close(fd)
+		// format(uint32), fd(ancillary), size(uint32)
+		format := binary.LittleEndian.Uint32(b[0:4])
+		size := int(binary.LittleEndian.Uint32(b[4:8]))
+		fd := w.takeFD()
+		if fd < 0 {
+			return
 		}
+		defer unix.Close(fd)
+		if format != 1 || size <= 0 { // 1 = xkb_v1 (текстовый)
+			return
+		}
+		data, err := unix.Mmap(fd, 0, size, unix.PROT_READ, unix.MAP_PRIVATE)
+		if err != nil {
+			wlLog("keymap mmap: %v", err)
+			return
+		}
+		defer unix.Munmap(data)
+		if dump := os.Getenv("HEADLESS_GUI_WL_KEYMAP_DUMP"); dump != "" {
+			os.WriteFile(dump, data, 0o644)
+		}
+		w.keymap = parseXkbKeymap(string(data))
+		if w.keymap == nil {
+			wlLog("keymap: разобрать не удалось — фолбэк на упрощённый ввод")
+		} else {
+			wlLog("keymap: %d клавиш", len(w.keymap.keys))
+		}
+
+	case wlKeyboardEvModifiers:
+		// serial, depressed, latched, locked, group
+		depressed := binary.LittleEndian.Uint32(b[4:8])
+		latched := binary.LittleEndian.Uint32(b[8:12])
+		locked := binary.LittleEndian.Uint32(b[12:16])
+		w.modShift = (depressed|latched)&xkbModShift != 0
+		w.modCaps = locked&xkbModLock != 0
+		w.kbGroup = int(binary.LittleEndian.Uint32(b[16:20]))
+
 	case wlKeyboardEvKey:
 		// serial, time, key, state
 		key := int(binary.LittleEndian.Uint32(b[8:12]))
 		pressed := binary.LittleEndian.Uint32(b[12:16]) == 1
 		vk := x11KeycodeToVK(key + 8)
-		if vk == 0 {
+		if !pressed {
+			if vk != 0 && w.onKeyUp != nil {
+				w.onKeyUp(vk)
+			}
 			return
 		}
-		if pressed {
-			if w.onKeyDown != nil {
-				w.onKeyDown(vk)
+		if vk != 0 && w.onKeyDown != nil {
+			w.onKeyDown(vk)
+		}
+		if w.onChar == nil {
+			return
+		}
+		// Полноценный ввод по keymap (руна с учётом раскладки/Shift/Caps);
+		// фолбэк — упрощённый маппинг, как раньше.
+		if r := w.keymap.runeFor(uint32(key+8), w.kbGroup, w.modShift, w.modCaps); r >= 32 {
+			w.onChar(r)
+			return
+		}
+		if w.keymap == nil {
+			if r := x11KeycodeToRune(key+8, w.modShift); r != 0 {
+				w.onChar(r)
 			}
-			// Упрощённый символьный ввод (как в X11-бэкенде): без xkb-раскладки.
-			if w.onChar != nil {
-				if r := x11KeycodeToRune(key+8, false); r != 0 {
-					w.onChar(r)
-				}
-			}
-		} else if w.onKeyUp != nil {
-			w.onKeyUp(vk)
 		}
 	}
 }

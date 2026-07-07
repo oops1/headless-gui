@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"sync"
+	"time"
 )
 
 // ListView — список элементов с вертикальной прокруткой и выделением.
@@ -57,6 +58,12 @@ type ListView struct {
 	focused int32 // 0 | 1
 
 	OnSelect func(index int, text string) // вызывается при выборе элемента
+	// OnActivate вызывается при «активации» элемента: двойной клик или Enter
+	// (аналог открытия). Для файловых списков — вход в папку/выбор файла.
+	OnActivate func(index int, text string)
+
+	lastClickIdx  int       // индекс последнего клика (для детекта double-click)
+	lastClickTime time.Time // время последнего клика
 }
 
 // NewListView создаёт список с заданными элементами.
@@ -464,7 +471,13 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 		if idx >= 0 {
 			changed := lv.selected != idx
 			lv.selected = idx
+			// Детект двойного клика: тот же элемент в пределах 400 мс.
+			now := time.Now()
+			dbl := idx == lv.lastClickIdx && now.Sub(lv.lastClickTime) < 400*time.Millisecond
+			lv.lastClickIdx = idx
+			lv.lastClickTime = now
 			onSel := lv.OnSelect
+			onAct := lv.OnActivate
 			text := lv.items[idx]
 			lv.mu.Unlock()
 			if changed {
@@ -472,6 +485,9 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 			}
 			if onSel != nil {
 				onSel(idx, text) // синхронно — вне lv.mu
+			}
+			if dbl && onAct != nil {
+				onAct(idx, text)
 			}
 			return true
 		}
@@ -543,8 +559,8 @@ func (lv *ListView) OnKeyEvent(e KeyEvent) {
 	// Снимок для авто-инвалидации при фактическом изменении.
 	oldSel, oldScroll := lv.selected, lv.scrollY
 
-	// Отложенный вызов OnSelect — после освобождения lv.mu (синхронно).
-	fireIdx, fireText, fire := -1, "", false
+	// Отложенный вызов callback — после освобождения lv.mu (синхронно).
+	fireIdx, fireText, fireActivate := -1, "", false
 
 	switch e.Code {
 	case KeyUp:
@@ -564,19 +580,27 @@ func (lv *ListView) OnKeyEvent(e KeyEvent) {
 		lv.selected = count - 1
 		lv.ensureVisible(lv.selected)
 	case KeyEnter:
-		if lv.selected >= 0 && lv.selected < count && lv.OnSelect != nil {
-			fireIdx, fireText, fire = lv.selected, lv.items[lv.selected], true
+		// Enter = активация выбранного элемента (открыть/выбрать).
+		if lv.selected >= 0 && lv.selected < count {
+			fireIdx, fireText, fireActivate = lv.selected, lv.items[lv.selected], true
 		}
 	}
 	onSel := lv.OnSelect
+	onAct := lv.OnActivate
 	visChanged := lv.selected != oldSel || lv.scrollY != oldScroll
 	lv.mu.Unlock()
 
 	if visChanged {
 		lv.Invalidate()
 	}
-	if fire && onSel != nil {
-		onSel(fireIdx, fireText)
+	if fireActivate {
+		// Обратная совместимость: если OnActivate не задан, Enter по-прежнему
+		// уведомляет OnSelect (прежнее поведение).
+		if onAct != nil {
+			onAct(fireIdx, fireText)
+		} else if onSel != nil {
+			onSel(fireIdx, fireText)
+		}
 	}
 }
 

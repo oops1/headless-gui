@@ -156,6 +156,9 @@ func accessInfoFor(w Widget) AccessInfo {
 	case *TextInput:
 		info.Role = RoleTextInput
 		info.Value = t.GetText()
+	case *TextBox:
+		info.Role = RoleTextInput
+		info.Value = t.GetText()
 	case *Label:
 		info.Role = RoleLabel
 		info.Name = t.Text()

@@ -111,7 +111,7 @@ func NewTextInput(placeholder string) *TextInput {
 		TextColor:   win10.InputText,
 		PlaceColor:  win10.InputPlaceholder,
 		CaretColor:  win10.InputCaret,
-		SelColor:    color.RGBA{R: 0, G: 120, B: 215, A: 90},
+		SelColor:    premulAlpha(win10.Accent, 110),
 		PaddingX:    6,
 		PaddingY:    4,
 		selStart:    -1,
@@ -1137,4 +1137,5 @@ func (t *TextInput) ApplyTheme(th *Theme) {
 	t.TextColor = th.InputText
 	t.PlaceColor = th.InputPlaceholder
 	t.CaretColor = th.InputCaret
+	t.SelColor = premulAlpha(th.Accent, 110)
 }

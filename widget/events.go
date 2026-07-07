@@ -49,6 +49,8 @@ const (
 	KeyEnter     KeyCode = 13
 	KeyEscape    KeyCode = 27
 	KeySpace     KeyCode = 32
+	KeyPageUp    KeyCode = 33
+	KeyPageDown  KeyCode = 34
 	KeyHome      KeyCode = 36
 	KeyLeft      KeyCode = 37
 	KeyUp        KeyCode = 38
