@@ -721,6 +721,10 @@ func vkToKeyCode(vk int) widget.KeyCode {
 		return widget.KeyHome
 	case VK_END:
 		return widget.KeyEnd
+	case VK_PRIOR:
+		return widget.KeyPageUp
+	case VK_NEXT:
+		return widget.KeyPageDown
 	case VK_A:
 		return widget.KeyA
 	case VK_C:
@@ -729,6 +733,8 @@ func vkToKeyCode(vk int) widget.KeyCode {
 		return widget.KeyV
 	case VK_X:
 		return widget.KeyX
+	case VK_Y:
+		return widget.KeyY
 	case VK_Z:
 		return widget.KeyZ
 	}
