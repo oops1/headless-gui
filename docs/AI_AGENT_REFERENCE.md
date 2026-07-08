@@ -2381,6 +2381,43 @@ Demo: `go run ./cmd/webdemo` -> http://localhost:8091.
 
 ---
 
+## v3.8.0 additions (animation framework)
+
+```go
+// Ядро: тик получает прогресс 0..1 ПОСЛЕ кривой; часы у движка
+// (StepAnimations в рендер-цикле — ни горутин, ни таймеров на анимацию).
+a := widget.Animate(300*time.Millisecond, widget.EaseOutCubic, func(t float64) {
+    pb.SetValue(widget.LerpF(from, to, t)) // сеттеры сами инвалидируются
+})
+// Owner-replace (CSS-transition): новая анимация с тем же (owner, tag)
+// останавливает предыдущую — анимации не «дерутся» при быстрых кликах.
+widget.AnimateOwned(w, "bounds", dur, curve, tick)
+a.Stop(); a.Running(); a.OnDone = ...; a.Loop; a.AutoReverse
+// Конфиг-поля (OnDone/Loop/AutoReverse) выставлять сразу после Animate,
+// в той же горутине — до первого Step (иначе data race).
+
+// Кривые: EaseLinear, In/Out/InOut × Quad/Cubic/Sine, EaseOutBack,
+// EaseOutElastic, EaseOutBounce. Лерпы: LerpF/LerpInt/LerpRect/LerpColor
+// (premultiplied-корректно). Обёртки: AnimateFloat, AnimateRect.
+
+// Готовые анимации виджетов: ToggleSwitch (ручка), Dialog (fade-in dim),
+// ProgressBar.AnimateValue(v). Classic3D (Win2000) — всё мгновенно.
+```
+
+Правила для новых анимаций виджетов: тик — внешний колбэк (зовёт только
+потокобезопасные сеттеры, не лезет под чужой mu); при отсутствии живого
+движка виджет обязан рисовать каноническое конечное состояние (пример —
+флаг `animating` у ToggleSwitch, взводимый ПЕРВЫМ тиком); полноэкранные
+эффекты (dim диалога) инвалидируют весь UI (`notifyUIChanged`), а не свой
+rect — иначе частичная перерисовка заморозит эффект вне bounds.
+
+Диагностика по PNG-кадрам: `SaveFrames` пишет ТОЛЬКО кадры с тайлами, а
+именует их сквозным seq → в on-demand нумерация С ДЫРКАМИ. «Последний
+кадр» ищи через ReadDir + максимальное имя, НЕ перебором от 1 до первого
+отсутствующего.
+
+---
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
