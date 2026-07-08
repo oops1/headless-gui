@@ -141,6 +141,11 @@ func TestAccessibility_Tree(t *testing.T) {
 }
 
 func TestAccessibility_ModalAndJSON(t *testing.T) {
+	// Диалог остаётся открытым до конца теста — ShowModal запускает fade-in
+	// затемнения (AnimateOwned); подчищаем глобальный реестр анимаций, иначе
+	// "зависшая" анимация тикает в других тестах пакета (движок здесь не
+	// Start()-нут, StepAnimations её не продвигает сам).
+	defer widget.StopAllAnimations()
 	eng := New(300, 200, 20)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 300, 200))

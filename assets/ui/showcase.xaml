@@ -851,6 +851,48 @@
             </Canvas>
         </TabItem>
 
+        <TabItem Header="Анимации">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="Анимационный фреймворк (easing-кривые, часы у движка)"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+
+                <TextBlock Left="24" Top="58" Foreground="#9399B2"
+                           Text="Гонка кривых: шесть баров стартуют одновременно (900 мс), каждый со своей кривой."/>
+                <Button Name="animRun" Left="24" Top="84" Width="170" Height="34"
+                        Content="▶ Запустить гонку" Style="Accent"/>
+
+                <Label Left="24"  Top="140" Width="120" Height="18" Text="Linear"      Foreground="#9399B2"/>
+                <ProgressBar Name="animBar0" Left="150" Top="140" Width="600" Height="14"/>
+                <Label Left="24"  Top="170" Width="120" Height="18" Text="OutQuad"     Foreground="#9399B2"/>
+                <ProgressBar Name="animBar1" Left="150" Top="170" Width="600" Height="14"/>
+                <Label Left="24"  Top="200" Width="120" Height="18" Text="OutCubic"    Foreground="#9399B2"/>
+                <ProgressBar Name="animBar2" Left="150" Top="200" Width="600" Height="14"/>
+                <Label Left="24"  Top="230" Width="120" Height="18" Text="InOutSine"   Foreground="#9399B2"/>
+                <ProgressBar Name="animBar3" Left="150" Top="230" Width="600" Height="14"/>
+                <Label Left="24"  Top="260" Width="120" Height="18" Text="OutBounce"   Foreground="#9399B2"/>
+                <ProgressBar Name="animBar4" Left="150" Top="260" Width="600" Height="14"/>
+                <Label Left="24"  Top="290" Width="120" Height="18" Text="OutElastic"  Foreground="#9399B2"/>
+                <ProgressBar Name="animBar5" Left="150" Top="290" Width="600" Height="14"/>
+
+                <TextBlock Left="24" Top="340" Foreground="#9399B2"
+                           Text="AnimateRect: панель летает между позициями (EaseOutBack — с лёгким «выбросом»)."/>
+                <Button Name="animMove" Left="24" Top="366" Width="170" Height="34" Content="⇄ Туда-обратно"/>
+                <Border Name="animBox" Left="220" Top="360" Width="46" Height="46"
+                        Background="#89B4FA" CornerRadius="10"/>
+
+                <TextBlock Left="24" Top="430" Foreground="#9399B2"
+                           Text="Плавный прогресс: AnimateValue едет к случайной цели (обычный SetValue — мгновенный)."/>
+                <Button Name="animValue" Left="24" Top="456" Width="170" Height="34" Content="↦ Новая цель"/>
+                <ProgressBar Name="animValueBar" Left="220" Top="466" Width="530" Height="14"/>
+                <Label Name="animValueLbl" Left="770" Top="462" Width="80" Height="20" Text="40%" Foreground="#A6E3A1"/>
+
+                <TextBlock Left="24" Top="520" Width="1010" Height="60" TextWrapping="Wrap"
+                           Foreground="#6C7086"
+                           Text="Часы анимаций принадлежат движку: ни одной горутины и ни одного таймера на анимацию — тики идут в рендер-цикле, кадры рендерятся только пока анимация живёт (on-demand экономия сохраняется), перерисовка частичная. Повторный запуск на том же объекте заменяет прежнюю анимацию (owner-replace) — «дерущихся» анимаций не бывает. Тумблеры на вкладке «Виджеты» скользят, диалоги появляются с fade-in; в классической теме Win2000 всё мгновенно."/>
+            </Canvas>
+        </TabItem>
+
         <TabItem Header="Диалоги">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"

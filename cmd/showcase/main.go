@@ -661,6 +661,68 @@ func main() {
 		}
 	}
 
+	// ─── TAB: Анимации ────────────────────────────────────────────────────────
+	animBars := []struct {
+		name  string
+		curve widget.Easing
+	}{
+		{"animBar0", widget.EaseLinear},
+		{"animBar1", widget.EaseOutQuad},
+		{"animBar2", widget.EaseOutCubic},
+		{"animBar3", widget.EaseInOutSine},
+		{"animBar4", widget.EaseOutBounce},
+		{"animBar5", widget.EaseOutElastic},
+	}
+	if b := btn("animRun"); b != nil {
+		b.OnClick = func() {
+			for _, def := range animBars {
+				pb, ok := reg[def.name].(*widget.ProgressBar)
+				if !ok {
+					continue
+				}
+				pb.SetValue(0)
+				curve := def.curve // capture
+				widget.AnimateOwned(pb, "race", 900*time.Millisecond, curve,
+					func(t float64) { pb.SetValue(t) })
+			}
+		}
+	}
+	if b := btn("animMove"); b != nil {
+		boxRight := false
+		b.OnClick = func() {
+			box, ok := reg["animBox"]
+			if !ok {
+				return
+			}
+			cur := box.Bounds()
+			dx := 500
+			if boxRight {
+				dx = -500
+			}
+			boxRight = !boxRight
+			widget.AnimateRect(box, cur.Add(image.Pt(dx, 0)),
+				450*time.Millisecond, widget.EaseOutBack)
+		}
+	}
+	if b := btn("animValue"); b != nil {
+		next := 0.9
+		b.OnClick = func() {
+			pb, ok := reg["animValueBar"].(*widget.ProgressBar)
+			if !ok {
+				return
+			}
+			target := next
+			next = 1.3 - next // чередуем 0.9 ↔ 0.4
+			pb.AnimateValue(target)
+			if l := lbl("animValueLbl"); l != nil {
+				l.SetText(fmt.Sprintf("→ %d%%", int(target*100)))
+			}
+		}
+	}
+	if pb, ok := reg["animValueBar"].(*widget.ProgressBar); ok {
+		pb.SetValue(0.4)
+	}
+
 	// ─── Многострочный TextBox (вкладка «Диалоги») ────────────────────────────
 	if tb, ok := reg["editBox"].(*widget.TextBox); ok {
 		tb.SetText("Многострочный редактор движка.\n\n" +

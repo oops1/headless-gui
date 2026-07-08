@@ -42,8 +42,10 @@ func NewProgressBarColor(fill color.RGBA) *ProgressBar {
 	return pb
 }
 
-// SetValue задаёт значение [0.0, 1.0]. Потокобезопасно.
+// SetValue задаёт значение [0.0, 1.0] МГНОВЕННО. Потокобезопасно.
 // При фактическом изменении инвалидирует область виджета (авто-damage).
+// Остаётся синхронным ради обратной совместимости и тестов — для плавного
+// перехода используйте AnimateValue.
 func (pb *ProgressBar) SetValue(v float64) {
 	v = max01(v)
 	nv := uint32(math.Round(v * float64(math.MaxUint32)))
@@ -55,6 +57,26 @@ func (pb *ProgressBar) SetValue(v float64) {
 // Value возвращает текущее значение [0.0, 1.0]. Потокобезопасно.
 func (pb *ProgressBar) Value() float64 {
 	return float64(pb.value.Load()) / float64(math.MaxUint32)
+}
+
+// progressAnimDur — длительность плавного перехода AnimateValue.
+const progressAnimDur = 200 * time.Millisecond
+
+// AnimateValue плавно анимирует отображаемое значение к newValue за ~200ms
+// (EaseOutCubic). В теме Classic3D — как и SetValue, мгновенно (анимации в
+// классике отключены целиком). Использует AnimateOwned(pb, "value", ...):
+// повторный вызов до завершения предыдущей анимации останавливает её и
+// продолжает лерп от ТЕКУЩЕГО отображаемого значения — без "дёргания".
+func (pb *ProgressBar) AnimateValue(newValue float64) {
+	newValue = max01(newValue)
+	if currentStyle().Classic3D {
+		pb.SetValue(newValue)
+		return
+	}
+	from := pb.Value()
+	AnimateOwned(pb, "value", progressAnimDur, EaseOutCubic, func(t float64) {
+		pb.SetValue(LerpF(from, newValue, t))
+	})
 }
 
 // SetIndeterminate включает/выключает режим бегущей полосы (потокобезопасно).
