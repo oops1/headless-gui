@@ -572,6 +572,13 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 		})
 	}
 
+	// Сообщаем виджету, что он показан как модальный (Dialog запускает здесь
+	// fade-in затемнения); дублирует уже true modal-флаг конструктора, но
+	// это единственный момент, когда движок точно знает про показ.
+	if sm, ok := m.(interface{ SetModal(bool) }); ok {
+		sm.SetModal(true)
+	}
+
 	e.modMu.Lock()
 	e.modals = append(e.modals, m)
 	e.modMu.Unlock()
