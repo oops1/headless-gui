@@ -652,6 +652,12 @@ func (e *Engine) loop() {
 	for {
 		select {
 		case <-ticker.C:
+			// Продвигаем анимации ДО решения о пропуске кадра: тики зовут
+			// сеттеры виджетов, те самоинвалидируются (авто-damage), поэтому
+			// damage от тиков попадёт в invGen ниже и кадр перерисуется
+			// частично. Вызывается в любом режиме — анимации живут и при
+			// SetRenderOnDemand(false).
+			widget.StepAnimations(time.Now())
 			if e.onDemand.Load() {
 				gen := e.invGen.Load()
 				if gen == lastGen && !e.animationNeeded(interval) {
