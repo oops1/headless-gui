@@ -386,6 +386,11 @@ func TestMessageBox_ShowDialog_DialogSize_Reasonable(t *testing.T) {
 // ─── Engine ShowModal / CloseModal ───────────────────────────────────────────
 
 func TestEngine_ShowModal_CentersDialog(t *testing.T) {
+	// Диалог не закрывается до конца теста — ShowModal запускает fade-in
+	// затемнения (AnimateOwned), поэтому явно подчищаем глобальный реестр
+	// анимаций, иначе "зависшая" анимация тикает в других тестах пакета
+	// (движок там нигде не Start()-нут, StepAnimations её не продвигает).
+	defer widget.StopAllAnimations()
 	eng := engine.New(400, 300, 20)
 
 	dlg := widget.NewDialog("T", 200, 150)
@@ -405,6 +410,9 @@ func TestEngine_ShowModal_CentersDialog(t *testing.T) {
 }
 
 func TestEngine_ShowModal_ChildrenShifted(t *testing.T) {
+	// См. комментарий в TestEngine_ShowModal_CentersDialog — диалог не
+	// закрывается, подчищаем fade-анимацию из глобального реестра.
+	defer widget.StopAllAnimations()
 	eng := engine.New(400, 300, 20)
 
 	dlg := widget.NewDialog("T", 200, 150)
@@ -426,6 +434,10 @@ func TestEngine_ShowModal_ChildrenShifted(t *testing.T) {
 }
 
 func TestEngine_CloseModal_SpecificDialog(t *testing.T) {
+	// dlg2 остаётся открытым до конца теста — его fade-анимация не
+	// останавливается закрытием dlg1, подчищаем реестр явно (см. комментарий
+	// в TestEngine_ShowModal_CentersDialog).
+	defer widget.StopAllAnimations()
 	eng := engine.New(400, 300, 20)
 
 	dlg1 := widget.NewDialog("D1", 200, 150)
@@ -480,6 +492,9 @@ func TestEngine_CloseModal_Nil_ClosesTop(t *testing.T) {
 }
 
 func TestEngine_Modal_BlocksRootInput(t *testing.T) {
+	// Диалог остаётся открытым — подчищаем fade-анимацию (см. комментарий в
+	// TestEngine_ShowModal_CentersDialog).
+	defer widget.StopAllAnimations()
 	eng := engine.New(400, 300, 20)
 
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
@@ -531,6 +546,9 @@ func TestEngine_Escape_ClosesTopModal(t *testing.T) {
 }
 
 func TestEngine_TabCycle_WithinModal(t *testing.T) {
+	// Диалог остаётся открытым — подчищаем fade-анимацию (см. комментарий в
+	// TestEngine_ShowModal_CentersDialog).
+	defer widget.StopAllAnimations()
 	eng := engine.New(400, 300, 20)
 
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)

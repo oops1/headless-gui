@@ -108,12 +108,16 @@ func (e *Engine) RenderCount() uint64 {
 }
 
 // animationNeeded — нужен ли кадр несмотря на отсутствие инвалидации:
-// мигающая каретка у виджета с фокусом или «дозревающий» tooltip.
+// мигающая каретка у виджета с фокусом, активная анимация (widget.Animate)
+// или «дозревающий» tooltip.
 func (e *Engine) animationNeeded(frameInterval time.Duration) bool {
 	if f := e.focus.get(); f != nil {
 		if a, ok := f.(widget.Animated); ok && a.NeedsAnimation() {
 			return true
 		}
+	}
+	if widget.AnimationsActive() {
+		return true
 	}
 	return e.tooltipMayAppear(frameInterval)
 }

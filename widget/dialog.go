@@ -3,6 +3,9 @@ package widget
 import (
 	"image"
 	"image/color"
+	"math"
+	"sync/atomic"
+	"time"
 )
 
 // ─── Modal-интерфейс ────────────────────────────────────────────────────────
@@ -26,6 +29,8 @@ const (
 	dlgPad       = 14 // горизонтальный отступ контента
 	dlgShadowW   = 5  // ширина мягкой тени справа/снизу
 	dlgCloseSize = 24 // зона кнопки ✕
+
+	dlgFadeDur = 140 * time.Millisecond // длительность fade-in затемнения
 )
 
 // Dialog — модальный диалог в стиле активной темы.
@@ -74,6 +79,21 @@ type Dialog struct {
 	closer     func() // закрытие модалки движком (устанавливает ShowModal)
 	closeBtn   *dialogCloseBtn
 	localeSubs []int // id подписчиков на смену языка (снимаются при закрытии)
+
+	// fading — true, только когда тик fade-анимации РЕАЛЬНО вызвался хотя бы
+	// раз (взводится изнутри тика — часы анимации ленивые, см. anim.go).
+	// Пока false, DimColor() возвращает каноническую Dim напрямую — так
+	// показ диалога без работающего движка (тесты, мгновенный ShowModal)
+	// рисуется с целевым затемнением сразу, без "провала в прозрачность".
+	fading atomic.Bool
+	// dimAlpha — текущая (анимируемая) альфа затемнения, 0..255 в uint32.
+	dimAlpha atomic.Uint32
+	// fadeAnim — хендл текущей fade-анимации (для явного Stop при закрытии
+	// диалога посреди fade-in; поле трогается только из горутины SetModal,
+	// поэтому без мьютекса — SetModal и так не конкурентен сам с собой по
+	// контракту движка: показывает/закрывает один и тот же диалог не более
+	// одного раза одновременно).
+	fadeAnim *Animation
 }
 
 // OnLanguageChange регистрирует применение перевода при смене языка
@@ -146,25 +166,88 @@ func NewDialog(title string, width, height int) *Dialog {
 		width-dlgCloseSize-6, (dlgTitleH-dlgCloseSize)/2,
 		width-6, (dlgTitleH-dlgCloseSize)/2+dlgCloseSize))
 	d.AddChild(d.closeBtn)
+	// dimAlpha изначально равна канонической альфе Dim — до первого показа
+	// через ShowModal DimColor() и так возвращает d.Dim напрямую (fading
+	// ещё false), это лишь безопасное стартовое значение поля.
+	d.dimAlpha.Store(uint32(d.Dim.A))
 	return d
 }
 
 // IsModal реализует ModalWidget.
 func (d *Dialog) IsModal() bool { return d.modal }
 
-// DimColor реализует ModalWidget.
-func (d *Dialog) DimColor() color.RGBA { return d.Dim }
+// DimColor реализует ModalWidget. Пока идёт fade-in (см. SetModal), отдаёт
+// промежуточную альфу; иначе — каноническое значение Dim напрямую, поэтому
+// конечное состояние без анимации (или после её завершения) совпадает с тем,
+// что было бы без анимационного фреймворка вообще.
+func (d *Dialog) DimColor() color.RGBA {
+	if d.fading.Load() {
+		a := uint8(d.dimAlpha.Load())
+		return color.RGBA{R: d.Dim.R, G: d.Dim.G, B: d.Dim.B, A: a}
+	}
+	return d.Dim
+}
+
+// setDimAlpha — публичный потокобезопасный сеттер текущей альфы затемнения;
+// вызывается ТОЛЬКО из тика fade-анимации (см. SetModal). Инвалидирует ВЕСЬ
+// UI (notifyUIChanged), а не только bounds диалога: затемнение рисуется
+// движком на весь экран, и точечная инвалидация d.Invalidate() оставила бы
+// dim ВНЕ прямоугольника диалога замороженным на альфе первого кадра —
+// частичная перерисовка клипует FillRectAlpha по damage-области.
+func (d *Dialog) setDimAlpha(a uint8) {
+	d.dimAlpha.Store(uint32(a))
+	notifyUIChanged()
+}
 
 // SetModal управляет модальным состоянием (вызывается движком).
-// При закрытии снимает подписки на смену языка.
+// true (показ через ShowModal) — запускает fade-in затемнения (кроме
+// Classic3D, где анимации отключены целиком — мгновенная целевая альфа).
+// false (закрытие) — останавливает fade-анимацию (если ещё шла) и снимает
+// подписки на смену языка.
 func (d *Dialog) SetModal(v bool) {
 	d.modal = v
-	if !v {
-		for _, id := range d.localeSubs {
-			RemoveLanguageListener(id)
+	if v {
+		if currentStyle().Classic3D {
+			// Классика Win2000: анимации отключены целиком — сразу целевая альфа.
+			d.fading.Store(false)
+			d.dimAlpha.Store(uint32(d.Dim.A))
+		} else {
+			target := d.Dim.A
+			d.dimAlpha.Store(0)
+			// fading взводится ВНУТРИ тика, а не здесь: часы анимации ленивые
+			// (см. widget/anim.go — старт на первом StepAnimations), поэтому
+			// между регистрацией и первым реальным тиком DimColor() должен
+			// по-прежнему отдавать канонический Dim, а не "ещё не сдвинутую"
+			// dimAlpha=0 — иначе показ диалога без работающего движка
+			// (тесты, мгновенный ShowModal) рисовался бы без затемнения.
+			//
+			// AnimateOwned(d,"fade",...) сам останавливает предыдущую
+			// fade-анимацию этого диалога, если ShowModal вызвали повторно
+			// до завершения предыдущего fade-in.
+			d.fadeAnim = AnimateOwned(d, "fade", dlgFadeDur, EaseOutCubic, func(t float64) {
+				d.fading.Store(true)
+				d.setDimAlpha(uint8(math.Round(LerpF(0, float64(target), t))))
+				if t >= 1.0 {
+					d.fading.Store(false)
+				}
+			})
 		}
-		d.localeSubs = nil
+		return
 	}
+	// Диалог закрывается: явно останавливаем ещё бегущий fade-in — Stop
+	// идемпотентен и безопасен, даже если анимация уже сама завершилась.
+	// Без этого тик мог бы продолжить дёргать setDimAlpha/Invalidate уже
+	// закрытого диалога до конца длительности — не паника (виджет валиден),
+	// но лишняя работа, которую чище оборвать сразу.
+	if d.fadeAnim != nil {
+		d.fadeAnim.Stop()
+		d.fadeAnim = nil
+	}
+	d.fading.Store(false)
+	for _, id := range d.localeSubs {
+		RemoveLanguageListener(id)
+	}
+	d.localeSubs = nil
 }
 
 // ContentBounds возвращает прямоугольник для размещения дочерних виджетов
