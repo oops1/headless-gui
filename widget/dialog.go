@@ -75,7 +75,9 @@ type Dialog struct {
 	// в буфер обмена (MessageBox формирует Windows-подобный дамп).
 	CopyText func() string
 
-	modal      bool   // управляется движком: true пока диалог показан
+	modal      atomic.Bool // управляется движком: true пока диалог показан;
+	//                        читается рендер-циклом (IsModal), пишется из
+	//                        ShowModal/CloseModal — доступ атомарный.
 	closer     func() // закрытие модалки движком (устанавливает ShowModal)
 	closeBtn   *dialogCloseBtn
 	localeSubs []int // id подписчиков на смену языка (снимаются при закрытии)
@@ -156,11 +158,11 @@ func NewDialog(title string, width, height int) *Dialog {
 		Shadow:          win10.ShadowColor,
 		TitleHeight:     dlgTitleH,
 		ShowCloseButton: true,
-		modal:           true,
 		Base: Base{
 			bounds: image.Rect(0, 0, width, height),
 		},
 	}
+	d.modal.Store(true)
 	d.closeBtn = &dialogCloseBtn{owner: d}
 	d.closeBtn.SetBounds(image.Rect(
 		width-dlgCloseSize-6, (dlgTitleH-dlgCloseSize)/2,
@@ -174,7 +176,7 @@ func NewDialog(title string, width, height int) *Dialog {
 }
 
 // IsModal реализует ModalWidget.
-func (d *Dialog) IsModal() bool { return d.modal }
+func (d *Dialog) IsModal() bool { return d.modal.Load() }
 
 // DimColor реализует ModalWidget. Пока идёт fade-in (см. SetModal), отдаёт
 // промежуточную альфу; иначе — каноническое значение Dim напрямую, поэтому
@@ -205,7 +207,7 @@ func (d *Dialog) setDimAlpha(a uint8) {
 // false (закрытие) — останавливает fade-анимацию (если ещё шла) и снимает
 // подписки на смену языка.
 func (d *Dialog) SetModal(v bool) {
-	d.modal = v
+	d.modal.Store(v)
 	if v {
 		if currentStyle().Classic3D {
 			// Классика Win2000: анимации отключены целиком — сразу целевая альфа.
