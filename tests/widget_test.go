@@ -721,6 +721,34 @@ func TestDropdown_SetSelected(t *testing.T) {
 	}
 }
 
+func TestDropdown_SetItems(t *testing.T) {
+	d := widget.NewDropdown("A", "B", "C")
+	d.SetSelected(2)
+	d.SetOpen(true)
+
+	d.SetItems([]string{"голос-1", "голос-2"})
+	if got := d.Items(); len(got) != 2 || got[0] != "голос-1" || got[1] != "голос-2" {
+		t.Fatalf("Items() = %v", got)
+	}
+	if d.Selected() != 0 || d.SelectedText() != "голос-1" {
+		t.Fatalf("после SetItems: selected=%d text=%q", d.Selected(), d.SelectedText())
+	}
+	if d.IsOpen() {
+		t.Fatal("SetItems должен закрыть раскрытый список")
+	}
+	// Items() отдаёт копию — мутация снаружи не влияет на виджет.
+	got := d.Items()
+	got[0] = "МУТАЦИЯ"
+	if d.SelectedText() != "голос-1" {
+		t.Fatal("Items() должен возвращать копию")
+	}
+	// Пустой список — без паники, выбранного текста нет.
+	d.SetItems(nil)
+	if d.SelectedText() != "" || len(d.Items()) != 0 {
+		t.Fatalf("пустой список: text=%q n=%d", d.SelectedText(), len(d.Items()))
+	}
+}
+
 func TestDropdown_SetSelectedOutOfRange(t *testing.T) {
 	d := widget.NewDropdown("A", "B")
 	d.SetSelected(10) // out of range — should be ignored
