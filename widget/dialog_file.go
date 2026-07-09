@@ -253,14 +253,17 @@ func (fd *FileDialog) buildSaveCompact(mb *MessageBox, title string) {
 	dlg.AddChild(nameLbl)
 
 	nameY := lblY + 22
+	// Фильтру нужно больше места под длинные подписи вида
+	// «Изображения (.png, .jpg, .jpeg)» — даём ему ~200px, остальное имени.
+	const filterW = 200
 	fd.nameIn = NewTextInput("")
 	fd.nameIn.SetText(fd.opts.InitialName)
 	fd.nameIn.OnChange = func(string) { fd.updateWarning() }
-	fd.nameIn.SetBounds(image.Rect(padX, nameY, dlgW-padX-132, nameY+30))
+	fd.nameIn.SetBounds(image.Rect(padX, nameY, dlgW-padX-filterW-10, nameY+30))
 	dlg.AddChild(fd.nameIn)
 
 	filterDD := fd.newFilterDropdown()
-	filterDD.SetBounds(image.Rect(dlgW-padX-120, nameY, dlgW-padX, nameY+30))
+	filterDD.SetBounds(image.Rect(dlgW-padX-filterW, nameY, dlgW-padX, nameY+30))
 	dlg.AddChild(filterDD)
 
 	// Предупреждение о перезаписи: треугольник + приглушённый оранжевый текст.
