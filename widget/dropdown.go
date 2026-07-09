@@ -50,6 +50,29 @@ func NewDropdown(items ...string) *Dropdown {
 	}
 }
 
+// SetItems заменяет список пунктов (по аналогии с ListView.SetItems).
+// Сбрасывает выбор и hover, закрывает раскрытый список и перерисовывает.
+// Потокобезопасно. Прежний OnChange не вызывается.
+func (d *Dropdown) SetItems(items []string) {
+	d.mu.Lock()
+	d.items = append([]string(nil), items...)
+	d.mu.Unlock()
+	atomic.StoreInt32(&d.selIdx, 0)
+	atomic.StoreInt32(&d.hoverIdx, -1)
+	if atomic.SwapInt32(&d.open, 0) == 1 {
+		notifyUIChanged() // список был раскрыт в overlay — обновляем весь кадр
+	} else {
+		d.Invalidate()
+	}
+}
+
+// Items возвращает копию текущего списка пунктов.
+func (d *Dropdown) Items() []string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return append([]string(nil), d.items...)
+}
+
 // SetSelected потокобезопасно устанавливает индекс выбранного пункта.
 func (d *Dropdown) SetSelected(idx int) {
 	d.mu.RLock()
@@ -163,13 +186,16 @@ func (d *Dropdown) Draw(ctx DrawContext) {
 		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), border)
 	}
 
-	// Текст выбранного пункта
+	// Текст выбранного пункта — обрезается многоточием до стрелки, чтобы
+	// длинная подпись не вылезала за край и не затирала ▼.
 	selText := d.SelectedText()
 	if selText == "" && len(d.items) > 0 {
 		selText = d.items[0]
 	}
 	textY := b.Min.Y + (b.Dy()-13)/2
-	ctx.DrawText(selText, b.Min.X+d.PaddingX, textY, d.TextColor)
+	textLeft := b.Min.X + d.PaddingX
+	textMaxW := (b.Max.X - 20) - textLeft // 20px под стрелку и зазор
+	ctx.DrawText(ellipsizeText(ctx, selText, textMaxW, DefaultFontSizePt), textLeft, textY, d.TextColor)
 
 	// Стрелка ▼
 	arrowX := b.Max.X - 16
@@ -232,11 +258,13 @@ func (d *Dropdown) drawOpenList(ctx DrawContext) {
 				textCol = win10.MenuHoverText // контрастный текст на подсветке
 			}
 		case i == sel:
-			ctx.FillRect(b.Min.X+2, iy, listW-4, itemH, win10.DropItemBG)
-			textCol = contrastText(win10.DropItemBG) // читаемый текст на выделении
+			drawDropSelBG(ctx, b.Min.X+2, iy, listW-4, itemH)
+			textCol = contrastText(dropSelOpaque()) // читаемый текст на выделении
 		}
-		// Текст — вертикально по центру элемента
-		ctx.DrawText(item, b.Min.X+d.PaddingX, iy+(itemH-13)/2, textCol)
+		// Текст — вертикально по центру, обрезается многоточием по ширине списка.
+		itemMaxW := listW - 2*d.PaddingX
+		ctx.DrawText(ellipsizeText(ctx, item, itemMaxW, DefaultFontSizePt),
+			b.Min.X+d.PaddingX, iy+(itemH-13)/2, textCol)
 	}
 
 	// Одна общая рамка вокруг всего списка
@@ -244,6 +272,27 @@ func (d *Dropdown) drawOpenList(ctx DrawContext) {
 }
 
 // drawArrowDown рисует маленькую стрелку ▼.
+// drawDropSelBG рисует подсветку выбранного пункта. Тема может задавать
+// DropItemBG полупрозрачным (Win10 Dark: акцент с α≈200): рисуем честным
+// альфа-блендингом валидным premultiplied-цветом. Наивный FillRect(Src)
+// вписал бы полупрозрачный НЕ-premultiplied цвет прямо в непрозрачный буфер —
+// «дыра» с искажённым (зеленоватым) оттенком (каналы превышают альфу).
+func drawDropSelBG(ctx DrawContext, x, y, w, h int) {
+	c := win10.DropItemBG
+	if c.A == 255 {
+		ctx.FillRect(x, y, w, h, c)
+		return
+	}
+	ctx.FillRectAlpha(x, y, w, h, premulAlpha(color.RGBA{R: c.R, G: c.G, B: c.B, A: 255}, c.A))
+}
+
+// dropSelOpaque возвращает непрозрачный цвет подсветки выбора — для расчёта
+// контрастного цвета текста (contrastText ожидает непрозрачный фон).
+func dropSelOpaque() color.RGBA {
+	c := win10.DropItemBG
+	return color.RGBA{R: c.R, G: c.G, B: c.B, A: 255}
+}
+
 func drawArrowDown(ctx DrawContext, x, y int, col color.RGBA) {
 	for i := 0; i < 4; i++ {
 		ctx.DrawHLine(x+i, y+i, 7-2*i, col)
