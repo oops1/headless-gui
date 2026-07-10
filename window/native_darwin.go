@@ -695,6 +695,8 @@ func cocoaKeyCodeToVK(keyCode int) int {
 		return VK_DOWN
 	case 117:
 		return VK_DELETE
+	case 114: // Mac-клавиатуры не имеют Insert; клавиша Help — best-effort маппинг
+		return VK_INSERT
 	case 115:
 		return VK_HOME
 	case 119:
@@ -722,3 +724,10 @@ func cocoaKeyCodeToVK(keyCode int) int {
 	}
 	return 0
 }
+
+// SetResizable — no-op: пользовательский resize за края borderless-окна
+// на этой платформе пока не реализован.
+func (w *CocoaWindow) SetResizable(v bool) {}
+
+// SetMinSize — no-op: минимальный размер окна на macOS пока не ограничиваем.
+func (w *CocoaWindow) SetMinSize(width, height int) {}

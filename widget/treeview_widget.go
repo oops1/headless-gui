@@ -99,6 +99,22 @@ func (w *TreeViewWidget) OnMouseButton(e MouseEvent) bool {
 	if !w.IsEnabled() {
 		return false
 	}
+
+	// Колесо мыши — вертикальная прокрутка на 3 строки за тик.
+	// Поглощаем событие ТОЛЬКО когда прокрутка реально сдвинулась; если
+	// содержимое помещается или мы уже у границы — возвращаем false,
+	// чтобы колесо всплыло к родительскому ScrollView.
+	if e.Button == MouseWheelUp || e.Button == MouseWheelDown {
+		if !e.Pressed || !image.Pt(e.X, e.Y).In(w.Bounds()) {
+			return false
+		}
+		moved := w.Tree.WheelScroll(e.Button == MouseWheelUp)
+		if moved {
+			w.Invalidate()
+		}
+		return moved
+	}
+
 	if e.Button != MouseLeft {
 		return false
 	}

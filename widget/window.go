@@ -89,6 +89,13 @@ type Window struct {
 	// Resize — режим изменения размера окна.
 	Resize ResizeMode
 
+	// MinWidth / MinHeight — минимальный размер окна в ЛОГИЧЕСКИХ пикселях.
+	// 0 → дефолт: для виджетного edge-resize — winMinW×winMinH (120×80),
+	// для нативного окна — движок ОС (Win32: 320×240). Задаётся из XAML
+	// (атрибуты MinWidth/MinHeight) или программно.
+	MinWidth  int
+	MinHeight int
+
 	// Background — цвет фона клиентской области.
 	Background color.RGBA
 
@@ -114,6 +121,13 @@ type Window struct {
 	// в заголовке окна. По умолчанию true; отключаемое свойство.
 	ShowLocaleIndicator bool
 
+	// MainWindow — является ли окно «главным». У главного окна во всех темах,
+	// кроме классической Win2000 (Classic3D), рисуется контрастная XOR-рамка
+	// 1px (инверсия фона окна) — чтобы границы были видны на фоне канваса
+	// того же тона. По умолчанию true; для вложенных окон в XAML задаётся
+	// MainWindow="False".
+	MainWindow bool
+
 	// inactive — окно без фокуса ОС: заголовок рисуется приглушённым
 	// (Win2000 — серый градиент, Mac — серые «светофоры», прочие — dim).
 	// Zero value = активно; хранится инвертированно.
@@ -124,11 +138,15 @@ type Window struct {
 
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
-	// OnClose вызывается при клике по кнопке закрытия (×).
+	// OnClose вызывается при ОТПУСКАНИИ кнопки закрытия (×), если курсор всё
+	// ещё над ней (Windows-семантика: нажатие «взводит» кнопку, отпускание
+	// в стороне отменяет действие).
 	OnClose func()
-	// OnMinimize вызывается при клике по кнопке сворачивания (─).
+	// OnMinimize вызывается при ОТПУСКАНИИ кнопки сворачивания (─), если
+	// курсор всё ещё над ней. См. OnClose.
 	OnMinimize func()
-	// OnMaximize вызывается при клике по кнопке развёртывания (□).
+	// OnMaximize вызывается при ОТПУСКАНИИ кнопки развёртывания (□), если
+	// курсор всё ещё над ней. См. OnClose.
 	OnMaximize func()
 
 	// ── Drag окна (для borderless-режима) ───────────────────────────────────
@@ -143,6 +161,18 @@ type Window struct {
 	dragStartY int
 	dragWinX   int // позиция окна при начале drag (для headless self-drag)
 	dragWinY   int
+
+	// ── Resize перетаскиванием краёв (для «виртуальных» окон на канвасе) ─────
+	resizing     bool           // идёт ли изменение размера за край
+	resizeDir    winEdge        // направление(я) активного ресайза (битовая маска)
+	resizeStart  image.Rectangle // bounds окна на момент начала ресайза
+	resizeStartX int            // координаты мыши на момент начала ресайза
+	resizeStartY int
+
+	// ── Взведённая кнопка заголовка (release-семантика) ─────────────────────
+	// armedBtn — какая кнопка управления «взведена» нажатием; колбэк вызывается
+	// на отпускании, только если курсор всё ещё над ней.
+	armedBtn titleButton
 
 	// capMgr — CaptureManager для корректного освобождения захвата мыши.
 	capMgr CaptureManager
@@ -171,6 +201,7 @@ func NewWindow(title string, width, height int) *Window {
 		Background:          win10.WindowBG,
 		BorderColor:         win10.Border,
 		ShowLocaleIndicator: true,
+		MainWindow:          true,
 	}
 	w.SetBounds(image.Rect(0, 0, width, height))
 	return w
@@ -289,6 +320,21 @@ func (w *Window) titleH() int {
 	return 32
 }
 
+// effTitleH возвращает ЭФФЕКТИВНУЮ высоту заголовка. В классике Win2000
+// заголовок ниже, чем в современных темах (реальный Win2000 ≈18px), поэтому
+// ограничиваем его 24px — так кнопки и глифы вписываются в пропорции референса.
+// В остальных темах эффективная высота совпадает с titleH().
+func (w *Window) effTitleH() int {
+	th := w.titleH()
+	if th == 0 {
+		return 0
+	}
+	if currentStyle().Classic3D && th > 24 {
+		return 24
+	}
+	return th
+}
+
 // borderW возвращает ширину рамки (0 для borderless).
 func (w *Window) borderW() int {
 	if w.Style == WindowStyleNone {
@@ -297,17 +343,42 @@ func (w *Window) borderW() int {
 	return 1
 }
 
+// classicFrameW — толщина объёмной 3D-рамки окна в классике Win2000 (px):
+// 1px внешний raised-контур + 3px полоса «лица» (resize-frame) + 1px
+// внутренняя утопленная кромка. Заголовок и клиентская область вписаны
+// внутрь этой рамки.
+const classicFrameW = 5
+
+// frameW возвращает толщину рамки окна с учётом стиля темы: в классике
+// Win2000 — толстая 3D-рамка (classicFrameW), в остальных темах — 1px
+// (0 для borderless). В отличие от borderW отражает реальный визуальный
+// отступ, на который смещаются заголовок и контент.
+func (w *Window) frameW() int {
+	if w.Style == WindowStyleNone {
+		return 0
+	}
+	if currentStyle().Classic3D {
+		return classicFrameW
+	}
+	return 1
+}
+
 // ContentBounds возвращает клиентскую область — прямоугольник для дочерних виджетов.
-// Расположена под заголовком, внутри рамки.
+// Расположена под заголовком, внутри рамки. В классике Win2000 заголовок сам
+// вписан внутрь толстой 3D-рамки, поэтому верхний отступ = рамка + заголовок.
 func (w *Window) ContentBounds() image.Rectangle {
 	b := w.Bounds()
 	th := w.titleH()
-	bw := w.borderW()
+	fw := w.frameW()
+	top := b.Min.Y + th
+	if currentStyle().Classic3D {
+		top = b.Min.Y + fw + w.effTitleH()
+	}
 	return image.Rect(
-		b.Min.X+bw,
-		b.Min.Y+th,
-		b.Max.X-bw,
-		b.Max.Y-bw,
+		b.Min.X+fw,
+		top,
+		b.Max.X-fw,
+		b.Max.Y-fw,
 	)
 }
 
@@ -320,6 +391,35 @@ const (
 	macStartX   = 18 // отступ первого кружка от левого края
 	macSpacing  = 22 // расстояние между центрами кружков
 	macHitSlop  = 10 // допуск клика по кружку
+)
+
+// ─── Resize перетаскиванием краёв ───────────────────────────────────────────
+
+// winEdge — битовая маска задействованных краёв при ресайзе (8 направлений).
+type winEdge int
+
+const (
+	edgeNone winEdge = 0
+	edgeN    winEdge = 1 << iota // верхний край
+	edgeS                        // нижний край
+	edgeW                        // левый край
+	edgeE                        // правый край
+)
+
+const (
+	winResizeBorder = 6   // ширина полосы-захвата вдоль каждого края, px
+	winMinW         = 120 // минимальная ширина окна при ресайзе, px
+	winMinH         = 80  // минимальная высота окна при ресайзе, px
+)
+
+// titleButton — «взведённая» кнопка заголовка (release-семантика).
+type titleButton int
+
+const (
+	titleBtnNone titleButton = iota
+	titleBtnClose
+	titleBtnMin
+	titleBtnMax
 )
 
 // btnWidth возвращает ширину одной кнопки управления для Windows-стиля.
@@ -344,24 +444,40 @@ func (w *Window) btnCount() int {
 	return 3 // ─ □ ×
 }
 
+// classicBtnSide возвращает сторону квадратной кнопки заголовка в классике
+// Win2000 — чуть меньше эффективной высоты заголовка (в оригинале ≈16×14 при
+// заголовке 18; здесь ≈18px при effTitleH=24).
+func (w *Window) classicBtnSide() int {
+	s := w.effTitleH() - 6
+	if s < 10 {
+		s = 10
+	}
+	return s
+}
+
 // classicTitleBtnRects возвращает прямоугольники кнопок ×, □, ─ для
 // классического стиля Win2000 (общая геометрия для отрисовки и hit-test).
-// Отсутствующие кнопки возвращаются как пустой Rectangle.
+// Кнопки прижаты к правому краю заголовка (внутри рамки) с отступом 2px справа
+// и 3px сверху; крест отделён от пары ─ □ зазором 2px. Отсутствующие кнопки —
+// пустой Rectangle.
 func (w *Window) classicTitleBtnRects() (closeR, maxR, minR image.Rectangle) {
-	const cbw, cbh, gap = 16, 14, 2
-	b := w.Bounds()
-	th := w.titleH()
+	tb := w.titleBarRect()
+	if tb.Empty() {
+		return
+	}
+	const edgePad, topPad, gap = 2, 3, 2
+	side := w.classicBtnSide()
 	nc := w.btnCount()
-	by := b.Min.Y + (th-cbh)/2
-	closeX := b.Max.X - 4 - cbw
-	closeR = image.Rect(closeX, by, closeX+cbw, by+cbh)
+	by := tb.Min.Y + topPad
+	closeX := tb.Max.X - edgePad - side
+	closeR = image.Rect(closeX, by, closeX+side, by+side)
 	if nc >= 3 {
-		mxX := closeX - gap - cbw
-		maxR = image.Rect(mxX, by, mxX+cbw, by+cbh)
-		minR = image.Rect(mxX-cbw, by, mxX, by+cbh)
+		mxX := closeX - gap - side
+		maxR = image.Rect(mxX, by, mxX+side, by+side)
+		minR = image.Rect(mxX-side, by, mxX, by+side)
 	} else if nc == 2 {
-		mnX := closeX - gap - cbw
-		minR = image.Rect(mnX, by, mnX+cbw, by+cbh)
+		mnX := closeX - gap - side
+		minR = image.Rect(mnX, by, mnX+side, by+side)
 	}
 	return closeR, maxR, minR
 }
@@ -465,39 +581,65 @@ func (w *Window) Draw(ctx DrawContext) {
 		}
 	}
 
-	// ── Рамка ───────────────────────────────────────────────────────────────
+	// ── Дочерние виджеты ────────────────────────────────────────────────────
+	w.drawChildren(ctx)
+
+	// ── Рамка (хром) — ПОВЕРХ детей ─────────────────────────────────────────
+	// Рамку рисуем после drawChildren: XAML-контент с абсолютными координатами
+	// может доходить до самого края клиентской области и в прежнем порядке
+	// «замазывал» полосу рамки (в классике — толстую 3D-рамку, в современных
+	// темах — 1px XOR-рамку главного окна по периметру). Overlay/popup-меню
+	// детей движок рисует отдельным проходом (DrawOverlay) — они не страдают.
 	// Для borderless нативного окна рисуем только боковые линии и низ:
 	// верхняя линия не нужна — заголовок уже заполняет верхний край.
 	if w.Style != WindowStyleNone {
-		bc := w.resolveColor(w.BorderColor, win10.Border)
-		if w.inactive {
-			// Рамка неактивного окна светлее (как в Win11).
-			bc = mixRGBA(bc, w.Background, 0.5)
-		}
-		if cr > 0 {
-			ctx.DrawRoundBorder(x, y, bw, bh, cr, bc)
+		if st := currentStyle(); st.Classic3D {
+			// Классика Win2000: толстая объёмная 3D-рамка по всему периметру
+			// (заголовок и контент уже вписаны внутрь неё).
+			w.drawClassicFrame(ctx, st)
 		} else {
-			// Левая, правая и нижняя линии (без верхней — там заголовок)
-			ctx.DrawVLine(x, y+th, bh-th, bc)        // левая (от низа заголовка)
-			ctx.DrawVLine(x+bw-1, y+th, bh-th, bc)   // правая
-			ctx.DrawHLine(x, y+bh-1, bw, bc)          // нижняя
-		}
-		// Разделитель под заголовком
-		if th > 0 {
-			ctx.DrawHLine(x, y+th-1, bw, bc)
+			bc := w.resolveColor(w.BorderColor, win10.Border)
+			if w.inactive {
+				// Рамка неактивного окна светлее (как в Win11).
+				bc = mixRGBA(bc, w.Background, 0.5)
+			}
+			// Главное окно в не-классических темах: контрастная XOR-рамка по всему
+			// периметру вместо обычной (на светлом фоне канваса светлая рамка окна
+			// сливалась бы).
+			if w.MainWindow {
+				xc := xorBorderColor(w.xorBorderBase())
+				if cr > 0 {
+					ctx.DrawRoundBorder(x, y, bw, bh, cr, xc)
+				} else {
+					ctx.DrawBorder(x, y, bw, bh, xc)
+				}
+			} else if cr > 0 {
+				ctx.DrawRoundBorder(x, y, bw, bh, cr, bc)
+			} else {
+				// Левая, правая и нижняя линии (без верхней — там заголовок)
+				ctx.DrawVLine(x, y+th, bh-th, bc)      // левая (от низа заголовка)
+				ctx.DrawVLine(x+bw-1, y+th, bh-th, bc) // правая
+				ctx.DrawHLine(x, y+bh-1, bw, bc)       // нижняя
+			}
+			// Разделитель под заголовком
+			if th > 0 {
+				ctx.DrawHLine(x, y+th-1, bw, bc)
+			}
 		}
 	}
-
-	// ── Дочерние виджеты ────────────────────────────────────────────────────
-	w.drawChildren(ctx)
 }
 
 // ─── Windows-стиль заголовка ────────────────────────────────────────────────
 
 func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	b := w.Bounds()
-	x, y, bw := b.Min.X, b.Min.Y, b.Dx()
-	th := w.titleH()
+	// Полоса заголовка: в классике смещена внутрь толстой 3D-рамки, в прочих
+	// темах совпадает с верхом окна (геометрия идентична прежней).
+	tb := w.titleBarRect()
+	x, y, bw := tb.Min.X, tb.Min.Y, tb.Dx()
+	// Эффективная высота: в классике заголовок ниже (effTitleH), в остальных
+	// темах совпадает с titleH() — геометрия текста/фона/бейджа считается от неё.
+	th := w.effTitleH()
 	cr := w.CornerRadius
 
 	// Эффективные цвета заголовка (учёт активности окна: без фокуса ОС
@@ -598,39 +740,116 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	ctx.DrawHLine(bx2+btnW/2-7, my, 14, lineColor)
 }
 
+// drawClassicFrame рисует толстую объёмную 3D-рамку окна Win2000. Устройство
+// изнутри наружу совпадает с настоящей Windows 2000:
+//   - внешний 1px raised-контур: BevelLight сверху/слева, BevelDark снизу/справа;
+//   - 3px полоса «лица» (BtnBG) — визуальный resize-frame (уже залита фоном окна);
+//   - внутренняя 1px утопленная кромка: BevelShadow сверху/слева, BevelLight
+//     снизу/справа — лёгкое углубление к клиентской области.
+func (w *Window) drawClassicFrame(ctx DrawContext, st ThemeStyle) {
+	b := w.Bounds()
+	x, y, ww, hh := b.Min.X, b.Min.Y, b.Dx(), b.Dy()
+
+	// 1) Внешний raised-контур (самый край окна).
+	ctx.DrawHLine(x, y, ww, st.BevelLight)
+	ctx.DrawVLine(x, y, hh, st.BevelLight)
+	ctx.DrawHLine(x, y+hh-1, ww, st.BevelDark)
+	ctx.DrawVLine(x+ww-1, y, hh, st.BevelDark)
+
+	// 2) Полоса «лица» толщиной 3px уже присутствует (фон окна = BtnBG).
+
+	// 3) Внутренняя утопленная кромка на глубине frameW-1.
+	in := classicFrameW - 1
+	ctx.DrawHLine(x+in, y+in, ww-2*in, st.BevelShadow)
+	ctx.DrawVLine(x+in, y+in, hh-2*in, st.BevelShadow)
+	ctx.DrawHLine(x+in, y+hh-1-in, ww-2*in, st.BevelLight)
+	ctx.DrawVLine(x+ww-1-in, y+in, hh-2*in, st.BevelLight)
+}
+
 // drawClassicTitleButtons рисует кнопки ─ □ × в классическом стиле Win2000:
-// маленькие выпуклые bevel-кнопки на «лице» с чёрными глифами.
+// выпуклые bevel-кнопки цвета «лица» с чёрными пиксельными глифами. Взведённая
+// кнопка (armedBtn при зажатой ЛКМ) рисуется ВДАВЛЕННОЙ (bevel sunken + глиф
+// смещён на 1px вправо-вниз).
 func (w *Window) drawClassicTitleButtons(ctx DrawContext, st ThemeStyle) {
-	face := win10.PanelBG // «лицо» Win2000 (#D4D0C8)
-	glyph := color.RGBA{R: 0, G: 0, B: 0, A: 255}
+	face := w.resolveColor(win10.BtnBG, win10.PanelBG) // «лицо» Win2000 (#D4D0C8)
+	glyph := win10.BtnText                              // чёрный глиф
 	closeR, maxR, minR := w.classicTitleBtnRects()
 
-	// Рисует одну bevel-кнопку и возвращает её центр.
-	drawBtn := func(r image.Rectangle) (int, int) {
+	// draw рисует одну bevel-кнопку и её глиф. kind задаёт тип глифа;
+	// вдавленность определяется тем, взведена ли эта кнопка (armedBtn).
+	draw := func(r image.Rectangle, kind titleButton) {
+		if r.Empty() {
+			return
+		}
 		ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), face)
-		drawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
-		return r.Min.X + r.Dx()/2, r.Min.Y + r.Dy()/2
+		pressed := w.armedBtn == kind
+		if pressed {
+			drawBevelSunken(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+		} else {
+			drawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+		}
+		cx := r.Min.X + r.Dx()/2
+		cy := r.Min.Y + r.Dy()/2
+		if pressed { // вдавленная кнопка: глиф смещён вправо-вниз
+			cx++
+			cy++
+		}
+		switch kind {
+		case titleBtnClose:
+			drawGlyphClose(ctx, cx, cy, r.Dx(), glyph)
+		case titleBtnMax:
+			drawGlyphMax(ctx, cx, cy, r.Dx(), glyph)
+		case titleBtnMin:
+			drawGlyphMin(ctx, cx, cy, r.Dx(), glyph)
+		}
 	}
 
-	// × (закрыть).
-	cx, cy := drawBtn(closeR)
-	for i := -3; i <= 3; i++ {
-		ctx.SetPixel(cx+i, cy+i, glyph)
-		ctx.SetPixel(cx+i, cy-i, glyph)
-		ctx.SetPixel(cx+i+1, cy+i, glyph)
+	draw(minR, titleBtnMin)
+	draw(maxR, titleBtnMax)
+	draw(closeR, titleBtnClose)
+}
+
+// drawGlyphClose рисует крест ✕ толщиной 2px, вписанный в кнопку стороной side,
+// с центром (cx, cy). Глиф компактный (~8×8 при кнопке 18px, ≈45% стороны) —
+// по пропорциям референсной кнопки Win2000, где крест НЕ занимает всю кнопку.
+func drawGlyphClose(ctx DrawContext, cx, cy, side int, col color.RGBA) {
+	h := side * 7 / 32 // половина диагонали ≈3px при side=18 → крест ~8×8
+	if h < 3 {
+		h = 3
 	}
-	// □ (развернуть).
-	if !maxR.Empty() {
-		mcx, mcy := drawBtn(maxR)
-		ctx.DrawBorder(mcx-4, mcy-4, 9, 8, glyph)
-		ctx.DrawHLine(mcx-4, mcy-3, 9, glyph) // двойная верхняя грань заголовка
+	for i := -h; i <= h; i++ {
+		ctx.SetPixel(cx+i, cy+i, col)
+		ctx.SetPixel(cx+i+1, cy+i, col) // 2-й пиксель по горизонтали → толщина 2px
+		ctx.SetPixel(cx+i, cy-i, col)
+		ctx.SetPixel(cx+i+1, cy-i, col)
 	}
-	// ─ (свернуть).
-	if !minR.Empty() {
-		ncx, ncy := drawBtn(minR)
-		ctx.DrawHLine(ncx-4, ncy+3, 8, glyph)
-		ctx.DrawHLine(ncx-4, ncy+4, 8, glyph)
+}
+
+// drawGlyphMax рисует значок развёртывания □ — квадрат-рамку 1px (~9×9 при
+// кнопке 18px) с утолщённой (2px) верхней гранью, как строка заголовка окна.
+func drawGlyphMax(ctx DrawContext, cx, cy, side int, col color.RGBA) {
+	gw := side / 2 // ≈9px при side=18
+	if gw < 8 {
+		gw = 8
 	}
+	gh := gw
+	gx := cx - gw/2
+	gy := cy - gh/2
+	ctx.DrawBorder(gx, gy, gw, gh, col)
+	ctx.DrawHLine(gx, gy+1, gw, col) // утолщённая верхняя грань (2px)
+}
+
+// drawGlyphMin рисует значок сворачивания ─ — короткую горизонтальную полоску
+// 2px толщиной (~8px ширины при кнопке 18px) у нижней трети кнопки.
+func drawGlyphMin(ctx DrawContext, cx, cy, side int, col color.RGBA) {
+	bw := side * 8 / 18 // ≈8px при side=18
+	if bw < 6 {
+		bw = 6
+	}
+	bx := cx - bw/2
+	by := cy + side/6 // ближе к низу кнопки
+	ctx.DrawHLine(bx, by, bw, col)
+	ctx.DrawHLine(bx, by+1, bw, col)
 }
 
 // closeBtnBG возвращает фон кнопки закрытия (красный при hover).
@@ -712,28 +931,152 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 
 // ─── Drag / Capture ─────────────────────────────────────────────────────────
 
-// WantsCapture возвращает true при клике в drag-зону заголовка.
-// Это позволяет движку захватить мышь для Window (аналогично Panel.WantsCapture).
+// WantsCapture возвращает true при клике в зоны, требующие захвата мыши:
+// кнопки управления (release-семантика — нужен release даже если курсор
+// ушёл с кнопки), полосы ресайза по краям и drag-зона заголовка.
+// Захват позволяет движку доставлять move/release только этому Window.
 func (w *Window) WantsCapture(e MouseEvent) bool {
 	if w.Style == WindowStyleNone {
 		return false
 	}
+	if e.Button != MouseLeft {
+		return false
+	}
 	pt := image.Pt(e.X, e.Y)
+	// Кнопки управления — захватываем ради release (arm → fire/cancel).
+	if pt.In(w.CloseBtnRect()) {
+		return true
+	}
+	if r := w.MinBtnRect(); !r.Empty() && pt.In(r) {
+		return true
+	}
+	if r := w.MaxBtnRect(); !r.Empty() && pt.In(r) {
+		return true
+	}
+	// Полоса ресайза по краю окна (приоритетнее drag заголовка в верхней зоне).
+	if w.resizeEdgeAt(e.X, e.Y) != edgeNone {
+		return true
+	}
+	// Drag за заголовок.
 	tb := w.titleBarRect()
 	if tb.Empty() || !pt.In(tb) {
 		return false
 	}
-	// Не захватываем если клик по кнопкам управления
-	if pt.In(w.CloseBtnRect()) {
-		return false
-	}
-	if r := w.MinBtnRect(); !r.Empty() && pt.In(r) {
-		return false
-	}
-	if r := w.MaxBtnRect(); !r.Empty() && pt.In(r) {
-		return false
-	}
 	return true
+}
+
+// ─── Resize перетаскиванием краёв ───────────────────────────────────────────
+
+// edgeResizeEnabled сообщает, разрешён ли ресайз перетаскиванием краёв.
+// Только для «виртуальных» окон на канвасе (headless): в нативном режиме
+// размер меняет ОС (window.Window выставляет OnDragMove), и виджетный ресайз
+// краёв конфликтовал бы с нативным. Запрещён для NoResize/CanMinimize и
+// borderless-окон (WindowStyleNone).
+func (w *Window) edgeResizeEnabled() bool {
+	return w.Resize == ResizeModeCanResize &&
+		w.Style != WindowStyleNone &&
+		w.OnDragMove == nil
+}
+
+// resizeEdgeAt возвращает край(а) окна под точкой (x, y) для ресайза —
+// полоса шириной winResizeBorder вдоль каждой границы bounds, включая углы
+// (комбинация двух краёв). edgeNone — точка вне зоны ресайза или ресайз
+// запрещён.
+func (w *Window) resizeEdgeAt(x, y int) winEdge {
+	if !w.edgeResizeEnabled() {
+		return edgeNone
+	}
+	b := w.Bounds()
+	if !image.Pt(x, y).In(b) {
+		return edgeNone
+	}
+	// Ширина полосы-захвата: в классике совпадает с толщиной 3D-рамки
+	// (frameW), в прочих темах — winResizeBorder.
+	m := winResizeBorder
+	if currentStyle().Classic3D {
+		m = w.frameW()
+	}
+	var e winEdge
+	if x < b.Min.X+m {
+		e |= edgeW
+	}
+	if x >= b.Max.X-m {
+		e |= edgeE
+	}
+	if y < b.Min.Y+m {
+		e |= edgeN
+	}
+	if y >= b.Max.Y-m {
+		e |= edgeS
+	}
+	return e
+}
+
+// Cursor реализует CursorProvider: над полосой ресайза возвращает
+// соответствующий resize-курсор, иначе обычную стрелку.
+func (w *Window) Cursor(x, y int) Cursor {
+	switch w.resizeEdgeAt(x, y) {
+	case edgeN, edgeS:
+		return CursorSizeNS
+	case edgeW, edgeE:
+		return CursorSizeWE
+	case edgeN | edgeW, edgeS | edgeE:
+		return CursorSizeNWSE
+	case edgeN | edgeE, edgeS | edgeW:
+		return CursorSizeNESW
+	}
+	return CursorArrow
+}
+
+// applyResize пересчитывает bounds окна по стартовому прямоугольнику и текущей
+// дельте мыши, уважая минимальный размер (winMinW×winMinH). Опорный прямоуголь-
+// ник фиксирован (resizeStart) — накопления ошибки нет.
+func (w *Window) applyResize(x, y int) {
+	b := w.resizeStart
+	nx0, ny0, nx1, ny1 := b.Min.X, b.Min.Y, b.Max.X, b.Max.Y
+	dx := x - w.resizeStartX
+	dy := y - w.resizeStartY
+	if w.resizeDir&edgeW != 0 {
+		nx0 = b.Min.X + dx
+	}
+	if w.resizeDir&edgeE != 0 {
+		nx1 = b.Max.X + dx
+	}
+	if w.resizeDir&edgeN != 0 {
+		ny0 = b.Min.Y + dy
+	}
+	if w.resizeDir&edgeS != 0 {
+		ny1 = b.Max.Y + dy
+	}
+	// Минимальный размер: публичные MinWidth/MinHeight (0 → дефолт winMinW×winMinH).
+	minW := w.MinWidth
+	if minW <= 0 {
+		minW = winMinW
+	}
+	minH := w.MinHeight
+	if minH <= 0 {
+		minH = winMinH
+	}
+	// Не даём схлопнуть окно, тянем «неподвижный» край.
+	if nx1-nx0 < minW {
+		if w.resizeDir&edgeW != 0 {
+			nx0 = nx1 - minW
+		} else {
+			nx1 = nx0 + minW
+		}
+	}
+	if ny1-ny0 < minH {
+		if w.resizeDir&edgeN != 0 {
+			ny0 = ny1 - minH
+		} else {
+			ny1 = ny0 + minH
+		}
+	}
+	nb := image.Rect(nx0, ny0, nx1, ny1)
+	if nb != w.Bounds() {
+		// Window.SetBounds сам пересчитает ContentBounds → дочерние виджеты.
+		w.SetBounds(nb)
+	}
 }
 
 // SetCaptureManager сохраняет CaptureManager для освобождения захвата при отпускании.
@@ -743,8 +1086,15 @@ func (w *Window) SetCaptureManager(cm CaptureManager) {
 
 // ─── Mouse events ───────────────────────────────────────────────────────────
 
-// OnMouseMove обновляет hover-состояние кнопок заголовка и обрабатывает drag.
+// OnMouseMove обновляет hover-состояние кнопок заголовка и обрабатывает
+// drag/resize.
 func (w *Window) OnMouseMove(x, y int) {
+	// Изменение размера за край окна
+	if w.resizing {
+		w.applyResize(x, y)
+		return
+	}
+
 	// Drag за заголовок
 	if w.dragging {
 		dx := x - w.dragStartX
@@ -796,11 +1146,18 @@ func (w *Window) OnMouseMove(x, y int) {
 }
 
 // titleBarRect возвращает прямоугольник заголовка (без кнопок управления).
+// В классике Win2000 заголовок вписан внутрь толстой 3D-рамки — прямоугольник
+// смещён внутрь на её толщину (frameW).
 func (w *Window) titleBarRect() image.Rectangle {
 	b := w.Bounds()
 	th := w.titleH()
 	if th == 0 {
 		return image.Rectangle{}
+	}
+	if currentStyle().Classic3D {
+		fw := w.frameW()
+		eth := w.effTitleH()
+		return image.Rect(b.Min.X+fw, b.Min.Y+fw, b.Max.X-fw, b.Min.Y+fw+eth)
 	}
 	// Вся полоса заголовка (кнопки обрабатываются отдельно)
 	return image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+th)
@@ -818,8 +1175,16 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 	}
 	pt := image.Pt(e.X, e.Y)
 
-	// Отпускание кнопки — прекращаем drag
+	// Отпускание кнопки — завершаем resize / drag / arm.
 	if !e.Pressed {
+		if w.resizing {
+			w.resizing = false
+			w.resizeDir = edgeNone
+			if w.capMgr != nil {
+				w.capMgr.ReleaseCapture()
+			}
+			return true
+		}
 		if w.dragging {
 			w.dragging = false
 			if w.capMgr != nil {
@@ -827,26 +1192,76 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 			}
 			return true
 		}
+		// Взведённая кнопка заголовка: колбэк только если курсор всё ещё над
+		// той же кнопкой (release в стороне — отмена без вызова).
+		if w.armedBtn != titleBtnNone {
+			armed := w.armedBtn
+			w.armedBtn = titleBtnNone
+			w.Invalidate() // кнопка «отпущена» — перерисовать в выпуклом виде
+			over := false
+			switch armed {
+			case titleBtnClose:
+				over = pt.In(w.CloseBtnRect())
+			case titleBtnMin:
+				if r := w.MinBtnRect(); !r.Empty() {
+					over = pt.In(r)
+				}
+			case titleBtnMax:
+				if r := w.MaxBtnRect(); !r.Empty() {
+					over = pt.In(r)
+				}
+			}
+			if w.capMgr != nil {
+				w.capMgr.ReleaseCapture()
+			}
+			if over {
+				switch armed {
+				case titleBtnClose:
+					if w.OnClose != nil {
+						w.OnClose()
+					}
+				case titleBtnMin:
+					if w.OnMinimize != nil {
+						w.OnMinimize()
+					}
+				case titleBtnMax:
+					if w.OnMaximize != nil {
+						w.OnMaximize()
+					}
+				}
+			}
+			return true
+		}
 		return false
 	}
 
-	// Нажатие — проверяем кнопки управления
+	// Нажатие — «взводим» кнопки управления (колбэк на release). В классике
+	// взведённая кнопка рисуется вдавленной — инвалидируем окно для перерисовки.
 	if pt.In(w.CloseBtnRect()) {
-		if w.OnClose != nil {
-			w.OnClose()
-		}
+		w.armedBtn = titleBtnClose
+		w.Invalidate()
 		return true
 	}
 	if r := w.MinBtnRect(); !r.Empty() && pt.In(r) {
-		if w.OnMinimize != nil {
-			w.OnMinimize()
-		}
+		w.armedBtn = titleBtnMin
+		w.Invalidate()
 		return true
 	}
 	if r := w.MaxBtnRect(); !r.Empty() && pt.In(r) {
-		if w.OnMaximize != nil {
-			w.OnMaximize()
-		}
+		w.armedBtn = titleBtnMax
+		w.Invalidate()
+		return true
+	}
+
+	// Нажатие в полосу ресайза по краю — начинаем изменение размера
+	// (проверяется до drag заголовка: верхняя 6px-зона — resize, ниже — drag).
+	if dir := w.resizeEdgeAt(e.X, e.Y); dir != edgeNone {
+		DismissAll(w) // закрываем dropdown/popup перед resize
+		w.resizing = true
+		w.resizeDir = dir
+		w.resizeStart = w.Bounds()
+		w.resizeStartX = e.X
+		w.resizeStartY = e.Y
 		return true
 	}
 
@@ -995,6 +1410,14 @@ func (w *Window) ApplyTheme(t *Theme) {
 	} else {
 		w.TitleStyle = WindowTitleWin
 	}
+
+	// Клиентская область зависит от стиля темы: классика Win2000 — толстая
+	// 3D-рамка (5px) и низкий титлбар (24), модерн — 1px и 32. Без перекладки
+	// после переключения темы контент до первого ресайза налезал на рамку и
+	// титлбар (или отставал от них).
+	if b := w.Bounds(); !b.Empty() {
+		w.SetBounds(b)
+	}
 }
 
 // ─── Вспомогательные ────────────────────────────────────────────────────────
@@ -1005,6 +1428,21 @@ func (w *Window) resolveColor(c, fallback color.RGBA) color.RGBA {
 		return c
 	}
 	return fallback
+}
+
+// xorBorderColor возвращает XOR-инверсию цвета фона (побитовое НЕ каждого
+// канала, alpha = 255). Чистая функция — гарантирует контраст рамки с фоном.
+func xorBorderColor(bg color.RGBA) color.RGBA {
+	return color.RGBA{R: ^bg.R, G: ^bg.G, B: ^bg.B, A: 255}
+}
+
+// xorBorderBase возвращает фактический фон окна для расчёта XOR-рамки.
+// Если фон окна полупрозрачный/нулевой (A == 0) — фолбэк на WindowBG темы.
+func (w *Window) xorBorderBase() color.RGBA {
+	if w.Background.A == 0 {
+		return win10.WindowBG
+	}
+	return w.Background
 }
 
 // fillCircle рисует закрашенный круг (для traffic lights).

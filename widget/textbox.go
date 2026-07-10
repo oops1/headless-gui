@@ -508,6 +508,41 @@ func (t *TextBox) wordRight(idx int) int {
 	return i
 }
 
+// copySelection копирует выделение в буфер обмена (разрешено и при ReadOnly).
+// Вызывать под t.mu.Lock().
+func (t *TextBox) copySelection() {
+	if t.selActive() {
+		lo, hi := t.normSel()
+		ClipboardSetText(string(t.runes[lo:hi]))
+	}
+}
+
+// cutSelection копирует выделение в буфер обмена и удаляет его. При ReadOnly
+// вырезание запрещено. Возвращает true, если что-то вырезано. Вызывать под t.mu.
+func (t *TextBox) cutSelection() bool {
+	if t.ReadOnly || !t.selActive() {
+		return false
+	}
+	lo, hi := t.normSel()
+	ClipboardSetText(string(t.runes[lo:hi]))
+	t.deleteSel()
+	return true
+}
+
+// pasteFromClipboard вставляет текст из буфера обмена в позицию каретки.
+// При ReadOnly вставка запрещена. Возвращает true, если текст вставлен.
+// Вызывать под t.mu.Lock().
+func (t *TextBox) pasteFromClipboard() bool {
+	if t.ReadOnly {
+		return false
+	}
+	if clip := ClipboardGetText(); clip != "" {
+		t.insertRunes([]rune(clip))
+		return true
+	}
+	return false
+}
+
 func (t *TextBox) pushUndo(before textEdit) {
 	t.undoStack = append(t.undoStack, before)
 	if len(t.undoStack) > 200 {
@@ -653,6 +688,17 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 		}
 		if t.deleteSel() {
 			changed = true
+		} else if ctrl {
+			// Ctrl+Backspace — удалить слово НАЗАД от каретки.
+			if t.caret > 0 {
+				start := t.wordLeft(t.caret)
+				if start < t.caret {
+					t.runes = append(t.runes[:start], t.runes[t.caret:]...)
+					t.caret = start
+					t.dirty = true
+					changed = true
+				}
+			}
 		} else if t.caret > 0 {
 			t.runes = append(t.runes[:t.caret-1], t.runes[t.caret:]...)
 			t.caret--
@@ -660,12 +706,41 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 			changed = true
 		}
 
+	case KeyInsert:
+		if ctrl {
+			// Ctrl+Insert = копировать (как Ctrl+C).
+			t.copySelection()
+		} else if shift {
+			// Shift+Insert = вставить (как Ctrl+V); запрещено при ReadOnly.
+			if t.pasteFromClipboard() {
+				changed = true
+			}
+		}
+
 	case KeyDelete:
+		if shift {
+			// Shift+Delete = вырезать (как Ctrl+X) — приоритетнее обычного Delete
+			// (cutSelection сам блокирует ReadOnly).
+			if t.cutSelection() {
+				changed = true
+			}
+			break
+		}
 		if t.ReadOnly {
 			break
 		}
 		if t.deleteSel() {
 			changed = true
+		} else if ctrl {
+			// Ctrl+Delete — удалить слово ВПЕРЁД от каретки.
+			if t.caret < len(t.runes) {
+				end := t.wordRight(t.caret)
+				if end > t.caret {
+					t.runes = append(t.runes[:t.caret], t.runes[end:]...)
+					t.dirty = true
+					changed = true
+				}
+			}
 		} else if t.caret < len(t.runes) {
 			t.runes = append(t.runes[:t.caret], t.runes[t.caret+1:]...)
 			t.dirty = true
@@ -703,23 +778,13 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 				t.selAnchor = 0
 				t.caret = len(t.runes)
 			case KeyC:
-				if t.selActive() {
-					lo, hi := t.normSel()
-					ClipboardSetText(string(t.runes[lo:hi]))
-				}
+				t.copySelection()
 			case KeyX:
-				if !t.ReadOnly && t.selActive() {
-					lo, hi := t.normSel()
-					ClipboardSetText(string(t.runes[lo:hi]))
-					t.deleteSel()
+				if t.cutSelection() {
 					changed = true
 				}
 			case KeyV:
-				if t.ReadOnly {
-					break
-				}
-				if clip := ClipboardGetText(); clip != "" {
-					t.insertRunes([]rune(clip))
+				if t.pasteFromClipboard() {
 					changed = true
 				}
 			}

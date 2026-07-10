@@ -546,7 +546,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<Canvas>` | `Canvas` | `Width`, `Height`, `Canvas.Left`, `Canvas.Top` |
 | `<ScrollViewer>` | `ScrollView` | `Content`, `Height` |
 | `<TabControl>` | `TabControl` | `Items` (TabItem elements) |
-| `<Window>` | `Window` | `Title`, `Width`, `Height`, `WindowStyle`, `ResizeMode` |
+| `<Window>` | `Window` | `Title`, `Width`, `Height`, `WindowStyle`, `ResizeMode`, `MainWindow` |
 | `<MenuItem>` | (nested in MenuBar) | `Header`, `Items` |
 | `<TreeView>` | `TreeViewWidget` | `Items`, `ItemHeight`, `ShowIndentGuides` |
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
@@ -685,7 +685,9 @@ MenuBar.OnSelect func(topIdx int, subIdx int, text string)
 // Panel.OnClose (fires on PRESS of close button in title bar)
 Panel.OnClose func()
 
-// Window.OnClose (fires on PRESS of close button in title bar)
+// Window.OnClose (fires on RELEASE of close button, if the cursor is still
+// over it — Windows semantics; releasing off the button cancels the action).
+// Same release-semantics apply to Window.OnMinimize / Window.OnMaximize.
 Window.OnClose func()
 ```
 
@@ -888,6 +890,7 @@ const (
     KeyUp        KeyCode = 38
     KeyRight     KeyCode = 39
     KeyDown      KeyCode = 40
+    KeyInsert    KeyCode = 45
     KeyDelete    KeyCode = 46
     KeyEnd       KeyCode = 35
     KeyA...KeyZ  KeyCode = 65...90
@@ -1137,9 +1140,9 @@ btn.OnClick = func() {
 
 This allows canceling clicks by dragging away before release.
 
-### Window.OnClose and Panel.OnClose Fire on MOUSE PRESS
+### Panel.OnClose Fires on MOUSE PRESS; Window Title Buttons Fire on RELEASE
 
-Unlike button clicks, close button events fire on **press**:
+`Panel.OnClose` fires on **press**:
 
 ```go
 panel.OnClose = func() {
@@ -1148,6 +1151,12 @@ panel.OnClose = func() {
     eng.CloseModal(panel)
 }
 ```
+
+`Window.OnClose` / `Window.OnMinimize` / `Window.OnMaximize`, by contrast,
+follow Windows semantics: pressing a title button **arms** it, and the callback
+fires on **release** only if the cursor is still over the same button.
+Releasing off the button (or moving away first) cancels the action without
+firing. This lets a user abort a close/minimize/maximize by dragging away.
 
 ### DrawContext is Only Valid Inside Draw()
 
@@ -2415,6 +2424,38 @@ rect — иначе частичная перерисовка заморозит
 именует их сквозным seq → в on-demand нумерация С ДЫРКАМИ. «Последний
 кадр» ищи через ReadDir + максимальное имя, НЕ перебором от 1 до первого
 отсутствующего.
+
+---
+
+## v3.9 additions (old-school clipboard keys + Win2000 chrome)
+
+Text editing (`TextInput` и `TextBox`) теперь понимает «старошкольные»
+клавиши буфера обмена и удаление слова:
+
+- **Ctrl+Insert** = копировать (алиас Ctrl+C; в password-режиме запрещено).
+- **Shift+Insert** = вставить (алиас Ctrl+V; при `ReadOnly` у TextBox запрещено).
+- **Shift+Delete** = вырезать (алиас Ctrl+X) — приоритетнее обычного Delete;
+  password/ReadOnly блокируют.
+- **Ctrl+Delete** = удалить слово ВПЕРЁД от каретки.
+- **Ctrl+Backspace** = удалить слово НАЗАД от каретки.
+
+Новый код клавиши: `KeyInsert = 45`, замаплен во ВСЕХ бэкендах
+(`VK_INSERT=0x2D`; X11 keycode 118; на macOS — best-effort через Help=114).
+Undo-история и `OnChange` работают как у обычных правок.
+
+Классический chrome окна (Win2000): в классике введена ЭФФЕКТИВНАЯ высота
+заголовка `Window.effTitleH()` (24px вместо полных 32) — вся геометрия
+классики (titleBarRect, кнопки, локаль-бейдж, текст, ContentBounds) считается
+от неё, поэтому титлбар и кнопки (side = effTitleH-6 = 18px) компактнее и
+ближе к референсу. Хром-рамка (толстая 3D в классике; 1px XOR-рамка главного
+окна в современных темах) рисуется ПОСЛЕ детей — контент с абсолютными
+координатами больше не «замазывает» полосу рамки.
+
+---
+
+## v3.10 additions (mouse wheel in all scrollable widgets)
+
+Колесо мыши теперь прокручивает **все** скроллируемые виджеты (шаг — 3 строки за тик, с клампом на границах): `ScrollView`, `TextBox`, `ListView`, `TreeView` (`TreeViewWidget`), `DataGrid` (`DataGridWidget`), `VirtualizingItemsControl`, `NumericUpDown` и `fileTable` в диалогах. Правило поглощения: виджет возвращает `true` из `OnMouseButton` только когда прокрутка реально сдвинулась; если контент помещается или каретка уже у границы — возвращает `false`, чтобы событие всплыло к родительскому `ScrollView` (вложенный список внутри страницы не блокирует прокрутку страницы, когда сам доскроллен). Ядра `treeview.TreeView` и `datagrid.DataGrid` получили `WheelScroll(up bool) bool` и `ScrollY() int`; у `ListView` добавлен `ScrollY() int`. Dropdown и PopupMenu колеса не получили — их раскрытые списки рисуются целиком без механики прокрутки (out of scope).
 
 ---
 

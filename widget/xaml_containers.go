@@ -215,6 +215,20 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 		win.Resize = ResizeModeCanResize
 	}
 
+	// MinWidth / MinHeight — минимальный размер окна (логические пиксели).
+	if mw := xatoi(el.attr("MinWidth")); mw > 0 {
+		win.MinWidth = mw
+	}
+	if mh := xatoi(el.attr("MinHeight")); mh > 0 {
+		win.MinHeight = mh
+	}
+
+	// MainWindow: True (default) | False. У главного окна рисуется XOR-рамка;
+	// вложенные окна (MainWindow="False") её не получают.
+	if mw := el.attr("MainWindow"); mw != "" {
+		win.MainWindow = strings.EqualFold(mw, "true") || mw == "1"
+	}
+
 	// Background
 	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {

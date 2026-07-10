@@ -43,6 +43,17 @@ type NativeWindow interface {
 	// SetSize меняет размер окна (в logical pixels).
 	SetSize(width, height int)
 
+	// SetResizable разрешает пользователю менять размер окна за края.
+	// Окна создаются borderless, поэтому зоны захвата у краёв реализует
+	// бэкенд (Win32 — WM_NCHITTEST). Бэкенды без поддержки — no-op.
+	SetResizable(v bool)
+
+	// SetMinSize задаёт минимальный размер окна В ФИЗИЧЕСКИХ пикселях
+	// (вызывающая сторона умножает логический минимум на HiDPI-scale).
+	// Win32 отдаёт его ОС в WM_GETMINMAXINFO; прочие бэкенды — no-op.
+	// 0 → дефолт движка (Win32: 320×240).
+	SetMinSize(width, height int)
+
 	// GetSize возвращает текущий размер окна (в logical pixels).
 	GetSize() (width, height int)
 
@@ -116,6 +127,7 @@ const (
 	VK_UP        = 0x26
 	VK_RIGHT     = 0x27
 	VK_DOWN      = 0x28
+	VK_INSERT    = 0x2D
 	VK_DELETE    = 0x2E
 	VK_HOME      = 0x24
 	VK_END       = 0x23

@@ -112,22 +112,162 @@ func TestWindowBtnCount(t *testing.T) {
 	}
 }
 
+// ─── Классика Win2000: толстая рамка и кнопки внутри неё ─────────────────────
+
+// TestWindowContentBounds_Classic3D — в классике клиентская область смещена
+// внутрь толстой 3D-рамки (frameW=5): слева/справа/снизу на 5px, сверху на
+// 5px рамки + эффективную высоту заголовка (effTitleH=24, а не полные 32 —
+// в классике заголовок ниже под пропорции референса Win2000).
+func TestWindowContentBounds_Classic3D(t *testing.T) {
+	widget.ApplyGlobalTheme(widget.ThemeByName("Win2000"))
+	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+
+	w := widget.NewWindow("Classic", 800, 600)
+	cb := w.ContentBounds()
+	want := image.Rect(5, 5+24, 795, 595) // frameW=5, effTitleH=24
+	if cb != want {
+		t.Fatalf("Classic ContentBounds = %v, want %v", cb, want)
+	}
+}
+
+// TestWindowApplyTheme_RelayoutsChildren — смена темы меняет клиентскую
+// область (классика: рамка 5px + титлбар 24 против 1px + 32 в модерне),
+// поэтому ApplyTheme обязан переложить детей. Без этого после переключения
+// на Win2000 контент до первого ресайза налезал на титлбар и рамку.
+func TestWindowApplyTheme_RelayoutsChildren(t *testing.T) {
+	widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+
+	w := widget.NewWindow("Theme", 800, 600)
+	c := widget.NewCanvas()
+	w.AddChild(c)
+	w.SetBounds(image.Rect(0, 0, 800, 600))
+	if got, want := c.Bounds(), w.ContentBounds(); got != want {
+		t.Fatalf("до смены темы ребёнок = %v, want %v", got, want)
+	}
+
+	classic := widget.ThemeByName("Win2000")
+	widget.ApplyGlobalTheme(classic)
+	widget.ApplyThemeTree(w, classic)
+	want := image.Rect(5, 5+24, 795, 595) // frameW=5, effTitleH=24
+	if got := c.Bounds(); got != want {
+		t.Fatalf("после Win2000 ребёнок = %v, want %v (контент не переложен)", got, want)
+	}
+
+	modern := widget.ThemeByName("Win10 Dark")
+	widget.ApplyGlobalTheme(modern)
+	widget.ApplyThemeTree(w, modern)
+	want = image.Rect(1, 32, 799, 599) // frameW=1, titleH=32
+	if got := c.Bounds(); got != want {
+		t.Fatalf("после возврата в модерн ребёнок = %v, want %v", got, want)
+	}
+}
+
+// TestWindowClassicButtons_InsideFrame — кнопки ─ □ × расположены внутри
+// рамки (не выходят за её правый/верхний край) и упорядочены слева направо.
+func TestWindowClassicButtons_InsideFrame(t *testing.T) {
+	widget.ApplyGlobalTheme(widget.ThemeByName("Win2000"))
+	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+
+	w := widget.NewWindow("Classic", 800, 600)
+	closeR := w.CloseBtnRect()
+	minR := w.MinBtnRect()
+	maxR := w.MaxBtnRect()
+	if closeR.Empty() || minR.Empty() || maxR.Empty() {
+		t.Fatalf("кнопки не должны быть пустыми в классике: close=%v min=%v max=%v", closeR, minR, maxR)
+	}
+	// Внутри рамки: правый край креста ≤ 795 (правая рамка), верх ≥ 5 (верхняя рамка).
+	if closeR.Max.X > 795 {
+		t.Fatalf("крест выходит за правую рамку: Max.X=%d > 795", closeR.Max.X)
+	}
+	if closeR.Min.Y < 5 {
+		t.Fatalf("кнопка выше верхней рамки: Min.Y=%d < 5", closeR.Min.Y)
+	}
+	// Компактная геометрия классики: сторона кнопки = effTitleH-6 = 18px,
+	// отступ сверху 3px (кнопка начинается на y = 5+3 = 8) и справа 2px
+	// (правый край креста = 795-2 = 793). Кнопки вписаны в effTitleH=24
+	// (нижний край ≤ 5+24 = 29).
+	if closeR.Dx() != 18 || closeR.Dy() != 18 {
+		t.Fatalf("сторона кнопки = %dx%d, want 18x18", closeR.Dx(), closeR.Dy())
+	}
+	if closeR.Min.Y != 8 {
+		t.Fatalf("верх кнопки Min.Y=%d, want 8 (5 рамка + 3 отступ)", closeR.Min.Y)
+	}
+	if closeR.Max.X != 793 {
+		t.Fatalf("правый край креста Max.X=%d, want 793 (795 - 2)", closeR.Max.X)
+	}
+	if closeR.Max.Y > 5+24 {
+		t.Fatalf("кнопка выходит за эффективный заголовок: Max.Y=%d > %d", closeR.Max.Y, 5+24)
+	}
+	// Порядок слева направо: ─ , □ , ×.
+	if !(minR.Max.X <= maxR.Min.X && maxR.Max.X <= closeR.Min.X) {
+		t.Fatalf("порядок кнопок нарушен: min=%v max=%v close=%v", minR, maxR, closeR)
+	}
+}
+
+// TestWindowClassicCloseClick — полный клик по кресту в классике вызывает OnClose.
+func TestWindowClassicCloseClick(t *testing.T) {
+	widget.ApplyGlobalTheme(widget.ThemeByName("Win2000"))
+	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+
+	w := widget.NewWindow("Classic", 800, 600)
+	closed := false
+	w.OnClose = func() { closed = true }
+
+	cx, cy := rectCenter(w.CloseBtnRect())
+	pressRelease(w, cx, cy)
+	if !closed {
+		t.Fatal("OnClose не вызван по клику на крест в классике")
+	}
+}
+
 // ─── Mouse click: close / minimize / maximize ───────────────────────────────
+
+// rectCenter возвращает центр прямоугольника.
+func rectCenter(r image.Rectangle) (int, int) {
+	return (r.Min.X + r.Max.X) / 2, (r.Min.Y + r.Max.Y) / 2
+}
+
+// pressRelease эмулирует полный клик ЛКМ (press + release) в точке.
+func pressRelease(w *widget.Window, x, y int) {
+	w.OnMouseButton(widget.MouseEvent{X: x, Y: y, Button: widget.MouseLeft, Pressed: true})
+	w.OnMouseButton(widget.MouseEvent{X: x, Y: y, Button: widget.MouseLeft, Pressed: false})
+}
 
 func TestWindowCloseClick(t *testing.T) {
 	w := widget.NewWindow("Test", 800, 600)
 	closed := false
 	w.OnClose = func() { closed = true }
 
-	// Кликаем в центр кнопки закрытия (Win-стиль: правый верхний угол)
-	cr := w.CloseBtnRect()
-	cx := (cr.Min.X + cr.Max.X) / 2
-	cy := (cr.Min.Y + cr.Max.Y) / 2
-	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	// Полный клик (press+release) в центр кнопки закрытия.
+	cx, cy := rectCenter(w.CloseBtnRect())
+	pressRelease(w, cx, cy)
 
 	if !closed {
 		t.Fatal("OnClose not called after clicking close button")
 	}
+}
+
+// TestWindowClose_PressOnly_NoCallback — на одном press колбэк НЕ вызывается
+// (release-семантика Windows).
+func TestWindowClose_PressOnly_NoCallback(t *testing.T) {
+	w := widget.NewWindow("Test", 800, 600)
+	w.OnClose = func() { t.Fatal("OnClose should not fire on press alone") }
+
+	cx, cy := rectCenter(w.CloseBtnRect())
+	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+}
+
+// TestWindowClose_ReleaseOutside_Cancels — press на кнопке, release в стороне:
+// колбэк НЕ вызывается (действие отменено).
+func TestWindowClose_ReleaseOutside_Cancels(t *testing.T) {
+	w := widget.NewWindow("Test", 800, 600)
+	w.OnClose = func() { t.Fatal("OnClose should not fire when released off the button") }
+
+	cx, cy := rectCenter(w.CloseBtnRect())
+	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	// Отпускаем в центре клиентской области — вне кнопки.
+	w.OnMouseButton(widget.MouseEvent{X: 400, Y: 300, Button: widget.MouseLeft, Pressed: false})
 }
 
 func TestWindowMinimizeClick(t *testing.T) {
@@ -140,9 +280,8 @@ func TestWindowMinimizeClick(t *testing.T) {
 	if mr.Empty() {
 		t.Fatal("minBtnRect should not be empty for CanResize")
 	}
-	cx := (mr.Min.X + mr.Max.X) / 2
-	cy := (mr.Min.Y + mr.Max.Y) / 2
-	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	cx, cy := rectCenter(mr)
+	pressRelease(w, cx, cy)
 
 	if !minimized {
 		t.Fatal("OnMinimize not called after clicking min button")
@@ -159,13 +298,32 @@ func TestWindowMaximizeClick(t *testing.T) {
 	if mr.Empty() {
 		t.Fatal("maxBtnRect should not be empty for CanResize")
 	}
-	cx := (mr.Min.X + mr.Max.X) / 2
-	cy := (mr.Min.Y + mr.Max.Y) / 2
-	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	cx, cy := rectCenter(mr)
+	pressRelease(w, cx, cy)
 
 	if !maximized {
 		t.Fatal("OnMaximize not called after clicking max button")
 	}
+}
+
+// TestWindowMinimize_ReleaseOutside_Cancels — отмена уходом для кнопки ─.
+func TestWindowMinimize_ReleaseOutside_Cancels(t *testing.T) {
+	w := widget.NewWindow("Test", 800, 600)
+	w.OnMinimize = func() { t.Fatal("OnMinimize should not fire when released off the button") }
+
+	cx, cy := rectCenter(w.MinBtnRect())
+	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	w.OnMouseButton(widget.MouseEvent{X: 400, Y: 300, Button: widget.MouseLeft, Pressed: false})
+}
+
+// TestWindowMaximize_ReleaseOutside_Cancels — отмена уходом для кнопки □.
+func TestWindowMaximize_ReleaseOutside_Cancels(t *testing.T) {
+	w := widget.NewWindow("Test", 800, 600)
+	w.OnMaximize = func() { t.Fatal("OnMaximize should not fire when released off the button") }
+
+	cx, cy := rectCenter(w.MaxBtnRect())
+	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	w.OnMouseButton(widget.MouseEvent{X: 400, Y: 300, Button: widget.MouseLeft, Pressed: false})
 }
 
 func TestWindowClickOutsideButtons(t *testing.T) {
@@ -183,10 +341,8 @@ func TestWindowMacStyle_CloseClick(t *testing.T) {
 	closed := false
 	w.OnClose = func() { closed = true }
 
-	cr := w.CloseBtnRect()
-	cx := (cr.Min.X + cr.Max.X) / 2
-	cy := (cr.Min.Y + cr.Max.Y) / 2
-	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	cx, cy := rectCenter(w.CloseBtnRect())
+	pressRelease(w, cx, cy)
 
 	if !closed {
 		t.Fatal("OnClose not called for Mac-style close button")
@@ -310,6 +466,26 @@ func TestXAMLWindow_ResizeMode(t *testing.T) {
 		if w.Resize != tt.want {
 			t.Fatalf("ResizeMode = %d, want %d for xml: %s", w.Resize, tt.want, tt.xml)
 		}
+	}
+}
+
+func TestXAMLWindow_MainWindow(t *testing.T) {
+	// По умолчанию — главное окно.
+	root, _, err := widget.LoadUIFromXAML([]byte(`<Window Width="100" Height="100"/>`))
+	if err != nil {
+		t.Fatalf("LoadUIFromXAML: %v", err)
+	}
+	if !root.(*widget.Window).MainWindow {
+		t.Fatal("MainWindow по умолчанию должно быть true")
+	}
+
+	// Явно MainWindow="False".
+	root, _, err = widget.LoadUIFromXAML([]byte(`<Window Width="100" Height="100" MainWindow="False"/>`))
+	if err != nil {
+		t.Fatalf("LoadUIFromXAML: %v", err)
+	}
+	if root.(*widget.Window).MainWindow {
+		t.Fatal("MainWindow=\"False\" должно отключать флаг")
 	}
 }
 

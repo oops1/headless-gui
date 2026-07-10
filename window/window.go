@@ -187,6 +187,9 @@ func (win *Window) SetMaxFPS(fps int) *Window {
 // SetResizable разрешает/запрещает изменение размера окна пользователем.
 func (win *Window) SetResizable(v bool) *Window {
 	win.resizable = v
+	if win.native != nil {
+		win.native.SetResizable(v)
+	}
 	return win
 }
 
@@ -238,6 +241,16 @@ func (win *Window) Run() error {
 	win.mu.Unlock()
 	if err := win.native.Create(win.title, pw, ph); err != nil {
 		return err
+	}
+	// Разрешаем ресайз за края (borderless: зоны рамки отдаёт бэкенд).
+	win.native.SetResizable(win.resizable)
+
+	// Минимальный размер окна из widget.Window (MinWidth/MinHeight): логические
+	// значения × HiDPI-scale → физические пиксели для ОС (Win32 WM_GETMINMAXINFO).
+	if ww, ok := win.eng.Root().(*widget.Window); ok && (ww.MinWidth > 0 || ww.MinHeight > 0) {
+		pmw := int(float64(ww.MinWidth)*win.scale + 0.5)
+		pmh := int(float64(ww.MinHeight)*win.scale + 0.5)
+		win.native.SetMinSize(pmw, pmh)
 	}
 
 	// Смена DPI монитора (перенос окна) — перестраиваем масштаб и буферы.
@@ -715,6 +728,8 @@ func vkToKeyCode(vk int) widget.KeyCode {
 		return widget.KeyRight
 	case VK_DOWN:
 		return widget.KeyDown
+	case VK_INSERT:
+		return widget.KeyInsert
 	case VK_DELETE:
 		return widget.KeyDelete
 	case VK_HOME:

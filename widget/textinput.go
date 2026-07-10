@@ -398,15 +398,50 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	case KeyBackspace:
 		if t.deleteSel() {
 			changed = true
+		} else if ctrl {
+			// Ctrl+Backspace — удалить слово НАЗАД от каретки.
+			if t.caretPos > 0 {
+				start := t.wordLeft(t.caretPos)
+				if start < t.caretPos {
+					t.runes = append(t.runes[:start], t.runes[t.caretPos:]...)
+					t.caretPos = start
+					changed = true
+				}
+			}
 		} else if t.caretPos > 0 {
 			t.runes = append(t.runes[:t.caretPos-1], t.runes[t.caretPos:]...)
 			t.caretPos--
 			changed = true
 		}
 
+	case KeyInsert:
+		if ctrl {
+			// Ctrl+Insert = копировать (как Ctrl+C); в password-режиме запрещено.
+			t.copySelection()
+		} else if shift {
+			// Shift+Insert = вставить (как Ctrl+V).
+			if t.pasteFromClipboard() {
+				changed = true
+			}
+		}
+
 	case KeyDelete:
-		if t.deleteSel() {
+		if shift {
+			// Shift+Delete = вырезать (как Ctrl+X) — приоритетнее обычного Delete.
+			if t.cutSelection() {
+				changed = true
+			}
+		} else if t.deleteSel() {
 			changed = true
+		} else if ctrl {
+			// Ctrl+Delete — удалить слово ВПЕРЁД от каретки.
+			if t.caretPos < len(t.runes) {
+				end := t.wordRight(t.caretPos)
+				if end > t.caretPos {
+					t.runes = append(t.runes[:t.caretPos], t.runes[end:]...)
+					changed = true
+				}
+			}
 		} else if t.caretPos < len(t.runes) {
 			t.runes = append(t.runes[:t.caretPos], t.runes[t.caretPos+1:]...)
 			changed = true
@@ -445,42 +480,16 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 				t.selEnd = len(t.runes)
 				t.caretPos = len(t.runes)
 			case KeyC:
-				// В режиме пароля копирование запрещено
-				if !t.isPassword && t.selActive() {
-					lo, hi := t.normSel()
-					ClipboardSetText(string(t.runes[lo:hi]))
-				}
+				// В режиме пароля копирование запрещено (см. copySelection).
+				t.copySelection()
 			case KeyX:
-				// В режиме пароля вырезание запрещено
-				if !t.isPassword && t.selActive() {
-					lo, hi := t.normSel()
-					ClipboardSetText(string(t.runes[lo:hi]))
-					t.deleteSel()
+				// В режиме пароля вырезание запрещено (см. cutSelection).
+				if t.cutSelection() {
 					changed = true
 				}
 			case KeyV:
-				clipText := ClipboardGetText()
-				if len(clipText) > 0 {
-					t.deleteSel()
-					paste := []rune(clipText)
-					if t.MaxLength > 0 { // обрезаем под лимит
-						room := t.MaxLength - len(t.runes)
-						if room < 0 {
-							room = 0
-						}
-						if len(paste) > room {
-							paste = paste[:room]
-						}
-					}
-					if n := len(paste); n > 0 {
-						ins := make([]rune, len(t.runes)+n)
-						copy(ins, t.runes[:t.caretPos])
-						copy(ins[t.caretPos:], paste)
-						copy(ins[t.caretPos+n:], t.runes[t.caretPos:])
-						t.runes = ins
-						t.caretPos += n
-						changed = true
-					}
+				if t.pasteFromClipboard() {
+					changed = true
 				}
 			}
 		} else if e.Rune >= 32 {
@@ -599,6 +608,91 @@ func (t *TextInput) wordBoundsAt(idx int) (int, int) {
 		hi++
 	}
 	return lo, hi
+}
+
+// wordLeft возвращает позицию начала предыдущего слова относительно idx
+// (симметрично TextBox.wordLeft). Вызывать под t.mu.Lock().
+func (t *TextInput) wordLeft(idx int) int {
+	if idx <= 0 {
+		return 0
+	}
+	i := idx - 1
+	for i > 0 && !isWordRune(t.runes[i]) {
+		i--
+	}
+	for i > 0 && isWordRune(t.runes[i-1]) {
+		i--
+	}
+	return i
+}
+
+// wordRight возвращает позицию за концом следующего слова относительно idx
+// (симметрично TextBox.wordRight). Вызывать под t.mu.Lock().
+func (t *TextInput) wordRight(idx int) int {
+	n := len(t.runes)
+	i := idx
+	for i < n && isWordRune(t.runes[i]) {
+		i++
+	}
+	for i < n && !isWordRune(t.runes[i]) {
+		i++
+	}
+	return i
+}
+
+// copySelection копирует выделение в буфер обмена. В password-режиме
+// копирование запрещено. Вызывать под t.mu.Lock().
+func (t *TextInput) copySelection() {
+	if t.isPassword || !t.selActive() {
+		return
+	}
+	lo, hi := t.normSel()
+	ClipboardSetText(string(t.runes[lo:hi]))
+}
+
+// cutSelection копирует выделение в буфер обмена и удаляет его. В password-
+// режиме вырезание запрещено. Возвращает true, если что-то вырезано.
+// Вызывать под t.mu.Lock().
+func (t *TextInput) cutSelection() bool {
+	if t.isPassword || !t.selActive() {
+		return false
+	}
+	lo, hi := t.normSel()
+	ClipboardSetText(string(t.runes[lo:hi]))
+	t.deleteSel()
+	return true
+}
+
+// pasteFromClipboard вставляет текст из буфера обмена в позицию каретки
+// (с учётом выделения и MaxLength). Возвращает true, если текст фактически
+// вставлен. Вызывать под t.mu.Lock().
+func (t *TextInput) pasteFromClipboard() bool {
+	clipText := ClipboardGetText()
+	if len(clipText) == 0 {
+		return false
+	}
+	t.deleteSel()
+	paste := []rune(clipText)
+	if t.MaxLength > 0 { // обрезаем под лимит
+		room := t.MaxLength - len(t.runes)
+		if room < 0 {
+			room = 0
+		}
+		if len(paste) > room {
+			paste = paste[:room]
+		}
+	}
+	n := len(paste)
+	if n == 0 {
+		return false
+	}
+	ins := make([]rune, len(t.runes)+n)
+	copy(ins, t.runes[:t.caretPos])
+	copy(ins[t.caretPos:], paste)
+	copy(ins[t.caretPos+n:], t.runes[t.caretPos:])
+	t.runes = ins
+	t.caretPos += n
+	return true
 }
 
 // isWordRune — true для букв/цифр/подчёркивания (символы одного «слова»).
