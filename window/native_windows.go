@@ -89,9 +89,11 @@ const (
 	// Cursors (IDC_*)
 	idcArrow  = 32512
 	idcIBeam  = 32513
-	idcSizeNS = 32645
-	idcSizeWE = 32644
-	idcHand   = 32649
+	idcSizeNS   = 32645
+	idcSizeWE   = 32644
+	idcSizeNWSE = 32642
+	idcSizeNESW = 32643
+	idcHand     = 32649
 
 	// WM_SETCURSOR
 	wmSetcursor = 0x0020
@@ -918,7 +920,8 @@ func (w *Win32Window) keyboardLayoutList() []uintptr {
 }
 
 // SetCursor задаёт форму курсора по коду widget.Cursor (0=Arrow,1=IBeam,
-// 2=Hand,3=SizeWE,4=SizeNS). Реальное применение — в WndProc (WM_SETCURSOR).
+// 2=Hand,3=SizeWE,4=SizeNS,5=SizeNWSE,6=SizeNESW). Реальное применение —
+// в WndProc (WM_SETCURSOR).
 func (w *Win32Window) SetCursor(c int) {
 	idc := idcArrow
 	switch c {
@@ -930,6 +933,10 @@ func (w *Win32Window) SetCursor(c int) {
 		idc = idcSizeWE
 	case 4:
 		idc = idcSizeNS
+	case 5:
+		idc = idcSizeNWSE
+	case 6:
+		idc = idcSizeNESW
 	}
 	if w.cursorCache == nil {
 		w.cursorCache = map[int]uintptr{}

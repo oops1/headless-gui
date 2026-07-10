@@ -546,7 +546,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<Canvas>` | `Canvas` | `Width`, `Height`, `Canvas.Left`, `Canvas.Top` |
 | `<ScrollViewer>` | `ScrollView` | `Content`, `Height` |
 | `<TabControl>` | `TabControl` | `Items` (TabItem elements) |
-| `<Window>` | `Window` | `Title`, `Width`, `Height`, `WindowStyle`, `ResizeMode` |
+| `<Window>` | `Window` | `Title`, `Width`, `Height`, `WindowStyle`, `ResizeMode`, `MainWindow` |
 | `<MenuItem>` | (nested in MenuBar) | `Header`, `Items` |
 | `<TreeView>` | `TreeViewWidget` | `Items`, `ItemHeight`, `ShowIndentGuides` |
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
@@ -685,7 +685,9 @@ MenuBar.OnSelect func(topIdx int, subIdx int, text string)
 // Panel.OnClose (fires on PRESS of close button in title bar)
 Panel.OnClose func()
 
-// Window.OnClose (fires on PRESS of close button in title bar)
+// Window.OnClose (fires on RELEASE of close button, if the cursor is still
+// over it — Windows semantics; releasing off the button cancels the action).
+// Same release-semantics apply to Window.OnMinimize / Window.OnMaximize.
 Window.OnClose func()
 ```
 
@@ -1137,9 +1139,9 @@ btn.OnClick = func() {
 
 This allows canceling clicks by dragging away before release.
 
-### Window.OnClose and Panel.OnClose Fire on MOUSE PRESS
+### Panel.OnClose Fires on MOUSE PRESS; Window Title Buttons Fire on RELEASE
 
-Unlike button clicks, close button events fire on **press**:
+`Panel.OnClose` fires on **press**:
 
 ```go
 panel.OnClose = func() {
@@ -1148,6 +1150,12 @@ panel.OnClose = func() {
     eng.CloseModal(panel)
 }
 ```
+
+`Window.OnClose` / `Window.OnMinimize` / `Window.OnMaximize`, by contrast,
+follow Windows semantics: pressing a title button **arms** it, and the callback
+fires on **release** only if the cursor is still over the same button.
+Releasing off the button (or moving away first) cancels the action without
+firing. This lets a user abort a close/minimize/maximize by dragging away.
 
 ### DrawContext is Only Valid Inside Draw()
 

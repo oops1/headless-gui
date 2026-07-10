@@ -114,6 +114,13 @@ type Window struct {
 	// в заголовке окна. По умолчанию true; отключаемое свойство.
 	ShowLocaleIndicator bool
 
+	// MainWindow — является ли окно «главным». У главного окна во всех темах,
+	// кроме классической Win2000 (Classic3D), рисуется контрастная XOR-рамка
+	// 1px (инверсия фона окна) — чтобы границы были видны на фоне канваса
+	// того же тона. По умолчанию true; для вложенных окон в XAML задаётся
+	// MainWindow="False".
+	MainWindow bool
+
 	// inactive — окно без фокуса ОС: заголовок рисуется приглушённым
 	// (Win2000 — серый градиент, Mac — серые «светофоры», прочие — dim).
 	// Zero value = активно; хранится инвертированно.
@@ -124,11 +131,15 @@ type Window struct {
 
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
-	// OnClose вызывается при клике по кнопке закрытия (×).
+	// OnClose вызывается при ОТПУСКАНИИ кнопки закрытия (×), если курсор всё
+	// ещё над ней (Windows-семантика: нажатие «взводит» кнопку, отпускание
+	// в стороне отменяет действие).
 	OnClose func()
-	// OnMinimize вызывается при клике по кнопке сворачивания (─).
+	// OnMinimize вызывается при ОТПУСКАНИИ кнопки сворачивания (─), если
+	// курсор всё ещё над ней. См. OnClose.
 	OnMinimize func()
-	// OnMaximize вызывается при клике по кнопке развёртывания (□).
+	// OnMaximize вызывается при ОТПУСКАНИИ кнопки развёртывания (□), если
+	// курсор всё ещё над ней. См. OnClose.
 	OnMaximize func()
 
 	// ── Drag окна (для borderless-режима) ───────────────────────────────────
@@ -143,6 +154,18 @@ type Window struct {
 	dragStartY int
 	dragWinX   int // позиция окна при начале drag (для headless self-drag)
 	dragWinY   int
+
+	// ── Resize перетаскиванием краёв (для «виртуальных» окон на канвасе) ─────
+	resizing     bool           // идёт ли изменение размера за край
+	resizeDir    winEdge        // направление(я) активного ресайза (битовая маска)
+	resizeStart  image.Rectangle // bounds окна на момент начала ресайза
+	resizeStartX int            // координаты мыши на момент начала ресайза
+	resizeStartY int
+
+	// ── Взведённая кнопка заголовка (release-семантика) ─────────────────────
+	// armedBtn — какая кнопка управления «взведена» нажатием; колбэк вызывается
+	// на отпускании, только если курсор всё ещё над ней.
+	armedBtn titleButton
 
 	// capMgr — CaptureManager для корректного освобождения захвата мыши.
 	capMgr CaptureManager
@@ -171,6 +194,7 @@ func NewWindow(title string, width, height int) *Window {
 		Background:          win10.WindowBG,
 		BorderColor:         win10.Border,
 		ShowLocaleIndicator: true,
+		MainWindow:          true,
 	}
 	w.SetBounds(image.Rect(0, 0, width, height))
 	return w
@@ -320,6 +344,35 @@ const (
 	macStartX   = 18 // отступ первого кружка от левого края
 	macSpacing  = 22 // расстояние между центрами кружков
 	macHitSlop  = 10 // допуск клика по кружку
+)
+
+// ─── Resize перетаскиванием краёв ───────────────────────────────────────────
+
+// winEdge — битовая маска задействованных краёв при ресайзе (8 направлений).
+type winEdge int
+
+const (
+	edgeNone winEdge = 0
+	edgeN    winEdge = 1 << iota // верхний край
+	edgeS                        // нижний край
+	edgeW                        // левый край
+	edgeE                        // правый край
+)
+
+const (
+	winResizeBorder = 6   // ширина полосы-захвата вдоль каждого края, px
+	winMinW         = 120 // минимальная ширина окна при ресайзе, px
+	winMinH         = 80  // минимальная высота окна при ресайзе, px
+)
+
+// titleButton — «взведённая» кнопка заголовка (release-семантика).
+type titleButton int
+
+const (
+	titleBtnNone titleButton = iota
+	titleBtnClose
+	titleBtnMin
+	titleBtnMax
 )
 
 // btnWidth возвращает ширину одной кнопки управления для Windows-стиля.
@@ -474,7 +527,18 @@ func (w *Window) Draw(ctx DrawContext) {
 			// Рамка неактивного окна светлее (как в Win11).
 			bc = mixRGBA(bc, w.Background, 0.5)
 		}
-		if cr > 0 {
+		// Главное окно в не-классических темах: контрастная XOR-рамка по всему
+		// периметру вместо обычной (на светлом фоне канваса светлая рамка окна
+		// сливалась бы). Классика Win2000 (Classic3D) имеет собственную bevel-
+		// рамку — её не трогаем.
+		if w.MainWindow && !currentStyle().Classic3D {
+			xc := xorBorderColor(w.xorBorderBase())
+			if cr > 0 {
+				ctx.DrawRoundBorder(x, y, bw, bh, cr, xc)
+			} else {
+				ctx.DrawBorder(x, y, bw, bh, xc)
+			}
+		} else if cr > 0 {
 			ctx.DrawRoundBorder(x, y, bw, bh, cr, bc)
 		} else {
 			// Левая, правая и нижняя линии (без верхней — там заголовок)
@@ -712,28 +776,138 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 
 // ─── Drag / Capture ─────────────────────────────────────────────────────────
 
-// WantsCapture возвращает true при клике в drag-зону заголовка.
-// Это позволяет движку захватить мышь для Window (аналогично Panel.WantsCapture).
+// WantsCapture возвращает true при клике в зоны, требующие захвата мыши:
+// кнопки управления (release-семантика — нужен release даже если курсор
+// ушёл с кнопки), полосы ресайза по краям и drag-зона заголовка.
+// Захват позволяет движку доставлять move/release только этому Window.
 func (w *Window) WantsCapture(e MouseEvent) bool {
 	if w.Style == WindowStyleNone {
 		return false
 	}
+	if e.Button != MouseLeft {
+		return false
+	}
 	pt := image.Pt(e.X, e.Y)
+	// Кнопки управления — захватываем ради release (arm → fire/cancel).
+	if pt.In(w.CloseBtnRect()) {
+		return true
+	}
+	if r := w.MinBtnRect(); !r.Empty() && pt.In(r) {
+		return true
+	}
+	if r := w.MaxBtnRect(); !r.Empty() && pt.In(r) {
+		return true
+	}
+	// Полоса ресайза по краю окна (приоритетнее drag заголовка в верхней зоне).
+	if w.resizeEdgeAt(e.X, e.Y) != edgeNone {
+		return true
+	}
+	// Drag за заголовок.
 	tb := w.titleBarRect()
 	if tb.Empty() || !pt.In(tb) {
 		return false
 	}
-	// Не захватываем если клик по кнопкам управления
-	if pt.In(w.CloseBtnRect()) {
-		return false
-	}
-	if r := w.MinBtnRect(); !r.Empty() && pt.In(r) {
-		return false
-	}
-	if r := w.MaxBtnRect(); !r.Empty() && pt.In(r) {
-		return false
-	}
 	return true
+}
+
+// ─── Resize перетаскиванием краёв ───────────────────────────────────────────
+
+// edgeResizeEnabled сообщает, разрешён ли ресайз перетаскиванием краёв.
+// Только для «виртуальных» окон на канвасе (headless): в нативном режиме
+// размер меняет ОС (window.Window выставляет OnDragMove), и виджетный ресайз
+// краёв конфликтовал бы с нативным. Запрещён для NoResize/CanMinimize и
+// borderless-окон (WindowStyleNone).
+func (w *Window) edgeResizeEnabled() bool {
+	return w.Resize == ResizeModeCanResize &&
+		w.Style != WindowStyleNone &&
+		w.OnDragMove == nil
+}
+
+// resizeEdgeAt возвращает край(а) окна под точкой (x, y) для ресайза —
+// полоса шириной winResizeBorder вдоль каждой границы bounds, включая углы
+// (комбинация двух краёв). edgeNone — точка вне зоны ресайза или ресайз
+// запрещён.
+func (w *Window) resizeEdgeAt(x, y int) winEdge {
+	if !w.edgeResizeEnabled() {
+		return edgeNone
+	}
+	b := w.Bounds()
+	if !image.Pt(x, y).In(b) {
+		return edgeNone
+	}
+	const m = winResizeBorder
+	var e winEdge
+	if x < b.Min.X+m {
+		e |= edgeW
+	}
+	if x >= b.Max.X-m {
+		e |= edgeE
+	}
+	if y < b.Min.Y+m {
+		e |= edgeN
+	}
+	if y >= b.Max.Y-m {
+		e |= edgeS
+	}
+	return e
+}
+
+// Cursor реализует CursorProvider: над полосой ресайза возвращает
+// соответствующий resize-курсор, иначе обычную стрелку.
+func (w *Window) Cursor(x, y int) Cursor {
+	switch w.resizeEdgeAt(x, y) {
+	case edgeN, edgeS:
+		return CursorSizeNS
+	case edgeW, edgeE:
+		return CursorSizeWE
+	case edgeN | edgeW, edgeS | edgeE:
+		return CursorSizeNWSE
+	case edgeN | edgeE, edgeS | edgeW:
+		return CursorSizeNESW
+	}
+	return CursorArrow
+}
+
+// applyResize пересчитывает bounds окна по стартовому прямоугольнику и текущей
+// дельте мыши, уважая минимальный размер (winMinW×winMinH). Опорный прямоуголь-
+// ник фиксирован (resizeStart) — накопления ошибки нет.
+func (w *Window) applyResize(x, y int) {
+	b := w.resizeStart
+	nx0, ny0, nx1, ny1 := b.Min.X, b.Min.Y, b.Max.X, b.Max.Y
+	dx := x - w.resizeStartX
+	dy := y - w.resizeStartY
+	if w.resizeDir&edgeW != 0 {
+		nx0 = b.Min.X + dx
+	}
+	if w.resizeDir&edgeE != 0 {
+		nx1 = b.Max.X + dx
+	}
+	if w.resizeDir&edgeN != 0 {
+		ny0 = b.Min.Y + dy
+	}
+	if w.resizeDir&edgeS != 0 {
+		ny1 = b.Max.Y + dy
+	}
+	// Минимальная ширина: не даём схлопнуть окно, тянем «неподвижный» край.
+	if nx1-nx0 < winMinW {
+		if w.resizeDir&edgeW != 0 {
+			nx0 = nx1 - winMinW
+		} else {
+			nx1 = nx0 + winMinW
+		}
+	}
+	if ny1-ny0 < winMinH {
+		if w.resizeDir&edgeN != 0 {
+			ny0 = ny1 - winMinH
+		} else {
+			ny1 = ny0 + winMinH
+		}
+	}
+	nb := image.Rect(nx0, ny0, nx1, ny1)
+	if nb != w.Bounds() {
+		// Window.SetBounds сам пересчитает ContentBounds → дочерние виджеты.
+		w.SetBounds(nb)
+	}
 }
 
 // SetCaptureManager сохраняет CaptureManager для освобождения захвата при отпускании.
@@ -743,8 +917,15 @@ func (w *Window) SetCaptureManager(cm CaptureManager) {
 
 // ─── Mouse events ───────────────────────────────────────────────────────────
 
-// OnMouseMove обновляет hover-состояние кнопок заголовка и обрабатывает drag.
+// OnMouseMove обновляет hover-состояние кнопок заголовка и обрабатывает
+// drag/resize.
 func (w *Window) OnMouseMove(x, y int) {
+	// Изменение размера за край окна
+	if w.resizing {
+		w.applyResize(x, y)
+		return
+	}
+
 	// Drag за заголовок
 	if w.dragging {
 		dx := x - w.dragStartX
@@ -818,8 +999,16 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 	}
 	pt := image.Pt(e.X, e.Y)
 
-	// Отпускание кнопки — прекращаем drag
+	// Отпускание кнопки — завершаем resize / drag / arm.
 	if !e.Pressed {
+		if w.resizing {
+			w.resizing = false
+			w.resizeDir = edgeNone
+			if w.capMgr != nil {
+				w.capMgr.ReleaseCapture()
+			}
+			return true
+		}
 		if w.dragging {
 			w.dragging = false
 			if w.capMgr != nil {
@@ -827,26 +1016,71 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 			}
 			return true
 		}
+		// Взведённая кнопка заголовка: колбэк только если курсор всё ещё над
+		// той же кнопкой (release в стороне — отмена без вызова).
+		if w.armedBtn != titleBtnNone {
+			armed := w.armedBtn
+			w.armedBtn = titleBtnNone
+			over := false
+			switch armed {
+			case titleBtnClose:
+				over = pt.In(w.CloseBtnRect())
+			case titleBtnMin:
+				if r := w.MinBtnRect(); !r.Empty() {
+					over = pt.In(r)
+				}
+			case titleBtnMax:
+				if r := w.MaxBtnRect(); !r.Empty() {
+					over = pt.In(r)
+				}
+			}
+			if w.capMgr != nil {
+				w.capMgr.ReleaseCapture()
+			}
+			if over {
+				switch armed {
+				case titleBtnClose:
+					if w.OnClose != nil {
+						w.OnClose()
+					}
+				case titleBtnMin:
+					if w.OnMinimize != nil {
+						w.OnMinimize()
+					}
+				case titleBtnMax:
+					if w.OnMaximize != nil {
+						w.OnMaximize()
+					}
+				}
+			}
+			return true
+		}
 		return false
 	}
 
-	// Нажатие — проверяем кнопки управления
+	// Нажатие — «взводим» кнопки управления (колбэк на release).
 	if pt.In(w.CloseBtnRect()) {
-		if w.OnClose != nil {
-			w.OnClose()
-		}
+		w.armedBtn = titleBtnClose
 		return true
 	}
 	if r := w.MinBtnRect(); !r.Empty() && pt.In(r) {
-		if w.OnMinimize != nil {
-			w.OnMinimize()
-		}
+		w.armedBtn = titleBtnMin
 		return true
 	}
 	if r := w.MaxBtnRect(); !r.Empty() && pt.In(r) {
-		if w.OnMaximize != nil {
-			w.OnMaximize()
-		}
+		w.armedBtn = titleBtnMax
+		return true
+	}
+
+	// Нажатие в полосу ресайза по краю — начинаем изменение размера
+	// (проверяется до drag заголовка: верхняя 6px-зона — resize, ниже — drag).
+	if dir := w.resizeEdgeAt(e.X, e.Y); dir != edgeNone {
+		DismissAll(w) // закрываем dropdown/popup перед resize
+		w.resizing = true
+		w.resizeDir = dir
+		w.resizeStart = w.Bounds()
+		w.resizeStartX = e.X
+		w.resizeStartY = e.Y
 		return true
 	}
 
@@ -1005,6 +1239,21 @@ func (w *Window) resolveColor(c, fallback color.RGBA) color.RGBA {
 		return c
 	}
 	return fallback
+}
+
+// xorBorderColor возвращает XOR-инверсию цвета фона (побитовое НЕ каждого
+// канала, alpha = 255). Чистая функция — гарантирует контраст рамки с фоном.
+func xorBorderColor(bg color.RGBA) color.RGBA {
+	return color.RGBA{R: ^bg.R, G: ^bg.G, B: ^bg.B, A: 255}
+}
+
+// xorBorderBase возвращает фактический фон окна для расчёта XOR-рамки.
+// Если фон окна полупрозрачный/нулевой (A == 0) — фолбэк на WindowBG темы.
+func (w *Window) xorBorderBase() color.RGBA {
+	if w.Background.A == 0 {
+		return win10.WindowBG
+	}
+	return w.Background
 }
 
 // fillCircle рисует закрашенный круг (для traffic lights).

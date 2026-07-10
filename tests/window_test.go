@@ -114,20 +114,51 @@ func TestWindowBtnCount(t *testing.T) {
 
 // ─── Mouse click: close / minimize / maximize ───────────────────────────────
 
+// rectCenter возвращает центр прямоугольника.
+func rectCenter(r image.Rectangle) (int, int) {
+	return (r.Min.X + r.Max.X) / 2, (r.Min.Y + r.Max.Y) / 2
+}
+
+// pressRelease эмулирует полный клик ЛКМ (press + release) в точке.
+func pressRelease(w *widget.Window, x, y int) {
+	w.OnMouseButton(widget.MouseEvent{X: x, Y: y, Button: widget.MouseLeft, Pressed: true})
+	w.OnMouseButton(widget.MouseEvent{X: x, Y: y, Button: widget.MouseLeft, Pressed: false})
+}
+
 func TestWindowCloseClick(t *testing.T) {
 	w := widget.NewWindow("Test", 800, 600)
 	closed := false
 	w.OnClose = func() { closed = true }
 
-	// Кликаем в центр кнопки закрытия (Win-стиль: правый верхний угол)
-	cr := w.CloseBtnRect()
-	cx := (cr.Min.X + cr.Max.X) / 2
-	cy := (cr.Min.Y + cr.Max.Y) / 2
-	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	// Полный клик (press+release) в центр кнопки закрытия.
+	cx, cy := rectCenter(w.CloseBtnRect())
+	pressRelease(w, cx, cy)
 
 	if !closed {
 		t.Fatal("OnClose not called after clicking close button")
 	}
+}
+
+// TestWindowClose_PressOnly_NoCallback — на одном press колбэк НЕ вызывается
+// (release-семантика Windows).
+func TestWindowClose_PressOnly_NoCallback(t *testing.T) {
+	w := widget.NewWindow("Test", 800, 600)
+	w.OnClose = func() { t.Fatal("OnClose should not fire on press alone") }
+
+	cx, cy := rectCenter(w.CloseBtnRect())
+	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+}
+
+// TestWindowClose_ReleaseOutside_Cancels — press на кнопке, release в стороне:
+// колбэк НЕ вызывается (действие отменено).
+func TestWindowClose_ReleaseOutside_Cancels(t *testing.T) {
+	w := widget.NewWindow("Test", 800, 600)
+	w.OnClose = func() { t.Fatal("OnClose should not fire when released off the button") }
+
+	cx, cy := rectCenter(w.CloseBtnRect())
+	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	// Отпускаем в центре клиентской области — вне кнопки.
+	w.OnMouseButton(widget.MouseEvent{X: 400, Y: 300, Button: widget.MouseLeft, Pressed: false})
 }
 
 func TestWindowMinimizeClick(t *testing.T) {
@@ -140,9 +171,8 @@ func TestWindowMinimizeClick(t *testing.T) {
 	if mr.Empty() {
 		t.Fatal("minBtnRect should not be empty for CanResize")
 	}
-	cx := (mr.Min.X + mr.Max.X) / 2
-	cy := (mr.Min.Y + mr.Max.Y) / 2
-	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	cx, cy := rectCenter(mr)
+	pressRelease(w, cx, cy)
 
 	if !minimized {
 		t.Fatal("OnMinimize not called after clicking min button")
@@ -159,13 +189,32 @@ func TestWindowMaximizeClick(t *testing.T) {
 	if mr.Empty() {
 		t.Fatal("maxBtnRect should not be empty for CanResize")
 	}
-	cx := (mr.Min.X + mr.Max.X) / 2
-	cy := (mr.Min.Y + mr.Max.Y) / 2
-	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	cx, cy := rectCenter(mr)
+	pressRelease(w, cx, cy)
 
 	if !maximized {
 		t.Fatal("OnMaximize not called after clicking max button")
 	}
+}
+
+// TestWindowMinimize_ReleaseOutside_Cancels — отмена уходом для кнопки ─.
+func TestWindowMinimize_ReleaseOutside_Cancels(t *testing.T) {
+	w := widget.NewWindow("Test", 800, 600)
+	w.OnMinimize = func() { t.Fatal("OnMinimize should not fire when released off the button") }
+
+	cx, cy := rectCenter(w.MinBtnRect())
+	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	w.OnMouseButton(widget.MouseEvent{X: 400, Y: 300, Button: widget.MouseLeft, Pressed: false})
+}
+
+// TestWindowMaximize_ReleaseOutside_Cancels — отмена уходом для кнопки □.
+func TestWindowMaximize_ReleaseOutside_Cancels(t *testing.T) {
+	w := widget.NewWindow("Test", 800, 600)
+	w.OnMaximize = func() { t.Fatal("OnMaximize should not fire when released off the button") }
+
+	cx, cy := rectCenter(w.MaxBtnRect())
+	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	w.OnMouseButton(widget.MouseEvent{X: 400, Y: 300, Button: widget.MouseLeft, Pressed: false})
 }
 
 func TestWindowClickOutsideButtons(t *testing.T) {
@@ -183,10 +232,8 @@ func TestWindowMacStyle_CloseClick(t *testing.T) {
 	closed := false
 	w.OnClose = func() { closed = true }
 
-	cr := w.CloseBtnRect()
-	cx := (cr.Min.X + cr.Max.X) / 2
-	cy := (cr.Min.Y + cr.Max.Y) / 2
-	w.OnMouseButton(widget.MouseEvent{X: cx, Y: cy, Button: widget.MouseLeft, Pressed: true})
+	cx, cy := rectCenter(w.CloseBtnRect())
+	pressRelease(w, cx, cy)
 
 	if !closed {
 		t.Fatal("OnClose not called for Mac-style close button")
@@ -310,6 +357,26 @@ func TestXAMLWindow_ResizeMode(t *testing.T) {
 		if w.Resize != tt.want {
 			t.Fatalf("ResizeMode = %d, want %d for xml: %s", w.Resize, tt.want, tt.xml)
 		}
+	}
+}
+
+func TestXAMLWindow_MainWindow(t *testing.T) {
+	// По умолчанию — главное окно.
+	root, _, err := widget.LoadUIFromXAML([]byte(`<Window Width="100" Height="100"/>`))
+	if err != nil {
+		t.Fatalf("LoadUIFromXAML: %v", err)
+	}
+	if !root.(*widget.Window).MainWindow {
+		t.Fatal("MainWindow по умолчанию должно быть true")
+	}
+
+	// Явно MainWindow="False".
+	root, _, err = widget.LoadUIFromXAML([]byte(`<Window Width="100" Height="100" MainWindow="False"/>`))
+	if err != nil {
+		t.Fatalf("LoadUIFromXAML: %v", err)
+	}
+	if root.(*widget.Window).MainWindow {
+		t.Fatal("MainWindow=\"False\" должно отключать флаг")
 	}
 }
 
