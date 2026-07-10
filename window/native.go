@@ -116,6 +116,7 @@ const (
 	VK_UP        = 0x26
 	VK_RIGHT     = 0x27
 	VK_DOWN      = 0x28
+	VK_INSERT    = 0x2D
 	VK_DELETE    = 0x2E
 	VK_HOME      = 0x24
 	VK_END       = 0x23

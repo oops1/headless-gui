@@ -715,6 +715,8 @@ func vkToKeyCode(vk int) widget.KeyCode {
 		return widget.KeyRight
 	case VK_DOWN:
 		return widget.KeyDown
+	case VK_INSERT:
+		return widget.KeyInsert
 	case VK_DELETE:
 		return widget.KeyDelete
 	case VK_HOME:

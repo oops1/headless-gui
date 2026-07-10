@@ -695,6 +695,8 @@ func cocoaKeyCodeToVK(keyCode int) int {
 		return VK_DOWN
 	case 117:
 		return VK_DELETE
+	case 114: // Mac-клавиатуры не имеют Insert; клавиша Help — best-effort маппинг
+		return VK_INSERT
 	case 115:
 		return VK_HOME
 	case 119:

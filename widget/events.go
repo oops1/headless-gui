@@ -56,6 +56,7 @@ const (
 	KeyUp        KeyCode = 38
 	KeyRight     KeyCode = 39
 	KeyDown      KeyCode = 40
+	KeyInsert    KeyCode = 45
 	KeyDelete    KeyCode = 46
 	KeyEnd       KeyCode = 35
 	KeyA         KeyCode = 65

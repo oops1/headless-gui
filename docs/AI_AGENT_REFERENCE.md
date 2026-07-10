@@ -890,6 +890,7 @@ const (
     KeyUp        KeyCode = 38
     KeyRight     KeyCode = 39
     KeyDown      KeyCode = 40
+    KeyInsert    KeyCode = 45
     KeyDelete    KeyCode = 46
     KeyEnd       KeyCode = 35
     KeyA...KeyZ  KeyCode = 65...90
@@ -2423,6 +2424,32 @@ rect — иначе частичная перерисовка заморозит
 именует их сквозным seq → в on-demand нумерация С ДЫРКАМИ. «Последний
 кадр» ищи через ReadDir + максимальное имя, НЕ перебором от 1 до первого
 отсутствующего.
+
+---
+
+## v3.9 additions (old-school clipboard keys + Win2000 chrome)
+
+Text editing (`TextInput` и `TextBox`) теперь понимает «старошкольные»
+клавиши буфера обмена и удаление слова:
+
+- **Ctrl+Insert** = копировать (алиас Ctrl+C; в password-режиме запрещено).
+- **Shift+Insert** = вставить (алиас Ctrl+V; при `ReadOnly` у TextBox запрещено).
+- **Shift+Delete** = вырезать (алиас Ctrl+X) — приоритетнее обычного Delete;
+  password/ReadOnly блокируют.
+- **Ctrl+Delete** = удалить слово ВПЕРЁД от каретки.
+- **Ctrl+Backspace** = удалить слово НАЗАД от каретки.
+
+Новый код клавиши: `KeyInsert = 45`, замаплен во ВСЕХ бэкендах
+(`VK_INSERT=0x2D`; X11 keycode 118; на macOS — best-effort через Help=114).
+Undo-история и `OnChange` работают как у обычных правок.
+
+Классический chrome окна (Win2000): в классике введена ЭФФЕКТИВНАЯ высота
+заголовка `Window.effTitleH()` (24px вместо полных 32) — вся геометрия
+классики (titleBarRect, кнопки, локаль-бейдж, текст, ContentBounds) считается
+от неё, поэтому титлбар и кнопки (side = effTitleH-6 = 18px) компактнее и
+ближе к референсу. Хром-рамка (толстая 3D в классике; 1px XOR-рамка главного
+окна в современных темах) рисуется ПОСЛЕ детей — контент с абсолютными
+координатами больше не «замазывает» полосу рамки.
 
 ---
 

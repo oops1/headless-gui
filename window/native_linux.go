@@ -909,6 +909,8 @@ func x11KeycodeToVK(keycode int) int {
 		return VK_DOWN
 	case 119:
 		return VK_DELETE
+	case 118: // evdev KEY_INSERT=110, +8 = 118 (не путать с 112/117 PgUp/PgDn)
+		return VK_INSERT
 	case 110:
 		return VK_HOME
 	case 115:
