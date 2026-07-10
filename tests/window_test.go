@@ -130,6 +130,39 @@ func TestWindowContentBounds_Classic3D(t *testing.T) {
 	}
 }
 
+// TestWindowApplyTheme_RelayoutsChildren — смена темы меняет клиентскую
+// область (классика: рамка 5px + титлбар 24 против 1px + 32 в модерне),
+// поэтому ApplyTheme обязан переложить детей. Без этого после переключения
+// на Win2000 контент до первого ресайза налезал на титлбар и рамку.
+func TestWindowApplyTheme_RelayoutsChildren(t *testing.T) {
+	widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+
+	w := widget.NewWindow("Theme", 800, 600)
+	c := widget.NewCanvas()
+	w.AddChild(c)
+	w.SetBounds(image.Rect(0, 0, 800, 600))
+	if got, want := c.Bounds(), w.ContentBounds(); got != want {
+		t.Fatalf("до смены темы ребёнок = %v, want %v", got, want)
+	}
+
+	classic := widget.ThemeByName("Win2000")
+	widget.ApplyGlobalTheme(classic)
+	widget.ApplyThemeTree(w, classic)
+	want := image.Rect(5, 5+24, 795, 595) // frameW=5, effTitleH=24
+	if got := c.Bounds(); got != want {
+		t.Fatalf("после Win2000 ребёнок = %v, want %v (контент не переложен)", got, want)
+	}
+
+	modern := widget.ThemeByName("Win10 Dark")
+	widget.ApplyGlobalTheme(modern)
+	widget.ApplyThemeTree(w, modern)
+	want = image.Rect(1, 32, 799, 599) // frameW=1, titleH=32
+	if got := c.Bounds(); got != want {
+		t.Fatalf("после возврата в модерн ребёнок = %v, want %v", got, want)
+	}
+}
+
 // TestWindowClassicButtons_InsideFrame — кнопки ─ □ × расположены внутри
 // рамки (не выходят за её правый/верхний край) и упорядочены слева направо.
 func TestWindowClassicButtons_InsideFrame(t *testing.T) {
