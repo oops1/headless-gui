@@ -96,6 +96,12 @@ type Dialog struct {
 	// контракту движка: показывает/закрывает один и тот же диалог не более
 	// одного раза одновременно).
 	fadeAnim *Animation
+
+	// ── Перетаскивание за заголовок (как у Window/Panel) ────────────────────
+	dragging   bool
+	dragLastX  int
+	dragLastY  int
+	capMgr     CaptureManager
 }
 
 // OnLanguageChange регистрирует применение перевода при смене языка
@@ -324,6 +330,69 @@ func (d *Dialog) ApplyTheme(t *Theme) {
 	d.BorderColor = t.Border
 	d.Dim = t.DialogDim
 	d.Shadow = t.ShadowColor
+}
+
+// ─── Перетаскивание за заголовок ─────────────────────────────────────────────
+
+// SetCaptureManager инжектит менеджер захвата мыши (движок вызывает при
+// ShowModal через injectCaptureManager).
+func (d *Dialog) SetCaptureManager(cm CaptureManager) { d.capMgr = cm }
+
+// titleDragRect — зона заголовка, за которую диалог таскается
+// (титлбар без кнопки ✕).
+func (d *Dialog) titleDragRect() image.Rectangle {
+	b := d.bounds
+	r := image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+d.TitleHeight)
+	if d.ShowCloseButton && d.closeBtn != nil {
+		r.Max.X = d.closeBtn.Bounds().Min.X
+	}
+	return r
+}
+
+// WantsCapture — захватываем мышь при нажатии на заголовок (drag).
+func (d *Dialog) WantsCapture(e MouseEvent) bool {
+	return e.Button == MouseLeft && e.Pressed && image.Pt(e.X, e.Y).In(d.titleDragRect())
+}
+
+// OnMouseButton начинает/заканчивает перетаскивание за заголовок.
+func (d *Dialog) OnMouseButton(e MouseEvent) bool {
+	if e.Button != MouseLeft {
+		return false
+	}
+	if !e.Pressed {
+		if d.dragging {
+			d.dragging = false
+			if d.capMgr != nil {
+				d.capMgr.ReleaseCapture()
+			}
+			return true
+		}
+		return false
+	}
+	if image.Pt(e.X, e.Y).In(d.titleDragRect()) {
+		DismissAll(d) // закрываем dropdown/popup внутри диалога перед drag
+		d.dragging = true
+		d.dragLastX = e.X
+		d.dragLastY = e.Y
+		return true
+	}
+	return false
+}
+
+// OnMouseMove перемещает диалог вместе с детьми, пока идёт drag.
+// Тень рисуется ЗА пределами bounds, а точечная инвалидация клипует по
+// damage — поэтому на каждый шаг инвалидируем весь кадр (drag редок).
+func (d *Dialog) OnMouseMove(x, y int) {
+	if !d.dragging {
+		return
+	}
+	dx, dy := x-d.dragLastX, y-d.dragLastY
+	if dx == 0 && dy == 0 {
+		return
+	}
+	d.dragLastX, d.dragLastY = x, y
+	ShiftWidget(d, dx, dy)
+	notifyUIChanged()
 }
 
 // ─── Кнопка ✕ в заголовке ───────────────────────────────────────────────────

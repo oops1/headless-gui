@@ -310,3 +310,38 @@ func TestDialog_CloseButtonCancels(t *testing.T) {
 		t.Fatalf("close-btn должен отменять: called=%v ok=%v", called, gotOK)
 	}
 }
+
+// Диалог таскается за заголовок: press на титлбаре + move сдвигает диалог
+// вместе с детьми; кнопка ✕ после перетаскивания работает по новой позиции.
+func TestDialog_DragByTitleBar(t *testing.T) {
+	eng := newDialogEngine()
+	mb := widget.NewMessageBox(eng)
+	canceled := false
+	id := mb.ShowInput("", "name:", "abc", nil, func(_ string, ok bool) { canceled = !ok })
+	dlg := id.Dialog()
+	before := dlg.Bounds()
+	okBtnBefore := findButton(dlg).Bounds() // первая *Button = OK
+
+	// Тянем за середину заголовка на (+60, +40).
+	sx, sy := before.Min.X+40, before.Min.Y+12
+	eng.SendMouseButton(sx, sy, widget.MouseLeft, true)
+	eng.SendMouseMove(sx+60, sy+40)
+	eng.SendMouseButton(sx+60, sy+40, widget.MouseLeft, false)
+
+	after := dlg.Bounds()
+	if after.Min.X != before.Min.X+60 || after.Min.Y != before.Min.Y+40 {
+		t.Fatalf("диалог не сдвинулся: %v → %v", before, after)
+	}
+	okBtnAfter := findButton(dlg).Bounds()
+	if okBtnAfter.Min.X != okBtnBefore.Min.X+60 || okBtnAfter.Min.Y != okBtnBefore.Min.Y+40 {
+		t.Fatalf("дети не сдвинулись: %v → %v", okBtnBefore, okBtnAfter)
+	}
+
+	// ✕ по НОВОЙ позиции закрывает с отменой.
+	cx, cy := after.Max.X-18, after.Min.Y+17
+	eng.SendMouseButton(cx, cy, widget.MouseLeft, true)
+	eng.SendMouseButton(cx, cy, widget.MouseLeft, false)
+	if !canceled {
+		t.Fatal("✕ по новой позиции не сработал")
+	}
+}
