@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -53,10 +54,13 @@ const (
 	wmSyscommand  = 0x0112
 	wmNccalcsize  = 0x0083
 	wmNchittest   = 0x0084
+	wmGetminmaxinfo = 0x0024
 	wmNcactivate  = 0x0086
 	wmNcpaint     = 0x0085
 	wmDpichanged  = 0x02E0
 	wmGetdpiscaledsize = 0x02E4
+	wmEntersizemove = 0x0231 // начало интерактивного перемещения/ресайза (modal loop)
+	wmExitsizemove  = 0x0232 // конец интерактивного перемещения/ресайза
 
 	// ShowWindow commands
 	swMinimize  = 6
@@ -66,6 +70,20 @@ const (
 
 	// WM_SIZE params
 	sizeMaximized = 2
+
+	// WM_NCHITTEST: коды зон окна (рамка resize).
+	htClient      = 1
+	htLeft        = 10
+	htRight       = 11
+	htTop         = 12
+	htTopLeft     = 13
+	htTopRight    = 14
+	htBottom      = 15
+	htBottomLeft  = 16
+	htBottomRight = 17
+
+	// Ширина невидимой resize-рамки borderless-окна (физ. пиксели).
+	ncResizeBorder = 8
 
 	// WM_SYSCOMMAND
 	scMinimize = 0xF020
@@ -89,9 +107,11 @@ const (
 	// Cursors (IDC_*)
 	idcArrow  = 32512
 	idcIBeam  = 32513
-	idcSizeNS = 32645
-	idcSizeWE = 32644
-	idcHand   = 32649
+	idcSizeNS   = 32645
+	idcSizeWE   = 32644
+	idcSizeNWSE = 32642
+	idcSizeNESW = 32643
+	idcHand     = 32649
 
 	// WM_SETCURSOR
 	wmSetcursor = 0x0020
@@ -245,6 +265,10 @@ type Win32Window struct {
 
 	maximized bool
 
+	// resizable — разрешён ли пользовательский resize за края окна
+	// (см. WM_NCHITTEST: у borderless-окна зоны рамки отдаём вручную).
+	resizable atomic.Bool
+
 	// cornerRadius — радиус скругления углов окна (0 = прямые). Реализуется
 	// через регион окна (SetWindowRgn), переприменяется при resize.
 	cornerRadius int
@@ -255,8 +279,19 @@ type Win32Window struct {
 	// (иначе WM_LBUTTONUP пролетает в окно ОС под курсором).
 	pendingClose bool
 
+	// resizing — идёт интерактивный ресайз за рамку (между WM_ENTERSIZEMOVE и
+	// WM_EXITSIZEMOVE). Пока флаг взведён, движку НЕ пересоздаём канвас на каждый
+	// WM_SIZE (дорого + мигает): вместо этого растягиваем последний кадр из кэша
+	// (frameBuf), а чёткую перерисовку делаем один раз на WM_EXITSIZEMOVE.
+	resizing atomic.Bool
+
+	// minW/minH — минимальный размер окна В ФИЗИЧЕСКИХ пикселях (учёт HiDPI-scale
+	// делает вызывающая сторона). 0 → дефолт 320×240. Отдаётся в WM_GETMINMAXINFO.
+	minW, minH int
+
 	mu      sync.Mutex
 	frameBuf []byte // BGRA пиксели для StretchDIBits (перевёрнуто по Y)
+	bufW, bufH int  // размер кадра, лежащего в frameBuf (для растянутого блита)
 
 	cursorHandle uintptr            // текущий желаемый курсор (HCURSOR)
 	cursorCache  map[int]uintptr    // кэш загруженных IDC-курсоров
@@ -281,6 +316,10 @@ func NewNativeWindow() NativeWindow {
 	return &Win32Window{}
 }
 
+// SetResizable включает/выключает пользовательский resize за края
+// (реализован через WM_NCHITTEST — см. wndproc). Потокобезопасно.
+func (w *Win32Window) SetResizable(v bool) { w.resizable.Store(v) }
+
 func (w *Win32Window) Create(title string, width, height int) error {
 	runtime.LockOSThread() // Win32 UI должен работать в одном потоке
 
@@ -297,9 +336,13 @@ func (w *Win32Window) Create(title string, width, height int) error {
 	// Загружаем курсор
 	cursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
 
+	// ВАЖНО: без CS_HREDRAW|CS_VREDRAW. Эти флаги заставляют ОС инвалидировать
+	// ВСЮ клиентскую область на каждый тик ресайза (WM_SIZE сыпется по пикселю),
+	// что даёт мерцание. Мы сами закрашиваем окно в WM_SIZE (растянутый кэш кадра),
+	// поэтому полная инвалидация не нужна. CS_OWNDC оставляем (GetDC переиспользует DC).
 	wc := wndClassExW{
 		CbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
-		Style:         csHredraw | csVredraw | csOwndc,
+		Style:         csOwndc,
 		LpfnWndProc:   windows.NewCallback(wndProc),
 		HInstance:     hInst,
 		HCursor:       windows.Handle(cursor),
@@ -492,8 +535,20 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 			dst[di+3] = srcRow[si+3] // A
 		}
 	}
+	w.bufW = width
+	w.bufH = height
 	// Мьютекс удерживается до конца StretchDIBits: блит может прийти
 	// одновременно из framePump и из WM_PAINT (event loop).
+
+	// Во время интерактивного ресайза размер окна ОС уже больше/меньше нашего
+	// буфера. Обычный dirty-блит покрыл бы лишь старый прямоугольник, оставив
+	// непокрытые полосы мигать фоном. Поэтому растягиваем весь кадр на всю
+	// клиентскую область — плавно, без вспышек, до готовности чёткого кадра.
+	if w.resizing.Load() {
+		w.blitStretchedLocked()
+		w.mu.Unlock()
+		return
+	}
 
 	hdc, _, _ := procGetDC.Call(uintptr(w.hwnd))
 	if hdc == 0 {
@@ -531,6 +586,66 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 		uintptr(srccopy),
 	)
 	w.mu.Unlock()
+}
+
+// blitStretchedLocked растягивает кэшированный кадр (frameBuf, bufW×bufH) на
+// всю текущую клиентскую область окна. Вызывается С УДЕРЖАННЫМ w.mu. Якорь —
+// левый-верхний угол, масштаб COLORONCOLOR (быстрый, для интерактивного resize).
+// Непокрытых областей не остаётся: кадр растянут на всё окно, поэтому фон
+// нигде не вспыхивает, пока движок не отрисует чёткий кадр нового размера.
+func (w *Win32Window) blitStretchedLocked() {
+	if w.hwnd == 0 || len(w.frameBuf) == 0 || w.bufW <= 0 || w.bufH <= 0 {
+		return
+	}
+	var cr rect
+	procGetClientRect.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&cr)))
+	cw := int(cr.Right - cr.Left)
+	ch := int(cr.Bottom - cr.Top)
+	if cw <= 0 || ch <= 0 {
+		return
+	}
+	hdc, _, _ := procGetDC.Call(uintptr(w.hwnd))
+	if hdc == 0 {
+		return
+	}
+	defer procReleaseDC.Call(uintptr(w.hwnd), hdc)
+
+	procSetStretchBltMode.Call(hdc, 3) // COLORONCOLOR — дешёвый скейл на каждый тик
+
+	bi := bitmapInfo{
+		BmiHeader: bitmapInfoHeader{
+			BiSize:        uint32(unsafe.Sizeof(bitmapInfoHeader{})),
+			BiWidth:       int32(w.bufW),
+			BiHeight:      int32(w.bufH), // positive = bottom-up (буфер перевёрнут)
+			BiPlanes:      1,
+			BiBitCount:    32,
+			BiCompression: biRgb,
+		},
+	}
+	procStretchDIBits.Call(
+		hdc,
+		0, 0, uintptr(cw), uintptr(ch), // dst = вся клиентская область
+		0, 0, uintptr(w.bufW), uintptr(w.bufH), // src = весь кэшированный кадр
+		uintptr(unsafe.Pointer(&w.frameBuf[0])),
+		uintptr(unsafe.Pointer(&bi)),
+		uintptr(dibRgbColors),
+		uintptr(srccopy),
+	)
+}
+
+// blitCachedStretched — обёртка blitStretchedLocked с захватом мьютекса.
+func (w *Win32Window) blitCachedStretched() {
+	w.mu.Lock()
+	w.blitStretchedLocked()
+	w.mu.Unlock()
+}
+
+// SetMinSize задаёт минимальный размер окна В ФИЗИЧЕСКИХ пикселях (вызывающая
+// сторона умножает логические на HiDPI-scale). Значение отдаётся ОС в
+// WM_GETMINMAXINFO (ptMinTrackSize). 0 → дефолт 320×240.
+func (w *Win32Window) SetMinSize(width, height int) {
+	w.minW = width
+	w.minH = height
 }
 
 // SetOnExpose — колбэк перерисовки области по WM_PAINT (см. exposeNotifier).
@@ -683,6 +798,23 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		procPostQuitMessage.Call(0)
 		return 0
 
+	case wmEntersizemove:
+		// Пользователь схватил рамку — входим в модальный цикл ресайза.
+		// Дальше WM_SIZE не трогает движок, а лишь растягивает кэш кадра.
+		w.resizing.Store(true)
+		break // → DefWindowProc (штатная механика modal loop)
+
+	case wmExitsizemove:
+		// Ресайз завершён — применяем реальный размер к движку ОДИН раз
+		// (пересоздание канваса дорогое). Затем «мост» из растянутого кэша,
+		// пока движок не отдаст чёткий кадр нового размера.
+		w.resizing.Store(false)
+		if w.onResize != nil && w.width > 0 && w.height > 0 {
+			w.onResize(w.width, w.height)
+		}
+		w.blitCachedStretched()
+		break // → DefWindowProc
+
 	case wmSize:
 		newW := int(lparam & 0xFFFF)
 		newH := int((lparam >> 16) & 0xFFFF)
@@ -692,7 +824,15 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			// wparam: 2 = SIZE_MAXIMIZED, 0 = SIZE_RESTORED.
 			w.maximized = wparam == 2
 			w.applyCorners() // регион в координатах окна — пересоздаём под новый размер
-			if w.onResize != nil {
+			if w.resizing.Load() {
+				// Интерактивный ресайз: немедленно закрашиваем НОВЫЙ размер
+				// окна растянутым кэшем — не дожидаясь кадра от движка.
+				// Так непокрытые полосы не мигают фоном. SetResolution
+				// отложен до WM_EXITSIZEMOVE.
+				w.blitCachedStretched()
+			} else if w.onResize != nil {
+				// Не-интерактивный путь (maximize/restore/программный SetSize):
+				// сразу применяем размер к движку.
 				w.onResize(newW, newH)
 			}
 		}
@@ -704,6 +844,12 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		var ps paintstruct
 		procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
 		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+		if w.resizing.Load() {
+			// Во время modal resize loop свежего кадра ещё нет — рисуем из кэша
+			// растянуто на всю область (НИКОГДА не отдаём пустую отрисовку в Def).
+			w.blitCachedStretched()
+			return 0
+		}
 		if w.onExpose != nil {
 			r := image.Rect(int(ps.RcPaint.Left), int(ps.RcPaint.Top),
 				int(ps.RcPaint.Right), int(ps.RcPaint.Bottom))
@@ -735,6 +881,58 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			w.onDpiChanged(float64(newDpi) / 96.0)
 		}
 		return 0
+
+	case wmNchittest:
+		// Borderless-окно: рамки ОС нет, зоны resize отдаём вручную.
+		// lParam — ЭКРАННЫЕ координаты курсора (signed 16-bit слова).
+		if !w.resizable.Load() || w.maximized {
+			break // → DefWindowProc (HTCLIENT и т.п.)
+		}
+		sx := int(int16(lparam & 0xFFFF))
+		sy := int(int16((lparam >> 16) & 0xFFFF))
+		var wr rect
+		procGetWindowRect.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&wr)))
+		left := sx-int(wr.Left) < ncResizeBorder
+		right := int(wr.Right)-sx <= ncResizeBorder
+		top := sy-int(wr.Top) < ncResizeBorder
+		bottom := int(wr.Bottom)-sy <= ncResizeBorder
+		switch {
+		case top && left:
+			return htTopLeft
+		case top && right:
+			return htTopRight
+		case bottom && left:
+			return htBottomLeft
+		case bottom && right:
+			return htBottomRight
+		case left:
+			return htLeft
+		case right:
+			return htRight
+		case top:
+			return htTop
+		case bottom:
+			return htBottom
+		}
+		return htClient
+
+	case wmGetminmaxinfo:
+		// Минимальный размер окна при пользовательском resize.
+		// MINMAXINFO: 5×POINT; ptMinTrackSize — смещение 24 (int32-индексы 6,7).
+		// Значения — в физических пикселях (SetMinSize уже учёл HiDPI-scale).
+		if lparam != 0 {
+			minW, minH := int32(320), int32(240)
+			if w.minW > 0 {
+				minW = int32(w.minW)
+			}
+			if w.minH > 0 {
+				minH = int32(w.minH)
+			}
+			mm := (*[10]int32)(unsafe.Pointer(lparam))
+			mm[6] = minW // ptMinTrackSize.x
+			mm[7] = minH // ptMinTrackSize.y
+			return 0
+		}
 
 	case wmSetcursor:
 		// Удерживаем выбранную форму курсора в клиентской области.
@@ -918,7 +1116,8 @@ func (w *Win32Window) keyboardLayoutList() []uintptr {
 }
 
 // SetCursor задаёт форму курсора по коду widget.Cursor (0=Arrow,1=IBeam,
-// 2=Hand,3=SizeWE,4=SizeNS). Реальное применение — в WndProc (WM_SETCURSOR).
+// 2=Hand,3=SizeWE,4=SizeNS,5=SizeNWSE,6=SizeNESW). Реальное применение —
+// в WndProc (WM_SETCURSOR).
 func (w *Win32Window) SetCursor(c int) {
 	idc := idcArrow
 	switch c {
@@ -930,6 +1129,10 @@ func (w *Win32Window) SetCursor(c int) {
 		idc = idcSizeWE
 	case 4:
 		idc = idcSizeNS
+	case 5:
+		idc = idcSizeNWSE
+	case 6:
+		idc = idcSizeNESW
 	}
 	if w.cursorCache == nil {
 		w.cursorCache = map[int]uintptr{}

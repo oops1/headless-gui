@@ -404,6 +404,36 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 	if !lv.IsEnabled() {
 		return false
 	}
+
+	// Колесо мыши — прокрутка на 3 строки за тик. Поглощаем событие ТОЛЬКО
+	// при реальном сдвиге: если содержимое помещается (maxScroll==0) или мы
+	// уже у границы — возвращаем false, чтобы колесо всплыло к родительскому
+	// ScrollView и не блокировало прокрутку страницы.
+	if e.Button == MouseWheelUp || e.Button == MouseWheelDown {
+		if !e.Pressed {
+			return false
+		}
+		lv.mu.Lock()
+		if !image.Pt(e.X, e.Y).In(lv.bounds) || lv.maxScroll() == 0 {
+			lv.mu.Unlock()
+			return false
+		}
+		old := lv.scrollY
+		step := 3 * lv.ItemHeight
+		if e.Button == MouseWheelUp {
+			lv.scrollY -= step
+		} else {
+			lv.scrollY += step
+		}
+		lv.clampScroll()
+		moved := lv.scrollY != old
+		lv.mu.Unlock()
+		if moved {
+			lv.Invalidate()
+		}
+		return moved
+	}
+
 	if e.Button != MouseLeft {
 		return false
 	}
@@ -617,6 +647,13 @@ func (lv *ListView) ensureVisible(idx int) {
 		lv.scrollY = itemBot - viewH
 	}
 	lv.clampScroll()
+}
+
+// ScrollY возвращает текущее вертикальное смещение прокрутки (в пикселях).
+func (lv *ListView) ScrollY() int {
+	lv.mu.Lock()
+	defer lv.mu.Unlock()
+	return lv.scrollY
 }
 
 // ScrollBy прокручивает список на delta пикселей.

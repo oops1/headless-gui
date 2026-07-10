@@ -843,3 +843,10 @@ func (w *WaylandWindow) SetOnChar(fn func(r rune))                              
 
 // SetOnActivate — активность окна (state activated в configure).
 func (w *WaylandWindow) SetOnActivate(fn func(active bool)) { w.onActivate = fn }
+
+// SetResizable — no-op: resize у Wayland-окна управляется композитором
+// (xdg-toplevel); ручные зоны краёв пока не реализованы.
+func (w *WaylandWindow) SetResizable(v bool) {}
+
+// SetMinSize — no-op: минимальный размер окна на Wayland пока не ограничиваем.
+func (w *WaylandWindow) SetMinSize(width, height int) {}

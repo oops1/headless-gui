@@ -292,7 +292,14 @@ func (c *Canvas) layoutChild(idx int) {
 	// при вызове SetBounds на родителе.
 	dx := newBounds.Min.X - oldBounds.Min.X
 	dy := newBounds.Min.Y - oldBounds.Min.Y
-	if (dx != 0 || dy != 0) && !oldBounds.Empty() {
+	// Контейнеры с собственным layout (TabControl, Grid, вложенный Canvas…)
+	// уже переложили потомков внутри child.SetBounds — повторный сдвиг
+	// задваивал смещение (контент вкладок «разъезжался» при перестановке).
+	// Сдвигаем и при «пустых» старых bounds: у двухъякорного ребёнка
+	// (Left+Right) ширина на этапе сборки неизвестна (Dx==0 → Empty), но
+	// Min согласован с координатами его детей — без сдвига дети навсегда
+	// отставали от контейнера (заголовок «двоился» под титлбаром).
+	if (dx != 0 || dy != 0) && !HasOwnLayout(child) {
 		shiftDescendants(child, dx, dy)
 	}
 }

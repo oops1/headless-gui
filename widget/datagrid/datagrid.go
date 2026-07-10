@@ -1126,6 +1126,35 @@ func (dg *DataGrid) ScrollBy(delta int) {
 	dg.clampScrollY()
 }
 
+// ScrollY возвращает текущее вертикальное смещение прокрутки (в пикселях).
+func (dg *DataGrid) ScrollY() int {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	return dg.scrollY
+}
+
+// WheelScroll прокручивает таблицу колесом мыши на 3 строки за тик
+// (up=true — вверх, иначе вниз). Возвращает true, если прокрутка
+// фактически сдвинулась — обёртка использует это, чтобы поглощать
+// событие ТОЛЬКО когда есть что прокручивать (иначе колесо всплывает
+// к родительскому ScrollView).
+func (dg *DataGrid) WheelScroll(up bool) bool {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	if dg.maxScrollY() == 0 {
+		return false
+	}
+	old := dg.scrollY
+	step := 3 * dg.RowHeight
+	if up {
+		dg.scrollY -= step
+	} else {
+		dg.scrollY += step
+	}
+	dg.clampScrollY()
+	return dg.scrollY != old
+}
+
 // ─── Selection helpers ─────────────────────────────────────────────────────
 
 func (dg *DataGrid) selectRow(row int, shift, ctrl bool) {
