@@ -112,6 +112,65 @@ func TestWindowBtnCount(t *testing.T) {
 	}
 }
 
+// ─── Классика Win2000: толстая рамка и кнопки внутри неё ─────────────────────
+
+// TestWindowContentBounds_Classic3D — в классике клиентская область смещена
+// внутрь толстой 3D-рамки (frameW=5): слева/справа/снизу на 5px, сверху на
+// 5px рамки + 32px заголовка.
+func TestWindowContentBounds_Classic3D(t *testing.T) {
+	widget.ApplyGlobalTheme(widget.ThemeByName("Win2000"))
+	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+
+	w := widget.NewWindow("Classic", 800, 600)
+	cb := w.ContentBounds()
+	want := image.Rect(5, 5+32, 795, 595) // frameW=5, titleH=32
+	if cb != want {
+		t.Fatalf("Classic ContentBounds = %v, want %v", cb, want)
+	}
+}
+
+// TestWindowClassicButtons_InsideFrame — кнопки ─ □ × расположены внутри
+// рамки (не выходят за её правый/верхний край) и упорядочены слева направо.
+func TestWindowClassicButtons_InsideFrame(t *testing.T) {
+	widget.ApplyGlobalTheme(widget.ThemeByName("Win2000"))
+	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+
+	w := widget.NewWindow("Classic", 800, 600)
+	closeR := w.CloseBtnRect()
+	minR := w.MinBtnRect()
+	maxR := w.MaxBtnRect()
+	if closeR.Empty() || minR.Empty() || maxR.Empty() {
+		t.Fatalf("кнопки не должны быть пустыми в классике: close=%v min=%v max=%v", closeR, minR, maxR)
+	}
+	// Внутри рамки: правый край креста ≤ 795 (правая рамка), верх ≥ 5 (верхняя рамка).
+	if closeR.Max.X > 795 {
+		t.Fatalf("крест выходит за правую рамку: Max.X=%d > 795", closeR.Max.X)
+	}
+	if closeR.Min.Y < 5 {
+		t.Fatalf("кнопка выше верхней рамки: Min.Y=%d < 5", closeR.Min.Y)
+	}
+	// Порядок слева направо: ─ , □ , ×.
+	if !(minR.Max.X <= maxR.Min.X && maxR.Max.X <= closeR.Min.X) {
+		t.Fatalf("порядок кнопок нарушен: min=%v max=%v close=%v", minR, maxR, closeR)
+	}
+}
+
+// TestWindowClassicCloseClick — полный клик по кресту в классике вызывает OnClose.
+func TestWindowClassicCloseClick(t *testing.T) {
+	widget.ApplyGlobalTheme(widget.ThemeByName("Win2000"))
+	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+
+	w := widget.NewWindow("Classic", 800, 600)
+	closed := false
+	w.OnClose = func() { closed = true }
+
+	cx, cy := rectCenter(w.CloseBtnRect())
+	pressRelease(w, cx, cy)
+	if !closed {
+		t.Fatal("OnClose не вызван по клику на крест в классике")
+	}
+}
+
 // ─── Mouse click: close / minimize / maximize ───────────────────────────────
 
 // rectCenter возвращает центр прямоугольника.
