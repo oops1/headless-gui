@@ -974,3 +974,7 @@ func uint32ToBytes(v uint32) []byte {
 
 // Ensure unused import doesn't cause error
 var _ = unsafe.Sizeof(0)
+
+// SetResizable — no-op: пользовательский resize за края borderless-окна
+// на этой платформе пока не реализован.
+func (w *X11Window) SetResizable(v bool) {}

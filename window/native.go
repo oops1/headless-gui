@@ -43,6 +43,11 @@ type NativeWindow interface {
 	// SetSize меняет размер окна (в logical pixels).
 	SetSize(width, height int)
 
+	// SetResizable разрешает пользователю менять размер окна за края.
+	// Окна создаются borderless, поэтому зоны захвата у краёв реализует
+	// бэкенд (Win32 — WM_NCHITTEST). Бэкенды без поддержки — no-op.
+	SetResizable(v bool)
+
 	// GetSize возвращает текущий размер окна (в logical pixels).
 	GetSize() (width, height int)
 

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -53,6 +54,7 @@ const (
 	wmSyscommand  = 0x0112
 	wmNccalcsize  = 0x0083
 	wmNchittest   = 0x0084
+	wmGetminmaxinfo = 0x0024
 	wmNcactivate  = 0x0086
 	wmNcpaint     = 0x0085
 	wmDpichanged  = 0x02E0
@@ -66,6 +68,20 @@ const (
 
 	// WM_SIZE params
 	sizeMaximized = 2
+
+	// WM_NCHITTEST: коды зон окна (рамка resize).
+	htClient      = 1
+	htLeft        = 10
+	htRight       = 11
+	htTop         = 12
+	htTopLeft     = 13
+	htTopRight    = 14
+	htBottom      = 15
+	htBottomLeft  = 16
+	htBottomRight = 17
+
+	// Ширина невидимой resize-рамки borderless-окна (физ. пиксели).
+	ncResizeBorder = 8
 
 	// WM_SYSCOMMAND
 	scMinimize = 0xF020
@@ -247,6 +263,10 @@ type Win32Window struct {
 
 	maximized bool
 
+	// resizable — разрешён ли пользовательский resize за края окна
+	// (см. WM_NCHITTEST: у borderless-окна зоны рамки отдаём вручную).
+	resizable atomic.Bool
+
 	// cornerRadius — радиус скругления углов окна (0 = прямые). Реализуется
 	// через регион окна (SetWindowRgn), переприменяется при resize.
 	cornerRadius int
@@ -282,6 +302,10 @@ var globalWin32 *Win32Window
 func NewNativeWindow() NativeWindow {
 	return &Win32Window{}
 }
+
+// SetResizable включает/выключает пользовательский resize за края
+// (реализован через WM_NCHITTEST — см. wndproc). Потокобезопасно.
+func (w *Win32Window) SetResizable(v bool) { w.resizable.Store(v) }
 
 func (w *Win32Window) Create(title string, width, height int) error {
 	runtime.LockOSThread() // Win32 UI должен работать в одном потоке
@@ -737,6 +761,50 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			w.onDpiChanged(float64(newDpi) / 96.0)
 		}
 		return 0
+
+	case wmNchittest:
+		// Borderless-окно: рамки ОС нет, зоны resize отдаём вручную.
+		// lParam — ЭКРАННЫЕ координаты курсора (signed 16-bit слова).
+		if !w.resizable.Load() || w.maximized {
+			break // → DefWindowProc (HTCLIENT и т.п.)
+		}
+		sx := int(int16(lparam & 0xFFFF))
+		sy := int(int16((lparam >> 16) & 0xFFFF))
+		var wr rect
+		procGetWindowRect.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&wr)))
+		left := sx-int(wr.Left) < ncResizeBorder
+		right := int(wr.Right)-sx <= ncResizeBorder
+		top := sy-int(wr.Top) < ncResizeBorder
+		bottom := int(wr.Bottom)-sy <= ncResizeBorder
+		switch {
+		case top && left:
+			return htTopLeft
+		case top && right:
+			return htTopRight
+		case bottom && left:
+			return htBottomLeft
+		case bottom && right:
+			return htBottomRight
+		case left:
+			return htLeft
+		case right:
+			return htRight
+		case top:
+			return htTop
+		case bottom:
+			return htBottom
+		}
+		return htClient
+
+	case wmGetminmaxinfo:
+		// Минимальный размер окна при пользовательском resize.
+		// MINMAXINFO: 5×POINT; ptMinTrackSize — смещение 24.
+		if lparam != 0 {
+			mm := (*[10]int32)(unsafe.Pointer(lparam))
+			mm[6] = 320 // ptMinTrackSize.x
+			mm[7] = 240 // ptMinTrackSize.y
+			return 0
+		}
 
 	case wmSetcursor:
 		// Удерживаем выбранную форму курсора в клиентской области.

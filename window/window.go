@@ -187,6 +187,9 @@ func (win *Window) SetMaxFPS(fps int) *Window {
 // SetResizable разрешает/запрещает изменение размера окна пользователем.
 func (win *Window) SetResizable(v bool) *Window {
 	win.resizable = v
+	if win.native != nil {
+		win.native.SetResizable(v)
+	}
 	return win
 }
 
@@ -239,6 +242,8 @@ func (win *Window) Run() error {
 	if err := win.native.Create(win.title, pw, ph); err != nil {
 		return err
 	}
+	// Разрешаем ресайз за края (borderless: зоны рамки отдаёт бэкенд).
+	win.native.SetResizable(win.resizable)
 
 	// Смена DPI монитора (перенос окна) — перестраиваем масштаб и буферы.
 	if dn, ok := win.native.(dpiChangeNotifier); ok {
