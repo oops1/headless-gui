@@ -180,6 +180,75 @@ func TestWindowResize_NoResizeMode(t *testing.T) {
 	}
 }
 
+// TestWindowResize_CustomMinSize — публичные MinWidth/MinHeight ограничивают
+// виджетный edge-resize вместо захардкоженных 120×80.
+func TestWindowResize_CustomMinSize(t *testing.T) {
+	w := widget.NewWindow("R", 400, 300)
+	w.MinWidth = 250
+	w.MinHeight = 200
+	w.SetBounds(image.Rect(100, 100, 500, 400))
+
+	// Тянем правый-нижний угол далеко внутрь — не должно схлопнуться ниже минимума.
+	pressAt(w, 499, 399)
+	w.OnMouseMove(120, 120)
+	releaseAt(w, 120, 120)
+
+	b := w.Bounds()
+	if b.Dx() != 250 {
+		t.Fatalf("ширина = %d, want ровно 250 (MinWidth)", b.Dx())
+	}
+	if b.Dy() != 200 {
+		t.Fatalf("высота = %d, want ровно 200 (MinHeight)", b.Dy())
+	}
+}
+
+// TestWindowResize_MinSizeDefault — при MinWidth/MinHeight=0 действует прежний
+// дефолт 120×80.
+func TestWindowResize_MinSizeDefault(t *testing.T) {
+	w := widget.NewWindow("R", 400, 300)
+	w.SetBounds(image.Rect(100, 100, 500, 400))
+
+	pressAt(w, 499, 250)
+	w.OnMouseMove(150, 250)
+	releaseAt(w, 150, 250)
+
+	if b := w.Bounds(); b.Dx() != 120 {
+		t.Fatalf("ширина = %d, want 120 (дефолтный минимум)", b.Dx())
+	}
+}
+
+// TestXAMLWindow_MinSize — атрибуты MinWidth/MinHeight парсятся в поля Window.
+func TestXAMLWindow_MinSize(t *testing.T) {
+	xaml := []byte(`<Window Title="T" Width="800" Height="600" MinWidth="640" MinHeight="480"><Canvas/></Window>`)
+	root, _, err := widget.LoadUIFromXAML(xaml)
+	if err != nil {
+		t.Fatalf("LoadUIFromXAML: %v", err)
+	}
+	w, ok := root.(*widget.Window)
+	if !ok {
+		t.Fatalf("root тип = %T, want *widget.Window", root)
+	}
+	if w.MinWidth != 640 {
+		t.Fatalf("MinWidth = %d, want 640", w.MinWidth)
+	}
+	if w.MinHeight != 480 {
+		t.Fatalf("MinHeight = %d, want 480", w.MinHeight)
+	}
+}
+
+// TestXAMLWindow_MinSize_Absent — без атрибутов MinWidth/MinHeight поля = 0.
+func TestXAMLWindow_MinSize_Absent(t *testing.T) {
+	xaml := []byte(`<Window Title="T" Width="800" Height="600"><Canvas/></Window>`)
+	root, _, err := widget.LoadUIFromXAML(xaml)
+	if err != nil {
+		t.Fatalf("LoadUIFromXAML: %v", err)
+	}
+	w := root.(*widget.Window)
+	if w.MinWidth != 0 || w.MinHeight != 0 {
+		t.Fatalf("MinWidth/MinHeight = %d/%d, want 0/0", w.MinWidth, w.MinHeight)
+	}
+}
+
 // TestWindowResize_NativeGuard — при выставленном OnDragMove (нативный режим)
 // виджетный edge-resize отключён, чтобы не конфликтовать с ресайзом ОС.
 func TestWindowResize_NativeGuard(t *testing.T) {

@@ -89,6 +89,13 @@ type Window struct {
 	// Resize — режим изменения размера окна.
 	Resize ResizeMode
 
+	// MinWidth / MinHeight — минимальный размер окна в ЛОГИЧЕСКИХ пикселях.
+	// 0 → дефолт: для виджетного edge-resize — winMinW×winMinH (120×80),
+	// для нативного окна — движок ОС (Win32: 320×240). Задаётся из XAML
+	// (атрибуты MinWidth/MinHeight) или программно.
+	MinWidth  int
+	MinHeight int
+
 	// Background — цвет фона клиентской области.
 	Background color.RGBA
 
@@ -1041,19 +1048,28 @@ func (w *Window) applyResize(x, y int) {
 	if w.resizeDir&edgeS != 0 {
 		ny1 = b.Max.Y + dy
 	}
-	// Минимальная ширина: не даём схлопнуть окно, тянем «неподвижный» край.
-	if nx1-nx0 < winMinW {
+	// Минимальный размер: публичные MinWidth/MinHeight (0 → дефолт winMinW×winMinH).
+	minW := w.MinWidth
+	if minW <= 0 {
+		minW = winMinW
+	}
+	minH := w.MinHeight
+	if minH <= 0 {
+		minH = winMinH
+	}
+	// Не даём схлопнуть окно, тянем «неподвижный» край.
+	if nx1-nx0 < minW {
 		if w.resizeDir&edgeW != 0 {
-			nx0 = nx1 - winMinW
+			nx0 = nx1 - minW
 		} else {
-			nx1 = nx0 + winMinW
+			nx1 = nx0 + minW
 		}
 	}
-	if ny1-ny0 < winMinH {
+	if ny1-ny0 < minH {
 		if w.resizeDir&edgeN != 0 {
-			ny0 = ny1 - winMinH
+			ny0 = ny1 - minH
 		} else {
-			ny1 = ny0 + winMinH
+			ny1 = ny0 + minH
 		}
 	}
 	nb := image.Rect(nx0, ny0, nx1, ny1)

@@ -48,6 +48,12 @@ type NativeWindow interface {
 	// бэкенд (Win32 — WM_NCHITTEST). Бэкенды без поддержки — no-op.
 	SetResizable(v bool)
 
+	// SetMinSize задаёт минимальный размер окна В ФИЗИЧЕСКИХ пикселях
+	// (вызывающая сторона умножает логический минимум на HiDPI-scale).
+	// Win32 отдаёт его ОС в WM_GETMINMAXINFO; прочие бэкенды — no-op.
+	// 0 → дефолт движка (Win32: 320×240).
+	SetMinSize(width, height int)
+
 	// GetSize возвращает текущий размер окна (в logical pixels).
 	GetSize() (width, height int)
 

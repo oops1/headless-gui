@@ -728,3 +728,6 @@ func cocoaKeyCodeToVK(keyCode int) int {
 // SetResizable — no-op: пользовательский resize за края borderless-окна
 // на этой платформе пока не реализован.
 func (w *CocoaWindow) SetResizable(v bool) {}
+
+// SetMinSize — no-op: минимальный размер окна на macOS пока не ограничиваем.
+func (w *CocoaWindow) SetMinSize(width, height int) {}

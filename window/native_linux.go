@@ -978,3 +978,6 @@ var _ = unsafe.Sizeof(0)
 // SetResizable — no-op: пользовательский resize за края borderless-окна
 // на этой платформе пока не реализован.
 func (w *X11Window) SetResizable(v bool) {}
+
+// SetMinSize — no-op: минимальный размер окна на X11 пока не ограничиваем.
+func (w *X11Window) SetMinSize(width, height int) {}

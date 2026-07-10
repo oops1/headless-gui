@@ -245,6 +245,14 @@ func (win *Window) Run() error {
 	// Разрешаем ресайз за края (borderless: зоны рамки отдаёт бэкенд).
 	win.native.SetResizable(win.resizable)
 
+	// Минимальный размер окна из widget.Window (MinWidth/MinHeight): логические
+	// значения × HiDPI-scale → физические пиксели для ОС (Win32 WM_GETMINMAXINFO).
+	if ww, ok := win.eng.Root().(*widget.Window); ok && (ww.MinWidth > 0 || ww.MinHeight > 0) {
+		pmw := int(float64(ww.MinWidth)*win.scale + 0.5)
+		pmh := int(float64(ww.MinHeight)*win.scale + 0.5)
+		win.native.SetMinSize(pmw, pmh)
+	}
+
 	// Смена DPI монитора (перенос окна) — перестраиваем масштаб и буферы.
 	if dn, ok := win.native.(dpiChangeNotifier); ok {
 		dn.SetOnDpiChanged(func(k float64) {
