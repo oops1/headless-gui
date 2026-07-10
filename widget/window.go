@@ -217,9 +217,15 @@ func (w *Window) SetTitle(s string) {
 }
 
 // resolvedTitleStyle возвращает конкретный стиль заголовка.
-// Если TitleStyle == WindowTitleAuto, определяет по текущей ОС.
+// Если TitleStyle == WindowTitleAuto, определяет по текущей ОС, но классика
+// Win2000 — исконно виндовый хром: traffic lights в ней не существуют, поэтому
+// Auto в классике всегда Windows-стиль независимо от ОС (иначе на darwin
+// hit-тест и отрисовка кнопок уходили в мак-ветку внутри 3D-рамки).
 func (w *Window) resolvedTitleStyle() WindowTitleStyle {
 	if w.TitleStyle == WindowTitleAuto {
+		if currentStyle().Classic3D {
+			return WindowTitleWin
+		}
 		return detectedTitleStyle()
 	}
 	return w.TitleStyle
