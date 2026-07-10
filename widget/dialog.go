@@ -338,20 +338,26 @@ func (d *Dialog) ApplyTheme(t *Theme) {
 // ShowModal через injectCaptureManager).
 func (d *Dialog) SetCaptureManager(cm CaptureManager) { d.capMgr = cm }
 
-// titleDragRect — зона заголовка, за которую диалог таскается
-// (титлбар без кнопки ✕).
-func (d *Dialog) titleDragRect() image.Rectangle {
+// titleDragHit — точка в перетаскиваемой зоне заголовка: внутри полосы
+// титлбара И не над каким-либо дочерним виджетом (кнопка ✕, а также любой
+// контент, размещённый приложением в верхней полосе, сохраняют свои клики).
+func (d *Dialog) titleDragHit(x, y int) bool {
 	b := d.bounds
-	r := image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+d.TitleHeight)
-	if d.ShowCloseButton && d.closeBtn != nil {
-		r.Max.X = d.closeBtn.Bounds().Min.X
+	pt := image.Pt(x, y)
+	if !pt.In(image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+d.TitleHeight)) {
+		return false
 	}
-	return r
+	for _, c := range d.children {
+		if IsWidgetVisible(c) && pt.In(c.Bounds()) {
+			return false
+		}
+	}
+	return true
 }
 
 // WantsCapture — захватываем мышь при нажатии на заголовок (drag).
 func (d *Dialog) WantsCapture(e MouseEvent) bool {
-	return e.Button == MouseLeft && e.Pressed && image.Pt(e.X, e.Y).In(d.titleDragRect())
+	return e.Button == MouseLeft && e.Pressed && d.titleDragHit(e.X, e.Y)
 }
 
 // OnMouseButton начинает/заканчивает перетаскивание за заголовок.
@@ -369,7 +375,7 @@ func (d *Dialog) OnMouseButton(e MouseEvent) bool {
 		}
 		return false
 	}
-	if image.Pt(e.X, e.Y).In(d.titleDragRect()) {
+	if d.titleDragHit(e.X, e.Y) {
 		DismissAll(d) // закрываем dropdown/popup внутри диалога перед drag
 		d.dragging = true
 		d.dragLastX = e.X
