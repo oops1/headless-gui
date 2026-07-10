@@ -313,6 +313,21 @@ func (w *Window) titleH() int {
 	return 32
 }
 
+// effTitleH возвращает ЭФФЕКТИВНУЮ высоту заголовка. В классике Win2000
+// заголовок ниже, чем в современных темах (реальный Win2000 ≈18px), поэтому
+// ограничиваем его 24px — так кнопки и глифы вписываются в пропорции референса.
+// В остальных темах эффективная высота совпадает с titleH().
+func (w *Window) effTitleH() int {
+	th := w.titleH()
+	if th == 0 {
+		return 0
+	}
+	if currentStyle().Classic3D && th > 24 {
+		return 24
+	}
+	return th
+}
+
 // borderW возвращает ширину рамки (0 для borderless).
 func (w *Window) borderW() int {
 	if w.Style == WindowStyleNone {
@@ -350,7 +365,7 @@ func (w *Window) ContentBounds() image.Rectangle {
 	fw := w.frameW()
 	top := b.Min.Y + th
 	if currentStyle().Classic3D {
-		top = b.Min.Y + fw + th
+		top = b.Min.Y + fw + w.effTitleH()
 	}
 	return image.Rect(
 		b.Min.X+fw,
@@ -423,10 +438,10 @@ func (w *Window) btnCount() int {
 }
 
 // classicBtnSide возвращает сторону квадратной кнопки заголовка в классике
-// Win2000 — чуть меньше высоты заголовка (масштабируется под TitleBarHeight;
-// в оригинале ≈16×14 при заголовке 18).
+// Win2000 — чуть меньше эффективной высоты заголовка (в оригинале ≈16×14 при
+// заголовке 18; здесь ≈18px при effTitleH=24).
 func (w *Window) classicBtnSide() int {
-	s := w.titleH() - 8
+	s := w.effTitleH() - 6
 	if s < 10 {
 		s = 10
 	}
@@ -435,19 +450,18 @@ func (w *Window) classicBtnSide() int {
 
 // classicTitleBtnRects возвращает прямоугольники кнопок ×, □, ─ для
 // классического стиля Win2000 (общая геометрия для отрисовки и hit-test).
-// Кнопки прижаты к правому краю заголовка (внутри рамки) с отступом 2px;
-// крест отделён от пары ─ □ зазором 2px. Отсутствующие кнопки —
+// Кнопки прижаты к правому краю заголовка (внутри рамки) с отступом 2px справа
+// и 3px сверху; крест отделён от пары ─ □ зазором 2px. Отсутствующие кнопки —
 // пустой Rectangle.
 func (w *Window) classicTitleBtnRects() (closeR, maxR, minR image.Rectangle) {
 	tb := w.titleBarRect()
 	if tb.Empty() {
 		return
 	}
-	const edgePad, gap = 2, 2
-	th := w.titleH()
+	const edgePad, topPad, gap = 2, 3, 2
 	side := w.classicBtnSide()
 	nc := w.btnCount()
-	by := tb.Min.Y + (th-side)/2
+	by := tb.Min.Y + topPad
 	closeX := tb.Max.X - edgePad - side
 	closeR = image.Rect(closeX, by, closeX+side, by+side)
 	if nc >= 3 {
@@ -560,7 +574,15 @@ func (w *Window) Draw(ctx DrawContext) {
 		}
 	}
 
-	// ── Рамка ───────────────────────────────────────────────────────────────
+	// ── Дочерние виджеты ────────────────────────────────────────────────────
+	w.drawChildren(ctx)
+
+	// ── Рамка (хром) — ПОВЕРХ детей ─────────────────────────────────────────
+	// Рамку рисуем после drawChildren: XAML-контент с абсолютными координатами
+	// может доходить до самого края клиентской области и в прежнем порядке
+	// «замазывал» полосу рамки (в классике — толстую 3D-рамку, в современных
+	// темах — 1px XOR-рамку главного окна по периметру). Overlay/popup-меню
+	// детей движок рисует отдельным проходом (DrawOverlay) — они не страдают.
 	// Для borderless нативного окна рисуем только боковые линии и низ:
 	// верхняя линия не нужна — заголовок уже заполняет верхний край.
 	if w.Style != WindowStyleNone {
@@ -598,9 +620,6 @@ func (w *Window) Draw(ctx DrawContext) {
 			}
 		}
 	}
-
-	// ── Дочерние виджеты ────────────────────────────────────────────────────
-	w.drawChildren(ctx)
 }
 
 // ─── Windows-стиль заголовка ────────────────────────────────────────────────
@@ -611,7 +630,9 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	// темах совпадает с верхом окна (геометрия идентична прежней).
 	tb := w.titleBarRect()
 	x, y, bw := tb.Min.X, tb.Min.Y, tb.Dx()
-	th := w.titleH()
+	// Эффективная высота: в классике заголовок ниже (effTitleH), в остальных
+	// темах совпадает с titleH() — геометрия текста/фона/бейджа считается от неё.
+	th := w.effTitleH()
 	cr := w.CornerRadius
 
 	// Эффективные цвета заголовка (учёт активности окна: без фокуса ОС
@@ -782,9 +803,10 @@ func (w *Window) drawClassicTitleButtons(ctx DrawContext, st ThemeStyle) {
 }
 
 // drawGlyphClose рисует крест ✕ толщиной 2px, вписанный в кнопку стороной side,
-// с центром (cx, cy).
+// с центром (cx, cy). Глиф компактный (~8×8 при кнопке 18px, ≈45% стороны) —
+// по пропорциям референсной кнопки Win2000, где крест НЕ занимает всю кнопку.
 func drawGlyphClose(ctx DrawContext, cx, cy, side int, col color.RGBA) {
-	h := (side - 8) / 2 // половина диагонали (отступ ~4px от краёв)
+	h := side * 7 / 32 // половина диагонали ≈3px при side=18 → крест ~8×8
 	if h < 3 {
 		h = 3
 	}
@@ -796,29 +818,29 @@ func drawGlyphClose(ctx DrawContext, cx, cy, side int, col color.RGBA) {
 	}
 }
 
-// drawGlyphMax рисует значок развёртывания □ — прямоугольник-рамку 1px с
-// утолщённой (2px) верхней гранью, как строка заголовка окна.
+// drawGlyphMax рисует значок развёртывания □ — квадрат-рамку 1px (~9×9 при
+// кнопке 18px) с утолщённой (2px) верхней гранью, как строка заголовка окна.
 func drawGlyphMax(ctx DrawContext, cx, cy, side int, col color.RGBA) {
-	gw := side / 2
-	gh := gw - 1
+	gw := side / 2 // ≈9px при side=18
 	if gw < 8 {
-		gw, gh = 8, 7
+		gw = 8
 	}
+	gh := gw
 	gx := cx - gw/2
 	gy := cy - gh/2
 	ctx.DrawBorder(gx, gy, gw, gh, col)
 	ctx.DrawHLine(gx, gy+1, gw, col) // утолщённая верхняя грань (2px)
 }
 
-// drawGlyphMin рисует значок сворачивания ─ — горизонтальную полоску 2px
-// у нижнего края кнопки, чуть левее центра.
+// drawGlyphMin рисует значок сворачивания ─ — короткую горизонтальную полоску
+// 2px толщиной (~8px ширины при кнопке 18px) у нижней трети кнопки.
 func drawGlyphMin(ctx DrawContext, cx, cy, side int, col color.RGBA) {
-	bw := side / 3
-	if bw < 5 {
-		bw = 5
+	bw := side * 8 / 18 // ≈8px при side=18
+	if bw < 6 {
+		bw = 6
 	}
-	bx := cx - bw/2 - 1 // чуть левее центра
-	by := cy + side/5   // ближе к низу кнопки
+	bx := cx - bw/2
+	by := cy + side/6 // ближе к низу кнопки
 	ctx.DrawHLine(bx, by, bw, col)
 	ctx.DrawHLine(bx, by+1, bw, col)
 }
@@ -1118,7 +1140,8 @@ func (w *Window) titleBarRect() image.Rectangle {
 	}
 	if currentStyle().Classic3D {
 		fw := w.frameW()
-		return image.Rect(b.Min.X+fw, b.Min.Y+fw, b.Max.X-fw, b.Min.Y+fw+th)
+		eth := w.effTitleH()
+		return image.Rect(b.Min.X+fw, b.Min.Y+fw, b.Max.X-fw, b.Min.Y+fw+eth)
 	}
 	// Вся полоса заголовка (кнопки обрабатываются отдельно)
 	return image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+th)

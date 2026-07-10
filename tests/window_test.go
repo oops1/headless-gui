@@ -116,14 +116,15 @@ func TestWindowBtnCount(t *testing.T) {
 
 // TestWindowContentBounds_Classic3D — в классике клиентская область смещена
 // внутрь толстой 3D-рамки (frameW=5): слева/справа/снизу на 5px, сверху на
-// 5px рамки + 32px заголовка.
+// 5px рамки + эффективную высоту заголовка (effTitleH=24, а не полные 32 —
+// в классике заголовок ниже под пропорции референса Win2000).
 func TestWindowContentBounds_Classic3D(t *testing.T) {
 	widget.ApplyGlobalTheme(widget.ThemeByName("Win2000"))
 	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
 
 	w := widget.NewWindow("Classic", 800, 600)
 	cb := w.ContentBounds()
-	want := image.Rect(5, 5+32, 795, 595) // frameW=5, titleH=32
+	want := image.Rect(5, 5+24, 795, 595) // frameW=5, effTitleH=24
 	if cb != want {
 		t.Fatalf("Classic ContentBounds = %v, want %v", cb, want)
 	}
@@ -148,6 +149,22 @@ func TestWindowClassicButtons_InsideFrame(t *testing.T) {
 	}
 	if closeR.Min.Y < 5 {
 		t.Fatalf("кнопка выше верхней рамки: Min.Y=%d < 5", closeR.Min.Y)
+	}
+	// Компактная геометрия классики: сторона кнопки = effTitleH-6 = 18px,
+	// отступ сверху 3px (кнопка начинается на y = 5+3 = 8) и справа 2px
+	// (правый край креста = 795-2 = 793). Кнопки вписаны в effTitleH=24
+	// (нижний край ≤ 5+24 = 29).
+	if closeR.Dx() != 18 || closeR.Dy() != 18 {
+		t.Fatalf("сторона кнопки = %dx%d, want 18x18", closeR.Dx(), closeR.Dy())
+	}
+	if closeR.Min.Y != 8 {
+		t.Fatalf("верх кнопки Min.Y=%d, want 8 (5 рамка + 3 отступ)", closeR.Min.Y)
+	}
+	if closeR.Max.X != 793 {
+		t.Fatalf("правый край креста Max.X=%d, want 793 (795 - 2)", closeR.Max.X)
+	}
+	if closeR.Max.Y > 5+24 {
+		t.Fatalf("кнопка выходит за эффективный заголовок: Max.Y=%d > %d", closeR.Max.Y, 5+24)
 	}
 	// Порядок слева направо: ─ , □ , ×.
 	if !(minR.Max.X <= maxR.Min.X && maxR.Max.X <= closeR.Min.X) {
