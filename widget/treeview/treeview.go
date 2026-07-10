@@ -511,3 +511,28 @@ func (tv *TreeView) ScrollBy(delta int) {
 	tv.scrollY += delta
 	tv.clampScroll()
 }
+
+// ScrollY возвращает текущее вертикальное смещение прокрутки (в пикселях).
+func (tv *TreeView) ScrollY() int {
+	return tv.scrollY
+}
+
+// WheelScroll прокручивает дерево колесом мыши на 3 строки за тик
+// (up=true — вверх, иначе вниз). Возвращает true, если прокрутка
+// фактически сдвинулась — обёртка использует это, чтобы поглощать
+// событие ТОЛЬКО когда есть что прокручивать (иначе колесо всплывает
+// к родительскому ScrollView).
+func (tv *TreeView) WheelScroll(up bool) bool {
+	if tv.maxScrollY() == 0 {
+		return false
+	}
+	old := tv.scrollY
+	step := 3 * tv.itemH()
+	if up {
+		tv.scrollY -= step
+	} else {
+		tv.scrollY += step
+	}
+	tv.clampScroll()
+	return tv.scrollY != old
+}

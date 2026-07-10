@@ -2453,6 +2453,12 @@ Undo-история и `OnChange` работают как у обычных пр
 
 ---
 
+## v3.10 additions (mouse wheel in all scrollable widgets)
+
+Колесо мыши теперь прокручивает **все** скроллируемые виджеты (шаг — 3 строки за тик, с клампом на границах): `ScrollView`, `TextBox`, `ListView`, `TreeView` (`TreeViewWidget`), `DataGrid` (`DataGridWidget`), `VirtualizingItemsControl`, `NumericUpDown` и `fileTable` в диалогах. Правило поглощения: виджет возвращает `true` из `OnMouseButton` только когда прокрутка реально сдвинулась; если контент помещается или каретка уже у границы — возвращает `false`, чтобы событие всплыло к родительскому `ScrollView` (вложенный список внутри страницы не блокирует прокрутку страницы, когда сам доскроллен). Ядра `treeview.TreeView` и `datagrid.DataGrid` получили `WheelScroll(up bool) bool` и `ScrollY() int`; у `ListView` добавлен `ScrollY() int`. Dropdown и PopupMenu колеса не получили — их раскрытые списки рисуются целиком без механики прокрутки (out of scope).
+
+---
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
