@@ -345,3 +345,58 @@ func TestDialog_DragByTitleBar(t *testing.T) {
 		t.Fatal("✕ по новой позиции не сработал")
 	}
 }
+
+// ─── Вписывание модалок в холст ──────────────────────────────────────────────
+
+// TestShowModal_LargerThanCanvas_PinnedTopLeft — диалог больше холста
+// прижимается к левому/верхнему краю, а не центрируется в отрицательные
+// координаты: титлбар и ✕ должны оставаться видимыми и достижимыми.
+func TestShowModal_LargerThanCanvas_PinnedTopLeft(t *testing.T) {
+	eng := newDialogEngine() // холст 600×400
+	dlg := widget.NewDialog("Огромный", 700, 500)
+	eng.ShowModal(dlg)
+	defer eng.CloseModal(dlg)
+
+	if b := dlg.Bounds(); b.Min.X != 0 || b.Min.Y != 0 {
+		t.Fatalf("диалог больше холста должен прижиматься к (0,0), а он %v", b)
+	}
+}
+
+// TestSetResolution_ClampsOpenModal — открытый диалог был отцентрирован под
+// прежний холст; при уменьшении разрешения он обязан быть вписан в новый
+// (раньше уезжал за край и обрезался). Дети сдвигаются вместе с ним.
+func TestSetResolution_ClampsOpenModal(t *testing.T) {
+	eng := newDialogEngine() // холст 600×400
+	dlg := widget.NewDialog("Диалог", 300, 200)
+	btn := widget.NewButton("OK")
+	btn.SetBounds(image.Rect(20, 160, 120, 190))
+	dlg.AddChild(btn)
+	eng.ShowModal(dlg)
+	defer eng.CloseModal(dlg)
+
+	before := dlg.Bounds() // центр 600×400 → (150,100)-(450,300)
+	if before.Min.X != 150 || before.Min.Y != 100 {
+		t.Fatalf("диалог не отцентрирован: %v", before)
+	}
+	btnOff := btn.Bounds().Min.Sub(before.Min)
+
+	eng.SetResolution(320, 240)
+
+	after := dlg.Bounds()
+	if after.Dx() != 300 || after.Dy() != 200 {
+		t.Fatalf("размер диалога изменился: %v", after)
+	}
+	if after.Min.X < 0 || after.Min.Y < 0 || after.Max.X > 320 || after.Max.Y > 240 {
+		t.Fatalf("диалог не вписан в холст 320×240: %v", after)
+	}
+	if got := btn.Bounds().Min.Sub(after.Min); got != btnOff {
+		t.Fatalf("ребёнок отстал от диалога: смещение %v, want %v", got, btnOff)
+	}
+
+	// Увеличение холста обратно не трогает уже видимый целиком диалог.
+	moved := after
+	eng.SetResolution(600, 400)
+	if got := dlg.Bounds(); got != moved {
+		t.Fatalf("видимый целиком диалог не должен переезжать: %v → %v", moved, got)
+	}
+}

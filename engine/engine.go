@@ -294,6 +294,20 @@ func (e *Engine) SetResolution(width, height int) {
 		root.SetBounds(image.Rect(0, 0, width, height))
 	}
 	widget.SetScreenBounds(width, height)
+
+	// Открытые модалки центрированы под прежний холст: при уменьшении окна
+	// они уезжали за край и обрезались (диалог «в пределах родительского
+	// окна» — иного в софтверном рендере нет, но он обязан быть виден целиком).
+	e.modMu.Lock()
+	modals := make([]widget.ModalWidget, len(e.modals))
+	copy(modals, e.modals)
+	e.modMu.Unlock()
+	for _, m := range modals {
+		b := m.Bounds()
+		if x, y := clampToCanvas(b, width, height); x != b.Min.X || y != b.Min.Y {
+			moveModalTo(m, x, y)
+		}
+	}
 	e.Invalidate()
 }
 
@@ -539,26 +553,16 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 	b := m.Bounds()
 	cx := (cw - b.Dx()) / 2
 	cy := (ch - b.Dy()) / 2
-
-	// Запоминаем позицию первого ребёнка ДО SetBounds.
-	// Если SetBounds сам пересчитает позиции дочерних виджетов
-	// (Canvas, Grid, DockPanel через собственный layout) — ручной сдвиг не нужен.
-	// Если нет (Panel) — сдвигаем вручную.
-	children := m.Children()
-	var firstChildBefore image.Rectangle
-	if len(children) > 0 {
-		firstChildBefore = children[0].Bounds()
+	// Диалог больше холста: прижимаем к левому/верхнему краю, а не центрируем
+	// в минус — титлбар и ✕ должны оставаться видимыми и достижимыми.
+	if cx < 0 {
+		cx = 0
+	}
+	if cy < 0 {
+		cy = 0
 	}
 
-	m.SetBounds(image.Rect(cx, cy, cx+b.Dx(), cy+b.Dy()))
-
-	if len(children) > 0 && children[0].Bounds() == firstChildBefore {
-		contentOff := image.Pt(cx-b.Min.X, cy-b.Min.Y)
-		for _, child := range children {
-			cb := child.Bounds()
-			child.SetBounds(cb.Add(contentOff))
-		}
-	}
+	moveModalTo(m, cx, cy)
 
 	injectCaptureManager(m, e)
 
@@ -583,6 +587,49 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 	e.modals = append(e.modals, m)
 	e.modMu.Unlock()
 	e.Invalidate()
+}
+
+// moveModalTo перемещает модальный виджет в позицию (x, y), сохраняя размер.
+// Если SetBounds виджета сам пересчитывает позиции дочерних (Canvas, Grid,
+// DockPanel через собственный layout) — ручной сдвиг не нужен; если нет
+// (Panel, Dialog) — сдвигаем детей вручную. Определяем по первому ребёнку.
+func moveModalTo(m widget.ModalWidget, x, y int) {
+	b := m.Bounds()
+	children := m.Children()
+	var firstChildBefore image.Rectangle
+	if len(children) > 0 {
+		firstChildBefore = children[0].Bounds()
+	}
+
+	m.SetBounds(image.Rect(x, y, x+b.Dx(), y+b.Dy()))
+
+	if len(children) > 0 && children[0].Bounds() == firstChildBefore {
+		contentOff := image.Pt(x-b.Min.X, y-b.Min.Y)
+		for _, child := range children {
+			widget.ShiftWidget(child, contentOff.X, contentOff.Y)
+		}
+	}
+}
+
+// clampToCanvas возвращает позицию, при которой прямоугольник b максимально
+// вписан в холст cw×ch: сначала прижимаем к правому/нижнему краю, затем
+// гарантируем неотрицательный верхний левый угол (если b больше холста —
+// приоритет левому/верхнему краю: там титлбар и ✕ диалога).
+func clampToCanvas(b image.Rectangle, cw, ch int) (int, int) {
+	x, y := b.Min.X, b.Min.Y
+	if x+b.Dx() > cw {
+		x = cw - b.Dx()
+	}
+	if x < 0 {
+		x = 0
+	}
+	if y+b.Dy() > ch {
+		y = ch - b.Dy()
+	}
+	if y < 0 {
+		y = 0
+	}
+	return x, y
 }
 
 // CloseModal закрывает указанный модальный виджет (удаляет из стека).
