@@ -126,12 +126,9 @@ func NewNativeWindow() NativeWindow {
 	return &X11Window{}
 }
 
-func (w *X11Window) Create(title string, width, height int) error {
-	w.title = title
-	w.width = width
-	w.height = height
-
-	// Подключаемся к X-серверу
+// connect подключается к X-серверу (Unix socket из DISPLAY) и выполняет
+// протокольный setup. Общий для главного окна (Create) и окна-попапа (CreatePopup).
+func (w *X11Window) connect() error {
 	display := os.Getenv("DISPLAY")
 	if display == "" {
 		display = ":0"
@@ -163,6 +160,17 @@ func (w *X11Window) Create(title string, width, height int) error {
 	if err := w.x11Setup(); err != nil {
 		conn.Close()
 		return fmt.Errorf("x11: setup: %w", err)
+	}
+	return nil
+}
+
+func (w *X11Window) Create(title string, width, height int) error {
+	w.title = title
+	w.width = width
+	w.height = height
+
+	if err := w.connect(); err != nil {
+		return err
 	}
 
 	// Создаём окно
@@ -240,6 +248,54 @@ func (w *X11Window) Create(title string, width, height int) error {
 	// Map (show) window
 	w.x11MapWindow(w.wid)
 
+	return nil
+}
+
+// CreatePopup создаёт окно-вьюпорт оверлея как override-redirect: WM его не
+// трогает (ни рамки, ни фокуса, ни декораций — родное поведение всплывающих
+// меню). Позиция задаётся позже (SetPosition в корневых координатах). У окна
+// собственное соединение и насос событий (StartEventPump), как у вторичных
+// окон диалогов.
+func (w *X11Window) CreatePopup(width, height int) error {
+	w.width = width
+	w.height = height
+
+	if err := w.connect(); err != nil {
+		return err
+	}
+
+	w.wid = w.x11GenID()
+	w.gcID = w.x11GenID()
+	w.x11LoadKeyboardMapping()
+
+	// Значения в порядке возрастания бит маски: BackPixel(0x02),
+	// OverrideRedirect(0x200), EventMask(0x800).
+	eventMask := uint32(
+		0x00000001 | // KeyPress
+			0x00000002 | // KeyRelease
+			0x00000004 | // ButtonPress
+			0x00000008 | // ButtonRelease
+			0x00000040 | // PointerMotion
+			0x00008000) // Exposure
+	values := []uint32{
+		w.screen.BlackPixel, // background
+		1,                   // override-redirect = true
+		eventMask,
+	}
+	valueMask := uint32(0x00000002 | 0x00000200 | 0x00000800) // BackPixel|OverrideRedirect|EventMask
+
+	// Создаём в (0,0); реальную позицию выставит хост через SetPosition.
+	w.x11CreateWindow(w.wid, w.screen.Root, 0, 0,
+		uint16(width), uint16(height), 0, valueMask, values)
+	w.x11CreateGC(w.gcID, w.wid)
+
+	// Seed кэша позиции (override-redirect: MoveWindow задаёт корневые координаты).
+	w.posMu.Lock()
+	w.posX, w.posY = 0, 0
+	w.posCached = true
+	w.posMu.Unlock()
+
+	w.x11MapWindow(w.wid)
 	return nil
 }
 

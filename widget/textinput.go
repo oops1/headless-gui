@@ -1215,6 +1215,15 @@ func (t *TextInput) DrawOverlay(ctx DrawContext) {
 	}
 }
 
+// OverlayBounds возвращает прямоугольник открытого контекстного меню
+// (для выноса в нативное окно). Реализует widget.OverlayBoundsProvider.
+func (t *TextInput) OverlayBounds() image.Rectangle {
+	if t.contextMenu != nil && t.contextMenu.IsOpen() {
+		return t.contextMenu.OverlayBounds()
+	}
+	return image.Rectangle{}
+}
+
 // Dismiss закрывает контекстное меню. Реализует Dismissable.
 func (t *TextInput) Dismiss() {
 	if t.contextMenu != nil && t.contextMenu.IsOpen() {

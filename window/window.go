@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -93,7 +94,39 @@ func (win *Window) setupActivation() {
 	}
 	an.SetOnActivate(func(active bool) {
 		ww.SetActive(active)
+		// При деактивации носителя (клик в другое приложение) закрываем
+		// вынесенные popup-оверлеи — как системные меню. Только в hosted-режиме.
+		if !active && win.popupHost != nil {
+			if c, ok := win.eng.(interface{ CloseAllOverlays() }); ok {
+				c.CloseAllOverlays()
+			}
+		}
 	})
+}
+
+// installPopupHost регистрирует хост popup-оверлеев, если бэкенд умеет окна-
+// попапы и маршалинг на UI-поток, а движок принимает PopupSink. На бэкендах без
+// поддержки (Wayland/macOS) и в headless — no-op: оверлеи рисуются в холст.
+func (win *Window) installPopupHost() {
+	if _, ok := win.native.(popupWindow); !ok {
+		return
+	}
+	inv, ok := win.native.(uiThreadInvoker)
+	if !ok {
+		return
+	}
+	peng, ok := win.eng.(popupEngine)
+	if !ok {
+		return
+	}
+	setter, ok := win.eng.(interface {
+		SetPopupSink(sink func(frames []engine.PopupFrame))
+	})
+	if !ok {
+		return
+	}
+	win.popupHost = newPopupHost(win.native, inv, peng, win.scale)
+	setter.SetPopupSink(win.popupHost.apply)
 }
 
 // detectScale возвращает HiDPI-масштаб: env HEADLESS_GUI_SCALE имеет
@@ -172,6 +205,10 @@ type Window struct {
 	maxFPS       int
 	resizable    bool
 	cornerRadius int // скругление углов окна (0 = прямые); применяется после Create
+
+	// popupHost — хост popup-оверлеев (dropdown/меню в собственных окнах ОС).
+	// nil, если бэкенд не поддерживает окна-попапы (Wayland/macOS → in-canvas).
+	popupHost *popupHost
 }
 
 // New создаёт окно для заданного движка с указанным заголовком.
@@ -307,6 +344,10 @@ func (win *Window) Run() error {
 	// Хост нативных модалок: если бэкенд поддерживает owner-окна (Win32) и
 	// движок принимает хост — модалки будут открываться в собственных окнах.
 	win.installModalHost()
+
+	// Хост popup-оверлеев: если бэкенд умеет окна-попапы (Win32/X11) — dropdown'ы
+	// и меню будут открываться в собственных окнах ОС и выходить за границы окна.
+	win.installPopupHost()
 
 	// Запускаем горутину чтения кадров из движка
 	go win.framePump()

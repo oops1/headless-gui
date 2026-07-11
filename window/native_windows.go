@@ -67,6 +67,13 @@ const (
 	swMaximize  = 3
 	swRestore   = 9
 	swShow      = 5
+	swShowNoActivate = 4
+
+	// Extended styles для окон-попапов (оверлеи): не активируется, поверх
+	// носителя, без кнопки на панели задач.
+	wsExToolwindow = 0x00000080
+	wsExTopmost    = 0x00000008
+	wsExNoactivate = 0x08000000
 
 	// WM_SIZE params
 	sizeMaximized = 2
@@ -406,6 +413,24 @@ func NewNativeWindow() NativeWindow {
 func (w *Win32Window) SetResizable(v bool) { w.resizable.Store(v) }
 
 func (w *Win32Window) Create(title string, width, height int) error {
+	// Borderless popup window с поддержкой resize и minimize/maximize.
+	style := uint32(wsPopup | wsVisible | wsMinimizebox | wsMaximizebox | wsThickframe | wsSysmenu | wsClipchildren)
+	exStyle := uint32(wsExAppwindow)
+	return w.createInternal(title, width, height, style, exStyle, swShow, true)
+}
+
+// CreatePopup создаёт окно-вьюпорт оверлея (dropdown/меню): WS_POPUP без рамки,
+// не активируется (WS_EX_NOACTIVATE), поверх носителя (WS_EX_TOPMOST), без
+// кнопки на панели задач (WS_EX_TOOLWINDOW). Позиция задаётся позже (SetPosition).
+// Помечается noQuit — уничтожение попапа не завершает цикл сообщений приложения.
+func (w *Win32Window) CreatePopup(width, height int) error {
+	w.noQuit = true
+	style := uint32(wsPopup)
+	exStyle := uint32(wsExNoactivate | wsExToolwindow | wsExTopmost)
+	return w.createInternal("", width, height, style, exStyle, swShowNoActivate, false)
+}
+
+func (w *Win32Window) createInternal(title string, width, height int, style, exStyle uint32, showCmd uintptr, centerOnScreen bool) error {
 	runtime.LockOSThread() // Win32 UI должен работать в одном потоке
 
 	w.title = title
@@ -430,6 +455,7 @@ func (w *Win32Window) Create(title string, width, height int) error {
 	// ВСЮ клиентскую область на каждый тик ресайза (WM_SIZE сыпется по пикселю),
 	// что даёт мерцание. Мы сами закрашиваем окно в WM_SIZE (растянутый кэш кадра),
 	// поэтому полная инвалидация не нужна. CS_OWNDC оставляем (GetDC переиспользует DC).
+	// RegisterClassExW повторно (для второго/попап-окна) — no-op: класс уже есть.
 	wc := wndClassExW{
 		CbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
 		Style:         csOwndc,
@@ -441,15 +467,14 @@ func (w *Win32Window) Create(title string, width, height int) error {
 
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 
-	// Borderless popup window с поддержкой resize и minimize/maximize
-	style := uint32(wsPopup | wsVisible | wsMinimizebox | wsMaximizebox | wsThickframe | wsSysmenu | wsClipchildren)
-	exStyle := uint32(wsExAppwindow)
-
-	// Вычисляем позицию по центру экрана
-	screenW := getSystemMetrics(0) // SM_CXSCREEN
-	screenH := getSystemMetrics(1) // SM_CYSCREEN
-	x := (screenW - width) / 2
-	y := (screenH - height) / 2
+	// Позиция: по центру экрана (главное окно) или (0,0) — попап позиционирует хост.
+	x, y := 0, 0
+	if centerOnScreen {
+		screenW := getSystemMetrics(0) // SM_CXSCREEN
+		screenH := getSystemMetrics(1) // SM_CYSCREEN
+		x = (screenW - width) / 2
+		y = (screenH - height) / 2
+	}
 
 	hwnd, _, err := procCreateWindowExW.Call(
 		uintptr(exStyle),
@@ -474,7 +499,7 @@ func (w *Win32Window) Create(title string, width, height int) error {
 	win32Creating = nil
 	win32Mu.Unlock()
 
-	procShowWindow.Call(hwnd, uintptr(swShow))
+	procShowWindow.Call(hwnd, showCmd)
 	procUpdateWindow.Call(hwnd)
 
 	return nil
@@ -542,10 +567,14 @@ func (w *Win32Window) GetSize() (int, int) {
 
 func (w *Win32Window) SetPosition(x, y int) {
 	if w.hwnd != 0 {
+		// SWP_NOACTIVATE обязателен: перемещение не должно активировать окно.
+		// Без него позиционирование окна-попапа (WS_EX_NOACTIVATE защищает
+		// только от активации мышью) крало фокус у носителя, тот ловил
+		// WM_ACTIVATE(false) → CloseAllOverlays — попап закрывался мгновенно.
 		procSetWindowPos.Call(
 			uintptr(w.hwnd), 0,
 			uintptr(x), uintptr(y), 0, 0,
-			0x0001|0x0004, // SWP_NOSIZE | SWP_NOZORDER
+			0x0001|0x0004|0x0010, // SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
 		)
 	}
 }

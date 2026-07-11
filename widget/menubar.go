@@ -151,6 +151,16 @@ func (mb *MenuBar) HasOverlay() bool {
 	return mb.popup.IsOpen()
 }
 
+// OverlayBounds возвращает объединённый прямоугольник всего каскада открытых
+// подменю (абсолютные логические координаты) — для выноса в нативное окно.
+// Пустой Rect, если подменю закрыто. Реализует widget.OverlayBoundsProvider.
+func (mb *MenuBar) OverlayBounds() image.Rectangle {
+	if !mb.popup.IsOpen() {
+		return image.Rectangle{}
+	}
+	return mb.popup.OverlayBounds()
+}
+
 // DrawOverlay рисует подменю поверх всего UI.
 func (mb *MenuBar) DrawOverlay(ctx DrawContext) {
 	if mb.popup.IsOpen() {

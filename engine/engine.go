@@ -77,6 +77,14 @@ type Engine struct {
 	onModalClosed func(widget.ModalWidget)
 	hostMu        sync.Mutex
 
+	// popupSink — опциональный хост popup-оверлеев (window.popupHost). Если
+	// задан, открытые оверлеи (dropdown/меню) выносятся в собственные нативные
+	// окна ОС, а не рисуются в холст. lastPopupSig — сигнатура последнего
+	// набора попапов, отданного sink (для вызова sink только при изменениях).
+	popupSink    func([]PopupFrame)
+	lastPopupSig []popupSig
+	popupMu      sync.Mutex
+
 	frameSeq atomic.Uint64
 	frames   chan output.Frame
 	quit     chan struct{}
@@ -797,12 +805,16 @@ func (e *Engine) renderFrame() output.Frame {
 		canvas.blitBackground()
 	}
 
+	// Активен ли хост попапов: если да — оверлеи с OverlayBounds не рисуются
+	// в холст (они уходят в собственные окна-попапы, см. renderPopups ниже).
+	hosted := e.getPopupSink() != nil
+
 	// Корневое дерево: рисуем root и его overlay-слой (popup/dropdown).
 	// Без этого вызова на канвасе остаётся только blitBackground —
 	// именно сюда «уехал» баг с чёрным экраном при последнем appendF.
 	if root != nil {
 		root.Draw(canvas)
-		drawOverlays(root, canvas)
+		drawOverlays(root, canvas, hosted)
 	}
 
 	// Модальные виджеты: затемнение + диалог поверх всего
@@ -823,7 +835,13 @@ func (e *Engine) renderFrame() output.Frame {
 		}
 		// Отрисовка модального виджета
 		m.Draw(canvas)
-		drawOverlays(m, canvas)
+		drawOverlays(m, canvas, hosted)
+	}
+
+	// Хостируемые popup-оверлеи: рендерим их в отдельные буферы и отдаём хосту
+	// (нативные окна-попапы). Вне hosted-режима — no-op.
+	if hosted {
+		e.renderPopups(canvas, root, modals)
 	}
 
 	// Всплывающая подсказка (поверх всего, включая модальные диалоги).
@@ -858,13 +876,30 @@ func (e *Engine) renderFrame() output.Frame {
 // drawOverlays рекурсивно обходит дерево виджетов и вызывает DrawOverlay
 // у тех, кто реализует OverlayDrawer и имеет активный overlay (например, открытый dropdown).
 // Вызывается ПОСЛЕ отрисовки всего дерева — overlay рисуется поверх всех виджетов.
-func drawOverlays(w widget.Widget, ctx widget.DrawContext) {
+//
+// hosted==true — активен PopupSink: оверлеи, реализующие OverlayBoundsProvider
+// с непустым прямоугольником, выносятся в отдельные нативные окна-попапы и
+// здесь (в основном холсте) НЕ рисуются. Прочие оверлеи (например, меню выбора
+// локали widget.Window, не реализующее OverlayBoundsProvider) рисуются как прежде.
+func drawOverlays(w widget.Widget, ctx widget.DrawContext, hosted bool) {
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
-		od.DrawOverlay(ctx)
+		if !hosted || !isHostedOverlay(w) {
+			od.DrawOverlay(ctx)
+		}
 	}
 	for _, child := range w.Children() {
-		drawOverlays(child, ctx)
+		drawOverlays(child, ctx, hosted)
 	}
+}
+
+// isHostedOverlay сообщает, выносится ли активный overlay виджета w в отдельное
+// нативное окно (реализует OverlayBoundsProvider и его прямоугольник непуст).
+func isHostedOverlay(w widget.Widget) bool {
+	ob, ok := w.(widget.OverlayBoundsProvider)
+	if !ok {
+		return false
+	}
+	return !ob.OverlayBounds().Empty()
 }
 
 func mkdirAll(dir string) error {

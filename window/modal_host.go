@@ -80,9 +80,10 @@ type hostedModal struct {
 	owner  NativeWindow // окно, отключаемое на время этой модалки
 
 	// Заполняются в create() (на UI-потоке).
-	eng    *engine.Engine
-	native NativeWindow
-	surf   *surface
+	eng       *engine.Engine
+	native    NativeWindow
+	surf      *surface
+	popupHost *popupHost // хост popup-оверлеев диалога (nil без поддержки)
 
 	created  bool // окно фактически создано
 	closed   bool // запрошено закрытие (до/после создания)
@@ -279,6 +280,26 @@ func (h *dialogHost) create(hm *hostedModal) {
 	eng.Start()
 	go surf.framePump()
 
+	// Хост popup-оверлеев для движка диалога: dropdown'ы/меню внутри диалога
+	// открываются в собственных окнах ОС, спозиционированных от окна диалога.
+	if _, ok := native.(popupWindow); ok {
+		if inv, ok := native.(uiThreadInvoker); ok {
+			ph := newPopupHost(native, inv, eng, scale)
+			eng.SetPopupSink(ph.apply)
+			h.mu.Lock()
+			hm.popupHost = ph
+			h.mu.Unlock()
+			// Деактивация окна диалога (клик в другое приложение) закрывает попапы.
+			if an, ok := native.(activationNotifier); ok {
+				an.SetOnActivate(func(active bool) {
+					if !active {
+						eng.CloseAllOverlays()
+					}
+				})
+			}
+		}
+	}
+
 	// Вторичное окно с собственным соединением (X11) само не обслуживается
 	// общим циклом сообщений — запускаем его насос событий. Win32 не реализует
 	// eventPumper (одна очередь на все окна): для него это no-op, путь неизменен.
@@ -321,7 +342,14 @@ func (h *dialogHost) teardown(hm *hostedModal) {
 	owner := hm.owner
 	native := hm.native
 	eng := hm.eng
+	ph := hm.popupHost
 	h.mu.Unlock()
+
+	// Закрываем окна popup-оверлеев диалога (его движок останавливается — sink
+	// больше не вызовется, поэтому окна не закроются сами).
+	if ph != nil {
+		ph.closeAll()
+	}
 
 	// Восстанавливаем глобальные screenBounds под оставшееся верхнее окно.
 	if rw > 0 && rh > 0 {
