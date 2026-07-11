@@ -1055,8 +1055,18 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 
 	case wmActivate:
 		// LOWORD(wparam): WA_INACTIVE=0, WA_ACTIVE=1, WA_CLICKACTIVE=2.
+		// lparam — hwnd окна, к которому уходит/от которого приходит фокус.
+		// Деактивация в пользу ДРУГОГО НАШЕГО окна (окно-попап меню, окно
+		// диалога) — не деактивация приложения: показ окна-попапа иначе сам
+		// себя закрывал (носитель ловил false → CloseAllOverlays), а титлбар
+		// носителя мигал «неактивным» при открытом меню — системные меню так
+		// не делают.
+		active := wparam&0xFFFF != 0
+		if !active && lparam != 0 && lookupWin32(lparam) != nil {
+			return 0
+		}
 		if w.onActivate != nil {
-			w.onActivate(wparam&0xFFFF != 0)
+			w.onActivate(active)
 		}
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
 		return ret
