@@ -31,6 +31,16 @@ type foregrounder interface {
 	SetForeground()
 }
 
+// eventPumper — бэкенд, вторичное окно которого НЕ обслуживается общим циклом
+// сообщений и требует отдельного насоса событий. dialogHost вызывает
+// StartEventPump после создания окна и подключения ввода. Win32 не реализует
+// (одна очередь сообщений маршрутизирует события всех окон по hwnd); X11
+// реализует — у каждого окна собственное соединение, которое иначе никто не
+// читает (RunEventLoop для вторичного окна dialogHost не вызывает).
+type eventPumper interface {
+	StartEventPump()
+}
+
 // installModalHost устанавливает хост нативных модалок, если бэкенд
 // поддерживает owner-окна и маршалинг на UI-поток, а движок принимает хост.
 // На бэкендах без поддержки (X11/Wayland/Cocoa) и в headless — no-op: движок
@@ -268,6 +278,13 @@ func (h *dialogHost) create(hm *hostedModal) {
 	surf.setupExposeRedraw()
 	eng.Start()
 	go surf.framePump()
+
+	// Вторичное окно с собственным соединением (X11) само не обслуживается
+	// общим циклом сообщений — запускаем его насос событий. Win32 не реализует
+	// eventPumper (одна очередь на все окна): для него это no-op, путь неизменен.
+	if ep, ok := native.(eventPumper); ok {
+		ep.StartEventPump()
+	}
 
 	// created — последним, под тем же мьютексом, что читает CloseModal.
 	h.mu.Lock()
