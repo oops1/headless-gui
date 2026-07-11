@@ -2459,6 +2459,127 @@ Undo-история и `OnChange` работают как у обычных пр
 
 ---
 
+## Нативные окна (v3.10)
+
+Модальные диалоги и popup-оверлеи (dropdown/меню) выносятся в **собственные
+окна ОС**. Плюс — иконка в трее, balloon-уведомления и живое превью окна в
+панели задач (Windows). Всё это живёт под `window/` за build-тегами; на
+платформах без поддержки — вежливый фолбэк или no-op. Headless-контракт не
+затронут: без нативного окна диалоги и оверлеи рисуются в холст, как раньше.
+
+### Поведение по платформам
+
+| Возможность | Win32 | X11 | Wayland / macOS / headless |
+|---|---|---|---|
+| Модалка в своём окне (`ModalHost`) | нативно | in-canvas | in-canvas фолбэк |
+| Popup-оверлей в своём окне (`PopupSink`) | нативно | нативно | in-canvas фолбэк |
+| Трей / balloon / превью | да | no-op (ошибка/false) | no-op (ошибка/false) |
+
+Фолбэк выбирается автоматически по способностям бэкенда (наличие owner-окон,
+окон-попапов, маршалинга на UI-поток); приложению делать ничего не нужно.
+
+### Модальные диалоги в своих окнах
+
+Движок делегирует показ модалки хосту, если он установлен:
+
+```go
+// engine.ModalHost — хост нативных модалок (реализует window.dialogHost).
+eng.SetModalHost(host)          // window.Window ставит его сам в Run()
+```
+
+`window.Window.Run()` вызывает `installModalHost()` — если бэкенд умеет
+owner-окна (Win32), каждый `*widget.Dialog` открывается в отдельном окне ОС со
+своим вторичным движком (холст ровно по размеру диалога). Диалог теперь может
+быть **больше** главного окна и перетаскиваться за его пределы. `Dialog`
+получил для этого:
+
+```go
+dlg.OnDragMove = func(dx, dy int) { /* перенос нативного окна */ } // ставит хост
+dlg.CornerRadius = 8   // скругление окна диалога (Win11 — DWM, Win10 — регион)
+```
+
+Диалог поверх диалога (например, файловый из обычного) даёт стек окон: owner
+нового — верхнее окно стека; закрытие возвращает фокус вниз по стеку.
+
+### Popup-оверлеи в своих окнах (dropdown / меню)
+
+```go
+// engine.PopupSink — приёмник кадров активных оверлеев.
+eng.SetPopupSink(func(frames []engine.PopupFrame) { /* хост окон-попапов */ })
+```
+
+Оверлей-виджет объявляет себя двумя интерфейсами (уже реализованы у `Dropdown`,
+`PopupMenu`, каскадных подменю):
+
+```go
+type OverlayDrawer interface { HasOverlay() bool; DrawOverlay(ctx DrawContext) }
+type OverlayBoundsProvider interface { OverlayBounds() image.Rectangle } // абс. лог. коорд.
+```
+
+Движок рендерит каждый оверлей в отдельный буфер и отдаёт `PopupSink`; хост
+(`window.popupHost`) создаёт/двигает/закрывает окно-попап у нужной точки и
+транслирует его мышь обратно в движок-носитель. Пока `PopupSink` установлен,
+`widget.SetPopupsHosted(true)` отключает клэмп меню по границам холста —
+позиционированием занимается хост, оверлей вправе выходить за окно.
+
+### Трей, balloon-уведомления, превью (Windows)
+
+Публичный API на `*window.Window`. Можно вызывать до `Run()` (состояние
+буферизуется и применяется при создании окна) или из обработчиков UI. На
+не-Windows — no-op/ошибка.
+
+```go
+// Иконка в трее. icon масштабируется до SM_CXSMICON, прозрачность из альфы.
+// Повторный вызов — обновление (NIM_MODIFY). Дефолт: если иконка задана и
+// OnTrayClick не переопределён, двойной левый клик восстанавливает окно.
+win.SetTrayIcon(icon image.Image, tooltip string) error
+win.RemoveTrayIcon()
+win.SetOnTrayClick(func(button widget.MouseButton, doubleClick bool))
+
+// Трей-меню — НАШЕ widget.PopupMenu по правому клику, рендерится в окне-попапе
+// у курсора (даже при скрытом главном окне). Меню добавляется в дерево корня.
+win.SetTrayMenu(menu *widget.PopupMenu)
+
+// Balloon-уведомление (NIF_INFO). Значок по severity: Info/Question→NIIF_INFO,
+// Warning→NIIF_WARNING, Error→NIIF_ERROR. ТРЕБУЕТ ранее заданной иконки трея —
+// иначе возвращает ошибку.
+win.ShowBalloon(title, text string, severity widget.DialogSeverity) error
+win.SetOnBalloonClick(func())
+
+// Сворачивание в трей (SW_HIDE — исчезает из панели задач) и восстановление.
+win.HideToTray()
+win.RestoreFromTray()
+```
+
+Пример:
+
+```go
+win := window.New(eng, "My App")
+win.SetTrayIcon(iconImg, "My App")             // до Run()
+m := widget.NewPopupMenu()
+m.AddItem("Показать", func() { win.RestoreFromTray() })
+m.AddItem("Выход",    func() { win.Close() })
+win.SetTrayMenu(m)
+win.SetOnBalloonClick(func() { win.RestoreFromTray() })
+go func() { win.ShowBalloon("Готово", "Задача выполнена", widget.SeverityInfo) }()
+win.Run()
+```
+
+**Превью в панели задач.** Раньше `PrintWindow`/DWM-превью нашего borderless-окна
+были чёрными (блит шёл мимо путей захвата). Теперь `wndProc` обрабатывает
+`WM_PRINTCLIENT`/`WM_PRINT` — блитит кэш последнего кадра (`frameBuf`) в
+переданный HDC. Этого достаточно для миниатюры при наведении и Aero Peek.
+Дополнительно есть честный **iconic-путь** (`DWMWA_FORCE_ICONIC_REPRESENTATION`
++ `DWMWA_HAS_ICONIC_BITMAP`, `WM_DWMSENDICONICTHUMBNAIL` /
+`WM_DWMSENDICONICLIVEPREVIEWBITMAP` из кэша кадра). Он **выключен по умолчанию**
+и включается переменной окружения `HEADLESS_GUI_ICONIC_PREVIEW=1` — на случай,
+если WM_PRINTCLIENT окажется недостаточно на конкретной системе.
+
+Идентификаторы сообщений: `InvokeOnUIThread` занимает `WM_APP` (0x8000);
+callback иконки трея — `WM_APP+1` (`wmTrayCallback`).
+
+---
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

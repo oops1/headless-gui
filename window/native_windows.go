@@ -318,6 +318,13 @@ type Win32Window struct {
 	cursorHandle uintptr            // текущий желаемый курсор (HCURSOR)
 	cursorCache  map[int]uintptr    // кэш загруженных IDC-курсоров
 
+	// Трей/уведомления (Shell_NotifyIcon) — см. tray_windows.go.
+	trayAdded      bool           // иконка добавлена (NIM_ADD выполнен)
+	trayHIcon      windows.Handle // текущий HICON иконки трея (уничтожаем при замене)
+	onTrayClick    func(button int, doubleClick bool)
+	onBalloonClick func()
+	iconicEnabled  bool // включено iconic-представление окна (DWM превью)
+
 	// Callbacks
 	onResize      func(w, h int)
 	onExpose      func(r image.Rectangle)
@@ -501,6 +508,11 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 
 	procShowWindow.Call(hwnd, showCmd)
 	procUpdateWindow.Call(hwnd)
+
+	// Главное окно (не попап): опциональный iconic-путь превью в панели задач.
+	if centerOnScreen {
+		w.maybeEnableIconic()
+	}
 
 	return nil
 }
@@ -1203,6 +1215,28 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			w.onChar(r)
 		}
 		return 0
+
+	case wmTrayCallback:
+		// Событие иконки трея (см. NOTIFYICONDATA.uCallbackMessage).
+		w.handleTrayCallback(lparam)
+		return 0
+
+	case wmPrintClient, wmPrint:
+		// Превью окна (таскбар/Aero Peek): блитим кэш кадра в переданный HDC
+		// (wParam), иначе PrintWindow/DWM показывают чёрное.
+		w.handlePrintClient(wparam)
+		return 0
+
+	case wmDwmSendIconicThumbnail:
+		// Iconic-миниатюра из кэша кадра (только при HEADLESS_GUI_ICONIC_PREVIEW=1).
+		if w.handleIconicThumbnail(lparam) {
+			return 0
+		}
+
+	case wmDwmSendIconicLivePreviewBitmap:
+		if w.handleIconicLivePreview() {
+			return 0
+		}
 	}
 
 	ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)

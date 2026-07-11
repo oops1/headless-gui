@@ -53,7 +53,9 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **Grid layout** — WPF-style `<Grid>` with Pixel / Star / Auto sizing, `Grid.Row`, `Grid.Column`, spans
 - **Theming** — built-in Dark and Light themes, 80+ customizable color tokens
 - **Drag & drop** — panels are draggable with recursive child movement
-- **Modal dialogs** — centered overlay with background dim, input isolation
+- **Modal dialogs** — centered overlay with background dim, input isolation; on Win32/X11 each dialog opens in its **own OS window** (can exceed the main window and drag outside it), with in-canvas fallback on Wayland/macOS/headless
+- **Native popups** — dropdowns and context/tray menus open in their own OS windows at the target point and are **not clipped** by the main window's edge (Win32/X11; in-canvas fallback elsewhere)
+- **Tray & notifications (Windows)** — `SetTrayIcon`/`SetTrayMenu`/`ShowBalloon` (Shell_NotifyIcon), balloon severity icons, `HideToTray`/`RestoreFromTray`, and live taskbar/Aero-Peek thumbnails; polite no-ops off Windows
 - **Font support** — TTF fonts via `golang.org/x/image/font`; custom registration by name
 - **Cascading menus** — nested submenus with arrow indicators and keyboard navigation
 - **Native window** — platform-native backends (Win32/Cocoa/X11/**Wayland**), zero CGO on all platforms; Wayland speaks the raw wire protocol (xdg-shell + wl_shm) over a unix socket and is auto-selected when a compositor is available (`HEADLESS_GUI_X11=1` forces X11); window chrome follows the theme, reacts to OS focus (inactive title bar), repaints from the frame cache on expose (X11/Win32; Wayland retains content)

@@ -1424,6 +1424,65 @@ skip frames. Input comes back as JSON (mouse/wheel/keys; the browser's
 `e.keyCode` matches `widget.KeyCode`). Demo: `go run ./cmd/webdemo` →
 http://localhost:8091.
 
+### Native modal windows and popups (v3.10)
+
+Since v3.10 modal dialogs and popup overlays (dropdowns, context/tray menus)
+open in **their own OS windows** rather than being drawn inside the main window:
+
+- A **modal dialog** opens as a separate window, so it can be larger than the
+  main window and dragged outside it. Nothing to configure — `window.Window`
+  installs the host in `Run()`. A dialog on top of a dialog (a file dialog from
+  a regular one) forms a stack of windows.
+- **Dropdowns and menus** open in a small window at the target point and are
+  **not clipped** by the main window's edge.
+- Works natively on **Windows (Win32)** and **Linux (X11)**. On **Wayland,
+  macOS and headless** it falls back to the previous behavior: everything is
+  drawn into the canvas (functionally identical, just within the window).
+
+```go
+dlg := widget.NewDialog("Settings", 1000, 700) // may be larger than the window
+dlg.CornerRadius = 8                             // rounded dialog window corners
+eng.ShowModal(dlg)
+```
+
+### Tray and notifications (Windows)
+
+`window.Window` can drive the notification area. Methods may be called before
+`Run()` (state is applied when the window is created) or from UI handlers. On
+non-Windows platforms they are polite no-ops (return an error/nothing).
+
+```go
+win := window.New(eng, "My App")
+
+// Tray icon (scaled to the system size, transparency from the alpha channel).
+win.SetTrayIcon(iconImg, "My App")
+
+// Right-click context menu (our widget.PopupMenu, shown at the cursor).
+m := widget.NewPopupMenu()
+m.AddItem("Show", func() { win.RestoreFromTray() })
+m.AddItem("Hide", func() { win.HideToTray() })
+m.AddItem("Quit", func() { win.Close() })
+win.SetTrayMenu(m)
+
+// Icon clicks (otherwise the default: double left-click restores the window).
+win.SetOnTrayClick(func(btn widget.MouseButton, dbl bool) { /* ... */ })
+
+// Balloon notification (icon by severity). Requires a tray icon to be set.
+win.ShowBalloon("Done", "Task finished", widget.SeverityInfo)
+win.SetOnBalloonClick(func() { win.RestoreFromTray() })
+
+// Minimize to tray / restore.
+win.HideToTray()
+win.RestoreFromTray()
+
+win.Run()
+```
+
+**Taskbar preview.** The hover thumbnail and Aero Peek show the live window
+contents (they used to be black). An additional DWM iconic path is enabled with
+the `HEADLESS_GUI_ICONIC_PREVIEW=1` environment variable (not needed by
+default).
+
 ---
 
 ## Module Structure

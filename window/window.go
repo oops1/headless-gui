@@ -209,6 +209,19 @@ type Window struct {
 	// popupHost — хост popup-оверлеев (dropdown/меню в собственных окнах ОС).
 	// nil, если бэкенд не поддерживает окна-попапы (Wayland/macOS → in-canvas).
 	popupHost *popupHost
+
+	// ── Трей и уведомления (Windows) ─────────────────────────────────────────
+	// Сеттеры трея вызываются до Run() (native ещё nil), поэтому желаемое
+	// состояние буферизуется и применяется в Run() после создания окна
+	// (applyPendingTray). На платформах без поддержки (native не trayHost) —
+	// тихий no-op. См. tray.go / tray_windows.go.
+	trayIcon          image.Image
+	trayTooltip       string
+	trayIconWant      bool
+	trayMenu          *widget.PopupMenu
+	onTrayClick       func(button widget.MouseButton, doubleClick bool)
+	onBalloonClick    func()
+	trayDispatcherSet bool
 }
 
 // New создаёт окно для заданного движка с указанным заголовком.
@@ -348,6 +361,10 @@ func (win *Window) Run() error {
 	// Хост popup-оверлеев: если бэкенд умеет окна-попапы (Win32/X11) — dropdown'ы
 	// и меню будут открываться в собственных окнах ОС и выходить за границы окна.
 	win.installPopupHost()
+
+	// Применяем отложенное состояние трея/уведомлений (иконка, меню, колбэки),
+	// заданное до Run(). На платформах без поддержки — no-op.
+	win.applyPendingTray()
 
 	// Запускаем горутину чтения кадров из движка
 	go win.framePump()
