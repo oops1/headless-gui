@@ -916,6 +916,7 @@
                 <TextBlock Left="24" Top="140" Foreground="#9399B2" Text="Ввод и прогресс:"/>
                 <Button Name="dlgInput" Left="24" Top="164" Width="180" Height="34" Content="Ввод строки"/>
                 <Button Name="dlgProgress" Left="214" Top="164" Width="220" Height="34" Content="Прогресс (индикатор)"/>
+                <Button Name="dlgBig" Left="444" Top="164" Width="220" Height="34" Content="Диалог больше окна"/>
 
                 <TextBlock Left="24" Top="222" Foreground="#9399B2" Text="Файловые диалоги (файловая система процесса):"/>
                 <Button Name="dlgOpen" Left="24" Top="246" Width="180" Height="34" Content="Открыть файл…"/>
@@ -938,6 +939,36 @@
                          Left="540" Top="460" Width="320" Height="180"/>
                 <Label Name="editStats" Left="24" Top="646" Width="700" Height="20"
                        Text="" Foreground="#6C7086"/>
+            </Canvas>
+        </TabItem>
+
+        <TabItem Header="Система">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="Трей · уведомления · превью окна (только Windows)"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+
+                <TextBlock Left="24" Top="58" Foreground="#9399B2"
+                           Text="Balloon-уведомления (системные, Shell_NotifyIcon · NIF_INFO):"/>
+                <Button Name="sysBalloonInfo" Left="24" Top="82" Width="180" Height="34" Content="Balloon: инфо"/>
+                <Button Name="sysBalloonWarn" Left="214" Top="82" Width="200" Height="34" Content="Balloon: предупреждение"/>
+                <Button Name="sysBalloonErr" Left="424" Top="82" Width="180" Height="34" Content="Balloon: ошибка" Style="Accent"/>
+
+                <TextBlock Left="24" Top="140" Foreground="#9399B2"
+                           Text="Окно и трей:"/>
+                <Button Name="sysHide" Left="24" Top="164" Width="220" Height="34" Content="Свернуть в трей"/>
+                <TextBlock Left="256" Top="172" Foreground="#6C7086"
+                           Text="Иконка остаётся в трее: двойной левый клик — восстановить, правый клик — меню."/>
+
+                <TextBlock Left="24" Top="222" Foreground="#9399B2"
+                           Text="Превью в панели задач:"/>
+                <TextBlock Left="24" Top="246" Width="1010" Height="40" TextWrapping="Wrap"
+                           Foreground="#A6E3A1"
+                           Text="Наведите указатель на кнопку приложения в панели задач — во всплывающей миниатюре и в Aero Peek видно живое содержимое окна (а не чёрный прямоугольник)."/>
+
+                <TextBlock Left="24" Top="320" Width="1010" Height="120" TextWrapping="Wrap"
+                           Foreground="#6C7086"
+                           Text="Иконка в трее ставится при старте (синий квадрат с белой «G»). Трей-меню (правый клик): Показать / Свернуть / Balloon / Выход — оно рендерится в собственном окне-попапе у курсора, поэтому появляется даже когда главное окно скрыто. На платформах кроме Windows эти функции — вежливые no-op; кнопки покажут сообщение «только Windows»."/>
             </Canvas>
         </TabItem>
 

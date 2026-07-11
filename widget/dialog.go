@@ -57,6 +57,7 @@ type Dialog struct {
 	Dim         color.RGBA // затемнение фона
 	Shadow      color.RGBA // тень под диалогом (A=0 — без тени)
 	TitleHeight int
+	CornerRadius int // радиус скругления корпуса (по умолчанию dlgCorner)
 
 	// ShowLocaleIndicator — показывать индикатор текущей локали (напр. «EN»)
 	// в заголовке диалога. По умолчанию выключен (принятый дизайн — ✕).
@@ -102,6 +103,12 @@ type Dialog struct {
 	dragLastX  int
 	dragLastY  int
 	capMgr     CaptureManager
+
+	// OnDragMove, если задан, вызывается при перетаскивании за заголовок ВМЕСТО
+	// сдвига виджета по холсту (по образцу Window.OnDragMove). Используется,
+	// когда диалог показан в собственном нативном окне (window.dialogHost):
+	// сам виджет в своём холсте неподвижен, двигается нативное окно ОС.
+	OnDragMove func(dx, dy int)
 }
 
 // OnLanguageChange регистрирует применение перевода при смене языка
@@ -163,6 +170,7 @@ func NewDialog(title string, width, height int) *Dialog {
 		Dim:             win10.DialogDim,
 		Shadow:          win10.ShadowColor,
 		TitleHeight:     dlgTitleH,
+		CornerRadius:    dlgCorner,
 		ShowCloseButton: true,
 		Base: Base{
 			bounds: image.Rect(0, 0, width, height),
@@ -294,7 +302,10 @@ func (d *Dialog) Draw(ctx DrawContext) {
 	}
 
 	// Современный вид (принятый дизайн): скругление, мягкая тень, ✕.
-	cr := dlgCorner
+	cr := d.CornerRadius
+	if cr < 0 {
+		cr = 0
+	}
 
 	// Тень: полосы с честным альфа-смешиванием справа и снизу.
 	if d.Shadow.A > 0 {
@@ -394,6 +405,14 @@ func (d *Dialog) OnMouseMove(x, y int) {
 	}
 	dx, dy := x-d.dragLastX, y-d.dragLastY
 	if dx == 0 && dy == 0 {
+		return
+	}
+	if d.OnDragMove != nil {
+		// Нативный режим: движется само окно ОС, диалог в своём холсте
+		// неподвижен. dragLast НЕ обновляем — координаты мыши относительны
+		// окну, и после его сдвига курсор возвращается к точке захвата
+		// (как в Window.OnMouseMove). Обновление dragLast дало бы осцилляцию.
+		d.OnDragMove(dx, dy)
 		return
 	}
 	d.dragLastX, d.dragLastY = x, y

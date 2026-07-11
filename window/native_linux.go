@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -25,7 +26,10 @@ type X11Window struct {
 	height    int
 	title     string
 	maximized bool
-	closed    bool
+	// closed — окно закрыто/уничтожается. Атомарный: главное окно читает его в
+	// RunEventLoop, вторичное — в eventPumpLoop, а Close() (для вторичного окна
+	// вызывается из горутины teardown) пишет — доступ из разных горутин.
+	closed    atomic.Bool
 
 	seqNum    uint16 // sequence number for requests
 	mu        sync.Mutex
@@ -66,6 +70,37 @@ type X11Window struct {
 	atomWMStateMaxH    uint32
 	atomWMStateMaxV    uint32
 	atomNetWMState     uint32
+	atomNetWMStateModal uint32 // _NET_WM_STATE_MODAL (модальность у EWMH-WM)
+	atomNetActiveWindow uint32 // _NET_ACTIVE_WINDOW (передача фокуса окну)
+
+	// disabled — окно заблокировано на время модального диалога (аналог
+	// Win32 EnableWindow(false)). У X11 нет системного отключения ввода,
+	// поэтому обработчик событий сам ДРОПАЕТ ввод (Key/Button/Motion) при
+	// взведённом флаге, продолжая обрабатывать Expose/Configure. Атомарный —
+	// читается из насоса событий, пишется из произвольной горутины (dialogHost).
+	disabled atomic.Bool
+
+	// Позиция клиентской области в ЭКРАННЫХ координатах. GetPosition обязан
+	// возвращать правдивое значение из ЛЮБОЙ горутины, но запрос-ответ
+	// (TranslateCoordinates) по этому соединению небезопасен: conn читает цикл
+	// событий, а SendMouseMove вызывает OnDragMove→GetPosition прямо в горутине
+	// насоса событий (блокирующее ожидание reply дало бы дедлок — читать ответ
+	// некому). Поэтому позицию КЭШируем: seed из Create (верно без WM сразу),
+	// обновление из ConfigureNotify и оптимистично из SetPosition.
+	// posSynthetic: у reparenting-WM (openbox) достоверны координаты только
+	// SYNTHETIC ConfigureNotify (root-relative, ICCCM 4.2.3); увидев такое,
+	// real-события (parent-relative под рамкой) в кэш больше не берём.
+	posMu        sync.Mutex
+	posX, posY   int
+	posCached    bool
+	posSynthetic bool
+
+	// Атомы UTF-8 заголовка (EWMH) и Motif-хинтов — интернируются в Create,
+	// чтобы SetTitle/borderless работали и после первого показа.
+	atomUTF8String    uint32
+	atomNetWMName     uint32
+	atomNetWMIconName uint32
+	atomMotifHints    uint32
 }
 
 type x11Screen struct {
@@ -91,12 +126,9 @@ func NewNativeWindow() NativeWindow {
 	return &X11Window{}
 }
 
-func (w *X11Window) Create(title string, width, height int) error {
-	w.title = title
-	w.width = width
-	w.height = height
-
-	// Подключаемся к X-серверу
+// connect подключается к X-серверу (Unix socket из DISPLAY) и выполняет
+// протокольный setup. Общий для главного окна (Create) и окна-попапа (CreatePopup).
+func (w *X11Window) connect() error {
 	display := os.Getenv("DISPLAY")
 	if display == "" {
 		display = ":0"
@@ -129,6 +161,17 @@ func (w *X11Window) Create(title string, width, height int) error {
 		conn.Close()
 		return fmt.Errorf("x11: setup: %w", err)
 	}
+	return nil
+}
+
+func (w *X11Window) Create(title string, width, height int) error {
+	w.title = title
+	w.width = width
+	w.height = height
+
+	if err := w.connect(); err != nil {
+		return err
+	}
 
 	// Создаём окно
 	w.wid = w.x11GenID()
@@ -143,10 +186,24 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomNetWMState = w.x11InternAtom("_NET_WM_STATE")
 	w.atomWMStateMaxH = w.x11InternAtom("_NET_WM_STATE_MAXIMIZED_HORZ")
 	w.atomWMStateMaxV = w.x11InternAtom("_NET_WM_STATE_MAXIMIZED_VERT")
+	w.atomNetWMStateModal = w.x11InternAtom("_NET_WM_STATE_MODAL")
+	w.atomNetActiveWindow = w.x11InternAtom("_NET_ACTIVE_WINDOW")
+	w.atomUTF8String = w.x11InternAtom("UTF8_STRING")
+	w.atomNetWMName = w.x11InternAtom("_NET_WM_NAME")
+	w.atomNetWMIconName = w.x11InternAtom("_NET_WM_ICON_NAME")
+	w.atomMotifHints = w.x11InternAtom("_MOTIF_WM_HINTS")
 
 	// CreateWindow request
 	x := (int(w.screen.WidthInPixels) - width) / 2
 	y := (int(w.screen.HeightInPixels) - height) / 2
+
+	// Seed кэша позиции: без WM окно останется ровно здесь, поэтому уже сейчас
+	// значение правдиво; под reparenting-WM его скорректирует synthetic
+	// ConfigureNotify после карты.
+	w.posMu.Lock()
+	w.posX, w.posY = x, y
+	w.posCached = true
+	w.posMu.Unlock()
 
 	eventMask := uint32(
 		0x00000001 | // KeyPress
@@ -174,13 +231,16 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.x11ChangeProperty(w.wid, w.atomWMProtocols, 4 /*ATOM*/, 32,
 		uint32ToBytes(w.atomWMDeleteWindow))
 
-	// Borderless — убираем WM decorations через Motif hints
-	motifHints := w.x11InternAtom("_MOTIF_WM_HINTS")
-	// flags=2 (decorations), decorations=0
-	hints := make([]byte, 20)
-	binary.LittleEndian.PutUint32(hints[0:4], 2)    // flags = MWM_HINTS_DECORATIONS
-	binary.LittleEndian.PutUint32(hints[8:12], 0)   // decorations = 0
-	w.x11ChangeProperty(w.wid, motifHints, motifHints, 32, hints)
+	// Borderless — убираем WM decorations через Motif hints. Свойство ставим
+	// ДО MapWindow (иначе WM успевает нарисовать рамку). Структура MwmHints —
+	// 5×CARD32 (flags, functions, decorations, input_mode, status); тип
+	// property — сам атом _MOTIF_WM_HINTS (НЕ CARDINAL), format 32.
+	if w.atomMotifHints != 0 {
+		hints := make([]byte, 20)
+		binary.LittleEndian.PutUint32(hints[0:4], 2)  // flags = MWM_HINTS_DECORATIONS
+		binary.LittleEndian.PutUint32(hints[8:12], 0) // decorations = 0 (нет рамки)
+		w.x11ChangeProperty(w.wid, w.atomMotifHints, w.atomMotifHints, 32, hints)
+	}
 
 	// Window title
 	w.x11SetTitle(w.wid, title)
@@ -191,11 +251,59 @@ func (w *X11Window) Create(title string, width, height int) error {
 	return nil
 }
 
+// CreatePopup создаёт окно-вьюпорт оверлея как override-redirect: WM его не
+// трогает (ни рамки, ни фокуса, ни декораций — родное поведение всплывающих
+// меню). Позиция задаётся позже (SetPosition в корневых координатах). У окна
+// собственное соединение и насос событий (StartEventPump), как у вторичных
+// окон диалогов.
+func (w *X11Window) CreatePopup(width, height int) error {
+	w.width = width
+	w.height = height
+
+	if err := w.connect(); err != nil {
+		return err
+	}
+
+	w.wid = w.x11GenID()
+	w.gcID = w.x11GenID()
+	w.x11LoadKeyboardMapping()
+
+	// Значения в порядке возрастания бит маски: BackPixel(0x02),
+	// OverrideRedirect(0x200), EventMask(0x800).
+	eventMask := uint32(
+		0x00000001 | // KeyPress
+			0x00000002 | // KeyRelease
+			0x00000004 | // ButtonPress
+			0x00000008 | // ButtonRelease
+			0x00000040 | // PointerMotion
+			0x00008000) // Exposure
+	values := []uint32{
+		w.screen.BlackPixel, // background
+		1,                   // override-redirect = true
+		eventMask,
+	}
+	valueMask := uint32(0x00000002 | 0x00000200 | 0x00000800) // BackPixel|OverrideRedirect|EventMask
+
+	// Создаём в (0,0); реальную позицию выставит хост через SetPosition.
+	w.x11CreateWindow(w.wid, w.screen.Root, 0, 0,
+		uint16(width), uint16(height), 0, valueMask, values)
+	w.x11CreateGC(w.gcID, w.wid)
+
+	// Seed кэша позиции (override-redirect: MoveWindow задаёт корневые координаты).
+	w.posMu.Lock()
+	w.posX, w.posY = 0, 0
+	w.posCached = true
+	w.posMu.Unlock()
+
+	w.x11MapWindow(w.wid)
+	return nil
+}
+
 func (w *X11Window) RunEventLoop() error {
 	buf := make([]byte, 32)
-	for !w.closed {
+	for !w.closed.Load() {
 		if !w.readFull(buf) {
-			if w.closed {
+			if w.closed.Load() {
 				return nil
 			}
 			return fmt.Errorf("x11: read event: соединение закрыто")
@@ -210,6 +318,17 @@ func (w *X11Window) RunEventLoop() error {
 // при перечитывании раскладки по MappingNotify), не терялись.
 func (w *X11Window) handleX11Event(buf []byte) {
 	evType := buf[0] & 0x7F
+	// Окно заблокировано модалкой (SetEnabled(false)): дропаем ввод
+	// (KeyPress=2, KeyRelease=3, ButtonPress=4, ButtonRelease=5, MotionNotify=6),
+	// но НЕ Expose/ConfigureNotify/ClientMessage — окно должно перерисовываться
+	// и продолжать реагировать на WM. Этого достаточно для модальности: родитель
+	// не отвечает на ввод, пока открыт диалог.
+	if w.disabled.Load() {
+		switch evType {
+		case 2, 3, 4, 5, 6:
+			return
+		}
+	}
 	switch evType {
 		case 2: // KeyPress
 			keycode := buf[1]
@@ -294,6 +413,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 			}
 
 		case 22: // ConfigureNotify
+			// Кэш позиции для GetPosition (см. updatePosFromConfigure).
+			cx, cy, synthetic := parseConfigureNotifyPos(buf)
+			w.updatePosFromConfigure(cx, cy, synthetic)
 			newW := int(binary.LittleEndian.Uint16(buf[20:22]))
 			newH := int(binary.LittleEndian.Uint16(buf[22:24]))
 			if newW != w.width || newH != w.height {
@@ -309,10 +431,10 @@ func (w *X11Window) handleX11Event(buf []byte) {
 			if atom == w.atomWMDeleteWindow {
 				if w.onClose != nil {
 					if w.onClose() {
-						w.closed = true
+						w.closed.Store(true)
 					}
 				} else {
-					w.closed = true
+					w.closed.Store(true)
 				}
 			}
 
@@ -373,7 +495,7 @@ func (w *X11Window) x11ReloadKeyboardMapping() {
 }
 
 func (w *X11Window) Close() {
-	w.closed = true
+	w.closed.Store(true)
 	if w.conn != nil {
 		w.conn.Close()
 	}
@@ -401,12 +523,59 @@ func (w *X11Window) GetSize() (int, int) {
 func (w *X11Window) SetPosition(x, y int) {
 	if w.wid != 0 {
 		w.x11MoveWindow(w.wid, x, y)
+		// Оптимистично обновляем кэш: под reparenting-WM ConfigureWindow
+		// трактуется как запрос корневой позиции (WM двигает рамку), поэтому
+		// x,y ≈ будущие экранные координаты; synthetic ConfigureNotify уточнит.
+		// Даёт плавный drag (GetPosition сразу после SetPosition не отстаёт).
+		w.posMu.Lock()
+		w.posX, w.posY = x, y
+		w.posCached = true
+		w.posMu.Unlock()
 	}
 }
 
+// GetPosition возвращает экранные координаты клиентской области окна.
+// Значение берётся из кэша (см. поле posX/posY): запрос-ответ по этому
+// соединению здесь недопустим — его читает цикл событий, а вызов приходит и из
+// чужой горутины (dialogHost.centerOn), и прямо из горутины насоса событий
+// (OnDragMove). Кэш заполняется seed'ом в Create, событиями ConfigureNotify
+// (у reparenting-WM — по достоверным synthetic) и оптимистично в SetPosition.
 func (w *X11Window) GetPosition() (int, int) {
-	// Упрощённо — возвращаем 0,0 (полная реализация требует GetGeometry)
-	return 0, 0
+	w.posMu.Lock()
+	defer w.posMu.Unlock()
+	if !w.posCached {
+		return 0, 0
+	}
+	return w.posX, w.posY
+}
+
+// updatePosFromConfigure обновляет кэш позиции по данным ConfigureNotify.
+// synthetic — событие, посланное WM через SendEvent (ICCCM 4.2.3): его x,y —
+// корневые (экранные) координаты клиентской области. У reparenting-WM только
+// такие координаты достоверны; real-события несут координаты относительно рамки.
+// Без WM reparent'а нет и координаты real-события тоже корневые — их принимаем,
+// пока не увидели ни одного synthetic.
+func (w *X11Window) updatePosFromConfigure(x, y int, synthetic bool) {
+	w.posMu.Lock()
+	if synthetic {
+		w.posX, w.posY = x, y
+		w.posSynthetic = true
+		w.posCached = true
+	} else if !w.posSynthetic {
+		w.posX, w.posY = x, y
+		w.posCached = true
+	}
+	w.posMu.Unlock()
+}
+
+// parseConfigureNotifyPos извлекает x,y и признак synthetic из 32-байтового
+// события ConfigureNotify. Формат: код@0 (бит 7 — send_event/synthetic),
+// x@16, y@18 (INT16). Вынесено для юнит-тестов без X-сервера.
+func parseConfigureNotifyPos(buf []byte) (x, y int, synthetic bool) {
+	x = int(int16(binary.LittleEndian.Uint16(buf[16:18])))
+	y = int(int16(binary.LittleEndian.Uint16(buf[18:20])))
+	synthetic = buf[0]&0x80 != 0
+	return
 }
 
 func (w *X11Window) Minimize() {
@@ -625,9 +794,21 @@ func (w *X11Window) x11MapWindow(wid uint32) {
 }
 
 func (w *X11Window) x11SetTitle(wid uint32, title string) {
-	// ChangeProperty: WM_NAME
 	data := []byte(title)
+	// WM_NAME/WM_ICON_NAME (тип STRING = latin1) — совместимость со старыми WM.
+	// Кириллица/UTF-8 в них отображается мусором, поэтому это лишь fallback.
 	w.x11ChangeProperty(wid, 39 /*WM_NAME*/, 31 /*STRING*/, 8, data)
+	w.x11ChangeProperty(wid, 37 /*WM_ICON_NAME*/, 31 /*STRING*/, 8, data)
+	// _NET_WM_NAME/_NET_WM_ICON_NAME (тип UTF8_STRING, format 8) — EWMH-путь,
+	// который openbox и прочие современные WM показывают корректно (UTF-8).
+	if w.atomUTF8String != 0 {
+		if w.atomNetWMName != 0 {
+			w.x11ChangeProperty(wid, w.atomNetWMName, w.atomUTF8String, 8, data)
+		}
+		if w.atomNetWMIconName != 0 {
+			w.x11ChangeProperty(wid, w.atomNetWMIconName, w.atomUTF8String, 8, data)
+		}
+	}
 }
 
 func (w *X11Window) x11ChangeProperty(wid, property, propType uint32, format int, data []byte) {
@@ -767,9 +948,15 @@ func (w *X11Window) x11InternAtom(name string) uint32 {
 	w.seqNum++
 	w.mu.Unlock()
 
-	// Читаем ответ (32 байта)
+	// Читаем ответ (32 байта) ЦЕЛИКОМ: одиночный Read может вернуть меньше,
+	// тогда reply[8:12] — мусор, а следующий InternAtom прочитает хвост и
+	// рассинхронизирует ВСЕ последующие атомы (в т.ч. _MOTIF_WM_HINTS → WM
+	// игнорирует borderless и рисует рамку). Интерн идёт до MapWindow, события
+	// не вклиниваются, поэтому readFull здесь достаточно.
 	reply := make([]byte, 32)
-	w.conn.Read(reply)
+	if !w.readFull(reply) {
+		return 0
+	}
 	return binary.LittleEndian.Uint32(reply[8:12])
 }
 
@@ -981,3 +1168,163 @@ func (w *X11Window) SetResizable(v bool) {}
 
 // SetMinSize — no-op: минимальный размер окна на X11 пока не ограничиваем.
 func (w *X11Window) SetMinSize(width, height int) {}
+
+// ─── Поддержка нативных модальных диалогов (dialogHost) ─────────────────────
+//
+// X11-бэкенд реализует опциональные интерфейсы window-пакета:
+//   - uiThreadInvoker (InvokeOnUIThread) — маршалинг колбэков;
+//   - ownedWindow      (SetOwner/SetEnabled) — owner + блокировка родителя;
+//   - foregrounder     (SetForeground) — возврат фокуса;
+//   - eventPumper      (StartEventPump) — насос событий вторичного окна.
+//
+// В отличие от Win32 (одна очередь сообщений на все окна, привязка к потоку),
+// у каждого X11-окна СВОЁ соединение и thread-affinity нет: нативные запросы
+// (x11Send) сериализуются мьютексом соединения и легальны из любой горутины.
+
+// InvokeOnUIThread выполняет fn. На X11 привязки к потоку нет, поэтому запуск
+// в отдельной горутине безопасен и, в отличие от синхронного вызова, НЕ блокирует
+// чтение событий родителя (dialogHost зовёт это из UI-колбэка цикла событий
+// родителя для create() и из горутин движка для teardown()). Все нативные
+// операции внутри fn идут через собственные соединения окон и защищены мьютексом.
+func (w *X11Window) InvokeOnUIThread(fn func()) {
+	if fn == nil {
+		return
+	}
+	go fn()
+}
+
+// SetOwner делает окно transient-for parent (WM_TRANSIENT_FOR): WM держит его
+// поверх родителя и группирует с ним. Дополнительно (bonus) помечает окно
+// модальным через _NET_WM_STATE_MODAL для EWMH-совместимых WM.
+//
+// Аналог Win32 noQuit здесь не нужен: у вторичного окна СВОЙ насос событий
+// (StartEventPump), а не общий RunEventLoop, поэтому его закрытие никогда не
+// завершает цикл событий главного окна и не роняет приложение.
+func (w *X11Window) SetOwner(parent NativeWindow) {
+	px, ok := parent.(*X11Window)
+	if !ok || w.wid == 0 || px.wid == 0 {
+		return
+	}
+	// WM_TRANSIENT_FOR — предопределённый атом 68; тип XA_WINDOW (33), формат 32.
+	// ID окон глобальны на сервере, поэтому разные соединения не мешают.
+	w.x11ChangeProperty(w.wid, 68, 33, 32, uint32ToBytes(px.wid))
+	// _NET_WM_STATE_MODAL: окно уже отображено (Create делает MapWindow), поэтому
+	// изменяем состояние через ClientMessage _NET_WM_STATE ADD к root.
+	if w.atomNetWMState != 0 && w.atomNetWMStateModal != 0 {
+		w.x11NetWMStateAdd(w.atomNetWMStateModal)
+	}
+}
+
+// SetEnabled включает/выключает реакцию окна на ввод. У X11 нет системного
+// EnableWindow — реализуем флагом disabled: обработчик событий дропает ввод,
+// см. handleX11Event.
+func (w *X11Window) SetEnabled(v bool) { w.disabled.Store(!v) }
+
+// SetForeground поднимает окно (ConfigureWindow stack-mode=Above), просит WM
+// активировать его (_NET_ACTIVE_WINDOW) и переносит фокус ввода (SetInputFocus).
+func (w *X11Window) SetForeground() {
+	if w.wid == 0 {
+		return
+	}
+	w.x11RaiseWindow()
+	w.x11NetActiveWindow()
+	w.x11SetInputFocus()
+}
+
+// StartEventPump запускает насос событий вторичного окна в отдельной горутине.
+// На Win32 не нужен (одна очередь сообщений на все окна) — там интерфейс не
+// реализован. На X11 у окна собственное соединение, которое иначе никто не
+// читает: dialogHost НЕ вызывает RunEventLoop для вторичного окна.
+func (w *X11Window) StartEventPump() {
+	if w.conn == nil {
+		return
+	}
+	go w.eventPumpLoop()
+}
+
+// eventPumpLoop читает события соединения этого окна, пока оно не закрыто.
+// Переиспользует логику RunEventLoop/handleX11Event. Завершается корректно при
+// уничтожении окна: Close() выставляет closed и закрывает conn → readFull
+// возвращает false (без паники на закрытом соединении) → цикл выходит. Насос
+// главного окна (RunEventLoop) при этом не затрагивается — у него своё conn.
+func (w *X11Window) eventPumpLoop() {
+	buf := make([]byte, 32)
+	for !w.closed.Load() {
+		if !w.readFull(buf) {
+			return
+		}
+		w.handleX11Event(buf)
+	}
+}
+
+// x11RaiseWindow поднимает окно на вершину стека (ConfigureWindow, stack-mode=Above).
+func (w *X11Window) x11RaiseWindow() {
+	buf := make([]byte, 16)
+	buf[0] = 12 // ConfigureWindow
+	binary.LittleEndian.PutUint16(buf[2:4], 4)     // length (16 байт)
+	binary.LittleEndian.PutUint32(buf[4:8], w.wid)
+	binary.LittleEndian.PutUint16(buf[8:10], 0x40) // value-mask: stack-mode
+	// buf[10:12] — паддинг
+	binary.LittleEndian.PutUint32(buf[12:16], 0)   // Above
+	w.x11Send(buf)
+}
+
+// x11SetInputFocus передаёт фокус ввода окну (SetInputFocus, revert-to=Parent).
+func (w *X11Window) x11SetInputFocus() {
+	buf := make([]byte, 12)
+	buf[0] = 42 // SetInputFocus
+	buf[1] = 2  // revert-to = Parent
+	binary.LittleEndian.PutUint16(buf[2:4], 3)   // length
+	binary.LittleEndian.PutUint32(buf[4:8], w.wid)
+	binary.LittleEndian.PutUint32(buf[8:12], 0)  // time = CurrentTime
+	w.x11Send(buf)
+}
+
+// x11NetActiveWindow просит WM активировать окно (EWMH _NET_ACTIVE_WINDOW).
+func (w *X11Window) x11NetActiveWindow() {
+	if w.atomNetActiveWindow == 0 {
+		return
+	}
+	buf := make([]byte, 32)
+	buf[0] = 33                                              // ClientMessage
+	buf[1] = 32                                              // format
+	binary.LittleEndian.PutUint16(buf[2:4], 8)
+	binary.LittleEndian.PutUint32(buf[4:8], w.wid)          // window
+	binary.LittleEndian.PutUint32(buf[8:12], w.atomNetActiveWindow) // type
+	binary.LittleEndian.PutUint32(buf[12:16], 1)           // data[0]: source = application
+	binary.LittleEndian.PutUint32(buf[16:20], 0)           // data[1]: timestamp = 0
+	binary.LittleEndian.PutUint32(buf[20:24], 0)           // data[2]: текущее активное окно
+
+	sendBuf := make([]byte, 44)
+	sendBuf[0] = 25 // SendEvent
+	sendBuf[1] = 0  // propagate = false
+	binary.LittleEndian.PutUint16(sendBuf[2:4], 11)
+	binary.LittleEndian.PutUint32(sendBuf[4:8], w.rootWin)
+	binary.LittleEndian.PutUint32(sendBuf[8:12], 0x00180000) // SubstructureRedirect|SubstructureNotify
+	copy(sendBuf[12:], buf)
+	w.x11Send(sendBuf)
+}
+
+// x11NetWMStateAdd добавляет одно состояние _NET_WM_STATE отображённому окну
+// (ClientMessage к root, action = _NET_WM_STATE_ADD).
+func (w *X11Window) x11NetWMStateAdd(prop uint32) {
+	buf := make([]byte, 32)
+	buf[0] = 33 // ClientMessage
+	buf[1] = 32 // format
+	binary.LittleEndian.PutUint16(buf[2:4], 8)
+	binary.LittleEndian.PutUint32(buf[4:8], w.wid)
+	binary.LittleEndian.PutUint32(buf[8:12], w.atomNetWMState)
+	binary.LittleEndian.PutUint32(buf[12:16], 1)   // _NET_WM_STATE_ADD
+	binary.LittleEndian.PutUint32(buf[16:20], prop) // первое свойство
+	binary.LittleEndian.PutUint32(buf[20:24], 0)   // второе свойство — нет
+	binary.LittleEndian.PutUint32(buf[24:28], 1)   // source = application
+
+	sendBuf := make([]byte, 44)
+	sendBuf[0] = 25
+	sendBuf[1] = 0
+	binary.LittleEndian.PutUint16(sendBuf[2:4], 11)
+	binary.LittleEndian.PutUint32(sendBuf[4:8], w.rootWin)
+	binary.LittleEndian.PutUint32(sendBuf[8:12], 0x00180000)
+	copy(sendBuf[12:], buf)
+	w.x11Send(sendBuf)
+}

@@ -69,6 +69,22 @@ type Engine struct {
 	modals []widget.ModalWidget // стек модальных виджетов (последний = верхний)
 	modMu  sync.Mutex
 
+	// modalHost — опциональный хост нативных модалок (window.dialogHost на
+	// Win32). Если установлен и принимает модалку, она живёт в собственном
+	// нативном окне ОС, а не в холсте движка. onModalClosed — колбэк,
+	// вызываемый в конце CloseModal (см. modalhost.go). hostMu защищает оба.
+	modalHost     ModalHost
+	onModalClosed func(widget.ModalWidget)
+	hostMu        sync.Mutex
+
+	// popupSink — опциональный хост popup-оверлеев (window.popupHost). Если
+	// задан, открытые оверлеи (dropdown/меню) выносятся в собственные нативные
+	// окна ОС, а не рисуются в холст. lastPopupSig — сигнатура последнего
+	// набора попапов, отданного sink (для вызова sink только при изменениях).
+	popupSink    func([]PopupFrame)
+	lastPopupSig []popupSig
+	popupMu      sync.Mutex
+
 	frameSeq atomic.Uint64
 	frames   chan output.Frame
 	quit     chan struct{}
@@ -294,6 +310,20 @@ func (e *Engine) SetResolution(width, height int) {
 		root.SetBounds(image.Rect(0, 0, width, height))
 	}
 	widget.SetScreenBounds(width, height)
+
+	// Открытые модалки центрированы под прежний холст: при уменьшении окна
+	// они уезжали за край и обрезались (диалог «в пределах родительского
+	// окна» — иного в софтверном рендере нет, но он обязан быть виден целиком).
+	e.modMu.Lock()
+	modals := make([]widget.ModalWidget, len(e.modals))
+	copy(modals, e.modals)
+	e.modMu.Unlock()
+	for _, m := range modals {
+		b := m.Bounds()
+		if x, y := clampToCanvas(b, width, height); x != b.Min.X || y != b.Min.Y {
+			moveModalTo(m, x, y)
+		}
+	}
 	e.Invalidate()
 }
 
@@ -532,6 +562,15 @@ func (e *Engine) AccessibilityTree() *widget.AccessNode {
 // Диалог центрируется на экране. Весь ввод ограничивается модальным виджетом.
 // CaptureManager инжектится автоматически.
 func (e *Engine) ShowModal(m widget.ModalWidget) {
+	// Хост нативных модалок (Win32): если он принял модалку, она целиком
+	// живёт в собственном окне ОС — НЕ добавляем в стек, не инжектим capture,
+	// не центрируем. false → обычный in-canvas путь ниже.
+	if h := e.getModalHost(); h != nil {
+		if h.ShowModal(m) {
+			return
+		}
+	}
+
 	// Центрируем диалог (в логических координатах)
 	e.mu.RLock()
 	cw, ch := e.canvas.LogicalSize()
@@ -539,26 +578,16 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 	b := m.Bounds()
 	cx := (cw - b.Dx()) / 2
 	cy := (ch - b.Dy()) / 2
-
-	// Запоминаем позицию первого ребёнка ДО SetBounds.
-	// Если SetBounds сам пересчитает позиции дочерних виджетов
-	// (Canvas, Grid, DockPanel через собственный layout) — ручной сдвиг не нужен.
-	// Если нет (Panel) — сдвигаем вручную.
-	children := m.Children()
-	var firstChildBefore image.Rectangle
-	if len(children) > 0 {
-		firstChildBefore = children[0].Bounds()
+	// Диалог больше холста: прижимаем к левому/верхнему краю, а не центрируем
+	// в минус — титлбар и ✕ должны оставаться видимыми и достижимыми.
+	if cx < 0 {
+		cx = 0
+	}
+	if cy < 0 {
+		cy = 0
 	}
 
-	m.SetBounds(image.Rect(cx, cy, cx+b.Dx(), cy+b.Dy()))
-
-	if len(children) > 0 && children[0].Bounds() == firstChildBefore {
-		contentOff := image.Pt(cx-b.Min.X, cy-b.Min.Y)
-		for _, child := range children {
-			cb := child.Bounds()
-			child.SetBounds(cb.Add(contentOff))
-		}
-	}
+	moveModalTo(m, cx, cy)
 
 	injectCaptureManager(m, e)
 
@@ -585,32 +614,89 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 	e.Invalidate()
 }
 
+// moveModalTo перемещает модальный виджет в позицию (x, y), сохраняя размер.
+// Если SetBounds виджета сам пересчитывает позиции дочерних (Canvas, Grid,
+// DockPanel через собственный layout) — ручной сдвиг не нужен; если нет
+// (Panel, Dialog) — сдвигаем детей вручную. Определяем по первому ребёнку.
+func moveModalTo(m widget.ModalWidget, x, y int) {
+	b := m.Bounds()
+	children := m.Children()
+	var firstChildBefore image.Rectangle
+	if len(children) > 0 {
+		firstChildBefore = children[0].Bounds()
+	}
+
+	m.SetBounds(image.Rect(x, y, x+b.Dx(), y+b.Dy()))
+
+	if len(children) > 0 && children[0].Bounds() == firstChildBefore {
+		contentOff := image.Pt(x-b.Min.X, y-b.Min.Y)
+		for _, child := range children {
+			widget.ShiftWidget(child, contentOff.X, contentOff.Y)
+		}
+	}
+}
+
+// clampToCanvas возвращает позицию, при которой прямоугольник b максимально
+// вписан в холст cw×ch: сначала прижимаем к правому/нижнему краю, затем
+// гарантируем неотрицательный верхний левый угол (если b больше холста —
+// приоритет левому/верхнему краю: там титлбар и ✕ диалога).
+func clampToCanvas(b image.Rectangle, cw, ch int) (int, int) {
+	x, y := b.Min.X, b.Min.Y
+	if x+b.Dx() > cw {
+		x = cw - b.Dx()
+	}
+	if x < 0 {
+		x = 0
+	}
+	if y+b.Dy() > ch {
+		y = ch - b.Dy()
+	}
+	if y < 0 {
+		y = 0
+	}
+	return x, y
+}
+
 // CloseModal закрывает указанный модальный виджет (удаляет из стека).
 // Если m == nil — закрывает верхний модальный виджет.
 func (e *Engine) CloseModal(m widget.ModalWidget) {
-	defer e.Invalidate()
-	e.modMu.Lock()
-	defer e.modMu.Unlock()
-
-	// notifyClosed уведомляет диалог о закрытии (снимает подписки локали и т.п.).
-	notifyClosed := func(w widget.ModalWidget) {
-		if sm, ok := w.(interface{ SetModal(bool) }); ok {
-			sm.SetModal(false)
-		}
-	}
-
-	if m == nil && len(e.modals) > 0 {
-		notifyClosed(e.modals[len(e.modals)-1])
-		e.modals = e.modals[:len(e.modals)-1]
-		return
-	}
-	for i, modal := range e.modals {
-		if modal == m {
-			notifyClosed(modal)
-			e.modals = append(e.modals[:i], e.modals[i+1:]...)
+	// Хост нативных модалок: если модалка у него — пусть закрывает сам.
+	if h := e.getModalHost(); h != nil {
+		if h.CloseModal(m) {
 			return
 		}
 	}
+
+	// Определяем закрываемую модалку и удаляем её из стека под modMu; сам
+	// SetModal(false) и onModalClosed вызываем ВНЕ modMu (колбэки могут
+	// повторно входить в движок).
+	var closed widget.ModalWidget
+	e.modMu.Lock()
+	if m == nil {
+		if len(e.modals) > 0 {
+			closed = e.modals[len(e.modals)-1]
+			e.modals = e.modals[:len(e.modals)-1]
+		}
+	} else {
+		for i, modal := range e.modals {
+			if modal == m {
+				closed = modal
+				e.modals = append(e.modals[:i], e.modals[i+1:]...)
+				break
+			}
+		}
+	}
+	e.modMu.Unlock()
+
+	if closed != nil {
+		// Уведомляем диалог о закрытии (снимает подписки локали, останавливает
+		// fade и т.п.).
+		if sm, ok := closed.(interface{ SetModal(bool) }); ok {
+			sm.SetModal(false)
+		}
+		e.fireOnModalClosed(closed)
+	}
+	e.Invalidate()
 }
 
 // topModal возвращает верхний модальный виджет или nil.
@@ -719,12 +805,16 @@ func (e *Engine) renderFrame() output.Frame {
 		canvas.blitBackground()
 	}
 
+	// Активен ли хост попапов: если да — оверлеи с OverlayBounds не рисуются
+	// в холст (они уходят в собственные окна-попапы, см. renderPopups ниже).
+	hosted := e.getPopupSink() != nil
+
 	// Корневое дерево: рисуем root и его overlay-слой (popup/dropdown).
 	// Без этого вызова на канвасе остаётся только blitBackground —
 	// именно сюда «уехал» баг с чёрным экраном при последнем appendF.
 	if root != nil {
 		root.Draw(canvas)
-		drawOverlays(root, canvas)
+		drawOverlays(root, canvas, hosted)
 	}
 
 	// Модальные виджеты: затемнение + диалог поверх всего
@@ -745,7 +835,13 @@ func (e *Engine) renderFrame() output.Frame {
 		}
 		// Отрисовка модального виджета
 		m.Draw(canvas)
-		drawOverlays(m, canvas)
+		drawOverlays(m, canvas, hosted)
+	}
+
+	// Хостируемые popup-оверлеи: рендерим их в отдельные буферы и отдаём хосту
+	// (нативные окна-попапы). Вне hosted-режима — no-op.
+	if hosted {
+		e.renderPopups(canvas, root, modals)
 	}
 
 	// Всплывающая подсказка (поверх всего, включая модальные диалоги).
@@ -780,13 +876,30 @@ func (e *Engine) renderFrame() output.Frame {
 // drawOverlays рекурсивно обходит дерево виджетов и вызывает DrawOverlay
 // у тех, кто реализует OverlayDrawer и имеет активный overlay (например, открытый dropdown).
 // Вызывается ПОСЛЕ отрисовки всего дерева — overlay рисуется поверх всех виджетов.
-func drawOverlays(w widget.Widget, ctx widget.DrawContext) {
+//
+// hosted==true — активен PopupSink: оверлеи, реализующие OverlayBoundsProvider
+// с непустым прямоугольником, выносятся в отдельные нативные окна-попапы и
+// здесь (в основном холсте) НЕ рисуются. Прочие оверлеи (например, меню выбора
+// локали widget.Window, не реализующее OverlayBoundsProvider) рисуются как прежде.
+func drawOverlays(w widget.Widget, ctx widget.DrawContext, hosted bool) {
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
-		od.DrawOverlay(ctx)
+		if !hosted || !isHostedOverlay(w) {
+			od.DrawOverlay(ctx)
+		}
 	}
 	for _, child := range w.Children() {
-		drawOverlays(child, ctx)
+		drawOverlays(child, ctx, hosted)
 	}
+}
+
+// isHostedOverlay сообщает, выносится ли активный overlay виджета w в отдельное
+// нативное окно (реализует OverlayBoundsProvider и его прямоугольник непуст).
+func isHostedOverlay(w widget.Widget) bool {
+	ob, ok := w.(widget.OverlayBoundsProvider)
+	if !ok {
+		return false
+	}
+	return !ob.OverlayBounds().Empty()
 }
 
 func mkdirAll(dir string) error {

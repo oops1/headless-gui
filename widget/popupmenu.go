@@ -85,6 +85,20 @@ func SetScreenBounds(w, h int) {
 	screenMu.Unlock()
 }
 
+// popupsHosted — глобальный флаг: оверлеи выносятся в собственные нативные
+// окна-попапы ОС (движок зарегистрировал PopupSink). Когда он взведён, клэмп
+// позиции popup по границам канваса (getScreenBounds) пропускается — экранным
+// позиционированием занимается хост, а popup вправе выходить за пределы холста.
+// В headless (без хоста) флаг сброшен и поведение прежнее до пикселя.
+var popupsHosted atomic.Bool
+
+// SetPopupsHosted включает/выключает режим вынесенных popup-оверлеев.
+// Вызывается движком при регистрации/снятии PopupSink.
+func SetPopupsHosted(v bool) { popupsHosted.Store(v) }
+
+// PopupsHosted сообщает, активен ли режим вынесенных popup-оверлеев.
+func PopupsHosted() bool { return popupsHosted.Load() }
+
 // getScreenBounds возвращает размер канваса (0,0 если ещё не задан).
 func getScreenBounds() (int, int) {
 	screenMu.Lock()
@@ -174,7 +188,9 @@ func (m *PopupMenu) Show(x, y int) {
 	w, h := m.calcSize()
 	m.mu.RUnlock()
 
-	if sw, sh := getScreenBounds(); sw > 0 && sh > 0 {
+	// Клэмп в границы канваса — только БЕЗ хоста попапов. При активном хостинге
+	// экранное позиционирование делает popupHost, а меню вправе выходить за холст.
+	if sw, sh := getScreenBounds(); sw > 0 && sh > 0 && !popupsHosted.Load() {
 		if x+w > sw {
 			x = sw - w
 		}
@@ -287,7 +303,8 @@ func (m *PopupMenu) openChild(idx int) {
 	child.mu.RUnlock()
 	itemY := m.itemYForIndex(idx)
 	x := m.popupX + m.popupW - 2
-	if sw, _ := getScreenBounds(); sw > 0 && x+cw > sw {
+	// Разворот влево у правого края — только без хоста (хост позиционирует сам).
+	if sw, _ := getScreenBounds(); sw > 0 && x+cw > sw && !popupsHosted.Load() {
 		x = m.popupX - cw + 2
 	}
 	child.Show(x, itemY)
@@ -405,6 +422,16 @@ func (m *PopupMenu) BaseBounds() image.Rectangle {
 // HasOverlay сообщает движку что меню рисуется как overlay.
 func (m *PopupMenu) HasOverlay() bool {
 	return atomic.LoadInt32(&m.open) == 1
+}
+
+// OverlayBounds возвращает объединённый прямоугольник popup и всех каскадных
+// подменю (абсолютные логические координаты) — для выноса в нативное окно.
+// Пустой Rect, если меню закрыто. Реализует widget.OverlayBoundsProvider.
+func (m *PopupMenu) OverlayBounds() image.Rectangle {
+	if atomic.LoadInt32(&m.open) == 0 {
+		return image.Rectangle{}
+	}
+	return m.fullBounds()
 }
 
 // DrawOverlay рисует popup-меню поверх всего UI (включая каскадные подменю).

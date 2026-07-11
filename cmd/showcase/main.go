@@ -15,7 +15,9 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"log"
+	"runtime"
 	"strings"
 	"time"
 
@@ -662,6 +664,85 @@ func main() {
 	}
 
 	// ─── TAB: Анимации ────────────────────────────────────────────────────────
+	// «Диалог больше окна» — крупный диалог (1000×700). В нативном режиме
+	// (Windows/X11) он открывается в СОБСТВЕННОМ окне ОС и может выходить за
+	// пределы главного окна; в headless — рисуется поверх затемнения.
+	if b := btn("dlgBig"); b != nil {
+		b.OnClick = func() {
+			const dw, dh = 1000, 700
+			dlg := widget.NewDialog("Большой диалог в собственном окне", dw, dh)
+			dlg.SetBounds(image.Rect(0, 0, dw, dh))
+			info := widget.NewWin10Label("Этот диалог — 1000×700. Начиная с v3.10 модальные диалоги " +
+				"открываются в отдельном нативном окне ОС, поэтому могут быть больше главного окна " +
+				"и перетаскиваться за его пределы.")
+			info.SetBounds(image.Rect(40, 60, dw-40, 120))
+			dlg.AddChild(info)
+			okBtn := widget.NewWin10AccentButton("Закрыть")
+			okBtn.SetBounds(image.Rect(dw-160, dh-60, dw-40, dh-24))
+			okBtn.OnClick = func() { eng.CloseModal(dlg) }
+			dlg.AddChild(okBtn)
+			eng.ShowModal(dlg)
+			addLog("Диалоги: открыт большой диалог 1000x700")
+		}
+	}
+
+	// ─── TAB: Система (трей / уведомления / превью) ──────────────────────────
+	// На платформах кроме Windows функции трея — no-op; кнопки показывают
+	// сообщение «только Windows».
+	sysOnly := func() bool {
+		if runtime.GOOS != "windows" {
+			mbox.ShowInfo("", "Эта функция доступна только в Windows.")
+			return false
+		}
+		return true
+	}
+	if b := btn("sysBalloonInfo"); b != nil {
+		b.OnClick = func() {
+			if !sysOnly() {
+				return
+			}
+			if err := win.ShowBalloon("Информация", "Операция выполнена успешно.", widget.SeverityInfo); err != nil {
+				addLog("Balloon: ошибка — %v", err)
+				return
+			}
+			addLog("Balloon: инфо показан")
+		}
+	}
+	if b := btn("sysBalloonWarn"); b != nil {
+		b.OnClick = func() {
+			if !sysOnly() {
+				return
+			}
+			if err := win.ShowBalloon("Предупреждение", "Есть несохранённые изменения.", widget.SeverityWarning); err != nil {
+				addLog("Balloon: ошибка — %v", err)
+				return
+			}
+			addLog("Balloon: предупреждение показано")
+		}
+	}
+	if b := btn("sysBalloonErr"); b != nil {
+		b.OnClick = func() {
+			if !sysOnly() {
+				return
+			}
+			if err := win.ShowBalloon("Ошибка", "Не удалось открыть файл (EACCES).", widget.SeverityError); err != nil {
+				addLog("Balloon: ошибка — %v", err)
+				return
+			}
+			addLog("Balloon: ошибка показана")
+		}
+	}
+	if b := btn("sysHide"); b != nil {
+		b.OnClick = func() {
+			if !sysOnly() {
+				return
+			}
+			win.HideToTray()
+			addLog("Окно свёрнуто в трей (двойной левый клик по иконке — восстановить)")
+		}
+	}
+
+	// ─── TAB: Анимации ────────────────────────────────────────────────────────
 	animBars := []struct {
 		name  string
 		curve widget.Easing
@@ -821,9 +902,89 @@ func main() {
 	win = window.New(eng, "GuiEngine — Widget Showcase")
 	win.SetMaxFPS(60)
 
+	// ─── Трей: иконка + контекстное меню (Windows; на прочих ОС — no-op) ─────
+	// Иконку и меню задаём ДО Run(): состояние буферизуется и применяется при
+	// создании окна. Двойной левый клик по иконке восстанавливает окно (дефолт).
+	if err := win.SetTrayIcon(makeTrayIcon(), "GuiEngine — Widget Showcase"); err != nil {
+		log.Printf("трей-иконка недоступна: %v", err)
+	}
+	trayMenu := widget.NewPopupMenu()
+	trayMenu.AddItem("Показать", func() { win.RestoreFromTray() })
+	trayMenu.AddItem("Свернуть", func() { win.HideToTray() })
+	trayMenu.AddSeparator()
+	trayMenu.AddItem("Balloon", func() {
+		win.ShowBalloon("GuiEngine", "Уведомление из трей-меню.", widget.SeverityInfo)
+	})
+	trayMenu.AddSeparator()
+	trayMenu.AddItem("Выход", func() { win.Close() })
+	trayMenu.OnSelect = func(idx int, text string) { addLog("Трей-меню: %s", text) }
+	win.SetTrayMenu(trayMenu)
+	win.SetOnBalloonClick(func() { addLog("Клик по balloon-уведомлению") })
+
 	if err := win.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// makeTrayIcon рисует 32×32 иконку приложения: синий квадрат со скруглёнными
+// углами и белой буквой «G» (кольцо с разрывом справа + горизонтальная
+// перекладина). Чистый image/draw, без внешних ассетов.
+func makeTrayIcon() image.Image {
+	const n = 32
+	img := image.NewRGBA(image.Rect(0, 0, n, n))
+	blue := color.RGBA{R: 0, G: 120, B: 215, A: 255}
+	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+
+	// Фон: синий квадрат со скруглёнными углами (радиус 6).
+	const r = 6
+	for y := 0; y < n; y++ {
+		for x := 0; x < n; x++ {
+			if roundedInside(x, y, n, n, r) {
+				img.SetRGBA(x, y, blue)
+			}
+		}
+	}
+
+	// Буква «G»: кольцо (6 ≤ dist ≤ 10.5) вокруг центра, с разрывом справа
+	// (устье буквы) и перекладиной от центра вправо.
+	cx, cy := 15.5, 16.0
+	for y := 0; y < n; y++ {
+		for x := 0; x < n; x++ {
+			dx := float64(x) - cx
+			dy := float64(y) - cy
+			dist := dx*dx + dy*dy
+			ring := dist >= 6.0*6.0 && dist <= 10.5*10.5
+			mouth := dx > 3.0 && dy > -3.0 && dy < 3.0 // разрыв справа
+			bar := dy > 1.0 && dy < 4.0 && dx > 0.0 && dx < 8.0
+			if (ring && !mouth) || bar {
+				img.SetRGBA(x, y, white)
+			}
+		}
+	}
+	return img
+}
+
+// roundedInside сообщает, попадает ли пиксель (x,y) внутрь прямоугольника
+// w×h со скруглёнными углами радиуса r.
+func roundedInside(x, y, w, h, r int) bool {
+	// Внутри вертикальной/горизонтальной «крестовины» — всегда да.
+	if x >= r && x < w-r {
+		return true
+	}
+	if y >= r && y < h-r {
+		return true
+	}
+	// Углы: расстояние до центра ближайшего скругления.
+	cx, cy := r, r
+	if x >= w-r {
+		cx = w - r - 1
+	}
+	if y >= h-r {
+		cy = h - r - 1
+	}
+	dx := x - cx
+	dy := y - cy
+	return dx*dx+dy*dy <= r*r
 }
 
 // sinWave возвращает sin-волну в диапазоне [-1, 1] с заданным периодом.

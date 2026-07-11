@@ -82,6 +82,12 @@ func ShiftWidget(w Widget, dx, dy int) {
 		b = w.Bounds()
 	}
 	w.SetBounds(image.Rect(b.Min.X+dx, b.Min.Y+dy, b.Max.X+dx, b.Max.Y+dy))
+	// Контейнеры с собственным layout (Canvas, Grid, TabControl…) уже
+	// переложили потомков внутри SetBounds — повторный сдвиг задваивал бы
+	// смещение (тот же класс бага, что в Canvas.layoutChild).
+	if HasOwnLayout(w) {
+		return
+	}
 	for _, child := range w.Children() {
 		ShiftWidget(child, dx, dy)
 	}
