@@ -346,6 +346,36 @@ func TestDialog_DragByTitleBar(t *testing.T) {
 	}
 }
 
+// При установленном OnDragMove (нативный режим: диалог в собственном окне ОС)
+// перетаскивание за заголовок вызывает колбэк с дельтой и НЕ сдвигает bounds
+// самого диалога — двигается нативное окно, а виджет в своём холсте неподвижен.
+func TestDialog_OnDragMove_NativeMode(t *testing.T) {
+	eng := newDialogEngine()
+	mb := widget.NewMessageBox(eng)
+	id := mb.ShowInput("", "name:", "abc", nil, nil)
+	dlg := id.Dialog()
+	before := dlg.Bounds()
+
+	var gotDX, gotDY int
+	var calls int
+	dlg.OnDragMove = func(dx, dy int) { gotDX += dx; gotDY += dy; calls++ }
+
+	sx, sy := before.Min.X+40, before.Min.Y+12
+	eng.SendMouseButton(sx, sy, widget.MouseLeft, true)
+	eng.SendMouseMove(sx+60, sy+40)
+	eng.SendMouseButton(sx+60, sy+40, widget.MouseLeft, false)
+
+	if calls == 0 {
+		t.Fatal("OnDragMove не вызван")
+	}
+	if gotDX != 60 || gotDY != 40 {
+		t.Fatalf("неверная дельта: got (%d,%d), want (60,40)", gotDX, gotDY)
+	}
+	if after := dlg.Bounds(); after != before {
+		t.Fatalf("bounds диалога не должны меняться в нативном режиме: %v → %v", before, after)
+	}
+}
+
 // ─── Вписывание модалок в холст ──────────────────────────────────────────────
 
 // TestShowModal_LargerThanCanvas_PinnedTopLeft — диалог больше холста

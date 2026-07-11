@@ -115,6 +115,14 @@ const (
 
 	// WM_SETCURSOR
 	wmSetcursor = 0x0020
+
+	// WM_APP — базовое сообщение приложения; используем для маршалинга колбэков
+	// на UI-поток (InvokeOnUIThread): PostMessage(WM_APP, id) → wndProc вызывает
+	// зарегистрированную функцию на потоке цикла сообщений.
+	wmApp = 0x8000
+
+	// GWLP_HWNDPARENT — индекс SetWindowLongPtr для смены owner-окна (== -8).
+	gwlpHwndParent = ^uintptr(7)
 )
 
 // ─── Win32 API структуры ────────────────────────────────────────────────────
@@ -212,6 +220,8 @@ var (
 	procSetWindowLongPtrW   = user32.NewProc("SetWindowLongPtrW")
 	procGetWindowLongPtrW   = user32.NewProc("GetWindowLongPtrW")
 	procScreenToClient      = user32.NewProc("ScreenToClient")
+	procEnableWindow        = user32.NewProc("EnableWindow")
+	procSetForegroundWindow = user32.NewProc("SetForegroundWindow")
 
 	// HiDPI (Win10 1703+; отсутствие процедур не фатально — Call вернёт ошибку).
 	procSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
@@ -289,6 +299,11 @@ type Win32Window struct {
 	// делает вызывающая сторона). 0 → дефолт 320×240. Отдаётся в WM_GETMINMAXINFO.
 	minW, minH int
 
+	// noQuit — окно НЕ завершает цикл сообщений при своём уничтожении
+	// (WM_DESTROY не шлёт PostQuitMessage). Взводится для вторичных окон модалок
+	// (owned windows): их закрытие не должно ронять приложение.
+	noQuit bool
+
 	mu      sync.Mutex
 	frameBuf []byte // BGRA пиксели для StretchDIBits (перевёрнуто по Y)
 	bufW, bufH int  // размер кадра, лежащего в frameBuf (для растянутого блита)
@@ -309,8 +324,78 @@ type Win32Window struct {
 	onChar        func(r rune)
 }
 
-// Глобальный указатель на окно для WndProc (Win32 callback не может быть методом).
-var globalWin32 *Win32Window
+// Реестр окон для WndProc (Win32 callback не может быть методом): маршрутизация
+// сообщений к нужному *Win32Window по hwnd. Поддерживает несколько окон на одном
+// потоке (главное окно + вторичные окна модалок).
+var (
+	win32Mu       sync.Mutex
+	win32Windows  = map[uintptr]*Win32Window{} // hwnd → окно
+	win32Creating *Win32Window                 // окно в процессе Create (hwnd ещё не назначен)
+)
+
+func lookupWin32(hwnd uintptr) *Win32Window {
+	win32Mu.Lock()
+	defer win32Mu.Unlock()
+	return win32Windows[hwnd]
+}
+
+// ─── Маршалинг колбэков на UI-поток (InvokeOnUIThread) ──────────────────────
+
+var (
+	uiCallMu  sync.Mutex
+	uiCallSeq uintptr
+	uiCalls   = map[uintptr]func(){}
+)
+
+// InvokeOnUIThread выполняет fn на потоке цикла сообщений окна (PostMessage
+// WM_APP). Безопасно из любой горутины. Если вызвать с уже-UI-потока (изнутри
+// wndProc), fn выполнится после возврата из текущего сообщения.
+func (w *Win32Window) InvokeOnUIThread(fn func()) {
+	if fn == nil || w.hwnd == 0 {
+		return
+	}
+	uiCallMu.Lock()
+	uiCallSeq++
+	id := uiCallSeq
+	uiCalls[id] = fn
+	uiCallMu.Unlock()
+	procPostMessageW.Call(uintptr(w.hwnd), uintptr(wmApp), id, 0)
+}
+
+// SetOwner делает окно принадлежащим parent (Win32 GWLP_HWNDPARENT): оно всегда
+// поверх owner'а и сворачивается вместе с ним. Помечает окно как вторичное
+// (noQuit) — его закрытие не завершает цикл сообщений приложения.
+func (w *Win32Window) SetOwner(parent NativeWindow) {
+	w.noQuit = true
+	if w.hwnd == 0 {
+		return
+	}
+	pw, ok := parent.(*Win32Window)
+	if !ok || pw.hwnd == 0 {
+		return
+	}
+	procSetWindowLongPtrW.Call(uintptr(w.hwnd), gwlpHwndParent, uintptr(pw.hwnd))
+}
+
+// SetEnabled включает/выключает окно (EnableWindow). Отключённое окно не
+// получает ввод — так владелец блокируется на время модального диалога.
+func (w *Win32Window) SetEnabled(v bool) {
+	if w.hwnd == 0 {
+		return
+	}
+	var b uintptr
+	if v {
+		b = 1
+	}
+	procEnableWindow.Call(uintptr(w.hwnd), b)
+}
+
+// SetForeground выводит окно на передний план и передаёт ему фокус ОС.
+func (w *Win32Window) SetForeground() {
+	if w.hwnd != 0 {
+		procSetForegroundWindow.Call(uintptr(w.hwnd))
+	}
+}
 
 func NewNativeWindow() NativeWindow {
 	return &Win32Window{}
@@ -326,7 +411,12 @@ func (w *Win32Window) Create(title string, width, height int) error {
 	w.title = title
 	w.width = width
 	w.height = height
-	globalWin32 = w
+	// Пока hwnd не назначен, wndProc маршрутизирует сообщения создаваемого окна
+	// (WM_NCCALCSIZE/WM_CREATE приходят синхронно внутри CreateWindowExW) на
+	// win32Creating.
+	win32Mu.Lock()
+	win32Creating = w
+	win32Mu.Unlock()
 
 	className, _ := windows.UTF16PtrFromString("HeadlessGUI_WndClass")
 	titlePtr, _ := windows.UTF16PtrFromString(title)
@@ -373,9 +463,16 @@ func (w *Win32Window) Create(title string, width, height int) error {
 		0,
 	)
 	if hwnd == 0 {
+		win32Mu.Lock()
+		win32Creating = nil
+		win32Mu.Unlock()
 		return err
 	}
 	w.hwnd = windows.HWND(hwnd)
+	win32Mu.Lock()
+	win32Windows[hwnd] = w
+	win32Creating = nil
+	win32Mu.Unlock()
 
 	procShowWindow.Call(hwnd, uintptr(swShow))
 	procUpdateWindow.Call(hwnd)
@@ -748,13 +845,31 @@ func (w *Win32Window) SetOnChar(fn func(r rune))                                
 // ─── WndProc ────────────────────────────────────────────────────────────────
 
 func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
-	w := globalWin32
+	w := lookupWin32(hwnd)
+	if w == nil {
+		// Сообщения, пришедшие до регистрации hwnd (внутри CreateWindowExW),
+		// относятся к создаваемому окну.
+		win32Mu.Lock()
+		w = win32Creating
+		win32Mu.Unlock()
+	}
 	if w == nil {
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
 		return ret
 	}
 
 	switch umsg {
+	case wmApp:
+		// Маршалинг колбэка на UI-поток (см. InvokeOnUIThread).
+		uiCallMu.Lock()
+		fn := uiCalls[wparam]
+		delete(uiCalls, wparam)
+		uiCallMu.Unlock()
+		if fn != nil {
+			fn()
+		}
+		return 0
+
 	case wmNccalcsize:
 		// Borderless окно: вся область окна = client area.
 		// Убираем non-client frame (рамку от WS_THICKFRAME),
@@ -795,7 +910,14 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmDestroy:
-		procPostQuitMessage.Call(0)
+		win32Mu.Lock()
+		delete(win32Windows, hwnd)
+		win32Mu.Unlock()
+		// Вторичные окна модалок (noQuit) не завершают цикл сообщений — иначе
+		// закрытие диалога уронило бы всё приложение. Главное окно — завершает.
+		if !w.noQuit {
+			procPostQuitMessage.Call(0)
+		}
 		return 0
 
 	case wmEntersizemove:

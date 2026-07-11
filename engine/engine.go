@@ -69,6 +69,14 @@ type Engine struct {
 	modals []widget.ModalWidget // стек модальных виджетов (последний = верхний)
 	modMu  sync.Mutex
 
+	// modalHost — опциональный хост нативных модалок (window.dialogHost на
+	// Win32). Если установлен и принимает модалку, она живёт в собственном
+	// нативном окне ОС, а не в холсте движка. onModalClosed — колбэк,
+	// вызываемый в конце CloseModal (см. modalhost.go). hostMu защищает оба.
+	modalHost     ModalHost
+	onModalClosed func(widget.ModalWidget)
+	hostMu        sync.Mutex
+
 	frameSeq atomic.Uint64
 	frames   chan output.Frame
 	quit     chan struct{}
@@ -546,6 +554,15 @@ func (e *Engine) AccessibilityTree() *widget.AccessNode {
 // Диалог центрируется на экране. Весь ввод ограничивается модальным виджетом.
 // CaptureManager инжектится автоматически.
 func (e *Engine) ShowModal(m widget.ModalWidget) {
+	// Хост нативных модалок (Win32): если он принял модалку, она целиком
+	// живёт в собственном окне ОС — НЕ добавляем в стек, не инжектим capture,
+	// не центрируем. false → обычный in-canvas путь ниже.
+	if h := e.getModalHost(); h != nil {
+		if h.ShowModal(m) {
+			return
+		}
+	}
+
 	// Центрируем диалог (в логических координатах)
 	e.mu.RLock()
 	cw, ch := e.canvas.LogicalSize()
@@ -635,29 +652,43 @@ func clampToCanvas(b image.Rectangle, cw, ch int) (int, int) {
 // CloseModal закрывает указанный модальный виджет (удаляет из стека).
 // Если m == nil — закрывает верхний модальный виджет.
 func (e *Engine) CloseModal(m widget.ModalWidget) {
-	defer e.Invalidate()
-	e.modMu.Lock()
-	defer e.modMu.Unlock()
-
-	// notifyClosed уведомляет диалог о закрытии (снимает подписки локали и т.п.).
-	notifyClosed := func(w widget.ModalWidget) {
-		if sm, ok := w.(interface{ SetModal(bool) }); ok {
-			sm.SetModal(false)
-		}
-	}
-
-	if m == nil && len(e.modals) > 0 {
-		notifyClosed(e.modals[len(e.modals)-1])
-		e.modals = e.modals[:len(e.modals)-1]
-		return
-	}
-	for i, modal := range e.modals {
-		if modal == m {
-			notifyClosed(modal)
-			e.modals = append(e.modals[:i], e.modals[i+1:]...)
+	// Хост нативных модалок: если модалка у него — пусть закрывает сам.
+	if h := e.getModalHost(); h != nil {
+		if h.CloseModal(m) {
 			return
 		}
 	}
+
+	// Определяем закрываемую модалку и удаляем её из стека под modMu; сам
+	// SetModal(false) и onModalClosed вызываем ВНЕ modMu (колбэки могут
+	// повторно входить в движок).
+	var closed widget.ModalWidget
+	e.modMu.Lock()
+	if m == nil {
+		if len(e.modals) > 0 {
+			closed = e.modals[len(e.modals)-1]
+			e.modals = e.modals[:len(e.modals)-1]
+		}
+	} else {
+		for i, modal := range e.modals {
+			if modal == m {
+				closed = modal
+				e.modals = append(e.modals[:i], e.modals[i+1:]...)
+				break
+			}
+		}
+	}
+	e.modMu.Unlock()
+
+	if closed != nil {
+		// Уведомляем диалог о закрытии (снимает подписки локали, останавливает
+		// fade и т.п.).
+		if sm, ok := closed.(interface{ SetModal(bool) }); ok {
+			sm.SetModal(false)
+		}
+		e.fireOnModalClosed(closed)
+	}
+	e.Invalidate()
 }
 
 // topModal возвращает верхний модальный виджет или nil.
