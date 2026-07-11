@@ -189,14 +189,41 @@ func (h *popupHost) repositionAndBlit(id uintptr) {
 	}
 }
 
+// workAreaProvider — бэкенд умеет сообщить рабочую область монитора,
+// содержащего точку (экран минус таскбар). Реализуется Win32.
+type workAreaProvider interface {
+	WorkAreaAt(x, y int) image.Rectangle
+}
+
 // positionPopup ставит окно-попап в экранную позицию: угол клиентской области
 // носителя + Rect.Min×scale. Размер — физические пиксели контента.
+// Позиция вписывается в рабочую область монитора: меню у трея (низ экрана)
+// иначе раскрывалось под таскбар, и нижние пункты («Выход») были недостижимы.
+// Сдвиг окна безопасен для проброса ввода: клики транслируются в ЛОКАЛЬНЫХ
+// координатах окна-попапа, которые не зависят от его экранной позиции.
 func (h *popupHost) positionPopup(native, carrier NativeWindow, rect image.Rectangle, pw, ph int) {
 	cx, cy := carrier.GetPosition()
 	sx := int(float64(rect.Min.X)*h.scale + 0.5)
 	sy := int(float64(rect.Min.Y)*h.scale + 0.5)
+	x, y := cx+sx, cy+sy
+	if wp, ok := native.(workAreaProvider); ok {
+		if wa := wp.WorkAreaAt(x, y); !wa.Empty() {
+			if x+pw > wa.Max.X {
+				x = wa.Max.X - pw
+			}
+			if y+ph > wa.Max.Y {
+				y = wa.Max.Y - ph
+			}
+			if x < wa.Min.X {
+				x = wa.Min.X
+			}
+			if y < wa.Min.Y {
+				y = wa.Min.Y
+			}
+		}
+	}
 	native.SetSize(pw, ph)
-	native.SetPosition(cx+sx, cy+sy)
+	native.SetPosition(x, y)
 }
 
 // setupPopupInput пробрасывает события мыши окна-попапа в движок-носитель:

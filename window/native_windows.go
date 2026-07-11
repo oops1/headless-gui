@@ -243,6 +243,10 @@ var (
 	procReleaseCapture    = user32.NewProc("ReleaseCapture")
 	procSetCursor         = user32.NewProc("SetCursor")
 
+	// Мониторы (рабочая область для клэмпа окон-попапов).
+	procMonitorFromPoint = user32.NewProc("MonitorFromPoint")
+	procGetMonitorInfoW  = user32.NewProc("GetMonitorInfoW")
+
 	// Раскладка клавиатуры (локаль).
 	procGetKeyboardLayout        = user32.NewProc("GetKeyboardLayout")
 	procGetKeyboardLayoutList    = user32.NewProc("GetKeyboardLayoutList")
@@ -589,6 +593,33 @@ func (w *Win32Window) SetPosition(x, y int) {
 			0x0001|0x0004|0x0010, // SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
 		)
 	}
+}
+
+// monitorInfo — MONITORINFO (GetMonitorInfoW).
+type monitorInfo struct {
+	CbSize    uint32
+	RcMonitor rect
+	RcWork    rect
+	DwFlags   uint32
+}
+
+// WorkAreaAt возвращает рабочую область монитора, содержащего точку (x, y):
+// экран минус таскбар. Используется popupHost для вписывания окон-попапов
+// (меню у трея иначе раскрывалось под таскбар). Пустой Rect при ошибке.
+func (w *Win32Window) WorkAreaAt(x, y int) image.Rectangle {
+	const monitorDefaultToNearest = 2
+	pt := uintptr(uint32(x)) | uintptr(uint32(y))<<32
+	hmon, _, _ := procMonitorFromPoint.Call(pt, monitorDefaultToNearest)
+	if hmon == 0 {
+		return image.Rectangle{}
+	}
+	var mi monitorInfo
+	mi.CbSize = uint32(unsafe.Sizeof(mi))
+	ret, _, _ := procGetMonitorInfoW.Call(hmon, uintptr(unsafe.Pointer(&mi)))
+	if ret == 0 {
+		return image.Rectangle{}
+	}
+	return image.Rect(int(mi.RcWork.Left), int(mi.RcWork.Top), int(mi.RcWork.Right), int(mi.RcWork.Bottom))
 }
 
 func (w *Win32Window) GetPosition() (int, int) {
