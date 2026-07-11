@@ -224,6 +224,24 @@ func (d *Dropdown) HasOverlay() bool {
 	return atomic.LoadInt32(&d.open) == 1
 }
 
+// OverlayBounds возвращает прямоугольник раскрытого списка в абсолютных
+// логических координатах (для выноса в нативное окно-попап). Пустой Rect,
+// если список закрыт или пуст. Реализует widget.OverlayBoundsProvider.
+func (d *Dropdown) OverlayBounds() image.Rectangle {
+	if atomic.LoadInt32(&d.open) == 0 {
+		return image.Rectangle{}
+	}
+	b := d.Base.Bounds()
+	d.mu.RLock()
+	n := len(d.items)
+	d.mu.RUnlock()
+	if n == 0 {
+		return image.Rectangle{}
+	}
+	const itemH = 30
+	return image.Rect(b.Min.X, b.Max.Y, b.Max.X, b.Max.Y+n*itemH)
+}
+
 // DrawOverlay рисует раскрытый список поверх всех виджетов.
 // Вызывается движком после отрисовки всего дерева.
 func (d *Dropdown) DrawOverlay(ctx DrawContext) {

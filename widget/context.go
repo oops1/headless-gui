@@ -40,6 +40,19 @@ type OverlayDrawer interface {
 	DrawOverlay(ctx DrawContext)
 }
 
+// OverlayBoundsProvider — оверлей-виджет, умеющий сообщить прямоугольник
+// своего оверлея в абсолютных ЛОГИЧЕСКИХ координатах холста. Пустой Rect
+// означает, что активного оверлея нет.
+//
+// Реализуется popup-подобными оверлеями (Dropdown, PopupMenu, MenuBar,
+// контекстные меню TextBox/TextInput). Движок использует это, чтобы вынести
+// оверлей в отдельное нативное окно-попап ОС (см. engine.SetPopupSink) —
+// тогда оверлей может выходить за границы родительского окна, как системное
+// меню. Оверлеи БЕЗ этого интерфейса рисуются по-старому в основной холст.
+type OverlayBoundsProvider interface {
+	OverlayBounds() image.Rectangle
+}
+
 // DrawContext — API рисования, предоставляемый движком каждому виджету.
 // Реализуется типом engine.Canvas.
 //

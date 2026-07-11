@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -93,7 +94,39 @@ func (win *Window) setupActivation() {
 	}
 	an.SetOnActivate(func(active bool) {
 		ww.SetActive(active)
+		// При деактивации носителя (клик в другое приложение) закрываем
+		// вынесенные popup-оверлеи — как системные меню. Только в hosted-режиме.
+		if !active && win.popupHost != nil {
+			if c, ok := win.eng.(interface{ CloseAllOverlays() }); ok {
+				c.CloseAllOverlays()
+			}
+		}
 	})
+}
+
+// installPopupHost регистрирует хост popup-оверлеев, если бэкенд умеет окна-
+// попапы и маршалинг на UI-поток, а движок принимает PopupSink. На бэкендах без
+// поддержки (Wayland/macOS) и в headless — no-op: оверлеи рисуются в холст.
+func (win *Window) installPopupHost() {
+	if _, ok := win.native.(popupWindow); !ok {
+		return
+	}
+	inv, ok := win.native.(uiThreadInvoker)
+	if !ok {
+		return
+	}
+	peng, ok := win.eng.(popupEngine)
+	if !ok {
+		return
+	}
+	setter, ok := win.eng.(interface {
+		SetPopupSink(sink func(frames []engine.PopupFrame))
+	})
+	if !ok {
+		return
+	}
+	win.popupHost = newPopupHost(win.native, inv, peng, win.scale)
+	setter.SetPopupSink(win.popupHost.apply)
 }
 
 // detectScale возвращает HiDPI-масштаб: env HEADLESS_GUI_SCALE имеет
@@ -121,6 +154,36 @@ func (win *Window) physicalSize() (int, int) {
 	return win.eng.CanvasSize()
 }
 
+// surface — общий слой рендер-насоса и ввода: связывает движок (EngineAPI),
+// нативное окно и HiDPI-масштаб. Его переиспользуют главное окно (Window его
+// встраивает) и вторичное окно модального диалога (dialogHost) — чтобы не
+// копировать насос кадров и проброс ввода. Оконно-специфичная логика
+// (resize/close/minimize/maximize, активность, локаль, смена DPI) живёт в
+// Window; surface её не касается.
+type surface struct {
+	eng    EngineAPI
+	native NativeWindow
+
+	// HiDPI: масштаб монитора (1.0 без HiDPI). Логический размер живёт у
+	// владельца; нативное окно и буфер кадра — физические (логические × scale).
+	scale float64
+
+	// Текущий полный кадр (накапливаем dirty-тайлы).
+	mu      sync.Mutex
+	current *image.RGBA
+	// pendingDirty — объединение областей тайлов, применённых с последнего
+	// блита; сбрасывается после отправки в нативное окно.
+	pendingDirty image.Rectangle
+
+	// Состояние модификаторов (обновляется в onKeyDown/onKeyUp).
+	modShift atomic.Bool
+	modCtrl  atomic.Bool
+	modAlt   atomic.Bool
+
+	// Предыдущие координаты мыши (для drag).
+	lastMX, lastMY int
+}
+
 // Window — нативное окно ОС для GUI-движка.
 //
 // Жизненный цикл:
@@ -130,18 +193,10 @@ func (win *Window) physicalSize() (int, int) {
 //	win.SetResizable(true) // опционально
 //	win.Run()              // блокирует до закрытия окна
 type Window struct {
-	eng   EngineAPI
+	surface
+
 	title string
 	w, h  int
-
-	native NativeWindow
-
-	// Текущий полный кадр (накапливаем dirty-тайлы).
-	mu      sync.Mutex
-	current *image.RGBA
-	// pendingDirty — объединение областей тайлов, применённых с последнего
-	// блита; сбрасывается после отправки в нативное окно.
-	pendingDirty image.Rectangle
 
 	// Флаг: запрошено закрытие окна (кнопка ×).
 	closeRequested atomic.Bool
@@ -151,31 +206,37 @@ type Window struct {
 	resizable    bool
 	cornerRadius int // скругление углов окна (0 = прямые); применяется после Create
 
-	// HiDPI: масштаб монитора (1.0 без HiDPI). win.w/h — логические,
-	// нативное окно и буфер кадра — физические (логические × scale).
-	scale float64
+	// popupHost — хост popup-оверлеев (dropdown/меню в собственных окнах ОС).
+	// nil, если бэкенд не поддерживает окна-попапы (Wayland/macOS → in-canvas).
+	popupHost *popupHost
 
-	// Состояние модификаторов (обновляется в onKeyDown/onKeyUp).
-	modShift   atomic.Bool
-	modCtrl    atomic.Bool
-	modAlt     atomic.Bool
-
-	// Предыдущие координаты мыши (для drag).
-	lastMX, lastMY int
+	// ── Трей и уведомления (Windows) ─────────────────────────────────────────
+	// Сеттеры трея вызываются до Run() (native ещё nil), поэтому желаемое
+	// состояние буферизуется и применяется в Run() после создания окна
+	// (applyPendingTray). На платформах без поддержки (native не trayHost) —
+	// тихий no-op. См. tray.go / tray_windows.go.
+	trayIcon          image.Image
+	trayTooltip       string
+	trayIconWant      bool
+	trayMenu          *widget.PopupMenu
+	onTrayClick       func(button widget.MouseButton, doubleClick bool)
+	onBalloonClick    func()
+	trayDispatcherSet bool
 }
 
 // New создаёт окно для заданного движка с указанным заголовком.
 // Размер окна берётся из CanvasSize() движка.
 func New(eng EngineAPI, title string) *Window {
 	w, h := eng.CanvasSize()
-	return &Window{
-		eng:     eng,
-		title:   title,
-		w:       w,
-		h:       h,
-		current: image.NewRGBA(image.Rect(0, 0, w, h)),
-		maxFPS:  60,
+	win := &Window{
+		title:  title,
+		w:      w,
+		h:      h,
+		maxFPS: 60,
 	}
+	win.eng = eng
+	win.current = image.NewRGBA(image.Rect(0, 0, w, h))
+	return win
 }
 
 // SetMaxFPS задаёт максимальный FPS отрисовки окна (по умолчанию 60).
@@ -278,8 +339,11 @@ func (win *Window) Run() error {
 	// Подключаем виджет-окно (drag, close, minimize, maximize)
 	win.setupWidgetWindow()
 
-	// Подключаем callbacks ввода
-	win.setupInputCallbacks()
+	// Оконно-специфичные callbacks (resize, close).
+	win.setupResizeClose()
+
+	// Общий проброс ввода (мышь/клавиатура) — surface.
+	win.setupInput()
 
 	// Перерисовка по WM_PAINT/Expose из кэша последнего кадра.
 	win.setupExposeRedraw()
@@ -289,6 +353,18 @@ func (win *Window) Run() error {
 
 	// Синхронизация локали с раскладкой клавиатуры ОС (Windows/Linux).
 	win.setupLocaleSync()
+
+	// Хост нативных модалок: если бэкенд поддерживает owner-окна (Win32) и
+	// движок принимает хост — модалки будут открываться в собственных окнах.
+	win.installModalHost()
+
+	// Хост popup-оверлеев: если бэкенд умеет окна-попапы (Win32/X11) — dropdown'ы
+	// и меню будут открываться в собственных окнах ОС и выходить за границы окна.
+	win.installPopupHost()
+
+	// Применяем отложенное состояние трея/уведомлений (иконка, меню, колбэки),
+	// заданное до Run(). На платформах без поддержки — no-op.
+	win.applyPendingTray()
 
 	// Запускаем горутину чтения кадров из движка
 	go win.framePump()
@@ -402,8 +478,10 @@ func (win *Window) setupWidgetWindow() {
 	}
 }
 
-// setupInputCallbacks подключает callback'и ввода от нативного окна к движку.
-func (win *Window) setupInputCallbacks() {
+// setupResizeClose подключает оконно-специфичные callback'и: изменение
+// размера окна (пересоздание канваса/буфера) и запрос закрытия (кнопка ×).
+// Проброс мыши/клавиатуры — в surface.setupInput.
+func (win *Window) setupResizeClose() {
 	// ── Resize ───────────────────────────────────────────────────────────────
 	// newW/newH — ФИЗИЧЕСКИЕ пиксели от ОС; движок и виджеты живут
 	// в логических (округление по масштабу).
@@ -441,22 +519,26 @@ func (win *Window) setupInputCallbacks() {
 		win.closeRequested.Store(true)
 		return true // разрешаем закрытие
 	})
+}
 
+// setupInput подключает проброс ввода (мышь/клавиатура/символы) от нативного
+// окна к движку. Общий для главного окна и вторичных окон модалок.
+func (s *surface) setupInput() {
 	// ── Mouse move ───────────────────────────────────────────────────────────
-	win.native.SetOnMouseMove(func(x, y int) {
-		win.lastMX = x
-		win.lastMY = y
-		win.eng.SendMouseMove(x, y)
+	s.native.SetOnMouseMove(func(x, y int) {
+		s.lastMX = x
+		s.lastMY = y
+		s.eng.SendMouseMove(x, y)
 		// Обновляем форму курсора под указателем (если бэкенд поддерживает).
-		if sc, ok := win.native.(interface{ SetCursor(c int) }); ok {
-			sc.SetCursor(int(win.eng.CursorAt(x, y)))
+		if sc, ok := s.native.(interface{ SetCursor(c int) }); ok {
+			sc.SetCursor(int(s.eng.CursorAt(x, y)))
 		}
 	})
 
 	// ── Mouse buttons ────────────────────────────────────────────────────────
-	win.native.SetOnMouseButton(func(x, y, button int, pressed bool) {
-		win.lastMX = x
-		win.lastMY = y
+	s.native.SetOnMouseButton(func(x, y, button int, pressed bool) {
+		s.lastMX = x
+		s.lastMY = y
 
 		var btn widget.MouseButton
 		switch button {
@@ -473,62 +555,62 @@ func (win *Window) setupInputCallbacks() {
 		default:
 			return
 		}
-		win.eng.SendMouseButton(x, y, btn, pressed)
+		s.eng.SendMouseButton(x, y, btn, pressed)
 	})
 
 	// ── Key down ─────────────────────────────────────────────────────────────
-	win.native.SetOnKeyDown(func(vk int) {
+	s.native.SetOnKeyDown(func(vk int) {
 		// Обновляем модификаторы
 		switch vk {
 		case VK_SHIFT:
-			win.modShift.Store(true)
+			s.modShift.Store(true)
 		case VK_CONTROL:
-			win.modCtrl.Store(true)
+			s.modCtrl.Store(true)
 		case VK_ALT:
-			win.modAlt.Store(true)
+			s.modAlt.Store(true)
 		}
 
 		code := vkToKeyCode(vk)
 		if code != widget.KeyUnknown {
-			win.eng.SendKeyEvent(widget.KeyEvent{
+			s.eng.SendKeyEvent(widget.KeyEvent{
 				Code:    code,
 				Rune:    0,
-				Mod:     win.currentMod(),
+				Mod:     s.currentMod(),
 				Pressed: true,
 			})
 		}
 	})
 
 	// ── Key up ───────────────────────────────────────────────────────────────
-	win.native.SetOnKeyUp(func(vk int) {
+	s.native.SetOnKeyUp(func(vk int) {
 		// Обновляем модификаторы
 		switch vk {
 		case VK_SHIFT:
-			win.modShift.Store(false)
+			s.modShift.Store(false)
 		case VK_CONTROL:
-			win.modCtrl.Store(false)
+			s.modCtrl.Store(false)
 		case VK_ALT:
-			win.modAlt.Store(false)
+			s.modAlt.Store(false)
 		}
 
 		code := vkToKeyCode(vk)
 		if code != widget.KeyUnknown {
-			win.eng.SendKeyEvent(widget.KeyEvent{
+			s.eng.SendKeyEvent(widget.KeyEvent{
 				Code:    code,
 				Rune:    0,
-				Mod:     win.currentMod(),
+				Mod:     s.currentMod(),
 				Pressed: false,
 			})
 		}
 	})
 
 	// ── Char (Unicode символ) ────────────────────────────────────────────────
-	win.native.SetOnChar(func(r rune) {
+	s.native.SetOnChar(func(r rune) {
 		if r >= 32 {
-			win.eng.SendKeyEvent(widget.KeyEvent{
+			s.eng.SendKeyEvent(widget.KeyEvent{
 				Code:    widget.KeyUnknown,
 				Rune:    r,
-				Mod:     win.currentMod(),
+				Mod:     s.currentMod(),
 				Pressed: true,
 			})
 		}
@@ -599,26 +681,26 @@ type exposeNotifier interface {
 	SetOnExpose(fn func(r image.Rectangle))
 }
 
-// setupExposeRedraw регистрирует перерисовку по запросу ОС из win.current.
+// setupExposeRedraw регистрирует перерисовку по запросу ОС из s.current.
 // macOS не требует этого: содержимое CALayer ретейнится композитором.
-func (win *Window) setupExposeRedraw() {
-	en, ok := win.native.(exposeNotifier)
+func (s *surface) setupExposeRedraw() {
+	en, ok := s.native.(exposeNotifier)
 	if !ok {
 		return
 	}
 	en.SetOnExpose(func(r image.Rectangle) {
-		win.mu.Lock()
-		cur := win.current
-		win.mu.Unlock()
+		s.mu.Lock()
+		cur := s.current
+		s.mu.Unlock()
 
 		r = r.Intersect(cur.Bounds())
 		if r.Empty() {
 			return
 		}
-		if db, ok := win.native.(dirtyRectBlitter); ok && r != cur.Bounds() {
+		if db, ok := s.native.(dirtyRectBlitter); ok && r != cur.Bounds() {
 			db.BlitRGBADirty(cur, r)
 		} else {
-			win.native.BlitRGBA(cur)
+			s.native.BlitRGBA(cur)
 		}
 	})
 }
@@ -629,19 +711,19 @@ func (win *Window) setupExposeRedraw() {
 // Полное копирование кадра перед блитом не делается: applyFrame и блит
 // выполняются последовательно в этой же горутине, а при resize старый буфер
 // остаётся валидным для чтения (заменяется целиком, не мутируется).
-func (win *Window) framePump() {
-	frames := win.eng.Frames()
-	db, hasDirtyBlit := win.native.(dirtyRectBlitter)
+func (s *surface) framePump() {
+	frames := s.eng.Frames()
+	db, hasDirtyBlit := s.native.(dirtyRectBlitter)
 	var lastBounds image.Rectangle // границы буфера на момент прошлого блита
 
 	for frame := range frames {
-		win.applyFrame(frame)
+		s.applyFrame(frame)
 
-		win.mu.Lock()
-		cur := win.current
-		dirty := win.pendingDirty
-		win.pendingDirty = image.Rectangle{}
-		win.mu.Unlock()
+		s.mu.Lock()
+		cur := s.current
+		dirty := s.pendingDirty
+		s.pendingDirty = image.Rectangle{}
+		s.mu.Unlock()
 
 		full := cur.Bounds()
 		if full != lastBounds {
@@ -657,21 +739,21 @@ func (win *Window) framePump() {
 		if hasDirtyBlit && dirty != full {
 			db.BlitRGBADirty(cur, dirty)
 		} else {
-			win.native.BlitRGBA(cur)
+			s.native.BlitRGBA(cur)
 		}
 	}
 }
 
 // currentMod возвращает текущие модификаторы клавиатуры.
-func (win *Window) currentMod() widget.KeyMod {
+func (s *surface) currentMod() widget.KeyMod {
 	var mod widget.KeyMod
-	if win.modCtrl.Load() {
+	if s.modCtrl.Load() {
 		mod |= widget.ModCtrl
 	}
-	if win.modShift.Load() {
+	if s.modShift.Load() {
 		mod |= widget.ModShift
 	}
-	if win.modAlt.Load() {
+	if s.modAlt.Load() {
 		mod |= widget.ModAlt
 	}
 	return mod
@@ -681,25 +763,25 @@ func (win *Window) currentMod() widget.KeyMod {
 
 // applyFrame накладывает dirty-тайлы кадра на текущий буфер и копит
 // объединение их областей в pendingDirty (для частичного блита).
-func (win *Window) applyFrame(frame output.Frame) {
-	win.mu.Lock()
-	defer win.mu.Unlock()
+func (s *surface) applyFrame(frame output.Frame) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, tile := range frame.Tiles {
-		win.pendingDirty = win.pendingDirty.Union(
+		s.pendingDirty = s.pendingDirty.Union(
 			image.Rect(tile.X, tile.Y, tile.X+tile.W, tile.Y+tile.H))
 		rowBytes := tile.W * 4
 		for row := 0; row < tile.H; row++ {
 			srcOff := row * rowBytes
 			dstY := tile.Y + row
-			if dstY >= win.current.Bounds().Dy() {
+			if dstY >= s.current.Bounds().Dy() {
 				break
 			}
-			dstOff := win.current.PixOffset(tile.X, dstY)
+			dstOff := s.current.PixOffset(tile.X, dstY)
 			dstEnd := dstOff + rowBytes
-			if dstEnd > len(win.current.Pix) {
+			if dstEnd > len(s.current.Pix) {
 				break
 			}
-			copy(win.current.Pix[dstOff:dstEnd], tile.Data[srcOff:srcOff+rowBytes])
+			copy(s.current.Pix[dstOff:dstEnd], tile.Data[srcOff:srcOff+rowBytes])
 		}
 	}
 }

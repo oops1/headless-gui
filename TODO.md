@@ -36,6 +36,18 @@
 
 ## 2. Важные (ожидаемый комфорт)
 
+- [x] **Нативные модальные окна и popup-оверлеи** — сделано 2026-07-11:
+      модальные диалоги (`engine.ModalHost`/`SetModalHost`) и оверлеи —
+      dropdown/меню (`engine.PopupSink`/`OverlayBoundsProvider`/
+      `widget.SetPopupsHosted`) — открываются в собственных окнах ОС.
+      Диалог может быть больше главного окна и тащиться за его пределы;
+      меню/dropdown не обрезаются краем окна. Нативно на Win32 и X11.
+      Известные ограничения:
+      - Wayland/macOS/headless — фолбэк in-canvas (рисуется в холст, как
+        раньше; функционально идентично, но в пределах окна).
+      - X11: клик в ДРУГОЕ приложение не закрывает popup (нет надёжного
+        события деактивации, как WM_ACTIVATE на Win32); закрывается кликом
+        мимо в своём окне/выбором пункта/Esc.
 - [x] **Анимационный фреймворк** — сделано 2026-07-07 (widget/anim.go +
       widget/easing.go): Animate/AnimateOwned (owner-replace против
       «дерущихся» анимаций), 13 канонических кривых, LerpF/Int/Rect/Color
@@ -49,9 +61,29 @@
       дискретизируем — отдавать точное значение), инерция в ScrollView.
 - [ ] **SVG-иконки** — темизируемые иконки (перекраска под тему), парсер
       подмножества SVG (path/fill) поверх существующего AA-растеризатора.
-- [ ] **Системные уведомления** — Win32 toast/Shell_NotifyIcon, D-Bus
-      org.freedesktop.Notifications, macOS NSUserNotification.
-- [ ] **Tray-иконка** с меню.
+- [~] **Системные уведомления** — Windows сделано 2026-07-11: balloon через
+      Shell_NotifyIcon (NIF_INFO, значок по severity), `Window.ShowBalloon` +
+      `SetOnBalloonClick`. Осталось: D-Bus org.freedesktop.Notifications
+      (Linux), macOS NSUserNotification.
+- [x] **Tray-иконка с меню** — Windows сделано 2026-07-11 (window/tray*.go):
+      `SetTrayIcon`/`RemoveTrayIcon` (Shell_NotifyIcon, image.Image→HICON,
+      масштаб до SM_CXSMICON, маска из альфы), `SetOnTrayClick`, `SetTrayMenu`
+      (НАШЕ widget.PopupMenu у курсора через хост popup-окон), `HideToTray`/
+      `RestoreFromTray`, дефолт «двойной левый клик восстанавливает окно».
+      Live-превью окна в панели задач/Aero Peek: WM_PRINTCLIENT из кэша кадра
+      (+ опциональный iconic-путь DWM за `HEADLESS_GUI_ICONIC_PREVIEW=1`).
+      На Linux/macOS/Wayland — no-op-заглушки. Трей на X11/macOS — позже.
+- [ ] **Splitter** — контрол-разделитель между двумя панелями: перетаскивание
+      мышью меняет доли (горизонтальный/вертикальный), курсор SizeWE/SizeNS,
+      MinSize сторон, двойной клик — сброс/коллапс панели. XAML-тег Splitter
+      (или GridSplitter в Grid). Основа для док-layout'ов и Toolbox ниже.
+- [ ] **Toolbox / докинг-панели** — плавающие инструментальные панели в духе
+      Visual Studio: притягиваются (док) к любой стороне окна с направляющими,
+      сворачиваются в заголовок (auto-hide/pin), отрываются в ОТДЕЛЬНЫЕ
+      нативные окна (инфраструктура нативных окон v3.10 уже готова: owned
+      окно + свой surface, как у диалогов) и возвращаются обратно доком.
+      Состав: DockManager-контейнер, DockPanelWindow (титлбар с pin/✕),
+      сериализация раскладки. Зависит от Splitter (ресайз доков).
 - [ ] **Drag&Drop файлов из ОС** в окно (WM_DROPFILES, xdg dnd, wl_data_device).
 - [ ] **Цветные эмодзи** — COLR/CBDT-глифы (сейчас честно пропускаются).
 - [ ] **Курсор ввода/IME-позиция** в нативных окнах (candidate window рядом
