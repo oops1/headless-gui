@@ -550,6 +550,8 @@ Mapping of XAML tags to Go types with key attributes.
 | `<MenuItem>` | (nested in MenuBar) | `Header`, `Items` |
 | `<TreeView>` | `TreeViewWidget` | `Items`, `ItemHeight`, `ShowIndentGuides` |
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
+| `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
+| `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
 
 ### XAML Color Values
 
@@ -2577,6 +2579,204 @@ win.Run()
 
 Идентификаторы сообщений: `InvokeOnUIThread` занимает `WM_APP` (0x8000);
 callback иконки трея — `WM_APP+1` (`wmTrayCallback`).
+
+---
+
+## v3.11 additions (smooth scroll, SplitPanel, SVG icons, file drop, color emoji)
+
+Пять фич поверх v3.10. Для каждой ниже явно указано, что работает **headless**
+(без окна ОС, через `engine.Send*` + тесты) и что требует **нативного** окна с
+платформенными оговорками.
+
+### Плавный / инерционный скролл — `SendMouseWheelPixels` / `OnMouseWheelPixels`
+
+Точная пиксельная дельта колеса/тачпада вместо целых «тиков».
+
+```go
+// Движок: точная дельта в физических пикселях окна/кадра. dy>0 — вниз, dx>0 — вправо.
+func (e *Engine) SendMouseWheelPixels(xPhys, yPhys int, dx, dy float64)
+```
+
+Событие всплывает от самого глубокого виджета под курсором к корню; первый,
+реализующий `wheelPixelHandler` и вернувший `true`, поглощает дельту.
+
+```go
+// Опт-ин интерфейс виджета (widget package). dy>0 — вниз. true = поглощено;
+// false = прокручивать нечего / упёрлись в край по жесту (дельта всплывёт к родителю).
+type wheelPixelHandler interface {
+    OnMouseWheelPixels(x, y int, dx, dy float64) bool
+}
+```
+
+- **Фолбэк (headless-контракт цел):** если точную дельту никто не принял,
+  движок синтезирует эквивалентные тики через `SendMouseButton`
+  (`MouseWheelUp`/`Down`, 40 px = 1 тик) — старые виджеты продолжают работать.
+- **Реализовали `OnMouseWheelPixels`:** `ScrollView` (инерция-«маховик» через
+  `AnimateOwned` на часах движка, без горутин; любой press/клик гасит бросок;
+  в `Classic3D` — мгновенно, без инерции), `ListView` и `TextBox`
+  (попиксельно с субпиксельным накоплением, всплытие на краях).
+- **Headless:** полностью — `SendMouseWheelPixels` + инерция на часах движка
+  работают без окна (см. `tests/smoothscroll_test.go`).
+- **Нативно (бэкенды):** Win32 конвертирует `WM_MOUSEWHEEL` delta/120 в пиксели
+  (точные тачпады шлют дробные дельты); Wayland форвардит `wl_pointer.axis`
+  (`wl_fixed`) как пиксели. **X11 остаётся на тиках** (кнопки 4/5 не несут
+  пиксельных данных); **macOS-колесо по-прежнему не эмитится** (доверху).
+
+### SplitPanel — контейнер двух панелей с разделителем
+
+`widget/splitpanel.go`. Держит ДВУХ детей (первые два `AddChild` → First/Second),
+раскладывает по обе стороны перетаскиваемой полосы. Позиция — доля `0..1`, так что
+ресайз сохраняет соотношение.
+
+```go
+func NewSplitPanel(orient Orientation) *SplitPanel   // Position=0.5, SplitterSize=6
+
+type SplitPanel struct {
+    Base
+    Orientation  Orientation  // Horizontal — панели слева/справа (полоса вертикальная); Vertical — сверху/снизу
+    SplitterSize int          // толщина полосы, px (по умолчанию 6)
+    Position     float64      // доля 0..1 доступного места (размер First)
+    MinFirst     int          // мин. размеры панелей, px (клэмп при drag/раскладке, не при коллапсе)
+    MinSecond    int
+    Background   color.RGBA   // цвет полосы (обычный)
+    HoverColor   color.RGBA   // цвет полосы при hover/drag
+    OnPositionChanged func(pos float64) // drag, коллапс, SetPosition
+}
+
+// Методы
+sp.First() Widget           // sp.Second() Widget
+sp.SetPosition(pos float64) // клэмп 0..1, снимает коллапс, уведомляет
+sp.Collapse()               // свернуть First (Position→0, прежняя позиция запоминается)
+sp.Expand()                 // развернуть обратно
+sp.ToggleCollapse()
+sp.IsCollapsed() bool
+```
+
+Взаимодействие: hover над полосой → курсор `CursorSizeWE`/`CursorSizeNS`;
+drag ЛКМ через `CaptureManager` (drag НЕ считается кликом для double-click);
+двойной клик по полосе — коллапс/восстановление First; SplitPanel'ы вложены.
+Зарегистрирован в `HasOwnLayout` (сам перекладывает детей в `SetBounds`), так что
+анкор-контейнеры (Canvas/DockPanel) не «двоят» сдвиг. Тема — `Theme.SplitterBG` /
+`Theme.SplitterHoverBG` (`ApplyTheme`).
+
+XAML (первые два дочерних элемента — панели):
+
+```xml
+<SplitPanel Orientation="Horizontal" Position="0.35" SplitterSize="6"
+            MinFirst="120" MinSecond="200">
+  <Panel Background="#1E1E1E"/>   <!-- First -->
+  <Panel Background="#252526"/>   <!-- Second -->
+</SplitPanel>
+```
+
+Атрибуты: `Orientation` (Horizontal/Vertical), `Position` (0..1), `SplitterSize`,
+`MinFirst`, `MinSecond`, `Background`, `HoverColor` + общие (`Name`, `Grid.Row/Column`, …).
+
+**Headless:** полностью (drag/коллапс через `Send*`, см. `tests/splitpanel_test.go`).
+Для ячеек `Grid` по-прежнему используйте `GridSplitter`.
+
+### SVG-иконки — пакет `widget/svg` + виджет `SVGIcon`
+
+`widget/svgicon.go` рендерит темизируемую векторную иконку, растеризуя документ
+под размер bounds с сохранением пропорций (центрирование).
+
+```go
+func NewSVGIcon() *SVGIcon                    // цвет по умолчанию = Theme.LabelText (следует за темой)
+func NewSVGIconFromData(data []byte) *SVGIcon
+
+ic.SetSVG(data []byte) error     // ic.SetSVGFile(path string) error
+ic.SetColor(c color.RGBA)        // явный цвет (перекрывает тему); = currentColor и цвет Tint
+ic.Color() color.RGBA
+ic.SetTint(on bool)              // true — перекрасить ВЕСЬ контент в Color (монохром); false — только fill="currentColor"
+ic.Tint() bool
+ic.Err() error                   // ic.Document() *svg.Document
+```
+
+Перекраска: `fill="currentColor"` → `Color` виджета; без явного `SetColor`
+`ApplyTheme` берёт `Theme.LabelText` (иконка «под текст»).
+
+Пакет `widget/svg` — парсер+растеризатор icon-ориентированного подмножества:
+
+```go
+func svg.Parse(data []byte) (*svg.Document, error)  // svg.ParseFile(path)
+func (d *svg.Document) RasterizeCached(w, h int, current color.RGBA, tint bool) *image.RGBA
+```
+
+- **Поддержано:** `path` со всеми командами (включая дуги `A` и smooth-кривые),
+  `rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`, group-трансформы,
+  `fill`/`fill-rule` (nonzero + even-odd)/`fill-opacity`/`currentColor`,
+  атрибут `style`. Растеризация через `x/image/vector` (AA), кэш по
+  face-независимым параметрам (размер/цвет/tint).
+- **Ограничения (честно):** нет градиентов, `clipPath`, `text`; обводка (stroke) —
+  упрощённая аппроксимация.
+- **Headless/нативно:** одинаково — чистый CPU-растеризатор, окно ОС не нужно
+  (см. `tests/svgicon_test.go`).
+
+XAML: `Source` резолвится относительно базовой директории XAML-файла.
+
+```xml
+<SVGIcon Source="icons/menu.svg" Color="#FF3366" Tint="True"/>
+<SVGIcon Source="icons/folder.svg"/>   <!-- без Color — цвет текста темы -->
+```
+
+Атрибуты: `Source`, `Color` (алиасы `Foreground`/`Fill`), `Tint` (True/False).
+
+### Drag & Drop файлов из ОС — `SetOnFilesDropped` / `FileDropTarget`
+
+Приём файлов, перетащенных из проводника/файлового менеджера в окно.
+
+```go
+// Окно: колбэк приложения. paths — абсолютные пути; x,y — ЛОГИЧЕСКИЕ пиксели
+// клиентской области. Вызывать до Run().
+func (win *window.Window) SetOnFilesDropped(fn func(paths []string, x, y int))
+
+// Движок: доставка виджету под точкой (x,y — ФИЗИЧЕСКИЕ пиксели, как у SendMouse*).
+// Всплытие от глубокого виджета к корню; первый вернувший true поглощает.
+func (e *Engine) SendFilesDropped(x, y int, paths []string)
+
+// Опт-ин интерфейс виджета-приёмника (widget package). x,y — ЛОГИЧЕСКИЕ координаты.
+type FileDropTarget interface {
+    OnFilesDropped(x, y int, paths []string) bool
+}
+```
+
+Событие идёт двумя путями одновременно: в движок (`SendFilesDropped` → виджет
+`FileDropTarget` под точкой, для headless-симметрии и тестов) и в
+`win.onFilesDropped` (колбэк приложения, логические координаты).
+
+- **Headless:** маршрутизация к `FileDropTarget` через `SendFilesDropped`
+  полностью тестируема без окна (`tests/filedrop_test.go`).
+- **Нативно по платформам:** **Win32** — полно (`WM_DROPFILES`, `DragAcceptFiles`
+  на главном окне, не на попапах); **X11** — полно (XDND v5: `XdndAware`,
+  Enter/Position/Status/Drop, `XConvertSelection` → async `SelectionNotify`,
+  `text/uri-list`); **Wayland** — **каркас** (`wl_data_device`, принимает
+  `text/uri-list`, требует живой проверки на реальной сессии); macOS — нет.
+  `parseURIList` декодирует `file://` URI (percent-escapes, hostname, CRLF).
+
+### Цветные эмодзи (COLR/CBDT) — автоматически
+
+Шейпинг-тракт теперь рендерит цветные глифы вместо их отбрасывания. Публичного
+API нет — работает само в общем текстовом пути (`DrawText*`, все виджеты).
+
+- **Поддержано:** COLRv0 (плоские CPAL-слои), COLRv1 (обход графа paint с
+  аффинными трансформами и сплошными заливками), CBDT/sbix (PNG-битмапы).
+  Цветные глифы кэшируются отдельно от монохромных масок и блитятся как
+  premultiplied RGBA без подкраски. Детектор шейпинга гонит эмодзи-диапазоны
+  (включая ZWJ-последовательности и VS16) через HarfBuzz; fallback-цепочка
+  предпочитает цветной эмодзи-шрифт. Проверено на Segoe UI Emoji (COLRv1):
+  👍🎉🚀🔥 в цвете.
+- **Ограничения (честно):** BMP-символы ниже U+1F000 остаются **монохромными**;
+  **региональные флаги** (буквенные лигатуры) — известный пробел;
+  **COLRv1-градиенты аппроксимируются средним** цветом (сплошная заливка).
+- **Headless/нативно:** одинаково (растеризация в буфер; окно не нужно,
+  см. `engine/emoji_test.go`).
+
+> Внутреннее (без публичного API, для полноты): `FontCache.Kern` теперь кэширует
+> пары кернинга (сброс на `SetDPI`) — ~1.7× на шрифтах с реальной kern-таблицей.
+> Плюс точечная построчная инвалидация DataGrid/TreeView (`TakeDirty`) —
+> selection/hover перерисовывают только затронутые строки; и исправлен бандинг
+> градиента на дробных HiDPI-масштабах (ramp 1×h / w×1 + `DrawImageScaled`;
+> при scale==1 байт-в-байт идентично).
 
 ---
 

@@ -66,6 +66,11 @@ GUI-движок на чистом Go (zero CGO): WPF-стиль XAML, прив�
 - **Валидация** — `IDataErrorInfo` / `ValidatesOnDataErrors=True` с красным адорнером ошибки
 - **CollectionView и UI-виртуализация** — сортировка/фильтр/группировка; `VirtualizingItemsControl` рендерит только видимые строки (100k+ элементов)
 - **Векторные фигуры** — `Ellipse`, `Rectangle`, `Line`, `Polygon`, `Polyline` с `Fill`/`Stroke`
+- **SVG-иконки** — темизируемый виджет `SVGIcon` + пакет `widget/svg` (парсер подмножества + AA-растеризатор): `currentColor`, монохромный `Tint`; path/дуги/базовые фигуры/трансформы/even-odd
+- **SplitPanel** — две панели с перетаскиваемым разделителем (позиция-доля, минимумы, коллапс двойным кликом, гнездование)
+- **Плавный / инерционный скролл** — точные пиксельные дельты колеса/тачпада (`SendMouseWheelPixels`) с затухающим «маховиком» в `ScrollView` (пиксельные дельты на Win32 и Wayland; X11 — тики)
+- **Drag & Drop файлов из ОС** — перетаскивание файлов из проводника/Finder в окно (`SetOnFilesDropped` / `FileDropTarget`); Win32 и X11 нативно, Wayland — каркас
+- **Цветные эмодзи** — глифы COLR/CBDT/sbix рендерятся в цвете автоматически (COLRv1-градиенты усредняются; флаги-лигатуры — известный пробел)
 - **Подсказки и курсоры** — `ToolTip` у каждого виджета; курсор мыши на виджет
 - **Свободные шрифты в комплекте** — Roboto (по умолчанию), Open Sans, Inter + системная цепочка фолбэков (без «тофу»)
 
@@ -107,6 +112,8 @@ GUI-движок на чистом Go (zero CGO): WPF-стиль XAML, прив�
 | Window | `Window` | Нативное окно ОС с заголовком (Win/Mac-стиль), resize, minimize/maximize |
 | TreeView | `TreeView` | WPF-совместимое дерево: виртуализация, HierarchicalDataTemplate, иконки, клавиатура |
 | GridSplitter | `GridSplitter` | Перетаскиваемый разделитель между ячейками Grid |
+| SplitPanel | `SplitPanel` | Две панели с перетаскиваемым разделителем, позиция-доля, минимумы, коллапс двойным кликом |
+| SVGIcon | `SVGIcon` | Темизируемая векторная иконка (подмножество SVG), перекраска `currentColor` / `Tint` |
 | StatusBar | `StatusBar` | Нижняя строка состояния |
 | DataGrid | `DataGrid` | WPF-совместимая таблица: колонки, сортировка, редактирование ячеек, resize, Binding, ObservableCollection |
 

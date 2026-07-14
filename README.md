@@ -68,6 +68,11 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **Validation** — `IDataErrorInfo` / `ValidatesOnDataErrors=True` with red error adorner
 - **CollectionView & UI virtualization** — sort/filter/group over a collection; `VirtualizingItemsControl` renders only visible rows (100k+ items)
 - **Vector shapes** — `Ellipse`, `Rectangle`, `Line`, `Polygon`, `Polyline` with `Fill`/`Stroke`
+- **SVG icons** — themeable `SVGIcon` widget + `widget/svg` subset parser/AA rasterizer (`currentColor`, monochrome tint); paths/arcs/basic shapes/transforms/even-odd
+- **SplitPanel** — two panes with a draggable splitter (fraction-based position, min sizes, double-click collapse, nesting)
+- **Smooth / inertial scroll** — pixel-precise wheel/touchpad deltas (`SendMouseWheelPixels`) with a decaying flywheel in `ScrollView` (Win32 + Wayland pixel deltas; X11 keeps ticks)
+- **File drag & drop from the OS** — drop files from Explorer/Finder into the window (`SetOnFilesDropped` / `FileDropTarget`); Win32 + X11 native, Wayland skeleton
+- **Color emoji** — COLR/CBDT/sbix color glyphs render automatically in the text path (COLRv1 gradients averaged; regional-flag ligatures a known gap)
 - **Tooltips & cursors** — `ToolTip` on every widget; per-widget mouse cursors
 - **Free bundled fonts** — Roboto (default), Open Sans, Inter + system glyph fallback chain (no tofu)
 
@@ -109,6 +114,8 @@ Run `go test ./engine/ -bench .` to reproduce.
 | Window | `Window` | Native OS window with title bar (Win/Mac style), resize, minimize/maximize |
 | TreeView | `TreeView` | WPF-compatible hierarchical tree with virtualization, HierarchicalDataTemplate, icons, keyboard nav |
 | GridSplitter | `GridSplitter` | Resizable splitter between Grid cells |
+| SplitPanel | `SplitPanel` | Two panes with a draggable splitter, fraction position, min sizes, double-click collapse |
+| SVGIcon | `SVGIcon` | Themeable vector icon (SVG subset), `currentColor` / `Tint` recoloring |
 | StatusBar | `StatusBar` | Bottom status bar with text |
 | DataGrid | `DataGrid` | WPF-compatible data table with columns, sorting, cell editing, resize, Data Binding, ObservableCollection |
 

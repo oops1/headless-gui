@@ -941,6 +941,8 @@ root Canvas (0,0)
 | `DataGridTextColumn` | DataGridTextColumn | `Header`, `Binding`, `Width`, `IsReadOnly`, `SortMemberPath` |
 | `DataGridCheckBoxColumn` | DataGridCheckBoxColumn | `Header`, `Binding`, `Width`, `IsReadOnly` |
 | `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
+| `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (первые два дочерних — панели) |
+| `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `Separator` | Separator | `Background` |
 
 Общие атрибуты: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`, `ToolTip`, `Visibility`, `IsEnabled`, `TabIndex`. Привязки `{Binding ...}` и локализация `{Loc Key}` работают на любом строковом атрибуте.
@@ -1509,6 +1511,141 @@ win.Run()
 Peek показывают живое содержимое окна (раньше было чёрным). Дополнительный
 iconic-путь DWM включается переменной окружения `HEADLESS_GUI_ICONIC_PREVIEW=1`
 (по умолчанию не требуется).
+
+### SplitPanel — две панели с разделителем
+
+Контейнер `SplitPanel` держит двух детей (первые два `AddChild` — First/Second) и
+раскладывает их по обе стороны перетаскиваемой полосы. Позиция хранится как доля
+`0..1`, поэтому ресайз окна сохраняет соотношение. Полосы можно вкладывать друг
+в друга (панель-в-панель).
+
+```go
+sp := widget.NewSplitPanel(widget.OrientationHorizontal) // слева/справа; Vertical — сверху/снизу
+sp.SplitterSize = 6
+sp.Position = 0.35        // доля под First
+sp.MinFirst, sp.MinSecond = 120, 200
+sp.OnPositionChanged = func(pos float64) { /* обновить подпись позиции */ }
+
+sp.AddChild(leftPanel)    // First
+sp.AddChild(rightPanel)   // Second
+sp.SetBounds(image.Rect(0, 0, 800, 500))
+
+// Управление коллапсом (аналог двойного клика по полосе):
+sp.Collapse(); sp.Expand(); sp.ToggleCollapse(); _ = sp.IsCollapsed()
+```
+
+Hover над полосой даёт курсор изменения размера (`SizeWE`/`SizeNS`), drag ЛКМ
+двигает границу с клэмпом по `MinFirst`/`MinSecond`, двойной клик по полосе
+сворачивает/разворачивает First. Цвет полосы следует за темой
+(`Theme.SplitterBG`/`SplitterHoverBG`). SplitPanel зарегистрирован в
+`HasOwnLayout`, так что вложение в Canvas/DockPanel не «двоит» сдвиг.
+
+XAML (первые два дочерних элемента — панели):
+
+```xml
+<SplitPanel Orientation="Horizontal" Position="0.35" SplitterSize="6"
+            MinFirst="120" MinSecond="200">
+  <Panel Background="#1E1E1E"/>   <!-- First -->
+  <Panel Background="#252526"/>   <!-- Second -->
+</SplitPanel>
+```
+
+Для ресайза ячеек `Grid` по-прежнему используйте `GridSplitter`.
+
+### SVG-иконки
+
+Виджет `SVGIcon` рисует векторную иконку из подмножества SVG, растеризуя её под
+размер bounds с сохранением пропорций. Без явного цвета иконка перекрашивается
+под цвет текста темы — удобно для панелей инструментов и меню.
+
+```go
+ic := widget.NewSVGIcon()          // цвет = Theme.LabelText, пока не задан явно
+ic.SetSVGFile("assets/menu.svg")   // или ic.SetSVG(data []byte)
+ic.SetColor(color.RGBA{0xFF, 0x33, 0x66, 0xFF}) // явный цвет = currentColor
+ic.SetTint(true)                   // перекрасить ВЕСЬ контент в Color (монохром)
+ic.SetBounds(image.Rect(8, 8, 32, 32))
+```
+
+- `fill="currentColor"` в SVG заменяется на `Color` виджета.
+- `Tint=true` перекрашивает весь контент в `Color` (монохромный режим);
+  `Tint=false` красит только `currentColor`.
+- Поддержано: `path` (все команды, включая дуги и smooth-кривые),
+  `rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`, трансформы групп,
+  `fill`/`fill-rule` (nonzero + even-odd)/`fill-opacity`, атрибут `style`.
+- Ограничения: нет градиентов, `clipPath` и `text`; обводка (stroke) упрощённая.
+
+Пакет `widget/svg` доступен и напрямую: `svg.Parse(data)` / `svg.ParseFile(path)`
+→ `*svg.Document` с методом `RasterizeCached(w, h, current, tint)`.
+
+XAML (`Source` резолвится относительно каталога XAML-файла):
+
+```xml
+<SVGIcon Source="icons/menu.svg" Color="#FF3366" Tint="True"/>
+<SVGIcon Source="icons/folder.svg"/>   <!-- без Color — цвет текста темы -->
+```
+
+### Плавный / инерционный скролл
+
+Помимо целых «тиков» колеса движок принимает **точные пиксельные дельты** — так
+тачпады и колёса высокой точности скроллят плавно.
+
+```go
+// Точная дельта в физических пикселях окна/кадра (dy>0 — вниз, dx>0 — вправо).
+eng.SendMouseWheelPixels(x, y, dx, dy)
+```
+
+Событие всплывает от глубокого виджета к корню; первый, реализующий
+`OnMouseWheelPixels(x, y int, dx, dy float64) bool` и вернувший `true`, поглощает
+дельту. `ScrollView` запускает инерцию-«маховик» (импульс скорости, затухание на
+часах движка — без горутин); любой клик/press гасит бросок, в `Classic3D` скролл
+мгновенный. `ListView` и `TextBox` прокручиваются попиксельно с субпиксельным
+накоплением и отдают дельту родителю на краях. Если точную дельту никто не принял,
+движок синтезирует эквивалентные тики — старый путь `MouseWheelUp`/`Down` цел.
+
+По платформам: Win32 (`WM_MOUSEWHEEL`) и Wayland (`wl_pointer.axis`) дают точные
+пиксели; X11 остаётся на тиках (кнопки 4/5), macOS-колесо пока не эмитится. В
+headless всё работает через `SendMouseWheelPixels`.
+
+### Drag & Drop файлов из ОС
+
+Приложение может принимать файлы, перетащенные из проводника/файлового менеджера
+в окно.
+
+```go
+win := window.New(eng, "My App")
+win.SetOnFilesDropped(func(paths []string, x, y int) {
+    // paths — абсолютные пути; x, y — ЛОГИЧЕСКИЕ координаты точки сброса.
+    for _, p := range paths { open(p) }
+})
+win.Run()
+```
+
+Параллельно событие уходит в движок (`eng.SendFilesDropped(x, y, paths)`, где
+`x,y` — физические пиксели) и доставляется виджету под точкой, реализующему
+интерфейс приёмника — это даёт headless-симметрию и тестируемость:
+
+```go
+type FileDropTarget interface {
+    OnFilesDropped(x, y int, paths []string) bool // true — поглотить (прекратить всплытие)
+}
+```
+
+По платформам: **Win32** (`WM_DROPFILES`) и **X11** (XDND v5) — полностью;
+**Wayland** (`wl_data_device`) — каркас, требует проверки на живой сессии;
+macOS — нет. В headless маршрутизация к `FileDropTarget` тестируется через
+`SendFilesDropped` без окна.
+
+### Цветные эмодзи
+
+Текстовый тракт рендерит цветные глифы автоматически — отдельного API не нужно,
+достаточно эмодзи в строке любого виджета (`👍🎉🚀🔥`). Поддержаны COLRv0
+(плоские CPAL-слои), COLRv1 (граф paint с трансформами и сплошными заливками) и
+CBDT/sbix (PNG-битмапы, напр. Noto Color Emoji). Цветные глифы кэшируются отдельно
+от монохромных масок.
+
+Ограничения (честно): BMP-символы ниже U+1F000 остаются монохромными;
+региональные флаги (буквенные лигатуры) — известный пробел; градиенты COLRv1
+аппроксимируются средним цветом. Работает одинаково headless и в окне.
 
 ---
 
