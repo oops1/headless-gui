@@ -2,6 +2,7 @@ package tests
 
 import (
 	"image"
+	"image/color"
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
@@ -108,8 +109,11 @@ func TestSplitPanel_DoubleClickCollapseRestore(t *testing.T) {
 	sp.SetPosition(0.5)
 	wantFirst := a.Bounds().Dx() // 97
 
-	dbl := func() {
-		e := widget.MouseEvent{X: 100, Y: 50, Button: widget.MouseLeft, Pressed: true}
+	// Клик строго по полосе: после коллапса она переезжает к левому краю,
+	// поэтому X берём из фактического положения (press вне полосы теперь
+	// честно игнорируется — см. TestSplitPanel_PressOutsideBarIgnored).
+	dbl := func(x int) {
+		e := widget.MouseEvent{X: x, Y: 50, Button: widget.MouseLeft, Pressed: true}
 		sp.OnMouseButton(e)
 		e.Pressed = false
 		sp.OnMouseButton(e)
@@ -120,7 +124,7 @@ func TestSplitPanel_DoubleClickCollapseRestore(t *testing.T) {
 	}
 
 	// Первый двойной клик — коллапс First.
-	dbl()
+	dbl(100)
 	if !sp.IsCollapsed() {
 		t.Fatal("после двойного клика First должен быть свёрнут")
 	}
@@ -131,8 +135,8 @@ func TestSplitPanel_DoubleClickCollapseRestore(t *testing.T) {
 		t.Errorf("Second при коллапсе = %v, want (6,0,200,100)", got)
 	}
 
-	// Второй двойной клик — восстановление прежней позиции.
-	dbl()
+	// Второй двойной клик — восстановление прежней позиции (полоса у края).
+	dbl(3)
 	if sp.IsCollapsed() {
 		t.Fatal("после повторного двойного клика First должен восстановиться")
 	}
@@ -219,5 +223,74 @@ func TestSplitPanel_ResizePreservesFraction(t *testing.T) {
 	}
 	if p := sp.Position; p != 0.25 {
 		t.Errorf("Position после ресайза = %v, want 0.25", p)
+	}
+}
+
+// ─── Регрессии живой проверки ────────────────────────────────────────────────
+
+// TestSplitPanel_PressOutsideBarIgnored — press в теле панели (вне полосы) не
+// взводит drag: раньше любой клик по SplitPanel включал dragging, и полоса
+// «прыгала» за мышью даже без зажатой кнопки.
+func TestSplitPanel_PressOutsideBarIgnored(t *testing.T) {
+	sp, a, _ := makeSplit(widget.OrientationHorizontal, image.Rect(0, 0, 200, 100))
+	sp.SetPosition(0.5)
+
+	eng := engine.New(200, 100, 20)
+	eng.SetRoot(sp)
+
+	wantW := a.Bounds().Dx()
+	// Press в центре ЛЕВОЙ панели (далеко от полосы) + движение мыши.
+	eng.SendMouseButton(40, 50, widget.MouseLeft, true)
+	eng.SendMouseMove(160, 50)
+	eng.SendMouseButton(160, 50, widget.MouseLeft, false)
+	// И просто hover-движения без кнопки.
+	eng.SendMouseMove(20, 50)
+	eng.SendMouseMove(180, 50)
+
+	if got := a.Bounds().Dx(); got != wantW {
+		t.Fatalf("полоса сдвинулась от клика вне разделителя: First %d → %d", wantW, got)
+	}
+}
+
+// TestSplitPanel_CaptureReleasedInsideTab — SplitPanel в НЕАКТИВНОЙ при
+// SetRoot вкладке TabControl не получает CaptureManager при инжекте (вкладка
+// скрыта из Children). Движок обязан инжектнуть менеджер в момент захвата —
+// иначе после первого drag'а захват залипал и весь ввод шёл сплиттеру.
+func TestSplitPanel_CaptureReleasedInsideTab(t *testing.T) {
+	sp, _, _ := makeSplit(widget.OrientationHorizontal, image.Rect(0, 0, 200, 80))
+	sp.SetPosition(0.5)
+
+	clicked := false
+	btn := widget.NewButton("btn")
+	btn.SetBounds(image.Rect(10, 120, 90, 150))
+	btn.OnClick = func() { clicked = true }
+
+	tc := widget.NewTabControl()
+	tc.SetBounds(image.Rect(0, 0, 200, 100))
+	tc.AddTab("первая", widget.NewPanel(color.RGBA{}))
+	tc.AddTab("сплит", sp) // неактивна при SetRoot — инжект не достанет
+
+	root := widget.NewPanel(color.RGBA{})
+	root.SetBounds(image.Rect(0, 0, 200, 200))
+	root.AddChild(tc)
+	root.AddChild(btn)
+
+	eng := engine.New(200, 200, 20)
+	eng.SetRoot(root)
+
+	tc.SetActive(1)
+
+	// Drag полосы: press на полосе → капчур; release обязан его отпустить.
+	bar := sp.Bounds().Min.X + sp.Bounds().Dx()/2
+	_ = bar
+	eng.SendMouseButton(100, 50, widget.MouseLeft, true)
+	eng.SendMouseMove(130, 50)
+	eng.SendMouseButton(130, 50, widget.MouseLeft, false)
+
+	// Если капчур залип — клик по кнопке уйдёт сплиттеру, а не кнопке.
+	eng.SendMouseButton(50, 135, widget.MouseLeft, true)
+	eng.SendMouseButton(50, 135, widget.MouseLeft, false)
+	if !clicked {
+		t.Fatal("клик по кнопке после drag'а не дошёл — капчур сплиттера залип")
 	}
 }

@@ -382,6 +382,13 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	// Проверяем, хочет ли кто-то из предков захватить мышь (drag handle)
 	if pressed && btn == widget.MouseLeft {
 		if capturer := findCapturer(dispatchRoot, x, y, ev); capturer != nil {
+			// Гарантируем захватчику CaptureManager: injectCaptureManager при
+			// SetRoot не достаёт до виджетов, скрытых из Children() (например,
+			// содержимое неактивной вкладки TabControl) — без менеджера виджет
+			// не смог бы отпустить захват, и весь ввод залипал бы на нём.
+			if ca, ok := capturer.(widget.CaptureAware); ok {
+				ca.SetCaptureManager(e)
+			}
 			e.SetCapture(capturer)
 
 			// Устанавливаем фокус на захватчик (TextInput и т.д.)

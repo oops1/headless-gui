@@ -297,6 +297,13 @@ func (sp *SplitPanel) OnMouseButton(e MouseEvent) bool {
 	if e.Button != MouseLeft {
 		return false
 	}
+	// Press вне полосы-разделителя — не наш: иначе клик в любом месте панелей
+	// (не поглощённый детьми) взводил dragging, и полоса «прыгала» за мышью
+	// даже без зажатой кнопки. Release пропускаем всегда — он завершает drag,
+	// начатый на полосе (капчур ведёт release к нам независимо от точки).
+	if e.Pressed && !image.Pt(e.X, e.Y).In(sp.grabRect()) {
+		return false
+	}
 	if e.Pressed {
 		now := time.Now().UnixMilli()
 		if sp.lastClickMs != 0 && now-sp.lastClickMs < splitDoubleClickMs {
