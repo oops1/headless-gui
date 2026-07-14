@@ -48,6 +48,12 @@ const (
 	wmMbuttonup      = 0x0208
 	wmMbuttondblclk  = 0x0209
 	wmMousewheel  = 0x020A
+
+	// wheelDeltaWin — WHEEL_DELTA: единица «одного щелчка» колеса в WM_MOUSEWHEEL.
+	// wheelNotchPx — во сколько логических пикселей превращается один щелчок
+	// (соответствует шагу тикового колеса в движке — 40 px/notch).
+	wheelDeltaWin = 120.0
+	wheelNotchPx  = 40.0
 	wmKeydown     = 0x0100
 	wmKeyup       = 0x0101
 	wmChar        = 0x0102
@@ -337,6 +343,7 @@ type Win32Window struct {
 	onClose       func() bool
 	onMouseMove   func(x, y int)
 	onMouseButton func(x, y, button int, pressed bool)
+	onMouseWheelPixels func(x, y int, dx, dy float64)
 	onKeyDown     func(vk int)
 	onKeyUp       func(vk int)
 	onChar        func(r rune)
@@ -910,6 +917,10 @@ func (w *Win32Window) SetOnResize(fn func(w, h int))                            
 func (w *Win32Window) SetOnClose(fn func() bool)                                   { w.onClose = fn }
 func (w *Win32Window) SetOnMouseMove(fn func(x, y int))                            { w.onMouseMove = fn }
 func (w *Win32Window) SetOnMouseButton(fn func(x, y, button int, pressed bool))    { w.onMouseButton = fn }
+
+// SetOnMouseWheelPixels регистрирует колбэк точной пиксельной дельты колеса
+// (высокоточные тачпады шлют WM_MOUSEWHEEL с delta, не кратной WHEEL_DELTA).
+func (w *Win32Window) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) { w.onMouseWheelPixels = fn }
 func (w *Win32Window) SetOnKeyDown(fn func(vk int))                                { w.onKeyDown = fn }
 func (w *Win32Window) SetOnKeyUp(fn func(vk int))                                  { w.onKeyUp = fn }
 func (w *Win32Window) SetOnChar(fn func(r rune))                                   { w.onChar = fn }
@@ -1226,7 +1237,16 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
 
 		delta := int16((wparam >> 16) & 0xFFFF)
-		if w.onMouseButton != nil {
+		if w.onMouseWheelPixels != nil {
+			// Высокоточный путь: delta кратна 120 (WHEEL_DELTA) для обычной мыши,
+			// но у прецизионных тачпадов приходит дробной. Один «notch» (120) =
+			// wheelNotchPx пикселей; знак: delta>0 = вверх ⇒ dy<0.
+			if delta != 0 {
+				dy := -float64(delta) / wheelDeltaWin * wheelNotchPx
+				w.onMouseWheelPixels(int(pt.X), int(pt.Y), 0, dy)
+			}
+		} else if w.onMouseButton != nil {
+			// Фолбэк на тики (например, в режиме popup-хоста).
 			if delta > 0 {
 				w.onMouseButton(int(pt.X), int(pt.Y), 3, true)
 				w.onMouseButton(int(pt.X), int(pt.Y), 3, false)

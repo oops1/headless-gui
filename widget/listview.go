@@ -3,6 +3,7 @@ package widget
 import (
 	"image"
 	"image/color"
+	"math"
 	"sync"
 	"time"
 )
@@ -47,6 +48,7 @@ type ListView struct {
 	selected int // индекс выделенного элемента (-1 = нет)
 	hoverIdx int // индекс элемента под курсором (-1 = нет)
 	scrollY  int // смещение прокрутки
+	scrollFrac float64 // субпиксельный остаток плавной пиксельной прокрутки
 
 	// Скроллбар
 	scrollbarWidth int
@@ -531,6 +533,38 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 	}
 	lv.mu.Unlock()
 	return false
+}
+
+// OnMouseWheelPixels — плавная прокрутка точной пиксельной дельтой (тачпад/
+// колесо высокой точности). dy>0 — вниз. В отличие от тикового колеса
+// (3 строки за тик) применяет дельту попиксельно, накапливая субпиксельный
+// остаток. Возвращает false у края в сторону жеста — чтобы событие всплыло
+// к родительскому ScrollView.
+func (lv *ListView) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
+	if !lv.IsEnabled() {
+		return false
+	}
+	lv.mu.Lock()
+	if !image.Pt(x, y).In(lv.bounds) || lv.maxScroll() == 0 {
+		lv.mu.Unlock()
+		return false
+	}
+	if (dy < 0 && lv.scrollY <= 0) || (dy > 0 && lv.scrollY >= lv.maxScroll()) {
+		lv.mu.Unlock()
+		return false
+	}
+	lv.scrollFrac += dy
+	whole := math.Trunc(lv.scrollFrac)
+	lv.scrollFrac -= whole
+	old := lv.scrollY
+	lv.scrollY += int(whole)
+	lv.clampScroll()
+	moved := lv.scrollY != old
+	lv.mu.Unlock()
+	if moved {
+		lv.Invalidate()
+	}
+	return true
 }
 
 // OnMouseMove обрабатывает hover и drag скроллбара.

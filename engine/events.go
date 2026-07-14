@@ -468,6 +468,83 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	}
 }
 
+// wheelPixelHandler — опциональный интерфейс виджета, принимающего точные
+// пиксельные дельты колеса/тачпада (плавный скролл). dy>0 — вниз. Возвращает
+// true, если дельта поглощена. Виджеты без него используют тиковый путь.
+type wheelPixelHandler interface {
+	OnMouseWheelPixels(x, y int, dx, dy float64) bool
+}
+
+// wheelTickPixels — сколько пикселей точной дельты приходится на один «тик»
+// колеса в фолбэке (соответствует шагу тикового колеса в виджетах).
+const wheelTickPixels = 40.0
+
+// SendMouseWheelPixels доставляет точную пиксельную дельту прокрутки в точке
+// (xPhys, yPhys — физические пиксели окна/кадра). dy>0 — вниз, dx>0 — вправо.
+// Событие всплывает от самого глубокого виджета под курсором к корню; первый
+// виджет, реализующий wheelPixelHandler и поглотивший дельту, останавливает
+// всплытие.
+//
+// Фолбэк: если точную дельту никто не принял (виджет знает лишь тиковое
+// колесо), синтезируем эквивалентные тики через SendMouseButton — старый
+// тиковый путь остаётся рабочим (headless-контракт).
+func (e *Engine) SendMouseWheelPixels(xPhys, yPhys int, dx, dy float64) {
+	x, y := e.toLogical(xPhys, yPhys)
+	if k := e.Scale(); k != 1 && k > 0 {
+		dx /= k
+		dy /= k
+	}
+	e.Invalidate()
+
+	var dispatchRoot widget.Widget
+	if m := e.topModal(); m != nil {
+		dispatchRoot = m
+	} else {
+		e.mu.RLock()
+		dispatchRoot = e.root
+		e.mu.RUnlock()
+	}
+	if dispatchRoot != nil {
+		path := hitTestPath(dispatchRoot, x, y)
+		for i := len(path) - 1; i >= 0; i-- {
+			if h, ok := path[i].(wheelPixelHandler); ok {
+				if h.OnMouseWheelPixels(x, y, dx, dy) {
+					return
+				}
+			}
+		}
+	}
+
+	// Фолбэк на тиковый путь. Передаём ФИЗИЧЕСКИЕ координаты — SendMouseButton
+	// сам переведёт их в логические.
+	steps, btn, ok := wheelTicksFromPixels(dy)
+	if !ok {
+		return
+	}
+	for i := 0; i < steps; i++ {
+		e.SendMouseButton(xPhys, yPhys, btn, true)
+		e.SendMouseButton(xPhys, yPhys, btn, false)
+	}
+}
+
+// wheelTicksFromPixels переводит пиксельную дельту в число тиков и направление.
+func wheelTicksFromPixels(dy float64) (steps int, btn widget.MouseButton, ok bool) {
+	if dy == 0 {
+		return 0, 0, false
+	}
+	mag := dy
+	btn = widget.MouseWheelDown
+	if dy < 0 {
+		btn = widget.MouseWheelUp
+		mag = -dy
+	}
+	steps = int(mag/wheelTickPixels + 0.5)
+	if steps < 1 {
+		steps = 1
+	}
+	return steps, btn, true
+}
+
 // ─── Dismiss ─────────────────────────────────────────────────────────────────
 
 // dismissOutside рекурсивно закрывает все Dismissable-виджеты, которые

@@ -76,6 +76,10 @@ const (
 	wlPointerEvButton = 3
 	wlPointerEvAxis   = 4
 
+	// wlAxisPixelScale — множитель перевода wl_pointer.axis (уже в пикселях
+	// после ÷256) к шагу движка (~40 px/notch; дискретное колесо даёт ~10/notch).
+	wlAxisPixelScale = 4.0
+
 	// wl_keyboard events
 	wlKeyboardEvKeymap    = 0
 	wlKeyboardEvKey       = 3
@@ -171,6 +175,7 @@ type WaylandWindow struct {
 	onClose       func() bool
 	onMouseMove   func(x, y int)
 	onMouseButton func(x, y, button int, pressed bool)
+	onMouseWheelPixels func(x, y int, dx, dy float64)
 	onKeyDown     func(vk int)
 	onKeyUp       func(vk int)
 	onChar        func(r rune)
@@ -601,10 +606,21 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 			w.onMouseButton(w.ptrX, w.ptrY, id, pressed)
 		}
 	case wlPointerEvAxis:
-		// time, axis, value(fixed): 0 = вертикаль; >0 — вниз
+		// time, axis, value(wl_fixed 24.8): axis 0 = вертикаль, 1 = горизонталь;
+		// value>0 — вниз/вправо. Тачпады высокой точности шлют дробные значения.
 		axis := binary.LittleEndian.Uint32(b[4:8])
 		val := int32(binary.LittleEndian.Uint32(b[8:12]))
-		if axis == 0 && w.onMouseButton != nil {
+		if w.onMouseWheelPixels != nil {
+			// Высокоточный путь: wl_fixed → пиксели (÷256), масштаб до «notch»
+			// в ~40 px под общий шаг движка.
+			amt := float64(val) / 256.0 * wlAxisPixelScale
+			if axis == 0 {
+				w.onMouseWheelPixels(w.ptrX, w.ptrY, 0, amt)
+			} else if axis == 1 {
+				w.onMouseWheelPixels(w.ptrX, w.ptrY, amt, 0)
+			}
+		} else if axis == 0 && w.onMouseButton != nil {
+			// Фолбэк на тики.
 			id := 3 // wheel up
 			if val > 0 {
 				id = 4 // wheel down
@@ -837,6 +853,10 @@ func (w *WaylandWindow) SetOnResize(fn func(w, h int))                          
 func (w *WaylandWindow) SetOnClose(fn func() bool)                               { w.onClose = fn }
 func (w *WaylandWindow) SetOnMouseMove(fn func(x, y int))                        { w.onMouseMove = fn }
 func (w *WaylandWindow) SetOnMouseButton(fn func(x, y, button int, pressed bool)) { w.onMouseButton = fn }
+
+// SetOnMouseWheelPixels регистрирует колбэк точной пиксельной дельты колеса/
+// тачпада (wl_pointer.axis). Без него бэкенд шлёт тики через SetOnMouseButton.
+func (w *WaylandWindow) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) { w.onMouseWheelPixels = fn }
 func (w *WaylandWindow) SetOnKeyDown(fn func(vk int))                            { w.onKeyDown = fn }
 func (w *WaylandWindow) SetOnKeyUp(fn func(vk int))                              { w.onKeyUp = fn }
 func (w *WaylandWindow) SetOnChar(fn func(r rune))                               { w.onChar = fn }

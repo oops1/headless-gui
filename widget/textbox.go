@@ -3,6 +3,7 @@ package widget
 import (
 	"image"
 	"image/color"
+	"math"
 	"sync"
 	"time"
 )
@@ -31,6 +32,7 @@ type TextBox struct {
 	selAnchor int // якорь выделения (-1 = нет); выделение = [min,max)(anchor, caret)
 	scrollY   int // вертикальный сдвиг, px
 	scrollX   int // горизонтальный сдвиг, px (используется только при Wrap=false)
+	scrollFrac float64 // субпиксельный остаток плавной пиксельной прокрутки
 	desiredX  int // целевая X (px) для Up/Down; -1 = не задана
 
 	// Кэш компоновки: границы строк для текущего текста и ширины.
@@ -919,6 +921,41 @@ func (t *TextBox) OnMouseButton(e MouseEvent) bool {
 		if t.capMgr != nil {
 			t.capMgr.ReleaseCapture()
 		}
+	}
+	return true
+}
+
+// OnMouseWheelPixels — плавная вертикальная прокрутка точной пиксельной дельтой
+// (тачпад/колесо высокой точности). dy>0 — вниз. В отличие от тикового колеса
+// (3 строки за тик) применяет дельту попиксельно с накоплением субпиксельного
+// остатка. Возвращает false, если курсор вне поля или прокручивать нечего —
+// чтобы событие всплыло к родителю.
+func (t *TextBox) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
+	if !image.Pt(x, y).In(t.bounds) {
+		return false
+	}
+	t.mu.Lock()
+	t.ensureLayout()
+	lh := t.lineHeight()
+	maxScroll := len(t.lines)*lh - t.visibleLines()*lh
+	if maxScroll <= 0 {
+		t.mu.Unlock()
+		return false
+	}
+	if (dy < 0 && t.scrollY <= 0) || (dy > 0 && t.scrollY >= maxScroll) {
+		t.mu.Unlock()
+		return false
+	}
+	t.scrollFrac += dy
+	whole := math.Trunc(t.scrollFrac)
+	t.scrollFrac -= whole
+	old := t.scrollY
+	t.scrollY += int(whole)
+	t.clampScroll()
+	moved := t.scrollY != old
+	t.mu.Unlock()
+	if moved {
+		t.Invalidate()
 	}
 	return true
 }

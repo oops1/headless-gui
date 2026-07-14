@@ -558,6 +558,24 @@ func (s *surface) setupInput() {
 		s.eng.SendMouseButton(x, y, btn, pressed)
 	})
 
+	// ── Precise wheel (пиксельная дельта колеса/тачпада) ─────────────────────
+	// Опционально: бэкенды с высокоточным колесом (Win32 WM_MOUSEWHEEL,
+	// Wayland wl_pointer.axis) вызывают этот колбэк вместо тиковых кнопок 3/4.
+	// Бэкенды без поддержки (X11) продолжают слать тики через SetOnMouseButton.
+	if pw, ok := s.native.(interface {
+		SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64))
+	}); ok {
+		pw.SetOnMouseWheelPixels(func(x, y int, dx, dy float64) {
+			s.lastMX = x
+			s.lastMY = y
+			if we, ok := s.eng.(interface {
+				SendMouseWheelPixels(x, y int, dx, dy float64)
+			}); ok {
+				we.SendMouseWheelPixels(x, y, dx, dy)
+			}
+		})
+	}
+
 	// ── Key down ─────────────────────────────────────────────────────────────
 	s.native.SetOnKeyDown(func(vk int) {
 		// Обновляем модификаторы
