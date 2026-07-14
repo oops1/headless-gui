@@ -898,6 +898,22 @@ func main() {
 		}
 	}()
 
+	// ─── Вкладка «Компоновка»: SplitPanel + SVGIcon ──────────────────────────
+	if sp, ok := reg["splitOuter"].(*widget.SplitPanel); ok {
+		posLbl, _ := reg["splitPosLbl"].(*widget.Label)
+		sp.OnPositionChanged = func(pos float64) {
+			if posLbl != nil {
+				posLbl.SetText(fmt.Sprintf("Position: %.2f", pos))
+			}
+		}
+		if btn, ok := reg["splitCollapse"].(*widget.Button); ok {
+			btn.OnClick = func() {
+				sp.ToggleCollapse()
+				addLog("SplitPanel: коллапс=%v", sp.IsCollapsed())
+			}
+		}
+	}
+
 	// ─── Нативное окно ──────────────────────────────────────────────────────
 	win = window.New(eng, "GuiEngine — Widget Showcase")
 	win.SetMaxFPS(60)

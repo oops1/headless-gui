@@ -942,6 +942,49 @@
             </Canvas>
         </TabItem>
 
+        <TabItem Header="Компоновка">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="SplitPanel — панели с перетаскиваемым разделителем"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="52" Foreground="#9399B2"
+                           Text="Тяни полосы мышью (курсор меняется), двойной клик по полосе — коллапс/восстановление. Слева — вложенный вертикальный сплит."/>
+
+                <SplitPanel Name="splitOuter" Left="24" Top="84" Width="1010" Height="380"
+                            Orientation="Horizontal" Position="0.35" MinFirst="120" MinSecond="240">
+                    <SplitPanel Name="splitInner" Orientation="Vertical" Position="0.5"
+                                MinFirst="60" MinSecond="60">
+                        <Canvas Background="#28283E">
+                            <Label Left="12" Top="10" Width="200" Height="18" Text="A (вложенный верх)" Foreground="#89B4FA"/>
+                        </Canvas>
+                        <Canvas Background="#232338">
+                            <Label Left="12" Top="10" Width="200" Height="18" Text="B (вложенный низ)" Foreground="#A6E3A1"/>
+                        </Canvas>
+                    </SplitPanel>
+                    <Canvas Background="#2A2A40">
+                        <Label Left="12" Top="10" Width="300" Height="18" Text="C (правая панель)" Foreground="#F9E2AF"/>
+                        <Label Name="splitPosLbl" Left="12" Top="34" Width="300" Height="18" Text="Position: 0.35" Foreground="#9399B2"/>
+                    </Canvas>
+                </SplitPanel>
+
+                <Button Name="splitCollapse" Left="24" Top="478" Width="240" Height="32"
+                        Content="Коллапс/восстановить левую"/>
+
+                <TextBlock Left="24" Top="530" Style="{StaticResource H324}"
+                           Text="SVGIcon — темизируемые векторные иконки"/>
+                <Separator Left="24" Top="554" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="566" Foreground="#9399B2"
+                           Text="Без Color иконка красится под цвет текста темы (переключи тему в шапке); с Color — фиксированный цвет. Размер любой — вектор."/>
+
+                <SVGIcon Left="24"  Top="596" Width="32" Height="32" Source="icons/menu.svg"/>
+                <SVGIcon Left="72"  Top="596" Width="32" Height="32" Source="icons/close.svg"/>
+                <SVGIcon Left="120" Top="596" Width="32" Height="32" Source="icons/folder.svg"/>
+                <SVGIcon Left="184" Top="588" Width="48" Height="48" Source="icons/folder.svg" Color="#F9E2AF"/>
+                <SVGIcon Left="248" Top="580" Width="64" Height="64" Source="icons/menu.svg" Color="#89B4FA"/>
+                <SVGIcon Left="330" Top="572" Width="80" Height="80" Source="icons/close.svg" Color="#F38BA8"/>
+            </Canvas>
+        </TabItem>
+
         <TabItem Header="Система">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"

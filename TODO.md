@@ -57,10 +57,17 @@
       Пилоты: ToggleSwitch (скольжение ручки), ProgressBar.AnimateValue,
       fade-in затемнения диалогов; Classic3D — мгновенно. Дальше по теме:
       плавный скролл с инерцией (ниже), нагрузочный тест на сотни анимаций.
-- [ ] **Плавный скролл** — пиксельные дельты тачпада (Wayland axis уже
-      дискретизируем — отдавать точное значение), инерция в ScrollView.
-- [ ] **SVG-иконки** — темизируемые иконки (перекраска под тему), парсер
-      подмножества SVG (path/fill) поверх существующего AA-растеризатора.
+- [x] **Плавный скролл** — сделано 2026-07-12: SendMouseWheelPixels (физ.
+      координаты, float64-дельты, фолбэк на тики), OnMouseWheelPixels у
+      ScrollView (инерция-«маховик» через AnimateOwned, прерывание вводом,
+      Classic3D мгновенно), ListView/TextBox — попиксельно с субпиксельным
+      накоплением; Win32 WM_MOUSEWHEEL точные дельты, Wayland axis
+      wl_fixed→пиксели. X11 — тики (кнопки 4/5), macOS колесо — позже.
+- [x] **SVG-иконки** — сделано 2026-07-12: пакет widget/svg (парсер path
+      M..Z/дуги/фигуры/transform/fill-rule/currentColor, растеризация через
+      x/image/vector с even-odd и кэшем) + виджет SVGIcon (перекраска под
+      тему/Tint, пропорции) + XAML-тег <SVGIcon Source Color Tint>.
+      Ограничения: без градиентов/clipPath/text; обводка упрощённая.
 - [~] **Системные уведомления** — Windows сделано 2026-07-11: balloon через
       Shell_NotifyIcon (NIF_INFO, значок по severity), `Window.ShowBalloon` +
       `SetOnBalloonClick`. Осталось: D-Bus org.freedesktop.Notifications
@@ -73,10 +80,11 @@
       Live-превью окна в панели задач/Aero Peek: WM_PRINTCLIENT из кэша кадра
       (+ опциональный iconic-путь DWM за `HEADLESS_GUI_ICONIC_PREVIEW=1`).
       На Linux/macOS/Wayland — no-op-заглушки. Трей на X11/macOS — позже.
-- [ ] **Splitter** — контрол-разделитель между двумя панелями: перетаскивание
-      мышью меняет доли (горизонтальный/вертикальный), курсор SizeWE/SizeNS,
-      MinSize сторон, двойной клик — сброс/коллапс панели. XAML-тег Splitter
-      (или GridSplitter в Grid). Основа для док-layout'ов и Toolbox ниже.
+- [x] **Splitter** — сделано 2026-07-12: контейнер SplitPanel (доля 0..1,
+      MinFirst/MinSecond, курсоры SizeWE/NS, drag через CaptureManager,
+      двойной клик — коллапс/восстановление, гнездование, HasOwnLayout,
+      OnPositionChanged) + XAML-тег <SplitPanel> + вкладка «Компоновка»
+      в showcase. Для ячеек Grid по-прежнему GridSplitter.
 - [ ] **Toolbox / докинг-панели** — плавающие инструментальные панели в духе
       Visual Studio: притягиваются (док) к любой стороне окна с направляющими,
       сворачиваются в заголовок (auto-hide/pin), отрываются в ОТДЕЛЬНЫЕ
