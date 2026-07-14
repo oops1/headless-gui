@@ -75,6 +75,60 @@ type TreeView struct {
 	focused  bool
 	dirty    bool // нужен пересчёт flat-списка
 	updating bool // true между BeginUpdate/EndUpdate — Draw пропускается
+
+	// ── Точечная инвалидация (damage) ────────────────────────────────────
+	// Обработчики ввода накапливают сюда изменившиеся АБСОЛЮТНЫЕ строки;
+	// обёртка (widget.TreeViewWidget) забирает их через TakeDirty и делает
+	// точечный InvalidateRect. dirtyFull — когда сдвигается весь контент
+	// (скролл, разворот/сворачивание узла меняет набор видимых строк).
+	dirtyRects []image.Rectangle
+	dirtyFull  bool
+}
+
+// ─── Damage tracking (точечная инвалидация) ────────────────────────────────
+
+// markFullDirty помечает, что требуется полная перерисовка виджета.
+func (tv *TreeView) markFullDirty() { tv.dirtyFull = true }
+
+// markRectDirty добавляет абсолютный прямоугольник в накопитель damage
+// (пересекается с bounds, дубликаты отбрасываются).
+func (tv *TreeView) markRectDirty(r image.Rectangle) {
+	r = r.Intersect(tv.bounds)
+	if r.Empty() {
+		return
+	}
+	for _, e := range tv.dirtyRects {
+		if e == r {
+			return
+		}
+	}
+	tv.dirtyRects = append(tv.dirtyRects, r)
+}
+
+// rowRectAbs возвращает абсолютный прямоугольник видимой части строки с
+// индексом idx в flat-списке (пустой, если строка прокручена за пределы).
+func (tv *TreeView) rowRectAbs(idx int) image.Rectangle {
+	if idx < 0 {
+		return image.Rectangle{}
+	}
+	ih := tv.itemH()
+	b := tv.bounds
+	y := b.Min.Y + idx*ih - tv.scrollY
+	return image.Rect(b.Min.X, y, b.Max.X, y+ih).Intersect(b)
+}
+
+// markRowDirty помечает область строки idx как изменившуюся.
+func (tv *TreeView) markRowDirty(idx int) { tv.markRectDirty(tv.rowRectAbs(idx)) }
+
+// TakeDirty возвращает накопленные области изменения (абсолютные координаты) и
+// сбрасывает накопитель. full=true — требуется полная перерисовка виджета.
+func (tv *TreeView) TakeDirty() (rects []image.Rectangle, full bool) {
+	tv.mu.Lock()
+	defer tv.mu.Unlock()
+	rects, full = tv.dirtyRects, tv.dirtyFull
+	tv.dirtyRects = nil
+	tv.dirtyFull = false
+	return
 }
 
 // New создаёт TreeView с настройками по умолчанию.

@@ -64,10 +64,6 @@ type DataGridWidget struct {
 	lastClickTime int64 // ms
 	lastClickX    int
 	lastClickY    int
-
-	// hoverInside — курсор был над виджетом на прошлом OnMouseMove
-	// (Grid ведёт hover строки внутри и не сообщает об изменениях).
-	hoverInside bool
 }
 
 // NewDataGridWidget создаёт виджет DataGrid.
@@ -89,6 +85,21 @@ func (w *DataGridWidget) Draw(ctx DrawContext) {
 	adapter := &drawContextAdapter{ctx: ctx}
 	w.Grid.Draw(adapter)
 	w.drawDisabledOverlay(ctx)
+}
+
+// applyDirty забирает у ядра накопленный damage и транслирует его в точечную
+// инвалидацию: full → весь виджет, иначе — только изменившиеся строки
+// (notifyRectChanged на каждый прямоугольник). Так выбор/hover строки не
+// перерисовывает всю таблицу.
+func (w *DataGridWidget) applyDirty() {
+	rects, full := w.Grid.TakeDirty()
+	if full {
+		w.Invalidate()
+		return
+	}
+	for _, r := range rects {
+		notifyRectChanged(r)
+	}
 }
 
 // ─── Mouse handling ────────────────────────────────────────────────────────
@@ -133,9 +144,9 @@ func (w *DataGridWidget) OnMouseButton(e MouseEvent) bool {
 		w.lastClickY = e.Y
 	}
 
-	if consumed {
-		w.Invalidate() // выбор строки/скролл/resize — рисуются в bounds
-	}
+	// Точечная инвалидация: выбор/hover строки перерисовывает только строки,
+	// скролл/сортировка/resize — весь виджет (см. ядро datagrid).
+	w.applyDirty()
 	return consumed
 }
 
@@ -145,13 +156,9 @@ func (w *DataGridWidget) OnMouseMove(x, y int) {
 		return
 	}
 	w.Grid.OnMouseMove(x, y)
-	// Grid не сообщает о смене hover-строки — инвалидируем при движении
-	// над виджетом (и один раз при выходе курсора за его пределы).
-	inside := image.Pt(x, y).In(w.Bounds())
-	if inside || w.hoverInside {
-		w.Invalidate()
-	}
-	w.hoverInside = inside
+	// Ядро сообщает точную область смены hover-строки/ползунка — транслируем
+	// её в точечную инвалидацию вместо перерисовки всего виджета.
+	w.applyDirty()
 }
 
 // ─── Keyboard handling ─────────────────────────────────────────────────────
@@ -166,9 +173,8 @@ func (w *DataGridWidget) OnKeyEvent(e KeyEvent) {
 	ctrl := e.Mod&ModCtrl != 0
 
 	w.Grid.OnKeyEvent(int(e.Code), e.Rune, e.Pressed, shift, ctrl)
-	if e.Pressed {
-		w.Invalidate() // навигация/редактирование меняют состояние в bounds
-	}
+	// Навигация/редактирование сообщают точную область (строка/вьюпорт).
+	w.applyDirty()
 }
 
 // ─── Focus ─────────────────────────────────────────────────────────────────
