@@ -14,8 +14,9 @@
 //   - альфа-маски глифов по (face, GID, размер) — контур растеризуется
 //     через golang.org/x/image/vector один раз.
 //
-// Ограничения v1: эмодзи-битмапы и цветные глифы не растеризуются
-// (пропускаются с продвижением пера); вертикальный текст не поддержан.
+// Цветные эмодзи (COLRv0-слои и растровые CBDT/sbix PNG) рендерятся в цвете —
+// см. emoji.go; COLRv1 (граф paint, градиенты) пока не поддержан. Вертикальный
+// текст не поддержан.
 package engine
 
 import (
@@ -82,6 +83,12 @@ func runeNeedsShaping(r rune) bool {
 		return true // еврейские/арабские презентационные формы A
 	case r >= 0xFE70 && r <= 0xFEFF:
 		return true // арабские презентационные формы B
+	case r >= 0xFE00 && r <= 0xFE0F:
+		return true // селекторы вариаций (VS1–VS16; VS16 — эмодзи-презентация)
+	case r >= 0x1F000 && r <= 0x1FAFF:
+		return true // эмодзи и пиктограммы (SMP): ZWJ-кластеры, модификаторы тона,
+		//              региональные индикаторы (флаги) — собираются шейпером,
+		//              цветные глифы (COLR/CBDT) рендерятся в цвете (см. emoji.go)
 	default:
 		return false
 	}
@@ -112,6 +119,24 @@ type chainFontmap struct {
 }
 
 func (cf *chainFontmap) ResolveFace(r rune) *tsfont.Face {
+	// Эмодзи: предпочитаем цветной шрифт (COLR/CBDT) монохромному покрытию.
+	// На Windows Segoe UI Symbol (ч/б варианты многих эмодзи) стоит в цепочке
+	// раньше Segoe UI Emoji — без этой ветки эмодзи вышел бы серым. Ветка
+	// активна только для собственно эмодзи-рун и только при наличии цветного
+	// покрытия, поэтому обычные символы (✓✗⚠) остаются на прежнем шрифте.
+	if isEmojiRune(r) {
+		if _, ok := cf.primary.NominalGlyph(r); ok && faceHasColor(cf.primary) {
+			return cf.primary
+		}
+		for _, f := range cf.fallbacks {
+			if f == nil || !faceHasColor(f) {
+				continue
+			}
+			if _, ok := f.NominalGlyph(r); ok {
+				return f
+			}
+		}
+	}
 	if _, ok := cf.primary.NominalGlyph(r); ok {
 		return cf.primary
 	}
@@ -124,6 +149,20 @@ func (cf *chainFontmap) ResolveFace(r rune) *tsfont.Face {
 		}
 	}
 	return cf.primary // контракт Fontmap: всегда не-nil
+}
+
+// isEmojiRune — руна из эмодзи-блоков SMP (Emoticons, Transport, Symbols &
+// Pictographs и расширения), для которых предпочтителен цветной шрифт.
+// Ограничено ≥0x1F000, чтобы не менять шрифт для BMP-символов (☺✓✈), которые
+// исторически рисуются монохромным fallback'ом.
+func isEmojiRune(r rune) bool {
+	return r >= 0x1F000 && r <= 0x1FAFF
+}
+
+// faceHasColor сообщает, есть ли у шрифта цветные глифы (COLR или растровые
+// CBDT/sbix). Дешёвая проверка полей — вызывается при шейпинге эмодзи.
+func faceHasColor(f *tsfont.Face) bool {
+	return f != nil && f.Font != nil && (f.COLR != nil || len(f.BitmapSizes()) > 0)
 }
 
 // ─── Кэшированный layout строки ──────────────────────────────────────────────
@@ -178,6 +217,15 @@ type textShaper struct {
 	hb      shaping.HarfbuzzShaper
 	layouts map[layoutKey]*shapedLayout
 	masks   map[maskKey]*glyphMask
+
+	// ── Цветные эмодзи (см. emoji.go) ────────────────────────────────────────
+	// colorGlyphs — кэш цветных RGBA-глифов по (face, GID, размер). Отдельно от
+	// одноцветных масок: цвет текста на цветной глиф НЕ влияет. nil-значение
+	// («у глифа нет цветного представления») тоже кэшируется.
+	colorGlyphs map[maskKey]*colorGlyph
+	// faceColor — есть ли у face цветные глифы вообще (COLR/CBDT), кэш по face:
+	// отсекает дорогую проверку GlyphData для обычных шрифтов без цвета.
+	faceColor map[*tsfont.Face]bool
 }
 
 // layout возвращает кэшированный (или строит новый) layout строки.
