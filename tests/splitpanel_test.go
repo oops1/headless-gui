@@ -294,3 +294,48 @@ func TestSplitPanel_CaptureReleasedInsideTab(t *testing.T) {
 		t.Fatal("клик по кнопке после drag'а не дошёл — капчур сплиттера залип")
 	}
 }
+
+// TestWindow_ThemeChangeWithAttachedMenuKeepsInput — PopupMenu, прикреплённый
+// прямым ребёнком корневого Window (так живёт трей-меню), не должен
+// растягиваться перекладкой Window.SetBounds: после смены темы (ApplyTheme →
+// SetBounds) закрытое меню размером во всё окно съедало весь ввод.
+func TestWindow_ThemeChangeWithAttachedMenuKeepsInput(t *testing.T) {
+	widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
+
+	win := widget.NewWindow("t", 300, 200)
+	win.SetBounds(image.Rect(0, 0, 300, 200))
+
+	cv := widget.NewCanvas()
+	clicked := false
+	btn := widget.NewButton("btn")
+	btn.SetBounds(image.Rect(20, 60, 120, 90))
+	btn.OnClick = func() { clicked = true }
+	cv.AddChild(btn)
+	win.AddChild(cv)
+
+	menu := widget.NewPopupMenu()
+	menu.AddItem("пункт", func() {})
+	win.AddChild(menu) // как attachTrayMenu
+
+	eng := engine.New(300, 200, 20)
+	eng.SetRoot(win)
+
+	// Смена темы → Window.ApplyTheme → SetBounds → перекладка детей.
+	th := widget.ThemeByName("Win11 Dark")
+	widget.ApplyGlobalTheme(th)
+	widget.ApplyThemeTree(win, th)
+
+	if b := menu.Bounds(); b.Dx() > 250 {
+		t.Fatalf("закрытое трей-меню растянуто перекладкой окна: %v", b)
+	}
+	// Кнопку могла сдвинуть перекладка (инсет клиентской области) — кликаем
+	// по её фактическому центру.
+	bc := btn.Bounds()
+	cx, cy := bc.Min.X+bc.Dx()/2, bc.Min.Y+bc.Dy()/2
+	eng.SendMouseButton(cx, cy, widget.MouseLeft, true)
+	eng.SendMouseButton(cx, cy, widget.MouseLeft, false)
+	if !clicked {
+		t.Fatal("клик по кнопке после смены темы не дошёл — ввод съеден растянутым меню")
+	}
+}
