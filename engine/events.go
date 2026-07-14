@@ -552,6 +552,48 @@ func wheelTicksFromPixels(dy float64) (steps int, btn widget.MouseButton, ok boo
 	return steps, btn, true
 }
 
+// ─── File drop (Drag&Drop файлов из ОС) ─────────────────────────────────────
+
+// SendFilesDropped доставляет событие сброса файлов из ОС в точку (x, y —
+// ФИЗИЧЕСКИЕ пиксели окна/кадра, как у SendMouse*). Событие всплывает от
+// самого глубокого виджета под точкой к корню; первый виджет, реализующий
+// widget.FileDropTarget и вернувший true, поглощает событие и останавливает
+// всплытие (bubbling, как у колеса).
+//
+// paths — абсолютные пути к сброшенным файлам. Координаты, переданные виджету,
+// уже логические. Позволяет headless-тестам синтетически «сбрасывать» файлы.
+func (e *Engine) SendFilesDropped(x, y int, paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	x, y = e.toLogical(x, y)
+
+	// Сброс файлов может изменить произвольную часть UI (виджет-приёмник
+	// перерисовывается) — полная инвалидация, как у клика.
+	e.Invalidate()
+
+	var dispatchRoot widget.Widget
+	if m := e.topModal(); m != nil {
+		dispatchRoot = m
+	} else {
+		e.mu.RLock()
+		dispatchRoot = e.root
+		e.mu.RUnlock()
+	}
+	if dispatchRoot == nil {
+		return
+	}
+
+	path := hitTestPath(dispatchRoot, x, y)
+	for i := len(path) - 1; i >= 0; i-- {
+		if fd, ok := path[i].(widget.FileDropTarget); ok {
+			if fd.OnFilesDropped(x, y, paths) {
+				return
+			}
+		}
+	}
+}
+
 // ─── Dismiss ─────────────────────────────────────────────────────────────────
 
 // dismissOutside рекурсивно закрывает все Dismissable-виджеты, которые

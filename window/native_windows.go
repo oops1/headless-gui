@@ -57,6 +57,7 @@ const (
 	wmKeydown     = 0x0100
 	wmKeyup       = 0x0101
 	wmChar        = 0x0102
+	wmDropfiles   = 0x0233 // WM_DROPFILES: wParam = HDROP (Drag&Drop файлов из ОС)
 	wmSyscommand  = 0x0112
 	wmNccalcsize  = 0x0083
 	wmNchittest   = 0x0084
@@ -207,6 +208,12 @@ var (
 	gdi32  = windows.NewLazySystemDLL("gdi32.dll")
 	dwmapi = windows.NewLazySystemDLL("dwmapi.dll")
 
+	// Drag&Drop файлов из ОС (WM_DROPFILES). shell32 объявлен в tray_windows.go.
+	procDragAcceptFiles = shell32.NewProc("DragAcceptFiles")
+	procDragQueryFileW  = shell32.NewProc("DragQueryFileW")
+	procDragQueryPoint  = shell32.NewProc("DragQueryPoint")
+	procDragFinish      = shell32.NewProc("DragFinish")
+
 	procRegisterClassExW    = user32.NewProc("RegisterClassExW")
 	procCreateWindowExW     = user32.NewProc("CreateWindowExW")
 	procDestroyWindow       = user32.NewProc("DestroyWindow")
@@ -347,6 +354,10 @@ type Win32Window struct {
 	onKeyDown     func(vk int)
 	onKeyUp       func(vk int)
 	onChar        func(r rune)
+	onFilesDropped func(paths []string, x, y int)
+
+	// fileDropEnabled — DragAcceptFiles(TRUE) уже вызван для этого окна.
+	fileDropEnabled bool
 }
 
 // Реестр окон для WndProc (Win32 callback не может быть методом): маршрутизация
@@ -434,7 +445,23 @@ func (w *Win32Window) Create(title string, width, height int) error {
 	// Borderless popup window с поддержкой resize и minimize/maximize.
 	style := uint32(wsPopup | wsVisible | wsMinimizebox | wsMaximizebox | wsThickframe | wsSysmenu | wsClipchildren)
 	exStyle := uint32(wsExAppwindow)
-	return w.createInternal(title, width, height, style, exStyle, swShow, true)
+	if err := w.createInternal(title, width, height, style, exStyle, swShow, true); err != nil {
+		return err
+	}
+	// Разрешаем приём файлов, перетащенных из проводника (WM_DROPFILES).
+	// Только для главного окна — окна-попапы (CreatePopup) его не включают.
+	w.enableFileDrop()
+	return nil
+}
+
+// enableFileDrop включает приём Drag&Drop файлов из ОС (DragAcceptFiles).
+// Идемпотентно; no-op до создания окна.
+func (w *Win32Window) enableFileDrop() {
+	if w.hwnd == 0 || w.fileDropEnabled {
+		return
+	}
+	procDragAcceptFiles.Call(uintptr(w.hwnd), 1)
+	w.fileDropEnabled = true
 }
 
 // CreatePopup создаёт окно-вьюпорт оверлея (dropdown/меню): WS_POPUP без рамки,
@@ -925,6 +952,14 @@ func (w *Win32Window) SetOnKeyDown(fn func(vk int))                             
 func (w *Win32Window) SetOnKeyUp(fn func(vk int))                                  { w.onKeyUp = fn }
 func (w *Win32Window) SetOnChar(fn func(r rune))                                   { w.onChar = fn }
 
+// SetOnFilesDropped регистрирует колбэк Drag&Drop файлов из ОС (WM_DROPFILES).
+// Координаты — клиентские физические пиксели. Гарантирует включённый приём
+// файлов (DragAcceptFiles), даже если окно уже создано.
+func (w *Win32Window) SetOnFilesDropped(fn func(paths []string, x, y int)) {
+	w.onFilesDropped = fn
+	w.enableFileDrop()
+}
+
 // ─── WndProc ────────────────────────────────────────────────────────────────
 
 func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
@@ -1277,6 +1312,12 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 
+	case wmDropfiles:
+		// wParam — HDROP: список путей + точка сброса. Раскрываем и завершаем
+		// (DragFinish обязателен — иначе ОС не освободит структуру).
+		w.handleDropFiles(wparam)
+		return 0
+
 	case wmTrayCallback:
 		// Событие иконки трея (см. NOTIFYICONDATA.uCallbackMessage).
 		w.handleTrayCallback(lparam)
@@ -1391,6 +1432,42 @@ func (w *Win32Window) SetCursor(c int) {
 	if w.cursorHandle != h {
 		w.cursorHandle = h
 		procSetCursor.Call(h) // применяем сразу (и далее держим через WM_SETCURSOR)
+	}
+}
+
+// handleDropFiles раскрывает HDROP из WM_DROPFILES: перечисляет пути
+// (DragQueryFileW), берёт клиентскую точку сброса (DragQueryPoint) и
+// освобождает структуру (DragFinish). Пути — UTF-16 → Go string.
+func (w *Win32Window) handleDropFiles(hDrop uintptr) {
+	// Гарантируем DragFinish даже при раннем выходе.
+	defer procDragFinish.Call(hDrop)
+
+	// Количество файлов: индекс 0xFFFFFFFF.
+	n, _, _ := procDragQueryFileW.Call(hDrop, 0xFFFFFFFF, 0, 0)
+	count := int(n)
+	if count <= 0 {
+		return
+	}
+
+	paths := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		// Требуемая длина (без завершающего NUL) — вызов с нулевым буфером.
+		l, _, _ := procDragQueryFileW.Call(hDrop, uintptr(i), 0, 0)
+		if l == 0 {
+			continue
+		}
+		buf := make([]uint16, int(l)+1)
+		procDragQueryFileW.Call(hDrop, uintptr(i),
+			uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+		paths = append(paths, windows.UTF16ToString(buf))
+	}
+
+	// Точка сброса в клиентских координатах (физические пиксели).
+	var pt point
+	procDragQueryPoint.Call(hDrop, uintptr(unsafe.Pointer(&pt)))
+
+	if w.onFilesDropped != nil && len(paths) > 0 {
+		w.onFilesDropped(paths, int(pt.X), int(pt.Y))
 	}
 }
 
