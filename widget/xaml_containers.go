@@ -7,11 +7,13 @@ package widget
 import (
 	"image"
 	"image/color"
+	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
+	svgPkg "github.com/oops1/headless-gui/v3/widget/svg"
 	tvPkg "github.com/oops1/headless-gui/v3/widget/treeview"
 )
 
@@ -265,6 +267,21 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 		}
 	}
 
+	// ── Трей: иконка + подсказка (декларация; window.Window подхватит в Run) ──
+	// TrayIcon — путь относительно baseDir (.png/.jpg декодируется, .svg
+	// растеризуется 32×32). Ошибка загрузки — log.Printf и пропуск.
+	if ti := el.attr("TrayIcon"); ti != "" {
+		if img := loadTrayIcon(ti, baseDir); img != nil {
+			win.TrayIconImage = img
+		}
+	}
+	// TrayTooltip — по умолчанию = Title.
+	if tt := el.attr("TrayTooltip"); tt != "" {
+		win.TrayTooltip = tt
+	} else {
+		win.TrayTooltip = win.Title
+	}
+
 	// Bounds (с учётом parentOff — обычно 0,0 для корня)
 	absBounds := b.Add(parentOff)
 	win.SetBounds(absBounds)
@@ -283,6 +300,22 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 	contentOff := win.ContentBounds().Min
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
+
+		// ── <TrayMenu> — контекстное меню трея (единственное) ────────────────
+		// Строим существующим механизмом popup-пунктов (buildXAMLPopupMenu) и
+		// кладём в ПОЛЕ Window.TrayMenu, НЕ добавляя ребёнком дерева: PopupMenu
+		// прямым ребёнком Window опасен (см. Window.SetBounds skip *PopupMenu);
+		// window.attachTrayMenu добавит его в дерево правильно уже в Run().
+		if childTag == "traymenu" {
+			cw, err := buildXAMLPopupMenu(child, reg, contentOff)
+			if err != nil {
+				return nil, err
+			}
+			if pm, ok := cw.(*PopupMenu); ok {
+				win.TrayMenu = pm
+			}
+			continue
+		}
 
 		// Пропускаем property elements
 		if strings.Contains(childTag, ".") {
@@ -363,6 +396,41 @@ func parseInputBindings(el xElement) []InputBinding {
 		}
 	}
 	return out
+}
+
+// loadTrayIcon загружает иконку трея из файла src (относительно baseDir):
+//   - .png/.jpg/.jpeg → декодируется как есть (loadImageFile);
+//   - .svg            → растеризуется в 32×32; свои цвета документа сохраняются,
+//     currentColor подставляется цветом текста темы (win10.LabelText), tint=false
+//     (для трея не темизируем монохромно — берём оригинальные цвета SVG).
+//
+// Ошибка загрузки/разбора — log.Printf и nil (иконка просто не ставится).
+func loadTrayIcon(src, baseDir string) image.Image {
+	path := src
+	if !filepath.IsAbs(path) && baseDir != "" {
+		path = filepath.Join(baseDir, src)
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".svg":
+		doc, err := svgPkg.ParseFile(path)
+		if err != nil {
+			log.Printf("xaml: TrayIcon Source=%q: %v", src, err)
+			return nil
+		}
+		img := doc.Rasterize(32, 32, win10.LabelText, false)
+		if img == nil {
+			log.Printf("xaml: TrayIcon Source=%q: пустая растеризация", src)
+			return nil
+		}
+		return img
+	default:
+		img, err := loadImageFile(path)
+		if err != nil {
+			log.Printf("xaml: TrayIcon Source=%q: %v", src, err)
+			return nil
+		}
+		return img
+	}
 }
 
 // ─── buildXAMLPanel ────────────────────────────────────────────────────────
@@ -762,6 +830,12 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 	// Парсим дочерние <MenuItem> элементы.
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
+		// Отдельный тег <Separator/> — горизонтальный разделитель (в дополнение к
+		// <MenuItem Separator="True"/>). Удобно для трей-меню и контекстных меню.
+		if childTag == "separator" {
+			pm.AddSeparator()
+			continue
+		}
 		if childTag != "menuitem" && childTag != "item" {
 			continue
 		}
@@ -887,6 +961,206 @@ func buildXAMLBorder(el xElement, reg map[string]Widget, parentOff image.Point, 
 	}
 
 	return dp, nil
+}
+
+// ─── buildXAMLDockManager ──────────────────────────────────────────────────
+//
+// <DockManager>
+//   <DockPane Id="tools" Title="Инструменты" Side="Left" Size="220" State="Docked">
+//     …контент (один child)…
+//   </DockPane>
+//   <DockPane Id="props" Title="Свойства" Side="Right" Size="200"/>
+//   <DockContent>…центр (документная область, один child)…</DockContent>
+// </DockManager>
+//
+// DockManager раскладывает докинг-панели (widget/dockpane.go) вокруг
+// документной области. <DockPane> пришвартовывается к своей стороне (Side,
+// дефолт Left) через AddPane; Size задаёт SetSideSize для этой стороны
+// (несколько панелей одной стороны — Size последней выигрывает); State
+// переводит панель в AutoHidden/Floating/Closed сразу после добавления
+// (Docked — состояние по умолчанию, вызовов не требует). <DockContent> —
+// не виджет, а маркер: его единственный ребёнок становится SetCenter.
+
+var xamlDockPaneAutoSeq int
+
+// xamlDockPaneID возвращает Id панели: явный Id/Name, иначе слаг от Title,
+// иначе "paneN" (автогенерация — на случай, если XAML не задал ни того ни
+// другого).
+func xamlDockPaneID(el xElement) string {
+	if id := el.attr("Id", "Name", "x:Name"); id != "" {
+		return id
+	}
+	if title := el.attr("Title"); title != "" {
+		return xamlSlugify(title)
+	}
+	xamlDockPaneAutoSeq++
+	return "pane" + strconv.Itoa(xamlDockPaneAutoSeq)
+}
+
+// xamlSlugify огрубляет произвольную строку до идентификатора: буквы/цифры
+// латиницы и кириллицы в нижнем регистре, остальное → "-".
+func xamlSlugify(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	prevDash := false
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r >= 'а' && r <= 'я', r == 'ё':
+			b.WriteRune(r)
+			prevDash = false
+		default:
+			if !prevDash && b.Len() > 0 {
+				b.WriteByte('-')
+				prevDash = true
+			}
+		}
+	}
+	out := strings.TrimSuffix(b.String(), "-")
+	if out == "" {
+		xamlDockPaneAutoSeq++
+		return "pane" + strconv.Itoa(xamlDockPaneAutoSeq)
+	}
+	return out
+}
+
+// xamlDockSide парсит атрибут Side="Left|Top|Bottom|Right" (дефолт Left).
+func xamlDockSide(s string) DockSide {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "top":
+		return DockTop
+	case "bottom":
+		return DockBottom
+	case "right":
+		return DockRight
+	default:
+		return DockLeft
+	}
+}
+
+// buildXAMLDockPane строит DockPane из <DockPane> внутри <DockManager>.
+// Возвращает панель и её запрошенные Side/Size/State — сам DockManager
+// решает, что с ними делать (AddPane/SetSideSize/Unpin·Float·Close).
+func buildXAMLDockPane(el xElement, reg map[string]Widget, baseDir string) (pane *DockPane, side DockSide, size int, state string, err error) {
+	id := xamlDockPaneID(el)
+	title := el.attr("Title")
+	if title == "" {
+		title = id
+	}
+
+	// Содержимое — первый дочерний виджет (кроме WPF property-тегов "X.Y").
+	var content Widget
+	for _, child := range el.Children {
+		if strings.Contains(child.Tag, ".") {
+			continue
+		}
+		cw, cerr := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		if cerr != nil {
+			return nil, DockLeft, 0, "", cerr
+		}
+		if cw != nil {
+			content = cw
+			break
+		}
+	}
+
+	pane = NewDockPane(id, title, content)
+	side = xamlDockSide(el.attr("Side"))
+	size = xatoi(el.attr("Size"))
+	state = strings.ToLower(strings.TrimSpace(el.attr("State")))
+
+	if name := el.attr("Name", "x:Name"); name != "" {
+		reg[name] = pane
+	} else {
+		reg[id] = pane
+	}
+
+	return pane, side, size, state, nil
+}
+
+// buildXAMLDockManager строит DockManager из <DockManager> (см. схему выше).
+func buildXAMLDockManager(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	dm := NewDockManager()
+
+	if bgStr := el.attr("Background"); bgStr != "" {
+		if c, err := parseXAMLColor(bgStr); err == nil {
+			dm.Background = c
+		}
+	}
+
+	// NativeFloating="True" — декларация нативного отрыва панелей (window.Window
+	// подхватит поле в Run → EnableDockFloating). В headless — без эффекта.
+	if strings.EqualFold(el.attr("NativeFloating"), "true") {
+		dm.NativeFloating = true
+	}
+
+	absBounds := el.bounds().Add(parentOff)
+	dm.SetBounds(absBounds)
+	applyCommonProps(dm, el)
+
+	if id := el.name(); id != "" {
+		reg[id] = dm
+	}
+
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+		switch childTag {
+		case "dockpane":
+			p, side, size, state, err := buildXAMLDockPane(child, reg, baseDir)
+			if err != nil {
+				return nil, err
+			}
+			if p == nil {
+				continue
+			}
+			dm.AddPane(p, side)
+			if size > 0 {
+				dm.SetSideSize(side, size)
+			}
+			switch state {
+			case "autohidden":
+				p.Unpin()
+			case "floating":
+				p.Float()
+			case "closed":
+				p.Close()
+			}
+
+		case "dockcontent":
+			var content Widget
+			for _, inner := range child.Children {
+				if strings.Contains(inner.Tag, ".") {
+					continue
+				}
+				cw, err := buildXAMLWidget(inner, reg, image.Point{}, baseDir)
+				if err != nil {
+					return nil, err
+				}
+				if cw != nil {
+					content = cw
+					break
+				}
+			}
+			dm.SetCenter(content)
+
+		default:
+			if strings.Contains(childTag, ".") {
+				continue
+			}
+			// Запасной путь: виджет без обёртки DockContent/DockPane, ещё не
+			// заданный центр — трактуем как центр (удобно для беглых правок XAML).
+			if dm.Center() == nil {
+				cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+				if err != nil {
+					return nil, err
+				}
+				if cw != nil {
+					dm.SetCenter(cw)
+				}
+			}
+		}
+	}
+
+	return dm, nil
 }
 
 // ─── buildXAMLStatusBar ────────────────────────────────────────────────────

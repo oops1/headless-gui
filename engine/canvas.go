@@ -826,6 +826,32 @@ func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
 	stdraw.Draw(c.back, dstRect, tmp, offset, stdraw.Over)
 }
 
+// Snapshot возвращает КОПИЮ прямоугольной области уже отрисованного back-буфера
+// как самостоятельный *image.RGBA. Прямоугольник r задаётся в ЛОГИЧЕСКИХ
+// координатах холста (как остальной DrawContext) и клипится по его границам;
+// возвращаемое изображение — в ФИЗИЧЕСКИХ пикселях (back-буфер физический) с
+// началом координат (0,0). Пустое пересечение с холстом → nil.
+//
+// Копия независима от буфера (последующий рендер её не меняет), поэтому снимок
+// можно хранить между кадрами — используется «призраком» drag&dock в
+// widget.DockManager (снимок панели следует за курсором). Пиксели —
+// premultiplied RGBA, как и весь back: снимок можно блиттить обратно через
+// DrawImage/DrawImageScaled (Over) без преобразований.
+func (c *Canvas) Snapshot(r image.Rectangle) *image.RGBA {
+	pr := c.sRect(r).Intersect(c.back.Bounds())
+	if pr.Empty() {
+		return nil
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, pr.Dx(), pr.Dy()))
+	rowBytes := pr.Dx() * 4
+	for y := 0; y < pr.Dy(); y++ {
+		src := c.back.PixOffset(pr.Min.X, pr.Min.Y+y)
+		d := dst.PixOffset(0, y)
+		copy(dst.Pix[d:d+rowBytes], c.back.Pix[src:src+rowBytes])
+	}
+	return dst
+}
+
 // ─── Tile diffing ───────────────────────────────────────────────────────────
 
 // diffAndSync сравнивает back с front по тайлам и возвращает изменившиеся.

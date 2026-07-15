@@ -256,6 +256,30 @@ func (win *Window) RestoreFromTray() {
 
 // ─── Внутреннее ──────────────────────────────────────────────────────────────
 
+// pickupDeclarativeTray подхватывает декларации трея из XAML-корня widget.Window
+// (<Window TrayIcon=… TrayTooltip=…> и <TrayMenu>): заполняет буферизованные поля
+// трея, если приложение НЕ задало их явно до Run() (SetTrayIcon/SetTrayMenu).
+// Приоритет у приложения: заданные им иконка/меню не перетираются. Вызывается в
+// Run() ДО applyPendingTray, которая уже отправит итоговое состояние бэкенду.
+func (win *Window) pickupDeclarativeTray() {
+	root := win.eng.Root()
+	if root == nil {
+		return
+	}
+	ww, ok := root.(*widget.Window)
+	if !ok {
+		return
+	}
+	if !win.trayIconWant && ww.TrayIconImage != nil {
+		win.trayIcon = ww.TrayIconImage
+		win.trayTooltip = ww.TrayTooltip
+		win.trayIconWant = true
+	}
+	if win.trayMenu == nil && ww.TrayMenu != nil {
+		win.trayMenu = ww.TrayMenu
+	}
+}
+
 // applyPendingTray применяет отложенное состояние трея после создания окна.
 // Вызывается из Run(). На платформах без trayHost — no-op.
 func (win *Window) applyPendingTray() {

@@ -17,60 +17,148 @@ import (
 	"sync"
 )
 
+// Модель уведомлений — ШИРОКОВЕЩАТЕЛЬНЫЙ РЕЕСТР (а не «последний движок
+// выигрывает»). Каждый живой движок регистрирует себя через RegisterUINotifier
+// при создании и снимает регистрацию в Stop. notifyUIChanged/notifyRectChanged
+// рассылают уведомление ВСЕМ зарегистрированным приёмникам.
+//
+// Зачем: при ДВУХ и более живых движках (главное окно + hosted-диалог/попап,
+// а в перспективе — немодальные floating-панели) инвалидации виджетов первого
+// движка не должны «утекать» во второй. Прежняя схема с единственным
+// глобальным колбэком отдавала все уведомления последнему созданному движку;
+// для модалок это маскировалось блокировкой родителя, для немодальных окон —
+// прямой блокер.
+//
+// Стоимость широковещания: лишний Invalidate в «чужом» движке безопасен и
+// дёшев — on-demand рендер сделает кадр, но diff по неизменившейся области
+// вернёт ПУСТОЙ набор тайлов, и кадр не будет эмитирован. Приёмников на
+// процесс единицы (движки), поэтому обход реестра — микроскопические накладные.
+//
+// Потокобезопасность: реестр под RWMutex. Рассылка идёт под RLock; КОНТРАКТ
+// приёмника — его колбэк (engine.Invalidate/InvalidateRect) НЕ должен повторно
+// входить в реестр (Register/Unregister) или звать notify* (иначе возможен
+// самодедлок на RWMutex). Реальные приёмники этого не делают: они лишь
+// выставляют атомарный damage движка.
+
+// uiReceiver — один зарегистрированный приёмник (обычно движок). full —
+// полная инвалидация; rect — точечная (nil → деградирует до full).
+type uiReceiver struct {
+	handle uint64
+	full   func()
+	rect   func(image.Rectangle)
+}
+
 var (
-	uiNotifyMu   sync.RWMutex
-	uiNotify     func()
-	uiRectNotify func(image.Rectangle)
+	uiNotifyMu sync.RWMutex
+	// uiReceivers — реестр живых приёмников (широковещание).
+	uiReceivers []uiReceiver
+	uiHandleSeq uint64
+	// Внешний «слот» обратной совместимости для SetUIChangeNotifier/
+	// SetUIRectChangeNotifier. Живёт ПАРАЛЛЕЛЬНО реестру: тесты подменяют
+	// нотификатор, не создавая движок (например tests/datagrid_invalidate_test).
+	// Вызывается ПОСЛЕ реестра. Семантика «последний выигрывает».
+	uiExtNotify     func()
+	uiExtRectNotify func(image.Rectangle)
 )
 
-// SetUIChangeNotifier регистрирует колбэк, вызываемый при изменениях UI из
-// слоя данных (биндинги, локализация, live-коллекции). Движок ставит сюда
-// свой Invalidate. Последняя регистрация выигрывает (на процесс — один
-// активный движок). nil снимает уведомления.
+// RegisterUINotifier регистрирует приёмник уведомлений об изменениях UI и
+// возвращает дескриптор для UnregisterUINotifier. Движок вызывает это при
+// создании (engine.New). Несколько живых движков сосуществуют — уведомления
+// рассылаются всем (широковещание). fnFull — полная инвалидация (аналог
+// прежнего SetUIChangeNotifier); fnRect — точечная (аналог прежнего
+// SetUIRectChangeNotifier, может быть nil).
+func RegisterUINotifier(fnFull func(), fnRect func(image.Rectangle)) uint64 {
+	uiNotifyMu.Lock()
+	uiHandleSeq++
+	h := uiHandleSeq
+	uiReceivers = append(uiReceivers, uiReceiver{handle: h, full: fnFull, rect: fnRect})
+	uiNotifyMu.Unlock()
+	return h
+}
+
+// UnregisterUINotifier снимает регистрацию приёмника по дескриптору.
+// Идемпотентно: повторный вызов или неизвестный/нулевой дескриптор — no-op.
+// Движок вызывает это в Stop; teardown hosted-диалога/попапа гарантированно
+// зовёт eng.Stop, поэтому короткоживущие движки не текут в реестре.
+func UnregisterUINotifier(handle uint64) {
+	if handle == 0 {
+		return
+	}
+	uiNotifyMu.Lock()
+	for i := range uiReceivers {
+		if uiReceivers[i].handle == handle {
+			uiReceivers = append(uiReceivers[:i], uiReceivers[i+1:]...)
+			break
+		}
+	}
+	uiNotifyMu.Unlock()
+}
+
+// UINotifierCount возвращает число зарегистрированных приёмников. Для тестов:
+// проверка отсутствия утечки реестра после Stop.
+func UINotifierCount() int {
+	uiNotifyMu.RLock()
+	n := len(uiReceivers)
+	uiNotifyMu.RUnlock()
+	return n
+}
+
+// SetUIChangeNotifier задаёт ВНЕШНИЙ колбэк полной инвалидации (обратная
+// совместимость). В отличие от реестра приёмников, это одиночный слот
+// («последний выигрывает»), живущий ПОВЕРХ реестра и вызываемый после него.
+// Движок больше сюда не регистрируется (он использует RegisterUINotifier) —
+// слот предназначен для тестов/встраивания. nil снимает внешний колбэк.
 func SetUIChangeNotifier(fn func()) {
 	uiNotifyMu.Lock()
-	uiNotify = fn
+	uiExtNotify = fn
 	uiNotifyMu.Unlock()
 }
 
-// SetUIRectChangeNotifier регистрирует колбэк точечной инвалидации: виджеты
-// сообщают прямоугольник изменившейся области (авто-damage). Движок ставит
-// сюда свой InvalidateRect. nil снимает уведомления — тогда точечные
-// уведомления деградируют до полной инвалидации через SetUIChangeNotifier.
+// SetUIRectChangeNotifier задаёт ВНЕШНИЙ колбэк точечной инвалидации (обратная
+// совместимость, одиночный слот поверх реестра, вызывается после него). nil
+// снимает внешний колбэк — тогда внешние точечные уведомления деградируют до
+// внешнего SetUIChangeNotifier (если задан). На реестр приёмников не влияет.
 func SetUIRectChangeNotifier(fn func(image.Rectangle)) {
 	uiNotifyMu.Lock()
-	uiRectNotify = fn
+	uiExtRectNotify = fn
 	uiNotifyMu.Unlock()
 }
 
-// notifyUIChanged сообщает движку, что содержимое UI могло измениться.
-// Дёшево и потокобезопасно; no-op, если notifier не зарегистрирован.
+// notifyUIChanged сообщает всем приёмникам, что содержимое UI могло измениться.
+// Дёшево и потокобезопасно; no-op, если приёмников нет.
 func notifyUIChanged() {
 	uiNotifyMu.RLock()
-	fn := uiNotify
-	uiNotifyMu.RUnlock()
-	if fn != nil {
-		fn()
+	defer uiNotifyMu.RUnlock()
+	for i := range uiReceivers {
+		if uiReceivers[i].full != nil {
+			uiReceivers[i].full()
+		}
+	}
+	if uiExtNotify != nil {
+		uiExtNotify()
 	}
 }
 
-// notifyRectChanged сообщает движку об изменении конкретной области UI.
-// Если rect-notifier не зарегистрирован — полная инвалидация (совместимость).
+// notifyRectChanged сообщает всем приёмникам об изменении конкретной области UI.
+// Приёмник без rect-колбэка получает полную инвалидацию (совместимость).
 // Пустой прямоугольник игнорируется.
 func notifyRectChanged(r image.Rectangle) {
 	if r.Empty() {
 		return
 	}
 	uiNotifyMu.RLock()
-	fn := uiRectNotify
-	full := uiNotify
-	uiNotifyMu.RUnlock()
-	if fn != nil {
-		fn(r)
-		return
+	defer uiNotifyMu.RUnlock()
+	for i := range uiReceivers {
+		if uiReceivers[i].rect != nil {
+			uiReceivers[i].rect(r)
+		} else if uiReceivers[i].full != nil {
+			uiReceivers[i].full()
+		}
 	}
-	if full != nil {
-		full()
+	if uiExtRectNotify != nil {
+		uiExtRectNotify(r)
+	} else if uiExtNotify != nil {
+		uiExtNotify()
 	}
 }
 
