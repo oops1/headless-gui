@@ -90,6 +90,13 @@ type DockPane struct {
 	// при Float виджетный floating НЕ включается: менеджер вызывает колбэк и
 	// оставляет панель менеджеру для отсоединения.
 	OnFloatNative func(p *DockPane)
+	// OnDragMove, если задан, вызывается при перетаскивании за титлбар ВМЕСТО
+	// менеджерного drag&dock (по образцу Dialog.OnDragMove). Используется, когда
+	// панель показана как корень собственного нативного окна ОС
+	// (window.dockFloatHost): сам виджет в своём холсте неподвижен, двигается
+	// нативное окно. Пока хук задан, виджетный ресайз краёв тоже отключён —
+	// размером плавающего окна управляет рамка ОС.
+	OnDragMove func(dx, dy int)
 
 	content Widget
 	mgr     *DockManager
@@ -114,6 +121,9 @@ type DockPane struct {
 	dragMoved bool
 	grabDX    int // смещение курсора от левого края панели при захвате
 	grabDY    int
+	// Последние координаты мыши при нативном drag (OnDragMove-режим).
+	dragLastX int
+	dragLastY int
 
 	// Ресайз плавающей панели за кромки (переиспользует winEdge из window.go).
 	resizing     bool
@@ -405,7 +415,10 @@ func (p *DockPane) SetCaptureManager(cm CaptureManager) {
 // floatingResizeEdgeAt возвращает край(а) плавающей панели под точкой для
 // ресайза (полоса winResizeBorder). edgeNone для не-floating или вне зоны.
 func (p *DockPane) floatingResizeEdgeAt(x, y int) winEdge {
-	if p.state != PaneFloating {
+	if p.state != PaneFloating || p.OnDragMove != nil {
+		// В нативном ОС-окне (OnDragMove задан) ресайз — задача рамки окна ОС,
+		// виджетный ресайз краёв отключаем (иначе он менял бы bounds внутри
+		// фиксированного холста вторичного движка).
 		return edgeNone
 	}
 	b := p.bounds
@@ -516,7 +529,11 @@ func (p *DockPane) OnMouseButton(e MouseEvent) bool {
 			p.dragMoved = false
 			p.grabDX = e.X - p.bounds.Min.X
 			p.grabDY = e.Y - p.bounds.Min.Y
-			if p.mgr != nil {
+			if p.OnDragMove != nil {
+				// Нативный режим: панель — корень своего ОС-окна, титлбар двигает
+				// окно ОС; менеджерный drag&dock не запускаем.
+				p.dragLastX, p.dragLastY = e.X, e.Y
+			} else if p.mgr != nil {
 				p.mgr.beginPaneDrag(p, e.X, e.Y)
 			}
 			return true
@@ -537,7 +554,9 @@ func (p *DockPane) OnMouseButton(e MouseEvent) bool {
 		p.dragging = false
 		moved := p.dragMoved
 		p.dragMoved = false
-		if p.mgr != nil {
+		// В нативном режиме (OnDragMove) окно уже двигалось за титлбар — drag&dock
+		// менеджера не завершаем (drag-возврат на направляющие — не в этой фазе).
+		if p.OnDragMove == nil && p.mgr != nil {
 			p.mgr.endPaneDrag(p, e.X, e.Y, moved)
 		}
 		if p.capMgr != nil {
@@ -592,6 +611,16 @@ func (p *DockPane) OnMouseMove(x, y int) {
 	}
 	if p.dragging {
 		p.dragMoved = true
+		if p.OnDragMove != nil {
+			// Нативный режим: двигаем окно ОС на дельту мыши. dragLast НЕ
+			// обновляем — координаты относительны окну, после его сдвига курсор
+			// возвращается к точке захвата (как у Dialog.OnMouseMove).
+			dx, dy := x-p.dragLastX, y-p.dragLastY
+			if dx != 0 || dy != 0 {
+				p.OnDragMove(dx, dy)
+			}
+			return
+		}
 		if p.mgr != nil {
 			p.mgr.updatePaneDrag(p, x, y)
 		}

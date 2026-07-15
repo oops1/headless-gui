@@ -210,6 +210,12 @@ type Window struct {
 	// nil, если бэкенд не поддерживает окна-попапы (Wayland/macOS → in-canvas).
 	popupHost *popupHost
 
+	// dockMgr — менеджер докинга, панели которого разрешено отрывать в отдельные
+	// нативные окна (EnableDockFloating). dockHost — установленный хост отрыва
+	// (nil на бэкендах без поддержки owner-окон / UI-маршалинга → in-canvas floating).
+	dockMgr  *widget.DockManager
+	dockHost *dockFloatHost
+
 	// ── Трей и уведомления (Windows) ─────────────────────────────────────────
 	// Сеттеры трея вызываются до Run() (native ещё nil), поэтому желаемое
 	// состояние буферизуется и применяется в Run() после создания окна
@@ -372,6 +378,10 @@ func (win *Window) Run() error {
 	// и меню будут открываться в собственных окнах ОС и выходить за границы окна.
 	win.installPopupHost()
 
+	// Хост отрыва DockPane в отдельные нативные окна (EnableDockFloating). На
+	// бэкендах без owner-окон / UI-маршалинга — no-op (панель флоатит в холсте).
+	win.installDockFloating()
+
 	// Применяем отложенное состояние трея/уведомлений (иконка, меню, колбэки),
 	// заданное до Run(). На платформах без поддержки — no-op.
 	win.applyPendingTray()
@@ -380,7 +390,14 @@ func (win *Window) Run() error {
 	go win.framePump()
 
 	// Блокирующий цикл событий (возврат = окно закрыто)
-	return win.native.RunEventLoop()
+	err := win.native.RunEventLoop()
+
+	// Сносим все оторванные окна панелей: останавливаем их движки (реестр
+	// нотификаторов/горутины без утечки); owned-окна ОС уходят вместе с owner'ом.
+	if win.dockHost != nil {
+		win.dockHost.teardownAll()
+	}
+	return err
 }
 
 // syncFromWidgetWindow считывает параметры из widget.Window (XAML <Window>)

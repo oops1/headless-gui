@@ -92,6 +92,11 @@ type DockManager struct {
 	BorderColor     color.RGBA
 	GuideFace       color.RGBA
 
+	// OnPaneAdded, если задан, вызывается в конце AddPane после регистрации
+	// панели. Используется window.dockFloatHost (фаза 2), чтобы навесить хук
+	// OnFloatNative на панели, добавленные уже после EnableDockFloating.
+	OnPaneAdded func(p *DockPane)
+
 	center     Widget
 	panes      []*DockPane   // мастер-реестр всех панелей (в т.ч. закрытых)
 	sides      [4][]*DockPane // Docked+AutoHidden по сторонам (индекс = DockSide)
@@ -246,6 +251,9 @@ func (m *DockManager) AddPane(p *DockPane, side DockSide) {
 	m.activePane[int(side)] = p
 	m.layout()
 	m.Invalidate()
+	if m.OnPaneAdded != nil {
+		m.OnPaneAdded(p)
+	}
 }
 
 // SideSize возвращает пиксельный размер региона стороны.
