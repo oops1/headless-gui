@@ -1622,6 +1622,15 @@ Limitations (honestly): BMP symbols below U+1F000 stay monochrome; regional flag
 (letter ligatures) are a known gap; COLRv1 gradients are approximated by their
 average color. Works the same headless and in a window.
 
+> **Licensing.** The engine bundles and ships no emoji font — glyphs come from
+> the font already installed on the user's OS (Segoe UI Emoji on Windows, Apple
+> Color Emoji on macOS, Noto Color Emoji on Linux if present), exactly like the
+> system fallback fonts used for Arabic/Hebrew/Thai. Strings hold plain Unicode
+> code points, not artwork, so the project carries no extra licensing
+> obligation. If you need guaranteed emoji rendering across platforms, bundle a
+> freely-licensed font (e.g. Noto Color Emoji, OFL) into your product and ship
+> its license.
+
 ---
 
 ## Module Structure
