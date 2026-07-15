@@ -104,22 +104,18 @@
       двойной клик — коллапс/восстановление, гнездование, HasOwnLayout,
       OnPositionChanged) + XAML-тег <SplitPanel> + вкладка «Компоновка»
       в showcase. Для ячеек Grid по-прежнему GridSplitter.
-- [ ] **Toolbox / докинг-панели** — плавающие инструментальные панели в духе
-      Visual Studio: притягиваются (док) к любой стороне окна с направляющими,
-      сворачиваются в заголовок (auto-hide/pin), отрываются в ОТДЕЛЬНЫЕ
-      нативные окна (инфраструктура нативных окон v3.10 уже готова: owned
-      окно + свой surface, как у диалогов) и возвращаются обратно доком.
-      Состав: DockManager-контейнер, DockPanelWindow (титлбар с pin/✕),
-      сериализация раскладки. Зависит от Splitter (ресайз доков).
-- [x] **Drag&Drop файлов из ОС** в окно — сделано 2026-07-15:
-      `Window.SetOnFilesDropped(paths, x, y)` + `engine.SendFilesDropped` +
-      `widget.FileDropTarget` (bubbling к виджету под точкой, headless-симметрия).
-      Win32 (WM_DROPFILES) и X11 (XDND v5) — полно; Wayland (wl_data_device) —
-      каркас (нужна проверка на живой сессии); macOS — нет.
-- [x] **Цветные эмодзи** — сделано 2026-07-15: COLRv0/COLRv1 (граф paint) +
-      CBDT/sbix (PNG-битмапы) в шейпинг-тракте, автоматически; кэш цветных
-      глифов. Ограничения: BMP<0x1F000 — моно, региональные флаги (лигатуры) —
-      пробел, COLRv1-градиенты усредняются.
+- [x] **Toolbox / докинг-панели** — сделано 2026-07-15 (widget/dockmanager.go,
+      dockpane.go, window/dock_host.go): DockManager (центр + 4 стороны,
+      VS-порядок, стопки табами, ресайз желобами с MinSize), DockPane
+      (титлбар pin/float/✕ release-семантики), drag&dock с направляющими и
+      призраком, floating в холсте (drag+edge-resize), auto-hide с выездом
+      (анимация часов движка), SaveLayout/RestoreLayout (JSON по id),
+      XAML <DockManager>/<DockPane>/<DockContent>, вкладка «Докинг» в
+      showcase. НАТИВНЫЙ ОТРЫВ: window.EnableDockFloating(dm) — панель в
+      собственном немодальном окне ОС (Win32/X11; фундамент — broadcast-
+      реестр нотификаторов, несколько живых движков). Ограничения:
+      drag-возврат на направляющие не реализован (возврат кнопкой dock),
+      оторванное окно без ресайза, guides — 4 стрелки без центр-креста.
 - [ ] **Курсор ввода/IME-позиция** в нативных окнах (candidate window рядом
       с кареткой).
 

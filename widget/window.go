@@ -136,6 +136,25 @@ type Window struct {
 	// InputBindings — горячие клавиши окна (WPF Window.InputBindings).
 	InputBindings []InputBinding
 
+	// ── Декларации трея (XAML <Window TrayIcon=… TrayTooltip=…> + <TrayMenu>) ──
+	//
+	// Эти поля — ТОЛЬКО декларация из XAML: widget-пакет не может импортировать
+	// window (зависимость window→widget), поэтому окно складывает намерение сюда,
+	// а window.Window подхватывает его в Run() и вызывает SetTrayIcon/SetTrayMenu.
+	// Явные вызовы приложения (SetTrayIcon/SetTrayMenu до Run) имеют приоритет и
+	// эти поля не перетирают.
+
+	// TrayIconImage — уже загруженная иконка трея (из атрибута TrayIcon,
+	// .png/.jpg декодируется, .svg растеризуется 32×32). nil — иконки нет.
+	TrayIconImage image.Image
+	// TrayTooltip — всплывающая подсказка иконки трея (по умолчанию = Title).
+	TrayTooltip string
+	// TrayMenu — контекстное меню трея (из дочернего тега <TrayMenu>). Хранится
+	// ПОЛЕМ, а не ребёнком дерева (PopupMenu прямым ребёнком Window опасен —
+	// см. Window.SetBounds, где *PopupMenu пропускается); window.attachTrayMenu
+	// сам добавит его в дерево корректно.
+	TrayMenu *PopupMenu
+
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
 	// OnClose вызывается при ОТПУСКАНИИ кнопки закрытия (×), если курсор всё

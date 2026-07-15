@@ -991,6 +991,48 @@
             </Canvas>
         </TabItem>
 
+        <TabItem Header="Докинг">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="DockManager — докинг-панели (Toolbox в стиле Visual Studio)"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="52" Width="1010" Foreground="#9399B2"
+                           Text="Тяни панель за заголовок — появятся направляющие дока; 📌 сворачивает панель в ярлык у края (auto-hide); кнопка-«окошко» делает панель плавающей (float)."/>
+
+                <DockManager Name="dockDemo" Left="24" Top="84" Width="1010" Height="560" Background="#232338" NativeFloating="True">
+                    <DockPane Id="dockTools" Title="Обозреватель" Side="Left" Size="220" State="Docked">
+                        <ListView>
+                            <ListViewItem Content="Отчёт.docx"/>
+                            <ListViewItem Content="Бюджет.xlsx"/>
+                            <ListViewItem Content="Архив"/>
+                            <ListViewItem Content="Заметки.txt"/>
+                        </ListView>
+                    </DockPane>
+
+                    <DockPane Id="dockProps" Title="Свойства" Side="Right" Size="200" State="Docked">
+                        <StackPanel Orientation="Vertical" Padding="8" Spacing="6">
+                            <Label Text="Имя: Отчёт.docx" Foreground="#CDD6F4"/>
+                            <Label Text="Размер: 128 КБ" Foreground="#9399B2"/>
+                        </StackPanel>
+                    </DockPane>
+
+                    <DockPane Id="dockOutput" Title="Вывод" Side="Bottom" Size="120" State="Docked">
+                        <TextBlock Text="Готово. Раскладку можно сохранить и восстановить кнопками ниже."
+                                   Foreground="#A6E3A1" TextWrapping="Wrap"/>
+                    </DockPane>
+
+                    <DockContent>
+                        <TextBox Name="dockCenterText" AcceptsReturn="True" TextWrapping="Wrap"
+                                 Text="Документная область — центр DockManager (SetCenter). Здесь обычно живёт редактор или просмотрщик документа."/>
+                    </DockContent>
+                </DockManager>
+
+                <Button Name="dockSaveLayout" Left="24" Top="654" Width="220" Height="32" Content="Сохранить раскладку"/>
+                <Button Name="dockRestoreLayout" Left="254" Top="654" Width="220" Height="32" Content="Восстановить раскладку"/>
+                <TextBlock Name="dockLayoutStatus" Left="490" Top="662" Width="544" Foreground="#9399B2" Text=""/>
+            </Canvas>
+        </TabItem>
+
         <TabItem Header="Система">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"

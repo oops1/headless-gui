@@ -944,6 +944,11 @@ root Canvas (0,0)
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (первые два дочерних — панели) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `Separator` | Separator | `Background` |
+| `DockManager` | DockManager | `Background`, `NativeFloating`; дочерние `<DockPane>`×N + один `<DockContent>` (см. «Докинг-панели») |
+| `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); только внутри `<DockManager>` |
+| `DockContent` | — (маркер) | единственный ребёнок → `DockManager.SetCenter`; только внутри `<DockManager>` |
+| `Window` | Window | `Title`, `Width`, `Height`, `WindowStyle`, `ResizeMode`, `MainWindow`, `TrayIcon`, `TrayTooltip` (см. «Трей из XAML») |
+| `TrayMenu` | — (ребёнок `<Window>`) | меню трея: дочерние `<MenuItem>`/`<Separator>` (см. «Трей из XAML») |
 
 Общие атрибуты: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`, `ToolTip`, `Visibility`, `IsEnabled`, `TabIndex`. Привязки `{Binding ...}` и локализация `{Loc Key}` работают на любом строковом атрибуте.
 
@@ -1512,6 +1517,31 @@ Peek показывают живое содержимое окна (раньше
 iconic-путь DWM включается переменной окружения `HEADLESS_GUI_ICONIC_PREVIEW=1`
 (по умолчанию не требуется).
 
+**Трей из XAML.** Иконку, подсказку и меню трея можно объявить прямо в корневом
+`<Window>` — без императивных `SetTrayIcon`/`SetTrayMenu`:
+
+```xml
+<Window Title="Моё приложение" TrayIcon="icons/app.svg" TrayTooltip="Моё приложение">
+  <TrayMenu Name="trayMenu">
+    <MenuItem Text="Показать"/>
+    <Separator/>
+    <MenuItem Text="Выход"/>
+  </TrayMenu>
+  <!-- …обычный контент… -->
+</Window>
+```
+
+`TrayIcon` — путь относительно XAML-файла: `.png`/`.jpg` декодируется как есть,
+`.svg` растеризуется 32×32 (свои цвета SVG сохраняются, `currentColor` → цвет
+текста темы; трей намеренно не темизируется). `TrayTooltip` по умолчанию равен
+`Title`. `<TrayMenu>` — единственный дочерний тег окна с пунктами `<MenuItem>` и
+разделителями `<Separator/>`; хранится полем `Window.TrayMenu`, а не ребёнком
+дерева. Обработчики вешаются в коде: найдите меню по `Name` и используйте
+`PopupMenu.OnSelect(idx, text)`. **Приоритет у кода:** если приложение вызвало
+`SetTrayIcon`/`SetTrayMenu` до `Run()`, XAML-декларация не применяется (заполняет
+только незаданное). Balloon-уведомления, `SetOnTrayClick`, `HideToTray` в XAML не
+выражаются — только в коде.
+
 ### SplitPanel — две панели с разделителем
 
 Контейнер `SplitPanel` держит двух детей (первые два `AddChild` — First/Second) и
@@ -1655,6 +1685,92 @@ CBDT/sbix (PNG-битмапы, напр. Noto Color Emoji). Цветные гл�
 > лицензионных обязательств у проекта нет. Если вам нужно гарантированное
 > отображение эмодзи на всех платформах — забандльте свободный шрифт (напр.
 > Noto Color Emoji, OFL) в свой продукт и приложите его лицензию.
+
+### Докинг-панели (Toolbox)
+
+`DockManager` + `DockPane` — зона докинга в стиле Visual Studio: документная
+область по центру (`Center`) и до четырёх сторон (Left/Top/Bottom/Right), на
+каждой из которых может быть стопка панелей `DockPane`. Менеджер сам умеет:
+ресайз сторон перетаскиванием кромки, табы стопки (2+ панели на одной
+стороне), auto-hide (сворачивание в ярлык у края), drag&dock (перетащи
+панель за титлбар — появятся направляющие; отпусти над стрелкой — панель
+пришвартуется, мимо — станет плавающей).
+
+```go
+mgr := widget.NewDockManager()
+mgr.SetBounds(image.Rect(0, 0, 1000, 600))
+
+tools := widget.NewDockPane("tools", "Обозреватель", widget.NewListView("Файл.txt"))
+mgr.AddPane(tools, widget.DockLeft)
+mgr.SetSideSize(widget.DockLeft, 220)
+
+props := widget.NewDockPane("props", "Свойства", widget.NewWin10Label("—"))
+mgr.AddPane(props, widget.DockRight)
+
+mgr.SetCenter(editor) // документная область
+
+// Состояния панели: делегируют менеджеру, если панель ему принадлежит.
+tools.Unpin()  // Docked → AutoHidden (ярлык у края)
+tools.Pin()    // обратно
+props.Float()  // Docked/AutoHidden → Floating (плавающая поверх центра)
+props.Dock(widget.DockRight) // обратно в стопку
+
+tools.OnStateChanged = func(p *widget.DockPane) {
+    log.Println(p.Title, "→", p.State()) // docked/autohidden/floating/closed
+}
+```
+
+Раскладку можно сохранить и восстановить (JSON, панели матчатся по `ID`):
+
+```go
+data := mgr.SaveLayout()
+// ...
+_ = mgr.RestoreLayout(data)
+```
+
+**Плавающие панели.** По умолчанию `Float()` включает виджетную плавающую
+панель прямо в холсте (drag/resize мышью, headless-тестируемо). Хук
+`DockPane.OnFloatNative func(p *DockPane)`, если задан, отдаёт отрыв
+нативному ОС-окну (`window/**`) вместо виджетного floating — на момент
+написания этого раздела ни один платформенный бэкенд его не назначает
+(состояние "в процессе"); при отсутствии хука работает фолбэк в холсте.
+
+XAML:
+
+```xml
+<DockManager Background="#232338">
+  <DockPane Id="tools" Title="Инструменты" Side="Left" Size="220" State="Docked">
+    <ListView><ListViewItem Content="item 1"/></ListView>
+  </DockPane>
+  <DockPane Id="props" Title="Свойства" Side="Right" Size="200"/>
+  <DockPane Title="Вывод" Side="Bottom" Size="120" State="AutoHidden">
+    <TextBlock Text="log..."/>
+  </DockPane>
+  <DockContent>
+    <TextBox Text="документная область"/>
+  </DockContent>
+</DockManager>
+```
+
+`<DockManager>` также принимает `NativeFloating="True"` — декларацию нативного
+отрыва панелей в отдельные ОС-окна: `window.Window.Run()` обходит дерево и, если
+приложение не вызвало `EnableDockFloating(dm)` само, включает отрыв для первого
+такого менеджера. Явный вызов `EnableDockFloating` имеет приоритет; при
+нескольких `NativeFloating`-менеджерах включается только первый (хост держит
+один), остальные логируются. В headless и на неподдерживаемых бэкендах атрибут
+без эффекта (floating остаётся виджетным оверлеем в холсте).
+
+`<DockPane>`: `Id` (если не задан — слаг от `Title`), `Title`, `Side`
+(Left/Top/Bottom/Right, по умолчанию Left), `Size` в px (→ `SetSideSize` для
+своей стороны — несколько панелей одной стороны просто делят один размер,
+побеждает последний `Size`), `State` (Docked по умолчанию; AutoHidden сразу
+после добавления вызывает `Unpin()`; Floating/Closed — по желанию). Контент —
+первый дочерний виджет панели. `<DockContent>` — не виджет, маркер: его
+единственный ребёнок становится центром (`SetCenter`). Оба тега вне
+`<DockManager>` игнорируются.
+
+Смотри вкладку «Докинг» в `cmd/showcase` — пример с тремя панелями и кнопками
+сохранения/восстановления раскладки.
 
 ---
 

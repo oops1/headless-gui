@@ -321,7 +321,7 @@ func shiftDescendants(w Widget, dx, dy int) {
 // позиции дочерних виджетов при вызове SetBounds (через layout / layoutContent).
 func HasOwnLayout(w Widget) bool {
 	switch w.(type) {
-	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel:
+	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager:
 		return true
 	}
 	return false
