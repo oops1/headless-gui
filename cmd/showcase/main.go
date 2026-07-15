@@ -937,6 +937,27 @@ func main() {
 	win.SetTrayMenu(trayMenu)
 	win.SetOnBalloonClick(func() { addLog("Клик по balloon-уведомлению") })
 
+	// ─── Drag & Drop файлов из ОС ────────────────────────────────────────────
+	// Перетаскивание файлов из проводника в окно: выводим их пути в drop-зону
+	// на вкладке «Система». Координаты (x,y) — логические, приходят из бэкенда
+	// (Win32 WM_DROPFILES / X11 XDND / Wayland). Green — цвет успешного дропа.
+	if dropLbl, ok := reg["dropLabel"].(*widget.Label); ok {
+		win.SetOnFilesDropped(func(paths []string, x, y int) {
+			addLog("Drop: %d файл(ов) в (%d,%d)", len(paths), x, y)
+			text := fmt.Sprintf("Брошено %d в (%d,%d):", len(paths), x, y)
+			for i, p := range paths {
+				if i >= 4 {
+					text += fmt.Sprintf("  …и ещё %d", len(paths)-4)
+					break
+				}
+				text += "  " + p
+			}
+			dropLbl.SetText(text)
+			dropLbl.TextColor = color.RGBA{R: 166, G: 227, B: 161, A: 255}
+			dropLbl.Invalidate()
+		})
+	}
+
 	if err := win.Run(); err != nil {
 		log.Fatal(err)
 	}
