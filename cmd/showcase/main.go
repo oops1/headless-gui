@@ -914,6 +914,40 @@ func main() {
 		}
 	}
 
+	// ─── Вкладка «Докинг»: DockManager — сохранение/восстановление раскладки ─
+	if dm, ok := reg["dockDemo"].(*widget.DockManager); ok {
+		var savedLayout []byte
+		statusLbl, _ := reg["dockLayoutStatus"].(*widget.Label)
+		setStatus := func(msg string) {
+			if statusLbl != nil {
+				statusLbl.SetText(msg)
+			}
+		}
+		if btn, ok := reg["dockSaveLayout"].(*widget.Button); ok {
+			btn.OnClick = func() {
+				savedLayout = dm.SaveLayout()
+				setStatus(fmt.Sprintf("Раскладка сохранена (%d байт JSON)", len(savedLayout)))
+				addLog("DockManager: раскладка сохранена (%d байт)", len(savedLayout))
+			}
+		}
+		if btn, ok := reg["dockRestoreLayout"].(*widget.Button); ok {
+			btn.OnClick = func() {
+				if savedLayout == nil {
+					setStatus("Сначала сохрани раскладку")
+					addLog("DockManager: восстановление отменено — нет сохранённой раскладки")
+					return
+				}
+				if err := dm.RestoreLayout(savedLayout); err != nil {
+					setStatus("Ошибка восстановления: " + err.Error())
+					addLog("DockManager: ошибка восстановления раскладки: %v", err)
+					return
+				}
+				setStatus("Раскладка восстановлена")
+				addLog("DockManager: раскладка восстановлена")
+			}
+		}
+	}
+
 	// ─── Нативное окно ──────────────────────────────────────────────────────
 	win = window.New(eng, "GuiEngine — Widget Showcase")
 	win.SetMaxFPS(60)

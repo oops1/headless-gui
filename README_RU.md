@@ -68,6 +68,7 @@ GUI-движок на чистом Go (zero CGO): WPF-стиль XAML, прив�
 - **Векторные фигуры** — `Ellipse`, `Rectangle`, `Line`, `Polygon`, `Polyline` с `Fill`/`Stroke`
 - **SVG-иконки** — темизируемый виджет `SVGIcon` + пакет `widget/svg` (парсер подмножества + AA-растеризатор): `currentColor`, монохромный `Tint`; path/дуги/базовые фигуры/трансформы/even-odd
 - **SplitPanel** — две панели с перетаскиваемым разделителем (позиция-доля, минимумы, коллапс двойным кликом, гнездование)
+- **Докинг-панели** — `DockManager`/`DockPane`, зона докинга в стиле Visual Studio Toolbox: центр + 4 пришвартовываемые стороны, табы стопки, auto-hide, drag&dock с направляющими, ресайз кромки, сохранение/восстановление раскладки (JSON)
 - **Плавный / инерционный скролл** — точные пиксельные дельты колеса/тачпада (`SendMouseWheelPixels`) с затухающим «маховиком» в `ScrollView` (пиксельные дельты на Win32 и Wayland; X11 — тики)
 - **Drag & Drop файлов из ОС** — перетаскивание файлов из проводника/Finder в окно (`SetOnFilesDropped` / `FileDropTarget`); Win32 и X11 нативно, Wayland — каркас
 - **Цветные эмодзи** — глифы COLR/CBDT/sbix рендерятся в цвете автоматически (COLRv1-градиенты усредняются; флаги-лигатуры — известный пробел)
@@ -114,6 +115,8 @@ GUI-движок на чистом Go (zero CGO): WPF-стиль XAML, прив�
 | GridSplitter | `GridSplitter` | Перетаскиваемый разделитель между ячейками Grid |
 | SplitPanel | `SplitPanel` | Две панели с перетаскиваемым разделителем, позиция-доля, минимумы, коллапс двойным кликом |
 | SVGIcon | `SVGIcon` | Темизируемая векторная иконка (подмножество SVG), перекраска `currentColor` / `Tint` |
+| DockManager | `DockManager` | Зона докинга в стиле VS: центр + 4 пришвартовываемые стороны, ресайз кромки, табы стопки, auto-hide, drag&dock |
+| DockPane | `DockPane` | Отдельная панель докинга внутри `DockManager`: титлбар с pin/float/close, Docked/AutoHidden/Floating/Closed |
 | StatusBar | `StatusBar` | Нижняя строка состояния |
 | DataGrid | `DataGrid` | WPF-совместимая таблица: колонки, сортировка, редактирование ячеек, resize, Binding, ObservableCollection |
 

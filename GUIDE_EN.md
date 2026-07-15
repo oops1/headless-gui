@@ -944,6 +944,9 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `Separator` | Separator | `Background` |
+| `DockManager` | DockManager | `Background`; children `<DockPane>`×N + one `<DockContent>` (see "Docking panels") |
+| `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
+| `DockContent` | — (marker) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
 
 Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`, `ToolTip`, `Visibility`, `IsEnabled`, `TabIndex`. `{Binding ...}` and `{Loc Key}` localization work on any string attribute.
 
@@ -1630,6 +1633,84 @@ average color. Works the same headless and in a window.
 > obligation. If you need guaranteed emoji rendering across platforms, bundle a
 > freely-licensed font (e.g. Noto Color Emoji, OFL) into your product and ship
 > its license.
+
+### Docking panels (Toolbox)
+
+`DockManager` + `DockPane` — a Visual Studio-style docking zone: a document
+area in the center (`Center`) and up to four sides (Left/Top/Bottom/Right),
+each able to hold a stack of `DockPane` panels. The manager handles: resizing
+a side by dragging its gutter, stack tabs (2+ panes on the same side),
+auto-hide (collapsing to an edge label), and drag&dock (drag a pane by its
+title bar — docking guides appear; drop on an arrow to dock, drop elsewhere
+to float).
+
+```go
+mgr := widget.NewDockManager()
+mgr.SetBounds(image.Rect(0, 0, 1000, 600))
+
+tools := widget.NewDockPane("tools", "Explorer", widget.NewListView("File.txt"))
+mgr.AddPane(tools, widget.DockLeft)
+mgr.SetSideSize(widget.DockLeft, 220)
+
+props := widget.NewDockPane("props", "Properties", widget.NewWin10Label("—"))
+mgr.AddPane(props, widget.DockRight)
+
+mgr.SetCenter(editor) // document area
+
+// Pane state transitions delegate to the manager when the pane belongs to one.
+tools.Unpin()  // Docked → AutoHidden (edge label)
+tools.Pin()    // back
+props.Float()  // Docked/AutoHidden → Floating (floats above the center)
+props.Dock(widget.DockRight) // back into the stack
+
+tools.OnStateChanged = func(p *widget.DockPane) {
+    log.Println(p.Title, "→", p.State()) // docked/autohidden/floating/closed
+}
+```
+
+Layout can be saved and restored (JSON, panes matched by `ID`):
+
+```go
+data := mgr.SaveLayout()
+// ...
+_ = mgr.RestoreLayout(data)
+```
+
+**Floating panels.** By default `Float()` turns on a widget-drawn floating
+panel right inside the canvas (drag/resize with the mouse, headless-testable).
+The hook `DockPane.OnFloatNative func(p *DockPane)`, if set, hands the detach
+off to a native OS window (`window/**`) instead of the widget floating — as
+of this writing no platform backend assigns it (work in progress); with the
+hook unset, the in-canvas fallback is what runs.
+
+XAML:
+
+```xml
+<DockManager Background="#232338">
+  <DockPane Id="tools" Title="Tools" Side="Left" Size="220" State="Docked">
+    <ListView><ListViewItem Content="item 1"/></ListView>
+  </DockPane>
+  <DockPane Id="props" Title="Properties" Side="Right" Size="200"/>
+  <DockPane Title="Output" Side="Bottom" Size="120" State="AutoHidden">
+    <TextBlock Text="log..."/>
+  </DockPane>
+  <DockContent>
+    <TextBox Text="document area"/>
+  </DockContent>
+</DockManager>
+```
+
+`<DockPane>`: `Id` (if omitted, a slug of `Title` is generated), `Title`,
+`Side` (Left/Top/Bottom/Right, default Left), `Size` in px (→ `SetSideSize`
+for its side — several panes on the same side just share one region, the
+last `Size` wins), `State` (Docked by default; AutoHidden calls `Unpin()`
+right after adding; Floating/Closed as desired). Content is the pane's first
+child widget. `<DockContent>` is not a widget — a marker whose single child
+becomes the center (`SetCenter`). Both tags are ignored outside
+`<DockManager>`.
+
+See the "Docking" tab in `cmd/showcase` for a working example with three
+panes and save/restore-layout buttons.
 
 ---
 

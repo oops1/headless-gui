@@ -189,6 +189,8 @@ NewDockPanel() *DockPanel
 NewScrollView() *ScrollView
 NewGrid() *Grid
 NewCanvas() *Canvas
+NewDockManager() *DockManager           // VS-style toolbox docking zone (see "Docking" section)
+NewDockPane(id, title string, content Widget) *DockPane
 ```
 
 ### Window/Dialog Widgets
@@ -552,6 +554,9 @@ Mapping of XAML tags to Go types with key attributes.
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
 | `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
+| `<DockManager>` | `DockManager` | `Background` + children `<DockPane>`×N, one `<DockContent>` (see "Docking" section) |
+| `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
+| `<DockContent>` | (marker, not a widget) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
 
 ### XAML Color Values
 
@@ -963,12 +968,15 @@ const (
 ### Dock Positions
 
 ```go
+// DockSide — used by both DockPanel's attached Dock property (Left/Top/
+// Bottom/Right/Fill) and DockManager/DockPane (Left/Top/Bottom/Right only —
+// DockFill is not a valid DockManager side). See "Docking" section below.
 const (
-    DockLeft   DockPosition = iota
+    DockLeft   DockSide = iota // 0 — WPF DockPanel.Dock default
     DockTop
-    DockRight
     DockBottom
-    DockFill
+    DockRight
+    DockFill // DockPanel only — last child fills remaining space
 )
 ```
 
@@ -1014,6 +1022,8 @@ type Base struct {
 - `TabControl` — tabbed container
 - `Window` — OS-level window container
 - `Dialog` — modal window container
+- `DockManager` — VS-style docking zone (center + 4 dockable sides)
+- `DockPane` — a single docking panel hosted by `DockManager`
 
 ### Control Widgets (embed Base)
 
@@ -2782,6 +2792,173 @@ API нет — работает само в общем текстовом пут
 > selection/hover перерисовывают только затронутые строки; и исправлен бандинг
 > градиента на дробных HiDPI-масштабах (ramp 1×h / w×1 + `DrawImageScaled`;
 > при scale==1 байт-в-байт идентично).
+
+---
+
+## v3.12 additions (docking panels)
+
+### Docking (DockManager/DockPane)
+
+`widget/dockmanager.go` + `widget/dockpane.go`. A Visual Studio Toolbox-style
+docking zone: a central document area (`Center`) surrounded by up to 4
+dockable sides (Left/Top/Bottom/Right), each holding a stack of `DockPane`
+panels. `DockManager` owns layout, resize-by-dragging-the-gutter, tabbed
+stacks (2+ panes on the same side), auto-hide flyouts, and drag&dock (drag a
+pane's title bar → docking guides appear via `DockManager`'s `OverlayDrawer`;
+drop on a guide docks it, drop elsewhere floats it).
+
+```go
+func NewDockManager() *DockManager
+
+type DockManager struct {
+    Base
+    SplitterSize   int // gutter thickness, px (0 → default 6)
+    MinSideSize    int // min side size, px (0 → default 60)
+    StripThickness int // auto-hide strip thickness, px (0 → default 22)
+    TabStripHeight int // stack tab-strip height, px (0 → default 22)
+    Background, GutterColor, GutterHoverBG, StripBG,
+    TabBG, TabActiveBG, TabText, AccentColor, BorderColor, GuideFace color.RGBA
+}
+
+// Center / panes
+func (m *DockManager) SetCenter(w Widget)
+func (m *DockManager) Center() Widget
+func (m *DockManager) Panes() []*DockPane           // all panes, incl. floating/closed
+func (m *DockManager) FindPane(id string) *DockPane // nil if not found
+func (m *DockManager) AddPane(p *DockPane, side DockSide) // registers + docks p to side
+
+// Side sizing
+func (m *DockManager) SideSize(side DockSide) int
+func (m *DockManager) SetSideSize(side DockSide, px int) // clamped by layout
+
+// Layout persistence
+func (m *DockManager) SaveLayout() []byte
+func (m *DockManager) RestoreLayout(data []byte) error
+```
+
+`DockSide` is the same type used by `DockPanel.Dock` (see "Dock Positions"
+above), but only `DockLeft`/`DockTop`/`DockBottom`/`DockRight` are valid for
+`DockManager` — `DockFill` is DockPanel-only and gets coerced to `DockLeft`.
+
+```go
+func NewDockPane(id, title string, content Widget) *DockPane // state starts PaneDocked
+
+type DockPane struct {
+    Base
+    ID    string // stable id for SaveLayout/FindPane
+    Title string // title-bar text
+    TitleBarHeight int // 0 → default 24
+    TitleBG, TitleActiveBG, TitleText, Background, BorderColor color.RGBA
+
+    OnStateChanged func(p *DockPane)   // fires on any Dock/Float/Pin/Unpin/Close/Show
+    OnFloatNative  func(p *DockPane)   // native-detach hook, see below
+}
+
+func (p *DockPane) Content() Widget
+func (p *DockPane) SetContent(w Widget)
+func (p *DockPane) State() DockPaneState
+func (p *DockPane) Side() DockSide   // current/last dock side (meaningful even when AutoHidden/Floating)
+func (p *DockPane) IsPinned() bool   // false only when AutoHidden
+
+// State transitions — delegate to the owning DockManager if the pane was
+// added via AddPane; otherwise just set local state (no manager to lay out).
+func (p *DockPane) Dock(side DockSide)
+func (p *DockPane) Float()
+func (p *DockPane) Pin()   // AutoHidden → Docked
+func (p *DockPane) Unpin() // Docked → AutoHidden (strip label at the edge)
+func (p *DockPane) Close() // → Closed (hidden; Show() restores to last side)
+func (p *DockPane) Show()
+```
+
+`DockPaneState` (`p.State()`, has a `.String()` for logging/debugging):
+
+```go
+const (
+    PaneDocked     DockPaneState = iota // pinned to a side, in the stack
+    PaneAutoHidden                      // collapsed to an edge label (pin off)
+    PaneFloating                        // floats above the dock zone (drag/resize with mouse)
+    PaneClosed                          // hidden; Show() brings it back
+)
+```
+
+The title bar ships 3 buttons with release-semantics (same press-arms /
+release-fires model as `Window.OnClose`): pin (Docked↔AutoHidden),
+float/dock (Floating↔Docked), close.
+
+**Native pane detach — `window.Window.EnableDockFloating(dm)`.** Call it
+before `Run()`: on backends with owned windows + UI-thread marshaling
+(Win32, X11) the float title-bar button pops the pane out into a real
+non-modal OS window (own engine + surface, title drag moves the OS window,
+dropdowns get their own popup host); the dock button/✕ returns/closes it,
+and all detached windows tear down when the main window exits. Internally
+this assigns the widget-layer hook `DockPane.OnFloatNative`. Where the
+backend lacks support (Wayland/macOS) — and always in headless — the hook
+stays unset and **floating is a widget-drawn overlay inside the canvas**: a
+draggable/resizable rectangle on top of the center, fully headless-testable
+via `SendMouseMove`/`SendMouseButton` (no OS window needed). Limitations:
+drag-return onto the guides is not implemented yet (return via the dock
+button), and the detached OS window is not resizable in this phase.
+
+XAML (see also the "Docking" tab in `cmd/showcase`):
+
+```xml
+<DockManager Name="dockDemo" Background="#232338">
+  <DockPane Id="tools" Title="Инструменты" Side="Left" Size="220" State="Docked">
+    <ListView><ListViewItem Content="item 1"/></ListView>
+  </DockPane>
+  <DockPane Id="props" Title="Свойства" Side="Right" Size="200"/>
+  <DockPane Title="Вывод" Side="Bottom" Size="120" State="AutoHidden">
+    <TextBlock Text="log..."/>
+  </DockPane>
+  <DockContent>
+    <TextBox Text="document area"/>
+  </DockContent>
+</DockManager>
+```
+
+- `<DockManager>`: `Background` + common bounds/props (`Name`, `Grid.Row/Column`,
+  `Margin`, …) via `applyCommonProps`. Children: any number of `<DockPane>`
+  plus at most one `<DockContent>`.
+- `<DockPane>`: `Id` (if omitted, generated by slugifying `Title`; if `Title`
+  is also empty, an auto id like `pane1`); `Title` (defaults to the resolved
+  `Id`); `Side` = `Left`/`Top`/`Bottom`/`Right` (case-insensitive, default
+  `Left`); `Size` in px → `SetSideSize` for that side (if several panes on
+  the same side set `Size`, the last one wins — harmless, it's one shared
+  region); `State` = `Docked` (default, no-op) / `AutoHidden` (calls `Unpin()`
+  right after adding) / `Floating` (calls `Float()`) / `Closed` (calls
+  `Close()`); content is the pane's **first** child widget. `Name`/`x:Name`
+  registers the pane in the XAML registry under that key instead of `Id`
+  (`reg[name]`, so `FindByName` works); otherwise it's registered under `Id`.
+  A `<DockPane>` outside `<DockManager>` is ignored (parses to nothing).
+- `<DockContent>`: not a widget — a marker whose **single** child becomes the
+  center via `SetCenter`. Ignored outside `<DockManager>`.
+
+Layout persistence — `SaveLayout()`/`RestoreLayout()` round-trip through JSON:
+
+```json
+{
+  "sizes": [left, top, bottom, right],
+  "panes": [
+    {"id": "tools", "state": 0, "side": 0, "active": true, "float": [x0, y0, x1, y1]}
+  ]
+}
+```
+
+`state`: 0=Docked 1=AutoHidden 2=Floating 3=Closed. `side`: 0=Left 1=Top
+2=Bottom 3=Right. Panes are matched by `id`; ids missing from the manager are
+ignored, and panes the manager has that are missing from the JSON keep their
+current state untouched. `float` is the saved floating-window rect (only
+meaningful when `state==2`).
+
+- **Headless:** fully — layout, resize-by-gutter, stack tabs, auto-hide
+  flyouts, drag&dock, and floating (widget-drawn) all drive through
+  `SendMouseMove`/`SendMouseButton`/`SendKeyEvent`; no OS window required
+  (see `tests/dock_test.go`).
+- **Integration:** `DockManager` is registered in `HasOwnLayout` (it lays out
+  its own children in `SetBounds`), so nesting it in `Canvas`/`Grid` doesn't
+  double-shift its content. `DockPane` itself does not need a `HasOwnLayout`
+  entry — it only ever lives inside a `DockManager`, which sets its bounds
+  directly.
 
 ---
 

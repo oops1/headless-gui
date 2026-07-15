@@ -208,6 +208,18 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	case "dockpanel":
 		return buildXAMLDockPanel(el, reg, parentOff, baseDir)
 
+	// ── DockManager — зона докинга (инструментальные панели VS-стиля) ──────
+	case "dockmanager":
+		return buildXAMLDockManager(el, reg, parentOff, baseDir)
+
+	// ── DockPane вне DockManager — игнорируем (валиден только как child) ───
+	case "dockpane":
+		return nil, nil
+
+	// ── DockContent вне DockManager — маркер, не виджет ─────────────────────
+	case "dockcontent":
+		return nil, nil
+
 	// ── GridSplitter — перетаскиваемый разделитель ячеек Grid ───────────────
 	case "gridsplitter":
 		s := NewGridSplitter()
