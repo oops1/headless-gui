@@ -31,6 +31,7 @@ func (tv *TreeView) OnMouseButton(x, y int, button, pressed int) bool {
 				tv.thumbDragging = true
 				tv.thumbDragStartY = y
 				tv.thumbDragStartS = tv.scrollY
+				tv.markRectDirty(tv.scrollbarRect()) // ползунок подсвечивается
 			} else {
 				// Клик по треку — page up/down
 				if y < tr.Min.Y {
@@ -39,12 +40,14 @@ func (tv *TreeView) OnMouseButton(x, y int, button, pressed int) bool {
 					tv.scrollY += b.Dy()
 				}
 				tv.clampScroll()
+				tv.markFullDirty() // прыжок скролла — весь вьюпорт
 			}
 			return true
 		}
 
 		if !isPressed && tv.thumbDragging {
 			tv.thumbDragging = false
+			tv.markRectDirty(tv.scrollbarRect()) // ползунок гаснет
 			return true
 		}
 	}
@@ -72,11 +75,13 @@ func (tv *TreeView) OnMouseButton(x, y int, button, pressed int) bool {
 	if x >= arrowX && x < arrowX+arrowZone && item.HasChildren() {
 		tv.ToggleExpand(item)
 		tv.dirty = true
+		tv.markFullDirty() // набор видимых строк изменился
 		return true
 	}
 
 	// ── Выбор узла ──────────────────────────────────────────────────────
 	old := tv.selectedItem
+	oldIdx := tv.indexOfItem(old, flat)
 	tv.selectedItem = item
 	if old != nil {
 		old.IsSelected = false
@@ -84,6 +89,9 @@ func (tv *TreeView) OnMouseButton(x, y int, button, pressed int) bool {
 	item.IsSelected = true
 
 	if old != item {
+		// Подсветка выделения меняется только на прежней и новой строках.
+		tv.markRowDirty(oldIdx)
+		tv.markRowDirty(idx)
 		tv.fireSelectedItemChanged(old, item)
 	}
 
@@ -92,6 +100,7 @@ func (tv *TreeView) OnMouseButton(x, y int, button, pressed int) bool {
 	if tv.lastClickIdx == idx && now-tv.lastClickTime < 400 {
 		if item.HasChildren() {
 			tv.ToggleExpand(item)
+			tv.markFullDirty() // набор видимых строк изменился
 		}
 		if tv.OnItemInvoked != nil {
 			tv.OnItemInvoked(ItemInvokedEvent{Item: item})
@@ -112,6 +121,7 @@ func (tv *TreeView) OnMouseMove(x, y int) {
 
 	// Перетаскивание ползунка скроллбара
 	if tv.thumbDragging {
+		old := tv.scrollY
 		sr := tv.scrollbarRect()
 		trackH := sr.Dy()
 		tr := tv.thumbRect()
@@ -123,8 +133,25 @@ func (tv *TreeView) OnMouseMove(x, y int) {
 			tv.scrollY = tv.thumbDragStartS + dy*maxS/(trackH-thumbH)
 			tv.clampScroll()
 		}
+		if tv.scrollY != old {
+			tv.markFullDirty()
+		}
 		return
 	}
+
+	// Точечная инвалидация: подсветка hover меняется на прежней и новой строках,
+	// подсветка ползунка — в области скроллбара. Диффим в конце (defer).
+	oldHover := tv.hoverIdx
+	oldThumb := tv.thumbHovered
+	defer func() {
+		if tv.hoverIdx != oldHover {
+			tv.markRowDirty(oldHover)
+			tv.markRowDirty(tv.hoverIdx)
+		}
+		if tv.thumbHovered != oldThumb {
+			tv.markRectDirty(tv.scrollbarRect())
+		}
+	}()
 
 	if !pt.In(b) {
 		tv.hoverIdx = -1
@@ -189,6 +216,22 @@ func (tv *TreeView) OnKeyEvent(keyCode int, r rune, pressed bool, shift, ctrl bo
 	if tv.selectedItem != nil {
 		curIdx = tv.indexOfItem(tv.selectedItem, flat)
 	}
+
+	// Снимок для точечной инвалидации: набор видимых строк, скролл и выделение.
+	oldLen := len(flat)
+	oldScroll := tv.scrollY
+	oldSel := tv.selectedItem
+	oldSelIdx := curIdx
+	defer func() {
+		newFlat := tv.visibleNodes()
+		if len(newFlat) != oldLen || tv.scrollY != oldScroll {
+			// Разворот/сворачивание узла или прокрутка сдвигает контент.
+			tv.markFullDirty()
+		} else if tv.selectedItem != oldSel {
+			tv.markRowDirty(oldSelIdx)
+			tv.markRowDirty(tv.indexOfItem(tv.selectedItem, newFlat))
+		}
+	}()
 
 	switch keyCode {
 	case keyDown:

@@ -222,6 +222,12 @@ type Window struct {
 	onTrayClick       func(button widget.MouseButton, doubleClick bool)
 	onBalloonClick    func()
 	trayDispatcherSet bool
+
+	// onFilesDropped — колбэк приложения для Drag&Drop файлов из ОС
+	// (см. SetOnFilesDropped). Координаты в колбэке — ЛОГИЧЕСКИЕ пиксели.
+	// nil = приложение не подписано; проброс в движок (widget.FileDropTarget)
+	// работает независимо от этого колбэка.
+	onFilesDropped func(paths []string, x, y int)
 }
 
 // New создаёт окно для заданного движка с указанным заголовком.
@@ -344,6 +350,10 @@ func (win *Window) Run() error {
 
 	// Общий проброс ввода (мышь/клавиатура) — surface.
 	win.setupInput()
+
+	// Drag&Drop файлов из ОС (WM_DROPFILES / XDND / wl_data_device), если
+	// бэкенд это умеет. Только для главного окна (не попапы/диалоги).
+	win.setupFilesDrop()
 
 	// Перерисовка по WM_PAINT/Expose из кэша последнего кадра.
 	win.setupExposeRedraw()
@@ -558,6 +568,24 @@ func (s *surface) setupInput() {
 		s.eng.SendMouseButton(x, y, btn, pressed)
 	})
 
+	// ── Precise wheel (пиксельная дельта колеса/тачпада) ─────────────────────
+	// Опционально: бэкенды с высокоточным колесом (Win32 WM_MOUSEWHEEL,
+	// Wayland wl_pointer.axis) вызывают этот колбэк вместо тиковых кнопок 3/4.
+	// Бэкенды без поддержки (X11) продолжают слать тики через SetOnMouseButton.
+	if pw, ok := s.native.(interface {
+		SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64))
+	}); ok {
+		pw.SetOnMouseWheelPixels(func(x, y int, dx, dy float64) {
+			s.lastMX = x
+			s.lastMY = y
+			if we, ok := s.eng.(interface {
+				SendMouseWheelPixels(x, y int, dx, dy float64)
+			}); ok {
+				we.SendMouseWheelPixels(x, y, dx, dy)
+			}
+		})
+	}
+
 	// ── Key down ─────────────────────────────────────────────────────────────
 	s.native.SetOnKeyDown(func(vk int) {
 		// Обновляем модификаторы
@@ -613,6 +641,53 @@ func (s *surface) setupInput() {
 				Mod:     s.currentMod(),
 				Pressed: true,
 			})
+		}
+	})
+}
+
+// SetOnFilesDropped регистрирует колбэк приёма файлов, перетащенных из ОС
+// (проводник / файловый менеджер) в окно приложения. paths — абсолютные пути
+// к файлам; x, y — ЛОГИЧЕСКИЕ координаты точки сброса в клиентской области.
+//
+// Поддерживается на Windows (WM_DROPFILES), Linux/X11 (XDND) и Linux/Wayland
+// (wl_data_device); на прочих платформах — no-op. Вызывать до Run().
+//
+// Независимо от этого колбэка событие пробрасывается в движок
+// (engine.SendFilesDropped) и доставляется виджету под точкой сброса,
+// реализующему widget.FileDropTarget.
+func (win *Window) SetOnFilesDropped(fn func(paths []string, x, y int)) {
+	win.onFilesDropped = fn
+}
+
+// setupFilesDrop подключает Drag&Drop файлов из ОС, если нативный бэкенд
+// реализует filesDropTarget. Координаты от бэкенда — ФИЗИЧЕСКИЕ пиксели
+// клиентской области; наружу они уходят двумя путями:
+//   - engine.SendFilesDropped (физические, движок сам переведёт в логические)
+//     — маршрутизация виджету под точкой (widget.FileDropTarget), headless-симметрия;
+//   - win.onFilesDropped (логические) — колбэк приложения, если задан.
+func (win *Window) setupFilesDrop() {
+	fd, ok := win.native.(filesDropTarget)
+	if !ok {
+		return
+	}
+	fd.SetOnFilesDropped(func(paths []string, x, y int) {
+		if len(paths) == 0 {
+			return
+		}
+		// Проброс в движок: принимает физические пиксели.
+		if s, ok := win.eng.(interface {
+			SendFilesDropped(x, y int, paths []string)
+		}); ok {
+			s.SendFilesDropped(x, y, paths)
+		}
+		// Колбэк приложения: логические координаты (делим на HiDPI-масштаб).
+		if win.onFilesDropped != nil {
+			lx, ly := x, y
+			if win.scale != 1 && win.scale > 0 {
+				lx = int(float64(x) / win.scale)
+				ly = int(float64(y) / win.scale)
+			}
+			win.onFilesDropped(paths, lx, ly)
 		}
 	})
 }

@@ -27,6 +27,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"image"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -76,6 +77,10 @@ const (
 	wlPointerEvButton = 3
 	wlPointerEvAxis   = 4
 
+	// wlAxisPixelScale — множитель перевода wl_pointer.axis (уже в пикселях
+	// после ÷256) к шагу движка (~40 px/notch; дискретное колесо даёт ~10/notch).
+	wlAxisPixelScale = 4.0
+
 	// wl_keyboard events
 	wlKeyboardEvKeymap    = 0
 	wlKeyboardEvKey       = 3
@@ -110,6 +115,32 @@ const (
 	btnLeft   = 0x110
 	btnRight  = 0x111
 	btnMiddle = 0x112
+
+	// wl_data_device_manager
+	wlDataDevMgrGetDataDevice = 1
+
+	// wl_data_device requests / events
+	wlDataDeviceRelease   = 2
+	wlDataDeviceEvDataOffer = 0
+	wlDataDeviceEvEnter     = 1
+	wlDataDeviceEvLeave     = 2
+	wlDataDeviceEvMotion    = 3
+	wlDataDeviceEvDrop      = 4
+	wlDataDeviceEvSelection = 5
+
+	// wl_data_offer requests / events
+	wlDataOfferAccept     = 0
+	wlDataOfferReceive    = 1
+	wlDataOfferDestroy    = 2
+	wlDataOfferFinish     = 3
+	wlDataOfferSetActions = 4
+	wlDataOfferEvOffer    = 0
+
+	// wl_data_device_manager.dnd_action
+	wlDndActionCopy = 1
+
+	// MIME-тип списка файлов при перетаскивании из файлового менеджера.
+	mimeTextUriList = "text/uri-list"
 )
 
 // ─── WaylandWindow ───────────────────────────────────────────────────────────
@@ -129,6 +160,13 @@ type WaylandWindow struct {
 	wmBaseID     uint32
 	// имена глобалов registry (для bind)
 	gCompositor, gShm, gSeat, gWmBase uint32
+
+	// wl_data_device_manager (Drag&Drop файлов из ОС).
+	gDataDevMgr    uint32 // имя глобала registry
+	gDataDevMgrVer uint32 // версия глобала (для finish/set_actions нужна v≥3)
+	dataDevMgrID   uint32 // объект после bind
+	dataDeviceID   uint32 // объект wl_data_device для seat
+	dataDevVersion uint32 // фактическая версия bind (min(advertised,3))
 
 	surfaceID    uint32
 	xdgSurfaceID uint32
@@ -171,10 +209,20 @@ type WaylandWindow struct {
 	onClose       func() bool
 	onMouseMove   func(x, y int)
 	onMouseButton func(x, y, button int, pressed bool)
+	onMouseWheelPixels func(x, y int, dx, dy float64)
 	onKeyDown     func(vk int)
 	onKeyUp       func(vk int)
 	onChar        func(r rune)
 	onActivate    func(active bool)
+	onFilesDropped func(paths []string, x, y int)
+
+	// ── Состояние Drag&Drop (wl_data_device) ────────────────────────────────
+	// offers — известные data_offer'ы и предложен ли в них text/uri-list.
+	offers map[uint32]bool
+	// dndOffer — активный offer текущего перетаскивания (между enter и drop).
+	dndOffer   uint32
+	dndSerial  uint32 // serial из enter (для accept)
+	dndX, dndY int    // позиция курсора в поверхностных пикселях
 }
 
 // waylandSocketPath возвращает путь к сокету композитора или "".
@@ -379,6 +427,20 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	if w.gSeat != 0 {
 		w.seatID = w.bind(w.gSeat, "wl_seat", 1)
 	}
+	// wl_data_device_manager: Drag&Drop файлов. Версия ≥3 нужна для
+	// finish/set_actions; берём min(advertised, 3).
+	if w.gDataDevMgr != 0 && w.gSeat != 0 {
+		ver := w.gDataDevMgrVer
+		if ver > 3 {
+			ver = 3
+		}
+		w.dataDevVersion = ver
+		w.dataDevMgrID = w.bind(w.gDataDevMgr, "wl_data_device_manager", ver)
+		// get_data_device(new_id, seat)
+		w.dataDeviceID = w.newID()
+		w.send(newWlMsg(w.dataDevMgrID, wlDataDevMgrGetDataDevice).
+			putUint(w.dataDeviceID).putUint(w.seatID), -1)
+	}
 
 	// surface + xdg_surface + toplevel
 	w.surfaceID = w.newID()
@@ -491,7 +553,8 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 
 	case obj == w.registryID && opcode == wlRegistryEvGlobal:
 		name := binary.LittleEndian.Uint32(b[0:4])
-		iface, _ := wlString(b, 4)
+		iface, off := wlString(b, 4)
+		version := binary.LittleEndian.Uint32(b[off : off+4])
 		switch iface {
 		case "wl_compositor":
 			w.gCompositor = name
@@ -501,6 +564,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			w.gSeat = name
 		case "xdg_wm_base":
 			w.gWmBase = name
+		case "wl_data_device_manager":
+			w.gDataDevMgr = name
+			w.gDataDevMgrVer = version
 		}
 
 	case obj == w.wmBaseID && opcode == xdgWmBaseEvPing:
@@ -559,6 +625,17 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 	case obj == w.keyboardID:
 		w.handleKeyboard(opcode, b)
 
+	case w.dataDeviceID != 0 && obj == w.dataDeviceID:
+		w.handleDataDevice(opcode, b)
+
+	case w.isOfferObject(obj):
+		// wl_data_offer.offer(mime): фиксируем предложение text/uri-list.
+		if opcode == wlDataOfferEvOffer {
+			if mime, _ := wlString(b, 0); mime == mimeTextUriList {
+				w.offerSet(obj, true)
+			}
+		}
+
 	case (obj == w.bufID[0] || obj == w.bufID[1]) && opcode == wlBufferEvRelease:
 		w.mu.Lock()
 		if obj == w.bufID[0] {
@@ -601,10 +678,21 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 			w.onMouseButton(w.ptrX, w.ptrY, id, pressed)
 		}
 	case wlPointerEvAxis:
-		// time, axis, value(fixed): 0 = вертикаль; >0 — вниз
+		// time, axis, value(wl_fixed 24.8): axis 0 = вертикаль, 1 = горизонталь;
+		// value>0 — вниз/вправо. Тачпады высокой точности шлют дробные значения.
 		axis := binary.LittleEndian.Uint32(b[4:8])
 		val := int32(binary.LittleEndian.Uint32(b[8:12]))
-		if axis == 0 && w.onMouseButton != nil {
+		if w.onMouseWheelPixels != nil {
+			// Высокоточный путь: wl_fixed → пиксели (÷256), масштаб до «notch»
+			// в ~40 px под общий шаг движка.
+			amt := float64(val) / 256.0 * wlAxisPixelScale
+			if axis == 0 {
+				w.onMouseWheelPixels(w.ptrX, w.ptrY, 0, amt)
+			} else if axis == 1 {
+				w.onMouseWheelPixels(w.ptrX, w.ptrY, amt, 0)
+			}
+		} else if axis == 0 && w.onMouseButton != nil {
+			// Фолбэк на тики.
 			id := 3 // wheel up
 			if val > 0 {
 				id = 4 // wheel down
@@ -837,12 +925,169 @@ func (w *WaylandWindow) SetOnResize(fn func(w, h int))                          
 func (w *WaylandWindow) SetOnClose(fn func() bool)                               { w.onClose = fn }
 func (w *WaylandWindow) SetOnMouseMove(fn func(x, y int))                        { w.onMouseMove = fn }
 func (w *WaylandWindow) SetOnMouseButton(fn func(x, y, button int, pressed bool)) { w.onMouseButton = fn }
+
+// SetOnMouseWheelPixels регистрирует колбэк точной пиксельной дельты колеса/
+// тачпада (wl_pointer.axis). Без него бэкенд шлёт тики через SetOnMouseButton.
+func (w *WaylandWindow) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) { w.onMouseWheelPixels = fn }
 func (w *WaylandWindow) SetOnKeyDown(fn func(vk int))                            { w.onKeyDown = fn }
 func (w *WaylandWindow) SetOnKeyUp(fn func(vk int))                              { w.onKeyUp = fn }
 func (w *WaylandWindow) SetOnChar(fn func(r rune))                               { w.onChar = fn }
 
 // SetOnActivate — активность окна (state activated в configure).
 func (w *WaylandWindow) SetOnActivate(fn func(active bool)) { w.onActivate = fn }
+
+// SetOnFilesDropped регистрирует колбэк Drag&Drop файлов из ОС
+// (wl_data_device). Координаты — поверхностные (клиентские) пиксели.
+func (w *WaylandWindow) SetOnFilesDropped(fn func(paths []string, x, y int)) { w.onFilesDropped = fn }
+
+// ─── Drag&Drop (wl_data_device) ──────────────────────────────────────────────
+//
+// Каркас приёма файлов из файлового менеджера. Поддерживается text/uri-list в
+// один проход: enter→(accept)→drop→receive(pipe)→parse→finish. Ограничения:
+//   - действие фиксировано copy; альтернативные действия (move/ask) не согласуются;
+//   - offer буфера обмена (selection) уничтожается без обработки;
+//   - finish/set_actions доступны только при версии wl_data_device_manager ≥ 3
+//     (при v<3 — совместимый путь без них);
+//   - позиция сброса берётся из последнего enter/motion (поверхностные пиксели).
+// Компилируемость и корректность на современных композиторах (v3) обеспечены;
+// углублённый torn-drag feedback не реализован.
+
+// isOfferObject сообщает, известен ли объект obj как data_offer.
+func (w *WaylandWindow) isOfferObject(id uint32) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, ok := w.offers[id]
+	return ok
+}
+
+// offerSet фиксирует наличие text/uri-list в offer (или регистрирует новый).
+func (w *WaylandWindow) offerSet(id uint32, hasURIList bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.offers == nil {
+		w.offers = map[uint32]bool{}
+	}
+	if hasURIList || !w.offers[id] {
+		w.offers[id] = hasURIList
+	}
+}
+
+// offerGet возвращает флаг «предложен text/uri-list» для offer.
+func (w *WaylandWindow) offerGet(id uint32) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.offers[id]
+}
+
+// offerDelete удаляет offer из карты.
+func (w *WaylandWindow) offerDelete(id uint32) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.offers, id)
+}
+
+// handleDataDevice обрабатывает события wl_data_device.
+func (w *WaylandWindow) handleDataDevice(opcode uint16, b []byte) {
+	switch opcode {
+	case wlDataDeviceEvDataOffer:
+		// new_id offer — компонент создаёт объект data_offer.
+		id := binary.LittleEndian.Uint32(b[0:4])
+		w.offerSet(id, false)
+
+	case wlDataDeviceEvEnter:
+		// serial, surface, x(fixed), y(fixed), id(offer)
+		w.dndSerial = binary.LittleEndian.Uint32(b[0:4])
+		w.dndX = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
+		w.dndY = int(int32(binary.LittleEndian.Uint32(b[12:16]))) >> 8
+		w.dndOffer = binary.LittleEndian.Uint32(b[16:20])
+		w.dndAcceptOffer()
+
+	case wlDataDeviceEvMotion:
+		// time, x(fixed), y(fixed)
+		w.dndX = int(int32(binary.LittleEndian.Uint32(b[4:8]))) >> 8
+		w.dndY = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
+
+	case wlDataDeviceEvLeave:
+		if w.dndOffer != 0 {
+			w.send(newWlMsg(w.dndOffer, wlDataOfferDestroy), -1)
+			w.offerDelete(w.dndOffer)
+			w.dndOffer = 0
+		}
+
+	case wlDataDeviceEvDrop:
+		w.dndReceive()
+
+	case wlDataDeviceEvSelection:
+		// Буфер обмена (не DnD): уничтожаем offer, чтобы не течь.
+		if len(b) >= 4 {
+			id := binary.LittleEndian.Uint32(b[0:4])
+			if id != 0 {
+				w.send(newWlMsg(id, wlDataOfferDestroy), -1)
+				w.offerDelete(id)
+			}
+		}
+	}
+}
+
+// dndAcceptOffer сообщает компоненту, принимаем ли мы предложение (accept +
+// set_actions при v≥3).
+func (w *WaylandWindow) dndAcceptOffer() {
+	if w.dndOffer == 0 {
+		return
+	}
+	if w.offerGet(w.dndOffer) {
+		w.send(newWlMsg(w.dndOffer, wlDataOfferAccept).
+			putUint(w.dndSerial).putString(mimeTextUriList), -1)
+		if w.dataDevVersion >= 3 {
+			w.send(newWlMsg(w.dndOffer, wlDataOfferSetActions).
+				putUint(wlDndActionCopy).putUint(wlDndActionCopy), -1)
+		}
+		return
+	}
+	// Отклоняем: accept с null-строкой (длина 0).
+	w.send(newWlMsg(w.dndOffer, wlDataOfferAccept).putUint(w.dndSerial).putUint(0), -1)
+}
+
+// dndReceive запрашивает данные (text/uri-list) через pipe и асинхронно их
+// читает, парсит и доставляет колбэку, после чего завершает offer.
+func (w *WaylandWindow) dndReceive() {
+	offer := w.dndOffer
+	w.dndOffer = 0
+	if offer == 0 || !w.offerGet(offer) {
+		w.completeOffer(offer, false)
+		return
+	}
+	r, wr, err := os.Pipe()
+	if err != nil {
+		w.completeOffer(offer, false)
+		return
+	}
+	// receive(mime, fd): компонент пишет данные в write-конец, мы читаем read-конец.
+	w.send(newWlMsg(offer, wlDataOfferReceive).putString(mimeTextUriList), int(wr.Fd()))
+	wr.Close() // наш write-конец не нужен — EOF придёт при закрытии компонентом
+	x, y := w.dndX, w.dndY
+	go func() {
+		defer r.Close()
+		data, _ := io.ReadAll(r)
+		paths := parseURIList(string(data))
+		if len(paths) > 0 && w.onFilesDropped != nil {
+			w.onFilesDropped(paths, x, y)
+		}
+		w.completeOffer(offer, len(paths) > 0)
+	}()
+}
+
+// completeOffer завершает работу с offer: finish (v≥3, при успехе) + destroy.
+func (w *WaylandWindow) completeOffer(offer uint32, accepted bool) {
+	if offer == 0 {
+		return
+	}
+	if accepted && w.dataDevVersion >= 3 {
+		w.send(newWlMsg(offer, wlDataOfferFinish), -1)
+	}
+	w.send(newWlMsg(offer, wlDataOfferDestroy), -1)
+	w.offerDelete(offer)
+}
 
 // SetResizable — no-op: resize у Wayland-окна управляется композитором
 // (xdg-toplevel); ручные зоны краёв пока не реализованы.

@@ -169,6 +169,61 @@ type DataGrid struct {
 	// освобождения мьютекса (см. firePending) — обработчик может безопасно
 	// дёргать методы DataGrid, не рискуя дедлоком.
 	pending []func()
+
+	// ── Точечная инвалидация (damage) ────────────────────────────────────
+	// Интерактивные обработчики (выбор строки, hover, скролл, сортировка)
+	// накапливают сюда изменившиеся АБСОЛЮТНЫЕ прямоугольники. Обёртка
+	// (widget.DataGridWidget) забирает их через TakeDirty и транслирует в
+	// точечный InvalidateRect вместо инвалидации всего виджета. dirtyFull —
+	// когда сдвигается весь контент (скролл/сортировка/resize колонок).
+	dirtyRects []image.Rectangle
+	dirtyFull  bool
+}
+
+// ─── Damage tracking (точечная инвалидация) ────────────────────────────────
+
+// markFullDirty помечает, что нужна полная перерисовка виджета.
+func (dg *DataGrid) markFullDirty() { dg.dirtyFull = true }
+
+// markRectDirty добавляет абсолютный прямоугольник в накопитель damage
+// (пересекается с bounds, дубликаты отбрасываются). Вызывать под dg.mu.
+func (dg *DataGrid) markRectDirty(r image.Rectangle) {
+	r = r.Intersect(dg.bounds)
+	if r.Empty() {
+		return
+	}
+	for _, e := range dg.dirtyRects {
+		if e == r {
+			return
+		}
+	}
+	dg.dirtyRects = append(dg.dirtyRects, r)
+}
+
+// rowRectAbs возвращает абсолютный прямоугольник видимой части строки row
+// (пустой, если строка вне области данных / прокручена за пределы).
+func (dg *DataGrid) rowRectAbs(row int) image.Rectangle {
+	if row < 0 || row >= dg.rowCount() {
+		return image.Rectangle{}
+	}
+	dr := dg.dataRect()
+	rowY := dr.Min.Y + row*dg.RowHeight - dg.scrollY
+	return image.Rect(dr.Min.X, rowY, dr.Max.X, rowY+dg.RowHeight).Intersect(dr)
+}
+
+// markRowDirty помечает область строки row как изменившуюся. Вызывать под dg.mu.
+func (dg *DataGrid) markRowDirty(row int) { dg.markRectDirty(dg.rowRectAbs(row)) }
+
+// TakeDirty возвращает накопленные области изменения (абсолютные координаты) и
+// сбрасывает накопитель. full=true — требуется полная перерисовка виджета.
+// Потокобезопасно. Обёртка вызывает его после каждого обработчика ввода.
+func (dg *DataGrid) TakeDirty() (rects []image.Rectangle, full bool) {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	rects, full = dg.dirtyRects, dg.dirtyFull
+	dg.dirtyRects = nil
+	dg.dirtyFull = false
+	return
 }
 
 // IsEditing сообщает, идёт ли сейчас редактирование ячейки (мигает каретка).
@@ -566,6 +621,9 @@ func (dg *DataGrid) sortByColumn(colIdx int) {
 	}
 	col := dg.columns[colIdx]
 
+	// Сортировка меняет порядок строк и индикатор в заголовке — полная перерисовка.
+	dg.markFullDirty()
+
 	// Переключаем направление
 	dir := col.GetSortDirection()
 	switch dir {
@@ -952,6 +1010,7 @@ func (dg *DataGrid) OnMouseButton(x, y int, button int, pressed bool) bool {
 		// Отпускание: завершаем drag операции
 		if dg.thumbDragging {
 			dg.thumbDragging = false
+			dg.markRectDirty(dg.scrollbarRect()) // ползунок гаснет
 			return true
 		}
 		if dg.resizingCol >= 0 {
@@ -971,6 +1030,7 @@ func (dg *DataGrid) OnMouseButton(x, y int, button int, pressed bool) bool {
 			dg.thumbDragging = true
 			dg.thumbDragStartY = y
 			dg.thumbDragStartS = dg.scrollY
+			dg.markRectDirty(dg.scrollbarRect()) // ползунок подсвечивается
 			return true
 		}
 		sr := dg.scrollbarRect()
@@ -978,6 +1038,7 @@ func (dg *DataGrid) OnMouseButton(x, y int, button int, pressed bool) bool {
 			ratio := float64(y-sr.Min.Y) / float64(sr.Dy())
 			dg.scrollY = int(ratio * float64(dg.contentHeight()))
 			dg.clampScrollY()
+			dg.markFullDirty() // прыжок скролла — весь вьюпорт
 			return true
 		}
 	}
@@ -1064,6 +1125,7 @@ func (dg *DataGrid) OnMouseMove(x, y int) {
 
 	// Drag скроллбара
 	if dg.thumbDragging {
+		old := dg.scrollY
 		sr := dg.scrollbarRect()
 		tr := dg.thumbRect()
 		trackUsable := sr.Dy() - tr.Dy()
@@ -1072,6 +1134,9 @@ func (dg *DataGrid) OnMouseMove(x, y int) {
 			scrollDelta := int(float64(dy) / float64(trackUsable) * float64(dg.maxScrollY()))
 			dg.scrollY = dg.thumbDragStartS + scrollDelta
 			dg.clampScrollY()
+		}
+		if dg.scrollY != old {
+			dg.markFullDirty()
 		}
 		return
 	}
@@ -1084,8 +1149,12 @@ func (dg *DataGrid) OnMouseMove(x, y int) {
 			newW = minColumnWidth
 		}
 		dg.columns[dg.resizingCol].SetActualWidth(newW)
+		dg.markFullDirty() // ширина колонки сдвигает весь контент
 		return
 	}
+
+	oldHover := dg.hoverRow
+	oldThumb := dg.thumbHovered
 
 	// Hover строки
 	dg.hoverRow = dg.rowIndexAtY(y)
@@ -1101,6 +1170,16 @@ func (dg *DataGrid) OnMouseMove(x, y int) {
 	if dg.needsScrollbar() {
 		tr := dg.thumbRect()
 		dg.thumbHovered = image.Pt(x, y).In(tr)
+	}
+
+	// Точечная инвалидация: подсветка hover меняется только на прежней и новой
+	// строках; подсветка ползунка — в области скроллбара.
+	if dg.hoverRow != oldHover {
+		dg.markRowDirty(oldHover)
+		dg.markRowDirty(dg.hoverRow)
+	}
+	if dg.thumbHovered != oldThumb {
+		dg.markRectDirty(dg.scrollbarRect())
 	}
 }
 
@@ -1158,6 +1237,13 @@ func (dg *DataGrid) WheelScroll(up bool) bool {
 // ─── Selection helpers ─────────────────────────────────────────────────────
 
 func (dg *DataGrid) selectRow(row int, shift, ctrl bool) {
+	// Снимок прежнего выделения и скролла для точечной инвалидации.
+	oldRows := make([]int, 0, len(dg.selectedRows))
+	for r := range dg.selectedRows {
+		oldRows = append(oldRows, r)
+	}
+	oldScroll := dg.scrollY
+
 	if dg.SelectionMode == SelectionSingle || (!shift && !ctrl) {
 		// Простой клик — одна строка
 		dg.selectedRows = map[int]bool{row: true}
@@ -1183,6 +1269,19 @@ func (dg *DataGrid) selectRow(row int, shift, ctrl bool) {
 
 	dg.focusRow = row
 	dg.ensureVisible(row)
+
+	// Точечная инвалидация: скролл не сдвинулся → перерисовываем только прежде
+	// и ныне выделенные строки; ensureVisible прокрутил → весь вьюпорт.
+	if dg.scrollY != oldScroll {
+		dg.markFullDirty()
+	} else {
+		for _, r := range oldRows {
+			dg.markRowDirty(r)
+		}
+		for r := range dg.selectedRows {
+			dg.markRowDirty(r)
+		}
+	}
 
 	// Callback — откладываем до выхода из-под dg.mu (см. firePending).
 	if dg.OnSelectionChanged != nil {
@@ -1233,6 +1332,7 @@ func (dg *DataGrid) beginEdit(row, col int) {
 	dg.editCursorPos = len([]rune(dg.editingValue))
 	dg.focusRow = row
 	dg.focusCol = col
+	dg.markRowDirty(row) // строка перешла в режим редактирования
 }
 
 func (dg *DataGrid) commitEdit() {
@@ -1261,6 +1361,7 @@ func (dg *DataGrid) commitEdit() {
 
 	// Записываем значение в модель
 	col.SetCellValue(item, dg.editingValue)
+	dg.markRowDirty(dg.editingRow) // ячейка вышла из режима редактирования
 
 	// Уведомляем о завершении редактирования строки — после выхода из-под dg.mu.
 	if dg.OnRowEditEnding != nil {
@@ -1275,6 +1376,7 @@ func (dg *DataGrid) commitEdit() {
 }
 
 func (dg *DataGrid) cancelEdit() {
+	dg.markRowDirty(dg.editingRow) // ячейка выходит из режима редактирования
 	dg.isEditing = false
 	dg.editingRow = -1
 	dg.editingCol = -1
@@ -1400,12 +1502,16 @@ func (dg *DataGrid) OnKeyEvent(code int, char rune, pressed bool, shift, ctrl bo
 			for i := 0; i < rc; i++ {
 				dg.selectedRows[i] = true
 			}
+			dg.markFullDirty() // выделены все строки
 		}
 	}
 }
 
 // handleEditKey обрабатывает ввод в режиме редактирования.
 func (dg *DataGrid) handleEditKey(code int, char rune, ctrl bool) {
+	// Любое изменение внутри редактируемой ячейки перерисовывает её строку.
+	// (commit/cancel уже пометили строку и обнулили editingRow — тогда no-op.)
+	defer func() { dg.markRowDirty(dg.editingRow) }()
 	switch code {
 	case 13: // Enter — commit
 		dg.commitEdit()

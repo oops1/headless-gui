@@ -382,6 +382,13 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	// Проверяем, хочет ли кто-то из предков захватить мышь (drag handle)
 	if pressed && btn == widget.MouseLeft {
 		if capturer := findCapturer(dispatchRoot, x, y, ev); capturer != nil {
+			// Гарантируем захватчику CaptureManager: injectCaptureManager при
+			// SetRoot не достаёт до виджетов, скрытых из Children() (например,
+			// содержимое неактивной вкладки TabControl) — без менеджера виджет
+			// не смог бы отпустить захват, и весь ввод залипал бы на нём.
+			if ca, ok := capturer.(widget.CaptureAware); ok {
+				ca.SetCaptureManager(e)
+			}
 			e.SetCapture(capturer)
 
 			// Устанавливаем фокус на захватчик (TextInput и т.д.)
@@ -462,6 +469,125 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 				if pressed && btn == widget.MouseLeft {
 					e.pressConsumer = path[i]
 				}
+				return
+			}
+		}
+	}
+}
+
+// wheelPixelHandler — опциональный интерфейс виджета, принимающего точные
+// пиксельные дельты колеса/тачпада (плавный скролл). dy>0 — вниз. Возвращает
+// true, если дельта поглощена. Виджеты без него используют тиковый путь.
+type wheelPixelHandler interface {
+	OnMouseWheelPixels(x, y int, dx, dy float64) bool
+}
+
+// wheelTickPixels — сколько пикселей точной дельты приходится на один «тик»
+// колеса в фолбэке (соответствует шагу тикового колеса в виджетах).
+const wheelTickPixels = 40.0
+
+// SendMouseWheelPixels доставляет точную пиксельную дельту прокрутки в точке
+// (xPhys, yPhys — физические пиксели окна/кадра). dy>0 — вниз, dx>0 — вправо.
+// Событие всплывает от самого глубокого виджета под курсором к корню; первый
+// виджет, реализующий wheelPixelHandler и поглотивший дельту, останавливает
+// всплытие.
+//
+// Фолбэк: если точную дельту никто не принял (виджет знает лишь тиковое
+// колесо), синтезируем эквивалентные тики через SendMouseButton — старый
+// тиковый путь остаётся рабочим (headless-контракт).
+func (e *Engine) SendMouseWheelPixels(xPhys, yPhys int, dx, dy float64) {
+	x, y := e.toLogical(xPhys, yPhys)
+	if k := e.Scale(); k != 1 && k > 0 {
+		dx /= k
+		dy /= k
+	}
+	e.Invalidate()
+
+	var dispatchRoot widget.Widget
+	if m := e.topModal(); m != nil {
+		dispatchRoot = m
+	} else {
+		e.mu.RLock()
+		dispatchRoot = e.root
+		e.mu.RUnlock()
+	}
+	if dispatchRoot != nil {
+		path := hitTestPath(dispatchRoot, x, y)
+		for i := len(path) - 1; i >= 0; i-- {
+			if h, ok := path[i].(wheelPixelHandler); ok {
+				if h.OnMouseWheelPixels(x, y, dx, dy) {
+					return
+				}
+			}
+		}
+	}
+
+	// Фолбэк на тиковый путь. Передаём ФИЗИЧЕСКИЕ координаты — SendMouseButton
+	// сам переведёт их в логические.
+	steps, btn, ok := wheelTicksFromPixels(dy)
+	if !ok {
+		return
+	}
+	for i := 0; i < steps; i++ {
+		e.SendMouseButton(xPhys, yPhys, btn, true)
+		e.SendMouseButton(xPhys, yPhys, btn, false)
+	}
+}
+
+// wheelTicksFromPixels переводит пиксельную дельту в число тиков и направление.
+func wheelTicksFromPixels(dy float64) (steps int, btn widget.MouseButton, ok bool) {
+	if dy == 0 {
+		return 0, 0, false
+	}
+	mag := dy
+	btn = widget.MouseWheelDown
+	if dy < 0 {
+		btn = widget.MouseWheelUp
+		mag = -dy
+	}
+	steps = int(mag/wheelTickPixels + 0.5)
+	if steps < 1 {
+		steps = 1
+	}
+	return steps, btn, true
+}
+
+// ─── File drop (Drag&Drop файлов из ОС) ─────────────────────────────────────
+
+// SendFilesDropped доставляет событие сброса файлов из ОС в точку (x, y —
+// ФИЗИЧЕСКИЕ пиксели окна/кадра, как у SendMouse*). Событие всплывает от
+// самого глубокого виджета под точкой к корню; первый виджет, реализующий
+// widget.FileDropTarget и вернувший true, поглощает событие и останавливает
+// всплытие (bubbling, как у колеса).
+//
+// paths — абсолютные пути к сброшенным файлам. Координаты, переданные виджету,
+// уже логические. Позволяет headless-тестам синтетически «сбрасывать» файлы.
+func (e *Engine) SendFilesDropped(x, y int, paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	x, y = e.toLogical(x, y)
+
+	// Сброс файлов может изменить произвольную часть UI (виджет-приёмник
+	// перерисовывается) — полная инвалидация, как у клика.
+	e.Invalidate()
+
+	var dispatchRoot widget.Widget
+	if m := e.topModal(); m != nil {
+		dispatchRoot = m
+	} else {
+		e.mu.RLock()
+		dispatchRoot = e.root
+		e.mu.RUnlock()
+	}
+	if dispatchRoot == nil {
+		return
+	}
+
+	path := hitTestPath(dispatchRoot, x, y)
+	for i := len(path) - 1; i >= 0; i-- {
+		if fd, ok := path[i].(widget.FileDropTarget); ok {
+			if fd.OnFilesDropped(x, y, paths) {
 				return
 			}
 		}

@@ -816,6 +816,12 @@
                 <TextBlock Left="24" Top="344" Width="490" Foreground="#6C7086"
                            Text="Латиница и кириллица идут быстрым per-rune путём; шейпер включается только для скриптов, которым он нужен."/>
 
+                <TextBlock Left="24" Top="392" Foreground="#9399B2" Text="Цветные эмодзи (COLR/CBDT, авто в тексте):"/>
+                <TextBlock Left="24" Top="414" FontSize="22" Foreground="#CDD6F4"
+                           Text="Привет 🙂 👍 🎉 🚀 🔥 👨‍👩‍👧 ⭐"/>
+                <TextBlock Left="24" Top="450" Width="490" Foreground="#6C7086"
+                           Text="Цветные глифы блитятся как RGBA, не красятся цветом текста. Символы вне emoji-блока (❤ ✓ ✗ ⚠) остаются одноцветными по дизайну; региональные флаги и COLRv1-градиенты — известные ограничения."/>
+
                 <!-- ─── Правая колонка: сглаженная графика ─────────────────── -->
                 <TextBlock Left="556" Top="16" Style="{StaticResource H324}"
                            Text="Сглаженная графика (antialiasing)"/>
@@ -942,6 +948,49 @@
             </Canvas>
         </TabItem>
 
+        <TabItem Header="Компоновка">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="SplitPanel — панели с перетаскиваемым разделителем"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="52" Foreground="#9399B2"
+                           Text="Тяни полосы мышью (курсор меняется), двойной клик по полосе — коллапс/восстановление. Слева — вложенный вертикальный сплит."/>
+
+                <SplitPanel Name="splitOuter" Left="24" Top="84" Width="1010" Height="380"
+                            Orientation="Horizontal" Position="0.35" MinFirst="120" MinSecond="240">
+                    <SplitPanel Name="splitInner" Orientation="Vertical" Position="0.5"
+                                MinFirst="60" MinSecond="60">
+                        <Canvas Background="#28283E">
+                            <Label Left="12" Top="10" Width="200" Height="18" Text="A (вложенный верх)" Foreground="#89B4FA"/>
+                        </Canvas>
+                        <Canvas Background="#232338">
+                            <Label Left="12" Top="10" Width="200" Height="18" Text="B (вложенный низ)" Foreground="#A6E3A1"/>
+                        </Canvas>
+                    </SplitPanel>
+                    <Canvas Background="#2A2A40">
+                        <Label Left="12" Top="10" Width="300" Height="18" Text="C (правая панель)" Foreground="#F9E2AF"/>
+                        <Label Name="splitPosLbl" Left="12" Top="34" Width="300" Height="18" Text="Position: 0.35" Foreground="#9399B2"/>
+                    </Canvas>
+                </SplitPanel>
+
+                <Button Name="splitCollapse" Left="24" Top="478" Width="240" Height="32"
+                        Content="Коллапс/восстановить левую"/>
+
+                <TextBlock Left="24" Top="530" Style="{StaticResource H324}"
+                           Text="SVGIcon — темизируемые векторные иконки"/>
+                <Separator Left="24" Top="554" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="566" Foreground="#9399B2"
+                           Text="Без Color иконка красится под цвет текста темы (переключи тему в шапке); с Color — фиксированный цвет. Размер любой — вектор."/>
+
+                <SVGIcon Left="24"  Top="596" Width="32" Height="32" Source="icons/menu.svg"/>
+                <SVGIcon Left="72"  Top="596" Width="32" Height="32" Source="icons/close.svg"/>
+                <SVGIcon Left="120" Top="596" Width="32" Height="32" Source="icons/folder.svg"/>
+                <SVGIcon Left="184" Top="588" Width="48" Height="48" Source="icons/folder.svg" Color="#F9E2AF"/>
+                <SVGIcon Left="248" Top="580" Width="64" Height="64" Source="icons/menu.svg" Color="#89B4FA"/>
+                <SVGIcon Left="330" Top="572" Width="80" Height="80" Source="icons/close.svg" Color="#F38BA8"/>
+            </Canvas>
+        </TabItem>
+
         <TabItem Header="Система">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
@@ -966,9 +1015,19 @@
                            Foreground="#A6E3A1"
                            Text="Наведите указатель на кнопку приложения в панели задач — во всплывающей миниатюре и в Aero Peek видно живое содержимое окна (а не чёрный прямоугольник)."/>
 
-                <TextBlock Left="24" Top="320" Width="1010" Height="120" TextWrapping="Wrap"
+                <TextBlock Left="24" Top="316" Foreground="#9399B2"
+                           Text="Drag & Drop файлов из ОС (перетащи файлы из проводника в рамку):"/>
+                <Border Name="dropZone" Left="24" Top="340" Width="1010" Height="130"
+                        Background="#232338" BorderBrush="#45475A" BorderThickness="2"
+                        CornerRadius="8">
+                    <Label Name="dropLabel" Left="16" Top="52" Width="978" Height="24"
+                           Text="Перетащите сюда файлы — появятся их пути"
+                           Foreground="#6C7086"/>
+                </Border>
+
+                <TextBlock Left="24" Top="486" Width="1010" Height="80" TextWrapping="Wrap"
                            Foreground="#6C7086"
-                           Text="Иконка в трее ставится при старте (синий квадрат с белой «G»). Трей-меню (правый клик): Показать / Свернуть / Balloon / Выход — оно рендерится в собственном окне-попапе у курсора, поэтому появляется даже когда главное окно скрыто. На платформах кроме Windows эти функции — вежливые no-op; кнопки покажут сообщение «только Windows»."/>
+                           Text="Иконка в трее ставится при старте (синий квадрат с белой «G»). Трей-меню (правый клик): Показать / Свернуть / Balloon / Выход — оно рендерится в собственном окне-попапе у курсора, поэтому появляется даже когда главное окно скрыто. Drag&Drop: Win32 и X11 — нативно, Wayland — каркас. На платформах без поддержки трея/balloon — вежливые no-op."/>
             </Canvas>
         </TabItem>
 

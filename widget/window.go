@@ -250,6 +250,14 @@ func (w *Window) SetBounds(r image.Rectangle) {
 	// Перестраиваем дочерние виджеты — заполняют ContentBounds
 	cb := w.ContentBounds()
 	for _, child := range w.Children() {
+		// PopupMenu, прикреплённое к корню (например, трей-меню — оно живёт
+		// в дереве, чтобы его оверлей собирал popup-хост), позиционируется
+		// собственным Show() — растягивать его нельзя: закрытое меню размером
+		// с клиентскую область становилось верхним в Z невидимым поглотителем
+		// ВСЕГО ввода после любой перекладки (смена темы, ресайз окна).
+		if _, ok := child.(*PopupMenu); ok {
+			continue
+		}
 		child.SetBounds(cb)
 	}
 }
@@ -663,12 +671,10 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 		fillTitleBarColors(ctx, image.Rect(x, y, x+bw, y+th), tbg, tbg2)
 	}
 
-	// Текст заголовка: вертикально по центру, отступ 12px слева
-	// (в классике — жирный, как в Win2000).
-	textY := y + (th-13)/2
-	drawTitleText(ctx, w.Title, x+12, textY, tc)
-
-	// Индикатор локали — слева от кнопок управления.
+	// Индикатор локали — рисуем ДО заголовка, чтобы обрезать заголовок
+	// эллипсисом по левому краю бейджа (иначе длинный Title в узком окне
+	// наезжает на плашку «EN»/«RU»).
+	badgeLeft, haveBadge := 0, false
 	if w.ShowLocaleIndicator {
 		nc0 := w.btnCount()
 		rightX := b.Max.X - 8
@@ -681,8 +687,45 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 		} else if nc0 > 0 {
 			rightX = b.Max.X - w.btnWidth()*nc0 - 8
 		}
-		w.setLocaleBadgeRect(drawLocaleBadge(ctx, rightX, y, th, tc))
+		badgeRect := drawLocaleBadge(ctx, rightX, y, th, tc)
+		w.setLocaleBadgeRect(badgeRect)
+		if !badgeRect.Empty() {
+			badgeLeft, haveBadge = badgeRect.Min.X, true
+		}
 	}
+
+	// Правая граница текста заголовка: левый край бейджа (если есть) либо
+	// левый край блока кнопок управления.
+	titleRight := b.Max.X
+	if haveBadge {
+		titleRight = badgeLeft
+	} else if nc0 := w.btnCount(); nc0 > 0 {
+		if currentStyle().Classic3D {
+			if _, _, minR := w.classicTitleBtnRects(); !minR.Empty() {
+				titleRight = minR.Min.X
+			} else if closeR, _, _ := w.classicTitleBtnRects(); !closeR.Empty() {
+				titleRight = closeR.Min.X
+			}
+		} else {
+			titleRight = b.Max.X - w.btnWidth()*nc0
+		}
+	}
+
+	// Текст заголовка: вертикально по центру, отступ 12px слева
+	// (в классике — жирный, как в Win2000). Обрезаем эллипсисом, только если
+	// заголовок реально доходит до titleRight (левый край бейджа/кнопок).
+	// Без искусственного зазора: заголовок, который вписывался раньше (до
+	// появления бейджа), должен рендериться так же — иначе короткие названия
+	// теряли последнюю букву под эллипсис при наличии плашки локали.
+	textX := x + 12
+	textY := y + (th-13)/2
+	title := w.Title
+	if titleMaxW := titleRight - textX; titleMaxW <= 0 {
+		title = ""
+	} else {
+		title = ellipsizeText(ctx, title, titleMaxW, DefaultFontSizePt)
+	}
+	drawTitleText(ctx, title, textX, textY, tc)
 
 	nc := w.btnCount()
 	if nc == 0 {
@@ -923,15 +966,42 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 		fillCircle(ctx, ccx, cy, macCircleR, col)
 	}
 
-	// Текст заголовка: по центру
-	textW := ctx.MeasureText(w.Title, 10)
-	textX := x + (bw-textW)/2
-	textY := y + (th-13)/2
-	ctx.DrawText(w.Title, textX, textY, tc)
-
-	// Индикатор локали — в правом верхнем углу (traffic lights слева в Mac-стиле).
+	// Индикатор локали — рисуем ДО заголовка (traffic lights слева в Mac-стиле,
+	// бейдж — в правом верхнем углу): нужен левый край бейджа для обрезки.
+	badgeLeft, haveBadge := 0, false
 	if w.ShowLocaleIndicator {
-		w.setLocaleBadgeRect(drawLocaleBadge(ctx, b.Max.X-8, y, th, tc))
+		badgeRect := drawLocaleBadge(ctx, b.Max.X-8, y, th, tc)
+		w.setLocaleBadgeRect(badgeRect)
+		if !badgeRect.Empty() {
+			badgeLeft, haveBadge = badgeRect.Min.X, true
+		}
+	}
+
+	// Текст заголовка: по центру, но не залезая на «светофоры» слева и бейдж
+	// справа. Обрезаем эллипсисом до доступной ширины и клампим позицию.
+	leftLimit := x
+	if nc >= 1 {
+		leftLimit = x + macStartX + (nc-1)*macSpacing + macCircleR + 8
+	}
+	rightLimit := b.Max.X - 8
+	if haveBadge {
+		rightLimit = badgeLeft - 8
+	}
+	textY := y + (th-13)/2
+	title := w.Title
+	if maxW := rightLimit - leftLimit; maxW <= 0 {
+		title = ""
+	} else {
+		title = ellipsizeText(ctx, title, maxW, 10)
+		textW := ctx.MeasureText(title, 10)
+		textX := x + (bw-textW)/2
+		if textX < leftLimit {
+			textX = leftLimit
+		}
+		if textX+textW > rightLimit {
+			textX = rightLimit - textW
+		}
+		ctx.DrawText(title, textX, textY, tc)
 	}
 }
 

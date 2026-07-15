@@ -13,6 +13,10 @@
 //
 // Бэкенды могут дополнительно реализовать dirtyRectBlitter (см. window.go) —
 // тогда окно передаёт им только изменившуюся область кадра.
+//
+// Опциональный интерфейс filesDropTarget (объявлен в window/dnd.go) — приём
+// файлов, перетащенных из ОС (Win32 WM_DROPFILES, X11 XDND, Wayland
+// wl_data_device). Реализуется бэкендами, поддерживающими Drag&Drop файлов.
 package window
 
 import "image"

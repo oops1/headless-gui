@@ -551,6 +551,40 @@ func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 	}
 }
 
+// drawColorGlyph блиттит цветной глиф эмодзи (premultiplied RGBA) в back-буфер
+// операцией Over. Цвет текста НЕ применяется — источник уже цветной. Учитывает
+// clip. (gx, gy) — позиция левого верхнего угла изображения на холсте.
+func (c *Canvas) drawColorGlyph(img *image.RGBA, gx, gy int) {
+	iw, ih := img.Rect.Dx(), img.Rect.Dy()
+	r := c.clampRect(image.Rect(gx, gy, gx+iw, gy+ih))
+	if r.Empty() {
+		return
+	}
+	src := img.Pix
+	sStride := img.Stride
+	dst := c.back.Pix
+	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
+		sRow := (yy-gy)*sStride + (r.Min.X-gx)*4
+		dOff := c.back.PixOffset(r.Min.X, yy)
+		for xx := r.Min.X; xx < r.Max.X; xx++ {
+			sa := uint32(src[sRow+3])
+			if sa == 0 { // полностью прозрачный пиксель
+				sRow += 4
+				dOff += 4
+				continue
+			}
+			inv := 255 - sa
+			p := dst[dOff : dOff+4 : dOff+4]
+			p[0] = uint8(uint32(src[sRow+0]) + uint32(p[0])*inv/255)
+			p[1] = uint8(uint32(src[sRow+1]) + uint32(p[1])*inv/255)
+			p[2] = uint8(uint32(src[sRow+2]) + uint32(p[2])*inv/255)
+			p[3] = uint8(uint32(src[sRow+3]) + uint32(p[3])*inv/255)
+			sRow += 4
+			dOff += 4
+		}
+	}
+}
+
 // runeAdvance возвращает ширину руны в выбранном (с учётом fallback) шрифте.
 // Для непокрытых рун использует ширину пробела (соответствует drawTextWithFont).
 func (c *Canvas) runeAdvance(fc *FontCache, r rune, sizePt float64) fixed.Int26_6 {
@@ -597,6 +631,15 @@ func (c *Canvas) drawShapedText(fc *FontCache, text string, x, baseline int, siz
 		// GID 0 = .notdef: руна не покрыта ни одним шрифтом — не рисуем
 		// «тофу»-квадрат (философия BUG-2), но перо продвигаем.
 		if g.gid == 0 {
+			pen += g.adv
+			continue
+		}
+		// Цветной эмодзи (COLR/CBDT): блиттится как RGBA, цветом текста НЕ
+		// красится. Для обычных глифов colorGlyphFor сразу вернёт nil.
+		if cg := c.shaper.colorGlyphFor(g.face, g.gid, sizePx, col); cg != nil && cg.img != nil {
+			gx := (pen + g.xOff).Round() + cg.offX
+			gy := baseline - g.yOff.Round() + cg.offY
+			c.drawColorGlyph(cg.img, gx, gy)
 			pen += g.adv
 			continue
 		}
