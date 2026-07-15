@@ -7,11 +7,13 @@ package widget
 import (
 	"image"
 	"image/color"
+	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
+	svgPkg "github.com/oops1/headless-gui/v3/widget/svg"
 	tvPkg "github.com/oops1/headless-gui/v3/widget/treeview"
 )
 
@@ -265,6 +267,21 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 		}
 	}
 
+	// ── Трей: иконка + подсказка (декларация; window.Window подхватит в Run) ──
+	// TrayIcon — путь относительно baseDir (.png/.jpg декодируется, .svg
+	// растеризуется 32×32). Ошибка загрузки — log.Printf и пропуск.
+	if ti := el.attr("TrayIcon"); ti != "" {
+		if img := loadTrayIcon(ti, baseDir); img != nil {
+			win.TrayIconImage = img
+		}
+	}
+	// TrayTooltip — по умолчанию = Title.
+	if tt := el.attr("TrayTooltip"); tt != "" {
+		win.TrayTooltip = tt
+	} else {
+		win.TrayTooltip = win.Title
+	}
+
 	// Bounds (с учётом parentOff — обычно 0,0 для корня)
 	absBounds := b.Add(parentOff)
 	win.SetBounds(absBounds)
@@ -283,6 +300,22 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 	contentOff := win.ContentBounds().Min
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
+
+		// ── <TrayMenu> — контекстное меню трея (единственное) ────────────────
+		// Строим существующим механизмом popup-пунктов (buildXAMLPopupMenu) и
+		// кладём в ПОЛЕ Window.TrayMenu, НЕ добавляя ребёнком дерева: PopupMenu
+		// прямым ребёнком Window опасен (см. Window.SetBounds skip *PopupMenu);
+		// window.attachTrayMenu добавит его в дерево правильно уже в Run().
+		if childTag == "traymenu" {
+			cw, err := buildXAMLPopupMenu(child, reg, contentOff)
+			if err != nil {
+				return nil, err
+			}
+			if pm, ok := cw.(*PopupMenu); ok {
+				win.TrayMenu = pm
+			}
+			continue
+		}
 
 		// Пропускаем property elements
 		if strings.Contains(childTag, ".") {
@@ -363,6 +396,41 @@ func parseInputBindings(el xElement) []InputBinding {
 		}
 	}
 	return out
+}
+
+// loadTrayIcon загружает иконку трея из файла src (относительно baseDir):
+//   - .png/.jpg/.jpeg → декодируется как есть (loadImageFile);
+//   - .svg            → растеризуется в 32×32; свои цвета документа сохраняются,
+//     currentColor подставляется цветом текста темы (win10.LabelText), tint=false
+//     (для трея не темизируем монохромно — берём оригинальные цвета SVG).
+//
+// Ошибка загрузки/разбора — log.Printf и nil (иконка просто не ставится).
+func loadTrayIcon(src, baseDir string) image.Image {
+	path := src
+	if !filepath.IsAbs(path) && baseDir != "" {
+		path = filepath.Join(baseDir, src)
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".svg":
+		doc, err := svgPkg.ParseFile(path)
+		if err != nil {
+			log.Printf("xaml: TrayIcon Source=%q: %v", src, err)
+			return nil
+		}
+		img := doc.Rasterize(32, 32, win10.LabelText, false)
+		if img == nil {
+			log.Printf("xaml: TrayIcon Source=%q: пустая растеризация", src)
+			return nil
+		}
+		return img
+	default:
+		img, err := loadImageFile(path)
+		if err != nil {
+			log.Printf("xaml: TrayIcon Source=%q: %v", src, err)
+			return nil
+		}
+		return img
+	}
 }
 
 // ─── buildXAMLPanel ────────────────────────────────────────────────────────
@@ -762,6 +830,12 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 	// Парсим дочерние <MenuItem> элементы.
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
+		// Отдельный тег <Separator/> — горизонтальный разделитель (в дополнение к
+		// <MenuItem Separator="True"/>). Удобно для трей-меню и контекстных меню.
+		if childTag == "separator" {
+			pm.AddSeparator()
+			continue
+		}
 		if childTag != "menuitem" && childTag != "item" {
 			continue
 		}
@@ -1011,6 +1085,12 @@ func buildXAMLDockManager(el xElement, reg map[string]Widget, parentOff image.Po
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			dm.Background = c
 		}
+	}
+
+	// NativeFloating="True" — декларация нативного отрыва панелей (window.Window
+	// подхватит поле в Run → EnableDockFloating). В headless — без эффекта.
+	if strings.EqualFold(el.attr("NativeFloating"), "true") {
+		dm.NativeFloating = true
 	}
 
 	absBounds := el.bounds().Add(parentOff)

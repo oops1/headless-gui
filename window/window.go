@@ -378,9 +378,19 @@ func (win *Window) Run() error {
 	// и меню будут открываться в собственных окнах ОС и выходить за границы окна.
 	win.installPopupHost()
 
+	// Декларация нативного отрыва из XAML (<DockManager NativeFloating="True">):
+	// если приложение не вызвало EnableDockFloating явно — включаем для первого
+	// такого менеджера. ДО installDockFloating (она читает win.dockMgr).
+	win.pickupDeclarativeDockFloating()
+
 	// Хост отрыва DockPane в отдельные нативные окна (EnableDockFloating). На
 	// бэкендах без owner-окон / UI-маршалинга — no-op (панель флоатит в холсте).
 	win.installDockFloating()
+
+	// Декларация трея из XAML (<Window TrayIcon=…>, <TrayMenu>): переносим в
+	// буферизованные поля, если приложение не задало иконку/меню явно. ДО
+	// applyPendingTray, которая отправит итоговое состояние бэкенду.
+	win.pickupDeclarativeTray()
 
 	// Применяем отложенное состояние трея/уведомлений (иконка, меню, колбэки),
 	// заданное до Run(). На платформах без поддержки — no-op.

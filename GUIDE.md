@@ -944,9 +944,11 @@ root Canvas (0,0)
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (первые два дочерних — панели) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `Separator` | Separator | `Background` |
-| `DockManager` | DockManager | `Background`; дочерние `<DockPane>`×N + один `<DockContent>` (см. «Докинг-панели») |
+| `DockManager` | DockManager | `Background`, `NativeFloating`; дочерние `<DockPane>`×N + один `<DockContent>` (см. «Докинг-панели») |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); только внутри `<DockManager>` |
 | `DockContent` | — (маркер) | единственный ребёнок → `DockManager.SetCenter`; только внутри `<DockManager>` |
+| `Window` | Window | `Title`, `Width`, `Height`, `WindowStyle`, `ResizeMode`, `MainWindow`, `TrayIcon`, `TrayTooltip` (см. «Трей из XAML») |
+| `TrayMenu` | — (ребёнок `<Window>`) | меню трея: дочерние `<MenuItem>`/`<Separator>` (см. «Трей из XAML») |
 
 Общие атрибуты: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`, `ToolTip`, `Visibility`, `IsEnabled`, `TabIndex`. Привязки `{Binding ...}` и локализация `{Loc Key}` работают на любом строковом атрибуте.
 
@@ -1515,6 +1517,31 @@ Peek показывают живое содержимое окна (раньше
 iconic-путь DWM включается переменной окружения `HEADLESS_GUI_ICONIC_PREVIEW=1`
 (по умолчанию не требуется).
 
+**Трей из XAML.** Иконку, подсказку и меню трея можно объявить прямо в корневом
+`<Window>` — без императивных `SetTrayIcon`/`SetTrayMenu`:
+
+```xml
+<Window Title="Моё приложение" TrayIcon="icons/app.svg" TrayTooltip="Моё приложение">
+  <TrayMenu Name="trayMenu">
+    <MenuItem Text="Показать"/>
+    <Separator/>
+    <MenuItem Text="Выход"/>
+  </TrayMenu>
+  <!-- …обычный контент… -->
+</Window>
+```
+
+`TrayIcon` — путь относительно XAML-файла: `.png`/`.jpg` декодируется как есть,
+`.svg` растеризуется 32×32 (свои цвета SVG сохраняются, `currentColor` → цвет
+текста темы; трей намеренно не темизируется). `TrayTooltip` по умолчанию равен
+`Title`. `<TrayMenu>` — единственный дочерний тег окна с пунктами `<MenuItem>` и
+разделителями `<Separator/>`; хранится полем `Window.TrayMenu`, а не ребёнком
+дерева. Обработчики вешаются в коде: найдите меню по `Name` и используйте
+`PopupMenu.OnSelect(idx, text)`. **Приоритет у кода:** если приложение вызвало
+`SetTrayIcon`/`SetTrayMenu` до `Run()`, XAML-декларация не применяется (заполняет
+только незаданное). Balloon-уведомления, `SetOnTrayClick`, `HideToTray` в XAML не
+выражаются — только в коде.
+
 ### SplitPanel — две панели с разделителем
 
 Контейнер `SplitPanel` держит двух детей (первые два `AddChild` — First/Second) и
@@ -1724,6 +1751,14 @@ XAML:
   </DockContent>
 </DockManager>
 ```
+
+`<DockManager>` также принимает `NativeFloating="True"` — декларацию нативного
+отрыва панелей в отдельные ОС-окна: `window.Window.Run()` обходит дерево и, если
+приложение не вызвало `EnableDockFloating(dm)` само, включает отрыв для первого
+такого менеджера. Явный вызов `EnableDockFloating` имеет приоритет; при
+нескольких `NativeFloating`-менеджерах включается только первый (хост держит
+один), остальные логируются. В headless и на неподдерживаемых бэкендах атрибут
+без эффекта (floating остаётся виджетным оверлеем в холсте).
 
 `<DockPane>`: `Id` (если не задан — слаг от `Title`), `Title`, `Side`
 (Left/Top/Bottom/Right, по умолчанию Left), `Size` в px (→ `SetSideSize` для

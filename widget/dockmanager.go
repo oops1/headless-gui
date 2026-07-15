@@ -107,6 +107,13 @@ type DockManager struct {
 	// OnFloatNative на панели, добавленные уже после EnableDockFloating.
 	OnPaneAdded func(p *DockPane)
 
+	// NativeFloating — декларация из XAML (<DockManager NativeFloating="True">):
+	// панели этого менеджера разрешено отрывать в отдельные нативные окна ОС.
+	// widget-пакет только хранит намерение; window.Window.Run() обходит дерево,
+	// находит менеджеры с NativeFloating=true и вызывает EnableDockFloating(dm).
+	// Явный вызов EnableDockFloating приложением имеет приоритет.
+	NativeFloating bool
+
 	center     Widget
 	panes      []*DockPane   // мастер-реестр всех панелей (в т.ч. закрытых)
 	sides      [4][]*DockPane // Docked+AutoHidden по сторонам (индекс = DockSide)

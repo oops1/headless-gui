@@ -944,9 +944,11 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `Separator` | Separator | `Background` |
-| `DockManager` | DockManager | `Background`; children `<DockPane>`×N + one `<DockContent>` (see "Docking panels") |
+| `DockManager` | DockManager | `Background`, `NativeFloating`; children `<DockPane>`×N + one `<DockContent>` (see "Docking panels") |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
 | `DockContent` | — (marker) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
+| `Window` | Window | `Title`, `Width`, `Height`, `WindowStyle`, `ResizeMode`, `MainWindow`, `TrayIcon`, `TrayTooltip` (see "Tray from XAML") |
+| `TrayMenu` | — (child of `<Window>`) | tray menu: child `<MenuItem>`/`<Separator>` (see "Tray from XAML") |
 
 Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`, `ToolTip`, `Visibility`, `IsEnabled`, `TabIndex`. `{Binding ...}` and `{Loc Key}` localization work on any string attribute.
 
@@ -1488,6 +1490,31 @@ contents (they used to be black). An additional DWM iconic path is enabled with
 the `HEADLESS_GUI_ICONIC_PREVIEW=1` environment variable (not needed by
 default).
 
+**Tray from XAML.** The tray icon, tooltip and menu can be declared right in the
+root `<Window>` — no imperative `SetTrayIcon`/`SetTrayMenu` for the basic case:
+
+```xml
+<Window Title="My App" TrayIcon="icons/app.svg" TrayTooltip="My App">
+  <TrayMenu Name="trayMenu">
+    <MenuItem Text="Show"/>
+    <Separator/>
+    <MenuItem Text="Quit"/>
+  </TrayMenu>
+  <!-- …normal content… -->
+</Window>
+```
+
+`TrayIcon` is a path relative to the XAML file: `.png`/`.jpg` is decoded as-is,
+`.svg` is rasterized to 32×32 (the SVG's own colors are kept, `currentColor` →
+theme label color; the tray is intentionally not themed). `TrayTooltip` defaults
+to `Title`. `<TrayMenu>` is the single tray-menu child with `<MenuItem>` items
+and `<Separator/>`; it is stored in the `Window.TrayMenu` field, not the widget
+tree. Wire handlers in code: look the menu up by `Name` and use
+`PopupMenu.OnSelect(idx, text)`. **Code wins:** if the app calls
+`SetTrayIcon`/`SetTrayMenu` before `Run()`, the XAML declaration is not applied
+(the pickup only fills unset fields). Balloon notifications, `SetOnTrayClick` and
+`HideToTray` are code-only.
+
 ### SplitPanel — two panes with a splitter
 
 `SplitPanel` holds two children (the first two `AddChild` calls — First/Second)
@@ -1699,6 +1726,14 @@ XAML:
   </DockContent>
 </DockManager>
 ```
+
+`<DockManager>` also accepts `NativeFloating="True"` — a declaration of native
+pane detach into separate OS windows: `window.Window.Run()` walks the tree and,
+unless the app called `EnableDockFloating(dm)` itself, enables it for the first
+such manager. An explicit `EnableDockFloating` call wins; with several
+`NativeFloating` managers only the first is wired (the host holds one) and the
+rest are logged. Headless / unsupported backends ignore the attribute (floating
+stays a widget-drawn overlay in the canvas).
 
 `<DockPane>`: `Id` (if omitted, a slug of `Title` is generated), `Title`,
 `Side` (Left/Top/Bottom/Right, default Left), `Size` in px (→ `SetSideSize`

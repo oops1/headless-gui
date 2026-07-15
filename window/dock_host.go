@@ -2,6 +2,7 @@ package window
 
 import (
 	"image"
+	"log"
 	"sync"
 
 	"github.com/oops1/headless-gui/v3/engine"
@@ -65,6 +66,54 @@ type floatingPane struct {
 // на UI-поток (Wayland/macOS) и в headless — no-op (панель флоатит в холсте).
 func (win *Window) EnableDockFloating(dm *widget.DockManager) {
 	win.dockMgr = dm
+}
+
+// pickupDeclarativeDockFloating подхватывает декларацию нативного отрыва из XAML
+// (<DockManager NativeFloating="True">): обходит дерево корня, и если приложение
+// НЕ вызвало EnableDockFloating явно (win.dockMgr == nil), включает отрыв для
+// ПЕРВОГО найденного менеджера с NativeFloating=true. Хост отрыва (dock_host)
+// держит один менеджер, поэтому при нескольких таких менеджерах остальные лишь
+// логируются. Вызывается в Run() ДО installDockFloating (которая читает dockMgr).
+func (win *Window) pickupDeclarativeDockFloating() {
+	if win.dockMgr != nil {
+		return // приложение уже задало явным EnableDockFloating — приоритет
+	}
+	root := win.eng.Root()
+	if root == nil {
+		return
+	}
+	var found []*widget.DockManager
+	collectNativeFloatingDockManagers(root, &found)
+	if len(found) == 0 {
+		return
+	}
+	win.EnableDockFloating(found[0])
+	if len(found) > 1 {
+		log.Printf("window: %d DockManager с NativeFloating=true — нативный отрыв "+
+			"включён только для первого (хост держит один менеджер)", len(found))
+	}
+}
+
+// collectNativeFloatingDockManagers рекурсивно собирает по дереву все
+// *widget.DockManager с NativeFloating=true (в порядке обхода сверху вниз).
+func collectNativeFloatingDockManagers(w widget.Widget, out *[]*widget.DockManager) {
+	if w == nil {
+		return
+	}
+	if dm, ok := w.(*widget.DockManager); ok && dm.NativeFloating {
+		*out = append(*out, dm)
+	}
+	// TabControl.Children() отдаёт только АКТИВНУЮ вкладку — обходим все вкладки
+	// явно, иначе менеджер в неактивной вкладке (как в showcase) не был бы найден.
+	if tc, ok := w.(*widget.TabControl); ok {
+		for i := 0; i < tc.TabCount(); i++ {
+			collectNativeFloatingDockManagers(tc.TabContent(i), out)
+		}
+		return
+	}
+	for _, c := range w.Children() {
+		collectNativeFloatingDockManagers(c, out)
+	}
 }
 
 // installDockFloating ставит хост отрыва панелей, если бэкенд поддерживает
