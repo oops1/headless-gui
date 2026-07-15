@@ -80,6 +80,25 @@
       Live-превью окна в панели задач/Aero Peek: WM_PRINTCLIENT из кэша кадра
       (+ опциональный iconic-путь DWM за `HEADLESS_GUI_ICONIC_PREVIEW=1`).
       На Linux/macOS/Wayland — no-op-заглушки. Трей на X11/macOS — позже.
+- [ ] **Трей + уведомления на Linux/macOS** — сейчас `trayHost` реализует
+      только `Win32Window`; на Linux/Wayland/macOS весь трей-API
+      (`SetTrayIcon`/`ShowBalloon`/`HideToTray`/`SetTrayMenu`/…) — вежливые
+      no-op. Довести по платформам (по возрастанию цены):
+      1. **Linux balloon** — `org.freedesktop.Notifications` (метод `Notify`)
+         через D-Bus session bus. Самый полезный и предсказуемый (это путь
+         `notify-send`). Грабли: D-Bus. Готовой либы нет, новую зависимость
+         (`godbus/dbus`) правило zero-new-deps не разрешает → писать D-Bus
+         поверх unix-сокета руками (как XDND, но крупнее). Сделать первым.
+      2. **Linux трей** (иконка+меню) — StatusNotifierItem по D-Bus +
+         `com.canonical.dbusmenu` (иконка — ARGB32-pixmap). Старый XEmbed-трей
+         устарел; **GNOME без расширения AppIndicator трей не показывает**.
+         Высокая цена + ненадёжно между DE — делать после balloon.
+      3. **macOS трей+уведомления** — `NSStatusItem` + `UNUserNotification`
+         через purego/Cocoa (purego 0.10.1 уже в go.mod). Средне, но нужен
+         ЖИВОЙ Mac для проверки (Cocoa-бэкенд на железе не тестирован).
+      Публичный API уже кроссплатформенный — трогать только бэкенды
+      (window/native_linux.go, native_wayland.go, native_darwin.go + новый
+      window/dbus*.go). Дефолт «no-op на неподдержанном» сохранить.
 - [x] **Splitter** — сделано 2026-07-12: контейнер SplitPanel (доля 0..1,
       MinFirst/MinSecond, курсоры SizeWE/NS, drag через CaptureManager,
       двойной клик — коллапс/восстановление, гнездование, HasOwnLayout,
