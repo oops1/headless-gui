@@ -94,15 +94,28 @@ func TestThemes_SwitchOnLiveEngine(t *testing.T) {
 	eng.Start()
 	defer eng.Stop()
 
+	// Ждём продвижения счётчика кадров поллингом с дедлайном: фиксированный
+	// sleep (80мс) флейково падал на медленных CI-раннерах (macOS) — первый
+	// кадр после Start+SetTheme не успевал отрендериться. Дедлайн 3с не
+	// маскирует реальную регрессию (мёртвый рендер не оживёт и за 3с).
+	waitAdvance := func(prev uint64) (uint64, bool) {
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if rc := eng.RenderCount(); rc > prev {
+				return rc, true
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return eng.RenderCount(), false
+	}
 	prev := uint64(0)
 	for _, name := range widget.ThemeNames() {
 		eng.SetTheme(widget.ThemeByName(name))
-		time.Sleep(80 * time.Millisecond) // пара кадров на перерисовку
-		if rc := eng.RenderCount(); rc <= prev {
+		rc, ok := waitAdvance(prev)
+		if !ok {
 			t.Fatalf("тема %q: рендер не продвинулся (%d)", name, rc)
-		} else {
-			prev = rc
 		}
+		prev = rc
 	}
 	// Возвращаем тему по умолчанию, чтобы не влиять на другие тесты.
 	eng.SetTheme(widget.DarkTheme())
