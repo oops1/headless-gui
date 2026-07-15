@@ -240,6 +240,16 @@ func (p *DockPane) Show() {
 	p.SetVisible(true)
 }
 
+// Dismiss реализует Dismissable: закрывает flyout (auto-hide выезд), если ЭТА
+// панель сейчас выехала. Движок вызывает Dismiss у виджетов вне пути клика
+// (dismissOutside), поэтому клик по центру/другой панели сворачивает flyout —
+// как клик мимо dropdown. Для не-flyout панелей — no-op.
+func (p *DockPane) Dismiss() {
+	if p.mgr != nil && p.mgr.flyoutPane == p {
+		p.mgr.closeFlyout()
+	}
+}
+
 // ─── Геометрия / раскладка ──────────────────────────────────────────────────
 
 func (p *DockPane) titleH() int {

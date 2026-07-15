@@ -30,6 +30,21 @@ type AAShapes interface {
 	DrawLineAA(x1, y1, x2, y2 int, thickness float64, col color.RGBA)
 }
 
+// Snapshotter — опциональный интерфейс DrawContext, умеющий скопировать
+// прямоугольную область уже отрисованного холста в самостоятельный *image.RGBA.
+// Реализуется engine.Canvas (по образцу AAShapes: код виджетов проверяет его
+// type-assert'ом и откатывается, если контекст интерфейс не поддерживает).
+//
+// Координаты r — ЛОГИЧЕСКИЕ; результат — в физических пикселях холста
+// (premultiplied RGBA), пригодных для обратного блита через DrawImage/
+// DrawImageScaled. Пустое пересечение r с холстом → nil.
+//
+// Используется DockManager.DrawOverlay для «призрака» перетаскиваемой панели
+// (снимок панели следует за курсором, как в Visual Studio).
+type Snapshotter interface {
+	Snapshot(r image.Rectangle) *image.RGBA
+}
+
 // OverlayDrawer реализуется виджетами, которым нужно рисовать поверх всего дерева.
 // Например, раскрытый выпадающий список должен перекрывать соседние виджеты.
 //

@@ -62,6 +62,16 @@ const (
 	dockTabStripHeight = 22  // высота полосы табов стопки (px)
 	dockCenterMin      = 40  // минимальный размер центра вдоль каждой оси
 	dockFlyoutMs       = 140 // длительность анимации выезда flyout (мс)
+
+	// dockFlyoutHold — гистерезис зоны удержания flyout (px): union прямоугольников
+	// ярлыка и выехавшей панели расширяется на столько во все стороны, чтобы
+	// дрожание курсора на границе (и переход ярлык→панель) не схлопывал flyout.
+	dockFlyoutHold = 8
+	// dockGhostAlpha — числитель альфы призрака перетаскивания (из 255).
+	// Снимок панели непрозрачен (premultiplied A=255); умножение всех каналов
+	// на dockGhostAlpha/255 даёт premultiplied-цвет с ~70% альфой — при блите
+	// Over это честное 70%-смешение снимка с фоном под призраком.
+	dockGhostAlpha = 178
 )
 
 // dockTabInfo — прямоугольник таба/ярлыка и связанная панель (для hit-теста).
@@ -127,6 +137,15 @@ type DockManager struct {
 	dragY     int
 	dragGuide DockSide
 	dragGuOK  bool
+
+	// Призрак перетаскивания: снимок панели, взятый ОДИН раз в первом кадре
+	// drag'а (когда панель ещё нарисована на своём месте в back) и кэшируемый
+	// до конца drag'а. ghostImg — предумноженный (×dockGhostAlpha) снимок,
+	// ghostW/ghostH — его ЛОГИЧЕСКИЙ размер (для DrawImageScaled при HiDPI).
+	ghostImg  *image.RGBA
+	ghostW    int
+	ghostH    int
+	ghostPane *DockPane
 
 	// Auto-hide flyout. flyoutReveal ∈ [0,1] — ТОЛЬКО косметика анимации выезда
 	// (Draw закрывает нераскрытую часть фоном); bounds панели ставятся сразу на
@@ -859,6 +878,10 @@ func (m *DockManager) beginPaneDrag(p *DockPane, x, y int) {
 	m.dragPane = p
 	m.dragX, m.dragY = x, y
 	m.dragGuide, m.dragGuOK = dockGuideHit(m.bounds, x, y)
+	// Снимок берётся лениво в первом кадре DrawOverlay (нужен DrawContext);
+	// сбрасываем кэш, чтобы новый drag не переиспользовал старый призрак.
+	m.ghostImg = nil
+	m.ghostPane = nil
 	notifyUIChanged()
 }
 
@@ -883,6 +906,8 @@ func (m *DockManager) updatePaneDrag(p *DockPane, x, y int) {
 
 func (m *DockManager) endPaneDrag(p *DockPane, x, y int, moved bool) {
 	m.dragPane = nil
+	m.ghostImg = nil
+	m.ghostPane = nil
 	side, ok := dockGuideHit(m.bounds, x, y)
 	m.dragGuOK = false
 	if ok {
@@ -1032,22 +1057,34 @@ func (m *DockManager) OnMouseMove(x, y int) {
 		m.hoverGutter, m.hoverGutOK = s, ok
 		m.Invalidate()
 	}
-	// Прячем flyout при уходе мыши за пределы (панель + её ярлык).
-	if m.flyoutPane != nil {
-		pt := image.Pt(x, y)
-		in := pt.In(m.flyoutRect())
-		if !in {
-			for _, info := range m.stripInfo[int(m.flyoutPane.side)] {
-				if info.pane == m.flyoutPane && pt.In(info.rect) {
-					in = true
-					break
-				}
-			}
-		}
-		if !in {
-			m.closeFlyout()
+	// Прячем flyout при уходе мыши за пределы зоны удержания (union ярлыка и
+	// выехавшей панели, расширенный на гистерезис). Пока курсор в этой зоне —
+	// flyout остаётся открытым, чтобы можно было дойти до содержимого и кнопки
+	// pin (📌), не схлопнув панель по дороге от ярлыка.
+	if m.flyoutPane != nil && !m.pointInFlyoutHold(x, y) {
+		m.closeFlyout()
+	}
+}
+
+// pointInFlyoutHold сообщает, находится ли точка (x, y) в зоне удержания flyout:
+// объединение прямоугольников выехавшей панели и её ярлыка, каждый расширен на
+// dockFlyoutHold во все стороны (гистерезис против дрожания на границе и провала
+// в зазор ярлык→панель).
+func (m *DockManager) pointInFlyoutHold(x, y int) bool {
+	p := m.flyoutPane
+	if p == nil {
+		return false
+	}
+	pt := image.Pt(x, y)
+	if fr := m.flyoutRect(); !fr.Empty() && pt.In(fr.Inset(-dockFlyoutHold)) {
+		return true
+	}
+	for _, info := range m.stripInfo[int(p.side)] {
+		if info.pane == p && pt.In(info.rect.Inset(-dockFlyoutHold)) {
+			return true
 		}
 	}
+	return false
 }
 
 // applyGutterResize пересчитывает размер стороны по позиции курсора.
@@ -1240,20 +1277,65 @@ func (m *DockManager) DrawOverlay(ctx DrawContext) {
 	if ok {
 		prevSize = m.sizes[int(side)]
 	}
-	// Призрак: полупрозрачный прямоугольник размера панели у курсора
-	// (для docked-источника — панель на месте; floating ведём вживую).
+	// Призрак: полупрозрачный СНИМОК панели у курсора, как в Visual Studio
+	// (для docked-источника — панель на месте; floating ведём вживую без призрака).
 	p := m.dragPane
 	if p.state != PaneFloating {
-		w, h := 200, 140
-		if !p.bounds.Empty() {
-			w, h = p.bounds.Dx(), p.bounds.Dy()
+		// Снимок делаем один раз в первом кадре drag'а: DrawOverlay идёт ПОСЛЕ
+		// Draw, поэтому панель гарантированно нарисована в back на своём месте.
+		if m.ghostImg == nil || m.ghostPane != p {
+			m.captureGhost(ctx, p)
 		}
 		gx, gy := m.dragX-p.grabDX, m.dragY-p.grabDY
-		ghost := color.RGBA{R: m.AccentColor.R, G: m.AccentColor.G, B: m.AccentColor.B, A: 60}
-		ctx.FillRectAlpha(gx, gy, w, h, ghost)
-		ctx.DrawBorder(gx, gy, w, h, m.AccentColor)
+		if m.ghostImg != nil {
+			// DrawImageScaled с ЛОГИЧЕСКИМ размером: снимок физический, при HiDPI
+			// он корректно растягивается обратно на scale. Снимок предумножен
+			// (×dockGhostAlpha) → Over даёт честную полупрозрачность.
+			ctx.DrawImageScaled(m.ghostImg, gx, gy, m.ghostW, m.ghostH)
+			ctx.DrawBorder(gx, gy, m.ghostW, m.ghostH, m.AccentColor)
+		} else {
+			// Фолбэк: DrawContext без Snapshotter (теоретически) — прежний
+			// прямоугольник-призрак.
+			w, h := 200, 140
+			if !p.bounds.Empty() {
+				w, h = p.bounds.Dx(), p.bounds.Dy()
+			}
+			ghost := color.RGBA{R: m.AccentColor.R, G: m.AccentColor.G, B: m.AccentColor.B, A: 60}
+			ctx.FillRectAlpha(gx, gy, w, h, ghost)
+			ctx.DrawBorder(gx, gy, w, h, m.AccentColor)
+		}
 	}
 	drawDockGuides(ctx, m.bounds, side, ok, prevSize, m.AccentColor, m.GuideFace, m.BorderColor)
+}
+
+// captureGhost делает снимок области панели p и кэширует полупрозрачный призрак
+// для отрисовки во время drag'а. Требует, чтобы ctx реализовывал Snapshotter
+// (engine.Canvas); иначе ghostImg остаётся nil и DrawOverlay откатывается на
+// прямоугольник-призрак.
+func (m *DockManager) captureGhost(ctx DrawContext, p *DockPane) {
+	sn, ok := ctx.(Snapshotter)
+	if !ok {
+		return
+	}
+	b := p.bounds
+	if b.Empty() {
+		return
+	}
+	img := sn.Snapshot(b)
+	if img == nil {
+		return
+	}
+	// Честная полупрозрачность: back непрозрачен (premultiplied A=255).
+	// Умножаем ВСЕ каналы на dockGhostAlpha/255 → premultiplied-цвет с ~70%
+	// альфой; при блите Over это настоящее 70%-смешение с фоном под призраком.
+	pix := img.Pix
+	for i := range pix {
+		pix[i] = uint8(uint32(pix[i]) * dockGhostAlpha / 255)
+	}
+	m.ghostImg = img
+	m.ghostW = b.Dx()
+	m.ghostH = b.Dy()
+	m.ghostPane = p
 }
 
 // ─── Тема ───────────────────────────────────────────────────────────────────
