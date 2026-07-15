@@ -223,6 +223,65 @@ func TestDockFlyout_CloseButton(t *testing.T) {
 	}
 }
 
+// TestDockFlyout_DragGhostIsPaneNotManager: drag выехавшей (auto-hide) панели за
+// титлбар даёт КОРРЕКТНЫЙ призрак — снимок самой панели (её контента), а не
+// «пол-экрана» с чужими панелями. Регресс: раньше DismissAll(p) прятал панель до
+// снимка, и призрак захватывал фон центра. Проверяем: (1) размер призрака ≈
+// ширине панели (не менеджера); (2) в позиции призрака — контент панели
+// (зелёный), а не центр (синий).
+func TestDockFlyout_DragGhostIsPaneNotManager(t *testing.T) {
+	blue := color.RGBA{R: 0, G: 0, B: 180, A: 255}  // центр
+	green := color.RGBA{R: 0, G: 200, B: 0, A: 255} // контент панели
+
+	m := widget.NewDockManager()
+	m.SetCenter(widget.NewPanel(blue))
+	m.SetBounds(image.Rect(0, 0, 400, 300))
+	pL := widget.NewDockPane("l", "Left", widget.NewPanel(green))
+	m.AddPane(pL, widget.DockLeft)
+	pL.Unpin() // auto-hide → ярлык у левого края
+
+	eng := engine.New(400, 300, 60)
+	eng.SetTooltipsEnabled(false)
+	eng.SetRoot(m)
+	eng.Start()
+	defer eng.Stop()
+
+	// Открываем flyout кликом по имени ярлыка (у верхнего края левой полоски).
+	eng.SendMouseButton(10, 12, widget.MouseLeft, true)
+	eng.SendMouseButton(10, 12, widget.MouseLeft, false)
+	if !pL.IsVisible() {
+		t.Fatal("flyout не выехал")
+	}
+
+	// Захват титлбара выехавшей панели (flyout Left: x[22,222], титлбар y[0,24]) и
+	// перенос призрака на центр.
+	eng.SendMouseButton(40, 10, widget.MouseLeft, true)
+	eng.SendMouseMove(150, 100)
+	eng.SendMouseMove(250, 150)
+
+	img := compositeFrames(t, eng, 400, 300)
+
+	// (1) Размер призрака ≈ панели (ширина ~200), а не менеджера (400).
+	gw, gh := m.GhostSize()
+	if gw <= 0 || gh <= 0 {
+		t.Fatalf("призрак не захвачен: %dx%d", gw, gh)
+	}
+	if gw >= 320 {
+		t.Fatalf("ширина призрака %d — почти как менеджер (400); ждали ≈ ширину панели (~200)", gw)
+	}
+
+	// (2) В контентной части призрака — зелёный снимок панели, а не синий центр.
+	// Призрак: offX=grabDX=40-22=18, top-left=(250-18,150-10)=(232,140).
+	// Точка (280,250): контент панели (ниже титлбара), над синим центром.
+	px := img.RGBAAt(280, 250)
+	if px.G < 100 {
+		t.Fatalf("в позиции призрака нет пикселей панели: %v (ждали зелёный контент, не синий центр)", px)
+	}
+	if px.B > 130 {
+		t.Fatalf("призрак содержит пиксели центра/чужой панели: B=%d слишком высок (%v)", px.B, px)
+	}
+}
+
 // TestDockFlyout_FloatButton: кнопка float в титлбаре выехавшей панели делает
 // её плавающей (state Floating) и завершает flyout.
 func TestDockFlyout_FloatButton(t *testing.T) {

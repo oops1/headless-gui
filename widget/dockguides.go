@@ -58,37 +58,18 @@ func dockGuideHit(b image.Rectangle, x, y int) (DockSide, bool) {
 	return DockLeft, false
 }
 
-// dockPreviewRect возвращает прямоугольник предпросмотра целевого региона при
-// доке на сторону side (полупрозрачная подсветка того места, куда встанет
-// панель). size — текущий пиксельный размер стороны.
-func dockPreviewRect(b image.Rectangle, side DockSide, size int) image.Rectangle {
-	if size <= 0 {
-		size = 180
-	}
-	switch side {
-	case DockLeft:
-		return image.Rect(b.Min.X, b.Min.Y, b.Min.X+size, b.Max.Y)
-	case DockRight:
-		return image.Rect(b.Max.X-size, b.Min.Y, b.Max.X, b.Max.Y)
-	case DockTop:
-		return image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+size)
-	case DockBottom:
-		return image.Rect(b.Min.X, b.Max.Y-size, b.Max.X, b.Max.Y)
-	}
-	return image.Rectangle{}
-}
-
 // drawDockGuides рисует четыре кнопки-направляющие и (при наведении) предпросмотр
-// целевого региона. accent — акцентный цвет темы; face/border — цвета кнопки.
-func drawDockGuides(ctx DrawContext, b image.Rectangle, hovered DockSide, hoverOK bool, previewSize int, accent, face, border color.RGBA) {
+// целевого региона. previewRect — прямоугольник региона, куда встанет панель при
+// доке на hovered-сторону; вычисляется менеджером (DockManager.previewRegion) как
+// ЕДИНЫЙ источник истины, совпадающий с фактической раскладкой после дропа.
+// accent — акцентный цвет темы; face/border — цвета кнопки.
+func drawDockGuides(ctx DrawContext, b image.Rectangle, hovered DockSide, hoverOK bool, previewRect image.Rectangle, accent, face, border color.RGBA) {
 	// Предпросмотр целевого региона под наведённой направляющей.
-	if hoverOK {
-		pr := dockPreviewRect(b, hovered, previewSize)
-		if !pr.Empty() {
-			hl := color.RGBA{R: accent.R, G: accent.G, B: accent.B, A: 70}
-			ctx.FillRectAlpha(pr.Min.X, pr.Min.Y, pr.Dx(), pr.Dy(), hl)
-			ctx.DrawBorder(pr.Min.X, pr.Min.Y, pr.Dx(), pr.Dy(), accent)
-		}
+	if hoverOK && !previewRect.Empty() {
+		pr := previewRect
+		hl := color.RGBA{R: accent.R, G: accent.G, B: accent.B, A: 70}
+		ctx.FillRectAlpha(pr.Min.X, pr.Min.Y, pr.Dx(), pr.Dy(), hl)
+		ctx.DrawBorder(pr.Min.X, pr.Min.Y, pr.Dx(), pr.Dy(), accent)
 	}
 	for _, s := range []DockSide{DockLeft, DockRight, DockTop, DockBottom} {
 		r := dockGuideRect(b, s)

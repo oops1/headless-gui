@@ -534,7 +534,13 @@ func (p *DockPane) OnMouseButton(e MouseEvent) bool {
 		}
 		// Drag за титлбар.
 		if p.titleDragHit(e.X, e.Y) {
-			DismissAll(p)
+			// Закрываем dropdown/popup ВНУТРИ содержимого панели, но НЕ её
+			// собственный flyout (DismissAll(p) вызвал бы p.Dismiss()→closeFlyout,
+			// панель спряталась бы ДО снимка призрака — дефект «сломанный призрак»).
+			// Завершение flyout-состояния для drag'а берёт на себя beginPaneDrag.
+			for _, c := range p.Children() {
+				DismissAll(c)
+			}
 			p.dragging = true
 			p.dragMoved = false
 			p.grabDX = e.X - p.bounds.Min.X

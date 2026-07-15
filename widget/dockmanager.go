@@ -72,6 +72,13 @@ const (
 	// на dockGhostAlpha/255 даёт premultiplied-цвет с ~70% альфой — при блите
 	// Over это честное 70%-смешение снимка с фоном под призраком.
 	dockGhostAlpha = 178
+
+	// dockGhostMaxW/H — потолок ЛОГИЧЕСКОГО размера призрака перетаскивания.
+	// Ограничивает снимок широкой/высокой панели (flyout на всю ось), чтобы
+	// призрак был компактным, как при обычном drag'е; типичные панели (уже/ниже)
+	// не клэмпятся.
+	dockGhostMaxW = 420
+	dockGhostMaxH = 360
 )
 
 // dockTabInfo — прямоугольник таба/ярлыка и связанная панель (для hit-теста).
@@ -137,6 +144,12 @@ type DockManager struct {
 	resizeSide  DockSide
 	hoverGutter DockSide
 	hoverGutOK  bool
+
+	// Кнопки ярлыка auto-hide (📌 pin / ✕ close) — release-семантика.
+	armedStripPane *DockPane
+	armedStripBtn  dockPaneBtn
+	hoverStripPane *DockPane
+	hoverStripBtn  dockPaneBtn
 
 	// Drag&Dock.
 	dragPane  *DockPane
@@ -590,37 +603,18 @@ func (m *DockManager) layout() {
 	m.workRect = work
 
 	// 2) Регионы сторон (VS-порядок: Left/Right полной высоты, Top/Bottom между).
+	// Единый источник истины: computeSideRegions вычисляет регионы для набора
+	// занятых сторон — ТЕ ЖЕ формулы использует превью дропа (previewRegion), так
+	// что подсветка направляющей совпадает с фактической вставкой панели.
 	g := m.gutterSize()
-	x0, y0, x1, y1 := work.Min.X, work.Min.Y, work.Max.X, work.Max.Y
-
-	// Размер стороны для РАСКЛАДКИ клэмпится под доступное место, но сохранённый
-	// m.sizes НЕ переписывается — так при ресайзе менеджера вниз-вверх размеры
-	// сторон восстанавливаются (менять их могут лишь SetSideSize/ресайз кромки).
-	if len(m.dockedPanes(DockLeft)) > 0 {
-		sz := m.clampSideSizeFor(DockLeft, x1-x0)
-		m.regions[int(DockLeft)] = image.Rect(x0, y0, x0+sz, y1)
-		m.gutters[int(DockLeft)] = image.Rect(x0+sz, y0, x0+sz+g, y1)
-		x0 += sz + g
+	var occ [4]bool
+	for s := DockLeft; s <= DockRight; s++ {
+		occ[int(s)] = len(m.dockedPanes(s)) > 0
 	}
-	if len(m.dockedPanes(DockRight)) > 0 {
-		sz := m.clampSideSizeFor(DockRight, x1-x0)
-		m.regions[int(DockRight)] = image.Rect(x1-sz, y0, x1, y1)
-		m.gutters[int(DockRight)] = image.Rect(x1-sz-g, y0, x1-sz, y1)
-		x1 -= sz + g
+	m.regions, m.centerRect = m.computeSideRegions(work, occ)
+	for _, s := range []DockSide{DockLeft, DockRight, DockTop, DockBottom} {
+		m.gutters[int(s)] = gutterForRegion(m.regions[int(s)], s, g)
 	}
-	if len(m.dockedPanes(DockTop)) > 0 {
-		sz := m.clampSideSizeFor(DockTop, y1-y0)
-		m.regions[int(DockTop)] = image.Rect(x0, y0, x1, y0+sz)
-		m.gutters[int(DockTop)] = image.Rect(x0, y0+sz, x1, y0+sz+g)
-		y0 += sz + g
-	}
-	if len(m.dockedPanes(DockBottom)) > 0 {
-		sz := m.clampSideSizeFor(DockBottom, y1-y0)
-		m.regions[int(DockBottom)] = image.Rect(x0, y1-sz, x1, y1)
-		m.gutters[int(DockBottom)] = image.Rect(x0, y1-sz-g, x1, y1-sz)
-		y1 -= sz + g
-	}
-	m.centerRect = image.Rect(x0, y0, x1, y1)
 
 	// 3) Центр.
 	if m.center != nil {
@@ -671,6 +665,121 @@ func (m *DockManager) clampSideSizeFor(side DockSide, avail int) int {
 		sz = 0
 	}
 	return sz
+}
+
+// computeSideRegions — ЕДИНЫЙ расчёт регионов сторон и центра в VS-порядке
+// (Left/Right полной высоты, Top/Bottom между) для набора занятых сторон occ в
+// пределах work. Размеры сторон берутся из m.sizes через clampSideSizeFor (тот
+// же клэмп, что и в раскладке). Используется и layout'ом (с фактической
+// занятостью), и превью дропа previewRegion (с гипотетической) — поэтому
+// подсветка направляющей = фактическому месту вставки панели.
+func (m *DockManager) computeSideRegions(work image.Rectangle, occ [4]bool) (regions [4]image.Rectangle, center image.Rectangle) {
+	g := m.gutterSize()
+	x0, y0, x1, y1 := work.Min.X, work.Min.Y, work.Max.X, work.Max.Y
+	if occ[int(DockLeft)] {
+		sz := m.clampSideSizeFor(DockLeft, x1-x0)
+		regions[int(DockLeft)] = image.Rect(x0, y0, x0+sz, y1)
+		x0 += sz + g
+	}
+	if occ[int(DockRight)] {
+		sz := m.clampSideSizeFor(DockRight, x1-x0)
+		regions[int(DockRight)] = image.Rect(x1-sz, y0, x1, y1)
+		x1 -= sz + g
+	}
+	if occ[int(DockTop)] {
+		sz := m.clampSideSizeFor(DockTop, y1-y0)
+		regions[int(DockTop)] = image.Rect(x0, y0, x1, y0+sz)
+		y0 += sz + g
+	}
+	if occ[int(DockBottom)] {
+		sz := m.clampSideSizeFor(DockBottom, y1-y0)
+		regions[int(DockBottom)] = image.Rect(x0, y1-sz, x1, y1)
+		y1 -= sz + g
+	}
+	center = image.Rect(x0, y0, x1, y1)
+	return
+}
+
+// gutterForRegion возвращает прямоугольник кромки-ресайза для региона стороны
+// (толщиной g, снаружи региона к центру). Пустой регион → пустая кромка.
+func gutterForRegion(region image.Rectangle, side DockSide, g int) image.Rectangle {
+	if region.Empty() {
+		return image.Rectangle{}
+	}
+	switch side {
+	case DockLeft:
+		return image.Rect(region.Max.X, region.Min.Y, region.Max.X+g, region.Max.Y)
+	case DockRight:
+		return image.Rect(region.Min.X-g, region.Min.Y, region.Min.X, region.Max.Y)
+	case DockTop:
+		return image.Rect(region.Min.X, region.Max.Y, region.Max.X, region.Max.Y+g)
+	case DockBottom:
+		return image.Rect(region.Min.X, region.Min.Y-g, region.Max.X, region.Min.Y)
+	}
+	return image.Rectangle{}
+}
+
+// previewRegion возвращает регион, который сторона side получит, если панель p
+// пришвартовать к ней сейчас (dockPane(p, side)). Занятость сторон берётся из
+// текущей раскладки, но: (а) target-сторона считается занятой; (б) если p —
+// единственная docked-панель своей текущей стороны, эта сторона освобождается
+// (после dockPane её регион исчезает). Так превью совпадает с bounds панели
+// после дропа — с точностью до полосы табов при попадании в стопку (см.
+// контракт в PreviewRect).
+func (m *DockManager) previewRegion(p *DockPane, side DockSide) image.Rectangle {
+	if !validSide(side) {
+		return image.Rectangle{}
+	}
+	var occ [4]bool
+	for s := DockLeft; s <= DockRight; s++ {
+		occ[int(s)] = len(m.dockedPanes(s)) > 0
+	}
+	// Если p сейчас docked и одна на своей стороне — при доке она уедет, и её
+	// прежняя сторона опустеет (влияет на геометрию соседних регионов).
+	if p != nil && p.state == PaneDocked && validSide(p.side) {
+		cnt := 0
+		for _, q := range m.dockedPanes(p.side) {
+			if q != p {
+				cnt++
+			}
+		}
+		occ[int(p.side)] = cnt > 0
+	}
+	occ[int(side)] = true
+	regions, _ := m.computeSideRegions(m.workRect, occ)
+	return regions[int(side)]
+}
+
+// PreviewRect возвращает прямоугольник превью дропа для перетаскиваемой сейчас
+// панели при доке на сторону side (пустой — если drag не идёт или side неверна).
+//
+// КОНТРАКТ (превью == результат): PreviewRect(side) равен региону, который
+// сторона side займёт после дропа. Bounds самой панели после дропа равны этому
+// региону ТОЧНО, если панель окажется единственной docked на стороне; при
+// попадании в СТОПКУ (на стороне уже есть docked-панель) bounds панели —
+// регион МИНУС нижняя полоса табов высотой TabStripHeight (панель-контент над
+// табами). Превью в обоих случаях подсвечивает полный регион стороны.
+// Экспонируется для тестов и внешних инструментов раскладки.
+func (m *DockManager) PreviewRect(side DockSide) image.Rectangle {
+	if m.dragPane == nil {
+		return image.Rectangle{}
+	}
+	return m.previewRegion(m.dragPane, side)
+}
+
+// GhostSize возвращает ЛОГИЧЕСКИЙ размер кэшированного призрака перетаскивания
+// (0,0 — если снимок ещё не взят). Экспонируется для тестов.
+func (m *DockManager) GhostSize() (w, h int) { return m.ghostW, m.ghostH }
+
+// StripButtonRects возвращает прямоугольники кнопок 📌 pin / ✕ close на ярлыке
+// auto-hide панели p (ok=false, если у p сейчас нет ярлыка). Для тестов.
+func (m *DockManager) StripButtonRects(p *DockPane) (pinR, closeR image.Rectangle, ok bool) {
+	info, s, found := m.stripInfoForPane(p)
+	if !found {
+		return image.Rectangle{}, image.Rectangle{}, false
+	}
+	pinR, closeR = stripLabelBtnRects(info.rect, s)
+	return pinR, closeR, true
 }
 
 // layoutSideRegion раскладывает активную панель стороны и вычисляет табы стопки.
@@ -736,14 +845,19 @@ func (m *DockManager) layoutStripLabels(s DockSide) {
 	if len(panes) == 0 {
 		return
 	}
+	// btnArea — место под две компактные кнопки (📌 pin / ✕ close): для
+	// вертикальной полосы (Left/Right) снизу ярлыка, для горизонтальной
+	// (Top/Bottom) справа. Резервируем его в основной оси ярлыка, чтобы хит имени
+	// (toggle flyout) не конфликтовал с хитами кнопок.
+	btnArea := 2*dockStripBtnSize + dockPaneBtnGap + 4
 	var infos []dockTabInfo
 	if horizontalSide(s) {
-		// Вертикальная полоса: ярлыки стопкой сверху вниз, высота ≈ длине текста.
+		// Вертикальная полоса: ярлыки стопкой сверху вниз, высота ≈ текст + кнопки.
 		y := strip.Min.Y + 2
 		for _, p := range panes {
-			h := MeasureUIText(p.Title, DefaultFontSizePt) + 16
-			if h < 24 {
-				h = 24
+			h := MeasureUIText(p.Title, DefaultFontSizePt) + 16 + btnArea
+			if h < 24+btnArea {
+				h = 24 + btnArea
 			}
 			if y+h > strip.Max.Y {
 				h = strip.Max.Y - y
@@ -758,12 +872,12 @@ func (m *DockManager) layoutStripLabels(s DockSide) {
 			y += h + 4
 		}
 	} else {
-		// Горизонтальная полоса: ярлыки слева направо.
+		// Горизонтальная полоса: ярлыки слева направо, ширина ≈ текст + кнопки.
 		x := strip.Min.X + 2
 		for _, p := range panes {
-			w := MeasureUIText(p.Title, DefaultFontSizePt) + 16
-			if w < 40 {
-				w = 40
+			w := MeasureUIText(p.Title, DefaultFontSizePt) + 16 + btnArea
+			if w < 40+btnArea {
+				w = 40 + btnArea
 			}
 			if x+w > strip.Max.X {
 				w = strip.Max.X - x
@@ -779,6 +893,32 @@ func (m *DockManager) layoutStripLabels(s DockSide) {
 		}
 	}
 	m.stripInfo[int(s)] = infos
+}
+
+// dockStripBtnSize — сторона компактной кнопки на ярлыке auto-hide (px).
+const dockStripBtnSize = 14
+
+// stripLabelBtnRects возвращает прямоугольники кнопок 📌 pin и ✕ close на ярлыке
+// auto-hide (rect — прямоугольник ярлыка, s — сторона). Для вертикальной полосы
+// (Left/Right) кнопки внизу (pin над close), для горизонтальной (Top/Bottom) —
+// справа (pin левее close).
+func stripLabelBtnRects(rect image.Rectangle, s DockSide) (pinR, closeR image.Rectangle) {
+	bs := dockStripBtnSize
+	gap := dockPaneBtnGap
+	if horizontalSide(s) {
+		x := rect.Min.X + (rect.Dx()-bs)/2
+		yClose := rect.Max.Y - bs - 1
+		yPin := yClose - bs - gap
+		pinR = image.Rect(x, yPin, x+bs, yPin+bs)
+		closeR = image.Rect(x, yClose, x+bs, yClose+bs)
+	} else {
+		y := rect.Min.Y + (rect.Dy()-bs)/2
+		xClose := rect.Max.X - bs - 1
+		xPin := xClose - bs - gap
+		pinR = image.Rect(xPin, y, xPin+bs, y+bs)
+		closeR = image.Rect(xClose, y, xClose+bs, y+bs)
+	}
+	return
 }
 
 // applyVisibility выставляет видимость/активность панелей по их состоянию.
@@ -882,6 +1022,19 @@ func (m *DockManager) closeFlyout() {
 // ─── Drag&Dock (вызывается из DockPane) ─────────────────────────────────────
 
 func (m *DockManager) beginPaneDrag(p *DockPane, x, y int) {
+	// Drag из выехавшего flyout: панель p сейчас — flyoutPane (оверлей поверх
+	// центра). Мгновенно доигрываем reveal (останавливаем анимацию, reveal=1),
+	// чтобы к моменту снимка панель была НАРИСОВАНА целиком на своём месте —
+	// иначе снимок захватит фон/чужие панели из нераскрытой части («сломанный
+	// призрак»). flyoutPane остаётся p (панель видима как flyout, ярлык на месте),
+	// авто-сворачивание flyout на время drag'а подавлено (см. OnMouseMove).
+	if m.flyoutPane == p {
+		if m.flyoutAnim != nil {
+			m.flyoutAnim.Stop()
+			m.flyoutAnim = nil
+		}
+		m.flyoutReveal = 1
+	}
 	m.dragPane = p
 	m.dragX, m.dragY = x, y
 	m.dragGuide, m.dragGuOK = dockGuideHit(m.bounds, x, y)
@@ -960,16 +1113,54 @@ func (m *DockManager) gutterAt(x, y int) (DockSide, bool) {
 	return DockLeft, false
 }
 
+// stripLabelAt возвращает панель, по ИМЕНИ ярлыка которой попала точка (для
+// toggle flyout). Попадание в кнопки 📌/✕ ярлыка сюда НЕ засчитывается (их
+// обрабатывает stripButtonAt) — хиты не конфликтуют.
 func (m *DockManager) stripLabelAt(x, y int) *DockPane {
 	pt := image.Pt(x, y)
 	for _, s := range []DockSide{DockLeft, DockRight, DockTop, DockBottom} {
 		for _, info := range m.stripInfo[int(s)] {
-			if pt.In(info.rect) {
-				return info.pane
+			if !pt.In(info.rect) {
+				continue
 			}
+			pinR, closeR := stripLabelBtnRects(info.rect, s)
+			if pt.In(pinR) || pt.In(closeR) {
+				return nil // клик по кнопке — не toggle flyout
+			}
+			return info.pane
 		}
 	}
 	return nil
+}
+
+// stripButtonAt возвращает панель и кнопку (📌 pin / ✕ close) ярлыка auto-hide
+// под точкой (x, y), либо (nil, dockBtnNone).
+func (m *DockManager) stripButtonAt(x, y int) (*DockPane, dockPaneBtn) {
+	pt := image.Pt(x, y)
+	for _, s := range []DockSide{DockLeft, DockRight, DockTop, DockBottom} {
+		for _, info := range m.stripInfo[int(s)] {
+			pinR, closeR := stripLabelBtnRects(info.rect, s)
+			if pt.In(pinR) {
+				return info.pane, dockBtnPin
+			}
+			if pt.In(closeR) {
+				return info.pane, dockBtnClose
+			}
+		}
+	}
+	return nil, dockBtnNone
+}
+
+// stripInfoForPane находит текущий ярлык auto-hide панели p (и его сторону).
+func (m *DockManager) stripInfoForPane(p *DockPane) (dockTabInfo, DockSide, bool) {
+	for _, s := range []DockSide{DockLeft, DockRight, DockTop, DockBottom} {
+		for _, info := range m.stripInfo[int(s)] {
+			if info.pane == p {
+				return info, s, true
+			}
+		}
+	}
+	return dockTabInfo{}, DockLeft, false
 }
 
 func (m *DockManager) tabAt(x, y int) (DockSide, *DockPane) {
@@ -997,13 +1188,19 @@ func (m *DockManager) SetCaptureManager(cm CaptureManager) {
 	}
 }
 
-// WantsCapture захватывает мышь при нажатии на кромку-ресайз.
+// WantsCapture захватывает мышь при нажатии на кромку-ресайз или на кнопку
+// ярлыка auto-hide (📌/✕ — release-семантика требует получить release).
 func (m *DockManager) WantsCapture(e MouseEvent) bool {
 	if e.Button != MouseLeft || !e.Pressed {
 		return false
 	}
-	_, ok := m.gutterAt(e.X, e.Y)
-	return ok
+	if _, ok := m.gutterAt(e.X, e.Y); ok {
+		return true
+	}
+	if pane, _ := m.stripButtonAt(e.X, e.Y); pane != nil {
+		return true
+	}
+	return false
 }
 
 // Cursor возвращает resize-курсор над кромками.
@@ -1029,7 +1226,14 @@ func (m *DockManager) OnMouseButton(e MouseEvent) bool {
 			m.resizeSide = s
 			return true
 		}
-		// Ярлык auto-hide → выезд/сворачивание flyout.
+		// Кнопка ярлыка auto-hide (📌/✕) — «взводим», колбэк на release.
+		if pane, btn := m.stripButtonAt(e.X, e.Y); pane != nil {
+			m.armedStripPane = pane
+			m.armedStripBtn = btn
+			m.Invalidate()
+			return true
+		}
+		// Ярлык auto-hide (имя) → выезд/сворачивание flyout.
 		if p := m.stripLabelAt(e.X, e.Y); p != nil {
 			m.toggleFlyout(p)
 			return true
@@ -1049,6 +1253,37 @@ func (m *DockManager) OnMouseButton(e MouseEvent) bool {
 		}
 		return true
 	}
+	// Кнопка ярлыка auto-hide: срабатывает, если release над той же кнопкой.
+	if m.armedStripPane != nil {
+		pane := m.armedStripPane
+		btn := m.armedStripBtn
+		m.armedStripPane = nil
+		m.armedStripBtn = dockBtnNone
+		m.Invalidate()
+		if m.capMgr != nil {
+			m.capMgr.ReleaseCapture()
+		}
+		over := false
+		if info, s, ok := m.stripInfoForPane(pane); ok {
+			pinR, closeR := stripLabelBtnRects(info.rect, s)
+			pt := image.Pt(e.X, e.Y)
+			switch btn {
+			case dockBtnPin:
+				over = pt.In(pinR)
+			case dockBtnClose:
+				over = pt.In(closeR)
+			}
+		}
+		if over {
+			switch btn {
+			case dockBtnPin:
+				pane.Pin() // развернуть = вернуть в док
+			case dockBtnClose:
+				pane.Close()
+			}
+		}
+		return true
+	}
 	return false
 }
 
@@ -1064,11 +1299,20 @@ func (m *DockManager) OnMouseMove(x, y int) {
 		m.hoverGutter, m.hoverGutOK = s, ok
 		m.Invalidate()
 	}
+	// hover кнопок ярлыков auto-hide (📌/✕) — для подсветки.
+	if !m.resizing && m.dragPane == nil {
+		hp, hb := m.stripButtonAt(x, y)
+		if hp != m.hoverStripPane || hb != m.hoverStripBtn {
+			m.hoverStripPane, m.hoverStripBtn = hp, hb
+			m.Invalidate()
+		}
+	}
 	// Прячем flyout при уходе мыши за пределы зоны удержания (union ярлыка и
 	// выехавшей панели, расширенный на гистерезис). Пока курсор в этой зоне —
 	// flyout остаётся открытым, чтобы можно было дойти до содержимого и кнопки
-	// pin (📌), не схлопнув панель по дороге от ярлыка.
-	if m.flyoutPane != nil && !m.pointInFlyoutHold(x, y) {
+	// pin (📌), не схлопнув панель по дороге от ярлыка. Во время drag'а самой
+	// выехавшей панели авто-сворачивание подавлено (панель ведётся как призрак).
+	if m.flyoutPane != nil && m.dragPane != m.flyoutPane && !m.pointInFlyoutHold(x, y) {
 		m.closeFlyout()
 	}
 }
@@ -1234,11 +1478,52 @@ func (m *DockManager) drawStrips(ctx DrawContext) {
 			r := info.rect
 			ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), m.TabBG)
 			ctx.DrawBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), m.BorderColor)
+			// Имя клипуем в область БЕЗ кнопок (сверху для верт., слева для гориз.).
+			pinR, _ := stripLabelBtnRects(r, s)
+			nameArea := r
+			if horizontalSide(s) {
+				nameArea.Max.Y = pinR.Min.Y - 1
+			} else {
+				nameArea.Max.X = pinR.Min.X - 1
+			}
 			save := ctx.Clip()
-			ctx.SetClip(r.Intersect(save))
+			ctx.SetClip(nameArea.Intersect(save))
 			ctx.DrawText(info.pane.Title, r.Min.X+3, r.Min.Y+(min2(r.Dy(), 18)-13)/2+2, m.TabText)
 			ctx.SetClip(save)
+			m.drawStripButtons(ctx, info, s)
 		}
+	}
+}
+
+// drawStripButtons рисует компактные кнопки 📌 pin и ✕ close на ярлыке auto-hide
+// (пиксельные глифы по образцу DockPane.drawButtons; hover/armed подсветка).
+func (m *DockManager) drawStripButtons(ctx DrawContext, info dockTabInfo, s DockSide) {
+	pinR, closeR := stripLabelBtnRects(info.rect, s)
+	col := m.TabText
+	lit := func(kind dockPaneBtn) bool {
+		return (m.hoverStripPane == info.pane && m.hoverStripBtn == kind) ||
+			(m.armedStripPane == info.pane && m.armedStripBtn == kind)
+	}
+
+	// pin: две вертикальные чёрточки (кнопка «приколоть» = развернуть в док).
+	if lit(dockBtnPin) {
+		ctx.FillRectAlpha(pinR.Min.X, pinR.Min.Y, pinR.Dx(), pinR.Dy(), color.RGBA{R: 255, G: 255, B: 255, A: 40})
+	}
+	pcx, pcy := pinR.Min.X+pinR.Dx()/2, pinR.Min.Y+pinR.Dy()/2
+	ctx.DrawVLine(pcx, pcy-3, 7, col)
+	ctx.DrawVLine(pcx+1, pcy-3, 7, col)
+	ctx.DrawHLine(pcx-2, pcy-3, 5, col)
+
+	// close: крест ✕ (hover — красный фон, белый глиф).
+	ccol := col
+	if lit(dockBtnClose) {
+		ctx.FillRectAlpha(closeR.Min.X, closeR.Min.Y, closeR.Dx(), closeR.Dy(), color.RGBA{R: 232, G: 17, B: 35, A: 255})
+		ccol = color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	}
+	ccx, ccy := closeR.Min.X+closeR.Dx()/2, closeR.Min.Y+closeR.Dy()/2
+	for i := -3; i <= 3; i++ {
+		ctx.SetPixel(ccx+i, ccy+i, ccol)
+		ctx.SetPixel(ccx+i, ccy-i, ccol)
 	}
 }
 
@@ -1280,9 +1565,11 @@ func (m *DockManager) DrawOverlay(ctx DrawContext) {
 		return
 	}
 	side, ok := dockGuideHit(m.bounds, m.dragX, m.dragY)
-	prevSize := 0
+	// Превью целевого региона считаем ЕДИНЫМ источником истины (previewRegion) —
+	// та же геометрия, что применит layout после дропа (см. PreviewRect).
+	var preview image.Rectangle
 	if ok {
-		prevSize = m.sizes[int(side)]
+		preview = m.previewRegion(m.dragPane, side)
 	}
 	// Призрак: полупрозрачный СНИМОК панели у курсора, как в Visual Studio
 	// (для docked-источника — панель на месте; floating ведём вживую без призрака).
@@ -1293,7 +1580,16 @@ func (m *DockManager) DrawOverlay(ctx DrawContext) {
 		if m.ghostImg == nil || m.ghostPane != p {
 			m.captureGhost(ctx, p)
 		}
-		gx, gy := m.dragX-p.grabDX, m.dragY-p.grabDY
+		// Смещение призрака под курсором клэмпим до размера призрака, чтобы при
+		// клэмпе большого снимка (широкий flyout) курсор оставался над призраком.
+		offX, offY := p.grabDX, p.grabDY
+		if offX > m.ghostW {
+			offX = m.ghostW / 2
+		}
+		if offY > m.ghostH {
+			offY = m.ghostH / 2
+		}
+		gx, gy := m.dragX-offX, m.dragY-offY
 		if m.ghostImg != nil {
 			// DrawImageScaled с ЛОГИЧЕСКИМ размером: снимок физический, при HiDPI
 			// он корректно растягивается обратно на scale. Снимок предумножен
@@ -1305,14 +1601,27 @@ func (m *DockManager) DrawOverlay(ctx DrawContext) {
 			// прямоугольник-призрак.
 			w, h := 200, 140
 			if !p.bounds.Empty() {
-				w, h = p.bounds.Dx(), p.bounds.Dy()
+				w, h = clampGhostSize(p.bounds.Dx(), p.bounds.Dy())
 			}
 			ghost := color.RGBA{R: m.AccentColor.R, G: m.AccentColor.G, B: m.AccentColor.B, A: 60}
 			ctx.FillRectAlpha(gx, gy, w, h, ghost)
 			ctx.DrawBorder(gx, gy, w, h, m.AccentColor)
 		}
 	}
-	drawDockGuides(ctx, m.bounds, side, ok, prevSize, m.AccentColor, m.GuideFace, m.BorderColor)
+	drawDockGuides(ctx, m.bounds, side, ok, preview, m.AccentColor, m.GuideFace, m.BorderColor)
+}
+
+// clampGhostSize ограничивает размер призрака разумным максимумом, чтобы снимок
+// широкой/высокой панели (напр., flyout Top на всю ширину менеджера) не давал
+// призрак «в пол-экрана» — как для обычного drag'а он должен быть компактным.
+func clampGhostSize(w, h int) (int, int) {
+	if w > dockGhostMaxW {
+		w = dockGhostMaxW
+	}
+	if h > dockGhostMaxH {
+		h = dockGhostMaxH
+	}
+	return w, h
 }
 
 // captureGhost делает снимок области панели p и кэширует полупрозрачный призрак
@@ -1328,6 +1637,10 @@ func (m *DockManager) captureGhost(ctx DrawContext, p *DockPane) {
 	if b.Empty() {
 		return
 	}
+	// Клэмпим область снимка к разумному максимуму, привязка — левый-верхний угол
+	// панели (там титлбар). Широкий flyout не даёт призрак «в пол-экрана».
+	cw, ch := clampGhostSize(b.Dx(), b.Dy())
+	b = image.Rect(b.Min.X, b.Min.Y, b.Min.X+cw, b.Min.Y+ch)
 	img := sn.Snapshot(b)
 	if img == nil {
 		return
