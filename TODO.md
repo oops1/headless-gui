@@ -57,10 +57,17 @@
       Пилоты: ToggleSwitch (скольжение ручки), ProgressBar.AnimateValue,
       fade-in затемнения диалогов; Classic3D — мгновенно. Дальше по теме:
       плавный скролл с инерцией (ниже), нагрузочный тест на сотни анимаций.
-- [ ] **Плавный скролл** — пиксельные дельты тачпада (Wayland axis уже
-      дискретизируем — отдавать точное значение), инерция в ScrollView.
-- [ ] **SVG-иконки** — темизируемые иконки (перекраска под тему), парсер
-      подмножества SVG (path/fill) поверх существующего AA-растеризатора.
+- [x] **Плавный скролл** — сделано 2026-07-12: SendMouseWheelPixels (физ.
+      координаты, float64-дельты, фолбэк на тики), OnMouseWheelPixels у
+      ScrollView (инерция-«маховик» через AnimateOwned, прерывание вводом,
+      Classic3D мгновенно), ListView/TextBox — попиксельно с субпиксельным
+      накоплением; Win32 WM_MOUSEWHEEL точные дельты, Wayland axis
+      wl_fixed→пиксели. X11 — тики (кнопки 4/5), macOS колесо — позже.
+- [x] **SVG-иконки** — сделано 2026-07-12: пакет widget/svg (парсер path
+      M..Z/дуги/фигуры/transform/fill-rule/currentColor, растеризация через
+      x/image/vector с even-odd и кэшем) + виджет SVGIcon (перекраска под
+      тему/Tint, пропорции) + XAML-тег <SVGIcon Source Color Tint>.
+      Ограничения: без градиентов/clipPath/text; обводка упрощённая.
 - [~] **Системные уведомления** — Windows сделано 2026-07-11: balloon через
       Shell_NotifyIcon (NIF_INFO, значок по severity), `Window.ShowBalloon` +
       `SetOnBalloonClick`. Осталось: D-Bus org.freedesktop.Notifications
@@ -73,10 +80,30 @@
       Live-превью окна в панели задач/Aero Peek: WM_PRINTCLIENT из кэша кадра
       (+ опциональный iconic-путь DWM за `HEADLESS_GUI_ICONIC_PREVIEW=1`).
       На Linux/macOS/Wayland — no-op-заглушки. Трей на X11/macOS — позже.
-- [ ] **Splitter** — контрол-разделитель между двумя панелями: перетаскивание
-      мышью меняет доли (горизонтальный/вертикальный), курсор SizeWE/SizeNS,
-      MinSize сторон, двойной клик — сброс/коллапс панели. XAML-тег Splitter
-      (или GridSplitter в Grid). Основа для док-layout'ов и Toolbox ниже.
+- [ ] **Трей + уведомления на Linux/macOS** — сейчас `trayHost` реализует
+      только `Win32Window`; на Linux/Wayland/macOS весь трей-API
+      (`SetTrayIcon`/`ShowBalloon`/`HideToTray`/`SetTrayMenu`/…) — вежливые
+      no-op. Довести по платформам (по возрастанию цены):
+      1. **Linux balloon** — `org.freedesktop.Notifications` (метод `Notify`)
+         через D-Bus session bus. Самый полезный и предсказуемый (это путь
+         `notify-send`). Грабли: D-Bus. Готовой либы нет, новую зависимость
+         (`godbus/dbus`) правило zero-new-deps не разрешает → писать D-Bus
+         поверх unix-сокета руками (как XDND, но крупнее). Сделать первым.
+      2. **Linux трей** (иконка+меню) — StatusNotifierItem по D-Bus +
+         `com.canonical.dbusmenu` (иконка — ARGB32-pixmap). Старый XEmbed-трей
+         устарел; **GNOME без расширения AppIndicator трей не показывает**.
+         Высокая цена + ненадёжно между DE — делать после balloon.
+      3. **macOS трей+уведомления** — `NSStatusItem` + `UNUserNotification`
+         через purego/Cocoa (purego 0.10.1 уже в go.mod). Средне, но нужен
+         ЖИВОЙ Mac для проверки (Cocoa-бэкенд на железе не тестирован).
+      Публичный API уже кроссплатформенный — трогать только бэкенды
+      (window/native_linux.go, native_wayland.go, native_darwin.go + новый
+      window/dbus*.go). Дефолт «no-op на неподдержанном» сохранить.
+- [x] **Splitter** — сделано 2026-07-12: контейнер SplitPanel (доля 0..1,
+      MinFirst/MinSecond, курсоры SizeWE/NS, drag через CaptureManager,
+      двойной клик — коллапс/восстановление, гнездование, HasOwnLayout,
+      OnPositionChanged) + XAML-тег <SplitPanel> + вкладка «Компоновка»
+      в showcase. Для ячеек Grid по-прежнему GridSplitter.
 - [ ] **Toolbox / докинг-панели** — плавающие инструментальные панели в духе
       Visual Studio: притягиваются (док) к любой стороне окна с направляющими,
       сворачиваются в заголовок (auto-hide/pin), отрываются в ОТДЕЛЬНЫЕ
@@ -84,8 +111,15 @@
       окно + свой surface, как у диалогов) и возвращаются обратно доком.
       Состав: DockManager-контейнер, DockPanelWindow (титлбар с pin/✕),
       сериализация раскладки. Зависит от Splitter (ресайз доков).
-- [ ] **Drag&Drop файлов из ОС** в окно (WM_DROPFILES, xdg dnd, wl_data_device).
-- [ ] **Цветные эмодзи** — COLR/CBDT-глифы (сейчас честно пропускаются).
+- [x] **Drag&Drop файлов из ОС** в окно — сделано 2026-07-15:
+      `Window.SetOnFilesDropped(paths, x, y)` + `engine.SendFilesDropped` +
+      `widget.FileDropTarget` (bubbling к виджету под точкой, headless-симметрия).
+      Win32 (WM_DROPFILES) и X11 (XDND v5) — полно; Wayland (wl_data_device) —
+      каркас (нужна проверка на живой сессии); macOS — нет.
+- [x] **Цветные эмодзи** — сделано 2026-07-15: COLRv0/COLRv1 (граф paint) +
+      CBDT/sbix (PNG-битмапы) в шейпинг-тракте, автоматически; кэш цветных
+      глифов. Ограничения: BMP<0x1F000 — моно, региональные флаги (лигатуры) —
+      пробел, COLRv1-градиенты усредняются.
 - [ ] **Курсор ввода/IME-позиция** в нативных окнах (candidate window рядом
       с кареткой).
 
@@ -114,13 +148,20 @@
 - [ ] Wayland: минимизация/максимизация (set_minimized/set_maximized),
       точный скролл (axis_discrete/value120), wl_output scale (авто-HiDPI),
       server-side decoration protocol (opt-in).
-- [ ] gradient.go рисует по логическим строкам — на дробных HiDPI-масштабах
-      возможен лёгкий бандинг.
-- [ ] Бейдж локали «EN» налезает на длинный заголовок в узком окне
-      (обрезать title перед бейджем).
-- [ ] DataGrid/TreeView: внутренние пакеты не сообщают «changed» — обёртки
-      инвалидируют грубо (весь виджет вместо строки).
-- [ ] Кэш кернинг-пар (fc.Kern ходит в sfnt на каждую пару).
+- [x] gradient.go рисует по логическим строкам — на дробных HiDPI-масштабах
+      возможен лёгкий бандинг. Сделано 2026-07-15: ramp строится 1×h / w×1, а
+      движок интерполирует в физическое разрешение через DrawImageScaled;
+      при scale==1 байт-в-байт идентично (goldens не тронуты).
+- [x] Бейдж локали «EN» налезает на длинный заголовок в узком окне
+      (обрезать title перед бейджем). Сделано 2026-07-15: заголовок эллипсируется
+      у левого края бейджа (или блока кнопок) во всех стилях титлбара.
+- [x] DataGrid/TreeView: внутренние пакеты не сообщают «changed» — обёртки
+      инвалидируют грубо (весь виджет вместо строки). Сделано 2026-07-15:
+      ядра накапливают построчный dirty-диапазон (TakeDirty) — selection/hover
+      перерисовывают только затронутые строки; скролл/сорт/expand — вьюпорт.
+- [x] Кэш кернинг-пар (fc.Kern ходит в sfnt на каждую пару). Сделано 2026-07-15:
+      FontCache.Kern кэширует пары (сброс на SetDPI) — ~1.7× на шрифтах с реальной
+      kern-таблицей.
 - [ ] X11: MIT-SHM для блита (сейчас PutImage через сокет).
 
 ## Рекомендуемый порядок

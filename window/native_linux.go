@@ -101,6 +101,29 @@ type X11Window struct {
 	atomNetWMName     uint32
 	atomNetWMIconName uint32
 	atomMotifHints    uint32
+
+	// ── XDND (Drag&Drop файлов из ОС, протокол v5) ──────────────────────────
+	atomXdndAware      uint32
+	atomXdndEnter      uint32
+	atomXdndPosition   uint32
+	atomXdndStatus     uint32
+	atomXdndLeave      uint32
+	atomXdndDrop       uint32
+	atomXdndFinished   uint32
+	atomXdndSelection  uint32
+	atomXdndTypeList   uint32
+	atomXdndActionCopy uint32
+	atomTextUriList    uint32
+
+	// Состояние текущей DnD-сессии (заполняется из ClientMessage-событий).
+	dndSource    uint32 // окно-источник перетаскивания (0 — нет сессии)
+	dndVersion   int    // версия протокола источника
+	dndAccept    bool   // предложен ли text/uri-list (принимаем ли сброс)
+	dndX, dndY   int    // последняя позиция курсора (КОРНЕВЫЕ/экранные координаты)
+	dndTime      uint32 // timestamp из XdndDrop (для XConvertSelection)
+	dndDropPending bool // ждём SelectionNotify после XConvertSelection
+
+	onFilesDropped func(paths []string, x, y int)
 }
 
 type x11Screen struct {
@@ -193,6 +216,19 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomNetWMIconName = w.x11InternAtom("_NET_WM_ICON_NAME")
 	w.atomMotifHints = w.x11InternAtom("_MOTIF_WM_HINTS")
 
+	// XDND (Drag&Drop файлов из ОС).
+	w.atomXdndAware = w.x11InternAtom("XdndAware")
+	w.atomXdndEnter = w.x11InternAtom("XdndEnter")
+	w.atomXdndPosition = w.x11InternAtom("XdndPosition")
+	w.atomXdndStatus = w.x11InternAtom("XdndStatus")
+	w.atomXdndLeave = w.x11InternAtom("XdndLeave")
+	w.atomXdndDrop = w.x11InternAtom("XdndDrop")
+	w.atomXdndFinished = w.x11InternAtom("XdndFinished")
+	w.atomXdndSelection = w.x11InternAtom("XdndSelection")
+	w.atomXdndTypeList = w.x11InternAtom("XdndTypeList")
+	w.atomXdndActionCopy = w.x11InternAtom("XdndActionCopy")
+	w.atomTextUriList = w.x11InternAtom("text/uri-list")
+
 	// CreateWindow request
 	x := (int(w.screen.WidthInPixels) - width) / 2
 	y := (int(w.screen.HeightInPixels) - height) / 2
@@ -240,6 +276,13 @@ func (w *X11Window) Create(title string, width, height int) error {
 		binary.LittleEndian.PutUint32(hints[0:4], 2)  // flags = MWM_HINTS_DECORATIONS
 		binary.LittleEndian.PutUint32(hints[8:12], 0) // decorations = 0 (нет рамки)
 		w.x11ChangeProperty(w.wid, w.atomMotifHints, w.atomMotifHints, 32, hints)
+	}
+
+	// XdndAware = 5: объявляем поддержку XDND v5 (тип property — ATOM(4),
+	// format 32, значение — версия протокола). Источник читает это свойство,
+	// решая, принимает ли окно перетаскивание.
+	if w.atomXdndAware != 0 {
+		w.x11ChangeProperty(w.wid, w.atomXdndAware, 4 /*ATOM*/, 32, uint32ToBytes(5))
 	}
 
 	// Window title
@@ -426,9 +469,13 @@ func (w *X11Window) handleX11Event(buf []byte) {
 				}
 			}
 
-		case 33: // ClientMessage (WM_DELETE_WINDOW)
+		case 31: // SelectionNotify — ответ на XConvertSelection (XDND drop)
+			w.handleSelectionNotify(buf)
+
+		case 33: // ClientMessage (WM_DELETE_WINDOW / XDND)
 			atom := binary.LittleEndian.Uint32(buf[8:12])
-			if atom == w.atomWMDeleteWindow {
+			switch atom {
+			case w.atomWMDeleteWindow:
 				if w.onClose != nil {
 					if w.onClose() {
 						w.closed.Store(true)
@@ -436,6 +483,14 @@ func (w *X11Window) handleX11Event(buf []byte) {
 				} else {
 					w.closed.Store(true)
 				}
+			case w.atomXdndEnter:
+				w.handleXdndEnter(buf)
+			case w.atomXdndPosition:
+				w.handleXdndPosition(buf)
+			case w.atomXdndLeave:
+				w.dndReset()
+			case w.atomXdndDrop:
+				w.handleXdndDrop(buf)
 			}
 
 	case 34: // MappingNotify — раскладка/маппинг клавиатуры изменились
@@ -670,6 +725,10 @@ func (w *X11Window) SetOnMouseButton(fn func(x, y, button int, pressed bool))   
 func (w *X11Window) SetOnKeyDown(fn func(vk int))                                { w.onKeyDown = fn }
 func (w *X11Window) SetOnKeyUp(fn func(vk int))                                  { w.onKeyUp = fn }
 func (w *X11Window) SetOnChar(fn func(r rune))                                   { w.onChar = fn }
+
+// SetOnFilesDropped регистрирует колбэк Drag&Drop файлов из ОС (XDND).
+// Координаты — клиентские физические пиксели.
+func (w *X11Window) SetOnFilesDropped(fn func(paths []string, x, y int)) { w.onFilesDropped = fn }
 
 // ─── X11 протокол (низкоуровневые запросы) ──────────────────────────────────
 

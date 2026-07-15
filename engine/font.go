@@ -49,6 +49,9 @@ type FontCache struct {
 	glyphs map[glyphKey]cachedGlyph
 	// metrics — кэш вертикальных метрик по размеру (Face.Metrics не бесплатен).
 	metrics map[float64]vMetric
+	// kern — кэш кернинга пар (размер + пара рун): Face.Kern дёргает sfnt на
+	// каждую пару, а UI многократно рисует одни и те же строки.
+	kern map[kernKey]fixed.Int26_6
 
 	// ── Шейпинг (go-text/typesetting) ────────────────────────────────────────
 	// ttfData — исходные байты шрифта: typesetting парсит их отдельно от
@@ -70,6 +73,16 @@ type glyphKey struct {
 	size float64
 	r    rune
 }
+
+// kernKey — ключ кэша кернинга: размер в пунктах + упорядоченная пара рун.
+type kernKey struct {
+	size float64
+	a, b rune
+}
+
+// maxKernCacheEntries — предел кэша кернинг-пар (см. maxGlyphCacheEntries):
+// при переполнении сбрасывается целиком.
+const maxKernCacheEntries = 8192
 
 // cachedGlyph — растеризованный глиф: маска покрытия и метрики размещения.
 // Маска immutable после создания — читается без блокировки.
@@ -226,6 +239,7 @@ func (fc *FontCache) SetDPI(dpi float64) {
 	fc.cache = make(map[float64]font.Face) // очищаем кэш
 	fc.glyphs = nil                        // маски зависят от DPI
 	fc.metrics = nil
+	fc.kern = nil // кернинг зависит от DPI/размера
 }
 
 // Ascent возвращает подъём базовой линии (в пикселях) для размера sizePt.
@@ -311,9 +325,29 @@ func (fc *FontCache) Glyph(sizePt float64, r rune) cachedGlyph {
 	return g
 }
 
-// Kern возвращает кернинг пары рун для размера sizePt.
+// Kern возвращает кернинг пары рун для размера sizePt (кэшируется).
+// Face.Kern обращается к sfnt на каждую пару; типичный UI рисует одни и те же
+// строки многократно, поэтому пары кэшируются. Потокобезопасно.
 func (fc *FontCache) Kern(sizePt float64, a, b rune) fixed.Int26_6 {
-	return fc.Face(sizePt).Kern(a, b)
+	k := kernKey{size: sizePt, a: a, b: b}
+	fc.mu.RLock()
+	if v, ok := fc.kern[k]; ok {
+		fc.mu.RUnlock()
+		return v
+	}
+	fc.mu.RUnlock()
+
+	v := fc.Face(sizePt).Kern(a, b)
+
+	fc.mu.Lock()
+	if fc.kern == nil {
+		fc.kern = make(map[kernKey]fixed.Int26_6)
+	} else if len(fc.kern) >= maxKernCacheEntries {
+		fc.kern = make(map[kernKey]fixed.Int26_6, maxKernCacheEntries/4)
+	}
+	fc.kern[k] = v
+	fc.mu.Unlock()
+	return v
 }
 
 // HasGlyph сообщает, есть ли в шрифте глиф для руны r (cmap-проверка).

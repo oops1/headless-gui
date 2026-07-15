@@ -57,13 +57,34 @@ func lerpColor(a, b color.RGBA, f float64) color.RGBA {
 	return color.RGBA{R: li(a.R, b.R), G: li(a.G, b.G), B: li(a.B, b.B), A: li(a.A, b.A)}
 }
 
+// physicalScaler — опциональный интерфейс DrawContext, сообщающий HiDPI-масштаб
+// холста. Реализуется engine.Canvas (метод Scale()). Кастомные реализации
+// DrawContext могут его не поддерживать — тогда градиент рисуется прежним
+// построчным путём (см. drawLinearGradient).
+type physicalScaler interface {
+	Scale() float64
+}
+
 // drawLinearGradient заполняет прямоугольник r градиентом g.
+//
+// На дробном HiDPI-масштабе (1.25/1.5) построчная ЛОГИЧЕСКАЯ заливка даёт
+// бандинг: одна логическая строка покрывает 1–2 физические, и соседние
+// физические строки получают один и тот же цвет. Чтобы интерполировать по
+// ФИЗИЧЕСКОЙ координате, при scale != 1 градиент строится как узкий образ
+// (1×h либо w×1) и отдаётся движку через DrawImageScaled — тот билинейно
+// разворачивает его до физического разрешения, и каждая физическая строка
+// получает собственный цвет. При scale == 1 путь прежний, бит-в-бит
+// (golden-сцены не меняются).
 func drawLinearGradient(ctx DrawContext, r image.Rectangle, g *LinearGradient) {
 	if g == nil || len(g.Stops) == 0 || r.Empty() {
 		return
 	}
 	if len(g.Stops) == 1 {
 		ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), g.Stops[0].Color)
+		return
+	}
+	if sr, ok := ctx.(physicalScaler); ok && sr.Scale() != 1 {
+		drawGradientScaled(ctx, r, g)
 		return
 	}
 	if g.Horizontal {
@@ -79,6 +100,35 @@ func drawLinearGradient(ctx DrawContext, r image.Rectangle, g *LinearGradient) {
 		t := float64(y) / float64(h-1)
 		ctx.DrawHLine(r.Min.X, r.Min.Y+y, r.Dx(), g.colorAt(t))
 	}
+}
+
+// drawGradientScaled рисует градиент через билинейную интерполяцию движка
+// (DrawImageScaled) — используется на дробном HiDPI-масштабе, где построчная
+// заливка давала бы бандинг. Образ строится в логическом разрешении (по одной
+// «оси» градиента), движок разворачивает его до физического.
+func drawGradientScaled(ctx DrawContext, r image.Rectangle, g *LinearGradient) {
+	w, h := r.Dx(), r.Dy()
+	if g.Horizontal {
+		if w < 2 {
+			ctx.FillRect(r.Min.X, r.Min.Y, w, h, g.colorAt(0))
+			return
+		}
+		img := image.NewRGBA(image.Rect(0, 0, w, 1))
+		for x := 0; x < w; x++ {
+			img.SetRGBA(x, 0, g.colorAt(float64(x)/float64(w-1)))
+		}
+		ctx.DrawImageScaled(img, r.Min.X, r.Min.Y, w, h)
+		return
+	}
+	if h < 2 {
+		ctx.FillRect(r.Min.X, r.Min.Y, w, h, g.colorAt(0))
+		return
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 1, h))
+	for y := 0; y < h; y++ {
+		img.SetRGBA(0, y, g.colorAt(float64(y)/float64(h-1)))
+	}
+	ctx.DrawImageScaled(img, r.Min.X, r.Min.Y, w, h)
 }
 
 // encodeGradient кодирует <LinearGradientBrush> в строку для передачи через

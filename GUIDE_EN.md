@@ -941,6 +941,8 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `DataGridTextColumn` | DataGridTextColumn | `Header`, `Binding`, `Width`, `IsReadOnly`, `SortMemberPath` |
 | `DataGridCheckBoxColumn` | DataGridCheckBoxColumn | `Header`, `Binding`, `Width`, `IsReadOnly` |
 | `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
+| `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
+| `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `Separator` | Separator | `Background` |
 
 Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `Width`, `Height`, `Grid.Row`, `Grid.Column`, `Grid.RowSpan`, `Grid.ColumnSpan`, `ToolTip`, `Visibility`, `IsEnabled`, `TabIndex`. `{Binding ...}` and `{Loc Key}` localization work on any string attribute.
@@ -1482,6 +1484,152 @@ win.Run()
 contents (they used to be black). An additional DWM iconic path is enabled with
 the `HEADLESS_GUI_ICONIC_PREVIEW=1` environment variable (not needed by
 default).
+
+### SplitPanel — two panes with a splitter
+
+`SplitPanel` holds two children (the first two `AddChild` calls — First/Second)
+and lays them out on either side of a draggable bar. The position is stored as a
+`0..1` fraction, so resizing the window keeps the ratio. Panels nest
+(split-in-split).
+
+```go
+sp := widget.NewSplitPanel(widget.OrientationHorizontal) // left/right; Vertical — top/bottom
+sp.SplitterSize = 6
+sp.Position = 0.35        // fraction taken by First
+sp.MinFirst, sp.MinSecond = 120, 200
+sp.OnPositionChanged = func(pos float64) { /* update a position label */ }
+
+sp.AddChild(leftPanel)    // First
+sp.AddChild(rightPanel)   // Second
+sp.SetBounds(image.Rect(0, 0, 800, 500))
+
+// Collapse control (same as double-clicking the bar):
+sp.Collapse(); sp.Expand(); sp.ToggleCollapse(); _ = sp.IsCollapsed()
+```
+
+Hovering the bar shows a resize cursor (`SizeWE`/`SizeNS`), an LMB drag moves the
+boundary clamped by `MinFirst`/`MinSecond`, and a double-click on the bar
+collapses/restores First. The bar color follows the theme
+(`Theme.SplitterBG`/`SplitterHoverBG`). `SplitPanel` is registered in
+`HasOwnLayout`, so nesting it inside Canvas/DockPanel does not double-shift its
+children.
+
+XAML (the first two child elements are the panes):
+
+```xml
+<SplitPanel Orientation="Horizontal" Position="0.35" SplitterSize="6"
+            MinFirst="120" MinSecond="200">
+  <Panel Background="#1E1E1E"/>   <!-- First -->
+  <Panel Background="#252526"/>   <!-- Second -->
+</SplitPanel>
+```
+
+To resize `Grid` cells, keep using `GridSplitter`.
+
+### SVG icons
+
+The `SVGIcon` widget draws a vector icon from an SVG subset, rasterized to its
+bounds preserving aspect. Without an explicit color the icon recolors to the
+theme's text color — handy for toolbars and menus.
+
+```go
+ic := widget.NewSVGIcon()          // color = Theme.LabelText until set explicitly
+ic.SetSVGFile("assets/menu.svg")   // or ic.SetSVG(data []byte)
+ic.SetColor(color.RGBA{0xFF, 0x33, 0x66, 0xFF}) // explicit color = currentColor
+ic.SetTint(true)                   // recolor the WHOLE content to Color (monochrome)
+ic.SetBounds(image.Rect(8, 8, 32, 32))
+```
+
+- `fill="currentColor"` in the SVG is replaced with the widget's `Color`.
+- `Tint=true` recolors all content to `Color` (monochrome mode); `Tint=false`
+  recolors only `currentColor`.
+- Supported: `path` (all commands, including arcs and smooth curves),
+  `rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`, group transforms,
+  `fill`/`fill-rule` (nonzero + even-odd)/`fill-opacity`, the `style` attribute.
+- Limitations: no gradients, `clipPath`, or `text`; stroke is a simple
+  approximation.
+
+The `widget/svg` package is also usable directly: `svg.Parse(data)` /
+`svg.ParseFile(path)` → `*svg.Document` with `RasterizeCached(w, h, current, tint)`.
+
+XAML (`Source` resolves against the XAML file's directory):
+
+```xml
+<SVGIcon Source="icons/menu.svg" Color="#FF3366" Tint="True"/>
+<SVGIcon Source="icons/folder.svg"/>   <!-- no Color — theme text color -->
+```
+
+### Smooth / inertial scroll
+
+Besides whole wheel "ticks", the engine accepts **pixel-precise deltas** — so
+touchpads and precision wheels scroll smoothly.
+
+```go
+// Exact delta in physical window/frame pixels (dy>0 — down, dx>0 — right).
+eng.SendMouseWheelPixels(x, y, dx, dy)
+```
+
+The event bubbles from the deepest widget to the root; the first one implementing
+`OnMouseWheelPixels(x, y int, dx, dy float64) bool` and returning `true` consumes
+the delta. `ScrollView` starts a flywheel of inertia (a velocity impulse decayed
+on the engine clock — no goroutines); any click/press stops the fling, and in
+`Classic3D` scrolling is instant. `ListView` and `TextBox` scroll per pixel with
+subpixel accumulation and hand the delta to the parent at the edges. If nobody
+takes the precise delta, the engine synthesizes equivalent ticks — the old
+`MouseWheelUp`/`Down` path is intact.
+
+By platform: Win32 (`WM_MOUSEWHEEL`) and Wayland (`wl_pointer.axis`) deliver exact
+pixels; X11 stays on ticks (buttons 4/5), and the macOS wheel is not emitted yet.
+Headless works through `SendMouseWheelPixels`.
+
+### File drag & drop from the OS
+
+An app can accept files dragged from Explorer/Finder into the window.
+
+```go
+win := window.New(eng, "My App")
+win.SetOnFilesDropped(func(paths []string, x, y int) {
+    // paths — absolute file paths; x, y — LOGICAL drop coordinates.
+    for _, p := range paths { open(p) }
+})
+win.Run()
+```
+
+In parallel the event goes to the engine (`eng.SendFilesDropped(x, y, paths)`,
+where `x,y` are physical pixels) and is delivered to the widget under the point
+that implements the target interface — giving headless symmetry and testability:
+
+```go
+type FileDropTarget interface {
+    OnFilesDropped(x, y int, paths []string) bool // true — consume (stop bubbling)
+}
+```
+
+By platform: **Win32** (`WM_DROPFILES`) and **X11** (XDND v5) are complete;
+**Wayland** (`wl_data_device`) is a skeleton that needs live-session verification;
+macOS is not supported. Headless routing to `FileDropTarget` is testable via
+`SendFilesDropped` without a window.
+
+### Color emoji
+
+The text path renders color glyphs automatically — no separate API, just put
+emoji in any widget's string (`👍🎉🚀🔥`). COLRv0 (flat CPAL layers), COLRv1
+(paint graph with transforms and solid fills), and CBDT/sbix (PNG bitmaps, e.g.
+Noto Color Emoji) are supported. Color glyphs are cached separately from
+monochrome masks.
+
+Limitations (honestly): BMP symbols below U+1F000 stay monochrome; regional flags
+(letter ligatures) are a known gap; COLRv1 gradients are approximated by their
+average color. Works the same headless and in a window.
+
+> **Licensing.** The engine bundles and ships no emoji font — glyphs come from
+> the font already installed on the user's OS (Segoe UI Emoji on Windows, Apple
+> Color Emoji on macOS, Noto Color Emoji on Linux if present), exactly like the
+> system fallback fonts used for Arabic/Hebrew/Thai. Strings hold plain Unicode
+> code points, not artwork, so the project carries no extra licensing
+> obligation. If you need guaranteed emoji rendering across platforms, bundle a
+> freely-licensed font (e.g. Noto Color Emoji, OFL) into your product and ship
+> its license.
 
 ---
 

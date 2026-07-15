@@ -65,10 +65,6 @@ func (a *treeViewDrawAdapter) SetPixel(x, y int, col color.RGBA) {
 type TreeViewWidget struct {
 	Base
 	Tree *treeview.TreeView
-
-	// hoverInside — курсор был над виджетом на прошлом OnMouseMove
-	// (Tree ведёт hover строки внутри и не сообщает об изменениях).
-	hoverInside bool
 }
 
 // NewTreeViewWidget создаёт виджет TreeView.
@@ -90,6 +86,19 @@ func (w *TreeViewWidget) Draw(ctx DrawContext) {
 	adapter := &treeViewDrawAdapter{ctx: ctx}
 	w.Tree.Draw(adapter)
 	w.drawDisabledOverlay(ctx)
+}
+
+// applyDirty забирает у ядра накопленный damage и транслирует его в точечную
+// инвалидацию: full → весь виджет, иначе — только изменившиеся строки.
+func (w *TreeViewWidget) applyDirty() {
+	rects, full := w.Tree.TakeDirty()
+	if full {
+		w.Invalidate()
+		return
+	}
+	for _, r := range rects {
+		notifyRectChanged(r)
+	}
 }
 
 // ─── Mouse handling ────────────────────────────────────────────────────────
@@ -124,9 +133,9 @@ func (w *TreeViewWidget) OnMouseButton(e MouseEvent) bool {
 		pressed = 1
 	}
 	consumed := w.Tree.OnMouseButton(e.X, e.Y, int(e.Button), pressed)
-	if consumed {
-		w.Invalidate() // выбор/разворачивание узла/скролл — рисуются в bounds
-	}
+	// Точечная инвалидация: выбор/hover строки — только строки, разворот
+	// узла/скролл — весь виджет (см. ядро treeview).
+	w.applyDirty()
 	return consumed
 }
 
@@ -136,13 +145,8 @@ func (w *TreeViewWidget) OnMouseMove(x, y int) {
 		return
 	}
 	w.Tree.OnMouseMove(x, y)
-	// Tree не сообщает о смене hover-строки — инвалидируем при движении
-	// над виджетом (и один раз при выходе курсора за его пределы).
-	inside := image.Pt(x, y).In(w.Bounds())
-	if inside || w.hoverInside {
-		w.Invalidate()
-	}
-	w.hoverInside = inside
+	// Ядро сообщает точную область смены hover-строки/ползунка.
+	w.applyDirty()
 }
 
 // ─── Keyboard handling ─────────────────────────────────────────────────────
@@ -157,9 +161,8 @@ func (w *TreeViewWidget) OnKeyEvent(e KeyEvent) {
 	ctrl := e.Mod&ModCtrl != 0
 
 	w.Tree.OnKeyEvent(int(e.Code), e.Rune, e.Pressed, shift, ctrl)
-	if e.Pressed {
-		w.Invalidate() // навигация/разворачивание меняют состояние в bounds
-	}
+	// Навигация — только строки, разворачивание/скролл — весь виджет.
+	w.applyDirty()
 }
 
 // ─── Focus ─────────────────────────────────────────────────────────────────

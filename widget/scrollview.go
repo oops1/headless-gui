@@ -3,7 +3,9 @@ package widget
 import (
 	"image"
 	"image/color"
+	"math"
 	"sync"
+	"time"
 )
 
 // ScrollView — прокручиваемый контейнер с вертикальным скроллбаром.
@@ -28,6 +30,18 @@ type ScrollView struct {
 	mu      sync.Mutex
 	scrollY int // текущее смещение прокрутки (>=0)
 
+	// Плавный скролл (пиксельные дельты + инерция).
+	//   scrollFrac — субпиксельный остаток пиксельной прокрутки (тачпад
+	//     высокой точности отдаёт дробные дельты; без накопления они теряются);
+	//   vel — текущая скорость инерции, px/с (знак = направление);
+	//   inertiaAnim — «маховик» инерции на часах движка (без горутин);
+	//   lastElapsed — прошедшее время предыдущего тика (сек, из прогресса
+	//     анимации), для вычисления dt на часах движка.
+	scrollFrac  float64
+	vel         float64
+	inertiaAnim *Animation
+	lastElapsed float64
+
 	// Скроллбар
 	scrollbarWidth int // ширина полосы (по умолчанию 10)
 	dragging       bool
@@ -35,6 +49,22 @@ type ScrollView struct {
 	dragStartScr   int
 	thumbHovered   bool
 }
+
+// Параметры инерции ScrollView.
+const (
+	// inertiaTau — постоянная времени экспоненциального затухания (сек).
+	// Импульс dy инжектируется как dy/inertiaTau, поэтому суммарный путь
+	// маховика ≈ dy (v0·τ), т.е. пиксельная дельта доезжает целиком, но плавно.
+	inertiaTau = 0.30
+	// inertiaMinVel — порог остановки маховика (px/с). При τ=0.30 недоезд на
+	// остановке < inertiaMinVel·τ ≈ 0.6 px.
+	inertiaMinVel = 2.0
+	// inertiaDuration — длительность несущей анимации; на порядки больше
+	// времени затухания, реально маховик сам останавливается по inertiaMinVel.
+	inertiaDuration = 4 * time.Second
+)
+
+var inertiaDurationSec = inertiaDuration.Seconds()
 
 // NewScrollView создаёт прокручиваемый контейнер.
 func NewScrollView() *ScrollView {
@@ -223,6 +253,11 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 		return false
 	}
 
+	// Любой клик ЛКМ прерывает инерцию (новый ввод перебивает «бросок»).
+	if e.Pressed {
+		sv.stopInertia()
+	}
+
 	sv.mu.Lock()
 	defer sv.mu.Unlock()
 
@@ -311,6 +346,111 @@ func (sv *ScrollView) ScrollBy(delta int) {
 	sv.mu.Unlock()
 	if changed {
 		sv.Invalidate()
+	}
+}
+
+// OnMouseWheelPixels — плавная прокрутка точной пиксельной дельтой (колесо
+// высокой точности / тачпад). dy>0 — вниз. Возвращает true, если событие
+// поглощено; false — если прокручивать нечего или мы упёрлись в край в
+// сторону жеста (тогда дельта всплывёт к родителю).
+//
+// В обычных темах дельта запускает «маховик» инерции (импульс скорости,
+// затухание на часах движка). В Classic3D — мгновенно, без инерции.
+func (sv *ScrollView) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
+	if !sv.IsEnabled() {
+		return false
+	}
+	sv.mu.Lock()
+	if sv.ContentHeight <= sv.bounds.Dy() {
+		sv.mu.Unlock()
+		return false // нечего прокручивать — пусть всплывёт выше
+	}
+	// Упёрлись в край в сторону жеста — отдаём событие родителю.
+	if (dy < 0 && sv.scrollY <= 0) || (dy > 0 && sv.scrollY >= sv.maxScroll()) {
+		sv.mu.Unlock()
+		return false
+	}
+
+	if currentStyle().Classic3D {
+		// Классика: без инерции, дельта применяется сразу (с субпиксельным
+		// накоплением, чтобы дробные дельты тачпада не терялись).
+		sv.scrollFrac += dy
+		whole := math.Trunc(sv.scrollFrac)
+		sv.scrollFrac -= whole
+		changed := sv.setScrollYLocked(sv.scrollY + int(whole))
+		sv.mu.Unlock()
+		if changed {
+			sv.Invalidate()
+		}
+		return true
+	}
+
+	// Маховик: инжектируем импульс скорости. Стационарный путь ≈ dy.
+	sv.vel += dy / inertiaTau
+	sv.mu.Unlock()
+	sv.ensureInertia()
+	return true
+}
+
+// ensureInertia запускает несущую анимацию инерции, если она ещё не идёт.
+// Скорость (sv.vel) уже задана вызывающим. Часы — движка (tick через
+// StepAnimations); ни одной горутины.
+func (sv *ScrollView) ensureInertia() {
+	sv.mu.Lock()
+	if sv.inertiaAnim != nil && sv.inertiaAnim.Running() {
+		sv.mu.Unlock()
+		return
+	}
+	sv.lastElapsed = 0
+	sv.mu.Unlock()
+	a := AnimateOwned(sv, "scroll-inertia", inertiaDuration, nil, sv.inertiaTick)
+	sv.mu.Lock()
+	sv.inertiaAnim = a
+	sv.mu.Unlock()
+}
+
+// inertiaTick — шаг маховика: интегрируем скорость в позицию и экспоненциально
+// затухаем. dt берём из прогресса t (часы движка), а не из time.Now.
+func (sv *ScrollView) inertiaTick(t float64) {
+	sv.mu.Lock()
+	elapsed := t * inertiaDurationSec
+	dt := elapsed - sv.lastElapsed
+	sv.lastElapsed = elapsed
+	if dt <= 0 {
+		sv.mu.Unlock()
+		return
+	}
+	sv.scrollFrac += sv.vel * dt
+	whole := math.Trunc(sv.scrollFrac)
+	sv.scrollFrac -= whole
+	changed := sv.setScrollYLocked(sv.scrollY + int(whole))
+	sv.vel *= math.Exp(-dt / inertiaTau)
+	atEdge := sv.scrollY <= 0 || sv.scrollY >= sv.maxScroll()
+	stop := math.Abs(sv.vel) < inertiaMinVel || atEdge
+	if stop {
+		sv.vel = 0
+		sv.scrollFrac = 0
+	}
+	a := sv.inertiaAnim
+	sv.mu.Unlock()
+	if changed {
+		sv.Invalidate()
+	}
+	if stop && a != nil {
+		a.Stop()
+	}
+}
+
+// stopInertia гасит инерцию (новый ввод/клик перебивает «бросок»).
+func (sv *ScrollView) stopInertia() {
+	sv.mu.Lock()
+	a := sv.inertiaAnim
+	sv.inertiaAnim = nil
+	sv.vel = 0
+	sv.scrollFrac = 0
+	sv.mu.Unlock()
+	if a != nil {
+		a.Stop()
 	}
 }
 

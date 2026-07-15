@@ -214,6 +214,10 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 		applyColor(&s.Background, el, "Background")
 		w = s
 
+	// ── SplitPanel — две панели с перетаскиваемым разделителем ──────────────
+	case "splitpanel":
+		return buildXAMLSplitPanel(el, reg, parentOff, baseDir)
+
 	// ── ToolBarTray / ToolBar → горизонтальный StackPanel (WPF ToolBar) ────
 	case "toolbartray":
 		return buildXAMLToolBarTray(el, reg, parentOff, baseDir)
@@ -308,6 +312,10 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	// ── Изображение ───────────────────────────────────────────────────────────
 	case "image":
 		w = buildXAMLImage(el)
+
+	// ── SVG-иконка (темизируемая векторная) ─────────────────────────────────
+	case "svgicon":
+		w = buildXAMLSVGIcon(el, baseDir)
 
 	// ── Разделитель ──────────────────────────────────────────────────────────
 	case "separator":
@@ -985,4 +993,78 @@ func buildXAMLListView(el xElement) Widget {
 		}
 	}
 	return lv
+}
+
+// buildXAMLSplitPanel строит SplitPanel: две панели с перетаскиваемым
+// разделителем. Первый дочерний элемент — First, второй — Second.
+func buildXAMLSplitPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	orient := OrientationHorizontal
+	if strings.EqualFold(el.attr("Orientation"), "vertical") {
+		orient = OrientationVertical
+	}
+	sp := NewSplitPanel(orient)
+
+	if fs := el.attr("Position"); fs != "" {
+		if v, err := strconv.ParseFloat(fs, 64); err == nil && v >= 0 && v <= 1 {
+			sp.Position = v
+		}
+	}
+	if v := xatoi(el.attr("SplitterSize")); v > 0 {
+		sp.SplitterSize = v
+	}
+	if v := xatoi(el.attr("MinFirst")); v > 0 {
+		sp.MinFirst = v
+	}
+	if v := xatoi(el.attr("MinSecond")); v > 0 {
+		sp.MinSecond = v
+	}
+	applyColor(&sp.Background, el, "Background")
+	applyColor(&sp.HoverColor, el, "HoverColor")
+
+	absBounds := el.bounds().Add(parentOff)
+	sp.SetBounds(absBounds)
+	applyCommonProps(sp, el)
+	if id := el.name(); id != "" {
+		reg[id] = sp
+	}
+
+	// Дочерние виджеты: layout SplitPanel сам расставит первых двух.
+	for _, child := range el.Children {
+		childTag := strings.ToLower(child.Tag)
+		if strings.Contains(childTag, ".") {
+			continue
+		}
+		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if cw != nil {
+			sp.AddChild(cw)
+		}
+	}
+	return sp, nil
+}
+
+// buildXAMLSVGIcon строит темизируемую векторную иконку из .svg-файла.
+// Без явного Color иконка перекрашивается под цвет текста темы.
+func buildXAMLSVGIcon(el xElement, baseDir string) Widget {
+	ic := NewSVGIcon()
+	if src := el.attr("Source"); src != "" {
+		p := src
+		if baseDir != "" && !filepath.IsAbs(p) {
+			p = filepath.Join(baseDir, p)
+		}
+		if err := ic.SetSVGFile(p); err != nil {
+			log.Printf("xaml: SVGIcon Source=%q: %v", src, err)
+		}
+	}
+	var c color.RGBA
+	applyColor(&c, el, "Color", "Foreground", "Fill")
+	if c.A > 0 {
+		ic.SetColor(c)
+	}
+	if strings.EqualFold(el.attr("Tint"), "true") {
+		ic.SetTint(true)
+	}
+	return ic
 }
