@@ -143,8 +143,21 @@
       или `HEADLESS_GUI_A11Y=1`. Проверено настоящим клиентом libatspi.
       Не сделано: `GrabFocus`/`DoAction` из скринридера (нужен путь «активировать
       узел по семантическому id» в движке) и интерфейс Text (карет, выделение).
-      Осталось: UI Automation (Windows, COM через syscall),
-      NSAccessibility (macOS, purego).
+      **UI Automation (Windows) — ЭКСПЕРИМЕНТАЛЬНО, 2026-08-01**
+      (window/a11y_uia_windows.go — COM-обвязка без CGO: vtable из
+      windows.NewCallback, VARIANT/BSTR/SAFEARRAY; window/a11y_windows.go —
+      провайдеры Simple/Fragment/FragmentRoot, WM_GETOBJECT, события).
+      По умолчанию ВЫКЛЮЧЕНО: `SetAccessibilityEnabled(true)` или
+      `HEADLESS_GUI_A11Y=1`. Живой клиент .NET UIAutomationClient находит окно,
+      видит наши ClassName/AutomationId/Name, а FindAll(Descendants) отдаёт все
+      кнопки и поля с верными типами, границами и состояниями; свойства,
+      навигация, RuntimeId и фокус покрыты тестами через настоящие vtable.
+      ДЕФЕКТ: обход TreeWalker'ом от окна выдаёт корень собственным ребёнком
+      (бесконечное «окно внутри окна»); поиск по поддереву при этом верен.
+      Причина не в кэше хост-провайдера и не в RuntimeId корня — следующий шаг
+      логировать вызовы провайдера в живом сеансе. Также нет паттернов
+      управления (Invoke/Toggle/Value) и SetFocus.
+      Осталось: NSAccessibility (macOS, purego).
 - [ ] **IME (CJK)** — text-input-v3 (Wayland), TSF (Windows), NSTextInputClient.
 - [ ] **Mobile (Android/iOS)** — самый дорогой разрыв с Fyne/Gio; браться
       только при реальном запросе (WASM-вьювер частично закрывает кейс).

@@ -113,17 +113,17 @@ func TestATSPIPaths(t *testing.T) {
 // TestATSPIStableIDs — устойчивые идентификаторы: пережившие перестройку узлы
 // сохраняют свои id, исчезнувшие их не отдают новым элементам.
 func TestATSPIStableIDs(t *testing.T) {
-	b := &atspiBridge{idKeys: map[string]int32{}}
+	b := &atspiBridge{}
 
 	full := a11yFlatten(buildTestAccessTree("abc"))
-	v1 := b.assignIDs(full)
+	v1 := b.ids.assign(full)
 
 	// Убираем ПЕРВОГО ребёнка (кнопку): индексы всех последующих узлов
 	// сдвигаются, но их устойчивые id обязаны сохраниться.
 	tree := buildTestAccessTree("abc")
 	tree.Children = tree.Children[1:]
 	short := a11yFlatten(tree)
-	v2 := b.assignIDs(short)
+	v2 := b.ids.assign(short)
 
 	if v1.id(0) != v2.id(0) {
 		t.Errorf("id окна изменился: %d → %d", v1.id(0), v2.id(0))
@@ -138,7 +138,7 @@ func TestATSPIStableIDs(t *testing.T) {
 		t.Errorf("панель получила id исчезнувшей кнопки (%d) — кэш клиента разъедется", v2.id(1))
 	}
 	// Возврат к прежней структуре возвращает прежние идентификаторы.
-	v3 := b.assignIDs(a11yFlatten(buildTestAccessTree("abc")))
+	v3 := b.ids.assign(a11yFlatten(buildTestAccessTree("abc")))
 	for i := range full.Nodes {
 		if v3.id(int32(i)) != v1.id(int32(i)) {
 			t.Errorf("узел %d: id %d, ожидался прежний %d", i, v3.id(int32(i)), v1.id(int32(i)))
@@ -157,17 +157,17 @@ func TestATSPIStableIDs(t *testing.T) {
 // имена, индексы и число детей.
 func TestATSPICacheItems(t *testing.T) {
 	win := newTestWindow(widget.NewWindow("Кэш", 200, 100))
-	b := &atspiBridge{win: win, appName: ":1.7", idKeys: map[string]int32{}}
+	b := &atspiBridge{win: win, appName: ":1.7"}
 	win.title = "Кэш"
-	v := b.assignIDs(a11yFlatten(buildTestAccessTree("abc")))
+	v := b.ids.assign(a11yFlatten(buildTestAccessTree("abc")))
 
 	rep := b.handleCache(&dbusMessage{Path: atspiCachePath, Interface: ifaceCache, Member: "GetItems"}, v)
 	if rep == nil || rep.Sig != atspiCacheItemsSig {
 		t.Fatalf("GetItems вернул %#v", rep)
 	}
 	arr, ok := rep.Body[0].(dbusArray)
-	if !ok || len(arr.Items) != len(v.snap.Nodes)+1 {
-		t.Fatalf("записей кэша %d, want %d", len(arr.Items), len(v.snap.Nodes)+1)
+	if !ok || len(arr.Items) != len(v.Snap.Nodes)+1 {
+		t.Fatalf("записей кэша %d, want %d", len(arr.Items), len(v.Snap.Nodes)+1)
 	}
 	// Кодируемость записей — гарантия, что сигнатура и типы совпали.
 	e := dbusEnc{}

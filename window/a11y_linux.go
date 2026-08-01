@@ -63,8 +63,6 @@ const (
 	atspiCoordWindow = 1
 	atspiCoordParent = 2
 
-	// Как часто пересобираем снимок семантики при активности UI.
-	a11yRefreshEvery = 150 * time.Millisecond
 )
 
 // ─── Роли и состояния AT-SPI ─────────────────────────────────────────────────
@@ -265,50 +263,15 @@ func atspiStateSet(info widget.AccessInfo, focused bool) []uint32 {
 
 func init() { newA11yBridge = func(win *Window) a11yBridge { return &atspiBridge{win: win} } }
 
-// atspiView — снимок семантики вместе с УСТОЙЧИВЫМИ идентификаторами объектов.
-//
-// Индексы в снимке — позиции в обходе дерева: после перестройки UI один и тот
-// же индекс может достаться другому виджету. Клиенты доступности (libatspi,
-// а значит и Orca) КЭШИРУЮТ объекты по пути, поэтому такое переиспользование
-// показало бы скринридеру чужие имя и роль. Отсюда отдельный слой: каждому
-// узлу сопоставляется id, выданный по структурному ключу (путь индексов +
-// роль) и живущий, пока живёт сам элемент.
-type atspiView struct {
-	snap  *a11ySnapshot
-	ids   []int32         // индекс снимка → устойчивый id
-	index map[int32]int32 // устойчивый id → индекс снимка
-}
-
-// node возвращает узел по устойчивому id.
-func (v *atspiView) node(id int32) *a11yNode {
-	if v == nil {
-		return nil
-	}
-	idx, ok := v.index[id]
-	if !ok {
-		return nil
-	}
-	return v.snap.node(idx)
-}
-
-// id переводит индекс снимка в устойчивый id (-1 — индекс вне снимка).
-func (v *atspiView) id(idx int32) int32 {
-	if v == nil || idx < 0 || int(idx) >= len(v.ids) {
-		return -1
-	}
-	return v.ids[idx]
-}
-
 // atspiBridge — состояние моста для одного окна.
 type atspiBridge struct {
 	win  *Window
 	conn *dbusConn
 
 	mu      sync.RWMutex
-	view    *atspiView
-	prev    *atspiView // предыдущий снимок — для деталей событий состояний
-	idKeys  map[string]int32
-	idNext  int32
+	view    *a11yView
+	prev    *a11yView // предыдущий снимок — для деталей событий состояний
+	ids     a11yIDPool
 	stamp   time.Time
 	dirty   bool
 	appName string // уникальное имя на шине доступности (:1.N)
@@ -428,39 +391,6 @@ func atspiBusAddress() (string, error) {
 
 // ─── Снимок ──────────────────────────────────────────────────────────────────
 
-// atspiNodeKeys строит структурные ключи узлов снимка: путь индексов от корня
-// плюс роль. Обход в глубину гарантирует, что родитель обработан раньше ребёнка.
-func atspiNodeKeys(s *a11ySnapshot) []string {
-	keys := make([]string, len(s.Nodes))
-	for i := range s.Nodes {
-		n := &s.Nodes[i]
-		if n.Parent < 0 {
-			keys[i] = "w:" + string(n.Info.Role)
-			continue
-		}
-		keys[i] = keys[n.Parent] + "/" + strconv.Itoa(int(n.Index)) + ":" + string(n.Info.Role)
-	}
-	return keys
-}
-
-// assignIDs раздаёт узлам устойчивые идентификаторы. Ключи запоминаются на всё
-// время жизни моста: элемент, вернувшийся на прежнее место (переключение
-// вкладок, повторное открытие панели), получает СВОЙ прежний id.
-func (b *atspiBridge) assignIDs(s *a11ySnapshot) *atspiView {
-	v := &atspiView{snap: s, ids: make([]int32, len(s.Nodes)), index: make(map[int32]int32, len(s.Nodes))}
-	for i, key := range atspiNodeKeys(s) {
-		id, ok := b.idKeys[key]
-		if !ok {
-			id = b.idNext
-			b.idNext++
-			b.idKeys[key] = id
-		}
-		v.ids[i] = id
-		v.index[id] = int32(i)
-	}
-	return v
-}
-
 // refresh пересобирает снимок семантики (force — не глядя на троттлинг) и
 // возвращает изменения относительно прошлого снимка.
 func (b *atspiBridge) refresh(force bool) a11yChanges {
@@ -476,16 +406,13 @@ func (b *atspiBridge) refresh(force bool) a11yChanges {
 	snap := b.win.accessibilitySnapshot()
 	var oldSnap *a11ySnapshot
 	if old != nil {
-		oldSnap = old.snap
+		oldSnap = old.Snap
 	}
 	ch := a11yDiff(oldSnap, snap)
 
 	b.mu.Lock()
-	if b.idKeys == nil {
-		b.idKeys = map[string]int32{}
-	}
 	b.prev = b.view
-	b.view = b.assignIDs(snap)
+	b.view = b.ids.assign(snap)
 	b.stamp = time.Now()
 	b.dirty = false
 	b.mu.Unlock()
@@ -493,7 +420,7 @@ func (b *atspiBridge) refresh(force bool) a11yChanges {
 }
 
 // current возвращает актуальное представление, при необходимости пересобрав его.
-func (b *atspiBridge) current() *atspiView {
+func (b *atspiBridge) current() *a11yView {
 	b.mu.RLock()
 	v, stamp, dirty := b.view, b.stamp, b.dirty
 	b.mu.RUnlock()
@@ -550,9 +477,9 @@ func (b *atspiBridge) emitChanges(ch a11yChanges) {
 	if curV == nil {
 		return
 	}
-	prev, cur := (*a11ySnapshot)(nil), curV.snap
+	prev, cur := (*a11ySnapshot)(nil), curV.Snap
 	if prevV != nil {
-		prev = prevV.snap
+		prev = prevV.Snap
 	}
 	emptyStr := dbusVariant{Sig: "s", Val: ""}
 
@@ -615,14 +542,14 @@ func (b *atspiBridge) emitChanges(ch a11yChanges) {
 // defunct и удаляются из кэша клиента, появившиеся — добавляются. Благодаря
 // устойчивым идентификаторам «исчез» означает именно исчез, а не «сдвинулся
 // индекс», поэтому кэш клиента не разъезжается с реальностью.
-func (b *atspiBridge) emitStructural(prevV, curV *atspiView) {
+func (b *atspiBridge) emitStructural(prevV, curV *a11yView) {
 	emptyStr := dbusVariant{Sig: "s", Val: ""}
 	if prevV != nil {
-		for id, idx := range prevV.index {
-			if _, alive := curV.index[id]; alive {
+		for id, idx := range prevV.Index {
+			if _, alive := curV.Index[id]; alive {
 				continue
 			}
-			node := prevV.snap.node(idx)
+			node := prevV.Snap.node(idx)
 			parent := int32(-1)
 			if node != nil && node.Parent >= 0 {
 				parent = prevV.id(node.Parent)
@@ -638,9 +565,9 @@ func (b *atspiBridge) emitStructural(prevV, curV *atspiView) {
 			}
 		}
 	}
-	for id, idx := range curV.index {
+	for id, idx := range curV.Index {
 		if prevV != nil {
-			if _, existed := prevV.index[id]; existed {
+			if _, existed := prevV.Index[id]; existed {
 				continue
 			}
 		}
@@ -648,7 +575,7 @@ func (b *atspiBridge) emitStructural(prevV, curV *atspiView) {
 			_ = b.conn.emit(atspiCachePath, ifaceCache, "AddAccessible", atspiCacheItemSig,
 				[]any{b.cacheItem(curV, id)})
 		}
-		node := curV.snap.node(idx)
+		node := curV.Snap.node(idx)
 		if node == nil {
 			continue
 		}
@@ -760,10 +687,10 @@ func (b *atspiBridge) pointToLogical(x, y int32, coord uint32) (int, int) {
 
 // appNode — синтетический узел приложения: единственный ребёнок — окно
 // (корень снимка). Собирается на лету, чтобы не дублировать состояние.
-func (b *atspiBridge) appNode(v *atspiView) *a11yNode {
+func (b *atspiBridge) appNode(v *a11yView) *a11yNode {
 	n := &a11yNode{Parent: -1, Index: -1}
 	n.Info.Name = b.win.title
-	if len(v.snap.Nodes) > 0 {
+	if len(v.Snap.Nodes) > 0 {
 		n.Children = []int32{v.id(a11yRootID)}
 	}
 	return n
@@ -813,14 +740,14 @@ func (b *atspiBridge) handleCall(msg *dbusMessage) *dbusReply {
 // handleCache — org.a11y.atspi.Cache: клиент забирает ВСЁ дерево одним
 // вызовом вместо сотен точечных запросов. Именно так libatspi (а значит Orca)
 // наполняет свой кэш при подключении к приложению.
-func (b *atspiBridge) handleCache(msg *dbusMessage, v *atspiView) *dbusReply {
+func (b *atspiBridge) handleCache(msg *dbusMessage, v *a11yView) *dbusReply {
 	switch {
 	case msg.Interface == ifaceIntrospect && msg.Member == "Introspect":
 		return &dbusReply{Sig: "s", Body: []any{atspiCacheXML}}
 	case msg.Interface == ifaceCache && msg.Member == "GetItems":
-		items := make([]any, 0, len(v.snap.Nodes)+1)
+		items := make([]any, 0, len(v.Snap.Nodes)+1)
 		items = append(items, b.cacheItem(v, atspiAppID))
-		for i := range v.snap.Nodes {
+		for i := range v.Snap.Nodes {
 			items = append(items, b.cacheItem(v, v.id(int32(i))))
 		}
 		return &dbusReply{Sig: atspiCacheItemsSig,
@@ -831,7 +758,7 @@ func (b *atspiBridge) handleCache(msg *dbusMessage, v *atspiView) *dbusReply {
 
 // cacheItem собирает запись кэша: ссылка, приложение, родитель, индекс в
 // родителе, число детей, интерфейсы, имя, роль, описание, состояния.
-func (b *atspiBridge) cacheItem(v *atspiView, id int32) dbusStruct {
+func (b *atspiBridge) cacheItem(v *a11yView, id int32) dbusStruct {
 	var node *a11yNode
 	if id == atspiAppID {
 		node = b.appNode(v)
@@ -848,7 +775,7 @@ func (b *atspiBridge) cacheItem(v *atspiView, id int32) dbusStruct {
 	case v.id(a11yRootID):
 		index = 0 // окно — первый ребёнок приложения
 	}
-	focused := id != atspiAppID && v.id(v.snap.Focus) == id
+	focused := id != atspiAppID && v.id(v.Snap.Focus) == id
 	return dbusStruct{Fields: []any{
 		b.ref(id),
 		b.ref(atspiAppID),
@@ -864,7 +791,7 @@ func (b *atspiBridge) cacheItem(v *atspiView, id int32) dbusStruct {
 }
 
 // handleProps — org.freedesktop.DBus.Properties для наших интерфейсов.
-func (b *atspiBridge) handleProps(msg *dbusMessage, v *atspiView, id int32, node *a11yNode) *dbusReply {
+func (b *atspiBridge) handleProps(msg *dbusMessage, v *a11yView, id int32, node *a11yNode) *dbusReply {
 	prop := func(iface, name string) (dbusVariant, bool) {
 		switch iface {
 		case ifaceAccessible:
@@ -968,7 +895,7 @@ func (b *atspiBridge) handleProps(msg *dbusMessage, v *atspiView, id int32, node
 
 // childID переводит ребёнка узла в устойчивый id. У приложения ребёнок уже
 // хранится как id, у прочих узлов — как индекс снимка.
-func (b *atspiBridge) childID(v *atspiView, id int32, child int32) int32 {
+func (b *atspiBridge) childID(v *a11yView, id int32, child int32) int32 {
 	if id == atspiAppID {
 		return child
 	}
@@ -976,8 +903,8 @@ func (b *atspiBridge) childID(v *atspiView, id int32, child int32) int32 {
 }
 
 // handleAccessible — org.a11y.atspi.Accessible.
-func (b *atspiBridge) handleAccessible(msg *dbusMessage, v *atspiView, id int32, node *a11yNode) *dbusReply {
-	snap := v.snap
+func (b *atspiBridge) handleAccessible(msg *dbusMessage, v *a11yView, id int32, node *a11yNode) *dbusReply {
+	snap := v.Snap
 	switch msg.Member {
 	case "GetChildAtIndex":
 		idx, _ := msg.Body[0].(int32)
@@ -1020,7 +947,7 @@ func (b *atspiBridge) handleAccessible(msg *dbusMessage, v *atspiView, id int32,
 }
 
 // handleComponent — org.a11y.atspi.Component (геометрия и попадание точкой).
-func (b *atspiBridge) handleComponent(msg *dbusMessage, v *atspiView, id int32, node *a11yNode) *dbusReply {
+func (b *atspiBridge) handleComponent(msg *dbusMessage, v *a11yView, id int32, node *a11yNode) *dbusReply {
 	arg := func(i int) int32 {
 		if i < len(msg.Body) {
 			if v, ok := msg.Body[i].(int32); ok {
@@ -1053,7 +980,7 @@ func (b *atspiBridge) handleComponent(msg *dbusMessage, v *atspiView, id int32, 
 		return &dbusReply{Sig: "b", Body: []any{image.Pt(lx, ly).In(node.Info.Bounds)}}
 	case "GetAccessibleAtPoint":
 		lx, ly := b.pointToLogical(arg(0), arg(1), coordAt(2))
-		hit := v.snap.hitTest(lx, ly)
+		hit := v.Snap.hitTest(lx, ly)
 		if hit < 0 {
 			return &dbusReply{Sig: "(so)", Body: []any{b.nullRef()}}
 		}

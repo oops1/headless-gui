@@ -11,12 +11,19 @@ package window
 
 import (
 	"image"
+	"strconv"
+	"time"
 
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // a11yRootID — идентификатор корня снимка (окно приложения).
 const a11yRootID int32 = 0
+
+// a11yRefreshEvery — как часто мост пересобирает снимок семантики при
+// активности UI. Реже, чем кадры: бурная анимация не должна топить клиента
+// доступности в событиях.
+const a11yRefreshEvery = 150 * time.Millisecond
 
 // a11yNode — узел плоского снимка.
 type a11yNode struct {
@@ -170,6 +177,84 @@ func a11ySameStates(a, b []string) bool {
 	return true
 }
 
+// ─── Устойчивые идентификаторы ───────────────────────────────────────────────
+
+// a11yView — снимок вместе с УСТОЙЧИВЫМИ идентификаторами объектов.
+//
+// Индексы в снимке — позиции в обходе дерева: после перестройки UI один и тот
+// же индекс может достаться другому виджету. Клиенты доступности (libatspi на
+// Linux, UI Automation на Windows) КЭШИРУЮТ элементы, поэтому такое
+// переиспользование показало бы скринридеру чужие имя и роль. Отсюда отдельный
+// слой: каждому узлу выдаётся id по структурному ключу (путь индексов + роль),
+// живущий столько же, сколько сам элемент.
+type a11yView struct {
+	Snap  *a11ySnapshot
+	IDs   []int32         // индекс снимка → устойчивый id
+	Index map[int32]int32 // устойчивый id → индекс снимка
+}
+
+// node возвращает узел по устойчивому id.
+func (v *a11yView) node(id int32) *a11yNode {
+	if v == nil {
+		return nil
+	}
+	idx, ok := v.Index[id]
+	if !ok {
+		return nil
+	}
+	return v.Snap.node(idx)
+}
+
+// id переводит индекс снимка в устойчивый id (-1 — индекс вне снимка).
+func (v *a11yView) id(idx int32) int32 {
+	if v == nil || idx < 0 || int(idx) >= len(v.IDs) {
+		return -1
+	}
+	return v.IDs[idx]
+}
+
+// a11yIDPool раздаёт устойчивые идентификаторы по структурным ключам.
+type a11yIDPool struct {
+	keys map[string]int32
+	next int32
+}
+
+// nodeKeys строит структурные ключи узлов снимка: путь индексов от корня плюс
+// роль. Обход в глубину гарантирует, что родитель обработан раньше ребёнка.
+func a11yNodeKeys(s *a11ySnapshot) []string {
+	keys := make([]string, len(s.Nodes))
+	for i := range s.Nodes {
+		n := &s.Nodes[i]
+		if n.Parent < 0 {
+			keys[i] = "w:" + string(n.Info.Role)
+			continue
+		}
+		keys[i] = keys[n.Parent] + "/" + strconv.Itoa(int(n.Index)) + ":" + string(n.Info.Role)
+	}
+	return keys
+}
+
+// assign раздаёт узлам снимка устойчивые идентификаторы. Ключи запоминаются на
+// всё время жизни пула: элемент, вернувшийся на прежнее место (переключение
+// вкладок, повторное открытие панели), получает СВОЙ прежний id.
+func (p *a11yIDPool) assign(s *a11ySnapshot) *a11yView {
+	if p.keys == nil {
+		p.keys = map[string]int32{}
+	}
+	v := &a11yView{Snap: s, IDs: make([]int32, len(s.Nodes)), Index: make(map[int32]int32, len(s.Nodes))}
+	for i, key := range a11yNodeKeys(s) {
+		id, ok := p.keys[key]
+		if !ok {
+			id = p.next
+			p.next++
+			p.keys[key] = id
+		}
+		v.IDs[i] = id
+		v.Index[id] = int32(i)
+	}
+	return v
+}
+
 // ─── Подключение платформенного моста ────────────────────────────────────────
 
 // a11yBridge — платформенный мост доступности. Реализации: AT-SPI (Linux).
@@ -185,9 +270,12 @@ type a11yBridge interface {
 var newA11yBridge func(win *Window) a11yBridge
 
 // SetAccessibilityEnabled принудительно включает (true) или выключает (false)
-// платформенный мост доступности. По умолчанию (метод не вызывался) мост
-// поднимается сам, когда система сообщает, что доступность включена:
-// на Linux — org.a11y.Status.IsEnabled/ScreenReaderEnabled.
+// платформенный мост доступности.
+//
+// По умолчанию (метод не вызывался): на Linux мост AT-SPI поднимается сам,
+// когда система сообщает о включённой доступности (org.a11y.Status); на
+// Windows мост UI Automation ВЫКЛЮЧЕН — он экспериментальный (см. шапку
+// a11y_windows.go), и без него окно отдаёт клиентам штатный HWND-провайдер.
 //
 // Вызывать до Run(). Переменная окружения HEADLESS_GUI_A11Y=1/0 имеет
 // наивысший приоритет (удобно для отладки со скринридером).
