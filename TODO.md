@@ -143,20 +143,22 @@
       или `HEADLESS_GUI_A11Y=1`. Проверено настоящим клиентом libatspi.
       Не сделано: `GrabFocus`/`DoAction` из скринридера (нужен путь «активировать
       узел по семантическому id» в движке) и интерфейс Text (карет, выделение).
-      **UI Automation (Windows) — ЭКСПЕРИМЕНТАЛЬНО, 2026-08-01**
+      **UI Automation (Windows) сделано 2026-08-01**
       (window/a11y_uia_windows.go — COM-обвязка без CGO: vtable из
-      windows.NewCallback, VARIANT/BSTR/SAFEARRAY; window/a11y_windows.go —
-      провайдеры Simple/Fragment/FragmentRoot, WM_GETOBJECT, события).
-      По умолчанию ВЫКЛЮЧЕНО: `SetAccessibilityEnabled(true)` или
-      `HEADLESS_GUI_A11Y=1`. Живой клиент .NET UIAutomationClient находит окно,
-      видит наши ClassName/AutomationId/Name, а FindAll(Descendants) отдаёт все
-      кнопки и поля с верными типами, границами и состояниями; свойства,
-      навигация, RuntimeId и фокус покрыты тестами через настоящие vtable.
-      ДЕФЕКТ: обход TreeWalker'ом от окна выдаёт корень собственным ребёнком
-      (бесконечное «окно внутри окна»); поиск по поддереву при этом верен.
-      Причина не в кэше хост-провайдера и не в RuntimeId корня — следующий шаг
-      логировать вызовы провайдера в живом сеансе. Также нет паттернов
-      управления (Invoke/Toggle/Value) и SetFocus.
+      windows.NewCallback, VARIANT/BSTR/SAFEARRAY, журнал вызовов провайдера
+      по `HEADLESS_GUI_UIA_LOG`; window/a11y_windows.go — провайдеры
+      Simple/Fragment/FragmentRoot, WM_GETOBJECT, события).
+      Живой клиент .NET UIAutomationClient обходит дерево от окна до листьев с
+      верными типами, именами, границами и фокусом. Мост включён по умолчанию
+      и пассивен: горутина и снимки появляются только после первого
+      WM_GETOBJECT. Выключить — `SetAccessibilityEnabled(false)` /
+      `HEADLESS_GUI_A11Y=0`.
+      Грабли, стоившие полдня и закреплённые тестом: корень фрагмента НЕ должен
+      отдавать `NativeWindowHandle` — UIA идёт по этому дескриптору за
+      провайдером и делает корень собственным ребёнком.
+      Не сделано: паттерны управления (Invoke/Toggle/Value) и SetFocus — нужен
+      путь «активировать узел по семантическому id» в движке; поиск по точке
+      берёт позицию курсора (windows.NewCallback не принимает double-аргументы).
       Осталось: NSAccessibility (macOS, purego).
 - [ ] **IME (CJK)** — text-input-v3 (Wayland), TSF (Windows), NSTextInputClient.
 - [ ] **Mobile (Android/iOS)** — самый дорогой разрыв с Fyne/Gio; браться

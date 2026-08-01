@@ -62,7 +62,6 @@ const (
 	atspiCoordScreen = 0
 	atspiCoordWindow = 1
 	atspiCoordParent = 2
-
 )
 
 // ─── Роли и состояния AT-SPI ─────────────────────────────────────────────────

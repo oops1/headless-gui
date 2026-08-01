@@ -187,14 +187,14 @@ func TestUIAProviderThroughVTable(t *testing.T) {
 		uintptr(unsafe.Pointer(&out))); hr != eNoInterface || out != 0 {
 		t.Errorf("QueryInterface(чужой IID): hr=%#x out=%#x", hr, out)
 	}
-	before := root.refs
+	before := root.refs.Load()
 	comCall(simple, slotAddRef)
-	if root.refs != before+1 {
-		t.Errorf("AddRef не увеличил счётчик: %d → %d", before, root.refs)
+	if root.refs.Load() != before+1 {
+		t.Errorf("AddRef не увеличил счётчик: %d → %d", before, root.refs.Load())
 	}
 	comCall(simple, slotRelease)
-	if root.refs != before {
-		t.Errorf("Release не вернул счётчик: %d", root.refs)
+	if root.refs.Load() != before {
+		t.Errorf("Release не вернул счётчик: %d", root.refs.Load())
 	}
 
 	// ── IRawElementProviderSimple ────────────────────────────────────────────
@@ -337,6 +337,32 @@ func TestUIAProviderThroughVTable(t *testing.T) {
 	v = prop(btn.simplePtr(), 39999) // неизвестное свойство
 	if v.vt != vtEmpty {
 		t.Errorf("неизвестное свойство должно давать VT_EMPTY, получено vt=%d", v.vt)
+	}
+}
+
+// TestUIANoNativeWindowHandle — корень НЕ должен отдавать NativeWindowHandle.
+//
+// Регрессия: пока корень отвечал на это свойство дескриптором своего окна, UIA
+// понимала его как «элемент содержит вот это окно», шла в него за провайдером
+// (WM_GETOBJECT), получала тот же самый корень и делала его собственным
+// ребёнком — обход дерева уходил в бесконечное «окно внутри окна».
+func TestUIANoNativeWindowHandle(t *testing.T) {
+	b, _ := newUIATestBridge(t)
+	b.hwnd = 0xBEEF
+	for _, id := range []int32{b.rootID(), b.current().id(1)} {
+		e := b.element(id)
+		if e == nil {
+			t.Fatalf("элемент %d не создан", id)
+		}
+		var v comVariant
+		if hr := comCall(e.simplePtr(), slotPropertyValue, uiaPropNativeWindowHandle,
+			uintptr(unsafe.Pointer(&v))); hr != sOK {
+			t.Fatalf("GetPropertyValue(NativeWindowHandle): hr=%#x", hr)
+		}
+		if v.vt != vtEmpty {
+			t.Errorf("элемент %d вернул NativeWindowHandle (vt=%d, %#x) — UIA уйдёт в рекурсию",
+				id, v.vt, v.val[0])
+		}
 	}
 }
 

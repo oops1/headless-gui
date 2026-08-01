@@ -18,25 +18,31 @@
 //  4. Изменения (фокус, имя, значение, структура) поднимаются событиями UIA,
 //     но только когда клиенты действительно слушают (UiaClientsAreListening).
 //
-// СТАТУС: экспериментально, по умолчанию ВЫКЛЮЧЕНО (включить —
-// SetAccessibilityEnabled(true) или HEADLESS_GUI_A11Y=1).
+// Проверено на живом клиенте (.NET UIAutomationClient — та же сторона, что и у
+// скринридера): дерево обходится TreeWalker'ом от окна до листьев с верными
+// типами, именами, границами и фокусом; поиск по поддереву и по свойствам
+// работает. Свойства, навигация, RuntimeId, границы и фокус покрыты тестами
+// через НАСТОЯЩИЕ vtable (a11y_windows_test.go).
 //
-// Что проверено на живом клиенте (.NET UIAutomationClient, та же сторона, что
-// и у скринридера): окно находится, ClassName/AutomationId/Name наши,
-// FindAll(Descendants) отдаёт все кнопки/поля с верными типами, именами,
-// границами и состояниями; свойства, навигация, RuntimeId и фокус покрыты
-// тестами через НАСТОЯЩИЕ vtable (a11y_windows_test.go).
+// ГРАБЛИ, на которые уже наступили (не наступать снова):
 //
-// ИЗВЕСТНЫЙ ДЕФЕКТ: обход через TreeWalker от элемента окна возвращает корень
-// как собственного ребёнка (бесконечная цепочка «окно внутри окна»), тогда как
-// поиск по поддереву работает верно. Проверено, что причина НЕ в кэшировании
-// хост-провайдера и не в RuntimeId корня. Следующий шаг — логировать вызовы
-// провайдера из живого сеанса и посмотреть, что именно UIA спрашивает у
-// корня перед тем, как выдать его же ребёнком.
+//   - НЕ отдавать UIA_NativeWindowHandlePropertyId из корня фрагмента. Это
+//     свойство означает «элемент СОДЕРЖИТ вот это окно», и UIA идёт в него за
+//     провайдером — то есть шлёт WM_GETOBJECT нам же, получает тот же корень и
+//     делает его собственным ребёнком: обход уходит в бесконечное «окно внутри
+//     окна». Закреплено тестом TestUIANoNativeWindowHandle.
+//   - Каждый указатель, отданный в out-параметре, обязан быть учтён AddRef'ом
+//     (см. outFragment/outRoot), а хост-провайдер должен быть ОДНИМ И ТЕМ ЖЕ
+//     объектом при каждом запросе: UIA сверяет элементы по идентичности
+//     COM-объекта.
+//   - Разбирать поведение клиента можно журналом вызовов провайдера:
+//     HEADLESS_GUI_UIA_LOG=<файл> (см. uiaLog).
 //
 // Не поддержано пока: паттерны управления (Invoke/Toggle/Value) — скринридер
 // читает элементы, но не может нажимать их за пользователя; для этого движку
-// нужен путь «активировать узел по семантическому id».
+// нужен путь «активировать узел по семантическому id». И поиск по точке
+// (ElementProviderFromPoint) берёт позицию курсора, а не переданные
+// координаты — см. комментарий у этого метода.
 package window
 
 import (
@@ -44,6 +50,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -177,9 +184,24 @@ type uiaElement struct {
 	fragmentVT uintptr
 	rootVT     uintptr
 
-	refs int32
+	// refs — счётчик ссылок COM. Атомарный: AddRef/Release приходят из
+	// потоков UIA, а не только из UI-потока окна.
+	refs atomic.Int32
 	b    *uiaBridge
 	id   int32
+}
+
+// outFragment/outRoot отдают интерфейс наружу по правилам COM: каждый
+// указатель, попавший в out-параметр, обязан быть учтён AddRef'ом — иначе
+// клиент освободит объект, которым мы продолжаем пользоваться.
+func (e *uiaElement) outFragment() uintptr {
+	e.refs.Add(1)
+	return e.fragmentPtr()
+}
+
+func (e *uiaElement) outRoot() uintptr {
+	e.refs.Add(1)
+	return e.rootPtr()
 }
 
 var (
@@ -199,7 +221,8 @@ func uiaLookup(this uintptr) *uiaElement {
 // Объект живёт до закрытия окна: держать его в карте дешевле, чем городить
 // освобождение по счётчику ссылок из чужого потока.
 func newUIAElement(b *uiaBridge, id int32) *uiaElement {
-	e := &uiaElement{b: b, id: id, refs: 1}
+	e := &uiaElement{b: b, id: id}
+	e.refs.Store(1)
 	e.simpleVT = uiaSimpleVTable()
 	e.fragmentVT = uiaFragmentVTable()
 	e.rootVT = uiaRootVTable()
@@ -278,25 +301,29 @@ func uiaQueryInterface(this uintptr, riid *comGUID, ppv *uintptr) uintptr {
 	}
 	switch {
 	case riid.equals(&iidIUnknown), riid.equals(&iidProviderSimple):
+		uiaLog("QI(%d, Simple)", e.id)
 		*ppv = e.simplePtr()
 	case riid.equals(&iidProviderFragment):
+		uiaLog("QI(%d, Fragment)", e.id)
 		*ppv = e.fragmentPtr()
 	case riid.equals(&iidProviderFragmentRoot):
 		if !e.isRoot() {
+			uiaLog("QI(%d, FragmentRoot) → не корень, E_NOINTERFACE", e.id)
 			return eNoInterface
 		}
+		uiaLog("QI(%d, FragmentRoot)", e.id)
 		*ppv = e.rootPtr()
 	default:
+		uiaLog("QI(%d, %s) → E_NOINTERFACE", e.id, riid)
 		return eNoInterface
 	}
-	e.refs++
+	e.refs.Add(1)
 	return sOK
 }
 
 func uiaAddRef(this uintptr) uintptr {
 	if e := uiaLookup(this); e != nil {
-		e.refs++
-		return uintptr(e.refs)
+		return uintptr(e.refs.Add(1))
 	}
 	return 1
 }
@@ -306,10 +333,10 @@ func uiaAddRef(this uintptr) uintptr {
 // возможными вызовами из потоков UIA.
 func uiaRelease(this uintptr) uintptr {
 	if e := uiaLookup(this); e != nil {
-		if e.refs > 0 {
-			e.refs--
+		if n := e.refs.Add(-1); n >= 0 {
+			return uintptr(n)
 		}
-		return uintptr(e.refs)
+		e.refs.Store(0)
 	}
 	return 0
 }
@@ -343,6 +370,7 @@ func uiaGetPropertyValue(this uintptr, propID int32, out *comVariant) uintptr {
 		return eFail
 	}
 	e.b.fillProperty(e.id, propID, out)
+	uiaLog("Property(%d, %d) → vt=%d", e.id, propID, out.vt)
 	return sOK
 }
 
@@ -357,7 +385,12 @@ func uiaGetHostProvider(this uintptr, out *uintptr) uintptr {
 	if e == nil || !e.isRoot() {
 		return sOK
 	}
+	// Хост-провайдер должен быть ОДНИМ И ТЕМ ЖЕ объектом при каждом запросе:
+	// UIA сверяет элементы по идентичности COM-объекта, и новый экземпляр на
+	// каждый вызов она принимает за новый элемент окна. Отдаём кэшированный —
+	// с обязательным AddRef, потому что владение переходит клиенту.
 	*out = e.b.hostProvider()
+	uiaLog("HostProvider(%d) → %#x", e.id, *out)
 	return sOK
 }
 
@@ -372,10 +405,20 @@ func uiaNavigate(this uintptr, direction int32, out *uintptr) uintptr {
 	if e == nil {
 		return eFail
 	}
-	if target := e.b.navigate(e.id, direction); target != nil {
-		*out = target.fragmentPtr()
+	target := e.b.navigate(e.id, direction)
+	if target != nil {
+		*out = target.outFragment()
 	}
+	uiaLog("Navigate(%d, dir=%d) → %s", e.id, direction, uiaTargetName(target))
 	return sOK
+}
+
+// uiaTargetName — компактное описание элемента для журнала.
+func uiaTargetName(e *uiaElement) string {
+	if e == nil {
+		return "NULL"
+	}
+	return "id=" + strconv.Itoa(int(e.id))
 }
 
 // uiaGetRuntimeID — идентификатор элемента для клиента: [UiaAppendRuntimeId, id].
@@ -389,6 +432,7 @@ func uiaGetRuntimeID(this uintptr, out *uintptr) uintptr {
 		return eFail
 	}
 	*out = safeArrayOfInts([]int32{uiaAppendRuntimeID, e.id})
+	uiaLog("RuntimeId(%d) → [%d %d] sa=%#x", e.id, uiaAppendRuntimeID, e.id, *out)
 	return sOK
 }
 
@@ -432,9 +476,11 @@ func uiaGetFragmentRoot(this uintptr, out *uintptr) uintptr {
 	if e == nil {
 		return eFail
 	}
-	if root := e.b.element(e.b.rootID()); root != nil {
-		*out = root.rootPtr()
+	root := e.b.element(e.b.rootID())
+	if root != nil {
+		*out = root.outRoot()
 	}
+	uiaLog("FragmentRoot(%d) → %s", e.id, uiaTargetName(root))
 	return sOK
 }
 
@@ -460,7 +506,7 @@ func uiaElementProviderFromPoint(this uintptr, _, _ uintptr, out *uintptr) uintp
 		return sOK
 	}
 	if hit := e.b.hitTestScreen(x, y); hit != nil {
-		*out = hit.fragmentPtr()
+		*out = hit.outFragment()
 	}
 	return sOK
 }
@@ -474,9 +520,11 @@ func uiaGetFocus(this uintptr, out *uintptr) uintptr {
 	if e == nil {
 		return eFail
 	}
-	if f := e.b.focusElement(); f != nil {
-		*out = f.fragmentPtr()
+	f := e.b.focusElement()
+	if f != nil {
+		*out = f.outFragment()
 	}
+	uiaLog("GetFocus(%d) → %s", e.id, uiaTargetName(f))
 	return sOK
 }
 
@@ -500,19 +548,20 @@ func init() {
 type uiaBridge struct {
 	win *Window
 
-	mu    sync.RWMutex
-	ids   a11yIDPool
-	view  *a11yView
-	prev  *a11yView
-	stamp time.Time
-	dirty bool
-	elems map[int32]*uiaElement
-	hwnd  uintptr
-	host  uintptr // кэш провайдера окна (см. hostProvider)
+	mu      sync.RWMutex
+	ids     a11yIDPool
+	view    *a11yView
+	prev    *a11yView
+	stamp   time.Time
+	dirty   bool
+	elems   map[int32]*uiaElement
+	hwnd    uintptr
+	hostPtr atomic.Uintptr // кэш провайдера окна (см. hostProvider)
 
 	notifier uint64
 	stopCh   chan struct{}
 	stopOnce sync.Once
+	loopOnce sync.Once
 }
 
 // uiaBridges — мосты по hwnd: wndProc обрабатывает WM_GETOBJECT без правки
@@ -533,6 +582,7 @@ func (b *uiaBridge) start() error {
 		return errUIAUnavailable
 	}
 	b.hwnd = uintptr(nw.hwnd)
+	b.createHostProvider()
 	b.elems = map[int32]*uiaElement{}
 	b.refresh(true)
 
@@ -541,9 +591,17 @@ func (b *uiaBridge) start() error {
 	uiaBridgeMu.Unlock()
 
 	b.stopCh = make(chan struct{})
-	b.notifier = widget.RegisterUINotifier(b.markDirty, nil)
-	go b.eventLoop()
 	return nil
+}
+
+// ensureEventLoop поднимает слежение за изменениями UI при ПЕРВОМ обращении
+// клиента доступности. Пока никто не спрашивал, мост не стоит приложению
+// ничего: ни горутины, ни подписки, ни снимков семантики.
+func (b *uiaBridge) ensureEventLoop() {
+	b.loopOnce.Do(func() {
+		b.notifier = widget.RegisterUINotifier(b.markDirty, nil)
+		go b.eventLoop()
+	})
 }
 
 // stop снимает мост и отключает провайдеры от клиентов.
@@ -570,12 +628,11 @@ func (b *uiaBridge) stop() {
 	})
 }
 
-// enabled решает, поднимать ли мост.
-//
-// ПО УМОЛЧАНИЮ ВЫКЛЮЧЕН: мост экспериментальный (см. известный дефект обхода
-// в шапке файла), а без него окно отдаёт клиентам штатный HWND-провайдер
-// Windows — предсказуемое поведение «как у любого borderless-окна». Включается
-// явно: SetAccessibilityEnabled(true) или HEADLESS_GUI_A11Y=1.
+// enabled решает, поднимать ли мост. По умолчанию ВКЛЮЧЁН: сам по себе он
+// пассивен (пока никто не прислал WM_GETOBJECT, нет ни горутин, ни снимков —
+// см. ensureEventLoop), а без него скринридер не видит в borderless-окне
+// ничего, кроме пустого прямоугольника. Выключить: SetAccessibilityEnabled(false)
+// или HEADLESS_GUI_A11Y=0.
 func (b *uiaBridge) enabled() bool {
 	if v := os.Getenv("HEADLESS_GUI_A11Y"); v != "" {
 		return v != "0" && !strings.EqualFold(v, "false")
@@ -583,7 +640,7 @@ func (b *uiaBridge) enabled() bool {
 	if b.win.a11yForce != nil {
 		return *b.win.a11yForce
 	}
-	return false
+	return true
 }
 
 func (b *uiaBridge) markDirty() {
@@ -593,19 +650,24 @@ func (b *uiaBridge) markDirty() {
 }
 
 // hostProvider — провайдер самого окна (UiaHostProviderFromHwnd). Создаётся
-// РОВНО ОДИН раз: каждый вызов возвращает новый COM-объект, и если отдавать
-// клиенту каждый раз новый, UIA не узнаёт в нём прежний элемент — обход дерева
-// уходит в бесконечный «корень внутри корня».
+// РОВНО ОДИН раз (в start, на UI-потоке) и отдаётся клиенту с AddRef: каждый
+// вызов UiaHostProviderFromHwnd возвращает НОВЫЙ COM-объект, а UIA сверяет
+// элементы по идентичности объекта — новый экземпляр на каждый запрос она
+// принимает за другой элемент окна.
 func (b *uiaBridge) hostProvider() uintptr {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.host != 0 || b.hwnd == 0 || uiaCore.Load() != nil {
-		return b.host
+	host := b.hostPtr.Load()
+	comAddRef(host) // владение отданным указателем переходит клиенту
+	return host
+}
+
+// createHostProvider создаёт хост-провайдер один раз при подъёме моста.
+func (b *uiaBridge) createHostProvider() {
+	if b.hwnd == 0 || uiaCore.Load() != nil {
+		return
 	}
 	var host uintptr
 	procUiaHostProviderFromHwnd.Call(b.hwnd, uintptr(unsafe.Pointer(&host)))
-	b.host = host
-	return b.host
+	b.hostPtr.Store(host)
 }
 
 func (b *uiaBridge) hwndValue() uintptr {
@@ -797,9 +859,11 @@ func (b *uiaBridge) fillProperty(id int32, prop int32, out *comVariant) {
 	case uiaPropValueValue:
 		out.setString(node.Info.Value)
 	case uiaPropNativeWindowHandle:
-		if isRoot {
-			out.setI4(int32(b.hwndValue()))
-		}
+		// НЕ отдаём HWND. Это свойство означает «элемент СОДЕРЖИТ вот это
+		// окно», и UIA послушно идёт в него за провайдером — то есть шлёт
+		// WM_GETOBJECT нашему же окну и получает этот же корень, делая его
+		// собственным ребёнком (бесконечное «окно внутри окна»). Дескриптор
+		// окна клиент и так получает из хост-провайдера.
 	case uiaPropProcessID:
 		out.setI4(int32(windows.GetCurrentProcessId()))
 	}
@@ -921,10 +985,13 @@ func uiaHandleGetObject(hwnd, wparam, lparam uintptr) (uintptr, bool) {
 	if b == nil {
 		return 0, false
 	}
+	b.ensureEventLoop() // клиент доступности пришёл — начинаем следить за UI
 	root := b.element(b.rootID())
 	if root == nil {
 		return 0, false
 	}
+	root.refs.Add(1) // UIA владеет отданным указателем и освободит его сама
 	ret, _, _ := procUiaReturnRawElementProvider.Call(hwnd, wparam, lparam, root.simplePtr())
+	uiaLog("WM_GETOBJECT → корень id=%d, ret=%#x", root.id, ret)
 	return ret, true
 }

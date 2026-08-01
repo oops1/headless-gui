@@ -16,7 +16,11 @@ package window
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"sync"
+	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -25,6 +29,46 @@ import (
 // errUIAUnavailable — мост поднять не на чем: нет uiautomationcore.dll или
 // окно ещё не создано.
 var errUIAUnavailable = errors.New("window: UI Automation недоступна")
+
+// ─── Журнал вызовов провайдера ───────────────────────────────────────────────
+//
+// Клиент UIA живёт в чужом процессе, отладчиком его не прощупать: единственный
+// способ понять, ЧТО именно он спрашивает у провайдера и в каком порядке —
+// писать вызовы в файл. Включается переменной окружения:
+//
+//	HEADLESS_GUI_UIA_LOG=C:\путь\uia.log
+//
+// Без неё не стоит ничего (проверка одного указателя).
+
+var (
+	uiaLogMu   sync.Mutex
+	uiaLogFile *os.File
+	uiaLogOnce sync.Once
+	uiaLogOn   bool
+	uiaLogT0   time.Time
+)
+
+// uiaLog пишет строку в журнал вызовов провайдера, если он включён.
+func uiaLog(format string, args ...any) {
+	uiaLogOnce.Do(func() {
+		path := os.Getenv("HEADLESS_GUI_UIA_LOG")
+		if path == "" {
+			return
+		}
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			return
+		}
+		uiaLogFile, uiaLogOn, uiaLogT0 = f, true, time.Now()
+	})
+	if !uiaLogOn {
+		return
+	}
+	uiaLogMu.Lock()
+	defer uiaLogMu.Unlock()
+	fmt.Fprintf(uiaLogFile, "%8.3f [%d] %s\n", time.Since(uiaLogT0).Seconds(),
+		windows.GetCurrentThreadId(), fmt.Sprintf(format, args...))
+}
 
 // ─── HRESULT ─────────────────────────────────────────────────────────────────
 
@@ -52,6 +96,32 @@ func (g *comGUID) equals(o *comGUID) bool {
 		return false
 	}
 	return *g == *o
+}
+
+// String форматирует GUID как {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX} —
+// нужно, чтобы в журнале было видно, какой интерфейс просит клиент.
+func (g *comGUID) String() string {
+	if g == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+		g.Data1, g.Data2, g.Data3, g.Data4[0], g.Data4[1],
+		g.Data4[2], g.Data4[3], g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7])
+}
+
+// comAddRef вызывает IUnknown::AddRef чужого COM-объекта (слот 1 в vtable).
+// Нужен, когда мы отдаём клиенту КЭШИРОВАННЫЙ указатель: без этого клиент
+// освободит объект, которым мы продолжаем пользоваться.
+//
+// go vet ругается здесь на «possible misuse of unsafe.Pointer»: чтение чужой
+// таблицы методов иначе и не делается — адрес приходит из ОС, а не из Go.
+func comAddRef(obj uintptr) {
+	if obj == 0 {
+		return
+	}
+	vtbl := *(*uintptr)(unsafe.Pointer(obj))
+	fn := *(*uintptr)(unsafe.Pointer(vtbl + unsafe.Sizeof(uintptr(0))))
+	syscall.SyscallN(fn, obj)
 }
 
 var (
