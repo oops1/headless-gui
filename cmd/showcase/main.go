@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/cmd/internal/showcasestrings"
 	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/widget"
 	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
@@ -100,7 +101,7 @@ func main() {
 	// поэтому английской таблицы не нужно: Tr не находит перевод и возвращает
 	// сам ключ. Разметка ссылается на ключи через {Loc …} и обновляется
 	// вживую, код зовёт Tr/Trf и перечитывает строки в relocalize (ниже).
-	registerShowcaseStrings()
+	showcasestrings.Register()
 	widget.SetLanguage("RU") // язык интерфейса (надписи)
 	widget.SetLocale("RU")   // раскладка клавиатуры (индикатор) — независимо
 

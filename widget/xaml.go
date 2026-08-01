@@ -975,10 +975,19 @@ func buildXAMLScrollView(el xElement) Widget {
 
 func buildXAMLListView(el xElement) Widget {
 	var items []string
+	// keys[i] — ключ {Loc …} для i-й строки (пустой, если строка не
+	// локализуемая): строки списка не виджеты, поэтому перевод и подписку на
+	// смену языка делает сборщик (см. xaml_loc_items.go).
+	var keys []string
+	add := func(raw string) {
+		text, key := locItemText(raw)
+		items = append(items, text)
+		keys = append(keys, key)
+	}
 	if raw := el.attr("Items", "ItemsSource"); raw != "" {
 		for _, item := range strings.Split(raw, ",") {
 			if s := strings.TrimSpace(item); s != "" {
-				items = append(items, s)
+				add(s)
 			}
 		}
 	}
@@ -991,7 +1000,7 @@ func buildXAMLListView(el xElement) Widget {
 				v = strings.TrimSpace(child.Text)
 			}
 			if v != "" {
-				items = append(items, v)
+				add(v)
 			}
 		case t == "textblock" || t == "label" || t == "run":
 			// WPF: <ListView><TextBlock>text</TextBlock></ListView>
@@ -1000,11 +1009,18 @@ func buildXAMLListView(el xElement) Widget {
 				v = strings.TrimSpace(child.Text)
 			}
 			if v != "" {
-				items = append(items, v)
+				add(v)
 			}
 		}
 	}
 	lv := NewListView(items...)
+	registerLocItemList(keys, func(i int, s string) {
+		cur := lv.Items()
+		if i < len(cur) {
+			cur[i] = s
+			lv.SetItems(cur)
+		}
+	})
 
 	applyColor(&lv.Background, el, "Background")
 

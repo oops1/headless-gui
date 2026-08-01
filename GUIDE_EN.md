@@ -1428,7 +1428,9 @@ Protocol: binary `init` (canvas size) and tile batches (per-tile PNG with
 a u16 x/y/w/h header); the server keeps a composite of the screen and
 sends each new client a full keyframe, then only deltas; slow clients
 skip frames. Input comes back as JSON (mouse/wheel/keys; the browser's
-`e.keyCode` matches `widget.KeyCode`). Demo: `go run ./cmd/webdemo` →
+`e.keyCode` matches `widget.KeyCode`). Demo: go run ./cmd/webshowcase (the entire widget showcase in a browser -
+same markup, tabs, themes and localization as the native window, without a
+single OS window) or the minimal go run ./cmd/webdemo →
 http://localhost:8091.
 
 ### Native modal windows and popups (v3.10)
@@ -1790,7 +1792,8 @@ go run ./cmd/showcase    # all widgets + live animation
 go run ./cmd/guiview     # interactive demo with modal XAML windows
 go run ./cmd/griddemo    # Grid layout
 go run ./cmd/smartgit    # SmartGit-like UI
-go run ./cmd/webdemo     # stream the UI to a browser (http://localhost:8091)
+go run ./cmd/webshowcase # the whole showcase in a browser (http://localhost:8091)
+go run ./cmd/webdemo     # minimal streaming example
 
 # Windows binary without console
 go build -ldflags="-H windowsgui" -o showcase.exe ./cmd/showcase

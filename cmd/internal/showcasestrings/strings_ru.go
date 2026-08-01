@@ -1,11 +1,18 @@
-// strings_ru.go — таблица переводов showcase (СГЕНЕРИРОВАНО).
+// Package showcasestrings — переводы демонстрационного приложения showcase.
+//
+// Пакет общий для двух витрин: оконной (cmd/showcase) и браузерной
+// (cmd/webshowcase) — они показывают ОДНУ И ТУ ЖЕ разметку, поэтому и таблица
+// строк у них одна.
+//
+// strings_ru.go — таблица строк РАЗМЕТКИ (СГЕНЕРИРОВАНО инструментом
+// localize_xaml из прежнего русского showcase.xaml).
 //
 // Ключ — английская строка: в EN-режиме Tr не находит таблицу и возвращает сам
 // ключ, поэтому английский текст не дублируется отдельной таблицей. Русский
 // текст живёт здесь, а разметка ссылается на ключи через {Loc …}.
 //
 // Файл собран инструментом localize_xaml из прежнего русского showcase.xaml.
-package main
+package showcasestrings
 
 import "github.com/oops1/headless-gui/v3/widget"
 
@@ -254,11 +261,11 @@ var showcaseRU = map[string]string{
 	"▶ Start the race":                       "▶ Запустить гонку",
 }
 
-// registerShowcaseStrings подключает ОБЕ таблицы переводов: строки разметки
+// Register подключает ОБЕ таблицы переводов: строки разметки
 // (эта, сгенерированная) и строки, задаваемые кодом (strings_code_ru.go).
 // Запасной язык — английский, но таблицы для него нет: ключ и есть английский
 // текст, и Tr возвращает его сам.
-func registerShowcaseStrings() {
+func Register() {
 	widget.SetFallbackLanguage("EN")
 	widget.RegisterStrings("RU", showcaseRU)
 	widget.RegisterStrings("RU", showcaseCodeRU)

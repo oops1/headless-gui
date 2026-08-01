@@ -3,7 +3,7 @@
 //
 // Как и в strings_ru.go, ключ — английская строка: в EN-режиме Tr возвращает
 // сам ключ. СГЕНЕРИРОВАНО инструментом localize_go, правится вместе с кодом.
-package main
+package showcasestrings
 
 // showcaseCodeRU — переводы строк, задаваемых из кода.
 var showcaseCodeRU = map[string]string{

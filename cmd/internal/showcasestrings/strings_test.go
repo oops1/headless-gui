@@ -1,4 +1,4 @@
-package main
+package showcasestrings
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 )
 
 // xamlPath — разметка showcase относительно каталога пакета.
-const xamlPath = "../../assets/ui/showcase.xaml"
+const xamlPath = "../../../assets/ui/showcase.xaml"
 
 // locRe вылавливает ссылки {Loc ключ} из разметки.
 var locRe = regexp.MustCompile(`"\{Loc ([^"}]*)\}"`)

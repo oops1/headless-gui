@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	_ "embed"
 
@@ -41,9 +43,40 @@ type Server struct {
 	eng *engine.Engine
 
 	mu        sync.Mutex
-	clients   map[*wsConn]chan []byte
+	clients   map[*wsConn]chan outMsg
 	composite *image.RGBA // текущее полное состояние экрана (физич. пиксели)
 	w, h      int
+
+	// Счётчики для /stats: сколько кадров, тайлов и байтов ушло зрителям.
+	// Полезны и в демонстрации, и при отладке «почему тормозит».
+	frames, tiles, bytes int64
+	started              time.Time
+}
+
+// Stats — сводка по стриму (см. Server.Stats и HTTP-эндпойнт /stats).
+type Stats struct {
+	Viewers  int   `json:"viewers"`  // сколько браузеров смотрит сейчас
+	Frames   int64 `json:"frames"`   // кадров разослано
+	Tiles    int64 `json:"tiles"`    // тайлов в них
+	Bytes    int64 `json:"bytes"`    // суммарный объём тайлов (до умножения на зрителей)
+	Width    int   `json:"width"`    // размер холста, физические пиксели
+	Height   int   `json:"height"`   //
+	UptimeMS int64 `json:"uptimeMs"` // сколько сервер уже стримит
+}
+
+// Stats возвращает текущую сводку. Потокобезопасно.
+func (s *Server) Stats() Stats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return Stats{
+		Viewers:  len(s.clients),
+		Frames:   s.frames,
+		Tiles:    s.tiles,
+		Bytes:    s.bytes,
+		Width:    s.w,
+		Height:   s.h,
+		UptimeMS: time.Since(s.started).Milliseconds(),
+	}
 }
 
 // New создаёт стример для движка.
@@ -51,10 +84,11 @@ func New(eng *engine.Engine) *Server {
 	w, h := eng.PhysicalSize()
 	return &Server{
 		eng:       eng,
-		clients:   make(map[*wsConn]chan []byte),
+		clients:   make(map[*wsConn]chan outMsg),
 		composite: image.NewRGBA(image.Rect(0, 0, w, h)),
 		w:         w,
 		h:         h,
+		started:   time.Now(),
 	}
 }
 
@@ -74,9 +108,12 @@ func (s *Server) Run() {
 			log.Printf("webstream: кодирование кадра %d: %v", f.Seq, err)
 			continue
 		}
+		s.frames++
+		s.tiles += int64(len(f.Tiles))
+		s.bytes += int64(len(msg))
 		for _, ch := range s.clients {
 			select {
-			case ch <- msg:
+			case ch <- outMsg{op: opBinary, data: msg}:
 			default: // медленный клиент — кадр пропускается (дельты догонят)
 			}
 		}
@@ -152,12 +189,28 @@ func (s *Server) encodeInit() []byte {
 	return msg
 }
 
-// ServeHTTP: "/" — встроенный вьювер, "/ws" — поток тайлов + ввод.
+// ServeHTTP: "/" — встроенный вьювер, "/ws" — поток тайлов + ввод,
+// "/stats" — сводка по стриму в JSON.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/", "/index.html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(viewerHTML)
+	case "/snapshot.png":
+		// Текущее состояние холста одним PNG: удобно для скриншотов в
+		// документации, для мониторинга и для тестов, которым не нужен
+		// WebSocket.
+		s.mu.Lock()
+		snap := image.NewRGBA(s.composite.Rect)
+		copy(snap.Pix, s.composite.Pix)
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "image/png")
+		_ = png.Encode(w, snap)
+	case "/stats":
+		// Вьювер показывает эти числа в строке состояния; приложению они
+		// пригодятся для мониторинга (сколько зрителей, сколько трафика).
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(s.Stats())
 	case "/ws":
 		s.handleWS(w, r)
 	default:
@@ -172,9 +225,22 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
+	// Первый зритель может подключиться раньше, чем движок нарисовал хоть
+	// один кадр (при рендере по требованию кадр рождается только на
+	// изменение UI, а самый первый мог уйти в никуда, пока Run ещё не начал
+	// читать канал). Тогда композит пуст, и клиент увидел бы чёрный
+	// прямоугольник — просим движок перерисоваться целиком.
+	s.mu.Lock()
+	empty := s.frames == 0
+	s.mu.Unlock()
+	if empty {
+		s.eng.Invalidate()
+		s.waitFirstFrame(time.Second)
+	}
+
 	// Регистрация + init + keyframe (под мьютексом, чтобы не потерять
 	// дельты между снимком и подпиской).
-	out := make(chan []byte, 60)
+	out := make(chan outMsg, 60)
 	s.mu.Lock()
 	kf, kerr := s.keyframe()
 	s.clients[ws] = out
@@ -200,8 +266,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for msg := range out {
-			if err := ws.WriteMessage(opBinary, msg); err != nil {
+		for m := range out {
+			if err := ws.WriteMessage(m.op, m.data); err != nil {
 				return
 			}
 		}
@@ -214,7 +280,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if op == opText {
-			s.dispatchInput(data)
+			s.dispatchInput(data, out)
 		}
 	}
 	s.mu.Lock()
@@ -224,26 +290,55 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	<-done
 }
 
+// waitFirstFrame ждёт, пока Run применит первый кадр к композиту (но не
+// дольше timeout): без этого новый клиент получил бы пустой снимок.
+func (s *Server) waitFirstFrame(timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		got := s.frames > 0
+		s.mu.Unlock()
+		if got {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// outMsg — сообщение в сокет клиента: бинарные тайлы или текстовый ответ.
+type outMsg struct {
+	op   byte
+	data []byte
+}
+
 // inputEvent — событие ввода от браузерного клиента.
 type inputEvent struct {
-	T string `json:"t"`           // "mm" | "mb" | "wh" | "kd" | "ku"
-	X int    `json:"x,omitempty"` // координаты (физические пиксели холста)
-	Y int    `json:"y,omitempty"`
-	B int    `json:"b,omitempty"` // кнопка (widget.MouseButton)
-	P bool   `json:"p,omitempty"` // pressed
-	D int    `json:"d,omitempty"` // направление колеса: -1 вверх, +1 вниз
-	C int    `json:"c,omitempty"` // KeyCode (совпадает с VK/keyCode браузера)
-	R int    `json:"r,omitempty"` // руна (codepoint) для печатных клавиш
-	M int    `json:"m,omitempty"` // модификаторы: 1=Ctrl 2=Shift 4=Alt
+	T  string  `json:"t"`            // "mm" | "mb" | "wh" | "kd" | "ku" | "pg"
+	TS float64 `json:"ts,omitempty"` // метка времени пинга — возвращается как есть
+	X  int     `json:"x,omitempty"`  // координаты (физические пиксели холста)
+	Y  int     `json:"y,omitempty"`
+	B  int     `json:"b,omitempty"` // кнопка (widget.MouseButton)
+	P  bool    `json:"p,omitempty"` // pressed
+	D  int     `json:"d,omitempty"` // направление колеса: -1 вверх, +1 вниз
+	C  int     `json:"c,omitempty"` // KeyCode (совпадает с VK/keyCode браузера)
+	R  int     `json:"r,omitempty"` // руна (codepoint) для печатных клавиш
+	M  int     `json:"m,omitempty"` // модификаторы: 1=Ctrl 2=Shift 4=Alt
 }
 
 // dispatchInput транслирует событие клиента в движок.
-func (s *Server) dispatchInput(data []byte) {
+func (s *Server) dispatchInput(data []byte, out chan<- outMsg) {
 	var ev inputEvent
 	if err := json.Unmarshal(data, &ev); err != nil {
 		return
 	}
 	switch ev.T {
+	case "pg":
+		// Эхо-пинг: вьювер меряет задержку туда-обратно. Ответ уходит через
+		// канал писателя — писать в сокет из читающей горутины нельзя.
+		select {
+		case out <- outMsg{op: opText, data: []byte(fmt.Sprintf(`{"t":"pg","ts":%v}`, ev.TS))}:
+		default:
+		}
 	case "mm":
 		s.eng.SendMouseMove(ev.X, ev.Y)
 	case "mb":
