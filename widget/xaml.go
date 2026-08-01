@@ -772,10 +772,13 @@ func buildXAMLTextBox(el xElement) Widget {
 
 func buildXAMLDropdown(el xElement) Widget {
 	var items []string
+	var keys []string // ключи {Loc …} по индексам items (пустая строка — нет)
 	if raw := el.attr("Items", "ItemsSource"); raw != "" {
 		for _, item := range strings.Split(raw, ",") {
 			if s := strings.TrimSpace(item); s != "" {
-				items = append(items, s)
+				text, key := locItemText(s)
+				items = append(items, text)
+				keys = append(keys, key)
 			}
 		}
 	}
@@ -787,12 +790,23 @@ func buildXAMLDropdown(el xElement) Widget {
 				v = strings.TrimSpace(child.Text)
 			}
 			if v != "" {
-				items = append(items, v)
+				text, key := locItemText(v)
+				items = append(items, text)
+				keys = append(keys, key)
 			}
 		}
 	}
 
 	dd := NewDropdown(items...)
+	// Элементы списка — не виджеты, поэтому обновляем их сами: при смене
+	// языка перечитываем переводы и переустанавливаем весь список.
+	registerLocItemList(keys, func(i int, s string) {
+		cur := dd.Items()
+		if i < len(cur) {
+			cur[i] = s
+			dd.SetItems(cur)
+		}
+	})
 	if sel := el.attr("SelectedIndex", "Selected"); sel != "" {
 		if idx, err := strconv.Atoi(sel); err == nil {
 			dd.SetSelected(idx)

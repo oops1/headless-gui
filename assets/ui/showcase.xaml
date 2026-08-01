@@ -55,11 +55,11 @@
     </Panel>
     <ComboBox Name="themeSelect" Right="355" Top="10" Width="235" Height="32"
               Items="Win10 Dark,Win10 Light,Win11 Dark,Win11 Light,Win2000,Mac"
-              SelectedIndex="0" ToolTip="Сменить тему оформления"/>
+              SelectedIndex="0" ToolTip="{Loc Switch the theme}"/>
     <Button Name="langToggle" Right="220" Top="10" Width="120" Height="32"
-            Content="Язык: RU" Background="#005A9E" Foreground="White"
+            Content="{Loc Language: RU}" Background="#005A9E" Foreground="White"
             HoverBG="#1A8CFF" PressedBG="#004578" BorderBrush="#1A8CFF"
-            ToolTip="Переключить язык интерфейса / Switch UI language"/>
+            ToolTip="{Loc Switch UI language / Переключить язык интерфейса}"/>
     <Label Name="headerClock" Right="10" Top="14" Width="180" Height="24"
            Text="00:00:00" Foreground="#B0D4FF"/>
 
@@ -67,43 +67,43 @@
          MENU BAR — горизонтальное меню
          ═══════════════════════════════════════════════════════════════════════ -->
     <Menu Name="mainMenu" Left="0" Top="52" Right="0" Height="28">
-        <MenuItem Header="Файл">
-            <MenuItem Text="Новый"/>
-            <MenuItem Text="Открыть"/>
-            <MenuItem Text="Сохранить"/>
+        <MenuItem Header="{Loc File}">
+            <MenuItem Text="{Loc New}"/>
+            <MenuItem Text="{Loc Open}"/>
+            <MenuItem Text="{Loc Save}"/>
             <MenuItem Separator="True"/>
-            <MenuItem Text="Экспорт..."/>
+            <MenuItem Text="{Loc Export...}"/>
             <MenuItem Separator="True"/>
-            <MenuItem Text="Выход"/>
+            <MenuItem Text="{Loc Exit}"/>
         </MenuItem>
-        <MenuItem Header="Правка">
-            <MenuItem Text="Отменить"/>
-            <MenuItem Text="Повторить"/>
+        <MenuItem Header="{Loc Edit}">
+            <MenuItem Text="{Loc Undo}"/>
+            <MenuItem Text="{Loc Retry}"/>
             <MenuItem Separator="True"/>
-            <MenuItem Text="Вырезать"/>
-            <MenuItem Text="Копировать"/>
-            <MenuItem Text="Вставить"/>
+            <MenuItem Text="{Loc Cut}"/>
+            <MenuItem Text="{Loc Copy}"/>
+            <MenuItem Text="{Loc Paste}"/>
             <MenuItem Separator="True"/>
-            <MenuItem Text="Выделить всё"/>
+            <MenuItem Text="{Loc Select all}"/>
         </MenuItem>
-        <MenuItem Header="Вид">
-            <MenuItem Text="Панель инструментов"/>
-            <MenuItem Text="Строка состояния"/>
+        <MenuItem Header="{Loc View}">
+            <MenuItem Text="{Loc Toolbox}"/>
+            <MenuItem Text="{Loc Status bar}"/>
             <MenuItem Separator="True"/>
-            <MenuItem Text="Масштаб 100%"/>
-            <MenuItem Text="Масштаб 150%"/>
+            <MenuItem Text="{Loc Scale 100%}"/>
+            <MenuItem Text="{Loc Scale 150%}"/>
         </MenuItem>
-        <MenuItem Header="Подключение">
-            <MenuItem Text="Новое подключение"/>
-            <MenuItem Text="Быстрое подключение"/>
+        <MenuItem Header="{Loc Connection}">
+            <MenuItem Text="{Loc New connection}"/>
+            <MenuItem Text="{Loc Quick connect}"/>
             <MenuItem Separator="True"/>
-            <MenuItem Text="Отключить"/>
+            <MenuItem Text="{Loc Disable}"/>
         </MenuItem>
-        <MenuItem Header="Справка">
-            <MenuItem Text="Документация"/>
-            <MenuItem Text="Горячие клавиши"/>
+        <MenuItem Header="{Loc Help}">
+            <MenuItem Text="{Loc Documentation}"/>
+            <MenuItem Text="{Loc Shortcuts}"/>
             <MenuItem Separator="True"/>
-            <MenuItem Text="О программе"/>
+            <MenuItem Text="{Loc About}"/>
         </MenuItem>
     </Menu>
 
@@ -114,30 +114,30 @@
     <Panel Name="sidebar" Left="0" Top="80" Width="220" Bottom="36"
            Background="#16162B">
         <Label Left="16" Top="16" Width="188" Height="20"
-               Text="ВИДЖЕТЫ" Foreground="#5B6078"/>
+               Text="{Loc WIDGETS}" Foreground="#5B6078"/>
         <Separator Left="16" Top="42" Width="188" Height="1" Background="#2A2A44"/>
 
         <Label Left="16" Top="56" Width="188" Height="22"
-               Text="  Ввод данных" Foreground="#CDD6F4"/>
+               Text="{Loc Input data}" Foreground="#CDD6F4"/>
         <Label Left="16" Top="84" Width="188" Height="22"
-               Text="  Элементы управления" Foreground="#CDD6F4"/>
+               Text="{Loc Control elements}" Foreground="#CDD6F4"/>
         <Label Left="16" Top="112" Width="188" Height="22"
-               Text="  Индикаторы" Foreground="#CDD6F4"/>
+               Text="{Loc Indicators}" Foreground="#CDD6F4"/>
         <Label Left="16" Top="140" Width="188" Height="22"
-               Text="  Контейнеры" Foreground="#CDD6F4"/>
+               Text="{Loc Containers}" Foreground="#CDD6F4"/>
         <Label Left="16" Top="168" Width="188" Height="22"
-               Text="  Списки" Foreground="#CDD6F4"/>
+               Text="{Loc Lists}" Foreground="#CDD6F4"/>
 
         <Separator Left="16" Top="206" Width="188" Height="1" Background="#2A2A44"/>
 
         <Label Left="16" Top="222" Width="188" Height="20"
-               Text="ИНФОРМАЦИЯ" Foreground="#5B6078"/>
+               Text="{Loc INFORMATION}" Foreground="#5B6078"/>
         <Label Name="sideInfo1" Left="16" Top="248" Width="188" Height="20"
-               Text="Виджетов: 16" Foreground="#7F849C"/>
+               Text="{Loc Widgets: 16}" Foreground="#7F849C"/>
         <Label Name="sideInfo2" Left="16" Top="272" Width="188" Height="20"
                Text="XAML: showcase.xaml" Foreground="#7F849C"/>
         <Label Name="sideInfo3" Left="16" Top="296" Width="188" Height="20"
-               Text="Разрешение: 1280×900" Foreground="#7F849C"/>
+               Text="{Loc Resolution: 1280×900}" Foreground="#7F849C"/>
     </Panel>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -148,7 +148,7 @@
                 SelectedIndex="0">
 
         <!-- ─── TAB 1: Ввод данных ──────────────────────────────────────── -->
-        <TabItem Header="Ввод данных">
+        <TabItem Header="{Loc Input}">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
 
                 <!-- Секция: TextBox / TextInput -->
@@ -157,19 +157,19 @@
                 <Separator Left="30" Top="44" Width="460" Height="1" Background="#313244"/>
 
                 <Label Left="30" Top="56" Width="120" Height="20"
-                       Text="Логин:" Foreground="#BAC2DE"/>
+                       Text="{Loc Login:}" Foreground="#BAC2DE"/>
                 <TextBox Name="txtLogin" Left="30" Top="78" Width="460" Height="36"
                          Placeholder="user@example.com"/>
 
                 <Label Left="30" Top="126" Width="120" Height="20"
-                       Text="Пароль:" Foreground="#BAC2DE"/>
+                       Text="{Loc Password:}" Foreground="#BAC2DE"/>
                 <PasswordBox Name="txtPassword" Left="30" Top="148" Width="460" Height="36"
-                             Placeholder="Введите пароль..."/>
+                             Placeholder="{Loc Enter the password...}"/>
 
                 <Label Left="30" Top="196" Width="120" Height="20"
-                       Text="Комментарий:" Foreground="#BAC2DE"/>
+                       Text="{Loc Comment:}" Foreground="#BAC2DE"/>
                 <TextBox Name="txtComment" Left="30" Top="218" Width="460" Height="36"
-                         Placeholder="Любой текст для проверки ввода..."/>
+                         Placeholder="{Loc Any text to try the input...}"/>
 
                 <!-- Секция: ComboBox / Dropdown -->
                 <Label Left="30" Top="280" Width="200" Height="20"
@@ -177,16 +177,16 @@
                 <Separator Left="30" Top="304" Width="460" Height="1" Background="#313244"/>
 
                 <Label Left="30" Top="316" Width="140" Height="20"
-                       Text="Роль пользователя:" Foreground="#BAC2DE"/>
+                       Text="{Loc User role:}" Foreground="#BAC2DE"/>
                 <ComboBox Name="ddRole" Left="30" Top="338" Width="460" Height="32">
-                    <ComboBoxItem Content="Администратор"/>
-                    <ComboBoxItem Content="Оператор"/>
-                    <ComboBoxItem Content="Пользователь"/>
-                    <ComboBoxItem Content="Гость"/>
+                    <ComboBoxItem Content="{Loc Administrator}"/>
+                    <ComboBoxItem Content="{Loc Operator}"/>
+                    <ComboBoxItem Content="{Loc User}"/>
+                    <ComboBoxItem Content="{Loc Guest}"/>
                 </ComboBox>
 
                 <Label Left="30" Top="386" Width="140" Height="20"
-                       Text="Протокол:" Foreground="#BAC2DE"/>
+                       Text="{Loc Protocol:}" Foreground="#BAC2DE"/>
                 <ComboBox Name="ddProtocol" Left="30" Top="408" Width="460" Height="32"
                           Items="RDP,VNC,SSH,HTTP,HTTPS" SelectedIndex="0"/>
 
@@ -196,24 +196,24 @@
                 <Separator Left="30" Top="490" Width="460" Height="1" Background="#313244"/>
 
                 <Button Name="btnAccent" Left="30" Top="504" Width="140" Height="40"
-                        Content="Войти" Style="Accent"
+                        Content="{Loc Sign in}" Style="Accent"
                         HoverBG="#1A8CFF" PressedBG="#005A9E"/>
 
                 <Button Name="btnDefault" Left="186" Top="504" Width="140" Height="40"
-                        Content="Отмена"
+                        Content="{Loc Cancel}"
                         HoverBG="#3A3A52" PressedBG="#2A2A3E"/>
 
                 <Button Name="btnDanger" Left="342" Top="504" Width="148" Height="40"
-                        Content="Удалить" Background="#C42B1C" Foreground="White"
+                        Content="{Loc Delete}" Background="#C42B1C" Foreground="White"
                         HoverBG="#E03524" PressedBG="#A01E14"
                         BorderBrush="#E03524"/>
 
                 <Button Name="btnDisabled" Left="30" Top="558" Width="220" Height="36"
-                        Content="Сбросить форму"
+                        Content="{Loc Reset the form}"
                         HoverBG="#3A3A52"/>
 
                 <Button Name="btnExport" Left="266" Top="558" Width="224" Height="36"
-                        Content="Экспорт настроек" Style="Accent"
+                        Content="{Loc Export settings}" Style="Accent"
                         HoverBG="#1A8CFF"/>
 
                 <!-- ──── Правая колонка: Текст с переносом ──────────────── -->
@@ -222,14 +222,14 @@
                 <Separator Left="540" Top="44" Width="480" Height="1" Background="#313244"/>
 
                 <Label Left="540" Top="56" Width="480" Height="20"
-                       Text="Обычный текст (одна строка)" Foreground="#CDD6F4"/>
+                       Text="{Loc Plain text (single line)}" Foreground="#CDD6F4"/>
 
                 <Label Left="540" Top="88" Width="480" Height="100"
-                       Text="Длинный текст с переносом строк (TextWrapping=Wrap). Движок headless-gui поддерживает пиксельно-точный перенос слов по ширине контейнера. Это позволяет создавать информационные панели и диалоги с динамическим содержимым."
+                       Text="{Loc A long text with word wrapping (TextWrapping=Wrap). The headless-gui engine wraps words pixel-precisely to the container width. That makes it possible to build information panels and dialogs with dynamic content.}"
                        Foreground="#A6ADC8" TextWrapping="Wrap" Background="#181828"/>
 
                 <Label Left="540" Top="204" Width="480" Height="60"
-                       Text="Ещё один блок текста. Шрифт по умолчанию, светлый фон для контраста. Проверка переноса при различных размерах."
+                       Text="{Loc Another block of text. Default font, light background for contrast. A wrapping check at various sizes.}"
                        Foreground="#1E1E32" TextWrapping="Wrap" Background="#CDD6F4"/>
 
                 <!-- Image -->
@@ -240,7 +240,7 @@
                 <Panel Left="540" Top="316" Width="480" Height="240" Background="#11112A"
                        CornerRadius="6" BorderBrush="#313244">
                     <Label Left="12" Top="12" Width="456" Height="216"
-                           Text="[ Область для изображения — Image Source='path' ]"
+                           Text="{Loc [ Image area — Image Source='path' ]}"
                            Foreground="#585B70" TextWrapping="Wrap"/>
                 </Panel>
 
@@ -250,21 +250,21 @@
                 <Separator Left="540" Top="490" Width="480" Height="1" Background="#313244"/>
 
                 <Button Name="btnShowPopup" Left="540" Top="504" Width="220" Height="36"
-                        Content="Показать меню" Style="Accent"
+                        Content="{Loc Show menu}" Style="Accent"
                         HoverBG="#1A8CFF"/>
                 <Button Name="btnShowPopup2" Left="776" Top="504" Width="244" Height="36"
-                        Content="Контекстное меню (справа)"
+                        Content="{Loc Context menu (right click)}"
                         HoverBG="#3A3A52"/>
 
                 <PopupMenu Name="ctxMenu">
-                    <MenuItem Text="Копировать"/>
-                    <MenuItem Text="Вставить"/>
-                    <MenuItem Text="Вырезать"/>
+                    <MenuItem Text="{Loc Copy}"/>
+                    <MenuItem Text="{Loc Paste}"/>
+                    <MenuItem Text="{Loc Cut}"/>
                     <MenuItem Separator="True"/>
-                    <MenuItem Text="Выделить всё"/>
+                    <MenuItem Text="{Loc Select all}"/>
                     <MenuItem Separator="True"/>
-                    <MenuItem Text="Отключено" Disabled="True"/>
-                    <MenuItem Text="Удалить" />
+                    <MenuItem Text="{Loc Disabled}" Disabled="True"/>
+                    <MenuItem Text="{Loc Delete}" />
                 </PopupMenu>
 
                 <!-- Separator demo -->
@@ -279,7 +279,7 @@
         </TabItem>
 
         <!-- ─── TAB 2: Элементы управления ──────────────────────────────── -->
-        <TabItem Header="Управление">
+        <TabItem Header="{Loc Controls}">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
 
                 <!-- CheckBox -->
@@ -288,13 +288,13 @@
                 <Separator Left="30" Top="44" Width="460" Height="1" Background="#313244"/>
 
                 <CheckBox Name="cbRemember" Left="30" Top="58" Width="460" Height="28"
-                          Content="Запомнить учётные данные" IsChecked="true"/>
+                          Content="{Loc Remember credentials}" IsChecked="true"/>
                 <CheckBox Name="cbAutoConnect" Left="30" Top="92" Width="460" Height="28"
-                          Content="Автоматическое подключение при запуске"/>
+                          Content="{Loc Connect automatically on start}"/>
                 <CheckBox Name="cbVerbose" Left="30" Top="126" Width="460" Height="28"
-                          Content="Подробное логирование (verbose)"/>
+                          Content="{Loc Verbose logging}"/>
                 <CheckBox Name="cbCompress" Left="30" Top="160" Width="460" Height="28"
-                          Content="Сжатие данных при передаче" IsChecked="true"/>
+                          Content="{Loc Compress transferred data}" IsChecked="true"/>
 
                 <!-- RadioButton -->
                 <Label Left="30" Top="210" Width="200" Height="20"
@@ -302,22 +302,22 @@
                 <Separator Left="30" Top="234" Width="460" Height="1" Background="#313244"/>
 
                 <Label Left="30" Top="248" Width="200" Height="20"
-                       Text="Метод аутентификации:" Foreground="#BAC2DE"/>
+                       Text="{Loc Authentication method:}" Foreground="#BAC2DE"/>
                 <RadioButton Name="rbLDAP" Left="30" Top="274" Width="460" Height="26"
                              Content="LDAP / Active Directory" GroupName="auth" IsChecked="true"/>
                 <RadioButton Name="rbOTP" Left="30" Top="306" Width="460" Height="26"
-                             Content="Одноразовый пароль (OTP)" GroupName="auth"/>
+                             Content="{Loc One-time password (OTP)}" GroupName="auth"/>
                 <RadioButton Name="rbCert" Left="30" Top="338" Width="460" Height="26"
-                             Content="Сертификат (X.509)" GroupName="auth"/>
+                             Content="{Loc Certificate (X.509)}" GroupName="auth"/>
 
                 <Label Left="30" Top="382" Width="200" Height="20"
-                       Text="Качество изображения:" Foreground="#BAC2DE"/>
+                       Text="{Loc Image quality:}" Foreground="#BAC2DE"/>
                 <RadioButton Name="rbHigh" Left="30" Top="408" Width="220" Height="26"
-                             Content="Высокое" GroupName="quality" IsChecked="true"/>
+                             Content="{Loc High}" GroupName="quality" IsChecked="true"/>
                 <RadioButton Name="rbMedium" Left="250" Top="408" Width="220" Height="26"
-                             Content="Среднее" GroupName="quality"/>
+                             Content="{Loc Medium}" GroupName="quality"/>
                 <RadioButton Name="rbLow" Left="30" Top="440" Width="220" Height="26"
-                             Content="Низкое" GroupName="quality"/>
+                             Content="{Loc Low}" GroupName="quality"/>
 
                 <!-- ToggleSwitch -->
                 <Label Left="30" Top="492" Width="200" Height="20"
@@ -325,13 +325,13 @@
                 <Separator Left="30" Top="516" Width="460" Height="1" Background="#313244"/>
 
                 <ToggleSwitch Name="tsAutoRefresh" Left="30" Top="530" Width="460" Height="28"
-                              Content="Авто-обновление" IsOn="true"/>
+                              Content="{Loc Auto-update}" IsOn="true"/>
                 <ToggleSwitch Name="tsNotify" Left="30" Top="566" Width="460" Height="28"
-                              Content="Уведомления"/>
+                              Content="{Loc Notifications}"/>
                 <ToggleSwitch Name="tsDarkMode" Left="30" Top="602" Width="460" Height="28"
-                              Content="Тёмная тема" IsOn="true"/>
+                              Content="{Loc Dark theme}" IsOn="true"/>
                 <ToggleSwitch Name="tsFullscreen" Left="30" Top="638" Width="460" Height="28"
-                              Content="Полноэкранный режим"/>
+                              Content="{Loc Full screen}"/>
 
                 <!-- ──── Правая колонка: Slider ────────────────────────── -->
                 <Label Left="540" Top="20" Width="200" Height="20"
@@ -339,21 +339,21 @@
                 <Separator Left="540" Top="44" Width="480" Height="1" Background="#313244"/>
 
                 <Label Left="540" Top="58" Width="200" Height="20"
-                       Text="Скорость (FPS):" Foreground="#BAC2DE"/>
+                       Text="{Loc Speed (FPS):}" Foreground="#BAC2DE"/>
                 <Slider Name="sliderSpeed" Left="540" Top="84" Width="400" Height="28"
                         Minimum="1" Maximum="60" Value="30"/>
                 <Label Name="lblSpeedVal" Left="950" Top="84" Width="70" Height="20"
                        Text="30 FPS" Foreground="#A6E3A1"/>
 
                 <Label Left="540" Top="124" Width="200" Height="20"
-                       Text="Качество (%):" Foreground="#BAC2DE"/>
+                       Text="{Loc Quality (%):}" Foreground="#BAC2DE"/>
                 <Slider Name="sliderQuality" Left="540" Top="150" Width="400" Height="28"
                         Minimum="10" Maximum="100" Value="80"/>
                 <Label Name="lblQualityVal" Left="950" Top="150" Width="70" Height="20"
                        Text="80%" Foreground="#F9E2AF"/>
 
                 <Label Left="540" Top="190" Width="200" Height="20"
-                       Text="Громкость:" Foreground="#BAC2DE"/>
+                       Text="{Loc Volume:}" Foreground="#BAC2DE"/>
                 <Slider Name="sliderVolume" Left="540" Top="216" Width="400" Height="28"
                         Minimum="0" Maximum="100" Value="65"/>
                 <Label Name="lblVolumeVal" Left="950" Top="216" Width="70" Height="20"
@@ -365,21 +365,21 @@
                 <Separator Left="540" Top="298" Width="480" Height="1" Background="#313244"/>
 
                 <Label Left="540" Top="312" Width="200" Height="20"
-                       Text="Загрузка данных:" Foreground="#BAC2DE"/>
+                       Text="{Loc Loading data:}" Foreground="#BAC2DE"/>
                 <ProgressBar Name="pbMain" Left="540" Top="338" Width="400" Height="18"
                              Value="0.65"/>
                 <Label Name="lblPbVal" Left="950" Top="336" Width="70" Height="20"
                        Text="65%" Foreground="#CDD6F4"/>
 
                 <Label Left="540" Top="370" Width="200" Height="20"
-                       Text="Установка обновлений:" Foreground="#BAC2DE"/>
+                       Text="{Loc Installing updates:}" Foreground="#BAC2DE"/>
                 <ProgressBar Name="pbSecondary" Left="540" Top="396" Width="400" Height="18"
                              Value="0.33" Foreground="#A6E3A1"/>
                 <Label Name="lblPb2Val" Left="950" Top="394" Width="70" Height="20"
                        Text="33%" Foreground="#CDD6F4"/>
 
                 <Label Left="540" Top="428" Width="200" Height="20"
-                       Text="Резервное копирование:" Foreground="#BAC2DE"/>
+                       Text="{Loc Backup:}" Foreground="#BAC2DE"/>
                 <ProgressBar Name="pbTertiary" Left="540" Top="454" Width="400" Height="18"
                              Value="0.88" Foreground="#F38BA8"/>
                 <Label Name="lblPb3Val" Left="950" Top="452" Width="70" Height="20"
@@ -393,7 +393,7 @@
                 <ScrollViewer Name="scrollDemo" Left="540" Top="538" Width="480" Height="200"
                               ContentHeight="500" Background="#181828">
                     <Label Left="12" Top="8" Width="440" Height="480"
-                           Text="Это содержимое ScrollViewer. Прокрутите вниз чтобы увидеть весь текст. Скроллер поддерживает колёсико мыши и перетаскивание полосы прокрутки. Высота контента задаётся через ContentHeight и может быть больше видимой области. Это позволяет размещать длинные списки, логи, документацию и другой контент произвольной длины внутри ограниченной области экрана. Виджет работает аналогично ScrollViewer из WPF."
+                           Text="{Loc This is the content of a ScrollViewer. Scroll down to see the whole text. The scroller supports the mouse wheel and dragging the scrollbar. The content height is set through ContentHeight and can exceed the visible area. That makes it possible to place long lists, logs, documentation and any other content of arbitrary length inside a limited area of the screen. The widget works like the WPF ScrollViewer.}"
                            Foreground="#A6ADC8" TextWrapping="Wrap"/>
                 </ScrollViewer>
 
@@ -401,7 +401,7 @@
         </TabItem>
 
         <!-- ─── TAB 3: Данные и контейнеры ──────────────────────────────── -->
-        <TabItem Header="Данные">
+        <TabItem Header="{Loc Data}">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
 
                 <!-- ListView -->
@@ -410,23 +410,23 @@
                 <Separator Left="30" Top="44" Width="460" Height="1" Background="#313244"/>
 
                 <ListView Name="eventLog" Left="30" Top="58" Width="460" Height="300">
-                    <ListViewItem Content="[09:00:01] Движок запущен"/>
-                    <ListViewItem Content="[09:00:01] XAML загружен: showcase.xaml"/>
-                    <ListViewItem Content="[09:00:02] Подключение к серверу..."/>
-                    <ListViewItem Content="[09:00:03] Соединение установлено"/>
-                    <ListViewItem Content="[09:00:03] Аутентификация: LDAP"/>
-                    <ListViewItem Content="[09:00:04] Сессия открыта"/>
-                    <ListViewItem Content="[09:00:05] Загрузка профиля пользователя"/>
-                    <ListViewItem Content="[09:00:06] Профиль загружен"/>
-                    <ListViewItem Content="[09:00:07] Инициализация рабочего стола"/>
-                    <ListViewItem Content="[09:00:08] Готов к работе"/>
+                    <ListViewItem Content="{Loc [09:00:01] Engine started}"/>
+                    <ListViewItem Content="{Loc [09:00:01] XAML loaded: showcase.xaml}"/>
+                    <ListViewItem Content="{Loc [09:00:02] Connecting to the server...}"/>
+                    <ListViewItem Content="{Loc [09:00:03] Connection established}"/>
+                    <ListViewItem Content="{Loc [09:00:03] Authentication: LDAP}"/>
+                    <ListViewItem Content="{Loc [09:00:04] Session opened}"/>
+                    <ListViewItem Content="{Loc [09:00:05] Loading the user profile}"/>
+                    <ListViewItem Content="{Loc [09:00:06] Profile loaded}"/>
+                    <ListViewItem Content="{Loc [09:00:07] Initialising the desktop}"/>
+                    <ListViewItem Content="{Loc [09:00:08] Ready}"/>
                 </ListView>
 
                 <Button Name="btnAddEvent" Left="30" Top="370" Width="224" Height="36"
-                        Content="Добавить запись" Style="Accent"
+                        Content="{Loc Add record}" Style="Accent"
                         HoverBG="#1A8CFF"/>
                 <Button Name="btnClearLog" Left="266" Top="370" Width="224" Height="36"
-                        Content="Очистить журнал"
+                        Content="{Loc Clear the log}"
                         HoverBG="#3A3A52"/>
 
                 <!-- Grid layout demo -->
@@ -450,14 +450,14 @@
 
                     <!-- Header row -->
                     <Label Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3"
-                           Text="  Сетка 4×3 (Grid с ShowGridLines)"
+                           Text="{Loc Grid 4×3 (Grid with ShowGridLines)}"
                            Foreground="White" Background="#0078D4"/>
 
                     <!-- Content cells -->
                     <Label Grid.Row="1" Grid.Column="0"
-                           Text="Ячейка (1,0)" Foreground="#BAC2DE" Background="#1E1E38"/>
+                           Text="{Loc Cell (1,0)}" Foreground="#BAC2DE" Background="#1E1E38"/>
                     <Label Grid.Row="1" Grid.Column="1"
-                           Text="Ячейка (1,1)" Foreground="#BAC2DE" Background="#222240"/>
+                           Text="{Loc Cell (1,1)}" Foreground="#BAC2DE" Background="#222240"/>
                     <Label Grid.Row="1" Grid.Column="2"
                            Text="(1,2)" Foreground="#BAC2DE" Background="#1E1E38"/>
 
@@ -470,65 +470,65 @@
 
                     <!-- Footer row -->
                     <Button Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
-                            Content="Кнопка в Grid (ColumnSpan=2)" Style="Accent"/>
+                            Content="{Loc Button in a Grid (ColumnSpan=2)}" Style="Accent"/>
                     <Button Grid.Row="3" Grid.Column="2"
                             Content="OK" HoverBG="#3A3A52"/>
                 </Grid>
 
                 <!-- ──── Правая колонка: TabControl вложенный ──────────── -->
                 <Label Left="540" Top="20" Width="200" Height="20"
-                       Text="TabControl (вложенный)" Foreground="#89B4FA"/>
+                       Text="{Loc TabControl (nested)}" Foreground="#89B4FA"/>
                 <Separator Left="540" Top="44" Width="480" Height="1" Background="#313244"/>
 
                 <TabControl Name="innerTabs" Left="540" Top="58" Width="480" Height="300">
-                    <TabItem Header="Сервер">
+                    <TabItem Header="{Loc Server}">
                         <Canvas Width="480" Height="250" Background="#181828">
                             <Label Left="16" Top="16" Width="448" Height="20"
-                                   Text="Настройки сервера" Foreground="#CDD6F4"/>
+                                   Text="{Loc Server settings}" Foreground="#CDD6F4"/>
                             <Separator Left="16" Top="40" Width="448" Height="1" Background="#313244"/>
                             <Label Left="16" Top="56" Width="120" Height="20"
-                                   Text="Адрес:" Foreground="#BAC2DE"/>
+                                   Text="{Loc Address:}" Foreground="#BAC2DE"/>
                             <TextBox Name="txtServer" Left="16" Top="78" Width="448" Height="32"
-                                     Text="192.168.1.100" Placeholder="IP или имя хоста"/>
+                                     Text="192.168.1.100" Placeholder="{Loc IP address or host name}"/>
                             <Label Left="16" Top="122" Width="120" Height="20"
-                                   Text="Порт:" Foreground="#BAC2DE"/>
+                                   Text="{Loc Port:}" Foreground="#BAC2DE"/>
                             <TextBox Name="txtPort" Left="16" Top="144" Width="200" Height="32"
-                                     Text="3389" Placeholder="Номер порта"/>
+                                     Text="3389" Placeholder="{Loc Port number}"/>
                             <CheckBox Name="cbSSL" Left="16" Top="192" Width="448" Height="26"
-                                      Content="Использовать SSL/TLS" IsChecked="true"/>
+                                      Content="{Loc Use SSL/TLS}" IsChecked="true"/>
                         </Canvas>
                     </TabItem>
-                    <TabItem Header="Дисплей">
+                    <TabItem Header="{Loc Display}">
                         <Canvas Width="480" Height="250" Background="#181828">
                             <Label Left="16" Top="16" Width="448" Height="20"
-                                   Text="Настройки дисплея" Foreground="#CDD6F4"/>
+                                   Text="{Loc Display settings}" Foreground="#CDD6F4"/>
                             <Separator Left="16" Top="40" Width="448" Height="1" Background="#313244"/>
                             <ComboBox Name="ddResolution" Left="16" Top="56" Width="448" Height="32"
                                       Items="1920×1080,1680×1050,1440×900,1280×720,1024×768"
                                       SelectedIndex="0"/>
                             <Label Left="16" Top="104" Width="200" Height="20"
-                                   Text="Цветность:" Foreground="#BAC2DE"/>
+                                   Text="{Loc Colour depth:}" Foreground="#BAC2DE"/>
                             <RadioButton Name="rb32bit" Left="16" Top="130" Width="140" Height="24"
-                                         Content="32 бит" GroupName="color" IsChecked="true"/>
+                                         Content="{Loc 32 bit}" GroupName="color" IsChecked="true"/>
                             <RadioButton Name="rb16bit" Left="170" Top="130" Width="140" Height="24"
-                                         Content="16 бит" GroupName="color"/>
+                                         Content="{Loc 16 bit}" GroupName="color"/>
                             <ToggleSwitch Name="tsSmooth" Left="16" Top="170" Width="448" Height="28"
-                                          Content="Сглаживание шрифтов" IsOn="true"/>
+                                          Content="{Loc Font smoothing}" IsOn="true"/>
                         </Canvas>
                     </TabItem>
-                    <TabItem Header="Звук">
+                    <TabItem Header="{Loc Sound}">
                         <Canvas Width="480" Height="250" Background="#181828">
                             <Label Left="16" Top="16" Width="448" Height="20"
-                                   Text="Аудио настройки" Foreground="#CDD6F4"/>
+                                   Text="{Loc Audio settings}" Foreground="#CDD6F4"/>
                             <Separator Left="16" Top="40" Width="448" Height="1" Background="#313244"/>
                             <ToggleSwitch Name="tsAudio" Left="16" Top="56" Width="448" Height="28"
-                                          Content="Перенаправление звука" IsOn="true"/>
+                                          Content="{Loc Audio redirection}" IsOn="true"/>
                             <Label Left="16" Top="100" Width="200" Height="20"
-                                   Text="Громкость воспроизведения:" Foreground="#BAC2DE"/>
+                                   Text="{Loc Playback volume:}" Foreground="#BAC2DE"/>
                             <Slider Name="sliderPlayback" Left="16" Top="126" Width="380" Height="28"
                                     Minimum="0" Maximum="100" Value="75"/>
                             <Label Left="16" Top="170" Width="200" Height="20"
-                                   Text="Громкость записи:" Foreground="#BAC2DE"/>
+                                   Text="{Loc Recording volume:}" Foreground="#BAC2DE"/>
                             <Slider Name="sliderRecord" Left="16" Top="196" Width="380" Height="28"
                                     Minimum="0" Maximum="100" Value="50"/>
                         </Canvas>
@@ -543,10 +543,10 @@
                 <Panel Name="cardPanel1" Left="540" Top="416" Width="230" Height="160"
                        Background="#252540" CornerRadius="8" BorderBrush="#45475A">
                     <Label Left="16" Top="14" Width="198" Height="20"
-                           Text="Карточка 1" Foreground="#CDD6F4"/>
+                           Text="{Loc Card 1}" Foreground="#CDD6F4"/>
                     <Separator Left="16" Top="38" Width="198" Height="1" Background="#45475A"/>
                     <Label Left="16" Top="50" Width="198" Height="80"
-                           Text="Панель с CornerRadius=8 и рамкой. Поддержка alpha-прозрачности."
+                           Text="{Loc A panel with CornerRadius=8 and a border. Alpha transparency is supported.}"
                            Foreground="#A6ADC8" TextWrapping="Wrap"/>
                     <ProgressBar Left="16" Top="132" Width="198" Height="12"
                                  Value="0.72" Foreground="#A6E3A1"/>
@@ -555,13 +555,13 @@
                 <Panel Name="cardPanel2" Left="790" Top="416" Width="230" Height="160"
                        Background="#402525" CornerRadius="8" BorderBrush="#6B3030">
                     <Label Left="16" Top="14" Width="198" Height="20"
-                           Text="Карточка 2" Foreground="#F38BA8"/>
+                           Text="{Loc Card 2}" Foreground="#F38BA8"/>
                     <Separator Left="16" Top="38" Width="198" Height="1" Background="#6B3030"/>
                     <Label Left="16" Top="50" Width="198" Height="80"
-                           Text="Другой стиль оформления. Фон, рамка и текст — всё настраивается через XAML."
+                           Text="{Loc A different style. Background, border and text — all of it is set from XAML.}"
                            Foreground="#D4A0A0" TextWrapping="Wrap"/>
                     <Button Left="16" Top="132" Width="198" Height="24"
-                            Content="Действие" Background="#C42B1C" Foreground="White"
+                            Content="{Loc Action}" Background="#C42B1C" Foreground="White"
                             HoverBG="#E03524"/>
                 </Panel>
 
@@ -605,12 +605,12 @@
 
                 <!-- ─── Левая колонка: привязки / стили / триггеры / команды ─── -->
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
-                           Text="Привязки · стили · триггеры · команды"/>
+                           Text="{Loc Bindings · styles · triggers · commands}"/>
                 <Separator Left="24" Top="40" Width="490" Height="1" Background="#313244"/>
 
                 <TextBlock Left="24" Top="54" Foreground="#9399B2" Text="TextBox (TwoWay) →"/>
                 <TextBox Name="userBox324" Left="190" Top="50" Width="320" Height="28"
-                         Text="{Binding Username, Mode=TwoWay}" ToolTip="Двусторонняя привязка"/>
+                         Text="{Binding Username, Mode=TwoWay}" ToolTip="{Loc Two-way binding}"/>
                 <TextBlock Left="24" Top="86" Foreground="#CDD6F4" FontSize="14"
                            Text="{Binding Username, StringFormat=Привет, %s! (живой OneWay + INPC)}"/>
 
@@ -621,22 +621,22 @@
 
                 <Button Name="saveBtn324" Left="24" Top="158" Width="250" Height="34"
                         Content="Save (Ctrl+S, ICommand)" Style="Accent" HoverBG="#1A8CFF"
-                        Command="{Binding SaveCommand}" ToolTip="Команда + горячая клавиша"/>
+                        Command="{Binding SaveCommand}" ToolTip="{Loc Command + shortcut}"/>
                 <Button Name="errBtn324" Left="284" Top="158" Width="120" Height="34"
-                        Content="Trigger ERROR" HoverBG="#3A3A52" ToolTip="DataTrigger покрасит статус"/>
+                        Content="Trigger ERROR" HoverBG="#3A3A52" ToolTip="{Loc DataTrigger will colour the status}"/>
                 <TextBlock Left="24" Top="204" Style="{StaticResource Status324}"
                            Text="{Binding Status}"/>
 
                 <GroupBox Header="GroupBox" Left="24" Top="234" Width="240" Height="104">
                     <StackPanel Padding="8" Spacing="6">
-                        <CheckBox Content="Опция 1" Foreground="#CDD6F4"/>
-                        <CheckBox Content="Опция 2" Foreground="#CDD6F4"/>
+                        <CheckBox Content="{Loc Option 1}" Foreground="#CDD6F4"/>
+                        <CheckBox Content="{Loc Option 2}" Foreground="#CDD6F4"/>
                     </StackPanel>
                 </GroupBox>
                 <Expander Header="Expander" Left="280" Top="234" Width="234" Height="104" IsExpanded="True">
                     <StackPanel Padding="8" Spacing="4">
-                        <TextBlock Text="Содержимое панели" Foreground="#CDD6F4"/>
-                        <TextBlock Text="(сворачивается по клику)" Foreground="#9399B2"/>
+                        <TextBlock Text="{Loc Panel content}" Foreground="#CDD6F4"/>
+                        <TextBlock Text="{Loc (click the header to collapse)}" Foreground="#9399B2"/>
                     </StackPanel>
                 </Expander>
 
@@ -659,12 +659,12 @@
                     <TextBlock Text="Bold" Foreground="#CDD6F4" FontWeight="Bold"/>
                     <TextBlock Text="Italic" Foreground="#CDD6F4" FontStyle="Italic"/>
                     <TextBlock Text="Underline" Foreground="#89B4FA" TextDecorations="Underline"/>
-                    <TextBlock Text="Символы ✓ ✗ ⚠ ▲ ▼ →" Foreground="#9399B2"/>
+                    <TextBlock Text="{Loc Symbols ✓ ✗ ⚠ ▲ ▼ →}" Foreground="#9399B2"/>
                 </StackPanel>
 
                 <!-- ─── Правая колонка: ItemsControl + DataTemplate + панели ─── -->
                 <TextBlock Left="556" Top="16" Style="{StaticResource H324}"
-                           Text="ItemsControl + DataTemplate (живой)"/>
+                           Text="{Loc ItemsControl + DataTemplate (live)}"/>
                 <Separator Left="556" Top="40" Width="470" Height="1" Background="#313244"/>
 
                 <ItemsControl Name="ic324" Left="556" Top="50" Width="470" Height="170"
@@ -681,7 +681,7 @@
                 </ItemsControl>
 
                 <Button Name="addBtn324" Left="556" Top="226" Width="220" Height="32"
-                        Content="Добавить строку (live)" HoverBG="#3A3A52"/>
+                        Content="{Loc Add row (live)}" HoverBG="#3A3A52"/>
 
                 <TextBlock Left="556" Top="276" Style="{StaticResource H324}" Text="WrapPanel / UniformGrid"/>
                 <Separator Left="556" Top="300" Width="470" Height="1" Background="#313244"/>
@@ -703,62 +703,62 @@
             <Canvas Width="1060" Height="770" Background="#1E1E32">
 
                 <!-- ─── Локализация (динамические строки {Loc}) ─── -->
-                <TextBlock Left="24" Top="16" Style="{StaticResource H324}" Text="{Loc T325_Header}"/>
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}" Text="{Loc Localization (dynamic Loc bindings)}"/>
                 <Separator Left="24" Top="40" Width="490" Height="1" Background="#313244"/>
 
-                <TextBlock Left="24" Top="54" FontSize="20" Foreground="#CDD6F4" Text="{Loc T325_Hello}"/>
+                <TextBlock Left="24" Top="54" FontSize="20" Foreground="#CDD6F4" Text="{Loc Hello! Switch the language →}"/>
                 <Button Name="langRu325" Left="24" Top="92" Width="150" Height="32"
-                        Content="Русский" HoverBG="#3A3A52" ToolTip="{Loc T325_LangTip}"/>
+                        Content="{Loc Russian}" HoverBG="#3A3A52" ToolTip="{Loc Switch the UI language (not the keyboard layout)}"/>
                 <Button Name="langEn325" Left="184" Top="92" Width="150" Height="32"
-                        Content="English" HoverBG="#3A3A52" ToolTip="{Loc T325_LangTip}"/>
+                        Content="English" HoverBG="#3A3A52" ToolTip="{Loc Switch the UI language (not the keyboard layout)}"/>
                 <Button Name="save325" Left="344" Top="92" Width="166" Height="32"
-                        Content="{Loc T325_Save}" Style="Accent" HoverBG="#1A8CFF"/>
-                <TextBlock Left="24" Top="134" Foreground="#9399B2" Text="{Loc T325_Hint}"/>
+                        Content="{Loc Save}" Style="Accent" HoverBG="#1A8CFF"/>
+                <TextBlock Left="24" Top="134" Foreground="#9399B2" Text="{Loc The buttons change the UI language (widget.Language) — Loc strings update live}"/>
 
                 <!-- ─── NumericUpDown ─── -->
                 <TextBlock Left="24" Top="176" Style="{StaticResource H324}" Text="NumericUpDown"/>
                 <Separator Left="24" Top="200" Width="490" Height="1" Background="#313244"/>
-                <TextBlock Left="24" Top="216" Foreground="#9399B2" Text="Количество:"/>
+                <TextBlock Left="24" Top="216" Foreground="#9399B2" Text="{Loc Quantity:}"/>
                 <NumericUpDown Name="qty325" Left="160" Top="212" Width="150" Height="28"
                                Minimum="0" Maximum="100" Increment="1" Value="10"
-                               ToolTip="Целое 0..100, шаг 1"/>
-                <TextBlock Left="330" Top="216" Foreground="#9399B2" Text="Цена:"/>
+                               ToolTip="{Loc Integer 0..100, step 1}"/>
+                <TextBlock Left="330" Top="216" Foreground="#9399B2" Text="{Loc Price:}"/>
                 <NumericUpDown Name="price325" Left="396" Top="212" Width="118" Height="28"
                                Minimum="0" Maximum="1000" Increment="0.5" Decimals="2" Value="9.99"
-                               ToolTip="Дробное, шаг 0.5"/>
+                               ToolTip="{Loc Fractional, step 0.5}"/>
 
                 <!-- ─── Валидация (IDataErrorInfo) ─── -->
-                <TextBlock Left="24" Top="262" Style="{StaticResource H324}" Text="Валидация (IDataErrorInfo)"/>
+                <TextBlock Left="24" Top="262" Style="{StaticResource H324}" Text="{Loc Validation (IDataErrorInfo)}"/>
                 <Separator Left="24" Top="286" Width="490" Height="1" Background="#313244"/>
-                <TextBlock Left="24" Top="300" Foreground="#9399B2" Text="E-mail (обязательно «@»):"/>
+                <TextBlock Left="24" Top="300" Foreground="#9399B2" Text="{Loc E-mail (must contain @):}"/>
                 <TextBox Name="email325" Left="24" Top="322" Width="360" Height="30"
                          Text="{Binding Email, Mode=TwoWay, ValidatesOnDataErrors=True}"
-                         ToolTip="Введите адрес с @"/>
+                         ToolTip="{Loc Enter an address containing @}"/>
                 <TextBlock Left="24" Top="360" Foreground="#6C7086"
-                           Text="Неверный ввод → красная рамка + подсказка с текстом ошибки"/>
+                           Text="{Loc Invalid input → red border and a tooltip with the error text}"/>
 
                 <!-- ─── TextBox: MaxLength / Undo-Redo / выбор слова ─── -->
                 <TextBlock Left="24" Top="404" Style="{StaticResource H324}"
-                           Text="TextBox: MaxLength · Undo/Redo · 2×клик"/>
+                           Text="{Loc TextBox: MaxLength · Undo/Redo · double click}"/>
                 <Separator Left="24" Top="428" Width="490" Height="1" Background="#313244"/>
-                <TextBlock Left="24" Top="444" Foreground="#9399B2" Text="Макс. 10 символов:"/>
+                <TextBlock Left="24" Top="444" Foreground="#9399B2" Text="{Loc Max. 10 characters:}"/>
                 <TextBox Name="maxlen325" Left="200" Top="440" Width="314" Height="30"
-                         MaxLength="10" Text="Привет"
-                         ToolTip="MaxLength=10; Ctrl+Z/Ctrl+Y; двойной клик — слово"/>
+                         MaxLength="10" Text="{Loc Hello}"
+                         ToolTip="{Loc MaxLength=10; Ctrl+Z/Ctrl+Y; double click — word}"/>
                 <TextBlock Left="24" Top="482" Foreground="#6C7086"
-                           Text="Ctrl+Z — отменить · Ctrl+Y — повторить · двойной клик — выделить слово"/>
+                           Text="{Loc Ctrl+Z — undo · Ctrl+Y — redo · double click — select word}"/>
 
                 <!-- ─── CollectionView + виртуализация ─── -->
-                <TextBlock Left="556" Top="16" Style="{StaticResource H324}" Text="CollectionView + виртуализация"/>
+                <TextBlock Left="556" Top="16" Style="{StaticResource H324}" Text="{Loc CollectionView + virtualisation}"/>
                 <Separator Left="556" Top="40" Width="470" Height="1" Background="#313244"/>
                 <Button Name="vfilter325" Left="556" Top="50" Width="150" Height="30"
-                        Content="Возраст ≥ 30" HoverBG="#3A3A52"/>
+                        Content="{Loc Age ≥ 30}" HoverBG="#3A3A52"/>
                 <Button Name="vsort325" Left="716" Top="50" Width="150" Height="30"
-                        Content="Сортировать A→Я" HoverBG="#3A3A52"/>
+                        Content="{Loc Sort A→Z}" HoverBG="#3A3A52"/>
                 <Button Name="vreset325" Left="876" Top="50" Width="150" Height="30"
-                        Content="Сброс" HoverBG="#3A3A52"/>
+                        Content="{Loc Reset}" HoverBG="#3A3A52"/>
                 <TextBlock Left="556" Top="88" Foreground="#9399B2"
-                           Text="1000 элементов — материализуются только видимые строки"/>
+                           Text="{Loc 1000 items — only visible rows are materialised}"/>
 
                 <VirtualizingItemsControl Name="vlist325" Left="556" Top="112" Width="470" Height="300"
                                           ItemHeight="26" ItemsSource="{Binding People}">
@@ -774,7 +774,7 @@
 
                 <!-- ─── Превью оформления окна (меняется вместе с темой) ─── -->
                 <TextBlock Left="556" Top="430" Style="{StaticResource H324}"
-                           Text="Окно (chrome темы: углы / заголовок / кнопки)"/>
+                           Text="{Loc Window (theme chrome: corners / title / buttons)}"/>
                 <Separator Left="556" Top="454" Width="470" Height="1" Background="#313244"/>
                 <Panel Name="winPreviewMount" Left="556" Top="466" Width="470" Height="150"
                        Background="#00000000"/>
@@ -785,46 +785,46 @@
         <!-- ─────────────────────────────────────────────────────────────────
              TAB «Текст и графика» — шейпинг (HarfBuzz), AA-фигуры, HiDPI
              ───────────────────────────────────────────────────────────────── -->
-        <TabItem Header="Текст и графика">
+        <TabItem Header="{Loc Text and graphics}">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
 
                 <!-- ─── Левая колонка: шейпинг сложного текста ─────────────── -->
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
-                           Text="Шейпинг текста (HarfBuzz, чистый Go)"/>
+                           Text="{Loc Text shaping (HarfBuzz, pure Go)}"/>
                 <Separator Left="24" Top="40" Width="490" Height="1" Background="#313244"/>
 
-                <TextBlock Left="24" Top="56" Foreground="#9399B2" Text="Арабский (лигатуры, связные формы):"/>
+                <TextBlock Left="24" Top="56" Foreground="#9399B2" Text="{Loc Arabic (ligatures, joined forms):}"/>
                 <TextBlock Left="24" Top="78" FontSize="15" Foreground="#CDD6F4"
                            Text="مرحبا بالعالم — لا إله إلا الله"/>
 
-                <TextBlock Left="24" Top="112" Foreground="#9399B2" Text="Иврит (RTL):"/>
+                <TextBlock Left="24" Top="112" Foreground="#9399B2" Text="{Loc Hebrew (RTL):}"/>
                 <TextBlock Left="24" Top="134" FontSize="15" Foreground="#CDD6F4"
                            Text="שלום עולם — כתיבה מימין לשמאל"/>
 
-                <TextBlock Left="24" Top="168" Foreground="#9399B2" Text="Деванагари (конъюнкты):"/>
+                <TextBlock Left="24" Top="168" Foreground="#9399B2" Text="{Loc Devanagari (conjuncts):}"/>
                 <TextBlock Left="24" Top="190" FontSize="15" Foreground="#CDD6F4"
                            Text="नमस्ते दुनिया — क्ष त्र ज्ञ"/>
 
-                <TextBlock Left="24" Top="224" Foreground="#9399B2" Text="Тайский (mark positioning):"/>
+                <TextBlock Left="24" Top="224" Foreground="#9399B2" Text="{Loc Thai (mark positioning):}"/>
                 <TextBlock Left="24" Top="246" FontSize="15" Foreground="#CDD6F4"
                            Text="สวัสดีชาวโลก"/>
 
-                <TextBlock Left="24" Top="280" Foreground="#9399B2" Text="Смешанный LTR + RTL (bidi):"/>
+                <TextBlock Left="24" Top="280" Foreground="#9399B2" Text="{Loc Mixed LTR + RTL (bidi):}"/>
                 <TextBlock Left="24" Top="302" FontSize="15" Foreground="#A6E3A1"
-                           Text="User أحمد (роль: מנהל) — активен"/>
+                           Text="{Loc User أحمد (role: מנהל) — active}"/>
 
                 <TextBlock Left="24" Top="344" Width="490" Foreground="#6C7086"
-                           Text="Латиница и кириллица идут быстрым per-rune путём; шейпер включается только для скриптов, которым он нужен."/>
+                           Text="{Loc Latin and Cyrillic take the fast per-rune path; the shaper only kicks in for scripts that need it.}"/>
 
-                <TextBlock Left="24" Top="392" Foreground="#9399B2" Text="Цветные эмодзи (COLR/CBDT, авто в тексте):"/>
+                <TextBlock Left="24" Top="392" Foreground="#9399B2" Text="{Loc Colour emoji (COLR/CBDT, automatic in text):}"/>
                 <TextBlock Left="24" Top="414" FontSize="22" Foreground="#CDD6F4"
-                           Text="Привет 🙂 👍 🎉 🚀 🔥 👨‍👩‍👧 ⭐"/>
+                           Text="{Loc Hello 🙂 👍 🎉 🚀 🔥 👨‍👩‍👧 ⭐}"/>
                 <TextBlock Left="24" Top="450" Width="490" Foreground="#6C7086"
-                           Text="Цветные глифы блитятся как RGBA, не красятся цветом текста. Символы вне emoji-блока (❤ ✓ ✗ ⚠) остаются одноцветными по дизайну; региональные флаги и COLRv1-градиенты — известные ограничения."/>
+                           Text="{Loc Colour glyphs are blitted as RGBA instead of being tinted with the text colour. Symbols outside the emoji block (❤ ✓ ✗ ⚠) stay monochrome by design; regional flags and COLRv1 gradients are known limitations.}"/>
 
                 <!-- ─── Правая колонка: сглаженная графика ─────────────────── -->
                 <TextBlock Left="556" Top="16" Style="{StaticResource H324}"
-                           Text="Сглаженная графика (antialiasing)"/>
+                           Text="{Loc Antialiased graphics}"/>
                 <Separator Left="556" Top="40" Width="470" Height="1" Background="#313244"/>
 
                 <TextBlock Left="556" Top="56" Foreground="#9399B2" Text="Ellipse (Fill / Stroke):"/>
@@ -834,7 +834,7 @@
                 <Ellipse Left="816" Top="80" Width="70" Height="70"
                          Fill="#0078D4" Stroke="#CDD6F4" StrokeThickness="1"/>
 
-                <TextBlock Left="556" Top="170" Foreground="#9399B2" Text="Polygon / Line (толщина 1–5):"/>
+                <TextBlock Left="556" Top="170" Foreground="#9399B2" Text="{Loc Polygon / Line (width 1–5):}"/>
                 <Polygon Left="564" Top="250" Width="93" Height="87"
                          Points="610,250 622,282 656,284 630,304 640,336 610,318 580,336 590,304 564,284 598,282"
                          Fill="#F09632"/>
@@ -847,7 +847,7 @@
                 <Line Left="700" Top="305" Width="321" Height="46"
                       X1="700" Y1="305" X2="1020" Y2="350" Stroke="#F38BA8" StrokeThickness="5"/>
 
-                <TextBlock Left="556" Top="366" Foreground="#9399B2" Text="Rectangle (RadiusX — AA-углы):"/>
+                <TextBlock Left="556" Top="366" Foreground="#9399B2" Text="{Loc Rectangle (RadiusX — AA corners):}"/>
                 <Rectangle Left="556" Top="390" Width="150" Height="52" RadiusX="14" Fill="#0E639C"/>
                 <Rectangle Left="726" Top="390" Width="150" Height="52" RadiusX="14"
                            Stroke="#CDD6F4" StrokeThickness="1"/>
@@ -856,24 +856,24 @@
                 <Separator Left="24" Top="470" Width="1002" Height="1" Background="#313244"/>
                 <TextBlock Left="24" Top="486" Style="{StaticResource H324}" Text="HiDPI"/>
                 <Label Name="lblScale" Left="24" Top="514" Width="400" Height="20"
-                       Text="Масштаб: 100%" Foreground="#A6E3A1"/>
+                       Text="{Loc Scale: 100%}" Foreground="#A6E3A1"/>
                 <TextBlock Left="24" Top="540" Width="1002" Height="60" TextWrapping="Wrap"
                            Foreground="#6C7086"
-                           Text="Виджеты живут в логических пикселях, кадр рендерится в физических. Windows: масштаб монитора подхватывается автоматически (per-monitor DPI v2). Ручной запуск: HEADLESS_GUI_SCALE=1.5 showcase.exe — текст растеризуется в физическом размере, а не растягивается."/>
+                           Text="{Loc Widgets live in logical pixels while the frame renders in physical ones. Windows picks up the monitor scale automatically (per-monitor DPI v2). Manual run: HEADLESS_GUI_SCALE=1.5 showcase.exe — the text is rasterised at the physical size instead of being stretched.}"/>
 
             </Canvas>
         </TabItem>
 
-        <TabItem Header="Анимации">
+        <TabItem Header="{Loc Animations}">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
-                           Text="Анимационный фреймворк (easing-кривые, часы у движка)"/>
+                           Text="{Loc Animation framework (easing curves, engine-owned clock)}"/>
                 <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
 
                 <TextBlock Left="24" Top="58" Foreground="#9399B2"
-                           Text="Гонка кривых: шесть баров стартуют одновременно (900 мс), каждый со своей кривой."/>
+                           Text="{Loc Curve race: six bars start together (900 ms), each with its own curve.}"/>
                 <Button Name="animRun" Left="24" Top="84" Width="170" Height="34"
-                        Content="▶ Запустить гонку" Style="Accent"/>
+                        Content="{Loc ▶ Start the race}" Style="Accent"/>
 
                 <Label Left="24"  Top="140" Width="120" Height="18" Text="Linear"      Foreground="#9399B2"/>
                 <ProgressBar Name="animBar0" Left="150" Top="140" Width="600" Height="14"/>
@@ -889,55 +889,55 @@
                 <ProgressBar Name="animBar5" Left="150" Top="290" Width="600" Height="14"/>
 
                 <TextBlock Left="24" Top="340" Foreground="#9399B2"
-                           Text="AnimateRect: панель летает между позициями (EaseOutBack — с лёгким «выбросом»)."/>
-                <Button Name="animMove" Left="24" Top="366" Width="170" Height="34" Content="⇄ Туда-обратно"/>
+                           Text="{Loc AnimateRect: the panel flies between positions (EaseOutBack — with a slight overshoot).}"/>
+                <Button Name="animMove" Left="24" Top="366" Width="170" Height="34" Content="{Loc ⇄ Back and forth}"/>
                 <Border Name="animBox" Left="220" Top="360" Width="46" Height="46"
                         Background="#89B4FA" CornerRadius="10"/>
 
                 <TextBlock Left="24" Top="430" Foreground="#9399B2"
-                           Text="Плавный прогресс: AnimateValue едет к случайной цели (обычный SetValue — мгновенный)."/>
-                <Button Name="animValue" Left="24" Top="456" Width="170" Height="34" Content="↦ Новая цель"/>
+                           Text="{Loc Smooth progress: AnimateValue travels to a random target (a plain SetValue is instant).}"/>
+                <Button Name="animValue" Left="24" Top="456" Width="170" Height="34" Content="{Loc ↦ New target}"/>
                 <ProgressBar Name="animValueBar" Left="220" Top="466" Width="530" Height="14"/>
                 <Label Name="animValueLbl" Left="770" Top="462" Width="80" Height="20" Text="40%" Foreground="#A6E3A1"/>
 
                 <TextBlock Left="24" Top="520" Width="1010" Height="60" TextWrapping="Wrap"
                            Foreground="#6C7086"
-                           Text="Часы анимаций принадлежат движку: ни одной горутины и ни одного таймера на анимацию — тики идут в рендер-цикле, кадры рендерятся только пока анимация живёт (on-demand экономия сохраняется), перерисовка частичная. Повторный запуск на том же объекте заменяет прежнюю анимацию (owner-replace) — «дерущихся» анимаций не бывает. Тумблеры на вкладке «Виджеты» скользят, диалоги появляются с fade-in; в классической теме Win2000 всё мгновенно."/>
+                           Text="{Loc The animation clock belongs to the engine: not a single goroutine and not a single timer per animation — ticks come from the render loop, frames are rendered only while an animation is alive (the on-demand saving stays), and repainting is partial. Starting an animation again on the same object replaces the previous one (owner-replace), so animations never fight. The toggles on the Widgets tab slide, dialogs fade in; in the classic Win2000 theme everything is instant.}"/>
             </Canvas>
         </TabItem>
 
-        <TabItem Header="Диалоги">
+        <TabItem Header="{Loc Dialogs}">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
-                           Text="Стандартные диалоги (тема · локализация · Ctrl+C · Enter/Esc)"/>
+                           Text="{Loc Standard dialogs (theme · localisation · Ctrl+C · Enter/Esc)}"/>
                 <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
 
                 <TextBlock Left="24" Top="58" Foreground="#9399B2"
-                           Text="MessageBox (значок severity, Ctrl+C копирует как в Windows):"/>
-                <Button Name="dlgInfo" Left="24" Top="82" Width="150" Height="34" Content="Информация"/>
-                <Button Name="dlgQuestion" Left="184" Top="82" Width="150" Height="34" Content="Вопрос (Да/Нет)"/>
-                <Button Name="dlgWarn" Left="344" Top="82" Width="150" Height="34" Content="Предупреждение"/>
-                <Button Name="dlgError" Left="504" Top="82" Width="150" Height="34" Content="Ошибка" Style="Accent"/>
+                           Text="{Loc MessageBox (severity icon, Ctrl+C copies as on Windows):}"/>
+                <Button Name="dlgInfo" Left="24" Top="82" Width="150" Height="34" Content="{Loc Information}"/>
+                <Button Name="dlgQuestion" Left="184" Top="82" Width="150" Height="34" Content="{Loc Question (Yes/No)}"/>
+                <Button Name="dlgWarn" Left="344" Top="82" Width="150" Height="34" Content="{Loc Warning}"/>
+                <Button Name="dlgError" Left="504" Top="82" Width="150" Height="34" Content="{Loc Error}" Style="Accent"/>
 
-                <TextBlock Left="24" Top="140" Foreground="#9399B2" Text="Ввод и прогресс:"/>
-                <Button Name="dlgInput" Left="24" Top="164" Width="180" Height="34" Content="Ввод строки"/>
-                <Button Name="dlgProgress" Left="214" Top="164" Width="220" Height="34" Content="Прогресс (индикатор)"/>
-                <Button Name="dlgBig" Left="444" Top="164" Width="220" Height="34" Content="Диалог больше окна"/>
+                <TextBlock Left="24" Top="140" Foreground="#9399B2" Text="{Loc Input and progress:}"/>
+                <Button Name="dlgInput" Left="24" Top="164" Width="180" Height="34" Content="{Loc Text input}"/>
+                <Button Name="dlgProgress" Left="214" Top="164" Width="220" Height="34" Content="{Loc Progress (indicator)}"/>
+                <Button Name="dlgBig" Left="444" Top="164" Width="220" Height="34" Content="{Loc Dialog larger than the window}"/>
 
-                <TextBlock Left="24" Top="222" Foreground="#9399B2" Text="Файловые диалоги (файловая система процесса):"/>
-                <Button Name="dlgOpen" Left="24" Top="246" Width="180" Height="34" Content="Открыть файл…"/>
-                <Button Name="dlgSave" Left="214" Top="246" Width="180" Height="34" Content="Сохранить как…"/>
-                <Button Name="dlgFolder" Left="404" Top="246" Width="180" Height="34" Content="Выбрать папку…"/>
+                <TextBlock Left="24" Top="222" Foreground="#9399B2" Text="{Loc File dialogs (the file system of this process):}"/>
+                <Button Name="dlgOpen" Left="24" Top="246" Width="180" Height="34" Content="{Loc Open file…}"/>
+                <Button Name="dlgSave" Left="214" Top="246" Width="180" Height="34" Content="{Loc Save as…}"/>
+                <Button Name="dlgFolder" Left="404" Top="246" Width="180" Height="34" Content="{Loc Select folder…}"/>
 
                 <Label Name="dlgResult" Left="24" Top="310" Width="1010" Height="24"
-                       Text="Результат появится здесь" Foreground="#A6E3A1"/>
+                       Text="{Loc The result will appear here}" Foreground="#A6E3A1"/>
 
                 <TextBlock Left="24" Top="360" Width="1010" Height="60" TextWrapping="Wrap"
                            Foreground="#6C7086"
-                           Text="Все диалоги — внутренние (движок рисует их поверх затемнения), поэтому работают в headless/стриминге и файловые диалоги показывают ФС сервера. Оформление следует теме приложения (попробуйте сменить тему в шапке), подписи локализованы (кнопка «Язык» в шапке переключает RU/EN вживую). В MessageBox: Enter — кнопка по умолчанию, Esc — отмена, Ctrl+C — копирование содержимого."/>
+                           Text="{Loc Every dialog is internal (the engine draws it over the dimmed background), so dialogs work headless and in streaming, and file dialogs show the server file system. The look follows the application theme (try switching the theme in the header) and the labels are localised (the Language button in the header switches RU/EN live). In a MessageBox: Enter — default button, Esc — cancel, Ctrl+C — copy the contents.}"/>
 
                 <TextBlock Left="24" Top="430" Style="{StaticResource H324}"
-                           Text="Многострочный TextBox"/>
+                           Text="{Loc Multiline TextBox}"/>
                 <TextBox Name="editBox" AcceptsReturn="True" TextWrapping="Wrap"
                          Left="24" Top="460" Width="500" Height="180"
                          Tag="Введите многострочный текст…"/>
@@ -948,39 +948,39 @@
             </Canvas>
         </TabItem>
 
-        <TabItem Header="Компоновка">
+        <TabItem Header="{Loc Layout}">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
-                           Text="SplitPanel — панели с перетаскиваемым разделителем"/>
+                           Text="{Loc SplitPanel — panes with a draggable splitter}"/>
                 <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
                 <TextBlock Left="24" Top="52" Foreground="#9399B2"
-                           Text="Тяни полосы мышью (курсор меняется), двойной клик по полосе — коллапс/восстановление. Слева — вложенный вертикальный сплит."/>
+                           Text="{Loc Drag the bars with the mouse (the cursor changes), double click a bar to collapse or restore it. On the left there is a nested vertical split.}"/>
 
                 <SplitPanel Name="splitOuter" Left="24" Top="84" Width="1010" Height="380"
                             Orientation="Horizontal" Position="0.35" MinFirst="120" MinSecond="240">
                     <SplitPanel Name="splitInner" Orientation="Vertical" Position="0.5"
                                 MinFirst="60" MinSecond="60">
                         <Canvas Background="#28283E">
-                            <Label Left="12" Top="10" Width="200" Height="18" Text="A (вложенный верх)" Foreground="#89B4FA"/>
+                            <Label Left="12" Top="10" Width="200" Height="18" Text="{Loc A (nested top)}" Foreground="#89B4FA"/>
                         </Canvas>
                         <Canvas Background="#232338">
-                            <Label Left="12" Top="10" Width="200" Height="18" Text="B (вложенный низ)" Foreground="#A6E3A1"/>
+                            <Label Left="12" Top="10" Width="200" Height="18" Text="{Loc B (nested bottom)}" Foreground="#A6E3A1"/>
                         </Canvas>
                     </SplitPanel>
                     <Canvas Background="#2A2A40">
-                        <Label Left="12" Top="10" Width="300" Height="18" Text="C (правая панель)" Foreground="#F9E2AF"/>
+                        <Label Left="12" Top="10" Width="300" Height="18" Text="{Loc C (right panel)}" Foreground="#F9E2AF"/>
                         <Label Name="splitPosLbl" Left="12" Top="34" Width="300" Height="18" Text="Position: 0.35" Foreground="#9399B2"/>
                     </Canvas>
                 </SplitPanel>
 
                 <Button Name="splitCollapse" Left="24" Top="478" Width="240" Height="32"
-                        Content="Коллапс/восстановить левую"/>
+                        Content="{Loc Collapse/restore the left pane}"/>
 
                 <TextBlock Left="24" Top="530" Style="{StaticResource H324}"
-                           Text="SVGIcon — темизируемые векторные иконки"/>
+                           Text="{Loc SVGIcon — themeable vector icons}"/>
                 <Separator Left="24" Top="554" Width="1010" Height="1" Background="#313244"/>
                 <TextBlock Left="24" Top="566" Foreground="#9399B2"
-                           Text="Без Color иконка красится под цвет текста темы (переключи тему в шапке); с Color — фиксированный цвет. Размер любой — вектор."/>
+                           Text="{Loc Without Color the icon takes the theme text colour (switch the theme in the header); with Color it is fixed. Any size — it is a vector.}"/>
 
                 <SVGIcon Left="24"  Top="596" Width="32" Height="32" Source="icons/menu.svg"/>
                 <SVGIcon Left="72"  Top="596" Width="32" Height="32" Source="icons/close.svg"/>
@@ -991,85 +991,85 @@
             </Canvas>
         </TabItem>
 
-        <TabItem Header="Докинг">
+        <TabItem Header="{Loc Docking}">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
-                           Text="DockManager — докинг-панели (Toolbox в стиле Visual Studio)"/>
+                           Text="{Loc DockManager — docking panels (Visual Studio style toolbox)}"/>
                 <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
                 <TextBlock Left="24" Top="52" Width="1010" Foreground="#9399B2"
-                           Text="Тяни панель за заголовок — появятся направляющие дока; 📌 сворачивает панель в ярлык у края (auto-hide); кнопка-«окошко» делает панель плавающей (float)."/>
+                           Text="{Loc Drag a panel by its title bar — the dock guides appear; 📌 collapses the panel into a tab at the edge (auto-hide); the window button makes the panel floating.}"/>
 
                 <DockManager Name="dockDemo" Left="24" Top="84" Width="1010" Height="560" Background="#232338" NativeFloating="True">
-                    <DockPane Id="dockTools" Title="Обозреватель" Side="Left" Size="220" State="Docked">
+                    <DockPane Id="dockTools" Title="{Loc Explorer}" Side="Left" Size="220" State="Docked">
                         <ListView>
-                            <ListViewItem Content="Отчёт.docx"/>
-                            <ListViewItem Content="Бюджет.xlsx"/>
-                            <ListViewItem Content="Архив"/>
-                            <ListViewItem Content="Заметки.txt"/>
+                            <ListViewItem Content="{Loc Report.docx}"/>
+                            <ListViewItem Content="{Loc Budget.xlsx}"/>
+                            <ListViewItem Content="{Loc Archive}"/>
+                            <ListViewItem Content="{Loc Notes.txt}"/>
                         </ListView>
                     </DockPane>
 
-                    <DockPane Id="dockProps" Title="Свойства" Side="Right" Size="200" State="Docked">
+                    <DockPane Id="dockProps" Title="{Loc Properties}" Side="Right" Size="200" State="Docked">
                         <StackPanel Orientation="Vertical" Padding="8" Spacing="6">
-                            <Label Text="Имя: Отчёт.docx" Foreground="#CDD6F4"/>
-                            <Label Text="Размер: 128 КБ" Foreground="#9399B2"/>
+                            <Label Text="{Loc Name: Report.docx}" Foreground="#CDD6F4"/>
+                            <Label Text="{Loc Size: 128 KB}" Foreground="#9399B2"/>
                         </StackPanel>
                     </DockPane>
 
-                    <DockPane Id="dockOutput" Title="Вывод" Side="Bottom" Size="120" State="Docked">
-                        <TextBlock Text="Готово. Раскладку можно сохранить и восстановить кнопками ниже."
+                    <DockPane Id="dockOutput" Title="{Loc Output}" Side="Bottom" Size="120" State="Docked">
+                        <TextBlock Text="{Loc Done. The layout can be saved and restored with the buttons below.}"
                                    Foreground="#A6E3A1" TextWrapping="Wrap"/>
                     </DockPane>
 
                     <DockContent>
                         <TextBox Name="dockCenterText" AcceptsReturn="True" TextWrapping="Wrap"
-                                 Text="Документная область — центр DockManager (SetCenter). Здесь обычно живёт редактор или просмотрщик документа."/>
+                                 Text="{Loc The document area is the centre of the DockManager (SetCenter). An editor or a document viewer usually lives here.}"/>
                     </DockContent>
                 </DockManager>
 
-                <Button Name="dockSaveLayout" Left="24" Top="654" Width="220" Height="32" Content="Сохранить раскладку"/>
-                <Button Name="dockRestoreLayout" Left="254" Top="654" Width="220" Height="32" Content="Восстановить раскладку"/>
+                <Button Name="dockSaveLayout" Left="24" Top="654" Width="220" Height="32" Content="{Loc Save layout}"/>
+                <Button Name="dockRestoreLayout" Left="254" Top="654" Width="220" Height="32" Content="{Loc Restore layout}"/>
                 <TextBlock Name="dockLayoutStatus" Left="490" Top="662" Width="544" Foreground="#9399B2" Text=""/>
             </Canvas>
         </TabItem>
 
-        <TabItem Header="Система">
+        <TabItem Header="{Loc System}">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
-                           Text="Трей · уведомления · превью окна (только Windows)"/>
+                           Text="{Loc Tray · notifications · window preview (Windows only)}"/>
                 <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
 
                 <TextBlock Left="24" Top="58" Foreground="#9399B2"
-                           Text="Balloon-уведомления (системные, Shell_NotifyIcon · NIF_INFO):"/>
-                <Button Name="sysBalloonInfo" Left="24" Top="82" Width="180" Height="34" Content="Balloon: инфо"/>
-                <Button Name="sysBalloonWarn" Left="214" Top="82" Width="200" Height="34" Content="Balloon: предупреждение"/>
-                <Button Name="sysBalloonErr" Left="424" Top="82" Width="180" Height="34" Content="Balloon: ошибка" Style="Accent"/>
+                           Text="{Loc Balloon notifications (system, Shell_NotifyIcon · NIF_INFO):}"/>
+                <Button Name="sysBalloonInfo" Left="24" Top="82" Width="180" Height="34" Content="{Loc Balloon: info}"/>
+                <Button Name="sysBalloonWarn" Left="214" Top="82" Width="200" Height="34" Content="{Loc Balloon: warning}"/>
+                <Button Name="sysBalloonErr" Left="424" Top="82" Width="180" Height="34" Content="{Loc Balloon: error}" Style="Accent"/>
 
                 <TextBlock Left="24" Top="140" Foreground="#9399B2"
-                           Text="Окно и трей:"/>
-                <Button Name="sysHide" Left="24" Top="164" Width="220" Height="34" Content="Свернуть в трей"/>
+                           Text="{Loc Window and tray:}"/>
+                <Button Name="sysHide" Left="24" Top="164" Width="220" Height="34" Content="{Loc Minimise to tray}"/>
                 <TextBlock Left="256" Top="172" Foreground="#6C7086"
-                           Text="Иконка остаётся в трее: двойной левый клик — восстановить, правый клик — меню."/>
+                           Text="{Loc The icon stays in the tray: double left click restores the window, right click opens the menu.}"/>
 
                 <TextBlock Left="24" Top="222" Foreground="#9399B2"
-                           Text="Превью в панели задач:"/>
+                           Text="{Loc Taskbar preview:}"/>
                 <TextBlock Left="24" Top="246" Width="1010" Height="40" TextWrapping="Wrap"
                            Foreground="#A6E3A1"
-                           Text="Наведите указатель на кнопку приложения в панели задач — во всплывающей миниатюре и в Aero Peek видно живое содержимое окна (а не чёрный прямоугольник)."/>
+                           Text="{Loc Hover the application button on the taskbar — the thumbnail and Aero Peek show the live window content (not a black rectangle).}"/>
 
                 <TextBlock Left="24" Top="316" Foreground="#9399B2"
-                           Text="Drag & Drop файлов из ОС (перетащи файлы из проводника в рамку):"/>
+                           Text="{Loc Drag and drop files from the OS (drag files from the file manager into the frame):}"/>
                 <Border Name="dropZone" Left="24" Top="340" Width="1010" Height="130"
                         Background="#232338" BorderBrush="#45475A" BorderThickness="2"
                         CornerRadius="8">
                     <Label Name="dropLabel" Left="16" Top="52" Width="978" Height="24"
-                           Text="Перетащите сюда файлы — появятся их пути"
+                           Text="{Loc Drop files here — their paths will appear}"
                            Foreground="#6C7086"/>
                 </Border>
 
                 <TextBlock Left="24" Top="486" Width="1010" Height="80" TextWrapping="Wrap"
                            Foreground="#6C7086"
-                           Text="Иконка в трее ставится при старте (синий квадрат с белой «G»). Трей-меню (правый клик): Показать / Свернуть / Balloon / Выход — оно рендерится в собственном окне-попапе у курсора, поэтому появляется даже когда главное окно скрыто. Drag&Drop: Win32 и X11 — нативно, Wayland — каркас. На платформах без поддержки трея/balloon — вежливые no-op."/>
+                           Text="{Loc The tray icon is installed at startup (a blue square with a white G). The tray menu (right click): Show / Minimise / Balloon / Exit — it renders in its own popup window at the cursor, so it appears even when the main window is hidden. Drag and drop: native on Win32 and X11, a skeleton on Wayland. On platforms without tray or balloon support — polite no-ops.}"/>
             </Canvas>
         </TabItem>
 
@@ -1084,7 +1084,7 @@
     <Panel Name="statusBar" Left="0" Right="0" Bottom="0" Height="36"
            Background="#11111B"/>
     <Label Name="lblStatus" Left="16" Bottom="8" Width="600" Height="20"
-           Text="Готов · Widget Showcase · headless-gui" Foreground="#6C7086"/>
+           Text="{Loc Ready · Widget Showcase · headless-gui}" Foreground="#6C7086"/>
     <ProgressBar Name="pbStatus" Right="180" Bottom="12" Width="300" Height="12"
                  Value="1.0" Foreground="#0078D4"/>
     <Label Name="lblFPS" Right="20" Bottom="8" Width="140" Height="20"
