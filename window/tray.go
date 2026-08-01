@@ -44,6 +44,19 @@ type trayHost interface {
 	SetForeground()
 }
 
+// balloonHost — УЗКАЯ часть возможностей трея: только системные уведомления.
+// Выделена отдельно, потому что на Linux уведомления живут без иконки в трее
+// (демон org.freedesktop.Notifications показывает их сам), а полноценного трея
+// у X11/Wayland-бэкендов пока нет. Win32Window реализует и trayHost, и этот
+// интерфейс; X11Window/WaylandWindow — только его (см. notify_linux.go).
+type balloonHost interface {
+	// showBalloon показывает системное уведомление.
+	// infoFlag: 0=none, 1=info, 2=warning, 3=error.
+	showBalloon(title, text string, infoFlag uint32) error
+	// setBalloonClickHandler регистрирует колбэк клика по уведомлению.
+	setBalloonClickHandler(fn func())
+}
+
 // severityInfoFlag переводит widget.DialogSeverity в dwInfoFlags balloon'а
 // (NIIF_*): Info/Question → NIIF_INFO, Warning → NIIF_WARNING,
 // Error → NIIF_ERROR, None → NIIF_NONE.
@@ -209,28 +222,33 @@ func (win *Window) SetTrayMenu(menu *widget.PopupMenu) {
 }
 
 // ShowBalloon показывает системное balloon-уведомление с заголовком title,
-// текстом text и значком по severity (Info/Warning/Error). Требует ранее
-// установленной иконки трея (SetTrayIcon) — иначе возвращает ошибку.
+// текстом text и значком по severity (Info/Warning/Error).
+//
+// Windows: требует ранее установленной иконки трея (SetTrayIcon) — уведомление
+// принадлежит ей. Linux: иконка не нужна, уведомление показывает демон рабочего
+// стола (org.freedesktop.Notifications); без демона возвращается ошибка.
+// macOS/headless — errTrayUnsupported.
 func (win *Window) ShowBalloon(title, text string, severity widget.DialogSeverity) error {
 	if win.native == nil {
 		return errTrayUnsupported
 	}
-	th, ok := win.native.(trayHost)
+	bh, ok := win.native.(balloonHost)
 	if !ok {
 		return errTrayUnsupported
 	}
-	return th.showBalloon(title, text, severityInfoFlag(severity))
+	return bh.showBalloon(title, text, severityInfoFlag(severity))
 }
 
-// SetOnBalloonClick регистрирует колбэк клика пользователя по balloon'у
-// (NIN_BALLOONUSERCLICK).
+// SetOnBalloonClick регистрирует колбэк клика пользователя по уведомлению
+// (Windows — NIN_BALLOONUSERCLICK, Linux — действие "default" в ActionInvoked).
+// На Linux колбэк вызывается из отдельной горутины.
 func (win *Window) SetOnBalloonClick(fn func()) {
 	win.onBalloonClick = fn
 	if win.native == nil {
 		return
 	}
-	if th, ok := win.native.(trayHost); ok {
-		th.setBalloonClickHandler(fn)
+	if bh, ok := win.native.(balloonHost); ok {
+		bh.setBalloonClickHandler(fn)
 	}
 }
 
@@ -283,15 +301,17 @@ func (win *Window) pickupDeclarativeTray() {
 // applyPendingTray применяет отложенное состояние трея после создания окна.
 // Вызывается из Run(). На платформах без trayHost — no-op.
 func (win *Window) applyPendingTray() {
+	// Уведомления доступны шире трея (Linux — без иконки), поэтому колбэк
+	// клика применяем через balloonHost, до проверки полного trayHost.
+	if bh, ok := win.native.(balloonHost); ok && win.onBalloonClick != nil {
+		bh.setBalloonClickHandler(win.onBalloonClick)
+	}
 	th, ok := win.native.(trayHost)
 	if !ok {
 		return
 	}
 	if win.trayIconWant || win.onTrayClick != nil || win.trayMenu != nil {
 		win.ensureTrayDispatcher(th)
-	}
-	if win.onBalloonClick != nil {
-		th.setBalloonClickHandler(win.onBalloonClick)
 	}
 	win.attachTrayMenu()
 	if win.trayIconWant && win.trayIcon != nil {

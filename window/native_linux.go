@@ -17,6 +17,11 @@ import (
 // Чистый Go без CGO и внешних зависимостей.
 // Общается с X-сервером напрямую через Unix socket.
 type X11Window struct {
+	// linuxNotifier — системные уведомления через D-Bus (notify_linux.go).
+	// Встроен анонимно: его методы showBalloon/setBalloonClickHandler делают
+	// окно balloonHost'ом, и Window.ShowBalloon работает без иконки в трее.
+	linuxNotifier
+
 	conn      net.Conn
 	screen    x11Screen
 	rootWin   uint32
