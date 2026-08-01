@@ -229,6 +229,13 @@ type Window struct {
 	onBalloonClick    func()
 	trayDispatcherSet bool
 
+	// ── Доступность (accessibility) ──────────────────────────────────────────
+	// a11y — платформенный мост (AT-SPI на Linux), поднимается в Run(), если
+	// система сообщает о включённой доступности. a11yForce — явное решение
+	// приложения (SetAccessibilityEnabled), важнее автоопределения.
+	a11y      a11yBridge
+	a11yForce *bool
+
 	// onFilesDropped — колбэк приложения для Drag&Drop файлов из ОС
 	// (см. SetOnFilesDropped). Координаты в колбэке — ЛОГИЧЕСКИЕ пиксели.
 	// nil = приложение не подписано; проброс в движок (widget.FileDropTarget)
@@ -395,6 +402,11 @@ func (win *Window) Run() error {
 	// Применяем отложенное состояние трея/уведомлений (иконка, меню, колбэки),
 	// заданное до Run(). На платформах без поддержки — no-op.
 	win.applyPendingTray()
+
+	// Мост доступности (AT-SPI на Linux): поднимается, только если система
+	// сообщает о включённой доступности или приложение попросило явно.
+	win.startAccessibility()
+	defer win.stopAccessibility()
 
 	// Запускаем горутину чтения кадров из движка
 	go win.framePump()

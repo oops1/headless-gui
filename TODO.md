@@ -70,8 +70,12 @@
       Ограничения: без градиентов/clipPath/text; обводка упрощённая.
 - [~] **Системные уведомления** — Windows сделано 2026-07-11: balloon через
       Shell_NotifyIcon (NIF_INFO, значок по severity), `Window.ShowBalloon` +
-      `SetOnBalloonClick`. Осталось: D-Bus org.freedesktop.Notifications
-      (Linux), macOS NSUserNotification.
+      `SetOnBalloonClick`. **Linux сделано 2026-08-01**: свой D-Bus (window/
+      dbus.go + dbus_conn_linux.go, zero deps) и org.freedesktop.Notifications
+      (window/notify_linux.go) — X11 и Wayland, иконка в трее НЕ нужна, клик
+      доезжает через действие "default" (когда демон объявляет "actions").
+      Проверено на живой шине и на стороннем демоне (python-dbus).
+      Осталось: macOS NSUserNotification.
 - [x] **Tray-иконка с меню** — Windows сделано 2026-07-11 (window/tray*.go):
       `SetTrayIcon`/`RemoveTrayIcon` (Shell_NotifyIcon, image.Image→HICON,
       масштаб до SM_CXSMICON, маска из альфы), `SetOnTrayClick`, `SetTrayMenu`
@@ -80,15 +84,12 @@
       Live-превью окна в панели задач/Aero Peek: WM_PRINTCLIENT из кэша кадра
       (+ опциональный iconic-путь DWM за `HEADLESS_GUI_ICONIC_PREVIEW=1`).
       На Linux/macOS/Wayland — no-op-заглушки. Трей на X11/macOS — позже.
-- [ ] **Трей + уведомления на Linux/macOS** — сейчас `trayHost` реализует
-      только `Win32Window`; на Linux/Wayland/macOS весь трей-API
-      (`SetTrayIcon`/`ShowBalloon`/`HideToTray`/`SetTrayMenu`/…) — вежливые
-      no-op. Довести по платформам (по возрастанию цены):
-      1. **Linux balloon** — `org.freedesktop.Notifications` (метод `Notify`)
-         через D-Bus session bus. Самый полезный и предсказуемый (это путь
-         `notify-send`). Грабли: D-Bus. Готовой либы нет, новую зависимость
-         (`godbus/dbus`) правило zero-new-deps не разрешает → писать D-Bus
-         поверх unix-сокета руками (как XDND, но крупнее). Сделать первым.
+- [~] **Трей + уведомления на Linux/macOS** — `trayHost` (иконка, меню,
+      HideToTray) по-прежнему только у `Win32Window`; уведомления вынесены в
+      узкий `balloonHost` и на Linux уже работают.
+      1. [x] **Linux balloon** — сделано 2026-08-01, см. «Системные
+         уведомления» выше. Свой D-Bus живёт в window/dbus*.go и переиспользован
+         мостом доступности.
       2. **Linux трей** (иконка+меню) — StatusNotifierItem по D-Bus +
          `com.canonical.dbusmenu` (иконка — ARGB32-pixmap). Старый XEmbed-трей
          устарел; **GNOME без расширения AppIndicator трей не показывает**.
@@ -130,9 +131,20 @@
       (рукопожатие → keyframe → клик из клиента → дельта). Дальше:
       сжатие лучше PNG (WebP/zstd), троттлинг/коалесценция для медленных
       клиентов, буфер обмена браузера, опциональный Go-WASM клиент.
-- [ ] **Платформенный accessibility-мост** — семантическое дерево уже есть
-      (`eng.AccessibilityTree()`); мосты: UI Automation (Windows, COM через
-      syscall), AT-SPI (Linux, D-Bus), NSAccessibility (macOS, purego).
+- [~] **Платформенный accessibility-мост** — семантическое дерево уже есть
+      (`eng.AccessibilityTree()`).
+      **AT-SPI (Linux) сделано 2026-08-01** (window/a11y.go — плоский снимок с
+      УСТОЙЧИВЫМИ id, hit-test, диффы; window/a11y_linux.go — мост):
+      регистрация через `org.a11y.atspi.Socket.Embed`, объекты Accessible/
+      Component/Application/Value/Action, кэш `org.a11y.atspi.Cache.GetItems`
+      (одним вызовом всё дерево — так его читает Orca), события фокуса, имени,
+      значения, состояний и перестройки дерева. Поднимается сам при включённой
+      доступности (`org.a11y.Status`), принудительно — `SetAccessibilityEnabled`
+      или `HEADLESS_GUI_A11Y=1`. Проверено настоящим клиентом libatspi.
+      Не сделано: `GrabFocus`/`DoAction` из скринридера (нужен путь «активировать
+      узел по семантическому id» в движке) и интерфейс Text (карет, выделение).
+      Осталось: UI Automation (Windows, COM через syscall),
+      NSAccessibility (macOS, purego).
 - [ ] **IME (CJK)** — text-input-v3 (Wayland), TSF (Windows), NSTextInputClient.
 - [ ] **Mobile (Android/iOS)** — самый дорогой разрыв с Fyne/Gio; браться
       только при реальном запросе (WASM-вьювер частично закрывает кейс).
