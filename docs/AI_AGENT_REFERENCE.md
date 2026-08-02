@@ -2099,6 +2099,9 @@ v.BindCollectionView(view)                 // or: auto-refresh from a Collection
   an `ObservableCollection` on add/remove.
 - Note: requires a **fixed `ItemHeight`** (no per-item variable height yet) and a
   plain `ItemsControl` is still the right choice for short lists.
+- Registered in `HasOwnLayout` (`SetBounds` → `updateVisible` re-positions the
+  materialized rows itself), so hosting it in a `Canvas` / `TabItem` / `DockPane`
+  does not double-shift the rows.
 
 > The string-based `ListView` was already virtualized in its `Draw` (it only
 > paints the visible rows); `VirtualizingItemsControl` extends that to arbitrary

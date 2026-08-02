@@ -147,6 +147,14 @@ const (
 
 // WaylandWindow — реализация NativeWindow поверх Wayland (xdg-shell + wl_shm).
 type WaylandWindow struct {
+	// linuxNotifier — системные уведомления через D-Bus (notify_linux.go):
+	// путь общий с X11, композитора не касается.
+	linuxNotifier
+
+	// linuxTray — иконка в системном трее по StatusNotifierItem
+	// (tray_sni_linux.go): тоже чистый D-Bus, композитора не касается.
+	linuxTray
+
 	conn *net.UnixConn
 
 	mu     sync.Mutex // сериализует запись в сокет и доступ к буферам

@@ -876,6 +876,16 @@ func setWidgetProperty(w Widget, prop, val string) {
 	switch strings.ToLower(prop) {
 	case "text", "content":
 		setWidgetText(w, val)
+	case "placeholder", "placeholdertext", "hint":
+		// Подсказка в пустом поле — такой же пользовательский текст, как и
+		// всё остальное: её тоже нужно уметь переустановить (смена языка).
+		switch t := w.(type) {
+		case *TextInput:
+			t.Placeholder = val
+		case *TextBox:
+			t.Placeholder = val
+		}
+		notifyUIChanged()
 	case "ischecked", "checked":
 		b := parseXAMLBool(val)
 		switch t := w.(type) {

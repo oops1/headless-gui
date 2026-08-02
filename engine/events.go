@@ -252,6 +252,15 @@ func (e *Engine) SendMouseMove(x, y int) {
 	// Запоминаем позицию курсора и сбрасываем таймер всплывающей подсказки.
 	e.recordMouse(x, y)
 
+	// Прежняя позиция курсора — для адресной доставки (см. broadcastMouseMove):
+	// виджету, из-под которого курсор ушёл, событие тоже нужно (снять hover).
+	ox, oy := e.lastMoveX, e.lastMoveY
+	if !e.hasLastMove {
+		ox, oy = x, y
+		e.hasLastMove = true
+	}
+	e.lastMoveX, e.lastMoveY = x, y
+
 	// Если мышь захвачена — только захватчику
 	if cap := e.getCaptured(); cap != nil {
 		if mm, ok := cap.(widget.MouseMoveHandler); ok {
@@ -262,7 +271,7 @@ func (e *Engine) SendMouseMove(x, y int) {
 
 	// Модальный виджет: ограничиваем broadcast
 	if m := e.topModal(); m != nil {
-		broadcastMouseMove(m, x, y)
+		broadcastMouseMove(m, ox, oy, x, y)
 		return
 	}
 
@@ -272,7 +281,7 @@ func (e *Engine) SendMouseMove(x, y int) {
 	if root == nil {
 		return
 	}
-	broadcastMouseMove(root, x, y)
+	broadcastMouseMove(root, ox, oy, x, y)
 }
 
 // SendMouseButton уведомляет дерево о нажатии/отпускании кнопки мыши в (x, y).
@@ -705,17 +714,44 @@ func findOverlayAt(w widget.Widget, x, y int) widget.Widget {
 	return nil
 }
 
-// broadcastMouseMove рекурсивно доставляет событие перемещения мыши
-// всему дереву виджетов (не только тем, что под курсором).
-// Каждый виджет сам определяет своё hover-состояние через image.Pt(x,y).In(bounds).
-func broadcastMouseMove(w widget.Widget, x, y int) {
+// broadcastMouseMove рекурсивно доставляет событие перемещения мыши дереву
+// виджетов АДРЕСНО: OnMouseMove получают только виджеты, которых движение
+// касается — прежняя (ox,oy) или новая (nx,ny) точка в их bounds (вторая
+// нужна, чтобы виджет, из которого курсор ушёл, снял свой hover). Исключения,
+// получающие событие всегда:
+//
+//   - пустые bounds — оверлейные виджеты (PopupMenu до Show) и контейнеры без
+//     геометрии судят о попадании сами;
+//   - активный overlay (открытый dropdown/меню) — его видимая область шире
+//     bounds виджета-хозяина.
+//
+// Drag-механики адресность не задевает: всё, что тянет мышью (скроллбары,
+// сплиттеры, заголовок окна, выделение текста), берёт мышь через
+// SetCapture, а захваченная мышь доставляется напрямую (см. SendMouseMove).
+//
+// Обход по-прежнему идёт по всему дереву (дети в абсолютных координатах и
+// могут выходить за родителя — отсечься по родителю нельзя), но дорогая часть
+// — интерфейсный ассерт + вызов OnMouseMove на каждом из сотен виджетов при
+// каждом движении — выполняется теперь только у затронутых.
+func broadcastMouseMove(w widget.Widget, ox, oy, nx, ny int) {
 	if !widget.IsWidgetVisible(w) {
 		return
 	}
-	if mm, ok := w.(widget.MouseMoveHandler); ok {
-		mm.OnMouseMove(x, y)
+	b := w.Bounds()
+	interested := b.Empty() ||
+		(nx >= b.Min.X && nx < b.Max.X && ny >= b.Min.Y && ny < b.Max.Y) ||
+		(ox >= b.Min.X && ox < b.Max.X && oy >= b.Min.Y && oy < b.Max.Y)
+	if !interested {
+		if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
+			interested = true
+		}
+	}
+	if interested {
+		if mm, ok := w.(widget.MouseMoveHandler); ok {
+			mm.OnMouseMove(nx, ny)
+		}
 	}
 	for _, child := range w.Children() {
-		broadcastMouseMove(child, x, y)
+		broadcastMouseMove(child, ox, oy, nx, ny)
 	}
 }

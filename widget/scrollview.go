@@ -308,6 +308,22 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 	return false
 }
 
+// WantsCapture захватывает мышь при нажатии ЛКМ на ползунке скроллбара:
+// во время перетаскивания курсор свободно выходит за границы виджета, и без
+// захвата drag обрывался бы на краю (а с адресной доставкой мыши события
+// вне bounds иначе вовсе не приходят).
+func (sv *ScrollView) WantsCapture(e MouseEvent) bool {
+	if e.Button != MouseLeft || !e.Pressed {
+		return false
+	}
+	sv.mu.Lock()
+	defer sv.mu.Unlock()
+	if !sv.needsScrollbar() {
+		return false
+	}
+	return image.Pt(e.X, e.Y).In(sv.thumbRect())
+}
+
 // OnMouseMove обрабатывает перемещение мыши (drag скроллбара, hover).
 func (sv *ScrollView) OnMouseMove(x, y int) {
 	sv.mu.Lock()

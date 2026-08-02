@@ -2,50 +2,154 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>headless-gui viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>headless-gui — витрина в браузере</title>
 <style>
-  html,body { margin:0; height:100%; background:#15161e; color:#9399b2;
-              font:13px/1.4 system-ui,sans-serif; }
-  #wrap { display:flex; flex-direction:column; align-items:center; gap:8px;
-          padding:16px; }
-  canvas { background:#000; outline:none; box-shadow:0 8px 40px rgba(0,0,0,.6);
-           border-radius:6px; image-rendering:pixelated; }
-  #status { user-select:none; }
+  :root {
+    --bg:#12131a; --panel:#1a1c26; --line:#282b3a;
+    --text:#cdd6f4; --dim:#8b90a6; --accent:#89b4fa; --ok:#a6e3a1; --warn:#f9e2af;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
+              font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  body { display:flex; flex-direction:column; }
+
+  header { display:flex; align-items:center; gap:14px; padding:10px 16px;
+           background:var(--panel); border-bottom:1px solid var(--line); flex:0 0 auto; }
+  header h1 { margin:0; font-size:14px; font-weight:600; letter-spacing:.2px; }
+  header .sub { color:var(--dim); font-size:12px; }
+  header .spacer { flex:1; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--warn);
+         box-shadow:0 0 8px currentColor; }
+  .dot.on { background:var(--ok); }
+  .dot.off { background:#f38ba8; }
+
+  button { background:#252836; color:var(--text); border:1px solid var(--line);
+           border-radius:5px; padding:5px 11px; font:inherit; cursor:pointer; }
+  button:hover { background:#2e3244; }
+  button[aria-pressed="true"] { background:var(--accent); color:#11131a; border-color:transparent; }
+
+  main { flex:1; display:flex; align-items:center; justify-content:center;
+         padding:14px; min-height:0; overflow:auto; }
+  canvas { background:#000; outline:none; box-shadow:0 10px 44px rgba(0,0,0,.65);
+           border-radius:8px; }
+  canvas:focus { box-shadow:0 10px 44px rgba(0,0,0,.65), 0 0 0 2px var(--accent); }
+
+  footer { flex:0 0 auto; display:flex; flex-wrap:wrap; gap:6px 22px;
+           padding:8px 16px; background:var(--panel); border-top:1px solid var(--line);
+           color:var(--dim); font-size:12px; }
+  footer b { color:var(--text); font-weight:600; }
+  .hint { color:var(--dim); }
+  .hint kbd { background:#252836; border:1px solid var(--line); border-radius:4px;
+              padding:1px 5px; font:inherit; color:var(--text); }
 </style>
 </head>
 <body>
-<div id="wrap">
+
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>headless-gui</h1>
+  <span class="sub" id="state">подключение…</span>
+  <span class="spacer"></span>
+  <span class="hint">холст:</span>
+  <button id="fit" aria-pressed="true" title="Вписать холст в окно браузера">вписать</button>
+  <button id="one" aria-pressed="false" title="Показывать пиксель в пиксель">1:1</button>
+</header>
+
+<main>
   <canvas id="screen" tabindex="0"></canvas>
-  <div id="status">подключение…</div>
-</div>
+</main>
+
+<footer>
+  <span>размер: <b id="size">—</b></span>
+  <span>зрителей: <b id="viewers">—</b></span>
+  <span>кадров: <b id="frames">0</b></span>
+  <span>тайлов: <b id="tiles">0</b></span>
+  <span>трафик: <b id="traffic">0 КБ</b></span>
+  <span>задержка: <b id="ping">—</b></span>
+  <span class="hint">Сервер не открыл ни одного окна: это тайлы его холста.
+    Клик и <kbd>Tab</kbd> — фокус, ввод идёт обратно на сервер.</span>
+</footer>
+
 <script>
 "use strict";
-const canvas = document.getElementById("screen");
-const ctx = canvas.getContext("2d");
-const status = document.getElementById("status");
+const canvas  = document.getElementById("screen");
+const ctx     = canvas.getContext("2d", { alpha:false });
+const elState = document.getElementById("state");
+const elDot   = document.getElementById("dot");
+const elSize  = document.getElementById("size");
+const elFrames= document.getElementById("frames");
+const elTiles = document.getElementById("tiles");
+const elTraf  = document.getElementById("traffic");
+const elPing  = document.getElementById("ping");
+const elView  = document.getElementById("viewers");
+const btnFit  = document.getElementById("fit");
+const btnOne  = document.getElementById("one");
 
-let tiles = 0, bytes = 0;
+let frames = 0, tiles = 0, bytes = 0;
+let fit = true;
+
+// ─── Масштабирование холста ──────────────────────────────────────────────────
+// Холст сервера имеет фиксированный размер; в браузере он либо вписывается в
+// окно (по умолчанию — удобно на ноутбуке), либо показывается 1:1. Координаты
+// мыши пересчитываются обратно в пиксели холста, поэтому попадание точное.
+function layout() {
+  if (!canvas.width) return;
+  if (fit) {
+    const main = document.querySelector("main");
+    const availW = main.clientWidth  - 28;
+    const availH = main.clientHeight - 28;
+    const k = Math.min(availW / canvas.width, availH / canvas.height, 1);
+    canvas.style.width  = Math.round(canvas.width  * k) + "px";
+    canvas.style.height = Math.round(canvas.height * k) + "px";
+    canvas.style.imageRendering = k === 1 ? "pixelated" : "auto";
+  } else {
+    canvas.style.width  = canvas.width  + "px";
+    canvas.style.height = canvas.height + "px";
+    canvas.style.imageRendering = "pixelated";
+  }
+}
+addEventListener("resize", layout);
+btnFit.onclick = () => { fit = true;  sync(); };
+btnOne.onclick = () => { fit = false; sync(); };
+function sync() {
+  btnFit.setAttribute("aria-pressed", String(fit));
+  btnOne.setAttribute("aria-pressed", String(!fit));
+  layout();
+}
+
+// ─── Поток тайлов ────────────────────────────────────────────────────────────
 const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
 ws.binaryType = "arraybuffer";
 
-// Сообщения обрабатываются строго по порядку (createImageBitmap асинхронен).
-let queue = Promise.resolve();
+let queue = Promise.resolve();   // сообщения обрабатываются строго по порядку
 ws.onmessage = ev => {
-  if (typeof ev.data === "string") return;
+  if (typeof ev.data === "string") { onText(ev.data); return; }
   queue = queue.then(() => handle(ev.data)).catch(console.error);
 };
-ws.onopen  = () => { status.textContent = "подключено"; canvas.focus(); };
-ws.onclose = () => { status.textContent = "соединение закрыто"; };
+ws.onopen = () => {
+  elState.textContent = "подключено";
+  elDot.classList.add("on");
+  canvas.focus();
+  ping();
+};
+ws.onclose = () => {
+  elState.textContent = "соединение закрыто";
+  elDot.classList.remove("on");
+  elDot.classList.add("off");
+};
 
 async function handle(buf) {
   const dv = new DataView(buf);
   const type = dv.getUint8(0);
-  if (type === 0x02) {                    // init: размер холста
-    canvas.width = dv.getUint16(1);
+  if (type === 0x02) {                       // init: размер холста
+    canvas.width  = dv.getUint16(1);
     canvas.height = dv.getUint16(3);
+    elSize.textContent = canvas.width + "×" + canvas.height;
+    layout();
     return;
   }
-  if (type !== 0x01) return;              // tiles
+  if (type !== 0x01) return;                 // tiles
   const n = dv.getUint16(1);
   let off = 3;
   const jobs = [];
@@ -53,7 +157,7 @@ async function handle(buf) {
     const x = dv.getUint16(off), y = dv.getUint16(off + 2);
     const len = dv.getUint32(off + 8);
     off += 12;
-    const blob = new Blob([new Uint8Array(buf, off, len)], { type: "image/png" });
+    const blob = new Blob([new Uint8Array(buf, off, len)], { type:"image/png" });
     off += len;
     jobs.push(createImageBitmap(blob).then(bmp => ({ bmp, x, y })));
   }
@@ -62,52 +166,83 @@ async function handle(buf) {
     ctx.drawImage(bmp, x, y);
     if (bmp.close) bmp.close();
   }
-  tiles += n; bytes += buf.byteLength;
-  status.textContent = `тайлов: ${tiles} · трафик: ${(bytes / 1024).toFixed(0)} КБ`;
+  frames++; tiles += n; bytes += buf.byteLength;
+  elFrames.textContent = frames;
+  elTiles.textContent  = tiles;
+  elTraf.textContent   = (bytes / 1024).toFixed(0) + " КБ";
 }
+
+// Текстовые сообщения — ответ на пинг (замер задержки туда-обратно).
+function onText(s) {
+  try {
+    const m = JSON.parse(s);
+    if (m.t === "pg") elPing.textContent = (performance.now() - m.ts).toFixed(0) + " мс";
+  } catch (_) { /* не наше сообщение */ }
+}
+function ping() { send({ t:"pg", ts: performance.now() }); }
+setInterval(ping, 2000);
+
+// Число зрителей берём из сводки сервера.
+async function stats() {
+  try {
+    const r = await fetch("/stats");
+    const s = await r.json();
+    elView.textContent = s.viewers;
+  } catch (_) { /* сервер мог уйти */ }
+}
+stats();
+setInterval(stats, 3000);
 
 // ─── Ввод ────────────────────────────────────────────────────────────────────
 function send(o) { if (ws.readyState === 1) ws.send(JSON.stringify(o)); }
+
+// Координаты пересчитываются из экранных в пиксели холста (см. layout).
 function pos(e) {
   const r = canvas.getBoundingClientRect();
-  return { x: Math.round(e.clientX - r.left), y: Math.round(e.clientY - r.top) };
+  return {
+    x: Math.round((e.clientX - r.left) * canvas.width  / r.width),
+    y: Math.round((e.clientY - r.top)  * canvas.height / r.height),
+  };
 }
 // JS button: 0 лев, 1 сред, 2 прав → widget.MouseButton: 0 лев, 1 прав, 2 сред.
-const btnMap = { 0: 0, 1: 2, 2: 1 };
+const btnMap = { 0:0, 1:2, 2:1 };
 
-let moveScheduled = null;
+let pending = null;
 canvas.addEventListener("mousemove", e => {
-  moveScheduled = pos(e);
-  if (moveScheduled.sent) return;
+  const had = pending !== null;
+  pending = pos(e);
+  if (had) return;                       // уже запланирован кадр — просто обновили точку
   requestAnimationFrame(() => {
-    if (moveScheduled) { send({ t: "mm", ...moveScheduled }); moveScheduled = null; }
+    if (pending) { send({ t:"mm", ...pending }); pending = null; }
   });
 });
 canvas.addEventListener("mousedown", e => {
   canvas.focus();
-  send({ t: "mb", ...pos(e), b: btnMap[e.button] ?? 0, p: true });
+  send({ t:"mb", ...pos(e), b: btnMap[e.button] ?? 0, p:true });
   e.preventDefault();
 });
 canvas.addEventListener("mouseup", e => {
-  send({ t: "mb", ...pos(e), b: btnMap[e.button] ?? 0, p: false });
+  send({ t:"mb", ...pos(e), b: btnMap[e.button] ?? 0, p:false });
   e.preventDefault();
 });
 canvas.addEventListener("wheel", e => {
-  send({ t: "wh", ...pos(e), d: Math.sign(e.deltaY) });
+  send({ t:"wh", ...pos(e), d: Math.sign(e.deltaY) });
   e.preventDefault();
-}, { passive: false });
+}, { passive:false });
 canvas.addEventListener("contextmenu", e => e.preventDefault());
 
-function mods(e) { return (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) | (e.altKey ? 4 : 0); }
+function mods(e) { return (e.ctrlKey?1:0) | (e.shiftKey?2:0) | (e.altKey?4:0); }
 canvas.addEventListener("keydown", e => {
   const r = e.key.length === 1 ? e.key.codePointAt(0) : 0;
-  send({ t: "kd", c: e.keyCode, r, m: mods(e) });
+  send({ t:"kd", c:e.keyCode, r, m:mods(e) });
   e.preventDefault();
 });
 canvas.addEventListener("keyup", e => {
-  send({ t: "ku", c: e.keyCode, m: mods(e) });
+  send({ t:"ku", c:e.keyCode, m:mods(e) });
   e.preventDefault();
 });
+
+sync();
 </script>
 </body>
 </html>

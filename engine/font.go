@@ -418,6 +418,46 @@ func systemFallbackFontPaths() []string {
 	}
 }
 
+// ─── Процессный кэш файлов шрифтов ──────────────────────────────────────────
+//
+// Каждый engine.New перечитывал шрифты с диска — а движков в процессе бывает
+// МНОГО: hosted-режим создаёт движок на каждый нативный модальный диалог и на
+// каждую оторванную док-панель (см. window/modal_host.go, dock_host.go). В
+// профиле это десятки мегабайт os.ReadFile и лишние миллисекунды на КАЖДОЕ
+// открытие диалога. Шрифты в рантайме не меняются, поэтому содержимое файлов
+// кэшируется на процесс. Данные только читаются (sfnt/typesetting держат их
+// как read-only), так что общий срез безопасен.
+
+var (
+	fontFileMu    sync.Mutex
+	fontFileCache = map[string][]byte{} // путь → содержимое (nil — файла нет)
+)
+
+// readFontFile — os.ReadFile с процессным кэшем. Ошибка тоже кэшируется:
+// отсутствующий файл не перепроверяется на каждом создании движка.
+func readFontFile(path string) ([]byte, error) {
+	fontFileMu.Lock()
+	data, seen := fontFileCache[path]
+	fontFileMu.Unlock()
+	if seen {
+		if data == nil {
+			return nil, os.ErrNotExist
+		}
+		return data, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		data = nil
+	}
+	fontFileMu.Lock()
+	fontFileCache[path] = data
+	fontFileMu.Unlock()
+	if data == nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 // loadFontData читает TTF из файла; если не удаётся — возвращает встроенный Go Regular.
 func loadFontData(assetsDir string) []byte {
 	candidates := []string{
@@ -425,7 +465,7 @@ func loadFontData(assetsDir string) []byte {
 		"assets/fonts/Go-Regular.ttf",
 	}
 	for _, p := range candidates {
-		if data, err := os.ReadFile(p); err == nil {
+		if data, err := readFontFile(p); err == nil {
 			return data
 		}
 	}

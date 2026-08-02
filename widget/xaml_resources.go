@@ -454,6 +454,13 @@ func (env *xamlEnv) resolveAttrs(el *xElement, ctx interface{}) {
 				el.attrs[k] = Tr(key) // внутри DataTemplate — одноразовый перевод
 				continue
 			}
+			if isFoldedItemTag(el.Tag) {
+				// Вкладки, пункты меню и элементы списков виджетами не
+				// становятся — их сворачивает в себя родитель. Разметку
+				// оставляем как есть: перевод и подписку на смену языка
+				// заведёт сборщик родителя (см. xaml_loc_items.go).
+				continue
+			}
 			name := env.ensureName(el)
 			env.locs = append(env.locs, pendingLoc{name: name, prop: k, key: key})
 			el.attrs[k] = Tr(key) // начальное значение для первого рендера

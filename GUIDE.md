@@ -1456,7 +1456,13 @@ u16-заголовком x/y/w/h); сервер держит композит э
 клиенту полный keyframe, дальше — только дельты; медленные клиенты
 пропускают кадры. Ввод возвращается JSON-сообщениями (мышь/колесо/клавиши;
 `e.keyCode` браузера совпадает с `widget.KeyCode`). Демо:
-`go run ./cmd/webdemo` → http://localhost:8091.
+go run ./cmd/webshowcase → http://localhost:8091 — ВСЯ витрина виджетов в
+браузере: та же разметка showcase.xaml, те же вкладки, темы и локализация, но
+ни одного окна ОС. Минимальный пример — `go run ./cmd/webdemo`.
+
+Сервер отдаёт ещё две вспомогательные точки: `/stats` (JSON: зрители, кадры,
+тайлы, трафик) и `/snapshot.png` (текущий кадр целиком — удобно для
+документации и мониторинга).
 
 ### Нативные модальные окна и попапы (v3.10)
 
@@ -1815,7 +1821,8 @@ go run ./cmd/showcase    # все виджеты + живая анимация
 go run ./cmd/guiview     # интерактивное демо с модальными XAML-окнами
 go run ./cmd/griddemo    # Grid-раскладка
 go run ./cmd/smartgit    # SmartGit-подобный UI
-go run ./cmd/webdemo     # стриминг UI в браузер (http://localhost:8091)
+go run ./cmd/webshowcase # вся витрина в браузере (http://localhost:8091)
+go run ./cmd/webdemo     # минимальный пример стриминга
 
 # Бинарник без консоли (Windows)
 go build -ldflags="-H windowsgui" -o showcase.exe ./cmd/showcase

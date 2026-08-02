@@ -155,6 +155,21 @@ func (m *PopupMenu) SetItems(items []MenuItem) {
 	m.items = items
 }
 
+// SetItemText меняет надпись пункта по индексу. Нужен, когда меню уже собрано,
+// а текст должен обновиться на лету — например при смене языка интерфейса.
+func (m *PopupMenu) SetItemText(idx int, text string) {
+	m.mu.Lock()
+	changed := false
+	if idx >= 0 && idx < len(m.items) && m.items[idx].Text != text {
+		m.items[idx].Text = text
+		changed = true
+	}
+	m.mu.Unlock()
+	if changed {
+		notifyUIChanged()
+	}
+}
+
 // Items возвращает копию пунктов.
 func (m *PopupMenu) Items() []MenuItem {
 	m.mu.RLock()
