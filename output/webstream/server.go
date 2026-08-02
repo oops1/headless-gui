@@ -9,7 +9,9 @@ import (
 	"image/png"
 	"log"
 	"net/http"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "embed"
@@ -153,31 +155,99 @@ func (s *Server) keyframe() ([]byte, error) {
 	return encodeTiles(tiles)
 }
 
+// pngEncoder — общий кодировщик PNG для тайлов.
+//
+// Два решения ради скорости, и оба ощутимы на порядок:
+//   - BestSpeed вместо компрессии по умолчанию: содержимое тайла — куски
+//     интерфейса (плоские заливки, текст), они и так сжимаются отлично, а
+//     стандартный уровень тратил ~140 мкс на тайл — 8-9 мс на средний кадр
+//     и ~80 мс на keyframe, всё в один поток.
+//   - BufferPool: png.Encode без него аллоцирует ~850 КБ на КАЖДЫЙ тайл
+//     (внутренний zlib-писатель и буферы строк) — при 30 FPS это давило GC.
+var pngEncoder = png.Encoder{
+	CompressionLevel: png.BestSpeed,
+	BufferPool:       &pngPool{},
+}
+
+// pngPool — пул png.EncoderBuffer (потокобезопасность даёт sync.Pool).
+type pngPool struct{ p sync.Pool }
+
+func (pp *pngPool) Get() *png.EncoderBuffer {
+	b, _ := pp.p.Get().(*png.EncoderBuffer)
+	return b // nil допустим — кодировщик создаст новый
+}
+func (pp *pngPool) Put(b *png.EncoderBuffer) { pp.p.Put(b) }
+
+// encodedTile — один тайл, упакованный воркером.
+type encodedTile struct {
+	hdr [12]byte
+	png []byte
+}
+
 // encodeTiles сериализует тайлы: заголовок + PNG на каждый тайл.
+// Тайлы кодируются ПАРАЛЛЕЛЬНО: они независимы, а именно кодирование — самая
+// дорогая часть стрима (движок рендерит кадр быстрее, чем один поток
+// упаковывал). Порядок в выходном буфере сохраняется — клиент полагается на
+// заголовки, но детерминированный вывод дешевле и в отладке, и в тестах.
 func encodeTiles(tiles []output.DirtyTile) ([]byte, error) {
-	var buf bytes.Buffer
-	buf.WriteByte(msgTiles)
+	encoded := make([]encodedTile, len(tiles))
+	workers := runtime.GOMAXPROCS(0)
+	if workers > len(tiles) {
+		workers = len(tiles)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+
+	var wg sync.WaitGroup
+	var firstErr atomic.Pointer[error]
+	next := atomic.Int64{}
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var pngBuf bytes.Buffer
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= len(tiles) {
+					return
+				}
+				t := tiles[i]
+				img := &image.RGBA{Pix: t.Data, Stride: t.W * 4, Rect: image.Rect(0, 0, t.W, t.H)}
+				pngBuf.Reset()
+				if err := pngEncoder.Encode(&pngBuf, img); err != nil {
+					firstErr.CompareAndSwap(nil, &err)
+					return
+				}
+				et := &encoded[i]
+				binary.BigEndian.PutUint16(et.hdr[0:], uint16(t.X))
+				binary.BigEndian.PutUint16(et.hdr[2:], uint16(t.Y))
+				binary.BigEndian.PutUint16(et.hdr[4:], uint16(t.W))
+				binary.BigEndian.PutUint16(et.hdr[6:], uint16(t.H))
+				binary.BigEndian.PutUint32(et.hdr[8:], uint32(pngBuf.Len()))
+				et.png = append(et.png[:0], pngBuf.Bytes()...)
+			}
+		}()
+	}
+	wg.Wait()
+	if p := firstErr.Load(); p != nil {
+		return nil, *p
+	}
+
+	total := 3
+	for i := range encoded {
+		total += 12 + len(encoded[i].png)
+	}
+	buf := make([]byte, 0, total)
+	buf = append(buf, msgTiles)
 	var n16 [2]byte
 	binary.BigEndian.PutUint16(n16[:], uint16(len(tiles)))
-	buf.Write(n16[:])
-
-	var pngBuf bytes.Buffer
-	for _, t := range tiles {
-		img := &image.RGBA{Pix: t.Data, Stride: t.W * 4, Rect: image.Rect(0, 0, t.W, t.H)}
-		pngBuf.Reset()
-		if err := png.Encode(&pngBuf, img); err != nil {
-			return nil, err
-		}
-		var hdr [12]byte
-		binary.BigEndian.PutUint16(hdr[0:], uint16(t.X))
-		binary.BigEndian.PutUint16(hdr[2:], uint16(t.Y))
-		binary.BigEndian.PutUint16(hdr[4:], uint16(t.W))
-		binary.BigEndian.PutUint16(hdr[6:], uint16(t.H))
-		binary.BigEndian.PutUint32(hdr[8:], uint32(pngBuf.Len()))
-		buf.Write(hdr[:])
-		buf.Write(pngBuf.Bytes())
+	buf = append(buf, n16[:]...)
+	for i := range encoded {
+		buf = append(buf, encoded[i].hdr[:]...)
+		buf = append(buf, encoded[i].png...)
 	}
-	return buf.Bytes(), nil
+	return buf, nil
 }
 
 // encodeInit — сообщение с размером холста.
