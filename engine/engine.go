@@ -92,6 +92,7 @@ type Engine struct {
 	notifierHandle uint64
 
 	frameSeq atomic.Uint64
+	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
 	frames   chan output.Frame
 	quit     chan struct{}
 	done     chan struct{}
@@ -156,7 +157,7 @@ func New(width, height, fps int) *Engine {
 	// Best-effort: подгружаем системные шрифты с широким покрытием символов
 	// (✓ ✗ ⚠, box-drawing, стрелки) как fallback к встроенному Go Regular (BUG-2).
 	for _, p := range systemFallbackFontPaths() {
-		if data, err := os.ReadFile(p); err == nil {
+		if data, err := readFontFile(p); err == nil {
 			e.canvas.AddFallbackFont(data)
 		}
 	}
@@ -412,7 +413,7 @@ func (e *Engine) loadFontDirectory(dir string) {
 		if ext != ".ttf" && ext != ".otf" {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, name))
+		data, err := readFontFile(filepath.Join(dir, name))
 		if err != nil {
 			continue
 		}
@@ -533,10 +534,15 @@ func (e *Engine) Start() {
 // После Stop канал Frames() закрывается.
 //
 // Снимает регистрацию движка в широковещательном реестре нотификаторов
-// (см. New) — после Stop виджеты больше не будят этот движок. Разрегистрация
-// идемпотентна; сам Stop, как и прежде, вызывать не более одного раза
-// (повторный close(e.quit) паникует — поведение не менялось).
+// (см. New) — после Stop виджеты больше не будят этот движок.
+//
+// Идемпотентен: повторный вызов — no-op. Раньше повторный Stop паниковал
+// close of closed channel — типовая ловушка для кода с defer eng.Stop()
+// рядом с явной остановкой на пути ошибки.
 func (e *Engine) Stop() {
+	if !e.stopped.CompareAndSwap(false, true) {
+		return
+	}
 	widget.UnregisterUINotifier(e.notifierHandle)
 	close(e.quit)
 	<-e.done
