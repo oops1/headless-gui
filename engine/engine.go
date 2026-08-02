@@ -93,7 +93,13 @@ type Engine struct {
 
 	frameSeq atomic.Uint64
 	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
-	frames   chan output.Frame
+
+	// Прежняя позиция курсора для адресного broadcastMouseMove. Доступ только
+	// из потока-источника ввода (SendMouseMove), синхронизация не нужна.
+	lastMoveX, lastMoveY int
+	hasLastMove          bool
+
+	frames chan output.Frame
 	quit     chan struct{}
 	done     chan struct{}
 
@@ -305,6 +311,7 @@ func (e *Engine) SetScale(k float64) {
 	e.canvas.setDPIAll(e.userDPI * k)
 	e.scaleBits.Store(math.Float64bits(k))
 	e.mu.Unlock()
+	widget.BumpTextMetricsRev() // ширины текста изменились — сброс кэшей переноса
 	e.Invalidate()
 }
 
@@ -493,6 +500,7 @@ func (e *Engine) SetDPI(dpi float64) {
 	defer e.frameMu.Unlock()
 	e.userDPI = dpi
 	e.canvas.setDPIAll(dpi * e.canvas.scale)
+	widget.BumpTextMetricsRev() // ширины текста изменились — сброс кэшей переноса
 	e.Invalidate()
 }
 

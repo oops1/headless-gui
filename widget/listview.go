@@ -567,6 +567,20 @@ func (lv *ListView) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
 	return true
 }
 
+// WantsCapture захватывает мышь при нажатии ЛКМ на ползунке скроллбара —
+// drag не должен обрываться, когда курсор выходит за границы списка.
+func (lv *ListView) WantsCapture(e MouseEvent) bool {
+	if e.Button != MouseLeft || !e.Pressed || !lv.IsEnabled() {
+		return false
+	}
+	lv.mu.Lock()
+	defer lv.mu.Unlock()
+	if !lv.needsScrollbar() {
+		return false
+	}
+	return image.Pt(e.X, e.Y).In(lv.thumbRect())
+}
+
 // OnMouseMove обрабатывает hover и drag скроллбара.
 func (lv *ListView) OnMouseMove(x, y int) {
 	if !lv.IsEnabled() {
