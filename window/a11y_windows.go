@@ -9,7 +9,9 @@
 //     UiaReturnRawElementProvider, отдавая корневой провайдер.
 //  2. Провайдер — обычный COM-объект: IRawElementProviderSimple (свойства),
 //     IRawElementProviderFragment (навигация по дереву и границы) и
-//     IRawElementProviderFragmentRoot (фокус и поиск по точке) у корня.
+//     IRawElementProviderFragmentRoot (фокус и поиск по точке) у корня. Плюс
+//     паттерны управления: IInvokeProvider у кнопок и IToggleProvider у
+//     флажков/переключателей — через них скринридер нажимает элемент.
 //     COM-обвязка собрана руками в a11y_uia_windows.go — CGO в проекте нет.
 //  3. Семантику отдаёт движок (engine.AccessibilityTree), общий с Linux слой
 //     a11y.go разворачивает её в плоский снимок с УСТОЙЧИВЫМИ id: клиент UIA
@@ -38,11 +40,16 @@
 //   - Разбирать поведение клиента можно журналом вызовов провайдера:
 //     HEADLESS_GUI_UIA_LOG=<файл> (см. uiaLog).
 //
-// Не поддержано пока: паттерны управления (Invoke/Toggle/Value) — скринридер
-// читает элементы, но не может нажимать их за пользователя; для этого движку
-// нужен путь «активировать узел по семантическому id». И поиск по точке
-// (ElementProviderFromPoint) берёт позицию курсора, а не переданные
-// координаты — см. комментарий у этого метода.
+// Действия скринридера (SetFocus, Invoke, Toggle) уходят в движок через
+// accessibilityFocus/accessibilityActivate — см. accessibilityActor в a11y.go.
+// Активация выполняется СИНТЕТИЧЕСКИМ КЛИКОМ по центру виджета, поэтому
+// перекрытый другим виджетом элемент нажать не удастся (см. ActivateAccessible).
+//
+// Не поддержано пока: паттерн Value (Slider/TextInput отдают значение только
+// свойством ValueValue, менять его клиент не может), SelectionItem у
+// радиокнопок (им отдан Invoke как приближение — нажатие выбирает пункт).
+// И поиск по точке (ElementProviderFromPoint) берёт позицию курсора, а не
+// переданные координаты — см. комментарий у этого метода.
 package window
 
 import (
@@ -102,6 +109,14 @@ const (
 	uiaCtrlGroup       = 50026
 	uiaCtrlWindow      = 50032
 	uiaCtrlPane        = 50033
+
+	// Паттерны управления (UIA_*PatternId).
+	uiaPatternInvoke = 10000
+	uiaPatternToggle = 10015
+
+	// ToggleState.
+	uiaToggleOff = 0
+	uiaToggleOn  = 1
 
 	// Направления обхода (NavigateDirection).
 	uiaNavParent      = 0
@@ -176,13 +191,17 @@ func uiaFocusable(info widget.AccessInfo) bool {
 
 // ─── COM-элемент ─────────────────────────────────────────────────────────────
 
-// uiaElement — COM-объект одного элемента дерева. Три первых поля — указатели
-// на vtable: их АДРЕСА и есть COM-указатели соответствующих интерфейсов
-// (&e.simpleVT — IRawElementProviderSimple и т.д.).
+// uiaElement — COM-объект одного элемента дерева. Первые поля — указатели на
+// vtable: их АДРЕСА и есть COM-указатели соответствующих интерфейсов
+// (&e.simpleVT — IRawElementProviderSimple и т.д.). Паттерны Invoke и Toggle
+// живут в том же объекте: держать их отдельными COM-объектами незачем — время
+// жизни то же, а счётчик ссылок общий (так делает и стандартный UIA-провайдер).
 type uiaElement struct {
 	simpleVT   uintptr
 	fragmentVT uintptr
 	rootVT     uintptr
+	invokeVT   uintptr
+	toggleVT   uintptr
 
 	// refs — счётчик ссылок COM. Атомарный: AddRef/Release приходят из
 	// потоков UIA, а не только из UI-потока окна.
@@ -226,10 +245,14 @@ func newUIAElement(b *uiaBridge, id int32) *uiaElement {
 	e.simpleVT = uiaSimpleVTable()
 	e.fragmentVT = uiaFragmentVTable()
 	e.rootVT = uiaRootVTable()
+	e.invokeVT = uiaInvokeVTable()
+	e.toggleVT = uiaToggleVTable()
 	uiaObjMu.Lock()
 	uiaObjects[uintptr(unsafe.Pointer(&e.simpleVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.fragmentVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.rootVT))] = e
+	uiaObjects[uintptr(unsafe.Pointer(&e.invokeVT))] = e
+	uiaObjects[uintptr(unsafe.Pointer(&e.toggleVT))] = e
 	uiaObjMu.Unlock()
 	return e
 }
@@ -240,21 +263,69 @@ func (e *uiaElement) forget() {
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.simpleVT)))
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.fragmentVT)))
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.rootVT)))
+	delete(uiaObjects, uintptr(unsafe.Pointer(&e.invokeVT)))
+	delete(uiaObjects, uintptr(unsafe.Pointer(&e.toggleVT)))
 	uiaObjMu.Unlock()
 }
 
 func (e *uiaElement) simplePtr() uintptr   { return uintptr(unsafe.Pointer(&e.simpleVT)) }
 func (e *uiaElement) fragmentPtr() uintptr { return uintptr(unsafe.Pointer(&e.fragmentVT)) }
 func (e *uiaElement) rootPtr() uintptr     { return uintptr(unsafe.Pointer(&e.rootVT)) }
+func (e *uiaElement) invokePtr() uintptr   { return uintptr(unsafe.Pointer(&e.invokeVT)) }
+func (e *uiaElement) togglePtr() uintptr   { return uintptr(unsafe.Pointer(&e.toggleVT)) }
 
 // isRoot — корень фрагмента (окно): у него живёт FragmentRoot и хост-провайдер.
 func (e *uiaElement) isRoot() bool { return e.id == e.b.rootID() }
+
+// node возвращает узел снимка, которому соответствует элемент (nil — узел
+// исчез из дерева после перестройки UI, а COM-объект клиент ещё держит).
+func (e *uiaElement) node() *a11yNode {
+	if e == nil || e.b == nil {
+		return nil
+	}
+	return e.b.current().node(e.id)
+}
+
+// role — роль узла элемента (RoleUnknown, если узла уже нет).
+func (e *uiaElement) role() widget.AccessRole {
+	if n := e.node(); n != nil {
+		return n.Info.Role
+	}
+	return widget.RoleUnknown
+}
+
+// ─── Поддержка паттернов по роли ─────────────────────────────────────────────
+
+// uiaSupportsInvoke — роли, у которых «нажатие» не имеет состояния.
+//
+// Радиокнопке по спецификации положен SelectionItem, а не Invoke: клиент хочет
+// уметь спросить «выбрана ли» и «в какой группе». Группы движок не публикует,
+// поэтому отдаём Invoke как приближение — скринридер сможет хотя бы ВЫБРАТЬ
+// пункт (нажатие радиокнопки её и выбирает), а состояние он читает из
+// свойств. Флажок и переключатель сюда НЕ входят: у них Toggle.
+func uiaSupportsInvoke(r widget.AccessRole) bool {
+	switch r {
+	case widget.RoleButton, widget.RoleRadioButton:
+		return true
+	}
+	return false
+}
+
+// uiaSupportsToggle — роли с двумя состояниями (Toggle вместо Invoke).
+func uiaSupportsToggle(r widget.AccessRole) bool {
+	switch r {
+	case widget.RoleCheckBox, widget.RoleSwitch:
+		return true
+	}
+	return false
+}
 
 // ─── Таблицы виртуальных методов ─────────────────────────────────────────────
 
 var (
 	uiaVTOnce                             sync.Once
 	uiaVTSimple, uiaVTFragment, uiaVTRoot uintptr
+	uiaVTInvoke, uiaVTToggle              uintptr
 )
 
 func uiaInitVTables() {
@@ -281,12 +352,21 @@ func uiaInitVTables() {
 			windows.NewCallback(uiaElementProviderFromPoint),
 			windows.NewCallback(uiaGetFocus),
 		)
+		uiaVTInvoke = newVTable(qi, addRef, release,
+			windows.NewCallback(uiaInvoke),
+		)
+		uiaVTToggle = newVTable(qi, addRef, release,
+			windows.NewCallback(uiaToggle),
+			windows.NewCallback(uiaGetToggleState),
+		)
 	})
 }
 
 func uiaSimpleVTable() uintptr   { uiaInitVTables(); return uiaVTSimple }
 func uiaFragmentVTable() uintptr { uiaInitVTables(); return uiaVTFragment }
 func uiaRootVTable() uintptr     { uiaInitVTables(); return uiaVTRoot }
+func uiaInvokeVTable() uintptr   { uiaInitVTables(); return uiaVTInvoke }
+func uiaToggleVTable() uintptr   { uiaInitVTables(); return uiaVTToggle }
 
 // ─── IUnknown ────────────────────────────────────────────────────────────────
 
@@ -313,6 +393,23 @@ func uiaQueryInterface(this uintptr, riid *comGUID, ppv *uintptr) uintptr {
 		}
 		uiaLog("QI(%d, FragmentRoot)", e.id)
 		*ppv = e.rootPtr()
+	case riid.equals(&iidInvokeProvider):
+		// Отвечаем ТОЛЬКО если роль реально поддерживает паттерн: пустой
+		// IInvokeProvider на надписи заставил бы скринридер объявить её
+		// нажимаемой, а нажатие ничего бы не делало.
+		if !uiaSupportsInvoke(e.role()) {
+			uiaLog("QI(%d, Invoke) → роль не поддерживает, E_NOINTERFACE", e.id)
+			return eNoInterface
+		}
+		uiaLog("QI(%d, Invoke)", e.id)
+		*ppv = e.invokePtr()
+	case riid.equals(&iidToggleProvider):
+		if !uiaSupportsToggle(e.role()) {
+			uiaLog("QI(%d, Toggle) → роль не поддерживает, E_NOINTERFACE", e.id)
+			return eNoInterface
+		}
+		uiaLog("QI(%d, Toggle)", e.id)
+		*ppv = e.togglePtr()
 	default:
 		uiaLog("QI(%d, %s) → E_NOINTERFACE", e.id, riid)
 		return eNoInterface
@@ -351,12 +448,34 @@ func uiaGetProviderOptions(this uintptr, out *int32) uintptr {
 	return sOK
 }
 
-// uiaGetPatternProvider — паттернов управления пока нет (см. шапку файла).
+// uiaGetPatternProvider отдаёт провайдер паттерна управления по его id.
+//
+// Возвращаемый указатель уходит клиенту во владение, поэтому обязателен AddRef
+// (как и в outFragment/outRoot). Неизвестный или неподдерживаемый ролью
+// паттерн — NULL и S_OK: для UIA это штатный ответ «такого у меня нет».
 func uiaGetPatternProvider(this uintptr, patternID int32, out *uintptr) uintptr {
 	if out == nil {
 		return eInvalidArg
 	}
 	*out = 0
+	e := uiaLookup(this)
+	if e == nil {
+		return eFail
+	}
+	role := e.role()
+	switch patternID {
+	case uiaPatternInvoke:
+		if uiaSupportsInvoke(role) {
+			e.refs.Add(1)
+			*out = e.invokePtr()
+		}
+	case uiaPatternToggle:
+		if uiaSupportsToggle(role) {
+			e.refs.Add(1)
+			*out = e.togglePtr()
+		}
+	}
+	uiaLog("Pattern(%d, %d, role=%s) → %#x", e.id, patternID, role, *out)
 	return sOK
 }
 
@@ -462,10 +581,31 @@ func uiaGetEmbeddedFragmentRoots(this uintptr, out *uintptr) uintptr {
 	return sOK
 }
 
-// uiaSetFocus — программная передача фокуса пока не поддержана: у движка нет
-// публичного «сфокусировать узел по семантическому id». Возвращаем S_OK,
-// чтобы клиент не считал провайдер сломанным.
-func uiaSetFocus(this uintptr) uintptr { return sOK }
+// uiaSetFocus — программная передача фокуса: скринридер просит сделать элемент
+// фокусированным (NVDA делает это при переходе по объектной навигации).
+//
+// Отказ (виджета нет, он скрыт/выключен или не принимает фокус) НЕ превращаем в
+// ошибку: клиенты UIA плохо переносят HRESULT из SetFocus — «Экранный диктор»
+// после него считает провайдер сломанным и перестаёт ходить по дереву. Причину
+// видно в журнале (HEADLESS_GUI_UIA_LOG).
+func uiaSetFocus(this uintptr) uintptr {
+	e := uiaLookup(this)
+	if e == nil {
+		return eFail
+	}
+	node := e.node()
+	if node == nil {
+		uiaLog("SetFocus(%d) → узла нет в снимке", e.id)
+		return sOK
+	}
+	if !e.b.win.accessibilityFocus(node.Widget) {
+		uiaLog("SetFocus(%d) → отказ (виджет не принимает фокус)", e.id)
+		return sOK
+	}
+	e.b.markDirty() // фокус переехал — снимок устарел
+	uiaLog("SetFocus(%d) → ок", e.id)
+	return sOK
+}
 
 func uiaGetFragmentRoot(this uintptr, out *uintptr) uintptr {
 	if out == nil {
@@ -525,6 +665,66 @@ func uiaGetFocus(this uintptr, out *uintptr) uintptr {
 		*out = f.outFragment()
 	}
 	uiaLog("GetFocus(%d) → %s", e.id, uiaTargetName(f))
+	return sOK
+}
+
+// ─── Паттерны управления: IInvokeProvider и IToggleProvider ──────────────────
+
+// uiaActivateNode — общая часть Invoke и Toggle: «нажать» виджет узла.
+//
+// Оба паттерна ведут в одно и то же — синтетический клик по центру виджета
+// (engine.ActivateAccessible). Разница между ними только в том, ЧТО клиент об
+// элементе думает: Invoke — действие без состояния, Toggle — переключение,
+// после которого клиент перечитает ToggleState.
+func uiaActivateNode(this uintptr, what string) uintptr {
+	e := uiaLookup(this)
+	if e == nil {
+		return eFail
+	}
+	node := e.node()
+	if node == nil {
+		uiaLog("%s(%d) → узла нет в снимке", what, e.id)
+		return uiaEElementNotAvailable
+	}
+	if !e.b.win.accessibilityActivate(node.Widget) {
+		uiaLog("%s(%d) → отказ (виджет выключен, скрыт или без границ)", what, e.id)
+		return uiaEElementNotEnabled
+	}
+	// Состояние узла изменилось (флажок переключился, кнопка что-то сделала):
+	// помечаем снимок устаревшим, чтобы следующий пересбор поднял события.
+	// Штатный уведомитель UI сделал бы это и сам, но он подключается только
+	// вместе с циклом событий (ensureEventLoop).
+	e.b.markDirty()
+	uiaLog("%s(%d) → ок", what, e.id)
+	return sOK
+}
+
+// uiaInvoke — IInvokeProvider::Invoke.
+func uiaInvoke(this uintptr) uintptr { return uiaActivateNode(this, "Invoke") }
+
+// uiaToggle — IToggleProvider::Toggle. Отдельного «установить в состояние X» в
+// паттерне нет: клиент переключает и перечитывает ToggleState.
+func uiaToggle(this uintptr) uintptr { return uiaActivateNode(this, "Toggle") }
+
+// uiaGetToggleState — IToggleProvider::get_ToggleState.
+// Третьего состояния (ToggleState_Indeterminate) движок не публикует.
+func uiaGetToggleState(this uintptr, out *int32) uintptr {
+	if out == nil {
+		return eInvalidArg
+	}
+	*out = uiaToggleOff
+	e := uiaLookup(this)
+	if e == nil {
+		return eFail
+	}
+	node := e.node()
+	if node == nil {
+		return uiaEElementNotAvailable
+	}
+	if a11yHasState(node.Info.States, widget.StateChecked) {
+		*out = uiaToggleOn
+	}
+	uiaLog("ToggleState(%d) → %d", e.id, *out)
 	return sOK
 }
 

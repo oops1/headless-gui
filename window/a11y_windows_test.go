@@ -4,6 +4,7 @@ package window
 
 import (
 	"image"
+	"image/color"
 	"syscall"
 	"testing"
 	"unsafe"
@@ -46,6 +47,10 @@ const (
 
 	slotElementFromPoint = 3
 	slotGetFocus         = 4
+
+	slotInvoke      = 3 // IInvokeProvider::Invoke
+	slotToggle      = 3 // IToggleProvider::Toggle
+	slotToggleState = 4 // IToggleProvider::get_ToggleState
 )
 
 var (
@@ -204,9 +209,9 @@ func TestUIAProviderThroughVTable(t *testing.T) {
 		t.Errorf("ProviderOptions: hr=%#x opts=%d", hr, opts)
 	}
 	var pattern uintptr
-	if hr := comCall(simple, slotPatternProvider, 10000, uintptr(unsafe.Pointer(&pattern))); hr != sOK ||
+	if hr := comCall(simple, slotPatternProvider, uiaPatternInvoke, uintptr(unsafe.Pointer(&pattern))); hr != sOK ||
 		pattern != 0 {
-		t.Errorf("GetPatternProvider: hr=%#x ptr=%#x (паттернов пока нет)", hr, pattern)
+		t.Errorf("GetPatternProvider(Invoke) у окна: hr=%#x ptr=%#x (окно не нажимается)", hr, pattern)
 	}
 
 	prop := func(iface uintptr, id int32) comVariant {
@@ -400,6 +405,240 @@ func TestUIADisabledAndChecked(t *testing.T) {
 	comCall(e.simplePtr(), slotPropertyValue, uiaPropIsKeyboardFocusabl, uintptr(unsafe.Pointer(&out)))
 	if out.val[0] != 0 {
 		t.Error("выключенная кнопка не должна быть фокусируемой")
+	}
+}
+
+// ─── Паттерны управления ─────────────────────────────────────────────────────
+
+// uiaActionScene — сцена для проверки Invoke/Toggle/SetFocus.
+type uiaActionScene struct {
+	b      *uiaBridge
+	eng    *engine.Engine
+	btn    *widget.Button
+	cb     *widget.CheckBox
+	lbl    *widget.Label
+	clicks int
+}
+
+// newUIAActionScene собирает мост поверх кнопки, флажка и надписи.
+//
+// Два требования к раскладке, оба обязательны: виджеты НЕ перекрываются и лежат
+// НИЖЕ полосы заголовка (32 px у widget.Window). Активация выполняется
+// синтетическим кликом по центру границ через настоящий путь ввода — клик в
+// заголовок перехватил бы сам widget.Window (перетаскивание), а перекрытый
+// виджет получил бы чужое нажатие.
+func newUIAActionScene(t *testing.T) *uiaActionScene {
+	t.Helper()
+	sc := &uiaActionScene{}
+	sc.eng = engine.New(400, 300, 20)
+	root := widget.NewWindow("Действия UIA", 400, 300)
+
+	sc.btn = widget.NewButton("Сохранить")
+	sc.btn.SetBounds(image.Rect(10, 50, 120, 80))
+	sc.btn.OnClick = func() { sc.clicks++ }
+	root.AddChild(sc.btn)
+
+	sc.cb = widget.NewCheckBox("Запомнить")
+	sc.cb.SetBounds(image.Rect(10, 100, 160, 130))
+	root.AddChild(sc.cb)
+
+	sc.lbl = widget.NewLabel("Подпись", color.RGBA{A: 255})
+	sc.lbl.SetBounds(image.Rect(10, 150, 160, 170))
+	root.AddChild(sc.lbl)
+
+	sc.eng.SetRoot(root)
+
+	win := New(sc.eng, "Действия UIA")
+	win.scale = 1
+	sc.b = &uiaBridge{win: win, elems: map[int32]*uiaElement{}}
+	sc.b.refresh(true)
+	t.Cleanup(func() {
+		sc.b.mu.Lock()
+		for _, e := range sc.b.elems {
+			e.forget()
+		}
+		sc.b.mu.Unlock()
+	})
+	return sc
+}
+
+// elem возвращает COM-объект узла по его индексу в снимке (1 — кнопка,
+// 2 — флажок, 3 — надпись).
+func (sc *uiaActionScene) elem(t *testing.T, idx int32) *uiaElement {
+	t.Helper()
+	e := sc.b.element(sc.b.current().id(idx))
+	if e == nil {
+		t.Fatalf("элемент с индексом %d не создан", idx)
+	}
+	return e
+}
+
+// TestUIAPatternProviderByRole — GetPatternProvider отдаёт паттерн только тем
+// ролям, которые его реально поддерживают: надпись нельзя ни нажать, ни
+// переключить, кнопку нельзя переключить, флажок нажимается через Toggle.
+func TestUIAPatternProviderByRole(t *testing.T) {
+	sc := newUIAActionScene(t)
+	btn, cb, lbl := sc.elem(t, 1), sc.elem(t, 2), sc.elem(t, 3)
+
+	pattern := func(e *uiaElement, id int32) uintptr {
+		t.Helper()
+		var p uintptr
+		if hr := comCall(e.simplePtr(), slotPatternProvider, uintptr(id),
+			uintptr(unsafe.Pointer(&p))); hr != sOK {
+			t.Fatalf("GetPatternProvider(%d): hr=%#x", id, hr)
+		}
+		return p
+	}
+
+	if got := pattern(btn, uiaPatternInvoke); got != btn.invokePtr() {
+		t.Errorf("Invoke у кнопки = %#x, ожидался %#x", got, btn.invokePtr())
+	}
+	if got := pattern(btn, uiaPatternToggle); got != 0 {
+		t.Errorf("Toggle у кнопки = %#x, ожидался NULL", got)
+	}
+	if got := pattern(cb, uiaPatternToggle); got != cb.togglePtr() {
+		t.Errorf("Toggle у флажка = %#x, ожидался %#x", got, cb.togglePtr())
+	}
+	if got := pattern(cb, uiaPatternInvoke); got != 0 {
+		t.Errorf("Invoke у флажка = %#x, ожидался NULL (у него Toggle)", got)
+	}
+	if got := pattern(lbl, uiaPatternInvoke); got != 0 {
+		t.Errorf("Invoke у надписи = %#x, ожидался NULL", got)
+	}
+	if got := pattern(lbl, uiaPatternToggle); got != 0 {
+		t.Errorf("Toggle у надписи = %#x, ожидался NULL", got)
+	}
+	if got := pattern(btn, 10002); got != 0 { // ExpandCollapse — не реализован
+		t.Errorf("неизвестный паттерн = %#x, ожидался NULL", got)
+	}
+
+	// QueryInterface обязан отвечать так же, как GetPatternProvider: иначе
+	// клиент, получивший паттерн одним путём, не найдёт его другим.
+	var out uintptr
+	if hr := comCall(btn.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidInvokeProvider)),
+		uintptr(unsafe.Pointer(&out))); hr != sOK || out != btn.invokePtr() {
+		t.Errorf("QI(Invoke) у кнопки: hr=%#x out=%#x", hr, out)
+	}
+	if hr := comCall(lbl.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidInvokeProvider)),
+		uintptr(unsafe.Pointer(&out))); hr != eNoInterface || out != 0 {
+		t.Errorf("QI(Invoke) у надписи: hr=%#x out=%#x, ожидался E_NOINTERFACE", hr, out)
+	}
+	if hr := comCall(cb.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidToggleProvider)),
+		uintptr(unsafe.Pointer(&out))); hr != sOK || out != cb.togglePtr() {
+		t.Errorf("QI(Toggle) у флажка: hr=%#x out=%#x", hr, out)
+	}
+	if hr := comCall(btn.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidToggleProvider)),
+		uintptr(unsafe.Pointer(&out))); hr != eNoInterface {
+		t.Errorf("QI(Toggle) у кнопки: hr=%#x, ожидался E_NOINTERFACE", hr)
+	}
+}
+
+// TestUIAInvokeClicksButton — вызов Invoke() через настоящую vtable доходит до
+// OnClick кнопки. Это и есть «скринридер нажал кнопку за пользователя».
+func TestUIAInvokeClicksButton(t *testing.T) {
+	sc := newUIAActionScene(t)
+	btn := sc.elem(t, 1)
+
+	var invoke uintptr
+	comCall(btn.simplePtr(), slotPatternProvider, uiaPatternInvoke, uintptr(unsafe.Pointer(&invoke)))
+	if invoke == 0 {
+		t.Fatal("кнопка не отдала IInvokeProvider")
+	}
+	if hr := comCall(invoke, slotInvoke); hr != sOK {
+		t.Fatalf("Invoke: hr=%#x", hr)
+	}
+	if sc.clicks != 1 {
+		t.Fatalf("нажатий %d, ожидалось 1", sc.clicks)
+	}
+	if hr := comCall(invoke, slotInvoke); hr != sOK || sc.clicks != 2 {
+		t.Errorf("повторный Invoke: hr=%#x clicks=%d", hr, sc.clicks)
+	}
+
+	// Выключенную кнопку нажать нельзя — клиент получает UIA_E_ELEMENTNOTENABLED.
+	sc.btn.SetEnabled(false)
+	if hr := comCall(invoke, slotInvoke); hr != uiaEElementNotEnabled || sc.clicks != 2 {
+		t.Errorf("Invoke выключенной кнопки: hr=%#x clicks=%d", hr, sc.clicks)
+	}
+}
+
+// TestUIAToggleCheckBox — Toggle() переключает флажок, а get_ToggleState
+// показывает его текущее состояние.
+func TestUIAToggleCheckBox(t *testing.T) {
+	sc := newUIAActionScene(t)
+	cb := sc.elem(t, 2)
+
+	var toggle uintptr
+	comCall(cb.simplePtr(), slotPatternProvider, uiaPatternToggle, uintptr(unsafe.Pointer(&toggle)))
+	if toggle == 0 {
+		t.Fatal("флажок не отдал IToggleProvider")
+	}
+
+	// state читает состояние ПОСЛЕ принудительного пересбора снимка: провайдер
+	// отвечает по снимку, а он обновляется не чаще a11yRefreshEvery.
+	state := func() int32 {
+		t.Helper()
+		sc.b.refresh(true)
+		var s int32
+		if hr := comCall(toggle, slotToggleState, uintptr(unsafe.Pointer(&s))); hr != sOK {
+			t.Fatalf("get_ToggleState: hr=%#x", hr)
+		}
+		return s
+	}
+
+	if got := state(); got != uiaToggleOff {
+		t.Fatalf("исходное состояние = %d, ожидался Off", got)
+	}
+	if hr := comCall(toggle, slotToggle); hr != sOK {
+		t.Fatalf("Toggle: hr=%#x", hr)
+	}
+	if !sc.cb.IsChecked() {
+		t.Fatal("Toggle не отметил флажок")
+	}
+	if got := state(); got != uiaToggleOn {
+		t.Errorf("после Toggle состояние = %d, ожидался On", got)
+	}
+	if hr := comCall(toggle, slotToggle); hr != sOK || sc.cb.IsChecked() {
+		t.Errorf("обратный Toggle: hr=%#x checked=%v", hr, sc.cb.IsChecked())
+	}
+	if got := state(); got != uiaToggleOff {
+		t.Errorf("после обратного Toggle состояние = %d, ожидался Off", got)
+	}
+}
+
+// TestUIASetFocusThroughVTable — SetFocus из IRawElementProviderFragment реально
+// переводит фокус ввода в движке (раньше метод был заглушкой).
+func TestUIASetFocusThroughVTable(t *testing.T) {
+	sc := newUIAActionScene(t)
+	btn, cb, lbl := sc.elem(t, 1), sc.elem(t, 2), sc.elem(t, 3)
+
+	if hr := comCall(btn.fragmentPtr(), slotSetFocus); hr != sOK {
+		t.Fatalf("SetFocus у кнопки: hr=%#x", hr)
+	}
+	if !sc.btn.IsFocused() {
+		t.Fatal("кнопка не получила фокус")
+	}
+	// Снимок должен показать фокус там же, где его видит движок.
+	sc.b.refresh(true)
+	var v comVariant
+	comCall(btn.simplePtr(), slotPropertyValue, uiaPropHasKeyboardFocus, uintptr(unsafe.Pointer(&v)))
+	if v.vt != vtBool || v.val[0] == 0 {
+		t.Errorf("HasKeyboardFocus у кнопки после SetFocus: vt=%d val=%d", v.vt, v.val[0])
+	}
+
+	if hr := comCall(cb.fragmentPtr(), slotSetFocus); hr != sOK {
+		t.Fatalf("SetFocus у флажка: hr=%#x", hr)
+	}
+	if !sc.cb.IsFocused() || sc.btn.IsFocused() {
+		t.Errorf("фокус не переехал на флажок: cb=%v btn=%v", sc.cb.IsFocused(), sc.btn.IsFocused())
+	}
+
+	// Надпись фокус не принимает, но HRESULT всё равно S_OK: ошибка отсюда
+	// заставляет «Экранный диктор» считать провайдер сломанным.
+	if hr := comCall(lbl.fragmentPtr(), slotSetFocus); hr != sOK {
+		t.Errorf("SetFocus у надписи: hr=%#x, ожидался S_OK", hr)
+	}
+	if !sc.cb.IsFocused() {
+		t.Error("отказной SetFocus не должен был сдвинуть фокус")
 	}
 }
 

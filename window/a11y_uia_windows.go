@@ -79,6 +79,12 @@ const (
 	eFail        = uintptr(0x80004005)
 	eNotImpl     = uintptr(0x80004001)
 	uiaEBadPoint = uintptr(0x80131515) // не используется, оставлено для полноты
+
+	// UIA_E_ELEMENTNOTENABLED / UIA_E_ELEMENTNOTAVAILABLE — штатные отказы
+	// паттернов управления: «элемент выключен» и «элемента больше нет».
+	// Клиенты их ждут и обрабатывают (в отличие от ошибок из SetFocus).
+	uiaEElementNotEnabled   = uintptr(0x80040200)
+	uiaEElementNotAvailable = uintptr(0x80040201)
 )
 
 // ─── GUID ────────────────────────────────────────────────────────────────────
@@ -132,6 +138,10 @@ var (
 	iidProviderFragment = comGUID{0xF7063DA8, 0x8359, 0x439C, [8]byte{0x92, 0x97, 0xBB, 0xC5, 0x29, 0x9A, 0x7D, 0x87}}
 	// IRawElementProviderFragmentRoot {620CE2A5-AB8F-40A9-86CB-DE3C75599B58}
 	iidProviderFragmentRoot = comGUID{0x620CE2A5, 0xAB8F, 0x40A9, [8]byte{0x86, 0xCB, 0xDE, 0x3C, 0x75, 0x59, 0x9B, 0x58}}
+	// IInvokeProvider {54FCB24B-E18E-47A2-B4D3-ECCBE77599A2} — паттерн Invoke.
+	iidInvokeProvider = comGUID{0x54FCB24B, 0xE18E, 0x47A2, [8]byte{0xB4, 0xD3, 0xEC, 0xCB, 0xE7, 0x75, 0x99, 0xA2}}
+	// IToggleProvider {56D00BD0-C4F4-433C-A836-1A52A57E0892} — паттерн Toggle.
+	iidToggleProvider = comGUID{0x56D00BD0, 0xC4F4, 0x433C, [8]byte{0xA8, 0x36, 0x1A, 0x52, 0xA5, 0x7E, 0x08, 0x92}}
 )
 
 // ─── Импорты ─────────────────────────────────────────────────────────────────
