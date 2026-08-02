@@ -93,17 +93,24 @@ func (e *Engine) drawTooltip(c *Canvas, root widget.Widget) {
 	e.drawTooltipBox(c, tip, mx, my)
 }
 
-// tooltipMayAppear — true, пока подсказка «дозревает»: курсор остановился,
-// задержка ещё не истекла (плюс один кадр сверху, чтобы успеть нарисовать
-// появившуюся подсказку). Используется on-demand циклом, чтобы не пропустить
-// момент появления tooltip без явной инвалидации.
+// tooltipMayAppear — true в МОМЕНТ появления подсказки: курсор остановился и
+// задержка только что истекла (окно в пару кадров, чтобы точно успеть её
+// нарисовать). Используется on-demand циклом, чтобы не пропустить появление
+// tooltip без явной инвалидации.
+//
+// Важно, что true держится только это короткое окно, а не всё время
+// «дозревания»: раньше условие было elapsed <= delay, и КАЖДОЕ движение мыши
+// заставляло цикл рендерить полные кадры (фон + всё дерево + полный дифф)
+// в течение всей задержки подсказки — постоянная фоновая нагрузка при любом
+// шевелении курсора, хотя менялся от силы hover одной кнопки.
 func (e *Engine) tooltipMayAppear(frameInterval time.Duration) bool {
 	e.ttMu.Lock()
 	defer e.ttMu.Unlock()
 	if !e.ttEnabled || !e.ttHasMouse {
 		return false
 	}
-	return time.Since(e.ttLastMove) <= e.ttDelay+frameInterval
+	elapsed := time.Since(e.ttLastMove)
+	return elapsed >= e.ttDelay && elapsed <= e.ttDelay+2*frameInterval
 }
 
 // tooltipAt возвращает ToolTip самого глубокого видимого виджета под (x, y).

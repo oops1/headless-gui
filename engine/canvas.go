@@ -293,16 +293,50 @@ func (c *Canvas) FillRectAlpha(x, y, w, h int, col color.RGBA) {
 }
 
 // fillRectPx — заливка в ФИЗИЧЕСКИХ координатах (внутренний примитив).
+//
+// Ручные циклы вместо stdraw.Draw(&image.Uniform{...}): универсальный путь
+// стандартной библиотеки аллоцировал Uniform на каждый вызов (в профиле —
+// десятки тысяч объектов за секунды нагрузки). Src — заполнение первой строки
+// + copy остальных; Over — побайтово по формуле drawFillOver из image/draw
+// (та же 16-битная арифметика, поэтому результат идентичен до бита).
 func (c *Canvas) fillRectPx(r image.Rectangle, col color.RGBA, over bool) {
 	r = c.clampRect(r)
 	if r.Empty() {
 		return
 	}
-	op := stdraw.Src
-	if over {
-		op = stdraw.Over
+	if over && col.A != 255 {
+		if col.A == 0 {
+			return
+		}
+		const m = 1<<16 - 1
+		sr, sg, sb, sa := uint32(col.R)*0x101, uint32(col.G)*0x101, uint32(col.B)*0x101, uint32(col.A)*0x101
+		a := (m - sa) * 0x101
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			i := c.back.PixOffset(r.Min.X, y)
+			row := c.back.Pix[i : i+r.Dx()*4]
+			for x := 0; x < len(row); x += 4 {
+				row[x+0] = uint8((uint32(row[x+0])*a/m + sr) >> 8)
+				row[x+1] = uint8((uint32(row[x+1])*a/m + sg) >> 8)
+				row[x+2] = uint8((uint32(row[x+2])*a/m + sb) >> 8)
+				row[x+3] = uint8((uint32(row[x+3])*a/m + sa) >> 8)
+			}
+		}
+		return
 	}
-	stdraw.Draw(c.back, r, &image.Uniform{C: col}, image.Point{}, op)
+	// Src (или непрозрачный Over — то же самое): первая строка руками,
+	// остальные — копированием первой (memmove).
+	first := c.back.PixOffset(r.Min.X, r.Min.Y)
+	row0 := c.back.Pix[first : first+r.Dx()*4]
+	for x := 0; x < len(row0); x += 4 {
+		row0[x+0] = col.R
+		row0[x+1] = col.G
+		row0[x+2] = col.B
+		row0[x+3] = col.A
+	}
+	for y := r.Min.Y + 1; y < r.Max.Y; y++ {
+		i := c.back.PixOffset(r.Min.X, y)
+		copy(c.back.Pix[i:i+len(row0)], row0)
+	}
 }
 
 // FillRoundRect заливает прямоугольник со скруглёнными углами радиуса r.
@@ -930,27 +964,43 @@ func (c *Canvas) diffTiles(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
 }
 
 // diffTileRows — последовательный diff тайлов в диапазоне рядов [ty0..ty1].
+//
+// Два прохода: сначала сравнение находит изменившиеся тайлы, затем их данные
+// извлекаются в ОДИН слэб точного размера, а Data каждого тайла —
+// трёхиндексный срез в него. Раньше на каждый тайл выделялся собственный
+// буфер — при активной перерисовке это был крупнейший источник мусора движка
+// (десятки МБ/с в профиле); слэб через append тоже не годился — рост с
+// удвоением копирует данные и оставляет позади до слэба мусора за кадр.
 func (c *Canvas) diffTileRows(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
 	ts := output.TileSize
-	var tiles []output.DirtyTile
 
+	// Проход 1: какие тайлы изменились и сколько байт им нужно.
+	var tiles []output.DirtyTile
+	total := 0
 	for ty := ty0; ty <= ty1; ty++ {
 		for tx := tx0; tx <= tx1; tx++ {
 			px := tx * ts
 			py := ty * ts
 			pw := min(ts, c.W-px)
 			ph := min(ts, c.H-py)
-
 			if !c.tilesEqual(px, py, pw, ph) {
-				data := c.extractTile(px, py, pw, ph)
-				tiles = append(tiles, output.DirtyTile{
-					X: px, Y: py,
-					W: pw, H: ph,
-					Data: data,
-				})
-				c.syncTile(px, py, pw, ph)
+				tiles = append(tiles, output.DirtyTile{X: px, Y: py, W: pw, H: ph})
+				total += pw * ph * 4
 			}
 		}
+	}
+	if len(tiles) == 0 {
+		return nil
+	}
+
+	// Проход 2: одна аллокация под все данные, извлечение и синхронизация.
+	slab := make([]byte, 0, total)
+	for i := range tiles {
+		t := &tiles[i]
+		start := len(slab)
+		slab = c.appendTile(slab, t.X, t.Y, t.W, t.H)
+		t.Data = slab[start:len(slab):len(slab)]
+		c.syncTile(t.X, t.Y, t.W, t.H)
 	}
 	return tiles
 }
@@ -970,15 +1020,16 @@ func (c *Canvas) tilesEqual(x, y, w, h int) bool {
 	return true
 }
 
-func (c *Canvas) extractTile(x, y, w, h int) []byte {
-	data := make([]byte, w*h*4)
+// appendTile дописывает пиксели тайла (x,y,w,h) из back-буфера в конец slab
+// и возвращает выросший слэб. См. diffTileRows: одна аллокация на воркера
+// вместо буфера на каждый тайл.
+func (c *Canvas) appendTile(slab []byte, x, y, w, h int) []byte {
 	rowBytes := w * 4
 	for row := 0; row < h; row++ {
 		src := c.back.PixOffset(x, y+row)
-		dst := row * rowBytes
-		copy(data[dst:dst+rowBytes], c.back.Pix[src:src+rowBytes])
+		slab = append(slab, c.back.Pix[src:src+rowBytes]...)
 	}
-	return data
+	return slab
 }
 
 func (c *Canvas) syncTile(x, y, w, h int) {

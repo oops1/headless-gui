@@ -40,7 +40,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 
 - **Off-screen rendering** — no OS window required; output via `<-chan output.Frame`
 - **Delta tile streaming** — only changed 64x64 regions are sent each frame
-- **Browser viewer out of the box** — `output/webstream` streams the UI to any browser over WebSocket (zero-dep RFC 6455 server, per-tile PNG, keyframe for new clients, multiple concurrent viewers) and feeds mouse/keyboard back; one Go process on the server, no rebuild for the client (`go run ./cmd/webdemo`)
+- **Browser viewer out of the box** — `output/webstream` streams the UI to any browser over WebSocket (zero-dep RFC 6455 server, per-tile PNG, keyframe for new clients, multiple concurrent viewers) and feeds mouse/keyboard back; one Go process on the server, no rebuild for the client. The full widget showcase runs this way: `go run ./cmd/webshowcase` serves the very same UI as the native window, with no OS window opened at all
 - **Standard dialogs, fully engine-drawn** — MessageBox with severity icons (Enter/Esc, Windows-style Ctrl+C dump), input and progress dialogs, file Open/Save/Folder with a built-in browser (places sidebar, clickable breadcrumb, columns) — they work headless and show the *server's* filesystem when streaming; themed and localized (EN/RU built in, live language switch)
 - **Multiline TextBox editor** — word wrap or horizontal scroll, mouse/keyboard selection, Ctrl+arrows word jumps, PgUp/PgDn, clipboard, undo/redo, context menu; caret math works headless
 - **Full keyboard layouts on Linux** — Wayland xkb keymap parsing (live layout switching) and X11 `GetKeyboardMapping`, so Russian/US/… layouts type correctly in native windows
@@ -134,8 +134,10 @@ go run main.go
 ### Browser (WebSocket streaming)
 
 ```bash
-go run ./cmd/webdemo
+go run ./cmd/webshowcase   # the whole widget showcase, streamed
 # open http://localhost:8091 — the UI runs on the server, no native window at all
+#
+# go run ./cmd/webdemo     # minimal streaming example (a few widgets)
 ```
 
 ### Native Window
@@ -164,7 +166,8 @@ headless-gui/
   window/          Native window (Win32/Cocoa/X11/Wayland, zero CGO)
   cmd/
     showcase/      Full widget showcase (all widgets + live animation)
-    webdemo/       Browser streaming demo (http://localhost:8091)
+    webshowcase/   The full showcase in a browser (http://localhost:8091)
+webdemo/       Minimal browser streaming example
     smartgit/      SmartGit-like UI (Window + Menu + TreeView + DataGrid)
   assets/ui/       XAML demo layouts (demo.xaml, grid_demo.xaml, showcase.xaml)
   gui/             XAML files for RDP UI (login, block, error dialogs)

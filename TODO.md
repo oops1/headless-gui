@@ -70,8 +70,12 @@
       Ограничения: без градиентов/clipPath/text; обводка упрощённая.
 - [~] **Системные уведомления** — Windows сделано 2026-07-11: balloon через
       Shell_NotifyIcon (NIF_INFO, значок по severity), `Window.ShowBalloon` +
-      `SetOnBalloonClick`. Осталось: D-Bus org.freedesktop.Notifications
-      (Linux), macOS NSUserNotification.
+      `SetOnBalloonClick`. **Linux сделано 2026-08-01**: свой D-Bus (window/
+      dbus.go + dbus_conn_linux.go, zero deps) и org.freedesktop.Notifications
+      (window/notify_linux.go) — X11 и Wayland, иконка в трее НЕ нужна, клик
+      доезжает через действие "default" (когда демон объявляет "actions").
+      Проверено на живой шине и на стороннем демоне (python-dbus).
+      Осталось: macOS NSUserNotification.
 - [x] **Tray-иконка с меню** — Windows сделано 2026-07-11 (window/tray*.go):
       `SetTrayIcon`/`RemoveTrayIcon` (Shell_NotifyIcon, image.Image→HICON,
       масштаб до SM_CXSMICON, маска из альфы), `SetOnTrayClick`, `SetTrayMenu`
@@ -79,26 +83,35 @@
       `RestoreFromTray`, дефолт «двойной левый клик восстанавливает окно».
       Live-превью окна в панели задач/Aero Peek: WM_PRINTCLIENT из кэша кадра
       (+ опциональный iconic-путь DWM за `HEADLESS_GUI_ICONIC_PREVIEW=1`).
-      На Linux/macOS/Wayland — no-op-заглушки. Трей на X11/macOS — позже.
-- [ ] **Трей + уведомления на Linux/macOS** — сейчас `trayHost` реализует
-      только `Win32Window`; на Linux/Wayland/macOS весь трей-API
-      (`SetTrayIcon`/`ShowBalloon`/`HideToTray`/`SetTrayMenu`/…) — вежливые
-      no-op. Довести по платформам (по возрастанию цены):
-      1. **Linux balloon** — `org.freedesktop.Notifications` (метод `Notify`)
-         через D-Bus session bus. Самый полезный и предсказуемый (это путь
-         `notify-send`). Грабли: D-Bus. Готовой либы нет, новую зависимость
-         (`godbus/dbus`) правило zero-new-deps не разрешает → писать D-Bus
-         поверх unix-сокета руками (как XDND, но крупнее). Сделать первым.
-      2. **Linux трей** (иконка+меню) — StatusNotifierItem по D-Bus +
-         `com.canonical.dbusmenu` (иконка — ARGB32-pixmap). Старый XEmbed-трей
-         устарел; **GNOME без расширения AppIndicator трей не показывает**.
-         Высокая цена + ненадёжно между DE — делать после balloon.
+      Linux (X11 и Wayland) — сделано 2026-08-02, см. ниже. macOS — no-op.
+- [~] **Трей + уведомления на Linux/macOS** — на Windows и Linux работает
+      целиком; осталась macOS.
+      1. [x] **Linux balloon** — сделано 2026-08-01, см. «Системные
+         уведомления» выше. Свой D-Bus живёт в window/dbus*.go и переиспользован
+         мостом доступности.
+      2. [x] **Linux трей** (иконка+меню) — сделано 2026-08-02
+         (window/tray_sni_linux.go): StatusNotifierItem по D-Bus + меню
+         `com.canonical.dbusmenu`, X11 и Wayland, zero deps. Отдельное
+         соединение с шиной; имя `org.kde.StatusNotifierItem-<pid>-<n>`,
+         объекты `/StatusNotifierItem` (свойства, Activate/SecondaryActivate,
+         сигналы NewIcon/NewTitle/NewToolTip/NewMenu/NewStatus) и `/MenuBar`
+         (GetLayout/GetGroupProperties/Event/AboutToShow + LayoutUpdated).
+         Иконка — ARGB32-pixmap с разворотом премультипликации (`sniARGB32`,
+         НЕ путать с BGRA-буфером Windows). Меню рисует САМА панель: бэкенд
+         заявляет `nativeTrayMenu`, и наш PopupMenu по правому клику не
+         открывается (Windows-путь не изменился). `HideToTray` на X11 —
+         UnmapWindow, `RestoreFromTray` — MapWindow + raise +
+         _NET_ACTIVE_WINDOW; на Wayland скрыть окно нечем — no-op.
+         Проверено: юнит-тесты (ARGB, дерево меню, Event→OnClick/OnSelect) и
+         сквозной тест на живой шине с фейковым Watcher'ом, плюс ручная
+         сверка с чужой реализацией (dbus-python) в WSL.
+         **GNOME без расширения AppIndicator трей не показывает** — свойство
+         среды: `SetTrayIcon` возвращает `errNoTrayWatcher`.
       3. **macOS трей+уведомления** — `NSStatusItem` + `UNUserNotification`
          через purego/Cocoa (purego 0.10.1 уже в go.mod). Средне, но нужен
          ЖИВОЙ Mac для проверки (Cocoa-бэкенд на железе не тестирован).
-      Публичный API уже кроссплатформенный — трогать только бэкенды
-      (window/native_linux.go, native_wayland.go, native_darwin.go + новый
-      window/dbus*.go). Дефолт «no-op на неподдержанном» сохранить.
+      Публичный API кроссплатформенный — трогать только бэкенды
+      (window/native_darwin.go). Дефолт «no-op на неподдержанном» сохранить.
 - [x] **Splitter** — сделано 2026-07-12: контейнер SplitPanel (доля 0..1,
       MinFirst/MinSecond, курсоры SizeWE/NS, drag через CaptureManager,
       двойной клик — коллапс/восстановление, гнездование, HasOwnLayout,
@@ -121,7 +134,14 @@
 
 ## 3. Стратегические (большие ставки)
 
-- [~] **Браузерный вьювер тайлов** — база готова 2026-07-07
+- [~] **Браузерный вьювер тайлов** — витрина в браузере готова 2026-08-01
+      (cmd/webshowcase): та же разметка showcase.xaml, те же вкладки, темы и
+      локализация, но ни одного окна ОС; диалоги и файловые диалоги работают
+      поверх стрима и показывают ФС сервера. Страница вьювера переписана
+      (масштабирование «вписать/1:1», зрители, кадры, тайлы, трафик, задержка),
+      сервер отдаёт `/stats` (JSON) и `/snapshot.png` (текущий кадр), а первый
+      подключившийся зритель больше не видит чёрный экран (движок просят
+      перерисоваться, если кадров ещё не было). База готова 2026-07-07
       (output/webstream): zero-dep WebSocket-сервер (RFC 6455), бинарный
       протокол (PNG на тайл + keyframe новому клиенту из композита),
       обратные события мыши/клавиатуры/колеса, несколько одновременных
@@ -130,9 +150,35 @@
       (рукопожатие → keyframe → клик из клиента → дельта). Дальше:
       сжатие лучше PNG (WebP/zstd), троттлинг/коалесценция для медленных
       клиентов, буфер обмена браузера, опциональный Go-WASM клиент.
-- [ ] **Платформенный accessibility-мост** — семантическое дерево уже есть
-      (`eng.AccessibilityTree()`); мосты: UI Automation (Windows, COM через
-      syscall), AT-SPI (Linux, D-Bus), NSAccessibility (macOS, purego).
+- [~] **Платформенный accessibility-мост** — семантическое дерево уже есть
+      (`eng.AccessibilityTree()`).
+      **AT-SPI (Linux) сделано 2026-08-01** (window/a11y.go — плоский снимок с
+      УСТОЙЧИВЫМИ id, hit-test, диффы; window/a11y_linux.go — мост):
+      регистрация через `org.a11y.atspi.Socket.Embed`, объекты Accessible/
+      Component/Application/Value/Action, кэш `org.a11y.atspi.Cache.GetItems`
+      (одним вызовом всё дерево — так его читает Orca), события фокуса, имени,
+      значения, состояний и перестройки дерева. Поднимается сам при включённой
+      доступности (`org.a11y.Status`), принудительно — `SetAccessibilityEnabled`
+      или `HEADLESS_GUI_A11Y=1`. Проверено настоящим клиентом libatspi.
+      Не сделано: `GrabFocus`/`DoAction` из скринридера (нужен путь «активировать
+      узел по семантическому id» в движке) и интерфейс Text (карет, выделение).
+      **UI Automation (Windows) сделано 2026-08-01**
+      (window/a11y_uia_windows.go — COM-обвязка без CGO: vtable из
+      windows.NewCallback, VARIANT/BSTR/SAFEARRAY, журнал вызовов провайдера
+      по `HEADLESS_GUI_UIA_LOG`; window/a11y_windows.go — провайдеры
+      Simple/Fragment/FragmentRoot, WM_GETOBJECT, события).
+      Живой клиент .NET UIAutomationClient обходит дерево от окна до листьев с
+      верными типами, именами, границами и фокусом. Мост включён по умолчанию
+      и пассивен: горутина и снимки появляются только после первого
+      WM_GETOBJECT. Выключить — `SetAccessibilityEnabled(false)` /
+      `HEADLESS_GUI_A11Y=0`.
+      Грабли, стоившие полдня и закреплённые тестом: корень фрагмента НЕ должен
+      отдавать `NativeWindowHandle` — UIA идёт по этому дескриптору за
+      провайдером и делает корень собственным ребёнком.
+      Не сделано: паттерны управления (Invoke/Toggle/Value) и SetFocus — нужен
+      путь «активировать узел по семантическому id» в движке; поиск по точке
+      берёт позицию курсора (windows.NewCallback не принимает double-аргументы).
+      Осталось: NSAccessibility (macOS, purego).
 - [ ] **IME (CJK)** — text-input-v3 (Wayland), TSF (Windows), NSTextInputClient.
 - [ ] **Mobile (Android/iOS)** — самый дорогой разрыв с Fyne/Gio; браться
       только при реальном запросе (WASM-вьювер частично закрывает кейс).
@@ -158,7 +204,19 @@
 - [x] Кэш кернинг-пар (fc.Kern ходит в sfnt на каждую пару). Сделано 2026-07-15:
       FontCache.Kern кэширует пары (сброс на SetDPI) — ~1.7× на шрифтах с реальной
       kern-таблицей.
-- [ ] X11: MIT-SHM для блита (сейчас PutImage через сокет).
+- [x] X11: MIT-SHM для блита. Сделано 2026-08-02 (window/x11shm.go): кадр
+      уходит через SysV-сегмент разделяемой памяти (ShmPutImage + событие
+      ShmCompletion как обратное давление; занят — кадр идёт PutImage), при
+      недоступности расширения/чужом IPC-namespace (WSLg XWayland) — чистый
+      фолбэк на PutImage, отловленный синхронным round-trip'ом на старте.
+      Проверено e2e против настоящего Xvfb (активация, серия кадров,
+      пересоздание сегмента при ресайзе — внешнем и программном SetSize).
+- [ ] VirtualizingItemsControl: при ПЕРВОМ показе вкладки строки могут
+      отрисоваться со сдвигом (частичная инвалидация первой материализации);
+      следующая перерисовка (скролл, hover) чинит. В окне незаметно — кадры
+      идут постоянно, а в webstream артефакт видим до следующего изменения.
+      Репро: webshowcase → вкладка 3.2.5 → снимок /snapshot.png сразу после
+      переключения.
 
 ## Рекомендуемый порядок
 

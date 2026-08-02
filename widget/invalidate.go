@@ -15,6 +15,7 @@ package widget
 import (
 	"image"
 	"sync"
+	"sync/atomic"
 )
 
 // Модель уведомлений — ШИРОКОВЕЩАТЕЛЬНЫЙ РЕЕСТР (а не «последний движок
@@ -123,6 +124,20 @@ func SetUIRectChangeNotifier(fn func(image.Rectangle)) {
 	uiExtRectNotify = fn
 	uiNotifyMu.Unlock()
 }
+
+// ─── Ревизия метрик текста ──────────────────────────────────────────────────
+
+// textMetricsRev растёт при каждом изменении, влияющем на ШИРИНУ текста:
+// смена DPI шрифтов или HiDPI-масштаба. Кэши, зависящие от измерения строк
+// (например, кэш переноса в Label), сверяются с ревизией и пересчитываются.
+var textMetricsRev atomic.Uint64
+
+// TextMetricsRev — текущая ревизия метрик текста.
+func TextMetricsRev() uint64 { return textMetricsRev.Load() }
+
+// BumpTextMetricsRev поднимает ревизию метрик текста. Вызывается движком при
+// смене DPI/масштаба; приложениям обычно не нужна.
+func BumpTextMetricsRev() { textMetricsRev.Add(1) }
 
 // notifyUIChanged сообщает всем приёмникам, что содержимое UI могло измениться.
 // Дёшево и потокобезопасно; no-op, если приёмников нет.

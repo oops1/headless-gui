@@ -30,6 +30,14 @@ type Label struct {
 
 	PaddingX int
 	PaddingY int
+
+	// Кэш переноса (см. wrappedLines): последний результат и его ключ.
+	wrapCache []string
+	wrapText  string
+	wrapFont  string
+	wrapSize  float64
+	wrapW     int
+	wrapRev   uint64
 }
 
 // Встроенные имена шрифтов для жирного/курсива (регистрируются движком из gofont).
@@ -120,7 +128,7 @@ func (l *Label) Draw(ctx DrawContext) {
 		l.drawLine(ctx, text, b.Min.X+l.PaddingX, b.Min.Y+l.PaddingY, fontSize, font)
 	} else {
 		maxW := b.Dx() - l.PaddingX*2
-		lines := wrapTextPixelFont(ctx, text, fontSize, font, maxW)
+		lines := l.wrappedLines(ctx, text, fontSize, font, maxW)
 		lineH := int(fontSize*1.5 + 0.5) // межстрочный интервал
 		y := b.Min.Y + l.PaddingY
 		for _, line := range lines {
@@ -151,6 +159,29 @@ func (l *Label) drawLine(ctx DrawContext, text string, x, y int, sizePt float64,
 		uy := y + int(sizePt*1.35+0.5)
 		ctx.DrawHLine(x, uy, tw, l.TextColor)
 	}
+}
+
+// wrappedLines возвращает строки переноса, кэшируя результат в самом Label.
+// Перенос — это MeasureText на каждое слово-кандидат, и раньше он считался
+// заново на КАЖДОМ Draw wrap-надписи; для длинных абзацев это заметно.
+// Кэш инвалидируется по ключу (текст, размер, шрифт, ширина) и по глобальной
+// ревизии метрик текста (смена DPI/HiDPI-масштаба меняет ширины строк).
+func (l *Label) wrappedLines(ctx DrawContext, text string, sizePt float64, font string, maxW int) []string {
+	rev := TextMetricsRev()
+	l.mu.RLock()
+	hit := l.wrapCache != nil && l.wrapText == text && l.wrapSize == sizePt &&
+		l.wrapFont == font && l.wrapW == maxW && l.wrapRev == rev
+	lines := l.wrapCache
+	l.mu.RUnlock()
+	if hit {
+		return lines
+	}
+	lines = wrapTextPixelFont(ctx, text, sizePt, font, maxW)
+	l.mu.Lock()
+	l.wrapCache = lines
+	l.wrapText, l.wrapSize, l.wrapFont, l.wrapW, l.wrapRev = text, sizePt, font, maxW, rev
+	l.mu.Unlock()
+	return lines
 }
 
 // wrapTextPixelFont разбивает text на строки с именованным шрифтом.

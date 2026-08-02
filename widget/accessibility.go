@@ -72,6 +72,14 @@ type AccessInfo struct {
 type AccessNode struct {
 	AccessInfo
 	Children []*AccessNode `json:"children,omitempty"`
+
+	// Widget — виджет, которому соответствует узел. Нужен платформенным
+	// мостам, чтобы скринридер мог не только ЧИТАТЬ семантику, но и
+	// ДЕЙСТВОВАТЬ: сфокусировать элемент (AT-SPI GrabFocus, UIA SetFocus) или
+	// нажать его (AT-SPI DoAction, UIA Invoke). Из сериализации исключён —
+	// снапшот остаётся чистым JSON-деревом для стриминговых сценариев,
+	// где виджета на стороне клиента всё равно нет.
+	Widget Widget `json:"-"`
 }
 
 // Accessible — опциональный интерфейс: кастомный виджет сам описывает
@@ -87,7 +95,7 @@ func BuildAccessTree(root Widget, focused Widget) *AccessNode {
 	if root == nil || !IsWidgetVisible(root) {
 		return nil
 	}
-	node := &AccessNode{AccessInfo: accessInfoFor(root)}
+	node := &AccessNode{AccessInfo: accessInfoFor(root), Widget: root}
 	if root == focused {
 		node.States = append(node.States, StateFocused)
 	}

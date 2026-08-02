@@ -707,7 +707,12 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 					break
 				}
 			}
-			tc.AddTab(header, content)
+			// Заголовок может быть {Loc Ключ}: переводим и запоминаем, как
+			// обновить его при смене языка (индекс вкладки уже известен).
+			text, key := locItemText(header)
+			idx := tc.TabCount()
+			tc.AddTab(text, content)
+			registerLocItem(key, func(s string) { tc.SetTabHeader(idx, s) })
 		} else if !strings.Contains(childTag, ".") {
 			// Обычные дочерние виджеты (не TabItem)
 			cw, err := buildXAMLWidget(child, reg, contentOff, baseDir)
@@ -769,17 +774,28 @@ func buildXAMLMenuBar(el xElement, reg map[string]Widget, parentOff image.Point)
 			header = child.Text
 		}
 
-		// Рекурсивно собираем подпункты.
-		subItems := parseMenuItems(child)
-		mb.AddMenu(header, subItems...)
+		// Рекурсивно собираем подпункты. Их надписи тоже могут быть {Loc …},
+		// поэтому parseMenuItems возвращает ещё и ключи — по индексам.
+		subItems, subKeys := parseMenuItems(child)
+		text, key := locItemText(header)
+		top := mb.MenuCount()
+		mb.AddMenu(text, subItems...)
+		registerLocItem(key, func(s string) { mb.SetMenuText(top, s) })
+		for i, k := range subKeys {
+			i := i
+			registerLocItem(k, func(s string) { mb.SetSubItemText(top, i, s) })
+		}
 	}
 
 	return mb, nil
 }
 
 // parseMenuItems рекурсивно собирает MenuItem из дочерних <MenuItem>.
-func parseMenuItems(parent xElement) []MenuItem {
+// Второй результат — ключи перевода надписей (по индексам items): пункты меню
+// не являются виджетами, поэтому {Loc …} для них разворачивает вызывающий код.
+func parseMenuItems(parent xElement) ([]MenuItem, []string) {
 	var items []MenuItem
+	var keys []string // ключ перевода для каждого пункта («» — не локализуемый)
 	for _, sub := range parent.Children {
 		subTag := strings.ToLower(sub.Tag)
 		if subTag != "menuitem" && subTag != "item" {
@@ -789,13 +805,15 @@ func parseMenuItems(parent xElement) []MenuItem {
 		sep := strings.EqualFold(sub.attr("Separator"), "True")
 		if sep {
 			items = append(items, MenuItem{Separator: true})
+			keys = append(keys, "")
 			continue
 		}
 
-		text := sub.attr("Header", "Text", "Content")
-		if text == "" {
-			text = sub.Text
+		raw := sub.attr("Header", "Text", "Content")
+		if raw == "" {
+			raw = sub.Text
 		}
+		text, key := locItemText(raw)
 
 		disabled := strings.EqualFold(sub.attr("IsEnabled"), "False") ||
 			strings.EqualFold(sub.attr("Disabled"), "True")
@@ -805,14 +823,17 @@ func parseMenuItems(parent xElement) []MenuItem {
 			Disabled: disabled,
 		}
 
-		// Рекурсивные подменю (3+ уровень).
+		// Рекурсивные подменю (3+ уровень). Их надписи локализуются
+		// одноразово: путь до подпункта третьего уровня MenuBar менять не
+		// умеет, а в разметке проекта такие меню пока не встречаются.
 		if len(sub.Children) > 0 {
-			item.SubItems = parseMenuItems(sub)
+			item.SubItems, _ = parseMenuItems(sub)
 		}
 
 		items = append(items, item)
+		keys = append(keys, key)
 	}
-	return items
+	return items, keys
 }
 
 // ─── PopupMenu ──────────────────────────────────────────────────────────────
@@ -846,10 +867,13 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 			continue
 		}
 
-		text := child.attr("Header", "Text", "Content")
-		if text == "" {
-			text = child.Text
+		raw := child.attr("Header", "Text", "Content")
+		if raw == "" {
+			raw = child.Text
 		}
+		// Пункт контекстного меню — не виджет, поэтому {Loc …} разворачиваем
+		// здесь и запоминаем, как обновить надпись при смене языка.
+		text, locKey := locItemText(raw)
 
 		disabled := strings.EqualFold(child.attr("IsEnabled"), "False") ||
 			strings.EqualFold(child.attr("Disabled"), "True")
@@ -859,8 +883,10 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 			Disabled: disabled,
 		}
 		pm.mu.Lock()
+		idx := len(pm.items)
 		pm.items = append(pm.items, item)
 		pm.mu.Unlock()
+		registerLocItem(locKey, func(s string) { pm.SetItemText(idx, s) })
 	}
 
 	return pm, nil

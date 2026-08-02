@@ -88,6 +88,58 @@ func (mb *MenuBar) AddMenu(text string, items ...MenuItem) {
 	mb.recalcRects()
 }
 
+// MenuCount возвращает число пунктов верхнего уровня.
+func (mb *MenuBar) MenuCount() int {
+	mb.mu.RLock()
+	defer mb.mu.RUnlock()
+	return len(mb.items)
+}
+
+// Items возвращает копию пунктов меню (подпункты — как есть, без копирования
+// вложенных срезов: их состав после сборки меню не меняется).
+func (mb *MenuBar) Items() []MenuBarItem {
+	mb.mu.RLock()
+	defer mb.mu.RUnlock()
+	out := make([]MenuBarItem, len(mb.items))
+	copy(out, mb.items)
+	return out
+}
+
+// SetMenuText меняет надпись пункта верхнего уровня. Нужен, когда состав меню
+// уже собран, а текст должен поменяться на лету — например при смене языка
+// интерфейса (пункты меню хранятся строками, а не привязками).
+func (mb *MenuBar) SetMenuText(idx int, text string) {
+	mb.mu.Lock()
+	changed := false
+	if idx >= 0 && idx < len(mb.items) && mb.items[idx].Text != text {
+		mb.items[idx].Text = text
+		changed = true
+		mb.recalcRects() // ширина пункта зависит от надписи
+	}
+	mb.mu.Unlock()
+	if changed {
+		notifyUIChanged()
+	}
+}
+
+// SetSubItemText меняет надпись подпункта меню (top — индекс пункта верхнего
+// уровня, sub — индекс внутри его подменю).
+func (mb *MenuBar) SetSubItemText(top, sub int, text string) {
+	mb.mu.Lock()
+	changed := false
+	if top >= 0 && top < len(mb.items) {
+		items := mb.items[top].Items
+		if sub >= 0 && sub < len(items) && items[sub].Text != text {
+			items[sub].Text = text
+			changed = true
+		}
+	}
+	mb.mu.Unlock()
+	if changed {
+		notifyUIChanged()
+	}
+}
+
 // AddTopItem добавляет пункт без подменю (просто кнопка).
 func (mb *MenuBar) AddTopItem(text string, onClick func()) {
 	mb.mu.Lock()

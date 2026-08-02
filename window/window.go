@@ -216,11 +216,11 @@ type Window struct {
 	dockMgr  *widget.DockManager
 	dockHost *dockFloatHost
 
-	// ── Трей и уведомления (Windows) ─────────────────────────────────────────
+	// ── Трей и уведомления (Windows, Linux) ──────────────────────────────────
 	// Сеттеры трея вызываются до Run() (native ещё nil), поэтому желаемое
 	// состояние буферизуется и применяется в Run() после создания окна
 	// (applyPendingTray). На платформах без поддержки (native не trayHost) —
-	// тихий no-op. См. tray.go / tray_windows.go.
+	// тихий no-op. См. tray.go / tray_windows.go / tray_sni_linux.go.
 	trayIcon          image.Image
 	trayTooltip       string
 	trayIconWant      bool
@@ -228,6 +228,16 @@ type Window struct {
 	onTrayClick       func(button widget.MouseButton, doubleClick bool)
 	onBalloonClick    func()
 	trayDispatcherSet bool
+	// trayMenuNative — меню трея показывает САМА система (Linux, dbusmenu):
+	// наш widget.PopupMenu не открываем и в дерево виджетов не добавляем.
+	trayMenuNative bool
+
+	// ── Доступность (accessibility) ──────────────────────────────────────────
+	// a11y — платформенный мост (AT-SPI на Linux), поднимается в Run(), если
+	// система сообщает о включённой доступности. a11yForce — явное решение
+	// приложения (SetAccessibilityEnabled), важнее автоопределения.
+	a11y      a11yBridge
+	a11yForce *bool
 
 	// onFilesDropped — колбэк приложения для Drag&Drop файлов из ОС
 	// (см. SetOnFilesDropped). Координаты в колбэке — ЛОГИЧЕСКИЕ пиксели.
@@ -395,6 +405,11 @@ func (win *Window) Run() error {
 	// Применяем отложенное состояние трея/уведомлений (иконка, меню, колбэки),
 	// заданное до Run(). На платформах без поддержки — no-op.
 	win.applyPendingTray()
+
+	// Мост доступности (AT-SPI на Linux): поднимается, только если система
+	// сообщает о включённой доступности или приложение попросило явно.
+	win.startAccessibility()
+	defer win.stopAccessibility()
 
 	// Запускаем горутину чтения кадров из движка
 	go win.framePump()

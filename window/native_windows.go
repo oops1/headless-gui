@@ -977,6 +977,14 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	}
 
 	switch umsg {
+	case wmGetObject:
+		// Запрос клиента доступности (скринридер, Инспектор UIA): отдаём
+		// корневой провайдер UI Automation. Если мост не поднят, сообщение
+		// уходит дальше в DefWindowProc (см. a11y_windows.go).
+		if ret, ok := uiaHandleGetObject(hwnd, wparam, lparam); ok {
+			return ret
+		}
+
 	case wmApp:
 		// Маршалинг колбэка на UI-поток (см. InvokeOnUIThread).
 		uiCallMu.Lock()
