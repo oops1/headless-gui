@@ -45,6 +45,12 @@ type X11Window struct {
 	blitBuf []byte
 	blitMu  sync.Mutex
 
+	// shm — состояние MIT-SHM (см. x11shm.go): блит через разделяемую память
+	// вместо PutImage по сокету, с фолбэком на PutImage. nil до инициализации
+	// (x11ShmInit из Create/CreatePopup); shm.fallback — SHM недоступен/не
+	// вышел, PutImage навсегда.
+	shm *x11ShmState
+
 	// Раскладка клавиатуры: GetKeyboardMapping (core-протокол).
 	// keysyms — матрица keycode × symsPerCode; колонки 0-1 — группа 1,
 	// 2-3 — группа 2 (группа берётся из бит 13-14 поля state события).
@@ -208,6 +214,12 @@ func (w *X11Window) Create(title string, width, height int) error {
 	// Раскладка клавиатуры (до появления событий — reply читается напрямую).
 	w.x11LoadKeyboardMapping()
 
+	// MIT-SHM: пробуем активировать блит через разделяемую память ДО
+	// CreateWindow/MapWindow — событий на соединении ещё нет, reply читается
+	// напрямую (см. x11ShmInit в x11shm.go). Неудача — молчаливый fallback
+	// на PutImage.
+	w.x11ShmInit()
+
 	// Intern atoms для WM-протоколов
 	w.atomWMProtocols = w.x11InternAtom("WM_PROTOCOLS")
 	w.atomWMDeleteWindow = w.x11InternAtom("WM_DELETE_WINDOW")
@@ -316,6 +328,10 @@ func (w *X11Window) CreatePopup(width, height int) error {
 	w.gcID = w.x11GenID()
 	w.x11LoadKeyboardMapping()
 
+	// MIT-SHM: та же инициализация, что и в Create (см. комментарий там) —
+	// до CreateWindow, событий на соединении ещё нет.
+	w.x11ShmInit()
+
 	// Значения в порядке возрастания бит маски: BackPixel(0x02),
 	// OverrideRedirect(0x200), EventMask(0x800).
 	eventMask := uint32(
@@ -366,6 +382,14 @@ func (w *X11Window) RunEventLoop() error {
 // при перечитывании раскладки по MappingNotify), не терялись.
 func (w *X11Window) handleX11Event(buf []byte) {
 	evType := buf[0] & 0x7F
+	// ShmCompletion (MIT-SHM): сервер закончил читать сегмент из предыдущего
+	// ShmPutImage, память снова наша (см. x11shm.go). Проверяем ДО switch по
+	// core-кодам событий: firstEvent — динамический код за пределами core
+	// диапазона, а w.shm нередко nil (SHM не инициализировался/недоступен).
+	if w.shm != nil && !w.shm.fallback && evType == w.shm.firstEvent {
+		w.x11ShmCompletion()
+		return
+	}
 	// Окно заблокировано модалкой (SetEnabled(false)): дропаем ввод
 	// (KeyPress=2, KeyRelease=3, ButtonPress=4, ButtonRelease=5, MotionNotify=6),
 	// но НЕ Expose/ConfigureNotify/ClientMessage — окно должно перерисовываться
@@ -469,6 +493,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 			if newW != w.width || newH != w.height {
 				w.width = newW
 				w.height = newH
+				w.x11ShmResize(newW, newH)
 				if w.onResize != nil {
 					w.onResize(newW, newH)
 				}
@@ -556,6 +581,9 @@ func (w *X11Window) x11ReloadKeyboardMapping() {
 
 func (w *X11Window) Close() {
 	w.closed.Store(true)
+	// Освобождаем локальный маппинг SHM-сегмента (см. x11ShmClose): серверную
+	// половину X-сервер снимает сам при закрытии соединения.
+	w.x11ShmClose()
 	if w.conn != nil {
 		w.conn.Close()
 	}
@@ -573,6 +601,11 @@ func (w *X11Window) SetSize(width, height int) {
 	w.height = height
 	if w.wid != 0 {
 		w.x11ConfigureWindow(w.wid, width, height)
+		// Программный ресайз не проходит через ConfigureNotify-ветку (width/
+		// height уже записаны выше, и проверка «размер изменился» там не
+		// сработает), поэтому SHM-сегмент пересоздаём здесь сами — иначе блит
+		// тихо жил бы на PutImage-фолбэке до первого ресайза мышью.
+		w.x11ShmResize(width, height)
 	}
 }
 
@@ -689,6 +722,15 @@ func (w *X11Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 
 	w.blitMu.Lock()
 	defer w.blitMu.Unlock()
+
+	// MIT-SHM: если расширение активно и сервер уже подтвердил предыдущий
+	// кадр (ShmCompletion), шлём этот через разделяемую память — короткий
+	// ShmPutImage вместо копирования пикселей в тело запроса. Если SHM
+	// недоступен или занят предыдущим кадром — падаем на обычный PutImage
+	// за этот кадр, не блокируясь (см. x11ShmBlit в x11shm.go).
+	if w.x11ShmBlit(img, dirty) {
+		return
+	}
 
 	// X11 PutImage: формат ZPixmap, depth=24, BGRA order.
 	// Буфер содержит только dirty-область (строки шириной dw).
