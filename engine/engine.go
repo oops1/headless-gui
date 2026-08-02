@@ -592,6 +592,87 @@ func (e *Engine) AccessibilityTree() *widget.AccessNode {
 	return tree
 }
 
+// FocusAccessible передаёт фокус ввода виджету, найденному через семантическое
+// дерево (widget.AccessNode.Widget).
+//
+// Это половина «действующей» доступности: до сих пор скринридер мог только
+// читать снапшот, а перевести фокус на элемент — нет (AT-SPI GrabFocus и
+// UIA SetFocus возвращали false). Метод потокобезопасен: платформенные мосты
+// зовут его из своих горутин (D-Bus на Linux, COM-поток UIA на Windows), а вся
+// работа сводится к потокобезопасным SetFocus/InvalidateRect.
+//
+// Возвращает false, если виджет nil, не умеет принимать фокус (не реализует
+// widget.Focusable), скрыт или выключен — фокус в таких случаях не двигается.
+func (e *Engine) FocusAccessible(w widget.Widget) bool {
+	if !accessibleActionable(w) {
+		return false
+	}
+	if _, ok := w.(widget.Focusable); !ok {
+		return false
+	}
+	e.SetFocus(w)
+	return true
+}
+
+// ActivateAccessible «нажимает» виджет, найденный через семантическое дерево:
+// действие AT-SPI «click» / шаблон UIA Invoke.
+//
+// Реализовано СИНТЕТИЧЕСКИМ КЛИКОМ по центру виджета через штатный путь ввода
+// (SendMouseMove + press/release левой кнопкой), а не вызовом OnClick по типу
+// виджета. Так активация проходит настоящий hit-test, capture, закрытие
+// dropdown'ов вне пути и передачу фокуса — то есть работает одинаково для
+// кнопки, чекбокса, вкладки, пункта списка и любого стороннего кликабельного
+// виджета, и движку не нужен type-switch по всем известным типам.
+//
+// Осознанный компромисс: если центр виджета перекрыт другим виджетом (соседняя
+// панель поверх, открытый popup, частично прокрученный элемент списка), клик
+// достанется верхнему — hit-test честно вернёт того, кто нарисован сверху.
+// Точечная диспетчеризация «в обход дерева» решала бы этот случай, но ценой
+// расхождения с реальным вводом (не сработали бы capture, dismiss, фокус), что
+// куда хуже: скринридер должен видеть ровно то же поведение, что и мышь.
+//
+// Возвращает false, если виджет nil, скрыт, выключен или его границы пусты.
+func (e *Engine) ActivateAccessible(w widget.Widget) bool {
+	if !accessibleActionable(w) {
+		return false
+	}
+	b := w.Bounds()
+	if b.Empty() {
+		return false
+	}
+	// Центр — в ЛОГИЧЕСКИХ координатах (в них живут Bounds), а SendMouse*
+	// принимают ФИЗИЧЕСКИЕ и сами делят на Scale() внутри toLogical.
+	k := e.Scale()
+	if k <= 0 {
+		k = 1
+	}
+	cx := int(float64(b.Min.X+b.Dx()/2)*k + 0.5)
+	cy := int(float64(b.Min.Y+b.Dy()/2)*k + 0.5)
+
+	// Move перед кликом: виджеты, реагирующие на hover (кнопки подсвечиваются,
+	// ListView выделяет строку), должны увидеть курсор там же, где press.
+	e.SendMouseMove(cx, cy)
+	e.SendMouseButton(cx, cy, widget.MouseLeft, true)
+	e.SendMouseButton(cx, cy, widget.MouseLeft, false)
+	return true
+}
+
+// accessibleActionable — общая проверка для FocusAccessible/ActivateAccessible:
+// над скрытым или выключенным виджетом действия доступности не выполняются
+// (скринридер не должен уметь того, чего не может мышь).
+func accessibleActionable(w widget.Widget) bool {
+	if w == nil {
+		return false
+	}
+	if !widget.IsWidgetVisible(w) {
+		return false
+	}
+	if en, ok := w.(interface{ IsEnabled() bool }); ok && !en.IsEnabled() {
+		return false
+	}
+	return true
+}
+
 // ─── Modal ──────────────────────────────────────────────────────────────────
 
 // ShowModal показывает модальный виджет поверх всего UI.

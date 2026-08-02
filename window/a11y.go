@@ -31,6 +31,11 @@ type a11yNode struct {
 	Parent   int32 // -1 у корня
 	Children []int32
 	Index    int32 // порядковый номер среди детей родителя
+
+	// Widget — виджет узла (nil у синтетических узлов вроде приложения
+	// AT-SPI). Через него мост выполняет действия скринридера: GrabFocus и
+	// DoAction (см. accessibilityActor).
+	Widget widget.Widget
 }
 
 // a11ySnapshot — плоский снимок семантического дерева.
@@ -51,7 +56,7 @@ func a11yFlatten(root *widget.AccessNode) *a11ySnapshot {
 	var walk func(n *widget.AccessNode, parent, index int32) int32
 	walk = func(n *widget.AccessNode, parent, index int32) int32 {
 		id := int32(len(s.Nodes))
-		s.Nodes = append(s.Nodes, a11yNode{Info: n.AccessInfo, Parent: parent, Index: index})
+		s.Nodes = append(s.Nodes, a11yNode{Info: n.AccessInfo, Parent: parent, Index: index, Widget: n.Widget})
 		if a11yHasState(n.States, widget.StateFocused) {
 			s.Focus = id
 		}
@@ -321,4 +326,34 @@ func (win *Window) accessibilitySnapshot() *a11ySnapshot {
 		return &a11ySnapshot{Focus: -1}
 	}
 	return a11yFlatten(p.AccessibilityTree())
+}
+
+// accessibilityActor — опциональная возможность движка ВЫПОЛНЯТЬ действия
+// доступности: перевести фокус и нажать элемент (реализует *engine.Engine).
+// Отдельный узкий интерфейс рядом с accessibilityTreeProvider — по той же
+// причине: обязательный EngineAPI не должен разрастаться ради моста.
+type accessibilityActor interface {
+	FocusAccessible(w widget.Widget) bool
+	ActivateAccessible(w widget.Widget) bool
+}
+
+// accessibilityFocus просит движок сфокусировать виджет узла.
+// false — движок не умеет действий доступности или виджет их не принимает
+// (nil у синтетических узлов, скрытый/выключенный виджет).
+func (win *Window) accessibilityFocus(w widget.Widget) bool {
+	a, ok := win.eng.(accessibilityActor)
+	if !ok || w == nil {
+		return false
+	}
+	return a.FocusAccessible(w)
+}
+
+// accessibilityActivate просит движок «нажать» виджет узла (синтетический клик
+// по штатному пути ввода — см. engine.ActivateAccessible).
+func (win *Window) accessibilityActivate(w widget.Widget) bool {
+	a, ok := win.eng.(accessibilityActor)
+	if !ok || w == nil {
+		return false
+	}
+	return a.ActivateAccessible(w)
 }

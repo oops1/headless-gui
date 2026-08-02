@@ -836,6 +836,13 @@ func (b *atspiBridge) handleProps(msg *dbusMessage, v *a11yView, id int32, node 
 			case "MinimumIncrement":
 				return dbusVariant{Sig: "d", Val: step}, true
 			}
+		case ifaceAction:
+			// Свежий libatspi берёт число действий СВОЙСТВОМ NActions, а не
+			// методом GetNActions (без этой ветки get_n_actions() возвращал 0,
+			// хотя сами действия работали).
+			if name == "NActions" {
+				return dbusVariant{Sig: "i", Val: int32(1)}, true
+			}
 		}
 		return dbusVariant{}, false
 	}
@@ -992,9 +999,10 @@ func (b *atspiBridge) handleComponent(msg *dbusMessage, v *a11yView, id int32, n
 	case "GetAlpha":
 		return &dbusReply{Sig: "d", Body: []any{1.0}}
 	case "GrabFocus":
-		// Программная передача фокуса из скринридера пока не поддержана:
-		// у движка нет публичного «сфокусировать узел по семантическому id».
-		return &dbusReply{Sig: "b", Body: []any{false}}
+		// Скринридер переводит фокус ввода на элемент (Orca: перемещение по
+		// дереву с «follow focus»). node.Widget == nil у синтетического узла
+		// приложения — там фокусировать нечего, честно отвечаем false.
+		return &dbusReply{Sig: "b", Body: []any{b.win.accessibilityFocus(node.Widget)}}
 	case "ScrollTo", "ScrollToPoint", "SetExtents", "SetPosition", "SetSize":
 		return &dbusReply{Sig: "b", Body: []any{false}}
 	}
@@ -1037,11 +1045,27 @@ func (b *atspiBridge) handleAction(msg *dbusMessage, node *a11yNode) *dbusReply 
 	case "GetKeyBinding":
 		return &dbusReply{Sig: "s", Body: []any{""}}
 	case "DoAction":
-		// Нажатие из скринридера — отдельная задача (нужен путь «сфокусировать
-		// и активировать узел» в движке).
-		return &dbusReply{Sig: "b", Body: []any{false}}
+		// Единственное действие — 0 («click»); всё остальное вне диапазона.
+		// Активация идёт синтетическим кликом через штатный путь ввода
+		// (engine.ActivateAccessible), поэтому работает для любого
+		// кликабельного виджета без разбора типов.
+		if atspiActionIndex(msg) != 0 {
+			return &dbusReply{Sig: "b", Body: []any{false}}
+		}
+		return &dbusReply{Sig: "b", Body: []any{b.win.accessibilityActivate(node.Widget)}}
 	}
 	return nil
+}
+
+// atspiActionIndex достаёт номер действия из тела вызова Action (первый
+// аргумент типа i). Отсутствует или другого типа — считаем 0 («click»).
+func atspiActionIndex(msg *dbusMessage) int32 {
+	if len(msg.Body) > 0 {
+		if v, ok := msg.Body[0].(int32); ok {
+			return v
+		}
+	}
+	return 0
 }
 
 // ─── Вспомогательное ─────────────────────────────────────────────────────────
