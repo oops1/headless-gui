@@ -1,10 +1,16 @@
 // tray.go — публичный, платформенно-независимый API иконки в трее,
 // системных balloon-уведомлений и восстановления окна из трея.
 //
-// Реально поддерживается только на Windows (Shell_NotifyIcon). Бэкенд
-// реализует приватный интерфейс trayHost; на прочих платформах (X11/Wayland/
-// macOS/headless) окно его не реализует — методы становятся вежливыми no-op'ами
-// и возвращают ошибку/ничего. Компилируется на всех платформах.
+// Поддержаны Windows (Shell_NotifyIcon, tray_windows.go) и Linux — X11 и
+// Wayland (StatusNotifierItem по D-Bus, tray_sni_linux.go). Бэкенд реализует
+// приватный интерфейс trayHost; на прочих платформах (macOS/headless) окно его
+// не реализует — методы становятся вежливыми no-op'ами и возвращают
+// ошибку/ничего. Компилируется на всех платформах.
+//
+// Разница платформ, о которой знает этот файл: контекстное меню трея на
+// Windows рисуем МЫ (widget.PopupMenu у курсора), а на Linux его показывает
+// сама панель по протоколу com.canonical.dbusmenu. Бэкенд заявляет об этом
+// опциональным интерфейсом nativeTrayMenu.
 package window
 
 import (
@@ -15,7 +21,7 @@ import (
 )
 
 // errTrayUnsupported возвращается методами трея на платформах без поддержки.
-var errTrayUnsupported = errors.New("window: иконка в трее поддерживается только на Windows")
+var errTrayUnsupported = errors.New("window: иконка в трее поддерживается на Windows и Linux")
 
 // trayHost — приватная возможность бэкенда: иконка в области уведомлений,
 // balloon-уведомления и сворачивание/восстановление окна. Реализуется
@@ -42,6 +48,19 @@ type trayHost interface {
 	cursorScreenPos() (int, int)
 	// SetForeground выводит окно-носитель на передний план (класс. трей-трюк).
 	SetForeground()
+}
+
+// nativeTrayMenu — опциональная возможность бэкенда: контекстное меню трея
+// показывает САМА система, а не мы. Так устроен Linux (StatusNotifierItem
+// отдаёт дерево меню панели по com.canonical.dbusmenu, и позиции иконки мы
+// даже не знаем). Реализуется linuxTray (tray_sni_linux.go).
+//
+// setTrayMenuNative передаёт бэкенду актуальное меню (nil — убрать) и
+// возвращает true, если он взял показ на себя: тогда Window не добавляет
+// PopupMenu в дерево виджетов и не открывает его по правому клику.
+// Win32Window интерфейс НЕ реализует — путь Windows не меняется.
+type nativeTrayMenu interface {
+	setTrayMenuNative(menu *widget.PopupMenu) bool
 }
 
 // balloonHost — УЗКАЯ часть возможностей трея: только системные уведомления.
@@ -206,10 +225,13 @@ func (win *Window) SetOnTrayClick(fn func(button widget.MouseButton, doubleClick
 	}
 }
 
-// SetTrayMenu задаёт НАШЕ контекстное меню (widget.PopupMenu), показываемое по
-// правому клику на иконке трея. Меню рендерится в собственном окне-попапе у
-// курсора (благодаря хосту popup-оверлеев) — даже за пределами главного окна и
-// при скрытом окне. Передайте nil, чтобы убрать меню.
+// SetTrayMenu задаёт контекстное меню (widget.PopupMenu), показываемое по
+// правому клику на иконке трея. Передайте nil, чтобы убрать меню.
+//
+// Windows: меню рендерим МЫ в собственном окне-попапе у курсора (благодаря
+// хосту popup-оверлеев) — даже за пределами главного окна и при скрытом окне.
+// Linux: то же дерево пунктов отдаётся панели по com.canonical.dbusmenu, и
+// рисует его среда рабочего стола; наш попап при этом не показывается.
 func (win *Window) SetTrayMenu(menu *widget.PopupMenu) {
 	win.trayMenu = menu
 	if win.native == nil {
@@ -217,6 +239,7 @@ func (win *Window) SetTrayMenu(menu *widget.PopupMenu) {
 	}
 	if th, ok := win.native.(trayHost); ok {
 		win.ensureTrayDispatcher(th)
+		win.pushTrayMenuNative()
 		win.attachTrayMenu()
 	}
 }
@@ -313,6 +336,7 @@ func (win *Window) applyPendingTray() {
 	if win.trayIconWant || win.onTrayClick != nil || win.trayMenu != nil {
 		win.ensureTrayDispatcher(th)
 	}
+	win.pushTrayMenuNative()
 	win.attachTrayMenu()
 	if win.trayIconWant && win.trayIcon != nil {
 		_ = th.setTrayIcon(win.trayIcon, win.trayTooltip)
@@ -337,9 +361,22 @@ func (win *Window) dispatchTrayClick(button int, doubleClick bool) {
 	} else if doubleClick && button == 0 && win.trayIconWant {
 		win.RestoreFromTray()
 	}
-	if button == 1 && !doubleClick && win.trayMenu != nil {
+	// Правый клик открывает НАШЕ меню только там, где его не показывает
+	// система (Windows). На Linux панель уже нарисовала своё — см. nativeTrayMenu.
+	if button == 1 && !doubleClick && win.trayMenu != nil && !win.trayMenuNative {
 		win.showTrayMenu()
 	}
+}
+
+// pushTrayMenuNative отдаёт трей-меню бэкенду, если тот показывает меню сам
+// (Linux). Запоминает результат: пока trayMenuNative взведён, наш PopupMenu в
+// дерево виджетов не добавляется и по правому клику не открывается.
+func (win *Window) pushTrayMenuNative() {
+	nm, ok := win.native.(nativeTrayMenu)
+	if !ok {
+		return
+	}
+	win.trayMenuNative = nm.setTrayMenuNative(win.trayMenu)
 }
 
 // showTrayMenu показывает трей-меню у курсора. Экранные координаты курсора
@@ -366,8 +403,9 @@ func (win *Window) showTrayMenu() {
 
 // attachTrayMenu добавляет трей-меню в дерево корневого виджета носителя, чтобы
 // движок собирал его оверлей в sink (иначе popup-хост его не увидит).
+// Когда меню рисует система (Linux), добавлять его в дерево незачем.
 func (win *Window) attachTrayMenu() {
-	if win.trayMenu == nil || win.eng == nil {
+	if win.trayMenu == nil || win.eng == nil || win.trayMenuNative {
 		return
 	}
 	root := win.eng.Root()

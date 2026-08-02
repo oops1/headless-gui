@@ -83,23 +83,35 @@
       `RestoreFromTray`, дефолт «двойной левый клик восстанавливает окно».
       Live-превью окна в панели задач/Aero Peek: WM_PRINTCLIENT из кэша кадра
       (+ опциональный iconic-путь DWM за `HEADLESS_GUI_ICONIC_PREVIEW=1`).
-      На Linux/macOS/Wayland — no-op-заглушки. Трей на X11/macOS — позже.
-- [~] **Трей + уведомления на Linux/macOS** — `trayHost` (иконка, меню,
-      HideToTray) по-прежнему только у `Win32Window`; уведомления вынесены в
-      узкий `balloonHost` и на Linux уже работают.
+      Linux (X11 и Wayland) — сделано 2026-08-02, см. ниже. macOS — no-op.
+- [~] **Трей + уведомления на Linux/macOS** — на Windows и Linux работает
+      целиком; осталась macOS.
       1. [x] **Linux balloon** — сделано 2026-08-01, см. «Системные
          уведомления» выше. Свой D-Bus живёт в window/dbus*.go и переиспользован
          мостом доступности.
-      2. **Linux трей** (иконка+меню) — StatusNotifierItem по D-Bus +
-         `com.canonical.dbusmenu` (иконка — ARGB32-pixmap). Старый XEmbed-трей
-         устарел; **GNOME без расширения AppIndicator трей не показывает**.
-         Высокая цена + ненадёжно между DE — делать после balloon.
+      2. [x] **Linux трей** (иконка+меню) — сделано 2026-08-02
+         (window/tray_sni_linux.go): StatusNotifierItem по D-Bus + меню
+         `com.canonical.dbusmenu`, X11 и Wayland, zero deps. Отдельное
+         соединение с шиной; имя `org.kde.StatusNotifierItem-<pid>-<n>`,
+         объекты `/StatusNotifierItem` (свойства, Activate/SecondaryActivate,
+         сигналы NewIcon/NewTitle/NewToolTip/NewMenu/NewStatus) и `/MenuBar`
+         (GetLayout/GetGroupProperties/Event/AboutToShow + LayoutUpdated).
+         Иконка — ARGB32-pixmap с разворотом премультипликации (`sniARGB32`,
+         НЕ путать с BGRA-буфером Windows). Меню рисует САМА панель: бэкенд
+         заявляет `nativeTrayMenu`, и наш PopupMenu по правому клику не
+         открывается (Windows-путь не изменился). `HideToTray` на X11 —
+         UnmapWindow, `RestoreFromTray` — MapWindow + raise +
+         _NET_ACTIVE_WINDOW; на Wayland скрыть окно нечем — no-op.
+         Проверено: юнит-тесты (ARGB, дерево меню, Event→OnClick/OnSelect) и
+         сквозной тест на живой шине с фейковым Watcher'ом, плюс ручная
+         сверка с чужой реализацией (dbus-python) в WSL.
+         **GNOME без расширения AppIndicator трей не показывает** — свойство
+         среды: `SetTrayIcon` возвращает `errNoTrayWatcher`.
       3. **macOS трей+уведомления** — `NSStatusItem` + `UNUserNotification`
          через purego/Cocoa (purego 0.10.1 уже в go.mod). Средне, но нужен
          ЖИВОЙ Mac для проверки (Cocoa-бэкенд на железе не тестирован).
-      Публичный API уже кроссплатформенный — трогать только бэкенды
-      (window/native_linux.go, native_wayland.go, native_darwin.go + новый
-      window/dbus*.go). Дефолт «no-op на неподдержанном» сохранить.
+      Публичный API кроссплатформенный — трогать только бэкенды
+      (window/native_darwin.go). Дефолт «no-op на неподдержанном» сохранить.
 - [x] **Splitter** — сделано 2026-07-12: контейнер SplitPanel (доля 0..1,
       MinFirst/MinSecond, курсоры SizeWE/NS, drag через CaptureManager,
       двойной клик — коллапс/восстановление, гнездование, HasOwnLayout,

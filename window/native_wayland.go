@@ -151,6 +151,10 @@ type WaylandWindow struct {
 	// путь общий с X11, композитора не касается.
 	linuxNotifier
 
+	// linuxTray — иконка в системном трее по StatusNotifierItem
+	// (tray_sni_linux.go): тоже чистый D-Bus, композитора не касается.
+	linuxTray
+
 	conn *net.UnixConn
 
 	mu     sync.Mutex // сериализует запись в сокет и доступ к буферам

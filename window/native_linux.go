@@ -22,6 +22,11 @@ type X11Window struct {
 	// окно balloonHost'ом, и Window.ShowBalloon работает без иконки в трее.
 	linuxNotifier
 
+	// linuxTray — иконка в системном трее по StatusNotifierItem
+	// (tray_sni_linux.go). Вместе с методами hideToTray/restoreFromTray ниже
+	// делает окно trayHost'ом (tray.go).
+	linuxTray
+
 	conn      net.Conn
 	screen    x11Screen
 	rootWin   uint32
@@ -894,6 +899,16 @@ func (w *X11Window) x11CreateGC(gcid, drawable uint32) {
 func (w *X11Window) x11MapWindow(wid uint32) {
 	buf := make([]byte, 8)
 	buf[0] = 8 // MapWindow
+	binary.LittleEndian.PutUint16(buf[2:4], 2)
+	binary.LittleEndian.PutUint32(buf[4:8], wid)
+	w.x11Send(buf)
+}
+
+// x11UnmapWindow убирает окно с экрана (UnmapWindow). У EWMH-WM оно при этом
+// пропадает и из панели задач — полный аналог Win32 SW_HIDE, нужен HideToTray.
+func (w *X11Window) x11UnmapWindow(wid uint32) {
+	buf := make([]byte, 8)
+	buf[0] = 10 // UnmapWindow
 	binary.LittleEndian.PutUint16(buf[2:4], 2)
 	binary.LittleEndian.PutUint32(buf[4:8], wid)
 	w.x11Send(buf)
