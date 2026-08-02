@@ -220,8 +220,208 @@ func (a *webShowcase) wire() {
 	a.wireDialogs()
 	a.wireWindowOnly()
 	a.wireWebNote()
+	a.wireWindowPreview()
+	a.wireAnimations()
+	a.wireEditors()
+	a.wireLayoutTabs()
+	a.wireBindingTabs()
+
+	// Фокус — на поле логина, как и в оконной витрине.
+	if ti, ok := a.reg["txtLogin"].(*widget.TextInput); ok {
+		a.eng.SetFocus(ti)
+	}
 
 	a.addLog("Web showcase started: the server has no OS window")
+}
+
+// wireWindowPreview — живое превью оформления окна на вкладке 3.2.5:
+// НАСТОЯЩИЙ widget.Window внутри витрины, который перерисовывается вместе с
+// темой (скругление Win11/Mac, traffic-lights, градиент Win2000). В браузере
+// он особенно уместен: настоящего окна ОС на сервере нет, а chrome темы
+// показать нужно.
+func (a *webShowcase) wireWindowPreview() {
+	mount, ok := a.reg["winPreviewMount"].(*widget.Panel)
+	if !ok {
+		return
+	}
+	prev := &widget.Window{
+		Title:  "System properties",
+		Style:  widget.WindowStyleSingleBorder,
+		Resize: widget.ResizeModeCanResize,
+	}
+	mb := mount.Bounds()
+	prev.SetBounds(mb)
+	info := widget.NewLabel("Microsoft Windows · GuiEngine", widget.CurrentThemeStyle().BevelDark)
+	info.SetBounds(image.Rect(mb.Min.X+14, mb.Min.Y+44, mb.Max.X-14, mb.Min.Y+64))
+	prev.AddChild(info)
+	okBtn := widget.NewButton("OK")
+	okBtn.SetBounds(image.Rect(mb.Max.X-100, mb.Max.Y-40, mb.Max.X-12, mb.Max.Y-12))
+	prev.AddChild(okBtn)
+	mount.AddChild(prev)
+}
+
+// wireAnimations — вкладка «Анимации»: гонка кривых, полёт панели, плавный
+// прогресс. Часы анимаций живут в движке, поэтому в стриме всё работает так
+// же, как в окне.
+func (a *webShowcase) wireAnimations() {
+	animBars := []struct {
+		name  string
+		curve widget.Easing
+	}{
+		{"animBar0", widget.EaseLinear},
+		{"animBar1", widget.EaseOutQuad},
+		{"animBar2", widget.EaseOutCubic},
+		{"animBar3", widget.EaseInOutSine},
+		{"animBar4", widget.EaseOutBounce},
+		{"animBar5", widget.EaseOutElastic},
+	}
+	a.onClick("animRun", func() {
+		for _, def := range animBars {
+			pb, ok := a.reg[def.name].(*widget.ProgressBar)
+			if !ok {
+				continue
+			}
+			pb.SetValue(0)
+			curve := def.curve
+			widget.AnimateOwned(pb, "race", 900*time.Millisecond, curve,
+				func(t float64) { pb.SetValue(t) })
+		}
+	})
+	boxRight := false
+	a.onClick("animMove", func() {
+		box, ok := a.reg["animBox"]
+		if !ok {
+			return
+		}
+		cur := box.Bounds()
+		dx := 500
+		if boxRight {
+			dx = -500
+		}
+		boxRight = !boxRight
+		widget.AnimateRect(box, cur.Add(image.Pt(dx, 0)),
+			450*time.Millisecond, widget.EaseOutBack)
+	})
+	next := 0.9
+	a.onClick("animValue", func() {
+		pb, ok := a.reg["animValueBar"].(*widget.ProgressBar)
+		if !ok {
+			return
+		}
+		target := next
+		next = 1.3 - next // чередуем 0.9 ↔ 0.4
+		pb.AnimateValue(target)
+		if l := a.lbl("animValueLbl"); l != nil {
+			l.SetText(fmt.Sprintf("→ %d%%", int(target*100)))
+		}
+	})
+	if pb, ok := a.reg["animValueBar"].(*widget.ProgressBar); ok {
+		pb.SetValue(0.4)
+	}
+}
+
+// wireEditors — многострочные редакторы на вкладке «Диалоги».
+func (a *webShowcase) wireEditors() {
+	if tb, ok := a.reg["editBox"].(*widget.TextBox); ok {
+		const editDemo = "The multiline editor of the engine.\n\nWord wrapping, vertical scrolling with the wheel and PgUp/PgDn, selection with the mouse and Shift+arrows, Ctrl+arrows — by words, Ctrl+Home/End — document bounds, Ctrl+C/X/V and Ctrl+Z/Y.\n\nMixed content: English, Russian and digits 1234567890."
+		tb.SetText(widget.Tr(editDemo))
+		tb.OnChange = func(text string) {
+			if l := a.lbl("editStats"); l != nil {
+				l.SetText(widget.Trf("Characters: %d · lines (visual): %d",
+					len([]rune(text)), tb.LineCount()))
+			}
+		}
+	}
+	if ro, ok := a.reg["editBoxRO"].(*widget.TextBox); ok {
+		const roDemo = "This field is ReadOnly: the text can be selected and copied (Ctrl+C, context menu) but not edited.\n\nThe editor works headless too: input arrives through SendKeyEvent and layout is computed without a window."
+		ro.SetText(widget.Tr(roDemo))
+		a.langs = append(a.langs, func() { ro.SetText(widget.Tr(roDemo)) })
+	}
+}
+
+// wireLayoutTabs — вкладки «Компоновка» и «Докинг».
+func (a *webShowcase) wireLayoutTabs() {
+	if sp, ok := a.reg["splitOuter"].(*widget.SplitPanel); ok {
+		posLbl, _ := a.reg["splitPosLbl"].(*widget.Label)
+		sp.OnPositionChanged = func(pos float64) {
+			if posLbl != nil {
+				posLbl.SetText(fmt.Sprintf("Position: %.2f", pos))
+			}
+		}
+		a.onClick("splitCollapse", func() {
+			sp.ToggleCollapse()
+			a.addLog("SplitPanel: collapsed=%v", sp.IsCollapsed())
+		})
+	}
+
+	if dm, ok := a.reg["dockDemo"].(*widget.DockManager); ok {
+		var saved []byte
+		statusLbl, _ := a.reg["dockLayoutStatus"].(*widget.Label)
+		setStatus := func(key string, args ...any) {
+			if statusLbl != nil {
+				statusLbl.SetText(widget.Trf(key, args...))
+			}
+		}
+		a.onClick("dockSaveLayout", func() {
+			saved = dm.SaveLayout()
+			setStatus("Layout saved (%d bytes of JSON)", len(saved))
+			a.addLog("DockManager: layout saved (%d bytes)", len(saved))
+		})
+		a.onClick("dockRestoreLayout", func() {
+			if saved == nil {
+				setStatus("Save the layout first")
+				return
+			}
+			if err := dm.RestoreLayout(saved); err != nil {
+				setStatus("Restore failed: %s", err.Error())
+				return
+			}
+			setStatus("Layout restored")
+			a.addLog("DockManager: layout restored")
+		})
+	}
+}
+
+// wireBindingTabs — вкладки 3.2.4 (привязки/триггеры/команды) и 3.2.5
+// (NumericUpDown, валидация, CollectionView).
+func (a *webShowcase) wireBindingTabs() {
+	a.onClick("errBtn324", func() {
+		a.vm.SetStatus("ERROR") // DataTrigger покрасит статус в красный
+		a.addLog("3.2.4: status → ERROR (DataTrigger)")
+	})
+	a.onClick("addBtn324", func() {
+		a.vm.Items.Add(Order{"BUY", "NEWPAIR", 1.23})
+		a.addLog("3.2.4: row added (live ItemsControl)")
+	})
+	if b := a.btn("saveBtn324"); b != nil {
+		b.AddClickHandler(func() { a.addLog("3.2.4: Save command executed") })
+	}
+
+	a.onClick("save325", func() { a.addLog("3.2.5: Save (localised button)") })
+	if nud, ok := a.reg["qty325"].(*widget.NumericUpDown); ok {
+		nud.OnChange = func(v float64) { a.addLog("3.2.5: quantity = %.0f", v) }
+	}
+	if nud, ok := a.reg["price325"].(*widget.NumericUpDown); ok {
+		nud.OnChange = func(v float64) { a.addLog("3.2.5: price = %.2f", v) }
+	}
+	a.onClick("vfilter325", func() {
+		a.vm.People.SetFilter(func(it interface{}) bool { return it.(*Trader).Age >= 30 })
+		a.addLog("3.2.5: filter age ≥ 30 (%d visible)", a.vm.People.Count())
+	})
+	a.onClick("vsort325", func() {
+		a.vm.People.SetSort(widget.SortDescription{Property: "Name"})
+		a.addLog("3.2.5: sorted by name")
+	})
+	a.onClick("vreset325", func() {
+		a.vm.People.SetFilter(nil)
+		a.vm.People.ClearSort()
+		a.addLog("3.2.5: filter and sorting reset (%d)", a.vm.People.Count())
+	})
+	if ti, ok := a.reg["maxlen325"].(*widget.TextInput); ok {
+		ti.OnChange = func(s string) {
+			a.addLog("3.2.5: TextBox = %q (%d chars)", s, len([]rune(s)))
+		}
+	}
 }
 
 // wireHeader — смена темы и языка. И то и другое живёт на сервере, поэтому
@@ -324,6 +524,7 @@ func (a *webShowcase) wireControls() {
 	for id, name := range map[string]string{
 		"tsAutoRefresh": "Auto-update", "tsNotify": "Notifications",
 		"tsDarkMode": "Dark theme", "tsFullscreen": "Full screen",
+		"tsSmooth": "Smoothing", "tsAudio": "Audio",
 	} {
 		if ts, ok := a.reg[id].(*widget.ToggleSwitch); ok {
 			n := name
@@ -357,8 +558,57 @@ func (a *webShowcase) wireControls() {
 			}
 		}
 	}
+	// RadioButton — метод аутентификации и качество.
+	for id, name := range map[string]string{
+		"rbLDAP": "LDAP", "rbOTP": "OTP", "rbCert": "Certificate",
+		"rbHigh": "High", "rbMedium": "Medium", "rbLow": "Low",
+	} {
+		if rb, ok := a.reg[id].(*widget.RadioButton); ok {
+			n := name
+			rb.OnChange = func(selected bool) {
+				if selected {
+					a.addLog("RadioButton: %s", widget.Tr(n))
+				}
+			}
+		}
+	}
+	// Слайдеры внутренних вкладок «Звук».
+	if s := a.slider("sliderPlayback"); s != nil {
+		s.OnChange = func(v float64) { a.addLog("Playback: %.0f%%", v) }
+	}
+	if s := a.slider("sliderRecord"); s != nil {
+		s.OnChange = func(v float64) { a.addLog("Recording: %.0f%%", v) }
+	}
+	// Выпадающие списки формы.
+	if dd, ok := a.reg["ddRole"].(*widget.Dropdown); ok {
+		dd.OnChange = func(_ int, text string) { a.addLog("Role: %s", text) }
+	}
+	if dd, ok := a.reg["ddProtocol"].(*widget.Dropdown); ok {
+		dd.OnChange = func(_ int, text string) { a.addLog("Protocol: %s", text) }
+	}
+	// Контекстное меню (кнопки «Показать меню» / «Контекстное меню»).
+	if pm, ok := a.reg["ctxMenu"].(*widget.PopupMenu); ok {
+		pm.OnSelect = func(idx int, text string) {
+			a.addLog("PopupMenu: «%s» (idx=%d)", text, idx)
+		}
+		if b := a.btn("btnShowPopup"); b != nil {
+			b.OnClick = func() {
+				pm.ShowBelow(b)
+				a.addLog("PopupMenu opened (ShowBelow)")
+			}
+		}
+		if b := a.btn("btnShowPopup2"); b != nil {
+			b.OnClick = func() {
+				pm.ShowRight(b)
+				a.addLog("PopupMenu opened (ShowRight)")
+			}
+		}
+	}
 	if tc, ok := a.reg["mainTabs"].(*widget.TabControl); ok {
 		tc.OnTabChange = func(idx int, header string) { a.addLog("Tab: %s (%d)", header, idx) }
+	}
+	if tc, ok := a.reg["innerTabs"].(*widget.TabControl); ok {
+		tc.OnTabChange = func(_ int, header string) { a.addLog("Inner tab: %s", header) }
 	}
 }
 
@@ -508,6 +758,24 @@ func (a *webShowcase) tick() {
 		set("pbCPU", "lblCPU", 3.1)
 		set("pbRAM", "lblRAM", 5.7)
 		set("pbDisk", "lblDisk", 8.3)
+		// Ползущий прогресс и FPS в строке состояния — как в оконной витрине.
+		if pb, ok := a.reg["pbMain"].(*widget.ProgressBar); ok {
+			v := secs / 30
+			pb.SetValue(v - float64(int(v)))
+			if l := a.lbl("lblPbVal"); l != nil {
+				l.SetText(fmt.Sprintf("%.0f%%", (v-float64(int(v)))*100))
+			}
+		}
+		if l := a.lbl("lblFPS"); l != nil {
+			l.SetText("30 FPS") // частота кадров движка в стриме
+		}
+		// Вкладка «Текст и графика»: текущий HiDPI-масштаб.
+		if l := a.lbl("lblScale"); l != nil {
+			pw, ph := a.eng.PhysicalSize()
+			lw, lh := a.eng.CanvasSize()
+			l.SetText(fmt.Sprintf("Scale: %.0f%%  ·  logical %d×%d → physical %d×%d",
+				a.eng.Scale()*100, lw, lh, pw, ph))
+		}
 	}
 }
 
