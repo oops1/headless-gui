@@ -305,8 +305,9 @@ func (c *Canvas) layoutChild(idx int) {
 }
 
 // shiftDescendants рекурсивно сдвигает bounds всех потомков виджета на (dx, dy).
-// Для виджетов с собственным layout (Canvas, Grid, DockPanel, TabControl, StackPanel)
-// вызов SetBounds уже перестраивает дочерние позиции, поэтому рекурсия не нужна.
+// Для виджетов с собственным layout (Canvas, Grid, DockPanel, TabControl,
+// StackPanel, VirtualizingItemsControl) вызов SetBounds уже перестраивает
+// дочерние позиции, поэтому рекурсия не нужна.
 func shiftDescendants(w Widget, dx, dy int) {
 	delta := image.Pt(dx, dy)
 	for _, child := range w.Children() {
@@ -319,9 +320,16 @@ func shiftDescendants(w Widget, dx, dy int) {
 
 // HasOwnLayout возвращает true для контейнеров, которые сами пересчитывают
 // позиции дочерних виджетов при вызове SetBounds (через layout / layoutContent).
+//
+// VirtualizingItemsControl тоже здесь: его SetBounds вызывает updateVisible,
+// который заново раскладывает материализованные строки от новых bounds. Без
+// регистрации Canvas/TabControl/DockPane догоняли уже переложенные строки
+// вызовом shiftDescendants и задваивали смещение родителя — при первом показе
+// вкладки список рисовался сдвинутым, а ближайшая перерисовка окна (скролл)
+// «чинила» его следующим updateVisible.
 func HasOwnLayout(w Widget) bool {
 	switch w.(type) {
-	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager:
+	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager, *VirtualizingItemsControl:
 		return true
 	}
 	return false

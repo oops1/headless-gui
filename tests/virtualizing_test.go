@@ -101,3 +101,86 @@ func TestVirtualizing_BindCollectionView(t *testing.T) {
 		t.Fatalf("after filter count = %d, want 2", v.ItemCount())
 	}
 }
+
+// TestVirtualizing_RowsNotDoubleShiftedInsideCanvas воспроизводит баг «первый
+// показ рисует строки со сдвигом»: Canvas.layoutChild после child.SetBounds
+// доводил потомков контейнеров БЕЗ собственной раскладки через
+// shiftDescendants. VirtualizingItemsControl свою раскладку имеет
+// (SetBounds → updateVisible позиционирует строки заново), но не был
+// зарегистрирован в HasOwnLayout — и материализованные строки получали
+// смещение Canvas ВТОРОЙ раз.
+//
+// Сцена повторяет вкладку «3.2.5» витрины: контент-канва вкладки смещена
+// вправо на ширину сайдбара (220px) и вниз под шапку, список лежит внутри неё.
+func TestVirtualizing_RowsNotDoubleShiftedInsideCanvas(t *testing.T) {
+	const (
+		itemH   = 26
+		listW   = 470
+		listH   = 300
+		leftOff = 556 // Canvas.Left списка внутри канвы вкладки
+		topOff  = 112 // Canvas.Top  списка внутри канвы вкладки
+		canvasX = 220 // ширина сайдбара — смещение канвы вкладки
+		canvasY = 80
+	)
+
+	v := widget.NewVirtualizingItemsControl()
+	v.ItemHeight = itemH
+	v.Buffer = 0
+	// Строка шаблона — контейнер (как StackPanel в DataTemplate витрины):
+	// важно проверить и её собственные bounds, и координаты её детей.
+	v.SetItemBuilder(func(item interface{}, index int) widget.Widget {
+		row := widget.NewStackPanel(widget.OrientationHorizontal)
+		row.AddChild(widget.NewLabel(item.(string), color.RGBA{255, 255, 255, 255}))
+		return row
+	})
+	v.SetItems(makeItems(1000))
+
+	cv := widget.NewCanvas()
+	cv.AddChildAt(v, widget.CanvasAttached{Left: leftOff, Top: topOff, Right: -1, Bottom: -1},
+		listW, listH)
+	// Первая раскладка канвы — тот самый «первый показ вкладки».
+	cv.SetBounds(image.Rect(canvasX, canvasY, canvasX+1060, canvasY+770))
+
+	wantList := image.Rect(canvasX+leftOff, canvasY+topOff,
+		canvasX+leftOff+listW, canvasY+topOff+listH)
+	if got := v.Bounds(); got != wantList {
+		t.Fatalf("bounds списка = %v, want %v", got, wantList)
+	}
+
+	rows := v.Children()
+	if len(rows) == 0 {
+		t.Fatal("строки не материализованы")
+	}
+	for i, row := range rows {
+		rb := row.Bounds()
+		if rb.Min.X != wantList.Min.X {
+			t.Fatalf("строка %d: Min.X = %d, want %d (сдвиг родителя применён дважды)",
+				i, rb.Min.X, wantList.Min.X)
+		}
+		wantY := wantList.Min.Y + i*itemH
+		if rb.Min.Y != wantY {
+			t.Fatalf("строка %d: Min.Y = %d, want %d", i, rb.Min.Y, wantY)
+		}
+		for j, ch := range row.Children() {
+			cb := ch.Bounds()
+			if cb.Min.X < wantList.Min.X || cb.Min.X >= wantList.Max.X {
+				t.Fatalf("строка %d, потомок %d: Min.X = %d вне списка %v",
+					i, j, cb.Min.X, wantList)
+			}
+		}
+	}
+
+	// Повторная раскладка (скролл/hover в витрине «чинили» картинку) не должна
+	// ничего менять — позиции уже верные и стабильны.
+	before := make([]image.Rectangle, len(rows))
+	for i, row := range rows {
+		before[i] = row.Bounds()
+	}
+	cv.SetBounds(image.Rect(canvasX, canvasY, canvasX+1060, canvasY+770))
+	for i, row := range v.Children() {
+		if i < len(before) && row.Bounds() != before[i] {
+			t.Fatalf("строка %d уехала при повторной раскладке: %v → %v",
+				i, before[i], row.Bounds())
+		}
+	}
+}
