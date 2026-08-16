@@ -147,18 +147,27 @@ func NewPasswordInput(placeholder string) *TextInput {
 	return ti
 }
 
-// SetPasswordMode включает/выключает режим пароля.
+// SetPasswordMode включает/выключает режим пароля; при включении стирает undo.
 func (t *TextInput) SetPasswordMode(v bool) {
 	t.mu.Lock()
 	changed := t.isPassword != v || (!v && t.showPassword)
 	t.isPassword = v
-	if !v {
+	if v {
+		t.wipeHistory()
+	} else {
 		t.showPassword = false
 	}
 	t.mu.Unlock()
 	if changed {
 		t.Invalidate()
 	}
+}
+
+// wipeHistory затирает и отпускает стеки undo/redo. Вызывать под t.mu.
+func (t *TextInput) wipeHistory() {
+	clear(t.undoStack)
+	clear(t.redoStack)
+	t.undoStack, t.redoStack = nil, nil
 }
 
 // IsPasswordMode возвращает true, если поле в режиме пароля.
@@ -196,11 +205,9 @@ func (t *TextInput) SetText(text string) {
 	changed := string(t.runes) != text || t.caretPos != len(runes) ||
 		t.selStart != -1 || t.scrollX != 0
 	if t.isPassword {
-		// Прежний пароль затираем в памяти, а не просто отпускаем ссылку:
-		// строка живёт в бэкинг-массиве до реаллокации, и SetText("") — это
-		// именно тот момент, когда приложение ждёт, что пароля больше нет.
+		// Прежний пароль затираем в памяти, а не отпускаем.
 		clear(t.runes)
-		t.undoStack, t.redoStack = nil, nil
+		t.wipeHistory()
 	}
 	t.runes = runes
 	t.caretPos = len(runes)

@@ -91,8 +91,8 @@ func (d *Document) Rasterize(w, h int, current color.RGBA, tint bool) *image.RGB
 		return float32(p.X*s + tx), float32(p.Y*s + ty)
 	}
 
-	// Переиспользуемые буферы.
-	acc := make([]float64, w*h) // для even-odd
+	// Буферы even-odd создаются лениво: обычным иконкам они не нужны.
+	var eo *evenOddBuf
 	for i := range d.Shapes {
 		sh := &d.Shapes[i]
 
@@ -105,7 +105,10 @@ func (d *Document) Rasterize(w, h int, current color.RGBA, tint bool) *image.RGB
 			if col.A > 0 {
 				var mask *image.Alpha
 				if sh.EvenOdd {
-					mask = rasterEvenOdd(w, h, sh.Paths, mapPt, acc)
+					if eo == nil {
+						eo = newEvenOddBuf(w, h)
+					}
+					mask = eo.raster(sh.Paths, mapPt)
 				} else {
 					mask = rasterNonzero(w, h, sh.Paths, mapPt)
 				}
@@ -152,48 +155,62 @@ func rasterNonzero(w, h int, contours []Contour, mapPt func(Point) (float32, flo
 	return m
 }
 
-// rasterEvenOdd растеризует контуры правилом чётности. Каждый контур
-// растеризуется отдельно (ненулевым правилом), затем покрытия складываются
-// XOR-формулой acc = acc + a - 2*acc*a — корректное AA-объединение для
-// непересекающихся по одному пикселю рёбер (типичный случай иконок-колец).
-func rasterEvenOdd(w, h int, contours []Contour, mapPt func(Point) (float32, float32), acc []float64) *image.Alpha {
-	for i := range acc {
-		acc[i] = 0
+// evenOddBuf — переиспользуемые буферы растеризации по правилу чётности.
+type evenOddBuf struct {
+	acc []float64
+	tmp *image.Alpha // покрытие одного контура
+	out *image.Alpha
+	z   vector.Rasterizer
+}
+
+func newEvenOddBuf(w, h int) *evenOddBuf {
+	return &evenOddBuf{
+		acc: make([]float64, w*h),
+		tmp: image.NewAlpha(image.Rect(0, 0, w, h)),
+		out: image.NewAlpha(image.Rect(0, 0, w, h)),
 	}
+}
+
+// raster растеризует контуры правилом чётности: покрытия складываются
+// XOR-формулой acc + a - 2*acc*a.
+// Результат живёт до следующего вызова.
+func (b *evenOddBuf) raster(contours []Contour, mapPt func(Point) (float32, float32)) *image.Alpha {
+	clear(b.acc)
+	size := b.tmp.Bounds().Size()
 	for _, c := range contours {
 		if len(c.Points) < 2 {
 			continue
 		}
-		z := vector.NewRasterizer(w, h)
+		clear(b.tmp.Pix)
+		b.z.Reset(size.X, size.Y)
 		x, y := mapPt(c.Points[0])
-		z.MoveTo(x, y)
+		b.z.MoveTo(x, y)
 		for _, p := range c.Points[1:] {
 			px, py := mapPt(p)
-			z.LineTo(px, py)
+			b.z.LineTo(px, py)
 		}
-		z.ClosePath()
-		m := image.NewAlpha(image.Rect(0, 0, w, h))
-		z.Draw(m, m.Bounds(), image.Opaque, image.Point{})
-		for idx, mv := range m.Pix {
+		b.z.ClosePath()
+		b.z.Draw(b.tmp, b.tmp.Bounds(), image.Opaque, image.Point{})
+		for idx, mv := range b.tmp.Pix {
 			if mv == 0 {
 				continue
 			}
 			a := float64(mv) / 255
-			acc[idx] = acc[idx] + a - 2*acc[idx]*a
+			b.acc[idx] = b.acc[idx] + a - 2*b.acc[idx]*a
 		}
 	}
-	out := image.NewAlpha(image.Rect(0, 0, w, h))
-	for i, v := range acc {
+	clear(b.out.Pix)
+	for i, v := range b.acc {
 		if v <= 0 {
 			continue
 		}
 		if v >= 1 {
-			out.Pix[i] = 255
+			b.out.Pix[i] = 255
 			continue
 		}
-		out.Pix[i] = uint8(v*255 + 0.5)
+		b.out.Pix[i] = uint8(v*255 + 0.5)
 	}
-	return out
+	return b.out
 }
 
 // rasterStroke растеризует обводку контуров толщиной sw (пиксели), рисуя

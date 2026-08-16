@@ -1,6 +1,7 @@
 package svg
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"image/color"
@@ -81,11 +82,14 @@ func (n xnode) attr(name string) (string, bool) {
 	return "", false
 }
 
-// Parse разбирает SVG-данные в Document. Возвращает ошибку только при
-// некорректном XML; неизвестные элементы/атрибуты молча игнорируются.
+// Parse разбирает SVG-данные в Document (лимиты MaxFileBytes и MaxDepth).
+// Неизвестные элементы и атрибуты игнорируются.
 func Parse(data []byte) (*Document, error) {
-	var root xnode
-	if err := xml.Unmarshal(data, &root); err != nil {
+	if len(data) > MaxFileBytes {
+		return nil, fmt.Errorf("svg: данные слишком велики (%d байт > %d)", len(data), MaxFileBytes)
+	}
+	root, err := decodeTree(data)
+	if err != nil {
 		return nil, err
 	}
 
@@ -99,7 +103,7 @@ func Parse(data []byte) (*Document, error) {
 		vbSet = applyViewBox(doc, root)
 	}
 
-	walk(root, st, doc)
+	walk(root, st, doc, 0)
 
 	if !vbSet {
 		// Нет viewBox/размеров — вычислим по границам содержимого.
@@ -108,10 +112,69 @@ func Parse(data []byte) (*Document, error) {
 	return doc, nil
 }
 
-// MaxFileBytes — предельный размер SVG-файла для ParseFile (SEC-9): путь к
-// иконке приходит из XAML-разметки, и «иконка» на гигабайты не должна целиком
-// подниматься в память. Реальные иконки — единицы–сотни килобайт.
+// MaxFileBytes — предельный размер SVG-данных (файла и Parse/SetSVG).
 const MaxFileBytes = 16 << 20
+
+// MaxDepth — предельная вложенность элементов SVG.
+const MaxDepth = 256
+
+// decodeTree строит дерево потоковым декодером, без рекурсии.
+func decodeTree(data []byte) (xnode, error) {
+	var root xnode
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	stack := make([]*xnode, 0, 32)
+	rootDone := false
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return root, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if len(stack) >= MaxDepth {
+				return root, fmt.Errorf("svg: вложенность больше %d", MaxDepth)
+			}
+			if len(stack) == 0 {
+				if rootDone {
+					// Второй корневой элемент — как у xml.Unmarshal, игнорируем.
+					if err := dec.Skip(); err != nil {
+						return root, err
+					}
+					continue
+				}
+				root = xnode{XMLName: t.Name, Attrs: copyAttrs(t.Attr)}
+				stack = append(stack, &root)
+				continue
+			}
+			p := stack[len(stack)-1]
+			p.Nodes = append(p.Nodes, xnode{XMLName: t.Name, Attrs: copyAttrs(t.Attr)})
+			stack = append(stack, &p.Nodes[len(p.Nodes)-1])
+		case xml.EndElement:
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+				if len(stack) == 0 {
+					rootDone = true
+				}
+			}
+		}
+	}
+	if !rootDone && len(stack) == 0 {
+		return root, io.EOF // корневого элемента нет — как у xml.Unmarshal
+	}
+	return root, nil
+}
+
+func copyAttrs(a []xml.Attr) []xml.Attr {
+	if len(a) == 0 {
+		return nil
+	}
+	out := make([]xml.Attr, len(a))
+	copy(out, a)
+	return out
+}
 
 // ParseFile читает и разбирает SVG-файл. Файл больше MaxFileBytes — ошибка.
 func ParseFile(path string) (*Document, error) {
@@ -159,7 +222,11 @@ func applyViewBox(doc *Document, el xnode) bool {
 }
 
 // walk рекурсивно обходит дерево, накапливая состояние и собирая фигуры.
-func walk(n xnode, parent inherited, doc *Document) {
+// depth ограничена MaxDepth — страховка от глубокого дерева.
+func walk(n xnode, parent inherited, doc *Document, depth int) {
+	if depth >= MaxDepth {
+		return
+	}
 	st := resolveState(n, parent)
 	tag := strings.ToLower(n.XMLName.Local)
 
@@ -214,7 +281,7 @@ func walk(n xnode, parent inherited, doc *Document) {
 	}
 
 	for _, c := range n.Nodes {
-		walk(c, st, doc)
+		walk(c, st, doc, depth+1)
 	}
 }
 

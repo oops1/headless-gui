@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -58,6 +59,69 @@ type FileDialogOptions struct {
 	Filters     []FileFilter // фильтры расширений (пустой → «Все файлы»)
 	ShowHidden  bool         // показывать скрытые (имена с точкой)
 	Places      []FilePlace  // дополнительные места в боковой панели
+	// AllowedRoots — разрешённые каталоги (пустой → глобальный дефолт).
+	AllowedRoots []string
+}
+
+var (
+	allowedRootsMu      sync.Mutex
+	defaultAllowedRoots []string
+)
+
+// SetDefaultAllowedRoots задаёт корни новых диалогов (без аргументов — снять).
+func SetDefaultAllowedRoots(paths ...string) {
+	roots := normRoots(paths)
+	allowedRootsMu.Lock()
+	defaultAllowedRoots = roots
+	allowedRootsMu.Unlock()
+}
+
+// DefaultAllowedRoots возвращает корни по умолчанию.
+func DefaultAllowedRoots() []string {
+	allowedRootsMu.Lock()
+	defer allowedRootsMu.Unlock()
+	return append([]string(nil), defaultAllowedRoots...)
+}
+
+// normRoots приводит корни к абсолютному чистому виду, пустые отбрасывает.
+func normRoots(paths []string) []string {
+	var out []string
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		out = append(out, filepath.Clean(p))
+	}
+	return out
+}
+
+// withinRoot — p внутри root или совпадает с ним.
+func withinRoot(root, p string) bool {
+	if runtime.GOOS == "windows" {
+		root, p = strings.ToLower(root), strings.ToLower(p)
+	}
+	rel, err := filepath.Rel(root, p)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// withinRoots — p внутри хотя бы одного корня; без корней разрешено всё.
+func withinRoots(roots []string, p string) bool {
+	if len(roots) == 0 {
+		return true
+	}
+	for _, r := range roots {
+		if withinRoot(r, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // fileEntry — элемент каталога.
@@ -83,7 +147,8 @@ type FileDialog struct {
 
 	cur     string // текущий каталог
 	entries []fileEntry
-	filter  int // индекс активного фильтра
+	filter  int      // индекс активного фильтра
+	roots   []string // разрешённые корни (пустой — вся ФС)
 
 	crumb   *crumbBar
 	places  *placeList // nil в компактном Save
@@ -126,6 +191,10 @@ func (mb *MessageBox) showFileDialog(opts FileDialogOptions, onResult func(path 
 	if len(opts.Filters) == 0 {
 		opts.Filters = []FileFilter{{Label: "*", Exts: nil}}
 	}
+	roots := normRoots(opts.AllowedRoots)
+	if len(roots) == 0 {
+		roots = DefaultAllowedRoots()
+	}
 	start := opts.StartDir
 	if start == "" {
 		start, _ = os.UserHomeDir()
@@ -134,7 +203,7 @@ func (mb *MessageBox) showFileDialog(opts FileDialogOptions, onResult func(path 
 		start = "."
 	}
 
-	fd := &FileDialog{eng: mb.eng, opts: opts, onResult: onResult}
+	fd := &FileDialog{eng: mb.eng, opts: opts, onResult: onResult, roots: roots}
 	if opts.Mode == FileSave {
 		fd.buildSaveCompact(mb, title)
 	} else {
@@ -180,7 +249,7 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 	dlg.AddChild(refBtn)
 
 	// ── Панель мест ──────────────────────────────────────────────────────
-	fd.places = newPlaceList(buildPlaces(fd.opts.Places))
+	fd.places = newPlaceList(buildPlaces(fd.opts.Places, fd.roots))
 	fd.places.SetBounds(image.Rect(padX, panelY, padX+140, panelY+panelH))
 	fd.places.OnNavigate = fd.navigate
 	dlg.AddChild(fd.places)
@@ -340,11 +409,20 @@ func (fd *FileDialog) addBottomButtons(mb *MessageBox, dlg *Dialog, dlgW, dlgH i
 }
 
 // buildPlaces собирает панель мест: пользовательские, домашняя,
-// стандартные подпапки и корни дисков.
-func buildPlaces(extra []FilePlace) []placeItem {
+// стандартные подпапки и корни дисков. При заданных roots — только они.
+func buildPlaces(extra []FilePlace, roots []string) []placeItem {
 	var items []placeItem
 	for _, p := range extra {
+		if !withinRoots(roots, p.Path) {
+			continue
+		}
 		items = append(items, placeItem{label: p.Label, path: p.Path})
+	}
+	if len(roots) > 0 {
+		for _, r := range roots {
+			items = append(items, placeItem{label: rootLabel(r), path: r})
+		}
+		return items
 	}
 	home, _ := os.UserHomeDir()
 	if home != "" {
@@ -370,10 +448,26 @@ func buildPlaces(extra []FilePlace) []placeItem {
 	return items
 }
 
+// rootLabel — короткая подпись корня для панели мест.
+func rootLabel(root string) string {
+	if b := filepath.Base(root); b != "" && b != "." && b != string(filepath.Separator) {
+		return b
+	}
+	return root
+}
+
 // navigate переходит в каталог dir и перечитывает содержимое.
+// Путь за пределами разрешённых корней отклоняется.
 func (fd *FileDialog) navigate(dir string) {
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
+	}
+	dir = filepath.Clean(dir)
+	if !withinRoots(fd.roots, dir) {
+		if fd.cur != "" {
+			return // остаёмся где были
+		}
+		dir = fd.roots[0] // старт вне корней — первый корень
 	}
 	fd.cur = dir
 	fd.reload()
@@ -503,6 +597,9 @@ func (fd *FileDialog) confirm() {
 }
 
 func (fd *FileDialog) finish(path string) {
+	if !withinRoots(fd.roots, path) {
+		return // ручной ввод за пределами корней
+	}
 	fd.eng.CloseModal(fd.dlg)
 	if fd.onResult != nil {
 		fd.onResult(path, true)
@@ -516,6 +613,40 @@ func (fd *FileDialog) Dialog() *Dialog { return fd.dlg }
 
 // CurrentDir возвращает текущий каталог браузера.
 func (fd *FileDialog) CurrentDir() string { return fd.cur }
+
+// SetAllowedRoots ограничивает навигацию, «Места» и выбор этими каталогами.
+func (fd *FileDialog) SetAllowedRoots(paths ...string) {
+	fd.roots = normRoots(paths)
+	if fd.places != nil {
+		fd.places.mu.Lock()
+		fd.places.items = buildPlaces(fd.opts.Places, fd.roots)
+		fd.places.mu.Unlock()
+		fd.places.Invalidate()
+	}
+	if len(fd.roots) > 0 && !withinRoots(fd.roots, fd.cur) {
+		fd.cur = ""
+		fd.navigate(fd.roots[0])
+	}
+}
+
+// AllowedRoots возвращает разрешённые корни (nil — ограничения нет).
+func (fd *FileDialog) AllowedRoots() []string {
+	return append([]string(nil), fd.roots...)
+}
+
+// PlacePaths возвращает пути боковой панели «Места» (для автоматизации).
+func (fd *FileDialog) PlacePaths() []string {
+	if fd.places == nil {
+		return nil
+	}
+	fd.places.mu.Lock()
+	defer fd.places.mu.Unlock()
+	out := make([]string, len(fd.places.items))
+	for i, it := range fd.places.items {
+		out[i] = it.path
+	}
+	return out
+}
 
 // VisibleNames возвращает имена текущего списка (папки как «[имя]»).
 // В компактном Save возвращает nil.

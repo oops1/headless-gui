@@ -46,7 +46,7 @@ func NewSVGIconFromData(data []byte) *SVGIcon {
 	return ic
 }
 
-// SetSVG загружает иконку из SVG-данных. Возвращает ошибку разбора XML.
+// SetSVG загружает иконку из SVG-данных (лимиты svg.MaxFileBytes и svg.MaxDepth).
 func (w *SVGIcon) SetSVG(data []byte) error {
 	doc, err := svg.Parse(data)
 	w.mu.Lock()
