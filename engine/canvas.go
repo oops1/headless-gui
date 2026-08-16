@@ -134,12 +134,20 @@ func newCanvas(w, h int, fc *FontCache) *Canvas {
 
 // newCanvasScaled создаёт холст логического размера (w, h) с HiDPI-масштабом
 // scale: буферы аллоцируются в физических пикселях (w×scale, h×scale).
+//
+// Размеры валидируются здесь же (SEC-10, вторая линия обороны после
+// clampCanvasSize в New/SetResolution): отрицательные и нулевые стороны
+// давали пустые буферы и tilesX/tilesY ≤ 0 — всю дальнейшую тайловую
+// арифметику это превращало в мусор, а масштаб мог раздуть физический
+// размер сверх любых границ.
 func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 	if scale <= 0 {
 		scale = 1
 	}
+	w, h = clampCanvasSize(w, h)
 	pw := int(math.Round(float64(w) * scale))
 	ph := int(math.Round(float64(h) * scale))
+	pw, ph = clampCanvasSize(pw, ph) // масштаб мог вывести за предел
 	ts := output.TileSize
 	return &Canvas{
 		front:      image.NewRGBA(image.Rect(0, 0, pw, ph)),

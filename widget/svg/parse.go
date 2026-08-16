@@ -2,7 +2,9 @@ package svg
 
 import (
 	"encoding/xml"
+	"fmt"
 	"image/color"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -106,11 +108,27 @@ func Parse(data []byte) (*Document, error) {
 	return doc, nil
 }
 
-// ParseFile читает и разбирает SVG-файл.
+// MaxFileBytes — предельный размер SVG-файла для ParseFile (SEC-9): путь к
+// иконке приходит из XAML-разметки, и «иконка» на гигабайты не должна целиком
+// подниматься в память. Реальные иконки — единицы–сотни килобайт.
+const MaxFileBytes = 16 << 20
+
+// ParseFile читает и разбирает SVG-файл. Файл больше MaxFileBytes — ошибка.
 func ParseFile(path string) (*Document, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
+	}
+	defer f.Close()
+	if st, err := f.Stat(); err == nil && st.Size() > MaxFileBytes {
+		return nil, fmt.Errorf("svg: %s: файл слишком большой (%d байт > %d)", path, st.Size(), MaxFileBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > MaxFileBytes {
+		return nil, fmt.Errorf("svg: %s: файл слишком большой (> %d байт)", path, MaxFileBytes)
 	}
 	return Parse(data)
 }

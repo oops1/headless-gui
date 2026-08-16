@@ -5,6 +5,7 @@ import (
 	"image"
 	_ "image/jpeg" // декодер JPEG для SetBackgroundFile
 	"image/png"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -92,6 +93,7 @@ type Engine struct {
 	notifierHandle uint64
 
 	frameSeq atomic.Uint64
+	started  atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
 	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
 
 	// Прежняя позиция курсора для адресного broadcastMouseMove. Доступ только
@@ -132,14 +134,85 @@ type saveJob struct {
 	snap *image.RGBA // снапшот front-буфера на момент рендера
 }
 
+// ─── Границы размера холста (SEC-10) ────────────────────────────────────────
+
+const (
+	// MinCanvasSide — минимальная сторона холста. Ноль и отрицательные
+	// значения давали image.NewRGBA с пустым прямоугольником и мусорную
+	// тайловую арифметику в newCanvas (tilesX/tilesY ≤ 0).
+	MinCanvasSide = 1
+
+	// MaxCanvasSide — максимальная сторона холста в логических пикселях.
+	// 16384 — верх того, что осмысленно рисовать программно; всё, что выше,
+	// это опечатка или подставленное снаружи число.
+	MaxCanvasSide = 16384
+
+	// MaxCanvasPixels — максимальная площадь холста (в ФИЗИЧЕСКИХ пикселях,
+	// то есть уже с учётом HiDPI-масштаба).
+	//
+	// Цена пикселя — 4 байта, а буфера два (front+back): 64 Мпикс это
+	// 2 × 256 МБ. Выше поднимать нельзя — предел в 256 Мпикс всё ещё давал
+	// на New(1<<20, 1<<20) два гигабайтных буфера, то есть ровно то, от чего
+	// защищаемся. Ниже — тоже нельзя: 64 Мпикс с запасом покрывает 8K
+	// (7680×4320 ≈ 33 Мпикс) и 4K при scale=2 (те же 33 Мпикс).
+	//
+	// Без этой границы New(1<<20, 1<<20) просил у рантайма терабайты и валил
+	// процесс на месте.
+	MaxCanvasPixels = 64 << 20
+)
+
+// clampCanvasSize приводит запрошенный размер холста к допустимому диапазону.
+// При изменении пишет в журнал: молча отдать не тот размер, что просили, —
+// худший из вариантов (приложение будет считать координаты по своему числу).
+func clampCanvasSize(width, height int) (int, int) {
+	w, h := width, height
+	if w < MinCanvasSide {
+		w = MinCanvasSide
+	}
+	if h < MinCanvasSide {
+		h = MinCanvasSide
+	}
+	if w > MaxCanvasSide {
+		w = MaxCanvasSide
+	}
+	if h > MaxCanvasSide {
+		h = MaxCanvasSide
+	}
+	// Площадь: ужимаем пропорционально, чтобы не ломать соотношение сторон.
+	for int64(w)*int64(h) > MaxCanvasPixels {
+		if w >= h {
+			w /= 2
+		} else {
+			h /= 2
+		}
+		if w < MinCanvasSide {
+			w = MinCanvasSide
+		}
+		if h < MinCanvasSide {
+			h = MinCanvasSide
+		}
+	}
+	if w != width || h != height {
+		log.Printf("engine: размер холста %dx%d вне допустимых границ — приведён к %dx%d "+
+			"(сторона %d…%d, площадь ≤ %d пикс.)",
+			width, height, w, h, MinCanvasSide, MaxCanvasSide, int64(MaxCanvasPixels))
+	}
+	return w, h
+}
+
 // New создаёт движок.
 //
 //	width, height — размер виртуального экрана в пикселях
 //	fps           — целевая частота кадров (рекомендуется 15–25)
+//
+// Размер холста приводится к допустимым границам (см. clampCanvasSize):
+// отрицательные и нулевые значения поднимаются до 1, заведомо неподъёмные —
+// опускаются до предела, вместо аллокации на десятки гигабайт.
 func New(width, height, fps int) *Engine {
 	if fps < 1 {
 		fps = 20
 	}
+	width, height = clampCanvasSize(width, height)
 	fc := newFontCache("assets")
 	e := &Engine{
 		fontCache: fc,
@@ -325,6 +398,9 @@ func (e *Engine) SetScale(k float64) {
 // Корневой виджет получает обновлённые bounds. Зарегистрированные шрифты
 // и fallback-цепочка сохраняются.
 func (e *Engine) SetResolution(width, height int) {
+	// Границы те же, что у New (SEC-10): смена разрешения — такой же
+	// вход для «числа снаружи», как и создание движка.
+	width, height = clampCanvasSize(width, height)
 	e.frameMu.Lock() // ждём конца текущего кадра — буферы меняются
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
@@ -358,15 +434,18 @@ func (e *Engine) SetResolution(width, height int) {
 // SetBackgroundFile загружает изображение (PNG или JPEG) из файла и масштабирует его
 // до размера холста. Исходный файл сохраняется — при последующих вызовах SetResolution
 // фон автоматически перемасштабируется без повторной загрузки.
+// Размер файла и площадь растра ограничены (widget.DecodeImageBounded, SEC-9):
+// заголовок читается до декодирования, поэтому PNG 65535×65535 отвергается
+// по заявленным размерам, а не после аллокации 16 ГБ.
 func (e *Engine) SetBackgroundFile(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	img, _, err := image.Decode(f)
+	img, err := widget.DecodeImageBounded(f)
 	if err != nil {
-		return err
+		return fmt.Errorf("SetBackgroundFile %q: %w", path, err)
 	}
 	e.frameMu.Lock() // фон читается blitBackground — меняем между кадрами
 	e.mu.Lock()
@@ -540,6 +619,9 @@ func (e *Engine) SetTheme(t *widget.Theme) {
 // Start запускает цикл рендеринга в отдельной горутине.
 // Вызывать не более одного раза.
 func (e *Engine) Start() {
+	if e.stopped.Load() || !e.started.CompareAndSwap(false, true) {
+		return // повторный Start или Start после Stop — no-op
+	}
 	e.Invalidate() // гарантируем рендер первого кадра в любом режиме
 	if e.saveDir != "" {
 		go e.saveWorker()
@@ -556,17 +638,25 @@ func (e *Engine) Start() {
 // Идемпотентен: повторный вызов — no-op. Раньше повторный Stop паниковал
 // close of closed channel — типовая ловушка для кода с defer eng.Stop()
 // рядом с явной остановкой на пути ошибки.
+//
+// Stop без Start тоже безопасен (снимает регистрацию, закрывает каналы) —
+// раньше он навсегда зависал на ожидании цикла, который никто не запускал.
 func (e *Engine) Stop() {
 	if !e.stopped.CompareAndSwap(false, true) {
 		return
 	}
 	widget.UnregisterUINotifier(e.notifierHandle)
 	close(e.quit)
-	<-e.done
+	started := e.started.Load()
+	if started {
+		<-e.done
+	}
 	close(e.frames)
 	if e.saveCh != nil {
 		close(e.saveCh) // saveWorker дочитает оставшиеся задачи
-		<-e.saveDone    // ждём пока все PNG записаны на диск
+		if started {
+			<-e.saveDone // ждём пока все PNG записаны на диск
+		}
 	}
 }
 
@@ -840,6 +930,12 @@ func (e *Engine) topModal() widget.ModalWidget {
 func (e *Engine) saveWorker() {
 	defer close(e.saveDone)
 	if err := mkdirAll(e.saveDir); err != nil {
+		// SEC-18: раньше воркер просто выходил, канал никто не читал, и после
+		// 512 кадров рендер-горутина навсегда вставала на отправке (Stop
+		// зависал). Теперь дренируем задания, чтобы цикл кадров не блокировался.
+		log.Printf("engine: SaveFrames: каталог %q недоступен (%v) — кадры не сохраняются", e.saveDir, err)
+		for range e.saveCh {
+		}
 		return
 	}
 	for job := range e.saveCh {
@@ -989,7 +1085,12 @@ func (e *Engine) renderFrame() output.Frame {
 		snap := image.NewRGBA(canvas.front.Rect)
 		copy(snap.Pix, canvas.front.Pix)
 		path := filepath.Join(e.saveDir, fmt.Sprintf("frame_%06d.png", seq))
-		e.saveCh <- saveJob{path: path, seq: seq, snap: snap}
+		// Отправка блокирующая (все кадры сохраняются), но не переживает Stop:
+		// иначе при остановке с полным буфером рендер и Stop ждали бы друг друга.
+		select {
+		case e.saveCh <- saveJob{path: path, seq: seq, snap: snap}:
+		case <-e.quit:
+		}
 	}
 
 	return output.Frame{

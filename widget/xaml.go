@@ -138,7 +138,21 @@ func resolveWindowInputCommands(root Widget, ctx interface{}) {
 // относительные и сдвигаются на parentOff, что соответствует поведению
 // WPF Canvas и позволяет открывать XAML-файлы в Blend.
 // Для корневого элемента parentOff = image.Point{}.
+//
+// Это точка входа с глубины 0: рекурсия идёт через buildXAMLWidgetAt.
 func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+	return buildXAMLWidgetAt(el, reg, parentOff, baseDir, 0)
+}
+
+// buildXAMLWidgetAt — рекурсивное тело buildXAMLWidget. depth — глубина
+// текущего элемента в дереве; превышение maxXAMLDepth прерывает построение
+// ошибкой, не давая рекурсии исчерпать стек (SEC-7). Парсер держит ту же
+// границу, так что здесь это вторая линия обороны — на случай деревьев,
+// собранных в обход parseXAML (клоны DataTemplate/ItemsControl).
+func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
+	if depth > maxXAMLDepth {
+		return nil, fmt.Errorf("%w (%d): <%s>", ErrXAMLTooDeep, maxXAMLDepth, el.Tag)
+	}
 	tag := strings.ToLower(el.Tag)
 
 	// Игнорируем теги-свойства WPF (Panel.Children, Grid.RowDefinitions, …)
@@ -159,37 +173,37 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 	switch tag {
 	// ── Grid ────────────────────────────────────────────────────────────────
 	case "grid":
-		return buildXAMLGrid(el, reg, parentOff, baseDir)
+		return buildXAMLGrid(el, reg, parentOff, baseDir, depth)
 
 	// ── Window — корневой элемент нативного окна ────────────────────────────
 	case "window":
-		return buildXAMLWindow(el, reg, parentOff, baseDir)
+		return buildXAMLWindow(el, reg, parentOff, baseDir, depth)
 
 	// ── StackPanel — контейнер с автораскладкой ─────────────────────────────
 	case "stackpanel":
-		return buildXAMLStackPanel(el, reg, parentOff, baseDir)
+		return buildXAMLStackPanel(el, reg, parentOff, baseDir, depth)
 
 	// ── ItemsControl — список объектов по DataTemplate ──────────────────────
 	// preprocessXAML разворачивает его в StackPanel (по элементам ItemsSource);
 	// неразвёрнутый (нет шаблона/контекста) строится как пустой StackPanel.
 	case "itemscontrol":
-		return buildXAMLStackPanel(el, reg, parentOff, baseDir)
+		return buildXAMLStackPanel(el, reg, parentOff, baseDir, depth)
 
 	// ── WrapPanel — контейнер с переносом ───────────────────────────────────
 	case "wrappanel":
-		return buildXAMLWrapPanel(el, reg, parentOff, baseDir)
+		return buildXAMLWrapPanel(el, reg, parentOff, baseDir, depth)
 
 	// ── UniformGrid — равномерная сетка ─────────────────────────────────────
 	case "uniformgrid":
-		return buildXAMLUniformGrid(el, reg, parentOff, baseDir)
+		return buildXAMLUniformGrid(el, reg, parentOff, baseDir, depth)
 
 	// ── GroupBox — рамка с заголовком ───────────────────────────────────────
 	case "groupbox":
-		return buildXAMLGroupBox(el, reg, parentOff, baseDir)
+		return buildXAMLGroupBox(el, reg, parentOff, baseDir, depth)
 
 	// ── Expander — раскрывающаяся панель ────────────────────────────────────
 	case "expander":
-		return buildXAMLExpander(el, reg, parentOff, baseDir)
+		return buildXAMLExpander(el, reg, parentOff, baseDir, depth)
 
 	// ── TreeView — иерархический список ─────────────────────────────────────
 	case "treeview":
@@ -206,11 +220,11 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 	// ── DockPanel — контейнер с dock-layout ────────────────────────────────
 	case "dockpanel":
-		return buildXAMLDockPanel(el, reg, parentOff, baseDir)
+		return buildXAMLDockPanel(el, reg, parentOff, baseDir, depth)
 
 	// ── DockManager — зона докинга (инструментальные панели VS-стиля) ──────
 	case "dockmanager":
-		return buildXAMLDockManager(el, reg, parentOff, baseDir)
+		return buildXAMLDockManager(el, reg, parentOff, baseDir, depth)
 
 	// ── DockPane вне DockManager — игнорируем (валиден только как child) ───
 	case "dockpane":
@@ -228,17 +242,17 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 	// ── SplitPanel — две панели с перетаскиваемым разделителем ──────────────
 	case "splitpanel":
-		return buildXAMLSplitPanel(el, reg, parentOff, baseDir)
+		return buildXAMLSplitPanel(el, reg, parentOff, baseDir, depth)
 
 	// ── ToolBarTray / ToolBar → горизонтальный StackPanel (WPF ToolBar) ────
 	case "toolbartray":
-		return buildXAMLToolBarTray(el, reg, parentOff, baseDir)
+		return buildXAMLToolBarTray(el, reg, parentOff, baseDir, depth)
 	case "toolbar":
-		return buildXAMLToolBar(el, reg, parentOff, baseDir)
+		return buildXAMLToolBar(el, reg, parentOff, baseDir, depth)
 
 	// ── StatusBar → StackPanel (горизонтальный) ────────────────────────────
 	case "statusbar":
-		return buildXAMLStatusBar(el, reg, parentOff, baseDir)
+		return buildXAMLStatusBar(el, reg, parentOff, baseDir, depth)
 
 	// ── DataGrid — полноценный табличный виджет ─────────────────────────────
 	case "datagrid":
@@ -246,11 +260,11 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 	// ── Border — контейнер с фоном и одним потомком ─────────────────────────
 	case "border":
-		return buildXAMLBorder(el, reg, parentOff, baseDir)
+		return buildXAMLBorder(el, reg, parentOff, baseDir, depth)
 
 	// ── Canvas — контейнер с абсолютным позиционированием (WPF Canvas) ──────
 	case "canvas":
-		return buildXAMLCanvas(el, reg, parentOff, baseDir)
+		return buildXAMLCanvas(el, reg, parentOff, baseDir, depth)
 
 	// ── Контейнеры ──────────────────────────────────────────────────────────
 	case "usercontrol",
@@ -295,7 +309,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 	// ── TabControl ───────────────────────────────────────────────────────────
 	case "tabcontrol":
-		return buildXAMLTabControl(el, reg, parentOff, baseDir)
+		return buildXAMLTabControl(el, reg, parentOff, baseDir, depth)
 
 	// ── Slider ───────────────────────────────────────────────────────────────
 	case "slider":
@@ -323,7 +337,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 	// ── Изображение ───────────────────────────────────────────────────────────
 	case "image":
-		w = buildXAMLImage(el)
+		w = buildXAMLImage(el, baseDir)
 
 	// ── SVG-иконка (темизируемая векторная) ─────────────────────────────────
 	case "svgicon":
@@ -415,7 +429,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 		// Attached ContextMenu: <X.ContextMenu><ContextMenu>…</ContextMenu></X.ContextMenu>
 		if strings.HasSuffix(childTag, ".contextmenu") {
 			for _, inner := range child.Children {
-				cw, err := buildXAMLWidget(inner, reg, childOff, baseDir)
+				cw, err := buildXAMLWidgetAt(inner, reg, childOff, baseDir, depth+1)
 				if err != nil {
 					return nil, err
 				}
@@ -435,7 +449,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 			}
 			// WPF property element — пропускаем сам тег, но обрабатываем его потомков
 			for _, inner := range child.Children {
-				cw, err := buildXAMLWidget(inner, reg, childOff, baseDir)
+				cw, err := buildXAMLWidgetAt(inner, reg, childOff, baseDir, depth+1)
 				if err != nil {
 					return nil, err
 				}
@@ -445,7 +459,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 			}
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, childOff, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, childOff, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -459,10 +473,21 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 // ─── Построители простых виджетов ──────────────────────────────────────────
 
-func buildXAMLImage(el xElement) Widget {
+// buildXAMLImage строит <Image Source="…">.
+//
+// Раньше путь уходил в SetSource как есть: относительный резолвился от
+// текущего каталога процесса (а не от XAML-файла — несовпадение с иконками
+// кнопок и SVGIcon), абсолютный читал что угодно. Теперь путь проходит через
+// resolveXAMLResource — тот же резолв и та же граница, что у всех ресурсов
+// разметки (SEC-8).
+func buildXAMLImage(el xElement, baseDir string) Widget {
 	iw := NewImageWidget()
 	if src := el.attr("Source"); src != "" {
-		if err := iw.SetSource(src); err != nil {
+		path, err := resolveXAMLResource(baseDir, src)
+		if err == nil {
+			err = iw.SetSource(path)
+		}
+		if err != nil {
 			log.Printf("xaml: Image Source=%q: %v", src, err)
 		}
 		iw.Source = src
@@ -601,14 +626,14 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 	}
 
 	// ── Иконка ─────────────────────────────────────────────────────────────
+	// Путь ограничен каталогом XAML-файла (SEC-8): filepath.Join сам по себе
+	// чистит «..», но не удерживает внутри baseDir.
 	if iconSrc != "" {
-		path := iconSrc
-		if !filepath.IsAbs(path) && baseDir != "" {
-			path = filepath.Join(baseDir, iconSrc)
-		}
-		if img, err := loadImageFile(path); err == nil {
-			btn.Icon = img
-			btn.IconPath = iconSrc
+		if path, err := resolveXAMLResource(baseDir, iconSrc); err == nil {
+			if img, err := loadImageFile(path); err == nil {
+				btn.Icon = img
+				btn.IconPath = iconSrc
+			}
 		}
 	}
 	// Размер иконки из вложенного <Image Width="..." Height="...">
@@ -1039,7 +1064,7 @@ func buildXAMLListView(el xElement) Widget {
 
 // buildXAMLSplitPanel строит SplitPanel: две панели с перетаскиваемым
 // разделителем. Первый дочерний элемент — First, второй — Second.
-func buildXAMLSplitPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLSplitPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	orient := OrientationHorizontal
 	if strings.EqualFold(el.attr("Orientation"), "vertical") {
 		orient = OrientationVertical
@@ -1076,7 +1101,7 @@ func buildXAMLSplitPanel(el xElement, reg map[string]Widget, parentOff image.Poi
 		if strings.Contains(childTag, ".") {
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1092,11 +1117,11 @@ func buildXAMLSplitPanel(el xElement, reg map[string]Widget, parentOff image.Poi
 func buildXAMLSVGIcon(el xElement, baseDir string) Widget {
 	ic := NewSVGIcon()
 	if src := el.attr("Source"); src != "" {
-		p := src
-		if baseDir != "" && !filepath.IsAbs(p) {
-			p = filepath.Join(baseDir, p)
+		p, err := resolveXAMLResource(baseDir, src) // граница по baseDir (SEC-8)
+		if err == nil {
+			err = ic.SetSVGFile(p)
 		}
-		if err := ic.SetSVGFile(p); err != nil {
+		if err != nil {
 			log.Printf("xaml: SVGIcon Source=%q: %v", src, err)
 		}
 	}

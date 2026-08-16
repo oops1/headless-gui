@@ -21,7 +21,7 @@ import (
 
 // buildXAMLGrid создаёт Grid из XAML-элемента, парсит RowDefinitions/ColumnDefinitions,
 // создаёт потомков и вызывает layout.
-func buildXAMLGrid(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLGrid(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	g := NewGrid()
 
 	// Фон
@@ -91,7 +91,7 @@ func buildXAMLGrid(el xElement, reg map[string]Widget, parentOff image.Point, ba
 
 		// Для дочерних виджетов Grid передаём parentOff=0, т.к. Grid.layout()
 		// сам задаст bounds через SetBounds.
-		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +180,7 @@ func parseGridDef(el xElement, sizeAttr string) GridDefinition {
 //	TitleForeground  — цвет текста заголовка
 //
 // Дочерние виджеты размещаются в клиентской области (ContentBounds).
-func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	b := el.bounds()
 	if b.Empty() {
 		b = image.Rect(0, 0, 800, 600) // default
@@ -325,7 +325,7 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 			}
 			// Но обрабатываем потомков property element (например Window.Content)
 			for _, inner := range child.Children {
-				cw, err := buildXAMLWidget(inner, reg, contentOff, baseDir)
+				cw, err := buildXAMLWidgetAt(inner, reg, contentOff, baseDir, depth+1)
 				if err != nil {
 					return nil, err
 				}
@@ -340,7 +340,7 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 			continue
 		}
 
-		cw, err := buildXAMLWidget(child, reg, contentOff, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, contentOff, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -406,9 +406,11 @@ func parseInputBindings(el xElement) []InputBinding {
 //
 // Ошибка загрузки/разбора — log.Printf и nil (иконка просто не ставится).
 func loadTrayIcon(src, baseDir string) image.Image {
-	path := src
-	if !filepath.IsAbs(path) && baseDir != "" {
-		path = filepath.Join(baseDir, src)
+	// Путь удерживается внутри каталога XAML-файла (SEC-8).
+	path, rerr := resolveXAMLResource(baseDir, src)
+	if rerr != nil {
+		log.Printf("xaml: TrayIcon Source=%q: %v", src, rerr)
+		return nil
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".svg":
@@ -512,13 +514,13 @@ func buildXAMLPanel(el xElement, baseDir string) Widget {
 	}
 
 	// BackgroundImage — фоновая картинка из файла (относительно XAML-файла).
+	// Путь удерживается внутри baseDir (SEC-8); при загрузке из строки
+	// (baseDir == "") фон, как и раньше, не подхватывается.
 	if bgImg := el.attr("BackgroundImage"); bgImg != "" && baseDir != "" {
-		imgPath := bgImg
-		if !filepath.IsAbs(imgPath) {
-			imgPath = filepath.Join(baseDir, imgPath)
-		}
-		if img, err := loadImageFile(imgPath); err == nil {
-			p.BackgroundImage = img
+		if imgPath, err := resolveXAMLResource(baseDir, bgImg); err == nil {
+			if img, err := loadImageFile(imgPath); err == nil {
+				p.BackgroundImage = img
+			}
 		}
 	}
 
@@ -530,7 +532,7 @@ func buildXAMLPanel(el xElement, baseDir string) Widget {
 // buildXAMLCanvas строит Canvas виджет из XAML-элемента.
 // Canvas размещает дочерние виджеты по абсолютным координатам (Canvas.Left, Canvas.Top, и т.д.).
 // Это полноценный аналог WPF Canvas, в отличие от Panel — Canvas сам управляет layout.
-func buildXAMLCanvas(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLCanvas(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	cv := NewCanvas()
 
 	// Background
@@ -573,14 +575,14 @@ func buildXAMLCanvas(el xElement, reg map[string]Widget, parentOff image.Point, 
 		// Пропускаем WPF property elements, но обрабатываем их потомков
 		if strings.Contains(childTag, ".") {
 			for _, inner := range child.Children {
-				if err := addCanvasChild(cv, inner, reg, zeroOff, baseDir); err != nil {
+				if err := addCanvasChild(cv, inner, reg, zeroOff, baseDir, depth); err != nil {
 					return nil, err
 				}
 			}
 			continue
 		}
 
-		if err := addCanvasChild(cv, child, reg, zeroOff, baseDir); err != nil {
+		if err := addCanvasChild(cv, child, reg, zeroOff, baseDir, depth); err != nil {
 			return nil, err
 		}
 	}
@@ -594,7 +596,7 @@ func buildXAMLCanvas(el xElement, reg map[string]Widget, parentOff image.Point, 
 // Важно: дочерний виджет строится с parentOff=image.Point{} (нулевое смещение),
 // потому что Canvas сам управляет позиционированием. buildXAMLWidget прибавит
 // атрибуты Left/Top к parentOff, но нам нужно только Width/Height.
-func addCanvasChild(cv *Canvas, child xElement, reg map[string]Widget, canvasOff image.Point, baseDir string) error {
+func addCanvasChild(cv *Canvas, child xElement, reg map[string]Widget, canvasOff image.Point, baseDir string, depth int) error {
 	// ── Извлекаем Canvas attached properties ────────────────────────────────
 	props := CanvasAttached{
 		Left:   xatoiOrNeg1(child.attr("Canvas.Left")),
@@ -635,7 +637,7 @@ func addCanvasChild(cv *Canvas, child xElement, reg map[string]Widget, canvasOff
 	// (Canvas внутри Canvas, Grid внутри Canvas) получили правильный offset.
 	// Для leaf-виджетов buildXAMLWidget вычислит bounds через el.bounds().Add(parentOff),
 	// но Canvas потом переопределит позицию через layout.
-	cw, err := buildXAMLWidget(child, reg, canvasOff, baseDir)
+	cw, err := buildXAMLWidgetAt(child, reg, canvasOff, baseDir, depth+1)
 	if err != nil {
 		return err
 	}
@@ -662,7 +664,7 @@ func addCanvasChild(cv *Canvas, child xElement, reg map[string]Widget, canvasOff
 
 // ─── buildXAMLTabControl ────────────────────────────────────────────────────
 
-func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	tc := NewTabControl()
 	absBounds := el.bounds().Add(parentOff)
 	tc.SetBounds(absBounds)
@@ -698,7 +700,7 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 				if strings.Contains(innerTag, ".") {
 					continue
 				}
-				cw, err := buildXAMLWidget(inner, reg, contentOff, baseDir)
+				cw, err := buildXAMLWidgetAt(inner, reg, contentOff, baseDir, depth+1)
 				if err != nil {
 					return nil, err
 				}
@@ -715,7 +717,7 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 			registerLocItem(key, func(s string) { tc.SetTabHeader(idx, s) })
 		} else if !strings.Contains(childTag, ".") {
 			// Обычные дочерние виджеты (не TabItem)
-			cw, err := buildXAMLWidget(child, reg, contentOff, baseDir)
+			cw, err := buildXAMLWidgetAt(child, reg, contentOff, baseDir, depth+1)
 			if err != nil {
 				return nil, err
 			}
@@ -896,7 +898,7 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 
 // buildXAMLDockPanel строит DockPanel из XAML-элемента <DockPanel>.
 // Последний дочерний элемент заполняет оставшееся пространство (LastChildFill).
-func buildXAMLDockPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLDockPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	dp := NewDockPanel()
 
 	// Background
@@ -927,7 +929,7 @@ func buildXAMLDockPanel(el xElement, reg map[string]Widget, parentOff image.Poin
 		if strings.Contains(childTag, ".") {
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -944,7 +946,7 @@ func buildXAMLDockPanel(el xElement, reg map[string]Widget, parentOff image.Poin
 // buildXAMLBorder строит Border — контейнер с фоном/рамкой и одним потомком.
 // В WPF Border.Child заполняет всю область Border.
 // Реализуем через DockPanel (последний ребёнок заполняет оставшееся пространство).
-func buildXAMLBorder(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLBorder(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	dp := NewDockPanel()
 
 	// Background
@@ -977,7 +979,7 @@ func buildXAMLBorder(el xElement, reg map[string]Widget, parentOff image.Point, 
 		if strings.Contains(childTag, ".") {
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1066,7 +1068,7 @@ func xamlDockSide(s string) DockSide {
 // buildXAMLDockPane строит DockPane из <DockPane> внутри <DockManager>.
 // Возвращает панель и её запрошенные Side/Size/State — сам DockManager
 // решает, что с ними делать (AddPane/SetSideSize/Unpin·Float·Close).
-func buildXAMLDockPane(el xElement, reg map[string]Widget, baseDir string) (pane *DockPane, side DockSide, size int, state string, err error) {
+func buildXAMLDockPane(el xElement, reg map[string]Widget, baseDir string, depth int) (pane *DockPane, side DockSide, size int, state string, err error) {
 	id := xamlDockPaneID(el)
 	title := el.attr("Title")
 	if title == "" {
@@ -1079,7 +1081,7 @@ func buildXAMLDockPane(el xElement, reg map[string]Widget, baseDir string) (pane
 		if strings.Contains(child.Tag, ".") {
 			continue
 		}
-		cw, cerr := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		cw, cerr := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 		if cerr != nil {
 			return nil, DockLeft, 0, "", cerr
 		}
@@ -1104,7 +1106,7 @@ func buildXAMLDockPane(el xElement, reg map[string]Widget, baseDir string) (pane
 }
 
 // buildXAMLDockManager строит DockManager из <DockManager> (см. схему выше).
-func buildXAMLDockManager(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLDockManager(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	dm := NewDockManager()
 
 	if bgStr := el.attr("Background"); bgStr != "" {
@@ -1131,7 +1133,7 @@ func buildXAMLDockManager(el xElement, reg map[string]Widget, parentOff image.Po
 		childTag := strings.ToLower(child.Tag)
 		switch childTag {
 		case "dockpane":
-			p, side, size, state, err := buildXAMLDockPane(child, reg, baseDir)
+			p, side, size, state, err := buildXAMLDockPane(child, reg, baseDir, depth)
 			if err != nil {
 				return nil, err
 			}
@@ -1157,7 +1159,7 @@ func buildXAMLDockManager(el xElement, reg map[string]Widget, parentOff image.Po
 				if strings.Contains(inner.Tag, ".") {
 					continue
 				}
-				cw, err := buildXAMLWidget(inner, reg, image.Point{}, baseDir)
+				cw, err := buildXAMLWidgetAt(inner, reg, image.Point{}, baseDir, depth+1)
 				if err != nil {
 					return nil, err
 				}
@@ -1175,7 +1177,7 @@ func buildXAMLDockManager(el xElement, reg map[string]Widget, parentOff image.Po
 			// Запасной путь: виджет без обёртки DockContent/DockPane, ещё не
 			// заданный центр — трактуем как центр (удобно для беглых правок XAML).
 			if dm.Center() == nil {
-				cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+				cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 				if err != nil {
 					return nil, err
 				}
@@ -1193,7 +1195,7 @@ func buildXAMLDockManager(el xElement, reg map[string]Widget, parentOff image.Po
 
 // buildXAMLStatusBar строит StatusBar как горизонтальный StackPanel.
 // WPF StatusBar — набор StatusBarItem. Мы упрощаем: строим StackPanel Horizontal.
-func buildXAMLStatusBar(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLStatusBar(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	sp := NewStackPanel(OrientationHorizontal)
 	sp.Spacing = 10
 	sp.Padding = 6
@@ -1226,7 +1228,7 @@ func buildXAMLStatusBar(el xElement, reg map[string]Widget, parentOff image.Poin
 		if strings.Contains(childTag, ".") {
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1250,7 +1252,7 @@ func buildXAMLStatusBar(el xElement, reg map[string]Widget, parentOff image.Poin
 //
 //	Background — цвет фона (#RRGGBB / имя)
 //	Orientation — Horizontal (default) | Vertical
-func buildXAMLToolBarTray(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLToolBarTray(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	sp := NewStackPanel(OrientationHorizontal)
 	sp.Spacing = 0
 	sp.Padding = 0
@@ -1281,7 +1283,7 @@ func buildXAMLToolBarTray(el xElement, reg map[string]Widget, parentOff image.Po
 		if strings.Contains(childTag, ".") {
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1306,7 +1308,7 @@ func buildXAMLToolBarTray(el xElement, reg map[string]Widget, parentOff image.Po
 //	Background — цвет фона
 //	Band       — номер полосы (игнорируется, layout упрощён)
 //	BandIndex  — позиция в полосе (игнорируется)
-func buildXAMLToolBar(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLToolBar(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	sp := NewStackPanel(OrientationHorizontal)
 	sp.Spacing = 2
 	sp.Padding = 4
@@ -1337,7 +1339,7 @@ func buildXAMLToolBar(el xElement, reg map[string]Widget, parentOff image.Point,
 		if strings.Contains(childTag, ".") {
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1364,7 +1366,7 @@ func buildXAMLToolBar(el xElement, reg map[string]Widget, parentOff image.Point,
 //	Spacing      — расстояние между элементами (px)
 //	Padding      — внутренний отступ (px)
 //	Margin       — внешний отступ (игнорируется в текущей реализации)
-func buildXAMLStackPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLStackPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	orient := OrientationVertical
 	if strings.EqualFold(el.attr("Orientation"), "horizontal") {
 		orient = OrientationHorizontal
@@ -1416,7 +1418,7 @@ func buildXAMLStackPanel(el xElement, reg map[string]Widget, parentOff image.Poi
 			continue
 		}
 
-		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1431,7 +1433,7 @@ func buildXAMLStackPanel(el xElement, reg map[string]Widget, parentOff image.Poi
 // ─── buildXAMLGroupBox ──────────────────────────────────────────────────────
 
 // buildXAMLGroupBox строит GroupBox (Header + один контент).
-func buildXAMLGroupBox(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLGroupBox(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	header := el.attr("Header", "Title")
 	gb := NewGroupBox(header)
 	if bgStr := el.attr("Background"); bgStr != "" && !strings.EqualFold(bgStr, "transparent") {
@@ -1452,7 +1454,7 @@ func buildXAMLGroupBox(el xElement, reg map[string]Widget, parentOff image.Point
 		if strings.Contains(ct, ".") {
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, contentOff, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, contentOff, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1472,7 +1474,7 @@ func buildXAMLGroupBox(el xElement, reg map[string]Widget, parentOff image.Point
 // ─── buildXAMLExpander ──────────────────────────────────────────────────────
 
 // buildXAMLExpander строит Expander (Header, IsExpanded + контент).
-func buildXAMLExpander(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLExpander(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	header := el.attr("Header", "Title")
 	ex := NewExpander(header)
 	if strings.EqualFold(el.attr("IsExpanded"), "true") {
@@ -1494,7 +1496,7 @@ func buildXAMLExpander(el xElement, reg map[string]Widget, parentOff image.Point
 		if strings.Contains(ct, ".") {
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, contentOff, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, contentOff, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1509,7 +1511,7 @@ func buildXAMLExpander(el xElement, reg map[string]Widget, parentOff image.Point
 // ─── buildXAMLWrapPanel ─────────────────────────────────────────────────────
 
 // buildXAMLWrapPanel строит WrapPanel из XAML (Orientation, Background, Spacing).
-func buildXAMLWrapPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLWrapPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	orient := OrientationHorizontal
 	if strings.EqualFold(el.attr("Orientation"), "vertical") {
 		orient = OrientationVertical
@@ -1540,7 +1542,7 @@ func buildXAMLWrapPanel(el xElement, reg map[string]Widget, parentOff image.Poin
 		if strings.Contains(strings.ToLower(child.Tag), ".") {
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1554,7 +1556,7 @@ func buildXAMLWrapPanel(el xElement, reg map[string]Widget, parentOff image.Poin
 // ─── buildXAMLUniformGrid ───────────────────────────────────────────────────
 
 // buildXAMLUniformGrid строит UniformGrid из XAML (Rows, Columns, Background).
-func buildXAMLUniformGrid(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLUniformGrid(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	ug := NewUniformGrid()
 	ug.Rows = xatoi(el.attr("Rows"))
 	ug.Columns = xatoi(el.attr("Columns"))
@@ -1576,7 +1578,7 @@ func buildXAMLUniformGrid(el xElement, reg map[string]Widget, parentOff image.Po
 		if strings.Contains(strings.ToLower(child.Tag), ".") {
 			continue
 		}
-		cw, err := buildXAMLWidget(child, reg, image.Point{}, baseDir)
+		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
 		if err != nil {
 			return nil, err
 		}
