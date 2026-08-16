@@ -626,9 +626,12 @@ func (t *TextInput) WantsCapture(e MouseEvent) bool {
 	if e.Button != MouseLeft || !e.Pressed {
 		return false
 	}
-	// Не захватываем, если клик по глазику
-	if t.isPassword {
-		b := t.bounds
+	// Не захватываем, если клик по глазику (isPassword — под t.mu, SEC-18).
+	t.mu.Lock()
+	isPassword := t.isPassword
+	t.mu.Unlock()
+	if isPassword {
+		b := t.Bounds()
 		if e.X >= b.Max.X-eyeButtonWidth && e.X <= b.Max.X {
 			return false
 		}

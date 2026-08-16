@@ -880,15 +880,16 @@ func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	dst := w.shmData[base:]
 	src := img.Pix
 	stride := img.Stride
+	rowLen := width * 4
 	for y := 0; y < height; y++ {
 		so := y * stride
 		do := y * w.stride
-		for x := 0; x < width; x++ {
-			si, di := so+x*4, do+x*4
-			dst[di+0] = src[si+2] // B
-			dst[di+1] = src[si+1] // G
-			dst[di+2] = src[si+0] // R
-			dst[di+3] = 0xFF      // X
+		// RGBA → XRGB8888 (в памяти LE: B,G,R,X): построчный swap R/B, затем
+		// байт X = 0xFF (альфа канваса и так всегда 255, но формат буфера —
+		// WL_SHM_FORMAT_XRGB8888, старший байт по контракту игнорируется).
+		swapRBRow(dst[do:do+rowLen], src[so:so+rowLen])
+		for x := 3; x < rowLen; x += 4 {
+			dst[do+x] = 0xFF
 		}
 	}
 	w.attachAndCommit(dirty)
