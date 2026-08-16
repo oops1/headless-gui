@@ -2,14 +2,16 @@ package webstream
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"image"
 	"image/png"
 	"log"
+	"net"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,7 +20,6 @@ import (
 
 	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/widget"
 )
 
 //go:embed viewer.html
@@ -30,22 +31,37 @@ const (
 	msgInit  byte = 0x02 // [type][u16 width][u16 height]
 )
 
+// Лимиты по умолчанию.
+const (
+	defaultMaxClients = 16
+	clientQueueSize   = 60
+	maxSnapshotJobs   = 2
+)
+
+// Options — настройки доступа и лимитов (см. NewWithOptions).
+type Options struct {
+	Token          string   // если задан — нужен ?token= или Authorization: Bearer
+	AllowedOrigins []string // дополнительные Origin для WebSocket
+	MaxClients     int      // одновременных вьюверов; 0 → 16
+}
+
 // Server стримит кадры движка в браузерные вьюверы и возвращает ввод.
 //
 //	eng := engine.New(1060, 700, 30)
 //	// ... построить UI, eng.Start()
 //	srv := webstream.New(eng)
 //	go srv.Run()                     // потребляет eng.Frames()
-//	http.ListenAndServe(":8080", srv) // "/" — вьювер, "/ws" — поток
+//	http.ListenAndServe("127.0.0.1:8080", srv)
 //
 // Server — единственный потребитель eng.Frames(). Поддерживает несколько
 // одновременных вьюверов: держит композит текущего кадра и отдаёт новому
 // клиенту полный снимок (keyframe), дальше — только дельта-тайлы.
 type Server struct {
-	eng *engine.Engine
+	eng  *engine.Engine
+	opts Options
 
 	mu        sync.Mutex
-	clients   map[*wsConn]chan outMsg
+	clients   map[*wsConn]*client
 	composite *image.RGBA // текущее полное состояние экрана (физич. пиксели)
 	w, h      int
 
@@ -53,17 +69,39 @@ type Server struct {
 	// Полезны и в демонстрации, и при отладке «почему тормозит».
 	frames, tiles, bytes int64
 	started              time.Time
+
+	kfMsg   []byte // кэш keyframe-сообщения на номер кадра kfSeq
+	kfSeq   int64
+	snapPNG []byte // кэш /snapshot.png на номер кадра snapSeq
+	snapSeq int64
+	snapSem chan struct{}
+
+	dropped  atomic.Int64
+	input    chan inputEvent
+	inputOne sync.Once
+	stopOne  sync.Once
+	stop     chan struct{}
+
+	// Таймауты сокета; тесты укорачивают их до подключения клиентов.
+	readTimeout, writeTimeout, pingInterval time.Duration
+}
+
+// client — состояние одного вьювера.
+type client struct {
+	ch     chan outMsg
+	needKF bool // дельта потеряна, ждёт полный кадр
 }
 
 // Stats — сводка по стриму (см. Server.Stats и HTTP-эндпойнт /stats).
 type Stats struct {
-	Viewers  int   `json:"viewers"`  // сколько браузеров смотрит сейчас
-	Frames   int64 `json:"frames"`   // кадров разослано
-	Tiles    int64 `json:"tiles"`    // тайлов в них
-	Bytes    int64 `json:"bytes"`    // суммарный объём тайлов (до умножения на зрителей)
-	Width    int   `json:"width"`    // размер холста, физические пиксели
-	Height   int   `json:"height"`   //
-	UptimeMS int64 `json:"uptimeMs"` // сколько сервер уже стримит
+	Viewers      int   `json:"viewers"`      // сколько браузеров смотрит сейчас
+	Frames       int64 `json:"frames"`       // кадров разослано
+	Tiles        int64 `json:"tiles"`        // тайлов в них
+	Bytes        int64 `json:"bytes"`        // суммарный объём тайлов (до умножения на зрителей)
+	Width        int   `json:"width"`        // размер холста, физические пиксели
+	Height       int   `json:"height"`       //
+	UptimeMS     int64 `json:"uptimeMs"`     // сколько сервер уже стримит
+	InputDropped int64 `json:"inputDropped"` // событий ввода отброшено (лимиты)
 }
 
 // Stats возвращает текущую сводку. Потокобезопасно.
@@ -71,31 +109,48 @@ func (s *Server) Stats() Stats {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Stats{
-		Viewers:  len(s.clients),
-		Frames:   s.frames,
-		Tiles:    s.tiles,
-		Bytes:    s.bytes,
-		Width:    s.w,
-		Height:   s.h,
-		UptimeMS: time.Since(s.started).Milliseconds(),
+		Viewers:      len(s.clients),
+		Frames:       s.frames,
+		Tiles:        s.tiles,
+		Bytes:        s.bytes,
+		Width:        s.w,
+		Height:       s.h,
+		UptimeMS:     time.Since(s.started).Milliseconds(),
+		InputDropped: s.dropped.Load(),
 	}
 }
 
-// New создаёт стример для движка.
-func New(eng *engine.Engine) *Server {
+// New создаёт стример для движка с настройками по умолчанию.
+func New(eng *engine.Engine) *Server { return NewWithOptions(eng, Options{}) }
+
+// NewWithOptions создаёт стример с токеном доступа, allowlist и лимитом зрителей.
+func NewWithOptions(eng *engine.Engine, opts Options) *Server {
+	if opts.MaxClients <= 0 {
+		opts.MaxClients = defaultMaxClients
+	}
 	w, h := eng.PhysicalSize()
 	return &Server{
 		eng:       eng,
-		clients:   make(map[*wsConn]chan outMsg),
+		opts:      opts,
+		clients:   make(map[*wsConn]*client),
 		composite: image.NewRGBA(image.Rect(0, 0, w, h)),
 		w:         w,
 		h:         h,
 		started:   time.Now(),
+		snapSem:   make(chan struct{}, maxSnapshotJobs),
+		input:     make(chan inputEvent, inputQueueSize),
+		stop:      make(chan struct{}),
+
+		readTimeout:  defaultReadTimeout,
+		writeTimeout: defaultWriteTimeout,
+		pingInterval: defaultPingInterval,
 	}
 }
 
 // Run потребляет канал кадров движка до его закрытия (обычно в goroutine).
 func (s *Server) Run() {
+	s.startInput()
+	defer s.Close()
 	for f := range s.eng.Frames() {
 		if len(f.Tiles) == 0 {
 			continue
@@ -104,23 +159,68 @@ func (s *Server) Run() {
 		for _, t := range f.Tiles {
 			s.applyTile(t)
 		}
-		msg, err := encodeTiles(f.Tiles)
+		s.frames++
+		s.tiles += int64(len(f.Tiles))
+		s.mu.Unlock()
+
+		msg, err := encodeTiles(f.Tiles) // кодирование вне s.mu
 		if err != nil {
-			s.mu.Unlock()
 			log.Printf("webstream: кодирование кадра %d: %v", f.Seq, err)
 			continue
 		}
-		s.frames++
-		s.tiles += int64(len(f.Tiles))
+
+		s.mu.Lock()
 		s.bytes += int64(len(msg))
-		for _, ch := range s.clients {
+		lost := false
+		for _, c := range s.clients {
+			if c.needKF {
+				lost = true
+				continue
+			}
 			select {
-			case ch <- outMsg{op: opBinary, data: msg}:
-			default: // медленный клиент — кадр пропускается (дельты догонят)
+			case c.ch <- outMsg{op: opBinary, data: msg}:
+			default: // медленный клиент — дельта пропущена, дошлём полный кадр
+				c.needKF = true
+				lost = true
 			}
 		}
 		s.mu.Unlock()
+		if lost {
+			s.sendKeyframes()
+		}
 	}
+}
+
+// Close останавливает диспетчер ввода и разрывает соединения вьюверов.
+func (s *Server) Close() error {
+	s.stopOne.Do(func() { close(s.stop) })
+	s.mu.Lock()
+	for ws := range s.clients {
+		ws.Close()
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+// sendKeyframes досылает полный кадр клиентам, потерявшим дельту.
+func (s *Server) sendKeyframes() {
+	kf, err := s.keyframeMsg()
+	if err != nil {
+		log.Printf("webstream: keyframe: %v", err)
+		return
+	}
+	s.mu.Lock()
+	for _, c := range s.clients {
+		if !c.needKF {
+			continue
+		}
+		select {
+		case c.ch <- outMsg{op: opBinary, data: kf}:
+			c.needKF = false
+		default:
+		}
+	}
+	s.mu.Unlock()
 }
 
 // applyTile вносит тайл в композит (под s.mu).
@@ -132,8 +232,8 @@ func (s *Server) applyTile(t output.DirtyTile) {
 	}
 }
 
-// keyframe формирует полный снимок композита в виде сетки тайлов (под s.mu).
-func (s *Server) keyframe() ([]byte, error) {
+// snapshotTiles режет композит на сетку тайлов (под s.mu).
+func (s *Server) snapshotTiles() []output.DirtyTile {
 	var tiles []output.DirtyTile
 	for y := 0; y < s.h; y += output.TileSize {
 		for x := 0; x < s.w; x += output.TileSize {
@@ -152,7 +252,60 @@ func (s *Server) keyframe() ([]byte, error) {
 			tiles = append(tiles, output.DirtyTile{X: x, Y: y, W: w, H: h, Data: data})
 		}
 	}
-	return encodeTiles(tiles)
+	return tiles
+}
+
+// keyframeMsg возвращает полный кадр из кэша либо кодирует его вне s.mu.
+func (s *Server) keyframeMsg() ([]byte, error) {
+	s.mu.Lock()
+	seq := s.frames
+	if s.kfMsg != nil && s.kfSeq == seq {
+		msg := s.kfMsg
+		s.mu.Unlock()
+		return msg, nil
+	}
+	tiles := s.snapshotTiles()
+	s.mu.Unlock()
+
+	msg, err := encodeTiles(tiles)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	if s.kfMsg == nil || seq >= s.kfSeq {
+		s.kfMsg, s.kfSeq = msg, seq
+	}
+	s.mu.Unlock()
+	return msg, nil
+}
+
+// snapshotPNG возвращает холст одним PNG: кэш на кадр, кодирование вне s.mu.
+func (s *Server) snapshotPNG() ([]byte, error) {
+	s.mu.Lock()
+	seq := s.frames
+	if s.snapPNG != nil && s.snapSeq == seq {
+		b := s.snapPNG
+		s.mu.Unlock()
+		return b, nil
+	}
+	snap := image.NewRGBA(s.composite.Rect)
+	copy(snap.Pix, s.composite.Pix)
+	s.mu.Unlock()
+
+	s.snapSem <- struct{}{} // не больше двух кодировок разом
+	defer func() { <-s.snapSem }()
+
+	var buf bytes.Buffer
+	if err := pngEncoder.Encode(&buf, snap); err != nil {
+		return nil, err
+	}
+	b := buf.Bytes()
+	s.mu.Lock()
+	if s.snapPNG == nil || seq >= s.snapSeq {
+		s.snapPNG, s.snapSeq = b, seq
+	}
+	s.mu.Unlock()
+	return b, nil
 }
 
 // pngEncoder — общий кодировщик PNG для тайлов.
@@ -259,6 +412,20 @@ func (s *Server) encodeInit() []byte {
 	return msg
 }
 
+// authorized проверяет токен доступа: ?token= или Authorization: Bearer.
+func (s *Server) authorized(r *http.Request) bool {
+	if s.opts.Token == "" {
+		return true
+	}
+	got := r.URL.Query().Get("token")
+	if got == "" {
+		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+			got = strings.TrimPrefix(h, "Bearer ")
+		}
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(s.opts.Token)) == 1
+}
+
 // ServeHTTP: "/" — встроенный вьювер, "/ws" — поток тайлов + ввод,
 // "/stats" — сводка по стриму в JSON.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -266,16 +433,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/", "/index.html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(viewerHTML)
+		return
+	}
+	if !s.authorized(r) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="webstream"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	switch r.URL.Path {
 	case "/snapshot.png":
 		// Текущее состояние холста одним PNG: удобно для скриншотов в
 		// документации, для мониторинга и для тестов, которым не нужен
 		// WebSocket.
-		s.mu.Lock()
-		snap := image.NewRGBA(s.composite.Rect)
-		copy(snap.Pix, s.composite.Pix)
-		s.mu.Unlock()
+		b, err := s.snapshotPNG()
+		if err != nil {
+			http.Error(w, "encode failed", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "image/png")
-		_ = png.Encode(w, snap)
+		w.Write(b)
 	case "/stats":
 		// Вьювер показывает эти числа в строке состояния; приложению они
 		// пригодятся для мониторинга (сколько зрителей, сколько трафика).
@@ -289,11 +465,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
-	ws, err := upgradeWS(w, r)
+	s.mu.Lock()
+	full := len(s.clients) >= s.opts.MaxClients
+	s.mu.Unlock()
+	if full {
+		http.Error(w, "too many viewers", http.StatusServiceUnavailable)
+		return
+	}
+	ws, err := upgradeWS(w, r, wsConfig{
+		allowedOrigins: s.opts.AllowedOrigins,
+		readTimeout:    s.readTimeout,
+		writeTimeout:   s.writeTimeout,
+	})
 	if err != nil {
 		return
 	}
 	defer ws.Close()
+	s.startInput()
 
 	// Первый зритель может подключиться раньше, чем движок нарисовал хоть
 	// один кадр (при рендере по требованию кадр рождается только на
@@ -308,23 +496,29 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		s.waitFirstFrame(time.Second)
 	}
 
-	// Регистрация + init + keyframe (под мьютексом, чтобы не потерять
-	// дельты между снимком и подпиской).
-	out := make(chan outMsg, 60)
+	c := &client{ch: make(chan outMsg, clientQueueSize)}
 	s.mu.Lock()
-	kf, kerr := s.keyframe()
-	s.clients[ws] = out
+	s.clients[ws] = c
 	s.mu.Unlock()
-	if kerr != nil {
-		log.Printf("webstream: keyframe: %v", kerr)
-		return
-	}
 	defer func() {
 		s.mu.Lock()
 		delete(s.clients, ws)
 		s.mu.Unlock()
 	}()
 
+	kf, err := s.keyframeMsg()
+	if err != nil {
+		log.Printf("webstream: keyframe: %v", err)
+		return
+	}
+	// Дельты, накопленные до снимка, устарели — keyframe их перекрывает.
+	for drained := false; !drained; {
+		select {
+		case <-c.ch:
+		default:
+			drained = true
+		}
+	}
 	if err := ws.WriteMessage(opBinary, s.encodeInit()); err != nil {
 		return
 	}
@@ -332,31 +526,47 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Писатель: кадры из канала → сокет.
+	// Писатель: кадры из канала и серверные ping → сокет.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for m := range out {
-			if err := ws.WriteMessage(m.op, m.data); err != nil {
+		defer ws.Close() // застрявший писатель будит читателя
+		t := time.NewTicker(s.pingInterval)
+		defer t.Stop()
+		for {
+			select {
+			case m, ok := <-c.ch:
+				if !ok {
+					return
+				}
+				if err := ws.WriteMessage(m.op, m.data); err != nil {
+					return
+				}
+			case <-t.C:
+				if err := ws.WriteMessage(opPing, nil); err != nil {
+					return
+				}
+			case <-s.stop:
 				return
 			}
 		}
 	}()
 
-	// Читатель: JSON-события ввода → движок.
+	// Читатель: JSON-события ввода → очередь диспетчера.
+	lim := &bucket{}
 	for {
 		op, data, err := ws.ReadMessage()
 		if err != nil {
 			break
 		}
-		if op == opText {
-			s.dispatchInput(data, out)
+		if op == opText && len(data) <= maxInputMessage {
+			s.handleInput(data, c, lim)
 		}
 	}
 	s.mu.Lock()
 	delete(s.clients, ws)
 	s.mu.Unlock()
-	close(out)
+	close(c.ch)
 	<-done
 }
 
@@ -381,64 +591,31 @@ type outMsg struct {
 	data []byte
 }
 
-// inputEvent — событие ввода от браузерного клиента.
-type inputEvent struct {
-	T  string  `json:"t"`            // "mm" | "mb" | "wh" | "kd" | "ku" | "pg"
-	TS float64 `json:"ts,omitempty"` // метка времени пинга — возвращается как есть
-	X  int     `json:"x,omitempty"`  // координаты (физические пиксели холста)
-	Y  int     `json:"y,omitempty"`
-	B  int     `json:"b,omitempty"` // кнопка (widget.MouseButton)
-	P  bool    `json:"p,omitempty"` // pressed
-	D  int     `json:"d,omitempty"` // направление колеса: -1 вверх, +1 вниз
-	C  int     `json:"c,omitempty"` // KeyCode (совпадает с VK/keyCode браузера)
-	R  int     `json:"r,omitempty"` // руна (codepoint) для печатных клавиш
-	M  int     `json:"m,omitempty"` // модификаторы: 1=Ctrl 2=Shift 4=Alt
-}
-
-// dispatchInput транслирует событие клиента в движок.
-func (s *Server) dispatchInput(data []byte, out chan<- outMsg) {
-	var ev inputEvent
-	if err := json.Unmarshal(data, &ev); err != nil {
+// LogListen печатает фактический адрес прослушивания и предупреждает о рисках.
+func LogListen(addr, token string) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		log.Printf("webstream: слушаю %s", addr)
 		return
 	}
-	switch ev.T {
-	case "pg":
-		// Эхо-пинг: вьювер меряет задержку туда-обратно. Ответ уходит через
-		// канал писателя — писать в сокет из читающей горутины нельзя.
-		select {
-		case out <- outMsg{op: opText, data: []byte(fmt.Sprintf(`{"t":"pg","ts":%v}`, ev.TS))}:
-		default:
+	shown := addr
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		if host == "" {
+			host = "0.0.0.0"
 		}
-	case "mm":
-		s.eng.SendMouseMove(ev.X, ev.Y)
-	case "mb":
-		s.eng.SendMouseButton(ev.X, ev.Y, widget.MouseButton(ev.B), ev.P)
-	case "wh":
-		btn := widget.MouseWheelUp
-		if ev.D > 0 {
-			btn = widget.MouseWheelDown
-		}
-		s.eng.SendMouseButton(ev.X, ev.Y, btn, true)
-	case "kd", "ku":
-		mod := widget.KeyMod(0)
-		if ev.M&1 != 0 {
-			mod |= widget.ModCtrl
-		}
-		if ev.M&2 != 0 {
-			mod |= widget.ModShift
-		}
-		if ev.M&4 != 0 {
-			mod |= widget.ModAlt
-		}
-		r := rune(0)
-		if ev.R >= 32 && mod&widget.ModCtrl == 0 {
-			r = rune(ev.R)
-		}
-		s.eng.SendKeyEvent(widget.KeyEvent{
-			Code:    widget.KeyCode(ev.C),
-			Rune:    r,
-			Mod:     mod,
-			Pressed: ev.T == "kd",
-		})
+		shown = host + ":" + port + " (все интерфейсы!)"
 	}
+	log.Printf("webstream: слушаю http://%s", shown)
+	if !loopbackHost(host) && token == "" {
+		log.Printf("webstream: ВНИМАНИЕ — доступ снаружи без токена и без TLS; задайте -token и ставьте за TLS-прокси")
+	}
+}
+
+// loopbackHost — адрес виден только с этой машины.
+func loopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }

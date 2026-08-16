@@ -119,7 +119,10 @@ function sync() {
 }
 
 // ─── Поток тайлов ────────────────────────────────────────────────────────────
-const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+// Токен доступа берётся из адреса страницы и передаётся дальше сам.
+const token = new URLSearchParams(location.search).get("token") || "";
+const auth  = token ? "?token=" + encodeURIComponent(token) : "";
+const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws" + auth);
 ws.binaryType = "arraybuffer";
 
 let queue = Promise.resolve();   // сообщения обрабатываются строго по порядку
@@ -185,7 +188,7 @@ setInterval(ping, 2000);
 // Число зрителей берём из сводки сервера.
 async function stats() {
   try {
-    const r = await fetch("/stats");
+    const r = await fetch("/stats" + auth);
     const s = await r.json();
     elView.textContent = s.viewers;
   } catch (_) { /* сервер мог уйти */ }
