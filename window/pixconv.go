@@ -1,5 +1,7 @@
 package window
 
+import "image"
+
 // pixconv.go — платформенно-независимые преобразования пикселей для
 // презентации кадра (Win32 StretchDIBits, X11 PutImage — оба хотят BGRA).
 
@@ -28,5 +30,25 @@ func swapRBRow(dst, src []byte) {
 		d[1] = byte(u >> 8)
 		d[2] = byte(u >> 16)
 		d[3] = byte(u >> 24)
+	}
+}
+
+// convRectBGRX конвертирует RGBA→BGRX только внутри r (координаты общие для
+// src и dst). Старший байт ставится 0xFF: формат буфера XRGB8888.
+func convRectBGRX(dst []byte, dstStride int, src []byte, srcStride int, r image.Rectangle) {
+	if r.Empty() || dstStride <= 0 || srcStride <= 0 {
+		return
+	}
+	rowLen := r.Dx() * 4
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		so := y*srcStride + r.Min.X*4
+		do := y*dstStride + r.Min.X*4
+		if so < 0 || do < 0 || so+rowLen > len(src) || do+rowLen > len(dst) {
+			return
+		}
+		swapRBRow(dst[do:do+rowLen], src[so:so+rowLen])
+		for x := 3; x < rowLen; x += 4 {
+			dst[do+x] = 0xFF
+		}
 	}
 }

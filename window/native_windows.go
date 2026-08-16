@@ -377,11 +377,49 @@ func lookupWin32(hwnd uintptr) *Win32Window {
 
 // ─── Маршалинг колбэков на UI-поток (InvokeOnUIThread) ──────────────────────
 
+// uiCall — отложенный колбэк вместе с окном-адресатом.
+type uiCall struct {
+	hwnd uintptr
+	fn   func()
+}
+
 var (
 	uiCallMu  sync.Mutex
 	uiCallSeq uintptr
-	uiCalls   = map[uintptr]func(){}
+	uiCalls   = map[uintptr]uiCall{}
 )
+
+// queueUICall кладёт колбэк в очередь и возвращает его id.
+func queueUICall(hwnd uintptr, fn func()) uintptr {
+	uiCallMu.Lock()
+	defer uiCallMu.Unlock()
+	uiCallSeq++
+	uiCalls[uiCallSeq] = uiCall{hwnd: hwnd, fn: fn}
+	return uiCallSeq
+}
+
+// takeUICall забирает колбэк по id (или nil, если его уже нет).
+func takeUICall(id uintptr) func() {
+	uiCallMu.Lock()
+	defer uiCallMu.Unlock()
+	c := uiCalls[id]
+	delete(uiCalls, id)
+	return c.fn
+}
+
+// dropUICalls выбрасывает колбэки разрушенного окна: их WM_APP уже не придёт.
+func dropUICalls(hwnd uintptr) int {
+	uiCallMu.Lock()
+	defer uiCallMu.Unlock()
+	n := 0
+	for id, c := range uiCalls {
+		if c.hwnd == hwnd {
+			delete(uiCalls, id)
+			n++
+		}
+	}
+	return n
+}
 
 // InvokeOnUIThread выполняет fn на потоке цикла сообщений окна (PostMessage
 // WM_APP). Безопасно из любой горутины. Если вызвать с уже-UI-потока (изнутри
@@ -390,12 +428,11 @@ func (w *Win32Window) InvokeOnUIThread(fn func()) {
 	if fn == nil || w.hwnd == 0 {
 		return
 	}
-	uiCallMu.Lock()
-	uiCallSeq++
-	id := uiCallSeq
-	uiCalls[id] = fn
-	uiCallMu.Unlock()
-	procPostMessageW.Call(uintptr(w.hwnd), uintptr(wmApp), id, 0)
+	hwnd := uintptr(w.hwnd)
+	id := queueUICall(hwnd, fn)
+	if ret, _, _ := procPostMessageW.Call(hwnd, uintptr(wmApp), id, 0); ret == 0 {
+		takeUICall(id) // окно уже мертво — колбэк не доедет
+	}
 }
 
 // SetOwner делает окно принадлежащим parent (Win32 GWLP_HWNDPARENT): оно всегда
@@ -999,11 +1036,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 
 	case wmApp:
 		// Маршалинг колбэка на UI-поток (см. InvokeOnUIThread).
-		uiCallMu.Lock()
-		fn := uiCalls[wparam]
-		delete(uiCalls, wparam)
-		uiCallMu.Unlock()
-		if fn != nil {
+		if fn := takeUICall(wparam); fn != nil {
 			fn()
 		}
 		return 0
@@ -1051,6 +1084,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		win32Mu.Lock()
 		delete(win32Windows, hwnd)
 		win32Mu.Unlock()
+		dropUICalls(hwnd) // WM_APP этому окну уже не придёт
 		// Вторичные окна модалок (noQuit) не завершают цикл сообщений — иначе
 		// закрытие диалога уронило бы всё приложение. Главное окно — завершает.
 		if !w.noQuit {

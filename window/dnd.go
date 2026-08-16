@@ -2,6 +2,9 @@ package window
 
 import "strings"
 
+// maxDnDBytes — потолок на данные перетаскивания от пира (16 МиБ).
+const maxDnDBytes = 16 << 20
+
 // filesDropTarget — опциональная возможность нативного бэкенда принимать файлы,
 // перетащенные из ОС (проводник / файловый менеджер) в окно. Реализуется
 // бэкендами Win32 (WM_DROPFILES), X11 (XDND) и Wayland (wl_data_device);
@@ -40,9 +43,8 @@ func parseURIList(data string) []string {
 }
 
 // fileURIToPath переводит один file:// URI в локальный путь. ok=false, если
-// схема не file. Форматы: "file:///path", "file://host/path", "file:/path".
-// Hostname (между "//" и следующим "/") отбрасывается — путь всегда начинается
-// со слэша корня. %XX декодируется.
+// схема не file. Форматы: "file:///path", "file://localhost/path", "file:/path".
+// Чужой hostname отклоняется — файл не локальный. %XX декодируется.
 func fileURIToPath(uri string) (string, bool) {
 	const scheme = "file:"
 	if !strings.HasPrefix(uri, scheme) {
@@ -51,11 +53,14 @@ func fileURIToPath(uri string) (string, bool) {
 	rest := uri[len(scheme):]
 	if strings.HasPrefix(rest, "//") {
 		rest = rest[2:]
-		// Отбрасываем hostname до первого '/'. Если '/' нет — путь пуст.
+		host := rest
 		if i := strings.IndexByte(rest, '/'); i >= 0 {
-			rest = rest[i:]
+			host, rest = rest[:i], rest[i:]
 		} else {
 			rest = ""
+		}
+		if host != "" && !strings.EqualFold(host, "localhost") {
+			return "", false
 		}
 	}
 	return percentDecode(rest), true

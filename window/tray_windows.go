@@ -138,11 +138,11 @@ func (w *Win32Window) setTrayIcon(icon image.Image, tooltip string) error {
 	}
 	ret, _, _ := procShellNotifyIconW.Call(msg, uintptr(unsafe.Pointer(&nid)))
 
-	// Уничтожаем прежнюю иконку после успешной замены.
-	if w.trayHIcon != 0 {
-		procDestroyIcon.Call(uintptr(w.trayHIcon))
+	keep, drop := trayIconAfterNotify(ret != 0, w.trayHIcon, hicon)
+	if drop != 0 {
+		procDestroyIcon.Call(uintptr(drop))
 	}
-	w.trayHIcon = hicon
+	w.trayHIcon = keep
 	if ret == 0 {
 		return errTrayUnsupported
 	}
@@ -150,13 +150,22 @@ func (w *Win32Window) setTrayIcon(icon image.Image, tooltip string) error {
 	return nil
 }
 
-// removeTrayIcon убирает иконку из трея.
-func (w *Win32Window) removeTrayIcon() {
-	if w.hwnd == 0 || !w.trayAdded {
-		return
+// trayIconAfterNotify выбирает, какую иконку оставить, а какую уничтожить:
+// при успехе живёт новая, при неудаче — прежняя.
+func trayIconAfterNotify(ok bool, prev, next windows.Handle) (keep, drop windows.Handle) {
+	if ok {
+		return next, prev
 	}
-	nid := w.baseNotifyData()
-	procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&nid)))
+	return prev, next
+}
+
+// removeTrayIcon убирает иконку из трея. HICON уничтожается всегда, даже если
+// иконка так и не была добавлена.
+func (w *Win32Window) removeTrayIcon() {
+	if w.hwnd != 0 && w.trayAdded {
+		nid := w.baseNotifyData()
+		procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&nid)))
+	}
 	if w.trayHIcon != 0 {
 		procDestroyIcon.Call(uintptr(w.trayHIcon))
 		w.trayHIcon = 0

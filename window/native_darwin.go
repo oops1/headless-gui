@@ -357,6 +357,7 @@ func (w *CocoaWindow) RunEventLoop() error {
 
 	// NSDefaultRunLoopMode — создаём как NSString
 	defaultMode := nsString("kCFRunLoopDefaultMode")
+	defer defaultMode.Send(selRelease)
 
 	for !w.closed {
 		// nextEventMatchingMask:untilDate:inMode:dequeue:
@@ -474,6 +475,7 @@ func (w *CocoaWindow) setCocoaTitle(title string) {
 	if w.nsWindow != 0 {
 		nsStr := nsString(title)
 		w.nsWindow.Send(selSetTitle, uintptr(nsStr))
+		nsStr.Send(selRelease) // setTitle: копирует строку
 	}
 }
 
@@ -545,15 +547,7 @@ func (w *CocoaWindow) BlitRGBA(img *image.RGBA) {
 	}
 
 	// CALayer-путь: пиксели → CFData (копия) → CGImage → layer.contents.
-	// Без переворота Y: CGImage отображается в contents в естественной
-	// ориентации (строка 0 — верх).
-	//
-	// SEC-6: CFDataCreate КОПИРУЕТ пиксели синхронно, здесь и сейчас — в память,
-	// которой владеет CoreFoundation. Прежний вариант (CGDataProviderCreateWithData
-	// поверх Go-слайса без release-колбэка) оставлял Core Animation указатель в
-	// Go-кучу: после ресайза буфер пересоздавался, старый уходил в GC, а слой мог
-	// прочитать освобождённую память. Одна копия кадра (~1 мс на 1080p) — та же
-	// цена, что была у прежнего copy в двойной буфер, но без use-after-free.
+	// Копия обязательна: слой не должен держать указатель в Go-кучу.
 	pixLen := height * img.Stride
 	if pixLen <= 0 || len(img.Pix) < pixLen {
 		return
@@ -591,6 +585,15 @@ func (w *CocoaWindow) BlitRGBA(img *image.RGBA) {
 	// Слой удерживает contents; наши ссылки больше не нужны.
 	cgImageRelease(cgImg)
 	cgDataProviderRelease(provider)
+}
+
+// BlitRGBADirty пропускает кадр без изменений. Частичного обновления нет:
+// contents слоя требует CGImage целиком.
+func (w *CocoaWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
+	if img == nil || dirty.Intersect(img.Bounds()).Empty() {
+		return
+	}
+	w.BlitRGBA(img)
 }
 
 // blitRGBALegacy — прежний путь вывода через NSBitmapImageRep + NSImage +
