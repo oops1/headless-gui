@@ -48,6 +48,13 @@ type ScrollView struct {
 	dragStartY     int
 	dragStartScr   int
 	thumbHovered   bool
+
+	// Кэш транслирующей обёртки DrawContext (PERF-12, см. Draw): создаётся один
+	// раз на конкретный внешний контекст и переиспользуется между кадрами.
+	// Трогается ТОЛЬКО из Draw (рендер-горутина), поэтому мьютекс не нужен.
+	offCtx     DrawContext
+	offCtxBase *svOffsetCtx
+	offCtxFor  DrawContext
 }
 
 // Параметры инерции ScrollView.
@@ -181,19 +188,29 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 	contentW := sv.contentWidth()
 	ctx.SetClip(image.Rect(b.Min.X, b.Min.Y, b.Min.X+contentW, b.Max.Y))
 
-	// Рисуем дочерние элементы со смещением
-	// Каждый дочерний виджет должен быть позиционирован относительно ScrollView.
-	// Мы сдвигаем их bounds на -scrollY перед отрисовкой и возвращаем обратно.
+	// Рисуем дочерние элементы со смещением.
+	//
+	// PERF-12: смещение даёт транслирующая обёртка DrawContext, а НЕ временная
+	// подмена bounds ребёнка. Прежний код делал SetBounds(shifted) → Draw →
+	// SetBounds(orig), и это было плохо сразу трижды:
+	//   - гонка данных: hit-test/обработка мыши идут в ДРУГОЙ горутине (события
+	//     не берут frameMu) и могли прочитать сдвинутые bounds;
+	//   - Base.SetBounds шлёт notifyRectChanged → движок инвалидировался на
+	//     КАЖДОМ кадре, и on-demand рендер с живым ScrollView никогда не засыпал;
+	//   - три лишних вызова на ребёнка за кадр.
+	// Рисуемый результат идентичен: ребёнок отдаёт свои (несдвинутые) координаты,
+	// обёртка вычитает scrollY на входе в канвас.
+	childCtx := ctx
+	if scrollY != 0 {
+		childCtx = sv.offsetContext(ctx, scrollY)
+	}
 	for _, child := range sv.children {
-		origBounds := child.Bounds()
-		shifted := origBounds.Add(image.Pt(0, -scrollY))
+		shifted := child.Bounds().Add(image.Pt(0, -scrollY))
 		// Пропускаем невидимые элементы
 		if shifted.Max.Y < b.Min.Y || shifted.Min.Y > b.Max.Y {
 			continue
 		}
-		child.SetBounds(shifted)
-		child.Draw(ctx)
-		child.SetBounds(origBounds) // восстанавливаем
+		child.Draw(childCtx)
 	}
 
 	ctx.ClearClip()
@@ -226,6 +243,172 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 	}
 
 	sv.drawDisabledOverlay(ctx)
+}
+
+// ─── Транслирующий DrawContext (PERF-12) ─────────────────────────────────────
+
+// svOffsetCtx — обёртка DrawContext, сдвигающая все координаты рисования на
+// -dy по вертикали. Позволяет ScrollView рисовать содержимое прокрученным, не
+// трогая bounds дочерних виджетов (см. Draw).
+//
+// Опциональные интерфейсы контекста: AAShapes пробрасывается отдельным типом
+// (svOffsetCtxAA), чтобы обёртка НЕ заявляла его, когда внутренний контекст его
+// не поддерживает — иначе виджеты потеряли бы свой откат на не-AA отрисовку.
+// DrawContextAlpha удовлетворяется автоматически (FillRectAlpha входит в
+// DrawContext). Scale() безопасно заявлять всегда: контекст без HiDPI отдаёт 1,
+// что для потребителей (drawLinearGradient) равносильно отсутствию интерфейса.
+// Snapshotter НЕ пробрасывается сознательно: он нужен только оверлею
+// DockManager, который рисуется движком поверх дерева, а не внутри ScrollView.
+type svOffsetCtx struct {
+	inner DrawContext
+	dy    int
+}
+
+// svOffsetCtxAA — вариант обёртки для контекстов со сглаженными примитивами.
+type svOffsetCtxAA struct {
+	svOffsetCtx
+	aa AAShapes
+}
+
+var (
+	_ DrawContext      = (*svOffsetCtx)(nil)
+	_ DrawContextAlpha = (*svOffsetCtx)(nil)
+	_ AAShapes         = (*svOffsetCtxAA)(nil)
+)
+
+// offsetContext возвращает обёртку над ctx со сдвигом dy, переиспользуя ранее
+// созданную (внешний контекст между кадрами один и тот же). Вызывается только
+// из Draw — рендер-горутина единственная.
+func (sv *ScrollView) offsetContext(ctx DrawContext, dy int) DrawContext {
+	if sv.offCtx == nil || sv.offCtxFor != ctx {
+		if aa, ok := ctx.(AAShapes); ok {
+			w := &svOffsetCtxAA{svOffsetCtx: svOffsetCtx{inner: ctx}, aa: aa}
+			sv.offCtx, sv.offCtxBase = w, &w.svOffsetCtx
+		} else {
+			w := &svOffsetCtx{inner: ctx}
+			sv.offCtx, sv.offCtxBase = w, w
+		}
+		sv.offCtxFor = ctx
+	}
+	sv.offCtxBase.dy = dy
+	return sv.offCtx
+}
+
+func (o *svOffsetCtx) FillRect(x, y, w, h int, col color.RGBA) {
+	o.inner.FillRect(x, y-o.dy, w, h, col)
+}
+
+func (o *svOffsetCtx) FillRectAlpha(x, y, w, h int, col color.RGBA) {
+	o.inner.FillRectAlpha(x, y-o.dy, w, h, col)
+}
+
+func (o *svOffsetCtx) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
+	o.inner.FillRoundRect(x, y-o.dy, w, h, r, col)
+}
+
+func (o *svOffsetCtx) DrawBorder(x, y, w, h int, col color.RGBA) {
+	o.inner.DrawBorder(x, y-o.dy, w, h, col)
+}
+
+func (o *svOffsetCtx) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
+	o.inner.DrawRoundBorder(x, y-o.dy, w, h, r, col)
+}
+
+func (o *svOffsetCtx) SetPixel(x, y int, col color.RGBA) {
+	o.inner.SetPixel(x, y-o.dy, col)
+}
+
+func (o *svOffsetCtx) DrawHLine(x, y, length int, col color.RGBA) {
+	o.inner.DrawHLine(x, y-o.dy, length, col)
+}
+
+func (o *svOffsetCtx) DrawVLine(x, y, length int, col color.RGBA) {
+	o.inner.DrawVLine(x, y-o.dy, length, col)
+}
+
+func (o *svOffsetCtx) DrawImage(src image.Image, x, y int) {
+	o.inner.DrawImage(src, x, y-o.dy)
+}
+
+func (o *svOffsetCtx) DrawImageScaled(src image.Image, x, y, w, h int) {
+	o.inner.DrawImageScaled(src, x, y-o.dy, w, h)
+}
+
+func (o *svOffsetCtx) DrawText(text string, x, y int, col color.RGBA) {
+	o.inner.DrawText(text, x, y-o.dy, col)
+}
+
+func (o *svOffsetCtx) DrawTextSize(text string, x, y int, sizePt float64, col color.RGBA) {
+	o.inner.DrawTextSize(text, x, y-o.dy, sizePt, col)
+}
+
+func (o *svOffsetCtx) DrawTextFont(text string, x, y int, sizePt float64, fontName string, col color.RGBA) {
+	o.inner.DrawTextFont(text, x, y-o.dy, sizePt, fontName, col)
+}
+
+func (o *svOffsetCtx) MeasureText(text string, sizePt float64) int {
+	return o.inner.MeasureText(text, sizePt)
+}
+
+func (o *svOffsetCtx) MeasureTextFont(text string, sizePt float64, fontName string) int {
+	return o.inner.MeasureTextFont(text, sizePt, fontName)
+}
+
+func (o *svOffsetCtx) MeasureRunePositions(text string, sizePt float64) []int {
+	return o.inner.MeasureRunePositions(text, sizePt)
+}
+
+func (o *svOffsetCtx) SetClip(r image.Rectangle) {
+	o.inner.SetClip(r.Sub(image.Pt(0, o.dy)))
+}
+
+func (o *svOffsetCtx) ClearClip() { o.inner.ClearClip() }
+
+// Clip возвращает область отсечения в системе координат ДЕТЕЙ (несдвинутой):
+// внутренний клип + dy — симметрично SetClip.
+func (o *svOffsetCtx) Clip() image.Rectangle {
+	return o.inner.Clip().Add(image.Pt(0, o.dy))
+}
+
+// Scale проксирует HiDPI-масштаб внутреннего контекста (physicalScaler).
+// Контекст без масштаба отдаёт 1 — как если бы интерфейса не было вовсе.
+func (o *svOffsetCtx) Scale() float64 {
+	if ps, ok := o.inner.(physicalScaler); ok {
+		return ps.Scale()
+	}
+	return 1
+}
+
+func (o *svOffsetCtxAA) FillEllipseAA(cx, cy, rx, ry int, col color.RGBA) {
+	o.aa.FillEllipseAA(cx, cy-o.dy, rx, ry, col)
+}
+
+func (o *svOffsetCtxAA) StrokeEllipseAA(cx, cy, rx, ry int, thickness float64, col color.RGBA) {
+	o.aa.StrokeEllipseAA(cx, cy-o.dy, rx, ry, thickness, col)
+}
+
+func (o *svOffsetCtxAA) FillPolygonAA(pts []image.Point, col color.RGBA) {
+	o.aa.FillPolygonAA(o.shift(pts), col)
+}
+
+func (o *svOffsetCtxAA) StrokePolylineAA(pts []image.Point, thickness float64, closed bool, col color.RGBA) {
+	o.aa.StrokePolylineAA(o.shift(pts), thickness, closed, col)
+}
+
+func (o *svOffsetCtxAA) DrawLineAA(x1, y1, x2, y2 int, thickness float64, col color.RGBA) {
+	o.aa.DrawLineAA(x1, y1-o.dy, x2, y2-o.dy, thickness, col)
+}
+
+// shift возвращает копию точек, сдвинутых на -dy по вертикали.
+func (o *svOffsetCtxAA) shift(pts []image.Point) []image.Point {
+	if len(pts) == 0 || o.dy == 0 {
+		return pts
+	}
+	out := make([]image.Point, len(pts))
+	for i, p := range pts {
+		out[i] = image.Pt(p.X, p.Y-o.dy)
+	}
+	return out
 }
 
 // OnMouseButton обрабатывает клик на скроллбаре (drag ползунка) и колесо мыши.

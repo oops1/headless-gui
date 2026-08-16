@@ -644,20 +644,37 @@ func hitTest(w widget.Widget, x, y int) widget.Widget {
 // Путь: [root, ..., parent, hit]. Пустой срез — точка вне дерева.
 // Используется для event bubbling.
 func hitTestPath(w widget.Widget, x, y int) []widget.Widget {
+	return appendHitTestPath(nil, w, x, y)
+}
+
+// appendHitTestPath дописывает путь [w, ..., hit] в dst и возвращает результат;
+// nil — точка вне w.
+//
+// PERF-14: прежняя реализация на каждом уровне рекурсии делала
+// append([]Widget{w}, path...) — новый срез и полное копирование хвоста, т.е.
+// O(depth²) аллокаций и копий на каждое движение мыши. Здесь путь растёт в один
+// накопитель сверху вниз: одна амортизированная аллокация на весь путь.
+//
+// Аллиасинг безопасен: nil возвращается ТОЛЬКО до append (первые две проверки),
+// поэтому «протухшая» ссылка на dst у родителя после реаллокации в потомке
+// никогда не используется.
+func appendHitTestPath(dst []widget.Widget, w widget.Widget, x, y int) []widget.Widget {
 	if !widget.IsWidgetVisible(w) {
 		return nil
 	}
 	if !image.Pt(x, y).In(w.Bounds()) {
 		return nil
 	}
+	n := len(dst)
+	dst = append(dst, w)
 	// Проверяем детей в обратном Z-порядке
 	children := w.Children()
 	for i := len(children) - 1; i >= 0; i-- {
-		if path := hitTestPath(children[i], x, y); path != nil {
-			return append([]widget.Widget{w}, path...)
+		if path := appendHitTestPath(dst, children[i], x, y); path != nil {
+			return path
 		}
 	}
-	return []widget.Widget{w}
+	return dst[:n+1]
 }
 
 // findCapturer ищет виджет, который хочет захватить мышь, в цепочке предков

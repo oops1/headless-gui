@@ -359,13 +359,23 @@ func (fc *FontCache) HasGlyph(r rune) bool {
 	if r == ' ' {
 		return true
 	}
+	// PERF-14: попадание в кэш — под RLock (HasGlyph зовётся на КАЖДУЮ руну
+	// при активной fallback-цепочке). Write-lock берём только на промах.
+	fc.mu.RLock()
+	v, ok := fc.glyphPresent[r]
+	fc.mu.RUnlock()
+	if ok {
+		return v
+	}
+
+	// Промах: считаем cmap ВНЕ мьютекса нельзя — fc.buf разделяемый (sfnt.Buffer
+	// не потокобезопасен), поэтому расчёт идёт под write-lock, как и раньше.
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 	if fc.glyphPresent == nil {
 		fc.glyphPresent = make(map[rune]bool)
-	}
-	if v, ok := fc.glyphPresent[r]; ok {
-		return v
+	} else if v, ok := fc.glyphPresent[r]; ok {
+		return v // кто-то посчитал, пока мы ждали lock
 	}
 	gi, err := fc.ttf.GlyphIndex(&fc.buf, r)
 	present := err == nil && gi != 0
@@ -387,8 +397,8 @@ func systemFallbackFontPaths() []string {
 		fonts := filepath.Join(root, "Fonts")
 		return []string{
 			filepath.Join(fonts, "seguisym.ttf"), // Segoe UI Symbol: ✓✗⚠, стрелки, box-drawing
-			filepath.Join(fonts, "l_10646.ttf"),   // Lucida Sans Unicode: ✓✗ и пр.
-			filepath.Join(fonts, "arialuni.ttf"),  // Arial Unicode MS (если установлен)
+			filepath.Join(fonts, "l_10646.ttf"),  // Lucida Sans Unicode: ✓✗ и пр.
+			filepath.Join(fonts, "arialuni.ttf"), // Arial Unicode MS (если установлен)
 			filepath.Join(fonts, "DejaVuSans.ttf"),
 			filepath.Join(fonts, "arial.ttf"),    // латиница/кириллица/арабский/иврит
 			filepath.Join(fonts, "Nirmala.ttc"),  // Nirmala UI: индийские скрипты (деванагари и др.)

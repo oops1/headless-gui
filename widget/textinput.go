@@ -25,12 +25,12 @@ import (
 type TextInput struct {
 	Base
 
-	mu        sync.Mutex
-	runes     []rune // содержимое как []rune
-	caretPos  int    // позиция вставки (индекс в runes)
-	selStart  int    // начало выделения (-1 = нет)
-	selEnd    int    // конец выделения
-	scrollX   int    // горизонтальный сдвиг, пикселей
+	mu       sync.Mutex
+	runes    []rune         // содержимое как []rune
+	caretPos int            // позиция вставки (индекс в runes)
+	selStart int            // начало выделения (-1 = нет)
+	selEnd   int            // конец выделения
+	scrollX  int            // горизонтальный сдвиг, пикселей
 	dragging bool           // true — идёт выделение мышью (зажата ЛКМ)
 	capMgr   CaptureManager // инжектится движком через SetCaptureManager
 
@@ -40,6 +40,25 @@ type TextInput struct {
 	// Позиции символов от последнего Draw: positions[i] = X-сдвиг i-го символа от начала текста.
 	// Обновляется в Draw(), используется в OnMouseButton().
 	charPositions []int
+
+	// Кэш раскладки строки (PERF-11). Прежний Draw на КАЖДОМ кадре копировал
+	// руны, собирал строку (а в режиме пароля ещё и маску) и заново мерил
+	// позиции всех рун — при том что текст между кадрами обычно не меняется.
+	// Ключ кэша: отображаемая строка + кегль + ревизия метрик текста
+	// (widget.TextMetricsRev растёт при смене DPI/HiDPI-масштаба).
+	layoutText     string
+	layoutSize     float64
+	layoutRev      uint64
+	layoutMasked   bool // раскладка снята с маски пароля, а не с текста
+	layoutMaskRune rune // символ маски, которым снята раскладка
+	layoutRuneLen  int  // длина содержимого в рунах на момент снятия
+	layoutValid    bool
+
+	// caretPhase — фаза мигания каретки, ФАКТИЧЕСКИ отрисованная последним
+	// Draw; caretPhaseKnown — была ли каретка вообще нарисована.
+	// См. NeedsAnimation.
+	caretPhase      bool
+	caretPhaseKnown bool
 
 	Placeholder string
 
@@ -55,15 +74,15 @@ type TextInput struct {
 	focused bool
 
 	// Password mode
-	isPassword   bool  // true — режим пароля
-	showPassword bool  // true — показать пароль (по нажатию глазика)
-	eyeHovered   bool  // курсор над кнопкой-глазиком
-	MaskRune     rune  // символ маски (по умолчанию '●')
+	isPassword   bool // true — режим пароля
+	showPassword bool // true — показать пароль (по нажатию глазика)
+	eyeHovered   bool // курсор над кнопкой-глазиком
+	MaskRune     rune // символ маски (по умолчанию '●')
 
 	PaddingX int
 	PaddingY int
 
-	FontName string // именованный шрифт (RegisterFont); "" → default
+	FontName string  // именованный шрифт (RegisterFont); "" → default
 	FontSize float64 // размер шрифта в pt (0 → DefaultFontSizePt)
 
 	// AcceptsReturn: true — многострочный режим (WPF AcceptsReturn="True").
@@ -176,6 +195,13 @@ func (t *TextInput) SetText(text string) {
 	runes := []rune(text)
 	changed := string(t.runes) != text || t.caretPos != len(runes) ||
 		t.selStart != -1 || t.scrollX != 0
+	if t.isPassword {
+		// Прежний пароль затираем в памяти, а не просто отпускаем ссылку:
+		// строка живёт в бэкинг-массиве до реаллокации, и SetText("") — это
+		// именно тот момент, когда приложение ждёт, что пароля больше нет.
+		clear(t.runes)
+		t.undoStack, t.redoStack = nil, nil
+	}
 	t.runes = runes
 	t.caretPos = len(runes)
 	t.selStart = -1
@@ -281,10 +307,54 @@ func (t *TextInput) redo() {
 	t.selStart = -1
 }
 
-// NeedsAnimation — пока поле в фокусе, мигает каретка: в on-demand режиме
-// движок не должен пропускать кадры (Animated).
+// runesEqualString сравнивает срез рун со строкой без аллокаций
+// (string(rs) == s создало бы копию на каждом кадре — см. Draw).
+func runesEqualString(rs []rune, s string) bool {
+	i := 0
+	for _, r := range s {
+		if i >= len(rs) || rs[i] != r {
+			return false
+		}
+		i++
+	}
+	return i == len(rs)
+}
+
+// caretBlinkHalfPeriodMs — полупериод мигания каретки (мс, стиль Windows).
+const caretBlinkHalfPeriodMs = 530
+
+// caretPhaseAt возвращает фазу мигания каретки (true — каретка видима)
+// для момента времени ms (Unix-миллисекунды).
+func caretPhaseAt(ms int64) bool { return (ms/caretBlinkHalfPeriodMs)%2 == 0 }
+
+// NeedsAnimation — «нужен ли движку кадр ради мигающей каретки».
+//
+// PERF-11: раньше здесь возвращалось просто IsFocused(), и движок в on-demand
+// режиме рендерил ПОЛНЫЙ кадр всего дерева на целевом FPS (60 кадров в секунду
+// ради каретки, меняющейся ~2 раза в секунду) — весь смысл рендера по запросу
+// терялся, стоило поставить курсор в поле ввода.
+//
+// Теперь: пока фаза мигания совпадает с уже нарисованной — кадр не нужен
+// (false). Когда фаза сменилась — виджет инвалидирует ТОЛЬКО свой прямоугольник
+// и всё равно возвращает false: движок увидит новое поколение инвалидации на
+// следующем тике и отрисует ЧАСТИЧНЫЙ кадр по damage-области поля. Возврат true
+// здесь дал бы полный кадр (damage пуст → partial=false в renderFrame), то есть
+// ровно то, от чего мы уходим. Задержка — один тик (≤ 1/FPS) на полупериод
+// 530 мс, визуально незаметна.
 func (t *TextInput) NeedsAnimation() bool {
-	return t.IsFocused()
+	phase := caretPhaseAt(time.Now().UnixMilli())
+	t.mu.Lock()
+	if !t.focused || (t.caretPhaseKnown && t.caretPhase == phase) {
+		t.mu.Unlock()
+		return false // фазу менять не пора — перерисовывать нечего
+	}
+	// Запрошенную фазу фиксируем здесь же: иначе, если кадр по какой-то причине
+	// не дойдёт до Draw (виджет скрыт, кадр отброшен), мы бы инвалидировали на
+	// КАЖДОМ тике. Пропущенное мигание безобиднее непрерывной перерисовки.
+	t.caretPhase, t.caretPhaseKnown = phase, true
+	t.mu.Unlock()
+	t.Invalidate() // точечный damage по bounds поля
+	return false
 }
 
 // ─── ValidationAware ──────────────────────────────────────────────────────────
@@ -507,7 +577,12 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	}
 
 	// Запись в историю Undo (кроме самих операций undo/redo).
-	if changed && !isUndoRedo {
+	//
+	// В режиме пароля историю НЕ ведём: каждая запись — полный снимок текста
+	// в открытом виде, и после очистки поля Ctrl+Z восстанавливал бы пароль
+	// (аудит SEC-12). Copy/Cut в этом режиме уже заблокированы — undo был
+	// последней лазейкой.
+	if changed && !isUndoRedo && !t.isPassword {
 		t.undoStack = append(t.undoStack, before)
 		if len(t.undoStack) > 200 {
 			t.undoStack = t.undoStack[1:]
@@ -954,9 +1029,10 @@ func (t *TextInput) OnMouseMove(x, y int) {
 const eyeButtonWidth = 28
 
 func (t *TextInput) Draw(ctx DrawContext) {
+	const sizePt = DefaultFontSizePt
+	metricsRev := TextMetricsRev()
+
 	t.mu.Lock()
-	runes := make([]rune, len(t.runes))
-	copy(runes, t.runes)
 	isFocused := t.focused
 	caretPos := t.caretPos
 	selStart := t.selStart
@@ -966,11 +1042,33 @@ func (t *TextInput) Draw(ctx DrawContext) {
 	maskRune := t.MaskRune
 	eyeHov := t.eyeHovered
 	hasError := t.validationError != ""
-	t.mu.Unlock()
-
 	if maskRune == 0 {
 		maskRune = '●'
 	}
+	// Отображаемая строка: маска (скрытый пароль) или сам текст.
+	//
+	// PERF-11: сперва пробуем ПОПАСТЬ В КЭШ, не собирая строку — иначе на каждом
+	// кадре была бы аллокация (string(runes) плюс срез маски). Сравнение с
+	// закэшированной строкой идёт по рунам, без промежуточных копий.
+	// В режиме скрытого пароля открытый текст в строку не собирается вовсе
+	// (прежний код делал string(runes) всегда, даже под маской).
+	masked := isPwd && !showPwd && len(t.runes) > 0
+	var displayText string
+	var positions []int
+	if t.layoutValid && t.layoutSize == sizePt && t.layoutRev == metricsRev &&
+		t.layoutMasked == masked && t.layoutRuneLen == len(t.runes) &&
+		((masked && t.layoutMaskRune == maskRune) || (!masked && runesEqualString(t.runes, t.layoutText))) {
+		displayText, positions = t.layoutText, t.charPositions
+	} else if masked {
+		buf := make([]rune, len(t.runes))
+		for i := range buf {
+			buf[i] = maskRune
+		}
+		displayText = string(buf)
+	} else {
+		displayText = string(t.runes)
+	}
+	t.mu.Unlock()
 
 	b := t.bounds
 	if b.Empty() {
@@ -1014,7 +1112,6 @@ func (t *TextInput) Draw(ctx DrawContext) {
 		}
 	}
 
-	const sizePt = DefaultFontSizePt
 	const textH = 13
 
 	// В режиме пароля резервируем место под кнопку-глазик
@@ -1028,22 +1125,18 @@ func (t *TextInput) Draw(ctx DrawContext) {
 		textY = b.Min.Y + 2
 	}
 
-	// Текст для отображения: маскированный или реальный
-	displayText := string(runes)
-	if isPwd && !showPwd && len(runes) > 0 {
-		masked := make([]rune, len(runes))
-		for i := range masked {
-			masked[i] = maskRune
-		}
-		displayText = string(masked)
+	// Позиции символов (по отображаемому тексту): считаем ТОЛЬКО при промахе
+	// кэша раскладки — см. поля layout* и заполнение ключа ниже.
+	if positions == nil {
+		positions = ctx.MeasureRunePositions(displayText, sizePt) // len(runes)+1
 	}
-
-	// Позиции символов (по отображаемому тексту)
-	positions := ctx.MeasureRunePositions(displayText, sizePt) // len(runes)+1
 
 	// Обновляем сохранённые позиции и scrollX
 	t.mu.Lock()
 	t.charPositions = positions
+	t.layoutText, t.layoutSize, t.layoutRev = displayText, sizePt, metricsRev
+	t.layoutMasked, t.layoutMaskRune, t.layoutRuneLen = masked, maskRune, len(t.runes)
+	t.layoutValid = true
 
 	caretPx := 0
 	if caretPos < len(positions) {
@@ -1092,9 +1185,13 @@ func (t *TextInput) Draw(ctx DrawContext) {
 		ctx.DrawText(displayText, textX, textY, t.TextColor)
 	}
 
-	// Мигающий курсор
+	// Мигающий курсор. Отрисованную фазу запоминаем — по ней NeedsAnimation
+	// решает, нужен ли кадр (PERF-11).
 	if isFocused {
-		caretVisible := (time.Now().UnixMilli()/530)%2 == 0
+		caretVisible := caretPhaseAt(time.Now().UnixMilli())
+		t.mu.Lock()
+		t.caretPhase, t.caretPhaseKnown = caretVisible, true
+		t.mu.Unlock()
 		if caretVisible {
 			caretX := textX + caretPx
 			ctx.DrawVLine(caretX, textY, textH, t.CaretColor)

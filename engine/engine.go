@@ -100,8 +100,8 @@ type Engine struct {
 	hasLastMove          bool
 
 	frames chan output.Frame
-	quit     chan struct{}
-	done     chan struct{}
+	quit   chan struct{}
+	done   chan struct{}
 
 	fps     int     // целевой FPS, 1–120
 	userDPI float64 // пользовательский DPI шрифтов (без учёта HiDPI-масштаба)
@@ -111,9 +111,9 @@ type Engine struct {
 	// виджетов, в т.ч. когда движок уже держит e.mu (например, root.SetBounds
 	// из SetResolution) — брать e.mu там нельзя (RWMutex нереентерабелен).
 	scaleBits atomic.Uint64
-	saveDir  string       // если не пусто — сохранять PNG в эту директорию
-	saveCh   chan saveJob // канал для асинхронного сохранения
-	saveDone chan struct{} // закрывается, когда saveWorker завершил запись всех PNG
+	saveDir   string        // если не пусто — сохранять PNG в эту директорию
+	saveCh    chan saveJob  // канал для асинхронного сохранения
+	saveDone  chan struct{} // закрывается, когда saveWorker завершил запись всех PNG
 
 	// ── Tooltip ─────────────────────────────────────────────────────────────
 	ttMu       sync.Mutex
@@ -260,9 +260,13 @@ func injectCaptureManager(w widget.Widget, cm widget.CaptureManager) {
 }
 
 // Root возвращает текущий корневой виджет (или nil).
+//
+// Чтение указателя — под RLock (PERF-14): Root() зовут из горячих путей
+// (доступность, hit-test, отладка), и write-lock там сериализовал бы
+// параллельных читателей с рендер-горутиной без всякой нужды.
 func (e *Engine) Root() widget.Widget {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	return e.root
 }
 
@@ -508,8 +512,13 @@ func (e *Engine) SetDPI(dpi float64) {
 // Текущие виджеты немедленно получают новые цвета; новые виджеты будут создаваться
 // с обновлёнными цветами по умолчанию.
 func (e *Engine) SetTheme(t *widget.Theme) {
-	widget.ApplyGlobalTheme(t)
+	// Глобальную палитру (widget.ApplyGlobalTheme пишет в общие переменные
+	// пакета widget без блокировок) меняем ТОЛЬКО под frameMu: рендер-горутина
+	// внутри Draw читает те же глобалы, и запись до захвата замка была
+	// настоящей гонкой данных (аудит SEC-14). Под frameMu кадр гарантированно
+	// не идёт, поэтому и палитра, и цвета дерева меняются атомарно для рендера.
 	e.frameMu.Lock() // массовая мутация цветов дерева — не во время отрисовки
+	widget.ApplyGlobalTheme(t)
 	e.mu.RLock()
 	root := e.root
 	e.mu.RUnlock()
@@ -556,8 +565,8 @@ func (e *Engine) Stop() {
 	<-e.done
 	close(e.frames)
 	if e.saveCh != nil {
-		close(e.saveCh)   // saveWorker дочитает оставшиеся задачи
-		<-e.saveDone      // ждём пока все PNG записаны на диск
+		close(e.saveCh) // saveWorker дочитает оставшиеся задачи
+		<-e.saveDone    // ждём пока все PNG записаны на диск
 	}
 }
 

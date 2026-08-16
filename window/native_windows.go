@@ -17,63 +17,63 @@ import (
 
 const (
 	// Window styles
-	wsPopup       = 0x80000000
-	wsVisible     = 0x10000000
-	wsSysmenu     = 0x00080000
-	wsMinimizebox = 0x00020000
-	wsMaximizebox = 0x00010000
-	wsThickframe  = 0x00040000
+	wsPopup        = 0x80000000
+	wsVisible      = 0x10000000
+	wsSysmenu      = 0x00080000
+	wsMinimizebox  = 0x00020000
+	wsMaximizebox  = 0x00010000
+	wsThickframe   = 0x00040000
 	wsClipchildren = 0x02000000
 
 	// Extended styles
-	wsExAppwindow   = 0x00040000
-	wsExLayered     = 0x00080000
+	wsExAppwindow           = 0x00040000
+	wsExLayered             = 0x00080000
 	wsExNoredirectionbitmap = 0x00200000
 
 	// Messages
-	wmDestroy     = 0x0002
-	wmActivate    = 0x0006
-	wmSize        = 0x0005
-	wmClose       = 0x0010
-	wmPaint       = 0x000F
-	wmErasebkgnd  = 0x0014
-	wmMousemove   = 0x0200
-	wmLbuttondown    = 0x0201
-	wmLbuttonup      = 0x0202
-	wmLbuttondblclk  = 0x0203
-	wmRbuttondown    = 0x0204
-	wmRbuttonup      = 0x0205
-	wmRbuttondblclk  = 0x0206
-	wmMbuttondown    = 0x0207
-	wmMbuttonup      = 0x0208
-	wmMbuttondblclk  = 0x0209
-	wmMousewheel  = 0x020A
+	wmDestroy       = 0x0002
+	wmActivate      = 0x0006
+	wmSize          = 0x0005
+	wmClose         = 0x0010
+	wmPaint         = 0x000F
+	wmErasebkgnd    = 0x0014
+	wmMousemove     = 0x0200
+	wmLbuttondown   = 0x0201
+	wmLbuttonup     = 0x0202
+	wmLbuttondblclk = 0x0203
+	wmRbuttondown   = 0x0204
+	wmRbuttonup     = 0x0205
+	wmRbuttondblclk = 0x0206
+	wmMbuttondown   = 0x0207
+	wmMbuttonup     = 0x0208
+	wmMbuttondblclk = 0x0209
+	wmMousewheel    = 0x020A
 
 	// wheelDeltaWin — WHEEL_DELTA: единица «одного щелчка» колеса в WM_MOUSEWHEEL.
 	// wheelNotchPx — во сколько логических пикселей превращается один щелчок
 	// (соответствует шагу тикового колеса в движке — 40 px/notch).
-	wheelDeltaWin = 120.0
-	wheelNotchPx  = 40.0
-	wmKeydown     = 0x0100
-	wmKeyup       = 0x0101
-	wmChar        = 0x0102
-	wmDropfiles   = 0x0233 // WM_DROPFILES: wParam = HDROP (Drag&Drop файлов из ОС)
-	wmSyscommand  = 0x0112
-	wmNccalcsize  = 0x0083
-	wmNchittest   = 0x0084
-	wmGetminmaxinfo = 0x0024
-	wmNcactivate  = 0x0086
-	wmNcpaint     = 0x0085
-	wmDpichanged  = 0x02E0
+	wheelDeltaWin      = 120.0
+	wheelNotchPx       = 40.0
+	wmKeydown          = 0x0100
+	wmKeyup            = 0x0101
+	wmChar             = 0x0102
+	wmDropfiles        = 0x0233 // WM_DROPFILES: wParam = HDROP (Drag&Drop файлов из ОС)
+	wmSyscommand       = 0x0112
+	wmNccalcsize       = 0x0083
+	wmNchittest        = 0x0084
+	wmGetminmaxinfo    = 0x0024
+	wmNcactivate       = 0x0086
+	wmNcpaint          = 0x0085
+	wmDpichanged       = 0x02E0
 	wmGetdpiscaledsize = 0x02E4
-	wmEntersizemove = 0x0231 // начало интерактивного перемещения/ресайза (modal loop)
-	wmExitsizemove  = 0x0232 // конец интерактивного перемещения/ресайза
+	wmEntersizemove    = 0x0231 // начало интерактивного перемещения/ресайза (modal loop)
+	wmExitsizemove     = 0x0232 // конец интерактивного перемещения/ресайза
 
 	// ShowWindow commands
-	swMinimize  = 6
-	swMaximize  = 3
-	swRestore   = 9
-	swShow      = 5
+	swMinimize       = 6
+	swMaximize       = 3
+	swRestore        = 9
+	swShow           = 5
 	swShowNoActivate = 4
 
 	// Extended styles для окон-попапов (оверлеи): не активируется, поверх
@@ -119,8 +119,8 @@ const (
 	csOwndc   = 0x0020
 
 	// Cursors (IDC_*)
-	idcArrow  = 32512
-	idcIBeam  = 32513
+	idcArrow    = 32512
+	idcIBeam    = 32513
 	idcSizeNS   = 32645
 	idcSizeWE   = 32644
 	idcSizeNWSE = 32642
@@ -247,14 +247,14 @@ var (
 	procSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
 	procGetDpiForSystem               = user32.NewProc("GetDpiForSystem")
 
-	procStretchDIBits     = gdi32.NewProc("StretchDIBits")
-	procSetStretchBltMode = gdi32.NewProc("SetStretchBltMode")
+	procStretchDIBits         = gdi32.NewProc("StretchDIBits")
+	procSetStretchBltMode     = gdi32.NewProc("SetStretchBltMode")
 	procCreateRoundRectRgn    = gdi32.NewProc("CreateRoundRectRgn")
 	procSetWindowRgn          = user32.NewProc("SetWindowRgn")
 	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
-	procSetCapture        = user32.NewProc("SetCapture")
-	procReleaseCapture    = user32.NewProc("ReleaseCapture")
-	procSetCursor         = user32.NewProc("SetCursor")
+	procSetCapture            = user32.NewProc("SetCapture")
+	procReleaseCapture        = user32.NewProc("ReleaseCapture")
+	procSetCursor             = user32.NewProc("SetCursor")
 
 	// Мониторы (рабочая область для клэмпа окон-попапов).
 	procMonitorFromPoint = user32.NewProc("MonitorFromPoint")
@@ -328,12 +328,12 @@ type Win32Window struct {
 	// (owned windows): их закрытие не должно ронять приложение.
 	noQuit bool
 
-	mu      sync.Mutex
-	frameBuf []byte // BGRA пиксели для StretchDIBits (перевёрнуто по Y)
-	bufW, bufH int  // размер кадра, лежащего в frameBuf (для растянутого блита)
+	mu         sync.Mutex
+	frameBuf   []byte // BGRA пиксели для StretchDIBits (top-down: строка 0 — верхняя)
+	bufW, bufH int    // размер кадра, лежащего в frameBuf (для растянутого блита)
 
-	cursorHandle uintptr            // текущий желаемый курсор (HCURSOR)
-	cursorCache  map[int]uintptr    // кэш загруженных IDC-курсоров
+	cursorHandle uintptr         // текущий желаемый курсор (HCURSOR)
+	cursorCache  map[int]uintptr // кэш загруженных IDC-курсоров
 
 	// Трей/уведомления (Shell_NotifyIcon) — см. tray_windows.go.
 	trayAdded      bool           // иконка добавлена (NIM_ADD выполнен)
@@ -343,18 +343,18 @@ type Win32Window struct {
 	iconicEnabled  bool // включено iconic-представление окна (DWM превью)
 
 	// Callbacks
-	onResize      func(w, h int)
-	onExpose      func(r image.Rectangle)
-	onDpiChanged  func(scale float64)
-	onActivate    func(active bool)
-	onClose       func() bool
-	onMouseMove   func(x, y int)
-	onMouseButton func(x, y, button int, pressed bool)
+	onResize           func(w, h int)
+	onExpose           func(r image.Rectangle)
+	onDpiChanged       func(scale float64)
+	onActivate         func(active bool)
+	onClose            func() bool
+	onMouseMove        func(x, y int)
+	onMouseButton      func(x, y, button int, pressed bool)
 	onMouseWheelPixels func(x, y int, dx, dy float64)
-	onKeyDown     func(vk int)
-	onKeyUp       func(vk int)
-	onChar        func(r rune)
-	onFilesDropped func(paths []string, x, y int)
+	onKeyDown          func(vk int)
+	onKeyUp            func(vk int)
+	onChar             func(r rune)
+	onFilesDropped     func(paths []string, x, y int)
 
 	// fileDropEnabled — DragAcceptFiles(TRUE) уже вызван для этого окна.
 	fileDropEnabled bool
@@ -700,9 +700,56 @@ func (w *Win32Window) BlitRGBA(img *image.RGBA) {
 	w.BlitRGBADirty(img, img.Bounds())
 }
 
+// swapRBRow переставляет R и B в одной строке пикселей: RGBA → BGRA.
+// dst и src должны быть одной длины, кратной 4 (по 4 байта на пиксель).
+//
+// PERF-2: вместо четырёх байтовых чтений/записей с индексной арифметикой на
+// пиксель — одно 32-битное чтение, три ALU-операции и одна 32-битная запись.
+// Слайсы с полной тройной формой (i:i+4:i+4) снимают проверки границ в цикле.
+//
+//	память RGBA (LE): v = R | G<<8 | B<<16 | A<<24
+//	память BGRA (LE): u = B | G<<8 | R<<16 | A<<24
+//	u = (v & 0xFF00FF00) | (v&0xFF)<<16 | (v>>16)&0xFF
+func swapRBRow(dst, src []byte) {
+	n := len(src)
+	if len(dst) < n {
+		n = len(dst)
+	}
+	n &^= 3
+	for i := 0; i < n; i += 4 {
+		s := src[i : i+4 : i+4]
+		v := uint32(s[0]) | uint32(s[1])<<8 | uint32(s[2])<<16 | uint32(s[3])<<24
+		u := (v & 0xFF00FF00) | (v&0x000000FF)<<16 | (v>>16)&0x000000FF
+		d := dst[i : i+4 : i+4]
+		d[0] = byte(u)
+		d[1] = byte(u >> 8)
+		d[2] = byte(u >> 16)
+		d[3] = byte(u >> 24)
+	}
+}
+
+// convertFrameToBGRA конвертирует прямоугольник dirty кадра img в BGRA-буфер
+// dst шириной width пикселей, БЕЗ переворота по Y (top-down DIB, BiHeight<0).
+// Строка y кадра ложится в строку y буфера — порядок строк совпадает, поэтому
+// переворот не нужен, а конвертация идёт построчно быстрым 32-битным swap'ом.
+func convertFrameToBGRA(dst []byte, img *image.RGBA, dirty image.Rectangle, width int) {
+	x0, x1 := dirty.Min.X*4, dirty.Max.X*4
+	rowLen := x1 - x0
+	if rowLen <= 0 {
+		return
+	}
+	src := img.Pix
+	stride := img.Stride
+	for y := dirty.Min.Y; y < dirty.Max.Y; y++ {
+		s := y*stride + x0
+		d := y*width*4 + x0
+		swapRBRow(dst[d:d+rowLen], src[s:s+rowLen])
+	}
+}
+
 // BlitRGBADirty выводит только изменившуюся область dirty: RGBA→BGRA
 // конвертация и StretchDIBits ограничиваются этой областью.
-// Буфер кадра переиспользуется между вызовами (полный кадр, bottom-up DIB).
+// Буфер кадра переиспользуется между вызовами (полный кадр, top-down DIB).
 func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	if w.hwnd == 0 || img == nil {
 		return
@@ -715,29 +762,15 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 		return
 	}
 
-	// Конвертируем RGBA → BGRA (Win32 DIB формат) с переворотом по Y —
-	// только строки/столбцы dirty-области.
+	// Конвертируем RGBA → BGRA (Win32 DIB формат) — только строки/столбцы
+	// dirty-области. Переворота по Y нет: DIB объявлен top-down (BiHeight<0).
 	w.mu.Lock()
 	needed := width * height * 4
 	if len(w.frameBuf) < needed {
 		w.frameBuf = make([]byte, needed)
 		dirty = b // новый буфер — заполняем целиком
 	}
-	src := img.Pix
-	dst := w.frameBuf
-	stride := img.Stride
-	for y := dirty.Min.Y; y < dirty.Max.Y; y++ {
-		srcRow := src[y*stride:]
-		dstOff := (height - 1 - y) * width * 4
-		for x := dirty.Min.X; x < dirty.Max.X; x++ {
-			si := x * 4
-			di := dstOff + x*4
-			dst[di+0] = srcRow[si+2] // B
-			dst[di+1] = srcRow[si+1] // G
-			dst[di+2] = srcRow[si+0] // R
-			dst[di+3] = srcRow[si+3] // A
-		}
-	}
+	convertFrameToBGRA(w.frameBuf, img, dirty, width)
 	w.bufW = width
 	w.bufH = height
 	// Мьютекс удерживается до конца StretchDIBits: блит может прийти
@@ -767,7 +800,7 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 		BmiHeader: bitmapInfoHeader{
 			BiSize:        uint32(unsafe.Sizeof(bitmapInfoHeader{})),
 			BiWidth:       int32(width),
-			BiHeight:      int32(height), // positive = bottom-up (мы перевернули)
+			BiHeight:      -int32(height), // negative = top-down (переворот не нужен)
 			BiPlanes:      1,
 			BiBitCount:    32,
 			BiCompression: biRgb,
@@ -776,7 +809,12 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 
 	dw := dirty.Dx()
 	dh := dirty.Dy()
-	// Для bottom-up DIB YSrc отсчитывается от нижнего края изображения.
+	// ВНИМАНИЕ (проверено визуально, PERF-2): знак BiHeight задаёт только
+	// ПОРЯДОК ХРАНЕНИЯ строк в буфере. Система координат ИСТОЧНИКА у
+	// StretchDIBits остаётся bottom-up и для top-down DIB: YSrc по-прежнему
+	// отсчитывается от НИЖНЕГО края изображения. С YSrc = dirty.Min.Y частичные
+	// (dirty) блиты брали строки из зеркального места кадра — окно показывало
+	// чужой кусок интерфейса на месте перерисованного виджета.
 	ySrc := height - dirty.Max.Y
 
 	procStretchDIBits.Call(
@@ -819,7 +857,7 @@ func (w *Win32Window) blitStretchedLocked() {
 		BmiHeader: bitmapInfoHeader{
 			BiSize:        uint32(unsafe.Sizeof(bitmapInfoHeader{})),
 			BiWidth:       int32(w.bufW),
-			BiHeight:      int32(w.bufH), // positive = bottom-up (буфер перевёрнут)
+			BiHeight:      -int32(w.bufH), // negative = top-down (буфер не перевёрнут)
 			BiPlanes:      1,
 			BiBitCount:    32,
 			BiCompression: biRgb,
@@ -940,17 +978,19 @@ func (w *Win32Window) applyCorners() {
 	procSetWindowRgn.Call(uintptr(w.hwnd), rgn, 1)
 }
 
-func (w *Win32Window) SetOnResize(fn func(w, h int))                              { w.onResize = fn }
-func (w *Win32Window) SetOnClose(fn func() bool)                                   { w.onClose = fn }
-func (w *Win32Window) SetOnMouseMove(fn func(x, y int))                            { w.onMouseMove = fn }
-func (w *Win32Window) SetOnMouseButton(fn func(x, y, button int, pressed bool))    { w.onMouseButton = fn }
+func (w *Win32Window) SetOnResize(fn func(w, h int))                            { w.onResize = fn }
+func (w *Win32Window) SetOnClose(fn func() bool)                                { w.onClose = fn }
+func (w *Win32Window) SetOnMouseMove(fn func(x, y int))                         { w.onMouseMove = fn }
+func (w *Win32Window) SetOnMouseButton(fn func(x, y, button int, pressed bool)) { w.onMouseButton = fn }
 
 // SetOnMouseWheelPixels регистрирует колбэк точной пиксельной дельты колеса
 // (высокоточные тачпады шлют WM_MOUSEWHEEL с delta, не кратной WHEEL_DELTA).
-func (w *Win32Window) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) { w.onMouseWheelPixels = fn }
-func (w *Win32Window) SetOnKeyDown(fn func(vk int))                                { w.onKeyDown = fn }
-func (w *Win32Window) SetOnKeyUp(fn func(vk int))                                  { w.onKeyUp = fn }
-func (w *Win32Window) SetOnChar(fn func(r rune))                                   { w.onChar = fn }
+func (w *Win32Window) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) {
+	w.onMouseWheelPixels = fn
+}
+func (w *Win32Window) SetOnKeyDown(fn func(vk int)) { w.onKeyDown = fn }
+func (w *Win32Window) SetOnKeyUp(fn func(vk int))   { w.onKeyUp = fn }
+func (w *Win32Window) SetOnChar(fn func(r rune))    { w.onChar = fn }
 
 // SetOnFilesDropped регистрирует колбэк Drag&Drop файлов из ОС (WM_DROPFILES).
 // Координаты — клиентские физические пиксели. Гарантирует включённый приём

@@ -437,9 +437,9 @@ func (c *Canvas) drawRoundBorderCornersLegacy(x, y, w, h, r int, col color.RGBA)
 	for i := 0; i <= r; i++ {
 		dy := float64(r - i)
 		dx := int(math.Round(math.Sqrt(rf*rf - dy*dy)))
-		c.setPixelPx(x+r-dx, y+i, col)       // верхний левый
-		c.setPixelPx(x+w-1-r+dx, y+i, col)   // верхний правый
-		c.setPixelPx(x+r-dx, y+h-1-i, col)   // нижний левый
+		c.setPixelPx(x+r-dx, y+i, col)         // верхний левый
+		c.setPixelPx(x+w-1-r+dx, y+i, col)     // верхний правый
+		c.setPixelPx(x+r-dx, y+h-1-i, col)     // нижний левый
 		c.setPixelPx(x+w-1-r+dx, y+h-1-i, col) // нижний правый
 	}
 }
@@ -470,6 +470,13 @@ func (c *Canvas) DrawTextFont(text string, x, y int, sizePt float64, fontName st
 	c.drawTextWithFont(c.fontFor(fontName), text, x, y, sizePt, col)
 }
 
+// clipPenSlackX — запас справа от клипа (физические пиксели), после которого
+// отрисовка строки прекращается. Покрывает отрицательный кернинг и левый свес
+// маски глифа (g.offX < 0) — то есть случаи, когда перо уже правее клипа, а
+// сам глиф ещё мог бы зацепить его край. 64 px кратно перекрывают и то и
+// другое для любого разумного кегля.
+const clipPenSlackX = 64
+
 func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt float64, col color.RGBA) {
 	// Обе ветки блиттируют кэшированные альфа-маски глифов (см. FontCache.Glyph)
 	// вместо повторной растеризации контуров через font.Drawer.
@@ -496,6 +503,16 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 		return
 	}
 
+	// Горизонтальный отсев (PERF-7): как только перо ушло правее клипа, все
+	// оставшиеся глифы гарантированно за его пределами — продвижение пера в
+	// LTR-шрифтах неотрицательно, а сложные скрипты уходят в шейпер выше.
+	// Длинная строка в узком поле/скролле раньше целиком прогонялась через
+	// кэши глифов и кернинга ради полностью отсечённого результата.
+	penLimit := fixed.Int26_6(math.MaxInt32) // клипа нет — предела нет
+	if c.hasClip {
+		penLimit = fixed.I(c.clip.Max.X + clipPenSlackX)
+	}
+
 	// Быстрый путь: нет fallback-шрифтов — один шрифт, с кернингом
 	// (поведение прежнего font.Drawer.DrawString; отсутствующий глиф
 	// пропускается без продвижения пера — как делал Drawer с opentype).
@@ -503,6 +520,9 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 		pen := fixed.I(px)
 		prev := rune(-1)
 		for _, r := range text {
+			if pen >= penLimit {
+				break
+			}
 			if prev >= 0 {
 				pen += fc.Kern(sizePt, prev, r)
 			}
@@ -521,6 +541,9 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 	// Baseline от основного шрифта, кернинг не применяется (прежнее поведение).
 	pen := fixed.I(px)
 	for _, r := range text {
+		if pen >= penLimit {
+			break
+		}
 		chosen, found := c.fcForRune(fc, r)
 		g := chosen.Glyph(sizePt, r)
 		if found && g.ok {
@@ -560,27 +583,30 @@ func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 	sb := uint32(col.B) * 0x101
 	sa := uint32(col.A) * 0x101
 	const m16 = 1<<16 - 1
+	// Строки берём подсрезами (PERF-7): компилятор снимает проверку границ на
+	// каждый пиксель, арифметика смешивания — прежняя, результат бит-в-бит тот же.
 	mask := alpha.Pix
 	mStride := alpha.Stride
 	dst := c.back.Pix
+	rw := r.Dx()
 	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
-		mRow := (yy - gy) * mStride
+		mo := (yy-gy)*mStride + (r.Min.X - gx)
+		mRow := mask[mo : mo+rw]
 		dOff := c.back.PixOffset(r.Min.X, yy)
-		for xx := r.Min.X; xx < r.Max.X; xx++ {
-			ma := uint32(mask[mRow+(xx-gx)])
+		dRow := dst[dOff : dOff+rw*4]
+		for i := 0; i < rw; i++ {
+			ma := uint32(mRow[i])
 			if ma == 0 {
-				dOff += 4
 				continue
 			}
 			ma |= ma << 8 // 0..0xffff
 			a := sa * ma / m16
 			inv := m16 - a
-			p := dst[dOff : dOff+4 : dOff+4]
+			p := dRow[i*4 : i*4+4 : i*4+4]
 			p[0] = uint8((uint32(p[0])*0x101*inv/m16 + sr*ma/m16) >> 8)
 			p[1] = uint8((uint32(p[1])*0x101*inv/m16 + sg*ma/m16) >> 8)
 			p[2] = uint8((uint32(p[2])*0x101*inv/m16 + sb*ma/m16) >> 8)
 			p[3] = uint8((uint32(p[3])*0x101*inv/m16 + sa*ma/m16) >> 8)
-			dOff += 4
 		}
 	}
 }

@@ -146,9 +146,15 @@ func TestOnDemand_InputAutoInvalidates(t *testing.T) {
 	}
 }
 
-// Виджет с фокусом и мигающей кареткой (Animated) не даёт пропускать кадры.
+// Виджет с фокусом и мигающей кареткой (Animated) продолжает рендериться —
+// но ТОЛЬКО на смену фазы мигания, а не на каждом тике (PERF-11).
+//
+// Прежний контракт (NeedsAnimation()==true, пока есть фокус) заставлял движок
+// рендерить ПОЛНЫЙ кадр всего дерева на целевом FPS ради каретки с полупериодом
+// 530 мс. Теперь TextInput инвалидирует свой прямоугольник только когда фазу
+// пора сменить, поэтому кадров примерно 2 в секунду вместо fps.
 func TestOnDemand_FocusedTextInputKeepsRendering(t *testing.T) {
-	eng, _ := newOnDemandEngine()
+	eng, _ := newOnDemandEngine() // 50 fps
 	ti := widget.NewTextInput("")
 	ti.SetBounds(image.Rect(10, 60, 200, 90))
 	eng.Root().AddChild(ti)
@@ -158,10 +164,18 @@ func TestOnDemand_FocusedTextInputKeepsRendering(t *testing.T) {
 
 	eng.SetFocus(ti)
 	waitCount(eng, 1)
+	time.Sleep(100 * time.Millisecond) // дождаться кадра по фокусу
 	base := eng.RenderCount()
-	time.Sleep(200 * time.Millisecond)
-	if got := eng.RenderCount(); got < base+3 {
-		t.Fatalf("с фокусом на TextInput кадры должны идти (каретка): %d → %d", base, got)
+
+	// 1.2 с — минимум две смены фазы мигания (полупериод 530 мс).
+	time.Sleep(1200 * time.Millisecond)
+	got := eng.RenderCount()
+	if got < base+2 {
+		t.Fatalf("с фокусом на TextInput каретка должна мигать (кадры): %d → %d", base, got)
+	}
+	// И при этом кадров должно быть на порядок меньше, чем тиков (60 при 50 fps).
+	if got > base+12 {
+		t.Fatalf("каретка не должна тянуть кадры на каждом тике: %d → %d за 1.2 с", base, got)
 	}
 
 	// Сняли фокус — кадры снова замирают.

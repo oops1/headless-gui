@@ -246,7 +246,7 @@ func (w *Win32Window) handlePrintClient(hdc uintptr) {
 		BmiHeader: bitmapInfoHeader{
 			BiSize:        uint32(unsafe.Sizeof(bitmapInfoHeader{})),
 			BiWidth:       int32(w.bufW),
-			BiHeight:      int32(w.bufH), // positive = bottom-up (буфер перевёрнут)
+			BiHeight:      -int32(w.bufH), // negative = top-down (буфер не перевёрнут)
 			BiPlanes:      1,
 			BiBitCount:    32,
 			BiCompression: biRgb,
@@ -389,7 +389,7 @@ func rgbaToHICON(img *image.RGBA) windows.Handle {
 }
 
 // frameToRGBA собирает top-down premultiplied RGBA из кэша кадра (frameBuf —
-// bottom-up BGRA). nil, если кадра ещё нет.
+// top-down BGRA, см. PERF-2 в native_windows.go). nil, если кадра ещё нет.
 func (w *Win32Window) frameToRGBA() *image.RGBA {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -399,7 +399,7 @@ func (w *Win32Window) frameToRGBA() *image.RGBA {
 	cw, ch := w.bufW, w.bufH
 	img := image.NewRGBA(image.Rect(0, 0, cw, ch))
 	for y := 0; y < ch; y++ {
-		srcRow := (ch - 1 - y) * cw * 4 // frameBuf перевёрнут по Y
+		srcRow := y * cw * 4 // frameBuf top-down: порядок строк совпадает
 		for x := 0; x < cw; x++ {
 			si := srcRow + x*4
 			di := img.PixOffset(x, y)
