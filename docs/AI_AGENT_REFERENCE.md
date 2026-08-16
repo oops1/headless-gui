@@ -297,7 +297,9 @@ func (e *Engine) SetDPI(dpi float64)
 // Enable frame saving as PNG files
 // Call before Start(); blocks on send (ensures all frames saved)
 // Stop() waits for all PNG writes to complete
+// Capped at DefaultSaveFramesLimit (10000) frames; SaveFramesLimit(0) = no cap
 func (e *Engine) SaveFrames(dir string)
+func (e *Engine) SaveFramesLimit(n int)
 ```
 
 ### Modal Dialogs
@@ -791,6 +793,9 @@ type DrawContext interface {
     // ── Images ──
     DrawImage(src image.Image, x, y int)
     DrawImageScaled(src image.Image, x, y, w, h int)
+    // Scaled result is cached by source identity (pointer + Bounds) and
+    // size (32 entries / 16 Mpx LRU). Mutating an image in place requires
+    // canvas.InvalidateImageCache(src) (nil clears everything).
     
     // ── Text ──
     DrawText(text string, x, y int, col color.RGBA)  // default font, DefaultFontSizePt
@@ -2375,6 +2380,11 @@ opts := widget.FileDialogOptions{
 }
 mb.ShowOpenFile(opts, func(path string, ok bool) {})  // places sidebar, breadcrumb,
                                                       // Name/Size/Modified columns
+// Confine the dialog to a set of roots (navigation, Places and typed paths
+// cannot leave them) — mandatory when the UI is streamed to a browser, since
+// the dialog lists the SERVER's file system:
+opts.AllowedRoots = []string{"/srv/uploads"}          // per dialog
+widget.SetDefaultAllowedRoots("/srv/uploads")         // for all new dialogs
 mb.ShowSaveFile(opts, onResult)                       // compact form + overwrite warning
 mb.ShowPickFolder(opts, onResult)
 ```
@@ -2412,9 +2422,34 @@ New key codes (mapped on ALL backends): `KeyPageUp` (33), `KeyPageDown`
 
 ```go
 srv := webstream.New(eng)   // the SOLE consumer of eng.Frames()
+// Hardened variant (recommended for anything beyond loopback):
+srv = webstream.NewWithOptions(eng, webstream.Options{
+    Token:          "s3cret",           // required on /ws, /snapshot.png, /stats
+    AllowedOrigins: []string{"app.example.com"}, // extra Origins besides Host
+    MaxClients:     16,                 // extra connections get 503
+})
 go srv.Run()
-http.ListenAndServe(":8091", srv)   // "/" embedded viewer, "/ws" stream
+defer srv.Close()
+hs := &http.Server{Addr: "127.0.0.1:8091", Handler: srv,
+    ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+    IdleTimeout: 2 * time.Minute}       // no WriteTimeout — it is a stream
+webstream.LogListen(hs.Addr, "s3cret") // honest listen log + exposure warning
+hs.ListenAndServe()                    // "/" embedded viewer, "/ws" stream
 ```
+
+Security posture: the server has no TLS and no user accounts. Bind to
+loopback unless you set a token; the viewer forwards `?token=` from its own
+URL to the WebSocket and `/stats`. WebSocket handshake requires GET,
+`Connection: upgrade`, version 13, and an Origin whose host equals the
+request Host (or is in `AllowedOrigins`); unmasked client frames close with
+1002, frames and reassembled messages above 1 MB with 1009. Read/write
+deadlines (60 s / 10 s), server pings (20 s) and the client cap keep dead
+peers from leaking goroutines. All client input is funnelled through ONE
+dispatcher goroutine (the engine's input API is single-threaded), with a
+per-client token bucket (500 ev/s, burst 100) and coordinate/button/key
+validation; drops are counted in `Stats.InputDropped`. Keyframes and
+`/snapshot.png` are cached per frame and encoded outside the server lock;
+a client that dropped a delta receives a keyframe next.
 
 Zero-dep WebSocket server (RFC 6455: handshake, masked client frames,
 fragmentation, ping/pong). Binary protocol: `0x02 init [u16 w][u16 h]`,
