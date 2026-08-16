@@ -265,11 +265,16 @@ func (e *Engine) CanvasSize() (w, h int)
 ```go
 // Change canvas resolution (call before Start or after Stop)
 // Auto-scales background image if set
+// Sizes are clamped to engine.MinCanvasSide..MaxCanvasSide (1..16384) and
+// MaxCanvasPixels (64 Mpx); out-of-range values are logged (same in New)
 func (e *Engine) SetResolution(width, height int)
 
 // Load background image from file (PNG or JPEG)
 // Automatically scales to canvas size
 // Saved internally for rescaling on SetResolution
+// Decoded through widget.DecodeImageBounded: header first, then
+// widget.MaxImagePixels() (64 Mpx default, SetMaxImagePixels) and a 256 MB
+// file cap — oversized/decompression-bomb images return an error.
 func (e *Engine) SetBackgroundFile(path string) error
 
 // Set color theme across all widgets
@@ -1665,7 +1670,19 @@ root, reg, scope, err := widget.LoadUIFromXAMLBindings(xamlBytes, vm)
 
 - Paths resolve via `datagrid.GetPropertyValue` (struct fields, `Get<Prop>()`
   methods, maps, `PropertyGetter`, dotted paths).
-- **OneWay/OneTime/TwoWay** via `Mode=`. **StringFormat** is a Go format string.
+- **Method calls are restricted (security audit):** only *getter-shaped*
+  methods are invoked — no arguments, exactly one result (an optional second
+  `error` result is allowed). `Save() error`, `Delete(id)` and the like are
+  never called from a binding path. A model may publish an explicit allowlist
+  via `BindableMethods() []string`; `datagrid.SetStrictBindingMethods(true)`
+  makes the allowlist mandatory (use it when XAML comes from an untrusted
+  source). Reflection panics are recovered and logged; TwoWay writes require
+  assignable/convertible types (no string↔number coercion) and setter-shaped
+  `Set<Prop>` methods.
+- **OneWay/OneTime/TwoWay** via `Mode=`. **StringFormat** is applied through
+  `datagrid.SafeFormat`: WPF-style `{0}`, `{0:F2}`, `{0:N2}`, `{0:P1}`,
+  `{0:D3}`, `{0:X}` and Go formats with exactly one verb; `%#v`, `%+v`,
+  `%T`, `%p` and multi-verb strings degrade to `%v` + literal text.
 - **Live model→UI:** if the DataContext implements `INotifyPropertyChanged`
   (embed `datagrid.PropertyNotifier`, call `NotifyPropertyChanged`), bound
   widgets refresh automatically.
@@ -1676,8 +1693,14 @@ root, reg, scope, err := widget.LoadUIFromXAMLBindings(xamlBytes, vm)
   `Background`, `IsEnabled`, `Visibility`, `ToolTip`, `SelectedIndex`,
   `IsExpanded` (Expander), `Header` (Expander/GroupBox),
   `Value` (NumericUpDown — TwoWay-ready).
-- **`BindingScope.Dispose()`** — unsubscribes from model and language listener.
-  Call when the loaded XAML tree is discarded (UI reload) to prevent leaks.
+- **`BindingScope.Dispose()`** — unsubscribes from the model (including the
+  legacy `AddPropertyChanged` path), `ObservableCollection`/`CollectionView`
+  sources and the language listener. Call when the loaded XAML tree is
+  discarded (UI reload) to prevent leaks. Related unsubscribe APIs:
+  `ObservableCollection.AddCollectionChanged` returns an id for
+  `RemoveCollectionChanged(id)`; `CollectionView.AddViewChangedHandle` /
+  `RemoveViewChanged(id)`; `DataGrid.Dispose()`, `CollectionView.Dispose()`,
+  `VirtualizingItemsControl.UnbindCollectionView()`.
 - **Duplicate-free subscriptions**: `SetDataContext` can be called repeatedly
   with the same model — no duplicate `PropertyChanged` handlers are created.
 
@@ -2993,7 +3016,13 @@ platforms the declaration parses fine and is simply a no-op at run time.
 </Window>
 ```
 
-- `TrayIcon` — path relative to the XAML file's directory (`baseDir`).
+- `TrayIcon` — path relative to the XAML file's directory (`baseDir`), like
+  every file reference in markup (`Image Source`, `Button Icon`, `SVGIcon
+  Source`, `Panel BackgroundImage`). **Resource sandbox:** when XAML is loaded
+  from a file, the resolved path must stay inside that file's directory —
+  absolute paths, drive-qualified paths and `..` escapes are rejected and
+  logged once. XAML loaded from a string keeps CWD-relative semantics
+  (absolute allowed — the program author supplied it).
   `.png`/`.jpg`/`.jpeg` are decoded as-is; `.svg` is rasterized to 32×32 with
   the document's own colors preserved (`currentColor` → theme label color,
   no monochrome tint — the tray icon is intentionally **not** themed). A load /
