@@ -20,14 +20,16 @@ func TestSaveFrames_LimitStops(t *testing.T) {
 	e.SetRoot(root)
 	e.SaveFrames(dir)
 	e.SaveFramesLimit(3)
-	e.Start()
+	// Без Start: кадры и правки виджета — из одной горутины.
+	go e.saveWorker()
 
 	for i := 0; i < 12; i++ {
 		root.Background = color.RGBA{R: uint8(i * 20), G: 40, B: 60, A: 255}
 		e.Invalidate()
 		e.renderFrame()
 	}
-	e.Stop()
+	close(e.saveCh)
+	<-e.saveDone
 
 	files, err := filepath.Glob(filepath.Join(dir, "*.png"))
 	if err != nil {
