@@ -73,11 +73,15 @@ func f2dot14(v tables.Fixed214) float32 { return float32(v) / 16384.0 }
 // colrDeg переводит угол COLR (1.0 == 180° против часовой) в градусы.
 func colrDeg(v tables.Fixed214) float32 { return f2dot14(v) * 180.0 }
 
-// v1Layer — один растеризованный слой COLRv1: маска покрытия + цвет
-// (premultiplied). Собирается при обходе графа, композитится позже.
+// glyphBox — границы слоя в пикселях относительно точки отрисовки.
+type glyphBox struct{ offX, offY, w, h int }
+
+// v1Layer — слой COLRv1 до растеризации: глиф, матрица, цвет, границы.
 type v1Layer struct {
-	m   *glyphMask
-	col color.RGBA
+	gid tsfont.GID
+	ctm affine
+	col color.RGBA // premultiplied
+	box glyphBox
 }
 
 const (
@@ -87,44 +91,66 @@ const (
 
 // renderCOLRv1 обходит граф paint базового глифа и композитит слои в цветную
 // RGBA-маску. Второе значение — «динамический» (использует foreground-цвет
-// текста, палитра 0xFFFF): такие глифы не кэшируются.
+// текста, палитра 0xFFFF).
 func renderCOLRv1(face *tsfont.Face, colr *tables.COLR1, paint tables.PaintTable, sizePx fixed.Int26_6, textCol color.RGBA) (*colorGlyph, bool) {
 	if colr == nil {
 		return nil, false
 	}
-	pal := colrPalette(face)
-	var layers []v1Layer
-	dynamic := false
-	collectColrV1(face, colr, paint, identityAffine, pal, textCol, sizePx, &layers, &dynamic, 0)
-	if len(layers) == 0 {
-		return nil, dynamic
+	w := &colrWalk{face: face, colr: colr, pal: colrPalette(face), textCol: textCol, sizePx: sizePx}
+	w.collect(paint, identityAffine, 0)
+	if w.over {
+		warnGlyphBudget(face)
+		return nil, w.dynamic
+	}
+	if len(w.layers) == 0 {
+		return nil, w.dynamic
 	}
 
 	const big = 1 << 30
 	minX, minY, maxX, maxY := big, big, -big, -big
-	for _, l := range layers {
-		w, h := l.m.mask.Rect.Dx(), l.m.mask.Rect.Dy()
-		if l.m.offX < minX {
-			minX = l.m.offX
+	maxPix := 0
+	for _, l := range w.layers {
+		if l.box.offX < minX {
+			minX = l.box.offX
 		}
-		if l.m.offY < minY {
-			minY = l.m.offY
+		if l.box.offY < minY {
+			minY = l.box.offY
 		}
-		if l.m.offX+w > maxX {
-			maxX = l.m.offX + w
+		if l.box.offX+l.box.w > maxX {
+			maxX = l.box.offX + l.box.w
 		}
-		if l.m.offY+h > maxY {
-			maxY = l.m.offY + h
+		if l.box.offY+l.box.h > maxY {
+			maxY = l.box.offY + l.box.h
+		}
+		if n := l.box.w * l.box.h; n > maxPix {
+			maxPix = n
 		}
 	}
 	if maxX <= minX || maxY <= minY {
-		return nil, dynamic
+		return nil, w.dynamic
 	}
+	if !glyphBudgetOK(maxX-minX, maxY-minY) {
+		warnGlyphBudget(face)
+		return nil, w.dynamic
+	}
+
 	dst := image.NewRGBA(image.Rect(0, 0, maxX-minX, maxY-minY))
-	for _, l := range layers { // порядок сбора = снизу вверх
-		compositeMaskColor(dst, l.m.mask, l.m.offX-minX, l.m.offY-minY, l.col)
+	// Один буфер маски и один растеризатор на все слои глифа.
+	buf := make([]uint8, maxPix)
+	var rast vector.Rasterizer
+	for _, l := range w.layers { // порядок сбора = снизу вверх
+		mask := &image.Alpha{
+			Pix:    buf[:l.box.w*l.box.h],
+			Stride: l.box.w,
+			Rect:   image.Rect(0, 0, l.box.w, l.box.h),
+		}
+		clear(mask.Pix)
+		if !drawGlyphAffine(&rast, mask, face, l.gid, sizePx, l.ctm, l.box) {
+			continue
+		}
+		compositeMaskColor(dst, mask, l.box.offX-minX, l.box.offY-minY, l.col)
 	}
-	return &colorGlyph{img: dst, offX: minX, offY: minY}, dynamic
+	return &colorGlyph{img: dst, offX: minX, offY: minY}, w.dynamic
 }
 
 // colrPalette возвращает палитру по умолчанию (палитра 0) или nil.
@@ -135,68 +161,90 @@ func colrPalette(face *tsfont.Face) []tables.ColorRecord {
 	return nil
 }
 
-// collectColrV1 рекурсивно обходит граф paint, добавляя растеризованные слои
-// в out. ctm — накопленное преобразование в font units.
-func collectColrV1(face *tsfont.Face, colr *tables.COLR1, paint tables.PaintTable, ctm affine,
-	pal []tables.ColorRecord, textCol color.RGBA, sizePx fixed.Int26_6,
-	out *[]v1Layer, dynamic *bool, depth int) {
+// colrWalk — обход графа COLRv1 одного глифа с бюджетом пикселей.
+type colrWalk struct {
+	face    *tsfont.Face
+	colr    *tables.COLR1
+	pal     []tables.ColorRecord
+	textCol color.RGBA
+	sizePx  fixed.Int26_6
+	layers  []v1Layer
+	pixels  int
+	dynamic bool
+	over    bool // бюджет исчерпан — глиф пропускаем целиком
+}
 
-	if depth > maxColrDepth || len(*out) >= maxColrLayers {
+// addLayer учитывает слой в бюджете пикселей; false — бюджет исчерпан.
+func (w *colrWalk) addLayer(l v1Layer) bool {
+	w.pixels += l.box.w * l.box.h
+	if w.pixels > maxGlyphLayerPixels {
+		w.over = true
+		return false
+	}
+	w.layers = append(w.layers, l)
+	return true
+}
+
+// collect рекурсивно обходит граф paint, накапливая слои. ctm — накопленное
+// преобразование в font units.
+func (w *colrWalk) collect(paint tables.PaintTable, ctm affine, depth int) {
+	if w.over || depth > maxColrDepth || len(w.layers) >= maxColrLayers {
 		return
 	}
 	switch v := paint.(type) {
 	case tables.PaintColrLayers:
-		sub, err := colr.LayerList.Resolve(v)
+		sub, err := w.colr.LayerList.Resolve(v)
 		if err != nil {
 			return
 		}
 		for _, p := range sub {
-			collectColrV1(face, colr, p, ctm, pal, textCol, sizePx, out, dynamic, depth+1)
+			w.collect(p, ctm, depth+1)
 		}
 	case tables.PaintColrGlyph:
-		if p, ok := colr.Search(tables.GlyphID(v.GlyphID)); ok {
-			collectColrV1(face, colr, p, ctm, pal, textCol, sizePx, out, dynamic, depth+1)
+		if p, ok := w.colr.Search(tables.GlyphID(v.GlyphID)); ok {
+			w.collect(p, ctm, depth+1)
 		}
 	case tables.PaintGlyph:
-		m := rasterizeGlyphAffine(face, tsfont.GID(v.GlyphID), sizePx, ctm)
-		if m.mask == nil {
+		gid := tsfont.GID(v.GlyphID)
+		box, ok := affineGlyphBox(w.face, gid, w.sizePx, ctm)
+		if !ok {
 			return
 		}
-		col, ok := representativeColor(v.Paint, pal, textCol, dynamic, 0)
+		col, ok := representativeColor(v.Paint, w.pal, w.textCol, &w.dynamic, 0)
 		if !ok || col.A == 0 {
 			return
 		}
-		*out = append(*out, v1Layer{m: m, col: col})
+		w.addLayer(v1Layer{gid: gid, ctm: ctm, col: col, box: box})
 	case tables.PaintTransform:
-		collectColrV1(face, colr, v.Paint, compose(ctm, affFrom2x3(v.Transform)), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, affFrom2x3(v.Transform)), depth+1)
 	case tables.PaintVarTransform:
-		collectColrV1(face, colr, v.Paint, compose(ctm, affFromVar2x3(v.Transform)), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, affFromVar2x3(v.Transform)), depth+1)
 	case tables.PaintTranslate:
-		collectColrV1(face, colr, v.Paint, compose(ctm, affTranslate(float32(v.Dx), float32(v.Dy))), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, affTranslate(float32(v.Dx), float32(v.Dy))), depth+1)
 	case tables.PaintVarTranslate:
-		collectColrV1(face, colr, v.Paint, compose(ctm, affTranslate(float32(v.Dx), float32(v.Dy))), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, affTranslate(float32(v.Dx), float32(v.Dy))), depth+1)
 	case tables.PaintScale:
-		collectColrV1(face, colr, v.Paint, compose(ctm, affScale(f2dot14(v.ScaleX), f2dot14(v.ScaleY))), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, affScale(f2dot14(v.ScaleX), f2dot14(v.ScaleY))), depth+1)
 	case tables.PaintScaleAroundCenter:
-		collectColrV1(face, colr, v.Paint, compose(ctm, aroundCenter(affScale(f2dot14(v.ScaleX), f2dot14(v.ScaleY)), float32(v.CenterX), float32(v.CenterY))), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, aroundCenter(affScale(f2dot14(v.ScaleX), f2dot14(v.ScaleY)), float32(v.CenterX), float32(v.CenterY))), depth+1)
 	case tables.PaintScaleUniform:
 		s := f2dot14(v.Scale)
-		collectColrV1(face, colr, v.Paint, compose(ctm, affScale(s, s)), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, affScale(s, s)), depth+1)
 	case tables.PaintScaleUniformAroundCenter:
 		s := f2dot14(v.Scale)
-		collectColrV1(face, colr, v.Paint, compose(ctm, aroundCenter(affScale(s, s), float32(v.CenterX), float32(v.CenterY))), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, aroundCenter(affScale(s, s), float32(v.CenterX), float32(v.CenterY))), depth+1)
 	case tables.PaintRotate:
-		collectColrV1(face, colr, v.Paint, compose(ctm, affRotate(colrDeg(v.Angle))), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, affRotate(colrDeg(v.Angle))), depth+1)
 	case tables.PaintRotateAroundCenter:
-		collectColrV1(face, colr, v.Paint, compose(ctm, aroundCenter(affRotate(colrDeg(v.Angle)), float32(v.CenterX), float32(v.CenterY))), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, aroundCenter(affRotate(colrDeg(v.Angle)), float32(v.CenterX), float32(v.CenterY))), depth+1)
 	case tables.PaintSkew:
-		collectColrV1(face, colr, v.Paint, compose(ctm, affSkew(colrDeg(v.XSkewAngle), colrDeg(v.YSkewAngle))), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, affSkew(colrDeg(v.XSkewAngle), colrDeg(v.YSkewAngle))), depth+1)
 	case tables.PaintSkewAroundCenter:
-		collectColrV1(face, colr, v.Paint, compose(ctm, aroundCenter(affSkew(colrDeg(v.XSkewAngle), colrDeg(v.YSkewAngle)), float32(v.CenterX), float32(v.CenterY))), pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.Paint, compose(ctm, aroundCenter(affSkew(colrDeg(v.XSkewAngle), colrDeg(v.YSkewAngle)), float32(v.CenterX), float32(v.CenterY))), depth+1)
 	case tables.PaintComposite:
 		// Приблизительно: сначала фон, затем источник (режим смешивания игнорируем).
-		collectColrV1(face, colr, v.BackdropPaint, ctm, pal, textCol, sizePx, out, dynamic, depth+1)
-		collectColrV1(face, colr, v.SourcePaint, ctm, pal, textCol, sizePx, out, dynamic, depth+1)
+		w.collect(v.BackdropPaint, ctm, depth+1)
+		w.collect(v.SourcePaint, ctm, depth+1)
 	default:
 		// PaintSolid/градиент без PaintGlyph-родителя (нет формы) или
 		// непокрытый тип — пропускаем.
@@ -332,67 +380,75 @@ func gradientColorVar(stops []tables.VarColorStop, pal []tables.ColorRecord, tex
 	return color.RGBA{R: uint8(r / n), G: uint8(g / n), B: uint8(b / n), A: uint8(a / n)}, true
 }
 
-// rasterizeGlyphAffine растеризует контур глифа gid, применяя аффинное
-// преобразование m (в font units), в альфа-маску покрытия. Возвращает пустую
-// маску, если у глифа нет контура (растровый/цветной слой — не сюда).
-func rasterizeGlyphAffine(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, m affine) *glyphMask {
-	outline, ok := face.GlyphData(gid).(tsfont.GlyphOutline)
-	if !ok || len(outline.Segments) == 0 {
-		return &glyphMask{}
-	}
+// affMapper возвращает перевод font unit → пиксель (ось Y вниз) через m.
+func affMapper(face *tsfont.Face, sizePx fixed.Int26_6, m affine) func(x, y float32) (float32, float32) {
 	scale := float32(sizePx) / 64.0 / float32(face.Upem())
-
-	// font unit (x, y) → пиксель (ось Y вниз) через m и масштаб кегля.
-	mapPt := func(x, y float32) (float32, float32) {
+	return func(x, y float32) (float32, float32) {
 		fx := m.xx*x + m.xy*y + m.dx
 		fy := m.yx*x + m.yy*y + m.dy
 		return fx * scale, -fy * scale
 	}
+}
 
-	// Проход 1: bbox в пикселях.
+// affineGlyphBox считает границы глифа под преобразованием m без растеризации.
+func affineGlyphBox(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, m affine) (glyphBox, bool) {
+	outline, ok := face.GlyphData(gid).(tsfont.GlyphOutline)
+	if !ok || len(outline.Segments) == 0 {
+		return glyphBox{}, false
+	}
+	mapPt := affMapper(face, sizePx, m)
 	first := true
 	var minXf, minYf, maxXf, maxYf float32
-	upd := func(px, py float32) {
-		if first {
-			minXf, maxXf, minYf, maxYf, first = px, px, py, py, false
-			return
-		}
-		if px < minXf {
-			minXf = px
-		}
-		if px > maxXf {
-			maxXf = px
-		}
-		if py < minYf {
-			minYf = py
-		}
-		if py > maxYf {
-			maxYf = py
-		}
-	}
 	for _, seg := range outline.Segments {
 		for i := 0; i < segArgs(seg.Op); i++ {
 			px, py := mapPt(seg.Args[i].X, seg.Args[i].Y)
-			upd(px, py)
+			if first {
+				minXf, maxXf, minYf, maxYf, first = px, px, py, py, false
+				continue
+			}
+			if px < minXf {
+				minXf = px
+			}
+			if px > maxXf {
+				maxXf = px
+			}
+			if py < minYf {
+				minYf = py
+			}
+			if py > maxYf {
+				maxYf = py
+			}
 		}
 	}
 	if first {
-		return &glyphMask{}
+		return glyphBox{}, false
 	}
 	minX, minY := floorF32(minXf), floorF32(minYf)
 	w := ceilF32(maxXf) - minX + 1
 	h := ceilF32(maxYf) - minY + 1
-	if w <= 0 || h <= 0 || w > 4096 || h > 4096 {
-		return &glyphMask{}
+	if !glyphBudgetOK(w, h) {
+		return glyphBox{}, false
 	}
+	return glyphBox{offX: minX, offY: minY, w: w, h: h}, true
+}
 
-	r := vector.NewRasterizer(w, h)
-	ox, oy := float32(minX), float32(minY)
-	started := false
+// drawGlyphAffine растеризует контур глифа в готовую маску по границам b.
+// Маска и растеризатор переиспользуются между слоями одного глифа.
+func drawGlyphAffine(r *vector.Rasterizer, mask *image.Alpha, face *tsfont.Face,
+	gid tsfont.GID, sizePx fixed.Int26_6, m affine, b glyphBox) bool {
+
+	outline, ok := face.GlyphData(gid).(tsfont.GlyphOutline)
+	if !ok || len(outline.Segments) == 0 {
+		return false
+	}
+	mapPt := affMapper(face, sizePx, m)
+	r.Reset(b.w, b.h)
+	ox, oy := float32(b.offX), float32(b.offY)
 	pt := func(i int, seg ot.Segment) (float32, float32) {
 		px, py := mapPt(seg.Args[i].X, seg.Args[i].Y)
 		return px - ox, py - oy
 	}
+	started := false
 	for _, seg := range outline.Segments {
 		switch seg.Op {
 		case ot.SegmentOpMoveTo:
@@ -419,9 +475,8 @@ func rasterizeGlyphAffine(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_
 	if started {
 		r.ClosePath()
 	}
-	mask := image.NewAlpha(image.Rect(0, 0, w, h))
 	r.Draw(mask, mask.Bounds(), image.Opaque, image.Point{})
-	return &glyphMask{mask: mask, offX: minX, offY: minY}
+	return true
 }
 
 // segArgs — число значащих точек в сегменте контура.

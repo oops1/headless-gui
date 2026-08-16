@@ -502,15 +502,14 @@ const wheelTickPixels = 40.0
 // всплытие.
 //
 // Фолбэк: если точную дельту никто не принял (виджет знает лишь тиковое
-// колесо), синтезируем эквивалентные тики через SendMouseButton — старый
-// тиковый путь остаётся рабочим (headless-контракт).
+// колесо), синтезируем эквивалентные тики — старый тиковый путь остаётся
+// рабочим (headless-контракт). Инвалидация — только область получателя.
 func (e *Engine) SendMouseWheelPixels(xPhys, yPhys int, dx, dy float64) {
 	x, y := e.toLogical(xPhys, yPhys)
 	if k := e.Scale(); k != 1 && k > 0 {
 		dx /= k
 		dy /= k
 	}
-	e.Invalidate()
 
 	var dispatchRoot widget.Widget
 	if m := e.topModal(); m != nil {
@@ -525,22 +524,82 @@ func (e *Engine) SendMouseWheelPixels(xPhys, yPhys int, dx, dy float64) {
 		for i := len(path) - 1; i >= 0; i-- {
 			if h, ok := path[i].(wheelPixelHandler); ok {
 				if h.OnMouseWheelPixels(x, y, dx, dy) {
+					e.invalidateWidget(path[i])
 					return
 				}
 			}
 		}
 	}
 
-	// Фолбэк на тиковый путь. Передаём ФИЗИЧЕСКИЕ координаты — SendMouseButton
-	// сам переведёт их в логические.
+	// Фолбэк на тиковый путь: один hit-test, N тиков, одна инвалидация.
 	steps, btn, ok := wheelTicksFromPixels(dy)
 	if !ok {
 		return
 	}
-	for i := 0; i < steps; i++ {
-		e.SendMouseButton(xPhys, yPhys, btn, true)
-		e.SendMouseButton(xPhys, yPhys, btn, false)
+	targets := e.wheelTargets(dispatchRoot, x, y)
+	if len(targets) == 0 {
+		return
 	}
+	var consumer widget.Widget
+	for i := 0; i < steps; i++ {
+		if w := deliverWheelTick(targets, x, y, btn); w != nil {
+			consumer = w
+		}
+	}
+	if consumer != nil {
+		e.invalidateWidget(consumer)
+	}
+}
+
+// wheelTargets — получатели тика колеса по порядку: захватчик мыши либо
+// оверлей под курсором и путь hit-test снизу вверх.
+func (e *Engine) wheelTargets(dispatchRoot widget.Widget, x, y int) []widget.Widget {
+	if cap := e.getCaptured(); cap != nil {
+		return []widget.Widget{cap}
+	}
+	if dispatchRoot == nil {
+		return nil
+	}
+	var out []widget.Widget
+	if ov := findOverlayAt(dispatchRoot, x, y); ov != nil {
+		out = append(out, ov)
+	}
+	path := hitTestPath(dispatchRoot, x, y)
+	for i := len(path) - 1; i >= 0; i-- {
+		out = append(out, path[i])
+	}
+	return out
+}
+
+// deliverWheelTick шлёт один тик (press+release) по списку получателей;
+// возвращает виджет, поглотивший нажатие.
+func deliverWheelTick(targets []widget.Widget, x, y int, btn widget.MouseButton) widget.Widget {
+	var consumer widget.Widget
+	for _, pressed := range [2]bool{true, false} {
+		ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed}
+		for _, w := range targets {
+			mc, ok := w.(widget.MouseClickHandler)
+			if !ok {
+				continue
+			}
+			if mc.OnMouseButton(ev) {
+				if pressed {
+					consumer = w
+				}
+				break
+			}
+		}
+	}
+	return consumer
+}
+
+// invalidateWidget помечает область виджета; при пустых bounds — весь кадр.
+func (e *Engine) invalidateWidget(w widget.Widget) {
+	if b := w.Bounds(); !b.Empty() {
+		e.InvalidateRect(b)
+		return
+	}
+	e.Invalidate()
 }
 
 // wheelTicksFromPixels переводит пиксельную дельту в число тиков и направление.
@@ -609,13 +668,20 @@ func (e *Engine) SendFilesDropped(x, y int, paths []string) {
 // не входят в набор keep (виджеты на пути от корня до клика).
 // Это гарантирует закрытие popup/dropdown/menu при клике в другое место.
 func dismissOutside(w widget.Widget, keep map[widget.Widget]struct{}) {
+	dismissOutsideAt(w, keep, 0)
+}
+
+func dismissOutsideAt(w widget.Widget, keep map[widget.Widget]struct{}, depth int) {
+	if tooDeep(depth) {
+		return
+	}
 	if _, inPath := keep[w]; !inPath {
 		if d, ok := w.(widget.Dismissable); ok {
 			d.Dismiss()
 		}
 	}
 	for _, child := range w.Children() {
-		dismissOutside(child, keep)
+		dismissOutsideAt(child, keep, depth+1)
 	}
 }
 
@@ -624,7 +690,11 @@ func dismissOutside(w widget.Widget, keep map[widget.Widget]struct{}) {
 // hitTest возвращает самый верхний виджет (последний дочерний в Z-порядке),
 // чьи bounds содержат точку (x, y). Возвращает nil, если точка вне дерева.
 func hitTest(w widget.Widget, x, y int) widget.Widget {
-	if !widget.IsWidgetVisible(w) {
+	return hitTestAt(w, x, y, 0)
+}
+
+func hitTestAt(w widget.Widget, x, y, depth int) widget.Widget {
+	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
 		return nil
 	}
 	if !image.Pt(x, y).In(w.Bounds()) {
@@ -633,7 +703,7 @@ func hitTest(w widget.Widget, x, y int) widget.Widget {
 	// Дети рисуются поверх родителя — проверяем в обратном порядке
 	children := w.Children()
 	for i := len(children) - 1; i >= 0; i-- {
-		if hit := hitTest(children[i], x, y); hit != nil {
+		if hit := hitTestAt(children[i], x, y, depth+1); hit != nil {
 			return hit
 		}
 	}
@@ -644,7 +714,7 @@ func hitTest(w widget.Widget, x, y int) widget.Widget {
 // Путь: [root, ..., parent, hit]. Пустой срез — точка вне дерева.
 // Используется для event bubbling.
 func hitTestPath(w widget.Widget, x, y int) []widget.Widget {
-	return appendHitTestPath(nil, w, x, y)
+	return appendHitTestPath(nil, w, x, y, 0)
 }
 
 // appendHitTestPath дописывает путь [w, ..., hit] в dst и возвращает результат;
@@ -658,8 +728,8 @@ func hitTestPath(w widget.Widget, x, y int) []widget.Widget {
 // Аллиасинг безопасен: nil возвращается ТОЛЬКО до append (первые две проверки),
 // поэтому «протухшая» ссылка на dst у родителя после реаллокации в потомке
 // никогда не используется.
-func appendHitTestPath(dst []widget.Widget, w widget.Widget, x, y int) []widget.Widget {
-	if !widget.IsWidgetVisible(w) {
+func appendHitTestPath(dst []widget.Widget, w widget.Widget, x, y, depth int) []widget.Widget {
+	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
 		return nil
 	}
 	if !image.Pt(x, y).In(w.Bounds()) {
@@ -670,7 +740,7 @@ func appendHitTestPath(dst []widget.Widget, w widget.Widget, x, y int) []widget.
 	// Проверяем детей в обратном Z-порядке
 	children := w.Children()
 	for i := len(children) - 1; i >= 0; i-- {
-		if path := appendHitTestPath(dst, children[i], x, y); path != nil {
+		if path := appendHitTestPath(dst, children[i], x, y, depth+1); path != nil {
 			return path
 		}
 	}
@@ -680,7 +750,11 @@ func appendHitTestPath(dst []widget.Widget, w widget.Widget, x, y int) []widget.
 // findCapturer ищет виджет, который хочет захватить мышь, в цепочке предков
 // от корня до hit-виджета. Возвращает ближайшего к hit (самого вложенного).
 func findCapturer(w widget.Widget, x, y int, ev widget.MouseEvent) widget.Widget {
-	if !widget.IsWidgetVisible(w) {
+	return findCapturerAt(w, x, y, ev, 0)
+}
+
+func findCapturerAt(w widget.Widget, x, y int, ev widget.MouseEvent, depth int) widget.Widget {
+	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
 		return nil
 	}
 	pt := image.Pt(x, y)
@@ -690,7 +764,7 @@ func findCapturer(w widget.Widget, x, y int, ev widget.MouseEvent) widget.Widget
 	// Рекурсивно проверяем потомков (в обратном Z-порядке)
 	children := w.Children()
 	for i := len(children) - 1; i >= 0; i-- {
-		if found := findCapturer(children[i], x, y, ev); found != nil {
+		if found := findCapturerAt(children[i], x, y, ev, depth+1); found != nil {
 			return found
 		}
 	}
@@ -708,7 +782,11 @@ func findCapturer(w widget.Widget, x, y int, ev widget.MouseEvent) widget.Widget
 // Overlay имеет приоритет над обычным Z-порядком дерева виджетов.
 // Возвращает nil, если ни один overlay не содержит точку.
 func findOverlayAt(w widget.Widget, x, y int) widget.Widget {
-	if !widget.IsWidgetVisible(w) {
+	return findOverlayAtDepth(w, x, y, 0)
+}
+
+func findOverlayAtDepth(w widget.Widget, x, y, depth int) widget.Widget {
+	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
 		return nil
 	}
 	pt := image.Pt(x, y)
@@ -716,7 +794,7 @@ func findOverlayAt(w widget.Widget, x, y int) widget.Widget {
 	// Проверяем детей в обратном Z-порядке (верхние первыми).
 	children := w.Children()
 	for i := len(children) - 1; i >= 0; i-- {
-		if found := findOverlayAt(children[i], x, y); found != nil {
+		if found := findOverlayAtDepth(children[i], x, y, depth+1); found != nil {
 			return found
 		}
 	}
@@ -751,7 +829,11 @@ func findOverlayAt(w widget.Widget, x, y int) widget.Widget {
 // — интерфейсный ассерт + вызов OnMouseMove на каждом из сотен виджетов при
 // каждом движении — выполняется теперь только у затронутых.
 func broadcastMouseMove(w widget.Widget, ox, oy, nx, ny int) {
-	if !widget.IsWidgetVisible(w) {
+	broadcastMouseMoveAt(w, ox, oy, nx, ny, 0)
+}
+
+func broadcastMouseMoveAt(w widget.Widget, ox, oy, nx, ny, depth int) {
+	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
 		return
 	}
 	b := w.Bounds()
@@ -769,6 +851,6 @@ func broadcastMouseMove(w widget.Widget, ox, oy, nx, ny int) {
 		}
 	}
 	for _, child := range w.Children() {
-		broadcastMouseMove(child, ox, oy, nx, ny)
+		broadcastMouseMoveAt(child, ox, oy, nx, ny, depth+1)
 	}
 }

@@ -84,7 +84,13 @@ type Engine struct {
 	// набора попапов, отданного sink (для вызова sink только при изменениях).
 	popupSink    func([]PopupFrame)
 	lastPopupSig []popupSig
+	popupCache   map[uintptr]*popupEntry // кэш канваса/картинки на оверлей
+	popupGen     uint64                  // поколение для отсева исчезнувших попапов
 	popupMu      sync.Mutex
+
+	// Рабочие буферы renderPopups (только рендер-горутина, под frameMu).
+	popupItems []popupItem
+	popupSigBu []popupSig
 
 	// notifierHandle — дескриптор регистрации этого движка в широковещательном
 	// реестре нотификаторов widget-пакета (RegisterUINotifier в New). Снимается
@@ -116,6 +122,11 @@ type Engine struct {
 	saveDir   string        // если не пусто — сохранять PNG в эту директорию
 	saveCh    chan saveJob  // канал для асинхронного сохранения
 	saveDone  chan struct{} // закрывается, когда saveWorker завершил запись всех PNG
+
+	saveLimit atomic.Int64 // предел числа сохраняемых кадров (0 — без предела)
+	saveCount atomic.Int64
+	saveOnce  sync.Once // лог о достижении предела — один раз
+	snapPool  sync.Pool // пул снапшотов front-буфера для SaveFrames
 
 	// ── Tooltip ─────────────────────────────────────────────────────────────
 	ttMu       sync.Mutex
@@ -160,6 +171,23 @@ const (
 	// процесс на месте.
 	MaxCanvasPixels = 64 << 20
 )
+
+// maxTreeDepth — предел глубины обходов дерева виджетов.
+// Цикл в Children() иначе вешает обход намертво.
+const maxTreeDepth = 512
+
+var deepTreeOnce sync.Once
+
+// tooDeep сообщает о превышении предела глубины; логирует один раз.
+func tooDeep(depth int) bool {
+	if depth < maxTreeDepth {
+		return false
+	}
+	deepTreeOnce.Do(func() {
+		log.Printf("engine: обход дерева виджетов прерван на глубине %d — вероятен цикл в Children()", maxTreeDepth)
+	})
+	return true
+}
 
 // clampCanvasSize приводит запрошенный размер холста к допустимому диапазону.
 // При изменении пишет в журнал: молча отдать не тот размер, что просили, —
@@ -324,11 +352,18 @@ func (e *Engine) SetRootFullCanvas(w widget.Widget) {
 
 // injectCaptureManager рекурсивно раздаёт CaptureManager по дереву виджетов.
 func injectCaptureManager(w widget.Widget, cm widget.CaptureManager) {
+	injectCaptureManagerAt(w, cm, 0)
+}
+
+func injectCaptureManagerAt(w widget.Widget, cm widget.CaptureManager, depth int) {
+	if tooDeep(depth) {
+		return
+	}
 	if ca, ok := w.(widget.CaptureAware); ok {
 		ca.SetCaptureManager(cm)
 	}
 	for _, child := range w.Children() {
-		injectCaptureManager(child, cm)
+		injectCaptureManagerAt(child, cm, depth+1)
 	}
 }
 
@@ -354,12 +389,16 @@ func (e *Engine) Frames() <-chan output.Frame {
 // CanvasSize возвращает ЛОГИЧЕСКИЙ размер холста (в нём живут виджеты).
 // При Scale == 1 совпадает с физическим.
 func (e *Engine) CanvasSize() (w, h int) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	return e.canvas.LogicalSize()
 }
 
 // PhysicalSize возвращает ФИЗИЧЕСКИЙ размер буферов кадра
 // (размер тайлов в Frames и нативного окна на HiDPI-мониторе).
 func (e *Engine) PhysicalSize() (w, h int) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	return e.canvas.W, e.canvas.H
 }
 
@@ -457,13 +496,51 @@ func (e *Engine) SetBackgroundFile(path string) error {
 	return nil
 }
 
+// DefaultSaveFramesLimit — сколько кадров SaveFrames сохраняет по умолчанию.
+const DefaultSaveFramesLimit = 10000
+
 // SaveFrames включает сохранение каждого изменившегося кадра как PNG в директорию dir.
-// Вызывать до Start(). Все кадры гарантированно сохраняются (отправка блокирующая).
+// Вызывать до Start(). Кадры сохраняются, пока не исчерпан лимит
+// (DefaultSaveFramesLimit; изменяется через SaveFramesLimit).
 // Stop() дожидается записи всех оставшихся PNG перед возвратом.
 func (e *Engine) SaveFrames(dir string) {
 	e.saveDir = dir
 	e.saveCh = make(chan saveJob, 512)
 	e.saveDone = make(chan struct{})
+	e.saveLimit.Store(DefaultSaveFramesLimit)
+	e.saveCount.Store(0)
+}
+
+// SaveFramesLimit задаёт предел числа сохраняемых кадров (0 — без предела).
+// Вызывать после SaveFrames.
+func (e *Engine) SaveFramesLimit(n int) {
+	if n < 0 {
+		n = 0
+	}
+	e.saveLimit.Store(int64(n))
+}
+
+// saveAllowed резервирует слот под очередной кадр; false — лимит исчерпан.
+func (e *Engine) saveAllowed() bool {
+	limit := e.saveLimit.Load()
+	if limit == 0 {
+		return true
+	}
+	if e.saveCount.Add(1) > limit {
+		e.saveOnce.Do(func() {
+			log.Printf("engine: SaveFrames: достигнут предел %d кадров — сохранение остановлено", limit)
+		})
+		return false
+	}
+	return true
+}
+
+// acquireSnap берёт буфер снапшота нужного размера из пула.
+func (e *Engine) acquireSnap(r image.Rectangle) *image.RGBA {
+	if img, _ := e.snapPool.Get().(*image.RGBA); img != nil && img.Rect == r {
+		return img
+	}
+	return image.NewRGBA(r)
 }
 
 // RegisterFont регистрирует именованный шрифт (TTF-данные) в движке.
@@ -476,8 +553,9 @@ func (e *Engine) RegisterFont(fontName string, ttfData []byte) {
 }
 
 // RegisterFontFile регистрирует именованный шрифт из TTF/OTF-файла.
+// Размер файла ограничен maxFontFileSize.
 func (e *Engine) RegisterFontFile(fontName, path string) error {
-	data, err := os.ReadFile(path)
+	data, err := readFileBounded(path, maxFontFileSize)
 	if err != nil {
 		return fmt.Errorf("RegisterFontFile %q: %w", path, err)
 	}
@@ -564,8 +642,9 @@ func (e *Engine) RegisterFallbackFont(ttfData []byte) bool {
 }
 
 // RegisterFallbackFontFile добавляет fallback-шрифт из TTF/OTF-файла.
+// Размер файла ограничен maxFontFileSize.
 func (e *Engine) RegisterFallbackFontFile(path string) error {
-	data, err := os.ReadFile(path)
+	data, err := readFileBounded(path, maxFontFileSize)
 	if err != nil {
 		return fmt.Errorf("RegisterFallbackFontFile %q: %w", path, err)
 	}
@@ -940,6 +1019,7 @@ func (e *Engine) saveWorker() {
 	}
 	for job := range e.saveCh {
 		savePNG(job.snap, job.path)
+		e.snapPool.Put(job.snap)
 	}
 }
 
@@ -1008,6 +1088,8 @@ func (e *Engine) renderFrame() output.Frame {
 	e.mu.RUnlock()
 
 	damage, damageAll := e.consumeDamage()
+	// Некламповая копия — попапы живут и за краем холста (см. renderPopups).
+	popupDamage := damage
 
 	// Частичная перерисовка: в on-demand режиме при InvalidateRect фон и
 	// дерево рисуются только в damage-области (базовый клип канваса). Вне
@@ -1063,7 +1145,8 @@ func (e *Engine) renderFrame() output.Frame {
 	// Хостируемые popup-оверлеи: рендерим их в отдельные буферы и отдаём хосту
 	// (нативные окна-попапы). Вне hosted-режима — no-op.
 	if hosted {
-		e.renderPopups(canvas, root, modals)
+		// !partial — рисовали весь кадр, значит перерисовываем и все попапы.
+		e.renderPopups(canvas, root, modals, popupDamage, !partial)
 	}
 
 	// Всплывающая подсказка (поверх всего, включая модальные диалоги).
@@ -1080,9 +1163,9 @@ func (e *Engine) renderFrame() output.Frame {
 
 	seq := e.frameSeq.Add(1)
 
-	if e.saveDir != "" && len(tiles) > 0 {
+	if e.saveDir != "" && len(tiles) > 0 && e.saveAllowed() {
 		// Снимаем копию front-буфера СЕЙЧАС, пока он актуален.
-		snap := image.NewRGBA(canvas.front.Rect)
+		snap := e.acquireSnap(canvas.front.Rect)
 		copy(snap.Pix, canvas.front.Pix)
 		path := filepath.Join(e.saveDir, fmt.Sprintf("frame_%06d.png", seq))
 		// Отправка блокирующая (все кадры сохраняются), но не переживает Stop:
@@ -1109,13 +1192,20 @@ func (e *Engine) renderFrame() output.Frame {
 // здесь (в основном холсте) НЕ рисуются. Прочие оверлеи (например, меню выбора
 // локали widget.Window, не реализующее OverlayBoundsProvider) рисуются как прежде.
 func drawOverlays(w widget.Widget, ctx widget.DrawContext, hosted bool) {
+	drawOverlaysAt(w, ctx, hosted, 0)
+}
+
+func drawOverlaysAt(w widget.Widget, ctx widget.DrawContext, hosted bool, depth int) {
+	if tooDeep(depth) {
+		return
+	}
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
 		if !hosted || !isHostedOverlay(w) {
 			od.DrawOverlay(ctx)
 		}
 	}
 	for _, child := range w.Children() {
-		drawOverlays(child, ctx, hosted)
+		drawOverlaysAt(child, ctx, hosted, depth+1)
 	}
 }
 

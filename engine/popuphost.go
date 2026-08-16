@@ -33,6 +33,24 @@ type popupSig struct {
 	hash uint64
 }
 
+// popupItem — найденный в дереве хостируемый оверлей (до рендера).
+type popupItem struct {
+	id   uintptr
+	rect image.Rectangle
+	od   widget.OverlayDrawer
+}
+
+// popupEntry — межкадровый кэш одного оверлея: канвас, готовая картинка и её хэш.
+type popupEntry struct {
+	canvas  *Canvas
+	src     *Canvas // канвас движка, из которого клонирован
+	fontRev uint64
+	rect    image.Rectangle
+	img     *image.RGBA
+	hash    uint64
+	seen    uint64
+}
+
 // SetPopupSink регистрирует хост popup-оверлеев. sink вызывается из рендер-цикла
 // со всеми активными оверлеями текущего кадра (пустой slice — закрыть все окна).
 // nil снимает хост (оверлеи снова рисуются в холст).
@@ -44,6 +62,7 @@ func (e *Engine) SetPopupSink(sink func(frames []PopupFrame)) {
 	e.popupMu.Lock()
 	e.popupSink = sink
 	e.lastPopupSig = nil
+	e.popupCache = nil
 	e.popupMu.Unlock()
 	widget.SetPopupsHosted(sink != nil)
 }
@@ -54,35 +73,64 @@ func (e *Engine) getPopupSink() func([]PopupFrame) {
 	return e.popupSink
 }
 
-// renderPopups собирает активные хостируемые оверлеи, рендерит каждый в свой
-// буфер и, если состав/содержимое/Rect изменились с прошлого кадра, вызывает
-// sink. Вызывается из renderFrame под frameMu (canvas стабилен).
-func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widget.ModalWidget) {
+// renderPopups отдаёт sink изменившиеся оверлеи (под frameMu).
+// Перерисовывается только оверлей с новым Rect или в damage.
+func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widget.ModalWidget,
+	damage image.Rectangle, dirtyAll bool) {
 	sink := e.getPopupSink()
 	if sink == nil {
 		return
 	}
 
-	var frames []PopupFrame
+	items := e.popupItems[:0]
 	if root != nil {
-		collectPopups(root, canvas, &frames)
+		items = collectPopups(items, root, 0)
 	}
 	for _, m := range modals {
 		if m.IsModal() {
-			collectPopups(m, canvas, &frames)
+			items = collectPopups(items, m, 0)
 		}
 	}
+	e.popupItems = items
 
-	// Сигнатура набора: id+rect+хэш пикселей. Вызываем sink только при отличии.
-	sig := make([]popupSig, len(frames))
-	for i, f := range frames {
-		sig[i] = popupSig{id: f.ID, rect: f.Rect, hash: hashRGBA(f.Img)}
-	}
+	sig := e.popupSigBu[:0]
 
 	e.popupMu.Lock()
+	if e.popupCache == nil {
+		e.popupCache = make(map[uintptr]*popupEntry)
+	}
+	e.popupGen++
+	gen := e.popupGen
+	for _, it := range items {
+		ent := e.popupCache[it.id]
+		if ent == nil {
+			ent = &popupEntry{}
+			e.popupCache[it.id] = ent
+		}
+		ent.seen = gen
+		if ent.img == nil || ent.rect != it.rect || dirtyAll || canvas.sRect(it.rect).Overlaps(damage) {
+			oc := ent.overlayCanvas(canvas, it.rect)
+			ent.img = renderOverlayInto(oc, it.od, it.rect)
+			ent.hash = hashRGBA(ent.img)
+			ent.rect = it.rect
+		}
+		sig = append(sig, popupSig{id: it.id, rect: it.rect, hash: ent.hash})
+	}
+	for id, ent := range e.popupCache {
+		if ent.seen != gen {
+			delete(e.popupCache, id)
+		}
+	}
+	e.popupSigBu = sig
+
 	changed := !samePopupSig(e.lastPopupSig, sig)
+	var frames []PopupFrame
 	if changed {
-		e.lastPopupSig = sig
+		e.lastPopupSig = append([]popupSig(nil), sig...)
+		frames = make([]PopupFrame, len(items))
+		for i, it := range items {
+			frames[i] = PopupFrame{ID: it.id, Rect: it.rect, Img: e.popupCache[it.id].img}
+		}
 	}
 	e.popupMu.Unlock()
 
@@ -91,22 +139,38 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 	}
 }
 
-// collectPopups рекурсивно рендерит хостируемые оверлеи дерева в буферы.
-func collectPopups(w widget.Widget, canvas *Canvas, out *[]PopupFrame) {
+// overlayCanvas отдаёт кэшированный канвас оверлея (или создаёт новый),
+// очищенный под новый рендер.
+func (ent *popupEntry) overlayCanvas(src *Canvas, r image.Rectangle) *Canvas {
+	oc := ent.canvas
+	if oc == nil || ent.src != src || ent.fontRev != src.fontRev ||
+		oc.logicalW != r.Dx() || oc.logicalH != r.Dy() || oc.scale != src.scale {
+		oc = src.cloneForSize(r.Dx(), r.Dy(), src.scale, nil)
+		ent.canvas, ent.src, ent.fontRev = oc, src, src.fontRev
+		return oc
+	}
+	clear(oc.back.Pix)
+	oc.hasClip = false
+	oc.hasBase = false
+	return oc
+}
+
+// collectPopups рекурсивно собирает хостируемые оверлеи дерева (без рендера).
+func collectPopups(out []popupItem, w widget.Widget, depth int) []popupItem {
+	if tooDeep(depth) {
+		return out
+	}
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
 		if ob, ok := w.(widget.OverlayBoundsProvider); ok {
 			if r := ob.OverlayBounds(); !r.Empty() {
-				*out = append(*out, PopupFrame{
-					ID:   widgetID(w),
-					Rect: r,
-					Img:  canvas.renderOverlay(od, r),
-				})
+				out = append(out, popupItem{id: widgetID(w), rect: r, od: od})
 			}
 		}
 	}
 	for _, child := range w.Children() {
-		collectPopups(child, canvas, out)
+		out = collectPopups(out, child, depth+1)
 	}
+	return out
 }
 
 // widgetID возвращает стабильный ключ виджета (указатель на его структуру).
@@ -119,14 +183,18 @@ func widgetID(w widget.Widget) uintptr {
 }
 
 // renderOverlay рендерит оверлей od в отдельный буфер размером с r (логический),
-// в физическом масштабе движка. Все координаты оверлея (абсолютные логические)
-// транслируются на -r.Min через translatingContext. Возвращает ФИЗИЧЕСКИЙ RGBA.
+// в физическом масштабе движка. Возвращает ФИЗИЧЕСКИЙ RGBA.
 func (c *Canvas) renderOverlay(od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
-	oc := c.cloneForSize(r.Dx(), r.Dy(), c.scale, nil)
+	return renderOverlayInto(c.cloneForSize(r.Dx(), r.Dy(), c.scale, nil), od, r)
+}
+
+// renderOverlayInto рисует оверлей в подготовленный канвас oc. Координаты
+// оверлея (абсолютные логические) транслируются на -r.Min.
+func renderOverlayInto(oc *Canvas, od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
 	tc := &translatingContext{inner: oc, dx: r.Min.X, dy: r.Min.Y}
 	od.DrawOverlay(tc)
-	// Отдаём копию back-буфера: cloneForSize-канвас переиспользоваться не будет,
-	// но копия развязывает владение с хостом (он блитит асинхронно).
+	// Копия развязывает владение с хостом: он блитит асинхронно, а канвас
+	// оверлея переиспользуется следующими кадрами.
 	out := image.NewRGBA(oc.back.Rect)
 	copy(out.Pix, oc.back.Pix)
 	return out
