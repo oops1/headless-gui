@@ -28,9 +28,11 @@ var (
 	procGetClipboardData = user32Clip.NewProc("GetClipboardData")
 	procSetClipboardData = user32Clip.NewProc("SetClipboardData")
 
-	procGlobalAlloc   = kernel32.NewProc("GlobalAlloc")
-	procGlobalLock    = kernel32.NewProc("GlobalLock")
-	procGlobalUnlock  = kernel32.NewProc("GlobalUnlock")
+	procGlobalAlloc  = kernel32.NewProc("GlobalAlloc")
+	procGlobalLock   = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock = kernel32.NewProc("GlobalUnlock")
+	procGlobalSize   = kernel32.NewProc("GlobalSize")
+	procGlobalFree   = kernel32.NewProc("GlobalFree")
 )
 
 // winClipboard — Windows системный буфер обмена.
@@ -58,10 +60,19 @@ func (c *winClipboard) GetText() string {
 	}
 	defer procGlobalUnlock.Call(h)
 
-	// Читаем UTF-16LE строку до нулевого терминатора.
-	var utf16Chars []uint16
-	for p := ptr; ; p += 2 {
-		ch := *(*uint16)(unsafe.Pointer(p))
+	// Читаем UTF-16LE строку до нулевого терминатора, НЕ выходя за размер
+	// блока: CF_UNICODETEXT обязан быть NUL-терминирован, но чужое приложение
+	// могло положить в буфер обмена что угодно, и скан «до нуля» ушёл бы за
+	// границу выделения (аудит SEC-16). Размер блока даёт GlobalSize; если она
+	// вернула 0 — доверять нечему, читаем пусто.
+	size, _, _ := procGlobalSize.Call(h)
+	if size < 2 {
+		return ""
+	}
+	maxChars := int(size / 2)
+	utf16Chars := make([]uint16, 0, min(maxChars, 4096))
+	for i := 0; i < maxChars; i++ {
+		ch := *(*uint16)(unsafe.Pointer(ptr + uintptr(i)*2))
 		if ch == 0 {
 			break
 		}
@@ -92,6 +103,9 @@ func (c *winClipboard) SetText(s string) {
 
 	ptr, _, _ := procGlobalLock.Call(hMem)
 	if ptr == 0 {
+		// Блок ещё наш (системе он передаётся только в SetClipboardData) —
+		// освобождаем, иначе HGLOBAL утекает при каждой неудаче.
+		procGlobalFree.Call(hMem)
 		return
 	}
 

@@ -5,7 +5,10 @@
 //   - ObservableCollection: коллекция с уведомлением о добавлении/удалении
 package datagrid
 
-import "sync"
+import (
+	"reflect"
+	"sync"
+)
 
 // ─── PropertyChangedHandler ────────────────────────────────────────────────
 
@@ -79,13 +82,27 @@ func (pn *PropertyNotifier) AddPropertyChanged(handler PropertyChangedHandler) {
 	pn.AddPropertyChangedHandle(handler)
 }
 
-// RemovePropertyChanged убирает последний добавленный обработчик (старое поведение).
-// Сохраняет совместимость с интерфейсом INotifyPropertyChanged.
+// RemovePropertyChanged убирает обработчик по функции. Сохраняет
+// совместимость с интерфейсом INotifyPropertyChanged.
+//
+// Раньше метод снимал ПОСЛЕДНИЙ добавленный обработчик, чей бы он ни был —
+// молча убивая чужую подписку (аудит SEC-11). Функции в Go несравнимы, но
+// сравнимы их указатели на код: снимаем последний обработчик с тем же
+// адресом функции — это ровно тот, что был передан. Для замыканий с одним
+// телом, но разными захватами адрес совпадает; поэтому надёжный путь —
+// AddPropertyChangedHandle/RemovePropertyChangedHandle по дескриптору.
 func (pn *PropertyNotifier) RemovePropertyChanged(handler PropertyChangedHandler) {
+	if handler == nil {
+		return
+	}
+	want := reflect.ValueOf(handler).Pointer()
 	pn.mu.Lock()
 	defer pn.mu.Unlock()
-	if len(pn.entries) > 0 {
-		pn.entries = pn.entries[:len(pn.entries)-1]
+	for i := len(pn.entries) - 1; i >= 0; i-- {
+		if reflect.ValueOf(pn.entries[i].h).Pointer() == want {
+			pn.entries = append(pn.entries[:i], pn.entries[i+1:]...)
+			return
+		}
 	}
 }
 
@@ -134,9 +151,16 @@ type CollectionChangedHandler func(event CollectionChangedEvent)
 
 // ObservableCollection — коллекция с уведомлением о изменениях (WPF ObservableCollection<T>).
 type ObservableCollection struct {
-	mu       sync.RWMutex
-	items    []interface{}
-	handlers []CollectionChangedHandler
+	mu      sync.RWMutex
+	items   []interface{}
+	entries []collectionEntry
+	nextID  int
+}
+
+// collectionEntry — подписчик коллекции с дескриптором для отписки.
+type collectionEntry struct {
+	id int
+	h  CollectionChangedHandler
 }
 
 // NewObservableCollection создаёт пустую наблюдаемую коллекцию.
@@ -154,16 +178,53 @@ func NewObservableCollectionFrom(items []interface{}) *ObservableCollection {
 }
 
 // AddCollectionChanged регистрирует обработчик изменений коллекции.
-func (oc *ObservableCollection) AddCollectionChanged(handler CollectionChangedHandler) {
+// Возвращает дескриптор для RemoveCollectionChanged.
+//
+// Отписка — не украшение: каждый SetItemsSource у DataGrid/TreeView/
+// CollectionView подписывает замыкание, захватывающее виджет; без снятия
+// подписки N перебиндовок = N живых обработчиков — утечка деревьев виджетов
+// и кратное размножение работы на каждое изменение (аудит SEC-11).
+func (oc *ObservableCollection) AddCollectionChanged(handler CollectionChangedHandler) int {
+	if handler == nil {
+		return -1
+	}
 	oc.mu.Lock()
 	defer oc.mu.Unlock()
-	oc.handlers = append(oc.handlers, handler)
+	oc.nextID++
+	id := oc.nextID
+	oc.entries = append(oc.entries, collectionEntry{id: id, h: handler})
+	return id
+}
+
+// RemoveCollectionChanged снимает подписку по дескриптору (no-op для
+// неизвестного/отрицательного id).
+func (oc *ObservableCollection) RemoveCollectionChanged(id int) {
+	if id <= 0 {
+		return
+	}
+	oc.mu.Lock()
+	defer oc.mu.Unlock()
+	for i, e := range oc.entries {
+		if e.id == id {
+			oc.entries = append(oc.entries[:i], oc.entries[i+1:]...)
+			return
+		}
+	}
+}
+
+// HandlerCount возвращает число подписчиков (для тестов).
+func (oc *ObservableCollection) HandlerCount() int {
+	oc.mu.RLock()
+	defer oc.mu.RUnlock()
+	return len(oc.entries)
 }
 
 func (oc *ObservableCollection) notify(event CollectionChangedEvent) {
 	oc.mu.RLock()
-	handlers := make([]CollectionChangedHandler, len(oc.handlers))
-	copy(handlers, oc.handlers)
+	handlers := make([]CollectionChangedHandler, len(oc.entries))
+	for i, e := range oc.entries {
+		handlers[i] = e.h
+	}
 	oc.mu.RUnlock()
 	for _, h := range handlers {
 		h(event)
