@@ -210,8 +210,53 @@ type BindingScope struct {
 
 	subCtx    interface{} // контекст, на который оформлена подписка
 	subHandle int         // id подписки (для отписки, -1 если нет)
+	// subLegacy — обработчик, оформленный через AddPropertyChanged (без
+	// дескриптора). Раньше эта ветка не оставляла ничего для отписки, и
+	// Dispose молча оставлял подписку жить (аудит SEC-11).
+	subLegacy dgridPkg.PropertyChangedHandler
+
+	// collSubs — подписки на ObservableCollection, оформленные при wireItems/
+	// wireVirtuals. Без снятия при Dispose каждое перестроение UI оставляло
+	// живой обработчик, захватывающий целое дерево виджетов (аудит SEC-11).
+	collSubs []collSubscription
+
+	// viewSubs — подписки на *CollectionView (AddViewChangedHandle), снимаются
+	// в Dispose по тем же причинам, что и collSubs.
+	viewSubs []viewSubscription
 
 	langListenerID int // id подписки на смену языка (-1 если не подписан)
+}
+
+// collSubscription — оформленная подписка на изменения коллекции.
+type collSubscription struct {
+	oc *dgridPkg.ObservableCollection
+	id int
+}
+
+// viewSubscription — оформленная подписка на пересчёт CollectionView.
+type viewSubscription struct {
+	cv *CollectionView
+	id int
+}
+
+// addCollSub запоминает дескриптор подписки на коллекцию для Dispose.
+func (s *BindingScope) addCollSub(oc *dgridPkg.ObservableCollection, id int) {
+	if oc == nil || id <= 0 {
+		return
+	}
+	s.mu.Lock()
+	s.collSubs = append(s.collSubs, collSubscription{oc: oc, id: id})
+	s.mu.Unlock()
+}
+
+// addViewSub запоминает дескриптор подписки на CollectionView для Dispose.
+func (s *BindingScope) addViewSub(cv *CollectionView, id int) {
+	if cv == nil || id <= 0 {
+		return
+	}
+	s.mu.Lock()
+	s.viewSubs = append(s.viewSubs, viewSubscription{cv: cv, id: id})
+	s.mu.Unlock()
 }
 
 // commandTarget — привязка Button.Command к объекту-команде из DataContext.
@@ -316,24 +361,58 @@ func (s *BindingScope) wireLocs() {
 	s.mu.Unlock()
 }
 
-// Dispose отписывает scope от модели и слушателя языка. Вызывать, когда
-// загруженное XAML-дерево больше не используется (перезагрузка UI).
+// Dispose отписывает scope от модели, коллекций и слушателя языка. Вызывать,
+// когда загруженное XAML-дерево больше не используется (перезагрузка UI).
+// Повторный вызов безопасен.
 func (s *BindingScope) Dispose() {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	langID := s.langListenerID
 	subCtx := s.subCtx
 	subHandle := s.subHandle
+	subLegacy := s.subLegacy
+	collSubs := s.collSubs
+	viewSubs := s.viewSubs
 	s.langListenerID = -1
 	s.subCtx = nil
 	s.subHandle = -1
+	s.subLegacy = nil
+	s.collSubs = nil
+	s.viewSubs = nil
 	s.mu.Unlock()
 
 	if langID >= 0 {
 		RemoveLanguageListener(langID)
 	}
-	if subCtx != nil {
-		if r, ok := subCtx.(interface{ RemovePropertyChangedHandle(int) }); ok && subHandle >= 0 {
-			r.RemovePropertyChangedHandle(subHandle)
+	unsubscribeCtx(subCtx, subHandle, subLegacy)
+	for _, cs := range collSubs {
+		cs.oc.RemoveCollectionChanged(cs.id)
+	}
+	for _, vs := range viewSubs {
+		vs.cv.RemoveViewChanged(vs.id)
+	}
+}
+
+// unsubscribeCtx снимает подписку на INotifyPropertyChanged: по дескриптору,
+// если модель его выдала, иначе — по самому обработчику (legacy-ветка
+// AddPropertyChanged, которая раньше не отписывалась никогда — SEC-11).
+func unsubscribeCtx(ctx interface{}, handle int, legacy dgridPkg.PropertyChangedHandler) {
+	if ctx == nil {
+		return
+	}
+	if handle >= 0 {
+		if r, ok := ctx.(interface{ RemovePropertyChangedHandle(int) }); ok {
+			r.RemovePropertyChangedHandle(handle)
+			return
+		}
+	}
+	if legacy != nil {
+		if r, ok := ctx.(interface {
+			RemovePropertyChanged(dgridPkg.PropertyChangedHandler)
+		}); ok {
+			r.RemovePropertyChanged(legacy)
 		}
 	}
 }
@@ -381,11 +460,14 @@ func (s *BindingScope) wireVirtuals() {
 		vic.SetItems(collectionItems(val))
 		switch src := val.(type) {
 		case *CollectionView:
-			src.AddViewChanged(func() { vic.SetItems(collectionItems(val)) })
+			id := src.AddViewChangedHandle(func() { vic.SetItems(collectionItems(val)) })
+			s.addViewSub(src, id)
 		case *dgridPkg.ObservableCollection:
-			src.AddCollectionChanged(func(dgridPkg.CollectionChangedEvent) {
+			// Дескриптор сохраняем: без него Dispose не отпустит коллекцию.
+			id := src.AddCollectionChanged(func(dgridPkg.CollectionChangedEvent) {
 				vic.SetItems(collectionItems(val))
 			})
+			s.addCollSub(src, id)
 		}
 	}
 }
@@ -421,11 +503,14 @@ func (s *BindingScope) wireItems() {
 		switch src := val.(type) {
 		case *CollectionView:
 			// Перестроение при изменении представления (filter/sort/group/source).
-			src.AddViewChanged(func() { s.rebuildItems(t) })
+			id := src.AddViewChangedHandle(func() { s.rebuildItems(t) })
+			s.addViewSub(src, id)
 		case *dgridPkg.ObservableCollection:
-			src.AddCollectionChanged(func(ev dgridPkg.CollectionChangedEvent) {
+			// Дескриптор сохраняем: без него Dispose не отпустит коллекцию.
+			id := src.AddCollectionChanged(func(ev dgridPkg.CollectionChangedEvent) {
 				s.rebuildItems(t)
 			})
+			s.addCollSub(src, id)
 		}
 	}
 }
@@ -586,6 +671,7 @@ func (s *BindingScope) subscribe() {
 	ctx := s.ctx
 	subCtx := s.subCtx
 	subHandle := s.subHandle
+	subLegacy := s.subLegacy
 	s.mu.Unlock()
 
 	if ctx == subCtx {
@@ -593,14 +679,11 @@ func (s *BindingScope) subscribe() {
 	}
 
 	// Отписываемся от старого контекста.
-	if subCtx != nil {
-		if r, ok := subCtx.(interface{ RemovePropertyChangedHandle(int) }); ok && subHandle >= 0 {
-			r.RemovePropertyChangedHandle(subHandle)
-		}
-	}
+	unsubscribeCtx(subCtx, subHandle, subLegacy)
 
 	// Подписываемся на новый контекст.
 	newHandle := -1
+	var newLegacy dgridPkg.PropertyChangedHandler
 	if ctx != nil {
 		if a, ok := ctx.(interface {
 			AddPropertyChangedHandle(dgridPkg.PropertyChangedHandler) int
@@ -611,15 +694,17 @@ func (s *BindingScope) subscribe() {
 		} else if n, ok := ctx.(interface {
 			AddPropertyChanged(dgridPkg.PropertyChangedHandler)
 		}); ok {
-			n.AddPropertyChanged(func(_ interface{}, _ string) {
-				s.Refresh()
-			})
+			// Дескриптора нет — сохраняем сам обработчик, чтобы Dispose и
+			// смена DataContext могли снять подписку (аудит SEC-11).
+			newLegacy = func(_ interface{}, _ string) { s.Refresh() }
+			n.AddPropertyChanged(newLegacy)
 		}
 	}
 
 	s.mu.Lock()
 	s.subCtx = ctx
 	s.subHandle = newHandle
+	s.subLegacy = newLegacy
 	s.mu.Unlock()
 }
 
@@ -1099,9 +1184,14 @@ func resolveBindingFull(expr string, ctx interface{}) string {
 }
 
 // formatBindingValue форматирует значение модели для UI (StringFormat или %v).
+//
+// StringFormat приходит из разметки, то есть это ДАННЫЕ: отдавать его прямо в
+// fmt.Sprintf нельзя — "%#v" распечатал бы внутренности модели, а лишние
+// глаголы дали бы "%!d(MISSING)" (аудит SEC-13). Разбор и защита — в
+// datagrid.SafeFormat; там же поддержан WPF-стиль "{0:F2}".
 func formatBindingValue(v interface{}, spec bindingSpec) string {
-	if spec.stringFormat != "" && strings.Contains(spec.stringFormat, "%") {
-		return fmt.Sprintf(spec.stringFormat, v)
+	if spec.stringFormat != "" {
+		return dgridPkg.SafeFormat(spec.stringFormat, v)
 	}
 	return fmt.Sprintf("%v", v)
 }
