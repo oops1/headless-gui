@@ -12,11 +12,13 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/output/webstream"
@@ -24,6 +26,10 @@ import (
 )
 
 func main() {
+	addr := flag.String("addr", "127.0.0.1:8091", "адрес HTTP-сервера")
+	token := flag.String("token", "", "токен доступа: ?token=… или Bearer (пусто — без проверки)")
+	flag.Parse()
+
 	eng := engine.New(900, 620, 30)
 
 	root := widget.NewPanel(color.RGBA{R: 30, G: 30, B: 34, A: 255})
@@ -92,9 +98,17 @@ func main() {
 	eng.SetFocus(tb)
 	eng.Start()
 
-	srv := webstream.New(eng)
+	srv := webstream.NewWithOptions(eng, webstream.Options{Token: *token})
 	go srv.Run()
 
-	log.Println("webdemo: http://localhost:8091")
-	log.Fatal(http.ListenAndServe(":8091", srv))
+	hs := &http.Server{
+		Addr:              *addr,
+		Handler:           srv,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		// WriteTimeout нельзя: стрим живёт долго.
+	}
+	webstream.LogListen(*addr, *token)
+	log.Fatal(hs.ListenAndServe())
 }

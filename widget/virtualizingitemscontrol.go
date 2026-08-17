@@ -38,6 +38,12 @@ type VirtualizingItemsControl struct {
 	ItemHeight int // высота строки (обязательно > 0; по умолчанию 28)
 	Buffer     int // сколько строк материализовать сверх видимого окна с каждой стороны
 
+	// boundCV/boundCVID — текущая привязка к CollectionView (SEC-11): при
+	// повторном BindCollectionView прежняя подписка снимается, иначе каждая
+	// перепривязка оставляла живое замыкание, а SetItems звался N раз.
+	boundCV   *CollectionView
+	boundCVID int
+
 	mu      sync.Mutex
 	items   []interface{}
 	build   func(item interface{}, index int) Widget
@@ -97,11 +103,27 @@ func (v *VirtualizingItemsControl) ItemCount() int {
 // BindCollectionView привязывает контейнер к CollectionView: элементы берутся из
 // представления и обновляются при изменении фильтра/сортировки/группы/источника.
 func (v *VirtualizingItemsControl) BindCollectionView(cv *CollectionView) {
+	v.UnbindCollectionView()
 	if cv == nil {
 		return
 	}
 	v.SetItems(cv.Items())
-	cv.AddViewChanged(func() { v.SetItems(cv.Items()) })
+	id := cv.AddViewChangedHandle(func() { v.SetItems(cv.Items()) })
+	v.mu.Lock()
+	v.boundCV, v.boundCVID = cv, id
+	v.mu.Unlock()
+}
+
+// UnbindCollectionView снимает подписку на ранее привязанный CollectionView
+// (элементы остаются). Повторный вызов — no-op.
+func (v *VirtualizingItemsControl) UnbindCollectionView() {
+	v.mu.Lock()
+	cv, id := v.boundCV, v.boundCVID
+	v.boundCV, v.boundCVID = nil, 0
+	v.mu.Unlock()
+	if cv != nil {
+		cv.RemoveViewChanged(id)
+	}
 }
 
 // ─── скролл/геометрия ───────────────────────────────────────────────────────

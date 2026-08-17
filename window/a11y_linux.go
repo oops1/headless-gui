@@ -77,6 +77,7 @@ const (
 	atspiRoleDialog      = 16
 	atspiRoleFiller      = 20
 	atspiRoleFrame       = 23
+	atspiRolePasswordTxt = 40
 	atspiRoleImage       = 27
 	atspiRoleLabel       = 29
 	atspiRoleList        = 31
@@ -1086,6 +1087,9 @@ func (b *atspiBridge) parentRef(id int32, node *a11yNode) dbusStruct {
 func (b *atspiBridge) roleOf(id int32, node *a11yNode) uint32 {
 	if id == atspiAppID {
 		return atspiRoleApplication
+	}
+	if node.Info.Role == widget.RoleTextInput && a11yHasState(node.Info.States, widget.StatePassword) {
+		return atspiRolePasswordTxt
 	}
 	return atspiRoleOf(node.Info.Role)
 }

@@ -53,7 +53,6 @@ type CocoaWindow struct {
 
 	maximized bool
 	closed    bool
-	mu        sync.Mutex
 
 	// Callbacks
 	onResize      func(w, h int)
@@ -64,21 +63,19 @@ type CocoaWindow struct {
 	onKeyUp       func(vk int)
 	onChar        func(r rune)
 
-	// Для BlitRGBA
-	frameBuf []byte // legacy-путь (NSBitmapImageRep, с переворотом Y)
-
-	// CALayer-путь: слой contentView и двойной пиксельный буфер.
-	// Двойная буферизация нужна потому, что Core Animation может читать
-	// данные CGImage лениво — пишем следующий кадр в другой буфер.
+	// CALayer-путь: слой contentView. Пиксели кадра НЕ передаются Core
+	// Animation указателем на Go-память: они копируются в CFData (владелец —
+	// CoreFoundation), см. BlitRGBA. Иначе после ресайза/GC слой мог читать
+	// освобождённый Go-буфер (SEC-6, use-after-free).
 	nsLayer    objc.ID
-	layerBufs  [2][]byte
-	layerBufIx int
 	legacyBlit bool // HEADLESS_GUI_COCOA_LEGACY=1 — старый путь через lockFocus
 }
 
 // Cocoa selectors (кэшируем)
 var (
 	selAlloc                     objc.SEL
+	selRelease                   objc.SEL
+	selBitmapData                objc.SEL
 	selInit                      objc.SEL
 	selSharedApplication         objc.SEL
 	selSetActivationPolicy       objc.SEL
@@ -116,7 +113,7 @@ var (
 	selUnlockFocus              objc.SEL
 	selDrawInRect               objc.SEL
 	selFlushGraphics            objc.SEL
-	selCurrentContext            objc.SEL
+	selCurrentContext           objc.SEL
 
 	cocoaInited bool
 )
@@ -126,6 +123,8 @@ func initCocoaSelectors() {
 		return
 	}
 	selAlloc = objc.RegisterName("alloc")
+	selRelease = objc.RegisterName("release")
+	selBitmapData = objc.RegisterName("bitmapData")
 	selInit = objc.RegisterName("init")
 	selSharedApplication = objc.RegisterName("sharedApplication")
 	selSetActivationPolicy = objc.RegisterName("setActivationPolicy:")
@@ -186,10 +185,14 @@ var (
 	selSetDisableActions objc.SEL
 
 	// CoreGraphics: CGImage из сырого пиксельного буфера.
-	cgColorSpaceCreateDeviceRGB  func() uintptr
-	cgDataProviderCreateWithData func(info, data, size, releaseCallback uintptr) uintptr
-	cgDataProviderRelease        func(provider uintptr)
-	cgImageCreate                func(width, height, bitsPerComponent, bitsPerPixel, bytesPerRow,
+	cgColorSpaceCreateDeviceRGB    func() uintptr
+	cgDataProviderCreateWithCFData func(data uintptr) uintptr
+	cgDataProviderRelease          func(provider uintptr)
+	// CoreFoundation: CFData делает СОБСТВЕННУЮ копию пикселей — CoreGraphics
+	// и Core Animation никогда не держат указателей в Go-кучу (SEC-6).
+	cfDataCreate  func(allocator, bytes, length uintptr) uintptr
+	cfRelease     func(cf uintptr)
+	cgImageCreate func(width, height, bitsPerComponent, bitsPerPixel, bytesPerRow,
 		colorSpace uintptr, bitmapInfo uint32, provider, decode uintptr,
 		shouldInterpolate uintptr, intent uintptr) uintptr
 	cgImageRelease func(img uintptr)
@@ -226,10 +229,19 @@ func loadFrameworks() error {
 			return
 		}
 		purego.RegisterLibFunc(&cgColorSpaceCreateDeviceRGB, cg, "CGColorSpaceCreateDeviceRGB")
-		purego.RegisterLibFunc(&cgDataProviderCreateWithData, cg, "CGDataProviderCreateWithData")
+		purego.RegisterLibFunc(&cgDataProviderCreateWithCFData, cg, "CGDataProviderCreateWithCFData")
 		purego.RegisterLibFunc(&cgDataProviderRelease, cg, "CGDataProviderRelease")
 		purego.RegisterLibFunc(&cgImageCreate, cg, "CGImageCreate")
 		purego.RegisterLibFunc(&cgImageRelease, cg, "CGImageRelease")
+		cf, err := purego.Dlopen(
+			"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+			purego.RTLD_LAZY|purego.RTLD_GLOBAL)
+		if err != nil {
+			frameworksErr = fmt.Errorf("cocoa: dlopen CoreFoundation: %w", err)
+			return
+		}
+		purego.RegisterLibFunc(&cfDataCreate, cf, "CFDataCreate")
+		purego.RegisterLibFunc(&cfRelease, cf, "CFRelease")
 		cgColorSpace = cgColorSpaceCreateDeviceRGB()
 	})
 	return frameworksErr
@@ -345,14 +357,15 @@ func (w *CocoaWindow) RunEventLoop() error {
 
 	// NSDefaultRunLoopMode — создаём как NSString
 	defaultMode := nsString("kCFRunLoopDefaultMode")
+	defer defaultMode.Send(selRelease)
 
 	for !w.closed {
 		// nextEventMatchingMask:untilDate:inMode:dequeue:
 		event := w.nsApp.Send(selNextEvent,
-			uintptr(0xFFFFFFFF),      // NSAnyEventMask
+			uintptr(0xFFFFFFFF), // NSAnyEventMask
 			uintptr(distantFuture),
 			uintptr(defaultMode),
-			uintptr(1),               // dequeue = YES
+			uintptr(1), // dequeue = YES
 		)
 
 		if event == 0 {
@@ -462,6 +475,7 @@ func (w *CocoaWindow) setCocoaTitle(title string) {
 	if w.nsWindow != 0 {
 		nsStr := nsString(title)
 		w.nsWindow.Send(selSetTitle, uintptr(nsStr))
+		nsStr.Send(selRelease) // setTitle: копирует строку
 	}
 }
 
@@ -532,24 +546,19 @@ func (w *CocoaWindow) BlitRGBA(img *image.RGBA) {
 		return
 	}
 
-	// CALayer-путь: пиксели → CGImage → layer.contents.
-	// Без переворота Y: CGImage отображается в contents в естественной
-	// ориентации (строка 0 — верх). Копия нужна, т.к. img мутируется
-	// следующим кадром, а Core Animation может читать данные лениво;
-	// двойной буфер защищает и от чтения после подмены contents.
+	// CALayer-путь: пиксели → CFData (копия) → CGImage → layer.contents.
+	// Копия обязательна: слой не должен держать указатель в Go-кучу.
 	pixLen := height * img.Stride
-	w.mu.Lock()
-	w.layerBufIx ^= 1
-	buf := w.layerBufs[w.layerBufIx]
-	if len(buf) < pixLen {
-		buf = make([]byte, pixLen)
-		w.layerBufs[w.layerBufIx] = buf
+	if pixLen <= 0 || len(img.Pix) < pixLen {
+		return
 	}
-	copy(buf[:pixLen], img.Pix[:pixLen])
-	dataPtr := uintptr(unsafe.Pointer(&buf[0]))
-	w.mu.Unlock()
-
-	provider := cgDataProviderCreateWithData(0, dataPtr, uintptr(pixLen), 0)
+	cfData := cfDataCreate(0, uintptr(unsafe.Pointer(&img.Pix[0])), uintptr(pixLen))
+	runtime.KeepAlive(img) // img.Pix должен жить до возврата CFDataCreate
+	if cfData == 0 {
+		return
+	}
+	provider := cgDataProviderCreateWithCFData(cfData)
+	cfRelease(cfData) // провайдер удерживает собственную ссылку
 	if provider == 0 {
 		return
 	}
@@ -578,27 +587,27 @@ func (w *CocoaWindow) BlitRGBA(img *image.RGBA) {
 	cgDataProviderRelease(provider)
 }
 
+// BlitRGBADirty пропускает кадр без изменений. Частичного обновления нет:
+// contents слоя требует CGImage целиком.
+func (w *CocoaWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
+	if img == nil || dirty.Intersect(img.Bounds()).Empty() {
+		return
+	}
+	w.BlitRGBA(img)
+}
+
 // blitRGBALegacy — прежний путь вывода через NSBitmapImageRep + NSImage +
 // lockFocus (deprecated с macOS 10.14). Оставлен как аварийный фолбэк:
 // HEADLESS_GUI_COCOA_LEGACY=1.
 func (w *CocoaWindow) blitRGBALegacy(img *image.RGBA, width, height int) {
-	// Подготавливаем RGBA данные (Cocoa Y=0 внизу → переворачиваем)
-	pixLen := width * height * 4
-	w.mu.Lock()
-	if len(w.frameBuf) < pixLen {
-		w.frameBuf = make([]byte, pixLen)
-	}
-	stride := img.Stride
-	for y := 0; y < height; y++ {
-		srcOff := y * stride
-		dstOff := (height - 1 - y) * width * 4
-		copy(w.frameBuf[dstOff:dstOff+width*4], img.Pix[srcOff:srcOff+width*4])
-	}
+	// SEC-6: NSBitmapImageRep с planes=NULL выделяет СОБСТВЕННЫЙ буфер; пиксели
+	// копируем в него через -bitmapData (Cocoa Y=0 внизу → переворачиваем).
+	// Прежний вариант передавал указатель на Go-слайс, который репрезентация
+	// не копирует и который переживает возврат из функции (autorelease pool,
+	// NSImage-кэш) — при ресайзе старый слайс уходил в GC под ногами у Cocoa.
+	rowLen := width * 4
 
-	dataPtr := uintptr(unsafe.Pointer(&w.frameBuf[0]))
-	w.mu.Unlock()
-
-	// Создаём NSBitmapImageRep из пиксельных данных
+	// Создаём NSBitmapImageRep с внутренним буфером
 	nsBitmapClass := objc.ID(objc.GetClass("NSBitmapImageRep"))
 	bitmapAlloc := nsBitmapClass.Send(selAlloc)
 
@@ -608,21 +617,34 @@ func (w *CocoaWindow) blitRGBALegacy(img *image.RGBA, width, height int) {
 	// initWithBitmapDataPlanes:pixelsWide:pixelsHigh:bitsPerSample:samplesPerPixel:
 	//   hasAlpha:isPlanar:colorSpaceName:bytesPerRow:bitsPerPixel:
 	bitmapRep := bitmapAlloc.Send(selInitWithBitmapDataPlanes,
-		uintptr(unsafe.Pointer(&dataPtr)), // planes (pointer to pointer to pixel data)
-		uintptr(width),                     // pixelsWide
-		uintptr(height),                    // pixelsHigh
-		uintptr(8),                         // bitsPerSample
-		uintptr(4),                         // samplesPerPixel (RGBA)
-		uintptr(1),                         // hasAlpha = YES
-		uintptr(0),                         // isPlanar = NO
-		uintptr(colorSpace),                // colorSpaceName
-		uintptr(width*4),                   // bytesPerRow
-		uintptr(32),                        // bitsPerPixel
+		uintptr(0),          // planes = NULL → буфер выделяет сама репрезентация
+		uintptr(width),      // pixelsWide
+		uintptr(height),     // pixelsHigh
+		uintptr(8),          // bitsPerSample
+		uintptr(4),          // samplesPerPixel (RGBA)
+		uintptr(1),          // hasAlpha = YES
+		uintptr(0),          // isPlanar = NO
+		uintptr(colorSpace), // colorSpaceName
+		uintptr(rowLen),     // bytesPerRow
+		uintptr(32),         // bitsPerPixel
 	)
-
+	colorSpace.Send(selRelease)
 	if bitmapRep == 0 {
 		return
 	}
+	dataPtr := bitmapRep.Send(selBitmapData)
+	if dataPtr == 0 {
+		bitmapRep.Send(selRelease)
+		return
+	}
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(dataPtr)), rowLen*height)
+	stride := img.Stride
+	for y := 0; y < height; y++ {
+		srcOff := y * stride
+		dstOff := (height - 1 - y) * rowLen
+		copy(dst[dstOff:dstOff+rowLen], img.Pix[srcOff:srcOff+rowLen])
+	}
+	runtime.KeepAlive(img)
 
 	// Создаём NSImage и добавляем представление
 	nsImageClass := objc.ID(objc.GetClass("NSImage"))
@@ -648,8 +670,8 @@ func (w *CocoaWindow) blitRGBALegacy(img *image.RGBA, width, height int) {
 	nsImage.Send(selDrawInRect,
 		uintptr(unsafe.Pointer(&dstRect)),
 		uintptr(unsafe.Pointer(&srcRect)),
-		uintptr(2),   // NSCompositingOperationCopy
-		uintptr(1),   // fraction=1.0 (полная непрозрачность)
+		uintptr(2), // NSCompositingOperationCopy
+		uintptr(1), // fraction=1.0 (полная непрозрачность)
 	)
 
 	// Flush
@@ -660,16 +682,21 @@ func (w *CocoaWindow) blitRGBALegacy(img *image.RGBA, width, height int) {
 	}
 
 	w.nsView.Send(selUnlockFocus)
+
+	// alloc/init дают retain=1: отпускаем обе наши ссылки (NSImage удерживает
+	// репрезентацию сам) — иначе утечка двух объектов на каждый кадр.
+	nsImage.Send(selRelease)
+	bitmapRep.Send(selRelease)
 }
 
 // Callbacks
-func (w *CocoaWindow) SetOnResize(fn func(w, h int))                              { w.onResize = fn }
-func (w *CocoaWindow) SetOnClose(fn func() bool)                                   { w.onClose = fn }
-func (w *CocoaWindow) SetOnMouseMove(fn func(x, y int))                            { w.onMouseMove = fn }
-func (w *CocoaWindow) SetOnMouseButton(fn func(x, y, button int, pressed bool))    { w.onMouseButton = fn }
-func (w *CocoaWindow) SetOnKeyDown(fn func(vk int))                                { w.onKeyDown = fn }
-func (w *CocoaWindow) SetOnKeyUp(fn func(vk int))                                  { w.onKeyUp = fn }
-func (w *CocoaWindow) SetOnChar(fn func(r rune))                                   { w.onChar = fn }
+func (w *CocoaWindow) SetOnResize(fn func(w, h int))                            { w.onResize = fn }
+func (w *CocoaWindow) SetOnClose(fn func() bool)                                { w.onClose = fn }
+func (w *CocoaWindow) SetOnMouseMove(fn func(x, y int))                         { w.onMouseMove = fn }
+func (w *CocoaWindow) SetOnMouseButton(fn func(x, y, button int, pressed bool)) { w.onMouseButton = fn }
+func (w *CocoaWindow) SetOnKeyDown(fn func(vk int))                             { w.onKeyDown = fn }
+func (w *CocoaWindow) SetOnKeyUp(fn func(vk int))                               { w.onKeyUp = fn }
+func (w *CocoaWindow) SetOnChar(fn func(r rune))                                { w.onChar = fn }
 
 // ─── Маппинг клавиш macOS → VK ─────────────────────────────────────────────
 

@@ -49,14 +49,16 @@ func NewImageWidget() *ImageWidget {
 }
 
 // SetSource загружает изображение из файла (PNG или JPEG).
-// Потокобезопасно. Возвращает ошибку если файл недоступен или формат не поддерживается.
+// Потокобезопасно. Возвращает ошибку если файл недоступен, формат не
+// поддерживается или изображение превышает лимиты (см. DecodeImageBounded:
+// размер файла и площадь растра ограничены — SEC-9).
 func (w *ImageWidget) SetSource(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	img, _, err := image.Decode(f)
+	img, err := DecodeImageBounded(f)
 	if err != nil {
 		return err
 	}

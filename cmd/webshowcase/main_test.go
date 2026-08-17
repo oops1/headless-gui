@@ -22,7 +22,7 @@ func buildForTest(t *testing.T) *webShowcase {
 }
 
 // clickWidget шлёт движку настоящий клик в центр виджета — тот же путь, что и
-// у браузерного зрителя (webstream.dispatchInput зовёт эти же методы).
+// у браузерного зрителя (webstream зовёт эти же методы).
 func clickWidget(app *webShowcase, w widget.Widget) {
 	b := w.Bounds()
 	x, y := (b.Min.X+b.Max.X)/2, (b.Min.Y+b.Max.Y)/2

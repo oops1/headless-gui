@@ -151,6 +151,7 @@ var (
 	uiaCore  = windows.NewLazySystemDLL("uiautomationcore.dll")
 
 	procSysAllocString        = oleaut32.NewProc("SysAllocString")
+	procSysFreeString         = oleaut32.NewProc("SysFreeString")
 	procSafeArrayCreateVector = oleaut32.NewProc("SafeArrayCreateVector")
 	procSafeArrayPutElement   = oleaut32.NewProc("SafeArrayPutElement")
 
@@ -216,8 +217,7 @@ func (v *comVariant) setBool(b bool) {
 	v.val = [2]uintptr{uintptr(n), 0}
 }
 
-// setString кладёт BSTR. Строку выделяет SysAllocString — владение переходит
-// вызывающей стороне (UIA освободит через VariantClear).
+// setString кладёт BSTR; out-параметр освобождает UIA, in — clear().
 func (v *comVariant) setString(s string) {
 	if s == "" {
 		v.setEmpty()
@@ -235,6 +235,14 @@ func (v *comVariant) setString(s string) {
 	}
 	v.vt = vtBSTR
 	v.val = [2]uintptr{bstr, 0}
+}
+
+// clear освобождает BSTR входного VARIANT (in-параметры — наши).
+func (v *comVariant) clear() {
+	if v.vt == vtBSTR && v.val[0] != 0 {
+		procSysFreeString.Call(v.val[0])
+	}
+	v.setEmpty()
 }
 
 // ─── SAFEARRAY ───────────────────────────────────────────────────────────────

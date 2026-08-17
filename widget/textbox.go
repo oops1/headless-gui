@@ -6,6 +6,7 @@ import (
 	"math"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // TextBox — многострочный текстовый редактор (WPF TextBox c
@@ -36,9 +37,14 @@ type TextBox struct {
 	desiredX  int // целевая X (px) для Up/Down; -1 = не задана
 
 	// Кэш компоновки: границы строк для текущего текста и ширины.
-	lines   []tbLine
-	layoutW int  // ширина текстовой области, для которой посчитан кэш
-	dirty   bool // текст изменился — кэш недействителен
+	lines     []tbLine
+	layoutW   int    // ширина текстовой области, для которой посчитан кэш
+	layoutRev uint64 // ревизия метрик текста на момент компоновки
+	dirty     bool   // текст изменился — кэш недействителен
+
+	// Текст в байтах и смещения рун — замер префиксов без аллокаций.
+	layoutBuf []byte
+	runeOff   []int
 
 	dragging bool
 	capMgr   CaptureManager
@@ -241,15 +247,18 @@ func (t *TextBox) visibleLines() int {
 	return n
 }
 
-// ensureLayout перекомпоновывает строки при изменении текста или ширины.
-// Вызывать под t.mu.
+// ensureLayout перекомпоновывает строки при изменении текста, ширины или
+// метрик шрифта. Вызывать под t.mu.
 func (t *TextBox) ensureLayout() {
 	w := t.textAreaW()
-	if !t.dirty && t.layoutW == w && t.lines != nil {
+	rev := TextMetricsRev()
+	if !t.dirty && t.layoutW == w && t.layoutRev == rev && t.lines != nil {
 		return
 	}
 	t.layoutW = w
+	t.layoutRev = rev
 	t.dirty = false
+	t.buildText()
 	t.lines = t.lines[:0]
 
 	fs := t.fontSize()
@@ -272,6 +281,24 @@ func (t *TextBox) ensureLayout() {
 	}
 }
 
+// buildText пересобирает байтовый текст и смещения рун. Вызывать под t.mu.
+func (t *TextBox) buildText() {
+	t.layoutBuf = t.layoutBuf[:0]
+	t.runeOff = append(t.runeOff[:0], 0)
+	for _, r := range t.runes {
+		t.layoutBuf = utf8.AppendRune(t.layoutBuf, r)
+		t.runeOff = append(t.runeOff, len(t.layoutBuf))
+	}
+}
+
+// measureRange возвращает ширину рун [a, b) в пикселях. Вызывать под t.mu.
+func (t *TextBox) measureRange(a, b int, fs float64) int {
+	if !t.dirty && len(t.runeOff) == len(t.runes)+1 {
+		return measureUIBytes(t.layoutBuf[t.runeOff[a]:t.runeOff[b]], fs)
+	}
+	return MeasureUIText(string(t.runes[a:b]), fs)
+}
+
 // wrapParagraph разбивает параграф [start, end) на строки шириной ≤ maxW px:
 // перенос по пробелам, слишком длинные слова режутся по символам.
 // Вызывать под t.mu (внутри ensureLayout).
@@ -280,37 +307,55 @@ func (t *TextBox) wrapParagraph(start, end, maxW int, fs float64) {
 		t.lines = append(t.lines, tbLine{start: start, end: end})
 		return
 	}
-	lineStart := start
-	lastSpace := -1 // индекс последнего пробела в текущей строке
-	for i := start; i < end; i++ {
-		if t.runes[i] == ' ' {
-			lastSpace = i
+	lineStart, from := start, start
+	for from < end {
+		i := t.firstOverflow(lineStart, from, end, maxW, fs)
+		if i >= end {
+			break
 		}
-		w := MeasureUIText(string(t.runes[lineStart:i+1]), fs)
-		if w <= maxW {
-			continue
+		// Последний пробел строки; правее него пробелов уже нет.
+		lastSpace := -1
+		for k := i; k >= lineStart; k-- {
+			if t.runes[k] == ' ' {
+				lastSpace = k
+				break
+			}
 		}
-		// Символ i не влезает.
 		switch {
 		case lastSpace > lineStart:
 			// Перенос по последнему пробелу; пробел остаётся в верхней строке.
 			t.lines = append(t.lines, tbLine{start: lineStart, end: lastSpace})
 			lineStart = lastSpace + 1
-			lastSpace = -1
-			// Каретка цикла остаётся на i: пересчитаем ширину от нового начала.
 		case i > lineStart:
 			// Одно слово шире области — режем по символам.
 			t.lines = append(t.lines, tbLine{start: lineStart, end: i})
 			lineStart = i
-			lastSpace = -1
 		default:
 			// Даже один символ не влезает — кладём его целиком.
 			t.lines = append(t.lines, tbLine{start: lineStart, end: i + 1})
 			lineStart = i + 1
-			lastSpace = -1
 		}
+		from = i + 1
 	}
 	t.lines = append(t.lines, tbLine{start: lineStart, end: end})
+}
+
+// firstOverflow — первая руна из [from, end), где префикс от lineStart шире
+// maxW; end — влезает весь остаток. Ширина не убывает — делим пополам.
+func (t *TextBox) firstOverflow(lineStart, from, end, maxW int, fs float64) int {
+	if t.measureRange(lineStart, end, fs) <= maxW {
+		return end
+	}
+	lo, hi := from, end-1
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		if t.measureRange(lineStart, mid+1, fs) > maxW {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	return lo
 }
 
 // caretLine возвращает индекс строки, содержащей каретку.
@@ -334,23 +379,26 @@ func (t *TextBox) lineTextW(li, col int) int {
 	if col > ln.end-ln.start {
 		col = ln.end - ln.start
 	}
-	return MeasureUIText(string(t.runes[ln.start:ln.start+col]), t.fontSize())
+	return t.measureRange(ln.start, ln.start+col, t.fontSize())
 }
 
 // colAtX возвращает колонку (0..len) строки li, ближайшую к px x.
-// Вызывать под t.mu.
+// Рубежи колонок не убывают — ищем делением пополам. Вызывать под t.mu.
 func (t *TextBox) colAtX(li, x int) int {
 	ln := t.lines[li]
 	length := ln.end - ln.start
-	prev := 0
-	for c := 1; c <= length; c++ {
-		w := t.lineTextW(li, c)
-		if x < (prev+w)/2 {
-			return c - 1
+	lo, hi := 1, length
+	res := length + 1
+	for lo <= hi {
+		c := int(uint(lo+hi) >> 1)
+		if x < (t.lineTextW(li, c-1)+t.lineTextW(li, c))/2 {
+			res = c
+			hi = c - 1
+		} else {
+			lo = c + 1
 		}
-		prev = w
 	}
-	return length
+	return res - 1
 }
 
 // caretPoint возвращает (строка, x px) каретки. Вызывать под t.mu.

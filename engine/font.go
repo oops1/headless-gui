@@ -8,7 +8,10 @@ package engine
 
 import (
 	"bytes"
+	"fmt"
 	"image"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -99,30 +102,45 @@ type cachedGlyph struct {
 // размер×руна, маска ~200–800 байт — предел удерживает память в единицах МБ).
 const maxGlyphCacheEntries = 8192
 
-// newFontCache создаёт кэш, загружая шрифт из assetsDir или используя встроенный.
+// newFontCache создаёт кэш основного шрифта, загружая его из assetsDir.
+// Это ЕДИНСТВЕННОЕ место, где невалидный шрифт заменяется встроенным
+// Go Regular: без основного шрифта движок работать не может, и лучше
+// показать текст «не тем» шрифтом, чем не показать вовсе. Подмена логируется.
 func newFontCache(assetsDir string) *FontCache {
 	data := loadFontData(assetsDir)
-	return newFontCacheFromData(data, DefaultDPI)
+	if fc := newFontCacheFromData(data, DefaultDPI); fc != nil {
+		return fc
+	}
+	log.Printf("engine: основной шрифт из %q не распознан, используется встроенный Go Regular", assetsDir)
+	return newFontCacheFromData(goregular.TTF, DefaultDPI)
+}
+
+// parseFontData разбирает TTF/OTF/TTC-байты; для TTC-коллекций берётся
+// первый шрифт.
+func parseFontData(data []byte) (*opentype.Font, error) {
+	parsed, err := opentype.Parse(data)
+	if err == nil {
+		return parsed, nil
+	}
+	// TTC-коллекция (Nirmala.ttc и т.п.) — первый шрифт.
+	if coll, cerr := opentype.ParseCollection(data); cerr == nil {
+		if f, ferr := coll.Font(0); ferr == nil {
+			return f, nil
+		}
+	}
+	return nil, err
 }
 
 // newFontCacheFromData создаёт FontCache из TTF/OTF/TTC-байт и заданного DPI.
-// Для TTC-коллекций берётся первый шрифт. Возвращает nil, если данные невалидны.
+// Возвращает nil, если данные невалидны — БЕЗ молчаливой подмены встроенным
+// шрифтом (SEC-17): иначе битый файл из RegisterFont/AddFallbackFont
+// регистрировался как «ещё один Go Regular», ошибка «невалидный шрифт» в
+// RegisterFallbackFontFile была недостижима, а fallback-цепочка росла
+// бесполезными дубликатами.
 func newFontCacheFromData(data []byte, dpi float64) *FontCache {
-	parsed, err := opentype.Parse(data)
+	parsed, err := parseFontData(data)
 	if err != nil {
-		// TTC-коллекция (Nirmala.ttc и т.п.) — первый шрифт.
-		if coll, cerr := opentype.ParseCollection(data); cerr == nil {
-			if f, ferr := coll.Font(0); ferr == nil {
-				parsed, err = f, nil
-			}
-		}
-	}
-	if err != nil {
-		data = goregular.TTF
-		parsed, err = opentype.Parse(data)
-		if err != nil {
-			return nil
-		}
+		return nil
 	}
 	return &FontCache{
 		ttf:     parsed,
@@ -359,13 +377,23 @@ func (fc *FontCache) HasGlyph(r rune) bool {
 	if r == ' ' {
 		return true
 	}
+	// PERF-14: попадание в кэш — под RLock (HasGlyph зовётся на КАЖДУЮ руну
+	// при активной fallback-цепочке). Write-lock берём только на промах.
+	fc.mu.RLock()
+	v, ok := fc.glyphPresent[r]
+	fc.mu.RUnlock()
+	if ok {
+		return v
+	}
+
+	// Промах: считаем cmap ВНЕ мьютекса нельзя — fc.buf разделяемый (sfnt.Buffer
+	// не потокобезопасен), поэтому расчёт идёт под write-lock, как и раньше.
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 	if fc.glyphPresent == nil {
 		fc.glyphPresent = make(map[rune]bool)
-	}
-	if v, ok := fc.glyphPresent[r]; ok {
-		return v
+	} else if v, ok := fc.glyphPresent[r]; ok {
+		return v // кто-то посчитал, пока мы ждали lock
 	}
 	gi, err := fc.ttf.GlyphIndex(&fc.buf, r)
 	present := err == nil && gi != 0
@@ -380,15 +408,19 @@ func (fc *FontCache) HasGlyph(r rune) bool {
 func systemFallbackFontPaths() []string {
 	switch runtime.GOOS {
 	case "windows":
+		// SystemRoot — стандартная системная переменная; принимаем только
+		// абсолютный путь к существующему каталогу, иначе — C:\Windows (SEC-17).
 		root := os.Getenv("SystemRoot")
-		if root == "" {
+		if root == "" || !filepath.IsAbs(root) {
+			root = `C:\Windows`
+		} else if st, err := os.Stat(root); err != nil || !st.IsDir() {
 			root = `C:\Windows`
 		}
 		fonts := filepath.Join(root, "Fonts")
 		return []string{
 			filepath.Join(fonts, "seguisym.ttf"), // Segoe UI Symbol: ✓✗⚠, стрелки, box-drawing
-			filepath.Join(fonts, "l_10646.ttf"),   // Lucida Sans Unicode: ✓✗ и пр.
-			filepath.Join(fonts, "arialuni.ttf"),  // Arial Unicode MS (если установлен)
+			filepath.Join(fonts, "l_10646.ttf"),  // Lucida Sans Unicode: ✓✗ и пр.
+			filepath.Join(fonts, "arialuni.ttf"), // Arial Unicode MS (если установлен)
 			filepath.Join(fonts, "DejaVuSans.ttf"),
 			filepath.Join(fonts, "arial.ttf"),    // латиница/кириллица/арабский/иврит
 			filepath.Join(fonts, "Nirmala.ttc"),  // Nirmala UI: индийские скрипты (деванагари и др.)
@@ -445,7 +477,7 @@ func readFontFile(path string) ([]byte, error) {
 		}
 		return data, nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := readFileBounded(path, maxFontFileSize)
 	if err != nil {
 		data = nil
 	}
@@ -454,6 +486,34 @@ func readFontFile(path string) ([]byte, error) {
 	fontFileMu.Unlock()
 	if data == nil {
 		return nil, err
+	}
+	return data, nil
+}
+
+// maxFontFileSize — верхняя граница размера файла шрифта, который движок
+// согласен прочитать в память (SEC-17): пути fallback-шрифтов зависят от
+// окружения (SystemRoot и т.п.), и «шрифт» на десятки гигабайт не должен
+// превращаться в OOM при старте. Самые крупные реальные шрифты (Noto CJK,
+// Arial Unicode, TTC-коллекции) — 20–40 МБ.
+const maxFontFileSize = 128 << 20
+
+// readFileBounded читает файл целиком, но не более limit байт; файл больше
+// лимита — ошибка, а не усечённые данные (усечённый шрифт бесполезен).
+func readFileBounded(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if st, err := f.Stat(); err == nil && st.Size() > limit {
+		return nil, fmt.Errorf("%s: файл шрифта слишком большой (%d байт > %d)", path, st.Size(), limit)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s: файл шрифта слишком большой (> %d байт)", path, limit)
 	}
 	return data, nil
 }

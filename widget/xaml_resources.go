@@ -26,8 +26,10 @@ package widget
 
 import (
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
+	"sync"
 
 	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
 )
@@ -78,9 +80,27 @@ func preprocessXAML(root *xElement, ctx interface{}) *xamlEnv {
 		implicitStyles: map[string]*xamlStyle{},
 		templates:      map[string]*xElement{},
 	}
-	env.collect(root)
+	env.collect(root, 0)
 	env.process(root, ctx)
 	return env
+}
+
+// ─── Защита рекурсивных обходов (SEC-7) ─────────────────────────────────────
+//
+// collect / process / cloneXElement обходят дерево рекурсивно. Парсер уже
+// держит глубину ≤ maxXAMLDepth, но эти же функции работают и с деревьями,
+// собранными в обход parseXAML (клоны DataTemplate из xaml_binding.go), —
+// поэтому предел проверяется и здесь. Превышение не ошибка, а обрезка:
+// пред-обработка не критична для корректности, а падать процессом нельзя.
+
+// logDeepOnce сообщает о срабатывании предела один раз на процесс: обход
+// пойдёт по множеству узлов, и без этого журнал утонет в повторах.
+var deepLogOnce sync.Once
+
+func logTooDeep(what string) {
+	deepLogOnce.Do(func() {
+		log.Printf("xaml: %s: превышена предельная вложенность %d — поддерево пропущено", what, maxXAMLDepth)
+	})
 }
 
 // ensureName возвращает имя элемента, генерируя его при отсутствии (и записывая
@@ -107,25 +127,33 @@ func isDataGridColumnTag(tag string) bool {
 	return strings.HasPrefix(tag, "datagrid") && strings.HasSuffix(tag, "column")
 }
 
-func (env *xamlEnv) collect(el *xElement) {
+func (env *xamlEnv) collect(el *xElement, depth int) {
+	if depth > maxXAMLDepth {
+		logTooDeep("collect")
+		return
+	}
 	if isResourceContainer(strings.ToLower(el.Tag)) {
 		for i := range el.Children {
-			env.addResource(&el.Children[i])
+			env.addResource(&el.Children[i], depth+1)
 		}
 	}
 	for i := range el.Children {
-		env.collect(&el.Children[i])
+		env.collect(&el.Children[i], depth+1)
 	}
 }
 
 // addResource регистрирует один элемент-ресурс (скаляр или стиль).
-func (env *xamlEnv) addResource(el *xElement) {
+func (env *xamlEnv) addResource(el *xElement, depth int) {
+	if depth > maxXAMLDepth {
+		logTooDeep("addResource")
+		return
+	}
 	tag := strings.ToLower(el.Tag)
 	switch {
 	case tag == "resourcedictionary":
 		// Вложенный/слитый словарь.
 		for i := range el.Children {
-			env.addResource(&el.Children[i])
+			env.addResource(&el.Children[i], depth+1)
 		}
 		return
 	case tag == "style":
@@ -281,7 +309,17 @@ func collectSetters(el *xElement, s *xamlStyle) {
 
 // ─── Применение ─────────────────────────────────────────────────────────────
 
+// process — точка входа обработки поддерева (глубина 0). Сигнатуру используют
+// живые перестроения из xaml_binding.go, поэтому она сохранена как есть.
 func (env *xamlEnv) process(el *xElement, ctx interface{}) {
+	env.processAt(el, ctx, 0)
+}
+
+func (env *xamlEnv) processAt(el *xElement, ctx interface{}, depth int) {
+	if depth > maxXAMLDepth {
+		logTooDeep("process")
+		return
+	}
 	tag := strings.ToLower(el.Tag)
 	// Внутрь ресурсов/стилей/InputBindings/DataGrid-колонок не лезем —
 	// они обрабатываются отдельно (DataGrid сам разбирает Binding колонок).
@@ -313,7 +351,7 @@ func (env *xamlEnv) process(el *xElement, ctx interface{}) {
 			return // клоны уже обработаны с DataContext каждого элемента
 		}
 		for i := range el.Children {
-			env.process(&el.Children[i], ctx)
+			env.processAt(&el.Children[i], ctx, depth+1)
 		}
 		return
 	}
@@ -330,7 +368,7 @@ func (env *xamlEnv) process(el *xElement, ctx interface{}) {
 	env.resolveAttrs(el, ctx)
 	env.applyStyleTo(el, ctx)
 	for i := range el.Children {
-		env.process(&el.Children[i], ctx)
+		env.processAt(&el.Children[i], ctx, depth+1)
 	}
 }
 
@@ -574,12 +612,22 @@ func collectionItems(v interface{}) []interface{} {
 
 // cloneXElement делает глубокую копию узла XAML-дерева.
 func cloneXElement(el *xElement) xElement {
+	return cloneXElementAt(el, 0)
+}
+
+// cloneXElementAt — рекурсивное тело cloneXElement с ограничением глубины
+// (SEC-7): поддерево глубже maxXAMLDepth не копируется.
+func cloneXElementAt(el *xElement, depth int) xElement {
 	c := xElement{Tag: el.Tag, Text: el.Text, attrs: make(map[string]string, len(el.attrs))}
 	for k, v := range el.attrs {
 		c.attrs[k] = v
 	}
+	if depth > maxXAMLDepth {
+		logTooDeep("cloneXElement")
+		return c
+	}
 	for i := range el.Children {
-		c.Children = append(c.Children, cloneXElement(&el.Children[i]))
+		c.Children = append(c.Children, cloneXElementAt(&el.Children[i], depth+1))
 	}
 	return c
 }

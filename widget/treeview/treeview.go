@@ -2,6 +2,8 @@ package treeview
 
 import (
 	"image"
+	"log"
+	"reflect"
 	"sync"
 	"time"
 
@@ -31,7 +33,12 @@ type TreeView struct {
 
 	// ── ItemsSource (для data binding) ──────────────────────────────────
 	itemsSource *datagrid.ObservableCollection
-	itemTemplate *HierarchicalDataTemplate
+	// itemsSourceSub — дескриптор подписки на itemsSource. Без него каждая
+	// перебиндовка оставляла живой обработчик, захватывающий этот TreeView:
+	// N вызовов SetItemsSource = N перестроений дерева на каждое изменение
+	// коллекции и утечка самого дерева (аудит SEC-11). 0 = подписки нет.
+	itemsSourceSub int
+	itemTemplate   *HierarchicalDataTemplate
 
 	// ── Свойства (WPF-совместимые) ──────────────────────────────────────
 	ItemHeight  int     // высота одной строки (px). 0 → defaultItemHeight
@@ -75,6 +82,20 @@ type TreeView struct {
 	focused  bool
 	dirty    bool // нужен пересчёт flat-списка
 	updating bool // true между BeginUpdate/EndUpdate — Draw пропускается
+
+	// ── Кэш плоского списка видимых узлов (PERF-10) ──────────────────────
+	// Раньше visibleNodes() обходил дерево и аллоцировал новый срез на
+	// КАЖДЫЙ Draw, mousemove, клик и нажатие клавиши (а внутри одного
+	// обработчика — по три-четыре раза), при том что флаг dirty исправно
+	// выставлялся в девяти местах и не читался нигде. Теперь список
+	// пересобирается только при dirty, а поиск индекса узла идёт по карте
+	// вместо линейного скана.
+	//
+	// Пересборка ВСЕГДА выделяет новый срез и новую карту — уже отданные
+	// вызывающему срезы остаются неизменными, поэтому чтение их вне лока
+	// безопасно.
+	flatCache []flatItem
+	flatIndex map[*TreeViewItem]int
 
 	// ── Точечная инвалидация (damage) ────────────────────────────────────
 	// Обработчики ввода накапливают сюда изменившиеся АБСОЛЮТНЫЕ строки;
@@ -144,7 +165,7 @@ func New() *TreeView {
 // ─── Widget interface ──────────────────────────────────────────────────────
 
 func (tv *TreeView) Bounds() image.Rectangle     { return tv.bounds }
-func (tv *TreeView) SetBounds(r image.Rectangle)  { tv.bounds = r; tv.dirty = true }
+func (tv *TreeView) SetBounds(r image.Rectangle) { tv.bounds = r; tv.InvalidateLayout() }
 
 // ─── Batch update (двойная буферизация) ────────────────────────────────────
 
@@ -230,15 +251,24 @@ func (tv *TreeView) SetRoots(items []*TreeViewItem) {
 // ─── ItemsSource (Data Binding) ────────────────────────────────────────────
 
 // SetItemsSource привязывает ObservableCollection как источник корневых узлов.
+//
+// Подписка на прежний источник снимается (SEC-11): иначе N перебиндовок
+// оставляли N живых обработчиков, каждый из которых перестраивал дерево на
+// любое изменение коллекции и удерживал этот TreeView от сборки.
 func (tv *TreeView) SetItemsSource(oc *datagrid.ObservableCollection) {
 	tv.mu.Lock()
 	defer tv.mu.Unlock()
+
+	if tv.itemsSource != nil && tv.itemsSourceSub > 0 {
+		tv.itemsSource.RemoveCollectionChanged(tv.itemsSourceSub)
+	}
+	tv.itemsSourceSub = 0
 	tv.itemsSource = oc
 	tv.dirty = true
 
 	// Подписываемся на изменения
 	if oc != nil {
-		oc.AddCollectionChanged(func(e datagrid.CollectionChangedEvent) {
+		tv.itemsSourceSub = oc.AddCollectionChanged(func(e datagrid.CollectionChangedEvent) {
 			tv.rebuildFromItemsSource()
 		})
 		tv.rebuildFromItemsSourceLocked()
@@ -274,44 +304,121 @@ func (tv *TreeView) rebuildFromItemsSourceLocked() {
 	tv.roots = tv.roots[:0]
 
 	items := tv.itemsSource.Items()
+	// Состояние сборки одно на всю перестройку: путь очищается при выходе из
+	// каждого узла, а флаги «уже сообщили» дают ровно одну запись в журнал
+	// на перестройку, а не по одной на каждый корень.
+	st := &treeBuildState{path: map[nodeKey]bool{}}
 	for _, dataObj := range items {
-		item := tv.createItemFromData(dataObj, tmpl, 0)
+		item := tv.buildItemFromData(dataObj, tmpl, 0, st)
 		tv.roots = append(tv.roots, item)
 	}
 	tv.dirty = true
 }
 
+// ─── Построение дерева из данных ───────────────────────────────────────────
+
+// maxTreeDepth — предельная глубина дерева, строимого из ItemsSource (SEC-7).
+// Обход рекурсивен: модель, у которой ItemsSourcePath уводит вглубь без
+// конца, исчерпывала стек. Предел с запасом над любым реальным деревом.
+const maxTreeDepth = 256
+
+// nodeKey — идентичность объекта данных для детекции циклов. Сравнивать сами
+// interface{} нельзя: у несравнимого динамического типа (структура со срезом)
+// это паника в рантайме. Поэтому берём адрес — у указателей, карт и каналов
+// он есть, а именно ими и связывают узлы в иерархических моделях
+// (`type Node struct{ Children []*Node }`).
+type nodeKey struct {
+	ptr uintptr
+	typ reflect.Type
+}
+
+// nodeIdentity возвращает идентичность объекта данных, если она определима.
+func nodeIdentity(v interface{}) (nodeKey, bool) {
+	if v == nil {
+		return nodeKey{}, false
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Chan, reflect.UnsafePointer:
+		if rv.IsNil() {
+			return nodeKey{}, false
+		}
+		return nodeKey{ptr: rv.Pointer(), typ: rv.Type()}, true
+	}
+	return nodeKey{}, false // значимый тип — цикл через него невозможен
+}
+
+// treeBuildState — состояние одной сборки поддерева: множество объектов на
+// ПУТИ от корня (не «всех виденных» — иначе один и тот же узел, честно
+// упомянутый у двух разных родителей, был бы ошибочно обрезан) и флаги
+// «уже сообщили», чтобы не залить журнал повторами.
+type treeBuildState struct {
+	path      map[nodeKey]bool
+	cycleLog  bool
+	depthLog  bool
+}
+
 // createItemFromData создаёт TreeViewItem из объекта данных используя шаблон.
 func (tv *TreeView) createItemFromData(dataObj interface{}, tmpl *HierarchicalDataTemplate, depth int) *TreeViewItem {
+	return tv.buildItemFromData(dataObj, tmpl, depth, &treeBuildState{path: map[nodeKey]bool{}})
+}
+
+// buildItemFromData — рекурсивное тело createItemFromData с защитой от
+// циклических моделей и от чрезмерной глубины (SEC-7). При обнаружении цикла
+// узел создаётся, но НЕ раскрывается — дерево остаётся конечным, а данные
+// пользователя не теряются молча (в журнал уходит одно сообщение на сборку).
+func (tv *TreeView) buildItemFromData(dataObj interface{}, tmpl *HierarchicalDataTemplate, depth int, st *treeBuildState) *TreeViewItem {
 	item := NewItem("")
 	item.DataContext = dataObj
 	item.depth = depth
 	item.owner = tv
 
-	if tmpl != nil {
-		// Заголовок
-		if h := tmpl.resolveHeader(dataObj); h != "" {
-			item.Header = h
-		}
+	if tmpl == nil {
+		return item
+	}
 
-		// Иконка
-		if icon := tmpl.resolveIcon(dataObj); icon != nil {
-			item.Icon = icon
-		}
+	// Заголовок
+	if h := tmpl.resolveHeader(dataObj); h != "" {
+		item.Header = h
+	}
 
-		// IsExpanded
-		if tmpl.IsExpandedPath != "" {
-			item.Expanded = tmpl.resolveIsExpanded(dataObj)
-		}
+	// Иконка
+	if icon := tmpl.resolveIcon(dataObj); icon != nil {
+		item.Icon = icon
+	}
 
-		// Дочерние элементы
-		if children := tmpl.resolveChildren(dataObj); len(children) > 0 {
-			for _, childData := range children {
-				child := tv.createItemFromData(childData, tmpl, depth+1)
-				child.parent = item
-				item.Children = append(item.Children, child)
+	// IsExpanded
+	if tmpl.IsExpandedPath != "" {
+		item.Expanded = tmpl.resolveIsExpanded(dataObj)
+	}
+
+	if depth >= maxTreeDepth {
+		if !st.depthLog {
+			st.depthLog = true
+			log.Printf("treeview: глубина модели превысила %d — поддерево не раскрыто", maxTreeDepth)
+		}
+		return item
+	}
+
+	// Детекция цикла: объект уже встречался на пути от корня.
+	key, hasKey := nodeIdentity(dataObj)
+	if hasKey {
+		if st.path[key] {
+			if !st.cycleLog {
+				st.cycleLog = true
+				log.Printf("treeview: в модели ItemsSource обнаружен цикл — узел не раскрыт")
 			}
+			return item
 		}
+		st.path[key] = true
+		defer delete(st.path, key) // снимаем при выходе — это путь, а не «всё виденное»
+	}
+
+	// Дочерние элементы
+	for _, childData := range tmpl.resolveChildren(dataObj) {
+		child := tv.buildItemFromData(childData, tmpl, depth+1, st)
+		child.parent = item
+		item.Children = append(item.Children, child)
 	}
 
 	return item
@@ -364,8 +471,13 @@ func (tv *TreeView) ExpandItem(item *TreeViewItem) {
 	if item == nil || item.Expanded {
 		return
 	}
+	// Под локом — тем же, что защищает кэш flat-списка: раскрытие меняет
+	// набор видимых строк, и кэш обязан протухнуть согласованно.
+	// Пользовательский обработчик вызывается уже без лока.
+	tv.mu.Lock()
 	item.Expanded = true
 	tv.dirty = true
+	tv.mu.Unlock()
 	if tv.OnExpanded != nil {
 		tv.OnExpanded(ExpandedEvent{Item: item})
 	}
@@ -376,8 +488,10 @@ func (tv *TreeView) CollapseItem(item *TreeViewItem) {
 	if item == nil || !item.Expanded {
 		return
 	}
+	tv.mu.Lock()
 	item.Expanded = false
 	tv.dirty = true
+	tv.mu.Unlock()
 	if tv.OnCollapsed != nil {
 		tv.OnCollapsed(CollapsedEvent{Item: item})
 	}
@@ -403,12 +517,50 @@ func (tv *TreeView) IsFocused() bool   { return tv.focused }
 // ─── Visible nodes ─────────────────────────────────────────────────────────
 
 // visibleNodes возвращает плоский список видимых узлов.
+//
+// Список кэшируется и пересобирается только когда модель менялась (dirty).
+// Кэш читается и пишется под tv.mu — тем же локом, что защищает roots, —
+// поэтому одновременные Draw и обработка ввода не гонятся за него.
 func (tv *TreeView) visibleNodes() []flatItem {
+	tv.mu.Lock()
+	defer tv.mu.Unlock()
+	return tv.visibleNodesLocked()
+}
+
+// visibleNodesLocked — тело visibleNodes; вызывать под tv.mu.
+func (tv *TreeView) visibleNodesLocked() []flatItem {
+	if !tv.dirty && tv.flatCache != nil {
+		return tv.flatCache
+	}
 	var result []flatItem
 	for _, root := range tv.roots {
 		collectVisible(root, root.depth, &result)
 	}
+	idx := make(map[*TreeViewItem]int, len(result))
+	for i, fi := range result {
+		// Первое вхождение — как у прежнего линейного скана: один и тот же
+		// узел может попасть в список дважды (его подцепили к двум родителям),
+		// и индекс обязан совпадать с тем, что вернул бы поиск перебором.
+		if _, dup := idx[fi.item]; !dup {
+			idx[fi.item] = i
+		}
+	}
+	tv.flatCache = result
+	tv.flatIndex = idx
+	tv.dirty = false
 	return result
+}
+
+// InvalidateLayout помечает плоский список видимых узлов устаревшим.
+//
+// Нужен, если структура дерева или раскрытие узлов менялись в обход методов
+// TreeView/TreeViewItem — например прямой записью в публичное поле
+// item.Expanded или item.Children. Методы (AddRoot, SetRoots, AddChild,
+// ExpandItem, …) помечают кэш сами.
+func (tv *TreeView) InvalidateLayout() {
+	tv.mu.Lock()
+	tv.dirty = true
+	tv.mu.Unlock()
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -485,7 +637,27 @@ func (tv *TreeView) ensureVisible(idx int) {
 }
 
 // indexOfItem ищет индекс узла в плоском списке.
+//
+// Пока flat — это актуальный кэш (обычный случай), поиск идёт по карте,
+// построенной при пересборке, а не линейным сканом (PERF-10). Если передан
+// чужой/устаревший срез, остаётся линейный поиск по нему — результат обязан
+// соответствовать именно переданному списку.
 func (tv *TreeView) indexOfItem(item *TreeViewItem, flat []flatItem) int {
+	if item == nil {
+		return -1
+	}
+	tv.mu.Lock()
+	if tv.flatIndex != nil && len(flat) == len(tv.flatCache) &&
+		(len(flat) == 0 || &flat[0] == &tv.flatCache[0]) {
+		i, ok := tv.flatIndex[item]
+		tv.mu.Unlock()
+		if !ok {
+			return -1
+		}
+		return i
+	}
+	tv.mu.Unlock()
+
 	for i, fi := range flat {
 		if fi.item == item {
 			return i

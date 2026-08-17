@@ -97,6 +97,7 @@ func (am *animator) add(a *Animation) {
 // линейная). tick(t) вызывается с ПРОГРЕССОМ ПОСЛЕ кривой (t ∈ [0,1]):
 // первый тик — t по фактическому времени первого шага, последний —
 // гарантированно ровно 1.0 (после чего OnDone). Будит движок.
+// Владельца нет — Loop-анимацию остановит только Stop.
 func Animate(dur time.Duration, curve Easing, tick func(t float64)) *Animation {
 	a := &Animation{
 		duration: dur,
@@ -110,6 +111,7 @@ func Animate(dur time.Duration, curve Easing, tick func(t float64)) *Animation {
 // AnimateOwned — как Animate, но новая анимация с тем же (owner, tag)
 // ОСТАНАВЛИВАЕТ предыдущую (семантика CSS-transition: анимации не дерутся).
 // owner сравнивается по == (указатель виджета), tag — строка ("bounds", "fade").
+// Loop-анимация снимается сама, когда владелец скрыт (!IsVisible).
 func AnimateOwned(owner any, tag string, dur time.Duration, curve Easing, tick func(t float64)) *Animation {
 	a := &Animation{
 		duration: dur,
@@ -143,6 +145,12 @@ func (a *Animation) Stop() {
 	anim.mu.Lock()
 	a.stopped = true
 	anim.mu.Unlock()
+}
+
+// ownerHidden — владелец известен и скрыт.
+func (a *Animation) ownerHidden() bool {
+	v, ok := a.owner.(interface{ IsVisible() bool })
+	return ok && !v.IsVisible()
 }
 
 // Running сообщает, активна ли анимация (не завершена и не снята).
@@ -231,8 +239,16 @@ func StepAnimations(now time.Time) bool {
 		// Могла быть снята из предыдущего тика этого же прохода.
 		anim.mu.Lock()
 		skip := a.stopped || a.done
+		loop := a.Loop
 		anim.mu.Unlock()
 		if skip {
+			continue
+		}
+		// Скрытый владелец: вечный цикл некому смотреть — снимаем.
+		if loop && a.ownerHidden() {
+			anim.mu.Lock()
+			a.stopped = true
+			anim.mu.Unlock()
 			continue
 		}
 

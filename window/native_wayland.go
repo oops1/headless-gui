@@ -31,6 +31,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -143,6 +144,9 @@ const (
 	mimeTextUriList = "text/uri-list"
 )
 
+// wlBufWaitTimeout — сколько ждать wl_buffer.release перед пропуском кадра.
+const wlBufWaitTimeout = 32 * time.Millisecond
+
 // ─── WaylandWindow ───────────────────────────────────────────────────────────
 
 // WaylandWindow — реализация NativeWindow поверх Wayland (xdg-shell + wl_shm).
@@ -192,6 +196,10 @@ type WaylandWindow struct {
 	stride   int
 	poolW    int
 	poolH    int
+
+	// bufRelease будит блит при wl_buffer.release; dirtyTrack сводит области.
+	bufRelease chan struct{}
+	dirtyTrack wlDirtyTracker
 
 	width, height int
 	title         string
@@ -270,7 +278,7 @@ func newWaylandWindow() *WaylandWindow {
 		return nil
 	}
 	wlLog("connected: %s", path)
-	return &WaylandWindow{conn: conn, nextID: 2}
+	return &WaylandWindow{conn: conn, nextID: 2, bufRelease: make(chan struct{}, 1)}
 }
 
 // ─── Отправка запросов ───────────────────────────────────────────────────────
@@ -651,7 +659,12 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		} else {
 			w.bufBusy[1] = false
 		}
+		ch := w.bufRelease
 		w.mu.Unlock()
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -860,38 +873,79 @@ func (w *WaylandWindow) BlitRGBA(img *image.RGBA) {
 	w.BlitRGBADirty(img, img.Bounds())
 }
 
-// BlitRGBADirty пишет кадр в свободный shm-буфер (BGRX) и коммитит.
-// Из-за чередования буферов копируется весь кадр, damage — только dirty.
+// wlDirtyTracker сводит dirty-области при двойной буферизации: буфер,
+// пропустивший кадр, обязан довписать всё, что ушло в соседний.
+type wlDirtyTracker struct {
+	pending image.Rectangle    // накоплено с пропущенных кадров
+	stale   [2]image.Rectangle // устарело в каждом буфере
+}
+
+// next возвращает область для записи в буфер idx и обновляет состояние.
+func (t *wlDirtyTracker) next(idx int, dirty image.Rectangle) image.Rectangle {
+	area := dirty.Union(t.pending).Union(t.stale[idx])
+	t.pending = image.Rectangle{}
+	t.stale[idx] = image.Rectangle{}
+	t.stale[idx^1] = t.stale[idx^1].Union(area)
+	return area
+}
+
+// skip откладывает область пропущенного кадра до следующего.
+func (t *wlDirtyTracker) skip(dirty image.Rectangle) {
+	t.pending = t.pending.Union(dirty)
+}
+
+// waitBufFree ждёт release целевого буфера. false — кадр надо пропустить.
+func (w *WaylandWindow) waitBufFree() bool {
+	deadline := time.Now().Add(wlBufWaitTimeout)
+	for {
+		w.mu.Lock()
+		free := !w.bufBusy[w.curBuf]
+		ch := w.bufRelease
+		w.mu.Unlock()
+		if free {
+			return true
+		}
+		left := time.Until(deadline)
+		if left <= 0 || ch == nil {
+			return false
+		}
+		t := time.NewTimer(left)
+		select {
+		case <-ch:
+		case <-t.C:
+		}
+		t.Stop()
+	}
+}
+
+// BlitRGBADirty конвертирует и коммитит только изменившуюся область. Если
+// композитор ещё держит целевой буфер — кадр пропускается, область копится.
 func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
-	if w.surfaceID == 0 || img == nil || w.closed {
+	if w.surfaceID == 0 || img == nil || w.closed || w.shmData == nil {
 		return
 	}
 	b := img.Bounds()
-	width, height := b.Dx(), b.Dy()
-	if width > w.poolW || height > w.poolH {
-		width, height = min(width, w.poolW), min(height, w.poolH)
-	}
+	width, height := min(b.Dx(), w.poolW), min(b.Dy(), w.poolH)
 	dirty = dirty.Intersect(image.Rect(0, 0, width, height))
 	if dirty.Empty() {
 		return
 	}
 
-	base := w.curBuf * w.stride * w.poolH
-	dst := w.shmData[base:]
-	src := img.Pix
-	stride := img.Stride
-	for y := 0; y < height; y++ {
-		so := y * stride
-		do := y * w.stride
-		for x := 0; x < width; x++ {
-			si, di := so+x*4, do+x*4
-			dst[di+0] = src[si+2] // B
-			dst[di+1] = src[si+1] // G
-			dst[di+2] = src[si+0] // R
-			dst[di+3] = 0xFF      // X
-		}
+	if !w.waitBufFree() {
+		w.mu.Lock()
+		w.dirtyTrack.skip(dirty)
+		w.mu.Unlock()
+		return
 	}
-	w.attachAndCommit(dirty)
+
+	w.mu.Lock()
+	idx := w.curBuf
+	area := w.dirtyTrack.next(idx, dirty).Intersect(image.Rect(0, 0, width, height))
+	w.mu.Unlock()
+
+	base := idx * w.stride * w.poolH
+	convRectBGRX(w.shmData[base:], w.stride, img.Pix, img.Stride, area)
+	w.attachAndCommit(area)
 }
 
 // ─── Управление окном ────────────────────────────────────────────────────────
@@ -1076,7 +1130,7 @@ func (w *WaylandWindow) dndReceive() {
 	x, y := w.dndX, w.dndY
 	go func() {
 		defer r.Close()
-		data, _ := io.ReadAll(r)
+		data, _ := io.ReadAll(io.LimitReader(r, maxDnDBytes))
 		paths := parseURIList(string(data))
 		if len(paths) > 0 && w.onFilesDropped != nil {
 			w.onFilesDropped(paths, x, y)

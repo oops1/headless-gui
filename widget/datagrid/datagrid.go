@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ─── SelectionMode ─────────────────────────────────────────────────────────
@@ -81,6 +82,12 @@ type DataGrid struct {
 	// ── Данные ───────────────────────────────────────────────────────────
 	itemsSource *ObservableCollection // наблюдаемая коллекция
 	sortedIdx   []int                 // индексы в исходной коллекции после сортировки
+
+	// itemsSubID — дескриптор подписки на itemsSource.CollectionChanged
+	// (SEC-11). Снимается при перебиндовке источника и в Dispose; без этого
+	// N вызовов SetItemsSource = N живых замыканий, каждое из которых держит
+	// грид и перестраивает индекс на каждое изменение старой коллекции.
+	itemsSubID int
 
 	// ── Свойства (WPF-совместимые) ───────────────────────────────────────
 	AutoGenerateColumns bool
@@ -178,6 +185,169 @@ type DataGrid struct {
 	// когда сдвигается весь контент (скролл/сортировка/resize колонок).
 	dirtyRects []image.Rectangle
 	dirtyFull  bool
+
+	// ── Кэш текста ячеек (PERF-3) ────────────────────────────────────────
+	// Живёт под собственным мьютексом: Draw работает вне dg.mu (PERF-8) и
+	// не должен блокировать обработчики мыши, а инвалидация из-под dg.mu
+	// не должна ждать кадр. Порядок захвата всегда dg.mu → cacheMu,
+	// обратный запрещён.
+	cacheMu    sync.Mutex
+	cellCache  map[cellKey]string
+	cacheGen   uint64              // поколение; инвалидация = ++
+	itemSubs   map[interface{}]int // item → id подписки на PropertyChanged
+	cacheLoRow int                 // удерживаемое окно строк [lo..hi]
+	cacheHiRow int
+}
+
+// cellKey — координата ячейки в кэше текста (row — индекс в sortedIdx).
+type cellKey struct{ row, col int }
+
+// maxItemSubs ограничивает число подписок на PropertyChanged элементов:
+// кэшируются только видимые ячейки, так что окна с запасом хватает.
+// Сверх лимита новые элементы не кэшируются вовсе — лучше медленно, чем
+// показать устаревший текст.
+const maxItemSubs = 512
+
+// notifierWithHandle — элемент модели, умеющий уведомлять об изменении
+// свойств с отпиской по дескриптору (реализуется PropertyNotifier).
+type notifierWithHandle interface {
+	AddPropertyChangedHandle(PropertyChangedHandler) int
+	RemovePropertyChangedHandle(int)
+}
+
+// ─── Кэш текста ячеек (PERF-3) ─────────────────────────────────────────────
+
+// InvalidateCells сбрасывает кэш отформатированного текста ячеек.
+//
+// Вызывается автоматически при изменении коллекции, источника, колонок,
+// сортировки и при коммите редактирования, а также по PropertyChanged
+// элементов, реализующих INotifyPropertyChanged. Если модель меняется
+// «молча» (обычная структура без уведомлений), вызовите метод вручную —
+// иначе таблица продолжит показывать прежний текст.
+func (dg *DataGrid) InvalidateCells() { dg.invalidateCellCache() }
+
+// invalidateCellCache полностью сбрасывает кэш и снимает подписки на
+// PropertyChanged. Безопасно вызывать как под dg.mu, так и без него.
+func (dg *DataGrid) invalidateCellCache() {
+	dg.cacheMu.Lock()
+	dg.cacheGen++
+	dg.cellCache = nil
+	subs := dg.itemSubs
+	dg.itemSubs = nil
+	dg.cacheMu.Unlock()
+
+	// Отписка — вне cacheMu: обработчик уведомителя сам берёт свой лок.
+	for item, id := range subs {
+		if n, ok := item.(notifierWithHandle); ok {
+			n.RemovePropertyChangedHandle(id)
+		}
+	}
+}
+
+// invalidateCellRow сбрасывает кэш одной строки (после коммита правки).
+func (dg *DataGrid) invalidateCellRow(row int) {
+	dg.cacheMu.Lock()
+	for k := range dg.cellCache {
+		if k.row == row {
+			delete(dg.cellCache, k)
+		}
+	}
+	dg.cacheMu.Unlock()
+}
+
+// cellText возвращает отформатированный текст ячейки, беря его из кэша.
+// gen — поколение кэша, снятое в начале кадра: если за время отрисовки
+// данные сменились, результат не оседает в кэше.
+//
+// Значение вычисляется ВНЕ cacheMu (reflect + Sprintf — самая дорогая
+// часть кадра), под локом только карта.
+func (dg *DataGrid) cellText(gen uint64, row, col int, c Column, item interface{}) string {
+	k := cellKey{row: row, col: col}
+
+	dg.cacheMu.Lock()
+	if dg.cacheGen == gen {
+		if s, ok := dg.cellCache[k]; ok {
+			dg.cacheMu.Unlock()
+			return s
+		}
+	}
+	dg.cacheMu.Unlock()
+
+	s := c.GetCellValue(item)
+
+	dg.cacheMu.Lock()
+	if dg.cacheGen != gen {
+		dg.cacheMu.Unlock()
+		return s
+	}
+	// Элемент с уведомлениями — подписываемся, чтобы сбросить кэш при
+	// изменении свойства. Не подписались (лимит/несравнимый ключ) — не кэшируем.
+	if n, ok := item.(notifierWithHandle); ok {
+		if !dg.trackNotifierLocked(item, n) {
+			dg.cacheMu.Unlock()
+			return s
+		}
+	}
+	if dg.cellCache == nil {
+		dg.cellCache = make(map[cellKey]string, 256)
+	}
+	dg.cellCache[k] = s
+	dg.cacheMu.Unlock()
+	return s
+}
+
+// trackNotifierLocked подписывается на PropertyChanged элемента (idempotent).
+// Возвращает false, если подписаться нельзя — тогда значение не кэшируется.
+// Вызывать под cacheMu.
+func (dg *DataGrid) trackNotifierLocked(item interface{}, n notifierWithHandle) bool {
+	// Ключ карты обязан быть сравнимым: структура со слайсом внутри
+	// уронила бы приложение при вставке.
+	if t := reflect.TypeOf(item); t == nil || !t.Comparable() {
+		return false
+	}
+	if _, ok := dg.itemSubs[item]; ok {
+		return true
+	}
+	if len(dg.itemSubs) >= maxItemSubs {
+		return false
+	}
+	if dg.itemSubs == nil {
+		dg.itemSubs = make(map[interface{}]int, 64)
+	}
+	dg.itemSubs[item] = n.AddPropertyChangedHandle(func(interface{}, string) {
+		dg.invalidateCellCache()
+	})
+	return true
+}
+
+// trimCellCache выбрасывает записи вне удерживаемого окна строк и возвращает
+// актуальное поколение кэша. Кэш держит только видимое окно с запасом — на
+// 100k строк в памяти всё равно остаётся пара сотен записей.
+//
+// Если подписок на PropertyChanged накопилось слишком много (долгая прокрутка
+// по модели с уведомлениями), кэш сбрасывается целиком — это дешевле, чем
+// вести обратный индекс «элемент → ячейки».
+func (dg *DataGrid) trimCellCache(lo, hi int) uint64 {
+	dg.cacheMu.Lock()
+	dg.cacheLoRow, dg.cacheHiRow = lo, hi
+	tooManySubs := len(dg.itemSubs) > maxItemSubs/2
+	if !tooManySubs && len(dg.cellCache) > 4*(hi-lo+1)*8+256 {
+		for k := range dg.cellCache {
+			if k.row < lo || k.row > hi {
+				delete(dg.cellCache, k)
+			}
+		}
+	}
+	gen := dg.cacheGen
+	dg.cacheMu.Unlock()
+
+	if tooManySubs {
+		dg.invalidateCellCache()
+		dg.cacheMu.Lock()
+		gen = dg.cacheGen
+		dg.cacheMu.Unlock()
+	}
+	return gen
 }
 
 // ─── Damage tracking (точечная инвалидация) ────────────────────────────────
@@ -287,71 +457,198 @@ func New() *DataGrid {
 
 // ─── Widget interface (compatible with widget.Widget) ──────────────────────
 
-func (dg *DataGrid) Bounds() image.Rectangle    { return dg.bounds }
-func (dg *DataGrid) SetBounds(r image.Rectangle) { dg.bounds = r; dg.dirty = true }
+// Bounds возвращает прямоугольник виджета.
+func (dg *DataGrid) Bounds() image.Rectangle {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	return dg.bounds
+}
+
+// SetBounds задаёт прямоугольник виджета и помечает layout грязным.
+func (dg *DataGrid) SetBounds(r image.Rectangle) {
+	dg.mu.Lock()
+	dg.bounds = r
+	dg.dirty = true
+	dg.mu.Unlock()
+}
 
 // ─── Columns ───────────────────────────────────────────────────────────────
 
 // AddColumn добавляет колонку.
 func (dg *DataGrid) AddColumn(col Column) {
+	if col == nil {
+		return
+	}
+	dg.mu.Lock()
 	dg.columns = append(dg.columns, col)
 	dg.dirty = true
+	dg.markFullDirty()
+	dg.mu.Unlock()
+	dg.invalidateCellCache()
 }
 
-// Columns возвращает колонки.
+// Columns возвращает копию среза колонок.
+//
+// Копия, а не сам срез: вызывающий код не должен уметь подменить колонку
+// «под» гридом мимо мьютекса (SEC-5) — сами объекты колонок остаются общими.
 func (dg *DataGrid) Columns() []Column {
-	return dg.columns
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	out := make([]Column, len(dg.columns))
+	copy(out, dg.columns)
+	return out
 }
 
 // SetColumns заменяет все колонки.
+//
+// Смена набора колонок обесценивает индексы editingCol/resizingCol/focusCol:
+// если их не сбросить, следующий commitEdit/resize залезет за границу нового
+// среза и уронит приложение (SEC-5). Режим редактирования отменяется БЕЗ
+// коммита — редактируемой колонки больше не существует.
 func (dg *DataGrid) SetColumns(cols []Column) {
+	dg.mu.Lock()
 	dg.columns = cols
 	dg.dirty = true
+	dg.markFullDirty()
+
+	if dg.isEditing {
+		dg.isEditing = false
+		dg.editingRow, dg.editingCol = -1, -1
+		dg.editingValue, dg.editCursorPos = "", 0
+	}
+	dg.resizingCol = -1
+	if dg.focusCol >= len(cols) {
+		dg.focusCol = len(cols) - 1
+	}
+	if dg.focusCol < 0 {
+		dg.focusCol = 0
+	}
+	dg.mu.Unlock()
+	dg.invalidateCellCache()
+}
+
+// Dispose снимает подписку на источник данных и освобождает кэш.
+// Вызывать при выбрасывании грида из дерева виджетов (SEC-11).
+func (dg *DataGrid) Dispose() {
+	dg.mu.Lock()
+	if dg.itemsSource != nil && dg.itemsSubID > 0 {
+		dg.itemsSource.RemoveCollectionChanged(dg.itemsSubID)
+	}
+	dg.itemsSubID = 0
+	dg.itemsSource = nil
+	dg.sortedIdx = nil
+	dg.selectedRows = make(map[int]bool)
+	dg.focusRow = -1
+	dg.isEditing = false
+	dg.editingRow, dg.editingCol = -1, -1
+	dg.mu.Unlock()
+	dg.invalidateCellCache()
 }
 
 // ─── Data Source ────────────────────────────────────────────────────────────
 
 // SetItemsSource задаёт источник данных.
+//
+// Со СТАРОГО источника подписка снимается (SEC-11): иначе каждая
+// перебиндовка оставляла живое замыкание, которое держит грид и продолжает
+// перестраивать его индекс на каждое изменение уже ненужной коллекции.
 func (dg *DataGrid) SetItemsSource(oc *ObservableCollection) {
 	dg.mu.Lock()
-	defer dg.mu.Unlock()
+
+	if dg.itemsSource != nil && dg.itemsSubID > 0 {
+		dg.itemsSource.RemoveCollectionChanged(dg.itemsSubID)
+	}
+	dg.itemsSubID = 0
+
 	dg.itemsSource = oc
 	dg.rebuildSortedIdx()
 	dg.selectedRows = make(map[int]bool)
 	dg.focusRow = -1
 	dg.scrollY = 0
+	// Источник сменился — редактирование прежней строки бессмысленно.
+	dg.isEditing = false
+	dg.editingRow, dg.editingCol = -1, -1
+	dg.editingValue, dg.editCursorPos = "", 0
+	dg.markFullDirty()
 
-	// Подписка на изменения
-	oc.AddCollectionChanged(func(event CollectionChangedEvent) {
-		dg.mu.Lock()
-		dg.rebuildSortedIdx()
-		dg.mu.Unlock()
-	})
+	if oc != nil {
+		// Подписка на изменения
+		dg.itemsSubID = oc.AddCollectionChanged(func(event CollectionChangedEvent) {
+			dg.mu.Lock()
+			dg.rebuildSortedIdx()
+			dg.mu.Unlock()
+			dg.invalidateCellCache()
+		})
 
-	// Авто-генерация колонок
-	if dg.AutoGenerateColumns && len(dg.columns) == 0 && oc.Count() > 0 {
-		dg.autoGenerateColumns(oc.Get(0))
+		// Авто-генерация колонок
+		if dg.AutoGenerateColumns && len(dg.columns) == 0 && oc.Count() > 0 {
+			dg.autoGenerateColumns(oc.Get(0))
+		}
 	}
+	dg.mu.Unlock()
+
+	dg.invalidateCellCache()
 }
 
 // ItemsSource возвращает источник данных.
 func (dg *DataGrid) ItemsSource() *ObservableCollection {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
 	return dg.itemsSource
 }
 
 // rebuildSortedIdx пересоздаёт индексный массив (без сортировки).
+// Вызывать под dg.mu.
 func (dg *DataGrid) rebuildSortedIdx() {
 	if dg.itemsSource == nil {
 		dg.sortedIdx = nil
+		dg.clampStateToRows()
 		return
 	}
 	n := dg.itemsSource.Count()
-	dg.sortedIdx = make([]int, n)
+	if cap(dg.sortedIdx) >= n {
+		dg.sortedIdx = dg.sortedIdx[:n]
+	} else {
+		dg.sortedIdx = make([]int, n)
+	}
 	for i := 0; i < n; i++ {
 		dg.sortedIdx[i] = i
 	}
 	// Переприменяем текущую сортировку
 	dg.applyCurrentSort()
+	dg.clampStateToRows()
+}
+
+// clampStateToRows приводит индексы состояния к новому числу строк (SEC-5).
+//
+// Коллекция может сжаться из фоновой горутины прямо посреди редактирования:
+// без коррекции следующий commitEdit/Draw уходит за границу sortedIdx и
+// роняет приложение. Исчезнувшая строка = отмена редактирования БЕЗ коммита
+// (записывать значение уже некуда). Вызывать под dg.mu.
+func (dg *DataGrid) clampStateToRows() {
+	n := len(dg.sortedIdx)
+
+	if dg.isEditing && (dg.editingRow < 0 || dg.editingRow >= n ||
+		dg.editingCol < 0 || dg.editingCol >= len(dg.columns)) {
+		dg.isEditing = false
+		dg.editingRow, dg.editingCol = -1, -1
+		dg.editingValue, dg.editCursorPos = "", 0
+	}
+	if dg.focusRow >= n {
+		dg.focusRow = n - 1
+	}
+	if dg.anchorRow >= n {
+		dg.anchorRow = n - 1
+	}
+	if dg.hoverRow >= n {
+		dg.hoverRow = -1
+	}
+	for r := range dg.selectedRows {
+		if r < 0 || r >= n {
+			delete(dg.selectedRows, r)
+		}
+	}
+	dg.clampScrollY()
 }
 
 // autoGenerateColumns генерирует колонки из полей первого элемента.
@@ -639,16 +936,28 @@ func (dg *DataGrid) sortByColumn(colIdx int) {
 	}
 	col.SetSortDirection(dir)
 
-	// Вызываем callback
+	// Callback — строго ВНЕ dg.mu (SEC-4): sync.Mutex нерекурсивен, а
+	// обработчик сортировки почти всегда лезет в SelectedItem()/ScrollBy().
+	// Сортировку применяем в том же отложенном вызове — обработчику надо
+	// дать шанс выставить Handled и отсортировать данные самому.
 	if dg.OnSorting != nil {
+		cb := dg.OnSorting
 		evt := &SortingEvent{Column: col, Direction: dir}
-		dg.OnSorting(evt)
-		if evt.Handled {
-			return
-		}
+		dg.pending = append(dg.pending, func() {
+			cb(evt)
+			if evt.Handled {
+				return
+			}
+			dg.mu.Lock()
+			dg.applyCurrentSort()
+			dg.mu.Unlock()
+			dg.invalidateCellCache()
+		})
+		return
 	}
 
 	dg.applyCurrentSort()
+	dg.invalidateCellCache()
 }
 
 // applyCurrentSort применяет текущую сортировку.
@@ -678,16 +987,157 @@ func (dg *DataGrid) applyCurrentSort() {
 		return
 	}
 
+	n := len(dg.sortedIdx)
+	if n < 2 {
+		return
+	}
+
+	// Decorate-sort-undecorate (PERF-4): раньше КАЖДОЕ сравнение делало два
+	// GetPropertyValue (reflect + strings.Split + FieldByName), Sprintf и
+	// ToLower — то есть 2·n·log₂n рефлексивных обходов на сортировку.
+	// Теперь ключи извлекаются один раз (n обходов), а сравниваются уже
+	// типизированные значения.
 	src := dg.itemsSource
-	sort.SliceStable(dg.sortedIdx, func(i, j int) bool {
-		a, _ := GetPropertyValue(src.Get(dg.sortedIdx[i]), path)
-		b, _ := GetPropertyValue(src.Get(dg.sortedIdx[j]), path)
-		cmp := compareValues(a, b)
-		if dir == SortDescending {
+	keys := make([]sortKey, n)
+	for i, idx := range dg.sortedIdx {
+		v, ok := GetPropertyValue(src.Get(idx), path)
+		if !ok {
+			v = nil
+		}
+		keys[i] = makeSortKey(v)
+	}
+	kind := commonSortKind(keys)
+
+	// Сортируем перестановку позиций, а не сам sortedIdx: сортировка
+	// переставляет элементы, а ключи привязаны к исходным позициям.
+	perm := make([]int, n)
+	for i := range perm {
+		perm[i] = i
+	}
+	desc := dir == SortDescending
+	sort.SliceStable(perm, func(a, b int) bool {
+		cmp := compareSortKeys(&keys[perm[a]], &keys[perm[b]], kind)
+		if desc {
 			return cmp > 0
 		}
 		return cmp < 0
 	})
+
+	old := make([]int, n)
+	copy(old, dg.sortedIdx)
+	for i, p := range perm {
+		dg.sortedIdx[i] = old[p]
+	}
+}
+
+// ─── Ключи сортировки (decorate-sort-undecorate) ───────────────────────────
+
+// sortKind — тип ключа сортировки колонки.
+type sortKind uint8
+
+const (
+	kindNil    sortKind = iota // значение отсутствует
+	kindNumber                 // int/uint/float — сравнение по float64
+	kindBool                   // false < true
+	kindTime                   // time.Time — сравнение по моменту времени
+	kindString                 // строки и всё прочее — по нижнему регистру
+	kindMixed                  // в колонке разные типы — общий compareValues
+)
+
+// sortKey — предизвлечённый ключ одной строки.
+type sortKey struct {
+	kind sortKind
+	num  float64     // kindNumber; kindBool: 0/1
+	unix int64       // kindTime — UnixNano (float64 потерял бы наносекунды)
+	str  string      // kindString — уже в нижнем регистре
+	raw  interface{} // сырое значение — только для kindMixed
+}
+
+// makeSortKey раскладывает значение свойства в типизированный ключ.
+func makeSortKey(v interface{}) sortKey {
+	if v == nil {
+		return sortKey{kind: kindNil}
+	}
+	switch t := v.(type) {
+	case string:
+		return sortKey{kind: kindString, str: strings.ToLower(t), raw: v}
+	case time.Time:
+		return sortKey{kind: kindTime, unix: t.UnixNano(), raw: v}
+	case bool:
+		var f float64
+		if t {
+			f = 1
+		}
+		return sortKey{kind: kindBool, num: f, raw: v}
+	}
+	rv := reflect.ValueOf(v)
+	if isNumeric(rv) {
+		return sortKey{kind: kindNumber, num: toFloat64(rv), raw: v}
+	}
+	if rv.Kind() == reflect.Bool {
+		var f float64
+		if rv.Bool() {
+			f = 1
+		}
+		return sortKey{kind: kindBool, num: f, raw: v}
+	}
+	return sortKey{kind: kindString, str: strings.ToLower(valToString(v)), raw: v}
+}
+
+// commonSortKind определяет, однородна ли колонка. Неоднородная (kindMixed)
+// сравнивается прежним compareValues — семантика не меняется, но значения
+// уже извлечены и рефлексия по пути больше не повторяется.
+func commonSortKind(keys []sortKey) sortKind {
+	k := kindNil
+	for i := range keys {
+		if keys[i].kind == kindNil {
+			continue
+		}
+		if k == kindNil {
+			k = keys[i].kind
+			continue
+		}
+		if keys[i].kind != k {
+			return kindMixed
+		}
+	}
+	return k
+}
+
+// compareSortKeys сравнивает два ключа: -1 / 0 / 1. nil всегда меньше любого
+// значения — как и в прежнем compareValues.
+func compareSortKeys(a, b *sortKey, kind sortKind) int {
+	if a.kind == kindNil || b.kind == kindNil {
+		switch {
+		case a.kind == kindNil && b.kind == kindNil:
+			return 0
+		case a.kind == kindNil:
+			return -1
+		default:
+			return 1
+		}
+	}
+	switch kind {
+	case kindNumber, kindBool:
+		switch {
+		case a.num < b.num:
+			return -1
+		case a.num > b.num:
+			return 1
+		}
+		return 0
+	case kindTime:
+		switch {
+		case a.unix < b.unix:
+			return -1
+		case a.unix > b.unix:
+			return 1
+		}
+		return 0
+	case kindString:
+		return strings.Compare(a.str, b.str)
+	}
+	return compareValues(a.raw, b.raw)
 }
 
 // compareValues сравнивает два значения произвольного типа.
@@ -774,151 +1224,279 @@ func valToString(v interface{}) string {
 
 // ─── Draw ──────────────────────────────────────────────────────────────────
 
-// Draw отрисовывает DataGrid.
-func (dg *DataGrid) Draw(ctx DrawContextBridge) {
+// drawSnapshot — согласованный слепок состояния для одного кадра (PERF-8).
+//
+// Раньше dg.mu держался на всю отрисовку: медленный кадр заставлял мышь и
+// фоновые изменения коллекции ждать. Теперь под локом снимается только
+// слепок (десятки байт + видимое окно строк), а рисование идёт без лока.
+type drawSnapshot struct {
+	bounds     image.Rectangle
+	headerRect image.Rectangle
+	dataRect   image.Rectangle
+	dataW      int // ширина области данных (без скроллбара)
+	rowH       int
+	headerH    int
+	fontSize   float64
+	scrollX    int
+	scrollY    int
+
+	cols     []Column
+	widths   []int
+	headers  []string
+	sortDirs []SortDirection
+
+	needScroll  bool
+	scrollbar   image.Rectangle
+	thumb       image.Rectangle
+	thumbActive bool
+
+	// Видимое окно строк: startRow..endRow включительно (rows == nil — пусто).
+	startRow int
+	rows     []rowSnapshot
+
+	isEditing  bool
+	editRow    int
+	editCol    int
+	editValue  string
+	editCursor int
+	focused    bool
+
+	rowStyle func(interface{}, int) (color.RGBA, bool)
+	gen      uint64
+
+	bg, headerBG, headerText, textColor       color.RGBA
+	borderColor, selectColor, hoverColor      color.RGBA
+	alternateBG, gridLine                     color.RGBA
+	scrollTrack, scrollThumb, scrollThumbHigh color.RGBA
+	editBG, editBorder                        color.RGBA
+}
+
+// rowSnapshot — данные одной видимой строки на кадр.
+type rowSnapshot struct {
+	dataIdx  int
+	item     interface{}
+	selected bool
+	hovered  bool
+}
+
+// snapshotForDraw снимает слепок состояния под dg.mu (короткий лок).
+// ok=false — рисовать нечего.
+func (dg *DataGrid) snapshotForDraw() (s drawSnapshot, ok bool) {
 	dg.mu.Lock()
-	defer dg.mu.Unlock()
 
 	b := dg.bounds
 	if b.Empty() || len(dg.columns) == 0 {
-		return
+		dg.mu.Unlock()
+		return s, false
 	}
 
-	// Глобальный клип по bounds — ничто не выйдет за пределы DataGrid.
-	ctx.SetClip(b)
-	defer ctx.ClearClip()
-
-	// Пересчитываем ширину колонок
+	// Пересчёт ширин колонок — состояние, поэтому под локом.
 	if dg.dirty {
 		dg.layoutColumns()
 		dg.dirty = false
 	}
 
+	s.bounds = b
+	s.headerRect = dg.headerRect()
+	s.dataRect = dg.dataRect()
+	s.rowH = dg.RowHeight
+	s.headerH = dg.HeaderHeight
+	s.fontSize = dg.FontSize
+	s.scrollX = dg.scrollX
+	s.scrollY = dg.scrollY
+
+	n := len(dg.columns)
+	s.cols = make([]Column, n)
+	s.widths = make([]int, n)
+	s.headers = make([]string, n)
+	s.sortDirs = make([]SortDirection, n)
+	copy(s.cols, dg.columns)
+	for i, c := range dg.columns {
+		s.widths[i] = c.ActualWidth()
+		s.headers[i] = c.Header()
+		s.sortDirs[i] = c.GetSortDirection()
+	}
+
+	s.needScroll = dg.needsScrollbar()
+	s.dataW = b.Dx()
+	if s.needScroll {
+		s.dataW -= scrollbarWidth
+		s.scrollbar = dg.scrollbarRect()
+		s.thumb = dg.thumbRect()
+		s.thumbActive = dg.thumbHovered || dg.thumbDragging
+	}
+
+	rc := dg.rowCount()
+	if rc > 0 && dg.itemsSource != nil {
+		startRow := dg.scrollY / dg.RowHeight
+		if startRow < 0 {
+			startRow = 0
+		}
+		endRow := (dg.scrollY + dg.viewHeight()) / dg.RowHeight
+		if endRow >= rc {
+			endRow = rc - 1
+		}
+		if endRow >= startRow {
+			s.startRow = startRow
+			s.rows = make([]rowSnapshot, endRow-startRow+1)
+			for row := startRow; row <= endRow; row++ {
+				di := dg.sortedIdx[row]
+				s.rows[row-startRow] = rowSnapshot{
+					dataIdx:  di,
+					item:     dg.itemsSource.Get(di),
+					selected: dg.selectedRows[row],
+					hovered:  row == dg.hoverRow,
+				}
+			}
+		}
+	}
+
+	s.isEditing = dg.isEditing
+	s.editRow, s.editCol = dg.editingRow, dg.editingCol
+	s.editValue = dg.editingValue
+	s.editCursor = dg.editCursorPos
+	s.focused = dg.focused
+	s.rowStyle = dg.RowStyleSelector
+
+	s.bg, s.headerBG, s.headerText = dg.Background, dg.HeaderBG, dg.HeaderText
+	s.textColor, s.borderColor = dg.TextColor, dg.BorderColor
+	s.selectColor, s.hoverColor = dg.SelectColor, dg.HoverColor
+	s.alternateBG, s.gridLine = dg.AlternateBG, dg.GridLineColor
+	s.scrollTrack, s.scrollThumb = dg.ScrollTrackBG, dg.ScrollThumbBG
+	s.scrollThumbHigh = dg.ScrollThumbHover
+	s.editBG, s.editBorder = dg.EditBG, dg.EditBorder
+
+	dg.mu.Unlock()
+	return s, true
+}
+
+// Draw отрисовывает DataGrid.
+//
+// dg.mu держится только на снятие слепка; сама отрисовка (включая
+// пользовательские RowStyleSelector и DrawCell) идёт без лока — медленный
+// кадр больше не блокирует мышь и фоновые изменения коллекции (PERF-8).
+//
+// Следствие: чтение полей элементов модели (GetCellValue) происходит ВНЕ
+// dg.mu. Состав коллекции менять из любой горутины безопасно — за это
+// отвечает ObservableCollection; а поля самих элементов, как и в WPF,
+// правит только UI-поток (либо модель синхронизируется сама).
+func (dg *DataGrid) Draw(ctx DrawContextBridge) {
+	s, ok := dg.snapshotForDraw()
+	if !ok {
+		return
+	}
+
+	// Кэш текста ячеек держим по видимому окну с запасом (PERF-3).
+	lo, hi := s.startRow, s.startRow+len(s.rows)-1
+	pad := len(s.rows) + 8
+	s.gen = dg.trimCellCache(lo-pad, hi+pad)
+
+	b := s.bounds
+
+	// Глобальный клип по bounds — ничто не выйдет за пределы DataGrid.
+	ctx.SetClip(b)
+	defer ctx.ClearClip()
+
 	// Фон
-	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), dg.Background)
+	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), s.bg)
 
 	// Заголовок
-	dg.drawHeader(ctx)
+	dg.drawHeader(ctx, &s)
 
 	// Строки данных (с виртуализацией) — собственный клип внутри
-	dg.drawRows(ctx)
+	dg.drawRows(ctx, &s)
 
 	// Скроллбар
-	if dg.needsScrollbar() {
-		dg.drawScrollbar(ctx)
+	if s.needScroll {
+		dg.drawScrollbar(ctx, &s)
 	}
 
 	// Внешняя рамка
-	ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), dg.BorderColor)
+	ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), s.borderColor)
 }
 
 // drawHeader рисует заголовки колонок.
-func (dg *DataGrid) drawHeader(ctx DrawContextBridge) {
-	hr := dg.headerRect()
-	ctx.FillRect(hr.Min.X, hr.Min.Y, hr.Dx(), hr.Dy(), dg.HeaderBG)
+func (dg *DataGrid) drawHeader(ctx DrawContextBridge, s *drawSnapshot) {
+	hr := s.headerRect
+	ctx.FillRect(hr.Min.X, hr.Min.Y, hr.Dx(), hr.Dy(), s.headerBG)
 
 	// Клиппинг по области заголовка (без скроллбара)
-	dataW := dg.bounds.Dx()
-	if dg.needsScrollbar() {
-		dataW -= scrollbarWidth
-	}
-	clipRect := image.Rect(hr.Min.X, hr.Min.Y, hr.Min.X+dataW, hr.Max.Y)
+	clipRect := image.Rect(hr.Min.X, hr.Min.Y, hr.Min.X+s.dataW, hr.Max.Y)
 	ctx.SetClip(clipRect)
 
-	x := dg.bounds.Min.X - dg.scrollX
-	for _, col := range dg.columns {
-		w := col.ActualWidth()
-		if x+w > hr.Min.X && x < hr.Min.X+dataW {
+	x := s.bounds.Min.X - s.scrollX
+	for i := range s.cols {
+		w := s.widths[i]
+		if x+w > hr.Min.X && x < hr.Min.X+s.dataW {
 			// Текст заголовка
 			textX := x + 6
-			textY := hr.Min.Y + (dg.HeaderHeight-14)/2
-			ctx.DrawTextSize(col.Header(), textX, textY, dg.FontSize, dg.HeaderText)
+			textY := hr.Min.Y + (s.headerH-14)/2
+			ctx.DrawTextSize(s.headers[i], textX, textY, s.fontSize, s.headerText)
 
 			// Индикатор сортировки
-			if col.GetSortDirection() != SortNone {
+			if s.sortDirs[i] != SortNone {
 				arrow := "▲"
-				if col.GetSortDirection() == SortDescending {
+				if s.sortDirs[i] == SortDescending {
 					arrow = "▼"
 				}
 				arrowX := x + w - 16
-				ctx.DrawTextSize(arrow, arrowX, textY, dg.FontSize, dg.HeaderText)
+				ctx.DrawTextSize(arrow, arrowX, textY, s.fontSize, s.headerText)
 			}
 
 			// Разделитель колонки
-			ctx.DrawVLine(x+w-1, hr.Min.Y, dg.HeaderHeight, dg.GridLineColor)
+			ctx.DrawVLine(x+w-1, hr.Min.Y, s.headerH, s.gridLine)
 		}
 		x += w
 	}
 
 	// Восстанавливаем глобальный клип по bounds
-	ctx.SetClip(dg.bounds)
+	ctx.SetClip(s.bounds)
 
 	// Горизонтальная линия под заголовком
-	ctx.DrawHLine(hr.Min.X, hr.Max.Y-1, hr.Dx(), dg.BorderColor)
+	ctx.DrawHLine(hr.Min.X, hr.Max.Y-1, hr.Dx(), s.borderColor)
 }
 
 // drawRows рисует видимые строки (виртуализация).
-func (dg *DataGrid) drawRows(ctx DrawContextBridge) {
-	dr := dg.dataRect()
-	if dg.rowCount() == 0 || dg.itemsSource == nil {
+func (dg *DataGrid) drawRows(ctx DrawContextBridge, s *drawSnapshot) {
+	if len(s.rows) == 0 {
 		return
 	}
-
-	// Вычисляем диапазон видимых строк
-	startRow := dg.scrollY / dg.RowHeight
-	if startRow < 0 {
-		startRow = 0
-	}
-	endRow := (dg.scrollY + dg.viewHeight()) / dg.RowHeight
-	if endRow >= dg.rowCount() {
-		endRow = dg.rowCount() - 1
-	}
-
-	dataW := dg.bounds.Dx()
-	if dg.needsScrollbar() {
-		dataW -= scrollbarWidth
-	}
-	clipRect := image.Rect(dr.Min.X, dr.Min.Y, dr.Min.X+dataW, dr.Max.Y)
+	dr := s.dataRect
+	clipRect := image.Rect(dr.Min.X, dr.Min.Y, dr.Min.X+s.dataW, dr.Max.Y)
 	ctx.SetClip(clipRect)
 
-	for row := startRow; row <= endRow; row++ {
-		rowY := dr.Min.Y + row*dg.RowHeight - dg.scrollY
-		if rowY+dg.RowHeight < dr.Min.Y || rowY >= dr.Max.Y {
+	for i := range s.rows {
+		row := s.startRow + i
+		rs := &s.rows[i]
+		rowY := dr.Min.Y + row*s.rowH - s.scrollY
+		if rowY+s.rowH < dr.Min.Y || rowY >= dr.Max.Y {
 			continue
 		}
-
-		// Получаем элемент данных
-		dataIdx := dg.sortedIdx[row]
-		item := dg.itemsSource.Get(dataIdx)
-
-		// Фон строки: чередование, hover, выделение
-		isSelected := dg.selectedRows[row]
-		isHovered := row == dg.hoverRow
 
 		// Базовый фон строки: пользовательский RowStyleSelector (BUG-3) имеет
 		// приоритет над стандартным чередованием AlternatingRowBackground.
 		drewBase := false
-		if dg.RowStyleSelector != nil {
-			if bg, ok := dg.RowStyleSelector(item, dataIdx); ok {
-				ctx.FillRect(dr.Min.X, rowY, dataW, dg.RowHeight, bg)
+		if s.rowStyle != nil {
+			if bg, ok := s.rowStyle(rs.item, rs.dataIdx); ok {
+				ctx.FillRect(dr.Min.X, rowY, s.dataW, s.rowH, bg)
 				drewBase = true
 			}
 		}
 		if !drewBase && row%2 == 1 {
-			ctx.FillRect(dr.Min.X, rowY, dataW, dg.RowHeight, dg.AlternateBG)
+			ctx.FillRect(dr.Min.X, rowY, s.dataW, s.rowH, s.alternateBG)
 		}
 		// Выделение / hover рисуются поверх базового фона.
-		if isSelected {
-			ctx.FillRectAlpha(dr.Min.X, rowY, dataW, dg.RowHeight, dg.SelectColor)
-		} else if isHovered {
-			ctx.FillRect(dr.Min.X, rowY, dataW, dg.RowHeight, dg.HoverColor)
+		if rs.selected {
+			ctx.FillRectAlpha(dr.Min.X, rowY, s.dataW, s.rowH, s.selectColor)
+		} else if rs.hovered {
+			ctx.FillRect(dr.Min.X, rowY, s.dataW, s.rowH, s.hoverColor)
 		}
 
 		// Ячейки
-		cellX := dg.bounds.Min.X - dg.scrollX
-		for colIdx, col := range dg.columns {
-			w := col.ActualWidth()
-			cellRect := image.Rect(cellX, rowY, cellX+w, rowY+dg.RowHeight)
+		cellX := s.bounds.Min.X - s.scrollX
+		for colIdx, col := range s.cols {
+			w := s.widths[colIdx]
+			cellRect := image.Rect(cellX, rowY, cellX+w, rowY+s.rowH)
 
 			// Per-cell clip = пересечение ячейки с областью данных,
 			// чтобы текст не вылезал ни за пределы ячейки, ни за хедер/нижнюю границу.
@@ -928,25 +1506,32 @@ func (dg *DataGrid) drawRows(ctx DrawContextBridge) {
 			}
 
 			// Режим редактирования?
-			if dg.isEditing && dg.editingRow == row && dg.editingCol == colIdx {
-				dg.drawEditCell(ctx, cellRect)
+			if s.isEditing && s.editRow == row && s.editCol == colIdx {
+				dg.drawEditCell(ctx, s, cellRect)
 			} else {
 				cdc := CellDrawContext{
 					Rect:       cellRect,
-					Item:       item,
-					RowIndex:   dataIdx,
-					IsSelected: isSelected,
-					IsHovered:  isHovered,
+					Item:       rs.item,
+					RowIndex:   rs.dataIdx,
+					IsSelected: rs.selected,
+					IsHovered:  rs.hovered,
 					IsEditing:  false,
 					DrawCtx:    ctx,
-					TextColor:  dg.TextColor,
-					FontSize:   dg.FontSize,
+					TextColor:  s.textColor,
+					FontSize:   s.fontSize,
+				}
+				// PERF-3: текст ячейки считается один раз и кладётся в кэш —
+				// без него каждый кадр на каждую видимую ячейку приходился
+				// reflect-обход пути + fmt.Sprintf (а у CheckBox — дважды).
+				if ctc, ok := col.(cachedTextColumn); ok && ctc.UsesCachedText() {
+					cdc.CachedText = dg.cellText(s.gen, row, colIdx, col, rs.item)
+					cdc.HasCachedText = true
 				}
 				col.DrawCell(cdc)
 			}
 
 			// Вертикальная линия ячейки
-			ctx.DrawVLine(cellX+w-1, rowY, dg.RowHeight, dg.GridLineColor)
+			ctx.DrawVLine(cellX+w-1, rowY, s.rowH, s.gridLine)
 			cellX += w
 		}
 
@@ -954,41 +1539,51 @@ func (dg *DataGrid) drawRows(ctx DrawContextBridge) {
 		ctx.SetClip(clipRect)
 
 		// Горизонтальная линия строки
-		ctx.DrawHLine(dr.Min.X, rowY+dg.RowHeight-1, dataW, dg.GridLineColor)
+		ctx.DrawHLine(dr.Min.X, rowY+s.rowH-1, s.dataW, s.gridLine)
 	}
 
 	// Восстанавливаем глобальный клип по bounds
-	ctx.SetClip(dg.bounds)
+	ctx.SetClip(s.bounds)
 }
 
 // drawEditCell рисует ячейку в режиме редактирования.
-func (dg *DataGrid) drawEditCell(ctx DrawContextBridge, r image.Rectangle) {
+func (dg *DataGrid) drawEditCell(ctx DrawContextBridge, s *drawSnapshot, r image.Rectangle) {
 	// Фон и рамка
-	ctx.FillRect(r.Min.X+1, r.Min.Y+1, r.Dx()-2, r.Dy()-2, dg.EditBG)
-	ctx.DrawBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), dg.EditBorder)
+	ctx.FillRect(r.Min.X+1, r.Min.Y+1, r.Dx()-2, r.Dy()-2, s.editBG)
+	ctx.DrawBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.editBorder)
 
 	// Текст
 	textX := r.Min.X + 6
 	textY := r.Min.Y + (r.Dy()-14)/2
-	ctx.DrawTextSize(dg.editingValue, textX, textY, dg.FontSize, dg.TextColor)
+	ctx.DrawTextSize(s.editValue, textX, textY, s.fontSize, s.textColor)
 
 	// Каретка
-	if dg.focused {
-		caretText := string([]rune(dg.editingValue)[:dg.editCursorPos])
-		caretX := textX + ctx.MeasureText(caretText, dg.FontSize)
-		ctx.FillRect(caretX, r.Min.Y+4, 1, r.Dy()-8, dg.TextColor)
+	if s.focused {
+		// SEC-5: позицию курсора клэмпим — редактор мог быть сброшен
+		// параллельным изменением модели, а срез рун по «старой» позиции
+		// уронил бы кадр.
+		runes := []rune(s.editValue)
+		pos := s.editCursor
+		if pos < 0 {
+			pos = 0
+		}
+		if pos > len(runes) {
+			pos = len(runes)
+		}
+		caretX := textX + ctx.MeasureText(string(runes[:pos]), s.fontSize)
+		ctx.FillRect(caretX, r.Min.Y+4, 1, r.Dy()-8, s.textColor)
 	}
 }
 
 // drawScrollbar рисует вертикальный скроллбар.
-func (dg *DataGrid) drawScrollbar(ctx DrawContextBridge) {
-	sr := dg.scrollbarRect()
-	ctx.FillRect(sr.Min.X, sr.Min.Y, sr.Dx(), sr.Dy(), dg.ScrollTrackBG)
+func (dg *DataGrid) drawScrollbar(ctx DrawContextBridge, s *drawSnapshot) {
+	sr := s.scrollbar
+	ctx.FillRect(sr.Min.X, sr.Min.Y, sr.Dx(), sr.Dy(), s.scrollTrack)
 
-	tr := dg.thumbRect()
-	tc := dg.ScrollThumbBG
-	if dg.thumbHovered || dg.thumbDragging {
-		tc = dg.ScrollThumbHover
+	tr := s.thumb
+	tc := s.scrollThumb
+	if s.thumbActive {
+		tc = s.scrollThumbHigh
 	}
 	ctx.FillRect(tr.Min.X+2, tr.Min.Y+1, tr.Dx()-4, tr.Dy()-2, tc)
 }
@@ -1088,16 +1683,16 @@ func (dg *DataGrid) OnMouseButton(x, y int, button int, pressed bool) bool {
 //     допустимо ли редактирование с учётом IsReadOnly грида и колонки.
 //
 // Снапшот item для callback снимается ПОД мьютексом, сам callback
-// вызывается ПОСЛЕ Unlock — обработчик может безопасно дёргать
+// вызывается ПОСЛЕ Unlock (firePending) — обработчик может безопасно дёргать
 // SetItemsSource / SelectRow / Refresh, не вызывая deadlock.
 func (dg *DataGrid) OnMouseDoubleClick(x, y int) bool {
-	defer dg.firePending() // колбэки — после явных Unlock внутри
+	defer dg.firePending() // LIFO: выполнится ПОСЛЕ Unlock — колбэки вне dg.mu
 	dg.mu.Lock()
+	defer dg.mu.Unlock()
 
 	row := dg.rowIndexAtY(y)
 	col := dg.colIndexAtX(x)
 	if row < 0 {
-		dg.mu.Unlock()
 		return false
 	}
 
@@ -1110,10 +1705,9 @@ func (dg *DataGrid) OnMouseDoubleClick(x, y int) bool {
 	if col >= 0 {
 		dg.beginEdit(row, col)
 	}
-	dg.mu.Unlock()
 
 	if cb != nil {
-		cb(row, activatedItem)
+		dg.pending = append(dg.pending, func() { cb(row, activatedItem) })
 	}
 	return true
 }
@@ -1141,7 +1735,11 @@ func (dg *DataGrid) OnMouseMove(x, y int) {
 		return
 	}
 
-	// Resize колонки
+	// Resize колонки. SEC-5: индекс мог протухнуть после SetColumns —
+	// проверяем по фактической длине среза, а не только на >= 0.
+	if dg.resizingCol >= len(dg.columns) {
+		dg.resizingCol = -1
+	}
 	if dg.resizingCol >= 0 {
 		dx := x - dg.resizingStartX
 		newW := dg.resizingStartW + dx
@@ -1318,7 +1916,7 @@ func (dg *DataGrid) beginEdit(row, col int) {
 	if effectiveRO {
 		return
 	}
-	if row < 0 || row >= len(dg.sortedIdx) {
+	if row < 0 || row >= len(dg.sortedIdx) || dg.itemsSource == nil {
 		return
 	}
 
@@ -1335,51 +1933,75 @@ func (dg *DataGrid) beginEdit(row, col int) {
 	dg.markRowDirty(row) // строка перешла в режим редактирования
 }
 
+// commitEdit завершает редактирование ячейки. Вызывать под dg.mu.
+//
+// SEC-5: editingRow/editingCol проверяются по ФАКТИЧЕСКИМ границам. Фоновый
+// RemoveAt/Clear или SetColumns посреди редактирования оставляли здесь
+// индексы за границей срезов — грид падал на первом же клике.
+//
+// SEC-4: OnCellEditEnding и запись значения уходят в pending и выполняются
+// уже вне dg.mu — обработчик волен звать SelectedItem()/ScrollBy().
 func (dg *DataGrid) commitEdit() {
 	if !dg.isEditing {
 		return
 	}
 
-	col := dg.columns[dg.editingCol]
-	dataIdx := dg.sortedIdx[dg.editingRow]
-	item := dg.itemsSource.Get(dataIdx)
+	row, colIdx := dg.editingRow, dg.editingCol
+	value := dg.editingValue
 
-	// Callback
-	if dg.OnCellEditEnding != nil {
-		evt := &CellEditEndingEvent{
-			RowIndex: dataIdx,
-			Column:   col,
-			Item:     item,
-			NewValue: dg.editingValue,
-		}
-		dg.OnCellEditEnding(evt)
-		if evt.Cancel {
-			dg.cancelEdit()
-			return
-		}
-	}
-
-	// Записываем значение в модель
-	col.SetCellValue(item, dg.editingValue)
-	dg.markRowDirty(dg.editingRow) // ячейка вышла из режима редактирования
-
-	// Уведомляем о завершении редактирования строки — после выхода из-под dg.mu.
-	if dg.OnRowEditEnding != nil {
-		cb := dg.OnRowEditEnding
-		di, it := dataIdx, item
-		dg.pending = append(dg.pending, func() { cb(di, it) })
-	}
-
+	// Режим редактирования снимаем сразу и синхронно: дальше по стеку
+	// (selectRow, обработка клавиш) состояние должно быть уже согласованным.
 	dg.isEditing = false
-	dg.editingRow = -1
-	dg.editingCol = -1
+	dg.editingRow, dg.editingCol = -1, -1
+	dg.editingValue, dg.editCursorPos = "", 0
+	dg.markRowDirty(row)
+
+	if colIdx < 0 || colIdx >= len(dg.columns) ||
+		row < 0 || row >= len(dg.sortedIdx) || dg.itemsSource == nil {
+		return // редактируемой ячейки больше нет — коммитить некуда
+	}
+
+	col := dg.columns[colIdx]
+	dataIdx := dg.sortedIdx[row]
+	item := dg.itemsSource.Get(dataIdx)
+	if item == nil {
+		return
+	}
+
+	cbEnd := dg.OnCellEditEnding
+	cbRow := dg.OnRowEditEnding
+	dg.pending = append(dg.pending, func() {
+		if cbEnd != nil {
+			evt := &CellEditEndingEvent{
+				RowIndex: dataIdx,
+				Column:   col,
+				Item:     item,
+				NewValue: value,
+			}
+			cbEnd(evt)
+			if evt.Cancel {
+				return
+			}
+		}
+		// Записываем значение в модель
+		col.SetCellValue(item, value)
+		dg.invalidateCellRow(row)
+		if cbRow != nil {
+			cbRow(dataIdx, item)
+		}
+	})
 }
 
+// cancelEdit отменяет редактирование без записи в модель. Вызывать под dg.mu.
 func (dg *DataGrid) cancelEdit() {
+	if !dg.isEditing {
+		return
+	}
 	dg.markRowDirty(dg.editingRow) // ячейка выходит из режима редактирования
 	dg.isEditing = false
 	dg.editingRow = -1
 	dg.editingCol = -1
+	dg.editingValue, dg.editCursorPos = "", 0
 }
 
 // ─── Keyboard ──────────────────────────────────────────────────────────────
@@ -1466,26 +2088,21 @@ func (dg *DataGrid) OnKeyEvent(code int, char rune, pressed bool, shift, ctrl bo
 		}
 	case 13: // Enter — активация строки + (если editable) начать редактирование
 		if dg.focusRow >= 0 {
-			// Снимаем item под мьютексом, callback дёрнем после unlock
-			// в конце handleNavKey (через defer ниже не получится — мы
-			// внутри switch). Здесь делаем синхронный вызов: handleNavKey
-			// уже под dg.mu, так что обработчик OnRowActivated должен быть
-			// thread-aware. Для совместимости с двойным кликом callback
-			// вызывается синхронно в той же горутине, что и keypress.
+			// SEC-4: item снимается под мьютексом, а callback уходит в
+			// pending и выполняется уже вне dg.mu (firePending). Прежде он
+			// звался прямо здесь, под нерекурсивным sync.Mutex: обработчик,
+			// дёрнувший SelectedItem()/ScrollBy(), намертво вешал UI-поток.
 			if dg.OnRowActivated != nil {
 				var item interface{}
 				if dg.focusRow < len(dg.sortedIdx) && dg.itemsSource != nil {
 					item = dg.itemsSource.Get(dg.sortedIdx[dg.focusRow])
 				}
-				// Сохраняем callback и item, вызовем после beginEdit.
 				cb := dg.OnRowActivated
 				row := dg.focusRow
 				if dg.focusCol >= 0 {
 					dg.beginEdit(dg.focusRow, dg.focusCol)
 				}
-				// Вызываем под mu — допущение: обработчик не должен сам
-				// захватывать dg.mu (как и OnSelectionChanged выше).
-				cb(row, item)
+				dg.pending = append(dg.pending, func() { cb(row, item) })
 				return
 			}
 			if dg.focusCol >= 0 {
@@ -1512,6 +2129,15 @@ func (dg *DataGrid) handleEditKey(code int, char rune, ctrl bool) {
 	// Любое изменение внутри редактируемой ячейки перерисовывает её строку.
 	// (commit/cancel уже пометили строку и обнулили editingRow — тогда no-op.)
 	defer func() { dg.markRowDirty(dg.editingRow) }()
+
+	// SEC-5: позиция каретки могла остаться от прежнего значения (модель
+	// сменилась под редактором) — срез рун по ней паникует.
+	if n := len([]rune(dg.editingValue)); dg.editCursorPos > n {
+		dg.editCursorPos = n
+	} else if dg.editCursorPos < 0 {
+		dg.editCursorPos = 0
+	}
+
 	switch code {
 	case 13: // Enter — commit
 		dg.commitEdit()
@@ -1594,6 +2220,9 @@ type DataGridTheme struct {
 
 // ApplyTheme применяет тему к DataGrid.
 func (dg *DataGrid) ApplyTheme(t *DataGridTheme) {
+	// Под локом: цвета читаются в слепок кадра (Draw работает вне dg.mu).
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
 	dg.Background = t.Background
 	dg.HeaderBG = t.HeaderBG
 	dg.HeaderText = t.HeaderText

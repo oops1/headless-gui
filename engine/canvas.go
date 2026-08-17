@@ -14,6 +14,7 @@ import (
 	"image/color"
 	stdraw "image/draw"
 	"math"
+	"reflect"
 	"runtime"
 	"sort"
 	"sync"
@@ -47,6 +48,15 @@ type Canvas struct {
 	// буферы — в физических. При scale == 1 пути тождественны прежним.
 	scale              float64
 	logicalW, logicalH int
+
+	// fontRev растёт при смене состава шрифтов: по нему кэшированные
+	// клоны канваса (popup-оверлеи) понимают, что устарели.
+	fontRev uint64
+
+	// Кэш результата масштабирования (см. DrawImageScaled).
+	scaledCache  map[scaledKey]*scaledEntry
+	scaledClock  uint64
+	scaledPixels int
 }
 
 // RegisterFont регистрирует именованный шрифт (TTF-данные) в реестре холста.
@@ -58,6 +68,7 @@ func (c *Canvas) RegisterFont(fontName string, ttfData []byte) {
 	fc := newFontCacheFromData(ttfData, c.fontCache.dpi)
 	if fc != nil {
 		c.namedFonts[fontName] = fc
+		c.fontRev++
 	}
 }
 
@@ -86,6 +97,7 @@ func (c *Canvas) SetDefaultFont(name string) bool {
 	}
 	if fc, ok := c.namedFonts[name]; ok && fc != nil {
 		c.fontCache = fc
+		c.fontRev++
 		return true
 	}
 	return false
@@ -109,6 +121,7 @@ func (c *Canvas) AddFallbackFont(ttfData []byte) bool {
 		return false
 	}
 	c.fallbacks = append(c.fallbacks, fc)
+	c.fontRev++
 	return true
 }
 
@@ -134,12 +147,20 @@ func newCanvas(w, h int, fc *FontCache) *Canvas {
 
 // newCanvasScaled создаёт холст логического размера (w, h) с HiDPI-масштабом
 // scale: буферы аллоцируются в физических пикселях (w×scale, h×scale).
+//
+// Размеры валидируются здесь же (SEC-10, вторая линия обороны после
+// clampCanvasSize в New/SetResolution): отрицательные и нулевые стороны
+// давали пустые буферы и tilesX/tilesY ≤ 0 — всю дальнейшую тайловую
+// арифметику это превращало в мусор, а масштаб мог раздуть физический
+// размер сверх любых границ.
 func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 	if scale <= 0 {
 		scale = 1
 	}
+	w, h = clampCanvasSize(w, h)
 	pw := int(math.Round(float64(w) * scale))
 	ph := int(math.Round(float64(h) * scale))
+	pw, ph = clampCanvasSize(pw, ph) // масштаб мог вывести за предел
 	ts := output.TileSize
 	return &Canvas{
 		front:      image.NewRGBA(image.Rect(0, 0, pw, ph)),
@@ -437,9 +458,9 @@ func (c *Canvas) drawRoundBorderCornersLegacy(x, y, w, h, r int, col color.RGBA)
 	for i := 0; i <= r; i++ {
 		dy := float64(r - i)
 		dx := int(math.Round(math.Sqrt(rf*rf - dy*dy)))
-		c.setPixelPx(x+r-dx, y+i, col)       // верхний левый
-		c.setPixelPx(x+w-1-r+dx, y+i, col)   // верхний правый
-		c.setPixelPx(x+r-dx, y+h-1-i, col)   // нижний левый
+		c.setPixelPx(x+r-dx, y+i, col)         // верхний левый
+		c.setPixelPx(x+w-1-r+dx, y+i, col)     // верхний правый
+		c.setPixelPx(x+r-dx, y+h-1-i, col)     // нижний левый
 		c.setPixelPx(x+w-1-r+dx, y+h-1-i, col) // нижний правый
 	}
 }
@@ -470,6 +491,13 @@ func (c *Canvas) DrawTextFont(text string, x, y int, sizePt float64, fontName st
 	c.drawTextWithFont(c.fontFor(fontName), text, x, y, sizePt, col)
 }
 
+// clipPenSlackX — запас справа от клипа (физические пиксели), после которого
+// отрисовка строки прекращается. Покрывает отрицательный кернинг и левый свес
+// маски глифа (g.offX < 0) — то есть случаи, когда перо уже правее клипа, а
+// сам глиф ещё мог бы зацепить его край. 64 px кратно перекрывают и то и
+// другое для любого разумного кегля.
+const clipPenSlackX = 64
+
 func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt float64, col color.RGBA) {
 	// Обе ветки блиттируют кэшированные альфа-маски глифов (см. FontCache.Glyph)
 	// вместо повторной растеризации контуров через font.Drawer.
@@ -496,6 +524,16 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 		return
 	}
 
+	// Горизонтальный отсев (PERF-7): как только перо ушло правее клипа, все
+	// оставшиеся глифы гарантированно за его пределами — продвижение пера в
+	// LTR-шрифтах неотрицательно, а сложные скрипты уходят в шейпер выше.
+	// Длинная строка в узком поле/скролле раньше целиком прогонялась через
+	// кэши глифов и кернинга ради полностью отсечённого результата.
+	penLimit := fixed.Int26_6(math.MaxInt32) // клипа нет — предела нет
+	if c.hasClip {
+		penLimit = fixed.I(c.clip.Max.X + clipPenSlackX)
+	}
+
 	// Быстрый путь: нет fallback-шрифтов — один шрифт, с кернингом
 	// (поведение прежнего font.Drawer.DrawString; отсутствующий глиф
 	// пропускается без продвижения пера — как делал Drawer с opentype).
@@ -503,6 +541,9 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 		pen := fixed.I(px)
 		prev := rune(-1)
 		for _, r := range text {
+			if pen >= penLimit {
+				break
+			}
 			if prev >= 0 {
 				pen += fc.Kern(sizePt, prev, r)
 			}
@@ -521,6 +562,9 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 	// Baseline от основного шрифта, кернинг не применяется (прежнее поведение).
 	pen := fixed.I(px)
 	for _, r := range text {
+		if pen >= penLimit {
+			break
+		}
 		chosen, found := c.fcForRune(fc, r)
 		g := chosen.Glyph(sizePt, r)
 		if found && g.ok {
@@ -560,27 +604,30 @@ func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 	sb := uint32(col.B) * 0x101
 	sa := uint32(col.A) * 0x101
 	const m16 = 1<<16 - 1
+	// Строки берём подсрезами (PERF-7): компилятор снимает проверку границ на
+	// каждый пиксель, арифметика смешивания — прежняя, результат бит-в-бит тот же.
 	mask := alpha.Pix
 	mStride := alpha.Stride
 	dst := c.back.Pix
+	rw := r.Dx()
 	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
-		mRow := (yy - gy) * mStride
+		mo := (yy-gy)*mStride + (r.Min.X - gx)
+		mRow := mask[mo : mo+rw]
 		dOff := c.back.PixOffset(r.Min.X, yy)
-		for xx := r.Min.X; xx < r.Max.X; xx++ {
-			ma := uint32(mask[mRow+(xx-gx)])
+		dRow := dst[dOff : dOff+rw*4]
+		for i := 0; i < rw; i++ {
+			ma := uint32(mRow[i])
 			if ma == 0 {
-				dOff += 4
 				continue
 			}
 			ma |= ma << 8 // 0..0xffff
 			a := sa * ma / m16
 			inv := m16 - a
-			p := dst[dOff : dOff+4 : dOff+4]
+			p := dRow[i*4 : i*4+4 : i*4+4]
 			p[0] = uint8((uint32(p[0])*0x101*inv/m16 + sr*ma/m16) >> 8)
 			p[1] = uint8((uint32(p[1])*0x101*inv/m16 + sg*ma/m16) >> 8)
 			p[2] = uint8((uint32(p[2])*0x101*inv/m16 + sb*ma/m16) >> 8)
 			p[3] = uint8((uint32(p[3])*0x101*inv/m16 + sa*ma/m16) >> 8)
-			dOff += 4
 		}
 	}
 }
@@ -834,8 +881,28 @@ func (c *Canvas) DrawImage(src image.Image, x, y int) {
 	stdraw.Draw(c.back, r, src, offset, stdraw.Over)
 }
 
+// ─── Кэш масштабирования ────────────────────────────────────────────────────
+
+const (
+	maxScaledEntries = 32       // записей в кэше DrawImageScaled
+	maxScaledPixels  = 16 << 20 // суммарный бюджет пикселей кэша
+)
+
+// scaledKey — ключ кэша: идентичность источника плюс запрошенный размер.
+type scaledKey struct {
+	src  uintptr
+	sb   image.Rectangle
+	w, h int
+}
+
+type scaledEntry struct {
+	img  *image.RGBA
+	used uint64 // такт последнего обращения (LRU)
+}
+
 // DrawImageScaled рисует изображение масштабированным до (w × h) логических
-// пикселей в позицию (x, y). Промежуточный буфер переиспользуется.
+// пикселей в позицию (x, y).
+// Кэш — по идентичности источника; мутировали пиксели — InvalidateImageCache.
 func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
 	px, py := c.sx(x), c.sx(y)
 	pw, ph := c.sl(x, w), c.sl(y, h)
@@ -843,21 +910,106 @@ func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
 	if dstRect.Empty() {
 		return
 	}
-	// Переиспользуем буфер если размер подходит.
-	need := image.Rect(0, 0, pw, ph)
-	tmp := c.scaleTmp
-	if tmp == nil || tmp.Bounds() != need {
-		tmp = image.NewRGBA(need)
-		c.scaleTmp = tmp
-	} else {
-		// Очищаем буфер для нового масштабирования.
-		for i := range tmp.Pix {
-			tmp.Pix[i] = 0
-		}
-	}
-	draw.BiLinear.Scale(tmp, tmp.Bounds(), src, src.Bounds(), stdraw.Src, nil)
+	tmp := c.scaledFor(src, pw, ph)
 	offset := image.Pt(dstRect.Min.X-px, dstRect.Min.Y-py)
 	stdraw.Draw(c.back, dstRect, tmp, offset, stdraw.Over)
+}
+
+// scaledFor возвращает src, масштабированный до pw×ph физических пикселей.
+func (c *Canvas) scaledFor(src image.Image, pw, ph int) *image.RGBA {
+	need := image.Rect(0, 0, pw, ph)
+	key, cacheable := scaledCacheKey(src, pw, ph)
+	if cacheable {
+		if ent, ok := c.scaledCache[key]; ok {
+			c.scaledClock++
+			ent.used = c.scaledClock
+			return ent.img
+		}
+	} else {
+		// Источник без стабильной идентичности — общий временный буфер.
+		tmp := c.scaleTmp
+		if tmp == nil || tmp.Bounds() != need {
+			tmp = image.NewRGBA(need)
+			c.scaleTmp = tmp
+		} else {
+			for i := range tmp.Pix {
+				tmp.Pix[i] = 0
+			}
+		}
+		draw.BiLinear.Scale(tmp, need, src, src.Bounds(), stdraw.Src, nil)
+		return tmp
+	}
+	img := image.NewRGBA(need)
+	draw.BiLinear.Scale(img, need, src, src.Bounds(), stdraw.Src, nil)
+	c.putScaled(key, img, pw*ph)
+	return img
+}
+
+// scaledCacheKey строит ключ кэша; false — источник кэшировать нельзя.
+func scaledCacheKey(src image.Image, w, h int) (scaledKey, bool) {
+	v := reflect.ValueOf(src)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return scaledKey{}, false
+	}
+	return scaledKey{src: v.Pointer(), sb: src.Bounds(), w: w, h: h}, true
+}
+
+// putScaled кладёт запись в кэш, вытесняя давние при переполнении.
+func (c *Canvas) putScaled(key scaledKey, img *image.RGBA, pixels int) {
+	if pixels > maxScaledPixels {
+		return
+	}
+	if c.scaledCache == nil {
+		c.scaledCache = make(map[scaledKey]*scaledEntry, maxScaledEntries)
+	}
+	for len(c.scaledCache) >= maxScaledEntries || c.scaledPixels+pixels > maxScaledPixels {
+		if !c.evictScaled() {
+			break
+		}
+	}
+	c.scaledClock++
+	c.scaledCache[key] = &scaledEntry{img: img, used: c.scaledClock}
+	c.scaledPixels += pixels
+}
+
+// evictScaled выбрасывает самую давно не использованную запись.
+func (c *Canvas) evictScaled() bool {
+	var (
+		oldKey scaledKey
+		oldEnt *scaledEntry
+	)
+	for k, ent := range c.scaledCache {
+		if oldEnt == nil || ent.used < oldEnt.used {
+			oldKey, oldEnt = k, ent
+		}
+	}
+	if oldEnt == nil {
+		return false
+	}
+	delete(c.scaledCache, oldKey)
+	c.scaledPixels -= oldEnt.img.Rect.Dx() * oldEnt.img.Rect.Dy()
+	return true
+}
+
+// InvalidateImageCache сбрасывает кэш масштабирования для src (nil — целиком).
+// Вызывать после мутации пикселей картинки на месте, из потока отрисовки.
+func (c *Canvas) InvalidateImageCache(src image.Image) {
+	if src == nil {
+		c.scaledCache = nil
+		c.scaledPixels = 0
+		return
+	}
+	v := reflect.ValueOf(src)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return
+	}
+	ptr := v.Pointer()
+	for k, ent := range c.scaledCache {
+		if k.src == ptr {
+			delete(c.scaledCache, k)
+			c.scaledPixels -= ent.img.Rect.Dx() * ent.img.Rect.Dy()
+		}
+	}
 }
 
 // Snapshot возвращает КОПИЮ прямоугольной области уже отрисованного back-буфера
