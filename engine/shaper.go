@@ -205,8 +205,9 @@ type glyphMask struct {
 // Пределы кэшей: при переполнении кэш сбрасывается целиком (простая política,
 // как у кэша глифов FontCache).
 const (
-	maxShapedLayouts = 2048
-	maxShapedMasks   = 4096
+	maxShapedLayouts  = 2048
+	maxShapedMasks    = 4096
+	maxDynColorGlyphs = 256 // цветозависимые эмодзи: цвет текста меняется редко
 )
 
 // textShaper — состояние шейпинга одного Canvas. Все обращения — под mu
@@ -219,13 +220,20 @@ type textShaper struct {
 	masks   map[maskKey]*glyphMask
 
 	// ── Цветные эмодзи (см. emoji.go) ────────────────────────────────────────
-	// colorGlyphs — кэш цветных RGBA-глифов по (face, GID, размер). Отдельно от
-	// одноцветных масок: цвет текста на цветной глиф НЕ влияет. nil-значение
-	// («у глифа нет цветного представления») тоже кэшируется.
+	// colorGlyphs — кэш цветных RGBA-глифов по (face, GID, размер); nil-значение
+	// («цветного представления нет») тоже кэшируется.
 	colorGlyphs map[maskKey]*colorGlyph
-	// faceColor — есть ли у face цветные глифы вообще (COLR/CBDT), кэш по face:
-	// отсекает дорогую проверку GlyphData для обычных шрифтов без цвета.
+	// dynColorGlyphs — глифы со слоями foreground, ключ включает цвет текста.
+	dynColorGlyphs map[dynColorKey]*colorGlyph
+	// faceColor — есть ли у face цветные глифы вообще (COLR/CBDT).
 	faceColor map[*tsfont.Face]bool
+}
+
+// dropLayouts сбрасывает кэш раскладок: его ключ не учитывает DPI.
+func (ts *textShaper) dropLayouts() {
+	ts.mu.Lock()
+	ts.layouts = nil
+	ts.mu.Unlock()
 }
 
 // layout возвращает кэшированный (или строит новый) layout строки.
@@ -386,7 +394,7 @@ func rasterizeGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6) *gl
 	minX, minY := floorF32(x0), floorF32(y0)
 	w := ceilF32(x1) - minX + 1
 	h := ceilF32(y1) - minY + 1
-	if w <= 0 || h <= 0 || w > 4096 || h > 4096 {
+	if !glyphBudgetOK(w, h) {
 		return &glyphMask{}
 	}
 

@@ -7,12 +7,30 @@ package widget
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
 	"strconv"
 	"strings"
 )
+
+// ─── Предел вложенности (SEC-7) ─────────────────────────────────────────────
+
+// maxXAMLDepth — предельная глубина вложенности XAML-элементов.
+//
+// Разбор XML в xElement, пред-обработка ресурсов и построение виджетов —
+// рекурсивные обходы. Файл вида «<a><a><a>…» глубиной в сотни тысяч уровней
+// исчерпывал стек горутины и ронял процесс целиком: переполнение стека в Go
+// не восстанавливается через recover, это фатальная ошибка рантайма.
+//
+// 256 — с многократным запасом над любой осмысленной вёрсткой (реальные окна
+// редко глубже 15–20 уровней), но заведомо безопасно по стеку: ~256 кадров
+// парсера/билдера укладываются в стартовый стек горутины.
+const maxXAMLDepth = 256
+
+// ErrXAMLTooDeep — разметка вложена глубже maxXAMLDepth.
+var ErrXAMLTooDeep = errors.New("xaml: превышена предельная вложенность элементов")
 
 // ─── Внутреннее дерево XAML ─────────────────────────────────────────────────
 
@@ -89,7 +107,7 @@ func parseXAML(data []byte) (*xElement, error) {
 		}
 		if start, ok := tok.(xml.StartElement); ok {
 			var root xElement
-			if err := parseXAMLEl(d, start, &root); err != nil {
+			if err := parseXAMLEl(d, start, &root, 0); err != nil {
 				return nil, err
 			}
 			return &root, nil
@@ -97,7 +115,13 @@ func parseXAML(data []byte) (*xElement, error) {
 	}
 }
 
-func parseXAMLEl(d *xml.Decoder, start xml.StartElement, el *xElement) error {
+// parseXAMLEl разбирает один элемент и его потомков. depth — текущая глубина
+// вложенности (0 у корня); превышение maxXAMLDepth прерывает разбор ошибкой,
+// не давая рекурсии исчерпать стек (SEC-7).
+func parseXAMLEl(d *xml.Decoder, start xml.StartElement, el *xElement, depth int) error {
+	if depth > maxXAMLDepth {
+		return fmt.Errorf("%w (%d): <%s>", ErrXAMLTooDeep, maxXAMLDepth, start.Name.Local)
+	}
 	el.Tag = start.Name.Local
 	el.attrs = make(map[string]string, len(start.Attr)*2)
 	for _, a := range start.Attr {
@@ -115,7 +139,7 @@ func parseXAMLEl(d *xml.Decoder, start xml.StartElement, el *xElement) error {
 		switch t := tok.(type) {
 		case xml.StartElement:
 			var child xElement
-			if err := parseXAMLEl(d, t, &child); err != nil {
+			if err := parseXAMLEl(d, t, &child, depth+1); err != nil {
 				return err
 			}
 			el.Children = append(el.Children, child)

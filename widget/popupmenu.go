@@ -28,17 +28,22 @@ type PopupMenu struct {
 	mu    sync.RWMutex
 	items []MenuItem
 
-	// Положение popup (абсолютные координаты).
+	// Положение popup (абсолютные координаты) и каскадное дочернее подменю.
+	// Пишутся из обработчиков событий (Show/openChild/closeChild), читаются
+	// рендер-горутиной (DrawOverlay/OverlayBounds) — под отдельным geoMu, чтобы
+	// не смешивать с m.mu (items) и не ловить гонку по memory model (SEC-18).
+	// Порядок захвата: m.mu → geoMu (никогда наоборот).
+	geoMu          sync.Mutex
 	popupX, popupY int
 	popupW, popupH int
 
 	open     int32 // 1 — показано, 0 — скрыто (атомарно)
 	hoverIdx int32 // индекс пункта под курсором (-1 = нет)
 
-	// Каскадное дочернее подменю.
-	child        *PopupMenu // текущее открытое вложенное подменю
-	childForIdx  int        // индекс пункта, для которого открыт child (-1 = нет)
-	parent       *PopupMenu // родительское меню (nil для корневого)
+	// Каскадное дочернее подменю (под geoMu).
+	child       *PopupMenu // текущее открытое вложенное подменю
+	childForIdx int        // индекс пункта, для которого открыт child (-1 = нет)
+	parent      *PopupMenu // родительское меню (nil для корневого)
 
 	// Стиль.
 	Background     color.RGBA
@@ -50,11 +55,11 @@ type PopupMenu struct {
 	SeparatorColor color.RGBA
 	ShadowColor    color.RGBA
 
-	ItemHeight    int // высота обычного пункта (по умолчанию 30)
-	SeparatorH    int // высота разделителя (по умолчанию 9)
-	PaddingX      int // горизонтальный отступ текста
-	MinWidth      int // минимальная ширина меню
-	ArrowPadding  int // отступ для стрелки ► справа
+	ItemHeight   int // высота обычного пункта (по умолчанию 30)
+	SeparatorH   int // высота разделителя (по умолчанию 9)
+	PaddingX     int // горизонтальный отступ текста
+	MinWidth     int // минимальная ширина меню
+	ArrowPadding int // отступ для стрелки ► справа
 
 	// OnSelect вызывается при выборе пункта (index, text).
 	OnSelect func(index int, text string)
@@ -220,10 +225,12 @@ func (m *PopupMenu) Show(x, y int) {
 		}
 	}
 
+	m.geoMu.Lock()
 	m.popupX = x
 	m.popupY = y
 	m.popupW = w
 	m.popupH = h
+	m.geoMu.Unlock()
 	atomic.StoreInt32(&m.hoverIdx, -1)
 	atomic.StoreInt32(&m.open, 1)
 	notifyUIChanged() // появление overlay-меню (вне bounds виджета)
@@ -268,11 +275,34 @@ func (m *PopupMenu) setHoverIdx(idx int) {
 
 // closeChild закрывает дочернее подменю, если открыто.
 func (m *PopupMenu) closeChild() {
-	if m.child != nil && m.child.IsOpen() {
-		m.child.Close()
-	}
+	m.geoMu.Lock()
+	c := m.child
 	m.child = nil
 	m.childForIdx = -1
+	m.geoMu.Unlock()
+	if c != nil && c.IsOpen() {
+		c.Close()
+	}
+}
+
+// geo возвращает положение popup под geoMu.
+func (m *PopupMenu) geo() (x, y, w, h int) {
+	m.geoMu.Lock()
+	x, y, w, h = m.popupX, m.popupY, m.popupW, m.popupH
+	m.geoMu.Unlock()
+	return
+}
+
+// openChildOf возвращает текущее открытое дочернее подменю (nil, если его
+// нет или оно закрыто) и индекс пункта, для которого оно открыто.
+func (m *PopupMenu) openChildOf() (*PopupMenu, int) {
+	m.geoMu.Lock()
+	c, idx := m.child, m.childForIdx
+	m.geoMu.Unlock()
+	if c == nil || !c.IsOpen() {
+		return nil, idx
+	}
+	return c, idx
 }
 
 // openChild открывает каскадное подменю для пункта idx.
@@ -286,7 +316,7 @@ func (m *PopupMenu) openChild(idx int) {
 	m.mu.RUnlock()
 
 	// Если уже открыто для этого пункта — ничего не делаем.
-	if m.childForIdx == idx && m.child != nil && m.child.IsOpen() {
+	if c, cIdx := m.openChildOf(); c != nil && cIdx == idx {
 		return
 	}
 
@@ -317,22 +347,26 @@ func (m *PopupMenu) openChild(idx int) {
 	cw, _ := child.calcSize()
 	child.mu.RUnlock()
 	itemY := m.itemYForIndex(idx)
-	x := m.popupX + m.popupW - 2
+	px, _, pw, _ := m.geo()
+	x := px + pw - 2
 	// Разворот влево у правого края — только без хоста (хост позиционирует сам).
 	if sw, _ := getScreenBounds(); sw > 0 && x+cw > sw && !popupsHosted.Load() {
-		x = m.popupX - cw + 2
+		x = px - cw + 2
 	}
 	child.Show(x, itemY)
 
+	m.geoMu.Lock()
 	m.child = child
 	m.childForIdx = idx
+	m.geoMu.Unlock()
 }
 
 // itemYForIndex возвращает абсолютную Y-координату верхнего края пункта.
 func (m *PopupMenu) itemYForIndex(idx int) int {
+	_, py, _, _ := m.geo()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	y := m.popupY + 2
+	y := py + 2
 	for i, item := range m.items {
 		if i == idx {
 			return y
@@ -349,8 +383,8 @@ func (m *PopupMenu) itemYForIndex(idx int) int {
 // fullBounds возвращает объединённые bounds этого popup и всех дочерних.
 func (m *PopupMenu) fullBounds() image.Rectangle {
 	r := m.popupRect()
-	if m.child != nil && m.child.IsOpen() {
-		r = r.Union(m.child.fullBounds())
+	if c, _ := m.openChildOf(); c != nil {
+		r = r.Union(c.fullBounds())
 	}
 	return r
 }
@@ -392,7 +426,8 @@ func (m *PopupMenu) calcSize() (w, h int) {
 // itemAtY возвращает индекс пункта по Y-координатe (абсолютной).
 // Возвращает -1 если нет пункта (разделитель, за пределами).
 func (m *PopupMenu) itemAtY(y int) int {
-	curY := m.popupY + 2 // верхний padding
+	_, py, _, _ := m.geo()
+	curY := py + 2 // верхний padding
 	for i, item := range m.items {
 		var itemH int
 		if item.Separator {
@@ -413,7 +448,8 @@ func (m *PopupMenu) itemAtY(y int) int {
 
 // popupRect возвращает bounds popup-области.
 func (m *PopupMenu) popupRect() image.Rectangle {
-	return image.Rect(m.popupX, m.popupY, m.popupX+m.popupW, m.popupY+m.popupH)
+	x, y, w, h := m.geo()
+	return image.Rect(x, y, x+w, y+h)
 }
 
 // ─── Bounds (расширенные при открытии) ───────────────────────────────────────
@@ -459,8 +495,8 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 	items := m.items
 	m.mu.RUnlock()
 
-	px, py := m.popupX, m.popupY
-	pw, ph := m.popupW, m.popupH
+	px, py, pw, ph := m.geo()
+	openChild, openChildIdx := m.openChildOf()
 	hover := int(atomic.LoadInt32(&m.hoverIdx))
 
 	// Тень (2px смещение вправо-вниз).
@@ -487,7 +523,7 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 		}
 
 		// Hover-подсветка (а также подсветка пункта с открытым дочерним подменю).
-		isChildOpen := m.childForIdx == i && m.child != nil && m.child.IsOpen()
+		isChildOpen := openChild != nil && openChildIdx == i
 		hovered := (i == hover || isChildOpen) && !item.Disabled
 		if hovered {
 			ctx.FillRect(px+2, curY, pw-4, m.ItemHeight, m.HoverBG)
@@ -514,8 +550,8 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 	}
 
 	// Рекурсивно рисуем дочернее подменю.
-	if m.child != nil && m.child.IsOpen() {
-		m.child.DrawOverlay(ctx)
+	if openChild != nil {
+		openChild.DrawOverlay(ctx)
 	}
 }
 
@@ -541,10 +577,10 @@ func (m *PopupMenu) OnMouseMove(x, y int) {
 	}
 
 	// Сначала проверяем дочернее подменю.
-	if m.child != nil && m.child.IsOpen() {
-		childRect := m.child.fullBounds()
+	if c, _ := m.openChildOf(); c != nil {
+		childRect := c.fullBounds()
 		if image.Pt(x, y).In(childRect) {
-			m.child.OnMouseMove(x, y)
+			c.OnMouseMove(x, y)
 			return
 		}
 	}
@@ -584,10 +620,10 @@ func (m *PopupMenu) OnMouseButton(e MouseEvent) bool {
 	}
 
 	// Сначала проверяем дочернее подменю.
-	if m.child != nil && m.child.IsOpen() {
-		childRect := m.child.fullBounds()
+	if c, _ := m.openChildOf(); c != nil {
+		childRect := c.fullBounds()
 		if image.Pt(e.X, e.Y).In(childRect) {
-			return m.child.OnMouseButton(e)
+			return c.OnMouseButton(e)
 		}
 	}
 
@@ -660,8 +696,8 @@ func (m *PopupMenu) OnKeyEvent(e KeyEvent) {
 	}
 
 	// Если есть открытое дочернее подменю — делегируем ему.
-	if m.child != nil && m.child.IsOpen() {
-		m.child.OnKeyEvent(e)
+	if c, _ := m.openChildOf(); c != nil {
+		c.OnKeyEvent(e)
 		return
 	}
 
@@ -701,9 +737,9 @@ func (m *PopupMenu) OnKeyEvent(e KeyEvent) {
 			if hasSubItems {
 				m.openChild(hover)
 				// Устанавливаем hover на первый пункт дочернего меню.
-				if m.child != nil {
-					first := m.child.nextActiveItem(-1)
-					m.child.setHoverIdx(first)
+				if c, _ := m.openChildOf(); c != nil {
+					first := c.nextActiveItem(-1)
+					c.setHoverIdx(first)
 				}
 			}
 		}
@@ -723,9 +759,9 @@ func (m *PopupMenu) OnKeyEvent(e KeyEvent) {
 				// Если есть подменю — открываем каскад.
 				if len(item.SubItems) > 0 {
 					m.openChild(hover)
-					if m.child != nil {
-						first := m.child.nextActiveItem(-1)
-						m.child.setHoverIdx(first)
+					if c, _ := m.openChildOf(); c != nil {
+						first := c.nextActiveItem(-1)
+						c.setHoverIdx(first)
 					}
 					return
 				}

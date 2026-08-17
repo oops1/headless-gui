@@ -69,6 +69,36 @@ type TreeViewItem struct {
 	owner  *TreeView // ссылка на TreeView-владельца
 }
 
+// invalidateOwner помечает плоский список видимых узлов у TreeView-владельца
+// устаревшим. Вызывается из всех структурных мутаций узла: без этого кэш
+// visibleNodes (PERF-10) не заметил бы добавленных/удалённых потомков.
+func (item *TreeViewItem) invalidateOwner() {
+	if item.owner != nil {
+		item.owner.InvalidateLayout()
+	}
+}
+
+// SetExpanded раскрывает/сворачивает узел и помечает раскладку устаревшей.
+//
+// Предпочтительнее прямой записи в поле Expanded: та не уведомляет TreeView,
+// и после неё нужно звать TreeView.InvalidateLayout() вручную.
+func (item *TreeViewItem) SetExpanded(v bool) {
+	if item.Expanded == v {
+		return
+	}
+	if item.owner != nil {
+		// Раскрытие меняет набор видимых строк — идём тем же путём, что и
+		// клик по стрелке (лок владельца + событие).
+		if v {
+			item.owner.ExpandItem(item)
+		} else {
+			item.owner.CollapseItem(item)
+		}
+		return
+	}
+	item.Expanded = v
+}
+
 // NewItem создаёт узел с заданным заголовком.
 func NewItem(header string) *TreeViewItem {
 	return &TreeViewItem{
@@ -97,6 +127,7 @@ func (item *TreeViewItem) AddChild(child *TreeViewItem) {
 	if item.owner != nil {
 		child.setOwnerRecursive(item.owner)
 	}
+	item.invalidateOwner()
 }
 
 // InsertChild вставляет дочерний узел по индексу.
@@ -118,6 +149,7 @@ func (item *TreeViewItem) InsertChild(index int, child *TreeViewItem) {
 	if item.owner != nil {
 		child.setOwnerRecursive(item.owner)
 	}
+	item.invalidateOwner()
 }
 
 // RemoveChild удаляет дочерний узел.
@@ -127,6 +159,7 @@ func (item *TreeViewItem) RemoveChild(child *TreeViewItem) {
 			item.Children = append(item.Children[:i], item.Children[i+1:]...)
 			child.parent = nil
 			child.setOwnerRecursive(nil)
+			item.invalidateOwner()
 			return
 		}
 	}
@@ -141,6 +174,7 @@ func (item *TreeViewItem) RemoveChildAt(index int) {
 	item.Children = append(item.Children[:index], item.Children[index+1:]...)
 	child.parent = nil
 	child.setOwnerRecursive(nil)
+	item.invalidateOwner()
 }
 
 // HasChildren возвращает true, если у узла есть дочерние элементы.
@@ -165,6 +199,7 @@ func (item *TreeViewItem) ClearChildren() {
 		c.setOwnerRecursive(nil)
 	}
 	item.Children = item.Children[:0]
+	item.invalidateOwner()
 }
 
 // SetItemsSource привязывает ObservableCollection для автоматической

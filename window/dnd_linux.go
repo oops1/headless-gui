@@ -183,6 +183,23 @@ func (w *X11Window) x11ConvertSelection(selection, target, property, time uint32
 	w.x11Send(buf)
 }
 
+// propertyTooBig — заявленная длина свойства (в 4-байтовых словах) вне лимита.
+func propertyTooBig(words int) bool {
+	return words < 0 || words > maxDnDBytes/4
+}
+
+// x11Discard дочитывает и выбрасывает n байт тела ответа.
+func (w *X11Window) x11Discard(n int) {
+	buf := make([]byte, 64*1024)
+	for n > 0 {
+		k := min(n, len(buf))
+		if !w.readFull(buf[:k]) {
+			return
+		}
+		n -= k
+	}
+}
+
 // x11GetProperty читает свойство property окна window (тип AnyPropertyType).
 // del — удалить свойство после чтения. Возвращает (тип, формат в битах, данные).
 // Вызывается из горутины насоса событий: reply читается синхронно, промежуточные
@@ -220,6 +237,10 @@ func (w *X11Window) x11GetProperty(window, property uint32, del bool) (uint32, i
 			nitems := int(binary.LittleEndian.Uint32(hdr[16:20]))
 			if n == 0 {
 				return typeAtom, format, nil
+			}
+			if propertyTooBig(n) { // пир заявил неправдоподобный размер
+				w.x11Discard(n * 4)
+				return 0, 0, nil
 			}
 			raw := make([]byte, n*4)
 			if !w.readFull(raw) {

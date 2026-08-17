@@ -44,10 +44,35 @@ func (w *X11Window) AvailableLocaleCodes() []string {
 }
 
 // ActivateLocaleCode переключает раскладку X-сессии через setxkbmap.
+//
+// Код раскладки валидируется перед запуском: setxkbmap разбирает аргументы
+// сам, и строка, начинающаяся с «-», стала бы ФЛАГОМ («-option …» меняет
+// XKB-конфигурацию всей сессии). Shell тут не участвует, но аргументная
+// инъекция возможна и без него; источник кода — меню раскладок, однако
+// защита должна держаться на границе, а не на доверии к вызывающему.
+// Допускаются только имена вида «us», «ru», «de_ch», «pt_br» — латиница и
+// подчёркивание, без ведущего дефиса и прочих символов.
 func (w *X11Window) ActivateLocaleCode(code string) bool {
 	code = strings.ToLower(strings.TrimSpace(code))
-	if code == "" {
+	if !validLayoutCode(code) {
 		return false
 	}
-	return exec.Command("setxkbmap", code).Run() == nil
+	// «--» завершает разбор флагов: даже если валидация когда-нибудь ослабнет,
+	// код раскладки останется позиционным аргументом.
+	return exec.Command("setxkbmap", "--", code).Run() == nil
+}
+
+// validLayoutCode — имя раскладки XKB: 2–8 символов [a-z_], не начинается с
+// подчёркивания и не пустое.
+func validLayoutCode(code string) bool {
+	if len(code) < 2 || len(code) > 8 || code[0] == '_' {
+		return false
+	}
+	for i := 0; i < len(code); i++ {
+		c := code[i]
+		if (c < 'a' || c > 'z') && c != '_' {
+			return false
+		}
+	}
+	return true
 }

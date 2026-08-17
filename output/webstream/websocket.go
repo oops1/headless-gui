@@ -21,8 +21,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Опкоды WebSocket-кадров (RFC 6455 §5.2).
@@ -35,17 +37,49 @@ const (
 	opPong         = 0xA
 )
 
+// Коды закрытия (RFC 6455 §7.4.1).
+const (
+	closeProtocol = 1002
+	closeTooBig   = 1009
+)
+
+// Лимиты на входящие данные: события ввода крошечные.
+const (
+	maxFrameBytes   = 1 << 20
+	maxMessageBytes = 1 << 20
+)
+
 // wsGUID — константа рукопожатия из RFC 6455 §1.3.
 const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-// errWSClosed возвращается ReadMessage после кадра Close.
-var errWSClosed = errors.New("webstream: соединение закрыто")
+// Таймауты сокета по умолчанию.
+const (
+	defaultReadTimeout  = 60 * time.Second
+	defaultWriteTimeout = 10 * time.Second
+	defaultPingInterval = 20 * time.Second
+)
+
+var (
+	errWSClosed   = errors.New("webstream: соединение закрыто")
+	errWSProtocol = errors.New("webstream: нарушение протокола")
+	errWSTooBig   = errors.New("webstream: сообщение слишком большое")
+)
+
+// wsConfig — параметры рукопожатия и сокета.
+type wsConfig struct {
+	allowedOrigins []string
+	readTimeout    time.Duration
+	writeTimeout   time.Duration
+}
 
 // wsConn — серверная сторона WebSocket-соединения.
 type wsConn struct {
-	c   net.Conn
-	br  *bufio.Reader
-	wmu sync.Mutex // сериализует записи (broadcast + pong из читателя)
+	c            net.Conn
+	br           *bufio.Reader
+	readTimeout  time.Duration
+	writeTimeout time.Duration
+	wmu          sync.Mutex // сериализует записи (broadcast + pong из читателя)
+	hdr          [10]byte
 }
 
 // wsAccept вычисляет Sec-WebSocket-Accept для ключа клиента.
@@ -54,11 +88,45 @@ func wsAccept(key string) string {
 	return base64.StdEncoding.EncodeToString(h[:])
 }
 
+// originOK: пустой Origin разрешён, иначе Host или allowlist.
+func originOK(origin, host string, allowed []string) bool {
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if strings.EqualFold(u.Host, host) {
+		return true
+	}
+	for _, a := range allowed {
+		if strings.EqualFold(a, origin) || strings.EqualFold(a, u.Host) {
+			return true
+		}
+	}
+	return false
+}
+
 // upgradeWS выполняет рукопожатие RFC 6455 поверх HTTP-запроса.
-func upgradeWS(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
-	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+func upgradeWS(w http.ResponseWriter, r *http.Request, cfg wsConfig) (*wsConn, error) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return nil, errors.New("webstream: метод не GET")
+	}
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") ||
+		!strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade") {
 		http.Error(w, "websocket required", http.StatusBadRequest)
 		return nil, errors.New("webstream: не websocket-запрос")
+	}
+	if r.Header.Get("Sec-WebSocket-Version") != "13" {
+		w.Header().Set("Sec-WebSocket-Version", "13")
+		http.Error(w, "unsupported websocket version", http.StatusBadRequest)
+		return nil, errors.New("webstream: версия протокола не 13")
+	}
+	if !originOK(r.Header.Get("Origin"), r.Host, cfg.allowedOrigins) {
+		http.Error(w, "origin not allowed", http.StatusForbidden)
+		return nil, errors.New("webstream: чужой Origin")
 	}
 	key := r.Header.Get("Sec-WebSocket-Key")
 	if key == "" {
@@ -78,11 +146,17 @@ func upgradeWS(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Accept: " + wsAccept(key) + "\r\n\r\n"
+	_ = conn.SetWriteDeadline(time.Now().Add(cfg.writeTimeout))
 	if _, err := conn.Write([]byte(resp)); err != nil {
 		conn.Close()
 		return nil, err
 	}
-	return &wsConn{c: conn, br: rw.Reader}, nil
+	return &wsConn{
+		c:            conn,
+		br:           rw.Reader,
+		readTimeout:  cfg.readTimeout,
+		writeTimeout: cfg.writeTimeout,
+	}, nil
 }
 
 // ReadMessage читает следующее сообщение данных (text/binary), прозрачно
@@ -104,12 +178,17 @@ func (ws *wsConn) ReadMessage() (opcode byte, data []byte, err error) {
 		case opClose:
 			_ = ws.WriteMessage(opClose, nil)
 			return 0, nil, errWSClosed
-		case opContinuation:
-			msg = append(msg, payload...)
-		case opText, opBinary:
-			msgOp = op
+		case opContinuation, opText, opBinary:
+			if len(msg)+len(payload) > maxMessageBytes {
+				ws.writeClose(closeTooBig, "message too big")
+				return 0, nil, errWSTooBig
+			}
+			if op != opContinuation {
+				msgOp = op
+			}
 			msg = append(msg, payload...)
 		default:
+			ws.writeClose(closeProtocol, "bad opcode")
 			return 0, nil, fmt.Errorf("webstream: неизвестный опкод 0x%x", op)
 		}
 		if fin {
@@ -120,6 +199,9 @@ func (ws *wsConn) ReadMessage() (opcode byte, data []byte, err error) {
 
 // readFrame читает один кадр и снимает клиентскую маску.
 func (ws *wsConn) readFrame() (fin bool, opcode byte, payload []byte, err error) {
+	if ws.readTimeout > 0 {
+		_ = ws.c.SetReadDeadline(time.Now().Add(ws.readTimeout))
+	}
 	var hdr [2]byte
 	if _, err = io.ReadFull(ws.br, hdr[:]); err != nil {
 		return
@@ -142,26 +224,43 @@ func (ws *wsConn) readFrame() (fin bool, opcode byte, payload []byte, err error)
 		}
 		length = binary.BigEndian.Uint64(ext[:])
 	}
-	if length > 1<<20 { // события ввода крошечные; защита от мусора
-		err = fmt.Errorf("webstream: слишком большой кадр (%d)", length)
+	if opcode >= opClose && (length > 125 || !fin) {
+		ws.writeClose(closeProtocol, "bad control frame")
+		err = errWSProtocol
+		return
+	}
+	if length > maxFrameBytes {
+		ws.writeClose(closeTooBig, "frame too big")
+		err = errWSTooBig
+		return
+	}
+	if !masked { // клиент обязан маскировать (RFC 6455 §5.1)
+		// Payload дочитываем: иначе закрытие уйдёт через RST.
+		_, _ = io.CopyN(io.Discard, ws.br, int64(length))
+		ws.writeClose(closeProtocol, "unmasked frame")
+		err = errWSProtocol
 		return
 	}
 	var mask [4]byte
-	if masked {
-		if _, err = io.ReadFull(ws.br, mask[:]); err != nil {
-			return
-		}
+	if _, err = io.ReadFull(ws.br, mask[:]); err != nil {
+		return
 	}
 	payload = make([]byte, length)
 	if _, err = io.ReadFull(ws.br, payload); err != nil {
 		return
 	}
-	if masked {
-		for i := range payload {
-			payload[i] ^= mask[i%4]
-		}
+	for i := range payload {
+		payload[i] ^= mask[i%4]
 	}
 	return
+}
+
+// writeClose отправляет кадр Close с кодом и причиной.
+func (ws *wsConn) writeClose(code uint16, reason string) {
+	var b [125]byte
+	binary.BigEndian.PutUint16(b[:2], code)
+	n := 2 + copy(b[2:], reason)
+	_ = ws.WriteMessage(opClose, b[:n])
 }
 
 // WriteMessage отправляет одно сообщение (сервер не маскирует кадры).
@@ -169,8 +268,12 @@ func (ws *wsConn) WriteMessage(opcode byte, data []byte) error {
 	ws.wmu.Lock()
 	defer ws.wmu.Unlock()
 
-	hdr := make([]byte, 0, 10)
-	hdr = append(hdr, 0x80|opcode) // FIN + опкод
+	if ws.writeTimeout > 0 {
+		if err := ws.c.SetWriteDeadline(time.Now().Add(ws.writeTimeout)); err != nil {
+			return err
+		}
+	}
+	hdr := append(ws.hdr[:0], 0x80|opcode) // FIN + опкод
 	switch {
 	case len(data) < 126:
 		hdr = append(hdr, byte(len(data)))
@@ -182,10 +285,9 @@ func (ws *wsConn) WriteMessage(opcode byte, data []byte) error {
 		binary.BigEndian.PutUint64(ext[:], uint64(len(data)))
 		hdr = append(hdr, ext[:]...)
 	}
-	if _, err := ws.c.Write(hdr); err != nil {
-		return err
-	}
-	_, err := ws.c.Write(data)
+	// Заголовок и payload одной записью, не двумя.
+	bufs := net.Buffers{hdr, data}
+	_, err := bufs.WriteTo(ws.c)
 	return err
 }
 

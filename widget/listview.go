@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -43,11 +44,11 @@ type ListView struct {
 	// AutoScrollToBottom имеет приоритет над этим флагом.
 	PreserveScrollOnSetItems bool
 
-	mu       sync.Mutex
-	items    []string
-	selected int // индекс выделенного элемента (-1 = нет)
-	hoverIdx int // индекс элемента под курсором (-1 = нет)
-	scrollY  int // смещение прокрутки
+	mu         sync.Mutex
+	items      []string
+	selected   int     // индекс выделенного элемента (-1 = нет)
+	hoverIdx   int     // индекс элемента под курсором (-1 = нет)
+	scrollY    int     // смещение прокрутки
 	scrollFrac float64 // субпиксельный остаток плавной пиксельной прокрутки
 
 	// Скроллбар
@@ -717,18 +718,22 @@ func (lv *ListView) ScrollBy(delta int) {
 	}
 }
 
-// SetFocused реализует Focusable.
+// SetFocused реализует Focusable. Поле объявлено как int32 под атомарный
+// доступ: пишется из диспетчера фокуса, читается в Draw (рамка фокуса) из
+// рендер-горутины — без atomic это гонка по memory model (SEC-18).
 func (lv *ListView) SetFocused(v bool) {
+	var n int32
 	if v {
-		lv.focused = 1
-	} else {
-		lv.focused = 0
+		n = 1
+	}
+	if atomic.SwapInt32(&lv.focused, n) != n {
+		lv.Invalidate() // рамка фокуса
 	}
 }
 
 // IsFocused реализует Focusable.
 func (lv *ListView) IsFocused() bool {
-	return lv.focused == 1
+	return atomic.LoadInt32(&lv.focused) == 1
 }
 
 // ApplyTheme обновляет цвета ListView.

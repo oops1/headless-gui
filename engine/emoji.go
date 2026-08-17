@@ -16,7 +16,7 @@
 //
 // Ключевое отличие от одноцветных масок: цветной глиф блиттится «как есть»
 // (premultiplied-over), цвет текста на него не влияет; кэш — отдельный от
-// масок, по (face, GID, размер), без учёта цвета текста (см. colorGlyphFor).
+// масок, по (face, GID, размер) — плюс цвет для слоёв foreground.
 package engine
 
 import (
@@ -24,12 +24,37 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"log"
+	"sync"
 
 	tsfont "github.com/go-text/typesetting/font"
 	"github.com/go-text/typesetting/font/opentype/tables"
 	"golang.org/x/image/draw"
 	"golang.org/x/image/math/fixed"
 )
+
+// Бюджеты памяти на один цветной глиф — защита от враждебных шрифтов.
+const (
+	maxGlyphLayerPixels = 16 << 20 // суммарно по слоям глифа
+	maxColorGlyphPixels = 4 << 20  // итоговая маска/RGBA глифа
+	maxGlyphBitmapBytes = 8 << 20  // размер PNG растрового глифа
+	maxGlyphDim         = 4096     // предел стороны в пикселях
+)
+
+// budgetWarned — шрифты, по которым превышение бюджета уже залогировано.
+var budgetWarned sync.Map
+
+// warnGlyphBudget логирует превышение бюджета один раз на шрифт.
+func warnGlyphBudget(face *tsfont.Face) {
+	if _, dup := budgetWarned.LoadOrStore(face, struct{}{}); !dup {
+		log.Printf("engine: цветной глиф превысил бюджет пикселей — пропущен")
+	}
+}
+
+// glyphBudgetOK проверяет размеры итоговой маски цветного глифа.
+func glyphBudgetOK(w, h int) bool {
+	return w > 0 && h > 0 && w <= maxGlyphDim && h <= maxGlyphDim && w*h <= maxColorGlyphPixels
+}
 
 // colorGlyph — растеризованный цветной глиф эмодзи: RGBA-изображение
 // (premultiplied-alpha) и смещение левого-верхнего угла от точки отрисовки
@@ -53,10 +78,15 @@ func (ts *textShaper) faceHasColorGlyphs(face *tsfont.Face) bool {
 	return has
 }
 
+// dynColorKey — ключ глифа, зависящего от цвета текста (палитра 0xFFFF).
+type dynColorKey struct {
+	maskKey
+	col color.RGBA
+}
+
 // colorGlyphFor возвращает цветной глиф (кэшируется по face+GID+размеру) или
-// nil, если у глифа нет цветного представления. textCol используется только
-// для COLR-слоёв с палитрой 0xFFFF (foreground) — глифы с такими слоями
-// зависят от цвета текста и не кэшируются.
+// nil, если у глифа нет цветного представления. Глифы со слоями foreground
+// (палитра 0xFFFF) зависят от textCol и кэшируются отдельно, с учётом цвета.
 func (ts *textShaper) colorGlyphFor(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, textCol color.RGBA) *colorGlyph {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
@@ -67,9 +97,19 @@ func (ts *textShaper) colorGlyphFor(face *tsfont.Face, gid tsfont.GID, sizePx fi
 	if cg, ok := ts.colorGlyphs[key]; ok {
 		return cg
 	}
+	dynKey := dynColorKey{maskKey: key, col: textCol}
+	if cg, ok := ts.dynColorGlyphs[dynKey]; ok {
+		return cg
+	}
 	cg, dynamic := renderColorGlyph(face, gid, sizePx, textCol)
 	if dynamic {
-		return cg // зависит от цвета текста — не кэшируем
+		if ts.dynColorGlyphs == nil {
+			ts.dynColorGlyphs = make(map[dynColorKey]*colorGlyph)
+		} else if len(ts.dynColorGlyphs) >= maxDynColorGlyphs {
+			ts.dynColorGlyphs = make(map[dynColorKey]*colorGlyph, maxDynColorGlyphs/4)
+		}
+		ts.dynColorGlyphs[dynKey] = cg
+		return cg
 	}
 	if ts.colorGlyphs == nil {
 		ts.colorGlyphs = make(map[maskKey]*colorGlyph)
@@ -124,6 +164,7 @@ func renderCOLR(face *tsfont.Face, gc tsfont.GlyphColor, sizePx fixed.Int26_6, t
 	minX, minY := big, big
 	maxX, maxY := -big, -big
 	dynamic := false
+	pixels := 0
 
 	for _, layer := range layers {
 		var col color.RGBA
@@ -145,6 +186,11 @@ func renderCOLR(face *tsfont.Face, gc tsfont.GlyphColor, sizePx fixed.Int26_6, t
 			continue
 		}
 		w, h := m.mask.Rect.Dx(), m.mask.Rect.Dy()
+		pixels += w * h
+		if pixels > maxGlyphLayerPixels {
+			warnGlyphBudget(face)
+			return nil, dynamic
+		}
 		if m.offX < minX {
 			minX = m.offX
 		}
@@ -163,6 +209,10 @@ func renderCOLR(face *tsfont.Face, gc tsfont.GlyphColor, sizePx fixed.Int26_6, t
 	if len(items) == 0 || maxX <= minX || maxY <= minY {
 		return nil, dynamic
 	}
+	if !glyphBudgetOK(maxX-minX, maxY-minY) {
+		warnGlyphBudget(face)
+		return nil, dynamic
+	}
 	dst := image.NewRGBA(image.Rect(0, 0, maxX-minX, maxY-minY))
 	// Слои рисуются в порядке следования: первый — нижний.
 	for _, it := range items {
@@ -174,12 +224,8 @@ func renderCOLR(face *tsfont.Face, gc tsfont.GlyphColor, sizePx fixed.Int26_6, t
 // renderColorBitmap декодирует растровый PNG-глиф (CBDT/sbix) и масштабирует
 // под кегль. Размещение — из GlyphExtents (в font units, ppem уже выставлен).
 func renderColorBitmap(face *tsfont.Face, gid tsfont.GID, gb tsfont.GlyphBitmap, sizePx fixed.Int26_6) *colorGlyph {
-	if gb.Format != tsfont.PNG || len(gb.Data) == 0 {
+	if gb.Format != tsfont.PNG || !glyphPNGSane(gb.Data) {
 		return nil // поддерживаем только PNG (Noto Color Emoji и пр.)
-	}
-	src, err := png.Decode(bytes.NewReader(gb.Data))
-	if err != nil {
-		return nil
 	}
 	ext, ok := face.GlyphExtents(gid)
 	if !ok || ext.Width == 0 || ext.Height == 0 {
@@ -190,12 +236,28 @@ func renderColorBitmap(face *tsfont.Face, gid tsfont.GID, gb tsfont.GlyphBitmap,
 	y0 := -ext.YBearing * scale // верх глифа относительно базовой линии (ось вниз)
 	w := ceilF32(ext.Width * scale)
 	h := ceilF32(-ext.Height * scale) // ext.Height < 0 (ось вверх)
-	if w <= 0 || h <= 0 || w > 4096 || h > 4096 {
+	if !glyphBudgetOK(w, h) {
+		return nil
+	}
+	src, err := png.Decode(bytes.NewReader(gb.Data))
+	if err != nil {
 		return nil
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
 	draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Src, nil)
 	return &colorGlyph{img: dst, offX: floorF32(x0), offY: floorF32(y0)}
+}
+
+// glyphPNGSane проверяет размер данных и заголовок PNG до декодирования.
+func glyphPNGSane(data []byte) bool {
+	if len(data) == 0 || len(data) > maxGlyphBitmapBytes {
+		return false
+	}
+	cfg, err := png.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return false
+	}
+	return glyphBudgetOK(cfg.Width, cfg.Height)
 }
 
 // premulColor переводит straight-alpha RGBA в premultiplied.

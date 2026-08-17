@@ -138,11 +138,11 @@ func (w *Win32Window) setTrayIcon(icon image.Image, tooltip string) error {
 	}
 	ret, _, _ := procShellNotifyIconW.Call(msg, uintptr(unsafe.Pointer(&nid)))
 
-	// Уничтожаем прежнюю иконку после успешной замены.
-	if w.trayHIcon != 0 {
-		procDestroyIcon.Call(uintptr(w.trayHIcon))
+	keep, drop := trayIconAfterNotify(ret != 0, w.trayHIcon, hicon)
+	if drop != 0 {
+		procDestroyIcon.Call(uintptr(drop))
 	}
-	w.trayHIcon = hicon
+	w.trayHIcon = keep
 	if ret == 0 {
 		return errTrayUnsupported
 	}
@@ -150,13 +150,22 @@ func (w *Win32Window) setTrayIcon(icon image.Image, tooltip string) error {
 	return nil
 }
 
-// removeTrayIcon убирает иконку из трея.
-func (w *Win32Window) removeTrayIcon() {
-	if w.hwnd == 0 || !w.trayAdded {
-		return
+// trayIconAfterNotify выбирает, какую иконку оставить, а какую уничтожить:
+// при успехе живёт новая, при неудаче — прежняя.
+func trayIconAfterNotify(ok bool, prev, next windows.Handle) (keep, drop windows.Handle) {
+	if ok {
+		return next, prev
 	}
-	nid := w.baseNotifyData()
-	procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&nid)))
+	return prev, next
+}
+
+// removeTrayIcon убирает иконку из трея. HICON уничтожается всегда, даже если
+// иконка так и не была добавлена.
+func (w *Win32Window) removeTrayIcon() {
+	if w.hwnd != 0 && w.trayAdded {
+		nid := w.baseNotifyData()
+		procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&nid)))
+	}
 	if w.trayHIcon != 0 {
 		procDestroyIcon.Call(uintptr(w.trayHIcon))
 		w.trayHIcon = 0
@@ -246,7 +255,7 @@ func (w *Win32Window) handlePrintClient(hdc uintptr) {
 		BmiHeader: bitmapInfoHeader{
 			BiSize:        uint32(unsafe.Sizeof(bitmapInfoHeader{})),
 			BiWidth:       int32(w.bufW),
-			BiHeight:      int32(w.bufH), // positive = bottom-up (буфер перевёрнут)
+			BiHeight:      -int32(w.bufH), // negative = top-down (буфер не перевёрнут)
 			BiPlanes:      1,
 			BiBitCount:    32,
 			BiCompression: biRgb,
@@ -389,7 +398,7 @@ func rgbaToHICON(img *image.RGBA) windows.Handle {
 }
 
 // frameToRGBA собирает top-down premultiplied RGBA из кэша кадра (frameBuf —
-// bottom-up BGRA). nil, если кадра ещё нет.
+// top-down BGRA, см. PERF-2 в native_windows.go). nil, если кадра ещё нет.
 func (w *Win32Window) frameToRGBA() *image.RGBA {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -399,7 +408,7 @@ func (w *Win32Window) frameToRGBA() *image.RGBA {
 	cw, ch := w.bufW, w.bufH
 	img := image.NewRGBA(image.Rect(0, 0, cw, ch))
 	for y := 0; y < ch; y++ {
-		srcRow := (ch - 1 - y) * cw * 4 // frameBuf перевёрнут по Y
+		srcRow := y * cw * 4 // frameBuf top-down: порядок строк совпадает
 		for x := 0; x < cw; x++ {
 			si := srcRow + x*4
 			di := img.PixOffset(x, y)

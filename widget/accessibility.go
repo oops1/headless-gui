@@ -56,6 +56,7 @@ const (
 	StateExpanded = "expanded"
 	StateModal    = "modal"
 	StateInactive = "inactive" // окно без фокуса ОС
+	StatePassword = "password" // значение скрыто
 )
 
 // AccessInfo — семантическое описание одного элемента.
@@ -163,7 +164,11 @@ func accessInfoFor(w Widget) AccessInfo {
 		info.Value = fmt.Sprintf("%g", t.Value())
 	case *TextInput:
 		info.Role = RoleTextInput
-		info.Value = t.GetText()
+		if t.IsPasswordMode() {
+			info.States = append(info.States, StatePassword)
+		} else {
+			info.Value = t.GetText()
+		}
 	case *TextBox:
 		info.Role = RoleTextInput
 		info.Value = t.GetText()

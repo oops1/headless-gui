@@ -49,6 +49,10 @@ type X11Window struct {
 	// блиты из framePump и из Expose-обработчика (event loop).
 	blitBuf []byte
 	blitMu  sync.Mutex
+	// putBuf — переиспользуемый буфер тела запроса PutImage (одна полоса
+	// ≤ 256 КБ); раньше выделялся на каждую полосу каждого кадра (PERF-14).
+	// Защищён blitMu вместе с blitBuf.
+	putBuf []byte
 
 	// shm — состояние MIT-SHM (см. x11shm.go): блит через разделяемую память
 	// вместо PutImage по сокету, с фолбэком на PutImage. nil до инициализации
@@ -747,17 +751,11 @@ func (w *X11Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 
 	src := img.Pix
 	stride := img.Stride
+	rowLen := dw * 4
 	for y := 0; y < dh; y++ {
 		srcOff := (dirty.Min.Y+y)*stride + dirty.Min.X*4
-		dstOff := y * dw * 4
-		for x := 0; x < dw; x++ {
-			si := srcOff + x*4
-			di := dstOff + x*4
-			data[di+0] = src[si+2] // B
-			data[di+1] = src[si+1] // G
-			data[di+2] = src[si+0] // R
-			data[di+3] = src[si+3] // A
-		}
+		dstOff := y * rowLen
+		swapRBRow(data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
 	}
 
 	w.x11PutImage(w.wid, w.gcID, dirty.Min.X, dirty.Min.Y, dw, dh, data)
@@ -1156,7 +1154,25 @@ func (w *X11Window) x11PutImage(drawable, gc uint32, dstX, dstY, width, height i
 	// PutImage opcode=72
 	// Для больших изображений отправляем полосами (X11 max request = 262140 bytes)
 	maxDataPerReq := 262140 - 24 // оставляем место для заголовка
+	// Поля запроса 16-битные: ширина/высота/координаты за пределами uint16
+	// в протоколе невыразимы (и на практике недостижимы — окно X11 ≤ 32767).
+	// Клэмпим явно, чтобы усечение не превратилось в мусорный запрос.
+	if width <= 0 || height <= 0 {
+		return
+	}
+	if width > 65535 {
+		width = 65535
+	}
+	if height > 65535 {
+		height = 65535
+	}
 	rowBytes := width * 4
+	if len(data) < rowBytes*height {
+		height = len(data) / rowBytes
+		if height <= 0 {
+			return
+		}
+	}
 	maxRows := maxDataPerReq / rowBytes
 	if maxRows < 1 {
 		maxRows = 1
@@ -1172,7 +1188,13 @@ func (w *X11Window) x11PutImage(drawable, gc uint32, dstX, dstY, width, height i
 		pad := (4 - dataLen%4) % 4
 		reqLen := 6 + (dataLen+pad)/4
 
-		buf := make([]byte, reqLen*4)
+		// Тело запроса — из переиспользуемого буфера: conn.Write копирует
+		// данные синхронно, после возврата x11Send буфер свободен.
+		need := reqLen * 4
+		if cap(w.putBuf) < need {
+			w.putBuf = make([]byte, need)
+		}
+		buf := w.putBuf[:need]
 		buf[0] = 72 // PutImage
 		buf[1] = 2  // ZPixmap format
 		binary.LittleEndian.PutUint16(buf[2:4], uint16(reqLen))
@@ -1184,10 +1206,13 @@ func (w *X11Window) x11PutImage(drawable, gc uint32, dstX, dstY, width, height i
 		binary.LittleEndian.PutUint16(buf[18:20], uint16(dstY+yOff)) // dst-y
 		buf[20] = 0                                                  // left-pad
 		buf[21] = 24                                                 // depth
-		// buf[22:24] = padding (0)
+		buf[22], buf[23] = 0, 0                                      // padding (буфер переиспользуется)
 
 		srcOff := yOff * rowBytes
 		copy(buf[24:], data[srcOff:srcOff+dataLen])
+		for i := 24 + dataLen; i < need; i++ {
+			buf[i] = 0 // выравнивание до 4 байт
+		}
 		w.x11Send(buf)
 	}
 }

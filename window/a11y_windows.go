@@ -1003,6 +1003,8 @@ func (b *uiaBridge) emitChanges(ch a11yChanges) {
 		set(&newV, node)
 		procUiaRaisePropertyChanged.Call(e.simplePtr(), uintptr(prop),
 			uintptr(unsafe.Pointer(&oldV)), uintptr(unsafe.Pointer(&newV)))
+		oldV.clear()
+		newV.clear()
 	}
 	for _, idx := range ch.NameChanged {
 		raiseProp(idx, uiaPropName, func(v *comVariant, n *a11yNode) { v.setString(n.Info.Name) })
@@ -1055,7 +1057,7 @@ func (b *uiaBridge) fillProperty(id int32, prop int32, out *comVariant) {
 	case uiaPropIsOffscreen:
 		out.setBool(false)
 	case uiaPropIsPassword:
-		out.setBool(false)
+		out.setBool(a11yHasState(node.Info.States, widget.StatePassword))
 	case uiaPropValueValue:
 		out.setString(node.Info.Value)
 	case uiaPropNativeWindowHandle:

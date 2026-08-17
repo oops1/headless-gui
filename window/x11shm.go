@@ -213,17 +213,12 @@ func (w *X11Window) x11ShmBlit(img *image.RGBA, dirty image.Rectangle) bool {
 	stride := shm.width
 	src := img.Pix
 	srcStride := img.Stride
+	rowLen := dw * 4
 	for y := 0; y < dh; y++ {
 		srcOff := (dirty.Min.Y+y)*srcStride + dirty.Min.X*4
 		dstOff := ((dirty.Min.Y+y)*stride + dirty.Min.X) * 4
-		for x := 0; x < dw; x++ {
-			si := srcOff + x*4
-			di := dstOff + x*4
-			shm.data[di+0] = src[si+2] // B
-			shm.data[di+1] = src[si+1] // G
-			shm.data[di+2] = src[si+0] // R
-			shm.data[di+3] = src[si+3] // A
-		}
+		// RGBA → BGRA построчным 32-битным swap'ом (см. pixconv.go).
+		swapRBRow(shm.data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
 	}
 
 	req := x11ShmPutImageRequest(shm.major, w.wid, w.gcID,

@@ -92,7 +92,8 @@ func (pctConv) Convert(v interface{}) interface{} {
 func (pctConv) ConvertBack(v interface{}) interface{} { return v }
 
 func main() {
-	addr := flag.String("addr", ":8091", "адрес HTTP-сервера")
+	addr := flag.String("addr", "127.0.0.1:8091", "адрес HTTP-сервера")
+	token := flag.String("token", "", "токен доступа: ?token=… или Bearer (пусто — без проверки)")
 	xamlPath := flag.String("xaml", "./assets/ui/showcase.xaml", "путь к разметке витрины")
 	lang := flag.String("lang", "RU", "язык интерфейса: RU или EN")
 	theme := flag.String("theme", "", "тема оформления (Win10 Dark, Win11 Light, Win2000, macOS…)")
@@ -107,12 +108,21 @@ func main() {
 	}
 
 	app.eng.Start()
-	srv := webstream.New(app.eng)
+	srv := webstream.NewWithOptions(app.eng, webstream.Options{Token: *token})
 	go srv.Run()
 	go app.tick()
 
-	log.Printf("webshowcase: http://localhost%s — витрина целиком, окон ОС не открыто", *addr)
-	log.Fatal(http.ListenAndServe(*addr, srv))
+	hs := &http.Server{
+		Addr:              *addr,
+		Handler:           srv,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		// WriteTimeout нельзя: стрим живёт долго.
+	}
+	log.Printf("webshowcase: витрина целиком, окон ОС не открыто")
+	webstream.LogListen(*addr, *token)
+	log.Fatal(hs.ListenAndServe())
 }
 
 // buildShowcase собирает витрину: движок, разметку, модель и обработчики.

@@ -81,6 +81,30 @@ type CellDrawContext struct {
 	TextColor color.RGBA
 	// FontSize — размер шрифта.
 	FontSize float64
+
+	// CachedText — заранее вычисленное значение ячейки (GetCellValue),
+	// действительно только при HasCachedText. DataGrid считает его один раз
+	// и держит в кэше видимого окна (PERF-3): без этого каждая ячейка на
+	// каждом кадре повторяла reflect-обход пути привязки и fmt.Sprintf,
+	// а чекбокс-колонка делала это дважды.
+	CachedText string
+	// HasCachedText сообщает, что CachedText заполнен.
+	HasCachedText bool
+}
+
+// cachedTextColumn — колонка, для которой DataGrid готовит CachedText.
+// Реализуется через ColumnBase.UsesCachedText: текст готовится только для
+// колонок с привязкой, шаблонные колонки рисуют себя сами.
+type cachedTextColumn interface {
+	UsesCachedText() bool
+}
+
+// cellValue возвращает текст ячейки, предпочитая заранее вычисленный.
+func (cdc *CellDrawContext) cellValue(c Column) string {
+	if cdc.HasCachedText {
+		return cdc.CachedText
+	}
+	return c.GetCellValue(cdc.Item)
 }
 
 // ─── DrawContextBridge ─────────────────────────────────────────────────────
@@ -212,6 +236,12 @@ func (c *ColumnBase) ResetReadOnly() {
 // на колонке явно (через SetReadOnly). DataGrid.beginEdit использует
 // это для решения «брать значение колонки или наследовать от грида».
 func (c *ColumnBase) IsReadOnlyExplicit() bool { return c.readOnlyExplicit }
+
+// UsesCachedText сообщает DataGrid, что колонке нужен текст ячейки
+// (GetCellValue) — значит, его стоит посчитать один раз и закэшировать.
+// Колонка без привязки рисует себя сама, считать нечего.
+func (c *ColumnBase) UsesCachedText() bool { return c.binding != nil }
+
 func (c *ColumnBase) SetSortPath(path string)          { c.sortPath = path }
 func (c *ColumnBase) SetMinWidth(px int)               { c.minWidth = px }
 func (c *ColumnBase) SetMaxWidth(px int)               { c.maxWidth = px }
@@ -247,7 +277,7 @@ func NewTextColumn(header string, bindingPath string) *DataGridTextColumn {
 // DrawCell рисует текстовую ячейку.
 func (c *DataGridTextColumn) DrawCell(cdc CellDrawContext) {
 	r := cdc.Rect
-	text := c.GetCellValue(cdc.Item)
+	text := cdc.cellValue(c)
 	if text == "" {
 		return
 	}
@@ -277,6 +307,9 @@ func NewCheckBoxColumn(header string, bindingPath string) *DataGridCheckBoxColum
 
 // GetCellValue возвращает "true" или "false".
 func (c *DataGridCheckBoxColumn) GetCellValue(item interface{}) string {
+	if c.binding == nil {
+		return "false"
+	}
 	val, ok := GetPropertyValue(item, c.binding.Path)
 	if !ok {
 		return "false"
@@ -289,7 +322,7 @@ func (c *DataGridCheckBoxColumn) GetCellValue(item interface{}) string {
 
 // SetCellValue переключает bool в модели.
 func (c *DataGridCheckBoxColumn) SetCellValue(item interface{}, value string) bool {
-	if c.readOnly {
+	if c.readOnly || c.binding == nil {
 		return false
 	}
 	return SetPropertyValue(item, c.binding.Path, value == "true")
@@ -309,8 +342,9 @@ func (c *DataGridCheckBoxColumn) DrawCell(cdc CellDrawContext) {
 	cdc.DrawCtx.FillRect(cx, cy, boxSize, boxSize, bgColor)
 	cdc.DrawCtx.DrawBorder(cx, cy, boxSize, boxSize, color.RGBA{R: 100, G: 100, B: 100, A: 255})
 
-	// Галочка
-	checked := c.GetCellValue(cdc.Item) == "true"
+	// Галочка. PERF-3: значение берём из подготовленного текста — раньше
+	// GetCellValue вызывался здесь ВТОРОЙ раз за ту же ячейку.
+	checked := cdc.cellValue(c) == "true"
 	if checked {
 		// Рисуем ✓ — две линии
 		checkColor := color.RGBA{R: 0, G: 200, B: 100, A: 255}
@@ -344,6 +378,10 @@ func NewTemplateColumn(header string, renderer CellRenderer) *DataGridTemplateCo
 	col.width = StarWidth(1)
 	return col
 }
+
+// UsesCachedText — шаблонная колонка рисует ячейку сама, готовить для неё
+// текст незачем даже при заданной привязке.
+func (c *DataGridTemplateColumn) UsesCachedText() bool { return false }
 
 // DrawCell вызывает пользовательский шаблон.
 func (c *DataGridTemplateColumn) DrawCell(cdc CellDrawContext) {

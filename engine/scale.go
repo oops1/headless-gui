@@ -93,7 +93,7 @@ func (c *Canvas) cloneForSize(w, h int, scale float64, bgSrc image.Image) *Canva
 }
 
 // setDPIAll задаёт DPI всем шрифтам канваса (default, именованные, fallback)
-// и сбрасывает их кэши глифов/метрик. Вызывается при смене DPI или масштаба.
+// и сбрасывает кэши глифов, метрик и раскладок шейпера.
 func (c *Canvas) setDPIAll(dpi float64) {
 	c.fontCache.SetDPI(dpi)
 	for _, fc := range c.namedFonts {
@@ -102,4 +102,5 @@ func (c *Canvas) setDPIAll(dpi float64) {
 	for _, fb := range c.fallbacks {
 		fb.SetDPI(dpi)
 	}
+	c.shaper.dropLayouts()
 }

@@ -19,9 +19,13 @@ import (
 // comCall вызывает метод COM-объекта по номеру слота в vtable — ровно так, как
 // это делает клиент UIA. Проверяет не только логику провайдера, но и саму
 // раскладку таблицы: перепутанный слот виден сразу.
+//
+// Объекты тестов живут в Go-куче — checkptr здесь неприменим.
+//
+//go:nocheckptr
 func comCall(iface uintptr, slot int, args ...uintptr) uintptr {
-	vtbl := *(*uintptr)(unsafe.Pointer(iface))
-	fn := *(*uintptr)(unsafe.Pointer(vtbl + uintptr(slot)*unsafe.Sizeof(uintptr(0))))
+	vtbl := *(*unsafe.Pointer)(unsafe.Pointer(iface))
+	fn := *(*uintptr)(unsafe.Add(vtbl, slot*int(unsafe.Sizeof(uintptr(0)))))
 	all := append([]uintptr{iface}, args...)
 	r, _, _ := syscall.SyscallN(fn, all...)
 	return r
@@ -54,13 +58,14 @@ const (
 )
 
 var (
-	procSysFreeString        = oleaut32.NewProc("SysFreeString")
 	procSafeArrayGetElement  = oleaut32.NewProc("SafeArrayGetElement")
 	procSafeArrayGetUBound   = oleaut32.NewProc("SafeArrayGetUBound")
 	procSafeArrayDestroyTest = oleaut32.NewProc("SafeArrayDestroy")
 )
 
 // variantString читает BSTR из VARIANT и освобождает его.
+//
+//go:nocheckptr
 func variantString(t *testing.T, v *comVariant) string {
 	t.Helper()
 	if v.vt != vtBSTR {
@@ -653,5 +658,56 @@ func TestUIAScaledBounds(t *testing.T) {
 	comCall(e.fragmentPtr(), slotBoundingRectangle, uintptr(unsafe.Pointer(&rc)))
 	if rc.left != 15 || rc.top != 15 || rc.width != 165 || rc.height != 45 {
 		t.Errorf("границы при scale=1.5: %+v, want 15,15 165x45", rc)
+	}
+}
+
+// TestUIAPasswordHidden — пароль не отдаётся UIA, IsPassword=true.
+func TestUIAPasswordHidden(t *testing.T) {
+	eng := engine.New(200, 100, 20)
+	root := widget.NewWindow("T", 200, 100)
+	ti := widget.NewTextInput("")
+	ti.SetBounds(image.Rect(0, 40, 150, 70))
+	ti.SetPasswordMode(true)
+	ti.SetText("hunter2")
+	root.AddChild(ti)
+	eng.SetRoot(root)
+
+	win := New(eng, "T")
+	win.scale = 1
+	b := &uiaBridge{win: win, elems: map[int32]*uiaElement{}}
+	b.refresh(true)
+	t.Cleanup(func() {
+		for _, e := range b.elems {
+			e.forget()
+		}
+	})
+
+	v := b.current()
+	e := b.element(v.id(1))
+	if e == nil {
+		t.Fatal("элемент поля не создан")
+	}
+	var out comVariant
+	comCall(e.simplePtr(), slotPropertyValue, uiaPropIsPassword, uintptr(unsafe.Pointer(&out)))
+	if out.vt != vtBool || out.val[0] == 0 {
+		t.Errorf("IsPassword: vt=%d val=%d, ожидалось TRUE", out.vt, out.val[0])
+	}
+	comCall(e.simplePtr(), slotPropertyValue, uiaPropValueValue, uintptr(unsafe.Pointer(&out)))
+	if out.vt == vtBSTR {
+		if s := variantString(t, &out); s != "" {
+			t.Errorf("Value раскрывает пароль: %q", s)
+		}
+	}
+	if snap := eng.AccessibilityTree(); snap != nil {
+		var walk func(n *widget.AccessNode)
+		walk = func(n *widget.AccessNode) {
+			if n.Value == "hunter2" {
+				t.Error("пароль в семантическом дереве")
+			}
+			for _, c := range n.Children {
+				walk(c)
+			}
+		}
+		walk(snap)
 	}
 }

@@ -73,9 +73,8 @@ func (tv *TreeView) OnMouseButton(x, y int, button, pressed int) bool {
 	// ── Клик по стрелке → toggle expand ─────────────────────────────────
 	arrowX := b.Min.X + 6 + fi.depth*tv.indentW()
 	if x >= arrowX && x < arrowX+arrowZone && item.HasChildren() {
-		tv.ToggleExpand(item)
-		tv.dirty = true
-		tv.markFullDirty() // набор видимых строк изменился
+		tv.ToggleExpand(item) // сам помечает flat-кэш устаревшим
+		tv.markFullDirty()    // набор видимых строк изменился
 		return true
 	}
 
