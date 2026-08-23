@@ -107,6 +107,36 @@ func (c *Canvas) AddChildAt(w Widget, props CanvasAttached, desiredW, desiredH i
 	c.layoutChild(len(c.children) - 1)
 }
 
+// RemoveChild удаляет дочерний виджет вместе с его childInfo,
+// чтобы attached-свойства остальных детей не сместились по индексам.
+func (c *Canvas) RemoveChild(w Widget) bool {
+	for i, child := range c.children {
+		if child == w {
+			if i < len(c.childInfos) {
+				c.childInfos = append(c.childInfos[:i], c.childInfos[i+1:]...)
+			}
+			return c.Base.RemoveChild(w)
+		}
+	}
+	return false
+}
+
+// ClearChildren удаляет всех потомков и их childInfos.
+func (c *Canvas) ClearChildren() {
+	c.childInfos = nil
+	c.Base.ClearChildren()
+}
+
+// SetChildDesiredSize задаёт желаемый размер дочернего виджета и перекладывает его.
+func (c *Canvas) SetChildDesiredSize(idx, w, h int) {
+	if idx < 0 || idx >= len(c.childInfos) {
+		return
+	}
+	c.childInfos[idx].DesiredW = w
+	c.childInfos[idx].DesiredH = h
+	c.layoutChild(idx)
+}
+
 // SetChildCanvasProps задаёт Canvas attached properties для дочернего виджета по индексу.
 func (c *Canvas) SetChildCanvasProps(idx int, props CanvasAttached) {
 	if idx < 0 || idx >= len(c.childInfos) {
