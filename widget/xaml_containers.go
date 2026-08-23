@@ -732,6 +732,14 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 			idx := tc.TabCount()
 			tc.AddTab(text, content)
 			registerLocItem(key, func(s string) { tc.SetTabHeader(idx, s) })
+			if tip := child.attr("ToolTip", "Tooltip"); tip != "" {
+				tipText, tipKey := locItemText(tip)
+				tc.SetTabToolTip(idx, tipText)
+				registerLocItem(tipKey, func(s string) { tc.SetTabToolTip(idx, s) })
+			}
+			if sep := child.attr("SeparatorBefore"); strings.EqualFold(sep, "true") || sep == "1" {
+				tc.SetTabSeparator(idx, true)
+			}
 		} else if !strings.Contains(childTag, ".") {
 			// Обычные дочерние виджеты (не TabItem)
 			cw, err := buildXAMLWidgetAt(child, reg, contentOff, baseDir, depth+1)
