@@ -207,19 +207,18 @@ func main() {
 		}
 	}
 
-	// Переключение темы
-	var darkMode = true
+	// Переключение темы — по кругу через ВСЕ преднастроенные темы.
+	themeNames := widget.ThemeNames()
+	themeIdx := 0
 	if btn, ok := registry["btnThemeToggle"].(*widget.Button); ok {
 		btn.OnClick = func() {
-			darkMode = !darkMode
-			if darkMode {
-				eng.SetTheme(widget.DarkTheme())
-				btn.Text = "Светлая тема"
-			} else {
-				eng.SetTheme(widget.LightTheme())
-				btn.Text = "Тёмная тема"
+			themeIdx = (themeIdx + 1) % len(themeNames)
+			name := themeNames[themeIdx]
+			if t := widget.ThemeByName(name); t != nil {
+				eng.SetTheme(t)
+				btn.Text = "Тема: " + name
+				logEvent(eventLog, "Тема: %s", name)
 			}
-			logEvent(eventLog, "Тема: dark=%v", darkMode)
 		}
 	}
 

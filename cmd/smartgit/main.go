@@ -139,14 +139,14 @@ func main() {
 		menu.OnSelect = func(topIdx, subIdx int, text string) {
 			log.Printf("Menu: [%d][%d] %s", topIdx, subIdx, text)
 
+			// ── Тема (любая из преднастроенных, включая алиасы) ─────
+			if t := widget.ThemeByName(text); t != nil {
+				eng.SetTheme(t)
+				log.Println("Theme: " + text)
+				return
+			}
+
 			switch text {
-			// ── Тема ────────────────────────────────────────────────
-			case "Dark":
-				eng.SetTheme(widget.DarkTheme())
-				log.Println("Theme: Dark")
-			case "Light":
-				eng.SetTheme(widget.LightTheme())
-				log.Println("Theme: Light")
 
 			// ── Стиль заголовка ─────────────────────────────────────
 			case "Windows Style":
