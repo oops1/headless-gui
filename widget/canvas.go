@@ -359,7 +359,7 @@ func shiftDescendants(w Widget, dx, dy int) {
 // «чинила» его следующим updateVisible.
 func HasOwnLayout(w Widget) bool {
 	switch w.(type) {
-	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager, *VirtualizingItemsControl:
+	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager, *VirtualizingItemsControl, *Panel:
 		return true
 	}
 	return false
