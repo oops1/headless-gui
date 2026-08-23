@@ -3,6 +3,7 @@ package widget
 import (
 	"image"
 	"image/color"
+	"sync"
 )
 
 // HorizontalAlignment — WPF HorizontalAlignment (позиционирование внутри родителя).
@@ -44,6 +45,10 @@ type Margin struct {
 // Base — общие поля и тривиальные реализации интерфейса Widget.
 // Встраивается во все конкретные виджеты.
 type Base struct {
+	// boundsMu защищает bounds: Invalidate/Bounds можно звать из рабочих
+	// горутин (виджет, перерисовывающийся из фонового потока), пока
+	// layout-проход меняет bounds через SetBounds.
+	boundsMu sync.Mutex
 	bounds   image.Rectangle
 	children []Widget
 
@@ -101,18 +106,26 @@ type Base struct {
 	hasCursorOverride bool
 }
 
-func (b *Base) Bounds() image.Rectangle { return b.bounds }
+func (b *Base) Bounds() image.Rectangle {
+	b.boundsMu.Lock()
+	defer b.boundsMu.Unlock()
+	return b.bounds
+}
 
 // SetBounds задаёт границы виджета. Если границы фактически изменились —
 // инвалидируется объединение старой и новой области (перемещение/ресайз
 // перерисовываются точечно). Повторный вызов с теми же границами — no-op,
 // поэтому layout-проходы контейнеров не порождают лишних уведомлений.
 func (b *Base) SetBounds(r image.Rectangle) {
+	b.boundsMu.Lock()
 	if r == b.bounds {
+		b.boundsMu.Unlock()
 		return
 	}
-	notifyRectChanged(b.bounds.Union(r))
+	union := b.bounds.Union(r)
 	b.bounds = r
+	b.boundsMu.Unlock()
+	notifyRectChanged(union)
 }
 
 func (b *Base) Children() []Widget { return b.children }
@@ -128,7 +141,10 @@ func (b *Base) AddChild(w Widget) {
 // визуального состояния; приложению он нужен после прямой мутации
 // экспортированных полей (btn.Text = ... → btn.Invalidate()).
 func (b *Base) Invalidate() {
-	notifyRectChanged(b.bounds)
+	b.boundsMu.Lock()
+	r := b.bounds
+	b.boundsMu.Unlock()
+	notifyRectChanged(r)
 }
 
 // RemoveChild удаляет дочерний виджет из контейнера (по указателю).
