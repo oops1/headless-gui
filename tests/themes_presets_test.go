@@ -121,3 +121,19 @@ func TestThemes_SwitchOnLiveEngine(t *testing.T) {
 	eng.SetTheme(widget.DarkTheme())
 	time.Sleep(50 * time.Millisecond)
 }
+
+// TestThemeByName_Aliases — базовые «Dark»/«Light» доступны по имени
+// (алиасы Win10 Dark/Light), реестр отдаёт все пресеты.
+func TestThemeByName_Aliases(t *testing.T) {
+	if th := widget.ThemeByName("Dark"); th == nil || th.Style.Name != "Win10 Dark" {
+		t.Errorf("ThemeByName(Dark) = %v", th)
+	}
+	if th := widget.ThemeByName("light"); th == nil || th.Style.Name != "Win10 Light" {
+		t.Errorf("ThemeByName(light) = %v", th)
+	}
+	for _, name := range widget.ThemeNames() {
+		if widget.ThemeByName(name) == nil {
+			t.Errorf("пресет %q не резолвится", name)
+		}
+	}
+}

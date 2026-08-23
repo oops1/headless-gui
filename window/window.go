@@ -108,6 +108,11 @@ func (win *Window) setupActivation() {
 // попапы и маршалинг на UI-поток, а движок принимает PopupSink. На бэкендах без
 // поддержки (Wayland/macOS) и в headless — no-op: оверлеи рисуются в холст.
 func (win *Window) installPopupHost() {
+	// ContentFit: масштаб и офсет меняются на каждом ресайзе — нативные
+	// popup-окна их не учитывают; оверлеи рисуются в холсте.
+	if win.fitMode == FitScale {
+		return
+	}
 	if _, ok := win.native.(popupWindow); !ok {
 		return
 	}
@@ -182,7 +187,29 @@ type surface struct {
 
 	// Предыдущие координаты мыши (для drag).
 	lastMX, lastMY int
+
+	// fitOX, fitOY — смещение контента в буфере окна (letterbox при
+	// ContentFit=FitScale). Пишутся под mu (resize), читаются входными
+	// колбэками того же UI-потока и applyFrame (под mu).
+	fitOX, fitOY int
 }
+
+// toContent переводит координаты окна в координаты контента (letterbox).
+func (s *surface) toContent(x, y int) (int, int) {
+	return x - s.fitOX, y - s.fitOY
+}
+
+// ContentFitMode — поведение контента при изменении размера окна.
+type ContentFitMode int
+
+const (
+	// FitNone — классика: логический холст растёт вместе с окном.
+	FitNone ContentFitMode = iota
+	// FitScale — логическое разрешение фиксировано (дизайн-размер);
+	// при ресайзе контент масштабируется с сохранением пропорций и
+	// центрируется (letterbox). Для приложений с фикс-раскладкой.
+	FitScale
+)
 
 // Window — нативное окно ОС для GUI-движка.
 //
@@ -205,6 +232,10 @@ type Window struct {
 	maxFPS       int
 	resizable    bool
 	cornerRadius int // скругление углов окна (0 = прямые); применяется после Create
+
+	// ── ContentFit (letterbox) ───────────────────────────────────────────────
+	fitMode            ContentFitMode
+	fitBaseW, fitBaseH int // логический дизайн-размер (фиксируется в Run)
 
 	// popupHost — хост popup-оверлеев (dropdown/меню в собственных окнах ОС).
 	// nil, если бэкенд не поддерживает окна-попапы (Wayland/macOS → in-canvas).
@@ -276,6 +307,19 @@ func (win *Window) SetResizable(v bool) *Window {
 	return win
 }
 
+// SetContentFit задаёт режим контента при ресайзе (см. ContentFitMode).
+// FitScale: логическое разрешение остаётся равным исходному дизайну, при
+// ресайзе движку выставляется scale = min(physW/baseW, physH/baseH), контент
+// центрируется, поля — чёрные (letterbox). Вызывать до Run(). Подразумевает
+// resizable-окно. Popup-оверлеи в этом режиме рисуются в холсте (in-canvas).
+func (win *Window) SetContentFit(m ContentFitMode) *Window {
+	win.fitMode = m
+	if m == FitScale {
+		win.resizable = true
+	}
+	return win
+}
+
 // Close программно закрывает окно: Run() вернётся, приложение завершится
 // штатно (аналог нажатия ×). Безопасно вызывать из обработчиков UI;
 // до Run() — no-op.
@@ -317,6 +361,12 @@ func (win *Window) Run() error {
 	// а widget.Window получает bounds = (0,0)-(w,h) нативного окна.
 	win.syncFromWidgetWindow()
 
+	// ContentFit: фиксируем дизайн-размер (логический) до первого ресайза.
+	if win.fitMode == FitScale {
+		win.fitBaseW, win.fitBaseH = win.w, win.h
+		win.resizable = true
+	}
+
 	// Создаём окно ФИЗИЧЕСКОГО размера (логический × scale).
 	pw, ph := win.physicalSize()
 	win.mu.Lock()
@@ -339,6 +389,9 @@ func (win *Window) Run() error {
 	// Смена DPI монитора (перенос окна) — перестраиваем масштаб и буферы.
 	if dn, ok := win.native.(dpiChangeNotifier); ok {
 		dn.SetOnDpiChanged(func(k float64) {
+			if win.fitMode == FitScale {
+				return // fit-режим сам управляет масштабом
+			}
 			sa, ok := win.eng.(engineScaler)
 			if !ok || k <= 0 || k == win.scale {
 				return
@@ -541,6 +594,10 @@ func (win *Window) setupResizeClose() {
 		if newW <= 0 || newH <= 0 {
 			return
 		}
+		if win.fitMode == FitScale {
+			win.handleFitResize(newW, newH)
+			return
+		}
 		lw, lh := newW, newH
 		if win.scale != 1 && win.scale > 0 {
 			lw = int(float64(newW)/win.scale + 0.5)
@@ -573,11 +630,57 @@ func (win *Window) setupResizeClose() {
 	})
 }
 
+// handleFitResize — ресайз в режиме FitScale: логическое разрешение
+// (дизайн-размер) не меняется, движку выставляется масштаб
+// min(physW/baseW, physH/baseH), контент центрируется в буфере окна,
+// поля заливаются чёрным (letterbox).
+func (win *Window) handleFitResize(newW, newH int) {
+	sa, ok := win.eng.(engineScaler)
+	if !ok || win.fitBaseW <= 0 || win.fitBaseH <= 0 {
+		return
+	}
+	k := float64(newW) / float64(win.fitBaseW)
+	if ky := float64(newH) / float64(win.fitBaseH); ky < k {
+		k = ky
+	}
+	if k < 0.1 {
+		k = 0.1
+	}
+	sa.SetScale(k)
+	win.scale = sa.Scale()
+
+	pw, ph := win.physicalSize()
+	ox := (newW - pw) / 2
+	if ox < 0 {
+		ox = 0
+	}
+	oy := (newH - ph) / 2
+	if oy < 0 {
+		oy = 0
+	}
+
+	win.mu.Lock()
+	buf := image.NewRGBA(image.Rect(0, 0, newW, newH))
+	// Letterbox-поля — непрозрачный чёрный.
+	for i := 3; i < len(buf.Pix); i += 4 {
+		buf.Pix[i] = 255
+	}
+	win.current = buf
+	win.fitOX, win.fitOY = ox, oy
+	win.mu.Unlock()
+
+	// Полный кадр в новом масштабе.
+	if inv, ok := win.eng.(interface{ Invalidate() }); ok {
+		inv.Invalidate()
+	}
+}
+
 // setupInput подключает проброс ввода (мышь/клавиатура/символы) от нативного
 // окна к движку. Общий для главного окна и вторичных окон модалок.
 func (s *surface) setupInput() {
 	// ── Mouse move ───────────────────────────────────────────────────────────
 	s.native.SetOnMouseMove(func(x, y int) {
+		x, y = s.toContent(x, y)
 		s.lastMX = x
 		s.lastMY = y
 		s.eng.SendMouseMove(x, y)
@@ -589,6 +692,7 @@ func (s *surface) setupInput() {
 
 	// ── Mouse buttons ────────────────────────────────────────────────────────
 	s.native.SetOnMouseButton(func(x, y, button int, pressed bool) {
+		x, y = s.toContent(x, y)
 		s.lastMX = x
 		s.lastMY = y
 
@@ -618,6 +722,7 @@ func (s *surface) setupInput() {
 		SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64))
 	}); ok {
 		pw.SetOnMouseWheelPixels(func(x, y int, dx, dy float64) {
+			x, y = s.toContent(x, y)
 			s.lastMX = x
 			s.lastMY = y
 			if we, ok := s.eng.(interface {
@@ -716,6 +821,7 @@ func (win *Window) setupFilesDrop() {
 		if len(paths) == 0 {
 			return
 		}
+		x, y = win.toContent(x, y)
 		// Проброс в движок: принимает физические пиксели.
 		if s, ok := win.eng.(interface {
 			SendFilesDropped(x, y int, paths []string)
@@ -883,17 +989,19 @@ func (s *surface) currentMod() widget.KeyMod {
 func (s *surface) applyFrame(frame output.Frame) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	ox, oy := s.fitOX, s.fitOY
 	for _, tile := range frame.Tiles {
+		tx, ty := tile.X+ox, tile.Y+oy
 		s.pendingDirty = s.pendingDirty.Union(
-			image.Rect(tile.X, tile.Y, tile.X+tile.W, tile.Y+tile.H))
+			image.Rect(tx, ty, tx+tile.W, ty+tile.H))
 		rowBytes := tile.W * 4
 		for row := 0; row < tile.H; row++ {
 			srcOff := row * rowBytes
-			dstY := tile.Y + row
+			dstY := ty + row
 			if dstY >= s.current.Bounds().Dy() {
 				break
 			}
-			dstOff := s.current.PixOffset(tile.X, dstY)
+			dstOff := s.current.PixOffset(tx, dstY)
 			dstEnd := dstOff + rowBytes
 			if dstEnd > len(s.current.Pix) {
 				break

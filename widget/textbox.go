@@ -169,6 +169,45 @@ func (t *TextBox) CaretPosition() int {
 	return t.caret
 }
 
+// SetCaretPosition ставит каретку в pos (индекс в рунах), сбрасывая выделение.
+func (t *TextBox) SetCaretPosition(pos int) {
+	t.mu.Lock()
+	t.caret = pos
+	t.clampCaret()
+	t.selAnchor = -1
+	t.desiredX = -1
+	t.ensureLayout()
+	t.ensureCaretVisible()
+	t.mu.Unlock()
+	t.Invalidate()
+}
+
+// InsertAtCaret вставляет s в позицию каретки (заменяя выделение),
+// сдвигает каретку за вставку; поддерживает Undo и вызывает OnChange.
+func (t *TextBox) InsertAtCaret(s string) {
+	if s == "" {
+		return
+	}
+	t.mu.Lock()
+	if t.ReadOnly {
+		t.mu.Unlock()
+		return
+	}
+	before := textEdit{text: string(t.runes), caret: t.caret}
+	t.insertRunes([]rune(s))
+	t.pushUndo(before)
+	t.desiredX = -1
+	t.ensureLayout()
+	t.ensureCaretVisible()
+	text := string(t.runes)
+	onCh := t.OnChange
+	t.mu.Unlock()
+	t.Invalidate()
+	if onCh != nil {
+		onCh(text)
+	}
+}
+
 // LineCount возвращает число визуальных строк при текущей ширине.
 func (t *TextBox) LineCount() int {
 	t.mu.Lock()

@@ -309,6 +309,11 @@ func (c *Canvas) FillRect(x, y, w, h int, col color.RGBA) {
 }
 
 // FillRectAlpha заливает прямоугольник с альфа-смешиванием (Over).
+//
+// ВАЖНО: col — alpha-premultiplied (модель color.RGBA в Go): R,G,B ≤ A.
+// Прямой (straight) цвет вида {R:96, G:156, B:235, A:40} даст пересвет
+// и накопление при наложении. Перевести straight → premultiplied:
+// R*A/255, G*A/255, B*A/255.
 func (c *Canvas) FillRectAlpha(x, y, w, h int, col color.RGBA) {
 	c.fillRectPx(c.sRect(image.Rect(x, y, x+w, y+h)), col, true)
 }

@@ -453,7 +453,14 @@ func ThemeNames() []string {
 
 // ThemeByName возвращает свежую копию преднастроенной темы по имени
 // (без учёта регистра) или nil, если темы с таким именем нет.
+// Алиасы: «Dark» → Win10 Dark, «Light» → Win10 Light (базовые темы).
 func ThemeByName(name string) *Theme {
+	switch {
+	case equalFoldASCII(name, "Dark"):
+		return Win10DarkTheme()
+	case equalFoldASCII(name, "Light"):
+		return Win10LightTheme()
+	}
 	for _, p := range themePresets {
 		if equalFoldASCII(p.Name, name) {
 			return p.New()

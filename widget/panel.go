@@ -290,6 +290,19 @@ func (p *Panel) drawMacHeader(ctx DrawContext, b image.Rectangle, hh int, bg, tc
 	}
 }
 
+// SetBounds перемещает панель вместе с детьми: их абсолютные координаты
+// смещаются на ту же дельту (Panel в HasOwnLayout — внешние контейнеры
+// не сдвигают детей повторно).
+func (p *Panel) SetBounds(r image.Rectangle) {
+	old := p.bounds
+	p.Base.SetBounds(r)
+	dx := r.Min.X - old.Min.X
+	dy := r.Min.Y - old.Min.Y
+	if dx != 0 || dy != 0 {
+		shiftDescendants(p, dx, dy)
+	}
+}
+
 // ContentBounds возвращает прямоугольник для размещения дочерних виджетов
 // (под заголовком, если он показан).
 func (p *Panel) ContentBounds() image.Rectangle {

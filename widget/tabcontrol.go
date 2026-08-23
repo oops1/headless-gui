@@ -11,7 +11,16 @@ type TabItem struct {
 	Header  string
 	Content Widget // корневой виджет содержимого вкладки
 	Hidden  bool   // true → вкладка скрыта из полосы заголовков (SetTabVisible)
+
+	// ToolTip — подсказка при наведении на заголовок вкладки.
+	ToolTip string
+	// SeparatorBefore — визуальный разделитель перед вкладкой
+	// (группировка вкладок в полосе).
+	SeparatorBefore bool
 }
+
+// tabSepW — ширина зазора-разделителя между группами вкладок.
+const tabSepW = 9
 
 // TabControl — виджет с вкладками в стиле Windows 10.
 //
@@ -110,6 +119,42 @@ func (tc *TabControl) TabHeader(idx int) string {
 		return tc.tabs[idx].Header
 	}
 	return ""
+}
+
+// SetTabToolTip задаёт подсказку заголовка вкладки.
+func (tc *TabControl) SetTabToolTip(idx int, tip string) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if idx >= 0 && idx < len(tc.tabs) {
+		tc.tabs[idx].ToolTip = tip
+	}
+}
+
+// SetTabSeparator включает/выключает разделитель перед вкладкой.
+func (tc *TabControl) SetTabSeparator(idx int, sep bool) {
+	tc.mu.Lock()
+	changed := false
+	if idx >= 0 && idx < len(tc.tabs) && tc.tabs[idx].SeparatorBefore != sep {
+		tc.tabs[idx].SeparatorBefore = sep
+		changed = true
+	}
+	tc.mu.Unlock()
+	if changed {
+		tc.Invalidate()
+	}
+}
+
+// GetToolTip возвращает подсказку вкладки под курсором (если задана),
+// иначе — общий ToolTip виджета. Курсор отслеживается через hoverIdx.
+func (tc *TabControl) GetToolTip() string {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if tc.hoverIdx >= 0 && tc.hoverIdx < len(tc.tabs) {
+		if tip := tc.tabs[tc.hoverIdx].ToolTip; tip != "" {
+			return tip
+		}
+	}
+	return tc.ToolTip
 }
 
 // TabContent возвращает контент вкладки idx (или nil вне диапазона).
@@ -318,12 +363,21 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 	var activeRect image.Rectangle
 	activeHeader := ""
 	tabX := b.Min.X
+	seenTab := false
 	for i, tab := range tabs {
 		// Скрытые вкладки не занимают места в полосе заголовков (ширина 0).
 		if tab.Hidden {
 			widths[i] = 0
 			continue
 		}
+		// Разделитель группы вкладок (не перед первой видимой).
+		if tab.SeparatorBefore && seenTab {
+			if !st.Classic3D {
+				ctx.DrawVLine(tabX+tabSepW/2, b.Min.Y+6, tc.TabHeight-12, tc.TabBorder)
+			}
+			tabX += tabSepW
+		}
+		seenTab = true
 		textW := ctx.MeasureText(tab.Header, DefaultFontSizePt)
 		tabW := textW + tc.TabPadH*2
 		widths[i] = tabW
@@ -471,10 +525,15 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 	clicked, changed := -1, false
 	header := ""
 	tabX := b.Min.X
+	seenTab := false
 	for i := range tc.tabs {
 		if tc.tabs[i].Hidden {
 			continue
 		}
+		if tc.tabs[i].SeparatorBefore && seenTab {
+			tabX += tabSepW
+		}
+		seenTab = true
 		tabW := tc.TabPadH*2 + 80 // fallback
 		if i < len(tc.tabWidths) {
 			tabW = tc.tabWidths[i]
@@ -527,10 +586,15 @@ func (tc *TabControl) OnMouseMove(x, y int) {
 	}
 
 	tabX := b.Min.X
+	seenTab := false
 	for i, tab := range tc.tabs {
 		if tab.Hidden {
 			continue
 		}
+		if tab.SeparatorBefore && seenTab {
+			tabX += tabSepW
+		}
+		seenTab = true
 		tabW := len(tab.Header)*8 + tc.TabPadH*2 // fallback
 		if i < len(tc.tabWidths) {
 			tabW = tc.tabWidths[i]
