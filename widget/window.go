@@ -364,6 +364,12 @@ func (w *Window) titleH() int {
 	if w.Style == WindowStyleToolWindow {
 		return 24
 	}
+	// Режим вкладок в заголовке: полоса выше (как в Windows Terminal, ~40
+	// логических px), чтобы карточки вкладок дышали. Классика Win2000 всё
+	// равно ограничена effTitleH=24 — там компактные bevel-ярлыки.
+	if w.titleTabsActive() && !currentStyle().Classic3D {
+		return 40
+	}
 	return 32
 }
 

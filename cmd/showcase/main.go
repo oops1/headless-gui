@@ -287,9 +287,10 @@ func main() {
 		newTabContent := func(name string) widget.Widget {
 			p := widget.NewPanel(color.RGBA{R: 12, G: 12, B: 12, A: 255})
 			p.ShowHeader = false
+			// Координаты относительно (0,0): SetActiveTitleTab выставит
+			// панели ContentBounds, а Panel.SetBounds сдвинет детей на дельту.
 			lbl := widget.NewLabel(`PS C:\> `+name, color.RGBA{R: 204, G: 204, B: 204, A: 255})
-			cb := tw.ContentBounds()
-			lbl.SetBounds(image.Rect(cb.Min.X+12, cb.Min.Y+10, cb.Max.X-12, cb.Min.Y+30))
+			lbl.SetBounds(image.Rect(12, 10, 400, 30))
 			p.AddChild(lbl)
 			return p
 		}

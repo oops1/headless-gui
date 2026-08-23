@@ -365,12 +365,11 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 		}
 	}
 
-	// Вертикальная геометрия по стилю.
-	tabTop, tabBot := y+4, y+th // современные: карточка «прирастает» к контенту
+	// Вертикальная геометрия по стилю: карточка занимает большую часть
+	// полосы с полями по 5px (в Terminal ~30px карточка на ~40px полосе).
+	tabTop, tabBot := y+5, y+th-5
 	if st.Classic3D {
 		tabTop, tabBot = y+2, y+th-2 // bevel-ярлыки внутри градиента
-	} else if w.resolvedTitleStyle() == WindowTitleMac {
-		tabTop, tabBot = y+4, y+th-4 // mac: скруглённая пилюля по центру
 	}
 
 	tabRects := make([]image.Rectangle, len(tabs))
@@ -414,13 +413,20 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 		if plusRect.Max.Y > tabBot {
 			plusRect.Max.Y = tabBot
 		}
-		if hoverNew {
-			if st.Classic3D {
+		tbg, _, _ := w.titleColors()
+		if st.Classic3D {
+			if hoverNew {
 				drawBevelRaised(ctx, plusRect.Min.X, plusRect.Min.Y, plusRect.Dx(), plusRect.Dy(), st)
-			} else {
-				ctx.FillRoundRect(plusRect.Min.X, plusRect.Min.Y, plusRect.Dx(), plusRect.Dy(), 4,
-					color.RGBA{R: 128, G: 128, B: 128, A: 70})
 			}
+		} else {
+			// Постоянная «пилюля» под кнопкой (как блок +/v в Terminal),
+			// при наведении — ярче.
+			k := 0.06
+			if hoverNew {
+				k = 0.14
+			}
+			ctx.FillRoundRect(plusRect.Min.X, plusRect.Min.Y, plusRect.Dx(), plusRect.Dy(), 4,
+				mixRGBA(tbg, tc, k))
 		}
 		pc := tc
 		if st.Classic3D {
@@ -446,13 +452,18 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 			mBot = tabBot
 		}
 		menuRect = image.Rect(x, mTop, x+titleTabMenuW, mBot)
-		if hoverMenu {
-			if st.Classic3D {
+		tbg2, _, _ := w.titleColors()
+		if st.Classic3D {
+			if hoverMenu {
 				drawBevelRaised(ctx, menuRect.Min.X, menuRect.Min.Y, menuRect.Dx(), menuRect.Dy(), st)
-			} else {
-				ctx.FillRoundRect(menuRect.Min.X, menuRect.Min.Y, menuRect.Dx(), menuRect.Dy(), 4,
-					color.RGBA{R: 128, G: 128, B: 128, A: 70})
 			}
+		} else {
+			k := 0.06
+			if hoverMenu {
+				k = 0.14
+			}
+			ctx.FillRoundRect(menuRect.Min.X, menuRect.Min.Y, menuRect.Dx(), menuRect.Dy(), 4,
+				mixRGBA(tbg2, tc, k))
 		}
 		gc := tc
 		if st.Classic3D {
@@ -473,23 +484,31 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 	tt.mu.Unlock()
 }
 
-// drawModernTitleTab — карточка вкладки Win10/Win11: активная залита фоном
-// клиентской области и «прирастает» к контенту, наведённая слегка светлее.
+// drawModernTitleTab — карточка вкладки Win10/Win11 в духе Windows Terminal:
+// активная — скруглённая карточка чуть светлее полосы заголовка (в светлых
+// темах — чуть темнее) с тонкой рамкой, неактивные — приглушённый текст,
+// наведённая — лёгкая подсветка. Цвета выводятся из цветов заголовка, а не
+// из TabControl: там «активный» фон совпадает с фоном окна и на полосе
+// заголовка был бы невидим.
 func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, header string,
 	active, hover bool, tc color.RGBA, closeR image.Rectangle, hoverClose bool) {
 
+	tbg, _, _ := w.titleColors()
+	cardBG := mixRGBA(tbg, tc, 0.10)   // карточка активной: сдвиг к цвету текста
+	cardBorder := mixRGBA(tbg, tc, 0.22)
+	hoverBG := mixRGBA(tbg, tc, 0.05)
+
 	switch {
 	case active:
-		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy()+6, 6, w.Background)
-		// нижние скругления «съедает» контент — карточка сливается с ним
-		ctx.FillRect(r.Min.X, r.Max.Y-2, r.Dx(), 2, w.Background)
+		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, cardBG)
+		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, cardBorder)
 	case hover:
-		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy()-2, 6, color.RGBA{R: 128, G: 128, B: 128, A: 60})
+		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, hoverBG)
 	}
 
 	textCol := tc
-	if active {
-		textCol = w.resolveColor(color.RGBA{}, win10.BtnText)
+	if !active {
+		textCol = mixRGBA(tc, tbg, 0.4) // неактивная — приглушённый текст
 	}
 	maxW := r.Dx() - titleTabPadH*2
 	if !closeR.Empty() {
