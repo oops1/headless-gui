@@ -14,6 +14,7 @@ type Dropdown struct {
 	mu       sync.RWMutex
 	items    []string
 	selIdx   int32 // атомарно
+	chosen   int32 // 1 — выбор делался (пользователем или SetSelected), атомарно
 	hoverIdx int32 // индекс пункта под курсором (-1 = нет)
 
 	Background  color.RGBA
@@ -51,13 +52,15 @@ func NewDropdown(items ...string) *Dropdown {
 }
 
 // SetItems заменяет список пунктов (по аналогии с ListView.SetItems).
-// Сбрасывает выбор и hover, закрывает раскрытый список и перерисовывает.
+// Сбрасывает выбор в 0 (HasSelection → false), hover, закрывает
+// раскрытый список и перерисовывает.
 // Потокобезопасно. Прежний OnChange не вызывается.
 func (d *Dropdown) SetItems(items []string) {
 	d.mu.Lock()
 	d.items = append([]string(nil), items...)
 	d.mu.Unlock()
 	atomic.StoreInt32(&d.selIdx, 0)
+	atomic.StoreInt32(&d.chosen, 0)
 	atomic.StoreInt32(&d.hoverIdx, -1)
 	if atomic.SwapInt32(&d.open, 0) == 1 {
 		notifyUIChanged() // список был раскрыт в overlay — обновляем весь кадр
@@ -79,6 +82,7 @@ func (d *Dropdown) SetSelected(idx int) {
 	n := len(d.items)
 	d.mu.RUnlock()
 	if idx >= 0 && idx < n {
+		atomic.StoreInt32(&d.chosen, 1)
 		if atomic.SwapInt32(&d.selIdx, int32(idx)) != int32(idx) {
 			d.invalidateSelection()
 		}
@@ -97,8 +101,19 @@ func (d *Dropdown) invalidateSelection() {
 }
 
 // Selected возвращает индекс текущего выбранного пункта.
+//
+// Внимание: у нового Dropdown (и после SetItems) выбор равен 0, а не −1 —
+// по индексу «ничего не выбрано» не отличить от выбора первого пункта.
+// Для этого есть HasSelection.
 func (d *Dropdown) Selected() int {
 	return int(atomic.LoadInt32(&d.selIdx))
+}
+
+// HasSelection возвращает true, если выбор делался явно: пользователем
+// (мышь/клавиатура) или через SetSelected. У нового Dropdown и после
+// SetItems — false, хотя Selected() возвращает 0.
+func (d *Dropdown) HasSelection() bool {
+	return atomic.LoadInt32(&d.chosen) == 1
 }
 
 // SelectedText возвращает текст выбранного пункта (или "" если список пуст).
@@ -366,6 +381,7 @@ func (d *Dropdown) OnKeyEvent(e KeyEvent) {
 		idx := int(atomic.LoadInt32(&d.selIdx))
 		if idx > 0 {
 			atomic.StoreInt32(&d.selIdx, int32(idx-1))
+			atomic.StoreInt32(&d.chosen, 1)
 			d.invalidateSelection()
 			d.fireOnChange(idx - 1)
 		}
@@ -377,6 +393,7 @@ func (d *Dropdown) OnKeyEvent(e KeyEvent) {
 		idx := int(atomic.LoadInt32(&d.selIdx))
 		if idx < n-1 {
 			atomic.StoreInt32(&d.selIdx, int32(idx+1))
+			atomic.StoreInt32(&d.chosen, 1)
 			d.invalidateSelection()
 			d.fireOnChange(idx + 1)
 		}
@@ -460,6 +477,7 @@ func (d *Dropdown) OnMouseButton(e MouseEvent) bool {
 		itemBot := itemTop + itemH
 		if e.X >= header.Min.X && e.X < header.Max.X && e.Y >= itemTop && e.Y < itemBot {
 			prev := int(atomic.SwapInt32(&d.selIdx, int32(i)))
+			atomic.StoreInt32(&d.chosen, 1)
 			atomic.StoreInt32(&d.open, 0)
 			notifyUIChanged() // закрытие списка + возможная смена заголовка
 			if prev != i && d.OnChange != nil {
