@@ -384,11 +384,20 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 		}
 	}
 
-	// Вертикальная геометрия по стилю: карточка занимает большую часть
-	// полосы с полями по 5px (в Terminal ~30px карточка на ~40px полосе).
+	// Вертикальная геометрия по стилю. В современных темах корешок вкладки
+	// СРАСТАЕТСЯ с клиентской областью: прямоугольник вкладки тянется до
+	// самого низа заголовка (скругление только сверху), визуальная полоса
+	// контента корешка (текст, иконка, «×») центрируется выше, в band
+	// y+5…y+th-5. Классика — компактные bevel-ярлыки внутри градиента.
+	modernFlush := !st.Classic3D && w.resolvedTitleStyle() != WindowTitleMac
 	tabTop, tabBot := y+5, y+th-5
 	if st.Classic3D {
-		tabTop, tabBot = y+2, y+th-2 // bevel-ярлыки внутри градиента
+		// Классика: ярлыки Win2000 прижаты к странице — низ вровень с низом
+		// заголовка, активный срастается с клиентской областью (без нижней
+		// грани), неактивные на 2px ниже (рисуются в drawClassicTitleTab).
+		tabTop, tabBot = y+2, y+th
+	} else if modernFlush {
+		tabBot = y + th // корешок до низа заголовка
 	}
 
 	tabRects := make([]image.Rectangle, len(tabs))
@@ -406,8 +415,13 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 		// «×» показываем у активной и наведённой вкладки (если влезает).
 		showClose := (i == active || i == hoverIdx) && widths[i] >= titleTabMinW+titleTabCloseW
 		if showClose {
-			closeRects[i] = image.Rect(r.Max.X-titleTabCloseW-2, r.Min.Y+(r.Dy()-titleTabCloseW)/2,
-				r.Max.X-2, r.Min.Y+(r.Dy()+titleTabCloseW)/2)
+			bandBot := r.Max.Y
+			if modernFlush {
+				bandBot -= 5 // контент корешка центрируется по видимой полосе
+			}
+			cy := (r.Min.Y + bandBot) / 2
+			closeRects[i] = image.Rect(r.Max.X-titleTabCloseW-2, cy-titleTabCloseW/2,
+				r.Max.X-2, cy+titleTabCloseW/2)
 		}
 
 		switch {
@@ -424,11 +438,17 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 	// Кнопки «+» и «v» — одинаковой высоты (чуть ниже карточки вкладки),
 	// по общему вертикальному центру полосы, с отступом от последней вкладки
 	// (как блок кнопок в Windows Terminal).
-	btnH := (tabBot - tabTop) - 4
-	if btnH < 14 {
-		btnH = tabBot - tabTop
+	bandBot := tabBot
+	if modernFlush {
+		bandBot = y + th - 5
+	} else if st.Classic3D {
+		bandBot = y + th - 2
 	}
-	btnTop := tabTop + (tabBot-tabTop-btnH)/2
+	btnH := (bandBot - tabTop) - 4
+	if btnH < 14 {
+		btnH = bandBot - tabTop
+	}
+	btnTop := tabTop + (bandBot-tabTop-btnH)/2
 	x += 4 // зазор между вкладками и блоком кнопок
 
 	// Геометрия обеих кнопок считается заранее — фон рисуется ОДНОЙ общей
@@ -499,25 +519,36 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 	active, hover bool, tc color.RGBA, closeR image.Rectangle, hoverClose bool) {
 
 	tbg, _, _ := w.titleColors()
-	cardBG := mixRGBA(tbg, tc, 0.10)   // карточка активной: сдвиг к цвету текста
-	cardBorder := mixRGBA(tbg, tc, 0.22)
+	cardBorder := mixRGBA(tbg, tc, 0.25)
 	hoverBG := mixRGBA(tbg, tc, 0.05)
+
+	// Видимая полоса контента корешка: низ r уходит под клиентскую область,
+	// текст/иконка/«×» центрируются по band.
+	bandBot := r.Max.Y - 5
 
 	switch {
 	case active:
-		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, cardBG)
-		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, cardBorder)
+		// Корешок единым куском с панелью: заливка цветом клиентской
+		// области, скругление ТОЛЬКО сверху (низ прямой, вровень с низом
+		// заголовка — линия-разделитель под ним прерывается, см.
+		// Window.Draw), рамка по бокам и сверху.
+		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, w.Background)
+		ctx.FillRect(r.Min.X, r.Max.Y-6, r.Dx(), 6, w.Background)
+		ctx.SetClip(r)
+		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy()+6, 6, cardBorder)
+		ctx.ClearClip()
 	case hover:
-		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, hoverBG)
+		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), bandBot-r.Min.Y, 6, hoverBG)
 	}
 
 	textCol := tc
 	if !active {
 		textCol = mixRGBA(tc, tbg, 0.4) // неактивная — приглушённый текст
 	}
+	bandH := bandBot - r.Min.Y
 	textX := r.Min.X + titleTabPadH
 	if tab.Icon != nil {
-		ctx.DrawImageScaled(tab.Icon, textX, r.Min.Y+(r.Dy()-titleTabIconW)/2,
+		ctx.DrawImageScaled(tab.Icon, textX, r.Min.Y+(bandH-titleTabIconW)/2,
 			titleTabIconW, titleTabIconW)
 		textX += titleTabIconW + titleTabIconGap
 	}
@@ -527,7 +558,7 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 	}
 	if maxW > 0 {
 		txt := ellipsizeText(ctx, tab.Header, maxW, DefaultFontSizePt)
-		ctx.DrawText(txt, textX, r.Min.Y+(r.Dy()-13)/2, textCol)
+		ctx.DrawText(txt, textX, r.Min.Y+(bandH-13)/2, textCol)
 	}
 	w.drawTabClose(ctx, closeR, hoverClose, textCol, false)
 }
@@ -538,19 +569,29 @@ func (w *Window) drawClassicTitleTab(ctx DrawContext, r image.Rectangle, tab Tab
 	active bool, closeR image.Rectangle, hoverClose bool) {
 
 	st := currentStyle()
-	ctx.FillRect(r.Min.X+1, r.Min.Y+1, r.Dx()-2, r.Dy()-2, win10.BtnBG)
+	top := r.Min.Y
+	face := win10.BtnBG
 	if active {
-		drawBevelSunken(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+		// Активный ярлык срастается с клиентской областью: лицо — фон окна,
+		// нижней грани нет (низ вровень с низом заголовка).
+		face = w.Background
 	} else {
-		drawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+		top += 2 // неактивные ярлыки на 2px ниже, как в Win2000
 	}
-	off := 0
-	if active {
-		off = 1 // вдавленный ярлык — контент смещён, как у нажатой кнопки
-	}
-	textX := r.Min.X + titleTabPadH + off
+	ctx.FillRect(r.Min.X+1, top+1, r.Dx()-2, r.Max.Y-top-1, face)
+	// Верхняя грань со «срезанными» углами (как у ярлыков классического
+	// TabControl), боковые грани до самого низа; нижней грани нет.
+	ctx.DrawHLine(r.Min.X+2, top, r.Dx()-4, st.BevelLight)
+	ctx.SetPixel(r.Min.X+1, top+1, st.BevelLight)
+	ctx.SetPixel(r.Max.X-2, top+1, st.BevelDark)
+	ctx.DrawVLine(r.Min.X, top+2, r.Max.Y-top-2, st.BevelLight)
+	ctx.DrawVLine(r.Max.X-1, top+2, r.Max.Y-top-2, st.BevelDark)
+	ctx.DrawVLine(r.Max.X-2, top+2, r.Max.Y-top-2, st.BevelShadow)
+
+	bandH := r.Max.Y - top
+	textX := r.Min.X + titleTabPadH
 	if tab.Icon != nil {
-		ctx.DrawImageScaled(tab.Icon, textX, r.Min.Y+(r.Dy()-titleTabIconW)/2+off,
+		ctx.DrawImageScaled(tab.Icon, textX, top+(bandH-titleTabIconW)/2,
 			titleTabIconW, titleTabIconW)
 		textX += titleTabIconW + titleTabIconGap
 	}
@@ -560,7 +601,7 @@ func (w *Window) drawClassicTitleTab(ctx DrawContext, r image.Rectangle, tab Tab
 	}
 	if maxW > 0 {
 		txt := ellipsizeText(ctx, tab.Header, maxW, DefaultFontSizePt)
-		ctx.DrawText(txt, textX, r.Min.Y+(r.Dy()-13)/2+off, win10.BtnText)
+		ctx.DrawText(txt, textX, top+(bandH-13)/2, win10.BtnText)
 	}
 	w.drawTabClose(ctx, closeR, hoverClose, win10.BtnText, true)
 }
@@ -622,6 +663,23 @@ func (w *Window) drawTabClose(ctx DrawContext, r image.Rectangle, hover bool,
 }
 
 // ─── Hit-тест и ввод ────────────────────────────────────────────────────────
+
+// titleTabsActiveRect возвращает прямоугольник корешка активной вкладки из
+// последней отрисовки (пустой — режим выключен/вкладка не видна). Нужен
+// Window.Draw, чтобы прервать линию-разделитель под заголовком: корешок
+// сливается с клиентской областью единым куском.
+func (w *Window) titleTabsActiveRect() image.Rectangle {
+	tt := w.titleTabs
+	if tt == nil {
+		return image.Rectangle{}
+	}
+	tt.mu.Lock()
+	defer tt.mu.Unlock()
+	if tt.active >= 0 && tt.active < len(tt.tabRects) {
+		return tt.tabRects[tt.active]
+	}
+	return image.Rectangle{}
+}
 
 // titleTabHitZone — точка попадает в интерактивный элемент полосы вкладок
 // (вкладку, её «×» или «+»). Такие клики не должны начинать drag/захват.

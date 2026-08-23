@@ -674,9 +674,15 @@ func (w *Window) Draw(ctx DrawContext) {
 				ctx.DrawVLine(x+bw-1, y+th, bh-th, bc) // правая
 				ctx.DrawHLine(x, y+bh-1, bw, bc)       // нижняя
 			}
-			// Разделитель под заголовком
+			// Разделитель под заголовком. В режиме вкладок прерывается под
+			// корешком активной вкладки — он сливается с клиентской областью.
 			if th > 0 {
-				ctx.DrawHLine(x, y+th-1, bw, bc)
+				if ar := w.titleTabsActiveRect(); !ar.Empty() && ar.Min.X > x && ar.Max.X < x+bw {
+					ctx.DrawHLine(x, y+th-1, ar.Min.X+1-x, bc)
+					ctx.DrawHLine(ar.Max.X-1, y+th-1, x+bw-ar.Max.X+1, bc)
+				} else {
+					ctx.DrawHLine(x, y+th-1, bw, bc)
+				}
 			}
 		}
 	}
