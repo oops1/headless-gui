@@ -361,6 +361,11 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 			text, key := locItemText(header)
 			idx := win.AddTitleTab(text, content)
 			registerLocItem(key, func(s string) { win.SetTitleTabHeader(idx, s) })
+			if ic := child.attr("Icon"); ic != "" && baseDir != "" {
+				if img := loadTrayIcon(ic, baseDir); img != nil {
+					win.SetTitleTabIcon(idx, img)
+				}
+			}
 			if tip := child.attr("ToolTip", "Tooltip"); tip != "" {
 				tipText, tipKey := locItemText(tip)
 				win.SetTitleTabToolTip(idx, tipText)

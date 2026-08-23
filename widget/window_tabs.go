@@ -46,7 +46,9 @@ type titleTabsState struct {
 
 // Геометрия полосы вкладок заголовка.
 const (
-	titleTabMenuW  = 20  // ширина кнопки «v» (меню)
+	titleTabIconW   = 16 // размер иконки вкладки
+	titleTabIconGap = 6  // зазор между иконкой и текстом
+	titleTabMenuW   = 20 // ширина кнопки «v» (меню)
 	titleTabMaxW   = 200 // максимальная ширина вкладки
 	titleTabMinW   = 40  // ширина, ниже которой вкладки не сжимаются
 	titleTabPadH   = 10  // горизонтальный padding текста
@@ -271,6 +273,20 @@ func (w *Window) TitleTabHeader(idx int) string {
 	return ""
 }
 
+// SetTitleTabIcon задаёт иконку вкладки idx (рисуется слева от заголовка).
+func (w *Window) SetTitleTabIcon(idx int, img image.Image) {
+	tt := w.titleTabs
+	if tt == nil {
+		return
+	}
+	tt.mu.Lock()
+	if idx >= 0 && idx < len(tt.tabs) {
+		tt.tabs[idx].Icon = img
+	}
+	tt.mu.Unlock()
+	w.Invalidate()
+}
+
 // SetTitleTabToolTip задаёт подсказку заголовка вкладки idx.
 func (w *Window) SetTitleTabToolTip(idx int, tip string) {
 	tt := w.titleTabs
@@ -346,6 +362,9 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 	total := 0
 	for i, tab := range tabs {
 		tw := ctx.MeasureText(tab.Header, DefaultFontSizePt) + titleTabPadH*2 + titleTabCloseW
+		if tab.Icon != nil {
+			tw += titleTabIconW + titleTabIconGap
+		}
 		if tw > titleTabMaxW {
 			tw = titleTabMaxW
 		}
@@ -393,89 +412,75 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 
 		switch {
 		case st.Classic3D:
-			w.drawClassicTitleTab(ctx, r, tab.Header, i == active, closeRects[i], hoverClose == i)
+			w.drawClassicTitleTab(ctx, r, tab, i == active, closeRects[i], hoverClose == i)
 		case w.resolvedTitleStyle() == WindowTitleMac:
-			w.drawMacTitleTab(ctx, r, tab.Header, i == active, i == hoverIdx, tc, closeRects[i], hoverClose == i)
+			w.drawMacTitleTab(ctx, r, tab, i == active, i == hoverIdx, tc, closeRects[i], hoverClose == i)
 		default:
-			w.drawModernTitleTab(ctx, r, tab.Header, i == active, i == hoverIdx, tc, closeRects[i], hoverClose == i)
+			w.drawModernTitleTab(ctx, r, tab, i == active, i == hoverIdx, tc, closeRects[i], hoverClose == i)
 		}
 		x += widths[i] + titleTabGap
 	}
 
-	// Кнопка «+».
-	var plusRect image.Rectangle
+	// Кнопки «+» и «v» — одинаковой высоты (чуть ниже карточки вкладки),
+	// по общему вертикальному центру полосы, с отступом от последней вкладки
+	// (как блок кнопок в Windows Terminal).
+	btnH := (tabBot - tabTop) - 4
+	if btnH < 14 {
+		btnH = tabBot - tabTop
+	}
+	btnTop := tabTop + (tabBot-tabTop-btnH)/2
+	x += 4 // зазор между вкладками и блоком кнопок
+
+	// Геометрия обеих кнопок считается заранее — фон рисуется ОДНОЙ общей
+	// пилюлей на блок (как сегментная кнопка +/v в Windows Terminal),
+	// наведённая половинка подсвечивается внутри.
+	var plusRect, menuRect image.Rectangle
 	if showPlus && x+titleTabPlusW <= right {
-		plusRect = image.Rect(x, tabTop+(tabBot-tabTop-titleTabPlusW)/2+2, x+titleTabPlusW, tabTop+(tabBot-tabTop+titleTabPlusW)/2+2)
-		// квадрат высотой не больше полосы
-		if plusRect.Min.Y < tabTop {
-			plusRect.Min.Y = tabTop
-		}
-		if plusRect.Max.Y > tabBot {
-			plusRect.Max.Y = tabBot
-		}
-		tbg, _, _ := w.titleColors()
-		if st.Classic3D {
-			if hoverNew {
-				drawBevelRaised(ctx, plusRect.Min.X, plusRect.Min.Y, plusRect.Dx(), plusRect.Dy(), st)
-			}
-		} else {
-			// Постоянная «пилюля» под кнопкой (как блок +/v в Terminal),
-			// при наведении — ярче.
-			k := 0.06
-			if hoverNew {
-				k = 0.14
-			}
-			ctx.FillRoundRect(plusRect.Min.X, plusRect.Min.Y, plusRect.Dx(), plusRect.Dy(), 4,
-				mixRGBA(tbg, tc, k))
-		}
-		pc := tc
-		if st.Classic3D {
-			pc = color.RGBA{A: 255} // чёрный глиф на градиенте/bevel
-		}
-		pcx, pcy := (plusRect.Min.X+plusRect.Max.X)/2, (plusRect.Min.Y+plusRect.Max.Y)/2
-		ctx.DrawHLine(pcx-4, pcy, 9, pc)
-		ctx.DrawVLine(pcx, pcy-4, 9, pc)
+		plusRect = image.Rect(x, btnTop, x+titleTabPlusW, btnTop+btnH)
+		x = plusRect.Max.X + titleTabGap
+	}
+	if showMenu && x+titleTabMenuW <= right {
+		menuRect = image.Rect(x, btnTop, x+titleTabMenuW, btnTop+btnH)
 	}
 
-	// Кнопка «v» (меню) — сразу после «+».
-	var menuRect image.Rectangle
-	if showMenu && x+titleTabMenuW <= right {
-		if !plusRect.Empty() {
-			x = plusRect.Max.X + titleTabGap
-		}
-		mTop := tabTop + (tabBot-tabTop-titleTabMenuW)/2
-		if mTop < tabTop {
-			mTop = tabTop
-		}
-		mBot := mTop + titleTabMenuW
-		if mBot > tabBot {
-			mBot = tabBot
-		}
-		menuRect = image.Rect(x, mTop, x+titleTabMenuW, mBot)
-		tbg2, _, _ := w.titleColors()
+	if !plusRect.Empty() || !menuRect.Empty() {
+		tbg, _, _ := w.titleColors()
+		glyph := tc
 		if st.Classic3D {
-			if hoverMenu {
+			// Классика: общий блок не рисуем, hover — выпуклый bevel.
+			glyph = color.RGBA{A: 255}
+			if hoverNew && !plusRect.Empty() {
+				drawBevelRaised(ctx, plusRect.Min.X, plusRect.Min.Y, plusRect.Dx(), plusRect.Dy(), st)
+			}
+			if hoverMenu && !menuRect.Empty() {
 				drawBevelRaised(ctx, menuRect.Min.X, menuRect.Min.Y, menuRect.Dx(), menuRect.Dy(), st)
 			}
 		} else {
-			k := 0.06
-			if hoverMenu {
-				k = 0.14
+			block := plusRect.Union(menuRect)
+			ctx.FillRoundRect(block.Min.X, block.Min.Y, block.Dx(), block.Dy(), 4,
+				mixRGBA(tbg, tc, 0.06))
+			hl := mixRGBA(tbg, tc, 0.14)
+			if hoverNew && !plusRect.Empty() {
+				ctx.FillRoundRect(plusRect.Min.X+1, plusRect.Min.Y+1, plusRect.Dx()-2, plusRect.Dy()-2, 3, hl)
 			}
-			ctx.FillRoundRect(menuRect.Min.X, menuRect.Min.Y, menuRect.Dx(), menuRect.Dy(), 4,
-				mixRGBA(tbg2, tc, k))
+			if hoverMenu && !menuRect.Empty() {
+				ctx.FillRoundRect(menuRect.Min.X+1, menuRect.Min.Y+1, menuRect.Dx()-2, menuRect.Dy()-2, 3, hl)
+			}
 		}
-		gc := tc
-		if st.Classic3D {
-			gc = color.RGBA{A: 255}
+
+		if !plusRect.Empty() {
+			pcx, pcy := (plusRect.Min.X+plusRect.Max.X)/2, (plusRect.Min.Y+plusRect.Max.Y)/2
+			ctx.DrawHLine(pcx-4, pcy, 9, glyph)
+			ctx.DrawVLine(pcx, pcy-4, 9, glyph)
 		}
-		// Глиф «v» (шеврон вниз).
-		mcx, mcy := (menuRect.Min.X+menuRect.Max.X)/2, (menuRect.Min.Y+menuRect.Max.Y)/2 - 1
-		for i := 0; i <= 3; i++ {
-			ctx.SetPixel(mcx-3+i, mcy+i, gc)
-			ctx.SetPixel(mcx-2+i, mcy+i, gc)
-			ctx.SetPixel(mcx+3-i, mcy+i, gc)
-			ctx.SetPixel(mcx+2-i, mcy+i, gc)
+		if !menuRect.Empty() {
+			mcx, mcy := (menuRect.Min.X+menuRect.Max.X)/2, (menuRect.Min.Y+menuRect.Max.Y)/2-1
+			for i := 0; i <= 3; i++ {
+				ctx.SetPixel(mcx-3+i, mcy+i, glyph)
+				ctx.SetPixel(mcx-2+i, mcy+i, glyph)
+				ctx.SetPixel(mcx+3-i, mcy+i, glyph)
+				ctx.SetPixel(mcx+2-i, mcy+i, glyph)
+			}
 		}
 	}
 
@@ -490,7 +495,7 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 // наведённая — лёгкая подсветка. Цвета выводятся из цветов заголовка, а не
 // из TabControl: там «активный» фон совпадает с фоном окна и на полосе
 // заголовка был бы невидим.
-func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, header string,
+func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabItem,
 	active, hover bool, tc color.RGBA, closeR image.Rectangle, hoverClose bool) {
 
 	tbg, _, _ := w.titleColors()
@@ -510,20 +515,26 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, header s
 	if !active {
 		textCol = mixRGBA(tc, tbg, 0.4) // неактивная — приглушённый текст
 	}
-	maxW := r.Dx() - titleTabPadH*2
+	textX := r.Min.X + titleTabPadH
+	if tab.Icon != nil {
+		ctx.DrawImageScaled(tab.Icon, textX, r.Min.Y+(r.Dy()-titleTabIconW)/2,
+			titleTabIconW, titleTabIconW)
+		textX += titleTabIconW + titleTabIconGap
+	}
+	maxW := r.Max.X - textX - titleTabPadH
 	if !closeR.Empty() {
-		maxW -= titleTabCloseW
+		maxW = closeR.Min.X - textX - 4
 	}
 	if maxW > 0 {
-		txt := ellipsizeText(ctx, header, maxW, DefaultFontSizePt)
-		ctx.DrawText(txt, r.Min.X+titleTabPadH, r.Min.Y+(r.Dy()-13)/2, textCol)
+		txt := ellipsizeText(ctx, tab.Header, maxW, DefaultFontSizePt)
+		ctx.DrawText(txt, textX, r.Min.Y+(r.Dy()-13)/2, textCol)
 	}
 	w.drawTabClose(ctx, closeR, hoverClose, textCol, false)
 }
 
 // drawClassicTitleTab — bevel-ярлык Win2000 на градиенте заголовка:
 // неактивный выпуклый, активный «вдавлен».
-func (w *Window) drawClassicTitleTab(ctx DrawContext, r image.Rectangle, header string,
+func (w *Window) drawClassicTitleTab(ctx DrawContext, r image.Rectangle, tab TabItem,
 	active bool, closeR image.Rectangle, hoverClose bool) {
 
 	st := currentStyle()
@@ -533,23 +544,29 @@ func (w *Window) drawClassicTitleTab(ctx DrawContext, r image.Rectangle, header 
 	} else {
 		drawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
 	}
-	maxW := r.Dx() - titleTabPadH*2
+	off := 0
+	if active {
+		off = 1 // вдавленный ярлык — контент смещён, как у нажатой кнопки
+	}
+	textX := r.Min.X + titleTabPadH + off
+	if tab.Icon != nil {
+		ctx.DrawImageScaled(tab.Icon, textX, r.Min.Y+(r.Dy()-titleTabIconW)/2+off,
+			titleTabIconW, titleTabIconW)
+		textX += titleTabIconW + titleTabIconGap
+	}
+	maxW := r.Max.X - textX - titleTabPadH
 	if !closeR.Empty() {
-		maxW -= titleTabCloseW
+		maxW = closeR.Min.X - textX - 4
 	}
 	if maxW > 0 {
-		txt := ellipsizeText(ctx, header, maxW, DefaultFontSizePt)
-		off := 0
-		if active {
-			off = 1 // вдавленный ярлык — текст смещён, как у нажатой кнопки
-		}
-		ctx.DrawText(txt, r.Min.X+titleTabPadH+off, r.Min.Y+(r.Dy()-13)/2+off, win10.BtnText)
+		txt := ellipsizeText(ctx, tab.Header, maxW, DefaultFontSizePt)
+		ctx.DrawText(txt, textX, r.Min.Y+(r.Dy()-13)/2+off, win10.BtnText)
 	}
 	w.drawTabClose(ctx, closeR, hoverClose, win10.BtnText, true)
 }
 
 // drawMacTitleTab — вкладка в Mac-стиле: скруглённая пилюля, текст по центру.
-func (w *Window) drawMacTitleTab(ctx DrawContext, r image.Rectangle, header string,
+func (w *Window) drawMacTitleTab(ctx DrawContext, r image.Rectangle, tab TabItem,
 	active, hover bool, tc color.RGBA, closeR image.Rectangle, hoverClose bool) {
 
 	switch {
@@ -558,16 +575,24 @@ func (w *Window) drawMacTitleTab(ctx DrawContext, r image.Rectangle, header stri
 	case hover:
 		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, color.RGBA{R: 128, G: 128, B: 128, A: 50})
 	}
-	maxW := r.Dx() - titleTabPadH*2
+	iconW := 0
+	if tab.Icon != nil {
+		iconW = titleTabIconW + titleTabIconGap
+	}
+	maxW := r.Dx() - titleTabPadH*2 - iconW
 	if !closeR.Empty() {
 		maxW -= titleTabCloseW
 	}
 	if maxW > 0 {
-		txt := ellipsizeText(ctx, header, maxW, 10)
+		txt := ellipsizeText(ctx, tab.Header, maxW, 10)
 		txtW := ctx.MeasureText(txt, 10)
-		tx := r.Min.X + (r.Dx()-txtW)/2
-		if tx < r.Min.X+titleTabPadH {
-			tx = r.Min.X + titleTabPadH
+		tx := r.Min.X + (r.Dx()-iconW-txtW)/2 + iconW
+		if tx < r.Min.X+titleTabPadH+iconW {
+			tx = r.Min.X + titleTabPadH + iconW
+		}
+		if tab.Icon != nil {
+			ctx.DrawImageScaled(tab.Icon, tx-iconW, r.Min.Y+(r.Dy()-titleTabIconW)/2,
+				titleTabIconW, titleTabIconW)
 		}
 		ctx.DrawText(txt, tx, r.Min.Y+(r.Dy()-13)/2, tc)
 	}

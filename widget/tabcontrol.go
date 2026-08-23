@@ -12,6 +12,10 @@ type TabItem struct {
 	Content Widget // корневой виджет содержимого вкладки
 	Hidden  bool   // true → вкладка скрыта из полосы заголовков (SetTabVisible)
 
+	// Icon — иконка вкладки (рисуется слева от заголовка, 16×16).
+	// Пока используется вкладками заголовка окна (TitleTabs).
+	Icon image.Image
+
 	// ToolTip — подсказка при наведении на заголовок вкладки.
 	ToolTip string
 	// SeparatorBefore — визуальный разделитель перед вкладкой

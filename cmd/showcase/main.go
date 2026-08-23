@@ -294,9 +294,30 @@ func main() {
 			p.AddChild(lbl)
 			return p
 		}
+		// Иконка вкладки — квадратик-«терминал» (генерируется кодом, как
+		// иконка трея): тёмный фон + зелёный ">" в углу.
+		tabIcon := func() image.Image {
+			img := image.NewRGBA(image.Rect(0, 0, 16, 16))
+			for y := 0; y < 16; y++ {
+				for x := 0; x < 16; x++ {
+					img.SetRGBA(x, y, color.RGBA{R: 30, G: 30, B: 34, A: 255})
+				}
+			}
+			green := color.RGBA{R: 80, G: 220, B: 120, A: 255}
+			for i := 0; i < 4; i++ { // глиф ">"
+				img.SetRGBA(3+i, 5+i, green)
+				img.SetRGBA(3+i, 11-i, green)
+			}
+			for x := 8; x < 13; x++ { // подчёркивание
+				img.SetRGBA(x, 12, green)
+			}
+			return img
+		}()
 		addTab := func(name string) int {
 			tabSeq++
-			return tw.AddTitleTab(name, newTabContent(name))
+			idx := tw.AddTitleTab(name, newTabContent(name))
+			tw.SetTitleTabIcon(idx, tabIcon)
+			return idx
 		}
 		addTab("PowerShell")
 		addTab("cmd")
