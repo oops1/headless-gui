@@ -220,7 +220,7 @@ func Win10LightTheme() *Theme {
 // смягчённая палитра Mica, голубой акцент.
 func Win11DarkTheme() *Theme {
 	t := DarkTheme()
-	t.Style = ThemeStyle{Name: "Win11 Dark", ControlCorner: 6, WindowCorner: 8}
+	t.Style = ThemeStyle{Name: "Win11 Dark", ControlCorner: 6, WindowCorner: 12}
 
 	t.WindowBG = color.RGBA{R: 32, G: 32, B: 32, A: 255}    // #202020 — Mica
 	t.PanelBG = color.RGBA{R: 43, G: 43, B: 43, A: 255}     // #2B2B2B
@@ -260,7 +260,7 @@ func Win11DarkTheme() *Theme {
 // Win11LightTheme — Windows 11, светлая: скруглённые контролы, акцент #005FB8.
 func Win11LightTheme() *Theme {
 	t := LightTheme()
-	t.Style = ThemeStyle{Name: "Win11 Light", ControlCorner: 6, WindowCorner: 8}
+	t.Style = ThemeStyle{Name: "Win11 Light", ControlCorner: 6, WindowCorner: 12}
 
 	t.WindowBG = color.RGBA{R: 243, G: 243, B: 243, A: 255} // #F3F3F3 — Mica
 	t.PanelBG = color.RGBA{R: 251, G: 251, B: 251, A: 255}  // #FBFBFB

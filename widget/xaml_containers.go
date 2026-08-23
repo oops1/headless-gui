@@ -282,6 +282,12 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 		}
 	}
 
+	// TitleTabs="True" — вкладки в заголовке окна (стиль Windows 11 Terminal).
+	// Вкладки задаются дочерними <TabItem>, меню шеврона — <TitleTabsMenu>.
+	if ttv := el.attr("TitleTabs"); strings.EqualFold(ttv, "true") || ttv == "1" {
+		win.EnableTitleTabs()
+	}
+
 	// ── Трей: иконка + подсказка (декларация; window.Window подхватит в Run) ──
 	// TrayIcon — путь относительно baseDir (.png/.jpg декодируется, .svg
 	// растеризуется 32×32). Ошибка загрузки — log.Printf и пропуск.
@@ -332,6 +338,54 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 			continue
 		}
 
+		// ── <TabItem> — вкладка заголовка (режим TitleTabs) ──────────────────
+		if childTag == "tabitem" && win.TitleTabsEnabled() {
+			header := child.attr("Header", "Text")
+			if header == "" {
+				header = child.Text
+			}
+			var content Widget
+			for _, inner := range child.Children {
+				if strings.Contains(strings.ToLower(inner.Tag), ".") {
+					continue
+				}
+				cw, err := buildXAMLWidgetAt(inner, reg, contentOff, baseDir, depth+1)
+				if err != nil {
+					return nil, err
+				}
+				if cw != nil {
+					content = cw
+					break
+				}
+			}
+			text, key := locItemText(header)
+			idx := win.AddTitleTab(text, content)
+			registerLocItem(key, func(s string) { win.SetTitleTabHeader(idx, s) })
+			if ic := child.attr("Icon"); ic != "" && baseDir != "" {
+				if img := loadTrayIcon(ic, baseDir); img != nil {
+					win.SetTitleTabIcon(idx, img)
+				}
+			}
+			if tip := child.attr("ToolTip", "Tooltip"); tip != "" {
+				tipText, tipKey := locItemText(tip)
+				win.SetTitleTabToolTip(idx, tipText)
+				registerLocItem(tipKey, func(s string) { win.SetTitleTabToolTip(idx, s) })
+			}
+			continue
+		}
+
+		// ── <TitleTabsMenu> — меню кнопки «v» полосы вкладок ─────────────────
+		if childTag == "titletabsmenu" {
+			cw, err := buildXAMLPopupMenu(child, reg, contentOff)
+			if err != nil {
+				return nil, err
+			}
+			if pm, ok := cw.(*PopupMenu); ok {
+				win.SetTitleTabsMenu(pm)
+			}
+			continue
+		}
+
 		// Пропускаем property elements
 		if strings.Contains(childTag, ".") {
 			// Ресурсы и InputBindings уже собраны отдельно — не строим как виджеты.
@@ -368,6 +422,11 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 	// Для Grid это особенно важно — SetBounds запустит layout() с правильными размерами.
 	cb := win.ContentBounds()
 	for _, child := range win.Children() {
+		// PopupMenu (TitleTabsMenu/контекстные) позиционируется собственным
+		// Show — растягивать нельзя (см. Window.SetBounds).
+		if _, ok := child.(*PopupMenu); ok {
+			continue
+		}
 		childB := child.Bounds()
 		if childB.Dx() <= 0 || childB.Dy() <= 0 || childB.Empty() {
 			child.SetBounds(cb)

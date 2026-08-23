@@ -12,6 +12,10 @@ type TabItem struct {
 	Content Widget // корневой виджет содержимого вкладки
 	Hidden  bool   // true → вкладка скрыта из полосы заголовков (SetTabVisible)
 
+	// Icon — иконка вкладки (рисуется слева от заголовка, 16×16).
+	// Пока используется вкладками заголовка окна (TitleTabs).
+	Icon image.Image
+
 	// ToolTip — подсказка при наведении на заголовок вкладки.
 	ToolTip string
 	// SeparatorBefore — визуальный разделитель перед вкладкой
@@ -498,6 +502,27 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 	} else {
 		// Рамка вокруг содержимого.
 		ctx.DrawBorder(cr.Min.X, cr.Min.Y, cr.Dx(), cr.Dy(), tc.TabBorder)
+
+		// Корешок активной вкладки срастается со страницей (как в классике,
+		// где активный ярлык «прорезает» верхнюю грань): затираем линию под
+		// вкладками и верхнюю грань рамки в границах активного корешка.
+		if active >= 0 && active < len(widths) && widths[active] > 0 && !tabs[active].Hidden {
+			ax, seen := b.Min.X, false
+			for i := 0; i < active; i++ {
+				if tabs[i].Hidden {
+					continue
+				}
+				if tabs[i].SeparatorBefore && seen {
+					ax += tabSepW
+				}
+				seen = true
+				ax += widths[i]
+			}
+			if tabs[active].SeparatorBefore && seen {
+				ax += tabSepW
+			}
+			ctx.FillRect(ax+1, b.Min.Y+tc.TabHeight-1, widths[active]-2, 2, tc.TabActiveBG)
+		}
 	}
 
 	tc.drawDisabledOverlay(ctx)

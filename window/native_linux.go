@@ -1252,6 +1252,12 @@ func x11KeycodeToVK(keycode int) int {
 		return VK_PRIOR // Page Up
 	case 117:
 		return VK_NEXT // Page Down
+	case 67, 68, 69, 70, 71, 72, 73, 74, 75, 76: // F1–F10 (evdev+8)
+		return VK_F1 + (keycode - 67)
+	case 95:
+		return VK_F11
+	case 96:
+		return VK_F12
 	case 38:
 		return VK_A
 	case 54:
