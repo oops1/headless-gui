@@ -1033,6 +1033,19 @@
             </Canvas>
         </TabItem>
 
+        <TabItem Header="{Loc Tabbed window}">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="{Loc Window with tabs in the title bar (Windows 11 Terminal style)}"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="54" Width="1010" Height="36" TextWrapping="Wrap" Foreground="#9399B2"
+                           Text="{Loc Tabs live in the window title bar next to the window buttons: a cross closes a tab, plus opens a new one, the chevron shows the profile menu. Free title-bar space still drags the window. Switch the theme - the tab strip follows Win10/Win11, Win2000 bevel and Mac styles.}"/>
+                <Panel Name="tabWinMount" Left="24" Top="100" Width="1010" Height="580" Background="#161622"/>
+                <TextBlock Left="24" Top="694" Width="1010" Height="40" TextWrapping="Wrap" Foreground="#6C7086"
+                           Text="{Loc The inner window is a real widget.Window with EnableTitleTabs: drag it by the title, resize by the edges, close all tabs - OnClose restores the demo.}"/>
+            </Canvas>
+        </TabItem>
+
         <TabItem Header="{Loc System}">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"

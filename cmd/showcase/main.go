@@ -269,6 +269,70 @@ func main() {
 		mount.AddChild(prev)
 	}
 
+	// Демо «Вкладки в заголовке» (Windows 11 Terminal style): настоящий
+	// widget.Window с EnableTitleTabs внутри showcase — вкладки, «+», «×»,
+	// шеврон-меню; отрисовка следует активной теме (Win10/11, Win2000, Mac).
+	if mount, ok := reg["tabWinMount"].(*widget.Panel); ok {
+		tw := &widget.Window{
+			Title:      "Terminal",
+			Style:      widget.WindowStyleSingleBorder,
+			Resize:     widget.ResizeModeCanResize,
+			MainWindow: false,
+			Background: color.RGBA{R: 12, G: 12, B: 12, A: 255},
+		}
+		mb := mount.Bounds()
+		tw.SetBounds(image.Rect(mb.Min.X+50, mb.Min.Y+40, mb.Max.X-50, mb.Max.Y-40))
+
+		tabSeq := 0
+		newTabContent := func(name string) widget.Widget {
+			p := widget.NewPanel(color.RGBA{R: 12, G: 12, B: 12, A: 255})
+			p.ShowHeader = false
+			lbl := widget.NewLabel(`PS C:\> `+name, color.RGBA{R: 204, G: 204, B: 204, A: 255})
+			cb := tw.ContentBounds()
+			lbl.SetBounds(image.Rect(cb.Min.X+12, cb.Min.Y+10, cb.Max.X-12, cb.Min.Y+30))
+			p.AddChild(lbl)
+			return p
+		}
+		addTab := func(name string) int {
+			tabSeq++
+			return tw.AddTitleTab(name, newTabContent(name))
+		}
+		addTab("PowerShell")
+		addTab("cmd")
+		addTab("bash")
+
+		tw.OnTitleTabNew = func() {
+			idx := addTab(fmt.Sprintf("Вкладка %d", tabSeq))
+			tw.SetActiveTitleTab(idx)
+			addLog("Title tab: + (new tab)")
+		}
+		tw.OnTitleTabChange = func(idx int, header string) {
+			addLog("Title tab: %s", header)
+		}
+		tw.OnTitleTabClosed = func(idx int, header string) {
+			addLog("Title tab closed: %s", header)
+		}
+		// Закрыты все вкладки (или «×» окна) — демо возрождается с одной.
+		tw.OnClose = func() {
+			addTab("PowerShell")
+			addLog("Title tabs: demo window restored")
+		}
+
+		menu := widget.NewPopupMenu()
+		for _, prof := range []string{"Windows PowerShell", "Командная строка", "Ubuntu"} {
+			prof := prof
+			menu.AddItem(prof, func() {
+				idx := addTab(prof)
+				tw.SetActiveTitleTab(idx)
+			})
+		}
+		menu.AddSeparator()
+		menu.AddItem("О программе", func() { addLog("Title tabs: about") })
+		tw.SetTitleTabsMenu(menu)
+
+		mount.AddChild(tw)
+	}
+
 	if dd, ok := reg["themeSelect"].(*widget.Dropdown); ok {
 		dd.OnChange = func(_ int, name string) {
 			if t := widget.ThemeByName(name); t != nil {
