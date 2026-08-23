@@ -419,6 +419,9 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 	// y+5…y+th-5. Классика — компактные bevel-ярлыки внутри градиента.
 	modernFlush := !st.Classic3D && w.resolvedTitleStyle() != WindowTitleMac
 	tabTop, tabBot := y+5, y+th-5
+	if modernFlush {
+		tabTop = y + 8 // корешок ниже верха полосы, как в Terminal
+	}
 	if st.Classic3D {
 		// Классика: ярлыки Win2000 прижаты к странице — низ вровень с низом
 		// заголовка, активный срастается с клиентской областью (без нижней
@@ -445,7 +448,7 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 		if showClose {
 			bandBot := r.Max.Y
 			if modernFlush {
-				bandBot -= 5 // контент корешка центрируется по видимой полосе
+				bandBot -= 2 // контент корешка центрируется по видимой части
 			}
 			cy := (r.Min.Y + bandBot) / 2
 			closeRects[i] = image.Rect(r.Max.X-titleTabCloseW-titleTabCloseGap, cy-titleTabCloseW/2,
@@ -468,7 +471,7 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 	// (как блок кнопок в Windows Terminal).
 	bandBot := tabBot
 	if modernFlush {
-		bandBot = y + th - 5
+		bandBot = y + th - 2
 	} else if st.Classic3D {
 		bandBot = y + th - 2
 	}
@@ -552,7 +555,7 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 
 	// Видимая полоса контента корешка: низ r уходит под клиентскую область,
 	// текст/иконка/«×» центрируются по band.
-	bandBot := r.Max.Y - 5
+	bandBot := r.Max.Y - 2
 
 	switch {
 	case active:
@@ -562,13 +565,13 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 		// разделитель под ним прерывается, см. Window.Draw), рамка по
 		// бокам и сверху.
 		bg := w.titleTabContentBG(tab.Content)
-		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, bg)
-		ctx.FillRect(r.Min.X, r.Max.Y-6, r.Dx(), 6, bg)
+		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 8, bg)
+		ctx.FillRect(r.Min.X, r.Max.Y-8, r.Dx(), 8, bg)
 		ctx.SetClip(r)
-		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy()+6, 6, cardBorder)
+		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy()+8, 8, cardBorder)
 		ctx.ClearClip()
 	case hover:
-		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), bandBot-r.Min.Y, 6, hoverBG)
+		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), bandBot-r.Min.Y, 8, hoverBG)
 	}
 
 	textCol := tc
