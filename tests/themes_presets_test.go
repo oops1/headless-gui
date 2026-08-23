@@ -46,7 +46,7 @@ func TestThemes_StyleParameters(t *testing.T) {
 		t.Fatalf("Win10 Dark style: %+v", st)
 	}
 	// Скругление окна и Mac-заголовок.
-	if st := widget.ThemeByName("Win11 Dark").Style; st.WindowCorner != 8 || st.MacTitleBar {
+	if st := widget.ThemeByName("Win11 Dark").Style; st.WindowCorner != 12 || st.MacTitleBar {
 		t.Fatalf("Win11 window style: %+v", st)
 	}
 	if st := widget.ThemeByName("Mac").Style; st.WindowCorner != 10 || !st.MacTitleBar {
@@ -66,7 +66,7 @@ func TestThemes_WindowApplyShape(t *testing.T) {
 		t.Fatalf("Mac: corner=%d style=%v", w.CornerRadius, w.TitleStyle)
 	}
 	w.ApplyTheme(widget.ThemeByName("Win11 Light"))
-	if w.CornerRadius != 8 || w.TitleStyle != widget.WindowTitleWin {
+	if w.CornerRadius != 12 || w.TitleStyle != widget.WindowTitleWin {
 		t.Fatalf("Win11: corner=%d style=%v", w.CornerRadius, w.TitleStyle)
 	}
 	w.ApplyTheme(widget.ThemeByName("Win2000"))

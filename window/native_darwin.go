@@ -732,6 +732,30 @@ func cocoaKeyCodeToVK(keyCode int) int {
 		return VK_PRIOR // Page Up
 	case 121:
 		return VK_NEXT // Page Down
+	case 122:
+		return VK_F1
+	case 120:
+		return VK_F2
+	case 99:
+		return VK_F3
+	case 118:
+		return VK_F4
+	case 96:
+		return VK_F5
+	case 97:
+		return VK_F6
+	case 98:
+		return VK_F7
+	case 100:
+		return VK_F8
+	case 101:
+		return VK_F9
+	case 109:
+		return VK_F10
+	case 103:
+		return VK_F11
+	case 111:
+		return VK_F12
 	case 0:
 		return VK_A
 	case 8:

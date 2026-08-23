@@ -1060,6 +1060,10 @@ func vkToKeyCode(vk int) widget.KeyCode {
 	case VK_Z:
 		return widget.KeyZ
 	}
+	// F1–F12: значения KeyCode совпадают с VK (0x70–0x7B).
+	if vk >= VK_F1 && vk <= VK_F12 {
+		return widget.KeyCode(vk)
+	}
 	return widget.KeyUnknown
 }
 
