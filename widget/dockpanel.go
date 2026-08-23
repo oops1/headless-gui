@@ -22,6 +22,13 @@ type DockPanel struct {
 
 	Background color.RGBA
 	UseAlpha   bool
+
+	// fillChild/fillOrig — кто сейчас растянут как LastChildFill и его
+	// bounds до растяжения. При добавлении следующего ребёнка исходный
+	// размер восстанавливается — иначе бывший «последний» резервировал
+	// при доке всю панель (зазор после SetBounds-до-AddChild).
+	fillChild Widget
+	fillOrig  image.Rectangle
 }
 
 // NewDockPanel создаёт пустой DockPanel с прозрачным фоном.
@@ -78,6 +85,10 @@ func (dp *DockPanel) layout() {
 
 		// Последний элемент заполняет оставшееся пространство
 		if isLast {
+			if dp.fillChild != child {
+				dp.fillChild = child
+				dp.fillOrig = child.Bounds()
+			}
 			r := image.Rect(
 				remaining.Min.X+m.Left, remaining.Min.Y+m.Top,
 				remaining.Max.X-m.Right, remaining.Max.Y-m.Bottom,
@@ -88,6 +99,12 @@ func (dp *DockPanel) layout() {
 		}
 
 		cb := child.Bounds()
+		if dp.fillChild == child {
+			// Ребёнок был растянут как Fill, но перестал быть последним —
+			// докуем его по исходному размеру.
+			cb = dp.fillOrig
+			dp.fillChild = nil
+		}
 		switch dock {
 		case DockTop:
 			h := cb.Dy()
