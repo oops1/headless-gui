@@ -768,7 +768,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 		// Режим вкладок: полосу заголовка занимают вкладки, текст Title
 		// не рисуется. В классике старт после отступа иконки, потолок —
 		// эффективная высота заголовка.
-		w.drawTitleTabs(ctx, x+4, titleRight-4, y, th)
+		w.drawTitleTabs(ctx, x+8, titleRight-4, y, th)
 	} else {
 		title := w.Title
 		if titleMaxW := titleRight - textX; titleMaxW <= 0 {

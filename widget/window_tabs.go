@@ -46,16 +46,43 @@ type titleTabsState struct {
 
 // Геометрия полосы вкладок заголовка.
 const (
-	titleTabIconW   = 16 // размер иконки вкладки
-	titleTabIconGap = 6  // зазор между иконкой и текстом
-	titleTabMenuW   = 20 // ширина кнопки «v» (меню)
-	titleTabMaxW   = 200 // максимальная ширина вкладки
-	titleTabMinW   = 40  // ширина, ниже которой вкладки не сжимаются
-	titleTabPadH   = 10  // горизонтальный padding текста
-	titleTabCloseW = 16  // зона «×» внутри вкладки
-	titleTabGap    = 2   // зазор между вкладками
-	titleTabPlusW  = 24  // ширина кнопки «+»
+	titleTabIconW    = 16 // размер иконки вкладки
+	titleTabIconGap  = 8  // зазор между иконкой и текстом
+	titleTabMenuW    = 20 // ширина кнопки «v» (меню)
+	titleTabMaxW     = 220 // максимальная ширина вкладки
+	titleTabMinW     = 40  // ширина, ниже которой вкладки не сжимаются
+	titleTabPadH     = 12  // горизонтальный padding контента вкладки
+	titleTabCloseW   = 16  // зона «×» внутри вкладки
+	titleTabCloseGap = 8   // зазор текст → «×» и «×» → правый край
+	titleTabGap      = 2   // зазор между вкладками
+	titleTabPlusW    = 24  // ширина кнопки «+»
 )
+
+// titleTabContentBG возвращает эффективный фон содержимого вкладки — им
+// заливается корешок, чтобы срастись с панелью без шва. Контент-контейнеры
+// с собственным полем Background (Panel/Canvas/Grid/DockPanel) отдают его;
+// иначе — фон клиентской области окна.
+func (w *Window) titleTabContentBG(content Widget) color.RGBA {
+	switch v := content.(type) {
+	case *Panel:
+		if v.Background.A > 0 {
+			return v.Background
+		}
+	case *Canvas:
+		if v.Background.A > 0 {
+			return v.Background
+		}
+	case *Grid:
+		if v.Background.A > 0 {
+			return v.Background
+		}
+	case *DockPanel:
+		if v.Background.A > 0 {
+			return v.Background
+		}
+	}
+	return w.Background
+}
 
 // ─── Публичный API ──────────────────────────────────────────────────────────
 
@@ -361,7 +388,8 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 	widths := make([]int, len(tabs))
 	total := 0
 	for i, tab := range tabs {
-		tw := ctx.MeasureText(tab.Header, DefaultFontSizePt) + titleTabPadH*2 + titleTabCloseW
+		tw := ctx.MeasureText(tab.Header, DefaultFontSizePt) + titleTabPadH*2 +
+			titleTabCloseW + titleTabCloseGap
 		if tab.Icon != nil {
 			tw += titleTabIconW + titleTabIconGap
 		}
@@ -420,8 +448,8 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 				bandBot -= 5 // контент корешка центрируется по видимой полосе
 			}
 			cy := (r.Min.Y + bandBot) / 2
-			closeRects[i] = image.Rect(r.Max.X-titleTabCloseW-2, cy-titleTabCloseW/2,
-				r.Max.X-2, cy+titleTabCloseW/2)
+			closeRects[i] = image.Rect(r.Max.X-titleTabCloseW-titleTabCloseGap, cy-titleTabCloseW/2,
+				r.Max.X-titleTabCloseGap, cy+titleTabCloseW/2)
 		}
 
 		switch {
@@ -449,7 +477,7 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 		btnH = bandBot - tabTop
 	}
 	btnTop := tabTop + (bandBot-tabTop-btnH)/2
-	x += 4 // зазор между вкладками и блоком кнопок
+	x += 8 // зазор между вкладками и блоком кнопок
 
 	// Геометрия обеих кнопок считается заранее — фон рисуется ОДНОЙ общей
 	// пилюлей на блок (как сегментная кнопка +/v в Windows Terminal),
@@ -528,12 +556,14 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 
 	switch {
 	case active:
-		// Корешок единым куском с панелью: заливка цветом клиентской
-		// области, скругление ТОЛЬКО сверху (низ прямой, вровень с низом
-		// заголовка — линия-разделитель под ним прерывается, см.
-		// Window.Draw), рамка по бокам и сверху.
-		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, w.Background)
-		ctx.FillRect(r.Min.X, r.Max.Y-6, r.Dx(), 6, w.Background)
+		// Корешок единым куском с панелью: заливка фоном СОДЕРЖИМОГО
+		// вкладки (не окна — после темизации они расходятся), скругление
+		// ТОЛЬКО сверху (низ прямой, вровень с низом заголовка — линия-
+		// разделитель под ним прерывается, см. Window.Draw), рамка по
+		// бокам и сверху.
+		bg := w.titleTabContentBG(tab.Content)
+		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, bg)
+		ctx.FillRect(r.Min.X, r.Max.Y-6, r.Dx(), 6, bg)
 		ctx.SetClip(r)
 		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy()+6, 6, cardBorder)
 		ctx.ClearClip()
@@ -572,9 +602,10 @@ func (w *Window) drawClassicTitleTab(ctx DrawContext, r image.Rectangle, tab Tab
 	top := r.Min.Y
 	face := win10.BtnBG
 	if active {
-		// Активный ярлык срастается с клиентской областью: лицо — фон окна,
-		// нижней грани нет (низ вровень с низом заголовка).
-		face = w.Background
+		// Активный ярлык срастается с клиентской областью: лицо — фон
+		// содержимого вкладки, нижней грани нет (низ вровень с низом
+		// заголовка).
+		face = w.titleTabContentBG(tab.Content)
 	} else {
 		top += 2 // неактивные ярлыки на 2px ниже, как в Win2000
 	}
