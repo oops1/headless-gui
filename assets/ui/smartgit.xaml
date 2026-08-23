@@ -12,8 +12,12 @@
             </MenuItem>
             <MenuItem Header="Settings">
                 <MenuItem Header="Theme">
-                    <MenuItem Header="Dark"/>
-                    <MenuItem Header="Light"/>
+                    <MenuItem Header="Win10 Dark"/>
+                    <MenuItem Header="Win10 Light"/>
+                    <MenuItem Header="Win11 Dark"/>
+                    <MenuItem Header="Win11 Light"/>
+                    <MenuItem Header="Win2000"/>
+                    <MenuItem Header="Mac"/>
                 </MenuItem>
                 <MenuItem Header="Title Style">
                     <MenuItem Header="Windows Style"/>

@@ -183,7 +183,7 @@
                 Style="Accent"/>
         <Button Name="btnThemeToggle"
                 Left="388" Top="344" Right="620" Bottom="382"
-                Content="Светлая тема"/>
+                Content="Сменить тему"/>
 
         <!-- ═══ Новые виджеты ═══ -->
         <Separator Left="20" Top="400" Right="1080" Bottom="402"/>
