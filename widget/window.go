@@ -168,6 +168,20 @@ type Window struct {
 	// курсор всё ещё над ней. См. OnClose.
 	OnMaximize func()
 
+	// ── Вкладки в заголовке (стиль Windows 11 Terminal) ─────────────────────
+
+	// OnTitleTabChange вызывается при смене активной вкладки заголовка.
+	OnTitleTabChange func(idx int, header string)
+	// OnTitleTabClosed вызывается после закрытия вкладки заголовка.
+	OnTitleTabClosed func(idx int, header string)
+	// OnTitleTabNew вызывается по клику на «+» в полосе вкладок.
+	// nil — кнопка «+» не показывается.
+	OnTitleTabNew func()
+
+	// titleTabs — состояние режима вкладок (nil — режим выключен).
+	// См. window_tabs.go: EnableTitleTabs / AddTitleTab.
+	titleTabs *titleTabsState
+
 	// ── Drag окна (для borderless-режима) ───────────────────────────────────
 
 	// OnDragMove вызывается при перетаскивании за заголовок.
@@ -738,13 +752,20 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	// теряли последнюю букву под эллипсис при наличии плашки локали.
 	textX := x + 12
 	textY := y + (th-13)/2
-	title := w.Title
-	if titleMaxW := titleRight - textX; titleMaxW <= 0 {
-		title = ""
+	if w.titleTabsActive() {
+		// Режим вкладок: полосу заголовка занимают вкладки, текст Title
+		// не рисуется. В классике старт после отступа иконки, потолок —
+		// эффективная высота заголовка.
+		w.drawTitleTabs(ctx, x+4, titleRight-4, y, th)
 	} else {
-		title = ellipsizeText(ctx, title, titleMaxW, DefaultFontSizePt)
+		title := w.Title
+		if titleMaxW := titleRight - textX; titleMaxW <= 0 {
+			title = ""
+		} else {
+			title = ellipsizeText(ctx, title, titleMaxW, DefaultFontSizePt)
+		}
+		drawTitleText(ctx, title, textX, textY, tc)
 	}
-	drawTitleText(ctx, title, textX, textY, tc)
 
 	nc := w.btnCount()
 	if nc == 0 {
@@ -1006,6 +1027,11 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 	if haveBadge {
 		rightLimit = badgeLeft - 8
 	}
+	if w.titleTabsActive() {
+		// Режим вкладок: после traffic lights — полоса вкладок.
+		w.drawTitleTabs(ctx, leftLimit+8, rightLimit, y, th)
+		return
+	}
 	textY := y + (th-13)/2
 	title := w.Title
 	if maxW := rightLimit - leftLimit; maxW <= 0 {
@@ -1051,6 +1077,11 @@ func (w *Window) WantsCapture(e MouseEvent) bool {
 	// Полоса ресайза по краю окна (приоритетнее drag заголовка в верхней зоне).
 	if w.resizeEdgeAt(e.X, e.Y) != edgeNone {
 		return true
+	}
+	// Клик по вкладке/«×»/«+» в полосе заголовка обрабатывается на нажатии
+	// и захвата не требует (иначе капча зависла бы без release-ветки).
+	if w.titleTabHitZone(pt) {
+		return false
 	}
 	// Drag за заголовок.
 	tb := w.titleBarRect()
@@ -1235,7 +1266,8 @@ func (w *Window) OnMouseMove(x, y int) {
 	c1 := w.hoverClose.Swap(hc) != hc
 	c2 := w.hoverMin.Swap(hm) != hm
 	c3 := w.hoverMax.Swap(hx) != hx
-	if c1 || c2 || c3 {
+	c4 := w.titleTabsMouseMove(x, y)
+	if c1 || c2 || c3 || c4 {
 		w.Invalidate()
 	}
 }
@@ -1345,6 +1377,11 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 	if r := w.MaxBtnRect(); !r.Empty() && pt.In(r) {
 		w.armedBtn = titleBtnMax
 		w.Invalidate()
+		return true
+	}
+
+	// Вкладки заголовка: клик по вкладке/«×»/«+» (до начала drag).
+	if pt.In(w.titleBarRect()) && w.titleTabsMouseDown(pt) {
 		return true
 	}
 
