@@ -17,6 +17,20 @@ import (
 	tvPkg "github.com/oops1/headless-gui/v3/widget/treeview"
 )
 
+// applyXAMLSizeAttr сохраняет явные XAML Width/Height (для alignment).
+// Спец-билдеры контейнеров не проходят общий путь buildXAMLWidgetAt,
+// где это делается автоматически.
+func applyXAMLSizeAttr(w Widget, el xElement) {
+	type xamlSizeSetter interface {
+		SetXAMLSize(w, h int)
+	}
+	if xss, ok := w.(xamlSizeSetter); ok {
+		if xw, xh := xatoi(el.attr("Width")), xatoi(el.attr("Height")); xw > 0 || xh > 0 {
+			xss.SetXAMLSize(xw, xh)
+		}
+	}
+}
+
 // ─── buildXAMLGrid ─────────────────────────────────────────────────────────
 
 // buildXAMLGrid создаёт Grid из XAML-элемента, парсит RowDefinitions/ColumnDefinitions,
@@ -66,6 +80,7 @@ func buildXAMLGrid(el xElement, reg map[string]Widget, parentOff image.Point, ba
 
 	// Attached properties — важно для вложенных Grid'ов внутри родительского Grid.
 	applyCommonProps(g, el)
+	applyXAMLSizeAttr(g, el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
@@ -554,6 +569,7 @@ func buildXAMLCanvas(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin, ToolTip, …
 	applyCommonProps(cv, el)
+	applyXAMLSizeAttr(cv, el)
 	cv.InputBindings = parseInputBindings(el)
 
 	// Регистрация по имени
@@ -646,11 +662,14 @@ func addCanvasChild(cv *Canvas, child xElement, reg map[string]Widget, canvasOff
 	}
 
 	// Если Width/Height не были заданы явно в XAML, попробуем взять
-	// из bounds, которые buildXAMLWidget мог установить
-	if desiredW <= 0 {
+	// из bounds, которые buildXAMLWidget мог установить.
+	// При якоре Right/Bottom bounds не годятся: el.bounds() читает
+	// Right/Bottom как координаты прямоугольника и даёт мусорный размер;
+	// оставляем 0 → layoutChild применит дефолт или вычислит по якорям.
+	if desiredW <= 0 && props.Right < 0 {
 		desiredW = cw.Bounds().Dx()
 	}
-	if desiredH <= 0 {
+	if desiredH <= 0 && props.Bottom < 0 {
 		desiredH = cw.Bounds().Dy()
 	}
 
@@ -671,9 +690,7 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 	// Общие свойства (включая Grid.Row/Column — без этого TabControl как прямой
 	// потомок Grid игнорировал ячейку и рисовался от верха окна; см. BUG-1).
 	applyCommonProps(tc, el)
-	if xw, xh := xatoi(el.attr("Width")), xatoi(el.attr("Height")); xw > 0 || xh > 0 {
-		tc.SetXAMLSize(xw, xh)
-	}
+	applyXAMLSizeAttr(tc, el)
 
 	// Регистрация по имени
 	if id := el.name(); id != "" {
