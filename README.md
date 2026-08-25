@@ -1,5 +1,6 @@
 <a href="https://github.com/oops1/headless-gui">
      <img width="1280" height="640" alt="claude-skills" src="https://github.com/oops1/headless-gui/blob/main/social_preview.png" />
+     
 </a>
 
 
