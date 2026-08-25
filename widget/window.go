@@ -65,6 +65,18 @@ const (
 
 // ─── Window ─────────────────────────────────────────────────────────────────
 
+// OutlineDragStyle — из чего состоит контур перетаскивания (OutlineDrag).
+type OutlineDragStyle int
+
+const (
+	// OutlineDragBorder — только рамка (по умолчанию): за кадр меняются
+	// несколько тонких полос пикселей, дёшево по трафику.
+	OutlineDragBorder OutlineDragStyle = iota
+	// OutlineDragFilled — рамка плюс полупрозрачная заливка: меняется каждый
+	// пиксель под контуром. Заметно дороже, см. Window.OutlineDragStyle.
+	OutlineDragFilled
+)
+
 // Window — корневой виджет, представляющий независимое окно приложения.
 //
 // В отличие от Panel/Canvas (рабочий стол с панелями-окнами внутри),
@@ -195,8 +207,15 @@ type Window struct {
 	// нативном режиме контур рисуется внутри окна и обрезается его краями.
 	OutlineDrag bool
 
-	// OutlineDragFill — заливка контура (A=0 → берётся из темы, а если и там
-	// не задана — считается от цвета рамки окна). Alpha-premultiplied.
+	// OutlineDragStyle — из чего состоит контур. По умолчанию
+	// OutlineDragBorder: только рамка, несколько тонких полос за кадр.
+	// Заливка (OutlineDragFilled) перекрашивает КАЖДЫЙ пиксель под окном —
+	// на удалённом рабочем столе это дороже, чем просто двигать окно, ради
+	// чего режим и заводился. Включайте её только для локального экрана.
+	OutlineDragStyle OutlineDragStyle
+
+	// OutlineDragFill — цвет заливки при OutlineDragFilled (A=0 → из темы,
+	// а если и там не задан — тон рамки окна). Alpha-premultiplied.
 	OutlineDragFill color.RGBA
 
 	// outlineRect — текущее положение контура; непустой только пока идёт
@@ -210,7 +229,15 @@ type Window struct {
 	// OnDragMove вызывается при перетаскивании за заголовок.
 	// dx, dy — смещение мыши с предыдущего кадра.
 	// Используется window.Window для SetWindowPosition.
+	//
+	// Сам по себе хук НЕ отключает ресайз за края: приложение может забрать
+	// перемещение и сохранить изменение размера. Ресайз краями выключает
+	// SetNativeHosted — там размером ведает ОС.
 	OnDragMove func(dx, dy int)
+
+	// nativeHosted — окно живёт в нативном окне ОС (window.Window): размер и
+	// положение меняет система, виджетный ресайз за края конфликтовал бы с ней.
+	nativeHosted bool
 
 	dragging   bool
 	dragStartX int
@@ -1130,14 +1157,26 @@ func (w *Window) WantsCapture(e MouseEvent) bool {
 
 // edgeResizeEnabled сообщает, разрешён ли ресайз перетаскиванием краёв.
 // Только для «виртуальных» окон на канвасе (headless): в нативном режиме
-// размер меняет ОС (window.Window выставляет OnDragMove), и виджетный ресайз
-// краёв конфликтовал бы с нативным. Запрещён для NoResize/CanMinimize и
-// borderless-окон (WindowStyleNone).
+// размер меняет ОС, и виджетный ресайз краёв конфликтовал бы с ней. Запрещён
+// для NoResize/CanMinimize и borderless-окон (WindowStyleNone).
+//
+// Признак нативного режима — SetNativeHosted, а не наличие OnDragMove:
+// приложение вправе забрать себе перемещение окна (например, чтобы рисовать
+// контур или тащить окно по своей сцене), не теряя изменение размера.
 func (w *Window) edgeResizeEnabled() bool {
 	return w.Resize == ResizeModeCanResize &&
 		w.Style != WindowStyleNone &&
-		w.OnDragMove == nil
+		!w.nativeHosted
 }
+
+// SetNativeHosted помечает окно как живущее в нативном окне ОС: размер и
+// положение ведёт система, поэтому виджетный ресайз за края выключается.
+// Вызывается window.Window при подключении окна; приложениям на канвасе
+// вызывать не нужно.
+func (w *Window) SetNativeHosted(v bool) { w.nativeHosted = v }
+
+// IsNativeHosted сообщает, помечено ли окно как нативно размещённое.
+func (w *Window) IsNativeHosted() bool { return w.nativeHosted }
 
 // resizeEdgeAt возвращает край(а) окна под точкой (x, y) для ресайза —
 // полоса шириной winResizeBorder вдоль каждой границы bounds, включая углы
@@ -1267,13 +1306,16 @@ func (w *Window) OnMouseMove(x, y int) {
 		// контур-overlay. Итоговое смещение применяется при отпускании.
 		if !w.outlineRect.Empty() {
 			b := w.Bounds()
+			old := w.outlineRect
 			w.outlineDX, w.outlineDY = dx, dy
 			w.outlineRect = image.Rect(
 				w.dragWinX+dx, w.dragWinY+dy,
 				w.dragWinX+dx+b.Dx(), w.dragWinY+dy+b.Dy(),
 			)
-			w.Invalidate()
-			notifyUIChanged() // контур рисуется overlay-проходом поверх всего
+			// Изменились только две полосы: там, где контур был, и там, где
+			// он стал. Полная инвалидация здесь стоила бы кадра целиком —
+			// ровно того, чего режим контура и должен избегать.
+			notifyRectChanged(old.Union(w.outlineRect))
 			return
 		}
 		if w.OnDragMove != nil {
@@ -1368,12 +1410,16 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 				dx, dy := w.outlineDX, w.outlineDY
 				w.outlineRect = image.Rectangle{}
 				w.outlineDX, w.outlineDY = 0, 0
+				from := w.Bounds()
 				if w.OnDragMove != nil {
 					w.OnDragMove(dx, dy) // нативное окно переносит ОС
 				} else if dx != 0 || dy != 0 {
-					w.SetBounds(dest)
+					w.SetBounds(dest) // сам сообщит об объединении старой и новой области
 				}
-				notifyUIChanged() // контур исчез, окно на новом месте
+				// Гасим контур ровно там, где он был; полная инвалидация
+				// скрыла бы от хоста, что окно просто переехало, — а по этому
+				// он решает, можно ли обойтись командой копирования.
+				notifyRectChanged(dest.Union(from))
 			}
 			if w.capMgr != nil {
 				w.capMgr.ReleaseCapture()
@@ -1532,8 +1578,12 @@ func (w *Window) drawDragOutline(ctx DrawContext) {
 		return
 	}
 	fill, border := w.outlineColors()
-	if da, ok := ctx.(DrawContextAlpha); ok && fill.A > 0 {
-		da.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), fill)
+	// Заливка — только по явному запросу: она перекрашивает каждый пиксель
+	// под контуром, и по сети это дороже, чем двигать само окно.
+	if w.OutlineDragStyle == OutlineDragFilled && fill.A > 0 {
+		if da, ok := ctx.(DrawContextAlpha); ok {
+			da.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), fill)
+		}
 	}
 	if cr := w.CornerRadius; cr > 0 {
 		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), cr, border)
@@ -1544,8 +1594,9 @@ func (w *Window) drawDragOutline(ctx DrawContext) {
 	ctx.DrawBorder(r.Min.X+1, r.Min.Y+1, r.Dx()-2, r.Dy()-2, border)
 }
 
-// outlineColors возвращает заливку (alpha-premultiplied) и цвет рамки контура:
-// поле окна, иначе тема, иначе — расчёт от цвета рамки окна.
+// outlineColors возвращает заливку (alpha-premultiplied) и цвет рамки контура.
+// Заливка берётся из поля окна, иначе из темы, иначе считается от цвета рамки;
+// рисуется она только при OutlineDragFilled (см. drawDragOutline).
 func (w *Window) outlineColors() (fill, border color.RGBA) {
 	border = w.resolveColor(w.BorderColor, win10.Border)
 	switch {
