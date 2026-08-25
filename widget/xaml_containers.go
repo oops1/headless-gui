@@ -282,6 +282,17 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 		}
 	}
 
+	// OutlineDrag="True" — таскать за заголовок контур, а не само окно
+	// (аналог «не показывать содержимое окна при перетаскивании»).
+	if od := el.attr("OutlineDrag"); strings.EqualFold(od, "true") || od == "1" {
+		win.OutlineDrag = true
+	}
+	if ofc := el.attr("OutlineDragFill"); ofc != "" {
+		if c, err := parseXAMLColor(ofc); err == nil {
+			win.OutlineDragFill = c
+		}
+	}
+
 	// TitleTabs="True" — вкладки в заголовке окна (стиль Windows 11 Terminal).
 	// Вкладки задаются дочерними <TabItem>, меню шеврона — <TitleTabsMenu>.
 	if ttv := el.attr("TitleTabs"); strings.EqualFold(ttv, "true") || ttv == "1" {

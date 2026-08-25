@@ -182,6 +182,29 @@ type Window struct {
 	// См. window_tabs.go: EnableTitleTabs / AddTitleTab.
 	titleTabs *titleTabsState
 
+	// ── Перетаскивание контуром (OutlineDrag) ───────────────────────────────
+
+	// OutlineDrag — таскать за заголовок КОНТУР окна, а не само окно; окно
+	// переезжает один раз, при отпускании кнопки. Так работает режим
+	// «не показывать содержимое окна при перетаскивании» (Windows) и
+	// PERF_DISABLE_FULLWINDOWDRAG у RDP-клиентов: по сети уходит контур в
+	// пару сотен байт вместо кадров движущегося окна.
+	//
+	// Работает и для окон на канвасе (окно двигает себя само), и в нативном
+	// режиме (OnDragMove вызывается один раз с итоговым смещением); в
+	// нативном режиме контур рисуется внутри окна и обрезается его краями.
+	OutlineDrag bool
+
+	// OutlineDragFill — заливка контура (A=0 → берётся из темы, а если и там
+	// не задана — считается от цвета рамки окна). Alpha-premultiplied.
+	OutlineDragFill color.RGBA
+
+	// outlineRect — текущее положение контура; непустой только пока идёт
+	// перетаскивание контуром. outlineDX/DY — суммарное смещение мыши.
+	outlineRect      image.Rectangle
+	outlineDX        int
+	outlineDY        int
+
 	// ── Drag окна (для borderless-режима) ───────────────────────────────────
 
 	// OnDragMove вызывается при перетаскивании за заголовок.
@@ -1240,6 +1263,19 @@ func (w *Window) OnMouseMove(x, y int) {
 		if dx == 0 && dy == 0 {
 			return
 		}
+		// Перетаскивание контуром: само окно стоит на месте, двигается только
+		// контур-overlay. Итоговое смещение применяется при отпускании.
+		if !w.outlineRect.Empty() {
+			b := w.Bounds()
+			w.outlineDX, w.outlineDY = dx, dy
+			w.outlineRect = image.Rect(
+				w.dragWinX+dx, w.dragWinY+dy,
+				w.dragWinX+dx+b.Dx(), w.dragWinY+dy+b.Dy(),
+			)
+			w.Invalidate()
+			notifyUIChanged() // контур рисуется overlay-проходом поверх всего
+			return
+		}
 		if w.OnDragMove != nil {
 			// Нативный режим: делегируем движение нативному окну.
 			// Не обновляем dragStart — координаты мыши относительны окна.
@@ -1326,6 +1362,19 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 		}
 		if w.dragging {
 			w.dragging = false
+			// Контурное перетаскивание: окно переезжает один раз, здесь.
+			if !w.outlineRect.Empty() {
+				dest := w.outlineRect
+				dx, dy := w.outlineDX, w.outlineDY
+				w.outlineRect = image.Rectangle{}
+				w.outlineDX, w.outlineDY = 0, 0
+				if w.OnDragMove != nil {
+					w.OnDragMove(dx, dy) // нативное окно переносит ОС
+				} else if dx != 0 || dy != 0 {
+					w.SetBounds(dest)
+				}
+				notifyUIChanged() // контур исчез, окно на новом месте
+			}
 			if w.capMgr != nil {
 				w.capMgr.ReleaseCapture()
 			}
@@ -1418,6 +1467,10 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 		b := w.Bounds()
 		w.dragWinX = b.Min.X
 		w.dragWinY = b.Min.Y
+		if w.OutlineDrag {
+			w.outlineRect = b // непустой прямоугольник = идёт drag контуром
+			w.outlineDX, w.outlineDY = 0, 0
+		}
 		return true
 	}
 
@@ -1444,13 +1497,19 @@ func localeMenuList() []string {
 
 // HasOverlay реализует OverlayDrawer — true, когда открыто меню выбора локали.
 func (w *Window) HasOverlay() bool {
+	if !w.outlineRect.Empty() {
+		return true // контур перетаскивания рисуется поверх всего
+	}
 	w.localeMu.Lock()
 	defer w.localeMu.Unlock()
 	return w.localeMenuOpen && w.ShowLocaleIndicator
 }
 
-// DrawOverlay рисует выпадающий список выбора локали поверх всего окна.
+// DrawOverlay рисует контур перетаскивания и выпадающий список выбора
+// локали поверх всего окна.
 func (w *Window) DrawOverlay(ctx DrawContext) {
+	w.drawDragOutline(ctx)
+
 	w.localeMu.Lock()
 	open := w.localeMenuOpen
 	badge := w.localeBadgeRect
@@ -1462,6 +1521,50 @@ func (w *Window) DrawOverlay(ctx DrawContext) {
 	w.localeMu.Lock()
 	w.localeItemRects = rects
 	w.localeMu.Unlock()
+}
+
+// drawDragOutline рисует контур окна при OutlineDrag: полупрозрачная заливка
+// в тон хрома плюс сплошная рамка. Пока контур виден, само окно стоит на
+// месте — оно переедет при отпускании кнопки.
+func (w *Window) drawDragOutline(ctx DrawContext) {
+	r := w.outlineRect
+	if r.Empty() {
+		return
+	}
+	fill, border := w.outlineColors()
+	if da, ok := ctx.(DrawContextAlpha); ok && fill.A > 0 {
+		da.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), fill)
+	}
+	if cr := w.CornerRadius; cr > 0 {
+		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), cr, border)
+	} else {
+		ctx.DrawBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), border)
+	}
+	// Вторая линия внутрь — контур виден и на фоне того же тона.
+	ctx.DrawBorder(r.Min.X+1, r.Min.Y+1, r.Dx()-2, r.Dy()-2, border)
+}
+
+// outlineColors возвращает заливку (alpha-premultiplied) и цвет рамки контура:
+// поле окна, иначе тема, иначе — расчёт от цвета рамки окна.
+func (w *Window) outlineColors() (fill, border color.RGBA) {
+	border = w.resolveColor(w.BorderColor, win10.Border)
+	switch {
+	case w.OutlineDragFill.A > 0:
+		fill = w.OutlineDragFill
+	case win10.OutlineDragFill.A > 0:
+		fill = win10.OutlineDragFill
+	default:
+		// Полупрозрачный тон рамки: straight-цвет × alpha (FillRectAlpha
+		// ждёт alpha-premultiplied — см. Canvas.FillRectAlpha).
+		const a = 56
+		fill = color.RGBA{
+			R: uint8(int(border.R) * a / 255),
+			G: uint8(int(border.G) * a / 255),
+			B: uint8(int(border.B) * a / 255),
+			A: a,
+		}
+	}
+	return fill, border
 }
 
 // Dismiss реализует Dismissable — закрывает меню локали при клике в стороне.

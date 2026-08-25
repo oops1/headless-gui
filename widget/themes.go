@@ -18,6 +18,10 @@ type Theme struct {
 	Border      color.RGBA // Window, Panel, ListView, Dialog, ScrollView, MenuBar — рамки
 	ShadowColor color.RGBA // PopupMenu, Dialog — тень под overlay-элементами
 
+	// OutlineDragFill — заливка контура окна при OutlineDrag (полупрозрачная,
+	// alpha-premultiplied: R,G,B ≤ A). A=0 → контур считается от цвета рамки.
+	OutlineDragFill color.RGBA
+
 	// Заголовок НЕАКТИВНОГО окна (без фокуса ОС). A=0 — автоматическое
 	// приглушение активного цвета. Win2000 задаёт явные классические
 	// цвета (серый градиент #808080→#C0C0C0, серебристый текст).
