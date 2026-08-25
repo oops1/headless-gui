@@ -135,7 +135,7 @@ func TestWindowResize_CornerNW(t *testing.T) {
 	w := widget.NewWindow("R", 400, 300)
 	w.SetBounds(image.Rect(100, 100, 500, 400))
 
-	pressAt(w, 101, 101) // угол NW
+	pressAt(w, 101, 101)  // угол NW
 	w.OnMouseMove(81, 71) // сдвиг (-20,-30)
 	releaseAt(w, 81, 71)
 
@@ -249,11 +249,14 @@ func TestXAMLWindow_MinSize_Absent(t *testing.T) {
 	}
 }
 
-// TestWindowResize_NativeGuard — при выставленном OnDragMove (нативный режим)
-// виджетный edge-resize отключён, чтобы не конфликтовать с ресайзом ОС.
+// TestWindowResize_NativeGuard — в нативном режиме виджетный edge-resize
+// отключён, чтобы не конфликтовать с ресайзом ОС. Признак режима — явный
+// SetNativeHosted (его выставляет window.Window), а не наличие OnDragMove:
+// приложение вправе забрать перемещение, не теряя изменение размера.
 func TestWindowResize_NativeGuard(t *testing.T) {
 	w := widget.NewWindow("Native", 400, 300)
-	w.OnDragMove = func(dx, dy int) {} // имитируем нативный режим
+	w.SetNativeHosted(true)            // как это делает window.Window
+	w.OnDragMove = func(dx, dy int) {} // ОС переносит окно
 	w.SetBounds(image.Rect(100, 100, 500, 400))
 
 	if c := w.Cursor(499, 250); c != widget.CursorArrow {
