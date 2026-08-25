@@ -292,6 +292,10 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 			win.OutlineDragFill = c
 		}
 	}
+	// OutlineDragStyle: Border (по умолчанию) | Filled.
+	if strings.EqualFold(el.attr("OutlineDragStyle"), "filled") {
+		win.OutlineDragStyle = OutlineDragFilled
+	}
 
 	// TitleTabs="True" — вкладки в заголовке окна (стиль Windows 11 Terminal).
 	// Вкладки задаются дочерними <TabItem>, меню шеврона — <TitleTabsMenu>.
