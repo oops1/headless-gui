@@ -297,6 +297,13 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	e.Invalidate()
 	ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed}
 
+	// Новое нажатие: открываем его номер ДО гашения overlay'ев (dismissOutside
+	// ниже) — кнопка, владеющая меню из чужого поддерева, по этому номеру
+	// узнаёт, что меню погасил её собственный клик. См. widget.BumpPressSeq.
+	if pressed && btn == widget.MouseLeft {
+		widget.BumpPressSeq()
+	}
+
 	// Если мышь захвачена — только захватчику.
 	// ВАЖНО: эта проверка ПЕРЕД pressConsumer, потому что capture-виджет
 	// (TextInput, Slider) ожидает release для освобождения захвата.

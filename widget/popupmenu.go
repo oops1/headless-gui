@@ -38,6 +38,9 @@ type PopupMenu struct {
 	popupW, popupH int
 
 	open     int32 // 1 — показано, 0 — скрыто (атомарно)
+	// dismissSeq — номер нажатия (CurrentPressSeq), которым меню было
+	// погашено через Dismiss. Атомарно.
+	dismissSeq uint64
 	hoverIdx int32 // индекс пункта под курсором (-1 = нет)
 
 	// Каскадное дочернее подменю (под geoMu).
@@ -391,7 +394,23 @@ func (m *PopupMenu) fullBounds() image.Rectangle {
 
 // Dismiss реализует Dismissable — закрывает меню при DismissAll.
 func (m *PopupMenu) Dismiss() {
+	// Кто именно погасил меню, важно кнопке-владельцу: движок закрывает
+	// overlay'и вне пути клика ДО доставки события, поэтому кнопка, лежащая
+	// в другом виджете (шеврон в заголовке окна), иначе не может отличить
+	// «меню было закрыто» от «меню закрыл мой же клик». См. CurrentPressSeq.
+	//
+	// Метку ставим ТОЛЬКО если меню было открыто: движок гасит и уже
+	// закрытые меню, а такая отметка заставила бы кнопку проглотить
+	// нажатие, которое должно меню открыть.
+	if atomic.LoadInt32(&m.open) == 1 {
+		atomic.StoreUint64(&m.dismissSeq, CurrentPressSeq())
+	}
 	m.Close()
+}
+
+// dismissedByPress сообщает, было ли меню погашено нажатием seq (0 — никогда).
+func (m *PopupMenu) dismissedByPress(seq uint64) bool {
+	return seq != 0 && atomic.LoadUint64(&m.dismissSeq) == seq
 }
 
 // ─── Размеры ────────────────────────────────────────────────────────────────

@@ -343,6 +343,107 @@ func (w *Window) GetToolTip() string {
 	return w.ToolTip
 }
 
+// ─── Экспортированная геометрия полосы вкладок ──────────────────────────────
+
+// TitleTabPart — что находится под точкой в полосе вкладок заголовка.
+type TitleTabPart int
+
+const (
+	TitleTabPartNone  TitleTabPart = iota // ничего (свободное место / вне полосы)
+	TitleTabPartTab                       // карточка вкладки
+	TitleTabPartClose                     // «×» вкладки
+	TitleTabPartPlus                      // кнопка «+»
+	TitleTabPartMenu                      // кнопка «v» (меню)
+)
+
+// TitleTabRect возвращает прямоугольник корешка вкладки idx по состоянию
+// последней отрисовки. Пустой — вкладки нет, она не поместилась в полосу
+// или окно ещё не рисовалось.
+func (w *Window) TitleTabRect(idx int) image.Rectangle {
+	tt := w.titleTabs
+	if tt == nil {
+		return image.Rectangle{}
+	}
+	tt.mu.Lock()
+	defer tt.mu.Unlock()
+	if idx >= 0 && idx < len(tt.tabRects) {
+		return tt.tabRects[idx]
+	}
+	return image.Rectangle{}
+}
+
+// TitleTabCloseRect возвращает прямоугольник «×» вкладки idx по состоянию
+// последней отрисовки. Пустой — крестик у этой вкладки сейчас не показан
+// (вкладка неактивна и без курсора либо слишком узкая).
+func (w *Window) TitleTabCloseRect(idx int) image.Rectangle {
+	tt := w.titleTabs
+	if tt == nil {
+		return image.Rectangle{}
+	}
+	tt.mu.Lock()
+	defer tt.mu.Unlock()
+	if idx >= 0 && idx < len(tt.closeRects) {
+		return tt.closeRects[idx]
+	}
+	return image.Rectangle{}
+}
+
+// TitleTabPlusRect возвращает прямоугольник кнопки «+» (пустой — кнопки нет:
+// не задан OnTitleTabNew либо не хватило места).
+func (w *Window) TitleTabPlusRect() image.Rectangle {
+	tt := w.titleTabs
+	if tt == nil {
+		return image.Rectangle{}
+	}
+	tt.mu.Lock()
+	defer tt.mu.Unlock()
+	return tt.plusRect
+}
+
+// TitleTabMenuRect возвращает прямоугольник кнопки «v» (пустой — меню не
+// прикреплено либо не хватило места).
+func (w *Window) TitleTabMenuRect() image.Rectangle {
+	tt := w.titleTabs
+	if tt == nil {
+		return image.Rectangle{}
+	}
+	tt.mu.Lock()
+	defer tt.mu.Unlock()
+	return tt.menuRect
+}
+
+// TitleTabHitTest сообщает, что находится под точкой (x, y) в полосе вкладок
+// заголовка: часть и индекс вкладки (−1 для «+», «v» и пустого места).
+// Геометрия — от последней отрисовки; до первого кадра всё пусто.
+//
+// Нужен приложениям, которые сами перехватывают ввод до движка (например,
+// чтобы отличить перетаскивание заголовка от клика по вкладке), и тестам.
+func (w *Window) TitleTabHitTest(x, y int) (TitleTabPart, int) {
+	tt := w.titleTabs
+	if tt == nil {
+		return TitleTabPartNone, -1
+	}
+	pt := image.Pt(x, y)
+	tt.mu.Lock()
+	defer tt.mu.Unlock()
+	if !tt.plusRect.Empty() && pt.In(tt.plusRect) {
+		return TitleTabPartPlus, -1
+	}
+	if !tt.menuRect.Empty() && pt.In(tt.menuRect) {
+		return TitleTabPartMenu, -1
+	}
+	for i, r := range tt.tabRects {
+		if r.Empty() || !pt.In(r) {
+			continue
+		}
+		if i < len(tt.closeRects) && !tt.closeRects[i].Empty() && pt.In(tt.closeRects[i]) {
+			return TitleTabPartClose, i
+		}
+		return TitleTabPartTab, i
+	}
+	return TitleTabPartNone, -1
+}
+
 // ─── Геометрия и отрисовка ──────────────────────────────────────────────────
 
 // drawTitleTabs рисует полосу вкладок в заголовке между left и right
@@ -759,9 +860,15 @@ func (w *Window) titleTabsMouseDown(pt image.Point) bool {
 		mx, my := tt.menuRect.Min.X, tt.menuRect.Max.Y+4
 		tt.mu.Unlock()
 		if menu != nil {
-			if menu.IsOpen() {
+			switch {
+			case menu.IsOpen():
 				menu.Close()
-			} else {
+			case menu.dismissedByPress(CurrentPressSeq()):
+				// Меню уже закрыто ЭТИМ нажатием: движок гасит overlay'и вне
+				// пути клика до доставки события, а кнопка «v» лежит в окне,
+				// не в меню. Без этой ветки шеврон никогда не сворачивал бы
+				// собственное меню — оно закрывалось и тут же открывалось.
+			default:
 				menu.Show(mx, my)
 			}
 		}
