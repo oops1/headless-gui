@@ -675,6 +675,23 @@ func main() {
 	})
 	updateLangBtn()
 
+	// Светящаяся полоса: кнопка переключает определённый режим и «бегунок».
+	if b := btn("pbGlowToggle"); b != nil {
+		if pbg, ok := reg["pbGlow"].(*widget.ProgressBar); ok {
+			b.OnClick = func() {
+				on := !pbg.IsIndeterminate()
+				pbg.SetIndeterminate(on)
+				if on {
+					b.SetText(widget.Tr("Determinate mode"))
+				} else {
+					b.SetText(widget.Tr("Indeterminate mode"))
+					pbg.AnimateValue(0.62)
+				}
+				addLog("Glow bar: indeterminate=%v", on)
+			}
+		}
+	}
+
 	// ─── TAB: Диалоги ────────────────────────────────────────────────────────
 	mbox := widget.NewMessageBox(eng)
 	setResult := func(format string, args ...any) {
@@ -735,6 +752,31 @@ func main() {
 			}()
 		}
 	}
+	// Диалог ожидания: заголовок по центру, светящаяся полоса, нижняя
+	// строка-предупреждение. Сперва неопределённый режим («не знаем, сколько
+	// осталось»), затем переход на реальный прогресс — так это и выглядит в
+	// жизни, когда работа сначала непредсказуема, а потом считается.
+	if b := btn("dlgBusy"); b != nil {
+		b.OnClick = func() {
+			bd := mbox.ShowBusy(
+				widget.Tr("Processing data"),
+				widget.Tr("Please wait…"),
+				widget.Tr("Do not close this window"),
+				func() { setResult("Processing cancelled") },
+			)
+			go func() {
+				time.Sleep(1600 * time.Millisecond)
+				bd.SetSubtitle(widget.Tr("Building the index…"))
+				for i := 0; i <= 100; i += 3 {
+					time.Sleep(45 * time.Millisecond)
+					bd.SetProgress(float64(i) / 100)
+				}
+				bd.Close()
+				setResult("Processing finished")
+			}()
+		}
+	}
+
 	fileOpts := func() widget.FileDialogOptions {
 		return widget.FileDialogOptions{
 			Filters: []widget.FileFilter{
