@@ -260,15 +260,12 @@ func glowPhase(dur time.Duration) float64 {
 	return float64(time.Now().UnixNano()%int64(dur)) / float64(dur)
 }
 
-// glowSweep — положение головы в неопределённом режиме: разгон от края,
-// торможение у противоположного (EaseInOut), затем возврат.
+// glowSweep — положение головы в неопределённом режиме: ровный ход слева
+// направо, у правого края — заново от левого. Скорость постоянная: с
+// плавным разгоном (smoothstep) на стыке циклов был бы рывок, а метание
+// головы вперёд-назад читается как сбой, а не как «идёт работа».
 func glowSweep() float64 {
-	t := glowPhase(2200 * time.Millisecond)
-	if t > 0.5 {
-		t = 1 - t
-	}
-	t *= 2
-	return t * t * (3 - 2*t) // smoothstep
+	return glowPhase(2200 * time.Millisecond)
 }
 
 // markDrawn запоминает момент отрисовки: по нему зацикленная анимация
