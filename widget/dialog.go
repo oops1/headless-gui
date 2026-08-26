@@ -428,6 +428,12 @@ type dialogCloseBtn struct {
 	Base
 	owner *Dialog
 	hover bool
+	// armed — кнопка «взведена» нажатием. Закрытие срабатывает на ОТПУСКАНИИ
+	// и только если курсор всё ещё над кнопкой: нажать, увести мышь и
+	// отпустить — значит передумать (семантика кнопок Windows, та же, что у
+	// кнопок заголовка окна, см. Window.armedBtn).
+	armed  bool
+	capMgr CaptureManager
 }
 
 func (cb *dialogCloseBtn) Draw(ctx DrawContext) {
@@ -463,11 +469,40 @@ func (cb *dialogCloseBtn) OnMouseMove(x, y int) {
 	}
 }
 
+// SetCaptureManager инжектится движком: захват нужен, чтобы отпускание
+// пришло кнопке даже если курсор ушёл с неё.
+func (cb *dialogCloseBtn) SetCaptureManager(cm CaptureManager) { cb.capMgr = cm }
+
+// WantsCapture — захватываем мышь на нажатии ради release-семантики.
+func (cb *dialogCloseBtn) WantsCapture(e MouseEvent) bool {
+	return e.Button == MouseLeft && e.Pressed && image.Pt(e.X, e.Y).In(cb.bounds)
+}
+
 func (cb *dialogCloseBtn) OnMouseButton(e MouseEvent) bool {
-	if e.Button != MouseLeft || !e.Pressed || !image.Pt(e.X, e.Y).In(cb.bounds) {
+	if e.Button != MouseLeft {
 		return false
 	}
-	cb.owner.RequestClose()
+	over := image.Pt(e.X, e.Y).In(cb.bounds)
+
+	if e.Pressed {
+		if !over {
+			return false
+		}
+		cb.armed = true
+		return true
+	}
+
+	// Отпускание: закрываем, только если кнопка была взведена и курсор над ней.
+	if !cb.armed {
+		return false
+	}
+	cb.armed = false
+	if cb.capMgr != nil {
+		cb.capMgr.ReleaseCapture()
+	}
+	if over {
+		cb.owner.RequestClose()
+	}
 	return true
 }
 

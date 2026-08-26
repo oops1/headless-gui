@@ -62,3 +62,37 @@ func TestBusyDialog_CancelClosesAndNotifies(t *testing.T) {
 		t.Errorf("после Close onCancel вызван ещё раз: %d", calls)
 	}
 }
+
+// TestDialogCloseButton_FiresOnRelease — ✕ диалога срабатывает на отпускании
+// кнопки: нажать, увести курсор и отпустить — значит передумать.
+func TestDialogCloseButton_FiresOnRelease(t *testing.T) {
+	eng := engine.New(900, 600, 30)
+	eng.SetRoot(widget.NewPanel(widget.DarkTheme().WindowBG))
+	mb := widget.NewMessageBox(eng)
+
+	closes := 0
+	bd := mb.ShowBusy("Работа", "", "", func() { closes++ })
+
+	// Координаты ✕: правый верхний угол корпуса диалога.
+	b := bd.Bounds()
+	cx, cy := b.Max.X-24, b.Min.Y+17
+
+	// Одно нажатие ничего не закрывает.
+	eng.SendMouseButton(cx, cy, widget.MouseLeft, true)
+	if closes != 0 {
+		t.Fatalf("нажатие закрыло диалог сразу (%d)", closes)
+	}
+
+	// Отпускание в стороне — отмена, диалог остаётся.
+	eng.SendMouseButton(cx, b.Max.Y-10, widget.MouseLeft, false)
+	if closes != 0 {
+		t.Errorf("отпускание вне кнопки закрыло диалог (%d)", closes)
+	}
+
+	// Нажатие и отпускание на кнопке — закрытие.
+	eng.SendMouseButton(cx, cy, widget.MouseLeft, true)
+	eng.SendMouseButton(cx, cy, widget.MouseLeft, false)
+	if closes != 1 {
+		t.Errorf("клик по ✕: onCancel вызван %d раз, ждали 1", closes)
+	}
+}

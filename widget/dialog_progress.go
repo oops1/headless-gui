@@ -115,6 +115,10 @@ func (pd *ProgressDialog) SetIndeterminate(on bool) {
 	}
 }
 
+// Bounds возвращает прямоугольник корпуса диалога (после центрирования
+// движком). Нужен приложениям, которые дорисовывают что-то рядом, и тестам.
+func (pd *ProgressDialog) Bounds() image.Rectangle { return pd.dlg.Bounds() }
+
 // Progress возвращает текущее значение полосы [0,1] (потокобезопасно).
 func (pd *ProgressDialog) Progress() float64 { return pd.bar.Value() }
 
