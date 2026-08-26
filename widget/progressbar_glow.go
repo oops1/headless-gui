@@ -297,16 +297,20 @@ func (pb *ProgressBar) ensureGlowAnim() {
 	pb.glowAnim = a
 }
 
-// glowDamageRect — область, которую нужно перерисовать: ореол выходит за
-// границы виджета, и damage строго по bounds оставил бы за ними старый кадр.
+// glowDamageRect — область, которую нужно перерисовать. У свечения ореол
+// выходит за границы виджета, и damage строго по bounds оставил бы за ними
+// старый кадр; штатной полосе хватает собственных границ.
 func (pb *ProgressBar) glowDamageRect() image.Rectangle {
 	b := pb.Bounds()
-	if b.Empty() {
+	if b.Empty() || !pb.glowEnabled() {
 		return b
 	}
 	h := b.Dy()
 	return b.Inset(-int(float64(h)*glowHaloRY) - h)
 }
+
+// marqueePhase — фаза бегущей полосы (классика Win2000): период 1.4 с.
+func marqueePhase() float64 { return glowPhase(1400 * time.Millisecond) }
 
 // ─── Цветовые помощники ─────────────────────────────────────────────────────
 

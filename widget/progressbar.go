@@ -141,6 +141,13 @@ func (pb *ProgressBar) Draw(ctx DrawContext) {
 // дорожка с блоками, Mac/Win11 — скруглённая пилюля, Win10 — прямоугольник.
 func (pb *ProgressBar) drawThemed(ctx DrawContext, b image.Rectangle, v float64) {
 	st := currentStyle()
+	if pb.indeterminate.Load() {
+		// Бегущая полоса живёт от кадра к кадру, а фокуса у неё нет (диалог
+		// ожидания) — держим кадры той же зациклённой анимацией, что и
+		// свечение. Она снимет себя, когда полосу перестанут рисовать.
+		pb.markDrawn()
+		pb.ensureGlowAnim()
+	}
 
 	// Неопределённый режим: бегущий блок ~1/3 ширины (кроме классики Win2000,
 	// где indeterminate рисуется как заполнение блоками).
@@ -189,8 +196,25 @@ func (pb *ProgressBar) drawThemed(ctx DrawContext, b image.Rectangle, v float64)
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), pb.Background)
 		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		innerW := b.Dx() - 6
-		fillW := int(math.Round(float64(innerW) * v))
 		blockW, gap := 8, 2
+		if pb.indeterminate.Load() {
+			// Marquee Win2000: группа блоков ползёт по дорожке и уходит за
+			// край. Без этой ветки классика в неопределённом режиме просто
+			// показывала бы пустую дорожку.
+			const group = 5
+			step := blockW + gap
+			span := innerW + group*step
+			off := int(marqueePhase()*float64(span)) - group*step
+			for i := 0; i < group; i++ {
+				x := off + i*step
+				if x < 0 || x+blockW > innerW {
+					continue
+				}
+				ctx.FillRect(b.Min.X+3+x, b.Min.Y+3, blockW, b.Dy()-6, pb.FillColor)
+			}
+			break
+		}
+		fillW := int(math.Round(float64(innerW) * v))
 		for x := 0; x+blockW <= fillW; x += blockW + gap {
 			ctx.FillRect(b.Min.X+3+x, b.Min.Y+3, blockW, b.Dy()-6, pb.FillColor)
 		}

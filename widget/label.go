@@ -7,6 +7,15 @@ import (
 	"unicode"
 )
 
+// TextAlign — выравнивание текста в границах виджета.
+type TextAlign int
+
+const (
+	TextAlignLeft   TextAlign = iota // по левому краю (по умолчанию)
+	TextAlignCenter                  // по центру
+	TextAlignRight                   // по правому краю
+)
+
 // Label — текстовая метка.
 // Текст можно менять из любой горутины через SetText.
 type Label struct {
@@ -18,6 +27,9 @@ type Label struct {
 
 	HasBG      bool
 	Background color.RGBA
+
+	// TextAlign — выравнивание строки в границах виджета (по умолчанию слева).
+	TextAlign TextAlign
 
 	WrapText bool    // true — переносить текст по словам в пределах bounds
 	Muted    bool    // true — вторичный текст: тема красит в приглушённый цвет
@@ -125,7 +137,7 @@ func (l *Label) Draw(ctx DrawContext) {
 
 	font := l.effectiveFont()
 	if !l.WrapText {
-		l.drawLine(ctx, text, b.Min.X+l.PaddingX, b.Min.Y+l.PaddingY, fontSize, font)
+		l.drawLine(ctx, text, l.lineX(ctx, text, fontSize, font), b.Min.Y+l.PaddingY, fontSize, font)
 	} else {
 		maxW := b.Dx() - l.PaddingX*2
 		lines := l.wrappedLines(ctx, text, fontSize, font, maxW)
@@ -135,11 +147,36 @@ func (l *Label) Draw(ctx DrawContext) {
 			if y+lineH > b.Max.Y {
 				break // не вылезаем за границы
 			}
-			l.drawLine(ctx, line, b.Min.X+l.PaddingX, y, fontSize, font)
+			l.drawLine(ctx, line, l.lineX(ctx, line, fontSize, font), y, fontSize, font)
 			y += lineH
 		}
 	}
 	l.drawChildren(ctx)
+}
+
+// lineX возвращает X строки с учётом TextAlign. Ширина текста известна только
+// в момент отрисовки (её меряет контекст), поэтому выравнивание считается
+// здесь, а не при раскладке.
+func (l *Label) lineX(ctx DrawContext, text string, sizePt float64, font string) int {
+	b := l.bounds
+	x := b.Min.X + l.PaddingX
+	if l.TextAlign == TextAlignLeft || text == "" {
+		return x
+	}
+	var tw int
+	if font != "" {
+		tw = ctx.MeasureTextFont(text, sizePt, font)
+	} else {
+		tw = ctx.MeasureText(text, sizePt)
+	}
+	free := b.Dx() - l.PaddingX*2 - tw
+	if free <= 0 {
+		return x
+	}
+	if l.TextAlign == TextAlignCenter {
+		return x + free/2
+	}
+	return x + free // TextAlignRight
 }
 
 // drawLine рисует одну строку нужным шрифтом, при необходимости — подчёркивание.
