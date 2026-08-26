@@ -37,8 +37,9 @@ const (
 	glowTrailH   = 0.34 // толщина следа
 	glowHaloRX   = 5.0  // горизонтальный радиус ореола
 	glowHaloRY   = 2.6  // вертикальный радиус ореола
-	glowSparks   = 7    // искр вдоль следа
+	glowSparks   = 22   // «звёзд» вдоль следа
 	glowPulseDur = 1700 * time.Millisecond
+	glowSweepDur = 2200 * time.Millisecond // один проход головы по дорожке
 )
 
 // glowEnabled — рисовать ли свечение: стиль запрошен и тема современная.
@@ -105,12 +106,23 @@ func (pb *ProgressBar) drawGlow(ctx DrawContext, b image.Rectangle, v float64) {
 		return
 	}
 	var headX int
+	erasing := false
 	if pb.indeterminate.Load() {
-		headX = x0 + int(glowSweep()*float64(x1-x0))
+		var t float64
+		t, erasing = glowSweep()
+		headX = x0 + int(t*float64(x1-x0))
 	} else {
 		headX = x0 + int(math.Round(v*float64(x1-x0)))
 	}
 	cy := b.Min.Y + h/2
+
+	// Подсвеченный участок дорожки. На рисующем проходе он тянется от начала
+	// до головы, на гасящем — от головы до конца: голова «съедает» линию,
+	// оставленную предыдущим проходом.
+	segFrom, segTo := x0, headX
+	if erasing {
+		segFrom, segTo = headX, x1
+	}
 
 	// Пульсация ореола: заметная, но не мигающая.
 	pulse := 0.82 + 0.18*math.Sin(glowPhase(glowPulseDur)*2*math.Pi)
@@ -130,7 +142,7 @@ func (pb *ProgressBar) drawGlow(ctx DrawContext, b image.Rectangle, v float64) {
 		haloK = 0.55
 	}
 	trailTop := cy - trailH/2
-	span := float64(headX - x0)
+	span := float64(segTo - segFrom)
 	// Вертикальное свечение вокруг следа: три слоя, чем дальше от центра,
 	// тем прозрачнее — от них след светится, а не выглядит нарисованным.
 	haze := []struct {
@@ -141,14 +153,19 @@ func (pb *ProgressBar) drawGlow(ctx DrawContext, b image.Rectangle, v float64) {
 		{trailH * 3, 0.10},
 		{trailH * 2, 0.16},
 	}
-	for x := x0; x <= headX; x += 2 {
+	for x := segFrom; x <= segTo; x += 2 {
+		// f — близость к голове: 1 у неё, 0 у дальнего конца участка.
 		f := 1.0
 		if span > 0 {
-			f = float64(x-x0) / span // 0 — хвост, 1 — голова
+			if erasing {
+				f = float64(segTo-x) / span
+			} else {
+				f = float64(x-segFrom) / span
+			}
 		}
 		w := 2
-		if x+w > headX+1 {
-			w = headX + 1 - x
+		if x+w > segTo+1 {
+			w = segTo + 1 - x
 		}
 		if w <= 0 {
 			continue
@@ -171,21 +188,38 @@ func (pb *ProgressBar) drawGlow(ctx DrawContext, b image.Rectangle, v float64) {
 	}
 
 	// ── Искры вдоль следа ────────────────────────────────────────────────
+	// ── Звёздное небо вдоль следа ────────────────────────────────────────
+	// Огоньки стоят на месте (позиции детерминированы), но мерцают каждый
+	// со своей фазой — след не выглядит ровной чертой и не гаснет разом.
 	if span > 20 {
-		ph := glowPhase(2600 * time.Millisecond)
+		ph := glowPhase(3200 * time.Millisecond)
 		for i := 0; i < glowSparks; i++ {
-			// Детерминированные, но неравномерные позиции.
-			r := math.Mod(float64(i)*0.618+0.13, 1)
-			sx := x0 + int(r*span)
-			if sx >= headX-2 {
+			// Золотое сечение даёт равномерно-неравномерную россыпь.
+			r := math.Mod(float64(i)*0.6180339887+0.13, 1)
+			sx := segFrom + int(r*span)
+			if sx < segFrom+2 || sx > segTo-2 {
 				continue
 			}
-			tw := math.Sin((ph + r) * 2 * math.Pi)
-			if tw <= 0 {
-				continue
+			// Своя фаза и своя скорость мерцания у каждой звезды.
+			tw := 0.5 + 0.5*math.Sin((ph*(1+0.35*math.Mod(float64(i)*0.37, 1))+r)*2*math.Pi)
+			// Ближе к голове ярче — и на рисующем проходе, и на гасящем.
+			near := r
+			if erasing {
+				near = 1 - r
 			}
-			a := 0.35 * tw * (float64(sx-x0) / span)
-			da.FillRectAlpha(sx, cy-1, 2, 2, premul(head, a))
+			a := (0.12 + 0.5*tw) * (0.25 + 0.75*near)
+			// Каждая четвёртая — крупнее и чуть выше/ниже линии: «созвездие»,
+			// а не пунктир.
+			sz, dy := 1, 0
+			if i%4 == 0 {
+				sz = 2
+				dy = int(math.Round(math.Sin(float64(i)) * float64(trailH)))
+			}
+			da.FillRectAlpha(sx, cy+dy-sz/2, sz, sz, premul(hot, a))
+			if sz > 1 {
+				// Мягкий ореол вокруг крупной звезды.
+				da.FillRectAlpha(sx-1, cy+dy-2, 4, 4, premul(head, a*0.25))
+			}
 		}
 	}
 
@@ -202,6 +236,11 @@ func (pb *ProgressBar) drawGlow(ctx DrawContext, b image.Rectangle, v float64) {
 	if core < 3 {
 		core = 3
 	}
+	// Лучи: длинный горизонтальный и короткий вертикальный — так свет
+	// читается звездой, а не круглой точкой.
+	// Лучи короткие: это лёгкий блик, а не «звезда во всё окно».
+	drawStarRays(da, headX, cy, int(float64(h)*1.4*pulse), int(float64(h)*0.65*pulse),
+		hot, 0.5*pulse*haloK)
 	fillCircle(ctx, headX, cy, core, head)
 	fillCircle(ctx, headX, cy, core*2/3, lerpRGBA(head, hot, 0.55))
 	fillCircle(ctx, headX, cy, core/3, hot)
@@ -249,6 +288,40 @@ func drawGlowHalo(da DrawContextAlpha, cx, cy, rx, ry int, col color.RGBA, peak 
 	}
 }
 
+// drawStarRays рисует крестообразный блик звезды: луч сужается и гаснет к
+// концу, поэтому у центра он сливается с ядром, а на краю тает.
+func drawStarRays(da DrawContextAlpha, cx, cy, lenX, lenY int, col color.RGBA, peak float64) {
+	if peak <= 0 {
+		return
+	}
+	// Горизонтальный луч (в обе стороны).
+	for dx := 1; dx <= lenX; dx++ {
+		f := 1 - float64(dx)/float64(lenX)
+		a := peak * f * f * f // резкий спад: длинный, но лёгкий хвост луча
+		if a < 0.004 {
+			continue
+		}
+		th := 1
+		if f > 0.6 {
+			th = 2 // у основания луч толще
+		}
+		pc := premul(col, a)
+		da.FillRectAlpha(cx+dx, cy-th/2, 1, th, pc)
+		da.FillRectAlpha(cx-dx, cy-th/2, 1, th, pc)
+	}
+	// Вертикальный луч — короче: так блик выглядит «объективным», как в оптике.
+	for dy := 1; dy <= lenY; dy++ {
+		f := 1 - float64(dy)/float64(lenY)
+		a := peak * f * f * f
+		if a < 0.004 {
+			continue
+		}
+		pc := premul(col, a)
+		da.FillRectAlpha(cx, cy+dy, 1, 1, pc)
+		da.FillRectAlpha(cx, cy-dy, 1, 1, pc)
+	}
+}
+
 // ─── Анимация ───────────────────────────────────────────────────────────────
 
 // glowPhase возвращает фазу [0,1) периода dur по стенным часам: свечение
@@ -260,12 +333,18 @@ func glowPhase(dur time.Duration) float64 {
 	return float64(time.Now().UnixNano()%int64(dur)) / float64(dur)
 }
 
-// glowSweep — положение головы в неопределённом режиме: ровный ход слева
-// направо, у правого края — заново от левого. Скорость постоянная: с
-// плавным разгоном (smoothstep) на стыке циклов был бы рывок, а метание
-// головы вперёд-назад читается как сбой, а не как «идёт работа».
-func glowSweep() float64 {
-	return glowPhase(2200 * time.Millisecond)
+// glowSweep — ход головы в неопределённом режиме. Цикл состоит из ДВУХ
+// проходов, и оба идут слева направо: первый тянет за собой линию, второй
+// её гасит. Возврата назад нет вовсе, а раз линия к началу каждого прохода
+// в нужном состоянии, нет и рывка на стыке.
+//
+// Возвращает положение головы t ∈ [0,1] и признак гасящего прохода.
+func glowSweep() (t float64, erasing bool) {
+	p := glowPhase(2 * glowSweepDur)
+	if p < 0.5 {
+		return p * 2, false
+	}
+	return (p - 0.5) * 2, true
 }
 
 // markDrawn запоминает момент отрисовки: по нему зацикленная анимация
