@@ -445,6 +445,7 @@ func ApplyGlobalTheme(t *Theme) {
 	win10.TitleTextInactive = t.TitleTextInactive
 	win10.Border = t.Border
 	win10.ShadowColor = t.ShadowColor
+	win10.OutlineDragFill = t.OutlineDragFill
 
 	// Кнопки
 	win10.BtnBG = t.BtnBG
