@@ -64,6 +64,12 @@ type Theme struct {
 	ProgressBG   color.RGBA // ProgressBar — фон (дорожка)
 	ProgressFill color.RGBA // ProgressBar — заполненная часть
 
+	// ProgressGlowTail / ProgressGlowHead — концы градиента светящейся
+	// полосы (ProgressStyleGlow): хвост у начала дорожки и голова-бегунок.
+	// A=0 → считаются от ProgressFill.
+	ProgressGlowTail color.RGBA
+	ProgressGlowHead color.RGBA
+
 	// ═══════════════════════════════════════════════════════════════════════
 	// Выпадающий список (Dropdown) и PopupMenu
 	// ═══════════════════════════════════════════════════════════════════════
@@ -213,6 +219,9 @@ func DarkTheme() *Theme {
 		ProgressBG:   color.RGBA{R: 37, G: 37, B: 38, A: 255},  // #252526
 		ProgressFill: color.RGBA{R: 0, G: 120, B: 215, A: 255}, // #0078D7
 
+		ProgressGlowTail: color.RGBA{R: 16, G: 185, B: 160, A: 255},  // бирюза
+		ProgressGlowHead: color.RGBA{R: 120, G: 205, B: 255, A: 255}, // голубой
+
 		// Выпадающий список / PopupMenu
 		DropBG:     color.RGBA{R: 37, G: 37, B: 38, A: 250},    // #252526 — фон попапа
 		DropBorder: color.RGBA{R: 63, G: 63, B: 70, A: 255},    // #3F3F46
@@ -323,6 +332,9 @@ func LightTheme() *Theme {
 		// Прогресс-бар
 		ProgressBG:   color.RGBA{R: 230, G: 230, B: 230, A: 255}, // #E6E6E6
 		ProgressFill: color.RGBA{R: 0, G: 120, B: 215, A: 255},   // #0078D7
+
+		ProgressGlowTail: color.RGBA{R: 0, G: 160, B: 140, A: 255}, // бирюза
+		ProgressGlowHead: color.RGBA{R: 40, G: 150, B: 255, A: 255}, // голубой
 
 		// Выпадающий список / PopupMenu
 		DropBG:     color.RGBA{R: 255, G: 255, B: 255, A: 255}, // белый
@@ -456,6 +468,8 @@ func ApplyGlobalTheme(t *Theme) {
 	// Прогресс-бар
 	win10.ProgressBG = t.ProgressBG
 	win10.ProgressFill = t.ProgressFill
+	win10.ProgressGlowTail = t.ProgressGlowTail
+	win10.ProgressGlowHead = t.ProgressGlowHead
 
 	// Dropdown / PopupMenu
 	win10.DropBG = t.DropBG

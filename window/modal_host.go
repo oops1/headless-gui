@@ -214,6 +214,10 @@ func (h *dialogHost) create(hm *hostedModal) {
 	dlg.Dim = color.RGBA{}
 
 	native := NewNativeWindow()
+	// Окно модалки — ровно по диалогу и не ресайзится пользователем.
+	// Минимум объявляем ДО Create: иначе окно, меньшее дефолтного минимума
+	// платформы, будет создано увеличенным (см. fitMinTrack в native_windows).
+	native.SetMinSize(pw, ph)
 	surf := &surface{
 		eng:     eng,
 		native:  native,

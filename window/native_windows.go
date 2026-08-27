@@ -518,6 +518,12 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 	w.title = title
 	w.width = width
 	w.height = height
+	// Окно, которое просят создать меньше дефолтного минимума (320×240),
+	// иначе вырастет до него: Windows клампит размер по ptMinTrackSize уже
+	// при создании. Кадр остаётся прежним, и снизу/справа остаётся
+	// непрокрашенная полоса — так «рамка» окна модалки оказывалась больше
+	// самого диалога. Явно заданный SetMinSize имеет приоритет.
+	w.minW, w.minH = fitMinTrack(w.minW, w.minH, width, height)
 	// Пока hwnd не назначен, wndProc маршрутизирует сообщения создаваемого окна
 	// (WM_NCCALCSIZE/WM_CREATE приходят синхронно внутри CreateWindowExW) на
 	// win32Creating.
@@ -1221,6 +1227,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return htClient
 
 	case wmGetminmaxinfo:
+		// Значения минимума согласованы с fitMinTrack (см. createInternal).
 		// Минимальный размер окна при пользовательском resize.
 		// MINMAXINFO: 5×POINT; ptMinTrackSize — смещение 24 (int32-индексы 6,7).
 		// Значения — в физических пикселях (SetMinSize уже учёл HiDPI-scale).

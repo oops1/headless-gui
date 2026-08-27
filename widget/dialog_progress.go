@@ -99,27 +99,45 @@ func (mb *MessageBox) ShowProgress(title, status string, onCancel func()) *Progr
 func (pd *ProgressDialog) SetProgress(v float64) {
 	pd.bar.SetIndeterminate(false)
 	pd.bar.SetValue(v)
-	pd.pct.SetText(fmt.Sprintf("%d%%", int(math.Round(max01(v)*100))))
+	// В диалоге ожидания (ShowBusy) процента и деталей нет — там всё по
+	// центру и без цифр, поэтому подписи могут отсутствовать.
+	if pd.pct != nil {
+		pd.pct.SetText(fmt.Sprintf("%d%%", int(math.Round(max01(v)*100))))
+	}
 }
 
 // SetIndeterminate включает/выключает неопределённый режим (бегущая полоса).
 // В неопределённом режиме процент скрывается.
 func (pd *ProgressDialog) SetIndeterminate(on bool) {
 	pd.bar.SetIndeterminate(on)
-	if on {
+	if on && pd.pct != nil {
 		pd.pct.SetText("")
 	}
 }
 
+// Bounds возвращает прямоугольник корпуса диалога (после центрирования
+// движком). Нужен приложениям, которые дорисовывают что-то рядом, и тестам.
+func (pd *ProgressDialog) Bounds() image.Rectangle { return pd.dlg.Bounds() }
+
+// Progress возвращает текущее значение полосы [0,1] (потокобезопасно).
+func (pd *ProgressDialog) Progress() float64 { return pd.bar.Value() }
+
+// IsIndeterminate сообщает, идёт ли полоса в неопределённом режиме.
+func (pd *ProgressDialog) IsIndeterminate() bool { return pd.bar.IsIndeterminate() }
+
 // SetStatus обновляет основную строку статуса (потокобезопасно).
 func (pd *ProgressDialog) SetStatus(s string) {
-	pd.status.SetText(s)
+	if pd.status != nil {
+		pd.status.SetText(s)
+	}
 }
 
 // SetDetail обновляет приглушённую строку деталей под статусом
 // («34 из 120 файлов · 61,4 МБ/с · осталось 0:42»). Потокобезопасно.
 func (pd *ProgressDialog) SetDetail(s string) {
-	pd.detail.SetText(s)
+	if pd.detail != nil {
+		pd.detail.SetText(s)
+	}
 }
 
 // Close закрывает диалог (идемпотентно; безопасно из любой горутины).
