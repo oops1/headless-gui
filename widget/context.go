@@ -68,6 +68,15 @@ type OverlayBoundsProvider interface {
 	OverlayBounds() image.Rectangle
 }
 
+// BackdropDrawer — опциональная возможность контекста размыть то, что уже
+// нарисовано под слоем (acrylic и mica Windows 11, материалы macOS).
+// Реализуется engine.Canvas методом BlurBehind; контекст без размытия
+// компонент обходит подкраской — стекло становится плёнкой, но отрисовка
+// не ломается.
+type BackdropDrawer interface {
+	BlurBehind(r image.Rectangle, radius int, tint color.RGBA)
+}
+
 // DrawContext — API рисования, предоставляемый движком каждому виджету.
 // Реализуется типом engine.Canvas.
 //
