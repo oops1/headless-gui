@@ -19,6 +19,7 @@ import (
 	"golang.org/x/image/font/gofont/goitalic"
 
 	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -693,6 +694,28 @@ func (e *Engine) SetTheme(t *widget.Theme) {
 	}
 	e.frameMu.Unlock()
 	e.Invalidate()
+}
+
+// SetThemeProfile применяет тему из менеджера профилей по имени.
+//
+// Дополняет SetTheme, а не заменяет: профиль разрешается в плоскую тему
+// мостом (widget.Materialize) и дальше идёт тем же путём — глобальная
+// палитра, обход дерева, инвалидация. Приложению, которое хочет
+// наследовать тему и переопределять токены, не нужно ради этого менять
+// способ применения.
+//
+// Менеджер передаётся явно: набор тем принадлежит приложению, а не
+// движку. Готовый набор со встроенными пресетами —
+// widget.DefaultThemeManager().
+func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
+	if m == nil {
+		return fmt.Errorf("engine: SetThemeProfile без менеджера тем")
+	}
+	if err := m.SetTheme(name); err != nil {
+		return err
+	}
+	e.SetTheme(widget.Materialize(m.Active()))
+	return nil
 }
 
 // Start запускает цикл рендеринга в отдельной горутине.
