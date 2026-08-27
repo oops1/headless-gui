@@ -77,6 +77,14 @@ type BackdropDrawer interface {
 	BlurBehind(r image.Rectangle, radius int, tint color.RGBA)
 }
 
+// ShadowDrawer — опциональная возможность контекста рисовать мягкую тень
+// (реализуется engine.Canvas методом DrawSoftShadow). Контекст без неё
+// компонент просто пропускает: тень — украшение, её отсутствие не должно
+// менять раскладку.
+type ShadowDrawer interface {
+	DrawSoftShadow(r image.Rectangle, corner int, elevation float64, col color.RGBA)
+}
+
 // DrawContext — API рисования, предоставляемый движком каждому виджету.
 // Реализуется типом engine.Canvas.
 //

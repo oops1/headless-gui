@@ -1,0 +1,150 @@
+package desktop
+
+import (
+	"image"
+
+	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v3/widget"
+)
+
+// Общая отрисовка по стилю темы.
+//
+// Компоненты рабочего стола не знают цветов и размеров: они спрашивают у
+// темы стиль для своего состояния и передают его сюда. Из-за этого «как
+// выглядит наведённая кнопка» решается в одном месте, а не в каждом
+// компоненте, и профиль темы, добавивший скругление или фаску, меняет вид
+// сразу у всех.
+
+// PaintStyle рисует подложку по стилю: размытую, если тема просит стекло,
+// затем заливку, затем рамку. Скругление, толщина рамки и радиус размытия —
+// из стиля.
+func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
+	if s == nil || r.Empty() {
+		return
+	}
+	corner := int(s.Corner)
+
+	// Тень — до всего остального: она лежит под слоем.
+	if s.Elevation > 0 && s.Shadow.A > 0 {
+		if sd, ok := ctx.(widget.ShadowDrawer); ok {
+			sd.DrawSoftShadow(r, corner, s.Elevation, s.Shadow)
+		}
+	}
+
+	// Стекло: размытая подложка, если тема просит и контекст умеет.
+	if s.Backdrop.Mode == theme.BackdropBlur {
+		if bd, ok := ctx.(widget.BackdropDrawer); ok {
+			bd.BlurBehind(r, int(s.Backdrop.Radius), s.Backdrop.Tint)
+		} else if s.Backdrop.Tint.A > 0 {
+			fillAlpha(ctx, r, s.Backdrop.Tint)
+		}
+	} else if s.Backdrop.Mode == theme.BackdropAlpha && s.Backdrop.Tint.A > 0 {
+		fillAlpha(ctx, r, s.Backdrop.Tint)
+	}
+
+	if s.Fill.A > 0 {
+		if corner > 0 {
+			ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), corner, s.Fill)
+		} else {
+			ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Fill)
+		}
+	}
+
+	// Объёмная рамка Windows 2000 вместо плоской, если профиль её объявил.
+	if s.Bevel != nil {
+		widget.DrawBevel(ctx, r, s.Bevel.Light, s.Bevel.Shadow, s.Bevel.Dark, s.Bevel.Sunken)
+		return
+	}
+
+	if s.Border.A > 0 && s.BorderWidth > 0 {
+		if corner > 0 {
+			ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), corner, s.Border)
+		} else {
+			ctx.DrawBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Border)
+		}
+	}
+}
+
+// DrawTextCentered рисует строку по центру области цветом и шрифтом стиля.
+// Возвращает ширину строки — вызывающему она нужна для раскладки.
+func DrawTextCentered(ctx widget.DrawContext, r image.Rectangle, text string, s *theme.Style) int {
+	if text == "" || s == nil || r.Empty() {
+		return 0
+	}
+	size := s.Font.Size
+	if size <= 0 {
+		size = widget.DefaultFontSizePt
+	}
+	w := measure(ctx, text, size, s.Font)
+	x := r.Min.X + (r.Dx()-w)/2
+	y := r.Min.Y + (r.Dy()-int(size*1.4))/2
+	drawText(ctx, text, x, y, size, s)
+	return w
+}
+
+// DrawTextLeft рисует строку у левого края с отступом стиля.
+func DrawTextLeft(ctx widget.DrawContext, r image.Rectangle, text string, s *theme.Style) int {
+	if text == "" || s == nil || r.Empty() {
+		return 0
+	}
+	size := s.Font.Size
+	if size <= 0 {
+		size = widget.DefaultFontSizePt
+	}
+	x := r.Min.X + int(s.PadX)
+	y := r.Min.Y + (r.Dy()-int(size*1.4))/2
+	drawText(ctx, text, x, y, size, s)
+	return measure(ctx, text, size, s.Font)
+}
+
+// MeasureText возвращает ширину строки шрифтом стиля.
+func MeasureText(ctx widget.DrawContext, text string, s *theme.Style) int {
+	if text == "" || s == nil {
+		return 0
+	}
+	size := s.Font.Size
+	if size <= 0 {
+		size = widget.DefaultFontSizePt
+	}
+	return measure(ctx, text, size, s.Font)
+}
+
+func measure(ctx widget.DrawContext, text string, size float64, f theme.FontSpec) int {
+	if f.Family != "" {
+		return ctx.MeasureTextFont(text, size, f.Family)
+	}
+	return ctx.MeasureText(text, size)
+}
+
+func drawText(ctx widget.DrawContext, text string, x, y int, size float64, s *theme.Style) {
+	if s.Font.Family != "" {
+		ctx.DrawTextFont(text, x, y, size, s.Font.Family, s.Text)
+		return
+	}
+	ctx.DrawTextSize(text, x, y, size, s.Text)
+}
+
+// StateOf собирает состояние компонента из признаков, которые есть у всех:
+// наведение, нажатие, отключённость, выбранность.
+//
+// Компоненту остаётся передать свои булевы поля — а какое состояние сильнее
+// и как оно ложится на стиль, решает тема.
+func StateOf(hover, pressed, active, disabled, focused bool) theme.State {
+	var st theme.State
+	if hover {
+		st |= theme.StateHover
+	}
+	if pressed {
+		st |= theme.StatePressed
+	}
+	if active {
+		st |= theme.StateActive
+	}
+	if disabled {
+		st |= theme.StateDisabled
+	}
+	if focused {
+		st |= theme.StateFocused
+	}
+	return st
+}
