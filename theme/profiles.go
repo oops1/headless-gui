@@ -80,7 +80,17 @@ func Windows2000Profile() *Profile {
 		SetMetric("control.pad.y", 4).
 		SetMetric("taskbar.height", 28).
 		SetMetric("taskbar.pad.x", 2).
-		SetMetric("taskbar.gap", 2)
+		SetMetric("taskbar.gap", 2).
+		SetMetric("tray.icon.size", 14).
+		SetMetric("startbutton.icon.size", 14).
+		SetMetric("startbutton.icon.gap", 2).
+		SetMetric("startbutton.label.gap", 4).
+		SetMetric("startbutton.label.width", 34).
+		SetMetric("taskbutton.width", 150).
+		SetMetric("taskbutton.width.min", 60).
+		SetMetric("taskbutton.icon.size", 14).
+		SetMetric("taskbutton.gap", 2).
+		SetMetric("taskbutton.label.gap", 4)
 
 	p.SetFlag("style.classic3d", true).
 		SetFlag("style.mac.titlebar", false).
@@ -173,7 +183,17 @@ func Windows10Profile() *Profile {
 		SetMetric("control.pad.y", 6).
 		SetMetric("taskbar.height", 40).
 		SetMetric("taskbar.pad.x", 0).
-		SetMetric("taskbar.gap", 2)
+		SetMetric("taskbar.gap", 2).
+		SetMetric("tray.icon.size", 16).
+		SetMetric("startbutton.icon.size", 18).
+		SetMetric("startbutton.icon.gap", 2).
+		SetMetric("startbutton.label.gap", 6).
+		SetMetric("startbutton.label.width", 40).
+		SetMetric("taskbutton.width", 160).
+		SetMetric("taskbutton.width.min", 64).
+		SetMetric("taskbutton.icon.size", 16).
+		SetMetric("taskbutton.gap", 2).
+		SetMetric("taskbutton.label.gap", 6)
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", false).
@@ -271,11 +291,23 @@ func Windows11Profile() *Profile {
 		SetMetric("control.pad.y", 6).
 		SetMetric("taskbar.height", 48).
 		SetMetric("taskbar.pad.x", 8).
-		SetMetric("taskbar.gap", 4)
+		SetMetric("taskbar.gap", 4).
+		SetMetric("tray.icon.size", 16).
+		SetMetric("startbutton.icon.size", 20).
+		SetMetric("startbutton.icon.gap", 3).
+		SetMetric("startbutton.label.gap", 8).
+		SetMetric("startbutton.label.width", 44).
+		SetMetric("taskbutton.width", 44).
+		SetMetric("taskbutton.width.min", 40).
+		SetMetric("taskbutton.icon.size", 22).
+		SetMetric("taskbutton.gap", 4).
+		SetMetric("taskbutton.label.gap", 6)
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", false).
-		SetFlag("taskbar.centered", true) // кнопки по центру — примета Windows 11
+		SetFlag("taskbar.centered", true).  // кнопки по центру — примета Windows 11
+		SetFlag("taskbutton.label", false). // только значки, как в Windows 11
+		SetFlag("startbutton.label", false)
 
 	p.Fonts["default"] = FontSpec{Size: 9}
 	p.Anims["hover"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}
@@ -390,7 +422,17 @@ func MacOSProfile() *Profile {
 		SetMetric("taskbar.pad.x", 12).
 		SetMetric("taskbar.gap", 6).
 		SetMetric("dock.icon", 44).
-		SetMetric("dock.magnify", 1.6)
+		SetMetric("dock.magnify", 1.6).
+		SetMetric("tray.icon.size", 16).
+		SetMetric("startbutton.icon.size", 18).
+		SetMetric("startbutton.icon.gap", 3).
+		SetMetric("startbutton.label.gap", 6).
+		SetMetric("startbutton.label.width", 40).
+		SetMetric("taskbutton.width", 48).
+		SetMetric("taskbutton.width.min", 44).
+		SetMetric("taskbutton.icon.size", 32).
+		SetMetric("taskbutton.gap", 6).
+		SetMetric("taskbutton.label.gap", 0)
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", true).
