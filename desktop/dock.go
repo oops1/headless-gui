@@ -59,19 +59,22 @@ func (DockPresenter) Measure(c Component, avail image.Point) image.Point {
 	return image.Pt(w, avail.Y)
 }
 
-// Layout доку не нужен: ячейки считаются при отрисовке — их размер зависит
-// от того, где сейчас курсор, и запоминать эту раскладку незачем.
-func (DockPresenter) Layout(Component, image.Rectangle) {}
+// Layout возвращает прямоугольники значков при текущем положении курсора.
+//
+// Раскладка дока меняется вместе с наведением: значок под курсором растёт и
+// раздвигает соседей. Те же числа считает и Draw — чтобы кликалось ровно
+// там, где нарисовано.
+func (DockPresenter) Layout(c Component, bounds image.Rectangle) []image.Rectangle {
+	return dockRects(c, bounds)
+}
 
-// Draw рисует док: центрированный ряд значков с увеличением под курсором.
-func (p DockPresenter) Draw(ctx widget.DrawContext, c Component) {
-	b := c.Bounds()
+// dockRects — раскладка ряда значков в области b.
+func dockRects(c Component, b image.Rectangle) []image.Rectangle {
 	cells := c.Cells()
 	if b.Empty() || len(cells) == 0 {
-		return
+		return nil
 	}
-	tm := c.Theme()
-	icon, mag, gap := dockMetrics(tm)
+	icon, mag, gap := dockMetrics(c.Theme())
 	hover := c.HoverIndex()
 
 	// Размер каждого значка: под курсором — полный, у соседей — промежуточный.
@@ -88,12 +91,37 @@ func (p DockPresenter) Draw(ctx widget.DrawContext, c Component) {
 	if x < b.Min.X {
 		x = b.Min.X
 	}
-
-	for i, cell := range cells {
+	out := make([]image.Rectangle, 0, len(cells))
+	for i := range cells {
 		size := sizes[i]
 		// Значки выровнены по нижнему краю: увеличенный растёт вверх, как в
 		// настоящем доке, а не раздвигает ряд по вертикали.
-		cellRect := image.Rect(x, b.Max.Y-size, x+size, b.Max.Y)
+		out = append(out, image.Rect(x, b.Max.Y-size, x+size, b.Max.Y).Intersect(b))
+		x += size + gap
+	}
+	return out
+}
+
+// Draw рисует док: центрированный ряд значков с увеличением под курсором.
+func (p DockPresenter) Draw(ctx widget.DrawContext, c Component) {
+	b := c.Bounds()
+	cells := c.Cells()
+	if b.Empty() || len(cells) == 0 {
+		return
+	}
+	tm := c.Theme()
+	hover := c.HoverIndex()
+	rects := dockRects(c, b)
+
+	for i, cell := range cells {
+		if i >= len(rects) {
+			break
+		}
+		cellRect := rects[i]
+		if cellRect.Empty() {
+			continue
+		}
+		size := cellRect.Dy()
 		st := StateOf(i == hover, false, cell.Active, cell.Muted, false)
 		style := styleOf(tm, ComponentDock, "", st)
 
@@ -111,7 +139,6 @@ func (p DockPresenter) Draw(ctx widget.DrawContext, c Component) {
 		if cell.Active || !cell.Muted {
 			drawRunningDot(ctx, cellRect, style, cell.Active)
 		}
-		x += size + gap
 	}
 }
 

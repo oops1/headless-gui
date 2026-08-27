@@ -15,9 +15,13 @@ func TestNetworkItem_PreferredSizeFromTheme(t *testing.T) {
 	it := NewNetworkStatus(tm, st)
 	defer it.Close()
 
+	// Значок — квадрат KeyTrayIconSize, ширина запрашивается с отступами
+	// стиля по обе стороны: вплотную значки трея не стоят.
+	pad := int(tm.GetStyle(ComponentNetwork, "", 0).PadX)
 	got := it.PreferredSize(image.Pt(999, 999))
-	if got.X != 16 || got.Y != 16 {
-		t.Errorf("PreferredSize = %v, ждали 16x16 (KeyTrayIconSize из тестовой темы)", got)
+	if got.X != 16+2*pad || got.Y != 16 {
+		t.Errorf("PreferredSize = %v, ждали %dx16 (KeyTrayIconSize и отступы из тестовой темы)",
+			got, 16+2*pad)
 	}
 }
 

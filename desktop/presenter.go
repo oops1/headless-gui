@@ -28,8 +28,14 @@ import (
 type Presenter interface {
 	// Measure возвращает желаемый размер компонента при доступном месте.
 	Measure(c Component, avail image.Point) image.Point
-	// Layout расставляет внутренние части компонента в границах bounds.
-	Layout(c Component, bounds image.Rectangle)
+	// Layout возвращает прямоугольники ячеек в границах bounds — по одному
+	// на ячейку, в том же порядке, что Cells().
+	//
+	// Компонент берёт их себе: по ним он считает попадание мыши. Иначе клик
+	// шёл бы по собственной раскладке компонента, а картинка была бы чужой:
+	// в доке со значками разного размера это расхождение сразу заметно.
+	// nil означает «раскладывай сам».
+	Layout(c Component, bounds image.Rectangle) []image.Rectangle
 	// Draw рисует компонент целиком.
 	Draw(ctx widget.DrawContext, c Component)
 }

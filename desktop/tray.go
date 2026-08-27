@@ -108,6 +108,44 @@ func trayStyle(tm *theme.Manager, component string, st theme.State) *theme.Style
 	return tm.GetStyle(component, "", st)
 }
 
+// ink — цвет, которым рисуется сам значок.
+//
+// Значок трея — монохромный глиф, и рисуется он цветом ТЕКСТА: заливка в
+// стиле значка описывает его подложку (у большинства тем её нет вовсе), и
+// рисовать глиф заливкой значит рисовать невидимым по невидимому. Если тема
+// цвет текста не задала, берём то, чем она вообще что-то рисует.
+func ink(s *theme.Style) color.RGBA {
+	if s.Text.A > 0 {
+		return s.Text
+	}
+	if s.Border.A > 0 {
+		return s.Border
+	}
+	return s.Fill
+}
+
+// mutedInk — те же чернила вполсилы: незаполненные деления шкалы, фон
+// индикатора. Тема вправе задать для этого рамку; если не задала, глушим
+// основной цвет сами.
+func mutedInk(s *theme.Style) color.RGBA {
+	if s.Border.A > 0 && s.Text.A > 0 {
+		return s.Border
+	}
+	return fade(ink(s), 0.35)
+}
+
+// fade умножает цвет на k. Компоненты хранятся с предумноженной альфой, так
+// что множатся все четыре — иначе цвет «поплывёт» вместо того, чтобы стать
+// прозрачнее.
+func fade(c color.RGBA, k float64) color.RGBA {
+	return color.RGBA{
+		R: uint8(float64(c.R) * k),
+		G: uint8(float64(c.G) * k),
+		B: uint8(float64(c.B) * k),
+		A: uint8(float64(c.A) * k),
+	}
+}
+
 // shrinkByPad обжимает прямоугольник на отступы стиля.
 func shrinkByPad(b image.Rectangle, s *theme.Style) image.Rectangle {
 	return image.Rect(
@@ -201,7 +239,9 @@ func (n *NetworkItem) Close() {
 // PreferredSize — квадрат стороной из темы.
 func (n *NetworkItem) PreferredSize(image.Point) image.Point {
 	size := trayIconSize(n.tm)
-	return image.Point{X: size, Y: size}
+	// Ширина — значок плюс отступы стиля с обеих сторон: вплотную друг к
+	// другу значки трея не стоят ни в одной из тем.
+	return image.Point{X: size + 2*int(trayStyle(n.tm, ComponentNetwork, theme.StateNormal).PadX), Y: size}
 }
 
 // OnMouseMove обновляет hover.
@@ -234,7 +274,7 @@ func (n *NetworkItem) Draw(ctx widget.DrawContext) {
 	if net.Kind == NetNone {
 		ratio = 0
 	}
-	drawLevelBars(ctx, inner, ratio, networkBars, s.Fill, s.Border)
+	drawLevelBars(ctx, inner, ratio, networkBars, ink(s), mutedInk(s))
 }
 
 func (n *NetworkItem) networkState() NetState {
@@ -283,7 +323,9 @@ func (v *VolumeItem) Close() {
 // PreferredSize — квадрат стороной из темы.
 func (v *VolumeItem) PreferredSize(image.Point) image.Point {
 	size := trayIconSize(v.tm)
-	return image.Point{X: size, Y: size}
+	// Ширина — значок плюс отступы стиля с обеих сторон: вплотную друг к
+	// другу значки трея не стоят ни в одной из тем.
+	return image.Point{X: size + 2*int(trayStyle(v.tm, ComponentVolume, theme.StateNormal).PadX), Y: size}
 }
 
 // OnMouseMove обновляет hover.
@@ -315,14 +357,14 @@ func (v *VolumeItem) Draw(ctx widget.DrawContext) {
 
 	bodyW := inner.Dx() / volumeBodyDiv
 	body := image.Rect(inner.Min.X, inner.Min.Y, inner.Min.X+bodyW, inner.Max.Y)
-	ctx.FillRect(body.Min.X, body.Min.Y, body.Dx(), body.Dy(), s.Fill)
+	ctx.FillRect(body.Min.X, body.Min.Y, body.Dx(), body.Dy(), ink(s))
 
 	if vol.Muted {
-		drawDiagonal(ctx, inner, s.Border)
+		drawDiagonal(ctx, inner, ink(s))
 		return
 	}
 	bars := image.Rect(body.Max.X, inner.Min.Y, inner.Max.X, inner.Max.Y)
-	drawLevelBars(ctx, bars, vol.Level, volumeBars, s.Fill, s.Border)
+	drawLevelBars(ctx, bars, vol.Level, volumeBars, ink(s), mutedInk(s))
 }
 
 func (v *VolumeItem) volumeState() VolState {
@@ -376,7 +418,9 @@ func (p *PowerItem) PreferredSize(image.Point) image.Point {
 		return image.Point{}
 	}
 	size := trayIconSize(p.tm)
-	return image.Point{X: size, Y: size}
+	// Ширина — значок плюс отступы стиля с обеих сторон: вплотную друг к
+	// другу значки трея не стоят ни в одной из тем.
+	return image.Point{X: size + 2*int(trayStyle(p.tm, ComponentPower, theme.StateNormal).PadX), Y: size}
 }
 
 // OnMouseMove обновляет hover.
@@ -413,15 +457,15 @@ func (p *PowerItem) Draw(ctx widget.DrawContext) {
 	body := image.Rect(inner.Min.X, inner.Min.Y, inner.Max.X-nubW, inner.Max.Y)
 	corner := int(s.Corner)
 	if corner > 0 {
-		ctx.DrawRoundBorder(body.Min.X, body.Min.Y, body.Dx(), body.Dy(), corner, s.Border)
+		ctx.DrawRoundBorder(body.Min.X, body.Min.Y, body.Dx(), body.Dy(), corner, ink(s))
 	} else {
-		ctx.DrawBorder(body.Min.X, body.Min.Y, body.Dx(), body.Dy(), s.Border)
+		ctx.DrawBorder(body.Min.X, body.Min.Y, body.Dx(), body.Dy(), ink(s))
 	}
 
 	nubInset := body.Dy() / batteryInsetDiv
 	nub := image.Rect(body.Max.X, body.Min.Y+nubInset, inner.Max.X, body.Max.Y-nubInset)
 	if !nub.Empty() {
-		ctx.FillRect(nub.Min.X, nub.Min.Y, nub.Dx(), nub.Dy(), s.Border)
+		ctx.FillRect(nub.Min.X, nub.Min.Y, nub.Dx(), nub.Dy(), ink(s))
 	}
 
 	charge := pw.Charge
@@ -433,13 +477,13 @@ func (p *PowerItem) Draw(ctx widget.DrawContext) {
 	}
 	fillW := int(float64(body.Dx()) * charge)
 	if fillW > 0 {
-		ctx.FillRect(body.Min.X, body.Min.Y, fillW, body.Dy(), s.Fill)
+		ctx.FillRect(body.Min.X, body.Min.Y, fillW, body.Dy(), ink(s))
 	}
 
 	if pw.OnAC {
 		stripeH := inner.Dy() / acStripeDiv
 		if stripeH > 0 {
-			ctx.FillRect(body.Min.X, body.Min.Y, body.Dx(), stripeH, s.Text)
+			ctx.FillRect(body.Min.X, body.Min.Y, body.Dx(), stripeH, ink(s))
 		}
 	}
 }

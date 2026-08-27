@@ -718,6 +718,33 @@ func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
 	return nil
 }
 
+// RenderOnce синхронно рисует один кадр и возвращает КОПИЮ полученного
+// изображения (физические пиксели).
+//
+// Движок обычно отдаёт кадры дельта-тайлами через Frames() — так дешевле по
+// сети. Но иногда нужна целая картинка здесь и сейчас: снимок для
+// предпросмотра, кадр для golden-теста, отладочный дамп. Собирать её из
+// тайлов ради этого — лишняя работа для вызывающего.
+//
+// Копия, а не ссылка на внутренний буфер: движок продолжит рисовать в него
+// следующий кадр, и отданная наружу картинка изменилась бы под руками.
+// Возвращает nil, если холста ещё нет.
+func (e *Engine) RenderOnce() *image.RGBA {
+	e.renderFrame()
+
+	e.mu.RLock()
+	canvas := e.canvas
+	e.mu.RUnlock()
+	if canvas == nil {
+		return nil
+	}
+	e.frameMu.Lock()
+	defer e.frameMu.Unlock()
+	out := image.NewRGBA(canvas.front.Rect)
+	copy(out.Pix, canvas.front.Pix)
+	return out
+}
+
 // Start запускает цикл рендеринга в отдельной горутине.
 // Вызывать не более одного раза.
 func (e *Engine) Start() {

@@ -64,6 +64,9 @@ const (
 	KeyTaskbarHeight theme.Key = "taskbar.height"
 	KeyTaskbarPadX   theme.Key = "taskbar.pad.x"
 	KeyTaskbarGap    theme.Key = "taskbar.gap"
+	// KeyTaskbarCentered — ставить ли группу «пуск + приложения» по центру
+	// панели (Windows 11) вместо прижатия влево (всё остальное).
+	KeyTaskbarCentered theme.Key = "taskbar.centered"
 
 	// ComponentTaskbar — имя компонента для стилей темы.
 	ComponentTaskbar = "taskbar"
@@ -144,15 +147,8 @@ func (t *Taskbar) relayout() {
 	}
 	avail := image.Pt(inner.Dx(), inner.Dy())
 
-	// Начало — слева, конец — справа, каждый берёт по запросу.
-	x := inner.Min.X
-	for _, it := range t.slots[SlotStart] {
-		sz := t.sizeOf(it, avail)
-		place(it, image.Rect(x, inner.Min.Y, x+sz.X, inner.Min.Y+sz.Y), inner)
-		x += sz.X + gap
-	}
-	startEnd := x
-
+	// Трей справа считается первым: он ни при каком раскладе не двигается, и
+	// его левый край задаёт границу, дальше которой остальным нельзя.
 	right := inner.Max.X
 	for i := len(t.slots[SlotTray]) - 1; i >= 0; i-- {
 		it := t.slots[SlotTray][i]
@@ -162,44 +158,90 @@ func (t *Taskbar) relayout() {
 	}
 	trayStart := right
 
-	// Середина получает остаток. Просят больше — сжимаем пропорционально:
-	// это и есть предсказуемая деградация, о которой договорились с
-	// элементами.
-	midAvail := trayStart - startEnd
-	if midAvail < 0 {
-		midAvail = 0
+	start, apps := t.slots[SlotStart], t.slots[SlotApps]
+
+	// Желаемые ширины. Приложениям показываем не всю панель, а то, что
+	// осталось после трея и кнопки пуска: иначе они запросят лишнее и
+	// потребуют сжатия там, где его можно было избежать.
+	startW := make([]int, len(start))
+	startTotal := 0
+	for i, it := range start {
+		startW[i] = t.sizeOf(it, avail).X
+		startTotal += startW[i] + gap
 	}
-	apps := t.slots[SlotApps]
+	appsAvail := trayStart - inner.Min.X - startTotal
+	if appsAvail < 0 {
+		appsAvail = 0
+	}
+	appsW := make([]int, len(apps))
+	appsTotal := 0
+	for i, it := range apps {
+		appsW[i] = t.sizeOf(it, image.Pt(appsAvail, avail.Y)).X
+		appsTotal += appsW[i]
+	}
+	if len(apps) > 0 {
+		appsTotal += gap * (len(apps) - 1)
+	}
+
+	// Группа «пуск + приложения» либо прижата влево, либо стоит по центру
+	// ПАНЕЛИ — так это устроено в Windows 11. По центру именно панели, а не
+	// оставшегося места: иначе группа съезжала бы влево от того, что справа
+	// висит трей, и центр переставал быть центром.
+	x := inner.Min.X
+	if t.flag(KeyTaskbarCentered) {
+		group := startTotal + appsTotal
+		x = inner.Min.X + (inner.Dx()-group)/2
+		// Но не поверх трея и не левее края.
+		if x+group > trayStart {
+			x = trayStart - group
+		}
+		if x < inner.Min.X {
+			x = inner.Min.X
+		}
+	}
+
+	for i, it := range start {
+		place(it, image.Rect(x, inner.Min.Y, x+startW[i], inner.Min.Y+t.sizeOf(it, avail).Y), inner)
+		x += startW[i] + gap
+	}
 	if len(apps) == 0 {
 		return
 	}
-	want := make([]int, len(apps))
-	total := 0
-	for i, it := range apps {
-		sz := t.sizeOf(it, image.Pt(midAvail, avail.Y))
-		want[i] = sz.X
-		total += sz.X
-	}
-	total += gap * (len(apps) - 1)
 
+	// Приложениям — остаток до трея. Просят больше — сжимаем пропорционально:
+	// это и есть предсказуемая деградация, о которой договорились с
+	// элементами.
+	midAvail := trayStart - x
+	if midAvail < 0 {
+		midAvail = 0
+	}
 	scale := 1.0
-	if total > midAvail && total > 0 {
-		scale = float64(midAvail-gap*(len(apps)-1)) / float64(total-gap*(len(apps)-1))
+	if appsTotal > midAvail && appsTotal > 0 {
+		gaps := gap * (len(apps) - 1)
+		if appsTotal > gaps {
+			scale = float64(midAvail-gaps) / float64(appsTotal-gaps)
+		}
 		if scale < 0 {
 			scale = 0
 		}
 	}
-
-	mx := startEnd
 	for i, it := range apps {
-		w := int(float64(want[i]) * scale)
-		place(it, image.Rect(mx, inner.Min.Y, mx+w, inner.Max.Y), inner)
-		mx += w + gap
+		w := int(float64(appsW[i]) * scale)
+		place(it, image.Rect(x, inner.Min.Y, x+w, inner.Max.Y), inner)
+		x += w + gap
 	}
 }
 
 // place ставит элемент в прямоугольник, вписывая его в границы панели.
+//
+// Элемент, которому не нужна вся высота панели (значок трея), центрируется
+// по вертикали, а не липнет к верхнему краю: панель — это ряд, и всё в ней
+// стоит на одной средней линии.
 func place(it Item, r, inner image.Rectangle) {
+	if h := r.Dy(); h > 0 && h < inner.Dy() {
+		top := inner.Min.Y + (inner.Dy()-h)/2
+		r = image.Rect(r.Min.X, top, r.Max.X, top+h)
+	}
 	r = r.Intersect(inner)
 	if r.Empty() {
 		// Место кончилось: элемент прячется, а не рисуется поверх соседа.
@@ -207,6 +249,14 @@ func place(it Item, r, inner image.Rectangle) {
 		return
 	}
 	it.SetBounds(r)
+}
+
+// flag читает признак темы (false, если темы нет).
+func (t *Taskbar) flag(k theme.Key) bool {
+	if t.tm == nil {
+		return false
+	}
+	return t.tm.GetFlag(k, false)
 }
 
 // sizeOf спрашивает у элемента желаемый размер, подставляя высоту панели,

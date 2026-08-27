@@ -97,6 +97,48 @@ func DrawTextLeft(ctx widget.DrawContext, r image.Rectangle, text string, s *the
 	return measure(ctx, text, size, s.Font)
 }
 
+// DrawTextLeftElided рисует строку у левого края, усекая её многоточием,
+// если она не помещается.
+//
+// Просто обрезать строку клипом мало: получается обрывок вроде «п», который
+// читается как мусор, а не как укороченный заголовок. Если не помещается
+// даже одна буква с многоточием, не рисуется ничего — пустое место честнее
+// огрызка.
+func DrawTextLeftElided(ctx widget.DrawContext, r image.Rectangle, text string, s *theme.Style) int {
+	if text == "" || s == nil || r.Empty() {
+		return 0
+	}
+	avail := r.Dx() - 2*int(s.PadX)
+	if avail <= 0 {
+		return 0
+	}
+	shown := Elide(ctx, text, s, avail)
+	if shown == "" {
+		return 0
+	}
+	return DrawTextLeft(ctx, r, shown, s)
+}
+
+// Elide укорачивает строку до ширины maxW, добавляя многоточие. Возвращает
+// пустую строку, если не помещается даже одна буква с многоточием.
+func Elide(ctx widget.DrawContext, text string, s *theme.Style, maxW int) string {
+	if text == "" || maxW <= 0 {
+		return ""
+	}
+	if MeasureText(ctx, text, s) <= maxW {
+		return text
+	}
+	const ellipsis = "…"
+	runes := []rune(text)
+	// Отрезаем с конца по руне, пока строка с многоточием не влезет.
+	for n := len(runes) - 1; n > 0; n-- {
+		if MeasureText(ctx, string(runes[:n])+ellipsis, s) <= maxW {
+			return string(runes[:n]) + ellipsis
+		}
+	}
+	return ""
+}
+
 // MeasureText возвращает ширину строки шрифтом стиля.
 func MeasureText(ctx widget.DrawContext, text string, s *theme.Style) int {
 	if text == "" || s == nil {

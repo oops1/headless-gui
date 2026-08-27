@@ -152,6 +152,19 @@ func (r *RunningApplications) layout() {
 		return
 	}
 
+	// Презентер темы раскладывает по-своему — берём его прямоугольники, иначе
+	// клик попадал бы по нашей полосе кнопок, а видел бы пользователь док.
+	if p := r.presenter(); p != nil {
+		rects := p.Layout(r, b)
+		for i := 0; i < n && i < len(rects); i++ {
+			if rects[i].Empty() {
+				continue
+			}
+			r.btns = append(r.btns, winButton{info: windows[i], rect: rects[i]})
+		}
+		return
+	}
+
 	gap := int(r.metric(KeyTaskButtonGap))
 	ideal := int(r.metric(KeyTaskButtonWidth))
 	min := int(r.metric(KeyTaskButtonMinWidth))
@@ -225,10 +238,18 @@ func (r *RunningApplications) hitIndex(x, y int) int {
 // OnMouseMove реализует widget.MouseMoveHandler — обновляет наведённую кнопку.
 func (r *RunningApplications) OnMouseMove(x, y int) {
 	idx := r.hitIndex(x, y)
-	if idx != r.hoverIdx {
-		r.hoverIdx = idx
-		r.Invalidate()
+	if idx == r.hoverIdx {
+		return
 	}
+	r.hoverIdx = idx
+	// У дока от наведения зависят размеры значков, а значит и попадание по
+	// ним: раскладку надо пересчитать, иначе следующий клик уйдёт по старым
+	// границам. Полоса кнопок от наведения не меняется, и пересчёт ей ничего
+	// не стоит — кнопки те же.
+	if r.presenter() != nil {
+		r.layout()
+	}
+	r.Invalidate()
 }
 
 // OnMouseButton реализует widget.MouseClickHandler.
@@ -290,14 +311,23 @@ func (r *RunningApplications) OnMouseButton(e widget.MouseEvent) bool {
 func (r *RunningApplications) Theme() *theme.Manager { return r.tm }
 
 // Cells реализует Component: содержимое области для чужой отрисовки.
+//
+// Читается список окон, а не разложенные кнопки: презентер спрашивает Cells
+// в Measure — то есть ДО того, как область получит размер и в ней появятся
+// кнопки. Считай мы ячейки по кнопкам, док просил бы нулевую ширину, получал
+// бы её и не раскладывался бы никогда.
 func (r *RunningApplications) Cells() []Cell {
-	cells := make([]Cell, 0, len(r.btns))
-	for _, wb := range r.btns {
+	if r.wm == nil {
+		return nil
+	}
+	windows := r.wm.Windows()
+	cells := make([]Cell, 0, len(windows))
+	for _, info := range windows {
 		cells = append(cells, Cell{
-			Title:  wb.info.Title,
-			Icon:   wb.info.Icon,
-			Active: wb.info.Active,
-			Muted:  wb.info.Minimized,
+			Title:  info.Title,
+			Icon:   info.Icon,
+			Active: info.Active,
+			Muted:  info.Minimized,
 		})
 	}
 	return cells
@@ -351,7 +381,7 @@ func (r *RunningApplications) Draw(ctx widget.DrawContext) {
 			ctx.SetClip(wb.rect.Intersect(prevClip))
 			textLeft := iconX + iconSize + labelGap
 			labelRect := image.Rect(textLeft-int(style.PadX), wb.rect.Min.Y, wb.rect.Max.X, wb.rect.Max.Y)
-			DrawTextLeft(ctx, labelRect, wb.info.Title, style)
+			DrawTextLeftElided(ctx, labelRect, wb.info.Title, style)
 			ctx.SetClip(prevClip)
 		}
 	}
