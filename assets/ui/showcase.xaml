@@ -900,7 +900,17 @@
                 <ProgressBar Name="animValueBar" Left="220" Top="466" Width="530" Height="14"/>
                 <Label Name="animValueLbl" Left="770" Top="462" Width="80" Height="20" Text="40%" Foreground="#A6E3A1"/>
 
-                <TextBlock Left="24" Top="520" Width="1010" Height="60" TextWrapping="Wrap"
+                <TextBlock Left="24" Top="510" Foreground="#9399B2"
+                           Text="{Loc Glowing bar (ProgressStyleGlow): a head with a trail, the look of a modern wait indicator.}"/>
+                <ProgressBar Name="pbGlow" Left="24" Top="540" Width="600" Height="16"
+                             Style="Glow" Value="0.62"/>
+                <Button Name="pbGlowToggle" Left="650" Top="532" Width="200" Height="30"
+                        Content="{Loc Indeterminate mode}"/>
+                <TextBlock Left="24" Top="568" Width="1010" Height="34" TextWrapping="Wrap"
+                           Foreground="#6C7086"
+                           Text="{Loc Only modern themes glow: Win2000 keeps its sunken trough with blocks, and the Mac theme its rounded pill — switch the theme in the header to compare.}"/>
+
+                <TextBlock Left="24" Top="614" Width="1010" Height="60" TextWrapping="Wrap"
                            Foreground="#6C7086"
                            Text="{Loc The animation clock belongs to the engine: not a single goroutine and not a single timer per animation — ticks come from the render loop, frames are rendered only while an animation is alive (the on-demand saving stays), and repainting is partial. Starting an animation again on the same object replaces the previous one (owner-replace), so animations never fight. The toggles on the Widgets tab slide, dialogs fade in; in the classic Win2000 theme everything is instant.}"/>
             </Canvas>
@@ -923,6 +933,7 @@
                 <Button Name="dlgInput" Left="24" Top="164" Width="180" Height="34" Content="{Loc Text input}"/>
                 <Button Name="dlgProgress" Left="214" Top="164" Width="220" Height="34" Content="{Loc Progress (indicator)}"/>
                 <Button Name="dlgBig" Left="444" Top="164" Width="220" Height="34" Content="{Loc Dialog larger than the window}"/>
+                <Button Name="dlgBusy" Left="674" Top="164" Width="220" Height="34" Content="{Loc Waiting (glowing bar)}" Style="Accent"/>
 
                 <TextBlock Left="24" Top="222" Foreground="#9399B2" Text="{Loc File dialogs (the file system of this process):}"/>
                 <Button Name="dlgOpen" Left="24" Top="246" Width="180" Height="34" Content="{Loc Open file…}"/>

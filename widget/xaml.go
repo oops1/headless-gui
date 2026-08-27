@@ -848,6 +848,15 @@ func buildXAMLProgressBar(el xElement) Widget {
 			pb.SetValue(v)
 		}
 	}
+	// Style: Bar (по умолчанию) | Glow — светящаяся голова со следом.
+	if strings.EqualFold(el.attr("Style"), "glow") {
+		pb.Style = ProgressStyleGlow
+	}
+	if ind := el.attr("Indeterminate"); strings.EqualFold(ind, "true") || ind == "1" {
+		pb.SetIndeterminate(true)
+	}
+	applyColor(&pb.GlowTail, el, "GlowTail")
+	applyColor(&pb.GlowHead, el, "GlowHead")
 	return pb
 }
 
