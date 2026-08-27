@@ -36,6 +36,7 @@ type Canvas struct {
 	fallbacks  []*FontCache          // fallback-шрифты для отсутствующих глифов (BUG-2)
 	clip       image.Rectangle       // активная область отсечения
 	hasClip    bool                  // включено ли отсечение
+	round      roundClipState        // отсечение по скруглённому контуру (clipround.go)
 	baseClip   image.Rectangle       // базовый клип кадра (damage-область частичной перерисовки)
 	hasBase    bool                  // активен ли базовый клип
 	scaleTmp   *image.RGBA           // переиспользуемый буфер для DrawImageScaled
@@ -330,6 +331,23 @@ func (c *Canvas) fillRectPx(r image.Rectangle, col color.RGBA, over bool) {
 	if r.Empty() {
 		return
 	}
+	// Скруглённое отсечение сужает каждую строку по-своему, поэтому заливка
+	// идёт построчно. Ветка стоит одну проверку, когда отсечения нет.
+	if c.round.active {
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			x0, x1, ok := c.round.spanX(y, r.Min.X, r.Max.X)
+			if !ok {
+				continue
+			}
+			c.fillRectRaw(image.Rect(x0, y, x1, y+1), col, over)
+		}
+		return
+	}
+	c.fillRectRaw(r, col, over)
+}
+
+// fillRectRaw — заливка уже зажатого прямоугольника, без проверок отсечения.
+func (c *Canvas) fillRectRaw(r image.Rectangle, col color.RGBA, over bool) {
 	if over && col.A != 255 {
 		if col.A == 0 {
 			return
@@ -614,11 +632,17 @@ func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 	mask := alpha.Pix
 	mStride := alpha.Stride
 	dst := c.back.Pix
-	rw := r.Dx()
 	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
-		mo := (yy-gy)*mStride + (r.Min.X - gx)
+		// Скруглённое отсечение сужает строку: текст в панели со скруглёнными
+		// углами не должен вылезать за кривую (см. clipround.go).
+		lx, rx, ok := c.round.spanX(yy, r.Min.X, r.Max.X)
+		if !ok {
+			continue
+		}
+		rw := rx - lx
+		mo := (yy-gy)*mStride + (lx - gx)
 		mRow := mask[mo : mo+rw]
-		dOff := c.back.PixOffset(r.Min.X, yy)
+		dOff := c.back.PixOffset(lx, yy)
 		dRow := dst[dOff : dOff+rw*4]
 		for i := 0; i < rw; i++ {
 			ma := uint32(mRow[i])
@@ -650,9 +674,15 @@ func (c *Canvas) drawColorGlyph(img *image.RGBA, gx, gy int) {
 	sStride := img.Stride
 	dst := c.back.Pix
 	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
-		sRow := (yy-gy)*sStride + (r.Min.X-gx)*4
-		dOff := c.back.PixOffset(r.Min.X, yy)
-		for xx := r.Min.X; xx < r.Max.X; xx++ {
+		// Скруглённое отсечение: эмодзи в панели с кривыми углами обрезается
+		// так же, как текст и заливки.
+		lx, rx, ok := c.round.spanX(yy, r.Min.X, r.Max.X)
+		if !ok {
+			continue
+		}
+		sRow := (yy-gy)*sStride + (lx-gx)*4
+		dOff := c.back.PixOffset(lx, yy)
+		for xx := lx; xx < rx; xx++ {
 			sa := uint32(src[sRow+3])
 			if sa == 0 { // полностью прозрачный пиксель
 				sRow += 4
@@ -855,6 +885,9 @@ func (c *Canvas) setPixelPx(x, y int, col color.RGBA) {
 		if !image.Pt(x, y).In(c.clip) {
 			return
 		}
+	}
+	if !c.round.contains(x, y) {
+		return
 	}
 	if x >= 0 && x < c.W && y >= 0 && y < c.H {
 		c.back.SetRGBA(x, y, col)
