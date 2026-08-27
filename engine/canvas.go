@@ -1099,6 +1099,26 @@ func (c *Canvas) diffAndSyncIn(region image.Rectangle) []output.DirtyTile {
 	return c.diffTiles(tx0, ty0, tx1, ty1)
 }
 
+// diffAndSyncInRects — diff по НЕСКОЛЬКИМ областям сразу.
+//
+// Области перебираются по одной, и общий тайл двух соседних областей не
+// попадёт в выдачу дважды: diffTiles синхронизирует front сразу после
+// извлечения тайла, поэтому при втором сравнении тайл уже равен и
+// отбрасывается. Отдельная дедупликация не нужна.
+func (c *Canvas) diffAndSyncInRects(regions []image.Rectangle) []output.DirtyTile {
+	switch len(regions) {
+	case 0:
+		return nil
+	case 1:
+		return c.diffAndSyncIn(regions[0])
+	}
+	var out []output.DirtyTile
+	for _, r := range regions {
+		out = append(out, c.diffAndSyncIn(r)...)
+	}
+	return out
+}
+
 // diffTiles сравнивает тайлы в диапазоне индексов [tx0..tx1]×[ty0..ty1].
 // При достаточном объёме работа распараллеливается по рядам тайлов: каждый
 // воркер обрабатывает непересекающийся диапазон памяти (сравнение, извлечение

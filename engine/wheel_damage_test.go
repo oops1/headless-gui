@@ -38,7 +38,7 @@ func TestWheelPixels_DamageIsWidgetRect(t *testing.T) {
 		t.Fatalf("прокрутка не сдвинулась: scrollY = %d", lv.ScrollY())
 	}
 
-	damage, all := e.consumeDamage()
+	damage, all := damageUnion(e)
 	if all {
 		t.Fatal("колесо не должно инвалидировать весь холст")
 	}
@@ -66,7 +66,7 @@ func TestWheelTicks_FallbackSingleDamage(t *testing.T) {
 		t.Fatal("тиковое колесо не изменило значение")
 	}
 
-	damage, all := e.consumeDamage()
+	damage, all := damageUnion(e)
 	if all {
 		t.Fatal("тиковый фолбэк не должен инвалидировать весь холст")
 	}
@@ -86,8 +86,15 @@ func TestWheel_NoTargetNoDamage(t *testing.T) {
 
 	e.SendMouseWheelPixels(280, 280, 0, 120)
 
-	damage, all := e.consumeDamage()
+	damage, all := damageUnion(e)
 	if all || !damage.Empty() {
 		t.Fatalf("колесо в пустоту дало damage %v (all=%v)", damage, all)
 	}
+}
+
+// damageUnion — накопленные области одним прямоугольником: этим тестам важно
+// не то, сколько их, а куда они попали.
+func damageUnion(e *Engine) (image.Rectangle, bool) {
+	rects, all := e.consumeDamage()
+	return unionRects(rects), all
 }

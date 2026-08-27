@@ -55,7 +55,7 @@ type Engine struct {
 	onDemand  atomic.Bool
 	invGen    atomic.Uint64
 	damageMu  sync.Mutex
-	damage    image.Rectangle // объединение InvalidateRect с прошлого кадра
+	damage    []image.Rectangle // области InvalidateRect с прошлого кадра
 	damageAll bool            // Invalidate() — полный diff
 
 	focus    focusManager  // текущий виджет с фокусом
@@ -1137,7 +1137,10 @@ func (e *Engine) renderFrame() output.Frame {
 	root := e.root
 	e.mu.RUnlock()
 
-	damage, damageAll := e.consumeDamage()
+	damageRects, damageAll := e.consumeDamage()
+	// Объединение нужно там, где область может быть только одна: клип
+	// канваса — прямоугольник, и попапы отбираются по одному прямоугольнику.
+	damage := unionRects(damageRects)
 	// Некламповая копия — попапы живут и за краем холста (см. renderPopups).
 	popupDamage := damage
 
@@ -1146,6 +1149,11 @@ func (e *Engine) renderFrame() output.Frame {
 	// damage back-буфер хранит прошлый кадр — он совпадает с front, поэтому
 	// и отрисовка, и diff вне damage не нужны (контракт InvalidateRect:
 	// вызывающий заявляет ВСЕ изменившиеся области).
+	//
+	// ОТРИСОВКА идёт по объединению, а DIFF — по каждой области отдельно.
+	// Рисовать по объединению не жалко (пиксели остаются те же, тайлы от
+	// этого не меняются), а вот сравнивать по нему — значит отправить
+	// потребителю всё, что лежит между далёкими областями.
 	partial := e.onDemand.Load() && !damageAll && !damage.Empty()
 	if partial {
 		damage = damage.Intersect(image.Rect(0, 0, canvas.W, canvas.H))
@@ -1206,7 +1214,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
 	if partial {
-		tiles = canvas.diffAndSyncIn(damage)
+		tiles = canvas.diffAndSyncInRects(damageRects)
 	} else {
 		tiles = canvas.diffAndSync()
 	}
