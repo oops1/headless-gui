@@ -375,8 +375,12 @@ func StepAnimations(now time.Time) bool {
 	return hasActive
 }
 
-// AnimationsActive сообщает, есть ли активные анимации (движок опрашивает в
-// animationNeeded, чтобы не заснуть, пока анимация идёт).
+// AnimationsActive сообщает, есть ли зарегистрированные анимации.
+//
+// Движок этим НЕ решает, готовить ли кадр: анимация сама заявляет, что
+// изменила, а StepAnimations проходит до решения о пропуске — см.
+// Engine.animationNeeded. Функция осталась для тестов и приложений, ждущих
+// завершения анимации.
 func AnimationsActive() bool {
 	anim.mu.Lock()
 	active := len(anim.active) > 0 || len(anim.incoming) > 0

@@ -1071,6 +1071,20 @@ widget.AnimateOwned(w, "pulse", 400*time.Millisecond, widget.EaseOutCubic, func(
 })
 ```
 
+Note the `Invalidate()` in the tick: **it is required**. A registered
+animation is not a reason for the engine to draw — damage is. A tick that
+moves the widget through setters (`SetBounds`, `SetValue`, and the rest)
+declares damage itself; a tick that writes a field directly must call
+`Invalidate()`, or the change reaches no frame at all.
+
+This is about idling. The engine used to prepare a frame on every tick while
+any animation was registered, and the taskbar's one-second clock kept a
+motionless desktop running at full rate. The frame was a FULL one, too: such
+a wake-up has empty damage, and empty damage takes the full path — the
+background blitted over the whole canvas, the whole tree walked unclipped,
+every tile compared. A frame with nothing to do cost more than a frame with a
+change in it.
+
 **3. `Draw` doesn't change widget state — it only paints.** The dangerous
 case is computing layout (child positions, hit-test zones) inside `Draw` and
 caching it there: skip a `Draw` call and that cache goes stale, so a click
