@@ -65,6 +65,15 @@ type physicalScaler interface {
 	Scale() float64
 }
 
+// DrawLinearGradient заполняет прямоугольник r линейным градиентом.
+//
+// Публичная пара к DrawRadialGradient: рисовать градиент понадобилось не
+// только контейнерам пакета widget, но и оформлению по стилю темы, а
+// повторять построчную заливку во второй раз незачем.
+func DrawLinearGradient(ctx DrawContext, r image.Rectangle, g *LinearGradient) {
+	drawLinearGradient(ctx, r, g)
+}
+
 // drawLinearGradient заполняет прямоугольник r градиентом g.
 //
 // На дробном HiDPI-масштабе (1.25/1.5) построчная ЛОГИЧЕСКАЯ заливка даёт

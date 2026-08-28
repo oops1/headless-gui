@@ -42,7 +42,10 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 		fillAlpha(ctx, r, s.Backdrop.Tint)
 	}
 
-	if s.Fill.A > 0 {
+	// Градиент заменяет заливку, когда тема его задала.
+	if len(s.Gradient) > 0 {
+		PaintGradient(ctx, r, s)
+	} else if s.Fill.A > 0 {
 		switch {
 		case corner > 0:
 			ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), corner, s.Fill)
@@ -69,6 +72,63 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 			ctx.DrawBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Border)
 		}
 	}
+}
+
+// PaintGradient заливает область градиентом стиля.
+//
+// Вид решает сам стиль: вдоль оси (угол в градусах, 0 — слева направо) или
+// кругом от центра. Радиальный нужен там, где свет расходится от точки —
+// подсветка под значком дока, ореол под курсором: осью такое не выразить.
+//
+// Углы стиля здесь не учитываются: градиент прямоугольный, а скругление
+// делает клип вызывающего. Иначе пришлось бы либо строить маску на каждый
+// вызов, либо повторять арифметику скругления в третий раз.
+func PaintGradient(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
+	if s == nil || len(s.Gradient) == 0 || r.Empty() {
+		return
+	}
+	stops := make([]widget.GradientStop, 0, len(s.Gradient))
+	for _, st := range s.Gradient {
+		stops = append(stops, widget.GradientStop{Color: st.Color, Offset: st.Pos})
+	}
+
+	if s.GradientKind == theme.GradientRadial {
+		g := &widget.RadialGradient{
+			Stops:   stops,
+			CenterX: orHalf(s.GradientCenterX),
+			CenterY: orHalf(s.GradientCenterY),
+			Radius:  s.GradientRadius,
+		}
+		widget.DrawRadialGradient(ctx, r, g)
+		return
+	}
+
+	// Линейный: угол приводим к одной из двух осей — движок рисует градиент
+	// построчно или поколоночно, произвольный наклон он не умеет, а рисовать
+	// его попиксельно ради подложки кнопки не стоит того.
+	widget.DrawLinearGradient(ctx, r, &widget.LinearGradient{
+		Horizontal: horizontalAngle(s.GradientAngle),
+		Stops:      stops,
+	})
+}
+
+// orHalf — доля из стиля, а ноль означает середину: стиль, попросивший
+// радиальный градиент и не указавший центр, ждёт его посередине.
+func orHalf(v float64) float64 {
+	if v <= 0 {
+		return 0.5
+	}
+	return v
+}
+
+// horizontalAngle — ближе ли угол к горизонтали.
+func horizontalAngle(deg float64) bool {
+	a := deg
+	for a < 0 {
+		a += 360
+	}
+	a = float64(int(a) % 360)
+	return a < 45 || a > 315 || (a > 135 && a < 225)
 }
 
 // DrawUnderline рисует метку под кнопкой окна: так Windows 10 и 11 отмечают

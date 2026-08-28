@@ -96,6 +96,37 @@ type BevelSpec struct {
 	Sunken bool `json:"sunken,omitempty"`
 }
 
+// GradientKind — как разложены цвета градиента.
+type GradientKind uint8
+
+const (
+	// GradientLinear — вдоль оси GradientAngle (значение по умолчанию, чтобы
+	// стиль без указания вида вёл себя как раньше).
+	GradientLinear GradientKind = iota
+	// GradientRadial — кругом от центра к краю: подсветка под значком дока,
+	// ореол под курсором. Осью такое не выразить.
+	GradientRadial
+)
+
+// String — имя вида для JSON и диагностики.
+func (k GradientKind) String() string {
+	if k == GradientRadial {
+		return "radial"
+	}
+	return "linear"
+}
+
+// ParseGradientKind разбирает имя вида ("linear", "radial").
+func ParseGradientKind(s string) (GradientKind, bool) {
+	switch s {
+	case "", "linear":
+		return GradientLinear, true
+	case "radial":
+		return GradientRadial, true
+	}
+	return GradientLinear, false
+}
+
 // GradientStop — точка линейного градиента: положение вдоль оси [0,1] и цвет.
 // Ось задаётся углом в Style.GradientAngle.
 type GradientStop struct {

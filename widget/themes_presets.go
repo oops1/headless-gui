@@ -45,10 +45,34 @@ type ThemeStyle struct {
 }
 
 // currentStyle возвращает стиль активной темы (для Draw виджетов).
-func currentStyle() ThemeStyle { return win10.Style }
+func currentStyle() ThemeStyle {
+	if drawStyle != nil {
+		return *drawStyle
+	}
+	return win10.Style
+}
 
 // CurrentThemeStyle — публичный доступ к стилю активной темы.
-func CurrentThemeStyle() ThemeStyle { return win10.Style }
+func CurrentThemeStyle() ThemeStyle { return currentStyle() }
+
+// drawStyle — стиль, подменённый на время отрисовки поддерева с собственной
+// темой (ThemeScope). nil — рисуется обычное дерево, стиль берётся из общей
+// темы.
+//
+// Обычная переменная без блокировки: кадр рисуется в одной горутине —
+// движок последовательно обходит дерево, оверлеи и модалки. Читать её из
+// другой горутины некому: currentStyle зовётся только из Draw.
+var drawStyle *ThemeStyle
+
+// pushThemeStyle подменяет стиль отрисовки и возвращает функцию возврата.
+//
+// Возврат к ПРЕЖНЕМУ значению, а не к nil: области темы вкладываются друг в
+// друга, и внутренняя не должна сбрасывать внешнюю.
+func pushThemeStyle(st ThemeStyle) func() {
+	prev := drawStyle
+	drawStyle = &st
+	return func() { drawStyle = prev }
+}
 
 // ─── Отрисовка bevel (Classic3D) ─────────────────────────────────────────────
 

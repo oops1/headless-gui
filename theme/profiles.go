@@ -729,6 +729,30 @@ func MacOSProfile() *Profile {
 		Border: C(accent), BorderWidth: N(1), Corner: N(6),
 	})
 	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+
+	// У значка дока нет своей плашки: он лежит прямо на подложке дока, а
+	// стиль по умолчанию дал бы ему заливку темы — белый прямоугольник.
+	p.SetStyle("dock", "", StateNormal, StyleDelta{Fill: C(RGBA(0, 0, 0, 0))})
+
+	// Подсветка под значком дока — радиальный градиент: свет расходится
+	// кругом от значка, и осью такое не выразить. Ради этого случая
+	// радиальный градиент и появился в стиле темы.
+	p.SetStyle("dock", "", StateHover, StyleDelta{
+		Gradient: []GradientStop{
+			{Pos: 0, Color: RGBA(255, 255, 255, 150)},
+			{Pos: 1, Color: RGBA(255, 255, 255, 0)},
+		},
+		GradientKind:   GK(GradientRadial),
+		GradientRadius: N(1.1),
+	})
+	p.SetStyle("dock", "", StateActive, StyleDelta{
+		Gradient: []GradientStop{
+			{Pos: 0, Color: RGBA(255, 255, 255, 90)},
+			{Pos: 1, Color: RGBA(255, 255, 255, 0)},
+		},
+		GradientKind:   GK(GradientRadial),
+		GradientRadius: N(1.1),
+	})
 	return p
 }
 

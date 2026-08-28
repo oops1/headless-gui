@@ -3354,6 +3354,47 @@ Two traps worth remembering, both found by tests here:
 - Do not hold the component's mutex while calling a presenter: it calls
   `Cells()`/`HoverIndex()` back and deadlocks.
 
+### Radial gradients
+
+`Style.Gradient` is drawn by `desktop.PaintGradient` (called from `PaintStyle`
+whenever the style sets it) and replaces the fill. `GradientKind` picks the
+shape:
+
+```go
+p.SetStyle("dock", "", theme.StateHover, theme.StyleDelta{
+    Gradient:       []theme.GradientStop{{Pos: 0, Color: c1}, {Pos: 1, Color: c2}},
+    GradientKind:   theme.GK(theme.GradientRadial),
+    GradientCenterX: theme.N(0.5), GradientCenterY: theme.N(0.5),
+    GradientRadius: theme.N(1.1),
+})
+```
+
+Center and radius are fractions of the area (0 means "middle" / "to the edge"),
+so one glow fits any icon size. Renderer entry points:
+`widget.DrawRadialGradient(ctx, rect, *widget.RadialGradient)` and
+`widget.DrawLinearGradient`. The radial one builds a 64×64 image and lets the
+engine stretch it — cheaper than per-pixel writes and smooth on fractional DPI.
+Colors are alpha-premultiplied, so a transparent edge is the ZERO color, not the
+same color with `A=0`; `widget.NewRadialGradient(col)` builds that pair for you.
+
+### A theme for a subtree (`widget.ThemeScope`)
+
+```go
+scope := widget.NewThemeScope(widget.Win2000Theme())
+scope.AddChild(w)                 // themed immediately
+root.AddChild(scope)
+eng.SetTheme(widget.DarkTheme())  // the scope keeps its own theme
+```
+
+- `ApplyThemeTree` skips any widget implementing `HasOwnTheme() bool` returning
+  true, so a global theme change cannot repaint a scoped subtree.
+- Colors live in widget fields (handed out by `ApplyTheme`), but SHAPE
+  (`Classic3D`, corners, bevel colors) is read from a shared variable inside
+  `Draw` via `currentStyle()`. `ThemeScope.Draw` swaps it for the subtree and
+  restores it with `defer`; nested scopes restore the OUTER style, not the
+  global one. The swap is a plain variable: a frame is drawn on one goroutine.
+- `NewThemeScope(nil)` behaves as a plain container.
+
 ### Icons
 
 `widget.BuiltinIcons()` returns an `IconSet` implementing `theme.IconResolver`

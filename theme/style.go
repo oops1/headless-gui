@@ -20,6 +20,14 @@ type Style struct {
 	// GradientAngle (в градусах, 0 — слева направо, 90 — сверху вниз).
 	Gradient      []GradientStop
 	GradientAngle float64
+	// GradientKind — линейный (по умолчанию) или радиальный.
+	GradientKind GradientKind
+	// GradientCenter — центр радиального градиента в долях области
+	// (0.5, 0.5 — середина). Нулевое значение означает середину: так стиль,
+	// который просто попросил радиальный градиент, получает ожидаемое.
+	GradientCenterX, GradientCenterY float64
+	// GradientRadius — радиус в долях половины большей стороны (0 — до края).
+	GradientRadius float64
 
 	// Геометрия — в логических пикселях.
 	Corner      float64 // радиус скругления углов
@@ -72,6 +80,11 @@ type StyleDelta struct {
 
 	Gradient      []GradientStop `json:"gradient,omitempty"`
 	GradientAngle *float64       `json:"gradient_angle,omitempty"`
+	GradientKind  *GradientKind  `json:"gradient_kind,omitempty"`
+
+	GradientCenterX *float64 `json:"gradient_center_x,omitempty"`
+	GradientCenterY *float64 `json:"gradient_center_y,omitempty"`
+	GradientRadius  *float64 `json:"gradient_radius,omitempty"`
 
 	Corner      *float64 `json:"corner,omitempty"`
 	BorderWidth *float64 `json:"border_width,omitempty"`
@@ -104,6 +117,18 @@ func (d *StyleDelta) applyTo(s *Style) {
 	}
 	if d.Gradient != nil {
 		s.Gradient = append([]GradientStop(nil), d.Gradient...)
+	}
+	if d.GradientKind != nil {
+		s.GradientKind = *d.GradientKind
+	}
+	if d.GradientCenterX != nil {
+		s.GradientCenterX = *d.GradientCenterX
+	}
+	if d.GradientCenterY != nil {
+		s.GradientCenterY = *d.GradientCenterY
+	}
+	if d.GradientRadius != nil {
+		s.GradientRadius = *d.GradientRadius
 	}
 	if d.GradientAngle != nil {
 		s.GradientAngle = *d.GradientAngle
@@ -142,6 +167,9 @@ func (d *StyleDelta) applyTo(s *Style) {
 
 // C возвращает указатель на цвет — для полей StyleDelta.
 func C(c color.RGBA) *color.RGBA { return &c }
+
+// GK возвращает указатель на вид градиента — для StyleDelta.
+func GK(k GradientKind) *GradientKind { return &k }
 
 // N возвращает указатель на число — для полей StyleDelta.
 func N(v float64) *float64 { return &v }

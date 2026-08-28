@@ -1865,6 +1865,51 @@ one who draws changes. Register your own with
 Demo: `go run ./cmd/desktopdemo` — five looks of the very same components,
 switched by buttons without a restart.
 
+
+#### Radial gradient
+
+A linear gradient describes a transition along an axis, and the glow under a
+dock icon cannot be expressed that way: there the light spreads out in a circle.
+
+```go
+p.SetStyle("dock", "", theme.StateHover, theme.StyleDelta{
+    Gradient: []theme.GradientStop{
+        {Pos: 0, Color: theme.RGBA(255, 255, 255, 150)},
+        {Pos: 1, Color: theme.RGBA(255, 255, 255, 0)},
+    },
+    GradientKind:   theme.GK(theme.GradientRadial),
+    GradientRadius: theme.N(1.1),     // fraction of half the longer side
+})
+```
+
+Center (`GradientCenterX/Y`) and radius are fractions of the area, not pixels:
+the same glow fits both a 24 pt icon and a 64 pt one. A gradient replaces the
+fill when set. `widget.DrawRadialGradient` and `widget.DrawLinearGradient` are
+available directly too.
+
+#### A theme for a subtree
+
+There used to be exactly one theme per application: `ApplyGlobalTheme` writes to
+shared variables and `Engine.SetTheme` walks the whole tree. A remote-desktop
+shell needs something else — the guest's window in the guest's theme next to its
+own interface.
+
+```go
+scope := widget.NewThemeScope(widget.Win2000Theme())
+scope.SetBounds(image.Rect(0, 0, 400, 300))
+scope.AddChild(button)          // a child is themed by the scope right away
+root.AddChild(scope)
+
+eng.SetTheme(widget.DarkTheme()) // the scope stays classic
+```
+
+The scope hands its theme to its subtree and shields it from a global change:
+`ApplyThemeTree` does not descend into it. Shape — bevels, corners, the classic
+flag — is read from a shared variable inside `Draw`, so it is swapped for the
+duration of the subtree's drawing and restored via `defer`. Scopes nest: an
+inner one restores the OUTER style rather than resetting to the global one.
+`NewThemeScope(nil)` is a plain container — a global theme reaches its children.
+
 ---
 
 ## Module Structure
