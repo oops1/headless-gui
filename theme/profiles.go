@@ -804,19 +804,23 @@ func MacOSProfile() *Profile {
 	})
 	// Элементы стеклянной полосы не носят своей заливки: она приходит из
 	// общих токенов темы (surface) и ложится светлой капсулой поверх стекла.
-	// Фон им даёт сама полоса, а собственный — только под курсором. Блок
-	// стоит последним намеренно: SetStyle заменяет запись целиком, и любой
-	// стиль этих компонентов ниже вернул бы заливку обратно.
-	clear := C(RGBA(0, 0, 0, 0))
+	// Фон им даёт сама полоса, а собственный — только под курсором.
+	//
+	// SetStyle заменяет запись StyleDelta целиком, поэтому блок раньше писал
+	// сюда Corner/PadX заново и затирал то, что выше уже задано для
+	// startbutton/taskbutton (скругление 8/10 и отступы 10/6) — как и в
+	// Windows10Profile/Windows11Profile, меняем только Fill через чтение
+	// текущего стиля, а не переопределяем StyleDelta с нуля.
+	clearFill := C(RGBA(0, 0, 0, 0))
 	for _, comp := range []string{"startbutton", "taskbutton", "clock",
 		"tray.network", "tray.volume", "tray.power", "tray.chevron"} {
-		p.SetStyle(comp, "", StateNormal, StyleDelta{
-			Fill: clear, Text: C(text), Corner: N(6), PadX: N(8),
-		})
+		st := p.Styles[StyleKey{Component: comp, State: StateNormal}]
+		st.Fill = clearFill
+		p.SetStyle(comp, "", StateNormal, st)
 	}
-	p.SetStyle("startbutton", "", StateNormal, StyleDelta{
-		Fill: clear, Text: C(text), Corner: N(6), PadX: N(10),
-	})
+	// Отдельная строка для startbutton больше не нужна: она задавала ровно
+	// то же самое (Fill/Text/Corner/PadX), что уже входит в цикл выше —
+	// без переопределения Corner/PadX задавать её отдельно незачем.
 
 	return p
 }
