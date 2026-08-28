@@ -106,8 +106,16 @@ func Windows2000Profile() *Profile {
 
 	p.SetFlag("style.classic3d", true).
 		SetFlag("style.mac.titlebar", false).
-		SetFlag("taskbar.centered", false)
+		SetFlag("taskbar.centered", false).
+		SetFlag("taskbar.separators", true). // хваталки между секциями
+		SetFlag("startbutton.label", true).  // «Пуск» рядом со значком
+		SetFlag("taskbutton.label", true).
+		// Даты в классических часах нет вовсе — она живёт в подсказке.
+		SetFlag("clock.date", false)
 
+	// Значок кнопки «Пуск» — из набора иконок темы: оболочка вправе
+	// подменить его своим, не трогая компонент.
+	p.Icons["startbutton.icon"] = IconRef{Name: "start"}
 	p.Fonts["default"] = FontSpec{Size: 9}
 
 	// Анимаций нет — нулевая длительность и есть отказ от движения.
@@ -262,12 +270,20 @@ func Windows10Profile() *Profile {
 		SetMetric("notifications.gap", 6).
 		SetMetric("calendar.cell", 28).
 		SetMetric("calendar.width", 220).
-		SetMetric("calendar.header.height", 30)
+		SetMetric("calendar.header.height", 30).
+		SetMetric("taskbutton.underline", 2).    // полоса под открытым окном
+		SetMetric("taskbutton.underline.len", 1) // во всю ширину кнопки
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", false).
-		SetFlag("taskbar.centered", false)
+		SetFlag("taskbar.centered", false).
+		// Панель Windows 10 тёмная и при светлой теме окон, а кнопки окон
+		// показывают только значки: подписи включаются в настройках.
+		SetFlag("startbutton.label", false).
+		SetFlag("taskbutton.label", false)
 
+	// Значок кнопки «Пуск» берётся из набора иконок темы.
+	p.Icons["startbutton.icon"] = IconRef{Name: "start"}
 	p.Fonts["default"] = FontSpec{Size: 9}
 	p.Anims["hover"] = AnimSpec{Duration: 120 * time.Millisecond, Curve: "out-cubic"}
 	p.Anims["menu.open"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}
@@ -285,8 +301,9 @@ func Windows10Profile() *Profile {
 		Fill: C(taskbarFill), Text: C(RGB(230, 230, 230)), PadX: N(8),
 	})
 	p.SetStyle("taskbutton", "", StateHover, StyleDelta{Fill: C(RGB(56, 56, 56))})
+	// Полоса под кнопкой вместо обводки — как на панели Windows 10.
 	p.SetStyle("taskbutton", "", StateActive, StyleDelta{
-		Fill: C(RGB(64, 64, 64)), Border: C(accent), BorderWidth: N(1),
+		Fill: C(RGB(64, 64, 64)), Border: C(accent),
 	})
 	p.SetStyle("taskbutton", "", StateDisabled, StyleDelta{Text: C(RGB(150, 150, 150))})
 
@@ -427,7 +444,9 @@ func Windows11Profile() *Profile {
 		SetMetric("notifications.gap", 8).
 		SetMetric("calendar.cell", 32).
 		SetMetric("calendar.width", 260).
-		SetMetric("calendar.header.height", 34)
+		SetMetric("calendar.header.height", 34).
+		SetMetric("taskbutton.underline", 3).      // чёрточка под значком
+		SetMetric("taskbutton.underline.len", 0.4) // короткая, не во всю кнопку
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", false).
@@ -435,6 +454,8 @@ func Windows11Profile() *Profile {
 		SetFlag("taskbutton.label", false). // только значки, как в Windows 11
 		SetFlag("startbutton.label", false)
 
+	// Значок кнопки «Пуск» берётся из набора иконок темы.
+	p.Icons["startbutton.icon"] = IconRef{Name: "start"}
 	p.Fonts["default"] = FontSpec{Size: 9}
 	p.Anims["hover"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}
 	p.Anims["menu.open"] = AnimSpec{Duration: 200 * time.Millisecond, Curve: "out-back"}
@@ -458,8 +479,10 @@ func Windows11Profile() *Profile {
 		Text: C(text), Corner: N(6), PadX: N(8),
 	})
 	p.SetStyle("taskbutton", "", StateHover, StyleDelta{Fill: C(RGBA(0, 0, 0, 20))})
+	// Активное окно отмечено меткой под кнопкой, а не обводкой: цвет метки
+	// берётся из Border, но саму рамку не рисуем — BorderWidth остаётся нулём.
 	p.SetStyle("taskbutton", "", StateActive, StyleDelta{
-		Fill: C(RGBA(0, 0, 0, 28)), Border: C(accent), BorderWidth: N(1),
+		Fill: C(RGBA(0, 0, 0, 28)), Border: C(accent),
 	})
 
 	for _, comp := range []string{"tray.network", "tray.volume", "tray.power"} {
@@ -589,7 +612,10 @@ func MacOSProfile() *Profile {
 		SetMetric("window.corner", 10).
 		SetMetric("control.pad.x", 14).
 		SetMetric("control.pad.y", 6).
-		SetMetric("taskbar.height", 64).
+		// Строка меню сверху тонкая, док снизу — крупный: в macOS это две
+		// разные полосы, а не одна панель задач.
+		SetMetric("taskbar.height", 24).
+		SetMetric("dock.height", 64).
 		SetMetric("taskbar.pad.x", 12).
 		SetMetric("taskbar.gap", 6).
 		SetMetric("dock.icon", 44).
@@ -619,7 +645,12 @@ func MacOSProfile() *Profile {
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", true).
-		SetFlag("taskbar.centered", true)
+		// Меню Apple прижато к левому краю строки меню; по центру в macOS
+		// стоит только док, и центрирует он себя сам — презентером.
+		SetFlag("taskbar.centered", false).
+		SetFlag("taskbar.top", true). // строка меню прижата к верху экрана
+		SetFlag("startbutton.label", false).
+		SetFlag("taskbutton.label", false)
 
 	p.Fonts["default"] = FontSpec{Size: 9}
 	p.Anims["hover"] = AnimSpec{Duration: 120 * time.Millisecond, Curve: "out-cubic"}

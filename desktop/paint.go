@@ -43,9 +43,15 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 	}
 
 	if s.Fill.A > 0 {
-		if corner > 0 {
+		switch {
+		case corner > 0:
 			ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), corner, s.Fill)
-		} else {
+		case s.Fill.A < 255:
+			// Полупрозрачная заливка — это плёнка поверх фона (подсветка
+			// кнопки под курсором), и класть её надо смешиванием: обычный
+			// FillRect записал бы цвет вместе с чужой альфой прямо в буфер.
+			ctx.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Fill)
+		default:
 			ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Fill)
 		}
 	}
@@ -63,6 +69,47 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 			ctx.DrawBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Border)
 		}
 	}
+}
+
+// DrawUnderline рисует метку под кнопкой окна: так Windows 10 и 11 отмечают
+// открытое окно вместо вдавленной кнопки классических тем.
+//
+// Длина метки — доля ширины кнопки (ratio), и она же различает темы: в
+// Windows 10 полоса идёт почти во всю ширину, в Windows 11 это короткая
+// чёрточка под значком. Если тема просит короткую метку, то у активного окна
+// она вдвое длиннее, чем у просто открытого — именно этим Windows 11 их и
+// различает. Тема с полной полосой рисует её только активному.
+func DrawUnderline(ctx widget.DrawContext, r image.Rectangle, thickness int, ratio float64, active bool, s *theme.Style) {
+	if thickness <= 0 || s == nil || r.Empty() {
+		return
+	}
+	if ratio <= 0 {
+		ratio = 1
+	}
+	if ratio >= 1 && !active {
+		return // полная полоса — примета активного окна, остальным её не рисуют
+	}
+	col := s.Border
+	if col.A == 0 {
+		col = s.Text
+	}
+	if col.A == 0 {
+		return
+	}
+
+	k := ratio
+	if !active {
+		k /= 2
+	}
+	w := int(float64(r.Dx()) * k)
+	if w < thickness {
+		w = thickness
+	}
+	if w > r.Dx() {
+		w = r.Dx()
+	}
+	x := r.Min.X + (r.Dx()-w)/2
+	ctx.FillRect(x, r.Max.Y-thickness, w, thickness, col)
 }
 
 // DrawTextCentered рисует строку по центру области цветом и шрифтом стиля.

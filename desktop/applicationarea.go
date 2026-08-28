@@ -158,6 +158,10 @@ func (a *ApplicationArea) PreferredSize(avail image.Point) image.Point {
 		return image.Point{}
 	}
 	ideal := int(a.metric(KeyTaskButtonWidth))
+	if a.tm != nil && !a.tm.GetFlag(KeyTaskButtonLabel, true) {
+		st := styleOf(a.tm, ComponentTaskButton, "", theme.StateNormal)
+		ideal = int(a.metric(KeyTaskButtonIconSize)) + 2*int(st.PadX)
+	}
 	gap := int(a.metric(KeyTaskButtonGap))
 	want := n*ideal + gap*(n-1)
 	if avail.X > 0 && want > avail.X {
@@ -196,6 +200,12 @@ func (a *ApplicationArea) layout() {
 	gap := int(a.metric(KeyTaskButtonGap))
 	ideal := int(a.metric(KeyTaskButtonWidth))
 	min := int(a.metric(KeyTaskButtonMinWidth))
+	// Тема без подписей хочет кнопку со значок, а не полноразмерную.
+	if a.tm != nil && !a.tm.GetFlag(KeyTaskButtonLabel, true) {
+		st := styleOf(a.tm, ComponentTaskButton, "", theme.StateNormal)
+		ideal = int(a.metric(KeyTaskButtonIconSize)) + 2*int(st.PadX)
+		min = ideal
+	}
 	per := (b.Dx() - gap*(n-1)) / n
 
 	w := per
@@ -280,6 +290,7 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 
 	iconSize := int(a.metric(KeyTaskButtonIconSize))
 	labelGap := int(a.metric(KeyTaskButtonLabelGap))
+	labels := a.tm == nil || a.tm.GetFlag(KeyTaskButtonLabel, true)
 	prev := ctx.Clip()
 
 	for i, r := range rects {
@@ -291,14 +302,21 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 		s := styleOf(a.tm, ComponentTaskButton, "", st)
 		PaintStyle(ctx, r, s)
 
+		// Метка открытого окна: закреплённое, но незапущенное её не получает —
+		// в этом вся разница между «закреплено» и «открыто».
+		if e.live {
+			DrawUnderline(ctx, r, int(a.metric(KeyTaskButtonUnderline)),
+				a.metric(KeyTaskButtonUnderlineLen), e.active, s)
+		}
+
 		padX := int(s.PadX)
 		iconX := r.Min.X + padX
 		if e.icon != nil && iconSize > 0 {
 			ctx.DrawImageScaled(e.icon, iconX, r.Min.Y+(r.Dy()-iconSize)/2, iconSize, iconSize)
 		}
-		// Подпись помещается не всегда — тогда остаётся один значок.
+		// Подпись помещается не всегда, и тема вправе не хотеть её вовсе.
 		textLeft := iconX + iconSize + labelGap
-		if r.Max.X-textLeft > iconSize {
+		if labels && r.Max.X-textLeft > iconSize {
 			ctx.SetClip(r.Intersect(prev))
 			DrawTextLeftElided(ctx, image.Rect(textLeft-padX, r.Min.Y, r.Max.X, r.Max.Y), e.title, s)
 			ctx.SetClip(prev)

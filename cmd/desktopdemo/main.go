@@ -28,6 +28,9 @@ import (
 const (
 	screenW = 1000
 	screenH = 640
+
+	// dockPad — поля плавающей плашки дока по краям от значков.
+	dockPad = 12
 )
 
 // themeOrder — порядок обхода тем кнопками.
@@ -128,11 +131,12 @@ func buildDesktop(eng *engine.Engine) scene {
 	tray.AddItem(vol)
 	tray.AddItem(pwr)
 
-	bar.AddItem(desktop.SlotStart, startBtn)
-	bar.AddItem(desktop.SlotApps, apps)
-	bar.AddItem(desktop.SlotTray, tray)
-	bar.AddItem(desktop.SlotTray, clock)
+	// Вторая полоса: у macOS рабочий стол разделён надвое — строка меню
+	// сверху и док снизу. Полоса создаётся всегда, но под темами Windows
+	// остаётся пустой и нулевой высоты, то есть невидимой.
+	dock := desktop.NewTaskbar(tm)
 	root.AddChild(bar)
+	root.AddChild(dock)
 
 	// ─── Всплывающие панели ─────────────────────────────────────────────────
 	screen := image.Rect(0, 0, screenW, screenH)
@@ -196,13 +200,65 @@ func buildDesktop(eng *engine.Engine) scene {
 	// Кнопки не пересоздают ни один компонент: они только меняют активную
 	// тему. Всё остальное — высота панели, форма кнопок, наличие дока,
 	// размеры всплывающих панелей — приезжает из профиля.
+	// arrange раскладывает компоненты по полосам так, как просит активная
+	// тема, и ставит сами полосы к нужным краям экрана.
+	//
+	// Компоненты при этом НЕ пересоздаются: кнопка «Пуск», часы и значки
+	// остаются теми же объектами, меняется только то, в какой полосе они
+	// лежат. Иначе смена темы теряла бы их состояние — наведение, открытые
+	// панели, подписки.
+	arrange := func() {
+		dockH := bar.DockHeight()
+		if dockH > 0 {
+			// Две полосы: строка меню (пуск и статусы) и док (приложения).
+			bar.SetItems(desktop.SlotStart, startBtn)
+			bar.SetItems(desktop.SlotApps)
+			bar.SetItems(desktop.SlotTray, tray, clock)
+			dock.SetItems(desktop.SlotApps, apps)
+		} else {
+			bar.SetItems(desktop.SlotStart, startBtn)
+			bar.SetItems(desktop.SlotApps, apps)
+			bar.SetItems(desktop.SlotTray, tray, clock)
+			dock.SetItems(desktop.SlotApps)
+		}
+
+		barH := bar.Height()
+		if barH <= 0 {
+			barH = 40
+		}
+		if bar.Edge() == desktop.EdgeTop {
+			bar.SetBounds(image.Rect(0, 0, screenW, barH))
+		} else {
+			bar.SetBounds(image.Rect(0, screenH-barH, screenW, screenH))
+		}
+		if dockH > 0 {
+			// Док — плавающая плашка по содержимому, а не полоса во всю
+			// ширину: этим он и отличается от панели задач. Ширину спрашиваем
+			// у самой области приложений — сколько ей надо, столько и даём.
+			want := apps.PreferredSize(image.Pt(screenW, dockH)).X + 2*dockPad
+			if want > screenW {
+				want = screenW
+			}
+			x := (screenW - want) / 2
+			// Док не прилипает к краю экрана — под ним остаётся поле.
+			dock.SetBounds(image.Rect(x, screenH-dockH-dockPad, x+want, screenH-dockPad))
+		} else {
+			dock.SetBounds(image.Rectangle{})
+		}
+
+		// Всплывающие панели раскрываются от своего края.
+		edge := bar.Edge()
+		menu.Edge, quick.Edge, center.Edge, cal.Edge = edge, edge, edge, edge
+		tray.Overflow().Edge = edge
+	}
+
 	apply := func(i int) {
 		current := i % len(themeOrder)
 		if err := tm.SetTheme(themeOrder[current].profile); err != nil {
 			log.Printf("тема %s: %v", themeOrder[current].profile, err)
 			return
 		}
-		layoutBar(bar, screen)
+		arrange()
 		eng.Invalidate()
 	}
 
@@ -223,12 +279,13 @@ func buildDesktop(eng *engine.Engine) scene {
 	hint.SetBounds(image.Rect(20, 60, 700, 84))
 	root.AddChild(hint)
 
-	layoutBar(bar, screen)
+	arrange()
 	return scene{
 		root:  root,
 		apply: apply,
 		close: func() {
 			bar.Close()
+			dock.Close()
 			apps.Close()
 			tray.Close()
 			clock.Close()
@@ -236,18 +293,6 @@ func buildDesktop(eng *engine.Engine) scene {
 			center.Close()
 		},
 	}
-}
-
-// layoutBar ставит панель задач по нижнему краю с высотой из активной темы.
-//
-// Высота панели — метрика темы, и при её смене панель обязана переехать:
-// Windows 2000 хочет 28 точек, macOS — 64.
-func layoutBar(bar *desktop.Taskbar, screen image.Rectangle) {
-	h := bar.Height()
-	if h <= 0 {
-		h = 40
-	}
-	bar.SetBounds(image.Rect(screen.Min.X, screen.Max.Y-h, screen.Max.X, screen.Max.Y))
 }
 
 // addWallpaper рисует «обои» — сетку прямоугольников, на которой видно

@@ -57,6 +57,12 @@ type Taskbar struct {
 	// unsubTheme снимает подписку на смену темы. Панель перерисовывается
 	// сама: она живёт вне обхода дерева, когда её показывают оболочкой.
 	unsubTheme func()
+
+	// startEdge и trayEdge — границы секций, посчитанные раскладкой: между
+	// ними классическая тема рисует разделители. Хранятся, а не считаются
+	// заново при отрисовке, чтобы разделитель не разъехался с элементами.
+	startEdge int
+	trayEdge  int
 }
 
 // Ключи токенов, которыми тема управляет панелью.
@@ -67,6 +73,17 @@ const (
 	// KeyTaskbarCentered — ставить ли группу «пуск + приложения» по центру
 	// панели (Windows 11) вместо прижатия влево (всё остальное).
 	KeyTaskbarCentered theme.Key = "taskbar.centered"
+	// KeyTaskbarTop — панель прижата к ВЕРХНЕМУ краю экрана.
+	// Так устроена строка меню macOS; всплывающие панели при этом
+	// раскрываются вниз, а не вверх.
+	KeyTaskbarTop theme.Key = "taskbar.top"
+	// KeyDockHeight — высота отдельной нижней полосы (док macOS). Ноль —
+	// отдельной полосы нет, всё живёт в одной панели.
+	KeyDockHeight theme.Key = "dock.height"
+	// KeyTaskbarSeparators — рисовать ли разделители между секциями панели.
+	// Примета классической панели: между кнопкой «Пуск», кнопками окон и
+	// треем стоят вертикальные хваталки с фаской.
+	KeyTaskbarSeparators theme.Key = "taskbar.separators"
 
 	// ComponentTaskbar — имя компонента для стилей темы.
 	ComponentTaskbar = "taskbar"
@@ -110,6 +127,41 @@ func (t *Taskbar) Items(slot Slot) []Item {
 		return nil
 	}
 	return append([]Item(nil), t.slots[slot]...)
+}
+
+// Edge сообщает, к какому краю экрана прижата панель по мнению активной темы.
+//
+// Нужно не самой панели (она рисуется в тех границах, что ей дали), а
+// оболочке и всплывающим панелям: от края зависит, куда им раскрываться.
+func (t *Taskbar) Edge() Edge {
+	if t.flag(KeyTaskbarTop) {
+		return EdgeTop
+	}
+	return EdgeBottom
+}
+
+// DockHeight — высота отдельной нижней полосы, если тема её просит (0 — не
+// просит). Отдельная полоса — это док macOS: строка меню и док не одно и то
+// же и не могут быть одной панелью.
+func (t *Taskbar) DockHeight() int { return t.metric(KeyDockHeight) }
+
+// SetItems заменяет содержимое слота целиком.
+//
+// Нужно оболочке при смене темы: macOS раскладывает те же компоненты по двум
+// полосам, Windows — по одной. Компоненты при этом остаются теми же
+// объектами — переезжает только их принадлежность панели.
+func (t *Taskbar) SetItems(slot Slot, items ...Item) {
+	if slot < 0 || int(slot) >= len(t.slots) {
+		return
+	}
+	for _, old := range t.slots[slot] {
+		t.RemoveChild(old)
+	}
+	t.slots[slot] = nil
+	for _, it := range items {
+		t.AddItem(slot, it)
+	}
+	t.relayout()
 }
 
 // Height возвращает высоту панели из темы (0 — тема не задала, решает
@@ -157,6 +209,7 @@ func (t *Taskbar) relayout() {
 		right -= sz.X + gap
 	}
 	trayStart := right
+	t.trayEdge = trayStart
 
 	start, apps := t.slots[SlotStart], t.slots[SlotApps]
 
@@ -204,6 +257,7 @@ func (t *Taskbar) relayout() {
 		place(it, image.Rect(x, inner.Min.Y, x+startW[i], inner.Min.Y+t.sizeOf(it, avail).Y), inner)
 		x += startW[i] + gap
 	}
+	t.startEdge = x
 	if len(apps) == 0 {
 		return
 	}
@@ -328,7 +382,50 @@ func (t *Taskbar) Draw(ctx widget.DrawContext) {
 		}
 	}
 
+	t.drawSeparators(ctx)
 	t.DrawChildren(ctx)
+}
+
+// drawSeparators рисует вертикальные разделители между секциями панели.
+//
+// Примета классической панели: между кнопкой «Пуск», кнопками окон и треем
+// стоят хваталки — светлая и тёмная линии рядом, как фаска. Современные темы
+// признак не выставляют, и разделителей у них нет.
+func (t *Taskbar) drawSeparators(ctx widget.DrawContext) {
+	if !t.flag(KeyTaskbarSeparators) {
+		return
+	}
+	b := t.Bounds()
+	if b.Empty() {
+		return
+	}
+	s := t.style("", theme.StateNormal)
+	light, shadow := separatorColors(s)
+	if light.A == 0 && shadow.A == 0 {
+		return
+	}
+	gap := t.metric(KeyTaskbarGap)
+	inset := b.Dy() / 6
+
+	for _, x := range []int{t.startEdge, t.trayEdge} {
+		// Разделитель стоит в зазоре между секциями, а не поверх элемента.
+		cx := x - gap/2
+		if cx <= b.Min.X+1 || cx >= b.Max.X-1 {
+			continue
+		}
+		ctx.FillRect(cx, b.Min.Y+inset, 1, b.Dy()-2*inset, shadow)
+		ctx.FillRect(cx+1, b.Min.Y+inset, 1, b.Dy()-2*inset, light)
+	}
+}
+
+// separatorColors берёт грани фаски стиля панели, а если тема фасок не
+// объявляла — обходится рамкой: разделитель обязан быть виден и в плоской
+// теме, если та его попросила.
+func separatorColors(s *theme.Style) (light, shadow color.RGBA) {
+	if s.Bevel != nil {
+		return s.Bevel.Light, s.Bevel.Shadow
+	}
+	return color.RGBA{}, s.Border
 }
 
 // fillAlpha заливает область с честным смешиванием, если контекст умеет.

@@ -140,8 +140,20 @@ func lineHeight(size float64) int {
 	return int(size * 1.4)
 }
 
-// twoLine решает, помещается ли вторая строка (дата) в доступную высоту.
+// KeyClockDate — показывать ли дату под временем.
+//
+// Признак, а не расчёт по месту: в классических часах Windows 2000 даты нет
+// вовсе, сколько бы места ни было — она живёт во всплывающей подсказке. Без
+// признака часы решали бы это высотой панели и на высокой панели показывали
+// бы дату там, где её быть не должно.
+const KeyClockDate theme.Key = "clock.date"
+
+// twoLine решает, показывать ли вторую строку (дату): разрешает ли её тема и
+// хватает ли высоты.
 func (c *ClockItem) twoLine(availY int, timeSize float64) bool {
+	if c.tm != nil && !c.tm.GetFlag(KeyClockDate, true) {
+		return false
+	}
 	dateStyle := c.style("date", theme.StateNormal)
 	dateSize := fontSizeOf(dateStyle)
 	gap := int(dateStyle.PadY)

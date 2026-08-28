@@ -421,18 +421,24 @@ func (c *Canvas) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
 	c.drawCorners(cornersFor(pr, cornerFill), px, py, pw, ph, pr, col)
 }
 
-// fillRoundRectLegacy — прежняя ступенчатая заливка (для A<255).
-// Координаты ФИЗИЧЕСКИЕ.
+// fillRoundRectLegacy — ступенчатая заливка для полупрозрачных цветов
+// (A<255). Координаты ФИЗИЧЕСКИЕ.
+//
+// Смешивает, а не пишет цвет как есть. Ветка выбирается ИМЕННО по
+// полупрозрачности, и запись без смешивания оставляла в буфере цвет с чужой
+// альфой: подсветка кнопки под курсором не ложилась плёнкой поверх панели, а
+// пробивала в ней дыру — на экране это выглядело светлым пятном, потому что
+// сквозь неё просвечивал фон приёмника.
 func (c *Canvas) fillRoundRectLegacy(x, y, w, h, r int, col color.RGBA) {
-	c.fillRectPx(image.Rect(x, y+r, x+w, y+h-r), col, false)
+	c.fillRectPx(image.Rect(x, y+r, x+w, y+h-r), col, true)
 	rf := float64(r)
 	for i := 0; i < r; i++ {
 		dy := float64(r - i - 1)
 		inset := r - int(math.Round(math.Sqrt(rf*rf-dy*dy)))
 		lineW := w - 2*inset
 		if lineW > 0 {
-			c.fillRectPx(image.Rect(x+inset, y+i, x+inset+lineW, y+i+1), col, false)     // верх
-			c.fillRectPx(image.Rect(x+inset, y+h-1-i, x+inset+lineW, y+h-i), col, false) // низ
+			c.fillRectPx(image.Rect(x+inset, y+i, x+inset+lineW, y+i+1), col, true)     // верх
+			c.fillRectPx(image.Rect(x+inset, y+h-1-i, x+inset+lineW, y+h-i), col, true) // низ
 		}
 	}
 }

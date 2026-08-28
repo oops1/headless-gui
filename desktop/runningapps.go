@@ -23,6 +23,17 @@ const (
 	KeyTaskButtonIconSize theme.Key = "taskbutton.icon.size"
 	// KeyTaskButtonGap — зазор между соседними кнопками окон.
 	KeyTaskButtonGap theme.Key = "taskbutton.gap"
+	// KeyTaskButtonLabel — признак темы: показывать ли подписи на кнопках
+	// окон. Windows 10 и 11 по умолчанию их скрывают, оставляя значки;
+	// классическая панель показывает.
+	KeyTaskButtonLabel theme.Key = "taskbutton.label"
+	// KeyTaskButtonUnderline — толщина метки под кнопкой открытого окна.
+	// Ею Windows 10 и 11 отмечают окно вместо вдавленной кнопки.
+	KeyTaskButtonUnderline theme.Key = "taskbutton.underline"
+	// KeyTaskButtonUnderlineLen — длина метки как доля ширины кнопки.
+	// Единица (по умолчанию) — полоса во всю кнопку, как в Windows 10;
+	// доля поменьше — короткая чёрточка под значком, как в Windows 11.
+	KeyTaskButtonUnderlineLen theme.Key = "taskbutton.underline.len"
 	// KeyTaskButtonLabelGap — зазор между значком и заголовком окна.
 	KeyTaskButtonLabelGap theme.Key = "taskbutton.label.gap"
 )
@@ -175,14 +186,19 @@ func (r *RunningApplications) layout() {
 	perButton := (avail - totalGap) / n
 
 	bw := ideal
-	showLabel := true
+	// Тема вправе запретить подписи вовсе — тогда и ширина кнопки не нужна
+	// «идеальная»: кнопка ужимается до значка, как на панели Windows 10.
+	showLabel := r.wantLabels()
+	if !showLabel {
+		ideal = iconOnly
+	}
 	count := n
 
 	switch {
 	case perButton >= ideal:
-		bw, showLabel = ideal, true
+		bw = ideal
 	case perButton >= min:
-		bw, showLabel = perButton, true
+		bw = perButton
 	case perButton >= iconOnly:
 		bw, showLabel = perButton, false
 	default:
@@ -215,6 +231,14 @@ func (r *RunningApplications) layout() {
 		r.btns = append(r.btns, winButton{info: windows[i], rect: rect, showLabel: showLabel})
 		x += bw + gap
 	}
+}
+
+// wantLabels — просит ли тема подписи на кнопках окон (по умолчанию да).
+func (r *RunningApplications) wantLabels() bool {
+	if r.tm == nil {
+		return true
+	}
+	return r.tm.GetFlag(KeyTaskButtonLabel, true)
 }
 
 // iconOnlyWidth — минимальная ширина кнопки без подписи: значок и отступы
@@ -374,6 +398,10 @@ func (r *RunningApplications) Draw(ctx widget.DrawContext) {
 		if wb.info.Icon != nil && iconSize > 0 {
 			ctx.DrawImageScaled(wb.info.Icon, iconX, iconY, iconSize, iconSize)
 		}
+
+		// Свёрнутое окно тоже открыто — метка под ним остаётся.
+		DrawUnderline(ctx, wb.rect, int(r.metric(KeyTaskButtonUnderline)),
+			r.metric(KeyTaskButtonUnderlineLen), wb.info.Active, style)
 
 		if wb.showLabel {
 			// Заголовок клипуется по кнопке: он не должен наезжать на

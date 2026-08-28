@@ -168,7 +168,9 @@ func (t *SystemTray) Draw(ctx widget.DrawContext) {
 	if b.Empty() {
 		return
 	}
-	PaintStyle(ctx, b, t.style(ComponentTray, theme.StateNormal))
+	// Своей подложки у трея нет: ни в одной настоящей панели он не выделен
+	// плашкой, а стиль по умолчанию дал бы ему заливку темы — светлый
+	// прямоугольник поверх тёмной панели.
 	t.DrawChildren(ctx)
 
 	if t.chevron.Empty() {

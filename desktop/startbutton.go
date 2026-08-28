@@ -23,6 +23,11 @@ type StartButton struct {
 
 	tm *theme.Manager
 
+	// Icon — своя картинка вместо значка темы. Задаётся оболочкой, когда
+	// нужен конкретный логотип, а не тот, что предлагает тема; побеждает
+	// и иконку темы, и встроенный значок.
+	Icon image.Image
+
 	hovered bool
 	armed   bool
 
@@ -50,7 +55,11 @@ const (
 	// её, если места не хватило, — так что неточная оценка здесь не ломает
 	// раскладку, только делает панель чуть менее оптимальной.
 	KeyStartButtonLabelWidth theme.Key = "startbutton.label.width"
-	// KeyStartButtonLabel — флаг темы (0/иначе): показывать ли подпись
+	// KeyStartButtonIcon — имя иконки кнопки «Пуск» в наборе иконок темы.
+	// Тема вправе подменить значок целиком: логотип заказчика, эмблема
+	// дистрибутива, что угодно — не трогая ни строчки кода компонента.
+	KeyStartButtonIcon theme.Key = "startbutton.icon"
+	// KeyStartButtonLabel — признак темы: показывать ли подпись
 	// рядом со значком, когда место позволяет. Большинство профилей Windows
 	// его не заявляют — тогда кнопка всегда показывает только значок.
 	KeyStartButtonLabel theme.Key = "startbutton.label"
@@ -71,7 +80,7 @@ func NewStartButton(tm *theme.Manager) *StartButton {
 func (s *StartButton) PreferredSize(avail image.Point) image.Point {
 	st := s.style(theme.StateNormal)
 	width := int(s.metric(KeyStartButtonIconSize)) + 2*int(st.PadX)
-	if s.metric(KeyStartButtonLabel) != 0 {
+	if s.wantLabel() {
 		width += int(s.metric(KeyStartButtonLabelGap)) + int(s.metric(KeyStartButtonLabelWidth))
 	}
 	if width < 0 {
@@ -136,7 +145,7 @@ func (s *StartButton) Draw(ctx widget.DrawContext) {
 	iconGap := int(s.metric(KeyStartButtonIconGap))
 	padX := int(style.PadX)
 
-	wantLabel := s.metric(KeyStartButtonLabel) != 0
+	wantLabel := s.wantLabel()
 	labelGap := int(s.metric(KeyStartButtonLabelGap))
 	labelW := 0
 	if wantLabel {
@@ -151,7 +160,7 @@ func (s *StartButton) Draw(ctx widget.DrawContext) {
 	}
 	iconY := b.Min.Y + (b.Dy()-iconSize)/2
 
-	drawStartGlyph(ctx, iconX, iconY, iconSize, iconGap, style)
+	s.drawIcon(ctx, iconX, iconY, iconSize, iconGap, style)
 
 	if showLabel {
 		textLeft := iconX + iconSize + labelGap
@@ -160,6 +169,34 @@ func (s *StartButton) Draw(ctx widget.DrawContext) {
 	}
 
 	s.DrawChildren(ctx)
+}
+
+// drawIcon рисует значок кнопки: свою картинку, если её задала оболочка,
+// иначе иконку темы, иначе встроенную решётку 2×2.
+//
+// Три уровня, а не один, потому что заказчики у них разные: оболочке нужен
+// свой логотип, теме — свой значок в наборе иконок, а движку — что-то, что
+// нарисуется даже когда нет ни того, ни другого.
+func (s *StartButton) drawIcon(ctx widget.DrawContext, x, y, size, gap int, style *theme.Style) {
+	if size <= 0 {
+		return
+	}
+	if img := s.iconImage(size); img != nil {
+		ctx.DrawImageScaled(img, x, y, size, size)
+		return
+	}
+	drawStartGlyph(ctx, x, y, size, gap, style)
+}
+
+// iconImage — картинка значка или nil, если ни оболочка, ни тема её не дали.
+func (s *StartButton) iconImage(size int) image.Image {
+	if s.Icon != nil {
+		return s.Icon
+	}
+	if s.tm == nil {
+		return nil
+	}
+	return s.tm.GetIcon(string(KeyStartButtonIcon), size)
 }
 
 // drawStartGlyph рисует значок «Пуск» — решётку 2×2 из квадратов — цветом
@@ -178,6 +215,19 @@ func drawStartGlyph(ctx widget.DrawContext, x, y, iconSize, gap int, style *them
 }
 
 // metric читает метрику темы (0, если темы нет).
+// wantLabel — просит ли тема подпись у кнопки.
+//
+// Читается ПРИЗНАКОМ, а не метрикой: SetFlag кладёт значение в таблицу
+// признаков, и чтение метрикой всегда возвращало ноль — подпись не
+// появлялась ни в одной теме, включая те, где она обязана быть.
+// По умолчанию подпись есть: так выглядела кнопка «Пуск» до Windows 8.
+func (s *StartButton) wantLabel() bool {
+	if s.tm == nil {
+		return false
+	}
+	return s.tm.GetFlag(KeyStartButtonLabel, true)
+}
+
 func (s *StartButton) metric(k theme.Key) float64 {
 	if s.tm == nil {
 		return 0
