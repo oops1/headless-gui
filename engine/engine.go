@@ -729,6 +729,20 @@ func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
 	return nil
 }
 
+// RenderFrameNow синхронно готовит кадр и возвращает его целиком — с
+// тайлами, признаками содержимого и переносами.
+//
+// RenderOnce для этого не годится: он отдаёт копию всей картинки, а
+// потребителю, который живёт дельта-тайлами, нужна именно она — и копировать
+// весь кадр ради этого значит платить ровно ту цену, которой он избегает.
+//
+// Кадр готовится в вызывающей горутине. Потребителю, который меняет сцену у
+// себя, это и нужно: мутация и отрисовка оказываются на одной горутине, и
+// гонка с внутренним циклом исчезает по построению.
+func (e *Engine) RenderFrameNow() output.Frame {
+	return e.renderFrame()
+}
+
 // RenderOnce синхронно рисует один кадр и возвращает КОПИЮ полученного
 // изображения (физические пиксели).
 //
@@ -1299,11 +1313,24 @@ func (e *Engine) renderFrame() output.Frame {
 		}
 	}
 
+	// Переносы: содержимое, переехавшее без изменений. При полном кадре они
+	// бессмысленны — потребитель и так получает всё заново, а оставшись в
+	// списке, перенос достался бы следующему кадру, к которому не относится.
+	var moves []output.MoveRegion
+	if partial {
+		for _, m := range widget.TakeMoves() {
+			moves = append(moves, output.MoveRegion{From: m.From, Rect: m.Rect})
+		}
+	} else {
+		widget.DropMoves()
+	}
+
 	return output.Frame{
 		Seq:       seq,
 		Timestamp: time.Now(),
 		Tiles:     tiles,
 		Regions:   canvas.regionsFor(tiles),
+		Moves:     moves,
 	}
 }
 
