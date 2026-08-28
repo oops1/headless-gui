@@ -109,5 +109,15 @@ func TestDemoShots(t *testing.T) {
 		eng.Invalidate()
 		saveIfAsked(t, eng.RenderOnce(), th.profile+"_notify")
 		sc.center.Close()
+
+		// Автоскрытие: панель за краем и она же выехавшая по курсору.
+		sc.setAutoHide(true)
+		eng.Invalidate()
+		saveIfAsked(t, eng.RenderOnce(), th.profile+"_hidden")
+
+		sc.revealByCursor()
+		eng.Invalidate()
+		saveIfAsked(t, eng.RenderOnce(), th.profile+"_revealed")
+		sc.setAutoHide(false)
 	}
 }

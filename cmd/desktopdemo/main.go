@@ -17,6 +17,7 @@ import (
 	"image"
 	"image/color"
 	"log"
+	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
 	"github.com/oops1/headless-gui/v3/engine"
@@ -64,6 +65,12 @@ type scene struct {
 	cal      *desktop.CalendarFlyout
 	quick    *desktop.QuickSettings
 	center   *desktop.NotificationCenter
+
+	// setAutoHide и revealByCursor — то же, что делает человек кнопкой и
+	// подведением курсора к краю: снимки должны показывать настоящее
+	// поведение, а не выставленное поле.
+	setAutoHide    func(bool)
+	revealByCursor func()
 }
 
 func main() {
@@ -310,8 +317,22 @@ func buildDesktop(eng *engine.Engine) scene {
 
 	arrange()
 	return scene{
-		root:     root,
-		apply:    apply,
+		root:  root,
+		apply: apply,
+		setAutoHide: func(on bool) {
+			bar.SetAutoHide(on)
+			dock.SetAutoHide(on)
+		},
+		revealByCursor: func() {
+			// Курсор у того края, к которому прижата полоса.
+			y := screenH - 1
+			if bar.Edge() == desktop.EdgeTop {
+				y = 0
+			}
+			bar.OnMouseMove(screenW/2, y)
+			dock.OnMouseMove(screenW/2, screenH-1)
+			settleAnimations()
+		},
 		startBtn: startBtn,
 		clock:    clock,
 		tray:     tray,
@@ -328,6 +349,16 @@ func buildDesktop(eng *engine.Engine) scene {
 			quick.Close()
 			center.Close()
 		},
+	}
+}
+
+// settleAnimations доводит выезд панели до конца: снимок делается сразу, а
+// анимация иначе застыла бы на середине.
+func settleAnimations() {
+	now := time.Now()
+	for i := 0; i < 60 && widget.AnimationsActive(); i++ {
+		now = now.Add(16 * time.Millisecond)
+		widget.StepAnimations(now)
 	}
 }
 
