@@ -2012,6 +2012,46 @@ the margin:
 func (w *MyWidget) DrawMargin() int { return 12 } // shadow, glow
 ```
 
+#### Not drawing what is covered
+
+The engine draws bottom-up. A window under another window used to be drawn in
+full and then painted over; on a desktop, where windows sit in a stack, that
+is a multiple of the work on every full frame.
+
+A widget may declare what it covers:
+
+```go
+func (w *MyWidget) OpaqueRegion() []image.Rectangle {
+    if w.Background.A < 255 {
+        return nil // what is under translucency shows through and must be drawn
+    }
+    return []image.Rectangle{w.Bounds()}
+}
+```
+
+The child walk goes top-down, accumulates the declared area and skips subtrees
+that fall entirely inside it. Window and Panel already do this: a solid opaque
+background covers its bounds, a rounded one covers everything but its corners,
+and translucent, gradient or image-backed ones cover nothing.
+
+Declare only what you can vouch for:
+
+- a widget with no `OpaqueRegion` counts as TRANSPARENT and hides nothing;
+- declare the area painted COMPLETELY and opaquely: shadows, glass and any
+  blending do not count;
+- containment is tested against ONE declared rectangle, not their union. A
+  subtree covered by two windows between them is drawn for nothing — cheaper
+  than getting the shape of a union wrong.
+
+Declaring too much leaves a hole on screen; declaring too little only shows up
+in a profile.
+
+Measured (full frame 1280×800, a stack of windows with content): one window
+unchanged, five windows 1094 → 780 µs, ten windows 1370 → 830 µs.
+
+This complements subtree culling rather than replacing it: culling removes work
+outside damage, occlusion removes work under other windows.
+
 #### Several engines in one process
 
 There may be as many engines as you like — a remote desktop shell keeps one

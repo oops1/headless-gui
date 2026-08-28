@@ -3611,6 +3611,30 @@ instead of once per tile. The truncated edge tile is the exception the code
 accounts for — on a canvas whose height is not a multiple of 64 the last tile
 row can be one pixel tall, and then a one-pixel strip does cover it.
 
+### Occlusion (v3.16.0)
+
+A widget may implement `widget.OpaqueRegioner` to declare what it covers
+opaquely; the child walk goes top-down and skips subtrees that fall entirely
+inside the accumulated area. `Window` and `Panel` implement it already.
+
+```go
+OpaqueRegion() []image.Rectangle   // absolute logical coords, like Bounds
+```
+
+Rules: no method means transparent; declare only fully-painted opaque area (a
+rounded fill loses its corners, translucent/gradient/image-backed fills declare
+nothing); containment is tested against ONE declared rectangle, never a union.
+Over-declaring leaves a hole on screen — under-declaring only costs work.
+
+| stack of windows, full frame 1280×800 | before | after |
+|---|---|---|
+| one window | 824 µs | 810 µs |
+| five windows | 1 094 µs | 780 µs |
+| ten windows | 1 370 µs | 830 µs |
+
+Allocations per frame are unchanged: the occluder list is an array, and the
+skip marks and the `OpaqueRegion` answer live in widget-owned buffers.
+
 Rule worth keeping: an optimisation without a paired measurement is not
 accepted. Add the before/after here.
 
