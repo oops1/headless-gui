@@ -23,9 +23,53 @@ type MoveNotice struct {
 
 var (
 	moveMu sync.Mutex
-	// moves — переносы, объявленные с прошлого кадра.
-	moves []MoveNotice
+	// moveSinks — приёмники объявлений, по одному на движок. Список, а не
+	// одна переменная: движков в процессе может быть несколько (окно и
+	// вынесенный в своё окно попап), и перенос, объявленный деревом одного,
+	// не должен попадать в кадр другого. Кому какое дерево принадлежит,
+	// решает приёмник — он же и есть движок.
+	moveSinks   []moveSink
+	moveSinkSeq uint64
 )
+
+// moveSink — зарегистрированный приёмник объявлений о переносе.
+type moveSink struct {
+	handle uint64
+	notify func(MoveNotice)
+}
+
+// RegisterMoveSink регистрирует приёмник объявлений о переносе и возвращает
+// дескриптор для UnregisterMoveSink. Движок вызывает это при создании.
+//
+// Приёмник получает КАЖДОЕ объявление процесса и сам решает, относится ли
+// оно к его дереву. Виджет об этом ничего не знает: он говорит «эти пиксели
+// переехали», а не «переехали у такого-то движка».
+func RegisterMoveSink(notify func(MoveNotice)) uint64 {
+	if notify == nil {
+		return 0
+	}
+	moveMu.Lock()
+	moveSinkSeq++
+	h := moveSinkSeq
+	moveSinks = append(moveSinks, moveSink{handle: h, notify: notify})
+	moveMu.Unlock()
+	return h
+}
+
+// UnregisterMoveSink снимает приёмник по дескриптору. Идемпотентно.
+func UnregisterMoveSink(handle uint64) {
+	if handle == 0 {
+		return
+	}
+	moveMu.Lock()
+	for i := range moveSinks {
+		if moveSinks[i].handle == handle {
+			moveSinks = append(moveSinks[:i], moveSinks[i+1:]...)
+			break
+		}
+	}
+	moveMu.Unlock()
+}
 
 // NotifyMove объявляет, что содержимое области src целиком переехало в dst.
 //
@@ -46,32 +90,18 @@ func NotifyMove(src, dst image.Rectangle) {
 	if src.Min == dst.Min {
 		return // никуда не переехало
 	}
-	moveMu.Lock()
-	moves = append(moves, MoveNotice{From: src.Min, Rect: dst})
-	moveMu.Unlock()
-}
+	notice := MoveNotice{From: src.Min, Rect: dst}
 
-// TakeMoves забирает объявленные переносы и очищает список.
-// Вызывается движком при сборке кадра.
-func TakeMoves() []MoveNotice {
 	moveMu.Lock()
-	defer moveMu.Unlock()
-	if len(moves) == 0 {
-		return nil
+	sinks := make([]func(MoveNotice), 0, len(moveSinks))
+	for _, s := range moveSinks {
+		sinks = append(sinks, s.notify)
 	}
-	out := make([]MoveNotice, len(moves))
-	copy(out, moves)
-	moves = moves[:0]
-	return out
-}
-
-// DropMoves выбрасывает объявленные переносы, не отдавая их.
-//
-// Нужно там, где кадр всё равно перерисовывается целиком: перенос тогда
-// бессмыслен, а оставшись в списке, он достался бы следующему кадру, к
-// которому уже не относится.
-func DropMoves() {
-	moveMu.Lock()
-	moves = moves[:0]
 	moveMu.Unlock()
+
+	// Приёмники зовём ВНЕ замка: движок в ответ трогает свои структуры, и
+	// держать на это время общий замок пакета незачем.
+	for _, notify := range sinks {
+		notify(notice)
+	}
 }

@@ -16,12 +16,95 @@ type textMeasurer func(text string, sizePt float64) int
 
 var uiTextMeasurer atomic.Value // textMeasurer
 
-// SetTextMeasurer регистрирует точный измеритель текста (вызывает движок).
+// Измеритель, в отличие от прочего состояния конвейера, один на процесс —
+// иначе и быть не может: MeasureUIText зовут из кода компоновки, у которого
+// нет ни движка, ни контекста отрисовки (диалог считает свой размер при
+// создании). Отвечает последний зарегистрированный.
+//
+// Реестр, а не одна переменная, нужен для снятия: движок регистрирует
+// измеритель при старте и снимает в Stop. Без реестра остановленный движок
+// оставлял бы измерителем свой мёртвый холст, и следующие замеры шли бы по
+// шрифтам движка, которого уже нет. Со снятием управление возвращается
+// предыдущему живому.
+var (
+	measurersMu  sync.Mutex
+	measurers    []registeredMeasurer
+	measurerSeq  uint64
+	baseMeasurer textMeasurer // заданный через SetTextMeasurer, без дескриптора
+)
+
+type registeredMeasurer struct {
+	handle uint64
+	fn     textMeasurer
+}
+
+// SetTextMeasurer регистрирует точный измеритель текста без дескриптора.
+//
+// Оставлен для потребителей, которые ставят свой измеритель раз и навсегда.
+// Движок пользуется RegisterTextMeasurer: тот умеет сниматься.
 func SetTextMeasurer(m func(text string, sizePt float64) int) {
-	if m != nil {
-		uiTextMeasurer.Store(textMeasurer(m))
-		BumpTextMetricsRev() // прежние замеры больше не годятся
+	if m == nil {
+		return
 	}
+	measurersMu.Lock()
+	baseMeasurer = textMeasurer(m)
+	measurersMu.Unlock()
+	publishMeasurer()
+}
+
+// RegisterTextMeasurer добавляет измеритель и делает его действующим.
+// Возвращает дескриптор для UnregisterTextMeasurer.
+func RegisterTextMeasurer(m func(text string, sizePt float64) int) uint64 {
+	if m == nil {
+		return 0
+	}
+	measurersMu.Lock()
+	measurerSeq++
+	h := measurerSeq
+	measurers = append(measurers, registeredMeasurer{handle: h, fn: textMeasurer(m)})
+	measurersMu.Unlock()
+	publishMeasurer()
+	return h
+}
+
+// UnregisterTextMeasurer снимает измеритель по дескриптору. Действующим
+// становится предыдущий живой. Идемпотентно.
+func UnregisterTextMeasurer(handle uint64) {
+	if handle == 0 {
+		return
+	}
+	measurersMu.Lock()
+	for i := range measurers {
+		if measurers[i].handle == handle {
+			measurers = append(measurers[:i], measurers[i+1:]...)
+			break
+		}
+	}
+	measurersMu.Unlock()
+	publishMeasurer()
+}
+
+// publishMeasurer выставляет действующий измеритель — последний
+// зарегистрированный, иначе заданный через SetTextMeasurer.
+func publishMeasurer() {
+	measurersMu.Lock()
+	var active textMeasurer
+	if n := len(measurers); n > 0 {
+		active = measurers[n-1].fn
+	} else {
+		active = baseMeasurer
+	}
+	measurersMu.Unlock()
+
+	if active == nil {
+		// Возврата к эвристике нет: снять последний измеритель и остаться
+		// без него — редкость (все движки остановлены), а хранить в
+		// atomic.Value типизированный nil нельзя, Load вернул бы его как
+		// годный.
+		return
+	}
+	uiTextMeasurer.Store(active)
+	BumpTextMetricsRev() // прежние замеры больше не годятся
 }
 
 // Мемоизация замеров: ключ — кегль и текст; сброс при смене ревизии метрик

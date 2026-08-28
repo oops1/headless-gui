@@ -20,47 +20,32 @@ import (
 	"sync/atomic"
 )
 
+// CullScope — то, что контекст отрисовки знает о текущем кадре: какие области
+// перерисовываются и разрешён ли пропуск.
+//
+// Спрашивается у КОНТЕКСТА, а не у пакета. Раньше это были переменные на
+// процесс, и два движка в одном процессе (окно и вынесенный в своё окно
+// попап — обычное дело) перетирали их друг другу: движок мог пропустить
+// поддерево по чужому damage и отдать недорисованный кадр.
+//
+// Реализуется engine.Canvas. Контекст без этих методов ограничений не
+// ставит — обход идёт целиком, как до появления пропуска.
+type CullScope interface {
+	// DrawDamage — области кадра в ЛОГИЧЕСКИХ координатах. Пустой список
+	// означает «рисуем всё».
+	DrawDamage() []image.Rectangle
+	// SubtreeCullingEnabled — разрешён ли пропуск поддеревьев.
+	SubtreeCullingEnabled() bool
+}
+
 var (
-	// cullMu защищает damage кадра: движок ставит его перед отрисовкой,
-	// обход читает во время неё.
-	cullMu sync.RWMutex
-	// drawDamage — области, которые движок собирается перерисовать.
-	// Пустой список означает «рисуем всё» — так ведут себя полный кадр и
-	// любой потребитель, не сообщивший damage.
-	drawDamage []image.Rectangle
-
-	// cullingOn — включён ли пропуск. По умолчанию да: контракт объявлен, а
-	// приложение с нарушенным вернёт прежнее поведение одной строкой.
-	cullingOn atomic.Bool
-
 	// treeGen растёт при каждом изменении геометрии или состава дерева.
 	// Охватывающие прямоугольники поддеревьев кэшируются по нему: пока
-	// дерево не трогали, пересчитывать нечего.
+	// дерево не трогали, пересчитывать нечего. Счётчик общий на процесс
+	// намеренно — он лишь помечает кэш устаревшим, и лишний пересчёт из-за
+	// чужого дерева безвреден.
 	treeGen atomic.Uint64
 )
-
-func init() { cullingOn.Store(true) }
-
-// SetSubtreeCulling включает или выключает пропуск поддеревьев.
-func SetSubtreeCulling(v bool) { cullingOn.Store(v) }
-
-// SubtreeCulling сообщает, включён ли пропуск.
-func SubtreeCulling() bool { return cullingOn.Load() }
-
-// SetDrawDamage сообщает области, которые будут перерисованы в этом кадре.
-// Вызывается движком перед обходом; пустой список снимает ограничение.
-func SetDrawDamage(rects []image.Rectangle) {
-	cullMu.Lock()
-	drawDamage = append(drawDamage[:0], rects...)
-	cullMu.Unlock()
-}
-
-// ClearDrawDamage снимает ограничение: следующий обход пройдёт целиком.
-func ClearDrawDamage() {
-	cullMu.Lock()
-	drawDamage = drawDamage[:0]
-	cullMu.Unlock()
-}
 
 // bumpTreeGen помечает кэш охватывающих прямоугольников устаревшим.
 // Зовётся при изменении границ и состава дерева.
@@ -137,18 +122,20 @@ func computeSubtreeRect(w Widget, depth int) image.Rectangle {
 
 // SkipSubtree сообщает, можно ли не рисовать поддерево виджета в этом кадре.
 //
+// Решение принимается по damage ЭТОГО кадра, который знает контекст
+// отрисовки: у каждого движка он свой.
+//
 // Нельзя пропускать: виджет с открытым оверлеем (оверлей рисуется отдельным
 // проходом, но его область в границы виджета не входит) и виджет с пустым
 // поддеревом — пустой прямоугольник означает «не знаю, где это», а не
 // «нигде».
-func SkipSubtree(w Widget) bool {
-	if !cullingOn.Load() {
+func SkipSubtree(ctx DrawContext, w Widget) bool {
+	scope, ok := ctx.(CullScope)
+	if !ok || !scope.SubtreeCullingEnabled() {
 		return false
 	}
-	cullMu.RLock()
-	n := len(drawDamage)
-	cullMu.RUnlock()
-	if n == 0 {
+	damage := scope.DrawDamage()
+	if len(damage) == 0 {
 		return false
 	}
 	if od, ok := w.(OverlayDrawer); ok && od.HasOverlay() {
@@ -159,10 +146,7 @@ func SkipSubtree(w Widget) bool {
 	if r.Empty() {
 		return false
 	}
-
-	cullMu.RLock()
-	defer cullMu.RUnlock()
-	for _, d := range drawDamage {
+	for _, d := range damage {
 		if r.Overlaps(d) {
 			return false
 		}

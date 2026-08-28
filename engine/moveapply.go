@@ -19,6 +19,7 @@ import (
 	"image"
 
 	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // applyMovesToFront выполняет переносы внутри переднего буфера.
@@ -36,6 +37,9 @@ func (c *Canvas) applyMovesToFront(moves []widgetMove) []output.MoveRegion {
 	}
 	out := make([]output.MoveRegion, 0, len(moves))
 	bounds := image.Rect(0, 0, c.W, c.H)
+	// taken — области, уже занятые применёнными переносами (и источники, и
+	// назначения) в физических координатах. См. проверку пересечения ниже.
+	taken := make([]image.Rectangle, 0, 2*len(moves))
 
 	for _, m := range moves {
 		dst := c.sRect(m.Rect).Intersect(bounds)
@@ -56,7 +60,24 @@ func (c *Canvas) applyMovesToFront(moves []widgetMove) []output.MoveRegion {
 		if src.Min == dst.Min {
 			continue
 		}
+		// Переносы, задевающие уже перенесённое, дальше не идут.
+		//
+		// Движок применяет их к своему буферу подряд, поэтому второй читает
+		// пиксели, которые первый уже переложил. Потребитель обязан повторить
+		// ровно тот же порядок — а он этого не обязан уметь: команда копии
+		// поверхности в RDP выполняется когда угодно относительно соседних, и
+		// локальный потребитель вправе применить их разом. Разошедшийся
+		// порядок даёт копию с неверным источником — прямоугольник чужого
+		// содержимого с резким швом.
+		//
+		// Поэтому в кадр уходят только непересекающиеся переносы: их можно
+		// применять в любом порядке и получить один и тот же результат.
+		// Остальное уезжает обычными тайлами — дороже, но верно.
+		if overlapsAny(taken, src) || overlapsAny(taken, dst) {
+			continue
+		}
 		blitWithin(c.front, src, dst.Min)
+		taken = append(taken, src, dst)
 		out = append(out, output.MoveRegion{From: m.From, Rect: m.Rect})
 	}
 	if len(out) == 0 {
@@ -65,11 +86,59 @@ func (c *Canvas) applyMovesToFront(moves []widgetMove) []output.MoveRegion {
 	return out
 }
 
+// overlapsAny сообщает, задевает ли r хоть одну из областей.
+func overlapsAny(rects []image.Rectangle, r image.Rectangle) bool {
+	for _, o := range rects {
+		if r.Overlaps(o) {
+			return true
+		}
+	}
+	return false
+}
+
 // widgetMove — объявление переноса в логических координатах (копия
 // widget.MoveNotice, чтобы engine не зависел от его формы).
 type widgetMove struct {
 	From image.Point
 	Rect image.Rectangle
+}
+
+// noteMove принимает объявление от дерева виджетов. Регистрируется в New.
+//
+// Приёмник получает объявления ВСЕГО процесса, поэтому чужие надо отсеять:
+// движок берёт только то, что попадает на его холст. Иначе перенос из
+// соседнего движка заставил бы этот скопировать у себя пиксели с места, где
+// ничего не переезжало, — и потребитель увидел бы смазанный след.
+func (e *Engine) noteMove(n widget.MoveNotice) {
+	if n.Rect.Empty() {
+		return
+	}
+	e.mu.RLock()
+	canvas := e.canvas
+	e.mu.RUnlock()
+	if canvas == nil {
+		return
+	}
+	// Границы холста в логических координатах — тех же, в которых живут
+	// виджеты и приходит объявление.
+	screen := image.Rect(0, 0, canvas.logicalW, canvas.logicalH)
+	src := image.Rect(n.From.X, n.From.Y, n.From.X+n.Rect.Dx(), n.From.Y+n.Rect.Dy())
+	if !n.Rect.Overlaps(screen) && !src.Overlaps(screen) {
+		return
+	}
+
+	e.moveMu.Lock()
+	e.pendingMoves = append(e.pendingMoves, widgetMove{From: n.From, Rect: n.Rect})
+	e.moveMu.Unlock()
+}
+
+// takeMoves забирает накопленные объявления и очищает список.
+func (e *Engine) takeMoves() []widgetMove {
+	e.moveMu.Lock()
+	out := e.pendingMoves
+	e.pendingMoves = nil
+	e.moveMu.Unlock()
+	return out
 }
 
 // blitWithin копирует прямоугольник внутри одного изображения.

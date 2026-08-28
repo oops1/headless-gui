@@ -3,6 +3,7 @@ package tests
 import (
 	"image"
 	"image/color"
+	"sync"
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
@@ -16,19 +17,44 @@ import (
 // кадр. Объявленный перенос позволяет потребителю скопировать картинку у
 // себя вместо того, чтобы принимать её заново.
 
-func TestMoves_WindowDragDeclaresMove(t *testing.T) {
-	widget.DropMoves() // прошлые объявления к этому тесту не относятся
+// recordMoves подписывается на объявления о переносе на время теста —
+// ровно так же, как это делает движок. Возвращает функцию, отдающую
+// накопленное.
+//
+// Своя подписка на тест, а не общий список пакета: объявления идут всем
+// подписчикам сразу, и тест видит только те, что случились при нём.
+func recordMoves(t *testing.T) func() []widget.MoveNotice {
+	t.Helper()
+	var mu sync.Mutex
+	var got []widget.MoveNotice
+	h := widget.RegisterMoveSink(func(n widget.MoveNotice) {
+		mu.Lock()
+		got = append(got, n)
+		mu.Unlock()
+	})
+	t.Cleanup(func() { widget.UnregisterMoveSink(h) })
+	return func() []widget.MoveNotice {
+		mu.Lock()
+		defer mu.Unlock()
+		out := got
+		got = nil
+		return out
+	}
+}
 
+func TestMoves_WindowDragDeclaresMove(t *testing.T) {
 	win := widget.NewWindow("Окно", 300, 200)
 	from := image.Rect(100, 100, 400, 300)
 	win.SetBounds(from)
-	widget.DropMoves() // SetBounds — это не перетаскивание
+
+	// Подписываемся ПОСЛЕ SetBounds: это не перетаскивание.
+	taken := recordMoves(t)
 
 	// Тащим за заголовок.
 	win.OnMouseButton(widget.MouseEvent{X: 200, Y: 110, Button: widget.MouseLeft, Pressed: true})
 	win.OnMouseMove(230, 140)
 
-	moves := widget.TakeMoves()
+	moves := taken()
 	if len(moves) == 0 {
 		t.Fatal("перетаскивание окна не объявило переноса")
 	}
@@ -47,8 +73,6 @@ func TestMoves_WindowDragDeclaresMove(t *testing.T) {
 // Перенос не отменяет инвалидацию: он подсказка, как дешевле получить тот же
 // результат, а не замена damage.
 func TestMoves_StillReportsDamage(t *testing.T) {
-	widget.DropMoves()
-
 	win := widget.NewWindow("Окно", 200, 150)
 	win.SetBounds(image.Rect(50, 50, 250, 200))
 	win.OnMouseButton(widget.MouseEvent{X: 100, Y: 60, Button: widget.MouseLeft, Pressed: true})
@@ -57,15 +81,14 @@ func TestMoves_StillReportsDamage(t *testing.T) {
 	if len(rects) == 0 {
 		t.Error("перетаскивание объявило перенос, но не заявило ни одной изменившейся области")
 	}
-	widget.DropMoves()
 }
 
 // Масштабирование переносом не считается: потребитель выполнит его блитом и
 // получит искажение.
 func TestMoves_RejectsResize(t *testing.T) {
-	widget.DropMoves()
+	taken := recordMoves(t)
 	widget.NotifyMove(image.Rect(0, 0, 100, 100), image.Rect(200, 200, 340, 340))
-	if got := widget.TakeMoves(); len(got) != 0 {
+	if got := taken(); len(got) != 0 {
 		t.Errorf("объявлен перенос с изменением размера: %v", got)
 	}
 }
@@ -75,8 +98,6 @@ func TestMoves_RejectsResize(t *testing.T) {
 // Объявление берётся напрямую: то, что перетаскивание окна его порождает,
 // проверено выше, а здесь важен путь «объявили — попало в кадр».
 func TestMoves_ReachTheFrame(t *testing.T) {
-	widget.DropMoves()
-
 	root := widget.NewPanel(color.RGBA{R: 20, G: 20, B: 20, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 600, 400))
@@ -128,8 +149,6 @@ func TestMoves_SaveTraffic(t *testing.T) {
 
 	// Одна и та же сцена и один и тот же сдвиг: с объявлением и без.
 	tilesFor := func(declare bool) (int, int) {
-		widget.DropMoves()
-
 		root := widget.NewPanel(color.RGBA{R: 20, G: 24, B: 30, A: 255})
 		root.ShowHeader = false
 		root.SetBounds(image.Rect(0, 0, w, h))
@@ -172,7 +191,6 @@ func TestMoves_SaveTraffic(t *testing.T) {
 		}
 
 		frame := eng.RenderFrameNow()
-		widget.DropMoves()
 
 		bytes := 0
 		for _, tile := range frame.Tiles {
@@ -191,4 +209,85 @@ func TestMoves_SaveTraffic(t *testing.T) {
 	t.Logf("перенос: %d тайлов / %d байт; без переноса: %d тайлов / %d байт (%.0f%% от прежнего)",
 		withTiles, withBytes, plainTiles, plainBytes,
 		100*float64(withBytes)/float64(plainBytes))
+}
+
+// Переносы в одном кадре не пересекаются.
+//
+// Движок применяет их к своему буферу подряд, и второй читает пиксели, уже
+// переложенные первым. Потребитель повторить этот порядок не обязан: команда
+// копии поверхности в RDP выполняется когда угодно относительно соседних, а
+// локальный потребитель вправе применить их разом. Разошедшийся порядок даёт
+// копию с неверным источником — прямоугольник чужого содержимого с резким
+// швом, ровно как в незакрытом наблюдении заказчика.
+//
+// Поэтому кадр несёт только непересекающиеся переносы; пересекающиеся уезжают
+// обычными тайлами.
+func TestMoves_FrameCarriesNoOverlappingMoves(t *testing.T) {
+	const w, h = 600, 400
+
+	root := widget.NewPanel(color.RGBA{R: 20, G: 24, B: 30, A: 255})
+	root.ShowHeader = false
+	root.SetBounds(image.Rect(0, 0, w, h))
+
+	eng := engine.New(w, h, 60)
+	eng.SetRenderOnDemand(true)
+	eng.SetRoot(root)
+	eng.RenderOnce()
+	eng.RenderOnce()
+
+	// Второй перенос забирает пиксели оттуда, куда только что приехал первый.
+	a := image.Rect(50, 50, 250, 200)
+	aTo := a.Add(image.Pt(100, 0))
+	b := aTo.Add(image.Pt(20, 20)) // накрывает место приземления первого
+	bTo := b.Add(image.Pt(0, 120))
+
+	widget.NotifyMove(a, aTo)
+	widget.NotifyMove(b, bTo)
+	// Кадр обязан быть частичным: в полном переносы бессмысленны.
+	eng.InvalidateRect(a.Union(aTo))
+	eng.InvalidateRect(b.Union(bTo))
+
+	frame := eng.RenderFrameNow()
+	if len(frame.Moves) == 0 {
+		t.Fatal("кадр не принёс ни одного переноса")
+	}
+	for i := 0; i < len(frame.Moves); i++ {
+		for j := i + 1; j < len(frame.Moves); j++ {
+			for _, x := range []image.Rectangle{frame.Moves[i].Src(), frame.Moves[i].Rect} {
+				for _, y := range []image.Rectangle{frame.Moves[j].Src(), frame.Moves[j].Rect} {
+					if x.Overlaps(y) {
+						t.Errorf("переносы %d и %d пересекаются (%v и %v): "+
+							"потребитель применит их в своём порядке и скопирует не то",
+							i, j, x, y)
+					}
+				}
+			}
+		}
+	}
+}
+
+// Непересекающиеся переносы кадр несёт все.
+func TestMoves_IndependentMovesAllSurvive(t *testing.T) {
+	const w, h = 600, 400
+
+	root := widget.NewPanel(color.RGBA{R: 20, G: 24, B: 30, A: 255})
+	root.ShowHeader = false
+	root.SetBounds(image.Rect(0, 0, w, h))
+
+	eng := engine.New(w, h, 60)
+	eng.SetRenderOnDemand(true)
+	eng.SetRoot(root)
+	eng.RenderOnce()
+	eng.RenderOnce()
+
+	a := image.Rect(10, 10, 110, 80)
+	bb := image.Rect(300, 250, 400, 320)
+	widget.NotifyMove(a, a.Add(image.Pt(120, 0)))
+	widget.NotifyMove(bb, bb.Add(image.Pt(0, 60)))
+	eng.InvalidateRect(a.Union(a.Add(image.Pt(120, 0))))
+	eng.InvalidateRect(bb.Union(bb.Add(image.Pt(0, 60))))
+
+	if got := len(eng.RenderFrameNow().Moves); got != 2 {
+		t.Errorf("кадр принёс %d переносов из двух непересекающихся", got)
+	}
 }

@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"image"
+	"sync"
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/widget"
@@ -268,4 +269,53 @@ func TestRunningApplications_Draw_NoOverflowingButtons(t *testing.T) {
 	if ctx.clip != image.Rect(0, 0, 1<<15, 1<<15) {
 		t.Fatalf("Draw должен восстановить внешний клип после себя, получили %v", ctx.clip)
 	}
+}
+
+// ─── Гонка между подпиской на WindowModel и кадром ─────────────────────────
+
+// TestRunningApplications_ConcurrentModelAndFrame бьёт по компоненту из двух
+// горутин одновременно: одна меняет список окон fake-модели (как это делает
+// реальный потребитель, доставляющий уведомления из своей горутины), другая
+// изображает горутину кадра и ввода — раскладку, отрисовку, движение мыши и
+// клики. Сам по себе тест ничего не проверяет по значению: его работа —
+// попасться детектору гонок (-race) на btns/hoverIdx/armedIdx.
+func TestRunningApplications_ConcurrentModelAndFrame(t *testing.T) {
+	tm := buildTestTheme()
+	wm := NewFakeWindowModel(manyWindows(6)...)
+	ra := NewRunningApplications(tm, wm)
+	ra.SetBounds(image.Rect(0, 0, 500, 32))
+
+	const iters = 500
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Горутина модели: список окон то растёт, то сжимается, то остаётся тем
+	// же — каждый раз это будит подписку и сбрасывает hoverIdx/armedIdx.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			n := 1 + i%8
+			wm.SetWindows(manyWindows(n))
+		}
+	}()
+
+	// Горутина кадра и ввода: раскладка, отрисовка, движение мыши и клики —
+	// как их вызывает реальный цикл кадра, только гораздо чаще.
+	go func() {
+		defer wg.Done()
+		ctx := newItemRecCtx()
+		for i := 0; i < iters; i++ {
+			ra.SetBounds(image.Rect(0, 0, 200+i%400, 32))
+			ra.Draw(ctx)
+			x, y := i%500, 10
+			ra.OnMouseMove(x, y)
+			ra.OnMouseButton(widget.MouseEvent{X: x, Y: y, Button: widget.MouseLeft, Pressed: true})
+			ra.OnMouseButton(widget.MouseEvent{X: x, Y: y, Button: widget.MouseLeft, Pressed: false})
+			_ = ra.HoverIndex()
+			_ = ra.Cells()
+			_ = ra.PreferredSize(image.Pt(500, 32))
+		}
+	}()
+
+	wg.Wait()
 }

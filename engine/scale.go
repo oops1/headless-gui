@@ -86,6 +86,12 @@ func (c *Canvas) cloneForSize(w, h int, scale float64, bgSrc image.Image) *Canva
 	nc := newCanvasScaled(w, h, scale, c.fontCache)
 	nc.namedFonts = c.namedFonts
 	nc.fallbacks = c.fallbacks
+	// Настройки движка переезжают вместе с холстом: смена разрешения не
+	// повод молча вернуть пропуск поддеревьев или порядок каналов к
+	// значениям по умолчанию.
+	nc.cullingOn.Store(c.cullingOn.Load())
+	nc.format = c.format
+	nc.formatOwn = c.formatOwn
 	if bgSrc != nil {
 		nc.setBackground(bgSrc)
 	}

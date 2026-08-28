@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/image/draw"
 	"golang.org/x/image/math/fixed"
@@ -50,6 +51,15 @@ type Canvas struct {
 	// maskKind — чем считается то, что рисуют маски альфы и цветные глифы
 	// прямо сейчас: буквами, фигурой, тенью. Через них идут все три.
 	maskKind output.RegionKind
+
+	// drawDamage — области ЭТОГО кадра в логических координатах, по которым
+	// обход решает, что можно не рисовать (widget.CullScope). Живут на
+	// канвасе, а не в пакете widget: у каждого движка кадр свой.
+	drawDamage []image.Rectangle
+	// cullingOn — разрешён ли пропуск поддеревьев в этом движке. Атомарный:
+	// выключатель дёргает приложение из своей горутины, а читает обход в
+	// горутине кадра.
+	cullingOn atomic.Bool
 
 	tilesX int
 	tilesY int
@@ -187,6 +197,10 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 		logicalW:   w,
 		logicalH:   h,
 	}
+	// Пропуск поддеревьев включён по умолчанию: контракт отрисовки объявлен,
+	// а приложение с нарушенным вернёт прежний обход одной строкой
+	// (Engine.SetSubtreeCulling).
+	c.cullingOn.Store(true)
 	c.initTileMarks()
 	return c
 }
@@ -206,6 +220,21 @@ func (c *Canvas) setBackground(src image.Image) {
 	}
 	c.bgImage = dst
 }
+
+// DrawDamage реализует widget.CullScope: области кадра в логических
+// координатах. Пустой список — рисуем всё.
+func (c *Canvas) DrawDamage() []image.Rectangle { return c.drawDamage }
+
+// SubtreeCullingEnabled реализует widget.CullScope.
+func (c *Canvas) SubtreeCullingEnabled() bool { return c.cullingOn.Load() }
+
+// setDrawDamage задаёт области кадра (вызывает движок перед обходом).
+func (c *Canvas) setDrawDamage(rects []image.Rectangle) {
+	c.drawDamage = append(c.drawDamage[:0], rects...)
+}
+
+// clearDrawDamage снимает ограничение: обход пройдёт целиком.
+func (c *Canvas) clearDrawDamage() { c.drawDamage = c.drawDamage[:0] }
 
 // clearBackground снимает фоновое изображение: blitBackground снова будет
 // заливать буфер чёрным.
@@ -628,7 +657,7 @@ func (c *Canvas) DrawBorder(x, y, w, h int, col color.RGBA) {
 	px, py := c.sx(x), c.sx(y)
 	pw, ph := c.sl(x, w), c.sl(y, h)
 	t := c.st(1)
-	encCol := c.enc(col) // fillRectPx col не кодирует — см. его контракт
+	encCol := c.enc(col)                                               // fillRectPx col не кодирует — см. его контракт
 	c.fillRectPx(image.Rect(px, py, px+pw, py+t), encCol, blend)       // верх
 	c.fillRectPx(image.Rect(px, py+ph-t, px+pw, py+ph), encCol, blend) // низ
 	c.fillRectPx(image.Rect(px, py, px+t, py+ph), encCol, blend)       // лево

@@ -52,8 +52,8 @@ type Engine struct {
 	frameMu sync.Mutex
 
 	// ── Рендер по запросу (см. invalidate.go) ───────────────────────────────
-	onDemand  atomic.Bool
-	invGen    atomic.Uint64
+	onDemand atomic.Bool
+	invGen   atomic.Uint64
 	// pacing, frameWanted, wake, sink — внешний темп и сток кадров
 	// (pacing.go). При PacingExternal кадр готовится только по RequestFrame.
 	pacing      atomicPacing
@@ -64,7 +64,7 @@ type Engine struct {
 
 	damageMu  sync.Mutex
 	damage    []image.Rectangle // области InvalidateRect с прошлого кадра
-	damageAll bool            // Invalidate() — полный diff
+	damageAll bool              // Invalidate() — полный diff
 
 	focus    focusManager  // текущий виджет с фокусом
 	captured widget.Widget // виджет, захвативший мышь (drag)
@@ -106,6 +106,22 @@ type Engine struct {
 	// в Stop (UnregisterUINotifier), чтобы короткоживущие движки диалогов/
 	// попапов не накапливались в реестре.
 	notifierHandle uint64
+
+	// measurerHandle — дескриптор регистрации измерителя текста
+	// (widget.RegisterTextMeasurer в New, снимается в Stop).
+	measurerHandle uint64
+
+	// moveHandle — дескриптор регистрации приёмника объявлений о переносе
+	// (widget.RegisterMoveSink в New, снимается в Stop).
+	moveHandle uint64
+	// moveMu защищает pendingMoves: объявления приходят из горутины, где
+	// двигают виджет (обработка ввода), а забирает их горутина кадра.
+	moveMu sync.Mutex
+	// pendingMoves — объявления, накопленные с прошлого кадра. Список свой у
+	// каждого движка: раньше он был один на процесс, и перенос окна в одном
+	// движке уносило в кадр другого — тот копировал у себя пиксели,
+	// которых там нет.
+	pendingMoves []widgetMove
 
 	frameSeq atomic.Uint64
 	started  atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
@@ -257,7 +273,7 @@ func New(width, height, fps int) *Engine {
 		frames:    make(chan output.Frame, 8),
 		// wake будит цикл кадров при внешнем темпе: без него RequestFrame
 		// ждал бы ближайшего тика, то есть темп остался бы тикерным.
-		wake: make(chan struct{}, 1),
+		wake:      make(chan struct{}, 1),
 		quit:      make(chan struct{}),
 		done:      make(chan struct{}),
 		fps:       fps,
@@ -299,17 +315,20 @@ func New(width, height, fps int) *Engine {
 	// КАЖДОГО, а не только до последнего созданного. Снимаем регистрацию в
 	// Stop (см. Stop). full → e.Invalidate, rect (точечно) → e.InvalidateRect.
 	e.notifierHandle = widget.RegisterUINotifier(e.Invalidate, e.InvalidateRect)
+	e.moveHandle = widget.RegisterMoveSink(e.noteMove)
 	// Точный замер текста для компоновки до отрисовки (размеры диалогов).
-	// Здесь сознательно сохранена семантика «последний выигрывает»: измеритель
-	// (шрифт default при заданном sizePt) у всех движков процесса практически
-	// идентичен — общие встроенные/системные шрифты. ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ: при
-	// разном SetDPI у сосуществующих движков MeasureUIText вернёт метрики
-	// ПОСЛЕДНЕГО созданного движка (замер не привязан к конкретному движку).
-	// Это влияет лишь на pre-draw компоновку (расчёт размеров диалога); внутри
-	// Draw используется ctx.MeasureText конкретного канваса и расхождения нет.
-	// Разводить измеритель по движкам смысла нет, пока pre-draw layout не
-	// станет per-engine — тогда мерить нужно будет через движок явно.
-	widget.SetTextMeasurer(e.canvas.MeasureText)
+	//
+	// Измеритель один на процесс — иначе некому отвечать: MeasureUIText зовут
+	// оттуда, где движка не видно (диалог считает размер при создании). Отвечает
+	// последний созданный движок; ОГРАНИЧЕНИЕ в том, что при разном SetDPI у
+	// сосуществующих движков замер придёт с его метриками. Расхождение при
+	// этом — округление логической длины (MeasureText делит физическую ширину
+	// на масштаб), а не другой шрифт; на отрисовку оно не влияет вовсе, внутри
+	// Draw меряет ctx.MeasureText своего холста.
+	//
+	// Регистрация со снятием: остановленный движок возвращает измеритель
+	// предыдущему живому вместо того, чтобы оставить свой мёртвый холст.
+	e.measurerHandle = widget.RegisterTextMeasurer(e.canvas.MeasureText)
 	return e
 }
 
@@ -859,6 +878,8 @@ func (e *Engine) Stop() {
 		return
 	}
 	widget.UnregisterUINotifier(e.notifierHandle)
+	widget.UnregisterMoveSink(e.moveHandle)
+	widget.UnregisterTextMeasurer(e.measurerHandle)
 	close(e.quit)
 	started := e.started.Load()
 	if started {
@@ -1268,10 +1289,10 @@ func (e *Engine) renderFrame() output.Frame {
 		// пикселях, а границы виджетов живут в логических. При масштабе
 		// 1.25 сравнение одних с другими пропустило бы ровно то поддерево,
 		// которое и надо было нарисовать.
-		widget.SetDrawDamage(e.logicalDamage(damageRects))
-		defer widget.ClearDrawDamage()
+		canvas.setDrawDamage(e.logicalDamage(damageRects))
+		defer canvas.clearDrawDamage()
 	} else {
-		widget.ClearDrawDamage()
+		canvas.clearDrawDamage()
 	}
 
 	if partial {
@@ -1337,20 +1358,12 @@ func (e *Engine) renderFrame() output.Frame {
 	// получал и команду переноса, и все пиксели переехавшего окна — то есть
 	// платил столько же, сколько без переноса вовсе.
 	var moves []output.MoveRegion
-	if partial {
-		notices := widget.TakeMoves()
-		if len(notices) > 0 {
-			declared := make([]widgetMove, 0, len(notices))
-			for _, n := range notices {
-				declared = append(declared, widgetMove{From: n.From, Rect: n.Rect})
-			}
-			moves = canvas.applyMovesToFront(declared)
-		}
-	} else {
-		// Полный кадр: потребитель и так получает всё заново, а объявление,
-		// оставшееся в списке, досталось бы следующему кадру.
-		widget.DropMoves()
+	declared := e.takeMoves()
+	if partial && len(declared) > 0 {
+		moves = canvas.applyMovesToFront(declared)
 	}
+	// При полном кадре объявления просто отбрасываются: потребитель и так
+	// получает всё заново, а оставшись, они достались бы следующему кадру.
 
 	// Diff: при частичной перерисовке сравниваем только тайлы,
 	// пересекающие damage-область (контракт InvalidateRect).

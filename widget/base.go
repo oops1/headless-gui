@@ -482,7 +482,7 @@ func (b *Base) drawChildren(ctx DrawContext) {
 		// Поддерево, не задевающее ни одной изменившейся области, не рисуем
 		// вовсе: ножницы холста всё равно отбросили бы эти пиксели, а обход
 		// и вызовы Draw стоили бы как при полной перерисовке.
-		if SkipSubtree(child) {
+		if SkipSubtree(ctx, child) {
 			continue
 		}
 		child.Draw(ctx)
