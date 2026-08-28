@@ -45,6 +45,13 @@ type ClockItem struct {
 	TimeFormat string
 	DateFormat string
 
+	// OnClick — щелчок по часам. Оболочка вешает на него календарь: именно
+	// так он открывается на настоящем рабочем столе.
+	OnClick func()
+
+	hovered int32
+	pressed int32
+
 	mu       sync.Mutex
 	lastTime string
 	lastDate string
@@ -54,6 +61,21 @@ type ClockItem struct {
 // NewClock создаёт часы, оформляемые темой tm и показывающие время clk.
 func NewClock(tm *theme.Manager, clk Clock) *ClockItem {
 	return &ClockItem{tm: tm, clk: clk}
+}
+
+// OnMouseMove обновляет наведение — часы подсвечиваются, как и значки трея,
+// раз по ним можно щёлкнуть.
+func (c *ClockItem) OnMouseMove(x, y int) {
+	trayHandleMove(&c.hovered, c.Bounds(), x, y, c.Invalidate)
+}
+
+// OnMouseButton — щелчок срабатывает на отпускании над часами, как у всех
+// кнопок панели задач.
+func (c *ClockItem) OnMouseButton(e widget.MouseEvent) bool {
+	if c.OnClick == nil {
+		return false
+	}
+	return trayHandleClick(&c.pressed, c.Bounds(), e, c.OnClick, c.Invalidate)
 }
 
 // Close останавливает секундный тик. Часы, снятые со сцены и не закрытые,
