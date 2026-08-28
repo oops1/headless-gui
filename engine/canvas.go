@@ -42,8 +42,11 @@ type Canvas struct {
 	scaleTmp   *image.RGBA           // переиспользуемый буфер для DrawImageScaled
 	shaper     textShaper            // шейпинг сложного текста (RTL, лигатуры; см. shaper.go)
 	W, H       int                   // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
-	tilesX     int
-	tilesY     int
+	// marks — признак содержимого по тайлам за текущий кадр (regions.go).
+	marks []tileMark
+
+	tilesX int
+	tilesY int
 
 	// HiDPI (см. scale.go): виджеты живут в логических пикселях,
 	// буферы — в физических. При scale == 1 пути тождественны прежним.
@@ -163,7 +166,7 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 	ph := int(math.Round(float64(h) * scale))
 	pw, ph = clampCanvasSize(pw, ph) // масштаб мог вывести за предел
 	ts := output.TileSize
-	return &Canvas{
+	c := &Canvas{
 		front:      image.NewRGBA(image.Rect(0, 0, pw, ph)),
 		back:       image.NewRGBA(image.Rect(0, 0, pw, ph)),
 		fontCache:  fc,
@@ -176,6 +179,8 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 		logicalW:   w,
 		logicalH:   h,
 	}
+	c.initTileMarks()
+	return c
 }
 
 // ─── Background ──────────────────────────────────────────────────────────────
@@ -327,6 +332,9 @@ func (c *Canvas) FillRectAlpha(x, y, w, h int, col color.RGBA) {
 // + copy остальных; Over — побайтово по формуле drawFillOver из image/draw
 // (та же 16-битная арифметика, поэтому результат идентичен до бита).
 func (c *Canvas) fillRectPx(r image.Rectangle, col color.RGBA, over bool) {
+	// Заливка — то, о чём потребителю знать выгоднее всего: сплошную область
+	// он передаёт командой протокола и не кодирует вовсе.
+	c.markSolid(r, col, !over || col.A == 255)
 	r = c.clampRect(r)
 	if r.Empty() {
 		return
@@ -631,6 +639,9 @@ func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
 // premultiplied — как image/draw для font.Drawer). Учитывает clip.
 // (gx, gy) — позиция левого верхнего угла маски на холсте.
 func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
+	if b := alpha.Bounds(); !b.Empty() {
+		c.markText(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
+	}
 	mw, mh := alpha.Rect.Dx(), alpha.Rect.Dy()
 	r := c.clampRect(image.Rect(gx, gy, gx+mw, gy+mh))
 	if r.Empty() {
@@ -679,6 +690,9 @@ func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 // операцией Over. Цвет текста НЕ применяется — источник уже цветной. Учитывает
 // clip. (gx, gy) — позиция левого верхнего угла изображения на холсте.
 func (c *Canvas) drawColorGlyph(img *image.RGBA, gx, gy int) {
+	if b := img.Bounds(); !b.Empty() {
+		c.markText(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
+	}
 	iw, ih := img.Rect.Dx(), img.Rect.Dy()
 	r := c.clampRect(image.Rect(gx, gy, gx+iw, gy+ih))
 	if r.Empty() {
@@ -921,6 +935,9 @@ func (c *Canvas) DrawVLine(x, y, length int, col color.RGBA) {
 // DrawImage рисует изображение в (x, y); логический размер = размеру
 // картинки в пикселях (при HiDPI изображение растягивается на scale).
 func (c *Canvas) DrawImage(src image.Image, x, y int) {
+	if b := src.Bounds(); !b.Empty() {
+		c.markImage(c.sRect(image.Rect(x, y, x+b.Dx(), y+b.Dy())))
+	}
 	if c.scale != 1 {
 		c.DrawImageScaled(src, x, y, src.Bounds().Dx(), src.Bounds().Dy())
 		return
@@ -956,6 +973,9 @@ type scaledEntry struct {
 // пикселей в позицию (x, y).
 // Кэш — по идентичности источника; мутировали пиксели — InvalidateImageCache.
 func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
+	if w > 0 && h > 0 {
+		c.markImage(c.sRect(image.Rect(x, y, x+w, y+h)))
+	}
 	px, py := c.sx(x), c.sx(y)
 	pw, ph := c.sl(x, w), c.sl(y, h)
 	dstRect := c.clampRect(image.Rect(px, py, px+pw, py+ph))

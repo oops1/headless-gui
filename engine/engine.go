@@ -1197,9 +1197,11 @@ func (e *Engine) renderFrame() output.Frame {
 		}
 		canvas.blitBackgroundIn(damage)
 		canvas.setBaseClip(damage)
+		canvas.resetTileMarks(damage)
 		defer canvas.clearBaseClip()
 	} else {
 		canvas.blitBackground()
+		canvas.resetTileMarks(image.Rect(0, 0, canvas.W, canvas.H))
 	}
 
 	// Активен ли хост попапов: если да — оверлеи с OverlayBounds не рисуются
@@ -1273,6 +1275,7 @@ func (e *Engine) renderFrame() output.Frame {
 		Seq:       seq,
 		Timestamp: time.Now(),
 		Tiles:     tiles,
+		Regions:   canvas.regionsFor(tiles),
 	}
 }
 
