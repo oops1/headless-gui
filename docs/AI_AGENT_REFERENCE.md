@@ -3408,6 +3408,48 @@ m.SetIconResolver(widget.BuiltinIcons())
 
 ---
 
+## v3.15.0 additions (render pipeline)
+
+### Draw contract
+
+The engine can skip a widget subtree whose bounding rectangle does not
+intersect any damage region — that subtree's `Draw` is not called for the
+frame. Controlled by:
+
+```go
+eng.SetSubtreeCulling(bool)   // default: true (on)
+```
+
+Set `false` to fall back to the pre-v3.15.0 behavior (every widget's `Draw`
+runs every rendered frame) for an app that can't yet meet the contract below.
+
+Rules a widget MUST follow so culling is transparent to it:
+
+1. **`Draw` is not called every frame.** A widget must render correctly when
+   skipped — skipped means "the screen already shows the right thing."
+2. **Animation only via `widget.Animate` / `widget.AnimateOwned`.** Never a
+   frame counter or `time.Now()` read inside `Draw` — a skipped `Draw` call
+   would stall it instead of letting it finish.
+3. **`Draw` must not mutate widget state.** In particular, do not compute
+   layout / hit-test rects inside `Draw` and cache them there — a skipped
+   `Draw` leaves the cache stale and clicks resolve against the wrong
+   coordinates.
+4. **Any visual change needs `Invalidate()` (own bounds) or
+   `widget.InvalidateRect(r)` (area outside own bounds — overlays, popups).**
+   Without it the engine has no signal the frame is stale, and with culling
+   on that means the widget never repaints again, not just late.
+5. **A widget that paints outside its own bounds (`Elevation` shadow,
+   overlay, popup) must claim that area itself.** The subtree's bounding
+   rectangle is computed from widget `Bounds()`, not from actual paint
+   extent — an unclaimed shadow/overlay area is dropped from culling
+   consideration and can go stale.
+
+See `GUIDE.md` / `GUIDE_EN.md`, section "Свой виджет" / "Custom Widget" →
+"Контракт отрисовки" / "The draw contract", for the full rationale and
+before/after code examples.
+
+---
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

@@ -52,6 +52,11 @@ type Base struct {
 	bounds   image.Rectangle
 	children []Widget
 
+	// subtree — кэш охватывающего прямоугольника поддерева (culling.go).
+	// Живёт здесь, чтобы им обладал каждый виджет движка: Base встроен во
+	// все.
+	subtree subtreeInfo
+
 	// disabled=true → виджет отключён (WPF IsEnabled="False").
 	// По умолчанию false (т.е. виджет включён), что соответствует WPF IsEnabled=True.
 	disabled bool
@@ -474,9 +479,20 @@ func (b *Base) drawChildren(ctx DrawContext) {
 		if !IsWidgetVisible(child) {
 			continue
 		}
+		// Поддерево, не задевающее ни одной изменившейся области, не рисуем
+		// вовсе: ножницы холста всё равно отбросили бы эти пиксели, а обход
+		// и вызовы Draw стоили бы как при полной перерисовке.
+		if SkipSubtree(child) {
+			continue
+		}
 		child.Draw(ctx)
 	}
 }
+
+// subtreeCache отдаёт кэш прямоугольника поддерева. Приватный метод: его
+// промоутят все виджеты движка, и только они, — чужая реализация Widget
+// кэша не имеет и просто не пропускается.
+func (b *Base) subtreeCache() *subtreeInfo { return &b.subtree }
 
 // IsWidgetVisible возвращает false, если виджет реализует IsVisible() и скрыт.
 // Виджеты без этого метода считаются видимыми.

@@ -729,6 +729,26 @@ func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
 // Копия, а не ссылка на внутренний буфер: движок продолжит рисовать в него
 // следующий кадр, и отданная наружу картинка изменилась бы под руками.
 // Возвращает nil, если холста ещё нет.
+// logicalDamage переводит области кадра в логические координаты, расширяя
+// их наружу: при дробном масштабе округление внутрь отрезало бы от области
+// половину точки, а вместе с ней — поддерево на самом её краю.
+func (e *Engine) logicalDamage(rects []image.Rectangle) []image.Rectangle {
+	k := e.Scale()
+	if k == 1 || len(rects) == 0 {
+		return rects
+	}
+	out := make([]image.Rectangle, 0, len(rects))
+	for _, r := range rects {
+		out = append(out, image.Rect(
+			int(math.Floor(float64(r.Min.X)/k)),
+			int(math.Floor(float64(r.Min.Y)/k)),
+			int(math.Ceil(float64(r.Max.X)/k)),
+			int(math.Ceil(float64(r.Max.Y)/k)),
+		))
+	}
+	return out
+}
+
 func (e *Engine) RenderOnce() *image.RGBA {
 	e.renderFrame()
 
@@ -1155,6 +1175,21 @@ func (e *Engine) renderFrame() output.Frame {
 	// этого не меняются), а вот сравнивать по нему — значит отправить
 	// потребителю всё, что лежит между далёкими областями.
 	partial := e.onDemand.Load() && !damageAll && !damage.Empty()
+
+	// Пропуск поддеревьев: обходу нужно знать, что именно перерисовывается.
+	// Полный кадр ограничений не ставит — иначе первый же кадр после
+	// запуска остался бы наполовину пустым.
+	if partial {
+		// В ЛОГИЧЕСКИХ координатах: damage движок хранит в физических
+		// пикселях, а границы виджетов живут в логических. При масштабе
+		// 1.25 сравнение одних с другими пропустило бы ровно то поддерево,
+		// которое и надо было нарисовать.
+		widget.SetDrawDamage(e.logicalDamage(damageRects))
+		defer widget.ClearDrawDamage()
+	} else {
+		widget.ClearDrawDamage()
+	}
+
 	if partial {
 		damage = damage.Intersect(image.Rect(0, 0, canvas.W, canvas.H))
 		if damage.Empty() {
