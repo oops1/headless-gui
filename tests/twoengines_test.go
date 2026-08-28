@@ -274,12 +274,22 @@ func TestTwoEngines_SameSizeDoNotStealEachOthersMoves(t *testing.T) {
 		return root, win, eng
 	}
 
-	_, winA, engA := build()
+	_, _, engA := build()
 	_, _, engB := build()
 
-	// Тащим окно ТОЛЬКО в движке A.
-	winA.OnMouseButton(widget.MouseEvent{X: 200, Y: 110, Button: widget.MouseLeft, Pressed: true})
-	winA.OnMouseMove(240, 150)
+	// Тащим окно ТОЛЬКО в движке A — через сам движок, а не в обход:
+	// объявление о переносе рождается внутри обработки ввода, и путь через
+	// диспетчеризацию проверяет заодно, что движок не берёт при этом своих
+	// замков (иначе приёмник объявления встал бы намертво).
+	engA.SendMouseButton(200, 110, widget.MouseLeft, true)
+	// Кадр после нажатия: клик движок инвалидирует целиком (он может открыть
+	// меню, сместить фокус — задеть что угодно), а в полном кадре переносы
+	// бессмысленны. В работе этот кадр уходит потребителю сразу же, и шаг
+	// мыши приходит уже на чистое состояние.
+	engA.RenderFrameNow()
+	engB.RenderFrameNow()
+
+	engA.SendMouseMove(240, 150)
 
 	if got := len(engA.RenderFrameNow().Moves); got != 1 {
 		t.Errorf("движок, в чьём дереве тащили окно, получил %d переносов вместо одного", got)
