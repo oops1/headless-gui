@@ -276,7 +276,7 @@ func buildDesktop(eng *engine.Engine) scene {
 
 	switcher := widget.NewPanel(color.RGBA{A: 90})
 	switcher.ShowHeader = false
-	switcher.SetBounds(image.Rect(16, 16, 16+len(themeOrder)*150, 52))
+	switcher.SetBounds(image.Rect(16, 16, 16+len(themeOrder)*150+170, 52))
 	for i, th := range themeOrder {
 		i := i
 		btn := widget.NewButton(th.label)
@@ -285,6 +285,23 @@ func buildDesktop(eng *engine.Engine) scene {
 		switcher.AddChild(btn)
 	}
 	root.AddChild(switcher)
+
+	// Автоскрытие: панель уезжает за край и выезжает, когда курсор подведён
+	// к самому краю экрана.
+	hideBtn := widget.NewButton("Скрывать панель")
+	hideBtn.SetBounds(image.Rect(20+len(themeOrder)*150, 20, 20+len(themeOrder)*150+160, 48))
+	hideBtn.OnClick = func() {
+		on := !bar.AutoHide()
+		bar.SetAutoHide(on)
+		dock.SetAutoHide(on)
+		if on {
+			hideBtn.Text = "Показать панель"
+		} else {
+			hideBtn.Text = "Скрывать панель"
+		}
+		eng.Invalidate()
+	}
+	switcher.AddChild(hideBtn)
 
 	hint := widget.NewLabel("Кнопки наверху меняют тему; «Пуск», часы и значки трея открывают панели",
 		color.RGBA{R: 235, G: 240, B: 250, A: 255})

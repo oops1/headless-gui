@@ -58,6 +58,14 @@ type Taskbar struct {
 	// сама: она живёт вне обхода дерева, когда её показывают оболочкой.
 	unsubTheme func()
 
+	// autoHide, revealed, offset, fullBounds — состояние автоскрытия
+	// (см. autohide.go). fullBounds — место, которое панель занимает
+	// выдвинутой; Bounds() при этом может быть смещён за край экрана.
+	autoHide   bool
+	revealed   int32
+	offset     int
+	fullBounds image.Rectangle
+
 	// StyleComponent — имя компонента для стилей темы. Пустое — "taskbar".
 	// Второй полосе рабочего стола оболочка ставит ComponentDockbar.
 	StyleComponent string
@@ -196,11 +204,27 @@ func (t *Taskbar) Height() int {
 //
 // Нужна потребителю: развёрнутое окно не должно перекрывать панель, а
 // узнать её геометрию иначе неоткуда.
-func (t *Taskbar) ReservedArea() image.Rectangle { return t.Bounds() }
+func (t *Taskbar) ReservedArea() image.Rectangle {
+	// Автоскрытая панель не занимает места: развёрнутое окно вправе идти под
+	// неё — ради этого автоскрытие и включают.
+	if t.autoHide {
+		return image.Rectangle{}
+	}
+	return t.Bounds()
+}
 
 // SetBounds задаёт положение панели и перекладывает элементы.
 func (t *Taskbar) SetBounds(r image.Rectangle) {
-	t.Base.SetBounds(r)
+	// Запоминаем место, которое панель занимает ВЫДВИНУТОЙ: скрытая панель
+	// стоит за краем экрана, и без этого она не знала бы, куда возвращаться.
+	t.fullBounds = r
+	if t.autoHide && !t.IsRevealed() {
+		h := r.Dy()
+		if h > 0 {
+			t.offset = h
+		}
+	}
+	t.Base.SetBounds(t.shiftedBounds())
 	t.relayout()
 }
 
@@ -359,6 +383,15 @@ func (t *Taskbar) style(part string, st theme.State) *theme.Style {
 		return &theme.Style{}
 	}
 	return t.tm.GetStyle(t.component(), part, st)
+}
+
+// OnMouseMove выдвигает и убирает автоскрытую панель.
+//
+// Панель получает движение и когда курсор за её пределами: движок доставляет
+// событие тому, в чьих границах курсор был на прошлом кадре, — так уход
+// курсора и становится сигналом убраться.
+func (t *Taskbar) OnMouseMove(x, y int) {
+	t.handleAutoHideMove(x, y)
 }
 
 // Draw рисует подложку панели и её элементы.

@@ -446,6 +446,10 @@ func (c *Canvas) fillRoundRectLegacy(x, y, w, h, r int, col color.RGBA) {
 // DrawRoundBorder рисует 1-пиксельный (логический) контур со скруглёнными
 // углами. Дуги углов сглажены (AA-маски четверть-кольца, см. aa.go).
 func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
+	// Полупрозрачная рамка — плёнка поверх фона, а не запись цвета вместе с
+	// чужой альфой: тонкая светлая обводка стеклянной панели иначе ложится
+	// сплошной белой линией.
+	blend := col.A < 255
 	if r <= 0 {
 		c.DrawBorder(x, y, w, h, col)
 		return
@@ -468,10 +472,10 @@ func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
 	}
 	t := c.st(1) // физическая толщина линии
 	// Прямые стороны.
-	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+t), col, false)       // верх
-	c.fillRectPx(image.Rect(px+pr, py+ph-t, px+pw-pr, py+ph), col, false) // низ
-	c.fillRectPx(image.Rect(px, py+pr, px+t, py+ph-pr), col, false)       // лево
-	c.fillRectPx(image.Rect(px+pw-t, py+pr, px+pw, py+ph-pr), col, false) // право
+	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+t), col, blend)       // верх
+	c.fillRectPx(image.Rect(px+pr, py+ph-t, px+pw-pr, py+ph), col, blend) // низ
+	c.fillRectPx(image.Rect(px, py+pr, px+t, py+ph-pr), col, blend)       // лево
+	c.fillRectPx(image.Rect(px+pw-t, py+pr, px+pw, py+ph-pr), col, blend) // право
 	if col.A < 255 {
 		c.drawRoundBorderCornersLegacy(px, py, pw, ph, pr, col)
 		return
@@ -496,13 +500,17 @@ func (c *Canvas) drawRoundBorderCornersLegacy(x, y, w, h, r int, col color.RGBA)
 
 // DrawBorder рисует 1-пиксельный (логический) контур прямоугольника.
 func (c *Canvas) DrawBorder(x, y, w, h int, col color.RGBA) {
+	// Полупрозрачная рамка — плёнка поверх фона, а не запись цвета вместе с
+	// чужой альфой: тонкая светлая обводка стеклянной панели иначе ложится
+	// сплошной белой линией.
+	blend := col.A < 255
 	px, py := c.sx(x), c.sx(y)
 	pw, ph := c.sl(x, w), c.sl(y, h)
 	t := c.st(1)
-	c.fillRectPx(image.Rect(px, py, px+pw, py+t), col, false)       // верх
-	c.fillRectPx(image.Rect(px, py+ph-t, px+pw, py+ph), col, false) // низ
-	c.fillRectPx(image.Rect(px, py, px+t, py+ph), col, false)       // лево
-	c.fillRectPx(image.Rect(px+pw-t, py, px+pw, py+ph), col, false) // право
+	c.fillRectPx(image.Rect(px, py, px+pw, py+t), col, blend)       // верх
+	c.fillRectPx(image.Rect(px, py+ph-t, px+pw, py+ph), col, blend) // низ
+	c.fillRectPx(image.Rect(px, py, px+t, py+ph), col, blend)       // лево
+	c.fillRectPx(image.Rect(px+pw-t, py, px+pw, py+ph), col, blend) // право
 }
 
 // DrawText рисует строку TTF-шрифтом (Go Regular) размером DefaultFontSize.

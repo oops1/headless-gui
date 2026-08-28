@@ -149,7 +149,7 @@ func (p DockPresenter) Draw(ctx widget.DrawContext, c Component) {
 		// Точка под значком у запущенного приложения — так док отличает
 		// открытое от закреплённого.
 		if cell.Active || !cell.Muted {
-			drawRunningDot(ctx, cellRect, style, cell.Active)
+			drawRunningDot(ctx, cellRect, b.Max.Y, dockPad(tm), style, cell.Active)
 		}
 	}
 }
@@ -227,8 +227,14 @@ func drawDockTile(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 	ctx.FillRect(tile.Min.X, tile.Min.Y, tile.Dx(), tile.Dy(), s.Text)
 }
 
-// drawRunningDot рисует точку запущенного приложения под значком.
-func drawRunningDot(ctx widget.DrawContext, r image.Rectangle, s *theme.Style, active bool) {
+// drawRunningDot рисует точку запущенного приложения ПОД значком — в поле
+// между его нижним краем и краем плашки дока.
+//
+// Не на самом значке: точка на значке читается как часть картинки приложения
+// и портит её, а в настоящем доке она стоит отдельно, в отведённом ей поле.
+// Отсюда и требование к полю: оно должно быть достаточным, чтобы точка в нём
+// поместилась, иначе её срежет краем плашки.
+func drawRunningDot(ctx widget.DrawContext, cell image.Rectangle, barBottom, pad int, s *theme.Style, active bool) {
 	col := s.Text
 	if active && s.Border.A > 0 {
 		col = s.Border
@@ -236,11 +242,21 @@ func drawRunningDot(ctx widget.DrawContext, r image.Rectangle, s *theme.Style, a
 	if col.A == 0 {
 		return
 	}
-	d := r.Dy() / 12
-	if d < 2 {
-		d = 2
+	d := cell.Dx() / 12
+	if d < 3 {
+		d = 3
 	}
-	cx := r.Min.X + r.Dx()/2 - d/2
-	y := r.Max.Y - d
-	ctx.FillRoundRect(cx, y, d, d, d/2, col)
+	if pad > 0 && d > pad {
+		d = pad
+	}
+
+	// Середина поля под значком: так точка не жмётся ни к значку, ни к краю.
+	y := cell.Max.Y + (barBottom-cell.Max.Y-d)/2
+	if y+d > barBottom {
+		y = barBottom - d
+	}
+	if y < cell.Max.Y {
+		y = cell.Max.Y
+	}
+	ctx.FillRoundRect(cell.Min.X+cell.Dx()/2-d/2, y, d, d, d/2, col)
 }

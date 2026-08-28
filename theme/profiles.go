@@ -644,7 +644,7 @@ func MacOSProfile() *Profile {
 		// разные полосы, а не одна панель задач.
 		SetMetric("taskbar.height", 26).
 		SetMetric("dock.height", 68).
-		SetMetric("dock.pad", 6).
+		SetMetric("dock.pad", 8).
 		SetMetric("taskbar.pad.x", 12).
 		SetMetric("taskbar.gap", 6).
 		SetMetric("dock.icon", 52).
