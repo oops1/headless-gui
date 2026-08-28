@@ -3492,6 +3492,27 @@ declares a move with `widget.NotifyMove(src, dst)` — `Window` does it while
 dragging and on landing. A declared move does NOT replace damage: it is a hint
 about a cheaper way to reach the same result.
 
+### Buffer format and drawing into foreign memory
+
+```go
+eng.SetPixelFormat(engine.FormatBGRX)   // rasteriser writes BGRX directly
+eng.SetSurface(pix, stride, engine.FormatBGRX) // back buffer = your memory
+eng.SetSurface(nil, 0, engine.FormatRGBA)      // back to the engine's own
+```
+
+Channel order is a property of the buffer, not a reason for a per-pixel loop:
+an RDP consumer used to swap RGBA→BGRX itself on every frame. `FormatRGBA` is
+the default and byte-for-byte what shipped before.
+
+`SetSurface` hands the engine the consumer's own memory as the back buffer,
+removing two copies of the frame. `stride` may exceed `w*4` (DIB alignment).
+The **front** buffer stays internal — the diff needs a private copy of the
+previous frame to compare against. Buffer rotation (`SetSurfaces` with
+per-buffer damage age, the equivalent of `EGL_buffer_age`) is not implemented.
+
+`DirtyTile.Data` follows the chosen format: with `FormatBGRX` those bytes are
+BGRX, which is what the caller asked for.
+
 ### Pacing and the frame sink
 
 ```go

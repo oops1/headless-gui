@@ -2027,6 +2027,21 @@ Dragging a window does not change pixels, it moves them. `widget.NotifyMove(src,
 declares the move; in RDP that is a pair of surface-cache commands instead of a
 hundred kilobytes.
 
+#### Channel order and foreign memory
+
+```go
+eng.SetPixelFormat(engine.FormatBGRX)          // the rasteriser writes BGRX directly
+eng.SetSurface(pix, stride, engine.FormatBGRX) // back buffer = your memory
+```
+
+Channel order is a property of the buffer, not a reason for a per-pixel loop:
+an RDP consumer used to swap the channels itself on every frame. The default
+(`FormatRGBA`) is byte-for-byte what shipped before.
+
+`SetSurface` hands the engine your memory for the back buffer and removes two
+copies of the frame; `stride` may exceed the width (DIB alignment). The front
+buffer stays internal — the diff needs its own copy of the previous frame.
+
 #### Who sets the pace
 
 ```go

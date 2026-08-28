@@ -29,8 +29,10 @@ import (
 // Реализует интерфейс widget.DrawContext.
 type Canvas struct {
 	front      *image.RGBA           // последний отправленный кадр
-	back       *image.RGBA           // текущий рендер-таргет
-	bgImage    *image.RGBA           // фоновое изображение (масштабировано под холст)
+	back       *image.RGBA           // текущий рендер-таргет (может быть чужой памятью — см. SetSurface)
+	backOwn    *image.RGBA           // собственный back-буфер холста; back переключается на него, когда внешняя память не задана
+	format     PixelFormat           // порядок каналов back-буфера (см. pixelformat.go)
+	bgImage    *image.RGBA           // фоновое изображение (масштабировано под холст, закодировано в format — см. setBackground)
 	fontCache  *FontCache            // кэш шрифта по умолчанию
 	namedFonts map[string]*FontCache // именованные шрифты (FontFamily из XAML)
 	fallbacks  []*FontCache          // fallback-шрифты для отсутствующих глифов (BUG-2)
@@ -166,9 +168,11 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 	ph := int(math.Round(float64(h) * scale))
 	pw, ph = clampCanvasSize(pw, ph) // масштаб мог вывести за предел
 	ts := output.TileSize
+	backBuf := image.NewRGBA(image.Rect(0, 0, pw, ph))
 	c := &Canvas{
 		front:      image.NewRGBA(image.Rect(0, 0, pw, ph)),
-		back:       image.NewRGBA(image.Rect(0, 0, pw, ph)),
+		back:       backBuf,
+		backOwn:    backBuf,
 		fontCache:  fc,
 		namedFonts: make(map[string]*FontCache),
 		W:          pw,
@@ -191,6 +195,11 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 func (c *Canvas) setBackground(src image.Image) {
 	dst := image.NewRGBA(image.Rect(0, 0, c.W, c.H))
 	draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), stdraw.Over, nil)
+	if c.format == FormatBGRX {
+		// Кодируем ОДИН раз здесь, а не на каждом blitBackground: фон не
+		// меняется от кадра к кадру, а blitBackground вызывается каждый.
+		swapRB(dst.Pix)
+	}
 	c.bgImage = dst
 }
 
@@ -199,16 +208,31 @@ func (c *Canvas) setBackground(src image.Image) {
 // Если фонового изображения нет — заливает буфер чёрным цветом,
 // чтобы при перемещении виджетов старые пиксели не оставались.
 func (c *Canvas) blitBackground() {
+	// Построчно через PixOffset обеих сторон, а не одним copy(back.Pix,
+	// bgImage.Pix): back.Stride может отличаться от bgImage.Stride (back —
+	// чужая память с собственным шагом строки, см. SetSurface), да и просто
+	// писать за пределы c.W×c.H в чужой буфер нельзя, даже если у него есть
+	// запасные байты дальше по срезу.
+	rowBytes := c.W * 4
 	if c.bgImage != nil {
-		copy(c.back.Pix, c.bgImage.Pix)
-	} else {
-		// Очищаем буфер чёрным (RGBA = 0,0,0,255)
-		pix := c.back.Pix
-		for i := 0; i < len(pix); i += 4 {
-			pix[i+0] = 0   // R
-			pix[i+1] = 0   // G
-			pix[i+2] = 0   // B
-			pix[i+3] = 255 // A
+		for y := 0; y < c.H; y++ {
+			dOff := c.back.PixOffset(0, y)
+			sOff := c.bgImage.PixOffset(0, y)
+			copy(c.back.Pix[dOff:dOff+rowBytes], c.bgImage.Pix[sOff:sOff+rowBytes])
+		}
+		return
+	}
+	// Очищаем буфер чёрным (RGBA = 0,0,0,255). R=G=B=0 — перестановка
+	// каналов (FormatBGRX) здесь ничего не меняет, менять цвет по формату
+	// незачем.
+	for y := 0; y < c.H; y++ {
+		off := c.back.PixOffset(0, y)
+		row := c.back.Pix[off : off+rowBytes]
+		for i := 0; i < len(row); i += 4 {
+			row[i+0] = 0
+			row[i+1] = 0
+			row[i+2] = 0
+			row[i+3] = 255
 		}
 	}
 }
@@ -221,11 +245,15 @@ func (c *Canvas) blitBackgroundIn(r image.Rectangle) {
 		return
 	}
 	if c.bgImage != nil {
-		// bgImage создаётся размером с холст — stride совпадает с back.
+		// bgImage — ВСЕГДА собственный image.NewRGBA(W,H) канваса (Stride =
+		// 4×W без запаса), а back может быть чужой памятью с другим шагом
+		// строки (см. SetSurface) — оффсет считаем для каждого раздельно,
+		// один и тот же off тут не годится.
 		rowBytes := r.Dx() * 4
 		for y := r.Min.Y; y < r.Max.Y; y++ {
-			off := c.back.PixOffset(r.Min.X, y)
-			copy(c.back.Pix[off:off+rowBytes], c.bgImage.Pix[off:off+rowBytes])
+			dOff := c.back.PixOffset(r.Min.X, y)
+			sOff := c.bgImage.PixOffset(r.Min.X, y)
+			copy(c.back.Pix[dOff:dOff+rowBytes], c.bgImage.Pix[sOff:sOff+rowBytes])
 		}
 		return
 	}
@@ -239,6 +267,25 @@ func (c *Canvas) blitBackgroundIn(r image.Rectangle) {
 			row[i+3] = 255
 		}
 	}
+}
+
+// ─── Внешняя память back-буфера (Engine.SetSurface, surface.go) ────────────
+
+// setExternalBack переключает back на память потребителя. Размер и шаг
+// строки здесь УЖЕ проверены вызывающим (Engine.SetSurface) — Canvas только
+// строит обёртку image.RGBA поверх чужого среза, без копирования.
+//
+// front остаётся собственным буфером канваса всегда (см. поле front) —
+// только back меняется.
+func (c *Canvas) setExternalBack(pix []byte, stride int, f PixelFormat) {
+	c.back = &image.RGBA{Pix: pix, Stride: stride, Rect: image.Rect(0, 0, c.W, c.H)}
+	c.format = f
+}
+
+// useOwnBack возвращает back к собственному буферу канваса
+// (Engine.SetSurface(nil, …, …)).
+func (c *Canvas) useOwnBack() {
+	c.back = c.backOwn
 }
 
 // ─── Clip ───────────────────────────────────────────────────────────────────
@@ -311,7 +358,7 @@ func (c *Canvas) FillRect(x, y, w, h int, col color.RGBA) {
 	if col.A == 0 {
 		return
 	}
-	c.fillRectPx(c.sRect(image.Rect(x, y, x+w, y+h)), col, false)
+	c.fillRectPx(c.sRect(image.Rect(x, y, x+w, y+h)), c.enc(col), false)
 }
 
 // FillRectAlpha заливает прямоугольник с альфа-смешиванием (Over).
@@ -321,10 +368,15 @@ func (c *Canvas) FillRect(x, y, w, h int, col color.RGBA) {
 // и накопление при наложении. Перевести straight → premultiplied:
 // R*A/255, G*A/255, B*A/255.
 func (c *Canvas) FillRectAlpha(x, y, w, h int, col color.RGBA) {
-	c.fillRectPx(c.sRect(image.Rect(x, y, x+w, y+h)), col, true)
+	c.fillRectPx(c.sRect(image.Rect(x, y, x+w, y+h)), c.enc(col), true)
 }
 
 // fillRectPx — заливка в ФИЗИЧЕСКИХ координатах (внутренний примитив).
+//
+// КОНТРАКТ: col приходит УЖЕ в порядке байт back-буфера (см. Canvas.enc) —
+// сама fillRectPx формат не знает и ничего не переставляет. Так и
+// backdrop.go может гонять сюда сырые байты, снятые прямо с back (после
+// размытия), не рискуя, что их перекодируют повторно.
 //
 // Ручные циклы вместо stdraw.Draw(&image.Uniform{...}): универсальный путь
 // стандартной библиотеки аллоцировал Uniform на каждый вызов (в профиле —
@@ -418,19 +470,26 @@ func (c *Canvas) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
 		pr = ph / 2
 	}
 	if col.A < 255 {
-		c.fillRoundRectLegacy(px, py, pw, ph, pr, col)
+		c.fillRoundRectLegacy(px, py, pw, ph, pr, c.enc(col))
 		return
 	}
+	// Тело идёт через fillRectPx, который col не кодирует (см. его
+	// контракт) — кодируем один раз здесь. Углы идут через drawCorners →
+	// drawAlphaMask, который кодирует col САМ (см. его комментарий), поэтому
+	// туда передаём исходный, ещё не закодированный col — не задваивать же
+	// перестановку каналов.
+	encCol := c.enc(col)
 	// Тело: средняя полоса на всю ширину + верх/низ между углами.
-	c.fillRectPx(image.Rect(px, py+pr, px+pw, py+ph-pr), col, false)
-	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+pr), col, false)
-	c.fillRectPx(image.Rect(px+pr, py+ph-pr, px+pw-pr, py+ph), col, false)
+	c.fillRectPx(image.Rect(px, py+pr, px+pw, py+ph-pr), encCol, false)
+	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+pr), encCol, false)
+	c.fillRectPx(image.Rect(px+pr, py+ph-pr, px+pw-pr, py+ph), encCol, false)
 	// Сглаженные углы.
 	c.drawCorners(cornersFor(pr, cornerFill), px, py, pw, ph, pr, col)
 }
 
 // fillRoundRectLegacy — ступенчатая заливка для полупрозрачных цветов
-// (A<255). Координаты ФИЗИЧЕСКИЕ.
+// (A<255). Координаты ФИЗИЧЕСКИЕ. col приходит уже закодированным
+// (см. контракт fillRectPx) — вызывается только из FillRoundRect.
 //
 // Смешивает, а не пишет цвет как есть. Ветка выбирается ИМЕННО по
 // полупрозрачности, и запись без смешивания оставляла в буфере цвет с чужой
@@ -479,13 +538,17 @@ func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
 		pr = ph / 2
 	}
 	t := c.st(1) // физическая толщина линии
-	// Прямые стороны.
-	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+t), col, blend)       // верх
-	c.fillRectPx(image.Rect(px+pr, py+ph-t, px+pw-pr, py+ph), col, blend) // низ
-	c.fillRectPx(image.Rect(px, py+pr, px+t, py+ph-pr), col, blend)       // лево
-	c.fillRectPx(image.Rect(px+pw-t, py+pr, px+pw, py+ph-pr), col, blend) // право
+	// Прямые стороны идут через fillRectPx (не кодирует col — см. его
+	// контракт), кодируем один раз для них; дуги — либо тот же путь
+	// (легаси), либо drawAlphaMask, который кодирует col САМ (см. FillRoundRect
+	// выше) — туда исходный, не закодированный col.
+	encCol := c.enc(col)
+	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+t), encCol, blend)       // верх
+	c.fillRectPx(image.Rect(px+pr, py+ph-t, px+pw-pr, py+ph), encCol, blend) // низ
+	c.fillRectPx(image.Rect(px, py+pr, px+t, py+ph-pr), encCol, blend)       // лево
+	c.fillRectPx(image.Rect(px+pw-t, py+pr, px+pw, py+ph-pr), encCol, blend) // право
 	if col.A < 255 {
-		c.drawRoundBorderCornersLegacy(px, py, pw, ph, pr, col)
+		c.drawRoundBorderCornersLegacy(px, py, pw, ph, pr, encCol)
 		return
 	}
 	// Сглаженные дуги углов.
@@ -493,7 +556,8 @@ func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
 }
 
 // drawRoundBorderCornersLegacy — прежние ступенчатые дуги (для A<255).
-// Координаты ФИЗИЧЕСКИЕ.
+// Координаты ФИЗИЧЕСКИЕ. col приходит уже закодированным (вызывается только
+// из DrawRoundBorder).
 func (c *Canvas) drawRoundBorderCornersLegacy(x, y, w, h, r int, col color.RGBA) {
 	rf := float64(r)
 	for i := 0; i <= r; i++ {
@@ -515,10 +579,11 @@ func (c *Canvas) DrawBorder(x, y, w, h int, col color.RGBA) {
 	px, py := c.sx(x), c.sx(y)
 	pw, ph := c.sl(x, w), c.sl(y, h)
 	t := c.st(1)
-	c.fillRectPx(image.Rect(px, py, px+pw, py+t), col, blend)       // верх
-	c.fillRectPx(image.Rect(px, py+ph-t, px+pw, py+ph), col, blend) // низ
-	c.fillRectPx(image.Rect(px, py, px+t, py+ph), col, blend)       // лево
-	c.fillRectPx(image.Rect(px+pw-t, py, px+pw, py+ph), col, blend) // право
+	encCol := c.enc(col) // fillRectPx col не кодирует — см. его контракт
+	c.fillRectPx(image.Rect(px, py, px+pw, py+t), encCol, blend)       // верх
+	c.fillRectPx(image.Rect(px, py+ph-t, px+pw, py+ph), encCol, blend) // низ
+	c.fillRectPx(image.Rect(px, py, px+t, py+ph), encCol, blend)       // лево
+	c.fillRectPx(image.Rect(px+pw-t, py, px+pw, py+ph), encCol, blend) // право
 }
 
 // DrawText рисует строку TTF-шрифтом (Go Regular) размером DefaultFontSize.
@@ -638,7 +703,16 @@ func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
 // drawAlphaMask альфа-блендит альфа-маску цветом col в back-буфер (Over,
 // premultiplied — как image/draw для font.Drawer). Учитывает clip.
 // (gx, gy) — позиция левого верхнего угла маски на холсте.
+//
+// В отличие от fillRectPx/setPixelPx, здесь col КОДИРУЕТСЯ (c.enc) прямо
+// внутри: часть вызывающих кода (aa.go — AA-фигуры, скруглённые углы) не
+// входит в файлы этой задачи и не может закодировать col сама на своей
+// стороне до вызова. Тем вызывающим в canvas.go, что уже закодировали col
+// сами (drawCorners из FillRoundRect/DrawRoundBorder — нет, туда специально
+// передаётся ИСХОДНЫЙ col), двойного кодирования тут нет: единственная
+// точка входа цвета для альфа-масок — эта функция.
 func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
+	col = c.enc(col)
 	if b := alpha.Bounds(); !b.Empty() {
 		c.markText(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
 	}
@@ -698,6 +772,12 @@ func (c *Canvas) drawColorGlyph(img *image.RGBA, gx, gy int) {
 	if r.Empty() {
 		return
 	}
+	// img приходит из другого мира (COLR/эмодзи-глиф в emoji.go/colrv1.go,
+	// временный буфер тени в shadow.go) — всегда в "логическом" R,G,B,A,
+	// без понятия о формате back. Здесь единственная точка, где такие чужие
+	// пиксели копируются в back, поэтому здесь и переставляем R/B при
+	// FormatBGRX — по одному разу на пиксель, а не через отдельный проход.
+	swap := c.format == FormatBGRX
 	src := img.Pix
 	sStride := img.Stride
 	dst := c.back.Pix
@@ -717,12 +797,16 @@ func (c *Canvas) drawColorGlyph(img *image.RGBA, gx, gy int) {
 				dOff += 4
 				continue
 			}
+			sr, sg, sb := src[sRow+0], src[sRow+1], src[sRow+2]
+			if swap {
+				sr, sb = sb, sr
+			}
 			inv := 255 - sa
 			p := dst[dOff : dOff+4 : dOff+4]
-			p[0] = uint8(uint32(src[sRow+0]) + uint32(p[0])*inv/255)
-			p[1] = uint8(uint32(src[sRow+1]) + uint32(p[1])*inv/255)
-			p[2] = uint8(uint32(src[sRow+2]) + uint32(p[2])*inv/255)
-			p[3] = uint8(uint32(src[sRow+3]) + uint32(p[3])*inv/255)
+			p[0] = uint8(uint32(sr) + uint32(p[0])*inv/255)
+			p[1] = uint8(uint32(sg) + uint32(p[1])*inv/255)
+			p[2] = uint8(uint32(sb) + uint32(p[2])*inv/255)
+			p[3] = uint8(sa + uint32(p[3])*inv/255)
 			sRow += 4
 			dOff += 4
 		}
@@ -900,6 +984,7 @@ func (c *Canvas) measureRunePositionsPx(text string, sizePt float64) []int {
 // SetPixel устанавливает цвет одного ЛОГИЧЕСКОГО пикселя (при HiDPI —
 // блок физических пикселей соответствующего размера). Учитывает clip.
 func (c *Canvas) SetPixel(x, y int, col color.RGBA) {
+	col = c.enc(col) // setPixelPx/fillRectPx col не кодируют — см. их контракт
 	if c.scale != 1 {
 		c.fillRectPx(image.Rect(c.sx(x), c.sx(y), c.sx(x+1), c.sx(y+1)), col, false)
 		return
@@ -907,7 +992,8 @@ func (c *Canvas) SetPixel(x, y int, col color.RGBA) {
 	c.setPixelPx(x, y, col)
 }
 
-// setPixelPx — один ФИЗИЧЕСКИЙ пиксель (внутренний примитив).
+// setPixelPx — один ФИЗИЧЕСКИЙ пиксель (внутренний примитив). col приходит
+// уже закодированным (см. контракт fillRectPx) — вызывающие кодируют сами.
 func (c *Canvas) setPixelPx(x, y int, col color.RGBA) {
 	if c.hasClip {
 		if !image.Pt(x, y).In(c.clip) {
@@ -947,7 +1033,54 @@ func (c *Canvas) DrawImage(src image.Image, x, y int) {
 		return
 	}
 	offset := src.Bounds().Min.Add(image.Pt(r.Min.X-x, r.Min.Y-y))
-	stdraw.Draw(c.back, r, src, offset, stdraw.Over)
+	c.blitOver(r, src, offset)
+}
+
+// blitOver копирует src в back операцией Over в физической области r
+// (offset — точка src, соответствующая r.Min). Общая точка для
+// DrawImage/DrawImageScaled — единственное место, где в back попадают
+// пиксели чужого image.Image напрямую, минуя markSolid/drawAlphaMask.
+//
+// FormatRGBA: тот же stdraw.Draw, что был здесь и раньше, — байт в байт
+// прежнее поведение, никакого нового кода на этом пути не выполняется.
+//
+// FormatBGRX: stdraw.Draw не знает про наш порядок байт, а переписывать его
+// арифметику Over вручную — рискованно разойтись на пару значений округления
+// с оригиналом (тест ЗАДАЧИ 1 требует побитового совпадения с RGBA-рендером
+// той же сцены). Поэтому вместо этого прогоняем ТОТ ЖЕ stdraw.Draw во
+// временном RGBA-буфере: сначала "расколдовываем" в него текущее содержимое
+// затрагиваемой области back (снова R↔B), затем — обычный Over, затем
+// результат переносим назад с той же перестановкой. Дороже прямой записи,
+// зато арифметика смешивания гарантированно та же, что и в FormatRGBA.
+func (c *Canvas) blitOver(r image.Rectangle, src image.Image, offset image.Point) {
+	if c.format != FormatBGRX {
+		stdraw.Draw(c.back, r, src, offset, stdraw.Over)
+		return
+	}
+	w, h := r.Dx(), r.Dy()
+	if w <= 0 || h <= 0 {
+		return
+	}
+	tmp := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		bOff := c.back.PixOffset(r.Min.X, r.Min.Y+y)
+		tOff := tmp.PixOffset(0, y)
+		row := c.back.Pix[bOff : bOff+w*4]
+		trow := tmp.Pix[tOff : tOff+w*4]
+		for i := 0; i < len(row); i += 4 {
+			trow[i+0], trow[i+1], trow[i+2], trow[i+3] = row[i+2], row[i+1], row[i+0], row[i+3]
+		}
+	}
+	stdraw.Draw(tmp, tmp.Bounds(), src, offset, stdraw.Over)
+	for y := 0; y < h; y++ {
+		bOff := c.back.PixOffset(r.Min.X, r.Min.Y+y)
+		tOff := tmp.PixOffset(0, y)
+		row := c.back.Pix[bOff : bOff+w*4]
+		trow := tmp.Pix[tOff : tOff+w*4]
+		for i := 0; i < len(row); i += 4 {
+			row[i+0], row[i+1], row[i+2], row[i+3] = trow[i+2], trow[i+1], trow[i+0], trow[i+3]
+		}
+	}
 }
 
 // ─── Кэш масштабирования ────────────────────────────────────────────────────
@@ -984,7 +1117,7 @@ func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
 	}
 	tmp := c.scaledFor(src, pw, ph)
 	offset := image.Pt(dstRect.Min.X-px, dstRect.Min.Y-py)
-	stdraw.Draw(c.back, dstRect, tmp, offset, stdraw.Over)
+	c.blitOver(dstRect, tmp, offset)
 }
 
 // scaledFor возвращает src, масштабированный до pw×ph физических пикселей.
