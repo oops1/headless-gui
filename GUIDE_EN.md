@@ -1749,6 +1749,167 @@ becomes the center (`SetCenter`). Both tags are ignored outside
 See the "Docking" tab in `cmd/showcase` for a working example with three
 panes and save/restore-layout buttons.
 
+
+### Themes as data and the desktop (v3.14.0)
+
+The `theme/` package describes an application's looks with **data** rather than
+code, and `desktop/` builds a system taskbar out of that data.
+
+#### Theme profile
+
+A profile is a set of flat token tables: colors, metrics, flags, fonts, icons,
+animations, presenters and component styles.
+
+```go
+p := theme.NewProfile("mytheme")
+p.Parent = theme.ProfileWindows11        // inherit everything, override what differs
+p.SetColor("accent", theme.RGB(200, 60, 60)).
+    SetMetric("taskbar.height", 44).
+    SetFlag("taskbar.centered", true)
+p.SetStyle("taskbutton", "", theme.StateHover, theme.StyleDelta{
+    Fill: theme.C(theme.RGBA(255, 255, 255, 24)), Corner: theme.N(6),
+})
+
+m := theme.NewManager()
+theme.RegisterBuiltinProfiles(m)          // Windows 11/10/2000, macOS + dark ones
+m.RegisterTheme(p)
+m.SetTheme("mytheme")                     // live switch, subscribers notified
+```
+
+A style is asked for by (component, part, state); a missing state falls back to
+normal, a missing part to the component, a missing component to the theme's
+overall look. `GetStyle` returns a pointer into the resolved table and allocates
+nothing — it is safe to call from `Draw`.
+
+States are a bitmask, but the table keeps one style per state: `Dominant()`
+collapses the mask to the leading one (Disabled > Pressed > Active > Hover >
+Focused). Six entries per component instead of thirty-two.
+
+A dark variant declares **only the differences** — usually three or four colors:
+style fill and text come from the flat `surface` and `text` tokens unless the
+style sets them.
+
+Themes also load from JSON, with no engine changes:
+
+```go
+res, err := theme.LoadTheme(file)   // res.Profile, res.Warnings
+m.RegisterTheme(res.Profile)
+```
+
+#### Glass, shadows and rounded clipping
+
+A theme style can ask for what used to be drawn by hand:
+
+```go
+p.SetStyle("taskbar", "", theme.StateNormal, theme.StyleDelta{
+    Backdrop:  &theme.BackdropSpec{Mode: theme.BackdropBlur, Radius: 30,
+                                   Tint: theme.RGBA(243, 243, 243, 200)},
+    Corner:    theme.N(8),
+    Elevation: theme.N(12),                       // soft shadow
+    Shadow:    theme.C(theme.RGBA(0, 0, 0, 70)),
+})
+```
+
+Backdrop blur takes the pixels already on the canvas, downscales them 4×, blurs
+them with a separable box blur (cost independent of the radius) and puts them
+back. `Canvas.SetRoundClip` clips along the rounded outline instead of its
+bounding box.
+
+#### The taskbar and its components
+
+```go
+bar := desktop.NewTaskbar(m)
+bar.AddItem(desktop.SlotStart, desktop.NewStartButton(m))
+bar.AddItem(desktop.SlotApps, desktop.NewApplicationArea(m, catalog, windows))
+bar.AddItem(desktop.SlotTray, tray)      // desktop.NewSystemTray(m)
+bar.AddItem(desktop.SlotTray, desktop.NewClock(m, desktop.SystemClock{}))
+bar.SetBounds(image.Rect(0, h-bar.Height(), w, h))
+```
+
+Components never touch the system themselves: data arrives through the
+`WindowModel`, `AppCatalog`, `SystemStatus`, `Notifications` and `Clock`
+interfaces implemented by the consumer. The engine ships fakes for all of them
+(`FakeWindowModel`, `StaticAppCatalog`, `FakeSystemStatus`, `FakeNotifications`,
+`FakeClock`) — tests and the demo run on those.
+
+Flyouts — Start menu, calendar, quick settings, notification center — are drawn
+as engine overlays, so they can be hosted in separate OS windows
+(`engine.SetPopupSink`) and are not clipped by the shell window:
+
+```go
+menu := desktop.NewStartMenu(m, catalog)
+menu.Screen = image.Rect(0, 0, w, h)
+startBtn.OnClick = func() { menu.Toggle(startBtn.Bounds()) }
+root.AddChild(menu)                       // must be in the tree, or the overlay is not found
+```
+
+The taskbar spans the full width, survives `SetBounds` to another resolution and
+respects the canvas scale. A component short on space degrades predictably:
+window buttons shrink to icons, tray icons hide behind a chevron button.
+
+#### Presenters: a theme changes more than color
+
+Tokens describe palette and geometry, but not shape. The macOS dock is not a
+repainted button row: icons are large, centered, and the one under the cursor
+grows and pushes its neighbours aside. So a profile may bring a **presenter**
+with it — someone else's drawing and layout for a component it knows:
+
+```go
+p.Presenters["runningapps"] = "dock"      // in the macOS profile
+```
+
+The component stays single, its behaviour tests pass under both themes; only the
+one who draws changes. Register your own with
+`desktop.RegisterPresenter(name, p)`.
+
+Demo: `go run ./cmd/desktopdemo` — five looks of the very same components,
+switched by buttons without a restart.
+
+
+#### Radial gradient
+
+A linear gradient describes a transition along an axis, and the glow under a
+dock icon cannot be expressed that way: there the light spreads out in a circle.
+
+```go
+p.SetStyle("dock", "", theme.StateHover, theme.StyleDelta{
+    Gradient: []theme.GradientStop{
+        {Pos: 0, Color: theme.RGBA(255, 255, 255, 150)},
+        {Pos: 1, Color: theme.RGBA(255, 255, 255, 0)},
+    },
+    GradientKind:   theme.GK(theme.GradientRadial),
+    GradientRadius: theme.N(1.1),     // fraction of half the longer side
+})
+```
+
+Center (`GradientCenterX/Y`) and radius are fractions of the area, not pixels:
+the same glow fits both a 24 pt icon and a 64 pt one. A gradient replaces the
+fill when set. `widget.DrawRadialGradient` and `widget.DrawLinearGradient` are
+available directly too.
+
+#### A theme for a subtree
+
+There used to be exactly one theme per application: `ApplyGlobalTheme` writes to
+shared variables and `Engine.SetTheme` walks the whole tree. A remote-desktop
+shell needs something else — the guest's window in the guest's theme next to its
+own interface.
+
+```go
+scope := widget.NewThemeScope(widget.Win2000Theme())
+scope.SetBounds(image.Rect(0, 0, 400, 300))
+scope.AddChild(button)          // a child is themed by the scope right away
+root.AddChild(scope)
+
+eng.SetTheme(widget.DarkTheme()) // the scope stays classic
+```
+
+The scope hands its theme to its subtree and shields it from a global change:
+`ApplyThemeTree` does not descend into it. Shape — bevels, corners, the classic
+flag — is read from a shared variable inside `Draw`, so it is swapped for the
+duration of the subtree's drawing and restored via `defer`. Scopes nest: an
+inner one restores the OUTER style rather than resetting to the global one.
+`NewThemeScope(nil)` is a plain container — a global theme reaches its children.
+
 ---
 
 ## Module Structure
@@ -1789,6 +1950,7 @@ Run from the root `GuiEngine` directory:
 
 ```bash
 go run ./cmd/showcase    # all widgets + live animation
+go run ./cmd/desktopdemo # desktop: taskbar and live theme switching
 go run ./cmd/guiview     # interactive demo with modal XAML windows
 go run ./cmd/griddemo    # Grid layout
 go run ./cmd/smartgit    # SmartGit-like UI

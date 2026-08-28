@@ -1778,6 +1778,172 @@ XAML:
 Смотри вкладку «Докинг» в `cmd/showcase` — пример с тремя панелями и кнопками
 сохранения/восстановления раскладки.
 
+
+### Темы как данные и рабочий стол (v3.14.0)
+
+Пакет `theme/` описывает облик приложения **данными**, а не кодом, а пакет
+`desktop/` даёт из этих данных собранную системную панель задач.
+
+#### Профиль темы
+
+Профиль — плоские таблицы токенов: цвета, метрики, признаки, шрифты, иконки,
+анимации, презентеры и стили компонентов.
+
+```go
+p := theme.NewProfile("mytheme")
+p.Parent = theme.ProfileWindows11        // наследование: берём всё, меняем нужное
+p.SetColor("accent", theme.RGB(200, 60, 60)).
+    SetMetric("taskbar.height", 44).
+    SetFlag("taskbar.centered", true)
+p.SetStyle("taskbutton", "", theme.StateHover, theme.StyleDelta{
+    Fill: theme.C(theme.RGBA(255, 255, 255, 24)), Corner: theme.N(6),
+})
+
+m := theme.NewManager()
+theme.RegisterBuiltinProfiles(m)          // Windows 11/10/2000, macOS + тёмные
+m.RegisterTheme(p)
+m.SetTheme("mytheme")                     // смена на лету, подписчики уведомлены
+```
+
+Стиль спрашивается по тройке «компонент, часть, состояние»; отсутствующее
+состояние падает на покой, отсутствующая часть — на компонент, отсутствующий
+компонент — на общий вид темы. `GetStyle` возвращает указатель в готовую
+таблицу и не выделяет памяти — его можно звать из `Draw`.
+
+```go
+s := m.GetStyle("taskbutton", "", theme.StateHover|theme.StateActive)
+```
+
+Состояния — битовая маска, но таблица хранит по одному стилю на состояние:
+`Dominant()` сводит маску к главному (Disabled > Pressed > Active > Hover >
+Focused). Поэтому шесть записей на компонент, а не тридцать две.
+
+Тёмная разновидность объявляет **только отличия** — обычно три-четыре цвета:
+заливка и текст стилей берутся из плоских токенов `surface` и `text`, если
+стиль их не задал.
+
+Тема грузится и из JSON — без единой правки движка:
+
+```go
+res, err := theme.LoadTheme(file)   // res.Profile, res.Warnings
+m.RegisterTheme(res.Profile)
+```
+
+#### Стекло, тени и скруглённый клип
+
+Стиль темы умеет просить то, что раньше приходилось рисовать руками:
+
+```go
+p.SetStyle("taskbar", "", theme.StateNormal, theme.StyleDelta{
+    Backdrop:  &theme.BackdropSpec{Mode: theme.BackdropBlur, Radius: 30,
+                                   Tint: theme.RGBA(243, 243, 243, 200)},
+    Corner:    theme.N(8),
+    Elevation: theme.N(12),                       // мягкая тень
+    Shadow:    theme.C(theme.RGBA(0, 0, 0, 70)),
+})
+```
+
+Размытие подложки берёт готовые пиксели холста, уменьшает их вчетверо,
+размывает разделимым box-blur (стоимость не зависит от радиуса) и возвращает
+обратно. `Canvas.SetRoundClip` обрезает по скруглённому контуру, а не по
+охватывающему прямоугольнику.
+
+#### Панель задач и её компоненты
+
+```go
+bar := desktop.NewTaskbar(m)
+bar.AddItem(desktop.SlotStart, desktop.NewStartButton(m))
+bar.AddItem(desktop.SlotApps, desktop.NewApplicationArea(m, catalog, windows))
+bar.AddItem(desktop.SlotTray, tray)      // desktop.NewSystemTray(m)
+bar.AddItem(desktop.SlotTray, desktop.NewClock(m, desktop.SystemClock{}))
+bar.SetBounds(image.Rect(0, h-bar.Height(), w, h))
+```
+
+Компоненты не лезут в систему: данные приходят через интерфейсы
+`WindowModel`, `AppCatalog`, `SystemStatus`, `Notifications`, `Clock`, которые
+реализует потребитель. Движок поставляет их фейки (`FakeWindowModel`,
+`StaticAppCatalog`, `FakeSystemStatus`, `FakeNotifications`, `FakeClock`) —
+на них держатся тесты и демонстрация.
+
+Всплывающие панели — меню «Пуск», календарь, быстрые настройки, центр
+уведомлений — рисуются оверлеем движка, поэтому их можно вынести в отдельные
+окна ОС (`engine.SetPopupSink`) и они не обрезаются окном оболочки:
+
+```go
+menu := desktop.NewStartMenu(m, catalog)
+menu.Screen = image.Rect(0, 0, w, h)
+startBtn.OnClick = func() { menu.Toggle(startBtn.Bounds()) }
+root.AddChild(menu)                       // в дереве — иначе оверлей не найдут
+```
+
+Панель занимает всю ширину, переживает `SetBounds` с другим разрешением и
+уважает масштаб холста. Компонент, которому не хватило места, деградирует
+предсказуемо: кнопки окон сжимаются до значков, значки трея прячутся за
+кнопку-шеврон.
+
+#### Презентеры: тема меняет не только цвет
+
+Токенами описывается палитра и геометрия, но не форма. Док macOS — не
+перекрашенная полоса кнопок: значки крупные, стоят по центру, тот, что под
+курсором, увеличивается и раздвигает соседей. Поэтому профиль вправе принести
+с собой **презентер** — чужую отрисовку и раскладку известного ему компонента:
+
+```go
+p.Presenters["runningapps"] = "dock"      // в профиле macOS
+```
+
+Компонент остаётся один, его тесты на поведение проходят для обеих тем;
+меняется только тот, кто рисует. Свой презентер регистрируется
+`desktop.RegisterPresenter(name, p)`.
+
+Демонстрация: `go run ./cmd/desktopdemo` — пять обликов одних и тех же
+компонентов переключаются кнопками без перезапуска.
+
+
+#### Радиальный градиент
+
+Линейный градиент описывает переход вдоль оси, и подсветку под значком дока им
+не выразить: там свет расходится кругом от точки.
+
+```go
+p.SetStyle("dock", "", theme.StateHover, theme.StyleDelta{
+    Gradient: []theme.GradientStop{
+        {Pos: 0, Color: theme.RGBA(255, 255, 255, 150)},
+        {Pos: 1, Color: theme.RGBA(255, 255, 255, 0)},
+    },
+    GradientKind:   theme.GK(theme.GradientRadial),
+    GradientRadius: theme.N(1.1),     // доля половины большей стороны
+})
+```
+
+Центр (`GradientCenterX/Y`) и радиус задаются долями области, а не пикселями:
+одна и та же подсветка ложится и под значок 24 точки, и под 64. Градиент
+заменяет заливку, когда задан. Напрямую доступны и `widget.DrawRadialGradient`
+с `widget.DrawLinearGradient`.
+
+#### Тема на поддерево
+
+Тема была одна на всё приложение: `ApplyGlobalTheme` пишет в общие переменные,
+`Engine.SetTheme` обходит всё дерево. Оболочке удалённого стола нужно другое —
+окно гостя в его теме рядом со своим интерфейсом.
+
+```go
+scope := widget.NewThemeScope(widget.Win2000Theme())
+scope.SetBounds(image.Rect(0, 0, 400, 300))
+scope.AddChild(button)          // ребёнок сразу оформляется темой области
+root.AddChild(scope)
+
+eng.SetTheme(widget.DarkTheme()) // область останется классической
+```
+
+Область раздаёт тему своему поддереву и защищает его от глобальной смены:
+`ApplyThemeTree` в неё не заходит. Форма — фаски, скругления, признак
+классики — читается из общей переменной прямо в `Draw`, поэтому на время
+отрисовки поддерева она подменяется и возвращается через `defer`. Области
+вкладываются друг в друга: внутренняя возвращает стиль ВНЕШНЕЙ, а не сбрасывает
+его в общий. `NewThemeScope(nil)` — обычный контейнер, глобальная тема доходит
+до детей.
+
 ---
 
 ## Структура модулей
@@ -1818,6 +1984,7 @@ replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
 
 ```bash
 go run ./cmd/showcase    # все виджеты + живая анимация
+go run ./cmd/desktopdemo # рабочий стол: панель задач и смена тем на ходу
 go run ./cmd/guiview     # интерактивное демо с модальными XAML-окнами
 go run ./cmd/griddemo    # Grid-раскладка
 go run ./cmd/smartgit    # SmartGit-подобный UI

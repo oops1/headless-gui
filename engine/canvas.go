@@ -36,6 +36,7 @@ type Canvas struct {
 	fallbacks  []*FontCache          // fallback-шрифты для отсутствующих глифов (BUG-2)
 	clip       image.Rectangle       // активная область отсечения
 	hasClip    bool                  // включено ли отсечение
+	round      roundClipState        // отсечение по скруглённому контуру (clipround.go)
 	baseClip   image.Rectangle       // базовый клип кадра (damage-область частичной перерисовки)
 	hasBase    bool                  // активен ли базовый клип
 	scaleTmp   *image.RGBA           // переиспользуемый буфер для DrawImageScaled
@@ -330,6 +331,23 @@ func (c *Canvas) fillRectPx(r image.Rectangle, col color.RGBA, over bool) {
 	if r.Empty() {
 		return
 	}
+	// Скруглённое отсечение сужает каждую строку по-своему, поэтому заливка
+	// идёт построчно. Ветка стоит одну проверку, когда отсечения нет.
+	if c.round.active {
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			x0, x1, ok := c.round.spanX(y, r.Min.X, r.Max.X)
+			if !ok {
+				continue
+			}
+			c.fillRectRaw(image.Rect(x0, y, x1, y+1), col, over)
+		}
+		return
+	}
+	c.fillRectRaw(r, col, over)
+}
+
+// fillRectRaw — заливка уже зажатого прямоугольника, без проверок отсечения.
+func (c *Canvas) fillRectRaw(r image.Rectangle, col color.RGBA, over bool) {
 	if over && col.A != 255 {
 		if col.A == 0 {
 			return
@@ -403,18 +421,24 @@ func (c *Canvas) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
 	c.drawCorners(cornersFor(pr, cornerFill), px, py, pw, ph, pr, col)
 }
 
-// fillRoundRectLegacy — прежняя ступенчатая заливка (для A<255).
-// Координаты ФИЗИЧЕСКИЕ.
+// fillRoundRectLegacy — ступенчатая заливка для полупрозрачных цветов
+// (A<255). Координаты ФИЗИЧЕСКИЕ.
+//
+// Смешивает, а не пишет цвет как есть. Ветка выбирается ИМЕННО по
+// полупрозрачности, и запись без смешивания оставляла в буфере цвет с чужой
+// альфой: подсветка кнопки под курсором не ложилась плёнкой поверх панели, а
+// пробивала в ней дыру — на экране это выглядело светлым пятном, потому что
+// сквозь неё просвечивал фон приёмника.
 func (c *Canvas) fillRoundRectLegacy(x, y, w, h, r int, col color.RGBA) {
-	c.fillRectPx(image.Rect(x, y+r, x+w, y+h-r), col, false)
+	c.fillRectPx(image.Rect(x, y+r, x+w, y+h-r), col, true)
 	rf := float64(r)
 	for i := 0; i < r; i++ {
 		dy := float64(r - i - 1)
 		inset := r - int(math.Round(math.Sqrt(rf*rf-dy*dy)))
 		lineW := w - 2*inset
 		if lineW > 0 {
-			c.fillRectPx(image.Rect(x+inset, y+i, x+inset+lineW, y+i+1), col, false)     // верх
-			c.fillRectPx(image.Rect(x+inset, y+h-1-i, x+inset+lineW, y+h-i), col, false) // низ
+			c.fillRectPx(image.Rect(x+inset, y+i, x+inset+lineW, y+i+1), col, true)     // верх
+			c.fillRectPx(image.Rect(x+inset, y+h-1-i, x+inset+lineW, y+h-i), col, true) // низ
 		}
 	}
 }
@@ -422,6 +446,10 @@ func (c *Canvas) fillRoundRectLegacy(x, y, w, h, r int, col color.RGBA) {
 // DrawRoundBorder рисует 1-пиксельный (логический) контур со скруглёнными
 // углами. Дуги углов сглажены (AA-маски четверть-кольца, см. aa.go).
 func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
+	// Полупрозрачная рамка — плёнка поверх фона, а не запись цвета вместе с
+	// чужой альфой: тонкая светлая обводка стеклянной панели иначе ложится
+	// сплошной белой линией.
+	blend := col.A < 255
 	if r <= 0 {
 		c.DrawBorder(x, y, w, h, col)
 		return
@@ -444,10 +472,10 @@ func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
 	}
 	t := c.st(1) // физическая толщина линии
 	// Прямые стороны.
-	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+t), col, false)       // верх
-	c.fillRectPx(image.Rect(px+pr, py+ph-t, px+pw-pr, py+ph), col, false) // низ
-	c.fillRectPx(image.Rect(px, py+pr, px+t, py+ph-pr), col, false)       // лево
-	c.fillRectPx(image.Rect(px+pw-t, py+pr, px+pw, py+ph-pr), col, false) // право
+	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+t), col, blend)       // верх
+	c.fillRectPx(image.Rect(px+pr, py+ph-t, px+pw-pr, py+ph), col, blend) // низ
+	c.fillRectPx(image.Rect(px, py+pr, px+t, py+ph-pr), col, blend)       // лево
+	c.fillRectPx(image.Rect(px+pw-t, py+pr, px+pw, py+ph-pr), col, blend) // право
 	if col.A < 255 {
 		c.drawRoundBorderCornersLegacy(px, py, pw, ph, pr, col)
 		return
@@ -472,13 +500,17 @@ func (c *Canvas) drawRoundBorderCornersLegacy(x, y, w, h, r int, col color.RGBA)
 
 // DrawBorder рисует 1-пиксельный (логический) контур прямоугольника.
 func (c *Canvas) DrawBorder(x, y, w, h int, col color.RGBA) {
+	// Полупрозрачная рамка — плёнка поверх фона, а не запись цвета вместе с
+	// чужой альфой: тонкая светлая обводка стеклянной панели иначе ложится
+	// сплошной белой линией.
+	blend := col.A < 255
 	px, py := c.sx(x), c.sx(y)
 	pw, ph := c.sl(x, w), c.sl(y, h)
 	t := c.st(1)
-	c.fillRectPx(image.Rect(px, py, px+pw, py+t), col, false)       // верх
-	c.fillRectPx(image.Rect(px, py+ph-t, px+pw, py+ph), col, false) // низ
-	c.fillRectPx(image.Rect(px, py, px+t, py+ph), col, false)       // лево
-	c.fillRectPx(image.Rect(px+pw-t, py, px+pw, py+ph), col, false) // право
+	c.fillRectPx(image.Rect(px, py, px+pw, py+t), col, blend)       // верх
+	c.fillRectPx(image.Rect(px, py+ph-t, px+pw, py+ph), col, blend) // низ
+	c.fillRectPx(image.Rect(px, py, px+t, py+ph), col, blend)       // лево
+	c.fillRectPx(image.Rect(px+pw-t, py, px+pw, py+ph), col, blend) // право
 }
 
 // DrawText рисует строку TTF-шрифтом (Go Regular) размером DefaultFontSize.
@@ -614,11 +646,17 @@ func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 	mask := alpha.Pix
 	mStride := alpha.Stride
 	dst := c.back.Pix
-	rw := r.Dx()
 	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
-		mo := (yy-gy)*mStride + (r.Min.X - gx)
+		// Скруглённое отсечение сужает строку: текст в панели со скруглёнными
+		// углами не должен вылезать за кривую (см. clipround.go).
+		lx, rx, ok := c.round.spanX(yy, r.Min.X, r.Max.X)
+		if !ok {
+			continue
+		}
+		rw := rx - lx
+		mo := (yy-gy)*mStride + (lx - gx)
 		mRow := mask[mo : mo+rw]
-		dOff := c.back.PixOffset(r.Min.X, yy)
+		dOff := c.back.PixOffset(lx, yy)
 		dRow := dst[dOff : dOff+rw*4]
 		for i := 0; i < rw; i++ {
 			ma := uint32(mRow[i])
@@ -650,9 +688,15 @@ func (c *Canvas) drawColorGlyph(img *image.RGBA, gx, gy int) {
 	sStride := img.Stride
 	dst := c.back.Pix
 	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
-		sRow := (yy-gy)*sStride + (r.Min.X-gx)*4
-		dOff := c.back.PixOffset(r.Min.X, yy)
-		for xx := r.Min.X; xx < r.Max.X; xx++ {
+		// Скруглённое отсечение: эмодзи в панели с кривыми углами обрезается
+		// так же, как текст и заливки.
+		lx, rx, ok := c.round.spanX(yy, r.Min.X, r.Max.X)
+		if !ok {
+			continue
+		}
+		sRow := (yy-gy)*sStride + (lx-gx)*4
+		dOff := c.back.PixOffset(lx, yy)
+		for xx := lx; xx < rx; xx++ {
 			sa := uint32(src[sRow+3])
 			if sa == 0 { // полностью прозрачный пиксель
 				sRow += 4
@@ -855,6 +899,9 @@ func (c *Canvas) setPixelPx(x, y int, col color.RGBA) {
 		if !image.Pt(x, y).In(c.clip) {
 			return
 		}
+	}
+	if !c.round.contains(x, y) {
+		return
 	}
 	if x >= 0 && x < c.W && y >= 0 && y < c.H {
 		c.back.SetRGBA(x, y, col)
@@ -1064,6 +1111,26 @@ func (c *Canvas) diffAndSyncIn(region image.Rectangle) []output.DirtyTile {
 	tx1 := (region.Max.X - 1) / ts
 	ty1 := (region.Max.Y - 1) / ts
 	return c.diffTiles(tx0, ty0, tx1, ty1)
+}
+
+// diffAndSyncInRects — diff по НЕСКОЛЬКИМ областям сразу.
+//
+// Области перебираются по одной, и общий тайл двух соседних областей не
+// попадёт в выдачу дважды: diffTiles синхронизирует front сразу после
+// извлечения тайла, поэтому при втором сравнении тайл уже равен и
+// отбрасывается. Отдельная дедупликация не нужна.
+func (c *Canvas) diffAndSyncInRects(regions []image.Rectangle) []output.DirtyTile {
+	switch len(regions) {
+	case 0:
+		return nil
+	case 1:
+		return c.diffAndSyncIn(regions[0])
+	}
+	var out []output.DirtyTile
+	for _, r := range regions {
+		out = append(out, c.diffAndSyncIn(r)...)
+	}
+	return out
 }
 
 // diffTiles сравнивает тайлы в диапазоне индексов [tx0..tx1]×[ty0..ty1].

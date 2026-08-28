@@ -19,6 +19,7 @@ import (
 	"golang.org/x/image/font/gofont/goitalic"
 
 	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -54,7 +55,7 @@ type Engine struct {
 	onDemand  atomic.Bool
 	invGen    atomic.Uint64
 	damageMu  sync.Mutex
-	damage    image.Rectangle // объединение InvalidateRect с прошлого кадра
+	damage    []image.Rectangle // области InvalidateRect с прошлого кадра
 	damageAll bool            // Invalidate() — полный diff
 
 	focus    focusManager  // текущий виджет с фокусом
@@ -695,6 +696,55 @@ func (e *Engine) SetTheme(t *widget.Theme) {
 	e.Invalidate()
 }
 
+// SetThemeProfile применяет тему из менеджера профилей по имени.
+//
+// Дополняет SetTheme, а не заменяет: профиль разрешается в плоскую тему
+// мостом (widget.Materialize) и дальше идёт тем же путём — глобальная
+// палитра, обход дерева, инвалидация. Приложению, которое хочет
+// наследовать тему и переопределять токены, не нужно ради этого менять
+// способ применения.
+//
+// Менеджер передаётся явно: набор тем принадлежит приложению, а не
+// движку. Готовый набор со встроенными пресетами —
+// widget.DefaultThemeManager().
+func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
+	if m == nil {
+		return fmt.Errorf("engine: SetThemeProfile без менеджера тем")
+	}
+	if err := m.SetTheme(name); err != nil {
+		return err
+	}
+	e.SetTheme(widget.Materialize(m.Active()))
+	return nil
+}
+
+// RenderOnce синхронно рисует один кадр и возвращает КОПИЮ полученного
+// изображения (физические пиксели).
+//
+// Движок обычно отдаёт кадры дельта-тайлами через Frames() — так дешевле по
+// сети. Но иногда нужна целая картинка здесь и сейчас: снимок для
+// предпросмотра, кадр для golden-теста, отладочный дамп. Собирать её из
+// тайлов ради этого — лишняя работа для вызывающего.
+//
+// Копия, а не ссылка на внутренний буфер: движок продолжит рисовать в него
+// следующий кадр, и отданная наружу картинка изменилась бы под руками.
+// Возвращает nil, если холста ещё нет.
+func (e *Engine) RenderOnce() *image.RGBA {
+	e.renderFrame()
+
+	e.mu.RLock()
+	canvas := e.canvas
+	e.mu.RUnlock()
+	if canvas == nil {
+		return nil
+	}
+	e.frameMu.Lock()
+	defer e.frameMu.Unlock()
+	out := image.NewRGBA(canvas.front.Rect)
+	copy(out.Pix, canvas.front.Pix)
+	return out
+}
+
 // Start запускает цикл рендеринга в отдельной горутине.
 // Вызывать не более одного раза.
 func (e *Engine) Start() {
@@ -1087,7 +1137,10 @@ func (e *Engine) renderFrame() output.Frame {
 	root := e.root
 	e.mu.RUnlock()
 
-	damage, damageAll := e.consumeDamage()
+	damageRects, damageAll := e.consumeDamage()
+	// Объединение нужно там, где область может быть только одна: клип
+	// канваса — прямоугольник, и попапы отбираются по одному прямоугольнику.
+	damage := unionRects(damageRects)
 	// Некламповая копия — попапы живут и за краем холста (см. renderPopups).
 	popupDamage := damage
 
@@ -1096,6 +1149,11 @@ func (e *Engine) renderFrame() output.Frame {
 	// damage back-буфер хранит прошлый кадр — он совпадает с front, поэтому
 	// и отрисовка, и diff вне damage не нужны (контракт InvalidateRect:
 	// вызывающий заявляет ВСЕ изменившиеся области).
+	//
+	// ОТРИСОВКА идёт по объединению, а DIFF — по каждой области отдельно.
+	// Рисовать по объединению не жалко (пиксели остаются те же, тайлы от
+	// этого не меняются), а вот сравнивать по нему — значит отправить
+	// потребителю всё, что лежит между далёкими областями.
 	partial := e.onDemand.Load() && !damageAll && !damage.Empty()
 	if partial {
 		damage = damage.Intersect(image.Rect(0, 0, canvas.W, canvas.H))
@@ -1156,7 +1214,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
 	if partial {
-		tiles = canvas.diffAndSyncIn(damage)
+		tiles = canvas.diffAndSyncInRects(damageRects)
 	} else {
 		tiles = canvas.diffAndSync()
 	}

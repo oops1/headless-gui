@@ -395,6 +395,34 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 		}
 	}
 
+	// Открытый overlay (popup-меню, раскрытый dropdown) старше и обычного
+	// Z-порядка дерева, и заявки на захват мыши: он нарисован поверх всего,
+	// значит и клик по нему принадлежит ему.
+	//
+	// Проверять его НУЖНО до поиска захватчика. Виджет под меню — титлбар
+	// окна, вьюха терминала — просит захват на любое нажатие в своих
+	// границах и находится первым просто потому, что лежит ниже; ветка
+	// захвата гасит меню (dismissOutside по пути к захватчику, меню в него
+	// не входит), и до пункта меню нажатие не доходит вовсе. Меню, открытое
+	// над окном, из-за этого было полностью мёртвым — а над пустым рабочим
+	// столом, где захват никому не нужен, работало.
+	if overlayW := findOverlayAt(dispatchRoot, x, y); overlayW != nil {
+		if pressed && btn == widget.MouseLeft {
+			if _, ok := overlayW.(widget.Focusable); ok {
+				e.focus.set(overlayW)
+			}
+		}
+		if mc, ok := overlayW.(widget.MouseClickHandler); ok {
+			if mc.OnMouseButton(ev) {
+				// Overlay поглотил press — запоминаем для release-проверки.
+				if pressed && btn == widget.MouseLeft {
+					e.pressConsumer = overlayW
+				}
+				return
+			}
+		}
+	}
+
 	// Проверяем, хочет ли кто-то из предков захватить мышь (drag handle)
 	if pressed && btn == widget.MouseLeft {
 		if capturer := findCapturer(dispatchRoot, x, y, ev); capturer != nil {
@@ -430,24 +458,6 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 				mc.OnMouseButton(ev)
 			}
 			return
-		}
-	}
-
-	// Сначала проверяем: есть ли виджет с активным overlay под курсором.
-	if overlayW := findOverlayAt(dispatchRoot, x, y); overlayW != nil {
-		if pressed && btn == widget.MouseLeft {
-			if _, ok := overlayW.(widget.Focusable); ok {
-				e.focus.set(overlayW)
-			}
-		}
-		if mc, ok := overlayW.(widget.MouseClickHandler); ok {
-			if mc.OnMouseButton(ev) {
-				// Overlay поглотил press — запоминаем для release-проверки.
-				if pressed && btn == widget.MouseLeft {
-					e.pressConsumer = overlayW
-				}
-				return
-			}
 		}
 	}
 

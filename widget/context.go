@@ -68,6 +68,35 @@ type OverlayBoundsProvider interface {
 	OverlayBounds() image.Rectangle
 }
 
+// BackdropDrawer — опциональная возможность контекста размыть то, что уже
+// нарисовано под слоем (acrylic и mica Windows 11, материалы macOS).
+// Реализуется engine.Canvas методом BlurBehind; контекст без размытия
+// компонент обходит подкраской — стекло становится плёнкой, но отрисовка
+// не ломается.
+type BackdropDrawer interface {
+	BlurBehind(r image.Rectangle, radius int, tint color.RGBA)
+}
+
+// RoundClipper — опциональная возможность контекста обрезать рисование по
+// скруглённому контуру, а не по охватывающему прямоугольнику.
+//
+// Нужна там, где слой заливается не фигурой, а областью: размытая подложка
+// берёт прямоугольник, и у скруглённого слоя за дугой оставались бы
+// необрезанные уголки размытия — на стекле это выглядит как оборванные углы.
+// Реализуется engine.Canvas; контекст без него рисует как раньше.
+type RoundClipper interface {
+	SetRoundClip(r image.Rectangle, radius int)
+	ClearRoundClip()
+}
+
+// ShadowDrawer — опциональная возможность контекста рисовать мягкую тень
+// (реализуется engine.Canvas методом DrawSoftShadow). Контекст без неё
+// компонент просто пропускает: тень — украшение, её отсутствие не должно
+// менять раскладку.
+type ShadowDrawer interface {
+	DrawSoftShadow(r image.Rectangle, corner int, elevation float64, col color.RGBA)
+}
+
 // DrawContext — API рисования, предоставляемый движком каждому виджету.
 // Реализуется типом engine.Canvas.
 //
