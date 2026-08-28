@@ -46,8 +46,11 @@ func TestTabControl_SeparatorShiftsHitTest(t *testing.T) {
 	tc.AddTab("bb", nil)
 	tc.SetTabSeparator(1, true)
 
-	// Без Draw хит-тест клика берёт fallback-ширину TabPadH*2 + 80.
-	tabW := tc.TabPadH*2 + 80
+	// Хит-тест считает НАСТОЯЩУЮ ширину вкладки и без единой отрисовки:
+	// раскладка вынесена из Draw, потому что кадр вправе её пропустить.
+	// Раньше здесь была фиксированная ширина-заглушка, и тест закреплял
+	// именно её — то самое поведение, от которого пришлось избавиться.
+	tabW := widget.MeasureUIText("aa", widget.DefaultFontSizePt) + tc.TabPadH*2
 	const sepW = 9
 
 	// Клик в зазор разделителя — не попадает ни в одну вкладку.

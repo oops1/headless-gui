@@ -54,6 +54,14 @@ type Engine struct {
 	// ── Рендер по запросу (см. invalidate.go) ───────────────────────────────
 	onDemand  atomic.Bool
 	invGen    atomic.Uint64
+	// pacing, frameWanted, wake, sink — внешний темп и сток кадров
+	// (pacing.go). При PacingExternal кадр готовится только по RequestFrame.
+	pacing      atomicPacing
+	frameWanted atomic.Bool
+	wake        chan struct{}
+	sinkMu      sync.RWMutex
+	sink        FrameSink
+
 	damageMu  sync.Mutex
 	damage    []image.Rectangle // области InvalidateRect с прошлого кадра
 	damageAll bool            // Invalidate() — полный diff
@@ -247,6 +255,9 @@ func New(width, height, fps int) *Engine {
 		fontCache: fc,
 		canvas:    newCanvas(width, height, fc),
 		frames:    make(chan output.Frame, 8),
+		// wake будит цикл кадров при внешнем темпе: без него RequestFrame
+		// ждал бы ближайшего тика, то есть темп остался бы тикерным.
+		wake: make(chan struct{}, 1),
 		quit:      make(chan struct{}),
 		done:      make(chan struct{}),
 		fps:       fps,
@@ -1116,6 +1127,18 @@ func (e *Engine) loop() {
 
 	for {
 		select {
+		case <-e.wake:
+			// Внешний темп: сток попросил кадр. Анимации продвигаются в
+			// тикере, здесь — только кадр.
+			if !e.pacingIsExternal() || !e.takeFrameRequest() {
+				continue
+			}
+			frame := e.renderFrame()
+			if len(frame.Tiles) == 0 {
+				continue
+			}
+			e.deliver(frame)
+
 		case <-ticker.C:
 			// Продвигаем анимации ДО решения о пропуске кадра: тики зовут
 			// сеттеры виджетов, те самоинвалидируются (авто-damage), поэтому
@@ -1123,6 +1146,12 @@ func (e *Engine) loop() {
 			// частично. Вызывается в любом режиме — анимации живут и при
 			// SetRenderOnDemand(false).
 			widget.StepAnimations(time.Now())
+			// Внешний темп: кадры готовит RequestFrame. Анимации всё равно
+			// продвигаем — иначе начатая приложением анимация замерла бы до
+			// следующего запроса и шла бы рывками.
+			if e.pacingIsExternal() {
+				continue
+			}
 			if e.onDemand.Load() {
 				gen := e.invGen.Load()
 				if gen == lastGen && !e.animationNeeded(interval) {
@@ -1134,11 +1163,10 @@ func (e *Engine) loop() {
 			if len(frame.Tiles) == 0 {
 				continue
 			}
-			select {
-			case e.frames <- frame:
-			default:
-				// Потребитель не успевает — кадр отбрасывается
-			}
+			// Один путь выдачи на оба темпа: сток и канал получают кадр
+			// в одном месте, иначе сток молча оставался бы пустым при
+			// тикерном темпе — ровно это и показал тест.
+			e.deliver(frame)
 		case <-e.quit:
 			return
 		}

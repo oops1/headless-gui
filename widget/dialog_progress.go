@@ -55,7 +55,9 @@ func (mb *MessageBox) ShowProgress(title, status string, onCancel func()) *Progr
 	}
 
 	dlg := NewDialog(title, dlgW, dlgH)
-	dlg.ShowCloseButton = onCancel != nil // без отмены операция незакрываема
+	// SetShowCloseButton — без отмены операция незакрываема; метод сразу
+	// синхронизирует видимость ✕, не дожидаясь первого Draw диалога.
+	dlg.SetShowCloseButton(onCancel != nil)
 
 	lbl := NewLabel(status, win10.LabelText)
 	lbl.FontSize = 11

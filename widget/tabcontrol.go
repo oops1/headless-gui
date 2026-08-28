@@ -44,12 +44,11 @@ type TabControl struct {
 	TabHeight int // высота полосы вкладок (по умолчанию 32)
 	TabPadH   int // горизонтальный padding текста вкладки
 
-	mu        sync.Mutex
-	tabs      []TabItem
-	active    int   // индекс активной вкладки
-	hoverIdx  int   // индекс вкладки под курсором
-	tabWidths []int // реальные ширины вкладок (обновляются в Draw)
-	capMgr    CaptureManager // для инжекции в контент всех вкладок
+	mu       sync.Mutex
+	tabs     []TabItem
+	active   int // индекс активной вкладки
+	hoverIdx int // индекс вкладки под курсором
+	capMgr   CaptureManager // для инжекции в контент всех вкладок
 
 	OnTabChange func(index int, header string)
 }
@@ -238,7 +237,6 @@ func (tc *TabControl) ClearTabs() {
 	changed := len(tc.tabs) > 0
 	tc.tabs = nil
 	tc.active = 0
-	tc.tabWidths = nil
 	tc.mu.Unlock()
 	if changed {
 		tc.Invalidate()
@@ -310,6 +308,30 @@ func (tc *TabControl) layoutContent() {
 	}
 }
 
+// layoutTabs считает ширины заголовков вкладок (0 у скрытых) — САМ, а не
+// в качестве побочного эффекта Draw. Раньше ширины запоминались в поле
+// tc.tabWidths только внутри Draw, а хит-тест (OnMouseButton/OnMouseMove)
+// это поле читал; после того как движок научился пропускать Draw для
+// поддеревьев вне изменившейся области (SkipSubtree), это поле могло
+// протухнуть — клик уходил бы по координатам старого кадра. Теперь Draw и
+// хит-тест зовут ОДНУ и ту же функцию, так что раскладка не зависит от
+// того, рисовался ли в этом кадре TabControl вообще.
+//
+// Для замера текста используем MeasureUIText, а не ctx.MeasureText: это
+// один и тот же измеритель (движок регистрирует Canvas.MeasureText через
+// SetTextMeasurer), но MeasureUIText не требует DrawContext, которого у
+// хит-теста нет. Вызывать под tc.mu.
+func (tc *TabControl) layoutTabs() []int {
+	widths := make([]int, len(tc.tabs))
+	for i, tab := range tc.tabs {
+		if tab.Hidden {
+			continue // ширина 0 — не занимает места в полосе заголовков
+		}
+		widths[i] = MeasureUIText(tab.Header, DefaultFontSizePt) + tc.TabPadH*2
+	}
+	return widths
+}
+
 // tabRects вычисляет прямоугольники заголовков вкладок.
 // Вызывать под мьютексом.
 func (tc *TabControl) tabRects(ctx DrawContext) []image.Rectangle {
@@ -341,6 +363,10 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 	tabs := tc.tabs
 	active := tc.active
 	hoverIdx := tc.hoverIdx
+	// Ширины считаем той же layoutTabs, что зовёт и хит-тест (см. её
+	// комментарий) — чтобы Draw рисовал ровно по тем координатам, по
+	// которым потом будут искать попадание клика.
+	widths := tc.layoutTabs()
 	tc.mu.Unlock()
 
 	if len(tabs) == 0 {
@@ -362,8 +388,8 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), tc.TabHeight, tc.TabBG)
 	}
 
-	// Рисуем каждую вкладку и сохраняем реальные ширины для hit-test.
-	widths := make([]int, len(tabs))
+	// Рисуем каждую вкладку по ширинам из layoutTabs (посчитаны выше, под
+	// тем же mu, что видит и хит-тест).
 	var activeRect image.Rectangle
 	activeHeader := ""
 	tabX := b.Min.X
@@ -371,7 +397,6 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 	for i, tab := range tabs {
 		// Скрытые вкладки не занимают места в полосе заголовков (ширина 0).
 		if tab.Hidden {
-			widths[i] = 0
 			continue
 		}
 		// Разделитель группы вкладок (не перед первой видимой).
@@ -382,9 +407,7 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 			tabX += tabSepW
 		}
 		seenTab = true
-		textW := ctx.MeasureText(tab.Header, DefaultFontSizePt)
-		tabW := textW + tc.TabPadH*2
-		widths[i] = tabW
+		tabW := widths[i]
 		tabRect := image.Rect(tabX, b.Min.Y, tabX+tabW, b.Min.Y+tc.TabHeight)
 
 		// Фон вкладки
@@ -449,11 +472,6 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 
 		tabX += tabW
 	}
-
-	// Сохраняем реальные ширины для hit-test в OnMouseButton/OnMouseMove.
-	tc.mu.Lock()
-	tc.tabWidths = widths
-	tc.mu.Unlock()
 
 	// Линия под вкладками (в классике её роль играет верхняя грань страницы).
 	if !st.Classic3D {
@@ -545,8 +563,12 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 
 	tc.mu.Lock()
 
-	// Находим вкладку по X-позиции (используем реальные ширины из Draw).
+	// Находим вкладку по X-позиции. Ширины считаем сами (layoutTabs), а не
+	// читаем поле, посчитанное в Draw: если этот кадр Draw не рисовался
+	// (пропуск поддерева движком — см. комментарий layoutTabs), кэш из
+	// Draw был бы устаревшим и клик ушёл бы мимо.
 	// Колбэк и layoutContent (сам берёт tc.mu) вызываем ПОСЛЕ Unlock.
+	widths := tc.layoutTabs()
 	clicked, changed := -1, false
 	header := ""
 	tabX := b.Min.X
@@ -559,10 +581,7 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 			tabX += tabSepW
 		}
 		seenTab = true
-		tabW := tc.TabPadH*2 + 80 // fallback
-		if i < len(tc.tabWidths) {
-			tabW = tc.tabWidths[i]
-		}
+		tabW := widths[i]
 		if e.X >= tabX && e.X < tabX+tabW {
 			clicked = i
 			if tc.active != i {
@@ -610,6 +629,8 @@ func (tc *TabControl) OnMouseMove(x, y int) {
 		return
 	}
 
+	// Те же ширины, что и в OnMouseButton/Draw — см. комментарий layoutTabs.
+	widths := tc.layoutTabs()
 	tabX := b.Min.X
 	seenTab := false
 	for i, tab := range tc.tabs {
@@ -620,10 +641,7 @@ func (tc *TabControl) OnMouseMove(x, y int) {
 			tabX += tabSepW
 		}
 		seenTab = true
-		tabW := len(tab.Header)*8 + tc.TabPadH*2 // fallback
-		if i < len(tc.tabWidths) {
-			tabW = tc.tabWidths[i]
-		}
+		tabW := widths[i]
 		if x >= tabX && x < tabX+tabW {
 			tc.hoverIdx = i
 			return
