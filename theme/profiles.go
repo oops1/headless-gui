@@ -90,7 +90,19 @@ func Windows2000Profile() *Profile {
 		SetMetric("taskbutton.width.min", 60).
 		SetMetric("taskbutton.icon.size", 14).
 		SetMetric("taskbutton.gap", 2).
-		SetMetric("taskbutton.label.gap", 4)
+		SetMetric("taskbutton.label.gap", 4).
+		SetMetric("startmenu.width", 180).
+		SetMetric("startmenu.row.height", 20).
+		SetMetric("startmenu.icon.size", 16).
+		SetMetric("quicksettings.width", 176).
+		SetMetric("quicksettings.tile", 52).
+		SetMetric("quicksettings.gap", 4).
+		SetMetric("notifications.width", 240).
+		SetMetric("notifications.card.height", 52).
+		SetMetric("notifications.gap", 4).
+		SetMetric("calendar.cell", 20).
+		SetMetric("calendar.width", 164).
+		SetMetric("calendar.header.height", 22)
 
 	p.SetFlag("style.classic3d", true).
 		SetFlag("style.mac.titlebar", false).
@@ -141,6 +153,51 @@ func Windows2000Profile() *Profile {
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{
 		Fill: C(navy), Text: C(RGB(255, 255, 255)),
 	})
+
+	// Всплывающие панели — меню «Пуск», быстрые настройки, уведомления,
+	// календарь. Заливка и цвет текста НЕ задаются намеренно: они приходят из
+	// плоских токенов "surface" и "text", и тёмная разновидность темы меняет
+	// именно их, а не переписывает эти стили заново.
+	for _, comp := range []string{"startmenu", "quicksettings", "notifications", "calendar"} {
+		p.SetStyle(comp, "", StateNormal, StyleDelta{
+			Corner: N(0), PadX: N(2), PadY: N(2),
+			Bevel: &BevelSpec{Light: light, Shadow: shadow, Dark: dark},
+		})
+	}
+	p.SetStyle("startmenu", "", StateHover, StyleDelta{Fill: C(selection), Text: C(RGB(255, 255, 255))})
+	p.SetStyle("startmenu", "section", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200)), PadX: N(4)})
+	p.SetStyle("quicksettings", "slider", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
+	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{Fill: C(selection), Corner: N(0)})
+	for _, tile := range []string{"tile.network", "tile.volume", "tile.power"} {
+		p.SetStyle("quicksettings", tile, StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
+		p.SetStyle("quicksettings", tile, StateActive, StyleDelta{
+			Fill: C(selection), Text: C(RGB(255, 255, 255)), Corner: N(0),
+		})
+	}
+	// Карточка уведомления: рамка задаёт важность, заливка приходит из палитры.
+	p.SetStyle("notifications", "card.info", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0), PadX: N(2), PadY: N(4),
+	})
+	p.SetStyle("notifications", "card.warning", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0), PadX: N(2), PadY: N(4),
+		Border: C(RGB(220, 150, 20)), BorderWidth: N(1),
+	})
+	p.SetStyle("notifications", "card.error", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0), PadX: N(2), PadY: N(4),
+		Border: C(RGB(200, 60, 60)), BorderWidth: N(1),
+	})
+	p.SetStyle("notifications", "empty", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	p.SetStyle("notifications", "clear", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
+	p.SetStyle("calendar", "weekday", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	p.SetStyle("calendar", "day", StateNormal, StyleDelta{Corner: N(0)})
+	p.SetStyle("calendar", "day", StateHover, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
+	p.SetStyle("calendar", "day", StateActive, StyleDelta{
+		Fill: C(selection), Text: C(RGB(255, 255, 255)), Corner: N(0),
+	})
+	p.SetStyle("calendar", "day", StateFocused, StyleDelta{
+		Border: C(selection), BorderWidth: N(1), Corner: N(0),
+	})
+	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
 	return p
 }
 
@@ -193,7 +250,19 @@ func Windows10Profile() *Profile {
 		SetMetric("taskbutton.width.min", 64).
 		SetMetric("taskbutton.icon.size", 16).
 		SetMetric("taskbutton.gap", 2).
-		SetMetric("taskbutton.label.gap", 6)
+		SetMetric("taskbutton.label.gap", 6).
+		SetMetric("startmenu.width", 260).
+		SetMetric("startmenu.row.height", 28).
+		SetMetric("startmenu.icon.size", 20).
+		SetMetric("quicksettings.width", 240).
+		SetMetric("quicksettings.tile", 64).
+		SetMetric("quicksettings.gap", 6).
+		SetMetric("notifications.width", 300).
+		SetMetric("notifications.card.height", 60).
+		SetMetric("notifications.gap", 6).
+		SetMetric("calendar.cell", 28).
+		SetMetric("calendar.width", 220).
+		SetMetric("calendar.header.height", 30)
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", false).
@@ -245,6 +314,51 @@ func Windows10Profile() *Profile {
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{
 		Fill: C(accent), Text: C(RGB(255, 255, 255)),
 	})
+
+	// Всплывающие панели — меню «Пуск», быстрые настройки, уведомления,
+	// календарь. Заливка и цвет текста НЕ задаются намеренно: они приходят из
+	// плоских токенов "surface" и "text", и тёмная разновидность темы меняет
+	// именно их, а не переписывает эти стили заново.
+	for _, comp := range []string{"startmenu", "quicksettings", "notifications", "calendar"} {
+		p.SetStyle(comp, "", StateNormal, StyleDelta{
+			Corner: N(0), PadX: N(8), PadY: N(8),
+			Border: C(RGBA(0, 0, 0, 40)), BorderWidth: N(1), Elevation: N(6), Shadow: C(RGBA(0, 0, 0, 70)),
+		})
+	}
+	p.SetStyle("startmenu", "", StateHover, StyleDelta{Fill: C(accent), Text: C(RGB(255, 255, 255))})
+	p.SetStyle("startmenu", "section", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200)), PadX: N(6)})
+	p.SetStyle("quicksettings", "slider", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
+	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{Fill: C(accent), Corner: N(0)})
+	for _, tile := range []string{"tile.network", "tile.volume", "tile.power"} {
+		p.SetStyle("quicksettings", tile, StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
+		p.SetStyle("quicksettings", tile, StateActive, StyleDelta{
+			Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(0),
+		})
+	}
+	// Карточка уведомления: рамка задаёт важность, заливка приходит из палитры.
+	p.SetStyle("notifications", "card.info", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0), PadX: N(8), PadY: N(4),
+	})
+	p.SetStyle("notifications", "card.warning", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0), PadX: N(8), PadY: N(4),
+		Border: C(RGB(220, 150, 20)), BorderWidth: N(1),
+	})
+	p.SetStyle("notifications", "card.error", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0), PadX: N(8), PadY: N(4),
+		Border: C(RGB(200, 60, 60)), BorderWidth: N(1),
+	})
+	p.SetStyle("notifications", "empty", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	p.SetStyle("notifications", "clear", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
+	p.SetStyle("calendar", "weekday", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	p.SetStyle("calendar", "day", StateNormal, StyleDelta{Corner: N(0)})
+	p.SetStyle("calendar", "day", StateHover, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
+	p.SetStyle("calendar", "day", StateActive, StyleDelta{
+		Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(0),
+	})
+	p.SetStyle("calendar", "day", StateFocused, StyleDelta{
+		Border: C(accent), BorderWidth: N(1), Corner: N(0),
+	})
+	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
 	return p
 }
 
@@ -301,7 +415,19 @@ func Windows11Profile() *Profile {
 		SetMetric("taskbutton.width.min", 40).
 		SetMetric("taskbutton.icon.size", 22).
 		SetMetric("taskbutton.gap", 4).
-		SetMetric("taskbutton.label.gap", 6)
+		SetMetric("taskbutton.label.gap", 6).
+		SetMetric("startmenu.width", 300).
+		SetMetric("startmenu.row.height", 34).
+		SetMetric("startmenu.icon.size", 24).
+		SetMetric("quicksettings.width", 280).
+		SetMetric("quicksettings.tile", 72).
+		SetMetric("quicksettings.gap", 8).
+		SetMetric("notifications.width", 340).
+		SetMetric("notifications.card.height", 68).
+		SetMetric("notifications.gap", 8).
+		SetMetric("calendar.cell", 32).
+		SetMetric("calendar.width", 260).
+		SetMetric("calendar.header.height", 34)
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", false).
@@ -357,6 +483,51 @@ func Windows11Profile() *Profile {
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{
 		Fill: C(RGB(243, 243, 243)), Text: C(text),
 	})
+
+	// Всплывающие панели — меню «Пуск», быстрые настройки, уведомления,
+	// календарь. Заливка и цвет текста НЕ задаются намеренно: они приходят из
+	// плоских токенов "surface" и "text", и тёмная разновидность темы меняет
+	// именно их, а не переписывает эти стили заново.
+	for _, comp := range []string{"startmenu", "quicksettings", "notifications", "calendar"} {
+		p.SetStyle(comp, "", StateNormal, StyleDelta{
+			Corner: N(8), PadX: N(10), PadY: N(10),
+			Elevation: N(12), Shadow: C(RGBA(0, 0, 0, 70)),
+		})
+	}
+	p.SetStyle("startmenu", "", StateHover, StyleDelta{Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6)})
+	p.SetStyle("startmenu", "section", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200)), PadX: N(6)})
+	p.SetStyle("quicksettings", "slider", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
+	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{Fill: C(accent), Corner: N(6)})
+	for _, tile := range []string{"tile.network", "tile.volume", "tile.power"} {
+		p.SetStyle("quicksettings", tile, StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
+		p.SetStyle("quicksettings", tile, StateActive, StyleDelta{
+			Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6),
+		})
+	}
+	// Карточка уведомления: рамка задаёт важность, заливка приходит из палитры.
+	p.SetStyle("notifications", "card.info", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6), PadX: N(10), PadY: N(4),
+	})
+	p.SetStyle("notifications", "card.warning", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6), PadX: N(10), PadY: N(4),
+		Border: C(RGB(220, 150, 20)), BorderWidth: N(1),
+	})
+	p.SetStyle("notifications", "card.error", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6), PadX: N(10), PadY: N(4),
+		Border: C(RGB(200, 60, 60)), BorderWidth: N(1),
+	})
+	p.SetStyle("notifications", "empty", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	p.SetStyle("notifications", "clear", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
+	p.SetStyle("calendar", "weekday", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	p.SetStyle("calendar", "day", StateNormal, StyleDelta{Corner: N(6)})
+	p.SetStyle("calendar", "day", StateHover, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
+	p.SetStyle("calendar", "day", StateActive, StyleDelta{
+		Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6),
+	})
+	p.SetStyle("calendar", "day", StateFocused, StyleDelta{
+		Border: C(accent), BorderWidth: N(1), Corner: N(6),
+	})
+	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
 	return p
 }
 
@@ -432,7 +603,19 @@ func MacOSProfile() *Profile {
 		SetMetric("taskbutton.width.min", 44).
 		SetMetric("taskbutton.icon.size", 32).
 		SetMetric("taskbutton.gap", 6).
-		SetMetric("taskbutton.label.gap", 0)
+		SetMetric("taskbutton.label.gap", 0).
+		SetMetric("startmenu.width", 280).
+		SetMetric("startmenu.row.height", 30).
+		SetMetric("startmenu.icon.size", 22).
+		SetMetric("quicksettings.width", 260).
+		SetMetric("quicksettings.tile", 68).
+		SetMetric("quicksettings.gap", 8).
+		SetMetric("notifications.width", 320).
+		SetMetric("notifications.card.height", 64).
+		SetMetric("notifications.gap", 8).
+		SetMetric("calendar.cell", 30).
+		SetMetric("calendar.width", 240).
+		SetMetric("calendar.header.height", 32)
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", true).
@@ -470,6 +653,51 @@ func MacOSProfile() *Profile {
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{
 		Fill: C(RGB(236, 236, 236)), Text: C(text),
 	})
+
+	// Всплывающие панели — меню «Пуск», быстрые настройки, уведомления,
+	// календарь. Заливка и цвет текста НЕ задаются намеренно: они приходят из
+	// плоских токенов "surface" и "text", и тёмная разновидность темы меняет
+	// именно их, а не переписывает эти стили заново.
+	for _, comp := range []string{"startmenu", "quicksettings", "notifications", "calendar"} {
+		p.SetStyle(comp, "", StateNormal, StyleDelta{
+			Corner: N(10), PadX: N(10), PadY: N(10),
+			Elevation: N(10), Shadow: C(RGBA(0, 0, 0, 60)),
+		})
+	}
+	p.SetStyle("startmenu", "", StateHover, StyleDelta{Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6)})
+	p.SetStyle("startmenu", "section", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200)), PadX: N(6)})
+	p.SetStyle("quicksettings", "slider", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
+	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{Fill: C(accent), Corner: N(6)})
+	for _, tile := range []string{"tile.network", "tile.volume", "tile.power"} {
+		p.SetStyle("quicksettings", tile, StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
+		p.SetStyle("quicksettings", tile, StateActive, StyleDelta{
+			Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6),
+		})
+	}
+	// Карточка уведомления: рамка задаёт важность, заливка приходит из палитры.
+	p.SetStyle("notifications", "card.info", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6), PadX: N(10), PadY: N(4),
+	})
+	p.SetStyle("notifications", "card.warning", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6), PadX: N(10), PadY: N(4),
+		Border: C(RGB(220, 150, 20)), BorderWidth: N(1),
+	})
+	p.SetStyle("notifications", "card.error", StateNormal, StyleDelta{
+		Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6), PadX: N(10), PadY: N(4),
+		Border: C(RGB(200, 60, 60)), BorderWidth: N(1),
+	})
+	p.SetStyle("notifications", "empty", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	p.SetStyle("notifications", "clear", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
+	p.SetStyle("calendar", "weekday", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	p.SetStyle("calendar", "day", StateNormal, StyleDelta{Corner: N(6)})
+	p.SetStyle("calendar", "day", StateHover, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
+	p.SetStyle("calendar", "day", StateActive, StyleDelta{
+		Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6),
+	})
+	p.SetStyle("calendar", "day", StateFocused, StyleDelta{
+		Border: C(accent), BorderWidth: N(1), Corner: N(6),
+	})
+	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
 	return p
 }
 

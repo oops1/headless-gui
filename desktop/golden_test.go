@@ -267,3 +267,71 @@ func saveIfAsked(t *testing.T, img *image.RGBA, name string) {
 		t.Fatal(err)
 	}
 }
+
+// TestGolden_FlyoutsLook — снимок с открытыми всплывающими панелями.
+//
+// Проверка та же, что у панели задач: панель должна быть видна на фоне обоев.
+// Кадры сохраняются при GOLDEN_OUT — смотреть глазами.
+func TestGolden_FlyoutsLook(t *testing.T) {
+	const w, h = 720, 480
+
+	for _, name := range []string{theme.ProfileWindows2000, theme.ProfileWindows11Dark} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			m := theme.NewManager()
+			if err := theme.RegisterBuiltinProfiles(m); err != nil {
+				t.Fatal(err)
+			}
+			if err := m.SetTheme(name); err != nil {
+				t.Fatal(err)
+			}
+			m.SetIconResolver(widget.BuiltinIcons())
+
+			root, bar := buildScene(t, m, w, h)
+			defer bar.Close()
+			screen := image.Rect(0, 0, w, h)
+			barTop := bar.Bounds().Min.Y
+
+			cat := desktop.NewStaticAppCatalog(
+				desktop.AppInfo{ID: "term", Title: "Терминал"},
+				desktop.AppInfo{ID: "files", Title: "Проводник"},
+				desktop.AppInfo{ID: "mail", Title: "Почта"},
+			)
+			menu := desktop.NewStartMenu(m, cat)
+			menu.Screen = screen
+			root.AddChild(menu)
+			menu.Open(image.Rect(0, barTop, 48, h))
+
+			cal := desktop.NewCalendarFlyout(m, desktop.NewFakeClock(
+				time.Date(2026, 3, 14, 15, 9, 26, 0, time.UTC)))
+			cal.Screen = screen
+			cal.Align = desktop.AlignEnd
+			root.AddChild(cal)
+			cal.Open(image.Rect(w-90, barTop, w, h))
+
+			eng := engine.New(w, h, 30)
+			eng.SetRoot(root)
+			img := eng.RenderOnce()
+			if img == nil {
+				t.Fatal("кадр не отрисован")
+			}
+
+			for what, r := range map[string]image.Rectangle{
+				"меню «Пуск»": menu.OverlayBounds(),
+				"календарь":   cal.OverlayBounds(),
+			} {
+				if r.Empty() {
+					t.Fatalf("%s не открылось", what)
+				}
+				// Панель непрозрачна: её середина отличается от клетчатых обоев,
+				// то есть обои сквозь неё не просвечивают клетками.
+				a := img.RGBAAt(r.Min.X+r.Dx()/2, r.Min.Y+8)
+				b := img.RGBAAt(r.Min.X+r.Dx()/2, r.Min.Y+8+24)
+				if a == (color.RGBA{}) && b == (color.RGBA{}) {
+					t.Errorf("%s: на месте панели пусто", what)
+				}
+			}
+			saveIfAsked(t, img, "flyouts_"+name)
+		})
+	}
+}
