@@ -3111,6 +3111,221 @@ cannot import `window` (the dependency runs `window` → `widget`):
 
 ---
 
+## v3.14.0 additions (themes as data, desktop shell)
+
+Two new packages: `theme/` (an application's looks described by data) and
+`desktop/` (a system taskbar built out of that data). Both are additive — the
+old `widget.Theme` presets keep working through a two-way bridge, which is why
+this is v3.14.0 and not v4.
+
+### Theme profiles (`theme/`)
+
+A `Profile` is flat token tables; a `Theme` is those tables resolved along the
+inheritance chain; a `Manager` owns the registry, the active theme and
+subscriptions.
+
+```go
+p := theme.NewProfile("mytheme")
+p.Parent = theme.ProfileWindows11         // inherit, override only what differs
+p.SetColor("accent", theme.RGB(200, 60, 60)).
+    SetMetric("taskbar.height", 44).
+    SetFlag("taskbar.centered", true)
+p.SetStyle("taskbutton", "", theme.StateHover, theme.StyleDelta{
+    Fill: theme.C(theme.RGBA(255, 255, 255, 24)), Corner: theme.N(6),
+})
+
+m := theme.NewManager()
+theme.RegisterBuiltinProfiles(m)          // Windows2000(+Blue), Windows10(+Dark),
+m.RegisterTheme(p)                        // Windows11(+Dark), MacOS(+Dark)
+m.SetTheme("mytheme")                     // live switch; subscribers notified
+unsub := m.Subscribe(theme.ObserverFunc(func(*theme.Theme) { eng.Invalidate() }))
+```
+
+Manager API: `RegisterTheme`, `GetTheme`, `SetTheme`, `UnloadTheme` (refuses the
+active theme and any theme used as a parent), `Active`, `Subscribe`,
+`SetIconResolver`, and the lookups `GetStyle(component, part string, st State)`,
+`GetMetric(Key) float64`, `GetFlag(Key, def bool) bool`,
+`GetAnimation(Key) (AnimSpec, bool)`, `GetIcon(IconRef, size int) image.Image`.
+
+**`GetStyle` allocates nothing** — it returns a pointer into the resolved table
+and is safe to call from `Draw` (guarded by `testing.AllocsPerRun` in
+`theme/theme_test.go`). Never mutate the returned `*Style`; `Clone()` it first.
+
+Lookup order: `(component, part, state)` → `(component, part, Normal)` →
+`(component, "", state)` → the theme's default style. `State` is a bitmask
+(`StateHover|StatePressed|StateActive|StateDisabled|StateFocused`) collapsed by
+`Dominant()` to the leading one (Disabled > Pressed > Active > Hover > Focused),
+so a component keeps six entries, not thirty-two.
+
+`Style` fields: `Fill, Text, Border, Shadow color.RGBA`, `Gradient
+[]GradientStop`, `GradientAngle`, `Corner, BorderWidth, PadX, PadY, Elevation
+float64`, `Font FontSpec`, `Backdrop BackdropSpec`, `Bevel *BevelSpec`.
+`StyleDelta` mirrors them with pointers ("set" vs "inherited"); helpers `C(col)`,
+`N(f)`, `RGB(r,g,b)`, `RGBA(r,g,b,a)` (**alpha-premultiplies**, as everywhere in
+this engine).
+
+A dark variant declares only differences — usually three or four colors:
+`defaultStyle` takes fill and text from the flat `surface` and `text` tokens
+whenever a style leaves them unset. Do NOT write concrete colors into styles a
+dark variant must override; write the token instead.
+
+JSON themes need no engine changes:
+
+```go
+res, err := theme.LoadTheme(reader)  // res.Profile, res.Warnings ([]string)
+m.RegisterTheme(res.Profile)
+```
+Style keys in JSON are `"component.part:state"`; colors are `#RGB`, `#RRGGBB`,
+`#RRGGBBAA` in **straight** alpha and are premultiplied on load.
+
+### Bridge to the old presets
+
+`widget/theme_bridge.go` + `widget/theme_bindings.go`: one binding table walked
+in both directions, so they cannot drift.
+
+```go
+p := widget.ProfileFromTheme(oldTheme)     // *widget.Theme  → *theme.Profile
+t := widget.Materialize(resolvedTheme)     // *theme.Theme   → *widget.Theme
+m := widget.DefaultThemeManager()          // presets registered as profiles
+eng.SetThemeProfile(m, theme.ProfileWindows11)
+```
+
+### Engine additions
+
+- `Canvas.SetRoundClip(r image.Rectangle, radius int)` / `ClearRoundClip()` /
+  `HasRoundClip()` — clipping along the rounded outline (per-row span
+  narrowing), not just its bounding box. Honored by `fillRectPx`, `setPixelPx`,
+  `drawAlphaMask`, `drawColorGlyph`.
+- `Canvas.BlurBehind(r image.Rectangle, radius int, tint color.RGBA)` — acrylic
+  /mica: capture → 4× downscale → separable box blur (`engine.BlurRGBA`,
+  `BlurRegion`; cost independent of radius) → upscale back through `fillRectPx`,
+  so it inherits clips.
+- `Canvas.DrawSoftShadow(r image.Rectangle, corner, elevation int, col
+  color.RGBA)` — a shadow with a smooth falloff.
+- `Engine.RenderOnce() *image.RGBA` — render one frame synchronously and return
+  a **copy** of the image (snapshots, golden tests, debug dumps).
+- `Engine.SetThemeProfile(m *theme.Manager, name string) error`.
+- `widget.InvalidateRect(r image.Rectangle)` — claim an area outside any
+  widget's own bounds. Needed by overlays: `Base.Invalidate` claims the
+  widget's bounds, and a flyout's bounds are its taskbar icon, while what
+  changes is a window drawn elsewhere.
+- **Damage is a list, not one union.** `InvalidateRect` keeps up to
+  `maxDamageRects` (16) separate rectangles, absorbing nested ones and
+  collapsing to a union past the limit. Drawing still happens over the union
+  (the canvas clip is one rectangle); the **diff** runs per rectangle, so two
+  changes in opposite corners no longer compare every tile between them.
+
+### Desktop shell (`desktop/`)
+
+Components never touch the system. Data arrives through consumer-implemented
+interfaces — `WindowModel`, `AppCatalog`, `SystemStatus`, `Notifications`,
+`Clock` (see `desktop/contract.go`) — and the engine ships fakes for all of them
+(`FakeWindowModel`, `StaticAppCatalog`, `FakeSystemStatus`, `FakeNotifications`,
+`FakeClock`) that tests and `cmd/desktopdemo` run on.
+
+```go
+bar := desktop.NewTaskbar(m)              // m *theme.Manager
+bar.AddItem(desktop.SlotStart, desktop.NewStartButton(m))
+bar.AddItem(desktop.SlotApps, desktop.NewApplicationArea(m, catalog, windows))
+bar.AddItem(desktop.SlotTray, tray)       // desktop.NewSystemTray(m)
+bar.AddItem(desktop.SlotTray, desktop.NewClock(m, desktop.SystemClock{}))
+bar.SetBounds(image.Rect(0, h-bar.Height(), w, h))
+defer bar.Close()                         // unsubscribes from the theme
+area := bar.ReservedArea()                // keep maximized windows out of it
+```
+
+Slots: `SlotStart`, `SlotApps`, `SlotTray`. An `Item` is a `widget.Widget` plus
+`PreferredSize(avail image.Point) image.Point`. Components: `Taskbar`,
+`StartButton`, `ApplicationArea`, `RunningApplications`, `SystemTray`,
+`NetworkItem`, `VolumeItem`, `PowerItem`, `ClockItem`, `StartMenu`,
+`CalendarFlyout`, `QuickSettings`, `NotificationCenter`.
+
+Everything with a subscription has `Close()`; forgetting it leaves a component
+waking the renderer forever (the clock ticks once a second; status icons wake on
+every network/volume/power change).
+
+Painting helpers (`desktop/paint.go`): `PaintStyle` (shadow → backdrop → fill →
+bevel/border), `DrawTextCentered`, `DrawTextLeft`, `DrawTextLeftElided`, `Elide`,
+`MeasureText`, `StateOf(hover, pressed, active, disabled, focused)`.
+
+**No color literals in `Draw`.** `desktop/nocolor_test.go` parses the package
+and fails on any `color.RGBA{...}` inside `Draw`/`draw*`/`paint*`. Colors come
+from the theme; that is what makes one taskbar look like four different ones.
+
+### Flyouts
+
+`desktop/flyout.go` — the shared base for the Start menu, calendar, quick
+settings and notification center. They are **engine overlays**
+(`HasOverlay`/`DrawOverlay`/`OverlayBounds`), so `engine.SetPopupSink` can host
+them in separate OS windows and the shell window does not clip them.
+
+```go
+menu := desktop.NewStartMenu(m, catalog)
+menu.Screen = image.Rect(0, 0, w, h)      // flyout is fitted into this
+startBtn.OnClick = func() { menu.Toggle(startBtn.Bounds()) }
+root.AddChild(menu)                       // must be in the tree, or no overlay
+```
+
+`Flyout` fields: `Component`, `Anchor`, `Edge` (EdgeBottom/EdgeTop), `Align`
+(AlignStart/Center/End), `Margin`, `Screen`, `Content`, `Size`, `OnOpen`,
+`OnClose`. Methods: `Open(anchor)`, `Close()`, `Toggle(anchor)`, `IsOpen()`.
+A flyout closes on a click outside and on Esc; a click **inside** is not
+consumed — the content handles it.
+
+A component that asks the theme for metrics the theme never defined gets zero
+and silently never opens. `desktop/flyouts_test.go` opens all four panels under
+all eight built-in themes for exactly this reason.
+
+### Presenters: a theme changes shape, not only color
+
+Tokens cannot express "the macOS dock": large centered icons, the hovered one
+growing and pushing its neighbours. So a profile may supply a presenter —
+someone else's drawing AND layout for a component it knows.
+
+```go
+p.Presenters["runningapps"] = "dock"                  // in the macOS profile
+desktop.RegisterPresenter("dock", DockPresenter{})    // registered in init()
+```
+
+```go
+type Presenter interface {
+    Measure(c Component, avail image.Point) image.Point
+    Layout(c Component, bounds image.Rectangle) []image.Rectangle
+    Draw(ctx widget.DrawContext, c Component)
+}
+type Component interface {          // what a presenter may ask of a component
+    Bounds() image.Rectangle
+    Theme() *theme.Manager
+    Cells() []Cell                  // Title, Icon, Active, Muted
+    HoverIndex() int
+}
+```
+
+`Layout` returns the cell rectangles and the component adopts them for hit
+testing — otherwise clicks follow the component's own row while the user sees a
+dock. A component must **never** know the active theme's name; it asks
+`PresenterFor(tm, key)` and hands drawing over if there is one.
+
+Two traps worth remembering, both found by tests here:
+- `Cells()` must not be derived from the laid-out cells: presenters call it from
+  `Measure`, i.e. before any layout exists (zero width → no cells → never lays
+  out).
+- Do not hold the component's mutex while calling a presenter: it calls
+  `Cells()`/`HoverIndex()` back and deadlocks.
+
+### Icons
+
+`widget.BuiltinIcons()` returns an `IconSet` implementing `theme.IconResolver`
+(`ResolveIcon(theme.IconRef, size int) image.Image`), with a two-level cache and
+a never-nil placeholder glyph. Give it to the manager — without a resolver the
+tray renders empty and nothing warns you:
+
+```go
+m.SetIconResolver(widget.BuiltinIcons())
+```
+
+---
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
