@@ -31,6 +31,24 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 		}
 	}
 
+	// Скруглённый слой обрезается по своему контуру: размытие кладётся
+	// областью, а не фигурой, и без этого у скруглённой панели за дугой
+	// оставались бы прямые уголки размытого фона.
+	if corner > 0 {
+		if rc, ok := ctx.(widget.RoundClipper); ok {
+			// Клип восстанавливается ПОЛНОСТЬЮ: SetRoundClip подменяет и
+			// прямоугольное отсечение, а ClearRoundClip снимает только
+			// скругление. Без возврата всё, что рисуется после слоя,
+			// оказывалось обрезано его границами.
+			prev := ctx.Clip()
+			rc.SetRoundClip(r, corner)
+			defer func() {
+				rc.ClearRoundClip()
+				ctx.SetClip(prev)
+			}()
+		}
+	}
+
 	// Стекло: размытая подложка, если тема просит и контекст умеет.
 	if s.Backdrop.Mode == theme.BackdropBlur {
 		if bd, ok := ctx.(widget.BackdropDrawer); ok {
@@ -40,6 +58,13 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 		}
 	} else if s.Backdrop.Mode == theme.BackdropAlpha && s.Backdrop.Tint.A > 0 {
 		fillAlpha(ctx, r, s.Backdrop.Tint)
+	}
+
+	// Блик по верхней кромке: свет, поймавшийся на крае стекла. Рисуется
+	// внутри скруглённого отсечения слоя, поэтому на углах он обрывается
+	// вместе с контуром, а не торчит за него.
+	if s.Backdrop.Highlight.A > 0 && r.Dy() > 2 {
+		ctx.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), 1, s.Backdrop.Highlight)
 	}
 
 	// Заливка НЕ рисуется поверх стекла: цвет стеклу даёт подкраска

@@ -479,7 +479,8 @@ func Windows11Profile() *Profile {
 	// Панель задач: стекло поверх обоев.
 	p.SetStyle("taskbar", "", StateNormal, StyleDelta{
 		Backdrop: &BackdropSpec{
-			Mode: BackdropBlur, Radius: 30, Tint: RGBA(243, 243, 243, 190),
+			Mode: BackdropBlur, Radius: 22, Tint: RGBA(243, 243, 243, 150),
+			Highlight: RGBA(255, 255, 255, 100),
 		},
 		Border: C(RGBA(0, 0, 0, 15)), BorderWidth: N(1),
 	})
@@ -508,8 +509,10 @@ func Windows11Profile() *Profile {
 
 	// Всплывающие поверхности: стекло, крупное скругление, мягкая тень.
 	p.SetStyle("menu", "", StateNormal, StyleDelta{
-		Backdrop: &BackdropSpec{Mode: BackdropBlur, Radius: 30, Tint: RGBA(249, 249, 249, 205)},
-		Text:     C(text), Corner: N(8), Elevation: N(8), Shadow: C(RGBA(0, 0, 0, 70)),
+		Backdrop: &BackdropSpec{
+			Mode: BackdropBlur, Radius: 22, Tint: RGBA(249, 249, 249, 150),
+			Highlight: RGBA(255, 255, 255, 100)},
+		Text: C(text), Corner: N(8), Elevation: N(8), Shadow: C(RGBA(0, 0, 0, 70)),
 		Border: C(RGBA(0, 0, 0, 15)), BorderWidth: N(1),
 	})
 	p.SetStyle("menu", "item", StateHover, StyleDelta{Fill: C(RGBA(0, 0, 0, 18)), Corner: N(4)})
@@ -598,7 +601,9 @@ func Windows11DarkProfile() *Profile {
 		SetColor("border", RGBA(255, 255, 255, 20))
 
 	p.SetStyle("taskbar", "", StateNormal, StyleDelta{
-		Backdrop: &BackdropSpec{Mode: BackdropBlur, Radius: 30, Tint: RGBA(32, 32, 32, 190)},
+		Backdrop: &BackdropSpec{
+			Mode: BackdropBlur, Radius: 22, Tint: RGBA(32, 32, 32, 150),
+			Highlight: RGBA(255, 255, 255, 40)},
 	})
 	p.SetStyle("startbutton", "", StateNormal, StyleDelta{Text: C(text)})
 	p.SetStyle("startbutton", "", StateHover, StyleDelta{Fill: C(RGBA(255, 255, 255, 24))})
@@ -606,8 +611,10 @@ func Windows11DarkProfile() *Profile {
 	p.SetStyle("taskbutton", "", StateHover, StyleDelta{Fill: C(RGBA(255, 255, 255, 24))})
 	p.SetStyle("clock", "", StateNormal, StyleDelta{Text: C(text)})
 	p.SetStyle("menu", "", StateNormal, StyleDelta{
-		Backdrop: &BackdropSpec{Mode: BackdropBlur, Radius: 30, Tint: RGBA(44, 44, 44, 205)},
-		Text:     C(text),
+		Backdrop: &BackdropSpec{
+			Mode: BackdropBlur, Radius: 22, Tint: RGBA(44, 44, 44, 150),
+			Highlight: RGBA(255, 255, 255, 40)},
+		Text: C(text),
 	})
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface)})
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{Fill: C(surface), Text: C(text)})
@@ -692,13 +699,17 @@ func MacOSProfile() *Profile {
 	// Строка меню — полоса во всю ширину экрана: ни скругления, ни тени у
 	// неё нет, только стекло и тонкая линия снизу.
 	p.SetStyle("taskbar", "", StateNormal, StyleDelta{
-		Backdrop: &BackdropSpec{Mode: BackdropBlur, Radius: 24, Tint: RGBA(246, 246, 246, 150)},
-		Border:   C(RGBA(0, 0, 0, 30)), BorderWidth: N(1),
+		Backdrop: &BackdropSpec{
+			Mode: BackdropBlur, Radius: 22, Tint: RGBA(246, 246, 246, 150),
+			Highlight: RGBA(255, 255, 255, 100)},
+		Border: C(RGBA(0, 0, 0, 30)), BorderWidth: N(1),
 	})
 	// Док — плавающая скруглённая плашка с тенью.
 	p.SetStyle("dockbar", "", StateNormal, StyleDelta{
-		Backdrop: &BackdropSpec{Mode: BackdropBlur, Radius: 24, Tint: RGBA(246, 246, 246, 170)},
-		Corner:   N(16), Elevation: N(10), Shadow: C(RGBA(0, 0, 0, 60)),
+		Backdrop: &BackdropSpec{
+			Mode: BackdropBlur, Radius: 22, Tint: RGBA(246, 246, 246, 150),
+			Highlight: RGBA(255, 255, 255, 100)},
+		Corner: N(16), Elevation: N(10), Shadow: C(RGBA(0, 0, 0, 60)),
 		Border: C(RGBA(255, 255, 255, 60)), BorderWidth: N(1),
 	})
 	p.SetStyle("startbutton", "", StateNormal, StyleDelta{Text: C(text), Corner: N(8), PadX: N(10)})
@@ -709,8 +720,10 @@ func MacOSProfile() *Profile {
 	}
 	p.SetStyle("clock", "", StateNormal, StyleDelta{Text: C(text), PadX: N(10)})
 	p.SetStyle("menu", "", StateNormal, StyleDelta{
-		Backdrop: &BackdropSpec{Mode: BackdropBlur, Radius: 24, Tint: RGBA(250, 250, 250, 210)},
-		Text:     C(text), Corner: N(10), Elevation: N(10), Shadow: C(RGBA(0, 0, 0, 60)),
+		Backdrop: &BackdropSpec{
+			Mode: BackdropBlur, Radius: 22, Tint: RGBA(250, 250, 250, 150),
+			Highlight: RGBA(255, 255, 255, 100)},
+		Text: C(text), Corner: N(10), Elevation: N(10), Shadow: C(RGBA(0, 0, 0, 60)),
 	})
 	p.SetStyle("menu", "item", StateHover, StyleDelta{Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6)})
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface), Corner: N(10)})
@@ -819,14 +832,18 @@ func MacOSDarkProfile() *Profile {
 		SetColor("text", text).
 		SetColor("border", RGBA(255, 255, 255, 30))
 	p.SetStyle("taskbar", "", StateNormal, StyleDelta{
-		Backdrop: &BackdropSpec{Mode: BackdropBlur, Radius: 24, Tint: RGBA(40, 40, 42, 180)},
+		Backdrop: &BackdropSpec{
+			Mode: BackdropBlur, Radius: 22, Tint: RGBA(40, 40, 42, 150),
+			Highlight: RGBA(255, 255, 255, 40)},
 	})
 	p.SetStyle("startbutton", "", StateNormal, StyleDelta{Text: C(text)})
 	p.SetStyle("taskbutton", "", StateNormal, StyleDelta{Text: C(text)})
 	p.SetStyle("clock", "", StateNormal, StyleDelta{Text: C(text)})
 	p.SetStyle("menu", "", StateNormal, StyleDelta{
-		Backdrop: &BackdropSpec{Mode: BackdropBlur, Radius: 24, Tint: RGBA(50, 50, 52, 210)},
-		Text:     C(text),
+		Backdrop: &BackdropSpec{
+			Mode: BackdropBlur, Radius: 22, Tint: RGBA(50, 50, 52, 150),
+			Highlight: RGBA(255, 255, 255, 40)},
+		Text: C(text),
 	})
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface)})
 	p.SetStyle("window", "titlebar", StateNormal, StyleDelta{Fill: C(RGB(50, 50, 52)), Text: C(RGB(150, 150, 150))})

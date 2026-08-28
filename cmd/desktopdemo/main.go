@@ -362,18 +362,55 @@ func settleAnimations() {
 	}
 }
 
-// addWallpaper рисует «обои» — сетку прямоугольников, на которой видно
-// размытие подложки у стеклянных тем.
+// addWallpaper рисует «обои» — не одноцветные клетки, а картинку с мелкими
+// деталями и переходами.
+//
+// Это не украшательство: сквозь стекло видно размытую подложку, а размытие
+// одноцветного квадрата от него самого неотличимо. На плоских клетках любая
+// стеклянная панель выглядит просто серым прямоугольником — и не разберёшь,
+// работает размытие или нет.
 func addWallpaper(root *widget.Panel) {
-	const cell = 64
-	for y := 0; y < screenH; y += cell {
-		for x := 0; x < screenW; x += cell {
-			shade := uint8(40 + (x/cell*13+y/cell*29)%120)
-			p := widget.NewPanel(color.RGBA{
-				R: shade / 2, G: uint8(60 + int(shade)/3), B: uint8(110 + int(shade)/4), A: 255,
-			})
+	// Небо: горизонтальные полосы с плавным переходом сверху вниз.
+	const band = 8
+	for y := 0; y < screenH; y += band {
+		k := float64(y) / float64(screenH)
+		p := widget.NewPanel(color.RGBA{
+			R: uint8(20 + 70*k),
+			G: uint8(60 + 90*k),
+			B: uint8(130 + 60*k),
+			A: 255,
+		})
+		p.ShowHeader = false
+		p.SetBounds(image.Rect(0, y, screenW, y+band))
+		root.AddChild(p)
+	}
+
+	// Светлые пятна разного размера — по ним и видно, что подложка размыта.
+	spots := []struct {
+		x, y, r int
+		c       color.RGBA
+	}{
+		{160, 180, 90, color.RGBA{R: 90, G: 140, B: 220, A: 255}},
+		{420, 120, 60, color.RGBA{R: 140, G: 190, B: 240, A: 255}},
+		{760, 260, 120, color.RGBA{R: 60, G: 110, B: 190, A: 255}},
+		{300, 430, 70, color.RGBA{R: 110, G: 170, B: 230, A: 255}},
+		// Пятна НА ПУТИ полос: под доком и под строкой меню. Без них стекло
+		// нечему показывать — размытие ровного фона от него неотличимо, и
+		// панель выглядит просто светлым прямоугольником.
+		{470, 610, 120, color.RGBA{R: 235, G: 150, B: 90, A: 255}},
+		{700, 620, 80, color.RGBA{R: 120, G: 200, B: 150, A: 255}},
+		{250, 12, 70, color.RGBA{R: 240, G: 190, B: 100, A: 255}},
+		{880, 520, 50, color.RGBA{R: 150, G: 200, B: 245, A: 255}},
+	}
+	for _, s := range spots {
+		// Пятно набирается кольцами: чем ближе к центру, тем светлее — так
+		// у него мягкий край, который размытие заметно растягивает.
+		for i := 4; i > 0; i-- {
+			rad := s.r * i / 4
+			p := widget.NewPanel(s.c)
 			p.ShowHeader = false
-			p.SetBounds(image.Rect(x, y, x+cell, y+cell))
+			p.CornerRadius = rad
+			p.SetBounds(image.Rect(s.x-rad, s.y-rad, s.x+rad, s.y+rad))
 			root.AddChild(p)
 		}
 	}
