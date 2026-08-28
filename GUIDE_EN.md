@@ -2048,9 +2048,16 @@ for _, m := range frame.Moves { // moves first, then tiles!
 }
 ```
 
-Dragging a window does not change pixels, it moves them. `widget.NotifyMove(src, dst)`
-declares the move; in RDP that is a pair of surface-cache commands instead of a
-hundred kilobytes.
+Dragging a window does not change pixels, it moves them.
+`widget.NotifyWidgetMove(w, src, dst)` declares the move; in RDP that is a pair
+of surface-cache commands instead of a hundred kilobytes. The widget names the
+tree the move belongs to: every engine in the process receives every
+declaration, and with two engines of the same resolution the coordinates are
+identical, so nothing else tells them apart. A consumer declaring moves itself
+calls `widget.NotifyMove(src, dst)`; those are matched by canvas.
+
+Moves within one frame never overlap: overlapping declarations are dropped and
+that area travels as ordinary tiles, so they may be applied in any order.
 
 #### Channel order and foreign memory
 

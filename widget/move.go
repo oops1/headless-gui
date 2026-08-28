@@ -19,6 +19,17 @@ import (
 type MoveNotice struct {
 	From image.Point
 	Rect image.Rectangle
+
+	// Widget — кто объявил перенос. По нему движок узнаёт, его ли это дерево:
+	// объявления рассылаются всем движкам процесса, а выполнить перенос обязан
+	// только тот, у кого эти пиксели действительно переехали. Отличить по
+	// координатам нельзя — два движка одного размера (две сессии одного
+	// разрешения в одном процессе) видят один и тот же прямоугольник.
+	//
+	// nil означает «неизвестно кто»: так приходят объявления из NotifyMove,
+	// который зовут напрямую. Их движок берёт по координатам — иначе
+	// потребитель, объявляющий переносы сам, перестал бы получать их вовсе.
+	Widget Widget
 }
 
 var (
@@ -81,6 +92,19 @@ func UnregisterMoveSink(handle uint64) {
 // заявить изменившиеся области. Перенос — подсказка, как дешевле получить тот
 // же результат, а не замена damage.
 func NotifyMove(src, dst image.Rectangle) {
+	notifyMove(nil, src, dst)
+}
+
+// NotifyWidgetMove — то же самое, но с указанием, чьё содержимое переехало.
+//
+// Виджет из дерева обязан звать именно её: движки в одном процессе получают
+// все объявления, и без виджета отличить своё от чужого можно только по
+// координатам — а у двух движков одного разрешения они совпадают.
+func NotifyWidgetMove(w Widget, src, dst image.Rectangle) {
+	notifyMove(w, src, dst)
+}
+
+func notifyMove(w Widget, src, dst image.Rectangle) {
 	if src.Empty() || dst.Empty() {
 		return
 	}
@@ -90,7 +114,7 @@ func NotifyMove(src, dst image.Rectangle) {
 	if src.Min == dst.Min {
 		return // никуда не переехало
 	}
-	notice := MoveNotice{From: src.Min, Rect: dst}
+	notice := MoveNotice{From: src.Min, Rect: dst, Widget: w}
 
 	moveMu.Lock()
 	sinks := make([]func(MoveNotice), 0, len(moveSinks))

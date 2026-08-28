@@ -243,3 +243,72 @@ func snapshotRGBA(src *image.RGBA) *image.RGBA {
 	copy(dst.Pix, src.Pix)
 	return dst
 }
+
+// Перетаскивание в одном движке не двигает пиксели в другом ТАКОГО ЖЕ размера.
+//
+// Две сессии одного разрешения в одном процессе — обычный случай для
+// оболочки удалённого стола, и по координатам их объявления не различить:
+// прямоугольник (100,100)-(400,300) лежит на обоих холстах. Различает только
+// принадлежность дереву, которую объявление несёт с собой.
+//
+// Чужой перенос дорог не тем, что «лишний»: движок скопировал бы у себя
+// пиксели с места, где ничего не переезжало, и потребитель показал бы чужой
+// прямоугольник до следующего диффа.
+func TestTwoEngines_SameSizeDoNotStealEachOthersMoves(t *testing.T) {
+	const w, h = 800, 600
+
+	build := func() (*widget.Panel, *widget.Window, *engine.Engine) {
+		root := widget.NewPanel(color.RGBA{R: 24, G: 28, B: 36, A: 255})
+		root.ShowHeader = false
+		root.SetBounds(image.Rect(0, 0, w, h))
+
+		win := widget.NewWindow("Окно", 300, 200)
+		win.SetBounds(image.Rect(100, 100, 400, 300))
+		root.AddChild(win)
+
+		eng := engine.New(w, h, 60)
+		eng.SetRenderOnDemand(true)
+		eng.SetRoot(root)
+		eng.RenderOnce()
+		eng.RenderOnce() // съедаем полную инвалидацию от SetRoot
+		return root, win, eng
+	}
+
+	_, winA, engA := build()
+	_, _, engB := build()
+
+	// Тащим окно ТОЛЬКО в движке A.
+	winA.OnMouseButton(widget.MouseEvent{X: 200, Y: 110, Button: widget.MouseLeft, Pressed: true})
+	winA.OnMouseMove(240, 150)
+
+	if got := len(engA.RenderFrameNow().Moves); got != 1 {
+		t.Errorf("движок, в чьём дереве тащили окно, получил %d переносов вместо одного", got)
+	}
+	if got := engB.RenderFrameNow().Moves; len(got) != 0 {
+		t.Errorf("соседний движок принял чужой перенос %v — он скопирует у себя "+
+			"пиксели с места, где ничего не переезжало", got)
+	}
+}
+
+// Объявление без виджета по-прежнему доходит: потребитель вправе звать
+// NotifyMove сам, и тогда отличить своё от чужого можно только по холсту.
+func TestTwoEngines_BareNotifyMoveStillReaches(t *testing.T) {
+	root := widget.NewPanel(color.RGBA{R: 24, G: 28, B: 36, A: 255})
+	root.ShowHeader = false
+	root.SetBounds(image.Rect(0, 0, 600, 400))
+
+	eng := engine.New(600, 400, 60)
+	eng.SetRenderOnDemand(true)
+	eng.SetRoot(root)
+	eng.RenderOnce()
+	eng.RenderOnce()
+
+	from := image.Rect(50, 50, 250, 200)
+	to := from.Add(image.Pt(40, 30))
+	widget.NotifyMove(from, to)
+	eng.InvalidateRect(from.Union(to))
+
+	if got := len(eng.RenderFrameNow().Moves); got != 1 {
+		t.Errorf("объявление без виджета дало %d переносов, ждали 1", got)
+	}
+}

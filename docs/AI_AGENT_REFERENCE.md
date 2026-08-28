@@ -3506,8 +3506,12 @@ accumulates per tile, in the rasteriser's own loops:
 
 **Apply `Moves` BEFORE `Tiles`.** That is DXGI's order and what a consumer
 expects; the reverse would overwrite fresh pixels with stale ones. A widget
-declares a move with `widget.NotifyMove(src, dst)` — `Window` does it while
-dragging and on landing. A declared move does NOT replace damage: it is a hint
+declares a move with `widget.NotifyWidgetMove(w, src, dst)` — `Window` does it
+while dragging and on landing. The widget names the tree the move belongs to,
+which is how an engine tells its own declarations from a neighbour's: with two
+engines of the same resolution in one process the coordinates are identical.
+`widget.NotifyMove(src, dst)` (no widget) still works for a consumer declaring
+moves itself; those are matched by canvas instead. A declared move does NOT replace damage: it is a hint
 about a cheaper way to reach the same result.
 
 Moves within one frame never overlap each other, by source or destination
