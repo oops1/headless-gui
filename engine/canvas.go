@@ -204,6 +204,10 @@ func (c *Canvas) setBackground(src image.Image) {
 	c.bgImage = dst
 }
 
+// clearBackground снимает фоновое изображение: blitBackground снова будет
+// заливать буфер чёрным.
+func (c *Canvas) clearBackground() { c.bgImage = nil }
+
 // blitBackground очищает back-буфер и копирует фон (если задан).
 // Вызывается до отрисовки виджетов — перезаписывает весь back.
 // Если фонового изображения нет — заливает буфер чёрным цветом,

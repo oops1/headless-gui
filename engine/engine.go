@@ -508,6 +508,45 @@ func (e *Engine) SetBackgroundFile(path string) error {
 	return nil
 }
 
+// SetBackground задаёт фон из готового изображения в памяти.
+//
+// SetBackgroundFile был единственным входом, и потребителю приходилось
+// платить за это дважды: обои, уже отмасштабированные в памяти, писались на
+// диск PNG-ом только чтобы движок прочитал их обратно, а снимок неподвижной
+// сцены для перетаскивания кодировал восемь мегабайт RGBA прямо в тот момент,
+// когда пользователь взялся за окно. Изображение здесь не копируется — не
+// меняйте его после передачи.
+func (e *Engine) SetBackground(img image.Image) error {
+	if img == nil {
+		return fmt.Errorf("engine: SetBackground: изображение nil (снять фон — ClearBackground)")
+	}
+	if b := img.Bounds(); b.Empty() {
+		return fmt.Errorf("engine: SetBackground: изображение пустое %v", b)
+	}
+	e.frameMu.Lock() // фон читается blitBackground — меняем между кадрами
+	e.mu.Lock()
+	e.bgSrc = img
+	e.canvas.setBackground(img)
+	e.mu.Unlock()
+	e.frameMu.Unlock()
+	e.Invalidate()
+	return nil
+}
+
+// ClearBackground снимает фон: кадр снова начинается с чёрного.
+//
+// Без него «просто тёмный рабочий стол» приходилось изображать растянутым
+// однопиксельным PNG — фон нельзя было ни задать из памяти, ни убрать.
+func (e *Engine) ClearBackground() {
+	e.frameMu.Lock()
+	e.mu.Lock()
+	e.bgSrc = nil
+	e.canvas.clearBackground()
+	e.mu.Unlock()
+	e.frameMu.Unlock()
+	e.Invalidate()
+}
+
 // DefaultSaveFramesLimit — сколько кадров SaveFrames сохраняет по умолчанию.
 const DefaultSaveFramesLimit = 10000
 
