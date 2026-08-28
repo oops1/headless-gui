@@ -614,11 +614,12 @@ func MacOSProfile() *Profile {
 		SetMetric("control.pad.y", 6).
 		// Строка меню сверху тонкая, док снизу — крупный: в macOS это две
 		// разные полосы, а не одна панель задач.
-		SetMetric("taskbar.height", 24).
-		SetMetric("dock.height", 64).
+		SetMetric("taskbar.height", 26).
+		SetMetric("dock.height", 68).
+		SetMetric("dock.pad", 6).
 		SetMetric("taskbar.pad.x", 12).
 		SetMetric("taskbar.gap", 6).
-		SetMetric("dock.icon", 44).
+		SetMetric("dock.icon", 52).
 		SetMetric("dock.magnify", 1.6).
 		SetMetric("tray.icon.size", 16).
 		SetMetric("startbutton.icon.size", 18).
@@ -660,7 +661,14 @@ func MacOSProfile() *Profile {
 	// Док рисует область приложений вместо полосы кнопок.
 	p.Presenters["runningapps"] = "dock"
 
+	// Строка меню — полоса во всю ширину экрана: ни скругления, ни тени у
+	// неё нет, только стекло и тонкая линия снизу.
 	p.SetStyle("taskbar", "", StateNormal, StyleDelta{
+		Backdrop: &BackdropSpec{Mode: BackdropBlur, Radius: 24, Tint: RGBA(246, 246, 246, 150)},
+		Border:   C(RGBA(0, 0, 0, 30)), BorderWidth: N(1),
+	})
+	// Док — плавающая скруглённая плашка с тенью.
+	p.SetStyle("dockbar", "", StateNormal, StyleDelta{
 		Backdrop: &BackdropSpec{Mode: BackdropBlur, Radius: 24, Tint: RGBA(246, 246, 246, 170)},
 		Corner:   N(16), Elevation: N(10), Shadow: C(RGBA(0, 0, 0, 60)),
 		Border: C(RGBA(255, 255, 255, 60)), BorderWidth: N(1),
@@ -739,7 +747,7 @@ func MacOSProfile() *Profile {
 	// радиальный градиент и появился в стиле темы.
 	p.SetStyle("dock", "", StateHover, StyleDelta{
 		Gradient: []GradientStop{
-			{Pos: 0, Color: RGBA(255, 255, 255, 150)},
+			{Pos: 0, Color: RGBA(255, 255, 255, 90)},
 			{Pos: 1, Color: RGBA(255, 255, 255, 0)},
 		},
 		GradientKind:   GK(GradientRadial),
@@ -747,12 +755,28 @@ func MacOSProfile() *Profile {
 	})
 	p.SetStyle("dock", "", StateActive, StyleDelta{
 		Gradient: []GradientStop{
-			{Pos: 0, Color: RGBA(255, 255, 255, 90)},
+			{Pos: 0, Color: RGBA(255, 255, 255, 40)},
 			{Pos: 1, Color: RGBA(255, 255, 255, 0)},
 		},
 		GradientKind:   GK(GradientRadial),
 		GradientRadius: N(1.1),
 	})
+	// Элементы стеклянной полосы не носят своей заливки: она приходит из
+	// общих токенов темы (surface) и ложится светлой капсулой поверх стекла.
+	// Фон им даёт сама полоса, а собственный — только под курсором. Блок
+	// стоит последним намеренно: SetStyle заменяет запись целиком, и любой
+	// стиль этих компонентов ниже вернул бы заливку обратно.
+	clear := C(RGBA(0, 0, 0, 0))
+	for _, comp := range []string{"startbutton", "taskbutton", "clock",
+		"tray.network", "tray.volume", "tray.power", "tray.chevron"} {
+		p.SetStyle(comp, "", StateNormal, StyleDelta{
+			Fill: clear, Text: C(text), Corner: N(6), PadX: N(8),
+		})
+	}
+	p.SetStyle("startbutton", "", StateNormal, StyleDelta{
+		Fill: clear, Text: C(text), Corner: N(6), PadX: N(10),
+	})
+
 	return p
 }
 

@@ -71,3 +71,43 @@ func saveIfAsked(t *testing.T, img *image.RGBA, name string) {
 		t.Fatal(err)
 	}
 }
+
+// Снимки для просмотра глазами: по два кадра на тему — чистый рабочий стол и
+// он же с раскрытыми панелями.
+//
+// Запуск: GOLDEN_OUT=<папка> go test ./cmd/desktopdemo -run Shots -count=1
+func TestDemoShots(t *testing.T) {
+	if os.Getenv("GOLDEN_OUT") == "" {
+		t.Skip("снимки делаются только при заданном GOLDEN_OUT")
+	}
+	eng := engine.New(screenW, screenH, 60)
+	sc := buildDesktop(eng)
+	defer sc.close()
+	eng.SetRoot(sc.root)
+
+	for i, th := range themeOrder {
+		sc.apply(i)
+		eng.Invalidate()
+		saveIfAsked(t, eng.RenderOnce(), th.profile)
+
+		// Меню «Пуск» и календарь — с двух краёв панели сразу, чтобы на одном
+		// кадре было видно и то и другое.
+		sc.menu.Open(sc.startBtn.Bounds())
+		sc.cal.Open(sc.clock.Bounds())
+		eng.Invalidate()
+		saveIfAsked(t, eng.RenderOnce(), th.profile+"_menu")
+		sc.menu.Close()
+		sc.cal.Close()
+
+		// Быстрые настройки и центр уведомлений.
+		sc.quick.Open(sc.tray.Bounds())
+		eng.Invalidate()
+		saveIfAsked(t, eng.RenderOnce(), th.profile+"_quick")
+		sc.quick.Close()
+
+		sc.center.Open(sc.tray.Bounds())
+		eng.Invalidate()
+		saveIfAsked(t, eng.RenderOnce(), th.profile+"_notify")
+		sc.center.Close()
+	}
+}

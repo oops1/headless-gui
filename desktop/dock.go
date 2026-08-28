@@ -25,6 +25,8 @@ const (
 	KeyDockMagnify theme.Key = "dock.magnify"
 	// KeyDockGap — зазор между значками.
 	KeyDockGap theme.Key = "taskbutton.gap"
+	// KeyDockPad — поле между краем плашки дока и значками.
+	KeyDockPad theme.Key = "dock.pad"
 
 	// ComponentDock — имя компонента для стилей темы: у дока своя ячейка и
 	// свой указатель активного приложения.
@@ -50,7 +52,7 @@ func (DockPresenter) Measure(c Component, avail image.Point) image.Point {
 		return image.Point{}
 	}
 	icon, mag, gap := dockMetrics(c.Theme())
-	w := n*icon + gap*(n-1)
+	w := n*icon + gap*(n-1) + 2*dockPad(c.Theme())
 	// Запас: увеличенный значок шире обычного на (mag-1) своей стороны.
 	w += int(float64(icon) * (mag - 1))
 	if w > avail.X {
@@ -75,7 +77,14 @@ func dockRects(c Component, b image.Rectangle) []image.Rectangle {
 		return nil
 	}
 	icon, mag, gap := dockMetrics(c.Theme())
+	pad := dockPad(c.Theme())
 	hover := c.HoverIndex()
+
+	// Значок не больше того, что осталось от высоты плашки за вычетом полей:
+	// иначе он упирается в края, и док выглядит набитым под завязку.
+	if room := b.Dy() - 2*pad; room > 0 && icon > room {
+		icon = room
+	}
 
 	// Размер каждого значка: под курсором — полный, у соседей — промежуточный.
 	sizes := make([]int, len(cells))
@@ -91,12 +100,15 @@ func dockRects(c Component, b image.Rectangle) []image.Rectangle {
 	if x < b.Min.X {
 		x = b.Min.X
 	}
+	// Базовая линия — низ значков обычного размера: они стоят на ней, а
+	// увеличенный растёт ВВЕРХ, как в настоящем доке. Сама линия отступает
+	// от нижнего края плашки на поле, иначе значки лежат на самом краю.
+	baseline := b.Max.Y - pad
+
 	out := make([]image.Rectangle, 0, len(cells))
 	for i := range cells {
 		size := sizes[i]
-		// Значки выровнены по нижнему краю: увеличенный растёт вверх, как в
-		// настоящем доке, а не раздвигает ряд по вертикали.
-		out = append(out, image.Rect(x, b.Max.Y-size, x+size, b.Max.Y).Intersect(b))
+		out = append(out, image.Rect(x, baseline-size, x+size, baseline).Intersect(b))
 		x += size + gap
 	}
 	return out
@@ -161,6 +173,18 @@ func dockIconSize(icon int, mag float64, i, hover int) int {
 		k = mag
 	}
 	return int(float64(icon) * k)
+}
+
+// dockPad — поле между краем плашки и значками. Если тема его не задала,
+// берётся восьмая часть значка: док без полей выглядит набитым.
+func dockPad(tm *theme.Manager) int {
+	if tm == nil {
+		return 0
+	}
+	if p := int(tm.GetMetric(KeyDockPad)); p > 0 {
+		return p
+	}
+	return int(tm.GetMetric(KeyDockIcon)) / 8
 }
 
 // dockMetrics читает размеры дока из темы.

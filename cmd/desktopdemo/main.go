@@ -53,6 +53,17 @@ type scene struct {
 	root  *widget.Panel
 	apply func(int)
 	close func()
+
+	// Всплывающие панели и кнопки, от которых они открываются: снимки
+	// делаются с открытыми панелями, а открывать их надо тем же путём, что
+	// и человек — от значка.
+	startBtn *desktop.StartButton
+	clock    *desktop.ClockItem
+	tray     *desktop.SystemTray
+	menu     *desktop.StartMenu
+	cal      *desktop.CalendarFlyout
+	quick    *desktop.QuickSettings
+	center   *desktop.NotificationCenter
 }
 
 func main() {
@@ -135,6 +146,7 @@ func buildDesktop(eng *engine.Engine) scene {
 	// сверху и док снизу. Полоса создаётся всегда, но под темами Windows
 	// остаётся пустой и нулевой высоты, то есть невидимой.
 	dock := desktop.NewTaskbar(tm)
+	dock.StyleComponent = desktop.ComponentDockbar
 	root.AddChild(bar)
 	root.AddChild(dock)
 
@@ -281,8 +293,15 @@ func buildDesktop(eng *engine.Engine) scene {
 
 	arrange()
 	return scene{
-		root:  root,
-		apply: apply,
+		root:     root,
+		apply:    apply,
+		startBtn: startBtn,
+		clock:    clock,
+		tray:     tray,
+		menu:     menu,
+		cal:      cal,
+		quick:    quick,
+		center:   center,
 		close: func() {
 			bar.Close()
 			dock.Close()

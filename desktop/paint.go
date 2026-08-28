@@ -42,10 +42,18 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 		fillAlpha(ctx, r, s.Backdrop.Tint)
 	}
 
+	// Заливка НЕ рисуется поверх стекла: цвет стеклу даёт подкраска
+	// (Backdrop.Tint), а сплошная заливка просто закрасила бы размытие —
+	// именно так «стеклянная» панель macOS выглядела матовой белой плашкой.
+	// Заливка приходит сюда из общих токенов темы (surface), даже когда
+	// компонент её не просил, и отличить «тема задала» от «досталось по
+	// умолчанию» в готовом стиле уже нельзя — поэтому решает Backdrop.
+	glass := s.Backdrop.Mode != theme.BackdropNone
+
 	// Градиент заменяет заливку, когда тема его задала.
 	if len(s.Gradient) > 0 {
 		PaintGradient(ctx, r, s)
-	} else if s.Fill.A > 0 {
+	} else if s.Fill.A > 0 && !glass {
 		switch {
 		case corner > 0:
 			ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), corner, s.Fill)

@@ -58,6 +58,10 @@ type Taskbar struct {
 	// сама: она живёт вне обхода дерева, когда её показывают оболочкой.
 	unsubTheme func()
 
+	// StyleComponent — имя компонента для стилей темы. Пустое — "taskbar".
+	// Второй полосе рабочего стола оболочка ставит ComponentDockbar.
+	StyleComponent string
+
 	// startEdge и trayEdge — границы секций, посчитанные раскладкой: между
 	// ними классическая тема рисует разделители. Хранятся, а не считаются
 	// заново при отрисовке, чтобы разделитель не разъехался с элементами.
@@ -87,6 +91,9 @@ const (
 
 	// ComponentTaskbar — имя компонента для стилей темы.
 	ComponentTaskbar = "taskbar"
+	// ComponentDockbar — вторая полоса рабочего стола (док macOS): своё
+	// скругление, свои поля, своё стекло.
+	ComponentDockbar = "dockbar"
 )
 
 // NewTaskbar создаёт панель задач, оформляемую темами из tm.
@@ -162,6 +169,18 @@ func (t *Taskbar) SetItems(slot Slot, items ...Item) {
 		t.AddItem(slot, it)
 	}
 	t.relayout()
+}
+
+// component — имя компонента для стилей темы.
+//
+// По умолчанию панель задач, но вторая полоса рабочего стола (док macOS)
+// оформляется иначе: у неё своё скругление, свои поля и своё стекло. Одним
+// именем это не выразить — строка меню осталась бы со скруглением дока.
+func (t *Taskbar) component() string {
+	if t.StyleComponent != "" {
+		return t.StyleComponent
+	}
+	return ComponentTaskbar
 }
 
 // Height возвращает высоту панели из темы (0 — тема не задала, решает
@@ -339,7 +358,7 @@ func (t *Taskbar) style(part string, st theme.State) *theme.Style {
 	if t.tm == nil {
 		return &theme.Style{}
 	}
-	return t.tm.GetStyle(ComponentTaskbar, part, st)
+	return t.tm.GetStyle(t.component(), part, st)
 }
 
 // Draw рисует подложку панели и её элементы.
@@ -353,34 +372,11 @@ func (t *Taskbar) Draw(ctx widget.DrawContext) {
 	if b.Empty() {
 		return
 	}
-	s := t.style("", theme.StateNormal)
-
-	// Стекло: если тема просит размытую подложку, а контекст это умеет.
-	if s.Backdrop.Mode == theme.BackdropBlur {
-		if bd, ok := ctx.(widget.BackdropDrawer); ok {
-			bd.BlurBehind(b, int(s.Backdrop.Radius), s.Backdrop.Tint)
-		} else if s.Backdrop.Tint.A > 0 {
-			// Контекст без размытия — остаётся подкраска. Так тема,
-			// написанная для стекла, выглядит хотя бы полупрозрачной.
-			fillAlpha(ctx, b, s.Backdrop.Tint)
-		}
-	}
-
-	corner := int(s.Corner)
-	if s.Fill.A > 0 {
-		if corner > 0 {
-			ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), corner, s.Fill)
-		} else {
-			ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), s.Fill)
-		}
-	}
-	if s.Border.A > 0 && s.BorderWidth > 0 {
-		if corner > 0 {
-			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), corner, s.Border)
-		} else {
-			ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), s.Border)
-		}
-	}
+	// Подложка целиком отдана PaintStyle — тени, стекло, заливка, рамка и
+	// фаска там уже разобраны по порядку. Своя копия этой логики здесь
+	// когда-то была и разошлась с общей: заливка ложилась ПОВЕРХ размытия, и
+	// стеклянная панель macOS выглядела матовой белой плашкой.
+	PaintStyle(ctx, b, t.style("", theme.StateNormal))
 
 	t.drawSeparators(ctx)
 	t.DrawChildren(ctx)
