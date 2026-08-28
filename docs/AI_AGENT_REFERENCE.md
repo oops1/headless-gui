@@ -3252,6 +3252,47 @@ bevel/border), `DrawTextCentered`, `DrawTextLeft`, `DrawTextLeftElided`, `Elide`
 and fails on any `color.RGBA{...}` inside `Draw`/`draw*`/`paint*`. Colors come
 from the theme; that is what makes one taskbar look like four different ones.
 
+### Theme tokens that change the shell's shape
+
+Beyond colors and sizes, these decide what the taskbar *is*:
+
+| Token | Kind | Meaning |
+|---|---|---|
+| `taskbar.height` | metric | strip height |
+| `taskbar.top` | flag | strip is pinned to the TOP edge (macOS menu bar); flyouts then open downwards |
+| `dock.height` | metric | height of a SEPARATE bottom strip (the macOS dock); 0 = one strip only |
+| `taskbar.centered` | flag | Start + apps group is centered (Windows 11) |
+| `taskbar.separators` | flag | draw grip separators between sections (classic panel) |
+| `startbutton.label` | flag | show the "Start" caption next to the icon |
+| `startbutton.icon` | icon | the Start button glyph from the theme's icon set |
+| `taskbutton.label` | flag | show window titles on task buttons (Windows 10/11 hide them) |
+| `taskbutton.underline` | metric | thickness of the mark under an open window |
+| `taskbutton.underline.len` | metric | mark length as a fraction of button width: 1 = full bar (Windows 10), 0.4 = short tick (Windows 11, doubled for the active window) |
+| `clock.date` | flag | show the date under the time (classic clocks never do) |
+| `tray.gap`, `tray.chevron.width`, `tray.overflow.columns` | metrics | tray row and its overflow grid |
+
+The Start button icon has three levels, in order: `StartButton.Icon` (a picture
+the shell sets), the theme's `startbutton.icon`, and the built-in 2×2 glyph.
+
+macOS splits the desktop into two strips, so the shell asks the taskbar what the
+theme wants and lays the same components out accordingly:
+
+```go
+if h := bar.DockHeight(); h > 0 {      // menu bar + dock
+    bar.SetItems(desktop.SlotStart, startBtn)
+    bar.SetItems(desktop.SlotTray, tray, clock)
+    dock.SetItems(desktop.SlotApps, apps)
+} else {                                // one taskbar
+    bar.SetItems(desktop.SlotApps, apps)
+    dock.SetItems(desktop.SlotApps)
+}
+if bar.Edge() == desktop.EdgeTop { /* pin to the top */ }
+```
+
+`SetItems` replaces a slot's contents; components are NOT recreated, only
+reassigned — otherwise a theme switch would drop their state (hover, open
+flyouts, subscriptions).
+
 ### Flyouts
 
 `desktop/flyout.go` — the shared base for the Start menu, calendar, quick
