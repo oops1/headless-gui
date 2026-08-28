@@ -3450,6 +3450,36 @@ before/after code examples.
 
 ---
 
+### Measured cost of a frame
+
+Desktop scene from `desktop/` at 1280×800, Windows 11 theme, fake system data
+with a fixed clock; `go test ./engine/ -bench BenchmarkPipeline -benchtime=200x`
+on the maintainer's machine (Intel Core Ultra 7 265K, Windows). Rerun with
+`engine/pipeline_bench_test.go`.
+
+| scenario | ns/op | B/op | allocs/op |
+|---|---|---|---|
+| full frame (`Invalidate`) | 3 318 098 | 28 891 | 37 |
+| clock tick (60×24 rect), culling on | 77 426 | 2 697 | 7 |
+| clock tick, culling **off** | 82 122 | 2 968 | 9 |
+| hover over a taskbar button | 95 390 | 51 583 | 10 |
+| dragging a 720×440 window | 1 854 068 | 2 038 138 | 89 |
+
+What the numbers say, and what they do not:
+
+- A damage-sized frame costs ~43× less than a full one. That win comes from
+  `SetRenderOnDemand` + `InvalidateRect`, which predate this work.
+- Subtree culling adds ~6% on top of that (77.4 µs vs 82.1 µs) and removes two
+  allocations. On a flat desktop most of the tree is a handful of wide panels,
+  so there is little to skip; the deeper the tree away from the damage, the
+  more it saves. It is not the headline win, and the numbers say so.
+- Window dragging is the expensive case (1.85 ms, 2 MB) — that is what
+  `Frame.Moves` addresses: the pixels have not changed, only moved.
+
+Rule worth keeping: an optimisation without a paired measurement is not
+accepted. Add the before/after here.
+
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

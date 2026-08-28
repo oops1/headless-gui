@@ -1335,7 +1335,12 @@ func (w *Window) OnMouseMove(x, y int) {
 			if shiftX != 0 || shiftY != 0 {
 				// Window.SetBounds сам пересчитает ContentBounds → дочерние виджеты.
 				// Рекурсивный ShiftWidget не нужен — Window управляет layout.
-				w.SetBounds(image.Rect(newX, newY, newX+b.Dx(), newY+b.Dy()))
+				moved := image.Rect(newX, newY, newX+b.Dx(), newY+b.Dy())
+				w.SetBounds(moved)
+				// Картинка окна та же, просто в другом месте. Объявляем
+				// перенос: потребитель скопирует её у себя вместо того,
+				// чтобы принимать заново на каждый шаг мыши.
+				NotifyMove(b, moved)
 			}
 		}
 		return
@@ -1417,6 +1422,10 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 					w.OnDragMove(dx, dy) // нативное окно переносит ОС
 				} else if dx != 0 || dy != 0 {
 					w.SetBounds(dest) // сам сообщит об объединении старой и новой области
+					// Окно не изменилось — оно переехало. Объявляем перенос:
+					// потребитель скопирует картинку у себя вместо того,
+					// чтобы принимать её заново.
+					NotifyMove(from, dest)
 				}
 				// Гасим контур ровно там, где он был; полная инвалидация
 				// скрыла бы от хоста, что окно просто переехало, — а по этому
