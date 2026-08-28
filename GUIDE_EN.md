@@ -65,7 +65,9 @@ eng := engine.New(width, height, fps)
 // Root and styling
 eng.SetRoot(w widget.Widget)
 eng.SetTheme(t *widget.Theme)
-eng.SetBackgroundFile(path string)    // PNG/JPEG
+eng.SetBackgroundFile(path string)    // PNG/JPEG from disk
+eng.SetBackground(img image.Image)    // a ready image from memory
+eng.ClearBackground()                 // remove the wallpaper
 eng.SetResolution(width, height int)  // change on the fly
 
 // Fonts
@@ -1043,7 +1045,8 @@ to work only by accident.
 
 An application that hasn't been brought into compliance yet can restore the
 old behavior with one line: `eng.SetSubtreeCulling(false)` turns culling off
-entirely (it's on by default).
+entirely (it's on by default). The switch belongs to the ENGINE, not to the
+process: engines in one process do not affect each other.
 
 **1. `Draw` is not guaranteed every frame.** Being skipped means "what's on
 screen is already correct" — a widget has no business assuming that, because
@@ -1994,6 +1997,28 @@ the margin:
 ```go
 func (w *MyWidget) DrawMargin() int { return 12 } // shadow, glow
 ```
+
+#### Several engines in one process
+
+There may be as many engines as you like — a remote desktop shell keeps one
+per window. All pipeline state belongs to the engine: the frame's damage, the
+subtree-culling switch, the accumulated move declarations, the pixel format,
+external pacing. Engines do not disturb each other and may render at the same
+time from different goroutines (`tests/twoengines_test.go` checks this under
+the race detector).
+
+Two things stay process-wide, both on purpose:
+
+- **The widget tree.** One widget lives in one tree, one tree in one engine.
+  Move declarations (`widget.NotifyMove`) are broadcast to every engine, and
+  each takes only what lies on its own canvas.
+- **The text measurer** (`widget.MeasureUIText`). It is called from places
+  where no engine is in sight — a dialog sizes itself at construction. The
+  most recently created engine answers; a stopped one hands the measurer back
+  to the previous live engine. With different `SetDPI` across coexisting
+  engines the measurement comes with the answering engine's metrics: the
+  discrepancy is rounding of the logical length and does not affect drawing
+  (inside `Draw`, `ctx.MeasureText` measures on the widget's own canvas).
 
 #### What a tile is made of
 

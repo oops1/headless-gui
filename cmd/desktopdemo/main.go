@@ -183,20 +183,15 @@ func buildDesktop(eng *engine.Engine) scene {
 
 	// Одна панель за раз: открывая любую, закрываем остальные — иначе они
 	// перекрывают друг друга, чего на настоящем рабочем столе не бывает.
-	closeOthers := func(keep any) {
-		for _, p := range []any{menu, quick, center, cal} {
-			if p == keep {
-				continue
-			}
-			switch v := p.(type) {
-			case *desktop.StartMenu:
-				v.Close()
-			case *desktop.QuickSettings:
-				v.Close()
-			case *desktop.NotificationCenter:
-				v.Close()
-			case *desktop.CalendarFlyout:
-				v.Close()
+	// Список по интерфейсу, а не по типам: Close() есть у каждой панели, и
+	// перечисление типов в switch пришлось бы дополнять при появлении новой —
+	// причём молча, ничего не сломав: забытый тип просто не закрывался бы.
+	type closable interface{ Close() }
+	panels := []closable{menu, quick, center, cal}
+	closeOthers := func(keep closable) {
+		for _, p := range panels {
+			if p != keep {
+				p.Close()
 			}
 		}
 	}

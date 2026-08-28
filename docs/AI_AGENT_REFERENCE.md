@@ -48,7 +48,10 @@ README_RU.md, GUIDE.md / GUIDE_EN.md; roadmap: TODO.md.
   (`OnChange`, `OnClick`) and `Invalidate()` are called AFTER Unlock.
   `Draw` copies state under mu, then draws without it.
 - **Text measurement outside Draw:** `widget.MeasureUIText(text, sizePt)` —
-  the precise measurer registered by the engine (`SetTextMeasurer`). Use it
+  the precise measurer registered by the engine (`RegisterTextMeasurer`;
+  `SetTextMeasurer` still works for a consumer that sets one once and for
+  all). The most recently created engine answers; a stopped engine hands the
+  measurer back to the previous live one. Use it
   for layout computed before painting (dialogs, TextBox). Inside Draw use
   `ctx.MeasureText`.
 - **Theming:** constructors read the global palette `win10.*` (updated by
@@ -276,6 +279,16 @@ func (e *Engine) SetResolution(width, height int)
 // widget.MaxImagePixels() (64 Mpx default, SetMaxImagePixels) and a 256 MB
 // file cap — oversized/decompression-bomb images return an error.
 func (e *Engine) SetBackgroundFile(path string) error
+
+// Set the background from an image already in memory (v3.15.0). Same
+// scaling and rescale-on-SetResolution behaviour as SetBackgroundFile;
+// no decoding, no file cap. A shell that received the wallpaper down its
+// own wire had to write it to a temporary file before this existed.
+func (e *Engine) SetBackground(img image.Image) error
+
+// Remove the background (v3.15.0). Widgets draw on the canvas background
+// colour again. Idempotent.
+func (e *Engine) ClearBackground()
 
 // Set color theme across all widgets
 func (e *Engine) SetTheme(t *widget.Theme)
@@ -3423,6 +3436,11 @@ eng.SetSubtreeCulling(bool)   // default: true (on)
 Set `false` to fall back to the pre-v3.15.0 behavior (every widget's `Draw`
 runs every rendered frame) for an app that can't yet meet the contract below.
 
+Since v3.16.0 this switch, the frame's damage and the accumulated move
+declarations belong to the ENGINE, not to the process. Several engines in one
+process (one per window) render independently and may do so concurrently from
+different goroutines; `tests/twoengines_test.go` covers this under `-race`.
+
 Rules a widget MUST follow so culling is transparent to it:
 
 1. **`Draw` is not called every frame.** A widget must render correctly when
@@ -3491,6 +3509,12 @@ expects; the reverse would overwrite fresh pixels with stale ones. A widget
 declares a move with `widget.NotifyMove(src, dst)` — `Window` does it while
 dragging and on landing. A declared move does NOT replace damage: it is a hint
 about a cheaper way to reach the same result.
+
+Moves within one frame never overlap each other, by source or destination
+(v3.16.0): the engine drops overlapping declarations and that area travels as
+ordinary tiles. Apply them in any order, or all at once — the result is the
+same. Without that rule a consumer whose order differed from the engine's read
+a source that had not moved yet, and copied the wrong rectangle.
 
 ### Buffer format and drawing into foreign memory
 

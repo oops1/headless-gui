@@ -56,7 +56,7 @@ type Engine struct {
 	invGen   atomic.Uint64
 	// pacing, frameWanted, wake, sink — внешний темп и сток кадров
 	// (pacing.go). При PacingExternal кадр готовится только по RequestFrame.
-	pacing      atomicPacing
+	pacing      atomic.Uint32
 	frameWanted atomic.Bool
 	wake        chan struct{}
 	sinkMu      sync.RWMutex

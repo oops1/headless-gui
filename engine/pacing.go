@@ -14,7 +14,6 @@
 package engine
 
 import (
-	"sync/atomic"
 
 	"github.com/oops1/headless-gui/v3/output"
 )
@@ -119,6 +118,3 @@ func (e *Engine) pacingIsExternal() bool {
 	return Pacing(e.pacing.Load()) == PacingExternal
 }
 
-// atomicPacing — тип поля движка (объявлен здесь, чтобы pacing жил рядом со
-// своим смыслом).
-type atomicPacing = atomic.Uint32
