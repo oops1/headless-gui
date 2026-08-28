@@ -61,6 +61,19 @@ func NewSystemTray(tm *theme.Manager) *SystemTray {
 	t.overflow.Align = AlignEnd
 	t.overflow.Size = t.overflowSize
 	t.overflow.Content = t.drawOverflow
+	// drawOverflow выставляет скрытым значкам настоящие границы, чтобы они
+	// ловили мышь внутри раскрытой области. При закрытии (клик мимо, Esc,
+	// повторный щелчок по шеврону) эти границы сами не пропадают — значок
+	// невидим, но Bounds() всё ещё указывают туда, где была область, и
+	// следующий клик по пустому месту попал бы в него. relayout() уже прячет
+	// значки так же (SetBounds(image.Rectangle{})) при пересчёте раскладки,
+	// так что обнуление здесь идемпотентно с ним, а не конфликтует; при
+	// следующем открытии drawOverflow снова расставит границы заново.
+	t.overflow.OnClose = func() {
+		for _, h := range t.hidden {
+			h.SetBounds(image.Rectangle{})
+		}
+	}
 	return t
 }
 

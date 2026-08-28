@@ -164,7 +164,18 @@ func (a *Animation) Running() bool {
 // progress вычисляет прогресс кривой t ∈ [0,1] на момент now и признак
 // завершения фазы. Обрабатывает reverse-фазу AutoReverse.
 // Вызывается БЕЗ мьютекса (a обрабатывается монопольно в рамках Step).
-func (a *Animation) progress(now time.Time) (t float64, phaseDone bool) {
+// animPhase — снимок полей анимации, нужных для расчёта прогресса.
+//
+// Отдельный тип, а не чтение из *Animation: фаза тиков идёт без мьютекса, и
+// снимок делает невозможным случайное чтение живого поля оттуда.
+type animPhase struct {
+	start    time.Time
+	duration time.Duration
+	curve    Easing
+	reversed bool
+}
+
+func (a animPhase) progress(now time.Time) (t float64, phaseDone bool) {
 	// Линейный прогресс по времени фазы.
 	var lin float64
 	if a.duration <= 0 {
@@ -224,6 +235,23 @@ func StepAnimations(now time.Time) bool {
 			a.start = now
 		}
 	}
+	// Поля, нужные для расчёта прогресса, снимаем ЗДЕСЬ, под мьютексом.
+	//
+	// Фаза тиков идёт вне мьютекса — так задумано: тик зовёт код виджета,
+	// который вправе сам обратиться к анимациям. Но читать оттуда поля живой
+	// анимации нельзя: пишутся они под мьютексом (ленивый старт выше,
+	// перезапуск цикла ниже), и чтение без него — гонка, которую детектор
+	// ловит у потребителя, как только на экране появляются часы. Снимок
+	// примитивов стоит дешевле, чем блокировка вокруг чужого кода.
+	phase := make([]animPhase, len(snapshot))
+	for i, a := range snapshot {
+		phase[i] = animPhase{
+			start:    a.start,
+			duration: a.duration,
+			curve:    a.curve,
+			reversed: a.reversed,
+		}
+	}
 	anim.mu.Unlock()
 
 	// ── Фаза тиков (вне мьютекса) ────────────────────────────────────────
@@ -235,7 +263,7 @@ func StepAnimations(now time.Time) bool {
 	}
 	var completed []doneItem
 
-	for _, a := range snapshot {
+	for i, a := range snapshot {
 		// Могла быть снята из предыдущего тика этого же прохода.
 		anim.mu.Lock()
 		skip := a.stopped || a.done
@@ -252,7 +280,7 @@ func StepAnimations(now time.Time) bool {
 			continue
 		}
 
-		t, phaseDone := a.progress(now)
+		t, phaseDone := phase[i].progress(now)
 
 		if !phaseDone {
 			a.tick(t)
@@ -347,8 +375,12 @@ func StepAnimations(now time.Time) bool {
 	return hasActive
 }
 
-// AnimationsActive сообщает, есть ли активные анимации (движок опрашивает в
-// animationNeeded, чтобы не заснуть, пока анимация идёт).
+// AnimationsActive сообщает, есть ли зарегистрированные анимации.
+//
+// Движок этим НЕ решает, готовить ли кадр: анимация сама заявляет, что
+// изменила, а StepAnimations проходит до решения о пропуске — см.
+// Engine.animationNeeded. Функция осталась для тестов и приложений, ждущих
+// завершения анимации.
 func AnimationsActive() bool {
 	anim.mu.Lock()
 	active := len(anim.active) > 0 || len(anim.incoming) > 0

@@ -127,3 +127,33 @@ func TestPacing_SinkAndChannelAgree(t *testing.T) {
 		t.Fatal("кадр не пришёл в канал")
 	}
 }
+
+// RequestFrame под тикерным темпом делает то, что обещает док: помечает кадр
+// нужным. Иначе приложение, написанное под внешний темп, при переключении
+// режима переставало получать кадры вовсе — запрос молча исчезал.
+func TestPacing_RequestFrameWorksUnderTicker(t *testing.T) {
+	eng, sink, root := pacedEngine(t)
+	eng.SetRenderOnDemand(true)
+	eng.Start()
+	defer eng.Stop()
+
+	// Съедаем стартовый кадр, чтобы дальше судить только по запросу.
+	deadline := time.Now().Add(time.Second)
+	for sink.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	before := sink.count()
+
+	// Меняем сцену БЕЗ Invalidate — так это делает потребитель, привыкший к
+	// внешнему темпу: прямая запись в поле плюс RequestFrame.
+	root.Background = color.RGBA{R: 180, G: 60, B: 60, A: 255}
+	eng.RequestFrame()
+
+	deadline = time.Now().Add(time.Second)
+	for sink.count() == before && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if sink.count() == before {
+		t.Error("RequestFrame под тикерным темпом не привёл к кадру")
+	}
+}

@@ -122,3 +122,48 @@ func TestDamage_UnclaimedChangeStaysHome(t *testing.T) {
 		}
 	}
 }
+
+// Ни одна заявленная область не теряется при поглощениях.
+//
+// Список компактится «на месте», по тому же массиву, и цена ошибки здесь —
+// молча пропавшая область: она не будет ни нарисована, ни продиффена, а у
+// потребителя останутся старые пиксели. Тест закрепляет инвариант на будущее:
+// после серии поглощений каждая заявленная область по-прежнему покрыта.
+func TestDamage_AbsorptionKeepsEveryArea(t *testing.T) {
+	e := New(640, 480, 60)
+	e.consumeDamage()
+
+	// P и Q далеко друг от друга; Z накрывает P, но не Q.
+	p := image.Rect(0, 0, 40, 40)
+	q := image.Rect(500, 400, 560, 460)
+	z := image.Rect(0, 0, 200, 200) // содержит p
+
+	e.InvalidateRect(p)
+	e.InvalidateRect(q)
+	e.InvalidateRect(z)
+	// Область внутри z: она уже покрыта — это и есть ранний возврат.
+	e.InvalidateRect(image.Rect(10, 10, 20, 20))
+
+	rects, all := e.consumeDamage()
+	if all {
+		t.Fatal("InvalidateRect не должен требовать полного кадра")
+	}
+
+	union := unionRects(rects)
+	for _, want := range []image.Rectangle{p, q, z} {
+		if !want.In(union) {
+			t.Errorf("область %v потерялась: накоплено %v", want, rects)
+		}
+	}
+	// Q обязана присутствовать отдельной областью, а не «в среднем»:
+	// объединение с ней прошло бы проверку выше и без неё.
+	covered := false
+	for _, r := range rects {
+		if q.In(r) {
+			covered = true
+		}
+	}
+	if !covered {
+		t.Errorf("дальняя область %v не покрыта ни одной записью: %v", q, rects)
+	}
+}

@@ -116,6 +116,74 @@ func (s *roundClipState) spanX(y, x0, x1 int) (int, int, bool) {
 	return x0, x1, true
 }
 
+// clipsTile сообщает, отрезает ли скруглённый клип что-нибудь от тайла:
+// тайл либо выходит за прямоугольник клипа, либо задевает дугу угла.
+//
+// Нужно классификации содержимого: тайл, у которого срезан угол, не сплошной,
+// сколько бы заливка ни накрывала его прямоугольник.
+//
+// Пересечения с угловым КВАДРАТОМ мало: в него попадает и внутренняя часть,
+// которую дуга не трогает. Считается расстояние от центра дуги до дальней
+// точки тайла внутри этого квадрата — срезается только то, что вышло за
+// радиус.
+func (r *roundClipState) clipsTile(tile image.Rectangle) bool {
+	if !r.active {
+		return false
+	}
+	if !tile.In(r.rect) {
+		return true // часть тайла вне клипа — там прежнее содержимое
+	}
+	rad := r.radius
+	if rad <= 0 {
+		return false
+	}
+	radSq := float64(rad) * float64(rad)
+
+	// Центры четырёх дуг и их квадранты.
+	type corner struct {
+		cx, cy int
+		zone   image.Rectangle
+	}
+	corners := [4]corner{
+		{r.rect.Min.X + rad, r.rect.Min.Y + rad,
+			image.Rect(r.rect.Min.X, r.rect.Min.Y, r.rect.Min.X+rad, r.rect.Min.Y+rad)},
+		{r.rect.Max.X - rad, r.rect.Min.Y + rad,
+			image.Rect(r.rect.Max.X-rad, r.rect.Min.Y, r.rect.Max.X, r.rect.Min.Y+rad)},
+		{r.rect.Min.X + rad, r.rect.Max.Y - rad,
+			image.Rect(r.rect.Min.X, r.rect.Max.Y-rad, r.rect.Min.X+rad, r.rect.Max.Y)},
+		{r.rect.Max.X - rad, r.rect.Max.Y - rad,
+			image.Rect(r.rect.Max.X-rad, r.rect.Max.Y-rad, r.rect.Max.X, r.rect.Max.Y)},
+	}
+
+	for _, c := range corners {
+		part := tile.Intersect(c.zone)
+		if part.Empty() {
+			continue
+		}
+		// Дальняя точка части тайла от центра дуги.
+		dx := maxAbs(part.Min.X-c.cx, part.Max.X-1-c.cx)
+		dy := maxAbs(part.Min.Y-c.cy, part.Max.Y-1-c.cy)
+		if float64(dx*dx+dy*dy) > radSq {
+			return true
+		}
+	}
+	return false
+}
+
+// maxAbs — большее по модулю из двух смещений.
+func maxAbs(a, b int) int {
+	if a < 0 {
+		a = -a
+	}
+	if b < 0 {
+		b = -b
+	}
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // contains сообщает, лежит ли точка внутри скруглённого контура.
 func (s *roundClipState) contains(x, y int) bool {
 	if !s.active {

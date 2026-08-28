@@ -55,5 +55,12 @@ func (k RegionKind) String() string {
 type Region struct {
 	Rect  image.Rectangle
 	Kind  RegionKind
-	Color color.RGBA // осмыслен только при Kind == RegionSolid
+	// Color осмыслен только при Kind == RegionSolid.
+	//
+	// Порядок каналов — тот же, что у DirtyTile.Data, то есть выбранный
+	// Engine.SetPixelFormat: при FormatBGRX здесь лежат переставленные
+	// каналы. Это байты буфера, а не портируемый цвет — читающий их как
+	// обычный RGBA получит неверный оттенок ровно тогда, когда сам просил
+	// другой формат.
+	Color color.RGBA
 }

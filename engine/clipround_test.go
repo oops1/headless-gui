@@ -197,3 +197,43 @@ func TestRoundClip_IntersectsWithBaseClip(t *testing.T) {
 		t.Error("нарисовано вне damage-области — базовый клип потерян")
 	}
 }
+
+// Дуги полупрозрачной скруглённой рамки смешиваются с фоном, а не пишутся
+// поверх него цветом с чужой альфой.
+//
+// Прямые стороны это уже умели, а четыре угла — нет: на стеклянной панели
+// обводка ложилась плёнкой по сторонам и «дырами» на углах.
+func TestRoundBorder_TranslucentCornersBlend(t *testing.T) {
+	const w, h = 80, 60
+	c := newCanvas(w, h, nil)
+
+	// Ровный тёмный фон, поверх — светлая полупрозрачная рамка.
+	c.FillRect(0, 0, w, h, color.RGBA{R: 20, G: 30, B: 40, A: 255})
+	border := color.RGBA{R: 255, G: 255, B: 255, A: 60}
+	c.DrawRoundBorder(4, 4, w-8, h-8, 10, border)
+
+	// Точка на прямой стороне и точка на дуге обязаны лежать в одном
+	// диапазоне: обе — та же плёнка поверх того же фона.
+	side := c.back.RGBAAt(w/2, 4)
+	if side.R == 255 {
+		t.Fatalf("сторона рамки записана как есть (%v) — смешивания нет", side)
+	}
+
+	// Ищем самую светлую точку в угловой зоне: там лежит дуга.
+	var corner color.RGBA
+	for y := 4; y < 18; y++ {
+		for x := 4; x < 18; x++ {
+			p := c.back.RGBAAt(x, y)
+			if int(p.R)+int(p.G)+int(p.B) > int(corner.R)+int(corner.G)+int(corner.B) {
+				corner = p
+			}
+		}
+	}
+	if corner.A != 255 {
+		t.Errorf("на дуге альфа %d — цвет записан вместе с чужой альфой", corner.A)
+	}
+	if diff := int(corner.R) - int(side.R); diff > 24 || diff < -24 {
+		t.Errorf("дуга (%v) и сторона (%v) легли по-разному — угол не смешан как сторона",
+			corner, side)
+	}
+}

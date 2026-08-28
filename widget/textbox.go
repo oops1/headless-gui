@@ -81,6 +81,11 @@ type TextBox struct {
 
 	focused bool
 
+	// caretPhase — фаза мигания каретки, ФАКТИЧЕСКИ отрисованная последним
+	// Draw; caretPhaseKnown — рисовалась ли каретка вообще. См. NeedsAnimation.
+	caretPhase      bool
+	caretPhaseKnown bool
+
 	// OnChange вызывается при каждом изменении текста.
 	OnChange func(text string)
 }
@@ -249,8 +254,35 @@ func (t *TextBox) IsFocused() bool {
 	return t.focused
 }
 
-// NeedsAnimation — пока редактор в фокусе, мигает каретка.
-func (t *TextBox) NeedsAnimation() bool { return t.IsFocused() }
+// NeedsAnimation — «нужен ли движку кадр ради мигающей каретки».
+//
+// Здесь возвращался просто IsFocused(), и движок в режиме отрисовки по
+// запросу готовил ПОЛНЫЙ кадр всего дерева на целевой частоте — шестьдесят
+// кадров в секунду ради каретки, меняющейся дважды. Полный, а не частичный:
+// damage при этом пуст, а пустой damage уводит кадр по полному пути (блит
+// фона во весь холст, обход дерева без клипа, сравнение всех тайлов). Смысл
+// отрисовки по запросу терялся, стоило поставить курсор в текст.
+//
+// Теперь так же, как в TextInput (см. его NeedsAnimation): пока фаза мигания
+// совпадает с уже нарисованной, кадр не нужен; когда сменилась — редактор
+// заявляет ТОЛЬКО свой прямоугольник и всё равно отвечает «нет», а движок
+// увидит новое поколение инвалидации на следующем тике и нарисует частичный
+// кадр. Задержка в один тик на полупериод 530 мс глазу незаметна.
+func (t *TextBox) NeedsAnimation() bool {
+	phase := caretPhaseAt(time.Now().UnixMilli())
+	t.mu.Lock()
+	if !t.focused || (t.caretPhaseKnown && t.caretPhase == phase) {
+		t.mu.Unlock()
+		return false
+	}
+	// Фазу фиксируем здесь же: если кадр до Draw не дойдёт (редактор скрыт,
+	// кадр отброшен), иначе инвалидировали бы на каждом тике. Пропущенное
+	// мигание безобиднее непрерывной перерисовки.
+	t.caretPhase, t.caretPhaseKnown = phase, true
+	t.mu.Unlock()
+	t.Invalidate()
+	return false
+}
 
 // ─── Геометрия и компоновка ──────────────────────────────────────────────────
 
@@ -1241,7 +1273,7 @@ func (t *TextBox) Draw(ctx DrawContext) {
 	}
 
 	// Каретка.
-	if focused && (time.Now().UnixMilli()/530)%2 == 0 {
+	if focused && caretPhaseAt(time.Now().UnixMilli()) {
 		li := 0
 		for i, ln := range lines {
 			if caret >= ln.start && caret <= ln.end {

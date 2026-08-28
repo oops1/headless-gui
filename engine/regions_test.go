@@ -166,3 +166,86 @@ func TestRegions_PartialFillIsMixed(t *testing.T) {
 		t.Error("частичная заливка объявлена сплошной — потребитель зальёт весь тайл одним цветом")
 	}
 }
+
+// Сглаженные дуги и тени — не текст.
+//
+// Маски альфы и цветные глифы — общий путь для букв, дуг скруглённых заливок
+// и размытого силуэта тени. Пока вид объявлялся самим путём, потребитель
+// применял к серому размытию текстовый кодек.
+func TestRegions_ShapesAndShadowsAreNotText(t *testing.T) {
+	const w, h = 192, 192
+	eng := New(w, h, 30)
+
+	root := widget.NewPanel(color.RGBA{R: 12, G: 14, B: 18, A: 255})
+	root.ShowHeader = false
+	root.SetBounds(image.Rect(0, 0, w, h))
+	eng.SetRoot(root)
+	eng.renderFrame()
+
+	canvas := eng.canvas
+
+	// Скруглённая заливка: её углы идут через маску альфы.
+	canvas.resetTileMarks(image.Rect(0, 0, w, h))
+	canvas.FillRoundRect(4, 4, 120, 120, 24, color.RGBA{R: 200, G: 90, B: 40, A: 255})
+	if got := canvas.marks[0].kind; got == output.RegionText {
+		t.Error("угол скруглённой заливки объявлен текстом")
+	}
+
+	// Мягкая тень: composited через цветной глиф.
+	canvas.resetTileMarks(image.Rect(0, 0, w, h))
+	canvas.DrawSoftShadow(image.Rect(70, 70, 180, 180), 12, 10,
+		color.RGBA{R: 0, G: 0, B: 0, A: 90})
+	shadowTile := canvas.marks[(h/2/64)*canvas.tilesX+(w/2/64)]
+	if shadowTile.kind == output.RegionText {
+		t.Error("мягкая тень объявлена текстом")
+	}
+
+	// А текст — по-прежнему текст.
+	canvas.resetTileMarks(image.Rect(0, 0, w, h))
+	canvas.DrawTextSize("Проверка", 8, 20, 14, color.RGBA{R: 240, G: 240, B: 240, A: 255})
+	found := false
+	for _, m := range canvas.marks {
+		if m.touched && m.kind == output.RegionText {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("надпись перестала помечаться текстом")
+	}
+}
+
+// Тайл, у которого скруглённый клип срезает угол, не может быть сплошным.
+//
+// Заливка накрывает прямоугольник тайла целиком, но за дугой пиксели
+// остаются прежними. Потребитель, выполняющий Solid командой заливки,
+// нарисовал бы там квадратный угол чужим цветом.
+func TestRegions_RoundClipCornerIsNotSolid(t *testing.T) {
+	const w, h = 192, 192
+	eng := New(w, h, 30)
+	root := widget.NewPanel(color.RGBA{R: 12, G: 14, B: 18, A: 255})
+	root.ShowHeader = false
+	root.SetBounds(image.Rect(0, 0, w, h))
+	eng.SetRoot(root)
+	eng.renderFrame()
+
+	canvas := eng.canvas
+	canvas.resetTileMarks(image.Rect(0, 0, w, h))
+
+	// Так рисует стеклянная панель: скруглённый клип, затем заливка области.
+	area := image.Rect(0, 0, 160, 160)
+	canvas.SetRoundClip(area, 40)
+	canvas.FillRect(area.Min.X, area.Min.Y, area.Dx(), area.Dy(),
+		color.RGBA{R: 200, G: 90, B: 40, A: 255})
+	canvas.ClearRoundClip()
+
+	// Угловой тайл — тот, что накрывает дугу.
+	if got := canvas.marks[0].kind; got == output.RegionSolid {
+		t.Error("угловой тайл под скруглённым клипом объявлен сплошным")
+	}
+	// Тайл в середине области — сплошной: там дуга ничего не режет.
+	mid := (80 / 64) * canvas.tilesX + (80 / 64)
+	if got := canvas.marks[mid].kind; got != output.RegionSolid {
+		t.Errorf("середина залитой области объявлена %v, ждали solid", got)
+	}
+}

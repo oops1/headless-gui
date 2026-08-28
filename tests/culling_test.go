@@ -162,10 +162,10 @@ func TestCulling_FrameIsIdentical(t *testing.T) {
 		return eng.RenderOnce()
 	}
 
+	// Возвращать выключатель в норму между вызовами не нужно: он живёт на
+	// движке, а движок здесь каждый раз новый.
 	withCulling := render(true)
-	widget.SetSubtreeCulling(true) // вернуть общий выключатель в норму
 	without := render(false)
-	widget.SetSubtreeCulling(true)
 
 	if withCulling == nil || without == nil {
 		t.Fatal("кадр не отрисован")

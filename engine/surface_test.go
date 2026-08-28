@@ -284,3 +284,31 @@ func TestSetSurfacePaddedStride(t *testing.T) {
 		}
 	}
 }
+
+// Возврат к собственному буферу возвращает и его формат.
+//
+// Формат — свойство буфера: чужая память вправе иметь свой порядок каналов,
+// но собственный буфер обязан вернуться к тому, который просил вызывающий
+// через SetPixelFormat. Иначе после круга «BGRX → внешний RGBA → свой» все
+// кадры кодировались бы не тем форматом, а PixelFormat() сообщал бы неправду.
+func TestSetSurfaceRestoresOwnFormatOnNil(t *testing.T) {
+	eng := New(64, 48, 30)
+	if err := eng.SetPixelFormat(FormatBGRX); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := make([]byte, 64*4*48)
+	if err := eng.SetSurface(buf, 64*4, FormatRGBA); err != nil {
+		t.Fatal(err)
+	}
+	if got := eng.PixelFormat(); got != FormatRGBA {
+		t.Errorf("на внешнем буфере формат %v, ждали RGBA", got)
+	}
+
+	if err := eng.SetSurface(nil, 0, FormatRGBA); err != nil {
+		t.Fatal(err)
+	}
+	if got := eng.PixelFormat(); got != FormatBGRX {
+		t.Errorf("после возврата к своему буферу формат %v, ждали BGRX — тот, что задавали", got)
+	}
+}

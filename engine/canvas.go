@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/image/draw"
 	"golang.org/x/image/math/fixed"
@@ -32,6 +33,7 @@ type Canvas struct {
 	back       *image.RGBA           // текущий рендер-таргет (может быть чужой памятью — см. SetSurface)
 	backOwn    *image.RGBA           // собственный back-буфер холста; back переключается на него, когда внешняя память не задана
 	format     PixelFormat           // порядок каналов back-буфера (см. pixelformat.go)
+	formatOwn  PixelFormat           // порядок каналов СОБСТВЕННОГО буфера: чужая память вправе иметь свой, и после возврата к своему буферу надо вернуться к нему же
 	bgImage    *image.RGBA           // фоновое изображение (масштабировано под холст, закодировано в format — см. setBackground)
 	fontCache  *FontCache            // кэш шрифта по умолчанию
 	namedFonts map[string]*FontCache // именованные шрифты (FontFamily из XAML)
@@ -46,6 +48,18 @@ type Canvas struct {
 	W, H       int                   // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
 	// marks — признак содержимого по тайлам за текущий кадр (regions.go).
 	marks []tileMark
+	// maskKind — чем считается то, что рисуют маски альфы и цветные глифы
+	// прямо сейчас: буквами, фигурой, тенью. Через них идут все три.
+	maskKind output.RegionKind
+
+	// drawDamage — области ЭТОГО кадра в логических координатах, по которым
+	// обход решает, что можно не рисовать (widget.CullScope). Живут на
+	// канвасе, а не в пакете widget: у каждого движка кадр свой.
+	drawDamage []image.Rectangle
+	// cullingOn — разрешён ли пропуск поддеревьев в этом движке. Атомарный:
+	// выключатель дёргает приложение из своей горутины, а читает обход в
+	// горутине кадра.
+	cullingOn atomic.Bool
 
 	tilesX int
 	tilesY int
@@ -183,6 +197,10 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 		logicalW:   w,
 		logicalH:   h,
 	}
+	// Пропуск поддеревьев включён по умолчанию: контракт отрисовки объявлен,
+	// а приложение с нарушенным вернёт прежний обход одной строкой
+	// (Engine.SetSubtreeCulling).
+	c.cullingOn.Store(true)
 	c.initTileMarks()
 	return c
 }
@@ -202,6 +220,25 @@ func (c *Canvas) setBackground(src image.Image) {
 	}
 	c.bgImage = dst
 }
+
+// DrawDamage реализует widget.CullScope: области кадра в логических
+// координатах. Пустой список — рисуем всё.
+func (c *Canvas) DrawDamage() []image.Rectangle { return c.drawDamage }
+
+// SubtreeCullingEnabled реализует widget.CullScope.
+func (c *Canvas) SubtreeCullingEnabled() bool { return c.cullingOn.Load() }
+
+// setDrawDamage задаёт области кадра (вызывает движок перед обходом).
+func (c *Canvas) setDrawDamage(rects []image.Rectangle) {
+	c.drawDamage = append(c.drawDamage[:0], rects...)
+}
+
+// clearDrawDamage снимает ограничение: обход пройдёт целиком.
+func (c *Canvas) clearDrawDamage() { c.drawDamage = c.drawDamage[:0] }
+
+// clearBackground снимает фоновое изображение: blitBackground снова будет
+// заливать буфер чёрным.
+func (c *Canvas) clearBackground() { c.bgImage = nil }
 
 // blitBackground очищает back-буфер и копирует фон (если задан).
 // Вызывается до отрисовки виджетов — перезаписывает весь back.
@@ -282,10 +319,25 @@ func (c *Canvas) setExternalBack(pix []byte, stride int, f PixelFormat) {
 	c.format = f
 }
 
+// setOwnFormat задаёт формат собственного буфера. Он же становится текущим,
+// пока рисуем в свой буфер.
+func (c *Canvas) setOwnFormat(f PixelFormat) {
+	c.formatOwn = f
+	if c.back == c.backOwn {
+		c.format = f
+	}
+}
+
 // useOwnBack возвращает back к собственному буферу канваса
 // (Engine.SetSurface(nil, …, …)).
 func (c *Canvas) useOwnBack() {
 	c.back = c.backOwn
+	// Формат возвращается вместе с буфером. Иначе порядок каналов, заданный
+	// чужой памятью, оставался бы у собственного буфера навсегда: после
+	// SetPixelFormat(BGRX) → SetSurface(внешний RGBA) → SetSurface(nil) все
+	// последующие кадры кодировались бы не тем, что просил вызывающий, а
+	// Engine.PixelFormat() сообщал бы неправду.
+	c.format = c.formatOwn
 }
 
 // ─── Clip ───────────────────────────────────────────────────────────────────
@@ -559,15 +611,41 @@ func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
 // Координаты ФИЗИЧЕСКИЕ. col приходит уже закодированным (вызывается только
 // из DrawRoundBorder).
 func (c *Canvas) drawRoundBorderCornersLegacy(x, y, w, h, r int, col color.RGBA) {
+	// Полупрозрачные дуги СМЕШИВАЮТСЯ с фоном, как и прямые стороны рамки.
+	// Ветка выбирается по A<255, и запись цвета вместе с чужой альфой
+	// оставляла на углах «пробитые» точки: у стеклянной панели прямые стороны
+	// обводки ложились плёнкой, а четыре угла — дырами.
+	put := c.setPixelPx
+	if col.A < 255 {
+		put = c.blendPixelPx
+	}
 	rf := float64(r)
 	for i := 0; i <= r; i++ {
 		dy := float64(r - i)
 		dx := int(math.Round(math.Sqrt(rf*rf - dy*dy)))
-		c.setPixelPx(x+r-dx, y+i, col)         // верхний левый
-		c.setPixelPx(x+w-1-r+dx, y+i, col)     // верхний правый
-		c.setPixelPx(x+r-dx, y+h-1-i, col)     // нижний левый
-		c.setPixelPx(x+w-1-r+dx, y+h-1-i, col) // нижний правый
+		put(x+r-dx, y+i, col)         // верхний левый
+		put(x+w-1-r+dx, y+i, col)     // верхний правый
+		put(x+r-dx, y+h-1-i, col)     // нижний левый
+		put(x+w-1-r+dx, y+h-1-i, col) // нижний правый
 	}
+}
+
+// blendPixelPx кладёт полупрозрачную точку поверх фона (Over), уважая клипы.
+// Отличается от setPixelPx только этим: та пишет цвет как есть.
+func (c *Canvas) blendPixelPx(x, y int, col color.RGBA) {
+	if c.hasClip && !image.Pt(x, y).In(c.clip) {
+		return
+	}
+	if !c.round.contains(x, y) {
+		return
+	}
+	if x < 0 || x >= c.W || y < 0 || y >= c.H {
+		return
+	}
+	// Один пиксель — тот же путь, что у заливки с alpha-смешиванием:
+	// прямоугольник 1×1 через fillRectPx, чтобы формулу смешивания не
+	// пришлось держать в двух местах.
+	c.fillRectPx(image.Rect(x, y, x+1, y+1), col, true)
 }
 
 // DrawBorder рисует 1-пиксельный (логический) контур прямоугольника.
@@ -579,7 +657,7 @@ func (c *Canvas) DrawBorder(x, y, w, h int, col color.RGBA) {
 	px, py := c.sx(x), c.sx(y)
 	pw, ph := c.sl(x, w), c.sl(y, h)
 	t := c.st(1)
-	encCol := c.enc(col) // fillRectPx col не кодирует — см. его контракт
+	encCol := c.enc(col)                                               // fillRectPx col не кодирует — см. его контракт
 	c.fillRectPx(image.Rect(px, py, px+pw, py+t), encCol, blend)       // верх
 	c.fillRectPx(image.Rect(px, py+ph-t, px+pw, py+ph), encCol, blend) // низ
 	c.fillRectPx(image.Rect(px, py, px+t, py+ph), encCol, blend)       // лево
@@ -697,7 +775,7 @@ func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
 	if g.mask == nil {
 		return
 	}
-	c.drawAlphaMask(g.mask, gx, gy, col)
+	c.withMaskKind(output.RegionText, func() { c.drawAlphaMask(g.mask, gx, gy, col) })
 }
 
 // drawAlphaMask альфа-блендит альфа-маску цветом col в back-буфер (Over,
@@ -714,7 +792,7 @@ func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
 func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 	col = c.enc(col)
 	if b := alpha.Bounds(); !b.Empty() {
-		c.markText(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
+		c.markKind(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
 	}
 	mw, mh := alpha.Rect.Dx(), alpha.Rect.Dy()
 	r := c.clampRect(image.Rect(gx, gy, gx+mw, gy+mh))
@@ -765,7 +843,7 @@ func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 // clip. (gx, gy) — позиция левого верхнего угла изображения на холсте.
 func (c *Canvas) drawColorGlyph(img *image.RGBA, gx, gy int) {
 	if b := img.Bounds(); !b.Empty() {
-		c.markText(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
+		c.markKind(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
 	}
 	iw, ih := img.Rect.Dx(), img.Rect.Dy()
 	r := c.clampRect(image.Rect(gx, gy, gx+iw, gy+ih))
@@ -867,7 +945,7 @@ func (c *Canvas) drawShapedText(fc *FontCache, text string, x, baseline int, siz
 		if cg := c.shaper.colorGlyphFor(g.face, g.gid, sizePx, col); cg != nil && cg.img != nil {
 			gx := (pen + g.xOff).Round() + cg.offX
 			gy := baseline - g.yOff.Round() + cg.offY
-			c.drawColorGlyph(cg.img, gx, gy)
+			c.withMaskKind(output.RegionText, func() { c.drawColorGlyph(cg.img, gx, gy) })
 			pen += g.adv
 			continue
 		}
@@ -876,7 +954,7 @@ func (c *Canvas) drawShapedText(fc *FontCache, text string, x, baseline int, siz
 			// Точка отрисовки: перо + XOffset; YOffset положителен вверх.
 			gx := (pen + g.xOff).Round() + m.offX
 			gy := baseline - g.yOff.Round() + m.offY
-			c.drawAlphaMask(m.mask, gx, gy, col)
+			c.withMaskKind(output.RegionText, func() { c.drawAlphaMask(m.mask, gx, gy, col) })
 		}
 		pen += g.adv
 	}

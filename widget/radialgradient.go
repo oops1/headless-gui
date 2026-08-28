@@ -46,28 +46,7 @@ func NewRadialGradient(col color.RGBA) *RadialGradient {
 
 // colorAt возвращает цвет на расстоянии t от центра (0..1).
 func (g *RadialGradient) colorAt(t float64) color.RGBA {
-	if len(g.Stops) == 0 {
-		return color.RGBA{}
-	}
-	if t <= g.Stops[0].Offset {
-		return g.Stops[0].Color
-	}
-	last := g.Stops[len(g.Stops)-1]
-	if t >= last.Offset {
-		return last.Color
-	}
-	for i := 1; i < len(g.Stops); i++ {
-		a, b := g.Stops[i-1], g.Stops[i]
-		if t <= b.Offset {
-			span := b.Offset - a.Offset
-			f := 0.0
-			if span > 0 {
-				f = (t - a.Offset) / span
-			}
-			return lerpColor(a.Color, b.Color, f)
-		}
-	}
-	return last.Color
+	return colorAtStops(g.Stops, t)
 }
 
 // radialSteps — сторона образа, который растягивается на всю область.

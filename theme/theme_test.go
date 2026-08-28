@@ -596,3 +596,61 @@ func TestStyleKey_ParseAndString(t *testing.T) {
 		t.Error("ключ без компонента принят")
 	}
 }
+
+// Тема из JSON умеет всё, что умеют встроенные профили.
+//
+// Схема загрузчика однажды отстала от модели стилей: радиальный градиент и
+// блик стекла появились в Go-профилях, а через JSON их задать было нельзя —
+// пользовательская тема молча теряла то, что показывают Windows 11 и macOS.
+func TestLoadTheme_RadialGradientAndHighlight(t *testing.T) {
+	const src = `{
+      "name": "custom",
+      "styles": {
+        "dock:hover": {
+          "gradient": [
+            {"pos": 0, "color": "#FFFFFF96"},
+            {"pos": 1, "color": "#FFFFFF00"}
+          ],
+          "gradient_kind": "radial",
+          "gradient_center_x": 0.5,
+          "gradient_center_y": 0.5,
+          "gradient_radius": 1.1
+        },
+        "taskbar": {
+          "backdrop": {"mode": "blur", "radius": 22, "tint": "#F5F5F78C", "highlight": "#FFFFFF5A"}
+        }
+      }
+    }`
+
+	res, err := theme.LoadTheme(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("theme.LoadTheme: %v", err)
+	}
+	if len(res.Warnings) != 0 {
+		t.Errorf("предупреждения при разборе: %v", res.Warnings)
+	}
+
+	m := theme.NewManager()
+	if err := m.RegisterTheme(res.Profile); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetTheme("custom"); err != nil {
+		t.Fatal(err)
+	}
+
+	dock := m.GetStyle("dock", "", theme.StateHover)
+	if dock.GradientKind != theme.GradientRadial {
+		t.Errorf("вид градиента %v, ждали radial", dock.GradientKind)
+	}
+	if dock.GradientRadius != 1.1 {
+		t.Errorf("радиус градиента %v, ждали 1.1", dock.GradientRadius)
+	}
+	if len(dock.Gradient) != 2 {
+		t.Errorf("точек градиента %d, ждали 2", len(dock.Gradient))
+	}
+
+	bar := m.GetStyle("taskbar", "", theme.StateNormal)
+	if bar.Backdrop.Highlight.A == 0 {
+		t.Error("блик подложки не прочитан — стекло выйдет плоской заливкой")
+	}
+}
