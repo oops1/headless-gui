@@ -423,12 +423,25 @@ func ApplyThemeTree(w Widget, t *Theme) {
 	if w == nil {
 		return
 	}
+	// Поддерево со своей темой пропускаем целиком: смена общей темы не
+	// должна перекрашивать область, которой тему назначили отдельно —
+	// иначе назначить её было бы нельзя, только до ближайшего SetTheme.
+	if sc, ok := w.(themeScoped); ok && sc.HasOwnTheme() {
+		return
+	}
 	if th, ok := w.(Themeable); ok {
 		th.ApplyTheme(t)
 	}
 	for _, child := range w.Children() {
 		ApplyThemeTree(child, t)
 	}
+}
+
+// themeScoped — виджет, объявляющий, что его поддерево живёт под своей темой
+// (реализуется ThemeScope). Интерфейс, а не проверка конкретного типа, чтобы
+// потребитель мог сделать такую область своим виджетом.
+type themeScoped interface {
+	HasOwnTheme() bool
 }
 
 // ApplyGlobalTheme обновляет глобальные цвета по умолчанию (используются в New*-конструкторах).
@@ -445,6 +458,7 @@ func ApplyGlobalTheme(t *Theme) {
 	win10.TitleTextInactive = t.TitleTextInactive
 	win10.Border = t.Border
 	win10.ShadowColor = t.ShadowColor
+	win10.OutlineDragFill = t.OutlineDragFill
 
 	// Кнопки
 	win10.BtnBG = t.BtnBG

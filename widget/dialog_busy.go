@@ -47,7 +47,9 @@ const (
 // только известен прогресс — SetProgress переключит её на значение.
 func (mb *MessageBox) ShowBusy(title, subtitle, hint string, onCancel func()) *BusyDialog {
 	dlg := NewDialog("", busyDlgW, busyDlgH)
-	dlg.ShowCloseButton = onCancel != nil
+	// SetShowCloseButton, а не прямая запись в поле — синхронизирует
+	// видимость кнопки ✕ сразу, не дожидаясь первого Draw диалога.
+	dlg.SetShowCloseButton(onCancel != nil)
 	dlg.CornerRadius = busyCorner // мягче обычного диалога — так в дизайне
 
 	// Полосы заголовка нет: ✕ висит в пустом верхнем поле, как в дизайне.

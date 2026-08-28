@@ -3111,6 +3111,464 @@ cannot import `window` (the dependency runs `window` → `widget`):
 
 ---
 
+## v3.14.0 additions (themes as data, desktop shell)
+
+Two new packages: `theme/` (an application's looks described by data) and
+`desktop/` (a system taskbar built out of that data). Both are additive — the
+old `widget.Theme` presets keep working through a two-way bridge, which is why
+this is v3.14.0 and not v4.
+
+### Theme profiles (`theme/`)
+
+A `Profile` is flat token tables; a `Theme` is those tables resolved along the
+inheritance chain; a `Manager` owns the registry, the active theme and
+subscriptions.
+
+```go
+p := theme.NewProfile("mytheme")
+p.Parent = theme.ProfileWindows11         // inherit, override only what differs
+p.SetColor("accent", theme.RGB(200, 60, 60)).
+    SetMetric("taskbar.height", 44).
+    SetFlag("taskbar.centered", true)
+p.SetStyle("taskbutton", "", theme.StateHover, theme.StyleDelta{
+    Fill: theme.C(theme.RGBA(255, 255, 255, 24)), Corner: theme.N(6),
+})
+
+m := theme.NewManager()
+theme.RegisterBuiltinProfiles(m)          // Windows2000(+Blue), Windows10(+Dark),
+m.RegisterTheme(p)                        // Windows11(+Dark), MacOS(+Dark)
+m.SetTheme("mytheme")                     // live switch; subscribers notified
+unsub := m.Subscribe(theme.ObserverFunc(func(*theme.Theme) { eng.Invalidate() }))
+```
+
+Manager API: `RegisterTheme`, `GetTheme`, `SetTheme`, `UnloadTheme` (refuses the
+active theme and any theme used as a parent), `Active`, `Subscribe`,
+`SetIconResolver`, and the lookups `GetStyle(component, part string, st State)`,
+`GetMetric(Key) float64`, `GetFlag(Key, def bool) bool`,
+`GetAnimation(Key) (AnimSpec, bool)`, `GetIcon(IconRef, size int) image.Image`.
+
+**`GetStyle` allocates nothing** — it returns a pointer into the resolved table
+and is safe to call from `Draw` (guarded by `testing.AllocsPerRun` in
+`theme/theme_test.go`). Never mutate the returned `*Style`; `Clone()` it first.
+
+Lookup order: `(component, part, state)` → `(component, part, Normal)` →
+`(component, "", state)` → the theme's default style. `State` is a bitmask
+(`StateHover|StatePressed|StateActive|StateDisabled|StateFocused`) collapsed by
+`Dominant()` to the leading one (Disabled > Pressed > Active > Hover > Focused),
+so a component keeps six entries, not thirty-two.
+
+`Style` fields: `Fill, Text, Border, Shadow color.RGBA`, `Gradient
+[]GradientStop`, `GradientAngle`, `Corner, BorderWidth, PadX, PadY, Elevation
+float64`, `Font FontSpec`, `Backdrop BackdropSpec`, `Bevel *BevelSpec`.
+`StyleDelta` mirrors them with pointers ("set" vs "inherited"); helpers `C(col)`,
+`N(f)`, `RGB(r,g,b)`, `RGBA(r,g,b,a)` (**alpha-premultiplies**, as everywhere in
+this engine).
+
+A dark variant declares only differences — usually three or four colors:
+`defaultStyle` takes fill and text from the flat `surface` and `text` tokens
+whenever a style leaves them unset. Do NOT write concrete colors into styles a
+dark variant must override; write the token instead.
+
+JSON themes need no engine changes:
+
+```go
+res, err := theme.LoadTheme(reader)  // res.Profile, res.Warnings ([]string)
+m.RegisterTheme(res.Profile)
+```
+Style keys in JSON are `"component.part:state"`; colors are `#RGB`, `#RRGGBB`,
+`#RRGGBBAA` in **straight** alpha and are premultiplied on load.
+
+### Bridge to the old presets
+
+`widget/theme_bridge.go` + `widget/theme_bindings.go`: one binding table walked
+in both directions, so they cannot drift.
+
+```go
+p := widget.ProfileFromTheme(oldTheme)     // *widget.Theme  → *theme.Profile
+t := widget.Materialize(resolvedTheme)     // *theme.Theme   → *widget.Theme
+m := widget.DefaultThemeManager()          // presets registered as profiles
+eng.SetThemeProfile(m, theme.ProfileWindows11)
+```
+
+### Engine additions
+
+- `Canvas.SetRoundClip(r image.Rectangle, radius int)` / `ClearRoundClip()` /
+  `HasRoundClip()` — clipping along the rounded outline (per-row span
+  narrowing), not just its bounding box. Honored by `fillRectPx`, `setPixelPx`,
+  `drawAlphaMask`, `drawColorGlyph`.
+- `Canvas.BlurBehind(r image.Rectangle, radius int, tint color.RGBA)` — acrylic
+  /mica: capture → 4× downscale → separable box blur (`engine.BlurRGBA`,
+  `BlurRegion`; cost independent of radius) → upscale back through `fillRectPx`,
+  so it inherits clips.
+- `Canvas.DrawSoftShadow(r image.Rectangle, corner, elevation int, col
+  color.RGBA)` — a shadow with a smooth falloff.
+- `Engine.RenderOnce() *image.RGBA` — render one frame synchronously and return
+  a **copy** of the image (snapshots, golden tests, debug dumps).
+- `Engine.SetThemeProfile(m *theme.Manager, name string) error`.
+- `widget.InvalidateRect(r image.Rectangle)` — claim an area outside any
+  widget's own bounds. Needed by overlays: `Base.Invalidate` claims the
+  widget's bounds, and a flyout's bounds are its taskbar icon, while what
+  changes is a window drawn elsewhere.
+- **Damage is a list, not one union.** `InvalidateRect` keeps up to
+  `maxDamageRects` (16) separate rectangles, absorbing nested ones and
+  collapsing to a union past the limit. Drawing still happens over the union
+  (the canvas clip is one rectangle); the **diff** runs per rectangle, so two
+  changes in opposite corners no longer compare every tile between them.
+
+### Desktop shell (`desktop/`)
+
+Components never touch the system. Data arrives through consumer-implemented
+interfaces — `WindowModel`, `AppCatalog`, `SystemStatus`, `Notifications`,
+`Clock` (see `desktop/contract.go`) — and the engine ships fakes for all of them
+(`FakeWindowModel`, `StaticAppCatalog`, `FakeSystemStatus`, `FakeNotifications`,
+`FakeClock`) that tests and `cmd/desktopdemo` run on.
+
+```go
+bar := desktop.NewTaskbar(m)              // m *theme.Manager
+bar.AddItem(desktop.SlotStart, desktop.NewStartButton(m))
+bar.AddItem(desktop.SlotApps, desktop.NewApplicationArea(m, catalog, windows))
+bar.AddItem(desktop.SlotTray, tray)       // desktop.NewSystemTray(m)
+bar.AddItem(desktop.SlotTray, desktop.NewClock(m, desktop.SystemClock{}))
+bar.SetBounds(image.Rect(0, h-bar.Height(), w, h))
+defer bar.Close()                         // unsubscribes from the theme
+area := bar.ReservedArea()                // keep maximized windows out of it
+```
+
+Slots: `SlotStart`, `SlotApps`, `SlotTray`. An `Item` is a `widget.Widget` plus
+`PreferredSize(avail image.Point) image.Point`. Components: `Taskbar`,
+`StartButton`, `ApplicationArea`, `RunningApplications`, `SystemTray`,
+`NetworkItem`, `VolumeItem`, `PowerItem`, `ClockItem`, `StartMenu`,
+`CalendarFlyout`, `QuickSettings`, `NotificationCenter`.
+
+Everything with a subscription has `Close()`; forgetting it leaves a component
+waking the renderer forever (the clock ticks once a second; status icons wake on
+every network/volume/power change).
+
+Painting helpers (`desktop/paint.go`): `PaintStyle` (shadow → backdrop → fill →
+bevel/border), `DrawTextCentered`, `DrawTextLeft`, `DrawTextLeftElided`, `Elide`,
+`MeasureText`, `StateOf(hover, pressed, active, disabled, focused)`.
+
+**No color literals in `Draw`.** `desktop/nocolor_test.go` parses the package
+and fails on any `color.RGBA{...}` inside `Draw`/`draw*`/`paint*`. Colors come
+from the theme; that is what makes one taskbar look like four different ones.
+
+### Theme tokens that change the shell's shape
+
+Beyond colors and sizes, these decide what the taskbar *is*:
+
+| Token | Kind | Meaning |
+|---|---|---|
+| `taskbar.height` | metric | strip height |
+| `taskbar.top` | flag | strip is pinned to the TOP edge (macOS menu bar); flyouts then open downwards |
+| `dock.height` | metric | height of a SEPARATE bottom strip (the macOS dock); 0 = one strip only |
+| `taskbar.centered` | flag | Start + apps group is centered (Windows 11) |
+| `taskbar.separators` | flag | draw grip separators between sections (classic panel) |
+| `startbutton.label` | flag | show the "Start" caption next to the icon |
+| `startbutton.icon` | icon | the Start button glyph from the theme's icon set |
+| `taskbutton.label` | flag | show window titles on task buttons (Windows 10/11 hide them) |
+| `taskbutton.underline` | metric | thickness of the mark under an open window |
+| `taskbutton.underline.len` | metric | mark length as a fraction of button width: 1 = full bar (Windows 10), 0.4 = short tick (Windows 11, doubled for the active window) |
+| `clock.date` | flag | show the date under the time (classic clocks never do) |
+| `tray.gap`, `tray.chevron.width`, `tray.overflow.columns` | metrics | tray row and its overflow grid |
+
+The Start button icon has three levels, in order: `StartButton.Icon` (a picture
+the shell sets), the theme's `startbutton.icon`, and the built-in 2×2 glyph.
+
+macOS splits the desktop into two strips, so the shell asks the taskbar what the
+theme wants and lays the same components out accordingly:
+
+```go
+if h := bar.DockHeight(); h > 0 {      // menu bar + dock
+    bar.SetItems(desktop.SlotStart, startBtn)
+    bar.SetItems(desktop.SlotTray, tray, clock)
+    dock.SetItems(desktop.SlotApps, apps)
+} else {                                // one taskbar
+    bar.SetItems(desktop.SlotApps, apps)
+    dock.SetItems(desktop.SlotApps)
+}
+if bar.Edge() == desktop.EdgeTop { /* pin to the top */ }
+```
+
+`SetItems` replaces a slot's contents; components are NOT recreated, only
+reassigned — otherwise a theme switch would drop their state (hover, open
+flyouts, subscriptions).
+
+### Flyouts
+
+`desktop/flyout.go` — the shared base for the Start menu, calendar, quick
+settings and notification center. They are **engine overlays**
+(`HasOverlay`/`DrawOverlay`/`OverlayBounds`), so `engine.SetPopupSink` can host
+them in separate OS windows and the shell window does not clip them.
+
+```go
+menu := desktop.NewStartMenu(m, catalog)
+menu.Screen = image.Rect(0, 0, w, h)      // flyout is fitted into this
+startBtn.OnClick = func() { menu.Toggle(startBtn.Bounds()) }
+root.AddChild(menu)                       // must be in the tree, or no overlay
+```
+
+`Flyout` fields: `Component`, `Anchor`, `Edge` (EdgeBottom/EdgeTop), `Align`
+(AlignStart/Center/End), `Margin`, `Screen`, `Content`, `Size`, `OnOpen`,
+`OnClose`. Methods: `Open(anchor)`, `Close()`, `Toggle(anchor)`, `IsOpen()`.
+A flyout closes on a click outside and on Esc; a click **inside** is not
+consumed — the content handles it.
+
+A component that asks the theme for metrics the theme never defined gets zero
+and silently never opens. `desktop/flyouts_test.go` opens all four panels under
+all eight built-in themes for exactly this reason.
+
+### Presenters: a theme changes shape, not only color
+
+Tokens cannot express "the macOS dock": large centered icons, the hovered one
+growing and pushing its neighbours. So a profile may supply a presenter —
+someone else's drawing AND layout for a component it knows.
+
+```go
+p.Presenters["runningapps"] = "dock"                  // in the macOS profile
+desktop.RegisterPresenter("dock", DockPresenter{})    // registered in init()
+```
+
+```go
+type Presenter interface {
+    Measure(c Component, avail image.Point) image.Point
+    Layout(c Component, bounds image.Rectangle) []image.Rectangle
+    Draw(ctx widget.DrawContext, c Component)
+}
+type Component interface {          // what a presenter may ask of a component
+    Bounds() image.Rectangle
+    Theme() *theme.Manager
+    Cells() []Cell                  // Title, Icon, Active, Muted
+    HoverIndex() int
+}
+```
+
+`Layout` returns the cell rectangles and the component adopts them for hit
+testing — otherwise clicks follow the component's own row while the user sees a
+dock. A component must **never** know the active theme's name; it asks
+`PresenterFor(tm, key)` and hands drawing over if there is one.
+
+Two traps worth remembering, both found by tests here:
+- `Cells()` must not be derived from the laid-out cells: presenters call it from
+  `Measure`, i.e. before any layout exists (zero width → no cells → never lays
+  out).
+- Do not hold the component's mutex while calling a presenter: it calls
+  `Cells()`/`HoverIndex()` back and deadlocks.
+
+### Radial gradients
+
+`Style.Gradient` is drawn by `desktop.PaintGradient` (called from `PaintStyle`
+whenever the style sets it) and replaces the fill. `GradientKind` picks the
+shape:
+
+```go
+p.SetStyle("dock", "", theme.StateHover, theme.StyleDelta{
+    Gradient:       []theme.GradientStop{{Pos: 0, Color: c1}, {Pos: 1, Color: c2}},
+    GradientKind:   theme.GK(theme.GradientRadial),
+    GradientCenterX: theme.N(0.5), GradientCenterY: theme.N(0.5),
+    GradientRadius: theme.N(1.1),
+})
+```
+
+Center and radius are fractions of the area (0 means "middle" / "to the edge"),
+so one glow fits any icon size. Renderer entry points:
+`widget.DrawRadialGradient(ctx, rect, *widget.RadialGradient)` and
+`widget.DrawLinearGradient`. The radial one builds a 64×64 image and lets the
+engine stretch it — cheaper than per-pixel writes and smooth on fractional DPI.
+Colors are alpha-premultiplied, so a transparent edge is the ZERO color, not the
+same color with `A=0`; `widget.NewRadialGradient(col)` builds that pair for you.
+
+### A theme for a subtree (`widget.ThemeScope`)
+
+```go
+scope := widget.NewThemeScope(widget.Win2000Theme())
+scope.AddChild(w)                 // themed immediately
+root.AddChild(scope)
+eng.SetTheme(widget.DarkTheme())  // the scope keeps its own theme
+```
+
+- `ApplyThemeTree` skips any widget implementing `HasOwnTheme() bool` returning
+  true, so a global theme change cannot repaint a scoped subtree.
+- Colors live in widget fields (handed out by `ApplyTheme`), but SHAPE
+  (`Classic3D`, corners, bevel colors) is read from a shared variable inside
+  `Draw` via `currentStyle()`. `ThemeScope.Draw` swaps it for the subtree and
+  restores it with `defer`; nested scopes restore the OUTER style, not the
+  global one. The swap is a plain variable: a frame is drawn on one goroutine.
+- `NewThemeScope(nil)` behaves as a plain container.
+
+### Icons
+
+`widget.BuiltinIcons()` returns an `IconSet` implementing `theme.IconResolver`
+(`ResolveIcon(theme.IconRef, size int) image.Image`), with a two-level cache and
+a never-nil placeholder glyph. Give it to the manager — without a resolver the
+tray renders empty and nothing warns you:
+
+```go
+m.SetIconResolver(widget.BuiltinIcons())
+```
+
+---
+
+## v3.15.0 additions (render pipeline)
+
+### Draw contract
+
+The engine can skip a widget subtree whose bounding rectangle does not
+intersect any damage region — that subtree's `Draw` is not called for the
+frame. Controlled by:
+
+```go
+eng.SetSubtreeCulling(bool)   // default: true (on)
+```
+
+Set `false` to fall back to the pre-v3.15.0 behavior (every widget's `Draw`
+runs every rendered frame) for an app that can't yet meet the contract below.
+
+Rules a widget MUST follow so culling is transparent to it:
+
+1. **`Draw` is not called every frame.** A widget must render correctly when
+   skipped — skipped means "the screen already shows the right thing."
+2. **Animation only via `widget.Animate` / `widget.AnimateOwned`.** Never a
+   frame counter or `time.Now()` read inside `Draw` — a skipped `Draw` call
+   would stall it instead of letting it finish.
+3. **`Draw` must not mutate widget state.** In particular, do not compute
+   layout / hit-test rects inside `Draw` and cache them there — a skipped
+   `Draw` leaves the cache stale and clicks resolve against the wrong
+   coordinates.
+4. **Any visual change needs `Invalidate()` (own bounds) or
+   `widget.InvalidateRect(r)` (area outside own bounds — overlays, popups).**
+   Without it the engine has no signal the frame is stale, and with culling
+   on that means the widget never repaints again, not just late.
+5. **A widget that paints outside its own bounds (`Elevation` shadow,
+   overlay, popup) must claim that area itself.** The subtree's bounding
+   rectangle is computed from widget `Bounds()`, not from actual paint
+   extent — an unclaimed shadow/overlay area is dropped from culling
+   consideration and can go stale.
+
+See `GUIDE.md` / `GUIDE_EN.md`, section "Свой виджет" / "Custom Widget" →
+"Контракт отрисовки" / "The draw contract", for the full rationale and
+before/after code examples.
+
+---
+
+### Frame contents: what the engine now reports
+
+```go
+type Frame struct {
+    Seq       uint64
+    Timestamp time.Time
+    Tiles     []DirtyTile   // as before: raw RGBA
+    Regions   []Region      // v3.15.0: what each tile is made of
+    Moves     []MoveRegion  // v3.15.0: content that merely moved
+}
+
+type Region struct {
+    Rect  image.Rectangle
+    Kind  RegionKind // RegionMixed | RegionSolid | RegionImage | RegionText
+    Color color.RGBA // meaningful only for RegionSolid
+}
+
+type MoveRegion struct {
+    From image.Point     // take from here
+    Rect image.Rectangle // put here; size comes from Rect
+}
+```
+
+`Regions` runs parallel to `Tiles` (same order, same length). How the mark
+accumulates per tile, in the rasteriser's own loops:
+
+- an **opaque fill covering the whole tile** wipes whatever was under it and
+  makes the tile `RegionSolid` with that color;
+- a fill is a *weak* mark — it is the background. Text or an image drawn over
+  it becomes the tile's mark, not `RegionMixed`: what matters to the consumer
+  is what is on top;
+- a fill that lands over content **without covering the tile** gives
+  `RegionMixed` — an honest "don't know";
+- text over an image (or the reverse) is `RegionMixed`;
+- marks inside the damage are reset at the start of each frame.
+
+**Apply `Moves` BEFORE `Tiles`.** That is DXGI's order and what a consumer
+expects; the reverse would overwrite fresh pixels with stale ones. A widget
+declares a move with `widget.NotifyMove(src, dst)` — `Window` does it while
+dragging and on landing. A declared move does NOT replace damage: it is a hint
+about a cheaper way to reach the same result.
+
+### Buffer format and drawing into foreign memory
+
+```go
+eng.SetPixelFormat(engine.FormatBGRX)   // rasteriser writes BGRX directly
+eng.SetSurface(pix, stride, engine.FormatBGRX) // back buffer = your memory
+eng.SetSurface(nil, 0, engine.FormatRGBA)      // back to the engine's own
+```
+
+Channel order is a property of the buffer, not a reason for a per-pixel loop:
+an RDP consumer used to swap RGBA→BGRX itself on every frame. `FormatRGBA` is
+the default and byte-for-byte what shipped before.
+
+`SetSurface` hands the engine the consumer's own memory as the back buffer,
+removing two copies of the frame. `stride` may exceed `w*4` (DIB alignment).
+The **front** buffer stays internal — the diff needs a private copy of the
+previous frame to compare against. Buffer rotation (`SetSurfaces` with
+per-buffer damage age, the equivalent of `EGL_buffer_age`) is not implemented.
+
+`DirtyTile.Data` follows the chosen format: with `FormatBGRX` those bytes are
+BGRX, which is what the caller asked for.
+
+### Pacing and the frame sink
+
+```go
+eng.SetFrameSink(sink)                    // sink.Present(output.Frame), synchronous
+eng.SetPacing(engine.PacingExternal)      // the internal ticker starts no frames
+eng.RequestFrame()                        // the sink is ready for one
+```
+
+Under `PacingExternal` the ticker still advances animations — otherwise an
+animation started by the application would freeze until the next request. The
+`Frames()` channel keeps working; the sink is an alternative, not a
+replacement, and unlike the channel it cannot drop a frame (the channel has a
+depth of 8 and discards on overflow).
+
+Why a consumer wants this beyond vblank pacing: `Engine.Start()` runs the
+render loop on its own goroutine, so a consumer that mutates the widget tree
+from another goroutine races the render walk. External pacing lets it do both
+on one goroutine and remove the race by construction.
+
+### Measured cost of a frame
+
+Desktop scene from `desktop/` at 1280×800, Windows 11 theme, fake system data
+with a fixed clock; `go test ./engine/ -bench BenchmarkPipeline -benchtime=200x`
+on the maintainer's machine (Intel Core Ultra 7 265K, Windows). Rerun with
+`engine/pipeline_bench_test.go`.
+
+| scenario | ns/op | B/op | allocs/op |
+|---|---|---|---|
+| full frame (`Invalidate`) | 3 318 098 | 28 891 | 37 |
+| clock tick (60×24 rect), culling on | 77 426 | 2 697 | 7 |
+| clock tick, culling **off** | 82 122 | 2 968 | 9 |
+| hover over a taskbar button | 95 390 | 51 583 | 10 |
+| dragging a 720×440 window | 1 854 068 | 2 038 138 | 89 |
+
+What the numbers say, and what they do not:
+
+- A damage-sized frame costs ~43× less than a full one. That win comes from
+  `SetRenderOnDemand` + `InvalidateRect`, which predate this work.
+- Subtree culling adds ~6% on top of that (77.4 µs vs 82.1 µs) and removes two
+  allocations. On a flat desktop most of the tree is a handful of wide panels,
+  so there is little to skip; the deeper the tree away from the damage, the
+  more it saves. It is not the headline win, and the numbers say so.
+- Window dragging is the expensive case (1.85 ms, 2 MB) — that is what
+  `Frame.Moves` addresses: the pixels have not changed, only moved.
+
+Repeated after tile classification, move reporting and external pacing landed
+(the same command, same machine): full frame 3 278 191 ns, clock tick 75 660 ns
+with culling and 84 868 ns without, hover 102 311 ns, window drag 2 007 091 ns.
+Within noise of the numbers above — the marks are one assignment inside loops
+that already ran, and `Frame.Moves` is filled from a list that is empty unless
+something declared a move.
+
+Rule worth keeping: an optimisation without a paired measurement is not
+accepted. Add the before/after here.
+
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

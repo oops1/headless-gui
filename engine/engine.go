@@ -19,6 +19,7 @@ import (
 	"golang.org/x/image/font/gofont/goitalic"
 
 	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -53,8 +54,16 @@ type Engine struct {
 	// ── Рендер по запросу (см. invalidate.go) ───────────────────────────────
 	onDemand  atomic.Bool
 	invGen    atomic.Uint64
+	// pacing, frameWanted, wake, sink — внешний темп и сток кадров
+	// (pacing.go). При PacingExternal кадр готовится только по RequestFrame.
+	pacing      atomicPacing
+	frameWanted atomic.Bool
+	wake        chan struct{}
+	sinkMu      sync.RWMutex
+	sink        FrameSink
+
 	damageMu  sync.Mutex
-	damage    image.Rectangle // объединение InvalidateRect с прошлого кадра
+	damage    []image.Rectangle // области InvalidateRect с прошлого кадра
 	damageAll bool            // Invalidate() — полный diff
 
 	focus    focusManager  // текущий виджет с фокусом
@@ -246,6 +255,9 @@ func New(width, height, fps int) *Engine {
 		fontCache: fc,
 		canvas:    newCanvas(width, height, fc),
 		frames:    make(chan output.Frame, 8),
+		// wake будит цикл кадров при внешнем темпе: без него RequestFrame
+		// ждал бы ближайшего тика, то есть темп остался бы тикерным.
+		wake: make(chan struct{}, 1),
 		quit:      make(chan struct{}),
 		done:      make(chan struct{}),
 		fps:       fps,
@@ -695,6 +707,89 @@ func (e *Engine) SetTheme(t *widget.Theme) {
 	e.Invalidate()
 }
 
+// SetThemeProfile применяет тему из менеджера профилей по имени.
+//
+// Дополняет SetTheme, а не заменяет: профиль разрешается в плоскую тему
+// мостом (widget.Materialize) и дальше идёт тем же путём — глобальная
+// палитра, обход дерева, инвалидация. Приложению, которое хочет
+// наследовать тему и переопределять токены, не нужно ради этого менять
+// способ применения.
+//
+// Менеджер передаётся явно: набор тем принадлежит приложению, а не
+// движку. Готовый набор со встроенными пресетами —
+// widget.DefaultThemeManager().
+func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
+	if m == nil {
+		return fmt.Errorf("engine: SetThemeProfile без менеджера тем")
+	}
+	if err := m.SetTheme(name); err != nil {
+		return err
+	}
+	e.SetTheme(widget.Materialize(m.Active()))
+	return nil
+}
+
+// RenderFrameNow синхронно готовит кадр и возвращает его целиком — с
+// тайлами, признаками содержимого и переносами.
+//
+// RenderOnce для этого не годится: он отдаёт копию всей картинки, а
+// потребителю, который живёт дельта-тайлами, нужна именно она — и копировать
+// весь кадр ради этого значит платить ровно ту цену, которой он избегает.
+//
+// Кадр готовится в вызывающей горутине. Потребителю, который меняет сцену у
+// себя, это и нужно: мутация и отрисовка оказываются на одной горутине, и
+// гонка с внутренним циклом исчезает по построению.
+func (e *Engine) RenderFrameNow() output.Frame {
+	return e.renderFrame()
+}
+
+// RenderOnce синхронно рисует один кадр и возвращает КОПИЮ полученного
+// изображения (физические пиксели).
+//
+// Движок обычно отдаёт кадры дельта-тайлами через Frames() — так дешевле по
+// сети. Но иногда нужна целая картинка здесь и сейчас: снимок для
+// предпросмотра, кадр для golden-теста, отладочный дамп. Собирать её из
+// тайлов ради этого — лишняя работа для вызывающего.
+//
+// Копия, а не ссылка на внутренний буфер: движок продолжит рисовать в него
+// следующий кадр, и отданная наружу картинка изменилась бы под руками.
+// Возвращает nil, если холста ещё нет.
+// logicalDamage переводит области кадра в логические координаты, расширяя
+// их наружу: при дробном масштабе округление внутрь отрезало бы от области
+// половину точки, а вместе с ней — поддерево на самом её краю.
+func (e *Engine) logicalDamage(rects []image.Rectangle) []image.Rectangle {
+	k := e.Scale()
+	if k == 1 || len(rects) == 0 {
+		return rects
+	}
+	out := make([]image.Rectangle, 0, len(rects))
+	for _, r := range rects {
+		out = append(out, image.Rect(
+			int(math.Floor(float64(r.Min.X)/k)),
+			int(math.Floor(float64(r.Min.Y)/k)),
+			int(math.Ceil(float64(r.Max.X)/k)),
+			int(math.Ceil(float64(r.Max.Y)/k)),
+		))
+	}
+	return out
+}
+
+func (e *Engine) RenderOnce() *image.RGBA {
+	e.renderFrame()
+
+	e.mu.RLock()
+	canvas := e.canvas
+	e.mu.RUnlock()
+	if canvas == nil {
+		return nil
+	}
+	e.frameMu.Lock()
+	defer e.frameMu.Unlock()
+	out := image.NewRGBA(canvas.front.Rect)
+	copy(out.Pix, canvas.front.Pix)
+	return out
+}
+
 // Start запускает цикл рендеринга в отдельной горутине.
 // Вызывать не более одного раза.
 func (e *Engine) Start() {
@@ -1046,6 +1141,18 @@ func (e *Engine) loop() {
 
 	for {
 		select {
+		case <-e.wake:
+			// Внешний темп: сток попросил кадр. Анимации продвигаются в
+			// тикере, здесь — только кадр.
+			if !e.pacingIsExternal() || !e.takeFrameRequest() {
+				continue
+			}
+			frame := e.renderFrame()
+			if len(frame.Tiles) == 0 {
+				continue
+			}
+			e.deliver(frame)
+
 		case <-ticker.C:
 			// Продвигаем анимации ДО решения о пропуске кадра: тики зовут
 			// сеттеры виджетов, те самоинвалидируются (авто-damage), поэтому
@@ -1053,6 +1160,12 @@ func (e *Engine) loop() {
 			// частично. Вызывается в любом режиме — анимации живут и при
 			// SetRenderOnDemand(false).
 			widget.StepAnimations(time.Now())
+			// Внешний темп: кадры готовит RequestFrame. Анимации всё равно
+			// продвигаем — иначе начатая приложением анимация замерла бы до
+			// следующего запроса и шла бы рывками.
+			if e.pacingIsExternal() {
+				continue
+			}
 			if e.onDemand.Load() {
 				gen := e.invGen.Load()
 				if gen == lastGen && !e.animationNeeded(interval) {
@@ -1064,11 +1177,10 @@ func (e *Engine) loop() {
 			if len(frame.Tiles) == 0 {
 				continue
 			}
-			select {
-			case e.frames <- frame:
-			default:
-				// Потребитель не успевает — кадр отбрасывается
-			}
+			// Один путь выдачи на оба темпа: сток и канал получают кадр
+			// в одном месте, иначе сток молча оставался бы пустым при
+			// тикерном темпе — ровно это и показал тест.
+			e.deliver(frame)
 		case <-e.quit:
 			return
 		}
@@ -1087,7 +1199,10 @@ func (e *Engine) renderFrame() output.Frame {
 	root := e.root
 	e.mu.RUnlock()
 
-	damage, damageAll := e.consumeDamage()
+	damageRects, damageAll := e.consumeDamage()
+	// Объединение нужно там, где область может быть только одна: клип
+	// канваса — прямоугольник, и попапы отбираются по одному прямоугольнику.
+	damage := unionRects(damageRects)
 	// Некламповая копия — попапы живут и за краем холста (см. renderPopups).
 	popupDamage := damage
 
@@ -1096,7 +1211,27 @@ func (e *Engine) renderFrame() output.Frame {
 	// damage back-буфер хранит прошлый кадр — он совпадает с front, поэтому
 	// и отрисовка, и diff вне damage не нужны (контракт InvalidateRect:
 	// вызывающий заявляет ВСЕ изменившиеся области).
+	//
+	// ОТРИСОВКА идёт по объединению, а DIFF — по каждой области отдельно.
+	// Рисовать по объединению не жалко (пиксели остаются те же, тайлы от
+	// этого не меняются), а вот сравнивать по нему — значит отправить
+	// потребителю всё, что лежит между далёкими областями.
 	partial := e.onDemand.Load() && !damageAll && !damage.Empty()
+
+	// Пропуск поддеревьев: обходу нужно знать, что именно перерисовывается.
+	// Полный кадр ограничений не ставит — иначе первый же кадр после
+	// запуска остался бы наполовину пустым.
+	if partial {
+		// В ЛОГИЧЕСКИХ координатах: damage движок хранит в физических
+		// пикселях, а границы виджетов живут в логических. При масштабе
+		// 1.25 сравнение одних с другими пропустило бы ровно то поддерево,
+		// которое и надо было нарисовать.
+		widget.SetDrawDamage(e.logicalDamage(damageRects))
+		defer widget.ClearDrawDamage()
+	} else {
+		widget.ClearDrawDamage()
+	}
+
 	if partial {
 		damage = damage.Intersect(image.Rect(0, 0, canvas.W, canvas.H))
 		if damage.Empty() {
@@ -1104,9 +1239,11 @@ func (e *Engine) renderFrame() output.Frame {
 		}
 		canvas.blitBackgroundIn(damage)
 		canvas.setBaseClip(damage)
+		canvas.resetTileMarks(damage)
 		defer canvas.clearBaseClip()
 	} else {
 		canvas.blitBackground()
+		canvas.resetTileMarks(image.Rect(0, 0, canvas.W, canvas.H))
 	}
 
 	// Активен ли хост попапов: если да — оверлеи с OverlayBounds не рисуются
@@ -1156,7 +1293,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
 	if partial {
-		tiles = canvas.diffAndSyncIn(damage)
+		tiles = canvas.diffAndSyncInRects(damageRects)
 	} else {
 		tiles = canvas.diffAndSync()
 	}
@@ -1176,10 +1313,24 @@ func (e *Engine) renderFrame() output.Frame {
 		}
 	}
 
+	// Переносы: содержимое, переехавшее без изменений. При полном кадре они
+	// бессмысленны — потребитель и так получает всё заново, а оставшись в
+	// списке, перенос достался бы следующему кадру, к которому не относится.
+	var moves []output.MoveRegion
+	if partial {
+		for _, m := range widget.TakeMoves() {
+			moves = append(moves, output.MoveRegion{From: m.From, Rect: m.Rect})
+		}
+	} else {
+		widget.DropMoves()
+	}
+
 	return output.Frame{
 		Seq:       seq,
 		Timestamp: time.Now(),
 		Tiles:     tiles,
+		Regions:   canvas.regionsFor(tiles),
+		Moves:     moves,
 	}
 }
 

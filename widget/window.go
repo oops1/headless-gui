@@ -220,9 +220,9 @@ type Window struct {
 
 	// outlineRect — текущее положение контура; непустой только пока идёт
 	// перетаскивание контуром. outlineDX/DY — суммарное смещение мыши.
-	outlineRect      image.Rectangle
-	outlineDX        int
-	outlineDY        int
+	outlineRect image.Rectangle
+	outlineDX   int
+	outlineDY   int
 
 	// ── Drag окна (для borderless-режима) ───────────────────────────────────
 
@@ -246,10 +246,10 @@ type Window struct {
 	dragWinY   int
 
 	// ── Resize перетаскиванием краёв (для «виртуальных» окон на канвасе) ─────
-	resizing     bool           // идёт ли изменение размера за край
-	resizeDir    winEdge        // направление(я) активного ресайза (битовая маска)
+	resizing     bool            // идёт ли изменение размера за край
+	resizeDir    winEdge         // направление(я) активного ресайза (битовая маска)
 	resizeStart  image.Rectangle // bounds окна на момент начала ресайза
-	resizeStartX int            // координаты мыши на момент начала ресайза
+	resizeStartX int             // координаты мыши на момент начала ресайза
 	resizeStartY int
 
 	// ── Взведённая кнопка заголовка (release-семантика) ─────────────────────
@@ -488,12 +488,12 @@ func (w *Window) ContentBounds() image.Rectangle {
 // ─── Кнопки заголовка: геометрия и hit-test ─────────────────────────────────
 
 const (
-	winBtnW     = 46 // ширина кнопки управления (Windows-стиль)
-	toolBtnW    = 32 // ширина кнопки для ToolWindow
-	macCircleR  = 6  // радиус traffic light (macOS)
-	macStartX   = 18 // отступ первого кружка от левого края
-	macSpacing  = 22 // расстояние между центрами кружков
-	macHitSlop  = 10 // допуск клика по кружку
+	winBtnW    = 46 // ширина кнопки управления (Windows-стиль)
+	toolBtnW   = 32 // ширина кнопки для ToolWindow
+	macCircleR = 6  // радиус traffic light (macOS)
+	macStartX  = 18 // отступ первого кружка от левого края
+	macSpacing = 22 // расстояние между центрами кружков
+	macHitSlop = 10 // допуск клика по кружку
 )
 
 // ─── Resize перетаскиванием краёв ───────────────────────────────────────────
@@ -923,7 +923,7 @@ func (w *Window) drawClassicFrame(ctx DrawContext, st ThemeStyle) {
 // смещён на 1px вправо-вниз).
 func (w *Window) drawClassicTitleButtons(ctx DrawContext, st ThemeStyle) {
 	face := w.resolveColor(win10.BtnBG, win10.PanelBG) // «лицо» Win2000 (#D4D0C8)
-	glyph := win10.BtnText                              // чёрный глиф
+	glyph := win10.BtnText                             // чёрный глиф
 	closeR, maxR, minR := w.classicTitleBtnRects()
 
 	// draw рисует одну bevel-кнопку и её глиф. kind задаёт тип глифа;
@@ -1312,10 +1312,12 @@ func (w *Window) OnMouseMove(x, y int) {
 				w.dragWinX+dx, w.dragWinY+dy,
 				w.dragWinX+dx+b.Dx(), w.dragWinY+dy+b.Dy(),
 			)
-			// Изменились только две полосы: там, где контур был, и там, где
-			// он стал. Полная инвалидация здесь стоила бы кадра целиком —
-			// ровно того, чего режим контура и должен избегать.
-			notifyRectChanged(old.Union(w.outlineRect))
+			// Изменились только полосы контура: там, где он был, и там, где
+			// он стал. Именно полосы и заявляются — объединение двух рамок,
+			// разошедшихся на пять точек, накрывает всё окно целиком, и
+			// потребитель перерисовывает эту площадь на каждый шаг мыши.
+			w.damageOutline(old)
+			w.damageOutline(w.outlineRect)
 			return
 		}
 		if w.OnDragMove != nil {
@@ -1333,7 +1335,12 @@ func (w *Window) OnMouseMove(x, y int) {
 			if shiftX != 0 || shiftY != 0 {
 				// Window.SetBounds сам пересчитает ContentBounds → дочерние виджеты.
 				// Рекурсивный ShiftWidget не нужен — Window управляет layout.
-				w.SetBounds(image.Rect(newX, newY, newX+b.Dx(), newY+b.Dy()))
+				moved := image.Rect(newX, newY, newX+b.Dx(), newY+b.Dy())
+				w.SetBounds(moved)
+				// Картинка окна та же, просто в другом месте. Объявляем
+				// перенос: потребитель скопирует её у себя вместо того,
+				// чтобы принимать заново на каждый шаг мыши.
+				NotifyMove(b, moved)
 			}
 		}
 		return
@@ -1415,6 +1422,10 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 					w.OnDragMove(dx, dy) // нативное окно переносит ОС
 				} else if dx != 0 || dy != 0 {
 					w.SetBounds(dest) // сам сообщит об объединении старой и новой области
+					// Окно не изменилось — оно переехало. Объявляем перенос:
+					// потребитель скопирует картинку у себя вместо того,
+					// чтобы принимать её заново.
+					NotifyMove(from, dest)
 				}
 				// Гасим контур ровно там, где он был; полная инвалидация
 				// скрыла бы от хоста, что окно просто переехало, — а по этому
@@ -1568,6 +1579,42 @@ func (w *Window) DrawOverlay(ctx DrawContext) {
 	w.localeItemRects = rects
 	w.localeMu.Unlock()
 }
+
+// damageOutline заявляет области, которые занимает контур.
+//
+// Пустой контур — четыре тонкие полосы по краям: рамка в две линии плюс
+// запас на скругление. Залитый — весь прямоугольник: под заливкой меняется
+// каждый пиксель, и дробить её на полосы нечестно.
+func (w *Window) damageOutline(r image.Rectangle) {
+	if r.Empty() {
+		return
+	}
+	if w.OutlineDragStyle == OutlineDragFilled {
+		notifyRectChanged(r)
+		return
+	}
+
+	// Толщина: две линии рамки плюс скругление, если оно есть — дуга уходит
+	// внутрь от края ровно на радиус.
+	t := outlineStripThickness
+	if cr := w.CornerRadius; cr > t {
+		t = cr
+	}
+	if t*2 >= r.Dy() || t*2 >= r.Dx() {
+		// Контур тоньше собственных полос — дробить нечего.
+		notifyRectChanged(r)
+		return
+	}
+
+	notifyRectChanged(image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+t))     // верх
+	notifyRectChanged(image.Rect(r.Min.X, r.Max.Y-t, r.Max.X, r.Max.Y))     // низ
+	notifyRectChanged(image.Rect(r.Min.X, r.Min.Y+t, r.Min.X+t, r.Max.Y-t)) // лево
+	notifyRectChanged(image.Rect(r.Max.X-t, r.Min.Y+t, r.Max.X, r.Max.Y-t)) // право
+}
+
+// outlineStripThickness — толщина полосы контура: две линии рамки и точка
+// запаса на сглаживание.
+const outlineStripThickness = 3
 
 // drawDragOutline рисует контур окна при OutlineDrag: полупрозрачная заливка
 // в тон хрома плюс сплошная рамка. Пока контур виден, само окно стоит на

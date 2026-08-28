@@ -37,6 +37,21 @@ import (
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
+// SetSubtreeCulling включает или выключает пропуск поддеревьев, не
+// пересекающихся с изменившейся областью.
+//
+// По умолчанию включён. Выключатель нужен приложению, чьи виджеты нарушают
+// контракт отрисовки (Draw не гарантирован каждый кадр — см. GUIDE, раздел
+// «Контракт отрисовки»): одна строка возвращает прежнее поведение, пока
+// нарушения разбираются.
+func (e *Engine) SetSubtreeCulling(v bool) {
+	widget.SetSubtreeCulling(v)
+	e.Invalidate()
+}
+
+// SubtreeCulling сообщает, включён ли пропуск поддеревьев.
+func (e *Engine) SubtreeCulling() bool { return widget.SubtreeCulling() }
+
 // SetRenderOnDemand включает/выключает рендер по запросу.
 // Безопасно вызывать в любой момент; включение сразу инвалидирует кадр.
 func (e *Engine) SetRenderOnDemand(v bool) {
@@ -58,10 +73,24 @@ func (e *Engine) Invalidate() {
 	e.invGen.Add(1)
 }
 
+// maxDamageRects — сколько областей движок держит по отдельности, прежде чем
+// схлопнуть их в одно объединение.
+//
+// Порог нужен, чтобы список не рос без предела: сотня областей сама по себе
+// дороже, чем перерисовать их общий прямоугольник. Шестнадцати хватает на
+// любой разумный кадр — обычно их две-три.
+const maxDamageRects = 16
+
 // InvalidateRect помечает изменившейся прямоугольную область (в ЛОГИЧЕСКИХ
-// пикселях холста — система координат виджетов). Отрисовка и diff ближайшего
-// кадра ограничатся тайлами, пересекающими объединение заявленных областей.
+// пикселях холста — система координат виджетов). Diff ближайшего кадра
+// ограничится тайлами, пересекающими ЗАЯВЛЕННЫЕ области.
 // Внутри damage хранится в физических пикселях (масштабируется здесь).
+//
+// Области хранятся списком, а не одним объединением. Разница видна там, где
+// изменения далеко друг от друга: перетаскивание рамки окна двигает две
+// узкие полосы на разных краях экрана, и их объединение — почти весь экран.
+// По объединению уходили тайлы всего прямоугольника (десятки килобайт на
+// кадр), по списку — только тайлы самих полос.
 func (e *Engine) InvalidateRect(r image.Rectangle) {
 	if r.Empty() {
 		return
@@ -73,10 +102,38 @@ func (e *Engine) InvalidateRect(r image.Rectangle) {
 	}
 	e.damageMu.Lock()
 	if !e.damageAll {
-		e.damage = e.damage.Union(r)
+		e.damage = addDamage(e.damage, r)
 	}
 	e.damageMu.Unlock()
 	e.invGen.Add(1)
+}
+
+// addDamage добавляет область к списку, поглощая вложенные.
+//
+// Вложенные отбрасываются не ради экономии памяти, а потому что тайлы всё
+// равно сравнивались бы дважды: первое сравнение синхронизирует буферы, и
+// второе вернуло бы «не изменилось» — работа впустую.
+func addDamage(list []image.Rectangle, r image.Rectangle) []image.Rectangle {
+	out := list[:0]
+	for _, cur := range list {
+		if r.In(cur) {
+			return list // новая область уже покрыта — ничего не меняется
+		}
+		if cur.In(r) {
+			continue // старая поглощается новой
+		}
+		out = append(out, cur)
+	}
+	out = append(out, r)
+	if len(out) > maxDamageRects {
+		// Порог пройден: дальше дешевле работать одним прямоугольником.
+		u := out[0]
+		for _, cur := range out[1:] {
+			u = u.Union(cur)
+		}
+		return append(out[:0], u)
+	}
+	return out
 }
 
 // scaleRectF масштабирует логический прямоугольник в физический по краям
@@ -90,15 +147,24 @@ func scaleRectF(r image.Rectangle, k float64) image.Rectangle {
 	)
 }
 
-// consumeDamage атомарно забирает накопленное повреждение.
+// consumeDamage атомарно забирает накопленные повреждения.
 // all==true — нужен полный diff (Invalidate или режим по умолчанию).
-func (e *Engine) consumeDamage() (region image.Rectangle, all bool) {
+func (e *Engine) consumeDamage() (regions []image.Rectangle, all bool) {
 	e.damageMu.Lock()
-	region, all = e.damage, e.damageAll
-	e.damage = image.Rectangle{}
+	regions, all = e.damage, e.damageAll
+	e.damage = nil
 	e.damageAll = false
 	e.damageMu.Unlock()
-	return region, all
+	return regions, all
+}
+
+// unionRects — общий прямоугольник списка (пустой для пустого списка).
+func unionRects(rects []image.Rectangle) image.Rectangle {
+	var u image.Rectangle
+	for _, r := range rects {
+		u = u.Union(r)
+	}
+	return u
 }
 
 // RenderCount возвращает число фактически отрендеренных кадров с момента

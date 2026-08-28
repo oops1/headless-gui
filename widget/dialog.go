@@ -282,7 +282,11 @@ func (d *Dialog) ContentBounds() image.Rectangle {
 func (d *Dialog) Draw(ctx DrawContext) {
 	b := d.bounds
 	st := currentStyle()
-	d.closeBtn.SetVisible(d.ShowCloseButton)
+	// Страховка на случай прямой записи в ShowCloseButton (см.
+	// syncCloseButtonVisible) — БЕЗ Invalidate: мы и так внутри Draw,
+	// звать перерисовку из середины перерисовки незачем и небезопасно
+	// (это ровно то, из-за чего исходно ловили баг с пропуском Draw).
+	d.syncCloseButtonVisible()
 
 	if st.Classic3D {
 		// Классика Win2000: квадрат, градиентный заголовок, рамка.
@@ -331,6 +335,38 @@ func (d *Dialog) Draw(ctx DrawContext) {
 	ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, d.BorderColor)
 
 	d.drawChildren(ctx)
+}
+
+// SetShowCloseButton — предпочтительный способ поменять ShowCloseButton в
+// рантайме: сразу синхронизирует видимость кнопки ✕ (и, если она реально
+// изменилась, зовёт Invalidate — здесь это уместно, это настоящее внешнее
+// изменение состояния, а не побочный эффект отрисовки). Поле ShowCloseButton
+// остаётся публичным для обратной совместимости: тем, кто пишет в него
+// напрямую, видимость всё равно досинхронизируют Draw и Children() —
+// см. syncCloseButtonVisible.
+func (d *Dialog) SetShowCloseButton(v bool) {
+	d.ShowCloseButton = v
+	d.closeBtn.SetVisible(v)
+}
+
+// syncCloseButtonVisible приводит видимость кнопки ✕ в соответствие текущему
+// значению ShowCloseButton. Вызывается из Draw и Children() как страховка —
+// НАПРЯМУЮ трогает hidden, а не через SetVisible, поэтому не дёргает
+// Invalidate: это идемпотентная подстройка состояния, а не решение о
+// перерисовке (которое отдельно принимает SetShowCloseButton).
+func (d *Dialog) syncCloseButtonVisible() {
+	d.closeBtn.hidden = !d.ShowCloseButton
+}
+
+// Children переопределяет Base.Children(): движок ходит по нему для
+// hit-теста и доставки событий мыши/клавиатуры — а с пропуском отрисовки
+// невидимых поддеревьев (SkipSubtree) это может случиться и БЕЗ
+// предшествующего вызова Draw. Досинхронизируем видимость кнопки ✕ здесь
+// же, а не только в Draw, — иначе клик по «скрытой» ✕ (или мимо видимой)
+// мог бы использовать состояние старого кадра.
+func (d *Dialog) Children() []Widget {
+	d.syncCloseButtonVisible()
+	return d.Base.Children()
 }
 
 // ApplyTheme обновляет цвета Dialog.
