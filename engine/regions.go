@@ -99,6 +99,33 @@ func (c *Canvas) markText(r image.Rectangle) {
 	c.markTiles(r, output.RegionText, color.RGBA{}, false)
 }
 
+// markKind помечает область тем, чем её рисует текущий вызывающий.
+//
+// Маски альфы и цветные глифы — общий путь для трёх разных вещей: букв,
+// сглаженных дуг скруглённых заливок и размытого силуэта тени. Раньше все
+// три уходили наружу как «текст», и потребитель применял к серому размытию
+// текстовый кодек. Теперь вид объявляет вызывающий, а по умолчанию —
+// честное «не знаю».
+func (c *Canvas) markKind(r image.Rectangle) {
+	kind := c.maskKind
+	if kind == output.RegionText {
+		c.markText(r)
+		return
+	}
+	c.markTiles(r, kind, color.RGBA{}, false)
+}
+
+// withMaskKind выполняет f, объявляя, чем рисуют маски внутри неё.
+//
+// Возврат к прежнему значению, а не к «не знаю»: вызовы вкладываются —
+// текстовый прогон внутри фигуры остаётся текстом только внутри себя.
+func (c *Canvas) withMaskKind(kind output.RegionKind, f func()) {
+	prev := c.maskKind
+	c.maskKind = kind
+	f()
+	c.maskKind = prev
+}
+
 // markTiles — накопление признака: новый примитив поверх того, что уже было.
 //
 // Правила выведены из физики отрисовки, а не из порядка вызовов:
@@ -125,14 +152,55 @@ func (c *Canvas) markTiles(r image.Rectangle, kind output.RegionKind, col color.
 	}
 	ts := output.TileSize
 
+	// canBeFull — способен ли r накрыть хоть один тайл диапазона целиком.
+	//
+	// Линейный (и через drawGradientScaled — радиальный) градиент кладёт
+	// заливку ПОСТРОЧНО: на область высотой 400 точек это 400 отдельных
+	// вызовов markSolid, каждый — прямоугольник высотой в 1 физический
+	// пиксель. Тайл 64×64 такая полоса не накроет НИКОГДА — full ниже
+	// заведомо ложен для любого тайла диапазона. Строить под это Rect
+	// тайла, четыре сравнения и (при активном скруглённом клипе) ещё и
+	// clipsTile — работа впустую, повторённая 400 раз ради одного и того
+	// же ответа «нет». Проверяем это ОДИН раз на весь вызов (не на тайл) и,
+	// если full нигде не достижим, доходим до switch напрямую.
+	//
+	// Крайний (правый/нижний) тайл может быть меньше TileSize, если размер
+	// холста не кратен 64, — учитываем и это: иначе на таком холсте тонкая
+	// полоса, совпавшая по стороне с обрезанным тайлом, была бы ошибочно
+	// признана неспособной его накрыть.
+	minW, minH := ts, ts
+	if tx1 == c.tilesX-1 {
+		if rem := c.W - tx1*ts; rem < minW {
+			minW = rem
+		}
+	}
+	if ty1 == c.tilesY-1 {
+		if rem := c.H - ty1*ts; rem < minH {
+			minH = rem
+		}
+	}
+	canBeFull := r.Dx() >= minW && r.Dy() >= minH
+
 	for ty := ty0; ty <= ty1; ty++ {
 		row := ty * c.tilesX
 		for tx := tx0; tx <= tx1; tx++ {
 			m := &c.marks[row+tx]
 
-			tile := image.Rect(tx*ts, ty*ts, min(tx*ts+ts, c.W), min(ty*ts+ts, c.H))
-			full := r.Min.X <= tile.Min.X && r.Min.Y <= tile.Min.Y &&
-				r.Max.X >= tile.Max.X && r.Max.Y >= tile.Max.Y
+			var full bool
+			if canBeFull {
+				tile := image.Rect(tx*ts, ty*ts, min(tx*ts+ts, c.W), min(ty*ts+ts, c.H))
+				full = r.Min.X <= tile.Min.X && r.Min.Y <= tile.Min.Y &&
+					r.Max.X >= tile.Max.X && r.Max.Y >= tile.Max.Y
+
+				// Скруглённый клип режет углы: примитив накрывает прямоугольник
+				// тайла, но пиксели за дугой остаются прежними. Обещать
+				// потребителю сплошной цвет тут нельзя — он зальёт квадратом то,
+				// что на деле скруглено. Смысл есть, только когда full и так
+				// истинен — иначе решать нечего.
+				if full && c.round.active && c.round.clipsTile(tile) {
+					full = false
+				}
+			}
 
 			// Перекрытие: примитив накрыл тайл целиком и ничего не пропускает.
 			if full && opaque {

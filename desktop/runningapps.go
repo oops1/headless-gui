@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"image"
+	"sync"
 
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
@@ -70,6 +71,11 @@ type RunningApplications struct {
 	tm *theme.Manager
 	wm WindowModel
 
+	// mu защищает btns/hoverIdx/armedIdx: их меняют из двух горутин — из
+	// подписки на WindowModel (её зовёт потребитель из своей горутины при
+	// изменении списка окон) и из горутины кадра и ввода (SetBounds,
+	// layout, Draw, OnMouseMove, OnMouseButton).
+	mu       sync.RWMutex
 	btns     []winButton
 	hoverIdx int // -1 — нет наведения
 	armedIdx int // -1 — нет взведённой кнопки
@@ -94,8 +100,15 @@ func NewRunningApplications(tm *theme.Manager, wm WindowModel) *RunningApplicati
 			// Список окон реально изменился — индексы наведения/взвода
 			// могли начать указывать не на то окно. Безопаснее сбросить их,
 			// чем гадать, куда «переехало» окно под курсором.
+			r.mu.Lock()
 			r.hoverIdx = -1
 			r.armedIdx = -1
+			r.mu.Unlock()
+			// layout()/Invalidate() зовутся без замка: подписчик приходит из
+			// своей горутины, а не из горутины кадра, и держать замок во
+			// время раскладки и перерисовки незачем и небезопасно для
+			// презентера, которому эти же данные снова понадобятся через
+			// Cells()/HoverIndex().
 			r.layout()
 			r.Invalidate()
 		})
@@ -153,7 +166,10 @@ func (r *RunningApplications) PreferredSize(avail image.Point) image.Point {
 // пользователь видит на настоящей панели задач.
 func (r *RunningApplications) layout() {
 	b := r.Bounds()
+
+	r.mu.Lock()
 	r.btns = r.btns[:0]
+	r.mu.Unlock()
 	if r.wm == nil || b.Empty() {
 		return
 	}
@@ -165,16 +181,23 @@ func (r *RunningApplications) layout() {
 
 	// Презентер темы раскладывает по-своему — берём его прямоугольники, иначе
 	// клик попадал бы по нашей полосе кнопок, а видел бы пользователь док.
+	// Зовём его БЕЗ замка: он спрашивает у нас же Cells() и HoverIndex(), а
+	// взять тот же замок повторно нельзя — раскладка заклинит намертво.
 	if p := r.presenter(); p != nil {
 		rects := p.Layout(r, b)
+		r.mu.Lock()
 		for i := 0; i < n && i < len(rects); i++ {
 			if rects[i].Empty() {
 				continue
 			}
 			r.btns = append(r.btns, winButton{info: windows[i], rect: rects[i]})
 		}
+		r.mu.Unlock()
 		return
 	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	gap := int(r.metric(KeyTaskButtonGap))
 	ideal := int(r.metric(KeyTaskButtonWidth))
@@ -251,6 +274,8 @@ func (r *RunningApplications) iconOnlyWidth() int {
 // hitIndex возвращает индекс кнопки под точкой (x, y) или -1.
 func (r *RunningApplications) hitIndex(x, y int) int {
 	pt := image.Pt(x, y)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for i, wb := range r.btns {
 		if pt.In(wb.rect) {
 			return i
@@ -262,14 +287,17 @@ func (r *RunningApplications) hitIndex(x, y int) int {
 // OnMouseMove реализует widget.MouseMoveHandler — обновляет наведённую кнопку.
 func (r *RunningApplications) OnMouseMove(x, y int) {
 	idx := r.hitIndex(x, y)
-	if idx == r.hoverIdx {
+	r.mu.Lock()
+	changed := idx != r.hoverIdx
+	r.hoverIdx = idx
+	r.mu.Unlock()
+	if !changed {
 		return
 	}
-	r.hoverIdx = idx
 	// У дока от наведения зависят размеры значков, а значит и попадание по
 	// ним: раскладку надо пересчитать, иначе следующий клик уйдёт по старым
 	// границам. Полоса кнопок от наведения не меняется, и пересчёт ей ничего
-	// не стоит — кнопки те же.
+	// не стоит — кнопки те же. layout() зовём без замка — он берёт его сам.
 	if r.presenter() != nil {
 		r.layout()
 	}
@@ -292,18 +320,30 @@ func (r *RunningApplications) OnMouseButton(e widget.MouseEvent) bool {
 			if idx < 0 {
 				return false
 			}
+			r.mu.Lock()
 			r.armedIdx = idx
+			r.mu.Unlock()
 			r.Invalidate()
 			return true
 		}
+		// Кнопку, на которой было нажатие, читаем под тем же замком, что и
+		// снимаем взвод: между press и release раскладка могла пересчитаться
+		// (пришло уведомление от WindowModel из другой горутины), и индекс
+		// вправе оказаться уже вне текущего btns.
+		r.mu.Lock()
 		wasArmed := r.armedIdx
 		r.armedIdx = -1
+		var info WindowInfo
+		hadInfo := wasArmed >= 0 && wasArmed < len(r.btns)
+		if hadInfo {
+			info = r.btns[wasArmed].info
+		}
+		r.mu.Unlock()
 		r.Invalidate()
 		if wasArmed < 0 {
 			return false
 		}
-		if wasArmed == idx {
-			info := r.btns[wasArmed].info
+		if wasArmed == idx && hadInfo {
 			if info.Active {
 				r.wm.Minimize(info.ID)
 			} else {
@@ -315,7 +355,17 @@ func (r *RunningApplications) OnMouseButton(e widget.MouseEvent) bool {
 		if !e.Pressed || idx < 0 {
 			return false
 		}
-		r.wm.Close(r.btns[idx].info.ID)
+		r.mu.RLock()
+		ok := idx < len(r.btns)
+		var id WindowID
+		if ok {
+			id = r.btns[idx].info.ID
+		}
+		r.mu.RUnlock()
+		if !ok {
+			return false
+		}
+		r.wm.Close(id)
 		return true
 	}
 	return false
@@ -358,7 +408,11 @@ func (r *RunningApplications) Cells() []Cell {
 }
 
 // HoverIndex реализует Component.
-func (r *RunningApplications) HoverIndex() int { return r.hoverIdx }
+func (r *RunningApplications) HoverIndex() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.hoverIdx
+}
 
 // presenter возвращает презентер, назначенный темой этому компоненту.
 func (r *RunningApplications) presenter() Presenter {
@@ -381,14 +435,22 @@ func (r *RunningApplications) Draw(ctx widget.DrawContext) {
 	iconSize := int(r.metric(KeyTaskButtonIconSize))
 	labelGap := int(r.metric(KeyTaskButtonLabelGap))
 
+	// Снимок под замком, дальше рисуем по нему: держать замок на всё время
+	// отрисовки нельзя — DrawTextLeftElided и остальные вызовы ctx уходят
+	// наружу, а раскладке в это время незачем ждать кадр.
+	r.mu.RLock()
+	btns := append([]winButton(nil), r.btns...)
+	hoverIdx, armedIdx := r.hoverIdx, r.armedIdx
+	r.mu.RUnlock()
+
 	prevClip := ctx.Clip()
-	for i, wb := range r.btns {
+	for i, wb := range btns {
 		// Активное окно — состоянием StateActive; свёрнутое рисуется
 		// приглушённо состоянием StateDisabled (не как «недоступная»
 		// кнопка в смысле ввода — клик по ней по-прежнему разворачивает
 		// окно, приглушение чисто визуальное: так их видно от обычных
 		// свёрнутых на настоящей панели задач).
-		st := StateOf(i == r.hoverIdx, i == r.armedIdx, wb.info.Active, wb.info.Minimized, false)
+		st := StateOf(i == hoverIdx, i == armedIdx, wb.info.Active, wb.info.Minimized, false)
 		style := r.style(st)
 		PaintStyle(ctx, wb.rect, style)
 

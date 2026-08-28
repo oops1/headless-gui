@@ -65,7 +65,9 @@ eng := engine.New(width, height, fps)
 // Root and styling
 eng.SetRoot(w widget.Widget)
 eng.SetTheme(t *widget.Theme)
-eng.SetBackgroundFile(path string)    // PNG/JPEG
+eng.SetBackgroundFile(path string)    // PNG/JPEG from disk
+eng.SetBackground(img image.Image)    // a ready image from memory
+eng.ClearBackground()                 // remove the wallpaper
 eng.SetResolution(width, height int)  // change on the fly
 
 // Fonts
@@ -1043,7 +1045,8 @@ to work only by accident.
 
 An application that hasn't been brought into compliance yet can restore the
 old behavior with one line: `eng.SetSubtreeCulling(false)` turns culling off
-entirely (it's on by default).
+entirely (it's on by default). The switch belongs to the ENGINE, not to the
+process: engines in one process do not affect each other.
 
 **1. `Draw` is not guaranteed every frame.** Being skipped means "what's on
 screen is already correct" — a widget has no business assuming that, because
@@ -1067,6 +1070,20 @@ widget.AnimateOwned(w, "pulse", 400*time.Millisecond, widget.EaseOutCubic, func(
     w.Invalidate()
 })
 ```
+
+Note the `Invalidate()` in the tick: **it is required**. A registered
+animation is not a reason for the engine to draw — damage is. A tick that
+moves the widget through setters (`SetBounds`, `SetValue`, and the rest)
+declares damage itself; a tick that writes a field directly must call
+`Invalidate()`, or the change reaches no frame at all.
+
+This is about idling. The engine used to prepare a frame on every tick while
+any animation was registered, and the taskbar's one-second clock kept a
+motionless desktop running at full rate. The frame was a FULL one, too: such
+a wake-up has empty damage, and empty damage takes the full path — the
+background blitted over the whole canvas, the whole tree walked unclipped,
+every tile compared. A frame with nothing to do cost more than a frame with a
+change in it.
 
 **3. `Draw` doesn't change widget state — it only paints.** The dangerous
 case is computing layout (child positions, hit-test zones) inside `Draw` and
@@ -1971,7 +1988,7 @@ inner one restores the OUTER style rather than resetting to the global one.
 `NewThemeScope(nil)` is a plain container — a global theme reaches its children.
 
 
-### The frame pipeline (v3.15.0)
+### The frame pipeline
 
 A frame is produced and handed to a consumer; this is what the engine tells
 about it and who sets the pace.
@@ -1994,6 +2011,68 @@ the margin:
 ```go
 func (w *MyWidget) DrawMargin() int { return 12 } // shadow, glow
 ```
+
+#### Not drawing what is covered
+
+The engine draws bottom-up. A window under another window used to be drawn in
+full and then painted over; on a desktop, where windows sit in a stack, that
+is a multiple of the work on every full frame.
+
+A widget may declare what it covers:
+
+```go
+func (w *MyWidget) OpaqueRegion() []image.Rectangle {
+    if w.Background.A < 255 {
+        return nil // what is under translucency shows through and must be drawn
+    }
+    return []image.Rectangle{w.Bounds()}
+}
+```
+
+The child walk goes top-down, accumulates the declared area and skips subtrees
+that fall entirely inside it. Window and Panel already do this: a solid opaque
+background covers its bounds, a rounded one covers everything but its corners,
+and translucent, gradient or image-backed ones cover nothing.
+
+Declare only what you can vouch for:
+
+- a widget with no `OpaqueRegion` counts as TRANSPARENT and hides nothing;
+- declare the area painted COMPLETELY and opaquely: shadows, glass and any
+  blending do not count;
+- containment is tested against ONE declared rectangle, not their union. A
+  subtree covered by two windows between them is drawn for nothing — cheaper
+  than getting the shape of a union wrong.
+
+Declaring too much leaves a hole on screen; declaring too little only shows up
+in a profile.
+
+Measured (full frame 1280×800, a stack of windows with content): one window
+unchanged, five windows 1094 → 780 µs, ten windows 1370 → 830 µs.
+
+This complements subtree culling rather than replacing it: culling removes work
+outside damage, occlusion removes work under other windows.
+
+#### Several engines in one process
+
+There may be as many engines as you like — a remote desktop shell keeps one
+per window. All pipeline state belongs to the engine: the frame's damage, the
+subtree-culling switch, the accumulated move declarations, the pixel format,
+external pacing. Engines do not disturb each other and may render at the same
+time from different goroutines (`tests/twoengines_test.go` checks this under
+the race detector).
+
+Two things stay process-wide, both on purpose:
+
+- **The widget tree.** One widget lives in one tree, one tree in one engine.
+  Move declarations (`widget.NotifyMove`) are broadcast to every engine, and
+  each takes only what lies on its own canvas.
+- **The text measurer** (`widget.MeasureUIText`). It is called from places
+  where no engine is in sight — a dialog sizes itself at construction. The
+  most recently created engine answers; a stopped one hands the measurer back
+  to the previous live engine. With different `SetDPI` across coexisting
+  engines the measurement comes with the answering engine's metrics: the
+  discrepancy is rounding of the logical length and does not affect drawing
+  (inside `Draw`, `ctx.MeasureText` measures on the widget's own canvas).
 
 #### What a tile is made of
 
@@ -2023,9 +2102,16 @@ for _, m := range frame.Moves { // moves first, then tiles!
 }
 ```
 
-Dragging a window does not change pixels, it moves them. `widget.NotifyMove(src, dst)`
-declares the move; in RDP that is a pair of surface-cache commands instead of a
-hundred kilobytes.
+Dragging a window does not change pixels, it moves them.
+`widget.NotifyWidgetMove(w, src, dst)` declares the move; in RDP that is a pair
+of surface-cache commands instead of a hundred kilobytes. The widget names the
+tree the move belongs to: every engine in the process receives every
+declaration, and with two engines of the same resolution the coordinates are
+identical, so nothing else tells them apart. A consumer declaring moves itself
+calls `widget.NotifyMove(src, dst)`; those are matched by canvas.
+
+Moves within one frame never overlap: overlapping declarations are dropped and
+that area travels as ordinary tiles, so they may be applied in any order.
 
 #### Channel order and foreign memory
 

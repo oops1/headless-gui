@@ -371,7 +371,6 @@ func TestGolden_PipelineDoesNotChangePixels(t *testing.T) {
 
 			withCulling := render(true)
 			without := render(false)
-			widget.SetSubtreeCulling(true) // вернуть общий выключатель
 
 			if withCulling == nil || without == nil {
 				t.Fatal("кадр не отрисован")

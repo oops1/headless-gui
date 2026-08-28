@@ -77,15 +77,10 @@ func pushThemeStyle(st ThemeStyle) func() {
 // ─── Отрисовка bevel (Classic3D) ─────────────────────────────────────────────
 
 // drawBevelRaised рисует выпуклую 2-пиксельную рамку Win2000 (кнопка).
+// Обёртка над DrawBevel: реализация рамки одна на движок (см. bevel.go).
 func drawBevelRaised(ctx DrawContext, x, y, w, h int, st ThemeStyle) {
-	// Внешняя: светлая верх/лево, самая тёмная низ/право.
-	ctx.DrawHLine(x, y, w, st.BevelLight)
-	ctx.DrawVLine(x, y, h, st.BevelLight)
-	ctx.DrawHLine(x, y+h-1, w, st.BevelDark)
-	ctx.DrawVLine(x+w-1, y, h, st.BevelDark)
-	// Внутренняя: тень низ/право.
-	ctx.DrawHLine(x+1, y+h-2, w-2, st.BevelShadow)
-	ctx.DrawVLine(x+w-2, y+1, h-2, st.BevelShadow)
+	DrawBevel(ctx, image.Rect(x, y, x+w, y+h),
+		st.BevelLight, st.BevelShadow, st.BevelDark, false)
 }
 
 // drawSunkenRing рисует круглое «утопленное» кольцо (RadioButton Win2000):
@@ -110,12 +105,8 @@ func drawSunkenRing(ctx DrawContext, cx, cy, r int, dark, light color.RGBA) {
 // drawBevelSunken рисует утопленную 2-пиксельную рамку Win2000
 // (поле ввода, нажатая кнопка): грани инвертированы.
 func drawBevelSunken(ctx DrawContext, x, y, w, h int, st ThemeStyle) {
-	ctx.DrawHLine(x, y, w, st.BevelShadow)
-	ctx.DrawVLine(x, y, h, st.BevelShadow)
-	ctx.DrawHLine(x, y+h-1, w, st.BevelLight)
-	ctx.DrawVLine(x+w-1, y, h, st.BevelLight)
-	ctx.DrawHLine(x+1, y+1, w-2, st.BevelDark)
-	ctx.DrawVLine(x+1, y+1, h-2, st.BevelDark)
+	DrawBevel(ctx, image.Rect(x, y, x+w, y+h),
+		st.BevelLight, st.BevelShadow, st.BevelDark, true)
 }
 
 // fillTitleBar заливает полосу заголовка: горизонтальный градиент

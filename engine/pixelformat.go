@@ -93,7 +93,7 @@ func (e *Engine) SetPixelFormat(f PixelFormat) error {
 		e.frameMu.Unlock()
 		return nil
 	}
-	e.canvas.format = f
+	e.canvas.setOwnFormat(f)
 	if e.bgSrc != nil {
 		e.canvas.setBackground(e.bgSrc) // перестроить фон в новом порядке байт
 	}

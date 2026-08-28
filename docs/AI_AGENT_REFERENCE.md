@@ -48,7 +48,10 @@ README_RU.md, GUIDE.md / GUIDE_EN.md; roadmap: TODO.md.
   (`OnChange`, `OnClick`) and `Invalidate()` are called AFTER Unlock.
   `Draw` copies state under mu, then draws without it.
 - **Text measurement outside Draw:** `widget.MeasureUIText(text, sizePt)` —
-  the precise measurer registered by the engine (`SetTextMeasurer`). Use it
+  the precise measurer registered by the engine (`RegisterTextMeasurer`;
+  `SetTextMeasurer` still works for a consumer that sets one once and for
+  all). The most recently created engine answers; a stopped engine hands the
+  measurer back to the previous live one. Use it
   for layout computed before painting (dialogs, TextBox). Inside Draw use
   `ctx.MeasureText`.
 - **Theming:** constructors read the global palette `win10.*` (updated by
@@ -276,6 +279,16 @@ func (e *Engine) SetResolution(width, height int)
 // widget.MaxImagePixels() (64 Mpx default, SetMaxImagePixels) and a 256 MB
 // file cap — oversized/decompression-bomb images return an error.
 func (e *Engine) SetBackgroundFile(path string) error
+
+// Set the background from an image already in memory (v3.15.0). Same
+// scaling and rescale-on-SetResolution behaviour as SetBackgroundFile;
+// no decoding, no file cap. A shell that received the wallpaper down its
+// own wire had to write it to a temporary file before this existed.
+func (e *Engine) SetBackground(img image.Image) error
+
+// Remove the background (v3.15.0). Widgets draw on the canvas background
+// colour again. Idempotent.
+func (e *Engine) ClearBackground()
 
 // Set color theme across all widgets
 func (e *Engine) SetTheme(t *widget.Theme)
@@ -3423,6 +3436,11 @@ eng.SetSubtreeCulling(bool)   // default: true (on)
 Set `false` to fall back to the pre-v3.15.0 behavior (every widget's `Draw`
 runs every rendered frame) for an app that can't yet meet the contract below.
 
+Since v3.16.0 this switch, the frame's damage and the accumulated move
+declarations belong to the ENGINE, not to the process. Several engines in one
+process (one per window) render independently and may do so concurrently from
+different goroutines; `tests/twoengines_test.go` covers this under `-race`.
+
 Rules a widget MUST follow so culling is transparent to it:
 
 1. **`Draw` is not called every frame.** A widget must render correctly when
@@ -3488,9 +3506,19 @@ accumulates per tile, in the rasteriser's own loops:
 
 **Apply `Moves` BEFORE `Tiles`.** That is DXGI's order and what a consumer
 expects; the reverse would overwrite fresh pixels with stale ones. A widget
-declares a move with `widget.NotifyMove(src, dst)` — `Window` does it while
-dragging and on landing. A declared move does NOT replace damage: it is a hint
+declares a move with `widget.NotifyWidgetMove(w, src, dst)` — `Window` does it
+while dragging and on landing. The widget names the tree the move belongs to,
+which is how an engine tells its own declarations from a neighbour's: with two
+engines of the same resolution in one process the coordinates are identical.
+`widget.NotifyMove(src, dst)` (no widget) still works for a consumer declaring
+moves itself; those are matched by canvas instead. A declared move does NOT replace damage: it is a hint
 about a cheaper way to reach the same result.
+
+Moves within one frame never overlap each other, by source or destination
+(v3.16.0): the engine drops overlapping declarations and that area travels as
+ordinary tiles. Apply them in any order, or all at once — the result is the
+same. Without that rule a consumer whose order differed from the engine's read
+a source that had not moved yet, and copied the wrong rectangle.
 
 ### Buffer format and drawing into foreign memory
 
@@ -3564,6 +3592,48 @@ with culling and 84 868 ns without, hover 102 311 ns, window drag 2 007 091 ns.
 Within noise of the numbers above — the marks are one assignment inside loops
 that already ran, and `Frame.Moves` is filled from a list that is empty unless
 something declared a move.
+
+Repeated again after v3.16.0 (per-engine pipeline state, one bevel
+implementation, gradient stop cache): full frame 3 315 877 ns, clock tick
+81 758 ns with culling and 86 152 ns without, hover 100 750 ns, window drag
+1 853 372 ns. Still within noise — that release moved correctness, not cost.
+
+Two targeted measurements from it, both with `-benchmem`:
+
+| what | before | after |
+|---|---|---|
+| `markTiles` on a row-by-row fill (400×300, 300 one-pixel strips) | 6 120 ns | 4 063 ns |
+| `PaintGradient` (desktop) | 3 590 ns, 1 alloc / 48 B | 3 510 ns, 0 allocs |
+
+The first one: a strip thinner than a tile can never cover one, so the
+per-tile "does this cover the whole tile?" test is answered once per call
+instead of once per tile. The truncated edge tile is the exception the code
+accounts for — on a canvas whose height is not a multiple of 64 the last tile
+row can be one pixel tall, and then a one-pixel strip does cover it.
+
+### Occlusion (v3.16.0)
+
+A widget may implement `widget.OpaqueRegioner` to declare what it covers
+opaquely; the child walk goes top-down and skips subtrees that fall entirely
+inside the accumulated area. `Window` and `Panel` implement it already.
+
+```go
+OpaqueRegion() []image.Rectangle   // absolute logical coords, like Bounds
+```
+
+Rules: no method means transparent; declare only fully-painted opaque area (a
+rounded fill loses its corners, translucent/gradient/image-backed fills declare
+nothing); containment is tested against ONE declared rectangle, never a union.
+Over-declaring leaves a hole on screen — under-declaring only costs work.
+
+| stack of windows, full frame 1280×800 | before | after |
+|---|---|---|
+| one window | 824 µs | 810 µs |
+| five windows | 1 094 µs | 780 µs |
+| ten windows | 1 370 µs | 830 µs |
+
+Allocations per frame are unchanged: the occluder list is an array, and the
+skip marks and the `OpaqueRegion` answer live in widget-owned buffers.
 
 Rule worth keeping: an optimisation without a paired measurement is not
 accepted. Add the before/after here.

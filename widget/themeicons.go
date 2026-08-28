@@ -307,20 +307,6 @@ func newIconCanvas(size int) *image.RGBA {
 	return image.NewRGBA(image.Rect(0, 0, size, size))
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // fillRect закрашивает прямоугольник (обрезая по границам изображения).
 func fillRect(img *image.RGBA, r image.Rectangle, c color.RGBA) {
 	r = r.Intersect(img.Bounds())
@@ -406,8 +392,8 @@ func drawArcCorner(img *image.RGBA, cx, cy, r int, c color.RGBA, w int) {
 // drawPlaceholder — заглушечный глиф: рамка с диагональным крестом.
 func drawPlaceholder(size int) *image.RGBA {
 	img := newIconCanvas(size)
-	inset := maxInt(1, size/8)
-	th := maxInt(1, size/12)
+	inset := max(1, size/8)
+	th := max(1, size/12)
 	r := image.Rect(inset, inset, size-inset, size-inset)
 	if r.Dx() <= 0 || r.Dy() <= 0 {
 		r = img.Bounds()
@@ -421,9 +407,9 @@ func drawPlaceholder(size int) *image.RGBA {
 // drawStartIcon — четыре квадрата решёткой (кнопка «Пуск»).
 func drawStartIcon(size int) *image.RGBA {
 	img := newIconCanvas(size)
-	pad := maxInt(1, size/8)
-	gap := maxInt(1, size/10)
-	cell := maxInt(1, (size-2*pad-gap)/2)
+	pad := max(1, size/8)
+	gap := max(1, size/10)
+	cell := max(1, (size-2*pad-gap)/2)
 
 	colors := [4]color.RGBA{
 		{R: 0xF2, G: 0x5A, B: 0x22, A: 0xFF},
@@ -448,13 +434,13 @@ func drawStartIcon(size int) *image.RGBA {
 // или крест "приглушено".
 func drawSpeaker(img *image.RGBA, size int) (tipX, cy int) {
 	cy = size / 2
-	boxW := maxInt(1, size/5)
-	boxH := maxInt(2, size/3)
-	boxX := maxInt(1, size/6)
+	boxW := max(1, size/5)
+	boxH := max(2, size/3)
+	boxX := max(1, size/6)
 	fillRect(img, image.Rect(boxX, cy-boxH/2, boxX+boxW, cy+boxH/2), iconFG)
 
 	coneX := boxX + boxW
-	coneTip := minInt(size-2, coneX+maxInt(2, size/3))
+	coneTip := min(size-2, coneX+max(2, size/3))
 	fillTriangleRight(img, coneX, cy-boxH, cy+boxH, coneTip, iconFG)
 	return coneTip, cy
 }
@@ -463,9 +449,9 @@ func drawSpeaker(img *image.RGBA, size int) (tipX, cy int) {
 func drawVolumeIcon(size int) *image.RGBA {
 	img := newIconCanvas(size)
 	tipX, cy := drawSpeaker(img, size)
-	w := maxInt(1, size/16)
-	drawArcCorner(img, tipX, cy, maxInt(1, size/6), iconFG, w)
-	drawArcCorner(img, tipX, cy, maxInt(2, size/3-1), iconFG, w)
+	w := max(1, size/16)
+	drawArcCorner(img, tipX, cy, max(1, size/6), iconFG, w)
+	drawArcCorner(img, tipX, cy, max(2, size/3-1), iconFG, w)
 	return img
 }
 
@@ -473,8 +459,8 @@ func drawVolumeIcon(size int) *image.RGBA {
 func drawVolumeMutedIcon(size int) *image.RGBA {
 	img := newIconCanvas(size)
 	tipX, cy := drawSpeaker(img, size)
-	w := maxInt(1, size/16)
-	r := maxInt(2, size/4)
+	w := max(1, size/16)
+	r := max(2, size/4)
 	drawLine(img, tipX, cy-r, tipX+r, cy+r, iconFG, w)
 	drawLine(img, tipX+r, cy-r, tipX, cy+r, iconFG, w)
 	return img
@@ -484,10 +470,10 @@ func drawVolumeMutedIcon(size int) *image.RGBA {
 func drawWifiIcon(size int) *image.RGBA {
 	img := newIconCanvas(size)
 	cx := size / 2
-	cy := size - maxInt(1, size/6)
-	w := maxInt(1, size/12)
+	cy := size - max(1, size/6)
+	w := max(1, size/12)
 
-	dot := maxInt(1, size/10)
+	dot := max(1, size/10)
 	fillRect(img, image.Rect(cx-dot/2, cy-dot/2, cx+dot/2+1, cy+dot/2+1), iconFG)
 
 	for i, r := range [3]int{size / 4, size / 3, size / 2} {
@@ -505,14 +491,14 @@ func drawWifiIcon(size int) *image.RGBA {
 // drawEthernetIcon — прямоугольный разъём со штекером.
 func drawEthernetIcon(size int) *image.RGBA {
 	img := newIconCanvas(size)
-	bodyW := maxInt(2, size*3/5)
-	bodyH := maxInt(2, size/2)
+	bodyW := max(2, size*3/5)
+	bodyH := max(2, size/2)
 	bx := (size - bodyW) / 2
 	by := size/2 - bodyH/2
-	strokeRect(img, image.Rect(bx, by, bx+bodyW, by+bodyH), iconFG, maxInt(1, size/14))
+	strokeRect(img, image.Rect(bx, by, bx+bodyW, by+bodyH), iconFG, max(1, size/14))
 
-	plugW := maxInt(1, bodyW/3)
-	plugH := maxInt(1, size/6)
+	plugW := max(1, bodyW/3)
+	plugH := max(1, size/6)
 	px := bx + (bodyW-plugW)/2
 	fillRect(img, image.Rect(px, by-plugH, px+plugW, by), iconFG)
 	return img
@@ -521,19 +507,19 @@ func drawEthernetIcon(size int) *image.RGBA {
 // drawBatteryIcon — прямоугольник с делением (уровень заряда) и контактом.
 func drawBatteryIcon(size int) *image.RGBA {
 	img := newIconCanvas(size)
-	bodyW := maxInt(2, size*3/4)
-	bodyH := maxInt(2, size/2)
-	bx := maxInt(1, size/10)
+	bodyW := max(2, size*3/4)
+	bodyH := max(2, size/2)
+	bx := max(1, size/10)
 	by := (size - bodyH) / 2
-	th := maxInt(1, size/14)
+	th := max(1, size/14)
 	strokeRect(img, image.Rect(bx, by, bx+bodyW, by+bodyH), iconFG, th)
 
-	nubW := maxInt(1, size/12)
-	nubH := maxInt(1, bodyH/2)
+	nubW := max(1, size/12)
+	nubH := max(1, bodyH/2)
 	fillRect(img, image.Rect(bx+bodyW, by+(bodyH-nubH)/2, bx+bodyW+nubW, by+(bodyH-nubH)/2+nubH), iconFG)
 
 	// Уровень заряда — заполненная часть внутри рамки (~60%).
-	innerPad := th + maxInt(1, size/20)
+	innerPad := th + max(1, size/20)
 	inner := image.Rect(bx+innerPad, by+innerPad, bx+bodyW-innerPad, by+bodyH-innerPad)
 	if inner.Dx() > 0 && inner.Dy() > 0 {
 		fillW := inner.Dx() * 3 / 5

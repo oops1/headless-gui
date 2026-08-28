@@ -98,6 +98,21 @@ type Window struct {
 	// TitleStyle — визуальный стиль заголовка (Win или Mac).
 	TitleStyle WindowTitleStyle
 
+	// ownStyle — стиль темы, которой окно принадлежит. nil означает «как у
+	// всех» — берётся общий стиль.
+	//
+	// Своё поле, а не общая переменная, потому что геометрия окна зависит от
+	// стиля (в классике Windows 2000 рамка 5px и заголовок 24px, в остальных
+	// темах 1px и 32px), а спрашивают её НЕ ТОЛЬКО из Draw: хит-тест
+	// заголовка, перекладка детей и ContentBounds зовутся из обработки ввода,
+	// когда подмена стиля области темы (ThemeScope) уже снята. Окно в области
+	// с темой Windows 2000 ловило мышь по границам заголовка Windows 11 —
+	// промах в восемь точек по вертикали.
+	ownStyle *ThemeStyle
+
+	// opaqueBuf — буфер под ответ OpaqueRegion (см. oneRegion).
+	opaqueBuf [1]image.Rectangle
+
 	// Resize — режим изменения размера окна.
 	Resize ResizeMode
 
@@ -306,7 +321,7 @@ func (w *Window) SetTitle(s string) {
 // hit-тест и отрисовка кнопок уходили в мак-ветку внутри 3D-рамки).
 func (w *Window) resolvedTitleStyle() WindowTitleStyle {
 	if w.TitleStyle == WindowTitleAuto {
-		if currentStyle().Classic3D {
+		if w.style().Classic3D {
 			return WindowTitleWin
 		}
 		return detectedTitleStyle()
@@ -417,7 +432,7 @@ func (w *Window) titleH() int {
 	// Режим вкладок в заголовке: полоса выше (как в Windows Terminal, ~40
 	// логических px), чтобы карточки вкладок дышали. Классика Win2000 всё
 	// равно ограничена effTitleH=24 — там компактные bevel-ярлыки.
-	if w.titleTabsActive() && !currentStyle().Classic3D {
+	if w.titleTabsActive() && !w.style().Classic3D {
 		return 40
 	}
 	return 32
@@ -432,10 +447,32 @@ func (w *Window) effTitleH() int {
 	if th == 0 {
 		return 0
 	}
-	if currentStyle().Classic3D && th > 24 {
+	if w.style().Classic3D && th > 24 {
 		return 24
 	}
 	return th
+}
+
+// style возвращает стиль темы этого окна: свой, если тема окну назначалась,
+// иначе общий. В отличие от currentStyle() отвечает одинаково и во время
+// отрисовки, и при обработке ввода.
+func (w *Window) style() ThemeStyle {
+	if w.ownStyle != nil {
+		return *w.ownStyle
+	}
+	return currentStyle()
+}
+
+// OpaqueRegion реализует OpaqueRegioner: что окно закрывает непрозрачно.
+//
+// Окно заливает свои границы целиком (Draw начинается именно с этого),
+// поэтому закрывает оно всё, кроме скруглённых углов. Полупрозрачный фон не
+// закрывает ничего: под ним видно то, что лежит ниже, и рисовать это надо.
+func (w *Window) OpaqueRegion() []image.Rectangle {
+	if w.Background.A < 255 {
+		return nil
+	}
+	return oneRegion(&w.opaqueBuf, opaqueRect(w.Bounds(), w.CornerRadius))
 }
 
 // borderW возвращает ширину рамки (0 для borderless).
@@ -460,7 +497,7 @@ func (w *Window) frameW() int {
 	if w.Style == WindowStyleNone {
 		return 0
 	}
-	if currentStyle().Classic3D {
+	if w.style().Classic3D {
 		return classicFrameW
 	}
 	return 1
@@ -474,7 +511,7 @@ func (w *Window) ContentBounds() image.Rectangle {
 	th := w.titleH()
 	fw := w.frameW()
 	top := b.Min.Y + th
-	if currentStyle().Classic3D {
+	if w.style().Classic3D {
 		top = b.Min.Y + fw + w.effTitleH()
 	}
 	return image.Rect(
@@ -600,7 +637,7 @@ func (w *Window) CloseBtnRect() image.Rectangle {
 		cy := b.Min.Y + th/2
 		return image.Rect(cx-macHitSlop, cy-macHitSlop, cx+macHitSlop, cy+macHitSlop)
 	}
-	if currentStyle().Classic3D {
+	if w.style().Classic3D {
 		r, _, _ := w.classicTitleBtnRects()
 		return r
 	}
@@ -623,7 +660,7 @@ func (w *Window) MinBtnRect() image.Rectangle {
 		cy := b.Min.Y + th/2
 		return image.Rect(cx-macHitSlop, cy-macHitSlop, cx+macHitSlop, cy+macHitSlop)
 	}
-	if currentStyle().Classic3D {
+	if w.style().Classic3D {
 		_, _, r := w.classicTitleBtnRects()
 		return r
 	}
@@ -647,7 +684,7 @@ func (w *Window) MaxBtnRect() image.Rectangle {
 		cy := b.Min.Y + th/2
 		return image.Rect(cx-macHitSlop, cy-macHitSlop, cx+macHitSlop, cy+macHitSlop)
 	}
-	if currentStyle().Classic3D {
+	if w.style().Classic3D {
 		_, r, _ := w.classicTitleBtnRects()
 		return r
 	}
@@ -696,7 +733,7 @@ func (w *Window) Draw(ctx DrawContext) {
 	// Для borderless нативного окна рисуем только боковые линии и низ:
 	// верхняя линия не нужна — заголовок уже заполняет верхний край.
 	if w.Style != WindowStyleNone {
-		if st := currentStyle(); st.Classic3D {
+		if st := w.style(); st.Classic3D {
 			// Классика Win2000: толстая объёмная 3D-рамка по всему периметру
 			// (заголовок и контент уже вписаны внутрь неё).
 			w.drawClassicFrame(ctx, st)
@@ -773,7 +810,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	if w.ShowLocaleIndicator {
 		nc0 := w.btnCount()
 		rightX := b.Max.X - 8
-		if currentStyle().Classic3D {
+		if w.style().Classic3D {
 			if _, _, minR := w.classicTitleBtnRects(); !minR.Empty() {
 				rightX = minR.Min.X - 8
 			} else if closeR, _, _ := w.classicTitleBtnRects(); !closeR.Empty() {
@@ -795,7 +832,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	if haveBadge {
 		titleRight = badgeLeft
 	} else if nc0 := w.btnCount(); nc0 > 0 {
-		if currentStyle().Classic3D {
+		if w.style().Classic3D {
 			if _, _, minR := w.classicTitleBtnRects(); !minR.Empty() {
 				titleRight = minR.Min.X
 			} else if closeR, _, _ := w.classicTitleBtnRects(); !closeR.Empty() {
@@ -836,7 +873,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 
 	// Классика Win2000: кнопки управления — выпуклые bevel-кнопки на «лице»
 	// с чёрными глифами (иначе светло-серые глифы сливаются с navy-заголовком).
-	if st := currentStyle(); st.Classic3D {
+	if st := w.style(); st.Classic3D {
 		w.drawClassicTitleButtons(ctx, st)
 		return
 	}
@@ -1193,7 +1230,7 @@ func (w *Window) resizeEdgeAt(x, y int) winEdge {
 	// Ширина полосы-захвата: в классике совпадает с толщиной 3D-рамки
 	// (frameW), в прочих темах — winResizeBorder.
 	m := winResizeBorder
-	if currentStyle().Classic3D {
+	if w.style().Classic3D {
 		m = w.frameW()
 	}
 	var e winEdge
@@ -1340,7 +1377,7 @@ func (w *Window) OnMouseMove(x, y int) {
 				// Картинка окна та же, просто в другом месте. Объявляем
 				// перенос: потребитель скопирует её у себя вместо того,
 				// чтобы принимать заново на каждый шаг мыши.
-				NotifyMove(b, moved)
+				NotifyWidgetMove(w, b, moved)
 			}
 		}
 		return
@@ -1378,7 +1415,7 @@ func (w *Window) titleBarRect() image.Rectangle {
 	if th == 0 {
 		return image.Rectangle{}
 	}
-	if currentStyle().Classic3D {
+	if w.style().Classic3D {
 		fw := w.frameW()
 		eth := w.effTitleH()
 		return image.Rect(b.Min.X+fw, b.Min.Y+fw, b.Max.X-fw, b.Min.Y+fw+eth)
@@ -1425,7 +1462,7 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 					// Окно не изменилось — оно переехало. Объявляем перенос:
 					// потребитель скопирует картинку у себя вместо того,
 					// чтобы принимать её заново.
-					NotifyMove(from, dest)
+					NotifyWidgetMove(w, from, dest)
 				}
 				// Гасим контур ровно там, где он был; полная инвалидация
 				// скрыла бы от хоста, что окно просто переехало, — а по этому
@@ -1743,6 +1780,11 @@ func (w *Window) HandleInputBinding(code KeyCode, mod KeyMod) bool {
 
 // ApplyTheme обновляет цвета и форму Window из темы.
 func (w *Window) ApplyTheme(t *Theme) {
+	// Запоминаем стиль: от него зависит геометрия, а её спрашивают и вне
+	// отрисовки — см. Window.ownStyle.
+	st := t.Style
+	w.ownStyle = &st
+
 	w.Background = t.WindowBG
 	w.BorderColor = t.Border
 	// TitleBG и TitleColor обновляются только если пользователь не задал явно (A=0)

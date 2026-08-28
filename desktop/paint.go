@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"image"
+	"sync"
 
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
@@ -120,10 +121,7 @@ func PaintGradient(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 	if s == nil || len(s.Gradient) == 0 || r.Empty() {
 		return
 	}
-	stops := make([]widget.GradientStop, 0, len(s.Gradient))
-	for _, st := range s.Gradient {
-		stops = append(stops, widget.GradientStop{Color: st.Color, Offset: st.Pos})
-	}
+	stops := gradientStopsFor(s)
 
 	if s.GradientKind == theme.GradientRadial {
 		g := &widget.RadialGradient{
@@ -143,6 +141,84 @@ func PaintGradient(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 		Horizontal: horizontalAngle(s.GradientAngle),
 		Stops:      stops,
 	})
+}
+
+// gradientStopsCache — стопы градиента, уже переведённые из формы темы
+// (theme.GradientStop) в форму виджета (widget.GradientStop), по указателю
+// на стиль, из которого они посчитаны.
+//
+// PaintGradient зовут на каждый кадр каждого градиентного компонента панели
+// задач, а Gradient стиля за это время не меняется: *theme.Style приходит
+// из уже разрешённой таблицы темы (theme.Manager.GetStyle → Theme.Style) и
+// по соглашению пакета theme НЕ ИЗМЕНЯЕТСЯ после разрешения — см. комментарий
+// у theme.Style ("указатель общий... менять его нельзя") и у theme.Theme
+// ("Разрешение выполняется один раз при SetTheme... отрисовка только читает
+// готовые таблицы"). Значит, для одного и того же указателя результат
+// конвертации всегда один и тот же, и его можно посчитать один раз и
+// переиспользовать — ключ кэша сам указатель, ревизия не нужна.
+//
+// Смена темы (RegisterTheme/SetTheme) не портит кэш, а просто перестаёт им
+// пользоваться: resolve() (theme/resolve.go) при пересборке строит СОВСЕМ
+// НОВЫЕ *Style (через Clone(), с новыми адресами) для каждой пары
+// компонент/часть/состояние, поэтому старые записи кэша больше никогда не
+// запрашиваются, а под новым указателем неизбежен промах и честный
+// пересчёт — панель не может остаться раскрашенной цветами прошлой темы.
+// Цена — старые записи держат мёртвые стили: ключ карты — указатель, и
+// сборщик до них не доберётся. Поэтому карта ограничена по размеру и при
+// переполнении сбрасывается целиком (maxGradientStopsCache): следующие кадры
+// пересчитают то, что рисуется сейчас, а всё, что осталось от прежних тем,
+// уйдёт. Сброс вместо вытеснения по одной записи — потому что стили одной
+// темы устаревают вместе, и выбирать между ними бессмысленно.
+//
+// Карта — а не переиспользуемый буфер на компонент/движок: движков в
+// процессе может быть несколько, и они рисуют ОДНОВРЕМЕННО в разных
+// горутинах кадра (см. tests/twoengines_test.go) — общий небезопасный буфер
+// на пакет был бы гонкой. sync.RWMutex почти всегда работает на чтение
+// (кадр за кадром одни и те же указатели), а пишет только один раз на
+// стиль.
+var (
+	gradientStopsMu    sync.RWMutex
+	gradientStopsCache = map[*theme.Style][]widget.GradientStop{}
+)
+
+// maxGradientStopsCache — сколько стилей кэш держит, прежде чем сбросить.
+//
+// Градиентных стилей у темы единицы: панель, кнопка, заголовок — и по
+// нескольку состояний на каждый. Двести пятьдесят шесть покрывают несколько
+// тем разом, а приложение, переключающее темы часами, упрётся в предел и
+// начнёт с чистой карты вместо того, чтобы держать всё, что когда-либо
+// рисовало.
+const maxGradientStopsCache = 256
+
+// gradientStopsFor возвращает converted-стопы стиля s, считая их не чаще
+// одного раза на указатель — см. gradientStopsCache.
+func gradientStopsFor(s *theme.Style) []widget.GradientStop {
+	gradientStopsMu.RLock()
+	stops, ok := gradientStopsCache[s]
+	gradientStopsMu.RUnlock()
+	if ok {
+		return stops
+	}
+
+	stops = make([]widget.GradientStop, 0, len(s.Gradient))
+	for _, st := range s.Gradient {
+		stops = append(stops, widget.GradientStop{Color: st.Color, Offset: st.Pos})
+	}
+
+	gradientStopsMu.Lock()
+	// Пока считали без блокировки записи, тот же стиль мог посчитать
+	// сосед из другого движка — отдаём его результат, а не плодим второй
+	// такой же в карте.
+	if existing, ok := gradientStopsCache[s]; ok {
+		gradientStopsMu.Unlock()
+		return existing
+	}
+	if len(gradientStopsCache) >= maxGradientStopsCache {
+		clear(gradientStopsCache)
+	}
+	gradientStopsCache[s] = stops
+	gradientStopsMu.Unlock()
+	return stops
 }
 
 // orHalf — доля из стиля, а ноль означает середину: стиль, попросивший
