@@ -3537,6 +3537,13 @@ What the numbers say, and what they do not:
 - Window dragging is the expensive case (1.85 ms, 2 MB) — that is what
   `Frame.Moves` addresses: the pixels have not changed, only moved.
 
+Repeated after tile classification, move reporting and external pacing landed
+(the same command, same machine): full frame 3 278 191 ns, clock tick 75 660 ns
+with culling and 84 868 ns without, hover 102 311 ns, window drag 2 007 091 ns.
+Within noise of the numbers above — the marks are one assignment inside loops
+that already ran, and `Frame.Moves` is filled from a list that is empty unless
+something declared a move.
+
 Rule worth keeping: an optimisation without a paired measurement is not
 accepted. Add the before/after here.
 
