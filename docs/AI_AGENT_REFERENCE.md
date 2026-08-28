@@ -3450,6 +3450,67 @@ before/after code examples.
 
 ---
 
+### Frame contents: what the engine now reports
+
+```go
+type Frame struct {
+    Seq       uint64
+    Timestamp time.Time
+    Tiles     []DirtyTile   // as before: raw RGBA
+    Regions   []Region      // v3.15.0: what each tile is made of
+    Moves     []MoveRegion  // v3.15.0: content that merely moved
+}
+
+type Region struct {
+    Rect  image.Rectangle
+    Kind  RegionKind // RegionMixed | RegionSolid | RegionImage | RegionText
+    Color color.RGBA // meaningful only for RegionSolid
+}
+
+type MoveRegion struct {
+    From image.Point     // take from here
+    Rect image.Rectangle // put here; size comes from Rect
+}
+```
+
+`Regions` runs parallel to `Tiles` (same order, same length). How the mark
+accumulates per tile, in the rasteriser's own loops:
+
+- an **opaque fill covering the whole tile** wipes whatever was under it and
+  makes the tile `RegionSolid` with that color;
+- a fill is a *weak* mark — it is the background. Text or an image drawn over
+  it becomes the tile's mark, not `RegionMixed`: what matters to the consumer
+  is what is on top;
+- a fill that lands over content **without covering the tile** gives
+  `RegionMixed` — an honest "don't know";
+- text over an image (or the reverse) is `RegionMixed`;
+- marks inside the damage are reset at the start of each frame.
+
+**Apply `Moves` BEFORE `Tiles`.** That is DXGI's order and what a consumer
+expects; the reverse would overwrite fresh pixels with stale ones. A widget
+declares a move with `widget.NotifyMove(src, dst)` — `Window` does it while
+dragging and on landing. A declared move does NOT replace damage: it is a hint
+about a cheaper way to reach the same result.
+
+### Pacing and the frame sink
+
+```go
+eng.SetFrameSink(sink)                    // sink.Present(output.Frame), synchronous
+eng.SetPacing(engine.PacingExternal)      // the internal ticker starts no frames
+eng.RequestFrame()                        // the sink is ready for one
+```
+
+Under `PacingExternal` the ticker still advances animations — otherwise an
+animation started by the application would freeze until the next request. The
+`Frames()` channel keeps working; the sink is an alternative, not a
+replacement, and unlike the channel it cannot drop a frame (the channel has a
+depth of 8 and discards on overflow).
+
+Why a consumer wants this beyond vblank pacing: `Engine.Start()` runs the
+render loop on its own goroutine, so a consumer that mutates the widget tree
+from another goroutine races the render walk. External pacing lets it do both
+on one goroutine and remove the race by construction.
+
 ### Measured cost of a frame
 
 Desktop scene from `desktop/` at 1280×800, Windows 11 theme, fake system data
