@@ -3593,6 +3593,24 @@ Within noise of the numbers above — the marks are one assignment inside loops
 that already ran, and `Frame.Moves` is filled from a list that is empty unless
 something declared a move.
 
+Repeated again after v3.16.0 (per-engine pipeline state, one bevel
+implementation, gradient stop cache): full frame 3 315 877 ns, clock tick
+81 758 ns with culling and 86 152 ns without, hover 100 750 ns, window drag
+1 853 372 ns. Still within noise — that release moved correctness, not cost.
+
+Two targeted measurements from it, both with `-benchmem`:
+
+| what | before | after |
+|---|---|---|
+| `markTiles` on a row-by-row fill (400×300, 300 one-pixel strips) | 6 120 ns | 4 063 ns |
+| `PaintGradient` (desktop) | 3 590 ns, 1 alloc / 48 B | 3 510 ns, 0 allocs |
+
+The first one: a strip thinner than a tile can never cover one, so the
+per-tile "does this cover the whole tile?" test is answered once per call
+instead of once per tile. The truncated edge tile is the exception the code
+accounts for — on a canvas whose height is not a multiple of 64 the last tile
+row can be one pixel tall, and then a one-pixel strip does cover it.
+
 Rule worth keeping: an optimisation without a paired measurement is not
 accepted. Add the before/after here.
 
