@@ -90,8 +90,12 @@ func (c *Canvas) cloneForSize(w, h int, scale float64, bgSrc image.Image) *Canva
 	// повод молча вернуть пропуск поддеревьев или порядок каналов к
 	// значениям по умолчанию.
 	nc.cullingOn.Store(c.cullingOn.Load())
-	nc.format = c.format
+	// Формат — только СОБСТВЕННОГО буфера. Новый холст рисует в свою память:
+	// буфер потребителя, отданный через SetSurface, размера прежнего экрана и
+	// после смены разрешения не годится, а его порядок каналов относится
+	// только к нему. Потребитель отдаёт буфер заново.
 	nc.formatOwn = c.formatOwn
+	nc.format = c.formatOwn
 	if bgSrc != nil {
 		nc.setBackground(bgSrc)
 	}
