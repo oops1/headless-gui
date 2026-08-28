@@ -376,6 +376,20 @@ func Windows10Profile() *Profile {
 		Border: C(accent), BorderWidth: N(1), Corner: N(0),
 	})
 	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	// Элементы панели не носят собственной заливки в покое: фон им даёт сама
+	// панель, а своя плашка появляется только под курсором и у активного
+	// окна. Заливка иначе приходит из общего токена surface, и на панели
+	// проступают прямоугольники чуть иного оттенка. Блок стоит последним:
+	// SetStyle заменяет запись целиком, и любой стиль этих компонентов ниже
+	// вернул бы заливку обратно.
+	clearFill := C(RGBA(0, 0, 0, 0))
+	for _, comp := range []string{"startbutton", "taskbutton", "clock",
+		"tray.network", "tray.volume", "tray.power", "tray.chevron"} {
+		st := p.Styles[StyleKey{Component: comp, State: StateNormal}]
+		st.Fill = clearFill
+		p.SetStyle(comp, "", StateNormal, st)
+	}
+
 	return p
 }
 
@@ -551,6 +565,20 @@ func Windows11Profile() *Profile {
 		Border: C(accent), BorderWidth: N(1), Corner: N(6),
 	})
 	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	// Элементы панели не носят собственной заливки в покое: фон им даёт сама
+	// панель, а своя плашка появляется только под курсором и у активного
+	// окна. Заливка иначе приходит из общего токена surface, и на панели
+	// проступают прямоугольники чуть иного оттенка. Блок стоит последним:
+	// SetStyle заменяет запись целиком, и любой стиль этих компонентов ниже
+	// вернул бы заливку обратно.
+	clearFill := C(RGBA(0, 0, 0, 0))
+	for _, comp := range []string{"startbutton", "taskbutton", "clock",
+		"tray.network", "tray.volume", "tray.power", "tray.chevron"} {
+		st := p.Styles[StyleKey{Component: comp, State: StateNormal}]
+		st.Fill = clearFill
+		p.SetStyle(comp, "", StateNormal, st)
+	}
+
 	return p
 }
 
