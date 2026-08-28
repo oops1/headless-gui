@@ -99,6 +99,33 @@ func (c *Canvas) markText(r image.Rectangle) {
 	c.markTiles(r, output.RegionText, color.RGBA{}, false)
 }
 
+// markKind помечает область тем, чем её рисует текущий вызывающий.
+//
+// Маски альфы и цветные глифы — общий путь для трёх разных вещей: букв,
+// сглаженных дуг скруглённых заливок и размытого силуэта тени. Раньше все
+// три уходили наружу как «текст», и потребитель применял к серому размытию
+// текстовый кодек. Теперь вид объявляет вызывающий, а по умолчанию —
+// честное «не знаю».
+func (c *Canvas) markKind(r image.Rectangle) {
+	kind := c.maskKind
+	if kind == output.RegionText {
+		c.markText(r)
+		return
+	}
+	c.markTiles(r, kind, color.RGBA{}, false)
+}
+
+// withMaskKind выполняет f, объявляя, чем рисуют маски внутри неё.
+//
+// Возврат к прежнему значению, а не к «не знаю»: вызовы вкладываются —
+// текстовый прогон внутри фигуры остаётся текстом только внутри себя.
+func (c *Canvas) withMaskKind(kind output.RegionKind, f func()) {
+	prev := c.maskKind
+	c.maskKind = kind
+	f()
+	c.maskKind = prev
+}
+
 // markTiles — накопление признака: новый примитив поверх того, что уже было.
 //
 // Правила выведены из физики отрисовки, а не из порядка вызовов:
@@ -133,6 +160,14 @@ func (c *Canvas) markTiles(r image.Rectangle, kind output.RegionKind, col color.
 			tile := image.Rect(tx*ts, ty*ts, min(tx*ts+ts, c.W), min(ty*ts+ts, c.H))
 			full := r.Min.X <= tile.Min.X && r.Min.Y <= tile.Min.Y &&
 				r.Max.X >= tile.Max.X && r.Max.Y >= tile.Max.Y
+
+			// Скруглённый клип режет углы: примитив накрывает прямоугольник
+			// тайла, но пиксели за дугой остаются прежними. Обещать
+			// потребителю сплошной цвет тут нельзя — он зальёт квадратом то,
+			// что на деле скруглено.
+			if full && c.round.active && c.round.clipsTile(tile) {
+				full = false
+			}
 
 			// Перекрытие: примитив накрыл тайл целиком и ничего не пропускает.
 			if full && opaque {

@@ -58,6 +58,13 @@ type jsonStyle struct {
 		Color string  `json:"color"`
 	} `json:"gradient,omitempty"`
 	GradientAngle *float64 `json:"gradient_angle,omitempty"`
+	// Вид градиента и параметры радиального: "linear" (по умолчанию) либо
+	// "radial". Центр и радиус — ДОЛЯМИ области, как в Go-профилях: одна и
+	// та же подсветка ложится под значок любого размера.
+	GradientKind    string   `json:"gradient_kind,omitempty"`
+	GradientCenterX *float64 `json:"gradient_center_x,omitempty"`
+	GradientCenterY *float64 `json:"gradient_center_y,omitempty"`
+	GradientRadius  *float64 `json:"gradient_radius,omitempty"`
 
 	Font *struct {
 		Family string  `json:"family,omitempty"`
@@ -70,6 +77,9 @@ type jsonStyle struct {
 		Mode   string  `json:"mode,omitempty"` // none | alpha | blur
 		Radius float64 `json:"radius,omitempty"`
 		Tint   string  `json:"tint,omitempty"`
+		// Блик по верхней кромке: именно он делает размытую подложку
+		// стеклом, а не плоской заливкой.
+		Highlight string `json:"highlight,omitempty"`
 	} `json:"backdrop,omitempty"`
 
 	Bevel *struct {
@@ -189,6 +199,16 @@ func (js jsonStyle) toDelta() (StyleDelta, []string) {
 	d.Elevation = js.Elevation
 	d.GradientAngle = js.GradientAngle
 
+	if js.GradientKind != "" {
+		if k, ok := ParseGradientKind(js.GradientKind); ok {
+			d.GradientKind = &k
+		} else {
+			warns = append(warns, fmt.Sprintf("gradient_kind: неизвестный вид %q", js.GradientKind))
+		}
+	}
+	d.GradientCenterX, d.GradientCenterY = js.GradientCenterX, js.GradientCenterY
+	d.GradientRadius = js.GradientRadius
+
 	for i, stop := range js.Gradient {
 		c, err := ParseColor(stop.Color)
 		if err != nil {
@@ -219,6 +239,13 @@ func (js jsonStyle) toDelta() (StyleDelta, []string) {
 				b.Tint = c
 			} else {
 				warns = append(warns, fmt.Sprintf("подложка, tint: %v", err))
+			}
+		}
+		if js.Backdrop.Highlight != "" {
+			if c, err := ParseColor(js.Backdrop.Highlight); err == nil {
+				b.Highlight = c
+			} else {
+				warns = append(warns, fmt.Sprintf("подложка, highlight: %v", err))
 			}
 		}
 		d.Backdrop = &b

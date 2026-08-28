@@ -1187,7 +1187,7 @@ func (e *Engine) loop() {
 				continue
 			}
 			frame := e.renderFrame()
-			if len(frame.Tiles) == 0 {
+			if len(frame.Tiles) == 0 && len(frame.Moves) == 0 {
 				continue
 			}
 			e.deliver(frame)
@@ -1213,7 +1213,10 @@ func (e *Engine) loop() {
 				lastGen = gen // снимаем ДО рендера: инвалидация во время кадра не потеряется
 			}
 			frame := e.renderFrame()
-			if len(frame.Tiles) == 0 {
+			// Кадр из ОДНИХ переносов — полноценный кадр: окно переехало,
+			// пикселей не изменилось, и потребителю есть что выполнить.
+			// Проверка только по тайлам отбрасывала его молча.
+			if len(frame.Tiles) == 0 && len(frame.Moves) == 0 {
 				continue
 			}
 			// Один путь выдачи на оба темпа: сток и канал получают кадр
@@ -1328,6 +1331,27 @@ func (e *Engine) renderFrame() output.Frame {
 	// Всплывающая подсказка (поверх всего, включая модальные диалоги).
 	e.drawTooltip(canvas, root)
 
+	// Переносы применяются к ПЕРЕДНЕМУ буферу до диффа: он приводится в то
+	// состояние, в котором окажется буфер потребителя после копирования, и
+	// дифф оставляет только настоящие расхождения. Без этого потребитель
+	// получал и команду переноса, и все пиксели переехавшего окна — то есть
+	// платил столько же, сколько без переноса вовсе.
+	var moves []output.MoveRegion
+	if partial {
+		notices := widget.TakeMoves()
+		if len(notices) > 0 {
+			declared := make([]widgetMove, 0, len(notices))
+			for _, n := range notices {
+				declared = append(declared, widgetMove{From: n.From, Rect: n.Rect})
+			}
+			moves = canvas.applyMovesToFront(declared)
+		}
+	} else {
+		// Полный кадр: потребитель и так получает всё заново, а объявление,
+		// оставшееся в списке, досталось бы следующему кадру.
+		widget.DropMoves()
+	}
+
 	// Diff: при частичной перерисовке сравниваем только тайлы,
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
@@ -1350,18 +1374,6 @@ func (e *Engine) renderFrame() output.Frame {
 		case e.saveCh <- saveJob{path: path, seq: seq, snap: snap}:
 		case <-e.quit:
 		}
-	}
-
-	// Переносы: содержимое, переехавшее без изменений. При полном кадре они
-	// бессмысленны — потребитель и так получает всё заново, а оставшись в
-	// списке, перенос достался бы следующему кадру, к которому не относится.
-	var moves []output.MoveRegion
-	if partial {
-		for _, m := range widget.TakeMoves() {
-			moves = append(moves, output.MoveRegion{From: m.From, Rect: m.Rect})
-		}
-	} else {
-		widget.DropMoves()
 	}
 
 	return output.Frame{

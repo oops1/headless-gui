@@ -47,6 +47,9 @@ type Canvas struct {
 	W, H       int                   // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
 	// marks — признак содержимого по тайлам за текущий кадр (regions.go).
 	marks []tileMark
+	// maskKind — чем считается то, что рисуют маски альфы и цветные глифы
+	// прямо сейчас: буквами, фигурой, тенью. Через них идут все три.
+	maskKind output.RegionKind
 
 	tilesX int
 	tilesY int
@@ -743,7 +746,7 @@ func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
 	if g.mask == nil {
 		return
 	}
-	c.drawAlphaMask(g.mask, gx, gy, col)
+	c.withMaskKind(output.RegionText, func() { c.drawAlphaMask(g.mask, gx, gy, col) })
 }
 
 // drawAlphaMask альфа-блендит альфа-маску цветом col в back-буфер (Over,
@@ -760,7 +763,7 @@ func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
 func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 	col = c.enc(col)
 	if b := alpha.Bounds(); !b.Empty() {
-		c.markText(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
+		c.markKind(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
 	}
 	mw, mh := alpha.Rect.Dx(), alpha.Rect.Dy()
 	r := c.clampRect(image.Rect(gx, gy, gx+mw, gy+mh))
@@ -811,7 +814,7 @@ func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 // clip. (gx, gy) — позиция левого верхнего угла изображения на холсте.
 func (c *Canvas) drawColorGlyph(img *image.RGBA, gx, gy int) {
 	if b := img.Bounds(); !b.Empty() {
-		c.markText(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
+		c.markKind(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
 	}
 	iw, ih := img.Rect.Dx(), img.Rect.Dy()
 	r := c.clampRect(image.Rect(gx, gy, gx+iw, gy+ih))
@@ -913,7 +916,7 @@ func (c *Canvas) drawShapedText(fc *FontCache, text string, x, baseline int, siz
 		if cg := c.shaper.colorGlyphFor(g.face, g.gid, sizePx, col); cg != nil && cg.img != nil {
 			gx := (pen + g.xOff).Round() + cg.offX
 			gy := baseline - g.yOff.Round() + cg.offY
-			c.drawColorGlyph(cg.img, gx, gy)
+			c.withMaskKind(output.RegionText, func() { c.drawColorGlyph(cg.img, gx, gy) })
 			pen += g.adv
 			continue
 		}
@@ -922,7 +925,7 @@ func (c *Canvas) drawShapedText(fc *FontCache, text string, x, baseline int, siz
 			// Точка отрисовки: перо + XOffset; YOffset положителен вверх.
 			gx := (pen + g.xOff).Round() + m.offX
 			gy := baseline - g.yOff.Round() + m.offY
-			c.drawAlphaMask(m.mask, gx, gy, col)
+			c.withMaskKind(output.RegionText, func() { c.drawAlphaMask(m.mask, gx, gy, col) })
 		}
 		pen += g.adv
 	}
