@@ -5,6 +5,21 @@ import (
 	"image/color"
 )
 
+// opaquePanelRegion — общая реализация OpaqueRegion для панелей.
+//
+// Панель закрывает свои границы, только если заливает их сплошным
+// непрозрачным цветом. Всё остальное — полупрозрачность (UseAlpha), градиент
+// (его стопы могут быть какими угодно), фоновое изображение (может нести
+// альфу) — повод не обещать ничего: ошибка в эту сторону стоит лишней
+// отрисовки, а в другую — дыры на экране.
+func opaquePanelRegion(buf *[1]image.Rectangle, b image.Rectangle, bg color.RGBA,
+	corner int, useAlpha bool, grad *LinearGradient, img *image.RGBA) []image.Rectangle {
+	if useAlpha || grad != nil || img != nil || bg.A < 255 {
+		return nil
+	}
+	return oneRegion(buf, opaqueRect(b, corner))
+}
+
 // DrawContextAlpha — расширение DrawContext для рисования с альфа-смешиванием.
 // Реализуется engine.Canvas через метод FillRectAlpha.
 type DrawContextAlpha interface {
@@ -26,6 +41,9 @@ type Panel struct {
 	// Gradient — градиентный фон (LinearGradientBrush). Если задан, рисуется
 	// вместо сплошного Background.
 	Gradient *LinearGradient
+
+	// opaqueBuf — буфер под ответ OpaqueRegion (см. oneRegion).
+	opaqueBuf [1]image.Rectangle
 
 	// ── Заголовок (title bar) ───────────────────────────────────────────────
 	Caption      string     // текст заголовка
@@ -82,6 +100,12 @@ func (p *Panel) resolvedTitleStyle() WindowTitleStyle {
 		return WindowTitleMac
 	}
 	return detectedTitleStyle()
+}
+
+// OpaqueRegion реализует OpaqueRegioner: что панель закрывает непрозрачно.
+func (p *Panel) OpaqueRegion() []image.Rectangle {
+	return opaquePanelRegion(&p.opaqueBuf, p.bounds, p.Background, p.CornerRadius,
+		p.UseAlpha, p.Gradient, p.BackgroundImage)
 }
 
 func (p *Panel) Draw(ctx DrawContext) {

@@ -110,6 +110,9 @@ type Window struct {
 	// промах в восемь точек по вертикали.
 	ownStyle *ThemeStyle
 
+	// opaqueBuf — буфер под ответ OpaqueRegion (см. oneRegion).
+	opaqueBuf [1]image.Rectangle
+
 	// Resize — режим изменения размера окна.
 	Resize ResizeMode
 
@@ -458,6 +461,18 @@ func (w *Window) style() ThemeStyle {
 		return *w.ownStyle
 	}
 	return currentStyle()
+}
+
+// OpaqueRegion реализует OpaqueRegioner: что окно закрывает непрозрачно.
+//
+// Окно заливает свои границы целиком (Draw начинается именно с этого),
+// поэтому закрывает оно всё, кроме скруглённых углов. Полупрозрачный фон не
+// закрывает ничего: под ним видно то, что лежит ниже, и рисовать это надо.
+func (w *Window) OpaqueRegion() []image.Rectangle {
+	if w.Background.A < 255 {
+		return nil
+	}
+	return oneRegion(&w.opaqueBuf, opaqueRect(w.Bounds(), w.CornerRadius))
 }
 
 // borderW возвращает ширину рамки (0 для borderless).

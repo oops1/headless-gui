@@ -57,6 +57,11 @@ type Base struct {
 	// все.
 	subtree subtreeInfo
 
+	// skipBuf — переиспользуемая пометка «этого ребёнка закрыли, не рисуем»
+	// (см. drawChildren). Живёт на контейнере, чтобы не аллоцировать срез на
+	// каждый кадр.
+	skipBuf []bool
+
 	// disabled=true → виджет отключён (WPF IsEnabled="False").
 	// По умолчанию false (т.е. виджет включён), что соответствует WPF IsEnabled=True.
 	disabled bool
@@ -472,11 +477,51 @@ func desiredWidth(w Widget) int {
 // Вызывается конкретными виджетами в конце своего Draw.
 // Скрытые потомки (SetVisible(false) / Visibility=Collapsed) пропускаются.
 func (b *Base) drawChildren(ctx DrawContext) {
-	for _, child := range b.children {
+	// Сначала проход СВЕРХУ ВНИЗ — от того, что рисуется последним и лежит
+	// поверх всех. Он копит закрытую площадь и помечает детей, которых
+	// закроют целиком: рисовать их незачем, поверх ляжет непрозрачное.
+	// Рисуем потом в обычном порядке — от этого прохода зависит только
+	// признак «пропустить», а не что за чем ложится.
+	skip := b.skipBuf[:0]
+	if len(b.children) > 1 {
+		// Буфер переиспользуется между кадрами: контейнер рисуется в одной
+		// горутине (виджет живёт в одном дереве, дерево — в одном движке), а
+		// свежий срез на каждый кадр каждого контейнера — аллокация на ровном
+		// месте.
+		if cap(skip) < len(b.children) {
+			skip = make([]bool, len(b.children))
+		} else {
+			skip = skip[:len(b.children)]
+			for i := range skip {
+				skip[i] = false
+			}
+		}
+		b.skipBuf = skip
+
+		var occ occluders
+		for i := len(b.children) - 1; i >= 0; i-- {
+			child := b.children[i]
+			if child.Bounds().Empty() || !IsWidgetVisible(child) {
+				continue
+			}
+			if occ.Occluded(child) {
+				skip[i] = true
+				continue
+			}
+			// Закрытую площадь копит только тот, кого рисуют: пропущенный
+			// ничего не нарисует и закрыть собой не может.
+			occ.add(child)
+		}
+	}
+
+	for i, child := range b.children {
 		if child.Bounds().Empty() {
 			continue
 		}
 		if !IsWidgetVisible(child) {
+			continue
+		}
+		if i < len(skip) && skip[i] {
 			continue
 		}
 		// Поддерево, не задевающее ни одной изменившейся области, не рисуем
