@@ -1970,6 +1970,77 @@ duration of the subtree's drawing and restored via `defer`. Scopes nest: an
 inner one restores the OUTER style rather than resetting to the global one.
 `NewThemeScope(nil)` is a plain container — a global theme reaches its children.
 
+
+### The frame pipeline (v3.15.0)
+
+A frame is produced and handed to a consumer; this is what the engine tells
+about it and who sets the pace.
+
+#### Subtree culling
+
+A frame used to walk the whole tree: damage clipped at the canvas level, so
+stray pixels were discarded — but the walk and the `Draw` calls happened
+anyway. Now a branch that touches none of the changed areas is not drawn at
+all.
+
+```go
+eng.SetSubtreeCulling(false) // back to the full walk
+```
+
+Hence the draw contract (see "Custom Widget" → "The draw contract"): `Draw` is
+not guaranteed every frame. A widget that draws outside its own bounds declares
+the margin:
+
+```go
+func (w *MyWidget) DrawMargin() int { return 12 } // shadow, glow
+```
+
+#### What a tile is made of
+
+```go
+frame := <-eng.Frames()
+for i, tile := range frame.Tiles {
+    switch frame.Regions[i].Kind {
+    case output.RegionSolid: // fill with Regions[i].Color
+    case output.RegionText:  // compress losslessly
+    case output.RegionImage: // lossy is fine
+    case output.RegionMixed: // as before
+    }
+}
+```
+
+The engine knows what it painted each area with; that knowledge used to be lost
+on the way out, and the consumer rebuilt it with a second codec pass. The mark
+accumulates per tile: an opaque full-tile fill erases whatever was under it,
+text or an image over a background becomes the tile's mark, and a fill over
+content yields `RegionMixed` — an honest "don't know".
+
+#### Content that moved
+
+```go
+for _, m := range frame.Moves { // moves first, then tiles!
+    blit(m.Src(), m.Rect)
+}
+```
+
+Dragging a window does not change pixels, it moves them. `widget.NotifyMove(src, dst)`
+declares the move; in RDP that is a pair of surface-cache commands instead of a
+hundred kilobytes.
+
+#### Who sets the pace
+
+```go
+eng.SetFrameSink(sink)          // the sink gets the frame synchronously and cannot lose it
+eng.SetPacing(engine.PacingExternal)
+eng.RequestFrame()              // the sink is ready
+```
+
+Under external pacing the internal ticker starts no frames (it still advances
+animations). This is what vblank pacing on a local output needs — and it also
+lets a consumer mutate the scene and produce the frame on one goroutine,
+removing that race by construction. `Frames()` keeps working: the sink is an
+alternative, not a replacement.
+
 ---
 
 ## Module Structure
