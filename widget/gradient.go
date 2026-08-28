@@ -28,18 +28,29 @@ type LinearGradient struct {
 
 // colorAt возвращает интерполированный цвет на позиции t (0..1).
 func (g *LinearGradient) colorAt(t float64) color.RGBA {
-	if len(g.Stops) == 0 {
+	return colorAtStops(g.Stops, t)
+}
+
+// colorAtStops интерполирует цвет по стопам на позиции t (0..1).
+//
+// Одна на оба градиента, линейный и радиальный: у них разная геометрия — где
+// брать t, — но одна и та же лестница цветов, и держать две копии значило бы
+// чинить каждую находку дважды. За пределами крайних стопов цвет не
+// экстраполируется, а держится: градиент, дошедший до последнего стопа,
+// дальше просто им и закрашен.
+func colorAtStops(stops []GradientStop, t float64) color.RGBA {
+	if len(stops) == 0 {
 		return color.RGBA{}
 	}
-	if t <= g.Stops[0].Offset {
-		return g.Stops[0].Color
+	if t <= stops[0].Offset {
+		return stops[0].Color
 	}
-	last := g.Stops[len(g.Stops)-1]
+	last := stops[len(stops)-1]
 	if t >= last.Offset {
 		return last.Color
 	}
-	for i := 1; i < len(g.Stops); i++ {
-		a, b := g.Stops[i-1], g.Stops[i]
+	for i := 1; i < len(stops); i++ {
+		a, b := stops[i-1], stops[i]
 		if t <= b.Offset {
 			span := b.Offset - a.Offset
 			f := 0.0

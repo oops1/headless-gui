@@ -127,3 +127,39 @@ func diffA(a, b color.RGBA) int {
 	}
 	return d
 }
+
+// Линейный и радиальный градиенты берут цвет по одной и той же лестнице.
+//
+// Интерполяция стопов была написана дважды — по разу на градиент, — и
+// расхождение в них проявилось бы как разный цвет одной и той же подложки в
+// зависимости от того, круглая она или полосатая. Теперь функция одна, и
+// тест это фиксирует: разная у них только геометрия, откуда берётся t.
+func TestGradients_ShareTheSameColorRamp(t *testing.T) {
+	stops := []GradientStop{
+		{Color: color.RGBA{R: 240, G: 60, B: 20, A: 255}, Offset: 0},
+		{Color: color.RGBA{R: 20, G: 90, B: 200, A: 180}, Offset: 0.35},
+		{Color: color.RGBA{R: 255, G: 255, B: 255, A: 0}, Offset: 1},
+	}
+	lin := &LinearGradient{Stops: stops}
+	rad := &RadialGradient{Stops: stops}
+
+	// Позиции нарочно включают края, точный стоп и «мимо» всех.
+	for _, pos := range []float64{-0.5, 0, 0.1, 0.35, 0.6, 1, 1.7} {
+		if a, b := lin.colorAt(pos), rad.colorAt(pos); a != b {
+			t.Errorf("на %.2f линейный даёт %v, радиальный %v", pos, a, b)
+		}
+	}
+
+	// За крайними стопами цвет держится, а не экстраполируется в мусор.
+	if got := lin.colorAt(-1); got != stops[0].Color {
+		t.Errorf("левее первого стопа цвет %v, ждали %v", got, stops[0].Color)
+	}
+	if got := lin.colorAt(2); got != stops[len(stops)-1].Color {
+		t.Errorf("правее последнего стопа цвет %v, ждали %v", got, stops[len(stops)-1].Color)
+	}
+
+	// Градиент без стопов не должен падать.
+	if got := (&LinearGradient{}).colorAt(0.5); got != (color.RGBA{}) {
+		t.Errorf("градиент без стопов вернул %v", got)
+	}
+}

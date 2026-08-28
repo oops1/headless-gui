@@ -128,9 +128,23 @@ func (e *Engine) noteMove(n widget.MoveNotice) {
 	}
 
 	e.moveMu.Lock()
-	e.pendingMoves = append(e.pendingMoves, widgetMove{From: n.From, Rect: n.Rect})
+	// Список ограничен: движок, который не рисует, копил бы объявления
+	// вечно — перетаскивание объявляет их шестьдесят раз в секунду, а
+	// созданный и оставленный движок (окно свёрнуто, кадры не запрашивают)
+	// их не разбирает. Лишние отбрасываются, а не вытесняют старые:
+	// потерянный перенос — это лишние тайлы, а не порча картинки, и лучше
+	// потерять поздние, чем те, к которым уже привязано состояние буфера.
+	if len(e.pendingMoves) < maxPendingMoves {
+		e.pendingMoves = append(e.pendingMoves, widgetMove{From: n.From, Rect: n.Rect})
+	}
 	e.moveMu.Unlock()
 }
+
+// maxPendingMoves — сколько объявлений движок держит между кадрами.
+//
+// Кадр всё равно возьмёт лишь непересекающиеся, а их на экране помещается
+// немного; шестьдесят четыре с запасом покрывают самый бурный кадр.
+const maxPendingMoves = 64
 
 // takeMoves забирает накопленные объявления и очищает список.
 func (e *Engine) takeMoves() []widgetMove {
