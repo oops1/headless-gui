@@ -3408,6 +3408,167 @@ m.SetIconResolver(widget.BuiltinIcons())
 
 ---
 
+## v3.15.0 additions (render pipeline)
+
+### Draw contract
+
+The engine can skip a widget subtree whose bounding rectangle does not
+intersect any damage region — that subtree's `Draw` is not called for the
+frame. Controlled by:
+
+```go
+eng.SetSubtreeCulling(bool)   // default: true (on)
+```
+
+Set `false` to fall back to the pre-v3.15.0 behavior (every widget's `Draw`
+runs every rendered frame) for an app that can't yet meet the contract below.
+
+Rules a widget MUST follow so culling is transparent to it:
+
+1. **`Draw` is not called every frame.** A widget must render correctly when
+   skipped — skipped means "the screen already shows the right thing."
+2. **Animation only via `widget.Animate` / `widget.AnimateOwned`.** Never a
+   frame counter or `time.Now()` read inside `Draw` — a skipped `Draw` call
+   would stall it instead of letting it finish.
+3. **`Draw` must not mutate widget state.** In particular, do not compute
+   layout / hit-test rects inside `Draw` and cache them there — a skipped
+   `Draw` leaves the cache stale and clicks resolve against the wrong
+   coordinates.
+4. **Any visual change needs `Invalidate()` (own bounds) or
+   `widget.InvalidateRect(r)` (area outside own bounds — overlays, popups).**
+   Without it the engine has no signal the frame is stale, and with culling
+   on that means the widget never repaints again, not just late.
+5. **A widget that paints outside its own bounds (`Elevation` shadow,
+   overlay, popup) must claim that area itself.** The subtree's bounding
+   rectangle is computed from widget `Bounds()`, not from actual paint
+   extent — an unclaimed shadow/overlay area is dropped from culling
+   consideration and can go stale.
+
+See `GUIDE.md` / `GUIDE_EN.md`, section "Свой виджет" / "Custom Widget" →
+"Контракт отрисовки" / "The draw contract", for the full rationale and
+before/after code examples.
+
+---
+
+### Frame contents: what the engine now reports
+
+```go
+type Frame struct {
+    Seq       uint64
+    Timestamp time.Time
+    Tiles     []DirtyTile   // as before: raw RGBA
+    Regions   []Region      // v3.15.0: what each tile is made of
+    Moves     []MoveRegion  // v3.15.0: content that merely moved
+}
+
+type Region struct {
+    Rect  image.Rectangle
+    Kind  RegionKind // RegionMixed | RegionSolid | RegionImage | RegionText
+    Color color.RGBA // meaningful only for RegionSolid
+}
+
+type MoveRegion struct {
+    From image.Point     // take from here
+    Rect image.Rectangle // put here; size comes from Rect
+}
+```
+
+`Regions` runs parallel to `Tiles` (same order, same length). How the mark
+accumulates per tile, in the rasteriser's own loops:
+
+- an **opaque fill covering the whole tile** wipes whatever was under it and
+  makes the tile `RegionSolid` with that color;
+- a fill is a *weak* mark — it is the background. Text or an image drawn over
+  it becomes the tile's mark, not `RegionMixed`: what matters to the consumer
+  is what is on top;
+- a fill that lands over content **without covering the tile** gives
+  `RegionMixed` — an honest "don't know";
+- text over an image (or the reverse) is `RegionMixed`;
+- marks inside the damage are reset at the start of each frame.
+
+**Apply `Moves` BEFORE `Tiles`.** That is DXGI's order and what a consumer
+expects; the reverse would overwrite fresh pixels with stale ones. A widget
+declares a move with `widget.NotifyMove(src, dst)` — `Window` does it while
+dragging and on landing. A declared move does NOT replace damage: it is a hint
+about a cheaper way to reach the same result.
+
+### Buffer format and drawing into foreign memory
+
+```go
+eng.SetPixelFormat(engine.FormatBGRX)   // rasteriser writes BGRX directly
+eng.SetSurface(pix, stride, engine.FormatBGRX) // back buffer = your memory
+eng.SetSurface(nil, 0, engine.FormatRGBA)      // back to the engine's own
+```
+
+Channel order is a property of the buffer, not a reason for a per-pixel loop:
+an RDP consumer used to swap RGBA→BGRX itself on every frame. `FormatRGBA` is
+the default and byte-for-byte what shipped before.
+
+`SetSurface` hands the engine the consumer's own memory as the back buffer,
+removing two copies of the frame. `stride` may exceed `w*4` (DIB alignment).
+The **front** buffer stays internal — the diff needs a private copy of the
+previous frame to compare against. Buffer rotation (`SetSurfaces` with
+per-buffer damage age, the equivalent of `EGL_buffer_age`) is not implemented.
+
+`DirtyTile.Data` follows the chosen format: with `FormatBGRX` those bytes are
+BGRX, which is what the caller asked for.
+
+### Pacing and the frame sink
+
+```go
+eng.SetFrameSink(sink)                    // sink.Present(output.Frame), synchronous
+eng.SetPacing(engine.PacingExternal)      // the internal ticker starts no frames
+eng.RequestFrame()                        // the sink is ready for one
+```
+
+Under `PacingExternal` the ticker still advances animations — otherwise an
+animation started by the application would freeze until the next request. The
+`Frames()` channel keeps working; the sink is an alternative, not a
+replacement, and unlike the channel it cannot drop a frame (the channel has a
+depth of 8 and discards on overflow).
+
+Why a consumer wants this beyond vblank pacing: `Engine.Start()` runs the
+render loop on its own goroutine, so a consumer that mutates the widget tree
+from another goroutine races the render walk. External pacing lets it do both
+on one goroutine and remove the race by construction.
+
+### Measured cost of a frame
+
+Desktop scene from `desktop/` at 1280×800, Windows 11 theme, fake system data
+with a fixed clock; `go test ./engine/ -bench BenchmarkPipeline -benchtime=200x`
+on the maintainer's machine (Intel Core Ultra 7 265K, Windows). Rerun with
+`engine/pipeline_bench_test.go`.
+
+| scenario | ns/op | B/op | allocs/op |
+|---|---|---|---|
+| full frame (`Invalidate`) | 3 318 098 | 28 891 | 37 |
+| clock tick (60×24 rect), culling on | 77 426 | 2 697 | 7 |
+| clock tick, culling **off** | 82 122 | 2 968 | 9 |
+| hover over a taskbar button | 95 390 | 51 583 | 10 |
+| dragging a 720×440 window | 1 854 068 | 2 038 138 | 89 |
+
+What the numbers say, and what they do not:
+
+- A damage-sized frame costs ~43× less than a full one. That win comes from
+  `SetRenderOnDemand` + `InvalidateRect`, which predate this work.
+- Subtree culling adds ~6% on top of that (77.4 µs vs 82.1 µs) and removes two
+  allocations. On a flat desktop most of the tree is a handful of wide panels,
+  so there is little to skip; the deeper the tree away from the damage, the
+  more it saves. It is not the headline win, and the numbers say so.
+- Window dragging is the expensive case (1.85 ms, 2 MB) — that is what
+  `Frame.Moves` addresses: the pixels have not changed, only moved.
+
+Repeated after tile classification, move reporting and external pacing landed
+(the same command, same machine): full frame 3 278 191 ns, clock tick 75 660 ns
+with culling and 84 868 ns without, hover 102 311 ns, window drag 2 007 091 ns.
+Within noise of the numbers above — the marks are one assignment inside loops
+that already ran, and `Frame.Moves` is filled from a list that is empty unless
+something declared a move.
+
+Rule worth keeping: an optimisation without a paired measurement is not
+accepted. Add the before/after here.
+
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

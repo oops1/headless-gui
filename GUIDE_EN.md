@@ -1030,6 +1030,66 @@ ctx.ClearClip()
 ctx.Clip() image.Rectangle   // current clip rect (for nested clipping)
 ```
 
+### The draw contract
+
+Starting with v3.15.0 the engine can skip a subtree whose bounding rectangle
+does not intersect any changed region (damage) — its widgets' `Draw` is
+simply not called that frame. That's a big win on screens where most of the
+area is static (a taskbar, a clock, a form sitting next to the one field
+being typed into), but it means `Draw` stops being a safe place for anything
+other than actual drawing. A widget that follows the four rules below is
+unaffected by the optimization; one that doesn't will break in ways that used
+to work only by accident.
+
+An application that hasn't been brought into compliance yet can restore the
+old behavior with one line: `eng.SetSubtreeCulling(false)` turns culling off
+entirely (it's on by default).
+
+**1. `Draw` is not guaranteed every frame.** Being skipped means "what's on
+screen is already correct" — a widget has no business assuming that, because
+it exists in the tree, it's necessarily being drawn.
+
+**2. Animation goes through `widget.Animate` / `widget.AnimateOwned` only,
+never a frame counter or a time measurement taken inside `Draw`.** A counter
+that `Draw` bumps on every call stops advancing the moment the widget falls
+out of damage — the animation just freezes instead of finishing:
+
+```go
+// Bad: the animation only progresses while the engine keeps calling Draw
+func (w *MyWidget) Draw(ctx widget.DrawContext) {
+    w.frame++                    // stalls the instant Draw stops being called
+    ...
+}
+
+// Good: ticks on its own clock, regardless of whether this frame draws the widget
+widget.AnimateOwned(w, "pulse", 400*time.Millisecond, widget.EaseOutCubic, func(t float64) {
+    w.phase = t
+    w.Invalidate()
+})
+```
+
+**3. `Draw` doesn't change widget state — it only paints.** The dangerous
+case is computing layout (child positions, hit-test zones) inside `Draw` and
+caching it there: skip a `Draw` call and that cache goes stale, so a click
+lands on where the widget was in the last frame that actually drew, not where
+it visually is now. Compute layout in `SetBounds`/`Layout`; let `Draw` only
+read the finished result.
+
+**4. Any change that affects appearance must be paired with `Invalidate()`**
+(when the change is within the widget's own bounds) **or
+`widget.InvalidateRect(r)`** (when it's outside them — needed by overlays and
+popups, which paint somewhere other than where they sit). Skip this and the
+engine has no way to know the frame is stale — and under the new scheme
+that's no longer just "one extra frame of staleness," it's "this widget never
+repaints again" until something else happens to touch the same region.
+
+Separately: a widget that paints **beyond its own bounds** — an `Elevation`
+shadow, an overlay, a popup — has to widen its own claimed area itself,
+because the subtree bounding rectangle the engine uses to decide whether to
+skip `Draw` is computed from widget `Bounds()`, not from what the widget
+actually paints. A widget with a shadow poking out past its bounds is a prime
+candidate for visual artifacts once culling is on.
+
 ---
 
 ## New Features
@@ -1909,6 +1969,92 @@ flag — is read from a shared variable inside `Draw`, so it is swapped for the
 duration of the subtree's drawing and restored via `defer`. Scopes nest: an
 inner one restores the OUTER style rather than resetting to the global one.
 `NewThemeScope(nil)` is a plain container — a global theme reaches its children.
+
+
+### The frame pipeline (v3.15.0)
+
+A frame is produced and handed to a consumer; this is what the engine tells
+about it and who sets the pace.
+
+#### Subtree culling
+
+A frame used to walk the whole tree: damage clipped at the canvas level, so
+stray pixels were discarded — but the walk and the `Draw` calls happened
+anyway. Now a branch that touches none of the changed areas is not drawn at
+all.
+
+```go
+eng.SetSubtreeCulling(false) // back to the full walk
+```
+
+Hence the draw contract (see "Custom Widget" → "The draw contract"): `Draw` is
+not guaranteed every frame. A widget that draws outside its own bounds declares
+the margin:
+
+```go
+func (w *MyWidget) DrawMargin() int { return 12 } // shadow, glow
+```
+
+#### What a tile is made of
+
+```go
+frame := <-eng.Frames()
+for i, tile := range frame.Tiles {
+    switch frame.Regions[i].Kind {
+    case output.RegionSolid: // fill with Regions[i].Color
+    case output.RegionText:  // compress losslessly
+    case output.RegionImage: // lossy is fine
+    case output.RegionMixed: // as before
+    }
+}
+```
+
+The engine knows what it painted each area with; that knowledge used to be lost
+on the way out, and the consumer rebuilt it with a second codec pass. The mark
+accumulates per tile: an opaque full-tile fill erases whatever was under it,
+text or an image over a background becomes the tile's mark, and a fill over
+content yields `RegionMixed` — an honest "don't know".
+
+#### Content that moved
+
+```go
+for _, m := range frame.Moves { // moves first, then tiles!
+    blit(m.Src(), m.Rect)
+}
+```
+
+Dragging a window does not change pixels, it moves them. `widget.NotifyMove(src, dst)`
+declares the move; in RDP that is a pair of surface-cache commands instead of a
+hundred kilobytes.
+
+#### Channel order and foreign memory
+
+```go
+eng.SetPixelFormat(engine.FormatBGRX)          // the rasteriser writes BGRX directly
+eng.SetSurface(pix, stride, engine.FormatBGRX) // back buffer = your memory
+```
+
+Channel order is a property of the buffer, not a reason for a per-pixel loop:
+an RDP consumer used to swap the channels itself on every frame. The default
+(`FormatRGBA`) is byte-for-byte what shipped before.
+
+`SetSurface` hands the engine your memory for the back buffer and removes two
+copies of the frame; `stride` may exceed the width (DIB alignment). The front
+buffer stays internal — the diff needs its own copy of the previous frame.
+
+#### Who sets the pace
+
+```go
+eng.SetFrameSink(sink)          // the sink gets the frame synchronously and cannot lose it
+eng.SetPacing(engine.PacingExternal)
+eng.RequestFrame()              // the sink is ready
+```
+
+Under external pacing the internal ticker starts no frames (it still advances
+animations). This is what vblank pacing on a local output needs — and it also
+lets a consumer mutate the scene and produce the frame on one goroutine,
+removing that race by construction. `Frames()` keeps working: the sink is an
+alternative, not a replacement.
 
 ---
 

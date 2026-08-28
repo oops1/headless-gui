@@ -37,6 +37,21 @@ import (
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
+// SetSubtreeCulling включает или выключает пропуск поддеревьев, не
+// пересекающихся с изменившейся областью.
+//
+// По умолчанию включён. Выключатель нужен приложению, чьи виджеты нарушают
+// контракт отрисовки (Draw не гарантирован каждый кадр — см. GUIDE, раздел
+// «Контракт отрисовки»): одна строка возвращает прежнее поведение, пока
+// нарушения разбираются.
+func (e *Engine) SetSubtreeCulling(v bool) {
+	widget.SetSubtreeCulling(v)
+	e.Invalidate()
+}
+
+// SubtreeCulling сообщает, включён ли пропуск поддеревьев.
+func (e *Engine) SubtreeCulling() bool { return widget.SubtreeCulling() }
+
 // SetRenderOnDemand включает/выключает рендер по запросу.
 // Безопасно вызывать в любой момент; включение сразу инвалидирует кадр.
 func (e *Engine) SetRenderOnDemand(v bool) {

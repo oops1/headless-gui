@@ -170,6 +170,9 @@ func InvalidateRect(r image.Rectangle) { notifyRectChanged(r) }
 // Приёмник без rect-колбэка получает полную инвалидацию (совместимость).
 // Пустой прямоугольник игнорируется.
 func notifyRectChanged(r image.Rectangle) {
+	// Границы виджета могли поменяться — прямоугольники поддеревьев,
+	// посчитанные до этого, больше не годятся.
+	bumpTreeGen()
 	if r.Empty() {
 		return
 	}

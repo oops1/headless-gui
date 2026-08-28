@@ -335,3 +335,50 @@ func TestGolden_FlyoutsLook(t *testing.T) {
 		})
 	}
 }
+
+// TestGolden_PipelineDoesNotChangePixels — главный критерий работы над
+// конвейером: она про то, КАК получается кадр, а не про то, как он выглядит.
+//
+// Сцена каждой темы рисуется дважды — с пропуском поддеревьев и без него — и
+// кадры обязаны совпасть до пикселя.
+func TestGolden_PipelineDoesNotChangePixels(t *testing.T) {
+	const w, h = 640, 220
+
+	for _, name := range []string{
+		theme.ProfileWindows2000, theme.ProfileWindows10,
+		theme.ProfileWindows11Dark, theme.ProfileMacOS,
+	} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			render := func(culling bool) *image.RGBA {
+				m := theme.NewManager()
+				if err := theme.RegisterBuiltinProfiles(m); err != nil {
+					t.Fatal(err)
+				}
+				if err := m.SetTheme(name); err != nil {
+					t.Fatal(err)
+				}
+				m.SetIconResolver(widget.BuiltinIcons())
+
+				eng := engine.New(w, h, 30)
+				eng.SetSubtreeCulling(culling)
+				root, bar := buildScene(t, m, w, h)
+				defer bar.Close()
+				eng.SetRoot(root)
+				eng.RenderOnce()
+				return snapshot(eng.RenderOnce())
+			}
+
+			withCulling := render(true)
+			without := render(false)
+			widget.SetSubtreeCulling(true) // вернуть общий выключатель
+
+			if withCulling == nil || without == nil {
+				t.Fatal("кадр не отрисован")
+			}
+			if !imagesEqual(withCulling, without) {
+				t.Error("кадры с пропуском поддеревьев и без него разошлись")
+			}
+		})
+	}
+}
