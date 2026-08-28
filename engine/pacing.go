@@ -79,6 +79,14 @@ func (e *Engine) getFrameSink() FrameSink {
 // успеет принять больше.
 func (e *Engine) RequestFrame() {
 	e.frameWanted.Store(true)
+	if !e.pacingIsExternal() {
+		// Тикерный темп: кадры готовит тикер, и он их пропускает, пока UI не
+		// менялся. Без инвалидации запрос просто исчезал бы — приложение,
+		// написанное под внешний темп, при переключении режима переставало
+		// получать кадры вовсе.
+		e.Invalidate()
+		return
+	}
 	select {
 	case e.wake <- struct{}{}:
 	default: // сигнал уже в очереди — второго не нужно

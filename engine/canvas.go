@@ -32,6 +32,7 @@ type Canvas struct {
 	back       *image.RGBA           // текущий рендер-таргет (может быть чужой памятью — см. SetSurface)
 	backOwn    *image.RGBA           // собственный back-буфер холста; back переключается на него, когда внешняя память не задана
 	format     PixelFormat           // порядок каналов back-буфера (см. pixelformat.go)
+	formatOwn  PixelFormat           // порядок каналов СОБСТВЕННОГО буфера: чужая память вправе иметь свой, и после возврата к своему буферу надо вернуться к нему же
 	bgImage    *image.RGBA           // фоновое изображение (масштабировано под холст, закодировано в format — см. setBackground)
 	fontCache  *FontCache            // кэш шрифта по умолчанию
 	namedFonts map[string]*FontCache // именованные шрифты (FontFamily из XAML)
@@ -282,10 +283,25 @@ func (c *Canvas) setExternalBack(pix []byte, stride int, f PixelFormat) {
 	c.format = f
 }
 
+// setOwnFormat задаёт формат собственного буфера. Он же становится текущим,
+// пока рисуем в свой буфер.
+func (c *Canvas) setOwnFormat(f PixelFormat) {
+	c.formatOwn = f
+	if c.back == c.backOwn {
+		c.format = f
+	}
+}
+
 // useOwnBack возвращает back к собственному буферу канваса
 // (Engine.SetSurface(nil, …, …)).
 func (c *Canvas) useOwnBack() {
 	c.back = c.backOwn
+	// Формат возвращается вместе с буфером. Иначе порядок каналов, заданный
+	// чужой памятью, оставался бы у собственного буфера навсегда: после
+	// SetPixelFormat(BGRX) → SetSurface(внешний RGBA) → SetSurface(nil) все
+	// последующие кадры кодировались бы не тем, что просил вызывающий, а
+	// Engine.PixelFormat() сообщал бы неправду.
+	c.format = c.formatOwn
 }
 
 // ─── Clip ───────────────────────────────────────────────────────────────────
@@ -559,15 +575,41 @@ func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
 // Координаты ФИЗИЧЕСКИЕ. col приходит уже закодированным (вызывается только
 // из DrawRoundBorder).
 func (c *Canvas) drawRoundBorderCornersLegacy(x, y, w, h, r int, col color.RGBA) {
+	// Полупрозрачные дуги СМЕШИВАЮТСЯ с фоном, как и прямые стороны рамки.
+	// Ветка выбирается по A<255, и запись цвета вместе с чужой альфой
+	// оставляла на углах «пробитые» точки: у стеклянной панели прямые стороны
+	// обводки ложились плёнкой, а четыре угла — дырами.
+	put := c.setPixelPx
+	if col.A < 255 {
+		put = c.blendPixelPx
+	}
 	rf := float64(r)
 	for i := 0; i <= r; i++ {
 		dy := float64(r - i)
 		dx := int(math.Round(math.Sqrt(rf*rf - dy*dy)))
-		c.setPixelPx(x+r-dx, y+i, col)         // верхний левый
-		c.setPixelPx(x+w-1-r+dx, y+i, col)     // верхний правый
-		c.setPixelPx(x+r-dx, y+h-1-i, col)     // нижний левый
-		c.setPixelPx(x+w-1-r+dx, y+h-1-i, col) // нижний правый
+		put(x+r-dx, y+i, col)         // верхний левый
+		put(x+w-1-r+dx, y+i, col)     // верхний правый
+		put(x+r-dx, y+h-1-i, col)     // нижний левый
+		put(x+w-1-r+dx, y+h-1-i, col) // нижний правый
 	}
+}
+
+// blendPixelPx кладёт полупрозрачную точку поверх фона (Over), уважая клипы.
+// Отличается от setPixelPx только этим: та пишет цвет как есть.
+func (c *Canvas) blendPixelPx(x, y int, col color.RGBA) {
+	if c.hasClip && !image.Pt(x, y).In(c.clip) {
+		return
+	}
+	if !c.round.contains(x, y) {
+		return
+	}
+	if x < 0 || x >= c.W || y < 0 || y >= c.H {
+		return
+	}
+	// Один пиксель — тот же путь, что у заливки с alpha-смешиванием:
+	// прямоугольник 1×1 через fillRectPx, чтобы формулу смешивания не
+	// пришлось держать в двух местах.
+	c.fillRectPx(image.Rect(x, y, x+1, y+1), col, true)
 }
 
 // DrawBorder рисует 1-пиксельный (логический) контур прямоугольника.
