@@ -35,7 +35,7 @@ const (
 
 // Подписи разделов. Не размер и не цвет — обычный текст интерфейса.
 const (
-	startMenuLabelPinned = "Закреплено"
+	startMenuLabelPinned  = "Закреплено"
 	startMenuLabelAllApps = "Все приложения"
 )
 
