@@ -1974,7 +1974,7 @@ inner one restores the OUTER style rather than resetting to the global one.
 `NewThemeScope(nil)` is a plain container — a global theme reaches its children.
 
 
-### The frame pipeline (v3.15.0)
+### The frame pipeline
 
 A frame is produced and handed to a consumer; this is what the engine tells
 about it and who sets the pace.
