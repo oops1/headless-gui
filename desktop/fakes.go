@@ -2,6 +2,8 @@ package desktop
 
 import (
 	"fmt"
+	"image"
+	"image/color"
 	"sync"
 	"time"
 )
@@ -404,4 +406,55 @@ func (c *FakeClock) Advance(d time.Duration) {
 	c.mu.Lock()
 	c.t = c.t.Add(d)
 	c.mu.Unlock()
+}
+
+// ─── Миниатюры окон ──────────────────────────────────────────────────────────
+
+// FakeWindowPreviews — модель окон, умеющая отдавать миниатюры.
+//
+// Отдельный тип, а не метод у FakeWindowModel: предпросмотр даётся модели по
+// необязательному интерфейсу, и должна остаться модель БЕЗ него — иначе
+// проверить поведение движка с такой моделью было бы нечем.
+type FakeWindowPreviews struct {
+	*FakeWindowModel
+}
+
+// NewFakeWindowPreviews создаёт модель с миниатюрами.
+func NewFakeWindowPreviews(windows ...WindowInfo) *FakeWindowPreviews {
+	return &FakeWindowPreviews{FakeWindowModel: NewFakeWindowModel(windows...)}
+}
+
+// Preview рисует узнаваемую заглушку: полосы своего для каждого окна цвета.
+// Настоящая оболочка отдаёт здесь снимок участка холста.
+func (f *FakeWindowPreviews) Preview(id WindowID, max image.Point) image.Image {
+	if max.X <= 0 || max.Y <= 0 {
+		return nil
+	}
+	img := image.NewRGBA(image.Rect(0, 0, max.X, max.Y))
+	base := color.RGBA{
+		R: uint8(40 + 60*(id%3)),
+		G: uint8(70 + 50*((id+1)%3)),
+		B: uint8(110 + 40*((id+2)%3)),
+		A: 255,
+	}
+	for y := 0; y < max.Y; y++ {
+		row := base
+		if (y/8)%2 == 0 {
+			row = fadeRGBA(base, 0.8)
+		}
+		for x := 0; x < max.X; x++ {
+			img.SetRGBA(x, y, row)
+		}
+	}
+	return img
+}
+
+// fadeRGBA затемняет цвет — заглушке довольно двух оттенков.
+func fadeRGBA(c color.RGBA, k float64) color.RGBA {
+	return color.RGBA{
+		R: uint8(float64(c.R) * k),
+		G: uint8(float64(c.G) * k),
+		B: uint8(float64(c.B) * k),
+		A: c.A,
+	}
 }

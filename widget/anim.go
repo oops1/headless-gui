@@ -93,6 +93,19 @@ func (am *animator) add(a *Animation) {
 	notifyUIChanged()
 }
 
+// step зовёт покадровый колбэк, если он есть.
+//
+// Пустой колбэк — законный случай: анимация без него не рисует ничего и
+// служит таймером «позови по завершении» (OnDone). Такие заводит,
+// например, предпросмотр окна на панели задач — задержка до появления и
+// период обновления миниатюры. Раньше StepAnimations звала tick без
+// проверки и на таком таймере падала.
+func (a *Animation) step(t float64) {
+	if a.tick != nil {
+		a.tick(t)
+	}
+}
+
 // Animate регистрирует анимацию длительностью dur с кривой curve (nil →
 // линейная). tick(t) вызывается с ПРОГРЕССОМ ПОСЛЕ кривой (t ∈ [0,1]):
 // первый тик — t по фактическому времени первого шага, последний —
@@ -283,7 +296,7 @@ func StepAnimations(now time.Time) bool {
 		t, phaseDone := phase[i].progress(now)
 
 		if !phaseDone {
-			a.tick(t)
+			a.step(t)
 			continue
 		}
 
@@ -292,7 +305,7 @@ func StepAnimations(now time.Time) bool {
 			// Прошла прямая фаза 0→1 — по времени t уже равен curve(1) на
 			// границе, но семантически цикл ещё не закончен. Начинаем
 			// обратную фазу 1→0, сдвигая часы на now.
-			a.tick(t) // t здесь = curve(1) (или reversed-эквивалент) — граница
+			a.step(t) // t здесь = curve(1) (или reversed-эквивалент) — граница
 			anim.mu.Lock()
 			a.reversed = true
 			a.start = now
@@ -320,7 +333,7 @@ func StepAnimations(now time.Time) bool {
 				final = 1
 			}
 		}
-		a.tick(final)
+		a.step(final)
 
 		if a.Loop {
 			// Перезапуск: сбрасываем фазу и часы на now.

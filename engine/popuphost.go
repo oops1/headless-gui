@@ -234,13 +234,15 @@ func (e *Engine) CloseAllOverlays() {
 	root := e.root
 	e.mu.RUnlock()
 	if root != nil {
-		dismissOutside(root, nil) // keep=nil → закрыть все
+		// keep=nil и точка вне любого экрана: закрыть ВСЕ, включая панели,
+		// которые считают своей площадь соседки по группе.
+		dismissOutside(root, nil, widget.CursorNowhere, widget.CursorNowhere)
 	}
 	e.modMu.Lock()
 	modals := make([]widget.ModalWidget, len(e.modals))
 	copy(modals, e.modals)
 	e.modMu.Unlock()
 	for _, m := range modals {
-		dismissOutside(m, nil)
+		dismissOutside(m, nil, widget.CursorNowhere, widget.CursorNowhere)
 	}
 }
