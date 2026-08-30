@@ -102,7 +102,8 @@ func Windows2000Profile() *Profile {
 		SetMetric("notifications.gap", 4).
 		SetMetric("calendar.cell", 20).
 		SetMetric("calendar.width", 164).
-		SetMetric("calendar.header.height", 22)
+		SetMetric("calendar.header.height", 22).
+		SetMetric("tray.label.width.min", 28)
 
 	p.SetFlag("style.classic3d", true).
 		SetFlag("style.mac.titlebar", false).
@@ -282,7 +283,8 @@ func Windows10Profile() *Profile {
 		SetMetric("preview.header", 20).
 		SetMetric("preview.delay.open", 500).
 		SetMetric("preview.delay.close", 250).
-		SetMetric("preview.refresh", 200)
+		SetMetric("preview.refresh", 200).
+		SetMetric("tray.label.width.min", 34)
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", false).
@@ -478,7 +480,8 @@ func Windows11Profile() *Profile {
 		SetMetric("preview.header", 22).
 		SetMetric("preview.delay.open", 400).
 		SetMetric("preview.delay.close", 250).
-		SetMetric("preview.refresh", 200)
+		SetMetric("preview.refresh", 200).
+		SetMetric("tray.label.width.min", 36)
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", false).
@@ -695,7 +698,8 @@ func MacOSProfile() *Profile {
 		SetMetric("notifications.gap", 8).
 		SetMetric("calendar.cell", 30).
 		SetMetric("calendar.width", 240).
-		SetMetric("calendar.header.height", 32)
+		SetMetric("calendar.header.height", 32).
+		SetMetric("tray.label.width.min", 34)
 
 	p.SetFlag("preview", false). // у дока свой механизм показа окон, не миниатюра при наведении
 		SetFlag("style.classic3d", false).
