@@ -427,6 +427,16 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 			if _, ok := overlayW.(widget.Focusable); ok {
 				e.focus.set(overlayW)
 			}
+			// Гасим ЧУЖИЕ оверлеи — ровно как на обычном пути доставки.
+			// Без этого оверлей, поглотивший клик, оставлял открытыми все
+			// остальные: клик внутри календаря не закрывал ни меню «Пуск»,
+			// ни соседнюю панель, потому что до dismissOutside дело не
+			// доходило вовсе.
+			keep := map[widget.Widget]struct{}{overlayW: {}}
+			for _, w := range hitTestPath(dispatchRoot, x, y) {
+				keep[w] = struct{}{}
+			}
+			dismissOutside(dispatchRoot, keep, x, y)
 		}
 		if mc, ok := overlayW.(widget.MouseClickHandler); ok {
 			if mc.OnMouseButton(ev) {
@@ -463,7 +473,7 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 				for _, w := range capPath {
 					pathSet[w] = struct{}{}
 				}
-				dismissOutside(dispatchRoot, pathSet)
+				dismissOutside(dispatchRoot, pathSet, x, y)
 			}
 
 			// Запоминаем capturer как pressConsumer — если capturer
@@ -498,7 +508,7 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 		for _, w := range path {
 			pathSet[w] = struct{}{}
 		}
-		dismissOutside(dispatchRoot, pathSet)
+		dismissOutside(dispatchRoot, pathSet, x, y)
 	}
 
 	// Доставляем событие с bubbling: от самого глубокого виджета к корню.
@@ -700,21 +710,29 @@ func (e *Engine) SendFilesDropped(x, y int, paths []string) {
 // dismissOutside рекурсивно закрывает все Dismissable-виджеты, которые
 // не входят в набор keep (виджеты на пути от корня до клика).
 // Это гарантирует закрытие popup/dropdown/menu при клике в другое место.
-func dismissOutside(w widget.Widget, keep map[widget.Widget]struct{}) {
-	dismissOutsideAt(w, keep, 0)
+// dismissOutside закрывает виджеты, не лежащие на пути клика в точке (x, y).
+//
+// Точка нужна не всем: обычному Dismissable довольно самого факта «клик мимо».
+// Но виджет, считающий чужую площадь своей — всплывающая панель, у которой
+// есть соседка по группе, — без координаты решить не может, и для него есть
+// widget.DismissableAt.
+func dismissOutside(w widget.Widget, keep map[widget.Widget]struct{}, x, y int) {
+	dismissOutsideAt(w, keep, x, y, 0)
 }
 
-func dismissOutsideAt(w widget.Widget, keep map[widget.Widget]struct{}, depth int) {
+func dismissOutsideAt(w widget.Widget, keep map[widget.Widget]struct{}, x, y, depth int) {
 	if tooDeep(depth) {
 		return
 	}
 	if _, inPath := keep[w]; !inPath {
-		if d, ok := w.(widget.Dismissable); ok {
+		if d, ok := w.(widget.DismissableAt); ok {
+			d.DismissAt(x, y)
+		} else if d, ok := w.(widget.Dismissable); ok {
 			d.Dismiss()
 		}
 	}
 	for _, child := range w.Children() {
-		dismissOutsideAt(child, keep, depth+1)
+		dismissOutsideAt(child, keep, x, y, depth+1)
 	}
 }
 

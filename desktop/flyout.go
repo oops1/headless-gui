@@ -74,6 +74,10 @@ type Flyout struct {
 	// нулевое и не показывается.
 	Size func() image.Point
 
+	// group — набор панелей, считающих прямоугольники друг друга своими
+	// (см. FlyoutGroup). nil — панель сама по себе.
+	group *FlyoutGroup
+
 	// OnOpen и OnClose — уведомления для оболочки (например, чтобы
 	// подсветить значок, от которого открыто окно).
 	OnOpen  func()
@@ -154,6 +158,60 @@ func (f *Flyout) invalidateOverlay(also image.Rectangle) {
 	}
 }
 
+// Bounds расширяет обычные границы виджета до прямоугольника открытой панели.
+//
+// Без этого движок панель попросту не видит: и поиск оверлея под курсором, и
+// путь попадания идут по Bounds, а у панели в потоке виджетов геометрии нет —
+// всё содержимое живёт в оверлее. Меню «Пуск» и быстрые настройки объявляли
+// это каждое у себя, а календарь и центр уведомлений не объявляли вовсе — и
+// не получали от движка ни кликов, ни движения мыши. Оболочке приходилось
+// разносить события по панелям вручную.
+func (f *Flyout) Bounds() image.Rectangle {
+	base := f.Base.Bounds()
+	if !f.IsOpen() {
+		return base
+	}
+	return base.Union(f.rect())
+}
+
+// Group возвращает группу панели (nil — панель сама по себе).
+func (f *Flyout) Group() *FlyoutGroup { return f.group }
+
+// SetGroup включает панель в группу: панели одной группы считают
+// прямоугольники друг друга своими и закрываются вместе.
+func (f *Flyout) SetGroup(g *FlyoutGroup) {
+	if f.group == g {
+		return
+	}
+	if f.group != nil {
+		f.group.remove(f)
+	}
+	f.group = g
+	if g != nil {
+		g.add(f)
+	}
+}
+
+// DismissAt реализует widget.DismissableAt: панель закрывается, когда клик
+// пришёлся мимо неё — но НЕ когда он попал в соседку по группе.
+func (f *Flyout) DismissAt(x, y int) {
+	if !f.IsOpen() {
+		return
+	}
+	if f.ownsPoint(image.Pt(x, y)) {
+		return
+	}
+	f.Close()
+}
+
+// ownsPoint — принадлежит ли точка этой панели или её соседке по группе.
+func (f *Flyout) ownsPoint(pt image.Point) bool {
+	if pt.In(f.rect()) {
+		return true
+	}
+	return f.group.covers(pt)
+}
+
 // OverlayBounds возвращает прямоугольник окна в абсолютных логических
 // координатах (пустой, если закрыто). Реализует widget.OverlayBoundsProvider.
 func (f *Flyout) OverlayBounds() image.Rectangle {
@@ -192,17 +250,22 @@ func (f *Flyout) Draw(ctx widget.DrawContext) { f.DrawChildren(ctx) }
 
 // OnMouseButton закрывает панель кликом мимо неё.
 //
-// Клик ВНУТРИ панель не поглощает: его разбирает содержимое — иначе ни одна
-// кнопка внутри меню «Пуск» не нажалась бы.
+// Событие НЕ поглощается ни в каком случае. Клик внутри разбирает содержимое
+// (иначе ни одна кнопка внутри меню «Пуск» не нажалась бы), а поглощённый
+// клик мимо гасил соседнюю панель: центр уведомлений и календарь стоят один
+// над другим, клик по числу приходится вне центра — тот закрывался и съедал
+// событие, и календарь не видел ни чисел, ни стрелок месяца.
+//
+// Клик в соседку по группе панель не закрывает: на то она и группа.
 func (f *Flyout) OnMouseButton(e widget.MouseEvent) bool {
 	if !f.IsOpen() || !e.Pressed {
 		return false
 	}
-	if image.Pt(e.X, e.Y).In(f.rect()) {
+	if f.ownsPoint(image.Pt(e.X, e.Y)) {
 		return false
 	}
 	f.Close()
-	return true
+	return false
 }
 
 // OnKeyEvent закрывает панель по Esc.

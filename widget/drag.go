@@ -51,6 +51,17 @@ type Dismissable interface {
 	Dismiss()
 }
 
+// DismissableAt — виджет, которому для решения о закрытии нужна точка клика.
+//
+// Движок предпочитает его обычному Dismissable: закрывать себя по факту
+// «клик пришёлся не в меня» умеет и Dismissable, но не всякий виджет считает
+// чужой площадью всё, что вне его собственной. Всплывающие панели рабочего
+// стола, стоящие одна над другой, — набор, в котором площадь соседки своя
+// (desktop.FlyoutGroup).
+type DismissableAt interface {
+	DismissAt(x, y int)
+}
+
 // DismissAll рекурсивно закрывает все Dismissable-виджеты в поддереве w.
 func DismissAll(w Widget) {
 	if d, ok := w.(Dismissable); ok {

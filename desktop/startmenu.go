@@ -103,27 +103,8 @@ func (m *StartMenu) Open(anchor image.Rectangle) {
 	m.Flyout.Open(anchor)
 }
 
-// Bounds расширяет обычные границы виджета до прямоугольника открытого
-// меню — так движок находит его при поиске оверлея под курсором и не
-// теряет клики по пунктам списка (тот же приём, что widget.Dropdown.Bounds
-// и widget.MenuBar.Bounds: оба расширяют границы ровно так же, пока их
-// оверлей открыт).
-func (m *StartMenu) Bounds() image.Rectangle {
-	base := m.Flyout.Bounds()
-	if !m.IsOpen() {
-		return base
-	}
-	return base.Union(m.rect())
-}
-
-// Dismiss закрывает меню при клике в любом другом месте интерфейса.
-// Реализует widget.Dismissable — так закрывают себя все выпадающие панели
-// движка (widget.Dropdown, widget.PopupMenu, widget.MenuBar): движок вызывает
-// Dismiss у каждого виджета вне пути клика, независимо от того, что там
-// внутри и какой у него Bounds.
-func (m *StartMenu) Dismiss() {
-	m.Close()
-}
+// Bounds меню не переопределяет: границы открытой панели объявляет общая
+// основа (Flyout.Bounds) — одинаково для всех четырёх панелей.
 
 // Draw — у меню нет собственной раскладки в потоке виджетов: содержимое
 // целиком рисуется оверлеем (Flyout.DrawOverlay, унаследованный от
