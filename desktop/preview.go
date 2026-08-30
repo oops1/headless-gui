@@ -99,7 +99,27 @@ type WindowPreview struct {
 	pendingWin    WindowInfo
 
 	// area — область кнопок окон, за наведением которой следит панель.
-	area *RunningApplications
+	area HoverArea
+}
+
+// HoverArea — область панели задач с кнопками окон, к которым прижимается
+// предпросмотр.
+//
+// Интерфейс, а не конкретный тип: кнопки окон бывают и полосой
+// (RunningApplications), и слитыми с закреплёнными значками
+// (ApplicationArea), и оболочка вправе положить на панель свою область.
+// Предпросмотру довольно трёх вопросов — кто под курсором, где его кнопка и
+// какое это окно.
+type HoverArea interface {
+	// SetHoverListener сообщает, кому докладывать о смене кнопки под
+	// курсором (-1 — курсора на кнопках нет).
+	SetHoverListener(fn func(idx int))
+	// ButtonRect — прямоугольник кнопки i в абсолютных логических
+	// координатах (пустой — такой кнопки нет).
+	ButtonRect(i int) image.Rectangle
+	// WindowAt — окно кнопки i. Второе значение ложно, если окна нет:
+	// закреплённое незапущенное приложение показывать нечем.
+	WindowAt(i int) (WindowInfo, bool)
 }
 
 // NewWindowPreview создаёт панель предпросмотра, оформляемую темой tm и
@@ -126,7 +146,7 @@ func NewWindowPreview(tm *theme.Manager, wm WindowModel) *WindowPreview {
 // Оболочке остаётся положить обе в дерево. Прямоугольник кнопки панель берёт
 // у области (ButtonRect) — считать его снаружи значило бы повторить у себя
 // три режима раскладки кнопок и ломать эту копию при каждом их изменении.
-func (p *WindowPreview) Track(area *RunningApplications) {
+func (p *WindowPreview) Track(area HoverArea) {
 	p.mu.Lock()
 	p.area = area
 	p.mu.Unlock()

@@ -466,3 +466,48 @@ func TestPreview_OpenPanelDoesNotFloodFrames(t *testing.T) {
 	}
 	t.Logf("кадров за %v: %d (обновление раз в %d мс)", window, got, refreshMs)
 }
+
+// Предпросмотр цепляется и к области закреплённых значков — именно её
+// оболочка держит на панели задач.
+//
+// Кнопки окон бывают полосой (RunningApplications) и слитыми с закреплёнными
+// значками (ApplicationArea); предпросмотру довольно трёх вопросов, и он
+// задаёт их через HoverArea.
+func TestPreview_WorksWithApplicationAreaToo(t *testing.T) {
+	m := previewTheme(t, 10)
+	wm := newFakePreviews(
+		WindowInfo{ID: 10, AppID: "term", Title: "Терминал", Active: true},
+	)
+	cat := NewStaticAppCatalog(
+		AppInfo{ID: "term", Title: "Терминал"},
+		AppInfo{ID: "notes", Title: "Заметки"},
+	)
+	cat.Pin("term")
+	cat.Pin("notes")
+
+	area := NewApplicationArea(m, cat, wm)
+	area.SetBounds(image.Rect(0, 560, 400, 600))
+	defer area.Close()
+
+	p := NewWindowPreview(m, wm)
+	p.Screen = image.Rect(0, 0, 800, 600)
+	p.Track(area)
+	defer p.Close()
+
+	// Ячейка 0 — запущенный «Терминал»: предпросмотр для него есть.
+	r := area.ButtonRect(0)
+	if r.Empty() {
+		t.Fatal("у ячейки 0 нет прямоугольника")
+	}
+	area.OnMouseMove(r.Min.X+r.Dx()/2, r.Min.Y+r.Dy()/2)
+	waitFor(t, "открытие панели", p.IsOpen)
+	if info, _ := p.Window(); info.ID != 10 {
+		t.Errorf("показано окно %d, ждали 10", info.ID)
+	}
+
+	// Ячейка 1 — закреплённые, но не запущенные «Заметки»: окна нет,
+	// показывать нечего.
+	if _, ok := area.WindowAt(1); ok {
+		t.Error("у незапущенного закреплённого приложения нашлось окно")
+	}
+}

@@ -112,7 +112,9 @@ func buildDesktop(eng *engine.Engine) scene {
 	iconOf := func(name string, size int) image.Image {
 		return icons.ResolveIcon(theme.IconRef{Name: name}, size)
 	}
-	wm := desktop.NewFakeWindowModel(
+	// Модель с миниатюрами: на неё опирается предпросмотр окна при наведении
+	// на кнопку панели задач.
+	wm := desktop.NewFakeWindowPreviews(
 		desktop.WindowInfo{ID: 1, AppID: "files", Title: "Проводник", Icon: iconOf("start", 24)},
 		desktop.WindowInfo{ID: 2, AppID: "term", Title: "Терминал", Active: true,
 			Icon: iconOf("network.ethernet", 24)},
@@ -139,6 +141,11 @@ func buildDesktop(eng *engine.Engine) scene {
 
 	startBtn := desktop.NewStartButton(tm)
 	apps := desktop.NewApplicationArea(tm, cat, wm)
+
+	// Предпросмотр окна: цепляется к области значков и дальше следит за
+	// наведением сам.
+	preview := desktop.NewWindowPreview(tm, wm)
+	preview.Track(apps)
 
 	tray := desktop.NewSystemTray(tm)
 	net := desktop.NewNetworkStatus(tm, status)
@@ -170,10 +177,18 @@ func buildDesktop(eng *engine.Engine) scene {
 	cal := desktop.NewCalendarFlyout(tm, desktop.SystemClock{})
 	cal.Screen = screen
 	cal.Align = desktop.AlignEnd
+	preview.Screen = screen
 	root.AddChild(menu)
 	root.AddChild(quick)
 	root.AddChild(center)
 	root.AddChild(cal)
+	// Предпросмотр — такой же оверлей, как остальные панели: в дереве он
+	// обязан быть, иначе движок его не найдёт.
+	root.AddChild(preview)
+
+	// Уведомления и календарь Windows показывает один над другим — значит
+	// они группа: клик по числу календаря не должен гасить центр уведомлений.
+	desktop.NewFlyoutGroup(cal.Flyout, center.Flyout)
 	tray.Overflow().Screen = screen
 	// Раскрывающаяся область трея — оверлей, и движок находит оверлеи обходом
 	// ДЕРЕВА: без этой строки шеврон открывался бы, а показывать было бы
