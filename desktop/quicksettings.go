@@ -118,22 +118,11 @@ func (q *QuickSettings) Close() {
 // (engine/events.go, восстановление pressConsumer) — а отпустить ползунок
 // пользователь может где угодно, уже покинув панель.
 func (q *QuickSettings) Bounds() image.Rectangle {
-	base := q.Flyout.Bounds()
-	if !q.IsOpen() {
-		return base
-	}
-	b := base.Union(q.rect())
-	if q.isDragging() && !q.Screen.Empty() {
+	b := q.Flyout.Bounds()
+	if q.IsOpen() && q.isDragging() && !q.Screen.Empty() {
 		b = b.Union(q.Screen)
 	}
 	return b
-}
-
-// Dismiss закрывает панель при клике в любом другом месте интерфейса.
-// Реализует widget.Dismissable — так закрывают себя все выпадающие панели
-// движка (widget.Dropdown, widget.PopupMenu, widget.MenuBar).
-func (q *QuickSettings) Dismiss() {
-	q.Close()
 }
 
 // Draw — у панели нет собственной раскладки в потоке виджетов: содержимое

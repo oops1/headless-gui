@@ -1924,6 +1924,46 @@ The taskbar spans the full width, survives `SetBounds` to another resolution and
 respects the canvas scale. A component short on space degrades predictably:
 window buttons shrink to icons, tray icons hide behind a chevron button.
 
+Panels that stand one above the other — Windows shows notifications above the
+calendar that way — are joined into a group: they treat each other's rectangles
+as their own and close together. Without a group, a click on a calendar date
+falls outside the notification centre, and that one closes:
+
+```go
+desktop.NewFlyoutGroup(calendar.Flyout, notifications.Flyout)
+```
+
+#### Window preview
+
+Hovering a window button shows a thumbnail of that window, anchored to the
+button:
+
+```go
+preview := desktop.NewWindowPreview(m, windows)
+preview.Screen = image.Rect(0, 0, w, h)
+preview.Track(area)   // area is desktop.NewRunningApplications(...)
+root.AddChild(preview)
+```
+
+The window model supplies the thumbnail, if it can:
+
+```go
+// Optional interface: a model without it simply gets no preview.
+func (m *MyWindows) Preview(id desktop.WindowID, max image.Point) image.Image
+```
+
+It is asked **on demand** rather than carried in `WindowInfo`: the model is
+rebuilt on every change to the window list and on every focus switch, while
+exactly one thumbnail is on screen at a time. A minimized window returns the
+last snapshot taken while it was visible — Windows behaves the same way.
+
+How often it is asked is set by the theme (`preview.refresh`), and that is a
+requirement rather than a preference: a live thumbnail every frame would bring
+back a continuous stream of frames. The other keys are `preview.width`,
+`preview.height`, `preview.pad`, `preview.header`, `preview.delay.open`,
+`preview.delay.close`; the `preview` flag turns the whole thing off (Windows
+2000 had no such preview, and the macOS dock has its own mechanism).
+
 #### Presenters: a theme changes more than color
 
 Tokens describe palette and geometry, but not shape. The macOS dock is not a

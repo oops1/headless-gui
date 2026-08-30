@@ -33,6 +33,10 @@ type ApplicationArea struct {
 	hoverIdx int
 	armedIdx int
 
+	// onHover — кому сообщать о смене ячейки под курсором (см.
+	// SetHoverListener). Этим живёт предпросмотр окна.
+	onHover func(idx int)
+
 	unsubCat func()
 	unsubWM  func()
 }
@@ -342,6 +346,62 @@ func (a *ApplicationArea) OnMouseMove(x, y int) {
 		a.layout()
 	}
 	a.Invalidate()
+
+	// Слушателя зовём ПОСЛЕДНИМ и вне замка: он в ответ трогает свои
+	// структуры и может спросить у нас же прямоугольник ячейки.
+	a.mu.RLock()
+	onHover := a.onHover
+	a.mu.RUnlock()
+	if onHover != nil {
+		onHover(idx)
+	}
+}
+
+// SetHoverListener реализует HoverArea: кому докладывать о смене ячейки под
+// курсором (-1 — курсора на ячейках нет). Этим живёт предпросмотр окна.
+func (a *ApplicationArea) SetHoverListener(fn func(idx int)) {
+	a.mu.Lock()
+	a.onHover = fn
+	a.mu.Unlock()
+}
+
+// ButtonRect реализует HoverArea: прямоугольник ячейки i в абсолютных
+// логических координатах (пустой — такой ячейки нет).
+//
+// Наружу это нужно тому, кто прижимает к ячейке своё окно, — предпросмотру.
+// Без этого метода оболочке пришлось бы повторить у себя раскладку области и
+// ломать копию при каждом её изменении.
+func (a *ApplicationArea) ButtonRect(i int) image.Rectangle {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if i < 0 || i >= len(a.rects) {
+		return image.Rectangle{}
+	}
+	return a.rects[i]
+}
+
+// WindowAt реализует HoverArea: окно ячейки i.
+//
+// У закреплённого незапущенного приложения окна нет — показывать в
+// предпросмотре нечего, и второе значение ложно.
+func (a *ApplicationArea) WindowAt(i int) (WindowInfo, bool) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if i < 0 || i >= len(a.entries) {
+		return WindowInfo{}, false
+	}
+	e := a.entries[i]
+	if !e.live {
+		return WindowInfo{}, false
+	}
+	return WindowInfo{
+		ID:        e.window,
+		Title:     e.title,
+		AppID:     e.app,
+		Icon:      e.icon,
+		Active:    e.active,
+		Minimized: e.min,
+	}, true
 }
 
 // OnMouseButton: щелчок по закреплённому незапущенному запускает его, по

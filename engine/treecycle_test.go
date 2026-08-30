@@ -44,7 +44,7 @@ func TestTreeCycle_DoesNotHang(t *testing.T) {
 		hitTest(w, 5, 5)
 		findOverlayAt(w, 5, 5)
 		findCapturer(w, 5, 5, widget.MouseEvent{})
-		dismissOutside(w, nil)
+		dismissOutside(w, nil, 5, 5)
 		broadcastMouseMove(w, 0, 0, 5, 5)
 		injectCaptureManager(w, e)
 		drawOverlays(w, e.canvas, false)
