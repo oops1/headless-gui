@@ -110,6 +110,8 @@ func Windows2000Profile() *Profile {
 		SetFlag("taskbar.separators", true). // хваталки между секциями
 		SetFlag("startbutton.label", true).  // «Пуск» рядом со значком
 		SetFlag("taskbutton.label", true).
+		// Предпросмотра окон Windows 2000 не имела — выключаем.
+		SetFlag("preview", false).
 		// Даты в классических часах нет вовсе — она живёт в подсказке.
 		SetFlag("clock.date", false)
 
@@ -272,7 +274,15 @@ func Windows10Profile() *Profile {
 		SetMetric("calendar.width", 220).
 		SetMetric("calendar.header.height", 30).
 		SetMetric("taskbutton.underline", 2).    // полоса под открытым окном
-		SetMetric("taskbutton.underline.len", 1) // во всю ширину кнопки
+		SetMetric("taskbutton.underline.len", 1). // во всю ширину кнопки
+		// Предпросмотр окна при наведении на кнопку.
+		SetMetric("preview.width", 200).
+		SetMetric("preview.height", 120).
+		SetMetric("preview.pad", 6).
+		SetMetric("preview.header", 20).
+		SetMetric("preview.delay.open", 500).
+		SetMetric("preview.delay.close", 250).
+		SetMetric("preview.refresh", 200)
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", false).
@@ -459,8 +469,16 @@ func Windows11Profile() *Profile {
 		SetMetric("calendar.cell", 32).
 		SetMetric("calendar.width", 260).
 		SetMetric("calendar.header.height", 34).
-		SetMetric("taskbutton.underline", 3).      // чёрточка под значком
-		SetMetric("taskbutton.underline.len", 0.4) // короткая, не во всю кнопку
+		SetMetric("taskbutton.underline", 3).       // чёрточка под значком
+		SetMetric("taskbutton.underline.len", 0.4). // короткая, не во всю кнопку
+		// Предпросмотр окна при наведении на кнопку.
+		SetMetric("preview.width", 220).
+		SetMetric("preview.height", 130).
+		SetMetric("preview.pad", 8).
+		SetMetric("preview.header", 22).
+		SetMetric("preview.delay.open", 400).
+		SetMetric("preview.delay.close", 250).
+		SetMetric("preview.refresh", 200)
 
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", false).
@@ -679,7 +697,8 @@ func MacOSProfile() *Profile {
 		SetMetric("calendar.width", 240).
 		SetMetric("calendar.header.height", 32)
 
-	p.SetFlag("style.classic3d", false).
+	p.SetFlag("preview", false). // у дока свой механизм показа окон, не миниатюра при наведении
+		SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", true).
 		// Меню Apple прижато к левому краю строки меню; по центру в macOS
 		// стоит только док, и центрирует он себя сам — презентером.

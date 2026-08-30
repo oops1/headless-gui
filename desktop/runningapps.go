@@ -80,6 +80,11 @@ type RunningApplications struct {
 	hoverIdx int // -1 — нет наведения
 	armedIdx int // -1 — нет взведённой кнопки
 
+	// onHover — кому сообщать о смене кнопки под курсором (см.
+	// SetHoverListener). Под тем же замком, что и раскладка: слушателя
+	// ставит оболочка из своей горутины, а зовут его из горутины кадра.
+	onHover func(idx int)
+
 	// unsubWM снимает подписку на WindowModel. Забытая отписка удерживает
 	// компонент в списке наблюдателей модели — утечка, если область убрали
 	// со сцены и не закрыли.
@@ -302,6 +307,52 @@ func (r *RunningApplications) OnMouseMove(x, y int) {
 		r.layout()
 	}
 	r.Invalidate()
+
+	// Слушателя зовём ПОСЛЕДНИМ и вне замка: он в ответ трогает свои
+	// структуры и может спросить у нас же прямоугольник кнопки.
+	r.mu.RLock()
+	onHover := r.onHover
+	r.mu.RUnlock()
+	if onHover != nil {
+		onHover(idx)
+	}
+}
+
+// SetHoverListener сообщает, кому докладывать о смене кнопки под курсором
+// (-1 — курсора на кнопках нет). Этим живёт предпросмотр окна.
+//
+// Слушатель один: желающих следить за наведением на панели задач больше
+// одного не бывает, а реестр подписчиков ради этого — лишняя механика.
+func (r *RunningApplications) SetHoverListener(fn func(idx int)) {
+	r.mu.Lock()
+	r.onHover = fn
+	r.mu.Unlock()
+}
+
+// ButtonRect возвращает прямоугольник кнопки i в абсолютных логических
+// координатах (пустой — такой кнопки нет).
+//
+// Наружу это нужно тому, кто прижимает к кнопке своё окно — предпросмотру.
+// Без этого метода оболочке пришлось бы повторить у себя три режима
+// раскладки (идеальная ширина, сжатие, переполнение) и ломать эту копию при
+// каждом их изменении.
+func (r *RunningApplications) ButtonRect(i int) image.Rectangle {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if i < 0 || i >= len(r.btns) {
+		return image.Rectangle{}
+	}
+	return r.btns[i].rect
+}
+
+// WindowAt возвращает окно кнопки i.
+func (r *RunningApplications) WindowAt(i int) (WindowInfo, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if i < 0 || i >= len(r.btns) {
+		return WindowInfo{}, false
+	}
+	return r.btns[i].info, true
 }
 
 // OnMouseButton реализует widget.MouseClickHandler.
