@@ -74,6 +74,17 @@ type CalendarFlyout struct {
 	mu        sync.Mutex
 	viewMonth time.Time // всегда 1-е число месяца, который сейчас показан
 	selected  time.Time // нулевое значение — выбора нет
+	// collapsed — сетка дней свёрнута, видна только строка с датой.
+	//
+	// Живёт между открытиями намеренно: свернувший календарь один раз обычно
+	// хочет его свёрнутым и дальше.
+	collapsed bool
+	// hovered — день под курсором; нулевое значение — курсора на сетке нет.
+	//
+	// Хранится датой, а не индексом ячейки: месяц можно перелистнуть колесом
+	// или стрелкой, не двигая мышь, и индекс после этого указывал бы на
+	// другое число.
+	hovered time.Time
 
 	// OnSelect вызывается при выборе дня кликом (необязателен).
 	OnSelect func(time.Time)
@@ -105,6 +116,33 @@ func (c *CalendarFlyout) now() time.Time {
 func firstOfMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
 }
+
+// Collapsed сообщает, свёрнута ли сетка дней.
+func (c *CalendarFlyout) Collapsed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.collapsed
+}
+
+// SetCollapsed сворачивает или разворачивает сетку дней. Свёрнутая панель
+// показывает только строку с датой и занимает ровно её высоту.
+func (c *CalendarFlyout) SetCollapsed(v bool) {
+	c.mu.Lock()
+	changed := c.collapsed != v
+	c.collapsed = v
+	if v {
+		// Свёрнутая сетка курсора не видит — иначе развёрнутая панель
+		// показала бы подсвеченным день, над которым курсора давно нет.
+		c.hovered = time.Time{}
+	}
+	c.mu.Unlock()
+	if changed {
+		c.Invalidate()
+	}
+}
+
+// ToggleCollapsed переключает свёрнутость.
+func (c *CalendarFlyout) ToggleCollapsed() { c.SetCollapsed(!c.Collapsed()) }
 
 // PrevMonth и NextMonth листают показанный месяц. AddDate сам переносит год
 // на границе декабря/января — специального кода для этого случая не нужно.
@@ -184,8 +222,13 @@ func (c *CalendarFlyout) size() image.Point {
 	width := c.metric(KeyCalendarWidth)
 	headerH := c.metric(KeyCalendarHeaderHeight)
 	cell := c.metric(KeyCalendarCell)
-	rows := len(c.gridSnapshot())
 	pad := int(c.style(theme.StateNormal).PadX)
+	if c.Collapsed() {
+		// Свёрнутая панель — это строка с датой и ничего больше. Без этого
+		// всплывающее окно осталось бы прежней высоты и показывало пустоту.
+		return image.Point{X: width + 2*pad, Y: headerH + 2*pad}
+	}
+	rows := len(c.gridSnapshot())
 	return image.Point{
 		X: width + 2*pad,
 		Y: headerH + cell + rows*cell + 2*pad,
@@ -211,7 +254,7 @@ type dayCellLayout struct {
 }
 
 type calendarLayout struct {
-	header, prevBtn, nextBtn, title, weekday image.Rectangle
+	header, prevBtn, nextBtn, collapseBtn, title, weekday image.Rectangle
 	days                                     [][]dayCellLayout
 }
 
@@ -228,9 +271,22 @@ func (c *CalendarFlyout) computeLayout(content image.Rectangle) calendarLayout {
 		// область названия месяца к отрицательной ширине.
 		btnW = half
 	}
-	prevBtn := image.Rect(header.Min.X, header.Min.Y, header.Min.X+btnW, header.Max.Y)
-	nextBtn := image.Rect(header.Max.X-btnW, header.Min.Y, header.Max.X, header.Max.Y)
-	title := image.Rect(prevBtn.Max.X, header.Min.Y, nextBtn.Min.X, header.Max.Y)
+	// Стрелка сворачивания стоит у правого края заголовка — там же, где её
+	// держит Windows. Стрелки листания месяца при свёрнутой сетке не рисуются
+	// и кликов не принимают: листать нечего.
+	collapseBtn := image.Rect(header.Max.X-btnW, header.Min.Y, header.Max.X, header.Max.Y)
+	var prevBtn, nextBtn, title image.Rectangle
+	if c.Collapsed() {
+		title = image.Rect(header.Min.X, header.Min.Y, collapseBtn.Min.X, header.Max.Y)
+	} else {
+		prevBtn = image.Rect(header.Min.X, header.Min.Y, header.Min.X+btnW, header.Max.Y)
+		nextBtn = image.Rect(collapseBtn.Min.X-btnW, header.Min.Y, collapseBtn.Min.X, header.Max.Y)
+		title = image.Rect(prevBtn.Max.X, header.Min.Y, nextBtn.Min.X, header.Max.Y)
+	}
+
+	if c.Collapsed() {
+		return calendarLayout{header: header, collapseBtn: collapseBtn, title: title}
+	}
 
 	weekday := image.Rect(content.Min.X, header.Max.Y, content.Max.X, header.Max.Y+cell)
 
@@ -252,7 +308,10 @@ func (c *CalendarFlyout) computeLayout(content image.Rectangle) calendarLayout {
 		}
 		days[row] = cells
 	}
-	return calendarLayout{header: header, prevBtn: prevBtn, nextBtn: nextBtn, title: title, weekday: weekday, days: days}
+	return calendarLayout{
+		header: header, prevBtn: prevBtn, nextBtn: nextBtn, collapseBtn: collapseBtn,
+		title: title, weekday: weekday, days: days,
+	}
 }
 
 // ─── Отрисовка ───────────────────────────────────────────────────────────────
@@ -264,8 +323,19 @@ func (c *CalendarFlyout) draw(ctx widget.DrawContext, r image.Rectangle) {
 	layout := c.computeLayout(r)
 
 	headerStyle := c.themeStyle(calendarPartHeader, theme.StateNormal)
-	DrawTextCentered(ctx, layout.title, c.monthTitle(), headerStyle)
 	arrowInk := ink(headerStyle)
+
+	if c.Collapsed() {
+		// Свёрнутая панель — строка с датой и стрелка, которая её развернёт.
+		DrawTextCentered(ctx, layout.title, c.dateTitle(), headerStyle)
+		// Уголок вниз — «развернуть». Фигура та же, что у трея (systemtray.go):
+		// одна на пакет, чтобы уголки на панели не разошлись видом.
+		drawChevron(ctx, layout.collapseBtn, false, arrowInk)
+		return
+	}
+
+	DrawTextCentered(ctx, layout.title, c.monthTitle(), headerStyle)
+	drawChevron(ctx, layout.collapseBtn, true, arrowInk) // вверх — «свернуть»
 	drawArrow(ctx, layout.prevBtn, true, arrowInk)
 	drawArrow(ctx, layout.nextBtn, false, arrowInk)
 
@@ -282,9 +352,12 @@ func (c *CalendarFlyout) draw(ctx widget.DrawContext, r image.Rectangle) {
 	today := c.now()
 	selected := c.Selected()
 	hasSelection := !selected.IsZero()
+	hovered := c.hoveredDay()
 	for _, row := range layout.days {
 		for _, cell := range row {
-			st := StateOf(false, false,
+			st := StateOf(
+				sameDay(cell.day.date, hovered),
+				false,
 				sameDay(cell.day.date, today),
 				!cell.day.inMonth,
 				hasSelection && sameDay(cell.day.date, selected),
@@ -326,6 +399,22 @@ func drawArrow(ctx widget.DrawContext, r image.Rectangle, pointLeft bool, col co
 	}
 }
 
+// dateTitle — строка с датой для свёрнутой панели: «27 августа 2026».
+func dateTitleFor(t time.Time) string {
+	return strconv.Itoa(t.Day()) + " " + calendarMonthGenitive[int(t.Month())-1] +
+		" " + strconv.Itoa(t.Year())
+}
+
+func (c *CalendarFlyout) dateTitle() string { return dateTitleFor(c.now()) }
+
+// calendarMonthGenitive — месяцы в родительном падеже: «27 августа», а не
+// «27 август». Отдельный список, потому что заголовок месяца («Август 2026»)
+// требует именительного, и одним набором не обойтись.
+var calendarMonthGenitive = [...]string{
+	"января", "февраля", "марта", "апреля", "мая", "июня",
+	"июля", "августа", "сентября", "октября", "ноября", "декабря",
+}
+
 // ─── Ввод ────────────────────────────────────────────────────────────────────
 
 // OnMouseButton закрывает панель кликом мимо (как Flyout), а внутри неё
@@ -354,6 +443,10 @@ func (c *CalendarFlyout) OnMouseButton(e widget.MouseEvent) bool {
 	}
 
 	layout := c.computeLayout(c.contentRect())
+	if pt.In(layout.collapseBtn) {
+		c.ToggleCollapsed()
+		return true
+	}
 	if pt.In(layout.prevBtn) {
 		c.PrevMonth()
 		return true
@@ -371,6 +464,44 @@ func (c *CalendarFlyout) OnMouseButton(e widget.MouseEvent) bool {
 		}
 	}
 	return true
+}
+
+// hoveredDay возвращает день под курсором (нулевое время — курсора нет).
+func (c *CalendarFlyout) hoveredDay() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.hovered
+}
+
+// OnMouseMove подсвечивает день под курсором.
+//
+// Без этого метода состояния StateHover и StateActive, которые профили честно
+// задают для части «day», не могли примениться никогда: отрисовка передавала
+// признак наведения ложью всегда, и заданная темой заливка при наведении была
+// не видна.
+func (c *CalendarFlyout) OnMouseMove(x, y int) {
+	var day time.Time
+	if c.IsOpen() && !widget.CursorIsNowhere(x, y) {
+		pt := image.Pt(x, y)
+		layout := c.computeLayout(c.contentRect())
+	rows:
+		for _, row := range layout.days {
+			for _, cell := range row {
+				if pt.In(cell.rect) {
+					day = cell.day.date
+					break rows
+				}
+			}
+		}
+	}
+
+	c.mu.Lock()
+	changed := !sameDay(c.hovered, day)
+	c.hovered = day
+	c.mu.Unlock()
+	if changed {
+		c.Invalidate()
+	}
 }
 
 // OnKeyEvent листает месяцы стрелками влево/вправо, а закрытие по Esc
