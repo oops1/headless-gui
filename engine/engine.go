@@ -1300,13 +1300,17 @@ func (e *Engine) renderFrame() output.Frame {
 		if damage.Empty() {
 			return output.Frame{Seq: e.frameSeq.Add(1), Timestamp: time.Now()}
 		}
+		// Сброс признаков — ДО блита фона: фон помечает тайлы, которые
+		// накрыл, и сброс после него стёр бы эту пометку. Тогда тайл, на
+		// котором кроме обоев ничего нет, снова уезжал бы к потребителю с
+		// ответом «неизвестно что».
+		canvas.resetTileMarks(damage)
 		canvas.blitBackgroundIn(damage)
 		canvas.setBaseClip(damage)
-		canvas.resetTileMarks(damage)
 		defer canvas.clearBaseClip()
 	} else {
-		canvas.blitBackground()
 		canvas.resetTileMarks(image.Rect(0, 0, canvas.W, canvas.H))
+		canvas.blitBackground()
 	}
 
 	// Активен ли хост попапов: если да — оверлеи с OverlayBounds не рисуются

@@ -251,12 +251,14 @@ func (c *Canvas) blitBackground() {
 	// писать за пределы c.W×c.H в чужой буфер нельзя, даже если у него есть
 	// запасные байты дальше по срезу.
 	rowBytes := c.W * 4
+	all := image.Rect(0, 0, c.W, c.H)
 	if c.bgImage != nil {
 		for y := 0; y < c.H; y++ {
 			dOff := c.back.PixOffset(0, y)
 			sOff := c.bgImage.PixOffset(0, y)
 			copy(c.back.Pix[dOff:dOff+rowBytes], c.bgImage.Pix[sOff:sOff+rowBytes])
 		}
+		c.markBackground(all)
 		return
 	}
 	// Очищаем буфер чёрным (RGBA = 0,0,0,255). R=G=B=0 — перестановка
@@ -272,6 +274,29 @@ func (c *Canvas) blitBackground() {
 			row[i+3] = 255
 		}
 	}
+	c.markBackground(all)
+}
+
+// markBackground помечает тайлы, накрытые фоном.
+//
+// Фон кладётся в начале каждого кадра построчным копированием, и пометки этот
+// путь не ставил вовсе. Из-за этого тайл, накрытый ТОЛЬКО фоном — а на
+// рабочем столе с обоями это почти весь экран, — оставался нетронутым, и
+// кадр сообщал о нём «неизвестно что». Потребитель, выбирающий кодек по
+// output.Frame.Regions, на обоях не получал ни одной подсказки и кодировал
+// каждый прямоугольник вслепую. Обои при этом — и самое большое на экране, и
+// то, на чём кодек без потерь теряет больше всего времени.
+//
+// Блит изображения помечается точно так же (DrawImage → markImage): фон —
+// тот же блит, только раньше остальных.
+func (c *Canvas) markBackground(r image.Rectangle) {
+	if c.bgImage != nil {
+		c.markImage(r)
+		return
+	}
+	// Пустой фон — сплошная чёрная заливка, накрывающая тайлы целиком.
+	// Сообщить о ней стоит: это команда заливки вместо тайла с пикселями.
+	c.markSolid(r, color.RGBA{A: 255}, true)
 }
 
 // blitBackgroundIn — как blitBackground, но только в области r (частичная
@@ -292,6 +317,7 @@ func (c *Canvas) blitBackgroundIn(r image.Rectangle) {
 			sOff := c.bgImage.PixOffset(r.Min.X, y)
 			copy(c.back.Pix[dOff:dOff+rowBytes], c.bgImage.Pix[sOff:sOff+rowBytes])
 		}
+		c.markBackground(r)
 		return
 	}
 	for y := r.Min.Y; y < r.Max.Y; y++ {
@@ -304,6 +330,7 @@ func (c *Canvas) blitBackgroundIn(r image.Rectangle) {
 			row[i+3] = 255
 		}
 	}
+	c.markBackground(r)
 }
 
 // ─── Внешняя память back-буфера (Engine.SetSurface, surface.go) ────────────
