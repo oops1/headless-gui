@@ -249,3 +249,120 @@ func TestRegions_RoundClipCornerIsNotSolid(t *testing.T) {
 		t.Errorf("середина залитой области объявлена %v, ждали solid", got)
 	}
 }
+
+// Обои описываются, а не молчат.
+//
+// Фон кладётся в начале каждого кадра построчным копированием, и пометки этот
+// путь не ставил вовсе: тайл, накрытый ТОЛЬКО фоном — на рабочем столе с
+// обоями это почти весь экран, — оставался нетронутым, и кадр сообщал о нём
+// «неизвестно что». Потребитель, выбирающий кодек по Regions, на обоях не
+// получал ни одной подсказки.
+func TestRegions_WallpaperIsDescribedAsImage(t *testing.T) {
+	const w, h = 320, 320
+	eng := New(w, h, 30)
+
+	// Фотообои: пёстрая картинка, которую сплошным цветом не описать.
+	wall := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			wall.SetRGBA(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: uint8(x ^ y), A: 255})
+		}
+	}
+	if err := eng.SetBackground(wall); err != nil {
+		t.Fatal(err)
+	}
+
+	// Пустой корень: поверх обоев не рисуется ничего.
+	root := widget.NewPanel(color.RGBA{})
+	root.ShowHeader = false
+	root.SetBounds(image.Rect(0, 0, 0, 0))
+	eng.SetRoot(root)
+
+	frame := eng.renderFrame()
+	if len(frame.Regions) == 0 {
+		t.Fatal("кадр не принёс признаков тайлов")
+	}
+
+	mixed := 0
+	for _, r := range frame.Regions {
+		switch r.Kind {
+		case output.RegionImage:
+		case output.RegionMixed:
+			mixed++
+		default:
+			t.Errorf("тайл %v объявлен %v, а под ним только обои", r.Rect, r.Kind)
+		}
+	}
+	if mixed != 0 {
+		t.Errorf("%d тайлов из %d описаны как «неизвестно что», хотя под ними только обои",
+			mixed, len(frame.Regions))
+	}
+}
+
+// Пустой фон — сплошная чёрная заливка, и сказать об этом стоит: потребитель
+// отправит команду заливки вместо тайла с пикселями.
+func TestRegions_EmptyBackgroundIsSolidBlack(t *testing.T) {
+	const w, h = 320, 320
+	eng := New(w, h, 30)
+
+	root := widget.NewPanel(color.RGBA{})
+	root.ShowHeader = false
+	root.SetBounds(image.Rect(0, 0, 0, 0))
+	eng.SetRoot(root)
+
+	frame := eng.renderFrame()
+	if len(frame.Regions) == 0 {
+		t.Fatal("кадр не принёс признаков тайлов")
+	}
+	black := color.RGBA{A: 255}
+	for _, r := range frame.Regions {
+		if r.Kind != output.RegionSolid {
+			t.Errorf("тайл %v объявлен %v, а под ним пустой чёрный фон", r.Rect, r.Kind)
+			continue
+		}
+		if r.Color != black {
+			t.Errorf("тайл %v объявлен цветом %v, ждали чёрный", r.Rect, r.Color)
+		}
+	}
+}
+
+// Виджет поверх обоев остаётся собой: сплошная панель, накрывшая тайл
+// целиком, описывается заливкой, а не картинкой.
+func TestRegions_WidgetOverWallpaperWins(t *testing.T) {
+	const w, h = 320, 320
+	eng := New(w, h, 30)
+
+	wall := image.NewRGBA(image.Rect(0, 0, w, h))
+	for i := range wall.Pix {
+		wall.Pix[i] = uint8(i)
+	}
+	if err := eng.SetBackground(wall); err != nil {
+		t.Fatal(err)
+	}
+
+	root := widget.NewPanel(color.RGBA{})
+	root.ShowHeader = false
+	root.SetBounds(image.Rect(0, 0, 0, 0))
+
+	fillCol := color.RGBA{R: 200, G: 30, B: 40, A: 255}
+	panel := widget.NewPanel(fillCol)
+	panel.ShowHeader = false
+	panel.SetBounds(image.Rect(0, 0, 128, 128)) // ровно четыре тайла
+	root.AddChild(panel)
+	eng.SetRoot(root)
+
+	frame := eng.renderFrame()
+	got, ok := regionAt(frame.Regions, 32, 32)
+	if !ok {
+		t.Fatal("тайл под панелью не попал в кадр")
+	}
+	if got.Kind != output.RegionSolid || got.Color != fillCol {
+		t.Errorf("тайл под сплошной панелью объявлен %v цветом %v, ждали заливку %v",
+			got.Kind, got.Color, fillCol)
+	}
+
+	// А тайл, где обои ничем не закрыты, — картинка.
+	if got, ok := regionAt(frame.Regions, w-32, h-32); ok && got.Kind != output.RegionImage {
+		t.Errorf("тайл с открытыми обоями объявлен %v, ждали картинку", got.Kind)
+	}
+}
