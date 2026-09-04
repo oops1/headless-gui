@@ -250,6 +250,10 @@ var (
 	procStretchDIBits         = gdi32.NewProc("StretchDIBits")
 	procSetStretchBltMode     = gdi32.NewProc("SetStretchBltMode")
 	procCreateRoundRectRgn    = gdi32.NewProc("CreateRoundRectRgn")
+	// Прямоугольные области и их объединение — выкройка окна-попапа по
+	// закрашенной части кадра (popuprgn_windows.go).
+	procCreateRectRgn = gdi32.NewProc("CreateRectRgn")
+	procCombineRgn    = gdi32.NewProc("CombineRgn")
 	procSetWindowRgn          = user32.NewProc("SetWindowRgn")
 	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 	procSetCapture            = user32.NewProc("SetCapture")
@@ -306,6 +310,10 @@ type Win32Window struct {
 	// cornerRadius — радиус скругления углов окна (0 = прямые). Реализуется
 	// через регион окна (SetWindowRgn), переприменяется при resize.
 	cornerRadius int
+	// popupBands — выкройка окна-попапа, применённая последней. Нужна,
+	// чтобы не переустанавливать её на каждый блит: SetWindowRgn перестраивает
+	// форму окна, и лишний вызов виден как мигание.
+	popupBands []image.Rectangle
 
 	// pendingClose: Close() был вызван из кода (не от ОС).
 	// Вместо синхронного DestroyWindow мы отправляем PostMessage(WM_CLOSE),

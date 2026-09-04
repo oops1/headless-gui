@@ -31,6 +31,10 @@ func (c *nopDrawCtx) SetClip(r image.Rectangle)                   { c.sink += r.
 func (c *nopDrawCtx) ClearClip()                                  {}
 func (c *nopDrawCtx) DrawHLine(x, y, length int, col color.RGBA)  { c.sink += length }
 func (c *nopDrawCtx) DrawVLine(x, y, length int, col color.RGBA)  { c.sink += length }
+func (c *nopDrawCtx) DrawImage(src image.Image, x, y int)         { c.sink += x }
+func (c *nopDrawCtx) DrawImageScaled(src image.Image, x, y, w, h int) {
+	c.sink += w
+}
 
 // ─── Модель для бенчмарков ─────────────────────────────────────────────────
 

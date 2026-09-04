@@ -627,6 +627,80 @@ TextInput.OnChange func(text string)
 dg.OnRowActivated = func(row int, item interface{}) { ... }
 ```
 
+### DataGrid: header click, column order, per-row tooltip, striping
+
+```go
+// Header click apart from sorting. Fires regardless of CanUserSortColumns;
+// true means "handled" and cancels the sort. The resize edge and the
+// scrollbar are claimed first — no need to tell a click from a grab.
+dg.OnHeaderClick = func(col dg.Column, idx, x, y int) bool { ... }
+
+// Column order. Dragging is OFF by default: turning it on moves the header
+// click from press to release (a click cannot be told from a grab until the
+// button comes up).
+dg.CanUserReorderColumns = true
+dg.MoveColumn(from, to)
+dg.OnColumnsReordered = func(from, to int) { ... }
+
+// Per-row tooltip (Base.ToolTip is one text for the whole widget).
+dg.RowToolTip = func(item interface{}, row int) string { ... }
+dg.HoverRow() int          // row under the cursor, or -1
+dg.RowIndexAtY(y int) int  // row at a Y coordinate, or -1
+dg.ScrollX() int           // horizontal scroll (absolute cell X)
+
+// Scrolling: virtualization has always been there, now it is observable.
+dg.OnScroll = func(first, count int) { ... } // outside the lock
+dg.FirstVisibleRow() int
+dg.VisibleRowCount() int
+
+// Row striping. AlternateBG alone is not enough: ApplyTheme recomputes it
+// from the theme background on every theme change.
+dg.ZebraStripes = false
+
+// Template columns can draw images:
+//   cdc.DrawCtx.DrawImage(img, x, y)
+//   cdc.DrawCtx.DrawImageScaled(img, x, y, w, h)
+```
+
+### Mouse modifiers — Ctrl/Shift+Click
+
+```go
+// MouseEvent carries Mod (ModShift | ModCtrl | ModAlt | ModMeta).
+// The engine cannot derive it from key events: there is no modifier key in
+// KeyCode, and holding Ctrl while clicking produces no key event at all.
+eng.SetModifiers(widget.ModCtrl) // window.Run does this itself
+eng.SendMouseButton(x, y, widget.MouseLeft, true)
+
+// DataGrid with SelectionExtended: Ctrl+Click toggles, Shift+Click ranges.
+```
+
+### DockPanel.LastChildFill, DockPane active title
+
+```go
+dp.LastChildFill = false   // XAML: <DockPanel LastChildFill="False">
+// Without it the LAST child always fills the remainder and its own Dock is
+// ignored — a row where EVERY child is docked was impossible.
+
+mgr.ActivatePane(pane)     // switch the active pane of a stack
+pane.IsActive() bool
+pane.TitleTextActive = col // title color on the accent background of an
+                           // active pane; zero alpha = same as inactive.
+// OnStateChanged now fires on an active-pane change too (old and new pane).
+```
+
+### ToggleButton — persistent pressed state
+
+```go
+btn.SetToggle(true)
+btn.SetChecked(true)   // set state; does NOT call the handler
+btn.IsChecked()
+btn.Toggle()           // flip and notify
+btn.OnCheckedChanged = func(on bool) { ... }
+```
+
+XAML: `<ToggleButton IsChecked="True"/>`. No separate type — a ToggleButton
+differs from a Button by exactly this state.
+
 ### Per-column IsReadOnly tri-state (NEW: A4 fix)
 
 ```go
@@ -1675,6 +1749,10 @@ root, reg, err := widget.LoadUIFromXAMLWithContext(xamlBytes, vm)
 // scope variant for manual control:
 root, reg, scope, err := widget.LoadUIFromXAMLBindings(xamlBytes, vm)
 // widget.LoadUIFromXAMLFileWithContext / LoadUIFromXAMLFileBindings also exist
+// widget.LoadUIFromXAMLFS(data, fsys) — markup resources from an fs.FS
+// (embed.FS single-file builds); same SEC-8 containment as baseDir on disk.
+// Resource paths resolve from the fsys ROOT, so use fs.Sub(embedded, "ui")
+// to keep Source="icons/ok.png" relative to the markup file.
 ```
 
 ```xml
@@ -2264,6 +2342,15 @@ eng.RegisterFontFile("Roboto", path)     // register a single named font
 eng.RegisterFontDir("my/fonts")          // register a whole directory
 eng.AvailableFonts()                      // []string of registered names
 eng.RegisterFallbackFont(ttfBytes)        // glyph fallback (✓✗⚠, …)
+
+// 2. assets/fonts is resolved relative to the PROCESS WORKING DIRECTORY.
+//    A program installed elsewhere finds nothing there and silently stays on
+//    the built-in Go Regular. Ship the fonts inside the binary instead:
+//
+//      //go:embed assets/fonts
+//      var fontsFS embed.FS
+//
+err := eng.RegisterFontFS(fontsFS, "assets/fonts") // same names as on disk
 ```
 
 XAML uses the family name via `FontFamily`:
@@ -2273,11 +2360,17 @@ XAML uses the family name via `FontFamily`:
 <TextBox FontFamily="Inter" FontSize="16"/>
 ```
 
-**Recommended free fonts** (place the TTF in `assets/fonts/`; see
-`assets/fonts/README.md`): Roboto (Apache-2.0, default), Open Sans (Apache-2.0),
-Inter (SIL OFL-1.1). These are free/redistributable but **not MIT** — fonts are
-licensed under OFL or Apache, both permissive. **Google Sans is proprietary and
-must not be bundled** — use Inter instead.
+**Bundled free fonts** (already in `assets/fonts/`, each with its license file;
+see `assets/fonts/README.md` for the licenses and the redistribution duties):
+Roboto (default), Open Sans, Inter, Liberation Sans, Liberation Mono, DejaVu
+Sans, DejaVu Sans Mono, Go Regular. All are SIL OFL-1.1 except DejaVu
+(Bitstream Vera + public domain) and Go (BSD-3-Clause) — free/redistributable
+including commercially, but **not MIT**: the license file must travel with the
+font. Liberation is metric-compatible with Arial/Courier New; DejaVu has the
+widest glyph coverage and doubles as the engine's own fallback (so do not
+rename `DejaVuSans.ttf` / `DejaVuSansMono.ttf`). Bold/Italic files are separate
+named fonts (`FontFamily="LiberationSans-Bold"`), not weight variants.
+**Google Sans is proprietary and must not be bundled** — use Inter instead.
 
 ---
 

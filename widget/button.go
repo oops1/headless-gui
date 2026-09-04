@@ -49,6 +49,16 @@ type Button struct {
 	hovered int32 // 0 | 1, атомарно
 	focused int32 // 0 | 1, атомарно
 
+	// isToggle/checked — кнопка-переключатель (togglebutton.go).
+	// Атомарные, как и остальное состояние кнопки: вид её спрашивают из
+	// отрисовки, а меняют из обработки ввода.
+	isToggle int32
+	checked  int32
+
+	// OnCheckedChanged — обработчик смены состояния переключателя
+	// (см. SetToggle). Зовётся ПОСЛЕ OnClick и только у переключателя.
+	OnCheckedChanged func(checked bool)
+
 	// OnClick — основной обработчик клика (back-compat).
 	// Если нужно несколько подписчиков — используйте AddClickHandler /
 	// RemoveClickHandler. OnClick всегда вызывается ДО handlers.
@@ -152,12 +162,24 @@ func (btn *Button) Draw(ctx DrawContext) {
 
 	st := currentStyle()
 
-	bg := btn.Background
+	bg, txt, border := btn.Background, btn.TextColor, btn.BorderColor
 	switch {
 	case btn.IsPressed():
 		bg = btn.PressedBG
+	case btn.IsChecked():
+		// Включённый переключатель выглядит нажатым постоянно. Наведение на
+		// него всё равно должно быть заметно — иначе непонятно, на что
+		// нажимаешь, — поэтому фон слегка ведётся в сторону hover, а не
+		// подменяется им: подмена стёрла бы само состояние.
+		bg = btn.PressedBG
+		if btn.IsHovered() && btn.HoverBG.A > 0 && !st.Classic3D {
+			bg = mixRGBA(btn.PressedBG, btn.HoverBG, 0.35)
+		}
 	case btn.IsHovered() && btn.HoverBG.A > 0 && !st.Classic3D:
 		bg = btn.HoverBG // классика Win2000 не подсвечивает hover
+	}
+	if !btn.IsEnabled() {
+		bg, txt, border = disabledLook(bg, txt, border)
 	}
 
 	switch {
@@ -165,7 +187,10 @@ func (btn *Button) Draw(ctx DrawContext) {
 		// Классическая объёмная кнопка: прямые углы, bevel-рамка;
 		// нажатие показывается инверсией граней (sunken).
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
-		if btn.IsPressed() {
+		// Классика: включённый переключатель — вдавленная грань, как у
+		// нажатой кнопки. Иначе в теме Win2000 состояние не видно вовсе:
+		// hover она не подсвечивает, и фон у обоих состояний один.
+		if btn.IsPressed() || btn.IsChecked() {
 			drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		} else {
 			drawBevelRaised(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
@@ -184,15 +209,15 @@ func (btn *Button) Draw(ctx DrawContext) {
 			ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, bg)
 			if btn.IsFocused() {
 				ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, btn.HighlightTop)
-			} else if btn.BorderColor.A > 0 {
-				ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, btn.BorderColor)
+			} else if border.A > 0 {
+				ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, border)
 			}
 		} else {
 			ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
 			if btn.IsFocused() {
 				ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), btn.HighlightTop)
 			} else {
-				ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), btn.BorderColor)
+				ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), border)
 			}
 		}
 	}
@@ -232,7 +257,7 @@ func (btn *Button) Draw(ctx DrawContext) {
 		ctx.DrawImageScaled(btn.Icon, startX, iconY, iconSz, iconSz)
 		textX := startX + iconSz + iconGap
 		textY := b.Min.Y + (b.Dy()-textH)/2
-		ctx.DrawText(btn.Text, textX, textY, btn.TextColor)
+		ctx.DrawText(btn.Text, textX, textY, txt)
 
 	case hasIcon && hasText && btn.IconPos == IconTop:
 		// Иконка сверху, текст снизу — оба центрированы по горизонтали
@@ -245,7 +270,7 @@ func (btn *Button) Draw(ctx DrawContext) {
 		ctx.DrawImageScaled(btn.Icon, iconX, startY, iconSz, iconSz)
 		textX := b.Min.X + (b.Dx()-textW)/2
 		textY := startY + iconSz + iconGap
-		ctx.DrawText(btn.Text, textX, textY, btn.TextColor)
+		ctx.DrawText(btn.Text, textX, textY, txt)
 
 	case hasIcon && !hasText:
 		// Только иконка — центрирована
@@ -264,12 +289,41 @@ func (btn *Button) Draw(ctx DrawContext) {
 			textY = b.Min.Y + 2
 		}
 		if hasText {
-			ctx.DrawText(btn.Text, textX, textY, btn.TextColor)
+			ctx.DrawText(btn.Text, textX, textY, txt)
 		}
 	}
 
 	btn.drawChildren(ctx)
-	btn.drawDisabledOverlay(ctx)
+}
+
+// disabledLook приглушает цвета выключенной кнопки.
+//
+// Заменяет собой общий полупрозрачный оверлей (Base.drawDisabledOverlay). Тот
+// красит виджет ЧЁРНЫМ на 55% поверх всего и прямоугольником: в тёмной теме
+// это читается как «погашено», а в светлой выключенная кнопка выходила темнее
+// и контрастнее соседней рабочей — притягивала взгляд и читалась нажатой, — да
+// ещё и с прямыми углами поверх скруглённых.
+//
+// Гасить — значит уводить К СОБСТВЕННОМУ фону, а не к чёрному: тёмная кнопка
+// темнеет, светлая светлеет, и в обеих темах выключенная отступает назад.
+// Главный признак при этом даёт текст: он наполовину растворяется в фоне
+// кнопки — так выключенное показывают и WPF, и сама Windows.
+func disabledLook(bg, text, border color.RGBA) (color.RGBA, color.RGBA, color.RGBA) {
+	ground := color.RGBA{A: 255} // чёрный — для тёмного фона
+	if luminance(bg) >= 128 {
+		ground = color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	}
+	bg = mixRGBA(bg, ground, 0.18)
+	text = mixRGBA(text, bg, 0.55)
+	if border.A > 0 {
+		border = mixRGBA(border, bg, 0.5)
+	}
+	return bg, text, border
+}
+
+// luminance — воспринимаемая яркость цвета (ITU-R BT.601).
+func luminance(c color.RGBA) int {
+	return (299*int(c.R) + 587*int(c.G) + 114*int(c.B)) / 1000
 }
 
 // OnMouseButton реализует widget.MouseClickHandler — вызывает OnClick при отпускании.
@@ -363,6 +417,12 @@ func (btn *Button) fireClick() {
 	// WPF Command: выполняется при клике, если доступна.
 	if btn.Command != nil && btn.Command.CanExecute(btn.CommandParameter) {
 		btn.Command.Execute(btn.CommandParameter)
+	}
+	// Переключатель меняет состояние ЗДЕСЬ, а не в обработке мыши: клавиша
+	// Enter/Space активирует кнопку тем же путём, и состояние обязано
+	// меняться одинаково — иначе переключатель слушался бы только мыши.
+	if btn.IsToggle() {
+		btn.Toggle()
 	}
 }
 

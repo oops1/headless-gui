@@ -93,6 +93,17 @@ type DataGrid struct {
 	AutoGenerateColumns bool
 	IsReadOnly          bool
 	CanUserSortColumns  bool
+
+	// CanUserReorderColumns — можно ли менять порядок колонок, перетаскивая
+	// заголовок мышью (reorder.go).
+	//
+	// По умолчанию ВЫКЛЮЧЕНО, хотя в WPF включено. Включение меняет момент
+	// срабатывания щелчка по заголовку: сортировка и OnHeaderClick уходят с
+	// нажатия на ОТПУСКАНИЕ — иначе нельзя отличить щелчок от захвата, и
+	// всякая попытка потащить колонку заодно пересортировывала бы таблицу.
+	// Менять это молча у всех, кто уже полагается на прежний момент, нельзя.
+	CanUserReorderColumns bool
+
 	CanUserResizeColumns bool
 	SelectionMode       SelectionMode
 	RowHeight           int
@@ -113,9 +124,21 @@ type DataGrid struct {
 	editCursorPos int  // позиция курсора в редакторе
 
 	// ── Скроллинг ────────────────────────────────────────────────────────
-	scrollY      int
-	scrollX      int // горизонтальный скролл (для широких таблиц)
-	hoverRow     int
+	scrollY  int
+	scrollX  int // горизонтальный скролл (для широких таблиц)
+	hoverRow int
+
+	// notifiedScrollY — положение прокрутки, о котором уже сообщили в
+	// OnScroll: без него событие сыпалось бы на каждый клампинг.
+	notifiedScrollY int
+
+	// Перетаскивание колонки за заголовок (reorder.go). dragCol == -1 —
+	// нажатия на заголовке нет.
+	dragCol    int
+	dragStartX int
+	dragX      int
+	dragging   bool
+
 	thumbDragging   bool
 	thumbDragStartY int
 	thumbDragStartS int
@@ -136,6 +159,16 @@ type DataGrid struct {
 	SelectColor     color.RGBA
 	HoverColor      color.RGBA
 	AlternateBG     color.RGBA
+
+	// ZebraStripes — чередовать ли фон нечётных строк (AlternateBG).
+	//
+	// По умолчанию да — так таблица выглядела всегда. Отключить это одним
+	// лишь приравниванием AlternateBG к Background было нельзя: ApplyTheme
+	// вычисляет AlternateBG из фона темы заново на каждую смену темы и
+	// затирает всё, что приложение туда положило. Цветом по-прежнему владеет
+	// тема, а признаком «полосы нужны» — приложение.
+	ZebraStripes bool
+
 	GridLineColor   color.RGBA
 	ScrollTrackBG   color.RGBA
 	ScrollThumbBG   color.RGBA
@@ -148,6 +181,48 @@ type DataGrid struct {
 	OnSorting          func(e *SortingEvent)
 	OnCellEditEnding   func(e *CellEditEndingEvent)
 	OnRowEditEnding    func(rowIndex int, item interface{})
+
+	// RowToolTip — текст всплывающей подсказки для строки под курсором.
+	//
+	// У Base.ToolTip один текст на весь виджет, а строке нужен свой:
+	// состояние файла, причина конфликта, полный путь. Колбэк, а не поле в
+	// модели, по той же причине, что и CellRenderer, — текст берётся из
+	// приложения и может быть локализован на лету.
+	//
+	// Пустая строка означает «подсказки нет»: тогда показывается общий
+	// ToolTip виджета, если он задан.
+	RowToolTip func(item interface{}, row int) string
+
+	// OnHeaderClick — щелчок по заголовку колонки.
+	//
+	// Вызывается ДО сортировки и НЕЗАВИСИМО от CanUserSortColumns: клик по
+	// заголовку — это не обязательно «сортируй», это может быть и меню
+	// выбора видимых колонок. Раньше две эти реакции нельзя было развести:
+	// единственным способом отобрать клик у сортировки было выключить её
+	// целиком и разбирать мышь в полосе заголовка самому — вместе с
+	// различением «клик» / «начало resize» / «начало перетаскивания».
+	//
+	// Возврат true означает «клик разобран»: сортировка не выполняется.
+	// Возврат false оставляет прежнее поведение.
+	//
+	// Вызывается ВНЕ внутреннего замка — обработчик может звать методы
+	// таблицы, не рискуя взаимной блокировкой.
+	OnHeaderClick func(col Column, colIndex, x, y int) bool
+
+	// OnColumnsReordered — колонку переставили перетаскиванием или вызовом
+	// MoveColumn. from и to — индексы до и после перестановки.
+	OnColumnsReordered func(from, to int)
+
+	// OnScroll — прокрутка сдвинулась: first — первая видимая строка,
+	// count — сколько строк помещается в окне.
+	//
+	// Нужно подгрузке следующей порции данных: без события её приходилось
+	// вешать на выбор строки рядом с концом списка, то есть требовать от
+	// человека щёлкнуть там, где он просто хотел прокрутить.
+	//
+	// Зовётся ВНЕ внутреннего замка — обработчик волен добавить строки в
+	// коллекцию прямо из него.
+	OnScroll func(first, count int)
 
 	// RowStyleSelector — условная раскраска строк по значению модели (BUG-3).
 	// Вызывается для каждой видимой строки перед отрисовкой её содержимого.
@@ -434,6 +509,7 @@ func New() *DataGrid {
 		editingRow:           -1,
 		editingCol:           -1,
 		hoverRow:             -1,
+		dragCol:              -1,
 		resizingCol:          -1,
 		// Цвета по умолчанию (Dark theme)
 		Background:      color.RGBA{R: 30, G: 30, B: 30, A: 255},
@@ -444,6 +520,7 @@ func New() *DataGrid {
 		SelectColor:     color.RGBA{R: 0, G: 120, B: 215, A: 80},
 		HoverColor:      color.RGBA{R: 62, G: 62, B: 66, A: 255},
 		AlternateBG:     color.RGBA{R: 37, G: 37, B: 38, A: 255},
+		ZebraStripes:    true,
 		GridLineColor:   color.RGBA{R: 50, G: 50, B: 52, A: 255},
 		ScrollTrackBG:   color.RGBA{R: 46, G: 46, B: 48, A: 255},
 		ScrollThumbBG:   color.RGBA{R: 77, G: 77, B: 80, A: 255},
@@ -808,6 +885,59 @@ func (dg *DataGrid) clampScrollY() {
 	if max := dg.maxScrollY(); dg.scrollY > max {
 		dg.scrollY = max
 	}
+	dg.queueScrollNotify()
+}
+
+// queueScrollNotify откладывает вызов OnScroll, если прокрутка действительно
+// сдвинулась. Вызывается под dg.mu.
+//
+// Живёт в clampScrollY, а не в каждом месте, где меняется scrollY: клампинг —
+// единственное, что делают ВСЕ такие места, и это гарантирует, что ни один
+// путь прокрутки не забудет сообщить о себе.
+func (dg *DataGrid) queueScrollNotify() {
+	if dg.OnScroll == nil || dg.scrollY == dg.notifiedScrollY {
+		return
+	}
+	dg.notifiedScrollY = dg.scrollY
+	cb := dg.OnScroll
+	first, count := dg.firstVisibleRowLocked(), dg.visibleRowCountLocked()
+	dg.pending = append(dg.pending, func() { cb(first, count) })
+}
+
+// FirstVisibleRow возвращает индекс первой видимой строки.
+//
+// Виртуализация в таблице есть с самого начала — рисуются только видимые
+// строки, — но снаружи об этом нельзя было спросить: подгрузке следующей
+// порции нужно знать, докуда человек долистал.
+func (dg *DataGrid) FirstVisibleRow() int {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	return dg.firstVisibleRowLocked()
+}
+
+// VisibleRowCount возвращает, сколько строк помещается в окне таблицы.
+func (dg *DataGrid) VisibleRowCount() int {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	return dg.visibleRowCountLocked()
+}
+
+func (dg *DataGrid) firstVisibleRowLocked() int {
+	if dg.RowHeight <= 0 {
+		return 0
+	}
+	return dg.scrollY / dg.RowHeight
+}
+
+func (dg *DataGrid) visibleRowCountLocked() int {
+	if dg.RowHeight <= 0 {
+		return 0
+	}
+	n := dg.viewHeight() / dg.RowHeight
+	if n < 0 {
+		return 0
+	}
+	return n
 }
 
 func (dg *DataGrid) totalColumnsWidth() int {
@@ -1269,6 +1399,12 @@ type drawSnapshot struct {
 	alternateBG, gridLine                     color.RGBA
 	scrollTrack, scrollThumb, scrollThumbHigh color.RGBA
 	editBG, editBorder                        color.RGBA
+	zebra                                     bool
+
+	// Перетаскивание колонки: что тащат и куда встанет (reorder.go).
+	dragging bool
+	dragCol  int
+	dropX    int
 }
 
 // rowSnapshot — данные одной видимой строки на кадр.
@@ -1362,6 +1498,8 @@ func (dg *DataGrid) snapshotForDraw() (s drawSnapshot, ok bool) {
 	s.textColor, s.borderColor = dg.TextColor, dg.BorderColor
 	s.selectColor, s.hoverColor = dg.SelectColor, dg.HoverColor
 	s.alternateBG, s.gridLine = dg.AlternateBG, dg.GridLineColor
+	s.zebra = dg.ZebraStripes
+	dg.headerDragSnapshot(&s)
 	s.scrollTrack, s.scrollThumb = dg.ScrollTrackBG, dg.ScrollThumbBG
 	s.scrollThumbHigh = dg.ScrollThumbHover
 	s.editBG, s.editBorder = dg.EditBG, dg.EditBorder
@@ -1402,6 +1540,7 @@ func (dg *DataGrid) Draw(ctx DrawContextBridge) {
 
 	// Заголовок
 	dg.drawHeader(ctx, &s)
+	dg.drawHeaderDrag(ctx, &s)
 
 	// Строки данных (с виртуализацией) — собственный клип внутри
 	dg.drawRows(ctx, &s)
@@ -1482,7 +1621,7 @@ func (dg *DataGrid) drawRows(ctx DrawContextBridge, s *drawSnapshot) {
 				drewBase = true
 			}
 		}
-		if !drewBase && row%2 == 1 {
+		if !drewBase && s.zebra && row%2 == 1 {
 			ctx.FillRect(dr.Min.X, rowY, s.dataW, s.rowH, s.alternateBG)
 		}
 		// Выделение / hover рисуются поверх базового фона.
@@ -1592,7 +1731,34 @@ func (dg *DataGrid) drawScrollbar(ctx DrawContextBridge, s *drawSnapshot) {
 
 // OnMouseButton обрабатывает нажатие/отпускание кнопки мыши.
 // Возвращает true, если событие поглощено.
+//
+// Без модификаторов: выделение ведёт себя как одиночное даже в режиме
+// SelectionExtended. Для Ctrl+Click и Shift+Click — OnMouseButtonMod.
 func (dg *DataGrid) OnMouseButton(x, y int, button int, pressed bool) bool {
+	return dg.OnMouseButtonMod(x, y, button, pressed, false, false)
+}
+
+// OnMouseButtonMod — то же, но с модификаторами клавиатуры.
+//
+// shift выделяет диапазон от опорной строки, ctrl добавляет и снимает строку
+// по одной — ровно то, что selectRow умел с самого начала и чего нельзя было
+// попросить снаружи.
+func (dg *DataGrid) OnMouseButtonMod(x, y int, button int, pressed bool, shift, ctrl bool) bool {
+	// Заголовок разбирается ДО общего замка: OnHeaderClick отвечает
+	// «разобрал/не разобрал» здесь и сейчас, отложить его через firePending
+	// нельзя — ответ нужен раньше, чем решение о сортировке. А звать чужой
+	// колбэк под замком нельзя тем более: обработчик почти наверняка позовёт
+	// методы этой же таблицы.
+	if button == 0 {
+		if pressed {
+			if dg.fireHeaderClick(x, y) {
+				return true
+			}
+		} else if handled, onHeader := dg.finishHeaderPress(x, y); onHeader {
+			return handled
+		}
+	}
+
 	defer dg.firePending() // LIFO: выполнится ПОСЛЕ Unlock — колбэки вне dg.mu
 	dg.mu.Lock()
 	defer dg.mu.Unlock()
@@ -1649,12 +1815,19 @@ func (dg *DataGrid) OnMouseButton(x, y int, button int, pressed bool) bool {
 		}
 	}
 
-	// Заголовок: сортировка
-	if dg.CanUserSortColumns && pt.In(dg.headerRect()) {
-		colIdx := dg.colIndexAtX(x)
-		if colIdx >= 0 {
-			dg.sortByColumn(colIdx)
+	// Заголовок. С включённым перетаскиванием нажатие лишь ЗАПОМИНАЕТСЯ:
+	// щелчок это или захват колонки, станет ясно только по движению мыши.
+	// Разбор такого нажатия — в finishHeaderPress на отпускании.
+	if pt.In(dg.headerRect()) {
+		if dg.CanUserReorderColumns && dg.beginHeaderPress(x) {
 			return true
+		}
+		if dg.CanUserSortColumns {
+			colIdx := dg.colIndexAtX(x)
+			if colIdx >= 0 {
+				dg.sortByColumn(colIdx)
+				return true
+			}
 		}
 	}
 
@@ -1665,11 +1838,68 @@ func (dg *DataGrid) OnMouseButton(x, y int, button int, pressed bool) bool {
 		if dg.isEditing {
 			dg.commitEdit()
 		}
-		dg.selectRow(row, false, false) // TODO: Shift/Ctrl из события
+		dg.selectRow(row, shift, ctrl)
 		return true
 	}
 
 	return false
+}
+
+// fireHeaderClick вызывает OnHeaderClick, если нажатие пришлось на заголовок
+// колонки. Сообщает, разобран ли клик.
+//
+// Кромка resize и ползунок прокрутки проверяются ЗДЕСЬ и отдаются своим
+// обработчикам: приложению, которое хочет всего лишь меню по щелчку на
+// заголовке, незачем самому отличать «клик» от «потянули за границу» —
+// именно на это уходило больше всего чужого кода.
+func (dg *DataGrid) fireHeaderClick(x, y int) bool {
+	dg.mu.Lock()
+	fn := dg.OnHeaderClick
+	// С перетаскиванием щелчок разбирается на отпускании (finishHeaderPress):
+	// на нажатии ещё неизвестно, щелчок это или захват колонки.
+	if fn == nil || dg.CanUserReorderColumns || !image.Pt(x, y).In(dg.headerRect()) {
+		dg.mu.Unlock()
+		return false
+	}
+	if dg.needsScrollbar() && image.Pt(x, y).In(dg.scrollbarRect()) {
+		dg.mu.Unlock()
+		return false
+	}
+	if dg.CanUserResizeColumns && dg.resizeColumnAt(x) >= 0 {
+		dg.mu.Unlock()
+		return false
+	}
+	idx := dg.colIndexAtX(x)
+	var col Column
+	if idx >= 0 && idx < len(dg.columns) {
+		col = dg.columns[idx]
+	}
+	dg.mu.Unlock()
+
+	return fn(col, idx, x, y)
+}
+
+// HoverRowToolTip возвращает текст подсказки для строки под курсором.
+//
+// Пустая строка — подсказки нет: либо колбэк RowToolTip не задан, либо
+// курсор не над строкой, либо приложение вернуло пустой текст.
+//
+// Колбэк зовётся ВНЕ замка: подсказку спрашивает движок посреди своей работы,
+// и обработчик волен обратиться к таблице за данными строки.
+func (dg *DataGrid) HoverRowToolTip() string {
+	dg.mu.Lock()
+	fn := dg.RowToolTip
+	row := dg.hoverRow
+	var item interface{}
+	if fn != nil && row >= 0 && row < len(dg.sortedIdx) && dg.itemsSource != nil {
+		item = dg.itemsSource.Get(dg.sortedIdx[row])
+	}
+	dg.mu.Unlock()
+
+	if fn == nil || row < 0 {
+		return ""
+	}
+	return fn(item, row)
 }
 
 // OnMouseDoubleClick обрабатывает двойной клик.
@@ -1735,6 +1965,12 @@ func (dg *DataGrid) OnMouseMove(x, y int) {
 		return
 	}
 
+	// Перетаскивание колонки за заголовок.
+	if dg.dragCol >= 0 {
+		dg.dragHeaderTo(x)
+		return
+	}
+
 	// Resize колонки. SEC-5: индекс мог протухнуть после SetColumns —
 	// проверяем по фактической длине среза, а не только на >= 0.
 	if dg.resizingCol >= len(dg.columns) {
@@ -1797,6 +2033,7 @@ func (dg *DataGrid) resizeColumnAt(x int) int {
 
 // ScrollBy прокручивает на delta пикселей.
 func (dg *DataGrid) ScrollBy(delta int) {
+	defer dg.firePending() // LIFO: выполнится ПОСЛЕ Unlock — колбэки вне dg.mu
 	dg.mu.Lock()
 	defer dg.mu.Unlock()
 	dg.scrollY += delta
@@ -1810,12 +2047,44 @@ func (dg *DataGrid) ScrollY() int {
 	return dg.scrollY
 }
 
+// ScrollX возвращает горизонтальную прокрутку в пикселях.
+//
+// Нужна снаружи по той же причине, что и ScrollY: посчитать абсолютный X
+// ячейки, когда таблица уехала вбок. Без неё формулу было не составить —
+// величина есть, а спросить её нечем.
+func (dg *DataGrid) ScrollX() int {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	return dg.scrollX
+}
+
+// HoverRow возвращает индекс строки под курсором или -1.
+//
+// Нужен подсказке на строку: у Base.ToolTip один текст на весь виджет, а
+// строке нужен свой. См. также RowToolTip — с ним обёртка не нужна вовсе.
+func (dg *DataGrid) HoverRow() int {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	return dg.hoverRow
+}
+
+// RowIndexAtY возвращает индекс строки по координате Y (или -1).
+//
+// Формула не сложная — высота заголовка, RowHeight, прокрутка, — но она
+// ЗДЕСЬ, и повторять её снаружи значит копировать то, что может измениться.
+func (dg *DataGrid) RowIndexAtY(y int) int {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	return dg.rowIndexAtY(y)
+}
+
 // WheelScroll прокручивает таблицу колесом мыши на 3 строки за тик
 // (up=true — вверх, иначе вниз). Возвращает true, если прокрутка
 // фактически сдвинулась — обёртка использует это, чтобы поглощать
 // событие ТОЛЬКО когда есть что прокручивать (иначе колесо всплывает
 // к родительскому ScrollView).
 func (dg *DataGrid) WheelScroll(up bool) bool {
+	defer dg.firePending() // LIFO: выполнится ПОСЛЕ Unlock — колбэки вне dg.mu
 	dg.mu.Lock()
 	defer dg.mu.Unlock()
 	if dg.maxScrollY() == 0 {

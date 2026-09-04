@@ -401,6 +401,20 @@ func (fc *FontCache) HasGlyph(r rune) bool {
 	return present
 }
 
+// assetFallbackFontPaths возвращает пути к нашим собственным шрифтам широкого
+// покрытия. Они идут ПОСЛЕ системных: на машине со шрифтами системная копия
+// ближе к тому, что видят остальные программы, и должна выигрывать. Смысл этих
+// путей — машина, на которой системных шрифтов нет вовсе: без них там нечем
+// нарисовать ни псевдографику, ни ✓ ✗ ⚠, и текст молча теряет символы
+// (fcForRune не рисует .notdef). Каталог ищется относительно рабочего каталога
+// процесса — как и вся регистрация из assets/fonts.
+func assetFallbackFontPaths() []string {
+	return []string{
+		filepath.Join("assets", "fonts", "DejaVuSans.ttf"),
+		filepath.Join("assets", "fonts", "DejaVuSansMono.ttf"),
+	}
+}
+
 // systemFallbackFontPaths возвращает список путей к системным шрифтам с широким
 // покрытием символов (✓ ✗ ⚠, box-drawing, стрелки и т.п.), которые движок
 // пытается подгрузить как fallback к встроенному Go Regular. Best-effort:

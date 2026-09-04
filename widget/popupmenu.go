@@ -15,6 +15,21 @@ type MenuItem struct {
 	Disabled  bool       // серый, некликабельный пункт
 	OnClick   func()     // обработчик
 	SubItems  []MenuItem // вложенные подменю (3+ уровень)
+
+	// Checkable — пункт-переключатель: слева от подписи отводится место под
+	// отметку, даже когда она снята. Без этого поля соседние пункты одного
+	// меню разъезжались бы по левому краю, стоило отметить один из них.
+	//
+	// Отводится место сразу всему меню, если хоть один пункт помечен
+	// Checkable: так же ведёт себя WPF, и так подписи стоят в столбик.
+	Checkable bool
+	// Checked — отметка стоит. Осмысленно только при Checkable.
+	Checked bool
+	// RadioGroup — имя группы взаимного исключения. Пункты с одинаковым
+	// непустым именем В ОДНОМ подменю ведут себя как переключатель: отметка
+	// одного снимает её с остальных (SetItemChecked, PopupMenu.SetItemChecked).
+	// Пустое имя — обычный флажок, независимый от соседей.
+	RadioGroup string
 }
 
 // PopupMenu — контекстное / всплывающее меню в стиле Windows 10.
@@ -419,6 +434,7 @@ func (m *PopupMenu) dismissedByPress(seq uint64) bool {
 func (m *PopupMenu) calcSize() (w, h int) {
 	w = m.MinWidth
 	hasSubItems := false
+	gutter := m.checkGutter()
 	for _, item := range m.items {
 		if item.Separator {
 			h += m.SeparatorH
@@ -427,8 +443,9 @@ func (m *PopupMenu) calcSize() (w, h int) {
 			if len(item.SubItems) > 0 {
 				hasSubItems = true
 			}
-			// Примерная ширина текста: 8px на символ + padding.
-			textW := len(item.Text)*8 + m.PaddingX*2 + 24
+			// Ширина по НАСТОЯЩЕМУ замеру подписи: len в Go считает байты, и
+			// кириллический пункт выходил вдвое шире нужного.
+			textW := MeasureUIText(item.Text, DefaultFontSizePt) + m.PaddingX*2 + 24 + gutter
 			if textW > w {
 				w = textW
 			}
@@ -557,7 +574,12 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 		if item.Disabled {
 			textCol = m.DisabledColor
 		}
-		ctx.DrawText(item.Text, px+m.PaddingX, textY, textCol)
+		textX := px + m.PaddingX + m.checkGutter()
+		if item.Checkable && item.Checked {
+			drawCheckMark(ctx, image.Rect(px+m.PaddingX, curY, px+m.PaddingX+checkMarkSize,
+				curY+m.ItemHeight), textCol)
+		}
+		ctx.DrawText(item.Text, textX, textY, textCol)
 
 		// Стрелка ► для пунктов с подменю.
 		if len(item.SubItems) > 0 {
@@ -850,5 +872,105 @@ func (m *PopupMenu) ApplyTheme(t *Theme) {
 	} else {
 		m.ItemHeight = 30
 		m.SeparatorH = 9
+	}
+}
+
+// ─── Отметки у пунктов (WPF MenuItem.IsChecked) ─────────────────────────────
+
+// checkMarkSize — сторона поля под отметку. Отметка рисуется фигурой, а не
+// символом шрифта: галочка обязана выглядеть одинаково при любом шрифте темы,
+// включая тот, в котором нужного знака нет вовсе (тот же довод, что у уголка
+// трея в desktop/systemtray.go).
+const checkMarkSize = 14
+
+// checkGutter — ширина поля под отметку слева от подписей.
+//
+// Отводится всему меню разом, если хоть один пункт объявлен Checkable: иначе
+// подписи разъезжались бы по левому краю в тот момент, когда пользователь
+// ставит отметку, — а меню не должно дёргаться от щелчка по нему.
+func (m *PopupMenu) checkGutter() int {
+	for _, item := range m.items {
+		if item.Checkable {
+			return checkMarkSize + 4
+		}
+	}
+	return 0
+}
+
+// SetItemChecked ставит или снимает отметку у пункта idx.
+//
+// Пункт с непустым RadioGroup ведёт себя как переключатель: отметка снимается
+// у соседей той же группы В ЭТОМ ЖЕ меню. Соседи глубже или выше по дереву к
+// группе не относятся — иначе одно имя группы в разных подменю связывало бы
+// несвязанные наборы.
+func (m *PopupMenu) SetItemChecked(idx int, checked bool) {
+	m.mu.Lock()
+	changed := setCheckedIn(m.items, idx, checked)
+	m.mu.Unlock()
+	if changed {
+		m.Invalidate()
+		notifyUIChanged()
+	}
+}
+
+// setCheckedIn — общая механика отметки для PopupMenu и MenuBar.
+func setCheckedIn(items []MenuItem, idx int, checked bool) bool {
+	if idx < 0 || idx >= len(items) {
+		return false
+	}
+	if items[idx].Checked == checked {
+		return false
+	}
+	items[idx].Checked = checked
+	// Пункт, которому ставят отметку, обязан её показывать: иначе вызов
+	// молча ничего не изменил бы на экране.
+	if checked {
+		items[idx].Checkable = true
+	}
+
+	if group := items[idx].RadioGroup; checked && group != "" {
+		for i := range items {
+			if i != idx && items[i].RadioGroup == group {
+				items[i].Checked = false
+			}
+		}
+	}
+	return true
+}
+
+// drawCheckMark рисует галочку в отведённом поле.
+//
+// Две линии под углом, набранные точками: короткая вниз-вправо и длинная
+// вверх-вправо. Толщина в две точки — иначе на светлой подложке галочка
+// теряется, ровно как терялся уголок трея.
+func drawCheckMark(ctx DrawContext, r image.Rectangle, col color.RGBA) {
+	if col.A == 0 || r.Empty() {
+		return
+	}
+	side := r.Dx()
+	if r.Dy() < side {
+		side = r.Dy()
+	}
+	// Галочка занимает не всё поле: по краям остаётся воздух, иначе она
+	// сливается с подсветкой пункта.
+	inset := side / 4
+	if inset < 1 {
+		inset = 1
+	}
+	x0 := r.Min.X + inset
+	y0 := r.Min.Y + r.Dy()/2
+	short := (side - 2*inset) / 3
+	long := side - 2*inset - short
+	if short < 1 || long < 1 {
+		return
+	}
+
+	for i := 0; i <= short; i++ {
+		ctx.SetPixel(x0+i, y0+i, col)
+		ctx.SetPixel(x0+i, y0+i+1, col)
+	}
+	for i := 0; i <= long; i++ {
+		ctx.SetPixel(x0+short+i, y0+short-i, col)
+		ctx.SetPixel(x0+short+i, y0+short-i+1, col)
 	}
 }

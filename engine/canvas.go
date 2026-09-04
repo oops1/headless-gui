@@ -60,6 +60,11 @@ type Canvas struct {
 	// выключатель дёргает приложение из своей горутины, а читает обход в
 	// горутине кадра.
 	cullingOn atomic.Bool
+	// occlusionOn — разрешено ли вычитание перекрытого (widget/occlusion.go).
+	// Отдельный выключатель от cullingOn: ошибиться в них можно по-разному —
+	// пропуск по damage промахивается мимо изменившегося, а вычитание верит
+	// объявлению виджета о собственной непрозрачности.
+	occlusionOn atomic.Bool
 
 	tilesX int
 	tilesY int
@@ -201,6 +206,7 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 	// а приложение с нарушенным вернёт прежний обход одной строкой
 	// (Engine.SetSubtreeCulling).
 	c.cullingOn.Store(true)
+	c.occlusionOn.Store(true)
 	c.initTileMarks()
 	return c
 }
@@ -1068,19 +1074,39 @@ func (c *Canvas) MeasureRunePositions(text string, sizePt float64) []int {
 
 // measureRunePositionsPx — позиции рун в физических пикселях.
 func (c *Canvas) measureRunePositionsPx(text string, sizePt float64) []int {
+	return c.measureRunePositionsPxFont(c.fontCache, text, sizePt)
+}
+
+// MeasureRunePositionsFont — как MeasureRunePositions, но ИМЕНОВАННЫМ шрифтом.
+//
+// Каретка и выделение в моноширинном тексте считаются по нему же: раскладка,
+// посчитанная шрифтом по умолчанию, разъезжается с нарисованной, как только
+// именованный шрифт действительно зарегистрирован. Пустое имя — шрифт по
+// умолчанию.
+func (c *Canvas) MeasureRunePositionsFont(text string, sizePt float64, fontName string) []int {
+	pos := c.measureRunePositionsPxFont(c.fontFor(fontName), text, sizePt)
+	if c.scale != 1 {
+		for i, p := range pos {
+			pos[i] = int(math.Round(float64(p) / c.scale))
+		}
+	}
+	return pos
+}
+
+func (c *Canvas) measureRunePositionsPxFont(fc *FontCache, text string, sizePt float64) []int {
 	if needsShaping(text) {
-		if pos := c.shapedRunePositions(c.fontCache, text, sizePt); pos != nil {
+		if pos := c.shapedRunePositions(fc, text, sizePt); pos != nil {
 			return pos
 		}
 	}
 	if len(c.fallbacks) == 0 {
-		return c.fontCache.MeasureRunes(text, sizePt)
+		return fc.MeasureRunes(text, sizePt)
 	}
 	runes := []rune(text)
 	pos := make([]int, len(runes)+1)
 	var w fixed.Int26_6
 	for i, r := range runes {
-		w += c.runeAdvance(c.fontCache, r, sizePt)
+		w += c.runeAdvance(fc, r, sizePt)
 		pos[i+1] = w.Round()
 	}
 	return pos
@@ -1522,3 +1548,6 @@ func (c *Canvas) syncTile(x, y, w, h int) {
 		copy(c.front.Pix[dst:dst+rowBytes], c.back.Pix[src:src+rowBytes])
 	}
 }
+
+// OcclusionEnabled реализует widget.OcclusionScope: вычитать ли перекрытое.
+func (c *Canvas) OcclusionEnabled() bool { return c.occlusionOn.Load() }

@@ -55,6 +55,25 @@ type EngineAPI interface {
 	CursorAt(x, y int) widget.Cursor
 }
 
+// modifierSink — опциональный приём состояния модификаторов клавиатуры
+// (реализует *engine.Engine).
+//
+// Опциональный, а не часть EngineAPI: EngineAPI — минимум, который обязан
+// уметь всякий движок под этим окном, и приделывать к нему обязательный метод
+// ради Ctrl+Click значило бы сломать сборку всякому, кто этот интерфейс уже
+// реализует. Движок без него просто не узнает про модификаторы — ровно так,
+// как было до их появления.
+type modifierSink interface {
+	SetModifiers(mod widget.KeyMod)
+}
+
+// sendModifiers сообщает движку текущее состояние Ctrl/Shift/Alt.
+func (s *surface) sendModifiers() {
+	if ms, ok := s.eng.(modifierSink); ok {
+		ms.SetModifiers(s.currentMod())
+	}
+}
+
 // engineScaler — опциональная поддержка HiDPI движком (реализует *engine.Engine).
 // CanvasSize при этом логический, кадры и события — физические.
 type engineScaler interface {
@@ -749,6 +768,10 @@ func (s *surface) setupInput() {
 		case VK_ALT:
 			s.modAlt.Store(true)
 		}
+		// Модификаторы нужны и событиям МЫШИ: Ctrl+Click и Shift+Click в
+		// таблице. Своего клавиатурного события у Ctrl нет (в KeyCode такой
+		// клавиши не существует), поэтому состояние отдаётся движку отдельно.
+		s.sendModifiers()
 
 		code := vkToKeyCode(vk)
 		if code != widget.KeyUnknown {
@@ -772,6 +795,7 @@ func (s *surface) setupInput() {
 		case VK_ALT:
 			s.modAlt.Store(false)
 		}
+		s.sendModifiers()
 
 		code := vkToKeyCode(vk)
 		if code != widget.KeyUnknown {

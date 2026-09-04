@@ -173,12 +173,21 @@ func (mb *MenuBar) setActiveIdx(idx int) {
 }
 
 // recalcRects вычисляет прямоугольники каждого пункта. Вызывать под Lock.
+//
+// Ширина — по НАСТОЯЩЕМУ замеру подписи, а не по восьми точкам на байт, как
+// было раньше. `len` в Go возвращает длину в байтах: кириллический пункт
+// получал вдвое большую ширину, чем нужно («Репозиторий» — 11 символов, 22
+// байта, то есть 176 точек вместо примерно 90), подсветка при наведении
+// выходила шире текста, а от шрифта и масштаба ширина не зависела вовсе.
+//
+// MeasureUIText, а не ctx.MeasureText: раскладка считается вне отрисовки —
+// её просят и при SetBounds, и при смене состава меню, когда контекста нет.
 func (mb *MenuBar) recalcRects() {
 	b := mb.bounds
 	rects := make([]image.Rectangle, len(mb.items))
 	x := b.Min.X
 	for i, item := range mb.items {
-		textW := len(item.Text)*8 + mb.ItemPaddingX*2
+		textW := MeasureUIText(item.Text, DefaultFontSizePt) + mb.ItemPaddingX*2
 		rects[i] = image.Rect(x, b.Min.Y, x+textW, b.Max.Y)
 		x += textW
 	}
@@ -491,4 +500,179 @@ func (mb *MenuBar) ApplyTheme(t *Theme) {
 	if mb.popup != nil {
 		mb.popup.ApplyTheme(t)
 	}
+}
+
+// ─── Правка собранного меню ────────────────────────────────────────────────
+//
+// Меню собирается один раз — из XAML или AddMenu, — а меняться должно на
+// лету: язык интерфейса переключают в самом меню, список языков зависит от
+// того, какие файлы перевода лежат у пользователя, а галочки «Вид → Тема»
+// отмечают текущий выбор. До этих методов состав правили записью в срез из
+// Items(), то есть держались на детали реализации — «Items копирует только
+// внешний срез».
+
+// itemPath находит пункт по пути индексов и возвращает срез, в котором он
+// лежит, вместе с его местом в этом срезе.
+//
+// Путь адресует любую глубину: {0} — первый пункт полосы, {0,2} — третий
+// пункт его подменю, {0,2,1} — второй пункт вложенного подменю. Пустой путь
+// или выход за границы — ok=false.
+func (mb *MenuBar) itemPath(path []int) (items []MenuItem, idx int, ok bool) {
+	if len(path) == 0 || path[0] < 0 || path[0] >= len(mb.items) {
+		return nil, 0, false
+	}
+	if len(path) == 1 {
+		// Верхний уровень живёт в MenuBarItem, а не в MenuItem: у него свой
+		// метод (SetMenuText) — сюда он не попадает.
+		return nil, path[0], false
+	}
+	items = mb.items[path[0]].Items
+	for _, i := range path[1 : len(path)-1] {
+		if i < 0 || i >= len(items) {
+			return nil, 0, false
+		}
+		items = items[i].SubItems
+	}
+	last := path[len(path)-1]
+	if last < 0 || last >= len(items) {
+		return nil, 0, false
+	}
+	return items, last, true
+}
+
+// SetItemText меняет надпись пункта по пути индексов — на любой глубине.
+//
+// SetItemText(text, 0) — пункт полосы, SetItemText(text, 0, 2) — третий пункт
+// его подменю, SetItemText(text, 0, 2, 1) — второй пункт вложенного. Прежний
+// SetSubItemText остаётся и делает то же, что SetItemText(text, top, sub).
+func (mb *MenuBar) SetItemText(text string, path ...int) {
+	if len(path) == 1 {
+		mb.SetMenuText(path[0], text)
+		return
+	}
+	mb.mu.Lock()
+	changed := false
+	if items, idx, ok := mb.itemPath(path); ok && items[idx].Text != text {
+		items[idx].Text = text
+		changed = true
+	}
+	mb.mu.Unlock()
+	if changed {
+		notifyUIChanged()
+	}
+}
+
+// SetItemChecked ставит или снимает отметку у пункта по пути индексов.
+//
+// Пункт с непустым RadioGroup ведёт себя как переключатель: отметка снимается
+// у соседей той же группы в том же подменю.
+func (mb *MenuBar) SetItemChecked(checked bool, path ...int) {
+	mb.mu.Lock()
+	changed := false
+	if items, idx, ok := mb.itemPath(path); ok {
+		changed = setCheckedIn(items, idx, checked)
+	}
+	mb.mu.Unlock()
+	if changed {
+		notifyUIChanged()
+	}
+}
+
+// ItemAt возвращает копию пункта по пути индексов.
+//
+// Копию, а не указатель: править состав меню полагается методами ниже, а
+// возвращённый указатель пережил бы любую перестройку и начал бы менять то,
+// чего на экране уже нет.
+func (mb *MenuBar) ItemAt(path ...int) (MenuItem, bool) {
+	mb.mu.RLock()
+	defer mb.mu.RUnlock()
+	items, idx, ok := mb.itemPath(path)
+	if !ok {
+		return MenuItem{}, false
+	}
+	return items[idx], true
+}
+
+// SetMenus заменяет весь состав полосы меню.
+func (mb *MenuBar) SetMenus(items ...MenuBarItem) {
+	mb.mu.Lock()
+	mb.items = append([]MenuBarItem(nil), items...)
+	mb.recalcRects()
+	mb.mu.Unlock()
+	mb.closeIfOpen()
+	notifyUIChanged()
+}
+
+// InsertMenu вставляет пункт полосы перед позицией idx. Индекс за пределами
+// списка означает «в конец» — так удобнее строить меню в цикле.
+func (mb *MenuBar) InsertMenu(idx int, item MenuBarItem) {
+	mb.mu.Lock()
+	if idx < 0 {
+		idx = 0
+	}
+	if idx > len(mb.items) {
+		idx = len(mb.items)
+	}
+	mb.items = append(mb.items, MenuBarItem{})
+	copy(mb.items[idx+1:], mb.items[idx:])
+	mb.items[idx] = item
+	mb.recalcRects()
+	mb.mu.Unlock()
+	mb.closeIfOpen()
+	notifyUIChanged()
+}
+
+// RemoveMenu удаляет пункт полосы. Несуществующий индекс — не событие.
+func (mb *MenuBar) RemoveMenu(idx int) {
+	mb.mu.Lock()
+	if idx < 0 || idx >= len(mb.items) {
+		mb.mu.Unlock()
+		return
+	}
+	mb.items = append(mb.items[:idx], mb.items[idx+1:]...)
+	mb.recalcRects()
+	mb.mu.Unlock()
+	mb.closeIfOpen()
+	notifyUIChanged()
+}
+
+// ClearMenus убирает все пункты.
+func (mb *MenuBar) ClearMenus() {
+	mb.mu.Lock()
+	mb.items = nil
+	mb.recalcRects()
+	mb.mu.Unlock()
+	mb.closeIfOpen()
+	notifyUIChanged()
+}
+
+// SetMenuItems заменяет подменю пункта верхнего уровня.
+//
+// Ради этого метода запрос и подан: список языков динамический — пользователь
+// кладёт свой файл перевода в каталог, и такой язык надо показать в «Вид →
+// Язык», не пересобирая всё меню.
+func (mb *MenuBar) SetMenuItems(top int, items ...MenuItem) {
+	mb.mu.Lock()
+	if top < 0 || top >= len(mb.items) {
+		mb.mu.Unlock()
+		return
+	}
+	mb.items[top].Items = append([]MenuItem(nil), items...)
+	mb.mu.Unlock()
+	mb.closeIfOpen()
+	notifyUIChanged()
+}
+
+// closeIfOpen закрывает раскрытое подменю после правки состава.
+//
+// Обязательно: открытое подменю показывает СНИМОК пунктов, взятый при
+// открытии, а его размеры и попадание мыши считаются по нему же. Оставить его
+// открытым поверх нового состава значит показывать пункты, которых уже нет, и
+// звать их обработчики.
+func (mb *MenuBar) closeIfOpen() {
+	if atomic.LoadInt32(&mb.activeIdx) < 0 {
+		return
+	}
+	mb.setActiveIdx(-1)
+	mb.popup.Close()
 }

@@ -487,23 +487,27 @@ func parseInputBindings(el xElement) []InputBinding {
 	return out
 }
 
-// loadTrayIcon загружает иконку трея из файла src (относительно baseDir):
-//   - .png/.jpg/.jpeg → декодируется как есть (loadImageFile);
+// loadTrayIcon загружает иконку трея из файла src (относительно baseDir или
+// из fs.FS — LoadUIFromXAMLFS, GG-7):
+//   - .png/.jpg/.jpeg → декодируется как есть (decodeXAMLImage);
 //   - .svg            → растеризуется в 32×32; свои цвета документа сохраняются,
 //     currentColor подставляется цветом текста темы (win10.LabelText), tint=false
 //     (для трея не темизируем монохромно — берём оригинальные цвета SVG).
 //
+// Расширение берём из src (атрибута разметки), а не из резолвленного пути —
+// у fs.FS нет «пути на диске», а filepath.Ext(src) от источника не зависит.
+//
 // Ошибка загрузки/разбора — log.Printf и nil (иконка просто не ставится).
 func loadTrayIcon(src, baseDir string) image.Image {
-	// Путь удерживается внутри каталога XAML-файла (SEC-8).
-	path, rerr := resolveXAMLResource(baseDir, src)
-	if rerr != nil {
-		log.Printf("xaml: TrayIcon Source=%q: %v", src, rerr)
-		return nil
-	}
-	switch strings.ToLower(filepath.Ext(path)) {
+	switch strings.ToLower(filepath.Ext(src)) {
 	case ".svg":
-		doc, err := svgPkg.ParseFile(path)
+		// Путь/граница удерживаются внутри baseDir или fs.FS (SEC-8, GG-7).
+		data, err := readXAMLResourceBytes(baseDir, src, svgPkg.MaxFileBytes)
+		if err != nil {
+			log.Printf("xaml: TrayIcon Source=%q: %v", src, err)
+			return nil
+		}
+		doc, err := svgPkg.Parse(data)
 		if err != nil {
 			log.Printf("xaml: TrayIcon Source=%q: %v", src, err)
 			return nil
@@ -515,7 +519,7 @@ func loadTrayIcon(src, baseDir string) image.Image {
 		}
 		return img
 	default:
-		img, err := loadImageFile(path)
+		img, err := decodeXAMLImage(baseDir, src)
 		if err != nil {
 			log.Printf("xaml: TrayIcon Source=%q: %v", src, err)
 			return nil
@@ -602,14 +606,13 @@ func buildXAMLPanel(el xElement, baseDir string) Widget {
 		p.HeaderHeight = hh
 	}
 
-	// BackgroundImage — фоновая картинка из файла (относительно XAML-файла).
-	// Путь удерживается внутри baseDir (SEC-8); при загрузке из строки
-	// (baseDir == "") фон, как и раньше, не подхватывается.
+	// BackgroundImage — фоновая картинка из файла (относительно XAML-файла)
+	// или из fs.FS (LoadUIFromXAMLFS, GG-7). Путь удерживается внутри
+	// источника (SEC-8); при загрузке из строки (baseDir == "") фон, как и
+	// раньше, не подхватывается.
 	if bgImg := el.attr("BackgroundImage"); bgImg != "" && baseDir != "" {
-		if imgPath, err := resolveXAMLResource(baseDir, bgImg); err == nil {
-			if img, err := loadImageFile(imgPath); err == nil {
-				p.BackgroundImage = img
-			}
+		if img, err := decodeXAMLImageRGBA(baseDir, bgImg); err == nil {
+			p.BackgroundImage = img
 		}
 	}
 
@@ -920,8 +923,13 @@ func parseMenuItems(parent xElement) ([]MenuItem, []string) {
 			strings.EqualFold(sub.attr("Disabled"), "True")
 
 		item := MenuItem{
-			Text:     text,
-			Disabled: disabled,
+			Text:      text,
+			Disabled:  disabled,
+			Checkable: menuItemCheckable(sub),
+			Checked:   strings.EqualFold(sub.attr("IsChecked"), "True"),
+			// GroupName — имя WPF: пункты одной группы в одном подменю ведут
+			// себя как переключатель.
+			RadioGroup: sub.attr("GroupName"),
 		}
 
 		// Рекурсивные подменю (3+ уровень). Их надписи локализуются
@@ -980,8 +988,11 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 			strings.EqualFold(child.attr("Disabled"), "True")
 
 		item := MenuItem{
-			Text:     text,
-			Disabled: disabled,
+			Text:       text,
+			Disabled:   disabled,
+			Checkable:  menuItemCheckable(child),
+			Checked:    strings.EqualFold(child.attr("IsChecked"), "True"),
+			RadioGroup: child.attr("GroupName"),
 		}
 		pm.mu.Lock()
 		idx := len(pm.items)
@@ -1008,6 +1019,13 @@ func buildXAMLDockPanel(el xElement, reg map[string]Widget, parentOff image.Poin
 			dp.Background = c
 			dp.UseAlpha = c.A < 255
 		}
+	}
+
+	// LastChildFill — WPF-атрибут: выключает растяжение последнего ребёнка.
+	// Без него строку, где ВСЕ дети докованы, собрать нельзя: последний
+	// забирает остаток, и его собственный Dock не действует.
+	if v := el.attr("LastChildFill"); v != "" {
+		dp.LastChildFill = !strings.EqualFold(v, "false") && v != "0"
 	}
 
 	// Bounds
@@ -2068,4 +2086,16 @@ func parseColumnWidth(s string) dgridPkg.ColumnWidth {
 		return dgridPkg.PixelWidth(float64(n))
 	}
 	return dgridPkg.StarWidth(1)
+}
+
+// menuItemCheckable — объявлен ли пункт меню переключателем.
+//
+// IsCheckable="True" — прямое объявление, как в WPF. Но IsChecked="True" тоже
+// делает пункт переключателем: разметка, которая ставит отметку, но забыла
+// объявить пункт отмечаемым, иначе показывала бы отметку в никуда. Имя группы
+// значит то же самое — переключатель без отметки всё равно переключатель.
+func menuItemCheckable(el xElement) bool {
+	return strings.EqualFold(el.attr("IsCheckable"), "True") ||
+		strings.EqualFold(el.attr("IsChecked"), "True") ||
+		el.attr("GroupName") != ""
 }

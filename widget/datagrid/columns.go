@@ -122,6 +122,16 @@ type DrawContextBridge interface {
 	ClearClip()
 	DrawHLine(x, y, length int, col color.RGBA)
 	DrawVLine(x, y, length int, col color.RGBA)
+
+	// DrawImage и DrawImageScaled — растровые картинки: значок статуса,
+	// миниатюра, флаг страны.
+	//
+	// Раньше их здесь не было, и шаблонная колонка могла рисовать только
+	// примитивами. Значок в ячейке приходилось складывать в список и рисовать
+	// вторым проходом уже своим контекстом — приём рабочий, но держащийся на
+	// том, что Draw колонки и Draw обёртки идут в одном кадре подряд.
+	DrawImage(src image.Image, x, y int)
+	DrawImageScaled(src image.Image, x, y, w, h int)
 }
 
 // ─── Column интерфейс ──────────────────────────────────────────────────────

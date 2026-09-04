@@ -240,6 +240,28 @@ btn.PressedBG = color.RGBA{...}  // pressed color
 
 In XAML: `HoverBG="#C42B1C"`, `PressedBG="#A01E14"`, `Background`, `Foreground`, `BorderBrush`.
 
+**Toggle button.** The pressed state persists between clicks: the button paints
+itself with `PressedBG` while checked, and under the cursor the fill leans
+slightly toward `HoverBG` — so both the state and the hover stay visible.
+
+```go
+btn.SetToggle(true)            // make it a toggle
+btn.SetChecked(true)           // set the state (the handler is NOT called)
+btn.IsChecked()                // read the state
+btn.Toggle()                   // flip it and notify the handler
+btn.OnCheckedChanged = func(on bool) { ... }
+```
+
+In XAML the tag makes the toggle, the attribute gives the initial state:
+
+```xml
+<ToggleButton x:Name="fltModified" Content="Modified" IsChecked="True"/>
+```
+
+There is no separate `ToggleButton` type: it differs from `Button` by exactly
+this state, not by layout, icons, commands or subscriptions. `IsChecked` is
+read on a plain button too — "draw it selected", without the toggle behavior.
+
 ### TextInput
 
 ```go
@@ -694,11 +716,70 @@ dg.Grid.AutoGenerateColumns  // auto-generate columns from data structure
 dg.Grid.IsReadOnly           // read-only mode
 dg.Grid.CanUserSortColumns   // sort by header click (default true)
 dg.Grid.CanUserResizeColumns // resize column widths (default true)
+dg.Grid.CanUserReorderColumns // drag columns by the header (default false)
 dg.Grid.SelectionMode        // SelectionSingle or SelectionExtended
+dg.Grid.ZebraStripes         // alternate row background (default true)
 dg.Grid.RowHeight            // row height (default 28px)
 dg.Grid.HeaderHeight         // header height (default 30px)
 dg.Grid.FontSize             // font size (default 10)
 ```
+
+**Row striping.** Setting `AlternateBG` equal to `Background` is not enough:
+`ApplyTheme` recomputes `AlternateBG` from the theme background on every theme
+change. The theme owns the color, `ZebraStripes` owns the on/off.
+
+**Header click apart from sorting.** `OnHeaderClick` fires regardless of
+`CanUserSortColumns`; returning `true` cancels the sort. The resize edge and
+the scrollbar are claimed first — the application does not have to tell a
+click from a grab.
+
+```go
+dg.Grid.OnHeaderClick = func(col datagrid.Column, idx, x, y int) bool {
+    showColumnsMenu(x, y) // your own "visible columns" menu
+    return true           // do not sort
+}
+```
+
+**Column order.** `MoveColumn(from, to)` reorders programmatically,
+`OnColumnsReordered` reports a reorder. With `CanUserReorderColumns = true` a
+column can be dragged by its header: a few-pixel threshold separates a drag
+from a click, and the insertion point is shown as a line.
+
+Dragging is OFF by default because turning it on moves the header click from
+press to release: until the button comes up, a click cannot be told from a grab.
+
+**Per-row tooltip.** `Base.ToolTip` is one text for the whole widget; a row
+gets its own from `RowToolTip`:
+
+```go
+dg.Grid.RowToolTip = func(item interface{}, row int) string {
+    return item.(*FileRow).State // "modified", "conflict", …
+}
+```
+
+To compute something yourself, `HoverRow()`, `RowIndexAtY(y)`, `ScrollX()` and
+`ScrollY()` are exported.
+
+**Loading more on scroll.** Row virtualization has always been there — only
+visible rows are drawn — and `OnScroll` reports how far the user has scrolled:
+
+```go
+dg.Grid.OnScroll = func(first, count int) {
+    if first+count > loaded-50 {
+        loadMore()
+    }
+}
+dg.Grid.FirstVisibleRow()  // first visible row
+dg.Grid.VisibleRowCount()  // rows that fit in the viewport
+```
+
+The handler runs outside the internal lock — it may append rows to the
+collection right from there.
+
+**Multi-select with the mouse.** With `SelectionMode = SelectionExtended`,
+Ctrl+Click toggles a row and Shift+Click selects a range. Modifiers arrive in
+`MouseEvent.Mod`; an application feeding the engine its own events reports them
+through `eng.SetModifiers` (see "Input").
 
 Data management:
 
@@ -829,6 +910,21 @@ eng.SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 
 The engine performs hit-testing and dispatches the event to the appropriate widget. On left click, focus automatically transfers to the `Focusable` widget under the cursor.
 
+**Modifiers on a click.** Ctrl+Click and Shift+Click reach the widget in
+`MouseEvent.Mod`. The engine cannot take them from keyboard events: there is no
+modifier key in `KeyCode`, and someone holding Ctrl and clicking produces no
+keyboard event at all. Whoever knows the state reports it:
+
+```go
+eng.SetModifiers(widget.ModCtrl) // Ctrl is held
+eng.SendMouseButton(x, y, widget.MouseLeft, true)
+eng.SetModifiers(widget.ModNone) // released
+```
+
+`window.Run` does this itself on every Ctrl/Shift/Alt press and release — an
+application with a native window never calls `SetModifiers`. The engine stamps
+the current state onto everything it dispatches: buttons, moves and the wheel.
+
 ### Keyboard
 
 ```go
@@ -895,6 +991,28 @@ eng.SetRoot(root)
 
 Also available: `LoadUIFromXAML(data []byte)` and `LoadUIFromXAMLWithBase(data, baseDir)` for loading from memory.
 
+**Single-file builds.** An application shipped as one executable has no
+resource directory on disk, so there is nothing for `LoadUIFromXAMLWithBase` to
+point at. `LoadUIFromXAMLFS` covers that case: markup resources (`Image
+Source`, `Button Icon/IconSource`, `Panel BackgroundImage`, `SVGIcon Source`,
+`Window TrayIcon`) are read from an `fs.FS`.
+
+```go
+//go:embed ui
+var uiFS embed.FS
+
+// fs.Sub moves the root next to the markup: resource paths in the XAML are
+// resolved from the fsys ROOT, not from the markup file. Without it,
+// Source="icons/ok.png" would have to be written as "ui/icons/ok.png".
+sub, _ := fs.Sub(uiFS, "ui")
+data, _ := fs.ReadFile(sub, "app.xaml")
+root, named, err := widget.LoadUIFromXAMLFS(data, sub)
+```
+
+A path from the markup is kept inside `fsys` under the same policy as `baseDir`
+on disk: an absolute path, or one escaping the root, is rejected. Fonts go into
+the binary the same way — `eng.RegisterFontFS` (see "Fonts").
+
 ### Coordinates
 
 Child element coordinates are **relative** (standard WPF Canvas behavior):
@@ -911,7 +1029,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 
 | WPF Element | Widget | Key Attributes |
 |---|---|---|
-| `Canvas`, `Border`, `StackPanel`, `DockPanel` | Panel | `Background`, `CornerRadius`, `Caption`, `ShowHeader`, `MacStyle`, `BackgroundImage`, `BorderBrush` |
+| `Canvas`, `Border`, `StackPanel`, `DockPanel` | Panel | `Background`, `CornerRadius`, `Caption`, `ShowHeader`, `MacStyle`, `BackgroundImage`, `BorderBrush`, `LastChildFill` (DockPanel only) |
 | `Grid` | Grid | `ShowGridLines`, `Grid.RowDefinitions`, `Grid.ColumnDefinitions` |
 | `Label`, `TextBlock` | Label | `Text`, `Foreground`, `Background`, `TextWrapping`, `FontSize` |
 | `Button`, `ToggleButton`, `RepeatButton` | Button | `Content`, `Style="Accent"`, `HoverBG`, `PressedBG`, `Background`, `Foreground`, `BorderBrush` |
@@ -1440,14 +1558,45 @@ the window moves between monitors; on X11/macOS set the
 
 ### Fonts
 
-Bundled free fonts: Roboto (default), Open Sans, Inter. Auto-loaded from
-`assets/fonts/`, with a system glyph fallback chain for symbols/emoji (no tofu).
+Eight bundled free families, each with its license file (full list, licenses
+and redistribution duties: `assets/fonts/README.md`):
+
+- **Roboto** (default), **Open Sans**, **Inter** — UI sans faces;
+- **Liberation Sans** and **Liberation Mono** — metric-compatible with Arial
+  and Courier New: same line width at the same size. Use them when a layout
+  came from Windows and has to match by width, not just by shape;
+- **DejaVu Sans** and **DejaVu Sans Mono** — the widest glyph coverage here:
+  Cyrillic, Greek, box drawing, arrows, ✓ ✗ ⚠. The engine also uses them as a
+  fallback on a machine with no system fonts at all;
+- **Go Regular** — the engine's built-in font.
+
+Auto-loaded from `assets/fonts/`, plus a system glyph fallback chain for
+symbols/emoji (no tofu).
+
+Bold/Italic files are separate named fonts, not weight variants:
+`FontWeight`/`FontStyle` only switch the built-in Go faces. Bold Liberation is
+`FontFamily="LiberationSans-Bold"`.
 
 ```go
 eng.SetDefaultFont("Inter")
 eng.RegisterFontFile("Roboto", path)
 eng.RegisterFontDir("my/fonts")
 eng.AvailableFonts()
+```
+
+`assets/fonts` is resolved **relative to the process working directory**. A
+program installed into Program Files or started as a service finds nothing
+there and silently stays on the built-in Go Regular. To ship the fonts inside
+the executable, use `RegisterFontFS`:
+
+```go
+//go:embed assets/fonts
+var fontsFS embed.FS
+
+if err := eng.RegisterFontFS(fontsFS, "assets/fonts"); err != nil {
+    log.Fatal(err) // a typo in //go:embed is expensive to find by a missing font
+}
+eng.SetDefaultFont("Roboto")
 ```
 
 ```xml
@@ -1769,6 +1918,15 @@ tools.Pin()    // back
 props.Float()  // Docked/AutoHidden → Floating (floats above the center)
 props.Dock(widget.DockRight) // back into the stack
 
+// The active pane of a stack is drawn with TitleActiveBG (the theme accent).
+mgr.ActivatePane(props)   // switch the active pane, not only by clicking a tab
+props.IsActive()          // ask
+props.TitleTextActive = c // title color on that accent background
+
+// OnStateChanged now also fires on an active-pane change — for both the old
+// and the new one. Whoever computes the title color from the background needs
+// it: the title bar has two backgrounds. A zero alpha in TitleTextActive means
+// "same as inactive".
 tools.OnStateChanged = func(p *widget.DockPane) {
     log.Println(p.Title, "→", p.State()) // docked/autohidden/floating/closed
 }

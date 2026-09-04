@@ -38,6 +38,25 @@ type CullScope interface {
 	SubtreeCullingEnabled() bool
 }
 
+// OcclusionScope — то, что контекст отрисовки знает о вычитании перекрытого
+// (occlusion.go). Отдельно от CullScope: у пропуска по damage и у вычитания
+// перекрытого разные условия и разные способы ошибиться, и выключать их
+// приходится порознь.
+//
+// Контекст без этого метода вычитание разрешает — так же, как это было до
+// появления выключателя.
+type OcclusionScope interface {
+	OcclusionEnabled() bool
+}
+
+// occlusionAllowed спрашивает у контекста, вычитать ли перекрытое.
+func occlusionAllowed(ctx DrawContext) bool {
+	if sc, ok := ctx.(OcclusionScope); ok {
+		return sc.OcclusionEnabled()
+	}
+	return true
+}
+
 var (
 	// treeGen растёт при каждом изменении геометрии или состава дерева.
 	// Охватывающие прямоугольники поддеревьев кэшируются по нему: пока

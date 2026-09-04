@@ -1155,5 +1155,23 @@ func (w *WaylandWindow) completeOffer(offer uint32, accepted bool) {
 // (xdg-toplevel); ручные зоны краёв пока не реализованы.
 func (w *WaylandWindow) SetResizable(v bool) {}
 
-// SetMinSize — no-op: минимальный размер окна на Wayland пока не ограничиваем.
-func (w *WaylandWindow) SetMinSize(width, height int) {}
+// SetMinSize задаёт минимальный размер окна через xdg_toplevel.set_min_size
+// (опкод xdgToplevelSetMinSize=8 — тот же, что уже шлёт Create при фиксации
+// стартового размера, так что нумерация заведомо совпадает с остальным кодом
+// этого файла). Композитор не даёт пользователю потянуть край окна меньше
+// заданного — раньше запрос не отправлялся вовсе, поэтому ограничения не было
+// (GG-18).
+//
+// Перевод физических пикселей (контракт SetMinSize) в surface-local координаты
+// протокола делает wlMinSizeArgs (minsize_linux.go, чистая функция с тестами).
+// Scale передаём как 1: этот бэкенд не отслеживает буферный масштаб поверхности
+// (ни wl_surface.set_buffer_scale, ни wp_fractional_scale не реализованы —
+// см. подробный комментарий у wlMinSizeArgs), так что physical == logical,
+// как и у уже существующих вызовов set_min_size/set_max_size в Create.
+func (w *WaylandWindow) SetMinSize(width, height int) {
+	if w.toplevelID == 0 {
+		return
+	}
+	mw, mh := wlMinSizeArgs(width, height, 1)
+	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(mw).putInt(mh), -1)
+}
