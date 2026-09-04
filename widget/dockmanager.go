@@ -122,11 +122,22 @@ type DockManager struct {
 	NativeFloating bool
 
 	center     Widget
-	panes      []*DockPane   // мастер-реестр всех панелей (в т.ч. закрытых)
+	panes      []*DockPane    // мастер-реестр всех панелей (в т.ч. закрытых)
 	sides      [4][]*DockPane // Docked+AutoHidden по сторонам (индекс = DockSide)
 	activePane [4]*DockPane   // активная панель стопки на стороне
-	sizes      [4]int         // пиксельный размер региона стороны
-	floating   []*DockPane    // плавающие панели (поверх центра)
+
+	// sizes — ЖЕЛАЕМЫЙ пиксельный размер региона стороны. Фактический
+	// применённый размер (при тесном менеджере) может быть меньше —
+	// clampSideSizeFor клэмпит его на лету при каждой раскладке, не трогая
+	// это поле (см. TestDock_ManagerResizePreservesSideSize).
+	sizes [4]int
+	// sizeWanted отмечает стороны, для которых SetSideSize уже вызывался ДО
+	// первой известной раскладки (m.bounds ещё пуст). Пока это так, повторные
+	// вызовы (несколько <DockPane Size="..."> одной стороны из XAML) берут
+	// МАКСИМУМ вместо перезаписи — см. SetSideSize.
+	sizeWanted [4]bool
+
+	floating []*DockPane // плавающие панели (поверх центра)
 
 	capMgr CaptureManager
 
@@ -304,11 +315,27 @@ func (m *DockManager) SideSize(side DockSide) int {
 }
 
 // SetSideSize задаёт пиксельный размер региона стороны (клэмпится раскладкой).
+//
+// Пока границы менеджера ещё не известны (m.bounds пуст — типичный случай при
+// построении дерева из XAML: <DockPane Size="..."> вызывает SetSideSize раньше,
+// чем engine.SetRoot проставит реальные bounds), несколько вызовов для одной
+// стороны — от разных панелей, задавших Size, — берут МАКСИМУМ, а не последнее
+// значение: порядок панелей в разметке не должен решать итоговую ширину
+// стороны. Как только границы стали известны, SetSideSize — обычный сеттер
+// (последний вызов побеждает), иначе приложение не смогло бы явно уменьшить
+// сторону (RestoreLayout, ручной ресайз и т.п. — см. TestDock_SaveRestore).
 func (m *DockManager) SetSideSize(side DockSide, px int) {
 	if !validSide(side) {
 		return
 	}
-	m.sizes[int(side)] = m.clampSideSize(side, px)
+	next := m.clampSideSize(side, px)
+	if m.bounds.Empty() {
+		if m.sizeWanted[int(side)] && m.sizes[int(side)] > next {
+			next = m.sizes[int(side)]
+		}
+		m.sizeWanted[int(side)] = true
+	}
+	m.sizes[int(side)] = next
 	m.layout()
 	m.Invalidate()
 }
@@ -543,8 +570,24 @@ func (m *DockManager) SetBounds(r image.Rectangle) {
 }
 
 // clampSideSize клэмпит размер стороны в [minSide, доступное вдоль оси].
+//
+// Если границы менеджера ещё не известны (SetBounds ни разу не вызывался с
+// непустым прямоугольником), верхний предел здесь считать не от чего: при
+// ext=0 maxS = 0 - gutterSize - dockCenterMin уходит в минус и тут же
+// схлопывается до minSide — а значит ЛЮБОЙ желаемый размер (в т.ч. заданный
+// XAML-атрибутом Size раньше первого SetBounds) обрезался бы до минимума,
+// хотя граница менеджера ещё попросту не проставлена. В этом случае возвращаем
+// размер как есть (только снизу ограниченный minSide) — настоящий верхний
+// клэмп применит уже layout() при первой реальной раскладке через
+// clampSideSizeFor, который не портит m.sizes (см. clampSideSizeFor).
 func (m *DockManager) clampSideSize(side DockSide, size int) int {
+	if size < m.minSide() {
+		size = m.minSide()
+	}
 	b := m.bounds
+	if b.Empty() {
+		return size
+	}
 	ext := b.Dx()
 	if !horizontalSide(side) {
 		ext = b.Dy()
@@ -553,14 +596,8 @@ func (m *DockManager) clampSideSize(side DockSide, size int) int {
 	if maxS < m.minSide() {
 		maxS = m.minSide()
 	}
-	if size < m.minSide() {
-		size = m.minSide()
-	}
 	if size > maxS {
 		size = maxS
-	}
-	if size < 0 {
-		size = 0
 	}
 	return size
 }

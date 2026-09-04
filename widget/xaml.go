@@ -11,14 +11,22 @@
 package widget
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
+	"io"
+	"io/fs"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
+
+	svgPkg "github.com/oops1/headless-gui/v3/widget/svg"
 )
 
 // ─── Публичный API ───────────────────────────────────────────────────────────
@@ -45,6 +53,27 @@ func LoadUIFromXAML(data []byte) (Widget, map[string]Widget, error) {
 // baseDir используется для загрузки ресурсов (BackgroundImage и пр.).
 func LoadUIFromXAMLWithBase(data []byte, baseDir string) (Widget, map[string]Widget, error) {
 	w, reg, _, err := loadUIFromXAML(data, baseDir, nil)
+	return w, reg, err
+}
+
+// LoadUIFromXAMLFS разбирает XAML и строит дерево виджетов, читая ресурсы
+// разметки (Image Source, Button Icon/IconSource, Panel BackgroundImage,
+// SVGIcon Source, Window TrayIcon) из fsys вместо каталога на диске (GG-7).
+//
+// Нужна для однофайловых сборок (embed.FS и т.п.): у такого приложения нет
+// каталога с ресурсами на диске, поэтому LoadUIFromXAMLWithBase здесь не
+// применить. Путь в разметке резолвится и удерживается внутри fsys ровно по
+// той же политике SEC-8, что и baseDir на диске — абсолютный путь или выход
+// за пределы корня отклоняется с ErrResourceOutsideBase (см. openXAMLResource).
+func LoadUIFromXAMLFS(data []byte, fsys fs.FS) (Widget, map[string]Widget, error) {
+	key := registerXAMLFS(fsys)
+	// DataContext здесь нет (у этой функции нет параметра ctx), а значит нет и
+	// живых перестроений ItemsControl/VirtualizingItemsControl — единственных
+	// мест, которые обращаются к baseDir уже ПОСЛЕ возврата из loadUIFromXAML
+	// (см. wireItems/wireVirtuals в xaml_binding.go — оба выходят рано при
+	// ctx == nil). Поэтому запись реестра снимается сразу же, без утечки.
+	defer unregisterXAMLFS(key)
+	w, reg, _, err := loadUIFromXAML(data, key, nil)
 	return w, reg, err
 }
 
@@ -128,6 +157,151 @@ func resolveWindowInputCommands(root Widget, ctx interface{}) {
 			}
 		}
 	}
+}
+
+// ─── Ресурсы разметки: диск или fs.FS (GG-7) ───────────────────────────────
+//
+// baseDir остаётся string во ВСЕХ билдерах — ни один из ~25 buildXAML*
+// (buildXAMLWidget включительно) не меняет сигнатуру. Причина не только в
+// формулировке задачи: xaml_binding.go хранит baseDir как string-поле
+// (pendingItems.baseDir, pendingVirtual.baseDir) и передаёт его обратно в
+// buildXAMLWidget при живом перестроении ItemsControl/VirtualizingItemsControl
+// — менять тип значило бы менять и xaml_binding.go, а трогать этот файл здесь
+// не входит в задачу.
+//
+// Поэтому fs.FS протаскивается тем же каналом, что и baseDir: LoadUIFromXAMLFS
+// заводит СИНТЕТИЧЕСКИЙ baseDir — строку-маркер, недостижимую для реального
+// пути каталога, — и кладёт fsys в реестр под этим ключом. Единая точка
+// чтения ресурса (openXAMLResource) сначала смотрит в реестр: нашли — это
+// fs.FS; не нашли — обычный путь на диске (или пустой baseDir, как раньше).
+
+// xamlFSMarker — префикс синтетического baseDir. Ведущий NUL-байт не может
+// встретиться в filepath.Dir(реального XAML-файла), поэтому коллизия с живым
+// диском исключена без доп. проверок.
+const xamlFSMarker = "\x00xamlfs:"
+
+var (
+	xamlFSRegistry    sync.Map // string(маркер+id) → fs.FS
+	xamlFSRegistrySeq atomic.Uint64
+)
+
+// registerXAMLFS заводит новый синтетический baseDir для fsys.
+func registerXAMLFS(fsys fs.FS) string {
+	id := xamlFSRegistrySeq.Add(1)
+	key := xamlFSMarker + strconv.FormatUint(id, 36)
+	xamlFSRegistry.Store(key, fsys)
+	return key
+}
+
+// unregisterXAMLFS убирает запись реестра (см. LoadUIFromXAMLFS: у неё нет
+// DataContext, поэтому запись не нужна дольше одной синхронной загрузки).
+func unregisterXAMLFS(key string) {
+	xamlFSRegistry.Delete(key)
+}
+
+// resolveXAMLResourceFS приводит путь ресурса из атрибута разметки к виду,
+// который принимает fs.FS: разделитель всегда "/", без ведущего "/" (таково
+// требование io/fs.ValidPath). Разметку часто пишут на Windows, поэтому "\"
+// сначала заменяется на "/" — это единственное отличие от resolveXAMLResource
+// (диск, xaml_props.go); политика границы та же (SEC-8): абсолютный путь и
+// выход за пределы корня отклоняются с ErrResourceOutsideBase. fs.FS и так не
+// откроет файл вне себя (Open вернёт ошибку), но сообщение должно быть
+// понятным, а не «invalid name» из stdlib.
+func resolveXAMLResourceFS(src string) (string, error) {
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return "", errors.New("xaml: пустой путь ресурса")
+	}
+	slashed := strings.ReplaceAll(src, `\`, "/")
+	if strings.HasPrefix(slashed, "/") || filepath.VolumeName(src) != "" {
+		err := fmt.Errorf("%w: абсолютный путь %q", ErrResourceOutsideBase, src)
+		logResourceRejected(src, err)
+		return "", err
+	}
+	clean := path.Clean(slashed)
+	if clean == ".." || strings.HasPrefix(clean, "../") || !fs.ValidPath(clean) {
+		err := fmt.Errorf("%w: %q", ErrResourceOutsideBase, src)
+		logResourceRejected(src, err)
+		return "", err
+	}
+	return clean, nil
+}
+
+// openXAMLResource — ЕДИНАЯ точка чтения ресурса разметки (Image Source,
+// Button Icon/IconSource, Panel BackgroundImage, SVGIcon Source, TrayIcon):
+// решает, откуда читать (диск или fs.FS из LoadUIFromXAMLFS), и открывает файл.
+// Дальше вызывающему коду (декодирование PNG/JPEG/SVG) источник уже не важен.
+func openXAMLResource(baseDir, src string) (io.ReadCloser, error) {
+	if v, ok := xamlFSRegistry.Load(baseDir); ok {
+		p, err := resolveXAMLResourceFS(src)
+		if err != nil {
+			return nil, err
+		}
+		return v.(fs.FS).Open(p)
+	}
+	full, err := resolveXAMLResource(baseDir, src)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(full)
+}
+
+// decodeXAMLImage читает и декодирует растровое изображение (PNG/JPEG) через
+// openXAMLResource — общая точка для Image.Source, Button.Icon и TrayIcon.
+// Декодирование ограничено (DecodeImageBounded, SEC-9) так же, как раньше
+// у loadImageFile/ImageWidget.SetSource.
+func decodeXAMLImage(baseDir, src string) (image.Image, error) {
+	f, err := openXAMLResource(baseDir, src)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return DecodeImageBounded(f)
+}
+
+// decodeXAMLImageRGBA — как decodeXAMLImage, но приводит результат к
+// *image.RGBA. Нужна только для Panel.BackgroundImage: это поле типизировано
+// именно как *image.RGBA (в отличие от Image.Source/Button.Icon/TrayIcon,
+// которым достаточно интерфейса image.Image). Конвертация — копия финального
+// шага loadImageFile (xaml_props.go); отдельно, потому что читать оттуда
+// нельзя без правки того файла, а сам он остаётся диск-only.
+func decodeXAMLImageRGBA(baseDir, src string) (*image.RGBA, error) {
+	img, err := decodeXAMLImage(baseDir, src)
+	if err != nil {
+		return nil, err
+	}
+	if rgba, ok := img.(*image.RGBA); ok {
+		return rgba, nil
+	}
+	b := img.Bounds()
+	rgba := image.NewRGBA(b)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			rgba.Set(x, y, img.At(x, y))
+		}
+	}
+	return rgba, nil
+}
+
+// readXAMLResourceBytes читает ресурс целиком, но не больше maxBytes —
+// используется там, где нет потокового декодера с собственным лимитом (SVG:
+// svg.Parse проверяет len(data) уже ПОСЛЕ чтения, поэтому чтение неограниченного
+// файла целиком в память само по себе было бы дырой — как раньше делал
+// svg.ParseFile через io.LimitReader).
+func readXAMLResourceBytes(baseDir, src string, maxBytes int64) ([]byte, error) {
+	f, err := openXAMLResource(baseDir, src)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("xaml: ресурс больше предела %d байт", maxBytes)
+	}
+	return data, nil
 }
 
 // ─── Построитель виджетов ───────────────────────────────────────────────────
@@ -478,16 +652,14 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 // Раньше путь уходил в SetSource как есть: относительный резолвился от
 // текущего каталога процесса (а не от XAML-файла — несовпадение с иконками
 // кнопок и SVGIcon), абсолютный читал что угодно. Теперь путь проходит через
-// resolveXAMLResource — тот же резолв и та же граница, что у всех ресурсов
-// разметки (SEC-8).
+// decodeXAMLImage — тот же резолв и та же граница, что у всех ресурсов
+// разметки (SEC-8), плюс умеет читать из fs.FS (LoadUIFromXAMLFS, GG-7).
 func buildXAMLImage(el xElement, baseDir string) Widget {
 	iw := NewImageWidget()
 	if src := el.attr("Source"); src != "" {
-		path, err := resolveXAMLResource(baseDir, src)
-		if err == nil {
-			err = iw.SetSource(path)
-		}
-		if err != nil {
+		if img, err := decodeXAMLImage(baseDir, src); err == nil {
+			iw.SetImage(img)
+		} else {
 			log.Printf("xaml: Image Source=%q: %v", src, err)
 		}
 		iw.Source = src
@@ -626,14 +798,12 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 	}
 
 	// ── Иконка ─────────────────────────────────────────────────────────────
-	// Путь ограничен каталогом XAML-файла (SEC-8): filepath.Join сам по себе
-	// чистит «..», но не удерживает внутри baseDir.
+	// Путь ограничен каталогом XAML-файла или fs.FS (SEC-8, GG-7) —
+	// decodeXAMLImage сама решает, откуда читать (см. openXAMLResource).
 	if iconSrc != "" {
-		if path, err := resolveXAMLResource(baseDir, iconSrc); err == nil {
-			if img, err := loadImageFile(path); err == nil {
-				btn.Icon = img
-				btn.IconPath = iconSrc
-			}
+		if img, err := decodeXAMLImage(baseDir, iconSrc); err == nil {
+			btn.Icon = img
+			btn.IconPath = iconSrc
 		}
 	}
 	// Размер иконки из вложенного <Image Width="..." Height="...">
@@ -1126,9 +1296,11 @@ func buildXAMLSplitPanel(el xElement, reg map[string]Widget, parentOff image.Poi
 func buildXAMLSVGIcon(el xElement, baseDir string) Widget {
 	ic := NewSVGIcon()
 	if src := el.attr("Source"); src != "" {
-		p, err := resolveXAMLResource(baseDir, src) // граница по baseDir (SEC-8)
+		// Граница по baseDir/fs.FS — SEC-8, GG-7 (см. readXAMLResourceBytes).
+		// Читаем байты сами (а не ic.SetSVGFile) — SetSVGFile умеет только диск.
+		data, err := readXAMLResourceBytes(baseDir, src, svgPkg.MaxFileBytes)
 		if err == nil {
-			err = ic.SetSVGFile(p)
+			err = ic.SetSVG(data)
 		}
 		if err != nil {
 			log.Printf("xaml: SVGIcon Source=%q: %v", src, err)
