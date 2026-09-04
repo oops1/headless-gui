@@ -54,6 +54,9 @@ type Engine struct {
 	// ── Рендер по запросу (см. invalidate.go) ───────────────────────────────
 	onDemand atomic.Bool
 	invGen   atomic.Uint64
+	// mouseMod — модификаторы клавиатуры, которыми помечаются события мыши
+	// (см. modifiers.go). Атомарные: пишет поток окна, читает диспетчеризация.
+	mouseMod atomic.Int32
 	// pacing, frameWanted, wake, sink — внешний темп и сток кадров
 	// (pacing.go). При PacingExternal кадр готовится только по RequestFrame.
 	pacing      atomic.Uint32

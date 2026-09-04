@@ -24,6 +24,13 @@ type MouseEvent struct {
 	X, Y    int
 	Button  MouseButton
 	Pressed bool // true = нажата, false = отпущена
+	// Mod — модификаторы, зажатые в момент события (Ctrl/Shift/Alt).
+	//
+	// Без них множественный выбор недостижим: DataGrid умеет и toggle по
+	// Ctrl, и диапазон по Shift, но узнать о них было неоткуда — событие
+	// несло только координаты и кнопку. Заполняет движок, забирая состояние
+	// у бэкенда окна (Engine.SetModifiers).
+	Mod KeyMod
 }
 
 // MouseMoveHandler реализуется виджетами, реагирующими на перемещение курсора.
