@@ -674,6 +674,20 @@ eng.SendMouseButton(x, y, widget.MouseLeft, true)
 // DataGrid with SelectionExtended: Ctrl+Click toggles, Shift+Click ranges.
 ```
 
+### DockPanel.LastChildFill, DockPane active title
+
+```go
+dp.LastChildFill = false   // XAML: <DockPanel LastChildFill="False">
+// Without it the LAST child always fills the remainder and its own Dock is
+// ignored — a row where EVERY child is docked was impossible.
+
+mgr.ActivatePane(pane)     // switch the active pane of a stack
+pane.IsActive() bool
+pane.TitleTextActive = col // title color on the accent background of an
+                           // active pane; zero alpha = same as inactive.
+// OnStateChanged now fires on an active-pane change too (old and new pane).
+```
+
 ### ToggleButton — persistent pressed state
 
 ```go

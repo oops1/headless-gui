@@ -1029,7 +1029,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 
 | WPF Element | Widget | Key Attributes |
 |---|---|---|
-| `Canvas`, `Border`, `StackPanel`, `DockPanel` | Panel | `Background`, `CornerRadius`, `Caption`, `ShowHeader`, `MacStyle`, `BackgroundImage`, `BorderBrush` |
+| `Canvas`, `Border`, `StackPanel`, `DockPanel` | Panel | `Background`, `CornerRadius`, `Caption`, `ShowHeader`, `MacStyle`, `BackgroundImage`, `BorderBrush`, `LastChildFill` (DockPanel only) |
 | `Grid` | Grid | `ShowGridLines`, `Grid.RowDefinitions`, `Grid.ColumnDefinitions` |
 | `Label`, `TextBlock` | Label | `Text`, `Foreground`, `Background`, `TextWrapping`, `FontSize` |
 | `Button`, `ToggleButton`, `RepeatButton` | Button | `Content`, `Style="Accent"`, `HoverBG`, `PressedBG`, `Background`, `Foreground`, `BorderBrush` |
@@ -1918,6 +1918,15 @@ tools.Pin()    // back
 props.Float()  // Docked/AutoHidden → Floating (floats above the center)
 props.Dock(widget.DockRight) // back into the stack
 
+// The active pane of a stack is drawn with TitleActiveBG (the theme accent).
+mgr.ActivatePane(props)   // switch the active pane, not only by clicking a tab
+props.IsActive()          // ask
+props.TitleTextActive = c // title color on that accent background
+
+// OnStateChanged now also fires on an active-pane change — for both the old
+// and the new one. Whoever computes the title color from the background needs
+// it: the title bar has two backgrounds. A zero alpha in TitleTextActive means
+// "same as inactive".
 tools.OnStateChanged = func(p *widget.DockPane) {
     log.Println(p.Title, "→", p.State()) // docked/autohidden/floating/closed
 }

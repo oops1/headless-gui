@@ -1035,7 +1035,7 @@ root Canvas (0,0)
 
 | WPF элемент | Виджет | Ключевые атрибуты |
 |---|---|---|
-| `Canvas`, `Border`, `StackPanel`, `DockPanel` | Panel | `Background`, `CornerRadius`, `Caption`, `ShowHeader`, `MacStyle`, `BackgroundImage`, `BorderBrush` |
+| `Canvas`, `Border`, `StackPanel`, `DockPanel` | Panel | `Background`, `CornerRadius`, `Caption`, `ShowHeader`, `MacStyle`, `BackgroundImage`, `BorderBrush`, `LastChildFill` (только DockPanel) |
 | `Grid` | Grid | `ShowGridLines`, `Grid.RowDefinitions`, `Grid.ColumnDefinitions` |
 | `Label`, `TextBlock` | Label | `Text`, `Foreground`, `Background`, `TextWrapping`, `FontSize` |
 | `Button`, `ToggleButton`, `RepeatButton` | Button | `Content`, `Style="Accent"`, `HoverBG`, `PressedBG`, `Background`, `Foreground`, `BorderBrush` |
@@ -1958,7 +1958,17 @@ props.Dock(widget.DockRight) // обратно в стопку
 tools.OnStateChanged = func(p *widget.DockPane) {
     log.Println(p.Title, "→", p.State()) // docked/autohidden/floating/closed
 }
+
+// Активная панель стопки: фон её титлбара — TitleActiveBG (акцент темы).
+mgr.ActivatePane(props)   // сменить активную (не только щелчком по корешку)
+props.IsActive()          // спросить
+props.TitleTextActive = c // цвет заголовка именно на акцентном фоне
 ```
+
+`OnStateChanged` приходит и на смену активной панели — обеим, прежней и новой.
+Это нужно тому, кто вычисляет цвет заголовка из фона: фонов у титлбара два, и
+без события пересчитать цвет не по чему. Нулевая альфа `TitleTextActive`
+означает «как у неактивной».
 
 Раскладку можно сохранить и восстановить (JSON, панели матчатся по `ID`):
 
