@@ -895,6 +895,28 @@ eng.SetRoot(root)
 
 Также доступны `LoadUIFromXAML(data []byte)` и `LoadUIFromXAMLWithBase(data, baseDir)` для загрузки из памяти.
 
+**Однофайловая сборка.** У приложения, уехавшего одним исполняемым файлом, нет
+каталога с ресурсами на диске — `LoadUIFromXAMLWithBase` там не к чему
+привязать. Для этого случая `LoadUIFromXAMLFS`: ресурсы разметки (`Image
+Source`, `Button Icon/IconSource`, `Panel BackgroundImage`, `SVGIcon Source`,
+`Window TrayIcon`) читаются из `fs.FS`.
+
+```go
+//go:embed ui
+var uiFS embed.FS
+
+// fs.Sub переносит корень к самой разметке: пути ресурсов в XAML считаются
+// от КОРНЯ fsys, а не от файла разметки. Без этого Source="icons/ok.png"
+// пришлось бы писать как "ui/icons/ok.png".
+sub, _ := fs.Sub(uiFS, "ui")
+data, _ := fs.ReadFile(sub, "app.xaml")
+root, named, err := widget.LoadUIFromXAMLFS(data, sub)
+```
+
+Путь из разметки удерживается внутри `fsys` по той же политике, что и `baseDir`
+на диске: абсолютный путь или выход за пределы корня отклоняются. Шрифты
+укладываются в сборку тем же приёмом — `eng.RegisterFontFS` (см. «Шрифты»).
+
 ### Координаты
 
 Координаты дочерних элементов **относительные** (стандарт WPF Canvas):
@@ -1468,15 +1490,45 @@ func (w *MyWidget) AccessInfo() widget.AccessInfo {
 
 ### Шрифты
 
-В комплекте свободные шрифты Roboto (по умолчанию), Open Sans, Inter. Авто-загрузка
-из `assets/fonts/`, цепочка фолбэка системных шрифтов для символов/эмодзи (нет
-«тофу»).
+В комплекте восемь свободных семейств, все с файлами лицензий (полный список,
+лицензии и обязанности при распространении — `assets/fonts/README.md`):
+
+- **Roboto** (по умолчанию), **Open Sans**, **Inter** — интерфейсные гротески;
+- **Liberation Sans** и **Liberation Mono** — метрически совместимы с Arial и
+  Courier New: та же ширина строки при том же кегле. Нужны там, где макет
+  пришёл из Windows и должен совпасть по ширине;
+- **DejaVu Sans** и **DejaVu Sans Mono** — самое широкое покрытие символов:
+  кириллица, греческий, псевдографика, стрелки, ✓ ✗ ⚠. Движок берёт их ещё и
+  как фолбэк на машине, где системных шрифтов нет вовсе;
+- **Go Regular** — встроенный шрифт движка.
+
+Авто-загрузка из `assets/fonts/`, плюс цепочка фолбэка системных шрифтов для
+символов/эмодзи (нет «тофу»).
+
+Начертания Bold/Italic здесь — самостоятельные именованные шрифты, а не
+варианты веса: `FontWeight`/`FontStyle` переключают только встроенные
+Go-шрифты. Жирный Liberation берётся как `FontFamily="LiberationSans-Bold"`.
 
 ```go
 eng.SetDefaultFont("Inter")
 eng.RegisterFontFile("Roboto", path)
 eng.RegisterFontDir("my/fonts")
 eng.AvailableFonts()
+```
+
+Папка `assets/fonts` ищется **относительно рабочего каталога процесса**.
+Программа, установленная куда-нибудь в Program Files или запущенная службой,
+там ничего не найдёт и молча останется на встроенном Go Regular. Чтобы шрифты
+ехали внутри исполняемого файла — `RegisterFontFS`:
+
+```go
+//go:embed assets/fonts
+var fontsFS embed.FS
+
+if err := eng.RegisterFontFS(fontsFS, "assets/fonts"); err != nil {
+    log.Fatal(err) // опечатка в //go:embed — искать её по пропавшему шрифту дорого
+}
+eng.SetDefaultFont("Roboto")
 ```
 
 ```xml

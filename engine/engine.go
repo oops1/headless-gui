@@ -671,11 +671,7 @@ func (e *Engine) loadFontDirectory(dir string) {
 		if err != nil {
 			continue
 		}
-		stem := strings.TrimSuffix(name, filepath.Ext(name))
-		e.canvas.RegisterFont(stem, data)
-		if fam := fontFamilyAlias(stem); fam != "" && fam != stem && !e.canvas.hasFont(fam) {
-			e.canvas.RegisterFont(fam, data) // семейство → Regular-вес
-		}
+		e.registerFontBlob(strings.TrimSuffix(name, filepath.Ext(name)), data)
 	}
 }
 

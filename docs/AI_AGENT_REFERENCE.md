@@ -1675,6 +1675,10 @@ root, reg, err := widget.LoadUIFromXAMLWithContext(xamlBytes, vm)
 // scope variant for manual control:
 root, reg, scope, err := widget.LoadUIFromXAMLBindings(xamlBytes, vm)
 // widget.LoadUIFromXAMLFileWithContext / LoadUIFromXAMLFileBindings also exist
+// widget.LoadUIFromXAMLFS(data, fsys) — markup resources from an fs.FS
+// (embed.FS single-file builds); same SEC-8 containment as baseDir on disk.
+// Resource paths resolve from the fsys ROOT, so use fs.Sub(embedded, "ui")
+// to keep Source="icons/ok.png" relative to the markup file.
 ```
 
 ```xml
@@ -2264,6 +2268,15 @@ eng.RegisterFontFile("Roboto", path)     // register a single named font
 eng.RegisterFontDir("my/fonts")          // register a whole directory
 eng.AvailableFonts()                      // []string of registered names
 eng.RegisterFallbackFont(ttfBytes)        // glyph fallback (✓✗⚠, …)
+
+// 2. assets/fonts is resolved relative to the PROCESS WORKING DIRECTORY.
+//    A program installed elsewhere finds nothing there and silently stays on
+//    the built-in Go Regular. Ship the fonts inside the binary instead:
+//
+//      //go:embed assets/fonts
+//      var fontsFS embed.FS
+//
+err := eng.RegisterFontFS(fontsFS, "assets/fonts") // same names as on disk
 ```
 
 XAML uses the family name via `FontFamily`:
@@ -2273,11 +2286,17 @@ XAML uses the family name via `FontFamily`:
 <TextBox FontFamily="Inter" FontSize="16"/>
 ```
 
-**Recommended free fonts** (place the TTF in `assets/fonts/`; see
-`assets/fonts/README.md`): Roboto (Apache-2.0, default), Open Sans (Apache-2.0),
-Inter (SIL OFL-1.1). These are free/redistributable but **not MIT** — fonts are
-licensed under OFL or Apache, both permissive. **Google Sans is proprietary and
-must not be bundled** — use Inter instead.
+**Bundled free fonts** (already in `assets/fonts/`, each with its license file;
+see `assets/fonts/README.md` for the licenses and the redistribution duties):
+Roboto (default), Open Sans, Inter, Liberation Sans, Liberation Mono, DejaVu
+Sans, DejaVu Sans Mono, Go Regular. All are SIL OFL-1.1 except DejaVu
+(Bitstream Vera + public domain) and Go (BSD-3-Clause) — free/redistributable
+including commercially, but **not MIT**: the license file must travel with the
+font. Liberation is metric-compatible with Arial/Courier New; DejaVu has the
+widest glyph coverage and doubles as the engine's own fallback (so do not
+rename `DejaVuSans.ttf` / `DejaVuSansMono.ttf`). Bold/Italic files are separate
+named fonts (`FontFamily="LiberationSans-Bold"`), not weight variants.
+**Google Sans is proprietary and must not be bundled** — use Inter instead.
 
 ---
 

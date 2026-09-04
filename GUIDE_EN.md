@@ -895,6 +895,28 @@ eng.SetRoot(root)
 
 Also available: `LoadUIFromXAML(data []byte)` and `LoadUIFromXAMLWithBase(data, baseDir)` for loading from memory.
 
+**Single-file builds.** An application shipped as one executable has no
+resource directory on disk, so there is nothing for `LoadUIFromXAMLWithBase` to
+point at. `LoadUIFromXAMLFS` covers that case: markup resources (`Image
+Source`, `Button Icon/IconSource`, `Panel BackgroundImage`, `SVGIcon Source`,
+`Window TrayIcon`) are read from an `fs.FS`.
+
+```go
+//go:embed ui
+var uiFS embed.FS
+
+// fs.Sub moves the root next to the markup: resource paths in the XAML are
+// resolved from the fsys ROOT, not from the markup file. Without it,
+// Source="icons/ok.png" would have to be written as "ui/icons/ok.png".
+sub, _ := fs.Sub(uiFS, "ui")
+data, _ := fs.ReadFile(sub, "app.xaml")
+root, named, err := widget.LoadUIFromXAMLFS(data, sub)
+```
+
+A path from the markup is kept inside `fsys` under the same policy as `baseDir`
+on disk: an absolute path, or one escaping the root, is rejected. Fonts go into
+the binary the same way — `eng.RegisterFontFS` (see "Fonts").
+
 ### Coordinates
 
 Child element coordinates are **relative** (standard WPF Canvas behavior):
@@ -1440,14 +1462,45 @@ the window moves between monitors; on X11/macOS set the
 
 ### Fonts
 
-Bundled free fonts: Roboto (default), Open Sans, Inter. Auto-loaded from
-`assets/fonts/`, with a system glyph fallback chain for symbols/emoji (no tofu).
+Eight bundled free families, each with its license file (full list, licenses
+and redistribution duties: `assets/fonts/README.md`):
+
+- **Roboto** (default), **Open Sans**, **Inter** — UI sans faces;
+- **Liberation Sans** and **Liberation Mono** — metric-compatible with Arial
+  and Courier New: same line width at the same size. Use them when a layout
+  came from Windows and has to match by width, not just by shape;
+- **DejaVu Sans** and **DejaVu Sans Mono** — the widest glyph coverage here:
+  Cyrillic, Greek, box drawing, arrows, ✓ ✗ ⚠. The engine also uses them as a
+  fallback on a machine with no system fonts at all;
+- **Go Regular** — the engine's built-in font.
+
+Auto-loaded from `assets/fonts/`, plus a system glyph fallback chain for
+symbols/emoji (no tofu).
+
+Bold/Italic files are separate named fonts, not weight variants:
+`FontWeight`/`FontStyle` only switch the built-in Go faces. Bold Liberation is
+`FontFamily="LiberationSans-Bold"`.
 
 ```go
 eng.SetDefaultFont("Inter")
 eng.RegisterFontFile("Roboto", path)
 eng.RegisterFontDir("my/fonts")
 eng.AvailableFonts()
+```
+
+`assets/fonts` is resolved **relative to the process working directory**. A
+program installed into Program Files or started as a service finds nothing
+there and silently stays on the built-in Go Regular. To ship the fonts inside
+the executable, use `RegisterFontFS`:
+
+```go
+//go:embed assets/fonts
+var fontsFS embed.FS
+
+if err := eng.RegisterFontFS(fontsFS, "assets/fonts"); err != nil {
+    log.Fatal(err) // a typo in //go:embed is expensive to find by a missing font
+}
+eng.SetDefaultFont("Roboto")
 ```
 
 ```xml
