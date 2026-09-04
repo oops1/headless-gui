@@ -23,6 +23,21 @@ type DockPanel struct {
 	Background color.RGBA
 	UseAlpha   bool
 
+	// LastChildFill — растягивать ли последнего ребёнка на остаток места
+	// (WPF DockPanel.LastChildFill, по умолчанию true).
+	//
+	// Выключается там, где ВСЕ дети докованы: строка с полем поиска слева и
+	// счётчиком с кнопками справа. С включённым заполнением последний
+	// ребёнок забирает весь остаток, и его собственный Dock не действует —
+	// приходилось дописывать в конец пустой Border только затем, чтобы
+	// растяжение досталось ему.
+	//
+	// Поле, а не «нулевое значение = true»: у NewDockPanel он ставится в
+	// true, а собранный литералом DockPanel{} вёл бы себя иначе. Оба пути
+	// живут в чужом коде, и разное поведение у них — источник вопросов, а не
+	// экономия.
+	LastChildFill bool
+
 	// fillChild/fillOrig — кто сейчас растянут как LastChildFill и его
 	// bounds до растяжения. При добавлении следующего ребёнка исходный
 	// размер восстанавливается — иначе бывший «последний» резервировал
@@ -34,7 +49,8 @@ type DockPanel struct {
 // NewDockPanel создаёт пустой DockPanel с прозрачным фоном.
 func NewDockPanel() *DockPanel {
 	return &DockPanel{
-		UseAlpha: true,
+		UseAlpha:      true,
+		LastChildFill: true,
 	}
 }
 
@@ -63,7 +79,7 @@ func (dp *DockPanel) layout() {
 
 	children := dp.children
 	for i, child := range children {
-		isLast := i == len(children)-1
+		isLast := dp.LastChildFill && i == len(children)-1
 
 		// Получаем Dock через интерфейс
 		dock := DockLeft // default (WPF standard: DockPanel.Dock default = Left)

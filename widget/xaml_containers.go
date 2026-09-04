@@ -1021,6 +1021,13 @@ func buildXAMLDockPanel(el xElement, reg map[string]Widget, parentOff image.Poin
 		}
 	}
 
+	// LastChildFill — WPF-атрибут: выключает растяжение последнего ребёнка.
+	// Без него строку, где ВСЕ дети докованы, собрать нельзя: последний
+	// забирает остаток, и его собственный Dock не действует.
+	if v := el.attr("LastChildFill"); v != "" {
+		dp.LastChildFill = !strings.EqualFold(v, "false") && v != "0"
+	}
+
 	// Bounds
 	absBounds := el.bounds().Add(parentOff)
 	dp.SetBounds(absBounds)
