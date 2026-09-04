@@ -137,6 +137,22 @@ type DockManager struct {
 	// МАКСИМУМ вместо перезаписи — см. SetSideSize.
 	sizeWanted [4]bool
 
+	// stacks — как показываются несколько панелей стороны: вкладками или в
+	// столбик (см. docksplit.go). Задаётся на сторону, а не на менеджер:
+	// слева удобен столбик, снизу — вкладки.
+	stacks [4]DockStack
+	// splitRatios — доли панелей стороны в режиме столбика. Доли, а не
+	// пиксели: сторону тянут за кромку, и при её изменении столбик обязан
+	// сохранять пропорции.
+	splitRatios [4][]float64
+	// splitGutters — кромки МЕЖДУ панелями столбика (в отличие от gutters,
+	// которые отделяют сторону от центра).
+	splitGutters [4][]image.Rectangle
+	// splitting — тянут кромку между панелями столбика.
+	splitting bool
+	splitSide DockSide
+	splitIdx  int
+
 	floating []*DockPane // плавающие панели (поверх центра)
 
 	capMgr CaptureManager
@@ -838,8 +854,17 @@ func (m *DockManager) layoutSideRegion(s DockSide) {
 
 	if len(docked) == 1 {
 		setDockChildBounds(active, region)
+		m.splitGutters[int(s)] = nil
 		return
 	}
+
+	// Столбик: панели делят сторону, между ними кромка.
+	if m.stacks[int(s)] == DockStackSplit {
+		m.splitGutters[int(s)] = m.layoutSideSplit(s, region, docked)
+		m.tabInfo[int(s)] = nil
+		return
+	}
+	m.splitGutters[int(s)] = nil
 
 	// Стопка: активная панель сверху, полоса табов снизу региона.
 	tsh := m.tabStripH()
@@ -1234,6 +1259,9 @@ func (m *DockManager) WantsCapture(e MouseEvent) bool {
 	if _, ok := m.gutterAt(e.X, e.Y); ok {
 		return true
 	}
+	if _, _, ok := m.SplitGutterAt(e.X, e.Y); ok {
+		return true
+	}
 	if pane, _ := m.stripButtonAt(e.X, e.Y); pane != nil {
 		return true
 	}
@@ -1263,6 +1291,13 @@ func (m *DockManager) OnMouseButton(e MouseEvent) bool {
 			m.resizeSide = s
 			return true
 		}
+		// Кромка МЕЖДУ панелями столбика — она же ресайз, но меняет доли
+		// внутри стороны, а не размер самой стороны.
+		if s, i, ok := m.SplitGutterAt(e.X, e.Y); ok {
+			m.splitting = true
+			m.splitSide, m.splitIdx = s, i
+			return true
+		}
 		// Кнопка ярлыка auto-hide (📌/✕) — «взводим», колбэк на release.
 		if pane, btn := m.stripButtonAt(e.X, e.Y); pane != nil {
 			m.armedStripPane = pane
@@ -1285,6 +1320,13 @@ func (m *DockManager) OnMouseButton(e MouseEvent) bool {
 	// release
 	if m.resizing {
 		m.resizing = false
+		if m.capMgr != nil {
+			m.capMgr.ReleaseCapture()
+		}
+		return true
+	}
+	if m.splitting {
+		m.splitting = false
 		if m.capMgr != nil {
 			m.capMgr.ReleaseCapture()
 		}
@@ -1328,6 +1370,10 @@ func (m *DockManager) OnMouseButton(e MouseEvent) bool {
 func (m *DockManager) OnMouseMove(x, y int) {
 	if m.resizing {
 		m.applyGutterResize(x, y)
+		return
+	}
+	if m.splitting {
+		m.DragSplitGutter(m.splitSide, m.splitIdx, x, y)
 		return
 	}
 	// hover кромки (для перерисовки).
@@ -1724,12 +1770,21 @@ type paneLayoutJSON struct {
 type dockLayoutJSON struct {
 	Sizes [4]int           `json:"sizes"`
 	Panes []paneLayoutJSON `json:"panes"`
+	// Stacks и Ratios — режим показа сторон и доли столбика. Опущенные поля
+	// (раскладка, сохранённая прежней версией) означают вкладки и равные
+	// доли — то самое поведение, что было до появления столбика.
+	Stacks [4]int      `json:"stacks,omitempty"`
+	Ratios [4][]float64 `json:"ratios,omitempty"`
 }
 
 // SaveLayout сериализует текущую раскладку в JSON (см. формат в шапке файла).
 func (m *DockManager) SaveLayout() []byte {
 	var dl dockLayoutJSON
 	dl.Sizes = m.sizes
+	for i := range m.stacks {
+		dl.Stacks[i] = int(m.stacks[i])
+		dl.Ratios[i] = append([]float64(nil), m.splitRatios[i]...)
+	}
 	for _, p := range m.panes {
 		fb := p.floatBounds
 		info := paneLayoutJSON{
@@ -1757,6 +1812,10 @@ func (m *DockManager) RestoreLayout(data []byte) error {
 	for i := range m.sides {
 		m.sides[i] = nil
 		m.activePane[i] = nil
+	}
+	for i := range m.stacks {
+		m.stacks[i] = DockStack(dl.Stacks[i])
+		m.splitRatios[i] = append([]float64(nil), dl.Ratios[i]...)
 	}
 	m.floating = nil
 	if m.flyoutAnim != nil {
