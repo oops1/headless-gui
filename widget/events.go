@@ -90,6 +90,22 @@ const (
 	KeyF10       KeyCode = 121
 	KeyF11       KeyCode = 122
 	KeyF12       KeyCode = 123
+	// F13..F24 — продолжение того же ряда виртуальных кодов (0x7C..0x87).
+	// Клавиатуры с ними редки, но XAML вправе их назвать, и молчаливое
+	// «клавиша неизвестна» здесь хуже неиспользуемой константы.
+	KeyF13 KeyCode = 124
+	KeyF14 KeyCode = 125
+	KeyF15 KeyCode = 126
+	KeyF16 KeyCode = 127
+	KeyF17 KeyCode = 128
+	KeyF18 KeyCode = 129
+	KeyF19 KeyCode = 130
+	KeyF20 KeyCode = 131
+	KeyF21 KeyCode = 132
+	KeyF22 KeyCode = 133
+	KeyF23 KeyCode = 134
+	KeyF24 KeyCode = 135
+
 	KeyA         KeyCode = 65
 	KeyC         KeyCode = 67
 	KeyV         KeyCode = 86

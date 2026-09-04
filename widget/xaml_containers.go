@@ -920,8 +920,13 @@ func parseMenuItems(parent xElement) ([]MenuItem, []string) {
 			strings.EqualFold(sub.attr("Disabled"), "True")
 
 		item := MenuItem{
-			Text:     text,
-			Disabled: disabled,
+			Text:      text,
+			Disabled:  disabled,
+			Checkable: menuItemCheckable(sub),
+			Checked:   strings.EqualFold(sub.attr("IsChecked"), "True"),
+			// GroupName — имя WPF: пункты одной группы в одном подменю ведут
+			// себя как переключатель.
+			RadioGroup: sub.attr("GroupName"),
 		}
 
 		// Рекурсивные подменю (3+ уровень). Их надписи локализуются
@@ -980,8 +985,11 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 			strings.EqualFold(child.attr("Disabled"), "True")
 
 		item := MenuItem{
-			Text:     text,
-			Disabled: disabled,
+			Text:       text,
+			Disabled:   disabled,
+			Checkable:  menuItemCheckable(child),
+			Checked:    strings.EqualFold(child.attr("IsChecked"), "True"),
+			RadioGroup: child.attr("GroupName"),
 		}
 		pm.mu.Lock()
 		idx := len(pm.items)
@@ -2068,4 +2076,16 @@ func parseColumnWidth(s string) dgridPkg.ColumnWidth {
 		return dgridPkg.PixelWidth(float64(n))
 	}
 	return dgridPkg.StarWidth(1)
+}
+
+// menuItemCheckable — объявлен ли пункт меню переключателем.
+//
+// IsCheckable="True" — прямое объявление, как в WPF. Но IsChecked="True" тоже
+// делает пункт переключателем: разметка, которая ставит отметку, но забыла
+// объявить пункт отмечаемым, иначе показывала бы отметку в никуда. Имя группы
+// значит то же самое — переключатель без отметки всё равно переключатель.
+func menuItemCheckable(el xElement) bool {
+	return strings.EqualFold(el.attr("IsCheckable"), "True") ||
+		strings.EqualFold(el.attr("IsChecked"), "True") ||
+		el.attr("GroupName") != ""
 }
