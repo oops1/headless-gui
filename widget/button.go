@@ -49,6 +49,16 @@ type Button struct {
 	hovered int32 // 0 | 1, атомарно
 	focused int32 // 0 | 1, атомарно
 
+	// isToggle/checked — кнопка-переключатель (togglebutton.go).
+	// Атомарные, как и остальное состояние кнопки: вид её спрашивают из
+	// отрисовки, а меняют из обработки ввода.
+	isToggle int32
+	checked  int32
+
+	// OnCheckedChanged — обработчик смены состояния переключателя
+	// (см. SetToggle). Зовётся ПОСЛЕ OnClick и только у переключателя.
+	OnCheckedChanged func(checked bool)
+
 	// OnClick — основной обработчик клика (back-compat).
 	// Если нужно несколько подписчиков — используйте AddClickHandler /
 	// RemoveClickHandler. OnClick всегда вызывается ДО handlers.
@@ -156,6 +166,15 @@ func (btn *Button) Draw(ctx DrawContext) {
 	switch {
 	case btn.IsPressed():
 		bg = btn.PressedBG
+	case btn.IsChecked():
+		// Включённый переключатель выглядит нажатым постоянно. Наведение на
+		// него всё равно должно быть заметно — иначе непонятно, на что
+		// нажимаешь, — поэтому фон слегка ведётся в сторону hover, а не
+		// подменяется им: подмена стёрла бы само состояние.
+		bg = btn.PressedBG
+		if btn.IsHovered() && btn.HoverBG.A > 0 && !st.Classic3D {
+			bg = mixRGBA(btn.PressedBG, btn.HoverBG, 0.35)
+		}
 	case btn.IsHovered() && btn.HoverBG.A > 0 && !st.Classic3D:
 		bg = btn.HoverBG // классика Win2000 не подсвечивает hover
 	}
@@ -165,7 +184,10 @@ func (btn *Button) Draw(ctx DrawContext) {
 		// Классическая объёмная кнопка: прямые углы, bevel-рамка;
 		// нажатие показывается инверсией граней (sunken).
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
-		if btn.IsPressed() {
+		// Классика: включённый переключатель — вдавленная грань, как у
+		// нажатой кнопки. Иначе в теме Win2000 состояние не видно вовсе:
+		// hover она не подсвечивает, и фон у обоих состояний один.
+		if btn.IsPressed() || btn.IsChecked() {
 			drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		} else {
 			drawBevelRaised(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
@@ -363,6 +385,12 @@ func (btn *Button) fireClick() {
 	// WPF Command: выполняется при клике, если доступна.
 	if btn.Command != nil && btn.Command.CanExecute(btn.CommandParameter) {
 		btn.Command.Execute(btn.CommandParameter)
+	}
+	// Переключатель меняет состояние ЗДЕСЬ, а не в обработке мыши: клавиша
+	// Enter/Space активирует кнопку тем же путём, и состояние обязано
+	// меняться одинаково — иначе переключатель слушался бы только мыши.
+	if btn.IsToggle() {
+		btn.Toggle()
 	}
 }
 

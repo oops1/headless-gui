@@ -452,6 +452,14 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 	// ── Кнопки ───────────────────────────────────────────────────────────────
 	case "button", "togglebutton", "repeatbutton":
 		w = buildXAMLButton(el, baseDir)
+		// ToggleButton — та же кнопка, но с устойчивым состоянием «нажата»
+		// (см. widget/togglebutton.go). Прежде тег разбирался как обычный
+		// Button, и переключатель из разметки было не получить.
+		if tag == "togglebutton" {
+			if btn, ok := w.(*Button); ok {
+				btn.SetToggle(true)
+			}
+		}
 
 	// ── Ввод текста ──────────────────────────────────────────────────────────
 	case "textbox", "textinput", "input", "richtextbox":
@@ -785,6 +793,14 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 	// ── ToolTip ────────────────────────────────────────────────────────────
 	if tip := el.attr("ToolTip"); tip != "" {
 		btn.ToolTip = tip
+	}
+
+	// ── Начальное состояние переключателя ──────────────────────────────────
+	// Читается и у обычной кнопки: <Button IsChecked="True"> означает
+	// «нарисуй выбранным», а поведение переключателя даёт сам тег
+	// <ToggleButton>.
+	if strings.EqualFold(el.attr("IsChecked", "Checked"), "true") {
+		btn.SetChecked(true)
 	}
 
 	// ── Padding ────────────────────────────────────────────────────────────
