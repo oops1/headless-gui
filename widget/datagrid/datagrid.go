@@ -124,15 +124,21 @@ type DataGrid struct {
 	editCursorPos int  // позиция курсора в редакторе
 
 	// ── Скроллинг ────────────────────────────────────────────────────────
-	scrollY      int
-	scrollX      int // горизонтальный скролл (для широких таблиц)
-	hoverRow     int
+	scrollY  int
+	scrollX  int // горизонтальный скролл (для широких таблиц)
+	hoverRow int
+
+	// notifiedScrollY — положение прокрутки, о котором уже сообщили в
+	// OnScroll: без него событие сыпалось бы на каждый клампинг.
+	notifiedScrollY int
+
 	// Перетаскивание колонки за заголовок (reorder.go). dragCol == -1 —
 	// нажатия на заголовке нет.
 	dragCol    int
 	dragStartX int
 	dragX      int
 	dragging   bool
+
 	thumbDragging   bool
 	thumbDragStartY int
 	thumbDragStartS int
@@ -162,6 +168,7 @@ type DataGrid struct {
 	// затирает всё, что приложение туда положило. Цветом по-прежнему владеет
 	// тема, а признаком «полосы нужны» — приложение.
 	ZebraStripes bool
+
 	GridLineColor   color.RGBA
 	ScrollTrackBG   color.RGBA
 	ScrollThumbBG   color.RGBA
@@ -205,6 +212,17 @@ type DataGrid struct {
 	// OnColumnsReordered — колонку переставили перетаскиванием или вызовом
 	// MoveColumn. from и to — индексы до и после перестановки.
 	OnColumnsReordered func(from, to int)
+
+	// OnScroll — прокрутка сдвинулась: first — первая видимая строка,
+	// count — сколько строк помещается в окне.
+	//
+	// Нужно подгрузке следующей порции данных: без события её приходилось
+	// вешать на выбор строки рядом с концом списка, то есть требовать от
+	// человека щёлкнуть там, где он просто хотел прокрутить.
+	//
+	// Зовётся ВНЕ внутреннего замка — обработчик волен добавить строки в
+	// коллекцию прямо из него.
+	OnScroll func(first, count int)
 
 	// RowStyleSelector — условная раскраска строк по значению модели (BUG-3).
 	// Вызывается для каждой видимой строки перед отрисовкой её содержимого.
@@ -867,6 +885,59 @@ func (dg *DataGrid) clampScrollY() {
 	if max := dg.maxScrollY(); dg.scrollY > max {
 		dg.scrollY = max
 	}
+	dg.queueScrollNotify()
+}
+
+// queueScrollNotify откладывает вызов OnScroll, если прокрутка действительно
+// сдвинулась. Вызывается под dg.mu.
+//
+// Живёт в clampScrollY, а не в каждом месте, где меняется scrollY: клампинг —
+// единственное, что делают ВСЕ такие места, и это гарантирует, что ни один
+// путь прокрутки не забудет сообщить о себе.
+func (dg *DataGrid) queueScrollNotify() {
+	if dg.OnScroll == nil || dg.scrollY == dg.notifiedScrollY {
+		return
+	}
+	dg.notifiedScrollY = dg.scrollY
+	cb := dg.OnScroll
+	first, count := dg.firstVisibleRowLocked(), dg.visibleRowCountLocked()
+	dg.pending = append(dg.pending, func() { cb(first, count) })
+}
+
+// FirstVisibleRow возвращает индекс первой видимой строки.
+//
+// Виртуализация в таблице есть с самого начала — рисуются только видимые
+// строки, — но снаружи об этом нельзя было спросить: подгрузке следующей
+// порции нужно знать, докуда человек долистал.
+func (dg *DataGrid) FirstVisibleRow() int {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	return dg.firstVisibleRowLocked()
+}
+
+// VisibleRowCount возвращает, сколько строк помещается в окне таблицы.
+func (dg *DataGrid) VisibleRowCount() int {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	return dg.visibleRowCountLocked()
+}
+
+func (dg *DataGrid) firstVisibleRowLocked() int {
+	if dg.RowHeight <= 0 {
+		return 0
+	}
+	return dg.scrollY / dg.RowHeight
+}
+
+func (dg *DataGrid) visibleRowCountLocked() int {
+	if dg.RowHeight <= 0 {
+		return 0
+	}
+	n := dg.viewHeight() / dg.RowHeight
+	if n < 0 {
+		return 0
+	}
+	return n
 }
 
 func (dg *DataGrid) totalColumnsWidth() int {
@@ -1326,14 +1397,14 @@ type drawSnapshot struct {
 	bg, headerBG, headerText, textColor       color.RGBA
 	borderColor, selectColor, hoverColor      color.RGBA
 	alternateBG, gridLine                     color.RGBA
+	scrollTrack, scrollThumb, scrollThumbHigh color.RGBA
+	editBG, editBorder                        color.RGBA
 	zebra                                     bool
 
 	// Перетаскивание колонки: что тащат и куда встанет (reorder.go).
 	dragging bool
 	dragCol  int
 	dropX    int
-	scrollTrack, scrollThumb, scrollThumbHigh color.RGBA
-	editBG, editBorder                        color.RGBA
 }
 
 // rowSnapshot — данные одной видимой строки на кадр.
@@ -1962,6 +2033,7 @@ func (dg *DataGrid) resizeColumnAt(x int) int {
 
 // ScrollBy прокручивает на delta пикселей.
 func (dg *DataGrid) ScrollBy(delta int) {
+	defer dg.firePending() // LIFO: выполнится ПОСЛЕ Unlock — колбэки вне dg.mu
 	dg.mu.Lock()
 	defer dg.mu.Unlock()
 	dg.scrollY += delta
@@ -2012,6 +2084,7 @@ func (dg *DataGrid) RowIndexAtY(y int) int {
 // событие ТОЛЬКО когда есть что прокручивать (иначе колесо всплывает
 // к родительскому ScrollView).
 func (dg *DataGrid) WheelScroll(up bool) bool {
+	defer dg.firePending() // LIFO: выполнится ПОСЛЕ Unlock — колбэки вне dg.mu
 	dg.mu.Lock()
 	defer dg.mu.Unlock()
 	if dg.maxScrollY() == 0 {

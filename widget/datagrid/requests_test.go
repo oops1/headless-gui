@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"testing"
+	"time"
 )
 
 // Запросы GG-25 (полосатость), GG-26 (картинки в шаблонной колонке и ScrollX),
@@ -148,5 +149,71 @@ func TestRowIndexAtY_MatchesGeometry(t *testing.T) {
 	}
 	if got := dg.RowIndexAtY(5); got != -1 {
 		t.Errorf("заголовок дал строку %d, ждали -1", got)
+	}
+}
+
+// Событие прокрутки и первая видимая строка — запрос GG-12.
+//
+// Виртуализация в таблице была с самого начала, но спросить, докуда человек
+// долистал, было нечем: подгрузку следующей порции журнала приходилось вешать
+// на выбор строки рядом с концом списка — то есть требовать щелчка там, где
+// человек просто крутил колесо.
+func TestScroll_ReportsFirstVisibleRow(t *testing.T) {
+	dg := reqGrid(t, 100)
+	dg.SetBounds(image.Rect(0, 0, 200, 20+10*20)) // окно на 10 строк
+
+	var firsts, counts []int
+	dg.OnScroll = func(first, count int) {
+		firsts = append(firsts, first)
+		counts = append(counts, count)
+	}
+
+	if got := dg.FirstVisibleRow(); got != 0 {
+		t.Errorf("свежая таблица начинается со строки %d", got)
+	}
+	if got := dg.VisibleRowCount(); got != 10 {
+		t.Errorf("в окне помещается %d строк, ждали 10", got)
+	}
+
+	dg.ScrollBy(20 * 20) // на двадцать строк вниз
+	if got := dg.FirstVisibleRow(); got != 20 {
+		t.Errorf("после прокрутки первая видимая строка %d, ждали 20", got)
+	}
+	if len(firsts) != 1 || firsts[0] != 20 || counts[0] != 10 {
+		t.Errorf("о прокрутке сообщили как %v/%v, ждали [20]/[10]", firsts, counts)
+	}
+
+	// Повторная прокрутка на то же место события не порождает.
+	dg.ScrollBy(0)
+	if len(firsts) != 1 {
+		t.Errorf("прокрутка на ноль породила событие: %v", firsts)
+	}
+
+	// Колесо тоже сообщает.
+	dg.WheelScroll(false)
+	if len(firsts) != 2 {
+		t.Errorf("колесо не сообщило о прокрутке: %v", firsts)
+	}
+}
+
+// Обработчик прокрутки зовётся вне замка: он вправе долить строк в коллекцию
+// прямо из себя — ради этого событие и заводилось.
+func TestScroll_HandlerMayTouchTheGrid(t *testing.T) {
+	dg := reqGrid(t, 100)
+	dg.SetBounds(image.Rect(0, 0, 200, 20+10*20))
+
+	done := make(chan struct{})
+	dg.OnScroll = func(first, count int) {
+		dg.ItemsSource().Add(&reqRow{Name: "дозагрузка"})
+		dg.FirstVisibleRow()
+	}
+	go func() {
+		defer close(done)
+		dg.ScrollBy(400)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("обработчик прокрутки заклинил поток")
 	}
 }

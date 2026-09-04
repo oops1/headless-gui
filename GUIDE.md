@@ -765,6 +765,22 @@ dg.Grid.RowToolTip = func(item interface{}, row int) string {
 Если нужно посчитать что-то самому — наружу отданы `HoverRow()`,
 `RowIndexAtY(y)`, `ScrollX()` и `ScrollY()`.
 
+**Подгрузка по прокрутке.** Виртуализация в таблице есть с самого начала —
+рисуются только видимые строки, — а `OnScroll` сообщает, докуда долистали:
+
+```go
+dg.Grid.OnScroll = func(first, count int) {
+    if first+count > loaded-50 {
+        loadMore()
+    }
+}
+dg.Grid.FirstVisibleRow()  // первая видимая строка
+dg.Grid.VisibleRowCount()  // сколько строк помещается в окне
+```
+
+Обработчик зовётся вне внутреннего замка — доливать строки в коллекцию можно
+прямо из него.
+
 **Множественный выбор мышью.** При `SelectionMode = SelectionExtended`
 Ctrl+Click добавляет и снимает строку, Shift+Click выделяет диапазон.
 Модификаторы приходят в `MouseEvent.Mod`; приложение, которое кормит движок

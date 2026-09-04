@@ -760,6 +760,22 @@ dg.Grid.RowToolTip = func(item interface{}, row int) string {
 To compute something yourself, `HoverRow()`, `RowIndexAtY(y)`, `ScrollX()` and
 `ScrollY()` are exported.
 
+**Loading more on scroll.** Row virtualization has always been there — only
+visible rows are drawn — and `OnScroll` reports how far the user has scrolled:
+
+```go
+dg.Grid.OnScroll = func(first, count int) {
+    if first+count > loaded-50 {
+        loadMore()
+    }
+}
+dg.Grid.FirstVisibleRow()  // first visible row
+dg.Grid.VisibleRowCount()  // rows that fit in the viewport
+```
+
+The handler runs outside the internal lock — it may append rows to the
+collection right from there.
+
 **Multi-select with the mouse.** With `SelectionMode = SelectionExtended`,
 Ctrl+Click toggles a row and Shift+Click selects a range. Modifiers arrive in
 `MouseEvent.Mod`; an application feeding the engine its own events reports them

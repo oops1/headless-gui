@@ -648,6 +648,11 @@ dg.HoverRow() int          // row under the cursor, or -1
 dg.RowIndexAtY(y int) int  // row at a Y coordinate, or -1
 dg.ScrollX() int           // horizontal scroll (absolute cell X)
 
+// Scrolling: virtualization has always been there, now it is observable.
+dg.OnScroll = func(first, count int) { ... } // outside the lock
+dg.FirstVisibleRow() int
+dg.VisibleRowCount() int
+
 // Row striping. AlternateBG alone is not enough: ApplyTheme recomputes it
 // from the theme background on every theme change.
 dg.ZebraStripes = false
