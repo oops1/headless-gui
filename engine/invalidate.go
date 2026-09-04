@@ -52,6 +52,21 @@ func (e *Engine) SetSubtreeCulling(v bool) {
 // SubtreeCulling сообщает, включён ли пропуск поддеревьев.
 func (e *Engine) SubtreeCulling() bool { return e.canvas.cullingOn.Load() }
 
+// SetOcclusionCulling включает или выключает вычитание перекрытого: поддерево,
+// целиком накрытое непрозрачным соседом, не рисуется (widget/occlusion.go).
+//
+// По умолчанию включено. Выключатель нужен приложению, чей виджет объявляет
+// непрозрачной площадь, которую на деле закрашивает не полностью: под таким
+// объявлением остаётся дыра, и одна строка возвращает прежнее поведение, пока
+// объявление ищут.
+func (e *Engine) SetOcclusionCulling(v bool) {
+	e.canvas.occlusionOn.Store(v)
+	e.Invalidate()
+}
+
+// OcclusionCulling сообщает, включено ли вычитание перекрытого.
+func (e *Engine) OcclusionCulling() bool { return e.canvas.occlusionOn.Load() }
+
 // SetRenderOnDemand включает/выключает рендер по запросу.
 // Безопасно вызывать в любой момент; включение сразу инвалидирует кадр.
 func (e *Engine) SetRenderOnDemand(v bool) {

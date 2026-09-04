@@ -54,6 +54,9 @@ type Engine struct {
 	// ── Рендер по запросу (см. invalidate.go) ───────────────────────────────
 	onDemand atomic.Bool
 	invGen   atomic.Uint64
+	// mouseMod — модификаторы клавиатуры, которыми помечаются события мыши
+	// (см. modifiers.go). Атомарные: пишет поток окна, читает диспетчеризация.
+	mouseMod atomic.Int32
 	// pacing, frameWanted, wake, sink — внешний темп и сток кадров
 	// (pacing.go). При PacingExternal кадр готовится только по RequestFrame.
 	pacing      atomic.Uint32
@@ -114,6 +117,12 @@ type Engine struct {
 	// moveHandle — дескриптор регистрации приёмника объявлений о переносе
 	// (widget.RegisterMoveSink в New, снимается в Stop).
 	moveHandle uint64
+	// postMu защищает posted: ставят в очередь из любых горутин, разбирает
+	// горутина кадра (см. post.go).
+	postMu sync.Mutex
+	// posted — вызовы, ожидающие выполнения в горутине кадра.
+	posted []func()
+
 	// moveMu защищает pendingMoves: объявления приходят из горутины, где
 	// двигают виджет (обработка ввода), а забирает их горутина кадра.
 	moveMu sync.Mutex
@@ -289,9 +298,11 @@ func New(width, height, fps int) *Engine {
 	// экспортированные поля виджетов требуют Invalidate()/Engine.Invalidate().
 	// Опт-аут (прежнее поведение «рендер каждый тик»): SetRenderOnDemand(false).
 	e.onDemand.Store(true)
-	// Best-effort: подгружаем системные шрифты с широким покрытием символов
-	// (✓ ✗ ⚠, box-drawing, стрелки) как fallback к встроенному Go Regular (BUG-2).
-	for _, p := range systemFallbackFontPaths() {
+	// Best-effort: подгружаем шрифты с широким покрытием символов (✓ ✗ ⚠,
+	// box-drawing, стрелки) как fallback к встроенному Go Regular (BUG-2).
+	// Сначала системные, затем наши из assets/fonts — на машине без единого
+	// системного шрифта иначе некому нарисовать эти символы вовсе.
+	for _, p := range append(systemFallbackFontPaths(), assetFallbackFontPaths()...) {
 		if data, err := readFontFile(p); err == nil {
 			e.canvas.AddFallbackFont(data)
 		}
@@ -328,7 +339,15 @@ func New(width, height, fps int) *Engine {
 	//
 	// Регистрация со снятием: остановленный движок возвращает измеритель
 	// предыдущему живому вместо того, чтобы оставить свой мёртвый холст.
-	e.measurerHandle = widget.RegisterTextMeasurer(e.canvas.MeasureText)
+	e.measurerHandle = widget.RegisterMeasurers(widget.Measurers{
+		Text:     e.canvas.MeasureText,
+		TextFont: func(text string, sizePt float64, family string) int {
+			return e.canvas.MeasureTextFont(text, sizePt, family)
+		},
+		RunePositions: func(text string, sizePt float64, family string) []int {
+			return e.canvas.MeasureRunePositionsFont(text, sizePt, family)
+		},
+	})
 	return e
 }
 
@@ -655,11 +674,7 @@ func (e *Engine) loadFontDirectory(dir string) {
 		if err != nil {
 			continue
 		}
-		stem := strings.TrimSuffix(name, filepath.Ext(name))
-		e.canvas.RegisterFont(stem, data)
-		if fam := fontFamilyAlias(stem); fam != "" && fam != stem && !e.canvas.hasFont(fam) {
-			e.canvas.RegisterFont(fam, data) // семейство → Regular-вес
-		}
+		e.registerFontBlob(strings.TrimSuffix(name, filepath.Ext(name)), data)
 	}
 }
 
@@ -798,6 +813,8 @@ func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
 // себя, это и нужно: мутация и отрисовка оказываются на одной горутине, и
 // гонка с внутренним циклом исчезает по построению.
 func (e *Engine) RenderFrameNow() output.Frame {
+	// Как и RenderOnce: без запущенного цикла очередь Post разбирать некому.
+	e.runPosted()
 	return e.renderFrame()
 }
 
@@ -833,6 +850,10 @@ func (e *Engine) logicalDamage(rects []image.Rectangle) []image.Rectangle {
 }
 
 func (e *Engine) RenderOnce() *image.RGBA {
+	// Без Start() цикла кадров нет, и очередь Post разбирать некому — значит
+	// разбираем здесь: приложение попросило кадр, и отложенная работа обязана
+	// попасть именно в него.
+	e.runPosted()
 	e.renderFrame()
 
 	e.mu.RLock()
@@ -1202,6 +1223,9 @@ func (e *Engine) loop() {
 	for {
 		select {
 		case <-e.wake:
+			// Отложенные вызовы разбираем ПЕРВЫМИ: они меняют дерево, и их
+			// изменения должны попасть в тот же кадр, а не в следующий.
+			e.runPosted()
 			// Внешний темп: сток попросил кадр. Анимации продвигаются в
 			// тикере, здесь — только кадр.
 			if !e.pacingIsExternal() || !e.takeFrameRequest() {
@@ -1214,6 +1238,10 @@ func (e *Engine) loop() {
 			e.deliver(frame)
 
 		case <-ticker.C:
+			// Отложенные вызовы — раньше всего: они меняют дерево, а решение
+			// о пропуске кадра принимается по заявленному damage, и damage от
+			// них обязан успеть.
+			e.runPosted()
 			// Продвигаем анимации ДО решения о пропуске кадра: тики зовут
 			// сеттеры виджетов, те самоинвалидируются (авто-damage), поэтому
 			// damage от тиков попадёт в invGen ниже и кадр перерисуется
@@ -1285,11 +1313,25 @@ func (e *Engine) renderFrame() output.Frame {
 	// Полный кадр ограничений не ставит — иначе первый же кадр после
 	// запуска остался бы наполовину пустым.
 	if partial {
+		// Обходу отдаётся ОБЪЕДИНЕНИЕ областей, а не их список — при том что
+		// дифф идёт по каждой отдельно.
+		//
+		// Так обязано быть, потому что стирается и рисуется тоже объединение:
+		// blitBackgroundIn кладёт фон по нему, и клип холста — тоже оно
+		// (клип у холста один прямоугольник). Если бы обход решал по
+		// отдельным областям, виджет, лежащий МЕЖДУ двумя далёкими
+		// областями, оказался бы затёрт фоном и не перерисован: его
+		// поддерево не пересекает ни одну из них, зато объединение накрывает
+		// его целиком. На экране это пустой прямоугольник на месте кнопок
+		// или меню — ровно то мигание, на которое пожаловался владелец.
+		//
+		// Правило простое: что стёрли, то и рисуем.
+		//
 		// В ЛОГИЧЕСКИХ координатах: damage движок хранит в физических
 		// пикселях, а границы виджетов живут в логических. При масштабе
 		// 1.25 сравнение одних с другими пропустило бы ровно то поддерево,
 		// которое и надо было нарисовать.
-		canvas.setDrawDamage(e.logicalDamage(damageRects))
+		canvas.setDrawDamage(e.logicalDamage([]image.Rectangle{damage}))
 		defer canvas.clearDrawDamage()
 	} else {
 		canvas.clearDrawDamage()

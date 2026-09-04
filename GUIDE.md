@@ -240,6 +240,29 @@ btn.PressedBG = color.RGBA{...}  // цвет при нажатии
 
 В XAML: `HoverBG="#C42B1C"`, `PressedBG="#A01E14"`, `Background`, `Foreground`, `BorderBrush`.
 
+**Кнопка-переключатель.** Состояние «нажата» держится между кликами: кнопка
+сама красится в `PressedBG`, пока включена, а под курсором фон слегка ведётся
+в сторону `HoverBG` — чтобы и состояние было видно, и наведение.
+
+```go
+btn.SetToggle(true)            // сделать переключателем
+btn.SetChecked(true)           // задать состояние (обработчик НЕ зовётся)
+btn.IsChecked()                // спросить состояние
+btn.Toggle()                   // переключить и сообщить обработчику
+btn.OnCheckedChanged = func(on bool) { ... }
+```
+
+В XAML переключатель даёт сам тег, начальное состояние — атрибут:
+
+```xml
+<ToggleButton x:Name="fltModified" Content="Изменённые" IsChecked="True"/>
+```
+
+Отдельного типа `ToggleButton` нет: от `Button` он отличается ровно этим
+состоянием, а не раскладкой, иконками, командами или подписками. `IsChecked`
+читается и у обычной кнопки — «нарисуй выбранной», без поведения
+переключателя.
+
 ### TextInput
 
 ```go
@@ -672,9 +695,11 @@ datagrid.NewTextColumn("Заголовок", "BindingPath")
 // Чекбокс-колонка — отображает bool как флажок
 datagrid.NewCheckBoxColumn("Активен", "IsActive")
 
-// Шаблонная колонка — пользовательский рендер ячеек
+// Шаблонная колонка — пользовательский рендер ячеек.
+// cdc.DrawCtx умеет то же, что и обычный контекст отрисовки, включая
+// DrawImage/DrawImageScaled: значок статуса в ячейке рисуется здесь же.
 datagrid.NewTemplateColumn("Действия", func(cdc datagrid.CellDrawContext) {
-    // рисуем через cdc.DrawCtx...
+    cdc.DrawCtx.DrawImageScaled(icon, cdc.Rect.Min.X+4, cdc.Rect.Min.Y+4, 16, 16)
 })
 ```
 
@@ -694,11 +719,72 @@ dg.Grid.AutoGenerateColumns  // автогенерация колонок из �
 dg.Grid.IsReadOnly           // только чтение
 dg.Grid.CanUserSortColumns   // сортировка по клику на заголовок (по умолчанию true)
 dg.Grid.CanUserResizeColumns // изменение ширины колонок (по умолчанию true)
+dg.Grid.CanUserReorderColumns // перетаскивание колонок мышью (по умолчанию false)
 dg.Grid.SelectionMode        // SelectionSingle или SelectionExtended
+dg.Grid.ZebraStripes         // чередовать фон строк (по умолчанию true)
 dg.Grid.RowHeight            // высота строки (по умолчанию 28px)
 dg.Grid.HeaderHeight         // высота заголовка (по умолчанию 30px)
 dg.Grid.FontSize             // размер шрифта (по умолчанию 10)
 ```
+
+**Полосатость строк.** Обнулить разницу между `AlternateBG` и `Background`
+недостаточно: `ApplyTheme` вычисляет `AlternateBG` из фона темы заново на
+каждую смену темы. Цветом владеет тема, признаком «полосы нужны» —
+`ZebraStripes`.
+
+**Щелчок по заголовку отдельно от сортировки.** `OnHeaderClick` вызывается
+независимо от `CanUserSortColumns`; вернув `true`, обработчик отменяет
+сортировку. Кромка изменения ширины и ползунок прокрутки отбираются раньше —
+отличать «щелчок» от «потянули за границу» приложению не нужно.
+
+```go
+dg.Grid.OnHeaderClick = func(col datagrid.Column, idx, x, y int) bool {
+    showColumnsMenu(x, y) // своё меню выбора видимых колонок
+    return true           // сортировать не надо
+}
+```
+
+**Порядок колонок.** `MoveColumn(from, to)` переставляет колонку программно,
+`OnColumnsReordered` сообщает о перестановке. С `CanUserReorderColumns = true`
+колонку можно тащить за заголовок: порог в несколько пикселей отделяет
+перетаскивание от щелчка, место вставки показывается линией.
+
+По умолчанию перетаскивание ВЫКЛЮЧЕНО, потому что включение переносит момент
+щелчка по заголовку с нажатия на отпускание: пока кнопка мыши не отпущена,
+щелчок от захвата колонки не отличить.
+
+**Подсказка на строку.** У `Base.ToolTip` один текст на весь виджет; строке
+свой даёт `RowToolTip`:
+
+```go
+dg.Grid.RowToolTip = func(item interface{}, row int) string {
+    return item.(*FileRow).State // «изменён», «конфликт», …
+}
+```
+
+Если нужно посчитать что-то самому — наружу отданы `HoverRow()`,
+`RowIndexAtY(y)`, `ScrollX()` и `ScrollY()`.
+
+**Подгрузка по прокрутке.** Виртуализация в таблице есть с самого начала —
+рисуются только видимые строки, — а `OnScroll` сообщает, докуда долистали:
+
+```go
+dg.Grid.OnScroll = func(first, count int) {
+    if first+count > loaded-50 {
+        loadMore()
+    }
+}
+dg.Grid.FirstVisibleRow()  // первая видимая строка
+dg.Grid.VisibleRowCount()  // сколько строк помещается в окне
+```
+
+Обработчик зовётся вне внутреннего замка — доливать строки в коллекцию можно
+прямо из него.
+
+**Множественный выбор мышью.** При `SelectionMode = SelectionExtended`
+Ctrl+Click добавляет и снимает строку, Shift+Click выделяет диапазон.
+Модификаторы приходят в `MouseEvent.Mod`; приложение, которое кормит движок
+событиями само, сообщает их через `eng.SetModifiers` (см. «Ввод»).
 
 Управление данными:
 
@@ -829,6 +915,22 @@ eng.SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 
 Движок делает hit-test и передаёт событие нужному виджету. При ЛКМ фокус переходит на `Focusable`-виджет под курсором.
 
+**Модификаторы при щелчке.** Ctrl+Click и Shift+Click доезжают до виджета в
+`MouseEvent.Mod`. Взять их из клавиатурных событий движок не может: отдельной
+клавиши-модификатора в `KeyCode` нет, и человек, зажавший Ctrl и щёлкнувший
+мышью, не порождает ни одного клавиатурного события. Состояние сообщает тот,
+кто его знает:
+
+```go
+eng.SetModifiers(widget.ModCtrl) // держат Ctrl
+eng.SendMouseButton(x, y, widget.MouseLeft, true)
+eng.SetModifiers(widget.ModNone) // отпустили
+```
+
+`window.Run` делает это сам на каждое нажатие и отпускание Ctrl/Shift/Alt —
+приложению с нативным окном звать `SetModifiers` не нужно. Свои события мыши
+движок метит текущим состоянием: нажатия, движения и колесо.
+
 ### Клавиатура
 
 ```go
@@ -895,6 +997,28 @@ eng.SetRoot(root)
 
 Также доступны `LoadUIFromXAML(data []byte)` и `LoadUIFromXAMLWithBase(data, baseDir)` для загрузки из памяти.
 
+**Однофайловая сборка.** У приложения, уехавшего одним исполняемым файлом, нет
+каталога с ресурсами на диске — `LoadUIFromXAMLWithBase` там не к чему
+привязать. Для этого случая `LoadUIFromXAMLFS`: ресурсы разметки (`Image
+Source`, `Button Icon/IconSource`, `Panel BackgroundImage`, `SVGIcon Source`,
+`Window TrayIcon`) читаются из `fs.FS`.
+
+```go
+//go:embed ui
+var uiFS embed.FS
+
+// fs.Sub переносит корень к самой разметке: пути ресурсов в XAML считаются
+// от КОРНЯ fsys, а не от файла разметки. Без этого Source="icons/ok.png"
+// пришлось бы писать как "ui/icons/ok.png".
+sub, _ := fs.Sub(uiFS, "ui")
+data, _ := fs.ReadFile(sub, "app.xaml")
+root, named, err := widget.LoadUIFromXAMLFS(data, sub)
+```
+
+Путь из разметки удерживается внутри `fsys` по той же политике, что и `baseDir`
+на диске: абсолютный путь или выход за пределы корня отклоняются. Шрифты
+укладываются в сборку тем же приёмом — `eng.RegisterFontFS` (см. «Шрифты»).
+
 ### Координаты
 
 Координаты дочерних элементов **относительные** (стандарт WPF Canvas):
@@ -911,7 +1035,7 @@ root Canvas (0,0)
 
 | WPF элемент | Виджет | Ключевые атрибуты |
 |---|---|---|
-| `Canvas`, `Border`, `StackPanel`, `DockPanel` | Panel | `Background`, `CornerRadius`, `Caption`, `ShowHeader`, `MacStyle`, `BackgroundImage`, `BorderBrush` |
+| `Canvas`, `Border`, `StackPanel`, `DockPanel` | Panel | `Background`, `CornerRadius`, `Caption`, `ShowHeader`, `MacStyle`, `BackgroundImage`, `BorderBrush`, `LastChildFill` (только DockPanel) |
 | `Grid` | Grid | `ShowGridLines`, `Grid.RowDefinitions`, `Grid.ColumnDefinitions` |
 | `Label`, `TextBlock` | Label | `Text`, `Foreground`, `Background`, `TextWrapping`, `FontSize` |
 | `Button`, `ToggleButton`, `RepeatButton` | Button | `Content`, `Style="Accent"`, `HoverBG`, `PressedBG`, `Background`, `Foreground`, `BorderBrush` |
@@ -1468,15 +1592,45 @@ func (w *MyWidget) AccessInfo() widget.AccessInfo {
 
 ### Шрифты
 
-В комплекте свободные шрифты Roboto (по умолчанию), Open Sans, Inter. Авто-загрузка
-из `assets/fonts/`, цепочка фолбэка системных шрифтов для символов/эмодзи (нет
-«тофу»).
+В комплекте восемь свободных семейств, все с файлами лицензий (полный список,
+лицензии и обязанности при распространении — `assets/fonts/README.md`):
+
+- **Roboto** (по умолчанию), **Open Sans**, **Inter** — интерфейсные гротески;
+- **Liberation Sans** и **Liberation Mono** — метрически совместимы с Arial и
+  Courier New: та же ширина строки при том же кегле. Нужны там, где макет
+  пришёл из Windows и должен совпасть по ширине;
+- **DejaVu Sans** и **DejaVu Sans Mono** — самое широкое покрытие символов:
+  кириллица, греческий, псевдографика, стрелки, ✓ ✗ ⚠. Движок берёт их ещё и
+  как фолбэк на машине, где системных шрифтов нет вовсе;
+- **Go Regular** — встроенный шрифт движка.
+
+Авто-загрузка из `assets/fonts/`, плюс цепочка фолбэка системных шрифтов для
+символов/эмодзи (нет «тофу»).
+
+Начертания Bold/Italic здесь — самостоятельные именованные шрифты, а не
+варианты веса: `FontWeight`/`FontStyle` переключают только встроенные
+Go-шрифты. Жирный Liberation берётся как `FontFamily="LiberationSans-Bold"`.
 
 ```go
 eng.SetDefaultFont("Inter")
 eng.RegisterFontFile("Roboto", path)
 eng.RegisterFontDir("my/fonts")
 eng.AvailableFonts()
+```
+
+Папка `assets/fonts` ищется **относительно рабочего каталога процесса**.
+Программа, установленная куда-нибудь в Program Files или запущенная службой,
+там ничего не найдёт и молча останется на встроенном Go Regular. Чтобы шрифты
+ехали внутри исполняемого файла — `RegisterFontFS`:
+
+```go
+//go:embed assets/fonts
+var fontsFS embed.FS
+
+if err := eng.RegisterFontFS(fontsFS, "assets/fonts"); err != nil {
+    log.Fatal(err) // опечатка в //go:embed — искать её по пропавшему шрифту дорого
+}
+eng.SetDefaultFont("Roboto")
 ```
 
 ```xml
@@ -1804,7 +1958,17 @@ props.Dock(widget.DockRight) // обратно в стопку
 tools.OnStateChanged = func(p *widget.DockPane) {
     log.Println(p.Title, "→", p.State()) // docked/autohidden/floating/closed
 }
+
+// Активная панель стопки: фон её титлбара — TitleActiveBG (акцент темы).
+mgr.ActivatePane(props)   // сменить активную (не только щелчком по корешку)
+props.IsActive()          // спросить
+props.TitleTextActive = c // цвет заголовка именно на акцентном фоне
 ```
+
+`OnStateChanged` приходит и на смену активной панели — обеим, прежней и новой.
+Это нужно тому, кто вычисляет цвет заголовка из фона: фонов у титлбара два, и
+без события пересчитать цвет не по чему. Нулевая альфа `TitleTextActive`
+означает «как у неактивной».
 
 Раскладку можно сохранить и восстановить (JSON, панели матчатся по `ID`):
 

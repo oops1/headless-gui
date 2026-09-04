@@ -1318,8 +1318,30 @@ var _ = unsafe.Sizeof(0)
 // на этой платформе пока не реализован.
 func (w *X11Window) SetResizable(v bool) {}
 
-// SetMinSize — no-op: минимальный размер окна на X11 пока не ограничиваем.
-func (w *X11Window) SetMinSize(width, height int) {}
+// SetMinSize задаёт минимальный размер окна через свойство WM_NORMAL_HINTS
+// (ICCCM §4.1.2.3, атом WM_NORMAL_HINTS=40, тип WM_SIZE_HINTS=41, format 32).
+// WM читает это свойство при пользовательском ресайзе окна за край и не даёт
+// сжать его меньше min_width/min_height — без хинта (или с ним, но без бита
+// PMinSize) большинство WM таких ограничений не накладывают вовсе, поэтому
+// окно раньше можно было сжать сколь угодно мелко (GG-18).
+//
+// Байты структуры собирает x11NormalHintsMinSize (minsize_linux.go) — чистая
+// функция без обращения к сети, покрытая отдельными тестами. Единицы — те же
+// физические пиксели, что принимает интерфейс SetMinSize (native.go): у X11
+// нет понятия "логической" поверхности отдельно от окна, конвертации не
+// требуется (в отличие от Wayland, см. WaylandWindow.SetMinSize).
+//
+// width/height ≤ 0 по каждой оси независимо — «минимума нет» (см. комментарий
+// x11NormalHintsMinSize): WM_NORMAL_HINTS переустанавливается ЦЕЛИКОМ через
+// ChangeProperty(mode=Replace), так что повторный вызов с нулями снимает
+// прежний минимум, а не оставляет его висеть.
+func (w *X11Window) SetMinSize(width, height int) {
+	if w.wid == 0 {
+		return
+	}
+	data := x11NormalHintsMinSize(width, height)
+	w.x11ChangeProperty(w.wid, 40 /*WM_NORMAL_HINTS*/, 41 /*WM_SIZE_HINTS*/, 32, data)
+}
 
 // ─── Поддержка нативных модальных диалогов (dialogHost) ─────────────────────
 //

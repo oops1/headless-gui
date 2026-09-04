@@ -101,7 +101,7 @@ func (h *popupHost) apply(frames []engine.PopupFrame) {
 			id := f.ID
 			h.invoker.InvokeOnUIThread(func() { h.repositionAndBlit(id) })
 		} else {
-			hp.native.BlitRGBA(hp.img) // блит потокобезопасен
+			blitPopup(hp.native, hp.img) // блит потокобезопасен
 		}
 	}
 
@@ -145,9 +145,7 @@ func (h *popupHost) createPopup(id uintptr) {
 		ow.SetOwner(carrier)
 	}
 	h.positionPopup(native, carrier, rect, pw, ph)
-	if img != nil {
-		native.BlitRGBA(img)
-	}
+	blitPopup(native, img)
 	h.setupPopupInput(native, id)
 	// Вторичное окно с собственным соединением (X11) — запускаем его насос событий.
 	if ep, ok := native.(eventPumper); ok {
@@ -163,9 +161,33 @@ func (h *popupHost) createPopup(id uintptr) {
 	hp.native = native
 	latest := hp.img // мог обновиться, пока окно поднималось
 	h.mu.Unlock()
-	if latest != nil {
-		native.BlitRGBA(latest)
+	blitPopup(native, latest)
+}
+
+// popupRegionSetter — бэкенд умеет выкроить окно по закрашенной части кадра.
+// Реализуется Win32; остальные просто блитят.
+type popupRegionSetter interface {
+	blitPopupRegion(img *image.RGBA, bands []image.Rectangle)
+}
+
+// blitPopup кладёт кадр в окно-попап и, если бэкенд умеет, выкраивает окно по
+// закрашенной части.
+//
+// Зачем выкройка. Вынесенный оверлей занимает ПРЯМОУГОЛЬНИК — объединение
+// всего, что он рисует. У каскадного меню это полоса, раскрытое подменю и его
+// дочернее подменю, стоящее правее и ниже; между ними остаётся площадь,
+// которую не закрашивает никто. В холсте сквозь неё виден рабочий стол, а в
+// отдельном окне видна чернота: окно непрозрачно, и «ничего» показывается
+// чёрным прямоугольником.
+func blitPopup(native NativeWindow, img *image.RGBA) {
+	if native == nil || img == nil {
+		return
 	}
+	if rs, ok := native.(popupRegionSetter); ok {
+		rs.blitPopupRegion(img, engine.OpaqueBands(img))
+		return
+	}
+	native.BlitRGBA(img)
 }
 
 // repositionAndBlit переносит окно под новый Rect/размер и блитит контент.
@@ -184,9 +206,7 @@ func (h *popupHost) repositionAndBlit(id uintptr) {
 	h.mu.Unlock()
 
 	h.positionPopup(native, carrier, rect, pw, ph)
-	if img != nil {
-		native.BlitRGBA(img)
-	}
+	blitPopup(native, img)
 }
 
 // workAreaProvider — бэкенд умеет сообщить рабочую область монитора,

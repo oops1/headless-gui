@@ -122,11 +122,38 @@ type DockManager struct {
 	NativeFloating bool
 
 	center     Widget
-	panes      []*DockPane   // мастер-реестр всех панелей (в т.ч. закрытых)
+	panes      []*DockPane    // мастер-реестр всех панелей (в т.ч. закрытых)
 	sides      [4][]*DockPane // Docked+AutoHidden по сторонам (индекс = DockSide)
 	activePane [4]*DockPane   // активная панель стопки на стороне
-	sizes      [4]int         // пиксельный размер региона стороны
-	floating   []*DockPane    // плавающие панели (поверх центра)
+
+	// sizes — ЖЕЛАЕМЫЙ пиксельный размер региона стороны. Фактический
+	// применённый размер (при тесном менеджере) может быть меньше —
+	// clampSideSizeFor клэмпит его на лету при каждой раскладке, не трогая
+	// это поле (см. TestDock_ManagerResizePreservesSideSize).
+	sizes [4]int
+	// sizeWanted отмечает стороны, для которых SetSideSize уже вызывался ДО
+	// первой известной раскладки (m.bounds ещё пуст). Пока это так, повторные
+	// вызовы (несколько <DockPane Size="..."> одной стороны из XAML) берут
+	// МАКСИМУМ вместо перезаписи — см. SetSideSize.
+	sizeWanted [4]bool
+
+	// stacks — как показываются несколько панелей стороны: вкладками или в
+	// столбик (см. docksplit.go). Задаётся на сторону, а не на менеджер:
+	// слева удобен столбик, снизу — вкладки.
+	stacks [4]DockStack
+	// splitRatios — доли панелей стороны в режиме столбика. Доли, а не
+	// пиксели: сторону тянут за кромку, и при её изменении столбик обязан
+	// сохранять пропорции.
+	splitRatios [4][]float64
+	// splitGutters — кромки МЕЖДУ панелями столбика (в отличие от gutters,
+	// которые отделяют сторону от центра).
+	splitGutters [4][]image.Rectangle
+	// splitting — тянут кромку между панелями столбика.
+	splitting bool
+	splitSide DockSide
+	splitIdx  int
+
+	floating []*DockPane // плавающие панели (поверх центра)
 
 	capMgr CaptureManager
 
@@ -304,11 +331,27 @@ func (m *DockManager) SideSize(side DockSide) int {
 }
 
 // SetSideSize задаёт пиксельный размер региона стороны (клэмпится раскладкой).
+//
+// Пока границы менеджера ещё не известны (m.bounds пуст — типичный случай при
+// построении дерева из XAML: <DockPane Size="..."> вызывает SetSideSize раньше,
+// чем engine.SetRoot проставит реальные bounds), несколько вызовов для одной
+// стороны — от разных панелей, задавших Size, — берут МАКСИМУМ, а не последнее
+// значение: порядок панелей в разметке не должен решать итоговую ширину
+// стороны. Как только границы стали известны, SetSideSize — обычный сеттер
+// (последний вызов побеждает), иначе приложение не смогло бы явно уменьшить
+// сторону (RestoreLayout, ручной ресайз и т.п. — см. TestDock_SaveRestore).
 func (m *DockManager) SetSideSize(side DockSide, px int) {
 	if !validSide(side) {
 		return
 	}
-	m.sizes[int(side)] = m.clampSideSize(side, px)
+	next := m.clampSideSize(side, px)
+	if m.bounds.Empty() {
+		if m.sizeWanted[int(side)] && m.sizes[int(side)] > next {
+			next = m.sizes[int(side)]
+		}
+		m.sizeWanted[int(side)] = true
+	}
+	m.sizes[int(side)] = next
 	m.layout()
 	m.Invalidate()
 }
@@ -525,13 +568,37 @@ func (m *DockManager) inSide(p *DockPane, s DockSide) bool {
 }
 
 // setActive делает p активной панелью стопки на стороне side.
+// ActivatePane делает панель активной в её стопке.
+//
+// До этого активную панель можно было сменить только щелчком по корешку:
+// приложение, восстанавливающее раскладку или открывающее панель по команде
+// меню, показать нужную не могло.
+func (m *DockManager) ActivatePane(p *DockPane) {
+	if p == nil {
+		return
+	}
+	m.setActive(p.side, p)
+}
+
 func (m *DockManager) setActive(side DockSide, p *DockPane) {
 	if !validSide(side) || m.activePane[int(side)] == p {
 		return
 	}
+	prev := m.activePane[int(side)]
 	m.activePane[int(side)] = p
 	m.layout()
 	m.Invalidate()
+	// Смена активной панели — такое же изменение состояния, как док или
+	// открепление: у активной другой фон титлбара, и приложение, которое
+	// считает цвет заголовка из фона, обязано узнать об этом. Раньше
+	// OnStateChanged приходил только на dock/float/pin/close, и пересчитать
+	// цвет было не по чему.
+	if prev != nil {
+		m.fireStateChanged(prev)
+	}
+	if p != nil {
+		m.fireStateChanged(p)
+	}
 }
 
 // ─── Раскладка ──────────────────────────────────────────────────────────────
@@ -543,8 +610,24 @@ func (m *DockManager) SetBounds(r image.Rectangle) {
 }
 
 // clampSideSize клэмпит размер стороны в [minSide, доступное вдоль оси].
+//
+// Если границы менеджера ещё не известны (SetBounds ни разу не вызывался с
+// непустым прямоугольником), верхний предел здесь считать не от чего: при
+// ext=0 maxS = 0 - gutterSize - dockCenterMin уходит в минус и тут же
+// схлопывается до minSide — а значит ЛЮБОЙ желаемый размер (в т.ч. заданный
+// XAML-атрибутом Size раньше первого SetBounds) обрезался бы до минимума,
+// хотя граница менеджера ещё попросту не проставлена. В этом случае возвращаем
+// размер как есть (только снизу ограниченный minSide) — настоящий верхний
+// клэмп применит уже layout() при первой реальной раскладке через
+// clampSideSizeFor, который не портит m.sizes (см. clampSideSizeFor).
 func (m *DockManager) clampSideSize(side DockSide, size int) int {
+	if size < m.minSide() {
+		size = m.minSide()
+	}
 	b := m.bounds
+	if b.Empty() {
+		return size
+	}
 	ext := b.Dx()
 	if !horizontalSide(side) {
 		ext = b.Dy()
@@ -553,14 +636,8 @@ func (m *DockManager) clampSideSize(side DockSide, size int) int {
 	if maxS < m.minSide() {
 		maxS = m.minSide()
 	}
-	if size < m.minSide() {
-		size = m.minSide()
-	}
 	if size > maxS {
 		size = maxS
-	}
-	if size < 0 {
-		size = 0
 	}
 	return size
 }
@@ -801,8 +878,17 @@ func (m *DockManager) layoutSideRegion(s DockSide) {
 
 	if len(docked) == 1 {
 		setDockChildBounds(active, region)
+		m.splitGutters[int(s)] = nil
 		return
 	}
+
+	// Столбик: панели делят сторону, между ними кромка.
+	if m.stacks[int(s)] == DockStackSplit {
+		m.splitGutters[int(s)] = m.layoutSideSplit(s, region, docked)
+		m.tabInfo[int(s)] = nil
+		return
+	}
+	m.splitGutters[int(s)] = nil
 
 	// Стопка: активная панель сверху, полоса табов снизу региона.
 	tsh := m.tabStripH()
@@ -1197,6 +1283,9 @@ func (m *DockManager) WantsCapture(e MouseEvent) bool {
 	if _, ok := m.gutterAt(e.X, e.Y); ok {
 		return true
 	}
+	if _, _, ok := m.SplitGutterAt(e.X, e.Y); ok {
+		return true
+	}
 	if pane, _ := m.stripButtonAt(e.X, e.Y); pane != nil {
 		return true
 	}
@@ -1226,6 +1315,13 @@ func (m *DockManager) OnMouseButton(e MouseEvent) bool {
 			m.resizeSide = s
 			return true
 		}
+		// Кромка МЕЖДУ панелями столбика — она же ресайз, но меняет доли
+		// внутри стороны, а не размер самой стороны.
+		if s, i, ok := m.SplitGutterAt(e.X, e.Y); ok {
+			m.splitting = true
+			m.splitSide, m.splitIdx = s, i
+			return true
+		}
 		// Кнопка ярлыка auto-hide (📌/✕) — «взводим», колбэк на release.
 		if pane, btn := m.stripButtonAt(e.X, e.Y); pane != nil {
 			m.armedStripPane = pane
@@ -1248,6 +1344,13 @@ func (m *DockManager) OnMouseButton(e MouseEvent) bool {
 	// release
 	if m.resizing {
 		m.resizing = false
+		if m.capMgr != nil {
+			m.capMgr.ReleaseCapture()
+		}
+		return true
+	}
+	if m.splitting {
+		m.splitting = false
 		if m.capMgr != nil {
 			m.capMgr.ReleaseCapture()
 		}
@@ -1291,6 +1394,10 @@ func (m *DockManager) OnMouseButton(e MouseEvent) bool {
 func (m *DockManager) OnMouseMove(x, y int) {
 	if m.resizing {
 		m.applyGutterResize(x, y)
+		return
+	}
+	if m.splitting {
+		m.DragSplitGutter(m.splitSide, m.splitIdx, x, y)
 		return
 	}
 	// hover кромки (для перерисовки).
@@ -1687,12 +1794,21 @@ type paneLayoutJSON struct {
 type dockLayoutJSON struct {
 	Sizes [4]int           `json:"sizes"`
 	Panes []paneLayoutJSON `json:"panes"`
+	// Stacks и Ratios — режим показа сторон и доли столбика. Опущенные поля
+	// (раскладка, сохранённая прежней версией) означают вкладки и равные
+	// доли — то самое поведение, что было до появления столбика.
+	Stacks [4]int      `json:"stacks,omitempty"`
+	Ratios [4][]float64 `json:"ratios,omitempty"`
 }
 
 // SaveLayout сериализует текущую раскладку в JSON (см. формат в шапке файла).
 func (m *DockManager) SaveLayout() []byte {
 	var dl dockLayoutJSON
 	dl.Sizes = m.sizes
+	for i := range m.stacks {
+		dl.Stacks[i] = int(m.stacks[i])
+		dl.Ratios[i] = append([]float64(nil), m.splitRatios[i]...)
+	}
 	for _, p := range m.panes {
 		fb := p.floatBounds
 		info := paneLayoutJSON{
@@ -1720,6 +1836,10 @@ func (m *DockManager) RestoreLayout(data []byte) error {
 	for i := range m.sides {
 		m.sides[i] = nil
 		m.activePane[i] = nil
+	}
+	for i := range m.stacks {
+		m.stacks[i] = DockStack(dl.Stacks[i])
+		m.splitRatios[i] = append([]float64(nil), dl.Ratios[i]...)
 	}
 	m.floating = nil
 	if m.flyoutAnim != nil {

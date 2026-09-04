@@ -52,6 +52,12 @@ func (a *drawContextAdapter) DrawHLine(x, y, length int, col color.RGBA) {
 func (a *drawContextAdapter) DrawVLine(x, y, length int, col color.RGBA) {
 	a.ctx.DrawVLine(x, y, length, col)
 }
+func (a *drawContextAdapter) DrawImage(src image.Image, x, y int) {
+	a.ctx.DrawImage(src, x, y)
+}
+func (a *drawContextAdapter) DrawImageScaled(src image.Image, x, y, w, h int) {
+	a.ctx.DrawImageScaled(src, x, y, w, h)
+}
 
 // ─── DataGridWidget ────────────────────────────────────────────────────────
 
@@ -129,7 +135,8 @@ func (w *DataGridWidget) OnMouseButton(e MouseEvent) bool {
 		return false
 	}
 
-	consumed := w.Grid.OnMouseButton(e.X, e.Y, int(e.Button), e.Pressed)
+	consumed := w.Grid.OnMouseButtonMod(e.X, e.Y, int(e.Button), e.Pressed,
+		e.Mod&ModShift != 0, e.Mod&ModCtrl != 0)
 
 	// Детекция двойного клика (упрощённая)
 	if e.Pressed && consumed {
@@ -159,6 +166,19 @@ func (w *DataGridWidget) OnMouseMove(x, y int) {
 	// Ядро сообщает точную область смены hover-строки/ползунка — транслируем
 	// её в точечную инвалидацию вместо перерисовки всего виджета.
 	w.applyDirty()
+}
+
+// GetToolTip возвращает подсказку строки под курсором, если приложение задало
+// RowToolTip, иначе — общий ToolTip виджета.
+//
+// Без этого строке нельзя было дать свой текст: Base.ToolTip один на весь
+// виджет, и обёртке приходилось пересчитывать индекс строки на каждое
+// движение мыши и звать SetToolTip.
+func (w *DataGridWidget) GetToolTip() string {
+	if tip := w.Grid.HoverRowToolTip(); tip != "" {
+		return tip
+	}
+	return w.Base.GetToolTip()
 }
 
 // ─── Keyboard handling ─────────────────────────────────────────────────────

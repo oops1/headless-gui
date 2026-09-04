@@ -311,7 +311,7 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	// overlay (dropdown, меню), сместить фокус, выполнить команду — задеть
 	// произвольные области. Клики редки, полный кадр здесь дёшев и надёжен.
 	e.Invalidate()
-	ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed}
+	ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed, Mod: e.Modifiers()}
 
 	// Новое нажатие: открываем его номер ДО гашения overlay'ев (dismissOutside
 	// ниже) — кнопка, владеющая меню из чужого поддерева, по этому номеру
@@ -585,7 +585,7 @@ func (e *Engine) SendMouseWheelPixels(xPhys, yPhys int, dx, dy float64) {
 	}
 	var consumer widget.Widget
 	for i := 0; i < steps; i++ {
-		if w := deliverWheelTick(targets, x, y, btn); w != nil {
+		if w := deliverWheelTick(targets, x, y, btn, e.Modifiers()); w != nil {
 			consumer = w
 		}
 	}
@@ -616,10 +616,10 @@ func (e *Engine) wheelTargets(dispatchRoot widget.Widget, x, y int) []widget.Wid
 
 // deliverWheelTick шлёт один тик (press+release) по списку получателей;
 // возвращает виджет, поглотивший нажатие.
-func deliverWheelTick(targets []widget.Widget, x, y int, btn widget.MouseButton) widget.Widget {
+func deliverWheelTick(targets []widget.Widget, x, y int, btn widget.MouseButton, mod widget.KeyMod) widget.Widget {
 	var consumer widget.Widget
 	for _, pressed := range [2]bool{true, false} {
-		ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed}
+		ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed, Mod: mod}
 		for _, w := range targets {
 			mc, ok := w.(widget.MouseClickHandler)
 			if !ok {
