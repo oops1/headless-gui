@@ -56,11 +56,11 @@ func (c *checkCtx) SetPixel(int, int, color.RGBA) { c.pixels++ }
 func (c *checkCtx) DrawText(text string, _, _ int, _ color.RGBA) {
 	c.texts = append(c.texts, text)
 }
-func (c *checkCtx) FillRect(int, int, int, int, color.RGBA)          {}
-func (c *checkCtx) FillRectAlpha(int, int, int, int, color.RGBA)     {}
-func (c *checkCtx) DrawHLine(int, int, int, color.RGBA)              {}
-func (c *checkCtx) DrawVLine(int, int, int, color.RGBA)              {}
-func (c *checkCtx) DrawBorder(int, int, int, int, color.RGBA)        {}
+func (c *checkCtx) FillRect(int, int, int, int, color.RGBA)           {}
+func (c *checkCtx) FillRectAlpha(int, int, int, int, color.RGBA)      {}
+func (c *checkCtx) DrawHLine(int, int, int, color.RGBA)               {}
+func (c *checkCtx) DrawVLine(int, int, int, color.RGBA)               {}
+func (c *checkCtx) DrawBorder(int, int, int, int, color.RGBA)         {}
 func (c *checkCtx) FillRoundRect(int, int, int, int, int, color.RGBA) {}
 
 func checkedMenu(t *testing.T, checked bool) *PopupMenu {
