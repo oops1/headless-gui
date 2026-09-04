@@ -568,13 +568,37 @@ func (m *DockManager) inSide(p *DockPane, s DockSide) bool {
 }
 
 // setActive делает p активной панелью стопки на стороне side.
+// ActivatePane делает панель активной в её стопке.
+//
+// До этого активную панель можно было сменить только щелчком по корешку:
+// приложение, восстанавливающее раскладку или открывающее панель по команде
+// меню, показать нужную не могло.
+func (m *DockManager) ActivatePane(p *DockPane) {
+	if p == nil {
+		return
+	}
+	m.setActive(p.side, p)
+}
+
 func (m *DockManager) setActive(side DockSide, p *DockPane) {
 	if !validSide(side) || m.activePane[int(side)] == p {
 		return
 	}
+	prev := m.activePane[int(side)]
 	m.activePane[int(side)] = p
 	m.layout()
 	m.Invalidate()
+	// Смена активной панели — такое же изменение состояния, как док или
+	// открепление: у активной другой фон титлбара, и приложение, которое
+	// считает цвет заголовка из фона, обязано узнать об этом. Раньше
+	// OnStateChanged приходил только на dock/float/pin/close, и пересчитать
+	// цвет было не по чему.
+	if prev != nil {
+		m.fireStateChanged(prev)
+	}
+	if p != nil {
+		m.fireStateChanged(p)
+	}
 }
 
 // ─── Раскладка ──────────────────────────────────────────────────────────────

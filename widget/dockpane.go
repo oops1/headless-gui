@@ -81,8 +81,20 @@ type DockPane struct {
 	TitleBG       color.RGBA // фон титлбара неактивной панели
 	TitleActiveBG color.RGBA // фон титлбара активной панели (Accent)
 	TitleText     color.RGBA // цвет заголовка/глифов
-	Background    color.RGBA // фон области содержимого
-	BorderColor   color.RGBA // рамка панели
+
+	// TitleTextActive — цвет заголовка АКТИВНОЙ панели.
+	//
+	// Фонов у титлбара два (TitleBG и TitleActiveBG), а цвет текста был один,
+	// и на акцентном фоне активной панели он оказывался подобран не под тот
+	// фон, поверх которого нарисован. Заметно это там, где цвет текста
+	// вычисляется из фона — например, инверсией.
+	//
+	// Нулевая альфа означает «как у неактивной»: прежнее поведение остаётся
+	// у всех, кто это поле не трогал.
+	TitleTextActive color.RGBA
+
+	Background  color.RGBA // фон области содержимого
+	BorderColor color.RGBA // рамка панели
 
 	// OnStateChanged вызывается при смене состояния (docked/floating/…).
 	OnStateChanged func(p *DockPane)
@@ -329,9 +341,12 @@ func (p *DockPane) Draw(ctx DrawContext) {
 
 	// Титлбар.
 	tb := p.titleBarRect()
-	tbg := p.TitleBG
+	tbg, ttext := p.TitleBG, p.TitleText
 	if p.active {
 		tbg = p.TitleActiveBG
+		if p.TitleTextActive.A > 0 {
+			ttext = p.TitleTextActive
+		}
 	}
 	ctx.FillRect(tb.Min.X, tb.Min.Y, tb.Dx(), tb.Dy(), tbg)
 
@@ -345,7 +360,7 @@ func (p *DockPane) Draw(ctx DrawContext) {
 	} else {
 		title = ellipsizeText(ctx, title, maxW, DefaultFontSizePt)
 	}
-	ctx.DrawText(title, textX, textY, p.TitleText)
+	ctx.DrawText(title, textX, textY, ttext)
 
 	// Кнопки титлбара.
 	p.drawButtons(ctx)
@@ -367,10 +382,20 @@ func (p *DockPane) Draw(ctx DrawContext) {
 	}
 }
 
+// IsActive сообщает, активна ли панель в своей стопке.
+//
+// Активная рисуется фоном TitleActiveBG. Наружу состояние нужно тому, кто
+// вычисляет цвет заголовка из фона: без него нельзя понять, какой из двух
+// фонов сейчас под текстом.
+func (p *DockPane) IsActive() bool { return p.active }
+
 // drawButtons рисует три кнопки титлбара (pin/float/close) с глифами.
 func (p *DockPane) drawButtons(ctx DrawContext) {
 	closeR, floatR, pinR := p.buttonRects()
 	col := p.TitleText
+	if p.active && p.TitleTextActive.A > 0 {
+		col = p.TitleTextActive
+	}
 
 	drawBtnBG := func(r image.Rectangle, kind dockPaneBtn) {
 		if p.hoverBtn == kind || p.armedBtn == kind {
