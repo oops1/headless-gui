@@ -60,6 +60,11 @@ type Canvas struct {
 	// выключатель дёргает приложение из своей горутины, а читает обход в
 	// горутине кадра.
 	cullingOn atomic.Bool
+	// occlusionOn — разрешено ли вычитание перекрытого (widget/occlusion.go).
+	// Отдельный выключатель от cullingOn: ошибиться в них можно по-разному —
+	// пропуск по damage промахивается мимо изменившегося, а вычитание верит
+	// объявлению виджета о собственной непрозрачности.
+	occlusionOn atomic.Bool
 
 	tilesX int
 	tilesY int
@@ -201,6 +206,7 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 	// а приложение с нарушенным вернёт прежний обход одной строкой
 	// (Engine.SetSubtreeCulling).
 	c.cullingOn.Store(true)
+	c.occlusionOn.Store(true)
 	c.initTileMarks()
 	return c
 }
@@ -1542,3 +1548,6 @@ func (c *Canvas) syncTile(x, y, w, h int) {
 		copy(c.front.Pix[dst:dst+rowBytes], c.back.Pix[src:src+rowBytes])
 	}
 }
+
+// OcclusionEnabled реализует widget.OcclusionScope: вычитать ли перекрытое.
+func (c *Canvas) OcclusionEnabled() bool { return c.occlusionOn.Load() }

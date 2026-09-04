@@ -153,16 +153,56 @@ func TestOpaqueBands_FindsThePaintedPart(t *testing.T) {
 	}
 }
 
-// Полностью закрашенная картинка — одна полоса во весь размер: выкраивать
-// нечего, и окно остаётся обычным прямоугольником.
-func TestOpaqueBands_FullImageIsOneBand(t *testing.T) {
+// Сплошная картинка выкройки не требует: окно остаётся прямоугольником.
+func TestOpaqueBands_FullImageNeedsNoRegion(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 8, 5))
 	for i := 3; i < len(img.Pix); i += 4 {
 		img.Pix[i] = 255
 	}
-	bands := OpaqueBands(img)
-	if len(bands) != 1 || bands[0] != img.Bounds() {
-		t.Errorf("сплошная картинка дала полосы %v, ждали одну во весь размер", bands)
+	if got := OpaqueBands(img); got != nil {
+		t.Errorf("сплошная картинка дала выкройку %v", got)
+	}
+}
+
+// Скруглённые углы выкройки НЕ требуют.
+//
+// Это главное в контракте. Углы меню прозрачны всегда, и если считать их
+// дырой, потребитель будет перестраивать форму окна на каждый кадр — на
+// каждое движение курсора по пунктам, — а окно от этого мигает на глазах.
+// Выигрыш при этом нулевой: несколько точек в углах.
+func TestOpaqueBands_RoundedCornersAreNotAHole(t *testing.T) {
+	const w, h, r = 200, 120, 10
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		// Срезаем угол: чем ближе к краю по вертикали, тем больше отступ.
+		cut := 0
+		if y < r {
+			cut = r - y
+		} else if y >= h-r {
+			cut = r - (h - 1 - y)
+		}
+		for x := cut; x < w-cut; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: 40, G: 40, B: 48, A: 255})
+		}
+	}
+	if got := OpaqueBands(img); got != nil {
+		t.Errorf("скруглённые углы приняты за дыру: %d полос %v", len(got), got)
+	}
+}
+
+// А настоящая дыра — строка, разорванная надвое, — выкройку требует.
+func TestOpaqueBands_SplitRowIsAHole(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 200, 40))
+	for y := 0; y < 40; y++ {
+		for x := 0; x < 200; x++ {
+			if x >= 90 && x < 110 {
+				continue // сквозной просвет посередине
+			}
+			img.SetRGBA(x, y, color.RGBA{R: 40, A: 255})
+		}
+	}
+	if got := OpaqueBands(img); len(got) == 0 {
+		t.Error("разорванная строка не признана дырой")
 	}
 }
 

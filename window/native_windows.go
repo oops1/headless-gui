@@ -310,6 +310,10 @@ type Win32Window struct {
 	// cornerRadius — радиус скругления углов окна (0 = прямые). Реализуется
 	// через регион окна (SetWindowRgn), переприменяется при resize.
 	cornerRadius int
+	// popupBands — выкройка окна-попапа, применённая последней. Нужна,
+	// чтобы не переустанавливать её на каждый блит: SetWindowRgn перестраивает
+	// форму окна, и лишний вызов виден как мигание.
+	popupBands []image.Rectangle
 
 	// pendingClose: Close() был вызван из кода (не от ОС).
 	// Вместо синхронного DestroyWindow мы отправляем PostMessage(WM_CLOSE),
