@@ -74,6 +74,8 @@ func (nopCtx) SetClip(r image.Rectangle)                                 {}
 func (nopCtx) ClearClip()                                                {}
 func (nopCtx) DrawHLine(x, y, length int, c color.RGBA)                  {}
 func (nopCtx) DrawVLine(x, y, length int, c color.RGBA)                  {}
+func (nopCtx) DrawImage(src image.Image, x, y int)                       {}
+func (nopCtx) DrawImageScaled(src image.Image, x, y, w, h int)           {}
 
 // ─── SEC-4: колбэки не держат dg.mu ────────────────────────────────────────
 
