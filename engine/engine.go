@@ -114,6 +114,12 @@ type Engine struct {
 	// moveHandle — дескриптор регистрации приёмника объявлений о переносе
 	// (widget.RegisterMoveSink в New, снимается в Stop).
 	moveHandle uint64
+	// postMu защищает posted: ставят в очередь из любых горутин, разбирает
+	// горутина кадра (см. post.go).
+	postMu sync.Mutex
+	// posted — вызовы, ожидающие выполнения в горутине кадра.
+	posted []func()
+
 	// moveMu защищает pendingMoves: объявления приходят из горутины, где
 	// двигают виджет (обработка ввода), а забирает их горутина кадра.
 	moveMu sync.Mutex
@@ -808,6 +814,8 @@ func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
 // себя, это и нужно: мутация и отрисовка оказываются на одной горутине, и
 // гонка с внутренним циклом исчезает по построению.
 func (e *Engine) RenderFrameNow() output.Frame {
+	// Как и RenderOnce: без запущенного цикла очередь Post разбирать некому.
+	e.runPosted()
 	return e.renderFrame()
 }
 
@@ -843,6 +851,10 @@ func (e *Engine) logicalDamage(rects []image.Rectangle) []image.Rectangle {
 }
 
 func (e *Engine) RenderOnce() *image.RGBA {
+	// Без Start() цикла кадров нет, и очередь Post разбирать некому — значит
+	// разбираем здесь: приложение попросило кадр, и отложенная работа обязана
+	// попасть именно в него.
+	e.runPosted()
 	e.renderFrame()
 
 	e.mu.RLock()
@@ -1212,6 +1224,9 @@ func (e *Engine) loop() {
 	for {
 		select {
 		case <-e.wake:
+			// Отложенные вызовы разбираем ПЕРВЫМИ: они меняют дерево, и их
+			// изменения должны попасть в тот же кадр, а не в следующий.
+			e.runPosted()
 			// Внешний темп: сток попросил кадр. Анимации продвигаются в
 			// тикере, здесь — только кадр.
 			if !e.pacingIsExternal() || !e.takeFrameRequest() {
@@ -1224,6 +1239,10 @@ func (e *Engine) loop() {
 			e.deliver(frame)
 
 		case <-ticker.C:
+			// Отложенные вызовы — раньше всего: они меняют дерево, а решение
+			// о пропуске кадра принимается по заявленному damage, и damage от
+			// них обязан успеть.
+			e.runPosted()
 			// Продвигаем анимации ДО решения о пропуске кадра: тики зовут
 			// сеттеры виджетов, те самоинвалидируются (авто-damage), поэтому
 			// damage от тиков попадёт в invGen ниже и кадр перерисуется
