@@ -627,6 +627,61 @@ TextInput.OnChange func(text string)
 dg.OnRowActivated = func(row int, item interface{}) { ... }
 ```
 
+### DataGrid: header click, column order, per-row tooltip, striping
+
+```go
+// Header click apart from sorting. Fires regardless of CanUserSortColumns;
+// true means "handled" and cancels the sort. The resize edge and the
+// scrollbar are claimed first — no need to tell a click from a grab.
+dg.OnHeaderClick = func(col dg.Column, idx, x, y int) bool { ... }
+
+// Column order. Dragging is OFF by default: turning it on moves the header
+// click from press to release (a click cannot be told from a grab until the
+// button comes up).
+dg.CanUserReorderColumns = true
+dg.MoveColumn(from, to)
+dg.OnColumnsReordered = func(from, to int) { ... }
+
+// Per-row tooltip (Base.ToolTip is one text for the whole widget).
+dg.RowToolTip = func(item interface{}, row int) string { ... }
+dg.HoverRow() int          // row under the cursor, or -1
+dg.RowIndexAtY(y int) int  // row at a Y coordinate, or -1
+dg.ScrollX() int           // horizontal scroll (absolute cell X)
+
+// Row striping. AlternateBG alone is not enough: ApplyTheme recomputes it
+// from the theme background on every theme change.
+dg.ZebraStripes = false
+
+// Template columns can draw images:
+//   cdc.DrawCtx.DrawImage(img, x, y)
+//   cdc.DrawCtx.DrawImageScaled(img, x, y, w, h)
+```
+
+### Mouse modifiers — Ctrl/Shift+Click
+
+```go
+// MouseEvent carries Mod (ModShift | ModCtrl | ModAlt | ModMeta).
+// The engine cannot derive it from key events: there is no modifier key in
+// KeyCode, and holding Ctrl while clicking produces no key event at all.
+eng.SetModifiers(widget.ModCtrl) // window.Run does this itself
+eng.SendMouseButton(x, y, widget.MouseLeft, true)
+
+// DataGrid with SelectionExtended: Ctrl+Click toggles, Shift+Click ranges.
+```
+
+### ToggleButton — persistent pressed state
+
+```go
+btn.SetToggle(true)
+btn.SetChecked(true)   // set state; does NOT call the handler
+btn.IsChecked()
+btn.Toggle()           // flip and notify
+btn.OnCheckedChanged = func(on bool) { ... }
+```
+
+XAML: `<ToggleButton IsChecked="True"/>`. No separate type — a ToggleButton
+differs from a Button by exactly this state.
+
 ### Per-column IsReadOnly tri-state (NEW: A4 fix)
 
 ```go

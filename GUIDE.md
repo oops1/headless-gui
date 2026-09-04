@@ -240,6 +240,29 @@ btn.PressedBG = color.RGBA{...}  // цвет при нажатии
 
 В XAML: `HoverBG="#C42B1C"`, `PressedBG="#A01E14"`, `Background`, `Foreground`, `BorderBrush`.
 
+**Кнопка-переключатель.** Состояние «нажата» держится между кликами: кнопка
+сама красится в `PressedBG`, пока включена, а под курсором фон слегка ведётся
+в сторону `HoverBG` — чтобы и состояние было видно, и наведение.
+
+```go
+btn.SetToggle(true)            // сделать переключателем
+btn.SetChecked(true)           // задать состояние (обработчик НЕ зовётся)
+btn.IsChecked()                // спросить состояние
+btn.Toggle()                   // переключить и сообщить обработчику
+btn.OnCheckedChanged = func(on bool) { ... }
+```
+
+В XAML переключатель даёт сам тег, начальное состояние — атрибут:
+
+```xml
+<ToggleButton x:Name="fltModified" Content="Изменённые" IsChecked="True"/>
+```
+
+Отдельного типа `ToggleButton` нет: от `Button` он отличается ровно этим
+состоянием, а не раскладкой, иконками, командами или подписками. `IsChecked`
+читается и у обычной кнопки — «нарисуй выбранной», без поведения
+переключателя.
+
 ### TextInput
 
 ```go
@@ -672,9 +695,11 @@ datagrid.NewTextColumn("Заголовок", "BindingPath")
 // Чекбокс-колонка — отображает bool как флажок
 datagrid.NewCheckBoxColumn("Активен", "IsActive")
 
-// Шаблонная колонка — пользовательский рендер ячеек
+// Шаблонная колонка — пользовательский рендер ячеек.
+// cdc.DrawCtx умеет то же, что и обычный контекст отрисовки, включая
+// DrawImage/DrawImageScaled: значок статуса в ячейке рисуется здесь же.
 datagrid.NewTemplateColumn("Действия", func(cdc datagrid.CellDrawContext) {
-    // рисуем через cdc.DrawCtx...
+    cdc.DrawCtx.DrawImageScaled(icon, cdc.Rect.Min.X+4, cdc.Rect.Min.Y+4, 16, 16)
 })
 ```
 
@@ -694,11 +719,56 @@ dg.Grid.AutoGenerateColumns  // автогенерация колонок из �
 dg.Grid.IsReadOnly           // только чтение
 dg.Grid.CanUserSortColumns   // сортировка по клику на заголовок (по умолчанию true)
 dg.Grid.CanUserResizeColumns // изменение ширины колонок (по умолчанию true)
+dg.Grid.CanUserReorderColumns // перетаскивание колонок мышью (по умолчанию false)
 dg.Grid.SelectionMode        // SelectionSingle или SelectionExtended
+dg.Grid.ZebraStripes         // чередовать фон строк (по умолчанию true)
 dg.Grid.RowHeight            // высота строки (по умолчанию 28px)
 dg.Grid.HeaderHeight         // высота заголовка (по умолчанию 30px)
 dg.Grid.FontSize             // размер шрифта (по умолчанию 10)
 ```
+
+**Полосатость строк.** Обнулить разницу между `AlternateBG` и `Background`
+недостаточно: `ApplyTheme` вычисляет `AlternateBG` из фона темы заново на
+каждую смену темы. Цветом владеет тема, признаком «полосы нужны» —
+`ZebraStripes`.
+
+**Щелчок по заголовку отдельно от сортировки.** `OnHeaderClick` вызывается
+независимо от `CanUserSortColumns`; вернув `true`, обработчик отменяет
+сортировку. Кромка изменения ширины и ползунок прокрутки отбираются раньше —
+отличать «щелчок» от «потянули за границу» приложению не нужно.
+
+```go
+dg.Grid.OnHeaderClick = func(col datagrid.Column, idx, x, y int) bool {
+    showColumnsMenu(x, y) // своё меню выбора видимых колонок
+    return true           // сортировать не надо
+}
+```
+
+**Порядок колонок.** `MoveColumn(from, to)` переставляет колонку программно,
+`OnColumnsReordered` сообщает о перестановке. С `CanUserReorderColumns = true`
+колонку можно тащить за заголовок: порог в несколько пикселей отделяет
+перетаскивание от щелчка, место вставки показывается линией.
+
+По умолчанию перетаскивание ВЫКЛЮЧЕНО, потому что включение переносит момент
+щелчка по заголовку с нажатия на отпускание: пока кнопка мыши не отпущена,
+щелчок от захвата колонки не отличить.
+
+**Подсказка на строку.** У `Base.ToolTip` один текст на весь виджет; строке
+свой даёт `RowToolTip`:
+
+```go
+dg.Grid.RowToolTip = func(item interface{}, row int) string {
+    return item.(*FileRow).State // «изменён», «конфликт», …
+}
+```
+
+Если нужно посчитать что-то самому — наружу отданы `HoverRow()`,
+`RowIndexAtY(y)`, `ScrollX()` и `ScrollY()`.
+
+**Множественный выбор мышью.** При `SelectionMode = SelectionExtended`
+Ctrl+Click добавляет и снимает строку, Shift+Click выделяет диапазон.
+Модификаторы приходят в `MouseEvent.Mod`; приложение, которое кормит движок
+событиями само, сообщает их через `eng.SetModifiers` (см. «Ввод»).
 
 Управление данными:
 
@@ -828,6 +898,22 @@ eng.SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 ```
 
 Движок делает hit-test и передаёт событие нужному виджету. При ЛКМ фокус переходит на `Focusable`-виджет под курсором.
+
+**Модификаторы при щелчке.** Ctrl+Click и Shift+Click доезжают до виджета в
+`MouseEvent.Mod`. Взять их из клавиатурных событий движок не может: отдельной
+клавиши-модификатора в `KeyCode` нет, и человек, зажавший Ctrl и щёлкнувший
+мышью, не порождает ни одного клавиатурного события. Состояние сообщает тот,
+кто его знает:
+
+```go
+eng.SetModifiers(widget.ModCtrl) // держат Ctrl
+eng.SendMouseButton(x, y, widget.MouseLeft, true)
+eng.SetModifiers(widget.ModNone) // отпустили
+```
+
+`window.Run` делает это сам на каждое нажатие и отпускание Ctrl/Shift/Alt —
+приложению с нативным окном звать `SetModifiers` не нужно. Свои события мыши
+движок метит текущим состоянием: нажатия, движения и колесо.
 
 ### Клавиатура
 

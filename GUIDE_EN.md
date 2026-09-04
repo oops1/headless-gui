@@ -240,6 +240,28 @@ btn.PressedBG = color.RGBA{...}  // pressed color
 
 In XAML: `HoverBG="#C42B1C"`, `PressedBG="#A01E14"`, `Background`, `Foreground`, `BorderBrush`.
 
+**Toggle button.** The pressed state persists between clicks: the button paints
+itself with `PressedBG` while checked, and under the cursor the fill leans
+slightly toward `HoverBG` — so both the state and the hover stay visible.
+
+```go
+btn.SetToggle(true)            // make it a toggle
+btn.SetChecked(true)           // set the state (the handler is NOT called)
+btn.IsChecked()                // read the state
+btn.Toggle()                   // flip it and notify the handler
+btn.OnCheckedChanged = func(on bool) { ... }
+```
+
+In XAML the tag makes the toggle, the attribute gives the initial state:
+
+```xml
+<ToggleButton x:Name="fltModified" Content="Modified" IsChecked="True"/>
+```
+
+There is no separate `ToggleButton` type: it differs from `Button` by exactly
+this state, not by layout, icons, commands or subscriptions. `IsChecked` is
+read on a plain button too — "draw it selected", without the toggle behavior.
+
 ### TextInput
 
 ```go
@@ -694,11 +716,54 @@ dg.Grid.AutoGenerateColumns  // auto-generate columns from data structure
 dg.Grid.IsReadOnly           // read-only mode
 dg.Grid.CanUserSortColumns   // sort by header click (default true)
 dg.Grid.CanUserResizeColumns // resize column widths (default true)
+dg.Grid.CanUserReorderColumns // drag columns by the header (default false)
 dg.Grid.SelectionMode        // SelectionSingle or SelectionExtended
+dg.Grid.ZebraStripes         // alternate row background (default true)
 dg.Grid.RowHeight            // row height (default 28px)
 dg.Grid.HeaderHeight         // header height (default 30px)
 dg.Grid.FontSize             // font size (default 10)
 ```
+
+**Row striping.** Setting `AlternateBG` equal to `Background` is not enough:
+`ApplyTheme` recomputes `AlternateBG` from the theme background on every theme
+change. The theme owns the color, `ZebraStripes` owns the on/off.
+
+**Header click apart from sorting.** `OnHeaderClick` fires regardless of
+`CanUserSortColumns`; returning `true` cancels the sort. The resize edge and
+the scrollbar are claimed first — the application does not have to tell a
+click from a grab.
+
+```go
+dg.Grid.OnHeaderClick = func(col datagrid.Column, idx, x, y int) bool {
+    showColumnsMenu(x, y) // your own "visible columns" menu
+    return true           // do not sort
+}
+```
+
+**Column order.** `MoveColumn(from, to)` reorders programmatically,
+`OnColumnsReordered` reports a reorder. With `CanUserReorderColumns = true` a
+column can be dragged by its header: a few-pixel threshold separates a drag
+from a click, and the insertion point is shown as a line.
+
+Dragging is OFF by default because turning it on moves the header click from
+press to release: until the button comes up, a click cannot be told from a grab.
+
+**Per-row tooltip.** `Base.ToolTip` is one text for the whole widget; a row
+gets its own from `RowToolTip`:
+
+```go
+dg.Grid.RowToolTip = func(item interface{}, row int) string {
+    return item.(*FileRow).State // "modified", "conflict", …
+}
+```
+
+To compute something yourself, `HoverRow()`, `RowIndexAtY(y)`, `ScrollX()` and
+`ScrollY()` are exported.
+
+**Multi-select with the mouse.** With `SelectionMode = SelectionExtended`,
+Ctrl+Click toggles a row and Shift+Click selects a range. Modifiers arrive in
+`MouseEvent.Mod`; an application feeding the engine its own events reports them
+through `eng.SetModifiers` (see "Input").
 
 Data management:
 
@@ -828,6 +893,21 @@ eng.SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 ```
 
 The engine performs hit-testing and dispatches the event to the appropriate widget. On left click, focus automatically transfers to the `Focusable` widget under the cursor.
+
+**Modifiers on a click.** Ctrl+Click and Shift+Click reach the widget in
+`MouseEvent.Mod`. The engine cannot take them from keyboard events: there is no
+modifier key in `KeyCode`, and someone holding Ctrl and clicking produces no
+keyboard event at all. Whoever knows the state reports it:
+
+```go
+eng.SetModifiers(widget.ModCtrl) // Ctrl is held
+eng.SendMouseButton(x, y, widget.MouseLeft, true)
+eng.SetModifiers(widget.ModNone) // released
+```
+
+`window.Run` does this itself on every Ctrl/Shift/Alt press and release — an
+application with a native window never calls `SetModifiers`. The engine stamps
+the current state onto everything it dispatches: buttons, moves and the wheel.
 
 ### Keyboard
 
