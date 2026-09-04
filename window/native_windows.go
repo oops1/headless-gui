@@ -250,6 +250,10 @@ var (
 	procStretchDIBits         = gdi32.NewProc("StretchDIBits")
 	procSetStretchBltMode     = gdi32.NewProc("SetStretchBltMode")
 	procCreateRoundRectRgn    = gdi32.NewProc("CreateRoundRectRgn")
+	// Прямоугольные области и их объединение — выкройка окна-попапа по
+	// закрашенной части кадра (popuprgn_windows.go).
+	procCreateRectRgn = gdi32.NewProc("CreateRectRgn")
+	procCombineRgn    = gdi32.NewProc("CombineRgn")
 	procSetWindowRgn          = user32.NewProc("SetWindowRgn")
 	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 	procSetCapture            = user32.NewProc("SetCapture")
