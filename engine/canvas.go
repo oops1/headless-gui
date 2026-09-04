@@ -1068,19 +1068,39 @@ func (c *Canvas) MeasureRunePositions(text string, sizePt float64) []int {
 
 // measureRunePositionsPx — позиции рун в физических пикселях.
 func (c *Canvas) measureRunePositionsPx(text string, sizePt float64) []int {
+	return c.measureRunePositionsPxFont(c.fontCache, text, sizePt)
+}
+
+// MeasureRunePositionsFont — как MeasureRunePositions, но ИМЕНОВАННЫМ шрифтом.
+//
+// Каретка и выделение в моноширинном тексте считаются по нему же: раскладка,
+// посчитанная шрифтом по умолчанию, разъезжается с нарисованной, как только
+// именованный шрифт действительно зарегистрирован. Пустое имя — шрифт по
+// умолчанию.
+func (c *Canvas) MeasureRunePositionsFont(text string, sizePt float64, fontName string) []int {
+	pos := c.measureRunePositionsPxFont(c.fontFor(fontName), text, sizePt)
+	if c.scale != 1 {
+		for i, p := range pos {
+			pos[i] = int(math.Round(float64(p) / c.scale))
+		}
+	}
+	return pos
+}
+
+func (c *Canvas) measureRunePositionsPxFont(fc *FontCache, text string, sizePt float64) []int {
 	if needsShaping(text) {
-		if pos := c.shapedRunePositions(c.fontCache, text, sizePt); pos != nil {
+		if pos := c.shapedRunePositions(fc, text, sizePt); pos != nil {
 			return pos
 		}
 	}
 	if len(c.fallbacks) == 0 {
-		return c.fontCache.MeasureRunes(text, sizePt)
+		return fc.MeasureRunes(text, sizePt)
 	}
 	runes := []rune(text)
 	pos := make([]int, len(runes)+1)
 	var w fixed.Int26_6
 	for i, r := range runes {
-		w += c.runeAdvance(c.fontCache, r, sizePt)
+		w += c.runeAdvance(fc, r, sizePt)
 		pos[i+1] = w.Round()
 	}
 	return pos

@@ -289,9 +289,11 @@ func New(width, height, fps int) *Engine {
 	// экспортированные поля виджетов требуют Invalidate()/Engine.Invalidate().
 	// Опт-аут (прежнее поведение «рендер каждый тик»): SetRenderOnDemand(false).
 	e.onDemand.Store(true)
-	// Best-effort: подгружаем системные шрифты с широким покрытием символов
-	// (✓ ✗ ⚠, box-drawing, стрелки) как fallback к встроенному Go Regular (BUG-2).
-	for _, p := range systemFallbackFontPaths() {
+	// Best-effort: подгружаем шрифты с широким покрытием символов (✓ ✗ ⚠,
+	// box-drawing, стрелки) как fallback к встроенному Go Regular (BUG-2).
+	// Сначала системные, затем наши из assets/fonts — на машине без единого
+	// системного шрифта иначе некому нарисовать эти символы вовсе.
+	for _, p := range append(systemFallbackFontPaths(), assetFallbackFontPaths()...) {
 		if data, err := readFontFile(p); err == nil {
 			e.canvas.AddFallbackFont(data)
 		}
@@ -328,7 +330,15 @@ func New(width, height, fps int) *Engine {
 	//
 	// Регистрация со снятием: остановленный движок возвращает измеритель
 	// предыдущему живому вместо того, чтобы оставить свой мёртвый холст.
-	e.measurerHandle = widget.RegisterTextMeasurer(e.canvas.MeasureText)
+	e.measurerHandle = widget.RegisterMeasurers(widget.Measurers{
+		Text:     e.canvas.MeasureText,
+		TextFont: func(text string, sizePt float64, family string) int {
+			return e.canvas.MeasureTextFont(text, sizePt, family)
+		},
+		RunePositions: func(text string, sizePt float64, family string) []int {
+			return e.canvas.MeasureRunePositionsFont(text, sizePt, family)
+		},
+	})
 	return e
 }
 

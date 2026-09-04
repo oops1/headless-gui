@@ -36,6 +36,26 @@ var (
 type registeredMeasurer struct {
 	handle uint64
 	fn     textMeasurer
+	set    Measurers
+}
+
+// Measurers — набор точных измерителей, который регистрирует движок.
+//
+// Их три, потому что разметку считают в трёх разных случаях: обычная подпись
+// шрифтом темы, подпись ИМЕНОВАННЫМ шрифтом (моноширинный текст diff-виджета,
+// жирный заголовок) и позиции символов для каретки и выделения.
+//
+// Text обязателен; остальные необязательны — измеритель без них просто не
+// отвечает на соответствующие вопросы, и вызывающий получает эвристику.
+type Measurers struct {
+	// Text — ширина строки шрифтом по умолчанию.
+	Text func(text string, sizePt float64) int
+	// TextFont — ширина строки ИМЕНОВАННЫМ шрифтом. Пустое имя означает
+	// шрифт по умолчанию.
+	TextFont func(text string, sizePt float64, family string) int
+	// RunePositions — накопленная ширина после каждого символа
+	// (len(runes)+1 значений, первое — ноль).
+	RunePositions func(text string, sizePt float64, family string) []int
 }
 
 // SetTextMeasurer регистрирует точный измеритель текста без дескриптора.
@@ -55,16 +75,134 @@ func SetTextMeasurer(m func(text string, sizePt float64) int) {
 // RegisterTextMeasurer добавляет измеритель и делает его действующим.
 // Возвращает дескриптор для UnregisterTextMeasurer.
 func RegisterTextMeasurer(m func(text string, sizePt float64) int) uint64 {
-	if m == nil {
+	return RegisterMeasurers(Measurers{Text: m})
+}
+
+// RegisterMeasurers регистрирует полный набор измерителей и возвращает
+// дескриптор для UnregisterTextMeasurer.
+//
+// Этим пользуется движок: холст умеет мерить и именованным шрифтом, и по
+// символам, а до этого набора наружу выходил только замер шрифтом по
+// умолчанию. Из-за этого раскладка, посчитанная ВНЕ отрисовки, считалась не
+// тем шрифтом, которым потом рисовали, — колонки моноширинного текста
+// разъезжались.
+func RegisterMeasurers(set Measurers) uint64 {
+	if set.Text == nil {
 		return 0
 	}
 	measurersMu.Lock()
 	measurerSeq++
 	h := measurerSeq
-	measurers = append(measurers, registeredMeasurer{handle: h, fn: textMeasurer(m)})
+	measurers = append(measurers, registeredMeasurer{
+		handle: h, fn: textMeasurer(set.Text), set: set,
+	})
 	measurersMu.Unlock()
 	publishMeasurer()
 	return h
+}
+
+// activeSet возвращает действующий набор измерителей.
+func activeSet() Measurers {
+	measurersMu.Lock()
+	defer measurersMu.Unlock()
+	if n := len(measurers); n > 0 {
+		return measurers[n-1].set
+	}
+	return Measurers{Text: baseMeasurer}
+}
+
+// MeasureUITextFont возвращает ширину строки ИМЕНОВАННЫМ шрифтом — вне
+// отрисовки, там же, где работает MeasureUIText.
+//
+// Ради этого запрос и подан: MeasureUIText меряет шрифтом по умолчанию, а
+// DrawTextFont рисует указанным семейством. Пока моноширинный шрифт не
+// зарегистрирован, он подменяется дефолтным и разницы не видно; как только
+// появится — раскладка, посчитанная не тем шрифтом, разъедется.
+//
+// Пустое имя семейства означает шрифт по умолчанию: тогда это ровно
+// MeasureUIText. Движок без зарегистрированного набора отвечает той же
+// эвристикой, что и MeasureUIText, — раскладка будет грубой, но не сломанной.
+func MeasureUITextFont(text string, sizePt float64, family string) int {
+	if family == "" {
+		return MeasureUIText(text, sizePt)
+	}
+	set := activeSet()
+	if set.TextFont == nil {
+		return MeasureUIText(text, sizePt)
+	}
+
+	rev := TextMetricsRev()
+	if w, ok := fontMemoGet(rev, family, sizePt, text); ok {
+		return w
+	}
+	w := set.TextFont(text, sizePt, family)
+	fontMemoStore(rev, family, sizePt, text, w)
+	return w
+}
+
+// MeasureUIRunePositions возвращает накопленную ширину после каждого символа
+// (len(runes)+1 значений, первое — ноль) — вне отрисовки.
+//
+// Нужна для попадания курсора и выделения в тексте, разложенном до кадра.
+// Пустое имя семейства — шрифт по умолчанию. Без зарегистрированного набора
+// возвращает nil: врать позициями хуже, чем честно сказать «не знаю».
+func MeasureUIRunePositions(text string, sizePt float64, family string) []int {
+	set := activeSet()
+	if set.RunePositions == nil {
+		return nil
+	}
+	return set.RunePositions(text, sizePt, family)
+}
+
+// Мемоизация замеров ИМЕНОВАННЫМ шрифтом — отдельная от основной.
+//
+// Отдельная намеренно: у основной ключ «кегль и текст», и вплетать в него имя
+// семейства значило бы удлинить самый горячий путь замера ради случая, когда
+// шрифт задан явно. Здесь ключ — семейство, кегль и текст.
+var (
+	fontMemoMu    sync.Mutex
+	fontMemo      map[string]map[float64]map[string]int
+	fontMemoRev   uint64
+	fontMemoCount int
+)
+
+func fontMemoGet(rev uint64, family string, sizePt float64, text string) (int, bool) {
+	fontMemoMu.Lock()
+	defer fontMemoMu.Unlock()
+	if fontMemoRev != rev {
+		fontMemo, fontMemoCount, fontMemoRev = nil, 0, rev
+		return 0, false
+	}
+	w, ok := fontMemo[family][sizePt][text]
+	return w, ok
+}
+
+func fontMemoStore(rev uint64, family string, sizePt float64, text string, w int) {
+	fontMemoMu.Lock()
+	defer fontMemoMu.Unlock()
+	if fontMemoRev != rev {
+		return
+	}
+	if fontMemoCount >= measureMemoMax {
+		fontMemo, fontMemoCount = nil, 0
+	}
+	if fontMemo == nil {
+		fontMemo = make(map[string]map[float64]map[string]int, 2)
+	}
+	bySize := fontMemo[family]
+	if bySize == nil {
+		bySize = make(map[float64]map[string]int, 4)
+		fontMemo[family] = bySize
+	}
+	byText := bySize[sizePt]
+	if byText == nil {
+		byText = make(map[string]int, 64)
+		bySize[sizePt] = byText
+	}
+	if _, dup := byText[text]; !dup {
+		fontMemoCount++
+	}
+	byText[text] = w
 }
 
 // UnregisterTextMeasurer снимает измеритель по дескриптору. Действующим
