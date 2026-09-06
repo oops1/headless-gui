@@ -58,6 +58,15 @@ func (a *drawContextAdapter) DrawImage(src image.Image, x, y int) {
 func (a *drawContextAdapter) DrawImageScaled(src image.Image, x, y, w, h int) {
 	a.ctx.DrawImageScaled(src, x, y, w, h)
 }
+// FillEllipseAA — сглаженный эллипс, а на холсте без поддержки сглаживания
+// (AAShapes — интерфейс опциональный) ступенчатый: без сглаживания, но с
+// фигурой на месте. Выбор делает fillEllipse.
+func (a *drawContextAdapter) FillEllipseAA(cx, cy, rx, ry int, col color.RGBA) {
+	fillEllipse(a.ctx, cx, cy, rx, ry, col)
+}
+func (a *drawContextAdapter) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
+	a.ctx.FillRoundRect(x, y, w, h, r, col)
+}
 
 // ─── DataGridWidget ────────────────────────────────────────────────────────
 

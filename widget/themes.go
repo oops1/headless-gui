@@ -57,6 +57,15 @@ type Theme struct {
 	LabelText color.RGBA // Label, ListView.TextColor — цвет текста метки
 	LabelBG   color.RGBA // Label — фон метки (обычно прозрачный)
 
+	// SecondaryText — приглушённый ПОЯСНИТЕЛЬНЫЙ текст: подпись под
+	// параметром, единица измерения, вторичная часть строки списка.
+	//
+	// Отдельно от Disabled, хотя цвета похожи: Disabled означает «этим нельзя
+	// пользоваться», и красить им пояснение — подменять смысл. Человек,
+	// увидевший серую подпись цвета Disabled, вправе решить, что параметр
+	// выключен. Отдельно и от InputPlaceholder — тот про пустое поле ввода.
+	SecondaryText color.RGBA
+
 	// ═══════════════════════════════════════════════════════════════════════
 	// Прогресс-бар (ProgressBar)
 	// ═══════════════════════════════════════════════════════════════════════
@@ -212,8 +221,9 @@ func DarkTheme() *Theme {
 		InputPlaceholder: color.RGBA{R: 110, G: 110, B: 110, A: 255}, // #6E6E6E
 
 		// Метки
-		LabelText: color.RGBA{R: 212, G: 212, B: 212, A: 255}, // #D4D4D4
-		LabelBG:   color.RGBA{R: 0, G: 0, B: 0, A: 0},         // прозрачный
+		LabelText:     color.RGBA{R: 212, G: 212, B: 212, A: 255}, // #D4D4D4
+		LabelBG:       color.RGBA{R: 0, G: 0, B: 0, A: 0},         // прозрачный
+		SecondaryText: color.RGBA{R: 150, G: 150, B: 150, A: 255}, // #969696
 
 		// Прогресс-бар
 		ProgressBG:   color.RGBA{R: 37, G: 37, B: 38, A: 255},  // #252526
@@ -326,8 +336,9 @@ func LightTheme() *Theme {
 		InputPlaceholder: color.RGBA{R: 140, G: 140, B: 140, A: 255}, // #8C8C8C
 
 		// Метки
-		LabelText: color.RGBA{R: 32, G: 32, B: 32, A: 255}, // #202020
-		LabelBG:   color.RGBA{R: 0, G: 0, B: 0, A: 0},      // прозрачный
+		LabelText:     color.RGBA{R: 32, G: 32, B: 32, A: 255},    // #202020
+		LabelBG:       color.RGBA{R: 0, G: 0, B: 0, A: 0},         // прозрачный
+		SecondaryText: color.RGBA{R: 96, G: 96, B: 96, A: 255},    // #606060
 
 		// Прогресс-бар
 		ProgressBG:   color.RGBA{R: 230, G: 230, B: 230, A: 255}, // #E6E6E6
@@ -477,6 +488,7 @@ func ApplyGlobalTheme(t *Theme) {
 
 	// Метки
 	win10.LabelText = t.LabelText
+	win10.SecondaryText = t.SecondaryText
 	win10.LabelBG = t.LabelBG
 
 	// Прогресс-бар

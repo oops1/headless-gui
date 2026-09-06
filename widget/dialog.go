@@ -98,6 +98,11 @@ type Dialog struct {
 	// одного раза одновременно).
 	fadeAnim *Animation
 
+	// resizable/minW/minH — изменяемый размер диалога (dialog_resize.go).
+	resizable  bool
+	minW, minH int
+	content    Widget
+
 	// ── Перетаскивание за заголовок (как у Window/Panel) ────────────────────
 	dragging   bool
 	dragLastX  int

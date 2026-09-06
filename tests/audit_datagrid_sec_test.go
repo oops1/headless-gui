@@ -76,6 +76,8 @@ func (nopCtx) DrawHLine(x, y, length int, c color.RGBA)                  {}
 func (nopCtx) DrawVLine(x, y, length int, c color.RGBA)                  {}
 func (nopCtx) DrawImage(src image.Image, x, y int)                       {}
 func (nopCtx) DrawImageScaled(src image.Image, x, y, w, h int)           {}
+func (nopCtx) FillEllipseAA(cx, cy, rx, ry int, c color.RGBA)            {}
+func (nopCtx) FillRoundRect(x, y, w, h, r int, c color.RGBA)             {}
 
 // ─── SEC-4: колбэки не держат dg.mu ────────────────────────────────────────
 

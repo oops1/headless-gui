@@ -74,9 +74,11 @@ func (sp *StackPanel) layout() {
 	offset := pad
 
 	for _, child := range sp.children {
-		cb := child.Bounds()
-		cw := cb.Dx()
-		ch := cb.Dy()
+		// Размер спрашиваем у ребёнка, если он умеет отвечать (DesiredSizer):
+		// свёрнутый Expander просит высоту одного заголовка, и без вопроса
+		// он занимал бы в столбике место, которого ему больше не нужно.
+		// Остальные, как и раньше, дают свои текущие границы.
+		cw, ch := layoutSizeOf(child)
 
 		// Margin — внешний отступ ребёнка (WPF Thickness).
 		var m Margin

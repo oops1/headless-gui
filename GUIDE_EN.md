@@ -262,6 +262,53 @@ There is no separate `ToggleButton` type: it differs from `Button` by exactly
 this state, not by layout, icons, commands or subscriptions. `IsChecked` is
 read on a plain button too — "draw it selected", without the toggle behavior.
 
+### Measuring content
+
+`StackPanel`, `ScrollView` and `Expander` can say how much room they need:
+
+```go
+w, h := sp.DesiredSize()   // children + gaps + padding
+sp.Relayout()              // re-lay the column after the content changed
+sv.FitContent()            // scroll height from the children
+```
+
+A collapsed `Expander` asks for the height of its header alone and no longer
+holds room for hidden content; a hidden child takes neither its own space nor
+the gap after it. Hence the typical case — a collapsible group inside a scroll
+view:
+
+```go
+ex.OnExpandedChanged = func(bool) {
+    stack.Relayout()
+    scroll.FitContent()
+}
+```
+
+There is no two-pass Measure/Arrange here: `DesiredSize` is asked through an
+interface, and a container only asks the children that implement it — everyone
+else still gets their own bounds.
+
+### Separator
+
+```go
+s := widget.NewSeparator()          // horizontal
+v := widget.NewVerticalSeparator()
+s.Thickness = 2                     // 0 means one pixel
+s.Margin = 20                       // inset from the ends ALONG the line
+```
+
+In XAML — `<Separator/>` with `Orientation`, `Thickness`, `Margin` and
+`Background`. The orientation follows the size: a width without a height means a
+horizontal line.
+
+The color comes from the theme (`Theme.Border`) and follows theme changes. The
+line is drawn in the middle of the area it gets: a separator is usually given a
+band a few pixels tall, and a line at the top edge would read as belonging to the
+group above rather than to the gap between groups.
+
+For explanatory captions under settings the theme has `Theme.SecondaryText` —
+separate from `Disabled`, which means "you cannot use this".
+
 ### ToolBar
 
 ```go
@@ -318,6 +365,17 @@ inp := widget.NewPasswordInput("Enter password...")
 ```
 
 In XAML: `<PasswordBox Placeholder="Password..."/>`.
+
+**Leading icon.** A search box with a magnifier, a password box with a lock:
+
+```go
+inp.LeadingIcon = searchIcon // image.Image
+inp.LeadingIconSize = 16     // 0 = the field height
+```
+
+In XAML — the `Icon` attribute (and `IconSize`). The text and the caret shift
+right by the icon width: there is no need to lay an icon widget over the field,
+and a click on it no longer misses the input.
 
 **Reading the secret as bytes.** `GetText()` hands back an immutable Go string:
 nothing can zero it, it lives on the heap until the GC gets to it, and it lands
@@ -840,6 +898,32 @@ dg.Grid.OnHeaderClick = func(col datagrid.Column, idx, x, y int) bool {
     return true           // do not sort
 }
 ```
+
+**Column width.** A column has its own `SetMinWidth`/`SetMaxWidth`, and both
+take part in distributing `*` columns and in mouse resizing: in a narrow window
+the "Status" column no longer shrinks to nothing while "Resource" gives up
+space. Star columns are divided in several rounds — a column that hits its
+bound hands the remainder to those that can still stretch.
+
+**Long text.** A text column ellipsizes its value to the cell width. The same
+function is available to template columns:
+
+```go
+s := datagrid.EllipsizeText(cdc.DrawCtx, longText, maxW, cdc.FontSize)
+```
+
+**Shapes in a cell.** `cdc.DrawCtx` provides `FillEllipseAA` and
+`FillRoundRect` — a colored status dot is drawn in place, with no pre-rasterized
+images.
+
+**Empty state.** An empty table is the normal first state of a key list or a log:
+
+```go
+dg.Grid.EmptyStateText = "No keys yet"
+dg.Grid.EmptyStateRenderer = func(c datagrid.EmptyStateContext) { ... }
+```
+
+The headers stay: they tell the reader what table this is.
 
 **Live header translation.** `{Loc Key}` in `Header` follows a language switch
 the same way tab and menu labels do:
@@ -1836,6 +1920,26 @@ dlg := widget.NewDialog("Settings", 1000, 700) // may be larger than the window
 dlg.CornerRadius = 8                             // rounded dialog window corners
 eng.ShowModal(dlg)
 ```
+
+**Resizable dialogs.** Off by default — a dialog with a question and two
+buttons has nothing to stretch:
+
+```go
+dlg.SetResizable(true)
+dlg.SetMinSize(500, 400)   // zero on an axis = the 200x120 default
+dlg.SetContent(panel)      // THIS widget fills the content area
+dlg.Resize(800, 600)
+```
+
+Only the `SetContent` widget is stretched; plain children move with the dialog.
+Stretching every child the way `widget.Window` does is wrong here: dialogs place
+buttons and labels at absolute coordinates inside themselves, and "every child
+fills the whole area" would turn a `MessageBox` into a pile of widgets on top of
+each other.
+
+When the dialog is shown in its own OS window, resizability reaches it too: a
+resize frame, the minimum from `MinSize`, and a canvas recomputed on every
+change.
 
 `ShowModal` applies the CURRENT theme to the dialog. Otherwise a widget that
 caches colors (`DataGridWidget`) would keep its defaults: a dialog created after
