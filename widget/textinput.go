@@ -82,6 +82,19 @@ type TextInput struct {
 	PaddingX int
 	PaddingY int
 
+	// LeadingIcon — значок в начале поля (лупа у строки поиска, замок у
+	// пароля). Текст сдвигается вправо на его ширину.
+	//
+	// Отдельным виджетом поверх поля это не решалось: клик по значку уходил
+	// значку, а не полю, каретка считалась от левого края и вставала под
+	// значок, а отступ приходилось задавать вручную и держать в согласии с
+	// размером картинки.
+	LeadingIcon image.Image
+
+	// LeadingIconSize — сторона значка в пикселях. 0 означает «по высоте
+	// поля»: значок обычно занимает её всю, за вычетом отступов.
+	LeadingIconSize int
+
 	FontName string  // именованный шрифт (RegisterFont); "" → default
 	FontSize float64 // размер шрифта в pt (0 → DefaultFontSizePt)
 
@@ -663,11 +676,31 @@ func (t *TextInput) WantsCapture(e MouseEvent) bool {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+// leadingZone возвращает ширину зоны значка в начале поля (0, если значка
+// нет). Ширина считается по высоте поля, если размер не задан явно.
+//
+// Одна функция на отрисовку и на хит-тест: разойдись они, каретка вставала бы
+// не туда, куда щёлкнули, и найти это было бы нечем — обе формулы выглядят
+// правдоподобно каждая по себе.
+func (t *TextInput) leadingZone() int {
+	if t.LeadingIcon == nil {
+		return 0
+	}
+	sz := t.LeadingIconSize
+	if sz <= 0 {
+		sz = t.bounds.Dy() - 10
+	}
+	if sz < 12 {
+		sz = 12
+	}
+	return sz + t.PaddingX
+}
+
 // charIndexAtX возвращает индекс символа (позицию каретки) для абсолютной X-координаты.
 // Вызывать под t.mu.Lock().
 func (t *TextInput) charIndexAtX(absX int) int {
 	b := t.bounds
-	textX := b.Min.X + t.PaddingX - t.scrollX
+	textX := b.Min.X + t.PaddingX + t.leadingZone() - t.scrollX
 	relX := absX - textX
 
 	pos := t.charPositions
@@ -1144,7 +1177,8 @@ func (t *TextInput) Draw(ctx DrawContext) {
 	if isPwd {
 		rightPad = eyeButtonWidth + 2
 	}
-	textAreaW := b.Dx() - t.PaddingX - rightPad
+	leadPad := t.PaddingX + t.leadingZone()
+	textAreaW := b.Dx() - leadPad - rightPad
 	textY := b.Min.Y + (b.Dy()-textH)/2
 	if textY < b.Min.Y+2 {
 		textY = b.Min.Y + 2
@@ -1182,14 +1216,18 @@ func (t *TextInput) Draw(ctx DrawContext) {
 	scrollX := t.scrollX
 	t.mu.Unlock()
 
-	// Клиппинг по внутренней области поля (без зоны глазика)
-	inner := image.Rect(b.Min.X+1, b.Min.Y+1, b.Max.X-rightPad, b.Max.Y-1)
+	// Значок в начале поля — ДО клиппинга по текстовой области: он лежит
+	// левее её и иначе был бы срезан.
+	t.drawLeadingIcon(ctx, b)
+
+	// Клиппинг по внутренней области поля (без зоны глазика и без значка)
+	inner := image.Rect(b.Min.X+leadPad, b.Min.Y+1, b.Max.X-rightPad, b.Max.Y-1)
 	ctx.SetClip(inner)
 
-	textX := b.Min.X + t.PaddingX - scrollX
+	textX := b.Min.X + leadPad - scrollX
 
 	if displayText == "" {
-		ctx.DrawText(t.Placeholder, b.Min.X+t.PaddingX, textY, t.PlaceColor)
+		ctx.DrawText(t.Placeholder, b.Min.X+leadPad, textY, t.PlaceColor)
 	} else {
 		// Подсветка выделения
 		if selStart >= 0 && selStart != selEnd {
@@ -1363,4 +1401,19 @@ func (t *TextInput) ApplyTheme(th *Theme) {
 	t.PlaceColor = th.InputPlaceholder
 	t.CaretColor = th.InputCaret
 	t.SelColor = premulAlpha(th.Accent, 110)
+}
+
+// drawLeadingIcon рисует значок в начале поля.
+//
+// По центру отведённой зоны и по вертикали: значок меньше поля, и прижатый к
+// краю он читался бы как часть рамки, а не как часть содержимого.
+func (t *TextInput) drawLeadingIcon(ctx DrawContext, b image.Rectangle) {
+	if t.LeadingIcon == nil {
+		return
+	}
+	zone := t.leadingZone()
+	sz := zone - t.PaddingX
+	x := b.Min.X + t.PaddingX
+	y := b.Min.Y + (b.Dy()-sz)/2
+	ctx.DrawImageScaled(t.LeadingIcon, x, y, sz, sz)
 }

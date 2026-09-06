@@ -467,11 +467,11 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 		if xamlWantsMultiline(el) {
 			w = buildXAMLTextBox(el)
 		} else {
-			w = buildXAMLTextInput(el, false)
+			w = buildXAMLTextInput(el, false, baseDir)
 		}
 
 	case "passwordbox":
-		w = buildXAMLTextInput(el, true)
+		w = buildXAMLTextInput(el, true, baseDir)
 
 	// ── Выпадающий список ────────────────────────────────────────────────────
 	case "combobox", "dropdown":
@@ -903,7 +903,7 @@ func extractButtonContentRec(el xElement, bc *buttonContent) {
 	}
 }
 
-func buildXAMLTextInput(el xElement, isPassword bool) Widget {
+func buildXAMLTextInput(el xElement, isPassword bool, baseDir string) Widget {
 	placeholder := el.attr("Tag", "Placeholder", "PlaceholderText", "Hint")
 	if isPassword && placeholder == "" {
 		placeholder = "Пароль"
@@ -942,6 +942,17 @@ func buildXAMLTextInput(el xElement, isPassword bool) Widget {
 		if v, err := strconv.Atoi(strings.TrimSpace(ml)); err == nil && v > 0 {
 			ti.MaxLength = v
 		}
+	}
+
+	// Значок в начале поля (лупа у строки поиска). Путь ограничен каталогом
+	// разметки или fs.FS — тем же openXAMLResource, что и у прочих ресурсов.
+	if src := el.attr("Icon", "IconSource", "LeadingIcon"); src != "" {
+		if img, err := decodeXAMLImage(baseDir, src); err == nil {
+			ti.LeadingIcon = img
+		}
+	}
+	if sz := xatoi(el.attr("IconSize")); sz > 0 {
+		ti.LeadingIconSize = sz
 	}
 
 	return ti
