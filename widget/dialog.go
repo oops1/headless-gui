@@ -97,6 +97,12 @@ type Dialog struct {
 	// (SetNavButton): collapsed — состояние ПОСЛЕ нажатия. Сворачивает
 	// боковую область приложение: движок не знает, что у него слева.
 	OnNavToggle func(collapsed bool)
+
+	// OnMinimize и OnMaximizeRestore — действия штатных кнопок окна
+	// (SetWindowButtons). Их ставит нативный хост модалки: свернуть и
+	// развернуть умеет окно ОС, а не виджет в холсте.
+	OnMinimize        func()
+	OnMaximizeRestore func()
 	// CopyText, если задан, вызывается по Ctrl+C и его результат кладётся
 	// в буфер обмена (MessageBox формирует Windows-подобный дамп).
 	CopyText func() string
@@ -140,6 +146,12 @@ type Dialog struct {
 	titleBarContent Widget
 	navBtn          *titleNavBtn
 	navPanel        Widget
+
+	// minBtn/maxBtn — штатные кнопки окна «свернуть» и «развернуть»
+	// (dialog_sysbuttons.go); maximized — состояние, о котором сообщает хост
+	// окна: сам виджет о своём окне ничего не знает.
+	minBtn, maxBtn *dialogSysBtn
+	maximized      bool
 	pad             int
 	padSet          bool
 

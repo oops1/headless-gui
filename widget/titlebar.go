@@ -21,6 +21,10 @@ const (
 	titleBarGap  = 8  // зазор между элементами полосы
 	titleBarPadV = 4  // отступ начинки от верхнего и нижнего края полосы
 	titleBarMinW = 48 // уже этого начинку не показываем — рисовать нечего
+	// titleBarHandleW — свободное место между начинкой приложения и кнопками
+	// окна. Полоса заголовка — это ещё и место, за которое окно тащат: поле
+	// поиска во всю ширину не оставляло бы за него ни одной точки.
+	titleBarHandleW = 72
 	// localeBadgeReserve — место, отводимое плашке локали в полосе заголовка.
 	// Её ширина зависит от подписи локали и известна только на отрисовке, а
 	// раскладка начинки идёт в SetBounds — берём заведомо достаточное.
@@ -225,10 +229,8 @@ func (d *Dialog) TitleBarContentBounds() image.Rectangle {
 	if nb := d.NavPanelBounds(); !nb.Empty() && nb.Max.X+titleBarGap > left {
 		left = nb.Max.X + titleBarGap
 	}
-	right := b.Max.X - dlgPad
-	if d.ShowCloseButton {
-		right = b.Max.X - dlgCloseSize - 12
-	}
+	// Правее начинки остаётся свободная полоска — за неё окно тащат.
+	right := d.sysButtonsLeft() - titleBarHandleW
 	if d.ShowLocaleIndicator {
 		right -= localeBadgeReserve
 	}
@@ -461,7 +463,8 @@ func (w *Window) titleContentRight() int {
 	if w.ShowLocaleIndicator {
 		right -= localeBadgeReserve
 	}
-	return right
+	// Свободная полоска между начинкой и кнопками — за неё тащат окно.
+	return right - titleBarHandleW
 }
 
 // titleTextW — ширина подписи заголовка окна тем шрифтом, которым её рисуют.

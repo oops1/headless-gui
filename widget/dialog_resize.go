@@ -126,12 +126,8 @@ func (d *Dialog) SetBounds(r image.Rectangle) {
 		}
 	}
 
-	if d.closeBtn != nil {
-		top := r.Min.Y + (d.TitleHeight-dlgCloseSize)/2
-		d.closeBtn.SetBounds(image.Rect(
-			r.Max.X-dlgCloseSize-6, top,
-			r.Max.X-6, top+dlgCloseSize))
-	}
+	// ✕ и, если включены, «свернуть»/«развернуть» — справа налево.
+	d.layoutSysButtons(r)
 
 	// Боковая панель занимает колонку до верхнего края — её раскладка идёт
 	// раньше содержимого, которое от неё отступает.
