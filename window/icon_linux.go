@@ -13,6 +13,10 @@ import "image"
 // Предопределённый, поэтому InternAtom не нужен.
 const atomCardinal = 6
 
+// Проверка на этапе сборки: Window.SetIcon находит бэкенд по интерфейсу, и
+// опечатка в имени метода превратилась бы в молчаливый ErrIconUnsupported.
+var _ iconSetter = (*X11Window)(nil)
+
 // setIcon выставляет _NET_WM_ICON.
 //
 // Формат свойства (EWMH): подряд идут значки, каждый — ширина, высота и

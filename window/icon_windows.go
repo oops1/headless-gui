@@ -17,6 +17,10 @@ const (
 
 var procSendMessageW = user32.NewProc("SendMessageW")
 
+// Проверка на этапе сборки: Window.SetIcon находит бэкенд по интерфейсу, и
+// опечатка в имени метода превратилась бы в молчаливый ErrIconUnsupported.
+var _ iconSetter = (*Win32Window)(nil)
+
 // setIcon ставит окну значок сообщением WM_SETICON.
 //
 // Значков два: маленький (16×16, заголовок и панель задач) и большой (32×32,
