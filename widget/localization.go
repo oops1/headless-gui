@@ -78,6 +78,25 @@ func SetLanguage(code string) {
 	}
 }
 
+// notifyLanguageChanged будит подписчиков, не меняя язык.
+//
+// Нужен там, где изменился не язык, а СПОСОБ получить перевод — например
+// добавили псевдоним ключа (stringalias.go). Видимый текст от этого меняется
+// так же, как от смены языка, и открытые диалоги обязаны его перечитать.
+func notifyLanguageChanged() {
+	langMu.RLock()
+	code := currentLanguage
+	ls := make([]func(string), 0, len(languageListeners))
+	for _, e := range languageListeners {
+		ls = append(ls, e.fn)
+	}
+	langMu.RUnlock()
+	for _, l := range ls {
+		l(code)
+	}
+	notifyUIChanged()
+}
+
 // Language возвращает текущий язык интерфейса. Потокобезопасно.
 func Language() string {
 	langMu.RLock()

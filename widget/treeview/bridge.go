@@ -20,6 +20,15 @@ type DrawContextBridge interface {
 	DrawVLine(x, y, length int, col color.RGBA)
 	DrawImageScaled(src image.Image, x, y, w, h int)
 	SetPixel(x, y int, col color.RGBA)
+
+	// DrawTextBold — жирное начертание.
+	//
+	// Именно «жирное», а не «шрифтом по имени»: имя встроенного жирного
+	// шрифта знает пакет widget, а он импортирует этот пакет, не наоборот.
+	// Отдавать сюда имя значило бы протаскивать чужую константу через
+	// границу пакетов ради одного вызова.
+	DrawTextBold(text string, x, y int, sizePt float64, col color.RGBA)
+	MeasureTextBold(text string, sizePt float64) int
 }
 
 // ─── TreeViewTheme ─────────────────────────────────────────────────────────

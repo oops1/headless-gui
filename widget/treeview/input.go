@@ -53,7 +53,9 @@ func (tv *TreeView) OnMouseButton(x, y int, button, pressed int) bool {
 	}
 
 	if !isPressed {
-		return false
+		// Отпускание завершает перетаскивание узла (dragdrop.go). Оно же
+		// поглощает клик: узел, который тащили, выбирать заново незачем.
+		return tv.finishNodeDrag()
 	}
 
 	// ── Определяем строку под курсором ──────────────────────────────────
@@ -77,6 +79,9 @@ func (tv *TreeView) OnMouseButton(x, y int, button, pressed int) bool {
 		tv.markFullDirty()    // набор видимых строк изменился
 		return true
 	}
+
+	// Нажатие может оказаться началом переноса — решится по движению мыши.
+	tv.beginNodeDrag(item, y)
 
 	// ── Выбор узла ──────────────────────────────────────────────────────
 	old := tv.selectedItem
@@ -135,6 +140,12 @@ func (tv *TreeView) OnMouseMove(x, y int) {
 		if tv.scrollY != old {
 			tv.markFullDirty()
 		}
+		return
+	}
+
+	// Перетаскивание узла (dragdrop.go): пока оно идёт, hover не ведём —
+	// подсветка строки под курсором спорила бы с полосой места вставки.
+	if tv.dragNodeTo(y) {
 		return
 	}
 

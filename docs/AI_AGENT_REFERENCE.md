@@ -674,6 +674,61 @@ eng.SendMouseButton(x, y, widget.MouseLeft, true)
 // DataGrid with SelectionExtended: Ctrl+Click toggles, Shift+Click ranges.
 ```
 
+### Context menus per row/node, ToolBar, tree drag, dialog localization
+
+```go
+// Menu built for the point under the cursor (ContextMenuProvider). The engine
+// asks it BEFORE the plain ContextMenu field. An empty slice means "no menu
+// here"; a right click does NOT change the selection.
+dg.RowContextMenu = func(item interface{}, row int) []widget.MenuItem { ... }
+tw.NodeContextMenu = func(it *treeview.TreeViewItem) []widget.MenuItem { ... }
+dg.Grid.ItemAtRow(row)      // model item shown in a row
+tw.Tree.ItemAtY(y)          // node under a Y coordinate
+tw.Tree.IndexAtY(y)
+
+// ToolBar: separators, icons-only, overflow into a chevron menu.
+tb := widget.NewToolBar(); tb.AddSeparator(); tb.SetIconsOnly(true)
+// XAML: <ToolBar IconsOnly="True" Overflow="True"><Separator/></ToolBar>
+// NOTE: <ToolBar> now builds *widget.ToolBar, not *widget.StackPanel.
+
+// Tree drag & drop (off by default — dragging changes what a click does).
+tw.Tree.CanUserDragNodes = true
+tw.Tree.CanDropNode = func(d, target *treeview.TreeViewItem, p treeview.DropPosition) bool
+tw.Tree.OnNodeDrop  = func(d, target *treeview.TreeViewItem, p treeview.DropPosition) bool
+// true from OnNodeDrop means "I handled it" — the tree moves nothing.
+tw.Tree.MoveNode(node, target, treeview.DropInside)
+
+// Dialog strings: override dlg.* directly, or alias them to your own keys.
+widget.RegisterStrings("EN", map[string]string{"dlg.cancel": "Never mind"})
+widget.AliasStrings(map[string]string{"dlg.ok": "btn.ok"})
+// {Loc Key} in a DataGrid column Header now follows SetLanguage.
+```
+
+### Window icon, modal theming, secret input, tree item style
+
+```go
+// Window icon at runtime: Win32 WM_SETICON, X11 _NET_WM_ICON.
+// Nearest size wins; a backend without support returns ErrIconUnsupported.
+win.SetIcon(icon16, icon32)
+win.SetIcon() // drop it
+
+// ShowModal now applies the current theme to the dialog, so a widget that
+// caches colors (DataGridWidget) is no longer left with the defaults.
+// Consequence: colors set by hand on dialog widgets BEFORE showing are
+// overwritten — exactly as already happened to a shown modal on SetTheme.
+widget.CurrentTheme() *Theme // a COPY of the active theme
+
+// Password input without ever creating a string.
+secret := inp.TakeSecret() // []byte; clears the field in the same call
+inp.WipeSecret()           // on cancel
+
+// Tree item look: fields on the item, or a callback for application state.
+item.Foreground = col
+item.Bold = true
+tv.ItemStyle = func(it *treeview.TreeViewItem) (color.RGBA, bool, bool) { ... }
+// ok=false means "you decide" — the item's own fields are used then.
+```
+
 ### DockPanel.LastChildFill, DockPane active title
 
 ```go

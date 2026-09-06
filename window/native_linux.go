@@ -122,6 +122,13 @@ type X11Window struct {
 	atomNetWMIconName uint32
 	atomMotifHints    uint32
 
+	// atomNetWMIcon — _NET_WM_ICON (значок окна, см. icon_linux.go).
+	// Берётся лениво: значок задают не все, а InternAtom — это круговой
+	// обмен с сервером. pendingIcons хранит значок, заданный до создания
+	// окна.
+	atomNetWMIcon uint32
+	pendingIcons  []image.Image
+
 	// ── XDND (Drag&Drop файлов из ОС, протокол v5) ──────────────────────────
 	atomXdndAware      uint32
 	atomXdndEnter      uint32
@@ -313,6 +320,11 @@ func (w *X11Window) Create(title string, width, height int) error {
 
 	// Window title
 	w.x11SetTitle(w.wid, title)
+
+	// Значок, заданный до создания окна: SetIcon мог прийти раньше Run.
+	// Свойство ставится ДО MapWindow — иначе WM успевает показать окно без
+	// значка и перерисовывает заголовок вторым шагом.
+	w.applyPendingIcon()
 
 	// Map (show) window
 	w.x11MapWindow(w.wid)

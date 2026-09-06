@@ -2,6 +2,7 @@ package treeview
 
 import (
 	"image"
+	"image/color"
 	"log"
 	"reflect"
 	"sync"
@@ -74,10 +75,52 @@ type TreeView struct {
 	OnCollapsed           CollapsedHandler
 	OnItemInvoked         ItemInvokedHandler
 
+	// ItemStyle — оформление строки узла: цвет текста и начертание.
+	//
+	// Колбэк, а не только поля узла: «активный репозиторий» — состояние
+	// ПРИЛОЖЕНИЯ, а не узла, и держать его копию в каждом узле значит
+	// синхронизировать её при каждом переключении. Возврат ok=false означает
+	// «решай сам» — тогда смотрятся поля Foreground и Bold самого узла.
+	//
+	// Зовётся на каждый видимый узел в каждом кадре: тяжёлой работы внутри
+	// быть не должно.
+	ItemStyle func(item *TreeViewItem) (fg color.RGBA, bold bool, ok bool)
+
+	// CanUserDragNodes — можно ли переставлять узлы перетаскиванием мышью
+	// (dragdrop.go).
+	//
+	// По умолчанию ВЫКЛЮЧЕНО: перетаскивание меняет поведение обычного
+	// щелчка — уведённая на несколько точек мышь переставляет узел, — и
+	// включать это молча у всех, кто дерево уже использует, нельзя.
+	CanUserDragNodes bool
+
+	// CanDropNode — разрешает или запрещает конкретный перенос.
+	//
+	// Структурные запреты (узел в самого себя и в собственного потомка)
+	// дерево проверяет само: ошибиться в них легко, а последствия у них не
+	// «неудобно», а «часть данных исчезла с экрана».
+	CanDropNode func(dragged, target *TreeViewItem, pos DropPosition) bool
+
+	// OnNodeDrop — узел отпустили над целью.
+	//
+	// Возврат true означает «справился сам»: дерево не станет переставлять
+	// узлы. Так приложение, у которого источник правды — своя модель,
+	// перестраивает дерево из неё, а не получает перестановку за спиной.
+	// Возврат false (и nil-колбэк) — дерево переставляет узел само.
+	OnNodeDrop func(dragged, target *TreeViewItem, pos DropPosition) bool
+
 	// Обратная совместимость: простой callback как в старом TreeView
 	OnSelect func(item *TreeViewItem)
 
 	// ── Внутреннее ───────────────────────────────────────────────────────
+	// Перетаскивание узла (dragdrop.go). dragItem == nil — нажатия нет.
+	dragItem   *TreeViewItem
+	dragStartY int
+	dragging   bool
+	dropTarget *TreeViewItem
+	dropPos    DropPosition
+	dropIdx    int
+
 	mu       sync.Mutex
 	focused  bool
 	dirty    bool // нужен пересчёт flat-списка
