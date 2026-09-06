@@ -96,6 +96,15 @@ type Window struct {
 	// (dialog_chrome.go). Нужны borderless-окну: своей полосы у него нет.
 	dragAreas []image.Rectangle
 
+	// titleBarContent/navBtn — начинка штатной полосы заголовка (titlebar.go):
+	// виджет приложения в её свободной части и кнопка сворачивания слева.
+	titleBarContent Widget
+	navBtn          *titleNavBtn
+
+	// OnNavToggle вызывается кнопкой сворачивания (SetNavButton): collapsed —
+	// состояние ПОСЛЕ нажатия. Сворачивает боковую область приложение.
+	OnNavToggle func(collapsed bool)
+
 	// Style — стиль обрамления (SingleBorder, None, ToolWindow).
 	Style WindowStyle
 
@@ -360,8 +369,15 @@ func (w *Window) SetBounds(r image.Rectangle) {
 		if _, ok := child.(*PopupMenu); ok {
 			continue
 		}
+		// Начинка полосы заголовка живёт в полосе, а не в клиентской области:
+		// растянуть её на ContentBounds значило бы положить поиск поверх всего
+		// содержимого окна.
+		if w.isTitleBarWidget(child) {
+			continue
+		}
 		child.SetBounds(cb)
 	}
+	w.layoutTitleBar()
 }
 
 // ─── Активность окна (фокус ОС) ─────────────────────────────────────────────
@@ -853,8 +869,22 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	// Без искусственного зазора: заголовок, который вписывался раньше (до
 	// появления бейджа), должен рендериться так же — иначе короткие названия
 	// теряли последнюю букву под эллипсис при наличии плашки локали.
+	// Начинка приложения стоит правее подписи — подпись обрезаем по её левому
+	// краю: иначе длинный заголовок наехал бы на чужой виджет.
+	if w.titleBarContent != nil {
+		if cl := w.titleContentLeft() - titleBarGap; cl < titleRight {
+			titleRight = cl
+		}
+	}
+
 	textX := x + 12
+	if w.navBtn != nil && !w.navBtn.bounds.Empty() {
+		textX = w.navBtn.bounds.Max.X + titleBarGap
+	}
 	textY := y + (th-13)/2
+	if w.navBtn != nil {
+		w.navBtn.fg = tc
+	}
 	if w.titleTabsActive() {
 		// Режим вкладок: полосу заголовка занимают вкладки, текст Title
 		// не рисуется. В классике старт после отступа иконки, потолок —
@@ -1130,9 +1160,18 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 	if haveBadge {
 		rightLimit = badgeLeft - 8
 	}
+	if w.navBtn != nil {
+		w.navBtn.fg = tc
+	}
 	if w.titleTabsActive() {
 		// Режим вкладок: после traffic lights — полоса вкладок.
 		w.drawTitleTabs(ctx, leftLimit+8, rightLimit, y, th)
+		return
+	}
+	if w.titleBarContent != nil {
+		// Начинка приложения занимает полосу после «светофора». Подпись в
+		// mac-стиле центрирована и легла бы поверх неё — не рисуем, как и в
+		// режиме вкладок.
 		return
 	}
 	textY := y + (th-13)/2
@@ -1190,6 +1229,12 @@ func (w *Window) WantsCapture(e MouseEvent) bool {
 	// Клик по вкладке/«×»/«+» в полосе заголовка обрабатывается на нажатии
 	// и захвата не требует (иначе капча зависла бы без release-ветки).
 	if w.titleTabHitZone(pt) {
+		return false
+	}
+	// Начинка приложения в полосе (поиск, кнопка сворачивания) забирает клик
+	// себе: захват окном увёл бы события у неё, и поле в заголовке нельзя было
+	// бы ни выделить, ни прокрутить.
+	if w.titleBarChildHit(pt) {
 		return false
 	}
 	// Drag за заголовок.
@@ -1563,7 +1608,7 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 	}
 
 	// Нажатие на заголовок или на объявленную область — начинаем drag
-	if pt.In(w.titleBarRect()) || w.dragAreaHit(pt) {
+	if (pt.In(w.titleBarRect()) && !w.titleBarChildHit(pt)) || w.dragAreaHit(pt) {
 		DismissAll(w) // закрываем dropdown/popup перед drag
 		w.dragging = true
 		w.dragStartX = e.X

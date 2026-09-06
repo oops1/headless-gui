@@ -92,6 +92,11 @@ type Dialog struct {
 	// действие, и звать её обработчик при остановленном закрытии значило бы
 	// сообщить о том, чего не произошло.
 	OnClosing func() bool
+
+	// OnNavToggle вызывается кнопкой сворачивания в полосе заголовка
+	// (SetNavButton): collapsed — состояние ПОСЛЕ нажатия. Сворачивает
+	// боковую область приложение: движок не знает, что у него слева.
+	OnNavToggle func(collapsed bool)
 	// CopyText, если задан, вызывается по Ctrl+C и его результат кладётся
 	// в буфер обмена (MessageBox формирует Windows-подобный дамп).
 	CopyText func() string
@@ -128,6 +133,14 @@ type Dialog struct {
 	// части содержимого окно тащат.
 	chromeless bool
 	dragAreas  []image.Rectangle
+
+	// titlebar.go — своя начинка штатной полосы и отступ содержимого:
+	// titleBarContent стоит в свободной части полосы, navBtn сворачивает
+	// боковую область приложения, pad/padSet заменяют константу dlgPad.
+	titleBarContent Widget
+	navBtn          *titleNavBtn
+	pad             int
+	padSet          bool
 
 	// ── Перетаскивание за заголовок (как у Window/Panel) ────────────────────
 	dragging   bool
@@ -298,14 +311,15 @@ func (d *Dialog) SetModal(v bool) {
 }
 
 // ContentBounds возвращает прямоугольник для размещения дочерних виджетов
-// (под заголовком, с отступами).
+// (под заголовком, с отступами — см. SetContentPadding).
 func (d *Dialog) ContentBounds() image.Rectangle {
 	b := d.bounds
+	ph, pv := d.contentPadding()
 	return image.Rect(
-		b.Min.X+dlgPad,
-		b.Min.Y+d.titleH()+12,
-		b.Max.X-dlgPad,
-		b.Max.Y-12,
+		b.Min.X+ph,
+		b.Min.Y+d.titleH()+pv,
+		b.Max.X-ph,
+		b.Max.Y-pv,
 	)
 }
 
@@ -318,6 +332,11 @@ func (d *Dialog) Draw(ctx DrawContext) {
 	// звать перерисовку из середины перерисовки незачем и небезопасно
 	// (это ровно то, из-за чего исходно ловили баг с пропуском Draw).
 	d.syncCloseButtonVisible()
+	if d.navBtn != nil {
+		// Иконка кнопки живёт в полосе заголовка и следует её цвету, а не
+		// палитре кнопок: тему полосы задаёт TitleColor.
+		d.navBtn.fg = d.TitleColor
+	}
 
 	if st.Classic3D {
 		// Классика Win2000: квадрат, градиентный заголовок, рамка.
@@ -325,7 +344,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 		if d.titleH() > 0 {
 			fillTitleBar(ctx, image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+d.TitleHeight), d.TitleBG)
 			textY := b.Min.Y + (d.TitleHeight-13)/2
-			drawTitleText(ctx, d.Title, b.Min.X+10, textY, d.TitleColor)
+			drawTitleText(ctx, d.Title, d.titleTextX(), textY, d.TitleColor)
 			if d.ShowLocaleIndicator {
 				drawLocaleBadge(ctx, b.Max.X-8, b.Min.Y, d.TitleHeight, d.TitleColor)
 			}
@@ -358,7 +377,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), d.TitleHeight, cr, d.TitleBG)
 		ctx.FillRect(b.Min.X, b.Min.Y+d.TitleHeight-cr, b.Dx(), cr, d.TitleBG)
 		textY := b.Min.Y + (d.TitleHeight-14)/2
-		ctx.DrawTextFont(d.Title, b.Min.X+dlgPad, textY, 11, BuiltinFontBold, d.TitleColor)
+		ctx.DrawTextFont(d.Title, d.titleTextX(), textY, 11, BuiltinFontBold, d.TitleColor)
 		if d.ShowLocaleIndicator {
 			drawLocaleBadge(ctx, b.Max.X-dlgCloseSize-12, b.Min.Y, d.TitleHeight, d.TitleColor)
 		}

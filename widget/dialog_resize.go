@@ -133,6 +133,11 @@ func (d *Dialog) SetBounds(r image.Rectangle) {
 			r.Max.X-6, top+dlgCloseSize))
 	}
 
+	// Полоса заголовка: кнопка сворачивания и начинка приложения (titlebar.go).
+	// Ширина полосы меняется вместе с диалогом, поэтому раскладка здесь, а не
+	// только в момент их установки.
+	d.layoutTitleBar()
+
 	if d.content != nil {
 		if cb := d.ContentBounds(); !cb.Empty() {
 			d.content.SetBounds(cb)
