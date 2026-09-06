@@ -1844,6 +1844,27 @@ hand on the dialog's widgets BEFORE showing are overwritten by the theme —
 exactly as already happened to a shown modal on `SetTheme`. A subtree with its
 own theme (`ThemeScope`) is left alone.
 
+### Minimum window size
+
+```go
+win.SetMinSize(800, 600) // LOGICAL pixels
+win.SetMinSize(0, 0)     // drop the limit
+win.MinSize()            // read back what was set
+```
+
+Logical, not physical: the application thinks in the same units as the widgets,
+and the window does the HiDPI conversion — and redoes it when the window moves
+to a monitor with a different DPI.
+
+Call it before `Run()` (applied when the window is created) or while running: a
+window with a compact and a full mode may change its minimum on the fly. An
+explicit call overrides `MinWidth`/`MinHeight` of the root `widget.Window` —
+explicit beats markup.
+
+All three backends honour the limit: Win32 (`WM_GETMINMAXINFO`), X11
+(`WM_NORMAL_HINTS`) and Wayland (`xdg_toplevel.set_min_size`). On macOS it is a
+no-op.
+
 ### Window icon
 
 ```go
