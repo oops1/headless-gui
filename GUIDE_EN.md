@@ -2121,7 +2121,9 @@ gets its `TopInset` from the host).
 
 `ContentBounds` moves right of the column, so the `SetContent` widget is laid out
 in what is left, and a collapsed panel hands it the freed width with no code in
-the application. The column is capped at half the window: a panel that took the
+the application. The title bar content (`SetTitleBarContent`) also starts
+AFTER the column: over the panel it would carry a foreign background and read as
+laid on top of it rather than as part of the bar. The column is capped at half the window: a panel that took the
 whole window would leave the content with no room and no explanation.
 
 The panel need not be a `NavPanel`: `SetNavPanel` takes any widget. Its width is
