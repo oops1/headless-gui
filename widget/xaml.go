@@ -1046,29 +1046,58 @@ func buildXAMLProgressBar(el xElement) Widget {
 	return pb
 }
 
+// buildXAMLSeparator строит разделитель (widget.Separator).
+//
+// Раньше здесь собиралась панель с намертво зашитым цветом #4C4C4C — тот самый
+// обход «панель в один пиксель», только внутри движка: при смене темы линия
+// оставалась прежней. Теперь это настоящий виджет, и цвет берётся из темы.
+//
+// Ориентация выводится из размеров, как это делает WPF: заданная ширина без
+// высоты означает горизонтальную линию, высота без ширины — вертикальную.
+// Явный атрибут Orientation сильнее.
 func buildXAMLSeparator(el xElement) Widget {
-	bg := el.attr("Background", "Fill", "Stroke")
-	c := color.RGBA{R: 76, G: 76, B: 76, A: 255}
-	if bg != "" {
-		if parsed, err := parseXAMLColor(bg); err == nil {
-			c = parsed
-		}
-	}
-	p := NewPanel(c)
-	p.ShowHeader = false
+	s := NewSeparator()
 
 	w := xatoi(el.attr("Width"))
 	h := xatoi(el.attr("Height"))
-	if w <= 0 && h <= 0 {
-		p.SetBounds(image.Rect(0, 0, 1, 24))
-	} else if w > 0 && h <= 0 {
-		p.SetBounds(image.Rect(0, 0, w, 1))
-	} else if h > 0 && w <= 0 {
-		p.SetBounds(image.Rect(0, 0, 1, h))
-	} else if w > 0 && h > 0 {
-		p.SetBounds(image.Rect(0, 0, w, h))
+	switch {
+	case strings.EqualFold(el.attr("Orientation"), "vertical"):
+		s.Orientation = SeparatorVertical
+	case strings.EqualFold(el.attr("Orientation"), "horizontal"):
+		s.Orientation = SeparatorHorizontal
+	case h > 0 && w <= 0:
+		s.Orientation = SeparatorVertical
 	}
-	return p
+
+	if bg := el.attr("Background", "Fill", "Stroke"); bg != "" {
+		if parsed, err := parseXAMLColor(bg); err == nil {
+			s.Color = parsed
+		}
+	}
+	if t := xatoi(el.attr("Thickness")); t > 0 {
+		s.Thickness = t
+	}
+	if m := xatoi(el.attr("Margin")); m > 0 {
+		s.Margin = m
+	}
+
+	// Размеры по умолчанию: линия занимает всю доступную длину, а толщину
+	// берёт свою. Нули оставляем контейнеру — он сам растянет.
+	if w <= 0 && h <= 0 {
+		if s.Orientation == SeparatorVertical {
+			h = 24
+		} else {
+			w = 24
+		}
+	}
+	if w <= 0 {
+		w = s.thickness()
+	}
+	if h <= 0 {
+		h = s.thickness()
+	}
+	s.SetBounds(image.Rect(0, 0, w, h))
+	return s
 }
 
 func buildXAMLCheckBox(el xElement) Widget {
