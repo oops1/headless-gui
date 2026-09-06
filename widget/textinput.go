@@ -202,7 +202,9 @@ func (t *TextInput) ToggleShowPassword() {
 func (t *TextInput) SetText(text string) {
 	t.mu.Lock()
 	runes := []rune(text)
-	changed := string(t.runes) != text || t.caretPos != len(runes) ||
+	// Сравниваем РУНАМИ, а не через string(t.runes): в режиме пароля эта
+	// строка — копия секрета, которую занулить уже нечем (см. TakeSecret).
+	changed := !sameRunes(t.runes, runes) || t.caretPos != len(runes) ||
 		t.selStart != -1 || t.scrollX != 0
 	if t.isPassword {
 		// Прежний пароль затираем в памяти, а не отпускаем.
@@ -217,6 +219,19 @@ func (t *TextInput) SetText(text string) {
 	if changed {
 		t.Invalidate()
 	}
+}
+
+// sameRunes сравнивает две последовательности рун.
+func sameRunes(a, b []rune) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // GetText возвращает текущее содержимое поля.

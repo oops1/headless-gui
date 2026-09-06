@@ -296,6 +296,12 @@ func langidCode(langid uint32) string {
 // Win32Window — реализация NativeWindow через Win32 API.
 // Чистый Go, без CGO. Работает через golang.org/x/sys/windows.
 type Win32Window struct {
+	// ownIcons — значки окна, созданные нами (WM_SETICON, см. icon_windows.go).
+	// Держим хэндлы, чтобы удалить прежний при замене: значок из ресурсов
+	// исполняемого файла принадлежит модулю, и уничтожать его нельзя.
+	ownIcons     [2]windows.Handle
+	pendingIcons []image.Image
+
 	hwnd   windows.HWND
 	width  int
 	height int
@@ -594,6 +600,9 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 	win32Windows[hwnd] = w
 	win32Creating = nil
 	win32Mu.Unlock()
+
+	// Значок, заданный до создания окна: SetIcon мог прийти раньше Run.
+	w.applyPendingIcon()
 
 	procShowWindow.Call(hwnd, showCmd)
 	procUpdateWindow.Call(hwnd)

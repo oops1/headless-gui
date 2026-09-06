@@ -1426,34 +1426,37 @@ func buildXAMLToolBarTray(el xElement, reg map[string]Widget, parentOff image.Po
 //	Band       — номер полосы (игнорируется, layout упрощён)
 //	BandIndex  — позиция в полосе (игнорируется)
 func buildXAMLToolBar(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
-	sp := NewStackPanel(OrientationHorizontal)
-	sp.Spacing = 2
-	sp.Padding = 4
+	tb := NewToolBar()
 
 	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
-			sp.Background = c
-			sp.UseAlpha = c.A < 255
+			tb.Background = c
+			tb.UseAlpha = c.A < 255
 		}
-	} else {
-		// Прозрачный фон по умолчанию — ToolBar наследует фон от ToolBarTray
-		sp.UseAlpha = true
+	}
+	// Иначе фон остаётся прозрачным: ToolBar наследует его от ToolBarTray.
+
+	if v := el.attr("IconsOnly"); v != "" {
+		tb.IconsOnly = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := el.attr("Overflow"); v != "" {
+		tb.Overflow = !strings.EqualFold(v, "false") && v != "0"
 	}
 
-	// Bounds
-	absBounds := el.bounds().Add(parentOff)
-	sp.SetBounds(absBounds)
-
-	applyCommonProps(sp, el)
+	applyCommonProps(tb, el)
 
 	if id := el.name(); id != "" {
-		reg[id] = sp
+		reg[id] = tb
 	}
 
 	// Дочерние виджеты: кнопки, разделители, и т.д.
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
 		if strings.Contains(childTag, ".") {
+			continue
+		}
+		if childTag == "separator" {
+			tb.AddSeparator()
 			continue
 		}
 		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
@@ -1465,11 +1468,15 @@ func buildXAMLToolBar(el xElement, reg map[string]Widget, parentOff image.Point,
 			if btn, ok := cw.(*Button); ok && btn.CornerRadius == 0 {
 				btn.CornerRadius = 4
 			}
-			sp.AddChild(cw)
+			tb.AddChild(cw)
 		}
 	}
 
-	return sp, nil
+	// Границы — ПОСЛЕ детей: раскладка панели считает переполнение по ним, и
+	// на пустой панели считать было бы нечего.
+	tb.SetBounds(el.bounds().Add(parentOff))
+
+	return tb, nil
 }
 
 // ─── buildXAMLStackPanel ────────────────────────────────────────────────────
@@ -1941,28 +1948,47 @@ func buildXAMLDataGrid(el xElement) Widget {
 		// <DataGrid.Columns> property element
 		if childTag == "datagrid.columns" {
 			for _, colEl := range child.Children {
-				col := parseDataGridColumn(colEl)
+				col, locKey := parseDataGridColumn(colEl)
 				if col != nil {
 					dg.Grid.AddColumn(col)
+					registerColumnHeaderLoc(col, locKey)
 				}
 			}
 			continue
 		}
 
 		// Прямые колонки (DataGridTextColumn и др.) — альтернативный синтаксис
-		col := parseDataGridColumn(child)
+		col, locKey := parseDataGridColumn(child)
 		if col != nil {
 			dg.Grid.AddColumn(col)
+			registerColumnHeaderLoc(col, locKey)
 		}
 	}
 
 	return dg
 }
 
+// registerColumnHeaderLoc подписывает заголовок колонки на смену языка.
+//
+// Колонка — не виджет: сборщик складывает её в таблицу, и свойства, которое
+// можно переустановить при смене языка, у неё снаружи нет. Поэтому заголовок
+// регистрируется как «свёрнутая» строка (xaml_loc_items.go) — так же, как
+// подписи вкладок и пунктов меню. Без этого {Loc …} в Header разворачивался
+// один раз при загрузке и оставался на языке загрузки навсегда.
+func registerColumnHeaderLoc(col dgridPkg.Column, key string) {
+	if key == "" {
+		return
+	}
+	registerLocItem(key, func(s string) { col.SetHeader(s) })
+}
+
 // parseDataGridColumn парсит один элемент-колонку из XAML.
-func parseDataGridColumn(el xElement) dgridPkg.Column {
+//
+// Второе значение — ключ {Loc …} заголовка (пустой, если заголовок обычный):
+// подписаться на смену языка должен вызывающий, у которого есть таблица.
+func parseDataGridColumn(el xElement) (dgridPkg.Column, string) {
 	tag := strings.ToLower(el.Tag)
-	header := el.attr("Header", "Text")
+	header, headerLocKey := locItemText(el.attr("Header", "Text"))
 
 	// Binding path: разбираем "{Binding PropertyName}"
 	bindingPath := parseBindingPath(el.attr("Binding"))
@@ -2003,24 +2029,24 @@ func parseDataGridColumn(el xElement) dgridPkg.Column {
 		if sortPath != "" {
 			col.SetSortPath(sortPath)
 		}
-		return col
+		return col, headerLocKey
 
 	case strings.HasPrefix(tag, "datagridcheckboxcolumn"),
 		strings.HasPrefix(tag, "datagridcheckbox"):
 		col := dgridPkg.NewCheckBoxColumn(header, bindingPath)
 		col.SetWidth(width)
 		applyReadOnly(col.SetReadOnly)
-		return col
+		return col, headerLocKey
 
 	case strings.HasPrefix(tag, "datagridtemplatecolumn"),
 		strings.HasPrefix(tag, "datagridtemplate"):
 		col := dgridPkg.NewTemplateColumn(header, nil)
 		col.SetWidth(width)
 		applyReadOnly(col.SetReadOnly)
-		return col
+		return col, headerLocKey
 	}
 
-	return nil
+	return nil, ""
 }
 
 // parseBindingPath извлекает путь из WPF binding-синтаксиса.
