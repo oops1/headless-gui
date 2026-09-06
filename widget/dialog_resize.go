@@ -126,12 +126,17 @@ func (d *Dialog) SetBounds(r image.Rectangle) {
 		}
 	}
 
-	if d.closeBtn != nil {
-		top := r.Min.Y + (d.TitleHeight-dlgCloseSize)/2
-		d.closeBtn.SetBounds(image.Rect(
-			r.Max.X-dlgCloseSize-6, top,
-			r.Max.X-6, top+dlgCloseSize))
-	}
+	// ✕ и, если включены, «свернуть»/«развернуть» — справа налево.
+	d.layoutSysButtons(r)
+
+	// Боковая панель занимает колонку до верхнего края — её раскладка идёт
+	// раньше содержимого, которое от неё отступает.
+	d.layoutNavPanel()
+
+	// Полоса заголовка: кнопка сворачивания и начинка приложения (titlebar.go).
+	// Ширина полосы меняется вместе с диалогом, поэтому раскладка здесь, а не
+	// только в момент их установки.
+	d.layoutTitleBar()
 
 	if d.content != nil {
 		if cb := d.ContentBounds(); !cb.Empty() {
