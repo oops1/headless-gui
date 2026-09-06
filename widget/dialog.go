@@ -139,6 +139,7 @@ type Dialog struct {
 	// боковую область приложения, pad/padSet заменяют константу dlgPad.
 	titleBarContent Widget
 	navBtn          *titleNavBtn
+	navPanel        Widget
 	pad             int
 	padSet          bool
 
@@ -315,8 +316,14 @@ func (d *Dialog) SetModal(v bool) {
 func (d *Dialog) ContentBounds() image.Rectangle {
 	b := d.bounds
 	ph, pv := d.contentPadding()
+	left := b.Min.X + ph
+	// Боковая панель занимает левую колонку целиком — содержимое начинается
+	// за ней, иначе оно легло бы под панель.
+	if nb := d.NavPanelBounds(); !nb.Empty() {
+		left = nb.Max.X + ph
+	}
 	return image.Rect(
-		b.Min.X+ph,
+		left,
 		b.Min.Y+d.titleH()+pv,
 		b.Max.X-ph,
 		b.Max.Y-pv,
@@ -343,8 +350,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), d.Background)
 		if d.titleH() > 0 {
 			fillTitleBar(ctx, image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+d.TitleHeight), d.TitleBG)
-			textY := b.Min.Y + (d.TitleHeight-13)/2
-			drawTitleText(ctx, d.Title, d.titleTextX(), textY, d.TitleColor)
+			d.drawTitleCaption(ctx)
 			if d.ShowLocaleIndicator {
 				drawLocaleBadge(ctx, b.Max.X-8, b.Min.Y, d.TitleHeight, d.TitleColor)
 			}
@@ -352,6 +358,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 		}
 		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), d.BorderColor)
 		d.drawChildren(ctx)
+		d.drawTitleCaptionOverNav(ctx)
 		return
 	}
 
@@ -376,8 +383,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 	if d.titleH() > 0 {
 		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), d.TitleHeight, cr, d.TitleBG)
 		ctx.FillRect(b.Min.X, b.Min.Y+d.TitleHeight-cr, b.Dx(), cr, d.TitleBG)
-		textY := b.Min.Y + (d.TitleHeight-14)/2
-		ctx.DrawTextFont(d.Title, d.titleTextX(), textY, 11, BuiltinFontBold, d.TitleColor)
+		d.drawTitleCaption(ctx)
 		if d.ShowLocaleIndicator {
 			drawLocaleBadge(ctx, b.Max.X-dlgCloseSize-12, b.Min.Y, d.TitleHeight, d.TitleColor)
 		}
@@ -385,6 +391,33 @@ func (d *Dialog) Draw(ctx DrawContext) {
 	ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, d.BorderColor)
 
 	d.drawChildren(ctx)
+	d.drawTitleCaptionOverNav(ctx)
+}
+
+// drawTitleCaption рисует подпись заголовка.
+//
+// Отдельным методом, потому что при боковой панели её рисуют ДВАЖДЫ: первый
+// раз вместе с полосой, второй — поверх панели, поднятой под самый верх окна
+// (см. drawTitleCaptionOverNav). Проще нарисовать текст ещё раз, чем менять
+// порядок отрисовки полосы и детей ради одного случая.
+func (d *Dialog) drawTitleCaption(ctx DrawContext) {
+	b := d.bounds
+	if currentStyle().Classic3D {
+		drawTitleText(ctx, d.Title, d.titleTextX(), b.Min.Y+(d.TitleHeight-13)/2, d.TitleColor)
+		return
+	}
+	ctx.DrawTextFont(d.Title, d.titleTextX(), b.Min.Y+(d.TitleHeight-14)/2, 11,
+		BuiltinFontBold, d.TitleColor)
+}
+
+// drawTitleCaptionOverNav возвращает подпись на место, если её закрыла боковая
+// панель: панель занимает колонку до верхнего края окна и рисуется первой из
+// детей, чтобы её цвет доходил до края.
+func (d *Dialog) drawTitleCaptionOverNav(ctx DrawContext) {
+	if d.navPanel == nil || d.titleH() == 0 || d.Title == "" {
+		return
+	}
+	d.drawTitleCaption(ctx)
 }
 
 // SetShowCloseButton — предпочтительный способ поменять ShowCloseButton в

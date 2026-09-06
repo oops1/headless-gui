@@ -313,6 +313,12 @@ func (d *Dialog) SetNavCollapsed(v bool) {
 	}
 	d.navBtn.collapsed = v
 	d.navBtn.Invalidate()
+	// Кнопка в полосе — орган управления именно боковой панелью, когда она
+	// задана: не сворачивать её здесь значило бы просить приложение повторить
+	// то же самое в OnNavToggle.
+	if c, ok := d.navPanel.(interface{ SetCollapsed(bool) }); ok {
+		c.SetCollapsed(v)
+	}
 	if d.OnNavToggle != nil {
 		d.OnNavToggle(v)
 	}
@@ -499,6 +505,9 @@ func (w *Window) SetNavCollapsed(v bool) {
 	}
 	w.navBtn.collapsed = v
 	w.navBtn.Invalidate()
+	if c, ok := w.navPanel.(interface{ SetCollapsed(bool) }); ok {
+		c.SetCollapsed(v)
+	}
 	if w.OnNavToggle != nil {
 		w.OnNavToggle(v)
 	}
@@ -561,5 +570,6 @@ func (w *Window) isTitleBarWidget(c Widget) bool {
 	if c == nil {
 		return false
 	}
-	return (w.navBtn != nil && Widget(w.navBtn) == c) || w.titleBarContent == c
+	return (w.navBtn != nil && Widget(w.navBtn) == c) || w.titleBarContent == c ||
+		w.navPanel == c
 }

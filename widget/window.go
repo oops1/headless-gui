@@ -100,6 +100,7 @@ type Window struct {
 	// виджет приложения в её свободной части и кнопка сворачивания слева.
 	titleBarContent Widget
 	navBtn          *titleNavBtn
+	navPanel        Widget
 
 	// OnNavToggle вызывается кнопкой сворачивания (SetNavButton): collapsed —
 	// состояние ПОСЛЕ нажатия. Сворачивает боковую область приложение.
@@ -377,6 +378,7 @@ func (w *Window) SetBounds(r image.Rectangle) {
 		}
 		child.SetBounds(cb)
 	}
+	w.layoutNavPanel()
 	w.layoutTitleBar()
 }
 
@@ -534,8 +536,14 @@ func (w *Window) ContentBounds() image.Rectangle {
 	if w.style().Classic3D {
 		top = b.Min.Y + fw + w.effTitleH()
 	}
+	left := b.Min.X + fw
+	// Боковая панель занимает левую колонку целиком — клиентская область
+	// начинается за ней.
+	if nb := w.NavPanelBounds(); !nb.Empty() {
+		left = nb.Max.X
+	}
 	return image.Rect(
-		b.Min.X+fw,
+		left,
 		top,
 		b.Max.X-fw,
 		b.Max.Y-fw,
@@ -743,6 +751,12 @@ func (w *Window) Draw(ctx DrawContext) {
 
 	// ── Дочерние виджеты ────────────────────────────────────────────────────
 	w.drawChildren(ctx)
+
+	// Боковая панель поднята под верхний край и закрыла подпись — возвращаем
+	// её поверх (см. navhost.go).
+	if w.navPanel != nil && th > 0 {
+		w.drawTitleCaptionOverNav(ctx)
+	}
 
 	// ── Рамка (хром) — ПОВЕРХ детей ─────────────────────────────────────────
 	// Рамку рисуем после drawChildren: XAML-контент с абсолютными координатами
