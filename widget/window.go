@@ -1184,12 +1184,8 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 		w.drawTitleTabs(ctx, leftLimit+8, rightLimit, y, th)
 		return
 	}
-	if w.titleBarContent != nil {
-		// Начинка приложения занимает полосу после «светофора». Подпись в
-		// mac-стиле центрирована и легла бы поверх неё — не рисуем, как и в
-		// режиме вкладок.
-		return
-	}
+	// Своей начинки в mac-полосе нет (см. macTitleBar) — подпись рисуется
+	// как обычно, по центру.
 	textY := y + (th-13)/2
 	title := w.Title
 	if maxW := rightLimit - leftLimit; maxW <= 0 {

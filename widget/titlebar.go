@@ -406,7 +406,7 @@ func (w *Window) TitleBarContent() Widget { return w.titleBarContent }
 // TitleBarContentBounds — свободная часть полосы заголовка окна.
 func (w *Window) TitleBarContentBounds() image.Rectangle {
 	tb := w.titleBarRect()
-	if tb.Empty() {
+	if tb.Empty() || w.macTitleBar() {
 		return image.Rectangle{}
 	}
 	r := image.Rect(w.titleContentLeft(), tb.Min.Y+titleBarPadV,
@@ -417,22 +417,21 @@ func (w *Window) TitleBarContentBounds() image.Rectangle {
 	return r
 }
 
-// titleContentLeft — левая граница свободной части полосы: после «светофора»
-// или кнопки сворачивания и после подписи.
+// macTitleBar сообщает, что полоса заголовка нарисована в mac-раскладке.
+//
+// В ней своя начинка не поддерживается: кнопки окна стоят СЛЕВА, подпись
+// центрирована, и виджет приложения пришлось бы втискивать между ними —
+// раскладка, которой в macOS нет ни у одного окна. Полоса остаётся такой,
+// какой её ждут на этой системе.
+func (w *Window) macTitleBar() bool {
+	return !w.style().Classic3D && w.resolvedTitleStyle() == WindowTitleMac
+}
+
+// titleContentLeft — левая граница свободной части полосы: после кнопки
+// сворачивания и после подписи.
 func (w *Window) titleContentLeft() int {
 	tb := w.titleBarRect()
 	x := tb.Min.X + 12
-	if w.resolvedTitleStyle() == WindowTitleMac {
-		if nc := w.btnCount(); nc >= 1 {
-			x = tb.Min.X + macStartX + (nc-1)*macSpacing + macCircleR + titleBarGap
-		}
-		// Подпись в mac-стиле центрирована; пока начинка задана, её не рисуют,
-		// поэтому место под неё не резервируем.
-		if w.navBtn != nil && !w.navBtn.bounds.Empty() {
-			x = w.navBtn.bounds.Max.X + titleBarGap
-		}
-		return x
-	}
 	if w.navBtn != nil && !w.navBtn.bounds.Empty() {
 		x = w.navBtn.bounds.Max.X + titleBarGap
 	}
@@ -533,7 +532,9 @@ func (w *Window) IsNavCollapsed() bool { return w.navBtn != nil && w.navBtn.coll
 func (w *Window) layoutTitleBar() {
 	tb := w.titleBarRect()
 	if w.navBtn != nil {
-		if tb.Empty() {
+		// В mac-раскладке своей начинки в полосе нет — и кнопке сворачивания
+		// там тоже не место: слева стоят кнопки окна.
+		if tb.Empty() || w.macTitleBar() {
 			w.navBtn.SetVisible(false)
 			w.navBtn.SetBounds(image.Rectangle{})
 		} else {
@@ -542,11 +543,6 @@ func (w *Window) layoutTitleBar() {
 				sz = h
 			}
 			left := tb.Min.X + 6
-			if w.resolvedTitleStyle() == WindowTitleMac {
-				if nc := w.btnCount(); nc >= 1 {
-					left = tb.Min.X + macStartX + (nc-1)*macSpacing + macCircleR + titleBarGap
-				}
-			}
 			top := tb.Min.Y + (tb.Dy()-sz)/2
 			w.navBtn.SetVisible(true)
 			w.navBtn.SetBounds(image.Rect(left, top, left+sz, top+sz))

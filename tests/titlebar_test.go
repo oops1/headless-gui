@@ -311,6 +311,9 @@ func TestWindowTitleBar_ContentDoesNotDrag(t *testing.T) {
 // Полоса заголовка окна по-прежнему тащит его.
 func TestWindowTitleBar_StillDrags(t *testing.T) {
 	w := widget.NewWindow("Настройки", 800, 600)
+	// Стиль явно: в mac-раскладке точка нажатия попала бы в «светофор», и тест
+	// проверял бы захват кнопкой, а не перетаскивание за полосу.
+	w.TitleStyle = widget.WindowTitleWin
 	w.SetBounds(image.Rect(0, 0, 800, 600))
 	w.SetTitleBarContent(widget.NewTextInput("Поиск..."))
 

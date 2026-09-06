@@ -193,11 +193,23 @@ func TestTitleBar_ContentShrinksForButtons(t *testing.T) {
 
 // У окна (widget.Window) все три кнопки были и остаются — начинка полосы их не
 // вытесняет.
-func TestWindowTitleBar_KeepsThreeButtons(t *testing.T) {
+//
+// Стиль заголовка задан ЯВНО: он зависит от ОС, а раскладка полосы в них
+// зеркальная — в Windows кнопки справа, в macOS «светофор» слева. Тест на одну
+// раскладку, положившийся на автоопределение, ловил бы ошибку только на одной
+// платформе (и падал на другой).
+func titleBarWindow(t *testing.T, style widget.WindowTitleStyle) (*widget.Window, *widget.TextInput) {
+	t.Helper()
 	w := widget.NewWindow("Настройки", 800, 600)
+	w.TitleStyle = style
 	w.SetBounds(image.Rect(0, 0, 800, 600))
 	search := widget.NewTextInput("Поиск...")
 	w.SetTitleBarContent(search)
+	return w, search
+}
+
+func TestWindowTitleBar_KeepsThreeButtons(t *testing.T) {
+	w, search := titleBarWindow(t, widget.WindowTitleWin)
 
 	closeR, minR, maxR := w.CloseBtnRect(), w.MinBtnRect(), w.MaxBtnRect()
 	if closeR.Empty() || minR.Empty() || maxR.Empty() {
@@ -210,5 +222,43 @@ func TestWindowTitleBar_KeepsThreeButtons(t *testing.T) {
 	}
 	if gap := minR.Min.X - search.Bounds().Max.X; gap < 60 {
 		t.Errorf("между поиском и кнопками всего %d точек — окно не за что схватить", gap)
+	}
+}
+
+// В mac-раскладке режима «свои контролы в полосе» нет: кнопки окна стоят слева,
+// подпись центрирована, и виджет приложения пришлось бы втискивать между ними —
+// такой полосы в macOS нет ни у одного окна.
+func TestWindowTitleBar_MacHasNoBarContent(t *testing.T) {
+	w, search := titleBarWindow(t, widget.WindowTitleMac)
+
+	if r := w.TitleBarContentBounds(); !r.Empty() {
+		t.Errorf("в mac-полосе нашлось место для начинки: %v", r)
+	}
+	if r := search.Bounds(); !r.Empty() {
+		t.Errorf("виджет приложения разложен в mac-полосе: %v", r)
+	}
+	if widget.IsWidgetVisible(search) {
+		t.Error("виджет в mac-полосе остался видимым")
+	}
+
+	// Кнопка сворачивания — часть того же режима, её там тоже нет.
+	w.SetNavButton(true)
+	for _, c := range w.Children() {
+		if c == widget.Widget(search) {
+			continue
+		}
+		if r := c.Bounds(); !r.Empty() && r.Max.Y <= w.ContentBounds().Min.Y {
+			t.Errorf("в mac-полосе разложен виджет движка: %v", r)
+		}
+	}
+}
+
+// Та же полоса в Windows-раскладке начинку принимает — проверка, что запрет
+// касается именно mac, а не выключил режим целиком.
+func TestWindowTitleBar_WinHasBarContent(t *testing.T) {
+	_, search := titleBarWindow(t, widget.WindowTitleWin)
+
+	if search.Bounds().Empty() {
+		t.Error("в Windows-раскладке начинке не отвели места")
 	}
 }

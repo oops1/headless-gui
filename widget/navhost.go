@@ -148,7 +148,7 @@ func (w *Window) NavPanelBounds() image.Rectangle {
 	fw := w.frameW()
 	pw := navWidthOf(w.navPanel, b.Dx())
 	top := b.Min.Y + fw
-	if w.resolvedTitleStyle() == WindowTitleMac {
+	if w.macTitleBar() {
 		// В mac-стиле «светофор» стоит в левом верхнем углу — колонка,
 		// поднятая под полосу, накрыла бы кнопки окна.
 		top = b.Min.Y + w.titleH()
@@ -177,7 +177,7 @@ func (w *Window) drawTitleCaptionOverNav(ctx DrawContext) {
 	if w.Title == "" || w.titleTabsActive() {
 		return
 	}
-	if w.resolvedTitleStyle() == WindowTitleMac {
+	if w.macTitleBar() {
 		// В mac-стиле кнопки окна стоят слева, и панель под полосу не
 		// поднимается (см. NavPanelBounds) — подпись никто не закрывал.
 		return
