@@ -119,6 +119,9 @@ func (tv *TreeView) Draw(ctx DrawContextBridge) {
 		}
 	}
 
+	// Место вставки перетаскиваемого узла — поверх строк, но под скроллбаром.
+	tv.drawDropIndicator(ctx, ih)
+
 	// Скроллбар
 	if tv.needsScrollbar() {
 		tv.drawScrollbar(ctx)
