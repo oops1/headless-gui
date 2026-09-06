@@ -102,21 +102,37 @@ func Tr(key string) string {
 // TrIn возвращает перевод key для заданного языка интерфейса.
 func TrIn(language, key string) string {
 	language = normLocale(language)
+	// Псевдоним ключа (stringalias.go) старше собственного перевода: он назван
+	// приложением позже и конкретнее. Если по псевдониму перевода нет, ниже
+	// берётся обычный — то есть встроенный, — и хуже, чем было, не станет.
+	if alias, ok := aliasFor(key); ok {
+		if v, found := lookupString(language, alias); found {
+			return v
+		}
+	}
+	if v, found := lookupString(language, key); found {
+		return v
+	}
+	return key
+}
+
+// lookupString ищет перевод ключа в языке, затем в запасном языке.
+func lookupString(language, key string) (string, bool) {
 	stringsMu.RLock()
 	defer stringsMu.RUnlock()
 	if t := stringTables[language]; t != nil {
 		if v, ok := t[key]; ok {
-			return v
+			return v, true
 		}
 	}
 	if fallbackLanguage != "" && fallbackLanguage != language {
 		if t := stringTables[fallbackLanguage]; t != nil {
 			if v, ok := t[key]; ok {
-				return v
+				return v, true
 			}
 		}
 	}
-	return key
+	return "", false
 }
 
 // Trf возвращает перевод key, отформатированный аргументами (fmt.Sprintf).
