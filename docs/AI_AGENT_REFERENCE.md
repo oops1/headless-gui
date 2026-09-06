@@ -752,6 +752,23 @@ dlg.SetContentPadding(0); dlg.ContentPadding()
 // laid out against the old 14/12 inset will shift.
 ```
 
+### Side navigation (widget.NavPanel)
+
+```go
+nav := widget.NewNavPanel()
+nav.AddItem(icon, "General")     // an item is icon AND caption; nil icon → first letter
+nav.OnSelect = func(i int) { ... } // user's click only, not SetSelected
+nav.SetCollapsed(true)             // icon-only strip; width follows, host re-lays out
+nav.ExpandedWidth, nav.CollapsedWidth, nav.ItemHeight, nav.IconSize, nav.FontSize
+nav.SetSelected(i); nav.Selected(); nav.ItemRect(i); nav.ItemCount()
+
+// Hosted column: full height INCLUDING the title bar; the caption is redrawn on
+// top of the panel. ContentBounds moves right of the column.
+dlg.SetNavPanel(nav); dlg.NavPanelBounds()
+win.SetNavPanel(nav) // mac style: the column starts below the bar (window buttons)
+// The "≡" button (SetNavButton) collapses the panel itself when one is set.
+```
+
 ### Context menus per row/node, ToolBar, tree drag, dialog localization
 
 ```go

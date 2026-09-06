@@ -2087,6 +2087,49 @@ background around the side panel defeated it — there was nothing to paint over
 it, a dialog has one background for the whole window. A regular dialog keeps the
 old default: `MessageBox` places its buttons and labels expecting 14/12.
 
+### Side navigation (NavPanel)
+
+```go
+nav := widget.NewNavPanel()
+nav.AddItem(iconGeneral, "General")
+nav.AddItem(iconGit, "Git")
+nav.OnSelect = func(i int) { pages.Show(i) }
+
+dlg.SetNavPanel(nav)   // a column spanning the FULL height, title bar included
+dlg.SetNavButton(true) // the "≡" in the bar collapses this very panel
+```
+
+An item is an icon AND a caption at once, which is why the collapsed mode hides
+the captions, not the items: what remains is a strip in the panel's own color
+with the icons, and the content takes the freed width. An item without an icon is
+drawn as the first letter of its caption — otherwise a collapsed panel would turn
+into a strip of empty rows for anyone who has no icons.
+
+```go
+nav.SetCollapsed(true)   // the icon strip
+nav.ExpandedWidth = 260  // width in either state
+nav.CollapsedWidth = 52
+nav.SetSelected(1)       // select programmatically (OnSelect is NOT called)
+nav.ItemRect(i)          // an item's rectangle — for your own tooltip, say
+```
+
+The column occupies the left side from the TOP edge of the window down: the panel
+is drawn first among the children and the engine puts the title caption back on
+top of it — so the color reaches the edge while the caption stays where it was,
+like the vertical tabs of a browser. The items start below the caption (the panel
+gets its `TopInset` from the host).
+
+`ContentBounds` moves right of the column, so the `SetContent` widget is laid out
+in what is left, and a collapsed panel hands it the freed width with no code in
+the application. The column is capped at half the window: a panel that took the
+whole window would leave the content with no room and no explanation.
+
+The panel need not be a `NavPanel`: `SetNavPanel` takes any widget. Its width is
+asked through `DesiredSize` and collapsing through `SetCollapsed(bool)`, when it
+has one. `widget.Window` has the same: `SetNavPanel`, `NavPanelBounds`. In the
+mac style the column does not rise into the bar — the window buttons live in that
+corner.
+
 ### Minimum window size
 
 ```go
