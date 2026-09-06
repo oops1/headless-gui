@@ -586,3 +586,16 @@ func NewConfirmDialog(title, message string, onResult func(ok bool)) *Dialog {
 
 	return dlg
 }
+
+// SetTitle задаёт заголовок диалога.
+//
+// Нужен живой локализации: {Loc} в Title переустанавливается через общий
+// интерфейс SetTitle(string), а не записью в поле — иначе диалог не
+// перерисовался бы до ближайшего чужого изменения.
+func (d *Dialog) SetTitle(s string) {
+	if d.Title == s {
+		return
+	}
+	d.Title = s
+	d.Invalidate()
+}

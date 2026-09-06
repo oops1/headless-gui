@@ -737,3 +737,19 @@ func (p *DockPane) ApplyTheme(t *Theme) {
 	p.Background = t.PanelBG
 	p.BorderColor = t.Border
 }
+
+// SetTitle задаёт текст заголовка панели.
+//
+// Не просто присваивание поля: заголовок панели виден ещё и на корешке вкладки,
+// а ширина корешка считается по нему. Без перекладки стопки корешок сохранял бы
+// ширину прежней подписи — при смене языка это разъезжающаяся полоса вкладок.
+func (p *DockPane) SetTitle(s string) {
+	if p.Title == s {
+		return
+	}
+	p.Title = s
+	if p.mgr != nil {
+		p.mgr.layout()
+	}
+	p.Invalidate()
+}
