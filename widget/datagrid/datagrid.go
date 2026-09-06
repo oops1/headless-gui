@@ -846,41 +846,105 @@ func (dg *DataGrid) layoutColumns() {
 		cw := col.Width()
 		switch cw.Mode {
 		case ColumnWidthPixel:
-			w := int(cw.Value)
-			if w < minColumnWidth {
-				w = minColumnWidth
-			}
+			w := clampColumnWidth(col, int(cw.Value))
 			col.SetActualWidth(w)
 			usedW += w
 		case ColumnWidthAuto:
 			// Вычисляем по заголовку (приблизительно)
-			headerW := len(col.Header())*8 + 20
-			if headerW < minColumnWidth {
-				headerW = minColumnWidth
-			}
-			col.SetActualWidth(headerW)
-			usedW += headerW
+			w := clampColumnWidth(col, len(col.Header())*8+20)
+			col.SetActualWidth(w)
+			usedW += w
 		case ColumnWidthStar:
 			starCols = append(starCols, i)
 			totalStars += cw.Value
 		}
 	}
 
-	// Второй проход: Star колонки получают оставшееся пространство
+	// Второй проход: Star колонки получают оставшееся пространство.
+	//
+	// В два круга, а не в один: колонка, упёршаяся в свой минимум или
+	// максимум, забирает не ту долю, которую ей отмерили, и остаток надо
+	// перераспределить между теми, кто ещё может тянуться. Иначе колонка с
+	// максимумом оставляла бы после себя пустую полосу, а с минимумом —
+	// вылезала бы за правый край таблицы.
 	remaining := totalW - usedW
 	if remaining < 0 {
 		remaining = 0
 	}
-	if len(starCols) > 0 && totalStars > 0 {
-		for _, i := range starCols {
-			cw := dg.columns[i].Width()
-			w := int(float64(remaining) * cw.Value / totalStars)
-			if w < minColumnWidth {
-				w = minColumnWidth
+	dg.layoutStarColumns(starCols, totalStars, remaining)
+}
+
+// layoutStarColumns делит остаток между Star-колонками, соблюдая их
+// собственные минимумы и максимумы.
+//
+// Колонки, упёршиеся в границу, фиксируются, и деление повторяется для
+// остальных, пока фиксировать больше нечего. Кругов не больше, чем колонок:
+// каждый круг либо фиксирует хотя бы одну, либо заканчивает работу.
+func (dg *DataGrid) layoutStarColumns(starCols []int, totalStars float64, remaining int) {
+	if len(starCols) == 0 || totalStars <= 0 {
+		return
+	}
+	free := make([]int, len(starCols))
+	copy(free, starCols)
+
+	for round := 0; round <= len(starCols); round++ {
+		if len(free) == 0 || totalStars <= 0 {
+			return
+		}
+		stuck := free[:0:0]
+		var stars float64
+		rest := remaining
+
+		for _, i := range free {
+			col := dg.columns[i]
+			want := int(float64(remaining) * col.Width().Value / totalStars)
+			got := clampColumnWidth(col, want)
+			if got != want {
+				// Упёрлась в свою границу: её ширина окончательна, а её доля
+				// звёзд и её место уходят из деления.
+				col.SetActualWidth(got)
+				rest -= got
+				continue
 			}
-			dg.columns[i].SetActualWidth(w)
+			stuck = append(stuck, i)
+			stars += col.Width().Value
+		}
+		if len(stuck) == len(free) {
+			// Никто не упёрся — раздаём как есть и заканчиваем.
+			for _, i := range free {
+				col := dg.columns[i]
+				col.SetActualWidth(int(float64(remaining) * col.Width().Value / totalStars))
+			}
+			return
+		}
+		free, totalStars, remaining = stuck, stars, rest
+		if remaining < 0 {
+			remaining = 0
 		}
 	}
+}
+
+// clampColumnWidth держит ширину в границах колонки.
+//
+// Собственные MinWidth/MaxWidth колонки читались только через геттеры и не
+// участвовали в раскладке ни разу: и распределение, и ресайз мышью знали одну
+// общую константу в 30 точек. В узком окне колонка «Статус» ужималась до
+// неразличимой наравне со всеми.
+func clampColumnWidth(col Column, w int) int {
+	lo := col.MinWidth()
+	if lo < minColumnWidth {
+		lo = minColumnWidth
+	}
+	if w < lo {
+		w = lo
+	}
+	// Максимум сильнее минимума: колонка, у которой MaxWidth меньше общего
+	// минимума, — это осознанное «уже некуда», и подменять его умолчанием
+	// значит не выполнить прямое указание.
+	if hi := col.MaxWidth(); hi > 0 && w > hi {
+		w = hi
+	}
+	return w
 }
 
 // ─── Geometry helpers ──────────────────────────────────────────────────────
@@ -2028,11 +2092,10 @@ func (dg *DataGrid) OnMouseMove(x, y int) {
 	}
 	if dg.resizingCol >= 0 {
 		dx := x - dg.resizingStartX
-		newW := dg.resizingStartW + dx
-		if newW < minColumnWidth {
-			newW = minColumnWidth
-		}
-		dg.columns[dg.resizingCol].SetActualWidth(newW)
+		col := dg.columns[dg.resizingCol]
+		// Границы колонки соблюдаются и при ручном ресайзе: иначе заданный
+		// минимум держался бы только до первого движения мышью.
+		col.SetActualWidth(clampColumnWidth(col, dg.resizingStartW+dx))
 		dg.markFullDirty() // ширина колонки сдвигает весь контент
 		return
 	}
