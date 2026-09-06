@@ -674,6 +674,38 @@ eng.SendMouseButton(x, y, widget.MouseLeft, true)
 // DataGrid with SelectionExtended: Ctrl+Click toggles, Shift+Click ranges.
 ```
 
+### Resizable dialogs, separators, cell shapes, content measuring
+
+```go
+// Dialog that can be resized. Only the SetContent widget is stretched; plain
+// children move with the dialog (dialogs place them absolutely).
+dlg.SetResizable(true); dlg.SetMinSize(500, 400); dlg.SetContent(panel)
+dlg.Resize(800, 600)
+
+// Standalone separator; color follows Theme.Border. XAML: <Separator/>.
+widget.NewSeparator(); widget.NewVerticalSeparator()
+// Theme.SecondaryText — muted explanatory text, distinct from Disabled.
+
+// DataGrid columns honour their own SetMinWidth/SetMaxWidth in both the star
+// distribution and mouse resizing.
+// Text cells ellipsize; template columns can use the same helper and shapes:
+datagrid.EllipsizeText(cdc.DrawCtx, s, maxW, sizePt)
+cdc.DrawCtx.FillEllipseAA(cx, cy, rx, ry, col)
+cdc.DrawCtx.FillRoundRect(x, y, w, h, r, col)
+dg.EmptyStateText = "No keys yet"          // or EmptyStateRenderer
+// NOTE: DrawContextBridge gained FillEllipseAA/FillRoundRect — external
+// implementations (test stubs) need the two methods.
+
+// TextInput leading icon (XAML: Icon="...", IconSize="16").
+inp.LeadingIcon = img
+
+// Content measuring: DesiredSizer interface, asked only of those who implement.
+sp.DesiredSize(); sp.Relayout(); sv.FitContent(); sv.ContentSize()
+// A collapsed Expander asks for its header height only.
+
+// NOTE: <Separator/> in XAML now builds *widget.Separator, not *widget.Panel.
+```
+
 ### Context menus per row/node, ToolBar, tree drag, dialog localization
 
 ```go
