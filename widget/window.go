@@ -96,6 +96,16 @@ type Window struct {
 	// (dialog_chrome.go). Нужны borderless-окну: своей полосы у него нет.
 	dragAreas []image.Rectangle
 
+	// titleBarContent/navBtn — начинка штатной полосы заголовка (titlebar.go):
+	// виджет приложения в её свободной части и кнопка сворачивания слева.
+	titleBarContent Widget
+	navBtn          *titleNavBtn
+	navPanel        Widget
+
+	// OnNavToggle вызывается кнопкой сворачивания (SetNavButton): collapsed —
+	// состояние ПОСЛЕ нажатия. Сворачивает боковую область приложение.
+	OnNavToggle func(collapsed bool)
+
 	// Style — стиль обрамления (SingleBorder, None, ToolWindow).
 	Style WindowStyle
 
@@ -360,8 +370,16 @@ func (w *Window) SetBounds(r image.Rectangle) {
 		if _, ok := child.(*PopupMenu); ok {
 			continue
 		}
+		// Начинка полосы заголовка живёт в полосе, а не в клиентской области:
+		// растянуть её на ContentBounds значило бы положить поиск поверх всего
+		// содержимого окна.
+		if w.isTitleBarWidget(child) {
+			continue
+		}
 		child.SetBounds(cb)
 	}
+	w.layoutNavPanel()
+	w.layoutTitleBar()
 }
 
 // ─── Активность окна (фокус ОС) ─────────────────────────────────────────────
@@ -518,8 +536,14 @@ func (w *Window) ContentBounds() image.Rectangle {
 	if w.style().Classic3D {
 		top = b.Min.Y + fw + w.effTitleH()
 	}
+	left := b.Min.X + fw
+	// Боковая панель занимает левую колонку целиком — клиентская область
+	// начинается за ней.
+	if nb := w.NavPanelBounds(); !nb.Empty() {
+		left = nb.Max.X
+	}
 	return image.Rect(
-		b.Min.X+fw,
+		left,
 		top,
 		b.Max.X-fw,
 		b.Max.Y-fw,
@@ -726,7 +750,15 @@ func (w *Window) Draw(ctx DrawContext) {
 	}
 
 	// ── Дочерние виджеты ────────────────────────────────────────────────────
-	w.drawChildren(ctx)
+	// Обрезаем по скруглённому корпусу: боковая панель и содержимое во всю
+	// клиентскую область заливаются прямоугольником и срезали бы углы окна.
+	drawRoundClipped(ctx, b, cr, func() { w.drawChildren(ctx) })
+
+	// Боковая панель поднята под верхний край и закрыла подпись — возвращаем
+	// её поверх (см. navhost.go).
+	if w.navPanel != nil && th > 0 {
+		w.drawTitleCaptionOverNav(ctx)
+	}
 
 	// ── Рамка (хром) — ПОВЕРХ детей ─────────────────────────────────────────
 	// Рамку рисуем после drawChildren: XAML-контент с абсолютными координатами
@@ -853,8 +885,22 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	// Без искусственного зазора: заголовок, который вписывался раньше (до
 	// появления бейджа), должен рендериться так же — иначе короткие названия
 	// теряли последнюю букву под эллипсис при наличии плашки локали.
+	// Начинка приложения стоит правее подписи — подпись обрезаем по её левому
+	// краю: иначе длинный заголовок наехал бы на чужой виджет.
+	if w.titleBarContent != nil {
+		if cl := w.titleContentLeft() - titleBarGap; cl < titleRight {
+			titleRight = cl
+		}
+	}
+
 	textX := x + 12
+	if w.navBtn != nil && !w.navBtn.bounds.Empty() {
+		textX = w.navBtn.bounds.Max.X + titleBarGap
+	}
 	textY := y + (th-13)/2
+	if w.navBtn != nil {
+		w.navBtn.fg = tc
+	}
 	if w.titleTabsActive() {
 		// Режим вкладок: полосу заголовка занимают вкладки, текст Title
 		// не рисуется. В классике старт после отступа иконки, потолок —
@@ -1130,11 +1176,16 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 	if haveBadge {
 		rightLimit = badgeLeft - 8
 	}
+	if w.navBtn != nil {
+		w.navBtn.fg = tc
+	}
 	if w.titleTabsActive() {
 		// Режим вкладок: после traffic lights — полоса вкладок.
 		w.drawTitleTabs(ctx, leftLimit+8, rightLimit, y, th)
 		return
 	}
+	// Своей начинки в mac-полосе нет (см. macTitleBar) — подпись рисуется
+	// как обычно, по центру.
 	textY := y + (th-13)/2
 	title := w.Title
 	if maxW := rightLimit - leftLimit; maxW <= 0 {
@@ -1190,6 +1241,12 @@ func (w *Window) WantsCapture(e MouseEvent) bool {
 	// Клик по вкладке/«×»/«+» в полосе заголовка обрабатывается на нажатии
 	// и захвата не требует (иначе капча зависла бы без release-ветки).
 	if w.titleTabHitZone(pt) {
+		return false
+	}
+	// Начинка приложения в полосе (поиск, кнопка сворачивания) забирает клик
+	// себе: захват окном увёл бы события у неё, и поле в заголовке нельзя было
+	// бы ни выделить, ни прокрутить.
+	if w.titleBarChildHit(pt) {
 		return false
 	}
 	// Drag за заголовок.
@@ -1563,7 +1620,7 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 	}
 
 	// Нажатие на заголовок или на объявленную область — начинаем drag
-	if pt.In(w.titleBarRect()) || w.dragAreaHit(pt) {
+	if (pt.In(w.titleBarRect()) && !w.titleBarChildHit(pt)) || w.dragAreaHit(pt) {
 		DismissAll(w) // закрываем dropdown/popup перед drag
 		w.dragging = true
 		w.dragStartX = e.X

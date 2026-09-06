@@ -2036,6 +2036,129 @@ one solid one.
 window (`WindowStyleNone`) needs them: it has no title bar, so there was nothing
 to drag it by — `WantsCapture` answered "no" unconditionally.
 
+**Your own controls in the built-in bar.** Removing the bar entirely is rarely
+what is wanted: usually the caption and the ✕ may stay with the engine while the
+application needs its own search box in the bar and a button that collapses the
+side navigation.
+
+```go
+dlg.SetTitleBarContent(searchBox) // a widget in the free part of the bar
+dlg.SetNavButton(true)            // collapse button, left of the caption
+dlg.SetNavIcons(iconMenu, nil)    // your icon (nil — the built-in "≡")
+dlg.OnNavToggle = func(collapsed bool) {
+    nav.SetVisible(!collapsed)
+    relayout()
+}
+dlg.SetContentPadding(0) // content reaches the window edges
+```
+
+The engine lays it out: after the caption (and the collapse button, when there
+is one) and before the ✕ — `TitleBarContentBounds()` returns that rectangle. The
+bar belongs to the engine, its height comes from the theme and its own controls
+sit at the right; an application that needs the whole bar still takes
+`SetChromeless`.
+
+A press on that widget does NOT drag the window — otherwise the search field
+could be neither selected nor scrolled. The free part of the bar next to it
+drags as before.
+
+To the right of the content the engine keeps a free strip of 72 px — the drag
+handle. A field stretched to the buttons would leave the bar without a single
+point to grab the window by, and a title bar is first of all the place a window
+is moved by.
+
+**All three window buttons.** A dialog drew one ✕ in its bar: a dialog that asks
+a question needs no more. A dialog shown in its own OS window and stretched to
+half the screen needs all three:
+
+```go
+dlg.SetWindowButtons(true) // ─ □ ✕ instead of a lone ✕
+dlg.SetMaximized(true)     // the "maximize" glyph becomes "restore"
+```
+
+Minimizing and maximizing is done by the OS window, not by the widget:
+`OnMinimize` and `OnMaximizeRestore` are installed by the native modal host when
+the dialog is shown in its own window. In headless (the dialog is drawn inside
+the main window) there is nothing to minimize — the buttons stay inert there and
+are not worth enabling. The buttons take room in the bar: the ✕ moves left and
+the application's content shrinks.
+
+Collapsing is the application's job: the engine does not know what is on its
+left — a navigation panel, a tree or a `SplitPanel`. The button only keeps the
+state (`IsNavCollapsed`, `SetNavCollapsed`) and calls `OnNavToggle`.
+
+`widget.Window` has the same: `SetTitleBarContent`, `SetNavButton`,
+`SetNavIcons`, `OnNavToggle`. The widget in the bar is the one child of a window
+that is not stretched to the client area: its geometry comes from the bar.
+
+**The mac title-bar layout does not offer this mode.** The window buttons sit on
+the left and the caption is centered, so an application widget would have to be
+squeezed between them — no macOS window has a bar like that. There
+`TitleBarContentBounds` is empty, the widget is hidden, the collapse button is
+not shown, and the caption is drawn as usual.
+
+**Content padding.** In a dialog it used to be a constant — 14 px horizontally
+and 12 px vertically:
+
+```go
+dlg.SetContentPadding(0)  // content from edge to edge
+dlg.SetContentPadding(-1) // back to the default
+dlg.ContentPadding()      // the effective padding: horizontal, vertical
+```
+
+A dialog without the built-in bar (`SetChromeless`) draws its content with no
+padding by default: that is the whole point of it, and a frame of dialog
+background around the side panel defeated it — there was nothing to paint over
+it, a dialog has one background for the whole window. A regular dialog keeps the
+old default: `MessageBox` places its buttons and labels expecting 14/12.
+
+### Side navigation (NavPanel)
+
+```go
+nav := widget.NewNavPanel()
+nav.AddItem(iconGeneral, "General")
+nav.AddItem(iconGit, "Git")
+nav.OnSelect = func(i int) { pages.Show(i) }
+
+dlg.SetNavPanel(nav)   // a column spanning the FULL height, title bar included
+dlg.SetNavButton(true) // the "≡" in the bar collapses this very panel
+```
+
+An item is an icon AND a caption at once, which is why the collapsed mode hides
+the captions, not the items: what remains is a strip in the panel's own color
+with the icons, and the content takes the freed width. An item without an icon is
+drawn as the first letter of its caption — otherwise a collapsed panel would turn
+into a strip of empty rows for anyone who has no icons.
+
+```go
+nav.SetCollapsed(true)   // the icon strip
+nav.ExpandedWidth = 260  // width in either state
+nav.CollapsedWidth = 52
+nav.SetSelected(1)       // select programmatically (OnSelect is NOT called)
+nav.ItemRect(i)          // an item's rectangle — for your own tooltip, say
+```
+
+The column occupies the left side from the TOP edge of the window down: the panel
+is drawn first among the children and the engine puts the title caption back on
+top of it — so the color reaches the edge while the caption stays where it was,
+like the vertical tabs of a browser. The children are clipped to the rounded body
+(`CornerRadius`): the panel fills its column with a rectangle and would otherwise
+cut the window's corners off. The items start below the caption (the panel
+gets its `TopInset` from the host).
+
+`ContentBounds` moves right of the column, so the `SetContent` widget is laid out
+in what is left, and a collapsed panel hands it the freed width with no code in
+the application. The title bar content (`SetTitleBarContent`) also starts
+AFTER the column: over the panel it would carry a foreign background and read as
+laid on top of it rather than as part of the bar. The column is capped at half the window: a panel that took the
+whole window would leave the content with no room and no explanation.
+
+The panel need not be a `NavPanel`: `SetNavPanel` takes any widget. Its width is
+asked through `DesiredSize` and collapsing through `SetCollapsed(bool)`, when it
+has one. `widget.Window` has the same: `SetNavPanel`, `NavPanelBounds`. In the
+mac style the column does not rise into the bar — the window buttons live in that
+corner.
+
 ### Minimum window size
 
 ```go
