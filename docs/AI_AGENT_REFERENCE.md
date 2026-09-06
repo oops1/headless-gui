@@ -707,6 +707,13 @@ widget.AliasStrings(map[string]string{"dlg.ok": "btn.ok"})
 ### Window icon, modal theming, secret input, tree item style
 
 ```go
+// Minimum window size in LOGICAL pixels; works before Run() and at runtime,
+// recomputed on a DPI change, overrides widget.Window MinWidth/MinHeight.
+// Honoured by Win32 (WM_GETMINMAXINFO), X11 (WM_NORMAL_HINTS) and Wayland
+// (xdg_toplevel.set_min_size); no-op on macOS.
+win.SetMinSize(800, 600)
+win.MinSize() (int, int)
+
 // Window icon at runtime: Win32 WM_SETICON, X11 _NET_WM_ICON.
 // Nearest size wins; a backend without support returns ErrIconUnsupported.
 win.SetIcon(icon16, icon32)

@@ -220,6 +220,12 @@ type WaylandWindow struct {
 	modCaps  bool
 	kbGroup  int
 
+	// minW/minH/minWant — минимальный размер, заданный до создания toplevel
+	// (см. SetMinSize): Create фиксирует размер, и отложенный минимум
+	// применяется после фиксации, иначе она его затрёт.
+	minW, minH int
+	minWant    bool
+
 	// Callbacks (интерфейс NativeWindow)
 	onResize      func(w, h int)
 	onClose       func() bool
@@ -470,6 +476,13 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	// фиксируем размер: движок сам управляет разрешением
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(int32(width)).putInt(int32(height)), -1)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(int32(width)).putInt(int32(height)), -1)
+	// Минимум, заданный приложением до Create, — ПОСЛЕ фиксации: иначе строка
+	// выше затёрла бы его размером окна.
+	if w.minWant {
+		w.minWant = false
+		mw, mh := wlMinSizeArgs(w.minW, w.minH, 1)
+		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(mw).putInt(mh), -1)
+	}
 	w.send(newWlMsg(w.surfaceID, wlSurfaceCommit), -1)
 
 	// Ждём первый configure (обязателен до attach).
@@ -1169,7 +1182,10 @@ func (w *WaylandWindow) SetResizable(v bool) {}
 // см. подробный комментарий у wlMinSizeArgs), так что physical == logical,
 // как и у уже существующих вызовов set_min_size/set_max_size в Create.
 func (w *WaylandWindow) SetMinSize(width, height int) {
+	// Toplevel ещё нет — запоминаем: Create сам зафиксирует размер и следом
+	// применит отложенный минимум (иначе он потерялся бы под фиксацией).
 	if w.toplevelID == 0 {
+		w.minW, w.minH, w.minWant = width, height, true
 		return
 	}
 	mw, mh := wlMinSizeArgs(width, height, 1)
