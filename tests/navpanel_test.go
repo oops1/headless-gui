@@ -214,6 +214,9 @@ func TestNavPanel_WidthClampedToHalf(t *testing.T) {
 // раскладываются уже по ней.
 func TestWindowNavPanel_ClientAreaShifts(t *testing.T) {
 	w := widget.NewWindow("Настройки", 800, 600)
+	// Стиль явно: в mac-раскладке колонка начинается НИЖЕ полосы (там кнопки
+	// окна), и тест проверял бы разную геометрию на разных платформах.
+	w.TitleStyle = widget.WindowTitleWin
 	w.SetBounds(image.Rect(0, 0, 800, 600))
 	body := widget.NewPanel(color.RGBA{R: 20, G: 20, B: 20, A: 255})
 	body.ShowHeader = false
@@ -274,5 +277,24 @@ func TestNavPanel_KeepsRoundedCorners(t *testing.T) {
 	got := [3]uint8{img.Pix[i], img.Pix[i+1], img.Pix[i+2]}
 	if got != [3]uint8{wideBG.R, wideBG.G, wideBG.B} {
 		t.Errorf("угол закрашен %v — скругление срезано", got)
+	}
+}
+
+// В mac-раскладке колонка начинается ПОД полосой: в её левом верхнем углу
+// стоят кнопки окна, и панель, поднятая под верх, накрыла бы их.
+func TestWindowNavPanel_MacStartsBelowTitleBar(t *testing.T) {
+	w := widget.NewWindow("Настройки", 800, 600)
+	w.TitleStyle = widget.WindowTitleMac
+	w.SetBounds(image.Rect(0, 0, 800, 600))
+
+	nav := widget.NewNavPanel()
+	nav.AddItem(nil, "Общие")
+	w.SetNavPanel(nav)
+
+	if got := nav.Bounds().Min.Y; got <= w.Bounds().Min.Y {
+		t.Errorf("колонка поднята под полосу (верх %d) — накроет кнопки окна", got)
+	}
+	if got, want := nav.Bounds().Min.Y, w.ContentBounds().Min.Y; got != want {
+		t.Errorf("колонка начинается на %d, клиентская область — на %d", got, want)
 	}
 }

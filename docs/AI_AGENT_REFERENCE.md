@@ -738,6 +738,8 @@ win.AddDragArea(image.Rect(0, 0, 240, 48)) // borderless window (WindowStyleNone
 // and a press on it does not drag the window.
 dlg.SetTitleBarContent(searchBox); dlg.TitleBarContentBounds()
 win.SetTitleBarContent(searchBox) // same on widget.Window
+// NOTE: not offered in the mac title-bar layout (buttons left, centered
+// caption): bounds come back empty and the widget stays hidden there.
 
 // Collapse button at the left of the bar. The engine keeps the state and
 // notifies; collapsing the side area is the application's job.
