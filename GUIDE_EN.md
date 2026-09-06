@@ -262,6 +262,41 @@ There is no separate `ToggleButton` type: it differs from `Button` by exactly
 this state, not by layout, icons, commands or subscriptions. `IsChecked` is
 read on a plain button too — "draw it selected", without the toggle behavior.
 
+### ToolBar
+
+```go
+tb := widget.NewToolBar()
+tb.AddChild(widget.NewButton("Refresh"))
+tb.AddSeparator()
+tb.AddChild(widget.NewButton("Push"))
+tb.SetIconsOnly(true)  // buttons with an icon show the icon only
+tb.Overflow = true     // what does not fit goes into a chevron menu
+tb.OverflowCount()     // how many items did not fit
+```
+
+In XAML — `<ToolBarTray>` and `<ToolBar>` with `IconsOnly`, `Overflow` and the
+`<Separator/>` element:
+
+```xml
+<ToolBarTray>
+  <ToolBar x:Name="tbMain" IconsOnly="False">
+    <Button Content="Refresh" Icon="icons/refresh.png"/>
+    <Separator/>
+    <Button Content="Push" Icon="icons/push.png"/>
+  </ToolBar>
+</ToolBarTray>
+```
+
+Overflow is on by default: a clipped button is unreachable, and that is worse
+than a button two clicks away. The first item is never hidden — a toolbar
+reduced to a single chevron does not even say what toolbar it is. Buttons and
+separators go into the overflow menu; an arbitrary widget (a search box) cannot
+become a menu entry, so put such items FIRST — they overflow last.
+
+Icons-only mode remembers the previous label position and restores it when
+turned off; a button without an icon is left alone — it has nothing to hide the
+label behind.
+
 ### TextInput
 
 ```go
@@ -579,6 +614,35 @@ item.Bold       // bold face
 item.Children   // children []*TreeViewItem
 ```
 
+**Per-node context menu** — the same shape as the grid's:
+
+```go
+tw.NodeContextMenu = func(it *treeview.TreeViewItem) []widget.MenuItem {
+    if it == nil {
+        return nil // clicked past the nodes
+    }
+    return []widget.MenuItem{{Text: "Checkout", OnClick: func() { checkout(it) }}}
+}
+```
+
+**Dragging nodes.** Off by default: dragging changes what an ordinary click
+does, and turning that on silently is not acceptable.
+
+```go
+tw.Tree.CanUserDragNodes = true
+tw.Tree.OnNodeDrop = func(d, target *treeview.TreeViewItem, pos treeview.DropPosition) bool {
+    return false // false — the tree moves the node; true — "I handled it"
+}
+tw.Tree.CanDropNode = func(d, target *treeview.TreeViewItem, pos treeview.DropPosition) bool {
+    return target.Tag == groupTag // only groups accept drops
+}
+tw.Tree.MoveNode(node, target, treeview.DropInside) // the same, programmatically
+```
+
+The top and bottom thirds of a row mean `DropBefore` and `DropAfter`, the middle
+means `DropInside`. A node is never dropped into itself or into its own
+descendant: that is not "inconvenient", that is a lost subtree.
+
 **Row styling.** The item fields are enough when the look depends on the item
 itself. When it depends on APPLICATION state — "the active repository" does not
 live in the tree — keeping a copy in every item means syncing it on every
@@ -777,6 +841,13 @@ dg.Grid.OnHeaderClick = func(col datagrid.Column, idx, x, y int) bool {
 }
 ```
 
+**Live header translation.** `{Loc Key}` in `Header` follows a language switch
+the same way tab and menu labels do:
+
+```xml
+<DataGridTextColumn Header="{Loc col.name}" Binding="{Binding Name}"/>
+```
+
 **Column order.** `MoveColumn(from, to)` reorders programmatically,
 `OnColumnsReordered` reports a reorder. With `CanUserReorderColumns = true` a
 column can be dragged by its header: a few-pixel threshold separates a drag
@@ -796,6 +867,29 @@ dg.Grid.RowToolTip = func(item interface{}, row int) string {
 
 To compute something yourself, `HoverRow()`, `RowIndexAtY(y)`, `ScrollX()` and
 `ScrollY()` are exported.
+
+**Per-row context menu.** `SetContextMenu` attaches one ready-made menu to the
+widget; actions on a file or a commit depend on which row was clicked:
+
+```go
+dg.RowContextMenu = func(item interface{}, row int) []widget.MenuItem {
+    if row < 0 {
+        return nil // clicked past the rows — no menu here
+    }
+    f := item.(*FileRow)
+    return []widget.MenuItem{
+        {Text: "Open", OnClick: func() { open(f) }},
+        {Separator: true},
+        {Text: "Delete", OnClick: func() { remove(f) }},
+    }
+}
+```
+
+An empty slice means "no menu here": the engine keeps looking up the tree. A
+right click does NOT change the selection — the row is handed to the callback
+explicitly, and changing the user's choice behind their back is not the engine's
+call; whoever wants Explorer behavior calls `SetSelectedIndex(row)` in the
+callback itself.
 
 **Loading more on scroll.** Row virtualization has always been there — only
 visible rows are drawn — and `OnScroll` reports how far the user has scrolled:
@@ -976,6 +1070,32 @@ eng.SendKeyEvent(widget.KeyEvent{
 Key codes: `KeyBackspace, KeyEnter, KeyEscape, KeyTab, KeySpace, KeyLeft/Right/Up/Down, KeyHome, KeyEnd, KeyDelete, KeyA/C/V/X/Z`.
 
 Modifiers: `ModShift, ModCtrl, ModAlt, ModMeta`.
+
+### Localizing the built-in dialogs
+
+`MessageBox`, the file chooser, input and progress are translated through
+`dlg.*` keys using the same string tables as everything else. Any key can be
+overridden with a plain `RegisterStrings` — tables are merged and the values
+passed in win:
+
+```go
+widget.RegisterStrings("EN", map[string]string{"dlg.cancel": "Never mind"})
+```
+
+If the application has its OWN key names, there is no need to duplicate values —
+just link the names:
+
+```go
+widget.AliasStrings(map[string]string{
+    "dlg.ok":     "btn.ok",
+    "dlg.cancel": "btn.cancel",
+})
+```
+
+An alias outranks a direct translation of the key: both are set by the
+application, and the more specific one wins. With no translation behind the
+alias the built-in one is used — never worse than before. `SetLanguage` drives
+the dialogs and the application alike: one language for the whole window.
 
 ---
 

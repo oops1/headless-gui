@@ -263,6 +263,41 @@ btn.OnCheckedChanged = func(on bool) { ... }
 читается и у обычной кнопки — «нарисуй выбранной», без поведения
 переключателя.
 
+### ToolBar
+
+```go
+tb := widget.NewToolBar()
+tb.AddChild(widget.NewButton("Обновить"))
+tb.AddSeparator()
+tb.AddChild(widget.NewButton("Отправить"))
+tb.SetIconsOnly(true)  // кнопки с иконкой показывают только иконку
+tb.Overflow = true     // не поместившиеся уходят в меню под шевроном
+tb.OverflowCount()     // сколько элементов не поместилось
+```
+
+В XAML — `<ToolBarTray>` и `<ToolBar>` с атрибутами `IconsOnly`, `Overflow` и
+элементом `<Separator/>`:
+
+```xml
+<ToolBarTray>
+  <ToolBar x:Name="tbMain" IconsOnly="False">
+    <Button Content="Обновить" Icon="icons/refresh.png"/>
+    <Separator/>
+    <Button Content="Отправить" Icon="icons/push.png"/>
+  </ToolBar>
+</ToolBarTray>
+```
+
+Переполнение включено по умолчанию: обрезанная кнопка недостижима, и это хуже,
+чем кнопка, до которой нужно два щелчка. Первый элемент не прячется никогда —
+панель из одного шеврона не сообщает даже того, что это за панель. В меню
+переполнения попадают кнопки и разделители: произвольный виджет (поле поиска)
+пунктом меню стать не может, поэтому такие элементы стоит ставить ПЕРВЫМИ — они
+переполняются последними.
+
+Режим «только иконки» запоминает прежнее положение подписи и возвращает его при
+выключении; кнопку без иконки он не трогает — прятать подпись ей не во что.
+
 ### TextInput
 
 ```go
@@ -580,6 +615,35 @@ item.Bold       // жирное начертание
 item.Children   // дочерние []*TreeViewItem
 ```
 
+**Контекстное меню на узел** — тем же приёмом, что и у таблицы:
+
+```go
+tw.NodeContextMenu = func(it *treeview.TreeViewItem) []widget.MenuItem {
+    if it == nil {
+        return nil // щёлкнули мимо узлов
+    }
+    return []widget.MenuItem{{Text: "Переключиться", OnClick: func() { checkout(it) }}}
+}
+```
+
+**Перетаскивание узлов.** Выключено по умолчанию: перетаскивание меняет
+поведение обычного щелчка, и включать это молча нельзя.
+
+```go
+tw.Tree.CanUserDragNodes = true
+tw.Tree.OnNodeDrop = func(d, target *treeview.TreeViewItem, pos treeview.DropPosition) bool {
+    return false // false — дерево переставит узел само; true — «справился сам»
+}
+tw.Tree.CanDropNode = func(d, target *treeview.TreeViewItem, pos treeview.DropPosition) bool {
+    return target.Tag == groupTag // разрешаем класть только в группы
+}
+tw.Tree.MoveNode(node, target, treeview.DropInside) // то же программно
+```
+
+Верхняя и нижняя трети строки означают `DropBefore` и `DropAfter`, середина —
+`DropInside`. Узел в самого себя и в собственного потомка дерево не отдаёт: это
+не «неудобно», это потерянное поддерево.
+
 **Оформление строки.** Полей узла хватает, когда вид зависит от самого узла.
 Когда он зависит от состояния ПРИЛОЖЕНИЯ — «активный репозиторий» живёт не в
 дереве, — держать его копию в каждом узле значит синхронизировать её при каждом
@@ -781,6 +845,13 @@ dg.Grid.OnHeaderClick = func(col datagrid.Column, idx, x, y int) bool {
 }
 ```
 
+**Живой перевод заголовков.** `{Loc Ключ}` в `Header` следует смене языка так
+же, как подписи вкладок и пунктов меню:
+
+```xml
+<DataGridTextColumn Header="{Loc col.name}" Binding="{Binding Name}"/>
+```
+
 **Порядок колонок.** `MoveColumn(from, to)` переставляет колонку программно,
 `OnColumnsReordered` сообщает о перестановке. С `CanUserReorderColumns = true`
 колонку можно тащить за заголовок: порог в несколько пикселей отделяет
@@ -801,6 +872,29 @@ dg.Grid.RowToolTip = func(item interface{}, row int) string {
 
 Если нужно посчитать что-то самому — наружу отданы `HoverRow()`,
 `RowIndexAtY(y)`, `ScrollX()` и `ScrollY()`.
+
+**Контекстное меню на строку.** `SetContextMenu` вешает на виджет одно готовое
+меню; действия над файлом или коммитом зависят от того, по какой строке
+щёлкнули:
+
+```go
+dg.RowContextMenu = func(item interface{}, row int) []widget.MenuItem {
+    if row < 0 {
+        return nil // щёлкнули мимо строк — меню здесь нет
+    }
+    f := item.(*FileRow)
+    return []widget.MenuItem{
+        {Text: "Открыть", OnClick: func() { open(f) }},
+        {Separator: true},
+        {Text: "Удалить", OnClick: func() { remove(f) }},
+    }
+}
+```
+
+Пустой список означает «меню здесь нет»: движок пойдёт искать его выше по
+дереву. Выделение правым щелчком НЕ меняется — строка приходит в колбэк явным
+аргументом, а менять выбор пользователя за его спиной движок не вправе; кому
+нужно поведение проводника, зовёт `SetSelectedIndex(row)` прямо в колбэке.
 
 **Подгрузка по прокрутке.** Виртуализация в таблице есть с самого начала —
 рисуются только видимые строки, — а `OnScroll` сообщает, докуда долистали:
@@ -982,6 +1076,31 @@ eng.SendKeyEvent(widget.KeyEvent{
 Коды клавиш: `KeyBackspace, KeyEnter, KeyEscape, KeyTab, KeySpace, KeyLeft/Right/Up/Down, KeyHome, KeyEnd, KeyDelete, KeyA/C/V/X/Z`.
 
 Модификаторы: `ModShift, ModCtrl, ModAlt, ModMeta`.
+
+### Локализация штатных диалогов
+
+`MessageBox`, выбор файла, ввод и прогресс переводятся ключами `dlg.*` через тот
+же механизм строковых таблиц, что и остальное. Переопределить любой ключ можно
+обычным `RegisterStrings` — таблицы сливаются, и переданные значения побеждают:
+
+```go
+widget.RegisterStrings("RU", map[string]string{"dlg.cancel": "Не надо"})
+```
+
+Если у приложения СВОИ имена ключей, дублировать значения не нужно — достаточно
+связать имена:
+
+```go
+widget.AliasStrings(map[string]string{
+    "dlg.ok":     "btn.ok",
+    "dlg.cancel": "btn.cancel",
+})
+```
+
+Псевдоним старше собственного перевода ключа: оба заданы приложением, и
+побеждает названный конкретнее. Если по псевдониму перевода нет, берётся
+встроенный — хуже, чем было, не станет. `SetLanguage` управляет и диалогами, и
+приложением: язык у окна один.
 
 ---
 

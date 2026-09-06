@@ -674,6 +674,36 @@ eng.SendMouseButton(x, y, widget.MouseLeft, true)
 // DataGrid with SelectionExtended: Ctrl+Click toggles, Shift+Click ranges.
 ```
 
+### Context menus per row/node, ToolBar, tree drag, dialog localization
+
+```go
+// Menu built for the point under the cursor (ContextMenuProvider). The engine
+// asks it BEFORE the plain ContextMenu field. An empty slice means "no menu
+// here"; a right click does NOT change the selection.
+dg.RowContextMenu = func(item interface{}, row int) []widget.MenuItem { ... }
+tw.NodeContextMenu = func(it *treeview.TreeViewItem) []widget.MenuItem { ... }
+dg.Grid.ItemAtRow(row)      // model item shown in a row
+tw.Tree.ItemAtY(y)          // node under a Y coordinate
+tw.Tree.IndexAtY(y)
+
+// ToolBar: separators, icons-only, overflow into a chevron menu.
+tb := widget.NewToolBar(); tb.AddSeparator(); tb.SetIconsOnly(true)
+// XAML: <ToolBar IconsOnly="True" Overflow="True"><Separator/></ToolBar>
+// NOTE: <ToolBar> now builds *widget.ToolBar, not *widget.StackPanel.
+
+// Tree drag & drop (off by default — dragging changes what a click does).
+tw.Tree.CanUserDragNodes = true
+tw.Tree.CanDropNode = func(d, target *treeview.TreeViewItem, p treeview.DropPosition) bool
+tw.Tree.OnNodeDrop  = func(d, target *treeview.TreeViewItem, p treeview.DropPosition) bool
+// true from OnNodeDrop means "I handled it" — the tree moves nothing.
+tw.Tree.MoveNode(node, target, treeview.DropInside)
+
+// Dialog strings: override dlg.* directly, or alias them to your own keys.
+widget.RegisterStrings("EN", map[string]string{"dlg.cancel": "Never mind"})
+widget.AliasStrings(map[string]string{"dlg.ok": "btn.ok"})
+// {Loc Key} in a DataGrid column Header now follows SetLanguage.
+```
+
 ### Window icon, modal theming, secret input, tree item style
 
 ```go
