@@ -267,6 +267,30 @@ func (h *dialogHost) create(hm *hostedModal) {
 		native.SetPosition(x+dx, y+dy)
 	}
 
+	// Штатные кнопки окна диалога (widget.Dialog.SetWindowButtons): свернуть и
+	// развернуть умеет окно ОС, виджет в холсте — нет.
+	//
+	// Действие маршалим на поток цикла сообщений: клик приходит на горутине
+	// вторичного движка, а ShowWindow из чужого потока Win32 выполняет
+	// асинхронно — состояние окна тут же после вызова было бы прежним, и
+	// кнопка нарисовала бы не тот глиф.
+	onUI := func(fn func()) { fn() }
+	if inv, ok := native.(uiThreadInvoker); ok {
+		onUI = inv.InvokeOnUIThread
+	}
+	dlg.OnMinimize = func() { onUI(func() { native.Minimize() }) }
+	dlg.OnMaximizeRestore = func() {
+		onUI(func() {
+			if native.IsMaximized() {
+				native.Restore()
+			} else {
+				native.Maximize()
+			}
+			dlg.SetMaximized(native.IsMaximized())
+			eng.Invalidate()
+		})
+	}
+
 	// Ресайз рамки окна ОС → новый размер холста и диалога.
 	//
 	// Только у растяжимого: у обычного окно и так не тянется, а лишний

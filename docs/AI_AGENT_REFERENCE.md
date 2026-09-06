@@ -730,6 +730,59 @@ win.AddDragArea(image.Rect(0, 0, 240, 48)) // borderless window (WindowStyleNone
 // A declared area beats the widgets inside it — cut your buttons out yourself.
 ```
 
+### Title bar with app controls, collapse button, content padding
+
+```go
+// A widget of the application inside the BUILT-IN title bar: laid out after the
+// caption and before the ✕ / window buttons. Not stretched to the client area,
+// and a press on it does not drag the window.
+dlg.SetTitleBarContent(searchBox); dlg.TitleBarContentBounds()
+win.SetTitleBarContent(searchBox) // same on widget.Window
+
+// Collapse button at the left of the bar. The engine keeps the state and
+// notifies; collapsing the side area is the application's job.
+dlg.SetNavButton(true); dlg.SetNavIcons(iconMenu, nil) // nil icon → built-in "≡"
+dlg.OnNavToggle = func(collapsed bool) { nav.SetVisible(!collapsed) }
+dlg.SetNavCollapsed(true); dlg.IsNavCollapsed(); dlg.HasNavButton()
+
+// Content padding (was the private dlgPad constant): 0 = content to the edges,
+// -1 = back to the default (14/12; a chromeless dialog defaults to 0).
+dlg.SetContentPadding(0); dlg.ContentPadding()
+// NOTE: SetChromeless now implies zero content padding — a chromeless dialog
+// laid out against the old 14/12 inset will shift.
+```
+
+### Side navigation (widget.NavPanel)
+
+```go
+nav := widget.NewNavPanel()
+nav.AddItem(icon, "General")     // an item is icon AND caption; nil icon → first letter
+nav.OnSelect = func(i int) { ... } // user's click only, not SetSelected
+nav.SetCollapsed(true)             // icon-only strip; width follows, host re-lays out
+nav.ExpandedWidth, nav.CollapsedWidth, nav.ItemHeight, nav.IconSize, nav.FontSize
+nav.SetSelected(i); nav.Selected(); nav.ItemRect(i); nav.ItemCount()
+
+// Hosted column: full height INCLUDING the title bar; the caption is redrawn on
+// top of the panel. ContentBounds moves right of the column.
+dlg.SetNavPanel(nav); dlg.NavPanelBounds()
+win.SetNavPanel(nav) // mac style: the column starts below the bar (window buttons)
+// The "≡" button (SetNavButton) collapses the panel itself when one is set.
+```
+
+### Window buttons on a dialog, title-bar drag handle
+
+```go
+// All three window buttons in the dialog's bar instead of a lone ✕. The actions
+// belong to the OS window: OnMinimize / OnMaximizeRestore are installed by the
+// native modal host (window/modal_host.go); inert in headless.
+dlg.SetWindowButtons(true); dlg.HasWindowButtons()
+dlg.SetMaximized(true); dlg.IsMaximized() // switches the glyph to "restore"
+dlg.OnMinimize, dlg.OnMaximizeRestore     // override only if you host the window
+
+// The title bar keeps a 72px free strip right of SetTitleBarContent — the drag
+// handle. Both Dialog and Window; TitleBarContentBounds already accounts for it.
+```
+
 ### Context menus per row/node, ToolBar, tree drag, dialog localization
 
 ```go
