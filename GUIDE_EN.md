@@ -2036,6 +2036,57 @@ one solid one.
 window (`WindowStyleNone`) needs them: it has no title bar, so there was nothing
 to drag it by — `WantsCapture` answered "no" unconditionally.
 
+**Your own controls in the built-in bar.** Removing the bar entirely is rarely
+what is wanted: usually the caption and the ✕ may stay with the engine while the
+application needs its own search box in the bar and a button that collapses the
+side navigation.
+
+```go
+dlg.SetTitleBarContent(searchBox) // a widget in the free part of the bar
+dlg.SetNavButton(true)            // collapse button, left of the caption
+dlg.SetNavIcons(iconMenu, nil)    // your icon (nil — the built-in "≡")
+dlg.OnNavToggle = func(collapsed bool) {
+    nav.SetVisible(!collapsed)
+    relayout()
+}
+dlg.SetContentPadding(0) // content reaches the window edges
+```
+
+The engine lays it out: after the caption (and the collapse button, when there
+is one) and before the ✕ — `TitleBarContentBounds()` returns that rectangle. The
+bar belongs to the engine, its height comes from the theme and its own controls
+sit at the right; an application that needs the whole bar still takes
+`SetChromeless`.
+
+A press on that widget does NOT drag the window — otherwise the search field
+could be neither selected nor scrolled. The free part of the bar next to it
+drags as before.
+
+Collapsing is the application's job: the engine does not know what is on its
+left — a navigation panel, a tree or a `SplitPanel`. The button only keeps the
+state (`IsNavCollapsed`, `SetNavCollapsed`) and calls `OnNavToggle`.
+
+`widget.Window` has the same: `SetTitleBarContent`, `SetNavButton`,
+`SetNavIcons`, `OnNavToggle`. The widget in the bar is the one child of a window
+that is not stretched to the client area: its geometry comes from the bar. In
+the mac style the caption is centered and would land on top of it, so the
+caption is not drawn while the bar has content (title tabs behave the same).
+
+**Content padding.** In a dialog it used to be a constant — 14 px horizontally
+and 12 px vertically:
+
+```go
+dlg.SetContentPadding(0)  // content from edge to edge
+dlg.SetContentPadding(-1) // back to the default
+dlg.ContentPadding()      // the effective padding: horizontal, vertical
+```
+
+A dialog without the built-in bar (`SetChromeless`) draws its content with no
+padding by default: that is the whole point of it, and a frame of dialog
+background around the side panel defeated it — there was nothing to paint over
+it, a dialog has one background for the whole window. A regular dialog keeps the
+old default: `MessageBox` places its buttons and labels expecting 14/12.
+
 ### Minimum window size
 
 ```go

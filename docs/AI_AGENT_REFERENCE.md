@@ -730,6 +730,28 @@ win.AddDragArea(image.Rect(0, 0, 240, 48)) // borderless window (WindowStyleNone
 // A declared area beats the widgets inside it — cut your buttons out yourself.
 ```
 
+### Title bar with app controls, collapse button, content padding
+
+```go
+// A widget of the application inside the BUILT-IN title bar: laid out after the
+// caption and before the ✕ / window buttons. Not stretched to the client area,
+// and a press on it does not drag the window.
+dlg.SetTitleBarContent(searchBox); dlg.TitleBarContentBounds()
+win.SetTitleBarContent(searchBox) // same on widget.Window
+
+// Collapse button at the left of the bar. The engine keeps the state and
+// notifies; collapsing the side area is the application's job.
+dlg.SetNavButton(true); dlg.SetNavIcons(iconMenu, nil) // nil icon → built-in "≡"
+dlg.OnNavToggle = func(collapsed bool) { nav.SetVisible(!collapsed) }
+dlg.SetNavCollapsed(true); dlg.IsNavCollapsed(); dlg.HasNavButton()
+
+// Content padding (was the private dlgPad constant): 0 = content to the edges,
+// -1 = back to the default (14/12; a chromeless dialog defaults to 0).
+dlg.SetContentPadding(0); dlg.ContentPadding()
+// NOTE: SetChromeless now implies zero content padding — a chromeless dialog
+// laid out against the old 14/12 inset will shift.
+```
+
 ### Context menus per row/node, ToolBar, tree drag, dialog localization
 
 ```go
