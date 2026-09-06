@@ -146,14 +146,14 @@ type Dialog struct {
 	titleBarContent Widget
 	navBtn          *titleNavBtn
 	navPanel        Widget
+	pad             int
+	padSet          bool
 
 	// minBtn/maxBtn — штатные кнопки окна «свернуть» и «развернуть»
 	// (dialog_sysbuttons.go); maximized — состояние, о котором сообщает хост
 	// окна: сам виджет о своём окне ничего не знает.
 	minBtn, maxBtn *dialogSysBtn
 	maximized      bool
-	pad             int
-	padSet          bool
 
 	// ── Перетаскивание за заголовок (как у Window/Panel) ────────────────────
 	dragging   bool
