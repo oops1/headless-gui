@@ -182,6 +182,26 @@ type DataGrid struct {
 	OnCellEditEnding   func(e *CellEditEndingEvent)
 	OnRowEditEnding    func(rowIndex int, item interface{})
 
+	// EmptyStateText — что показать вместо строк, когда их нет.
+	//
+	// Пустая таблица — обычное первое состояние: список ключей, история,
+	// журнал. Пустой прямоугольник не отличает «ещё ничего не добавили» от
+	// «не загрузилось», и приложение объясняло это своим Label поверх
+	// таблицы, переключая его видимость вручную.
+	//
+	// Заголовки при этом остаются: по ним видно, что за таблица перед
+	// человеком, и прятать их значило бы прятать половину ответа.
+	EmptyStateText string
+
+	// EmptyStateColor — цвет этого текста. Нулевая альфа означает «как у
+	// обычного текста таблицы».
+	EmptyStateColor color.RGBA
+
+	// EmptyStateRenderer — своя отрисовка пустого состояния: картинка,
+	// заголовок с пояснением, кнопка-подсказка. Задан — EmptyStateText не
+	// используется.
+	EmptyStateRenderer func(EmptyStateContext)
+
 	// RowToolTip — текст всплывающей подсказки для строки под курсором.
 	//
 	// У Base.ToolTip один текст на весь виджет, а строке нужен свой:
@@ -1419,6 +1439,13 @@ type drawSnapshot struct {
 	dragging bool
 	dragCol  int
 	dropX    int
+
+	// Пустое состояние (emptystate.go): текст и число строк, чтобы решить,
+	// показывать ли его.
+	rowCount   int
+	emptyText  string
+	emptyColor color.RGBA
+	emptyDraw  func(EmptyStateContext)
 }
 
 // rowSnapshot — данные одной видимой строки на кадр.
@@ -1513,6 +1540,12 @@ func (dg *DataGrid) snapshotForDraw() (s drawSnapshot, ok bool) {
 	s.selectColor, s.hoverColor = dg.SelectColor, dg.HoverColor
 	s.alternateBG, s.gridLine = dg.AlternateBG, dg.GridLineColor
 	s.zebra = dg.ZebraStripes
+	s.rowCount = dg.rowCount()
+	s.emptyText, s.emptyDraw = dg.EmptyStateText, dg.EmptyStateRenderer
+	s.emptyColor = dg.EmptyStateColor
+	if s.emptyColor.A == 0 {
+		s.emptyColor = dg.TextColor
+	}
 	dg.headerDragSnapshot(&s)
 	s.scrollTrack, s.scrollThumb = dg.ScrollTrackBG, dg.ScrollThumbBG
 	s.scrollThumbHigh = dg.ScrollThumbHover
@@ -1558,6 +1591,9 @@ func (dg *DataGrid) Draw(ctx DrawContextBridge) {
 
 	// Строки данных (с виртуализацией) — собственный клип внутри
 	dg.drawRows(ctx, &s)
+
+	// Пустое состояние — вместо строк, которых нет.
+	dg.drawEmptyState(ctx, &s)
 
 	// Скроллбар
 	if s.needScroll {
