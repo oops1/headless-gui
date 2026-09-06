@@ -1864,6 +1864,10 @@ cannot do it (Wayland before `xdg-toplevel-icon-v1`) returns
 `window.ErrIconUnsupported` — deliberately not silence: an application with no
 visible icon should learn why here, not go hunting through desktop settings.
 
+Before `Run()` the method always returns `nil`: there is no backend yet, so
+there is nothing to judge support by. The icon is remembered and applied when
+the window is created — the same way `SetTrayIcon` behaves.
+
 ### Tray and notifications (Windows)
 
 `window.Window` can drive the notification area. Methods may be called before

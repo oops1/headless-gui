@@ -244,6 +244,12 @@ type Window struct {
 	title string
 	w, h  int
 
+	// pendingIcons/iconWant — значок окна, заданный до Run() (icon.go).
+	// Бэкенда до Run() ещё нет, а задать значок сразу после window.New —
+	// естественно, и именно так написано в руководстве.
+	pendingIcons []image.Image
+	iconWant     bool
+
 	// Флаг: запрошено закрытие окна (кнопка ×).
 	closeRequested atomic.Bool
 
@@ -364,6 +370,10 @@ func (win *Window) SetCornerRadius(r int) {
 // ВАЖНО: вызывать из главной горутины (main).
 func (win *Window) Run() error {
 	win.native = NewNativeWindow()
+
+	// Значок, заданный до Run(): отдаём бэкенду ДО создания окна ОС, чтобы он
+	// выставил его в правильный момент (на X11 — до MapWindow).
+	win.applyPendingIcon()
 
 	// HiDPI: определяем масштаб монитора (env HEADLESS_GUI_SCALE или
 	// бэкенд) и сообщаем движку ДО расчёта размеров окна.
