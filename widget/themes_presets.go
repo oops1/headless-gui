@@ -340,8 +340,9 @@ func Win2000Theme() *Theme {
 		InputCaret:       black,
 		InputPlaceholder: gray,
 
-		LabelText: black,
-		LabelBG:   color.RGBA{},
+		LabelText:     black,
+		LabelBG:       color.RGBA{},
+		SecondaryText: gray,
 
 		ProgressBG:   white,
 		ProgressFill: navy,

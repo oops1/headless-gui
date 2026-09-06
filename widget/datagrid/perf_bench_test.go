@@ -35,6 +35,8 @@ func (c *nopDrawCtx) DrawImage(src image.Image, x, y int)         { c.sink += x 
 func (c *nopDrawCtx) DrawImageScaled(src image.Image, x, y, w, h int) {
 	c.sink += w
 }
+func (c *nopDrawCtx) FillEllipseAA(cx, cy, rx, ry int, col color.RGBA) { c.sink += rx }
+func (c *nopDrawCtx) FillRoundRect(x, y, w, h, r int, col color.RGBA)  { c.sink += w }
 
 // ─── Модель для бенчмарков ─────────────────────────────────────────────────
 

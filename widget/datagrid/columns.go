@@ -132,6 +132,15 @@ type DrawContextBridge interface {
 	// том, что Draw колонки и Draw обёртки идут в одном кадре подряд.
 	DrawImage(src image.Image, x, y int)
 	DrawImageScaled(src image.Image, x, y, w, h int)
+
+	// FillEllipseAA и FillRoundRect — фигуры, которыми движок рисует сам
+	// (кружок радиокнопки, значок диалога, подсветка строки).
+	//
+	// Без них цветной кружок статуса в ячейке приходилось заранее
+	// растеризовать из SVG в картинку каждого цвета — то есть держать набор
+	// картинок ради фигуры, которую движок умеет рисовать одной строкой.
+	FillEllipseAA(cx, cy, rx, ry int, col color.RGBA)
+	FillRoundRect(x, y, w, h, r int, col color.RGBA)
 }
 
 // ─── Column интерфейс ──────────────────────────────────────────────────────
@@ -292,9 +301,13 @@ func (c *DataGridTextColumn) DrawCell(cdc CellDrawContext) {
 		return
 	}
 
-	// Клиппинг по ячейке устанавливается вызывающей стороной (drawRows).
+	// Клиппинг по ячейке устанавливается вызывающей стороной (drawRows), но
+	// одного клиппинга мало: обрезанный им текст обрывается посреди буквы, и
+	// отличить короткое значение от урезанного нельзя. Многоточие об этом
+	// сообщает.
 	textX := r.Min.X + 6
 	textY := r.Min.Y + (r.Dy()-14)/2
+	text = EllipsizeText(cdc.DrawCtx, text, r.Dx()-12, cdc.FontSize)
 	cdc.DrawCtx.DrawTextSize(text, textX, textY, cdc.FontSize, cdc.TextColor)
 }
 

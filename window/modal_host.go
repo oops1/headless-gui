@@ -214,10 +214,20 @@ func (h *dialogHost) create(hm *hostedModal) {
 	dlg.Dim = color.RGBA{}
 
 	native := NewNativeWindow()
-	// Окно модалки — ровно по диалогу и не ресайзится пользователем.
 	// Минимум объявляем ДО Create: иначе окно, меньшее дефолтного минимума
 	// платформы, будет создано увеличенным (см. fitMinTrack в native_windows).
-	native.SetMinSize(pw, ph)
+	//
+	// У обычного диалога минимум — его собственный размер: тянуть диалог с
+	// вопросом и двумя кнопками незачем. У растяжимого (Dialog.SetResizable)
+	// минимум берётся из его MinSize, иначе окно нельзя было бы сделать ни
+	// меньше, ни больше — рамка есть, а предел один и тот же.
+	minW, minH := pw, ph
+	if dlg.IsResizable() {
+		mw, mh := dlg.MinSize()
+		minW = int(float64(mw)*scale + 0.5)
+		minH = int(float64(mh)*scale + 0.5)
+	}
+	native.SetMinSize(minW, minH)
 	surf := &surface{
 		eng:     eng,
 		native:  native,
@@ -232,8 +242,8 @@ func (h *dialogHost) create(hm *hostedModal) {
 		go eng.Stop()
 		return
 	}
-	native.SetResizable(false)
-	native.SetMinSize(pw, ph)
+	native.SetResizable(dlg.IsResizable())
+	native.SetMinSize(minW, minH)
 	if dlg.CornerRadius > 0 {
 		native.SetCornerRadius(int(float64(dlg.CornerRadius)*scale + 0.5))
 	}
@@ -255,6 +265,30 @@ func (h *dialogHost) create(hm *hostedModal) {
 		}
 		x, y := native.GetPosition()
 		native.SetPosition(x+dx, y+dy)
+	}
+
+	// Ресайз рамки окна ОС → новый размер холста и диалога.
+	//
+	// Только у растяжимого: у обычного окно и так не тянется, а лишний
+	// обработчик означал бы лишнюю ветку в разборе событий каждого диалога.
+	if dlg.IsResizable() {
+		native.SetOnResize(func(newW, newH int) {
+			if newW <= 0 || newH <= 0 {
+				return
+			}
+			lw, lh := newW, newH
+			if scale != 1 {
+				lw = int(float64(newW)/scale + 0.5)
+				lh = int(float64(newH)/scale + 0.5)
+			}
+			surf.mu.Lock()
+			surf.current = image.NewRGBA(image.Rect(0, 0, newW, newH))
+			surf.mu.Unlock()
+			eng.SetResolution(lw, lh)
+			// Диалог занимает окно целиком: он и есть его содержимое.
+			dlg.SetBounds(image.Rect(0, 0, lw, lh))
+			eng.Invalidate()
+		})
 	}
 
 	// Закрытие изнутри вторичного движка (✕/Escape/кнопка → closer → CloseModal).

@@ -122,6 +122,10 @@ var legacyBindings = []legacyBinding{
 	// поэтому у него есть законный адрес, как и у всех остальных.
 	{name: "LabelBG", field: func(t *Theme) *color.RGBA { return &t.LabelBG },
 		style: theme.StyleKey{Component: "label"}, role: roleFill},
+	// Пояснительный текст — часть «label», но со своим состоянием: это не
+	// выключенная метка (StateDisabled), а вторичная по смыслу.
+	{name: "SecondaryText", field: func(t *Theme) *color.RGBA { return &t.SecondaryText },
+		style: theme.StyleKey{Component: "label", Part: "secondary"}, role: roleText},
 
 	// ─── Прогресс-бар (ProgressBar) ─────────────────────────────────────────
 

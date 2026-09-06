@@ -359,7 +359,10 @@ func shiftDescendants(w Widget, dx, dy int) {
 // «чинила» его следующим updateVisible.
 func HasOwnLayout(w Widget) bool {
 	switch w.(type) {
-	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager, *VirtualizingItemsControl, *Panel:
+	// Dialog в этом списке с тех пор, как научился менять размер: его
+	// SetBounds сам двигает детей и переставляет кнопку ✕, и повторный сдвиг
+	// снаружи задваивал бы смещение при перетаскивании за заголовок.
+	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager, *VirtualizingItemsControl, *Panel, *Dialog:
 		return true
 	}
 	return false
