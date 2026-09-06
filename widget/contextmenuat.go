@@ -31,19 +31,26 @@ type ContextMenuProvider interface {
 // дважды в двух файлах.
 type rowMenuHost struct {
 	menu *PopupMenu
+	// openedAt — точка, в которой меню открыли, и признак «отпускание этой же
+	// кнопки ещё не пришло». См. routeMouse.
+	openedAt image.Point
+	armed    bool
 }
 
-// build собирает меню из пунктов и запоминает его.
+// build собирает меню из пунктов и запоминает его. (x, y) — точка, в которой
+// меню открывают.
 //
 // Пустой список даёт nil, а не пустое меню: пустая рамка на экране — это не
 // «меню без пунктов», это ошибка, которую пользователь не может исправить.
-func (h *rowMenuHost) build(items []MenuItem) *PopupMenu {
+func (h *rowMenuHost) build(x, y int, items []MenuItem) *PopupMenu {
 	if len(items) == 0 {
 		return nil
 	}
 	m := NewPopupMenu()
 	m.SetItems(items)
 	h.menu = m
+	h.openedAt = image.Pt(x, y)
+	h.armed = true
 	return m
 }
 
@@ -70,22 +77,44 @@ func (h *rowMenuHost) dismiss() {
 
 // routeMouse отдаёт событие открытому меню.
 //
-// Второе значение — «событие разобрано меню, дальше не идти». Отпускание
-// правой кнопки поглощается: это та же кнопка, которой меню открыли, и без
-// этого оно закрылось бы мгновенно. Щелчок мимо меню гасит его и НЕ
-// поглощается — клик должен отработать как обычный.
+// Возвращает «событие разобрано меню, дальше не идти».
+//
+// Отпускание кнопки, которой меню открыли, поглощается и НЕ гасит меню: оно
+// приходит уже после показа, в той же точке, и без этой оговорки меню
+// закрывалось бы в то же мгновение, в которое открылось. Различаем по точке,
+// а не по номеру кнопки: контекстное меню открывают правой, меню переполнения
+// — левой, и обе одинаково присылают своё отпускание следом.
+//
+// Щелчок мимо меню гасит его и НЕ поглощается — клик должен отработать как
+// обычный.
 func (h *rowMenuHost) routeMouse(e MouseEvent) bool {
 	if !h.open() {
 		return false
 	}
-	if e.Button == MouseRight && !e.Pressed {
+	pt := image.Pt(e.X, e.Y)
+	if h.armed && !e.Pressed && nearPoint(pt, h.openedAt) {
+		h.armed = false
 		return true
 	}
-	if image.Pt(e.X, e.Y).In(h.menu.Bounds()) {
+	h.armed = false
+	if pt.In(h.menu.Bounds()) {
 		return h.menu.OnMouseButton(e)
 	}
 	h.menu.Close()
 	return false
+}
+
+// nearPoint — та же точка с точностью до дрожи руки между нажатием и
+// отпусканием.
+func nearPoint(a, b image.Point) bool {
+	dx, dy := a.X-b.X, a.Y-b.Y
+	if dx < 0 {
+		dx = -dx
+	}
+	if dy < 0 {
+		dy = -dy
+	}
+	return dx <= 3 && dy <= 3
 }
 
 // routeMove ведёт подсветку пунктов; сообщает, что курсор над меню.

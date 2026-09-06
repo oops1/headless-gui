@@ -1426,34 +1426,37 @@ func buildXAMLToolBarTray(el xElement, reg map[string]Widget, parentOff image.Po
 //	Band       — номер полосы (игнорируется, layout упрощён)
 //	BandIndex  — позиция в полосе (игнорируется)
 func buildXAMLToolBar(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
-	sp := NewStackPanel(OrientationHorizontal)
-	sp.Spacing = 2
-	sp.Padding = 4
+	tb := NewToolBar()
 
 	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
-			sp.Background = c
-			sp.UseAlpha = c.A < 255
+			tb.Background = c
+			tb.UseAlpha = c.A < 255
 		}
-	} else {
-		// Прозрачный фон по умолчанию — ToolBar наследует фон от ToolBarTray
-		sp.UseAlpha = true
+	}
+	// Иначе фон остаётся прозрачным: ToolBar наследует его от ToolBarTray.
+
+	if v := el.attr("IconsOnly"); v != "" {
+		tb.IconsOnly = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := el.attr("Overflow"); v != "" {
+		tb.Overflow = !strings.EqualFold(v, "false") && v != "0"
 	}
 
-	// Bounds
-	absBounds := el.bounds().Add(parentOff)
-	sp.SetBounds(absBounds)
-
-	applyCommonProps(sp, el)
+	applyCommonProps(tb, el)
 
 	if id := el.name(); id != "" {
-		reg[id] = sp
+		reg[id] = tb
 	}
 
 	// Дочерние виджеты: кнопки, разделители, и т.д.
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
 		if strings.Contains(childTag, ".") {
+			continue
+		}
+		if childTag == "separator" {
+			tb.AddSeparator()
 			continue
 		}
 		cw, err := buildXAMLWidgetAt(child, reg, image.Point{}, baseDir, depth+1)
@@ -1465,11 +1468,15 @@ func buildXAMLToolBar(el xElement, reg map[string]Widget, parentOff image.Point,
 			if btn, ok := cw.(*Button); ok && btn.CornerRadius == 0 {
 				btn.CornerRadius = 4
 			}
-			sp.AddChild(cw)
+			tb.AddChild(cw)
 		}
 	}
 
-	return sp, nil
+	// Границы — ПОСЛЕ детей: раскладка панели считает переполнение по ним, и
+	// на пустой панели считать было бы нечего.
+	tb.SetBounds(el.bounds().Add(parentOff))
+
+	return tb, nil
 }
 
 // ─── buildXAMLStackPanel ────────────────────────────────────────────────────

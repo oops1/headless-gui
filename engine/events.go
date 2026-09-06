@@ -371,8 +371,11 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 			// виджетом, поэтому hitTestPath их не находит в области popup'а.
 			if !found {
 				if od, ok := consumer.(widget.OverlayDrawer); ok && od.HasOverlay() {
-					pt := image.Pt(x, y)
-					if pt.In(consumer.Bounds()) {
+					// По области ОВЕРЛЕЯ, а не владельца: меню открывается
+					// рядом с виджетом и почти всегда вылезает за него, а
+					// отпускание над меню обязано дойти до меню — именно на
+					// отпускании пункт и срабатывает.
+					if image.Pt(x, y).In(overlayHitRect(consumer)) {
 						found = true
 					}
 				}
@@ -862,12 +865,30 @@ func findOverlayAtDepth(w widget.Widget, x, y, depth int) widget.Widget {
 
 	// Проверяем сам виджет: есть ли активный overlay и попадает ли точка в него.
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
-		if pt.In(w.Bounds()) {
+		if pt.In(overlayHitRect(w)) {
 			return w
 		}
 	}
 
 	return nil
+}
+
+// overlayHitRect — область, в которой щелчок принадлежит оверлею виджета.
+//
+// Границы САМОГО виджета для этого не годятся: меню открывается рядом с ним и
+// почти всегда вылезает наружу — контекстное меню поля ввода вниз, меню
+// переполнения панели инструментов под панель. Щелчок по такому меню не
+// попадал в границы владельца, оверлей не находился, и движок гасил меню
+// вместо того, чтобы отдать ему нажатие: пункт нельзя было выбрать мышью.
+//
+// Объединение, а не одна лишь область оверлея: виджет может рисовать оверлей
+// частично поверх себя, и терять свою часть незачем.
+func overlayHitRect(w widget.Widget) image.Rectangle {
+	r := w.Bounds()
+	if ob, ok := w.(widget.OverlayBoundsProvider); ok {
+		r = r.Union(ob.OverlayBounds())
+	}
+	return r
 }
 
 // broadcastMouseMove рекурсивно доставляет событие перемещения мыши дереву
