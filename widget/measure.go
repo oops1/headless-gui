@@ -385,3 +385,16 @@ func fieldsSpace(s string) []string {
 	}
 	return out
 }
+
+// fontSizeOrDefault возвращает кегль виджета или общий размер, если свой не
+// задан.
+//
+// Ноль означает «как у всех»: виджету, которому кегль не важен, не нужно знать
+// про DefaultFontSizePt, а окну с плотной типографикой достаточно проставить
+// размер там, где он отличается.
+func fontSizeOrDefault(v float64) float64 {
+	if v > 0 {
+		return v
+	}
+	return DefaultFontSizePt
+}
