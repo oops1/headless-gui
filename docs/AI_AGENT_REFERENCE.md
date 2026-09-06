@@ -769,6 +769,20 @@ win.SetNavPanel(nav) // mac style: the column starts below the bar (window butto
 // The "≡" button (SetNavButton) collapses the panel itself when one is set.
 ```
 
+### Window buttons on a dialog, title-bar drag handle
+
+```go
+// All three window buttons in the dialog's bar instead of a lone ✕. The actions
+// belong to the OS window: OnMinimize / OnMaximizeRestore are installed by the
+// native modal host (window/modal_host.go); inert in headless.
+dlg.SetWindowButtons(true); dlg.HasWindowButtons()
+dlg.SetMaximized(true); dlg.IsMaximized() // switches the glyph to "restore"
+dlg.OnMinimize, dlg.OnMaximizeRestore     // override only if you host the window
+
+// The title bar keeps a 72px free strip right of SetTitleBarContent — the drag
+// handle. Both Dialog and Window; TitleBarContentBounds already accounts for it.
+```
+
 ### Context menus per row/node, ToolBar, tree drag, dialog localization
 
 ```go

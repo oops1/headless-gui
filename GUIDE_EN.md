@@ -2062,6 +2062,27 @@ A press on that widget does NOT drag the window — otherwise the search field
 could be neither selected nor scrolled. The free part of the bar next to it
 drags as before.
 
+To the right of the content the engine keeps a free strip of 72 px — the drag
+handle. A field stretched to the buttons would leave the bar without a single
+point to grab the window by, and a title bar is first of all the place a window
+is moved by.
+
+**All three window buttons.** A dialog drew one ✕ in its bar: a dialog that asks
+a question needs no more. A dialog shown in its own OS window and stretched to
+half the screen needs all three:
+
+```go
+dlg.SetWindowButtons(true) // ─ □ ✕ instead of a lone ✕
+dlg.SetMaximized(true)     // the "maximize" glyph becomes "restore"
+```
+
+Minimizing and maximizing is done by the OS window, not by the widget:
+`OnMinimize` and `OnMaximizeRestore` are installed by the native modal host when
+the dialog is shown in its own window. In headless (the dialog is drawn inside
+the main window) there is nothing to minimize — the buttons stay inert there and
+are not worth enabling. The buttons take room in the bar: the ✕ moves left and
+the application's content shrinks.
+
 Collapsing is the application's job: the engine does not know what is on its
 left — a navigation panel, a tree or a `SplitPanel`. The button only keeps the
 state (`IsNavCollapsed`, `SetNavCollapsed`) and calls `OnNavToggle`.
