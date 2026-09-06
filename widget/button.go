@@ -39,6 +39,15 @@ type Button struct {
 	IconPos  IconPosition // расположение иконки (Left, Top, IconOnly)
 	IconSize int          // размер иконки в пикселях (0 = авто: высота кнопки - 8)
 
+	// FontSize — кегль подписи в пунктах. 0 означает общий размер
+	// (DefaultFontSizePt).
+	//
+	// Своё поле, а не общий размер на всё приложение: окно с плотной
+	// типографикой — заголовок раздела, названия групп, подписи, пояснения —
+	// собирается из виджетов разных кеглей, и менять DefaultFontSizePt ради
+	// одного окна значит переверстать все остальные.
+	FontSize float64
+
 	// Padding — внутренние отступы (WPF Padding: Left,Top,Right,Bottom).
 	// (ToolTip унаследован из Base — единый для всех виджетов.)
 	Padding Margin
@@ -238,11 +247,25 @@ func (btn *Button) Draw(ctx DrawContext) {
 	hasText := btn.Text != "" && btn.IconPos != IconOnly
 
 	const textH = 13
+	sizePt := fontSizeOrDefault(btn.FontSize)
+	iconGap := 4 // зазор между иконкой и текстом
+
+	// Подпись усекается многоточием по доступной ширине.
+	//
+	// Без этого длинный текст просто вылезал за край кнопки и наезжал на
+	// соседний виджет: клиппинга у кнопки нет, а ширину подписи задаёт
+	// таблица строк — то есть язык, который выбрал пользователь, а не
+	// разметка. Ровно этим приёмом пользуются DockPane и Dropdown.
+	label := btn.Text
 	textW := 0
 	if hasText {
-		textW = ctx.MeasureText(btn.Text, DefaultFontSizePt)
+		avail := b.Dx() - 8
+		if hasIcon && btn.IconPos == IconLeft {
+			avail -= iconSz + iconGap
+		}
+		label = ellipsizeText(ctx, label, avail, sizePt)
+		textW = ctx.MeasureText(label, sizePt)
 	}
-	iconGap := 4 // зазор между иконкой и текстом
 
 	// ── Расположение контента ───────────────────────────────────────────
 	switch {
@@ -257,7 +280,7 @@ func (btn *Button) Draw(ctx DrawContext) {
 		ctx.DrawImageScaled(btn.Icon, startX, iconY, iconSz, iconSz)
 		textX := startX + iconSz + iconGap
 		textY := b.Min.Y + (b.Dy()-textH)/2
-		ctx.DrawText(btn.Text, textX, textY, txt)
+		ctx.DrawTextSize(label, textX, textY, sizePt, txt)
 
 	case hasIcon && hasText && btn.IconPos == IconTop:
 		// Иконка сверху, текст снизу — оба центрированы по горизонтали
@@ -270,7 +293,7 @@ func (btn *Button) Draw(ctx DrawContext) {
 		ctx.DrawImageScaled(btn.Icon, iconX, startY, iconSz, iconSz)
 		textX := b.Min.X + (b.Dx()-textW)/2
 		textY := startY + iconSz + iconGap
-		ctx.DrawText(btn.Text, textX, textY, txt)
+		ctx.DrawTextSize(label, textX, textY, sizePt, txt)
 
 	case hasIcon && !hasText:
 		// Только иконка — центрирована
@@ -289,7 +312,7 @@ func (btn *Button) Draw(ctx DrawContext) {
 			textY = b.Min.Y + 2
 		}
 		if hasText {
-			ctx.DrawText(btn.Text, textX, textY, txt)
+			ctx.DrawTextSize(label, textX, textY, sizePt, txt)
 		}
 	}
 

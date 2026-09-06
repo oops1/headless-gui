@@ -92,6 +92,10 @@ type Window struct {
 	// Title — текст заголовка окна.
 	Title string
 
+	// dragAreas — части содержимого, работающие как полоса заголовка
+	// (dialog_chrome.go). Нужны borderless-окну: своей полосы у него нет.
+	dragAreas []image.Rectangle
+
 	// Style — стиль обрамления (SingleBorder, None, ToolWindow).
 	Style WindowStyle
 
@@ -1156,13 +1160,19 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 // ушёл с кнопки), полосы ресайза по краям и drag-зона заголовка.
 // Захват позволяет движку доставлять move/release только этому Window.
 func (w *Window) WantsCapture(e MouseEvent) bool {
-	if w.Style == WindowStyleNone {
-		return false
-	}
 	if e.Button != MouseLeft {
 		return false
 	}
 	pt := image.Pt(e.X, e.Y)
+	// Область перетаскивания, объявленная приложением (dialog_chrome.go).
+	// Проверяется ДО отказа borderless-окну: у окна без полосы заголовка это
+	// единственный способ сообщить движку, где у него шапка.
+	if w.dragAreaHit(pt) {
+		return true
+	}
+	if w.Style == WindowStyleNone {
+		return false
+	}
 	// Кнопки управления — захватываем ради release (arm → fire/cancel).
 	if pt.In(w.CloseBtnRect()) {
 		return true
@@ -1552,8 +1562,8 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 		return true
 	}
 
-	// Нажатие на заголовок (не на кнопку) — начинаем drag
-	if pt.In(w.titleBarRect()) {
+	// Нажатие на заголовок или на объявленную область — начинаем drag
+	if pt.In(w.titleBarRect()) || w.dragAreaHit(pt) {
 		DismissAll(w) // закрываем dropdown/popup перед drag
 		w.dragging = true
 		w.dragStartX = e.X
