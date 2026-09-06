@@ -284,6 +284,23 @@ inp := widget.NewPasswordInput("Enter password...")
 
 In XAML: `<PasswordBox Placeholder="Password..."/>`.
 
+**Reading the secret as bytes.** `GetText()` hands back an immutable Go string:
+nothing can zero it, it lives on the heap until the GC gets to it, and it lands
+in memory dumps. For an application whose secrets must never become a `string`:
+
+```go
+secret := inp.TakeSecret() // []byte; the field is cleared by the same call
+defer clear(secret)
+vault.Unlock(secret)
+
+inp.WipeSecret() // on cancel: nobody needed it, but it still must go
+```
+
+`Take`, not `Get`: a password is read once, to hand to a vault or a transport,
+and splitting read from clear leaves a window where the secret sits in two
+places. Works on a plain input too — password mode hides the characters on
+screen and has nothing to do with how the value is read.
+
 ### Dropdown
 
 ```go
@@ -557,8 +574,28 @@ item.IsSelected // selected state
 item.IsEnabled  // enabled state
 item.Tag        // arbitrary data
 item.DataContext // data object for binding
+item.Foreground // own text color (zero alpha = theme color)
+item.Bold       // bold face
 item.Children   // children []*TreeViewItem
 ```
+
+**Row styling.** The item fields are enough when the look depends on the item
+itself. When it depends on APPLICATION state — "the active repository" does not
+live in the tree — keeping a copy in every item means syncing it on every
+switch. Hence the callback:
+
+```go
+tw.Tree.ItemStyle = func(it *treeview.TreeViewItem) (color.RGBA, bool, bool) {
+    if it.Tag == app.ActiveRepo() {
+        return color.RGBA{}, true, true // bold, theme color
+    }
+    return color.RGBA{}, false, false   // ok=false — "you decide"
+}
+```
+
+Returning `ok=false` means "you decide": the item's own `Foreground` and `Bold`
+are used then. The callback runs for every visible item in every frame — keep it
+cheap.
 
 Node methods:
 
@@ -1679,6 +1716,33 @@ dlg := widget.NewDialog("Settings", 1000, 700) // may be larger than the window
 dlg.CornerRadius = 8                             // rounded dialog window corners
 eng.ShowModal(dlg)
 ```
+
+`ShowModal` applies the CURRENT theme to the dialog. Otherwise a widget that
+caches colors (`DataGridWidget`) would keep its defaults: a dialog created after
+`SetTheme` would draw a dark table in a light theme. The flip side: colors set by
+hand on the dialog's widgets BEFORE showing are overwritten by the theme —
+exactly as already happened to a shown modal on `SetTheme`. A subtree with its
+own theme (`ThemeScope`) is left alone.
+
+### Window icon
+
+```go
+win.SetIcon(icon16, icon32, icon256) // several sizes
+win.SetIcon()                        // drop the icon
+```
+
+The size closest to what the system asks for is chosen: Windows uses different
+ones for the title bar (16×16) and for Alt+Tab (32×32), X11 window managers pick
+their own per place. A single size works too — the system will scale the rest.
+
+Call it any time after the window exists — to show the progress of a long
+operation, say — or before `Run()`: the icon is applied when the window is
+created.
+
+Works on **Win32** (`WM_SETICON`) and **X11** (`_NET_WM_ICON`). A backend that
+cannot do it (Wayland before `xdg-toplevel-icon-v1`) returns
+`window.ErrIconUnsupported` — deliberately not silence: an application with no
+visible icon should learn why here, not go hunting through desktop settings.
 
 ### Tray and notifications (Windows)
 

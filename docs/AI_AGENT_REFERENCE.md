@@ -674,6 +674,31 @@ eng.SendMouseButton(x, y, widget.MouseLeft, true)
 // DataGrid with SelectionExtended: Ctrl+Click toggles, Shift+Click ranges.
 ```
 
+### Window icon, modal theming, secret input, tree item style
+
+```go
+// Window icon at runtime: Win32 WM_SETICON, X11 _NET_WM_ICON.
+// Nearest size wins; a backend without support returns ErrIconUnsupported.
+win.SetIcon(icon16, icon32)
+win.SetIcon() // drop it
+
+// ShowModal now applies the current theme to the dialog, so a widget that
+// caches colors (DataGridWidget) is no longer left with the defaults.
+// Consequence: colors set by hand on dialog widgets BEFORE showing are
+// overwritten — exactly as already happened to a shown modal on SetTheme.
+widget.CurrentTheme() *Theme // a COPY of the active theme
+
+// Password input without ever creating a string.
+secret := inp.TakeSecret() // []byte; clears the field in the same call
+inp.WipeSecret()           // on cancel
+
+// Tree item look: fields on the item, or a callback for application state.
+item.Foreground = col
+item.Bold = true
+tv.ItemStyle = func(it *treeview.TreeViewItem) (color.RGBA, bool, bool) { ... }
+// ok=false means "you decide" — the item's own fields are used then.
+```
+
 ### DockPanel.LastChildFill, DockPane active title
 
 ```go
