@@ -122,6 +122,11 @@ type X11Window struct {
 	atomNetWMIconName uint32
 	atomMotifHints    uint32
 
+	// minW/minH/minWant — минимальный размер, заданный до создания окна
+	// (см. SetMinSize): свойство ставится до MapWindow.
+	minW, minH int
+	minWant    bool
+
 	// atomNetWMIcon — _NET_WM_ICON (значок окна, см. icon_linux.go).
 	// Берётся лениво: значок задают не все, а InternAtom — это круговой
 	// обмен с сервером. pendingIcons хранит значок, заданный до создания
@@ -320,6 +325,11 @@ func (w *X11Window) Create(title string, width, height int) error {
 
 	// Window title
 	w.x11SetTitle(w.wid, title)
+
+	// Минимальный размер, заданный до создания окна: WM читает
+	// WM_NORMAL_HINTS при показе окна, поэтому свойство ставится до
+	// MapWindow — иначе первый показ проходит без ограничения.
+	w.applyPendingMinSize()
 
 	// Значок, заданный до создания окна: SetIcon мог прийти раньше Run.
 	// Свойство ставится ДО MapWindow — иначе WM успевает показать окно без
@@ -1348,11 +1358,23 @@ func (w *X11Window) SetResizable(v bool) {}
 // ChangeProperty(mode=Replace), так что повторный вызов с нулями снимает
 // прежний минимум, а не оставляет его висеть.
 func (w *X11Window) SetMinSize(width, height int) {
+	// Окна ещё нет — запоминаем: свойство обязано попасть в него ДО
+	// MapWindow, иначе WM успевает показать окно, не зная про ограничение.
 	if w.wid == 0 {
+		w.minW, w.minH, w.minWant = width, height, true
 		return
 	}
 	data := x11NormalHintsMinSize(width, height)
 	w.x11ChangeProperty(w.wid, 40 /*WM_NORMAL_HINTS*/, 41 /*WM_SIZE_HINTS*/, 32, data)
+}
+
+// applyPendingMinSize выставляет минимум, заданный до создания окна.
+func (w *X11Window) applyPendingMinSize() {
+	if !w.minWant {
+		return
+	}
+	w.minWant = false
+	w.SetMinSize(w.minW, w.minH)
 }
 
 // ─── Поддержка нативных модальных диалогов (dialogHost) ─────────────────────

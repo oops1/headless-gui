@@ -244,6 +244,17 @@ type Window struct {
 	title string
 	w, h  int
 
+	// minW/minH/minWant — минимальный размер окна в ЛОГИЧЕСКИХ пикселях
+	// (minsize.go). Заданный до Run(), применяется при создании окна.
+	minW, minH int
+	minWant    bool
+
+	// pendingIcons/iconWant — значок окна, заданный до Run() (icon.go).
+	// Бэкенда до Run() ещё нет, а задать значок сразу после window.New —
+	// естественно, и именно так написано в руководстве.
+	pendingIcons []image.Image
+	iconWant     bool
+
 	// Флаг: запрошено закрытие окна (кнопка ×).
 	closeRequested atomic.Bool
 
@@ -365,6 +376,10 @@ func (win *Window) SetCornerRadius(r int) {
 func (win *Window) Run() error {
 	win.native = NewNativeWindow()
 
+	// Значок, заданный до Run(): отдаём бэкенду ДО создания окна ОС, чтобы он
+	// выставил его в правильный момент (на X11 — до MapWindow).
+	win.applyPendingIcon()
+
 	// HiDPI: определяем масштаб монитора (env HEADLESS_GUI_SCALE или
 	// бэкенд) и сообщаем движку ДО расчёта размеров окна.
 	win.scale = 1
@@ -391,19 +406,26 @@ func (win *Window) Run() error {
 	win.mu.Lock()
 	win.current = image.NewRGBA(image.Rect(0, 0, pw, ph))
 	win.mu.Unlock()
+	// Минимальный размер окна: явный SetMinSize, иначе MinWidth/MinHeight
+	// корневого widget.Window. Пересчёт логических значений в физические и
+	// отправку бэкенду делает applyMinSize (minsize.go) — она же зовётся при
+	// смене DPI и при вызове SetMinSize во время работы.
+	//
+	// ДО Create, а не после: у каждого бэкенда свой правильный момент. На X11
+	// свойство WM_NORMAL_HINTS обязано попасть в окно до MapWindow — оконный
+	// менеджер читает его при показе окна; на Win32 минимум действует уже на
+	// само создание окна. Бэкенд подержит значение у себя и выставит когда
+	// надо — так же, как со значком окна.
+	if ww, ok := win.eng.Root().(*widget.Window); ok {
+		win.pickupWidgetMinSize(ww.MinWidth, ww.MinHeight)
+	}
+	win.applyMinSize()
+
 	if err := win.native.Create(win.title, pw, ph); err != nil {
 		return err
 	}
 	// Разрешаем ресайз за края (borderless: зоны рамки отдаёт бэкенд).
 	win.native.SetResizable(win.resizable)
-
-	// Минимальный размер окна из widget.Window (MinWidth/MinHeight): логические
-	// значения × HiDPI-scale → физические пиксели для ОС (Win32 WM_GETMINMAXINFO).
-	if ww, ok := win.eng.Root().(*widget.Window); ok && (ww.MinWidth > 0 || ww.MinHeight > 0) {
-		pmw := int(float64(ww.MinWidth)*win.scale + 0.5)
-		pmh := int(float64(ww.MinHeight)*win.scale + 0.5)
-		win.native.SetMinSize(pmw, pmh)
-	}
 
 	// Смена DPI монитора (перенос окна) — перестраиваем масштаб и буферы.
 	if dn, ok := win.native.(dpiChangeNotifier); ok {
@@ -422,6 +444,9 @@ func (win *Window) Run() error {
 			win.current = image.NewRGBA(image.Rect(0, 0, npw, nph))
 			win.mu.Unlock()
 			win.native.SetSize(npw, nph)
+			// Минимум задан в логических пикселях: на мониторе с другим DPI
+			// прежнее физическое значение означало бы другой размер на глаз.
+			win.applyMinSize()
 		})
 	}
 

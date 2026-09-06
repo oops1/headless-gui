@@ -41,10 +41,6 @@ type iconSetter interface {
 // Вызывать можно в любой момент после создания окна. Пустой список снимает
 // значок, заданный ранее.
 func (w *Window) SetIcon(icons ...image.Image) error {
-	setter, ok := w.native.(iconSetter)
-	if !ok {
-		return ErrIconUnsupported
-	}
 	out := make([]image.Image, 0, len(icons))
 	for _, ic := range icons {
 		if ic == nil || ic.Bounds().Empty() {
@@ -52,7 +48,34 @@ func (w *Window) SetIcon(icons ...image.Image) error {
 		}
 		out = append(out, ic)
 	}
+	w.pendingIcons, w.iconWant = out, true
+
+	// До Run() бэкенда ещё нет: поле native заполняет первая же строка Run, и
+	// приведение типа на nil-интерфейсе всегда даёт «не поддерживается».
+	// Значок откладывается и ставится при создании окна — ровно так же, как
+	// это делает SetTrayIcon.
+	if w.native == nil {
+		return nil
+	}
+	setter, ok := w.native.(iconSetter)
+	if !ok {
+		return ErrIconUnsupported
+	}
 	return setter.setIcon(out)
+}
+
+// applyPendingIcon отдаёт бэкенду значок, заданный до Run().
+//
+// Зовётся сразу после создания объекта бэкенда и ДО создания окна ОС: сам
+// бэкенд подержит значок у себя и выставит его в нужный момент — на X11 до
+// MapWindow, иначе оконный менеджер успевает показать окно без значка.
+func (w *Window) applyPendingIcon() {
+	if !w.iconWant || w.native == nil {
+		return
+	}
+	if setter, ok := w.native.(iconSetter); ok {
+		_ = setter.setIcon(w.pendingIcons)
+	}
 }
 
 // iconToRGBA приводит картинку к *image.RGBA (копия, если тип уже тот).
