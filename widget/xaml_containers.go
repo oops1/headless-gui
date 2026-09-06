@@ -1941,28 +1941,47 @@ func buildXAMLDataGrid(el xElement) Widget {
 		// <DataGrid.Columns> property element
 		if childTag == "datagrid.columns" {
 			for _, colEl := range child.Children {
-				col := parseDataGridColumn(colEl)
+				col, locKey := parseDataGridColumn(colEl)
 				if col != nil {
 					dg.Grid.AddColumn(col)
+					registerColumnHeaderLoc(col, locKey)
 				}
 			}
 			continue
 		}
 
 		// Прямые колонки (DataGridTextColumn и др.) — альтернативный синтаксис
-		col := parseDataGridColumn(child)
+		col, locKey := parseDataGridColumn(child)
 		if col != nil {
 			dg.Grid.AddColumn(col)
+			registerColumnHeaderLoc(col, locKey)
 		}
 	}
 
 	return dg
 }
 
+// registerColumnHeaderLoc подписывает заголовок колонки на смену языка.
+//
+// Колонка — не виджет: сборщик складывает её в таблицу, и свойства, которое
+// можно переустановить при смене языка, у неё снаружи нет. Поэтому заголовок
+// регистрируется как «свёрнутая» строка (xaml_loc_items.go) — так же, как
+// подписи вкладок и пунктов меню. Без этого {Loc …} в Header разворачивался
+// один раз при загрузке и оставался на языке загрузки навсегда.
+func registerColumnHeaderLoc(col dgridPkg.Column, key string) {
+	if key == "" {
+		return
+	}
+	registerLocItem(key, func(s string) { col.SetHeader(s) })
+}
+
 // parseDataGridColumn парсит один элемент-колонку из XAML.
-func parseDataGridColumn(el xElement) dgridPkg.Column {
+//
+// Второе значение — ключ {Loc …} заголовка (пустой, если заголовок обычный):
+// подписаться на смену языка должен вызывающий, у которого есть таблица.
+func parseDataGridColumn(el xElement) (dgridPkg.Column, string) {
 	tag := strings.ToLower(el.Tag)
-	header := el.attr("Header", "Text")
+	header, headerLocKey := locItemText(el.attr("Header", "Text"))
 
 	// Binding path: разбираем "{Binding PropertyName}"
 	bindingPath := parseBindingPath(el.attr("Binding"))
@@ -2003,24 +2022,24 @@ func parseDataGridColumn(el xElement) dgridPkg.Column {
 		if sortPath != "" {
 			col.SetSortPath(sortPath)
 		}
-		return col
+		return col, headerLocKey
 
 	case strings.HasPrefix(tag, "datagridcheckboxcolumn"),
 		strings.HasPrefix(tag, "datagridcheckbox"):
 		col := dgridPkg.NewCheckBoxColumn(header, bindingPath)
 		col.SetWidth(width)
 		applyReadOnly(col.SetReadOnly)
-		return col
+		return col, headerLocKey
 
 	case strings.HasPrefix(tag, "datagridtemplatecolumn"),
 		strings.HasPrefix(tag, "datagridtemplate"):
 		col := dgridPkg.NewTemplateColumn(header, nil)
 		col.SetWidth(width)
 		applyReadOnly(col.SetReadOnly)
-		return col
+		return col, headerLocKey
 	}
 
-	return nil
+	return nil, ""
 }
 
 // parseBindingPath извлекает путь из WPF binding-синтаксиса.
