@@ -203,3 +203,22 @@ func (w *Window) drawTitleCaptionOverNav(ctx DrawContext) {
 	}
 	drawTitleText(ctx, title, textX, tb.Min.Y+(w.effTitleH()-13)/2, tc)
 }
+
+// drawRoundClipped выполняет fn с отсечением по скруглённому прямоугольнику.
+//
+// Скруглённый клип — опциональная возможность контекста (RoundClipper): там,
+// где её нет, рисуем как раньше. Прежнее отсечение восстанавливаем полностью —
+// SetRoundClip подменяет и прямоугольный клип, а ClearRoundClip снимает только
+// скругление, и без возврата всё нарисованное дальше осталось бы обрезанным.
+func drawRoundClipped(ctx DrawContext, r image.Rectangle, radius int, fn func()) {
+	rc, ok := ctx.(RoundClipper)
+	if !ok || radius <= 0 {
+		fn()
+		return
+	}
+	prev := ctx.Clip()
+	rc.SetRoundClip(r, radius)
+	fn()
+	rc.ClearRoundClip()
+	ctx.SetClip(prev)
+}

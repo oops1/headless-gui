@@ -255,3 +255,24 @@ func TestNavPanel_TitleBarContentStartsAfterColumn(t *testing.T) {
 		t.Errorf("поиск заехал на свёрнутую полоску: %d при её крае %d", got, want)
 	}
 }
+
+// Скругление окна не срезается панелью: она заливает свою колонку
+// прямоугольником, а корпус диалога скруглён.
+func TestNavPanel_KeepsRoundedCorners(t *testing.T) {
+	d := widget.NewDialog("Настройки", 300, 220)
+	d.CornerRadius = 8
+	d.SetContentPadding(0)
+	nav := widget.NewNavPanel()
+	nav.AddItem(nil, "Общие")
+	d.SetNavPanel(nav)
+
+	r := image.Rect(20, 10, 320, 230)
+	img := widgetScene(t, d, r)
+
+	// Точка внутри угловой дуги: до скругления её закрашивала панель.
+	i := img.PixOffset(r.Min.X+1, r.Min.Y+1)
+	got := [3]uint8{img.Pix[i], img.Pix[i+1], img.Pix[i+2]}
+	if got != [3]uint8{wideBG.R, wideBG.G, wideBG.B} {
+		t.Errorf("угол закрашен %v — скругление срезано", got)
+	}
+}

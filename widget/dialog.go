@@ -402,7 +402,10 @@ func (d *Dialog) Draw(ctx DrawContext) {
 	}
 	ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, d.BorderColor)
 
-	d.drawChildren(ctx)
+	// Дети обрезаются по скруглённому корпусу: содержимое без отступа
+	// (SetContentPadding) и боковая панель, поднятая под верх, заливаются
+	// прямоугольником и срезали бы углы окна.
+	drawRoundClipped(ctx, b, cr, func() { d.drawChildren(ctx) })
 	d.drawTitleCaptionOverNav(ctx)
 }
 
