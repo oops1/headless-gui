@@ -2137,7 +2137,9 @@ nav.ItemRect(i)          // an item's rectangle — for your own tooltip, say
 The column occupies the left side from the TOP edge of the window down: the panel
 is drawn first among the children and the engine puts the title caption back on
 top of it — so the color reaches the edge while the caption stays where it was,
-like the vertical tabs of a browser. The items start below the caption (the panel
+like the vertical tabs of a browser. The children are clipped to the rounded body
+(`CornerRadius`): the panel fills its column with a rectangle and would otherwise
+cut the window's corners off. The items start below the caption (the panel
 gets its `TopInset` from the host).
 
 `ContentBounds` moves right of the column, so the `SetContent` widget is laid out
