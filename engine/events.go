@@ -402,6 +402,16 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	if !pressed && btn == widget.MouseRight {
 		path := hitTestPath(dispatchRoot, x, y)
 		for i := len(path) - 1; i >= 0; i-- {
+			// Сперва — меню, собираемое под точкой: список и таблица строят
+			// его по строке под курсором, и одного готового меню на виджет им
+			// не хватает. Готовое ContextMenu — частный случай, когда меню от
+			// точки не зависит, поэтому оно идёт вторым.
+			if h, ok := path[i].(widget.ContextMenuProvider); ok {
+				if pm := h.ContextMenuAt(x, y); pm != nil {
+					pm.Show(x, y)
+					return
+				}
+			}
 			if h, ok := path[i].(interface{ GetContextMenu() *widget.PopupMenu }); ok {
 				if pm := h.GetContextMenu(); pm != nil {
 					pm.Show(x, y)

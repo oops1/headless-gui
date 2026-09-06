@@ -71,6 +71,32 @@ func (a *treeViewDrawAdapter) MeasureTextBold(text string, sizePt float64) int {
 type TreeViewWidget struct {
 	Base
 	Tree *treeview.TreeView
+
+	// NodeContextMenu собирает контекстное меню для узла под курсором.
+	//
+	// nil-узел означает щелчок мимо узлов (пустое место под последней
+	// строкой) — приложение может вернуть общее меню дерева или nil. Пустой
+	// список означает «меню здесь нет»: движок пойдёт искать его выше по
+	// дереву, как и с обычным ContextMenu.
+	//
+	// Выделение при правом щелчке НЕ меняется: узел приходит в колбэк явным
+	// аргументом, а менять выбор пользователя за его спиной движок не вправе.
+	NodeContextMenu func(item *treeview.TreeViewItem) []MenuItem
+
+	// nodeMenu — меню, отданное движку из ContextMenuAt: рисует его виджет,
+	// которому оно принадлежит (см. contextmenuat.go).
+	nodeMenu rowMenuHost
+}
+
+// ContextMenuAt собирает меню для узла под точкой (ContextMenuProvider).
+func (w *TreeViewWidget) ContextMenuAt(x, y int) *PopupMenu {
+	if !w.IsEnabled() || w.NodeContextMenu == nil {
+		return nil
+	}
+	if !image.Pt(x, y).In(w.Bounds()) {
+		return nil
+	}
+	return w.nodeMenu.build(w.NodeContextMenu(w.Tree.ItemAtY(y)))
 }
 
 // NewTreeViewWidget создаёт виджет TreeView.
@@ -94,6 +120,20 @@ func (w *TreeViewWidget) Draw(ctx DrawContext) {
 	w.drawDisabledOverlay(ctx)
 }
 
+// ─── Overlay (контекстное меню узла) ───────────────────────────────────────
+
+// HasOverlay реализует OverlayDrawer.
+func (w *TreeViewWidget) HasOverlay() bool { return w.nodeMenu.open() }
+
+// DrawOverlay рисует контекстное меню узла поверх всего UI.
+func (w *TreeViewWidget) DrawOverlay(ctx DrawContext) { w.nodeMenu.drawOverlay(ctx) }
+
+// OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
+func (w *TreeViewWidget) OverlayBounds() image.Rectangle { return w.nodeMenu.overlayBounds() }
+
+// Dismiss закрывает контекстное меню узла. Реализует Dismissable.
+func (w *TreeViewWidget) Dismiss() { w.nodeMenu.dismiss() }
+
 // applyDirty забирает у ядра накопленный damage и транслирует его в точечную
 // инвалидацию: full → весь виджет, иначе — только изменившиеся строки.
 func (w *TreeViewWidget) applyDirty() {
@@ -113,6 +153,12 @@ func (w *TreeViewWidget) applyDirty() {
 func (w *TreeViewWidget) OnMouseButton(e MouseEvent) bool {
 	if !w.IsEnabled() {
 		return false
+	}
+
+	// Открытое меню узла старше самого дерева: щелчок по пункту не должен
+	// доходить до узлов под ним.
+	if w.nodeMenu.routeMouse(e) {
+		return true
 	}
 
 	// Колесо мыши — вертикальная прокрутка на 3 строки за тик.
@@ -150,6 +196,9 @@ func (w *TreeViewWidget) OnMouseMove(x, y int) {
 	if !w.IsEnabled() {
 		return
 	}
+	if w.nodeMenu.routeMove(x, y) {
+		return // курсор над меню — подсветку узлов не трогаем
+	}
 	w.Tree.OnMouseMove(x, y)
 	// Ядро сообщает точную область смены hover-строки/ползунка.
 	w.applyDirty()
@@ -160,6 +209,9 @@ func (w *TreeViewWidget) OnMouseMove(x, y int) {
 // OnKeyEvent обрабатывает клавиатурный ввод.
 func (w *TreeViewWidget) OnKeyEvent(e KeyEvent) {
 	if !w.IsEnabled() {
+		return
+	}
+	if w.nodeMenu.routeKey(e) {
 		return
 	}
 

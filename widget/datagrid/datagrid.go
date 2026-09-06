@@ -758,6 +758,20 @@ func (dg *DataGrid) autoGenerateColumns(sample interface{}) {
 // ─── Selection ─────────────────────────────────────────────────────────────
 
 // SelectedItem возвращает первый выделенный элемент.
+// ItemAtRow возвращает элемент модели, показанный в строке row.
+//
+// Строка — номер в ТЕКУЩЕМ порядке (с учётом сортировки), тот же, что отдают
+// RowIndexAtY и HoverRow. Без этого метода снаружи оставалось только повторять
+// пересчёт через sortedIdx, которого наружу нет.
+func (dg *DataGrid) ItemAtRow(row int) interface{} {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+	if row < 0 || row >= len(dg.sortedIdx) || dg.itemsSource == nil {
+		return nil
+	}
+	return dg.itemsSource.Get(dg.sortedIdx[row])
+}
+
 func (dg *DataGrid) SelectedItem() interface{} {
 	dg.mu.Lock()
 	defer dg.mu.Unlock()

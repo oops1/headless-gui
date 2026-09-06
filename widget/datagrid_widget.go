@@ -66,6 +66,23 @@ type DataGridWidget struct {
 	Base
 	Grid *datagrid.DataGrid
 
+	// RowContextMenu собирает контекстное меню для строки под курсором.
+	//
+	// row == -1 означает щелчок мимо строк (заголовок, пустое место под
+	// последней строкой) — приложение может вернуть общее меню таблицы или
+	// nil. Пустой список означает «меню здесь нет»: движок пойдёт искать его
+	// выше по дереву, как и с обычным ContextMenu.
+	//
+	// Выделение при правом щелчке НЕ меняется: строка приходит в колбэк
+	// явным аргументом, а менять выбор пользователя за его спиной движок не
+	// вправе. Приложению, которому нужно поведение проводника, достаточно
+	// позвать SetSelectedIndex(row) в самом колбэке.
+	RowContextMenu func(item interface{}, row int) []MenuItem
+
+	// rowMenu — меню, отданное движку из ContextMenuAt: рисует его виджет,
+	// которому оно принадлежит (см. contextmenuat.go).
+	rowMenu rowMenuHost
+
 	// Для обработки двойного клика
 	lastClickTime int64 // ms
 	lastClickX    int
@@ -93,6 +110,20 @@ func (w *DataGridWidget) Draw(ctx DrawContext) {
 	w.drawDisabledOverlay(ctx)
 }
 
+// ─── Overlay (контекстное меню строки) ─────────────────────────────────────
+
+// HasOverlay реализует OverlayDrawer.
+func (w *DataGridWidget) HasOverlay() bool { return w.rowMenu.open() }
+
+// DrawOverlay рисует контекстное меню строки поверх всего UI.
+func (w *DataGridWidget) DrawOverlay(ctx DrawContext) { w.rowMenu.drawOverlay(ctx) }
+
+// OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
+func (w *DataGridWidget) OverlayBounds() image.Rectangle { return w.rowMenu.overlayBounds() }
+
+// Dismiss закрывает контекстное меню строки. Реализует Dismissable.
+func (w *DataGridWidget) Dismiss() { w.rowMenu.dismiss() }
+
 // applyDirty забирает у ядра накопленный damage и транслирует его в точечную
 // инвалидацию: full → весь виджет, иначе — только изменившиеся строки
 // (notifyRectChanged на каждый прямоугольник). Так выбор/hover строки не
@@ -114,6 +145,12 @@ func (w *DataGridWidget) applyDirty() {
 func (w *DataGridWidget) OnMouseButton(e MouseEvent) bool {
 	if !w.IsEnabled() {
 		return false
+	}
+
+	// Открытое меню строки старше самой таблицы: щелчок по пункту не должен
+	// доходить до строк под ним.
+	if w.rowMenu.routeMouse(e) {
+		return true
 	}
 
 	// Колесо мыши — вертикальная прокрутка строк на 3 строки за тик.
@@ -162,6 +199,9 @@ func (w *DataGridWidget) OnMouseMove(x, y int) {
 	if !w.IsEnabled() {
 		return
 	}
+	if w.rowMenu.routeMove(x, y) {
+		return // курсор над меню — подсветку строк не трогаем
+	}
 	w.Grid.OnMouseMove(x, y)
 	// Ядро сообщает точную область смены hover-строки/ползунка — транслируем
 	// её в точечную инвалидацию вместо перерисовки всего виджета.
@@ -181,11 +221,30 @@ func (w *DataGridWidget) GetToolTip() string {
 	return w.Base.GetToolTip()
 }
 
+// ContextMenuAt собирает меню для строки под точкой (ContextMenuProvider).
+func (w *DataGridWidget) ContextMenuAt(x, y int) *PopupMenu {
+	if !w.IsEnabled() || w.RowContextMenu == nil {
+		return nil
+	}
+	if !image.Pt(x, y).In(w.Bounds()) {
+		return nil
+	}
+	row := w.Grid.RowIndexAtY(y)
+	var item interface{}
+	if row >= 0 {
+		item = w.Grid.ItemAtRow(row)
+	}
+	return w.rowMenu.build(w.RowContextMenu(item, row))
+}
+
 // ─── Keyboard handling ─────────────────────────────────────────────────────
 
 // OnKeyEvent обрабатывает клавиатурный ввод.
 func (w *DataGridWidget) OnKeyEvent(e KeyEvent) {
 	if !w.IsEnabled() {
+		return
+	}
+	if w.rowMenu.routeKey(e) {
 		return
 	}
 
