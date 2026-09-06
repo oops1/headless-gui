@@ -119,10 +119,9 @@ func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
 	// диалог задал CancelAction — например, InputDialog возвращает ok=false).
 	if ev.Code == widget.KeyEscape && ev.Pressed {
 		if m := e.topModal(); m != nil {
-			if c, ok := m.(interface{ OnCancel() }); ok {
-				c.OnCancel()
-			}
-			e.CloseModal(nil) // закрывает верхний
+			// Тем же путём, что и ✕ (requestCloseModal): иначе диалог,
+			// отказавшийся закрываться по крестику, закрывался бы по Escape.
+			e.requestCloseModal(m)
 			return
 		}
 	}
