@@ -111,7 +111,12 @@ func (tv *TreeView) Draw(ctx DrawContextBridge) {
 		// Текст
 		textY := y + (ih-int(tv.fontSize()*1.3))/2
 		text := fi.item.DisplayText()
-		ctx.DrawTextSize(text, textX, textY, tv.fontSize(), tv.Theme.Foreground)
+		fg, bold := tv.itemStyle(fi.item)
+		if bold {
+			ctx.DrawTextBold(text, textX, textY, tv.fontSize(), fg)
+		} else {
+			ctx.DrawTextSize(text, textX, textY, tv.fontSize(), fg)
+		}
 	}
 
 	// Скроллбар

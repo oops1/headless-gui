@@ -58,6 +58,12 @@ func (a *treeViewDrawAdapter) DrawImageScaled(src image.Image, x, y, w, h int) {
 func (a *treeViewDrawAdapter) SetPixel(x, y int, col color.RGBA) {
 	a.ctx.SetPixel(x, y, col)
 }
+func (a *treeViewDrawAdapter) DrawTextBold(text string, x, y int, sizePt float64, col color.RGBA) {
+	a.ctx.DrawTextFont(text, x, y, sizePt, BuiltinFontBold, col)
+}
+func (a *treeViewDrawAdapter) MeasureTextBold(text string, sizePt float64) int {
+	return a.ctx.MeasureTextFont(text, sizePt, BuiltinFontBold)
+}
 
 // ─── TreeViewWidget ────────────────────────────────────────────────────────
 

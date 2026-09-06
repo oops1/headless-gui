@@ -2,6 +2,7 @@ package treeview
 
 import (
 	"image"
+	"image/color"
 	"log"
 	"reflect"
 	"sync"
@@ -73,6 +74,17 @@ type TreeView struct {
 	OnExpanded            ExpandedHandler
 	OnCollapsed           CollapsedHandler
 	OnItemInvoked         ItemInvokedHandler
+
+	// ItemStyle — оформление строки узла: цвет текста и начертание.
+	//
+	// Колбэк, а не только поля узла: «активный репозиторий» — состояние
+	// ПРИЛОЖЕНИЯ, а не узла, и держать его копию в каждом узле значит
+	// синхронизировать её при каждом переключении. Возврат ok=false означает
+	// «решай сам» — тогда смотрятся поля Foreground и Bold самого узла.
+	//
+	// Зовётся на каждый видимый узел в каждом кадре: тяжёлой работы внутри
+	// быть не должно.
+	ItemStyle func(item *TreeViewItem) (fg color.RGBA, bold bool, ok bool)
 
 	// Обратная совместимость: простой callback как в старом TreeView
 	OnSelect func(item *TreeViewItem)
