@@ -233,3 +233,25 @@ func TestWindowNavPanel_ClientAreaShifts(t *testing.T) {
 		t.Error("панель растянута на клиентскую область")
 	}
 }
+
+// Начинка полосы (поиск) не заезжает на колонку панели: у панели свой цвет и
+// свои пункты, и поле поверх неё выглядит чужим.
+func TestNavPanel_TitleBarContentStartsAfterColumn(t *testing.T) {
+	d, nav := navDialog(t)
+	search := widget.NewTextInput("Поиск...")
+	d.SetTitleBarContent(search)
+
+	if got, want := search.Bounds().Min.X, nav.Bounds().Max.X; got < want {
+		t.Errorf("поиск начинается на %d, колонка кончается на %d", got, want)
+	}
+
+	// Свёрнутая полоска освобождает место — поиск переезжает левее.
+	before := search.Bounds().Min.X
+	nav.SetCollapsed(true)
+	if after := search.Bounds().Min.X; after >= before {
+		t.Errorf("после сворачивания поиск остался на %d (было %d)", after, before)
+	}
+	if got, want := search.Bounds().Min.X, nav.Bounds().Max.X; got < want {
+		t.Errorf("поиск заехал на свёрнутую полоску: %d при её крае %d", got, want)
+	}
+}

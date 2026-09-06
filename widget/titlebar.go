@@ -219,6 +219,12 @@ func (d *Dialog) TitleBarContentBounds() image.Rectangle {
 	if d.Title != "" {
 		left += titleBarGap
 	}
+	// Колонка боковой панели поднята под верх окна — начинка полосы начинается
+	// ЗА ней, а не поверх: иначе поле поиска заезжало бы на панель, у которой
+	// свой цвет и свои пункты.
+	if nb := d.NavPanelBounds(); !nb.Empty() && nb.Max.X+titleBarGap > left {
+		left = nb.Max.X + titleBarGap
+	}
 	right := b.Max.X - dlgPad
 	if d.ShowCloseButton {
 		right = b.Max.X - dlgCloseSize - 12
@@ -430,6 +436,10 @@ func (w *Window) titleContentLeft() int {
 	}
 	if w.Title != "" && !w.titleTabsActive() {
 		x += w.titleTextW() + titleBarGap
+	}
+	// Начинка не заезжает на колонку боковой панели (см. Dialog).
+	if nb := w.NavPanelBounds(); !nb.Empty() && nb.Max.X+titleBarGap > x {
+		x = nb.Max.X + titleBarGap
 	}
 	return x
 }
