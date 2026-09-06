@@ -2089,9 +2089,13 @@ state (`IsNavCollapsed`, `SetNavCollapsed`) and calls `OnNavToggle`.
 
 `widget.Window` has the same: `SetTitleBarContent`, `SetNavButton`,
 `SetNavIcons`, `OnNavToggle`. The widget in the bar is the one child of a window
-that is not stretched to the client area: its geometry comes from the bar. In
-the mac style the caption is centered and would land on top of it, so the
-caption is not drawn while the bar has content (title tabs behave the same).
+that is not stretched to the client area: its geometry comes from the bar.
+
+**The mac title-bar layout does not offer this mode.** The window buttons sit on
+the left and the caption is centered, so an application widget would have to be
+squeezed between them — no macOS window has a bar like that. There
+`TitleBarContentBounds` is empty, the widget is hidden, the collapse button is
+not shown, and the caption is drawn as usual.
 
 **Content padding.** In a dialog it used to be a constant — 14 px horizontally
 and 12 px vertically:
