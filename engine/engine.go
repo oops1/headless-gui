@@ -1082,12 +1082,7 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 
 	// Кнопка ✕ диалога закрывает модалку с семантикой отмены (как Escape).
 	if s, ok := m.(interface{ SetCloser(func()) }); ok {
-		s.SetCloser(func() {
-			if c, ok := m.(interface{ OnCancel() }); ok {
-				c.OnCancel()
-			}
-			e.CloseModal(m)
-		})
+		s.SetCloser(func() { e.requestCloseModal(m) })
 	}
 
 	// Сообщаем виджету, что он показан как модальный (Dialog запускает здесь
@@ -1101,6 +1096,35 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 	e.modals = append(e.modals, m)
 	e.modMu.Unlock()
 	e.Invalidate()
+}
+
+// requestCloseModal — закрытие модалки по отмене: ✕ и Escape.
+//
+// Одна функция на оба пути НАМЕРЕННО. Раньше их было две — замыкание closer и
+// ветка Escape в обработке клавиш, — и обе повторяли одну и ту же пару
+// «OnCancel + CloseModal». Разойтись им ничего не мешало, и именно это и
+// случилось бы при добавлении права вето: диалог, отказавшийся закрываться по
+// ✕, всё равно закрывался бы по Escape.
+//
+// Право вето спрашивается ПЕРВЫМ. Раньше CloseModal вызывался безусловно сразу
+// после OnCancel, и обработчик, показавший вопрос «Сохранить изменения?», всё
+// равно терял свой диалог: движок выталкивал его из стека, не дождавшись
+// ответа.
+//
+// Спрашивается ДО OnCancel: «отмена» — состоявшееся действие, и звать её
+// обработчик при остановленном закрытии значило бы сообщить о том, чего не
+// произошло.
+func (e *Engine) requestCloseModal(m widget.ModalWidget) {
+	if m == nil {
+		return
+	}
+	if v, ok := m.(interface{ CanClose() bool }); ok && !v.CanClose() {
+		return
+	}
+	if c, ok := m.(interface{ OnCancel() }); ok {
+		c.OnCancel()
+	}
+	e.CloseModal(m)
 }
 
 // moveModalTo перемещает модальный виджет в позицию (x, y), сохраняя размер.

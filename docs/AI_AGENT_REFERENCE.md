@@ -706,6 +706,30 @@ sp.DesiredSize(); sp.Relayout(); sv.FitContent(); sv.ContentSize()
 // NOTE: <Separator/> in XAML now builds *widget.Separator, not *widget.Panel.
 ```
 
+### Localized titles, own font size, close veto, chromeless dialog
+
+```go
+// {Loc Key} works in Title too (Window, Dialog, DockPane) and follows
+// SetLanguage live. XAML: <Window Title="{Loc app.title}">.
+dlg.SetTitle("..."); pane.SetTitle("...") // a pane re-lays the manager: tab width
+
+// Own font size in points; 0 = the global DefaultFontSizePt.
+btn.FontSize = 18; chk.FontSize = 9; dd.FontSize = 14 // XAML: FontSize="18"
+// A button caption that does not fit is ellipsized (the button does no clipping).
+
+// Veto over closing: asked BEFORE a close by Escape or ✕; false keeps the
+// dialog on the stack. CancelAction is skipped when the close is stopped.
+dlg.OnClosing = func() bool { eng.ShowModal(askSave()); return false }
+// Engine.CloseModal (an application-ordered close) does not ask the hook.
+
+// No built-in title bar: content starts at the top, the ✕ goes away with the
+// bar, drag areas replace it. Coordinates are RELATIVE to the top-left corner.
+dlg.SetChromeless(true); dlg.IsChromeless()
+dlg.AddDragArea(image.Rect(0, 0, 240, 48)); dlg.ClearDragAreas()
+win.AddDragArea(image.Rect(0, 0, 240, 48)) // borderless window (WindowStyleNone)
+// A declared area beats the widgets inside it — cut your buttons out yourself.
+```
+
 ### Context menus per row/node, ToolBar, tree drag, dialog localization
 
 ```go

@@ -11,8 +11,12 @@ import (
 type CheckBox struct {
 	Base
 
-	Text       string
-	TextColor  color.RGBA
+	Text      string
+	TextColor color.RGBA
+
+	// FontSize — кегль подписи в пунктах (0 = общий размер).
+	FontSize float64
+
 	BoxBG      color.RGBA // фон квадратика
 	BoxBorder  color.RGBA
 	CheckColor color.RGBA // цвет галочки
@@ -147,11 +151,12 @@ func (cb *CheckBox) Draw(ctx DrawContext) {
 	const textPad = 6
 	textX := boxX + boxSize + textPad
 	textY := b.Min.Y + (b.Dy()-13)/2
-	ctx.DrawText(cb.Text, textX, textY, cb.TextColor)
+	sizePt := fontSizeOrDefault(cb.FontSize)
+	ctx.DrawTextSize(cb.Text, textX, textY, sizePt, cb.TextColor)
 
 	// Классика Win2000: пунктирная рамка фокуса вокруг текста метки.
 	if st.Classic3D && cb.IsFocused() && cb.Text != "" {
-		tw := ctx.MeasureText(cb.Text, DefaultFontSizePt)
+		tw := ctx.MeasureText(cb.Text, sizePt)
 		drawDottedRect(ctx, textX-2, textY-2, tw+5, 17, st.BevelDark)
 	}
 

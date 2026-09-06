@@ -72,6 +72,26 @@ type Dialog struct {
 	// CancelAction вызывается по Escape/✕ в дополнение к закрытию (может быть
 	// nil; само закрытие модалки выполняет движок).
 	CancelAction func()
+
+	// OnClosing — запрос «можно ли закрывать» по Escape или ✕.
+	//
+	// Возврат false ОСТАНАВЛИВАЕТ закрытие: диалог остаётся на экране и в
+	// стеке модалок. Это единственный способ дождаться ответа пользователя —
+	// решение приходит позже, а закрыть диалог потом приложение может само,
+	// вызовом Engine.CloseModal:
+	//
+	//	dlg.OnClosing = func() bool {
+	//	    if !dirty {
+	//	        return true
+	//	    }
+	//	    askSaveChanges() // покажет свой диалог, ответ придёт позже
+	//	    return false     // этот пока остаётся
+	//	}
+	//
+	// Спрашивается ДО CancelAction, а не после: «отмена» — это состоявшееся
+	// действие, и звать её обработчик при остановленном закрытии значило бы
+	// сообщить о том, чего не произошло.
+	OnClosing func() bool
 	// CopyText, если задан, вызывается по Ctrl+C и его результат кладётся
 	// в буфер обмена (MessageBox формирует Windows-подобный дамп).
 	CopyText func() string
@@ -102,6 +122,12 @@ type Dialog struct {
 	resizable  bool
 	minW, minH int
 	content    Widget
+
+	// chromeless/dragAreas — диалог без штатной полосы заголовка
+	// (dialog_chrome.go): шапку рисует приложение, оно же объявляет, за какие
+	// части содержимого окно тащат.
+	chromeless bool
+	dragAreas  []image.Rectangle
 
 	// ── Перетаскивание за заголовок (как у Window/Panel) ────────────────────
 	dragging   bool
@@ -277,7 +303,7 @@ func (d *Dialog) ContentBounds() image.Rectangle {
 	b := d.bounds
 	return image.Rect(
 		b.Min.X+dlgPad,
-		b.Min.Y+d.TitleHeight+12,
+		b.Min.Y+d.titleH()+12,
 		b.Max.X-dlgPad,
 		b.Max.Y-12,
 	)
@@ -296,7 +322,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 	if st.Classic3D {
 		// Классика Win2000: квадрат, градиентный заголовок, рамка.
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), d.Background)
-		if d.TitleHeight > 0 {
+		if d.titleH() > 0 {
 			fillTitleBar(ctx, image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+d.TitleHeight), d.TitleBG)
 			textY := b.Min.Y + (d.TitleHeight-13)/2
 			drawTitleText(ctx, d.Title, b.Min.X+10, textY, d.TitleColor)
@@ -328,7 +354,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 
 	// Корпус и заголовок.
 	ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, d.Background)
-	if d.TitleHeight > 0 {
+	if d.titleH() > 0 {
 		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), d.TitleHeight, cr, d.TitleBG)
 		ctx.FillRect(b.Min.X, b.Min.Y+d.TitleHeight-cr, b.Dx(), cr, d.TitleBG)
 		textY := b.Min.Y + (d.TitleHeight-14)/2
@@ -396,7 +422,16 @@ func (d *Dialog) SetCaptureManager(cm CaptureManager) { d.capMgr = cm }
 func (d *Dialog) titleDragHit(x, y int) bool {
 	b := d.bounds
 	pt := image.Pt(x, y)
-	if !pt.In(image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+d.TitleHeight)) {
+	// Область, объявленная приложением (dialog_chrome.go), сильнее детей:
+	// шапку рисует само приложение, и она вся состоит из его виджетов —
+	// проверка «под курсором чей-то ребёнок» отменила бы перетаскивание
+	// всегда. Вырезать из области свои кнопки — забота того, кто её объявил.
+	if d.dragAreaHit(pt) {
+		return true
+	}
+	// Штатная полоса: там дети принадлежат движку (✕), и клик по ним
+	// перетаскиванием быть не должен.
+	if !pt.In(image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+d.titleH())) {
 		return false
 	}
 	for _, c := range d.children {
@@ -585,4 +620,17 @@ func NewConfirmDialog(title, message string, onResult func(ok bool)) *Dialog {
 	dlg.AddChild(cancelBtn)
 
 	return dlg
+}
+
+// SetTitle задаёт заголовок диалога.
+//
+// Нужен живой локализации: {Loc} в Title переустанавливается через общий
+// интерфейс SetTitle(string), а не записью в поле — иначе диалог не
+// перерисовался бы до ближайшего чужого изменения.
+func (d *Dialog) SetTitle(s string) {
+	if d.Title == s {
+		return
+	}
+	d.Title = s
+	d.Invalidate()
 }

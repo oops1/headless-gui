@@ -790,6 +790,13 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 	applyColor(&btn.PressedBG, el, "PressedBG", "PressedBackground")
 	applyColor(&btn.BorderColor, el, "BorderBrush")
 
+	// FontSize — свой кегль виджета (0 = общий размер).
+	if fs := el.attr("FontSize"); fs != "" {
+		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
+			btn.FontSize = v
+		}
+	}
+
 	// ── ToolTip ────────────────────────────────────────────────────────────
 	if tip := el.attr("ToolTip"); tip != "" {
 		btn.ToolTip = tip
@@ -1034,6 +1041,13 @@ func buildXAMLDropdown(el xElement) Widget {
 			dd.SetSelected(idx)
 		}
 	}
+	// FontSize — свой кегль виджета (0 = общий размер).
+	if fs := el.attr("FontSize"); fs != "" {
+		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
+			dd.FontSize = v
+		}
+	}
+
 	return dd
 }
 
@@ -1120,6 +1134,13 @@ func buildXAMLCheckBox(el xElement) Widget {
 	if strings.EqualFold(el.attr("IsChecked", "Checked"), "true") {
 		cb.SetChecked(true)
 	}
+	// FontSize — свой кегль виджета (0 = общий размер).
+	if fs := el.attr("FontSize"); fs != "" {
+		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
+			cb.FontSize = v
+		}
+	}
+
 	return cb
 }
 

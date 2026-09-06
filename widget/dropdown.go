@@ -17,6 +17,10 @@ type Dropdown struct {
 	chosen   int32 // 1 — выбор делался (пользователем или SetSelected), атомарно
 	hoverIdx int32 // индекс пункта под курсором (-1 = нет)
 
+	// FontSize — кегль текста в пунктах (0 = общий размер). Действует и на
+	// выбранное значение, и на пункты раскрытого списка.
+	FontSize float64
+
 	Background  color.RGBA
 	BorderColor color.RGBA
 	TextColor   color.RGBA
@@ -210,7 +214,8 @@ func (d *Dropdown) Draw(ctx DrawContext) {
 	textY := b.Min.Y + (b.Dy()-13)/2
 	textLeft := b.Min.X + d.PaddingX
 	textMaxW := (b.Max.X - 20) - textLeft // 20px под стрелку и зазор
-	ctx.DrawText(ellipsizeText(ctx, selText, textMaxW, DefaultFontSizePt), textLeft, textY, d.TextColor)
+	sizePt := fontSizeOrDefault(d.FontSize)
+	ctx.DrawTextSize(ellipsizeText(ctx, selText, textMaxW, sizePt), textLeft, textY, sizePt, d.TextColor)
 
 	// Стрелка ▼
 	arrowX := b.Max.X - 16
@@ -296,8 +301,9 @@ func (d *Dropdown) drawOpenList(ctx DrawContext) {
 		}
 		// Текст — вертикально по центру, обрезается многоточием по ширине списка.
 		itemMaxW := listW - 2*d.PaddingX
-		ctx.DrawText(ellipsizeText(ctx, item, itemMaxW, DefaultFontSizePt),
-			b.Min.X+d.PaddingX, iy+(itemH-13)/2, textCol)
+		itemSize := fontSizeOrDefault(d.FontSize)
+		ctx.DrawTextSize(ellipsizeText(ctx, item, itemMaxW, itemSize),
+			b.Min.X+d.PaddingX, iy+(itemH-13)/2, itemSize, textCol)
 	}
 
 	// Одна общая рамка вокруг всего списка

@@ -262,6 +262,26 @@ There is no separate `ToggleButton` type: it differs from `Button` by exactly
 this state, not by layout, icons, commands or subscriptions. `IsChecked` is
 read on a plain button too — "draw it selected", without the toggle behavior.
 
+**Own font size.** Available on the button, the check box and the dropdown;
+until now only `Label`, `TextBox` and `TextInput` had one, everything else took
+`DefaultFontSizePt` — and the only lever was changing it for the whole
+application:
+
+```go
+btn.FontSize = 18   // points; 0 = the global size
+chk.FontSize = 9
+dd.FontSize = 14
+```
+
+In XAML — the `FontSize` attribute on `<Button>`, `<ToggleButton>`, `<CheckBox>`
+and `<ComboBox>`.
+
+**Label ellipsis.** A caption that does not fit the button is replaced by
+"beginning…": the button does no clipping, so long text used to run past the
+edge and over the neighbouring widget. The width is taken from the button's
+actual size minus the icon and the padding, so a short caption on a wide button
+is left untouched.
+
 ### Measuring content
 
 `StackPanel`, `ScrollView` and `Expander` can say how much room they need:
@@ -1667,6 +1687,18 @@ In XAML — `{Loc Key}` markup, re-applied **live** on `SetLanguage`:
 <Button Content="{Loc Save}"/>
 ```
 
+The title of a window, a dialog and a docked pane follows the language switch
+too:
+
+```xml
+<Window Title="{Loc app.title}">
+<DockPane Title="{Loc pane.props}">
+```
+
+`SetTitle` on `Dialog`, `Window` and `DockPane` can be called from code as well.
+A pane re-lays its manager when it is: the tab width is measured from the
+caption, and without a re-layout the new title would not fit the old tab.
+
 **Backward compatible:** plain strings are untouched — only `{Loc ...}` is
 translated; with no tables `Tr` returns the key itself.
 
@@ -1947,6 +1979,62 @@ caches colors (`DataGridWidget`) would keep its defaults: a dialog created after
 hand on the dialog's widgets BEFORE showing are overwritten by the theme —
 exactly as already happened to a shown modal on `SetTheme`. A subtree with its
 own theme (`ThemeScope`) is left alone.
+
+**The right to stop a close.** `OnClosing` is asked BEFORE a close by Escape or
+by ✕; `false` stops it and the dialog stays on the stack:
+
+```go
+dlg.OnClosing = func() bool {
+    if !changed {
+        return true
+    }
+    eng.ShowModal(askSave()) // ask and wait for the answer
+    return false             // not closing yet
+}
+```
+
+There was no veto before: the engine called `OnCancel` and IMMEDIATELY
+`CloseModal`, so a dialog with unsaved changes was popped off the stack without
+waiting for the answer to its own question — the application had to notice that
+through `IsModal()` and show the dialog again, losing a frame.
+
+`CancelAction` is NOT called when the close is stopped: "cancel" is something
+that happened, and reporting it when it did not is wrong. Escape and ✕ take the
+same path, so neither of them bypasses the hook. A close ordered by the
+application (`eng.CloseModal(dlg)`) does not ask the hook: that is the
+application's own decision.
+
+**Own header instead of the built-in title bar.** The dialog always drew a title
+bar across its full width — so the top belonged to the engine and a side panel
+could only start below it. A settings window built like a browser's vertical
+tabs (a navigation panel down the whole left side, the title inside it) could
+not be assembled:
+
+```go
+dlg.SetChromeless(true)                    // no bar, no caption, no ✕
+dlg.SetContent(root)                       // content starts at the very top
+dlg.AddDragArea(image.Rect(0, 0, 240, 48)) // the panel header drags the window
+dlg.ClearDragAreas()
+```
+
+Area coordinates are RELATIVE to the dialog's top-left corner, not absolute: the
+dialog gets moved, and absolute ones would have to be recomputed after every
+drag — that is, after every use of the area itself.
+
+The ✕ goes away with the bar: the engine may not draw it over someone else's
+header, it does not know what is there. The application draws its own and calls
+`RequestClose`; closing by Escape stays.
+
+A declared area BEATS the widgets inside it. The built-in bar has the opposite
+rule — there the ✕ takes the press for itself — but a header drawn by the
+application consists entirely of its own widgets, and a "is a child under the
+cursor?" test would cancel every drag. Cutting your own buttons out of the area
+is the caller's job: declare two areas on either side of the button instead of
+one solid one.
+
+`AddDragArea` and `ClearDragAreas` exist on `widget.Window` too. A borderless
+window (`WindowStyleNone`) needs them: it has no title bar, so there was nothing
+to drag it by — `WantsCapture` answered "no" unconditionally.
 
 ### Minimum window size
 

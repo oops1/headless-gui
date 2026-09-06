@@ -1001,6 +1001,17 @@ func setWidgetProperty(w Widget, prop, val string) {
 			lv := strings.ToLower(strings.TrimSpace(val))
 			v.SetVisible(!(lv == "collapsed" || lv == "hidden"))
 		}
+	case "title":
+		// Заголовок окна, диалога и док-панели. Отдельно от text/content:
+		// у окна есть и то и другое, и «переустановить заголовок» не то же
+		// самое, что «переустановить подпись».
+		//
+		// Без этой ветки {Loc} в Title разворачивался один раз при разборе
+		// разметки и оставался на языке загрузки навсегда: заголовки
+		// док-панелей после переключения языка стояли на прежнем.
+		if ts, ok := w.(interface{ SetTitle(string) }); ok {
+			ts.SetTitle(val)
+		}
 	case "tooltip":
 		if ts, ok := w.(interface{ SetToolTip(string) }); ok {
 			ts.SetToolTip(val)
