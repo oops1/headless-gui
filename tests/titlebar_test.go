@@ -270,6 +270,9 @@ func TestNavButton_AbsentByDefault(t *testing.T) {
 // остальных детей.
 func TestWindowTitleBar_ContentNotStretched(t *testing.T) {
 	w := widget.NewWindow("Настройки", 800, 600)
+	// Раскладка полосы зависит от ОС, а своей начинки в mac-полосе нет —
+	// задаём стиль явно, иначе тест проверял бы разное на разных платформах.
+	w.TitleStyle = widget.WindowTitleWin
 	w.SetBounds(image.Rect(0, 0, 800, 600))
 	search := widget.NewTextInput("Поиск...")
 	w.SetTitleBarContent(search)
@@ -289,6 +292,7 @@ func TestWindowTitleBar_ContentNotStretched(t *testing.T) {
 // Нажатие на начинку не тащит окно.
 func TestWindowTitleBar_ContentDoesNotDrag(t *testing.T) {
 	w := widget.NewWindow("Настройки", 800, 600)
+	w.TitleStyle = widget.WindowTitleWin
 	w.SetBounds(image.Rect(0, 0, 800, 600))
 	search := widget.NewTextInput("Поиск...")
 	w.SetTitleBarContent(search)
@@ -328,6 +332,7 @@ func TestWindowTitleBar_StillDrags(t *testing.T) {
 // Кнопка сворачивания у окна: состояние и уведомление.
 func TestWindowNavButton_Toggles(t *testing.T) {
 	w := widget.NewWindow("Настройки", 800, 600)
+	w.TitleStyle = widget.WindowTitleWin
 	w.SetBounds(image.Rect(0, 0, 800, 600))
 	w.SetNavButton(true)
 
