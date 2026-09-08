@@ -9,8 +9,24 @@ import (
 
 // MenuItem описывает один пункт контекстного / popup-меню.
 type MenuItem struct {
-	Text      string     // текст пункта
-	Icon      string     // зарезервировано (иконка)
+	Text string // текст пункта
+
+	// Icon — значок пункта картинкой.
+	//
+	// Раньше поле было строкой-путём и не рисовалось вовсе. Путь здесь не
+	// годится: значки приложения обычно вкомпилированы (SVG, растеризованный
+	// в цвет темы), файла на диске у них нет — а картинку отдать можно любую.
+	//
+	// Зона под значок отводится ВСЕМУ меню, если значок есть хоть у одного
+	// пункта: иначе подписи разъезжались бы по левому краю (то же правило, что
+	// у Checkable).
+	Icon image.Image
+	// IconSize — сторона значка в точках; 0 — по высоте пункта.
+	IconSize int
+	// IconPath — путь, из которого значок загрузила разметка (XAML Icon="…").
+	// Движок его не читает: поле для приложения, которому нужно знать источник.
+	IconPath string
+
 	Separator bool       // true — горизонтальный разделитель вместо текста
 	Disabled  bool       // серый, некликабельный пункт
 	OnClick   func()     // обработчик
@@ -434,7 +450,7 @@ func (m *PopupMenu) dismissedByPress(seq uint64) bool {
 func (m *PopupMenu) calcSize() (w, h int) {
 	w = m.MinWidth
 	hasSubItems := false
-	gutter := m.checkGutter()
+	gutter := m.checkGutter() + m.iconGutter()
 	for _, item := range m.items {
 		if item.Separator {
 			h += m.SeparatorH
@@ -574,10 +590,15 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 		if item.Disabled {
 			textCol = m.DisabledColor
 		}
-		textX := px + m.PaddingX + m.checkGutter()
+		textX := px + m.PaddingX + m.checkGutter() + m.iconGutter()
 		if item.Checkable && item.Checked {
 			drawCheckMark(ctx, image.Rect(px+m.PaddingX, curY, px+m.PaddingX+checkMarkSize,
 				curY+m.ItemHeight), textCol)
+		}
+		if item.Icon != nil {
+			sz := m.iconSizeOf(item)
+			ix := px + m.PaddingX + m.checkGutter()
+			ctx.DrawImageScaled(item.Icon, ix, curY+(m.ItemHeight-sz)/2, sz, sz)
 		}
 		ctx.DrawText(item.Text, textX, textY, textCol)
 
@@ -883,11 +904,54 @@ func (m *PopupMenu) ApplyTheme(t *Theme) {
 // трея в desktop/systemtray.go).
 const checkMarkSize = 14
 
+// Геометрия значка в пункте меню.
+const (
+	menuIconGap   = 8  // зазор между значком и подписью
+	menuIconInset = 14 // на сколько значок мельче высоты пункта
+)
+
 // checkGutter — ширина поля под отметку слева от подписей.
 //
 // Отводится всему меню разом, если хоть один пункт объявлен Checkable: иначе
 // подписи разъезжались бы по левому краю в тот момент, когда пользователь
 // ставит отметку, — а меню не должно дёргаться от щелчка по нему.
+// iconGutter — ширина зоны под значки: отводится всему меню, если значок есть
+// хоть у одного пункта.
+//
+// Одна функция и для измерения ширины, и для отрисовки: посчитай зону в двух
+// местах по-разному — и подписи разъедутся ровно на разницу.
+func (m *PopupMenu) iconGutter() int {
+	w := 0
+	for _, item := range m.items {
+		if item.Icon == nil {
+			continue
+		}
+		if sz := m.iconSizeOf(item); sz > w {
+			w = sz
+		}
+	}
+	if w == 0 {
+		return 0
+	}
+	return w + menuIconGap
+}
+
+// iconSizeOf — сторона значка пункта: своя, если задана, иначе по высоте
+// пункта, но не крупнее её самой за вычетом полей.
+func (m *PopupMenu) iconSizeOf(item MenuItem) int {
+	sz := item.IconSize
+	if sz <= 0 {
+		sz = m.ItemHeight - menuIconInset
+	}
+	if max := m.ItemHeight - 2; sz > max {
+		sz = max
+	}
+	if sz < 1 {
+		sz = 1
+	}
+	return sz
+}
+
 func (m *PopupMenu) checkGutter() int {
 	for _, item := range m.items {
 		if item.Checkable {
