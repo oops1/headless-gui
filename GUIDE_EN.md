@@ -961,6 +961,24 @@ s := datagrid.EllipsizeText(cdc.DrawCtx, longText, maxW, cdc.FontSize)
 `FillRoundRect` — a colored status dot is drawn in place, with no pre-rasterized
 images.
 
+Lines and outlines live there too — the rest of the engine's `AAShapes`:
+
+```go
+cdc.DrawCtx.DrawLineAA(x1, y1, x2, y2, 2, col)               // a segment
+cdc.DrawCtx.StrokePolylineAA(pts, 2, false, col)             // a polyline
+cdc.DrawCtx.StrokeEllipseAA(cx, cy, r, r, 2, col)            // a ring
+cdc.DrawCtx.FillPolygonAA(pts, col)                          // a polygon
+```
+
+That is what they were asked for: a commit-graph column is lanes, sloped
+transitions between them and a ring on a merge point. A ring cannot be faked
+with two fills (lane color, then background): on a selected row the background
+differs and the middle of the ring comes out the wrong color.
+
+The thickness is fractional: on an antialiased canvas a line of one and a half
+points exists. Only the fallback for a canvas without antialiasing (printing,
+tests) rounds it — there the shape is laid out in steps, but it is laid out.
+
 **Empty state.** An empty table is the normal first state of a key list or a log:
 
 ```go

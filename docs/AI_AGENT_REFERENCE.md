@@ -691,7 +691,16 @@ widget.NewSeparator(); widget.NewVerticalSeparator()
 // Text cells ellipsize; template columns can use the same helper and shapes:
 datagrid.EllipsizeText(cdc.DrawCtx, s, maxW, sizePt)
 cdc.DrawCtx.FillEllipseAA(cx, cy, rx, ry, col)
+cdc.DrawCtx.FillRoundRect(x, y, w, h, r, col)cdc.DrawCtx.FillEllipseAA(cx, cy, rx, ry, col)
 cdc.DrawCtx.FillRoundRect(x, y, w, h, r, col)
+// Lines and outlines (the rest of AAShapes); thickness is float64 and stays
+// fractional on an antialiased canvas — only the fallback rounds it.
+cdc.DrawCtx.DrawLineAA(x1, y1, x2, y2, 1.5, col)
+cdc.DrawCtx.StrokePolylineAA(pts, 2, false, col)
+cdc.DrawCtx.StrokeEllipseAA(cx, cy, rx, ry, 2, col)
+cdc.DrawCtx.FillPolygonAA(pts, col)
+// NOTE: DrawContextBridge gained those four — external implementations
+// (test stubs) need them too.
 dg.EmptyStateText = "No keys yet"          // or EmptyStateRenderer
 // NOTE: DrawContextBridge gained FillEllipseAA/FillRoundRect — external
 // implementations (test stubs) need the two methods.
