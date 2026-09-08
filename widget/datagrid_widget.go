@@ -68,6 +68,37 @@ func (a *drawContextAdapter) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
 	a.ctx.FillRoundRect(x, y, w, h, r, col)
 }
 
+// Линии и контуры: тот же приём, что у FillEllipseAA — на холсте со
+// сглаживанием рисует движок, на холсте без него помощники кладут фигуру
+// ступеньками.
+//
+// Толщина доходит до сглаженного холста ДРОБНОЙ: линия в полторы точки у него
+// существует, и округление здесь съедало бы ровно то, ради чего эти методы и
+// понадобились. Округляет только откат — у него нет полутонов.
+func (a *drawContextAdapter) DrawLineAA(x1, y1, x2, y2 int, thickness float64, col color.RGBA) {
+	if aa, ok := a.ctx.(AAShapes); ok {
+		aa.DrawLineAA(x1, y1, x2, y2, thickness, col)
+		return
+	}
+	drawThickLine(a.ctx, x1, y1, x2, y2, roundThickness(thickness), col)
+}
+
+func (a *drawContextAdapter) StrokePolylineAA(pts []image.Point, thickness float64, closed bool, col color.RGBA) {
+	strokePolyline(a.ctx, pts, thickness, closed, col)
+}
+
+func (a *drawContextAdapter) StrokeEllipseAA(cx, cy, rx, ry int, thickness float64, col color.RGBA) {
+	if aa, ok := a.ctx.(AAShapes); ok {
+		aa.StrokeEllipseAA(cx, cy, rx, ry, thickness, col)
+		return
+	}
+	drawEllipseOutline(a.ctx, cx, cy, rx, ry, roundThickness(thickness), col)
+}
+
+func (a *drawContextAdapter) FillPolygonAA(pts []image.Point, col color.RGBA) {
+	fillPolygon(a.ctx, pts, col)
+}
+
 // ─── DataGridWidget ────────────────────────────────────────────────────────
 
 // DataGridWidget — виджет-обёртка для интеграции datagrid.DataGrid в дерево виджетов.

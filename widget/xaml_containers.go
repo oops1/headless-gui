@@ -343,7 +343,7 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 		// прямым ребёнком Window опасен (см. Window.SetBounds skip *PopupMenu);
 		// window.attachTrayMenu добавит его в дерево правильно уже в Run().
 		if childTag == "traymenu" {
-			cw, err := buildXAMLPopupMenu(child, reg, contentOff)
+			cw, err := buildXAMLPopupMenu(child, reg, contentOff, baseDir)
 			if err != nil {
 				return nil, err
 			}
@@ -391,7 +391,7 @@ func buildXAMLWindow(el xElement, reg map[string]Widget, parentOff image.Point, 
 
 		// ── <TitleTabsMenu> — меню кнопки «v» полосы вкладок ─────────────────
 		if childTag == "titletabsmenu" {
-			cw, err := buildXAMLPopupMenu(child, reg, contentOff)
+			cw, err := buildXAMLPopupMenu(child, reg, contentOff, baseDir)
 			if err != nil {
 				return nil, err
 			}
@@ -840,7 +840,7 @@ func buildXAMLTabControl(el xElement, reg map[string]Widget, parentOff image.Poi
 
 // ─── MenuBar ────────────────────────────────────────────────────────────────
 
-func buildXAMLMenuBar(el xElement, reg map[string]Widget, parentOff image.Point) (Widget, error) {
+func buildXAMLMenuBar(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
 	mb := NewMenuBar()
 	absBounds := el.bounds().Add(parentOff)
 	mb.SetBounds(absBounds)
@@ -880,7 +880,7 @@ func buildXAMLMenuBar(el xElement, reg map[string]Widget, parentOff image.Point)
 
 		// Рекурсивно собираем подпункты. Их надписи тоже могут быть {Loc …},
 		// поэтому parseMenuItems возвращает ещё и ключи — по индексам.
-		subItems, subKeys := parseMenuItems(child)
+		subItems, subKeys := parseMenuItems(child, baseDir)
 		text, key := locItemText(header)
 		top := mb.MenuCount()
 		mb.AddMenu(text, subItems...)
@@ -897,7 +897,7 @@ func buildXAMLMenuBar(el xElement, reg map[string]Widget, parentOff image.Point)
 // parseMenuItems рекурсивно собирает MenuItem из дочерних <MenuItem>.
 // Второй результат — ключи перевода надписей (по индексам items): пункты меню
 // не являются виджетами, поэтому {Loc …} для них разворачивает вызывающий код.
-func parseMenuItems(parent xElement) ([]MenuItem, []string) {
+func parseMenuItems(parent xElement, baseDir string) ([]MenuItem, []string) {
 	var items []MenuItem
 	var keys []string // ключ перевода для каждого пункта («» — не локализуемый)
 	for _, sub := range parent.Children {
@@ -931,12 +931,13 @@ func parseMenuItems(parent xElement) ([]MenuItem, []string) {
 			// себя как переключатель.
 			RadioGroup: sub.attr("GroupName"),
 		}
+		applyMenuItemIcon(&item, sub, baseDir)
 
 		// Рекурсивные подменю (3+ уровень). Их надписи локализуются
 		// одноразово: путь до подпункта третьего уровня MenuBar менять не
 		// умеет, а в разметке проекта такие меню пока не встречаются.
 		if len(sub.Children) > 0 {
-			item.SubItems, _ = parseMenuItems(sub)
+			item.SubItems, _ = parseMenuItems(sub, baseDir)
 		}
 
 		items = append(items, item)
@@ -947,7 +948,7 @@ func parseMenuItems(parent xElement) ([]MenuItem, []string) {
 
 // ─── PopupMenu ──────────────────────────────────────────────────────────────
 
-func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Point) (Widget, error) {
+func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
 	pm := NewPopupMenu()
 	absBounds := el.bounds().Add(parentOff)
 	pm.SetBounds(absBounds)
@@ -994,6 +995,7 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 			Checked:    strings.EqualFold(child.attr("IsChecked"), "True"),
 			RadioGroup: child.attr("GroupName"),
 		}
+		applyMenuItemIcon(&item, child, baseDir)
 		pm.mu.Lock()
 		idx := len(pm.items)
 		pm.items = append(pm.items, item)
@@ -2124,4 +2126,23 @@ func menuItemCheckable(el xElement) bool {
 	return strings.EqualFold(el.attr("IsCheckable"), "True") ||
 		strings.EqualFold(el.attr("IsChecked"), "True") ||
 		el.attr("GroupName") != ""
+}
+
+// applyMenuItemIcon читает значок пункта меню из разметки: Icon="icons/copy.png".
+//
+// Путь ограничен каталогом XAML-файла или fs.FS (SEC-8, GG-7) — тем же
+// механизмом, что у Button.Icon. Не прочитался — пункт остаётся без значка:
+// меню без картинки понятнее, чем меню, не открывшееся из-за неё.
+func applyMenuItemIcon(item *MenuItem, el xElement, baseDir string) {
+	src := el.attr("Icon", "IconSource")
+	if src == "" {
+		return
+	}
+	if img, err := decodeXAMLImage(baseDir, src); err == nil {
+		item.Icon = img
+		item.IconPath = src
+	}
+	if sz := xatoi(el.attr("IconSize")); sz > 0 {
+		item.IconSize = sz
+	}
 }

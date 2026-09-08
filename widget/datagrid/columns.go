@@ -141,6 +141,21 @@ type DrawContextBridge interface {
 	// картинок ради фигуры, которую движок умеет рисовать одной строкой.
 	FillEllipseAA(cx, cy, rx, ry int, col color.RGBA)
 	FillRoundRect(x, y, w, h, r int, col color.RGBA)
+
+	// Линии и контуры — остальное из AAShapes движка.
+	//
+	// Без них наклонная линия в ячейке складывалась ступеньками из FillRect:
+	// граф коммитов рисовался, но переходы между дорожками выглядели рублено,
+	// а кольцо (точка слияния) не собиралось вовсе — двумя заливками его не
+	// нарисовать, на выделенной строке фон другой, и середина кольца
+	// оказывалась не того цвета.
+	//
+	// thickness — float64, как в самом AAShapes: сглаженная линия толщиной
+	// 1.5 точки существует, целое здесь округлило бы её на глаз.
+	DrawLineAA(x1, y1, x2, y2 int, thickness float64, col color.RGBA)
+	StrokePolylineAA(pts []image.Point, thickness float64, closed bool, col color.RGBA)
+	StrokeEllipseAA(cx, cy, rx, ry int, thickness float64, col color.RGBA)
+	FillPolygonAA(pts []image.Point, col color.RGBA)
 }
 
 // ─── Column интерфейс ──────────────────────────────────────────────────────
