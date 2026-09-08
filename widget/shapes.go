@@ -458,3 +458,37 @@ func parsePoints(s string, off image.Point) []image.Point {
 	}
 	return pts
 }
+
+// strokePolyline рисует ломаную толщиной thickness (closed замыкает контур).
+//
+// Отдельный помощник, а не цикл на стороне вызывающего: у сглаженного холста
+// ломаная рисуется ОДНИМ вызовом, и стыки сегментов получаются ровными.
+// Разбить её на отрезки заранее значило бы потерять это на каждом изгибе.
+func strokePolyline(ctx DrawContext, pts []image.Point, thickness float64, closed bool, col color.RGBA) {
+	if col.A == 0 || len(pts) < 2 {
+		return
+	}
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.StrokePolylineAA(pts, thickness, closed, col)
+		return
+	}
+	t := roundThickness(thickness)
+	for i := 1; i < len(pts); i++ {
+		drawThickLine(ctx, pts[i-1].X, pts[i-1].Y, pts[i].X, pts[i].Y, t, col)
+	}
+	if closed {
+		last, first := pts[len(pts)-1], pts[0]
+		drawThickLine(ctx, last.X, last.Y, first.X, first.Y, t, col)
+	}
+}
+
+// roundThickness переводит дробную толщину в целую для ступенчатого отката.
+// Ноль и отрицательные значения означают самую тонкую линию: фигура, заданная
+// толщиной 0.4, всё же должна быть видна.
+func roundThickness(t float64) int {
+	n := int(t + 0.5)
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
