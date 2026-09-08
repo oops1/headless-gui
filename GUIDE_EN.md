@@ -598,6 +598,31 @@ XAML:
 
 Closes on click outside or Escape. Arrow keys and Enter for keyboard navigation.
 
+**Item icon.** An image, not a path: application icons are usually compiled in
+and rasterized into the theme color — there is no file on disk for them.
+
+```go
+menu.SetItems([]widget.MenuItem{
+    {Text: "Copy path", Icon: iconCopy},                    // image.Image
+    {Text: "Open in terminal", Icon: iconTerm, IconSize: 14},
+    {Text: "Show hidden", Icon: iconEye, Checkable: true, Checked: true},
+    {Text: "No icon"}, // its caption lines up with the rest
+})
+```
+
+In markup — `Icon="icons/copy.png"` and `IconSize="14"` on `<MenuItem>`; the path
+is confined to the XAML file's directory or an `fs.FS`, as with `Button.Icon`. If
+it cannot be read the item simply has no icon: a menu without a picture is
+clearer than a window that did not open because of one.
+
+The icon gutter is reserved for the WHOLE menu when at least one item has an
+icon — the same rule as `Checkable`: otherwise captions of icon-less items would
+sit to the left of their neighbours. `IconSize` is the side in points, zero means
+"the item's height"; a size larger than the item is clamped, or the icon would
+cut into the neighbouring rows. The check mark and the icon do not compete for
+space: the mark on the left, the icon after it, the caption after the icon.
+Submenus (including a `MenuBar`'s) draw icons with the same code.
+
 ### MenuBar
 
 Horizontal menu bar (classic Windows-style). Each top-level item opens a PopupMenu with sub-items. When hovering over an adjacent item, the submenu automatically switches.

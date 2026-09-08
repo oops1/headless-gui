@@ -938,6 +938,15 @@ ListView.OnSelect func(index int, text string)
 
 // PopupMenu item selection
 PopupMenu.OnSelect func(index int, text string)
+// Menu item icon: image, not a path (compiled-in SVG has no file on disk).
+// BREAKING: MenuItem.Icon was `string` (reserved, never drawn) — now image.Image.
+widget.MenuItem{Text: "Copy", Icon: img, IconSize: 14} // 0 = item height
+// XAML: <MenuItem Text="Copy" Icon="icons/copy.png" IconSize="14"/>
+// The icon gutter is reserved for the whole menu when any item has an icon
+// (same rule as Checkable); mark left, icon next, caption last.
+
+// PopupMenu item selection
+PopupMenu.OnSelect func(index int, text string)
 
 // TabControl tab change
 TabControl.OnTabChange func(index int, header string)
