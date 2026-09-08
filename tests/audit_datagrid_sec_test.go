@@ -79,6 +79,14 @@ func (nopCtx) DrawImageScaled(src image.Image, x, y, w, h int)           {}
 func (nopCtx) FillEllipseAA(cx, cy, rx, ry int, c color.RGBA)            {}
 func (nopCtx) FillRoundRect(x, y, w, h, r int, c color.RGBA)             {}
 
+// Линии и контуры (GG-54): мост движка их пробрасывает, значит и заглушка
+// обязана их иметь — иначе тесты не соберутся.
+func (nopCtx) DrawLineAA(x1, y1, x2, y2 int, th float64, c color.RGBA) {}
+func (nopCtx) StrokePolylineAA(pts []image.Point, th float64, closed bool, c color.RGBA) {
+}
+func (nopCtx) StrokeEllipseAA(cx, cy, rx, ry int, th float64, c color.RGBA) {}
+func (nopCtx) FillPolygonAA(pts []image.Point, c color.RGBA)                {}
+
 // ─── SEC-4: колбэки не держат dg.mu ────────────────────────────────────────
 
 // TestSEC4_OnRowActivated_NoDeadlock — обработчик двойного клика зовёт

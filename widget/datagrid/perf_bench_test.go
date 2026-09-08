@@ -37,6 +37,16 @@ func (c *nopDrawCtx) DrawImageScaled(src image.Image, x, y, w, h int) {
 }
 func (c *nopDrawCtx) FillEllipseAA(cx, cy, rx, ry int, col color.RGBA) { c.sink += rx }
 func (c *nopDrawCtx) FillRoundRect(x, y, w, h, r int, col color.RGBA)  { c.sink += w }
+func (c *nopDrawCtx) DrawLineAA(x1, y1, x2, y2 int, thickness float64, col color.RGBA) {
+	c.sink += x2 - x1
+}
+func (c *nopDrawCtx) StrokePolylineAA(pts []image.Point, thickness float64, closed bool, col color.RGBA) {
+	c.sink += len(pts)
+}
+func (c *nopDrawCtx) StrokeEllipseAA(cx, cy, rx, ry int, thickness float64, col color.RGBA) {
+	c.sink += rx
+}
+func (c *nopDrawCtx) FillPolygonAA(pts []image.Point, col color.RGBA) { c.sink += len(pts) }
 
 // ─── Модель для бенчмарков ─────────────────────────────────────────────────
 

@@ -543,11 +543,11 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 
 	// ── PopupMenu ────────────────────────────────────────────────────────────
 	case "popupmenu", "contextmenu":
-		return buildXAMLPopupMenu(el, reg, parentOff)
+		return buildXAMLPopupMenu(el, reg, parentOff, baseDir)
 
 	// ── MenuBar (горизонтальное меню) ────────────────────────────────────────
 	case "menu", "menubar", "mainmenu":
-		return buildXAMLMenuBar(el, reg, parentOff)
+		return buildXAMLMenuBar(el, reg, parentOff, baseDir)
 
 	default:
 		// Проверяем реестр пользовательских виджетов.

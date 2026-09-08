@@ -598,6 +598,31 @@ XAML:
 
 Closes on click outside or Escape. Arrow keys and Enter for keyboard navigation.
 
+**Item icon.** An image, not a path: application icons are usually compiled in
+and rasterized into the theme color — there is no file on disk for them.
+
+```go
+menu.SetItems([]widget.MenuItem{
+    {Text: "Copy path", Icon: iconCopy},                    // image.Image
+    {Text: "Open in terminal", Icon: iconTerm, IconSize: 14},
+    {Text: "Show hidden", Icon: iconEye, Checkable: true, Checked: true},
+    {Text: "No icon"}, // its caption lines up with the rest
+})
+```
+
+In markup — `Icon="icons/copy.png"` and `IconSize="14"` on `<MenuItem>`; the path
+is confined to the XAML file's directory or an `fs.FS`, as with `Button.Icon`. If
+it cannot be read the item simply has no icon: a menu without a picture is
+clearer than a window that did not open because of one.
+
+The icon gutter is reserved for the WHOLE menu when at least one item has an
+icon — the same rule as `Checkable`: otherwise captions of icon-less items would
+sit to the left of their neighbours. `IconSize` is the side in points, zero means
+"the item's height"; a size larger than the item is clamped, or the icon would
+cut into the neighbouring rows. The check mark and the icon do not compete for
+space: the mark on the left, the icon after it, the caption after the icon.
+Submenus (including a `MenuBar`'s) draw icons with the same code.
+
 ### MenuBar
 
 Horizontal menu bar (classic Windows-style). Each top-level item opens a PopupMenu with sub-items. When hovering over an adjacent item, the submenu automatically switches.
@@ -935,6 +960,24 @@ s := datagrid.EllipsizeText(cdc.DrawCtx, longText, maxW, cdc.FontSize)
 **Shapes in a cell.** `cdc.DrawCtx` provides `FillEllipseAA` and
 `FillRoundRect` — a colored status dot is drawn in place, with no pre-rasterized
 images.
+
+Lines and outlines live there too — the rest of the engine's `AAShapes`:
+
+```go
+cdc.DrawCtx.DrawLineAA(x1, y1, x2, y2, 2, col)               // a segment
+cdc.DrawCtx.StrokePolylineAA(pts, 2, false, col)             // a polyline
+cdc.DrawCtx.StrokeEllipseAA(cx, cy, r, r, 2, col)            // a ring
+cdc.DrawCtx.FillPolygonAA(pts, col)                          // a polygon
+```
+
+That is what they were asked for: a commit-graph column is lanes, sloped
+transitions between them and a ring on a merge point. A ring cannot be faked
+with two fills (lane color, then background): on a selected row the background
+differs and the middle of the ring comes out the wrong color.
+
+The thickness is fractional: on an antialiased canvas a line of one and a half
+points exists. Only the fallback for a canvas without antialiasing (printing,
+tests) rounds it — there the shape is laid out in steps, but it is laid out.
 
 **Empty state.** An empty table is the normal first state of a key list or a log:
 
