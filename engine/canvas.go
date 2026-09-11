@@ -23,6 +23,7 @@ import (
 	"golang.org/x/image/draw"
 	"golang.org/x/image/math/fixed"
 
+	"github.com/oops1/headless-gui/v3/internal/pixsimd"
 	"github.com/oops1/headless-gui/v3/output"
 )
 
@@ -500,15 +501,12 @@ func (c *Canvas) fillRectRaw(r image.Rectangle, col color.RGBA, over bool) {
 		const m = 1<<16 - 1
 		sr, sg, sb, sa := uint32(col.R)*0x101, uint32(col.G)*0x101, uint32(col.B)*0x101, uint32(col.A)*0x101
 		a := (m - sa) * 0x101
+		// Строка целиком уходит в pixsimd: там та же формула, а при сборке с
+		// GOEXPERIMENT=simd на процессоре с AVX2 — восемь пикселей за шаг.
+		// Затемнение под модалкой накрывает весь экран каждый кадр затухания.
 		for y := r.Min.Y; y < r.Max.Y; y++ {
 			i := c.back.PixOffset(r.Min.X, y)
-			row := c.back.Pix[i : i+r.Dx()*4]
-			for x := 0; x < len(row); x += 4 {
-				row[x+0] = uint8((uint32(row[x+0])*a/m + sr) >> 8)
-				row[x+1] = uint8((uint32(row[x+1])*a/m + sg) >> 8)
-				row[x+2] = uint8((uint32(row[x+2])*a/m + sb) >> 8)
-				row[x+3] = uint8((uint32(row[x+3])*a/m + sa) >> 8)
-			}
+			pixsimd.OverSolidRow(c.back.Pix[i:i+r.Dx()*4], a, sr, sg, sb, sa)
 		}
 		return
 	}
@@ -836,9 +834,10 @@ func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 	sg := uint32(col.G) * 0x101
 	sb := uint32(col.B) * 0x101
 	sa := uint32(col.A) * 0x101
-	const m16 = 1<<16 - 1
-	// Строки берём подсрезами (PERF-7): компилятор снимает проверку границ на
-	// каждый пиксель, арифметика смешивания — прежняя, результат бит-в-бит тот же.
+	// Строки берём подсрезами (PERF-7), а смешивание строки — в pixsimd:
+	// арифметика прежняя, результат бит в бит тот же, а при сборке с
+	// GOEXPERIMENT=simd на процессоре с AVX2 — восемь пикселей за шаг. Это самое
+	// горячее место кадра: глифы, скругления и сглаженные фигуры идут через него.
 	mask := alpha.Pix
 	mStride := alpha.Stride
 	dst := c.back.Pix
@@ -853,21 +852,7 @@ func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 		mo := (yy-gy)*mStride + (lx - gx)
 		mRow := mask[mo : mo+rw]
 		dOff := c.back.PixOffset(lx, yy)
-		dRow := dst[dOff : dOff+rw*4]
-		for i := 0; i < rw; i++ {
-			ma := uint32(mRow[i])
-			if ma == 0 {
-				continue
-			}
-			ma |= ma << 8 // 0..0xffff
-			a := sa * ma / m16
-			inv := m16 - a
-			p := dRow[i*4 : i*4+4 : i*4+4]
-			p[0] = uint8((uint32(p[0])*0x101*inv/m16 + sr*ma/m16) >> 8)
-			p[1] = uint8((uint32(p[1])*0x101*inv/m16 + sg*ma/m16) >> 8)
-			p[2] = uint8((uint32(p[2])*0x101*inv/m16 + sb*ma/m16) >> 8)
-			p[3] = uint8((uint32(p[3])*0x101*inv/m16 + sa*ma/m16) >> 8)
-		}
+		pixsimd.BlendMaskRow(dst[dOff:dOff+rw*4], mRow, sr, sg, sb, sa)
 	}
 }
 
