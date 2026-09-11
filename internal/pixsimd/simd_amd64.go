@@ -16,15 +16,35 @@ import "simd/archsimd"
 // цвета сумма может перевалить за 255 — без маски лишний бит утёк бы в соседний
 // канал.
 
-func init() {
-	if !archsimd.X86.AVX2() || disabledByEnv() {
-		return
+// avx2 — векторный набор. Ставится при запуске, только если процессор умеет
+// AVX2 (archsimd.X86.AVX2 проверяет и CPUID, и то, что ОС сохраняет
+// YMM-регистры при переключении потоков) и набор прошёл самопроверку.
+//
+// Векторные функции вызываются только через этот набор, поэтому на
+// процессоре без AVX2 программа работает скалярным путём.
+var avx2 = kernels{
+	name:         "avx2",
+	blendMaskRow: blendMaskRowAVX2,
+	overSolidRow: overSolidRowAVX2,
+	swapRB:       swapRBAVX2,
+	swapRBOpaque: swapRBOpaqueAVX2,
+	blurRows:     boxBlurRowsAVX2,
+	blurCols:     boxBlurColsAVX2,
+}
+
+func init() { selectVector(archsimd.X86.AVX2(), disabledByEnv()) }
+
+// selectVector — выбор набора при запуске. Отдельно от init, чтобы тест мог
+// изобразить процессор без AVX2 на любой машине.
+func selectVector(hasAVX2, disabled bool) {
+	switch {
+	case !hasAVX2:
+		fallback = "avx2: процессор без AVX2"
+	case disabled:
+		fallback = "avx2: выключено HEADLESS_GUI_NOSIMD"
+	default:
+		install(avx2)
 	}
-	blendMaskRow = blendMaskRowAVX2
-	overSolidRow = overSolidRowAVX2
-	swapRB = swapRBAVX2
-	swapRBOpaque = swapRBOpaqueAVX2
-	impl = "avx2"
 }
 
 // div65535 — точное x/65535 без деления: (x + x>>16 + 1) >> 16. Верно для всех

@@ -13,7 +13,8 @@
 // остальных случаях работают скалярные версии: сборка без эксперимента, старый
 // тулчейн, другая архитектура, старый процессор.
 //
-// Интерфейс пакета намеренно узкий — три функции над строкой пикселей. API
+// Интерфейс пакета намеренно узкий — функции над строкой пикселей и проходы
+// размытия. API
 // archsimd не стабилен (между 1.26 и 1.27 он уже менялся), и когда он сменится
 // снова, править придётся только этот пакет, а не движок.
 //
@@ -27,15 +28,55 @@ package pixsimd
 
 import "os"
 
-// Функции, выбранные при запуске: скалярные по умолчанию, векторные — если
-// сборка и процессор это позволяют (simd_amd64.go).
+// kernels — набор реализаций. Выбирается целиком: векторный набор либо
+// проходит самопроверку весь, либо не ставится вовсе — смесь «часть ядер
+// векторные, часть скалярные» нигде не проверялась бы.
+type kernels struct {
+	name         string
+	blendMaskRow func(dst, mask []byte, sr, sg, sb, sa uint32)
+	overSolidRow func(row []byte, a, sr, sg, sb, sa uint32)
+	swapRB       func(dst, src []byte)
+	swapRBOpaque func(dst, src []byte)
+	blurRows     func(bb *BlurBuf, pix []byte, stride, w, h, radius int)
+	blurCols     func(bb *BlurBuf, pix []byte, stride, w, h, radius int)
+}
+
+// generic — скалярный набор: эталон и путь по умолчанию.
+var generic = kernels{
+	name:         "generic",
+	blendMaskRow: blendMaskRowGeneric,
+	overSolidRow: overSolidRowGeneric,
+	swapRB:       swapRBGeneric,
+	swapRBOpaque: swapRBOpaqueGeneric,
+	blurRows:     boxBlurRowsGeneric,
+	blurCols:     boxBlurColsGeneric,
+}
+
 var (
-	blendMaskRow = blendMaskRowGeneric
-	overSolidRow = overSolidRowGeneric
-	swapRB       = swapRBGeneric
-	swapRBOpaque = swapRBOpaqueGeneric
-	impl         = "generic"
+	// active — набор, выбранный при запуске (simd_amd64.go ставит векторный).
+	active = generic
+	// fallback — почему векторный набор не поставлен, хотя сборка его несёт:
+	// процессор без AVX2, рубильник или проваленная самопроверка. Пусто —
+	// векторного набора в сборке нет или он работает.
+	fallback string
 )
+
+// install ставит векторный набор, если он проходит самопроверку, и
+// запоминает причину отказа, если нет.
+//
+// Проверки процессора (CPUID и то, что ОС сохраняет YMM-регистры) делает
+// вызывающий до этого — без них векторная команда упала бы с «недопустимой
+// инструкцией», и перехватить это уже нечем. Самопроверка ловит другое: набор,
+// который на этой машине считает НЕ ТАК — ошибку в эксперименте Go (API
+// archsimd не стабилен и меняется между версиями), в гипервизоре, в нашем
+// ядре на непроверенном краю. Лучше медленнее, чем другой кадр.
+func install(cand kernels) {
+	if err := selfTest(cand); err != nil {
+		fallback = cand.name + ": " + err.Error()
+		return
+	}
+	active = cand
+}
 
 // disabledByEnv — векторные версии выключены переменной окружения
 // HEADLESS_GUI_NOSIMD=1 (любое непустое значение, кроме "0").
@@ -50,7 +91,13 @@ func disabledByEnv() bool {
 
 // Impl сообщает, какая реализация выбрана: "avx2" или "generic". Нужна тестам
 // и диагностике — по кадру не видно, какой путь его нарисовал.
-func Impl() string { return impl }
+func Impl() string { return active.name }
+
+// Fallback — почему векторный путь не выбран, хотя сборка его содержит
+// («avx2: процессор без AVX2», «avx2: HEADLESS_GUI_NOSIMD», «avx2:
+// самопроверка: …»). Пустая строка — векторного пути в сборке нет (обычная
+// сборка, другая архитектура) или он выбран.
+func Fallback() string { return fallback }
 
 // BlendMaskRow кладёт цвет через альфа-маску поверх строки пикселей (Over,
 // premultiplied RGBA): dst[4*i:] смешивается с цветом с покрытием mask[i].
@@ -58,7 +105,7 @@ func Impl() string { return impl }
 // sr, sg, sb, sa — компоненты цвета, растянутые до 16 бит (c * 0x101), как их
 // считает Canvas.drawAlphaMask. dst обязан вмещать 4*len(mask) байт.
 func BlendMaskRow(dst, mask []byte, sr, sg, sb, sa uint32) {
-	blendMaskRow(dst[:len(mask)*4], mask, sr, sg, sb, sa)
+	active.blendMaskRow(dst[:len(mask)*4], mask, sr, sg, sb, sa)
 }
 
 // OverSolidRow кладёт полупрозрачный цвет поверх строки пикселей (Over).
@@ -66,19 +113,19 @@ func BlendMaskRow(dst, mask []byte, sr, sg, sb, sa uint32) {
 // a — множитель фона (0xFFFF - sa) * 0x101, sr..sa — компоненты цвета, растянутые
 // до 16 бит; ровно те величины, что считает Canvas.fillRectRaw. len(dst) кратна 4.
 func OverSolidRow(dst []byte, a, sr, sg, sb, sa uint32) {
-	overSolidRow(dst[:len(dst)&^3], a, sr, sg, sb, sa)
+	active.overSolidRow(dst[:len(dst)&^3], a, sr, sg, sb, sa)
 }
 
 // SwapRB переставляет каналы R и B: RGBA ↔ BGRA. Обрабатывается
 // min(len(dst), len(src)) байт, округлённое вниз до целого пикселя.
 func SwapRB(dst, src []byte) {
 	n := min(len(dst), len(src)) &^ 3
-	swapRB(dst[:n], src[:n])
+	active.swapRB(dst[:n], src[:n])
 }
 
 // SwapRBOpaque — как SwapRB, но старший байт каждого пикселя ставится в 0xFF:
 // буфер формата XRGB8888, где «альфа» обязана быть непрозрачной.
 func SwapRBOpaque(dst, src []byte) {
 	n := min(len(dst), len(src)) &^ 3
-	swapRBOpaque(dst[:n], src[:n])
+	active.swapRBOpaque(dst[:n], src[:n])
 }
