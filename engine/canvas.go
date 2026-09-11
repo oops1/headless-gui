@@ -271,16 +271,7 @@ func (c *Canvas) blitBackground() {
 	// Очищаем буфер чёрным (RGBA = 0,0,0,255). R=G=B=0 — перестановка
 	// каналов (FormatBGRX) здесь ничего не меняет, менять цвет по формату
 	// незачем.
-	for y := 0; y < c.H; y++ {
-		off := c.back.PixOffset(0, y)
-		row := c.back.Pix[off : off+rowBytes]
-		for i := 0; i < len(row); i += 4 {
-			row[i+0] = 0
-			row[i+1] = 0
-			row[i+2] = 0
-			row[i+3] = 255
-		}
-	}
+	c.fillBlackRows(image.Rect(0, 0, c.W, c.H))
 	c.markBackground(all)
 }
 
@@ -327,17 +318,31 @@ func (c *Canvas) blitBackgroundIn(r image.Rectangle) {
 		c.markBackground(r)
 		return
 	}
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		off := c.back.PixOffset(r.Min.X, y)
-		row := c.back.Pix[off : off+r.Dx()*4]
-		for i := 0; i < len(row); i += 4 {
-			row[i+0] = 0
-			row[i+1] = 0
-			row[i+2] = 0
-			row[i+3] = 255
-		}
-	}
+	c.fillBlackRows(r)
 	c.markBackground(r)
+}
+
+// fillBlackRows заливает r непрозрачным чёрным: первая строка — по пикселю,
+// остальные — копированием первой.
+//
+// Раньше каждая строка заливалась побайтовым циклом, и в полном кадре без обоев
+// очистка фона занимала пятую часть времени кадра. copy — это memmove рантайма,
+// он и так векторный; строки при этом копируются по PixOffset, а не одним
+// куском: back может быть чужой памятью с другим шагом строки (SetSurface).
+func (c *Canvas) fillBlackRows(r image.Rectangle) {
+	if r.Empty() {
+		return
+	}
+	n := r.Dx() * 4
+	first := c.back.PixOffset(r.Min.X, r.Min.Y)
+	row0 := c.back.Pix[first : first+n]
+	for i := 0; i < n; i += 4 {
+		row0[i+0], row0[i+1], row0[i+2], row0[i+3] = 0, 0, 0, 255
+	}
+	for y := r.Min.Y + 1; y < r.Max.Y; y++ {
+		off := c.back.PixOffset(r.Min.X, y)
+		copy(c.back.Pix[off:off+n], row0)
+	}
 }
 
 // ─── Внешняя память back-буфера (Engine.SetSurface, surface.go) ────────────
