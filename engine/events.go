@@ -97,9 +97,11 @@ func (e *Engine) setFocusInvalidating(w widget.Widget) {
 // инвалидирует старый/новый фокус точечно, командные хоткеи — полностью
 // (команда может изменить что угодно).
 func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
-	// Tab-навигация: перехватываем Tab до доставки виджету.
+	// Tab-навигация: перехватываем Tab до доставки виджету — если только
+	// фокусный виджет не забирает его себе (widget.TabAcceptor: редактор кода).
+	// Ctrl+Tab остаётся навигацией и у такого виджета.
 	// При активном модальном виджете Tab циклит только внутри него.
-	if ev.Code == widget.KeyTab && ev.Pressed {
+	if ev.Code == widget.KeyTab && ev.Pressed && !widget.WantsTab(e.focus.get(), ev) {
 		var tabRoot widget.Widget
 		if m := e.topModal(); m != nil {
 			tabRoot = m

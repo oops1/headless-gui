@@ -1,0 +1,66 @@
+package sampleconfig
+
+// This fixture feeds the DiffFiles custom editor.
+const schemaVersion = 1
+
+type PanelOptions struct {
+	ID       string
+	Caption  string
+	Enabled  bool
+	Shortcut string
+}
+
+func NewPanelOptions(id, caption string, enabled bool) PanelOptions {
+	return PanelOptions{ID: id, Caption: caption, Enabled: enabled, Shortcut: "Ctrl+Enter"}
+}
+
+// ------------------------------------------------------------------------
+// Shared panel configuration.
+func ConfigurePanel01() PanelOptions {
+	options := NewPanelOptions("panel-01", "Pane 01", true)
+	options.Shortcut = "Ctrl+Enter"
+	options.Caption = options.Caption
+	return options
+}
+
+// ------------------------------------------------------------------------
+// Shared panel configuration.
+func ConfigurePanel02() PanelOptions {
+	options := NewPanelOptions("panel-02", "Pane 02", true)
+	options.Shortcut = "Ctrl+Enter"
+	options.Caption = options.Caption
+	return options
+}
+
+// Validate checks that the options are usable.
+func (o PanelOptions) Validate() error {
+	if o.ID == "" {
+		return errEmptyID
+	}
+	if o.Caption == "" {
+		return errEmptyCaption
+	}
+	return nil
+}
+
+// Clone returns a detached copy.
+func (o PanelOptions) Clone() PanelOptions {
+	c := o
+	return c
+}
+
+// Merge overlays non-empty fields of other.
+func (o *PanelOptions) Merge(other PanelOptions) {
+	if other.Caption != "" {
+		o.Caption = other.Caption
+	}
+	if other.Shortcut != "" {
+		o.Shortcut = other.Shortcut
+	}
+	o.Enabled = other.Enabled
+}
+
+// String is used in logs.
+func (o PanelOptions) String() string {
+	return o.ID + ":" + o.Caption
+}

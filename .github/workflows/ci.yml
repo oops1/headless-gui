@@ -51,6 +51,41 @@ jobs:
       - name: Vet
         run: go vet -unsafeptr=false ./...
 
+  # Векторные пиксельные ядра (internal/pixsimd) на экспериментальном
+  # simd/archsimd: собираются только с GOEXPERIMENT=simd. Проверки «вектор =
+  # скаляр бит в бит» и эталонные кадры имеют смысл лишь в этой сборке, поэтому
+  # у неё своя задача. PIXSIMD_REQUIRE=avx2 не даёт ей пройти молча на
+  # скалярном пути, если векторный файл не попал в сборку.
+  simd:
+    name: test (GOEXPERIMENT=simd)
+    runs-on: ubuntu-latest
+    env:
+      GOEXPERIMENT: simd
+      PIXSIMD_REQUIRE: avx2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test ./...
+      - name: Test pixsimd (verbose)
+        run: go test -v -run 'Impl|Matches|Exhaustive|Div65535' ./internal/pixsimd/
+      - name: Test (race)
+        run: go test -race ./internal/... ./engine/ ./tests/
+      - name: Vet
+        run: go vet -unsafeptr=false ./...
+      # На других архитектурах векторный файл в сборку не входит — проверяем,
+      # что теги сборки это обеспечивают и пакет собирается скалярным.
+      - name: Cross-compile with the experiment
+        run: |
+          GOOS=linux GOARCH=arm64 go build ./...
+          GOOS=darwin GOARCH=arm64 go build ./...
+          GOOS=windows GOARCH=amd64 go build ./...
+
   crosscompile:
     name: cross-compile (zero CGO)
     runs-on: ubuntu-latest

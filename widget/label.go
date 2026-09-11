@@ -57,6 +57,10 @@ const (
 	BuiltinFontBold       = "$hg_bold"
 	BuiltinFontItalic     = "$hg_italic"
 	BuiltinFontBoldItalic = "$hg_bolditalic"
+	// BuiltinFontMono — моноширинный Go Mono: для кода (DiffView), где колонки
+	// обязаны стоять ровно. Без него контрол, которому приложение не дало
+	// своего шрифта, выравнивал бы код пропорциональным.
+	BuiltinFontMono = "$hg_mono"
 )
 
 // effectiveFont выбирает шрифт: явный FontName важнее; иначе встроенный

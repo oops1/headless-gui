@@ -140,6 +140,18 @@ Title bar styles:
 
 Resize modes: `CanResize`, `NoResize`, `CanMinimize`.
 
+**Frame color.** By default the outer window frame is drawn as before —
+`BorderColor` (transparent in the presets; the XOR frame has its own color). For
+a thin colored frame around a window without its own title bar, set it in the
+theme (`Theme.WindowFrame`) or on the window directly:
+
+```go
+ww.SetFrameColor(color.RGBA{R: 0x3C, G: 0x3C, B: 0x3C, A: 255})
+```
+
+`SetFrameColor` pins the color over the theme: switching themes does not reset
+it. A zero alpha returns the window to the theme color.
+
 ### Panel
 
 Container with background, border, rounded corners, background image, and built-in window title bar.
@@ -434,6 +446,14 @@ In XAML — two variants:
     <ComboBoxItem Content="Administrator"/>
     <ComboBoxItem Content="Operator"/>
 </ComboBox>
+```
+
+The drop-down arrow is `ArrowStyle`: `ArrowAuto` (default: a chevron in the
+rounded Win11 and Mac themes, a triangle in a separated zone elsewhere),
+`ArrowTriangle` or `ArrowChevron`. In XAML — `ArrowStyle="Chevron"`.
+
+```go
+dd.ArrowStyle = widget.ArrowChevron
 ```
 
 ### CheckBox
@@ -1218,6 +1238,18 @@ Key codes: `KeyBackspace, KeyEnter, KeyEscape, KeyTab, KeySpace, KeyLeft/Right/U
 
 Modifiers: `ModShift, ModCtrl, ModAlt, ModMeta`.
 
+**Tab inside a widget.** The engine hands Tab to focus traversal before the
+focused widget sees it, so a code editor could not insert a tab. A widget that
+needs Tab itself implements `widget.TabAcceptor`:
+
+```go
+func (e *CodeEditor) AcceptsTab() bool { return !e.readOnly }
+```
+
+While `AcceptsTab` returns `true`, Tab and Shift+Tab arrive in `OnKeyEvent`
+and focus stays put. Ctrl+Tab always stays navigation — otherwise there would
+be no keyboard way out of such a widget.
+
 ### Localizing the built-in dialogs
 
 `MessageBox`, the file chooser, input and progress are translated through
@@ -1273,6 +1305,27 @@ The theme contains 80+ color tokens, grouped by widget:
 - StatusBar: `StatusBarBG`, `StatusBarText`
 - DataGrid header: `HeaderBG`, `HeaderText`
 - System: `Accent`, `Disabled`, `Scrollbar`
+- Window frame: `WindowFrame` (see "Window")
+- Code and diff: `DiffAddBG`, `DiffAddStrong`, `DiffDelBG`, `DiffDelStrong`,
+  `TextSelectionBG`, `SyntaxKeyword`, `SyntaxString`, `SyntaxComment`,
+  `SyntaxNumber`, `SyntaxFunc` — `DiffView` draws with them, and your own code
+  editor can use them too. Every preset fills them, so a theme derived from a
+  preset already has them; for a theme built from scratch `DiffView` replaces
+  zero fields with colors matched to its background.
+
+### Background of layout containers
+
+`StackPanel` and `DockPanel` keep an explicitly set background by default — a
+theme switch does not touch it. A toolbar or status bar that should follow
+the theme says so:
+
+```go
+bar.SetBackgroundRole(widget.BackgroundPanel)   // Theme.PanelBG
+root.SetBackgroundRole(widget.BackgroundWindow) // Theme.WindowBG
+```
+
+In XAML — `Background="{Theme PanelBG}"` or `Background="{Theme WindowBG}"`.
+`BackgroundCustom` restores the old behavior.
 
 ---
 
@@ -1339,7 +1392,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `Button`, `ToggleButton`, `RepeatButton` | Button | `Content`, `Style="Accent"`, `HoverBG`, `PressedBG`, `Background`, `Foreground`, `BorderBrush` |
 | `TextBox` | TextInput | `Placeholder`, `Text`, `Foreground` |
 | `PasswordBox` | TextInput (password) | `Placeholder`, `Text` |
-| `ComboBox` | Dropdown | `Items`, `SelectedIndex`, child `<ComboBoxItem>` |
+| `ComboBox` | Dropdown | `Items`, `SelectedIndex`, child `<ComboBoxItem>`, `ArrowStyle` |
 | `ProgressBar` | ProgressBar | `Value`, `Foreground` |
 | `CheckBox` | CheckBox | `Content`, `IsChecked` |
 | `RadioButton` | RadioButton | `Content`, `GroupName`, `IsChecked` |
@@ -1367,6 +1420,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
+| `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; children `<DockPane>`×N + one `<DockContent>` (see "Docking panels") |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
@@ -1396,6 +1450,32 @@ if err := win.Run(); err != nil {  // blocks until window closes
     log.Fatal(err)
 }
 ```
+
+**Title and closing.** The title changes on the fly — both in the strip the
+engine draws and in the taskbar:
+
+```go
+win.SetTitle("config.go *")
+```
+
+To ask "Save changes?" before closing, use `SetOnCloseRequest`. The hook runs
+for the × button and for closing through the OS (Alt+F4, the taskbar), on the
+engine goroutine — you can show a dialog right from it. `false` keeps the
+window on screen; a decision made later is carried out by the application
+itself through `Close`:
+
+```go
+win.SetOnCloseRequest(func() bool {
+    if !dv.IsModified(widget.DiffLeft) && !dv.IsModified(widget.DiffRight) {
+        return true
+    }
+    askSave(func(ok bool) { if ok { win.Close() } })
+    return false
+})
+```
+
+`Close()` does not consult the hook — that is already the application's
+decision.
 
 ---
 
@@ -1453,6 +1533,23 @@ ctx.SetClip(r image.Rectangle)
 ctx.ClearClip()
 ctx.Clip() image.Rectangle   // current clip rect (for nested clipping)
 ```
+
+**Curves and outlines.** The engine canvas draws anti-aliased paths
+(`widget.PathShapes`): a cubic Bézier curve, a polyline with round joins at the
+bends, and a filled polygon with fractional coordinates.
+
+```go
+if ps, ok := ctx.(widget.PathShapes); ok {
+    ps.StrokeCubicAA(x0, y0, x1, y1, x2, y2, x3, y3, 1.5, col)
+    ps.StrokePathAA([]widget.Point2F{{X: 10, Y: 10}, {X: 40, Y: 30}, {X: 70, Y: 12}}, 2, false, col)
+    ps.FillPathAA(pts, col)
+}
+```
+
+A polyline is stroked as one outline: no gap and no notch at the bends, unlike
+consecutive `DrawLineAA` segments. For a context without `PathShapes`,
+`widget.FlattenCubic` flattens the curve with the same subdivision the canvas
+uses.
 
 ### The draw contract
 
@@ -1631,6 +1728,77 @@ equal-sized cells (`Rows`/`Columns`).
 
 Go types: `widget.Ellipse`, `widget.RectangleShape`, `widget.Line`,
 `widget.Polygon`, `widget.Polyline`.
+
+#### DiffView — compare and edit two files
+
+Two panes of paragraph cards, S-shaped connectors between differing blocks,
+block-copy buttons, a change overview strip on the right, intra-line
+differences and syntax highlighting. Sides of different length scroll in sync,
+so matching blocks always stay side by side. Both panes are full editors:
+caret, selection, words, clipboard, undo and redo.
+
+```go
+dv := widget.NewDiffView("", "") // code and header fonts; empty — built-in Go Mono and Go Bold
+dv.LoadFile(widget.DiffLeft, "old/config.go")
+dv.LoadFile(widget.DiffRight, "new/config.go")
+dv.SetReadOnly(widget.DiffLeft, true)
+dv.SetHideUnchanged(true) // fold identical lines
+dv.SetContextLines(3)     // lines kept around folds
+dv.SetWatchFiles(true)    // watch the files on disk
+defer dv.Close()
+
+dv.OnDiffChanged = func(n int) { status.SetText(fmt.Sprintf("%d changes", n)) }
+dv.OnSaveRequest = func(side widget.DiffSide) { dv.Save(side) } // Ctrl+S
+dv.OnFileChangedOnDisk = func(side widget.DiffSide, path string, deleted bool) {
+    if !deleted && !dv.IsModified(side) {
+        dv.Reload(side)
+    }
+}
+```
+
+Saving writes the file back the way it was read: line endings (CRLF or LF),
+BOM and the presence of a final newline. A binary file is not loaded — the
+error goes to `OnError`. `Reload` is undoable: edits made before it come back
+with `Undo`. Modification is tracked by revision, so undoing back to the saved
+state clears the "modified" mark.
+
+Watching polls the files once a second in a background goroutine, while
+`OnFileChangedOnDisk` arrives **on the engine goroutine** — the control posts
+it through `engine.Post` itself, so the handler can show a dialog directly.
+The control's own save is not mistaken for an external edit.
+
+| Keys | Action |
+|---|---|
+| F7 / Shift+F7, Alt+↓ / Alt+↑ | next / previous change |
+| Alt+→ / Alt+← | copy the current block right / left |
+| Ctrl+S | `OnSaveRequest` and the `SaveCommand` command |
+| Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z | undo, redo |
+| Ctrl+C / X / V / A | clipboard, select all |
+| Tab | a tab into the text (`TabAcceptor`; on a read-only side — focus traversal) |
+
+From code — `NextChange`, `PrevChange`, `GoToChange`, `CopyBlock`,
+`CopyCurrent`, `CopyAll`, `Undo`, `Redo`, `SetCaret`, `InsertText`, `Changes`.
+Two files dropped from the file manager go to the two sides, one file goes to
+the side under the cursor. A screen reader sees two text panes with their
+content: the control implements `widget.AccessChildrenProvider`
+(`AccessChildren() []AccessInfo`), which any widget that draws its content
+itself rather than through children can use. Colors come from the `Diff*` /
+`Syntax*` theme fields, UI strings are the `diff.*` keys (`RegisterStrings`).
+
+```xml
+<DiffView x:Name="diff" LeftFile="old/config.go" RightFile="new/config.go"
+          ReadOnlyLeft="True" HideUnchanged="True" ContextLines="3"
+          IgnoreWhitespace="False" SyntaxHighlight="True" WatchFiles="True"
+          FontFamily="Consolas" FontSize="10"
+          SaveCommand="{Binding Save}" DiffChangedCommand="{Binding Count}"/>
+```
+
+File paths are relative to the markup directory and cannot leave it, like all
+markup resources. Markup loaded from an `fs.FS` puts the content in without a
+file; the application saves it with `SaveAs`. Commands: `SaveCommand`
+(parameter — `DiffSide`), `TextChangedCommand` (`DiffSide`),
+`DiffChangedCommand` (number of changes), `FileChangedCommand`
+(`DiffFileChange`); from code — `SetCommand`. Full example — `cmd/diffdemo`.
 
 ### TextBox maturity
 
@@ -2907,6 +3075,68 @@ lets a consumer mutate the scene and produce the frame on one goroutine,
 removing that race by construction. `Frames()` keeps working: the sink is an
 alternative, not a replacement.
 
+#### Vector kernels (Go experiment)
+
+The engine's hottest pixel loops — blending an alpha mask with a color (glyphs,
+rounded corners, antialiased shapes), translucent fills (the dim behind a modal,
+shadows) and the channel swap when presenting to an OS window, plus the box-blur
+passes (acrylic/mica glass, `BlurRGBA`) — can run on AVX2
+through the experimental `simd/archsimd` package. They are enabled by building
+with the experiment:
+
+```bash
+GOEXPERIMENT=simd go build ./...
+```
+
+It takes **Go 1.27 or newer** on amd64; the vector path is chosen at startup,
+only if the CPU has AVX2. In every other case — a build without the experiment,
+a toolchain older than 1.27, arm64, an older CPU — the previous scalar loops
+run, and nothing changes for the library: `go.mod` stays at `go 1.22`, and any
+toolchain from there on builds the engine.
+
+Why 1.27 and not 1.26, where the experiment first appeared: the `archsimd` API
+changed between them, and the kernels are written against 1.27. The vector
+files carry `go1.27` in their build constraints, so on Go 1.26 with
+`GOEXPERIMENT=simd` they are simply left out of the build — the engine builds
+and runs on the scalar path instead of failing to compile.
+
+The output matches the scalar one bit for bit — the golden frames pass in both
+builds. The gain (medians of 10 runs on amd64 with AVX2):
+
+| Measurement | Scalar | AVX2 |
+|---|---|---|
+| full frame (`Pipeline_FullFrame`) | 3.35 ms | 2.04 ms (−39 %) |
+| window drag | 1.63 ms | 0.93 ms (−43 %) |
+| rounded rectangles | 1.89 µs | 1.08 µs (−43 %) |
+| a line of text | 15.1 µs | 10.6 µs (−30 %) |
+| presenting a 1080p frame to an OS window | 1.08 ms | 0.37 ms (2.9×) |
+| `BlurRGBA` 480×120, r = 8 | 815 µs | 97 µs (8.4×) |
+| taskbar glass 1920×48 (`BlurBehind`) | 385 µs | 162 µs (2.4×) |
+
+`HEADLESS_GUI_NOSIMD=1` turns the vector path off without rebuilding: an
+experiment is an experiment, and if it misbehaves on someone's CPU, the
+application should not need a rebuild to get around it.
+
+**Automatic fallback.** The vector path asks nothing of the application and
+cannot crash it. The kernel set is chosen at startup as a whole: it is
+installed only if the CPU has AVX2 (both CPUID and OS support for saving YMM
+registers are checked), the kill switch is not set, and the set passes a
+self-test — every kernel runs on canned data and is compared with the scalar
+one; a kernel panic also counts as a failure. Otherwise the scalar path runs,
+and the reason is available from `pixsimd.Fallback()` (an internal package — for
+engine diagnostics). So the same program built with the experiment runs on a
+new CPU, on an old one without AVX2, and in a virtual machine that advertises
+AVX2 but computes differently.
+
+The scalar path gained from this work too: dividing the blur window sum by its
+width is now an exact multiplication by the reciprocal (twice as fast), and the
+`BlurBehind` downscale and upscale no longer go block by block — the taskbar
+glass costs 385 µs instead of 717 in a regular build.
+
+The `archsimd` API is not stable (it already changed between 1.26 and 1.27), so
+every vector kernel lives in one internal package, `internal/pixsimd`, behind a
+narrow interface — when the API changes, only that package needs editing.
+
 ---
 
 ## Module Structure
@@ -2951,6 +3181,7 @@ go run ./cmd/desktopdemo # desktop: taskbar and live theme switching
 go run ./cmd/guiview     # interactive demo with modal XAML windows
 go run ./cmd/griddemo    # Grid layout
 go run ./cmd/smartgit    # SmartGit-like UI
+go run ./cmd/diffdemo    # compare and edit two files (DiffView)
 go run ./cmd/webshowcase # the whole showcase in a browser (http://localhost:8091)
 go run ./cmd/webdemo     # minimal streaming example
 

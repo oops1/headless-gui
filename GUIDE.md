@@ -140,6 +140,18 @@ ww.Resize = widget.ResizeModeCanResize
 
 Режимы изменения размера: `CanResize`, `NoResize`, `CanMinimize`.
 
+**Цвет рамки.** Наружная рамка окна по умолчанию рисуется как раньше —
+`BorderColor` (в пресетах прозрачная, у рамки-XOR свой цвет). Если нужна
+тонкая цветная рамка вокруг окна без собственного заголовка, задайте её в теме
+(`Theme.WindowFrame`) или окну напрямую:
+
+```go
+ww.SetFrameColor(color.RGBA{R: 0x3C, G: 0x3C, B: 0x3C, A: 255})
+```
+
+`SetFrameColor` закрепляет цвет поверх темы: смена темы его не сбрасывает.
+Нулевая альфа возвращает окно к цвету из темы.
+
 ### Panel
 
 Контейнер с фоном, рамкой, скруглёнными углами, фоновым изображением и встроенным заголовком окна.
@@ -434,6 +446,14 @@ dd.OnChange = func(idx int, text string) { ... }
     <ComboBoxItem Content="Администратор"/>
     <ComboBoxItem Content="Оператор"/>
 </ComboBox>
+```
+
+Стрелка раскрытия — `ArrowStyle`: `ArrowAuto` (по умолчанию: у скруглённых
+тем Win11 и Mac — шеврон, у остальных — треугольник в отделённой зоне),
+`ArrowTriangle` или `ArrowChevron`. В XAML — `ArrowStyle="Chevron"`.
+
+```go
+dd.ArrowStyle = widget.ArrowChevron
 ```
 
 ### CheckBox
@@ -1222,6 +1242,18 @@ eng.SendKeyEvent(widget.KeyEvent{
 
 Модификаторы: `ModShift, ModCtrl, ModAlt, ModMeta`.
 
+**Tab внутри виджета.** Tab движок отдаёт обходу фокуса раньше, чем
+фокусному виджету, — редактору кода табуляцию так не вставить. Виджет, которому
+Tab нужен сам, реализует `widget.TabAcceptor`:
+
+```go
+func (e *CodeEditor) AcceptsTab() bool { return !e.readOnly }
+```
+
+Пока `AcceptsTab` отвечает `true`, Tab и Shift+Tab приходят в `OnKeyEvent`, а
+фокус остаётся на месте. Ctrl+Tab остаётся навигацией всегда — иначе из такого
+виджета не было бы выхода с клавиатуры.
+
 ### Локализация штатных диалогов
 
 `MessageBox`, выбор файла, ввод и прогресс переводятся ключами `dlg.*` через тот
@@ -1276,6 +1308,27 @@ eng.SetTheme(t)
 - StatusBar: `StatusBarBG`, `StatusBarText`
 - DataGrid header: `HeaderBG`, `HeaderText`
 - Системные: `Accent`, `Disabled`, `Scrollbar`
+- Рамка окна: `WindowFrame` (см. «Window»)
+- Код и сравнение: `DiffAddBG`, `DiffAddStrong`, `DiffDelBG`, `DiffDelStrong`,
+  `TextSelectionBG`, `SyntaxKeyword`, `SyntaxString`, `SyntaxComment`,
+  `SyntaxNumber`, `SyntaxFunc` — ими рисует `DiffView`, их же может брать свой
+  редактор кода. Во всех пресетах заполнены: для своей темы, собранной из
+  пресета, они уже есть, а у темы с нуля `DiffView` заменяет нулевые поля
+  цветами, подобранными к её фону.
+
+### Фон контейнеров раскладки
+
+`StackPanel` и `DockPanel` по умолчанию держат фон, заданный им явно, — смена
+темы его не трогает. Панель инструментов или строку состояния, которые должны
+следовать теме, так и отмечают:
+
+```go
+bar.SetBackgroundRole(widget.BackgroundPanel)   // Theme.PanelBG
+root.SetBackgroundRole(widget.BackgroundWindow) // Theme.WindowBG
+```
+
+В XAML — `Background="{Theme PanelBG}"` или `Background="{Theme WindowBG}"`.
+`BackgroundCustom` возвращает прежнее поведение.
 
 ---
 
@@ -1342,7 +1395,7 @@ root Canvas (0,0)
 | `Button`, `ToggleButton`, `RepeatButton` | Button | `Content`, `Style="Accent"`, `HoverBG`, `PressedBG`, `Background`, `Foreground`, `BorderBrush` |
 | `TextBox` | TextInput | `Placeholder`, `Text`, `Foreground` |
 | `PasswordBox` | TextInput (пароль) | `Placeholder`, `Text` |
-| `ComboBox` | Dropdown | `Items`, `SelectedIndex`, дочерние `<ComboBoxItem>` |
+| `ComboBox` | Dropdown | `Items`, `SelectedIndex`, дочерние `<ComboBoxItem>`, `ArrowStyle` |
 | `ProgressBar` | ProgressBar | `Value`, `Foreground` |
 | `CheckBox` | CheckBox | `Content`, `IsChecked` |
 | `RadioButton` | RadioButton | `Content`, `GroupName`, `IsChecked` |
@@ -1370,6 +1423,7 @@ root Canvas (0,0)
 | `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (первые два дочерних — панели) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
+| `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; дочерние `<DockPane>`×N + один `<DockContent>` (см. «Докинг-панели») |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); только внутри `<DockManager>` |
@@ -1399,6 +1453,30 @@ if err := win.Run(); err != nil {  // блокирует до закрытия
     log.Fatal(err)
 }
 ```
+
+**Заголовок и закрытие.** Заголовок меняется на ходу — и в полосе, которую
+рисует движок, и в панели задач:
+
+```go
+win.SetTitle("config.go *")
+```
+
+Спросить «Сохранить изменения?» перед закрытием — `SetOnCloseRequest`. Хук
+зовётся и на кнопку ×, и на закрытие средствами ОС (Alt+F4, панель задач), на
+горутине движка — из него можно сразу показать диалог. `false` оставляет окно
+на экране; решение, принятое позже, приложение исполняет само через `Close`:
+
+```go
+win.SetOnCloseRequest(func() bool {
+    if !dv.IsModified(widget.DiffLeft) && !dv.IsModified(widget.DiffRight) {
+        return true
+    }
+    askSave(func(ok bool) { if ok { win.Close() } })
+    return false
+})
+```
+
+`Close()` хук не спрашивает — это уже решение приложения.
 
 ---
 
@@ -1456,6 +1534,22 @@ ctx.SetClip(r image.Rectangle)
 ctx.ClearClip()
 ctx.Clip() image.Rectangle   // текущая область отсечения (для вложенного клиппинга)
 ```
+
+**Кривые и контуры.** Холст движка умеет сглаженные пути
+(`widget.PathShapes`): кубическую кривую Безье, ломаную с круглыми
+сопряжениями на изгибах и залитый многоугольник с дробными координатами.
+
+```go
+if ps, ok := ctx.(widget.PathShapes); ok {
+    ps.StrokeCubicAA(x0, y0, x1, y1, x2, y2, x3, y3, 1.5, col)
+    ps.StrokePathAA([]widget.Point2F{{X: 10, Y: 10}, {X: 40, Y: 30}, {X: 70, Y: 12}}, 2, false, col)
+    ps.FillPathAA(pts, col)
+}
+```
+
+Ломаная обводится одним контуром: на изгибе нет ни щели, ни зубца, как было
+бы у отрезков `DrawLineAA` подряд. Для контекста без `PathShapes` кривую
+раскладывает в ломаную `widget.FlattenCubic` — той же раскладкой, что и холст.
 
 ### Контракт отрисовки
 
@@ -1637,6 +1731,75 @@ v.BindCollectionView(view)      // авто-обновление из Collection
 
 Go-типы: `widget.Ellipse`, `widget.RectangleShape`, `widget.Line`,
 `widget.Polygon`, `widget.Polyline`.
+
+#### DiffView — сравнение и правка двух файлов
+
+Две панели с карточками-абзацами, S-коннекторы между отличающимися блоками,
+кнопки переноса блока, полоса-обзор изменений справа, внутристрочная разница
+и подсветка синтаксиса. Стороны разной длины прокручиваются синхронно:
+соответствующие блоки всегда стоят рядом. Обе панели — полноценные
+редакторы: каретка, выделение, слова, буфер обмена, отмена и повтор.
+
+```go
+dv := widget.NewDiffView("", "") // шрифт кода и шапки; пусто — встроенные Go Mono и Go Bold
+dv.LoadFile(widget.DiffLeft, "old/config.go")
+dv.LoadFile(widget.DiffRight, "new/config.go")
+dv.SetReadOnly(widget.DiffLeft, true)
+dv.SetHideUnchanged(true) // свернуть одинаковые строки
+dv.SetContextLines(3)     // сколько строк оставить у свёрток
+dv.SetWatchFiles(true)    // следить за файлами на диске
+defer dv.Close()
+
+dv.OnDiffChanged = func(n int) { status.SetText(fmt.Sprintf("%d изменений", n)) }
+dv.OnSaveRequest = func(side widget.DiffSide) { dv.Save(side) } // Ctrl+S
+dv.OnFileChangedOnDisk = func(side widget.DiffSide, path string, deleted bool) {
+    if !deleted && !dv.IsModified(side) {
+        dv.Reload(side)
+    }
+}
+```
+
+Сохранение сохраняет файл таким, каким он был прочитан: перевод строки (CRLF
+или LF), BOM и наличие перевода в конце. Двоичный файл не загружается —
+ошибка приходит в `OnError`. `Reload` отменяем: правки до перечитывания
+возвращаются `Undo`. Изменённость считается по ревизиям, поэтому отмена до
+сохранённого состояния снимает отметку «изменён».
+
+Слежение опрашивает файлы раз в секунду в фоновой горутине, а
+`OnFileChangedOnDisk` приходит **в потоке движка** — контрол сам отправляет
+его через `engine.Post`, так что из обработчика можно сразу показать диалог.
+Своё сохранение за внешнюю правку не принимается.
+
+| Клавиши | Действие |
+|---|---|
+| F7 / Shift+F7, Alt+↓ / Alt+↑ | следующее / предыдущее изменение |
+| Alt+→ / Alt+← | перенести текущий блок вправо / влево |
+| Ctrl+S | `OnSaveRequest` и команда `SaveCommand` |
+| Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z | отмена, повтор |
+| Ctrl+C / X / V / A | буфер обмена, выделить всё |
+| Tab | табуляция в текст (`TabAcceptor`; у стороны только для чтения — обход фокуса) |
+
+Программно — `NextChange`, `PrevChange`, `GoToChange`, `CopyBlock`,
+`CopyCurrent`, `CopyAll`, `Undo`, `Redo`, `SetCaret`, `InsertText`, `Changes`.
+Два файла, брошенные из проводника, раскладываются по сторонам, один — в
+сторону под курсором. Скринридер видит две текстовые панели с содержимым
+(`AccessChildrenProvider`). Цвета берутся из полей темы `Diff*`/`Syntax*`,
+строки интерфейса — ключи `diff.*` (`RegisterStrings`).
+
+```xml
+<DiffView x:Name="diff" LeftFile="old/config.go" RightFile="new/config.go"
+          ReadOnlyLeft="True" HideUnchanged="True" ContextLines="3"
+          IgnoreWhitespace="False" SyntaxHighlight="True" WatchFiles="True"
+          FontFamily="Consolas" FontSize="10"
+          SaveCommand="{Binding Save}" DiffChangedCommand="{Binding Count}"/>
+```
+
+Пути файлов — относительно каталога разметки и не выходят за него, как у
+всех ресурсов. Разметка из `fs.FS` кладёт содержимое без файла: сохранять его
+приложение будет через `SaveAs`. Команды: `SaveCommand` (параметр —
+`DiffSide`), `TextChangedCommand` (`DiffSide`), `DiffChangedCommand` (число
+изменений), `FileChangedCommand` (`DiffFileChange`); из кода — `SetCommand`.
+Полный пример — `cmd/diffdemo`.
 
 ### Зрелость TextBox
 
@@ -1896,6 +2059,10 @@ func (w *MyWidget) AccessInfo() widget.AccessInfo {
     return widget.AccessInfo{Role: widget.RoleButton, Name: "Моя кнопка"}
 }
 ```
+
+Виджет, который рисует содержимое сам, а не детьми (редактор, график),
+отдаёт его части через `widget.AccessChildrenProvider` — `AccessChildren()
+[]AccessInfo`. Так `DiffView` показывает скринридеру две текстовые панели.
 
 Применения: side-channel семантики в стриминговых сценариях (клиент
 озвучивает UI скринридером), поиск элементов в автотестах по роли/имени.
@@ -2942,6 +3109,69 @@ eng.RequestFrame()              // сток готов принять
 горутине, устранив гонку по построению. `Frames()` продолжает работать: сток
 — альтернатива, а не замена.
 
+#### Векторные ядра (эксперимент Go)
+
+Самые горячие пиксельные циклы движка — смешивание альфа-маски с цветом
+(глифы, скругления, сглаженные фигуры), полупрозрачная заливка (затемнение под
+модалкой, тени) и перестановка каналов при выводе в окно ОС, а также проходы
+box-размытия (стекло acrylic/mica, `BlurRGBA`) — умеют работать
+на AVX2 через экспериментальный пакет `simd/archsimd`. Включаются они сборкой с
+экспериментом:
+
+```bash
+GOEXPERIMENT=simd go build ./...
+```
+
+Нужен **Go 1.27 или новее** и amd64; векторный путь выбирается при запуске,
+только если процессор умеет AVX2. Во всех остальных случаях — сборка без
+эксперимента, тулчейн старше 1.27, arm64, старый процессор — работают прежние
+скалярные циклы, и для библиотеки ничего не меняется: `go.mod` остаётся на
+`go 1.22`, и собирать движок можно любым тулчейном начиная с него.
+
+Почему 1.27, а не 1.26, где эксперимент появился: API `archsimd` между ними
+менялся, и ядра написаны под 1.27. Векторные файлы помечены `go1.27` в
+ограничениях сборки, поэтому на Go 1.26 с `GOEXPERIMENT=simd` они просто не
+попадают в сборку — движок собирается и работает скалярным путём, а не
+падает с ошибкой компиляции.
+
+Результат совпадает со скалярным бит в бит — эталонные кадры проходят в обеих
+сборках. Выигрыш (медианы по 10 прогонам на amd64 с AVX2):
+
+| Замер | Скаляр | AVX2 |
+|---|---|---|
+| полный кадр (`Pipeline_FullFrame`) | 3,35 мс | 2,04 мс (−39 %) |
+| перетаскивание окна | 1,63 мс | 0,93 мс (−43 %) |
+| скруглённые прямоугольники | 1,89 мкс | 1,08 мкс (−43 %) |
+| строка текста | 15,1 мкс | 10,6 мкс (−30 %) |
+| вывод кадра 1080p в окно ОС | 1,08 мс | 0,37 мс (в 2,9 раза) |
+| размытие `BlurRGBA` 480×120, r = 8 | 815 мкс | 97 мкс (в 8,4 раза) |
+| стекло панели задач 1920×48 (`BlurBehind`) | 385 мкс | 162 мкс (в 2,4 раза) |
+
+Выключить векторный путь без пересборки — переменная окружения
+`HEADLESS_GUI_NOSIMD=1`: эксперимент на то и эксперимент, и если на чьём-то
+процессоре он поведёт себя не так, пересобирать приложение ради этого не
+придётся.
+
+**Автоматический обход.** Векторный путь не требует от приложения ничего и
+не может его уронить. Набор ядер выбирается при запуске целиком: он
+ставится, только если процессор умеет AVX2 (проверяются и CPUID, и то, что ОС
+сохраняет YMM-регистры), рубильник не задан и набор прошёл самопроверку —
+каждое ядро прогоняется на заготовленных данных и сверяется со скалярным,
+паника ядра тоже считается отказом. Иначе работает скалярный путь, а причина
+видна в `pixsimd.Fallback()` (внутренний пакет — для диагностики движка). Так
+одна и та же программа, собранная с экспериментом, работает и на новом
+процессоре, и на старом без AVX2, и в виртуальной машине, которая AVX2
+заявляет, но считает не так.
+
+Скалярный путь от этой работы тоже выиграл: деление суммы окна размытия на
+его ширину заменено точным умножением на обратное (вдвое быстрее), а
+уменьшение и растяжение подложки `BlurBehind` переписаны без поблочных
+вызовов — стекло панели задач в обычной сборке стоит 385 мкс вместо 717.
+
+API `archsimd` не стабилен (между 1.26 и 1.27 он уже менялся), поэтому все
+векторные ядра собраны в одном внутреннем пакете `internal/pixsimd` с узким
+интерфейсом — когда API сменится, править придётся только его.
+
 ---
 
 ## Структура модулей
@@ -2986,6 +3216,7 @@ go run ./cmd/desktopdemo # рабочий стол: панель задач и �
 go run ./cmd/guiview     # интерактивное демо с модальными XAML-окнами
 go run ./cmd/griddemo    # Grid-раскладка
 go run ./cmd/smartgit    # SmartGit-подобный UI
+go run ./cmd/diffdemo    # сравнение и правка двух файлов (DiffView)
 go run ./cmd/webshowcase # вся витрина в браузере (http://localhost:8091)
 go run ./cmd/webdemo     # минимальный пример стриминга
 

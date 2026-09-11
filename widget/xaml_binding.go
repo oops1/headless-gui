@@ -259,10 +259,23 @@ func (s *BindingScope) addViewSub(cv *CollectionView, id int) {
 	s.mu.Unlock()
 }
 
-// commandTarget — привязка Button.Command к объекту-команде из DataContext.
+// commandTarget — привязка команды из DataContext: Button.Command или
+// именованная команда виджета (commandSetter, например DiffView.SaveCommand).
 type commandTarget struct {
 	btn  *Button
+	cs   commandSetter
+	prop string
 	path string
+}
+
+// commandSetter — виджет с именованными командами разметки: атрибут
+// «…Command="{Binding Path}"» уходит в SetCommand(имя атрибута, команда).
+//
+// Раньше команда привязывалась только к Button.Command, и событиям других
+// виджетов из разметки было некуда деться: приложению приходилось доставать
+// виджет по имени и вешать обработчик кодом.
+type commandSetter interface {
+	SetCommand(name string, cmd ICommand) bool
 }
 
 // newBindingScope строит scope из собранных в env привязок/триггеров/ItemsControl,
@@ -282,6 +295,11 @@ func newBindingScope(ctx interface{}, env *xamlEnv, reg map[string]Widget, baseD
 			if btn, ok2 := w.(*Button); ok2 {
 				s.cmdTgts = append(s.cmdTgts, commandTarget{btn: btn, path: pb.spec.path})
 			}
+			continue
+		}
+		// Именованная команда виджета: SaveCommand, DiffChangedCommand, …
+		if cs, ok2 := w.(commandSetter); ok2 && strings.HasSuffix(pb.prop, "Command") {
+			s.cmdTgts = append(s.cmdTgts, commandTarget{cs: cs, prop: pb.prop, path: pb.spec.path})
 			continue
 		}
 		if pb.spec.elementName != "" {
@@ -482,8 +500,14 @@ func (s *BindingScope) wireCommands() {
 		if !ok {
 			continue
 		}
-		if cmd, ok := v.(ICommand); ok {
+		cmd, ok := v.(ICommand)
+		if !ok {
+			continue
+		}
+		if ct.btn != nil {
 			ct.btn.Command = cmd
+		} else if ct.cs != nil {
+			ct.cs.SetCommand(ct.prop, cmd)
 		}
 	}
 }

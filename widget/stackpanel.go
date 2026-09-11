@@ -33,8 +33,11 @@ type StackPanel struct {
 	Orientation Orientation
 	Background  color.RGBA
 	UseAlpha    bool
-	Spacing     int // расстояние между дочерними виджетами (px)
-	Padding     int // внутренний отступ (px)
+	// BackgroundRole — откуда фон берётся при смене темы (bgrole.go). По
+	// умолчанию BackgroundCustom: свой цвет тема не трогает.
+	BackgroundRole BackgroundRole
+	Spacing        int // расстояние между дочерними виджетами (px)
+	Padding        int // внутренний отступ (px)
 }
 
 // NewStackPanel создаёт StackPanel с заданным направлением.
@@ -156,7 +159,13 @@ func (sp *StackPanel) Draw(ctx DrawContext) {
 	sp.drawChildren(ctx)
 }
 
-// ApplyTheme обновляет цвета StackPanel.
+// ApplyTheme обновляет фон StackPanel, если панели назначена роль фона.
+//
+// Без роли фон не трогается: у контейнера раскладки он обычно свой, и смена
+// темы молча стирала бы его (см. bgrole.go).
 func (sp *StackPanel) ApplyTheme(t *Theme) {
-	// StackPanel обычно прозрачный; если задан фон — не меняем
+	if c, ok := themeBackground(sp.BackgroundRole, t); ok {
+		sp.Background = c
+		sp.UseAlpha = c.A < 255
+	}
 }

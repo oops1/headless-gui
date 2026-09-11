@@ -228,40 +228,16 @@ func (c *Canvas) FillPolygonAA(pts []image.Point, col color.RGBA) {
 
 // StrokePolylineAA рисует сглаженную ломаную толщиной thickness (логические
 // единицы); closed=true замыкает последний сегмент с первым.
-// Сегменты рисуются прямоугольниками без стыковых сочленений (v1):
-// для непрозрачных цветов стыки визуально бесшовны.
+//
+// Обводка — общая с дробным StrokePathAA (aa_path.go): одним путём, с круглым
+// сопряжением в изогнутых вершинах. Раньше сегменты рисовались отдельными
+// прямоугольниками, и на изгибе снаружи оставался зубец — шеврон списка или
+// кривая из коротких отрезков выглядели изломанными.
 func (c *Canvas) StrokePolylineAA(pts []image.Point, thickness float64, closed bool, col color.RGBA) {
 	if len(pts) < 2 || thickness <= 0 {
 		return
 	}
-	k := float32(c.scale)
-	pad := int(thickness*c.scale) + 2
-	bx, by, bw, bh := ptsBoundsScaled(pts, pad, c.scale)
-	half := float32(thickness*c.scale) / 2
-	c.fillPath(bx, by, bw, bh, col, func(z *vector.Rasterizer, ox, oy float32) {
-		n := len(pts)
-		last := n - 1
-		if closed {
-			last = n
-		}
-		for i := 0; i < last; i++ {
-			p1, p2 := pts[i], pts[(i+1)%n]
-			ax, ay := (float32(p1.X)+0.5)*k-ox, (float32(p1.Y)+0.5)*k-oy
-			bx2, by2 := (float32(p2.X)+0.5)*k-ox, (float32(p2.Y)+0.5)*k-oy
-			dx, dy := bx2-ax, by2-ay
-			l := float32(math.Hypot(float64(dx), float64(dy)))
-			if l == 0 {
-				continue
-			}
-			// Перпендикуляр половинной толщины.
-			px, py := -dy/l*half, dx/l*half
-			z.MoveTo(ax+px, ay+py)
-			z.LineTo(bx2+px, by2+py)
-			z.LineTo(bx2-px, by2-py)
-			z.LineTo(ax-px, ay-py)
-			z.ClosePath()
-		}
-	})
+	c.strokePhys(c.intPhys(pts), thickness*c.scale, closed, col)
 }
 
 // ptsBoundsScaled возвращает bbox точек в ФИЗИЧЕСКИХ координатах с запасом
