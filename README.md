@@ -74,6 +74,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **Vector shapes** — `Ellipse`, `Rectangle`, `Line`, `Polygon`, `Polyline` with `Fill`/`Stroke`
 - **SVG icons** — themeable `SVGIcon` widget + `widget/svg` subset parser/AA rasterizer (`currentColor`, monochrome tint); paths/arcs/basic shapes/transforms/even-odd
 - **SplitPanel** — two panes with a draggable splitter (fraction-based position, min sizes, double-click collapse, nesting)
+- **DiffView** — side-by-side file comparison with editing: synced scrolling, S-connectors, block copy, intra-line diff, syntax highlight, file watching; CRLF/BOM preserved on save
 - **Docking panels** — `DockManager`/`DockPane`, Visual Studio-style Toolbox docking: center + 4 dockable sides, stack tabs, auto-hide, drag&dock with guides, gutter resize, save/restore layout (JSON)
 - **Smooth / inertial scroll** — pixel-precise wheel/touchpad deltas (`SendMouseWheelPixels`) with a decaying flywheel in `ScrollView` (Win32 + Wayland pixel deltas; X11 keeps ticks)
 - **File drag & drop from the OS** — drop files from Explorer/Finder into the window (`SetOnFilesDropped` / `FileDropTarget`); Win32 + X11 native, Wayland skeleton
@@ -120,6 +121,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 | TreeView | `TreeView` | WPF-compatible hierarchical tree with virtualization, HierarchicalDataTemplate, icons, keyboard nav |
 | GridSplitter | `GridSplitter` | Resizable splitter between Grid cells |
 | SplitPanel | `SplitPanel` | Two panes with a draggable splitter, fraction position, min sizes, double-click collapse |
+| DiffView | `DiffView` | Compare and edit two files: synced scroll, block copy, intra-line diff, syntax highlight, file watching |
 | SVGIcon | `SVGIcon` | Themeable vector icon (SVG subset), `currentColor` / `Tint` recoloring |
 | DockManager | `DockManager` | VS-style docking zone: center + 4 dockable sides, gutter resize, stack tabs, auto-hide, drag&dock |
 | DockPane | `DockPane` | Single docking panel hosted by `DockManager`: title bar with pin/float/close, Docked/AutoHidden/Floating/Closed |
@@ -149,6 +151,7 @@ go run ./cmd/webshowcase   # the whole widget showcase, streamed
 ```bash
 go run ./cmd/showcase    # Full widget showcase
 go run ./cmd/smartgit    # SmartGit-like UI demo
+go run ./cmd/diffdemo    # compare and edit two files (DiffView)
 ```
 
 Windows binary without console:
@@ -173,6 +176,7 @@ headless-gui/
     webshowcase/   The full showcase in a browser (http://localhost:8091)
 webdemo/       Minimal browser streaming example
     smartgit/      SmartGit-like UI (Window + Menu + TreeView + DataGrid)
+    diffdemo/      File comparison app on DiffView
   assets/ui/       XAML demo layouts (demo.xaml, grid_demo.xaml, showcase.xaml)
   gui/             XAML files for RDP UI (login, block, error dialogs)
   tests/           Unit tests (engine, widgets, drag, modals)

@@ -575,6 +575,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
 | `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
+| `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "Additions after v3.16.10") |
 | `<DockManager>` | `DockManager` | `Background`, `NativeFloating` (see "Docking") + children `<DockPane>`×N, one `<DockContent>` |
 | `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
 | `<DockContent>` | (marker, not a widget) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
@@ -3938,6 +3939,98 @@ skip marks and the `OpaqueRegion` answer live in widget-owned buffers.
 Rule worth keeping: an optimisation without a paired measurement is not
 accepted. Add the before/after here.
 
+
+## Additions after v3.16.10 (DiffView and what an editor needs from the engine)
+
+### DiffView — compare and edit two files
+
+```go
+dv := widget.NewDiffView("", "")      // mono font, header font; "" → built-in Go Mono / Go Bold
+dv.LoadFile(widget.DiffLeft, a)      // error for binary files (also sent to OnError)
+dv.LoadFile(widget.DiffRight, b)
+dv.SetText(side, title, note, text)  // content without a file (Save → ErrDiffNoPath, use SaveAs)
+dv.Save(side); dv.SaveAs(side, path) // keeps EOL (CRLF/LF), BOM, final newline
+dv.Reload(side)                      // undoable
+dv.SetWatchFiles(true); defer dv.Close()
+dv.SetHideUnchanged(true); dv.SetContextLines(3)
+dv.SetIgnoreWhitespace(v); dv.SetSyntaxHighlight(v); dv.SetReadOnly(side, v)
+dv.SetFont(mono, bold, sizePt)
+dv.ChangeCount(); dv.Changes() []widget.DiffChange // {Kind, LeftFrom, LeftTo, RightFrom, RightTo}
+dv.NextChange(); dv.PrevChange(); dv.GoToChange(i); dv.CurrentChange()
+dv.CopyBlock(i, toRight); dv.CopyCurrent(toRight); dv.CopyAll(toRight)
+dv.Undo(); dv.Redo(); dv.CanUndo(); dv.CanRedo()
+dv.SetCaret(side, line, col); dv.Caret(side); dv.InsertText(s); dv.SelectedText()
+dv.Text(side); dv.Lines(side); dv.IsModified(side); dv.FilePath(side)
+```
+
+Events (all called without the control's lock held, so handlers may call back
+into it): `OnTextChanged`, `OnModifiedChanged`, `OnFileLoaded`, `OnFileSaved`,
+`OnFileChangedOnDisk`, `OnDiffChanged`, `OnCurrentChangeChanged`,
+`OnCaretMoved`, `OnActiveSideChanged`, `OnBlockCopied`, `OnSaveRequest`
+(Ctrl+S), `OnError`. `OnFileChangedOnDisk` comes from the watcher goroutine but
+is delivered **on the engine goroutine** via `engine.Post` (the engine hands
+itself to the control through `SetCaptureManager`); without an engine it is
+called directly. Modified state is revision-based: undo back to the saved
+state clears it.
+
+XAML: `<DiffView LeftFile=… RightFile=… SaveCommand="{Binding Save}"/>` — file
+paths are confined to the markup directory (SEC-8); with `LoadUIFromXAMLFS`
+the content is loaded without a disk path. Any widget with
+`SetCommand(name string, cmd ICommand) bool` gets `…Command="{Binding X}"`
+attributes wired by the binding scope; DiffView accepts `SaveCommand`
+(param `DiffSide`), `TextChangedCommand` (`DiffSide`), `DiffChangedCommand`
+(`int`), `FileChangedCommand` (`DiffFileChange`).
+
+Model without the view lives in `widget/diffview` (Myers line diff with
+paragraph-sliding, intra-line range, tokenizer, text decode/encode). Strings:
+`diff.*` keys. Colors: theme fields `DiffAddBG`, `DiffAddStrong`, `DiffDelBG`,
+`DiffDelStrong`, `TextSelectionBG`, `Syntax*`. Only glyphs present in the Go
+fonts are used (`…`, not `⋯`) so golden frames match on every OS. Demo:
+`cmd/diffdemo` (`-shot dir` renders check frames headlessly).
+
+### Editor hooks
+
+```go
+// Tab reaches the widget instead of focus traversal while AcceptsTab() is true.
+// Ctrl+Tab always stays navigation.
+type TabAcceptor interface{ AcceptsTab() bool }
+
+// Children for the accessibility tree of a widget that draws its content itself.
+type AccessChildrenProvider interface{ AccessChildren() []widget.AccessInfo }
+
+widget.StateReadOnly      // new AccessState
+widget.KeyS               // new KeyCode (Ctrl+S)
+widget.BuiltinFontMono    // "$hg_mono" — Go Mono, registered by every engine
+```
+
+### Paths with fractional coordinates
+
+```go
+if ps, ok := ctx.(widget.PathShapes); ok {
+    ps.StrokeCubicAA(x0, y0, x1, y1, x2, y2, x3, y3, thickness, col)
+    ps.StrokePathAA(pts []widget.Point2F, thickness, closed, col) // one outline, round joins
+    ps.FillPathAA(pts, col)
+}
+widget.FlattenCubic(x0, y0, x1, y1, x2, y2, x3, y3) []widget.Point2F // same subdivision as the canvas
+```
+
+`StrokePolylineAA` now uses the same single-outline stroker (no notches at bends).
+
+### Window, theme and containers
+
+```go
+win.SetTitle("config.go *")                // native window: taskbar + drawn title bar
+win.Title()
+win.SetOnCloseRequest(func() bool { ... }) // × and Alt+F4/taskbar; runs on the engine goroutine;
+                                           // false keeps the window; Close() skips the hook
+ww.SetFrameColor(c)                        // widget.Window outer frame, pinned over the theme; A=0 → theme
+t.WindowFrame                              // *widget.Theme default for the frame (A=0 in presets = old behavior)
+dd.ArrowStyle = widget.ArrowChevron        // ArrowAuto (theme decides) | ArrowTriangle | ArrowChevron; XAML ArrowStyle
+panel.SetBackgroundRole(widget.BackgroundPanel) // StackPanel/DockPanel follow Theme.PanelBG / WindowBG;
+                                                // XAML Background="{Theme PanelBG}"
+```
+
+---
 
 ## End of Reference
 

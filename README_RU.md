@@ -71,6 +71,7 @@ GUI-движок на чистом Go (zero CGO): WPF-стиль XAML, прив�
 - **Векторные фигуры** — `Ellipse`, `Rectangle`, `Line`, `Polygon`, `Polyline` с `Fill`/`Stroke`
 - **SVG-иконки** — темизируемый виджет `SVGIcon` + пакет `widget/svg` (парсер подмножества + AA-растеризатор): `currentColor`, монохромный `Tint`; path/дуги/базовые фигуры/трансформы/even-odd
 - **SplitPanel** — две панели с перетаскиваемым разделителем (позиция-доля, минимумы, коллапс двойным кликом, гнездование)
+- **DiffView** — сравнение двух файлов с правкой: синхронная прокрутка, S-коннекторы, перенос блоков, внутристрочная разница, подсветка синтаксиса, слежение за файлами; CRLF и BOM сохраняются
 - **Докинг-панели** — `DockManager`/`DockPane`, зона докинга в стиле Visual Studio Toolbox: центр + 4 пришвартовываемые стороны, табы стопки, auto-hide, drag&dock с направляющими, ресайз кромки, сохранение/восстановление раскладки (JSON)
 - **Плавный / инерционный скролл** — точные пиксельные дельты колеса/тачпада (`SendMouseWheelPixels`) с затухающим «маховиком» в `ScrollView` (пиксельные дельты на Win32 и Wayland; X11 — тики)
 - **Drag & Drop файлов из ОС** — перетаскивание файлов из проводника/Finder в окно (`SetOnFilesDropped` / `FileDropTarget`); Win32 и X11 нативно, Wayland — каркас
@@ -117,6 +118,7 @@ GUI-движок на чистом Go (zero CGO): WPF-стиль XAML, прив�
 | TreeView | `TreeView` | WPF-совместимое дерево: виртуализация, HierarchicalDataTemplate, иконки, клавиатура |
 | GridSplitter | `GridSplitter` | Перетаскиваемый разделитель между ячейками Grid |
 | SplitPanel | `SplitPanel` | Две панели с перетаскиваемым разделителем, позиция-доля, минимумы, коллапс двойным кликом |
+| DiffView | `DiffView` | Сравнение и правка двух файлов: синхронная прокрутка, перенос блоков, внутристрочная разница, подсветка, слежение за файлами |
 | SVGIcon | `SVGIcon` | Темизируемая векторная иконка (подмножество SVG), перекраска `currentColor` / `Tint` |
 | DockManager | `DockManager` | Зона докинга в стиле VS: центр + 4 пришвартовываемые стороны, ресайз кромки, табы стопки, auto-hide, drag&dock |
 | DockPane | `DockPane` | Отдельная панель докинга внутри `DockManager`: титлбар с pin/float/close, Docked/AutoHidden/Floating/Closed |
@@ -146,6 +148,7 @@ go run ./cmd/webshowcase   # вся витрина виджетов, отдан�
 ```bash
 go run ./cmd/showcase    # Полная витрина виджетов
 go run ./cmd/smartgit    # UI в духе SmartGit
+go run ./cmd/diffdemo    # сравнение и правка двух файлов (DiffView)
 ```
 
 Windows-бинарник без консоли:
@@ -170,6 +173,7 @@ headless-gui/
     webshowcase/   Полная витрина в браузере (http://localhost:8091)
 webdemo/       Минимальный пример стриминга
     smartgit/      UI в духе SmartGit (Window + Menu + TreeView + DataGrid)
+    diffdemo/      Сравнение файлов на DiffView
   assets/ui/       XAML-демо (demo.xaml, grid_demo.xaml, showcase.xaml)
   gui/             XAML для RDP-UI (логин, блокировка, диалоги ошибок)
   tests/           Юнит-тесты (движок, виджеты, drag, модалки)
