@@ -1013,9 +1013,11 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 func buildXAMLDockPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	dp := NewDockPanel()
 
-	// Background
+	// Background: цвет, "transparent" или роль темы "{Theme WindowBG}".
 	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
-		if strings.EqualFold(bgStr, "transparent") {
+		if role, ok := parseBackgroundRole(bgStr); ok {
+			dp.SetBackgroundRole(role)
+		} else if strings.EqualFold(bgStr, "transparent") {
 			dp.UseAlpha = true
 		} else if c, err := parseXAMLColor(bgStr); err == nil {
 			dp.Background = c
@@ -1068,9 +1070,11 @@ func buildXAMLDockPanel(el xElement, reg map[string]Widget, parentOff image.Poin
 func buildXAMLBorder(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
 	dp := NewDockPanel()
 
-	// Background
+	// Background: цвет, "transparent" или роль темы "{Theme WindowBG}".
 	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
-		if strings.EqualFold(bgStr, "transparent") {
+		if role, ok := parseBackgroundRole(bgStr); ok {
+			dp.SetBackgroundRole(role)
+		} else if strings.EqualFold(bgStr, "transparent") {
 			dp.UseAlpha = true
 		} else if c, err := parseXAMLColor(bgStr); err == nil {
 			dp.Background = c
@@ -1500,9 +1504,11 @@ func buildXAMLStackPanel(el xElement, reg map[string]Widget, parentOff image.Poi
 
 	sp := NewStackPanel(orient)
 
-	// Background
+	// Background: цвет, "transparent" или роль темы "{Theme PanelBG}".
 	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
-		if strings.EqualFold(bgStr, "transparent") {
+		if role, ok := parseBackgroundRole(bgStr); ok {
+			sp.SetBackgroundRole(role)
+		} else if strings.EqualFold(bgStr, "transparent") {
 			sp.UseAlpha = true
 		} else if c, err := parseXAMLColor(bgStr); err == nil {
 			sp.Background = c
