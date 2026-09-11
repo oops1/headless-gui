@@ -17,6 +17,7 @@ import (
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/gobolditalic"
 	"golang.org/x/image/font/gofont/goitalic"
+	"golang.org/x/image/font/gofont/gomono"
 
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/theme"
@@ -311,6 +312,7 @@ func New(width, height, fps int) *Engine {
 	e.canvas.RegisterFont(widget.BuiltinFontBold, gobold.TTF)
 	e.canvas.RegisterFont(widget.BuiltinFontItalic, goitalic.TTF)
 	e.canvas.RegisterFont(widget.BuiltinFontBoldItalic, gobolditalic.TTF)
+	e.canvas.RegisterFont(widget.BuiltinFontMono, gomono.TTF)
 	// Сообщаем виджетам размер канваса (для удержания popup-меню в пределах экрана).
 	widget.SetScreenBounds(width, height)
 	// Авто-регистрация пользовательских шрифтов из assets/fonts (Roboto, Inter, …).

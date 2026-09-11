@@ -383,6 +383,10 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 	case "treeview":
 		return buildXAMLTreeView(el, reg, parentOff)
 
+	// ── DiffView — сравнение и правка двух текстов ──────────────────────────
+	case "diffview":
+		w = buildXAMLDiffView(el, baseDir)
+
 	// ── TreeViewItem вне TreeView — игнорируем ──────────────────────────────
 	case "treeviewitem":
 		return nil, nil

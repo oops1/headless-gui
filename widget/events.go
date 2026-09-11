@@ -115,6 +115,7 @@ const (
 
 	KeyA         KeyCode = 65
 	KeyC         KeyCode = 67
+	KeyS         KeyCode = 83
 	KeyV         KeyCode = 86
 	KeyX         KeyCode = 88
 	KeyY         KeyCode = 89
