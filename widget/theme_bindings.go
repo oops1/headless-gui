@@ -131,6 +131,34 @@ var legacyBindings = []legacyBinding{
 	{name: "SecondaryText", field: func(t *Theme) *color.RGBA { return &t.SecondaryText },
 		style: theme.StyleKey{Component: "label", Part: "secondary"}, role: roleText},
 
+	// ─── Сравнение и редактор кода (DiffView) ───────────────────────────────
+
+	// Полосы строк — заливки частей контрола сравнения; «сильный» вариант —
+	// отдельная часть, а не состояние: внутристрочная разница лежит поверх
+	// полосы той же строки одновременно с ней.
+	{name: "DiffAddBG", field: func(t *Theme) *color.RGBA { return &t.DiffAddBG },
+		style: theme.StyleKey{Component: "diffview", Part: "added"}, role: roleFill},
+	{name: "DiffAddStrong", field: func(t *Theme) *color.RGBA { return &t.DiffAddStrong },
+		style: theme.StyleKey{Component: "diffview", Part: "added-inline"}, role: roleFill},
+	{name: "DiffDelBG", field: func(t *Theme) *color.RGBA { return &t.DiffDelBG },
+		style: theme.StyleKey{Component: "diffview", Part: "deleted"}, role: roleFill},
+	{name: "DiffDelStrong", field: func(t *Theme) *color.RGBA { return &t.DiffDelStrong },
+		style: theme.StyleKey{Component: "diffview", Part: "deleted-inline"}, role: roleFill},
+	{name: "TextSelectionBG", field: func(t *Theme) *color.RGBA { return &t.TextSelectionBG },
+		style: theme.StyleKey{Component: "diffview", Part: "selection"}, role: roleFill},
+	// Подсветка синтаксиса — цвет текста частей «syntax»: общая для всех
+	// редакторов, а не только для сравнения.
+	{name: "SyntaxKeyword", field: func(t *Theme) *color.RGBA { return &t.SyntaxKeyword },
+		style: theme.StyleKey{Component: "syntax", Part: "keyword"}, role: roleText},
+	{name: "SyntaxString", field: func(t *Theme) *color.RGBA { return &t.SyntaxString },
+		style: theme.StyleKey{Component: "syntax", Part: "string"}, role: roleText},
+	{name: "SyntaxComment", field: func(t *Theme) *color.RGBA { return &t.SyntaxComment },
+		style: theme.StyleKey{Component: "syntax", Part: "comment"}, role: roleText},
+	{name: "SyntaxNumber", field: func(t *Theme) *color.RGBA { return &t.SyntaxNumber },
+		style: theme.StyleKey{Component: "syntax", Part: "number"}, role: roleText},
+	{name: "SyntaxFunc", field: func(t *Theme) *color.RGBA { return &t.SyntaxFunc },
+		style: theme.StyleKey{Component: "syntax", Part: "func"}, role: roleText},
+
 	// ─── Прогресс-бар (ProgressBar) ─────────────────────────────────────────
 
 	{name: "ProgressBG", field: func(t *Theme) *color.RGBA { return &t.ProgressBG },

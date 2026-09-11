@@ -269,7 +269,8 @@ func Win11DarkTheme() *Theme {
 	t.TabActiveBG = t.WindowBG
 	t.TabBG = t.PanelBG
 	t.DialogTitleBG = t.PanelBG
-	return t
+	// Поле ввода у пресета своё — цвета редактора считаются от него.
+	return withCodeColors(t)
 }
 
 // Win11LightTheme — Windows 11, светлая: скруглённые контролы, акцент #005FB8.
@@ -293,7 +294,8 @@ func Win11LightTheme() *Theme {
 	t.SliderFill = t.Accent
 	t.ToggleOnBG = t.Accent
 	t.SplitterHoverBG = t.Accent
-	return t
+	// Поле ввода у пресета своё — цвета редактора считаются от него.
+	return withCodeColors(t)
 }
 
 // Win2000Theme — классическая Windows 2000: серебристая палитра, прямые углы,
@@ -305,7 +307,7 @@ func Win2000Theme() *Theme {
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 	gray := color.RGBA{R: 128, G: 128, B: 128, A: 255}   // #808080
 
-	return &Theme{
+	return withCodeColors(&Theme{
 		Style: ThemeStyle{
 			Name:        "Win2000",
 			Classic3D:   true,
@@ -404,7 +406,7 @@ func Win2000Theme() *Theme {
 		Accent:    navy,
 		Scrollbar: face,
 		Disabled:  gray,
-	}
+	})
 }
 
 // MacTheme — macOS (светлая): мягкая серая палитра, сильное скругление,
@@ -441,7 +443,8 @@ func MacTheme() *Theme {
 	t.StatusBarBG = color.RGBA{R: 236, G: 236, B: 236, A: 255}
 	t.StatusBarText = color.RGBA{R: 70, G: 70, B: 70, A: 255}
 	t.DialogTitleBG = t.TitleBG
-	return t
+	// Поле ввода у пресета своё — цвета редактора считаются от него.
+	return withCodeColors(t)
 }
 
 // ─── Реестр пресетов ─────────────────────────────────────────────────────────
@@ -514,4 +517,57 @@ func equalFoldASCII(a, b string) bool {
 		}
 	}
 	return true
+}
+
+// withCodeColors заполняет цвета сравнения и редактора кода от поля ввода и
+// акцента темы и возвращает ту же тему.
+//
+// Формулы те же, что у DiffView до переноса в движок, — оттенки проверены
+// глазами в Win11 Light/Dark и Win2000. Считаются от InputBG, а не от фона
+// окна: строки сравнения лежат на карточке редактора, и полоса добавленной
+// строки должна читаться именно на ней. Тема, которой нужны другие оттенки,
+// задаёт поля после вызова — они обычные поля Theme.
+func withCodeColors(t *Theme) *Theme {
+	card := t.InputBG
+	if card.A == 0 {
+		card = t.PanelBG
+	}
+	dark := luminance(card) < 128
+
+	red := color.RGBA{R: 0xE5, G: 0x48, B: 0x4D, A: 255}
+	green := color.RGBA{R: 0x2F, G: 0x9E, B: 0x62, A: 255}
+	band, strong, sel := 0.10, 0.28, 0.28
+	if dark {
+		red = color.RGBA{R: 0xF2, G: 0x55, B: 0x5A, A: 255}
+		green = color.RGBA{R: 0x3F, G: 0xB9, B: 0x50, A: 255}
+		band, strong, sel = 0.18, 0.40, 0.45
+	}
+	opaque := func(c color.RGBA) color.RGBA { c.A = 255; return c }
+	card = opaque(card)
+	t.DiffDelBG = mixRGBA(card, red, band)
+	t.DiffDelStrong = mixRGBA(card, red, strong)
+	// Зелёный на светлом фоне читается слабее красного той же доли — полоса
+	// добавленной строки на пару процентов плотнее.
+	t.DiffAddBG = mixRGBA(card, green, band+0.02)
+	t.DiffAddStrong = mixRGBA(card, green, strong)
+	accent := t.Accent
+	if accent.A == 0 {
+		accent = color.RGBA{R: 0x00, G: 0x78, B: 0xD7, A: 255}
+	}
+	t.TextSelectionBG = mixRGBA(card, opaque(accent), sel)
+
+	if dark {
+		t.SyntaxKeyword = color.RGBA{R: 0x56, G: 0x9C, B: 0xD6, A: 255}
+		t.SyntaxString = color.RGBA{R: 0xCE, G: 0x91, B: 0x78, A: 255}
+		t.SyntaxComment = color.RGBA{R: 0x6A, G: 0x99, B: 0x55, A: 255}
+		t.SyntaxNumber = color.RGBA{R: 0xB5, G: 0xCE, B: 0xA8, A: 255}
+		t.SyntaxFunc = color.RGBA{R: 0xDC, G: 0xDC, B: 0xAA, A: 255}
+	} else {
+		t.SyntaxKeyword = color.RGBA{R: 0x05, G: 0x50, B: 0xAE, A: 255}
+		t.SyntaxString = color.RGBA{R: 0x0A, G: 0x30, B: 0x69, A: 255}
+		t.SyntaxComment = color.RGBA{R: 0x6E, G: 0x77, B: 0x81, A: 255}
+		t.SyntaxNumber = color.RGBA{R: 0x05, G: 0x50, B: 0xAE, A: 255}
+		t.SyntaxFunc = color.RGBA{R: 0x82, G: 0x50, B: 0xDF, A: 255}
+	}
+	return t
 }
