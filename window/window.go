@@ -258,6 +258,11 @@ type Window struct {
 	// Флаг: запрошено закрытие окна (кнопка ×).
 	closeRequested atomic.Bool
 
+	// onCloseRequest — вопрос «можно ли закрывать» (title_close.go). Пишется
+	// приложением, читается из насоса событий ОС и из обработчика кнопки ×.
+	closeMu        sync.Mutex
+	onCloseRequest func() bool
+
 	// Настройки окна.
 	maxFPS       int
 	resizable    bool
@@ -605,12 +610,10 @@ func (win *Window) setupWidgetWindow() {
 		win.native.SetPosition(x+dx, y+dy)
 	}
 
-	// Кнопка × → закрытие.
+	// Кнопка × → закрытие, если приложение не против (SetOnCloseRequest).
+	// Обработчик кнопки и так работает на горутине движка — спрашиваем сразу.
 	if ww.OnClose == nil {
-		ww.OnClose = func() {
-			win.closeRequested.Store(true)
-			win.native.Close()
-		}
+		ww.OnClose = win.requestClose
 	}
 
 	// Кнопка ─ → свернуть.
@@ -674,8 +677,15 @@ func (win *Window) setupResizeClose() {
 
 	// ── Close ────────────────────────────────────────────────────────────────
 	win.native.SetOnClose(func() bool {
-		win.closeRequested.Store(true)
-		return true // разрешаем закрытие
+		if !win.hasCloseHook() {
+			win.closeRequested.Store(true)
+			return true // вопроса нет — закрываем, как и раньше
+		}
+		// Закрытие средствами ОС (Alt+F4, панель задач): окну ОС отвечаем
+		// «пока нет», а вопрос задаём на горутине движка — там из хука можно
+		// показать диалог, и насос событий ОС его не ждёт.
+		win.postToEngine(win.requestClose)
+		return false
 	})
 }
 
