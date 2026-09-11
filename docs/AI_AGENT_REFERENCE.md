@@ -575,7 +575,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
 | `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
-| `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "Additions after v3.16.10") |
+| `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17.0 additions") |
 | `<DockManager>` | `DockManager` | `Background`, `NativeFloating` (see "Docking") + children `<DockPane>`×N, one `<DockContent>` |
 | `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
 | `<DockContent>` | (marker, not a widget) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
@@ -3829,12 +3829,18 @@ BGRX, which is what the caller asked for.
 ### Vector kernels (GOEXPERIMENT=simd)
 
 ```bash
-GOEXPERIMENT=simd go build ./...   # Go 1.26+, amd64; AVX2 checked at startup
+GOEXPERIMENT=simd go build ./...   # Go 1.27+, amd64; AVX2 checked at startup
 HEADLESS_GUI_NOSIMD=1 ./app        # force the scalar path without rebuilding
 ```
 
 `internal/pixsimd` holds the hot pixel loops (mask×color blend, translucent fill,
-RGBA↔BGRA swap) with AVX2 versions behind `//go:build goexperiment.simd && amd64`.
+RGBA↔BGRA swap) with AVX2 versions behind
+`//go:build goexperiment.simd && amd64 && go1.27`. The `go1.27` term matters:
+the `archsimd` API changed between 1.26 and 1.27, so on Go 1.26 with the
+experiment the vector files must drop out (scalar path) rather than fail to
+compile. Keep that term on every new vector file and on tests that reference
+`selectVector`/`avx2`. `go.mod` stays at `go 1.22` — the core has no 1.27
+dependency.
 Output is bit-identical to the scalar path (golden frames pass in both builds);
 the full frame is ~39 % faster. Rules when touching it: keep the scalar version
 as the reference, prove every vector change with the "vector = scalar" tests
@@ -3950,7 +3956,7 @@ Rule worth keeping: an optimisation without a paired measurement is not
 accepted. Add the before/after here.
 
 
-## Additions after v3.16.10 (DiffView and what an editor needs from the engine)
+## v3.17.0 additions (DiffView and what an editor needs from the engine)
 
 ### DiffView — compare and edit two files
 

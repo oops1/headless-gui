@@ -3088,10 +3088,17 @@ with the experiment:
 GOEXPERIMENT=simd go build ./...
 ```
 
-It takes Go 1.26 or newer on amd64; the vector path is chosen at startup, only if
-the CPU has AVX2. In every other case — a build without the experiment, an older
-toolchain, arm64, an older CPU — the previous scalar loops run, and nothing
-changes for the library: `go.mod` stays at `go 1.22`.
+It takes **Go 1.27 or newer** on amd64; the vector path is chosen at startup,
+only if the CPU has AVX2. In every other case — a build without the experiment,
+a toolchain older than 1.27, arm64, an older CPU — the previous scalar loops
+run, and nothing changes for the library: `go.mod` stays at `go 1.22`, and any
+toolchain from there on builds the engine.
+
+Why 1.27 and not 1.26, where the experiment first appeared: the `archsimd` API
+changed between them, and the kernels are written against 1.27. The vector
+files carry `go1.27` in their build constraints, so on Go 1.26 with
+`GOEXPERIMENT=simd` they are simply left out of the build — the engine builds
+and runs on the scalar path instead of failing to compile.
 
 The output matches the scalar one bit for bit — the golden frames pass in both
 builds. The gain (medians of 10 runs on amd64 with AVX2):

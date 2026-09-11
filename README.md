@@ -1,5 +1,5 @@
 <a href="https://github.com/oops1/headless-gui">
-     <img width="1280" height="640" alt="claude-skills" src="https://github.com/oops1/headless-gui/blob/main/social_preview.png" />
+     <img width="1280" height="640" alt="headless-gui" src="https://github.com/oops1/headless-gui/blob/main/social_preview.png" />
      
 </a>
 
@@ -36,6 +36,8 @@ Software renderer, fully on CPU (Intel Core Ultra 7 265K, single engine):
 | Full-HD tile diff (no changes, parallel) | ~110 µs |
 
 Run `go test ./engine/ -bench .` to reproduce.
+
+**AVX2 build (optional).** Built with `GOEXPERIMENT=simd` on Go 1.27+ (amd64), the hottest pixel loops — mask blending for text and AA shapes, translucent fills, channel swap on present, backdrop blur — run on AVX2: the full frame gets ~39 % cheaper, presenting a 1080p frame 2.9× faster, `BlurRGBA` 8.4× faster. Output is bit-identical to the scalar path, and the vector set is chosen at startup only if the CPU has AVX2 and passes a self-test; otherwise — or with `HEADLESS_GUI_NOSIMD=1` — the scalar path runs. Details: [GUIDE_EN.md](GUIDE_EN.md), "Vector kernels".
 
 ## Features
 
@@ -75,6 +77,8 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **SVG icons** — themeable `SVGIcon` widget + `widget/svg` subset parser/AA rasterizer (`currentColor`, monochrome tint); paths/arcs/basic shapes/transforms/even-odd
 - **SplitPanel** — two panes with a draggable splitter (fraction-based position, min sizes, double-click collapse, nesting)
 - **DiffView** — side-by-side file comparison with editing: synced scrolling, S-connectors, block copy, intra-line diff, syntax highlight, file watching; CRLF/BOM preserved on save
+- **What an editor needs** — `win.SetTitle` and `win.SetOnCloseRequest` (a "Save changes?" prompt before the window closes), widgets that take Tab for themselves (`TabAcceptor`), antialiased paths with fractional coordinates and joined bends (`PathShapes`: cubic curves, polylines, fills), diff and syntax colors in the theme, accessibility children for self-drawn widgets
+- **AVX2 pixel kernels** — optional `GOEXPERIMENT=simd` build (Go 1.27+, amd64): text, AA shapes, fills, blur and frame presentation on AVX2, bit-identical to the scalar path, with CPU detection and a startup self-test falling back automatically
 - **Docking panels** — `DockManager`/`DockPane`, Visual Studio-style Toolbox docking: center + 4 dockable sides, stack tabs, auto-hide, drag&dock with guides, gutter resize, save/restore layout (JSON)
 - **Smooth / inertial scroll** — pixel-precise wheel/touchpad deltas (`SendMouseWheelPixels`) with a decaying flywheel in `ScrollView` (Win32 + Wayland pixel deltas; X11 keeps ticks)
 - **File drag & drop from the OS** — drop files from Explorer/Finder into the window (`SetOnFilesDropped` / `FileDropTarget`); Win32 + X11 native, Wayland skeleton
@@ -177,6 +181,7 @@ headless-gui/
 webdemo/       Minimal browser streaming example
     smartgit/      SmartGit-like UI (Window + Menu + TreeView + DataGrid)
     diffdemo/      File comparison app on DiffView
+    socialpreview/ Repository preview image (social_preview.png), drawn by the engine
   assets/ui/       XAML demo layouts (demo.xaml, grid_demo.xaml, showcase.xaml)
   gui/             XAML files for RDP UI (login, block, error dialogs)
   tests/           Unit tests (engine, widgets, drag, modals)
@@ -261,6 +266,8 @@ Coordinates inside containers are relative (standard WPF Canvas behavior).
 | `github.com/oops1/headless-gui/v3/window` | `golang.org/x/sys/windows`, `github.com/ebitengine/purego` |
 
 Go 1.22+. The `window/` module is optional — the core engine has zero CGO dependencies. The window module is also CGO-free on all platforms.
+
+The optional AVX2 kernels need **Go 1.27+** built with `GOEXPERIMENT=simd` on amd64 (the experimental `simd/archsimd` API changed between 1.26 and 1.27). With an older toolchain, without the experiment or on another architecture the engine builds as usual and uses the scalar path — `go.mod` stays at `go 1.22`.
 
 ## Documentation
 
