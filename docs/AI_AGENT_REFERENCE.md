@@ -3842,6 +3842,16 @@ as the reference, prove every vector change with the "vector = scalar" tests
 `archsimd.ClearAVXUpperBits()` — without VZEROUPPER the SSE code that follows
 (including runtime map lookups) pays a false-dependency penalty.
 
+Kernels (`kernels` struct) are selected as one set in `selectVector`: AVX2
+(CPUID + OS YMM support), no `HEADLESS_GUI_NOSIMD`, and `selfTest` passes —
+each kernel vs. generic on canned inputs, panics recovered as failures. The
+reason for staying scalar is in `pixsimd.Fallback()`. Box blur lives here too
+(`BoxBlurRows`/`BoxBlurCols` with a reusable `BlurBuf`): the scalar path
+divides by the window via an exact ⌈2⁴⁰/d⌉ reciprocal, AVX2 via ⌈2²⁴/d⌉ for
+windows ≤ 256 (exhaustive tests `TestDividerExact`, `TestRecip24Exact`); the
+horizontal pass transposes 8×8 blocks. A new kernel must be added to both the
+`generic` and `avx2` sets and to `selfTest`.
+
 ### Pacing and the frame sink
 
 ```go

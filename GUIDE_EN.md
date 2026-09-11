@@ -3079,7 +3079,8 @@ alternative, not a replacement.
 
 The engine's hottest pixel loops — blending an alpha mask with a color (glyphs,
 rounded corners, antialiased shapes), translucent fills (the dim behind a modal,
-shadows) and the channel swap when presenting to an OS window — can run on AVX2
+shadows) and the channel swap when presenting to an OS window, plus the box-blur
+passes (acrylic/mica glass, `BlurRGBA`) — can run on AVX2
 through the experimental `simd/archsimd` package. They are enabled by building
 with the experiment:
 
@@ -3102,10 +3103,28 @@ builds. The gain (medians of 10 runs on amd64 with AVX2):
 | rounded rectangles | 1.89 µs | 1.08 µs (−43 %) |
 | a line of text | 15.1 µs | 10.6 µs (−30 %) |
 | presenting a 1080p frame to an OS window | 1.08 ms | 0.37 ms (2.9×) |
+| `BlurRGBA` 480×120, r = 8 | 815 µs | 97 µs (8.4×) |
+| taskbar glass 1920×48 (`BlurBehind`) | 385 µs | 162 µs (2.4×) |
 
 `HEADLESS_GUI_NOSIMD=1` turns the vector path off without rebuilding: an
 experiment is an experiment, and if it misbehaves on someone's CPU, the
 application should not need a rebuild to get around it.
+
+**Automatic fallback.** The vector path asks nothing of the application and
+cannot crash it. The kernel set is chosen at startup as a whole: it is
+installed only if the CPU has AVX2 (both CPUID and OS support for saving YMM
+registers are checked), the kill switch is not set, and the set passes a
+self-test — every kernel runs on canned data and is compared with the scalar
+one; a kernel panic also counts as a failure. Otherwise the scalar path runs,
+and the reason is available from `pixsimd.Fallback()` (an internal package — for
+engine diagnostics). So the same program built with the experiment runs on a
+new CPU, on an old one without AVX2, and in a virtual machine that advertises
+AVX2 but computes differently.
+
+The scalar path gained from this work too: dividing the blur window sum by its
+width is now an exact multiplication by the reciprocal (twice as fast), and the
+`BlurBehind` downscale and upscale no longer go block by block — the taskbar
+glass costs 385 µs instead of 717 in a regular build.
 
 The `archsimd` API is not stable (it already changed between 1.26 and 1.27), so
 every vector kernel lives in one internal package, `internal/pixsimd`, behind a
