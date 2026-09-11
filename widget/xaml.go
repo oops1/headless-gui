@@ -1047,6 +1047,13 @@ func buildXAMLDropdown(el xElement) Widget {
 			dd.FontSize = v
 		}
 	}
+	// ArrowStyle="Chevron" | "Triangle" | "Auto" — вид стрелки раскрытия.
+	switch strings.ToLower(el.attr("ArrowStyle")) {
+	case "chevron":
+		dd.ArrowStyle = ArrowChevron
+	case "triangle":
+		dd.ArrowStyle = ArrowTriangle
+	}
 
 	return dd
 }

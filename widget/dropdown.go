@@ -35,6 +35,10 @@ type Dropdown struct {
 
 	PaddingX int
 
+	// ArrowStyle — как нарисована стрелка раскрытия. По умолчанию (ArrowAuto)
+	// решает тема: у скруглённых контролов — тонкий шеврон без разделителя.
+	ArrowStyle ArrowStyle
+
 	// OnChange вызывается при смене выбора.
 	OnChange func(idx int, text string)
 }
@@ -220,13 +224,17 @@ func (d *Dropdown) Draw(ctx DrawContext) {
 	// Стрелка ▼
 	arrowX := b.Max.X - 16
 	arrowY := b.Min.Y + b.Dy()/2 - 1
-	if st.Classic3D {
-		// Классика: выпуклая кнопка со стрелкой внутри утопленного поля.
+	switch {
+	case st.Classic3D:
+		// Классика: выпуклая кнопка со стрелкой внутри утопленного поля — часть
+		// образа Win9x, шеврону в ней не место при любом ArrowStyle.
 		btnX := b.Max.X - 19
 		ctx.FillRect(btnX, b.Min.Y+2, 17, b.Dy()-4, win10.BtnBG)
 		drawBevelRaised(ctx, btnX, b.Min.Y+2, 17, b.Dy()-4, st)
 		drawArrowDown(ctx, arrowX+1, arrowY, d.ArrowColor)
-	} else {
+	case d.arrowStyle(st) == ArrowChevron:
+		drawChevronDown(ctx, b.Max.X-14, b.Min.Y+b.Dy()/2, d.ArrowColor)
+	default:
 		drawArrowDown(ctx, arrowX, arrowY, d.ArrowColor)
 		// Разделитель перед стрелкой
 		ctx.DrawVLine(b.Max.X-20, b.Min.Y+2, b.Dy()-4, d.BorderColor)
@@ -308,6 +316,46 @@ func (d *Dropdown) drawOpenList(ctx DrawContext) {
 
 	// Одна общая рамка вокруг всего списка
 	ctx.DrawBorder(b.Min.X, listY, listW, listH, d.FocusBorder)
+}
+
+// ArrowStyle — как нарисована стрелка раскрытия выпадающего списка.
+type ArrowStyle int
+
+const (
+	// ArrowAuto — решает тема: у скруглённых контролов (Win11, macOS) шеврон,
+	// у плоских — прежний треугольник с разделителем.
+	ArrowAuto ArrowStyle = iota
+	// ArrowTriangle — залитый треугольник, зона стрелки отделена чертой.
+	ArrowTriangle
+	// ArrowChevron — тонкая «птичка» у правого края, без разделителя: поле
+	// остаётся одним целым, как у поля ввода той же высоты.
+	ArrowChevron
+)
+
+// arrowStyle разрешает ArrowAuto по стилю темы.
+//
+// По скруглению, а не отдельным флагом темы: скруглённое поле с прямоугольной
+// «кнопкой» внутри и есть та несостыковка, из-за которой шеврон понадобился, —
+// у скруглённого контрола стрелка должна быть частью поля.
+func (d *Dropdown) arrowStyle(st ThemeStyle) ArrowStyle {
+	if d.ArrowStyle != ArrowAuto {
+		return d.ArrowStyle
+	}
+	if st.ControlCorner > 0 {
+		return ArrowChevron
+	}
+	return ArrowTriangle
+}
+
+// drawChevronDown рисует тонкий шеврон «∨» с центром (cx, cy): две линии под
+// 45°, около 10×5 точек, толщиной полторы. Одной ломаной — у сглаженного холста
+// вершина получается ровной, а не стыком двух отрезков.
+func drawChevronDown(ctx DrawContext, cx, cy int, col color.RGBA) {
+	strokePolyline(ctx, []image.Point{
+		{X: cx - 5, Y: cy - 2},
+		{X: cx, Y: cy + 3},
+		{X: cx + 5, Y: cy - 2},
+	}, 1.5, false, col)
 }
 
 // drawArrowDown рисует маленькую стрелку ▼.
