@@ -2907,6 +2907,42 @@ lets a consumer mutate the scene and produce the frame on one goroutine,
 removing that race by construction. `Frames()` keeps working: the sink is an
 alternative, not a replacement.
 
+#### Vector kernels (Go experiment)
+
+The engine's hottest pixel loops — blending an alpha mask with a color (glyphs,
+rounded corners, antialiased shapes), translucent fills (the dim behind a modal,
+shadows) and the channel swap when presenting to an OS window — can run on AVX2
+through the experimental `simd/archsimd` package. They are enabled by building
+with the experiment:
+
+```bash
+GOEXPERIMENT=simd go build ./...
+```
+
+It takes Go 1.26 or newer on amd64; the vector path is chosen at startup, only if
+the CPU has AVX2. In every other case — a build without the experiment, an older
+toolchain, arm64, an older CPU — the previous scalar loops run, and nothing
+changes for the library: `go.mod` stays at `go 1.22`.
+
+The output matches the scalar one bit for bit — the golden frames pass in both
+builds. The gain (medians of 10 runs on amd64 with AVX2):
+
+| Measurement | Scalar | AVX2 |
+|---|---|---|
+| full frame (`Pipeline_FullFrame`) | 3.35 ms | 2.04 ms (−39 %) |
+| window drag | 1.63 ms | 0.93 ms (−43 %) |
+| rounded rectangles | 1.89 µs | 1.08 µs (−43 %) |
+| a line of text | 15.1 µs | 10.6 µs (−30 %) |
+| presenting a 1080p frame to an OS window | 1.08 ms | 0.37 ms (2.9×) |
+
+`HEADLESS_GUI_NOSIMD=1` turns the vector path off without rebuilding: an
+experiment is an experiment, and if it misbehaves on someone's CPU, the
+application should not need a rebuild to get around it.
+
+The `archsimd` API is not stable (it already changed between 1.26 and 1.27), so
+every vector kernel lives in one internal package, `internal/pixsimd`, behind a
+narrow interface — when the API changes, only that package needs editing.
+
 ---
 
 ## Module Structure

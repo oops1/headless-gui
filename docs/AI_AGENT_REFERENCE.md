@@ -3825,6 +3825,22 @@ per-buffer damage age, the equivalent of `EGL_buffer_age`) is not implemented.
 `DirtyTile.Data` follows the chosen format: with `FormatBGRX` those bytes are
 BGRX, which is what the caller asked for.
 
+### Vector kernels (GOEXPERIMENT=simd)
+
+```bash
+GOEXPERIMENT=simd go build ./...   # Go 1.26+, amd64; AVX2 checked at startup
+HEADLESS_GUI_NOSIMD=1 ./app        # force the scalar path without rebuilding
+```
+
+`internal/pixsimd` holds the hot pixel loops (mask×color blend, translucent fill,
+RGBA↔BGRA swap) with AVX2 versions behind `//go:build goexperiment.simd && amd64`.
+Output is bit-identical to the scalar path (golden frames pass in both builds);
+the full frame is ~39 % faster. Rules when touching it: keep the scalar version
+as the reference, prove every vector change with the "vector = scalar" tests
+(`go test` with `GOEXPERIMENT=simd`), and end every vector loop with
+`archsimd.ClearAVXUpperBits()` — without VZEROUPPER the SSE code that follows
+(including runtime map lookups) pays a false-dependency penalty.
+
 ### Pacing and the frame sink
 
 ```go
