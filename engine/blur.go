@@ -27,9 +27,18 @@
 // пикселей за границей как прозрачных (premultiplied (0,0,0,0) утянул бы
 // среднее к чёрному) или при заворачивании (wrap), которое подмешивало бы
 // пиксели с противоположного края области.
+//
+// Сами проходы — в internal/pixsimd: там же их векторные версии (AVX2 в
+// сборке с GOEXPERIMENT=simd) и скалярная, в которой деление на ширину окна
+// заменено точным умножением. Результат обеих совпадает с прежним кодом бит
+// в бит.
 package engine
 
-import "image"
+import (
+	"image"
+
+	"github.com/oops1/headless-gui/v3/internal/pixsimd"
+)
 
 // BlurRGBA размывает изображение целиком, на месте.
 //
@@ -57,139 +66,16 @@ func BlurRegion(img *image.RGBA, r image.Rectangle, radius, passes int) {
 		return
 	}
 	r = r.Intersect(img.Bounds())
-	w := r.Dx()
-	h := r.Dy()
+	w, h := r.Dx(), r.Dy()
 	if w <= 0 || h <= 0 {
 		return
 	}
+	pix := img.Pix[img.PixOffset(r.Min.X, r.Min.Y):]
 
-	// Общий временный буфер под одну строку/столбец каналов — переиспользуется
-	// на всех проходах и в обоих направлениях, чтобы не аллоцировать на
-	// каждый вызов boxBlur*.
-	maxLen := w
-	if h > maxLen {
-		maxLen = h
-	}
-	tmp := make([]uint8, maxLen*4)
-
+	// Буферы проходов общие на все проходы и оба направления.
+	var bb pixsimd.BlurBuf
 	for p := 0; p < passes; p++ {
-		boxBlurHorizontal(img, r, radius, tmp)
-		boxBlurVertical(img, r, radius, tmp)
+		pixsimd.BoxBlurRows(&bb, pix, img.Stride, w, h, radius)
+		pixsimd.BoxBlurCols(&bb, pix, img.Stride, w, h, radius)
 	}
-}
-
-// boxBlurHorizontal размывает каждую строку области r по горизонтали
-// скользящим окном шириной 2*radius+1, с зажимом координат к границам r.
-// tmp — переиспользуемый буфер вместимостью не меньше r.Dx()*4 байт.
-func boxBlurHorizontal(img *image.RGBA, r image.Rectangle, radius int, tmp []uint8) {
-	w := r.Dx()
-	row := tmp[:w*4]
-	winLen := 2*radius + 1
-
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		off := img.PixOffset(r.Min.X, y)
-		stride := 4
-
-		// Начальная сумма окна для x = r.Min.X: индексы от -radius до +radius
-		// относительно первого пикселя строки, зажатые к [0, w-1].
-		var sumR, sumG, sumB, sumA uint32
-		for k := -radius; k <= radius; k++ {
-			xi := clampInt(k, 0, w-1)
-			p := off + xi*stride
-			sumR += uint32(img.Pix[p])
-			sumG += uint32(img.Pix[p+1])
-			sumB += uint32(img.Pix[p+2])
-			sumA += uint32(img.Pix[p+3])
-		}
-
-		for x := 0; x < w; x++ {
-			ti := x * 4
-			row[ti] = uint8(sumR / uint32(winLen))
-			row[ti+1] = uint8(sumG / uint32(winLen))
-			row[ti+2] = uint8(sumB / uint32(winLen))
-			row[ti+3] = uint8(sumA / uint32(winLen))
-
-			// Сдвигаем окно на один пиксель вправо: убираем выходящий
-			// (левый) элемент, добавляем входящий (правый), оба зажаты.
-			outX := clampInt(x-radius, 0, w-1)
-			inX := clampInt(x+radius+1, 0, w-1)
-			po := off + outX*stride
-			pi := off + inX*stride
-			sumR += uint32(img.Pix[pi]) - uint32(img.Pix[po])
-			sumG += uint32(img.Pix[pi+1]) - uint32(img.Pix[po+1])
-			sumB += uint32(img.Pix[pi+2]) - uint32(img.Pix[po+2])
-			sumA += uint32(img.Pix[pi+3]) - uint32(img.Pix[po+3])
-		}
-
-		// Записываем размытую строку обратно в изображение.
-		for x := 0; x < w; x++ {
-			p := off + x*stride
-			ti := x * 4
-			img.Pix[p] = row[ti]
-			img.Pix[p+1] = row[ti+1]
-			img.Pix[p+2] = row[ti+2]
-			img.Pix[p+3] = row[ti+3]
-		}
-	}
-}
-
-// boxBlurVertical размывает каждый столбец области r по вертикали —
-// зеркало boxBlurHorizontal со сменой осей. tmp — переиспользуемый буфер
-// вместимостью не меньше r.Dy()*4 байт.
-func boxBlurVertical(img *image.RGBA, r image.Rectangle, radius int, tmp []uint8) {
-	h := r.Dy()
-	col := tmp[:h*4]
-	winLen := 2*radius + 1
-	stride := img.Stride
-
-	for x := r.Min.X; x < r.Max.X; x++ {
-		off := img.PixOffset(x, r.Min.Y)
-
-		var sumR, sumG, sumB, sumA uint32
-		for k := -radius; k <= radius; k++ {
-			yi := clampInt(k, 0, h-1)
-			p := off + yi*stride
-			sumR += uint32(img.Pix[p])
-			sumG += uint32(img.Pix[p+1])
-			sumB += uint32(img.Pix[p+2])
-			sumA += uint32(img.Pix[p+3])
-		}
-
-		for y := 0; y < h; y++ {
-			ti := y * 4
-			col[ti] = uint8(sumR / uint32(winLen))
-			col[ti+1] = uint8(sumG / uint32(winLen))
-			col[ti+2] = uint8(sumB / uint32(winLen))
-			col[ti+3] = uint8(sumA / uint32(winLen))
-
-			outY := clampInt(y-radius, 0, h-1)
-			inY := clampInt(y+radius+1, 0, h-1)
-			po := off + outY*stride
-			pi := off + inY*stride
-			sumR += uint32(img.Pix[pi]) - uint32(img.Pix[po])
-			sumG += uint32(img.Pix[pi+1]) - uint32(img.Pix[po+1])
-			sumB += uint32(img.Pix[pi+2]) - uint32(img.Pix[po+2])
-			sumA += uint32(img.Pix[pi+3]) - uint32(img.Pix[po+3])
-		}
-
-		for y := 0; y < h; y++ {
-			p := off + y*stride
-			ti := y * 4
-			img.Pix[p] = col[ti]
-			img.Pix[p+1] = col[ti+1]
-			img.Pix[p+2] = col[ti+2]
-			img.Pix[p+3] = col[ti+3]
-		}
-	}
-}
-
-// clampInt зажимает v к диапазону [lo, hi].
-func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }

@@ -125,3 +125,14 @@ func TestBlurBehind_RespectsClips(t *testing.T) {
 		t.Error("подложка залезла в срезанный угол")
 	}
 }
+
+// BenchmarkBlurBehindTaskbar — стекло панели задач 1920×48 на кадре 1080p:
+// уменьшение, размытие, растяжение и подкраска вместе.
+func BenchmarkBlurBehindTaskbar(b *testing.B) {
+	c := checkerCanvas(1920, 1080, 16)
+	r := image.Rect(0, 1032, 1920, 1080)
+	tint := color.RGBA{R: 20, G: 20, B: 20, A: 120}
+	for i := 0; i < b.N; i++ {
+		c.BlurBehind(r, 24, tint)
+	}
+}

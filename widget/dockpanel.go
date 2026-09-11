@@ -22,6 +22,9 @@ type DockPanel struct {
 
 	Background color.RGBA
 	UseAlpha   bool
+	// BackgroundRole — откуда фон берётся при смене темы (bgrole.go). По
+	// умолчанию BackgroundCustom: свой цвет тема не трогает.
+	BackgroundRole BackgroundRole
 
 	// LastChildFill — растягивать ли последнего ребёнка на остаток места
 	// (WPF DockPanel.LastChildFill, по умолчанию true).
@@ -194,7 +197,11 @@ func (dp *DockPanel) Draw(ctx DrawContext) {
 	dp.drawChildren(ctx)
 }
 
-// ApplyTheme обновляет цвета DockPanel из темы.
+// ApplyTheme обновляет фон DockPanel, если панели назначена роль фона.
+// Без роли фон не трогается (см. bgrole.go).
 func (dp *DockPanel) ApplyTheme(t *Theme) {
-	// DockPanel обычно прозрачный — ничего не обновляем
+	if c, ok := themeBackground(dp.BackgroundRole, t); ok {
+		dp.Background = c
+		dp.UseAlpha = c.A < 255
+	}
 }

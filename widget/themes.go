@@ -22,6 +22,16 @@ type Theme struct {
 	// alpha-premultiplied: R,G,B ≤ A). A=0 → контур считается от цвета рамки.
 	OutlineDragFill color.RGBA
 
+	// WindowFrame — цвет наружной рамки окна. A=0 (так во всех пресетах) —
+	// прежнее поведение: у главного окна XOR-инверсия фона, у остальных Border.
+	//
+	// Нужен теме, повторяющей Windows с включённым «цветом элементов в
+	// заголовках и границах окон»: там рамка активного окна красится
+	// системным акцентом, и окно с серо-чёрным контуром рядом с системными
+	// выглядит чужим. Отдельным полем, а не через Border: Border красит рамки
+	// ВСЕХ контролов, и акцентные поля ввода никто не просил.
+	WindowFrame color.RGBA
+
 	// Заголовок НЕАКТИВНОГО окна (без фокуса ОС). A=0 — автоматическое
 	// приглушение активного цвета. Win2000 задаёт явные классические
 	// цвета (серый градиент #808080→#C0C0C0, серебристый текст).
@@ -56,6 +66,33 @@ type Theme struct {
 
 	LabelText color.RGBA // Label, ListView.TextColor — цвет текста метки
 	LabelBG   color.RGBA // Label — фон метки (обычно прозрачный)
+
+	// ═══════════════════════════════════════════════════════════════════════
+	// Сравнение файлов и редактор кода (DiffView)
+	// ═══════════════════════════════════════════════════════════════════════
+
+	// Фон добавленных и удалённых строк и их «сильный» вариант — для
+	// внутристрочной разницы поверх полосы строки.
+	//
+	// Отдельными полями, а не выводом из InputBG «на глаз»: контрол, который
+	// сам смешивает красный с фоном, в Win2000 и Mac давал оттенки, которых
+	// автор темы не задумывал, и поправить их было негде.
+	DiffAddBG     color.RGBA
+	DiffAddStrong color.RGBA
+	DiffDelBG     color.RGBA
+	DiffDelStrong color.RGBA
+
+	// TextSelectionBG — фон выделенного текста в редакторе. Отдельно от
+	// ListItemSelect: выделение строки списка и выделение символов — разные
+	// по плотности заливки вещи, у второго сквозь фон читается текст.
+	TextSelectionBG color.RGBA
+
+	// Подсветка синтаксиса.
+	SyntaxKeyword color.RGBA
+	SyntaxString  color.RGBA
+	SyntaxComment color.RGBA
+	SyntaxNumber  color.RGBA
+	SyntaxFunc    color.RGBA
 
 	// SecondaryText — приглушённый ПОЯСНИТЕЛЬНЫЙ текст: подпись под
 	// параметром, единица измерения, вторичная часть строки списка.
@@ -196,7 +233,7 @@ type Theme struct {
 
 // DarkTheme возвращает тему Windows 10 Dark Mode.
 func DarkTheme() *Theme {
-	return &Theme{
+	return withCodeColors(&Theme{
 		// Окно и панели
 		WindowBG:    color.RGBA{R: 30, G: 30, B: 30, A: 255},    // #1E1E1E — тёмный фон окна
 		PanelBG:     color.RGBA{R: 45, G: 45, B: 48, A: 255},    // #2D2D30 — фон панелей/менюбара
@@ -304,14 +341,14 @@ func DarkTheme() *Theme {
 
 		// Стиль: плоский Win10 (прямые углы)
 		Style: ThemeStyle{Name: "Win10 Dark"},
-	}
+	})
 }
 
 // ─── Light Theme (Windows 10 Light Mode) ────────────────────────────────────
 
 // LightTheme возвращает тему Windows 10 Light Mode.
 func LightTheme() *Theme {
-	return &Theme{
+	return withCodeColors(&Theme{
 		// Окно и панели
 		WindowBG:    color.RGBA{R: 243, G: 243, B: 243, A: 255}, // #F3F3F3 — светлый фон окна
 		PanelBG:     color.RGBA{R: 248, G: 248, B: 248, A: 255}, // #F8F8F8 — фон панелей/менюбара
@@ -419,7 +456,7 @@ func LightTheme() *Theme {
 
 		// Стиль: плоский Win10 (прямые углы)
 		Style: ThemeStyle{Name: "Win10 Light"},
-	}
+	})
 }
 
 // Themeable — виджет, поддерживающий применение темы.
@@ -470,6 +507,17 @@ func ApplyGlobalTheme(t *Theme) {
 	win10.Border = t.Border
 	win10.ShadowColor = t.ShadowColor
 	win10.OutlineDragFill = t.OutlineDragFill
+	win10.WindowFrame = t.WindowFrame
+	win10.DiffAddBG = t.DiffAddBG
+	win10.DiffAddStrong = t.DiffAddStrong
+	win10.DiffDelBG = t.DiffDelBG
+	win10.DiffDelStrong = t.DiffDelStrong
+	win10.TextSelectionBG = t.TextSelectionBG
+	win10.SyntaxKeyword = t.SyntaxKeyword
+	win10.SyntaxString = t.SyntaxString
+	win10.SyntaxComment = t.SyntaxComment
+	win10.SyntaxNumber = t.SyntaxNumber
+	win10.SyntaxFunc = t.SyntaxFunc
 
 	// Кнопки
 	win10.BtnBG = t.BtnBG

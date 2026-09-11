@@ -191,3 +191,25 @@ func TestFontSize_FromXAML(t *testing.T) {
 		t.Errorf("список: кегль %s", strconv.FormatFloat(got, 'g', -1, 64))
 	}
 }
+
+// Вид стрелки списка задаётся и в разметке (GG-55).
+func TestDropdownArrow_FromXAML(t *testing.T) {
+	xaml := `<Window Width="400" Height="200"><Canvas>
+	  <ComboBox x:Name="a" Left="10" Top="10" Width="160" Height="28" ArrowStyle="Chevron"/>
+	  <ComboBox x:Name="b" Left="10" Top="50" Width="160" Height="28" ArrowStyle="Triangle"/>
+	  <ComboBox x:Name="c" Left="10" Top="90" Width="160" Height="28"/>
+	</Canvas></Window>`
+	_, reg, err := widget.LoadUIFromXAML([]byte(xaml))
+	if err != nil {
+		t.Fatalf("разбор разметки: %v", err)
+	}
+	if got := reg["a"].(*widget.Dropdown).ArrowStyle; got != widget.ArrowChevron {
+		t.Errorf("ArrowStyle=\"Chevron\" дал %v", got)
+	}
+	if got := reg["b"].(*widget.Dropdown).ArrowStyle; got != widget.ArrowTriangle {
+		t.Errorf("ArrowStyle=\"Triangle\" дал %v", got)
+	}
+	if got := reg["c"].(*widget.Dropdown).ArrowStyle; got != widget.ArrowAuto {
+		t.Errorf("без атрибута стиль %v вместо ArrowAuto", got)
+	}
+}

@@ -84,6 +84,17 @@ type BackdropDrawer interface {
 // берёт прямоугольник, и у скруглённого слоя за дугой оставались бы
 // необрезанные уголки размытия — на стекле это выглядит как оборванные углы.
 // Реализуется engine.Canvas; контекст без него рисует как раньше.
+//
+// SetRoundClip подменяет и прямоугольный клип (равносильно SetClip(r) плюс
+// скругление), а ClearRoundClip снимает только скругление. Прежний клип
+// вызывающий возвращает сам — иначе всё, что рисуется дальше, останется
+// обрезанным границами слоя:
+//
+//	prev := ctx.Clip()
+//	rc.SetRoundClip(r, radius)
+//	... // рисование слоя
+//	rc.ClearRoundClip()
+//	ctx.SetClip(prev)
 type RoundClipper interface {
 	SetRoundClip(r image.Rectangle, radius int)
 	ClearRoundClip()

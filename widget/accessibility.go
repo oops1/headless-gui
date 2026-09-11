@@ -57,6 +57,7 @@ const (
 	StateModal    = "modal"
 	StateInactive = "inactive" // окно без фокуса ОС
 	StatePassword = "password" // значение скрыто
+	StateReadOnly = "readonly" // значение видно, но не правится
 )
 
 // AccessInfo — семантическое описание одного элемента.
@@ -89,6 +90,18 @@ type Accessible interface {
 	AccessInfo() AccessInfo
 }
 
+// AccessChildrenProvider — опциональный интерфейс: виджет, который сам рисует
+// несколько логических элементов (две панели текста в DiffView), отдаёт их
+// скринридеру дочерними узлами.
+//
+// Дерево строится по Children(), а у виджета, рисующего всё сам, детей-виджетов
+// нет — и скринридер видел бы одну безымянную группу, не прочитав ни строчки.
+// Узлы указывают на сам виджет: действовать с ними (фокус, нажатие) можно только
+// через него.
+type AccessChildrenProvider interface {
+	AccessChildren() []AccessInfo
+}
+
 // BuildAccessTree строит семантический снапшот дерева виджетов.
 // focused — виджет с фокусом ввода (или nil); невидимые виджеты
 // пропускаются вместе с поддеревьями.
@@ -99,6 +112,11 @@ func BuildAccessTree(root Widget, focused Widget) *AccessNode {
 	node := &AccessNode{AccessInfo: accessInfoFor(root), Widget: root}
 	if root == focused {
 		node.States = append(node.States, StateFocused)
+	}
+	if p, ok := root.(AccessChildrenProvider); ok {
+		for _, info := range p.AccessChildren() {
+			node.Children = append(node.Children, &AccessNode{AccessInfo: info, Widget: root})
+		}
 	}
 	for _, child := range root.Children() {
 		if cn := BuildAccessTree(child, focused); cn != nil {

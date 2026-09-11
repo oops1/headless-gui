@@ -383,6 +383,10 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 	case "treeview":
 		return buildXAMLTreeView(el, reg, parentOff)
 
+	// ── DiffView — сравнение и правка двух текстов ──────────────────────────
+	case "diffview":
+		w = buildXAMLDiffView(el, baseDir)
+
 	// ── TreeViewItem вне TreeView — игнорируем ──────────────────────────────
 	case "treeviewitem":
 		return nil, nil
@@ -1046,6 +1050,13 @@ func buildXAMLDropdown(el xElement) Widget {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			dd.FontSize = v
 		}
+	}
+	// ArrowStyle="Chevron" | "Triangle" | "Auto" — вид стрелки раскрытия.
+	switch strings.ToLower(el.attr("ArrowStyle")) {
+	case "chevron":
+		dd.ArrowStyle = ArrowChevron
+	case "triangle":
+		dd.ArrowStyle = ArrowTriangle
 	}
 
 	return dd
