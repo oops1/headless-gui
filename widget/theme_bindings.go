@@ -84,6 +84,10 @@ var legacyBindings = []legacyBinding{
 
 	{name: "OutlineDragFill", field: func(t *Theme) *color.RGBA { return &t.OutlineDragFill },
 		style: theme.StyleKey{Component: "window", Part: "dragoutline"}, role: roleFill},
+	// Наружная рамка окна — у окна свой адрес, а не общий Border: тот красит
+	// рамки всех контролов, а эта нужна одной только рамке окна.
+	{name: "WindowFrame", field: func(t *Theme) *color.RGBA { return &t.WindowFrame },
+		style: theme.StyleKey{Component: "window", Part: "frame"}, role: roleBorder},
 
 	// ─── Кнопка (Button) ─────────────────────────────────────────────────────
 

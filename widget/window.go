@@ -143,6 +143,17 @@ type Window struct {
 	// BorderColor — цвет рамки окна.
 	BorderColor color.RGBA
 
+	// FrameColor — цвет НАРУЖНОЙ рамки окна; A=0 — прежнее поведение (у
+	// главного окна XOR-инверсия фона, у остальных BorderColor).
+	//
+	// Отдельно от BorderColor: тот задаётся движком всегда (в NewWindow и в
+	// ApplyTheme), и по нему нельзя отличить «приложение выбрало цвет» от
+	// «так в теме» — проверка BorderColor.A > 0 выключила бы XOR-рамку у всех.
+	// Берётся из Theme.WindowFrame; SetFrameColor закрепляет свой цвет поверх
+	// темы.
+	FrameColor    color.RGBA
+	frameExplicit bool
+
 	// CornerRadius — радиус скругления углов (0 = острые).
 	CornerRadius int
 
@@ -312,6 +323,7 @@ func NewWindow(title string, width, height int) *Window {
 		Resize:              ResizeModeCanResize,
 		Background:          win10.WindowBG,
 		BorderColor:         win10.Border,
+		FrameColor:          win10.WindowFrame,
 		ShowLocaleIndicator: true,
 		MainWindow:          true,
 	}
@@ -779,23 +791,33 @@ func (w *Window) Draw(ctx DrawContext) {
 				// Рамка неактивного окна светлее (как в Win11).
 				bc = mixRGBA(bc, w.Background, 0.5)
 			}
+			// edge — наружный контур. Разделитель под заголовком ниже берёт bc:
+			// он внутренний, акцентом его Windows не красит.
+			edge := bc
+			frame, haveFrame := w.frameColor()
+			if haveFrame {
+				edge = frame
+			}
 			// Главное окно в не-классических темах: контрастная XOR-рамка по всему
 			// периметру вместо обычной (на светлом фоне канваса светлая рамка окна
-			// сливалась бы).
+			// сливалась бы) — если приложение или тема не задали свой цвет.
 			if w.MainWindow {
 				xc := xorBorderColor(w.xorBorderBase())
+				if haveFrame {
+					xc = frame
+				}
 				if cr > 0 {
 					ctx.DrawRoundBorder(x, y, bw, bh, cr, xc)
 				} else {
 					ctx.DrawBorder(x, y, bw, bh, xc)
 				}
 			} else if cr > 0 {
-				ctx.DrawRoundBorder(x, y, bw, bh, cr, bc)
+				ctx.DrawRoundBorder(x, y, bw, bh, cr, edge)
 			} else {
 				// Левая, правая и нижняя линии (без верхней — там заголовок)
-				ctx.DrawVLine(x, y+th, bh-th, bc)      // левая (от низа заголовка)
-				ctx.DrawVLine(x+bw-1, y+th, bh-th, bc) // правая
-				ctx.DrawHLine(x, y+bh-1, bw, bc)       // нижняя
+				ctx.DrawVLine(x, y+th, bh-th, edge)      // левая (от низа заголовка)
+				ctx.DrawVLine(x+bw-1, y+th, bh-th, edge) // правая
+				ctx.DrawHLine(x, y+bh-1, bw, edge)       // нижняя
 			}
 			// Разделитель под заголовком. В режиме вкладок прерывается под
 			// корешком активной вкладки — он сливается с клиентской областью.
@@ -1854,6 +1876,12 @@ func (w *Window) ApplyTheme(t *Theme) {
 
 	w.Background = t.WindowBG
 	w.BorderColor = t.Border
+	// Цвет, заданный приложением через SetFrameColor, смена темы не трогает:
+	// акцент системы, прочитанный приложением, не должен слетать при каждом
+	// переключении светлой и тёмной темы.
+	if !w.frameExplicit {
+		w.FrameColor = t.WindowFrame
+	}
 	// TitleBG и TitleColor обновляются только если пользователь не задал явно (A=0)
 
 	// Форма окна определяется темой: скругление углов (Win11/Mac) и стиль
@@ -1875,6 +1903,35 @@ func (w *Window) ApplyTheme(t *Theme) {
 }
 
 // ─── Вспомогательные ────────────────────────────────────────────────────────
+
+// SetFrameColor задаёт цвет наружной рамки окна поверх темы.
+//
+// Цвет закрепляется: смена темы (ApplyTheme) его не трогает — акцент,
+// прочитанный приложением из системы, не должен слетать при переключении
+// светлой и тёмной темы. A=0 снимает закрепление: рамка снова берётся из
+// Theme.WindowFrame, а без него — прежняя (XOR у главного окна).
+func (w *Window) SetFrameColor(c color.RGBA) {
+	w.FrameColor = c
+	w.frameExplicit = c.A > 0
+	if !w.frameExplicit {
+		w.FrameColor = win10.WindowFrame
+	}
+	w.Invalidate()
+}
+
+// frameColor — действующий цвет наружной рамки и признак, что он задан.
+// У неактивного окна рамка приглушается, как и обычная: Windows тоже гасит
+// акцентную рамку окна без фокуса.
+func (w *Window) frameColor() (color.RGBA, bool) {
+	c := w.FrameColor
+	if c.A == 0 {
+		return color.RGBA{}, false
+	}
+	if w.inactive {
+		c = mixRGBA(c, w.Background, 0.5)
+	}
+	return c, true
+}
 
 // resolveColor возвращает c, если он не прозрачный; иначе fallback.
 func (w *Window) resolveColor(c, fallback color.RGBA) color.RGBA {
