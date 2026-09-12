@@ -113,6 +113,19 @@ const (
 	KeyF23 KeyCode = 134
 	KeyF24 KeyCode = 135
 
+	// Цифровой ряд: виртуальные коды здесь совпадают с кодом самого символа
+	// (0x30..0x39), как их и разбирает разметка (parseKeyName).
+	Key0 KeyCode = 48
+	Key1 KeyCode = 49
+	Key2 KeyCode = 50
+	Key3 KeyCode = 51
+	Key4 KeyCode = 52
+	Key5 KeyCode = 53
+	Key6 KeyCode = 54
+	Key7 KeyCode = 55
+	Key8 KeyCode = 56
+	Key9 KeyCode = 57
+
 	KeyA         KeyCode = 65
 	KeyC         KeyCode = 67
 	KeyS         KeyCode = 83

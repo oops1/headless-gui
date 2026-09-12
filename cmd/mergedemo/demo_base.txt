@@ -1,0 +1,23 @@
+package ui
+
+// Button — кнопка панели инструментов.
+type Button struct {
+	Text    string
+	Pad     int
+	Enabled bool
+}
+
+func New(text string) *Button {
+	return &Button{Text: text, Pad: 8, Enabled: true}
+}
+
+func (b *Button) Draw(c Ctx) {
+	c.Fill(b.Rect, b.Background)
+	c.Text(b.Text, b.Rect, b.Foreground)
+}
+
+func (b *Button) Click() {
+	if b.Enabled {
+		b.OnClick()
+	}
+}

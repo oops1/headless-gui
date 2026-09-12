@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -101,6 +102,13 @@ func NewListView(items ...string) *ListView {
 //
 // Selection всегда сбрасывается (-1), потому что индексы могут уже
 // не указывать на тот же элемент.
+//
+// Срез КОПИРУЕТСЯ: элементы виджет читает из потока отрисовки, и запись в
+// переданный массив после вызова была бы гонкой за строкой — на экране это
+// каша из глифов (указатель от новой строки, длина от старой). По той же
+// причине копия нужна стражу изменений: передав тот же срез с поправленным
+// элементом, вызывающий сравнивал бы массив сам с собой, и перерисовки не
+// было бы вовсе.
 func (lv *ListView) SetItems(items []string) {
 	lv.mu.Lock()
 
@@ -120,7 +128,7 @@ func (lv *ListView) SetItems(items []string) {
 	changed := !same || lv.selected != -1
 	oldScroll := lv.scrollY
 
-	lv.items = items
+	lv.items = slices.Clone(items)
 	lv.selected = -1
 
 	switch {
@@ -191,6 +199,9 @@ func (lv *ListView) Items() []string {
 // AddItem добавляет элемент в конец списка.
 // Если AutoScrollToBottom=true и пользователь был у нижнего края —
 // прокрутка автоматически встанет в конец после добавления.
+//
+// Строки виджет читает из потока отрисовки, поэтому менять уже добавленные
+// нельзя: новый текст элемента задаётся через SetItems.
 func (lv *ListView) AddItem(text string) {
 	lv.mu.Lock()
 	wasAtBottom := lv.isAtBottom()
