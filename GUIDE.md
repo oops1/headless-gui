@@ -1424,6 +1424,7 @@ root Canvas (0,0)
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (первые два дочерних — панели) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
+| `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; дочерние `<DockPane>`×N + один `<DockContent>` (см. «Докинг-панели») |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); только внутри `<DockManager>` |
@@ -1800,6 +1801,85 @@ dv.OnFileChangedOnDisk = func(side widget.DiffSide, path string, deleted bool) {
 `DiffSide`), `TextChangedCommand` (`DiffSide`), `DiffChangedCommand` (число
 изменений), `FileChangedCommand` (`DiffFileChange`); из кода — `SetCommand`.
 Полный пример — `cmd/diffdemo`.
+
+#### MergeView — трёхстороннее слияние
+
+Пара к `DiffView`: три стороны конфликта сверху (наше · база · их) и
+редактируемый итог снизу. Правится только итог — он и есть то, что приложение
+запишет в файл. Строки сторон выровнены по блокам: блок занимает в каждой
+панели одинаковое число экранных строк, поэтому прокрутка у верхних панелей
+одна, а соответствующие участки всегда стоят рядом.
+
+```go
+mv := widget.NewMergeView("", "") // шрифт кода и заголовков; пусто — встроенные
+mv.SetSides(
+    widget.MergeSideInfo{Title: "main", Note: "config.go"},
+    widget.MergeSideInfo{Title: "merge-base", Note: "config.go"},
+    widget.MergeSideInfo{Title: "feature/tag", Note: "config.go"},
+)
+mv.SetChunks(chunks)              // блоки посчитало приложение (git merge-file)
+// mv.SetTexts(base, ours, theirs) // или пусть посчитает контрол
+
+mv.OnResolvedChanged = func(left int) { status.SetText(fmt.Sprintf("нерешённых: %d", left)) }
+mv.OnSaveRequest = func() { os.WriteFile(path, []byte(mv.Result()), 0o644) } // Ctrl+S
+```
+
+**Блоки отдаёт приложение.** Если слияние у вас уже есть, итог обязан
+совпадать с тем, что записал бы git, а пересчёт другим алгоритмом дал бы
+другое разбиение. Поэтому главный путь — `SetChunks` с готовыми блоками:
+
+```go
+type MergeChunk struct {
+    Conflict           bool     // блок требует решения
+    Ours, Base, Theirs []string // что показывают панели
+    Merged             []string // итог неконфликтного блока; nil — «как в Ours»
+}
+```
+
+`SetTexts` считает блоки сам (`widget/mergeview.Merge`) — для демонстраций и
+простых случаев; соседние конфликты, разделённые парой общих строк, при этом
+не склеиваются, а git это делает.
+
+Конфликт закрывается решением: наше, их, база или обе стороны в любом порядке
+(`MergeTakeOurs`, `MergeTakeTheirs`, `MergeTakeBase`, `MergeTakeOursThenTheirs`,
+`MergeTakeTheirsThenOurs`); `MergeUnresolved` возвращает блок в нерешённое
+состояние. Строки блока заменяются в итоге **на месте**, поэтому правки руками
+в соседних блоках остаются целы. Нерешённый конфликт уходит в итог маркерами
+git — стиль `MergeStyleMerge` или `MergeStyleDiff3` (с базой за `|||||||`),
+подписи в маркерах берутся из заголовков панелей.
+
+| Клавиши | Действие |
+|---|---|
+| F7 / Shift+F7 | следующий / предыдущий конфликт |
+| Alt+1 / Alt+2 / Alt+3 | закрыть текущий конфликт нашим, базой, их |
+| Alt+0 | снова считать текущий конфликт нерешённым |
+| Ctrl+S | `OnSaveRequest` и команда `SaveCommand` |
+| Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z | отмена и повтор — в том числе решений |
+| Ctrl+C / X / V / A | буфер обмена, выделить всё |
+| Tab | табуляция в текст итога (`TabAcceptor`) |
+
+Мышью: кнопка-стрелка у конфликтного блока (у правого края «нашего» и у левого
+края «их») закрывает его этой стороной, контекстное меню даёт все решения,
+граница между верхом и итогом двигается перетаскиванием. `SetShowBase(false)`
+убирает панель базы — остаются наше, их и итог.
+
+Программно — `Resolve`, `ResolveCurrent`, `ResolveAll`, `Resolution`,
+`Unresolved`, `ConflictCount`, `NextConflict`, `PrevConflict`, `GoToConflict`,
+`Result`, `ResultLines`, `Undo`, `Redo`, `SetCaret`, `InsertText`.
+Скринридер видит четыре текстовые панели (`AccessChildrenProvider`), три из
+них — только для чтения. Цвета — те же поля темы `Diff*`/`Syntax*`, что у
+сравнения; строки интерфейса — ключи `merge.*` (`RegisterStrings`).
+
+```xml
+<MergeView x:Name="merge" BaseFile="base.go" OursFile="ours.go" TheirsFile="theirs.go"
+           ShowBase="True" ConflictStyle="diff3" ReadOnly="False"
+           SyntaxHighlight="True" FontFamily="Consolas" FontSize="10"
+           SaveCommand="{Binding Save}" ResolvedCommand="{Binding Left}"/>
+```
+
+Команды: `SaveCommand` (без параметра), `ResultEditedCommand` (без параметра),
+`ResolvedCommand` (параметр — сколько конфликтов осталось). Полный пример —
+`cmd/mergedemo`.
 
 ### Зрелость TextBox
 
@@ -3217,6 +3297,7 @@ go run ./cmd/guiview     # интерактивное демо с модальн
 go run ./cmd/griddemo    # Grid-раскладка
 go run ./cmd/smartgit    # SmartGit-подобный UI
 go run ./cmd/diffdemo    # сравнение и правка двух файлов (DiffView)
+go run ./cmd/mergedemo   # разрешение конфликта слияния (MergeView)
 go run ./cmd/webshowcase # вся витрина в браузере (http://localhost:8091)
 go run ./cmd/webdemo     # минимальный пример стриминга
 

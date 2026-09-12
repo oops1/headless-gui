@@ -77,6 +77,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **SVG icons** — themeable `SVGIcon` widget + `widget/svg` subset parser/AA rasterizer (`currentColor`, monochrome tint); paths/arcs/basic shapes/transforms/even-odd
 - **SplitPanel** — two panes with a draggable splitter (fraction-based position, min sizes, double-click collapse, nesting)
 - **DiffView** — side-by-side file comparison with editing: synced scrolling, S-connectors, block copy, intra-line diff, syntax highlight, file watching; CRLF/BOM preserved on save
+- **MergeView** — three-way merge: ours, base and theirs on top with rows aligned by chunk, editable result below; per-chunk resolutions (ours / theirs / base / both) by button, menu or Alt+1/2/3, git conflict markers (merge or diff3 style) for what is still unresolved
 - **What an editor needs** — `win.SetTitle` and `win.SetOnCloseRequest` (a "Save changes?" prompt before the window closes), widgets that take Tab for themselves (`TabAcceptor`), antialiased paths with fractional coordinates and joined bends (`PathShapes`: cubic curves, polylines, fills), diff and syntax colors in the theme, accessibility children for self-drawn widgets
 - **AVX2 pixel kernels** — optional `GOEXPERIMENT=simd` build (Go 1.27+, amd64): text, AA shapes, fills, blur and frame presentation on AVX2, bit-identical to the scalar path, with CPU detection and a startup self-test falling back automatically
 - **Docking panels** — `DockManager`/`DockPane`, Visual Studio-style Toolbox docking: center + 4 dockable sides, stack tabs, auto-hide, drag&dock with guides, gutter resize, save/restore layout (JSON)
@@ -126,6 +127,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 | GridSplitter | `GridSplitter` | Resizable splitter between Grid cells |
 | SplitPanel | `SplitPanel` | Two panes with a draggable splitter, fraction position, min sizes, double-click collapse |
 | DiffView | `DiffView` | Compare and edit two files: synced scroll, block copy, intra-line diff, syntax highlight, file watching |
+| MergeView | `MergeView` | Three-way merge: ours/base/theirs on top, editable result below, per-chunk resolutions, git conflict markers |
 | SVGIcon | `SVGIcon` | Themeable vector icon (SVG subset), `currentColor` / `Tint` recoloring |
 | DockManager | `DockManager` | VS-style docking zone: center + 4 dockable sides, gutter resize, stack tabs, auto-hide, drag&dock |
 | DockPane | `DockPane` | Single docking panel hosted by `DockManager`: title bar with pin/float/close, Docked/AutoHidden/Floating/Closed |
@@ -156,6 +158,7 @@ go run ./cmd/webshowcase   # the whole widget showcase, streamed
 go run ./cmd/showcase    # Full widget showcase
 go run ./cmd/smartgit    # SmartGit-like UI demo
 go run ./cmd/diffdemo    # compare and edit two files (DiffView)
+go run ./cmd/mergedemo   # resolve a merge conflict (MergeView)
 ```
 
 Windows binary without console:
@@ -181,6 +184,7 @@ headless-gui/
 webdemo/       Minimal browser streaming example
     smartgit/      SmartGit-like UI (Window + Menu + TreeView + DataGrid)
     diffdemo/      File comparison app on DiffView
+    mergedemo/     Merge conflict resolver on MergeView
     socialpreview/ Repository preview image (social_preview.png), drawn by the engine
   assets/ui/       XAML demo layouts (demo.xaml, grid_demo.xaml, showcase.xaml)
   gui/             XAML files for RDP UI (login, block, error dialogs)

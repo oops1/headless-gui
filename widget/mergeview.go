@@ -310,7 +310,9 @@ func (m *MergeView) SetChunks(chunks []MergeChunk) {
 		m.buildResultLocked()
 		m.rebuildLocked()
 		m.resolvedEvent = true
-		m.current = m.nextConflictLocked(-1, +1)
+		// Текущего конфликта нет: первый F7 (или NextConflict) встаёт на
+		// первый, как переход к изменению в сравнении.
+		m.current = -1
 	})
 }
 

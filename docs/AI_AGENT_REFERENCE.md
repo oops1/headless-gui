@@ -576,6 +576,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
 | `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17.0 additions") |
+| `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
 | `<DockManager>` | `DockManager` | `Background`, `NativeFloating` (see "Docking") + children `<DockPane>`×N, one `<DockContent>` |
 | `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
 | `<DockContent>` | (marker, not a widget) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
@@ -3996,6 +3997,42 @@ the content is loaded without a disk path. Any widget with
 attributes wired by the binding scope; DiffView accepts `SaveCommand`
 (param `DiffSide`), `TextChangedCommand` (`DiffSide`), `DiffChangedCommand`
 (`int`), `FileChangedCommand` (`DiffFileChange`).
+### MergeView — three-way merge (pair to DiffView)
+
+```go
+mv := widget.NewMergeView("", "")     // mono font, header font; "" → built-in
+mv.SetSides(ours, base, theirs widget.MergeSideInfo{Title, Note})
+mv.SetChunks(chunks []widget.MergeChunk) // app-computed (git merge-file) — main path
+mv.SetTexts(base, ours, theirs string)   // control computes chunks itself (demos)
+
+mv.Resolve(i, widget.MergeTakeOurs)   // TakeTheirs / TakeBase / TakeOursThenTheirs /
+mv.ResolveCurrent(how)                //   TakeTheirsThenOurs / MergeUnresolved
+mv.ResolveAll(how)
+mv.Unresolved() / mv.ConflictCount() / mv.Resolution(i)
+mv.Result() string                    // markers for unresolved conflicts
+mv.NextConflict() / PrevConflict() / GoToConflict(n) / CurrentConflict()
+mv.SetShowBase(false)                 // ours, theirs and the result only
+mv.SetStyle(widget.MergeStyleDiff3)   // or MergeStyleMerge
+```
+
+`MergeChunk{Conflict, Ours, Base, Theirs, Merged}` — `Merged` is the result of
+a clean chunk, `nil` meaning "same as Ours". Model without a view:
+`widget/mergeview` (`Merge`, `Result`, `ResultText`, `UnresolvedCount`), by
+analogy with `widget/diffview`.
+
+Rows are aligned by chunk (a chunk occupies the same number of rows in every
+pane, padded with `dvRowPad`), so the three top panes share one scroll — no
+piecewise mapping like DiffView's. Only the result pane is editable; resolving
+splices the chunk's lines **in place**, so hand edits elsewhere survive, and
+undo covers resolutions too.
+
+Events: `OnResolvedChanged(left int)`, `OnResultEdited()`,
+`OnCurrentConflict(index int)`, `OnCaretMoved(line, col int)`,
+`OnActiveSideChange(side)`, `OnSaveRequest()` (Ctrl+S). Commands:
+`SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` (`int`). Keys: F7 /
+Shift+F7 navigate, Alt+1/2/3 resolve with ours/base/theirs, Alt+0 unresolves,
+Tab inserts a tab into the result. Strings — `merge.*` keys; colors — the same
+`Diff*`/`Syntax*` theme fields as the comparison. Demo: `cmd/mergedemo`.
 
 Model without the view lives in `widget/diffview` (Myers line diff with
 paragraph-sliding, intra-line range, tokenizer, text decode/encode). Strings:
