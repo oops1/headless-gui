@@ -1421,6 +1421,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
+| `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; children `<DockPane>`×N + one `<DockContent>` (see "Docking panels") |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
@@ -1799,6 +1800,86 @@ file; the application saves it with `SaveAs`. Commands: `SaveCommand`
 (parameter — `DiffSide`), `TextChangedCommand` (`DiffSide`),
 `DiffChangedCommand` (number of changes), `FileChangedCommand`
 (`DiffFileChange`); from code — `SetCommand`. Full example — `cmd/diffdemo`.
+
+#### MergeView — three-way merge
+
+The counterpart to `DiffView`: three sides of the conflict on top (ours ·
+base · theirs) and an editable result below. Only the result is editable — it
+is what the application writes to the file. Side lines are aligned by chunk: a
+chunk takes the same number of screen rows in every pane, so the top panes
+share one scroll and matching regions always sit next to each other.
+
+```go
+mv := widget.NewMergeView("", "") // code and header fonts; empty — built-in
+mv.SetSides(
+    widget.MergeSideInfo{Title: "main", Note: "config.go"},
+    widget.MergeSideInfo{Title: "merge-base", Note: "config.go"},
+    widget.MergeSideInfo{Title: "feature/tag", Note: "config.go"},
+)
+mv.SetChunks(chunks)              // chunks computed by the app (git merge-file)
+// mv.SetTexts(base, ours, theirs) // or let the control compute them
+
+mv.OnResolvedChanged = func(left int) { status.SetText(fmt.Sprintf("%d unresolved", left)) }
+mv.OnSaveRequest = func() { os.WriteFile(path, []byte(mv.Result()), 0o644) } // Ctrl+S
+```
+
+**The application owns the chunks.** If you already merge the file yourself,
+the result must match what git would write, and recomputing it with another
+algorithm would produce a different split. So the main path is `SetChunks`:
+
+```go
+type MergeChunk struct {
+    Conflict           bool     // the chunk needs a decision
+    Ours, Base, Theirs []string // what the panes show
+    Merged             []string // result of a clean chunk; nil — "same as Ours"
+}
+```
+
+`SetTexts` computes the chunks itself (`widget/mergeview.Merge`) — for demos
+and simple cases; note that adjacent conflicts separated by a couple of common
+lines are not joined there, while git joins them.
+
+A conflict is closed by a resolution: ours, theirs, base, or both sides in
+either order (`MergeTakeOurs`, `MergeTakeTheirs`, `MergeTakeBase`,
+`MergeTakeOursThenTheirs`, `MergeTakeTheirsThenOurs`); `MergeUnresolved` puts
+the chunk back. The chunk's lines are replaced in the result **in place**, so
+hand edits in neighbouring chunks survive. An unresolved conflict goes into the
+result as git markers — `MergeStyleMerge` or `MergeStyleDiff3` (with the base
+after `|||||||`); marker labels come from the pane titles.
+
+| Keys | Action |
+|---|---|
+| F7 / Shift+F7 | next / previous conflict |
+| Alt+1 / Alt+2 / Alt+3 | close the current conflict with ours, base, theirs |
+| Alt+0 | mark the current conflict unresolved again |
+| Ctrl+S | `OnSaveRequest` and the `SaveCommand` command |
+| Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z | undo and redo — resolutions included |
+| Ctrl+C / X / V / A | clipboard, select all |
+| Tab | tab character into the result (`TabAcceptor`) |
+
+With the mouse: the arrow button at a conflict chunk (at the right edge of
+"ours" and the left edge of "theirs") closes it with that side, the context
+menu offers every resolution, and the boundary between the top panes and the
+result is draggable. `SetShowBase(false)` hides the base pane — ours, theirs
+and the result remain.
+
+From code — `Resolve`, `ResolveCurrent`, `ResolveAll`, `Resolution`,
+`Unresolved`, `ConflictCount`, `NextConflict`, `PrevConflict`, `GoToConflict`,
+`Result`, `ResultLines`, `Undo`, `Redo`, `SetCaret`, `InsertText`.
+A screen reader sees four text panes (`AccessChildrenProvider`), three of them
+read-only. Colors come from the same `Diff*`/`Syntax*` theme fields as the
+comparison; UI strings are `merge.*` keys (`RegisterStrings`).
+
+```xml
+<MergeView x:Name="merge" BaseFile="base.go" OursFile="ours.go" TheirsFile="theirs.go"
+           ShowBase="True" ConflictStyle="diff3" ReadOnly="False"
+           SyntaxHighlight="True" FontFamily="Consolas" FontSize="10"
+           SaveCommand="{Binding Save}" ResolvedCommand="{Binding Left}"/>
+```
+
+Commands: `SaveCommand` (no parameter), `ResultEditedCommand` (no parameter),
+`ResolvedCommand` (parameter — how many conflicts are left). Full example —
+`cmd/mergedemo`.
 
 ### TextBox maturity
 
@@ -3182,6 +3263,7 @@ go run ./cmd/guiview     # interactive demo with modal XAML windows
 go run ./cmd/griddemo    # Grid layout
 go run ./cmd/smartgit    # SmartGit-like UI
 go run ./cmd/diffdemo    # compare and edit two files (DiffView)
+go run ./cmd/mergedemo   # resolve a merge conflict (MergeView)
 go run ./cmd/webshowcase # the whole showcase in a browser (http://localhost:8091)
 go run ./cmd/webdemo     # minimal streaming example
 

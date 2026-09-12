@@ -1862,6 +1862,17 @@ func (m *DockManager) RestoreLayout(data []byte) error {
 		order = append(order, pj.ID)
 	}
 
+	// Панели, у которых состояние сменилось: им нужно сообщить об этом после
+	// восстановления — как это делают Dock/Float/Close. Без этого оторванная
+	// в нативное окно панель возвращалась в док, но её окно ОС оставалось жить
+	// без содержимого — чёрный прямоугольник поверх всего, закрыть его нечем:
+	// сносит окно обёртка OnStateChanged, а её никто не звал.
+	type stateChange struct {
+		pane *DockPane
+		from DockPaneState
+	}
+	var changes []stateChange
+
 	// Восстанавливаем панели в порядке раскладки (важно для порядка в стопке).
 	for _, id := range order {
 		pj := byID[id]
@@ -1876,6 +1887,9 @@ func (m *DockManager) RestoreLayout(data []byte) error {
 		p.side = side
 		p.floatBounds = image.Rect(pj.Float[0], pj.Float[1], pj.Float[2], pj.Float[3])
 		st := DockPaneState(pj.State)
+		if p.state != st {
+			changes = append(changes, stateChange{p, p.state})
+		}
 		p.state = st
 		switch st {
 		case PaneDocked:
@@ -1897,6 +1911,18 @@ func (m *DockManager) RestoreLayout(data []byte) error {
 
 	m.layout()
 	m.Invalidate()
+
+	// Сообщаем о сменах состояния ПОСЛЕ раскладки: обработчик видит панель уже
+	// на новом месте и с посчитанными границами — как при Dock/Float/Close.
+	for _, c := range changes {
+		// Панель, СТАВШАЯ плавающей, получает своё нативное окно тем же хуком,
+		// что и отрыв мышью. Только ставшая: у той, что плавала и до
+		// восстановления, окно уже есть, и второй вызов создал бы дубль.
+		if c.pane.state == PaneFloating && c.from != PaneFloating && c.pane.OnFloatNative != nil {
+			c.pane.OnFloatNative(c.pane)
+		}
+		m.fireStateChanged(c.pane)
+	}
 	return nil
 }
 
