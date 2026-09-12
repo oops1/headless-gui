@@ -662,7 +662,12 @@ func (d *DiffView) GoToLine(side DiffSide, line int) { d.SetCaret(side, line, 0)
 
 // ─── Модель отображения ─────────────────────────────────────────────────────
 
-func (d *DiffView) prepareSide(s *dvDoc) {
+func (d *DiffView) prepareSide(s *dvDoc) { dvPrepareDoc(s, d.syntax) }
+
+// dvPrepareDoc пересобирает кэши отображения буфера: раскрытые табуляции,
+// подсветку, пустые отметки внутристрочной разницы и карты строк. Свободная
+// функция: тем же способом готовит свои буферы контрол слияния.
+func dvPrepareDoc(s *dvDoc, syntax bool) {
 	L := s.text.Lines
 	s.disp = make([][]rune, len(L))
 	s.hl = make([][2]int, len(L))
@@ -672,7 +677,7 @@ func (d *DiffView) prepareSide(s *dvDoc) {
 		s.disp[i] = diffview.ExpandTabs(l)
 		s.hl[i] = [2]int{-1, -1}
 		s.lineRow[i] = -1
-		if d.syntax {
+		if syntax {
 			s.toks[i] = diffview.Tokenize(s.disp[i])
 		}
 	}

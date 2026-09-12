@@ -45,7 +45,12 @@ func (d *DiffView) Draw(ctx DrawContext) {
 }
 
 func (d *DiffView) roundRect(ctx DrawContext, x, y, w, h int, fill, edge color.RGBA) {
-	p := &d.pal
+	dvRoundRect(ctx, &d.pal, x, y, w, h, fill, edge)
+}
+
+// dvRoundRect — карточка палитры: скругление и тень из неё же. Свободная
+// функция: тем же приёмом рисует панели контрол слияния.
+func dvRoundRect(ctx DrawContext, p *dvPalette, x, y, w, h int, fill, edge color.RGBA) {
 	if p.shadow {
 		if sd, ok := ctx.(ShadowDrawer); ok {
 			sd.DrawSoftShadow(image.Rect(x, y, x+w, y+h), p.radius, 1, color.RGBA{A: 18})
@@ -240,13 +245,18 @@ func (d *DiffView) drawPane(ctx DrawContext, g dvGeom, side DiffSide, top float6
 }
 
 func (d *DiffView) drawCode(ctx DrawContext, s *dvDoc, line, x, y int) {
-	p := &d.pal
+	dvDrawCode(ctx, &d.pal, s, line, x, y, d.syntax, d.charW, d.fontSize, d.monoFont)
+}
+
+// dvDrawCode рисует строку кода с подсветкой синтаксиса. Свободная функция:
+// тем же кодом рисует строки контрол слияния.
+func dvDrawCode(ctx DrawContext, p *dvPalette, s *dvDoc, line, x, y int, syntax bool, charW, fontSize float64, monoFont string) {
 	rs := s.disp[line]
 	if len(rs) == 0 {
 		return
 	}
-	if !d.syntax || s.toks[line] == nil {
-		ctx.DrawTextFont(string(rs), x, y, d.fontSize, d.monoFont, p.text)
+	if !syntax || s.toks[line] == nil {
+		ctx.DrawTextFont(string(rs), x, y, fontSize, monoFont, p.text)
 		return
 	}
 	for _, t := range s.toks[line] {
@@ -263,7 +273,7 @@ func (d *DiffView) drawCode(ctx DrawContext, s *dvDoc, line, x, y int) {
 		case diffview.TokenFunc:
 			col = p.fn
 		}
-		ctx.DrawTextFont(string(rs[t.Start:t.End]), x+int(float64(t.Start)*d.charW), y, d.fontSize, d.monoFont, col)
+		ctx.DrawTextFont(string(rs[t.Start:t.End]), x+int(float64(t.Start)*charW), y, fontSize, monoFont, col)
 	}
 }
 

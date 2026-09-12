@@ -387,6 +387,10 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 	case "diffview":
 		w = buildXAMLDiffView(el, baseDir)
 
+	// ── MergeView — трёхстороннее слияние ───────────────────────────────────
+	case "mergeview":
+		w = buildXAMLMergeView(el, baseDir)
+
 	// ── TreeViewItem вне TreeView — игнорируем ──────────────────────────────
 	case "treeviewitem":
 		return nil, nil
