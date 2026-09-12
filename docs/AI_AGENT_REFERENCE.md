@@ -575,7 +575,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
 | `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
-| `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17.0 additions") |
+| `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17 additions") |
 | `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
 | `<DockManager>` | `DockManager` | `Background`, `NativeFloating` (see "Docking") + children `<DockPane>`×N, one `<DockContent>` |
 | `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
@@ -3957,7 +3957,7 @@ Rule worth keeping: an optimisation without a paired measurement is not
 accepted. Add the before/after here.
 
 
-## v3.17.0 additions (DiffView and what an editor needs from the engine)
+## v3.17 additions (DiffView, MergeView and what an editor needs from the engine)
 
 ### DiffView — compare and edit two files
 
