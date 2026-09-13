@@ -61,9 +61,15 @@ const (
 	MergeStyleDiff3 = mergeview.StyleDiff3
 )
 
-// MergeSideInfo — подписи панели: заголовок (ветка) и примечание (файл).
+// MergeSideInfo — подписи панели: заголовок (обычно ветка) и примечание (обычно
+// путь файла) в строке шапки, и пояснение — «что это за сторона» — второй
+// строкой мелким приглушённым шрифтом.
 type MergeSideInfo struct {
 	Title, Note string
+	// Hint — пояснение под заголовком. Шапки верхних панелей растут на строку,
+	// когда пояснение есть хоть у одной видимой стороны: иначе код в соседних
+	// панелях начинался бы на разной высоте. Шапка итога растёт по своему.
+	Hint string
 }
 
 // mvSpan — экранные строки блока: [from, to) — одинаково во всех трёх верхних
@@ -92,6 +98,7 @@ type MergeView struct {
 
 	docs   [4]*dvDoc
 	sides  [3]MergeSideInfo
+	result MergeSideInfo // подписи итога: заголовок, примечание, пояснение
 	chunks []MergeChunk
 	res    []MergeResolution
 	spans  []mvSpan  // блок → экранные строки верхних панелей
@@ -306,6 +313,33 @@ func (m *MergeView) SetSides(ours, base, theirs MergeSideInfo) {
 		m.respliceUnresolvedLocked()
 		m.rebuildLocked()
 	})
+}
+
+// Sides возвращает подписи трёх сторон, заданные SetSides.
+func (m *MergeView) Sides() [3]MergeSideInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sides
+}
+
+// SetResultInfo задаёт подписи панели итога — как SetSides у сторон.
+// Пустой заголовок — прежний, из ключа merge.side.result. В маркеры конфликта
+// подписи итога не уходят: там git пишет стороны, а не итог.
+func (m *MergeView) SetResultInfo(info MergeSideInfo) {
+	m.do(func() {
+		m.result = info
+		r := m.docs[MergeResult]
+		r.title, r.note = info.Title, info.Note
+		// Пояснение меняет высоту шапки итога, а с ней — сколько строк видно.
+		m.clampScrollLocked()
+	})
+}
+
+// ResultInfo возвращает подписи панели итога.
+func (m *MergeView) ResultInfo() MergeSideInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.result
 }
 
 // SetChunks задаёт блоки слияния готовыми.
@@ -895,13 +929,38 @@ type mvGeom struct {
 	panes      int
 	headerTopY int
 	headerResY int
+	headerTopH int // высота шапок верхних панелей (с пояснением выше)
+	headerResH int // высота шапки итога
 }
 
 const (
 	mvSplitH  = 8  // толщина разделителя
 	mvHeaderH = 34 // высота заголовка панели
 	mvGutter  = 10 // промежуток между панелями
+	mvHintH   = 16 // строка пояснения в шапке
 )
+
+// mvHeaderHeight — высота шапки панели: с пояснением на строку выше.
+func mvHeaderHeight(hint bool) int {
+	if hint {
+		return mvHeaderH + mvHintH
+	}
+	return mvHeaderH
+}
+
+// topHeaderH — высота шапок верхних панелей: общая для всех видимых сторон,
+// чтобы код в соседних панелях начинался на одной высоте.
+func (m *MergeView) topHeaderH() int {
+	for i, s := range m.sides {
+		if i == int(MergeBase) && !m.showBase {
+			continue
+		}
+		if s.Hint != "" {
+			return mvHeaderHeight(true)
+		}
+	}
+	return mvHeaderH
+}
 
 func (m *MergeView) geom() mvGeom {
 	b := m.Bounds()
@@ -927,10 +986,12 @@ func (m *MergeView) geom() mvGeom {
 		x += w + mvGutter
 	}
 	g.headerTopY = inner.Min.Y + 4
-	g.ty0 = g.headerTopY + mvHeaderH + 6
+	g.headerTopH = m.topHeaderH()
+	g.ty0 = g.headerTopY + g.headerTopH + 6
 	g.ty1 = splitY - mvSplitH/2
 	g.headerResY = splitY + mvSplitH/2 + 4
-	g.ry0 = g.headerResY + mvHeaderH + 6
+	g.headerResH = mvHeaderHeight(m.result.Hint != "")
+	g.ry0 = g.headerResY + g.headerResH + 6
 	g.ry1 = inner.Max.Y
 	return g
 }
@@ -1261,13 +1322,20 @@ func (m *MergeView) AccessChildren() []AccessInfo {
 		s := m.docs[i]
 		name := s.title
 		if name == "" {
-			name = Tr("merge.empty")
+			// Как в шапке: скринридер называет панель тем же словом, что видно
+			// на экране, а не «(пусто)».
+			name = Tr(mvSideKey(MergeSide(i)))
 		}
 		info := AccessInfo{
 			Role:   RoleTextInput,
 			Name:   Trf(keys[i], name),
 			Value:  strings.Join(s.text.Lines, "\n"),
 			Bounds: r,
+		}
+		if i == int(MergeResult) {
+			info.Description = m.result.Hint
+		} else {
+			info.Description = m.sides[i].Hint
 		}
 		if s.readOnly {
 			info.States = append(info.States, StateReadOnly)

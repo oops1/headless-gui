@@ -83,22 +83,26 @@ func (m *MergeView) drawHeader(ctx DrawContext, g mvGeom, side MergeSide) {
 	p := &m.pal
 	s := m.docs[side]
 	x0, x1, _ := m.paneCodeXLocked(g, side)
-	y, h := g.headerTopY, mvHeaderH
+	y, h := g.headerTopY, g.headerTopH
+	hint := ""
 	if side == MergeResult {
-		y = g.headerResY
+		y, h = g.headerResY, g.headerResH
+		hint = m.result.Hint
+	} else {
+		hint = m.sides[side].Hint
 	}
 	edge := p.cardEdge
 	if m.focused && m.active == side {
 		edge = p.accent
 	}
 	dvRoundRect(ctx, p, x0, y, x1-x0, h, p.card, edge)
-	fillEllipse(ctx, x0+18, y+h/2, 5, 5, m.sideColor(side))
+	fillEllipse(ctx, x0+18, y+mvHeaderH/2, 5, 5, m.sideColor(side))
 
 	name := s.title
 	if name == "" {
 		name = Tr(mvSideKey(side))
 	}
-	ty := y + (h-17)/2
+	ty := y + (mvHeaderH-17)/2
 	tx := x0 + 32
 	ctx.DrawTextFont(name, tx, ty, m.fontSize, m.boldFont, p.text)
 	tx += ctx.MeasureTextFont(name, m.fontSize, m.boldFont) + 10
@@ -128,7 +132,7 @@ func (m *MergeView) drawHeader(ctx DrawContext, g mvGeom, side MergeSide) {
 		if n > 0 {
 			band = p.delBand
 		}
-		ctx.FillRoundRect(bx, y+7, bw, h-14, 10, band)
+		ctx.FillRoundRect(bx, y+7, bw, mvHeaderH-14, 10, band)
 		ctx.DrawText(badge, bx+8, ty, col)
 		right = bx - 10
 		if s.readOnly {
@@ -137,8 +141,16 @@ func (m *MergeView) drawHeader(ctx DrawContext, g mvGeom, side MergeSide) {
 	}
 	if s.note != "" && tx < right {
 		prev := ctx.Clip()
-		ctx.SetClip(image.Rect(tx, y, right, y+h).Intersect(prev))
+		ctx.SetClip(image.Rect(tx, y, right, y+mvHeaderH).Intersect(prev))
 		ctx.DrawText(s.note, tx, ty, p.muted)
+		ctx.SetClip(prev)
+	}
+	if hint != "" {
+		// Пояснение — второй строкой, мелко и приглушённо, с отступом заголовка;
+		// не влезло — обрезается краем карточки.
+		prev := ctx.Clip()
+		ctx.SetClip(image.Rect(x0+32, y, x1-10, y+h).Intersect(prev))
+		ctx.DrawTextSize(hint, x0+32, y+mvHeaderH-6, m.fontSize-1.5, p.muted)
 		ctx.SetClip(prev)
 	}
 }
