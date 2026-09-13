@@ -382,6 +382,25 @@ tb.Overflow = true     // what does not fit goes into a chevron menu
 tb.OverflowCount()     // how many items did not fit
 ```
 
+Buttons with an arrow are `MenuButton`. A split button (`NewSplitButton`) runs
+its action from the main part and opens the menu from the arrow; a plain one
+(`NewMenuButton`) opens the menu from anywhere:
+
+```go
+pull := widget.NewSplitButton("Pull", doPull)
+pull.OnOpening = func() {                 // before every open
+    pull.Items = []widget.MenuItem{{Text: "Fetch", OnClick: doFetch}}
+}
+apply := widget.NewSplitButton("Apply Stash", applyStash)
+apply.SetActionEnabled(false)             // action unavailable, menu still is
+flow := widget.NewMenuButton("Git-Flow")  // the whole button is a menu
+tb.AddChild(pull)
+```
+
+The menu opens below the button, pressing the arrow again closes it, ↓ opens it
+from the keyboard. In an overflowing toolbar such a button becomes a submenu. In
+markup — `<SplitButton>` and `<MenuButton>` with nested `<MenuItem>`.
+
 In XAML — `<ToolBarTray>` and `<ToolBar>` with `IconsOnly`, `Overflow` and the
 `<Separator/>` element:
 
@@ -1423,6 +1442,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `Grid` | Grid | `ShowGridLines`, `Grid.RowDefinitions`, `Grid.ColumnDefinitions` |
 | `Label`, `TextBlock` | Label | `Text`, `Foreground`, `Background`, `TextWrapping`, `FontSize` |
 | `Button`, `ToggleButton`, `RepeatButton` | Button | `Content`, `Style="Accent"`, `HoverBG`, `PressedBG`, `Background`, `Foreground`, `BorderBrush` |
+| `SplitButton`, `MenuButton` | MenuButton | `Button` attributes; nested `<MenuItem>`; `Split`, `IsActionEnabled`, `IsMenuEnabled` |
 | `TextBox` | TextInput | `Placeholder`, `Text`, `Foreground` |
 | `PasswordBox` | TextInput (password) | `Placeholder`, `Text` |
 | `ComboBox` | Dropdown | `Items`, `SelectedIndex`, child `<ComboBoxItem>`, `ArrowStyle` |
@@ -2870,6 +2890,19 @@ tools.OnStateChanged = func(p *widget.DockPane) {
     log.Println(p.Title, "→", p.State()) // docked/autohidden/floating/closed
 }
 ```
+
+Your own buttons in a pane's title bar sit to the left of the built-in ones:
+
+```go
+branches.SetTitleButtons([]widget.DockPaneButton{
+    {Icon: githubIcon, Tooltip: "Refresh from GitHub", OnClick: refresh},
+    {Tooltip: "View", MenuFunc: viewMenu}, // no icon — "≡", menu below the button
+})
+branches.SetTitleButtonHidden(0, !onGitHub) // without rebuilding the list
+```
+
+The icon is recolored to the title text color, like the built-in glyphs
+(`KeepIconColors` keeps its own colors). Each button has its own tooltip.
 
 Layout can be saved and restored (JSON, panes matched by `ID`):
 

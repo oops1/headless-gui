@@ -382,6 +382,25 @@ tb.Overflow = true     // не поместившиеся уходят в мен
 tb.OverflowCount()     // сколько элементов не поместилось
 ```
 
+Кнопки со стрелкой — `MenuButton`. Разделённая (`NewSplitButton`) выполняет
+действие основной частью, а стрелкой открывает меню; простая (`NewMenuButton`)
+открывает меню вся:
+
+```go
+pull := widget.NewSplitButton("Pull", doPull)
+pull.OnOpening = func() {                 // перед каждым открытием
+    pull.Items = []widget.MenuItem{{Text: "Fetch", OnClick: doFetch}}
+}
+apply := widget.NewSplitButton("Apply Stash", applyStash)
+apply.SetActionEnabled(false)             // действие недоступно, меню — есть
+flow := widget.NewMenuButton("Git-Flow")  // вся кнопка — меню
+tb.AddChild(pull)
+```
+
+Меню встаёт под кнопкой, повторное нажатие по стрелке его закрывает, ↓ открывает
+его с клавиатуры. В переполненной панели такая кнопка становится подменю. В
+разметке — `<SplitButton>` и `<MenuButton>` с вложенными `<MenuItem>`.
+
 В XAML — `<ToolBarTray>` и `<ToolBar>` с атрибутами `IconsOnly`, `Overflow` и
 элементом `<Separator/>`:
 
@@ -1426,6 +1445,7 @@ root Canvas (0,0)
 | `Grid` | Grid | `ShowGridLines`, `Grid.RowDefinitions`, `Grid.ColumnDefinitions` |
 | `Label`, `TextBlock` | Label | `Text`, `Foreground`, `Background`, `TextWrapping`, `FontSize` |
 | `Button`, `ToggleButton`, `RepeatButton` | Button | `Content`, `Style="Accent"`, `HoverBG`, `PressedBG`, `Background`, `Foreground`, `BorderBrush` |
+| `SplitButton`, `MenuButton` | MenuButton | атрибуты `Button`; вложенные `<MenuItem>`; `Split`, `IsActionEnabled`, `IsMenuEnabled` |
 | `TextBox` | TextInput | `Placeholder`, `Text`, `Foreground` |
 | `PasswordBox` | TextInput (пароль) | `Placeholder`, `Text` |
 | `ComboBox` | Dropdown | `Items`, `SelectedIndex`, дочерние `<ComboBoxItem>`, `ArrowStyle` |
@@ -2893,6 +2913,19 @@ mgr.ActivatePane(props)   // сменить активную (не только 
 props.IsActive()          // спросить
 props.TitleTextActive = c // цвет заголовка именно на акцентном фоне
 ```
+
+Свои кнопки в заголовке панели стоят слева от штатных:
+
+```go
+branches.SetTitleButtons([]widget.DockPaneButton{
+    {Icon: githubIcon, Tooltip: "Обновить с GitHub", OnClick: refresh},
+    {Tooltip: "Вид", MenuFunc: viewMenu}, // без значка — «≡», меню под кнопкой
+})
+branches.SetTitleButtonHidden(0, !onGitHub) // без перестройки списка
+```
+
+Значок перекрашивается в цвет текста заголовка, как глифы штатных кнопок
+(`KeepIconColors` оставляет его цвета). У каждой кнопки своя подсказка.
 
 `OnStateChanged` приходит и на смену активной панели — обеим, прежней и новой.
 Это нужно тому, кто вычисляет цвет заголовка из фона: фонов у титлбара два, и
