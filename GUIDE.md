@@ -1309,6 +1309,10 @@ eng.SetTheme(t)
 - DataGrid header: `HeaderBG`, `HeaderText`
 - Системные: `Accent`, `Disabled`, `Scrollbar`
 - Рамка окна: `WindowFrame` (см. «Window»)
+- Текст добавленного и удалённого: `DiffAddText`, `DiffDelText` — «+42» и «−7»
+  в списке изменений. Полосы `DiffAddStrong`/`DiffDelStrong` смешаны с фоном,
+  и текст ими выходит бледным; эти же пресеты подбирают под фон поля ввода с
+  контрастом не ниже 4,5:1.
 - Код и сравнение: `DiffAddBG`, `DiffAddStrong`, `DiffDelBG`, `DiffDelStrong`,
   `TextSelectionBG`, `SyntaxKeyword`, `SyntaxString`, `SyntaxComment`,
   `SyntaxNumber`, `SyntaxFunc` — ими рисует `DiffView`, их же может брать свой

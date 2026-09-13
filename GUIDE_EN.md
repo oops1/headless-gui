@@ -1306,6 +1306,10 @@ The theme contains 80+ color tokens, grouped by widget:
 - DataGrid header: `HeaderBG`, `HeaderText`
 - System: `Accent`, `Disabled`, `Scrollbar`
 - Window frame: `WindowFrame` (see "Window")
+- Added and deleted text: `DiffAddText`, `DiffDelText` — "+42" and "−7" in a
+  change list. The bands `DiffAddStrong`/`DiffDelStrong` are mixed with the
+  background and look washed out as text; presets pick these to the input
+  background with a contrast of at least 4.5:1.
 - Code and diff: `DiffAddBG`, `DiffAddStrong`, `DiffDelBG`, `DiffDelStrong`,
   `TextSelectionBG`, `SyntaxKeyword`, `SyntaxString`, `SyntaxComment`,
   `SyntaxNumber`, `SyntaxFunc` — `DiffView` draws with them, and your own code

@@ -4050,7 +4050,7 @@ Tab inserts a tab into the result. Strings — `merge.*` keys; colors — the sa
 
 Model without the view lives in `widget/diffview` (Myers line diff with
 paragraph-sliding, intra-line range, tokenizer, text decode/encode). Strings:
-`diff.*` keys. Colors: theme fields `DiffAddBG`, `DiffAddStrong`, `DiffDelBG`,
+`diff.*` keys. Colors: theme fields `DiffAddText`/`DiffDelText` (text colors, picked to ≥ 4.5:1 contrast on `InputBG` via `readableOn`), `DiffAddBG`, `DiffAddStrong`, `DiffDelBG`,
 `DiffDelStrong`, `TextSelectionBG`, `Syntax*`. Only glyphs present in the Go
 fonts are used (`…`, not `⋯`) so golden frames match on every OS. Demo:
 `cmd/diffdemo` (`-shot dir` renders check frames headlessly).
