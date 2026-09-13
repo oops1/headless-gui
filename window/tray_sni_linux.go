@@ -106,6 +106,9 @@ type linuxTray struct {
 	revision uint32            // ревизия раскладки меню (растёт при смене)
 
 	onTrayClick func(button int, doubleClick bool)
+	// menuRun — куда отдавать выбор пункта меню: очередь движка окна
+	// (setTrayMenuRunner). nil — отдельная горутина, как до очереди.
+	menuRun func(fn func())
 }
 
 // ─── trayHost: иконка ────────────────────────────────────────────────────────
@@ -462,20 +465,34 @@ func (t *linuxTray) handleMenuMember(msg *dbusMessage) *dbusReply {
 // activateItem выполняет выбор пункта меню: OnClick пункта и OnSelect меню
 // (индекс — в СВОЁМ списке, как у нашего widget.PopupMenu: у вложенного пункта
 // это индекс внутри подменю). Разделители и выключенные пункты игнорируются.
-// Колбэки уходят в отдельную горутину — ответ панели не должен ждать UI.
+// Ответ панели не ждёт колбэков: они уходят в очередь движка окна — там же
+// выполняются обработчики виджетов (GG-68), — а без неё в отдельную горутину.
 func (t *linuxTray) activateItem(menu *widget.PopupMenu, e *dbusmenuEntry) {
 	if e == nil || e.id == 0 || e.item.Separator || e.item.Disabled {
 		return
 	}
 	onClick, idx, text := e.item.OnClick, e.index, e.item.Text
-	go func() {
+	t.trayMu.Lock()
+	run := t.menuRun
+	t.trayMu.Unlock()
+	if run == nil {
+		run = func(fn func()) { go fn() }
+	}
+	run(func() {
 		if onClick != nil {
 			onClick()
 		}
 		if menu != nil && menu.OnSelect != nil {
 			menu.OnSelect(idx, text)
 		}
-	}()
+	})
+}
+
+// setTrayMenuRunner задаёт, где выполнять выбор пункта меню (очередь движка).
+func (t *linuxTray) setTrayMenuRunner(run func(fn func())) {
+	t.trayMu.Lock()
+	t.menuRun = run
+	t.trayMu.Unlock()
 }
 
 // ─── Дерево меню ─────────────────────────────────────────────────────────────
