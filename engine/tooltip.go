@@ -114,9 +114,18 @@ func (e *Engine) tooltipMayAppear(frameInterval time.Duration) bool {
 }
 
 // tooltipAt возвращает ToolTip самого глубокого видимого виджета под (x, y).
+//
+// Виджет, у разных частей которого разные подсказки (кнопки в заголовке
+// панели), отвечает через ToolTipAt(x, y); пустой ответ — спросить его общую
+// подсказку.
 func tooltipAt(root widget.Widget, x, y int) string {
 	path := hitTestPath(root, x, y)
 	for i := len(path) - 1; i >= 0; i-- {
+		if tp, ok := path[i].(interface{ ToolTipAt(x, y int) string }); ok {
+			if s := tp.ToolTipAt(x, y); s != "" {
+				return s
+			}
+		}
 		if tp, ok := path[i].(interface{ GetToolTip() string }); ok {
 			if s := tp.GetToolTip(); s != "" {
 				return s

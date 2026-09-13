@@ -59,6 +59,9 @@ const (
 	dockBtnPin
 )
 
+// dockBtnCustom + i — i-я кнопка приложения в заголовке (SetTitleButtons).
+const dockBtnCustom dockPaneBtn = 100
+
 const (
 	dockPaneTitleH  = 24 // высота титлбара панели (px)
 	dockPaneBtnSize = 18 // сторона кнопки титлбара (px)
@@ -143,6 +146,17 @@ type DockPane struct {
 	resizeStart  image.Rectangle
 	resizeStartX int
 	resizeStartY int
+
+	// titleBtns — кнопки приложения в заголовке (dockpane_titlebuttons.go).
+	titleBtns []DockPaneButton
+	// titleTint — их значки, перекрашенные в цвет заголовка (по индексу).
+	titleTint []dockTintedIcon
+	// menu — меню кнопки заголовка; menuFor — индекс кнопки, чьё оно.
+	menu    rowMenuHost
+	menuFor int
+	// skipActivate — отпускание над кнопкой ничего не делает: нажатие по ней
+	// закрыло её же меню или кнопка выключена.
+	skipActivate bool
 }
 
 // NewDockPane создаёт панель докинга с идентификатором id, заголовком title и
@@ -257,6 +271,7 @@ func (p *DockPane) Show() {
 // (dismissOutside), поэтому клик по центру/другой панели сворачивает flyout —
 // как клик мимо dropdown. Для не-flyout панелей — no-op.
 func (p *DockPane) Dismiss() {
+	p.menu.dismiss() // меню кнопки заголовка — как любой выпадающий список
 	if p.mgr != nil && p.mgr.flyoutPane == p {
 		p.mgr.closeFlyout()
 	}
@@ -351,19 +366,19 @@ func (p *DockPane) Draw(ctx DrawContext) {
 	ctx.FillRect(tb.Min.X, tb.Min.Y, tb.Dx(), tb.Dy(), tbg)
 
 	// Заголовок (обрезаем эллипсисом до левого края кнопок).
-	_, _, pinR := p.buttonRects()
 	textX := tb.Min.X + 6
 	textY := tb.Min.Y + (tb.Dy()-13)/2
 	title := p.Title
-	if maxW := pinR.Min.X - 4 - textX; maxW <= 0 {
+	if maxW := p.titleTextLimit() - 4 - textX; maxW <= 0 {
 		title = ""
 	} else {
 		title = ellipsizeText(ctx, title, maxW, DefaultFontSizePt)
 	}
 	ctx.DrawText(title, textX, textY, ttext)
 
-	// Кнопки титлбара.
+	// Кнопки титлбара: штатные и приложения.
 	p.drawButtons(ctx)
+	p.drawTitleButtons(ctx)
 
 	// Содержимое.
 	if p.content != nil && IsWidgetVisible(p.content) {
@@ -488,7 +503,7 @@ func (p *DockPane) titleDragHit(x, y int) bool {
 	if pt.In(closeR) || pt.In(floatR) || pt.In(pinR) {
 		return false
 	}
-	return true
+	return p.titleButtonAt(pt) < 0
 }
 
 // WantsCapture захватывает мышь при нажатии на кнопку, титлбар или кромку
@@ -499,7 +514,7 @@ func (p *DockPane) WantsCapture(e MouseEvent) bool {
 	}
 	pt := image.Pt(e.X, e.Y)
 	closeR, floatR, pinR := p.buttonRects()
-	if pt.In(closeR) || pt.In(floatR) || pt.In(pinR) {
+	if pt.In(closeR) || pt.In(floatR) || pt.In(pinR) || p.titleButtonAt(pt) >= 0 {
 		return true
 	}
 	if p.floatingResizeEdgeAt(e.X, e.Y) != edgeNone {
@@ -526,6 +541,14 @@ func (p *DockPane) Cursor(x, y int) Cursor {
 // OnMouseButton обрабатывает кнопки титлбара (release-семантика), начало/конец
 // drag за титлбар и ресайза плавающей панели.
 func (p *DockPane) OnMouseButton(e MouseEvent) bool {
+	// Открытое меню кнопки заголовка разбирает событие первым.
+	menuFor := -1
+	if p.menu.open() {
+		menuFor = p.menuFor
+	}
+	if p.menu.routeMouse(e) {
+		return true
+	}
 	if e.Button != MouseLeft {
 		return false
 	}
@@ -533,6 +556,15 @@ func (p *DockPane) OnMouseButton(e MouseEvent) bool {
 	closeR, floatR, pinR := p.buttonRects()
 
 	if e.Pressed {
+		// Кнопка приложения — тоже release-семантика. Нажатие по кнопке, чьё
+		// меню было открыто, его закрыло (routeMouse выше) и заново не
+		// открывает; выключенная кнопка нажатие поглощает молча.
+		if i := p.titleButtonAt(pt); i >= 0 {
+			p.armedBtn = dockBtnCustom + dockPaneBtn(i)
+			p.skipActivate = i == menuFor || p.titleBtns[i].Disabled
+			p.Invalidate()
+			return true
+		}
 		// Кнопки — «взводим» (колбэк на release).
 		switch {
 		case pt.In(closeR):
@@ -608,6 +640,8 @@ func (p *DockPane) OnMouseButton(e MouseEvent) bool {
 	if p.armedBtn != dockBtnNone {
 		armed := p.armedBtn
 		p.armedBtn = dockBtnNone
+		skip := p.skipActivate
+		p.skipActivate = false
 		p.Invalidate()
 		over := false
 		switch armed {
@@ -617,6 +651,8 @@ func (p *DockPane) OnMouseButton(e MouseEvent) bool {
 			over = pt.In(floatR)
 		case dockBtnPin:
 			over = pt.In(pinR)
+		default:
+			over = !skip && p.titleButtonAt(pt) == int(armed-dockBtnCustom)
 		}
 		if p.capMgr != nil {
 			p.capMgr.ReleaseCapture()
@@ -637,6 +673,8 @@ func (p *DockPane) OnMouseButton(e MouseEvent) bool {
 				} else {
 					p.Unpin()
 				}
+			default:
+				p.activateTitleButton(int(armed-dockBtnCustom), pt)
 			}
 		}
 		return true
@@ -667,6 +705,10 @@ func (p *DockPane) OnMouseMove(x, y int) {
 		}
 		return
 	}
+	// Курсор над открытым меню кнопки заголовка — подсветка его пунктов.
+	if p.menu.routeMove(x, y) {
+		return
+	}
 	// hover кнопок.
 	pt := image.Pt(x, y)
 	closeR, floatR, pinR := p.buttonRects()
@@ -678,6 +720,10 @@ func (p *DockPane) OnMouseMove(x, y int) {
 		hb = dockBtnFloat
 	case pt.In(pinR):
 		hb = dockBtnPin
+	default:
+		if i := p.titleButtonAt(pt); i >= 0 && !p.titleBtns[i].Disabled {
+			hb = dockBtnCustom + dockPaneBtn(i)
+		}
 	}
 	if hb != p.hoverBtn {
 		p.hoverBtn = hb
