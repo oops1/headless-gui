@@ -1885,6 +1885,14 @@ elsewhere moves the visible area there. From code — `Scroll`/`SetScroll` (the
 top panes), `ResultScroll`/`SetResultScroll` (the result) and
 `ScrollToLine(side, line)`.
 
+The top panes and the result scroll **together, by chunk**: scrolling the
+result to a conflict shows the same side lines on top. The mapping is
+piecewise linear over chunk boundaries — a chunk that takes one row on top and
+five marker lines in the result is stretched, and neighbouring chunks still
+line up; at the start and end of the file both parts reach their edge at the
+same time. The part scrolled or edited last leads — editing the result does not
+jerk its scroll. Separate scrolling — `SetSyncScroll(false)`.
+
 ```xml
 <MergeView x:Name="merge" BaseFile="base.go" OursFile="ours.go" TheirsFile="theirs.go"
            ShowBase="True" ConflictStyle="diff3" MarkerSize="7" ReadOnly="False"
