@@ -381,7 +381,7 @@ func desiredHeight(w Widget) int {
 			fs = DefaultFontSizePt
 		}
 		return int(fs*1.5+0.5) + v.PaddingY*2
-	case *Button:
+	case *Button, *MenuButton:
 		return 32
 	case *TextInput:
 		return 26
@@ -470,6 +470,9 @@ func desiredWidth(w Widget) int {
 		// кнопке 80 хватало, не меняются. Кнопку уже задают Width в разметке или
 		// ToolBar, который меряет кнопки впритык той же функцией.
 		return max(80, buttonContentWidth(v, desiredHeight(v)))
+	case *MenuButton:
+		// Та же ширина по содержимому плюс зона стрелки (GG-78).
+		return max(80, buttonContentWidth(v.Button, desiredHeight(v))+menuButtonArrowW)
 	case *CheckBox:
 		// Как кнопка: по содержимому, не уже прежних 80 (GG-69 — пара к GG-66).
 		return max(80, checkBoxContentWidth(v))

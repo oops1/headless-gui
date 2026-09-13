@@ -548,6 +548,7 @@ Mapping of XAML tags to Go types with key attributes.
 | XAML Tag | Go Type | Key Attributes |
 |----------|---------|-----------------|
 | `<Button>` | `Button` | `Content`, `Width`, `Height`, `Background`, `Foreground` |
+| `<SplitButton>`, `<MenuButton>` | `MenuButton` | `Button` attributes + nested `<MenuItem>`; `Split`, `IsActionEnabled`, `IsMenuEnabled` |
 | `<Label>` | `Label` | `Content`, `Foreground`, `Background`, `FontSize` |
 | `<TextBox>` | `TextInput` | `Text`, `PlaceholderText`, `Width`, `Height`, `AcceptsReturn`, `MaxLength` |
 | `<PasswordBox>` | `TextInput` | (created with NewPasswordInput) |
@@ -579,7 +580,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
 | `<DatePicker>` | `DatePicker` | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd` (ISO 8601 or invariant M/d/yyyy), `DateFormat` (.NET pattern or Go layout), `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `<DockManager>` | `DockManager` | `Background`, `NativeFloating` (see "Docking") + children `<DockPane>`×N, one `<DockContent>` |
-| `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
+| `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `MinSize` (px, min of its side), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
 | `<DockContent>` | (marker, not a widget) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
 
 ### XAML Color Values
@@ -817,6 +818,17 @@ tb := widget.NewToolBar(); tb.AddSeparator(); tb.SetIconsOnly(true)
 // XAML: <ToolBar IconsOnly="True" Overflow="True"><Separator/></ToolBar>
 // NOTE: <ToolBar> now builds *widget.ToolBar, not *widget.StackPanel.
 
+// MenuButton (v3.20): button with a drop-down menu.
+pull := widget.NewSplitButton("Pull", doPull) // main part = action, arrow = menu
+flow := widget.NewMenuButton("Git-Flow")      // whole button opens the menu
+pull.Items = []widget.MenuItem{...}; pull.OnOpening = func() { /* rebuild Items */ }
+pull.SetActionEnabled(false); pull.SetMenuEnabled(true) // parts enabled separately
+pull.OpenMenu(); pull.CloseMenu(); pull.IsMenuOpen()
+// Keys: ↓ opens; Enter/Space = action (split) or menu (plain). In ToolBar width
+// includes the arrow, IconsOnly applies, overflow turns it into a submenu.
+// XAML: <SplitButton Content="Pull"><MenuItem Header="Fetch"/></SplitButton>
+// NOTE: *MenuButton embeds *Button but is a different type — w.(*widget.Button) misses it.
+
 // Tree drag & drop (off by default — dragging changes what a click does).
 tw.Tree.CanUserDragNodes = true
 tw.Tree.CanDropNode = func(d, target *treeview.TreeViewItem, p treeview.DropPosition) bool
@@ -874,6 +886,19 @@ pane.IsActive() bool
 pane.TitleTextActive = col // title color on the accent background of an
                            // active pane; zero alpha = same as inactive.
 // OnStateChanged now fires on an active-pane change too (old and new pane).
+
+// App buttons in the title bar (v3.20), left of the built-in pin/float/close:
+pane.SetTitleButtons([]widget.DockPaneButton{
+    {Icon: img, Tooltip: "Refresh", OnClick: fn},       // icon tinted to title text color
+    {Tooltip: "View", MenuFunc: func() []widget.MenuItem { ... }}, // nil Icon → "≡", menu below
+}) // fields: Icon, KeepIconColors, Tooltip, OnClick, Menu, MenuFunc, Hidden, Disabled
+pane.SetTitleButtonHidden(i, true); pane.SetTitleButtonDisabled(i, true); pane.TitleButtons()
+// Engine asks ToolTipAt(x, y) string before GetToolTip — per-part tooltips for any widget.
+
+// Per-pane side minimum (v3.20): side min = max(MinSideSize, MinSize of its DOCKED panes);
+// the splitter stops there; in a cramped manager it yields to the center.
+pane.MinSize = 300; pane.SetMinSize(300)   // XAML: <DockPane MinSize="300">
+mgr.OnSideResized = func(side widget.DockSide, size int) {} // on splitter release + after RestoreLayout
 ```
 
 ### ToggleButton — persistent pressed state
