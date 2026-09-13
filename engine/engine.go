@@ -63,6 +63,7 @@ type Engine struct {
 	pacing      atomic.Uint32
 	frameWanted atomic.Bool
 	wake        chan struct{}
+	loopGID     atomic.Uint64 // горутина цикла кадров; 0 — цикл не идёт (см. Flush)
 	sinkMu      sync.RWMutex
 	sink        FrameSink
 
@@ -342,7 +343,7 @@ func New(width, height, fps int) *Engine {
 	// Регистрация со снятием: остановленный движок возвращает измеритель
 	// предыдущему живому вместо того, чтобы оставить свой мёртвый холст.
 	e.measurerHandle = widget.RegisterMeasurers(widget.Measurers{
-		Text:     e.canvas.MeasureText,
+		Text: e.canvas.MeasureText,
 		TextFont: func(text string, sizePt float64, family string) int {
 			return e.canvas.MeasureTextFont(text, sizePt, family)
 		},
@@ -816,7 +817,11 @@ func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
 // гонка с внутренним циклом исчезает по построению.
 func (e *Engine) RenderFrameNow() output.Frame {
 	// Как и RenderOnce: без запущенного цикла очередь Post разбирать некому.
-	e.runPosted()
+	// С запущенным её разбирает только цикл — иначе две пачки отложенной
+	// работы пошли бы параллельно на разных горутинах.
+	if !e.loopRunning() {
+		e.runPosted()
+	}
 	return e.renderFrame()
 }
 
@@ -854,8 +859,11 @@ func (e *Engine) logicalDamage(rects []image.Rectangle) []image.Rectangle {
 func (e *Engine) RenderOnce() *image.RGBA {
 	// Без Start() цикла кадров нет, и очередь Post разбирать некому — значит
 	// разбираем здесь: приложение попросило кадр, и отложенная работа обязана
-	// попасть именно в него.
-	e.runPosted()
+	// попасть именно в него. С запущенным циклом очередь — только его: Post
+	// обещает одну горутину, и вторая пачка здесь её нарушила бы.
+	if !e.loopRunning() {
+		e.runPosted()
+	}
 	e.renderFrame()
 
 	e.mu.RLock()
@@ -869,6 +877,13 @@ func (e *Engine) RenderOnce() *image.RGBA {
 	out := image.NewRGBA(canvas.front.Rect)
 	copy(out.Pix, canvas.front.Pix)
 	return out
+}
+
+// loopRunning — цикл кадров запущен и не остановлен: очередь Post разбирает
+// он и только он. По флагам Start/Stop, а не по loopGID: сразу после Start
+// горутина цикла может ещё не успеть записать свой номер, а очередь уже его.
+func (e *Engine) loopRunning() bool {
+	return e.started.Load() && !e.stopped.Load()
 }
 
 // Start запускает цикл рендеринга в отдельной горутине.
@@ -925,6 +940,15 @@ func (e *Engine) Stop() {
 // в стриминговых сценариях передаётся side-channel'ом рядом с тайлами кадра
 // и озвучивается скринридером на стороне клиента.
 func (e *Engine) AccessibilityTree() *widget.AccessNode {
+	var tree *widget.AccessNode
+	e.callOnLoop(func() { tree = e.accessibilityTreeNow() })
+	return tree
+}
+
+// accessibilityTreeNow — AccessibilityTree на горутине движка: снимок обходит
+// дерево виджетов, а мост доступности снимает его со своей горутины — обход
+// шёл бы одновременно с обработчиками и отрисовкой.
+func (e *Engine) accessibilityTreeNow() *widget.AccessNode {
 	e.mu.RLock()
 	root := e.root
 	e.mu.RUnlock()
@@ -960,6 +984,14 @@ func (e *Engine) AccessibilityTree() *widget.AccessNode {
 // Возвращает false, если виджет nil, не умеет принимать фокус (не реализует
 // widget.Focusable), скрыт или выключен — фокус в таких случаях не двигается.
 func (e *Engine) FocusAccessible(w widget.Widget) bool {
+	ok := false
+	e.callOnLoop(func() { ok = e.focusAccessibleNow(w) })
+	return ok
+}
+
+// focusAccessibleNow — FocusAccessible на горутине движка: фокус зовёт
+// обработчики виджетов, а мост доступности приходит со своей горутины.
+func (e *Engine) focusAccessibleNow(w widget.Widget) bool {
 	if !accessibleActionable(w) {
 		return false
 	}
@@ -989,6 +1021,15 @@ func (e *Engine) FocusAccessible(w widget.Widget) bool {
 //
 // Возвращает false, если виджет nil, скрыт, выключен или его границы пусты.
 func (e *Engine) ActivateAccessible(w widget.Widget) bool {
+	ok := false
+	e.callOnLoop(func() { ok = e.activateAccessibleNow(w) })
+	return ok
+}
+
+// activateAccessibleNow — ActivateAccessible на горутине движка: синтетический
+// клик идёт штатным путём ввода, и его обработчики — на той же горутине, что
+// обработчики настоящей мыши.
+func (e *Engine) activateAccessibleNow(w widget.Widget) bool {
 	if !accessibleActionable(w) {
 		return false
 	}
@@ -1255,6 +1296,8 @@ func savePNG(img *image.RGBA, path string) {
 
 func (e *Engine) loop() {
 	defer close(e.done)
+	e.loopGID.Store(curGoroutineID())
+	defer e.loopGID.Store(0)
 
 	interval := time.Duration(float64(time.Second) / float64(e.fps))
 	ticker := time.NewTicker(interval)
@@ -1263,6 +1306,9 @@ func (e *Engine) loop() {
 	// lastGen — поколение инвалидации, отрендеренное последним кадром
 	// (on-demand). Сентинел гарантирует рендер первого кадра.
 	lastGen := ^uint64(0)
+	// lastFrameAt — когда рисовался последний кадр: кадр по пробуждению не
+	// должен идти чаще темпа кадров.
+	var lastFrameAt time.Time
 
 	for {
 		select {
@@ -1270,12 +1316,34 @@ func (e *Engine) loop() {
 			// Отложенные вызовы разбираем ПЕРВЫМИ: они меняют дерево, и их
 			// изменения должны попасть в тот же кадр, а не в следующий.
 			e.runPosted()
-			// Внешний темп: сток попросил кадр. Анимации продвигаются в
-			// тикере, здесь — только кадр.
-			if !e.pacingIsExternal() || !e.takeFrameRequest() {
+			if e.pacingIsExternal() {
+				// Внешний темп: кадр — только по запросу стока. Анимации
+				// продвигаются в тикере, здесь — только кадр.
+				if !e.takeFrameRequest() {
+					continue
+				}
+				frame := e.renderFrame()
+				lastFrameAt = time.Now()
+				if len(frame.Tiles) == 0 && len(frame.Moves) == 0 {
+					continue
+				}
+				e.deliver(frame)
 				continue
 			}
+			// Тикерный темп: через очередь приходит ввод окна, и его результат
+			// должен появиться сразу, а не на следующем тике. Но не чаще темпа
+			// кадров — мышь шлёт сотни событий в секунду, и кадр на каждое был
+			// бы работой впустую; не нарисованное здесь нарисует тикер.
+			if !e.onDemand.Load() || time.Since(lastFrameAt) < interval {
+				continue
+			}
+			gen := e.invGen.Load()
+			if gen == lastGen {
+				continue
+			}
+			lastGen = gen
 			frame := e.renderFrame()
+			lastFrameAt = time.Now()
 			if len(frame.Tiles) == 0 && len(frame.Moves) == 0 {
 				continue
 			}
@@ -1306,6 +1374,7 @@ func (e *Engine) loop() {
 				lastGen = gen // снимаем ДО рендера: инвалидация во время кадра не потеряется
 			}
 			frame := e.renderFrame()
+			lastFrameAt = time.Now()
 			// Кадр из ОДНИХ переносов — полноценный кадр: окно переехало,
 			// пикселей не изменилось, и потребителю есть что выполнить.
 			// Проверка только по тайлам отбрасывала его молча.
