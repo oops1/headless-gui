@@ -1,10 +1,6 @@
 package engine
 
-import (
-	"bytes"
-	"runtime"
-	"strconv"
-)
+import "github.com/oops1/headless-gui/v3/internal/goid"
 
 // curGoroutineID — номер текущей горутины.
 //
@@ -12,13 +8,4 @@ import (
 // ровно для одного: понять, что Flush зовут из горутины самого движка, — ждать
 // там завершения собственной очереди значило бы повиснуть навсегда. Стоит
 // около микросекунды, поэтому на горячем пути не используется.
-func curGoroutineID() uint64 {
-	var buf [64]byte
-	n := runtime.Stack(buf[:], false)
-	b := bytes.TrimPrefix(buf[:n], []byte("goroutine "))
-	if i := bytes.IndexByte(b, ' '); i > 0 {
-		b = b[:i]
-	}
-	id, _ := strconv.ParseUint(string(b), 10, 64)
-	return id
-}
+func curGoroutineID() uint64 { return goid.Current() }

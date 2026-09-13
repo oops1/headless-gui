@@ -1298,6 +1298,9 @@ func (e *Engine) loop() {
 	defer close(e.done)
 	e.loopGID.Store(curGoroutineID())
 	defer e.loopGID.Store(0)
+	// Анимации, заведённые на горутине цикла, шагает только этот движок: у
+	// вторичного движка диалога свои обработчики и своя горутина (GG-68).
+	defer widget.BindAnimationLoop(e)()
 
 	interval := time.Duration(float64(time.Second) / float64(e.fps))
 	ticker := time.NewTicker(interval)
@@ -1359,7 +1362,7 @@ func (e *Engine) loop() {
 			// damage от тиков попадёт в invGen ниже и кадр перерисуется
 			// частично. Вызывается в любом режиме — анимации живут и при
 			// SetRenderOnDemand(false).
-			widget.StepAnimations(time.Now())
+			widget.StepAnimationsFor(e, time.Now())
 			// Внешний темп: кадры готовит RequestFrame. Анимации всё равно
 			// продвигаем — иначе начатая приложением анимация замерла бы до
 			// следующего запроса и шла бы рывками.
