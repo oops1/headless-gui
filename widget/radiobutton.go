@@ -122,6 +122,17 @@ func (rb *RadioButton) deselectOthers() {
 	}
 }
 
+// radioButtonContentWidth — ширина переключателя по содержимому: кружок,
+// отступ, подпись и запас под пунктирную рамку фокуса классики. Отрисовка
+// (Draw) ставит подпись ровно так же: кружок 16, отступ 6, общий кегль.
+func radioButtonContentWidth(rb *RadioButton) int {
+	const diam, textPad, focusPad = 16, 6, 4
+	if rb.Text == "" {
+		return diam
+	}
+	return diam + textPad + MeasureUIText(rb.Text, DefaultFontSizePt) + focusPad
+}
+
 // Draw рисует RadioButton: кружок 16×16 слева + текст справа.
 func (rb *RadioButton) Draw(ctx DrawContext) {
 	b := rb.bounds
