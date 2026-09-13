@@ -1,4 +1,4 @@
-// theme_bindings.go — таблица привязок 73 цветовых полей widget.Theme к
+// theme_bindings.go — таблица привязок 75 цветовых полей widget.Theme к
 // адресам в модели токенов theme.Profile/theme.Theme.
 //
 // Ровно ОДНА таблица обслуживает оба направления моста (theme_bridge.go):
@@ -144,6 +144,12 @@ var legacyBindings = []legacyBinding{
 		style: theme.StyleKey{Component: "diffview", Part: "deleted"}, role: roleFill},
 	{name: "DiffDelStrong", field: func(t *Theme) *color.RGBA { return &t.DiffDelStrong },
 		style: theme.StyleKey{Component: "diffview", Part: "deleted-inline"}, role: roleFill},
+	// Цвета текста добавленного и удалённого — роль текста, а не заливки: у
+	// одной части стиля «added» заливка — полоса строки, а текст — отдельно.
+	{name: "DiffAddText", field: func(t *Theme) *color.RGBA { return &t.DiffAddText },
+		style: theme.StyleKey{Component: "diffview", Part: "added"}, role: roleText},
+	{name: "DiffDelText", field: func(t *Theme) *color.RGBA { return &t.DiffDelText },
+		style: theme.StyleKey{Component: "diffview", Part: "deleted"}, role: roleText},
 	{name: "TextSelectionBG", field: func(t *Theme) *color.RGBA { return &t.TextSelectionBG },
 		style: theme.StyleKey{Component: "diffview", Part: "selection"}, role: roleFill},
 	// Подсветка синтаксиса — цвет текста частей «syntax»: общая для всех
