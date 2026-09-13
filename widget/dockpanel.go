@@ -47,6 +47,13 @@ type DockPanel struct {
 	// при доке всю панель (зазор после SetBounds-до-AddChild).
 	fillChild Widget
 	fillOrig  image.Rectangle
+
+	// auto — размер, который панель сама выставила ребёнку по содержимому на
+	// прошлой раскладке: X — ширина у Left/Right, Y — высота у Top/Bottom.
+	// Нынешний размер совпадает с ним — значит, извне его не задавали, и на
+	// раскладке он перемеряется: подпись могла смениться (GG-74). Раньше
+	// ребёнок мерился по содержимому один раз, пока размер был нулевым.
+	auto map[Widget]image.Point
 }
 
 // NewDockPanel создаёт пустой DockPanel с прозрачным фоном.
@@ -69,6 +76,25 @@ func (dp *DockPanel) AddChild(w Widget) {
 	dp.layout()
 }
 
+// Relayout пересчитывает раскладку панели.
+//
+// Нужен, когда содержимое ребёнка сменилось само по себе — например, кодом
+// поменяли подпись кнопки: у виджета нет ссылки на родителя, и панель об этом
+// не узнаёт. Ребёнок без явного размера перемеряется по новому содержимому.
+// Дерево из разметки при смене языка переразмечается само.
+func (dp *DockPanel) Relayout() {
+	dp.layout()
+	dp.Invalidate()
+}
+
+// rememberAuto запоминает размер, выставленный ребёнку по содержимому.
+func (dp *DockPanel) rememberAuto(child Widget, p image.Point) {
+	if dp.auto == nil {
+		dp.auto = make(map[Widget]image.Point)
+	}
+	dp.auto[child] = p
+}
+
 // layout расставляет детей по DockPanel.Dock.
 // Последний ребёнок заполняет оставшееся пространство (WPF LastChildFill=true).
 func (dp *DockPanel) layout() {
@@ -79,6 +105,11 @@ func (dp *DockPanel) layout() {
 
 	// Оставшаяся область (уменьшается по мере размещения детей).
 	remaining := b
+
+	// Записи прошлой раскладки: остаются только дети, которых мерили сейчас,
+	// — убранные из панели не держатся.
+	prevAuto := dp.auto
+	dp.auto = nil
 
 	children := dp.children
 	for i, child := range children {
@@ -108,6 +139,12 @@ func (dp *DockPanel) layout() {
 				dp.fillChild = child
 				dp.fillOrig = child.Bounds()
 			}
+			// Растянутый ребёнок не мерится, но запись сохраняет: перестанет
+			// быть последним — вернётся к размеру по содержимому, а не к
+			// застывшему.
+			if p, ok := prevAuto[child]; ok {
+				dp.rememberAuto(child, p)
+			}
 			r := image.Rect(
 				remaining.Min.X+m.Left, remaining.Min.Y+m.Top,
 				remaining.Max.X-m.Right, remaining.Max.Y-m.Bottom,
@@ -127,8 +164,9 @@ func (dp *DockPanel) layout() {
 		switch dock {
 		case DockTop:
 			h := cb.Dy()
-			if h <= 0 {
+			if h <= 0 || prevAuto[child].Y == h {
 				h = desiredHeight(child)
+				dp.rememberAuto(child, image.Pt(0, h))
 			}
 			child.SetBounds(image.Rect(
 				remaining.Min.X+m.Left, remaining.Min.Y+m.Top,
@@ -138,8 +176,9 @@ func (dp *DockPanel) layout() {
 
 		case DockBottom:
 			h := cb.Dy()
-			if h <= 0 {
+			if h <= 0 || prevAuto[child].Y == h {
 				h = desiredHeight(child)
+				dp.rememberAuto(child, image.Pt(0, h))
 			}
 			child.SetBounds(image.Rect(
 				remaining.Min.X+m.Left, remaining.Max.Y-m.Bottom-h,
@@ -149,8 +188,9 @@ func (dp *DockPanel) layout() {
 
 		case DockLeft:
 			w := cb.Dx()
-			if w <= 0 {
+			if w <= 0 || prevAuto[child].X == w {
 				w = desiredWidth(child)
+				dp.rememberAuto(child, image.Pt(w, 0))
 			}
 			child.SetBounds(image.Rect(
 				remaining.Min.X+m.Left, remaining.Min.Y+m.Top,
@@ -160,8 +200,9 @@ func (dp *DockPanel) layout() {
 
 		case DockRight:
 			w := cb.Dx()
-			if w <= 0 {
+			if w <= 0 || prevAuto[child].X == w {
 				w = desiredWidth(child)
+				dp.rememberAuto(child, image.Pt(w, 0))
 			}
 			child.SetBounds(image.Rect(
 				remaining.Max.X-m.Right-w, remaining.Min.Y+m.Top,

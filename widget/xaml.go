@@ -121,13 +121,24 @@ func loadUIFromXAML(data []byte, baseDir string, dataContext interface{}) (Widge
 	}
 	env := preprocessXAML(root, dataContext)
 	registry := make(map[string]Widget)
-	w, err := buildXAMLWidget(*root, registry, image.Point{}, baseDir)
+	// Переводимые строки, свёрнутые в родителя (меню, вкладки, колонки),
+	// записываются за этой загрузкой: их переводит и снимает scope дерева, а не
+	// общий список на весь процесс (GG-75).
+	owner := &locOwner{}
+	var w Widget
+	withLocOwner(owner, func() {
+		w, err = buildXAMLWidget(*root, registry, image.Point{}, baseDir)
+	})
 	if err != nil {
+		removeOwnedLocItems(owner) // строки полусобранного дерева не нужны
 		return nil, nil, nil, err
 	}
 	scope := newBindingScope(dataContext, env, registry, baseDir)
+	scope.locOwner = owner
+	scope.root = w
 	scope.activate()
 	resolveWindowInputCommands(w, dataContext)
+	scope.track()
 	return w, registry, scope, nil
 }
 

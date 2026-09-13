@@ -327,6 +327,12 @@ sp.Relayout()              // re-lay the column after the content changed
 sv.FitContent()            // scroll height from the children
 ```
 
+`DockPanel` and `WrapPanel` re-measure a child without an explicit size on every
+layout pass: a button or check box whose caption changed gets a new width, while
+a size set from code is kept. The panel does not learn about a text change by
+itself — after `btn.SetText(…)` from code, call `dock.Relayout()`. A tree loaded
+from markup re-lays itself when the language changes.
+
 A collapsed `Expander` asks for the height of its header alone and no longer
 holds room for hidden content; a hidden child takes neither its own space nor
 the gap after it. Hence the typical case — a collapsible group inside a scroll
@@ -2005,7 +2011,14 @@ Loading XAML with a DataContext makes bindings live:
 root, reg, scope, err := widget.LoadUIFromXAMLBindings(data, viewModel)
 scope.SetDataContext(other)   // swap the source
 scope.Refresh()               // force-refresh the UI
+scope.Dispose()               // the tree is no longer needed
 ```
+
+A tree loaded from markup stays subscribed to language changes and to the model
+until it is released. Release a window or dialog that is loaded again on every
+open when it closes: `scope.Dispose()` for a tree from `LoadUIFromXAMLBindings`,
+`widget.ReleaseXAML(root)` for one loaded by any other `LoadUIFromXAML*`.
+Otherwise every language change translates and re-lays all discarded trees.
 
 ```xml
 <TextBox  Text="{Binding Name, Mode=TwoWay}"/>
