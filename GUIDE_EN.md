@@ -1421,7 +1421,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
-| `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
+| `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; children `<DockPane>`×N + one `<DockContent>` (see "Docking panels") |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
@@ -1870,9 +1870,24 @@ A screen reader sees four text panes (`AccessChildrenProvider`), three of them
 read-only. Colors come from the same `Diff*`/`Syntax*` theme fields as the
 comparison; UI strings are `merge.*` keys (`RegisterStrings`).
 
+**Writing the result.** Chunks arrive as lines without line endings, so how to
+write the file is told separately: `SetResultEOL(eol, bom, finalNL)` — the line
+ending, a BOM and a final newline. The default is `"\n"` with a final newline:
+almost every file in a repository ends that way. `SetTexts` takes the format
+from ours by itself, the setting survives `SetChunks`, and an empty merge is
+written as an empty file. `SetMarkerSize(n)` sets the marker length, like git's
+`conflict-marker-size` attribute (seven by default). Changing the style, length
+or labels rewrites only the markers of unresolved conflicts — hand edits stay.
+
+**Scrolling.** The overview ruler on the right works with the mouse: the thumb
+drags without a jump, a click on a conflict mark goes to that conflict, a click
+elsewhere moves the visible area there. From code — `Scroll`/`SetScroll` (the
+top panes), `ResultScroll`/`SetResultScroll` (the result) and
+`ScrollToLine(side, line)`.
+
 ```xml
 <MergeView x:Name="merge" BaseFile="base.go" OursFile="ours.go" TheirsFile="theirs.go"
-           ShowBase="True" ConflictStyle="diff3" ReadOnly="False"
+           ShowBase="True" ConflictStyle="diff3" MarkerSize="7" ReadOnly="False"
            SyntaxHighlight="True" FontFamily="Consolas" FontSize="10"
            SaveCommand="{Binding Save}" ResolvedCommand="{Binding Left}"/>
 ```

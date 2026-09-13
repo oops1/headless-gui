@@ -1424,7 +1424,7 @@ root Canvas (0,0)
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (первые два дочерних — панели) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
-| `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
+| `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; дочерние `<DockPane>`×N + один `<DockContent>` (см. «Докинг-панели») |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); только внутри `<DockManager>` |
@@ -1870,9 +1870,24 @@ git — стиль `MergeStyleMerge` или `MergeStyleDiff3` (с базой з�
 них — только для чтения. Цвета — те же поля темы `Diff*`/`Syntax*`, что у
 сравнения; строки интерфейса — ключи `merge.*` (`RegisterStrings`).
 
+**Запись итога.** Блоки приходят строками без переводов, поэтому как записать
+файл, контролу говорят отдельно: `SetResultEOL(eol, bom, finalNL)` — перевод
+строки, BOM и перевод в конце файла. По умолчанию `"\n"` и перевод в конце
+есть: так кончаются почти все файлы в репозитории. `SetTexts` берёт вид у нашей
+стороны сам, настройка переживает `SetChunks`, пустое слияние записывается
+пустым файлом. `SetMarkerSize(n)` — длина маркеров, как атрибут
+`conflict-marker-size` у git (по умолчанию семь знаков). Смена стиля, длины и
+подписей переписывает только маркеры нерешённых конфликтов — правки руками
+остаются.
+
+**Прокрутка.** Полоса-обзор справа работает мышью: ползунок тащится без скачка,
+щелчок по отметке конфликта переходит к нему, щелчок мимо переносит туда
+видимую область. Снаружи — `Scroll`/`SetScroll` (верхние панели),
+`ResultScroll`/`SetResultScroll` (итог) и `ScrollToLine(side, line)`.
+
 ```xml
 <MergeView x:Name="merge" BaseFile="base.go" OursFile="ours.go" TheirsFile="theirs.go"
-           ShowBase="True" ConflictStyle="diff3" ReadOnly="False"
+           ShowBase="True" ConflictStyle="diff3" MarkerSize="7" ReadOnly="False"
            SyntaxHighlight="True" FontFamily="Consolas" FontSize="10"
            SaveCommand="{Binding Save}" ResolvedCommand="{Binding Left}"/>
 ```

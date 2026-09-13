@@ -576,7 +576,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
 | `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17 additions") |
-| `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
+| `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
 | `<DockManager>` | `DockManager` | `Background`, `NativeFloating` (see "Docking") + children `<DockPane>`×N, one `<DockContent>` |
 | `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
 | `<DockContent>` | (marker, not a widget) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
@@ -4013,6 +4013,9 @@ mv.Result() string                    // markers for unresolved conflicts
 mv.NextConflict() / PrevConflict() / GoToConflict(n) / CurrentConflict()
 mv.SetShowBase(false)                 // ours, theirs and the result only
 mv.SetStyle(widget.MergeStyleDiff3)   // or MergeStyleMerge
+mv.SetMarkerSize(9)                   // git conflict-marker-size; 0 → 7
+mv.SetResultEOL("\r\n", bom, finalNL) // default "\n" + final newline; SetTexts copies ours
+mv.Scroll() / SetScroll(y) / ResultScroll() / SetResultScroll(y) / ScrollToLine(side, line)
 ```
 
 `MergeChunk{Conflict, Ours, Base, Theirs, Merged}` — `Merged` is the result of
@@ -4025,6 +4028,14 @@ pane, padded with `dvRowPad`), so the three top panes share one scroll — no
 piecewise mapping like DiffView's. Only the result pane is editable; resolving
 splices the chunk's lines **in place**, so hand edits elsewhere survive, and
 undo covers resolutions too.
+
+`SetStyle`, `SetSides` and `SetMarkerSize` re-splice only the markers of
+unresolved conflicts (`respliceUnresolvedLocked`) — never rebuild the whole
+result, it would wipe hand edits. The overview ruler is interactive: thumb drag
+keeps the grab offset (no jump), a click on a conflict mark goes to it, a click
+elsewhere centers the view there. Marks and thumb share one scale (content
+points): drawing and hit-testing both go through `rulerTrackLocked`,
+`rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
 
 Events: `OnResolvedChanged(left int)`, `OnResultEdited()`,
 `OnCurrentConflict(index int)`, `OnCaretMoved(line, col int)`,
