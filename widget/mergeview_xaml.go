@@ -43,6 +43,11 @@ func buildXAMLMergeView(el xElement, baseDir string) Widget {
 		}
 	}
 
+	// MarkerSize — длина маркеров конфликта, как conflict-marker-size у git.
+	if v := el.attr("MarkerSize"); v != "" {
+		m.SetMarkerSize(xatoi(v))
+	}
+
 	base, ours, theirs := el.attr("BaseFile"), el.attr("OursFile"), el.attr("TheirsFile")
 	if base != "" && ours != "" && theirs != "" {
 		b, okB := readXAMLText(baseDir, base)

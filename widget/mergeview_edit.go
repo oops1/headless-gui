@@ -653,7 +653,7 @@ func (m *MergeView) WantsCapture(e MouseEvent) bool {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.onSplitterLocked(e.Y) {
+	if m.onRulerLocked(e.X, e.Y) || m.onSplitterLocked(e.Y) {
 		return true
 	}
 	_, ok := m.paneAtLocked(e.X, e.Y)
@@ -673,7 +673,7 @@ func (m *MergeView) OnMouseButton(e MouseEvent) bool {
 		case e.Button == MouseLeft && e.Pressed:
 			handled = m.leftPressLocked(e)
 		case e.Button == MouseLeft && !e.Pressed:
-			m.dragSel, m.splitDrag = false, false
+			m.dragSel, m.splitDrag, m.rulerDrag = false, false, false
 			handled = true
 		case e.Button == MouseRight && e.Pressed:
 			handled = m.rightPressLocked(e)
@@ -683,6 +683,12 @@ func (m *MergeView) OnMouseButton(e MouseEvent) bool {
 }
 
 func (m *MergeView) leftPressLocked(e MouseEvent) bool {
+	// Полоса-обзор — раньше разделителя: она пересекает его по высоте, и
+	// нажатие на неё иначе начинало бы двигать границу панелей.
+	if m.onRulerLocked(e.X, e.Y) {
+		m.rulerPressLocked(e.Y)
+		return true
+	}
 	if m.onSplitterLocked(e.Y) {
 		m.splitDrag = true
 		return true
@@ -747,6 +753,10 @@ func (m *MergeView) rightPressLocked(e MouseEvent) bool {
 // кнопок под курсором.
 func (m *MergeView) OnMouseMove(x, y int) {
 	m.do(func() {
+		if m.rulerDrag {
+			m.rulerDragLocked(y)
+			return
+		}
 		if m.splitDrag {
 			g := m.geom()
 			inner := float64(g.b.Dy() - 2*dvOuterPad)
@@ -814,6 +824,9 @@ func (m *MergeView) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
 func (m *MergeView) Cursor(x, y int) Cursor {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.onRulerLocked(x, y) {
+		return CursorArrow
+	}
 	if m.onSplitterLocked(y) {
 		return CursorSizeNS
 	}

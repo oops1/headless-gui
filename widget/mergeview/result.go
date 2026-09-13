@@ -19,7 +19,8 @@ type Labels struct {
 	Ours, Base, Theirs string
 }
 
-// Маркеры конфликта — ровно семь знаков, как у git.
+// Маркеры конфликта длины по умолчанию — семь знаков, как у git. Другую длину
+// задаёт Format.MarkerSize.
 const (
 	MarkerOurs   = "<<<<<<<"
 	MarkerBase   = "|||||||"
@@ -33,6 +34,27 @@ const (
 // res — решения по блокам, по индексу; короткий срез (или nil) означает, что
 // решений нет. Неконфликтные блоки решения не спрашивают.
 func Result(chunks []Chunk, res []Resolution, st Style, lb Labels) []string {
+	return Render(chunks, res, Format{Style: st, Labels: lb})
+}
+
+// Format — как собирать итог: стиль маркеров, подписи сторон и длина маркера.
+type Format struct {
+	Style  Style
+	Labels Labels
+	// MarkerSize — длина маркера конфликта; 0 и меньше — семь знаков, как у git
+	// по умолчанию. git берёт её из атрибута conflict-marker-size, и
+	// репозиторий вправе поставить другую: нерешённый конфликт, записанный
+	// другой длиной, разошёлся бы с тем, что написал бы git.
+	MarkerSize int
+}
+
+// Render — то же, что Result, с полным набором настроек сборки.
+func Render(chunks []Chunk, res []Resolution, f Format) []string {
+	st, lb := f.Style, f.Labels
+	size := f.MarkerSize
+	if size <= 0 {
+		size = len(MarkerOurs)
+	}
 	var out []string
 	for i, c := range chunks {
 		if !c.Conflict {
@@ -47,15 +69,15 @@ func Result(chunks []Chunk, res []Resolution, st Style, lb Labels) []string {
 			out = append(out, r.Lines(c)...)
 			continue
 		}
-		out = append(out, marker(MarkerOurs, lb.Ours, "HEAD"))
+		out = append(out, marker("<", size, lb.Ours, "HEAD"))
 		out = append(out, c.Ours...)
 		if st == StyleDiff3 {
-			out = append(out, marker(MarkerBase, lb.Base, "base"))
+			out = append(out, marker("|", size, lb.Base, "base"))
 			out = append(out, c.Base...)
 		}
-		out = append(out, MarkerSplit)
+		out = append(out, strings.Repeat("=", size))
 		out = append(out, c.Theirs...)
-		out = append(out, marker(MarkerTheirs, lb.Theirs, "merge head"))
+		out = append(out, marker(">", size, lb.Theirs, "merge head"))
 	}
 	return out
 }
@@ -100,9 +122,9 @@ func Conflicts(chunks []Chunk) int {
 	return n
 }
 
-func marker(mark, label, def string) string {
+func marker(ch string, size int, label, def string) string {
 	if label == "" {
 		label = def
 	}
-	return mark + " " + label
+	return strings.Repeat(ch, size) + " " + label
 }
