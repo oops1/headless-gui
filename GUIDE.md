@@ -1481,7 +1481,7 @@ root Canvas (0,0)
 | `DatePicker` | DatePicker | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd`, `DateFormat`, `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; дочерние `<DockPane>`×N + один `<DockContent>` (см. «Докинг-панели») |
-| `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); только внутри `<DockManager>` |
+| `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `MinSize`, `State` (Docked/AutoHidden/Floating/Closed); только внутри `<DockManager>` |
 | `DockContent` | — (маркер) | единственный ребёнок → `DockManager.SetCenter`; только внутри `<DockManager>` |
 | `Window` | Window | `Title`, `Width`, `Height`, `WindowStyle`, `ResizeMode`, `MainWindow`, `TrayIcon`, `TrayTooltip` (см. «Трей из XAML») |
 | `TrayMenu` | — (ребёнок `<Window>`) | меню трея: дочерние `<MenuItem>`/`<Separator>` (см. «Трей из XAML») |
@@ -2926,6 +2926,19 @@ branches.SetTitleButtonHidden(0, !onGitHub) // без перестройки с�
 
 Значок перекрашивается в цвет текста заголовка, как глифы штатных кнопок
 (`KeepIconColors` оставляет его цвета). У каждой кнопки своя подсказка.
+
+Минимум стороны можно задать панели — он действует только на её сторону:
+
+```go
+commit.MinSize = 300              // XAML: <DockPane MinSize="300">; на лету — SetMinSize
+mgr.OnSideResized = func(side widget.DockSide, size int) {
+    // по отпусканию разделителя и после RestoreLayout
+}
+```
+
+Сторона не сужается меньше наибольшего `MinSize` своих закреплённых панелей и
+общего `MinSideSize`; разделитель упирается в этот предел. В тесном окне минимум
+уступает документной области.
 
 `OnStateChanged` приходит и на смену активной панели — обеим, прежней и новой.
 Это нужно тому, кто вычисляет цвет заголовка из фона: фонов у титлбара два, и

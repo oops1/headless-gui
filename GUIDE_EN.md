@@ -1478,7 +1478,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `DatePicker` | DatePicker | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd`, `DateFormat`, `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; children `<DockPane>`×N + one `<DockContent>` (see "Docking panels") |
-| `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
+| `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `MinSize`, `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
 | `DockContent` | — (marker) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
 | `Window` | Window | `Title`, `Width`, `Height`, `WindowStyle`, `ResizeMode`, `MainWindow`, `TrayIcon`, `TrayTooltip` (see "Tray from XAML") |
 | `TrayMenu` | — (child of `<Window>`) | tray menu: child `<MenuItem>`/`<Separator>` (see "Tray from XAML") |
@@ -2903,6 +2903,19 @@ branches.SetTitleButtonHidden(0, !onGitHub) // without rebuilding the list
 
 The icon is recolored to the title text color, like the built-in glyphs
 (`KeepIconColors` keeps its own colors). Each button has its own tooltip.
+
+A pane can set the minimum of its side — it affects only that side:
+
+```go
+commit.MinSize = 300              // XAML: <DockPane MinSize="300">; at runtime — SetMinSize
+mgr.OnSideResized = func(side widget.DockSide, size int) {
+    // on splitter release and after RestoreLayout
+}
+```
+
+A side does not shrink below the largest `MinSize` of its docked panes and the
+shared `MinSideSize`; the splitter stops there. In a cramped window the minimum
+yields to the document area.
 
 Layout can be saved and restored (JSON, panes matched by `ID`):
 

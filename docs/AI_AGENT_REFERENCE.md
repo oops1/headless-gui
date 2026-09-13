@@ -580,7 +580,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
 | `<DatePicker>` | `DatePicker` | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd` (ISO 8601 or invariant M/d/yyyy), `DateFormat` (.NET pattern or Go layout), `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `<DockManager>` | `DockManager` | `Background`, `NativeFloating` (see "Docking") + children `<DockPane>`×N, one `<DockContent>` |
-| `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
+| `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `MinSize` (px, min of its side), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
 | `<DockContent>` | (marker, not a widget) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
 
 ### XAML Color Values
@@ -894,6 +894,11 @@ pane.SetTitleButtons([]widget.DockPaneButton{
 }) // fields: Icon, KeepIconColors, Tooltip, OnClick, Menu, MenuFunc, Hidden, Disabled
 pane.SetTitleButtonHidden(i, true); pane.SetTitleButtonDisabled(i, true); pane.TitleButtons()
 // Engine asks ToolTipAt(x, y) string before GetToolTip — per-part tooltips for any widget.
+
+// Per-pane side minimum (v3.20): side min = max(MinSideSize, MinSize of its DOCKED panes);
+// the splitter stops there; in a cramped manager it yields to the center.
+pane.MinSize = 300; pane.SetMinSize(300)   // XAML: <DockPane MinSize="300">
+mgr.OnSideResized = func(side widget.DockSide, size int) {} // on splitter release + after RestoreLayout
 ```
 
 ### ToggleButton — persistent pressed state
