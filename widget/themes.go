@@ -82,6 +82,14 @@ type Theme struct {
 	DiffDelBG     color.RGBA
 	DiffDelStrong color.RGBA
 
+	// DiffAddText и DiffDelText — цвета ТЕКСТА добавленного и удалённого:
+	// «+42» и «−7» в списке изменений коммита, отметка стороны. Полосы
+	// (DiffAddStrong, DiffDelStrong) смешаны с фоном поля ввода, и текст ими
+	// выходит бледным. Пресеты подбирают эти цвета под фон поля ввода с
+	// контрастом не ниже 4,5:1.
+	DiffAddText color.RGBA
+	DiffDelText color.RGBA
+
 	// TextSelectionBG — фон выделенного текста в редакторе. Отдельно от
 	// ListItemSelect: выделение строки списка и выделение символов — разные
 	// по плотности заливки вещи, у второго сквозь фон читается текст.
@@ -308,10 +316,10 @@ func DarkTheme() *Theme {
 		ToggleBorder: color.RGBA{R: 136, G: 136, B: 136, A: 255}, // #888888
 
 		// ScrollView / ListView / TreeView
-		ScrollTrackBG:  color.RGBA{R: 37, G: 37, B: 38, A: 255},  // #252526
-		ScrollThumbBG:  color.RGBA{R: 78, G: 78, B: 78, A: 255},  // #4E4E4E
-		ListItemHover:  color.RGBA{R: 55, G: 55, B: 58, A: 255},  // #37373A — чуть светлее фона
-		ListItemSelect: color.RGBA{R: 0, G: 90, B: 158, A: 180},  // #005A9E — насыщенный синий
+		ScrollTrackBG:  color.RGBA{R: 37, G: 37, B: 38, A: 255}, // #252526
+		ScrollThumbBG:  color.RGBA{R: 78, G: 78, B: 78, A: 255}, // #4E4E4E
+		ListItemHover:  color.RGBA{R: 55, G: 55, B: 58, A: 255}, // #37373A — чуть светлее фона
+		ListItemSelect: color.RGBA{R: 0, G: 90, B: 158, A: 180}, // #005A9E — насыщенный синий
 
 		// TreeView
 		TreeText:  color.RGBA{R: 212, G: 212, B: 212, A: 255}, // #D4D4D4
@@ -373,15 +381,15 @@ func LightTheme() *Theme {
 		InputPlaceholder: color.RGBA{R: 140, G: 140, B: 140, A: 255}, // #8C8C8C
 
 		// Метки
-		LabelText:     color.RGBA{R: 32, G: 32, B: 32, A: 255},    // #202020
-		LabelBG:       color.RGBA{R: 0, G: 0, B: 0, A: 0},         // прозрачный
-		SecondaryText: color.RGBA{R: 96, G: 96, B: 96, A: 255},    // #606060
+		LabelText:     color.RGBA{R: 32, G: 32, B: 32, A: 255}, // #202020
+		LabelBG:       color.RGBA{R: 0, G: 0, B: 0, A: 0},      // прозрачный
+		SecondaryText: color.RGBA{R: 96, G: 96, B: 96, A: 255}, // #606060
 
 		// Прогресс-бар
 		ProgressBG:   color.RGBA{R: 230, G: 230, B: 230, A: 255}, // #E6E6E6
 		ProgressFill: color.RGBA{R: 0, G: 120, B: 215, A: 255},   // #0078D7
 
-		ProgressGlowTail: color.RGBA{R: 0, G: 160, B: 140, A: 255}, // бирюза
+		ProgressGlowTail: color.RGBA{R: 0, G: 160, B: 140, A: 255},  // бирюза
 		ProgressGlowHead: color.RGBA{R: 40, G: 150, B: 255, A: 255}, // голубой
 
 		// Выпадающий список / PopupMenu
@@ -512,6 +520,8 @@ func ApplyGlobalTheme(t *Theme) {
 	win10.DiffAddStrong = t.DiffAddStrong
 	win10.DiffDelBG = t.DiffDelBG
 	win10.DiffDelStrong = t.DiffDelStrong
+	win10.DiffAddText = t.DiffAddText
+	win10.DiffDelText = t.DiffDelText
 	win10.TextSelectionBG = t.TextSelectionBG
 	win10.SyntaxKeyword = t.SyntaxKeyword
 	win10.SyntaxString = t.SyntaxString

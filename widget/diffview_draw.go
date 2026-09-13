@@ -32,8 +32,10 @@ func (d *DiffView) Draw(ctx DrawContext) {
 	viewH := float64(g.cy1 - g.cy0)
 	lt, rt := d.offsets(viewH)
 
-	d.drawHeader(ctx, g, DiffLeft)
-	d.drawHeader(ctx, g, DiffRight)
+	if d.headers {
+		d.drawHeader(ctx, g, DiffLeft)
+		d.drawHeader(ctx, g, DiffRight)
+	}
 
 	content := image.Rect(b.Min.X, g.cy0, b.Max.X, g.cy1).Intersect(outer)
 	d.drawPane(ctx, g, DiffLeft, lt, content)
@@ -120,7 +122,7 @@ func (d *DiffView) drawHeader(ctx DrawContext, g dvGeom, side DiffSide) {
 	if s.modified() {
 		mark(Tr("diff.modified"), p.dirty)
 	}
-	if s.readOnly {
+	if s.readOnly && d.showRO {
 		mark(Tr("diff.readonly"), p.muted)
 	}
 	if s.note != "" && tx < right {

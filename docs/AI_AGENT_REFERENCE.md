@@ -575,8 +575,9 @@ Mapping of XAML tags to Go types with key attributes.
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
 | `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
-| `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17.0 additions") |
-| `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
+| `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `ShowHeaders`, `ShowReadOnlyMark`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17 additions") |
+| `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
+| `<DatePicker>` | `DatePicker` | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd` (ISO 8601 or invariant M/d/yyyy), `DateFormat` (.NET pattern or Go layout), `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `<DockManager>` | `DockManager` | `Background`, `NativeFloating` (see "Docking") + children `<DockPane>`×N, one `<DockContent>` |
 | `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
 | `<DockContent>` | (marker, not a widget) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
@@ -1516,24 +1517,36 @@ grid.SetItemsSource(collection)
 
 ### Callback Execution Model (sync vs goroutine)
 
-The model differs by widget. **As of GUI_ISSUES A5/A7 fix, Button is fully synchronous on both mouse and keyboard paths.** Older callbacks
-on other widgets may still spawn a goroutine on the keyboard path; this is being unified.
+**All widget callbacks are synchronous** — no widget spawns a goroutine for a
+callback. And with a running engine they all run on **one goroutine, the frame
+loop goroutine** (GG-68, v3.18): the native window and webstream queue input
+events on the engine instead of calling `Send*` from their own goroutines, and
+`eng.Post` functions and animation ticks run on that same goroutine. Shared
+state touched only by handlers and `Post` functions needs no mutex.
 
 | Widget | Mouse path | Keyboard path | Notes |
 |---|---|---|---|
 | `Button.OnClick` | sync | sync | Use `AddClickHandler(fn)` for multiple subscribers; OnClick (field) fires first, then handlers in registration order. |
-| `CheckBox.OnChange(checked bool)` | sync | goroutine (Space) | The field is `OnChange`, **not** `OnClick`. Tracks tri-state press → release. |
-| `ListView.OnSelect` | goroutine | goroutine | Long-running work OK. |
-| `DataGrid.OnRowActivated(row, item)` | sync (after Unlock) | sync | NEW. Fires on dbl-click and Enter, even if grid is read-only. Use for "open detail / toggle breakpoint" UX. |
-| `DataGrid.OnSelectionChanged` | goroutine | goroutine | |
-
-Treat the callback as potentially concurrent — guard shared state with a mutex.
-For Button specifically you can rely on synchronous semantics:
+| `CheckBox.OnChange(checked bool)` | sync | sync | The field is `OnChange`, **not** `OnClick`. Tracks tri-state press → release. |
+| `ListView.OnSelect` | sync | sync | Move long-running work to a goroutine and come back with `eng.Post`. |
+| `DataGrid.OnRowActivated(row, item)` | sync (after Unlock) | sync | Fires on dbl-click and Enter, even if grid is read-only. |
+| `DataGrid.OnSelectionChanged` | sync | sync | |
 
 ```go
-btn.OnClick = func() { /* runs in caller goroutine */ }
+btn.OnClick = func() { /* engine goroutine */ }
 btn.AddClickHandler(func() { /* runs after OnClick, same goroutine */ })
+
+go func() {
+    data := load()                            // background goroutine
+    eng.Post(func() { list.SetItems(data) })  // back on the engine goroutine
+}()
+eng.Flush() // tests: wait until the Post queue is drained, no frame rendered
 ```
+
+Caveats: without `Start()` nobody drains the queue except `RenderOnce`,
+`RenderFrameNow` and `Flush` (on the calling goroutine). Code that calls
+`Send*` from its own goroutine while the engine runs loses the guarantee —
+deliver such input through `eng.Post` as well.
 
 ### SetRoot Must Be Called Before Start
 
@@ -3957,7 +3970,7 @@ Rule worth keeping: an optimisation without a paired measurement is not
 accepted. Add the before/after here.
 
 
-## v3.17.0 additions (DiffView and what an editor needs from the engine)
+## v3.17 additions (DiffView, MergeView and what an editor needs from the engine)
 
 ### DiffView — compare and edit two files
 
@@ -3971,12 +3984,15 @@ dv.Reload(side)                      // undoable
 dv.SetWatchFiles(true); defer dv.Close()
 dv.SetHideUnchanged(true); dv.SetContextLines(3)
 dv.SetIgnoreWhitespace(v); dv.SetSyntaxHighlight(v); dv.SetReadOnly(side, v)
+dv.SetShowHeaders(v)                 // false → no side header cards, code starts at the top edge (default true)
+dv.SetShowReadOnlyMark(v)            // false → no "read-only" mark in the header; side stays read-only (default true)
 dv.SetFont(mono, bold, sizePt)
 dv.ChangeCount(); dv.Changes() []widget.DiffChange // {Kind, LeftFrom, LeftTo, RightFrom, RightTo}
 dv.NextChange(); dv.PrevChange(); dv.GoToChange(i); dv.CurrentChange()
 dv.CopyBlock(i, toRight); dv.CopyCurrent(toRight); dv.CopyAll(toRight)
 dv.Undo(); dv.Redo(); dv.CanUndo(); dv.CanRedo()
 dv.SetCaret(side, line, col); dv.Caret(side); dv.InsertText(s); dv.SelectedText()
+dv.Selection(side) (from, to int, ok bool) // lines touched by the selection, [from, to); ends at col 0 → that line excluded
 dv.Text(side); dv.Lines(side); dv.IsModified(side); dv.FilePath(side)
 ```
 
@@ -4013,6 +4029,12 @@ mv.Result() string                    // markers for unresolved conflicts
 mv.NextConflict() / PrevConflict() / GoToConflict(n) / CurrentConflict()
 mv.SetShowBase(false)                 // ours, theirs and the result only
 mv.SetStyle(widget.MergeStyleDiff3)   // or MergeStyleMerge
+mv.SetMarkerSize(9)                   // git conflict-marker-size; 0 → 7
+mv.SetResultEOL("\r\n", bom, finalNL) // default "\n" + final newline; SetTexts copies ours
+mv.Scroll() / SetScroll(y) / ResultScroll() / SetResultScroll(y) / ScrollToLine(side, line)
+mv.SetSyncScroll(false)               // default true: top and result scroll together, by chunk
+mv.SetResultInfo(widget.MergeSideInfo{Title, Note, Hint}) // result pane labels; Sides() / ResultInfo() read back
+// MergeSideInfo.Hint — second header line; top headers grow when any visible side has one
 ```
 
 `MergeChunk{Conflict, Ours, Base, Theirs, Merged}` — `Merged` is the result of
@@ -4026,6 +4048,39 @@ piecewise mapping like DiffView's. Only the result pane is editable; resolving
 splices the chunk's lines **in place**, so hand edits elsewhere survive, and
 undo covers resolutions too.
 
+`SetStyle`, `SetSides` and `SetMarkerSize` re-splice only the markers of
+unresolved conflicts (`respliceUnresolvedLocked`) — never rebuild the whole
+result, it would wipe hand edits. The overview ruler is interactive: thumb drag
+keeps the grab offset (no jump), a click on a conflict mark goes to it, a click
+elsewhere centers the view there. Marks and thumb share one scale (content
+points): drawing and hit-testing both go through `rulerTrackLocked`,
+`rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
+
+### DatePicker — date field with a drop-down calendar
+
+```go
+p := widget.NewDatePicker()
+p.SetSelectedDate(t) bool           // time of day dropped; false if outside the range
+p.SelectedDate() (time.Time, bool)
+p.ClearSelectedDate()
+p.SetDisplayDateRange(start, end)   // zero bound = unbounded; selection outside is cleared
+p.SetFormat("02.01.2006")           // "" → culture key date.format
+p.SetFirstDayOfWeek(time.Monday)    // default → culture key date.firstDay (0 Sun … 6 Sat)
+p.SetDropDownOpen(true); p.IsDropDownOpen(); p.ViewMonth(); p.Text()
+p.Now = func() time.Time { … }      // "today" source for tests and golden frames
+p.OnSelectedDateChanged = func(d time.Time, ok bool) {}
+```
+
+Culture is data: `date.format`, `date.firstDay`, `date.month.1..12`, `date.wd.0..6`,
+`date.placeholder` in the string tables (RU, EN built in; unknown language → ISO
+8601 + Monday). Parsing (`parseDateInput`) accepts no leading zeros, any of
+`. / -`, 2-digit year and ISO. The month grid comes from `internal/calendar`
+(`MonthGrid` with the first weekday as a parameter), shared with
+`desktop.CalendarFlyout` — never duplicate it. Calendar layout is one function
+(`dpLayoutFor`) for drawing and hit-testing. The overlay follows the Dropdown
+pattern: `OverlayDrawer`, `OverlayBoundsProvider`, `Dismissable`, `Bounds()`
+widened while open.
+
 Events: `OnResolvedChanged(left int)`, `OnResultEdited()`,
 `OnCurrentConflict(index int)`, `OnCaretMoved(line, col int)`,
 `OnActiveSideChange(side)`, `OnSaveRequest()` (Ctrl+S). Commands:
@@ -4036,7 +4091,7 @@ Tab inserts a tab into the result. Strings — `merge.*` keys; colors — the sa
 
 Model without the view lives in `widget/diffview` (Myers line diff with
 paragraph-sliding, intra-line range, tokenizer, text decode/encode). Strings:
-`diff.*` keys. Colors: theme fields `DiffAddBG`, `DiffAddStrong`, `DiffDelBG`,
+`diff.*` keys. Colors: theme fields `DiffAddText`/`DiffDelText` (text colors, picked to ≥ 4.5:1 contrast on `InputBG` via `readableOn`), `DiffAddBG`, `DiffAddStrong`, `DiffDelBG`,
 `DiffDelStrong`, `TextSelectionBG`, `Syntax*`. Only glyphs present in the Go
 fonts are used (`…`, not `⋯`) so golden frames match on every OS. Demo:
 `cmd/diffdemo` (`-shot dir` renders check frames headlessly).

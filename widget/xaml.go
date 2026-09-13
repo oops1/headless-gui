@@ -485,6 +485,10 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 	case "combobox", "dropdown":
 		w = buildXAMLDropdown(el)
 
+	// ── Поле даты с календарём ──────────────────────────────────────────────
+	case "datepicker":
+		w = buildXAMLDatePicker(el)
+
 	// ── Прогресс ─────────────────────────────────────────────────────────────
 	case "progressbar":
 		w = buildXAMLProgressBar(el)

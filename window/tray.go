@@ -264,14 +264,14 @@ func (win *Window) ShowBalloon(title, text string, severity widget.DialogSeverit
 
 // SetOnBalloonClick регистрирует колбэк клика пользователя по уведомлению
 // (Windows — NIN_BALLOONUSERCLICK, Linux — действие "default" в ActionInvoked).
-// На Linux колбэк вызывается из отдельной горутины.
+// Колбэк выполняется на горутине движка, как и обработчики виджетов.
 func (win *Window) SetOnBalloonClick(fn func()) {
 	win.onBalloonClick = fn
 	if win.native == nil {
 		return
 	}
 	if bh, ok := win.native.(balloonHost); ok {
-		bh.setBalloonClickHandler(fn)
+		bh.setBalloonClickHandler(win.onEngineFunc(fn))
 	}
 }
 
@@ -280,8 +280,10 @@ func (win *Window) HideToTray() {
 	if win.native == nil {
 		return
 	}
+	// Зовут из обработчиков, то есть с горутины движка, а окно ОС прячется на
+	// потоке своего цикла сообщений.
 	if th, ok := win.native.(trayHost); ok {
-		th.hideToTray()
+		win.onNative(th.hideToTray)
 	}
 }
 
@@ -291,7 +293,7 @@ func (win *Window) RestoreFromTray() {
 		return
 	}
 	if th, ok := win.native.(trayHost); ok {
-		th.restoreFromTray()
+		win.onNative(th.restoreFromTray)
 	}
 }
 
@@ -327,7 +329,7 @@ func (win *Window) applyPendingTray() {
 	// Уведомления доступны шире трея (Linux — без иконки), поэтому колбэк
 	// клика применяем через balloonHost, до проверки полного trayHost.
 	if bh, ok := win.native.(balloonHost); ok && win.onBalloonClick != nil {
-		bh.setBalloonClickHandler(win.onBalloonClick)
+		bh.setBalloonClickHandler(win.onEngineFunc(win.onBalloonClick))
 	}
 	th, ok := win.native.(trayHost)
 	if !ok {
@@ -350,14 +352,24 @@ func (win *Window) ensureTrayDispatcher(th trayHost) {
 	}
 	win.trayDispatcherSet = true
 	th.setTrayClickHandler(win.dispatchTrayClick)
+	// Меню, которое показывает сама система (Linux), сообщает выбор пункта со
+	// своего потока — пункт выполняется на горутине движка.
+	if mr, ok := th.(interface{ setTrayMenuRunner(run func(fn func())) }); ok {
+		mr.setTrayMenuRunner(win.onEngine)
+	}
 }
 
 // dispatchTrayClick — единый диспетчер кликов трея: вызывает пользовательский
 // колбэк (или дефолт: двойной левый клик восстанавливает окно) и показывает
 // трей-меню по правому клику.
+//
+// Бэкенд зовёт диспетчер со своего потока (Win32 — цикл сообщений, Linux —
+// D-Bus), а колбэк приложения и меню — код виджетов: они выполняются на
+// горутине движка (GG-68).
 func (win *Window) dispatchTrayClick(button int, doubleClick bool) {
-	if win.onTrayClick != nil {
-		win.onTrayClick(trayButton(button), doubleClick)
+	if fn := win.onTrayClick; fn != nil {
+		b := trayButton(button)
+		win.onEngine(func() { fn(b, doubleClick) })
 	} else if doubleClick && button == 0 && win.trayIconWant {
 		win.RestoreFromTray()
 	}
@@ -398,7 +410,9 @@ func (win *Window) showTrayMenu() {
 	}
 	lx := int(float64(sx-cx)/scale + 0.5)
 	ly := int(float64(sy-cy)/scale + 0.5)
-	win.trayMenu.Show(lx, ly)
+	// Положение курсора снято сейчас, а меню открывается на горутине движка.
+	menu := win.trayMenu
+	win.onEngine(func() { menu.Show(lx, ly) })
 }
 
 // attachTrayMenu добавляет трей-меню в дерево корневого виджета носителя, чтобы

@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"strconv"
+	"strings"
 
 	"github.com/oops1/headless-gui/v3/widget/diffview"
 )
@@ -82,22 +83,26 @@ func (m *MergeView) drawHeader(ctx DrawContext, g mvGeom, side MergeSide) {
 	p := &m.pal
 	s := m.docs[side]
 	x0, x1, _ := m.paneCodeXLocked(g, side)
-	y, h := g.headerTopY, mvHeaderH
+	y, h := g.headerTopY, g.headerTopH
+	hint := ""
 	if side == MergeResult {
-		y = g.headerResY
+		y, h = g.headerResY, g.headerResH
+		hint = m.result.Hint
+	} else {
+		hint = m.sides[side].Hint
 	}
 	edge := p.cardEdge
 	if m.focused && m.active == side {
 		edge = p.accent
 	}
 	dvRoundRect(ctx, p, x0, y, x1-x0, h, p.card, edge)
-	fillEllipse(ctx, x0+18, y+h/2, 5, 5, m.sideColor(side))
+	fillEllipse(ctx, x0+18, y+mvHeaderH/2, 5, 5, m.sideColor(side))
 
 	name := s.title
 	if name == "" {
 		name = Tr(mvSideKey(side))
 	}
-	ty := y + (h-17)/2
+	ty := y + (mvHeaderH-17)/2
 	tx := x0 + 32
 	ctx.DrawTextFont(name, tx, ty, m.fontSize, m.boldFont, p.text)
 	tx += ctx.MeasureTextFont(name, m.fontSize, m.boldFont) + 10
@@ -127,7 +132,7 @@ func (m *MergeView) drawHeader(ctx DrawContext, g mvGeom, side MergeSide) {
 		if n > 0 {
 			band = p.delBand
 		}
-		ctx.FillRoundRect(bx, y+7, bw, h-14, 10, band)
+		ctx.FillRoundRect(bx, y+7, bw, mvHeaderH-14, 10, band)
 		ctx.DrawText(badge, bx+8, ty, col)
 		right = bx - 10
 		if s.readOnly {
@@ -136,8 +141,16 @@ func (m *MergeView) drawHeader(ctx DrawContext, g mvGeom, side MergeSide) {
 	}
 	if s.note != "" && tx < right {
 		prev := ctx.Clip()
-		ctx.SetClip(image.Rect(tx, y, right, y+h).Intersect(prev))
+		ctx.SetClip(image.Rect(tx, y, right, y+mvHeaderH).Intersect(prev))
 		ctx.DrawText(s.note, tx, ty, p.muted)
+		ctx.SetClip(prev)
+	}
+	if hint != "" {
+		// Пояснение — второй строкой, мелко и приглушённо, с отступом заголовка;
+		// не влезло — обрезается краем карточки.
+		prev := ctx.Clip()
+		ctx.SetClip(image.Rect(x0+32, y, x1-10, y+h).Intersect(prev))
+		ctx.DrawTextSize(hint, x0+32, y+mvHeaderH-6, m.fontSize-1.5, p.muted)
 		ctx.SetClip(prev)
 	}
 }
@@ -270,7 +283,7 @@ func (m *MergeView) drawPane(ctx DrawContext, g mvGeom, side MergeSide, outer im
 				ctx.FillRect(codeX+int(float64(c0)*cw)-hs, y+1, int(float64(c1-c0)*cw), dvLineH-2, p.sel)
 			}
 		}
-		if isMarkerLine(s.text.Lines[row.line]) {
+		if isMarkerLine(s.text.Lines[row.line], m.markerSize) {
 			// Маркеры git в итоге — цветом конфликта и жирным: их нельзя
 			// спутать со строкой кода.
 			ctx.FillRect(codeX-8, y, codeR-(codeX-8), dvLineH, strong)
@@ -286,10 +299,16 @@ func (m *MergeView) drawPane(ctx DrawContext, g mvGeom, side MergeSide, outer im
 	}
 }
 
-// isMarkerLine — строка маркера конфликта git.
-func isMarkerLine(s string) bool {
-	for _, mk := range []string{"<<<<<<<", "|||||||", "=======", ">>>>>>>"} {
-		if len(s) >= len(mk) && s[:len(mk)] == mk {
+// isMarkerLine — строка маркера конфликта git заданной длины (0 — семь знаков).
+// Сравнение точное: восемь «=» при длине семь — это код, а не разделитель, и
+// git такую строку маркером тоже не считает.
+func isMarkerLine(s string, size int) bool {
+	if size <= 0 {
+		size = 7
+	}
+	for _, ch := range []string{"<", "|", "=", ">"} {
+		mk := strings.Repeat(ch, size)
+		if s == mk || strings.HasPrefix(s, mk+" ") {
 			return true
 		}
 	}
@@ -395,16 +414,18 @@ func (m *MergeView) drawSplitter(ctx DrawContext, g mvGeom) {
 	}
 }
 
-// drawRuler — полоса-обзор: где по файлу стоят конфликты и что уже решено.
+// drawRuler — полоса-обзор: где по файлу стоят конфликты и что уже решено, и
+// ползунок видимой области верхних панелей. Геометрия — общая с разбором мыши
+// (rulerTrackLocked, rulerMarkLocked, rulerThumbLocked): что нарисовано, в то
+// и попадает щелчок.
 func (m *MergeView) drawRuler(ctx DrawContext, g mvGeom) {
 	p := &m.pal
-	tr := image.Rect(g.rulerX, g.ty0, g.rulerX+dvRulerW, g.ry1)
+	tr := m.rulerTrackLocked(g)
 	if tr.Dy() <= 0 || m.rows == 0 {
 		return
 	}
 	ctx.SetClip(tr.Inset(-2).Intersect(g.b))
 	ctx.FillRoundRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), dvRulerW/2, p.track)
-	scale := float64(tr.Dy()) / float64(m.rows)
 	for ci, c := range m.chunks {
 		band, _, marked := m.chunkBands(ci)
 		if !marked {
@@ -417,19 +438,18 @@ func (m *MergeView) drawRuler(ctx DrawContext, g mvGeom) {
 				col = p.add
 			}
 		}
-		sp := m.spans[ci]
-		y0 := tr.Min.Y + int(float64(sp.from)*scale)
-		h := max(3, int(float64(sp.to-sp.from)*scale))
-		ctx.FillRect(tr.Min.X+2, y0, tr.Dx()-4, h, col)
+		r := m.rulerMarkLocked(g, ci)
+		ctx.FillRect(r.Min.X+2, r.Min.Y, r.Dx()-4, r.Dy(), col)
 		if ci == m.current {
-			ctx.DrawBorder(tr.Min.X, y0-1, tr.Dx(), h+2, p.accent)
+			ctx.DrawBorder(r.Min.X, r.Min.Y-1, r.Dx(), r.Dy()+2, p.accent)
 		}
 	}
-	if h := m.topViewH(); m.maxScrollLocked() > 0 && h > 0 {
-		vs := float64(tr.Dy()) / float64(dvTopPad+m.rows*dvLineH+dvBottomPad)
-		ty := tr.Min.Y + int(m.scroll*vs)
-		th := max(18, int(h*vs))
-		ctx.FillRectAlpha(tr.Min.X, ty, tr.Dx(), min(th, tr.Max.Y-ty), premulAlpha(p.thumb, 110))
+	if th := m.rulerThumbLocked(g); !th.Empty() {
+		alpha := uint8(110)
+		if m.rulerDrag {
+			alpha = 170 // схваченный ползунок плотнее — видно, что он в руке
+		}
+		ctx.FillRectAlpha(th.Min.X, th.Min.Y, th.Dx(), th.Dy(), premulAlpha(p.thumb, alpha))
 	}
 }
 

@@ -66,7 +66,9 @@ func (s *Server) dispatchLoop() {
 	for {
 		select {
 		case ev := <-s.input:
-			s.applyInput(ev)
+			// Событие выполняется на горутине движка, как и всё, что трогает
+			// виджеты (GG-68); диспетчер держит порядок и предел очереди.
+			s.eng.Post(func() { s.applyInput(ev) })
 		case <-s.stop:
 			return
 		}
@@ -134,7 +136,7 @@ func (s *Server) validInput(ev *inputEvent) bool {
 	return false
 }
 
-// applyInput транслирует событие в движок (только из горутины диспетчера).
+// applyInput транслирует событие в движок (на горутине движка, через Post).
 func (s *Server) applyInput(ev inputEvent) {
 	switch ev.T {
 	case "mm":

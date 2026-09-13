@@ -153,6 +153,14 @@ func (tb *ToolBar) itemWidth(w Widget, h int) int {
 	if xw, _ := xamlSizeOf(btn); xw > 0 {
 		return xw
 	}
+	return buttonContentWidth(btn, h)
+}
+
+// buttonContentWidth — ширина кнопки по содержимому: значок, зазор, подпись и
+// поля. Одна функция на панель инструментов и общий авторазмер (desiredWidth):
+// посчитай их по-разному — и одна и та же кнопка в панели и в DockPanel вышла
+// бы разной ширины. h — высота кнопки: от неё зависит значок без IconSize.
+func buttonContentWidth(btn *Button, h int) int {
 	icon := 0
 	if btn.Icon != nil {
 		icon = btn.IconSize
@@ -173,7 +181,8 @@ func (tb *ToolBar) itemWidth(w Widget, h int) int {
 	if icon > 0 {
 		gap = 4
 	}
-	return icon + gap + MeasureUIText(btn.Text, DefaultFontSizePt) + 14
+	// Своим кеглем кнопки: подпись, заданная FontSize, шире общей.
+	return icon + gap + MeasureUIText(btn.Text, fontSizeOrDefault(btn.FontSize)) + 14
 }
 
 // xamlSizeOf возвращает размер, заданный в разметке (0, если не задан).

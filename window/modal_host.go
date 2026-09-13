@@ -286,8 +286,12 @@ func (h *dialogHost) create(hm *hostedModal) {
 			} else {
 				native.Maximize()
 			}
-			dlg.SetMaximized(native.IsMaximized())
-			eng.Invalidate()
+			// Глиф кнопки — виджет: меняется на горутине движка диалога.
+			maximized := native.IsMaximized()
+			eng.Post(func() {
+				dlg.SetMaximized(maximized)
+				eng.Invalidate()
+			})
 		})
 	}
 
@@ -305,22 +309,28 @@ func (h *dialogHost) create(hm *hostedModal) {
 				lw = int(float64(newW)/scale + 0.5)
 				lh = int(float64(newH)/scale + 0.5)
 			}
-			surf.mu.Lock()
-			surf.current = image.NewRGBA(image.Rect(0, 0, newW, newH))
-			surf.mu.Unlock()
-			eng.SetResolution(lw, lh)
-			// Диалог занимает окно целиком: он и есть его содержимое.
-			dlg.SetBounds(image.Rect(0, 0, lw, lh))
-			eng.Invalidate()
+			// Холст и границы диалога — на горутине его движка (GG-68).
+			surf.post(func() {
+				surf.mu.Lock()
+				surf.current = image.NewRGBA(image.Rect(0, 0, newW, newH))
+				surf.mu.Unlock()
+				eng.SetResolution(lw, lh)
+				// Диалог занимает окно целиком: он и есть его содержимое.
+				dlg.SetBounds(image.Rect(0, 0, lw, lh))
+				eng.Invalidate()
+			})
 		})
 	}
 
 	// Закрытие изнутри вторичного движка (✕/Escape/кнопка → closer → CloseModal).
 	eng.SetOnModalClosed(func(widget.ModalWidget) { h.teardown(hm) })
 	// Закрытие нативного окна ОС (Alt+F4 / ✕ рамки) — как отмена диалога.
+	// Отмена — обработчик диалога, поэтому выполняется на горутине его движка.
 	native.SetOnClose(func() bool {
-		dlg.OnCancel()
-		h.teardown(hm)
+		surf.post(func() {
+			dlg.OnCancel()
+			h.teardown(hm)
+		})
 		return false // окно уничтожит teardown (через native.Close)
 	})
 
@@ -346,7 +356,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 	// открываются в собственных окнах ОС, спозиционированных от окна диалога.
 	if _, ok := native.(popupWindow); ok {
 		if inv, ok := native.(uiThreadInvoker); ok {
-			ph := newPopupHost(native, inv, eng, scale)
+			ph := newPopupHost(native, inv, eng, scale, &surf.in)
 			eng.SetPopupSink(ph.apply)
 			h.mu.Lock()
 			hm.popupHost = ph
@@ -355,7 +365,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 			if an, ok := native.(activationNotifier); ok {
 				an.SetOnActivate(func(active bool) {
 					if !active {
-						eng.CloseAllOverlays()
+						surf.post(eng.CloseAllOverlays)
 					}
 				})
 			}

@@ -266,8 +266,9 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 	}
 
 	// Закрытие окна ОС (Alt+F4 / ✕ рамки) — как закрытие панели.
+	// Закрытие панели трогает дерево менеджера — на горутине движка панели.
 	native.SetOnClose(func() bool {
-		p.Close() // → mgr.closePane → OnStateChanged → teardown (снесёт окно)
+		eng.Post(p.Close) // → mgr.closePane → OnStateChanged → teardown (снесёт окно)
 		return false
 	})
 
@@ -285,7 +286,7 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 	// открываются в собственных окнах ОС, спозиционированных от окна панели.
 	if _, ok := native.(popupWindow); ok {
 		if inv, ok := native.(uiThreadInvoker); ok {
-			pph := newPopupHost(native, inv, eng, scale)
+			pph := newPopupHost(native, inv, eng, scale, &surf.in)
 			eng.SetPopupSink(pph.apply)
 			h.mu.Lock()
 			fp.popupHost = pph
@@ -293,7 +294,7 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 			if an, ok := native.(activationNotifier); ok {
 				an.SetOnActivate(func(active bool) {
 					if !active {
-						eng.CloseAllOverlays()
+						surf.post(eng.CloseAllOverlays)
 					}
 				})
 			}

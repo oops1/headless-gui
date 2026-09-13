@@ -103,6 +103,13 @@ func TestGolden_MergeView(t *testing.T) {
 	withTheme(t, "Win10 Dark", func(th *widget.Theme) {
 		img := mergeGoldenScene(t, th, func(m *widget.MergeView) {
 			// Без базы, первый конфликт закрыт нашей стороной, каретка в итоге.
+			// Пояснения второй строкой в шапках сторон и итога (GG-65, GG-61).
+			m.SetSides(
+				widget.MergeSideInfo{Title: "main", Note: "config.go", Hint: "your branch, HEAD"},
+				widget.MergeSideInfo{Title: "merge-base", Note: "config.go"},
+				widget.MergeSideInfo{Title: "feature/tag", Note: "config.go", Hint: "branch being merged"},
+			)
+			m.SetResultInfo(widget.MergeSideInfo{Title: "result", Note: "config.go", Hint: "written to the file on Save"})
 			m.SetShowBase(false)
 			m.SetStyle(widget.MergeStyleDiff3)
 			m.SetFocused(true)

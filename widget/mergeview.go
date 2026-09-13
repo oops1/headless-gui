@@ -61,9 +61,15 @@ const (
 	MergeStyleDiff3 = mergeview.StyleDiff3
 )
 
-// MergeSideInfo — подписи панели: заголовок (ветка) и примечание (файл).
+// MergeSideInfo — подписи панели: заголовок (обычно ветка) и примечание (обычно
+// путь файла) в строке шапки, и пояснение — «что это за сторона» — второй
+// строкой мелким приглушённым шрифтом.
 type MergeSideInfo struct {
 	Title, Note string
+	// Hint — пояснение под заголовком. Шапки верхних панелей растут на строку,
+	// когда пояснение есть хоть у одной видимой стороны: иначе код в соседних
+	// панелях начинался бы на разной высоте. Шапка итога растёт по своему.
+	Hint string
 }
 
 // mvSpan — экранные строки блока: [from, to) — одинаково во всех трёх верхних
@@ -92,6 +98,7 @@ type MergeView struct {
 
 	docs   [4]*dvDoc
 	sides  [3]MergeSideInfo
+	result MergeSideInfo // подписи итога: заголовок, примечание, пояснение
 	chunks []MergeChunk
 	res    []MergeResolution
 	spans  []mvSpan  // блок → экранные строки верхних панелей
@@ -103,11 +110,14 @@ type MergeView struct {
 	showBase, syntax bool
 	style            MergeStyle
 	labels           mergeview.Labels
+	markerSize       int // длина маркера конфликта; 0 — семь знаков
 
 	monoFont, boldFont string
 	fontSize           float64
 
 	scroll, rscroll, hscroll, charW float64
+	syncScroll                      bool    // верх и итог прокручиваются вместе, по блокам
+	resultDrives                    bool    // ведущая часть — итог (её прокрутили или правили последней)
 	split                           float64 // доля высоты под верхние панели
 
 	active                    MergeSide
@@ -116,6 +126,8 @@ type MergeView struct {
 	focused, dragSel          bool
 	dragSide                  MergeSide
 	splitDrag                 bool
+	rulerDrag                 bool
+	rulerGrab                 int // точка захвата ползунка от его верха; -1 — нажали мимо
 	lastClickAt               time.Time
 	lastClickPt               image.Point
 	clicks                    int
@@ -162,6 +174,7 @@ func NewMergeView(monoFont, boldFont string) *MergeView {
 		fontSize:   10,
 		charW:      8,
 		split:      0.58,
+		syncScroll: true,
 		current:    -1,
 		hoverChunk: -1,
 		hoverBtn:   -1,
@@ -174,6 +187,12 @@ func NewMergeView(monoFont, boldFont string) *MergeView {
 	m.docs[MergeOurs].readOnly = true
 	m.docs[MergeBase].readOnly = true
 	m.docs[MergeTheirs].readOnly = true
+	// Итог по умолчанию кончается переводом строки: так кончаются почти все
+	// файлы в репозитории, а блоки (SetChunks) приходят строками без переводов,
+	// и без этого решённый конфликт записывался бы с «No newline at end of
+	// file». Другой вид задаёт SetResultEOL; SetTexts берёт его у нашей стороны.
+	m.docs[MergeResult].text.EOL = "\n"
+	m.docs[MergeResult].text.FinalNL = true
 	m.sides = [3]MergeSideInfo{{Title: "ours"}, {Title: "base"}, {Title: "theirs"}}
 	// Меню — ребёнок контрола: так движок рисует его оверлей и отдаёт ему
 	// клики (контракт ContextMenuProvider).
@@ -291,9 +310,36 @@ func (m *MergeView) SetSides(ours, base, theirs MergeSideInfo) {
 			m.docs[i].title, m.docs[i].note = s.Title, s.Note
 		}
 		m.labels = mergeview.Labels{Ours: ours.Title, Base: base.Title, Theirs: theirs.Title}
-		m.buildResultLocked()
+		m.respliceUnresolvedLocked()
 		m.rebuildLocked()
 	})
+}
+
+// Sides возвращает подписи трёх сторон, заданные SetSides.
+func (m *MergeView) Sides() [3]MergeSideInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sides
+}
+
+// SetResultInfo задаёт подписи панели итога — как SetSides у сторон.
+// Пустой заголовок — прежний, из ключа merge.side.result. В маркеры конфликта
+// подписи итога не уходят: там git пишет стороны, а не итог.
+func (m *MergeView) SetResultInfo(info MergeSideInfo) {
+	m.do(func() {
+		m.result = info
+		r := m.docs[MergeResult]
+		r.title, r.note = info.Title, info.Note
+		// Пояснение меняет высоту шапки итога, а с ней — сколько строк видно.
+		m.clampScrollLocked()
+	})
+}
+
+// ResultInfo возвращает подписи панели итога.
+func (m *MergeView) ResultInfo() MergeSideInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.result
 }
 
 // SetChunks задаёт блоки слияния готовыми.
@@ -384,7 +430,7 @@ func (m *MergeView) chunkResultLocked(i int, c MergeChunk) []string {
 	if i < len(m.res) {
 		res = []MergeResolution{m.res[i]}
 	}
-	return mergeview.Result([]MergeChunk{c}, res, m.style, m.labels)
+	return mergeview.Render([]MergeChunk{c}, res, m.formatLocked())
 }
 
 // ─── Решения ────────────────────────────────────────────────────────────────
@@ -469,12 +515,52 @@ func (m *MergeView) ConflictCount() int {
 	return mergeview.Conflicts(m.chunks)
 }
 
-// Result возвращает итог одним текстом — с переводами строк и BOM исходного
-// файла. Нерешённые конфликты записаны маркерами git.
+// Result возвращает итог одним текстом: перевод строки, BOM и перевод в конце —
+// как задано SetResultEOL (у SetTexts — как у нашей стороны). Нерешённые
+// конфликты записаны маркерами git.
 func (m *MergeView) Result() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return string(m.docs[MergeResult].text.Encode())
+	t := m.docs[MergeResult].text
+	// Пустое слияние — пустой файл, а не одинокий перевод строки: буфер держит
+	// одну пустую строку только потому, что каретке нужно где-то стоять.
+	if len(t.Lines) == 1 && t.Lines[0] == "" && m.resultLinesLocked() == 0 {
+		t.FinalNL = false
+	}
+	return string(t.Encode())
+}
+
+// resultLinesLocked — сколько строк итога принадлежит блокам.
+func (m *MergeView) resultLinesLocked() int {
+	n := 0
+	for _, sp := range m.rspan {
+		n += sp[1] - sp[0]
+	}
+	return n
+}
+
+// SetResultEOL задаёт, как записывается итог: перевод строки ("\n" или
+// "\r\n"; пусто — "\n"), BOM в начале и перевод строки в конце файла.
+//
+// Блоки (SetChunks) приходят строками без переводов, и сказать контролу, чем
+// кончался файл, больше нечем. Настройка переживает SetChunks — её задают
+// один раз на файл; SetTexts берёт её у нашей стороны сам.
+func (m *MergeView) SetResultEOL(eol string, bom, finalNL bool) {
+	if eol == "" {
+		eol = "\n"
+	}
+	m.do(func() {
+		r := m.docs[MergeResult]
+		r.text.EOL, r.text.BOM, r.text.FinalNL = eol, bom, finalNL
+	})
+}
+
+// ResultEOL возвращает настройку записи итога (см. SetResultEOL).
+func (m *MergeView) ResultEOL() (eol string, bom, finalNL bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.docs[MergeResult].text
+	return t.EOL, t.BOM, t.FinalNL
 }
 
 // ResultLines возвращает строки итога.
@@ -491,9 +577,71 @@ func (m *MergeView) SetStyle(s MergeStyle) {
 			return
 		}
 		m.style = s
-		m.buildResultLocked()
-		m.rebuildLocked()
+		m.respliceUnresolvedLocked()
 	})
+}
+
+// formatLocked — настройки сборки итога: стиль, подписи и длина маркеров.
+func (m *MergeView) formatLocked() mergeview.Format {
+	return mergeview.Format{Style: m.style, Labels: m.labels, MarkerSize: m.markerSize}
+}
+
+// SetMarkerSize задаёт длину маркеров конфликта. git берёт её из атрибута
+// conflict-marker-size, и репозиторий вправе поставить другую — нерешённый
+// конфликт, записанный из окна, должен совпасть с тем, что написал бы git.
+// 0 и меньше — семь знаков, как у git по умолчанию.
+func (m *MergeView) SetMarkerSize(n int) {
+	m.do(func() {
+		n = max(0, n)
+		if m.markerSize == n {
+			return
+		}
+		m.markerSize = n
+		m.respliceUnresolvedLocked()
+	})
+}
+
+// MarkerSize возвращает длину маркеров конфликта (семь, если не задана).
+func (m *MergeView) MarkerSize() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.markerSize <= 0 {
+		return len(mergeview.MarkerOurs)
+	}
+	return m.markerSize
+}
+
+// respliceUnresolvedLocked переписывает в итоге строки НЕРЕШЁННЫХ конфликтов:
+// маркеры зависят от стиля, подписей и длины. Остальной итог, в том числе
+// правки руками, не трогается — пересборка целиком их стёрла бы, а подписи
+// сторон, например, меняются при каждой смене языка.
+func (m *MergeView) respliceUnresolvedLocked() {
+	r := m.docs[MergeResult]
+	changed := false
+	for i, c := range m.chunks {
+		if !c.Conflict || i >= len(m.res) || m.res[i].Resolved() || i >= len(m.rspan) {
+			continue
+		}
+		sp := m.rspan[i]
+		ins := m.chunkResultLocked(i, c)
+		r.text.Lines = dvSplice(r.text.Lines, sp[0], sp[1], ins)
+		delta := len(ins) - (sp[1] - sp[0])
+		m.rspan[i][1] = sp[1] + delta
+		for k := i + 1; k < len(m.rspan); k++ {
+			m.rspan[k][0] += delta
+			m.rspan[k][1] += delta
+		}
+		changed = true
+	}
+	if !changed {
+		return
+	}
+	if len(r.text.Lines) == 0 {
+		r.text.Lines = []string{""}
+	}
+	r.caret, r.anchor = r.clamp(r.caret), r.clamp(r.anchor)
+	r.rev = m.nextRev()
+	m.rebuildLocked()
 }
 
 // ─── Навигация по конфликтам ────────────────────────────────────────────────
@@ -530,7 +678,9 @@ func (m *MergeView) nextConflictLocked(from, dir int) int {
 }
 
 // NextConflict переходит к следующему конфликту.
-func (m *MergeView) NextConflict() { m.do(func() { m.goToChunkLocked(m.nextConflictLocked(m.current, +1)) }) }
+func (m *MergeView) NextConflict() {
+	m.do(func() { m.goToChunkLocked(m.nextConflictLocked(m.current, +1)) })
+}
 
 // PrevConflict переходит к предыдущему конфликту.
 func (m *MergeView) PrevConflict() {
@@ -779,13 +929,38 @@ type mvGeom struct {
 	panes      int
 	headerTopY int
 	headerResY int
+	headerTopH int // высота шапок верхних панелей (с пояснением выше)
+	headerResH int // высота шапки итога
 }
 
 const (
 	mvSplitH  = 8  // толщина разделителя
 	mvHeaderH = 34 // высота заголовка панели
 	mvGutter  = 10 // промежуток между панелями
+	mvHintH   = 16 // строка пояснения в шапке
 )
+
+// mvHeaderHeight — высота шапки панели: с пояснением на строку выше.
+func mvHeaderHeight(hint bool) int {
+	if hint {
+		return mvHeaderH + mvHintH
+	}
+	return mvHeaderH
+}
+
+// topHeaderH — высота шапок верхних панелей: общая для всех видимых сторон,
+// чтобы код в соседних панелях начинался на одной высоте.
+func (m *MergeView) topHeaderH() int {
+	for i, s := range m.sides {
+		if i == int(MergeBase) && !m.showBase {
+			continue
+		}
+		if s.Hint != "" {
+			return mvHeaderHeight(true)
+		}
+	}
+	return mvHeaderH
+}
 
 func (m *MergeView) geom() mvGeom {
 	b := m.Bounds()
@@ -811,10 +986,12 @@ func (m *MergeView) geom() mvGeom {
 		x += w + mvGutter
 	}
 	g.headerTopY = inner.Min.Y + 4
-	g.ty0 = g.headerTopY + mvHeaderH + 6
+	g.headerTopH = m.topHeaderH()
+	g.ty0 = g.headerTopY + g.headerTopH + 6
 	g.ty1 = splitY - mvSplitH/2
 	g.headerResY = splitY + mvSplitH/2 + 4
-	g.ry0 = g.headerResY + mvHeaderH + 6
+	g.headerResH = mvHeaderHeight(m.result.Hint != "")
+	g.ry0 = g.headerResY + g.headerResH + 6
 	g.ry1 = inner.Max.Y
 	return g
 }
@@ -840,17 +1017,130 @@ func (m *MergeView) maxResultScrollLocked() float64 {
 	return max(0, h-float64(max(0, g.ry1-g.ry0)))
 }
 
+// setScrollLocked прокручивает верхние панели; при синхронной прокрутке итог
+// следует за ними.
 func (m *MergeView) setScrollLocked(v float64) {
 	m.scroll = min(max(0, v), m.maxScrollLocked())
+	m.resultDrives = false
+	if m.syncScroll {
+		m.followLocked()
+	}
 }
 
+// setResultScrollLocked прокручивает итог; при синхронной прокрутке верхние
+// панели следуют за ним.
 func (m *MergeView) setResultScrollLocked(v float64) {
 	m.rscroll = min(max(0, v), m.maxResultScrollLocked())
+	m.resultDrives = true
+	if m.syncScroll {
+		m.followLocked()
+	}
 }
 
+// clampScrollLocked держит обе прокрутки в пределах после перестройки (решение,
+// правка, смена раскладки) и заново ставит ведомую часть вровень с ведущей.
 func (m *MergeView) clampScrollLocked() {
-	m.setScrollLocked(m.scroll)
-	m.setResultScrollLocked(m.rscroll)
+	m.scroll = min(max(0, m.scroll), m.maxScrollLocked())
+	m.rscroll = min(max(0, m.rscroll), m.maxResultScrollLocked())
+	if m.syncScroll {
+		m.followLocked()
+	}
+}
+
+// resultViewHLocked — высота видимой области итога.
+func (m *MergeView) resultViewHLocked() float64 {
+	g := m.geom()
+	return float64(max(0, g.ry1-g.ry0))
+}
+
+// scrollBPsLocked — точки излома соответствия «точка верха ↔ точка итога»:
+// начала и концы блоков. Между ними соответствие линейное — блок, который
+// сверху занимает строку, а в итоге пять строк маркеров, растягивается, и
+// соседние блоки всё равно встают вровень.
+func (m *MergeView) scrollBPsLocked() (top, res []float64) {
+	top = append(top, 0, dvTopPad)
+	res = append(res, 0, dvTopPad)
+	for ci, sp := range m.spans {
+		if ci >= len(m.rspan) {
+			break
+		}
+		top = append(top, float64(dvTopPad+sp.to*dvLineH))
+		res = append(res, float64(dvTopPad+m.rspan[ci][1]*dvLineH))
+	}
+	top = append(top, m.virtualHLocked())
+	res = append(res, float64(dvTopPad+len(m.docs[MergeResult].rows)*dvLineH+dvBottomPad))
+	return top, res
+}
+
+// mvMapPoint переводит точку v по ломаной from → to. Отрезки нулевой длины на
+// стороне from пропускаются: блок без строк сверху (правка только в итоге)
+// точкой соответствия не служит.
+func mvMapPoint(v float64, from, to []float64) float64 {
+	n := min(len(from), len(to))
+	if n == 0 {
+		return v
+	}
+	if v <= from[0] {
+		return to[0]
+	}
+	for i := 0; i+1 < n; i++ {
+		if v > from[i+1] || from[i+1] <= from[i] {
+			continue
+		}
+		t := (v - from[i]) / (from[i+1] - from[i])
+		return to[i] + t*(to[i+1]-to[i])
+	}
+	return to[n-1]
+}
+
+// followLocked ставит ведомую часть вровень с ведущей.
+//
+// Опорная точка едет от верха окна к низу вместе с прокруткой (доля f), как в
+// сравнении: у начала файла вровень стоят верхние края, у конца — нижние, и
+// обе части доходят до своих концов одновременно, хотя итог длиннее на строки
+// маркеров.
+func (m *MergeView) followLocked() {
+	top, res := m.scrollBPsLocked()
+	vh, rvh := m.topViewH(), m.resultViewHLocked()
+	if m.resultDrives {
+		maxR := m.maxResultScrollLocked()
+		f := 0.0
+		if maxR > 0 {
+			f = m.rscroll / maxR
+		}
+		p := mvMapPoint(m.rscroll+f*rvh, res, top)
+		m.scroll = min(max(0, p-f*vh), m.maxScrollLocked())
+		return
+	}
+	maxT := m.maxScrollLocked()
+	f := 0.0
+	if maxT > 0 {
+		f = m.scroll / maxT
+	}
+	p := mvMapPoint(m.scroll+f*vh, top, res)
+	m.rscroll = min(max(0, p-f*rvh), m.maxResultScrollLocked())
+}
+
+// SetSyncScroll включает или выключает синхронную прокрутку верха и итога.
+// По умолчанию включена: листая итог к конфликту, человек ждёт наверху те же
+// строки сторон. Выключенная — части прокручиваются порознь.
+func (m *MergeView) SetSyncScroll(v bool) {
+	m.do(func() {
+		if m.syncScroll == v {
+			return
+		}
+		m.syncScroll = v
+		if v {
+			m.followLocked()
+		}
+	})
+}
+
+// SyncScroll сообщает, прокручиваются ли верх и итог вместе.
+func (m *MergeView) SyncScroll() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.syncScroll
 }
 
 // ensureResultVisibleLocked подкручивает итог так, чтобы каретка была видна.
@@ -870,6 +1160,137 @@ func (m *MergeView) ensureResultVisibleLocked() {
 }
 
 // ─── Прочее ─────────────────────────────────────────────────────────────────
+
+// ─── Полоса-обзор и прокрутка снаружи ───────────────────────────────────────
+
+// virtualHLocked — полная высота содержимого верхних панелей в точках.
+func (m *MergeView) virtualHLocked() float64 {
+	return float64(dvTopPad + m.rows*dvLineH + dvBottomPad)
+}
+
+// rulerTrackLocked — полоса-обзор справа: от верхних панелей до низа итога.
+func (m *MergeView) rulerTrackLocked(g mvGeom) image.Rectangle {
+	return image.Rect(g.rulerX, g.ty0, g.rulerX+dvRulerW, g.ry1)
+}
+
+// rulerThumbLocked — ползунок видимой области верхних панелей. Пустой —
+// прокручивать нечего.
+func (m *MergeView) rulerThumbLocked(g mvGeom) image.Rectangle {
+	tr := m.rulerTrackLocked(g)
+	h := m.topViewH()
+	if tr.Dy() <= 0 || h <= 0 || m.maxScrollLocked() <= 0 {
+		return image.Rectangle{}
+	}
+	vs := float64(tr.Dy()) / m.virtualHLocked()
+	ty := tr.Min.Y + int(m.scroll*vs)
+	return image.Rect(tr.Min.X, ty, tr.Max.X, min(ty+max(18, int(h*vs)), tr.Max.Y))
+}
+
+// rulerMarkLocked — отметка блока на полосе. Масштаб тот же, что у ползунка, —
+// точки содержимого: отметки по числу строк, а ползунок по точкам расходились
+// бы на поля сверху и снизу, и щелчок по отметке попадал бы мимо блока.
+func (m *MergeView) rulerMarkLocked(g mvGeom, ci int) image.Rectangle {
+	tr := m.rulerTrackLocked(g)
+	vs := float64(tr.Dy()) / m.virtualHLocked()
+	sp := m.spans[ci]
+	y0 := tr.Min.Y + int(float64(dvTopPad+sp.from*dvLineH)*vs)
+	return image.Rect(tr.Min.X, y0, tr.Max.X, y0+max(3, int(float64((sp.to-sp.from)*dvLineH)*vs)))
+}
+
+// onRulerLocked — точка над полосой-обзором, с запасом: в тонкую полосу иначе
+// трудно попасть.
+func (m *MergeView) onRulerLocked(x, y int) bool {
+	return image.Pt(x, y).In(m.rulerTrackLocked(m.geom()).Inset(-4))
+}
+
+// rulerPressLocked — нажатие на полосу-обзор. На ползунке — захват без скачка:
+// панели сдвигаются ровно на столько, на сколько протянули. На отметке
+// конфликта — переход к нему. Мимо — видимая область встаёт туда серединой.
+func (m *MergeView) rulerPressLocked(y int) {
+	g := m.geom()
+	m.rulerDrag, m.rulerGrab = true, -1
+	if th := m.rulerThumbLocked(g); !th.Empty() && y >= th.Min.Y && y < th.Max.Y {
+		m.rulerGrab = y - th.Min.Y
+		return
+	}
+	for ci, c := range m.chunks {
+		if !c.Conflict {
+			continue
+		}
+		if r := m.rulerMarkLocked(g, ci); y >= r.Min.Y-2 && y < r.Max.Y+2 {
+			m.goToChunkLocked(ci)
+			return
+		}
+	}
+	m.scrollToRulerLocked(y)
+}
+
+// rulerDragLocked — протяжка по полосе после нажатия.
+func (m *MergeView) rulerDragLocked(y int) {
+	tr := m.rulerTrackLocked(m.geom())
+	if tr.Dy() <= 0 {
+		return
+	}
+	if m.rulerGrab >= 0 {
+		vs := float64(tr.Dy()) / m.virtualHLocked()
+		m.setScrollLocked(float64(y-m.rulerGrab-tr.Min.Y) / vs)
+		return
+	}
+	m.scrollToRulerLocked(y)
+}
+
+// scrollToRulerLocked ставит серединой видимой области место полосы под y.
+func (m *MergeView) scrollToRulerLocked(y int) {
+	tr := m.rulerTrackLocked(m.geom())
+	if tr.Dy() <= 0 {
+		return
+	}
+	v := float64(y-tr.Min.Y) / float64(tr.Dy()) * m.virtualHLocked()
+	m.setScrollLocked(v - m.topViewH()/2)
+}
+
+// Scroll — прокрутка верхних панелей в точках от начала.
+func (m *MergeView) Scroll() float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.scroll
+}
+
+// SetScroll прокручивает верхние панели на y точек от начала; значение за
+// краями ограничивается.
+func (m *MergeView) SetScroll(y float64) { m.do(func() { m.setScrollLocked(y) }) }
+
+// ResultScroll — прокрутка итога в точках от начала.
+func (m *MergeView) ResultScroll() float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.rscroll
+}
+
+// SetResultScroll прокручивает итог на y точек от начала.
+func (m *MergeView) SetResultScroll(y float64) { m.do(func() { m.setResultScrollLocked(y) }) }
+
+// ScrollToLine прокручивает панель так, чтобы строка буфера (от нуля) стояла на
+// трети высоты: у сторон двигаются верхние панели, у итога — итог.
+func (m *MergeView) ScrollToLine(side MergeSide, line int) {
+	m.do(func() {
+		if side < MergeOurs || side > MergeResult {
+			return
+		}
+		s := m.docs[side]
+		if line < 0 || line >= len(s.lineRow) {
+			return
+		}
+		if side == MergeResult {
+			g := m.geom()
+			m.setResultScrollLocked(float64(dvTopPad+line*dvLineH) - float64(g.ry1-g.ry0)/3)
+			return
+		}
+		if row := s.lineRow[line]; row >= 0 {
+			m.setScrollLocked(float64(dvTopPad+row*dvLineH) - m.topViewH()/3)
+		}
+	})
+}
 
 // AccessInfo — контракт доступности: контрол как группа.
 func (m *MergeView) AccessInfo() AccessInfo {
@@ -901,13 +1322,20 @@ func (m *MergeView) AccessChildren() []AccessInfo {
 		s := m.docs[i]
 		name := s.title
 		if name == "" {
-			name = Tr("merge.empty")
+			// Как в шапке: скринридер называет панель тем же словом, что видно
+			// на экране, а не «(пусто)».
+			name = Tr(mvSideKey(MergeSide(i)))
 		}
 		info := AccessInfo{
 			Role:   RoleTextInput,
 			Name:   Trf(keys[i], name),
 			Value:  strings.Join(s.text.Lines, "\n"),
 			Bounds: r,
+		}
+		if i == int(MergeResult) {
+			info.Description = m.result.Hint
+		} else {
+			info.Description = m.sides[i].Hint
 		}
 		if s.readOnly {
 			info.States = append(info.States, StateReadOnly)

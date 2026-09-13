@@ -109,6 +109,7 @@ type DiffView struct {
 	pal    dvPalette
 
 	hide, syntax, ignoreWS bool
+	showRO, headers        bool // отметка «только чтение» и шапки сторон (GG-71, GG-72)
 	ctxLines               int
 	expanded               map[[2]int]bool
 	monoFont, boldFont     string
@@ -180,6 +181,8 @@ func NewDiffView(monoFont, boldFont string) *DiffView {
 		docs:       [2]*dvDoc{newDvDoc(), newDvDoc()},
 		pal:        dvPaletteFrom(t),
 		syntax:     true,
+		showRO:     true,
+		headers:    true,
 		ctxLines:   3,
 		expanded:   map[[2]int]bool{},
 		monoFont:   monoFont,
@@ -495,6 +498,43 @@ func (d *DiffView) SetHideUnchanged(v bool) {
 	})
 }
 
+// SetShowHeaders показывает или прячет шапки сторон — карточки с именем файла,
+// примечанием и счётчиком. Без них код начинается от верхнего края контрола:
+// там, где файл и что с чем сравнивается уже видно рядом (список изменений),
+// шапки только отнимают место.
+func (d *DiffView) SetShowHeaders(v bool) {
+	d.do(func() {
+		if d.headers == v {
+			return
+		}
+		d.headers = v
+		// Высота области кода изменилась — прокрутка могла выйти за край.
+		d.setScrollLocked(d.scroll)
+	})
+}
+
+// ShowHeaders сообщает, показаны ли шапки сторон.
+func (d *DiffView) ShowHeaders() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.headers
+}
+
+// SetShowReadOnlyMark показывает или прячет отметку «только чтение» в шапке
+// стороны. В окне, где сравнение по смыслу только для просмотра, отметка
+// стоит на обеих сторонах, ничего не сообщает и отнимает место у примечания.
+// Сама сторона остаётся только для чтения — меняется лишь надпись.
+func (d *DiffView) SetShowReadOnlyMark(v bool) {
+	d.do(func() { d.showRO = v })
+}
+
+// ShowReadOnlyMark сообщает, показывается ли отметка «только чтение».
+func (d *DiffView) ShowReadOnlyMark() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.showRO
+}
+
 func (d *DiffView) HideUnchanged() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -659,6 +699,32 @@ func (d *DiffView) SetCaret(side DiffSide, line, col int) {
 }
 
 func (d *DiffView) GoToLine(side DiffSide, line int) { d.SetCaret(side, line, 0) }
+
+// Selection возвращает строки стороны, задетые выделением: [fromLine, toLine),
+// номера от нуля. ok=false — выделения на этой стороне нет.
+//
+// Текст выделения (SelectedText) не говорит, какие это строки: одинаковые
+// строки встречаются в файле много раз, а приложению, которое добавляет в
+// индекс выделенные строки, нужны именно номера. Выделение, кончающееся в
+// самом начале строки, эту строку не задевает — так считают строки редакторы:
+// Shift+↓ от начала строки выделяет одну строку, а не две.
+func (d *DiffView) Selection(side DiffSide) (fromLine, toLine int, ok bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if side != DiffLeft && side != DiffRight {
+		return 0, 0, false
+	}
+	s := d.docs[side]
+	if !s.hasSel() {
+		return 0, 0, false
+	}
+	a, b := s.sel()
+	to := b.line + 1
+	if b.col == 0 && b.line > a.line {
+		to = b.line
+	}
+	return a.line, to, true
+}
 
 // ─── Модель отображения ─────────────────────────────────────────────────────
 
@@ -844,7 +910,10 @@ func (d *DiffView) geom() dvGeom {
 	g.lx1 = g.lx0 + pw
 	g.rx0 = g.lx1 + dvGutterW
 	g.rx1 = g.rx0 + pw
-	g.cy0 = b.Min.Y + dvHeaderH
+	g.cy0 = b.Min.Y
+	if d.headers {
+		g.cy0 += dvHeaderH
+	}
 	g.cy1 = b.Max.Y
 	return g
 }
