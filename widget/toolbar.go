@@ -119,8 +119,8 @@ func (tb *ToolBar) applyIconsOnly() {
 		tb.iconPosSaved = map[*Button]IconPosition{}
 	}
 	for _, child := range tb.children {
-		btn, ok := child.(*Button)
-		if !ok || btn.Icon == nil {
+		btn := toolBarButton(child)
+		if btn == nil || btn.Icon == nil {
 			continue // кнопке без иконки прятать подпись не во что
 		}
 		if tb.IconsOnly {
@@ -146,14 +146,29 @@ func (tb *ToolBar) itemWidth(w Widget, h int) int {
 	if _, ok := w.(*toolBarSeparator); ok {
 		return 9
 	}
-	btn, ok := w.(*Button)
-	if !ok {
+	btn := toolBarButton(w)
+	if btn == nil {
 		return desiredWidth(w)
 	}
 	if xw, _ := xamlSizeOf(btn); xw > 0 {
 		return xw
 	}
+	if _, ok := w.(*MenuButton); ok {
+		return buttonContentWidth(btn, h) + menuButtonArrowW
+	}
 	return buttonContentWidth(btn, h)
+}
+
+// toolBarButton — кнопка элемента панели: сама кнопка или кнопка с меню
+// (MenuButton); nil — не кнопка.
+func toolBarButton(w Widget) *Button {
+	switch v := w.(type) {
+	case *Button:
+		return v
+	case *MenuButton:
+		return v.Button
+	}
+	return nil
 }
 
 // buttonContentWidth — ширина кнопки по содержимому: значок, зазор, подпись и
@@ -344,6 +359,14 @@ func (tb *ToolBar) overflowItems() []MenuItem {
 			// Разделитель в начале списка не нужен: черта под ничем.
 			if len(items) > 0 {
 				items = append(items, MenuItem{Separator: true})
+			}
+			continue
+		}
+		if mb, ok := w.(*MenuButton); ok {
+			// Кнопка с меню становится подменю: пункты — её меню, у
+			// разделённой первым пунктом идёт действие.
+			if item, ok := mb.overflowItem(); ok {
+				items = append(items, item)
 			}
 			continue
 		}
