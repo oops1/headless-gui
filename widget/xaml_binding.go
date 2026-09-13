@@ -225,6 +225,61 @@ type BindingScope struct {
 	viewSubs []viewSubscription
 
 	langListenerID int // id подписки на смену языка (-1 если не подписан)
+
+	// locOwner — владелец «свёрнутых» строк дерева (меню, вкладки, заголовки
+	// колонок): их переводит и снимает этот scope (GG-75).
+	locOwner *locOwner
+	// root — корень дерева: при смене языка он переразмечается, потому что
+	// подписи сменили длину (GG-74), и по нему дерево освобождает ReleaseXAML.
+	root Widget
+}
+
+// xamlScopes — scope деревьев, загруженных без возврата scope
+// (LoadUIFromXAML и прочие): корень → scope, для ReleaseXAML. Записываются
+// только деревья, которые что-то держат (слушатель языка, подписки на модель
+// или коллекции): они и так живут, пока их не отпишут, а запись о дереве, не
+// держащем ничего, сама стала бы утечкой.
+var (
+	xamlScopesMu sync.Mutex
+	xamlScopes   = map[Widget]*BindingScope{}
+)
+
+// ReleaseXAML освобождает дерево, загруженное любой из функций LoadUIFromXAML*:
+// отписывает его от смены языка, от модели и коллекций и забывает его
+// переводимые строки меню, вкладок, списков и заголовков колонок.
+//
+//	root, reg, err := widget.LoadUIFromXAML(data)
+//	...
+//	widget.ReleaseXAML(root) // окно закрыто, дерево больше не нужно
+//
+// Без этого каждое загруженное и выброшенное дерево оставалось подписанным, и
+// одна смена языка переводила и перекладывала все мёртвые деревья (GG-75).
+// Для дерева из LoadUIFromXAMLBindings то же делает scope.Dispose. Повторный
+// вызов и корень, который нечего освобождать, безопасны.
+func ReleaseXAML(root Widget) {
+	if root == nil {
+		return
+	}
+	xamlScopesMu.Lock()
+	s := xamlScopes[root]
+	delete(xamlScopes, root)
+	xamlScopesMu.Unlock()
+	s.Dispose()
+}
+
+// track записывает scope для ReleaseXAML, если дереву есть что освобождать.
+func (s *BindingScope) track() {
+	s.mu.Lock()
+	holds := s.langListenerID >= 0 || s.subCtx != nil || s.subLegacy != nil ||
+		len(s.collSubs) > 0 || len(s.viewSubs) > 0
+	root := s.root
+	s.mu.Unlock()
+	if !holds || root == nil {
+		return
+	}
+	xamlScopesMu.Lock()
+	xamlScopes[root] = s
+	xamlScopesMu.Unlock()
 }
 
 // collSubscription — оформленная подписка на изменения коллекции.
@@ -237,6 +292,13 @@ type collSubscription struct {
 type viewSubscription struct {
 	cv *CollectionView
 	id int
+}
+
+// ownerOfLocs возвращает владельца свёрнутых строк дерева (nil после Dispose).
+func (s *BindingScope) ownerOfLocs() *locOwner {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.locOwner
 }
 
 // addCollSub запоминает дескриптор подписки на коллекцию для Dispose.
@@ -369,14 +431,54 @@ func (s *BindingScope) activate() {
 // wireLocs применяет локализованные строки {Loc Key} и подписывается на смену
 // ЯЗЫКА ИНТЕРФЕЙСА (не раскладки клавиатуры) для динамического перевода.
 func (s *BindingScope) wireLocs() {
-	if len(s.locs) == 0 {
+	if len(s.locs) > 0 {
+		s.applyLocs()
+	}
+	s.ensureLangListener()
+}
+
+// ensureLangListener подписывает scope на смену языка, если дереву есть что
+// переводить, а подписки ещё нет. Строки могут появиться и после загрузки —
+// при перестроении ItemsControl.
+func (s *BindingScope) ensureLangListener() {
+	s.mu.Lock()
+	need := s.langListenerID < 0 &&
+		(len(s.locs) > 0 || (s.locOwner != nil && ownedLocItemCount(s.locOwner) > 0))
+	s.mu.Unlock()
+	if !need {
 		return
 	}
-	s.applyLocs()
-	id := AddLanguageListener(func(string) { s.applyLocs() })
+	id := AddLanguageListener(func(string) { s.onLanguage() })
 	s.mu.Lock()
+	if s.langListenerID >= 0 {
+		s.mu.Unlock()
+		RemoveLanguageListener(id) // подписались параллельно — вторая не нужна
+		return
+	}
 	s.langListenerID = id
 	s.mu.Unlock()
+}
+
+// onLanguage — смена языка: переводы свойств и свёрнутых строк дерева, затем
+// раскладка корня.
+//
+// Раскладка нужна потому, что подписи сменили длину: панель мерит ребёнка по
+// содержимому на раскладке, а сама о смене текста не узнаёт (GG-74).
+func (s *BindingScope) onLanguage() {
+	s.mu.Lock()
+	owner, root := s.locOwner, s.root
+	s.mu.Unlock()
+	if len(s.locs) > 0 {
+		s.applyLocs()
+	}
+	if owner != nil {
+		applyOwnedLocItems(owner)
+	}
+	if root != nil {
+		if b := root.Bounds(); !b.Empty() {
+			root.SetBounds(b)
+		}
+	}
 }
 
 // Dispose отписывает scope от модели, коллекций и слушателя языка. Вызывать,
@@ -393,16 +495,30 @@ func (s *BindingScope) Dispose() {
 	subLegacy := s.subLegacy
 	collSubs := s.collSubs
 	viewSubs := s.viewSubs
+	owner := s.locOwner
+	root := s.root
 	s.langListenerID = -1
 	s.subCtx = nil
 	s.subHandle = -1
 	s.subLegacy = nil
 	s.collSubs = nil
 	s.viewSubs = nil
+	s.locOwner = nil
+	s.root = nil
 	s.mu.Unlock()
 
 	if langID >= 0 {
 		RemoveLanguageListener(langID)
+	}
+	// Свёрнутые строки дерева жили в общем списке и снимались только все разом
+	// (ClearLocalizedItems) — теперь у них есть владелец (GG-75).
+	removeOwnedLocItems(owner)
+	if root != nil {
+		xamlScopesMu.Lock()
+		if xamlScopes[root] == s {
+			delete(xamlScopes, root)
+		}
+		xamlScopesMu.Unlock()
 	}
 	unsubscribeCtx(subCtx, subHandle, subLegacy)
 	for _, cs := range collSubs {
@@ -461,10 +577,15 @@ func (s *BindingScope) wireVirtuals() {
 				inItemTemplate: true,
 			}
 			re.process(&c, item)
-			w, err := buildXAMLWidget(c, vt.reg, image.Point{}, vt.baseDir)
+			var w Widget
+			var err error
+			withLocOwner(s.ownerOfLocs(), func() {
+				w, err = buildXAMLWidget(c, vt.reg, image.Point{}, vt.baseDir)
+			})
 			if err != nil {
 				return nil
 			}
+			s.ensureLangListener()
 			return w
 		})
 		if s.ctx == nil {
@@ -563,11 +684,16 @@ func (s *BindingScope) rebuildItems(it itemsTarget) {
 			inItemTemplate: true,
 		}
 		re.process(&c, item)
-		w, err := buildXAMLWidget(c, it.reg, image.Point{}, it.baseDir)
+		var w Widget
+		var err error
+		withLocOwner(s.ownerOfLocs(), func() {
+			w, err = buildXAMLWidget(c, it.reg, image.Point{}, it.baseDir)
+		})
 		if err == nil && w != nil {
 			it.panel.AddChild(w)
 		}
 	}
+	s.ensureLangListener()
 	it.panel.SetBounds(it.panel.Bounds()) // перелейаут
 	notifyUIChanged()
 }

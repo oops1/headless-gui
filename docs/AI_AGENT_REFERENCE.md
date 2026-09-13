@@ -713,6 +713,9 @@ inp.LeadingIcon = img
 
 // Content measuring: DesiredSizer interface, asked only of those who implement.
 sp.DesiredSize(); sp.Relayout(); sv.FitContent(); sv.ContentSize()
+// DockPanel/WrapPanel re-measure children without explicit size on every layout
+// (caption changed → new width; size set from code is kept). After SetText from
+// code call dock.Relayout() / wrap.Relayout(); XAML trees re-lay on language change.
 // A collapsed Expander asks for its header height only.
 
 // NOTE: <Separator/> in XAML now builds *widget.Separator, not *widget.Panel.
@@ -1997,8 +2000,11 @@ root, reg, scope, err := widget.LoadUIFromXAMLBindings(xamlBytes, vm)
   `Value` (NumericUpDown — TwoWay-ready).
 - **`BindingScope.Dispose()`** — unsubscribes from the model (including the
   legacy `AddPropertyChanged` path), `ObservableCollection`/`CollectionView`
-  sources and the language listener. Call when the loaded XAML tree is
-  discarded (UI reload) to prevent leaks. Related unsubscribe APIs:
+  sources and the language listener, and forgets the tree's folded localized
+  strings (menu items, tab headers, list items, column headers). Call when the
+  loaded XAML tree is discarded (UI reload) to prevent leaks.
+  **`widget.ReleaseXAML(root)`** does the same for a tree from any other
+  `LoadUIFromXAML*` loader (those don't return the scope). Related unsubscribe APIs:
   `ObservableCollection.AddCollectionChanged` returns an id for
   `RemoveCollectionChanged(id)`; `CollectionView.AddViewChangedHandle` /
   `RemoveViewChanged(id)`; `DataGrid.Dispose()`, `CollectionView.Dispose()`,
@@ -2606,10 +2612,14 @@ widget.RemoveLocaleListener(id)
 ### BindingScope.Dispose
 
 ```go
-scope.Dispose()  // unsubscribes from model + language listener
+scope.Dispose()          // model, collections, language listener, folded {Loc} strings
+widget.ReleaseXAML(root) // same, for trees from LoadUIFromXAML / WithBase / FS / WithContext
 ```
 
-Call when the XAML tree is replaced (e.g., on navigation) to prevent memory leaks.
+Call when the XAML tree is replaced (e.g., on navigation, or a dialog loaded on
+every open) to prevent memory leaks: an unreleased tree is translated and
+re-laid on every language change. Releasing twice or a root with nothing to
+release is a no-op. `ClearLocalizedItems()` still drops the strings of ALL trees.
 
 ### XAML Cursor attribute
 

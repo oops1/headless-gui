@@ -18,6 +18,10 @@ type WrapPanel struct {
 	Spacing     int // зазор между элементами в линии (px)
 	LineSpacing int // зазор между линиями (px)
 	Padding     int
+
+	// auto — размер, выставленный ребёнку по содержимому на прошлой
+	// раскладке (см. measure).
+	auto map[Widget]image.Point
 }
 
 // NewWrapPanel создаёт WrapPanel.
@@ -37,14 +41,48 @@ func (wp *WrapPanel) AddChild(w Widget) {
 	wp.layout()
 }
 
+// Relayout пересчитывает раскладку панели — когда содержимое ребёнка
+// сменилось само по себе (см. DockPanel.Relayout).
+func (wp *WrapPanel) Relayout() {
+	wp.layout()
+	wp.Invalidate()
+}
+
+// measure возвращает размер ребёнка в раскладке. Размер, выставленный
+// панелью по содержимому на прошлой раскладке, перемеряется: подпись могла
+// смениться (GG-74). Заданный извне — остаётся.
+func (wp *WrapPanel) measure(child Widget, prev map[Widget]image.Point) (int, int) {
+	cb := child.Bounds()
+	cw, ch := cb.Dx(), cb.Dy()
+	p := prev[child]
+	var auto image.Point
+	if cw <= 0 || p.X == cw {
+		cw = desiredWidth(child)
+		auto.X = cw
+	}
+	if ch <= 0 || p.Y == ch {
+		ch = desiredHeight(child)
+		auto.Y = ch
+	}
+	if auto != (image.Point{}) {
+		if wp.auto == nil {
+			wp.auto = make(map[Widget]image.Point)
+		}
+		wp.auto[child] = auto
+	}
+	return cw, ch
+}
+
 func (wp *WrapPanel) layout() {
 	b := wp.Bounds()
 	if b.Empty() {
 		return
 	}
+	prev := wp.auto
+	wp.auto = nil
 	pad := wp.Padding
 	if wp.Orientation == OrientationVertical {
-		wp.layoutVertical(b, pad)
+		wp.layoutVertical(b, pad, prev)
 		return
 	}
 	// Horizontal: строки слева направо, перенос вниз.
@@ -53,14 +91,7 @@ func (wp *WrapPanel) layout() {
 	lineH := 0
 	maxW := b.Dx() - pad
 	for _, child := range wp.children {
-		cb := child.Bounds()
-		cw, ch := cb.Dx(), cb.Dy()
-		if cw <= 0 {
-			cw = desiredWidth(child)
-		}
-		if ch <= 0 {
-			ch = desiredHeight(child)
-		}
+		cw, ch := wp.measure(child, prev)
 		if x > pad && x+cw > maxW {
 			// перенос на новую строку
 			x = pad
@@ -75,20 +106,13 @@ func (wp *WrapPanel) layout() {
 	}
 }
 
-func (wp *WrapPanel) layoutVertical(b image.Rectangle, pad int) {
+func (wp *WrapPanel) layoutVertical(b image.Rectangle, pad int, prev map[Widget]image.Point) {
 	x := pad
 	y := pad
 	colW := 0
 	maxH := b.Dy() - pad
 	for _, child := range wp.children {
-		cb := child.Bounds()
-		cw, ch := cb.Dx(), cb.Dy()
-		if cw <= 0 {
-			cw = desiredWidth(child)
-		}
-		if ch <= 0 {
-			ch = desiredHeight(child)
-		}
+		cw, ch := wp.measure(child, prev)
 		if y > pad && y+ch > maxH {
 			y = pad
 			x += colW + wp.Spacing
