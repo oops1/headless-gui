@@ -1517,24 +1517,36 @@ grid.SetItemsSource(collection)
 
 ### Callback Execution Model (sync vs goroutine)
 
-The model differs by widget. **As of GUI_ISSUES A5/A7 fix, Button is fully synchronous on both mouse and keyboard paths.** Older callbacks
-on other widgets may still spawn a goroutine on the keyboard path; this is being unified.
+**All widget callbacks are synchronous** — no widget spawns a goroutine for a
+callback. And with a running engine they all run on **one goroutine, the frame
+loop goroutine** (GG-68, v3.18): the native window and webstream queue input
+events on the engine instead of calling `Send*` from their own goroutines, and
+`eng.Post` functions and animation ticks run on that same goroutine. Shared
+state touched only by handlers and `Post` functions needs no mutex.
 
 | Widget | Mouse path | Keyboard path | Notes |
 |---|---|---|---|
 | `Button.OnClick` | sync | sync | Use `AddClickHandler(fn)` for multiple subscribers; OnClick (field) fires first, then handlers in registration order. |
-| `CheckBox.OnChange(checked bool)` | sync | goroutine (Space) | The field is `OnChange`, **not** `OnClick`. Tracks tri-state press → release. |
-| `ListView.OnSelect` | goroutine | goroutine | Long-running work OK. |
-| `DataGrid.OnRowActivated(row, item)` | sync (after Unlock) | sync | NEW. Fires on dbl-click and Enter, even if grid is read-only. Use for "open detail / toggle breakpoint" UX. |
-| `DataGrid.OnSelectionChanged` | goroutine | goroutine | |
-
-Treat the callback as potentially concurrent — guard shared state with a mutex.
-For Button specifically you can rely on synchronous semantics:
+| `CheckBox.OnChange(checked bool)` | sync | sync | The field is `OnChange`, **not** `OnClick`. Tracks tri-state press → release. |
+| `ListView.OnSelect` | sync | sync | Move long-running work to a goroutine and come back with `eng.Post`. |
+| `DataGrid.OnRowActivated(row, item)` | sync (after Unlock) | sync | Fires on dbl-click and Enter, even if grid is read-only. |
+| `DataGrid.OnSelectionChanged` | sync | sync | |
 
 ```go
-btn.OnClick = func() { /* runs in caller goroutine */ }
+btn.OnClick = func() { /* engine goroutine */ }
 btn.AddClickHandler(func() { /* runs after OnClick, same goroutine */ })
+
+go func() {
+    data := load()                            // background goroutine
+    eng.Post(func() { list.SetItems(data) })  // back on the engine goroutine
+}()
+eng.Flush() // tests: wait until the Post queue is drained, no frame rendered
 ```
+
+Caveats: without `Start()` nobody drains the queue except `RenderOnce`,
+`RenderFrameNow` and `Flush` (on the calling goroutine). Code that calls
+`Send*` from its own goroutine while the engine runs loses the guarantee —
+deliver such input through `eng.Post` as well.
 
 ### SetRoot Must Be Called Before Start
 

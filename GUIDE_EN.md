@@ -95,6 +95,29 @@ eng.CloseModal(m widget.ModalWidget)
 
 `output.Frame` contains `Seq uint64`, `Timestamp time.Time`, and `[]DirtyTile{X, Y, W, H int; Data []byte}`.
 
+### The UI goroutine and `Post`
+
+While the engine is running, everything that touches widgets runs on one
+goroutine — the frame loop goroutine: input handlers, functions passed to
+`Post`, animation ticks and drawing. The native window (`window.Run`) and the
+browser viewer do not call `Send*` from their own goroutines; they queue events
+on the engine, so widgets can be changed from a handler and from `Post` without
+locks. An animation is stepped by the engine on whose goroutine it was started.
+
+```go
+go func() {
+    data := load()                          // background goroutine
+    eng.Post(func() { list.SetItems(data) }) // back to the UI goroutine
+}()
+
+eng.Flush() // in tests: wait for the queue without rendering a frame
+```
+
+Without `Start()` the queue is drained by `RenderOnce`, `RenderFrameNow` and
+`Flush`, on the calling goroutine. If you call `Send*` yourself from another
+goroutine while the engine is running, deliver that input through `Post` too —
+otherwise handlers run wherever they were called.
+
 ---
 
 ## Widgets
