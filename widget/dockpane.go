@@ -80,6 +80,13 @@ type DockPane struct {
 	// TitleBarHeight — высота титлбара (0 → dockPaneTitleH).
 	TitleBarHeight int
 
+	// MinSize — наименьший размер стороны менеджера, пока панель на ней
+	// закреплена: ширина у Left/Right, высота у Top/Bottom (0 — только общий
+	// DockManager.MinSideSize). Разделитель упирается в наибольший минимум
+	// панелей стороны; в тесном окне минимум уступает документной области.
+	// Смена на лету — SetMinSize (GG-79).
+	MinSize int
+
 	// Цвета (берутся из темы в NewDockPane; ApplyTheme обновляет).
 	TitleBG       color.RGBA // фон титлбара неактивной панели
 	TitleActiveBG color.RGBA // фон титлбара активной панели (Accent)
@@ -782,6 +789,22 @@ func (p *DockPane) ApplyTheme(t *Theme) {
 	p.TitleText = t.TitleText
 	p.Background = t.PanelBG
 	p.BorderColor = t.Border
+}
+
+// SetMinSize задаёт MinSize и перекладывает менеджер — например, когда
+// ширина вкладок панели сменилась вместе с языком.
+func (p *DockPane) SetMinSize(px int) {
+	if px < 0 {
+		px = 0
+	}
+	if p.MinSize == px {
+		return
+	}
+	p.MinSize = px
+	if p.mgr != nil {
+		p.mgr.layout()
+		p.mgr.Invalidate()
+	}
 }
 
 // SetTitle задаёт текст заголовка панели.

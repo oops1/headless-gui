@@ -1215,6 +1215,9 @@ func buildXAMLDockPane(el xElement, reg map[string]Widget, baseDir string, depth
 	}
 
 	pane = NewDockPane(id, title, content)
+	if v := xatoi(el.attr("MinSize")); v > 0 {
+		pane.MinSize = v // минимум стороны, пока панель на ней (GG-79)
+	}
 	side = xamlDockSide(el.attr("Side"))
 	size = xatoi(el.attr("Size"))
 	state = strings.ToLower(strings.TrimSpace(el.attr("State")))
