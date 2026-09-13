@@ -87,6 +87,18 @@ func (cb *CheckBox) OnMouseMove(x, y int) {
 	cb.SetHovered(image.Pt(x, y).In(cb.bounds))
 }
 
+// checkBoxContentWidth — ширина флажка по содержимому: квадрат, отступ,
+// подпись своим кеглем и запас под пунктирную рамку фокуса классики, которая
+// выступает за подпись на пару точек. Отрисовка (Draw) ставит подпись ровно
+// так же: квадрат 16, отступ 6.
+func checkBoxContentWidth(cb *CheckBox) int {
+	const boxSize, textPad, focusPad = 16, 6, 4
+	if cb.Text == "" {
+		return boxSize
+	}
+	return boxSize + textPad + MeasureUIText(cb.Text, fontSizeOrDefault(cb.FontSize)) + focusPad
+}
+
 // Draw рисует CheckBox: квадратик 16×16 слева + текст справа.
 func (cb *CheckBox) Draw(ctx DrawContext) {
 	b := cb.bounds

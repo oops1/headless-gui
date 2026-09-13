@@ -22,6 +22,7 @@ import (
 	stdraw "image/draw"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -67,10 +68,11 @@ type modifierSink interface {
 	SetModifiers(mod widget.KeyMod)
 }
 
-// sendModifiers сообщает движку текущее состояние Ctrl/Shift/Alt.
-func (s *surface) sendModifiers() {
+// sendModifiers сообщает движку состояние Ctrl/Shift/Alt, снятое в момент
+// события.
+func (s *surface) sendModifiers(mod widget.KeyMod) {
 	if ms, ok := s.eng.(modifierSink); ok {
-		ms.SetModifiers(s.currentMod())
+		ms.SetModifiers(mod)
 	}
 }
 
@@ -112,14 +114,17 @@ func (win *Window) setupActivation() {
 		return
 	}
 	an.SetOnActivate(func(active bool) {
-		ww.SetActive(active)
-		// При деактивации носителя (клик в другое приложение) закрываем
-		// вынесенные popup-оверлеи — как системные меню. Только в hosted-режиме.
-		if !active && win.popupHost != nil {
-			if c, ok := win.eng.(interface{ CloseAllOverlays() }); ok {
-				c.CloseAllOverlays()
+		// Заголовок и оверлеи — виджеты: на горутине движка.
+		win.post(func() {
+			ww.SetActive(active)
+			// При деактивации носителя (клик в другое приложение) закрываем
+			// вынесенные popup-оверлеи — как системные меню. Только в hosted-режиме.
+			if !active && win.popupHost != nil {
+				if c, ok := win.eng.(interface{ CloseAllOverlays() }); ok {
+					c.CloseAllOverlays()
+				}
 			}
-		}
+		})
 	})
 }
 
@@ -149,7 +154,7 @@ func (win *Window) installPopupHost() {
 	if !ok {
 		return
 	}
-	win.popupHost = newPopupHost(win.native, inv, peng, win.scale)
+	win.popupHost = newPopupHost(win.native, inv, peng, win.scale, &win.in)
 	setter.SetPopupSink(win.popupHost.apply)
 }
 
@@ -204,12 +209,17 @@ type surface struct {
 	modCtrl  atomic.Bool
 	modAlt   atomic.Bool
 
-	// Предыдущие координаты мыши (для drag).
-	lastMX, lastMY int
+	// in — очередь ввода к движку: склейка движений мыши (input_queue.go).
+	in inputQueue
+
+	// cursor/cursorSet — форма курсора, последней отданная окну ОС. Только
+	// горутина движка.
+	cursor    int
+	cursorSet bool
 
 	// fitOX, fitOY — смещение контента в буфере окна (letterbox при
-	// ContentFit=FitScale). Пишутся под mu (resize), читаются входными
-	// колбэками того же UI-потока и applyFrame (под mu).
+	// ContentFit=FitScale). Пишутся под mu при ресайзе, читаются событиями
+	// ввода — то и другое на горутине движка — и applyFrame (под mu).
 	fitOX, fitOY int
 }
 
@@ -435,23 +445,32 @@ func (win *Window) Run() error {
 	// Смена DPI монитора (перенос окна) — перестраиваем масштаб и буферы.
 	if dn, ok := win.native.(dpiChangeNotifier); ok {
 		dn.SetOnDpiChanged(func(k float64) {
-			if win.fitMode == FitScale {
-				return // fit-режим сам управляет масштабом
-			}
-			sa, ok := win.eng.(engineScaler)
-			if !ok || k <= 0 || k == win.scale {
+			if k <= 0 {
 				return
 			}
-			sa.SetScale(k)
-			win.scale = k
-			npw, nph := win.physicalSize()
-			win.mu.Lock()
-			win.current = image.NewRGBA(image.Rect(0, 0, npw, nph))
-			win.mu.Unlock()
-			win.native.SetSize(npw, nph)
-			// Минимум задан в логических пикселях: на мониторе с другим DPI
-			// прежнее физическое значение означало бы другой размер на глаз.
-			win.applyMinSize()
+			// Масштаб движка и буфер кадра меняются на горутине движка, размер и
+			// минимум окна ОС — на потоке окна.
+			win.post(func() {
+				if win.fitMode == FitScale {
+					return // fit-режим сам управляет масштабом
+				}
+				sa, ok := win.eng.(engineScaler)
+				if !ok || k == win.scale {
+					return
+				}
+				sa.SetScale(k)
+				win.scale = k
+				npw, nph := win.physicalSize()
+				win.mu.Lock()
+				win.current = image.NewRGBA(image.Rect(0, 0, npw, nph))
+				win.mu.Unlock()
+				win.onNative(func() {
+					win.native.SetSize(npw, nph)
+					// Минимум задан в логических пикселях: на мониторе с другим DPI
+					// прежнее физическое значение означало бы другой размер на глаз.
+					win.applyMinSize()
+				})
+			})
 		})
 	}
 
@@ -616,21 +635,25 @@ func (win *Window) setupWidgetWindow() {
 		ww.OnClose = win.requestClose
 	}
 
-	// Кнопка ─ → свернуть.
+	// Кнопка ─ → свернуть. Обработчик кнопки выполняется на горутине движка, а
+	// окно ОС сворачивается на потоке своего цикла сообщений: ShowWindow с
+	// чужого потока Win32 выполняет асинхронно.
 	if ww.OnMinimize == nil {
 		ww.OnMinimize = func() {
-			win.native.Minimize()
+			win.onNative(win.native.Minimize)
 		}
 	}
 
 	// Кнопка □ → развернуть / восстановить.
 	if ww.OnMaximize == nil {
 		ww.OnMaximize = func() {
-			if win.native.IsMaximized() {
-				win.native.Restore()
-			} else {
-				win.native.Maximize()
-			}
+			win.onNative(func() {
+				if win.native.IsMaximized() {
+					win.native.Restore()
+				} else {
+					win.native.Maximize()
+				}
+			})
 		}
 	}
 }
@@ -646,33 +669,9 @@ func (win *Window) setupResizeClose() {
 		if newW <= 0 || newH <= 0 {
 			return
 		}
-		if win.fitMode == FitScale {
-			win.handleFitResize(newW, newH)
-			return
-		}
-		lw, lh := newW, newH
-		if win.scale != 1 && win.scale > 0 {
-			lw = int(float64(newW)/win.scale + 0.5)
-			lh = int(float64(newH)/win.scale + 0.5)
-		}
-		win.w = lw
-		win.h = lh
-
-		// Обновляем размер canvas движка (логический).
-		if rs, ok := win.eng.(interface{ SetResolution(w, h int) }); ok {
-			rs.SetResolution(lw, lh)
-		}
-
-		// Пересоздаём буфер под физический размер кадра.
-		pw, ph := win.physicalSize()
-		win.mu.Lock()
-		win.current = image.NewRGBA(image.Rect(0, 0, pw, ph))
-		win.mu.Unlock()
-
-		// Обновляем bounds корневого виджета (widget.Window заполняет всё окно)
-		if root := win.eng.Root(); root != nil {
-			root.SetBounds(image.Rect(0, 0, lw, lh))
-		}
+		// Холст движка и границы корня меняются на горутине движка: из насоса
+		// ОС это шло параллельно с отрисовкой и обработчиками (GG-68).
+		win.post(func() { win.resizeTo(newW, newH) })
 	})
 
 	// ── Close ────────────────────────────────────────────────────────────────
@@ -687,6 +686,38 @@ func (win *Window) setupResizeClose() {
 		win.postToEngine(win.requestClose)
 		return false
 	})
+}
+
+// resizeTo применяет новый размер окна ОС (физические пиксели): холст движка,
+// буфер кадра и границы корня. Выполняется на горутине движка.
+func (win *Window) resizeTo(newW, newH int) {
+	if win.fitMode == FitScale {
+		win.handleFitResize(newW, newH)
+		return
+	}
+	lw, lh := newW, newH
+	if win.scale != 1 && win.scale > 0 {
+		lw = int(float64(newW)/win.scale + 0.5)
+		lh = int(float64(newH)/win.scale + 0.5)
+	}
+	win.w = lw
+	win.h = lh
+
+	// Обновляем размер canvas движка (логический).
+	if rs, ok := win.eng.(interface{ SetResolution(w, h int) }); ok {
+		rs.SetResolution(lw, lh)
+	}
+
+	// Пересоздаём буфер под физический размер кадра.
+	pw, ph := win.physicalSize()
+	win.mu.Lock()
+	win.current = image.NewRGBA(image.Rect(0, 0, pw, ph))
+	win.mu.Unlock()
+
+	// Обновляем bounds корневого виджета (widget.Window заполняет всё окно)
+	if root := win.eng.Root(); root != nil {
+		root.SetBounds(image.Rect(0, 0, lw, lh))
+	}
 }
 
 // handleFitResize — ресайз в режиме FitScale: логическое разрешение
@@ -736,41 +767,30 @@ func (win *Window) handleFitResize(newW, newH int) {
 
 // setupInput подключает проброс ввода (мышь/клавиатура/символы) от нативного
 // окна к движку. Общий для главного окна и вторичных окон модалок.
+//
+// Колбэки приходят на насосе событий ОС, а обработчики виджетов выполняются на
+// горутине движка — там же, где Post, анимации и отрисовка (GG-68). Поэтому
+// каждое событие уходит в очередь движка, а то, что зависит от момента события
+// (модификаторы), снимается здесь и едет в замыкании: к исполнению Ctrl могли
+// уже отпустить.
 func (s *surface) setupInput() {
 	// ── Mouse move ───────────────────────────────────────────────────────────
+	// Движения склеиваются: пока предыдущее стоит в очереди, новое лишь
+	// обновляет его координаты (input_queue.go).
 	s.native.SetOnMouseMove(func(x, y int) {
-		x, y = s.toContent(x, y)
-		s.lastMX = x
-		s.lastMY = y
-		s.eng.SendMouseMove(x, y)
-		// Обновляем форму курсора под указателем (если бэкенд поддерживает).
-		if sc, ok := s.native.(interface{ SetCursor(c int) }); ok {
-			sc.SetCursor(int(s.eng.CursorAt(x, y)))
-		}
+		s.in.move(s.onEngine, x, y, s.deliverMove)
 	})
 
 	// ── Mouse buttons ────────────────────────────────────────────────────────
 	s.native.SetOnMouseButton(func(x, y, button int, pressed bool) {
-		x, y = s.toContent(x, y)
-		s.lastMX = x
-		s.lastMY = y
-
-		var btn widget.MouseButton
-		switch button {
-		case 0:
-			btn = widget.MouseLeft
-		case 1:
-			btn = widget.MouseRight
-		case 2:
-			btn = widget.MouseMiddle
-		case 3:
-			btn = widget.MouseWheelUp
-		case 4:
-			btn = widget.MouseWheelDown
-		default:
+		btn, ok := nativeButton(button)
+		if !ok {
 			return
 		}
-		s.eng.SendMouseButton(x, y, btn, pressed)
+		s.post(func() {
+			x, y := s.toContent(x, y)
+			s.eng.SendMouseButton(x, y, btn, pressed)
+		})
 	})
 
 	// ── Precise wheel (пиксельная дельта колеса/тачпада) ─────────────────────
@@ -780,80 +800,84 @@ func (s *surface) setupInput() {
 	if pw, ok := s.native.(interface {
 		SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64))
 	}); ok {
+		we, hasWheel := s.eng.(interface {
+			SendMouseWheelPixels(x, y int, dx, dy float64)
+		})
 		pw.SetOnMouseWheelPixels(func(x, y int, dx, dy float64) {
-			x, y = s.toContent(x, y)
-			s.lastMX = x
-			s.lastMY = y
-			if we, ok := s.eng.(interface {
-				SendMouseWheelPixels(x, y int, dx, dy float64)
-			}); ok {
-				we.SendMouseWheelPixels(x, y, dx, dy)
+			if !hasWheel {
+				return
 			}
+			s.post(func() {
+				x, y := s.toContent(x, y)
+				we.SendMouseWheelPixels(x, y, dx, dy)
+			})
 		})
 	}
 
-	// ── Key down ─────────────────────────────────────────────────────────────
-	s.native.SetOnKeyDown(func(vk int) {
-		// Обновляем модификаторы
-		switch vk {
-		case VK_SHIFT:
-			s.modShift.Store(true)
-		case VK_CONTROL:
-			s.modCtrl.Store(true)
-		case VK_ALT:
-			s.modAlt.Store(true)
-		}
-		// Модификаторы нужны и событиям МЫШИ: Ctrl+Click и Shift+Click в
-		// таблице. Своего клавиатурного события у Ctrl нет (в KeyCode такой
-		// клавиши не существует), поэтому состояние отдаётся движку отдельно.
-		s.sendModifiers()
-
-		code := vkToKeyCode(vk)
-		if code != widget.KeyUnknown {
-			s.eng.SendKeyEvent(widget.KeyEvent{
-				Code:    code,
-				Rune:    0,
-				Mod:     s.currentMod(),
-				Pressed: true,
-			})
-		}
-	})
-
-	// ── Key up ───────────────────────────────────────────────────────────────
-	s.native.SetOnKeyUp(func(vk int) {
-		// Обновляем модификаторы
-		switch vk {
-		case VK_SHIFT:
-			s.modShift.Store(false)
-		case VK_CONTROL:
-			s.modCtrl.Store(false)
-		case VK_ALT:
-			s.modAlt.Store(false)
-		}
-		s.sendModifiers()
-
-		code := vkToKeyCode(vk)
-		if code != widget.KeyUnknown {
-			s.eng.SendKeyEvent(widget.KeyEvent{
-				Code:    code,
-				Rune:    0,
-				Mod:     s.currentMod(),
-				Pressed: false,
-			})
-		}
-	})
+	// ── Keys ─────────────────────────────────────────────────────────────────
+	s.native.SetOnKeyDown(func(vk int) { s.keyEvent(vk, true) })
+	s.native.SetOnKeyUp(func(vk int) { s.keyEvent(vk, false) })
 
 	// ── Char (Unicode символ) ────────────────────────────────────────────────
 	s.native.SetOnChar(func(r rune) {
-		if r >= 32 {
+		if r < 32 {
+			return
+		}
+		mod := s.currentMod()
+		s.post(func() {
 			s.eng.SendKeyEvent(widget.KeyEvent{
 				Code:    widget.KeyUnknown,
 				Rune:    r,
-				Mod:     s.currentMod(),
+				Mod:     mod,
 				Pressed: true,
+			})
+		})
+	})
+}
+
+// keyEvent — нажатие или отпускание клавиши, пришедшее с насоса ОС.
+func (s *surface) keyEvent(vk int, pressed bool) {
+	switch vk {
+	case VK_SHIFT:
+		s.modShift.Store(pressed)
+	case VK_CONTROL:
+		s.modCtrl.Store(pressed)
+	case VK_ALT:
+		s.modAlt.Store(pressed)
+	}
+	mod := s.currentMod()
+	code := vkToKeyCode(vk)
+	s.post(func() {
+		// Модификаторы нужны и событиям МЫШИ: Ctrl+Click и Shift+Click в
+		// таблице. Своего клавиатурного события у Ctrl нет (в KeyCode такой
+		// клавиши не существует), поэтому состояние отдаётся движку отдельно.
+		s.sendModifiers(mod)
+		if code != widget.KeyUnknown {
+			s.eng.SendKeyEvent(widget.KeyEvent{
+				Code:    code,
+				Mod:     mod,
+				Pressed: pressed,
 			})
 		}
 	})
+}
+
+// nativeButton переводит код кнопки бэкенда в widget.MouseButton.
+// ok=false — кнопка, которой движок не знает.
+func nativeButton(button int) (widget.MouseButton, bool) {
+	switch button {
+	case 0:
+		return widget.MouseLeft, true
+	case 1:
+		return widget.MouseRight, true
+	case 2:
+		return widget.MouseMiddle, true
+	case 3:
+		return widget.MouseWheelUp, true
+	case 4:
+		return widget.MouseWheelDown, true
+	}
+	return 0, false
 }
 
 // SetOnFilesDropped регистрирует колбэк приёма файлов, перетащенных из ОС
@@ -885,22 +909,26 @@ func (win *Window) setupFilesDrop() {
 		if len(paths) == 0 {
 			return
 		}
-		x, y = win.toContent(x, y)
-		// Проброс в движок: принимает физические пиксели.
-		if s, ok := win.eng.(interface {
-			SendFilesDropped(x, y int, paths []string)
-		}); ok {
-			s.SendFilesDropped(x, y, paths)
-		}
-		// Колбэк приложения: логические координаты (делим на HiDPI-масштаб).
-		if win.onFilesDropped != nil {
-			lx, ly := x, y
-			if win.scale != 1 && win.scale > 0 {
-				lx = int(float64(x) / win.scale)
-				ly = int(float64(y) / win.scale)
+		// И проброс в движок, и колбэк приложения — на горутине движка: из
+		// колбэка можно сразу менять виджеты.
+		win.post(func() {
+			x, y := win.toContent(x, y)
+			// Проброс в движок: принимает физические пиксели.
+			if s, ok := win.eng.(interface {
+				SendFilesDropped(x, y int, paths []string)
+			}); ok {
+				s.SendFilesDropped(x, y, paths)
 			}
-			win.onFilesDropped(paths, lx, ly)
-		}
+			// Колбэк приложения: логические координаты (делим на HiDPI-масштаб).
+			if win.onFilesDropped != nil {
+				lx, ly := x, y
+				if win.scale != 1 && win.scale > 0 {
+					lx = int(float64(x) / win.scale)
+					ly = int(float64(y) / win.scale)
+				}
+				win.onFilesDropped(paths, lx, ly)
+			}
+		})
 	})
 }
 
@@ -939,6 +967,10 @@ func (win *Window) setupLocaleSync() {
 
 // localePoll периодически опрашивает раскладку ОС и отражает её на индикаторе.
 // Останавливается при закрытии окна.
+//
+// Опрос идёт на своей горутине, а локаль меняется на горутине движка: слушатели
+// локали перестраивают подписи виджетов (GG-68). Движок будится, только когда
+// раскладка ОС расходится с локалью интерфейса.
 func (win *Window) localePoll(lp localeProvider) {
 	t := time.NewTicker(300 * time.Millisecond)
 	defer t.Stop()
@@ -946,8 +978,8 @@ func (win *Window) localePoll(lp localeProvider) {
 		if win.closeRequested.Load() {
 			return
 		}
-		if cur := lp.CurrentLocaleCode(); cur != "" {
-			widget.SetLocale(cur) // no-op, если не изменилась
+		if cur := lp.CurrentLocaleCode(); cur != "" && !strings.EqualFold(cur, widget.Locale()) {
+			win.onEngine(func() { widget.SetLocale(cur) })
 		}
 	}
 }

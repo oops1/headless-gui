@@ -237,9 +237,9 @@ func Win11DarkTheme() *Theme {
 	t := DarkTheme()
 	t.Style = ThemeStyle{Name: "Win11 Dark", ControlCorner: 6, WindowCorner: 12}
 
-	t.WindowBG = color.RGBA{R: 32, G: 32, B: 32, A: 255}    // #202020 — Mica
-	t.PanelBG = color.RGBA{R: 43, G: 43, B: 43, A: 255}     // #2B2B2B
-	t.TitleBG = color.RGBA{R: 32, G: 32, B: 32, A: 255}     // безрамочный заголовок
+	t.WindowBG = color.RGBA{R: 32, G: 32, B: 32, A: 255} // #202020 — Mica
+	t.PanelBG = color.RGBA{R: 43, G: 43, B: 43, A: 255}  // #2B2B2B
+	t.TitleBG = color.RGBA{R: 32, G: 32, B: 32, A: 255}  // безрамочный заголовок
 	t.TitleText = color.RGBA{R: 255, G: 255, B: 255, A: 255}
 	t.Border = color.RGBA{R: 58, G: 58, B: 58, A: 255} // #3A3A3A
 
@@ -253,7 +253,7 @@ func Win11DarkTheme() *Theme {
 	t.InputBorder = color.RGBA{R: 56, G: 56, B: 56, A: 255}
 	t.InputFocus = color.RGBA{R: 76, G: 194, B: 255, A: 255} // #4CC2FF
 
-	t.Accent = color.RGBA{R: 76, G: 194, B: 255, A: 255}       // #4CC2FF — Win11 accent
+	t.Accent = color.RGBA{R: 76, G: 194, B: 255, A: 255} // #4CC2FF — Win11 accent
 	t.ProgressFill = t.Accent
 	t.SliderFill = t.Accent
 	t.ToggleOnBG = t.Accent
@@ -301,11 +301,11 @@ func Win11LightTheme() *Theme {
 // Win2000Theme — классическая Windows 2000: серебристая палитра, прямые углы,
 // объёмные bevel-рамки, тёмно-синие заголовок/выделение, без hover-эффектов.
 func Win2000Theme() *Theme {
-	face := color.RGBA{R: 212, G: 208, B: 200, A: 255}   // #D4D0C8 — button face
-	navy := color.RGBA{R: 10, G: 36, B: 106, A: 255}     // #0A246A — active title
+	face := color.RGBA{R: 212, G: 208, B: 200, A: 255} // #D4D0C8 — button face
+	navy := color.RGBA{R: 10, G: 36, B: 106, A: 255}   // #0A246A — active title
 	black := color.RGBA{R: 0, G: 0, B: 0, A: 255}
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
-	gray := color.RGBA{R: 128, G: 128, B: 128, A: 255}   // #808080
+	gray := color.RGBA{R: 128, G: 128, B: 128, A: 255} // #808080
 
 	return withCodeColors(&Theme{
 		Style: ThemeStyle{
@@ -316,11 +316,11 @@ func Win2000Theme() *Theme {
 			BevelDark:   color.RGBA{R: 64, G: 64, B: 64, A: 255}, // #404040
 		},
 
-		WindowBG:    face,
-		PanelBG:     face,
-		TitleBG:     navy,
-		TitleBG2:    color.RGBA{R: 166, G: 202, B: 240, A: 255}, // #A6CAF0 — градиент заголовка
-		TitleText:   white,
+		WindowBG:  face,
+		PanelBG:   face,
+		TitleBG:   navy,
+		TitleBG2:  color.RGBA{R: 166, G: 202, B: 240, A: 255}, // #A6CAF0 — градиент заголовка
+		TitleText: white,
 		// Классика: неактивное окно — серый градиент #808080→#C0C0C0,
 		// текст — серебристый (как в настоящей Windows 2000).
 		TitleBGInactive:   color.RGBA{R: 128, G: 128, B: 128, A: 255},
@@ -550,6 +550,17 @@ func withCodeColors(t *Theme) *Theme {
 	// добавленной строки на пару процентов плотнее.
 	t.DiffAddBG = mixRGBA(card, green, band+0.02)
 	t.DiffAddStrong = mixRGBA(card, green, strong)
+	// Цвета текста — насыщенные, доведённые до читаемости на фоне поля ввода.
+	// Фиксированная пара значений на тёмной теме с серым полем опускалась бы
+	// ниже порога контраста.
+	textAdd := color.RGBA{R: 0x1A, G: 0x7F, B: 0x37, A: 255}
+	textDel := color.RGBA{R: 0xCF, G: 0x22, B: 0x2E, A: 255}
+	if dark {
+		textAdd = color.RGBA{R: 0x3F, G: 0xB9, B: 0x50, A: 255}
+		textDel = color.RGBA{R: 0xF8, G: 0x51, B: 0x49, A: 255}
+	}
+	t.DiffAddText = readableOn(textAdd, card)
+	t.DiffDelText = readableOn(textDel, card)
 	accent := t.Accent
 	if accent.A == 0 {
 		accent = color.RGBA{R: 0x00, G: 0x78, B: 0xD7, A: 255}

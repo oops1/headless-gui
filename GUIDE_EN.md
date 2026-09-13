@@ -95,6 +95,29 @@ eng.CloseModal(m widget.ModalWidget)
 
 `output.Frame` contains `Seq uint64`, `Timestamp time.Time`, and `[]DirtyTile{X, Y, W, H int; Data []byte}`.
 
+### The UI goroutine and `Post`
+
+While the engine is running, everything that touches widgets runs on one
+goroutine — the frame loop goroutine: input handlers, functions passed to
+`Post`, animation ticks and drawing. The native window (`window.Run`) and the
+browser viewer do not call `Send*` from their own goroutines; they queue events
+on the engine, so widgets can be changed from a handler and from `Post` without
+locks. An animation is stepped by the engine on whose goroutine it was started.
+
+```go
+go func() {
+    data := load()                          // background goroutine
+    eng.Post(func() { list.SetItems(data) }) // back to the UI goroutine
+}()
+
+eng.Flush() // in tests: wait for the queue without rendering a frame
+```
+
+Without `Start()` the queue is drained by `RenderOnce`, `RenderFrameNow` and
+`Flush`, on the calling goroutine. If you call `Send*` yourself from another
+goroutine while the engine is running, deliver that input through `Post` too —
+otherwise handlers run wherever they were called.
+
 ---
 
 ## Widgets
@@ -1306,6 +1329,10 @@ The theme contains 80+ color tokens, grouped by widget:
 - DataGrid header: `HeaderBG`, `HeaderText`
 - System: `Accent`, `Disabled`, `Scrollbar`
 - Window frame: `WindowFrame` (see "Window")
+- Added and deleted text: `DiffAddText`, `DiffDelText` — "+42" and "−7" in a
+  change list. The bands `DiffAddStrong`/`DiffDelStrong` are mixed with the
+  background and look washed out as text; presets pick these to the input
+  background with a contrast of at least 4.5:1.
 - Code and diff: `DiffAddBG`, `DiffAddStrong`, `DiffDelBG`, `DiffDelStrong`,
   `TextSelectionBG`, `SyntaxKeyword`, `SyntaxString`, `SyntaxComment`,
   `SyntaxNumber`, `SyntaxFunc` — `DiffView` draws with them, and your own code
@@ -1420,8 +1447,9 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
-| `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
-| `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
+| `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `ShowHeaders`, `ShowReadOnlyMark`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
+| `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
+| `DatePicker` | DatePicker | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd`, `DateFormat`, `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; children `<DockPane>`×N + one `<DockContent>` (see "Docking panels") |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
@@ -1746,6 +1774,8 @@ dv.SetReadOnly(widget.DiffLeft, true)
 dv.SetHideUnchanged(true) // fold identical lines
 dv.SetContextLines(3)     // lines kept around folds
 dv.SetWatchFiles(true)    // watch the files on disk
+// dv.SetShowHeaders(false)      — no side headers: code starts at the top edge
+// dv.SetShowReadOnlyMark(false) — no "read-only" mark in the header
 defer dv.Close()
 
 dv.OnDiffChanged = func(n int) { status.SetText(fmt.Sprintf("%d changes", n)) }
@@ -1778,7 +1808,10 @@ The control's own save is not mistaken for an external edit.
 | Tab | a tab into the text (`TabAcceptor`; on a read-only side — focus traversal) |
 
 From code — `NextChange`, `PrevChange`, `GoToChange`, `CopyBlock`,
-`CopyCurrent`, `CopyAll`, `Undo`, `Redo`, `SetCaret`, `InsertText`, `Changes`.
+`CopyCurrent`, `CopyAll`, `Undo`, `Redo`, `SetCaret`, `InsertText`, `Changes`,
+`Selection(side)` — the numbers of the lines the selection touches, `[from, to)`:
+the selected text does not say which lines they are, and staging needs exactly
+them.
 Two files dropped from the file manager go to the two sides, one file goes to
 the side under the cursor. A screen reader sees two text panes with their
 content: the control implements `widget.AccessChildrenProvider`
@@ -1870,9 +1903,40 @@ A screen reader sees four text panes (`AccessChildrenProvider`), three of them
 read-only. Colors come from the same `Diff*`/`Syntax*` theme fields as the
 comparison; UI strings are `merge.*` keys (`RegisterStrings`).
 
+**Writing the result.** Chunks arrive as lines without line endings, so how to
+write the file is told separately: `SetResultEOL(eol, bom, finalNL)` — the line
+ending, a BOM and a final newline. The default is `"\n"` with a final newline:
+almost every file in a repository ends that way. `SetTexts` takes the format
+from ours by itself, the setting survives `SetChunks`, and an empty merge is
+written as an empty file. `SetMarkerSize(n)` sets the marker length, like git's
+`conflict-marker-size` attribute (seven by default). Changing the style, length
+or labels rewrites only the markers of unresolved conflicts — hand edits stay.
+
+**Scrolling.** The overview ruler on the right works with the mouse: the thumb
+drags without a jump, a click on a conflict mark goes to that conflict, a click
+elsewhere moves the visible area there. From code — `Scroll`/`SetScroll` (the
+top panes), `ResultScroll`/`SetResultScroll` (the result) and
+`ScrollToLine(side, line)`.
+
+The top panes and the result scroll **together, by chunk**: scrolling the
+result to a conflict shows the same side lines on top. The mapping is
+piecewise linear over chunk boundaries — a chunk that takes one row on top and
+five marker lines in the result is stretched, and neighbouring chunks still
+line up; at the start and end of the file both parts reach their edge at the
+same time. The part scrolled or edited last leads — editing the result does not
+jerk its scroll. Separate scrolling — `SetSyncScroll(false)`.
+
+**Labels.** `MergeSideInfo` has three fields: `Title` (usually the branch) and
+`Note` (usually the file path) in the header line, and `Hint` — "what this side
+is" — as a second line in a small muted font. The top panes' headers grow by a
+line when any visible side has a hint, so code in neighbouring panes starts at
+the same height. `SetResultInfo` labels the result pane (an empty title falls
+back to the `merge.side.result` key); `Sides()` and `ResultInfo()` read the
+labels back. A hint reaches the screen reader as the pane description.
+
 ```xml
 <MergeView x:Name="merge" BaseFile="base.go" OursFile="ours.go" TheirsFile="theirs.go"
-           ShowBase="True" ConflictStyle="diff3" ReadOnly="False"
+           ShowBase="True" ConflictStyle="diff3" MarkerSize="7" ReadOnly="False"
            SyntaxHighlight="True" FontFamily="Consolas" FontSize="10"
            SaveCommand="{Binding Save}" ResolvedCommand="{Binding Left}"/>
 ```
@@ -1880,6 +1944,52 @@ comparison; UI strings are `merge.*` keys (`RegisterStrings`).
 Commands: `SaveCommand` (no parameter), `ResultEditedCommand` (no parameter),
 `ResolvedCommand` (parameter — how many conflicts are left). Full example —
 `cmd/mergedemo`.
+
+#### DatePicker — date field with a calendar
+
+A field you can type a date into, and a drop-down month calendar — the button
+on the right, F4 or Alt+↓. The date is stored without a time of day: a filter
+built on it does not depend on the hour someone clicked the day.
+
+```go
+since := widget.NewDatePicker()
+since.SetDisplayDateRange(time.Date(2020, 1, 1, 0, 0, 0, 0, time.Local), time.Time{}) // zero bound — unbounded
+since.OnSelectedDateChanged = func(d time.Time, ok bool) { reload() } // ok=false — the date was cleared
+d, ok := since.SelectedDate()
+```
+
+**Culture.** The format and the first day of the week come from the language's
+string tables: `date.format` (a `time.Format` layout) and `date.firstDay`
+(0 — Sunday, 1 — Monday). RU (`02.01.2006`, Monday) and EN (`01/02/2006`,
+Sunday) are built in; a language without its own culture gets ISO 8601. Add a
+culture with the same `RegisterStrings`, or set it explicitly with `SetFormat`
+and `SetFirstDayOfWeek`. Typing is forgiving: no leading zeros, any of the
+separators ". / -", a two-digit year, ISO 8601. Unparsable or out-of-range
+input gets an error border; losing focus restores the selected date.
+
+| Keys | Action |
+|---|---|
+| F4, Alt+↓ | open the calendar |
+| ← / →, ↑ / ↓ | day, week |
+| PgUp / PgDn, wheel | month |
+| Home / End | start, end of the month |
+| Enter, Space | select |
+| Esc | close the calendar or cancel typing |
+
+`SetDisplayDateRange` bounds: days outside are not selectable, typing does not
+accept them, and the month does not page past a bound. A "from — to" range is
+two fields where the second is bounded by the first: `to.SetDisplayDateRange(from, time.Time{})`.
+
+```xml
+<DatePicker x:Name="since" SelectedDate="2026-09-13" DisplayDateStart="2020-01-01"
+            DateFormat="dd.MM.yyyy" FirstDayOfWeek="Monday" Placeholder="since"
+            SelectedDateChangedCommand="{Binding Since}"/>
+```
+
+Dates in markup are ISO 8601 or invariant `M/d/yyyy`, as in WPF: markup means
+the same regardless of the UI language. `DateFormat` is a .NET pattern
+(`dd.MM.yyyy`) or a `time.Format` layout. `SelectedDateChangedCommand` receives
+a `time.Time` (zero — the date was cleared).
 
 ### TextBox maturity
 

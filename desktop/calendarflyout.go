@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/calendar"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -255,7 +256,7 @@ type dayCellLayout struct {
 
 type calendarLayout struct {
 	header, prevBtn, nextBtn, collapseBtn, title, weekday image.Rectangle
-	days                                     [][]dayCellLayout
+	days                                                  [][]dayCellLayout
 }
 
 // computeLayout раскладывает содержимое календаря внутри content: строку
@@ -525,7 +526,7 @@ func (c *CalendarFlyout) OnKeyEvent(e widget.KeyEvent) {
 // weekdayMondayIndex переводит воскресный отсчёт time.Weekday (Sunday=0) в
 // европейский, где неделя начинается с понедельника (Monday=0).
 func weekdayMondayIndex(t time.Time) int {
-	return (int(t.Weekday()) + 6) % 7
+	return calendar.WeekdayIndex(t, time.Monday)
 }
 
 // monthGrid строит полные недели месяца month года year: с понедельника
@@ -538,28 +539,18 @@ func weekdayMondayIndex(t time.Time) int {
 // осознанно (это выбор, а не случайность): пакет ориентирован в первую
 // очередь на профили Windows для российского и европейского рынка.
 func monthGrid(year int, month time.Month, loc *time.Location) [][]dayCell {
-	first := time.Date(year, month, 1, 0, 0, 0, 0, loc)
-	start := first.AddDate(0, 0, -weekdayMondayIndex(first))
-
-	next := first.AddDate(0, 1, 0)
-	last := next.AddDate(0, 0, -1)
-	end := last.AddDate(0, 0, 6-weekdayMondayIndex(last))
-
-	var rows [][]dayCell
-	for d := start; !d.After(end); {
-		row := make([]dayCell, 7)
-		for col := 0; col < 7; col++ {
-			row[col] = dayCell{date: d, inMonth: d.Month() == month}
-			d = d.AddDate(0, 0, 1)
+	// Расчёт сетки общий с выбором даты (widget.DatePicker) — internal/calendar;
+	// здесь только перекладка в свою ячейку.
+	grid := calendar.MonthGrid(year, month, loc, time.Monday)
+	rows := make([][]dayCell, len(grid))
+	for r, week := range grid {
+		rows[r] = make([]dayCell, len(week))
+		for c, d := range week {
+			rows[r][c] = dayCell{date: d.Date, inMonth: d.InMonth}
 		}
-		rows = append(rows, row)
 	}
 	return rows
 }
 
 // sameDay сравнивает дату (без времени суток).
-func sameDay(a, b time.Time) bool {
-	ay, am, ad := a.Date()
-	by, bm, bd := b.Date()
-	return ay == by && am == bm && ad == bd
-}
+func sameDay(a, b time.Time) bool { return calendar.SameDay(a, b) }

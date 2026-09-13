@@ -36,6 +36,8 @@ func buildXAMLDiffView(el xElement, baseDir string) Widget {
 	flag("HideUnchanged", d.SetHideUnchanged)
 	flag("IgnoreWhitespace", d.SetIgnoreWhitespace)
 	flag("SyntaxHighlight", d.SetSyntaxHighlight)
+	flag("ShowHeaders", d.SetShowHeaders)
+	flag("ShowReadOnlyMark", d.SetShowReadOnlyMark)
 	flag("ReadOnlyLeft", func(v bool) { d.SetReadOnly(DiffLeft, v) })
 	flag("ReadOnlyRight", func(v bool) { d.SetReadOnly(DiffRight, v) })
 	if v := el.attr("ContextLines"); v != "" {

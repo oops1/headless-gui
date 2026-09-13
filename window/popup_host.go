@@ -39,6 +39,12 @@ type popupHost struct {
 	eng     popupEngine     // движок-носитель (для проброса ввода)
 	scale   float64         // HiDPI-масштаб носителя (лог × scale = физ)
 
+	// in/run — очередь ввода носителя и постановка в его движок: события
+	// попапа выполняются на горутине движка и в одной очереди с событиями
+	// носителя, в порядке прихода (GG-68).
+	in  *inputQueue
+	run func(fn func())
+
 	mu      sync.Mutex
 	windows map[uintptr]*hostedPopup // ID оверлея → окно
 }
@@ -52,16 +58,26 @@ type hostedPopup struct {
 	closed bool
 }
 
-// newPopupHost создаёт хост попапов для окна-носителя.
-func newPopupHost(carrier NativeWindow, inv uiThreadInvoker, eng popupEngine, scale float64) *popupHost {
+// newPopupHost создаёт хост попапов для окна-носителя. in — очередь ввода
+// носителя (nil — своя).
+func newPopupHost(carrier NativeWindow, inv uiThreadInvoker, eng popupEngine, scale float64, in *inputQueue) *popupHost {
 	if scale <= 0 {
 		scale = 1
+	}
+	if in == nil {
+		in = &inputQueue{}
+	}
+	run := func(fn func()) { fn() }
+	if p, ok := eng.(poster); ok {
+		run = p.Post
 	}
 	return &popupHost{
 		carrier: carrier,
 		invoker: inv,
 		eng:     eng,
 		scale:   scale,
+		in:      in,
+		run:     run,
 		windows: map[uintptr]*hostedPopup{},
 	}
 }
@@ -261,28 +277,21 @@ func (h *popupHost) setupPopupInput(native NativeWindow, id uintptr) {
 			int(float64(hp.rect.Min.Y)*h.scale + 0.5)
 	}
 
+	// Начало координат снимается в момент события: к исполнению оверлей мог
+	// переехать, а щёлкнули по тому месту, где он стоял.
 	native.SetOnMouseMove(func(px, py int) {
 		ox, oy := physOrigin()
-		h.eng.SendMouseMove(ox+px, oy+py)
+		h.in.move(h.run, ox+px, oy+py, h.eng.SendMouseMove)
 	})
 	native.SetOnMouseButton(func(px, py, button int, pressed bool) {
-		var btn widget.MouseButton
-		switch button {
-		case 0:
-			btn = widget.MouseLeft
-		case 1:
-			btn = widget.MouseRight
-		case 2:
-			btn = widget.MouseMiddle
-		case 3:
-			btn = widget.MouseWheelUp
-		case 4:
-			btn = widget.MouseWheelDown
-		default:
+		btn, ok := nativeButton(button)
+		if !ok {
 			return
 		}
 		ox, oy := physOrigin()
-		h.eng.SendMouseButton(ox+px, oy+py, btn, pressed)
+		h.in.post(h.run, func() {
+			h.eng.SendMouseButton(ox+px, oy+py, btn, pressed)
+		})
 	})
 }
 

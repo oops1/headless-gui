@@ -30,7 +30,7 @@ const (
 type DockSide int
 
 const (
-	DockLeft   DockSide = iota // 0 — по умолчанию (WPF standard: DockPanel.Dock default = Left)
+	DockLeft DockSide = iota // 0 — по умолчанию (WPF standard: DockPanel.Dock default = Left)
 	DockTop
 	DockBottom
 	DockRight
@@ -229,8 +229,8 @@ func (b *Base) SetGridProps(row, col, rowSpan, colSpan int) {
 	b.GridColSpan = colSpan
 }
 
-func (b *Base) GetGridRow() int     { return b.GridRow }
-func (b *Base) GetGridColumn() int  { return b.GridColumn }
+func (b *Base) GetGridRow() int    { return b.GridRow }
+func (b *Base) GetGridColumn() int { return b.GridColumn }
 func (b *Base) GetGridRowSpan() int {
 	if b.GridRowSpan < 1 {
 		return 1
@@ -246,13 +246,13 @@ func (b *Base) GetGridColSpan() int {
 
 // ── DockPanel attached property ─────────────────────────────────────────────
 
-func (b *Base) GetDock() DockSide    { return b.Dock }
-func (b *Base) SetDock(d DockSide)   { b.Dock = d }
+func (b *Base) GetDock() DockSide  { return b.Dock }
+func (b *Base) SetDock(d DockSide) { b.Dock = d }
 
 // ── Margin ──────────────────────────────────────────────────────────────────
 
-func (b *Base) GetMargin() Margin      { return b.WidgetMargin }
-func (b *Base) SetMargin(m Margin)     { b.WidgetMargin = m }
+func (b *Base) GetMargin() Margin  { return b.WidgetMargin }
+func (b *Base) SetMargin(m Margin) { b.WidgetMargin = m }
 
 // ── Alignment ───────────────────────────────────────────────────────────────
 
@@ -465,7 +465,18 @@ func desiredWidth(w Widget) int {
 		charW := 7 // средняя ширина символа при дефолтном шрифте
 		return len(text)*charW + v.PaddingX*2
 	case *Button:
-		return 80
+		// По содержимому — как WPF меряет кнопку по Content, — но не уже прежних
+		// 80: кнопка растёт под длинную подпись, а раскладки, где короткой
+		// кнопке 80 хватало, не меняются. Кнопку уже задают Width в разметке или
+		// ToolBar, который меряет кнопки впритык той же функцией.
+		return max(80, buttonContentWidth(v, desiredHeight(v)))
+	case *CheckBox:
+		// Как кнопка: по содержимому, не уже прежних 80 (GG-69 — пара к GG-66).
+		return max(80, checkBoxContentWidth(v))
+	case *RadioButton:
+		// Та же беда и то же лечение, что у флажка: подпись шире 80 ложилась
+		// на соседа.
+		return max(80, radioButtonContentWidth(v))
 	case *TextInput:
 		return 120
 	default:

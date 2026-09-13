@@ -95,6 +95,29 @@ eng.CloseModal(m widget.ModalWidget)
 
 `output.Frame` содержит `Seq uint64`, `Timestamp time.Time` и `[]DirtyTile{X, Y, W, H int; Data []byte}`.
 
+### Горутина интерфейса и `Post`
+
+У запущенного движка всё, что трогает виджеты, выполняется на одной горутине —
+горутине цикла кадров: обработчики ввода, функции из `Post`, тики анимаций и
+отрисовка. Нативное окно (`window.Run`) и вьювер в браузере не зовут `Send*` из
+своих горутин, а ставят события в очередь движка, поэтому менять виджеты из
+обработчика и из `Post` можно без замков. Анимация шагает на том движке, на
+горутине которого её завели.
+
+```go
+go func() {
+    data := load()                          // фоновая горутина
+    eng.Post(func() { list.SetItems(data) }) // обратно на горутину интерфейса
+}()
+
+eng.Flush() // в тестах: дождаться очереди без отрисовки кадра
+```
+
+Без `Start()` очередь разбирают `RenderOnce`, `RenderFrameNow` и `Flush` — на
+вызывающей горутине. Если при запущенном движке сами зовёте `Send*` со своей
+горутины, отдавайте такой ввод через `Post`: иначе обработчики выполнятся там, где
+их позвали.
+
 ---
 
 ## Виджеты
@@ -1309,6 +1332,10 @@ eng.SetTheme(t)
 - DataGrid header: `HeaderBG`, `HeaderText`
 - Системные: `Accent`, `Disabled`, `Scrollbar`
 - Рамка окна: `WindowFrame` (см. «Window»)
+- Текст добавленного и удалённого: `DiffAddText`, `DiffDelText` — «+42» и «−7»
+  в списке изменений. Полосы `DiffAddStrong`/`DiffDelStrong` смешаны с фоном,
+  и текст ими выходит бледным; эти же пресеты подбирают под фон поля ввода с
+  контрастом не ниже 4,5:1.
 - Код и сравнение: `DiffAddBG`, `DiffAddStrong`, `DiffDelBG`, `DiffDelStrong`,
   `TextSelectionBG`, `SyntaxKeyword`, `SyntaxString`, `SyntaxComment`,
   `SyntaxNumber`, `SyntaxFunc` — ими рисует `DiffView`, их же может брать свой
@@ -1423,8 +1450,9 @@ root Canvas (0,0)
 | `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (первые два дочерних — панели) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
-| `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
-| `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
+| `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `ShowHeaders`, `ShowReadOnlyMark`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
+| `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
+| `DatePicker` | DatePicker | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd`, `DateFormat`, `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; дочерние `<DockPane>`×N + один `<DockContent>` (см. «Докинг-панели») |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); только внутри `<DockManager>` |
@@ -1749,6 +1777,8 @@ dv.SetReadOnly(widget.DiffLeft, true)
 dv.SetHideUnchanged(true) // свернуть одинаковые строки
 dv.SetContextLines(3)     // сколько строк оставить у свёрток
 dv.SetWatchFiles(true)    // следить за файлами на диске
+// dv.SetShowHeaders(false)      — без шапок сторон: код от верхнего края
+// dv.SetShowReadOnlyMark(false) — без отметки «только чтение» в шапке
 defer dv.Close()
 
 dv.OnDiffChanged = func(n int) { status.SetText(fmt.Sprintf("%d изменений", n)) }
@@ -1781,7 +1811,9 @@ dv.OnFileChangedOnDisk = func(side widget.DiffSide, path string, deleted bool) {
 | Tab | табуляция в текст (`TabAcceptor`; у стороны только для чтения — обход фокуса) |
 
 Программно — `NextChange`, `PrevChange`, `GoToChange`, `CopyBlock`,
-`CopyCurrent`, `CopyAll`, `Undo`, `Redo`, `SetCaret`, `InsertText`, `Changes`.
+`CopyCurrent`, `CopyAll`, `Undo`, `Redo`, `SetCaret`, `InsertText`, `Changes`,
+`Selection(side)` — номера строк, задетых выделением, `[from, to)`: текст
+выделения не говорит, какие это строки, а добавлять в индекс нужно именно их.
 Два файла, брошенные из проводника, раскладываются по сторонам, один — в
 сторону под курсором. Скринридер видит две текстовые панели с содержимым
 (`AccessChildrenProvider`). Цвета берутся из полей темы `Diff*`/`Syntax*`,
@@ -1870,9 +1902,40 @@ git — стиль `MergeStyleMerge` или `MergeStyleDiff3` (с базой з�
 них — только для чтения. Цвета — те же поля темы `Diff*`/`Syntax*`, что у
 сравнения; строки интерфейса — ключи `merge.*` (`RegisterStrings`).
 
+**Запись итога.** Блоки приходят строками без переводов, поэтому как записать
+файл, контролу говорят отдельно: `SetResultEOL(eol, bom, finalNL)` — перевод
+строки, BOM и перевод в конце файла. По умолчанию `"\n"` и перевод в конце
+есть: так кончаются почти все файлы в репозитории. `SetTexts` берёт вид у нашей
+стороны сам, настройка переживает `SetChunks`, пустое слияние записывается
+пустым файлом. `SetMarkerSize(n)` — длина маркеров, как атрибут
+`conflict-marker-size` у git (по умолчанию семь знаков). Смена стиля, длины и
+подписей переписывает только маркеры нерешённых конфликтов — правки руками
+остаются.
+
+**Прокрутка.** Полоса-обзор справа работает мышью: ползунок тащится без скачка,
+щелчок по отметке конфликта переходит к нему, щелчок мимо переносит туда
+видимую область. Снаружи — `Scroll`/`SetScroll` (верхние панели),
+`ResultScroll`/`SetResultScroll` (итог) и `ScrollToLine(side, line)`.
+
+Верх и итог прокручиваются **вместе, по блокам**: листая итог к конфликту,
+наверху видишь те же строки сторон. Соответствие кусочно-линейное по границам
+блоков — блок, который сверху занимает строку, а в итоге пять строк маркеров,
+растягивается, а соседние всё равно встают вровень; у начала и конца файла обе
+части доходят до края одновременно. Ведёт та часть, которую прокрутили или
+правили последней, — правка итога его прокрутку не дёргает. Раздельная
+прокрутка — `SetSyncScroll(false)`.
+
+**Подписи.** У `MergeSideInfo` три поля: `Title` (обычно ветка) и `Note`
+(обычно путь файла) в строке шапки и `Hint` — пояснение «что это за сторона»
+второй строкой мелким приглушённым шрифтом. Шапки верхних панелей растут на
+строку, когда пояснение есть хоть у одной видимой стороны, — код в соседних
+панелях начинается на одной высоте. Итогу подписи задаёт `SetResultInfo`
+(пустой заголовок — из ключа `merge.side.result`), прочитать заданное —
+`Sides()` и `ResultInfo()`. Пояснение уходит скринридеру описанием панели.
+
 ```xml
 <MergeView x:Name="merge" BaseFile="base.go" OursFile="ours.go" TheirsFile="theirs.go"
-           ShowBase="True" ConflictStyle="diff3" ReadOnly="False"
+           ShowBase="True" ConflictStyle="diff3" MarkerSize="7" ReadOnly="False"
            SyntaxHighlight="True" FontFamily="Consolas" FontSize="10"
            SaveCommand="{Binding Save}" ResolvedCommand="{Binding Left}"/>
 ```
@@ -1880,6 +1943,53 @@ git — стиль `MergeStyleMerge` или `MergeStyleDiff3` (с базой з�
 Команды: `SaveCommand` (без параметра), `ResultEditedCommand` (без параметра),
 `ResolvedCommand` (параметр — сколько конфликтов осталось). Полный пример —
 `cmd/mergedemo`.
+
+#### DatePicker — поле даты с календарём
+
+Поле, в которое дату можно набрать с клавиатуры, и выпадающий месячный
+календарь — кнопка справа, F4 или Alt+↓. Дата хранится без времени суток:
+фильтр, построенный на выборе, не зависит от часа, в который щёлкнули по
+числу.
+
+```go
+since := widget.NewDatePicker()
+since.SetDisplayDateRange(time.Date(2020, 1, 1, 0, 0, 0, 0, time.Local), time.Time{}) // нулевая граница — без ограничения
+since.OnSelectedDateChanged = func(d time.Time, ok bool) { reload() } // ok=false — дату стёрли
+d, ok := since.SelectedDate()
+```
+
+**Культура.** Формат и первый день недели берутся из таблиц строк языка:
+`date.format` (раскладка `time.Format`) и `date.firstDay` (0 — воскресенье,
+1 — понедельник). Встроены RU (`02.01.2006`, понедельник) и EN (`01/02/2006`,
+воскресенье); язык без своей культуры получает ISO 8601. Добавить культуру —
+те же `RegisterStrings`, задать явно — `SetFormat` и `SetFirstDayOfWeek`.
+Набор терпим к виду: без ведущих нулей, любой из разделителей «. / -»,
+двузначный год, ISO 8601. Неразобранное или вне границ помечается рамкой
+ошибки; уход фокуса возвращает выбранную дату.
+
+| Клавиши | Действие |
+|---|---|
+| F4, Alt+↓ | открыть календарь |
+| ← / →, ↑ / ↓ | день, неделя |
+| PgUp / PgDn, колесо | месяц |
+| Home / End | начало, конец месяца |
+| Enter, пробел | выбрать |
+| Esc | закрыть календарь или отменить набор |
+
+Границы `SetDisplayDateRange`: числа вне них не выбираются, набор их не
+принимает, месяц за границу не листается. Диапазон «с — по» — два поля, где
+второе ограничено выбором первого: `to.SetDisplayDateRange(from, time.Time{})`.
+
+```xml
+<DatePicker x:Name="since" SelectedDate="2026-09-13" DisplayDateStart="2020-01-01"
+            DateFormat="dd.MM.yyyy" FirstDayOfWeek="Monday" Placeholder="с какого числа"
+            SelectedDateChangedCommand="{Binding Since}"/>
+```
+
+Даты в разметке — ISO 8601 или инвариантная `M/d/yyyy`, как в WPF: смысл
+разметки не меняется от языка интерфейса. `DateFormat` — шаблон .NET
+(`dd.MM.yyyy`) или раскладка `time.Format`. Команда `SelectedDateChangedCommand`
+получает `time.Time` (нулевое — дату стёрли).
 
 ### Зрелость TextBox
 

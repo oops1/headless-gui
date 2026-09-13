@@ -25,7 +25,10 @@ package widget
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/internal/goid"
 )
 
 // Easing определён в widget/easing.go (другой файл пакета):
@@ -49,6 +52,10 @@ type Animation struct {
 	owner any
 	tag   string
 
+	// loop — ключ цикла, который шагает анимацию (BindAnimationLoop); nil —
+	// анимация ещё ничья, её заберёт первый шагнувший цикл.
+	loop any
+
 	// reversed — текущее направление в цикле AutoReverse (true = фаза 1→0).
 	reversed bool
 
@@ -66,27 +73,65 @@ type Animation struct {
 	AutoReverse bool   // 0→1→0 считается ОДНИМ циклом
 }
 
-// animator — глобальный реестр активных анимаций (на процесс — один движок).
+// animator — реестр активных анимаций процесса.
+//
+// Реестр общий, а шагает его каждый движок на своей горутине: анимация
+// привязана к циклу, на горутине которого её завели, и тики зовутся только
+// оттуда. Без привязки тик анимации в диалоге вторичного движка мог
+// выполниться на горутине главного — параллельно с обработчиками диалога
+// (GG-68).
 type animator struct {
 	mu     sync.Mutex
 	active []*Animation // порядок = порядок регистрации
-	// stepping защищает от «двойного шага» новорождённой анимации: во время
-	// прохода Step новые Animate попадают в incoming, а не в active.
-	stepping bool
-	incoming []*Animation
+	// stepping — циклы посреди прохода: защита от вложенного Step из тика.
+	// Анимация, заведённая во время прохода, в снимок прохода не попадает и
+	// получит шаг на следующем.
+	stepping map[any]bool
 }
 
 var anim animator
 
-// add регистрирует анимацию в реестр. Если идёт Step — откладывает в incoming
-// (чтобы новорождённая не получила шаг в этом же проходе). Будит движок.
-func (am *animator) add(a *Animation) {
-	am.mu.Lock()
-	if am.stepping {
-		am.incoming = append(am.incoming, a)
-	} else {
-		am.active = append(am.active, a)
+// stepAllKey — ключ прохода StepAnimations: все анимации, чьи бы они ни были.
+type stepAllKey struct{}
+
+// animLoops — горутины циклов, шагающих анимации: id горутины → ключ цикла.
+// animLoopCount избавляет от поиска, пока циклов нет (тесты без движка).
+var (
+	animLoops     sync.Map
+	animLoopCount atomic.Int32
+)
+
+// BindAnimationLoop объявляет текущую горутину циклом анимаций с ключом key и
+// возвращает функцию, снимающую объявление. Анимации, заведённые на этой
+// горутине — из обработчика, из Post, из тика или OnDone, — шагает только
+// StepAnimationsFor(key).
+//
+// Для движков; приложению звать не нужно.
+func BindAnimationLoop(key any) (unbind func()) {
+	id := goid.Current()
+	animLoops.Store(id, key)
+	animLoopCount.Add(1)
+	return func() {
+		animLoops.Delete(id)
+		animLoopCount.Add(-1)
 	}
+}
+
+// currentAnimLoop возвращает ключ цикла текущей горутины или nil.
+func currentAnimLoop() any {
+	if animLoopCount.Load() == 0 {
+		return nil
+	}
+	key, _ := animLoops.Load(goid.Current())
+	return key
+}
+
+// add регистрирует анимацию в реестр за циклом текущей горутины и будит
+// движок.
+func (am *animator) add(a *Animation) {
+	a.loop = currentAnimLoop()
+	am.mu.Lock()
+	am.active = append(am.active, a)
 	am.mu.Unlock()
 	// Разбудить спящий on-demand цикл: даже если Animate вызван вне кадра
 	// (из колбэка/горутины), ближайший тик отрендерит первый шаг.
@@ -133,16 +178,11 @@ func AnimateOwned(owner any, tag string, dur time.Duration, curve Easing, tick f
 		owner:    owner,
 		tag:      tag,
 	}
-	// Снимаем предыдущую с тем же (owner,tag) — и в active, и в incoming
-	// (если предыдущая тоже родилась в текущем Step).
+	// Снимаем предыдущую с тем же (owner,tag) — в том числе родившуюся в
+	// текущем Step: она уже в active.
 	if owner != nil {
 		anim.mu.Lock()
 		for _, other := range anim.active {
-			if !other.stopped && !other.done && other.owner == owner && other.tag == tag {
-				other.stopped = true
-			}
-		}
-		for _, other := range anim.incoming {
 			if !other.stopped && !other.done && other.owner == owner && other.tag == tag {
 				other.stopped = true
 			}
@@ -222,25 +262,59 @@ func (a animPhase) progress(now time.Time) (t float64, phaseDone bool) {
 // true, если после шага остались активные. Движок вызывает раз в кадр.
 //
 // Порядок:
-//  1. под мьютексом снимаем снапшот active (порядок регистрации), ставим
-//     флаг stepping — новые Animate уходят в incoming;
+//  1. под мьютексом снимаем снапшот active (порядок регистрации) и отмечаем
+//     цикл в stepping — новые Animate встают в конец active, в снапшот не
+//     попадают и шаг получат на следующем проходе;
 //  2. ВНЕ мьютекса зовём тики в порядке снапшота, вычисляя завершения;
 //  3. под мьютексом применяем результаты: перезапуск Loop/фазу AutoReverse,
-//     удаление завершённых/снятых, вливаем incoming в active;
+//     удаление завершённых/снятых;
 //  4. OnDone-колбэки зовём ВНЕ мьютекса (они могут звать Animate/Stop).
+//
+// Шагает ВСЕ анимации, к какому бы циклу они ни были привязаны: для тестов и
+// приложений без движка. Движок зовёт StepAnimationsFor.
 func StepAnimations(now time.Time) bool {
+	return stepAnimations(stepAllKey{}, now)
+}
+
+// StepAnimationsFor — StepAnimations для одного цикла: продвигает анимации,
+// привязанные к key (BindAnimationLoop), и ещё ничьи — их цикл забирает себе.
+// Возвращает, остались ли активные у этого цикла. Движок зовёт раз в кадр на
+// своей горутине.
+func StepAnimationsFor(key any, now time.Time) bool {
+	if key == nil {
+		return StepAnimations(now)
+	}
+	return stepAnimations(key, now)
+}
+
+func stepAnimations(key any, now time.Time) bool {
+	_, all := key.(stepAllKey)
 	anim.mu.Lock()
-	if anim.stepping {
-		// Реентерантный вызов Step (из тика) — не поддерживаем вложенный шаг;
-		// просто сообщаем, что активные есть.
-		hasActive := len(anim.active) > 0 || len(anim.incoming) > 0
+	if anim.stepping[key] || anim.stepping[stepAllKey{}] || (all && len(anim.stepping) > 0) {
+		// Вложенный Step (из тика) не поддерживаем — просто сообщаем, есть ли
+		// активные. Проход «всех» не пересекается ни с каким другим: он шагает
+		// и чужие анимации.
+		hasActive := anim.hasActiveLocked(key)
 		anim.mu.Unlock()
 		return hasActive
 	}
-	anim.stepping = true
-	// Снапшот: продвигаем только те, что были активны ДО этого Step.
-	snapshot := make([]*Animation, len(anim.active))
-	copy(snapshot, anim.active)
+	if anim.stepping == nil {
+		anim.stepping = map[any]bool{}
+	}
+	anim.stepping[key] = true
+	// Снимок: продвигаем только анимации этого цикла, активные ДО этого Step.
+	snapshot := make([]*Animation, 0, len(anim.active))
+	for _, a := range anim.active {
+		if !all {
+			if a.loop == nil {
+				a.loop = key // ничья — цикл забирает её себе
+			}
+			if a.loop != key {
+				continue
+			}
+		}
+		snapshot = append(snapshot, a)
+	}
 	// Лениво стартуем анимации, у которых ещё нет часов — старт = now.
 	for _, a := range snapshot {
 		if !a.started && !a.stopped {
@@ -355,6 +429,7 @@ func StepAnimations(now time.Time) bool {
 	// ── Фаза очистки (под мьютексом) ─────────────────────────────────────
 	anim.mu.Lock()
 	// Пересобираем active: выкидываем done/stopped, сохраняем порядок.
+	// Заведённые во время прохода уже стоят в конце active.
 	kept := anim.active[:0]
 	for _, a := range anim.active {
 		if a.done || a.stopped {
@@ -362,14 +437,10 @@ func StepAnimations(now time.Time) bool {
 		}
 		kept = append(kept, a)
 	}
+	clear(anim.active[len(kept):]) // не держать снятые анимации
 	anim.active = kept
-	// Вливаем родившихся во время прохода — в конец (порядок регистрации).
-	if len(anim.incoming) > 0 {
-		anim.active = append(anim.active, anim.incoming...)
-		anim.incoming = anim.incoming[:0]
-	}
-	anim.stepping = false
-	hasActive := len(anim.active) > 0
+	delete(anim.stepping, key)
+	hasActive := anim.hasActiveLocked(key)
 	anim.mu.Unlock()
 
 	// ── OnDone (вне мьютекса; колбэки могут звать Animate/Stop) ───────────
@@ -378,14 +449,28 @@ func StepAnimations(now time.Time) bool {
 			d.cb()
 		}
 	}
-	// OnDone мог зарегистрировать новые анимации (add вне stepping → сразу
-	// в active). Пересчитываем актуальное наличие активных.
+	// OnDone мог зарегистрировать новые анимации. Пересчитываем актуальное
+	// наличие активных.
 	if !hasActive {
 		anim.mu.Lock()
-		hasActive = len(anim.active) > 0
+		hasActive = anim.hasActiveLocked(key)
 		anim.mu.Unlock()
 	}
 	return hasActive
+}
+
+// hasActiveLocked сообщает, есть ли активные анимации у цикла key (при
+// удержанном mu). Ничьи считаются: их заберёт первый шагнувший цикл.
+func (am *animator) hasActiveLocked(key any) bool {
+	if _, all := key.(stepAllKey); all {
+		return len(am.active) > 0
+	}
+	for _, a := range am.active {
+		if !a.done && !a.stopped && (a.loop == nil || a.loop == key) {
+			return true
+		}
+	}
+	return false
 }
 
 // AnimationsActive сообщает, есть ли зарегистрированные анимации.
@@ -396,7 +481,7 @@ func StepAnimations(now time.Time) bool {
 // завершения анимации.
 func AnimationsActive() bool {
 	anim.mu.Lock()
-	active := len(anim.active) > 0 || len(anim.incoming) > 0
+	active := len(anim.active) > 0
 	anim.mu.Unlock()
 	return active
 }
@@ -407,10 +492,7 @@ func StopAllAnimations() {
 	for _, a := range anim.active {
 		a.stopped = true
 	}
-	for _, a := range anim.incoming {
-		a.stopped = true
-	}
+	clear(anim.active)
 	anim.active = anim.active[:0]
-	anim.incoming = anim.incoming[:0]
 	anim.mu.Unlock()
 }
