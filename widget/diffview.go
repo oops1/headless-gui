@@ -660,6 +660,32 @@ func (d *DiffView) SetCaret(side DiffSide, line, col int) {
 
 func (d *DiffView) GoToLine(side DiffSide, line int) { d.SetCaret(side, line, 0) }
 
+// Selection возвращает строки стороны, задетые выделением: [fromLine, toLine),
+// номера от нуля. ok=false — выделения на этой стороне нет.
+//
+// Текст выделения (SelectedText) не говорит, какие это строки: одинаковые
+// строки встречаются в файле много раз, а приложению, которое добавляет в
+// индекс выделенные строки, нужны именно номера. Выделение, кончающееся в
+// самом начале строки, эту строку не задевает — так считают строки редакторы:
+// Shift+↓ от начала строки выделяет одну строку, а не две.
+func (d *DiffView) Selection(side DiffSide) (fromLine, toLine int, ok bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if side != DiffLeft && side != DiffRight {
+		return 0, 0, false
+	}
+	s := d.docs[side]
+	if !s.hasSel() {
+		return 0, 0, false
+	}
+	a, b := s.sel()
+	to := b.line + 1
+	if b.col == 0 && b.line > a.line {
+		to = b.line
+	}
+	return a.line, to, true
+}
+
 // ─── Модель отображения ─────────────────────────────────────────────────────
 
 func (d *DiffView) prepareSide(s *dvDoc) { dvPrepareDoc(s, d.syntax) }
