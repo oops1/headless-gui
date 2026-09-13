@@ -577,6 +577,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
 | `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17 additions") |
 | `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
+| `<DatePicker>` | `DatePicker` | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd` (ISO 8601 or invariant M/d/yyyy), `DateFormat` (.NET pattern or Go layout), `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `<DockManager>` | `DockManager` | `Background`, `NativeFloating` (see "Docking") + children `<DockPane>`×N, one `<DockContent>` |
 | `<DockPane>` | `DockPane` | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size` (px), `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
 | `<DockContent>` | (marker, not a widget) | single child → `DockManager.SetCenter`; valid only inside `<DockManager>` |
@@ -3977,6 +3978,7 @@ dv.NextChange(); dv.PrevChange(); dv.GoToChange(i); dv.CurrentChange()
 dv.CopyBlock(i, toRight); dv.CopyCurrent(toRight); dv.CopyAll(toRight)
 dv.Undo(); dv.Redo(); dv.CanUndo(); dv.CanRedo()
 dv.SetCaret(side, line, col); dv.Caret(side); dv.InsertText(s); dv.SelectedText()
+dv.Selection(side) (from, to int, ok bool) // lines touched by the selection, [from, to); ends at col 0 → that line excluded
 dv.Text(side); dv.Lines(side); dv.IsModified(side); dv.FilePath(side)
 ```
 
@@ -4039,6 +4041,31 @@ keeps the grab offset (no jump), a click on a conflict mark goes to it, a click
 elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
+
+### DatePicker — date field with a drop-down calendar
+
+```go
+p := widget.NewDatePicker()
+p.SetSelectedDate(t) bool           // time of day dropped; false if outside the range
+p.SelectedDate() (time.Time, bool)
+p.ClearSelectedDate()
+p.SetDisplayDateRange(start, end)   // zero bound = unbounded; selection outside is cleared
+p.SetFormat("02.01.2006")           // "" → culture key date.format
+p.SetFirstDayOfWeek(time.Monday)    // default → culture key date.firstDay (0 Sun … 6 Sat)
+p.SetDropDownOpen(true); p.IsDropDownOpen(); p.ViewMonth(); p.Text()
+p.Now = func() time.Time { … }      // "today" source for tests and golden frames
+p.OnSelectedDateChanged = func(d time.Time, ok bool) {}
+```
+
+Culture is data: `date.format`, `date.firstDay`, `date.month.1..12`, `date.wd.0..6`,
+`date.placeholder` in the string tables (RU, EN built in; unknown language → ISO
+8601 + Monday). Parsing (`parseDateInput`) accepts no leading zeros, any of
+`. / -`, 2-digit year and ISO. The month grid comes from `internal/calendar`
+(`MonthGrid` with the first weekday as a parameter), shared with
+`desktop.CalendarFlyout` — never duplicate it. Calendar layout is one function
+(`dpLayoutFor`) for drawing and hit-testing. The overlay follows the Dropdown
+pattern: `OverlayDrawer`, `OverlayBoundsProvider`, `Dismissable`, `Bounds()`
+widened while open.
 
 Events: `OnResolvedChanged(left int)`, `OnResultEdited()`,
 `OnCurrentConflict(index int)`, `OnCaretMoved(line, col int)`,

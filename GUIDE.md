@@ -1429,6 +1429,7 @@ root Canvas (0,0)
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
 | `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
+| `DatePicker` | DatePicker | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd`, `DateFormat`, `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; дочерние `<DockPane>`×N + один `<DockContent>` (см. «Докинг-панели») |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); только внутри `<DockManager>` |
@@ -1785,7 +1786,9 @@ dv.OnFileChangedOnDisk = func(side widget.DiffSide, path string, deleted bool) {
 | Tab | табуляция в текст (`TabAcceptor`; у стороны только для чтения — обход фокуса) |
 
 Программно — `NextChange`, `PrevChange`, `GoToChange`, `CopyBlock`,
-`CopyCurrent`, `CopyAll`, `Undo`, `Redo`, `SetCaret`, `InsertText`, `Changes`.
+`CopyCurrent`, `CopyAll`, `Undo`, `Redo`, `SetCaret`, `InsertText`, `Changes`,
+`Selection(side)` — номера строк, задетых выделением, `[from, to)`: текст
+выделения не говорит, какие это строки, а добавлять в индекс нужно именно их.
 Два файла, брошенные из проводника, раскладываются по сторонам, один — в
 сторону под курсором. Скринридер видит две текстовые панели с содержимым
 (`AccessChildrenProvider`). Цвета берутся из полей темы `Diff*`/`Syntax*`,
@@ -1915,6 +1918,53 @@ git — стиль `MergeStyleMerge` или `MergeStyleDiff3` (с базой з�
 Команды: `SaveCommand` (без параметра), `ResultEditedCommand` (без параметра),
 `ResolvedCommand` (параметр — сколько конфликтов осталось). Полный пример —
 `cmd/mergedemo`.
+
+#### DatePicker — поле даты с календарём
+
+Поле, в которое дату можно набрать с клавиатуры, и выпадающий месячный
+календарь — кнопка справа, F4 или Alt+↓. Дата хранится без времени суток:
+фильтр, построенный на выборе, не зависит от часа, в который щёлкнули по
+числу.
+
+```go
+since := widget.NewDatePicker()
+since.SetDisplayDateRange(time.Date(2020, 1, 1, 0, 0, 0, 0, time.Local), time.Time{}) // нулевая граница — без ограничения
+since.OnSelectedDateChanged = func(d time.Time, ok bool) { reload() } // ok=false — дату стёрли
+d, ok := since.SelectedDate()
+```
+
+**Культура.** Формат и первый день недели берутся из таблиц строк языка:
+`date.format` (раскладка `time.Format`) и `date.firstDay` (0 — воскресенье,
+1 — понедельник). Встроены RU (`02.01.2006`, понедельник) и EN (`01/02/2006`,
+воскресенье); язык без своей культуры получает ISO 8601. Добавить культуру —
+те же `RegisterStrings`, задать явно — `SetFormat` и `SetFirstDayOfWeek`.
+Набор терпим к виду: без ведущих нулей, любой из разделителей «. / -»,
+двузначный год, ISO 8601. Неразобранное или вне границ помечается рамкой
+ошибки; уход фокуса возвращает выбранную дату.
+
+| Клавиши | Действие |
+|---|---|
+| F4, Alt+↓ | открыть календарь |
+| ← / →, ↑ / ↓ | день, неделя |
+| PgUp / PgDn, колесо | месяц |
+| Home / End | начало, конец месяца |
+| Enter, пробел | выбрать |
+| Esc | закрыть календарь или отменить набор |
+
+Границы `SetDisplayDateRange`: числа вне них не выбираются, набор их не
+принимает, месяц за границу не листается. Диапазон «с — по» — два поля, где
+второе ограничено выбором первого: `to.SetDisplayDateRange(from, time.Time{})`.
+
+```xml
+<DatePicker x:Name="since" SelectedDate="2026-09-13" DisplayDateStart="2020-01-01"
+            DateFormat="dd.MM.yyyy" FirstDayOfWeek="Monday" Placeholder="с какого числа"
+            SelectedDateChangedCommand="{Binding Since}"/>
+```
+
+Даты в разметке — ISO 8601 или инвариантная `M/d/yyyy`, как в WPF: смысл
+разметки не меняется от языка интерфейса. `DateFormat` — шаблон .NET
+(`dd.MM.yyyy`) или раскладка `time.Format`. Команда `SelectedDateChangedCommand`
+получает `time.Time` (нулевое — дату стёрли).
 
 ### Зрелость TextBox
 

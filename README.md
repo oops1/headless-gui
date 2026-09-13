@@ -78,6 +78,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **SplitPanel** — two panes with a draggable splitter (fraction-based position, min sizes, double-click collapse, nesting)
 - **DiffView** — side-by-side file comparison with editing: synced scrolling, S-connectors, block copy, intra-line diff, syntax highlight, file watching; CRLF/BOM preserved on save
 - **MergeView** — three-way merge: ours, base and theirs on top with rows aligned by chunk, editable result below; per-chunk resolutions (ours / theirs / base / both) by button, menu or Alt+1/2/3, git conflict markers (merge or diff3 style) for what is still unresolved
+- **DatePicker** — date field with a drop-down month calendar: typed or picked, forgiving parsing, format and first weekday taken from the UI language's string tables (RU/EN built in, ISO 8601 otherwise), selectable date range
 - **What an editor needs** — `win.SetTitle` and `win.SetOnCloseRequest` (a "Save changes?" prompt before the window closes), widgets that take Tab for themselves (`TabAcceptor`), antialiased paths with fractional coordinates and joined bends (`PathShapes`: cubic curves, polylines, fills), diff and syntax colors in the theme, accessibility children for self-drawn widgets
 - **AVX2 pixel kernels** — optional `GOEXPERIMENT=simd` build (Go 1.27+, amd64): text, AA shapes, fills, blur and frame presentation on AVX2, bit-identical to the scalar path, with CPU detection and a startup self-test falling back automatically
 - **Docking panels** — `DockManager`/`DockPane`, Visual Studio-style Toolbox docking: center + 4 dockable sides, stack tabs, auto-hide, drag&dock with guides, gutter resize, save/restore layout (JSON)
@@ -128,6 +129,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 | SplitPanel | `SplitPanel` | Two panes with a draggable splitter, fraction position, min sizes, double-click collapse |
 | DiffView | `DiffView` | Compare and edit two files: synced scroll, block copy, intra-line diff, syntax highlight, file watching |
 | MergeView | `MergeView` | Three-way merge: ours/base/theirs on top, editable result below, per-chunk resolutions, git conflict markers |
+| DatePicker | `DatePicker` | Date field with a drop-down month calendar, culture-aware format and first weekday, date range |
 | SVGIcon | `SVGIcon` | Themeable vector icon (SVG subset), `currentColor` / `Tint` recoloring |
 | DockManager | `DockManager` | VS-style docking zone: center + 4 dockable sides, gutter resize, stack tabs, auto-hide, drag&dock |
 | DockPane | `DockPane` | Single docking panel hosted by `DockManager`: title bar with pin/float/close, Docked/AutoHidden/Floating/Closed |

@@ -1426,6 +1426,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
 | `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
 | `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
+| `DatePicker` | DatePicker | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd`, `DateFormat`, `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; children `<DockPane>`×N + one `<DockContent>` (see "Docking panels") |
 | `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); valid only inside `<DockManager>` |
@@ -1782,7 +1783,10 @@ The control's own save is not mistaken for an external edit.
 | Tab | a tab into the text (`TabAcceptor`; on a read-only side — focus traversal) |
 
 From code — `NextChange`, `PrevChange`, `GoToChange`, `CopyBlock`,
-`CopyCurrent`, `CopyAll`, `Undo`, `Redo`, `SetCaret`, `InsertText`, `Changes`.
+`CopyCurrent`, `CopyAll`, `Undo`, `Redo`, `SetCaret`, `InsertText`, `Changes`,
+`Selection(side)` — the numbers of the lines the selection touches, `[from, to)`:
+the selected text does not say which lines they are, and staging needs exactly
+them.
 Two files dropped from the file manager go to the two sides, one file goes to
 the side under the cursor. A screen reader sees two text panes with their
 content: the control implements `widget.AccessChildrenProvider`
@@ -1915,6 +1919,52 @@ labels back. A hint reaches the screen reader as the pane description.
 Commands: `SaveCommand` (no parameter), `ResultEditedCommand` (no parameter),
 `ResolvedCommand` (parameter — how many conflicts are left). Full example —
 `cmd/mergedemo`.
+
+#### DatePicker — date field with a calendar
+
+A field you can type a date into, and a drop-down month calendar — the button
+on the right, F4 or Alt+↓. The date is stored without a time of day: a filter
+built on it does not depend on the hour someone clicked the day.
+
+```go
+since := widget.NewDatePicker()
+since.SetDisplayDateRange(time.Date(2020, 1, 1, 0, 0, 0, 0, time.Local), time.Time{}) // zero bound — unbounded
+since.OnSelectedDateChanged = func(d time.Time, ok bool) { reload() } // ok=false — the date was cleared
+d, ok := since.SelectedDate()
+```
+
+**Culture.** The format and the first day of the week come from the language's
+string tables: `date.format` (a `time.Format` layout) and `date.firstDay`
+(0 — Sunday, 1 — Monday). RU (`02.01.2006`, Monday) and EN (`01/02/2006`,
+Sunday) are built in; a language without its own culture gets ISO 8601. Add a
+culture with the same `RegisterStrings`, or set it explicitly with `SetFormat`
+and `SetFirstDayOfWeek`. Typing is forgiving: no leading zeros, any of the
+separators ". / -", a two-digit year, ISO 8601. Unparsable or out-of-range
+input gets an error border; losing focus restores the selected date.
+
+| Keys | Action |
+|---|---|
+| F4, Alt+↓ | open the calendar |
+| ← / →, ↑ / ↓ | day, week |
+| PgUp / PgDn, wheel | month |
+| Home / End | start, end of the month |
+| Enter, Space | select |
+| Esc | close the calendar or cancel typing |
+
+`SetDisplayDateRange` bounds: days outside are not selectable, typing does not
+accept them, and the month does not page past a bound. A "from — to" range is
+two fields where the second is bounded by the first: `to.SetDisplayDateRange(from, time.Time{})`.
+
+```xml
+<DatePicker x:Name="since" SelectedDate="2026-09-13" DisplayDateStart="2020-01-01"
+            DateFormat="dd.MM.yyyy" FirstDayOfWeek="Monday" Placeholder="since"
+            SelectedDateChangedCommand="{Binding Since}"/>
+```
+
+Dates in markup are ISO 8601 or invariant `M/d/yyyy`, as in WPF: markup means
+the same regardless of the UI language. `DateFormat` is a .NET pattern
+(`dd.MM.yyyy`) or a `time.Format` layout. `SelectedDateChangedCommand` receives
+a `time.Time` (zero — the date was cleared).
 
 ### TextBox maturity
 
