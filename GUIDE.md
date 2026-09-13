@@ -382,6 +382,25 @@ tb.Overflow = true     // не поместившиеся уходят в мен
 tb.OverflowCount()     // сколько элементов не поместилось
 ```
 
+Кнопки со стрелкой — `MenuButton`. Разделённая (`NewSplitButton`) выполняет
+действие основной частью, а стрелкой открывает меню; простая (`NewMenuButton`)
+открывает меню вся:
+
+```go
+pull := widget.NewSplitButton("Pull", doPull)
+pull.OnOpening = func() {                 // перед каждым открытием
+    pull.Items = []widget.MenuItem{{Text: "Fetch", OnClick: doFetch}}
+}
+apply := widget.NewSplitButton("Apply Stash", applyStash)
+apply.SetActionEnabled(false)             // действие недоступно, меню — есть
+flow := widget.NewMenuButton("Git-Flow")  // вся кнопка — меню
+tb.AddChild(pull)
+```
+
+Меню встаёт под кнопкой, повторное нажатие по стрелке его закрывает, ↓ открывает
+его с клавиатуры. В переполненной панели такая кнопка становится подменю. В
+разметке — `<SplitButton>` и `<MenuButton>` с вложенными `<MenuItem>`.
+
 В XAML — `<ToolBarTray>` и `<ToolBar>` с атрибутами `IconsOnly`, `Overflow` и
 элементом `<Separator/>`:
 
@@ -1426,6 +1445,7 @@ root Canvas (0,0)
 | `Grid` | Grid | `ShowGridLines`, `Grid.RowDefinitions`, `Grid.ColumnDefinitions` |
 | `Label`, `TextBlock` | Label | `Text`, `Foreground`, `Background`, `TextWrapping`, `FontSize` |
 | `Button`, `ToggleButton`, `RepeatButton` | Button | `Content`, `Style="Accent"`, `HoverBG`, `PressedBG`, `Background`, `Foreground`, `BorderBrush` |
+| `SplitButton`, `MenuButton` | MenuButton | атрибуты `Button`; вложенные `<MenuItem>`; `Split`, `IsActionEnabled`, `IsMenuEnabled` |
 | `TextBox` | TextInput | `Placeholder`, `Text`, `Foreground` |
 | `PasswordBox` | TextInput (пароль) | `Placeholder`, `Text` |
 | `ComboBox` | Dropdown | `Items`, `SelectedIndex`, дочерние `<ComboBoxItem>`, `ArrowStyle` |
@@ -1461,7 +1481,7 @@ root Canvas (0,0)
 | `DatePicker` | DatePicker | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd`, `DateFormat`, `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `Separator` | Separator | `Background` |
 | `DockManager` | DockManager | `Background`, `NativeFloating`; дочерние `<DockPane>`×N + один `<DockContent>` (см. «Докинг-панели») |
-| `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `State` (Docked/AutoHidden/Floating/Closed); только внутри `<DockManager>` |
+| `DockPane` | DockPane | `Id`, `Title`, `Side` (Left/Top/Bottom/Right), `Size`, `MinSize`, `State` (Docked/AutoHidden/Floating/Closed); только внутри `<DockManager>` |
 | `DockContent` | — (маркер) | единственный ребёнок → `DockManager.SetCenter`; только внутри `<DockManager>` |
 | `Window` | Window | `Title`, `Width`, `Height`, `WindowStyle`, `ResizeMode`, `MainWindow`, `TrayIcon`, `TrayTooltip` (см. «Трей из XAML») |
 | `TrayMenu` | — (ребёнок `<Window>`) | меню трея: дочерние `<MenuItem>`/`<Separator>` (см. «Трей из XAML») |
@@ -2893,6 +2913,32 @@ mgr.ActivatePane(props)   // сменить активную (не только 
 props.IsActive()          // спросить
 props.TitleTextActive = c // цвет заголовка именно на акцентном фоне
 ```
+
+Свои кнопки в заголовке панели стоят слева от штатных:
+
+```go
+branches.SetTitleButtons([]widget.DockPaneButton{
+    {Icon: githubIcon, Tooltip: "Обновить с GitHub", OnClick: refresh},
+    {Tooltip: "Вид", MenuFunc: viewMenu}, // без значка — «≡», меню под кнопкой
+})
+branches.SetTitleButtonHidden(0, !onGitHub) // без перестройки списка
+```
+
+Значок перекрашивается в цвет текста заголовка, как глифы штатных кнопок
+(`KeepIconColors` оставляет его цвета). У каждой кнопки своя подсказка.
+
+Минимум стороны можно задать панели — он действует только на её сторону:
+
+```go
+commit.MinSize = 300              // XAML: <DockPane MinSize="300">; на лету — SetMinSize
+mgr.OnSideResized = func(side widget.DockSide, size int) {
+    // по отпусканию разделителя и после RestoreLayout
+}
+```
+
+Сторона не сужается меньше наибольшего `MinSize` своих закреплённых панелей и
+общего `MinSideSize`; разделитель упирается в этот предел. В тесном окне минимум
+уступает документной области.
 
 `OnStateChanged` приходит и на смену активной панели — обеим, прежней и новой.
 Это нужно тому, кто вычисляет цвет заголовка из фона: фонов у титлбара два, и

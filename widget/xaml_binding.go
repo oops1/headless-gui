@@ -1058,6 +1058,8 @@ func getWidgetProperty(w Widget, prop string) (interface{}, bool) {
 			return t.GetText(), true
 		case *Button:
 			return t.Text, true
+		case *MenuButton:
+			return t.Text, true
 		}
 	case "value":
 		switch t := w.(type) {
@@ -1203,6 +1205,8 @@ func setWidgetText(w Widget, s string) {
 		t.SetText(s)
 	case *Button:
 		t.SetText(s)
+	case *MenuButton:
+		t.SetText(s)
 	case *TextInput:
 		t.SetText(s)
 	case *TextBox:
@@ -1221,6 +1225,8 @@ func setWidgetForeground(w Widget, c color.RGBA) {
 	case *Label:
 		t.TextColor = c
 	case *Button:
+		t.TextColor = c
+	case *MenuButton:
 		t.TextColor = c
 	case *TextInput:
 		t.TextColor = c
