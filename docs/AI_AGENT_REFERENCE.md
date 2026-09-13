@@ -4017,6 +4017,8 @@ mv.SetMarkerSize(9)                   // git conflict-marker-size; 0 → 7
 mv.SetResultEOL("\r\n", bom, finalNL) // default "\n" + final newline; SetTexts copies ours
 mv.Scroll() / SetScroll(y) / ResultScroll() / SetResultScroll(y) / ScrollToLine(side, line)
 mv.SetSyncScroll(false)               // default true: top and result scroll together, by chunk
+mv.SetResultInfo(widget.MergeSideInfo{Title, Note, Hint}) // result pane labels; Sides() / ResultInfo() read back
+// MergeSideInfo.Hint — second header line; top headers grow when any visible side has one
 ```
 
 `MergeChunk{Conflict, Ours, Base, Theirs, Merged}` — `Merged` is the result of

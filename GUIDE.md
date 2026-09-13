@@ -1893,6 +1893,14 @@ git — стиль `MergeStyleMerge` или `MergeStyleDiff3` (с базой з�
 правили последней, — правка итога его прокрутку не дёргает. Раздельная
 прокрутка — `SetSyncScroll(false)`.
 
+**Подписи.** У `MergeSideInfo` три поля: `Title` (обычно ветка) и `Note`
+(обычно путь файла) в строке шапки и `Hint` — пояснение «что это за сторона»
+второй строкой мелким приглушённым шрифтом. Шапки верхних панелей растут на
+строку, когда пояснение есть хоть у одной видимой стороны, — код в соседних
+панелях начинается на одной высоте. Итогу подписи задаёт `SetResultInfo`
+(пустой заголовок — из ключа `merge.side.result`), прочитать заданное —
+`Sides()` и `ResultInfo()`. Пояснение уходит скринридеру описанием панели.
+
 ```xml
 <MergeView x:Name="merge" BaseFile="base.go" OursFile="ours.go" TheirsFile="theirs.go"
            ShowBase="True" ConflictStyle="diff3" MarkerSize="7" ReadOnly="False"

@@ -1893,6 +1893,14 @@ line up; at the start and end of the file both parts reach their edge at the
 same time. The part scrolled or edited last leads — editing the result does not
 jerk its scroll. Separate scrolling — `SetSyncScroll(false)`.
 
+**Labels.** `MergeSideInfo` has three fields: `Title` (usually the branch) and
+`Note` (usually the file path) in the header line, and `Hint` — "what this side
+is" — as a second line in a small muted font. The top panes' headers grow by a
+line when any visible side has a hint, so code in neighbouring panes starts at
+the same height. `SetResultInfo` labels the result pane (an empty title falls
+back to the `merge.side.result` key); `Sides()` and `ResultInfo()` read the
+labels back. A hint reaches the screen reader as the pane description.
+
 ```xml
 <MergeView x:Name="merge" BaseFile="base.go" OursFile="ours.go" TheirsFile="theirs.go"
            ShowBase="True" ConflictStyle="diff3" MarkerSize="7" ReadOnly="False"
