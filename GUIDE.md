@@ -1427,7 +1427,7 @@ root Canvas (0,0)
 | `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (первые два дочерних — панели) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
-| `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
+| `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `ShowHeaders`, `ShowReadOnlyMark`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
 | `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
 | `DatePicker` | DatePicker | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd`, `DateFormat`, `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `Separator` | Separator | `Background` |
@@ -1754,6 +1754,8 @@ dv.SetReadOnly(widget.DiffLeft, true)
 dv.SetHideUnchanged(true) // свернуть одинаковые строки
 dv.SetContextLines(3)     // сколько строк оставить у свёрток
 dv.SetWatchFiles(true)    // следить за файлами на диске
+// dv.SetShowHeaders(false)      — без шапок сторон: код от верхнего края
+// dv.SetShowReadOnlyMark(false) — без отметки «только чтение» в шапке
 defer dv.Close()
 
 dv.OnDiffChanged = func(n int) { status.SetText(fmt.Sprintf("%d изменений", n)) }

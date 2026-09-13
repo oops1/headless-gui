@@ -109,6 +109,7 @@ type DiffView struct {
 	pal    dvPalette
 
 	hide, syntax, ignoreWS bool
+	showRO, headers        bool // отметка «только чтение» и шапки сторон (GG-71, GG-72)
 	ctxLines               int
 	expanded               map[[2]int]bool
 	monoFont, boldFont     string
@@ -180,6 +181,8 @@ func NewDiffView(monoFont, boldFont string) *DiffView {
 		docs:       [2]*dvDoc{newDvDoc(), newDvDoc()},
 		pal:        dvPaletteFrom(t),
 		syntax:     true,
+		showRO:     true,
+		headers:    true,
 		ctxLines:   3,
 		expanded:   map[[2]int]bool{},
 		monoFont:   monoFont,
@@ -493,6 +496,43 @@ func (d *DiffView) SetHideUnchanged(v bool) {
 		d.expanded = map[[2]int]bool{}
 		d.rebuildLocked()
 	})
+}
+
+// SetShowHeaders показывает или прячет шапки сторон — карточки с именем файла,
+// примечанием и счётчиком. Без них код начинается от верхнего края контрола:
+// там, где файл и что с чем сравнивается уже видно рядом (список изменений),
+// шапки только отнимают место.
+func (d *DiffView) SetShowHeaders(v bool) {
+	d.do(func() {
+		if d.headers == v {
+			return
+		}
+		d.headers = v
+		// Высота области кода изменилась — прокрутка могла выйти за край.
+		d.setScrollLocked(d.scroll)
+	})
+}
+
+// ShowHeaders сообщает, показаны ли шапки сторон.
+func (d *DiffView) ShowHeaders() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.headers
+}
+
+// SetShowReadOnlyMark показывает или прячет отметку «только чтение» в шапке
+// стороны. В окне, где сравнение по смыслу только для просмотра, отметка
+// стоит на обеих сторонах, ничего не сообщает и отнимает место у примечания.
+// Сама сторона остаётся только для чтения — меняется лишь надпись.
+func (d *DiffView) SetShowReadOnlyMark(v bool) {
+	d.do(func() { d.showRO = v })
+}
+
+// ShowReadOnlyMark сообщает, показывается ли отметка «только чтение».
+func (d *DiffView) ShowReadOnlyMark() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.showRO
 }
 
 func (d *DiffView) HideUnchanged() bool {
@@ -870,7 +910,10 @@ func (d *DiffView) geom() dvGeom {
 	g.lx1 = g.lx0 + pw
 	g.rx0 = g.lx1 + dvGutterW
 	g.rx1 = g.rx0 + pw
-	g.cy0 = b.Min.Y + dvHeaderH
+	g.cy0 = b.Min.Y
+	if d.headers {
+		g.cy0 += dvHeaderH
+	}
 	g.cy1 = b.Max.Y
 	return g
 }

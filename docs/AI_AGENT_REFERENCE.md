@@ -575,7 +575,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
 | `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
-| `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17 additions") |
+| `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `ShowHeaders`, `ShowReadOnlyMark`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17 additions") |
 | `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
 | `<DatePicker>` | `DatePicker` | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd` (ISO 8601 or invariant M/d/yyyy), `DateFormat` (.NET pattern or Go layout), `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `<DockManager>` | `DockManager` | `Background`, `NativeFloating` (see "Docking") + children `<DockPane>`×N, one `<DockContent>` |
@@ -3972,6 +3972,8 @@ dv.Reload(side)                      // undoable
 dv.SetWatchFiles(true); defer dv.Close()
 dv.SetHideUnchanged(true); dv.SetContextLines(3)
 dv.SetIgnoreWhitespace(v); dv.SetSyntaxHighlight(v); dv.SetReadOnly(side, v)
+dv.SetShowHeaders(v)                 // false → no side header cards, code starts at the top edge (default true)
+dv.SetShowReadOnlyMark(v)            // false → no "read-only" mark in the header; side stays read-only (default true)
 dv.SetFont(mono, bold, sizePt)
 dv.ChangeCount(); dv.Changes() []widget.DiffChange // {Kind, LeftFrom, LeftTo, RightFrom, RightTo}
 dv.NextChange(); dv.PrevChange(); dv.GoToChange(i); dv.CurrentChange()

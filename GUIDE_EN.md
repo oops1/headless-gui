@@ -1424,7 +1424,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `DataGridTemplateColumn` | DataGridTemplateColumn | `Header`, `Width` |
 | `SplitPanel` | SplitPanel | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `SVGIcon` | SVGIcon | `Source`, `Color`, `Tint` |
-| `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
+| `DiffView` | DiffView | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `ShowHeaders`, `ShowReadOnlyMark`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `TextChangedCommand`, `DiffChangedCommand`, `FileChangedCommand` |
 | `MergeView` | MergeView | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle`, `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`, `ResultEditedCommand`, `ResolvedCommand` |
 | `DatePicker` | DatePicker | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd`, `DateFormat`, `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
 | `Separator` | Separator | `Background` |
@@ -1751,6 +1751,8 @@ dv.SetReadOnly(widget.DiffLeft, true)
 dv.SetHideUnchanged(true) // fold identical lines
 dv.SetContextLines(3)     // lines kept around folds
 dv.SetWatchFiles(true)    // watch the files on disk
+// dv.SetShowHeaders(false)      — no side headers: code starts at the top edge
+// dv.SetShowReadOnlyMark(false) — no "read-only" mark in the header
 defer dv.Close()
 
 dv.OnDiffChanged = func(n int) { status.SetText(fmt.Sprintf("%d changes", n)) }
