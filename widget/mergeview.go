@@ -109,6 +109,8 @@ type MergeView struct {
 	fontSize           float64
 
 	scroll, rscroll, hscroll, charW float64
+	syncScroll                      bool    // верх и итог прокручиваются вместе, по блокам
+	resultDrives                    bool    // ведущая часть — итог (её прокрутили или правили последней)
 	split                           float64 // доля высоты под верхние панели
 
 	active                    MergeSide
@@ -165,6 +167,7 @@ func NewMergeView(monoFont, boldFont string) *MergeView {
 		fontSize:   10,
 		charW:      8,
 		split:      0.58,
+		syncScroll: true,
 		current:    -1,
 		hoverChunk: -1,
 		hoverBtn:   -1,
@@ -953,17 +956,130 @@ func (m *MergeView) maxResultScrollLocked() float64 {
 	return max(0, h-float64(max(0, g.ry1-g.ry0)))
 }
 
+// setScrollLocked прокручивает верхние панели; при синхронной прокрутке итог
+// следует за ними.
 func (m *MergeView) setScrollLocked(v float64) {
 	m.scroll = min(max(0, v), m.maxScrollLocked())
+	m.resultDrives = false
+	if m.syncScroll {
+		m.followLocked()
+	}
 }
 
+// setResultScrollLocked прокручивает итог; при синхронной прокрутке верхние
+// панели следуют за ним.
 func (m *MergeView) setResultScrollLocked(v float64) {
 	m.rscroll = min(max(0, v), m.maxResultScrollLocked())
+	m.resultDrives = true
+	if m.syncScroll {
+		m.followLocked()
+	}
 }
 
+// clampScrollLocked держит обе прокрутки в пределах после перестройки (решение,
+// правка, смена раскладки) и заново ставит ведомую часть вровень с ведущей.
 func (m *MergeView) clampScrollLocked() {
-	m.setScrollLocked(m.scroll)
-	m.setResultScrollLocked(m.rscroll)
+	m.scroll = min(max(0, m.scroll), m.maxScrollLocked())
+	m.rscroll = min(max(0, m.rscroll), m.maxResultScrollLocked())
+	if m.syncScroll {
+		m.followLocked()
+	}
+}
+
+// resultViewHLocked — высота видимой области итога.
+func (m *MergeView) resultViewHLocked() float64 {
+	g := m.geom()
+	return float64(max(0, g.ry1-g.ry0))
+}
+
+// scrollBPsLocked — точки излома соответствия «точка верха ↔ точка итога»:
+// начала и концы блоков. Между ними соответствие линейное — блок, который
+// сверху занимает строку, а в итоге пять строк маркеров, растягивается, и
+// соседние блоки всё равно встают вровень.
+func (m *MergeView) scrollBPsLocked() (top, res []float64) {
+	top = append(top, 0, dvTopPad)
+	res = append(res, 0, dvTopPad)
+	for ci, sp := range m.spans {
+		if ci >= len(m.rspan) {
+			break
+		}
+		top = append(top, float64(dvTopPad+sp.to*dvLineH))
+		res = append(res, float64(dvTopPad+m.rspan[ci][1]*dvLineH))
+	}
+	top = append(top, m.virtualHLocked())
+	res = append(res, float64(dvTopPad+len(m.docs[MergeResult].rows)*dvLineH+dvBottomPad))
+	return top, res
+}
+
+// mvMapPoint переводит точку v по ломаной from → to. Отрезки нулевой длины на
+// стороне from пропускаются: блок без строк сверху (правка только в итоге)
+// точкой соответствия не служит.
+func mvMapPoint(v float64, from, to []float64) float64 {
+	n := min(len(from), len(to))
+	if n == 0 {
+		return v
+	}
+	if v <= from[0] {
+		return to[0]
+	}
+	for i := 0; i+1 < n; i++ {
+		if v > from[i+1] || from[i+1] <= from[i] {
+			continue
+		}
+		t := (v - from[i]) / (from[i+1] - from[i])
+		return to[i] + t*(to[i+1]-to[i])
+	}
+	return to[n-1]
+}
+
+// followLocked ставит ведомую часть вровень с ведущей.
+//
+// Опорная точка едет от верха окна к низу вместе с прокруткой (доля f), как в
+// сравнении: у начала файла вровень стоят верхние края, у конца — нижние, и
+// обе части доходят до своих концов одновременно, хотя итог длиннее на строки
+// маркеров.
+func (m *MergeView) followLocked() {
+	top, res := m.scrollBPsLocked()
+	vh, rvh := m.topViewH(), m.resultViewHLocked()
+	if m.resultDrives {
+		maxR := m.maxResultScrollLocked()
+		f := 0.0
+		if maxR > 0 {
+			f = m.rscroll / maxR
+		}
+		p := mvMapPoint(m.rscroll+f*rvh, res, top)
+		m.scroll = min(max(0, p-f*vh), m.maxScrollLocked())
+		return
+	}
+	maxT := m.maxScrollLocked()
+	f := 0.0
+	if maxT > 0 {
+		f = m.scroll / maxT
+	}
+	p := mvMapPoint(m.scroll+f*vh, top, res)
+	m.rscroll = min(max(0, p-f*rvh), m.maxResultScrollLocked())
+}
+
+// SetSyncScroll включает или выключает синхронную прокрутку верха и итога.
+// По умолчанию включена: листая итог к конфликту, человек ждёт наверху те же
+// строки сторон. Выключенная — части прокручиваются порознь.
+func (m *MergeView) SetSyncScroll(v bool) {
+	m.do(func() {
+		if m.syncScroll == v {
+			return
+		}
+		m.syncScroll = v
+		if v {
+			m.followLocked()
+		}
+	})
+}
+
+// SyncScroll сообщает, прокручиваются ли верх и итог вместе.
+func (m *MergeView) SyncScroll() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.syncScroll
 }
 
 // ensureResultVisibleLocked подкручивает итог так, чтобы каретка была видна.

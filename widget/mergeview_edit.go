@@ -116,6 +116,9 @@ func (m *MergeView) editLocked(kind dvEditKind, fn func(s *dvDoc)) bool {
 		return false
 	}
 	m.pushUndoLocked(kind)
+	// Правят итог — он и ведёт прокрутку: подгонять его под верх значило бы
+	// сдвигать итог на строку при каждом Enter прямо под пишущим.
+	m.resultDrives = true
 	at, before := r.caret.line, len(r.text.Lines)
 	fn(r)
 	if len(r.text.Lines) == 0 {
@@ -799,7 +802,8 @@ func (m *MergeView) chunkAtPointLocked(side MergeSide, y int) int {
 	return -1
 }
 
-// OnMouseWheelPixels — колесо: верхние панели и итог прокручиваются отдельно.
+// OnMouseWheelPixels — колесо: прокручивается часть под курсором, вторая при
+// синхронной прокрутке идёт следом (SetSyncScroll).
 func (m *MergeView) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
 	handled := false
 	m.do(func() {
