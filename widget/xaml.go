@@ -480,6 +480,10 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 			}
 		}
 
+	// ── Кнопка с меню: Pull▾, Git-Flow▾ (GG-78) ─────────────────────────────
+	case "menubutton", "splitbutton", "dropdownbutton":
+		w = buildXAMLMenuButton(el, tag, baseDir)
+
 	// ── Ввод текста ──────────────────────────────────────────────────────────
 	case "textbox", "textinput", "input", "richtextbox":
 		// Многострочный (AcceptsReturn / TextWrapping="Wrap") → TextBox-редактор.
@@ -629,6 +633,10 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 		childTag := strings.ToLower(child.Tag)
 		if childTag == "item" || childTag == "comboboxitem" || childTag == "listboxitem" ||
 			childTag == "tabitem" || childTag == "listviewitem" {
+			continue
+		}
+		// Пункты кнопки с меню уже разобраны в buildXAMLMenuButton.
+		if _, ok := w.(*MenuButton); ok && (childTag == "menuitem" || childTag == "separator") {
 			continue
 		}
 		// Attached ContextMenu: <X.ContextMenu><ContextMenu>…</ContextMenu></X.ContextMenu>

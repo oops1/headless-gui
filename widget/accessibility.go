@@ -153,6 +153,9 @@ func accessInfoFor(w Widget) AccessInfo {
 	case *Button:
 		info.Role = RoleButton
 		info.Name = t.Text
+	case *MenuButton:
+		info.Role = RoleButton
+		info.Name = t.Text
 	case *CheckBox:
 		info.Role = RoleCheckBox
 		info.Name = t.Text

@@ -168,12 +168,23 @@ func (btn *Button) Draw(ctx DrawContext) {
 	if b.Empty() {
 		return
 	}
+	pressed := btn.IsPressed()
+	bg, txt, border := btn.stateColors(pressed)
+	btn.drawChrome(ctx, b, bg, border, pressed)
+	btn.drawContent(ctx, b, txt)
+	btn.drawChildren(ctx)
+}
 
+// stateColors — цвета фона, подписи и рамки для состояния кнопки.
+//
+// Отрисовка разрезана на цвета, корпус и содержимое ради кнопки с меню
+// (MenuButton): её основная часть и стрелка нажимаются порознь, и нарисовать
+// нажатой нужно только одну из них.
+func (btn *Button) stateColors(pressed bool) (bg, txt, border color.RGBA) {
 	st := currentStyle()
-
-	bg, txt, border := btn.Background, btn.TextColor, btn.BorderColor
+	bg, txt, border = btn.Background, btn.TextColor, btn.BorderColor
 	switch {
-	case btn.IsPressed():
+	case pressed:
 		bg = btn.PressedBG
 	case btn.IsChecked():
 		// Включённый переключатель выглядит нажатым постоянно. Наведение на
@@ -190,7 +201,13 @@ func (btn *Button) Draw(ctx DrawContext) {
 	if !btn.IsEnabled() {
 		bg, txt, border = disabledLook(bg, txt, border)
 	}
+	return bg, txt, border
+}
 
+// drawChrome рисует корпус кнопки в прямоугольнике b: фон, рамку, фокус и
+// акцентную линию.
+func (btn *Button) drawChrome(ctx DrawContext, b image.Rectangle, bg, border color.RGBA, pressed bool) {
+	st := currentStyle()
 	switch {
 	case st.Classic3D:
 		// Классическая объёмная кнопка: прямые углы, bevel-рамка;
@@ -199,7 +216,7 @@ func (btn *Button) Draw(ctx DrawContext) {
 		// Классика: включённый переключатель — вдавленная грань, как у
 		// нажатой кнопки. Иначе в теме Win2000 состояние не видно вовсе:
 		// hover она не подсвечивает, и фон у обоих состояний один.
-		if btn.IsPressed() || btn.IsChecked() {
+		if pressed || btn.IsChecked() {
 			drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		} else {
 			drawBevelRaised(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
@@ -231,10 +248,13 @@ func (btn *Button) Draw(ctx DrawContext) {
 		}
 	}
 
-	if btn.ShowHighlight && !btn.IsPressed() && !st.Classic3D {
+	if btn.ShowHighlight && !pressed && !st.Classic3D {
 		ctx.DrawHLine(b.Min.X+1, b.Min.Y, b.Dx()-2, btn.HighlightTop)
 	}
+}
 
+// drawContent рисует значок и подпись кнопки в прямоугольнике b цветом txt.
+func (btn *Button) drawContent(ctx DrawContext, b image.Rectangle, txt color.RGBA) {
 	// ── Размер иконки ──────────────────────────────────────────────────────
 	iconSz := btn.IconSize
 	if iconSz <= 0 {
@@ -315,8 +335,6 @@ func (btn *Button) Draw(ctx DrawContext) {
 			ctx.DrawTextSize(label, textX, textY, sizePt, txt)
 		}
 	}
-
-	btn.drawChildren(ctx)
 }
 
 // disabledLook приглушает цвета выключенной кнопки.

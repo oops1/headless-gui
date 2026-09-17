@@ -114,6 +114,13 @@ type DockManager struct {
 	// OnFloatNative на панели, добавленные уже после EnableDockFloating.
 	OnPaneAdded func(p *DockPane)
 
+	// OnSideResized, если задан, вызывается, когда размер стороны сменил
+	// пользователь — по отпусканию перетащенного разделителя, — и после
+	// RestoreLayout для каждой занятой стороны. size — желаемый размер стороны
+	// (SideSize). Приложение может поправить его сам (SetSideSize) — например,
+	// под ширину вкладок панели (GG-79).
+	OnSideResized func(side DockSide, size int)
+
 	// NativeFloating — декларация из XAML (<DockManager NativeFloating="True">):
 	// панели этого менеджера разрешено отрывать в отдельные нативные окна ОС.
 	// widget-пакет только хранит намерение; window.Window.Run() обходит дерево,
@@ -171,6 +178,10 @@ type DockManager struct {
 	resizeSide  DockSide
 	hoverGutter DockSide
 	hoverGutOK  bool
+
+	// resizeStartSize — размер стороны в начале перетаскивания разделителя:
+	// OnSideResized зовётся, только если он изменился.
+	resizeStartSize int
 
 	// Кнопки ярлыка auto-hide (📌 pin / ✕ close) — release-семантика.
 	armedStripPane *DockPane
@@ -240,6 +251,25 @@ func (m *DockManager) minSide() int {
 		return m.MinSideSize
 	}
 	return dockMinSideSize
+}
+
+// minSideFor — минимум стороны: общий MinSideSize или наибольший MinSize её
+// закреплённых панелей (GG-79).
+//
+// Общего минимума мало: панель с вкладками справа обрезает их уже на 300
+// точках, а поднять MinSideSize до 300 значит запретить и журналу снизу быть
+// ниже 300. Минимум панели действует только на её сторону.
+func (m *DockManager) minSideFor(side DockSide) int {
+	lo := m.minSide()
+	if !validSide(side) {
+		return lo
+	}
+	for _, p := range m.dockedPanes(side) {
+		if p.MinSize > lo {
+			lo = p.MinSize
+		}
+	}
+	return lo
 }
 
 func (m *DockManager) stripThick() int {
@@ -621,8 +651,8 @@ func (m *DockManager) SetBounds(r image.Rectangle) {
 // клэмп применит уже layout() при первой реальной раскладке через
 // clampSideSizeFor, который не портит m.sizes (см. clampSideSizeFor).
 func (m *DockManager) clampSideSize(side DockSide, size int) int {
-	if size < m.minSide() {
-		size = m.minSide()
+	if lo := m.minSideFor(side); size < lo {
+		size = lo
 	}
 	b := m.bounds
 	if b.Empty() {
@@ -728,9 +758,11 @@ func (m *DockManager) layout() {
 // под кромку и минимальный центр (avail — оставшийся размер оси до клэмпа).
 func (m *DockManager) clampSideSizeFor(side DockSide, avail int) int {
 	sz := m.sizes[int(side)]
-	if sz < m.minSide() {
-		sz = m.minSide()
+	if lo := m.minSideFor(side); sz < lo {
+		sz = lo
 	}
+	// Верхний предел по-прежнему опирается на общий минимум: в тесном окне
+	// минимум панели уступает документной области, иначе центр ушёл бы в минус.
 	maxS := avail - m.gutterSize() - dockCenterMin
 	if maxS < m.minSide() {
 		maxS = m.minSide()
@@ -1313,6 +1345,7 @@ func (m *DockManager) OnMouseButton(e MouseEvent) bool {
 		if s, ok := m.gutterAt(e.X, e.Y); ok {
 			m.resizing = true
 			m.resizeSide = s
+			m.resizeStartSize = m.sizes[int(s)]
 			return true
 		}
 		// Кромка МЕЖДУ панелями столбика — она же ресайз, но меняет доли
@@ -1346,6 +1379,12 @@ func (m *DockManager) OnMouseButton(e MouseEvent) bool {
 		m.resizing = false
 		if m.capMgr != nil {
 			m.capMgr.ReleaseCapture()
+		}
+		// Одно событие на перетаскивание, по отпусканию: промежуточные размеры
+		// приложению не нужны, а поправка на каждом шаге дёргала бы разделитель.
+		s := m.resizeSide
+		if size := m.sizes[int(s)]; size != m.resizeStartSize && m.OnSideResized != nil {
+			m.OnSideResized(s, size)
 		}
 		return true
 	}
@@ -1909,8 +1948,26 @@ func (m *DockManager) RestoreLayout(data []byte) error {
 		}
 	}
 
+	// Сохранённая раньше раскладка могла сузить сторону сильнее, чем теперь
+	// позволяют её панели (GG-79).
+	for s := DockLeft; s <= DockRight; s++ {
+		if lo := m.minSideFor(s); m.sizes[int(s)] < lo {
+			m.sizes[int(s)] = lo
+		}
+	}
+
 	m.layout()
 	m.Invalidate()
+
+	// Размеры сторон пришли из сохранённых данных: приложению, подгоняющему
+	// сторону под содержимое, пора сделать это заново.
+	if m.OnSideResized != nil {
+		for s := DockLeft; s <= DockRight; s++ {
+			if len(m.dockedPanes(s)) > 0 {
+				m.OnSideResized(s, m.sizes[int(s)])
+			}
+		}
+	}
 
 	// Сообщаем о сменах состояния ПОСЛЕ раскладки: обработчик видит панель уже
 	// на новом месте и с посчитанными границами — как при Dock/Float/Close.
