@@ -327,3 +327,37 @@ func (l *Label) ApplyTheme(t *Theme) {
 		l.Background = t.PanelBG
 	}
 }
+
+// DesiredSize сообщает, сколько места просит подпись: ширину строки по
+// текущему шрифту и высоту этой строки (плюс собственные отступы).
+//
+// Нужен контейнеру, которому размер подписи не задан разметкой: Canvas
+// раньше подставлял такому ребёнку дефолтные 80×30, и длинный заголовок
+// обрезался по этой коробке. Текст с переносом (WrapText) размер не называет:
+// перенос считается от ширины, которую даёт разметка, — а в ноль по оси
+// контейнер подставит своё значение (см. desiredOf).
+func (l *Label) DesiredSize() (int, int) {
+	l.mu.RLock()
+	text := l.text
+	l.mu.RUnlock()
+	if text == "" || l.WrapText {
+		return 0, 0
+	}
+	fontSize := l.FontSize
+	if fontSize <= 0 {
+		fontSize = DefaultFontSizePt
+	}
+	w := MeasureUITextFont(text, fontSize, l.effectiveFont()) + l.PaddingX*2
+	h := int(fontSize*1.5+0.5) + l.PaddingY*2
+	// Размер, заданный разметкой, важнее измеренного: Width="520" у ячейки
+	// строки состояния — это просьба занять место, а не описка. По такой оси
+	// молчим, и контейнер возьмёт значение из разметки (см. desiredOf).
+	xw, xh := l.GetXAMLSize()
+	if xw > 0 {
+		w = 0
+	}
+	if xh > 0 {
+		h = 0
+	}
+	return w, h
+}

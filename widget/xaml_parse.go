@@ -71,6 +71,19 @@ func (e *xElement) bounds() image.Rectangle {
 	if h := xatoi(e.attr("Height")); h > 0 && bottom == 0 {
 		bottom = top + h
 	}
+	// Без Width/Right (Height/Bottom) размер по этой оси неизвестен — его
+	// назовёт родитель или сам виджет. Прямоугольник при этом обязан
+	// остаться ВЫРОЖДЕННЫМ В СВОЕЙ ТОЧКЕ: image.Rect нормализует границы, и
+	// Rect(left, top, 0, 0) превращался в (0,0)-(left,top) — виджет получал
+	// ширину, равную своей же координате Left, и высоту, равную Top. Подпись
+	// с Left=24 жила в прямоугольнике шириной 24: текст рисовался за его
+	// пределами и пропадал при любой частичной перерисовке.
+	if right < left {
+		right = left
+	}
+	if bottom < top {
+		bottom = top
+	}
 	return image.Rect(left, top, right, bottom)
 }
 

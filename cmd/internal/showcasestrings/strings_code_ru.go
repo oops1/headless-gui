@@ -127,6 +127,15 @@ var showcaseCodeRU = map[string]string{
 	"Window minimised to the tray (double left click on the icon restores it)": "Окно свёрнуто в трей (двойной левый клик по иконке — восстановить)",
 	"cannot load showcase.xaml: %v":                                            "ошибка загрузки showcase.xaml: %v",
 	"tray icon unavailable: %v":                                                "трей-иконка недоступна: %v",
+
+	// ── Вкладки «Панели инструментов», «Деревья и таблицы» ──
+	"Date: %s":                          "Дата: %s",
+	"ListView: row %d moved to %d":      "ListView: строка %d переставлена на %d",
+	"No date chosen":                    "Дата не выбрана",
+	"Row moved: %d → %d":                "Строка переставлена: %d → %d",
+	"Selected nodes: %d":                "Выбрано узлов: %d",
+	"Toolbar: %s":                       "Панель инструментов: %s",
+	"TreeView: %d node(s) selected":     "TreeView: выбрано узлов — %d",
 	"This dialog is 1000×700. Since v3.10 modal dialogs open in a separate native OS window, so they can be larger than the main window and can be dragged outside it.":                                                                                                                             "Этот диалог — 1000×700. Начиная с v3.10 модальные диалоги открываются в отдельном нативном окне ОС, поэтому могут быть больше главного окна и перетаскиваться за его пределы.",
 	"The multiline editor of the engine.\n\nWord wrapping, vertical scrolling with the wheel and PgUp/PgDn, selection with the mouse and Shift+arrows, Ctrl+arrows — by words, Ctrl+Home/End — document bounds, Ctrl+C/X/V and Ctrl+Z/Y.\n\nMixed content: English, Russian and digits 1234567890.": "Многострочный редактор движка.\n\nПеренос по словам, вертикальный скролл колесом и PgUp/PgDn, выделение мышью и Shift+стрелками, Ctrl+стрелки — по словам, Ctrl+Home/End — границы документа, Ctrl+C/X/V и Ctrl+Z/Y.\n\nMixed content: English, русский и цифры 1234567890.",
 	"This field is ReadOnly: the text can be selected and copied (Ctrl+C, context menu) but not edited.\n\nThe editor works headless too: input arrives through SendKeyEvent and layout is computed without a window.":                                                                              "Это поле ReadOnly: текст можно выделять и копировать (Ctrl+C, контекстное меню), но не редактировать.\n\nРедактор работает и в headless-режиме: ввод приходит через SendKeyEvent, компоновка считается без окна.",

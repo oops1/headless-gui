@@ -34,10 +34,15 @@ func desiredOf(w Widget) (int, int) {
 	if ds, ok := w.(DesiredSizer); ok {
 		dw, dh = ds.DesiredSize()
 	}
-	if xw, xh := xamlSizeOf(w); dw <= 0 && xw > 0 {
-		dw = xw
-	} else if xh > 0 && dh <= 0 {
-		dh = xh
+	// Оси независимы: ветка else оставляла высоту из разметки неучтённой,
+	// стоило ширине прийти оттуда же.
+	if xw, xh := xamlSizeOf(w); xw > 0 || xh > 0 {
+		if dw <= 0 && xw > 0 {
+			dw = xw
+		}
+		if dh <= 0 && xh > 0 {
+			dh = xh
+		}
 	}
 	b := w.Bounds()
 	if dw <= 0 {

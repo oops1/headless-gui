@@ -749,6 +749,18 @@ func addCanvasChild(cv *Canvas, child xElement, reg map[string]Widget, canvasOff
 	if desiredH <= 0 && props.Bottom < 0 {
 		desiredH = cw.Bounds().Dy()
 	}
+	// Размера нет ни в разметке, ни в границах — спрашиваем сам виджет.
+	// Без этого Canvas подставлял дефолтные 80×30, и подпись без Width
+	// обрезалась по чужой коробке.
+	if desiredW <= 0 || desiredH <= 0 {
+		dw, dh := desiredOf(cw)
+		if desiredW <= 0 && props.Right < 0 {
+			desiredW = dw
+		}
+		if desiredH <= 0 && props.Bottom < 0 {
+			desiredH = dh
+		}
+	}
 
 	// Не сбрасываем bounds — Canvas.layoutChild пересчитает позицию
 	// и сдвинет потомков на правильную дельту через shiftDescendants.

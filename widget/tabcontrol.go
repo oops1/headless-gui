@@ -44,11 +44,17 @@ type TabControl struct {
 	TabHeight int // высота полосы вкладок (по умолчанию 32)
 	TabPadH   int // горизонтальный padding текста вкладки
 
+	// Overflow — прятать не поместившиеся вкладки в меню под шевроном.
+	// Без этого заголовки просто уезжают за правый край полосы, и открыть
+	// такую вкладку мышью нечем (см. tabcontrol_overflow.go).
+	Overflow bool
+
 	mu       sync.Mutex
 	tabs     []TabItem
 	active   int // индекс активной вкладки
 	hoverIdx int // индекс вкладки под курсором
 	capMgr   CaptureManager // для инжекции в контент всех вкладок
+	menu     rowMenuHost    // меню не поместившихся вкладок (шеврон)
 
 	OnTabChange func(index int, header string)
 }
@@ -65,6 +71,7 @@ func NewTabControl(tabs ...TabItem) *TabControl {
 		AccentColor:   win10.Accent,
 		TabHeight:     32,
 		TabPadH:       16,
+		Overflow:      true,
 		tabs:          tabs,
 		active:        0,
 		hoverIdx:      -1,
@@ -363,11 +370,12 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 	tabs := tc.tabs
 	active := tc.active
 	hoverIdx := tc.hoverIdx
-	// Ширины считаем той же layoutTabs, что зовёт и хит-тест (см. её
-	// комментарий) — чтобы Draw рисовал ровно по тем координатам, по
-	// которым потом будут искать попадание клика.
-	widths := tc.layoutTabs()
+	// Раскладку полосы считаем той же tabSlots, что зовёт и хит-тест (см.
+	// комментарий layoutTabs) — чтобы Draw рисовал ровно по тем координатам,
+	// по которым потом будут искать попадание клика.
+	rects, hidden, chevron := tc.tabSlots()
 	tc.mu.Unlock()
+	_ = hidden // список не поместившихся нужен меню, не отрисовке
 
 	if len(tabs) == 0 {
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), tc.ContentBG)
@@ -392,23 +400,18 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 	// тем же mu, что видит и хит-тест).
 	var activeRect image.Rectangle
 	activeHeader := ""
-	tabX := b.Min.X
-	seenTab := false
+	prevMaxX := b.Min.X
 	for i, tab := range tabs {
-		// Скрытые вкладки не занимают места в полосе заголовков (ширина 0).
-		if tab.Hidden {
+		// Скрытые и не поместившиеся вкладки места в полосе не занимают.
+		tabRect := rects[i]
+		if tabRect.Empty() {
 			continue
 		}
-		// Разделитель группы вкладок (не перед первой видимой).
-		if tab.SeparatorBefore && seenTab {
-			if !st.Classic3D {
-				ctx.DrawVLine(tabX+tabSepW/2, b.Min.Y+6, tc.TabHeight-12, tc.TabBorder)
-			}
-			tabX += tabSepW
+		// Разделитель группы вкладок — в зазоре, оставленном раскладкой.
+		if !st.Classic3D && tabRect.Min.X-prevMaxX >= tabSepW {
+			ctx.DrawVLine(tabRect.Min.X-tabSepW/2, b.Min.Y+6, tc.TabHeight-12, tc.TabBorder)
 		}
-		seenTab = true
-		tabW := widths[i]
-		tabRect := image.Rect(tabX, b.Min.Y, tabX+tabW, b.Min.Y+tc.TabHeight)
+		prevMaxX = tabRect.Max.X
 
 		// Фон вкладки
 		switch {
@@ -421,7 +424,6 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 			if i == active {
 				activeRect = image.Rect(tabRect.Min.X, top, tabRect.Max.X, pageTop)
 				activeHeader = tab.Header
-				tabX += tabW
 				continue
 			}
 			tr2 := image.Rect(tabRect.Min.X, top+2, tabRect.Max.X, pageTop)
@@ -440,7 +442,6 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 			// Текст неактивного ярлыка — по центру компактного ярлыка.
 			ctx.DrawText(tab.Header, tabRect.Min.X+tc.TabPadH,
 				tr2.Min.Y+(tr2.Dy()-13)/2, tc.TabText)
-			tabX += tabW
 			continue
 		case i == active:
 			ctx.FillRect(tabRect.Min.X, tabRect.Min.Y, tabRect.Dx(), tabRect.Dy(), tc.TabActiveBG)
@@ -469,8 +470,11 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 		if !st.Classic3D && i < len(tabs)-1 {
 			ctx.DrawVLine(tabRect.Max.X-1, tabRect.Min.Y+4, tabRect.Dy()-8, tc.TabBorder)
 		}
+	}
 
-		tabX += tabW
+	// Шеврон «остальные вкладки» — в конце полосы, поверх заголовков.
+	if !st.Classic3D {
+		tc.drawTabChevron(ctx, chevron)
 	}
 
 	// Линия под вкладками (в классике её роль играет верхняя грань страницы).
@@ -524,22 +528,9 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 		// Корешок активной вкладки срастается со страницей (как в классике,
 		// где активный ярлык «прорезает» верхнюю грань): затираем линию под
 		// вкладками и верхнюю грань рамки в границах активного корешка.
-		if active >= 0 && active < len(widths) && widths[active] > 0 && !tabs[active].Hidden {
-			ax, seen := b.Min.X, false
-			for i := 0; i < active; i++ {
-				if tabs[i].Hidden {
-					continue
-				}
-				if tabs[i].SeparatorBefore && seen {
-					ax += tabSepW
-				}
-				seen = true
-				ax += widths[i]
-			}
-			if tabs[active].SeparatorBefore && seen {
-				ax += tabSepW
-			}
-			ctx.FillRect(ax+1, b.Min.Y+tc.TabHeight-1, widths[active]-2, 2, tc.TabActiveBG)
+		if active >= 0 && active < len(rects) && !rects[active].Empty() {
+			ar := rects[active]
+			ctx.FillRect(ar.Min.X+1, b.Min.Y+tc.TabHeight-1, ar.Dx()-2, 2, tc.TabActiveBG)
 		}
 	}
 
@@ -550,6 +541,11 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 	if !tc.IsEnabled() {
 		return false
+	}
+	// Открытое меню переполнения разбирает щелчки первым — в том числе мимо
+	// себя (тогда оно гасится).
+	if tc.menu.routeMouse(e) {
+		return true
 	}
 	if e.Button != MouseLeft || e.Pressed {
 		return false
@@ -563,26 +559,18 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 
 	tc.mu.Lock()
 
-	// Находим вкладку по X-позиции. Ширины считаем сами (layoutTabs), а не
-	// читаем поле, посчитанное в Draw: если этот кадр Draw не рисовался
-	// (пропуск поддерева движком — см. комментарий layoutTabs), кэш из
-	// Draw был бы устаревшим и клик ушёл бы мимо.
-	// Колбэк и layoutContent (сам берёт tc.mu) вызываем ПОСЛЕ Unlock.
-	widths := tc.layoutTabs()
+	// Раскладку считаем сами (tabSlots), а не читаем поле, посчитанное в
+	// Draw: если этот кадр Draw не рисовался (пропуск поддерева движком —
+	// см. комментарий layoutTabs), кэш из Draw был бы устаревшим и клик ушёл
+	// бы мимо. Колбэк и layoutContent (сам берёт tc.mu) зовём ПОСЛЕ Unlock.
+	rects, hidden, chevron := tc.tabSlots()
 	clicked, changed := -1, false
 	header := ""
-	tabX := b.Min.X
-	seenTab := false
 	for i := range tc.tabs {
-		if tc.tabs[i].Hidden {
+		if rects[i].Empty() {
 			continue
 		}
-		if tc.tabs[i].SeparatorBefore && seenTab {
-			tabX += tabSepW
-		}
-		seenTab = true
-		tabW := widths[i]
-		if e.X >= tabX && e.X < tabX+tabW {
+		if e.X >= rects[i].Min.X && e.X < rects[i].Max.X {
 			clicked = i
 			if tc.active != i {
 				tc.active = i
@@ -591,10 +579,17 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 			}
 			break
 		}
-		tabX += tabW
 	}
 	onTab := tc.OnTabChange
 	tc.mu.Unlock()
+
+	// Щелчок по шеврону — меню из не поместившихся вкладок.
+	if clicked < 0 && !chevron.Empty() && image.Pt(e.X, e.Y).In(chevron) {
+		if m := tc.menu.build(e.X, e.Y, tc.overflowTabItems(hidden)); m != nil {
+			m.Show(chevron.Min.X, chevron.Max.Y)
+		}
+		return true
+	}
 
 	if clicked < 0 {
 		return false
@@ -612,6 +607,9 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 
 // OnMouseMove обрабатывает hover по вкладкам.
 func (tc *TabControl) OnMouseMove(x, y int) {
+	if tc.menu.routeMove(x, y) {
+		return
+	}
 	b := tc.bounds
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
@@ -629,24 +627,16 @@ func (tc *TabControl) OnMouseMove(x, y int) {
 		return
 	}
 
-	// Те же ширины, что и в OnMouseButton/Draw — см. комментарий layoutTabs.
-	widths := tc.layoutTabs()
-	tabX := b.Min.X
-	seenTab := false
-	for i, tab := range tc.tabs {
-		if tab.Hidden {
+	// Та же раскладка, что и в OnMouseButton/Draw — см. комментарий layoutTabs.
+	rects, _, _ := tc.tabSlots()
+	for i := range tc.tabs {
+		if rects[i].Empty() {
 			continue
 		}
-		if tab.SeparatorBefore && seenTab {
-			tabX += tabSepW
-		}
-		seenTab = true
-		tabW := widths[i]
-		if x >= tabX && x < tabX+tabW {
+		if x >= rects[i].Min.X && x < rects[i].Max.X {
 			tc.hoverIdx = i
 			return
 		}
-		tabX += tabW
 	}
 }
 

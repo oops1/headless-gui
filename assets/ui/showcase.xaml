@@ -1044,6 +1044,147 @@
             </Canvas>
         </TabItem>
 
+        <TabItem Header="{Loc Toolbars}">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="{Loc ToolBar — buttons, a split button and a stretch}"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="52" Width="1010" Height="36" TextWrapping="Wrap" Foreground="#9399B2"
+                           Text="{Loc A stretch pushes the right group to the edge. The split button runs its action, the arrow opens the menu; the whole Git-Flow button is a menu. Narrow the window and the extra buttons go into the chevron menu.}"/>
+
+                <ToolBarTray Left="24" Top="96" Width="1010" Height="44" Background="#232338">
+                    <ToolBar Name="tbMain" Width="1010" Height="44">
+                        <Button Name="tbPull" Content="{Loc Pull}" Icon="img/pull.png" ToolTip="{Loc Fetch and merge}"/>
+                        <SplitButton Name="tbPush" Content="{Loc Push}" Icon="img/push.png">
+                            <MenuItem Header="{Loc Push tags}"/>
+                            <MenuItem Header="{Loc Force push}"/>
+                        </SplitButton>
+                        <Separator/>
+                        <MenuButton Name="tbFlow" Content="{Loc Git-Flow}" Icon="img/branch.png">
+                            <MenuItem Header="{Loc Start feature}"/>
+                            <MenuItem Header="{Loc Finish release}"/>
+                        </MenuButton>
+                        <ToolBarStretch/>
+                        <Button Name="tbSettings" Content="{Loc Settings}" Icon="img/commit.png"/>
+                    </ToolBar>
+                </ToolBarTray>
+
+                <TextBlock Left="24" Top="152" Height="20" Foreground="#9399B2" Text="{Loc The same panel in icons-only mode:}"/>
+                <ToolBar Name="tbIcons" Left="24" Top="184" Width="180" Height="40" IconsOnly="True" Background="#232338">
+                    <Button Content="{Loc Pull}" Icon="img/pull.png" ToolTip="{Loc Fetch and merge}"/>
+                    <Button Content="{Loc Push}" Icon="img/push.png"/>
+                    <Separator/>
+                    <Button Content="{Loc Log}" Icon="img/log.png"/>
+                </ToolBar>
+
+                <TextBlock Left="24" Top="264" Style="{StaticResource H324}"
+                           Text="{Loc DockPanel — the layout container: children stick to the sides}"/>
+                <Separator Left="24" Top="288" Width="1010" Height="1" Background="#313244"/>
+                <DockPanel Name="dockPanelDemo" Left="24" Top="304" Width="620" Height="200" Background="#232338">
+                    <Label DockPanel.Dock="Top" Height="28" Text="{Loc Top strip}" Foreground="#89B4FA" Background="#28283E"/>
+                    <Label DockPanel.Dock="Bottom" Height="28" Text="{Loc Bottom strip}" Foreground="#A6E3A1" Background="#28283E"/>
+                    <Label DockPanel.Dock="Left" Width="160" Text="{Loc Left column}" Foreground="#F9E2AF" Background="#2A2A40"/>
+                    <Label Text="{Loc The last child fills the rest}" Foreground="#CDD6F4"/>
+                </DockPanel>
+
+                <TextBlock Left="676" Top="304" Style="{StaticResource H324}" Text="{Loc Image — a picture from a file}"/>
+                <Image Left="676" Top="336" Width="64" Height="64" Source="img/branch.png" Stretch="Uniform"/>
+                <Image Left="756" Top="336" Width="96" Height="64" Source="img/commit.png" Stretch="Uniform"/>
+
+                <TextBlock Left="24" Top="520" Style="{StaticResource H324}"
+                           Text="{Loc StatusBar — the strip along the bottom of a window}"/>
+                <Separator Left="24" Top="544" Width="1010" Height="1" Background="#313244"/>
+                <StatusBar Name="statusDemo" Left="24" Top="560" Width="1010" Height="30" Background="#232338">
+                    <Label Name="tbStatus" Width="520" Height="18" Text="{Loc Ready}" Foreground="#CDD6F4"/>
+                    <Label Width="200" Height="18" Text="{Loc UTF-8}" Foreground="#9399B2"/>
+                </StatusBar>
+            </Canvas>
+        </TabItem>
+
+        <TabItem Header="{Loc Trees and tables}">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="{Loc TreeView, DataGrid, a reorderable list and a date picker}"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="52" Width="1010" Height="36" TextWrapping="Wrap" Foreground="#9399B2"
+                           Text="{Loc In the tree Ctrl adds a node to the set and Shift takes a range; rows of the list are dragged by the mouse. The table is bound to the same collection as the ItemsControl on the «3.2.4» tab.}"/>
+
+                <TreeView Name="treeDemo" Left="24" Top="96" Width="320" Height="330"
+                          SelectionMode="Extended" ShowIndentGuides="True">
+                    <TreeViewItem Header="{Loc Branches}" IsExpanded="True">
+                        <TreeViewItem Header="main"/>
+                        <TreeViewItem Header="develop"/>
+                        <TreeViewItem Header="feature/login"/>
+                        <TreeViewItem Header="feature/export"/>
+                    </TreeViewItem>
+                    <TreeViewItem Header="{Loc Tags}" IsExpanded="True">
+                        <TreeViewItem Header="v3.21.0"/>
+                        <TreeViewItem Header="v3.20.0"/>
+                    </TreeViewItem>
+                </TreeView>
+                <Label Name="treeSelStatus" Left="24" Top="434" Width="320" Height="18"
+                       Text="{Loc Ctrl and Shift select several nodes}" Foreground="#9399B2"/>
+
+                <TextBlock Left="368" Top="96" Foreground="#9399B2" Text="{Loc DataGrid — sortable table}"/>
+                <DataGrid Name="gridDemo" Left="368" Top="120" Width="420" Height="200"
+                          ItemsSource="{Binding Items}" AutoGenerateColumns="False"
+                          CanUserSortColumns="True" IsReadOnly="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="{Loc Side}" Binding="{Binding Side}" Width="90"/>
+                        <DataGridTextColumn Header="{Loc Symbol}" Binding="{Binding Symbol}" Width="150"/>
+                        <DataGridTextColumn Header="{Loc Price}" Binding="{Binding Price}" Width="150"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <TextBlock Left="368" Top="336" Foreground="#9399B2" Text="{Loc Drag the rows to reorder them}"/>
+                <ListView Name="listReorder" Left="368" Top="360" Width="420" Height="120" Reorderable="True">
+                    <ListViewItem Content="{Loc Pull}"/>
+                    <ListViewItem Content="{Loc Push}"/>
+                    <ListViewItem Content="{Loc Log}"/>
+                    <ListViewItem Content="{Loc Settings}"/>
+                </ListView>
+                <Label Name="listReorderStatus" Left="368" Top="488" Width="420" Height="18" Text="" Foreground="#9399B2"/>
+
+                <TextBlock Left="812" Top="96" Foreground="#9399B2" Text="{Loc DatePicker — a date with a calendar}"/>
+                <DatePicker Name="dateDemo" Left="812" Top="120" Width="222" Height="32"/>
+                <Label Name="dateStatus" Left="812" Top="162" Width="222" Height="18" Text="" Foreground="#9399B2"/>
+
+                <TextBlock Left="812" Top="200" Foreground="#9399B2" Text="{Loc GridSplitter — a draggable column border}"/>
+                <Grid Name="gridSplitDemo" Left="812" Top="224" Width="222" Height="256" Background="#232338">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="100"/>
+                        <ColumnDefinition Width="6"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Label Grid.Column="0" Text="{Loc Left}" Foreground="#89B4FA" Background="#28283E"/>
+                    <GridSplitter Grid.Column="1" Background="#45475A"/>
+                    <Label Grid.Column="2" Text="{Loc Right}" Foreground="#A6E3A1" Background="#2A2A40"/>
+                </Grid>
+            </Canvas>
+        </TabItem>
+
+        <TabItem Header="{Loc Compare}">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="{Loc DiffView — two versions side by side}"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="52" Width="1010" Foreground="#9399B2"
+                           Text="{Loc Both panes are editors: caret, selection, undo and redo. The overview bar on the right shows every change of the file.}"/>
+                <DiffView Name="diffDemo" Left="24" Top="84" Width="1010" Height="280"
+                          LeftFile="diff/old.txt" RightFile="diff/new.txt"
+                          ReadOnlyLeft="True" ContextLines="3"/>
+
+                <TextBlock Left="24" Top="384" Style="{StaticResource H324}"
+                           Text="{Loc MergeView — a three-way merge}"/>
+                <Separator Left="24" Top="408" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="420" Width="1010" Foreground="#9399B2"
+                           Text="{Loc Ours, base and theirs are on top, the result is at the bottom: pick a side for a conflict and the result is assembled without git markers.}"/>
+                <MergeView Name="mergeDemo" Left="24" Top="452" Width="1010" Height="290"
+                           BaseFile="diff/base.txt" OursFile="diff/ours.txt" TheirsFile="diff/theirs.txt"
+                           ShowBase="True"/>
+            </Canvas>
+        </TabItem>
+
         <TabItem Header="{Loc Tabbed window}">
             <Canvas Width="1060" Height="770" Background="#1E1E32">
                 <TextBlock Left="24" Top="16" Style="{StaticResource H324}"

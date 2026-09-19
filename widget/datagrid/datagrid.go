@@ -689,14 +689,21 @@ func (dg *DataGrid) SetItemsSource(oc *ObservableCollection) {
 			// выделение выглядит как «его и не было».
 			had := len(dg.selectedRows) > 0 || dg.focusRow >= 0
 			dg.rebuildSortedIdx()
+			// Своё уведомление забираем с собой: общую очередь трогать
+			// нельзя — обработчик зовут из горутины, изменившей коллекцию,
+			// а в очереди лежат действия UI-потока (см.
+			// selectionChangedFnLocked).
+			var notify func()
 			if drop && had {
 				dg.selectedRows = make(map[int]bool)
 				dg.focusRow, dg.anchorRow = -1, -1
 				dg.markFullDirty()
-				dg.queueSelectionChangedLocked(-1)
+				notify = dg.selectionChangedFnLocked(-1)
 			}
 			dg.mu.Unlock()
-			dg.firePending()
+			if notify != nil {
+				notify()
+			}
 			dg.invalidateCellCache()
 		})
 
@@ -2317,8 +2324,24 @@ func (dg *DataGrid) selectRow(row int, shift, ctrl bool) {
 // коллекции. Раньше событие слал только клик, и приложение не узнавало ни о
 // программной смене, ни о том, что выделенной строки больше нет (GG-81).
 func (dg *DataGrid) queueSelectionChangedLocked(row int) {
+	if f := dg.selectionChangedFnLocked(row); f != nil {
+		dg.pending = append(dg.pending, f)
+	}
+}
+
+// selectionChangedFnLocked готовит вызов OnSelectionChanged, но никуда его не
+// кладёт: колбэк забирает тот, кто его и выполнит.
+//
+// Нужен тому, кто работает НЕ в UI-потоке — обработчику изменения коллекции.
+// Общая очередь ему не годится: firePending забирает её целиком, вместе с
+// чужими отложенными действиями (запись отредактированной ячейки в модель,
+// поставленную UI-потоком). Фоновая горутина выполняла бы их у себя, пока
+// UI-поток читает те же поля в Draw — гонка на полях элемента модели.
+//
+// Вызывать под dg.mu.
+func (dg *DataGrid) selectionChangedFnLocked(row int) func() {
 	if dg.OnSelectionChanged == nil {
-		return
+		return nil
 	}
 	var item interface{}
 	if row >= 0 && row < len(dg.sortedIdx) && dg.itemsSource != nil {
@@ -2326,7 +2349,7 @@ func (dg *DataGrid) queueSelectionChangedLocked(row int) {
 	}
 	cb := dg.OnSelectionChanged
 	ev := SelectionChangedEvent{SelectedIndex: row, SelectedItem: item}
-	dg.pending = append(dg.pending, func() { cb(ev) })
+	return func() { cb(ev) }
 }
 
 // ─── Editing ───────────────────────────────────────────────────────────────
