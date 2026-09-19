@@ -1768,6 +1768,13 @@ func buildXAMLTreeView(el xElement, reg map[string]Widget, parentOff image.Point
 		tw.Tree.IndentSize = is
 	}
 
+	// SelectionMode="Extended" — выбор набора узлов (GG-86).
+	if sm := el.attr("SelectionMode"); sm != "" {
+		if strings.EqualFold(sm, "extended") || strings.EqualFold(sm, "multiple") {
+			tw.Tree.SelectionMode = tvPkg.SelectionExtended
+		}
+	}
+
 	// IsReadOnly
 	if strings.EqualFold(el.attr("IsReadOnly"), "true") {
 		tw.Tree.IsReadOnly = true
