@@ -572,7 +572,8 @@ Mapping of XAML tags to Go types with key attributes.
 | `<Window>` | `Window` | `Title`, `Width`, `Height`, `WindowStyle`, `ResizeMode`, `MainWindow`, `TrayIcon`, `TrayTooltip` (see "Tray from XAML") |
 | `<TrayMenu>` | (child of `<Window>`) | tray context menu; `<MenuItem>`/`<Separator>` children (see "Tray from XAML") |
 | `<MenuItem>` | (nested in MenuBar) | `Header`, `Items` |
-| `<TreeView>` | `TreeViewWidget` | `Items`, `ItemHeight`, `ShowIndentGuides` |
+| `<TreeView>` | `TreeViewWidget` | `Items`, `ItemHeight`, `ShowIndentGuides`, `SelectionMode` (Single/Extended) |
+| `<Stretch>`, `<ToolBarStretch>` | `Stretch` | `Weight`; takes the free space in `StackPanel`/`ToolBar` |
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
 | `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
@@ -835,6 +836,16 @@ pull.OpenMenu(); pull.CloseMenu(); pull.IsMenuOpen()
 // Keys: ↓ opens; Enter/Space = action (split) or menu (plain). In ToolBar width
 // includes the arrow, IconsOnly applies, overflow turns it into a submenu.
 // XAML: <SplitButton Content="Pull"><MenuItem Header="Fetch"/></SplitButton>
+
+// Stretch (v3.22): takes the free space in StackPanel/ToolBar — the items after
+// it go to the right edge (in a column, to the bottom).
+tb.AddStretch(); sp.AddStretch(); widget.NewStretchWeighted(2)
+// XAML: <ToolBarStretch/> or <Stretch Weight="2"/>
+
+// ListView reorder (v3.22): drag rows; the drag starts after a few pixels.
+lv.Reorderable = true
+lv.OnReorder = func(from, to int) {} // to = index AFTER the move
+lv.SetSelected(i)      // now fires OnSelect (WPF-like); SetSelectedQuiet stays silent
 // NOTE: *MenuButton embeds *Button but is a different type — w.(*widget.Button) misses it.
 
 // Tree drag & drop (off by default — dragging changes what a click does).
@@ -1054,6 +1065,14 @@ DataGrid.OnRowEditEnding func(rowIndex int, item interface{})
 // Selected item changed
 TreeView.OnSelectedItemChanged func(e treeview.SelectedItemChangedEvent)
 // SelectedItemChangedEvent.SelectedItem (*TreeViewItem)
+
+// Multi-selection (v3.22): Ctrl toggles, Shift takes a range, Shift+↑/↓ extends.
+tree.SelectionMode = treeview.SelectionExtended // XAML: SelectionMode="Extended"
+tree.SelectedItems() []*treeview.TreeViewItem; tree.SetSelectedItems(items)
+tree.IsItemSelected(item) bool
+tree.OnSelectionChanged = func(e treeview.SelectionChangedEvent) {} // e.Items, e.Current
+// A plain click on an already selected node keeps the set (drag / group menu).
+// Highlight is drawn from TreeViewItem.IsSelected, not from one selectedItem.
 
 // Node expanded
 TreeView.OnExpanded func(e treeview.ExpandedEvent)

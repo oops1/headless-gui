@@ -401,6 +401,19 @@ The menu opens below the button, pressing the arrow again closes it, ↓ opens i
 from the keyboard. In an overflowing toolbar such a button becomes a submenu. In
 markup — `<SplitButton>` and `<MenuButton>` with nested `<MenuItem>`.
 
+A stretch spreads the bar: everything after it goes to the right edge. It works
+in `ToolBar` and in `StackPanel` — in a column, by height:
+
+```go
+tb.AddChild(pull)
+tb.AddStretch()          // in markup: <ToolBarStretch/> or <Stretch/>
+tb.AddChild(settings)    // pinned to the right edge
+
+sp.AddChild(widget.NewStretchWeighted(2)) // several stretches split the rest
+```
+
+If no space is left, a stretch simply takes none.
+
 In XAML — `<ToolBarTray>` and `<ToolBar>` with `IconsOnly`, `Overflow` and the
 `<Separator/>` element:
 
@@ -605,11 +618,18 @@ lv := widget.NewListView("Item 1", "Item 2", "Item 3")
 
 lv.AddItem("More")
 lv.Clear()
-lv.SetSelected(0)
+lv.SetSelected(0)        // fires OnSelect; silently — SetSelectedQuiet
 lv.Selected() int        // -1 if no selection
 lv.SelectedText() string
 lv.OnSelect = func(index int, text string) { ... }
+
+lv.Reorderable = true    // rows can be reordered by dragging
+lv.OnReorder = func(from, to int) { ... } // to — index AFTER the move
 ```
+
+A drag starts once the mouse has travelled a few pixels: a short press stays a
+plain click. An insertion line shows where the row will land, and the selection
+follows the row. In markup — `<ListView Reorderable="True">`.
 
 In XAML:
 
@@ -866,6 +886,13 @@ tw.Tree.ClearRoots()
 tw.Tree.Roots() []*TreeViewItem
 tw.Tree.SelectedItem() *TreeViewItem
 tw.Tree.SetSelectedItem(item)
+
+// A set of nodes (XAML: <TreeView SelectionMode="Extended">)
+tw.Tree.SelectionMode = treeview.SelectionExtended
+tw.Tree.SelectedItems() []*TreeViewItem
+tw.Tree.SetSelectedItems(items)
+tw.Tree.IsItemSelected(item) bool
+
 tw.Tree.ExpandItem(item)
 tw.Tree.CollapseItem(item)
 tw.Tree.ToggleExpand(item)
@@ -877,12 +904,20 @@ Events:
 tw.Tree.OnSelect = func(item *treeview.TreeViewItem) { ... }
 
 tw.Tree.OnSelectedItemChanged = func(e treeview.SelectedItemChangedEvent) {
-    // e.OldItem, e.NewItem
+    // e.OldItem, e.NewItem — the selection cursor
+}
+tw.Tree.OnSelectionChanged = func(e treeview.SelectionChangedEvent) {
+    // e.Items — the whole set, e.Current — the node under the cursor
 }
 tw.Tree.OnExpanded = func(e treeview.ExpandedEvent) { ... }
 tw.Tree.OnCollapsed = func(e treeview.CollapsedEvent) { ... }
 tw.Tree.OnItemInvoked = func(e treeview.ItemInvokedEvent) { ... } // double-click
 ```
+
+In `SelectionExtended` Ctrl adds and removes a node, Shift takes the range from
+the anchor, Shift+↑/↓ extends it from the keyboard. A plain click on an already
+selected node keeps the set — that is where a drag or a context menu for the
+whole group starts. Highlighting is drawn from `TreeViewItem.IsSelected`.
 
 Data Binding with HierarchicalDataTemplate:
 
@@ -1459,7 +1494,8 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `NumericUpDown`, `IntegerUpDown`, `DoubleUpDown` | NumericUpDown | `Minimum`, `Maximum`, `Increment`, `Decimals`, `Value` |
 | `ToggleSwitch` | ToggleSwitch | `Content`, `IsOn` |
 | `ScrollViewer` | ScrollView | `ContentHeight`, `Background` |
-| `ListView`, `ListBox` | ListView | `Items`, `SelectedIndex`, `ItemHeight`, child `<ListViewItem>` |
+| `ListView`, `ListBox` | ListView | `Items`, `SelectedIndex`, `ItemHeight`, `Reorderable`, child `<ListViewItem>` |
+| `Stretch`, `ToolBarStretch` | Stretch | `Weight`; takes the free space in `StackPanel` and `ToolBar` |
 | `VirtualizingItemsControl` | VirtualizingItemsControl | `ItemHeight`, `Buffer`, `ItemsSource`, `VirtualizingItemsControl.ItemTemplate` |
 | `WrapPanel` | WrapPanel | `Spacing`, `Orientation` |
 | `UniformGrid` | UniformGrid | `Rows`, `Columns`, `Spacing` |
@@ -1469,7 +1505,7 @@ For Grid children, coordinates are set by the grid via `Grid.Row` / `Grid.Column
 | `Image` | Image | `Source`, `Stretch` (Fill/Uniform/None) |
 | `PopupMenu`, `ContextMenu` | PopupMenu | child `<MenuItem Text="..." Separator="True" Disabled="True"/>` |
 | `Menu`, `MenuBar`, `MainMenu` | MenuBar | child `<MenuItem Header="...">` with nested `<MenuItem>` |
-| `TreeView` | TreeViewWidget | `IndentSize`, `IsReadOnly`, `ShowIndentGuides`, child `<TreeViewItem>`, `<TreeView.ItemTemplate>` |
+| `TreeView` | TreeViewWidget | `IndentSize`, `IsReadOnly`, `ShowIndentGuides`, `SelectionMode`, child `<TreeViewItem>`, `<TreeView.ItemTemplate>` |
 | `TreeViewItem` | TreeViewItem | `Header`, `IsExpanded`, `Icon`, `IsEnabled` |
 | `HierarchicalDataTemplate` | HierarchicalDataTemplate | `ItemsSource="{Binding ...}"`, child `<StackPanel>` with `<Image>` + `<TextBlock>` |
 | `DataGrid` | DataGridWidget | `AutoGenerateColumns`, `IsReadOnly`, `CanUserSortColumns`, `CanUserResizeColumns`, `SelectionMode`, `RowHeight`, `HeaderHeight` |
