@@ -1902,6 +1902,23 @@ tc.ClearTabs()                   // remove all
 
 `TabItem` gained a `Hidden bool` field.
 
+### Layout fixes — v3.23
+
+Two defects that only showed on a SECOND layout pass (switching a tab, docking
+a pane), so the first paint looked right:
+
+- `ToolBar` and `DockPane` lay their content out in their own `SetBounds`, but
+  were missing from `HasOwnLayout` — the parent shifted their descendants once
+  more and the shift doubled. Toolbar buttons drew on top of the next heading.
+- An element with no `Width`/`Height` got `Rect(Left, Top, 0, 0)`, which
+  `image.Rect` normalises to `(0,0)-(Left,Top)`: its size became its own
+  coordinates. A label with `Left="24"` lived in a 24px-wide box — the text
+  drew outside it and was clipped away by any partial repaint.
+
+`Label` now reports `DesiredSize()` (measured line), and Canvas asks
+`desiredOf` instead of falling back to 80×30. A size given in the markup still
+wins: `Label` stays silent on an axis where `Width`/`Height` is set.
+
 ### TabControl overflow — v3.23
 
 Headers that do not fit the strip used to run off the right edge: the tab
