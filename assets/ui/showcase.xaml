@@ -1069,27 +1069,27 @@
                     </ToolBar>
                 </ToolBarTray>
 
-                <TextBlock Left="24" Top="156" Foreground="#9399B2" Text="{Loc The same panel in icons-only mode:}"/>
-                <ToolBar Name="tbIcons" Left="24" Top="180" Width="300" Height="40" IconsOnly="True" Background="#232338">
+                <TextBlock Left="24" Top="152" Height="20" Foreground="#9399B2" Text="{Loc The same panel in icons-only mode:}"/>
+                <ToolBar Name="tbIcons" Left="24" Top="184" Width="180" Height="40" IconsOnly="True" Background="#232338">
                     <Button Content="{Loc Pull}" Icon="img/pull.png" ToolTip="{Loc Fetch and merge}"/>
                     <Button Content="{Loc Push}" Icon="img/push.png"/>
                     <Separator/>
                     <Button Content="{Loc Log}" Icon="img/log.png"/>
                 </ToolBar>
 
-                <TextBlock Left="24" Top="248" Style="{StaticResource H324}"
+                <TextBlock Left="24" Top="264" Style="{StaticResource H324}"
                            Text="{Loc DockPanel — the layout container: children stick to the sides}"/>
-                <Separator Left="24" Top="272" Width="1010" Height="1" Background="#313244"/>
-                <DockPanel Name="dockPanelDemo" Left="24" Top="288" Width="620" Height="200" Background="#232338">
+                <Separator Left="24" Top="288" Width="1010" Height="1" Background="#313244"/>
+                <DockPanel Name="dockPanelDemo" Left="24" Top="304" Width="620" Height="200" Background="#232338">
                     <Label DockPanel.Dock="Top" Height="28" Text="{Loc Top strip}" Foreground="#89B4FA" Background="#28283E"/>
                     <Label DockPanel.Dock="Bottom" Height="28" Text="{Loc Bottom strip}" Foreground="#A6E3A1" Background="#28283E"/>
                     <Label DockPanel.Dock="Left" Width="160" Text="{Loc Left column}" Foreground="#F9E2AF" Background="#2A2A40"/>
                     <Label Text="{Loc The last child fills the rest}" Foreground="#CDD6F4"/>
                 </DockPanel>
 
-                <TextBlock Left="676" Top="288" Style="{StaticResource H324}" Text="{Loc Image — a picture from a file}"/>
-                <Image Left="676" Top="320" Width="64" Height="64" Source="img/branch.png" Stretch="Uniform"/>
-                <Image Left="756" Top="320" Width="96" Height="64" Source="img/commit.png" Stretch="Uniform"/>
+                <TextBlock Left="676" Top="304" Style="{StaticResource H324}" Text="{Loc Image — a picture from a file}"/>
+                <Image Left="676" Top="336" Width="64" Height="64" Source="img/branch.png" Stretch="Uniform"/>
+                <Image Left="756" Top="336" Width="96" Height="64" Source="img/commit.png" Stretch="Uniform"/>
 
                 <TextBlock Left="24" Top="520" Style="{StaticResource H324}"
                            Text="{Loc StatusBar — the strip along the bottom of a window}"/>
