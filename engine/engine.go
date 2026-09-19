@@ -90,7 +90,12 @@ type Engine struct {
 	// вызываемый в конце CloseModal (см. modalhost.go). hostMu защищает оба.
 	modalHost     ModalHost
 	onModalClosed func(widget.ModalWidget)
-	hostMu        sync.Mutex
+	// modalClosedSubs — подписчики AddOnModalClosed. Слот onModalClosed занят
+	// хостом нативных окон, и приложению его не хватало: второй подписчик
+	// молча вытеснял первого (GG-82).
+	modalClosedSubs []modalClosedSub
+	modalSubNextID  int
+	hostMu          sync.Mutex
 
 	// popupSink — опциональный хост popup-оверлеев (window.popupHost). Если
 	// задан, открытые оверлеи (dropdown/меню) выносятся в собственные нативные

@@ -445,6 +445,15 @@ func (h *dialogHost) teardown(hm *hostedModal) {
 			native.Close()
 		}
 	})
+
+	// Диалог в собственном окне ОС закрывается мимо CloseModal главного
+	// движка: его закрывает вторичный движок окна. Без этого приложение не
+	// узнавало о закрытии — в том числе крестиком окна и Alt+F4 (GG-82).
+	if n, ok := h.parent.eng.(interface {
+		NotifyModalClosed(m widget.ModalWidget)
+	}); ok {
+		h.parent.post(func() { n.NotifyModalClosed(hm.dlg) })
+	}
 }
 
 // removeLocked убирает hm из стека (при удержанном h.mu).
