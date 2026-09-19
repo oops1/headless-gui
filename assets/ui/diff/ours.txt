@@ -1,0 +1,6 @@
+[server]
+host = localhost
+port = 9090
+timeout = 30
+tls = off
+workers = 4
