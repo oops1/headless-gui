@@ -3,6 +3,7 @@ package window
 import (
 	"image"
 	"sync"
+	"sync/atomic"
 
 	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/widget"
@@ -56,6 +57,25 @@ type hostedPopup struct {
 	img    *image.RGBA     // последний контент (физические пиксели)
 	w, h   int             // физический размер контента
 	closed bool
+
+	// origin — физическое начало координат оверлея (x в старшем слове, y в
+	// младшем). Ввод попапа читает его на потоке окна, и ждать рендер он не
+	// должен: замок хоста держит горутина движка, а её нативный вызов может
+	// ждать разбора сообщений этим самым потоком (GG-80).
+	origin atomic.Uint64
+}
+
+// setOrigin запоминает начало координат оверлея в физических пикселях.
+func (hp *hostedPopup) setOrigin(rect image.Rectangle, scale float64) {
+	x := int32(float64(rect.Min.X)*scale + 0.5)
+	y := int32(float64(rect.Min.Y)*scale + 0.5)
+	hp.origin.Store(uint64(uint32(x))<<32 | uint64(uint32(y)))
+}
+
+// originXY возвращает начало координат оверлея без блокировок.
+func (hp *hostedPopup) originXY() (int, int) {
+	v := hp.origin.Load()
+	return int(int32(v >> 32)), int(int32(v))
 }
 
 // newPopupHost создаёт хост попапов для окна-носителя. in — очередь ввода
@@ -82,14 +102,31 @@ func newPopupHost(carrier NativeWindow, inv uiThreadInvoker, eng popupEngine, sc
 	}
 }
 
+// blitJob — окно и кадр, которые нужно положить в него после снятия замка.
+type blitJob struct {
+	native NativeWindow
+	img    *image.RGBA
+}
+
 // apply — engine.PopupSink. Создаёт/обновляет/закрывает окна-попапы по составу
 // frames. Вызывается из рендер-цикла движка (не UI-поток); нативные операции
-// создания/позиционирования маршалятся на UI-поток носителя, блиты
-// потокобезопасны.
+// создания и позиционирования маршалятся на UI-поток носителя.
+//
+// Под замком хоста — только состав окон; всё нативное выполняется ПОСЛЕ него
+// (GG-80). Блит перестал быть чистой записью пикселей: с выкройкой окна по
+// закрашенной части он зовёт SetWindowRgn, а тот синхронно шлёт сообщения окну
+// и ждёт, пока их разберёт поток окна. Если этот поток в тот же момент ждёт
+// замок хоста — в обработчике движения мыши над попапом, — оба ждут друг друга
+// навсегда: окно «не отвечает», Windows предлагает закрыть программу.
 func (h *popupHost) apply(frames []engine.PopupFrame) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	var (
+		created []uintptr
+		moved   []uintptr
+		blits   []blitJob
+		closed  []NativeWindow
+	)
 
+	h.mu.Lock()
 	seen := make(map[uintptr]bool, len(frames))
 	for _, f := range frames {
 		seen[f.ID] = true
@@ -98,40 +135,54 @@ func (h *popupHost) apply(frames []engine.PopupFrame) {
 
 		hp := h.windows[f.ID]
 		if hp == nil {
-			// Новый оверлей — создаём окно на UI-потоке.
-			h.windows[f.ID] = &hostedPopup{rect: f.Rect, img: f.Img, w: pw, h: ph}
-			id := f.ID
-			h.invoker.InvokeOnUIThread(func() { h.createPopup(id) })
+			// Новый оверлей — окно создаётся на UI-потоке.
+			hp = &hostedPopup{rect: f.Rect, img: f.Img, w: pw, h: ph}
+			hp.setOrigin(f.Rect, h.scale)
+			h.windows[f.ID] = hp
+			created = append(created, f.ID)
 			continue
 		}
 
-		moved := hp.rect != f.Rect || hp.w != pw || hp.h != ph
+		move := hp.rect != f.Rect || hp.w != pw || hp.h != ph
 		hp.rect = f.Rect
 		hp.img = f.Img
 		hp.w = pw
 		hp.h = ph
+		hp.setOrigin(f.Rect, h.scale)
 		if hp.native == nil {
 			continue // окно ещё поднимается — createPopup возьмёт свежие rect/img
 		}
-		if moved {
-			id := f.ID
-			h.invoker.InvokeOnUIThread(func() { h.repositionAndBlit(id) })
+		if move {
+			moved = append(moved, f.ID)
 		} else {
-			blitPopup(hp.native, hp.img) // блит потокобезопасен
+			blits = append(blits, blitJob{hp.native, hp.img})
 		}
 	}
 
-	// Закрываем окна оверлеев, которых больше нет в кадре.
+	// Окна оверлеев, которых больше нет в кадре.
 	for id, hp := range h.windows {
 		if seen[id] {
 			continue
 		}
 		hp.closed = true
-		native := hp.native
-		delete(h.windows, id)
-		if native != nil {
-			h.invoker.InvokeOnUIThread(func() { native.Close() })
+		if hp.native != nil {
+			closed = append(closed, hp.native)
 		}
+		delete(h.windows, id)
+	}
+	h.mu.Unlock()
+
+	for _, id := range created {
+		h.invoker.InvokeOnUIThread(func() { h.createPopup(id) })
+	}
+	for _, id := range moved {
+		h.invoker.InvokeOnUIThread(func() { h.repositionAndBlit(id) })
+	}
+	for _, j := range blits {
+		blitPopup(j.native, j.img)
+	}
+	for _, native := range closed {
+		h.invoker.InvokeOnUIThread(func() { native.Close() })
 	}
 }
 
@@ -162,7 +213,7 @@ func (h *popupHost) createPopup(id uintptr) {
 	}
 	h.positionPopup(native, carrier, rect, pw, ph)
 	blitPopup(native, img)
-	h.setupPopupInput(native, id)
+	h.setupPopupInput(native, hp)
 	// Вторичное окно с собственным соединением (X11) — запускаем его насос событий.
 	if ep, ok := native.(eventPumper); ok {
 		ep.StartEventPump()
@@ -265,22 +316,14 @@ func (h *popupHost) positionPopup(native, carrier NativeWindow, rect image.Recta
 // setupPopupInput пробрасывает события мыши окна-попапа в движок-носитель:
 // локальные физические координаты попапа → физические координаты носителя
 // (Rect.Min×scale + локальные). Клавиатуру не трогаем — фокус у носителя.
-func (h *popupHost) setupPopupInput(native NativeWindow, id uintptr) {
-	physOrigin := func() (int, int) {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		hp := h.windows[id]
-		if hp == nil {
-			return 0, 0
-		}
-		return int(float64(hp.rect.Min.X)*h.scale + 0.5),
-			int(float64(hp.rect.Min.Y)*h.scale + 0.5)
-	}
-
+// Начало координат берётся из атомарного снимка окна, а не из-под замка хоста:
+// эти колбэки приходят на потоке окна, а замок держит горутина движка — ждать
+// её здесь значит рисковать взаимоблокировкой (GG-80).
+func (h *popupHost) setupPopupInput(native NativeWindow, hp *hostedPopup) {
 	// Начало координат снимается в момент события: к исполнению оверлей мог
 	// переехать, а щёлкнули по тому месту, где он стоял.
 	native.SetOnMouseMove(func(px, py int) {
-		ox, oy := physOrigin()
+		ox, oy := hp.originXY()
 		h.in.move(h.run, ox+px, oy+py, h.eng.SendMouseMove)
 	})
 	native.SetOnMouseButton(func(px, py, button int, pressed bool) {
@@ -288,7 +331,7 @@ func (h *popupHost) setupPopupInput(native NativeWindow, id uintptr) {
 		if !ok {
 			return
 		}
-		ox, oy := physOrigin()
+		ox, oy := hp.originXY()
 		h.in.post(h.run, func() {
 			h.eng.SendMouseButton(ox+px, oy+py, btn, pressed)
 		})
