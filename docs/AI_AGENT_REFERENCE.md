@@ -738,6 +738,14 @@ btn.FontSize = 18; chk.FontSize = 9; dd.FontSize = 14 // XAML: FontSize="18"
 dlg.OnClosing = func() bool { eng.ShowModal(askSave()); return false }
 // Engine.CloseModal (an application-ordered close) does not ask the hook.
 
+// Closed (v3.21): fires however the dialog was closed — engine, ✕, Escape, or
+// together with its native window (Alt+F4). Release what the dialog held here.
+dlg.OnClosed = func() { widget.ReleaseXAML(root) }
+id := eng.AddOnModalClosed(func(m widget.ModalWidget) {}) // any number of subscribers
+eng.RemoveOnModalClosed(id)
+// SetOnModalClosed is ONE slot and is taken by the native window host — use
+// AddOnModalClosed / Dialog.OnClosed in applications.
+
 // No built-in title bar: content starts at the top, the ✕ goes away with the
 // bar, drag areas replace it. Coordinates are RELATIVE to the top-left corner.
 dlg.SetChromeless(true); dlg.IsChromeless()
@@ -1020,8 +1028,11 @@ Window.OnClose func()
 ```go
 // Selection changed
 DataGrid.OnSelectionChanged func(e datagrid.SelectionChangedEvent)
-// SelectionChangedEvent.SelectedIndex (int)
+// SelectionChangedEvent.SelectedIndex (int; -1 = nothing selected)
 // SelectionChangedEvent.SelectedItem (interface{})
+// v3.21: fires on a programmatic change (SetSelectedIndex) and when the selected
+// row is gone (collection cleared / that row removed) — selection is dropped.
+// SetSelectedIndexQuiet(idx) sets it without the event (restoring after a refill).
 
 // Column sort requested
 DataGrid.OnSorting func(e *datagrid.SortingEvent)
