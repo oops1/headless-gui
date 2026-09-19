@@ -25,6 +25,7 @@ import (
 	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/widget"
 	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v3/widget/treeview"
 	"github.com/oops1/headless-gui/v3/window"
 )
 
@@ -1109,6 +1110,88 @@ func main() {
 				setStatus("Layout restored")
 				addLog("DockManager: layout restored")
 			}
+		}
+	}
+
+	// ─── Вкладка «Панели инструментов» ──────────────────────────────────────
+	// Подпись строки состояния хранится ключом: при смене языка relocalize
+	// пересоберёт её (как в разделе докинга выше).
+	{
+		statusLbl := lbl("tbStatus")
+		statusKey := "Ready"
+		var statusArgs []any
+		setToolbarStatus := func(key string, args ...any) {
+			statusKey, statusArgs = key, args
+			if statusLbl != nil {
+				statusLbl.SetText(widget.Trf(key, args...))
+			}
+		}
+		relocalizers = append(relocalizers, func() { setToolbarStatus(statusKey, statusArgs...) })
+
+		fired := func(key string) func() {
+			return func() {
+				setToolbarStatus("Toolbar: %s", widget.Tr(key))
+				addLog("Toolbar: %s", widget.Tr(key))
+			}
+		}
+		if b := btn("tbPull"); b != nil {
+			b.OnClick = fired("Pull")
+		}
+		if b := btn("tbSettings"); b != nil {
+			b.OnClick = fired("Settings")
+		}
+		// Пункты меню собираются ПЕРЕД каждым открытием (OnOpening): так они
+		// говорят на текущем языке интерфейса и получают обработчики, которых
+		// у разметки нет.
+		if mb, ok := reg["tbPush"].(*widget.MenuButton); ok {
+			mb.OnClick = fired("Push") // основная часть разделённой кнопки
+			mb.OnOpening = func() {
+				mb.Items = []widget.MenuItem{
+					{Text: widget.Tr("Push tags"), OnClick: fired("Push tags")},
+					{Text: widget.Tr("Force push"), OnClick: fired("Force push")},
+				}
+			}
+		}
+		if mb, ok := reg["tbFlow"].(*widget.MenuButton); ok {
+			mb.OnOpening = func() {
+				mb.Items = []widget.MenuItem{
+					{Text: widget.Tr("Start feature"), OnClick: fired("Start feature")},
+					{Text: widget.Tr("Finish release"), OnClick: fired("Finish release")},
+				}
+			}
+		}
+	}
+
+	// ─── Вкладка «Деревья и таблицы» ────────────────────────────────────────
+	if tw, ok := reg["treeDemo"].(*widget.TreeViewWidget); ok {
+		selLbl := lbl("treeSelStatus")
+		tw.Tree.OnSelectionChanged = func(e treeview.SelectionChangedEvent) {
+			if selLbl != nil {
+				selLbl.SetText(widget.Trf("Selected nodes: %d", len(e.Items)))
+			}
+			addLog("TreeView: %d node(s) selected", len(e.Items))
+		}
+	}
+	if lv, ok := reg["listReorder"].(*widget.ListView); ok {
+		moveLbl := lbl("listReorderStatus")
+		lv.OnReorder = func(from, to int) {
+			if moveLbl != nil {
+				moveLbl.SetText(widget.Trf("Row moved: %d → %d", from+1, to+1))
+			}
+			addLog("ListView: row %d moved to %d", from+1, to+1)
+		}
+	}
+	if dp, ok := reg["dateDemo"].(*widget.DatePicker); ok {
+		dateLbl := lbl("dateStatus")
+		dp.OnSelectedDateChanged = func(date time.Time, ok bool) {
+			if dateLbl == nil {
+				return
+			}
+			if !ok {
+				dateLbl.SetText(widget.Tr("No date chosen"))
+				return
+			}
+			dateLbl.SetText(widget.Trf("Date: %s", date.Format("02.01.2006")))
 		}
 	}
 

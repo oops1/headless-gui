@@ -362,7 +362,12 @@ func HasOwnLayout(w Widget) bool {
 	// Dialog в этом списке с тех пор, как научился менять размер: его
 	// SetBounds сам двигает детей и переставляет кнопку ✕, и повторный сдвиг
 	// снаружи задваивал бы смещение при перетаскивании за заголовок.
-	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager, *VirtualizingItemsControl, *Panel, *Dialog:
+	// ToolBar и DockPane — по той же причине: их SetBounds зовёт layout /
+	// layoutContent, и повторный сдвиг снаружи уносил содержимое на дельту
+	// переезда контейнера. В витрине это было видно так: панель «только
+	// значки» оставалась пустой коробкой, а её кнопки рисовались поверх
+	// соседнего заголовка — на столько, на сколько вкладка сместилась в окне.
+	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager, *VirtualizingItemsControl, *Panel, *Dialog, *ToolBar, *DockPane:
 		return true
 	}
 	return false

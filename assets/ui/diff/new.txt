@@ -1,0 +1,26 @@
+package repo
+
+import "time"
+
+// Commit describes one commit of the log.
+type Commit struct {
+	Hash    string
+	Author  string
+	Date    time.Time
+	Message string
+}
+
+func (c Commit) Short() string {
+	if len(c.Hash) < 7 {
+		return c.Hash
+	}
+	return c.Hash[:7]
+}
+
+func Load(path string) ([]Commit, error) {
+	commits, err := readAll(path)
+	if err != nil {
+		return nil, err
+	}
+	return commits, nil
+}
