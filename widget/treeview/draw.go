@@ -53,7 +53,9 @@ func (tv *TreeView) Draw(ctx DrawContextBridge) {
 			continue
 		}
 
-		isSelected := fi.item == tv.selectedItem
+		// Подсветка — по отметке самого узла: в режиме набора их несколько
+		// (GG-86), а в одиночном отметка стоит ровно на selectedItem.
+		isSelected := fi.item.IsSelected
 		isHovered := i == tv.hoverIdx
 
 		// Фон: выделение или hover

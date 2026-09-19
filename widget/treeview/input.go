@@ -6,7 +6,16 @@ import "image"
 
 // OnMouseButton обрабатывает нажатие/отпускание кнопки мыши.
 // Возвращает true, если событие поглощено.
+//
+// Без модификаторов: множественный выбор — OnMouseButtonMod.
 func (tv *TreeView) OnMouseButton(x, y int, button, pressed int) bool {
+	return tv.OnMouseButtonMod(x, y, button, pressed, false, false)
+}
+
+// OnMouseButtonMod — то же с модификаторами клавиатуры: в режиме
+// SelectionExtended Ctrl добавляет и снимает узел, Shift выбирает диапазон
+// от якоря (GG-86).
+func (tv *TreeView) OnMouseButtonMod(x, y int, button, pressed int, shift, ctrl bool) bool {
 	if button != 0 { // только левая кнопка
 		return false
 	}
@@ -84,19 +93,14 @@ func (tv *TreeView) OnMouseButton(x, y int, button, pressed int) bool {
 	tv.beginNodeDrag(item, y)
 
 	// ── Выбор узла ──────────────────────────────────────────────────────
-	old := tv.selectedItem
-	oldIdx := tv.indexOfItem(old, flat)
-	tv.selectedItem = item
-	if old != nil {
-		old.IsSelected = false
-	}
-	item.IsSelected = true
-
-	if old != item {
-		// Подсветка выделения меняется только на прежней и новой строках.
-		tv.markRowDirty(oldIdx)
-		tv.markRowDirty(idx)
-		tv.fireSelectedItemChanged(old, item)
+	// Щелчок по уже выбранному узлу набор не рушит: с него могут начать
+	// перетаскивание или вызвать контекстное меню на всю группу.
+	if !(ctrl || shift) && tv.SelectionMode == SelectionExtended &&
+		len(tv.selection) > 1 && tv.IsItemSelected(item) {
+		tv.selectedItem = item
+		tv.anchor = item
+	} else {
+		tv.clickSelect(item, idx, flat, shift, ctrl)
 	}
 
 	// ── Двойной клик → expand + invoke ──────────────────────────────────
@@ -245,13 +249,13 @@ func (tv *TreeView) OnKeyEvent(keyCode int, r rune, pressed bool, shift, ctrl bo
 
 	switch keyCode {
 	case keyDown:
-		// Следующий элемент
+		// Следующий элемент; с Shift в режиме набора — расширение диапазона.
 		newIdx := curIdx + 1
 		if newIdx >= len(flat) {
 			newIdx = len(flat) - 1
 		}
 		if newIdx >= 0 {
-			tv.selectByIndex(newIdx, flat)
+			tv.moveSelection(newIdx, flat, shift)
 			tv.ensureVisible(newIdx)
 		}
 
@@ -261,7 +265,7 @@ func (tv *TreeView) OnKeyEvent(keyCode int, r rune, pressed bool, shift, ctrl bo
 		if newIdx < 0 {
 			newIdx = 0
 		}
-		tv.selectByIndex(newIdx, flat)
+		tv.moveSelection(newIdx, flat, shift)
 		tv.ensureVisible(newIdx)
 
 	case keyRight:
@@ -345,20 +349,7 @@ func (tv *TreeView) OnKeyEvent(keyCode int, r rune, pressed bool, shift, ctrl bo
 	}
 }
 
-// selectByIndex выбирает элемент по индексу в flat-списке.
+// selectByIndex выбирает элемент по индексу в flat-списке (одиночно).
 func (tv *TreeView) selectByIndex(idx int, flat []flatItem) {
-	if idx < 0 || idx >= len(flat) {
-		return
-	}
-	item := flat[idx].item
-	old := tv.selectedItem
-	tv.selectedItem = item
-	if old != nil {
-		old.IsSelected = false
-	}
-	item.IsSelected = true
-
-	if old != item {
-		tv.fireSelectedItemChanged(old, item)
-	}
+	tv.moveSelection(idx, flat, false)
 }

@@ -297,7 +297,7 @@ func buildScrollViewJSON(n UINode) Widget {
 func buildListViewJSON(n UINode) Widget {
 	lv := NewListView(n.Items...)
 	if n.Selected >= 0 && n.Selected < len(n.Items) {
-		lv.SetSelected(n.Selected)
+		lv.SetSelectedQuiet(n.Selected) // начальное выделение — не выбор пользователя
 	}
 	if ih, ok := n.Props["itemHeight"]; ok {
 		if v, err := strconv.Atoi(ih); err == nil && v > 0 {

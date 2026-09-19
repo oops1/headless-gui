@@ -52,6 +52,13 @@ type TreeView struct {
 	// ── Выделение ────────────────────────────────────────────────────────
 	selectedItem *TreeViewItem
 
+	// SelectionMode — один узел или набор (selection.go, GG-86).
+	SelectionMode SelectionMode
+	// selection — выбранные узлы в порядке выбора; selectedItem — курсор
+	// выбора (последний тронутый). anchor — якорь диапазона для Shift.
+	selection []*TreeViewItem
+	anchor    *TreeViewItem
+
 	// ── Скроллинг ────────────────────────────────────────────────────────
 	scrollY         int  // смещение в пикселях
 	thumbDragging   bool
@@ -74,6 +81,10 @@ type TreeView struct {
 	OnExpanded            ExpandedHandler
 	OnCollapsed           CollapsedHandler
 	OnItemInvoked         ItemInvokedHandler
+
+	// OnSelectionChanged — сменился НАБОР выбранных узлов (SelectionExtended).
+	// Приходит и на программную смену (SetSelectedItems).
+	OnSelectionChanged SelectionChangedHandler
 
 	// ItemStyle — оформление строки узла: цвет текста и начертание.
 	//
@@ -476,22 +487,15 @@ func (tv *TreeView) SelectedItem() *TreeViewItem {
 	return tv.selectedItem
 }
 
-// SetSelectedItem программно выбирает узел.
+// SetSelectedItem программно выбирает узел. Набор при этом схлопывается до
+// него одного — как щелчок без модификаторов (GG-86).
 func (tv *TreeView) SetSelectedItem(item *TreeViewItem) {
-	tv.mu.Lock()
-	old := tv.selectedItem
-	tv.selectedItem = item
-	if old != nil {
-		old.IsSelected = false
+	tv.anchor = item
+	if item == nil {
+		tv.applySelection(nil, nil)
+		return
 	}
-	if item != nil {
-		item.IsSelected = true
-	}
-	tv.mu.Unlock()
-
-	if old != item {
-		tv.fireSelectedItemChanged(old, item)
-	}
+	tv.applySelection([]*TreeViewItem{item}, item)
 }
 
 func (tv *TreeView) fireSelectedItemChanged(oldItem, newItem *TreeViewItem) {

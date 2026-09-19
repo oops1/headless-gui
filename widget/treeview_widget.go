@@ -184,7 +184,10 @@ func (w *TreeViewWidget) OnMouseButton(e MouseEvent) bool {
 	if e.Pressed {
 		pressed = 1
 	}
-	consumed := w.Tree.OnMouseButton(e.X, e.Y, int(e.Button), pressed)
+	// Модификаторы нужны множественному выбору: Ctrl добавляет узел, Shift
+	// берёт диапазон (GG-86).
+	consumed := w.Tree.OnMouseButtonMod(e.X, e.Y, int(e.Button), pressed,
+		e.Mod&ModShift != 0, e.Mod&ModCtrl != 0)
 	// Точечная инвалидация: выбор/hover строки — только строки, разворот
 	// узла/скролл — весь виджет (см. ядро treeview).
 	w.applyDirty()
@@ -280,6 +283,12 @@ func (w *TreeViewWidget) ClearRoots() {
 // SelectedNode возвращает текущий выделенный узел (обратная совместимость).
 func (w *TreeViewWidget) SelectedNode() *treeview.TreeViewItem {
 	return w.Tree.SelectedItem()
+}
+
+// SelectedNodes возвращает выбранные узлы: в режиме
+// treeview.SelectionExtended их может быть несколько (GG-86).
+func (w *TreeViewWidget) SelectedNodes() []*treeview.TreeViewItem {
+	return w.Tree.SelectedItems()
 }
 
 // BeginUpdate приостанавливает отрисовку дерева (двойная буферизация).

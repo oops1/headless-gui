@@ -62,6 +62,63 @@ func (sp *StackPanel) AddChild(w Widget) {
 	sp.layout()
 }
 
+// AddStretch добавляет распорку — она заберёт место, оставшееся от прочих
+// элементов по оси раскладки (GG-84).
+func (sp *StackPanel) AddStretch() *Stretch {
+	s := NewStretch()
+	sp.AddChild(s)
+	return s
+}
+
+// stretchSizes раздаёт распоркам остаток места по оси раскладки: индекс
+// ребёнка → его размер. nil, если распорок нет.
+func (sp *StackPanel) stretchSizes(b image.Rectangle) map[int]int {
+	idx, weights := stretchIn(sp.children)
+	if len(idx) == 0 {
+		return nil
+	}
+	horizontal := sp.Orientation == OrientationHorizontal
+	used := 0
+	for _, child := range sp.children {
+		m := marginOf(child)
+		if _, ok := child.(*Stretch); ok {
+			// Сама распорка места не просит — только свои отступы.
+			if horizontal {
+				used += m.Left + m.Right
+			} else {
+				used += m.Top + m.Bottom
+			}
+			continue
+		}
+		cw, ch := layoutSizeOf(child)
+		if horizontal {
+			if cw <= 0 {
+				cw = 80
+			}
+			used += cw + m.Left + m.Right
+		} else {
+			if ch <= 0 {
+				ch = 30
+			}
+			used += ch + m.Top + m.Bottom
+		}
+	}
+	total := b.Dy()
+	if horizontal {
+		total = b.Dx()
+	}
+	free := total - 2*sp.Padding - used
+	if n := len(sp.children); n > 1 {
+		free -= sp.Spacing * (n - 1)
+	}
+	parts := spreadStretch(free, weights)
+	out := make(map[int]int, len(idx))
+	for k, i := range idx {
+		out[i] = parts[k]
+	}
+	return out
+}
+
 // layout расставляет дочерние виджеты последовательно.
 //
 // Для каждого ребёнка берётся его текущий Dx/Dy как желаемый размер.
@@ -75,8 +132,10 @@ func (sp *StackPanel) layout() {
 
 	pad := sp.Padding
 	offset := pad
+	// Распорки забирают место, оставшееся от прочих элементов (GG-84).
+	stretch := sp.stretchSizes(b)
 
-	for _, child := range sp.children {
+	for i, child := range sp.children {
 		// Размер спрашиваем у ребёнка, если он умеет отвечать (DesiredSizer):
 		// свёрнутый Expander просит высоту одного заголовка, и без вопроса
 		// он занимал бы в столбике место, которого ему больше не нужно.
@@ -84,16 +143,12 @@ func (sp *StackPanel) layout() {
 		cw, ch := layoutSizeOf(child)
 
 		// Margin — внешний отступ ребёнка (WPF Thickness).
-		var m Margin
-		type marginGetter interface {
-			GetMargin() Margin
-		}
-		if mg, ok := child.(marginGetter); ok {
-			m = mg.GetMargin()
-		}
+		m := marginOf(child)
 
 		if sp.Orientation == OrientationHorizontal {
-			if cw <= 0 {
+			if s, ok := stretch[i]; ok {
+				cw = s
+			} else if cw <= 0 {
 				cw = 80 // default width
 			}
 			if ch <= 0 {
@@ -114,7 +169,9 @@ func (sp *StackPanel) layout() {
 			offset += cw + m.Right + sp.Spacing
 
 		} else { // Vertical
-			if ch <= 0 {
+			if s, ok := stretch[i]; ok {
+				ch = s
+			} else if ch <= 0 {
 				ch = 30 // default height
 			}
 			if cw <= 0 {

@@ -401,6 +401,19 @@ tb.AddChild(pull)
 его с клавиатуры. В переполненной панели такая кнопка становится подменю. В
 разметке — `<SplitButton>` и `<MenuButton>` с вложенными `<MenuItem>`.
 
+Распорка растягивает панель: элементы после неё уходят к правому краю. Работает
+и в `ToolBar`, и в `StackPanel` — в столбике по высоте:
+
+```go
+tb.AddChild(pull)
+tb.AddStretch()          // в разметке: <ToolBarStretch/> или <Stretch/>
+tb.AddChild(settings)    // прижата к правому краю
+
+sp.AddChild(widget.NewStretchWeighted(2)) // несколько распорок делят остаток
+```
+
+Места не осталось — распорка просто ничего не занимает.
+
 В XAML — `<ToolBarTray>` и `<ToolBar>` с атрибутами `IconsOnly`, `Overflow` и
 элементом `<Separator/>`:
 
@@ -605,11 +618,18 @@ lv := widget.NewListView("Элемент 1", "Элемент 2", "Элемент
 
 lv.AddItem("Ещё")
 lv.Clear()
-lv.SetSelected(0)
+lv.SetSelected(0)        // шлёт OnSelect; молча — SetSelectedQuiet
 lv.Selected() int        // -1 если нет выделения
 lv.SelectedText() string
 lv.OnSelect = func(index int, text string) { ... }
+
+lv.Reorderable = true    // строки переставляются перетаскиванием
+lv.OnReorder = func(from, to int) { ... } // to — индекс ПОСЛЕ перестановки
 ```
+
+Перетаскивание начинается, когда мышь прошла несколько точек: короткое
+нажатие остаётся обычным щелчком. Место вставки показывает полоса, выделение
+едет за строкой. В разметке — `<ListView Reorderable="True">`.
 
 В XAML:
 
@@ -865,6 +885,13 @@ tw.Tree.ClearRoots()
 tw.Tree.Roots() []*TreeViewItem
 tw.Tree.SelectedItem() *TreeViewItem
 tw.Tree.SetSelectedItem(item)
+
+// Набор узлов (XAML: <TreeView SelectionMode="Extended">)
+tw.Tree.SelectionMode = treeview.SelectionExtended
+tw.Tree.SelectedItems() []*TreeViewItem
+tw.Tree.SetSelectedItems(items)
+tw.Tree.IsItemSelected(item) bool
+
 tw.Tree.ExpandItem(item)
 tw.Tree.CollapseItem(item)
 tw.Tree.ToggleExpand(item)
@@ -876,12 +903,20 @@ tw.Tree.ToggleExpand(item)
 tw.Tree.OnSelect = func(item *treeview.TreeViewItem) { ... }
 
 tw.Tree.OnSelectedItemChanged = func(e treeview.SelectedItemChangedEvent) {
-    // e.OldItem, e.NewItem
+    // e.OldItem, e.NewItem — курсор выбора
+}
+tw.Tree.OnSelectionChanged = func(e treeview.SelectionChangedEvent) {
+    // e.Items — весь набор, e.Current — узел под курсором выбора
 }
 tw.Tree.OnExpanded = func(e treeview.ExpandedEvent) { ... }
 tw.Tree.OnCollapsed = func(e treeview.CollapsedEvent) { ... }
 tw.Tree.OnItemInvoked = func(e treeview.ItemInvokedEvent) { ... } // двойной клик
 ```
+
+В режиме `SelectionExtended` Ctrl добавляет и снимает узел, Shift берёт
+диапазон от якоря, Shift+↑/↓ расширяет его с клавиатуры. Щелчок по уже
+выбранному узлу набор не рушит — с него начинают перетаскивание или зовут
+контекстное меню на всю группу. Подсветка рисуется по `TreeViewItem.IsSelected`.
 
 Data Binding с HierarchicalDataTemplate:
 
@@ -1462,7 +1497,8 @@ root Canvas (0,0)
 | `NumericUpDown`, `IntegerUpDown`, `DoubleUpDown` | NumericUpDown | `Minimum`, `Maximum`, `Increment`, `Decimals`, `Value` |
 | `ToggleSwitch` | ToggleSwitch | `Content`, `IsOn` |
 | `ScrollViewer` | ScrollView | `ContentHeight`, `Background` |
-| `ListView`, `ListBox` | ListView | `Items`, `SelectedIndex`, `ItemHeight`, дочерние `<ListViewItem>` |
+| `ListView`, `ListBox` | ListView | `Items`, `SelectedIndex`, `ItemHeight`, `Reorderable`, дочерние `<ListViewItem>` |
+| `Stretch`, `ToolBarStretch` | Stretch | `Weight`; забирает свободное место в `StackPanel` и `ToolBar` |
 | `VirtualizingItemsControl` | VirtualizingItemsControl | `ItemHeight`, `Buffer`, `ItemsSource`, `VirtualizingItemsControl.ItemTemplate` |
 | `WrapPanel` | WrapPanel | `Spacing`, `Orientation` |
 | `UniformGrid` | UniformGrid | `Rows`, `Columns`, `Spacing` |
@@ -1472,7 +1508,7 @@ root Canvas (0,0)
 | `Image` | Image | `Source`, `Stretch` (Fill/Uniform/None) |
 | `PopupMenu`, `ContextMenu` | PopupMenu | дочерние `<MenuItem Text="..." Separator="True" Disabled="True"/>` |
 | `Menu`, `MenuBar`, `MainMenu` | MenuBar | дочерние `<MenuItem Header="...">` с вложенными `<MenuItem>` |
-| `TreeView` | TreeViewWidget | `IndentSize`, `IsReadOnly`, `ShowIndentGuides`, дочерние `<TreeViewItem>`, `<TreeView.ItemTemplate>` |
+| `TreeView` | TreeViewWidget | `IndentSize`, `IsReadOnly`, `ShowIndentGuides`, `SelectionMode`, дочерние `<TreeViewItem>`, `<TreeView.ItemTemplate>` |
 | `TreeViewItem` | TreeViewItem | `Header`, `IsExpanded`, `Icon`, `IsEnabled` |
 | `HierarchicalDataTemplate` | HierarchicalDataTemplate | `ItemsSource="{Binding ...}"`, дочерние `<StackPanel>` с `<Image>` + `<TextBlock>` |
 | `DataGrid` | DataGridWidget | `AutoGenerateColumns`, `IsReadOnly`, `CanUserSortColumns`, `CanUserResizeColumns`, `SelectionMode`, `RowHeight`, `HeaderHeight` |
