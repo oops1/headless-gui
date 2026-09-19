@@ -274,8 +274,10 @@ func TestInput_PopupSharesCarrierQueue(t *testing.T) {
 	s, fn, eng := inputSurface(t)
 	h := newPopupHost(fn, fn, eng, 1, &s.in)
 	pop := &inputNative{}
-	h.windows[7] = &hostedPopup{rect: image.Rect(40, 30, 90, 80)}
-	h.setupPopupInput(pop, 7)
+	hp := &hostedPopup{rect: image.Rect(40, 30, 90, 80)}
+	hp.setOrigin(hp.rect, 1)
+	h.windows[7] = hp
+	h.setupPopupInput(pop, hp)
 
 	fn.onMove(1, 1)
 	pop.onMove(2, 3) // дополняет движение носителя: в физических координатах носителя

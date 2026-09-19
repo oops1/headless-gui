@@ -1191,8 +1191,13 @@ func (u *User) SetName(name string) {
 
 ```go
 dg.Grid.OnSelectionChanged = func(e datagrid.SelectionChangedEvent) {
-    // e.SelectedIndex, e.SelectedItem
+    // e.SelectedIndex, e.SelectedItem; SelectedIndex = -1 — выделения нет
 }
+// Событие приходит и на программную смену (SetSelectedIndex), и когда
+// выделенной строки не стало: коллекцию очистили или удалили эту строку —
+// под прежним индексом стоит уже другой элемент. Восстанавливаете выделение
+// сами после перезаполнения — SetSelectedIndexQuiet, чтобы событие не вернулось
+// в ваш же обработчик.
 dg.Grid.OnSorting = func(e *datagrid.SortingEvent) {
     // e.Column, e.Direction; e.Handled = true чтобы отменить
 }
@@ -2470,6 +2475,21 @@ dlg.OnClosing = func() bool {
 действие, и сообщать о ней, когда её не было, нельзя. Escape и ✕ идут одним
 путём, так что хук не обойти ни одним из них. А закрытие командой приложения
 (`eng.CloseModal(dlg)`) хук не спрашивает: это уже решение приложения.
+
+**Диалог закрылся.** `OnClosed` приходит, как бы его ни закрыли — движком в
+холсте, кнопкой ✕, Escape или вместе с нативным окном (Alt+F4). Здесь удобно
+освобождать всё, что держалось за диалогом:
+
+```go
+dlg.OnClosed = func() { widget.ReleaseXAML(root) }
+
+id := eng.AddOnModalClosed(func(m widget.ModalWidget) { /* любая модалка */ })
+eng.RemoveOnModalClosed(id)
+```
+
+Подписок через `AddOnModalClosed` может быть сколько угодно. `SetOnModalClosed`
+остаётся одним слотом и занят нативным хостом окон — приложению нужен
+`AddOnModalClosed` или `Dialog.OnClosed`.
 
 **Своя шапка вместо штатной полосы.** Диалог всегда рисовал полосу заголовка во
 всю ширину — значит, верх принадлежал движку, а боковая панель могла начинаться
