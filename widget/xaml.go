@@ -484,6 +484,10 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 	case "menubutton", "splitbutton", "dropdownbutton":
 		w = buildXAMLMenuButton(el, tag, baseDir)
 
+	// ── Распорка: забирает остаток места в StackPanel и ToolBar (GG-84) ─────
+	case "stretch", "toolbarstretch", "spacer":
+		w = buildXAMLStretch(el)
+
 	// ── Ввод текста ──────────────────────────────────────────────────────────
 	case "textbox", "textinput", "input", "richtextbox":
 		// Многострочный (AcceptsReturn / TextWrapping="Wrap") → TextBox-редактор.

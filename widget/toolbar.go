@@ -146,6 +146,9 @@ func (tb *ToolBar) itemWidth(w Widget, h int) int {
 	if _, ok := w.(*toolBarSeparator); ok {
 		return 9
 	}
+	if _, ok := w.(*Stretch); ok {
+		return 0 // распорке достаётся остаток строки, см. layout (GG-84)
+	}
 	btn := toolBarButton(w)
 	if btn == nil {
 		return desiredWidth(w)
@@ -232,8 +235,11 @@ func (tb *ToolBar) layout() {
 		limit -= toolBarChevronW
 	}
 
+	// Первый проход: кто помещается и какой ширины. Распорки просят ноль —
+	// их доля считается после, от остатка строки (GG-84).
 	x := b.Min.X + tb.Padding
 	first := true
+	var vis []toolBarItem
 	for _, child := range tb.children {
 		w := tb.itemWidth(child, innerH)
 		// Первый элемент не прячем никогда: панель из одной слишком широкой
@@ -245,15 +251,62 @@ func (tb *ToolBar) layout() {
 			continue
 		}
 		setToolBarItemVisible(child, true)
-		child.SetBounds(image.Rect(x, innerY, x+w, innerY+innerH))
+		vis = append(vis, toolBarItem{child, w})
 		x += w + tb.Spacing
 		first = false
+	}
+
+	// Второй проход: раздаём остаток распоркам и расставляем.
+	spreadToolBarStretches(vis, b.Min.X+tb.Padding, limit, tb.Spacing)
+	x = b.Min.X + tb.Padding
+	for _, it := range vis {
+		it.w.SetBounds(image.Rect(x, innerY, x+it.width, innerY+innerH))
+		x += it.width + tb.Spacing
 	}
 
 	if len(tb.overflowed) > 0 {
 		tb.chevron = image.Rect(b.Max.X-tb.Padding-toolBarChevronW, innerY,
 			b.Max.X-tb.Padding, innerY+innerH)
 	}
+}
+
+// toolBarItem — элемент панели и его ширина в текущей раскладке.
+type toolBarItem struct {
+	w     Widget
+	width int
+}
+
+// spreadToolBarStretches раздаёт распоркам остаток строки между start и limit.
+func spreadToolBarStretches(vis []toolBarItem, start, limit, spacing int) {
+	var idx []int
+	var weights []int
+	used := 0
+	for i, it := range vis {
+		used += it.width
+		if s, ok := it.w.(*Stretch); ok {
+			idx = append(idx, i)
+			weights = append(weights, s.weight())
+		}
+	}
+	if len(idx) == 0 {
+		return
+	}
+	free := limit - start - used
+	if len(vis) > 1 {
+		free -= spacing * (len(vis) - 1)
+	}
+	parts := spreadStretch(free, weights)
+	for k, i := range idx {
+		vis[i].width = parts[k]
+	}
+}
+
+// AddStretch добавляет распорку: она заберёт остаток строки, и следующие
+// элементы уйдут к правому краю (GG-84).
+func (tb *ToolBar) AddStretch() *Stretch {
+	s := NewStretch()
+	tb.AddChild(s)
+	return s
 }
 
 // totalWidth — сколько места хотят все элементы вместе.
