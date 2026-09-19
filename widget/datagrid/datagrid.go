@@ -672,8 +672,31 @@ func (dg *DataGrid) SetItemsSource(oc *ObservableCollection) {
 		// Подписка на изменения
 		dg.itemsSubID = oc.AddCollectionChanged(func(event CollectionChangedEvent) {
 			dg.mu.Lock()
+			// Под прежними индексами после сброса коллекции стоят ДРУГИЕ
+			// элементы: подсветка оставалась на строке 5 и показывала уже не
+			// тот коммит. Удаление выделенной строки — то же самое (GG-81).
+			drop := event.Action == CollectionReset
+			if event.Action == CollectionRemove {
+				for r := range dg.selectedRows {
+					if r >= 0 && r < len(dg.sortedIdx) && dg.sortedIdx[r] == event.Index {
+						drop = true
+						break
+					}
+				}
+			}
+			// Было ли что снимать, спрашиваем ДО перестроения: оно само
+			// подрезает индексы под новое число строк, и после него сброшенное
+			// выделение выглядит как «его и не было».
+			had := len(dg.selectedRows) > 0 || dg.focusRow >= 0
 			dg.rebuildSortedIdx()
+			if drop && had {
+				dg.selectedRows = make(map[int]bool)
+				dg.focusRow, dg.anchorRow = -1, -1
+				dg.markFullDirty()
+				dg.queueSelectionChangedLocked(-1)
+			}
 			dg.mu.Unlock()
+			dg.firePending()
 			dg.invalidateCellCache()
 		})
 
@@ -814,14 +837,34 @@ func (dg *DataGrid) SelectedItems() []interface{} {
 	return result
 }
 
-// SetSelectedIndex задаёт выделенную строку.
+// SetSelectedIndex задаёт выделенную строку и, если выделение изменилось,
+// шлёт OnSelectionChanged — как WPF, где SelectionChanged приходит и на
+// программную смену (GG-81). Молча — SetSelectedIndexQuiet.
 func (dg *DataGrid) SetSelectedIndex(idx int) {
+	dg.setSelectedIndex(idx, true)
+}
+
+// SetSelectedIndexQuiet задаёт выделенную строку БЕЗ OnSelectionChanged.
+//
+// Нужен тому, кто сам восстанавливает выделение после перезаполнения списка:
+// событие вернулось бы в его же обработчик и заставило бы перечитывать то,
+// что он только что показал.
+func (dg *DataGrid) SetSelectedIndexQuiet(idx int) {
+	dg.setSelectedIndex(idx, false)
+}
+
+func (dg *DataGrid) setSelectedIndex(idx int, notify bool) {
 	dg.mu.Lock()
-	defer dg.mu.Unlock()
+	changed := dg.focusRow != idx || len(dg.selectedRows) != 1 || !dg.selectedRows[idx]
 	dg.selectedRows = map[int]bool{idx: true}
 	dg.focusRow = idx
 	dg.anchorRow = idx
 	dg.ensureVisible(idx)
+	if notify && changed {
+		dg.queueSelectionChangedLocked(idx)
+	}
+	dg.mu.Unlock()
+	dg.firePending()
 }
 
 // ─── Layout ────────────────────────────────────────────────────────────────
@@ -2264,15 +2307,26 @@ func (dg *DataGrid) selectRow(row int, shift, ctrl bool) {
 	}
 
 	// Callback — откладываем до выхода из-под dg.mu (см. firePending).
-	if dg.OnSelectionChanged != nil {
-		var item interface{}
-		if row >= 0 && row < len(dg.sortedIdx) {
-			item = dg.itemsSource.Get(dg.sortedIdx[row])
-		}
-		cb := dg.OnSelectionChanged
-		ev := SelectionChangedEvent{SelectedIndex: row, SelectedItem: item}
-		dg.pending = append(dg.pending, func() { cb(ev) })
+	dg.queueSelectionChangedLocked(row)
+}
+
+// queueSelectionChangedLocked кладёт OnSelectionChanged в отложенные колбэки
+// (выполняются вне dg.mu — см. firePending). row = -1 — выделения нет.
+//
+// Одно место на все пути: клик, программная смена (SetSelectedIndex) и сброс
+// коллекции. Раньше событие слал только клик, и приложение не узнавало ни о
+// программной смене, ни о том, что выделенной строки больше нет (GG-81).
+func (dg *DataGrid) queueSelectionChangedLocked(row int) {
+	if dg.OnSelectionChanged == nil {
+		return
 	}
+	var item interface{}
+	if row >= 0 && row < len(dg.sortedIdx) && dg.itemsSource != nil {
+		item = dg.itemsSource.Get(dg.sortedIdx[row])
+	}
+	cb := dg.OnSelectionChanged
+	ev := SelectionChangedEvent{SelectedIndex: row, SelectedItem: item}
+	dg.pending = append(dg.pending, func() { cb(ev) })
 }
 
 // ─── Editing ───────────────────────────────────────────────────────────────

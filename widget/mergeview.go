@@ -104,6 +104,7 @@ type MergeView struct {
 	spans  []mvSpan  // блок → экранные строки верхних панелей
 	rspan  [][2]int  // блок → строки итога
 	rrows  []int     // строка итога → блок (-1 у строки вне блоков)
+	rpad   bool      // в итоге одна служебная пустая строка (buildResultLocked)
 	rows   int       // всего экранных строк сверху
 	pal    dvPalette // палитра DiffView: цвета и карточки общие
 
@@ -415,6 +416,9 @@ func (m *MergeView) buildResultLocked() {
 		m.rspan = append(m.rspan, [2]int{from, len(lines)})
 	}
 	r := m.docs[MergeResult]
+	// Пустой итог держит одну пустую строку — каретке нужно где-то стоять.
+	// Запоминаем это: в тексте такой строки быть не должно (GG-83).
+	m.rpad = len(lines) == 0
 	r.text.Lines = nonEmptyLines(lines)
 	r.caret, r.anchor = r.clamp(r.caret), r.clamp(r.anchor)
 	r.rev = m.nextRev()
@@ -459,7 +463,12 @@ func (m *MergeView) resolveLocked(index int, how MergeResolution) {
 	ins := m.chunkResultLocked(index, m.chunks[index])
 	r.text.Lines = dvSplice(r.text.Lines, sp[0], sp[1], ins)
 	if len(r.text.Lines) == 0 {
+		// Решение оставило итог пустым (взяли сторону, которой нет). Пустая
+		// строка здесь — место для каретки, а не текст: следующее решение
+		// вставит строки ПЕРЕД ней, и в файле остался бы лишний перевод
+		// строки в конце (GG-83).
 		r.text.Lines = []string{""}
+		m.rpad = true
 	}
 	delta := len(ins) - (sp[1] - sp[0])
 	m.rspan[index][1] = sp[1] + delta
@@ -526,8 +535,42 @@ func (m *MergeView) Result() string {
 	// одну пустую строку только потому, что каретке нужно где-то стоять.
 	if len(t.Lines) == 1 && t.Lines[0] == "" && m.resultLinesLocked() == 0 {
 		t.FinalNL = false
+		return string(t.Encode())
+	}
+	if i := m.resultPadIndexLocked(); i >= 0 {
+		t.Lines = t.Lines[:i]
 	}
 	return string(t.Encode())
+}
+
+// resultPadIndexLocked — индекс служебной пустой строки итога или -1.
+//
+// Она появляется у пустого итога (buildResultLocked) и остаётся ПОСЛЕ строк,
+// вставленных решением: файл, которого не было в базе, после «взять сторону
+// целиком» получал лишний перевод строки в конце (GG-83).
+//
+// Узнаём её по всем признакам сразу: итог собирался пустым, строка последняя,
+// пуста, не принадлежит ни одному блоку и она — единственная такая. Правку
+// руками это не трогает: дописал пользователь что-нибудь ещё — признаки не
+// сходятся, и мы ничего не отбрасываем.
+func (m *MergeView) resultPadIndexLocked() int {
+	if !m.rpad {
+		return -1
+	}
+	lines := m.docs[MergeResult].text.Lines
+	last := len(lines) - 1
+	if last <= 0 || lines[last] != "" {
+		return -1
+	}
+	if len(lines) != m.resultLinesLocked()+1 {
+		return -1
+	}
+	for _, sp := range m.rspan {
+		if last >= sp[0] && last < sp[1] {
+			return -1
+		}
+	}
+	return last
 }
 
 // resultLinesLocked — сколько строк итога принадлежит блокам.
@@ -563,11 +606,16 @@ func (m *MergeView) ResultEOL() (eol string, bom, finalNL bool) {
 	return t.EOL, t.BOM, t.FinalNL
 }
 
-// ResultLines возвращает строки итога.
+// ResultLines возвращает строки итога — без служебной пустой строки пустого
+// итога (см. resultPadIndexLocked).
 func (m *MergeView) ResultLines() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]string(nil), m.docs[MergeResult].text.Lines...)
+	lines := m.docs[MergeResult].text.Lines
+	if i := m.resultPadIndexLocked(); i >= 0 {
+		lines = lines[:i]
+	}
+	return append([]string(nil), lines...)
 }
 
 // SetStyle задаёт стиль маркеров нерешённого конфликта: merge или diff3.
@@ -637,7 +685,8 @@ func (m *MergeView) respliceUnresolvedLocked() {
 		return
 	}
 	if len(r.text.Lines) == 0 {
-		r.text.Lines = []string{""}
+		r.text.Lines = []string{""} // место для каретки, не текст (GG-83)
+		m.rpad = true
 	}
 	r.caret, r.anchor = r.clamp(r.caret), r.clamp(r.anchor)
 	r.rev = m.nextRev()

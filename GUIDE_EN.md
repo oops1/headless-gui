@@ -1188,8 +1188,13 @@ Events:
 
 ```go
 dg.Grid.OnSelectionChanged = func(e datagrid.SelectionChangedEvent) {
-    // e.SelectedIndex, e.SelectedItem
+    // e.SelectedIndex, e.SelectedItem; SelectedIndex = -1 — nothing selected
 }
+// It also fires on a programmatic change (SetSelectedIndex) and when the
+// selected row is gone: the collection was cleared or that row removed — the
+// old index now holds a different item. Restoring the selection yourself after
+// a refill? Use SetSelectedIndexQuiet so the event does not come back into your
+// own handler.
 dg.Grid.OnSorting = func(e *datagrid.SortingEvent) {
     // e.Column, e.Direction; e.Handled = true to prevent default
 }
@@ -2438,6 +2443,21 @@ that happened, and reporting it when it did not is wrong. Escape and ✕ take th
 same path, so neither of them bypasses the hook. A close ordered by the
 application (`eng.CloseModal(dlg)`) does not ask the hook: that is the
 application's own decision.
+
+**The dialog was closed.** `OnClosed` arrives however it was closed — by the
+engine in the canvas, by ✕, by Escape, or together with its native window
+(Alt+F4). It is the place to release whatever the dialog held:
+
+```go
+dlg.OnClosed = func() { widget.ReleaseXAML(root) }
+
+id := eng.AddOnModalClosed(func(m widget.ModalWidget) { /* any modal */ })
+eng.RemoveOnModalClosed(id)
+```
+
+There can be any number of `AddOnModalClosed` subscribers. `SetOnModalClosed`
+remains a single slot and is taken by the native window host — an application
+wants `AddOnModalClosed` or `Dialog.OnClosed`.
 
 **Own header instead of the built-in title bar.** The dialog always drew a title
 bar across its full width — so the top belonged to the engine and a side panel
