@@ -66,6 +66,21 @@ type ListView struct {
 	// (аналог открытия). Для файловых списков — вход в папку/выбор файла.
 	OnActivate func(index int, text string)
 
+	// Reorderable разрешает переставлять строки перетаскиванием (GG-85).
+	// Выключено по умолчанию: в обычном списке перетаскивание меняло бы
+	// смысл привычного движения мышью с зажатой кнопкой.
+	Reorderable bool
+	// OnReorder вызывается после перестановки: from — откуда строку взяли,
+	// to — где она оказалась (индекс уже ПОСЛЕ перестановки, как у Move).
+	OnReorder func(from, to int)
+
+	// Перетаскивание строки: dragItem — что тащим (-1 — ничего), dragTo —
+	// позиция вставки (0..len), dragArmed — нажали, но порог ещё не пройден.
+	dragItem  int
+	dragTo    int
+	dragArmed bool
+	dragItemY int
+
 	lastClickIdx  int       // индекс последнего клика (для детекта double-click)
 	lastClickTime time.Time // время последнего клика
 }
@@ -86,6 +101,8 @@ func NewListView(items ...string) *ListView {
 		items:          items,
 		selected:       -1,
 		hoverIdx:       -1,
+		dragItem:       -1,
+		dragTo:         -1,
 		scrollbarWidth: 10,
 	}
 }
@@ -245,18 +262,111 @@ func (lv *ListView) SelectedText() string {
 	return ""
 }
 
-// SetSelected программно выделяет элемент.
-func (lv *ListView) SetSelected(idx int) {
+// SetSelected программно выделяет элемент и шлёт OnSelect — как клик и как
+// WPF, где SelectionChanged приходит и на программную смену (GG-85).
+// Молча — SetSelectedQuiet.
+func (lv *ListView) SetSelected(idx int) { lv.setSelected(idx, true) }
+
+// SetSelectedQuiet выделяет элемент БЕЗ OnSelect.
+//
+// Нужен тому, кто сам ставит выделение в ответ на своё же событие: иначе
+// колбэк вернулся бы в тот же обработчик.
+func (lv *ListView) SetSelectedQuiet(idx int) { lv.setSelected(idx, false) }
+
+func (lv *ListView) setSelected(idx int, notify bool) {
 	lv.mu.Lock()
 	changed := false
+	text := ""
 	if idx >= -1 && idx < len(lv.items) && idx != lv.selected {
 		lv.selected = idx
 		changed = true
+		if idx >= 0 {
+			text = lv.items[idx]
+		}
 	}
+	onSel := lv.OnSelect
 	lv.mu.Unlock()
-	if changed {
-		lv.Invalidate()
+	if !changed {
+		return
 	}
+	lv.Invalidate()
+	if notify && onSel != nil {
+		onSel(idx, text) // синхронно — вне lv.mu, как у клика
+	}
+}
+
+// ─── Перестановка строк перетаскиванием (GG-85) ─────────────────────────────
+
+// listReorderThreshold — сколько точек нужно провести, чтобы нажатие стало
+// перетаскиванием, а не щелчком по строке.
+const listReorderThreshold = 4
+
+// insertIndexAtLocked — позиция вставки (0..len) для координаты y: строка
+// делится пополам, и ниже середины строка встаёт уже под неё.
+func (lv *ListView) insertIndexAtLocked(y int) int {
+	if lv.ItemHeight <= 0 {
+		return 0
+	}
+	rel := y - lv.bounds.Min.Y + lv.scrollY
+	idx := (rel + lv.ItemHeight/2) / lv.ItemHeight
+	if idx < 0 {
+		idx = 0
+	}
+	if idx > len(lv.items) {
+		idx = len(lv.items)
+	}
+	return idx
+}
+
+// updateReorderLocked ведёт перетаскивание: до порога — ничего, после —
+// двигает полосу вставки.
+func (lv *ListView) updateReorderLocked(y int) {
+	if lv.dragArmed {
+		dy := y - lv.dragItemY
+		if dy < 0 {
+			dy = -dy
+		}
+		if dy < listReorderThreshold {
+			return
+		}
+		lv.dragArmed = false // порог пройден: это перетаскивание
+	}
+	lv.dragTo = lv.insertIndexAtLocked(y)
+}
+
+// applyReorderLocked переставляет строку from на позицию вставки to и
+// возвращает её новый индекс (-1 — ничего не изменилось).
+func (lv *ListView) applyReorderLocked(from, to int) int {
+	if from < 0 || from >= len(lv.items) || to < 0 {
+		return -1
+	}
+	final := to
+	if final > from {
+		final-- // строку сначала вынули, всё после неё сдвинулось
+	}
+	if final < 0 {
+		final = 0
+	}
+	if final >= len(lv.items) {
+		final = len(lv.items) - 1
+	}
+	if final == from {
+		return -1
+	}
+	item := lv.items[from]
+	rest := append(lv.items[:from:from], lv.items[from+1:]...)
+	lv.items = append(rest[:final:final], append([]string{item}, rest[final:]...)...)
+
+	// Выделение едет со строкой: тянули именно её.
+	switch {
+	case lv.selected == from:
+		lv.selected = final
+	case from < lv.selected && lv.selected <= final:
+		lv.selected--
+	case final <= lv.selected && lv.selected < from:
+		lv.selected++
+	}
+	return final
 }
 
 func (lv *ListView) contentHeight() int {
@@ -345,6 +455,10 @@ func (lv *ListView) Draw(ctx DrawContext) {
 	selected := lv.selected
 	hoverIdx := lv.hoverIdx
 	scrollY := lv.scrollY
+	dragTo := -1
+	if lv.dragItem >= 0 && !lv.dragArmed {
+		dragTo = lv.dragTo // порог пройден: показываем, куда встанет строка
+	}
 	lv.mu.Unlock()
 
 	// Фон
@@ -380,6 +494,18 @@ func (lv *ListView) Draw(ctx DrawContext) {
 		// Текст
 		textY := itemY + (lv.ItemHeight-13)/2
 		ctx.DrawText(items[i], b.Min.X+8, textY, lv.TextColor)
+	}
+
+	// Полоса вставки: куда встанет перетаскиваемая строка (GG-85).
+	if dragTo >= 0 {
+		y := b.Min.Y + dragTo*lv.ItemHeight - scrollY
+		if y < b.Min.Y+1 {
+			y = b.Min.Y + 1
+		}
+		if y > b.Max.Y-1 {
+			y = b.Max.Y - 1
+		}
+		ctx.FillRect(b.Min.X, y-1, cw, 2, lv.ThumbHoverBG)
 	}
 
 	ctx.ClearClip()
@@ -515,6 +641,14 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 		if idx >= 0 {
 			changed := lv.selected != idx
 			lv.selected = idx
+			// Перетаскивание строки начнётся, если мышь пройдёт порог; до
+			// этого нажатие остаётся обычным щелчком (GG-85).
+			if lv.Reorderable {
+				lv.dragArmed = true
+				lv.dragItem = idx
+				lv.dragTo = idx
+				lv.dragItemY = e.Y
+			}
 			// Детект двойного клика: тот же элемент в пределах 400 мс.
 			now := time.Now()
 			dbl := idx == lv.lastClickIdx && now.Sub(lv.lastClickTime) < 400*time.Millisecond
@@ -536,6 +670,22 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 			return true
 		}
 	} else {
+		// Отпустили перетаскиваемую строку.
+		if lv.dragItem >= 0 {
+			from, to, armed := lv.dragItem, lv.dragTo, lv.dragArmed
+			lv.dragItem, lv.dragTo, lv.dragArmed = -1, -1, false
+			final := -1
+			if !armed { // порог пройден — это было перетаскивание
+				final = lv.applyReorderLocked(from, to)
+			}
+			onReorder := lv.OnReorder
+			lv.mu.Unlock()
+			lv.Invalidate()
+			if final >= 0 && onReorder != nil {
+				onReorder(from, final)
+			}
+			return true
+		}
 		if lv.dragging {
 			lv.dragging = false
 			lv.mu.Unlock()
@@ -587,6 +737,10 @@ func (lv *ListView) WantsCapture(e MouseEvent) bool {
 	}
 	lv.mu.Lock()
 	defer lv.mu.Unlock()
+	// Перетаскивание строки тоже должно переживать выход курсора за список.
+	if lv.Reorderable && lv.itemIndexAt(e.X, e.Y) >= 0 {
+		return true
+	}
 	if !lv.needsScrollbar() {
 		return false
 	}
@@ -603,11 +757,19 @@ func (lv *ListView) OnMouseMove(x, y int) {
 
 	// Авто-инвалидация при фактическом изменении (LIFO — выполняется до Unlock).
 	oldScroll, oldHover, oldThumb := lv.scrollY, lv.hoverIdx, lv.thumbHovered
+	oldTo := lv.dragTo
 	defer func() {
-		if lv.scrollY != oldScroll || lv.hoverIdx != oldHover || lv.thumbHovered != oldThumb {
+		if lv.scrollY != oldScroll || lv.hoverIdx != oldHover ||
+			lv.thumbHovered != oldThumb || lv.dragTo != oldTo {
 			lv.Invalidate()
 		}
 	}()
+
+	// Перетаскивание строки ведёт полосу вставки и hover не трогает.
+	if lv.dragItem >= 0 {
+		lv.updateReorderLocked(y)
+		return
+	}
 
 	if lv.dragging {
 		dy := y - lv.dragStartY

@@ -1349,8 +1349,11 @@ func buildXAMLListView(el xElement) Widget {
 
 	if sel := el.attr("SelectedIndex", "Selected"); sel != "" {
 		if idx, err := strconv.Atoi(sel); err == nil {
-			lv.SetSelected(idx)
+			lv.SetSelectedQuiet(idx) // начальное выделение — не выбор пользователя
 		}
+	}
+	if strings.EqualFold(el.attr("Reorderable"), "true") {
+		lv.Reorderable = true // строки переставляются перетаскиванием (GG-85)
 	}
 	if ih := el.attr("ItemHeight"); ih != "" {
 		if v := xatoi(ih); v > 0 {
