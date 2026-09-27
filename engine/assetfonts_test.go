@@ -70,6 +70,7 @@ func TestAssetFontLicensesPresent(t *testing.T) {
 		"Inter":      "Inter-OFL.txt",
 		"Liberation": "Liberation-OFL.txt",
 		"DejaVu":     "DejaVu-LICENSE.txt",
+		"GolosText":  "GolosText-OFL.txt",
 		"Go-":        "Go-LICENSE.txt",
 	}
 	entries, err := os.ReadDir(assetFontsDir)
