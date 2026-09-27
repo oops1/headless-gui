@@ -275,6 +275,23 @@ type Window struct {
 	// SetNativeHosted — там размером ведает ОС.
 	OnDragMove func(dx, dy int)
 
+	// OnNativeMove просит хоста начать перемещение окна средствами ОС — одним
+	// вызовом на нажатие, а не потоком дельт, как OnDragMove.
+	//
+	// Так устроен Wayland: клиент не знает своей позиции и не может её
+	// задать, он лишь просит компоновщик «тащи это окно за курсором».
+	// Вернул true — перемещение ведёт система, и OnDragMove для этого
+	// нажатия не зовётся. Вернул false (или хук не задан) — всё как раньше.
+	OnNativeMove func() bool
+
+	// OnNativeResize просит хоста начать изменение размера за край окна
+	// средствами ОС. edges — биты краёв (NativeEdgeTop и далее).
+	//
+	// Задан — значит край окна снова живой в нативном режиме: движок
+	// показывает над ним курсор и ловит нажатие, но размер меняет система.
+	// Вернул false — виджетный ресайз, как у окна на канвасе.
+	OnNativeResize func(edges int) bool
+
 	// nativeHosted — окно живёт в нативном окне ОС (window.Window): размер и
 	// положение меняет система, виджетный ресайз за края конфликтовал бы с ней.
 	nativeHosted bool
@@ -585,6 +602,33 @@ const (
 	edgeW                        // левый край
 	edgeE                        // правый край
 )
+
+// Биты краёв окна для OnNativeResize. Хост получает их вместо внутреннего
+// winEdge: значения устойчивы и не зависят от порядка констант выше.
+const (
+	NativeEdgeTop    = 1
+	NativeEdgeBottom = 2
+	NativeEdgeLeft   = 4
+	NativeEdgeRight  = 8
+)
+
+// nativeEdgeBits переводит внутреннюю маску краёв в биты NativeEdge*.
+func nativeEdgeBits(e winEdge) int {
+	bits := 0
+	if e&edgeN != 0 {
+		bits |= NativeEdgeTop
+	}
+	if e&edgeS != 0 {
+		bits |= NativeEdgeBottom
+	}
+	if e&edgeW != 0 {
+		bits |= NativeEdgeLeft
+	}
+	if e&edgeE != 0 {
+		bits |= NativeEdgeRight
+	}
+	return bits
+}
 
 const (
 	winResizeBorder = 6   // ширина полосы-захвата вдоль каждого края, px
@@ -1290,9 +1334,16 @@ func (w *Window) WantsCapture(e MouseEvent) bool {
 // приложение вправе забрать себе перемещение окна (например, чтобы рисовать
 // контур или тащить окно по своей сцене), не теряя изменение размера.
 func (w *Window) edgeResizeEnabled() bool {
-	return w.Resize == ResizeModeCanResize &&
-		w.Style != WindowStyleNone &&
-		!w.nativeHosted
+	if w.Resize != ResizeModeCanResize || w.Style == WindowStyleNone {
+		return false
+	}
+	// Нативное окно, чей хост умеет ресайз за край сам (Wayland: серверной
+	// рамки нет, край обязан обработать клиент), край держит живым: движок
+	// показывает там курсор и ловит нажатие, а размер меняет система.
+	if w.nativeHosted {
+		return w.OnNativeResize != nil
+	}
+	return true
 }
 
 // SetNativeHosted помечает окно как живущее в нативном окне ОС: размер и
@@ -1633,6 +1684,16 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 	// (проверяется до drag заголовка: верхняя 6px-зона — resize, ниже — drag).
 	if dir := w.resizeEdgeAt(e.X, e.Y); dir != edgeNone {
 		DismissAll(w) // закрываем dropdown/popup перед resize
+		// Размер меняет система — своего ресайза не начинаем: нажатие
+		// забирает себе оконный менеджер, и отпускания мы можем не увидеть.
+		//
+		// Отказ хоста тоже не повод менять bounds самим: окно живёт в окне
+		// ОС, и виджет, уехавший от него, — рассинхрон размеров. Клик просто
+		// ничего не делает, как и раньше в нативном режиме.
+		if w.nativeHosted && w.OnNativeResize != nil {
+			w.OnNativeResize(nativeEdgeBits(dir))
+			return true
+		}
 		w.resizing = true
 		w.resizeDir = dir
 		w.resizeStart = w.Bounds()
@@ -1644,6 +1705,13 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 	// Нажатие на заголовок или на объявленную область — начинаем drag
 	if (pt.In(w.titleBarRect()) && !w.titleBarChildHit(pt)) || w.dragAreaHit(pt) {
 		DismissAll(w) // закрываем dropdown/popup перед drag
+		// Перемещение средствами ОС: одна просьба на нажатие вместо потока
+		// дельт (см. OnNativeMove).
+		if w.nativeHosted && w.OnNativeMove != nil {
+			if w.OnNativeMove() {
+				return true
+			}
+		}
 		w.dragging = true
 		w.dragStartX = e.X
 		w.dragStartY = e.Y

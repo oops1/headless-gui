@@ -31,6 +31,7 @@ type X11Window struct {
 	screen    x11Screen
 	rootWin   uint32
 	wid       uint32 // window ID
+	appID     string // идентификатор для WM_CLASS (пусто — имя исполняемого файла)
 	gcID      uint32 // graphics context ID
 	width     int
 	height    int
@@ -325,6 +326,11 @@ func (w *X11Window) Create(title string, width, height int) error {
 
 	// Window title
 	w.x11SetTitle(w.wid, title)
+
+	// WM_CLASS — по нему панель задач и переключатель окон находят значок и
+	// .desktop программы. Ставится ДО MapWindow: WM читает свойство, когда
+	// окно появляется. То же значение уходит под Wayland в app_id.
+	w.x11SetClass(w.wid, w.effectiveAppID())
 
 	// Минимальный размер, заданный до создания окна: WM читает
 	// WM_NORMAL_HINTS при показе окна, поэтому свойство ставится до
@@ -950,6 +956,41 @@ func (w *X11Window) x11SetTitle(wid uint32, title string) {
 			w.x11ChangeProperty(wid, w.atomNetWMIconName, w.atomUTF8String, 8, data)
 		}
 	}
+}
+
+// SetAppID задаёт идентификатор приложения (WM_CLASS). Реализует appIDSetter.
+func (w *X11Window) SetAppID(id string) {
+	if id == "" {
+		return
+	}
+	w.appID = id
+	if w.wid != 0 {
+		w.x11SetClass(w.wid, id)
+	}
+}
+
+// effectiveAppID — заданный приложением идентификатор или имя исполняемого файла.
+func (w *X11Window) effectiveAppID() string {
+	if w.appID != "" {
+		return w.appID
+	}
+	return defaultAppID(os.Args[0])
+}
+
+// x11SetClass пишет WM_CLASS (атом 67, тип STRING): две строки подряд, каждая
+// с завершающим NUL, — instance и class (ICCCM §4.1.2.5). Класс с заглавной
+// буквы: так его пишут Xt-программы, и так его ждут правила оконных
+// менеджеров.
+func (w *X11Window) x11SetClass(wid uint32, id string) {
+	class := id
+	if r := []rune(class); len(r) > 0 && r[0] >= 'a' && r[0] <= 'z' {
+		r[0] -= 'a' - 'A'
+		class = string(r)
+	}
+	data := append([]byte(id), 0)
+	data = append(data, class...)
+	data = append(data, 0)
+	w.x11ChangeProperty(wid, 67 /*WM_CLASS*/, 31 /*STRING*/, 8, data)
 }
 
 func (w *X11Window) x11ChangeProperty(wid, property, propType uint32, format int, data []byte) {

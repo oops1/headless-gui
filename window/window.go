@@ -278,6 +278,11 @@ type Window struct {
 	resizable    bool
 	cornerRadius int // скругление углов окна (0 = прямые); применяется после Create
 
+	// appID — как программа называет себя среде рабочего стола: по нему
+	// панель задач ищет значок и .desktop-файл (см. SetAppID). Пусто —
+	// бэкенд подставляет имя исполняемого файла.
+	appID string
+
 	// ── ContentFit (letterbox) ───────────────────────────────────────────────
 	fitMode            ContentFitMode
 	fitBaseW, fitBaseH int // логический дизайн-размер (фиксируется в Run)
@@ -348,6 +353,22 @@ func (win *Window) SetResizable(v bool) *Window {
 	win.resizable = v
 	if win.native != nil {
 		win.native.SetResizable(v)
+	}
+	return win
+}
+
+// SetAppID задаёт идентификатор приложения для среды рабочего стола: по нему
+// панель задач находит значок и <id>.desktop программы (Wayland —
+// xdg_toplevel.app_id, X11 — WM_CLASS).
+//
+// Не задан — бэкенд берёт имя исполняемого файла. Бэкенды, которым это
+// понятие чуждо (Win32, macOS), вызов игнорируют.
+func (win *Window) SetAppID(id string) *Window {
+	win.appID = id
+	if win.native != nil {
+		if s, ok := win.native.(appIDSetter); ok {
+			s.SetAppID(id)
+		}
 	}
 	return win
 }
@@ -435,6 +456,14 @@ func (win *Window) Run() error {
 		win.pickupWidgetMinSize(ww.MinWidth, ww.MinHeight)
 	}
 	win.applyMinSize()
+
+	// app_id — ДО Create: Wayland отправляет его вместе с первым commit,
+	// а X11 обязан выставить WM_CLASS до показа окна.
+	if win.appID != "" {
+		if s, ok := win.native.(appIDSetter); ok {
+			s.SetAppID(win.appID)
+		}
+	}
 
 	if err := win.native.Create(win.title, pw, ph); err != nil {
 		return err
@@ -627,6 +656,14 @@ func (win *Window) setupWidgetWindow() {
 		}
 		x, y := win.native.GetPosition()
 		win.native.SetPosition(x+dx, y+dy)
+	}
+
+	// Перемещение и ресайз силами системы, если бэкенд так умеет (Wayland).
+	// Бэкенд без этой способности (Win32, X11) оставляет хуки пустыми, и
+	// окно двигается прежним путём — через OnDragMove и SetPosition.
+	if mv, ok := win.native.(interactiveMover); ok {
+		ww.OnNativeMove = mv.BeginMove
+		ww.OnNativeResize = mv.BeginResize
 	}
 
 	// Кнопка × → закрытие, если приложение не против (SetOnCloseRequest).

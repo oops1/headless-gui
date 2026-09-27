@@ -50,11 +50,15 @@ eng.RegisterFontFile("Roboto", "assets/fonts/Roboto-Regular.ttf")
 | **Liberation Mono** | `LiberationMono` | SIL OFL-1.1 | Regular/Bold/Italic/BoldItalic | `Liberation-OFL.txt` |
 | **DejaVu Sans** | `DejaVuSans` | Bitstream Vera + PD | Regular/Bold/Oblique/BoldOblique | `DejaVu-LICENSE.txt` |
 | **DejaVu Sans Mono** | `DejaVuSansMono` | Bitstream Vera + PD | Regular/Bold/Oblique/BoldOblique | `DejaVu-LICENSE.txt` |
+| **Golos Text** | `GolosText` | SIL OFL-1.1 | Regular/Medium/SemiBold/Bold/ExtraBold/Black | `GolosText-OFL.txt` |
 | **Go Regular** | `Go-Regular` | BSD-3-Clause | Regular | `Go-LICENSE.txt` |
 
 Что чем закрывается:
 
 - **Roboto, Open Sans, Inter** — интерфейсные гротески, ими рисуются виджеты.
+- **Golos Text** — гротеск с полной кириллицей и шестью весами: единственное
+  здешнее семейство, где вес выбирается начертанием от Regular до Black
+  (`FontFamily="GolosText-SemiBold"`), а не только Regular/Bold.
 - **Liberation Sans и Mono** — метрически совместимы с Arial и Courier New:
   та же ширина строки при том же кегле. Нужны там, где макет пришёл из Windows
   и должен совпасть по ширине, а не только по начертанию.
