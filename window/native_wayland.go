@@ -632,6 +632,8 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		nh := int(int32(binary.LittleEndian.Uint32(b[4:8])))
 		// states: array из uint32
 		active, maximized, fullscreen := wlParseStates(b[8:])
+		wlLog("toplevel.configure: %dx%d active=%v maximized=%v fullscreen=%v",
+			nw, nh, active, maximized, fullscreen)
 		w.maximized.Store(maximized)
 		w.fullscreen.Store(fullscreen)
 		if w.onActivate != nil {
@@ -1117,6 +1119,7 @@ func (w *WaylandWindow) BeginMove() bool {
 	if w.toplevelID == 0 || w.seatID == 0 || serial == 0 {
 		return false // нечем доказать, что перемещение начал пользователь
 	}
+	wlLog("move: seat=%d serial=%d", w.seatID, serial)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelMove).
 		putUint(w.seatID).putUint(serial), -1)
 	// Нажатие ушло компоновщику: он пришлёт leave, а отпускание — нет.
@@ -1137,6 +1140,7 @@ func (w *WaylandWindow) BeginResize(edges int) bool {
 	if e == xdgResizeEdgeNone {
 		return false
 	}
+	wlLog("resize: seat=%d serial=%d edges=%d", w.seatID, serial, e)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelResize).
 		putUint(w.seatID).putUint(serial).putUint(e), -1)
 	w.releaseHeldButtons()
@@ -1166,6 +1170,7 @@ func (w *WaylandWindow) Minimize() {
 	if w.toplevelID == 0 {
 		return
 	}
+	wlLog("set_minimized")
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinimized), -1)
 }
 
@@ -1177,6 +1182,7 @@ func (w *WaylandWindow) Maximize() {
 	}
 	// Развернуть окно, размер которого зафиксирован (min == max), компоновщик
 	// не сможет: снимаем фиксацию так же, как для ресайза за край.
+	wlLog("set_maximized")
 	w.applySizeLimits(true)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaximized), -1)
 }
@@ -1186,6 +1192,7 @@ func (w *WaylandWindow) Restore() {
 	if w.toplevelID == 0 {
 		return
 	}
+	wlLog("unset_maximized")
 	w.send(newWlMsg(w.toplevelID, xdgToplevelUnsetMaximized), -1)
 	if !w.resizable.Load() {
 		// Размер возвращаем под прежний запрет: компоновщик пришлёт
