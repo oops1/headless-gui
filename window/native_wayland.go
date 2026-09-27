@@ -31,6 +31,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -62,6 +63,8 @@ const (
 	// wl_shm / pool / buffer
 	wlShmCreatePool       = 0
 	wlShmPoolCreateBuffer = 0
+	wlShmPoolDestroy      = 1
+	wlBufferDestroy       = 0
 	wlBufferEvRelease     = 0
 
 	// wl_seat
@@ -100,15 +103,10 @@ const (
 	xdgSurfaceAckConfigure = 4
 	xdgSurfaceEvConfigure  = 0
 
-	// xdg_toplevel
-	xdgToplevelSetTitle   = 2
-	xdgToplevelSetAppID   = 3
-	xdgToplevelSetMinSize = 8
-	xdgToplevelSetMaxSize = 7
+	// xdg_toplevel — опкоды запросов в waylandwire.go (их проверяют тесты),
+	// здесь только события.
 	xdgToplevelEvConfigure = 0
 	xdgToplevelEvClose     = 1
-
-	xdgStateActivated = 4
 
 	wlShmFormatXRGB8888 = 1
 
@@ -211,6 +209,51 @@ type WaylandWindow struct {
 	// координаты указателя (motion приходит в fixed 24.8)
 	ptrX, ptrY int
 
+	// Serial'ы указателя. Компоновщик принимает move/resize/set_cursor
+	// только с serial'ом недавнего ввода: это доказательство, что действие
+	// начал пользователь, а не программа сама себе.
+	//
+	// Пишет их цикл событий, читает горутина движка (кнопка заголовка, край
+	// окна) — отсюда atomic, а не голые поля.
+	ptrEnterSerial  atomic.Uint32 // последний wl_pointer.enter — для set_cursor
+	ptrButtonSerial atomic.Uint32 // последнее НАЖАТИЕ — для move/resize
+	ptrButtons      atomic.Uint32 // маска зажатых кнопок (биты по id движка)
+
+	// Состояния из последнего xdg_toplevel.configure: пишет цикл событий,
+	// читает движок (кнопка «развернуть» спрашивает IsMaximized).
+	maximized  atomic.Bool
+	fullscreen atomic.Bool
+
+	// pendingResize — пришёл новый размер, кадра под него ещё нет. Пока он
+	// взведён, ack_configure не сопровождается рекоммитом: старый кадр в
+	// новом окне композитор растянул бы, и ресайз шёл бы рывками.
+	pendingResize bool
+
+	// resizable — разрешён ли пользователю ресайз. Create фиксирует размер
+	// (min == max), SetResizable снимает фиксацию: под Wayland это
+	// единственный способ запретить или разрешить растягивание окна.
+	resizable atomic.Bool
+
+	// appID — идентификатор для среды рабочего стола (xdg_toplevel.app_id).
+	// Пусто до Create — подставится имя исполняемого файла.
+	appID string
+
+	// Курсор (wayland_cursor_linux.go): текущая форма, буферы форм и
+	// поверхность, которую компоновщик показывает вместо курсора. Форму
+	// задаёт движок, применяет — и движок, и цикл событий (на enter),
+	// поэтому всё под cursorMu.
+	cursorMu         sync.Mutex
+	cursorShape      int
+	cursorSet        bool
+	cursorSurfID     uint32
+	cursorPoolID     uint32
+	cursorFD         int
+	cursorData       []byte
+	cursorSlots      map[int]wlCursorSlot
+	gCursorShapeMgr  uint32 // имя глобала wp_cursor_shape_manager_v1
+	cursorShapeMgrID uint32
+	cursorShapeDevID uint32
+
 	rxFDs []int // fd, принятые через SCM_RIGHTS (keymap и т.п.)
 
 	// Клавиатура: распарсенный xkb-keymap и состояние модификаторов
@@ -289,43 +332,9 @@ func newWaylandWindow() *WaylandWindow {
 
 // ─── Отправка запросов ───────────────────────────────────────────────────────
 
-// wlMsg — конструктор исходящего сообщения.
-type wlMsg struct {
-	buf []byte
-}
-
-func newWlMsg(objectID uint32, opcode uint16) *wlMsg {
-	m := &wlMsg{buf: make([]byte, 8, 32)}
-	binary.LittleEndian.PutUint32(m.buf[0:4], objectID)
-	// размер заполним при отправке; opcode — младшие 16 бит второго слова
-	binary.LittleEndian.PutUint16(m.buf[4:6], opcode)
-	return m
-}
-
-func (m *wlMsg) putUint(v uint32) *wlMsg {
-	var b [4]byte
-	binary.LittleEndian.PutUint32(b[:], v)
-	m.buf = append(m.buf, b[:]...)
-	return m
-}
-
-func (m *wlMsg) putInt(v int32) *wlMsg { return m.putUint(uint32(v)) }
-
-// putString — строка протокола: len (с NUL) + байты + NUL + паддинг до 4.
-func (m *wlMsg) putString(s string) *wlMsg {
-	n := len(s) + 1
-	m.putUint(uint32(n))
-	m.buf = append(m.buf, s...)
-	m.buf = append(m.buf, 0)
-	for len(m.buf)%4 != 0 {
-		m.buf = append(m.buf, 0)
-	}
-	return m
-}
-
 // send пишет сообщение (под w.mu). oobFD >= 0 — передать fd через SCM_RIGHTS.
 func (w *WaylandWindow) send(m *wlMsg, oobFD int) error {
-	binary.LittleEndian.PutUint16(m.buf[6:8], uint16(len(m.buf)))
+	m.bytes() // проставить длину в заголовке
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if oobFD >= 0 {
@@ -472,7 +481,7 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	w.toplevelID = w.newID()
 	w.send(newWlMsg(w.xdgSurfaceID, xdgSurfaceGetToplevel).putUint(w.toplevelID), -1)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetTitle).putString(title), -1)
-	w.send(newWlMsg(w.toplevelID, xdgToplevelSetAppID).putString("headless-gui"), -1)
+	w.send(newWlMsg(w.toplevelID, xdgToplevelSetAppID).putString(w.effectiveAppID()), -1)
 	// фиксируем размер: движок сам управляет разрешением
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(int32(width)).putInt(int32(height)), -1)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(int32(width)).putInt(int32(height)), -1)
@@ -596,6 +605,10 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		case "wl_data_device_manager":
 			w.gDataDevMgr = name
 			w.gDataDevMgrVer = version
+		case "wp_cursor_shape_manager_v1":
+			// Необязательное расширение: с ним курсор рисует компоновщик
+			// из системной темы, без него — своя картинка.
+			w.gCursorShapeMgr = name
 		}
 
 	case obj == w.wmBaseID && opcode == xdgWmBaseEvPing:
@@ -608,25 +621,27 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		w.configured = true
 		// Состояние из configure применяется композитором на СЛЕДУЮЩЕМ
 		// commit после ack. Движок on-demand может молчать (UI статичен) —
-		// рекоммитим последний кадр сами, иначе окно не замаппится.
-		w.recommitLast()
+		// рекоммитим последний кадр сами, иначе окно не замаппится. Кадр под
+		// новый размер уже в пути — его и ждём (см. pendingResize).
+		if !w.pendingResize {
+			w.recommitLast()
+		}
 
 	case obj == w.toplevelID && opcode == xdgToplevelEvConfigure:
 		nw := int(int32(binary.LittleEndian.Uint32(b[0:4])))
 		nh := int(int32(binary.LittleEndian.Uint32(b[4:8])))
 		// states: array из uint32
-		alen := int(binary.LittleEndian.Uint32(b[8:12]))
-		active := false
-		for i := 0; i+4 <= alen; i += 4 {
-			if binary.LittleEndian.Uint32(b[12+i:16+i]) == xdgStateActivated {
-				active = true
-			}
-		}
+		active, maximized, fullscreen := wlParseStates(b[8:])
+		w.maximized.Store(maximized)
+		w.fullscreen.Store(fullscreen)
 		if w.onActivate != nil {
 			w.onActivate(active)
 		}
+		// 0×0 — «решай сам»: размер не трогаем (так приходит configure при
+		// первом показе и при выходе из развёрнутого состояния).
 		if nw > 0 && nh > 0 && (nw != w.width || nh != w.height) {
 			w.width, w.height = nw, nh
+			w.pendingResize = true
 			if w.onResize != nil {
 				w.onResize(nw, nh)
 			}
@@ -686,8 +701,18 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 	switch opcode {
 	case wlPointerEvEnter:
 		// serial, surface, x(fixed), y(fixed)
+		w.ptrEnterSerial.Store(binary.LittleEndian.Uint32(b[0:4]))
 		w.ptrX = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
 		w.ptrY = int(int32(binary.LittleEndian.Uint32(b[12:16]))) >> 8
+		// Форму курсора ставим сразу: без set_cursor после enter курсор над
+		// окном остаётся тем, каким его оставил сосед.
+		w.applyCursor()
+	case wlPointerEvLeave:
+		// Указатель ушёл — в том числе потому, что компоновщик забрал
+		// нажатие себе (начались move/resize). Отпускания мы уже не
+		// получим, поэтому отпускаем зажатые кнопки сами: иначе движок
+		// навсегда остался бы с «нажатой» кнопкой и захватом мыши.
+		w.releaseHeldButtons()
 	case wlPointerEvMotion:
 		// time, x(fixed), y(fixed)
 		w.ptrX = int(int32(binary.LittleEndian.Uint32(b[4:8]))) >> 8
@@ -697,6 +722,7 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		}
 	case wlPointerEvButton:
 		// serial, time, button, state
+		serial := binary.LittleEndian.Uint32(b[0:4])
 		btn := binary.LittleEndian.Uint32(b[8:12])
 		pressed := binary.LittleEndian.Uint32(b[12:16]) == 1
 		id := -1
@@ -708,8 +734,27 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		case btnMiddle:
 			id = 2
 		}
-		if id >= 0 && w.onMouseButton != nil {
-			w.onMouseButton(w.ptrX, w.ptrY, id, pressed)
+		if pressed {
+			// Serial нажатия — пропуск к xdg_toplevel.move/resize: им
+			// клиент доказывает, что действие начал пользователь.
+			w.ptrButtonSerial.Store(serial)
+		}
+		if id >= 0 {
+			// Or/And у atomic.Uint32 появились в go1.23, а модуль держит
+			// go1.22 — обходимся CAS-циклом.
+			for {
+				old := w.ptrButtons.Load()
+				next := old | 1<<uint(id)
+				if !pressed {
+					next = old &^ (1 << uint(id))
+				}
+				if w.ptrButtons.CompareAndSwap(old, next) {
+					break
+				}
+			}
+			if w.onMouseButton != nil {
+				w.onMouseButton(w.ptrX, w.ptrY, id, pressed)
+			}
 		}
 	case wlPointerEvAxis:
 		// time, axis, value(wl_fixed 24.8): axis 0 = вертикаль, 1 = горизонталь;
@@ -848,6 +893,63 @@ func (w *WaylandWindow) setupPool(width, height int) error {
 	return nil
 }
 
+// ensurePool держит кадровые буферы в размер окна.
+//
+// Компоновщик показывает буфер как есть: после ресайза кадр старого размера
+// остаётся островом в новом окне. Поэтому при каждой смене размера пул
+// пересоздаётся — так под Wayland поступают все клиенты.
+func (w *WaylandWindow) ensurePool(width, height int) error {
+	w.mu.Lock()
+	same := w.poolID != 0 && w.poolW == width && w.poolH == height
+	w.mu.Unlock()
+	if same {
+		return nil
+	}
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("wayland: размер буфера %dx%d", width, height)
+	}
+	w.destroyPool()
+	return w.setupPool(width, height)
+}
+
+// destroyPool освобождает кадровые буферы и их память.
+//
+// Буферы уничтожаются ДО munmap: память пула, из которой композитор ещё
+// читает, освобождать нельзя — сначала он должен узнать, что буферов больше
+// нет. Ждать release при этом незачем: wl_buffer.destroy законен и для
+// занятого буфера, содержимое композитор уже скопировал или скопирует по
+// своим правилам.
+func (w *WaylandWindow) destroyPool() {
+	w.mu.Lock()
+	poolID := w.poolID
+	bufs := w.bufID
+	data := w.shmData
+	fd := w.shmFD
+	w.poolID, w.bufID = 0, [2]uint32{}
+	w.shmData, w.shmFD = nil, 0
+	w.bufBusy = [2]bool{}
+	w.curBuf = 0
+	w.hasFrame = false
+	w.poolW, w.poolH, w.stride = 0, 0, 0
+	w.dirtyTrack = wlDirtyTracker{}
+	w.mu.Unlock()
+
+	for _, id := range bufs {
+		if id != 0 {
+			w.send(newWlMsg(id, wlBufferDestroy), -1)
+		}
+	}
+	if poolID != 0 {
+		w.send(newWlMsg(poolID, wlShmPoolDestroy), -1)
+	}
+	if data != nil {
+		unix.Munmap(data)
+	}
+	if fd > 0 {
+		unix.Close(fd)
+	}
+}
+
 // recommitLast повторно коммитит последний закоммиченный буфер (полный
 // damage) — применяет состояние после ack_configure без нового кадра движка.
 func (w *WaylandWindow) recommitLast() {
@@ -876,6 +978,7 @@ func (w *WaylandWindow) attachAndCommit(dirty image.Rectangle) {
 	w.bufBusy[w.curBuf] = true
 	w.curBuf ^= 1
 	w.hasFrame = true
+	w.pendingResize = false
 	w.mu.Unlock()
 }
 
@@ -934,10 +1037,22 @@ func (w *WaylandWindow) waitBufFree() bool {
 // BlitRGBADirty конвертирует и коммитит только изменившуюся область. Если
 // композитор ещё держит целевой буфер — кадр пропускается, область копится.
 func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
-	if w.surfaceID == 0 || img == nil || w.closed || w.shmData == nil {
+	if w.surfaceID == 0 || img == nil || w.closed {
 		return
 	}
 	b := img.Bounds()
+	// Кадр другого размера — это ресайз: пул перестраивается под него, и
+	// область рисуется целиком (в новых буферах нет ничего).
+	if b.Dx() != w.poolW || b.Dy() != w.poolH {
+		if err := w.ensurePool(b.Dx(), b.Dy()); err != nil {
+			wlLog("пул под %dx%d: %v", b.Dx(), b.Dy(), err)
+			return
+		}
+		dirty = b
+	}
+	if w.shmData == nil {
+		return
+	}
 	width, height := min(b.Dx(), w.poolW), min(b.Dy(), w.poolH)
 	dirty = dirty.Intersect(image.Rect(0, 0, width, height))
 	if dirty.Empty() {
@@ -964,17 +1079,14 @@ func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 // ─── Управление окном ────────────────────────────────────────────────────────
 
 func (w *WaylandWindow) Close() {
+	w.closeCursor()
 	w.closed = true
+	// Соединение закрываем ПОСЛЕ памяти: destroyPool ещё пишет в сокет
+	// (wl_buffer.destroy, wl_shm_pool.destroy), а Close по протоколу — это
+	// разрыв, после которого композитор объекты и так забудет.
+	w.destroyPool()
 	if w.conn != nil {
 		w.conn.Close()
-	}
-	if w.shmData != nil {
-		unix.Munmap(w.shmData)
-		w.shmData = nil
-	}
-	if w.shmFD > 0 {
-		unix.Close(w.shmFD)
-		w.shmFD = 0
 	}
 }
 
@@ -987,13 +1099,104 @@ func (w *WaylandWindow) SetTitle(title string) {
 
 func (w *WaylandWindow) SetSize(width, height int)  { w.width, w.height = width, height }
 func (w *WaylandWindow) GetSize() (int, int)        { return w.width, w.height }
-func (w *WaylandWindow) SetPosition(x, y int)       {} // Wayland: позицией владеет композитор
-func (w *WaylandWindow) GetPosition() (int, int)    { return 0, 0 }
-func (w *WaylandWindow) Minimize()                  {} // set_minimized — при необходимости
-func (w *WaylandWindow) Maximize()                  {}
-func (w *WaylandWindow) Restore()                   {}
-func (w *WaylandWindow) IsMaximized() bool          { return false }
-func (w *WaylandWindow) SetCornerRadius(int)        {}
+func (w *WaylandWindow) SetPosition(x, y int)    {} // Wayland: позицией владеет композитор
+func (w *WaylandWindow) GetPosition() (int, int) { return 0, 0 }
+func (w *WaylandWindow) SetCornerRadius(int)     {}
+
+// ─── Перемещение, размер и состояние окна (xdg_toplevel) ─────────────────────
+//
+// Под Wayland окном распоряжается компоновщик. Позиции клиент не знает и
+// задать её не может — он лишь ПРОСИТ: «тащи меня за курсором», «тяни этот
+// край», «сверни», «разверни». Отказ компоновщика — не ошибка: окно просто
+// остаётся как было.
+
+// BeginMove просит компоновщик тащить окно за курсором (xdg_toplevel.move).
+// Реализует interactiveMover.
+func (w *WaylandWindow) BeginMove() bool {
+	serial := w.ptrButtonSerial.Load()
+	if w.toplevelID == 0 || w.seatID == 0 || serial == 0 {
+		return false // нечем доказать, что перемещение начал пользователь
+	}
+	w.send(newWlMsg(w.toplevelID, xdgToplevelMove).
+		putUint(w.seatID).putUint(serial), -1)
+	// Нажатие ушло компоновщику: он пришлёт leave, а отпускание — нет.
+	// Отпускаем кнопки сразу, не дожидаясь leave, иначе окно уедет с
+	// «зажатой» кнопкой в состоянии движка.
+	w.releaseHeldButtons()
+	return true
+}
+
+// BeginResize просит компоновщик тянуть край окна (xdg_toplevel.resize).
+// edges — биты widget.NativeEdge*. Реализует interactiveMover.
+func (w *WaylandWindow) BeginResize(edges int) bool {
+	serial := w.ptrButtonSerial.Load()
+	if w.toplevelID == 0 || w.seatID == 0 || serial == 0 || !w.resizable.Load() {
+		return false
+	}
+	e := wlResizeEdge(edges)
+	if e == xdgResizeEdgeNone {
+		return false
+	}
+	w.send(newWlMsg(w.toplevelID, xdgToplevelResize).
+		putUint(w.seatID).putUint(serial).putUint(e), -1)
+	w.releaseHeldButtons()
+	return true
+}
+
+// releaseHeldButtons отпускает кнопки, которые движок считает зажатыми.
+//
+// Компоновщик, забравший нажатие под move/resize, отпускания не пришлёт — а
+// движок держит по нажатой кнопке захват мыши. Без этого окно после
+// перетаскивания вело бы себя так, будто кнопку не отпускали.
+func (w *WaylandWindow) releaseHeldButtons() {
+	held := w.ptrButtons.Swap(0)
+	if held == 0 || w.onMouseButton == nil {
+		return
+	}
+	for id := 0; id < 3; id++ {
+		if held&(1<<uint(id)) != 0 {
+			w.onMouseButton(w.ptrX, w.ptrY, id, false)
+		}
+	}
+}
+
+// Minimize сворачивает окно (xdg_toplevel.set_minimized). Обратного запроса в
+// протоколе нет: разворачивает окно обратно сам пользователь через панель.
+func (w *WaylandWindow) Minimize() {
+	if w.toplevelID == 0 {
+		return
+	}
+	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinimized), -1)
+}
+
+// Maximize разворачивает окно (xdg_toplevel.set_maximized). Новый размер
+// придёт в configure — его же ждёт и Restore.
+func (w *WaylandWindow) Maximize() {
+	if w.toplevelID == 0 {
+		return
+	}
+	// Развернуть окно, размер которого зафиксирован (min == max), компоновщик
+	// не сможет: снимаем фиксацию так же, как для ресайза за край.
+	w.applySizeLimits(true)
+	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaximized), -1)
+}
+
+// Restore возвращает окно из развёрнутого состояния.
+func (w *WaylandWindow) Restore() {
+	if w.toplevelID == 0 {
+		return
+	}
+	w.send(newWlMsg(w.toplevelID, xdgToplevelUnsetMaximized), -1)
+	if !w.resizable.Load() {
+		// Размер возвращаем под прежний запрет: компоновщик пришлёт
+		// configure, и фиксация снова сделает окно нерастяжимым.
+		w.applySizeLimits(false)
+	}
+}
+
+// IsMaximized сообщает состояние из последнего configure. Полноэкранное окно
+// для кнопки □ — тоже «развёрнуто»: нажатие на неё должно возвращать окно.
+func (w *WaylandWindow) IsMaximized() bool { return w.maximized.Load() || w.fullscreen.Load() }
 
 // Callbacks
 func (w *WaylandWindow) SetOnResize(fn func(w, h int))                           { w.onResize = fn }
@@ -1164,9 +1367,61 @@ func (w *WaylandWindow) completeOffer(offer uint32, accepted bool) {
 	w.offerDelete(offer)
 }
 
-// SetResizable — no-op: resize у Wayland-окна управляется композитором
-// (xdg-toplevel); ручные зоны краёв пока не реализованы.
-func (w *WaylandWindow) SetResizable(v bool) {}
+// SetResizable разрешает пользователю менять размер окна.
+//
+// Под Wayland запрет выражается фиксацией размера: set_min_size == set_max_size.
+// Create фиксирует окно сразу (движок сам управляет разрешением), и без
+// снятия фиксации ни край, ни кнопка «развернуть» ничего бы не дали.
+func (w *WaylandWindow) SetResizable(v bool) {
+	w.resizable.Store(v)
+	if w.toplevelID == 0 {
+		return // Create применит: SetResizable зовут и до создания окна
+	}
+	w.applySizeLimits(v)
+}
+
+// applySizeLimits задаёт пару min/max размера под текущий режим.
+//
+// resizable: максимума нет (0×0 — «сколько угодно»), минимум — заданный
+// приложением (или ничего). Иначе окно фиксируется на текущем размере.
+func (w *WaylandWindow) applySizeLimits(resizable bool) {
+	if w.toplevelID == 0 {
+		return
+	}
+	if !resizable {
+		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).
+			putInt(int32(w.width)).putInt(int32(w.height)), -1)
+		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).
+			putInt(int32(w.width)).putInt(int32(w.height)), -1)
+		return
+	}
+	mw, mh := int32(0), int32(0)
+	if w.minW > 0 || w.minH > 0 {
+		mw, mh = wlMinSizeArgs(w.minW, w.minH, 1)
+	}
+	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(mw).putInt(mh), -1)
+	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(0).putInt(0), -1)
+}
+
+// SetAppID задаёт идентификатор приложения (xdg_toplevel.app_id): по нему
+// среда рабочего стола ищет значок и <app_id>.desktop. Реализует appIDSetter.
+func (w *WaylandWindow) SetAppID(id string) {
+	if id == "" {
+		return
+	}
+	w.appID = id
+	if w.toplevelID != 0 {
+		w.send(newWlMsg(w.toplevelID, xdgToplevelSetAppID).putString(id), -1)
+	}
+}
+
+// effectiveAppID — заданный приложением идентификатор или имя исполняемого файла.
+func (w *WaylandWindow) effectiveAppID() string {
+	if w.appID != "" {
+		return w.appID
+	}
+	return defaultAppID(os.Args[0])
+}
 
 // SetMinSize задаёт минимальный размер окна через xdg_toplevel.set_min_size
 // (опкод xdgToplevelSetMinSize=8 — тот же, что уже шлёт Create при фиксации
@@ -1188,6 +1443,7 @@ func (w *WaylandWindow) SetMinSize(width, height int) {
 		w.minW, w.minH, w.minWant = width, height, true
 		return
 	}
+	w.minW, w.minH = width, height
 	mw, mh := wlMinSizeArgs(width, height, 1)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(mw).putInt(mh), -1)
 }
