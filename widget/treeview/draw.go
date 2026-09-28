@@ -119,6 +119,17 @@ func (tv *TreeView) Draw(ctx DrawContextBridge) {
 		} else {
 			ctx.DrawTextSize(text, textX, textY, tv.fontSize(), fg)
 		}
+
+		// Приписка: тем же шрифтом сразу за текстом, но своим цветом —
+		// счётчик у ветки не должен спорить с её именем.
+		if d := fi.item.Detail; d != "" {
+			w := ctx.MeasureText(text, tv.fontSize())
+			if bold {
+				w = ctx.MeasureTextBold(text, tv.fontSize())
+			}
+			ctx.DrawTextSize(d, textX+w+detailGap, textY, tv.fontSize(),
+				detailColor(fi.item.DetailColor, fg, tv.Theme.Background))
+		}
 	}
 
 	// Место вставки перетаскиваемого узла — поверх строк, но под скроллбаром.
@@ -178,4 +189,21 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// detailGap — отступ приписки от основного текста узла.
+const detailGap = 6
+
+// detailColor — цвет приписки: заданный узлом или приглушённый оттенок
+// основного. Приглушаем смешиванием с фоном, а не альфой: полупрозрачный
+// текст поверх выделенной строки выглядит грязно.
+func detailColor(want, fg, bg color.RGBA) color.RGBA {
+	if want.A > 0 {
+		return want
+	}
+	const k = 0.45 // доля фона в смеси
+	mix := func(a, b uint8) uint8 {
+		return uint8(float64(a)*(1-k) + float64(b)*k + 0.5)
+	}
+	return color.RGBA{R: mix(fg.R, bg.R), G: mix(fg.G, bg.G), B: mix(fg.B, bg.B), A: 255}
 }

@@ -234,7 +234,20 @@ type ColumnBase struct {
 	sortPath         string
 	binding          *Binding
 	sortDirection    SortDirection
+	cursor           int // форма курсора над ячейками колонки (widget.Cursor)
 }
+
+// Cursor — форма курсора над ячейками этой колонки: значения widget.Cursor,
+// 0 — обычная стрелка.
+//
+// Ячейка со ссылкой без руки под курсором выглядит как обычный текст, и о
+// том, что по ней можно щёлкнуть (OnCellClicked), никто не догадывается.
+// Число, а не widget.Cursor: пакет widget импортирует этот, обратной ссылки
+// быть не может.
+func (c *ColumnBase) Cursor() int { return c.cursor }
+
+// SetCursor задаёт форму курсора над ячейками колонки.
+func (c *ColumnBase) SetCursor(v int) { c.cursor = v }
 
 func (c *ColumnBase) Header() string                   { return c.header }
 func (c *ColumnBase) SetHeader(h string)               { c.header = h }

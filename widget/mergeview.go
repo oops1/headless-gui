@@ -2,6 +2,7 @@ package widget
 
 import (
 	"image"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -117,9 +118,15 @@ type MergeView struct {
 	fontSize           float64
 
 	scroll, rscroll, hscroll, charW float64
-	syncScroll                      bool    // верх и итог прокручиваются вместе, по блокам
-	resultDrives                    bool    // ведущая часть — итог (её прокрутили или правили последней)
-	split                           float64 // доля высоты под верхние панели
+
+	// hbarDrag — тянут ползунок горизонтальной полосы; hbarGrab — за какое
+	// место ползунка схватили (чтобы код не прыгал под курсор).
+	hbarDrag bool
+	hbarGrab int
+
+	syncScroll   bool    // верх и итог прокручиваются вместе, по блокам
+	resultDrives bool    // ведущая часть — итог (её прокрутили или правили последней)
+	split        float64 // доля высоты под верхние панели
 
 	active                    MergeSide
 	current, hoverBtn         int
@@ -1042,7 +1049,135 @@ func (m *MergeView) geom() mvGeom {
 	g.headerResH = mvHeaderHeight(m.result.Hint != "")
 	g.ry0 = g.headerResY + g.headerResH + 6
 	g.ry1 = inner.Max.Y
+	// Полоса прокрутки отнимает высоту у итога — но только когда самая
+	// длинная строка не помещается по ширине.
+	if m.needHBarLocked(g) {
+		g.ry1 -= dvHBarH
+	}
 	return g
+}
+
+// ─── Горизонтальная прокрутка ───────────────────────────────────────────────
+//
+// Смещение hscroll одно на все панели: строки в них сопоставлены построчно, и
+// разъехавшиеся вбок панели читать невозможно — по вертикали они синхронны по
+// той же причине.
+
+// contentWLocked — ширина содержимого: самая длинная строка всех панелей.
+func (m *MergeView) contentWLocked() float64 {
+	maxRunes := 0
+	for _, s := range m.docs {
+		maxRunes = max(maxRunes, s.maxRunes)
+	}
+	return float64(maxRunes+2) * m.charW
+}
+
+// codeViewWLocked — ширина области кода самой узкой видимой панели. По ней
+// считается запас прокрутки: иначе в узкой панели конец длинной строки
+// остался бы недостижим.
+func (m *MergeView) codeViewWLocked(g mvGeom) float64 {
+	w := math.MaxFloat64
+	for i := range m.docs {
+		side := MergeSide(i)
+		if side == MergeBase && !m.showBase {
+			continue
+		}
+		x0, x1, codeX := m.paneCodeXLocked(g, side)
+		_ = x0
+		if v := float64(x1 - 8 - codeX); v > 0 && v < w {
+			w = v
+		}
+	}
+	if w == math.MaxFloat64 {
+		return 0
+	}
+	return w
+}
+
+// maxHScrollLocked — насколько вбок можно увести код. Ширина области кода от
+// самой полосы не зависит (та отнимает высоту), так что рекурсии здесь нет.
+func (m *MergeView) maxHScrollLocked() float64 {
+	return math.Max(0, m.contentWLocked()-m.codeViewWLocked(m.geom()))
+}
+
+// needHBarLocked — помещается ли самая длинная строка в самую узкую панель.
+func (m *MergeView) needHBarLocked(g mvGeom) bool {
+	if m.charW <= 0 {
+		return false
+	}
+	w := m.codeViewWLocked(g)
+	return w > 0 && m.contentWLocked() > w
+}
+
+// hbarTrackLocked — трек полосы: по низу виджета, под панелью итога.
+func (m *MergeView) hbarTrackLocked(g mvGeom) image.Rectangle {
+	if !m.needHBarLocked(g) {
+		return image.Rectangle{}
+	}
+	y := g.ry1 + 2
+	return image.Rect(g.px[0][0], y, g.rulerX-6, y+dvHBarH-4)
+}
+
+// hbarThumbLocked — ползунок полосы.
+func (m *MergeView) hbarThumbLocked(g mvGeom) image.Rectangle {
+	tr := m.hbarTrackLocked(g)
+	if tr.Empty() {
+		return image.Rectangle{}
+	}
+	return hbarThumb(tr, m.hscroll, m.maxHScrollLocked(), m.codeViewWLocked(g), m.contentWLocked())
+}
+
+// setHScrollLocked задаёт смещение вбок, зажимая его в допустимые пределы.
+func (m *MergeView) setHScrollLocked(v float64) bool {
+	v = math.Max(0, math.Min(v, m.maxHScrollLocked()))
+	if v == m.hscroll {
+		return false
+	}
+	m.hscroll = v
+	return true
+}
+
+// hbarPressLocked — нажатие на полосу: на ползунке начинается перетаскивание
+// без скачка, мимо — код прыгает туда, куда ткнули.
+func (m *MergeView) hbarPressLocked(x int) {
+	g := m.geom()
+	th := m.hbarThumbLocked(g)
+	m.hbarDrag, m.hbarGrab = true, 0
+	if !th.Empty() && x >= th.Min.X && x < th.Max.X {
+		m.hbarGrab = x - th.Min.X
+		return
+	}
+	m.setHScrollLocked(hbarScrollAt(m.hbarTrackLocked(g), x, m.maxHScrollLocked(),
+		m.codeViewWLocked(g), m.contentWLocked()))
+}
+
+// hbarDragToLocked ведёт ползунок за курсором.
+func (m *MergeView) hbarDragToLocked(x int) bool {
+	g := m.geom()
+	return m.setHScrollLocked(hbarScrollForThumbX(m.hbarTrackLocked(g), x-m.hbarGrab,
+		m.maxHScrollLocked(), m.codeViewWLocked(g), m.contentWLocked()))
+}
+
+// ensureColVisibleLocked подводит смещение так, чтобы каретка панели side
+// была видна по горизонтали.
+func (m *MergeView) ensureColVisibleLocked(side MergeSide) {
+	s := m.docs[side]
+	if s.caret.line < 0 || s.caret.line >= len(s.text.Lines) {
+		return
+	}
+	g := m.geom()
+	_, x1, codeX := m.paneCodeXLocked(g, side)
+	w := float64(x1 - 8 - codeX)
+	if w <= 0 {
+		return
+	}
+	x := float64(diffview.DisplayCol([]rune(s.text.Lines[s.caret.line]), s.caret.col)) * m.charW
+	switch {
+	case x-m.hscroll < 0:
+		m.setHScrollLocked(x - 4*m.charW)
+	case x-m.hscroll > w-2*m.charW:
+		m.setHScrollLocked(x - w + 4*m.charW)
+	}
 }
 
 // resultBounds — прямоугольник панели итога.
@@ -1206,6 +1341,9 @@ func (m *MergeView) ensureResultVisibleLocked() {
 	case y+dvLineH > m.rscroll+viewH:
 		m.setResultScrollLocked(y + dvLineH - viewH)
 	}
+	// Правят итог, и уехавшая за правый край каретка не видна так же, как
+	// уехавшая за нижний: подводим и по горизонтали.
+	m.ensureColVisibleLocked(MergeResult)
 }
 
 // ─── Прочее ─────────────────────────────────────────────────────────────────

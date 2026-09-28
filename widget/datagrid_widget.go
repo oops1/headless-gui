@@ -254,6 +254,13 @@ func (w *DataGridWidget) OnMouseMove(x, y int) {
 // Без этого строке нельзя было дать свой текст: Base.ToolTip один на весь
 // виджет, и обёртке приходилось пересчитывать индекс строки на каждое
 // движение мыши и звать SetToolTip.
+// Cursor — форма курсора над таблицей: рука над ячейками колонки, которой
+// задан Cursor (ссылка в ячейке), и стрелка изменения размера над границей
+// колонок в заголовке. Реализует CursorProvider.
+func (w *DataGridWidget) Cursor(x, y int) Cursor {
+	return Cursor(w.Grid.CursorAt(x, y))
+}
+
 func (w *DataGridWidget) GetToolTip() string {
 	if tip := w.Grid.HoverRowToolTip(); tip != "" {
 		return tip
