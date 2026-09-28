@@ -4154,6 +4154,48 @@ the content is loaded without a disk path. Any widget with
 attributes wired by the binding scope; DiffView accepts `SaveCommand`
 (param `DiffSide`), `TextChangedCommand` (`DiffSide`), `DiffChangedCommand`
 (`int`), `FileChangedCommand` (`DiffFileChange`).
+### DataGrid: clicking a cell — v3.25
+
+The grid reported the row (`OnSelectionChanged`, `OnRowActivated`) and said
+nothing about the cell, so an app that draws a link in a cell — a commit hash,
+a path — had nothing to catch the click with: the coordinate lookup was
+private.
+
+```go
+dg.OnCellClicked = func(e datagrid.CellClickedEvent) {
+    // e.RowIndex (current order, same as OnRowActivated), e.ColumnIndex,
+    // e.Column, e.Item, e.X/e.Y inside the cell, e.Button, e.DoubleClick
+}
+dg.CellAt(x, y) (row, col int, ok bool) // ok=false outside the data area
+dg.CellRect(row, col) image.Rectangle   // empty if there is no such cell
+
+col.SetCursor(datagrid.CursorHand) // a link cell without a hand looks like plain text
+dg.CursorAt(x, y) int              // what DataGridWidget.Cursor reports to the engine
+```
+
+Both the single and the double click raise `OnCellClicked` (the second one
+with `DoubleClick` set), after the row selection and outside the grid's lock,
+so a handler may call back into the grid. Cursor values match `widget.Cursor`
+but are plain ints here — `widget` imports `datagrid`, not the other way
+round.
+
+### TreeView: a second text fragment on a node — v3.25
+
+`Foreground` colours the whole node line, so a trailing note — an `↑3 ↓1`
+counter on a branch, a size on an attachment — fought with the label. Doing it
+with `CustomRenderer` means taking over drawing of *every* node (icon, arrow,
+selection, hover).
+
+```go
+item.Detail = "↑3 ↓1"                          // drawn right after the label
+item.DetailColor = color.RGBA{...}             // zero alpha → muted shade of the label colour
+// XAML: <TreeViewItem Header="main" Detail="↑3" DetailColor="#8C8C8C"/>
+```
+
+The offset is measured in the same face the label is drawn with, so a detail
+after a bold label does not overlap it. `<TreeViewItem>` also accepts
+`Foreground` and `FontWeight="Bold"`, which until now were code-only.
+
 ### Horizontal scrolling in DiffView and MergeView — v3.25
 
 A long line used to be visible only as far as the pane went. `DiffView` could

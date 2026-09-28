@@ -262,6 +262,14 @@ type DataGrid struct {
 	// своё действие до перехода в режим редактирования.
 	OnRowActivated func(rowIndex int, item interface{})
 
+	// OnCellClicked — щелчок по ячейке области данных (см. cellclick.go).
+	//
+	// Строка сообщалась и раньше — выделением и активацией, — а ячейка нет:
+	// приложение, нарисовавшее в ячейке ссылку, не могло поймать щелчок
+	// именно по ней. Зовётся и на одиночный щелчок, и на двойной (у второго
+	// взведён DoubleClick), после выделения строки и вне dg.mu.
+	OnCellClicked func(e CellClickedEvent)
+
 	// ── Внутреннее состояние ─────────────────────────────────────────────
 	mu      sync.Mutex
 	focused bool
@@ -2003,6 +2011,7 @@ func (dg *DataGrid) OnMouseButtonMod(x, y int, button int, pressed bool, shift, 
 			dg.commitEdit()
 		}
 		dg.selectRow(row, shift, ctrl)
+		dg.queueCellClickedLocked(x, y, button, false)
 		return true
 	}
 
@@ -2103,6 +2112,7 @@ func (dg *DataGrid) OnMouseDoubleClick(x, y int) bool {
 	if cb != nil {
 		dg.pending = append(dg.pending, func() { cb(row, activatedItem) })
 	}
+	dg.queueCellClickedLocked(x, y, 0, true)
 	return true
 }
 
