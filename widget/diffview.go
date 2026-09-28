@@ -120,11 +120,16 @@ type DiffView struct {
 	active                        DiffSide
 	current, hoverChunk, hoverBtn int
 	rulerDrag, dragSel, focused   bool
-	dragSide                      DiffSide
-	lastClickAt                   time.Time
-	lastClickPt                   image.Point
-	clicks                        int
-	anim                          *Animation
+	// hbarDrag — тянут ползунок горизонтальной полосы; hbarGrab — за какое
+	// место ползунка схватили, чтобы код не прыгал под курсор.
+	hbarDrag bool
+	hbarGrab int
+
+	dragSide    DiffSide
+	lastClickAt time.Time
+	lastClickPt image.Point
+	clicks      int
+	anim        *Animation
 
 	undo, redo   []dvHist
 	lastEdit     dvEditKind
@@ -739,10 +744,14 @@ func dvPrepareDoc(s *dvDoc, syntax bool) {
 	s.hl = make([][2]int, len(L))
 	s.toks = make([][]diffview.Token, len(L))
 	s.lineRow = make([]int, len(L))
+	s.maxRunes = 0
 	for i, l := range L {
 		s.disp[i] = diffview.ExpandTabs(l)
 		s.hl[i] = [2]int{-1, -1}
 		s.lineRow[i] = -1
+		if len(s.disp[i]) > s.maxRunes {
+			s.maxRunes = len(s.disp[i])
+		}
 		if syntax {
 			s.toks[i] = diffview.Tokenize(s.disp[i])
 		}
@@ -915,7 +924,77 @@ func (d *DiffView) geom() dvGeom {
 		g.cy0 += dvHeaderH
 	}
 	g.cy1 = b.Max.Y
+	// Полоса прокрутки отнимает высоту у кода — но только когда она нужна:
+	// у файла из коротких строк низ панели не должен пустовать.
+	if d.needHBarLocked(g) {
+		g.cy1 -= dvHBarH
+	}
 	return g
+}
+
+// needHBarLocked — помещается ли самая длинная строка в область кода.
+//
+// Ширину считаем по геометрии БЕЗ полосы (g приходит именно такой): полоса
+// отнимает высоту, а не ширину, так что рекурсии здесь нет.
+func (d *DiffView) needHBarLocked(g dvGeom) bool {
+	if d.charW <= 0 {
+		return false
+	}
+	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
+	return d.contentWLocked() > float64(codeR-codeX)
+}
+
+// hbarTrack — трек горизонтальной полосы: под обеими панелями кода, до
+// полосы-обзора.
+func (d *DiffView) hbarTrack(g dvGeom) image.Rectangle {
+	if !d.needHBarLocked(g) {
+		return image.Rectangle{}
+	}
+	y := g.cy1 + 2
+	return image.Rect(g.lx0, y, g.rulerX-6, y+dvHBarH-4)
+}
+
+// hbarThumbLocked — ползунок горизонтальной полосы.
+func (d *DiffView) hbarThumbLocked(g dvGeom) image.Rectangle {
+	tr := d.hbarTrack(g)
+	if tr.Empty() {
+		return image.Rectangle{}
+	}
+	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
+	return hbarThumb(tr, d.hscroll, d.maxHScrollLocked(), float64(codeR-codeX), d.contentWLocked())
+}
+
+// setHScrollLocked задаёт смещение вбок, зажимая его в допустимые пределы.
+func (d *DiffView) setHScrollLocked(v float64) bool {
+	v = math.Max(0, math.Min(v, d.maxHScrollLocked()))
+	if v == d.hscroll {
+		return false
+	}
+	d.hscroll = v
+	return true
+}
+
+// hbarPressLocked — нажатие на полосу: на ползунке начинается перетаскивание
+// без скачка, мимо — код прыгает туда, куда ткнули.
+func (d *DiffView) hbarPressLocked(x int) {
+	g := d.geom()
+	th := d.hbarThumbLocked(g)
+	d.hbarDrag, d.hbarGrab = true, 0
+	if !th.Empty() && x >= th.Min.X && x < th.Max.X {
+		d.hbarGrab = x - th.Min.X
+		return
+	}
+	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
+	d.setHScrollLocked(hbarScrollAt(d.hbarTrack(g), x, d.maxHScrollLocked(),
+		float64(codeR-codeX), d.contentWLocked()))
+}
+
+// hbarDragToLocked ведёт ползунок за курсором.
+func (d *DiffView) hbarDragToLocked(x int) bool {
+	g := d.geom()
+	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
+	return d.setHScrollLocked(hbarScrollForThumbX(d.hbarTrack(g), x-d.hbarGrab,
+		d.maxHScrollLocked(), float64(codeR-codeX), d.contentWLocked()))
 }
 
 // paneGeom — края панели и области кода стороны.
@@ -1024,23 +1103,27 @@ func (d *DiffView) scrollBy(dy float64) {
 	}
 }
 
+// maxHScrollLocked — насколько вбок можно увести код: самая длинная строка
+// обеих сторон минус ширина области кода.
 func (d *DiffView) maxHScrollLocked() float64 {
-	maxRunes := 0
-	for _, s := range d.docs {
-		for _, r := range s.disp {
-			maxRunes = max(maxRunes, len(r))
-		}
-	}
 	g := d.geom()
 	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
-	return math.Max(0, float64(maxRunes+2)*d.charW-float64(codeR-codeX))
+	return math.Max(0, d.contentWLocked()-float64(codeR-codeX))
+}
+
+// contentWLocked — ширина содержимого в точках (самая длинная строка плюс
+// небольшой запас, чтобы конец строки не упирался в край).
+func (d *DiffView) contentWLocked() float64 {
+	maxRunes := 0
+	for _, s := range d.docs {
+		maxRunes = max(maxRunes, s.maxRunes)
+	}
+	return float64(maxRunes+2) * d.charW
 }
 
 func (d *DiffView) hscrollBy(dx float64) {
 	d.mu.Lock()
-	v := math.Max(0, math.Min(d.hscroll+dx, d.maxHScrollLocked()))
-	ch := v != d.hscroll
-	d.hscroll = v
+	ch := d.setHScrollLocked(d.hscroll + dx)
 	d.mu.Unlock()
 	if ch {
 		d.Invalidate()

@@ -508,6 +508,12 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 	case "datepicker":
 		w = buildXAMLDatePicker(el)
 
+	// ── Поле цвета и образец ────────────────────────────────────────────────
+	case "colorpicker":
+		w = buildXAMLColorPicker(el)
+	case "swatch", "colorbox":
+		w = buildXAMLSwatch(el)
+
 	// ── Прогресс ─────────────────────────────────────────────────────────────
 	case "progressbar":
 		w = buildXAMLProgressBar(el)
@@ -893,11 +899,11 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 
 // buttonContent содержит информацию, извлечённую из дочерних элементов Button.
 type buttonContent struct {
-	Text       string     // текст из TextBlock/Label
-	IconSrc    string     // Source из Image
-	IconW      int        // Width из Image
-	IconH      int        // Height из Image
-	Foreground string     // Foreground из TextBlock (для цвета текста кнопки)
+	Text       string // текст из TextBlock/Label
+	IconSrc    string // Source из Image
+	IconW      int    // Width из Image
+	IconH      int    // Height из Image
+	Foreground string // Foreground из TextBlock (для цвета текста кнопки)
 }
 
 // extractButtonContent рекурсивно обходит дочерние элементы Button,

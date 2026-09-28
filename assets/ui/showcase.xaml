@@ -275,6 +275,18 @@
                 <Separator Left="540" Top="606" Width="480" Height="1" Background="#A6E3A1"/>
                 <Separator Left="540" Top="620" Width="480" Height="3" Background="#F9E2AF"/>
 
+                <!-- ColorPicker / Swatch -->
+                <Label Left="30" Top="620" Width="240" Height="20"
+                       Text="ColorPicker / Swatch" Foreground="#89B4FA"/>
+                <Label Left="30" Top="652" Width="110" Height="20"
+                       Text="{Loc Accent:}" Foreground="#CDD6F4"/>
+                <ColorPicker Name="pickAccent" Left="146" Top="646" Width="180" Height="30"
+                             Value="#89B4FA"/>
+                <Swatch Name="swAccent" Left="336" Top="649" Width="24" Height="24"
+                        Color="#89B4FA" CornerRadius="3"/>
+                <Label Name="colorStatus" Left="30" Top="686" Width="330" Height="20"
+                       Text="{Loc Pick a colour — the swatch follows}" Foreground="#9399B2"/>
+
             </Canvas>
         </TabItem>
 

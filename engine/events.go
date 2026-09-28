@@ -548,6 +548,16 @@ type wheelPixelHandler interface {
 	OnMouseWheelPixels(x, y int, dx, dy float64) bool
 }
 
+// wheelPixelModHandler — то же, но с модификаторами, зажатыми в момент
+// прокрутки (см. SetModifiers). Нужен виджетам, где Shift+колесо значит
+// «вбок»: на мыши без горизонтального колеса это единственный способ увести
+// длинную строку влево. Отдельный интерфейс, а не новый параметр
+// wheelPixelHandler: менять его сигнатуру значит сломать сборку всем, кто
+// его реализовал.
+type wheelPixelModHandler interface {
+	OnMouseWheelPixelsMod(x, y int, dx, dy float64, mod widget.KeyMod) bool
+}
+
 // wheelTickPixels — сколько пикселей точной дельты приходится на один «тик»
 // колеса в фолбэке (соответствует шагу тикового колеса в виджетах).
 const wheelTickPixels = 40.0
@@ -577,8 +587,16 @@ func (e *Engine) SendMouseWheelPixels(xPhys, yPhys int, dx, dy float64) {
 		e.mu.RUnlock()
 	}
 	if dispatchRoot != nil {
+		mod := e.Modifiers()
 		path := hitTestPath(dispatchRoot, x, y)
 		for i := len(path) - 1; i >= 0; i-- {
+			if h, ok := path[i].(wheelPixelModHandler); ok {
+				if h.OnMouseWheelPixelsMod(x, y, dx, dy, mod) {
+					e.invalidateWidget(path[i])
+					return
+				}
+				continue
+			}
 			if h, ok := path[i].(wheelPixelHandler); ok {
 				if h.OnMouseWheelPixels(x, y, dx, dy) {
 					e.invalidateWidget(path[i])

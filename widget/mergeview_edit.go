@@ -348,6 +348,7 @@ func (m *MergeView) ensureSideVisibleLocked() {
 	case y+dvLineH > m.scroll+viewH:
 		m.setScrollLocked(y + dvLineH - viewH)
 	}
+	m.ensureColVisibleLocked(m.active)
 }
 
 // homeLocked — умный Home: сначала к первому непробельному, потом к краю.
@@ -676,7 +677,7 @@ func (m *MergeView) OnMouseButton(e MouseEvent) bool {
 		case e.Button == MouseLeft && e.Pressed:
 			handled = m.leftPressLocked(e)
 		case e.Button == MouseLeft && !e.Pressed:
-			m.dragSel, m.splitDrag, m.rulerDrag = false, false, false
+			m.dragSel, m.splitDrag, m.rulerDrag, m.hbarDrag = false, false, false, false
 			handled = true
 		case e.Button == MouseRight && e.Pressed:
 			handled = m.rightPressLocked(e)
@@ -690,6 +691,11 @@ func (m *MergeView) leftPressLocked(e MouseEvent) bool {
 	// нажатие на неё иначе начинало бы двигать границу панелей.
 	if m.onRulerLocked(e.X, e.Y) {
 		m.rulerPressLocked(e.Y)
+		return true
+	}
+	if tr := m.hbarTrackLocked(m.geom()); !tr.Empty() &&
+		image.Pt(e.X, e.Y).In(tr.Inset(-dvHBarInsetX)) {
+		m.hbarPressLocked(e.X)
 		return true
 	}
 	if m.onSplitterLocked(e.Y) {
@@ -760,6 +766,10 @@ func (m *MergeView) OnMouseMove(x, y int) {
 			m.rulerDragLocked(y)
 			return
 		}
+		if m.hbarDrag {
+			m.hbarDragToLocked(x)
+			return
+		}
 		if m.splitDrag {
 			g := m.geom()
 			inner := float64(g.b.Dy() - 2*dvOuterPad)
@@ -805,8 +815,22 @@ func (m *MergeView) chunkAtPointLocked(side MergeSide, y int) int {
 // OnMouseWheelPixels — колесо: прокручивается часть под курсором, вторая при
 // синхронной прокрутке идёт следом (SetSyncScroll).
 func (m *MergeView) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
+	return m.OnMouseWheelPixelsMod(x, y, dx, dy, 0)
+}
+
+// OnMouseWheelPixelsMod — колесо с модификаторами: Shift уводит код вбок, как
+// в редакторах под Windows, а горизонтальное колесо тачпада — само по себе.
+func (m *MergeView) OnMouseWheelPixelsMod(x, y int, dx, dy float64, mod KeyMod) bool {
 	handled := false
 	m.do(func() {
+		if dx != 0 {
+			handled = m.setHScrollLocked(m.hscroll+dx) || handled
+			return
+		}
+		if mod&ModShift != 0 {
+			handled = m.setHScrollLocked(m.hscroll+dy) || handled
+			return
+		}
 		side, ok := m.paneAtLocked(x, y)
 		if !ok {
 			return

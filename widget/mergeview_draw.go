@@ -60,6 +60,7 @@ func (m *MergeView) Draw(ctx DrawContext) {
 	ctx.SetClip(b.Intersect(outer))
 	m.drawSplitter(ctx, g)
 	m.drawRuler(ctx, g)
+	m.drawHScroll(ctx, g)
 	ctx.SetClip(outer)
 	m.drawChildren(ctx)
 }
@@ -412,6 +413,19 @@ func (m *MergeView) drawSplitter(ctx DrawContext, g mvGeom) {
 	for i := -1; i <= 1; i++ {
 		fillEllipse(ctx, cx+i*8, y, 2, 2, p.muted)
 	}
+}
+
+// drawHScroll рисует горизонтальную полосу под панелью итога. Смещение у
+// панелей общее, поэтому полоса одна на все четыре.
+func (m *MergeView) drawHScroll(ctx DrawContext, g mvGeom) {
+	tr := m.hbarTrackLocked(g)
+	th := m.hbarThumbLocked(g)
+	if tr.Empty() || th.Empty() {
+		return
+	}
+	ctx.SetClip(tr.Inset(-2).Intersect(g.b))
+	drawHBar(ctx, tr, th, m.pal.track, m.pal.thumb)
+	ctx.ClearClip()
 }
 
 // drawRuler — полоса-обзор: где по файлу стоят конфликты и что уже решено, и

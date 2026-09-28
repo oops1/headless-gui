@@ -4154,6 +4154,78 @@ the content is loaded without a disk path. Any widget with
 attributes wired by the binding scope; DiffView accepts `SaveCommand`
 (param `DiffSide`), `TextChangedCommand` (`DiffSide`), `DiffChangedCommand`
 (`int`), `FileChangedCommand` (`DiffFileChange`).
+### DataGrid: clicking a cell — v3.25
+
+The grid reported the row (`OnSelectionChanged`, `OnRowActivated`) and said
+nothing about the cell, so an app that draws a link in a cell — a commit hash,
+a path — had nothing to catch the click with: the coordinate lookup was
+private.
+
+```go
+dg.OnCellClicked = func(e datagrid.CellClickedEvent) {
+    // e.RowIndex (current order, same as OnRowActivated), e.ColumnIndex,
+    // e.Column, e.Item, e.X/e.Y inside the cell, e.Button, e.DoubleClick
+}
+dg.CellAt(x, y) (row, col int, ok bool) // ok=false outside the data area
+dg.CellRect(row, col) image.Rectangle   // empty if there is no such cell
+
+col.SetCursor(datagrid.CursorHand) // a link cell without a hand looks like plain text
+dg.CursorAt(x, y) int              // what DataGridWidget.Cursor reports to the engine
+```
+
+Both the single and the double click raise `OnCellClicked` (the second one
+with `DoubleClick` set), after the row selection and outside the grid's lock,
+so a handler may call back into the grid. Cursor values match `widget.Cursor`
+but are plain ints here — `widget` imports `datagrid`, not the other way
+round.
+
+### TreeView: a second text fragment on a node — v3.25
+
+`Foreground` colours the whole node line, so a trailing note — an `↑3 ↓1`
+counter on a branch, a size on an attachment — fought with the label. Doing it
+with `CustomRenderer` means taking over drawing of *every* node (icon, arrow,
+selection, hover).
+
+```go
+item.Detail = "↑3 ↓1"                          // drawn right after the label
+item.DetailColor = color.RGBA{...}             // zero alpha → muted shade of the label colour
+// XAML: <TreeViewItem Header="main" Detail="↑3" DetailColor="#8C8C8C"/>
+```
+
+The offset is measured in the same face the label is drawn with, so a detail
+after a bold label does not overlap it. `<TreeViewItem>` also accepts
+`Foreground` and `FontWeight="Bold"`, which until now were code-only.
+
+### Horizontal scrolling in DiffView and MergeView — v3.25
+
+A long line used to be visible only as far as the pane went. `DiffView` could
+shift sideways, but the shift was set by exactly one thing — a horizontal
+wheel or a trackpad gesture; `MergeView` could not shift at all (its `hscroll`
+was read when drawing and never written). On an ordinary mouse the right half
+of a long line was unreachable.
+
+Both controls now show a horizontal scrollbar under the code when the longest
+line does not fit, and it works like the overview ruler: drag the thumb, or
+click the track to jump. Sideways scrolling also answers **Shift + wheel** and
+follows the caret (End walks to the end of the line and takes the view with
+it). In `MergeView` the shift is shared by all four panes — the panes are
+matched line by line, and panes drifting apart sideways are unreadable.
+
+Nothing to call: the bar appears by itself and takes its height from the code
+area only while it is needed.
+
+```go
+// Shift + wheel needs the modifiers, and the pixel-wheel interface has no
+// room for them — widgets that care implement this one instead:
+type wheelPixelModHandler interface { // engine-side name; any widget may implement it
+    OnMouseWheelPixelsMod(x, y int, dx, dy float64, mod widget.KeyMod) bool
+}
+```
+
+The engine tries it first and falls back to `OnMouseWheelPixels`, so widgets
+that implement only the old one keep working unchanged. Modifiers come from
+`engine.SetModifiers` — the same source that fills `MouseEvent.Mod`.
+
 ### MergeView — three-way merge (pair to DiffView)
 
 ```go
@@ -4196,6 +4268,42 @@ keeps the grab offset (no jump), a click on a conflict mark goes to it, a click
 elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
+
+### ColorPicker and Swatch — v3.25
+
+A colour field, built the way `DatePicker` is: the code can be typed straight
+into the field, or the palette can be opened and a swatch picked. Until now an
+app editing theme colours typed `#RRGGBB` into a plain TextBox and put a
+coloured panel next to it — you edited a colour without seeing it.
+
+```go
+cp := widget.NewColorPicker()
+cp.SetValue(color.RGBA{R: 0x00, G: 0x78, B: 0xD7, A: 255})
+cp.Value(); cp.Text()                 // "#0078D7"
+cp.SetPalette(cols); cp.Palette()     // empty list → the built-in set
+cp.SetDropDownOpen(true); cp.IsDropDownOpen()
+cp.OnChanged = func(c color.RGBA) {}  // also ValueChangedCommand
+
+widget.HexColor(c)          // "#RRGGBB", upper case
+widget.ParseHexColor("#0AF") // short form expands, like in CSS
+
+sw := widget.NewSwatch(c)   // plain colour rectangle with the theme's border
+sw.SetColor(c); sw.Border = ...; sw.CornerRadius = 3
+```
+
+XAML: `<ColorPicker Value="#0078D7" Palette="#000,#FFF,#E81123"/>` and
+`<Swatch Color="#C42B1C" CornerRadius="3"/>`.
+
+Keyboard as in the other fields: typing edits the code (focus selects it all),
+Enter commits, Esc reverts, leaving the field commits, Alt+↓ / F4 opens the
+palette. In the open palette arrows walk the swatches, Enter picks,
+Ctrl+←/→ nudges the channel under the pointer; the wheel over a channel
+changes it. A code that does not parse leaves the colour alone and marks the
+field — it never silently becomes black.
+
+Alpha is deliberately not supported: an interface colour is a colour, not a
+film over its neighbour — the same translucent value would look like two
+different colours on a light and a dark background.
 
 ### DatePicker — date field with a drop-down calendar
 

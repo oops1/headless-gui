@@ -582,8 +582,8 @@ func (d *DiffView) OnMouseButton(e MouseEvent) bool {
 	if !e.Pressed {
 		// Захват снимет движок: он гарантирует это при отпускании ЛКМ.
 		d.mu.Lock()
-		was := d.rulerDrag || d.dragSel
-		d.rulerDrag, d.dragSel = false, false
+		was := d.rulerDrag || d.dragSel || d.hbarDrag
+		d.rulerDrag, d.dragSel, d.hbarDrag = false, false, false
 		d.mu.Unlock()
 		return was
 	}
@@ -592,6 +592,12 @@ func (d *DiffView) OnMouseButton(e MouseEvent) bool {
 	if image.Pt(e.X, e.Y).In(d.rulerTrack(g).Inset(-4)) {
 		d.rulerDrag = true
 		d.scrollToRulerLocked(e.Y)
+		d.mu.Unlock()
+		d.Invalidate()
+		return true
+	}
+	if tr := d.hbarTrack(g); !tr.Empty() && image.Pt(e.X, e.Y).In(tr.Inset(-dvHBarInsetX)) {
+		d.hbarPressLocked(e.X)
 		d.mu.Unlock()
 		d.Invalidate()
 		return true
@@ -688,6 +694,14 @@ func (d *DiffView) OnMouseMove(x, y int) {
 		d.Invalidate()
 		return
 	}
+	if d.hbarDrag {
+		ch := d.hbarDragToLocked(x)
+		d.mu.Unlock()
+		if ch {
+			d.Invalidate()
+		}
+		return
+	}
 	if d.dragSel {
 		d.mu.Unlock()
 		d.do(func() {
@@ -723,11 +737,22 @@ func (d *DiffView) OnMouseMove(x, y int) {
 }
 
 func (d *DiffView) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
+	return d.OnMouseWheelPixelsMod(x, y, dx, dy, 0)
+}
+
+// OnMouseWheelPixelsMod — колесо с модификаторами: Shift уводит код вбок.
+// На мыши без горизонтального колеса это единственный способ добраться до
+// конца длинной строки, и так делают все редакторы под Windows.
+func (d *DiffView) OnMouseWheelPixelsMod(x, y int, dx, dy float64, mod KeyMod) bool {
 	if dx != 0 {
 		d.hscrollBy(dx)
 	}
 	if dy != 0 {
-		d.scrollBy(dy)
+		if mod&ModShift != 0 {
+			d.hscrollBy(dy)
+		} else {
+			d.scrollBy(dy)
+		}
 	}
 	return true
 }

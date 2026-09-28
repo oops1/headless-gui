@@ -1850,6 +1850,24 @@ func parseTreeViewItemNew(el xElement) *tvPkg.TreeViewItem {
 		item.IsEnabled = false
 	}
 
+	// Detail — приписка за текстом узла своим цветом (счётчик, размер).
+	if d := el.attr("Detail"); d != "" {
+		item.Detail = d
+	}
+	if c := el.attr("DetailColor"); c != "" {
+		if col, err := parseXAMLColor(c); err == nil {
+			item.DetailColor = col
+		}
+	}
+	if c := el.attr("Foreground"); c != "" {
+		if col, err := parseXAMLColor(c); err == nil {
+			item.Foreground = col
+		}
+	}
+	if strings.EqualFold(el.attr("FontWeight"), "Bold") {
+		item.Bold = true
+	}
+
 	// Вложенные TreeViewItem
 	for _, child := range el.Children {
 		if strings.EqualFold(child.Tag, "TreeViewItem") {
