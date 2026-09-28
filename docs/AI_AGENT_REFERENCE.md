@@ -4154,6 +4154,36 @@ the content is loaded without a disk path. Any widget with
 attributes wired by the binding scope; DiffView accepts `SaveCommand`
 (param `DiffSide`), `TextChangedCommand` (`DiffSide`), `DiffChangedCommand`
 (`int`), `FileChangedCommand` (`DiffFileChange`).
+### Horizontal scrolling in DiffView and MergeView — v3.25
+
+A long line used to be visible only as far as the pane went. `DiffView` could
+shift sideways, but the shift was set by exactly one thing — a horizontal
+wheel or a trackpad gesture; `MergeView` could not shift at all (its `hscroll`
+was read when drawing and never written). On an ordinary mouse the right half
+of a long line was unreachable.
+
+Both controls now show a horizontal scrollbar under the code when the longest
+line does not fit, and it works like the overview ruler: drag the thumb, or
+click the track to jump. Sideways scrolling also answers **Shift + wheel** and
+follows the caret (End walks to the end of the line and takes the view with
+it). In `MergeView` the shift is shared by all four panes — the panes are
+matched line by line, and panes drifting apart sideways are unreadable.
+
+Nothing to call: the bar appears by itself and takes its height from the code
+area only while it is needed.
+
+```go
+// Shift + wheel needs the modifiers, and the pixel-wheel interface has no
+// room for them — widgets that care implement this one instead:
+type wheelPixelModHandler interface { // engine-side name; any widget may implement it
+    OnMouseWheelPixelsMod(x, y int, dx, dy float64, mod widget.KeyMod) bool
+}
+```
+
+The engine tries it first and falls back to `OnMouseWheelPixels`, so widgets
+that implement only the old one keep working unchanged. Modifiers come from
+`engine.SetModifiers` — the same source that fills `MouseEvent.Mod`.
+
 ### MergeView — three-way merge (pair to DiffView)
 
 ```go

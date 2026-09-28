@@ -42,6 +42,7 @@ func (d *DiffView) Draw(ctx DrawContext) {
 	d.drawPane(ctx, g, DiffRight, rt, content)
 	d.drawConnectors(ctx, g, lt, rt, content)
 	d.drawRuler(ctx, g, viewH)
+	d.drawHScroll(ctx, g)
 	ctx.SetClip(outer)
 	d.drawChildren(ctx)
 }
@@ -362,6 +363,20 @@ func dvArrowButton(ctx DrawContext, cx, cy, r int, col, ring color.RGBA, pointRi
 		{X: tip.X - dir*4, Y: tip.Y - 4},
 		{X: tip.X - dir*4, Y: tip.Y + 4},
 	}, white)
+}
+
+// drawHScroll рисует горизонтальную полосу под панелями кода. Без неё
+// длинная строка была видна обрезанной, и добраться до её конца на обычной
+// мыши было нечем.
+func (d *DiffView) drawHScroll(ctx DrawContext, g dvGeom) {
+	tr := d.hbarTrack(g)
+	th := d.hbarThumbLocked(g)
+	if tr.Empty() || th.Empty() {
+		return
+	}
+	ctx.SetClip(tr.Inset(-2).Intersect(g.b))
+	drawHBar(ctx, tr, th, d.pal.track, d.pal.thumb)
+	ctx.ClearClip()
 }
 
 func (d *DiffView) drawRuler(ctx DrawContext, g dvGeom, viewH float64) {
