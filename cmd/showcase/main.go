@@ -1195,6 +1195,21 @@ func main() {
 		}
 	}
 
+	// Поле цвета: образец рядом и подпись идут за выбором.
+	if cp, ok := reg["pickAccent"].(*widget.ColorPicker); ok {
+		sw, _ := reg["swAccent"].(*widget.Swatch)
+		colorLbl := lbl("colorStatus")
+		cp.OnChanged = func(c color.RGBA) {
+			if sw != nil {
+				sw.SetColor(c)
+			}
+			if colorLbl != nil {
+				colorLbl.SetText(widget.Trf("Colour: %s", widget.HexColor(c)))
+			}
+			addLog("Colour: %s", widget.HexColor(c))
+		}
+	}
+
 	// ─── Нативное окно ──────────────────────────────────────────────────────
 	win = window.New(eng, "GuiEngine — Widget Showcase")
 	win.SetMaxFPS(60)

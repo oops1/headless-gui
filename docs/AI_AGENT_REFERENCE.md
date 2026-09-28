@@ -4269,6 +4269,42 @@ elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
 
+### ColorPicker and Swatch — v3.25
+
+A colour field, built the way `DatePicker` is: the code can be typed straight
+into the field, or the palette can be opened and a swatch picked. Until now an
+app editing theme colours typed `#RRGGBB` into a plain TextBox and put a
+coloured panel next to it — you edited a colour without seeing it.
+
+```go
+cp := widget.NewColorPicker()
+cp.SetValue(color.RGBA{R: 0x00, G: 0x78, B: 0xD7, A: 255})
+cp.Value(); cp.Text()                 // "#0078D7"
+cp.SetPalette(cols); cp.Palette()     // empty list → the built-in set
+cp.SetDropDownOpen(true); cp.IsDropDownOpen()
+cp.OnChanged = func(c color.RGBA) {}  // also ValueChangedCommand
+
+widget.HexColor(c)          // "#RRGGBB", upper case
+widget.ParseHexColor("#0AF") // short form expands, like in CSS
+
+sw := widget.NewSwatch(c)   // plain colour rectangle with the theme's border
+sw.SetColor(c); sw.Border = ...; sw.CornerRadius = 3
+```
+
+XAML: `<ColorPicker Value="#0078D7" Palette="#000,#FFF,#E81123"/>` and
+`<Swatch Color="#C42B1C" CornerRadius="3"/>`.
+
+Keyboard as in the other fields: typing edits the code (focus selects it all),
+Enter commits, Esc reverts, leaving the field commits, Alt+↓ / F4 opens the
+palette. In the open palette arrows walk the swatches, Enter picks,
+Ctrl+←/→ nudges the channel under the pointer; the wheel over a channel
+changes it. A code that does not parse leaves the colour alone and marks the
+field — it never silently becomes black.
+
+Alpha is deliberately not supported: an interface colour is a colour, not a
+film over its neighbour — the same translucent value would look like two
+different colours on a light and a dark background.
+
 ### DatePicker — date field with a drop-down calendar
 
 ```go
