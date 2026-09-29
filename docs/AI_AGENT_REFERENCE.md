@@ -4281,6 +4281,7 @@ cp := widget.NewColorPicker()
 cp.SetValue(color.RGBA{R: 0x00, G: 0x78, B: 0xD7, A: 255})
 cp.Value(); cp.Text()                 // "#0078D7"
 cp.SetPalette(cols); cp.Palette()     // empty list → the built-in set
+cp.SetValueQuiet(c)                   // same, without OnChanged — for the app's own writes
 cp.SetDropDownOpen(true); cp.IsDropDownOpen()
 cp.OnChanged = func(c color.RGBA) {}  // also ValueChangedCommand
 

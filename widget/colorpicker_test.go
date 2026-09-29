@@ -365,3 +365,60 @@ func TestColorPicker_ValueChangedCommand(t *testing.T) {
 		t.Errorf("команда получила %v, ждал %v", got, want)
 	}
 }
+
+// SetValue не отличал программную установку от выбора человеком: приложение,
+// показавшее в поле цвет текущей темы, немедленно получало это обратно как
+// «человек выбрал цвет», и «берём из темы» превращалось в заданное значение.
+func TestColorPicker_SetValueQuiet(t *testing.T) {
+	p := newPickerAt(image.Rect(0, 0, 160, 28))
+	events := 0
+	p.OnChanged = func(c color.RGBA) { events++ }
+	cmdCalls := 0
+	p.SetCommand("ValueChangedCommand", &RelayCommand{
+		ExecuteFn: func(param interface{}) { cmdCalls++ },
+	})
+
+	want := color.RGBA{R: 0x10, G: 0x7C, B: 0x10, A: 255}
+	if !p.SetValueQuiet(want) {
+		t.Fatal("SetValueQuiet вернул false на новом цвете")
+	}
+	if p.Value() != want {
+		t.Errorf("цвет %v, ждал %v", p.Value(), want)
+	}
+	if events != 0 || cmdCalls != 0 {
+		t.Errorf("тихая установка разбудила подписчиков: событий %d, команд %d", events, cmdCalls)
+	}
+	// Тот же цвет второй раз — по-прежнему false.
+	if p.SetValueQuiet(want) {
+		t.Error("SetValueQuiet вернул true на том же цвете")
+	}
+
+	// Обычный сеттер продолжает уведомлять.
+	if !p.SetValue(color.RGBA{R: 0xE8, G: 0x11, B: 0x23, A: 255}) {
+		t.Fatal("SetValue вернул false на новом цвете")
+	}
+	if events != 1 || cmdCalls != 1 {
+		t.Errorf("SetValue: событий %d, команд %d; ждал по одному", events, cmdCalls)
+	}
+}
+
+// Выбор человеком после тихой установки уведомляет как обычно: тихий сеттер
+// не переводит поле в «молчаливый» режим насовсем.
+func TestColorPicker_QuietThenUserPick(t *testing.T) {
+	field := image.Rect(10, 10, 170, 38)
+	p := newPickerAt(field)
+	p.SetValueQuiet(color.RGBA{R: 1, G: 2, B: 3, A: 255})
+
+	var last color.RGBA
+	got := 0
+	p.OnChanged = func(c color.RGBA) { last, got = c, got+1 }
+
+	p.SetDropDownOpen(true)
+	drop := p.OverlayBounds()
+	cell := cpCellRect(drop, 3)
+	p.OnMouseButton(MouseEvent{Button: MouseLeft, Pressed: true, X: cell.Min.X + 2, Y: cell.Min.Y + 2})
+
+	if got != 1 || last != DefaultColorPalette()[3] {
+		t.Errorf("после выбора образца: событий %d, цвет %v", got, last)
+	}
+}
