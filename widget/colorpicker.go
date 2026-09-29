@@ -114,6 +114,23 @@ func (p *ColorPicker) Value() color.RGBA {
 // Непрозрачность выставляется сама: поле работает с цветом, а не с плёнкой
 // (см. комментарий к файлу), и цвет с нулевой альфой означал бы «невидимо».
 func (p *ColorPicker) SetValue(c color.RGBA) bool {
+	return p.setValue(c, true)
+}
+
+// SetValueQuiet задаёт цвет БЕЗ OnChanged и ValueChangedCommand.
+//
+// Нужен тому, кто расставляет цвета сам: в окне настроек пустое поле значит
+// «берём из системной темы», и показанный там цвет темы немедленно вернулся
+// бы обратно как «человек выбрал цвет» — пустое значение превратилось бы в
+// заданное. То же при смене темы и при сбросе. Пара к SetValue — как
+// SetSelectedIndexQuiet у таблицы.
+func (p *ColorPicker) SetValueQuiet(c color.RGBA) bool {
+	return p.setValue(c, false)
+}
+
+// setValue — общий путь обоих сеттеров: notify решает, узнает ли об этом
+// приложение.
+func (p *ColorPicker) setValue(c color.RGBA, notify bool) bool {
 	c.A = 255
 	p.mu.Lock()
 	if p.value == c {
@@ -127,6 +144,9 @@ func (p *ColorPicker) SetValue(c color.RGBA) bool {
 	p.mu.Unlock()
 
 	p.Invalidate()
+	if !notify {
+		return true
+	}
 	if cb != nil {
 		cb(c)
 	}
