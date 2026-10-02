@@ -51,9 +51,7 @@ type TextBox struct {
 
 	contextMenu *PopupMenu
 
-	lastClickMs int64
-	lastClickX  int
-	lastClickY  int
+	clicks clickSeries // номер нажатия в серии, если движок его не прислал
 
 	undoStack []textEdit
 	redoStack []textEdit
@@ -1008,25 +1006,21 @@ func (t *TextBox) OnMouseButton(e MouseEvent) bool {
 	if e.Pressed {
 		idx := t.charIndexAtPoint(e.X, e.Y)
 
-		// Двойной клик — выделить слово.
-		nowMs := time.Now().UnixMilli()
-		dx, dy := e.X-t.lastClickX, e.Y-t.lastClickY
-		if dx < 0 {
-			dx = -dx
-		}
-		if dy < 0 {
-			dy = -dy
-		}
-		if nowMs-t.lastClickMs <= 400 && dx <= 4 && dy <= 4 {
+		// Двойной щелчок выделяет слово, тройной — строку.
+		switch n := clicksOf(e, &t.clicks); {
+		case n == 2:
 			lo, hi := t.wordBounds(idx)
 			t.selAnchor = lo
 			t.caret = hi
 			t.dragging = false
-			t.lastClickMs = 0
+			return true
+		case n >= 3:
+			lo, hi := t.lineBounds(idx)
+			t.selAnchor = lo
+			t.caret = hi
+			t.dragging = false
 			return true
 		}
-		t.lastClickMs = nowMs
-		t.lastClickX, t.lastClickY = e.X, e.Y
 
 		t.caret = idx
 		t.selAnchor = idx
@@ -1115,6 +1109,28 @@ func (t *TextBox) wordBounds(idx int) (int, int) {
 	}
 	hi := idx + 1
 	for hi < n && isWordRune(t.runes[hi]) == cls && t.runes[hi] != '\n' {
+		hi++
+	}
+	return lo, hi
+}
+
+// lineBounds — границы строки вокруг idx, без переноса на конце: выделять
+// сам перенос значит выделять и начало следующей строки, а тройным щелчком
+// просят именно эту.
+func (t *TextBox) lineBounds(idx int) (int, int) {
+	n := len(t.runes)
+	if idx > n {
+		idx = n
+	}
+	if idx < 0 {
+		idx = 0
+	}
+	lo := idx
+	for lo > 0 && t.runes[lo-1] != '\n' {
+		lo--
+	}
+	hi := idx
+	for hi < n && t.runes[hi] != '\n' {
 		hi++
 	}
 	return lo, hi

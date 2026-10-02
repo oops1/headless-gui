@@ -76,6 +76,16 @@ func (s *surface) sendModifiers(mod widget.KeyMod) {
 	}
 }
 
+// doubleClickSink — опциональный приём системного интервала двойного щелчка
+// (реализует *engine.Engine).
+//
+// Опциональный по той же причине, что modifierSink: EngineAPI — обязательный
+// минимум, и дописывать в него метод значило бы сломать сборку всякому, кто
+// этот интерфейс уже реализует.
+type doubleClickSink interface {
+	SetDoubleClickTime(d time.Duration)
+}
+
 // engineScaler — опциональная поддержка HiDPI движком (реализует *engine.Engine).
 // CanvasSize при этом логический, кадры и события — физические.
 type engineScaler interface {
@@ -454,6 +464,16 @@ func (win *Window) Run() error {
 	// Значок, заданный до Run(): отдаём бэкенду ДО создания окна ОС, чтобы он
 	// выставил его в правильный момент (на X11 — до MapWindow).
 	win.applyPendingIcon()
+
+	// Интервал двойного щелчка — системный: его выставляет человек в
+	// параметрах мыши, и по нему движок считает серию нажатий
+	// (widget.MouseEvent.Clicks). Бэкенд, который значения не знает,
+	// оставляет движку своё.
+	if ds, ok := win.eng.(doubleClickSink); ok {
+		if d := nativeDoubleClickTime(); d > 0 {
+			ds.SetDoubleClickTime(d)
+		}
+	}
 
 	// HiDPI: определяем масштаб монитора (env HEADLESS_GUI_SCALE или
 	// бэкенд) и сообщаем движку ДО расчёта размеров окна.

@@ -4,6 +4,7 @@ package engine
 import (
 	"image"
 	"sync"
+	"time"
 
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -313,6 +314,7 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	// произвольные области. Клики редки, полный кадр здесь дёшев и надёжен.
 	e.Invalidate()
 	ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed, Mod: e.Modifiers()}
+	ev.Clicks = e.countClick(x, y, btn, pressed)
 
 	// Новое нажатие: открываем его номер ДО гашения overlay'ев (dismissOutside
 	// ниже) — кнопка, владеющая меню из чужого поддерева, по этому номеру
@@ -954,4 +956,60 @@ func broadcastMouseMoveAt(w widget.Widget, ox, oy, nx, ny, depth int) {
 	for _, child := range w.Children() {
 		broadcastMouseMoveAt(child, ox, oy, nx, ny, depth+1)
 	}
+}
+
+// ─── Серия нажатий (двойной и тройной щелчок) ───────────────────────────────
+
+// defaultDoubleClick — интервал серии, когда системного значения нет.
+// 500 мс — то же, что ставит Windows по умолчанию.
+const defaultDoubleClick = 500 * time.Millisecond
+
+// clickSlack — насколько курсор может сдвинуться между нажатиями серии
+// (логические точки). Рука дрожит, и требовать точку в точку нельзя.
+const clickSlack = 4
+
+// SetDoubleClickTime задаёт интервал, внутри которого второе нажатие считается
+// двойным щелчком, а третье — тройным.
+//
+// Значение системное: человек выставляет его в параметрах мыши, и угадывать
+// за него не нужно. Окно сообщает его при запуске, если бэкенд умеет узнать
+// (Win32 — GetDoubleClickTime); иначе остаётся значение по умолчанию.
+// d <= 0 возвращает к значению по умолчанию.
+func (e *Engine) SetDoubleClickTime(d time.Duration) {
+	e.dblClickDelay = d
+}
+
+// countClick возвращает номер нажатия в серии для MouseEvent.Clicks.
+//
+// Серию рвёт что угодно из трёх: другая кнопка, слишком долгая пауза,
+// слишком далёкий курсор. Отпускание номера не меняет — оно несёт номер
+// своего нажатия, чтобы обработчик release видел ту же серию, что и press.
+func (e *Engine) countClick(x, y int, btn widget.MouseButton, pressed bool) int {
+	if !pressed {
+		if btn != e.clickBtn {
+			return 0
+		}
+		return e.clickN
+	}
+	delay := e.dblClickDelay
+	if delay <= 0 {
+		delay = defaultDoubleClick
+	}
+	now := time.Now()
+	sameSpot := abs(x-e.clickX) <= clickSlack && abs(y-e.clickY) <= clickSlack
+	if btn == e.clickBtn && e.clickN > 0 && sameSpot && now.Sub(e.clickAt) <= delay {
+		e.clickN++
+	} else {
+		e.clickN = 1
+	}
+	e.clickBtn, e.clickAt, e.clickX, e.clickY = btn, now, x, y
+	return e.clickN
+}
+
+// abs — модуль целого (math.Abs просит float и возвращает float).
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
