@@ -1149,52 +1149,29 @@ func (s *surface) applyFrame(frame output.Frame) {
 // vkToKeyCode переводит VK_* код в widget.KeyCode.
 // VK_* константы специально совпадают с widget.KeyCode, поэтому маппинг прямой.
 func vkToKeyCode(vk int) widget.KeyCode {
-	switch vk {
-	case VK_BACKSPACE:
-		return widget.KeyBackspace
-	case VK_TAB:
-		return widget.KeyTab
-	case VK_ENTER:
-		return widget.KeyEnter
-	case VK_ESCAPE:
-		return widget.KeyEscape
-	case VK_SPACE:
-		return widget.KeySpace
-	case VK_LEFT:
-		return widget.KeyLeft
-	case VK_UP:
-		return widget.KeyUp
-	case VK_RIGHT:
-		return widget.KeyRight
-	case VK_DOWN:
-		return widget.KeyDown
-	case VK_INSERT:
-		return widget.KeyInsert
-	case VK_DELETE:
-		return widget.KeyDelete
-	case VK_HOME:
-		return widget.KeyHome
-	case VK_END:
-		return widget.KeyEnd
-	case VK_PRIOR:
-		return widget.KeyPageUp
-	case VK_NEXT:
-		return widget.KeyPageDown
-	case VK_A:
-		return widget.KeyA
-	case VK_C:
-		return widget.KeyC
-	case VK_V:
-		return widget.KeyV
-	case VK_X:
-		return widget.KeyX
-	case VK_Y:
-		return widget.KeyY
-	case VK_Z:
-		return widget.KeyZ
+	// Значения widget.KeyCode намеренно совпадают с виртуальными кодами
+	// Windows, поэтому почти всё отображение — это проверка «код из тех, что
+	// мы объявили», а не длинный switch с сотней одинаковых строк вида
+	// «case VK_X: return KeyX». Пропускать всё подряд тоже нельзя: коды, для
+	// которых константы нет, пришли бы приложению безымянными числами, и
+	// завтрашнее добавление константы молча поменяло бы смысл события.
+	switch {
+	case vk >= VK_A && vk <= VK_Z: // буквы A–Z
+		return widget.KeyCode(vk)
+	case vk >= VK_0 && vk <= VK_9: // цифровой ряд
+		return widget.KeyCode(vk)
+	case vk >= VK_NUMPAD0 && vk <= VK_DIVIDE: // цифровая клавиатура
+		return widget.KeyCode(vk)
+	case vk >= VK_F1 && vk <= VK_F24:
+		return widget.KeyCode(vk)
 	}
-	// F1–F12: значения KeyCode совпадают с VK (0x70–0x7B).
-	if vk >= VK_F1 && vk <= VK_F12 {
+	switch vk {
+	case VK_BACKSPACE, VK_TAB, VK_ENTER, VK_ESCAPE, VK_SPACE,
+		VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN,
+		VK_INSERT, VK_DELETE, VK_HOME, VK_END, VK_PRIOR, VK_NEXT,
+		VK_PAUSE, VK_CAPITAL, VK_SNAPSHOT, VK_APPS, VK_NUMLOCK, VK_SCROLL,
+		VK_OEM_1, VK_OEM_PLUS, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD,
+		VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7:
 		return widget.KeyCode(vk)
 	}
 	return widget.KeyUnknown

@@ -4269,6 +4269,35 @@ elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
 
+### Full key table — v3.26
+
+The engine handed the application codes only for navigation keys, A/C/V/X/Y/Z
+and F1–F12; everything else became `KeyUnknown` and was dropped. So
+`Ctrl+S`, `Ctrl+O`, `Ctrl+N`, `Ctrl+B`, `Ctrl +/-/0` — anything an app with a
+menu is built on — never arrived.
+
+`widget.KeyCode` now covers all letters A–Z, digits 0–9, the numpad
+(`KeyNumpad0`…`KeyNumpad9`, `KeyAdd`, `KeySubtract`, `KeyMultiply`,
+`KeyDivide`, `KeyDecimal`), the OEM keys (`KeyOemPlus`, `KeyOemMinus`,
+`KeyOemComma`, `KeyOemPeriod`, `KeyOemSemicolon`, `KeyOemSlash`,
+`KeyOemTilde`, `KeyOemOpenBrace`, `KeyOemCloseBrace`, `KeyOemBackslash`,
+`KeyOemQuote`), F13–F24, and `KeyCapsLock`, `KeyNumLock`, `KeyScrollLock`,
+`KeyPrintScreen`, `KeyPause`, `KeyMenu` (the context-menu key). Values are the
+Windows virtual-key codes, as everywhere in the engine — existing constants
+are unchanged.
+
+**Shortcuts follow the physical key, not the printed symbol.** On X11 and
+Wayland the keycode is mapped through `window/keytable.go` (X11 keycode =
+evdev + 8), so `Ctrl+S` works on a Russian layout, where that key prints «ы».
+The character still arrives separately, from the layout: a key-down with
+`Code` first, the text event with `Rune` after it.
+
+The numpad Enter reports `KeyEnter`, like on Windows — it has no virtual key
+of its own there.
+
+Markup can name the new keys too: `Numpad5`, `Add`, `OemPlus` (or just `=`),
+`CapsLock`, `Apps`, `F13`.
+
 ### ColorPicker and Swatch — v3.25
 
 A colour field, built the way `DatePicker` is: the code can be typed straight

@@ -117,6 +117,74 @@ func parseKeyName(s string) KeyCode {
 		return KeyUp
 	case "down":
 		return KeyDown
+	case "capslock", "caps":
+		return KeyCapsLock
+	case "numlock":
+		return KeyNumLock
+	case "scrolllock", "scroll":
+		return KeyScrollLock
+	case "printscreen", "prtsc", "snapshot":
+		return KeyPrintScreen
+	case "pause", "break":
+		return KeyPause
+	case "apps", "menu", "contextmenu":
+		return KeyMenu
+	// Цифровая клавиатура — отдельно от цифрового ряда: калькулятору важно,
+	// с какой стороны нажали.
+	case "numpad0", "num0":
+		return KeyNumpad0
+	case "numpad1", "num1":
+		return KeyNumpad1
+	case "numpad2", "num2":
+		return KeyNumpad2
+	case "numpad3", "num3":
+		return KeyNumpad3
+	case "numpad4", "num4":
+		return KeyNumpad4
+	case "numpad5", "num5":
+		return KeyNumpad5
+	case "numpad6", "num6":
+		return KeyNumpad6
+	case "numpad7", "num7":
+		return KeyNumpad7
+	case "numpad8", "num8":
+		return KeyNumpad8
+	case "numpad9", "num9":
+		return KeyNumpad9
+	case "add", "numpadadd", "numpadplus":
+		return KeyAdd
+	case "subtract", "numpadsubtract", "numpadminus":
+		return KeySubtract
+	case "multiply", "numpadmultiply":
+		return KeyMultiply
+	case "divide", "numpaddivide":
+		return KeyDivide
+	case "decimal", "numpaddecimal":
+		return KeyDecimal
+	// OEM-клавиши названы и по-wpf-овски, и по тому, что на них написано в
+	// раскладке США: разметке удобнее второе, совместимости — первое.
+	case "oemplus", "plus", "=":
+		return KeyOemPlus
+	case "oemminus", "minus", "-":
+		return KeyOemMinus
+	case "oemcomma", "comma", ",":
+		return KeyOemComma
+	case "oemperiod", "period", ".":
+		return KeyOemPeriod
+	case "oem1", "semicolon", ";":
+		return KeyOemSemicolon
+	case "oem2", "slash", "/":
+		return KeyOemSlash
+	case "oem3", "tilde", "backquote", "`":
+		return KeyOemTilde
+	case "oem4", "openbrace", "[":
+		return KeyOemOpenBrace
+	case "oem5", "backslash", "\\":
+		return KeyOemBackslash
+	case "oem6", "closebrace", "]":
+		return KeyOemCloseBrace
+	case "oem7", "quote", "'":
+		return KeyOemQuote
 	}
 	return KeyUnknown
 }
