@@ -668,9 +668,9 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 		bg := w.titleTabContentBG(tab.Content)
 		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 8, bg)
 		ctx.FillRect(r.Min.X, r.Max.Y-8, r.Dx(), 8, bg)
-		ctx.SetClip(r)
+		restore := PushClip(ctx, r)
 		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy()+8, 8, cardBorder)
-		ctx.ClearClip()
+		restore()
 	case hover:
 		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), bandBot-r.Min.Y, 8, hoverBG)
 	}

@@ -488,9 +488,9 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 
 	// Рисуем содержимое активной вкладки
 	if active >= 0 && active < len(tabs) && tabs[active].Content != nil {
-		ctx.SetClip(cr)
+		restore := PushClip(ctx, cr)
 		tabs[active].Content.Draw(ctx)
-		ctx.ClearClip()
+		restore()
 	}
 
 	if st.Classic3D {

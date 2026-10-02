@@ -20,6 +20,8 @@ import (
 // treeViewDrawAdapter адаптирует widget.DrawContext → treeview.DrawContextBridge.
 type treeViewDrawAdapter struct {
 	ctx DrawContext
+	// outer — область рисования на входе в дерево (см. drawContextAdapter).
+	outer image.Rectangle
 }
 
 func (a *treeViewDrawAdapter) FillRect(x, y, w, h int, col color.RGBA) {
@@ -40,11 +42,15 @@ func (a *treeViewDrawAdapter) DrawTextSize(text string, x, y int, sizePt float64
 func (a *treeViewDrawAdapter) MeasureText(text string, sizePt float64) int {
 	return a.ctx.MeasureText(text, sizePt)
 }
+
+// SetClip сужает область ПЕРЕСЕЧЕНИЕМ с внешней, ClearClip возвращает её:
+// дерево внутри прокрутки не должно рисовать мимо неё.
 func (a *treeViewDrawAdapter) SetClip(r image.Rectangle) {
-	a.ctx.SetClip(r)
+	a.ctx.SetClip(r.Intersect(a.outer))
 }
+
 func (a *treeViewDrawAdapter) ClearClip() {
-	a.ctx.ClearClip()
+	a.ctx.SetClip(a.outer)
 }
 func (a *treeViewDrawAdapter) DrawHLine(x, y, length int, col color.RGBA) {
 	a.ctx.DrawHLine(x, y, length, col)
@@ -115,7 +121,7 @@ func (w *TreeViewWidget) SetBounds(r image.Rectangle) {
 
 // Draw отрисовывает TreeView.
 func (w *TreeViewWidget) Draw(ctx DrawContext) {
-	adapter := &treeViewDrawAdapter{ctx: ctx}
+	adapter := &treeViewDrawAdapter{ctx: ctx, outer: ctx.Clip()}
 	w.Tree.Draw(adapter)
 	w.drawDisabledOverlay(ctx)
 }

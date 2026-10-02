@@ -464,9 +464,10 @@ func (lv *ListView) Draw(ctx DrawContext) {
 	// Фон
 	ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), lv.Background)
 
-	// Клиппинг
+	// Клиппинг: сужаем ПЕРЕСЕЧЕНИЕМ с текущей областью — список может
+	// стоять внутри прокрутки, и рисовать шире неё нельзя.
 	cw := lv.contentWidth()
-	ctx.SetClip(image.Rect(b.Min.X, b.Min.Y, b.Min.X+cw, b.Max.Y))
+	restoreClip := PushClip(ctx, image.Rect(b.Min.X, b.Min.Y, b.Min.X+cw, b.Max.Y))
 
 	// Элементы
 	startIdx := scrollY / lv.ItemHeight
@@ -508,7 +509,7 @@ func (lv *ListView) Draw(ctx DrawContext) {
 		ctx.FillRect(b.Min.X, y-1, cw, 2, lv.ThumbHoverBG)
 	}
 
-	ctx.ClearClip()
+	restoreClip()
 
 	// Скроллбар
 	if lv.needsScrollbar() {

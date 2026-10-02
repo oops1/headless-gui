@@ -184,9 +184,13 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), sv.Background)
 	}
 
-	// Клиппинг для содержимого
+	// Клиппинг для содержимого. Сужаем ПЕРЕСЕЧЕНИЕМ с текущей областью —
+	// прокрутка может стоять внутри другой, — и ставим его заново перед
+	// КАЖДЫМ ребёнком: ребёнок вправе снять своё сужение вместе с нашим
+	// (`ClearClip` снимает всё), и тогда соседи рисовали бы мимо.
+	outer := ctx.Clip()
 	contentW := sv.contentWidth()
-	ctx.SetClip(image.Rect(b.Min.X, b.Min.Y, b.Min.X+contentW, b.Max.Y))
+	content := image.Rect(b.Min.X, b.Min.Y, b.Min.X+contentW, b.Max.Y).Intersect(outer)
 
 	// Рисуем дочерние элементы со смещением.
 	//
@@ -210,10 +214,11 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 		if shifted.Max.Y < b.Min.Y || shifted.Min.Y > b.Max.Y {
 			continue
 		}
+		ctx.SetClip(content)
 		child.Draw(childCtx)
 	}
 
-	ctx.ClearClip()
+	ctx.SetClip(outer)
 
 	// Скроллбар
 	if sv.needsScrollbar() {

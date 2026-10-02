@@ -1258,7 +1258,7 @@ func (t *TextBox) Draw(ctx DrawContext) {
 	}
 
 	inner := image.Rect(b.Min.X+1, b.Min.Y+1, b.Max.X-1, b.Max.Y-1)
-	ctx.SetClip(inner)
+	restoreClip := PushClip(ctx, inner)
 
 	textX := b.Min.X + t.PaddingX - scrollX
 	topY := b.Min.Y + t.PaddingY
@@ -1340,7 +1340,7 @@ func (t *TextBox) Draw(ctx DrawContext) {
 		ctx.FillRoundRect(b.Max.X-6, ty, 4, thumbH, 2, win10.ScrollThumbBG)
 	}
 
-	ctx.ClearClip()
+	restoreClip()
 	t.drawChildren(ctx)
 	t.drawDisabledOverlay(ctx)
 }
