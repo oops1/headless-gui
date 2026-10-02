@@ -30,3 +30,14 @@ type interactiveMover interface {
 type appIDSetter interface {
 	SetAppID(id string)
 }
+
+// keyRepeatSource — бэкенд умеет отличать автоповтор удерживаемой клавиши от
+// нового нажатия.
+//
+// Отдельный интерфейс, а не новый параметр SetOnKeyDown: тот реализуют все
+// бэкенды, и смена его сигнатуры сломала бы сборку каждому. Бэкенд, который
+// про повтор не знает, оставляет прежний путь, и приложение видит повторы
+// как обычные нажатия — ровно как раньше.
+type keyRepeatSource interface {
+	SetOnKeyDownRepeat(fn func(vk int, repeat bool))
+}

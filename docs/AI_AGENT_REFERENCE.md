@@ -2994,7 +2994,7 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 
 | Возможность | Win32 | X11 | Wayland / macOS / headless |
 |---|---|---|---|
-| Модалка в своём окне (`ModalHost`) | нативно | in-canvas | in-canvas фолбэк |
+| Модалка в своём окне (`ModalHost`) | нативно | нативно | in-canvas фолбэк |
 | Popup-оверлей в своём окне (`PopupSink`) | нативно | нативно | in-canvas фолбэк |
 | Трей / balloon / превью | да | no-op (ошибка/false) | no-op (ошибка/false) |
 | Перетащить / растянуть окно | `SetPosition` | `SetPosition` | Wayland — просит компоновщик, macOS — нет |
@@ -4268,6 +4268,246 @@ keeps the grab offset (no jump), a click on a conflict mark goes to it, a click
 elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
+
+### Menu item: shortcut text and mnemonics — v3.27
+
+A menu writes the shortcut on the right — "Ctrl+S". There was no field for it,
+so applications appended it to the item's own caption: it then lined up after
+the caption and read as a second label, not as a hint.
+
+```go
+menu.UseMnemonics = true
+menu.SetItems([]widget.MenuItem{
+    {Text: "_Save", Shortcut: "Ctrl+S", OnClick: save},
+    {Text: "report__2026.txt"}, // a real underscore
+})
+```
+
+`MenuItem.Shortcut` is only SHOWN: the keystroke is handled by the application
+through `InputBindings`, or the same combination would be declared twice and
+one day the two would disagree. Markup: `InputGestureText` (the WPF name) or
+`Shortcut`. The muted colour is mixed with the menu background rather than made
+translucent — translucent text over a highlighted item looks dirty.
+
+Mnemonics are opt-in through `UseMnemonics` (`PopupMenu`, `MenuBar`, and the
+markup attribute): captions do contain real underscores — file names in a
+context menu — and swallowing them silently is not allowed. A Cyrillic mnemonic
+is matched by the physical key, because what reaches the application is the
+Latin letter's code (so that `Ctrl+S` works in a Russian layout) and the engine
+does not know which layout is active; the layout assumed is ЙЦУКЕН, and the
+event's character, when a backend supplies it, wins over that guess.
+
+The menu bar holds no focus while keys go to the focused widget, so Alt+letter
+is handed to it by the application: `MenuBar.ActivateMnemonic(e)` reports
+whether such a mnemonic was found.
+
+### Click count in MouseEvent — v3.27
+
+Every widget used to spot a double click on its own — its own "time of the last
+click" field, its own 400 ms threshold and its own notion of "the mouse did not
+move". The threshold was invented rather than taken from the system, where the
+user sets it in the mouse settings. Nobody handled a triple click, and on
+Windows the second press arrives as a separate message (`WM_LBUTTONDBLCLK`) and
+looked like an ordinary first one.
+
+`MouseEvent.Clicks` now carries the number of the press in the series: 1, 2, 3
+and on. The engine counts it once for the whole tree (`countClick` in
+`engine/events.go`); a series is broken by another button, a cursor farther than
+four points, or a pause longer than the interval. A release carries the number
+of its own press, so a release handler sees the same series as the press.
+
+The interval comes from the system: `window.Run` reports it through the
+optional `doubleClickSink` (Win32 `GetDoubleClickTime`), and `SetDoubleClickTime`
+is public for anyone feeding the engine themselves. X11 and Wayland have no
+system-wide value in the protocol itself — it lives in desktop settings
+(XSettings, KDE's own key) — so there the default stays.
+
+`Clicks == 0` means the event did not come from the engine (a direct
+`OnMouseButton` call from a test or an application with its own dispatch): the
+widget then counts the series itself through `clicksOf` (`widget/clicks.go`),
+exactly as before. First use: a triple click selects the line in `TextBox` and
+the whole field in `TextInput`.
+
+### Window areas: Snap Layouts and edge snapping — v3.26
+
+Engine windows are borderless: the title bar and its buttons are drawn by the
+application, and the system knows nothing about them. So on Windows 11 the
+window did not snap to screen edges (it was moved by setting its position
+from mouse deltas), and hovering the maximise button showed no snap layouts —
+the system offers those only over an area declared as the maximise button.
+
+```go
+win.SetHitTest(func(x, y int) window.HitArea {
+    switch {
+    case closeRect.Contains(x, y): return window.HitCloseButton
+    case maxRect.Contains(x, y):   return window.HitMaxButton
+    case minRect.Contains(x, y):   return window.HitMinButton
+    case y < titleBarH:            return window.HitCaption
+    }
+    return window.HitClient
+})
+```
+
+Coordinates are client-side and logical — the same grid the application draws
+in. The resize edge wins over the buttons, otherwise the top edge of the
+window could not be grabbed. Events over a declared button are translated
+back into ordinary mouse events, so the application keeps drawing its own
+hover and pressed states. Without the callback nothing changes, and backends
+without the notion (X11, Wayland, macOS) ignore it.
+
+### X11: system move, resize and cursor shapes — v3.26
+
+`SetResizable` was an empty function and there were no cursor shapes at all:
+the window always showed an arrow, and its edge looked like its middle.
+
+Moving and resizing now go through `_NET_WM_MOVERESIZE` — the client asks the
+window manager to start, and the manager drives the window as it does its
+own, with edge snapping. It is the same `interactiveMover` the Wayland backend
+implements, so `Window.BeginMove` and `BeginResize` work on X11 too.
+
+Cursor shapes come from the «cursor» font — present in every X server, with
+no theme, no Xcursor and no external files. Each shape is created once and
+cached: the cursor changes hundreds of times a minute.
+
+### Horizontal wheel on Windows and X11 — v3.26
+
+`WM_MOUSEHWHEEL` was not handled, and on X11 buttons 6 and 7 — which is how
+the X server reports sideways scrolling, just as 4 and 5 report vertical —
+were dropped. Both now deliver `dx` the same way `dy` has always been
+delivered.
+
+### Text input on Windows: surrogates and AltGr — v3.26
+
+Two things got lost on the way from the OS to the widget.
+
+Windows sends text in UTF-16, so a character outside the basic plane — an
+emoji, a rare script — arrives as TWO WM_CHAR messages, a high and a low
+surrogate. On their own they mean nothing, and the application used to
+receive a pair of garbage runes. They are now assembled into one rune; an
+unpaired surrogate is dropped rather than shown as a replacement mark.
+
+Windows also reports AltGr as Ctrl+Alt. Widgets treat any Ctrl as a shortcut,
+so a character typed with AltGr (on a German layout AltGr+Q gives «@»)
+disappeared. A text event now arrives without that pair — it is typing, not a
+shortcut. A lone Ctrl or Alt is left alone: Ctrl+V pastes, it does not type.
+
+### System move and resize for any root — v3.26
+
+System dragging was wired up automatically only when the root was a
+widget.Window, so an application with its own root had to assert
+win.Native() to an unexported interface — reaching into the engine.
+
+    win.BeginMove() bool          // drag the window as the system does
+    win.BeginResize(edges) bool   // edges: widget.NativeEdgeTop и далее
+
+Both answer false when the backend cannot do it (Win32, X11, macOS today) or
+the system refused — then the application moves the window itself through
+SetPosition, exactly as before.
+
+### Alt, F10 and Alt+key — v3.26
+
+`WM_SYSKEYDOWN` / `WM_SYSKEYUP` / `WM_SYSCHAR` were not handled at all, so on
+Windows `ModAlt` was never set and F10 never arrived. They now go the same way
+as the ordinary key messages, and what the window does not consume is passed
+to `DefWindowProc` — `Alt+F4` and `Alt+Space` keep working as the system
+intends. The error beep on `WM_SYSCHAR` is suppressed (except for `Alt+Space`,
+which belongs to the window menu): the application has already received that
+combination as a key event.
+
+`widget.KeyAlt` is the gesture «Alt pressed and released with nothing in
+between» — how a menu bar is opened on Windows. As a modifier Alt still
+travels in `KeyEvent.Mod` and has no event of its own: `Alt+F` is `KeyF` with
+`ModAlt`, not two keys in a row.
+
+The gesture is recognised in `surface`, once for all three backends, so it
+works the same on X11 and Wayland. Auto-repeat of a held Alt neither cancels
+nor multiplies it, and any other key in between turns it into a plain
+combination.
+
+F10 is an ordinary key with its own code (`KeyF10`) — the application opens
+its menu itself.
+
+### Clipboard on Linux without external tools — v3.26
+
+The Linux clipboard ran `xclip` or `xsel` as a subprocess — a tool that may
+not be installed at all (the WinLine package has none), and the copied text
+lost its trailing newline on the way (`TrimRight`). Under Wayland it did not
+work at all.
+
+Both are native now, and the window registers the right provider itself as
+soon as the connection is up:
+
+- **Wayland** — `wl_data_device`. Copying creates a `wl_data_source`,
+  advertises `text/plain;charset=utf-8`, `text/plain`, `UTF8_STRING` and
+  `STRING`, and hands it over as the selection; the compositor then asks us
+  for the data (`send` with a file descriptor) for every paste. Pasting asks
+  the offer for data and reads the pipe. `set_selection` needs the serial of
+  recent input, so the engine now records it from keys, buttons and pointer
+  enter.
+- **X11** — real selections: we own `CLIPBOARD` and answer `SelectionRequest`
+  (including `TARGETS`), and paste goes through `ConvertSelection`.
+  `xclip`/`xsel` stay as a fallback for the case where there is no window yet.
+
+Reads do not hang the UI: the owner is another process and may never answer,
+so a paste gives up after 300 ms and returns empty.
+
+The trailing newline is preserved — copying `"abc\n"` and pasting gives
+`"abc\n"` back.
+
+`SetHTML` is not implemented yet: ask when you need it.
+
+### Key auto-repeat — v3.26
+
+Under Wayland the repeat of a held key is the CLIENT's job: the compositor
+sends the press and the release and says nothing in between. So holding an
+arrow or Backspace fired exactly once, and text could not be edited in a
+WinLine session at all.
+
+The Wayland backend now runs its own repeat timer, with the rate and delay the
+compositor reports (`wl_keyboard.repeat_info`, protocol version 4; older ones
+get the usual desktop defaults — 500 ms, then 25/s). A rate of `0` means the
+compositor turned repeat off, and that is honoured. The repeat stops on
+release, on a new key (only one key repeats, the last one), on focus loss and
+on close. Modifiers are never repeated.
+
+`KeyEvent.Repeat` marks a repeat on every platform (on Windows from bit 30 of
+`lParam`). It matters where a press toggles something: holding Caps Lock must
+not flip it twenty-five times a second. For typing and caret movement the
+repeat IS what is wanted, so most handlers ignore the flag.
+
+`wl_seat` is now bound at version 4 instead of 1 — that is what carries
+`repeat_info`. Higher versions are not taken: they oblige the client to handle
+`wl_pointer.frame` and the rest of the event grouping, which this backend does
+not do.
+
+### Full key table — v3.26
+
+The engine handed the application codes only for navigation keys, A/C/V/X/Y/Z
+and F1–F12; everything else became `KeyUnknown` and was dropped. So
+`Ctrl+S`, `Ctrl+O`, `Ctrl+N`, `Ctrl+B`, `Ctrl +/-/0` — anything an app with a
+menu is built on — never arrived.
+
+`widget.KeyCode` now covers all letters A–Z, digits 0–9, the numpad
+(`KeyNumpad0`…`KeyNumpad9`, `KeyAdd`, `KeySubtract`, `KeyMultiply`,
+`KeyDivide`, `KeyDecimal`), the OEM keys (`KeyOemPlus`, `KeyOemMinus`,
+`KeyOemComma`, `KeyOemPeriod`, `KeyOemSemicolon`, `KeyOemSlash`,
+`KeyOemTilde`, `KeyOemOpenBrace`, `KeyOemCloseBrace`, `KeyOemBackslash`,
+`KeyOemQuote`), F13–F24, and `KeyCapsLock`, `KeyNumLock`, `KeyScrollLock`,
+`KeyPrintScreen`, `KeyPause`, `KeyMenu` (the context-menu key). Values are the
+Windows virtual-key codes, as everywhere in the engine — existing constants
+are unchanged.
+
+**Shortcuts follow the physical key, not the printed symbol.** On X11 and
+Wayland the keycode is mapped through `window/keytable.go` (X11 keycode =
+evdev + 8), so `Ctrl+S` works on a Russian layout, where that key prints «ы».
+The character still arrives separately, from the layout: a key-down with
+`Code` first, the text event with `Rune` after it.
+
+The numpad Enter reports `KeyEnter`, like on Windows — it has no virtual key
+of its own there.
+
+Markup can name the new keys too: `Numpad5`, `Add`, `OemPlus` (or just `=`),
+`CapsLock`, `Apps`, `F13`.
 
 ### ColorPicker and Swatch — v3.25
 

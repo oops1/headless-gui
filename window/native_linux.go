@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // X11Window — реализация NativeWindow через X11 протокол.
@@ -40,10 +42,10 @@ type X11Window struct {
 	// closed — окно закрыто/уничтожается. Атомарный: главное окно читает его в
 	// RunEventLoop, вторичное — в eventPumpLoop, а Close() (для вторичного окна
 	// вызывается из горутины teardown) пишет — доступ из разных горутин.
-	closed    atomic.Bool
+	closed atomic.Bool
 
-	seqNum    uint16 // sequence number for requests
-	mu        sync.Mutex
+	seqNum uint16 // sequence number for requests
+	mu     sync.Mutex
 
 	// blitBuf — переиспользуемый буфер BGRA-конвертации для PutImage
 	// (раньше выделялся полный кадр на каждый блит). blitMu сериализует
@@ -80,17 +82,21 @@ type X11Window struct {
 	onClose       func() bool
 	onMouseMove   func(x, y int)
 	onMouseButton func(x, y, button int, pressed bool)
-	onKeyDown     func(vk int)
-	onKeyUp       func(vk int)
-	onChar        func(r rune)
+	// onMouseWheelPixels — точная дельта прокрутки. X11 сообщает колесо
+	// щелчками кнопок, но горизонтальной «кнопки колеса» в движке нет, и
+	// 6/7 передаются именно так.
+	onMouseWheelPixels func(x, y int, dx, dy float64)
+	onKeyDown          func(vk int)
+	onKeyUp            func(vk int)
+	onChar             func(r rune)
 
 	// Atom IDs для WM протоколов
-	atomWMProtocols   uint32
-	atomWMDeleteWindow uint32
-	atomWMState        uint32
-	atomWMStateMaxH    uint32
-	atomWMStateMaxV    uint32
-	atomNetWMState     uint32
+	atomWMProtocols     uint32
+	atomWMDeleteWindow  uint32
+	atomWMState         uint32
+	atomWMStateMaxH     uint32
+	atomWMStateMaxV     uint32
+	atomNetWMState      uint32
 	atomNetWMStateModal uint32 // _NET_WM_STATE_MODAL (модальность у EWMH-WM)
 	atomNetActiveWindow uint32 // _NET_ACTIVE_WINDOW (передача фокуса окну)
 
@@ -118,10 +124,26 @@ type X11Window struct {
 
 	// Атомы UTF-8 заголовка (EWMH) и Motif-хинтов — интернируются в Create,
 	// чтобы SetTitle/borderless работали и после первого показа.
-	atomUTF8String    uint32
-	atomNetWMName     uint32
-	atomNetWMIconName uint32
-	atomMotifHints    uint32
+	atomUTF8String uint32
+	// Буфер обмена: само выделение, свойство для ответа и два формата.
+	atomClipboard uint32
+	atomClipProp  uint32
+	atomTargets   uint32
+	atomText      uint32
+	// clip — буфер обмена своими силами (x11_clipboard_linux.go).
+	clip *x11Clipboard
+	// cursors — формы курсора окна (x11_cursor_linux.go).
+	cursors x11Cursors
+	// resizable — разрешено ли пользователю менять размер (SetResizable).
+	resizable atomic.Bool
+	// rootX/rootY — последняя известная позиция указателя в координатах
+	// экрана: её просит _NET_WM_MOVERESIZE, а отдельного запроса делать
+	// незачем — она приходит в каждом событии мыши.
+	rootX, rootY        atomic.Int32
+	atomNetWMMoveResize uint32
+	atomNetWMName       uint32
+	atomNetWMIconName   uint32
+	atomMotifHints      uint32
 
 	// minW/minH/minWant — минимальный размер, заданный до создания окна
 	// (см. SetMinSize): свойство ставится до MapWindow.
@@ -149,25 +171,25 @@ type X11Window struct {
 	atomTextUriList    uint32
 
 	// Состояние текущей DnD-сессии (заполняется из ClientMessage-событий).
-	dndSource    uint32 // окно-источник перетаскивания (0 — нет сессии)
-	dndVersion   int    // версия протокола источника
-	dndAccept    bool   // предложен ли text/uri-list (принимаем ли сброс)
-	dndX, dndY   int    // последняя позиция курсора (КОРНЕВЫЕ/экранные координаты)
-	dndTime      uint32 // timestamp из XdndDrop (для XConvertSelection)
-	dndDropPending bool // ждём SelectionNotify после XConvertSelection
+	dndSource      uint32 // окно-источник перетаскивания (0 — нет сессии)
+	dndVersion     int    // версия протокола источника
+	dndAccept      bool   // предложен ли text/uri-list (принимаем ли сброс)
+	dndX, dndY     int    // последняя позиция курсора (КОРНЕВЫЕ/экранные координаты)
+	dndTime        uint32 // timestamp из XdndDrop (для XConvertSelection)
+	dndDropPending bool   // ждём SelectionNotify после XConvertSelection
 
 	onFilesDropped func(paths []string, x, y int)
 }
 
 type x11Screen struct {
-	Root          uint32
-	Colormap      uint32
-	WhitePixel    uint32
-	BlackPixel    uint32
-	WidthInPixels uint16
+	Root           uint32
+	Colormap       uint32
+	WhitePixel     uint32
+	BlackPixel     uint32
+	WidthInPixels  uint16
 	HeightInPixels uint16
-	RootDepth     uint8
-	RootVisual    uint32
+	RootDepth      uint8
+	RootVisual     uint32
 }
 
 // NewNativeWindow выбирает бэкенд: Wayland при доступном композиторе
@@ -250,7 +272,13 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomWMStateMaxV = w.x11InternAtom("_NET_WM_STATE_MAXIMIZED_VERT")
 	w.atomNetWMStateModal = w.x11InternAtom("_NET_WM_STATE_MODAL")
 	w.atomNetActiveWindow = w.x11InternAtom("_NET_ACTIVE_WINDOW")
+	w.atomNetWMMoveResize = w.x11InternAtom("_NET_WM_MOVERESIZE")
 	w.atomUTF8String = w.x11InternAtom("UTF8_STRING")
+	w.clip = newX11Clipboard(w)
+	w.atomClipboard = w.x11InternAtom("CLIPBOARD")
+	w.atomClipProp = w.x11InternAtom("HEADLESS_GUI_CLIPBOARD")
+	w.atomTargets = w.x11InternAtom("TARGETS")
+	w.atomText = w.x11InternAtom("TEXT")
 	w.atomNetWMName = w.x11InternAtom("_NET_WM_NAME")
 	w.atomNetWMIconName = w.x11InternAtom("_NET_WM_ICON_NAME")
 	w.atomMotifHints = w.x11InternAtom("_MOTIF_WM_HINTS")
@@ -291,8 +319,8 @@ func (w *X11Window) Create(title string, width, height int) error {
 			0x00400000) // FocusChangeMask
 
 	values := []uint32{
-		w.screen.BlackPixel,                    // background
-		eventMask,                               // event-mask
+		w.screen.BlackPixel, // background
+		eventMask,           // event-mask
 	}
 	valueMask := uint32(0x00000002 | 0x00000800) // BackPixel | EventMask
 
@@ -344,6 +372,12 @@ func (w *X11Window) Create(title string, width, height int) error {
 
 	// Map (show) window
 	w.x11MapWindow(w.wid)
+
+	// Буфер обмена своими силами: xclip и xsel остаются запасным путём, но
+	// в системе их может не быть вовсе.
+	if w.atomClipboard != 0 {
+		widget.SetClipboardProvider(w.clip)
+	}
 
 	return nil
 }
@@ -439,126 +473,154 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		}
 	}
 	switch evType {
-		case 2: // KeyPress
-			keycode := buf[1]
-			state := binary.LittleEndian.Uint16(buf[28:30])
-			vk := x11KeycodeToVK(int(keycode))
-			if w.onKeyDown != nil && vk != 0 {
-				w.onKeyDown(vk)
-			}
-			// Символьный ввод: полноценный маппинг по GetKeyboardMapping
-			// (раскладка/Shift/Caps/группа); фолбэк — упрощённая таблица.
-			if w.onChar != nil {
-				if r := w.x11RuneForKey(keycode, state); r >= 32 {
+	case 2: // KeyPress
+		keycode := buf[1]
+		state := binary.LittleEndian.Uint16(buf[28:30])
+		vk := x11KeycodeToVK(int(keycode))
+		if w.onKeyDown != nil && vk != 0 {
+			w.onKeyDown(vk)
+		}
+		// Символьный ввод: полноценный маппинг по GetKeyboardMapping
+		// (раскладка/Shift/Caps/группа); фолбэк — упрощённая таблица.
+		if w.onChar != nil {
+			if r := w.x11RuneForKey(keycode, state); r >= 32 {
+				w.onChar(r)
+			} else if w.keysyms == nil {
+				if r := x11KeycodeToRune(int(keycode), state&1 != 0); r != 0 {
 					w.onChar(r)
-				} else if w.keysyms == nil {
-					if r := x11KeycodeToRune(int(keycode), state&1 != 0); r != 0 {
-						w.onChar(r)
-					}
 				}
 			}
+		}
 
-		case 3: // KeyRelease
-			keycode := buf[1]
-			vk := x11KeycodeToVK(int(keycode))
-			if w.onKeyUp != nil && vk != 0 {
-				w.onKeyUp(vk)
-			}
+	case 3: // KeyRelease
+		keycode := buf[1]
+		vk := x11KeycodeToVK(int(keycode))
+		if w.onKeyUp != nil && vk != 0 {
+			w.onKeyUp(vk)
+		}
 
-		case 4: // ButtonPress
-			x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
-			y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
-			button := int(buf[1]) - 1 // X11: 1=left, 2=mid, 3=right → 0,1,2
-			if button == 2 {
-				button = 1 // right
-			} else if button == 1 {
-				button = 2 // middle
-			}
-			if w.onMouseButton != nil {
-				w.onMouseButton(x, y, button, true)
-			}
-
-		case 5: // ButtonRelease
-			x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
-			y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
-			button := int(buf[1]) - 1
-			if button == 2 {
-				button = 1
-			} else if button == 1 {
-				button = 2
-			}
-			if w.onMouseButton != nil {
-				w.onMouseButton(x, y, button, false)
-			}
-
-		case 6: // MotionNotify
-			x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
-			y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
-			if w.onMouseMove != nil {
-				w.onMouseMove(x, y)
-			}
-
-		case 9: // FocusIn
-			if w.onActivate != nil {
-				w.onActivate(true)
-			}
-
-		case 10: // FocusOut
-			if w.onActivate != nil {
-				w.onActivate(false)
-			}
-
-		case 12: // Expose
-			// ОС просит восстановить область окна — блитим из кэша кадра.
-			// Формат события: x@8, y@10, width@12, height@14 (little-endian).
-			if w.onExpose != nil {
-				ex := int(binary.LittleEndian.Uint16(buf[8:10]))
-				ey := int(binary.LittleEndian.Uint16(buf[10:12]))
-				ew := int(binary.LittleEndian.Uint16(buf[12:14]))
-				eh := int(binary.LittleEndian.Uint16(buf[14:16]))
-				if ew > 0 && eh > 0 {
-					w.onExpose(image.Rect(ex, ey, ex+ew, ey+eh))
+	case 4: // ButtonPress
+		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
+		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
+		w.rememberRoot(buf)
+		// Кнопки 6 и 7 — это горизонтальная прокрутка (наклон колеса или
+		// жест тачпада), а не кнопки: X11 сообщает её так же, как вертикаль
+		// кнопками 4 и 5. Раньше они просто отбрасывались, и прокрутки
+		// вширь на X11 не было.
+		if raw := int(buf[1]); raw == 6 || raw == 7 {
+			if w.onMouseWheelPixels != nil {
+				dx := float64(x11WheelNotchPx)
+				if raw == 6 {
+					dx = -dx // 6 — влево
 				}
+				w.onMouseWheelPixels(x, y, dx, 0)
 			}
+			return
+		}
+		button := int(buf[1]) - 1 // X11: 1=left, 2=mid, 3=right → 0,1,2
+		if button == 2 {
+			button = 1 // right
+		} else if button == 1 {
+			button = 2 // middle
+		}
+		if w.onMouseButton != nil {
+			w.onMouseButton(x, y, button, true)
+		}
 
-		case 22: // ConfigureNotify
-			// Кэш позиции для GetPosition (см. updatePosFromConfigure).
-			cx, cy, synthetic := parseConfigureNotifyPos(buf)
-			w.updatePosFromConfigure(cx, cy, synthetic)
-			newW := int(binary.LittleEndian.Uint16(buf[20:22]))
-			newH := int(binary.LittleEndian.Uint16(buf[22:24]))
-			if newW != w.width || newH != w.height {
-				w.width = newW
-				w.height = newH
-				w.x11ShmResize(newW, newH)
-				if w.onResize != nil {
-					w.onResize(newW, newH)
-				}
+	case 5: // ButtonRelease
+		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
+		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
+		if raw := int(buf[1]); raw == 6 || raw == 7 {
+			return // прокрутку отдали на нажатии; отпускание ничего не значит
+		}
+		button := int(buf[1]) - 1
+		if button == 2 {
+			button = 1
+		} else if button == 1 {
+			button = 2
+		}
+		if w.onMouseButton != nil {
+			w.onMouseButton(x, y, button, false)
+		}
+
+	case 6: // MotionNotify
+		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
+		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
+		if w.onMouseMove != nil {
+			w.onMouseMove(x, y)
+		}
+
+	case 9: // FocusIn
+		if w.onActivate != nil {
+			w.onActivate(true)
+		}
+
+	case 10: // FocusOut
+		if w.onActivate != nil {
+			w.onActivate(false)
+		}
+
+	case 12: // Expose
+		// ОС просит восстановить область окна — блитим из кэша кадра.
+		// Формат события: x@8, y@10, width@12, height@14 (little-endian).
+		if w.onExpose != nil {
+			ex := int(binary.LittleEndian.Uint16(buf[8:10]))
+			ey := int(binary.LittleEndian.Uint16(buf[10:12]))
+			ew := int(binary.LittleEndian.Uint16(buf[12:14]))
+			eh := int(binary.LittleEndian.Uint16(buf[14:16]))
+			if ew > 0 && eh > 0 {
+				w.onExpose(image.Rect(ex, ey, ex+ew, ey+eh))
 			}
+		}
 
-		case 31: // SelectionNotify — ответ на XConvertSelection (XDND drop)
+	case 22: // ConfigureNotify
+		// Кэш позиции для GetPosition (см. updatePosFromConfigure).
+		cx, cy, synthetic := parseConfigureNotifyPos(buf)
+		w.updatePosFromConfigure(cx, cy, synthetic)
+		newW := int(binary.LittleEndian.Uint16(buf[20:22]))
+		newH := int(binary.LittleEndian.Uint16(buf[22:24]))
+		if newW != w.width || newH != w.height {
+			w.width = newW
+			w.height = newH
+			w.x11ShmResize(newW, newH)
+			if w.onResize != nil {
+				w.onResize(newW, newH)
+			}
+		}
+
+	case 29: // SelectionClear — буфером обмена завладел другой
+		w.clip.handleClear(buf)
+
+	case 30: // SelectionRequest — у нас просят содержимое буфера обмена
+		w.clip.handleRequest(buf)
+
+	case 31: // SelectionNotify — ответ на XConvertSelection
+		// Сначала буфер обмена: он отвечает только на своё выделение,
+		// остальное — XDND (сброс файлов).
+		if !w.clip.handleNotify(buf) {
 			w.handleSelectionNotify(buf)
+		}
 
-		case 33: // ClientMessage (WM_DELETE_WINDOW / XDND)
-			atom := binary.LittleEndian.Uint32(buf[8:12])
-			switch atom {
-			case w.atomWMDeleteWindow:
-				if w.onClose != nil {
-					if w.onClose() {
-						w.closed.Store(true)
-					}
-				} else {
+	case 33: // ClientMessage (WM_DELETE_WINDOW / XDND)
+		atom := binary.LittleEndian.Uint32(buf[8:12])
+		switch atom {
+		case w.atomWMDeleteWindow:
+			if w.onClose != nil {
+				if w.onClose() {
 					w.closed.Store(true)
 				}
-			case w.atomXdndEnter:
-				w.handleXdndEnter(buf)
-			case w.atomXdndPosition:
-				w.handleXdndPosition(buf)
-			case w.atomXdndLeave:
-				w.dndReset()
-			case w.atomXdndDrop:
-				w.handleXdndDrop(buf)
+			} else {
+				w.closed.Store(true)
 			}
+		case w.atomXdndEnter:
+			w.handleXdndEnter(buf)
+		case w.atomXdndPosition:
+			w.handleXdndPosition(buf)
+		case w.atomXdndLeave:
+			w.dndReset()
+		case w.atomXdndDrop:
+			w.handleXdndDrop(buf)
+		}
 
 	case 34: // MappingNotify — раскладка/маппинг клавиатуры изменились
 		// (setxkbmap на лету, динамический remap xdotool и т.п.) —
@@ -790,19 +852,27 @@ func (w *X11Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 }
 
 // Callbacks
-func (w *X11Window) SetOnResize(fn func(w, h int))                              { w.onResize = fn }
+func (w *X11Window) SetOnResize(fn func(w, h int)) { w.onResize = fn }
 
 // SetOnExpose — колбэк перерисовки области по Expose (см. exposeNotifier).
 func (w *X11Window) SetOnExpose(fn func(r image.Rectangle)) { w.onExpose = fn }
 
 // SetOnActivate — колбэк смены активности окна (FocusIn/FocusOut).
-func (w *X11Window) SetOnActivate(fn func(active bool)) { w.onActivate = fn }
-func (w *X11Window) SetOnClose(fn func() bool)                                   { w.onClose = fn }
-func (w *X11Window) SetOnMouseMove(fn func(x, y int))                            { w.onMouseMove = fn }
-func (w *X11Window) SetOnMouseButton(fn func(x, y, button int, pressed bool))    { w.onMouseButton = fn }
-func (w *X11Window) SetOnKeyDown(fn func(vk int))                                { w.onKeyDown = fn }
-func (w *X11Window) SetOnKeyUp(fn func(vk int))                                  { w.onKeyUp = fn }
-func (w *X11Window) SetOnChar(fn func(r rune))                                   { w.onChar = fn }
+func (w *X11Window) SetOnActivate(fn func(active bool))                       { w.onActivate = fn }
+func (w *X11Window) SetOnClose(fn func() bool)                                { w.onClose = fn }
+func (w *X11Window) SetOnMouseMove(fn func(x, y int))                         { w.onMouseMove = fn }
+func (w *X11Window) SetOnMouseButton(fn func(x, y, button int, pressed bool)) { w.onMouseButton = fn }
+
+// SetOnMouseWheelPixels регистрирует колбэк точной дельты прокрутки.
+// Вертикаль X11 по-прежнему приходит кнопками 4/5 — её трактовка не
+// менялась; сюда уходит только горизонталь (кнопки 6 и 7).
+func (w *X11Window) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) {
+	w.onMouseWheelPixels = fn
+}
+
+func (w *X11Window) SetOnKeyDown(fn func(vk int)) { w.onKeyDown = fn }
+func (w *X11Window) SetOnKeyUp(fn func(vk int))   { w.onKeyUp = fn }
+func (w *X11Window) SetOnChar(fn func(r rune))    { w.onChar = fn }
 
 // SetOnFilesDropped регистрирует колбэк Drag&Drop файлов из ОС (XDND).
 // Координаты — клиентские физические пиксели.
@@ -813,6 +883,12 @@ func (w *X11Window) SetOnFilesDropped(fn func(paths []string, x, y int)) { w.onF
 func (w *X11Window) x11Send(data []byte) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.conn == nil {
+		// Окно уже закрыто (или ещё не открыто): запрос просто некуда
+		// отправить. Отрисовка и смена курсора продолжают звать эти
+		// функции и после закрытия — ронять из-за них процесс нельзя.
+		return
+	}
 	w.conn.Write(data)
 	w.seqNum++
 }
@@ -893,8 +969,8 @@ func (w *X11Window) x11CreateWindow(wid, parent uint32, x, y int16, width, heigh
 	// wid(4) parent(4) x(2) y(2) w(2) h(2) border(2) class(2) visual(4) mask(4).
 	bodyLen := 28 + len(values)*4
 	buf := make([]byte, 4+bodyLen)
-	buf[0] = 1                                                    // opcode
-	buf[1] = w.screen.RootDepth                                   // depth
+	buf[0] = 1                                                     // opcode
+	buf[1] = w.screen.RootDepth                                    // depth
 	binary.LittleEndian.PutUint16(buf[2:4], uint16((4+bodyLen)/4)) // length in 4-byte units
 	binary.LittleEndian.PutUint32(buf[4:8], wid)
 	binary.LittleEndian.PutUint32(buf[8:12], parent)
@@ -903,8 +979,8 @@ func (w *X11Window) x11CreateWindow(wid, parent uint32, x, y int16, width, heigh
 	binary.LittleEndian.PutUint16(buf[16:18], width)
 	binary.LittleEndian.PutUint16(buf[18:20], height)
 	binary.LittleEndian.PutUint16(buf[20:22], borderWidth)
-	binary.LittleEndian.PutUint16(buf[22:24], 1)                      // class = InputOutput
-	binary.LittleEndian.PutUint32(buf[24:28], w.screen.RootVisual)    // visual
+	binary.LittleEndian.PutUint16(buf[22:24], 1)                   // class = InputOutput
+	binary.LittleEndian.PutUint32(buf[24:28], w.screen.RootVisual) // visual
 	binary.LittleEndian.PutUint32(buf[28:32], valueMask)
 	for i, v := range values {
 		binary.LittleEndian.PutUint32(buf[32+i*4:36+i*4], v)
@@ -914,7 +990,7 @@ func (w *X11Window) x11CreateWindow(wid, parent uint32, x, y int16, width, heigh
 
 func (w *X11Window) x11CreateGC(gcid, drawable uint32) {
 	buf := make([]byte, 16)
-	buf[0] = 55 // CreateGC
+	buf[0] = 55                                // CreateGC
 	binary.LittleEndian.PutUint16(buf[2:4], 4) // length
 	binary.LittleEndian.PutUint32(buf[4:8], gcid)
 	binary.LittleEndian.PutUint32(buf[8:12], drawable)
@@ -1144,8 +1220,8 @@ func (w *X11Window) x11InternAtom(name string) uint32 {
 
 func (w *X11Window) x11ConfigureWindow(wid uint32, width, height int) {
 	buf := make([]byte, 20)
-	buf[0] = 12 // ConfigureWindow
-	binary.LittleEndian.PutUint16(buf[2:4], 5)    // length
+	buf[0] = 12                                // ConfigureWindow
+	binary.LittleEndian.PutUint16(buf[2:4], 5) // length
 	binary.LittleEndian.PutUint32(buf[4:8], wid)
 	binary.LittleEndian.PutUint16(buf[8:10], 0x0C) // value-mask: width|height
 	binary.LittleEndian.PutUint32(buf[12:16], uint32(width))
@@ -1168,20 +1244,20 @@ func (w *X11Window) x11IconifyWindow() {
 	// WM_CHANGE_STATE client message
 	wmChangeState := w.x11InternAtom("WM_CHANGE_STATE")
 	buf := make([]byte, 32)
-	buf[0] = 33                                                    // ClientMessage
-	buf[1] = 32                                                    // format
-	binary.LittleEndian.PutUint16(buf[2:4], 8)                    // length
-	binary.LittleEndian.PutUint32(buf[4:8], w.rootWin)            // window = root
-	binary.LittleEndian.PutUint32(buf[8:12], wmChangeState)       // type
-	binary.LittleEndian.PutUint32(buf[12:16], 3)                  // IconicState
+	buf[0] = 33                                             // ClientMessage
+	buf[1] = 32                                             // format
+	binary.LittleEndian.PutUint16(buf[2:4], 8)              // length
+	binary.LittleEndian.PutUint32(buf[4:8], w.rootWin)      // window = root
+	binary.LittleEndian.PutUint32(buf[8:12], wmChangeState) // type
+	binary.LittleEndian.PutUint32(buf[12:16], 3)            // IconicState
 
 	// Отправляем SendEvent к root window
 	sendBuf := make([]byte, 44)
-	sendBuf[0] = 25                                                // SendEvent
-	sendBuf[1] = 0                                                 // propagate
-	binary.LittleEndian.PutUint16(sendBuf[2:4], 11)               // length
+	sendBuf[0] = 25                                 // SendEvent
+	sendBuf[1] = 0                                  // propagate
+	binary.LittleEndian.PutUint16(sendBuf[2:4], 11) // length
 	binary.LittleEndian.PutUint32(sendBuf[4:8], w.rootWin)
-	binary.LittleEndian.PutUint32(sendBuf[8:12], 0x00180000)      // SubstructureRedirect|SubstructureNotify
+	binary.LittleEndian.PutUint32(sendBuf[8:12], 0x00180000) // SubstructureRedirect|SubstructureNotify
 	copy(sendBuf[12:], buf)
 	w.x11Send(sendBuf)
 }
@@ -1194,8 +1270,8 @@ func (w *X11Window) x11ToggleMaximize(maximize bool) {
 	}
 
 	buf := make([]byte, 32)
-	buf[0] = 33                                                    // ClientMessage
-	buf[1] = 32                                                    // format
+	buf[0] = 33 // ClientMessage
+	buf[1] = 32 // format
 	binary.LittleEndian.PutUint16(buf[2:4], 8)
 	binary.LittleEndian.PutUint32(buf[4:8], w.wid)
 	binary.LittleEndian.PutUint32(buf[8:12], w.atomNetWMState)
@@ -1282,66 +1358,10 @@ func (w *X11Window) x11PutImage(drawable, gc uint32, dstX, dstY, width, height i
 
 // ─── Маппинг клавиш X11 → VK ───────────────────────────────────────────────
 
-func x11KeycodeToVK(keycode int) int {
-	// X11 keycodes (стандартная раскладка evdev)
-	switch keycode {
-	case 22:
-		return VK_BACKSPACE
-	case 23:
-		return VK_TAB
-	case 36:
-		return VK_ENTER
-	case 9:
-		return VK_ESCAPE
-	case 65:
-		return VK_SPACE
-	case 113:
-		return VK_LEFT
-	case 111:
-		return VK_UP
-	case 114:
-		return VK_RIGHT
-	case 116:
-		return VK_DOWN
-	case 119:
-		return VK_DELETE
-	case 118: // evdev KEY_INSERT=110, +8 = 118 (не путать с 112/117 PgUp/PgDn)
-		return VK_INSERT
-	case 110:
-		return VK_HOME
-	case 115:
-		return VK_END
-	case 112:
-		return VK_PRIOR // Page Up
-	case 117:
-		return VK_NEXT // Page Down
-	case 67, 68, 69, 70, 71, 72, 73, 74, 75, 76: // F1–F10 (evdev+8)
-		return VK_F1 + (keycode - 67)
-	case 95:
-		return VK_F11
-	case 96:
-		return VK_F12
-	case 38:
-		return VK_A
-	case 54:
-		return VK_C
-	case 55:
-		return VK_V
-	case 53:
-		return VK_X
-	case 29:
-		return VK_Y
-	case 52:
-		return VK_Z
-	case 50, 62:
-		return VK_SHIFT
-	case 37, 105:
-		return VK_CONTROL
-	case 64, 108:
-		return VK_ALT
-	}
-	return 0
-}
+// x11WheelNotchPx — шаг горизонтальной прокрутки в пикселях: X11 сообщает её
+// щелчками кнопок 6 и 7, без величины, поэтому берём тот же шаг, что у
+// вертикального колеса на других платформах.
+const x11WheelNotchPx = 40.0
 
 func x11KeycodeToRune(keycode int, shift bool) rune {
 	// Упрощённый маппинг для ASCII (полная реализация через XKB/xkbcommon)
@@ -1379,7 +1399,6 @@ var _ = unsafe.Sizeof(0)
 
 // SetResizable — no-op: пользовательский resize за края borderless-окна
 // на этой платформе пока не реализован.
-func (w *X11Window) SetResizable(v bool) {}
 
 // SetMinSize задаёт минимальный размер окна через свойство WM_NORMAL_HINTS
 // (ICCCM §4.1.2.3, атом WM_NORMAL_HINTS=40, тип WM_SIZE_HINTS=41, format 32).
@@ -1509,23 +1528,23 @@ func (w *X11Window) eventPumpLoop() {
 // x11RaiseWindow поднимает окно на вершину стека (ConfigureWindow, stack-mode=Above).
 func (w *X11Window) x11RaiseWindow() {
 	buf := make([]byte, 16)
-	buf[0] = 12 // ConfigureWindow
-	binary.LittleEndian.PutUint16(buf[2:4], 4)     // length (16 байт)
+	buf[0] = 12                                // ConfigureWindow
+	binary.LittleEndian.PutUint16(buf[2:4], 4) // length (16 байт)
 	binary.LittleEndian.PutUint32(buf[4:8], w.wid)
 	binary.LittleEndian.PutUint16(buf[8:10], 0x40) // value-mask: stack-mode
 	// buf[10:12] — паддинг
-	binary.LittleEndian.PutUint32(buf[12:16], 0)   // Above
+	binary.LittleEndian.PutUint32(buf[12:16], 0) // Above
 	w.x11Send(buf)
 }
 
 // x11SetInputFocus передаёт фокус ввода окну (SetInputFocus, revert-to=Parent).
 func (w *X11Window) x11SetInputFocus() {
 	buf := make([]byte, 12)
-	buf[0] = 42 // SetInputFocus
-	buf[1] = 2  // revert-to = Parent
-	binary.LittleEndian.PutUint16(buf[2:4], 3)   // length
+	buf[0] = 42                                // SetInputFocus
+	buf[1] = 2                                 // revert-to = Parent
+	binary.LittleEndian.PutUint16(buf[2:4], 3) // length
 	binary.LittleEndian.PutUint32(buf[4:8], w.wid)
-	binary.LittleEndian.PutUint32(buf[8:12], 0)  // time = CurrentTime
+	binary.LittleEndian.PutUint32(buf[8:12], 0) // time = CurrentTime
 	w.x11Send(buf)
 }
 
@@ -1535,14 +1554,14 @@ func (w *X11Window) x11NetActiveWindow() {
 		return
 	}
 	buf := make([]byte, 32)
-	buf[0] = 33                                              // ClientMessage
-	buf[1] = 32                                              // format
+	buf[0] = 33 // ClientMessage
+	buf[1] = 32 // format
 	binary.LittleEndian.PutUint16(buf[2:4], 8)
-	binary.LittleEndian.PutUint32(buf[4:8], w.wid)          // window
+	binary.LittleEndian.PutUint32(buf[4:8], w.wid)                  // window
 	binary.LittleEndian.PutUint32(buf[8:12], w.atomNetActiveWindow) // type
-	binary.LittleEndian.PutUint32(buf[12:16], 1)           // data[0]: source = application
-	binary.LittleEndian.PutUint32(buf[16:20], 0)           // data[1]: timestamp = 0
-	binary.LittleEndian.PutUint32(buf[20:24], 0)           // data[2]: текущее активное окно
+	binary.LittleEndian.PutUint32(buf[12:16], 1)                    // data[0]: source = application
+	binary.LittleEndian.PutUint32(buf[16:20], 0)                    // data[1]: timestamp = 0
+	binary.LittleEndian.PutUint32(buf[20:24], 0)                    // data[2]: текущее активное окно
 
 	sendBuf := make([]byte, 44)
 	sendBuf[0] = 25 // SendEvent
@@ -1563,10 +1582,10 @@ func (w *X11Window) x11NetWMStateAdd(prop uint32) {
 	binary.LittleEndian.PutUint16(buf[2:4], 8)
 	binary.LittleEndian.PutUint32(buf[4:8], w.wid)
 	binary.LittleEndian.PutUint32(buf[8:12], w.atomNetWMState)
-	binary.LittleEndian.PutUint32(buf[12:16], 1)   // _NET_WM_STATE_ADD
+	binary.LittleEndian.PutUint32(buf[12:16], 1)    // _NET_WM_STATE_ADD
 	binary.LittleEndian.PutUint32(buf[16:20], prop) // первое свойство
-	binary.LittleEndian.PutUint32(buf[20:24], 0)   // второе свойство — нет
-	binary.LittleEndian.PutUint32(buf[24:28], 1)   // source = application
+	binary.LittleEndian.PutUint32(buf[20:24], 0)    // второе свойство — нет
+	binary.LittleEndian.PutUint32(buf[24:28], 1)    // source = application
 
 	sendBuf := make([]byte, 44)
 	sendBuf[0] = 25

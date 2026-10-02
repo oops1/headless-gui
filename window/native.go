@@ -164,4 +164,75 @@ const (
 	VK_SHIFT   = 0x10
 	VK_CONTROL = 0x11
 	VK_ALT     = 0x12
+
+	// Буквы и цифры целиком: отображение клавиш идёт диапазонами, и
+	// перечислять их по одной незачем — нужны только границы.
+	VK_0 = 0x30
+	VK_9 = 0x39
+
+	// Буквы целиком: таблицы раскладок перечисляют клавиши поимённо, и
+	// писать там 0x42 вместо VK_B значит заставлять читателя считать в уме.
+	VK_B = 0x42
+	VK_D = 0x44
+	VK_E = 0x45
+	VK_F = 0x46
+	VK_G = 0x47
+	VK_H = 0x48
+	VK_I = 0x49
+	VK_J = 0x4A
+	VK_K = 0x4B
+	VK_L = 0x4C
+	VK_M = 0x4D
+	VK_N = 0x4E
+	VK_O = 0x4F
+	VK_P = 0x50
+	VK_Q = 0x51
+	VK_R = 0x52
+	VK_S = 0x53
+	VK_T = 0x54
+	VK_U = 0x55
+	VK_W = 0x57
+
+	// Клавиша контекстного меню и переключатели.
+	VK_APPS     = 0x5D
+	VK_PAUSE    = 0x13
+	VK_CAPITAL  = 0x14 // Caps Lock
+	VK_SNAPSHOT = 0x2C // Print Screen
+	VK_NUMLOCK  = 0x90
+	VK_SCROLL   = 0x91
+
+	// Цифровая клавиатура.
+	VK_NUMPAD0   = 0x60
+	VK_NUMPAD1   = 0x61
+	VK_NUMPAD2   = 0x62
+	VK_NUMPAD3   = 0x63
+	VK_NUMPAD4   = 0x64
+	VK_NUMPAD5   = 0x65
+	VK_NUMPAD6   = 0x66
+	VK_NUMPAD7   = 0x67
+	VK_NUMPAD8   = 0x68
+	VK_NUMPAD9   = 0x69
+	VK_MULTIPLY  = 0x6A
+	VK_ADD       = 0x6B
+	VK_SEPARATOR = 0x6C
+	VK_SUBTRACT  = 0x6D
+	VK_DECIMAL   = 0x6E
+	VK_DIVIDE    = 0x6F
+
+	// Остальные функциональные клавиши ряда (F13–F24).
+	VK_F13 = 0x7C
+	VK_F24 = 0x87
+
+	// OEM-клавиши: символ зависит от раскладки, код — нет.
+	VK_OEM_1      = 0xBA // ;:
+	VK_OEM_PLUS   = 0xBB // =+
+	VK_OEM_COMMA  = 0xBC // ,<
+	VK_OEM_MINUS  = 0xBD // -_
+	VK_OEM_PERIOD = 0xBE // .>
+	VK_OEM_2      = 0xBF // /?
+	VK_OEM_3      = 0xC0 // `~
+	VK_OEM_4      = 0xDB // [{
+	VK_OEM_5      = 0xDC // \|
+	VK_OEM_6      = 0xDD // ]}
+	VK_OEM_7      = 0xDE // '"
 )
