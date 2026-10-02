@@ -64,13 +64,14 @@ type wlPopup struct {
 
 	// Буфер кадра: своя память, свой пул — размер попапа меняется отдельно
 	// от окна (раскрылось подменю).
-	poolID uint32
-	bufID  uint32
-	fd     int
-	data   []byte
-	w, h   int
-	stride int
-	busy   bool
+	poolID     uint32
+	bufID      uint32
+	viewportID uint32 // область просмотра на HiDPI (0 — масштаб единица)
+	fd         int
+	data       []byte
+	w, h       int
+	stride     int
+	busy       bool
 
 	configured bool
 	closed     bool
@@ -145,12 +146,16 @@ func (w *WaylandWindow) OpenChildPopup(id uintptr, x, y, pw, ph int) error {
 
 	p.surfaceID = w.newID()
 	w.send(newWlMsg(w.compositorID, wlCompositorCreateSurface).putUint(p.surfaceID), -1)
+	w.popupApplyScale(p, pw, ph)
 	p.xdgSurfID = w.newID()
 	w.send(newWlMsg(w.wmBaseID, xdgWmBaseGetXdgSurface).putUint(p.xdgSurfID).putUint(p.surfaceID), -1)
 
+	// Позиционер считает в ПОВЕРХНОСТНЫХ единицах, а размеры здесь — в
+	// пикселях буфера: на HiDPI это разные числа.
 	posID := w.newID()
 	w.send(newWlMsg(w.wmBaseID, xdgWmBaseCreatePositioner).putUint(posID), -1)
-	for _, raw := range wlPositionerRequests(posID, ax, ay, pw, ph) {
+	for _, raw := range wlPositionerRequests(posID,
+		w.toSurface(ax), w.toSurface(ay), w.toSurface(pw), w.toSurface(ph)) {
 		w.sendRaw(raw)
 	}
 
@@ -169,7 +174,8 @@ func (w *WaylandWindow) OpenChildPopup(id uintptr, x, y, pw, ph int) error {
 	}
 
 	w.send(newWlMsg(p.xdgSurfID, xdgSurfaceSetWindowGeometry).
-		putInt(0).putInt(0).putInt(int32(pw)).putInt(int32(ph)), -1)
+		putInt(0).putInt(0).
+		putInt(int32(w.toSurface(pw))).putInt(int32(w.toSurface(ph))), -1)
 	// Первый commit — без буфера: компоновщик ответит на него configure, и
 	// только после ack можно показывать кадр.
 	w.send(newWlMsg(p.surfaceID, wlSurfaceCommit), -1)
@@ -332,8 +338,7 @@ func (w *WaylandWindow) popupDraw(p *wlPopup, img *image.RGBA, bands []image.Rec
 
 	w.popupSetRegions(p, bands)
 	w.send(newWlMsg(p.surfaceID, wlSurfaceAttach).putUint(p.bufID).putInt(0).putInt(0), -1)
-	w.send(newWlMsg(p.surfaceID, wlSurfaceDamage).
-		putInt(0).putInt(0).putInt(int32(p.w)).putInt(int32(p.h)), -1)
+	w.popupDamage(p)
 	w.send(newWlMsg(p.surfaceID, wlSurfaceCommit), -1)
 
 	w.popups.mu.Lock()
@@ -387,9 +392,10 @@ func (w *WaylandWindow) popupSetRegions(p *wlPopup, bands []image.Rectangle) {
 		rid := w.newID()
 		w.send(newWlMsg(w.compositorID, wlCompositorCreateRegion).putUint(rid), -1)
 		for _, r := range bands {
+			// Область — в поверхностных единицах, полосы пришли в пикселях.
 			w.send(newWlMsg(rid, wlRegionAdd).
-				putInt(int32(r.Min.X)).putInt(int32(r.Min.Y)).
-				putInt(int32(r.Dx())).putInt(int32(r.Dy())), -1)
+				putInt(int32(w.toSurface(r.Min.X))).putInt(int32(w.toSurface(r.Min.Y))).
+				putInt(int32(w.toSurface(r.Dx()))).putInt(int32(w.toSurface(r.Dy()))), -1)
 		}
 		w.send(newWlMsg(p.surfaceID, uint16(op)).putUint(rid), -1)
 		w.send(newWlMsg(rid, wlRegionDestroy), -1)
@@ -410,6 +416,9 @@ func (w *WaylandWindow) popupDestroy(p *wlPopup) {
 	}
 	if p.surfaceID != 0 {
 		w.send(newWlMsg(p.surfaceID, wlSurfaceDestroy), -1)
+	}
+	if p.viewportID != 0 {
+		w.send(newWlMsg(p.viewportID, wlSurfaceDestroy), -1) // wp_viewport.destroy — тоже 0
 	}
 	if p.bufID != 0 {
 		w.send(newWlMsg(p.bufID, wlBufferDestroy), -1)
@@ -504,4 +513,40 @@ func (w *WaylandWindow) popupHandlers() childPopupHandlers {
 	w.popups.mu.Lock()
 	defer w.popups.mu.Unlock()
 	return w.popups.handlers
+}
+
+// popupApplyScale готовит поверхность попапа к HiDPI.
+//
+// Кадр попапа движок рисует в пикселях, а компоновщик размещает окно в
+// поверхностных единицах. При дробном масштабе их связывает область
+// просмотра, при целом хватает буферного масштаба.
+func (w *WaylandWindow) popupApplyScale(p *wlPopup, pw, ph int) {
+	k := w.scaleFactor()
+	if k == 1 {
+		return
+	}
+	if w.viewporterID != 0 {
+		p.viewportID = w.newID()
+		w.send(newWlMsg(w.viewporterID, wpViewporterGetViewport).
+			putUint(p.viewportID).putUint(p.surfaceID), -1)
+		w.send(newWlMsg(p.viewportID, wpViewportSetDestination).
+			putInt(int32(w.toSurface(pw))).putInt(int32(w.toSurface(ph))), -1)
+		return
+	}
+	if k == float64(int(k)) {
+		w.send(newWlMsg(p.surfaceID, wlSurfaceSetBufferScale).putInt(int32(k)), -1)
+	}
+}
+
+// popupDamage помечает весь кадр попапа изменившимся — в тех единицах,
+// которые понимает компоновщик (см. damageSurface).
+func (w *WaylandWindow) popupDamage(p *wlPopup) {
+	if w.scaleFactor() != 1 && w.gCompositorVer >= wlCompositorVersionBufferDamage {
+		w.send(newWlMsg(p.surfaceID, wlSurfaceDamageBuffer).
+			putInt(0).putInt(0).putInt(int32(p.w)).putInt(int32(p.h)), -1)
+		return
+	}
+	w.send(newWlMsg(p.surfaceID, wlSurfaceDamage).
+		putInt(0).putInt(0).
+		putInt(int32(w.toSurface(p.w))).putInt(int32(w.toSurface(p.h))), -1)
 }

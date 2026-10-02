@@ -182,6 +182,16 @@ type WaylandWindow struct {
 	// имена глобалов registry (для bind)
 	gCompositor, gShm, gSeat, gWmBase uint32
 	gSeatVer                          uint32 // версия wl_seat (repeat_info — с 4-й)
+	gCompositorVer                    uint32 // версия wl_compositor (damage_buffer — с 4-й)
+
+	// HiDPI (wayland_scale_linux.go): масштаб поверхности и объекты, через
+	// которые о нём договариваются с компоновщиком.
+	scale        wlScale
+	gViewporter  uint32
+	gFracMgr     uint32
+	gOutputs     map[uint32]uint32 // имя глобала wl_output → его версия
+	viewporterID uint32
+	fracMgrID    uint32
 
 	// repeat — автоповтор удерживаемой клавиши (wayland_repeat_linux.go).
 	repeat *wlRepeater
@@ -506,8 +516,15 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 		return fmt.Errorf("wayland: композитор не предоставил compositor/shm/xdg_wm_base")
 	}
 
-	// bind глобалов (версия 1 достаточна для используемых запросов).
-	w.compositorID = w.bind(w.gCompositor, "wl_compositor", 1)
+	// bind глобалов (версия 1 достаточна для используемых запросов, кроме
+	// wl_compositor: с четвёртой версии у поверхности есть damage_buffer —
+	// повреждение в пикселях буфера, без которого на дробном масштабе
+	// область уезжает).
+	compVer := uint32(1)
+	if w.gCompositorVer >= wlCompositorVersionBufferDamage {
+		compVer = wlCompositorVersionBufferDamage
+	}
+	w.compositorID = w.bind(w.gCompositor, "wl_compositor", compVer)
 	w.shmID = w.bind(w.gShm, "wl_shm", 1)
 	w.wmBaseID = w.bind(w.gWmBase, "xdg_wm_base", 1)
 	if w.gSeat != 0 {
@@ -535,23 +552,48 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 			putUint(w.dataDeviceID).putUint(w.seatID), -1)
 	}
 
+	// Мониторы и расширения масштаба: без них окно рисуется один к одному,
+	// как было до HiDPI.
+	for name, ver := range w.gOutputs {
+		v := ver
+		if v > wlOutputVersionScale {
+			v = wlOutputVersionScale
+		}
+		id := w.bind(name, "wl_output", v)
+		w.scale.mu.Lock()
+		if w.scale.outputs == nil {
+			w.scale.outputs = map[uint32]float64{}
+		}
+		w.scale.outputs[id] = 0 // масштаб придёт событием scale
+		w.scale.mu.Unlock()
+	}
+	if w.gViewporter != 0 {
+		w.viewporterID = w.bind(w.gViewporter, "wp_viewporter", 1)
+	}
+	if w.gFracMgr != 0 {
+		w.fracMgrID = w.bind(w.gFracMgr, "wp_fractional_scale_manager_v1", 1)
+	}
+
 	// surface + xdg_surface + toplevel
 	w.surfaceID = w.newID()
 	w.send(newWlMsg(w.compositorID, wlCompositorCreateSurface).putUint(w.surfaceID), -1)
+	w.setupScaleObjects()
 	w.xdgSurfaceID = w.newID()
 	w.send(newWlMsg(w.wmBaseID, xdgWmBaseGetXdgSurface).putUint(w.xdgSurfaceID).putUint(w.surfaceID), -1)
 	w.toplevelID = w.newID()
 	w.send(newWlMsg(w.xdgSurfaceID, xdgSurfaceGetToplevel).putUint(w.toplevelID), -1)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetTitle).putString(title), -1)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetAppID).putString(w.effectiveAppID()), -1)
-	// фиксируем размер: движок сам управляет разрешением
-	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(int32(width)).putInt(int32(height)), -1)
-	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(int32(width)).putInt(int32(height)), -1)
+	// фиксируем размер: движок сам управляет разрешением (в поверхностных
+	// единицах — их и ждёт xdg-shell)
+	sw, sh := w.toSurface(width), w.toSurface(height)
+	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(int32(sw)).putInt(int32(sh)), -1)
+	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(int32(sw)).putInt(int32(sh)), -1)
 	// Минимум, заданный приложением до Create, — ПОСЛЕ фиксации: иначе строка
 	// выше затёрла бы его размером окна.
 	if w.minWant {
 		w.minWant = false
-		mw, mh := wlMinSizeArgs(w.minW, w.minH, 1)
+		mw, mh := wlMinSizeArgs(w.minW, w.minH, w.scaleFactor())
 		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(mw).putInt(mh), -1)
 	}
 	w.send(newWlMsg(w.surfaceID, wlSurfaceCommit), -1)
@@ -671,6 +713,7 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		switch iface {
 		case "wl_compositor":
 			w.gCompositor = name
+			w.gCompositorVer = version
 		case "wl_shm":
 			w.gShm = name
 		case "wl_seat":
@@ -681,6 +724,17 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		case "wl_data_device_manager":
 			w.gDataDevMgr = name
 			w.gDataDevMgrVer = version
+		case "wl_output":
+			// Мониторов может быть несколько; какой из них показывает окно,
+			// скажет wl_surface.enter.
+			if w.gOutputs == nil {
+				w.gOutputs = map[uint32]uint32{}
+			}
+			w.gOutputs[name] = version
+		case "wp_viewporter":
+			w.gViewporter = name
+		case "wp_fractional_scale_manager_v1":
+			w.gFracMgr = name
 		case "wp_cursor_shape_manager_v1":
 			// Необязательное расширение: с ним курсор рисует компоновщик
 			// из системной темы, без него — своя картинка.
@@ -704,8 +758,10 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		}
 
 	case obj == w.toplevelID && opcode == xdgToplevelEvConfigure:
-		nw := int(int32(binary.LittleEndian.Uint32(b[0:4])))
-		nh := int(int32(binary.LittleEndian.Uint32(b[4:8])))
+		// Размер приходит в ПОВЕРХНОСТНЫХ единицах; движок считает в
+		// пикселях буфера, и на HiDPI это разные числа.
+		nw := w.fromSurface(int(int32(binary.LittleEndian.Uint32(b[0:4]))))
+		nh := w.fromSurface(int(int32(binary.LittleEndian.Uint32(b[4:8]))))
 		// states: array из uint32
 		active, maximized, fullscreen := wlParseStates(b[8:])
 		wlLog("toplevel.configure: %dx%d active=%v maximized=%v fullscreen=%v",
@@ -739,6 +795,23 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		if caps&seatCapKeyboard != 0 && w.keyboardID == 0 {
 			w.keyboardID = w.newID()
 			w.send(newWlMsg(w.seatID, wlSeatGetKeyboard).putUint(w.keyboardID), -1)
+		}
+
+	case obj == w.surfaceID && opcode == wlSurfaceEvEnter:
+		// Окно показалось на мониторе: его масштаб и есть масштаб окна.
+		if len(b) >= 4 {
+			w.noteSurfaceEnter(binary.LittleEndian.Uint32(b[0:4]))
+		}
+
+	case w.isOutputObject(obj) && opcode == wlOutputEvScale:
+		if len(b) >= 4 {
+			w.noteOutputScale(obj, float64(int32(binary.LittleEndian.Uint32(b[0:4]))))
+		}
+
+	case w.isFracObject(obj) && opcode == wpFracEvPreferredScale:
+		// Дробный масштаб приходит в 120-х долях: 180 — это 1.5.
+		if len(b) >= 4 {
+			w.notePreferredScale(binary.LittleEndian.Uint32(b[0:4]))
 		}
 
 	case obj == w.pointerID:
@@ -1124,17 +1197,18 @@ func (w *WaylandWindow) recommitLast() {
 	}
 	wlLog("recommit последнего кадра (buf=%d)", last)
 	w.send(newWlMsg(w.surfaceID, wlSurfaceAttach).putUint(w.bufID[last]).putInt(0).putInt(0), -1)
-	w.send(newWlMsg(w.surfaceID, wlSurfaceDamage).
-		putInt(0).putInt(0).putInt(int32(w.poolW)).putInt(int32(w.poolH)), -1)
+	w.applyViewport()
+	w.damageSurface(image.Rect(0, 0, w.poolW, w.poolH))
 	w.send(newWlMsg(w.surfaceID, wlSurfaceCommit), -1)
 }
 
 // attachAndCommit прикрепляет текущий буфер и коммитит damage-область.
 func (w *WaylandWindow) attachAndCommit(dirty image.Rectangle) {
 	w.send(newWlMsg(w.surfaceID, wlSurfaceAttach).putUint(w.bufID[w.curBuf]).putInt(0).putInt(0), -1)
-	w.send(newWlMsg(w.surfaceID, wlSurfaceDamage).
-		putInt(int32(dirty.Min.X)).putInt(int32(dirty.Min.Y)).
-		putInt(int32(dirty.Dx())).putInt(int32(dirty.Dy())), -1)
+	// Размер кадра в поверхностных единицах — заново на каждом кадре: после
+	// ресайза он меняется, а компоновщик помнит прежний.
+	w.applyViewport()
+	w.damageSurface(dirty)
 	w.send(newWlMsg(w.surfaceID, wlSurfaceCommit), -1)
 	w.mu.Lock()
 	w.bufBusy[w.curBuf] = true
@@ -1589,15 +1663,14 @@ func (w *WaylandWindow) applySizeLimits(resizable bool) {
 		return
 	}
 	if !resizable {
-		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).
-			putInt(int32(w.width)).putInt(int32(w.height)), -1)
-		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).
-			putInt(int32(w.width)).putInt(int32(w.height)), -1)
+		sw, sh := int32(w.toSurface(w.width)), int32(w.toSurface(w.height))
+		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(sw).putInt(sh), -1)
+		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(sw).putInt(sh), -1)
 		return
 	}
 	mw, mh := int32(0), int32(0)
 	if w.minW > 0 || w.minH > 0 {
-		mw, mh = wlMinSizeArgs(w.minW, w.minH, 1)
+		mw, mh = wlMinSizeArgs(w.minW, w.minH, w.scaleFactor())
 	}
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(mw).putInt(mh), -1)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(0).putInt(0), -1)
@@ -1644,6 +1717,6 @@ func (w *WaylandWindow) SetMinSize(width, height int) {
 		return
 	}
 	w.minW, w.minH = width, height
-	mw, mh := wlMinSizeArgs(width, height, 1)
+	mw, mh := wlMinSizeArgs(width, height, w.scaleFactor())
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(mw).putInt(mh), -1)
 }
