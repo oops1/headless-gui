@@ -2994,7 +2994,7 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 
 | Возможность | Win32 | X11 | Wayland / macOS / headless |
 |---|---|---|---|
-| Модалка в своём окне (`ModalHost`) | нативно | in-canvas | in-canvas фолбэк |
+| Модалка в своём окне (`ModalHost`) | нативно | нативно | in-canvas фолбэк |
 | Popup-оверлей в своём окне (`PopupSink`) | нативно | нативно | in-canvas фолбэк |
 | Трей / balloon / превью | да | no-op (ошибка/false) | no-op (ошибка/false) |
 | Перетащить / растянуть окно | `SetPosition` | `SetPosition` | Wayland — просит компоновщик, macOS — нет |
@@ -4268,6 +4268,54 @@ keeps the grab offset (no jump), a click on a conflict mark goes to it, a click
 elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
+
+### Window areas: Snap Layouts and edge snapping — v3.26
+
+Engine windows are borderless: the title bar and its buttons are drawn by the
+application, and the system knows nothing about them. So on Windows 11 the
+window did not snap to screen edges (it was moved by setting its position
+from mouse deltas), and hovering the maximise button showed no snap layouts —
+the system offers those only over an area declared as the maximise button.
+
+```go
+win.SetHitTest(func(x, y int) window.HitArea {
+    switch {
+    case closeRect.Contains(x, y): return window.HitCloseButton
+    case maxRect.Contains(x, y):   return window.HitMaxButton
+    case minRect.Contains(x, y):   return window.HitMinButton
+    case y < titleBarH:            return window.HitCaption
+    }
+    return window.HitClient
+})
+```
+
+Coordinates are client-side and logical — the same grid the application draws
+in. The resize edge wins over the buttons, otherwise the top edge of the
+window could not be grabbed. Events over a declared button are translated
+back into ordinary mouse events, so the application keeps drawing its own
+hover and pressed states. Without the callback nothing changes, and backends
+without the notion (X11, Wayland, macOS) ignore it.
+
+### X11: system move, resize and cursor shapes — v3.26
+
+`SetResizable` was an empty function and there were no cursor shapes at all:
+the window always showed an arrow, and its edge looked like its middle.
+
+Moving and resizing now go through `_NET_WM_MOVERESIZE` — the client asks the
+window manager to start, and the manager drives the window as it does its
+own, with edge snapping. It is the same `interactiveMover` the Wayland backend
+implements, so `Window.BeginMove` and `BeginResize` work on X11 too.
+
+Cursor shapes come from the «cursor» font — present in every X server, with
+no theme, no Xcursor and no external files. Each shape is created once and
+cached: the cursor changes hundreds of times a minute.
+
+### Horizontal wheel on Windows and X11 — v3.26
+
+`WM_MOUSEHWHEEL` was not handled, and on X11 buttons 6 and 7 — which is how
+the X server reports sideways scrolling, just as 4 and 5 report vertical —
+were dropped. Both now deliver `dx` the same way `dy` has always been
+delivered.
 
 ### Text input on Windows: surrogates and AltGr — v3.26
 
