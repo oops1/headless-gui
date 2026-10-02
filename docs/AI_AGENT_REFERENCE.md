@@ -4269,6 +4269,19 @@ elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
 
+### System move and resize for any root — v3.26
+
+System dragging was wired up automatically only when the root was a
+widget.Window, so an application with its own root had to assert
+win.Native() to an unexported interface — reaching into the engine.
+
+    win.BeginMove() bool          // drag the window as the system does
+    win.BeginResize(edges) bool   // edges: widget.NativeEdgeTop и далее
+
+Both answer false when the backend cannot do it (Win32, X11, macOS today) or
+the system refused — then the application moves the window itself through
+SetPosition, exactly as before.
+
 ### Alt, F10 and Alt+key — v3.26
 
 `WM_SYSKEYDOWN` / `WM_SYSKEYUP` / `WM_SYSCHAR` were not handled at all, so on

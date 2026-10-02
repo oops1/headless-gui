@@ -360,6 +360,38 @@ func (win *Window) SetResizable(v bool) *Window {
 	return win
 }
 
+// BeginMove просит систему перетащить окно вслед за курсором — так, как она
+// это делает со своими окнами: с прилипанием к краям и раскладками.
+//
+// Зовётся из обработчика нажатия на своей полосе заголовка. false — бэкенд
+// так не умеет или система отказала; тогда окно двигают прежним путём, через
+// SetPosition.
+//
+// Приложению с корнем widget.Window звать это не нужно: там перетаскивание
+// подключается само. Публичный метод — для приложений со своим корнем
+// (Проводник, Блокнот), которые раньше лезли к неэкспортируемому интерфейсу
+// через утверждение типа над Native().
+func (win *Window) BeginMove() bool {
+	if win.native == nil {
+		return false
+	}
+	mv, ok := win.native.(interactiveMover)
+	return ok && mv.BeginMove()
+}
+
+// BeginResize просит систему изменить размер окна за край edges — биты
+// widget.NativeEdgeTop, NativeEdgeBottom, NativeEdgeLeft, NativeEdgeRight и
+// их сочетания для углов.
+//
+// false — бэкенд так не умеет или система отказала.
+func (win *Window) BeginResize(edges int) bool {
+	if win.native == nil {
+		return false
+	}
+	mv, ok := win.native.(interactiveMover)
+	return ok && mv.BeginResize(edges)
+}
+
 // SetAppID задаёт идентификатор приложения для среды рабочего стола: по нему
 // панель задач находит значок и <id>.desktop программы (Wayland —
 // xdg_toplevel.app_id, X11 — WM_CLASS).
