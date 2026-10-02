@@ -129,7 +129,7 @@ func (win *Window) setupActivation() {
 			ww.SetActive(active)
 			// При деактивации носителя (клик в другое приложение) закрываем
 			// вынесенные popup-оверлеи — как системные меню. Только в hosted-режиме.
-			if !active && win.popupHost != nil {
+			if !active && (win.popupHost != nil || win.childPopups != nil) {
 				if c, ok := win.eng.(interface{ CloseAllOverlays() }); ok {
 					c.CloseAllOverlays()
 				}
@@ -138,20 +138,18 @@ func (win *Window) setupActivation() {
 	})
 }
 
-// installPopupHost регистрирует хост popup-оверлеев, если бэкенд умеет окна-
-// попапы и маршалинг на UI-поток, а движок принимает PopupSink. На бэкендах без
-// поддержки (Wayland/macOS) и в headless — no-op: оверлеи рисуются в холст.
+// installPopupHost регистрирует хост popup-оверлеев: меню и выпадающие списки
+// показываются вне холста и не обрезаются краем окна.
+//
+// Путей два. Там, где попап — самостоятельное окно ОС с экранной позицией
+// (Win32, X11), работает popupHost. Там, где попапом владеет сам бэкенд
+// (Wayland: xdg_popup — поверхность-потомок, экранных координат у клиента
+// нет), — childPopups. Без обоих и в headless оверлеи рисуются в холст,
+// как раньше.
 func (win *Window) installPopupHost() {
-	// ContentFit: масштаб и офсет меняются на каждом ресайзе — нативные
-	// popup-окна их не учитывают; оверлеи рисуются в холсте.
+	// ContentFit: масштаб и офсет меняются на каждом ресайзе — вынесенные
+	// попапы их не учитывают; оверлеи рисуются в холсте.
 	if win.fitMode == FitScale {
-		return
-	}
-	if _, ok := win.native.(popupWindow); !ok {
-		return
-	}
-	inv, ok := win.native.(uiThreadInvoker)
-	if !ok {
 		return
 	}
 	peng, ok := win.eng.(popupEngine)
@@ -161,6 +159,20 @@ func (win *Window) installPopupHost() {
 	setter, ok := win.eng.(interface {
 		SetPopupSink(sink func(frames []engine.PopupFrame))
 	})
+	if !ok {
+		return
+	}
+
+	if cph, ok := win.native.(childPopupHost); ok {
+		win.childPopups = newChildPopups(cph, peng, win.scale, &win.in)
+		setter.SetPopupSink(win.childPopups.apply)
+		return
+	}
+
+	if _, ok := win.native.(popupWindow); !ok {
+		return
+	}
+	inv, ok := win.native.(uiThreadInvoker)
 	if !ok {
 		return
 	}
@@ -305,8 +317,12 @@ type Window struct {
 	fitBaseW, fitBaseH int // логический дизайн-размер (фиксируется в Run)
 
 	// popupHost — хост popup-оверлеев (dropdown/меню в собственных окнах ОС).
-	// nil, если бэкенд не поддерживает окна-попапы (Wayland/macOS → in-canvas).
+	// nil, если бэкенд не поддерживает окна-попапы (macOS → in-canvas).
 	popupHost *popupHost
+
+	// childPopups — тот же вынос оверлеев там, где попап не самостоятельное
+	// окно, а поверхность-потомок носителя (Wayland xdg_popup).
+	childPopups *childPopups
 
 	// dockMgr — менеджер докинга, панели которого разрешено отрывать в отдельные
 	// нативные окна (EnableDockFloating). dockHost — установленный хост отрыва

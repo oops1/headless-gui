@@ -235,6 +235,12 @@ type WaylandWindow struct {
 	// координаты указателя (motion приходит в fixed 24.8)
 	ptrX, ptrY int
 
+	// На какой поверхности указатель: события motion/button/axis приходят
+	// без неё, её сообщает только enter. Пока курсор над попапом, ввод
+	// принадлежит ему, а не окну. Читает и пишет цикл событий.
+	ptrOnPopup bool
+	ptrPopupID uintptr
+
 	// Serial'ы указателя. Компоновщик принимает move/resize/set_cursor
 	// только с serial'ом недавнего ввода: это доказательство, что действие
 	// начал пользователь, а не программа сама себе.
@@ -263,6 +269,12 @@ type WaylandWindow struct {
 	// appID — идентификатор для среды рабочего стола (xdg_toplevel.app_id).
 	// Пусто до Create — подставится имя исполняемого файла.
 	appID string
+
+	// popups — всплывающие окна (wayland_popup_linux.go): меню и списки,
+	// которым не хватает места в окне. На Wayland они обязаны быть
+	// поверхностями этого же соединения — отдельным окном попап там быть
+	// не может.
+	popups wlPopups
 
 	// Курсор (wayland_cursor_linux.go): текущая форма, буферы форм и
 	// поверхность, которую компоновщик показывает вместо курсора. Форму
@@ -378,6 +390,14 @@ func (w *WaylandWindow) send(m *wlMsg, oobFD int) error {
 		return err
 	}
 	_, err := w.conn.Write(m.buf)
+	return err
+}
+
+// sendRaw отправляет готовое сообщение (длина уже проставлена).
+func (w *WaylandWindow) sendRaw(raw []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, err := w.conn.Write(raw)
 	return err
 }
 
@@ -627,6 +647,12 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		wlLog("event obj=%d opcode=%d len=%d (reg=%d wm=%d xsurf=%d top=%d seat=%d ptr=%d kbd=%d)",
 			obj, opcode, len(b), w.registryID, w.wmBaseID, w.xdgSurfaceID, w.toplevelID, w.seatID, w.pointerID, w.keyboardID)
 	}
+	// Объекты попапов (их несколько и они недолговечны) разбираются
+	// отдельной таблицей — перечислять их в общем switch нечем.
+	if w.popupEvent(obj, opcode, b) {
+		return
+	}
+
 	switch {
 	case obj == wlDisplayID && opcode == wlDisplayEvError:
 		// object, code, message — фатальная ошибка протокола
@@ -771,12 +797,18 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		// serial, surface, x(fixed), y(fixed)
 		w.ptrEnterSerial.Store(binary.LittleEndian.Uint32(b[0:4]))
 		w.inputSerial.Store(binary.LittleEndian.Uint32(b[0:4]))
+		surf := binary.LittleEndian.Uint32(b[4:8])
+		w.ptrOnPopup = false
+		if pop := w.popupForSurface(surf); pop != nil {
+			w.ptrOnPopup, w.ptrPopupID = true, pop.id
+		}
 		w.ptrX = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
 		w.ptrY = int(int32(binary.LittleEndian.Uint32(b[12:16]))) >> 8
 		// Форму курсора ставим сразу: без set_cursor после enter курсор над
 		// окном остаётся тем, каким его оставил сосед.
 		w.applyCursor()
 	case wlPointerEvLeave:
+		w.ptrOnPopup = false
 		// Указатель ушёл — в том числе потому, что компоновщик забрал
 		// нажатие себе (начались move/resize). Отпускания мы уже не
 		// получим, поэтому отпускаем зажатые кнопки сами: иначе движок
@@ -786,6 +818,12 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		// time, x(fixed), y(fixed)
 		w.ptrX = int(int32(binary.LittleEndian.Uint32(b[4:8]))) >> 8
 		w.ptrY = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
+		if w.ptrOnPopup {
+			if h := w.popupHandlers(); h.Move != nil {
+				h.Move(w.ptrPopupID, w.ptrX, w.ptrY)
+			}
+			return
+		}
 		if w.onMouseMove != nil {
 			w.onMouseMove(w.ptrX, w.ptrY)
 		}
@@ -822,6 +860,12 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 					break
 				}
 			}
+			if w.ptrOnPopup {
+				if h := w.popupHandlers(); h.Button != nil {
+					h.Button(w.ptrPopupID, w.ptrX, w.ptrY, id, pressed)
+				}
+				return
+			}
 			if w.onMouseButton != nil {
 				w.onMouseButton(w.ptrX, w.ptrY, id, pressed)
 			}
@@ -831,6 +875,18 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		// value>0 — вниз/вправо. Тачпады высокой точности шлют дробные значения.
 		axis := binary.LittleEndian.Uint32(b[4:8])
 		val := int32(binary.LittleEndian.Uint32(b[8:12]))
+		if w.ptrOnPopup {
+			// Длинный список прокручивают колесом прямо в попапе.
+			amt := float64(val) / 256.0 * wlAxisPixelScale
+			if h := w.popupHandlers(); h.Wheel != nil {
+				if axis == 0 {
+					h.Wheel(w.ptrPopupID, w.ptrX, w.ptrY, 0, amt)
+				} else if axis == 1 {
+					h.Wheel(w.ptrPopupID, w.ptrX, w.ptrY, amt, 0)
+				}
+			}
+			return
+		}
 		if w.onMouseWheelPixels != nil {
 			// Высокоточный путь: wl_fixed → пиксели (÷256), масштаб до «notch»
 			// в ~40 px под общий шаг движка.
@@ -1186,6 +1242,7 @@ func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 
 func (w *WaylandWindow) Close() {
 	w.repeat.cancel()
+	w.closeAllPopups()
 	w.closeCursor()
 	w.closed = true
 	// Соединение закрываем ПОСЛЕ памяти: destroyPool ещё пишет в сокет
