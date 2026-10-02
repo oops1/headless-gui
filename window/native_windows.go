@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf16"
+	"unicode/utf8"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -48,19 +50,33 @@ const (
 	wmMbuttonup     = 0x0208
 	wmMbuttondblclk = 0x0209
 	wmMousewheel    = 0x020A
+	// Горизонтальное колесо и наклон колеса вбок. Без него прокрутка вширь
+	// на Windows не работала вовсе.
+	wmMousehwheel = 0x020E
 
 	// wheelDeltaWin — WHEEL_DELTA: единица «одного щелчка» колеса в WM_MOUSEWHEEL.
 	// wheelNotchPx — во сколько логических пикселей превращается один щелчок
 	// (соответствует шагу тикового колеса в движке — 40 px/notch).
-	wheelDeltaWin      = 120.0
-	wheelNotchPx       = 40.0
-	wmKeydown          = 0x0100
-	wmKeyup            = 0x0101
-	wmChar             = 0x0102
-	wmDropfiles        = 0x0233 // WM_DROPFILES: wParam = HDROP (Drag&Drop файлов из ОС)
-	wmSyscommand       = 0x0112
-	wmNccalcsize       = 0x0083
-	wmNchittest        = 0x0084
+	wheelDeltaWin = 120.0
+	wheelNotchPx  = 40.0
+	wmKeydown     = 0x0100
+	wmKeyup       = 0x0101
+	wmChar        = 0x0102
+	// Системные клавиатурные сообщения — те, что приходят с зажатым Alt, и
+	// F10. Без них ModAlt не выставлялся никогда, а F10 не доходил вовсе.
+	wmSyskeydown = 0x0104
+	wmSyskeyup   = 0x0105
+	wmSyschar    = 0x0106
+	wmDropfiles  = 0x0233 // WM_DROPFILES: wParam = HDROP (Drag&Drop файлов из ОС)
+	wmSyscommand = 0x0112
+	wmNccalcsize = 0x0083
+	wmNchittest  = 0x0084
+	// Мышь над нерабочей областью: окно объявило там свои кнопки, и рисует
+	// их тоже оно — значит и подсветку с нажатием обслуживать ему.
+	wmNcmousemove      = 0x00A0
+	wmNclbuttondown    = 0x00A1
+	wmNclbuttonup      = 0x00A2
+	wmNcmouseleave     = 0x02A2
 	wmGetminmaxinfo    = 0x0024
 	wmNcactivate       = 0x0086
 	wmNcpaint          = 0x0085
@@ -86,7 +102,14 @@ const (
 	sizeMaximized = 2
 
 	// WM_NCHITTEST: коды зон окна (рамка resize).
-	htClient      = 1
+	htClient = 1
+	// Зоны, которые система обслуживает сама: заголовок тащит окно с
+	// прилипанием к краям, а кнопка развёртывания показывает макеты
+	// привязки Windows 11.
+	htCaption     = 2
+	htMinButton   = 8
+	htMaxButton   = 9
+	htClose       = 20
 	htLeft        = 10
 	htRight       = 11
 	htTop         = 12
@@ -247,13 +270,13 @@ var (
 	procSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
 	procGetDpiForSystem               = user32.NewProc("GetDpiForSystem")
 
-	procStretchDIBits         = gdi32.NewProc("StretchDIBits")
-	procSetStretchBltMode     = gdi32.NewProc("SetStretchBltMode")
-	procCreateRoundRectRgn    = gdi32.NewProc("CreateRoundRectRgn")
+	procStretchDIBits      = gdi32.NewProc("StretchDIBits")
+	procSetStretchBltMode  = gdi32.NewProc("SetStretchBltMode")
+	procCreateRoundRectRgn = gdi32.NewProc("CreateRoundRectRgn")
 	// Прямоугольные области и их объединение — выкройка окна-попапа по
 	// закрашенной части кадра (popuprgn_windows.go).
-	procCreateRectRgn = gdi32.NewProc("CreateRectRgn")
-	procCombineRgn    = gdi32.NewProc("CombineRgn")
+	procCreateRectRgn         = gdi32.NewProc("CreateRectRgn")
+	procCombineRgn            = gdi32.NewProc("CombineRgn")
 	procSetWindowRgn          = user32.NewProc("SetWindowRgn")
 	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 	procSetCapture            = user32.NewProc("SetCapture")
@@ -366,9 +389,17 @@ type Win32Window struct {
 	onMouseButton      func(x, y, button int, pressed bool)
 	onMouseWheelPixels func(x, y int, dx, dy float64)
 	onKeyDown          func(vk int)
-	onKeyUp            func(vk int)
-	onChar             func(r rune)
-	onFilesDropped     func(paths []string, x, y int)
+	// hitTest — зоны окна для системы (hittest_windows.go). Колбэк зовётся
+	// из насоса сообщений, а ставится с горутины приложения — отсюда замок.
+	hitTestMu sync.Mutex
+	hitTest   func(x, y int) HitArea
+	// highSurrogate — первая половина суррогатной пары UTF-16, ждущая
+	// второго WM_CHAR.
+	highSurrogate   rune
+	onKeyDownRepeat func(vk int, repeat bool)
+	onKeyUp         func(vk int)
+	onChar          func(r rune)
+	onFilesDropped  func(paths []string, x, y int)
 
 	// fileDropEnabled — DragAcceptFiles(TRUE) уже вызван для этого окна.
 	fileDropEnabled bool
@@ -1021,8 +1052,14 @@ func (w *Win32Window) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) {
 	w.onMouseWheelPixels = fn
 }
 func (w *Win32Window) SetOnKeyDown(fn func(vk int)) { w.onKeyDown = fn }
-func (w *Win32Window) SetOnKeyUp(fn func(vk int))   { w.onKeyUp = fn }
-func (w *Win32Window) SetOnChar(fn func(r rune))    { w.onChar = fn }
+
+// SetOnKeyDownRepeat подписывает приёмник нажатий, отличающий автоповтор от
+// нового нажатия. Реализует keyRepeatSource.
+func (w *Win32Window) SetOnKeyDownRepeat(fn func(vk int, repeat bool)) {
+	w.onKeyDownRepeat = fn
+}
+func (w *Win32Window) SetOnKeyUp(fn func(vk int)) { w.onKeyUp = fn }
+func (w *Win32Window) SetOnChar(fn func(r rune))  { w.onChar = fn }
 
 // SetOnFilesDropped регистрирует колбэк Drag&Drop файлов из ОС (WM_DROPFILES).
 // Координаты — клиентские физические пиксели. Гарантирует включённый приём
@@ -1033,6 +1070,31 @@ func (w *Win32Window) SetOnFilesDropped(fn func(paths []string, x, y int)) {
 }
 
 // ─── WndProc ────────────────────────────────────────────────────────────────
+
+// charFromUTF16 собирает руну из потока WM_CHAR.
+//
+// Windows шлёт текст в UTF-16: символ вне основной плоскости — эмодзи,
+// редкие письменности — приходит ДВУМЯ сообщениями, старшим и младшим
+// суррогатом. По одному они не значат ничего, и раньше в приложение уходила
+// пара мусорных рун вместо одного символа.
+//
+// ok=false — руны пока нет: либо ждём вторую половину пары, либо пара не
+// сложилась (непарный суррогат лучше отбросить, чем показать знак-замену).
+func (w *Win32Window) charFromUTF16(u rune) (rune, bool) {
+	switch {
+	case utf16.IsSurrogate(u) && w.highSurrogate == 0:
+		w.highSurrogate = u
+		return 0, false
+	case w.highSurrogate != 0:
+		pair := utf16.DecodeRune(w.highSurrogate, u)
+		w.highSurrogate = 0
+		if pair == utf8.RuneError {
+			return 0, false
+		}
+		return pair, true
+	}
+	return u, true
+}
 
 func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	w := lookupWin32(hwnd)
@@ -1212,13 +1274,25 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	case wmNchittest:
 		// Borderless-окно: рамки ОС нет, зоны resize отдаём вручную.
 		// lParam — ЭКРАННЫЕ координаты курсора (signed 16-bit слова).
-		if !w.resizable.Load() || w.maximized {
-			break // → DefWindowProc (HTCLIENT и т.п.)
-		}
 		sx := int(int16(lparam & 0xFFFF))
 		sy := int(int16((lparam >> 16) & 0xFFFF))
 		var wr rect
 		procGetWindowRect.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&wr)))
+
+		// Края важнее кнопок: полоса ресайза идёт поверх заголовка, иначе
+		// верхний край окна с кнопками было бы не ухватить.
+		edge := w.resizable.Load() && !w.maximized &&
+			(sx-int(wr.Left) < ncResizeBorder || int(wr.Right)-sx <= ncResizeBorder ||
+				sy-int(wr.Top) < ncResizeBorder || int(wr.Bottom)-sy <= ncResizeBorder)
+		if !edge {
+			// Что здесь — знает приложение: оно эти кнопки и нарисовало.
+			if area, ok := w.hitAreaAt(sx-int(wr.Left), sy-int(wr.Top)); ok {
+				return area
+			}
+		}
+		if !w.resizable.Load() || w.maximized {
+			break // → DefWindowProc (HTCLIENT и т.п.)
+		}
 		left := sx-int(wr.Left) < ncResizeBorder
 		right := int(wr.Right)-sx <= ncResizeBorder
 		top := sy-int(wr.Top) < ncResizeBorder
@@ -1242,6 +1316,43 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			return htBottom
 		}
 		return htClient
+
+	case wmNcmousemove, wmNclbuttondown, wmNclbuttonup:
+		// Кнопку заголовка нарисовало приложение, и подсветку с нажатием
+		// ведёт тоже оно: переводим событие в клиентские координаты и
+		// отдаём как обычную мышь. Иначе кнопка «развернуть», объявленная
+		// системе ради макетов привязки, перестала бы подсвечиваться и
+		// нажиматься.
+		if _, ours := ncButtonArea(wparam); !ours {
+			break // прочая нерабочая область — системе
+		}
+		sx := int(int16(lparam & 0xFFFF))
+		sy := int(int16((lparam >> 16) & 0xFFFF))
+		pt := point{X: int32(sx), Y: int32(sy)}
+		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+		switch umsg {
+		case wmNcmousemove:
+			if w.onMouseMove != nil {
+				w.onMouseMove(int(pt.X), int(pt.Y))
+			}
+		case wmNclbuttondown:
+			if w.onMouseButton != nil {
+				w.onMouseButton(int(pt.X), int(pt.Y), 0, true)
+			}
+		case wmNclbuttonup:
+			if w.onMouseButton != nil {
+				w.onMouseButton(int(pt.X), int(pt.Y), 0, false)
+			}
+		}
+		return 0
+
+	case wmNcmouseleave:
+		// Курсор ушёл с кнопки заголовка — снимаем подсветку, уведя мышь
+		// за пределы окна.
+		if w.onMouseMove != nil {
+			w.onMouseMove(-1, -1)
+		}
+		return 0
 
 	case wmGetminmaxinfo:
 		// Значения минимума согласованы с fitMinTrack (см. createInternal).
@@ -1340,6 +1451,21 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 
+	case wmMousehwheel:
+		// Горизонтальное колесо: delta>0 — вправо (в отличие от
+		// вертикального, где положительное значение означает «от себя»).
+		pt := point{
+			X: int32(int16(lparam & 0xFFFF)),
+			Y: int32(int16((lparam >> 16) & 0xFFFF)),
+		}
+		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+		delta := int16((wparam >> 16) & 0xFFFF)
+		if delta != 0 && w.onMouseWheelPixels != nil {
+			dx := float64(delta) / wheelDeltaWin * wheelNotchPx
+			w.onMouseWheelPixels(int(pt.X), int(pt.Y), dx, 0)
+		}
+		return 0
+
 	case wmMousewheel:
 		// Для WM_MOUSEWHEEL координаты в lparam заданы в экранных координатах.
 		// Конвертируем их в клиентские, чтобы hit-test виджетов был корректным.
@@ -1370,22 +1496,44 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 
-	case wmKeydown:
-		if w.onKeyDown != nil {
+	case wmKeydown, wmSyskeydown:
+		// Бит 30 lParam — «клавиша уже была нажата», то есть это автоповтор,
+		// а не новое нажатие (WM_KEYDOWN, previous key state).
+		repeat := lparam&(1<<30) != 0
+		if w.onKeyDownRepeat != nil {
+			w.onKeyDownRepeat(int(wparam), repeat)
+		} else if w.onKeyDown != nil {
 			w.onKeyDown(int(wparam))
 		}
+		// Системные сочетания отдаём системе: Alt+F4 закрывает окно, а
+		// Alt+Space открывает оконное меню, и подменять их собой нельзя.
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
 		return ret
 
-	case wmKeyup:
+	case wmKeyup, wmSyskeyup:
 		if w.onKeyUp != nil {
 			w.onKeyUp(int(wparam))
+		}
+		if umsg == wmSyskeyup {
+			// То же, что и с нажатием: системные сочетания доигрывает ОС.
+			ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+			return ret
+		}
+		return 0
+
+	case wmSyschar:
+		// Символ, набранный с зажатым Alt. По умолчанию система отвечает на
+		// него звуком «такого пункта меню нет» — своей строки меню у окна
+		// нет, а приложение сочетание уже получило отдельным событием.
+		// Alt+Space (0x20) оставляем системе: это оконное меню.
+		if rune(wparam) == ' ' {
+			ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+			return ret
 		}
 		return 0
 
 	case wmChar:
-		r := rune(wparam)
-		if r >= 32 && w.onChar != nil {
+		if r, ok := w.charFromUTF16(rune(wparam)); ok && r >= 32 && w.onChar != nil {
 			w.onChar(r)
 		}
 		return 0

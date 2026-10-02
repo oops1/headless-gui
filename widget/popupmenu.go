@@ -27,6 +27,15 @@ type MenuItem struct {
 	// Движок его не читает: поле для приложения, которому нужно знать источник.
 	IconPath string
 
+	// Shortcut — сочетание клавиш пункта, написанное справа приглушённым
+	// цветом: «Ctrl+S», «Ctrl+Shift+N», «Del».
+	//
+	// Меню его только ПОКАЗЫВАЕТ — обрабатывает сочетание приложение, через
+	// InputBindings или свой обработчик клавиш. Иначе одно и то же
+	// сочетание пришлось бы объявлять дважды, и однажды они разошлись бы:
+	// в меню написано одно, работает другое.
+	Shortcut string
+
 	Separator bool       // true — горизонтальный разделитель вместо текста
 	Disabled  bool       // серый, некликабельный пункт
 	OnClick   func()     // обработчик
@@ -94,6 +103,14 @@ type PopupMenu struct {
 	PaddingX     int // горизонтальный отступ текста
 	MinWidth     int // минимальная ширина меню
 	ArrowPadding int // отступ для стрелки ► справа
+
+	// UseMnemonics — читать в подписях пунктов мнемоники: «_Файл» рисуется
+	// как «Файл» с чертой под Ф, и нажатие этой буквы при открытом меню
+	// выбирает пункт. Двойное подчёркивание означает сам знак подчёркивания.
+	//
+	// По умолчанию выключено: в подписях бывают настоящие подчёркивания —
+	// имена файлов в контекстном меню, — и молча съедать их нельзя.
+	UseMnemonics bool
 
 	// OnSelect вызывается при выборе пункта (index, text).
 	OnSelect func(index int, text string)
@@ -372,6 +389,7 @@ func (m *PopupMenu) openChild(idx int) {
 	child.PaddingX = m.PaddingX
 	child.MinWidth = m.MinWidth
 	child.ArrowPadding = m.ArrowPadding
+	child.UseMnemonics = m.UseMnemonics
 	child.SetItems(subItems)
 	child.OnSelect = m.OnSelect
 
@@ -461,7 +479,14 @@ func (m *PopupMenu) calcSize() (w, h int) {
 			}
 			// Ширина по НАСТОЯЩЕМУ замеру подписи: len в Go считает байты, и
 			// кириллический пункт выходил вдвое шире нужного.
-			textW := MeasureUIText(item.Text, DefaultFontSizePt) + m.PaddingX*2 + 24 + gutter
+			textW := MeasureUIText(mnemonicLabel(item.Text, m.UseMnemonics),
+				DefaultFontSizePt) + m.PaddingX*2 + 24 + gutter
+			if item.Shortcut != "" {
+				// Сочетание пишется справа, и место под него нужно
+				// отвести всему меню: иначе подпись и сочетание налезут
+				// друг на друга в самом длинном пункте.
+				textW += MeasureUIText(item.Shortcut, DefaultFontSizePt) + menuShortcutGap
+			}
 			if textW > w {
 				w = textW
 			}
@@ -600,7 +625,15 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 			ix := px + m.PaddingX + m.checkGutter()
 			ctx.DrawImageScaled(item.Icon, ix, curY+(m.ItemHeight-sz)/2, sz, sz)
 		}
-		ctx.DrawText(item.Text, textX, textY, textCol)
+		drawMnemonicText(ctx, item.Text, textX, textY, textCol, m.UseMnemonics)
+
+		// Сочетание клавиш — справа, приглушённым цветом: это подсказка, а
+		// не вторая подпись, и спорить с названием пункта она не должна.
+		if item.Shortcut != "" && len(item.SubItems) == 0 {
+			sw := MeasureUIText(item.Shortcut, DefaultFontSizePt)
+			sx := px + pw - m.PaddingX - sw
+			ctx.DrawText(item.Shortcut, sx, textY, m.shortcutColor(textCol))
+		}
 
 		// Стрелка ► для пунктов с подменю.
 		if len(item.SubItems) > 0 {
@@ -836,6 +869,74 @@ func (m *PopupMenu) OnKeyEvent(e KeyEvent) {
 				}
 			}
 		}
+
+	default:
+		m.handleMnemonic(e, hover)
+	}
+}
+
+// handleMnemonic выбирает пункт по подчёркнутой букве.
+//
+// Если буква у пунктов одна на двоих, нажатие не выбирает ни одного, а
+// переставляет подсветку на следующий такой пункт: так ведёт себя меню
+// Windows, и это единственное разумное — выбрать за человека наугад нельзя.
+func (m *PopupMenu) handleMnemonic(e KeyEvent, hover int) {
+	if !m.UseMnemonics || e.Mod&(ModCtrl) != 0 {
+		return
+	}
+	m.mu.RLock()
+	var hits []int
+	for i, it := range m.items {
+		if it.Separator || it.Disabled {
+			continue
+		}
+		if _, key, _ := splitMnemonic(it.Text); matchesMnemonic(key, e) {
+			hits = append(hits, i)
+		}
+	}
+	m.mu.RUnlock()
+	if len(hits) == 0 {
+		return
+	}
+	if len(hits) > 1 {
+		next := hits[0]
+		for _, i := range hits {
+			if i > hover {
+				next = i
+				break
+			}
+		}
+		m.setHoverIdx(next)
+		return
+	}
+	m.activateItem(hits[0])
+}
+
+// activateItem выполняет пункт так же, как Enter: подменю открывает, обычный
+// пункт выполняет, закрыв перед этим всё меню.
+func (m *PopupMenu) activateItem(idx int) {
+	m.mu.RLock()
+	if idx < 0 || idx >= len(m.items) {
+		m.mu.RUnlock()
+		return
+	}
+	item := m.items[idx]
+	m.mu.RUnlock()
+
+	if len(item.SubItems) > 0 {
+		m.setHoverIdx(idx)
+		m.openChild(idx)
+		if c, _ := m.openChildOf(); c != nil {
+			c.setHoverIdx(c.nextActiveItem(-1))
+		}
+		return
+	}
+	m.closeAll()
+	if item.OnClick != nil {
+		item.OnClick()
+	}
+	if m.OnSelect != nil {
+		m.OnSelect(idx, item.Text)
 	}
 }
 
@@ -909,6 +1010,26 @@ const (
 	menuIconGap   = 8  // зазор между значком и подписью
 	menuIconInset = 14 // на сколько значок мельче высоты пункта
 )
+
+// menuShortcutGap — зазор между подписью пункта и его сочетанием клавиш.
+const menuShortcutGap = 24
+
+// shortcutColor — цвет подписи сочетания: приглушённый оттенок цвета пункта.
+//
+// Приглушаем смешением с фоном меню, а не альфой: полупрозрачный текст
+// поверх подсвеченного пункта выглядит грязно (та же причина, что у приписки
+// узла дерева).
+func (m *PopupMenu) shortcutColor(text color.RGBA) color.RGBA {
+	bg := m.Background
+	if bg.A == 0 {
+		return text
+	}
+	const k = 0.45
+	mix := func(a, b uint8) uint8 {
+		return uint8(float64(a)*(1-k) + float64(b)*k + 0.5)
+	}
+	return color.RGBA{R: mix(text.R, bg.R), G: mix(text.G, bg.G), B: mix(text.B, bg.B), A: 255}
+}
 
 // checkGutter — ширина поля под отметку слева от подписей.
 //

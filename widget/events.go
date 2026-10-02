@@ -12,9 +12,9 @@ import "sort"
 type MouseButton int
 
 const (
-	MouseLeft   MouseButton = 0
-	MouseRight  MouseButton = 1
-	MouseMiddle MouseButton = 2
+	MouseLeft      MouseButton = 0
+	MouseRight     MouseButton = 1
+	MouseMiddle    MouseButton = 2
 	MouseWheelUp   MouseButton = 3
 	MouseWheelDown MouseButton = 4
 )
@@ -31,6 +31,19 @@ type MouseEvent struct {
 	// несло только координаты и кнопку. Заполняет движок, забирая состояние
 	// у бэкенда окна (Engine.SetModifiers).
 	Mod KeyMod
+
+	// Clicks — номер нажатия в серии: 1 — одиночное, 2 — двойное, 3 — тройное
+	// и так далее. Отпускание кнопки несёт номер своего нажатия.
+	//
+	// Считает движок, один раз на всё дерево: до этого двойной щелчок
+	// высматривал каждый виджет сам — своим полем «время прошлого клика»,
+	// своим порогом и своей меркой «мышь не сдвинулась», — и тройного
+	// щелчка не умел никто. Интервал движок берёт системный, то есть тот,
+	// который человек выставил в параметрах мыши.
+	//
+	// 0 — события пришли не от движка (прямой вызов OnMouseButton в тестах
+	// или в приложении со своей доставкой): виджету тогда считать самому.
+	Clicks int
 }
 
 // MouseMoveHandler реализуется виджетами, реагирующими на перемещение курсора.
@@ -126,13 +139,91 @@ const (
 	Key8 KeyCode = 56
 	Key9 KeyCode = 57
 
-	KeyA         KeyCode = 65
-	KeyC         KeyCode = 67
-	KeyS         KeyCode = 83
-	KeyV         KeyCode = 86
-	KeyX         KeyCode = 88
-	KeyY         KeyCode = 89
-	KeyZ         KeyCode = 90
+	// Буквы: код совпадает с заглавной латинской буквой (0x41..0x5A).
+	//
+	// Важно: это код ФИЗИЧЕСКОЙ клавиши латинской раскладки, а не введённый
+	// символ. При русской раскладке клавиша «ы» по-прежнему KeyS, иначе
+	// Ctrl+S перестал бы работать, стоило переключить язык.
+	KeyA KeyCode = 65
+	KeyB KeyCode = 66
+	KeyC KeyCode = 67
+	KeyD KeyCode = 68
+	KeyE KeyCode = 69
+	KeyF KeyCode = 70
+	KeyG KeyCode = 71
+	KeyH KeyCode = 72
+	KeyI KeyCode = 73
+	KeyJ KeyCode = 74
+	KeyK KeyCode = 75
+	KeyL KeyCode = 76
+	KeyM KeyCode = 77
+	KeyN KeyCode = 78
+	KeyO KeyCode = 79
+	KeyP KeyCode = 80
+	KeyQ KeyCode = 81
+	KeyR KeyCode = 82
+	KeyS KeyCode = 83
+	KeyT KeyCode = 84
+	KeyU KeyCode = 85
+	KeyV KeyCode = 86
+	KeyW KeyCode = 87
+	KeyX KeyCode = 88
+	KeyY KeyCode = 89
+	KeyZ KeyCode = 90
+
+	// Клавиша контекстного меню (между правыми Alt и Ctrl).
+	KeyMenu KeyCode = 93
+
+	// KeyAlt приходит, когда Alt нажали и отпустили, ничего между ними не
+	// нажав, — этим в Windows активируют строку меню.
+	//
+	// Как модификатор Alt по-прежнему ходит в KeyEvent.Mod и своего события
+	// не имеет: сочетание Alt+F — это KeyF с ModAlt, а не две клавиши
+	// подряд. Отдельный код нужен ровно для одного жеста, у которого нет
+	// второй клавиши.
+	KeyAlt KeyCode = 18
+
+	// Цифровая клавиатура (0x60..0x6F). Отдельно от цифрового ряда:
+	// калькулятору важно, с какой стороны нажали, а Num Lock делает их
+	// то цифрами, то навигацией.
+	KeyNumpad0         KeyCode = 96
+	KeyNumpad1         KeyCode = 97
+	KeyNumpad2         KeyCode = 98
+	KeyNumpad3         KeyCode = 99
+	KeyNumpad4         KeyCode = 100
+	KeyNumpad5         KeyCode = 101
+	KeyNumpad6         KeyCode = 102
+	KeyNumpad7         KeyCode = 103
+	KeyNumpad8         KeyCode = 104
+	KeyNumpad9         KeyCode = 105
+	KeyMultiply        KeyCode = 106
+	KeyAdd             KeyCode = 107
+	KeyNumpadSeparator KeyCode = 108
+	KeySubtract        KeyCode = 109
+	KeyDecimal         KeyCode = 110
+	KeyDivide          KeyCode = 111
+
+	// Переключатели и системные клавиши.
+	KeyPause       KeyCode = 19
+	KeyCapsLock    KeyCode = 20
+	KeyPrintScreen KeyCode = 44
+	KeyNumLock     KeyCode = 144
+	KeyScrollLock  KeyCode = 145
+
+	// OEM-клавиши: те, чей символ зависит от раскладки. Названы по тому,
+	// что на них написано в раскладке США, — так же, как у Windows, чьи
+	// значения здесь и взяты.
+	KeyOemSemicolon  KeyCode = 186 // ;: — VK_OEM_1
+	KeyOemPlus       KeyCode = 187 // =+ — одинаков во всех раскладках
+	KeyOemComma      KeyCode = 188 // ,<
+	KeyOemMinus      KeyCode = 189 // -_
+	KeyOemPeriod     KeyCode = 190 // .>
+	KeyOemSlash      KeyCode = 191 // /? — VK_OEM_2
+	KeyOemTilde      KeyCode = 192 // `~ — VK_OEM_3
+	KeyOemOpenBrace  KeyCode = 219 // [{ — VK_OEM_4
+	KeyOemBackslash  KeyCode = 220 // \| — VK_OEM_5
+	KeyOemCloseBrace KeyCode = 221 // ]} — VK_OEM_6
+	KeyOemQuote      KeyCode = 222 // '" — VK_OEM_7
 )
 
 // KeyMod — битовая маска нажатых модификаторов.
@@ -149,9 +240,18 @@ const (
 // KeyEvent содержит данные клавиатурного события.
 type KeyEvent struct {
 	Code    KeyCode
-	Rune    rune   // Unicode-символ для печатаемых клавиш (0 для служебных)
+	Rune    rune // Unicode-символ для печатаемых клавиш (0 для служебных)
 	Mod     KeyMod
 	Pressed bool // true = нажата, false = отпущена
+
+	// Repeat — событие от автоповтора удерживаемой клавиши, а не от нового
+	// нажатия.
+	//
+	// Различать их нужно там, где нажатие что-то переключает: удержание
+	// Caps Lock не должно гасить и зажигать его десять раз в секунду, а
+	// повтор Enter — отправлять форму снова и снова. Для набора текста и
+	// движения каретки разницы нет: там повтор и есть то, чего ждут.
+	Repeat bool
 }
 
 // KeyHandler реализуется виджетами, принимающими ввод с клавиатуры.

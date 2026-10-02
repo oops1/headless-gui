@@ -2,15 +2,20 @@
 
 package widget
 
-// clipboard_linux.go — буфер обмена Linux через xclip/xsel.
+// clipboard_linux.go — запасной буфер обмена Linux через xclip/xsel.
 //
-// Без CGO: используем внешние утилиты xclip или xsel.
-// Fallback: in-memory буфер если утилиты недоступны.
+// Основной путь — нативный: под Wayland это wl_data_device
+// (window/wayland_clipboard_linux.go), и окно подменяет провайдер сразу,
+// как только соединение поднялось. Эти утилиты остаются для X11-сессий без
+// нативного владельца и как запас там, где окна ещё нет.
+//
+// Текст НЕ подрезается: скопированная строка с завершающим переводом строки
+// должна вставиться ровно такой же. Прежний TrimRight съедал его и портил
+// вставку кода и списков.
 
 import (
 	"bytes"
 	"os/exec"
-	"strings"
 )
 
 type linuxClipboard struct {
@@ -36,13 +41,13 @@ func (c *linuxClipboard) GetText() string {
 		if err != nil {
 			return c.mem
 		}
-		return strings.TrimRight(string(out), "\n")
+		return string(out)
 	case "xsel":
 		out, err := exec.Command("xsel", "--clipboard", "--output").Output()
 		if err != nil {
 			return c.mem
 		}
-		return strings.TrimRight(string(out), "\n")
+		return string(out)
 	default:
 		return c.mem
 	}

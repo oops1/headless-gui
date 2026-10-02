@@ -703,6 +703,50 @@ is confined to the XAML file's directory or an `fs.FS`, as with `Button.Icon`. I
 it cannot be read the item simply has no icon: a menu without a picture is
 clearer than a window that did not open because of one.
 
+**A shortcut in the item.** Written on the right in a muted colour, as in any
+Windows menu:
+
+```go
+menu.SetItems([]widget.MenuItem{
+    {Text: "Save", Shortcut: "Ctrl+S", OnClick: save},
+    {Text: "Save as…", Shortcut: "Ctrl+Shift+S", OnClick: saveAs},
+    {Text: "Delete", Shortcut: "Del", OnClick: del},
+})
+```
+
+In markup — `InputGestureText="Ctrl+S"` (the WPF name) or `Shortcut="Ctrl+S"`.
+
+The menu only SHOWS the shortcut: the keystroke is handled by the application,
+through `InputBindings` or its own key handler. Otherwise the same combination
+would have to be declared twice, and one day the two would disagree: the menu
+says one thing, another works. Room for the shortcut is reserved for the whole
+menu; items with a submenu do not show it — an arrow sits there.
+
+**Mnemonics** — the underlined letter, a second way to reach an item besides the
+mouse. The markup is the one from WPF and Win32: an underscore before the
+letter, a double underscore for the underscore itself.
+
+```go
+menu.UseMnemonics = true
+menu.SetItems([]widget.MenuItem{
+    {Text: "_Open", OnClick: open},        // "Open" with O underlined
+    {Text: "_Save", OnClick: save},
+    {Text: "report__2026.txt"},            // a caption with a real underscore
+})
+```
+
+The flag is off by default, and underscores in captions stay as they are: in
+file names they are real, and swallowing them silently is not allowed. In
+markup — `UseMnemonics="True"` on `<PopupMenu>` or `<Menu>`; submenus inherit
+the flag.
+
+A Cyrillic mnemonic is matched by the physical key: what reaches the
+application is the code of the Latin letter (done so that `Ctrl+S` works in a
+Russian layout too), and which layout is active the engine does not know. So
+"_Файл" opens on both Alt+Ф and Alt+A — it is one key. The layout here is
+ЙЦУКЕН, the Russian one; if the backend supplied the event's character, it
+wins over the guess.
+
 The icon gutter is reserved for the WHOLE menu when at least one item has an
 icon — the same rule as `Checkable`: otherwise captions of icon-less items would
 sit to the left of their neighbours. `IconSize` is the side in points, zero means
@@ -749,6 +793,22 @@ XAML:
     </MenuItem>
 </Menu>
 ```
+
+**The menu bar on Alt.** The engine hands keys to the focused widget, and the
+menu bar holds no focus — so the application passes Alt+letter to it:
+
+```go
+menu.UseMnemonics = true
+menu.AddMenu("_File", /* … */)
+
+// from the root widget's key handler
+if e.Mod&widget.ModAlt != 0 && menu.ActivateMnemonic(e) {
+    return true // the menu opened
+}
+```
+
+`ActivateMnemonic` reports whether such a mnemonic was found. Once the menu is
+open, letters arrive the usual way and need not be passed on.
 
 Cascading submenus (nested MenuItem):
 
@@ -1295,6 +1355,35 @@ eng.SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 ```
 
 The engine performs hit-testing and dispatches the event to the appropriate widget. On left click, focus automatically transfers to the `Focusable` widget under the cursor.
+
+**Double and triple click.** The number of the press in a series arrives in
+`MouseEvent.Clicks`: 1 — single, 2 — double, 3 — triple. The engine counts it
+once for the whole tree and takes the interval from the system — the one set in
+the mouse settings (`window.Run` reports it at startup; by hand —
+`eng.SetDoubleClickTime`). A series is broken by another button, a cursor
+farther than four points, or a pause longer than the interval; a release
+carries the number of its own press.
+
+```go
+func (w *MyWidget) OnMouseButton(e widget.MouseEvent) bool {
+    if !e.Pressed {
+        return false
+    }
+    switch e.Clicks {
+    case 2:
+        w.selectWord(e.X, e.Y)
+    case 3:
+        w.selectLine(e.X, e.Y)
+    }
+    return true
+}
+```
+
+Zero means the event did not come from the engine (a direct `OnMouseButton`
+call from a test or from an application with its own dispatch) — the widget
+then counts the series itself. The built-in widgets already do this: a double
+click selects a word, a triple one selects the line in `TextBox` and the whole
+field in `TextInput`.
 
 **Modifiers on a click.** Ctrl+Click and Shift+Click reach the widget in
 `MouseEvent.Mod`. The engine cannot take them from keyboard events: there is no

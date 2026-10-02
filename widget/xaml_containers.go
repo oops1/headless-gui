@@ -875,6 +875,11 @@ func buildXAMLMenuBar(el xElement, reg map[string]Widget, parentOff image.Point,
 		}
 	}
 
+	// Мнемоники — по требованию: в подписях бывают настоящие подчёркивания.
+	if strings.EqualFold(el.attr("UseMnemonics"), "True") {
+		mb.UseMnemonics = true
+	}
+
 	// Attached properties
 	applyCommonProps(mb, el)
 
@@ -939,6 +944,9 @@ func parseMenuItems(parent xElement, baseDir string) ([]MenuItem, []string) {
 			Disabled:  disabled,
 			Checkable: menuItemCheckable(sub),
 			Checked:   strings.EqualFold(sub.attr("IsChecked"), "True"),
+			// InputGestureText — имя этого атрибута в WPF; Shortcut принят
+			// как более понятный синоним.
+			Shortcut: sub.attr("InputGestureText", "Shortcut"),
 			// GroupName — имя WPF: пункты одной группы в одном подменю ведут
 			// себя как переключатель.
 			RadioGroup: sub.attr("GroupName"),
@@ -965,6 +973,10 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 	absBounds := el.bounds().Add(parentOff)
 	pm.SetBounds(absBounds)
 	applyCommonProps(pm, el)
+
+	if strings.EqualFold(el.attr("UseMnemonics"), "True") {
+		pm.UseMnemonics = true
+	}
 
 	if id := el.name(); id != "" {
 		reg[id] = pm
@@ -1006,6 +1018,7 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 			Checkable:  menuItemCheckable(child),
 			Checked:    strings.EqualFold(child.attr("IsChecked"), "True"),
 			RadioGroup: child.attr("GroupName"),
+			Shortcut:   child.attr("InputGestureText", "Shortcut"),
 		}
 		applyMenuItemIcon(&item, child, baseDir)
 		pm.mu.Lock()

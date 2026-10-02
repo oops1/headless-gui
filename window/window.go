@@ -76,6 +76,16 @@ func (s *surface) sendModifiers(mod widget.KeyMod) {
 	}
 }
 
+// doubleClickSink — опциональный приём системного интервала двойного щелчка
+// (реализует *engine.Engine).
+//
+// Опциональный по той же причине, что modifierSink: EngineAPI — обязательный
+// минимум, и дописывать в него метод значило бы сломать сборку всякому, кто
+// этот интерфейс уже реализует.
+type doubleClickSink interface {
+	SetDoubleClickTime(d time.Duration)
+}
+
 // engineScaler — опциональная поддержка HiDPI движком (реализует *engine.Engine).
 // CanvasSize при этом логический, кадры и события — физические.
 type engineScaler interface {
@@ -208,6 +218,9 @@ type surface struct {
 	modShift atomic.Bool
 	modCtrl  atomic.Bool
 	modAlt   atomic.Bool
+	// altTap — Alt нажат и пока ничего другого не нажимали: при отпускании
+	// это жест открытия строки меню (см. widget.KeyAlt).
+	altTap atomic.Bool
 
 	// in — очередь ввода к движку: склейка движений мыши (input_queue.go).
 	in inputQueue
@@ -277,6 +290,10 @@ type Window struct {
 	maxFPS       int
 	resizable    bool
 	cornerRadius int // скругление углов окна (0 = прямые); применяется после Create
+
+	// hitTest — что лежит под точкой окна (см. SetHitTest): полоса
+	// заголовка, кнопки управления или содержимое.
+	hitTest func(x, y int) HitArea
 
 	// appID — как программа называет себя среде рабочего стола: по нему
 	// панель задач ищет значок и .desktop-файл (см. SetAppID). Пусто —
@@ -357,6 +374,38 @@ func (win *Window) SetResizable(v bool) *Window {
 	return win
 }
 
+// BeginMove просит систему перетащить окно вслед за курсором — так, как она
+// это делает со своими окнами: с прилипанием к краям и раскладками.
+//
+// Зовётся из обработчика нажатия на своей полосе заголовка. false — бэкенд
+// так не умеет или система отказала; тогда окно двигают прежним путём, через
+// SetPosition.
+//
+// Приложению с корнем widget.Window звать это не нужно: там перетаскивание
+// подключается само. Публичный метод — для приложений со своим корнем
+// (Проводник, Блокнот), которые раньше лезли к неэкспортируемому интерфейсу
+// через утверждение типа над Native().
+func (win *Window) BeginMove() bool {
+	if win.native == nil {
+		return false
+	}
+	mv, ok := win.native.(interactiveMover)
+	return ok && mv.BeginMove()
+}
+
+// BeginResize просит систему изменить размер окна за край edges — биты
+// widget.NativeEdgeTop, NativeEdgeBottom, NativeEdgeLeft, NativeEdgeRight и
+// их сочетания для углов.
+//
+// false — бэкенд так не умеет или система отказала.
+func (win *Window) BeginResize(edges int) bool {
+	if win.native == nil {
+		return false
+	}
+	mv, ok := win.native.(interactiveMover)
+	return ok && mv.BeginResize(edges)
+}
+
 // SetAppID задаёт идентификатор приложения для среды рабочего стола: по нему
 // панель задач находит значок и <id>.desktop программы (Wayland —
 // xdg_toplevel.app_id, X11 — WM_CLASS).
@@ -416,6 +465,16 @@ func (win *Window) Run() error {
 	// выставил его в правильный момент (на X11 — до MapWindow).
 	win.applyPendingIcon()
 
+	// Интервал двойного щелчка — системный: его выставляет человек в
+	// параметрах мыши, и по нему движок считает серию нажатий
+	// (widget.MouseEvent.Clicks). Бэкенд, который значения не знает,
+	// оставляет движку своё.
+	if ds, ok := win.eng.(doubleClickSink); ok {
+		if d := nativeDoubleClickTime(); d > 0 {
+			ds.SetDoubleClickTime(d)
+		}
+	}
+
 	// HiDPI: определяем масштаб монитора (env HEADLESS_GUI_SCALE или
 	// бэкенд) и сообщаем движку ДО расчёта размеров окна.
 	win.scale = 1
@@ -456,6 +515,12 @@ func (win *Window) Run() error {
 		win.pickupWidgetMinSize(ww.MinWidth, ww.MinHeight)
 	}
 	win.applyMinSize()
+
+	// Хит-тест — до Create: Win32 спрашивает его сразу, как только окно
+	// появилось, и первые же сообщения должны получить верный ответ.
+	if win.hitTest != nil {
+		win.applyHitTest()
+	}
 
 	// app_id — ДО Create: Wayland отправляет его вместе с первым commit,
 	// а X11 обязан выставить WM_CLASS до показа окна.
@@ -852,7 +917,13 @@ func (s *surface) setupInput() {
 	}
 
 	// ── Keys ─────────────────────────────────────────────────────────────────
-	s.native.SetOnKeyDown(func(vk int) { s.keyEvent(vk, true) })
+	// Повтор удерживаемой клавиши бэкенд отмечает отдельно, если умеет;
+	// иначе он приходит неотличимо от нового нажатия, как и раньше.
+	if kr, ok := s.native.(keyRepeatSource); ok {
+		kr.SetOnKeyDownRepeat(func(vk int, repeat bool) { s.keyEventRepeat(vk, true, repeat) })
+	} else {
+		s.native.SetOnKeyDown(func(vk int) { s.keyEvent(vk, true) })
+	}
 	s.native.SetOnKeyUp(func(vk int) { s.keyEvent(vk, false) })
 
 	// ── Char (Unicode символ) ────────────────────────────────────────────────
@@ -860,7 +931,7 @@ func (s *surface) setupInput() {
 		if r < 32 {
 			return
 		}
-		mod := s.currentMod()
+		mod := textMod(s.currentMod())
 		s.post(func() {
 			s.eng.SendKeyEvent(widget.KeyEvent{
 				Code:    widget.KeyUnknown,
@@ -872,8 +943,27 @@ func (s *surface) setupInput() {
 	})
 }
 
+// textMod снимает с текстового события пару Ctrl+Alt.
+//
+// Так Windows сообщает AltGr: на немецкой или польской раскладке AltGr+Q
+// печатает «@», и это именно ВВОД символа. Виджеты же при любом Ctrl уходят
+// в ветку сочетаний клавиш, и символ пропадал бы. Один Ctrl или один Alt
+// оставляем как есть: Ctrl+V — сочетание, и путать его с вводом нельзя.
+func textMod(mod widget.KeyMod) widget.KeyMod {
+	const altGr = widget.ModCtrl | widget.ModAlt
+	if mod&altGr == altGr {
+		return mod &^ altGr
+	}
+	return mod
+}
+
 // keyEvent — нажатие или отпускание клавиши, пришедшее с насоса ОС.
 func (s *surface) keyEvent(vk int, pressed bool) {
+	s.keyEventRepeat(vk, pressed, false)
+}
+
+// keyEventRepeat — то же, но с пометкой «это автоповтор».
+func (s *surface) keyEventRepeat(vk int, pressed, repeat bool) {
 	switch vk {
 	case VK_SHIFT:
 		s.modShift.Store(pressed)
@@ -881,6 +971,34 @@ func (s *surface) keyEvent(vk int, pressed bool) {
 		s.modCtrl.Store(pressed)
 	case VK_ALT:
 		s.modAlt.Store(pressed)
+		// Alt сам по себе — не клавиша, а модификатор, и своего события у
+		// него нет. Кроме одного жеста: Alt нажали и отпустили, ничего
+		// между ними не нажав, — так в Windows открывают строку меню.
+		// Распознаём его здесь, а не в бэкендах: правило одно на все три,
+		// и повторять его трижды незачем.
+		if pressed {
+			if !repeat {
+				s.altTap.Store(true)
+			}
+			return // удержание Alt приложению не событие
+		}
+		tap := s.altTap.Swap(false)
+		if !tap {
+			return
+		}
+		mod := s.currentMod()
+		s.post(func() {
+			s.sendModifiers(mod)
+			s.eng.SendKeyEvent(widget.KeyEvent{Code: widget.KeyAlt, Mod: mod, Pressed: true})
+			s.eng.SendKeyEvent(widget.KeyEvent{Code: widget.KeyAlt, Mod: mod, Pressed: false})
+		})
+		return
+	default:
+		// Любая другая клавиша при зажатом Alt — это уже сочетание, а не
+		// жест открытия меню.
+		if pressed {
+			s.altTap.Store(false)
+		}
 	}
 	mod := s.currentMod()
 	code := vkToKeyCode(vk)
@@ -894,6 +1012,7 @@ func (s *surface) keyEvent(vk int, pressed bool) {
 				Code:    code,
 				Mod:     mod,
 				Pressed: pressed,
+				Repeat:  repeat,
 			})
 		}
 	})
@@ -1149,52 +1268,29 @@ func (s *surface) applyFrame(frame output.Frame) {
 // vkToKeyCode переводит VK_* код в widget.KeyCode.
 // VK_* константы специально совпадают с widget.KeyCode, поэтому маппинг прямой.
 func vkToKeyCode(vk int) widget.KeyCode {
-	switch vk {
-	case VK_BACKSPACE:
-		return widget.KeyBackspace
-	case VK_TAB:
-		return widget.KeyTab
-	case VK_ENTER:
-		return widget.KeyEnter
-	case VK_ESCAPE:
-		return widget.KeyEscape
-	case VK_SPACE:
-		return widget.KeySpace
-	case VK_LEFT:
-		return widget.KeyLeft
-	case VK_UP:
-		return widget.KeyUp
-	case VK_RIGHT:
-		return widget.KeyRight
-	case VK_DOWN:
-		return widget.KeyDown
-	case VK_INSERT:
-		return widget.KeyInsert
-	case VK_DELETE:
-		return widget.KeyDelete
-	case VK_HOME:
-		return widget.KeyHome
-	case VK_END:
-		return widget.KeyEnd
-	case VK_PRIOR:
-		return widget.KeyPageUp
-	case VK_NEXT:
-		return widget.KeyPageDown
-	case VK_A:
-		return widget.KeyA
-	case VK_C:
-		return widget.KeyC
-	case VK_V:
-		return widget.KeyV
-	case VK_X:
-		return widget.KeyX
-	case VK_Y:
-		return widget.KeyY
-	case VK_Z:
-		return widget.KeyZ
+	// Значения widget.KeyCode намеренно совпадают с виртуальными кодами
+	// Windows, поэтому почти всё отображение — это проверка «код из тех, что
+	// мы объявили», а не длинный switch с сотней одинаковых строк вида
+	// «case VK_X: return KeyX». Пропускать всё подряд тоже нельзя: коды, для
+	// которых константы нет, пришли бы приложению безымянными числами, и
+	// завтрашнее добавление константы молча поменяло бы смысл события.
+	switch {
+	case vk >= VK_A && vk <= VK_Z: // буквы A–Z
+		return widget.KeyCode(vk)
+	case vk >= VK_0 && vk <= VK_9: // цифровой ряд
+		return widget.KeyCode(vk)
+	case vk >= VK_NUMPAD0 && vk <= VK_DIVIDE: // цифровая клавиатура
+		return widget.KeyCode(vk)
+	case vk >= VK_F1 && vk <= VK_F24:
+		return widget.KeyCode(vk)
 	}
-	// F1–F12: значения KeyCode совпадают с VK (0x70–0x7B).
-	if vk >= VK_F1 && vk <= VK_F12 {
+	switch vk {
+	case VK_BACKSPACE, VK_TAB, VK_ENTER, VK_ESCAPE, VK_SPACE,
+		VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN,
+		VK_INSERT, VK_DELETE, VK_HOME, VK_END, VK_PRIOR, VK_NEXT,
+		VK_PAUSE, VK_CAPITAL, VK_SNAPSHOT, VK_APPS, VK_NUMLOCK, VK_SCROLL,
+		VK_OEM_1, VK_OEM_PLUS, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD,
+		VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7:
 		return widget.KeyCode(vk)
 	}
 	return widget.KeyUnknown

@@ -59,6 +59,15 @@ type MenuBar struct {
 	ItemPaddingX    int // горизонтальный padding текста пункта
 	Height          int // высота полосы (по умолчанию 28)
 
+	// UseMnemonics — читать мнемоники в подписях: «_Файл» рисуется как
+	// «Файл» с чертой под Ф, и Alt+Ф (или Alt+A — та же клавиша) открывает
+	// это меню. Флаг передаётся и подменю.
+	//
+	// Строку меню Alt не открывает сам: клавиши приходят фокусному виджету,
+	// а полоса меню фокуса не держит. Приложение отдаёт ей событие само —
+	// через ActivateMnemonic, из своего обработчика Alt+клавиша.
+	UseMnemonics bool
+
 	// OnSelect вызывается при выборе подпункта: (topIndex, subIndex, text).
 	OnSelect func(topIndex int, subIndex int, text string)
 }
@@ -187,7 +196,8 @@ func (mb *MenuBar) recalcRects() {
 	rects := make([]image.Rectangle, len(mb.items))
 	x := b.Min.X
 	for i, item := range mb.items {
-		textW := MeasureUIText(item.Text, DefaultFontSizePt) + mb.ItemPaddingX*2
+		textW := MeasureUIText(mnemonicLabel(item.Text, mb.UseMnemonics),
+			DefaultFontSizePt) + mb.ItemPaddingX*2
 		rects[i] = image.Rect(x, b.Min.Y, x+textW, b.Max.Y)
 		x += textW
 	}
@@ -281,7 +291,8 @@ func (mb *MenuBar) Draw(ctx DrawContext) {
 
 		// Текст по центру вертикали.
 		textY := r.Min.Y + (r.Dy()-13)/2
-		ctx.DrawText(item.Text, r.Min.X+mb.ItemPaddingX, textY, textCol)
+		drawMnemonicText(ctx, item.Text, r.Min.X+mb.ItemPaddingX, textY, textCol,
+			mb.UseMnemonics)
 	}
 
 	mb.drawDisabledOverlay(ctx)
@@ -366,6 +377,7 @@ func (mb *MenuBar) OnMouseButton(e MouseEvent) bool {
 // ─── Подменю ─────────────────────────────────────────────────────────────────
 
 func (mb *MenuBar) openSubmenu(idx int) {
+	mb.popup.UseMnemonics = mb.UseMnemonics
 	mb.mu.RLock()
 	if idx < 0 || idx >= len(mb.items) {
 		mb.mu.RUnlock()
@@ -448,7 +460,48 @@ func (mb *MenuBar) OnKeyEvent(e KeyEvent) {
 		}
 	case KeyEscape:
 		mb.closeSubmenu()
+	default:
+		mb.ActivateMnemonic(e)
 	}
+}
+
+// ActivateMnemonic открывает меню, чья подчёркнутая буква нажата, и сообщает,
+// нашлось ли такое.
+//
+// Нужен отдельным методом, потому что клавиши движок отдаёт фокусному
+// виджету, а полоса меню фокуса не держит: Alt+Ф приложение получает само и
+// передаёт сюда. Когда меню уже открыто, буквы доходят обычным путём, через
+// OnKeyEvent.
+func (mb *MenuBar) ActivateMnemonic(e KeyEvent) bool {
+	if !mb.UseMnemonics || !e.Pressed || !mb.IsEnabled() {
+		return false
+	}
+	mb.mu.RLock()
+	hit := -1
+	for i, item := range mb.items {
+		if _, key, _ := splitMnemonic(item.Text); matchesMnemonic(key, e) {
+			hit = i
+			break
+		}
+	}
+	mb.mu.RUnlock()
+	if hit < 0 {
+		return false
+	}
+	mb.mu.RLock()
+	item := mb.items[hit]
+	mb.mu.RUnlock()
+	if len(item.Items) == 0 {
+		// Пункт верхнего уровня без подменю — это кнопка («Справка»).
+		mb.closeSubmenu()
+		if item.OnClick != nil {
+			item.OnClick()
+		}
+		return true
+	}
+	mb.openSubmenu(hit)
+	mb.popup.setHoverIdx(mb.popup.nextActiveItem(-1))
+	return true
 }
 
 // navigateTop переключает активный верхний пункт на delta (+1 или -1).

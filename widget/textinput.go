@@ -110,8 +110,7 @@ type TextInput struct {
 	redoStack []textEdit
 
 	// Для детекции двойного клика (выделение слова).
-	lastClickMs int64
-	lastClickX  int
+	clicks clickSeries // номер нажатия в серии, если движок его не прислал
 
 	// Состояние ошибки валидации (WPF Validation.HasError). "" = нет ошибки.
 	validationError string
@@ -901,23 +900,23 @@ func (t *TextInput) OnMouseButton(e MouseEvent) bool {
 
 		idx := t.charIndexAtX(e.X)
 
-		// Детекция двойного клика → выделение слова.
-		nowMs := time.Now().UnixMilli()
-		dx := e.X - t.lastClickX
-		if dx < 0 {
-			dx = -dx
-		}
-		if nowMs-t.lastClickMs <= 400 && dx <= 4 {
+		// Двойной щелчок выделяет слово, тройной — всё поле: строка здесь
+		// одна, и «выделить строку» означает выделить её целиком.
+		switch n := clicksOf(e, &t.clicks); {
+		case n == 2:
 			lo, hi := t.wordBoundsAt(idx)
 			t.selStart = lo
 			t.selEnd = hi
 			t.caretPos = hi
 			t.dragging = false
-			t.lastClickMs = 0 // сбрасываем, чтобы тройной клик не путался
+			return true
+		case n >= 3:
+			t.selStart = 0
+			t.selEnd = len(t.runes)
+			t.caretPos = t.selEnd
+			t.dragging = false
 			return true
 		}
-		t.lastClickMs = nowMs
-		t.lastClickX = e.X
 
 		t.caretPos = idx
 		t.selStart = idx // якорь выделения
