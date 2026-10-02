@@ -281,6 +281,10 @@ type Window struct {
 	resizable    bool
 	cornerRadius int // скругление углов окна (0 = прямые); применяется после Create
 
+	// hitTest — что лежит под точкой окна (см. SetHitTest): полоса
+	// заголовка, кнопки управления или содержимое.
+	hitTest func(x, y int) HitArea
+
 	// appID — как программа называет себя среде рабочего стола: по нему
 	// панель задач ищет значок и .desktop-файл (см. SetAppID). Пусто —
 	// бэкенд подставляет имя исполняемого файла.
@@ -491,6 +495,12 @@ func (win *Window) Run() error {
 		win.pickupWidgetMinSize(ww.MinWidth, ww.MinHeight)
 	}
 	win.applyMinSize()
+
+	// Хит-тест — до Create: Win32 спрашивает его сразу, как только окно
+	// появилось, и первые же сообщения должны получить верный ответ.
+	if win.hitTest != nil {
+		win.applyHitTest()
+	}
 
 	// app_id — ДО Create: Wayland отправляет его вместе с первым commit,
 	// а X11 обязан выставить WM_CLASS до показа окна.

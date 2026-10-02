@@ -64,13 +64,19 @@ const (
 	wmChar        = 0x0102
 	// Системные клавиатурные сообщения — те, что приходят с зажатым Alt, и
 	// F10. Без них ModAlt не выставлялся никогда, а F10 не доходил вовсе.
-	wmSyskeydown       = 0x0104
-	wmSyskeyup         = 0x0105
-	wmSyschar          = 0x0106
-	wmDropfiles        = 0x0233 // WM_DROPFILES: wParam = HDROP (Drag&Drop файлов из ОС)
-	wmSyscommand       = 0x0112
-	wmNccalcsize       = 0x0083
-	wmNchittest        = 0x0084
+	wmSyskeydown = 0x0104
+	wmSyskeyup   = 0x0105
+	wmSyschar    = 0x0106
+	wmDropfiles  = 0x0233 // WM_DROPFILES: wParam = HDROP (Drag&Drop файлов из ОС)
+	wmSyscommand = 0x0112
+	wmNccalcsize = 0x0083
+	wmNchittest  = 0x0084
+	// Мышь над нерабочей областью: окно объявило там свои кнопки, и рисует
+	// их тоже оно — значит и подсветку с нажатием обслуживать ему.
+	wmNcmousemove      = 0x00A0
+	wmNclbuttondown    = 0x00A1
+	wmNclbuttonup      = 0x00A2
+	wmNcmouseleave     = 0x02A2
 	wmGetminmaxinfo    = 0x0024
 	wmNcactivate       = 0x0086
 	wmNcpaint          = 0x0085
@@ -96,7 +102,14 @@ const (
 	sizeMaximized = 2
 
 	// WM_NCHITTEST: коды зон окна (рамка resize).
-	htClient      = 1
+	htClient = 1
+	// Зоны, которые система обслуживает сама: заголовок тащит окно с
+	// прилипанием к краям, а кнопка развёртывания показывает макеты
+	// привязки Windows 11.
+	htCaption     = 2
+	htMinButton   = 8
+	htMaxButton   = 9
+	htClose       = 20
 	htLeft        = 10
 	htRight       = 11
 	htTop         = 12
@@ -376,6 +389,10 @@ type Win32Window struct {
 	onMouseButton      func(x, y, button int, pressed bool)
 	onMouseWheelPixels func(x, y int, dx, dy float64)
 	onKeyDown          func(vk int)
+	// hitTest — зоны окна для системы (hittest_windows.go). Колбэк зовётся
+	// из насоса сообщений, а ставится с горутины приложения — отсюда замок.
+	hitTestMu sync.Mutex
+	hitTest   func(x, y int) HitArea
 	// highSurrogate — первая половина суррогатной пары UTF-16, ждущая
 	// второго WM_CHAR.
 	highSurrogate   rune
@@ -1257,13 +1274,25 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	case wmNchittest:
 		// Borderless-окно: рамки ОС нет, зоны resize отдаём вручную.
 		// lParam — ЭКРАННЫЕ координаты курсора (signed 16-bit слова).
-		if !w.resizable.Load() || w.maximized {
-			break // → DefWindowProc (HTCLIENT и т.п.)
-		}
 		sx := int(int16(lparam & 0xFFFF))
 		sy := int(int16((lparam >> 16) & 0xFFFF))
 		var wr rect
 		procGetWindowRect.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&wr)))
+
+		// Края важнее кнопок: полоса ресайза идёт поверх заголовка, иначе
+		// верхний край окна с кнопками было бы не ухватить.
+		edge := w.resizable.Load() && !w.maximized &&
+			(sx-int(wr.Left) < ncResizeBorder || int(wr.Right)-sx <= ncResizeBorder ||
+				sy-int(wr.Top) < ncResizeBorder || int(wr.Bottom)-sy <= ncResizeBorder)
+		if !edge {
+			// Что здесь — знает приложение: оно эти кнопки и нарисовало.
+			if area, ok := w.hitAreaAt(sx-int(wr.Left), sy-int(wr.Top)); ok {
+				return area
+			}
+		}
+		if !w.resizable.Load() || w.maximized {
+			break // → DefWindowProc (HTCLIENT и т.п.)
+		}
 		left := sx-int(wr.Left) < ncResizeBorder
 		right := int(wr.Right)-sx <= ncResizeBorder
 		top := sy-int(wr.Top) < ncResizeBorder
@@ -1287,6 +1316,43 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			return htBottom
 		}
 		return htClient
+
+	case wmNcmousemove, wmNclbuttondown, wmNclbuttonup:
+		// Кнопку заголовка нарисовало приложение, и подсветку с нажатием
+		// ведёт тоже оно: переводим событие в клиентские координаты и
+		// отдаём как обычную мышь. Иначе кнопка «развернуть», объявленная
+		// системе ради макетов привязки, перестала бы подсвечиваться и
+		// нажиматься.
+		if _, ours := ncButtonArea(wparam); !ours {
+			break // прочая нерабочая область — системе
+		}
+		sx := int(int16(lparam & 0xFFFF))
+		sy := int(int16((lparam >> 16) & 0xFFFF))
+		pt := point{X: int32(sx), Y: int32(sy)}
+		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+		switch umsg {
+		case wmNcmousemove:
+			if w.onMouseMove != nil {
+				w.onMouseMove(int(pt.X), int(pt.Y))
+			}
+		case wmNclbuttondown:
+			if w.onMouseButton != nil {
+				w.onMouseButton(int(pt.X), int(pt.Y), 0, true)
+			}
+		case wmNclbuttonup:
+			if w.onMouseButton != nil {
+				w.onMouseButton(int(pt.X), int(pt.Y), 0, false)
+			}
+		}
+		return 0
+
+	case wmNcmouseleave:
+		// Курсор ушёл с кнопки заголовка — снимаем подсветку, уведя мышь
+		// за пределы окна.
+		if w.onMouseMove != nil {
+			w.onMouseMove(-1, -1)
+		}
+		return 0
 
 	case wmGetminmaxinfo:
 		// Значения минимума согласованы с fitMinTrack (см. createInternal).
