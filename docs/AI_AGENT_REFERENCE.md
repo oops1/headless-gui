@@ -2995,11 +2995,15 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 | Возможность | Win32 | X11 | Wayland / macOS / headless |
 |---|---|---|---|
 | Модалка в своём окне (`ModalHost`) | нативно | нативно | in-canvas фолбэк |
-| Popup-оверлей в своём окне (`PopupSink`) | нативно | нативно | in-canvas фолбэк |
+| Popup-оверлей в своём окне (`PopupSink`) | нативно | нативно | Wayland — `xdg_popup`, macOS — in-canvas |
 | Трей / balloon / превью | да | no-op (ошибка/false) | no-op (ошибка/false) |
 | Перетащить / растянуть окно | `SetPosition` | `SetPosition` | Wayland — просит компоновщик, macOS — нет |
 | Свернуть / развернуть | да | да | Wayland — да (`set_minimized`/`set_maximized`) |
-| Форма курсора | да | нет | Wayland — да (`cursor_shape` или своя картинка) |
+| Форма курсора | да | да (шрифт «cursor») | Wayland — да (`cursor_shape` или своя картинка) |
+| Масштаб интерфейса (HiDPI) | да (per-monitor DPI) | да (`Xft.dpi`) | Wayland — да (fractional / `wl_output`), macOS — `HEADLESS_GUI_SCALE` |
+| Незавершённый ввод (IME) | да (IMM32) | нет (XIM не делался) | Wayland — `text-input-v3`, если есть у компоновщика |
+| Текст для скринридера | UIA Value | AT-SPI Text | Wayland — то же, что X11 (мост общий) |
+| Несколько окон в процессе | да | да | Wayland — да, macOS — не проверялось |
 | Имя для панели задач | — | `WM_CLASS` | Wayland — `app_id` |
 
 Фолбэк выбирается автоматически по способностям бэкенда (наличие owner-окон,
@@ -4268,6 +4272,123 @@ keeps the grab offset (no jump), a click on a conflict mark goes to it, a click
 elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
+
+### Wayland: menus outside the window (xdg_popup) — v3.28
+
+Overlays on Wayland were drawn INSIDE the window: the engine's canvas is the
+window, and whatever did not fit was cut by its edge. In a narrow window (the
+WinLine notepad, 490 px by reference) the File menu lost its right edge and a
+context menu its bottom items. On Win32 and X11 `popupHost` carries an
+overlay into a separate OS window by screen coordinates.
+
+On Wayland there is no such path at all: a client does not know where its
+window stands, and a point on the screen cannot be addressed. The protocol
+has `xdg_popup` for this — a child surface placed RELATIVE to its parent
+through `xdg_positioner`, with the compositor making the final decision,
+since only it knows where the screen ends. Hence a second host,
+`childPopups` (`window/popup_host_child.go`): instead of creating windows it
+asks the backend to show the popup inside its own connection.
+
+The popup has its own surface, its own buffer in a format WITH alpha (a
+cascading menu is a staircase, and the gap between its bands would be a black
+rectangle in an opaque buffer), an input region built from the painted bands
+(a click in the gap counts as a click outside), and an input grab on the
+first popup — with it the compositor closes the menu on a click elsewhere and
+says so through `popup_done`. While the grab is alive the next popups are
+created as its children: otherwise the compositor answers with a protocol
+error, which disconnects the client.
+
+Input: while the cursor is over a popup the events belong to it — only
+`wl_pointer.enter` names the surface, so it is remembered. Coordinates are
+translated into the engine by where IT drew the overlay, not by where the
+compositor put the window: the picture is the same either way.
+
+### HiDPI on Linux — v3.28
+
+The engine only ever asked Windows for the interface scale. On Linux nobody
+asked: on a 4K monitor everything came out half the size it should be, and
+the only cure was the `HEADLESS_GUI_SCALE` variable — that is, the user had
+to know about it.
+
+X11 has no system-wide scale; what every toolkit uses is the `Xft.dpi`
+resource in the X server's resource database (the RESOURCE_MANAGER property
+of the root window), where 96 dots per inch mean 1. That is what is read,
+with `GDK_SCALE` as a fallback. `connect` became idempotent for this: the
+scale is asked before the window is created, and a second connection would
+leak the first.
+
+Wayland sizes are counted in surface units while the buffer is sent in
+pixels; the scale binds them. `wl_output.scale` is the integer scale of the
+output the window landed on (`wl_surface.enter` says which);
+`wp_fractional_scale_v1` is the fractional scale the compositor considers
+right for this surface — more precise, and 1.25 cannot be expressed as an
+integer at all. With a fractional scale the buffer stays in pixels and
+`wp_viewport` says how many surface units it occupies; with an integer one
+`set_buffer_scale` is enough. Everything that goes into xdg-shell (window
+fixation, minimum size, popup anchor and size, input regions) is converted to
+surface units, and the incoming `configure` back to pixels. Damage at a scale
+other than 1 goes through `damage_buffer`, which counts in buffer pixels.
+
+### Several top-level windows in one process — v3.28
+
+A process had one window: `Run` created it and occupied the goroutine until
+it closed. Secondary windows existed internally (native modals, torn-off dock
+panes), but were never exposed and are both subordinate.
+
+`Window.OpenWindow(child)` opens a standalone top-level window: its own
+taskbar button, its own engine, its own widget tree. `Run` is therefore split
+in two — `bringUp` raises the window and everything attached to it, the
+blocking loop stays in `Run`. Creating the second window is marshalled to the
+main window's thread: on Windows the message queue belongs to the thread that
+created the window. On X11 and Wayland the second window has its own
+connection and gets its own pump (Wayland did not have one before).
+
+### Text accessibility — v3.28
+
+The content of a text field travelled to a screen reader as one string — the
+element's "value", as on a slider. A screen reader reads a document in
+pieces, follows the caret and announces the selection; NVDA, Narrator and
+Orca all announced the field as empty.
+
+A widget now hands over text semantics directly (`widget.AccessTextProvider`:
+text, caret, selection, read-only, plus optional setters). The data is asked
+of the LIVE widget rather than taken from the semantic snapshot, which is
+rebuilt every 150 ms and would lag behind typing. Offsets are in runes.
+
+Windows: the Value pattern (`IValueProvider` — read, read-only flag and
+replacing the content). Linux: `org.a11y.atspi.Text` — the text and its
+ranges, caret, selection, and the pieces around a position (character, word,
+line) in both request forms, the old one and the current one. Multi-line text
+gets its own role: document (UIA Document, AT-SPI text) against an edit field
+(Edit, entry).
+
+### Composition input (IME) — v3.28
+
+Chinese, Japanese and Korean are not typed letter by letter: a person types
+syllables, the system shows candidates, and only the chosen variant becomes
+text. The engine knew nothing of this — only finished characters reached a
+field — so not a single ideograph could be typed.
+
+The composition is stored INSIDE the field's content rather than beside it:
+that way it is visible without touching the drawing code, the caret stands
+where it is expected, and line layout counts the typed text. Only the RANGE
+is remembered separately — to replace it with the next composition and to
+underline it.
+
+Windows: the `WM_IME_*` messages were not handled at all. The composition and
+the result are taken from the input context, the system's composition window
+is suppressed (the field is drawn by the application, and a second one on top
+would look like a fault), and the candidate window is placed under the caret.
+
+Wayland: `text-input-v3`, where the compositor stands between client and
+input method. Events accumulate and are applied in one batch on `done` —
+separately, the finished text and the composition would land in the field in
+the wrong order. The extension is optional: the WinLine compositor does not
+have it yet, and there everything works as before.
+
+X11 (XIM) was not done: the protocol is obsolete, in current desktops input
+goes through the same text-input extensions, and the cost is out of
+proportion.
 
 ### Menu item: shortcut text and mnemonics — v3.27
 
