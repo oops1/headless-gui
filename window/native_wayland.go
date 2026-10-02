@@ -35,6 +35,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // ─── Константы протокола ─────────────────────────────────────────────────────
@@ -183,6 +185,13 @@ type WaylandWindow struct {
 
 	// repeat — автоповтор удерживаемой клавиши (wayland_repeat_linux.go).
 	repeat *wlRepeater
+
+	// clip — буфер обмена через wl_data_device (wayland_clipboard_linux.go).
+	clip *wlClipboard
+	// inputSerial — serial последнего ввода (клавиша, кнопка, вход
+	// указателя). Компоновщик принимает set_selection только с ним:
+	// доказательство, что действие начал пользователь.
+	inputSerial atomic.Uint32
 	// onKeyDownRepeat — приёмник нажатий, отличающий повтор от нового
 	// нажатия; им пользуется window.surface, если бэкенд умеет (см.
 	// keyRepeatSource).
@@ -301,6 +310,8 @@ type WaylandWindow struct {
 	// ── Состояние Drag&Drop (wl_data_device) ────────────────────────────────
 	// offers — известные data_offer'ы и предложен ли в них text/uri-list.
 	offers map[uint32]bool
+	// textOffers — предложения, в которых есть простой текст (буфер обмена).
+	textOffers map[uint32]bool
 	// dndOffer — активный offer текущего перетаскивания (между enter и drop).
 	dndOffer   uint32
 	dndSerial  uint32 // serial из enter (для accept)
@@ -344,12 +355,14 @@ func newWaylandWindow() *WaylandWindow {
 		return nil
 	}
 	wlLog("connected: %s", path)
-	return &WaylandWindow{
+	w := &WaylandWindow{
 		conn:       conn,
 		nextID:     2,
 		bufRelease: make(chan struct{}, 1),
 		repeat:     newWlRepeater(),
 	}
+	w.clip = newWlClipboard(w)
+	return w
 }
 
 // ─── Отправка запросов ───────────────────────────────────────────────────────
@@ -546,6 +559,13 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	// Первый кадр: чёрный буфер, чтобы окно появилось сразу.
 	w.attachAndCommit(image.Rect(0, 0, width, height))
 	wlLog("первый буфер закоммичен")
+
+	// Буфер обмена: в сессии Wayland внешних утилит может не быть вовсе, а
+	// wl_data_device — единственный путь обмена текстом с остальными
+	// программами. Регистрируем, только если компоновщик его дал.
+	if w.dataDeviceID != 0 {
+		widget.SetClipboardProvider(w.clip)
+	}
 	return nil
 }
 
@@ -704,11 +724,27 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 	case w.dataDeviceID != 0 && obj == w.dataDeviceID:
 		w.handleDataDevice(opcode, b)
 
+	case w.clip.isSource(obj):
+		// События нашего источника буфера обмена: у нас просят данные
+		// (send) или сообщают, что буфером завладел другой (cancelled).
+		switch opcode {
+		case wlDataSourceEvSend:
+			_, off := wlString(b, 0)
+			_ = off
+			w.clip.handleSourceSend(obj, w.takeFD())
+		case wlDataSourceEvCancelled:
+			w.clip.handleSourceCancelled(obj)
+		}
+
 	case w.isOfferObject(obj):
-		// wl_data_offer.offer(mime): фиксируем предложение text/uri-list.
+		// wl_data_offer.offer(mime): фиксируем, что предложено.
 		if opcode == wlDataOfferEvOffer {
-			if mime, _ := wlString(b, 0); mime == mimeTextUriList {
+			mime, _ := wlString(b, 0)
+			if mime == mimeTextUriList {
 				w.offerSet(obj, true)
+			}
+			if isTextMime(mime) {
+				w.offerSetText(obj)
 			}
 		}
 
@@ -734,6 +770,7 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 	case wlPointerEvEnter:
 		// serial, surface, x(fixed), y(fixed)
 		w.ptrEnterSerial.Store(binary.LittleEndian.Uint32(b[0:4]))
+		w.inputSerial.Store(binary.LittleEndian.Uint32(b[0:4]))
 		w.ptrX = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
 		w.ptrY = int(int32(binary.LittleEndian.Uint32(b[12:16]))) >> 8
 		// Форму курсора ставим сразу: без set_cursor после enter курсор над
@@ -771,6 +808,7 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 			// клиент доказывает, что действие начал пользователь.
 			w.ptrButtonSerial.Store(serial)
 		}
+		w.inputSerial.Store(serial)
 		if id >= 0 {
 			// Or/And у atomic.Uint32 появились в go1.23, а модуль держит
 			// go1.22 — обходимся CAS-циклом.
@@ -858,6 +896,7 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 
 	case wlKeyboardEvKey:
 		// serial, time, key, state
+		w.inputSerial.Store(binary.LittleEndian.Uint32(b[0:4]))
 		key := uint32(binary.LittleEndian.Uint32(b[8:12]))
 		pressed := binary.LittleEndian.Uint32(b[12:16]) == 1
 		if !pressed {
@@ -1323,6 +1362,37 @@ func (w *WaylandWindow) offerSet(id uint32, hasURIList bool) {
 	}
 }
 
+// offerSetText отмечает, что offer предлагает простой текст.
+//
+// Отдельная карта, а не второй флаг в offers: тот говорит про список файлов
+// для перетаскивания, и смешивать «тут файлы» с «тут текст» в одном булеве
+// значит однажды вставить в редактор список путей вместо скопированной
+// строки.
+func (w *WaylandWindow) offerSetText(id uint32) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.textOffers == nil {
+		w.textOffers = map[uint32]bool{}
+	}
+	w.textOffers[id] = true
+}
+
+// offerHasText сообщает, предлагает ли offer простой текст.
+func (w *WaylandWindow) offerHasText(id uint32) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.textOffers[id]
+}
+
+// isTextMime — тип, под которым ходит простой текст.
+func isTextMime(mime string) bool {
+	switch mime {
+	case mimeTextUTF8, mimeTextPlain, mimeUTF8Str, mimeTextStr:
+		return true
+	}
+	return false
+}
+
 // offerGet возвращает флаг «предложен text/uri-list» для offer.
 func (w *WaylandWindow) offerGet(id uint32) bool {
 	w.mu.Lock()
@@ -1332,6 +1402,9 @@ func (w *WaylandWindow) offerGet(id uint32) bool {
 
 // offerDelete удаляет offer из карты.
 func (w *WaylandWindow) offerDelete(id uint32) {
+	w.mu.Lock()
+	delete(w.textOffers, id)
+	w.mu.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.offers, id)
@@ -1369,13 +1442,10 @@ func (w *WaylandWindow) handleDataDevice(opcode uint16, b []byte) {
 		w.dndReceive()
 
 	case wlDataDeviceEvSelection:
-		// Буфер обмена (не DnD): уничтожаем offer, чтобы не течь.
+		// Содержимое буфера обмена: компоновщик отдаёт готовый offer, у
+		// которого можно спросить данные (wayland_clipboard_linux.go).
 		if len(b) >= 4 {
-			id := binary.LittleEndian.Uint32(b[0:4])
-			if id != 0 {
-				w.send(newWlMsg(id, wlDataOfferDestroy), -1)
-				w.offerDelete(id)
-			}
+			w.clip.handleSelection(binary.LittleEndian.Uint32(b[0:4]))
 		}
 	}
 }

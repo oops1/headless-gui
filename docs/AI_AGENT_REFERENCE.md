@@ -4269,6 +4269,35 @@ elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
 
+### Clipboard on Linux without external tools — v3.26
+
+The Linux clipboard ran `xclip` or `xsel` as a subprocess — a tool that may
+not be installed at all (the WinLine package has none), and the copied text
+lost its trailing newline on the way (`TrimRight`). Under Wayland it did not
+work at all.
+
+Both are native now, and the window registers the right provider itself as
+soon as the connection is up:
+
+- **Wayland** — `wl_data_device`. Copying creates a `wl_data_source`,
+  advertises `text/plain;charset=utf-8`, `text/plain`, `UTF8_STRING` and
+  `STRING`, and hands it over as the selection; the compositor then asks us
+  for the data (`send` with a file descriptor) for every paste. Pasting asks
+  the offer for data and reads the pipe. `set_selection` needs the serial of
+  recent input, so the engine now records it from keys, buttons and pointer
+  enter.
+- **X11** — real selections: we own `CLIPBOARD` and answer `SelectionRequest`
+  (including `TARGETS`), and paste goes through `ConvertSelection`.
+  `xclip`/`xsel` stay as a fallback for the case where there is no window yet.
+
+Reads do not hang the UI: the owner is another process and may never answer,
+so a paste gives up after 300 ms and returns empty.
+
+The trailing newline is preserved — copying `"abc\n"` and pasting gives
+`"abc\n"` back.
+
+`SetHTML` is not implemented yet: ask when you need it.
+
 ### Key auto-repeat — v3.26
 
 Under Wayland the repeat of a held key is the CLIENT's job: the compositor

@@ -52,6 +52,7 @@ func newWlTestWindow(t *testing.T) *wlTestConn {
 		bufRelease: make(chan struct{}, 1),
 		repeat:     newWlRepeater(),
 	}
+	w.clip = newWlClipboard(w)
 	w.toplevelID = 12
 	w.seatID = 7
 	w.pointerID = 14

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // X11Window — реализация NativeWindow через X11 протокол.
@@ -118,7 +120,14 @@ type X11Window struct {
 
 	// Атомы UTF-8 заголовка (EWMH) и Motif-хинтов — интернируются в Create,
 	// чтобы SetTitle/borderless работали и после первого показа.
-	atomUTF8String    uint32
+	atomUTF8String uint32
+	// Буфер обмена: само выделение, свойство для ответа и два формата.
+	atomClipboard uint32
+	atomClipProp  uint32
+	atomTargets   uint32
+	atomText      uint32
+	// clip — буфер обмена своими силами (x11_clipboard_linux.go).
+	clip              *x11Clipboard
 	atomNetWMName     uint32
 	atomNetWMIconName uint32
 	atomMotifHints    uint32
@@ -251,6 +260,11 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomNetWMStateModal = w.x11InternAtom("_NET_WM_STATE_MODAL")
 	w.atomNetActiveWindow = w.x11InternAtom("_NET_ACTIVE_WINDOW")
 	w.atomUTF8String = w.x11InternAtom("UTF8_STRING")
+	w.clip = newX11Clipboard(w)
+	w.atomClipboard = w.x11InternAtom("CLIPBOARD")
+	w.atomClipProp = w.x11InternAtom("HEADLESS_GUI_CLIPBOARD")
+	w.atomTargets = w.x11InternAtom("TARGETS")
+	w.atomText = w.x11InternAtom("TEXT")
 	w.atomNetWMName = w.x11InternAtom("_NET_WM_NAME")
 	w.atomNetWMIconName = w.x11InternAtom("_NET_WM_ICON_NAME")
 	w.atomMotifHints = w.x11InternAtom("_MOTIF_WM_HINTS")
@@ -344,6 +358,12 @@ func (w *X11Window) Create(title string, width, height int) error {
 
 	// Map (show) window
 	w.x11MapWindow(w.wid)
+
+	// Буфер обмена своими силами: xclip и xsel остаются запасным путём, но
+	// в системе их может не быть вовсе.
+	if w.atomClipboard != 0 {
+		widget.SetClipboardProvider(w.clip)
+	}
 
 	return nil
 }
@@ -536,8 +556,18 @@ func (w *X11Window) handleX11Event(buf []byte) {
 			}
 		}
 
-	case 31: // SelectionNotify — ответ на XConvertSelection (XDND drop)
-		w.handleSelectionNotify(buf)
+	case 29: // SelectionClear — буфером обмена завладел другой
+		w.clip.handleClear(buf)
+
+	case 30: // SelectionRequest — у нас просят содержимое буфера обмена
+		w.clip.handleRequest(buf)
+
+	case 31: // SelectionNotify — ответ на XConvertSelection
+		// Сначала буфер обмена: он отвечает только на своё выделение,
+		// остальное — XDND (сброс файлов).
+		if !w.clip.handleNotify(buf) {
+			w.handleSelectionNotify(buf)
+		}
 
 	case 33: // ClientMessage (WM_DELETE_WINDOW / XDND)
 		atom := binary.LittleEndian.Uint32(buf[8:12])
