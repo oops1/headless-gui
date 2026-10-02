@@ -361,6 +361,10 @@ type Window struct {
 	// nil = приложение не подписано; проброс в движок (widget.FileDropTarget)
 	// работает независимо от этого колбэка.
 	onFilesDropped func(paths []string, x, y int)
+
+	// sysTheme — подписка приложения на смену светлой/тёмной темы ОС
+	// (см. SetOnSystemThemeChanged в systheme.go).
+	sysTheme systemThemeState
 }
 
 // New создаёт окно для заданного движка с указанным заголовком.
@@ -494,6 +498,7 @@ func (win *Window) Run() error {
 // tearDown освобождает то, что подняла bringUp и что переживает закрытие
 // окна ОС.
 func (win *Window) tearDown() {
+	win.stopSystemThemeWatch()
 	win.stopAccessibility()
 	// Сносим все оторванные окна панелей: останавливаем их движки (реестр
 	// нотификаторов/горутины без утечки); owned-окна ОС уходят вместе с
@@ -646,6 +651,9 @@ func (win *Window) bringUp() error {
 
 	// Активность окна (фокус ОС) → приглушённый заголовок widget.Window.
 	win.setupActivation()
+
+	// Смена темы ОС: подписку поднимаем, если приложение задало колбэк до Run.
+	win.syncSystemThemeWatch()
 
 	// Синхронизация локали с раскладкой клавиатуры ОС (Windows/Linux).
 	win.setupLocaleSync()
