@@ -50,6 +50,9 @@ const (
 	wmMbuttonup     = 0x0208
 	wmMbuttondblclk = 0x0209
 	wmMousewheel    = 0x020A
+	// Горизонтальное колесо и наклон колеса вбок. Без него прокрутка вширь
+	// на Windows не работала вовсе.
+	wmMousehwheel = 0x020E
 
 	// wheelDeltaWin — WHEEL_DELTA: единица «одного щелчка» колеса в WM_MOUSEWHEEL.
 	// wheelNotchPx — во сколько логических пикселей превращается один щелчок
@@ -1379,6 +1382,21 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		y := int(int16((lparam >> 16) & 0xFFFF))
 		if w.onMouseButton != nil {
 			w.onMouseButton(x, y, 2, false)
+		}
+		return 0
+
+	case wmMousehwheel:
+		// Горизонтальное колесо: delta>0 — вправо (в отличие от
+		// вертикального, где положительное значение означает «от себя»).
+		pt := point{
+			X: int32(int16(lparam & 0xFFFF)),
+			Y: int32(int16((lparam >> 16) & 0xFFFF)),
+		}
+		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+		delta := int16((wparam >> 16) & 0xFFFF)
+		if delta != 0 && w.onMouseWheelPixels != nil {
+			dx := float64(delta) / wheelDeltaWin * wheelNotchPx
+			w.onMouseWheelPixels(int(pt.X), int(pt.Y), dx, 0)
 		}
 		return 0
 

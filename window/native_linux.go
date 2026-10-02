@@ -82,9 +82,13 @@ type X11Window struct {
 	onClose       func() bool
 	onMouseMove   func(x, y int)
 	onMouseButton func(x, y, button int, pressed bool)
-	onKeyDown     func(vk int)
-	onKeyUp       func(vk int)
-	onChar        func(r rune)
+	// onMouseWheelPixels — точная дельта прокрутки. X11 сообщает колесо
+	// щелчками кнопок, но горизонтальной «кнопки колеса» в движке нет, и
+	// 6/7 передаются именно так.
+	onMouseWheelPixels func(x, y int, dx, dy float64)
+	onKeyDown          func(vk int)
+	onKeyUp            func(vk int)
+	onChar             func(r rune)
 
 	// Atom IDs для WM протоколов
 	atomWMProtocols     uint32
@@ -127,10 +131,17 @@ type X11Window struct {
 	atomTargets   uint32
 	atomText      uint32
 	// clip — буфер обмена своими силами (x11_clipboard_linux.go).
-	clip              *x11Clipboard
-	atomNetWMName     uint32
-	atomNetWMIconName uint32
-	atomMotifHints    uint32
+	clip *x11Clipboard
+	// resizable — разрешено ли пользователю менять размер (SetResizable).
+	resizable atomic.Bool
+	// rootX/rootY — последняя известная позиция указателя в координатах
+	// экрана: её просит _NET_WM_MOVERESIZE, а отдельного запроса делать
+	// незачем — она приходит в каждом событии мыши.
+	rootX, rootY        atomic.Int32
+	atomNetWMMoveResize uint32
+	atomNetWMName       uint32
+	atomNetWMIconName   uint32
+	atomMotifHints      uint32
 
 	// minW/minH/minWant — минимальный размер, заданный до создания окна
 	// (см. SetMinSize): свойство ставится до MapWindow.
@@ -259,6 +270,7 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomWMStateMaxV = w.x11InternAtom("_NET_WM_STATE_MAXIMIZED_VERT")
 	w.atomNetWMStateModal = w.x11InternAtom("_NET_WM_STATE_MODAL")
 	w.atomNetActiveWindow = w.x11InternAtom("_NET_ACTIVE_WINDOW")
+	w.atomNetWMMoveResize = w.x11InternAtom("_NET_WM_MOVERESIZE")
 	w.atomUTF8String = w.x11InternAtom("UTF8_STRING")
 	w.clip = newX11Clipboard(w)
 	w.atomClipboard = w.x11InternAtom("CLIPBOARD")
@@ -488,6 +500,21 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	case 4: // ButtonPress
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
+		w.rememberRoot(buf)
+		// Кнопки 6 и 7 — это горизонтальная прокрутка (наклон колеса или
+		// жест тачпада), а не кнопки: X11 сообщает её так же, как вертикаль
+		// кнопками 4 и 5. Раньше они просто отбрасывались, и прокрутки
+		// вширь на X11 не было.
+		if raw := int(buf[1]); raw == 6 || raw == 7 {
+			if w.onMouseWheelPixels != nil {
+				dx := float64(x11WheelNotchPx)
+				if raw == 6 {
+					dx = -dx // 6 — влево
+				}
+				w.onMouseWheelPixels(x, y, dx, 0)
+			}
+			return
+		}
 		button := int(buf[1]) - 1 // X11: 1=left, 2=mid, 3=right → 0,1,2
 		if button == 2 {
 			button = 1 // right
@@ -501,6 +528,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	case 5: // ButtonRelease
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
+		if raw := int(buf[1]); raw == 6 || raw == 7 {
+			return // прокрутку отдали на нажатии; отпускание ничего не значит
+		}
 		button := int(buf[1]) - 1
 		if button == 2 {
 			button = 1
@@ -830,9 +860,17 @@ func (w *X11Window) SetOnActivate(fn func(active bool))                       { 
 func (w *X11Window) SetOnClose(fn func() bool)                                { w.onClose = fn }
 func (w *X11Window) SetOnMouseMove(fn func(x, y int))                         { w.onMouseMove = fn }
 func (w *X11Window) SetOnMouseButton(fn func(x, y, button int, pressed bool)) { w.onMouseButton = fn }
-func (w *X11Window) SetOnKeyDown(fn func(vk int))                             { w.onKeyDown = fn }
-func (w *X11Window) SetOnKeyUp(fn func(vk int))                               { w.onKeyUp = fn }
-func (w *X11Window) SetOnChar(fn func(r rune))                                { w.onChar = fn }
+
+// SetOnMouseWheelPixels регистрирует колбэк точной дельты прокрутки.
+// Вертикаль X11 по-прежнему приходит кнопками 4/5 — её трактовка не
+// менялась; сюда уходит только горизонталь (кнопки 6 и 7).
+func (w *X11Window) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) {
+	w.onMouseWheelPixels = fn
+}
+
+func (w *X11Window) SetOnKeyDown(fn func(vk int)) { w.onKeyDown = fn }
+func (w *X11Window) SetOnKeyUp(fn func(vk int))   { w.onKeyUp = fn }
+func (w *X11Window) SetOnChar(fn func(r rune))    { w.onChar = fn }
 
 // SetOnFilesDropped регистрирует колбэк Drag&Drop файлов из ОС (XDND).
 // Координаты — клиентские физические пиксели.
@@ -1312,6 +1350,11 @@ func (w *X11Window) x11PutImage(drawable, gc uint32, dstX, dstY, width, height i
 
 // ─── Маппинг клавиш X11 → VK ───────────────────────────────────────────────
 
+// x11WheelNotchPx — шаг горизонтальной прокрутки в пикселях: X11 сообщает её
+// щелчками кнопок 6 и 7, без величины, поэтому берём тот же шаг, что у
+// вертикального колеса на других платформах.
+const x11WheelNotchPx = 40.0
+
 func x11KeycodeToRune(keycode int, shift bool) rune {
 	// Упрощённый маппинг для ASCII (полная реализация через XKB/xkbcommon)
 	if keycode >= 10 && keycode <= 19 {
@@ -1348,7 +1391,6 @@ var _ = unsafe.Sizeof(0)
 
 // SetResizable — no-op: пользовательский resize за края borderless-окна
 // на этой платформе пока не реализован.
-func (w *X11Window) SetResizable(v bool) {}
 
 // SetMinSize задаёт минимальный размер окна через свойство WM_NORMAL_HINTS
 // (ICCCM §4.1.2.3, атом WM_NORMAL_HINTS=40, тип WM_SIZE_HINTS=41, format 32).

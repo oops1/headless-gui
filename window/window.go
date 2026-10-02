@@ -913,7 +913,6 @@ func (s *surface) setupInput() {
 	})
 }
 
-// keyEvent — нажатие или отпускание клавиши, пришедшее с насоса ОС.
 // textMod снимает с текстового события пару Ctrl+Alt.
 //
 // Так Windows сообщает AltGr: на немецкой или польской раскладке AltGr+Q
@@ -928,6 +927,7 @@ func textMod(mod widget.KeyMod) widget.KeyMod {
 	return mod
 }
 
+// keyEvent — нажатие или отпускание клавиши, пришедшее с насоса ОС.
 func (s *surface) keyEvent(vk int, pressed bool) {
 	s.keyEventRepeat(vk, pressed, false)
 }
