@@ -132,6 +132,8 @@ type X11Window struct {
 	atomText      uint32
 	// clip — буфер обмена своими силами (x11_clipboard_linux.go).
 	clip *x11Clipboard
+	// cursors — формы курсора окна (x11_cursor_linux.go).
+	cursors x11Cursors
 	// resizable — разрешено ли пользователю менять размер (SetResizable).
 	resizable atomic.Bool
 	// rootX/rootY — последняя известная позиция указателя в координатах
@@ -881,6 +883,12 @@ func (w *X11Window) SetOnFilesDropped(fn func(paths []string, x, y int)) { w.onF
 func (w *X11Window) x11Send(data []byte) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.conn == nil {
+		// Окно уже закрыто (или ещё не открыто): запрос просто некуда
+		// отправить. Отрисовка и смена курсора продолжают звать эти
+		// функции и после закрытия — ронять из-за них процесс нельзя.
+		return
+	}
 	w.conn.Write(data)
 	w.seqNum++
 }
