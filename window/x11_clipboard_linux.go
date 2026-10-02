@@ -14,6 +14,11 @@ package window
 // SelectionRequest — кладём текст в свойство окна-просителя и сообщаем ему
 // SelectionNotify.
 //
+// Оформленный текст (SetHTML) отдаётся тем же владением выделения: в списке
+// TARGETS рядом с текстовыми целями появляется text/html, а на запрос этой цели
+// отвечаем разметкой. Проситель выбирает сам: Блокнот спросит текст, Word или
+// браузер — HTML.
+//
 // Вставка: просим сервер сконвертировать CLIPBOARD в UTF8_STRING; ответ
 // приходит событием в цикле событий, поэтому GetText ждёт его по каналу с
 // коротким тайм-аутом. Владелец — чужой процесс и вправе не ответить вовсе.
@@ -32,9 +37,11 @@ type x11Clipboard struct {
 	w *X11Window
 
 	mu    sync.Mutex
-	owned string      // наш текст, пока владеем CLIPBOARD
-	owns  bool        // владеем ли мы буфером
-	wait  chan string // ждёт ответа на ConvertSelection; nil — не ждём
+	owned string // наш текст, пока владеем CLIPBOARD
+	// ownedHTML — оформленная версия нашего содержимого; пусто — только текст.
+	ownedHTML string
+	owns      bool        // владеем ли мы буфером
+	wait      chan string // ждёт ответа на ConvertSelection; nil — не ждём
 }
 
 func newX11Clipboard(w *X11Window) *x11Clipboard { return &x11Clipboard{w: w} }
@@ -42,12 +49,22 @@ func newX11Clipboard(w *X11Window) *x11Clipboard { return &x11Clipboard{w: w} }
 // SetText объявляет нас владельцем буфера обмена.
 //
 // Реализует widget.ClipboardProvider.
-func (c *x11Clipboard) SetText(s string) {
+func (c *x11Clipboard) SetText(s string) { c.setOwned(s, "") }
+
+// SetHTML объявляет нас владельцем буфера и готовит к выдаче и текст, и HTML.
+//
+// Реализует widget.ClipboardHTMLProvider.
+func (c *x11Clipboard) SetHTML(html, plain string) { c.setOwned(plain, html) }
+
+// setOwned запоминает содержимое и становится владельцем CLIPBOARD. Прежнее
+// оформление затирается всегда: иначе после SetText проситель text/html
+// получил бы разметку от прошлого копирования.
+func (c *x11Clipboard) setOwned(text, html string) {
 	if c == nil || c.w == nil || c.w.wid == 0 || c.w.atomClipboard == 0 {
 		return
 	}
 	c.mu.Lock()
-	c.owned, c.owns = s, true
+	c.owned, c.ownedHTML, c.owns = text, html, true
 	c.mu.Unlock()
 	c.w.x11SetSelectionOwner(c.w.atomClipboard, c.w.wid)
 }
@@ -63,6 +80,38 @@ func (c *x11Clipboard) GetText() string {
 		c.mu.Unlock()
 		return s // владеем сами — незачем ходить через сервер
 	}
+	c.mu.Unlock()
+	return c.convert(c.w.atomUTF8String)
+}
+
+// GetHTML читает оформленный текст из буфера обмена.
+//
+// Реализует widget.ClipboardHTMLProvider. Запрашиваем text/html напрямую: если
+// у владельца такой цели нет, сервер вернёт отказ (свойство None), и мы честно
+// скажем «HTML нет» — вызывающий возьмёт простой текст через GetText.
+func (c *x11Clipboard) GetHTML() (string, bool) {
+	if c == nil || c.w == nil || c.w.wid == 0 || c.w.atomClipboard == 0 || c.w.atomTextHTML == 0 {
+		return "", false
+	}
+	c.mu.Lock()
+	if c.owns {
+		html := c.ownedHTML
+		c.mu.Unlock()
+		return html, html != ""
+	}
+	c.mu.Unlock()
+	raw := c.convert(c.w.atomTextHTML)
+	if raw == "" {
+		return "", false
+	}
+	html := clipboardHTMLToString([]byte(raw))
+	return html, html != ""
+}
+
+// convert просит сервер сконвертировать CLIPBOARD в указанную цель и ждёт
+// ответ с тайм-аутом. Пустая строка — отказ, молчание владельца или пустой буфер.
+func (c *x11Clipboard) convert(target uint32) string {
+	c.mu.Lock()
 	if c.wait != nil {
 		c.mu.Unlock()
 		return "" // запрос уже в пути; второй ответ всё равно будет один
@@ -73,7 +122,7 @@ func (c *x11Clipboard) GetText() string {
 
 	// Ответ придёт событием SelectionNotify в цикл событий — он и разбудит
 	// этот канал (см. handleNotify).
-	c.w.x11ConvertSelection(c.w.atomClipboard, c.w.atomUTF8String, c.w.atomClipProp, 0)
+	c.w.x11ConvertSelection(c.w.atomClipboard, target, c.w.atomClipProp, 0)
 
 	select {
 	case s := <-ch:
@@ -133,7 +182,7 @@ func (c *x11Clipboard) handleRequest(buf []byte) {
 	}
 
 	c.mu.Lock()
-	text, owns := c.owned, c.owns
+	text, html, owns := c.owned, c.ownedHTML, c.owns
 	c.mu.Unlock()
 
 	ok := false
@@ -142,8 +191,12 @@ func (c *x11Clipboard) handleRequest(buf []byte) {
 		// Не наш буфер — отвечаем отказом.
 	case target == c.w.atomTargets:
 		// Список форматов, которые мы умеем отдать.
-		data := make([]byte, 0, 16)
-		for _, a := range []uint32{c.w.atomTargets, c.w.atomUTF8String, 31 /*STRING*/, c.w.atomText} {
+		data := make([]byte, 0, 20)
+		targets := []uint32{c.w.atomTargets, c.w.atomUTF8String, 31 /*STRING*/, c.w.atomText}
+		if html != "" && c.w.atomTextHTML != 0 {
+			targets = append(targets, c.w.atomTextHTML)
+		}
+		for _, a := range targets {
 			var b [4]byte
 			binary.LittleEndian.PutUint32(b[:], a)
 			data = append(data, b[:]...)
@@ -152,6 +205,9 @@ func (c *x11Clipboard) handleRequest(buf []byte) {
 		ok = true
 	case target == c.w.atomUTF8String || target == 31 /*STRING*/ || target == c.w.atomText:
 		c.w.x11ChangeProperty(requestor, property, target, 8, []byte(text))
+		ok = true
+	case html != "" && c.w.atomTextHTML != 0 && target == c.w.atomTextHTML:
+		c.w.x11ChangeProperty(requestor, property, target, 8, []byte(html))
 		ok = true
 	}
 	if !ok {
@@ -170,7 +226,7 @@ func (c *x11Clipboard) handleClear(buf []byte) {
 		return
 	}
 	c.mu.Lock()
-	c.owns, c.owned = false, ""
+	c.owns, c.owned, c.ownedHTML = false, "", ""
 	c.mu.Unlock()
 }
 

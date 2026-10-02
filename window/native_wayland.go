@@ -340,6 +340,9 @@ type WaylandWindow struct {
 	offers map[uint32]bool
 	// textOffers — предложения, в которых есть простой текст (буфер обмена).
 	textOffers map[uint32]bool
+	// htmlOffers — предложения с HTML: offer → объявленный тип (его же и
+	// запрашиваем).
+	htmlOffers map[uint32]string
 	// dndOffer — активный offer текущего перетаскивания (между enter и drop).
 	dndOffer   uint32
 	dndSerial  uint32 // serial из enter (для accept)
@@ -857,9 +860,8 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		// (send) или сообщают, что буфером завладел другой (cancelled).
 		switch opcode {
 		case wlDataSourceEvSend:
-			_, off := wlString(b, 0)
-			_ = off
-			w.clip.handleSourceSend(obj, w.takeFD())
+			mime, _ := wlString(b, 0)
+			w.clip.handleSourceSend(obj, mime, w.takeFD())
 		case wlDataSourceEvCancelled:
 			w.clip.handleSourceCancelled(obj)
 		}
@@ -873,6 +875,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			}
 			if isTextMime(mime) {
 				w.offerSetText(obj)
+			}
+			if isHTMLMime(mime) {
+				w.offerSetHTML(obj, mime)
 			}
 		}
 
@@ -1544,6 +1549,26 @@ func (w *WaylandWindow) offerHasText(id uint32) bool {
 	return w.textOffers[id]
 }
 
+// offerSetHTML отмечает, что offer предлагает HTML под указанным типом. Если
+// объявлено несколько вариантов, остаётся голый text/html: его понимают все.
+func (w *WaylandWindow) offerSetHTML(id uint32, mime string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.htmlOffers == nil {
+		w.htmlOffers = map[uint32]string{}
+	}
+	if old, ok := w.htmlOffers[id]; !ok || mime == mimeTextHTML || old == "" {
+		w.htmlOffers[id] = mime
+	}
+}
+
+// offerHTMLMime возвращает тип HTML, предложенный offer'ом, или пустую строку.
+func (w *WaylandWindow) offerHTMLMime(id uint32) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.htmlOffers[id]
+}
+
 // isTextMime — тип, под которым ходит простой текст.
 func isTextMime(mime string) bool {
 	switch mime {
@@ -1564,6 +1589,7 @@ func (w *WaylandWindow) offerGet(id uint32) bool {
 func (w *WaylandWindow) offerDelete(id uint32) {
 	w.mu.Lock()
 	delete(w.textOffers, id)
+	delete(w.htmlOffers, id)
 	w.mu.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()
