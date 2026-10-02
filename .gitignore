@@ -20,3 +20,6 @@ Thumbs.db
 
 # Build temp
 *-go-tmp-umask
+
+# Рабочие копии фоновых агентов (служебное, к проекту не относится)
+.claude/worktrees/

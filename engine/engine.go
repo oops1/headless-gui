@@ -143,6 +143,11 @@ type Engine struct {
 	started  atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
 	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
 
+	// timersMu защищает timers — таймеры After/Every, живые у этого движка. Stop
+	// гасит их все (см. timer.go).
+	timersMu sync.Mutex
+	timers   map[*Timer]struct{}
+
 	// Прежняя позиция курсора для адресного broadcastMouseMove. Доступ только
 	// из потока-источника ввода (SendMouseMove), синхронизация не нужна.
 	lastMoveX, lastMoveY int
@@ -933,6 +938,8 @@ func (e *Engine) Stop() {
 	widget.UnregisterMoveSink(e.moveHandle)
 	widget.UnregisterTextMeasurer(e.measurerHandle)
 	close(e.quit)
+	// Таймеры гасим до ожидания цикла: stopped уже выставлен, новые не заведутся.
+	e.stopTimers()
 	started := e.started.Load()
 	if started {
 		<-e.done
