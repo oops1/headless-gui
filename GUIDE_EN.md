@@ -666,6 +666,17 @@ nothing. A click on the horizontal bar does not reach the child under it. There
 is no horizontal inertia: a pixel delta is applied at once. Children are
 clipped in a nested way, as with vertical scrolling.
 
+The children of a scroll view stay in **content coordinates**: the `Bounds()` of
+a button at `y=200` are still `y=200` after `SetScrollY(200)`, when it is shown
+at the top edge. Everything that relates the screen to a child is translated by
+the engine itself: a click and the hover highlight go to whoever is visible
+under the cursor, mouse events reach a widget in the coordinates of its
+`Bounds()`, `Invalidate()` repaints its place on the screen, menus and drop-down
+lists open next to the widget, and the IME caret rectangle and the bounds in the
+accessibility tree are screen coordinates. A widget inside a scroll view does not
+need to know about it. A custom container that shows its children shifted only
+has to implement `widget.ContentOffsetter`.
+
 ### ListView
 
 ```go

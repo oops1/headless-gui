@@ -262,17 +262,24 @@ func (m *PopupMenu) Show(x, y int) {
 	// Клэмп в границы канваса — только БЕЗ хоста попапов. При активном хостинге
 	// экранное позиционирование делает popupHost, а меню вправе выходить за холст.
 	if sw, sh := getScreenBounds(); sw > 0 && sh > 0 && !popupsHosted.Load() {
-		if x+w > sw {
-			x = sw - w
+		// Холст — в экранных координатах, а (x, y) пришли в кадре виджета: у
+		// меню поля, лежащего в прокрутке, это координаты содержимого. Холст в
+		// этом кадре — прямоугольник [fo, fo+(sw,sh)). Без поправки меню у
+		// виджета, прокрученного далеко вниз, прижималось бы к нижнему краю
+		// СОДЕРЖИМОГО и улетало за экран, а не открывалось у курсора.
+		fo := currentEventFrame()
+		maxX, maxY := fo.X+sw, fo.Y+sh
+		if x+w > maxX {
+			x = maxX - w
 		}
-		if x < 0 {
-			x = 0
+		if x < fo.X {
+			x = fo.X
 		}
-		if y+h > sh {
-			y = sh - h
+		if y+h > maxY {
+			y = maxY - h
 		}
-		if y < 0 {
-			y = 0
+		if y < fo.Y {
+			y = fo.Y
 		}
 	}
 
@@ -402,7 +409,8 @@ func (m *PopupMenu) openChild(idx int) {
 	px, _, pw, _ := m.geo()
 	x := px + pw - 2
 	// Разворот влево у правого края — только без хоста (хост позиционирует сам).
-	if sw, _ := getScreenBounds(); sw > 0 && x+cw > sw && !popupsHosted.Load() {
+	// Правый край холста — в кадре обрабатываемого события (см. Show).
+	if sw, _ := getScreenBounds(); sw > 0 && x+cw > sw+currentEventFrame().X && !popupsHosted.Load() {
 		x = px - cw + 2
 	}
 	child.Show(x, itemY)

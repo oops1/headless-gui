@@ -36,8 +36,11 @@ type popupSig struct {
 // popupItem — найденный в дереве хостируемый оверлей (до рендера).
 type popupItem struct {
 	id   uintptr
-	rect image.Rectangle
+	rect image.Rectangle // ЭКРАННЫЕ координаты (границы оверлея минус off)
 	od   widget.OverlayDrawer
+	// off — кадр виджета-владельца (см. frames.go): оверлей внутри прокрутки
+	// рисуется в координатах содержимого, а окно-попап стоит на экране.
+	off image.Point
 }
 
 // popupEntry — межкадровый кэш одного оверлея: канвас, готовая картинка и её хэш.
@@ -110,7 +113,7 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 		ent.seen = gen
 		if ent.img == nil || ent.rect != it.rect || dirtyAll || canvas.sRect(it.rect).Overlaps(damage) {
 			oc := ent.overlayCanvas(canvas, it.rect)
-			ent.img = renderOverlayInto(oc, it.od, it.rect)
+			ent.img = renderOverlayShifted(oc, it.od, it.rect, it.off)
 			ent.hash = hashRGBA(ent.img)
 			ent.rect = it.rect
 		}
@@ -157,18 +160,29 @@ func (ent *popupEntry) overlayCanvas(src *Canvas, r image.Rectangle) *Canvas {
 
 // collectPopups рекурсивно собирает хостируемые оверлеи дерева (без рендера).
 func collectPopups(out []popupItem, w widget.Widget, depth int) []popupItem {
+	return collectPopupsAt(out, w, image.Point{}, depth)
+}
+
+// collectPopupsAt: off — смещение кадра w. Границы оверлея виджет отдаёт в
+// своём кадре; окну-попапу нужны экранные — вычитаем кадр.
+func collectPopupsAt(out []popupItem, w widget.Widget, off image.Point, depth int) []popupItem {
 	if tooDeep(depth) {
 		return out
 	}
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
 		if ob, ok := w.(widget.OverlayBoundsProvider); ok {
 			if r := ob.OverlayBounds(); !r.Empty() {
-				out = append(out, popupItem{id: widgetID(w), rect: r, od: od})
+				out = append(out, popupItem{id: widgetID(w), rect: r.Sub(off), od: od, off: off})
 			}
 		}
 	}
-	for _, child := range w.Children() {
-		out = collectPopups(out, child, depth+1)
+	children := w.Children()
+	if len(children) == 0 {
+		return out
+	}
+	coff := off.Add(contentShift(w))
+	for _, child := range children {
+		out = collectPopupsAt(out, child, coff, depth+1)
 	}
 	return out
 }
@@ -191,8 +205,16 @@ func (c *Canvas) renderOverlay(od widget.OverlayDrawer, r image.Rectangle) *imag
 // renderOverlayInto рисует оверлей в подготовленный канвас oc. Координаты
 // оверлея (абсолютные логические) транслируются на -r.Min.
 func renderOverlayInto(oc *Canvas, od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
+	return renderOverlayShifted(oc, od, r, image.Point{})
+}
+
+// renderOverlayShifted — renderOverlayInto для оверлея виджета, лежащего в
+// кадре off (внутри прокрутки): r — ЭКРАННЫЙ прямоугольник попапа, а оверлей
+// рисуется в координатах своего виджета, поэтому сперва сдвиг кадра, потом
+// сдвиг на начало попапа.
+func renderOverlayShifted(oc *Canvas, od widget.OverlayDrawer, r image.Rectangle, off image.Point) *image.RGBA {
 	tc := &translatingContext{inner: oc, dx: r.Min.X, dy: r.Min.Y}
-	od.DrawOverlay(tc)
+	od.DrawOverlay(widget.OffsetContext(tc, off.X, off.Y))
 	// Копия развязывает владение с хостом: он блитит асинхронно, а канвас
 	// оверлея переиспользуется следующими кадрами.
 	out := image.NewRGBA(oc.back.Rect)

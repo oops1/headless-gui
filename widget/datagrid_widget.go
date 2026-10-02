@@ -186,7 +186,7 @@ func (w *DataGridWidget) applyDirty() {
 		return
 	}
 	for _, r := range rects {
-		notifyRectChanged(r)
+		w.invalidateRect(r)
 	}
 }
 

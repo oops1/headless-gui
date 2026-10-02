@@ -98,6 +98,9 @@ func (tc *TabControl) AddTab(header string, content Widget) {
 	tc.mu.Lock()
 	cm := tc.capMgr
 	tc.tabs = append(tc.tabs, TabItem{Header: header, Content: content})
+	if content != nil {
+		adoptChild(&tc.Base, content) // родитель нужен переводу области перерисовки (см. contentoffset.go)
+	}
 	tc.mu.Unlock()
 	// Если CaptureManager уже инжектирован — раздаём его новому контенту.
 	if cm != nil && content != nil {

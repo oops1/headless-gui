@@ -119,14 +119,16 @@ func (e *Engine) tooltipMayAppear(frameInterval time.Duration) bool {
 // панели), отвечает через ToolTipAt(x, y); пустой ответ — спросить его общую
 // подсказку.
 func tooltipAt(root widget.Widget, x, y int) string {
-	path := hitTestPath(root, x, y)
+	path := hitPath(root, x, y)
 	for i := len(path) - 1; i >= 0; i-- {
-		if tp, ok := path[i].(interface{ ToolTipAt(x, y int) string }); ok {
-			if s := tp.ToolTipAt(x, y); s != "" {
+		if tp, ok := path[i].w.(interface{ ToolTipAt(x, y int) string }); ok {
+			// Точка — в кадре виджета (ребёнок прокрутки судит в координатах
+			// содержимого).
+			if s := tp.ToolTipAt(x+path[i].off.X, y+path[i].off.Y); s != "" {
 				return s
 			}
 		}
-		if tp, ok := path[i].(interface{ GetToolTip() string }); ok {
+		if tp, ok := path[i].w.(interface{ GetToolTip() string }); ok {
 			if s := tp.GetToolTip(); s != "" {
 				return s
 			}

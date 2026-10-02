@@ -367,7 +367,7 @@ func (pb *ProgressBar) ensureGlowAnim() {
 			a.Stop()
 			return
 		}
-		notifyRectChanged(pb.glowDamageRect())
+		pb.invalidateRect(pb.glowDamageRect())
 	})
 	a.Loop = true
 	pb.glowAnim = a

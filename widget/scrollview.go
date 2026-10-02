@@ -95,7 +95,7 @@ var inertiaDurationSec = inertiaDuration.Seconds()
 
 // NewScrollView создаёт прокручиваемый контейнер.
 func NewScrollView() *ScrollView {
-	return &ScrollView{
+	sv := &ScrollView{
 		Background:     color.RGBA{A: 0}, // прозрачный
 		TrackColor:     win10.ScrollTrackBG,
 		ThumbColor:     win10.ScrollThumbBG,
@@ -103,6 +103,37 @@ func NewScrollView() *ScrollView {
 		BorderColor:    win10.Border,
 		scrollbarWidth: 10,
 	}
+	sv.setContentShifter(sv)
+	return sv
+}
+
+// ContentOffset — на сколько содержимое сдвинуто прокруткой: (scrollX, scrollY).
+// Реализует ContentOffsetter.
+//
+// Bounds детей остаются в координатах содержимого и от прокрутки не меняются
+// (PERF-12, см. Draw), поэтому всё, что сопоставляет экранную точку с ребёнком, —
+// хит-тест, доставка мыши, область перерисовки, оверлеи, каретка IME, границы
+// для скринридера, — обязано переводить координаты через это смещение. Движок и
+// Base делают это сами; виджетам внутри прокрутки знать о ней не нужно.
+//
+// Те же значения, что берёт Draw (scrollXLocked, scrollY): иначе картинка и
+// точка попадания разошлись бы. Берёт sv.mu, поэтому не вызывать из кода,
+// который сам держит этот замок.
+func (sv *ScrollView) ContentOffset() image.Point {
+	sv.mu.Lock()
+	defer sv.mu.Unlock()
+	return image.Pt(sv.scrollXLocked(), sv.scrollY)
+}
+
+// AddChild добавляет ребёнка в содержимое. Прокрутка, созданная не через
+// NewScrollView (литерал структуры), объявляет себя контейнером со сдвигом
+// здесь: иначе дети такой прокрутки заявляли бы области перерисовки в
+// координатах содержимого.
+func (sv *ScrollView) AddChild(w Widget) {
+	if sv.Base.shifter.Load() == nil {
+		sv.setContentShifter(sv)
+	}
+	sv.Base.AddChild(w)
 }
 
 // ScrollY возвращает текущее смещение прокрутки.
@@ -244,6 +275,15 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 	//   - три лишних вызова на ребёнка за кадр.
 	// Рисуемый результат идентичен: ребёнок отдаёт свои (несдвинутые) координаты,
 	// обёртка вычитает scrollX/scrollY на входе в канвас.
+	//
+	// ЦЕНА этого решения: Bounds() детей остаются в координатах содержимого, а
+	// всё, что сопоставляло экранную точку с ребёнком по Bounds, видело
+	// несдвинутую картину — щелчок попадал в невидимую кнопку, прокрученную за
+	// верх, подсвечивалась не та кнопка, перерисовывалось не то место экрана,
+	// меню поля ввода открывалось не у курсора. Поэтому на каждой границе
+	// «ребёнок ↔ внешний мир» координаты переводятся через ContentOffset
+	// (подробности и список границ — в contentoffset.go). Сдвигать Bounds детей
+	// ради этого не стали: см. там же, почему это хуже.
 	childCtx := ctx
 	if scrollX != 0 || scrollY != 0 {
 		childCtx = sv.offsetContext(ctx, scrollX, scrollY)

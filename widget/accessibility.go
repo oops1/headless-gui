@@ -110,21 +110,40 @@ type AccessChildrenProvider interface {
 // BuildAccessTree строит семантический снапшот дерева виджетов.
 // focused — виджет с фокусом ввода (или nil); невидимые виджеты
 // пропускаются вместе с поддеревьями.
+//
+// Bounds узлов — экранные: элемент внутри прокрутки описан там, где его видно, а
+// не в координатах содержимого. Скринридер и тесты наводят курсор и кликают по
+// этим границам; с координатами содержимого они промахивались бы на величину
+// прокрутки (см. contentoffset.go).
 func BuildAccessTree(root Widget, focused Widget) *AccessNode {
+	return buildAccessTree(root, focused, image.Point{})
+}
+
+// buildAccessTree — BuildAccessTree с накопленным смещением off: сумма
+// ContentOffset контейнеров над root, то есть на сколько границы root лежат
+// правее и ниже его места на экране.
+func buildAccessTree(root Widget, focused Widget, off image.Point) *AccessNode {
 	if root == nil || !IsWidgetVisible(root) {
 		return nil
 	}
 	node := &AccessNode{AccessInfo: accessInfoFor(root), Widget: root}
+	node.Bounds = node.Bounds.Sub(off)
 	if root == focused {
 		node.States = append(node.States, StateFocused)
 	}
 	if p, ok := root.(AccessChildrenProvider); ok {
 		for _, info := range p.AccessChildren() {
+			info.Bounds = info.Bounds.Sub(off)
 			node.Children = append(node.Children, &AccessNode{AccessInfo: info, Widget: root})
 		}
 	}
+	// Дети контейнера со сдвигом живут в кадре, сдвинутом ещё и на его смещение.
+	childOff := off
+	if oc, ok := root.(ContentOffsetter); ok {
+		childOff = off.Add(oc.ContentOffset())
+	}
 	for _, child := range root.Children() {
-		if cn := BuildAccessTree(child, focused); cn != nil {
+		if cn := buildAccessTree(child, focused, childOff); cn != nil {
 			node.Children = append(node.Children, cn)
 		}
 	}
