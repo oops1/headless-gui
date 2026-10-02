@@ -208,6 +208,9 @@ type surface struct {
 	modShift atomic.Bool
 	modCtrl  atomic.Bool
 	modAlt   atomic.Bool
+	// altTap — Alt нажат и пока ничего другого не нажимали: при отпускании
+	// это жест открытия строки меню (см. widget.KeyAlt).
+	altTap atomic.Bool
 
 	// in — очередь ввода к движку: склейка движений мыши (input_queue.go).
 	in inputQueue
@@ -892,6 +895,34 @@ func (s *surface) keyEventRepeat(vk int, pressed, repeat bool) {
 		s.modCtrl.Store(pressed)
 	case VK_ALT:
 		s.modAlt.Store(pressed)
+		// Alt сам по себе — не клавиша, а модификатор, и своего события у
+		// него нет. Кроме одного жеста: Alt нажали и отпустили, ничего
+		// между ними не нажав, — так в Windows открывают строку меню.
+		// Распознаём его здесь, а не в бэкендах: правило одно на все три,
+		// и повторять его трижды незачем.
+		if pressed {
+			if !repeat {
+				s.altTap.Store(true)
+			}
+			return // удержание Alt приложению не событие
+		}
+		tap := s.altTap.Swap(false)
+		if !tap {
+			return
+		}
+		mod := s.currentMod()
+		s.post(func() {
+			s.sendModifiers(mod)
+			s.eng.SendKeyEvent(widget.KeyEvent{Code: widget.KeyAlt, Mod: mod, Pressed: true})
+			s.eng.SendKeyEvent(widget.KeyEvent{Code: widget.KeyAlt, Mod: mod, Pressed: false})
+		})
+		return
+	default:
+		// Любая другая клавиша при зажатом Alt — это уже сочетание, а не
+		// жест открытия меню.
+		if pressed {
+			s.altTap.Store(false)
+		}
 	}
 	mod := s.currentMod()
 	code := vkToKeyCode(vk)

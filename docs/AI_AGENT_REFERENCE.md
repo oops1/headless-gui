@@ -4269,6 +4269,29 @@ elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
 
+### Alt, F10 and Alt+key — v3.26
+
+`WM_SYSKEYDOWN` / `WM_SYSKEYUP` / `WM_SYSCHAR` were not handled at all, so on
+Windows `ModAlt` was never set and F10 never arrived. They now go the same way
+as the ordinary key messages, and what the window does not consume is passed
+to `DefWindowProc` — `Alt+F4` and `Alt+Space` keep working as the system
+intends. The error beep on `WM_SYSCHAR` is suppressed (except for `Alt+Space`,
+which belongs to the window menu): the application has already received that
+combination as a key event.
+
+`widget.KeyAlt` is the gesture «Alt pressed and released with nothing in
+between» — how a menu bar is opened on Windows. As a modifier Alt still
+travels in `KeyEvent.Mod` and has no event of its own: `Alt+F` is `KeyF` with
+`ModAlt`, not two keys in a row.
+
+The gesture is recognised in `surface`, once for all three backends, so it
+works the same on X11 and Wayland. Auto-repeat of a held Alt neither cancels
+nor multiplies it, and any other key in between turns it into a plain
+combination.
+
+F10 is an ordinary key with its own code (`KeyF10`) — the application opens
+its menu itself.
+
 ### Clipboard on Linux without external tools — v3.26
 
 The Linux clipboard ran `xclip` or `xsel` as a subprocess — a tool that may

@@ -52,11 +52,16 @@ const (
 	// wheelDeltaWin — WHEEL_DELTA: единица «одного щелчка» колеса в WM_MOUSEWHEEL.
 	// wheelNotchPx — во сколько логических пикселей превращается один щелчок
 	// (соответствует шагу тикового колеса в движке — 40 px/notch).
-	wheelDeltaWin      = 120.0
-	wheelNotchPx       = 40.0
-	wmKeydown          = 0x0100
-	wmKeyup            = 0x0101
-	wmChar             = 0x0102
+	wheelDeltaWin = 120.0
+	wheelNotchPx  = 40.0
+	wmKeydown     = 0x0100
+	wmKeyup       = 0x0101
+	wmChar        = 0x0102
+	// Системные клавиатурные сообщения — те, что приходят с зажатым Alt, и
+	// F10. Без них ModAlt не выставлялся никогда, а F10 не доходил вовсе.
+	wmSyskeydown       = 0x0104
+	wmSyskeyup         = 0x0105
+	wmSyschar          = 0x0106
 	wmDropfiles        = 0x0233 // WM_DROPFILES: wParam = HDROP (Drag&Drop файлов из ОС)
 	wmSyscommand       = 0x0112
 	wmNccalcsize       = 0x0083
@@ -1377,7 +1382,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 
-	case wmKeydown:
+	case wmKeydown, wmSyskeydown:
 		// Бит 30 lParam — «клавиша уже была нажата», то есть это автоповтор,
 		// а не новое нажатие (WM_KEYDOWN, previous key state).
 		repeat := lparam&(1<<30) != 0
@@ -1386,12 +1391,30 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		} else if w.onKeyDown != nil {
 			w.onKeyDown(int(wparam))
 		}
+		// Системные сочетания отдаём системе: Alt+F4 закрывает окно, а
+		// Alt+Space открывает оконное меню, и подменять их собой нельзя.
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
 		return ret
 
-	case wmKeyup:
+	case wmKeyup, wmSyskeyup:
 		if w.onKeyUp != nil {
 			w.onKeyUp(int(wparam))
+		}
+		if umsg == wmSyskeyup {
+			// То же, что и с нажатием: системные сочетания доигрывает ОС.
+			ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+			return ret
+		}
+		return 0
+
+	case wmSyschar:
+		// Символ, набранный с зажатым Alt. По умолчанию система отвечает на
+		// него звуком «такого пункта меню нет» — своей строки меню у окна
+		// нет, а приложение сочетание уже получило отдельным событием.
+		// Alt+Space (0x20) оставляем системе: это оконное меню.
+		if rune(wparam) == ' ' {
+			ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+			return ret
 		}
 		return 0
 
