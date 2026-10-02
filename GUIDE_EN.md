@@ -2568,6 +2568,27 @@ Ctrl+A/C/X/V, Ctrl+Z/Y, double-click word select, context menu,
 attributes the tag still creates the single-line TextInput). Layout uses
 `widget.MeasureUIText`, so caret math and scrolling work headless.
 
+For a code editor `TextBox` also has:
+
+- `FontName` — a named font (`RegisterFont`), `FontFamily` in XAML; layout,
+  caret and selection are measured with the same font that is drawn.
+- `AcceptTab` (XAML `AcceptsTab="True"`) — Tab inserts a tab character instead
+  of moving focus; Ctrl+Tab stays navigation. `TabSize` — tab width in spaces
+  (4 by default with `AcceptTab`): text aligns to tab stops.
+- `SetStyler(widget.Styler)` — styles on ranges: syntax, search and error
+  highlighting. The widget asks the application line by line, visible lines
+  only: `LineSpans(line int, text string) []widget.Span`, where `line` is the
+  logical line number (split on `
+`) and `Span{From, To, Style}` is a rune
+  range. `Style{Color, BG, Face}`: `Face` is a registered font name (regular,
+  bold and italic are separate fonts of one family and must share glyph
+  width). Answers are cached until the text changes; `InvalidateStyles()`
+  re-asks when the rules changed on their own. `LineSpans` is called without
+  the widget lock and must be fast.
+- A horizontal scrollbar when `Wrap=false`: thumb dragging, horizontal wheel,
+  Shift+wheel.
+- Undo history stores edits (position, removed, inserted), not text snapshots.
+
 ### Browser viewer (output/webstream)
 
 Any engine app can be shown in a browser with no client build:

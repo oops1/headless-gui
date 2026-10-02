@@ -87,6 +87,15 @@ func (t *TextBox) IMECommit(text string) {
 	rs := []rune(text)
 	t.mu.Lock()
 	t.imeReplaceLocked(rs, len(rs))
+	from := t.caret
+	if f, _, ok := t.ime.imeRange(); ok {
+		// Набранное стало обычным текстом — это правка, и её можно отменить.
+		// Пока шла композиция, она в историю не писалась: текст менялся на
+		// каждом нажатии, и запись на каждое была бы мусором.
+		from = f
+		t.pending = append(t.pending, tbEdit{pos: f, inserted: append([]rune(nil), rs...)})
+	}
+	t.commitUndo(from)
 	t.ime.clear() // текст уже на месте — он больше не композиция
 	t.mu.Unlock()
 	t.Invalidate()
@@ -96,11 +105,16 @@ func (t *TextBox) IMECommit(text string) {
 func (t *TextBox) IMECancel() {
 	t.mu.Lock()
 	t.imeReplaceLocked(nil, 0)
+	t.commitUndo(t.caret) // выделение, замещённое набором, — настоящая правка: её можно отменить
 	t.mu.Unlock()
 	t.Invalidate()
 }
 
 // imeReplaceLocked заменяет прежнюю композицию на новую. Вызывать под t.mu.
+//
+// Текст композиции меняется мимо истории правок (spliceRaw): он временный, и
+// записывать каждый его промежуточный вид значило бы засорить откат. Исключение
+// — выделение, которое набор заместил: его удаление настоящее и записывается.
 func (t *TextBox) imeReplaceLocked(rs []rune, caret int) {
 	if from, to, ok := t.ime.imeRange(); ok {
 		// Прежняя композиция уходит целиком: система всегда присылает
@@ -109,16 +123,20 @@ func (t *TextBox) imeReplaceLocked(rs []rune, caret int) {
 			to = len(t.runes)
 		}
 		if from <= to {
-			t.runes = append(t.runes[:from], t.runes[to:]...)
+			t.spliceRaw(from, to-from, nil)
 			t.caret = from
 		}
 		t.ime.clear()
 		t.dirty = true
 	}
 	t.clampCaret()
+	if len(rs) > 0 {
+		t.deleteSel()
+	}
 	start := t.caret
 	if len(rs) > 0 {
-		t.insertRunes(rs)
+		t.spliceRaw(start, 0, rs)
+		t.caret = start + len(rs)
 		t.ime.set(start, len(rs))
 		if caret >= 0 && caret <= len(rs) {
 			t.caret = start + caret

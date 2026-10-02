@@ -1037,6 +1037,14 @@ func buildXAMLTextBox(el xElement) Widget {
 			tb.FontSize = v
 		}
 	}
+	// FontFamily — именованный шрифт (RegisterFont); для кода — моноширинный.
+	if ff := el.attr("FontFamily"); ff != "" {
+		tb.FontName = ff
+	}
+	// AcceptsTab — Tab вставляет табуляцию, а не переводит фокус.
+	if strings.EqualFold(el.attr("AcceptsTab"), "true") {
+		tb.AcceptTab = true
+	}
 	return tb
 }
 
