@@ -369,6 +369,9 @@ func New(width, height, fps int) *Engine {
 		RunePositions: func(text string, sizePt float64, family string) []int {
 			return e.canvas.MeasureRunePositionsFont(text, sizePt, family)
 		},
+		FontMetrics: func(sizePt float64, family string) (ascent, descent, lineGap int) {
+			return e.canvas.FontMetrics(family, sizePt)
+		},
 	})
 	return e
 }

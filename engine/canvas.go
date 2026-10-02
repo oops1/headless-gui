@@ -1043,6 +1043,30 @@ func (c *Canvas) MeasureTextFont(text string, sizePt float64, fontName string) i
 	return c.toLogicalLen(c.measureWithFallback(c.fontFor(fontName), text, sizePt))
 }
 
+// FontMetrics возвращает вертикальные метрики шрифта в ЛОГИЧЕСКИХ пикселях:
+// подъём и спуск от базовой линии и рекомендуемый зазор между строками.
+// Пустое имя (или незарегистрированное) — шрифт по умолчанию, как у
+// MeasureTextFont.
+//
+// Числа берутся из того же кэша vMetrics, по которому drawTextWithFont ставит
+// базовую линию (y + ascent), поэтому «подъём» здесь — ровно то расстояние, на
+// которое DrawText опускает базовую линию от переданного y. Без этого
+// приложения разбирали TTF сами (Блокнот — через opentype) ради одной цифры и
+// расходились с движком в округлении.
+//
+// HiDPI: метрики физические (DPI = 96 × scale), в логические переводятся
+// округлением к ближайшему — как и ширины MeasureRunePositions. Вверх, как
+// ширину в toLogicalLen, нельзя: ширина — это «сколько места зарезервировать»,
+// а подъём — «где базовая линия», и завышенный подъём сдвинул бы текст.
+func (c *Canvas) FontMetrics(fontName string, sizePt float64) (ascent, descent, lineGap int) {
+	m := c.fontFor(fontName).vMetricsFull(sizePt)
+	if c.scale == 1 {
+		return m.ascent, m.descent, m.lineGap
+	}
+	toLogical := func(px int) int { return int(math.Round(float64(px) / c.scale)) }
+	return toLogical(m.ascent), toLogical(m.descent), toLogical(m.lineGap)
+}
+
 // toLogicalLen переводит физическую длину в логическую (округление вверх:
 // зарезервированное по измерению место гарантированно вмещает текст).
 func (c *Canvas) toLogicalLen(px int) int {
