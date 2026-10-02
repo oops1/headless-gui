@@ -4271,26 +4271,26 @@ points): drawing and hit-testing both go through `rulerTrackLocked`,
 
 ### Key auto-repeat — v3.26
 
-Under Wayland the repeat of a held key is the CLIENT'''s job: the compositor
+Under Wayland the repeat of a held key is the CLIENT's job: the compositor
 sends the press and the release and says nothing in between. So holding an
 arrow or Backspace fired exactly once, and text could not be edited in a
 WinLine session at all.
 
 The Wayland backend now runs its own repeat timer, with the rate and delay the
-compositor reports (, protocol version 4; older ones
-get the usual desktop defaults — 500 ms, then 25/s).  means the
+compositor reports (`wl_keyboard.repeat_info`, protocol version 4; older ones
+get the usual desktop defaults — 500 ms, then 25/s). A rate of `0` means the
 compositor turned repeat off, and that is honoured. The repeat stops on
 release, on a new key (only one key repeats, the last one), on focus loss and
 on close. Modifiers are never repeated.
 
- marks a repeat on every platform (on Windows from bit 30 of
-). It matters where a press toggles something: holding Caps Lock must
+`KeyEvent.Repeat` marks a repeat on every platform (on Windows from bit 30 of
+`lParam`). It matters where a press toggles something: holding Caps Lock must
 not flip it twenty-five times a second. For typing and caret movement the
 repeat IS what is wanted, so most handlers ignore the flag.
 
- is now bound at version 4 instead of 1 — that is what carries
-. Higher versions are not taken: they oblige the client to handle
- and the rest of the event grouping, which this backend does
+`wl_seat` is now bound at version 4 instead of 1 — that is what carries
+`repeat_info`. Higher versions are not taken: they oblige the client to handle
+`wl_pointer.frame` and the rest of the event grouping, which this backend does
 not do.
 
 ### Full key table — v3.26
