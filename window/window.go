@@ -324,6 +324,9 @@ type Window struct {
 	// окно, а поверхность-потомок носителя (Wayland xdg_popup).
 	childPopups *childPopups
 
+	// children — окна верхнего уровня, открытые из этого (multiwindow.go).
+	children childWindows
+
 	// dockMgr — менеджер докинга, панели которого разрешено отрывать в отдельные
 	// нативные окна (EnableDockFloating). dockHost — установленный хост отрыва
 	// (nil на бэкендах без поддержки owner-окон / UI-маршалинга → in-canvas floating).
@@ -474,7 +477,39 @@ func (win *Window) SetCornerRadius(r int) {
 // Run открывает нативное окно и запускает цикл событий.
 // Блокирует вызывающую горутину до закрытия окна.
 // ВАЖНО: вызывать из главной горутины (main).
+//
+// Второе и последующие окна приложения открываются иначе — методом
+// OpenWindow главного окна (multiwindow.go): цикл событий у процесса один, и
+// запускает его именно Run.
 func (win *Window) Run() error {
+	if err := win.bringUp(); err != nil {
+		return err
+	}
+	defer win.tearDown()
+
+	// Блокирующий цикл событий (возврат = окно закрыто)
+	return win.native.RunEventLoop()
+}
+
+// tearDown освобождает то, что подняла bringUp и что переживает закрытие
+// окна ОС.
+func (win *Window) tearDown() {
+	win.stopAccessibility()
+	// Сносим все оторванные окна панелей: останавливаем их движки (реестр
+	// нотификаторов/горутины без утечки); owned-окна ОС уходят вместе с
+	// owner'ом.
+	if win.dockHost != nil {
+		win.dockHost.teardownAll()
+	}
+	win.closeChildWindows()
+}
+
+// bringUp создаёт окно ОС и поднимает всё, что к нему прилагается: масштаб,
+// ввод, хосты попапов и модалок, трей, доступность, насос кадров.
+//
+// Отдельно от Run, потому что окон у процесса может быть несколько: второму
+// нужно то же самое, кроме блокирующего цикла событий (см. OpenWindow).
+func (win *Window) bringUp() error {
 	win.native = NewNativeWindow()
 
 	// Значок, заданный до Run(): отдаём бэкенду ДО создания окна ОС, чтобы он
@@ -639,21 +674,12 @@ func (win *Window) Run() error {
 
 	// Мост доступности (AT-SPI на Linux): поднимается, только если система
 	// сообщает о включённой доступности или приложение попросило явно.
+	// Снимается в tearDown.
 	win.startAccessibility()
-	defer win.stopAccessibility()
 
 	// Запускаем горутину чтения кадров из движка
 	go win.framePump()
-
-	// Блокирующий цикл событий (возврат = окно закрыто)
-	err := win.native.RunEventLoop()
-
-	// Сносим все оторванные окна панелей: останавливаем их движки (реестр
-	// нотификаторов/горутины без утечки); owned-окна ОС уходят вместе с owner'ом.
-	if win.dockHost != nil {
-		win.dockHost.teardownAll()
-	}
-	return err
+	return nil
 }
 
 // syncFromWidgetWindow считывает параметры из widget.Window (XAML <Window>)

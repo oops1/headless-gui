@@ -684,6 +684,20 @@ func (w *WaylandWindow) RunEventLoop() error {
 }
 
 // handleEvent — диспетчер входящих событий по объекту/опкоду.
+// StartEventPump обслуживает окно, которое не крутит общий цикл событий:
+// второе окно верхнего уровня (multiwindow.go) или оторванную панель.
+// Реализует eventPumper.
+//
+// У каждого окна Wayland своё соединение с компоновщиком, и события с него
+// никто, кроме этой горутины, не читает. Цикл заканчивается сам, когда окно
+// закрывают: Close рвёт соединение, и чтение возвращает ошибку.
+func (w *WaylandWindow) StartEventPump() {
+	if w.conn == nil {
+		return
+	}
+	go w.RunEventLoop()
+}
+
 func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 	if wlDebug {
 		wlLog("event obj=%d opcode=%d len=%d (reg=%d wm=%d xsurf=%d top=%d seat=%d ptr=%d kbd=%d)",
