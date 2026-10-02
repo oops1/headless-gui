@@ -207,6 +207,12 @@ func NewNativeWindow() NativeWindow {
 // connect подключается к X-серверу (Unix socket из DISPLAY) и выполняет
 // протокольный setup. Общий для главного окна (Create) и окна-попапа (CreatePopup).
 func (w *X11Window) connect() error {
+	// Повторный вызов ничего не делает: соединение открывает и DetectScale
+	// (масштаб спрашивают до создания окна), и Create — второе соединение
+	// было бы лишним, а первое утекло бы.
+	if w.conn != nil {
+		return nil
+	}
 	display := os.Getenv("DISPLAY")
 	if display == "" {
 		display = ":0"

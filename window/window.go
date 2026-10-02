@@ -129,7 +129,7 @@ func (win *Window) setupActivation() {
 			ww.SetActive(active)
 			// При деактивации носителя (клик в другое приложение) закрываем
 			// вынесенные popup-оверлеи — как системные меню. Только в hosted-режиме.
-			if !active && win.popupHost != nil {
+			if !active && (win.popupHost != nil || win.childPopups != nil) {
 				if c, ok := win.eng.(interface{ CloseAllOverlays() }); ok {
 					c.CloseAllOverlays()
 				}
@@ -138,20 +138,18 @@ func (win *Window) setupActivation() {
 	})
 }
 
-// installPopupHost регистрирует хост popup-оверлеев, если бэкенд умеет окна-
-// попапы и маршалинг на UI-поток, а движок принимает PopupSink. На бэкендах без
-// поддержки (Wayland/macOS) и в headless — no-op: оверлеи рисуются в холст.
+// installPopupHost регистрирует хост popup-оверлеев: меню и выпадающие списки
+// показываются вне холста и не обрезаются краем окна.
+//
+// Путей два. Там, где попап — самостоятельное окно ОС с экранной позицией
+// (Win32, X11), работает popupHost. Там, где попапом владеет сам бэкенд
+// (Wayland: xdg_popup — поверхность-потомок, экранных координат у клиента
+// нет), — childPopups. Без обоих и в headless оверлеи рисуются в холст,
+// как раньше.
 func (win *Window) installPopupHost() {
-	// ContentFit: масштаб и офсет меняются на каждом ресайзе — нативные
-	// popup-окна их не учитывают; оверлеи рисуются в холсте.
+	// ContentFit: масштаб и офсет меняются на каждом ресайзе — вынесенные
+	// попапы их не учитывают; оверлеи рисуются в холсте.
 	if win.fitMode == FitScale {
-		return
-	}
-	if _, ok := win.native.(popupWindow); !ok {
-		return
-	}
-	inv, ok := win.native.(uiThreadInvoker)
-	if !ok {
 		return
 	}
 	peng, ok := win.eng.(popupEngine)
@@ -161,6 +159,20 @@ func (win *Window) installPopupHost() {
 	setter, ok := win.eng.(interface {
 		SetPopupSink(sink func(frames []engine.PopupFrame))
 	})
+	if !ok {
+		return
+	}
+
+	if cph, ok := win.native.(childPopupHost); ok {
+		win.childPopups = newChildPopups(cph, peng, win.scale, &win.in)
+		setter.SetPopupSink(win.childPopups.apply)
+		return
+	}
+
+	if _, ok := win.native.(popupWindow); !ok {
+		return
+	}
+	inv, ok := win.native.(uiThreadInvoker)
 	if !ok {
 		return
 	}
@@ -305,8 +317,15 @@ type Window struct {
 	fitBaseW, fitBaseH int // логический дизайн-размер (фиксируется в Run)
 
 	// popupHost — хост popup-оверлеев (dropdown/меню в собственных окнах ОС).
-	// nil, если бэкенд не поддерживает окна-попапы (Wayland/macOS → in-canvas).
+	// nil, если бэкенд не поддерживает окна-попапы (macOS → in-canvas).
 	popupHost *popupHost
+
+	// childPopups — тот же вынос оверлеев там, где попап не самостоятельное
+	// окно, а поверхность-потомок носителя (Wayland xdg_popup).
+	childPopups *childPopups
+
+	// children — окна верхнего уровня, открытые из этого (multiwindow.go).
+	children childWindows
 
 	// dockMgr — менеджер докинга, панели которого разрешено отрывать в отдельные
 	// нативные окна (EnableDockFloating). dockHost — установленный хост отрыва
@@ -458,7 +477,39 @@ func (win *Window) SetCornerRadius(r int) {
 // Run открывает нативное окно и запускает цикл событий.
 // Блокирует вызывающую горутину до закрытия окна.
 // ВАЖНО: вызывать из главной горутины (main).
+//
+// Второе и последующие окна приложения открываются иначе — методом
+// OpenWindow главного окна (multiwindow.go): цикл событий у процесса один, и
+// запускает его именно Run.
 func (win *Window) Run() error {
+	if err := win.bringUp(); err != nil {
+		return err
+	}
+	defer win.tearDown()
+
+	// Блокирующий цикл событий (возврат = окно закрыто)
+	return win.native.RunEventLoop()
+}
+
+// tearDown освобождает то, что подняла bringUp и что переживает закрытие
+// окна ОС.
+func (win *Window) tearDown() {
+	win.stopAccessibility()
+	// Сносим все оторванные окна панелей: останавливаем их движки (реестр
+	// нотификаторов/горутины без утечки); owned-окна ОС уходят вместе с
+	// owner'ом.
+	if win.dockHost != nil {
+		win.dockHost.teardownAll()
+	}
+	win.closeChildWindows()
+}
+
+// bringUp создаёт окно ОС и поднимает всё, что к нему прилагается: масштаб,
+// ввод, хосты попапов и модалок, трей, доступность, насос кадров.
+//
+// Отдельно от Run, потому что окон у процесса может быть несколько: второму
+// нужно то же самое, кроме блокирующего цикла событий (см. OpenWindow).
+func (win *Window) bringUp() error {
 	win.native = NewNativeWindow()
 
 	// Значок, заданный до Run(): отдаём бэкенду ДО создания окна ОС, чтобы он
@@ -582,6 +633,10 @@ func (win *Window) Run() error {
 	// Общий проброс ввода (мышь/клавиатура) — surface.
 	win.setupInput()
 
+	// Редактор метода ввода (китайский, японский, корейский): набираемое от
+	// системы — фокусному полю. Бэкенд без поддержки — no-op.
+	win.setupIME()
+
 	// Drag&Drop файлов из ОС (WM_DROPFILES / XDND / wl_data_device), если
 	// бэкенд это умеет. Только для главного окна (не попапы/диалоги).
 	win.setupFilesDrop()
@@ -623,21 +678,12 @@ func (win *Window) Run() error {
 
 	// Мост доступности (AT-SPI на Linux): поднимается, только если система
 	// сообщает о включённой доступности или приложение попросило явно.
+	// Снимается в tearDown.
 	win.startAccessibility()
-	defer win.stopAccessibility()
 
 	// Запускаем горутину чтения кадров из движка
 	go win.framePump()
-
-	// Блокирующий цикл событий (возврат = окно закрыто)
-	err := win.native.RunEventLoop()
-
-	// Сносим все оторванные окна панелей: останавливаем их движки (реестр
-	// нотификаторов/горутины без утечки); owned-окна ОС уходят вместе с owner'ом.
-	if win.dockHost != nil {
-		win.dockHost.teardownAll()
-	}
-	return err
+	return nil
 }
 
 // syncFromWidgetWindow считывает параметры из widget.Window (XAML <Window>)

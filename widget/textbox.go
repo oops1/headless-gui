@@ -53,6 +53,11 @@ type TextBox struct {
 
 	clicks clickSeries // номер нажатия в серии, если движок его не прислал
 
+	// ime — диапазон незавершённого ввода внутри runes (ime.go). Набираемое
+	// хранится прямо в тексте: так его видно без правок в отрисовке, а
+	// раскладка строк считается с учётом набранного.
+	ime imeState
+
 	undoStack []textEdit
 	redoStack []textEdit
 
@@ -1222,6 +1227,7 @@ func (t *TextBox) Draw(ctx DrawContext) {
 		selLo, selHi = t.normSel()
 	}
 	scrollY, scrollX := t.scrollY, t.scrollX
+	imeFrom, imeTo, imeActive := t.ime.imeRange()
 	focused := t.focused
 	fs := t.fontSize()
 	lh := t.lineHeight()
@@ -1285,6 +1291,23 @@ func (t *TextBox) Draw(ctx DrawContext) {
 				}
 			}
 			ctx.DrawTextSize(string(runes[ln.start:ln.end]), textX, y+2, fs, t.TextColor)
+
+			// Набираемый, но ещё не введённый текст подчёркивается: иначе
+			// человек не отличит его от уже введённого.
+			if imeActive && imeFrom < ln.end+1 && imeTo > ln.start {
+				lo, hi := imeFrom, imeTo
+				if lo < ln.start {
+					lo = ln.start
+				}
+				if hi > ln.end {
+					hi = ln.end
+				}
+				x0 := textX + ctx.MeasureText(string(runes[ln.start:lo]), fs)
+				x1 := textX + ctx.MeasureText(string(runes[ln.start:hi]), fs)
+				if x1 > x0 {
+					ctx.DrawHLine(x0, y+lh-3, x1-x0, t.TextColor)
+				}
+			}
 		}
 	}
 

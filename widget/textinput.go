@@ -28,6 +28,7 @@ type TextInput struct {
 	mu       sync.Mutex
 	runes    []rune         // содержимое как []rune
 	caretPos int            // позиция вставки (индекс в runes)
+	ime      imeState       // диапазон незавершённого ввода (ime.go)
 	selStart int            // начало выделения (-1 = нет)
 	selEnd   int            // конец выделения
 	scrollX  int            // горизонтальный сдвиг, пикселей
@@ -1094,6 +1095,7 @@ func (t *TextInput) Draw(ctx DrawContext) {
 	caretPos := t.caretPos
 	selStart := t.selStart
 	selEnd := t.selEnd
+	imeFrom, imeTo, imeActive := t.ime.imeRange()
 	isPwd := t.isPassword
 	showPwd := t.showPassword
 	maskRune := t.MaskRune
@@ -1245,6 +1247,19 @@ func (t *TextInput) Draw(ctx DrawContext) {
 			ctx.FillRectAlpha(selX0, textY-1, selX1-selX0, textH+5, t.SelColor)
 		}
 		ctx.DrawText(displayText, textX, textY, t.TextColor)
+
+		// Набираемый, но ещё не введённый текст подчёркивается: иначе
+		// человек не отличит его от уже введённого.
+		if imeActive && imeFrom < len(positions) {
+			hi := imeTo
+			if hi >= len(positions) {
+				hi = len(positions) - 1
+			}
+			x0, x1 := textX+positions[imeFrom], textX+positions[hi]
+			if x1 > x0 {
+				ctx.DrawHLine(x0, textY+textH+1, x1-x0, t.TextColor)
+			}
+		}
 	}
 
 	// Мигающий курсор. Отрисованную фазу запоминаем — по ней NeedsAnimation
