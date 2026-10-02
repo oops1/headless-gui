@@ -280,6 +280,12 @@ type WaylandWindow struct {
 	// Пусто до Create — подставится имя исполняемого файла.
 	appID string
 
+	// textInput — редактор метода ввода (wayland_ime_linux.go). Расширение
+	// необязательное: компоновщик вправе его не предлагать.
+	textInput      wlTextInput
+	gTextInputMgr  uint32
+	textInputMgrID uint32
+
 	// popups — всплывающие окна (wayland_popup_linux.go): меню и списки,
 	// которым не хватает места в окне. На Wayland они обязаны быть
 	// поверхностями этого же соединения — отдельным окном попап там быть
@@ -573,6 +579,10 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	if w.gFracMgr != 0 {
 		w.fracMgrID = w.bind(w.gFracMgr, "wp_fractional_scale_manager_v1", 1)
 	}
+	if w.gTextInputMgr != 0 && w.gSeat != 0 {
+		w.textInputMgrID = w.bind(w.gTextInputMgr, "zwp_text_input_manager_v3", 1)
+		w.setupTextInput()
+	}
 
 	// surface + xdg_surface + toplevel
 	w.surfaceID = w.newID()
@@ -745,6 +755,8 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 				w.gOutputs = map[uint32]uint32{}
 			}
 			w.gOutputs[name] = version
+		case "zwp_text_input_manager_v3":
+			w.gTextInputMgr = name
 		case "wp_viewporter":
 			w.gViewporter = name
 		case "wp_fractional_scale_manager_v1":
@@ -821,6 +833,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		if len(b) >= 4 {
 			w.noteOutputScale(obj, float64(int32(binary.LittleEndian.Uint32(b[0:4]))))
 		}
+
+	case w.isTextInputObject(obj):
+		w.handleTextInput(opcode, b)
 
 	case w.isFracObject(obj) && opcode == wpFracEvPreferredScale:
 		// Дробный масштаб приходит в 120-х долях: 180 — это 1.5.

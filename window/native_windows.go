@@ -399,7 +399,13 @@ type Win32Window struct {
 	onKeyDownRepeat func(vk int, repeat bool)
 	onKeyUp         func(vk int)
 	onChar          func(r rune)
-	onFilesDropped  func(paths []string, x, y int)
+
+	// Редактор метода ввода (ime_windows.go): набираемое, готовый текст и
+	// место каретки для окна кандидатов.
+	onIMEComposition func(text string, caret int)
+	onIMECommit      func(text string)
+	imeCaret         func() (image.Rectangle, bool)
+	onFilesDropped   func(paths []string, x, y int)
 
 	// fileDropEnabled — DragAcceptFiles(TRUE) уже вызван для этого окна.
 	fileDropEnabled bool
@@ -1495,6 +1501,13 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			}
 		}
 		return 0
+
+	case wmImeSetContext, wmImeStartComposition, wmImeComposition, wmImeEndComposition:
+		if ret, done := w.handleIMEMessage(hwnd, umsg, wparam, lparam); done {
+			return ret
+		}
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+		return ret
 
 	case wmKeydown, wmSyskeydown:
 		// Бит 30 lParam — «клавиша уже была нажата», то есть это автоповтор,
