@@ -122,7 +122,8 @@ type Target struct {
 	// потерь.
 	FromPage, ToPage int
 	// Collate — раскладывать копии по комплектам (1,2,3, 1,2,3), а не по
-	// страницам (1,1, 2,2, 3,3). Учитывается на Windows.
+	// страницам (1,1, 2,2, 3,3). На Windows копии раскладывает сам пакет, на
+	// Linux уходит в CUPS атрибутом multiple-document-handling.
 	Collate bool
 
 	// devmode — настройки драйвера принтера (DEVMODE), которые пользователь

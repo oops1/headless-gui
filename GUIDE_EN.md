@@ -118,6 +118,36 @@ Without `Start()` the queue is drained by `RenderOnce`, `RenderFrameNow` and
 goroutine while the engine is running, deliver that input through `Post` too —
 otherwise handlers run wherever they were called.
 
+**Delayed and repeating calls.** An application had `Post` and nothing else: to
+run something in half a second or once a minute, every place started a
+`time.AfterFunc` and called `Post` from it. That went wrong in two ways. A
+timer had to be cancelled when the window closed, and code that did not left
+goroutines alive after exit to wake a dead engine. And `time.Ticker` sends a
+tick without waiting for the handler, so a slow handler piled calls into the
+queue that then ran all at once. `After` and `Every` belong to the engine: the
+handler runs on the same UI goroutine, the timer dies with the engine and
+holds no goroutine while it waits:
+
+```go
+eng.After(400*time.Millisecond, func() { tip.Show() })   // a tooltip after a pause
+save := eng.Every(time.Minute, func() { doc.Save() })    // autosave
+save.Stop()                                              // cancel; idempotent
+```
+
+For `Every` the next run is scheduled AFTER the handler returns: a slow handler
+slows the repetition rather than piling up a queue of calls, as a
+`time.Ticker` would. A period under one millisecond is rounded up to one
+millisecond. A handler may stop its own timer. `Stop` works after the timer has
+fired but before the call has run: a call already in the queue checks the flag
+and does not execute; a call that is already running is neither interrupted
+nor waited for. `Stopped()` reports that the timer will not fire again.
+`d <= 0` gives a call on the nearest pass of the loop, like `Post`. Stopping
+the engine stops all its timers; a timer created on a stopped engine comes
+back already stopped. The trap is the same as for `Post`: without `Start()` the
+queue is drained only by `RenderOnce`, `RenderFrameNow` and `Flush`, so on an
+engine that is not running the handler runs when the application asks for a
+frame.
+
 ---
 
 ## Widgets
@@ -611,6 +641,31 @@ sv.SetScrollY(100)
 sv.ScrollBy(50)
 ```
 
+Content wider than the area used to be simply clipped: its right part could
+not be reached. A horizontal scrollbar is switched on by `ContentWidth`, the
+full width of the content:
+
+```go
+sv.ContentWidth = 1600   // wider than the area — a horizontal scrollbar appears
+sv.ScrollX() int
+sv.SetScrollX(300)       // clamped to [0, ContentWidth − area width]
+sv.ScrollXBy(-40)        // positive — to the right
+```
+
+Zero (the default) means "no horizontal scrolling", and everything works as
+before. The default cannot be "width by children": for everyone who keeps wide
+children in a `ScrollView` and never asked for a bar, one would suddenly
+appear and take height from the content. Scrolling does not change the
+children's bounds — the application lays them out, in content coordinates.
+
+The two bars depend on each other: the vertical one may be needed only because
+the horizontal one took height. That is resolved in one place. The wheel: a
+horizontal delta moves the content sideways; Shift with the vertical wheel does
+the same, but only when the horizontal bar exists — otherwise Shift still means
+nothing. A click on the horizontal bar does not reach the child under it. There
+is no horizontal inertia: a pixel delta is applied at once. Children are
+clipped in a nested way, as with vertical scrolling.
+
 ### ListView
 
 ```go
@@ -754,6 +809,35 @@ sit to the left of their neighbours. `IconSize` is the side in points, zero mean
 cut into the neighbouring rows. The check mark and the icon do not compete for
 space: the mark on the left, the icon after it, the caption after the icon.
 Submenus (including a `MenuBar`'s) draw icons with the same code.
+
+**Scrolling and reordering of title tabs.** A window can carry tabs in its
+title strip (`EnableTitleTabs`, `AddTitleTab`). Tabs used to shrink to a limit
+and the rest were simply not drawn: with ten open documents some became
+invisible and unreachable. Now, when tabs stop fitting they shrink and then
+the strip scrolls: by the wheel over the title (the vertical wheel too — the
+strip is horizontal, as in a browser), by `ScrollTitleTabs(dx)` (`dx` points,
+positive — to the right) and by itself, to the active tab when it goes past the
+edge. Tabs outside the visible part are not drawn, and the strip is clipped to
+its own bounds so the outermost ones do not run over the window buttons.
+
+Dragging swaps tabs on the fly; the same in code is `MoveTitleTab(from, to)`,
+and `OnTitleTabMoved` reports the move:
+
+```go
+w.EnableTitleTabs()
+w.OnTitleTabMoved = func(from, to int) { log.Printf("tab %d → %d", from, to) }
+w.MoveTitleTab(0, 2)
+```
+
+A press becomes a drag only after a few points of movement — otherwise a
+trembling hand would change the order on a click. `MoveTitleTab` returns
+`false` if the indices are wrong or there is nothing to move; the active tab
+stays the same one. `OnTitleTabMoved` is also called during a drag, on every
+step when the tab takes a neighbour's place: the order changes at once, before
+the button is released, and the release moves nothing more. With a full strip
+the "+" and "v" buttons stand after the tabs but not beyond the space reserved
+for them: before, they were pushed past the right edge and there was no way to
+open a new tab.
 
 ### MenuBar
 
@@ -1686,6 +1770,94 @@ win.SetOnCloseRequest(func() bool {
 `Close()` does not consult the hook — that is already the application's
 decision.
 
+**System theme.** The engine did not know which theme — light or dark — the
+person had picked in the OS, and applications carried their own registry or
+portal reading from project to project. `window.DetectSystemTheme()` returns
+`SystemThemeLight`, `SystemThemeDark` or `SystemThemeUnknown`, and
+`SetOnSystemThemeChanged` reports a change:
+
+```go
+if window.DetectSystemTheme() == window.SystemThemeDark {
+    applyPalette(true) // the palette for the first frame
+}
+
+win.SetOnSystemThemeChanged(func(t window.SystemTheme) {
+    applyPalette(t == window.SystemThemeDark) // your function; runs on the engine goroutine
+})
+```
+
+The engine recolors nothing itself: the application picks the palette.
+`SystemThemeUnknown` is not "light": it is what an OS with no notion of a
+theme answers (Windows before 10 1607), as does Linux with neither `GTK_THEME`
+nor a desktop portal, and macOS. The application then takes its own default
+theme.
+
+- Windows: the `AppsUseLightTheme` value (not `SystemUsesLightTheme` — that one
+  is for the taskbar and the Start menu); a change arrives as a broadcast
+  `WM_SETTINGCHANGE` with the string `ImmersiveColorSet`.
+- Linux: the `GTK_THEME` variable (`Adwaita:dark`; a name with no variant but
+  with the word `dark` also counts as dark), then the settings portal
+  `org.freedesktop.portal.Settings` through the engine's own D-Bus client — no
+  external utilities. A change arrives as the `SettingChanged` signal. If the
+  bus exists but the portal does not answer, the first `DetectSystemTheme` call
+  may take up to a few seconds.
+- macOS: always `SystemThemeUnknown`, and there is no change observation.
+
+The callback is called only for a real change: repeats (Windows sends several
+messages for one switch, the portal sends the signal on an accent color change
+too) and "unknown" are filtered out. Every window has its own subscription,
+including windows from `OpenWindow`; `nil` removes it. `SetOnSystemThemeChanged`
+may be called before `Run`. `DetectSystemTheme` is safe from any goroutine and
+before a window exists.
+
+**Opening a link or a file with the system.** The engine could not open a link
+in a browser, a file in its assigned program, or show a file in the file
+manager, and every application did its own — on Linux by calling `xdg-open` as
+a subprocess. A package with no dependencies has no external utilities, so:
+
+```go
+if err := window.OpenURL("https://example.com/docs"); err != nil {
+    if errors.Is(err, window.ErrOpenScheme) {
+        // a scheme outside the allowed list — the link was not opened for safety
+    }
+}
+window.OpenFile("report.pdf")   // with the program assigned to the file type
+window.RevealFile("report.pdf") // show in Explorer / the file manager
+```
+
+`OpenURL` allows only the schemes `http`, `https`, `ftp`, `mailto` and `file`.
+Anything else is `ErrOpenScheme`: an application that shows links from an
+untrusted document (Markdown) would otherwise open `javascript:`, `ms-msdt:`
+or some other protocol handler with one click. Workarounds are rejected too:
+control characters in the link (`java\tscript:`), a link with no scheme,
+`http:` with no host, `file://` with a foreign host (on Windows that is a trip
+to the network with a password hash; `localhost` is allowed). The case of the
+scheme does not matter. `mailto:` with no recipient is allowed.
+
+`OpenFile` requires an existing path and rejects program files — `.exe`,
+`.bat`, `.lnk`, `.ps1`, `.js`, `.desktop`, `.app` and similar
+(`ErrOpenLaunchable`): to "open" such a file is to run it, and the path may
+come from an untrusted document. This guards against an application's
+mistake; it is not a security boundary — the list of extensions is finite. The
+same rule applies to `file://` in `OpenURL`. `RevealFile` also requires an
+existing path but does not run the file, so it has no ban on programs; if the
+manager cannot select a file, at least the folder opens. On a platform with no
+implementation all three return `ErrOpenUnsupported`.
+
+Success means "the system accepted the request", not "the window has already
+appeared". The call blocks the caller while the system is being asked — up to a
+few seconds on a cold portal start — so from a frame handler it is better
+called in a goroutine.
+
+- Windows: `ShellExecuteW` with the `open` verb; showing a file — Explorer
+  with the file selected.
+- Linux: the `org.freedesktop.portal.OpenURI` portal through the engine's own
+  D-Bus client; showing — `FileManager1.ShowItems`. `xdg-open` is only the last
+  resort, when there is no portal on the bus at all and `xdg-open` is found in
+  `PATH`. If the portal is alive but refused, `xdg-open` is not called: the
+  application would otherwise bypass the sandbox policy.
+- macOS: `/usr/bin/open`, showing — `open -R`.
+
 ---
 
 ## Custom Widget
@@ -1759,6 +1931,31 @@ A polyline is stroked as one outline: no gap and no notch at the bends, unlike
 consecutive `DrawLineAA` segments. For a context without `PathShapes`,
 `widget.FlattenCubic` flattens the curve with the same subdivision the canvas
 uses.
+
+### Nested clipping
+
+`SetClip` REPLACES the clip area and `ClearClip` removes it whole — together
+with the one the parent set. For a widget inside a scroll view that is a
+problem: having removed its own narrowing, it lets its neighbours draw past
+the edges. So a widget that limits drawing to its own part does it like this:
+
+```go
+func (w *MyPanel) Draw(ctx widget.DrawContext) {
+    defer widget.PushClip(ctx, w.Bounds())()   // intersect with the current area
+    // …draw the content…
+}
+```
+
+`PushClip` returns a function that restores the PREVIOUS area rather than
+removing the clip. Next to it, `widget.ClipRect(ctx, r)` intersects a rectangle
+with the visible area and changes nothing: handy for skipping what is
+invisible. It is a free function rather than a method of the context, because
+`DrawContext` is implemented by applications too, and a new interface method
+would break their build.
+
+The engine's containers (the scroll view, the virtualizing list) set their
+area anew before EACH child, so a foreign widget that removes the clip the old
+way does no harm to its neighbours.
 
 ### The draw contract
 
@@ -1992,34 +2189,6 @@ From code — `NextChange`, `PrevChange`, `GoToChange`, `CopyBlock`,
 `Selection(side)` — the numbers of the lines the selection touches, `[from, to)`:
 the selected text does not say which lines they are, and staging needs exactly
 them.
-**Text for a screen reader.** The content of a text field used to travel as
-one string — the element's "value", as on a slider. A screen reader needs
-more: it reads a document in pieces, follows the caret and announces the
-selection. A text widget hands it that through `widget.AccessTextProvider`:
-
-```go
-func (w *MyEditor) AccessText() string          { … } // the whole content
-func (w *MyEditor) AccessCaret() int            { … } // caret position
-func (w *MyEditor) AccessSelection() (int, int) { … } // selection
-func (w *MyEditor) AccessReadOnly() bool        { … }
-```
-
-Offsets are in RUNES: a screen reader counts positions in characters, and a
-Cyrillic string in bytes would give twice the numbers. The data is asked of
-the live widget rather than taken from the semantic snapshot — otherwise it
-would lag behind typing. A widget may also accept edits:
-`AccessTextSetter` (replace the whole text) and `AccessCaretSetter` (move the
-caret).
-
-`TextBox` and `TextInput` already do all this. Multi-line text announces
-itself as a DOCUMENT (`widget.RoleDocument`), a single-line field as an edit:
-by that difference a screen reader decides whether to read the content line
-by line or as one label. A password field is not read at all.
-
-On Windows this is the Value pattern (UI Automation), on Linux the
-`org.a11y.atspi.Text` interface: the text and its ranges, the caret, the
-selection, and the pieces around a position (character, word, line).
-
 Two files dropped from the file manager go to the two sides, one file goes to
 the side under the cursor. A screen reader sees two text panes with their
 content: the control implements `widget.AccessChildrenProvider`
@@ -2485,7 +2654,97 @@ Platforms: Windows through the system input method editor (IMM32), Wayland
 through `text-input-v3` when the compositor offers it. On X11 (XIM) and macOS
 behaviour is unchanged: only finished characters reach the field.
 
+### Accessibility (semantic tree)
+
+The engine builds a semantic snapshot of the UI — roles, names, values and
+states of all visible widgets:
+
+```go
+tree := eng.AccessibilityTree() // *widget.AccessNode, serializable to JSON
+```
+
+Roles of the built-in widgets are derived automatically (button, checkbox,
+combobox, textinput, slider, tablist, …); states are
+checked/selected/disabled/focused/expanded/modal/inactive. A custom widget can
+give its own semantics by implementing `widget.Accessible`:
+
+```go
+func (w *MyWidget) AccessInfo() widget.AccessInfo {
+    return widget.AccessInfo{Role: widget.RoleButton, Name: "My button"}
+}
+```
+
+A widget that draws its content itself rather than through children (an
+editor, a chart) hands its parts over through `widget.AccessChildrenProvider` —
+`AccessChildren() []AccessInfo`. That is how `DiffView` shows a screen reader
+its two text panes.
+
+**Text for a screen reader.** The content of a text field used to travel as
+one string — the element's "value", as on a slider. A screen reader needs
+more: it reads a document in pieces, follows the caret and announces the
+selection. A text widget hands it that through `widget.AccessTextProvider`:
+
+```go
+func (w *MyEditor) AccessText() string          { … } // the whole content
+func (w *MyEditor) AccessCaret() int            { … } // caret position
+func (w *MyEditor) AccessSelection() (int, int) { … } // selection
+func (w *MyEditor) AccessReadOnly() bool        { … }
+```
+
+Offsets are in RUNES: a screen reader counts positions in characters, and a
+Cyrillic string in bytes would give twice the numbers. The data is asked of
+the live widget rather than taken from the semantic snapshot — otherwise it
+would lag behind typing. A widget may also accept edits:
+`AccessTextSetter` (replace the whole text) and `AccessCaretSetter` (move the
+caret).
+
+`TextBox` and `TextInput` already do all this. Multi-line text announces
+itself as a DOCUMENT (`widget.RoleDocument`), a single-line field as an edit:
+by that difference a screen reader decides whether to read the content line
+by line or as one label. A password field is not read at all.
+
+On Windows these are the Value and Text patterns (UI Automation), on Linux the
+`org.a11y.atspi.Text` interface: the text and its ranges, the caret, the
+selection, and the pieces around a position (character, word, line).
+
+The Value pattern alone is not enough for a document: Narrator and NVDA could
+not read the current line or the word under the caret and announced the whole
+text again in an editor. They read the Text pattern in pieces. The application
+needs to do nothing for it; `AccessTextProvider` is enough. The units are
+character (`\r\n` counts as one), word (with the spaces after it), line,
+paragraph and document; format and page are treated as the document. The bridge
+raises `TextSelectionChanged` and `TextChanged` for the focused field itself —
+without them NVDA does not follow the caret.
+
+A screen reader can select a range if the widget implements the optional
+`widget.AccessSelectionSetter` (`TextBox` and `TextInput` have it):
+
+```go
+func (w *MyEditor) AccessSetSelection(from, to int) bool {
+    // runes, from <= to; the caret goes to `to`; from == to clears the
+    // selection and places the caret; false — the widget declined (read-only, say)
+    return w.selectRange(from, to)
+}
+```
+
+It is separate from `AccessCaretSetter`, because every field lets the caret be
+placed while selecting is optional. Without it, selecting a range comes down to
+placing the caret at its end, and a screen reader that has read a word cannot
+highlight it. A password field has no pattern.
+
+What the Text pattern simplifies: text attributes are not supported (a legal
+answer in UIA); the character rectangle is one for the whole element, since the
+widget publishes no exact rectangles; wrapping by widget width does not count as
+a line; ranges do not follow edits and are clamped to the text length.
+
+Uses: a semantics side channel in streaming scenarios (the client voices the UI
+with a screen reader), finding elements in autotests by role and name. Bridges
+exist for UI Automation (Windows) and AT-SPI (Linux); there is no macOS
+bridge. Keyboard navigation (Tab/Shift+Tab, Enter/Space) already works.
+
 ### Fonts
+
+Eight bundled free families### Fonts
 
 Eight bundled free families, each with its license file (full list, licenses
 and redistribution duties: `assets/fonts/README.md`):
@@ -2532,6 +2791,39 @@ eng.SetDefaultFont("Roboto")
 <TextBlock FontFamily="Roboto" FontSize="16"/>
 ```
 
+### Font metrics
+
+Ascent, descent and line gap lived only inside the engine — `DrawText` sets
+the baseline by them — and an application could not get at them. Notepad
+parsed TTF files for the sake of one number and risked diverging from the
+engine in rounding; a widget with mixed point sizes in one line (an editor
+with highlighting, rich text) could not align them on a common baseline.
+`widget.MeasureUIFontMetrics(sizePt, family)` returns them in logical pixels:
+
+```go
+big := widget.MeasureUIFontMetrics(18, "")   // "" — the default font
+small := widget.MeasureUIFontMetrics(10, "")
+
+// Two captions of different size on a common baseline; y is the top of the line.
+base := y + max(big.Ascent, small.Ascent)
+ctx.DrawTextSize("12", x, base-big.Ascent, 18, fg)
+ctx.DrawTextSize(" px", x+widget.MeasureUIText("12", 18), base-small.Ascent, 10, fg)
+```
+
+`Ascent` is the distance from the top of the line to the baseline — exactly how
+far `DrawText` lowers the baseline from the `y` it is given. `Descent` is from
+the baseline to the bottom of the line (positive), `LineGap` is the gap between
+lines the font recommends, `Height` is `Ascent + Descent + LineGap`. The numbers
+come from the same cache the text is drawn from and through the same measurer
+as `MeasureUITextFont`; the argument order is the same — size, then family. An
+empty name and an unregistered name give the default font, as when drawing.
+
+On HiDPI the metrics are converted to logical pixels by rounding to the nearest,
+not up as widths are: the ascent is the position of a line, not room to
+reserve. With no registered engine (tests without `engine.New`, a stopped
+engine) an approximation from the point size is returned, so that a layout does
+not divide by zero; a size of zero or less gives all zeros.
+
 ---
 
 ### Standard dialogs (MessageBox, input, progress, files)
@@ -2557,6 +2849,53 @@ copies its content in the Windows format (`---` separators). The Open
 browser has a places sidebar (custom Places + home/drives), a clickable
 breadcrumb path, Name/Size/Modified columns and extension filters.
 
+**Own drop-down lists in the file dialog.** The make-up of file dialogs was
+fixed, and a field could not be added to them. An application that needed even
+one list — "Encoding", as in the Windows Notepad — had to write its own dialog
+whole. `FileDialogOptions.Choices` adds any number of lists: a label (or a
+localization key), the options and the one selected at first. The choice is read
+from the dialog itself — `ShowOpenFile`, `ShowSaveFile` and `ShowPickFolder`
+return a `*widget.FileDialog` — usually straight from the result callback,
+which did not change:
+
+```go
+var fd *widget.FileDialog
+fd = mb.ShowSaveFile(widget.FileDialogOptions{
+    InitialName: "note.txt",
+    Choices: []widget.FileDialogChoice{
+        widget.EncodingChoice(),
+        {ID: "eol", Label: "Line endings", Options: []string{"LF", "CRLF"}},
+    },
+}, func(path string, ok bool) {
+    if !ok {
+        return
+    }
+    enc, _ := fd.Choice(widget.EncodingChoiceID) // index of the option
+    eol, _ := fd.ChoiceText("eol")               // text of the option: "LF" or "CRLF"
+    save(path, enc, eol)
+})
+```
+
+`var fd` is declared separately, or the callback cannot refer to `fd`. The
+callback runs after the person's choice, when `fd` is already assigned. The
+values live in the dialog after it closes, cancel included: look at `ok`.
+`Choice(id)` and `ChoiceText(id)` return `false` as the second value when there
+is no such list; `SetChoice(id, idx)` picks an option from code. A list with no
+options is not shown, a `Default` out of range is 0, and with repeated `ID`s the
+first answers. `LabelKey` is a localization key for the label: it changes with
+the language; the options themselves are never translated.
+
+`widget.EncodingChoice()` is a ready set: UTF-8, UTF-8 with BOM, UTF-16 LE/BE
+and Windows-1251, UTF-8 by default; the indices are the constants
+`EncodingUTF8`, `EncodingUTF8BOM`, `EncodingUTF16LE`, `EncodingUTF16BE`,
+`EncodingWindows1251`. The engine neither converts encodings nor detects them
+from content: the application reads and writes the file. Append your own
+options to the END of `Options` so the constants stay valid.
+
+The lists sit under the "name + file type" row and are right-aligned; those
+that do not fit go to the next row, and the dialog grows by a row. Without
+lists the sizes and the set of widgets are as before.
+
 ### Multiline TextBox
 
 `widget.NewTextBox(placeholder)` — an editor: word wrap (`Wrap=false`
@@ -2578,8 +2917,7 @@ For a code editor `TextBox` also has:
 - `SetStyler(widget.Styler)` — styles on ranges: syntax, search and error
   highlighting. The widget asks the application line by line, visible lines
   only: `LineSpans(line int, text string) []widget.Span`, where `line` is the
-  logical line number (split on `
-`) and `Span{From, To, Style}` is a rune
+  logical line number (split on `\n`) and `Span{From, To, Style}` is a rune
   range. `Style{Color, BG, Face}`: `Face` is a registered font name (regular,
   bold and italic are separate fonts of one family and must share glyph
   width). Answers are cached until the text changes; `InvalidateStyles()`
@@ -2588,6 +2926,33 @@ For a code editor `TextBox` also has:
 - A horizontal scrollbar when `Wrap=false`: thumb dragging, horizontal wheel,
   Shift+wheel.
 - Undo history stores edits (position, removed, inserted), not text snapshots.
+
+```go
+type commentStyler struct{ color color.RGBA }
+
+func (s commentStyler) LineSpans(line int, text string) []widget.Span {
+    if strings.HasPrefix(strings.TrimSpace(text), "//") {
+        return []widget.Span{{From: 0, To: utf8.RuneCountInString(text),
+            Style: widget.Style{Color: s.color}}}
+    }
+    return nil
+}
+
+tb := widget.NewTextBox("")
+tb.Wrap = false
+tb.FontName = widget.BuiltinFontMono // or a name from RegisterFont
+tb.AcceptTab = true                  // Tab inserts a tab character
+tb.TabSize = 4
+tb.SetStyler(commentStyler{color: color.RGBA{R: 0, G: 128, B: 0, A: 255}})
+```
+
+Limits. Zero `Style` fields mean "as the widget has it". Overlapping ranges are
+applied field by field: color from syntax, background from search; ranges past
+the end of the line are clipped. Layout, caret and selection are measured with
+the widget's font, not `Face`, so the faces must match in glyph width — the
+bold and italic variants of the same monospaced font. `Shift+Tab` does not
+remove an indent. `SetText` with different text clears the undo history. Edits
+from the context menu and IME input are undone as one edit.
 
 ### Browser viewer (output/webstream)
 
@@ -2608,6 +2973,119 @@ skip frames. Input comes back as JSON (mouse/wheel/keys; the browser's
 same markup, tabs, themes and localization as the native window, without a
 single OS window) or the minimal go run ./cmd/webdemo →
 http://localhost:8091.
+
+### Printing and saving to PDF
+
+The engine had no printing at all: an application had to call the OS print
+subsystem and lay the document out a second time — with other fonts and other
+layout, so "one thing on screen, another on paper" was commonplace. The model
+is now the same as for the screen: the application draws each page into an
+image with the same drawing context, and the engine sends the finished pages
+to the printer. The `printing` package gives paper sizes, orientation, margins,
+the list of printers and printing; the `output/pdf` package gives a PDF from
+page images with no dependencies.
+
+```go
+setup := printing.NewPageSetup(printing.A4)  // a portrait sheet, 300 dpi
+setup.Margins = printing.UniformMargins(15)  // mm
+w, h := setup.SheetSize()                    // 2480 × 3508 pixels
+content := setup.ContentRect()               // where to draw inside the margins
+
+var pages []image.Image
+for i := 0; i < pageCount; i++ {
+    pages = append(pages, renderPage(i, w, h, content)) // your code: an image for the whole sheet
+}
+job := printing.Job{Name: "Report", Setup: setup, Pages: pages}
+
+// To PDF — on any platform.
+err := printing.SavePDF("report.pdf", job, printing.PDFOptions{Title: "Report"})
+
+// To a printer.
+target := printing.Target{Copies: 2}
+if printing.HasPrintDialog() {
+    target, err = printing.PrintDialog(0, job) // 0 — the process's active window
+    if errors.Is(err, printing.ErrCanceled) {
+        return
+    }
+}
+err = printing.Print(target, job)
+```
+
+A page can be drawn by the engine too — with a `dpi/96` scale, so the interface
+does not come out tiny on a 300 dpi sheet:
+
+```go
+k := float64(setup.EffectiveDPI()) / 96
+eng := engine.New(int(float64(w)/k+0.5), int(float64(h)/k+0.5), 1)
+eng.SetScale(k)
+eng.SetRoot(pageUI)
+img := eng.RenderOnce() // *image.RGBA; its size may differ from w×h by a pixel
+```
+
+The size of a page image need not match `SheetSize()`: the physical size is then
+taken from the pixels and the resolution. A match is the only way to guarantee
+that everything takes the planned place on paper.
+
+**Paper and margins.** `A3`, `A4`, `A5`, `A6`, `Letter`, `Legal`, `Tabloid`,
+`Executive` and `CustomPaper(name, widthMM, heightMM)`; orientation is
+`Portrait` (the default) and `Landscape`. A page is drawn on the WHOLE sheet:
+margins only say where to draw the content (`ContentRect`), and printers with
+different unprintable edges print the same thing. `NewPageSetup` sets 20 mm on
+the left and 10 mm on the other sides — a starting point, not a
+recommendation. `PageSetup.DPI == 0` means 300 (`DefaultDPI`); 72–1200 is
+allowed. The page area is limited by `MaxPagePixels` (about 105 million
+pixels): A4 at 1200 dpi is over it, and `Validate` returns `ErrBadSetup`
+advising a lower resolution. The engine canvas has its own limit
+(`engine.MaxCanvasPixels`). `PagePixels(paper, orientation, dpi)` gives the
+same sizes without a `PageSetup`.
+
+**The target.** `Target.Printer` is a name from `Printers()`, empty means the
+default printer (`DefaultPrinter()`). `Copies` is the number of copies, 0 means
+one, capped at `MaxCopies` (999): a typo "10000" would otherwise push out a ream
+of paper. `FromPage`/`ToPage` is a range counted from one, inclusive, zeros mean
+all pages; an upper bound beyond the job is silently clipped, a start beyond
+it and an inverted range are an error. `Collate` lays copies out in sets
+(1 2 3, 1 2 3) rather than by page (1 1, 2 2, 3 3).
+
+`Print` returns when the system has accepted the job: on Linux, into the CUPS
+queue, on Windows, when the pages have been handed to the driver. That takes
+seconds, so from a frame handler it is called in a goroutine. Success does not
+mean the paper came out.
+
+Errors are distinguished with `errors.Is`: `ErrNoPrinter`, `ErrCanceled` (the
+system dialog was closed), `ErrNoPrintService` (CUPS is not running, on Linux),
+`ErrUnsupported`, `ErrNoPages`, `ErrBadSetup`.
+
+**PDF.** `printing.SavePDF(path, job, opts)` and `printing.WritePDF(w, job, opts)`;
+`PDFOptions` is `pdf.Options`: `Title`, `Author`, `Creator`, `Created` (zero —
+not written, the same input gives the same bytes) and `JPEGQuality`. A page is
+one image for the whole sheet; the text is rasterized by the engine, so it
+matches the screen, but in the file it cannot be selected or searched.
+Lossless (Flate) is the default, `JPEGQuality` 1–100 switches to JPEG, which
+blurs small text. Transparency is blended with white. `SavePDF` writes to a
+temporary file and renames it: an interrupted write does not leave a stub in
+place of a good document. Directly — `pdf.NewWriter(w, opts)`,
+`AddPage(pdf.PageFromImage(img, dpi))` and `Close()`: pages are written one at
+a time, and memory does not grow with the whole document.
+
+**Platforms.**
+
+- Windows: the system `PrintDlgEx` dialog (`HasPrintDialog()` is `true`) and
+  printing through GDI. A page lies on the sheet allowing for the unprintable
+  margins and is rotated if the orientation did not match; it goes to the driver
+  in bands. Driver settings from the dialog (duplex, tray) reach the `Target`
+  only through `PrintDialog`.
+- Linux: IPP 2.0 to CUPS — over the socket `/run/cups/cups.sock` or
+  `localhost:631` (`CUPS_SERVER` is honored), as an `application/pdf`
+  document; no `lp` or `lpr`. There is no system dialog (`PrintDialog` returns
+  `ErrUnsupported`): the application builds its own printer choice from
+  `Printers()`. The `org.freedesktop.portal.Print` portal is not done — it needs
+  a file descriptor over D-Bus, and the engine's own client cannot do that; in a
+  sandbox with no CUPS printing returns `ErrNoPrintService`.
+- macOS and others: printing is `ErrUnsupported`. `SavePDF` works everywhere.
+
+Printing has not been tested on a real printer: IPP was checked against the RFC
+and a test server, the GDI path was run on "Microsoft Print to PDF".
 
 ### Native modal windows and popups (v3.10)
 
@@ -3083,6 +3561,48 @@ By platform: **Win32** (`WM_DROPFILES`) and **X11** (XDND v5) are complete;
 **Wayland** (`wl_data_device`) is a skeleton that needs live-session verification;
 macOS is not supported. Headless routing to `FileDropTarget` is testable via
 `SendFilesDropped` without a window.
+
+### Rich text on the clipboard
+
+The clipboard knew only plain text: headings, bold and links from a Markdown
+preview were pasted into Word and a mail client as bare text.
+`widget.SetClipboardHTML(html, plain)` puts both representations at once — the
+receiver chooses: Word takes the markup, Notepad takes the plain text.
+`widget.ClipboardHTML()` reads the markup, if there is any.
+
+```go
+widget.SetClipboardHTML(
+    `<h1>Summary</h1><p><b>Revenue</b> grew, <a href="https://example.com">details</a></p>`,
+    "Summary\n\nRevenue grew, details")
+
+if html, ok := widget.ClipboardHTML(); ok {
+    // the clipboard holds an HTML fragment
+} else {
+    text := widget.ClipboardGetText() // the fallback: plain text
+}
+```
+
+`ClipboardHTML` returns `ok == false` when there is no HTML on the clipboard,
+and also when the clipboard provider cannot do HTML. It does not hand out plain
+text posing as HTML: that would have to be escaped, and the caller could not
+tell the two apart. `plain` is required — without it, pasting into Notepad or a
+terminal would give nothing.
+
+The `ClipboardProvider` interface did not change: applications implement it.
+HTML is the optional `widget.ClipboardHTMLProvider` (`SetHTML(html, plain)`,
+`GetHTML() (html string, ok bool)`). A custom provider without it gets only
+`plain` from `SetClipboardHTML`: the markup is lost, the text is not.
+
+- Windows: the "HTML Format" clipboard format with a service header whose
+  offsets are counted in UTF-8 BYTES — a mistake there is the most common
+  reason Word pastes garbage. Building and parsing are available as
+  `widget.BuildCFHTML(fragment)` and `widget.ParseCFHTML(data)`. Both
+  representations are put in one opening of the clipboard.
+- Wayland and X11: the `text/html` type next to the text ones. When reading
+  someone else's HTML the engine understands UTF-8 (BOM included) and the
+  UTF-16 that Firefox and some Qt programs put there. It works in a native
+  window (`window.Run`): the window installs the Linux clipboard provider.
+- macOS, and Linux without a native window: plain text only.
 
 ### Color emoji
 
