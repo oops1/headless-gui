@@ -1636,6 +1636,30 @@ if err := win.Run(); err != nil {  // blocks until window closes
 }
 ```
 
+**Several windows in one process.** A process had one window: `Run` created
+it and occupied the goroutine until it closed, and a second window had to be
+a second process. Now the first window opens the second:
+
+```go
+eng2 := engine.New(600, 400, 30)
+eng2.SetRoot(buildSecondUI())
+eng2.Start()
+
+second := window.New(eng2, "Second window")
+if err := win.OpenWindow(second); err != nil {
+    log.Printf("second window: %v", err)
+}
+```
+
+The second window's `Run` is not called: a process has one event loop, and
+the main window runs it. The second one is prepared like any other — its own
+engine, title, size, icon — and lives on its own: its own taskbar button, its
+own widget tree, its own closing. It closes together with the main window
+too, or its engine would keep running and its OS window would stay on screen.
+
+`OpenWindow` may be called from anywhere, including a button handler:
+creating the window is marshalled to the right thread by itself.
+
 **Title and closing.** The title changes on the fly — both in the strip the
 engine draws and in the taskbar:
 
@@ -1968,6 +1992,34 @@ From code — `NextChange`, `PrevChange`, `GoToChange`, `CopyBlock`,
 `Selection(side)` — the numbers of the lines the selection touches, `[from, to)`:
 the selected text does not say which lines they are, and staging needs exactly
 them.
+**Text for a screen reader.** The content of a text field used to travel as
+one string — the element's "value", as on a slider. A screen reader needs
+more: it reads a document in pieces, follows the caret and announces the
+selection. A text widget hands it that through `widget.AccessTextProvider`:
+
+```go
+func (w *MyEditor) AccessText() string          { … } // the whole content
+func (w *MyEditor) AccessCaret() int            { … } // caret position
+func (w *MyEditor) AccessSelection() (int, int) { … } // selection
+func (w *MyEditor) AccessReadOnly() bool        { … }
+```
+
+Offsets are in RUNES: a screen reader counts positions in characters, and a
+Cyrillic string in bytes would give twice the numbers. The data is asked of
+the live widget rather than taken from the semantic snapshot — otherwise it
+would lag behind typing. A widget may also accept edits:
+`AccessTextSetter` (replace the whole text) and `AccessCaretSetter` (move the
+caret).
+
+`TextBox` and `TextInput` already do all this. Multi-line text announces
+itself as a DOCUMENT (`widget.RoleDocument`), a single-line field as an edit:
+by that difference a screen reader decides whether to read the content line
+by line or as one label. A password field is not read at all.
+
+On Windows this is the Value pattern (UI Automation), on Linux the
+`org.a11y.atspi.Text` interface: the text and its ranges, the caret, the
+selection, and the pieces around a position (character, word, line).
+
 Two files dropped from the file manager go to the two sides, one file goes to
 the side under the cursor. A screen reader sees two text panes with their
 content: the control implements `widget.AccessChildrenProvider`
@@ -2389,10 +2441,49 @@ eng.PhysicalSize()      // physical size of frames/tiles
 `Frames()` tiles and `SendMouse*` events are physical pixels (events are
 converted to logical inside the engine).
 
-The native window (`window.Run`) detects the scale automatically: on Windows
+The native window (`window.Run`) detects the scale automatically. On Windows
 per-monitor DPI awareness (v2) is enabled plus WM_DPICHANGED handling when
-the window moves between monitors; on X11/macOS set the
-`HEADLESS_GUI_SCALE=1.5` environment variable (auto-detection planned).
+the window moves between monitors. On X11 the scale comes from the desktop
+settings — the `Xft.dpi` resource of the X server's resource database (the
+one GTK and Qt use), with `GDK_SCALE` as a fallback. On Wayland it comes from
+the compositor: the surface's fractional scale, or, without that extension,
+the integer scale of the output the window is shown on; it may change on the
+fly. On macOS, and on top of any detection, the scale is set by the
+`HEADLESS_GUI_SCALE=1.5` environment variable.
+
+### Composition input (IME)
+
+Chinese, Japanese and Korean are not typed letter by letter: a person types
+syllables, the system shows a list of candidates, and only the chosen variant
+becomes text. Until it is chosen, what was typed is the COMPOSITION: it is
+visible in the field, underlined, but not yet entered.
+
+The built-in `TextBox` and `TextInput` handle this themselves — an
+application needs to do nothing. The composition is shown at the caret,
+replaced by the next one, and turns into ordinary text once a variant is
+picked; the candidate window is placed under the caret by the system.
+
+A custom text widget implements `widget.IMEComposer`:
+
+```go
+func (w *MyEditor) IMESetComposition(text string, caret int) { … } // being typed
+func (w *MyEditor) IMECommit(text string)                    { … } // entered
+func (w *MyEditor) IMECancel()                               { … } // abandoned
+func (w *MyEditor) IMECaretRect() image.Rectangle            { … } // where the caret is
+```
+
+An application feeding the engine its own events passes the composition
+itself:
+
+```go
+eng.SendComposition("にほ", 2) // being typed, cursor after the second glyph
+eng.CommitComposition("日本")  // a variant was chosen
+eng.CancelComposition()        // typing abandoned
+```
+
+Platforms: Windows through the system input method editor (IMM32), Wayland
+through `text-input-v3` when the compositor offers it. On X11 (XIM) and macOS
+behaviour is unchanged: only finished characters reach the field.
 
 ### Fonts
 

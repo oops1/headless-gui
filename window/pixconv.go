@@ -44,3 +44,39 @@ func convRectBGRX(dst []byte, dstStride int, src []byte, srcStride int, r image.
 		pixsimd.SwapRBOpaque(dst[do:do+rowLen], src[so:so+rowLen])
 	}
 }
+
+// convRectBGRAPremul конвертирует RGBA→BGRA с умножением на альфу внутри r.
+//
+// Для всплывающих окон Wayland (wl_shm формат ARGB8888). Альфа там нужна
+// по-настоящему: вынесенное каскадное меню — ступенька, и между её полосами
+// есть площадь, которую никто не закрашивает; в непрозрачном буфере она
+// была бы чёрным прямоугольником. Протокол требует цвет, УЖЕ умноженный на
+// альфу, иначе у скруглённых углов меню появляется светлый ореол.
+func convRectBGRAPremul(dst []byte, dstStride int, src []byte, srcStride int, r image.Rectangle) {
+	if r.Empty() || dstStride <= 0 || srcStride <= 0 {
+		return
+	}
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		so := y*srcStride + r.Min.X*4
+		do := y*dstStride + r.Min.X*4
+		if so < 0 || do < 0 || so+r.Dx()*4 > len(src) || do+r.Dx()*4 > len(dst) {
+			return
+		}
+		for x := 0; x < r.Dx(); x++ {
+			s := src[so+x*4 : so+x*4+4 : so+x*4+4]
+			d := dst[do+x*4 : do+x*4+4 : do+x*4+4]
+			a := uint32(s[3])
+			switch a {
+			case 255:
+				d[0], d[1], d[2], d[3] = s[2], s[1], s[0], 255
+			case 0:
+				d[0], d[1], d[2], d[3] = 0, 0, 0, 0
+			default:
+				d[0] = byte(uint32(s[2]) * a / 255)
+				d[1] = byte(uint32(s[1]) * a / 255)
+				d[2] = byte(uint32(s[0]) * a / 255)
+				d[3] = byte(a)
+			}
+		}
+	}
+}

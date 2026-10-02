@@ -105,6 +105,7 @@ const (
 	uiaCtrlSpinner     = 50016
 	uiaCtrlTab         = 50018
 	uiaCtrlText        = 50020
+	uiaCtrlDocument    = 50030
 	uiaCtrlCustom      = 50025
 	uiaCtrlGroup       = 50026
 	uiaCtrlWindow      = 50032
@@ -112,6 +113,7 @@ const (
 
 	// Паттерны управления (UIA_*PatternId).
 	uiaPatternInvoke = 10000
+	uiaPatternValue  = 10002
 	uiaPatternToggle = 10015
 
 	// ToggleState.
@@ -157,6 +159,8 @@ func uiaControlType(r widget.AccessRole) int32 {
 		return uiaCtrlProgressBar
 	case widget.RoleTextInput:
 		return uiaCtrlEdit
+	case widget.RoleDocument:
+		return uiaCtrlDocument
 	case widget.RoleLabel:
 		return uiaCtrlText
 	case widget.RoleComboBox:
@@ -202,6 +206,7 @@ type uiaElement struct {
 	rootVT     uintptr
 	invokeVT   uintptr
 	toggleVT   uintptr
+	valueVT    uintptr
 
 	// refs — счётчик ссылок COM. Атомарный: AddRef/Release приходят из
 	// потоков UIA, а не только из UI-потока окна.
@@ -247,12 +252,14 @@ func newUIAElement(b *uiaBridge, id int32) *uiaElement {
 	e.rootVT = uiaRootVTable()
 	e.invokeVT = uiaInvokeVTable()
 	e.toggleVT = uiaToggleVTable()
+	e.valueVT = uiaValueVTable()
 	uiaObjMu.Lock()
 	uiaObjects[uintptr(unsafe.Pointer(&e.simpleVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.fragmentVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.rootVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.invokeVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.toggleVT))] = e
+	uiaObjects[uintptr(unsafe.Pointer(&e.valueVT))] = e
 	uiaObjMu.Unlock()
 	return e
 }
@@ -265,6 +272,7 @@ func (e *uiaElement) forget() {
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.rootVT)))
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.invokeVT)))
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.toggleVT)))
+	delete(uiaObjects, uintptr(unsafe.Pointer(&e.valueVT)))
 	uiaObjMu.Unlock()
 }
 
@@ -273,6 +281,7 @@ func (e *uiaElement) fragmentPtr() uintptr { return uintptr(unsafe.Pointer(&e.fr
 func (e *uiaElement) rootPtr() uintptr     { return uintptr(unsafe.Pointer(&e.rootVT)) }
 func (e *uiaElement) invokePtr() uintptr   { return uintptr(unsafe.Pointer(&e.invokeVT)) }
 func (e *uiaElement) togglePtr() uintptr   { return uintptr(unsafe.Pointer(&e.toggleVT)) }
+func (e *uiaElement) valuePtr() uintptr    { return uintptr(unsafe.Pointer(&e.valueVT)) }
 
 // isRoot — корень фрагмента (окно): у него живёт FragmentRoot и хост-провайдер.
 func (e *uiaElement) isRoot() bool { return e.id == e.b.rootID() }
@@ -325,7 +334,7 @@ func uiaSupportsToggle(r widget.AccessRole) bool {
 var (
 	uiaVTOnce                             sync.Once
 	uiaVTSimple, uiaVTFragment, uiaVTRoot uintptr
-	uiaVTInvoke, uiaVTToggle              uintptr
+	uiaVTInvoke, uiaVTToggle, uiaVTValue  uintptr
 )
 
 func uiaInitVTables() {
@@ -359,6 +368,11 @@ func uiaInitVTables() {
 			windows.NewCallback(uiaToggle),
 			windows.NewCallback(uiaGetToggleState),
 		)
+		uiaVTValue = newVTable(qi, addRef, release,
+			windows.NewCallback(uiaSetValue),
+			windows.NewCallback(uiaGetValue),
+			windows.NewCallback(uiaGetValueIsReadOnly),
+		)
 	})
 }
 
@@ -367,6 +381,7 @@ func uiaFragmentVTable() uintptr { uiaInitVTables(); return uiaVTFragment }
 func uiaRootVTable() uintptr     { uiaInitVTables(); return uiaVTRoot }
 func uiaInvokeVTable() uintptr   { uiaInitVTables(); return uiaVTInvoke }
 func uiaToggleVTable() uintptr   { uiaInitVTables(); return uiaVTToggle }
+func uiaValueVTable() uintptr    { uiaInitVTables(); return uiaVTValue }
 
 // ─── IUnknown ────────────────────────────────────────────────────────────────
 
@@ -410,6 +425,13 @@ func uiaQueryInterface(this uintptr, riid *comGUID, ppv *uintptr) uintptr {
 		}
 		uiaLog("QI(%d, Toggle)", e.id)
 		*ppv = e.togglePtr()
+	case riid.equals(&iidValueProvider):
+		if !uiaSupportsValue(e.role()) {
+			uiaLog("QI(%d, Value) → роль не поддерживает, E_NOINTERFACE", e.id)
+			return eNoInterface
+		}
+		uiaLog("QI(%d, Value)", e.id)
+		*ppv = e.valuePtr()
 	default:
 		uiaLog("QI(%d, %s) → E_NOINTERFACE", e.id, riid)
 		return eNoInterface
@@ -473,6 +495,11 @@ func uiaGetPatternProvider(this uintptr, patternID int32, out *uintptr) uintptr 
 		if uiaSupportsToggle(role) {
 			e.refs.Add(1)
 			*out = e.togglePtr()
+		}
+	case uiaPatternValue:
+		if uiaSupportsValue(role) {
+			e.refs.Add(1)
+			*out = e.valuePtr()
 		}
 	}
 	uiaLog("Pattern(%d, %d, role=%s) → %#x", e.id, patternID, role, *out)
@@ -1196,4 +1223,108 @@ func uiaHandleGetObject(hwnd, wparam, lparam uintptr) (uintptr, bool) {
 	ret, _, _ := procUiaReturnRawElementProvider.Call(hwnd, wparam, lparam, root.simplePtr())
 	uiaLog("WM_GETOBJECT → корень id=%d, ret=%#x", root.id, ret)
 	return ret, true
+}
+
+// ─── IValueProvider ──────────────────────────────────────────────────────────
+//
+// Содержимое поля ввода скринридер читает через этот паттерн. Без него текст
+// доезжал до него одной строкой-«значением» элемента, как у ползунка: для
+// кнопки довольно, для поля ввода — нет, и NVDA с «Экранным диктором»
+// объявляли поле пустым.
+
+// uiaSupportsValue — роли, у которых есть текстовое содержимое.
+func uiaSupportsValue(r widget.AccessRole) bool {
+	switch r {
+	case widget.RoleTextInput, widget.RoleDocument:
+		return true
+	}
+	return false
+}
+
+// uiaTextOf возвращает текстовую семантику виджета элемента.
+func uiaTextOf(e *uiaElement) (widget.AccessTextProvider, bool) {
+	node := e.node()
+	if node == nil || node.Widget == nil {
+		return nil, false
+	}
+	return widget.AccessTextOf(node.Widget)
+}
+
+// uiaGetValue — IValueProvider::get_Value.
+//
+// Текст спрашивается у виджета, а не берётся из снимка семантики: снимок
+// пересобирается раз в сто пятьдесят миллисекунд и отставал бы от набора.
+func uiaGetValue(this uintptr, out *uintptr) uintptr {
+	if out == nil {
+		return eInvalidArg
+	}
+	*out = 0
+	e := uiaLookup(this)
+	if e == nil {
+		return eFail
+	}
+	text := ""
+	if tp, ok := uiaTextOf(e); ok {
+		text = tp.AccessText()
+	} else if node := e.node(); node != nil {
+		text = node.Info.Value
+	} else {
+		return uiaEElementNotAvailable
+	}
+	var v comVariant
+	v.setString(text)
+	*out = v.val[0] // BSTR уходит клиенту во владение
+	uiaLog("get_Value(%d) → %d симв.", e.id, len([]rune(text)))
+	return sOK
+}
+
+// uiaGetValueIsReadOnly — IValueProvider::get_IsReadOnly.
+func uiaGetValueIsReadOnly(this uintptr, out *int32) uintptr {
+	if out == nil {
+		return eInvalidArg
+	}
+	*out = 1
+	e := uiaLookup(this)
+	if e == nil {
+		return eFail
+	}
+	if tp, ok := uiaTextOf(e); ok {
+		if !tp.AccessReadOnly() {
+			*out = 0
+		}
+		return sOK
+	}
+	node := e.node()
+	if node == nil {
+		return uiaEElementNotAvailable
+	}
+	if !a11yHasState(node.Info.States, widget.StateReadOnly) &&
+		!a11yHasState(node.Info.States, widget.StateDisabled) {
+		*out = 0
+	}
+	return sOK
+}
+
+// uiaSetValue — IValueProvider::SetValue: средство автоматизации (или сам
+// скринридер) заменяет содержимое поля.
+//
+// Правка идёт на горутине движка: дерево виджетов принадлежит ей, а вызов
+// приходит из потока UIA.
+func uiaSetValue(this uintptr, bstr uintptr) uintptr {
+	e := uiaLookup(this)
+	if e == nil {
+		return eFail
+	}
+	tp, ok := uiaTextOf(e)
+	if !ok {
+		return uiaEElementNotAvailable
+	}
+	setter, ok := tp.(widget.AccessTextSetter)
+	if !ok || tp.AccessReadOnly() {
+		return uiaEElementNotEnabled
+	}
+	text := bstrToString(bstr)
+	e.b.win.postToEngine(func() { setter.AccessSetText(text) })
+	uiaLog("SetValue(%d, %d симв.)", e.id, len([]rune(text)))
+	return sOK
 }

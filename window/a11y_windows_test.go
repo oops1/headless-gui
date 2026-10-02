@@ -513,8 +513,11 @@ func TestUIAPatternProviderByRole(t *testing.T) {
 	if got := pattern(lbl, uiaPatternToggle); got != 0 {
 		t.Errorf("Toggle у надписи = %#x, ожидался NULL", got)
 	}
-	if got := pattern(btn, 10002); got != 0 { // ExpandCollapse — не реализован
+	if got := pattern(btn, 10005); got != 0 { // ExpandCollapse — не реализован
 		t.Errorf("неизвестный паттерн = %#x, ожидался NULL", got)
+	}
+	if got := pattern(btn, uiaPatternValue); got != 0 {
+		t.Errorf("Value у кнопки = %#x, ожидался NULL: текста у неё нет", got)
 	}
 
 	// QueryInterface обязан отвечать так же, как GetPatternProvider: иначе

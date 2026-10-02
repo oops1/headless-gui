@@ -57,6 +57,11 @@ func newWlTestWindow(t *testing.T) *wlTestConn {
 	w.seatID = 7
 	w.pointerID = 14
 	w.surfaceID = 11
+	// Глобалы, без которых не создать попап (см. wayland_popup_linux_test.go).
+	w.compositorID = 3
+	w.shmID = 4
+	w.wmBaseID = 5
+	w.xdgSurfaceID = 10
 	w.width, w.height = 800, 600
 	t.Cleanup(func() {
 		client.Close()

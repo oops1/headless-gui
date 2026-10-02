@@ -142,6 +142,9 @@ var (
 	iidInvokeProvider = comGUID{0x54FCB24B, 0xE18E, 0x47A2, [8]byte{0xB4, 0xD3, 0xEC, 0xCB, 0xE7, 0x75, 0x99, 0xA2}}
 	// IToggleProvider {56D00BD0-C4F4-433C-A836-1A52A57E0892} — паттерн Toggle.
 	iidToggleProvider = comGUID{0x56D00BD0, 0xC4F4, 0x433C, [8]byte{0xA8, 0x36, 0x1A, 0x52, 0xA5, 0x7E, 0x08, 0x92}}
+	// IValueProvider {C7935180-6FB3-4201-B174-7DF73ADBF64A} — паттерн Value:
+	// содержимое поля ввода как строка.
+	iidValueProvider = comGUID{0xC7935180, 0x6FB3, 0x4201, [8]byte{0xB1, 0x74, 0x7D, 0xF7, 0x3A, 0xDB, 0xF6, 0x4A}}
 )
 
 // ─── Импорты ─────────────────────────────────────────────────────────────────
@@ -279,4 +282,22 @@ func newVTable(fns ...uintptr) uintptr {
 	vtableKeep = append(vtableKeep, tbl)
 	vtableMu.Unlock()
 	return uintptr(unsafe.Pointer(&tbl[0]))
+}
+
+// bstrToString читает строку COM (BSTR) — указатель на UTF-16 с длиной перед
+// ним. Нужен для входных параметров: SetValue приходит именно в таком виде.
+//
+// Длину берём из заголовка BSTR (четыре байта перед данными), а не ищем NUL:
+// строка вправе содержать нули внутри, и поиск оборвал бы её на первом.
+func bstrToString(bstr uintptr) string {
+	if bstr == 0 {
+		return ""
+	}
+	nBytes := *(*uint32)(unsafe.Pointer(bstr - 4))
+	n := int(nBytes / 2)
+	if n <= 0 || n > 1<<20 {
+		return ""
+	}
+	buf := unsafe.Slice((*uint16)(unsafe.Pointer(bstr)), n)
+	return windows.UTF16ToString(buf)
 }

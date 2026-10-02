@@ -37,14 +37,19 @@ const (
 	RoleSlider      AccessRole = "slider"
 	RoleProgressBar AccessRole = "progressbar"
 	RoleTextInput   AccessRole = "textinput"
-	RoleLabel       AccessRole = "label"
-	RoleComboBox    AccessRole = "combobox"
-	RoleList        AccessRole = "list"
-	RoleTabControl  AccessRole = "tablist"
-	RoleMenuBar     AccessRole = "menubar"
-	RoleSpinner     AccessRole = "spinner"
-	RoleImage       AccessRole = "image"
-	RoleUnknown     AccessRole = "unknown"
+	// RoleDocument — многострочный текст (редактор, просмотр документа).
+	// Отдельно от RoleTextInput: скринридер читает его иначе — по строкам и
+	// абзацам, а не одной подписью, — и объявляет человеку документом, а не
+	// полем ввода.
+	RoleDocument   AccessRole = "document"
+	RoleLabel      AccessRole = "label"
+	RoleComboBox   AccessRole = "combobox"
+	RoleList       AccessRole = "list"
+	RoleTabControl AccessRole = "tablist"
+	RoleMenuBar    AccessRole = "menubar"
+	RoleSpinner    AccessRole = "spinner"
+	RoleImage      AccessRole = "image"
+	RoleUnknown    AccessRole = "unknown"
 )
 
 // Состояния элемента (строковые — для простой JSON-сериализации).
@@ -191,8 +196,11 @@ func accessInfoFor(w Widget) AccessInfo {
 			info.Value = t.GetText()
 		}
 	case *TextBox:
-		info.Role = RoleTextInput
+		info.Role = RoleDocument
 		info.Value = t.GetText()
+		if t.ReadOnly {
+			info.States = append(info.States, StateReadOnly)
+		}
 	case *Label:
 		info.Role = RoleLabel
 		info.Name = t.Text()

@@ -45,6 +45,7 @@ const (
 	ifaceApplication = "org.a11y.atspi.Application"
 	ifaceValue       = "org.a11y.atspi.Value"
 	ifaceAction      = "org.a11y.atspi.Action"
+	ifaceText        = "org.a11y.atspi.Text"
 	ifaceSocket      = "org.a11y.atspi.Socket"
 	ifaceCache       = "org.a11y.atspi.Cache"
 	atspiCachePath   = "/org/a11y/atspi/cache"
@@ -139,6 +140,11 @@ func atspiRoleOf(r widget.AccessRole) uint32 {
 		return atspiRoleProgressBar
 	case widget.RoleTextInput:
 		return atspiRoleEntry
+	case widget.RoleDocument:
+		// В AT-SPI многострочный текст — это «text», а «entry» остаётся
+		// однострочному полю: по этому различию скринридер решает, читать
+		// содержимое построчно или одной подписью.
+		return atspiRoleText
 	case widget.RoleLabel:
 		return atspiRoleLabel
 	case widget.RoleComboBox:
@@ -733,6 +739,8 @@ func (b *atspiBridge) handleCall(msg *dbusMessage) *dbusReply {
 		return b.handleValue(msg, node)
 	case ifaceAction:
 		return b.handleAction(msg, node)
+	case ifaceText:
+		return b.handleText(msg, node)
 	}
 	return nil
 }
@@ -837,6 +845,14 @@ func (b *atspiBridge) handleProps(msg *dbusMessage, v *a11yView, id int32, node 
 			case "MinimumIncrement":
 				return dbusVariant{Sig: "d", Val: step}, true
 			}
+		case ifaceText:
+			text, caret, _, _ := atspiTextOf(node)
+			switch name {
+			case "CharacterCount":
+				return dbusVariant{Sig: "i", Val: int32(widget.AccessRuneLen(text))}, true
+			case "CaretOffset":
+				return dbusVariant{Sig: "i", Val: int32(caret)}, true
+			}
 		case ifaceAction:
 			// Свежий libatspi берёт число действий СВОЙСТВОМ NActions, а не
 			// методом GetNActions (без этой ветки get_n_actions() возвращал 0,
@@ -870,6 +886,8 @@ func (b *atspiBridge) handleProps(msg *dbusMessage, v *a11yView, id int32, node 
 			names = []string{"ToolkitName", "Version", "AtspiVersion", "Id"}
 		case ifaceValue:
 			names = []string{"CurrentValue", "MinimumValue", "MaximumValue", "MinimumIncrement"}
+		case ifaceText:
+			names = []string{"CharacterCount", "CaretOffset"}
 		}
 		all := map[string]dbusVariant{}
 		for _, n := range names {
@@ -1113,6 +1131,13 @@ func (b *atspiBridge) interfacesOf(id int32, node *a11yNode) []string {
 		out = append(out, ifaceValue)
 	case widget.RoleButton, widget.RoleCheckBox, widget.RoleRadioButton, widget.RoleSwitch:
 		out = append(out, ifaceAction)
+	case widget.RoleTextInput, widget.RoleDocument:
+		// Содержимое поля скринридер читает кусками — символами, словами и
+		// строками, следуя за кареткой. Для этого и нужен Text: одного
+		// «значения» элемента ему мало.
+		if _, ok := atspiTextProvider(node); ok {
+			out = append(out, ifaceText)
+		}
 	}
 	return out
 }
@@ -1178,6 +1203,18 @@ func atspiIntrospectXML(root bool) string {
 <method name="GetLayer"><arg direction="out" type="u"/></method>
 <method name="GrabFocus"><arg direction="out" type="b"/></method>
 </interface>
+<interface name="org.a11y.atspi.Text">
+<property name="CharacterCount" type="i" access="read"/>
+<property name="CaretOffset" type="i" access="read"/>
+<method name="GetText"><arg direction="in" type="i"/><arg direction="in" type="i"/><arg direction="out" type="s"/></method>
+<method name="SetCaretOffset"><arg direction="in" type="i"/><arg direction="out" type="b"/></method>
+<method name="GetStringAtOffset"><arg direction="in" type="i"/><arg direction="in" type="u"/><arg direction="out" type="s"/><arg direction="out" type="i"/><arg direction="out" type="i"/></method>
+<method name="GetTextAtOffset"><arg direction="in" type="i"/><arg direction="in" type="u"/><arg direction="out" type="s"/><arg direction="out" type="i"/><arg direction="out" type="i"/></method>
+<method name="GetCharacterAtOffset"><arg direction="in" type="i"/><arg direction="out" type="i"/></method>
+<method name="GetNSelections"><arg direction="out" type="i"/></method>
+<method name="GetSelection"><arg direction="in" type="i"/><arg direction="out" type="i"/><arg direction="out" type="i"/></method>
+<method name="GetAttributes"><arg direction="in" type="i"/><arg direction="out" type="a{ss}"/><arg direction="out" type="i"/><arg direction="out" type="i"/></method>
+</interface>
 `)
 	if root {
 		sb.WriteString(`<interface name="org.a11y.atspi.Application">
@@ -1203,3 +1240,143 @@ const atspiCacheXML = `<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object I
 </interface>
 </node>
 `
+
+// ─── org.a11y.atspi.Text ─────────────────────────────────────────────────────
+//
+// Содержимое поля ввода уезжало к скринридеру одной строкой — «значением»
+// элемента, как у ползунка. Для кнопки этого довольно, для текста — нет:
+// скринридер читает документ кусками, идёт за кареткой, озвучивает выделение.
+// Без этого интерфейса Orca объявляла поле пустым.
+
+// atspiTextProvider — текстовая семантика виджета узла.
+func atspiTextProvider(node *a11yNode) (widget.AccessTextProvider, bool) {
+	if node == nil || node.Widget == nil {
+		return nil, false
+	}
+	return widget.AccessTextOf(node.Widget)
+}
+
+// atspiTextOf — текст, каретка и выделение узла.
+//
+// Спрашиваются у виджета, а не берутся из снимка семантики: снимок
+// пересобирается раз в сто пятьдесят миллисекунд и отставал бы от набора.
+func atspiTextOf(node *a11yNode) (text string, caret, selFrom, selTo int) {
+	tp, ok := atspiTextProvider(node)
+	if !ok {
+		if node != nil {
+			return node.Info.Value, 0, 0, 0
+		}
+		return "", 0, 0, 0
+	}
+	text = tp.AccessText()
+	caret = tp.AccessCaret()
+	selFrom, selTo = tp.AccessSelection()
+	return text, caret, selFrom, selTo
+}
+
+// handleText — org.a11y.atspi.Text.
+func (b *atspiBridge) handleText(msg *dbusMessage, node *a11yNode) *dbusReply {
+	text, caret, selFrom, selTo := atspiTextOf(node)
+	n := widget.AccessRuneLen(text)
+
+	switch msg.Member {
+	case "GetText":
+		from, to := atspiIntArg(msg, 0), atspiIntArg(msg, 1)
+		if to < 0 {
+			to = int32(n) // -1 означает «до конца», так его шлёт libatspi
+		}
+		return &dbusReply{Sig: "s", Body: []any{widget.AccessSubstring(text, int(from), int(to))}}
+
+	case "GetCharacterCount":
+		return &dbusReply{Sig: "i", Body: []any{int32(n)}}
+
+	case "GetCaretOffset":
+		return &dbusReply{Sig: "i", Body: []any{int32(caret)}}
+
+	case "SetCaretOffset":
+		return &dbusReply{Sig: "b", Body: []any{b.setCaret(node, int(atspiIntArg(msg, 0)))}}
+
+	case "GetStringAtOffset":
+		s, from, to := a11yTextSlice(text, int(atspiIntArg(msg, 0)),
+			a11yGranularity(atspiUintArg(msg, 1)))
+		return &dbusReply{Sig: "sii", Body: []any{s, int32(from), int32(to)}}
+
+	case "GetTextAtOffset":
+		// Старый вид запроса: вид границы вместо зернистости.
+		s, from, to := a11yTextSlice(text, int(atspiIntArg(msg, 0)),
+			a11yTextBoundaryToGran(atspiUintArg(msg, 1)))
+		return &dbusReply{Sig: "sii", Body: []any{s, int32(from), int32(to)}}
+
+	case "GetCharacterAtOffset":
+		rs := []rune(text)
+		off := int(atspiIntArg(msg, 0))
+		if off < 0 || off >= len(rs) {
+			return &dbusReply{Sig: "i", Body: []any{int32(0)}}
+		}
+		return &dbusReply{Sig: "i", Body: []any{int32(rs[off])}}
+
+	case "GetNSelections":
+		cnt := int32(0)
+		if selFrom != selTo {
+			cnt = 1
+		}
+		return &dbusReply{Sig: "i", Body: []any{cnt}}
+
+	case "GetSelection":
+		if selFrom == selTo || atspiIntArg(msg, 0) != 0 {
+			return &dbusReply{Sig: "ii", Body: []any{int32(0), int32(0)}}
+		}
+		return &dbusReply{Sig: "ii", Body: []any{int32(selFrom), int32(selTo)}}
+
+	case "GetAttributes", "GetAttributeRun":
+		// Оформления текста движок не публикует: весь текст одного вида.
+		// Возвращаем пустой набор на весь документ — так отвечает и GTK для
+		// неоформленного текста.
+		return &dbusReply{Sig: "a{ss}ii",
+			Body: []any{dbusArray{ElemSig: "{ss}"}, int32(0), int32(n)}}
+
+	case "GetDefaultAttributes", "GetDefaultAttributeSet":
+		return &dbusReply{Sig: "a{ss}", Body: []any{dbusArray{ElemSig: "{ss}"}}}
+	}
+	return nil
+}
+
+// setCaret переставляет каретку по просьбе скринридера.
+//
+// Правка идёт на горутине движка: дерево виджетов принадлежит ей, а вызов
+// пришёл с шины.
+func (b *atspiBridge) setCaret(node *a11yNode, pos int) bool {
+	tp, ok := atspiTextProvider(node)
+	if !ok {
+		return false
+	}
+	setter, ok := tp.(widget.AccessCaretSetter)
+	if !ok {
+		return false
+	}
+	b.win.postToEngine(func() { setter.AccessSetCaret(pos) })
+	return true
+}
+
+// atspiIntArg — целый аргумент вызова по номеру (отсутствует — ноль).
+func atspiIntArg(msg *dbusMessage, i int) int32 {
+	if len(msg.Body) > i {
+		if v, ok := msg.Body[i].(int32); ok {
+			return v
+		}
+	}
+	return 0
+}
+
+// atspiUintArg — беззнаковый аргумент вызова по номеру.
+func atspiUintArg(msg *dbusMessage, i int) uint32 {
+	if len(msg.Body) > i {
+		switch v := msg.Body[i].(type) {
+		case uint32:
+			return v
+		case int32:
+			return uint32(v)
+		}
+	}
+	return 0
+}
