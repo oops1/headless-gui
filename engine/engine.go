@@ -148,6 +148,15 @@ type Engine struct {
 	lastMoveX, lastMoveY int
 	hasLastMove          bool
 
+	// Серия нажатий одной кнопкой — для MouseEvent.Clicks. Доступ оттуда же,
+	// из потока-источника ввода (SendMouseButton).
+	clickBtn      widget.MouseButton
+	clickAt       time.Time
+	clickX        int
+	clickY        int
+	clickN        int
+	dblClickDelay time.Duration // 0 — значение по умолчанию (defaultDoubleClick)
+
 	frames chan output.Frame
 	quit   chan struct{}
 	done   chan struct{}
