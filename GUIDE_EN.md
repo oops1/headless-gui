@@ -2965,6 +2965,49 @@ bold and italic variants of the same monospaced font. `Shift+Tab` does not
 remove an indent. `SetText` with different text clears the undo history. Edits
 from the context menu and IME input are undone as one edit.
 
+### RichText — formatted text (display only)
+
+`Label` has one font and colour, `TextBox` one size for the whole field. For
+a Markdown preview, help pages and highlighted logs there is `widget.RichText`:
+paragraphs of runs, each run with its own font, size, colour, background,
+underline, strike-through and link. It is not editable (that is the next stage).
+
+```go
+rt := widget.NewRichText()
+rt.SetParagraphs([]widget.RichParagraph{
+    {Runs: []widget.RichRun{{Text: "Title", Font: widget.BuiltinFontBold, Size: 20}},
+        SpaceAfter: 6},
+    {Runs: []widget.RichRun{
+        {Text: "Plain text, "},
+        {Text: "red", Color: color.RGBA{R: 224, G: 108, B: 117, A: 255}},
+        {Text: " and a "},
+        {Text: "link", Link: "https://example.com"},
+    }},
+})
+rt.OnLinkClick = func(url string) { window.OpenURL(url) } // the widget opens nothing itself
+rt.AppendRun(widget.RichRun{Text: " more"})                // end of the last paragraph
+rt.AppendParagraph(widget.RichParagraph{Runs: ...})        // log: no document rebuild
+```
+
+- Word wrap across runs of different fonts and sizes; a word longer than the
+  line is broken by characters; `\n` inside a run is a line break.
+- A line is as tall as its tallest run (ascent + descent) and all runs sit on
+  one baseline; `LineSpacing` adds space between lines. Underline and
+  strike-through take position and thickness from the run font's metrics.
+- Content taller than the widget gets a vertical scrollbar; wheel, PgUp/PgDn,
+  arrows, Home/End. `ScrollToEnd()` is for logs.
+- Mouse selection (drag, double-click word, triple-click paragraph), Ctrl+A,
+  Ctrl+C: both plain text and HTML go to the clipboard (pastes into Word with
+  formatting; the default colour and size are not exported — they belong to
+  the theme).
+- Hand cursor over a link; a click without dragging calls `OnLinkClick(url)`.
+- Screen readers: role "document", `AccessTextProvider` (text and selection).
+- XAML: `<RichText>` with `<Paragraph>` and `<Run Text= FontSize= FontWeight=
+  FontStyle= Foreground= Background= TextDecorations=>`, plus `<Bold>`,
+  `<Italic>`, `<Underline>`, `<Span>`, `<Hyperlink NavigateUri=>`,
+  `<LineBreak/>`. Put a space at a run boundary into the `Text` attribute: the
+  XAML parser trims text between tags.
+
 ### Browser viewer (output/webstream)
 
 Any engine app can be shown in a browser with no client build:

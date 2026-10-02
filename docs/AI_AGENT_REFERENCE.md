@@ -577,6 +577,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
 | `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
+| `<RichText>` | `RichText` | `Foreground`, `Background`, `LinkForeground`, `FontSize`, `FontFamily`, `Padding`, `LineSpacing`, `Text`; children `<Paragraph>` (`TextAlignment`, `Margin`, `Indent`, `SpaceBefore/After`) with `<Run>`, `<Bold>`, `<Italic>`, `<Underline>`, `<Span>`, `<Hyperlink NavigateUri>`, `<LineBreak/>` (see "RichText") |
 | `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `ShowHeaders`, `ShowReadOnlyMark`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17 additions") |
 | `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
 | `<DatePicker>` | `DatePicker` | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd` (ISO 8601 or invariant M/d/yyyy), `DateFormat` (.NET pattern or Go layout), `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
@@ -2305,8 +2306,8 @@ like Button keeps default click behavior — templating is supported on
 
 `Opacity` & per-widget alpha compositing, `RadialGradientBrush`/`ImageBrush`,
 animations/`Storyboard`/`EventTrigger`/`VisualStateManager`, `RelativeSource
-AncestorType`, rich-text inlines (`<Run>/<Bold>` inside TextBlock),
-`RenderTransform`/`LayoutTransform`.
+AncestorType`, rich-text inlines inside `TextBlock` (use `<RichText>`, see
+"RichText" below), `RenderTransform`/`LayoutTransform`.
 
 ---
 
@@ -5221,6 +5222,42 @@ widget.FlattenCubic(x0, y0, x1, y1, x2, y2, x3, y3) []widget.Point2F // same sub
 ```
 
 `StrokePolylineAA` now uses the same single-outline stroker (no notches at bends).
+
+### RichText (formatted text, display only)
+
+```go
+rt := widget.NewRichText()
+rt.SetParagraphs([]widget.RichParagraph{{
+    Runs: []widget.RichRun{
+        {Text: "Big ", Size: 24, Font: widget.BuiltinFontBold},
+        {Text: "small, "},
+        {Text: "link", Link: "https://example.com"},
+    },
+    Align: widget.TextAlignCenter, Indent: 0, SpaceBefore: 0, SpaceAfter: 6,
+}})
+rt.AppendRun(widget.RichRun{Text: "tail"})                 // last paragraph
+rt.AppendParagraph(widget.RichParagraph{Runs: runs})       // incremental, log-friendly
+rt.SetText("plain\ntext"); rt.Text(); rt.Paragraphs(); rt.Clear()
+rt.FontSize, rt.FontName, rt.LineSpacing, rt.LinkUnderline // defaults for runs without own
+rt.TextColor, rt.LinkColor, rt.SelColor, rt.Background     // themed by ApplyTheme
+rt.OnLinkClick = func(url string) {}                       // the widget opens nothing
+rt.SelectAll(); rt.Select(from, to); rt.SelectedText(); rt.Copy() // plain + HTML to clipboard
+rt.ScrollY(); rt.SetScrollY(y); rt.ScrollToEnd(); rt.ContentHeight()
+```
+
+`RichRun{Text, Font, Size, Color, BG, Underline, Strike, Link}` — zero field =
+"as the widget". `Font` is a registered font NAME (bold/italic are separate
+fonts: `BuiltinFontBold`, ...). A line is as tall as its tallest run
+(ascent+descent from `MeasureUIFontMetrics`), all runs share one baseline.
+Word wrap across runs, hard break of over-long words, `\n` in a run = line
+break. Offsets (selection, `AccessTextProvider`) are rune indexes into the text
+with paragraphs joined by `\n`. A vertical scrollbar appears when the content
+is taller than the widget; wheel/PgUp/PgDn/Home/End scroll. Mouse: drag, double
+click = word, triple click = paragraph; Ctrl+C/Ctrl+A. Hand cursor over links
+(`CursorProvider`). Role `RoleDocument`. Layout is pure
+(`widget/richtext_layout.go`, testable with a fake measurer). Not done:
+editing, bullets/tables/images, per-run baseline shift, virtualization of very
+long documents (layout is recomputed whole when width or content changes).
 
 ### Window, theme and containers
 
