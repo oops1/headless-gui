@@ -247,13 +247,13 @@ var (
 	procSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
 	procGetDpiForSystem               = user32.NewProc("GetDpiForSystem")
 
-	procStretchDIBits         = gdi32.NewProc("StretchDIBits")
-	procSetStretchBltMode     = gdi32.NewProc("SetStretchBltMode")
-	procCreateRoundRectRgn    = gdi32.NewProc("CreateRoundRectRgn")
+	procStretchDIBits      = gdi32.NewProc("StretchDIBits")
+	procSetStretchBltMode  = gdi32.NewProc("SetStretchBltMode")
+	procCreateRoundRectRgn = gdi32.NewProc("CreateRoundRectRgn")
 	// Прямоугольные области и их объединение — выкройка окна-попапа по
 	// закрашенной части кадра (popuprgn_windows.go).
-	procCreateRectRgn = gdi32.NewProc("CreateRectRgn")
-	procCombineRgn    = gdi32.NewProc("CombineRgn")
+	procCreateRectRgn         = gdi32.NewProc("CreateRectRgn")
+	procCombineRgn            = gdi32.NewProc("CombineRgn")
 	procSetWindowRgn          = user32.NewProc("SetWindowRgn")
 	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 	procSetCapture            = user32.NewProc("SetCapture")
@@ -366,6 +366,7 @@ type Win32Window struct {
 	onMouseButton      func(x, y, button int, pressed bool)
 	onMouseWheelPixels func(x, y int, dx, dy float64)
 	onKeyDown          func(vk int)
+	onKeyDownRepeat    func(vk int, repeat bool)
 	onKeyUp            func(vk int)
 	onChar             func(r rune)
 	onFilesDropped     func(paths []string, x, y int)
@@ -1021,8 +1022,14 @@ func (w *Win32Window) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) {
 	w.onMouseWheelPixels = fn
 }
 func (w *Win32Window) SetOnKeyDown(fn func(vk int)) { w.onKeyDown = fn }
-func (w *Win32Window) SetOnKeyUp(fn func(vk int))   { w.onKeyUp = fn }
-func (w *Win32Window) SetOnChar(fn func(r rune))    { w.onChar = fn }
+
+// SetOnKeyDownRepeat подписывает приёмник нажатий, отличающий автоповтор от
+// нового нажатия. Реализует keyRepeatSource.
+func (w *Win32Window) SetOnKeyDownRepeat(fn func(vk int, repeat bool)) {
+	w.onKeyDownRepeat = fn
+}
+func (w *Win32Window) SetOnKeyUp(fn func(vk int)) { w.onKeyUp = fn }
+func (w *Win32Window) SetOnChar(fn func(r rune))  { w.onChar = fn }
 
 // SetOnFilesDropped регистрирует колбэк Drag&Drop файлов из ОС (WM_DROPFILES).
 // Координаты — клиентские физические пиксели. Гарантирует включённый приём
@@ -1371,7 +1378,12 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmKeydown:
-		if w.onKeyDown != nil {
+		// Бит 30 lParam — «клавиша уже была нажата», то есть это автоповтор,
+		// а не новое нажатие (WM_KEYDOWN, previous key state).
+		repeat := lparam&(1<<30) != 0
+		if w.onKeyDownRepeat != nil {
+			w.onKeyDownRepeat(int(wparam), repeat)
+		} else if w.onKeyDown != nil {
 			w.onKeyDown(int(wparam))
 		}
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)

@@ -46,7 +46,12 @@ func newWlTestWindow(t *testing.T) *wlTestConn {
 	client := mk(fds[0], "client")
 	peer := mk(fds[1], "compositor")
 
-	w := &WaylandWindow{conn: client, nextID: 20, bufRelease: make(chan struct{}, 1)}
+	w := &WaylandWindow{
+		conn:       client,
+		nextID:     20,
+		bufRelease: make(chan struct{}, 1),
+		repeat:     newWlRepeater(),
+	}
 	w.toplevelID = 12
 	w.seatID = 7
 	w.pointerID = 14

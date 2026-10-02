@@ -852,7 +852,13 @@ func (s *surface) setupInput() {
 	}
 
 	// ── Keys ─────────────────────────────────────────────────────────────────
-	s.native.SetOnKeyDown(func(vk int) { s.keyEvent(vk, true) })
+	// Повтор удерживаемой клавиши бэкенд отмечает отдельно, если умеет;
+	// иначе он приходит неотличимо от нового нажатия, как и раньше.
+	if kr, ok := s.native.(keyRepeatSource); ok {
+		kr.SetOnKeyDownRepeat(func(vk int, repeat bool) { s.keyEventRepeat(vk, true, repeat) })
+	} else {
+		s.native.SetOnKeyDown(func(vk int) { s.keyEvent(vk, true) })
+	}
 	s.native.SetOnKeyUp(func(vk int) { s.keyEvent(vk, false) })
 
 	// ── Char (Unicode символ) ────────────────────────────────────────────────
@@ -874,6 +880,11 @@ func (s *surface) setupInput() {
 
 // keyEvent — нажатие или отпускание клавиши, пришедшее с насоса ОС.
 func (s *surface) keyEvent(vk int, pressed bool) {
+	s.keyEventRepeat(vk, pressed, false)
+}
+
+// keyEventRepeat — то же, но с пометкой «это автоповтор».
+func (s *surface) keyEventRepeat(vk int, pressed, repeat bool) {
 	switch vk {
 	case VK_SHIFT:
 		s.modShift.Store(pressed)
@@ -894,6 +905,7 @@ func (s *surface) keyEvent(vk int, pressed bool) {
 				Code:    code,
 				Mod:     mod,
 				Pressed: pressed,
+				Repeat:  repeat,
 			})
 		}
 	})

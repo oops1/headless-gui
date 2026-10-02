@@ -86,9 +86,18 @@ const (
 	wlAxisPixelScale = 4.0
 
 	// wl_keyboard events
-	wlKeyboardEvKeymap    = 0
-	wlKeyboardEvKey       = 3
-	wlKeyboardEvModifiers = 4
+	wlKeyboardEvKeymap     = 0
+	wlKeyboardEvEnter      = 1
+	wlKeyboardEvLeave      = 2
+	wlKeyboardEvKey        = 3
+	wlKeyboardEvModifiers  = 4
+	wlKeyboardEvRepeatInfo = 5 // версия 4 протокола
+
+	// wlSeatVersion — версия wl_seat, с которой композитор сообщает частоту
+	// автоповтора (wl_keyboard.repeat_info). Выше не берём: следующие версии
+	// обязывают принимать события wl_pointer.frame и прочую группировку,
+	// которой бэкенд не занимается.
+	wlSeatVersion = 4
 
 	xkbModShift = 1 // фиксированные маски реальных модификаторов xkb
 	xkbModLock  = 2
@@ -170,6 +179,14 @@ type WaylandWindow struct {
 	wmBaseID     uint32
 	// имена глобалов registry (для bind)
 	gCompositor, gShm, gSeat, gWmBase uint32
+	gSeatVer                          uint32 // версия wl_seat (repeat_info — с 4-й)
+
+	// repeat — автоповтор удерживаемой клавиши (wayland_repeat_linux.go).
+	repeat *wlRepeater
+	// onKeyDownRepeat — приёмник нажатий, отличающий повтор от нового
+	// нажатия; им пользуется window.surface, если бэкенд умеет (см.
+	// keyRepeatSource).
+	onKeyDownRepeat func(vk int, repeat bool)
 
 	// wl_data_device_manager (Drag&Drop файлов из ОС).
 	gDataDevMgr    uint32 // имя глобала registry
@@ -327,7 +344,12 @@ func newWaylandWindow() *WaylandWindow {
 		return nil
 	}
 	wlLog("connected: %s", path)
-	return &WaylandWindow{conn: conn, nextID: 2, bufRelease: make(chan struct{}, 1)}
+	return &WaylandWindow{
+		conn:       conn,
+		nextID:     2,
+		bufRelease: make(chan struct{}, 1),
+		repeat:     newWlRepeater(),
+	}
 }
 
 // ─── Отправка запросов ───────────────────────────────────────────────────────
@@ -456,7 +478,14 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	w.shmID = w.bind(w.gShm, "wl_shm", 1)
 	w.wmBaseID = w.bind(w.gWmBase, "xdg_wm_base", 1)
 	if w.gSeat != 0 {
-		w.seatID = w.bind(w.gSeat, "wl_seat", 1)
+		ver := w.gSeatVer
+		if ver > wlSeatVersion {
+			ver = wlSeatVersion
+		}
+		if ver < 1 {
+			ver = 1
+		}
+		w.seatID = w.bind(w.gSeat, "wl_seat", ver)
 	}
 	// wl_data_device_manager: Drag&Drop файлов. Версия ≥3 нужна для
 	// finish/set_actions; берём min(advertised, 3).
@@ -600,6 +629,7 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			w.gShm = name
 		case "wl_seat":
 			w.gSeat = name
+			w.gSeatVer = version
 		case "xdg_wm_base":
 			w.gWmBase = name
 		case "wl_data_device_manager":
@@ -828,33 +858,68 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 
 	case wlKeyboardEvKey:
 		// serial, time, key, state
-		key := int(binary.LittleEndian.Uint32(b[8:12]))
+		key := uint32(binary.LittleEndian.Uint32(b[8:12]))
 		pressed := binary.LittleEndian.Uint32(b[12:16]) == 1
-		vk := x11KeycodeToVK(key + 8)
 		if !pressed {
-			if vk != 0 && w.onKeyUp != nil {
+			w.repeat.stopKey(key)
+			if vk := x11KeycodeToVK(int(key) + 8); vk != 0 && w.onKeyUp != nil {
 				w.onKeyUp(vk)
 			}
 			return
 		}
-		if vk != 0 && w.onKeyDown != nil {
+		w.deliverKey(key, false)
+		// Повтор ведёт клиент: композитор между нажатием и отпусканием
+		// молчит. Модификаторы не повторяем — повторять нечего.
+		if vk := x11KeycodeToVK(int(key) + 8); vk != VK_SHIFT && vk != VK_CONTROL && vk != VK_ALT {
+			w.repeat.start(key, func() { w.deliverKey(key, true) })
+		}
+
+	case wlKeyboardEvLeave:
+		// Фокус ушёл — отпускания мы уже не увидим, и повтор завис бы
+		// навсегда.
+		w.repeat.cancel()
+
+	case wlKeyboardEvRepeatInfo:
+		// rate (кл/сек), delay (мс). rate == 0 — композитор выключил повтор.
+		rate := int32(binary.LittleEndian.Uint32(b[0:4]))
+		delay := int32(binary.LittleEndian.Uint32(b[4:8]))
+		w.repeat.setInfo(rate, delay)
+		wlLog("repeat_info: rate=%d delay=%d", rate, delay)
+	}
+}
+
+// deliverKey отдаёт нажатие приложению: сначала код клавиши, затем символ.
+//
+// repeat=true — это автоповтор, а не новое нажатие: приложению важно знать
+// разницу там, где нажатие что-то переключает.
+func (w *WaylandWindow) deliverKey(key uint32, repeat bool) {
+	if vk := x11KeycodeToVK(int(key) + 8); vk != 0 {
+		if w.onKeyDownRepeat != nil {
+			w.onKeyDownRepeat(vk, repeat)
+		} else if w.onKeyDown != nil {
 			w.onKeyDown(vk)
 		}
-		if w.onChar == nil {
-			return
-		}
-		// Полноценный ввод по keymap (руна с учётом раскладки/Shift/Caps);
-		// фолбэк — упрощённый маппинг, как раньше.
-		if r := w.keymap.runeFor(uint32(key+8), w.kbGroup, w.modShift, w.modCaps); r >= 32 {
+	}
+	if w.onChar == nil {
+		return
+	}
+	// Полноценный ввод по keymap (руна с учётом раскладки/Shift/Caps);
+	// фолбэк — упрощённый маппинг, как раньше.
+	if r := w.keymap.runeFor(key+8, w.kbGroup, w.modShift, w.modCaps); r >= 32 {
+		w.onChar(r)
+		return
+	}
+	if w.keymap == nil {
+		if r := x11KeycodeToRune(int(key)+8, w.modShift); r != 0 {
 			w.onChar(r)
-			return
-		}
-		if w.keymap == nil {
-			if r := x11KeycodeToRune(key+8, w.modShift); r != 0 {
-				w.onChar(r)
-			}
 		}
 	}
+}
+
+// SetOnKeyDownRepeat подписывает приёмник нажатий, отличающий автоповтор от
+// нового нажатия. Реализует keyRepeatSource.
+func (w *WaylandWindow) SetOnKeyDownRepeat(fn func(vk int, repeat bool)) {
+	w.onKeyDownRepeat = fn
 }
 
 // ─── SHM-пул и блит ─────────────────────────────────────────────────────────
@@ -1081,6 +1146,7 @@ func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 // ─── Управление окном ────────────────────────────────────────────────────────
 
 func (w *WaylandWindow) Close() {
+	w.repeat.cancel()
 	w.closeCursor()
 	w.closed = true
 	// Соединение закрываем ПОСЛЕ памяти: destroyPool ещё пишет в сокет
