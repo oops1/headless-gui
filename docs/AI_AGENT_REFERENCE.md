@@ -4269,6 +4269,65 @@ elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
 
+### Menu item: shortcut text and mnemonics — v3.27
+
+A menu writes the shortcut on the right — "Ctrl+S". There was no field for it,
+so applications appended it to the item's own caption: it then lined up after
+the caption and read as a second label, not as a hint.
+
+```go
+menu.UseMnemonics = true
+menu.SetItems([]widget.MenuItem{
+    {Text: "_Save", Shortcut: "Ctrl+S", OnClick: save},
+    {Text: "report__2026.txt"}, // a real underscore
+})
+```
+
+`MenuItem.Shortcut` is only SHOWN: the keystroke is handled by the application
+through `InputBindings`, or the same combination would be declared twice and
+one day the two would disagree. Markup: `InputGestureText` (the WPF name) or
+`Shortcut`. The muted colour is mixed with the menu background rather than made
+translucent — translucent text over a highlighted item looks dirty.
+
+Mnemonics are opt-in through `UseMnemonics` (`PopupMenu`, `MenuBar`, and the
+markup attribute): captions do contain real underscores — file names in a
+context menu — and swallowing them silently is not allowed. A Cyrillic mnemonic
+is matched by the physical key, because what reaches the application is the
+Latin letter's code (so that `Ctrl+S` works in a Russian layout) and the engine
+does not know which layout is active; the layout assumed is ЙЦУКЕН, and the
+event's character, when a backend supplies it, wins over that guess.
+
+The menu bar holds no focus while keys go to the focused widget, so Alt+letter
+is handed to it by the application: `MenuBar.ActivateMnemonic(e)` reports
+whether such a mnemonic was found.
+
+### Click count in MouseEvent — v3.27
+
+Every widget used to spot a double click on its own — its own "time of the last
+click" field, its own 400 ms threshold and its own notion of "the mouse did not
+move". The threshold was invented rather than taken from the system, where the
+user sets it in the mouse settings. Nobody handled a triple click, and on
+Windows the second press arrives as a separate message (`WM_LBUTTONDBLCLK`) and
+looked like an ordinary first one.
+
+`MouseEvent.Clicks` now carries the number of the press in the series: 1, 2, 3
+and on. The engine counts it once for the whole tree (`countClick` in
+`engine/events.go`); a series is broken by another button, a cursor farther than
+four points, or a pause longer than the interval. A release carries the number
+of its own press, so a release handler sees the same series as the press.
+
+The interval comes from the system: `window.Run` reports it through the
+optional `doubleClickSink` (Win32 `GetDoubleClickTime`), and `SetDoubleClickTime`
+is public for anyone feeding the engine themselves. X11 and Wayland have no
+system-wide value in the protocol itself — it lives in desktop settings
+(XSettings, KDE's own key) — so there the default stays.
+
+`Clicks == 0` means the event did not come from the engine (a direct
+`OnMouseButton` call from a test or an application with its own dispatch): the
+widget then counts the series itself through `clicksOf` (`widget/clicks.go`),
+exactly as before. First use: a triple click selects the line in `TextBox` and
+the whole field in `TextInput`.
+
 ### Window areas: Snap Layouts and edge snapping — v3.26
 
 Engine windows are borderless: the title bar and its buttons are drawn by the
