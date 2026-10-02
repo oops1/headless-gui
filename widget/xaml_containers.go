@@ -875,6 +875,11 @@ func buildXAMLMenuBar(el xElement, reg map[string]Widget, parentOff image.Point,
 		}
 	}
 
+	// Мнемоники — по требованию: в подписях бывают настоящие подчёркивания.
+	if strings.EqualFold(el.attr("UseMnemonics"), "True") {
+		mb.UseMnemonics = true
+	}
+
 	// Attached properties
 	applyCommonProps(mb, el)
 
@@ -968,6 +973,10 @@ func buildXAMLPopupMenu(el xElement, reg map[string]Widget, parentOff image.Poin
 	absBounds := el.bounds().Add(parentOff)
 	pm.SetBounds(absBounds)
 	applyCommonProps(pm, el)
+
+	if strings.EqualFold(el.attr("UseMnemonics"), "True") {
+		pm.UseMnemonics = true
+	}
 
 	if id := el.name(); id != "" {
 		reg[id] = pm

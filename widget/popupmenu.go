@@ -104,6 +104,14 @@ type PopupMenu struct {
 	MinWidth     int // минимальная ширина меню
 	ArrowPadding int // отступ для стрелки ► справа
 
+	// UseMnemonics — читать в подписях пунктов мнемоники: «_Файл» рисуется
+	// как «Файл» с чертой под Ф, и нажатие этой буквы при открытом меню
+	// выбирает пункт. Двойное подчёркивание означает сам знак подчёркивания.
+	//
+	// По умолчанию выключено: в подписях бывают настоящие подчёркивания —
+	// имена файлов в контекстном меню, — и молча съедать их нельзя.
+	UseMnemonics bool
+
 	// OnSelect вызывается при выборе пункта (index, text).
 	OnSelect func(index int, text string)
 }
@@ -381,6 +389,7 @@ func (m *PopupMenu) openChild(idx int) {
 	child.PaddingX = m.PaddingX
 	child.MinWidth = m.MinWidth
 	child.ArrowPadding = m.ArrowPadding
+	child.UseMnemonics = m.UseMnemonics
 	child.SetItems(subItems)
 	child.OnSelect = m.OnSelect
 
@@ -470,7 +479,8 @@ func (m *PopupMenu) calcSize() (w, h int) {
 			}
 			// Ширина по НАСТОЯЩЕМУ замеру подписи: len в Go считает байты, и
 			// кириллический пункт выходил вдвое шире нужного.
-			textW := MeasureUIText(item.Text, DefaultFontSizePt) + m.PaddingX*2 + 24 + gutter
+			textW := MeasureUIText(mnemonicLabel(item.Text, m.UseMnemonics),
+				DefaultFontSizePt) + m.PaddingX*2 + 24 + gutter
 			if item.Shortcut != "" {
 				// Сочетание пишется справа, и место под него нужно
 				// отвести всему меню: иначе подпись и сочетание налезут
@@ -615,7 +625,7 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 			ix := px + m.PaddingX + m.checkGutter()
 			ctx.DrawImageScaled(item.Icon, ix, curY+(m.ItemHeight-sz)/2, sz, sz)
 		}
-		ctx.DrawText(item.Text, textX, textY, textCol)
+		drawMnemonicText(ctx, item.Text, textX, textY, textCol, m.UseMnemonics)
 
 		// Сочетание клавиш — справа, приглушённым цветом: это подсказка, а
 		// не вторая подпись, и спорить с названием пункта она не должна.
@@ -859,6 +869,74 @@ func (m *PopupMenu) OnKeyEvent(e KeyEvent) {
 				}
 			}
 		}
+
+	default:
+		m.handleMnemonic(e, hover)
+	}
+}
+
+// handleMnemonic выбирает пункт по подчёркнутой букве.
+//
+// Если буква у пунктов одна на двоих, нажатие не выбирает ни одного, а
+// переставляет подсветку на следующий такой пункт: так ведёт себя меню
+// Windows, и это единственное разумное — выбрать за человека наугад нельзя.
+func (m *PopupMenu) handleMnemonic(e KeyEvent, hover int) {
+	if !m.UseMnemonics || e.Mod&(ModCtrl) != 0 {
+		return
+	}
+	m.mu.RLock()
+	var hits []int
+	for i, it := range m.items {
+		if it.Separator || it.Disabled {
+			continue
+		}
+		if _, key, _ := splitMnemonic(it.Text); matchesMnemonic(key, e) {
+			hits = append(hits, i)
+		}
+	}
+	m.mu.RUnlock()
+	if len(hits) == 0 {
+		return
+	}
+	if len(hits) > 1 {
+		next := hits[0]
+		for _, i := range hits {
+			if i > hover {
+				next = i
+				break
+			}
+		}
+		m.setHoverIdx(next)
+		return
+	}
+	m.activateItem(hits[0])
+}
+
+// activateItem выполняет пункт так же, как Enter: подменю открывает, обычный
+// пункт выполняет, закрыв перед этим всё меню.
+func (m *PopupMenu) activateItem(idx int) {
+	m.mu.RLock()
+	if idx < 0 || idx >= len(m.items) {
+		m.mu.RUnlock()
+		return
+	}
+	item := m.items[idx]
+	m.mu.RUnlock()
+
+	if len(item.SubItems) > 0 {
+		m.setHoverIdx(idx)
+		m.openChild(idx)
+		if c, _ := m.openChildOf(); c != nil {
+			c.setHoverIdx(c.nextActiveItem(-1))
+		}
+		return
+	}
+	m.closeAll()
+	if item.OnClick != nil {
+		item.OnClick()
+	}
+	if m.OnSelect != nil {
+		m.OnSelect(idx, item.Text)
 	}
 }
 
