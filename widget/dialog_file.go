@@ -61,6 +61,11 @@ type FileDialogOptions struct {
 	Places      []FilePlace  // дополнительные места в боковой панели
 	// AllowedRoots — разрешённые каталоги (пустой → глобальный дефолт).
 	AllowedRoots []string
+	// Choices — дополнительные выпадающие списки внизу диалога, рядом с
+	// фильтром типов файлов (например, «Кодировка»). Пустой → диалог ровно
+	// такой же, как без этого поля. Как приложение узнаёт выбор — см.
+	// FileDialogChoice и FileDialog.Choice.
+	Choices []FileDialogChoice
 }
 
 var (
@@ -150,6 +155,8 @@ type FileDialog struct {
 	filter  int      // индекс активного фильтра
 	roots   []string // разрешённые корни (пустой — вся ФС)
 
+	choices []*choiceCtl // дополнительные списки (см. FileDialogOptions.Choices)
+
 	crumb   *crumbBar
 	places  *placeList // nil в компактном Save
 	table   *fileTable // nil в компактном Save
@@ -203,6 +210,11 @@ func (mb *MessageBox) showFileDialog(opts FileDialogOptions, onResult func(path 
 		start = "."
 	}
 
+	// Копия: приложение вправе переиспользовать свой FileDialogOptions для
+	// следующего диалога, а нормализация (пустые списки, Default) не должна
+	// менять ему исходные данные.
+	opts.Choices = normChoices(opts.Choices)
+
 	fd := &FileDialog{eng: mb.eng, opts: opts, onResult: onResult, roots: roots}
 	if opts.Mode == FileSave {
 		fd.buildSaveCompact(mb, title)
@@ -221,12 +233,26 @@ func (mb *MessageBox) showFileDialog(opts FileDialogOptions, onResult func(path 
 func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 	const (
 		dlgW   = 640
-		dlgH   = 460
+		baseH  = 460
 		padX   = dlgPad
 		crumbY = dlgTitleH + 12
 		panelY = crumbY + 42
 		panelH = 280
 	)
+	// Ряды дополнительных списков считаем ДО создания диалога: им нужна
+	// высота, а размер диалога после NewDialog уже не подгонишь. Без них
+	// extraH = 0 и dlgH остаётся прежним 460.
+	nameY := panelY + panelH + 12
+	plan := planChoices(fd.opts.Choices, dlgW-2*padX)
+	// В Open ряд «имя + фильтр» занят, и списки идут под ним, прибавляя
+	// высоту; в FolderPick этот ряд пуст — первый ряд списков встаёт в него.
+	choiceY, extraH := nameY, plan.height()
+	if fd.opts.Mode == FileOpen {
+		choiceY += choiceRowH
+	} else if extraH > 0 {
+		extraH -= choiceRowH
+	}
+	dlgH := baseH + extraH
 	dlg := NewDialog(title, dlgW, dlgH)
 	fd.dlg = dlg
 
@@ -262,7 +288,6 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 	dlg.AddChild(fd.table)
 
 	// ── Имя файла + фильтр (только Open) ─────────────────────────────────
-	nameY := panelY + panelH + 12
 	var nameLbl *Label
 	var filterDD *Dropdown
 	if fd.opts.Mode == FileOpen {
@@ -279,6 +304,9 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 		filterDD.SetBounds(image.Rect(dlgW-padX-224, nameY, dlgW-padX, nameY+30))
 		dlg.AddChild(filterDD)
 	}
+
+	// ── Дополнительные списки приложения ─────────────────────────────────
+	fd.addChoices(dlg, dlgW, choiceY, plan)
 
 	// ── Кнопки ───────────────────────────────────────────────────────────
 	okKey := "dlg.open"
@@ -303,10 +331,14 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 func (fd *FileDialog) buildSaveCompact(mb *MessageBox, title string) {
 	const (
 		dlgW   = 540
-		dlgH   = 232
+		baseH  = 232
 		padX   = dlgPad
 		crumbY = dlgTitleH + 12
 	)
+	// Высота диалога растёт на ряды дополнительных списков (см. buildBrowser);
+	// без них dlgH == baseH, и кадр прежний.
+	plan := planChoices(fd.opts.Choices, dlgW-2*padX)
+	dlgH := baseH + plan.height()
 	dlg := NewDialog(title, dlgW, dlgH)
 	fd.dlg = dlg
 
@@ -335,8 +367,12 @@ func (fd *FileDialog) buildSaveCompact(mb *MessageBox, title string) {
 	filterDD.SetBounds(image.Rect(dlgW-padX-filterW, nameY, dlgW-padX, nameY+30))
 	dlg.AddChild(filterDD)
 
+	// Списки приложения — сразу под именем и фильтром, выше предупреждения:
+	// предупреждение относится к имени файла и уезжает вниз вместе с кнопками.
+	fd.addChoices(dlg, dlgW, nameY+choiceRowH, plan)
+
 	// Предупреждение о перезаписи: треугольник + приглушённый оранжевый текст.
-	warnY := nameY + 42
+	warnY := nameY + 42 + plan.height()
 	fd.warnIco = NewDialogIcon(SeverityWarning)
 	fd.warnIco.SetBounds(image.Rect(padX+2, warnY-2, padX+24, warnY+20))
 	fd.warnIco.SetVisible(false)
