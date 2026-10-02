@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf16"
+	"unicode/utf8"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -371,10 +373,13 @@ type Win32Window struct {
 	onMouseButton      func(x, y, button int, pressed bool)
 	onMouseWheelPixels func(x, y int, dx, dy float64)
 	onKeyDown          func(vk int)
-	onKeyDownRepeat    func(vk int, repeat bool)
-	onKeyUp            func(vk int)
-	onChar             func(r rune)
-	onFilesDropped     func(paths []string, x, y int)
+	// highSurrogate — первая половина суррогатной пары UTF-16, ждущая
+	// второго WM_CHAR.
+	highSurrogate   rune
+	onKeyDownRepeat func(vk int, repeat bool)
+	onKeyUp         func(vk int)
+	onChar          func(r rune)
+	onFilesDropped  func(paths []string, x, y int)
 
 	// fileDropEnabled — DragAcceptFiles(TRUE) уже вызван для этого окна.
 	fileDropEnabled bool
@@ -1046,6 +1051,31 @@ func (w *Win32Window) SetOnFilesDropped(fn func(paths []string, x, y int)) {
 
 // ─── WndProc ────────────────────────────────────────────────────────────────
 
+// charFromUTF16 собирает руну из потока WM_CHAR.
+//
+// Windows шлёт текст в UTF-16: символ вне основной плоскости — эмодзи,
+// редкие письменности — приходит ДВУМЯ сообщениями, старшим и младшим
+// суррогатом. По одному они не значат ничего, и раньше в приложение уходила
+// пара мусорных рун вместо одного символа.
+//
+// ok=false — руны пока нет: либо ждём вторую половину пары, либо пара не
+// сложилась (непарный суррогат лучше отбросить, чем показать знак-замену).
+func (w *Win32Window) charFromUTF16(u rune) (rune, bool) {
+	switch {
+	case utf16.IsSurrogate(u) && w.highSurrogate == 0:
+		w.highSurrogate = u
+		return 0, false
+	case w.highSurrogate != 0:
+		pair := utf16.DecodeRune(w.highSurrogate, u)
+		w.highSurrogate = 0
+		if pair == utf8.RuneError {
+			return 0, false
+		}
+		return pair, true
+	}
+	return u, true
+}
+
 func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	w := lookupWin32(hwnd)
 	if w == nil {
@@ -1419,8 +1449,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmChar:
-		r := rune(wparam)
-		if r >= 32 && w.onChar != nil {
+		if r, ok := w.charFromUTF16(rune(wparam)); ok && r >= 32 && w.onChar != nil {
 			w.onChar(r)
 		}
 		return 0

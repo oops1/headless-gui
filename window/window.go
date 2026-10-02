@@ -901,7 +901,7 @@ func (s *surface) setupInput() {
 		if r < 32 {
 			return
 		}
-		mod := s.currentMod()
+		mod := textMod(s.currentMod())
 		s.post(func() {
 			s.eng.SendKeyEvent(widget.KeyEvent{
 				Code:    widget.KeyUnknown,
@@ -914,6 +914,20 @@ func (s *surface) setupInput() {
 }
 
 // keyEvent — нажатие или отпускание клавиши, пришедшее с насоса ОС.
+// textMod снимает с текстового события пару Ctrl+Alt.
+//
+// Так Windows сообщает AltGr: на немецкой или польской раскладке AltGr+Q
+// печатает «@», и это именно ВВОД символа. Виджеты же при любом Ctrl уходят
+// в ветку сочетаний клавиш, и символ пропадал бы. Один Ctrl или один Alt
+// оставляем как есть: Ctrl+V — сочетание, и путать его с вводом нельзя.
+func textMod(mod widget.KeyMod) widget.KeyMod {
+	const altGr = widget.ModCtrl | widget.ModAlt
+	if mod&altGr == altGr {
+		return mod &^ altGr
+	}
+	return mod
+}
+
 func (s *surface) keyEvent(vk int, pressed bool) {
 	s.keyEventRepeat(vk, pressed, false)
 }

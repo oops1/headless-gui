@@ -4269,6 +4269,21 @@ elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
 
+### Text input on Windows: surrogates and AltGr — v3.26
+
+Two things got lost on the way from the OS to the widget.
+
+Windows sends text in UTF-16, so a character outside the basic plane — an
+emoji, a rare script — arrives as TWO WM_CHAR messages, a high and a low
+surrogate. On their own they mean nothing, and the application used to
+receive a pair of garbage runes. They are now assembled into one rune; an
+unpaired surrogate is dropped rather than shown as a replacement mark.
+
+Windows also reports AltGr as Ctrl+Alt. Widgets treat any Ctrl as a shortcut,
+so a character typed with AltGr (on a German layout AltGr+Q gives «@»)
+disappeared. A text event now arrives without that pair — it is typing, not a
+shortcut. A lone Ctrl or Alt is left alone: Ctrl+V pastes, it does not type.
+
 ### System move and resize for any root — v3.26
 
 System dragging was wired up automatically only when the root was a
