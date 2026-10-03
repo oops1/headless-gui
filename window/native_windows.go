@@ -1546,6 +1546,15 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 
+	case wmSyscommand:
+		// Вход в меню окна по F10 или одиночному Alt забирал бы клавиатуру у
+		// приложения, которое само рисует строку меню (syskeymenu.go).
+		if swallowKeyboardMenu(wparam, lparam) {
+			return 0
+		}
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+		return ret
+
 	case wmSyschar:
 		// Символ, набранный с зажатым Alt. По умолчанию система отвечает на
 		// него звуком «такого пункта меню нет» — своей строки меню у окна
