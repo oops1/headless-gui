@@ -20,6 +20,12 @@ package window
 // Word или браузерный редактор — HTML. Отдельного «режима» нет: событие send
 // называет тип, который запросили, и мы отвечаем именно им.
 //
+// Список файлов (SetFiles) — тот же источник с типами text/uri-list и
+// x-special/gnome-copied-files рядом с текстом путей. При вставке файлов
+// чтение ждёт долго: на удалённом рабочем столе файлы, скопированные у
+// клиента, скачиваются в момент вставки, и канал отдаёт данные, когда
+// скачивание закончено.
+//
 // Вставка: компоновщик присылает selection с готовым wl_data_offer; просим у
 // него данные подходящего типа и читаем из канала. Чужой клиент может
 // отвечать медленно или не ответить вовсе, поэтому чтение идёт с коротким
@@ -59,6 +65,12 @@ const (
 	// дольше этого не должен.
 	clipboardReadTimeout = 300 * time.Millisecond
 
+	// clipboardFilesTimeout — сколько ждём список файлов. Не короткий
+	// тайм-аут текста: компоновщик удалённого рабочего стола отдаёт список,
+	// когда файлы скачаны, а это секунды и минуты. Предел всё же есть —
+	// владелец, который не закрыл канал вовсе, не должен держать вызов вечно.
+	clipboardFilesTimeout = 10 * time.Minute
+
 	// maxClipboardBytes — предел на вставку: буфер обмена приходит извне, и
 	// доверять его размеру нельзя.
 	maxClipboardBytes = 16 << 20
@@ -76,8 +88,11 @@ type wlClipboard struct {
 	owned string // текст, которым мы владеем; пусто — владеет кто-то другой
 	// ownedHTML — оформленная версия нашего содержимого; пусто — только текст.
 	ownedHTML string
-	source    uint32 // наш wl_data_source, 0 — нет
-	offer     uint32 // последний selection-offer компоновщика
+	// ownedFiles — наш список файлов; nil — мы отдали не файлы.
+	ownedFiles []string
+	ownedCut   bool
+	source     uint32 // наш wl_data_source, 0 — нет
+	offer      uint32 // последний selection-offer компоновщика
 	// offerText — типы, которые объявил этот offer: текст мы берём только
 	// если он среди них.
 	offerText bool
@@ -85,6 +100,8 @@ type wlClipboard struct {
 	// Храним сам тип, а не флаг: запрашивать надо в точности тот, что
 	// предложен (text/html или вариант с кодировкой).
 	offerHTML string
+	// offerURIList / offerGnome — offer предлагает список файлов этими типами.
+	offerURIList, offerGnome bool
 }
 
 // newWlClipboard создаёт буфер обмена для окна.
@@ -94,17 +111,25 @@ func newWlClipboard(w *WaylandWindow) *wlClipboard { return &wlClipboard{w: w} }
 //
 // Реализует widget.ClipboardProvider: окно регистрирует этот буфер глобально,
 // когда Wayland-соединение поднялось.
-func (c *wlClipboard) SetText(s string) { c.setSelection(s, "") }
+func (c *wlClipboard) SetText(s string) { c.setSelection(s, "", nil, false) }
 
 // SetHTML отдаёт в буфер оформленный текст вместе с простым: рядом с текстовыми
 // типами объявляется text/html.
 //
 // Реализует widget.ClipboardHTMLProvider.
-func (c *wlClipboard) SetHTML(html, plain string) { c.setSelection(plain, html) }
+func (c *wlClipboard) SetHTML(html, plain string) { c.setSelection(plain, html, nil, false) }
+
+// SetFiles отдаёт в буфер список файлов: text/uri-list и
+// x-special/gnome-copied-files рядом с путями простым текстом.
+//
+// Реализует widget.ClipboardFilesProvider.
+func (c *wlClipboard) SetFiles(paths []string, cut bool) {
+	c.setSelection(filesPlainText(paths), "", append([]string(nil), paths...), cut)
+}
 
 // setSelection объявляет источник: простой текст всегда, text/html — если есть
-// оформленная версия.
-func (c *wlClipboard) setSelection(s, html string) {
+// оформленная версия, типы списка файлов — если отдаём файлы.
+func (c *wlClipboard) setSelection(s, html string, files []string, cut bool) {
 	if c == nil || c.w == nil {
 		return
 	}
@@ -123,6 +148,7 @@ func (c *wlClipboard) setSelection(s, html string) {
 	old := c.source
 	id := w.newID()
 	c.source, c.owned, c.ownedHTML = id, s, html
+	c.ownedFiles, c.ownedCut = files, cut
 	c.mu.Unlock()
 
 	if old != 0 {
@@ -132,6 +158,11 @@ func (c *wlClipboard) setSelection(s, html string) {
 	mimes := []string{mimeTextUTF8, mimeTextPlain, mimeUTF8Str, mimeTextStr}
 	if html != "" {
 		mimes = append(mimes, mimeTextHTML)
+	}
+	if len(files) > 0 {
+		// Файлы — первыми: получатель, который перебирает типы по порядку,
+		// должен увидеть их раньше текста.
+		mimes = append([]string{mimeTextUriList, mimeGnomeCopiedFiles}, mimes...)
 	}
 	for _, mime := range mimes {
 		w.send(newWlMsg(id, wlDataSourceOffer).putString(mime), -1)
@@ -189,8 +220,51 @@ func (c *wlClipboard) GetHTML() (string, bool) {
 	return html, html != ""
 }
 
-// receive просит у владельца данные указанного типа и читает их с тайм-аутом.
+// GetFiles читает список файлов из системного буфера обмена.
+//
+// Реализует widget.ClipboardFilesProvider. x-special/gnome-copied-files
+// спрашивается первым, когда предложен: только он говорит, вырезали ли файлы,
+// а список в нём тот же. Иначе — text/uri-list. Ждёт долго (см.
+// clipboardFilesTimeout): звать не на горутине движка.
+func (c *wlClipboard) GetFiles() ([]string, bool, bool) {
+	if c == nil || c.w == nil {
+		return nil, false, false
+	}
+	c.mu.Lock()
+	files, cut := c.ownedFiles, c.ownedCut
+	offer, uri, gnome := c.offer, c.offerURIList, c.offerGnome
+	src := c.source
+	c.mu.Unlock()
+
+	if src != 0 && len(files) > 0 {
+		return append([]string(nil), files...), cut, true
+	}
+	if offer == 0 {
+		return nil, false, false
+	}
+	if gnome {
+		data := c.receiveTimeout(offer, mimeGnomeCopiedFiles, clipboardFilesTimeout)
+		if p, cut, ok := parseGnomeCopiedFiles(string(data)); ok {
+			return p, cut, true
+		}
+	}
+	if uri {
+		data := c.receiveTimeout(offer, mimeTextUriList, clipboardFilesTimeout)
+		if p, ok := parseClipboardURIList(string(data)); ok {
+			return p, false, true
+		}
+	}
+	return nil, false, false
+}
+
+// receive просит у владельца данные указанного типа и читает их с коротким
+// тайм-аутом.
 func (c *wlClipboard) receive(offer uint32, mime string) []byte {
+	return c.receiveTimeout(offer, mime, clipboardReadTimeout)
+}
+
+// receiveTimeout — receive с заданным сроком ожидания.
+func (c *wlClipboard) receiveTimeout(offer uint32, mime string, timeout time.Duration) []byte {
 	r, wr, err := os.Pipe()
 	if err != nil {
 		return nil
@@ -208,7 +282,7 @@ func (c *wlClipboard) receive(offer uint32, mime string) []byte {
 	select {
 	case data := <-done:
 		return data
-	case <-time.After(clipboardReadTimeout):
+	case <-time.After(timeout):
 		// Владелец не ответил. Канал дочитает горутина, и файл закроется
 		// там же; подвешивать на это интерфейс незачем.
 		r.SetReadDeadline(time.Now())
@@ -222,14 +296,18 @@ func (c *wlClipboard) handleSelection(id uint32) {
 	c.mu.Lock()
 	old := c.offer
 	c.offer, c.offerText, c.offerHTML = id, false, ""
+	c.offerURIList, c.offerGnome = false, false
 	if id != 0 {
 		// Типы этого offer пришли раньше, событиями offer: берём их из
 		// общего списка предложений окна.
 		c.offerText = c.w.offerHasText(id)
 		c.offerHTML = c.w.offerHTMLMime(id)
+		c.offerURIList = c.w.offerGet(id)
+		c.offerGnome = c.w.offerHasGnomeFiles(id)
 		// Чужой selection означает, что владелец теперь не мы.
 		if c.source != 0 {
 			c.owned, c.ownedHTML = "", ""
+			c.ownedFiles, c.ownedCut = nil, false
 		}
 	}
 	c.mu.Unlock()
@@ -248,8 +326,13 @@ func (c *wlClipboard) handleSelection(id uint32) {
 func (c *wlClipboard) handleSourceSend(source uint32, mime string, fd int) {
 	c.mu.Lock()
 	ours, text := c.source == source, c.owned
-	if isHTMLMime(mime) && c.ownedHTML != "" {
+	switch {
+	case isHTMLMime(mime) && c.ownedHTML != "":
 		text = c.ownedHTML
+	case mime == mimeTextUriList && len(c.ownedFiles) > 0:
+		text = buildURIList(c.ownedFiles)
+	case mime == mimeGnomeCopiedFiles && len(c.ownedFiles) > 0:
+		text = buildGnomeCopiedFiles(c.ownedFiles, c.ownedCut)
 	}
 	c.mu.Unlock()
 	if fd < 0 {
@@ -275,6 +358,7 @@ func (c *wlClipboard) handleSourceCancelled(source uint32) {
 	ours := c.source == source
 	if ours {
 		c.source, c.owned, c.ownedHTML = 0, "", ""
+		c.ownedFiles, c.ownedCut = nil, false
 	}
 	c.mu.Unlock()
 	if ours {

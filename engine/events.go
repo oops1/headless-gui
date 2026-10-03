@@ -105,6 +105,8 @@ func (e *Engine) setFocusInvalidating(w widget.Widget) {
 // инвалидирует старый/новый фокус точечно, командные хоткеи — полностью
 // (команда может изменить что угодно).
 func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
+	defer e.serveFocusRequests()()
+
 	// Tab-навигация: перехватываем Tab до доставки виджету — если только
 	// фокусный виджет не забирает его себе (widget.TabAcceptor: редактор кода).
 	// Ctrl+Tab остаётся навигацией и у такого виджета.
@@ -319,6 +321,7 @@ func (e *Engine) SendMouseMove(x, y int) {
 // Иначе: проверяем, хочет ли какой-либо предок захватить мышь (WantsCapture),
 // затем передаём событие самому верхнему виджету под курсором.
 func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool) {
+	defer e.serveFocusRequests()()
 	x, y = e.toLogical(x, y)
 
 	// Клик оставляет ПОЛНУЮ инвалидацию сознательно: он может открыть/закрыть

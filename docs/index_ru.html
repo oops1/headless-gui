@@ -86,12 +86,16 @@ tr:hover td{background:rgba(137,180,250,.05)}
   <a href="#engine-font">Шрифты (FontCache)</a>
   <a href="#output-frame">output.Frame</a>
   <a href="#native-window">Нативное окно</a>
+  <a href="#printing">Печать и PDF</a>
+  <a href="#os-integration">Интеграция с ОС</a>
 
   <div class="group">Виджеты: Базовые</div>
   <a href="#widget-base">Base</a>
   <a href="#widget-button">Button</a>
   <a href="#widget-label">Label</a>
   <a href="#widget-textinput">TextInput</a>
+  <a href="#widget-textbox">TextBox</a>
+  <a href="#widget-richtext">RichText</a>
   <a href="#widget-checkbox">CheckBox</a>
   <a href="#widget-radiobutton">RadioButton</a>
   <a href="#widget-toggleswitch">ToggleSwitch</a>
@@ -150,7 +154,12 @@ tr:hover td{background:rgba(137,180,250,.05)}
 <tr><td><code>widget/datagrid/</code></td><td>Ядро DataGrid: ObservableCollection, привязки, колонки</td></tr>
 <tr><td><code>widget/treeview/</code></td><td>Ядро TreeView: модель, шаблоны, рендер, ввод</td></tr>
 <tr><td><code>output/</code></td><td>Типы Frame / DirtyTile</td></tr>
-<tr><td><code>window/</code></td><td>Нативное окно Win32/Cocoa/X11 (без CGO)</td></tr>
+<tr><td><code>window/</code></td><td>Нативное окно Win32/Cocoa/X11/Wayland (без CGO): несколько окон, интеграция с ОС</td></tr>
+<tr><td><code>output/webstream/</code></td><td>Браузерный вьювер: WebSocket-стрим тайлов + ввод</td></tr>
+<tr><td><code>output/pdf/</code></td><td>Запись PDF из страниц-картинок (без зависимостей)</td></tr>
+<tr><td><code>printing/</code></td><td>Печать: бумага, ориентация, поля, принтеры, системный диалог, SavePDF</td></tr>
+<tr><td><code>theme/</code></td><td>Профили тем как данные (JSON, наследование, смена на лету)</td></tr>
+<tr><td><code>desktop/</code></td><td>Системная панель задач, меню «Пуск», трей, центр уведомлений</td></tr>
 </table>
 
 <!-- ─── Быстрый старт ─── -->
@@ -251,6 +260,7 @@ root, reg, err := widget.LoadUIFromXAMLWithBase(data, "/assets")</code></pre>
 <tr><td><code>&lt;Window&gt;</code></td><td>Window</td></tr>
 <tr><td><code>&lt;DataGrid&gt;</code></td><td>DataGridWidget</td></tr>
 <tr><td><code>&lt;TreeView&gt;</code></td><td>TreeViewWidget</td></tr>
+<tr><td><code>&lt;RichText&gt;</code></td><td>RichText (<code>&lt;Paragraph&gt;</code>, <code>&lt;Run&gt;</code>, <code>&lt;Bold&gt;</code>, <code>&lt;Italic&gt;</code>, <code>&lt;Underline&gt;</code>, <code>&lt;Hyperlink&gt;</code>, <code>&lt;LineBreak/&gt;</code> inside)</td></tr>
 </table>
 
 <h4>Общие XAML-атрибуты</h4>
@@ -305,6 +315,7 @@ widget.ApplyGlobalTheme(theme)</code></pre>
     X, Y    int         // координаты
     Button  MouseButton // MouseLeft, MouseRight, MouseMiddle
     Pressed bool        // true = нажатие, false = отпускание
+    Clicks  int         // нажатие в серии: 1 одиночное, 2 двойное, 3 тройное (считает движок)
 }</code></pre>
 
 <h4>KeyEvent</h4>
@@ -313,6 +324,7 @@ widget.ApplyGlobalTheme(theme)</code></pre>
     Rune    rune    // символ (для ввода текста)
     Mod     KeyMod  // ModNone, ModShift, ModCtrl, ModAlt, ModMeta
     Pressed bool
+    Repeat  bool    // автоповтор удерживаемой клавиши, а не новое нажатие
 }</code></pre>
 
 <h4>Интерфейсы событий</h4>
@@ -361,6 +373,8 @@ widget.ApplyGlobalTheme(theme)</code></pre>
 <tr><td><code>ReleaseCapture()</code></td><td>Освободить захват</td></tr>
 <tr><td><code>ShowModal(m ModalWidget)</code></td><td>Показать модальный виджет</td></tr>
 <tr><td><code>CloseModal(m ModalWidget)</code></td><td>Закрыть модальный виджет</td></tr>
+<tr><td><code>After(d time.Duration, fn func()) *Timer</code></td><td>Выполнить <code>fn</code> один раз на горутине движка через <code>d</code>; <code>Timer.Stop()</code> отменяет, в том числе после срабатывания, но до выполнения</td></tr>
+<tr><td><code>Every(d time.Duration, fn func()) *Timer</code></td><td>Выполнять <code>fn</code> повторно на горутине движка; следующий запуск планируется <em>после</em> возврата обработчика. Гаснет вместе с движком</td></tr>
 </table>
 </div>
 
@@ -415,7 +429,50 @@ type DirtyTile struct {
 win := window.New(eng, "Заголовок")
 win.SetMaxFPS(60)
 win.Run() // блокирующий вызов</code></pre>
-<p>Поддерживает Win32 (GDI), macOS (Cocoa через purego), Linux (X11). Без CGO.</p>
+<p>Бэкенды: Win32 (GDI), macOS (Cocoa через purego), Linux &mdash; X11 и Wayland (сырой wire-протокол, меню через <code>xdg_popup</code>). Без CGO.</p>
+<table>
+<tr><th>Возможность</th><th>API</th></tr>
+<tr><td>Несколько окон верхнего уровня в одном процессе</td><td><code>win.OpenWindow(child)</code> &mdash; своя кнопка в панели задач, свой движок и дерево виджетов; звать можно откуда угодно, в том числе из обработчика кнопки</td></tr>
+<tr><td>Snap Layouts Windows 11, прилипание к краям</td><td><code>win.SetHitTest(fn)</code> &mdash; зоны Client / Caption / MinButton / MaxButton / CloseButton</td></tr>
+<tr><td>Системное перемещение и изменение размера</td><td><code>win.BeginMove()</code>, <code>win.BeginResize(edges)</code> (X11 и Wayland; в остальных случаях <code>false</code>)</td></tr>
+<tr><td>HiDPI</td><td>Per-monitor DPI на Windows, <code>Xft.dpi</code> на X11, <code>wl_output</code> / дробный масштаб на Wayland; <code>HEADLESS_GUI_SCALE</code> переопределяет</td></tr>
+<tr><td>Метод ввода (IME)</td><td>Windows IMM32 и Wayland <code>text-input-v3</code>: набираемое показывается в поле, окно кандидатов стоит под кареткой</td></tr>
+<tr><td>Буфер обмена</td><td>Текст на всех платформах (на Linux свой), HTML рядом с простым: <code>widget.SetClipboardHTML(html, plain)</code>, <code>widget.ClipboardHTML()</code>; файлы — <code>widget.ClipboardSetFiles(paths, cut)</code>, <code>widget.ClipboardFiles()</code> (может ждать — звать не на горутине движка)</td></tr>
+<tr><td>Мосты доступности</td><td>UI Automation (Windows, паттерны Value и Text), AT-SPI (Linux, интерфейс Text)</td></tr>
+</table>
+
+<h2 id="printing">Печать и PDF</h2>
+<p>Страницы рисуются тем же контекстом, что и экран (те же шрифты, та же вёрстка), затем уходят на принтер или сохраняются в PDF.</p>
+<pre><code>import "github.com/oops1/headless-gui/v3/printing"
+
+setup := printing.NewPageSetup(printing.A4)
+w, h := setup.SheetSize()                     // 2480x3508 at 300 dpi
+page := image.NewRGBA(image.Rect(0, 0, w, h)) // draw the page here
+job := printing.Job{Name: "Report", Setup: setup, Pages: []image.Image{page}}
+
+err := printing.SavePDF("report.pdf", job, printing.PDFOptions{}) // every platform
+// or send to a printer
+printers, _ := printing.Printers()
+err = printing.Print(printing.Target{Printer: printers[0].Name}, job)</code></pre>
+<table>
+<tr><th>Платформа</th><th>Печать</th></tr>
+<tr><td>Windows</td><td>Системный диалог (<code>printing.PrintDialog</code>) и печать через GDI: страница ложится на лист с учётом непечатаемых полей</td></tr>
+<tr><td>Linux</td><td>IPP 2.0 к CUPS (сокет или <code>localhost:631</code>) документом <code>application/pdf</code>; без <code>lp</code>/<code>lpr</code>; системного диалога нет &mdash; свой список принтеров показывайте по <code>Printers()</code></td></tr>
+<tr><td>macOS</td><td>Не поддерживается (<code>ErrUnsupported</code>); <code>SavePDF</code> работает</td></tr>
+</table>
+<p><code>output/pdf</code> пишет PDF из страниц-картинок без зависимостей &mdash; Flate (без потерь) или JPEG, постранично, чтобы память не росла на весь документ. Размеры бумаги: A3&ndash;A6, Letter, Legal, Tabloid, Executive, <code>printing.CustomPaper</code>; ориентация, поля, <code>printing.PagePixels</code> &mdash; пикселей на страницу при заданном DPI.</p>
+
+<h2 id="os-integration">Интеграция с ОС</h2>
+<table>
+<tr><th>API</th><th>Описание</th></tr>
+<tr><td><code>window.OpenURL(url)</code>, <code>window.OpenFile(path)</code>, <code>window.RevealFile(path)</code></td><td>Открыть ссылку в браузере, файл в назначенной программе или показать файл в файловом менеджере. Windows: ShellExecute; Linux: порталы OpenURI / FileManager1 через собственный D-Bus-клиент движка (<code>xdg-open</code> &mdash; лишь последний запасной путь); macOS: <code>open</code>. Только схемы http, https, ftp, mailto и file; программы (.exe, .bat, .lnk, ...) отклоняются</td></tr>
+<tr><td><code>window.DetectSystemTheme()</code></td><td><code>SystemThemeLight</code>, <code>SystemThemeDark</code> или <code>SystemThemeUnknown</code> (реестр Windows; Linux &mdash; <code>GTK_THEME</code> и портал настроек; macOS &mdash; неизвестно)</td></tr>
+<tr><td><code>win.SetOnSystemThemeChanged(fn)</code></td><td>Вызывается на горутине движка при настоящей смене темы ОС</td></tr>
+<tr><td><code>widget.MeasureUIFontMetrics(sizePt, family)</code></td><td>Подъём, спуск и межстрочный зазор в логических пикселях &mdash; тем же путём, каким рисуется текст; для выравнивания смешанных кеглей по одной базовой линии</td></tr>
+<tr><td><code>widget.PushClip(ctx, r)</code></td><td>Сужает отсечение <em>пересечением</em> с нынешним; возвращает функцию, восстанавливающую прежнее. Встроенные виджеты ею пользуются, поэтому ребёнок не рисует мимо родителя</td></tr>
+<tr><td><code>FileDialogOptions.Choices</code></td><td>Свои выпадающие списки в файловых диалогах; читаются через <code>FileDialog.Choice(id)</code> / <code>ChoiceText(id)</code>. <code>widget.EncodingChoice()</code> &mdash; готовый список «Кодировка»</td></tr>
+<tr><td><code>win.ScrollTitleTabs(dx)</code>, <code>win.MoveTitleTab(from, to)</code>, <code>OnTitleTabMoved</code></td><td>Вкладки в заголовке прокручиваются (колесо, автоматически к активной) и переставляются перетаскиванием</td></tr>
+</table>
 
 <!-- ═══════════════ ВИДЖЕТЫ ═══════════════ -->
 
@@ -576,6 +633,87 @@ ti := widget.NewPasswordInput("Пароль...")</code></pre>
 
 <p><strong>XAML:</strong> <code>&lt;TextBox PlaceholderText="Имя" FontSize="12"/&gt;</code><br>
 <code>&lt;PasswordBox PlaceholderText="Пароль"/&gt;</code></p>
+</div>
+
+<!-- ─── TextBox ─── -->
+<h2 id="widget-textbox">TextBox</h2>
+<div class="widget-card">
+<h3>widget.TextBox <span class="badge badge-struct">struct</span></h3>
+<p>Многострочный редактор: перенос по словам или горизонтальная прокрутка, выделение мышью и клавиатурой, буфер обмена, undo/redo, контекстное меню. Годится для кода.</p>
+
+<h4>Конструктор</h4>
+<pre><code>tb := widget.NewTextBox("Placeholder")
+tb.FontName = "Mono"   // a registered font
+tb.AcceptTab = true
+tb.TabSize = 4
+tb.SetStyler(myHighlighter)</code></pre>
+
+<h4>Поля для редактирования кода</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Wrap</code></td><td>bool</td><td>Перенос по словам; при <code>false</code> и длинных строках появляется горизонтальная полоса</td></tr>
+<tr><td><code>FontName</code></td><td>string</td><td>Зарегистрированный шрифт (например моноширинный); раскладка, каретка и выделение меряются им</td></tr>
+<tr><td><code>AcceptTab</code></td><td>bool</td><td>Tab вставляет символ табуляции (Ctrl+Tab по-прежнему уводит фокус)</td></tr>
+<tr><td><code>TabSize</code></td><td>int</td><td>Ширина табстопа в пробелах (при <code>AcceptTab</code> и 0 &mdash; 4)</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>SetText(text string)</code></td><td>Задать текст (очищает историю отмены)</td></tr>
+<tr><td><code>SetStyler(s Styler)</code></td><td>Стили диапазонов построчно &mdash; цвет, фон, начертание &mdash; для подсветки синтаксиса. Спрашиваются только видимые строки; ответы кэшируются до правки текста</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;TextBox AcceptsReturn="True" TextWrapping="Wrap"/&gt;</code></p>
+</div>
+
+<!-- ─── RichText ─── -->
+<h2 id="widget-richtext">RichText</h2>
+<div class="widget-card">
+<h3>widget.RichText <span class="badge badge-struct">struct</span></h3>
+<p>Форматированный текст: абзацы из ранов со своим шрифтом, кеглем, цветом, фоном, подчёркиванием, зачёркиванием и ссылкой, с переносом по словам и выравниванием. Выделение протяжкой, двойным щелчком (слово) и тройным (абзац); Ctrl+C кладёт в буфер простой текст и HTML. С <code>Editable</code> &mdash; редактор форматированного текста.</p>
+
+<h4>Конструктор</h4>
+<pre><code>rt := widget.NewRichText()
+rt.SetParagraphs([]widget.RichParagraph{{
+    Runs: []widget.RichRun{
+        {Text: "Hello, "},
+        {Text: "world", Font: widget.BuiltinFontBold},
+        {Text: " docs", Link: "https://example.com", Underline: true},
+    },
+}})
+rt.OnLinkClick = func(url string) { window.OpenURL(url) }</code></pre>
+
+<h4>Поля</h4>
+<table>
+<tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+<tr><td><code>Editable</code></td><td>bool</td><td>Режим редактора: набор, Enter (новый абзац), Shift+Enter (перевод строки), Backspace/Delete, undo/redo, буфер обмена, IME</td></tr>
+<tr><td><code>ShowCaret</code></td><td>bool</td><td>Рисовать каретку в режиме просмотра (у редактора есть всегда)</td></tr>
+<tr><td><code>OnChange</code></td><td>func()</td><td>После любой правки, вне замка виджета</td></tr>
+<tr><td><code>OnLinkClick</code></td><td>func(url string)</td><td>Щелчок по ссылке; сам виджет ничего не открывает (в редакторе &mdash; Ctrl+щелчок)</td></tr>
+<tr><td><code>PaddingX</code>, <code>PaddingY</code></td><td>int</td><td>Внутренние отступы</td></tr>
+</table>
+
+<h4>Методы</h4>
+<table>
+<tr><td><code>SetParagraphs</code>, <code>Paragraphs</code>, <code>AppendParagraph</code>, <code>AppendRun</code>, <code>SetText</code>, <code>Text</code>, <code>Clear</code></td><td>Содержимое</td></tr>
+<tr><td><code>HTML() string</code>, <code>SetHTML(src string)</code></td><td>Документ целиком как HTML; разбор HTML встроен (абзацы, заголовки, жирный, курсив, подчёркивание, ссылки, inline-стили цвета и кегля; скрипты и небезопасные схемы ссылок отбрасываются)</td></tr>
+<tr><td><code>ToggleBold</code>, <code>ToggleItalic</code>, <code>ToggleUnderline</code>, <code>ToggleStrike</code>, <code>SetSelectionStyle</code>, <code>SetParagraphFormat</code>, <code>SelectionStyle</code></td><td>Команды для панели инструментов; без выделения меняют стиль набора</td></tr>
+<tr><td><code>Undo</code>, <code>Redo</code>, <code>Cut</code>, <code>Copy</code>, <code>Paste</code>, <code>SelectAll</code></td><td>Правка; вставка берёт HTML, если он есть в буфере</td></tr>
+</table>
+
+<p><strong>XAML:</strong></p>
+<pre><code>&lt;RichText x:Name="help" FontSize="10"&gt;
+    &lt;Paragraph FontSize="20" FontWeight="Bold"&gt;Title&lt;/Paragraph&gt;
+    &lt;Paragraph TextAlignment="Center"&gt;
+        &lt;Run Text="Plain, "/&gt;
+        &lt;Run Text="red bold" FontWeight="Bold" Foreground="#E06C75"/&gt;
+        &lt;Bold&gt;&lt;Run Text=" nested"/&gt;&lt;/Bold&gt;
+        &lt;Hyperlink NavigateUri="https://example.com"&gt;link&lt;/Hyperlink&gt;
+        &lt;LineBreak/&gt;
+        &lt;Run Text="struck" TextDecorations="Strikethrough"/&gt;
+    &lt;/Paragraph&gt;
+&lt;/RichText&gt;</code></pre>
+<p>Оформление наследуется вниз, как в WPF. Текст кладут в <code>&lt;Run Text="..."/&gt;</code>. Пока нет: табстопов, списков, таблиц, картинок, поиска и замены.</p>
 </div>
 
 <!-- ─── CheckBox ─── -->
@@ -1018,6 +1156,7 @@ p := widget.NewWin10Panel()</code></pre>
 <h4>Поля</h4>
 <table>
 <tr><td><code>ContentHeight</code></td><td>int</td><td>Высота содержимого</td></tr>
+<tr><td><code>ContentWidth</code></td><td>int</td><td>Полная ширина содержимого; 0 (по умолчанию) &mdash; вбок не прокручивается. Показывает горизонтальную полосу; горизонтальное колесо и Shift+колесо</td></tr>
 <tr><td><code>ShowBorder</code></td><td>bool</td><td>Рамка</td></tr>
 <tr><td><code>Background</code>, <code>TrackColor</code>, <code>ThumbColor</code></td><td>color.RGBA</td><td>Цвета</td></tr>
 </table>
@@ -1027,6 +1166,7 @@ p := widget.NewWin10Panel()</code></pre>
 <tr><td><code>ScrollY() int</code></td><td>Текущая прокрутка</td></tr>
 <tr><td><code>SetScrollY(y int)</code></td><td>Установить прокрутку</td></tr>
 <tr><td><code>ScrollBy(delta int)</code></td><td>Прокрутить</td></tr>
+<tr><td><code>ScrollX() int</code>, <code>SetScrollX(x int)</code>, <code>ScrollXBy(delta int)</code></td><td>Горизонтальная прокрутка (нужен <code>ContentWidth</code>)</td></tr>
 </table>
 </div>
 
@@ -1134,12 +1274,14 @@ ma := widget.NewModalAdapterWithDim(myWidget, color.RGBA{0,0,0,120})</code></pre
 <tr><td><code>ItemPaddingX</code></td><td>int</td><td>Отступ пунктов</td></tr>
 <tr><td><code>Height</code></td><td>int</td><td>Высота (28 по умолчанию)</td></tr>
 <tr><td><code>OnSelect</code></td><td>func(topIdx, subIdx int, text string)</td><td>Обработчик</td></tr>
+<tr><td><code>UseMnemonics</code></td><td>bool</td><td>Читать мнемоники в подписях: <code>_Файл</code> рисует Ф с чертой (<code>__</code> &mdash; настоящее подчёркивание). По умолчанию выключено</td></tr>
 </table>
 
 <h4>Методы</h4>
 <table>
 <tr><td><code>AddMenu(text string, items ...MenuItem)</code></td><td>Добавить меню с подпунктами</td></tr>
 <tr><td><code>AddTopItem(text string, onClick func())</code></td><td>Пункт без подменю</td></tr>
+<tr><td><code>ActivateMnemonic(e KeyEvent) bool</code></td><td>Открыть меню, чья подчёркнутая буква нажата (зовите из своего обработчика Alt+клавиша)</td></tr>
 </table>
 
 <h4>XAML</h4>
@@ -1151,6 +1293,7 @@ ma := widget.NewModalAdapterWithDim(myWidget, color.RGBA{0,0,0,120})</code></pre
     &lt;/MenuItem&gt;
     &lt;MenuItem Header="Справка"/&gt;
 &lt;/Menu&gt;</code></pre>
+<p><code>MenuItem.Shortcut</code> (в разметке <code>InputGestureText</code> или <code>Shortcut</code>) пишет сочетание клавиш, например <code>Ctrl+S</code>, приглушённым цветом у правого края пункта. Меню его только показывает; нажатия обрабатывает приложение через <code>InputBindings</code>.</p>
 </div>
 
 <!-- ─── DataGrid ─── -->
