@@ -809,7 +809,7 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		// первом показе и при выходе из развёрнутого состояния).
 		if nw > 0 && nh > 0 && (nw != w.width || nh != w.height) {
 			// Под замком: размер читают и горутина кадров (skipStaleFrame),
-			// и Run сразу после Create (ClientSize).
+			// и Run сразу после Create (clientSize).
 			w.mu.Lock()
 			w.width, w.height = nw, nh
 			w.pendingResize = true
@@ -1390,10 +1390,10 @@ func (w *WaylandWindow) skipStaleFrame(b image.Rectangle) bool {
 
 func near(a, b int) bool { return a-b <= 1 && b-a <= 1 }
 
-// ClientSize — размер окна в пикселях буфера, каким его назначил
+// clientSize — размер окна в пикселях буфера, каким его назначил
 // компоновщик. Окно сверяет его с холстом сразу после Create: первый
 // configure приходит ещё внутри Create, когда обработчика ресайза нет.
-func (w *WaylandWindow) ClientSize() (int, int) {
+func (w *WaylandWindow) clientSize() (int, int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.width, w.height

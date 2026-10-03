@@ -847,7 +847,7 @@ func (win *Window) setupResizeClose() {
 
 // clientSizer — бэкенд, знающий размер окна, назначенный системой.
 type clientSizer interface {
-	ClientSize() (w, h int)
+	clientSize() (w, h int)
 }
 
 // adoptCreatedSize принимает размер, который система назначила окну ещё при
@@ -863,7 +863,7 @@ func (win *Window) adoptCreatedSize() {
 	if !ok {
 		return
 	}
-	cw, ch := cs.ClientSize()
+	cw, ch := cs.clientSize()
 	if cw <= 0 || ch <= 0 {
 		return // «размер выбирает программа» — оставляем свой
 	}

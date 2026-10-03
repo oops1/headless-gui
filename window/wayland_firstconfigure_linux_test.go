@@ -60,15 +60,15 @@ func destinations(msgs []wlWireMsg) [][]uint32 {
 }
 
 // Компоновщик назначил размер в первом configure, ещё до кадра: окно
-// сообщает его (ClientSize), кадр прежнего размера не показывает, а область
+// сообщает его (clientSize), кадр прежнего размера не показывает, а область
 // просмотра назначается по размеру буфера. Раньше первым уходил буфер
 // 1097×680 с назначением 960×516 — картинка сжималась, щелчки промахивались.
 func TestWayland_FirstConfigureSize_ReachesFirstBuffer(t *testing.T) {
 	c := newFirstConfigureWindow(t)
 	c.w.handleEvent(c.w.toplevelID, xdgToplevelEvConfigure, toplevelConfigure(960, 516))
 
-	if w, h := c.w.ClientSize(); w != 960 || h != 516 {
-		t.Fatalf("ClientSize = %dx%d, ждали 960x516", w, h)
+	if w, h := c.w.clientSize(); w != 960 || h != 516 {
+		t.Fatalf("clientSize = %dx%d, ждали 960x516", w, h)
 	}
 
 	// Кадр, нарисованный под прежний холст, не коммитится.
