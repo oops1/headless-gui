@@ -1199,7 +1199,13 @@
 
                 <TextBlock Left="688" Top="530" Foreground="#9399B2"
                            Text="{Loc HierarchicalDataTemplate — a tree built from a model}"/>
-                <TreeView Name="treeHier" Left="688" Top="554" Width="346" Height="190" ShowIndentGuides="True"/>
+                <TreeView Name="treeHier" Left="688" Top="554" Width="346" Height="190" ShowIndentGuides="True">
+                    <TreeView.ItemTemplate>
+                        <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                            <TextBlock Text="{Binding Name}"/>
+                        </HierarchicalDataTemplate>
+                    </TreeView.ItemTemplate>
+                </TreeView>
             </Canvas>
         </TabItem>
 

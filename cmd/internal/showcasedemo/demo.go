@@ -20,7 +20,6 @@ import (
 
 	"github.com/oops1/headless-gui/v3/widget"
 	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
-	"github.com/oops1/headless-gui/v3/widget/treeview"
 )
 
 // Env — то, что витрина даёт демонстрациям.
@@ -597,14 +596,9 @@ func (d *demo) tables() {
 		roots.Add(&node{"widget", []*node{{"RichText", nil}, {"ScrollView", nil}, {"TextBox", nil}}})
 		roots.Add(&node{"window", []*node{{"OpenURL", nil}, {"DetectSystemTheme", nil}}})
 		roots.Add(&node{"printing", []*node{{"SavePDF", nil}, {"PrintDialog", nil}}})
-		// Шаблон задаём кодом. В разметке <HierarchicalDataTemplate> тоже
-		// читается, но пред-проход XAML резолвит {Binding Name} по
-		// DataContext при загрузке и подменяет путь пустой строкой, поэтому
-		// пути в шаблоне разметки приходится писать без фигурных скобок.
-		tw.Tree.SetItemTemplate(&treeview.HierarchicalDataTemplate{
-			ItemsSourcePath: "Children", // дочерние узлы — поле Children
-			HeaderPath:      "Name",     // заголовок — поле Name
-		})
+		// Шаблон — в разметке (<HierarchicalDataTemplate ItemsSource=
+		// "{Binding Children}">); модель у дерева своя, не из DataContext
+		// окна, поэтому источник подаём кодом.
 		tw.Tree.SetItemsSource(roots)
 		// Раскрыты первые два корня, третий свёрнут: так все строки помещаются
 		// в окно дерева целиком, а раскрытие видно и без прокрутки.
