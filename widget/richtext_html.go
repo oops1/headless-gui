@@ -32,6 +32,7 @@ func richSelectionHTML(paras []RichParagraph, d *richDoc, lo, hi int) string {
 			continue
 		}
 		sb.WriteString(richParagraphOpen(p))
+		var pieces []richHTMLPiece
 		off := ps
 		for _, r := range p.Runs {
 			rs := []rune(r.Text)
@@ -43,11 +44,69 @@ func richSelectionHTML(paras []RichParagraph, d *richDoc, lo, hi int) string {
 				b = off + len(rs)
 			}
 			if a < b {
-				sb.WriteString(richRunHTML(r, string(rs[a-off:b-off])))
+				pieces = append(pieces, richHTMLPiece{r, string(rs[a-off : b-off])})
 			}
 			off += len(rs)
 		}
+		sb.WriteString(richPiecesHTML(pieces))
 		sb.WriteString("</p>")
+	}
+	return sb.String()
+}
+
+// richHTMLPiece — кусок рана, попавший в выгрузку.
+type richHTMLPiece struct {
+	run  RichRun
+	text string
+}
+
+// richPiecesHTML — содержимое абзаца: раны подряд.
+//
+// Пустой абзац выгружается как <br>: пустой <p></p> без полей браузеры и Word
+// не показывают вовсе, и пустая строка при вставке пропала бы. Тот же <br>
+// ставится ещё раз после текста, оканчивающегося переводом строки: единственный
+// <br> в конце блока строки не создаёт.
+//
+// Пробелы, которые HTML схлопнул бы (в начале абзаца, подряд, перед и после
+// перевода строки, в конце), пишутся как &nbsp;, иначе вставка теряла бы их, а
+// круг «выгрузить — разобрать» менял бы текст. Одиночный пробел между словами
+// остаётся обычным — иначе по неразрывным пробелам абзац не переносился бы.
+func richPiecesHTML(pieces []richHTMLPiece) string {
+	if len(pieces) == 0 {
+		return "<br>"
+	}
+	var all []rune
+	var lens []int
+	for _, pc := range pieces {
+		rs := []rune(pc.text)
+		all = append(all, rs...)
+		lens = append(lens, len(rs))
+	}
+	plain := false // предыдущий символ — обычный пробел
+	for i, r := range all {
+		switch r {
+		case ' ':
+			atStart := i == 0 || all[i-1] == '\n'
+			atEnd := i+1 == len(all) || all[i+1] == '\n'
+			if plain || atStart || atEnd {
+				all[i] = ' '
+				plain = false
+			} else {
+				plain = true
+			}
+		default:
+			plain = false
+		}
+	}
+	var sb strings.Builder
+	pos := 0
+	for i, pc := range pieces {
+		text := string(all[pos : pos+lens[i]])
+		pos += lens[i]
+		if i == len(pieces)-1 && strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		sb.WriteString(richRunHTML(pc.run, text))
 	}
 	return sb.String()
 }
@@ -84,6 +143,7 @@ func maxInt(a, b int) int {
 func richRunHTML(r RichRun, text string) string {
 	body := html.EscapeString(text)
 	body = strings.ReplaceAll(body, "\n", "<br>")
+	body = strings.ReplaceAll(body, "\u00a0", "&nbsp;")
 	if st := richRunCSS(r); st != "" {
 		body = `<span style="` + st + `">` + body + `</span>`
 	}
