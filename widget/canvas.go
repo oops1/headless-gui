@@ -392,8 +392,7 @@ func (c *Canvas) Draw(ctx DrawContext) {
 
 	// Clipping (WPF Canvas по умолчанию ClipToBounds=false)
 	if c.ClipToBounds {
-		ctx.SetClip(b)
-		defer ctx.ClearClip()
+		defer PushClip(ctx, b)()
 	}
 
 	c.drawChildren(ctx)

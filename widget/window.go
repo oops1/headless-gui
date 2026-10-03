@@ -226,6 +226,9 @@ type Window struct {
 	OnTitleTabChange func(idx int, header string)
 	// OnTitleTabClosed вызывается после закрытия вкладки заголовка.
 	OnTitleTabClosed func(idx int, header string)
+	// OnTitleTabMoved вызывается после перестановки вкладки заголовка
+	// (перетаскиванием или вызовом MoveTitleTab).
+	OnTitleTabMoved func(from, to int)
 	// OnTitleTabNew вызывается по клику на «+» в полосе вкладок.
 	// nil — кнопка «+» не показывается.
 	OnTitleTabNew func()
@@ -1578,6 +1581,11 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 
 	// Отпускание кнопки — завершаем resize / drag / arm.
 	if !e.Pressed {
+		// Перетаскивание вкладки заголовка завершается здесь же, где и
+		// перетаскивание окна: нажатие уже израсходовано.
+		if w.titleTabDragEnd() {
+			return true
+		}
 		if w.resizing {
 			w.resizing = false
 			w.resizeDir = edgeNone

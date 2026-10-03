@@ -145,6 +145,12 @@ var (
 	// IValueProvider {C7935180-6FB3-4201-B174-7DF73ADBF64A} — паттерн Value:
 	// содержимое поля ввода как строка.
 	iidValueProvider = comGUID{0xC7935180, 0x6FB3, 0x4201, [8]byte{0xB1, 0x74, 0x7D, 0xF7, 0x3A, 0xDB, 0xF6, 0x4A}}
+	// ITextProvider {3589C92C-63F3-4367-99BB-ADA653B77CF2} — паттерн Text:
+	// содержимое как документ, читаемый кусками.
+	iidTextProvider = comGUID{0x3589C92C, 0x63F3, 0x4367, [8]byte{0x99, 0xBB, 0xAD, 0xA6, 0x53, 0xB7, 0x7C, 0xF2}}
+	// ITextRangeProvider {5347AD7B-C355-46F8-AFF5-909033582F63} — диапазон
+	// текста внутри паттерна Text.
+	iidTextRangeProvider = comGUID{0x5347AD7B, 0xC355, 0x46F8, [8]byte{0xAF, 0xF5, 0x90, 0x90, 0x33, 0x58, 0x2F, 0x63}}
 )
 
 // ─── Импорты ─────────────────────────────────────────────────────────────────
@@ -165,6 +171,7 @@ var (
 	procUiaRaisePropertyChanged     = uiaCore.NewProc("UiaRaiseAutomationPropertyChangedEvent")
 	procUiaDisconnectAllProviders   = uiaCore.NewProc("UiaDisconnectAllProviders")
 	procUiaClientsAreListening      = uiaCore.NewProc("UiaClientsAreListening")
+	procUiaGetReservedNotSupported  = uiaCore.NewProc("UiaGetReservedNotSupportedValue")
 )
 
 // uiaAvailable — есть ли в системе uiautomationcore.dll (нет — мост молчит).

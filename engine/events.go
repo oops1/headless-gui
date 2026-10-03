@@ -52,6 +52,10 @@ func (fm *focusManager) get() widget.Widget {
 func (e *Engine) SetCapture(w widget.Widget) {
 	e.capMu.Lock()
 	e.captured = w
+	// Цепочку контейнеров со сдвигом над захватчиком найдём при ближайшем
+	// событии (captureOffset): здесь нас могли позвать из обработчика виджета,
+	// держащего свои замки, а поиск обходит дерево.
+	e.capChain, e.capChainOK = nil, false
 	e.capMu.Unlock()
 }
 
@@ -59,6 +63,7 @@ func (e *Engine) SetCapture(w widget.Widget) {
 func (e *Engine) ReleaseCapture() {
 	e.capMu.Lock()
 	e.captured = nil
+	e.capChain, e.capChainOK = nil, false
 	e.capMu.Unlock()
 }
 
@@ -81,12 +86,14 @@ func (e *Engine) SetFocus(w widget.Widget) {
 // и нового виджета (рамка фокуса). Виджеты дополнительно самоинвалидируются
 // в SetFocused — двойная инвалидация дешёвая (объединение damage-областей).
 func (e *Engine) setFocusInvalidating(w widget.Widget) {
+	// Границы виджета — в его кадре, а инвалидировать надо экранное место: у
+	// виджета внутри прокрутки это разные прямоугольники (см. frames.go).
 	if old := e.focus.get(); old != nil {
-		e.InvalidateRect(old.Bounds())
+		e.InvalidateRect(e.screenBoundsOf(old))
 	}
 	e.focus.set(w)
 	if w != nil {
-		e.InvalidateRect(w.Bounds())
+		e.InvalidateRect(e.screenBoundsOf(w))
 	}
 }
 
@@ -219,15 +226,17 @@ func (e *Engine) CursorAt(x, y int) widget.Cursor {
 	if disp == nil {
 		return widget.CursorArrow
 	}
-	path := hitTestPath(disp, x, y)
+	path := hitPath(disp, x, y)
 	for i := len(path) - 1; i >= 0; i-- {
-		if ov, ok := path[i].(interface{ CursorOverride() (widget.Cursor, bool) }); ok {
+		if ov, ok := path[i].w.(interface{ CursorOverride() (widget.Cursor, bool) }); ok {
 			if c, has := ov.CursorOverride(); has {
 				return c
 			}
 		}
-		if cp, ok := path[i].(widget.CursorProvider); ok {
-			return cp.Cursor(x, y)
+		if cp, ok := path[i].w.(widget.CursorProvider); ok {
+			// Виджет судит о точке в своём кадре (у ребёнка прокрутки — в
+			// координатах содержимого).
+			return cp.Cursor(x+path[i].off.X, y+path[i].off.Y)
 		}
 	}
 	return widget.CursorArrow
@@ -266,7 +275,9 @@ func (e *Engine) SendMouseMove(x, y int) {
 	// Если мышь захвачена — только захватчику
 	if cap := e.getCaptured(); cap != nil {
 		if mm, ok := cap.(widget.MouseMoveHandler); ok {
-			mm.OnMouseMove(x, y)
+			// В кадре захватчика: перетаскивание внутри прокрутки идёт в
+			// координатах содержимого, а курсор — экранный.
+			deliverMove(mm, x, y, e.captureOffset(cap))
 		}
 		return
 	}
@@ -289,13 +300,14 @@ func (e *Engine) SendMouseMove(x, y int) {
 	// раскрытым списком принадлежит им, а не тому, что они накрыли: иначе
 	// кнопка панели задач под меню «Пуск» исправно подсвечивалась, и сквозь
 	// стеклянную панель Windows 11 эта подсветка была видна.
-	if ov := findOverlayAt(root, x, y); ov != nil {
+	if ov, ovOff := findOverlayStep(root, x, y); ov != nil {
 		// Сначала — всему дереву «курсора над вами нет». Без этого кнопка, с
 		// которой курсор ушёл под оверлей, осталась бы подсвеченной навсегда:
 		// она бы просто перестала получать события.
 		broadcastMouseMove(root, ox, oy, widget.CursorNowhere, widget.CursorNowhere)
-		// Затем — настоящая точка тому, кому она принадлежит, и его детям.
-		broadcastMouseMove(ov, ox, oy, x, y)
+		// Затем — настоящая точка тому, кому она принадлежит, и его детям. Точки
+		// переводятся в кадр владельца оверлея: он может лежать в прокрутке.
+		broadcastMouseMoveFrame(ov, ox, oy, x, y, ovOff)
 		return
 	}
 
@@ -334,7 +346,7 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 			e.pressConsumer = nil
 		}
 		if mc, ok := cap.(widget.MouseClickHandler); ok {
-			mc.OnMouseButton(ev)
+			deliverButton(mc, ev, e.captureOffset(cap))
 		}
 		// Движок гарантирует снятие capture при отпускании ЛКМ —
 		// даже если виджет не вызвал ReleaseCapture (например, capMgr == nil).
@@ -361,10 +373,10 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 			e.mu.RUnlock()
 		}
 		if dispRoot != nil {
-			path := hitTestPath(dispRoot, x, y)
+			path := hitPath(dispRoot, x, y)
 			found := false
-			for _, w := range path {
-				if w == consumer {
+			for _, st := range path {
+				if st.w == consumer {
 					found = true
 					break
 				}
@@ -378,7 +390,8 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 					// рядом с виджетом и почти всегда вылезает за него, а
 					// отпускание над меню обязано дойти до меню — именно на
 					// отпускании пункт и срабатывает.
-					if image.Pt(x, y).In(overlayHitRect(consumer)) {
+					// Прямоугольник оверлея — в кадре его владельца.
+					if image.Pt(x, y).Add(e.frameOffsetOf(consumer)).In(overlayHitRect(consumer)) {
 						found = true
 					}
 				}
@@ -406,21 +419,27 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	// Правый клик (по отпусканию, как в ОС): показываем привязанное контекстное
 	// меню (WPF ContextMenu) самого глубокого виджета под курсором.
 	if !pressed && btn == widget.MouseRight {
-		path := hitTestPath(dispatchRoot, x, y)
+		path := hitPath(dispatchRoot, x, y)
 		for i := len(path) - 1; i >= 0; i-- {
+			// Виджет судит о точке в своём кадре, и меню, которое он строит,
+			// живёт там же: рисуется оно через тот же сдвиг, что и сам виджет.
+			fx, fy := x+path[i].off.X, y+path[i].off.Y
 			// Сперва — меню, собираемое под точкой: список и таблица строят
 			// его по строке под курсором, и одного готового меню на виджет им
 			// не хватает. Готовое ContextMenu — частный случай, когда меню от
 			// точки не зависит, поэтому оно идёт вторым.
-			if h, ok := path[i].(widget.ContextMenuProvider); ok {
-				if pm := h.ContextMenuAt(x, y); pm != nil {
-					pm.Show(x, y)
+			if h, ok := path[i].w.(widget.ContextMenuProvider); ok {
+				if pm := h.ContextMenuAt(fx, fy); pm != nil {
+					showMenuInFrame(pm, fx, fy, path[i].off)
 					return
 				}
 			}
-			if h, ok := path[i].(interface{ GetContextMenu() *widget.PopupMenu }); ok {
+			if h, ok := path[i].w.(interface{ GetContextMenu() *widget.PopupMenu }); ok {
 				if pm := h.GetContextMenu(); pm != nil {
-					pm.Show(x, y)
+					// Готовое меню — самостоятельный виджет дерева (обычно
+					// ребёнок того, к кому оно приколото), и кадр у него свой.
+					moff := e.frameOffsetOf(pm)
+					showMenuInFrame(pm, x+moff.X, y+moff.Y, moff)
 					return
 				}
 			}
@@ -438,7 +457,7 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 	// не входит), и до пункта меню нажатие не доходит вовсе. Меню, открытое
 	// над окном, из-за этого было полностью мёртвым — а над пустым рабочим
 	// столом, где захват никому не нужен, работало.
-	if overlayW := findOverlayAt(dispatchRoot, x, y); overlayW != nil {
+	if overlayW, overlayOff := findOverlayStep(dispatchRoot, x, y); overlayW != nil {
 		if pressed && btn == widget.MouseLeft {
 			if _, ok := overlayW.(widget.Focusable); ok {
 				e.focus.set(overlayW)
@@ -448,14 +467,14 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 			// остальные: клик внутри календаря не закрывал ни меню «Пуск»,
 			// ни соседнюю панель, потому что до dismissOutside дело не
 			// доходило вовсе.
-			keep := map[widget.Widget]struct{}{overlayW: {}}
-			for _, w := range hitTestPath(dispatchRoot, x, y) {
-				keep[w] = struct{}{}
-			}
+			keep := pathSet(hitPath(dispatchRoot, x, y))
+			keep[overlayW] = struct{}{}
 			dismissOutside(dispatchRoot, keep, x, y)
 		}
 		if mc, ok := overlayW.(widget.MouseClickHandler); ok {
-			if mc.OnMouseButton(ev) {
+			// Нажатие — в кадре владельца оверлея: меню поля внутри прокрутки
+			// лежит там же, где поле, в координатах содержимого.
+			if deliverButton(mc, ev, overlayOff) {
 				// Overlay поглотил press — запоминаем для release-проверки.
 				if pressed && btn == widget.MouseLeft {
 					e.pressConsumer = overlayW
@@ -467,7 +486,7 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 
 	// Проверяем, хочет ли кто-то из предков захватить мышь (drag handle)
 	if pressed && btn == widget.MouseLeft {
-		if capturer := findCapturer(dispatchRoot, x, y, ev); capturer != nil {
+		if capturer, capOff := findCapturerStep(dispatchRoot, x, y, ev); capturer != nil {
 			// Гарантируем захватчику CaptureManager: injectCaptureManager при
 			// SetRoot не достаёт до виджетов, скрытых из Children() (например,
 			// содержимое неактивной вкладки TabControl) — без менеджера виджет
@@ -483,13 +502,8 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 			}
 
 			// Закрываем Dismissable-виджеты вне пути к захватчику
-			capPath := hitTestPath(dispatchRoot, x, y)
-			if len(capPath) > 0 {
-				pathSet := make(map[widget.Widget]struct{}, len(capPath))
-				for _, w := range capPath {
-					pathSet[w] = struct{}{}
-				}
-				dismissOutside(dispatchRoot, pathSet, x, y)
+			if capPath := hitPath(dispatchRoot, x, y); len(capPath) > 0 {
+				dismissOutside(dispatchRoot, pathSet(capPath), x, y)
 			}
 
 			// Запоминаем capturer как pressConsumer — если capturer
@@ -497,18 +511,18 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 			e.pressConsumer = capturer
 
 			if mc, ok := capturer.(widget.MouseClickHandler); ok {
-				mc.OnMouseButton(ev)
+				deliverButton(mc, ev, capOff)
 			}
 			return
 		}
 	}
 
 	// Получаем путь от корня до самого глубокого виджета под курсором
-	path := hitTestPath(dispatchRoot, x, y)
+	path := hitPath(dispatchRoot, x, y)
 	if len(path) == 0 {
 		return
 	}
-	hit := path[len(path)-1]
+	hit := path[len(path)-1].w
 
 	// При нажатии — передаём фокус и закрываем overlay'и вне пути.
 	if pressed && btn == widget.MouseLeft {
@@ -520,22 +534,19 @@ func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 
 		// Закрываем все Dismissable-виджеты, которые НЕ лежат на пути
 		// от корня до целевого виджета (dropdown/popup/menu вне клика).
-		pathSet := make(map[widget.Widget]struct{}, len(path))
-		for _, w := range path {
-			pathSet[w] = struct{}{}
-		}
-		dismissOutside(dispatchRoot, pathSet, x, y)
+		dismissOutside(dispatchRoot, pathSet(path), x, y)
 	}
 
 	// Доставляем событие с bubbling: от самого глубокого виджета к корню.
 	// Если виджет поглотил событие (вернул true) — bubbling останавливается.
+	// Каждый получает точку в своём кадре: путь через прокрутку меняет кадр.
 	for i := len(path) - 1; i >= 0; i-- {
-		if mc, ok := path[i].(widget.MouseClickHandler); ok {
-			if mc.OnMouseButton(ev) {
+		if mc, ok := path[i].w.(widget.MouseClickHandler); ok {
+			if deliverButton(mc, ev, path[i].off) {
 				// Запоминаем поглотивший виджет, чтобы при release проверить,
 				// остался ли он под курсором (иначе release проглатывается).
 				if pressed && btn == widget.MouseLeft {
-					e.pressConsumer = path[i]
+					e.pressConsumer = path[i].w
 				}
 				return
 			}
@@ -590,18 +601,20 @@ func (e *Engine) SendMouseWheelPixels(xPhys, yPhys int, dx, dy float64) {
 	}
 	if dispatchRoot != nil {
 		mod := e.Modifiers()
-		path := hitTestPath(dispatchRoot, x, y)
+		path := hitPath(dispatchRoot, x, y)
 		for i := len(path) - 1; i >= 0; i-- {
-			if h, ok := path[i].(wheelPixelModHandler); ok {
-				if h.OnMouseWheelPixelsMod(x, y, dx, dy, mod) {
-					e.invalidateWidget(path[i])
+			// Точка — в кадре виджета: колесо над ребёнком прокрутки.
+			fx, fy := x+path[i].off.X, y+path[i].off.Y
+			if h, ok := path[i].w.(wheelPixelModHandler); ok {
+				if h.OnMouseWheelPixelsMod(fx, fy, dx, dy, mod) {
+					e.invalidateWidget(path[i].w, path[i].off)
 					return
 				}
 				continue
 			}
-			if h, ok := path[i].(wheelPixelHandler); ok {
-				if h.OnMouseWheelPixels(x, y, dx, dy) {
-					e.invalidateWidget(path[i])
+			if h, ok := path[i].w.(wheelPixelHandler); ok {
+				if h.OnMouseWheelPixels(fx, fy, dx, dy) {
+					e.invalidateWidget(path[i].w, path[i].off)
 					return
 				}
 			}
@@ -617,31 +630,31 @@ func (e *Engine) SendMouseWheelPixels(xPhys, yPhys int, dx, dy float64) {
 	if len(targets) == 0 {
 		return
 	}
-	var consumer widget.Widget
+	var consumer hitStep
 	for i := 0; i < steps; i++ {
-		if w := deliverWheelTick(targets, x, y, btn, e.Modifiers()); w != nil {
-			consumer = w
+		if st := deliverWheelTick(targets, x, y, btn, e.Modifiers()); st.w != nil {
+			consumer = st
 		}
 	}
-	if consumer != nil {
-		e.invalidateWidget(consumer)
+	if consumer.w != nil {
+		e.invalidateWidget(consumer.w, consumer.off)
 	}
 }
 
-// wheelTargets — получатели тика колеса по порядку: захватчик мыши либо
-// оверлей под курсором и путь hit-test снизу вверх.
-func (e *Engine) wheelTargets(dispatchRoot widget.Widget, x, y int) []widget.Widget {
+// wheelTargets — получатели тика колеса по порядку (каждый со своим кадром):
+// захватчик мыши либо оверлей под курсором и путь hit-test снизу вверх.
+func (e *Engine) wheelTargets(dispatchRoot widget.Widget, x, y int) []hitStep {
 	if cap := e.getCaptured(); cap != nil {
-		return []widget.Widget{cap}
+		return []hitStep{{w: cap, off: e.captureOffset(cap)}}
 	}
 	if dispatchRoot == nil {
 		return nil
 	}
-	var out []widget.Widget
-	if ov := findOverlayAt(dispatchRoot, x, y); ov != nil {
-		out = append(out, ov)
+	var out []hitStep
+	if ov, ovOff := findOverlayStep(dispatchRoot, x, y); ov != nil {
+		out = append(out, hitStep{w: ov, off: ovOff})
 	}
-	path := hitTestPath(dispatchRoot, x, y)
+	path := hitPath(dispatchRoot, x, y)
 	for i := len(path) - 1; i >= 0; i-- {
 		out = append(out, path[i])
 	}
@@ -649,19 +662,19 @@ func (e *Engine) wheelTargets(dispatchRoot widget.Widget, x, y int) []widget.Wid
 }
 
 // deliverWheelTick шлёт один тик (press+release) по списку получателей;
-// возвращает виджет, поглотивший нажатие.
-func deliverWheelTick(targets []widget.Widget, x, y int, btn widget.MouseButton, mod widget.KeyMod) widget.Widget {
-	var consumer widget.Widget
+// возвращает получателя, поглотившего нажатие (w == nil — никто).
+func deliverWheelTick(targets []hitStep, x, y int, btn widget.MouseButton, mod widget.KeyMod) hitStep {
+	var consumer hitStep
 	for _, pressed := range [2]bool{true, false} {
 		ev := widget.MouseEvent{X: x, Y: y, Button: btn, Pressed: pressed, Mod: mod}
-		for _, w := range targets {
-			mc, ok := w.(widget.MouseClickHandler)
+		for _, st := range targets {
+			mc, ok := st.w.(widget.MouseClickHandler)
 			if !ok {
 				continue
 			}
-			if mc.OnMouseButton(ev) {
+			if deliverButton(mc, ev, st.off) {
 				if pressed {
-					consumer = w
+					consumer = st
 				}
 				break
 			}
@@ -670,10 +683,11 @@ func deliverWheelTick(targets []widget.Widget, x, y int, btn widget.MouseButton,
 	return consumer
 }
 
-// invalidateWidget помечает область виджета; при пустых bounds — весь кадр.
-func (e *Engine) invalidateWidget(w widget.Widget) {
+// invalidateWidget помечает на экране область виджета, чей кадр сдвинут на off;
+// при пустых bounds — весь кадр.
+func (e *Engine) invalidateWidget(w widget.Widget, off image.Point) {
 	if b := w.Bounds(); !b.Empty() {
-		e.InvalidateRect(b)
+		e.InvalidateRect(b.Sub(off))
 		return
 	}
 	e.Invalidate()
@@ -729,10 +743,11 @@ func (e *Engine) SendFilesDropped(x, y int, paths []string) {
 		return
 	}
 
-	path := hitTestPath(dispatchRoot, x, y)
+	path := hitPath(dispatchRoot, x, y)
 	for i := len(path) - 1; i >= 0; i-- {
-		if fd, ok := path[i].(widget.FileDropTarget); ok {
-			if fd.OnFilesDropped(x, y, paths) {
+		if fd, ok := path[i].w.(widget.FileDropTarget); ok {
+			// Точка — в кадре приёмника (приёмник внутри прокрутки).
+			if fd.OnFilesDropped(x+path[i].off.X, y+path[i].off.Y, paths) {
 				return
 			}
 		}
@@ -750,23 +765,30 @@ func (e *Engine) SendFilesDropped(x, y int, paths []string) {
 // Но виджет, считающий чужую площадь своей — всплывающая панель, у которой
 // есть соседка по группе, — без координаты решить не может, и для него есть
 // widget.DismissableAt.
+//
+// (x, y) — экранные; каждому виджету точка отдаётся в его кадре (см. frames.go).
 func dismissOutside(w widget.Widget, keep map[widget.Widget]struct{}, x, y int) {
-	dismissOutsideAt(w, keep, x, y, 0)
+	dismissOutsideAt(w, keep, x, y, image.Point{}, 0)
 }
 
-func dismissOutsideAt(w widget.Widget, keep map[widget.Widget]struct{}, x, y, depth int) {
+func dismissOutsideAt(w widget.Widget, keep map[widget.Widget]struct{}, x, y int, off image.Point, depth int) {
 	if tooDeep(depth) {
 		return
 	}
 	if _, inPath := keep[w]; !inPath {
 		if d, ok := w.(widget.DismissableAt); ok {
-			d.DismissAt(x, y)
+			d.DismissAt(x+off.X, y+off.Y)
 		} else if d, ok := w.(widget.Dismissable); ok {
 			d.Dismiss()
 		}
 	}
-	for _, child := range w.Children() {
-		dismissOutsideAt(child, keep, x, y, depth+1)
+	children := w.Children()
+	if len(children) == 0 {
+		return
+	}
+	coff := off.Add(contentShift(w))
+	for _, child := range children {
+		dismissOutsideAt(child, keep, x, y, coff, depth+1)
 	}
 }
 
@@ -774,92 +796,58 @@ func dismissOutsideAt(w widget.Widget, keep map[widget.Widget]struct{}, x, y, de
 
 // hitTest возвращает самый верхний виджет (последний дочерний в Z-порядке),
 // чьи bounds содержат точку (x, y). Возвращает nil, если точка вне дерева.
+// Сам путь с кадрами виджетов строит hitPath (frames.go).
 func hitTest(w widget.Widget, x, y int) widget.Widget {
-	return hitTestAt(w, x, y, 0)
-}
-
-func hitTestAt(w widget.Widget, x, y, depth int) widget.Widget {
-	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
+	path := hitPath(w, x, y)
+	if len(path) == 0 {
 		return nil
 	}
-	if !image.Pt(x, y).In(w.Bounds()) {
-		return nil
-	}
-	// Дети рисуются поверх родителя — проверяем в обратном порядке
-	children := w.Children()
-	for i := len(children) - 1; i >= 0; i-- {
-		if hit := hitTestAt(children[i], x, y, depth+1); hit != nil {
-			return hit
-		}
-	}
-	return w
-}
-
-// hitTestPath возвращает путь от корня до самого глубокого виджета под (x, y).
-// Путь: [root, ..., parent, hit]. Пустой срез — точка вне дерева.
-// Используется для event bubbling.
-func hitTestPath(w widget.Widget, x, y int) []widget.Widget {
-	return appendHitTestPath(nil, w, x, y, 0)
-}
-
-// appendHitTestPath дописывает путь [w, ..., hit] в dst и возвращает результат;
-// nil — точка вне w.
-//
-// PERF-14: прежняя реализация на каждом уровне рекурсии делала
-// append([]Widget{w}, path...) — новый срез и полное копирование хвоста, т.е.
-// O(depth²) аллокаций и копий на каждое движение мыши. Здесь путь растёт в один
-// накопитель сверху вниз: одна амортизированная аллокация на весь путь.
-//
-// Аллиасинг безопасен: nil возвращается ТОЛЬКО до append (первые две проверки),
-// поэтому «протухшая» ссылка на dst у родителя после реаллокации в потомке
-// никогда не используется.
-func appendHitTestPath(dst []widget.Widget, w widget.Widget, x, y, depth int) []widget.Widget {
-	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
-		return nil
-	}
-	if !image.Pt(x, y).In(w.Bounds()) {
-		return nil
-	}
-	n := len(dst)
-	dst = append(dst, w)
-	// Проверяем детей в обратном Z-порядке
-	children := w.Children()
-	for i := len(children) - 1; i >= 0; i-- {
-		if path := appendHitTestPath(dst, children[i], x, y, depth+1); path != nil {
-			return path
-		}
-	}
-	return dst[:n+1]
+	return path[len(path)-1].w
 }
 
 // findCapturer ищет виджет, который хочет захватить мышь, в цепочке предков
 // от корня до hit-виджета. Возвращает ближайшего к hit (самого вложенного).
 func findCapturer(w widget.Widget, x, y int, ev widget.MouseEvent) widget.Widget {
-	return findCapturerAt(w, x, y, ev, 0)
+	c, _ := findCapturerStep(w, x, y, ev)
+	return c
 }
 
-func findCapturerAt(w widget.Widget, x, y int, ev widget.MouseEvent, depth int) widget.Widget {
+// findCapturerStep — findCapturer, который заодно отдаёт кадр найденного виджета:
+// захватчик получает нажатие в своих координатах.
+func findCapturerStep(w widget.Widget, x, y int, ev widget.MouseEvent) (widget.Widget, image.Point) {
+	return findCapturerAt(w, x, y, ev, image.Point{}, 0)
+}
+
+// findCapturerAt: (x, y) — точка в кадре w, off — смещение этого кадра. Вопрос
+// WantsCapture задаётся с событием в кадре самого спрашиваемого: он сверяет его
+// со своими Bounds.
+func findCapturerAt(w widget.Widget, x, y int, ev widget.MouseEvent, off image.Point, depth int) (widget.Widget, image.Point) {
 	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
-		return nil
+		return nil, image.Point{}
 	}
 	pt := image.Pt(x, y)
 	if !pt.In(w.Bounds()) {
-		return nil
+		return nil, image.Point{}
+	}
+	cx, cy, coff := x, y, off
+	if sh := contentShift(w); sh != (image.Point{}) {
+		cx, cy, coff = x+sh.X, y+sh.Y, off.Add(sh)
 	}
 	// Рекурсивно проверяем потомков (в обратном Z-порядке)
 	children := w.Children()
 	for i := len(children) - 1; i >= 0; i-- {
-		if found := findCapturerAt(children[i], x, y, ev, depth+1); found != nil {
-			return found
+		if found, foff := findCapturerAt(children[i], cx, cy, ev, coff, depth+1); found != nil {
+			return found, foff
 		}
 	}
 	// Проверяем сам виджет
 	if cr, ok := w.(widget.CaptureRequester); ok {
+		ev.X, ev.Y = x, y
 		if cr.WantsCapture(ev) {
-			return w
+			return w, off
 		}
 	}
-	return nil
+	return nil, image.Point{}
 }
 
 // findOverlayAt ищет виджет с активным overlay (popup/dropdown/menu),
@@ -867,31 +855,60 @@ func findCapturerAt(w widget.Widget, x, y int, ev widget.MouseEvent, depth int) 
 // Overlay имеет приоритет над обычным Z-порядком дерева виджетов.
 // Возвращает nil, если ни один overlay не содержит точку.
 func findOverlayAt(w widget.Widget, x, y int) widget.Widget {
-	return findOverlayAtDepth(w, x, y, 0)
+	o, _ := findOverlayStep(w, x, y)
+	return o
 }
 
-func findOverlayAtDepth(w widget.Widget, x, y, depth int) widget.Widget {
+// findOverlayStep — findOverlayAt, который заодно отдаёт кадр владельца оверлея:
+// оверлей лежит в координатах своего виджета (у поля внутри прокрутки — в
+// координатах содержимого), и событие ему нужно отдавать в них же.
+func findOverlayStep(w widget.Widget, x, y int) (widget.Widget, image.Point) {
+	return findOverlayAtDepth(w, x, y, image.Point{}, true, 0)
+}
+
+// findOverlayAtDepth: (x, y) — точка в кадре w, off — смещение этого кадра,
+// inView — точка видна сквозь все контейнеры со сдвигом над w.
+//
+// Вне видимой области прокрутки владелец оверлея не получает точку «своей
+// площадью»: сам он оттуда обрезан клипом, и его границы в координатах
+// содержимого могли бы перекрывать совсем другие кнопки под прокруткой. Сам
+// оверлей (меню) по-прежнему ловит точку — он рисуется поверх всего.
+func findOverlayAtDepth(w widget.Widget, x, y int, off image.Point, inView bool, depth int) (widget.Widget, image.Point) {
 	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
-		return nil
+		return nil, image.Point{}
 	}
 	pt := image.Pt(x, y)
 
 	// Проверяем детей в обратном Z-порядке (верхние первыми).
 	children := w.Children()
+	cx, cy, coff, cview := x, y, off, inView
+	if len(children) > 0 {
+		if oc, ok := w.(widget.ContentOffsetter); ok {
+			sh := oc.ContentOffset()
+			cview = inView && pt.In(w.Bounds())
+			cx, cy, coff = x+sh.X, y+sh.Y, off.Add(sh)
+		}
+	}
 	for i := len(children) - 1; i >= 0; i-- {
-		if found := findOverlayAtDepth(children[i], x, y, depth+1); found != nil {
-			return found
+		if found, foff := findOverlayAtDepth(children[i], cx, cy, coff, cview, depth+1); found != nil {
+			return found, foff
 		}
 	}
 
 	// Проверяем сам виджет: есть ли активный overlay и попадает ли точка в него.
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
-		if pt.In(overlayHitRect(w)) {
-			return w
+		hit := false
+		if inView {
+			hit = pt.In(overlayHitRect(w))
+		} else if ob, ok := w.(widget.OverlayBoundsProvider); ok {
+			hit = pt.In(ob.OverlayBounds())
+		}
+		if hit {
+			return w, off
 		}
 	}
 
-	return nil
+	return nil, image.Point{}
 }
 
 // overlayHitRect — область, в которой щелчок принадлежит оверлею виджета.
@@ -904,6 +921,8 @@ func findOverlayAtDepth(w widget.Widget, x, y, depth int) widget.Widget {
 //
 // Объединение, а не одна лишь область оверлея: виджет может рисовать оверлей
 // частично поверх себя, и терять свою часть незачем.
+//
+// Область — в кадре виджета (см. frames.go).
 func overlayHitRect(w widget.Widget) image.Rectangle {
 	r := w.Bounds()
 	if ob, ok := w.(widget.OverlayBoundsProvider); ok {
@@ -931,11 +950,24 @@ func overlayHitRect(w widget.Widget) image.Rectangle {
 // могут выходить за родителя — отсечься по родителю нельзя), но дорогая часть
 // — интерфейсный ассерт + вызов OnMouseMove на каждом из сотен виджетов при
 // каждом движении — выполняется теперь только у затронутых.
+//
+// Точки — экранные. Дети контейнера со сдвигом (прокрутки) получают их в своём
+// кадре, а точку вне видимой области контейнера — как «курсора нет»
+// (CursorNowhere): под прокруткой, в координатах содержимого, лежат кнопки,
+// которых с экрана не видно, и подсвечивать их нельзя; а ушедшая с кнопки мышь
+// обязана снять с неё подсветку.
 func broadcastMouseMove(w widget.Widget, ox, oy, nx, ny int) {
-	broadcastMouseMoveAt(w, ox, oy, nx, ny, 0)
+	broadcastMouseMoveAt(w, ox, oy, nx, ny, image.Point{}, 0)
 }
 
-func broadcastMouseMoveAt(w widget.Widget, ox, oy, nx, ny, depth int) {
+// broadcastMouseMoveFrame — broadcastMouseMove для поддерева, корень которого
+// (оверлей внутри прокрутки) лежит в кадре off.
+func broadcastMouseMoveFrame(w widget.Widget, ox, oy, nx, ny int, off image.Point) {
+	broadcastMouseMoveAt(w, ox+off.X, oy+off.Y, nx+off.X, ny+off.Y, off, 0)
+}
+
+// broadcastMouseMoveAt: обе точки — в кадре w, off — смещение этого кадра.
+func broadcastMouseMoveAt(w widget.Widget, ox, oy, nx, ny int, off image.Point, depth int) {
 	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
 		return
 	}
@@ -950,12 +982,32 @@ func broadcastMouseMoveAt(w widget.Widget, ox, oy, nx, ny, depth int) {
 	}
 	if interested {
 		if mm, ok := w.(widget.MouseMoveHandler); ok {
-			mm.OnMouseMove(nx, ny)
+			deliverMoveFramed(mm, nx, ny, off)
 		}
 	}
-	for _, child := range w.Children() {
-		broadcastMouseMoveAt(child, ox, oy, nx, ny, depth+1)
+	children := w.Children()
+	if len(children) == 0 {
+		return // лист: кадр детей считать незачем (в больших деревьях листьев большинство)
 	}
+	cox, coy, cnx, cny, coff := ox, oy, nx, ny, off
+	if oc, ok := w.(widget.ContentOffsetter); ok {
+		sh := oc.ContentOffset()
+		cox, coy = intoContent(ox, oy, b, sh)
+		cnx, cny = intoContent(nx, ny, b, sh)
+		coff = off.Add(sh)
+	}
+	for _, child := range children {
+		broadcastMouseMoveAt(child, cox, coy, cnx, cny, coff, depth+1)
+	}
+}
+
+// intoContent переводит точку контейнера со сдвигом sh в кадр его детей; точка
+// вне видимой области view становится «курсора нет».
+func intoContent(x, y int, view image.Rectangle, sh image.Point) (int, int) {
+	if !image.Pt(x, y).In(view) {
+		return widget.CursorNowhere, widget.CursorNowhere
+	}
+	return x + sh.X, y + sh.Y
 }
 
 // ─── Серия нажатий (двойной и тройной щелчок) ───────────────────────────────

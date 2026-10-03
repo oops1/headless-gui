@@ -98,6 +98,9 @@ func (tc *TabControl) AddTab(header string, content Widget) {
 	tc.mu.Lock()
 	cm := tc.capMgr
 	tc.tabs = append(tc.tabs, TabItem{Header: header, Content: content})
+	if content != nil {
+		adoptChild(&tc.Base, content) // родитель нужен переводу области перерисовки (см. contentoffset.go)
+	}
 	tc.mu.Unlock()
 	// Если CaptureManager уже инжектирован — раздаём его новому контенту.
 	if cm != nil && content != nil {
@@ -488,9 +491,9 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 
 	// Рисуем содержимое активной вкладки
 	if active >= 0 && active < len(tabs) && tabs[active].Content != nil {
-		ctx.SetClip(cr)
+		restore := PushClip(ctx, cr)
 		tabs[active].Content.Draw(ctx)
-		ctx.ClearClip()
+		restore()
 	}
 
 	if st.Classic3D {

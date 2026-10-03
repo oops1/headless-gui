@@ -49,6 +49,19 @@ type AccessCaretSetter interface {
 	AccessSetCaret(pos int) bool
 }
 
+// AccessSelectionSetter — скринридер может выделить диапазон: паттерн Text
+// UI Automation (ITextRangeProvider::Select) выделяет не точку, а отрезок.
+//
+// Отдельно от AccessCaretSetter: каретку ставят все поля, а выделение — не
+// обязательно. Без него Select на непустом диапазоне свёлся бы к постановке
+// каретки, и диктор, прочитав слово, не смог бы его подсветить.
+type AccessSelectionSetter interface {
+	// AccessSetSelection выделяет [from, to) в рунах (from <= to), каретка
+	// встаёт в to; from == to снимает выделение и ставит каретку. false —
+	// виджет отказался.
+	AccessSetSelection(from, to int) bool
+}
+
 // ─── TextInput (одна строка) ────────────────────────────────────────────────
 
 // AccessText — содержимое поля. У поля пароля скринридеру отдаётся пустая
@@ -92,6 +105,21 @@ func (t *TextInput) AccessSetCaret(pos int) bool {
 	return true
 }
 
+func (t *TextInput) AccessSetSelection(from, to int) bool {
+	t.mu.Lock()
+	n := len(t.runes)
+	from, to = accessClampPair(from, to, n)
+	t.caretPos = to
+	if from == to {
+		t.selStart, t.selEnd = -1, -1
+	} else {
+		t.selStart, t.selEnd = from, to
+	}
+	t.mu.Unlock()
+	t.Invalidate()
+	return true
+}
+
 func (t *TextInput) AccessSetText(s string) bool {
 	if !t.IsEnabled() {
 		return false
@@ -122,6 +150,22 @@ func (t *TextBox) AccessSetCaret(pos int) bool {
 	return true
 }
 
+func (t *TextBox) AccessSetSelection(from, to int) bool {
+	t.mu.Lock()
+	from, to = accessClampPair(from, to, len(t.runes))
+	t.caret = to
+	t.selAnchor = from
+	if from == to {
+		t.selAnchor = -1
+	}
+	t.desiredX = -1
+	t.ensureLayout()
+	t.ensureCaretVisible()
+	t.mu.Unlock()
+	t.Invalidate()
+	return true
+}
+
 func (t *TextBox) AccessSetText(s string) bool {
 	if t.AccessReadOnly() {
 		return false
@@ -136,6 +180,29 @@ func (t *TextBox) AccessSetText(s string) bool {
 func AccessTextOf(w Widget) (AccessTextProvider, bool) {
 	tp, ok := w.(AccessTextProvider)
 	return tp, ok
+}
+
+// accessClampPair усекает границы выделения до длины текста n и упорядочивает
+// их. Границы приходят от скринридера, который вправе промахнуться за конец
+// текста (он держит диапазон, пока пользователь печатает), а выход за массив
+// рун без усечения — паника в горутине движка.
+func accessClampPair(from, to, n int) (int, int) {
+	if from < 0 {
+		from = 0
+	}
+	if to < 0 {
+		to = 0
+	}
+	if from > n {
+		from = n
+	}
+	if to > n {
+		to = n
+	}
+	if to < from {
+		from, to = to, from
+	}
+	return from, to
 }
 
 // AccessRuneLen — длина текста в рунах: столько позиций у каретки минус одна.

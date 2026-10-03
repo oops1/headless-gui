@@ -45,9 +45,11 @@
 // Активация выполняется СИНТЕТИЧЕСКИМ КЛИКОМ по центру виджета, поэтому
 // перекрытый другим виджетом элемент нажать не удастся (см. ActivateAccessible).
 //
-// Не поддержано пока: паттерн Value (Slider/TextInput отдают значение только
-// свойством ValueValue, менять его клиент не может), SelectionItem у
-// радиокнопок (им отдан Invoke как приближение — нажатие выбирает пункт).
+// Тексту отданы паттерны Value (содержимое строкой) и Text (чтение кусками,
+// каретка, выделение — a11y_textpattern_windows.go).
+//
+// Не поддержано пока: Value у Slider (значение отдаётся только свойством
+// ValueValue, менять его клиент не может), SelectionItem у радиокнопок (им отдан Invoke как приближение — нажатие выбирает пункт).
 // И поиск по точке (ElementProviderFromPoint) берёт позицию курсора, а не
 // переданные координаты — см. комментарий у этого метода.
 package window
@@ -207,6 +209,7 @@ type uiaElement struct {
 	invokeVT   uintptr
 	toggleVT   uintptr
 	valueVT    uintptr
+	textVT     uintptr
 
 	// refs — счётчик ссылок COM. Атомарный: AddRef/Release приходят из
 	// потоков UIA, а не только из UI-потока окна.
@@ -253,6 +256,7 @@ func newUIAElement(b *uiaBridge, id int32) *uiaElement {
 	e.invokeVT = uiaInvokeVTable()
 	e.toggleVT = uiaToggleVTable()
 	e.valueVT = uiaValueVTable()
+	e.textVT = uiaTextVTable()
 	uiaObjMu.Lock()
 	uiaObjects[uintptr(unsafe.Pointer(&e.simpleVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.fragmentVT))] = e
@@ -260,6 +264,7 @@ func newUIAElement(b *uiaBridge, id int32) *uiaElement {
 	uiaObjects[uintptr(unsafe.Pointer(&e.invokeVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.toggleVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.valueVT))] = e
+	uiaObjects[uintptr(unsafe.Pointer(&e.textVT))] = e
 	uiaObjMu.Unlock()
 	return e
 }
@@ -273,6 +278,7 @@ func (e *uiaElement) forget() {
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.invokeVT)))
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.toggleVT)))
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.valueVT)))
+	delete(uiaObjects, uintptr(unsafe.Pointer(&e.textVT)))
 	uiaObjMu.Unlock()
 }
 
@@ -282,6 +288,7 @@ func (e *uiaElement) rootPtr() uintptr     { return uintptr(unsafe.Pointer(&e.ro
 func (e *uiaElement) invokePtr() uintptr   { return uintptr(unsafe.Pointer(&e.invokeVT)) }
 func (e *uiaElement) togglePtr() uintptr   { return uintptr(unsafe.Pointer(&e.toggleVT)) }
 func (e *uiaElement) valuePtr() uintptr    { return uintptr(unsafe.Pointer(&e.valueVT)) }
+func (e *uiaElement) textPtr() uintptr     { return uintptr(unsafe.Pointer(&e.textVT)) }
 
 // isRoot — корень фрагмента (окно): у него живёт FragmentRoot и хост-провайдер.
 func (e *uiaElement) isRoot() bool { return e.id == e.b.rootID() }
@@ -432,6 +439,14 @@ func uiaQueryInterface(this uintptr, riid *comGUID, ppv *uintptr) uintptr {
 		}
 		uiaLog("QI(%d, Value)", e.id)
 		*ppv = e.valuePtr()
+	case riid.equals(&iidTextProvider):
+		// Как и Value: только там, где у виджета есть текст, и не у пароля.
+		if !uiaSupportsText(e) {
+			uiaLog("QI(%d, Text) → не поддерживается, E_NOINTERFACE", e.id)
+			return eNoInterface
+		}
+		uiaLog("QI(%d, Text)", e.id)
+		*ppv = e.textPtr()
 	default:
 		uiaLog("QI(%d, %s) → E_NOINTERFACE", e.id, riid)
 		return eNoInterface
@@ -500,6 +515,11 @@ func uiaGetPatternProvider(this uintptr, patternID int32, out *uintptr) uintptr 
 		if uiaSupportsValue(role) {
 			e.refs.Add(1)
 			*out = e.valuePtr()
+		}
+	case uiaPatternText:
+		if uiaSupportsText(e) {
+			e.refs.Add(1)
+			*out = e.textPtr()
 		}
 	}
 	uiaLog("Pattern(%d, %d, role=%s) → %#x", e.id, patternID, role, *out)
@@ -785,6 +805,11 @@ type uiaBridge struct {
 	hwnd    uintptr
 	hostPtr atomic.Uintptr // кэш провайдера окна (см. hostProvider)
 
+	// Что клиентам уже известно о тексте поля с фокусом (см. emitTextEvents).
+	// Трогает только горутина цикла событий — замок не нужен.
+	textSeen   *a11yTextState
+	textSeenID int32
+
 	notifier uint64
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -848,6 +873,7 @@ func (b *uiaBridge) stop() {
 		}
 		b.elems = map[int32]*uiaElement{}
 		b.mu.Unlock()
+		uiaForgetRangesOf(b) // диапазоны, которые клиент так и не отпустил
 
 		if uiaCore.Load() == nil {
 			procUiaDisconnectAllProviders.Call()
@@ -988,6 +1014,7 @@ func (b *uiaBridge) eventLoop() {
 				continue
 			}
 			b.emitChanges(b.refresh(true))
+			b.emitTextEvents()
 		}
 	}
 }

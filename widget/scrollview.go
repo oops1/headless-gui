@@ -8,13 +8,15 @@ import (
 	"time"
 )
 
-// ScrollView — прокручиваемый контейнер с вертикальным скроллбаром.
+// ScrollView — прокручиваемый контейнер со скроллбарами.
 //
 // Содержимое может быть больше видимой области. Виджет отсекает
 // рисование дочерних элементов по своим границам и управляет
-// вертикальным смещением (scrollY).
+// смещением (scrollY по вертикали, scrollX по горизонтали).
 //
-// Скроллбар появляется только когда ContentHeight > высоты виджета.
+// Вертикальная полоса появляется только когда ContentHeight > высоты виджета.
+// Горизонтальная — только когда задан ContentWidth и он больше ширины виджета;
+// при нулевом ContentWidth горизонтальной прокрутки нет вовсе (см. scrollview_hscroll.go).
 type ScrollView struct {
 	Base
 
@@ -27,8 +29,26 @@ type ScrollView struct {
 
 	ContentHeight int // полная высота содержимого (задаётся вручную или автоматически)
 
+	// ContentWidth — полная ширина содержимого. Ноль (по умолчанию) означает
+	// «горизонтальной прокрутки нет»: содержимое шире области по-прежнему просто
+	// обрезается. Значение по умолчанию не может быть «ширина по детям» — тогда
+	// у каждого, кто уже держит в ScrollView широкие дети и не просил полосу,
+	// она внезапно появилась бы и отняла бы у содержимого высоту.
+	ContentWidth int
+
 	mu      sync.Mutex
 	scrollY int // текущее смещение прокрутки (>=0)
+	scrollX int // смещение вбок (>=0); всегда 0, пока ContentWidth не задан
+
+	// Горизонтальная полоса (подробности — в scrollview_hscroll.go).
+	//   hdragging/hdragGrab — идёт перетаскивание ползунка и на сколько пикселей
+	//     от его левого края взялись (чтобы содержимое не прыгало под курсор);
+	//   hthumbHovered — курсор над ползунком (подсветка);
+	//   scrollFracX — субпиксельный остаток горизонтальной пиксельной прокрутки.
+	hdragging     bool
+	hdragGrab     int
+	hthumbHovered bool
+	scrollFracX   float64
 
 	// Плавный скролл (пиксельные дельты + инерция).
 	//   scrollFrac — субпиксельный остаток пиксельной прокрутки (тачпад
@@ -75,7 +95,7 @@ var inertiaDurationSec = inertiaDuration.Seconds()
 
 // NewScrollView создаёт прокручиваемый контейнер.
 func NewScrollView() *ScrollView {
-	return &ScrollView{
+	sv := &ScrollView{
 		Background:     color.RGBA{A: 0}, // прозрачный
 		TrackColor:     win10.ScrollTrackBG,
 		ThumbColor:     win10.ScrollThumbBG,
@@ -83,6 +103,37 @@ func NewScrollView() *ScrollView {
 		BorderColor:    win10.Border,
 		scrollbarWidth: 10,
 	}
+	sv.setContentShifter(sv)
+	return sv
+}
+
+// ContentOffset — на сколько содержимое сдвинуто прокруткой: (scrollX, scrollY).
+// Реализует ContentOffsetter.
+//
+// Bounds детей остаются в координатах содержимого и от прокрутки не меняются
+// (PERF-12, см. Draw), поэтому всё, что сопоставляет экранную точку с ребёнком, —
+// хит-тест, доставка мыши, область перерисовки, оверлеи, каретка IME, границы
+// для скринридера, — обязано переводить координаты через это смещение. Движок и
+// Base делают это сами; виджетам внутри прокрутки знать о ней не нужно.
+//
+// Те же значения, что берёт Draw (scrollXLocked, scrollY): иначе картинка и
+// точка попадания разошлись бы. Берёт sv.mu, поэтому не вызывать из кода,
+// который сам держит этот замок.
+func (sv *ScrollView) ContentOffset() image.Point {
+	sv.mu.Lock()
+	defer sv.mu.Unlock()
+	return image.Pt(sv.scrollXLocked(), sv.scrollY)
+}
+
+// AddChild добавляет ребёнка в содержимое. Прокрутка, созданная не через
+// NewScrollView (литерал структуры), объявляет себя контейнером со сдвигом
+// здесь: иначе дети такой прокрутки заявляли бы области перерисовки в
+// координатах содержимого.
+func (sv *ScrollView) AddChild(w Widget) {
+	if sv.Base.shifter.Load() == nil {
+		sv.setContentShifter(sv)
+	}
+	sv.Base.AddChild(w)
 }
 
 // ScrollY возвращает текущее смещение прокрутки.
@@ -120,17 +171,21 @@ func (sv *ScrollView) setScrollYLocked(y int) bool {
 }
 
 // maxScroll возвращает максимальное значение scrollY.
+//
+// Видимая высота — без горизонтальной полосы: иначе последние строки
+// содержимого так и остались бы под ней, и до них было бы не доехать.
 func (sv *ScrollView) maxScroll() int {
-	viewH := sv.bounds.Dy()
+	viewH := sv.contentHeight()
 	if sv.ContentHeight <= viewH {
 		return 0
 	}
 	return sv.ContentHeight - viewH
 }
 
-// needsScrollbar возвращает true, если содержимое больше видимой области.
+// needsScrollbar возвращает true, если нужна вертикальная полоса.
 func (sv *ScrollView) needsScrollbar() bool {
-	return sv.ContentHeight > sv.bounds.Dy()
+	vert, _ := sv.bars()
+	return vert
 }
 
 // contentWidth возвращает ширину контентной области (без скроллбара).
@@ -149,9 +204,13 @@ func (sv *ScrollView) thumbRect() image.Rectangle {
 		return image.Rectangle{}
 	}
 
-	trackX := b.Max.X - sv.scrollbarWidth
-	top, workH := sbWorkArea(b, sv.scrollbarWidth) // в классике — между кнопками ▲▼
-	ratio := float64(b.Dy()) / float64(sv.ContentHeight)
+	// Полоса кончается над горизонтальной (если она есть), а доля видимого
+	// считается от видимой высоты: иначе ползунок был бы длиннее, чем надо, и
+	// не доходил до низа трека.
+	vb := sv.vbarRect()
+	trackX := vb.Min.X
+	top, workH := sbWorkArea(vb, sv.scrollbarWidth) // в классике — между кнопками ▲▼
+	ratio := float64(vb.Dy()) / float64(sv.ContentHeight)
 	thumbH := int(ratio * float64(workH))
 	if thumbH < 20 {
 		thumbH = 20
@@ -169,14 +228,26 @@ func (sv *ScrollView) thumbRect() image.Rectangle {
 	return image.Rect(trackX, top+thumbY, b.Max.X, top+thumbY+thumbH)
 }
 
-// Draw рисует ScrollView с клиппингом и скроллбаром.
+// Draw рисует ScrollView с клиппингом и скроллбарами.
 func (sv *ScrollView) Draw(ctx DrawContext) {
 	b := sv.bounds
 	if b.Empty() {
 		return
 	}
+	// Всё, что кадр берёт из изменяемого состояния, снимаем одним захватом
+	// замка: события мыши идут из другой горутины и двигают смещения и флаги
+	// подсветки посреди кадра. Раздельные чтения дали бы кадр, где содержимое
+	// уже уехало вбок, а ползунок ещё стоит на старом месте.
 	sv.mu.Lock()
-	scrollY := sv.scrollY
+	scrollX, scrollY := sv.scrollXLocked(), sv.scrollY
+	vert, horiz := sv.bars()
+	contentW, contentH := sv.contentWidth(), sv.contentHeight()
+	vbar := sv.vbarRect()
+	thumb := sv.thumbRect()
+	hstrip, htrack, hthumb := sv.hbarStrip(), sv.hbarTrack(), sv.hbarThumbLocked()
+	vActive := sv.thumbHovered || sv.dragging
+	hActive := sv.hthumbHovered || sv.hdragging
+	hScrollable := sv.ContentWidth > 0
 	sv.mu.Unlock()
 
 	// Фон
@@ -184,9 +255,13 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), sv.Background)
 	}
 
-	// Клиппинг для содержимого
-	contentW := sv.contentWidth()
-	ctx.SetClip(image.Rect(b.Min.X, b.Min.Y, b.Min.X+contentW, b.Max.Y))
+	// Клиппинг для содержимого: без обеих полос (а без горизонтальной —
+	// высота остаётся прежней). Сужаем ПЕРЕСЕЧЕНИЕМ с текущей областью —
+	// прокрутка может стоять внутри другой, — и ставим его заново перед
+	// КАЖДЫМ ребёнком: ребёнок вправе снять своё сужение вместе с нашим
+	// (`ClearClip` снимает всё), и тогда соседи рисовали бы мимо.
+	outer := ctx.Clip()
+	content := image.Rect(b.Min.X, b.Min.Y, b.Min.X+contentW, b.Min.Y+contentH).Intersect(outer)
 
 	// Рисуем дочерние элементы со смещением.
 	//
@@ -199,42 +274,70 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 	//     КАЖДОМ кадре, и on-demand рендер с живым ScrollView никогда не засыпал;
 	//   - три лишних вызова на ребёнка за кадр.
 	// Рисуемый результат идентичен: ребёнок отдаёт свои (несдвинутые) координаты,
-	// обёртка вычитает scrollY на входе в канвас.
+	// обёртка вычитает scrollX/scrollY на входе в канвас.
+	//
+	// ЦЕНА этого решения: Bounds() детей остаются в координатах содержимого, а
+	// всё, что сопоставляло экранную точку с ребёнком по Bounds, видело
+	// несдвинутую картину — щелчок попадал в невидимую кнопку, прокрученную за
+	// верх, подсвечивалась не та кнопка, перерисовывалось не то место экрана,
+	// меню поля ввода открывалось не у курсора. Поэтому на каждой границе
+	// «ребёнок ↔ внешний мир» координаты переводятся через ContentOffset
+	// (подробности и список границ — в contentoffset.go). Сдвигать Bounds детей
+	// ради этого не стали: см. там же, почему это хуже.
 	childCtx := ctx
-	if scrollY != 0 {
-		childCtx = sv.offsetContext(ctx, scrollY)
+	if scrollX != 0 || scrollY != 0 {
+		childCtx = sv.offsetContext(ctx, scrollX, scrollY)
 	}
 	for _, child := range sv.children {
-		shifted := child.Bounds().Add(image.Pt(0, -scrollY))
+		shifted := child.Bounds().Add(image.Pt(-scrollX, -scrollY))
 		// Пропускаем невидимые элементы
 		if shifted.Max.Y < b.Min.Y || shifted.Min.Y > b.Max.Y {
 			continue
 		}
+		// По горизонтали отсекаем только когда прокрутка вбок включена: без неё
+		// дети правее области рисовались (и целиком терялись на клипе) всегда, и
+		// менять это поведение для тех, кто ContentWidth не задавал, незачем.
+		if hScrollable && (shifted.Max.X < b.Min.X || shifted.Min.X > b.Max.X) {
+			continue
+		}
+		ctx.SetClip(content)
 		child.Draw(childCtx)
 	}
 
-	ctx.ClearClip()
+	ctx.SetClip(outer)
 
-	// Скроллбар
-	if sv.needsScrollbar() {
-		trackX := b.Max.X - sv.scrollbarWidth
-		ctx.FillRect(trackX, b.Min.Y, sv.scrollbarWidth, b.Dy(), sv.TrackColor)
-
-		sv.mu.Lock()
-		tr := sv.thumbRect()
-		sv.mu.Unlock()
+	// Вертикальная полоса
+	if vert {
+		ctx.FillRect(vbar.Min.X, vbar.Min.Y, vbar.Dx(), vbar.Dy(), sv.TrackColor)
 
 		tc := sv.ThumbColor
-		if sv.thumbHovered || sv.dragging {
+		if vActive {
 			tc = sv.ThumbHoverBG
 		}
 		if st := currentStyle(); st.Classic3D {
 			// Классика: кнопки ▲/▼ на концах + выпуклый ползунок.
-			track := image.Rect(trackX, b.Min.Y, b.Max.X, b.Max.Y)
-			drawClassicScrollbar(ctx, track, tr, st, sv.ThumbColor, win10.LabelText)
+			drawClassicScrollbar(ctx, vbar, thumb, st, sv.ThumbColor, win10.LabelText)
 		} else {
-			ctx.FillRoundRect(tr.Min.X+1, tr.Min.Y+1, tr.Dx()-2, tr.Dy()-2, 3, tc)
+			ctx.FillRoundRect(thumb.Min.X+1, thumb.Min.Y+1, thumb.Dx()-2, thumb.Dy()-2, 3, tc)
 		}
+	}
+
+	// Горизонтальная полоса — тем же drawHBar, что и в сравнении/слиянии.
+	if horiz {
+		ctx.FillRect(hstrip.Min.X, hstrip.Min.Y, hstrip.Dx(), hstrip.Dy(), sv.TrackColor)
+		tc := sv.ThumbColor
+		if hActive {
+			tc = sv.ThumbHoverBG
+		}
+		drawHBar(ctx, htrack, hthumb, sv.TrackColor, tc)
+	}
+
+	// Угол, где полосы сходятся. Вертикальная кончается над горизонтальной, а
+	// горизонтальная — левее вертикальной, поэтому ни одна его не закрашивает;
+	// заливаем один раз здесь. Если бы каждая полоса тянулась до края, угол
+	// рисовался бы дважды, и на полупрозрачной теме он был бы темнее остального.
+	if vert && horiz {
+		ctx.FillRect(vbar.Min.X, hstrip.Min.Y, vbar.Dx(), hstrip.Dy(), sv.TrackColor)
 	}
 
 	// Рамка
@@ -248,8 +351,13 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 // ─── Транслирующий DrawContext (PERF-12) ─────────────────────────────────────
 
 // svOffsetCtx — обёртка DrawContext, сдвигающая все координаты рисования на
-// -dy по вертикали. Позволяет ScrollView рисовать содержимое прокрученным, не
+// (-dx, -dy). Позволяет ScrollView рисовать содержимое прокрученным, не
 // трогая bounds дочерних виджетов (см. Draw).
+//
+// Сдвиг должен затрагивать КАЖДЫЙ метод, принимающий координату x, и обе
+// стороны пары SetClip/Clip. Метод, про который забыли, рисует мимо: после
+// прокрутки вбок такой элемент (линия, картинка, сглаженный эллипс) остался бы
+// на старом месте, пока всё вокруг уехало.
 //
 // Опциональные интерфейсы контекста: AAShapes пробрасывается отдельным типом
 // (svOffsetCtxAA), чтобы обёртка НЕ заявляла его, когда внутренний контекст его
@@ -260,8 +368,8 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 // Snapshotter НЕ пробрасывается сознательно: он нужен только оверлею
 // DockManager, который рисуется движком поверх дерева, а не внутри ScrollView.
 type svOffsetCtx struct {
-	inner DrawContext
-	dy    int
+	inner  DrawContext
+	dx, dy int
 }
 
 // svOffsetCtxAA — вариант обёртки для контекстов со сглаженными примитивами.
@@ -276,10 +384,10 @@ var (
 	_ AAShapes         = (*svOffsetCtxAA)(nil)
 )
 
-// offsetContext возвращает обёртку над ctx со сдвигом dy, переиспользуя ранее
-// созданную (внешний контекст между кадрами один и тот же). Вызывается только
-// из Draw — рендер-горутина единственная.
-func (sv *ScrollView) offsetContext(ctx DrawContext, dy int) DrawContext {
+// offsetContext возвращает обёртку над ctx со сдвигом (dx, dy), переиспользуя
+// ранее созданную (внешний контекст между кадрами один и тот же). Вызывается
+// только из Draw — рендер-горутина единственная.
+func (sv *ScrollView) offsetContext(ctx DrawContext, dx, dy int) DrawContext {
 	if sv.offCtx == nil || sv.offCtxFor != ctx {
 		if aa, ok := ctx.(AAShapes); ok {
 			w := &svOffsetCtxAA{svOffsetCtx: svOffsetCtx{inner: ctx}, aa: aa}
@@ -290,60 +398,60 @@ func (sv *ScrollView) offsetContext(ctx DrawContext, dy int) DrawContext {
 		}
 		sv.offCtxFor = ctx
 	}
-	sv.offCtxBase.dy = dy
+	sv.offCtxBase.dx, sv.offCtxBase.dy = dx, dy
 	return sv.offCtx
 }
 
 func (o *svOffsetCtx) FillRect(x, y, w, h int, col color.RGBA) {
-	o.inner.FillRect(x, y-o.dy, w, h, col)
+	o.inner.FillRect(x-o.dx, y-o.dy, w, h, col)
 }
 
 func (o *svOffsetCtx) FillRectAlpha(x, y, w, h int, col color.RGBA) {
-	o.inner.FillRectAlpha(x, y-o.dy, w, h, col)
+	o.inner.FillRectAlpha(x-o.dx, y-o.dy, w, h, col)
 }
 
 func (o *svOffsetCtx) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
-	o.inner.FillRoundRect(x, y-o.dy, w, h, r, col)
+	o.inner.FillRoundRect(x-o.dx, y-o.dy, w, h, r, col)
 }
 
 func (o *svOffsetCtx) DrawBorder(x, y, w, h int, col color.RGBA) {
-	o.inner.DrawBorder(x, y-o.dy, w, h, col)
+	o.inner.DrawBorder(x-o.dx, y-o.dy, w, h, col)
 }
 
 func (o *svOffsetCtx) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
-	o.inner.DrawRoundBorder(x, y-o.dy, w, h, r, col)
+	o.inner.DrawRoundBorder(x-o.dx, y-o.dy, w, h, r, col)
 }
 
 func (o *svOffsetCtx) SetPixel(x, y int, col color.RGBA) {
-	o.inner.SetPixel(x, y-o.dy, col)
+	o.inner.SetPixel(x-o.dx, y-o.dy, col)
 }
 
 func (o *svOffsetCtx) DrawHLine(x, y, length int, col color.RGBA) {
-	o.inner.DrawHLine(x, y-o.dy, length, col)
+	o.inner.DrawHLine(x-o.dx, y-o.dy, length, col)
 }
 
 func (o *svOffsetCtx) DrawVLine(x, y, length int, col color.RGBA) {
-	o.inner.DrawVLine(x, y-o.dy, length, col)
+	o.inner.DrawVLine(x-o.dx, y-o.dy, length, col)
 }
 
 func (o *svOffsetCtx) DrawImage(src image.Image, x, y int) {
-	o.inner.DrawImage(src, x, y-o.dy)
+	o.inner.DrawImage(src, x-o.dx, y-o.dy)
 }
 
 func (o *svOffsetCtx) DrawImageScaled(src image.Image, x, y, w, h int) {
-	o.inner.DrawImageScaled(src, x, y-o.dy, w, h)
+	o.inner.DrawImageScaled(src, x-o.dx, y-o.dy, w, h)
 }
 
 func (o *svOffsetCtx) DrawText(text string, x, y int, col color.RGBA) {
-	o.inner.DrawText(text, x, y-o.dy, col)
+	o.inner.DrawText(text, x-o.dx, y-o.dy, col)
 }
 
 func (o *svOffsetCtx) DrawTextSize(text string, x, y int, sizePt float64, col color.RGBA) {
-	o.inner.DrawTextSize(text, x, y-o.dy, sizePt, col)
+	o.inner.DrawTextSize(text, x-o.dx, y-o.dy, sizePt, col)
 }
 
 func (o *svOffsetCtx) DrawTextFont(text string, x, y int, sizePt float64, fontName string, col color.RGBA) {
-	o.inner.DrawTextFont(text, x, y-o.dy, sizePt, fontName, col)
+	o.inner.DrawTextFont(text, x-o.dx, y-o.dy, sizePt, fontName, col)
 }
 
 func (o *svOffsetCtx) MeasureText(text string, sizePt float64) int {
@@ -359,15 +467,15 @@ func (o *svOffsetCtx) MeasureRunePositions(text string, sizePt float64) []int {
 }
 
 func (o *svOffsetCtx) SetClip(r image.Rectangle) {
-	o.inner.SetClip(r.Sub(image.Pt(0, o.dy)))
+	o.inner.SetClip(r.Sub(image.Pt(o.dx, o.dy)))
 }
 
 func (o *svOffsetCtx) ClearClip() { o.inner.ClearClip() }
 
 // Clip возвращает область отсечения в системе координат ДЕТЕЙ (несдвинутой):
-// внутренний клип + dy — симметрично SetClip.
+// внутренний клип + (dx, dy) — симметрично SetClip.
 func (o *svOffsetCtx) Clip() image.Rectangle {
-	return o.inner.Clip().Add(image.Pt(0, o.dy))
+	return o.inner.Clip().Add(image.Pt(o.dx, o.dy))
 }
 
 // Scale проксирует HiDPI-масштаб внутреннего контекста (physicalScaler).
@@ -380,11 +488,11 @@ func (o *svOffsetCtx) Scale() float64 {
 }
 
 func (o *svOffsetCtxAA) FillEllipseAA(cx, cy, rx, ry int, col color.RGBA) {
-	o.aa.FillEllipseAA(cx, cy-o.dy, rx, ry, col)
+	o.aa.FillEllipseAA(cx-o.dx, cy-o.dy, rx, ry, col)
 }
 
 func (o *svOffsetCtxAA) StrokeEllipseAA(cx, cy, rx, ry int, thickness float64, col color.RGBA) {
-	o.aa.StrokeEllipseAA(cx, cy-o.dy, rx, ry, thickness, col)
+	o.aa.StrokeEllipseAA(cx-o.dx, cy-o.dy, rx, ry, thickness, col)
 }
 
 func (o *svOffsetCtxAA) FillPolygonAA(pts []image.Point, col color.RGBA) {
@@ -396,17 +504,17 @@ func (o *svOffsetCtxAA) StrokePolylineAA(pts []image.Point, thickness float64, c
 }
 
 func (o *svOffsetCtxAA) DrawLineAA(x1, y1, x2, y2 int, thickness float64, col color.RGBA) {
-	o.aa.DrawLineAA(x1, y1-o.dy, x2, y2-o.dy, thickness, col)
+	o.aa.DrawLineAA(x1-o.dx, y1-o.dy, x2-o.dx, y2-o.dy, thickness, col)
 }
 
-// shift возвращает копию точек, сдвинутых на -dy по вертикали.
+// shift возвращает копию точек, сдвинутых на (-dx, -dy).
 func (o *svOffsetCtxAA) shift(pts []image.Point) []image.Point {
-	if len(pts) == 0 || o.dy == 0 {
+	if len(pts) == 0 || (o.dx == 0 && o.dy == 0) {
 		return pts
 	}
 	out := make([]image.Point, len(pts))
 	for i, p := range pts {
-		out[i] = image.Pt(p.X, p.Y-o.dy)
+		out[i] = image.Pt(p.X-o.dx, p.Y-o.dy)
 	}
 	return out
 }
@@ -421,10 +529,21 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 		if !e.Pressed {
 			return true
 		}
+		const wheelStep = 40
+		// Shift+колесо — вбок, но только если есть куда: в ScrollView без
+		// горизонтальной полосы Shift по-прежнему ничего не меняет, иначе
+		// привычное колесо с зажатым Shift внезапно перестало бы листать.
+		if e.Mod&ModShift != 0 && sv.hscrollAvailable() {
+			if e.Button == MouseWheelUp {
+				sv.ScrollXBy(-wheelStep)
+			} else {
+				sv.ScrollXBy(wheelStep)
+			}
+			return true
+		}
 		if !sv.needsScrollbar() {
 			return false // нечего прокручивать — пусть событие всплывёт выше
 		}
-		const wheelStep = 40
 		if e.Button == MouseWheelUp {
 			sv.ScrollBy(-wheelStep)
 		} else {
@@ -454,27 +573,35 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 			sv.Invalidate() // ползунок подсвечивается при drag
 			return true
 		}
+		// Горизонтальная полоса: ползунок или прыжок по треку.
+		if sv.hbarPressLocked(e) {
+			return true
+		}
 		// Клик на скроллбаре: кнопки ▲/▼ (классика) или прыжок по треку.
+		// Трек — это vbarRect: он короче виджета на высоту горизонтальной полосы,
+		// а угол между полосами не принадлежит ни одной из них.
 		b := sv.bounds
+		vb := sv.vbarRect()
 		trackX := b.Max.X - sv.scrollbarWidth
-		if e.X >= trackX && e.X <= b.Max.X && sv.needsScrollbar() {
+		inCorner := sv.needsHScrollbar() && e.Y >= vb.Max.Y
+		if e.X >= trackX && e.X <= b.Max.X && !inCorner && sv.needsScrollbar() {
 			if currentStyle().Classic3D {
 				btn := classicSBBtnH(sv.scrollbarWidth)
 				const arrowStep = 40
-				if e.Y < b.Min.Y+btn {
+				if e.Y < vb.Min.Y+btn {
 					if sv.setScrollYLocked(sv.scrollY - arrowStep) {
 						sv.Invalidate()
 					}
 					return true
 				}
-				if e.Y >= b.Max.Y-btn {
+				if e.Y >= vb.Max.Y-btn {
 					if sv.setScrollYLocked(sv.scrollY + arrowStep) {
 						sv.Invalidate()
 					}
 					return true
 				}
 			}
-			top, workH := sbWorkArea(b, sv.scrollbarWidth)
+			top, workH := sbWorkArea(vb, sv.scrollbarWidth)
 			ratio := float64(e.Y-top) / float64(workH)
 			if sv.setScrollYLocked(int(ratio * float64(sv.ContentHeight))) {
 				sv.Invalidate()
@@ -487,6 +614,11 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 			sv.Invalidate() // подсветка ползунка гаснет
 			return true
 		}
+		if sv.hdragging {
+			sv.hdragging = false
+			sv.Invalidate()
+			return true
+		}
 	}
 	return false
 }
@@ -495,16 +627,25 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 // во время перетаскивания курсор свободно выходит за границы виджета, и без
 // захвата drag обрывался бы на краю (а с адресной доставкой мыши события
 // вне bounds иначе вовсе не приходят).
+//
+// Горизонтальную полосу захватываем целиком, а не только ползунок: она лежит
+// у нижнего края, где наверняка тянутся дети (их bounds не сдвинуты прокруткой),
+// и без захвата щелчок мимо ползунка доставался бы глубокому ребёнку под полосой,
+// а не ScrollView.
 func (sv *ScrollView) WantsCapture(e MouseEvent) bool {
 	if e.Button != MouseLeft || !e.Pressed {
 		return false
 	}
 	sv.mu.Lock()
 	defer sv.mu.Unlock()
-	if !sv.needsScrollbar() {
+	if !sv.needsScrollbar() && !sv.needsHScrollbar() {
 		return false
 	}
-	return image.Pt(e.X, e.Y).In(sv.thumbRect())
+	pt := image.Pt(e.X, e.Y)
+	if pt.In(sv.hbarStrip()) {
+		return true
+	}
+	return sv.needsScrollbar() && pt.In(sv.thumbRect())
 }
 
 // OnMouseMove обрабатывает перемещение мыши (drag скроллбара, hover).
@@ -512,9 +653,16 @@ func (sv *ScrollView) OnMouseMove(x, y int) {
 	sv.mu.Lock()
 	defer sv.mu.Unlock()
 
+	if sv.hdragging {
+		if sv.hbarDragToLocked(x) {
+			sv.Invalidate()
+		}
+		return
+	}
+
 	if sv.dragging {
 		dy := y - sv.dragStartY
-		_, workH := sbWorkArea(sv.bounds, sv.scrollbarWidth)
+		_, workH := sbWorkArea(sv.vbarRect(), sv.scrollbarWidth)
 		tr := sv.thumbRect()
 		thumbH := tr.Dy()
 		trackUsable := workH - thumbH
@@ -536,6 +684,13 @@ func (sv *ScrollView) OnMouseMove(x, y int) {
 			sv.Invalidate()
 		}
 	}
+
+	// Hover на горизонтальном ползунке. Сбрасывается и тогда, когда полосы уже
+	// нет (ContentWidth уменьшили): иначе подсветка осталась бы залипшей.
+	if hov := sv.hbarThumbHitLocked(x, y); hov != sv.hthumbHovered {
+		sv.hthumbHovered = hov
+		sv.Invalidate()
+	}
 }
 
 // ScrollBy прокручивает на delta пикселей (положительное — вниз).
@@ -548,19 +703,19 @@ func (sv *ScrollView) ScrollBy(delta int) {
 	}
 }
 
-// OnMouseWheelPixels — плавная прокрутка точной пиксельной дельтой (колесо
-// высокой точности / тачпад). dy>0 — вниз. Возвращает true, если событие
-// поглощено; false — если прокручивать нечего или мы упёрлись в край в
-// сторону жеста (тогда дельта всплывёт к родителю).
+// wheelPixelsY — вертикальная часть плавной прокрутки точной пиксельной
+// дельтой (колесо высокой точности / тачпад). dy>0 — вниз. Возвращает true,
+// если дельта поглощена; false — если прокручивать нечего или мы упёрлись в
+// край в сторону жеста (тогда дельта всплывёт к родителю).
 //
 // В обычных темах дельта запускает «маховик» инерции (импульс скорости,
 // затухание на часах движка). В Classic3D — мгновенно, без инерции.
-func (sv *ScrollView) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
+func (sv *ScrollView) wheelPixelsY(dy float64) bool {
 	if !sv.IsEnabled() {
 		return false
 	}
 	sv.mu.Lock()
-	if sv.ContentHeight <= sv.bounds.Dy() {
+	if !sv.needsScrollbar() {
 		sv.mu.Unlock()
 		return false // нечего прокручивать — пусть всплывёт выше
 	}
@@ -594,6 +749,12 @@ func (sv *ScrollView) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
 // ensureInertia запускает несущую анимацию инерции, если она ещё не идёт.
 // Скорость (sv.vel) уже задана вызывающим. Часы — движка (tick через
 // StepAnimations); ни одной горутины.
+//
+// Инерция только вертикальная, и это сделано сознательно: маховик держит одну
+// скорость, один остаток и один признак «упёрлись в край». Вторую ось пришлось бы
+// вести парой (вектор скорости, два края, остановка по обоим), а выигрыш мал —
+// вбок листают редко и обычно короткими рывками. Горизонтальная пиксельная
+// дельта применяется сразу (см. wheelPixelsX в scrollview_hscroll.go).
 func (sv *ScrollView) ensureInertia() {
 	sv.mu.Lock()
 	if sv.inertiaAnim != nil && sv.inertiaAnim.Running() {

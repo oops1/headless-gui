@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"sort"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -14,7 +15,11 @@ import (
 //
 // Поддерживает:
 //   - Перенос по словам (Wrap = TextWrapping="Wrap") либо горизонтальный скролл
+//     с полосой прокрутки (колесо с Shift, горизонтальное колесо, перетаскивание)
 //   - Вертикальный скролл: колесо мыши, PgUp/PgDn, тонкий индикатор
+//   - Именованный шрифт (FontName), в том числе моноширинный для кода
+//   - Табуляция: приём Tab как символа (AcceptTab) и табстопы (TabSize)
+//   - Стили на диапазонах: подсветка синтаксиса, поиска, ошибок (SetStyler)
 //   - Каретка, выделение мышью (drag), Shift+навигация, двойной клик — слово
 //   - Стрелки, Ctrl+стрелки (по словам), Home/End, Ctrl+Home/End (документ)
 //   - Ctrl+A/C/X/V, Ctrl+Z / Ctrl+Y (undo/redo)
@@ -27,14 +32,15 @@ import (
 type TextBox struct {
 	Base
 
-	mu        sync.Mutex
-	runes     []rune
-	caret     int // позиция вставки (индекс в runes)
-	selAnchor int // якорь выделения (-1 = нет); выделение = [min,max)(anchor, caret)
-	scrollY   int // вертикальный сдвиг, px
-	scrollX   int // горизонтальный сдвиг, px (используется только при Wrap=false)
-	scrollFrac float64 // субпиксельный остаток плавной пиксельной прокрутки
-	desiredX  int // целевая X (px) для Up/Down; -1 = не задана
+	mu          sync.Mutex
+	runes       []rune
+	caret       int     // позиция вставки (индекс в runes)
+	selAnchor   int     // якорь выделения (-1 = нет); выделение = [min,max)(anchor, caret)
+	scrollY     int     // вертикальный сдвиг, px
+	scrollX     int     // горизонтальный сдвиг, px (используется только при Wrap=false)
+	scrollFrac  float64 // субпиксельный остаток плавной пиксельной прокрутки
+	scrollFracX float64 // то же по горизонтали
+	desiredX    int     // целевая X (px) для Up/Down; -1 = не задана
 
 	// Кэш компоновки: границы строк для текущего текста и ширины.
 	lines     []tbLine
@@ -58,8 +64,38 @@ type TextBox struct {
 	// раскладка строк считается с учётом набранного.
 	ime imeState
 
-	undoStack []textEdit
-	redoStack []textEdit
+	// История правок (textbox_undo.go): хранятся замены, а не снимки текста.
+	undoStack []tbUndoEntry
+	redoStack []tbUndoEntry
+	pending   []tbEdit // замены текущего действия, ещё не закрытого commitUndo
+
+	// Стили на диапазонах (textbox_style.go). Кэш — по номеру логической
+	// строки, только для тех, что попадали в кадр; сбрасывается правкой текста.
+	// styleGen растёт при каждом сбросе: ответ Styler, полученный без замка,
+	// кладётся в кэш, только если за это время кэш не сбросили.
+	styler     Styler
+	styleCache map[int][]Span
+	styleGen   uint64
+
+	// Раскладка с учётом шрифта и табстопов. layoutKey — то, для чего она
+	// посчитана: смена любой из частей делает кэш строк недействительным.
+	pars       []int // начало каждого абзаца (логической строки) в runes
+	layoutKey  tbLayoutKey
+	layoutTabP int  // ширина табуляции в px для текущей раскладки (0 — табстопов нет)
+	hasTabs    bool // в тексте есть табуляция (иначе меряем по-прежнему целиком)
+
+	// Ширина самой длинной строки (для горизонтальной полосы): считается лениво
+	// и только без переноса; widthCache — ширины строк по хешу текста, чтобы
+	// правка одной строки не заставляла перемерять весь документ.
+	cw         int
+	cwOK       bool
+	widthCache map[uint64]int
+	widthSpare map[uint64]int
+
+	// Перетаскивание ползунка горизонтальной полосы: hbarGrab — на сколько
+	// правее левого края ползунка взялись.
+	hbarDrag bool
+	hbarGrab int
 
 	// Wrap — переносить строки по словам (TextWrapping="Wrap").
 	// false — длинные строки уходят вправо (горизонтальный скролл за кареткой).
@@ -68,6 +104,18 @@ type TextBox struct {
 	ReadOnly bool
 
 	Placeholder string
+
+	// FontName — именованный шрифт (RegisterFont); "" — шрифт по умолчанию.
+	// Раскладка и отрисовка идут одним и тем же шрифтом. Для кода — моноширинный.
+	FontName string
+	// TabSize — ширина табуляции в пробелах. 0 — «как раньше»: табстопов нет,
+	// пока не включён AcceptTab; с AcceptTab 0 означает 4.
+	TabSize int
+	// AcceptTab — Tab вставляет символ табуляции, а не уводит фокус (WPF:
+	// AcceptsTab). По умолчанию выключено: приложения, собранные до появления
+	// поля, продолжают переводить Tab в смену фокуса. Ctrl+Tab остаётся
+	// навигацией.
+	AcceptTab bool
 
 	Background  color.RGBA
 	BorderColor color.RGBA
@@ -97,6 +145,17 @@ type TextBox struct {
 // Завершающий '\n' (если есть) в интервал не входит.
 type tbLine struct {
 	start, end int
+}
+
+// tbLayoutKey — то, от чего зависит раскладка помимо текста и ширины: кегль,
+// шрифт, ширина табуляции и перенос по словам. Раньше раскладка помнила только
+// ширину и ревизию метрик, и смена шрифта (или включение переноса из меню
+// «Формат») оставляла старые строки и старые позиции каретки до первой правки.
+type tbLayoutKey struct {
+	fs   float64
+	font string
+	tab  int // табуляция в пробелах; 0 — табстопов нет
+	wrap bool
 }
 
 // NewTextBox создаёт многострочный редактор с переносом по словам.
@@ -139,6 +198,11 @@ func (t *TextBox) SetText(text string) {
 	t.mu.Lock()
 	runes := []rune(text)
 	changed := string(t.runes) != text
+	if changed {
+		// Записанные правки указывают в прежний документ: откат на новом
+		// тексте испортил бы его.
+		t.resetUndo()
+	}
 	t.runes = runes
 	t.caret = len(runes)
 	t.selAnchor = -1
@@ -157,6 +221,48 @@ func (t *TextBox) GetText() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.runes)
+}
+
+// changeText — текст для OnChange. Копия документа нужна только тому, кто
+// слушает: без обработчика она раньше делалась на каждое нажатие клавиши, и на
+// большом документе это была копия в мегабайты впустую. Вызывать под t.mu.
+func (t *TextBox) changeText(onCh func(string)) string {
+	if onCh == nil {
+		return ""
+	}
+	return string(t.runes)
+}
+
+// AcceptsTab — контракт TabAcceptor: при AcceptTab клавиша Tab вставляет символ
+// табуляции, а не уводит фокус. Только для чтения вставлять некуда — Tab снова
+// уходит обходу фокуса. Ctrl+Tab остаётся навигацией всегда.
+func (t *TextBox) AcceptsTab() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.AcceptTab && !t.ReadOnly
+}
+
+// SetStyler задаёт источник стилей на диапазонах текста (подсветка синтаксиса,
+// найденного, ошибок); nil — убрать, цвет один на весь виджет, как раньше.
+// Прежние ответы приложения сбрасываются.
+func (t *TextBox) SetStyler(s Styler) {
+	t.mu.Lock()
+	t.styler = s
+	t.styleCache = nil
+	t.styleGen++
+	t.mu.Unlock()
+	t.Invalidate()
+}
+
+// InvalidateStyles велит спросить стили заново: приложение сообщает, что
+// правила подсветки изменились без правки текста (новая строка поиска, новые
+// результаты разбора). Правку текста виджет замечает сам.
+func (t *TextBox) InvalidateStyles() {
+	t.mu.Lock()
+	t.styleCache = nil
+	t.styleGen++
+	t.mu.Unlock()
+	t.Invalidate()
 }
 
 // SelectedText возвращает выделенный фрагмент ("" если выделения нет).
@@ -201,14 +307,14 @@ func (t *TextBox) InsertAtCaret(s string) {
 		t.mu.Unlock()
 		return
 	}
-	before := textEdit{text: string(t.runes), caret: t.caret}
+	caret0 := t.caret
 	t.insertRunes([]rune(s))
-	t.pushUndo(before)
+	t.commitUndo(caret0)
 	t.desiredX = -1
 	t.ensureLayout()
 	t.ensureCaretVisible()
-	text := string(t.runes)
 	onCh := t.OnChange
+	text := t.changeText(onCh)
 	t.mu.Unlock()
 	t.Invalidate()
 	if onCh != nil {
@@ -233,10 +339,19 @@ func (t *TextBox) ScrollTop() int {
 
 // Cursor — текстовый курсор (I-beam) над редактором.
 func (t *TextBox) Cursor(x, y int) Cursor {
-	if t.IsEnabled() {
-		return CursorIBeam
+	if !t.IsEnabled() {
+		return CursorArrow
 	}
-	return CursorArrow
+	// Над полосой прокрутки — обычная стрелка: I-beam обещал бы текст там,
+	// где его нет.
+	t.mu.Lock()
+	t.ensureLayout()
+	onBar := t.hbarShown() && image.Pt(x, y).In(tbHBarHit(t.bounds, t.PaddingX, t.textAreaW()))
+	t.mu.Unlock()
+	if onBar {
+		return CursorArrow
+	}
+	return CursorIBeam
 }
 
 // ─── Focusable / Animated ───────────────────────────────────────────────────
@@ -304,38 +419,89 @@ func (t *TextBox) lineHeight() int {
 }
 
 // textAreaW — ширина области текста (внутри рамки, без скроллбара).
-func (t *TextBox) textAreaW() int {
-	w := t.bounds.Dx() - 2*t.PaddingX - tbScrollbarW
+func (t *TextBox) textAreaW() int { return t.textAreaWAt(t.bounds) }
+
+// textAreaWAt — то же для заданных границ: Draw работает с границами,
+// снятыми в начале кадра, и не должен перечитывать их по ходу.
+func (t *TextBox) textAreaWAt(b image.Rectangle) int {
+	w := b.Dx() - 2*t.PaddingX - tbScrollbarW
 	if w < 20 {
 		w = 20
 	}
 	return w
 }
 
-// visibleLines — сколько строк помещается по высоте.
+// visibleLines — сколько строк помещается по высоте. Показанная полоса
+// горизонтальной прокрутки отнимает у текста свою высоту.
 func (t *TextBox) visibleLines() int {
-	n := (t.bounds.Dy() - 2*t.PaddingY) / t.lineHeight()
+	h := t.bounds.Dy() - 2*t.PaddingY
+	if t.hbarShown() {
+		h -= tbHBarH
+	}
+	n := h / t.lineHeight()
 	if n < 1 {
 		n = 1
 	}
 	return n
 }
 
-// ensureLayout перекомпоновывает строки при изменении текста, ширины или
-// метрик шрифта. Вызывать под t.mu.
+// effectiveTabSize — ширина табуляции в пробелах для раскладки; 0 — табстопов нет.
+func (t *TextBox) effectiveTabSize() int {
+	switch {
+	case t.TabSize > 0:
+		return t.TabSize
+	case t.AcceptTab:
+		return tbDefaultTabSize
+	}
+	return 0
+}
+
+// measureText — ширина строки без табуляций шрифтом виджета, в пределах
+// раскладки (без Draw): тем же измерителем, что и всё остальное.
+func (t *TextBox) measureText(text string, fs float64) int {
+	if t.layoutKey.font == "" {
+		return MeasureUIText(text, fs)
+	}
+	return MeasureUITextFont(text, fs, t.layoutKey.font)
+}
+
+// ensureLayout перекомпоновывает строки при изменении текста, ширины, метрик
+// шрифта, самого шрифта или табстопов. Вызывать под t.mu.
 func (t *TextBox) ensureLayout() {
 	w := t.textAreaW()
 	rev := TextMetricsRev()
-	if !t.dirty && t.layoutW == w && t.layoutRev == rev && t.lines != nil {
+	key := tbLayoutKey{fs: t.fontSize(), font: t.FontName, tab: t.effectiveTabSize(), wrap: t.Wrap}
+	if !t.dirty && t.layoutW == w && t.layoutRev == rev && t.layoutKey == key && t.lines != nil {
 		return
 	}
+	if t.dirty {
+		// Текст изменился: стили, которые приложение отдало прежнему тексту,
+		// больше не про него. Поколение растёт, чтобы запоздавший ответ
+		// Styler (он зовётся без замка) не попал в кэш.
+		t.styleCache = nil
+		t.styleGen++
+	}
+	if t.layoutRev != rev || t.layoutKey != key {
+		t.widthCache = nil // ширины строк посчитаны другим шрифтом
+	}
+	t.cwOK = false
 	t.layoutW = w
 	t.layoutRev = rev
+	t.layoutKey = key
+	t.layoutTabP = 0
+	if key.tab > 0 {
+		sp := t.measureText(" ", key.fs)
+		if sp < 1 {
+			sp = 1
+		}
+		t.layoutTabP = key.tab * sp
+	}
 	t.dirty = false
 	t.buildText()
 	t.lines = t.lines[:0]
+	t.pars = t.pars[:0]
 
-	fs := t.fontSize()
+	fs := key.fs
 	n := len(t.runes)
 	parStart := 0
 	for i := 0; i <= n; i++ {
@@ -343,6 +509,7 @@ func (t *TextBox) ensureLayout() {
 			continue
 		}
 		// Параграф [parStart, i)
+		t.pars = append(t.pars, parStart)
 		if !t.Wrap {
 			t.lines = append(t.lines, tbLine{start: parStart, end: i})
 		} else {
@@ -359,18 +526,96 @@ func (t *TextBox) ensureLayout() {
 func (t *TextBox) buildText() {
 	t.layoutBuf = t.layoutBuf[:0]
 	t.runeOff = append(t.runeOff[:0], 0)
+	t.hasTabs = false
 	for _, r := range t.runes {
+		if r == '\t' {
+			t.hasTabs = true
+		}
 		t.layoutBuf = utf8.AppendRune(t.layoutBuf, r)
 		t.runeOff = append(t.runeOff, len(t.layoutBuf))
 	}
 }
 
-// measureRange возвращает ширину рун [a, b) в пикселях. Вызывать под t.mu.
+// measureRange возвращает ширину рун [a, b) в пикселях; a — начало видимой
+// строки, табстопы считаются от него. Вызывать под t.mu.
 func (t *TextBox) measureRange(a, b int, fs float64) int {
-	if !t.dirty && len(t.runeOff) == len(t.runes)+1 {
-		return measureUIBytes(t.layoutBuf[t.runeOff[a]:t.runeOff[b]], fs)
+	fast := !t.dirty && len(t.runeOff) == len(t.runes)+1
+	if t.layoutKey.font == "" && (t.layoutTabP <= 0 || !t.hasTabs) {
+		// Прежний путь без изменений: кэшированный байтовый замер без
+		// аллокаций. Им идут все редакторы без шрифта и табуляций.
+		if fast {
+			return measureUIBytes(t.layoutBuf[t.runeOff[a]:t.runeOff[b]], fs)
+		}
+		return MeasureUIText(string(t.runes[a:b]), fs)
 	}
-	return MeasureUIText(string(t.runes[a:b]), fs)
+	var text string
+	if fast {
+		text = string(t.layoutBuf[t.runeOff[a]:t.runeOff[b]])
+	} else {
+		text = string(t.runes[a:b])
+	}
+	tabW := t.layoutTabP
+	if !t.hasTabs {
+		tabW = 0
+	}
+	return measureTabbed(text, tabW, func(s string) int { return t.measureText(s, fs) })
+}
+
+// contentWidth — ширина самой длинной строки без переноса, px. С переносом 0:
+// строки не шире области, и полоса не нужна. Вызывать под t.mu.
+//
+// Считается лениво и держится до следующей раскладки: нужна лишь когда
+// решается, показывать ли полосу. Ширины строк кэшируются по хешу текста:
+// правка меняет одну строку, и перемерять остальные тысячи — это замер всего
+// документа на каждое нажатие клавиши.
+func (t *TextBox) contentWidth() int {
+	if t.Wrap || t.dirty || t.lines == nil {
+		return 0
+	}
+	if t.cwOK {
+		return t.cw
+	}
+	fs := t.layoutKey.fs
+	// Две карты по очереди: новую на каждую правку выделять — мегабайты на
+	// документе в десятки тысяч строк, а очищенная старая отдаёт ту же ёмкость.
+	next := t.widthSpare
+	if next == nil {
+		next = make(map[uint64]int, len(t.lines))
+	}
+	clear(next)
+	best := 0
+	for _, ln := range t.lines {
+		if ln.end <= ln.start {
+			continue
+		}
+		h := hashRunes(t.runes[ln.start:ln.end])
+		w, ok := t.widthCache[h]
+		if !ok {
+			w = t.measureRange(ln.start, ln.end, fs)
+		}
+		next[h] = w
+		if w > best {
+			best = w
+		}
+	}
+	t.widthSpare, t.widthCache, t.cw, t.cwOK = t.widthCache, next, best, true
+	return best
+}
+
+// hashRunes — FNV-1a по рунам. Коллизия даст лишь неточную ширину полосы, а не
+// порчу текста, так что криптостойкость не нужна.
+func hashRunes(rs []rune) uint64 {
+	h := uint64(14695981039346656037)
+	for _, r := range rs {
+		h ^= uint64(r)
+		h *= 1099511628211
+	}
+	return h
+}
+
+// hbarShown — показана ли полоса горизонтальной прокрутки. Вызывать под t.mu.
+func (t *TextBox) hbarShown() bool {
+	return tbNeedHBar(t.Wrap, t.contentWidth(), t.textAreaW())
 }
 
 // wrapParagraph разбивает параграф [start, end) на строки шириной ≤ maxW px:
@@ -434,13 +679,34 @@ func (t *TextBox) firstOverflow(lineStart, from, end, maxW int, fs float64) int 
 
 // caretLine возвращает индекс строки, содержащей каретку.
 // Вызывать под t.mu (после ensureLayout).
+//
+// Делением пополам, а не обходом: концы строк не убывают, а на каждый кадр и
+// каждое нажатие клавиши линейный обход по десяткам тысяч строк заметен.
+// Каретка на стыке двух строк (разрез длинного слова) принадлежит первой —
+// как и при обходе с начала.
 func (t *TextBox) caretLine() int {
-	for i, ln := range t.lines {
-		if t.caret >= ln.start && t.caret <= ln.end {
-			return i
-		}
+	return lineOfPos(t.lines, t.caret)
+}
+
+// lineOfPos — индекс первой строки, чей конец не левее pos; если такой нет —
+// последняя.
+func lineOfPos(lines []tbLine, pos int) int {
+	i := sort.Search(len(lines), func(i int) bool { return lines[i].end >= pos })
+	if i >= len(lines) {
+		return len(lines) - 1
 	}
-	return len(t.lines) - 1
+	return i
+}
+
+// parOfLine — номер абзаца (логической строки), которому принадлежит видимая
+// строка ln. Начала абзацев строго возрастают, а перенос по словам не пересекает
+// '\n', так что хватает начала строки. Вызывать под t.mu.
+func (t *TextBox) parOfLine(ln tbLine) int {
+	i := sort.Search(len(t.pars), func(i int) bool { return t.pars[i] > ln.start })
+	if i == 0 {
+		return 0
+	}
+	return i - 1
 }
 
 // lineTextW возвращает ширину префикса строки li длиной col рун (px).
@@ -498,16 +764,26 @@ func (t *TextBox) ensureCaretVisible() {
 
 	if !t.Wrap {
 		w := t.textAreaW()
-		if cx-t.scrollX > w-4 {
-			t.scrollX = cx - w + 4
+		if cx-t.scrollX > w-tbCaretRoom {
+			t.scrollX = cx - w + tbCaretRoom
 		}
 		if cx-t.scrollX < 0 {
 			t.scrollX = cx
 		}
-		if t.scrollX < 0 {
-			t.scrollX = 0
-		}
+		t.clampScrollX()
 	}
+}
+
+// clampScrollX ограничивает scrollX шириной самой длинной строки. Раньше
+// предела не было: после удаления длинной строки смещение оставалось где было,
+// и пустое место справа можно было накрутить колесом сколь угодно далеко.
+// Вызывать под t.mu (после ensureLayout).
+func (t *TextBox) clampScrollX() {
+	if t.Wrap {
+		t.scrollX = 0
+		return
+	}
+	t.scrollX = tbClampScrollX(t.scrollX, t.contentWidth(), t.textAreaW())
 }
 
 // clampScroll ограничивает scrollY содержимым. Вызывать под t.mu.
@@ -560,10 +836,9 @@ func (t *TextBox) deleteSel() bool {
 		return false
 	}
 	lo, hi := t.normSel()
-	t.runes = append(t.runes[:lo], t.runes[hi:]...)
+	t.splice(lo, hi-lo, nil)
 	t.caret = lo
 	t.selAnchor = -1
-	t.dirty = true
 	return true
 }
 
@@ -573,13 +848,8 @@ func (t *TextBox) insertRunes(rs []rune) {
 	if len(rs) == 0 {
 		return
 	}
-	ins := make([]rune, len(t.runes)+len(rs))
-	copy(ins, t.runes[:t.caret])
-	copy(ins[t.caret:], rs)
-	copy(ins[t.caret+len(rs):], t.runes[t.caret:])
-	t.runes = ins
+	t.splice(t.caret, 0, rs)
 	t.caret += len(rs)
-	t.dirty = true
 }
 
 func (t *TextBox) clampCaret() {
@@ -667,42 +937,6 @@ func (t *TextBox) pasteFromClipboard() bool {
 	return false
 }
 
-func (t *TextBox) pushUndo(before textEdit) {
-	t.undoStack = append(t.undoStack, before)
-	if len(t.undoStack) > 200 {
-		t.undoStack = t.undoStack[1:]
-	}
-	t.redoStack = nil
-}
-
-func (t *TextBox) undo() {
-	if len(t.undoStack) == 0 {
-		return
-	}
-	cur := textEdit{text: string(t.runes), caret: t.caret}
-	last := t.undoStack[len(t.undoStack)-1]
-	t.undoStack = t.undoStack[:len(t.undoStack)-1]
-	t.redoStack = append(t.redoStack, cur)
-	t.runes = []rune(last.text)
-	t.caret = last.caret
-	t.selAnchor = -1
-	t.dirty = true
-}
-
-func (t *TextBox) redo() {
-	if len(t.redoStack) == 0 {
-		return
-	}
-	cur := textEdit{text: string(t.runes), caret: t.caret}
-	next := t.redoStack[len(t.redoStack)-1]
-	t.redoStack = t.redoStack[:len(t.redoStack)-1]
-	t.undoStack = append(t.undoStack, cur)
-	t.runes = []rune(next.text)
-	t.caret = next.caret
-	t.selAnchor = -1
-	t.dirty = true
-}
-
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
 func (t *TextBox) OnKeyEvent(e KeyEvent) {
@@ -719,11 +953,17 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 
 	t.mu.Lock()
 	t.ensureLayout()
+	if !t.selActive() {
+		// Выделение нулевой ширины (Shift+→ и сразу Shift+←) невидимо, но якорь
+		// остаётся. Первая же правка двигала каретку от него прочь, и невидимое
+		// выделение оживало на соседних знаках; а при удалении слова якорь
+		// оказывался за концом текста и следующая вставка падала на срезе.
+		t.selAnchor = -1
+	}
 
 	changed := false
 	isUndoRedo := false
 	keepDesiredX := false
-	before := textEdit{text: string(t.runes), caret: t.caret}
 	caret0, sel0, scr0, scr0x := t.caret, t.selAnchor, t.scrollY, t.scrollX
 
 	switch e.Code {
@@ -817,16 +1057,14 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 			if t.caret > 0 {
 				start := t.wordLeft(t.caret)
 				if start < t.caret {
-					t.runes = append(t.runes[:start], t.runes[t.caret:]...)
+					t.splice(start, t.caret-start, nil)
 					t.caret = start
-					t.dirty = true
 					changed = true
 				}
 			}
 		} else if t.caret > 0 {
-			t.runes = append(t.runes[:t.caret-1], t.runes[t.caret:]...)
+			t.splice(t.caret-1, 1, nil)
 			t.caret--
-			t.dirty = true
 			changed = true
 		}
 
@@ -860,20 +1098,29 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 			if t.caret < len(t.runes) {
 				end := t.wordRight(t.caret)
 				if end > t.caret {
-					t.runes = append(t.runes[:t.caret], t.runes[end:]...)
-					t.dirty = true
+					t.splice(t.caret, end-t.caret, nil)
 					changed = true
 				}
 			}
 		} else if t.caret < len(t.runes) {
-			t.runes = append(t.runes[:t.caret], t.runes[t.caret+1:]...)
-			t.dirty = true
+			t.splice(t.caret, 1, nil)
 			changed = true
 		}
 
 	case KeyEnter:
 		if !t.ReadOnly {
 			t.insertRunes([]rune{'\n'})
+			changed = true
+		}
+
+	case KeyTab:
+		// Tab до сюда доходит, только если AcceptsTab() сказал «да» (движок
+		// иначе уводит его в смену фокуса) либо событие подали напрямую.
+		// Вставляем сам символ: пробелы вместо него редактор кода выбирает
+		// сам, а табстопы (TabSize) делают табуляцию нужной ширины. Shift+Tab
+		// ничего не вставляет — в списке отступов он «убрать», а не «добавить».
+		if t.AcceptTab && !t.ReadOnly && !ctrl && !shift {
+			t.insertRunes([]rune{'\t'})
 			changed = true
 		}
 
@@ -918,8 +1165,11 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 		}
 	}
 
-	if changed && !isUndoRedo {
-		t.pushUndo(before)
+	if !isUndoRedo {
+		// Закрываем действие всегда, а не только при changed: замены могли
+		// остаться от набора через IME, и пусть лучше они станут своей записью,
+		// чем прилипнут к чужому действию.
+		t.commitUndo(caret0)
 	}
 	if !keepDesiredX {
 		t.desiredX = -1
@@ -930,8 +1180,8 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 
 	visChanged := changed || t.caret != caret0 || t.selAnchor != sel0 ||
 		t.scrollY != scr0 || t.scrollX != scr0x
-	text := string(t.runes)
 	onCh := t.OnChange
+	text := t.changeText(onCh)
 	t.mu.Unlock()
 
 	if visChanged {
@@ -978,15 +1228,22 @@ func (t *TextBox) OnMouseButton(e MouseEvent) bool {
 	if inside && (e.Button == MouseWheelUp || e.Button == MouseWheelDown) && e.Pressed {
 		t.mu.Lock()
 		t.ensureLayout()
-		old := t.scrollY
+		oldY, oldX := t.scrollY, t.scrollX
 		step := 3 * t.lineHeight()
 		if e.Button == MouseWheelUp {
-			t.scrollY -= step
+			step = -step
+		}
+		if e.Mod&ModShift != 0 && t.hbarShown() {
+			// Shift+колесо — вбок: на мыши без горизонтального колеса это
+			// единственный способ добраться до конца длинной строки без
+			// захвата ползунка. Нет полосы — Shift ничего не меняет.
+			t.scrollX += step
+			t.clampScrollX()
 		} else {
 			t.scrollY += step
+			t.clampScroll()
 		}
-		t.clampScroll()
-		moved := t.scrollY != old
+		moved := t.scrollY != oldY || t.scrollX != oldX
 		t.mu.Unlock()
 		if moved {
 			t.Invalidate()
@@ -999,9 +1256,9 @@ func (t *TextBox) OnMouseButton(e MouseEvent) bool {
 	}
 
 	t.mu.Lock()
-	caret0, sel0 := t.caret, t.selAnchor
+	caret0, sel0, scrX0 := t.caret, t.selAnchor, t.scrollX
 	defer func() {
-		changed := t.caret != caret0 || t.selAnchor != sel0
+		changed := t.caret != caret0 || t.selAnchor != sel0 || t.scrollX != scrX0
 		t.mu.Unlock()
 		if changed {
 			t.Invalidate()
@@ -1009,6 +1266,11 @@ func (t *TextBox) OnMouseButton(e MouseEvent) bool {
 	}()
 
 	if e.Pressed {
+		// Полоса прокрутки — раньше текста: нажатие на неё не должно ставить
+		// каретку в строку под ней.
+		if t.hbarPressLocked(e.X, e.Y) {
+			return true
+		}
 		idx := t.charIndexAtPoint(e.X, e.Y)
 
 		// Двойной щелчок выделяет слово, тройной — строку.
@@ -1033,6 +1295,7 @@ func (t *TextBox) OnMouseButton(e MouseEvent) bool {
 		t.desiredX = -1
 	} else {
 		t.dragging = false
+		t.hbarDrag = false
 		if t.selAnchor == t.caret {
 			t.selAnchor = -1
 		}
@@ -1043,39 +1306,108 @@ func (t *TextBox) OnMouseButton(e MouseEvent) bool {
 	return true
 }
 
-// OnMouseWheelPixels — плавная вертикальная прокрутка точной пиксельной дельтой
-// (тачпад/колесо высокой точности). dy>0 — вниз. В отличие от тикового колеса
-// (3 строки за тик) применяет дельту попиксельно с накоплением субпиксельного
-// остатка. Возвращает false, если курсор вне поля или прокручивать нечего —
-// чтобы событие всплыло к родителю.
+// OnMouseWheelPixels — плавная прокрутка точной пиксельной дельтой
+// (тачпад/колесо высокой точности). dy>0 — вниз, dx>0 — вправо. В отличие от
+// тикового колеса (3 строки за тик) применяет дельту попиксельно с накоплением
+// субпиксельного остатка. Возвращает false, если курсор вне поля или
+// прокручивать нечего — чтобы событие всплыло к родителю.
 func (t *TextBox) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
+	return t.OnMouseWheelPixelsMod(x, y, dx, dy, 0)
+}
+
+// OnMouseWheelPixelsMod — то же с модификаторами: Shift уводит вертикальную
+// дельту вбок. Горизонтальная дельта раньше не принималась вовсе — dx
+// молча терялся, и тачпад не двигал длинную строку.
+func (t *TextBox) OnMouseWheelPixelsMod(x, y int, dx, dy float64, mod KeyMod) bool {
 	if !image.Pt(x, y).In(t.bounds) {
 		return false
 	}
 	t.mu.Lock()
 	t.ensureLayout()
+	oldY, oldX := t.scrollY, t.scrollX
+	consumed := false
+
+	hbar := t.hbarShown()
+	if mod&ModShift != 0 && hbar && dx == 0 {
+		dx, dy = dy, 0
+	}
+	if dx != 0 && hbar {
+		maxX := tbScrollXMax(t.contentWidth(), t.textAreaW())
+		if !((dx < 0 && t.scrollX <= 0) || (dx > 0 && t.scrollX >= maxX)) {
+			t.scrollFracX += dx
+			whole := math.Trunc(t.scrollFracX)
+			t.scrollFracX -= whole
+			t.scrollX += int(whole)
+			t.clampScrollX()
+			consumed = true
+		}
+	}
+
 	lh := t.lineHeight()
 	maxScroll := len(t.lines)*lh - t.visibleLines()*lh
-	if maxScroll <= 0 {
-		t.mu.Unlock()
-		return false
+	if dy != 0 && maxScroll > 0 &&
+		!((dy < 0 && t.scrollY <= 0) || (dy > 0 && t.scrollY >= maxScroll)) {
+		t.scrollFrac += dy
+		whole := math.Trunc(t.scrollFrac)
+		t.scrollFrac -= whole
+		t.scrollY += int(whole)
+		t.clampScroll()
+		consumed = true
 	}
-	if (dy < 0 && t.scrollY <= 0) || (dy > 0 && t.scrollY >= maxScroll) {
-		t.mu.Unlock()
-		return false
-	}
-	t.scrollFrac += dy
-	whole := math.Trunc(t.scrollFrac)
-	t.scrollFrac -= whole
-	old := t.scrollY
-	t.scrollY += int(whole)
-	t.clampScroll()
-	moved := t.scrollY != old
+	moved := t.scrollY != oldY || t.scrollX != oldX
 	t.mu.Unlock()
 	if moved {
 		t.Invalidate()
 	}
+	return consumed
+}
+
+// hbarThumbLocked — ползунок горизонтальной полосы. Пустой — полосы нет.
+// Вызывать под t.mu (после ensureLayout).
+func (t *TextBox) hbarThumbLocked() image.Rectangle {
+	if !t.hbarShown() {
+		return image.Rectangle{}
+	}
+	vw := t.textAreaW()
+	cw := t.contentWidth()
+	return hbarThumb(tbHBarTrack(t.bounds, t.PaddingX, vw), float64(t.scrollX),
+		float64(tbScrollXMax(cw, vw)), float64(vw), float64(cw+tbCaretRoom))
+}
+
+// hbarPressLocked — нажатие на полосу: на ползунке начинается перетаскивание
+// без скачка, мимо — текст прыгает туда, куда ткнули. Возвращает true, если
+// нажатие пришлось на полосу. Вызывать под t.mu.
+func (t *TextBox) hbarPressLocked(x, y int) bool {
+	t.ensureLayout()
+	if !t.hbarShown() {
+		return false
+	}
+	vw := t.textAreaW()
+	if !image.Pt(x, y).In(tbHBarHit(t.bounds, t.PaddingX, vw)) {
+		return false
+	}
+	th := t.hbarThumbLocked()
+	t.dragging = false
+	t.hbarDrag, t.hbarGrab = true, 0
+	if !th.Empty() && x >= th.Min.X && x < th.Max.X {
+		t.hbarGrab = x - th.Min.X
+		return true
+	}
+	cw := t.contentWidth()
+	t.scrollX = int(math.Round(hbarScrollAt(tbHBarTrack(t.bounds, t.PaddingX, vw), x,
+		float64(tbScrollXMax(cw, vw)), float64(vw), float64(cw+tbCaretRoom))))
+	t.clampScrollX()
 	return true
+}
+
+// hbarDragToLocked ведёт ползунок за курсором. Вызывать под t.mu.
+func (t *TextBox) hbarDragToLocked(x int) {
+	t.ensureLayout()
+	vw := t.textAreaW()
+	cw := t.contentWidth()
+	t.scrollX = int(math.Round(hbarScrollForThumbX(tbHBarTrack(t.bounds, t.PaddingX, vw), x-t.hbarGrab,
+		float64(tbScrollXMax(cw, vw)), float64(vw), float64(cw+tbCaretRoom))))
+	t.clampScrollX()
 }
 
 func (t *TextBox) OnMouseMove(x, y int) {
@@ -1083,12 +1415,14 @@ func (t *TextBox) OnMouseMove(x, y int) {
 		t.contextMenu.OnMouseMove(x, y)
 	}
 	t.mu.Lock()
-	caret0, scr0 := t.caret, t.scrollY
-	if t.dragging {
+	caret0, scr0, scrX0 := t.caret, t.scrollY, t.scrollX
+	if t.hbarDrag {
+		t.hbarDragToLocked(x)
+	} else if t.dragging {
 		t.caret = t.charIndexAtPoint(x, y)
 		t.ensureCaretVisible()
 	}
-	changed := t.caret != caret0 || t.scrollY != scr0
+	changed := t.caret != caret0 || t.scrollY != scr0 || t.scrollX != scrX0
 	t.mu.Unlock()
 	if changed {
 		t.Invalidate()
@@ -1153,13 +1487,19 @@ func (t *TextBox) showContextMenu(x, y int) {
 
 	edit := func(action func()) func() {
 		return func() {
+			t.mu.Lock()
+			caret0 := t.caret
+			t.mu.Unlock()
 			action()
 			t.mu.Lock()
+			// Правки меню раньше в историю не попадали: Ctrl+Z после «Вырезать»
+			// откатывал что-то более раннее. Теперь это обычное действие.
+			t.commitUndo(caret0)
 			t.clampCaret()
 			t.ensureLayout()
 			t.ensureCaretVisible()
-			text := string(t.runes)
 			onCh := t.OnChange
+			text := t.changeText(onCh)
 			t.mu.Unlock()
 			t.Invalidate()
 			if onCh != nil {
@@ -1209,39 +1549,190 @@ func (t *TextBox) showContextMenu(x, y int) {
 
 // ─── Draw ────────────────────────────────────────────────────────────────────
 
+// tbVisLine — видимая строка, снятая под замком для отрисовки: границы, её
+// руны и откуда она в абзаце (для стилей).
+type tbVisLine struct {
+	ln  tbLine
+	rs  []rune
+	par int // номер абзаца (логической строки)
+	off int // смещение начала строки в абзаце, руны
+}
+
+// tbDrawState — всё, что Draw берёт у виджета под замком. Вынесено в
+// структуру, чтобы рисовать без замка и не читать поля виджета гонкой.
+type tbDrawState struct {
+	vis      []tbVisLine // видимые строки с first по last включительно
+	first    int         // индекс первой видимой строки среди всех
+	nLines   int
+	empty    bool // текста нет вовсе — рисуем подсказку
+	caret    int
+	caretLi  int
+	selLo    int
+	selHi    int
+	scrollX  int
+	scrollY  int
+	imeFrom  int
+	imeTo    int
+	imeOn    bool
+	focused  bool
+	fs       float64
+	lh       int
+	font     string
+	tabPx    int
+	hbar     bool
+	contentW int
+	thumb    image.Rectangle
+	spans    map[int][]Span // стили абзацев видимых строк (из кэша или от Styler)
+	need     map[int]string // абзацы, стилей которых в кэше нет: номер -> текст
+	styler   Styler
+	gen      uint64
+}
+
+// snapshotDraw снимает состояние для кадра. Копируется ТОЛЬКО видимый диапазон
+// строк: раньше каждый кадр копировал весь срез рун и все строки документа
+// (на документе в мегабайты — копия в мегабайты на кадр, даже когда мигает одна
+// каретка), а рисовалось из них десяток строк.
+func (t *TextBox) snapshotDraw(viewH int) tbDrawState {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.ensureLayout()
+	t.clampScrollX() // перенос включили, или текст стал короче — смещение не должно «висеть»
+
+	st := tbDrawState{
+		nLines:  len(t.lines),
+		empty:   len(t.runes) == 0,
+		caret:   t.caret,
+		selLo:   -1,
+		selHi:   -1,
+		scrollX: t.scrollX,
+		scrollY: t.scrollY,
+		focused: t.focused,
+		fs:      t.fontSize(),
+		lh:      t.lineHeight(),
+		font:    t.layoutKey.font,
+		styler:  t.styler,
+		gen:     t.styleGen,
+	}
+	if t.selActive() {
+		st.selLo, st.selHi = t.normSel()
+	}
+	st.imeFrom, st.imeTo, st.imeOn = t.ime.imeRange()
+	if t.hasTabs {
+		st.tabPx = t.layoutTabP
+	}
+	st.hbar = t.hbarShown()
+	if st.hbar {
+		st.contentW = t.contentWidth()
+		st.thumb = t.hbarThumbLocked()
+	}
+	st.caretLi = t.caretLine()
+
+	if st.empty {
+		return st
+	}
+	first := st.scrollY / st.lh
+	last := (st.scrollY + viewH) / st.lh
+	if first < 0 {
+		first = 0
+	}
+	if last >= st.nLines {
+		last = st.nLines - 1
+	}
+	st.first = first
+	for li := first; li <= last; li++ {
+		ln := t.lines[li]
+		par := t.parOfLine(ln)
+		st.vis = append(st.vis, tbVisLine{
+			ln:  ln,
+			rs:  append([]rune(nil), t.runes[ln.start:ln.end]...),
+			par: par,
+			off: ln.start - t.pars[par],
+		})
+		if st.styler == nil {
+			continue
+		}
+		if _, ok := st.spans[par]; ok {
+			continue
+		}
+		if _, ok := st.need[par]; ok {
+			continue
+		}
+		if sp, ok := t.styleCache[par]; ok {
+			if st.spans == nil {
+				st.spans = make(map[int][]Span)
+			}
+			st.spans[par] = sp
+			continue
+		}
+		end := len(t.runes)
+		if par+1 < len(t.pars) {
+			end = t.pars[par+1] - 1
+		}
+		if st.need == nil {
+			st.need = make(map[int]string)
+		}
+		st.need[par] = string(t.runes[t.pars[par]:end])
+	}
+	return st
+}
+
+// fetchStyles спрашивает у приложения стили абзацев, которых нет в кэше. Зовёт
+// БЕЗ замка: Styler — чужой код, и он вправе обратиться к самому виджету
+// (GetText, позиция каретки) или долго считать; под замком это тупик или
+// заморозка ввода. Ответ кладётся в кэш, только если за время вызова текст и
+// правила не менялись: иначе устаревшие стили осели бы в кэше.
+func (t *TextBox) fetchStyles(st *tbDrawState) {
+	if len(st.need) == 0 || st.styler == nil {
+		return
+	}
+	got := make(map[int][]Span, len(st.need))
+	for par, text := range st.need {
+		got[par] = append([]Span(nil), st.styler.LineSpans(par, text)...)
+	}
+	if st.spans == nil {
+		st.spans = make(map[int][]Span, len(got))
+	}
+	for par, sp := range got {
+		st.spans[par] = sp
+	}
+
+	t.mu.Lock()
+	if t.styleGen == st.gen && !t.dirty {
+		if t.styleCache == nil || len(t.styleCache) > tbStyleCacheMax {
+			t.styleCache = make(map[int][]Span, len(got))
+		}
+		for par, sp := range got {
+			t.styleCache[par] = sp
+		}
+	}
+	t.mu.Unlock()
+}
+
+// tbStyleCacheMax — сколько абзацев держит кэш стилей. Кэш пополняется только
+// видимыми строками, а чистится правкой текста; предел страхует от прокрутки
+// по документу в сотни тысяч строк без единой правки.
+const tbStyleCacheMax = 4096
+
 func (t *TextBox) Draw(ctx DrawContext) {
 	b := t.bounds
 	if b.Empty() {
 		return
 	}
 
-	t.mu.Lock()
-	t.ensureLayout()
-	lines := make([]tbLine, len(t.lines))
-	copy(lines, t.lines)
-	runes := make([]rune, len(t.runes))
-	copy(runes, t.runes)
-	caret := t.caret
-	selLo, selHi := -1, -1
-	if t.selActive() {
-		selLo, selHi = t.normSel()
-	}
-	scrollY, scrollX := t.scrollY, t.scrollX
-	imeFrom, imeTo, imeActive := t.ime.imeRange()
-	focused := t.focused
-	fs := t.fontSize()
-	lh := t.lineHeight()
-	t.mu.Unlock()
+	st := t.snapshotDraw(b.Dy())
+	t.fetchStyles(&st)
+	fs, lh := st.fs, st.lh
+	focused := st.focused
 
-	st := currentStyle()
+	sty := currentStyle()
 
 	// Фон и рамка — в стиле TextInput активной темы.
 	switch {
-	case st.Classic3D:
+	case sty.Classic3D:
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.Background)
-		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
-	case st.ControlCorner > 0:
-		cr := st.ControlCorner
+		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), sty)
+	case sty.ControlCorner > 0:
+		cr := sty.ControlCorner
 		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, t.Background)
 		if focused {
 			ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, t.FocusBorder)
@@ -1258,52 +1749,114 @@ func (t *TextBox) Draw(ctx DrawContext) {
 	}
 
 	inner := image.Rect(b.Min.X+1, b.Min.Y+1, b.Max.X-1, b.Max.Y-1)
-	ctx.SetClip(inner)
+	// Текст не должен заходить на полосу прокрутки: нижняя строка обрезается по
+	// её верхнему краю. Сужение — пересечением с внешней областью, а в конце
+	// она возвращается: поле может стоять внутри прокрутки.
+	textClip := inner
+	if st.hbar {
+		textClip.Max.Y = b.Max.Y - tbHBarH
+	}
+	outer := ctx.Clip()
+	ctx.SetClip(textClip.Intersect(outer))
 
-	textX := b.Min.X + t.PaddingX - scrollX
+	textX := b.Min.X + t.PaddingX - st.scrollX
 	topY := b.Min.Y + t.PaddingY
 
-	if len(runes) == 0 {
-		ctx.DrawTextSize(t.Placeholder, b.Min.X+t.PaddingX, topY+2, fs, t.PlaceColor)
+	// Измерение и вывод — тем же шрифтом, каким считалась раскладка: иначе
+	// каретка и выделение разойдутся с буквами.
+	measure := func(s string) int { return ctx.MeasureText(s, fs) }
+	if st.font != "" {
+		measure = func(s string) int { return ctx.MeasureTextFont(s, fs, st.font) }
+	}
+	drawText := func(s string, x, y int, face string, col color.RGBA) {
+		if face == "" {
+			face = st.font
+		}
+		if face == "" {
+			ctx.DrawTextSize(s, x, y, fs, col)
+			return
+		}
+		ctx.DrawTextFont(s, x, y, fs, face, col)
+	}
+	// xAt — x колонки col строки rs. Колонка 0 — ровно начало: меряем только
+	// непустой префикс.
+	xAt := func(rs []rune, col int) int {
+		if col <= 0 {
+			return textX
+		}
+		return textX + measureTabbed(string(rs[:col]), st.tabPx, measure)
+	}
+
+	if st.empty {
+		drawText(t.Placeholder, b.Min.X+t.PaddingX, topY+2, "", t.PlaceColor)
 	} else {
-		first := scrollY / lh
-		last := (scrollY + b.Dy()) / lh
-		for li := first; li <= last && li < len(lines); li++ {
-			ln := lines[li]
-			y := topY + li*lh - scrollY
+		for i := range st.vis {
+			vl := &st.vis[i]
+			ln, rs := vl.ln, vl.rs
+			li := st.first + i
+			y := topY + li*lh - st.scrollY
+
+			pieces := splitStylePieces(len(rs), vl.off, st.spans[vl.par])
+
+			// Фон кусков — под выделением и текстом.
+			for _, pc := range pieces {
+				bg := pc.Style.BG
+				if bg.A == 0 {
+					continue
+				}
+				x0, x1 := xAt(rs, pc.From), xAt(rs, pc.To)
+				if x1 <= x0 {
+					continue
+				}
+				if bg.A == 255 {
+					ctx.FillRect(x0, y, x1-x0, lh, bg)
+				} else {
+					ctx.FillRectAlpha(x0, y, x1-x0, lh, bg)
+				}
+			}
+
 			// Подсветка выделения в пределах строки.
-			if selLo >= 0 && selLo < ln.end+1 && selHi > ln.start {
-				lo := selLo
-				if lo < ln.start {
-					lo = ln.start
-				}
-				hi := selHi
-				if hi > ln.end {
-					hi = ln.end
-				}
-				x0 := textX + ctx.MeasureText(string(runes[ln.start:lo]), fs)
-				x1 := textX + ctx.MeasureText(string(runes[ln.start:hi]), fs)
-				if selHi > ln.end { // выделение уходит на следующую строку
+			if lo, hi, spill, ok := tbSelOnLine(ln, st.selLo, st.selHi); ok {
+				x0 := xAt(rs, lo-ln.start)
+				x1 := xAt(rs, hi-ln.start)
+				if spill { // выделение уходит на следующую строку
 					x1 += 5
 				}
 				if x1 > x0 {
 					ctx.FillRectAlpha(x0, y, x1-x0, lh, t.SelColor)
 				}
 			}
-			ctx.DrawTextSize(string(runes[ln.start:ln.end]), textX, y+2, fs, t.TextColor)
+
+			for _, pc := range pieces {
+				col := t.TextColor
+				if pc.Style.Color.A != 0 {
+					col = pc.Style.Color
+				}
+				if st.tabPx <= 0 {
+					if pc.To > pc.From {
+						drawText(string(rs[pc.From:pc.To]), xAt(rs, pc.From), y+2, pc.Style.Face, col)
+					}
+					continue
+				}
+				// Табуляция сама ничего не рисует: куски между табуляциями
+				// выводятся каждый в своём табстопе.
+				for _, run := range splitTabRuns(rs, pc.From, pc.To) {
+					drawText(string(rs[run.From:run.To]), xAt(rs, run.From), y+2, pc.Style.Face, col)
+				}
+			}
 
 			// Набираемый, но ещё не введённый текст подчёркивается: иначе
 			// человек не отличит его от уже введённого.
-			if imeActive && imeFrom < ln.end+1 && imeTo > ln.start {
-				lo, hi := imeFrom, imeTo
+			if st.imeOn && st.imeFrom < ln.end+1 && st.imeTo > ln.start {
+				lo, hi := st.imeFrom, st.imeTo
 				if lo < ln.start {
 					lo = ln.start
 				}
 				if hi > ln.end {
 					hi = ln.end
 				}
-				x0 := textX + ctx.MeasureText(string(runes[ln.start:lo]), fs)
-				x1 := textX + ctx.MeasureText(string(runes[ln.start:hi]), fs)
+				x0 := xAt(rs, lo-ln.start)
+				x1 := xAt(rs, hi-ln.start)
 				if x1 > x0 {
 					ctx.DrawHLine(x0, y+lh-3, x1-x0, t.TextColor)
 				}
@@ -1311,36 +1864,45 @@ func (t *TextBox) Draw(ctx DrawContext) {
 		}
 	}
 
-	// Каретка.
+	// Каретка. Рисуется, только если её строка в кадре: остальные всё равно
+	// срезал бы клип, а снимать для них текст строки незачем.
 	if focused && caretPhaseAt(time.Now().UnixMilli()) {
-		li := 0
-		for i, ln := range lines {
-			if caret >= ln.start && caret <= ln.end {
-				li = i
-				break
-			}
-			li = i
+		if i := st.caretLi - st.first; i >= 0 && i < len(st.vis) {
+			vl := &st.vis[i]
+			cx := xAt(vl.rs, st.caret-vl.ln.start)
+			cy := topY + st.caretLi*lh - st.scrollY
+			ctx.DrawVLine(cx, cy+1, lh-2, t.CaretColor)
 		}
-		cx := textX + ctx.MeasureText(string(runes[lines[li].start:caret]), fs)
-		cy := topY + li*lh - scrollY
-		ctx.DrawVLine(cx, cy+1, lh-2, t.CaretColor)
 	}
 
 	// Тонкий вертикальный скроллбар при переполнении.
-	contentH := len(lines) * lh
+	contentH := st.nLines * lh
 	viewH := b.Dy() - 2*t.PaddingY
+	trackH := b.Dy() - 8
+	if st.hbar {
+		viewH -= tbHBarH
+		trackH -= tbHBarH
+	}
 	if contentH > viewH {
-		trackH := b.Dy() - 8
 		thumbH := trackH * viewH / contentH
 		if thumbH < 20 {
 			thumbH = 20
 		}
 		maxScroll := contentH - viewH
-		ty := b.Min.Y + 4 + (trackH-thumbH)*scrollY/maxScroll
+		ty := b.Min.Y + 4 + (trackH-thumbH)*st.scrollY/maxScroll
 		ctx.FillRoundRect(b.Max.X-6, ty, 4, thumbH, 2, win10.ScrollThumbBG)
 	}
 
-	ctx.ClearClip()
+	// Горизонтальная полоса прокрутки — геометрия общая со сравнением файлов.
+	if st.hbar && !st.thumb.Empty() {
+		tr := tbHBarTrack(b, t.PaddingX, t.textAreaWAt(b))
+		ctx.SetClip(tr.Inset(-2).Intersect(inner).Intersect(outer))
+		drawHBar(ctx, tr, st.thumb, win10.ScrollTrackBG, win10.ScrollThumbBG)
+	}
+
+	// Возвращаем внешнюю область, а не снимаем отсечение: иначе соседи поля
+	// внутри прокрутки рисовали бы мимо неё.
+	ctx.SetClip(outer)
 	t.drawChildren(ctx)
 	t.drawDisabledOverlay(ctx)
 }

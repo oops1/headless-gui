@@ -59,7 +59,9 @@ func (m *MergeView) Draw(ctx DrawContext) {
 	m.drawButtons(ctx, g, outer)
 	ctx.SetClip(b.Intersect(outer))
 	m.drawSplitter(ctx, g)
+	// Линейка и горизонтальная полоса — у краёв виджета (см. DiffView).
 	m.drawRuler(ctx, g)
+	ctx.SetClip(b.Intersect(outer))
 	m.drawHScroll(ctx, g)
 	ctx.SetClip(outer)
 	m.drawChildren(ctx)
@@ -423,9 +425,8 @@ func (m *MergeView) drawHScroll(ctx DrawContext, g mvGeom) {
 	if tr.Empty() || th.Empty() {
 		return
 	}
-	ctx.SetClip(tr.Inset(-2).Intersect(g.b))
+	defer PushClip(ctx, tr.Inset(-2).Intersect(g.b))()
 	drawHBar(ctx, tr, th, m.pal.track, m.pal.thumb)
-	ctx.ClearClip()
 }
 
 // drawRuler — полоса-обзор: где по файлу стоят конфликты и что уже решено, и
@@ -438,7 +439,7 @@ func (m *MergeView) drawRuler(ctx DrawContext, g mvGeom) {
 	if tr.Dy() <= 0 || m.rows == 0 {
 		return
 	}
-	ctx.SetClip(tr.Inset(-2).Intersect(g.b))
+	defer PushClip(ctx, tr.Inset(-2).Intersect(g.b))()
 	ctx.FillRoundRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), dvRulerW/2, p.track)
 	for ci, c := range m.chunks {
 		band, _, marked := m.chunkBands(ci)

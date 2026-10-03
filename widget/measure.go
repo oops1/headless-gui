@@ -56,6 +56,9 @@ type Measurers struct {
 	// RunePositions — накопленная ширина после каждого символа
 	// (len(runes)+1 значений, первое — ноль).
 	RunePositions func(text string, sizePt float64, family string) []int
+	// FontMetrics — вертикальные метрики шрифта в логических пикселях
+	// (подъём, спуск, зазор между строками). Пустое имя — шрифт по умолчанию.
+	FontMetrics func(sizePt float64, family string) (ascent, descent, lineGap int)
 }
 
 // SetTextMeasurer регистрирует точный измеритель текста без дескриптора.

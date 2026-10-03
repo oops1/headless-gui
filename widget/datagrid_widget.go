@@ -20,6 +20,9 @@ import (
 // drawContextAdapter адаптирует widget.DrawContext → datagrid.DrawContextBridge.
 type drawContextAdapter struct {
 	ctx DrawContext
+	// outer — область рисования на входе в таблицу: шире неё таблица
+	// рисовать не вправе, даже когда снимает собственное сужение.
+	outer image.Rectangle
 }
 
 func (a *drawContextAdapter) FillRect(x, y, w, h int, col color.RGBA) {
@@ -40,11 +43,19 @@ func (a *drawContextAdapter) DrawTextSize(text string, x, y int, sizePt float64,
 func (a *drawContextAdapter) MeasureText(text string, sizePt float64) int {
 	return a.ctx.MeasureText(text, sizePt)
 }
+// SetClip сужает область рисования ПЕРЕСЕЧЕНИЕМ с той, что была при входе в
+// таблицу, а ClearClip возвращает её, а не снимает совсем.
+//
+// Таблица — отдельный пакет со своим узким контекстом рисования, и о
+// внешнем отсечении она не знает. Если бы её вызовы проходили как есть,
+// таблица внутри прокрутки рисовала бы мимо неё: собственное сужение
+// заменяло бы родительское, а снятие убирало бы и его.
 func (a *drawContextAdapter) SetClip(r image.Rectangle) {
-	a.ctx.SetClip(r)
+	a.ctx.SetClip(r.Intersect(a.outer))
 }
+
 func (a *drawContextAdapter) ClearClip() {
-	a.ctx.ClearClip()
+	a.ctx.SetClip(a.outer)
 }
 func (a *drawContextAdapter) DrawHLine(x, y, length int, col color.RGBA) {
 	a.ctx.DrawHLine(x, y, length, col)
@@ -145,7 +156,7 @@ func (w *DataGridWidget) SetBounds(r image.Rectangle) {
 
 // Draw отрисовывает DataGrid.
 func (w *DataGridWidget) Draw(ctx DrawContext) {
-	adapter := &drawContextAdapter{ctx: ctx}
+	adapter := &drawContextAdapter{ctx: ctx, outer: ctx.Clip()}
 	w.Grid.Draw(adapter)
 	w.drawDisabledOverlay(ctx)
 }
@@ -175,7 +186,7 @@ func (w *DataGridWidget) applyDirty() {
 		return
 	}
 	for _, r := range rects {
-		notifyRectChanged(r)
+		w.invalidateRect(r)
 	}
 }
 

@@ -297,6 +297,9 @@ func horizontalSide(s DockSide) bool { return s == DockLeft || s == DockRight }
 // SetCenter задаёт документную область (единственный виджет центра).
 func (m *DockManager) SetCenter(w Widget) {
 	m.center = w
+	if w != nil {
+		adoptChild(&m.Base, w) // родитель нужен переводу области перерисовки (см. contentoffset.go)
+	}
 	if w != nil && m.capMgr != nil {
 		injectCaptureManagerTree(w, m.capMgr)
 	}
@@ -333,6 +336,7 @@ func (m *DockManager) AddPane(p *DockPane, side DockSide) {
 		side = DockLeft
 	}
 	p.mgr = m
+	adoptChild(&m.Base, p) // родитель нужен переводу области перерисовки (см. contentoffset.go)
 	if !m.hasPane(p) {
 		m.panes = append(m.panes, p)
 	}
