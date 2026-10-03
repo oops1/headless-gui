@@ -69,11 +69,29 @@ type RichText struct {
 	scrollY    int
 	scrollFrac float64 // субпиксельный остаток плавной прокрутки
 
-	// Выделение в рунах документа: [min, max) пары (anchor, caret). anchor < 0
-	// — выделения нет. «Каретки» у виджета нет, caret — подвижный конец.
+	// Выделение и каретка в рунах документа. Каретка — selCaret, она всегда
+	// есть и является подвижным («активным») концом выделения; якорь —
+	// selAnchor, неподвижный конец. Выделение — [min, max) этой пары; anchor < 0
+	// (или равный каретке) — выделения нет, и тогда якорь «совпадает» с кареткой.
+	// Одна пара вместо двух отдельных состояний: выделение мышью и клавиатурой
+	// (Shift+стрелки) и положение каретки не могут разойтись.
 	selAnchor, selCaret int
 	dragging            bool
 	pressLink           string // ссылка под курсором в момент нажатия
+
+	// Состояние каретки, не сводимое к смещению (см. richtext_caret.go).
+	// caretEOL — каретка на стыке мягко перенесённых строк: смещение одно и то
+	// же («конец строки» и «начало следующей»), а рисовать надо на одной из
+	// них. wantX/wantXOk — «желаемый X» вертикальной навигации.
+	// caretStamp — момент последнего перемещения (мс): мигание начинается с
+	// показанной каретки. caretPhase/caretPhaseKnown — фаза, нарисованная
+	// последним Draw (по ней NeedsAnimation решает, нужен ли кадр).
+	caretEOL        bool
+	wantX           int
+	wantXOk         bool
+	caretStamp      int64
+	caretPhase      bool
+	caretPhaseKnown bool
 
 	// Полоса прокрутки: перетаскивание ползунка и подсветка под курсором.
 	barDrag, barHover bool
@@ -91,6 +109,18 @@ type RichText struct {
 	LinkColor   color.RGBA // цвет ссылок (по умолчанию — акцент темы)
 	SelColor    color.RGBA // фон выделения
 	FocusBorder color.RGBA // рамка при фокусе
+	CaretColor  color.RGBA // цвет каретки (по умолчанию — каретка полей ввода темы)
+
+	// ShowCaret — рисовать мигающую каретку (в фокусе). По умолчанию false:
+	// виджет — средство ПРОСМОТРА, мигающая черта в справке или журнале только
+	// отвлекала бы, и кадр на каждое мигание не нужен. Каретка при этом всё
+	// равно существует и ходит: Влево/Вправо, Ctrl+стрелки, Shift+стрелки и
+	// Ctrl+Home/End двигают её и выделение (это нужно и клавиатурному
+	// выделению, и скринридеру, у которого есть AccessCaret). Отличие только
+	// в простых Вверх/Вниз/PgUp/PgDn/Home/End: в режиме просмотра они, как
+	// раньше, листают текст, а в режиме с кареткой двигают её. Редактору
+	// (этап 2) нужно true.
+	ShowCaret bool
 
 	PaddingX, PaddingY int
 
@@ -146,6 +176,7 @@ func (t *RichText) applyColors(th *Theme) {
 	t.TextColor = th.LabelText
 	t.LinkColor = th.Accent
 	t.FocusBorder = th.InputFocus
+	t.CaretColor = th.InputCaret
 	if th.TextSelectionBG.A != 0 {
 		t.SelColor = th.TextSelectionBG
 	} else {
@@ -173,6 +204,7 @@ func (t *RichText) SetParagraphs(paras []RichParagraph) {
 	t.paras, t.doc = cp, doc
 	t.rev++
 	t.selAnchor, t.selCaret = -1, 0
+	t.caretEOL, t.wantXOk = false, false
 	t.dragging = false
 	t.mu.Unlock()
 	t.Invalidate()
@@ -395,6 +427,7 @@ func (t *RichText) Draw(ctx DrawContext) {
 	selLo, selHi := t.selRangeLocked()
 	focused := t.focused
 	barOn := t.barOn
+	caret, caretOn := t.drawCaretLocked(focused)
 	track, _, thumb := t.barGeomLocked()
 	barActive := t.barDrag || t.barHover
 	m := t.measurer
@@ -420,6 +453,11 @@ func (t *RichText) Draw(ctx DrawContext) {
 		ln := &lay.Lines[li]
 		ly := originY + ln.Y
 		t.drawLine(ctx, m, lay, ln, originX, ly, selLo, selHi)
+	}
+	// Каретка — поверх букв, но в том же отсечении: уехавшая за край строка
+	// не должна оставлять черту над полосой прокрутки.
+	if caretOn {
+		fillColor(ctx, caret.Min.X, caret.Min.Y, caret.Dx(), caret.Dy(), t.CaretColor)
 	}
 	restore()
 

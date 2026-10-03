@@ -109,7 +109,10 @@ type richLine struct {
 type richLayout struct {
 	// Width — ширина, для которой посчитано; Height — полная высота.
 	Width, Height int
-	Lines         []richLine
+	// LineGap — добавка к высоте строки, с которой считали: каретке пустой
+	// строки нужна высота шрифта без неё.
+	LineGap int
+	Lines   []richLine
 	// ParaStart — смещение начала каждого абзаца; TextLen — длина текста.
 	ParaStart []int
 	TextLen   int
@@ -144,7 +147,7 @@ func (p richPiece) n() int { return p.to - p.from }
 
 // layoutRich раскладывает абзацы по строкам шириной opt.Width.
 func layoutRich(paras []RichParagraph, opt richLayoutOpts) *richLayout {
-	lay := &richLayout{Width: opt.Width, ParaStart: make([]int, len(paras))}
+	lay := &richLayout{Width: opt.Width, LineGap: opt.LineGap, ParaStart: make([]int, len(paras))}
 	b := &richBuilder{opt: opt, mcache: map[richMKey]FontMetrics{}}
 	if b.opt.Size <= 0 {
 		b.opt.Size = DefaultFontSizePt

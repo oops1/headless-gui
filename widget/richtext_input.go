@@ -49,6 +49,7 @@ func (t *RichText) Select(from, to int) {
 	} else {
 		t.selAnchor, t.selCaret = from, to
 	}
+	t.caretJumpedLocked()
 	t.mu.Unlock()
 	t.Invalidate()
 }
@@ -204,7 +205,7 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 	}
 
 	cx, cy := t.contentPointLocked(e.X, e.Y)
-	off := t.lay.offsetAt(t.measurer, cx, cy)
+	off, eol := t.lay.hitCaret(t.measurer, cx, cy)
 	n := clicksOf(e, &t.clicks)
 	t.pressLink = ""
 	switch {
@@ -217,11 +218,24 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 		t.setSelLocked(t.doc.paraStart[pi], t.doc.paraEnd(pi))
 		t.dragging = false
 	default:
-		t.selAnchor, t.selCaret = off, off
+		if e.Mod&ModShift != 0 {
+			// Shift+щелчок: якорь остаётся, каретка переезжает под курсор.
+			// Без выделения якорем служит прежняя каретка. Ссылка при этом
+			// не открывается: так человек расширяет выделение, а не нажимает.
+			if t.selAnchor < 0 {
+				t.selAnchor = t.caretLocked()
+			}
+			t.selCaret = off
+		} else {
+			t.selAnchor, t.selCaret = off, off
+			// Ссылка запоминается на нажатии: щелчком считается нажатие и
+			// отпускание на одной и той же ссылке без протяжки.
+			t.pressLink = t.linkAtLocked(e.X, e.Y)
+		}
 		t.dragging = true
-		// Ссылка запоминается на нажатии: щелчком считается нажатие и
-		// отпускание на одной и той же ссылке без протяжки.
-		t.pressLink = t.linkAtLocked(e.X, e.Y)
+		t.caretJumpedLocked()
+		// Щелчок правее строки с мягким переносом оставляет каретку на ней.
+		t.caretEOL = eol
 	}
 	t.mu.Unlock()
 	t.Invalidate()
@@ -230,6 +244,7 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 
 // setSelLocked ставит выделение [lo, hi); пустое — «нет выделения».
 func (t *RichText) setSelLocked(lo, hi int) {
+	t.caretJumpedLocked()
 	if lo == hi {
 		t.selAnchor, t.selCaret = -1, lo
 		return
@@ -322,8 +337,11 @@ func (t *RichText) OnMouseMove(x, y int) {
 			t.setScrollLocked(t.scrollY + minInt((y-b.Max.Y)/2+1, 60))
 		}
 		cx, cy := t.contentPointLocked(x, y)
-		if off := t.lay.offsetAt(t.measurer, cx, cy); off != t.selCaret {
-			t.selCaret = off
+		off, eol := t.lay.hitCaret(t.measurer, cx, cy)
+		if off != t.selCaret || eol != t.caretEOL {
+			t.selCaret, t.caretEOL = off, eol
+			t.wantXOk = false
+			t.caretStamp = richNowMs()
 		}
 		changed = true
 	default:
@@ -393,13 +411,16 @@ func (t *RichText) Cursor(x, y int) Cursor {
 
 // ─── Клавиатура ─────────────────────────────────────────────────────────────
 
-// OnKeyEvent: Ctrl+C / Ctrl+Insert — копировать, Ctrl+A — выделить всё,
-// стрелки, PgUp/PgDn, Home/End — листать.
+// OnKeyEvent: Ctrl+C / Ctrl+Insert — копировать, Ctrl+A — выделить всё;
+// стрелки, Home/End, PgUp/PgDn — двигают каретку и выделение (с Shift — как
+// расширение выделения), правила — в navigateLocked. После каждого движения
+// каретка прокручивается в видимую область.
 func (t *RichText) OnKeyEvent(e KeyEvent) {
 	if !t.IsEnabled() || !e.Pressed {
 		return
 	}
 	ctrl := e.Mod&ModCtrl != 0
+	shift := e.Mod&ModShift != 0
 	switch {
 	case ctrl && (e.Code == KeyC || e.Code == KeyInsert):
 		t.Copy()
@@ -408,33 +429,17 @@ func (t *RichText) OnKeyEvent(e KeyEvent) {
 		t.SelectAll()
 		return
 	}
+	// Alt+стрелка — «назад/вперёд» и прочие команды приложения, не навигация.
+	if e.Mod&ModAlt != 0 {
+		return
+	}
 
 	t.mu.Lock()
 	t.layoutLocked()
-	line := t.wheelStepLocked() / 3
-	page := t.Base.Bounds().Dy() - line
-	if page < line {
-		page = line
-	}
-	var target int
-	switch e.Code {
-	case KeyUp:
-		target = t.scrollY - line
-	case KeyDown:
-		target = t.scrollY + line
-	case KeyPageUp:
-		target = t.scrollY - page
-	case KeyPageDown:
-		target = t.scrollY + page
-	case KeyHome:
-		target = 0
-	case KeyEnd:
-		target = 1 << 30
-	default:
-		t.mu.Unlock()
-		return
-	}
-	changed := t.setScrollLocked(target)
+	oldScroll, oldAnchor, oldCaret, oldEOL := t.scrollY, t.selAnchor, t.selCaret, t.caretEOL
+	handled := t.navigateLocked(e.Code, ctrl, shift)
+	changed := handled && (t.scrollY != oldScroll || t.selAnchor != oldAnchor ||
+		t.selCaret != oldCaret || t.caretEOL != oldEOL)
 	t.mu.Unlock()
 	if changed {
 		t.Invalidate()
@@ -462,13 +467,9 @@ func (t *RichText) AccessInfo() AccessInfo {
 // AccessText — весь текст документа; абзацы разделены '\n'.
 func (t *RichText) AccessText() string { return t.Text() }
 
-// AccessCaret — подвижный конец выделения (у виджета нет мигающей каретки, но
-// скринридеру нужна точка отсчёта).
-func (t *RichText) AccessCaret() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return clampInt(t.selCaret, 0, len(t.doc.runes))
-}
+// AccessCaret — каретка: подвижный конец выделения. Есть и в режиме
+// просмотра (когда она не рисуется): скринридеру нужна точка отсчёта.
+func (t *RichText) AccessCaret() int { return t.CaretPosition() }
 
 // AccessSelection — выделение; равные границы означают, что его нет.
 func (t *RichText) AccessSelection() (int, int) {
@@ -477,16 +478,17 @@ func (t *RichText) AccessSelection() (int, int) {
 	if lo, hi := t.selRangeLocked(); lo != hi {
 		return lo, hi
 	}
-	c := clampInt(t.selCaret, 0, len(t.doc.runes))
+	c := t.caretLocked()
 	return c, c
 }
 
 // AccessReadOnly — текст только для чтения.
 func (t *RichText) AccessReadOnly() bool { return true }
 
-// AccessSetCaret — скринридер ставит точку отсчёта: выделение снимается.
+// AccessSetCaret — скринридер ставит каретку: выделение снимается, текст
+// прокручивается к ней.
 func (t *RichText) AccessSetCaret(pos int) bool {
-	t.Select(pos, pos)
+	t.SetCaretPosition(pos)
 	return true
 }
 
