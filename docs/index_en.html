@@ -86,12 +86,16 @@ tr:hover td{background:rgba(137,180,250,.05)}
   <a href="#engine-font">Fonts (FontCache)</a>
   <a href="#output-frame">output.Frame</a>
   <a href="#native-window">Native Window</a>
+  <a href="#printing">Printing &amp; PDF</a>
+  <a href="#os-integration">OS Integration</a>
 
   <div class="group">Widgets: Basic</div>
   <a href="#widget-base">Base</a>
   <a href="#widget-button">Button</a>
   <a href="#widget-label">Label</a>
   <a href="#widget-textinput">TextInput</a>
+  <a href="#widget-textbox">TextBox</a>
+  <a href="#widget-richtext">RichText</a>
   <a href="#widget-checkbox">CheckBox</a>
   <a href="#widget-radiobutton">RadioButton</a>
   <a href="#widget-toggleswitch">ToggleSwitch</a>
@@ -150,7 +154,12 @@ tr:hover td{background:rgba(137,180,250,.05)}
 <tr><td><code>widget/datagrid/</code></td><td>DataGrid core: ObservableCollection, bindings, columns</td></tr>
 <tr><td><code>widget/treeview/</code></td><td>TreeView core: model, templates, render, input</td></tr>
 <tr><td><code>output/</code></td><td>Frame / DirtyTile types</td></tr>
-<tr><td><code>window/</code></td><td>Native window Win32/Cocoa/X11 (no CGO)</td></tr>
+<tr><td><code>window/</code></td><td>Native window Win32/Cocoa/X11/Wayland (no CGO): several windows, OS integration</td></tr>
+<tr><td><code>output/webstream/</code></td><td>Browser viewer: WebSocket tile streaming + input</td></tr>
+<tr><td><code>output/pdf/</code></td><td>PDF writer from page images (no dependencies)</td></tr>
+<tr><td><code>printing/</code></td><td>Printing: paper, orientation, margins, printers, system dialog, SavePDF</td></tr>
+<tr><td><code>theme/</code></td><td>Theme profiles as data (JSON, inheritance, live switching)</td></tr>
+<tr><td><code>desktop/</code></td><td>System taskbar, Start menu, tray, notification center</td></tr>
 </table>
 
 <!-- ─── Быстрый старт ─── -->
@@ -251,6 +260,7 @@ root, reg, err := widget.LoadUIFromXAMLWithBase(data, "/assets")</code></pre>
 <tr><td><code>&lt;Window&gt;</code></td><td>Window</td></tr>
 <tr><td><code>&lt;DataGrid&gt;</code></td><td>DataGridWidget</td></tr>
 <tr><td><code>&lt;TreeView&gt;</code></td><td>TreeViewWidget</td></tr>
+<tr><td><code>&lt;RichText&gt;</code></td><td>RichText (<code>&lt;Paragraph&gt;</code>, <code>&lt;Run&gt;</code>, <code>&lt;Bold&gt;</code>, <code>&lt;Italic&gt;</code>, <code>&lt;Underline&gt;</code>, <code>&lt;Hyperlink&gt;</code>, <code>&lt;LineBreak/&gt;</code> inside)</td></tr>
 </table>
 
 <h4>Common XAML Attributes</h4>
@@ -305,6 +315,7 @@ widget.ApplyGlobalTheme(theme)</code></pre>
     X, Y    int         // coordinates
     Button  MouseButton // MouseLeft, MouseRight, MouseMiddle
     Pressed bool        // true = press, false = release
+    Clicks  int         // click in a series: 1 single, 2 double, 3 triple (counted by the engine)
 }</code></pre>
 
 <h4>KeyEvent</h4>
@@ -313,6 +324,7 @@ widget.ApplyGlobalTheme(theme)</code></pre>
     Rune    rune    // character (for text input)
     Mod     KeyMod  // ModNone, ModShift, ModCtrl, ModAlt, ModMeta
     Pressed bool
+    Repeat  bool    // key auto-repeat, not a new press
 }</code></pre>
 
 <h4>Event Interfaces</h4>
@@ -361,6 +373,8 @@ widget.ApplyGlobalTheme(theme)</code></pre>
 <tr><td><code>ReleaseCapture()</code></td><td>Release capture</td></tr>
 <tr><td><code>ShowModal(m ModalWidget)</code></td><td>Show modal widget</td></tr>
 <tr><td><code>CloseModal(m ModalWidget)</code></td><td>Close modal widget</td></tr>
+<tr><td><code>After(d time.Duration, fn func()) *Timer</code></td><td>Run <code>fn</code> once on the engine goroutine after <code>d</code>; <code>Timer.Stop()</code> cancels it, even after it fired but before it ran</td></tr>
+<tr><td><code>Every(d time.Duration, fn func()) *Timer</code></td><td>Run <code>fn</code> repeatedly on the engine goroutine; the next run is scheduled <em>after</em> the handler returns. Stops with the engine</td></tr>
 </table>
 </div>
 
@@ -415,7 +429,50 @@ type DirtyTile struct {
 win := window.New(eng, "Заголовок")
 win.SetMaxFPS(60)
 win.Run() // блокирующий вызов</code></pre>
-<p>Поддерживает Win32 (GDI), macOS (Cocoa через purego), Linux (X11). No CGO.</p>
+<p>Backends: Win32 (GDI), macOS (Cocoa via purego), Linux &mdash; X11 and Wayland (raw wire protocol, <code>xdg_popup</code> for menus). No CGO.</p>
+<table>
+<tr><th>Feature</th><th>API</th></tr>
+<tr><td>Several top-level windows in one process</td><td><code>win.OpenWindow(child)</code> &mdash; own taskbar button, engine and widget tree; callable from anywhere, including a button handler</td></tr>
+<tr><td>Windows 11 Snap Layouts, edge snapping</td><td><code>win.SetHitTest(fn)</code> &mdash; areas Client / Caption / MinButton / MaxButton / CloseButton</td></tr>
+<tr><td>System move and resize</td><td><code>win.BeginMove()</code>, <code>win.BeginResize(edges)</code> (X11 and Wayland; <code>false</code> elsewhere)</td></tr>
+<tr><td>HiDPI</td><td>Per-monitor DPI on Windows, <code>Xft.dpi</code> on X11, <code>wl_output</code> / fractional scale on Wayland; <code>HEADLESS_GUI_SCALE</code> overrides</td></tr>
+<tr><td>Input method (IME)</td><td>Windows IMM32 and Wayland <code>text-input-v3</code>: the composition is shown in the field, the candidate window sits under the caret</td></tr>
+<tr><td>Clipboard</td><td>Text on all platforms (built in on Linux), HTML next to plain text: <code>widget.SetClipboardHTML(html, plain)</code>, <code>widget.ClipboardHTML()</code></td></tr>
+<tr><td>Accessibility bridges</td><td>UI Automation (Windows, Value and Text patterns), AT-SPI (Linux, Text interface)</td></tr>
+</table>
+
+<h2 id="printing">Printing &amp; PDF</h2>
+<p>Pages are drawn with the same drawing context as the screen (same fonts, same layout), then handed to a printer or saved as PDF.</p>
+<pre><code>import "github.com/oops1/headless-gui/v3/printing"
+
+setup := printing.NewPageSetup(printing.A4)
+w, h := setup.SheetSize()                     // 2480x3508 at 300 dpi
+page := image.NewRGBA(image.Rect(0, 0, w, h)) // draw the page here
+job := printing.Job{Name: "Report", Setup: setup, Pages: []image.Image{page}}
+
+err := printing.SavePDF("report.pdf", job, printing.PDFOptions{}) // every platform
+// or send to a printer
+printers, _ := printing.Printers()
+err = printing.Print(printing.Target{Printer: printers[0].Name}, job)</code></pre>
+<table>
+<tr><th>Platform</th><th>Printing</th></tr>
+<tr><td>Windows</td><td>System dialog (<code>printing.PrintDialog</code>) and GDI printing: the page is fitted to the sheet minding the unprintable margins</td></tr>
+<tr><td>Linux</td><td>IPP 2.0 to CUPS (socket or <code>localhost:631</code>) as <code>application/pdf</code>; no <code>lp</code>/<code>lpr</code>; no system dialog &mdash; show your own list from <code>Printers()</code></td></tr>
+<tr><td>macOS</td><td>Not supported (<code>ErrUnsupported</code>); <code>SavePDF</code> works</td></tr>
+</table>
+<p><code>output/pdf</code> writes a PDF from page images with no dependencies &mdash; Flate (lossless) or JPEG, page by page so memory does not grow with the document. Paper sizes: A3&ndash;A6, Letter, Legal, Tabloid, Executive, <code>printing.CustomPaper</code>; orientation, margins, <code>printing.PagePixels</code> for pixels per page at a DPI.</p>
+
+<h2 id="os-integration">OS Integration</h2>
+<table>
+<tr><th>API</th><th>Description</th></tr>
+<tr><td><code>window.OpenURL(url)</code>, <code>window.OpenFile(path)</code>, <code>window.RevealFile(path)</code></td><td>Open a link in the browser, a file in its associated program, or show it in the file manager. Windows: ShellExecute; Linux: OpenURI / FileManager1 portals over the engine's own D-Bus client (<code>xdg-open</code> only as a last resort); macOS: <code>open</code>. Only http, https, ftp, mailto and file schemes; programs (.exe, .bat, .lnk, ...) are refused</td></tr>
+<tr><td><code>window.DetectSystemTheme()</code></td><td><code>SystemThemeLight</code>, <code>SystemThemeDark</code> or <code>SystemThemeUnknown</code> (Windows registry; Linux <code>GTK_THEME</code> and the Settings portal; macOS reports unknown)</td></tr>
+<tr><td><code>win.SetOnSystemThemeChanged(fn)</code></td><td>Called on the engine goroutine on a real change of the OS theme</td></tr>
+<tr><td><code>widget.MeasureUIFontMetrics(sizePt, family)</code></td><td>Ascent, descent and line gap in logical pixels, by the same path that draws text &mdash; for aligning mixed sizes on one baseline</td></tr>
+<tr><td><code>widget.PushClip(ctx, r)</code></td><td>Narrow the clip by <em>intersection</em> with the current one; returns a function that restores the previous clip. Built-in widgets use it, so a child never draws outside its parent</td></tr>
+<tr><td><code>FileDialogOptions.Choices</code></td><td>Your own drop-downs in file dialogs; read with <code>FileDialog.Choice(id)</code> / <code>ChoiceText(id)</code>. <code>widget.EncodingChoice()</code> is a ready "Encoding" list</td></tr>
+<tr><td><code>win.ScrollTitleTabs(dx)</code>, <code>win.MoveTitleTab(from, to)</code>, <code>OnTitleTabMoved</code></td><td>Title-bar tabs scroll (wheel, automatically to the active tab) and reorder by dragging</td></tr>
+</table>
 
 <!-- ═══════════════ WIDGETS ═══════════════ -->
 
@@ -576,6 +633,87 @@ ti := widget.NewPasswordInput("Пароль...")</code></pre>
 
 <p><strong>XAML:</strong> <code>&lt;TextBox PlaceholderText="Имя" FontSize="12"/&gt;</code><br>
 <code>&lt;PasswordBox PlaceholderText="Пароль"/&gt;</code></p>
+</div>
+
+<!-- ─── TextBox ─── -->
+<h2 id="widget-textbox">TextBox</h2>
+<div class="widget-card">
+<h3>widget.TextBox <span class="badge badge-struct">struct</span></h3>
+<p>Multiline editor: word wrap or horizontal scroll, mouse and keyboard selection, clipboard, undo/redo, context menu. Suitable for code.</p>
+
+<h4>Constructor</h4>
+<pre><code>tb := widget.NewTextBox("Placeholder")
+tb.FontName = "Mono"   // a registered font
+tb.AcceptTab = true
+tb.TabSize = 4
+tb.SetStyler(myHighlighter)</code></pre>
+
+<h4>Fields for code editing</h4>
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>Wrap</code></td><td>bool</td><td>Word wrap; with <code>false</code> and long lines a horizontal scrollbar appears</td></tr>
+<tr><td><code>FontName</code></td><td>string</td><td>Registered font (for example monospace); layout, caret and selection are measured with it</td></tr>
+<tr><td><code>AcceptTab</code></td><td>bool</td><td>Tab inserts a tab character (Ctrl+Tab still moves focus)</td></tr>
+<tr><td><code>TabSize</code></td><td>int</td><td>Tab stop width in spaces (4 with <code>AcceptTab</code> if 0)</td></tr>
+</table>
+
+<h4>Methods</h4>
+<table>
+<tr><td><code>SetText(text string)</code></td><td>Set the text (clears the undo history)</td></tr>
+<tr><td><code>SetStyler(s Styler)</code></td><td>Per-line range styles &mdash; color, background, face &mdash; for syntax highlighting. Only visible lines are requested; answers are cached until the text changes</td></tr>
+</table>
+
+<p><strong>XAML:</strong> <code>&lt;TextBox AcceptsReturn="True" TextWrapping="Wrap"/&gt;</code></p>
+</div>
+
+<!-- ─── RichText ─── -->
+<h2 id="widget-richtext">RichText</h2>
+<div class="widget-card">
+<h3>widget.RichText <span class="badge badge-struct">struct</span></h3>
+<p>Formatted text: paragraphs of runs with their own font, size, color, background, underline, strikethrough and link, with word wrap and alignment. Selection by drag, double click (word) and triple click (paragraph); Ctrl+C puts plain text and HTML on the clipboard. With <code>Editable</code> it is a rich-text editor.</p>
+
+<h4>Constructor</h4>
+<pre><code>rt := widget.NewRichText()
+rt.SetParagraphs([]widget.RichParagraph{{
+    Runs: []widget.RichRun{
+        {Text: "Hello, "},
+        {Text: "world", Font: widget.BuiltinFontBold},
+        {Text: " docs", Link: "https://example.com", Underline: true},
+    },
+}})
+rt.OnLinkClick = func(url string) { window.OpenURL(url) }</code></pre>
+
+<h4>Fields</h4>
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>Editable</code></td><td>bool</td><td>Editor mode: typing, Enter (new paragraph), Shift+Enter (line break), Backspace/Delete, undo/redo, clipboard, IME</td></tr>
+<tr><td><code>ShowCaret</code></td><td>bool</td><td>Draw the caret in view mode (always on when editable)</td></tr>
+<tr><td><code>OnChange</code></td><td>func()</td><td>After any edit, outside the widget lock</td></tr>
+<tr><td><code>OnLinkClick</code></td><td>func(url string)</td><td>Click on a link; the widget opens nothing itself (Ctrl+click in the editor)</td></tr>
+<tr><td><code>PaddingX</code>, <code>PaddingY</code></td><td>int</td><td>Inner padding</td></tr>
+</table>
+
+<h4>Methods</h4>
+<table>
+<tr><td><code>SetParagraphs</code>, <code>Paragraphs</code>, <code>AppendParagraph</code>, <code>AppendRun</code>, <code>SetText</code>, <code>Text</code>, <code>Clear</code></td><td>Content</td></tr>
+<tr><td><code>HTML() string</code>, <code>SetHTML(src string)</code></td><td>The whole document as HTML; HTML parsing is built in (paragraphs, headings, bold, italic, underline, links, inline color and size styles; scripts and unsafe link schemes are dropped)</td></tr>
+<tr><td><code>ToggleBold</code>, <code>ToggleItalic</code>, <code>ToggleUnderline</code>, <code>ToggleStrike</code>, <code>SetSelectionStyle</code>, <code>SetParagraphFormat</code>, <code>SelectionStyle</code></td><td>Toolbar commands; without a selection they change the typing style</td></tr>
+<tr><td><code>Undo</code>, <code>Redo</code>, <code>Cut</code>, <code>Copy</code>, <code>Paste</code>, <code>SelectAll</code></td><td>Editing; paste takes HTML when the clipboard has it</td></tr>
+</table>
+
+<p><strong>XAML:</strong></p>
+<pre><code>&lt;RichText x:Name="help" FontSize="10"&gt;
+    &lt;Paragraph FontSize="20" FontWeight="Bold"&gt;Title&lt;/Paragraph&gt;
+    &lt;Paragraph TextAlignment="Center"&gt;
+        &lt;Run Text="Plain, "/&gt;
+        &lt;Run Text="red bold" FontWeight="Bold" Foreground="#E06C75"/&gt;
+        &lt;Bold&gt;&lt;Run Text=" nested"/&gt;&lt;/Bold&gt;
+        &lt;Hyperlink NavigateUri="https://example.com"&gt;link&lt;/Hyperlink&gt;
+        &lt;LineBreak/&gt;
+        &lt;Run Text="struck" TextDecorations="Strikethrough"/&gt;
+    &lt;/Paragraph&gt;
+&lt;/RichText&gt;</code></pre>
+<p>Formatting is inherited downward, as in WPF. Put text inside <code>&lt;Run Text="..."/&gt;</code>. Not yet: tab stops, lists, tables, images, find and replace.</p>
 </div>
 
 <!-- ─── CheckBox ─── -->
@@ -1018,6 +1156,7 @@ p := widget.NewWin10Panel()</code></pre>
 <h4>Поля</h4>
 <table>
 <tr><td><code>ContentHeight</code></td><td>int</td><td>Высота содержимого</td></tr>
+<tr><td><code>ContentWidth</code></td><td>int</td><td>Full content width; 0 (default) means no sideways scrolling. Shows a horizontal bar; horizontal wheel and Shift+wheel</td></tr>
 <tr><td><code>ShowBorder</code></td><td>bool</td><td>Рамка</td></tr>
 <tr><td><code>Background</code>, <code>TrackColor</code>, <code>ThumbColor</code></td><td>color.RGBA</td><td>Цвета</td></tr>
 </table>
@@ -1027,6 +1166,7 @@ p := widget.NewWin10Panel()</code></pre>
 <tr><td><code>ScrollY() int</code></td><td>Текущая прокрутка</td></tr>
 <tr><td><code>SetScrollY(y int)</code></td><td>Установить прокрутку</td></tr>
 <tr><td><code>ScrollBy(delta int)</code></td><td>Прокрутить</td></tr>
+<tr><td><code>ScrollX() int</code>, <code>SetScrollX(x int)</code>, <code>ScrollXBy(delta int)</code></td><td>Horizontal scroll (needs <code>ContentWidth</code>)</td></tr>
 </table>
 </div>
 
@@ -1134,12 +1274,14 @@ ma := widget.NewModalAdapterWithDim(myWidget, color.RGBA{0,0,0,120})</code></pre
 <tr><td><code>ItemPaddingX</code></td><td>int</td><td>Отступ пунктов</td></tr>
 <tr><td><code>Height</code></td><td>int</td><td>Высота (28 по умолчанию)</td></tr>
 <tr><td><code>OnSelect</code></td><td>func(topIdx, subIdx int, text string)</td><td>Обработчик</td></tr>
+<tr><td><code>UseMnemonics</code></td><td>bool</td><td>Read mnemonics in labels: <code>_File</code> draws F underlined (<code>__</code> is a real underscore). Off by default</td></tr>
 </table>
 
 <h4>Methods</h4>
 <table>
 <tr><td><code>AddMenu(text string, items ...MenuItem)</code></td><td>Добавить меню с подпунктами</td></tr>
 <tr><td><code>AddTopItem(text string, onClick func())</code></td><td>Пункт без подменю</td></tr>
+<tr><td><code>ActivateMnemonic(e KeyEvent) bool</code></td><td>Open the menu whose mnemonic letter was pressed (call it from your Alt+key handler)</td></tr>
 </table>
 
 <h4>XAML</h4>
@@ -1151,6 +1293,7 @@ ma := widget.NewModalAdapterWithDim(myWidget, color.RGBA{0,0,0,120})</code></pre
     &lt;/MenuItem&gt;
     &lt;MenuItem Header="Справка"/&gt;
 &lt;/Menu&gt;</code></pre>
+<p><code>MenuItem.Shortcut</code> (XAML: <code>InputGestureText</code> or <code>Shortcut</code>) writes a key combination such as <code>Ctrl+S</code> in muted color at the right edge of the item. The menu only shows it; the application handles the keys through <code>InputBindings</code>.</p>
 </div>
 
 <!-- ─── DataGrid ─── -->

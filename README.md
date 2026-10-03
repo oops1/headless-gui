@@ -45,13 +45,16 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **Delta tile streaming** — only changed 64x64 regions are sent each frame
 - **Browser viewer out of the box** — `output/webstream` streams the UI to any browser over WebSocket (zero-dep RFC 6455 server, per-tile PNG, keyframe for new clients, multiple concurrent viewers) and feeds mouse/keyboard back; one Go process on the server, no rebuild for the client. The full widget showcase runs this way: `go run ./cmd/webshowcase` serves the very same UI as the native window, with no OS window opened at all
 - **Standard dialogs, fully engine-drawn** — MessageBox with severity icons (Enter/Esc, Windows-style Ctrl+C dump), input and progress dialogs, file Open/Save/Folder with a built-in browser (places sidebar, clickable breadcrumb, columns) — they work headless and show the *server's* filesystem when streaming; themed and localized (EN/RU built in, live language switch)
-- **Multiline TextBox editor** — word wrap or horizontal scroll, mouse/keyboard selection, Ctrl+arrows word jumps, PgUp/PgDn, clipboard, undo/redo, context menu; caret math works headless
+- **Multiline TextBox editor** — word wrap or horizontal scroll, mouse/keyboard selection, Ctrl+arrows word jumps, PgUp/PgDn, clipboard, undo/redo, context menu; caret math works headless. Fit for code: named (monospace) font, Tab stops (`AcceptTab`/`TabSize`), per-range syntax highlighting through `Styler`, horizontal scrollbar, and big documents without per-frame copies
 - **Full keyboard layouts on Linux** — Wayland xkb keymap parsing (live layout switching) and X11 `GetKeyboardMapping`, so Russian/US/… layouts type correctly in native windows
+- **Complete keyboard and mouse model** — the full key table (letters, numerals, numpad, OEM keys, F1–F24) bound to the *physical* key, so Ctrl+S works under any layout; Alt and F10, AltGr and surrogate pairs on Windows, auto-repeat on Wayland (`KeyEvent.Repeat`), horizontal wheel, `MouseEvent.Clicks` (double and triple click counted once by the engine)
+- **IME (CJK input)** — uncommitted text is shown in place, underlined, and replaced by the chosen candidate: Windows (IMM32, candidate window under the caret) and Wayland (`text-input-v3`, when the compositor has it); no X11 XIM
+- **Clipboard** — text on every platform; on Linux built in (Wayland `wl_data_device`, X11 selections), no `xclip`/`wl-copy` needed; formatted text too: `SetClipboardHTML` puts HTML next to plain text (Windows, Wayland, X11), `ClipboardHTML` reads it
 - **Animation framework** — `Animate`/`AnimateOwned` (CSS-transition-style owner replacement), 13 canonical easing curves, Lerp helpers; the clock belongs to the engine (no goroutines/timers per animation), frames are produced only while animations run and repaint partially; ToggleSwitch knob, dialog fade-in and `ProgressBar.AnimateValue` ship animated out of the box (`showcase` → Animations tab)
 - **Render-on-demand by default** — widgets self-invalidate; only the damaged region is redrawn and diffed (idle UI costs ~0 CPU, a hover ~45 µs)
 - **Complex text shaping** — HarfBuzz-quality shaping in pure Go (go-text/typesetting): Arabic ligatures & joining, Hebrew RTL, Devanagari conjuncts, Thai marks, mixed-bidi strings; Latin/Cyrillic keep a fast per-rune glyph cache
 - **Antialiasing** — smooth rounded corners (cached quarter-disc masks), AA ellipses/lines/polygons via vector rasterization
-- **HiDPI** — widgets live in logical pixels (WPF DIP model), frames render at physical resolution; per-monitor DPI awareness (v2) + `WM_DPICHANGED` on Windows, `HEADLESS_GUI_SCALE` elsewhere
+- **HiDPI** — widgets live in logical pixels (WPF DIP model), frames render at physical resolution; per-monitor DPI awareness (v2) + `WM_DPICHANGED` on Windows, `Xft.dpi` on X11, `wl_output`/fractional scale on Wayland (live monitor changes), `HEADLESS_GUI_SCALE` overrides everywhere
 - **XAML layout** — load UI from WPF-compatible `.xaml` files (opens in Blend / Visual Studio)
 - **Grid layout** — WPF-style `<Grid>` with Pixel / Star / Auto sizing, `Grid.Row`, `Grid.Column`, spans
 - **Theming** — built-in Dark and Light themes, 80+ customizable color tokens
@@ -60,13 +63,18 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **Soft shadows, glass and rounded clipping** — `Elevation` and `BackdropSpec` in a theme style: backdrop blur (acrylic/mica) via a separate box-blur pass, shadows with a smooth falloff, clipping along the rounded outline instead of its bounding box
 - **Drag & drop** — panels are draggable with recursive child movement
 - **Modal dialogs** — centered overlay with background dim, input isolation; on Win32/X11 each dialog opens in its **own OS window** (can exceed the main window and drag outside it), with in-canvas fallback on Wayland/macOS/headless
-- **Native popups** — dropdowns and context/tray menus open in their own OS windows at the target point and are **not clipped** by the main window's edge (Win32/X11; in-canvas fallback elsewhere)
-- **Tray & notifications (Windows)** — `SetTrayIcon`/`SetTrayMenu`/`ShowBalloon` (Shell_NotifyIcon), balloon severity icons, `HideToTray`/`RestoreFromTray`, and live taskbar/Aero-Peek thumbnails; polite no-ops off Windows
+- **Native popups** — dropdowns and context/tray menus open in their own OS windows at the target point and are **not clipped** by the main window's edge (Win32/X11, and Wayland through `xdg_popup`; in-canvas fallback on macOS and headless)
+- **Tray & notifications** — `SetTrayIcon`/`SetTrayMenu`/`ShowBalloon`, `HideToTray`/`RestoreFromTray`. Windows: Shell_NotifyIcon, balloon severity icons, live taskbar/Aero-Peek thumbnails. Linux (X11 and Wayland): StatusNotifierItem tray with a dbusmenu menu and `org.freedesktop.Notifications` over the engine's own D-Bus client, no external tools (GNOME needs the AppIndicator extension to show a tray). macOS: polite no-ops
 - **Font support** — TTF fonts via `golang.org/x/image/font`; custom registration by name
-- **Cascading menus** — nested submenus with arrow indicators and keyboard navigation
+- **Cascading menus** — nested submenus with arrow indicators and keyboard navigation; the shortcut written at the right edge (`MenuItem.Shortcut`) and `_File`-style mnemonics (`UseMnemonics`)
 - **Native window** — platform-native backends (Win32/Cocoa/X11/**Wayland**), zero CGO on all platforms; Wayland speaks the raw wire protocol (xdg-shell + wl_shm) over a unix socket and is auto-selected when a compositor is available (`HEADLESS_GUI_X11=1` forces X11); window chrome follows the theme, reacts to OS focus (inactive title bar), repaints from the frame cache on expose (X11/Win32; Wayland retains content)
+- **Window management** — several independent top-level windows in one process (`OpenWindow`), Windows 11 Snap Layouts and edge snapping (`SetHitTest`), system move and resize on X11 and Wayland (`BeginMove`/`BeginResize`), X11 cursor shapes, Wayland minimize/maximize
+- **Title-bar tabs** — the tab strip scrolls (wheel, `ScrollTitleTabs`, follows the active tab) and tabs reorder by dragging (`MoveTitleTab`, `OnTitleTabMoved`)
+- **Talking to the OS** — `window.OpenURL`/`OpenFile`/`RevealFile` (ShellExecute on Windows, the OpenURI portal on Linux with no external tools, `open` on macOS; only safe URL schemes, executables are refused) and the system theme: `DetectSystemTheme` + `SetOnSystemThemeChanged` (Windows, Linux; macOS reports "unknown")
+- **Timers owned by the engine** — `eng.After` and `eng.Every` run on the engine goroutine and stop with it; `Every` schedules the next run after the handler returns, so a slow handler never piles up a queue
+- **Printing and PDF** — render pages with the same drawing context as the screen, then send them to a printer or save as PDF. `printing` has paper sizes (A3–A6, Letter, Legal, custom), orientation, margins, printer list and `Print`; the system print dialog and GDI on Windows, IPP to CUPS on Linux (no `lp`/`lpr`), not supported on macOS; `output/pdf` writes PDF from page images with no dependencies (Flate or JPEG, page by page) on every platform
 - **Golden render tests** — pixel-exact snapshot tests of widgets/themes/AA/HiDPI guard against visual regressions (CI on Windows/Linux/macOS)
-- **Accessibility semantic tree** — `eng.AccessibilityTree()` returns a JSON-serializable snapshot (roles, names, values, states) for screen-reader side-channels in streaming scenarios and for UI test automation; full keyboard navigation (Tab/Enter/Space) built in
+- **Accessibility semantic tree** — `eng.AccessibilityTree()` returns a JSON-serializable snapshot (roles, names, values, states) for screen-reader side-channels in streaming scenarios and for UI test automation; full keyboard navigation (Tab/Enter/Space) built in. Platform bridges: UI Automation on Windows (Value and Text patterns) and AT-SPI on Linux (Text interface) — screen readers follow the caret and read text by character, word, line and paragraph
 - **Data binding** — `{Binding}` OneWay/TwoWay/OneTime, `INotifyPropertyChanged`, `StringFormat`, `IValueConverter`, `ElementName`/`RelativeSource`, live `ItemsControl`
 - **Styles, triggers & templates** — `<Style>`/`<Setter>`, `DataTrigger`/`MultiTrigger`, `ControlTemplate` + `ContentPresenter` + `TemplateBinding`, `StaticResource`
 - **Commands & input bindings** — `ICommand`/`RelayCommand`, `Button.Command`, `<KeyBinding>` hotkeys
@@ -78,11 +86,12 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **SplitPanel** — two panes with a draggable splitter (fraction-based position, min sizes, double-click collapse, nesting)
 - **DiffView** — side-by-side file comparison with editing: synced scrolling, S-connectors, block copy, intra-line diff, syntax highlight, file watching; CRLF/BOM preserved on save
 - **MergeView** — three-way merge: ours, base and theirs on top with rows aligned by chunk, editable result below; per-chunk resolutions (ours / theirs / base / both) by button, menu or Alt+1/2/3, git conflict markers (merge or diff3 style) for what is still unresolved
+- **RichText** — formatted text: paragraphs of runs with their own font, size, color, background, underline, strikethrough and links, word wrap, alignment, selection by drag/double/triple click; Ctrl+C copies plain text and HTML. With `Editable` it is an editor — typing, Enter/Shift+Enter, undo/redo, Ctrl+B/I/U and toolbar commands, paste of HTML from Word or a browser, IME; `HTML()`/`SetHTML()`. XAML: `<RichText>`, `<Paragraph>`, `<Run>`, `<Bold>`, `<Italic>`, `<Underline>`, `<Hyperlink>`, `<LineBreak/>`. No lists, tables or images yet
 - **DatePicker** — date field with a drop-down month calendar: typed or picked, forgiving parsing, format and first weekday taken from the UI language's string tables (RU/EN built in, ISO 8601 otherwise), selectable date range
-- **What an editor needs** — `win.SetTitle` and `win.SetOnCloseRequest` (a "Save changes?" prompt before the window closes), widgets that take Tab for themselves (`TabAcceptor`), antialiased paths with fractional coordinates and joined bends (`PathShapes`: cubic curves, polylines, fills), diff and syntax colors in the theme, accessibility children for self-drawn widgets
+- **What an editor needs** — `win.SetTitle` and `win.SetOnCloseRequest` (a "Save changes?" prompt before the window closes), widgets that take Tab for themselves (`TabAcceptor`), antialiased paths with fractional coordinates and joined bends (`PathShapes`: cubic curves, polylines, fills), diff and syntax colors in the theme, accessibility children for self-drawn widgets, nested clipping (`widget.PushClip`), font ascent/descent for aligning mixed sizes (`MeasureUIFontMetrics`), custom drop-downs in file dialogs (`FileDialogOptions.Choices`, ready-made `EncodingChoice`)
 - **AVX2 pixel kernels** — optional `GOEXPERIMENT=simd` build (Go 1.27+, amd64): text, AA shapes, fills, blur and frame presentation on AVX2, bit-identical to the scalar path, with CPU detection and a startup self-test falling back automatically
 - **Docking panels** — `DockManager`/`DockPane`, Visual Studio-style Toolbox docking: center + 4 dockable sides, stack tabs, auto-hide, drag&dock with guides, gutter resize, save/restore layout (JSON)
-- **Smooth / inertial scroll** — pixel-precise wheel/touchpad deltas (`SendMouseWheelPixels`) with a decaying flywheel in `ScrollView` (Win32 + Wayland pixel deltas; X11 keeps ticks)
+- **Smooth / inertial scroll** — pixel-precise wheel/touchpad deltas (`SendMouseWheelPixels`) with a decaying flywheel in `ScrollView` (Win32 + Wayland pixel deltas; X11 keeps ticks); `ScrollView` also scrolls sideways (`ContentWidth`, horizontal wheel, Shift+wheel)
 - **File drag & drop from the OS** — drop files from Explorer/Finder into the window (`SetOnFilesDropped` / `FileDropTarget`); Win32 + X11 native, Wayland skeleton
 - **Color emoji** — COLR/CBDT/sbix color glyphs render automatically in the text path (COLRv1 gradients averaged; regional-flag ligatures a known gap)
 - **Tooltips & cursors** — `ToolTip` on every widget; per-widget mouse cursors
@@ -97,7 +106,8 @@ Run `go test ./engine/ -bench .` to reproduce.
 | Label | `Label`, `TextBlock` | Static text, word wrap (`TextWrapping="Wrap"`) |
 | Button | `Button`, `ToggleButton`, `RepeatButton` | Click handler, hover/press/accent states, custom colors |
 | TextInput | `TextBox`, `TextInput` | Single-line: selection, clipboard, Home/End, undo/redo, context menu |
-| TextBox | `TextBox AcceptsReturn="True"` / `TextWrapping="Wrap"` | Multiline editor: word wrap, vertical scroll, Ctrl+arrows, PgUp/PgDn, clipboard, undo/redo |
+| TextBox | `TextBox AcceptsReturn="True"` / `TextWrapping="Wrap"` | Multiline editor: word wrap, vertical scroll, Ctrl+arrows, PgUp/PgDn, clipboard, undo/redo; for code — `FontName`, `AcceptTab`/`TabSize`, `Styler` highlighting, horizontal scrollbar |
+| RichText | `RichText` (`Paragraph`, `Run`, `Bold`, `Italic`, `Underline`, `Hyperlink`, `LineBreak`) | Formatted text with mixed fonts, sizes and colors, links, selection, HTML in the clipboard; with `Editable` — a rich-text editor with undo/redo and HTML paste |
 | PasswordBox | `PasswordBox` | Masked input |
 | Dropdown | `ComboBox`, `Dropdown` | Overlay popup, keyboard nav |
 | ProgressBar | `ProgressBar` | `Value` 0.0..1.0, custom fill color |
@@ -107,7 +117,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 | Slider | `Slider` | Min/Max/Value, drag thumb |
 | NumericUpDown | `NumericUpDown` / `IntegerUpDown` / `DoubleUpDown` | Spinner ▲/▼, wheel, typing, Min/Max/Increment/Decimals |
 | TabControl | `TabControl` / `TabItem` | Multiple tabs with content widgets |
-| ScrollView | `ScrollViewer` | Scrollbar, mouse wheel, `ContentHeight` |
+| ScrollView | `ScrollViewer` | Scrollbar, mouse wheel, `ContentHeight`; sideways with `ContentWidth` |
 | ListView | `ListView`, `ListBox` | Selection, keyboard nav, scrollbar (virtualized) |
 | VirtualizingItemsControl | `VirtualizingItemsControl` | UI virtualization — materializes only visible rows; CollectionView-aware |
 | Image | `Image` | PNG/JPEG, stretch modes (Fill/Uniform/None) |
@@ -121,9 +131,9 @@ Run `go test ./engine/ -bench .` to reproduce.
 | Separator | `Separator` | Divider line |
 | MessageBox | — (code only) | Severity presets (Info/Question/Warning/Error), OK/YesNo/YesNoCancel, Enter/Esc, Ctrl+C dump |
 | InputDialog / ProgressDialog | — (code only) | Prompt with validation & hint; progress with detail line, percent, indeterminate |
-| FileDialog | — (code only) | Open / Save / Pick-folder with built-in browser (places, breadcrumb, columns, filters) |
+| FileDialog | — (code only) | Open / Save / Pick-folder with built-in browser (places, breadcrumb, columns, filters, your own drop-downs such as "Encoding") |
 | Dialog | — (code only) | Modal base: rounded chrome + shadow, ✕ close, custom content |
-| Window | `Window` | Native OS window with title bar (Win/Mac style), resize, minimize/maximize |
+| Window | `Window` | Native OS window with title bar (Win/Mac style), resize, minimize/maximize, scrollable and reorderable title-bar tabs |
 | TreeView | `TreeView` | WPF-compatible hierarchical tree with virtualization, HierarchicalDataTemplate, icons, keyboard nav |
 | GridSplitter | `GridSplitter` | Resizable splitter between Grid cells |
 | SplitPanel | `SplitPanel` | Two panes with a draggable splitter, fraction position, min sizes, double-click collapse |
@@ -179,11 +189,13 @@ headless-gui/
     datagrid/      DataGrid core logic (ObservableCollection, PropertyNotifier)
   output/          Frame + DirtyTile types for delta streaming
     webstream/     Browser viewer: WebSocket tile streaming + input (zero-dep)
+    pdf/           PDF writer from page images (zero-dep, Flate/JPEG)
+  printing/        Printing: paper, orientation, margins, printers, system dialog; SavePDF
   window/          Native window (Win32/Cocoa/X11/Wayland, zero CGO)
   cmd/
     showcase/      Full widget showcase (all widgets + live animation)
     webshowcase/   The full showcase in a browser (http://localhost:8091)
-webdemo/       Minimal browser streaming example
+    webdemo/       Minimal browser streaming example
     smartgit/      SmartGit-like UI (Window + Menu + TreeView + DataGrid)
     diffdemo/      File comparison app on DiffView
     mergedemo/     Merge conflict resolver on MergeView
