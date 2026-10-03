@@ -13,6 +13,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -21,8 +22,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/cmd/internal/showcasedemo"
 	"github.com/oops1/headless-gui/v3/cmd/internal/showcasestrings"
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/printing"
 	"github.com/oops1/headless-gui/v3/widget"
 	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
 	"github.com/oops1/headless-gui/v3/widget/treeview"
@@ -816,6 +819,30 @@ func main() {
 			})
 		}
 	}
+	// «Сохранить как» со своими списками: кодировка (готовый набор движка) и
+	// переводы строк. Движок кодировки не преобразует — выбор отдаётся
+	// приложению вместе с путём, файл пишет оно само.
+	if b := btn("dlgEnc"); b != nil {
+		b.OnClick = func() {
+			o := fileOpts()
+			o.InitialName = "note.txt"
+			o.Choices = []widget.FileDialogChoice{
+				widget.EncodingChoice(),
+				{ID: "eol", LabelKey: "Line endings", Options: []string{"LF", "CRLF"}},
+			}
+			// fd объявляется отдельно: колбэк обязан сослаться на диалог,
+			// который ещё не присвоен в момент создания колбэка.
+			var fd *widget.FileDialog
+			fd = mbox.ShowSaveFile(o, func(path string, ok bool) {
+				if !ok {
+					return
+				}
+				enc, _ := fd.ChoiceText(widget.EncodingChoiceID)
+				eol, _ := fd.ChoiceText("eol")
+				setResult("Save → %s (encoding %s, line endings %s)", path, enc, eol)
+			})
+		}
+	}
 
 	// ─── TAB: Анимации ────────────────────────────────────────────────────────
 	// «Диалог больше окна» — крупный диалог (1000×700). В нативном режиме
@@ -980,6 +1007,238 @@ func main() {
 		relocalizers = append(relocalizers, func() { ro.SetText(widget.Tr(roDemo)) })
 	}
 
+	// ─── Вкладка «Платформа»: ссылка, таймер, тема ОС, PDF и печать ──────────
+	// Подписи, собранные из ключа и аргументов, перечитываются при смене языка.
+	onRelocalize := func(fn func()) { relocalizers = append(relocalizers, fn) }
+
+	// Ссылка: разрешён только https://. Движок сам отсекает чужие схемы
+	// (ErrOpenScheme), но демонстрация не должна открывать ничего, кроме
+	// защищённого адреса, и говорит об этом заранее. OpenURL блокирует
+	// вызывающего на время обращения к системе, поэтому идёт в горутине.
+	urlStatus := showcasedemo.NewLive(lbl("urlStatus"), onRelocalize)
+	openSite := func(url string) {
+		url = strings.TrimSpace(url)
+		if !strings.HasPrefix(strings.ToLower(url), "https://") {
+			urlStatus.Set("Only https:// links are opened")
+			return
+		}
+		urlStatus.Set("Opening %s…", url)
+		go func() {
+			err := window.OpenURL(url)
+			eng.Post(func() { // обратно на горутину интерфейса
+				switch {
+				case err == nil:
+					urlStatus.Set("The system accepted the request: %s", url)
+					addLog("OpenURL: %s", url)
+				case errors.Is(err, window.ErrOpenScheme):
+					urlStatus.Set("The link scheme is not allowed")
+				default:
+					urlStatus.Set("Cannot open the link: %v", err)
+				}
+			})
+		}()
+	}
+	if b := btn("urlOpen"); b != nil {
+		b.OnClick = func() {
+			if ti, ok := reg["urlBox"].(*widget.TextInput); ok {
+				openSite(ti.GetText())
+			}
+		}
+	}
+
+	// Таймер: Engine.Every исполняет обработчик на горутине интерфейса и
+	// гаснет вместе с движком — time.Ticker с Post больше не нужен.
+	// Запускается после eng.Start (см. ниже).
+	timerClock := lbl("timerClock")
+	timerCount := showcasedemo.NewLive(lbl("timerCount"), onRelocalize)
+	timerBtn := btn("timerToggle")
+	var (
+		tickTimer    *engine.Timer
+		timerRunning bool
+		ticks        int
+	)
+	refreshTimerBtn := func() {
+		if timerBtn == nil {
+			return
+		}
+		if timerRunning {
+			timerBtn.SetText(widget.Tr("Stop the timer"))
+		} else {
+			timerBtn.SetText(widget.Tr("Start the timer"))
+		}
+	}
+	onRelocalize(refreshTimerBtn)
+	startTimer := func() {
+		timerRunning = true
+		tickTimer = eng.Every(time.Second, func() {
+			ticks++
+			if timerClock != nil {
+				timerClock.SetText(time.Now().Format("15:04:05"))
+			}
+			timerCount.Set("Ticks since start: %d", ticks)
+		})
+		refreshTimerBtn()
+	}
+	if timerBtn != nil {
+		timerBtn.OnClick = func() {
+			if timerRunning {
+				tickTimer.Stop()
+				timerRunning = false
+				addLog("Timer stopped after %d ticks", ticks)
+			} else {
+				startTimer()
+				addLog("Timer started")
+			}
+			refreshTimerBtn()
+		}
+	}
+
+	// Тема ОС: показываем, какую тему выбрал человек в системе, и по желанию
+	// идём за ней. Движок сам ничего не перекрашивает — палитру выбирает
+	// приложение (здесь — через выпадающий список тем в шапке).
+	sysThemeLbl := showcasedemo.NewLive(lbl("sysThemeLbl"), onRelocalize)
+	sysTheme := window.SystemThemeUnknown
+	showSysTheme := func() {
+		switch sysTheme {
+		case window.SystemThemeDark:
+			sysThemeLbl.Set("System theme: dark")
+		case window.SystemThemeLight:
+			sysThemeLbl.Set("System theme: light")
+		default:
+			sysThemeLbl.Set("System theme: unknown (the OS does not report it)")
+		}
+	}
+	setAppTheme := func(name string) {
+		dd, _ := reg["themeSelect"].(*widget.Dropdown)
+		if dd == nil {
+			return
+		}
+		for i, it := range dd.Items() {
+			if it == name {
+				dd.SetSelected(i)
+				if dd.OnChange != nil {
+					dd.OnChange(i, name) // SetSelected обработчик не зовёт
+				}
+				return
+			}
+		}
+	}
+	followSystemTheme := func() {
+		if c := cb("sysThemeFollow"); c == nil || !c.IsChecked() {
+			return
+		}
+		switch sysTheme {
+		case window.SystemThemeDark:
+			setAppTheme("Win11 Dark")
+		case window.SystemThemeLight:
+			setAppTheme("Win11 Light")
+		}
+		// Неизвестная тема — не «светлая»: оставляем тему приложения.
+	}
+	onSystemTheme := func(t window.SystemTheme) {
+		sysTheme = t
+		showSysTheme()
+		followSystemTheme()
+	}
+	showSysTheme()
+	if c := cb("sysThemeFollow"); c != nil {
+		c.OnChange = func(on bool) {
+			addLog("Follow the system theme: %v", on)
+			followSystemTheme()
+		}
+	}
+
+	// Печать и PDF: страницы рисует отдельный движок (print.go). Страницы
+	// собираются здесь, на горутине интерфейса; запись файла и системный
+	// диалог — в горутине, чтобы не держать кадр.
+	printStatus := showcasedemo.NewLive(lbl("printStatus"), onRelocalize)
+	buildJob := func() (printing.Job, bool) {
+		var doc []widget.RichParagraph
+		if ed, ok := reg["rtEdit"].(*widget.RichText); ok {
+			doc = ed.Paragraphs()
+		}
+		var lines []string
+		if eventLog != nil {
+			lines = eventLog.Items()
+		}
+		job, err := buildPrintJob(doc, lines)
+		if err != nil {
+			printStatus.Set("Cannot build the pages: %v", err)
+			return printing.Job{}, false
+		}
+		return job, true
+	}
+	if b := btn("pdfSave"); b != nil {
+		b.OnClick = func() {
+			o := widget.FileDialogOptions{
+				InitialName: "showcase.pdf",
+				Filters:     []widget.FileFilter{{Label: "PDF", Exts: []string{".pdf"}}},
+			}
+			mbox.ShowSaveFile(o, func(path string, ok bool) {
+				if !ok {
+					return
+				}
+				job, built := buildJob()
+				if !built {
+					return
+				}
+				printStatus.Set("Saving %s…", path)
+				go func() {
+					err := printing.SavePDF(path, job, printing.PDFOptions{
+						Title: job.Name, Creator: "headless-gui showcase",
+					})
+					eng.Post(func() {
+						if err != nil {
+							printStatus.Set("Cannot save the PDF: %v", err)
+							return
+						}
+						printStatus.Set("PDF saved: %s (%d pages)", path, len(job.Pages))
+						addLog("PDF saved: %s", path)
+					})
+				}()
+			})
+		}
+	}
+	if b := btn("printGo"); b != nil {
+		b.OnClick = func() {
+			if !printing.HasPrintDialog() {
+				printStatus.Set("No system print dialog on this platform: use Save to PDF")
+				return
+			}
+			job, built := buildJob()
+			if !built {
+				return
+			}
+			go func() {
+				target, err := printing.PrintDialog(0, job) // 0 — активное окно процесса
+				if err == nil {
+					err = printing.Print(target, job)
+				}
+				eng.Post(func() {
+					switch {
+					case err == nil:
+						printStatus.Set("The job was sent to the printer")
+						addLog("Print: job sent")
+					case errors.Is(err, printing.ErrCanceled):
+						printStatus.Set("Printing cancelled")
+					default:
+						printStatus.Set("Cannot print: %v", err)
+					}
+				})
+			}()
+		}
+	}
+
+	// Вкладки «Форматированный текст», «Код и прокрутка», «Меню» и нижние ряды
+	// «Деревьев и таблиц» и «Компоновки» — общий с браузерной витриной код.
+	showcasedemo.Wire(showcasedemo.Env{
+		Reg:          reg,
+		Log:          addLog,
+		OnRelocalize: onRelocalize,
+		Focus:        eng.SetFocus,
+		OpenURL:      openSite,
+	})
+
 	// Фокус на поле логина
 	if ti, ok := reg["txtLogin"].(*widget.TextInput); ok {
 		eng.SetFocus(ti)
@@ -989,6 +1248,16 @@ func main() {
 	eng.SetRoot(root)
 	eng.Start()
 	defer eng.Stop()
+
+	// Таймеры и тема ОС заводятся после Start: у незапущенного движка
+	// обработчик выполнился бы, только когда приложение само попросит кадр.
+	startTimer()
+	// DetectSystemTheme на Linux без портала может ждать секунды — читаем в
+	// горутине и возвращаем результат на горутину интерфейса.
+	go func() {
+		t := window.DetectSystemTheme()
+		eng.Post(func() { onSystemTheme(t) })
+	}()
 
 	// ─── Живые данные (анимация) ────────────────────────────────────────────
 	go func() {
@@ -1213,6 +1482,12 @@ func main() {
 	// ─── Нативное окно ──────────────────────────────────────────────────────
 	win = window.New(eng, "GuiEngine — Widget Showcase")
 	win.SetMaxFPS(60)
+
+	// Смена темы в ОС приходит на горутине движка — виджеты трогать можно.
+	win.SetOnSystemThemeChanged(func(t window.SystemTheme) {
+		onSystemTheme(t)
+		addLog("System theme → %s", t.String())
+	})
 
 	// ─── Трей: иконка + контекстное меню (Windows; на прочих ОС — no-op) ─────
 	// Иконку и меню задаём ДО Run(): состояние буферизуется и применяется при

@@ -70,7 +70,7 @@
         <MenuItem Header="{Loc File}">
             <MenuItem Text="{Loc New}"/>
             <MenuItem Text="{Loc Open}"/>
-            <MenuItem Text="{Loc Save}"/>
+            <MenuItem Text="{Loc Save}" InputGestureText="Ctrl+S"/>
             <MenuItem Separator="True"/>
             <MenuItem Text="{Loc Export...}"/>
             <MenuItem Separator="True"/>
@@ -237,9 +237,9 @@
                        Text="Image" Foreground="#89B4FA"/>
                 <Separator Left="540" Top="304" Width="480" Height="1" Background="#313244"/>
 
-                <Panel Left="540" Top="316" Width="480" Height="240" Background="#11112A"
+                <Panel Left="540" Top="316" Width="480" Height="140" Background="#11112A"
                        CornerRadius="6" BorderBrush="#313244">
-                    <Label Left="12" Top="12" Width="456" Height="216"
+                    <Label Left="12" Top="12" Width="456" Height="116"
                            Text="{Loc [ Image area — Image Source='path' ]}"
                            Foreground="#585B70" TextWrapping="Wrap"/>
                 </Panel>
@@ -864,6 +864,11 @@
                 <Rectangle Left="726" Top="390" Width="150" Height="52" RadiusX="14"
                            Stroke="#CDD6F4" StrokeThickness="1"/>
 
+                <TextBlock Left="896" Top="366" Foreground="#9399B2" Text="Polyline:"/>
+                <Polyline Left="896" Top="392" Width="130" Height="50"
+                          Points="896,438 922,398 948,430 974,394 1000,430 1024,400"
+                          Stroke="#F9E2AF" StrokeThickness="3"/>
+
                 <!-- ─── Низ: HiDPI ─────────────────────────────────────────── -->
                 <Separator Left="24" Top="470" Width="1002" Height="1" Background="#313244"/>
                 <TextBlock Left="24" Top="486" Style="{StaticResource H324}" Text="HiDPI"/>
@@ -951,6 +956,7 @@
                 <Button Name="dlgOpen" Left="24" Top="246" Width="180" Height="34" Content="{Loc Open file…}"/>
                 <Button Name="dlgSave" Left="214" Top="246" Width="180" Height="34" Content="{Loc Save as…}"/>
                 <Button Name="dlgFolder" Left="404" Top="246" Width="180" Height="34" Content="{Loc Select folder…}"/>
+                <Button Name="dlgEnc" Left="594" Top="246" Width="260" Height="34" Content="{Loc Save with encoding…}"/>
 
                 <Label Name="dlgResult" Left="24" Top="310" Width="1010" Height="24"
                        Text="{Loc The result will appear here}" Foreground="#A6E3A1"/>
@@ -1011,6 +1017,11 @@
                 <SVGIcon Left="184" Top="588" Width="48" Height="48" Source="icons/folder.svg" Color="#F9E2AF"/>
                 <SVGIcon Left="248" Top="580" Width="64" Height="64" Source="icons/menu.svg" Color="#89B4FA"/>
                 <SVGIcon Left="330" Top="572" Width="80" Height="80" Source="icons/close.svg" Color="#F38BA8"/>
+
+                <!-- ThemeScope: у каждой из четырёх областей своя тема (панели строит код) -->
+                <TextBlock Left="24" Top="654" Foreground="#9399B2"
+                           Text="{Loc ThemeScope — a theme for a subtree: four looks at once, whatever the application theme is}"/>
+                <Panel Name="themeScopeMount" Left="24" Top="676" Width="1010" Height="68" Background="#1E1E32"/>
             </Canvas>
         </TabItem>
 
@@ -1172,6 +1183,23 @@
                     <GridSplitter Grid.Column="1" Background="#45475A"/>
                     <Label Grid.Column="2" Text="{Loc Right}" Foreground="#A6E3A1" Background="#2A2A40"/>
                 </Grid>
+
+                <!-- Нижний ряд: колонки-флажки и шаблонные, дерево из модели -->
+                <Separator Left="24" Top="520" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="530" Foreground="#9399B2"
+                           Text="{Loc DataGridCheckBoxColumn and DataGridTemplateColumn (a bar drawn by the application)}"/>
+                <DataGrid Name="gridCheck" Left="24" Top="554" Width="640" Height="190"
+                          AutoGenerateColumns="False" CanUserSortColumns="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="{Loc Service}" Binding="{Binding Name}" Width="*"/>
+                        <DataGridCheckBoxColumn Header="{Loc Enabled}" Binding="{Binding Enabled}" Width="90"/>
+                        <DataGridTemplateColumn Header="{Loc Load}" Width="220"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <TextBlock Left="688" Top="530" Foreground="#9399B2"
+                           Text="{Loc HierarchicalDataTemplate — a tree built from a model}"/>
+                <TreeView Name="treeHier" Left="688" Top="554" Width="346" Height="190" ShowIndentGuides="True"/>
             </Canvas>
         </TabItem>
 
@@ -1250,6 +1278,213 @@
             </Canvas>
         </TabItem>
 
+
+        <!-- ─────────────────────────────────────────────────────────────────
+             TAB «Форматированный текст» — RichText: показ и редактор
+             ───────────────────────────────────────────────────────────────── -->
+        <TabItem Header="{Loc Rich text}">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="{Loc RichText — formatted text (view and edit)}"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+
+                <!-- Левая колонка: показ (по умолчанию RichText только показывает) -->
+                <TextBlock Left="24" Top="56" Foreground="#9399B2"
+                           Text="{Loc View: sizes, bold, italic, colour, link}"/>
+                <!-- Рамка нужна, чтобы поле читалось и на тёмной, и на светлой теме:
+                     у самого RichText фона нет, он берёт цвета только для текста -->
+                <Rectangle Left="24" Top="82" Width="490" Height="290"
+                           Stroke="#5A5A6A" StrokeThickness="1"/>
+                <RichText Name="rtView" Left="25" Top="83" Width="488" Height="288" Padding="10,8"/>
+
+                <!-- Правая колонка: редактор (Editable = true) и его панель -->
+                <TextBlock Left="540" Top="56" Foreground="#9399B2"
+                           Text="{Loc Editor: Editable = true, Ctrl+B / I / U, Ctrl+Z}"/>
+                <Button Name="rtBold" Left="540" Top="82" Width="40" Height="30"
+                        Content="{Loc B}" ToolTip="{Loc Bold (Ctrl+B)}"/>
+                <Button Name="rtItalic" Left="586" Top="82" Width="40" Height="30"
+                        Content="{Loc I}" ToolTip="{Loc Italic (Ctrl+I)}"/>
+                <Button Name="rtUnderline" Left="632" Top="82" Width="40" Height="30"
+                        Content="{Loc U}" ToolTip="{Loc Underline (Ctrl+U)}"/>
+                <Button Name="rtColor" Left="682" Top="82" Width="120" Height="30"
+                        Content="{Loc Red text}" ToolTip="{Loc Colour of the selection (SetSelectionStyle)}"/>
+                <Button Name="rtUndo" Left="812" Top="82" Width="100" Height="30"
+                        Content="{Loc Undo}" ToolTip="{Loc Undo (Ctrl+Z)}"/>
+                <Button Name="rtRedo" Left="918" Top="82" Width="100" Height="30"
+                        Content="{Loc Redo}" ToolTip="{Loc Redo (Ctrl+Y)}"/>
+                <Rectangle Left="540" Top="120" Width="494" Height="252"
+                           Stroke="#5A5A6A" StrokeThickness="1"/>
+                <RichText Name="rtEdit" Left="541" Top="121" Width="492" Height="250"
+                          IsReadOnly="False" AcceptsTab="True" Padding="10,8"/>
+
+                <!-- Низ: тот же документ как HTML -->
+                <TextBlock Left="24" Top="390" Foreground="#9399B2"
+                           Text="{Loc The edited document as HTML (RichText.HTML())}"/>
+                <Button Name="rtShowHtml" Left="24" Top="414" Width="200" Height="32"
+                        Content="{Loc Show HTML}" Style="Accent"/>
+                <Label Name="rtStatus" Left="236" Top="420" Width="798" Height="20"
+                       Text="" Foreground="#A6E3A1"/>
+                <TextBox Name="rtHtml" AcceptsReturn="True" TextWrapping="NoWrap" IsReadOnly="True"
+                         FontFamily="$hg_mono" FontSize="10"
+                         Left="24" Top="454" Width="1010" Height="190"/>
+
+                <TextBlock Left="24" Top="656" Width="1010" Height="80" TextWrapping="Wrap"
+                           Foreground="#6C7086"
+                           Text="{Loc Select a piece of text and press a button: the property is switched on the whole selection (or off, if all of it already has it). Without a selection the next typed text gets the style, as in Word. The link in the view opens through OnLinkClick (the widget opens nothing by itself); in the editor a link is followed by Ctrl+click.}"/>
+            </Canvas>
+        </TabItem>
+
+        <!-- ─────────────────────────────────────────────────────────────────
+             TAB «Код и прокрутка» — TextBox для кода, ScrollView вбок
+             ───────────────────────────────────────────────────────────────── -->
+        <TabItem Header="{Loc Code and scrolling}">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="{Loc Code editor: TextBox with highlighting}"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="52" Width="1010" Height="36" TextWrapping="Wrap" Foreground="#9399B2"
+                           Text="{Loc Monospaced font (FontFamily), Tab inserts a tab (AcceptsTab), comments and strings are painted by SetStyler. With word wrap off a horizontal scrollbar appears: drag the thumb, use Shift+wheel or the horizontal wheel.}"/>
+                <TextBox Name="codeBox" AcceptsReturn="True" TextWrapping="NoWrap" AcceptsTab="True"
+                         FontFamily="$hg_mono"
+                         Left="24" Top="96" Width="1010" Height="272"/>
+                <ToggleButton Name="codeWrap" Left="24" Top="376" Width="160" Height="30"
+                              Content="{Loc Word wrap}"/>
+                <Label Name="codeStatus" Left="196" Top="382" Width="838" Height="20"
+                       Text="" Foreground="#9399B2"/>
+
+                <TextBlock Left="24" Top="426" Style="{StaticResource H324}"
+                           Text="{Loc ScrollView: horizontal scrolling (ContentWidth)}"/>
+                <Separator Left="24" Top="450" Width="1010" Height="1" Background="#313244"/>
+                <TextBlock Left="24" Top="462" Width="1010" Height="36" TextWrapping="Wrap" Foreground="#9399B2"
+                           Text="{Loc The content is wider than the area: the bar at the bottom scrolls it sideways. Scroll, then click a button: the click reaches the button you see under the cursor.}"/>
+                <ScrollViewer Name="hScroll" Left="24" Top="506" Width="1010" Height="104"
+                              ContentHeight="80" Background="#181828">
+                    <Button Name="hsBtn0" Left="12" Top="20" Width="148" Height="36" Content="{Loc Button 1}"/>
+                    <Button Name="hsBtn1" Left="172" Top="20" Width="148" Height="36" Content="{Loc Button 2}"/>
+                    <Button Name="hsBtn2" Left="332" Top="20" Width="148" Height="36" Content="{Loc Button 3}"/>
+                    <Button Name="hsBtn3" Left="492" Top="20" Width="148" Height="36" Content="{Loc Button 4}"/>
+                    <Button Name="hsBtn4" Left="652" Top="20" Width="148" Height="36" Content="{Loc Button 5}"/>
+                    <Button Name="hsBtn5" Left="812" Top="20" Width="148" Height="36" Content="{Loc Button 6}"/>
+                    <Button Name="hsBtn6" Left="972" Top="20" Width="148" Height="36" Content="{Loc Button 7}"/>
+                    <Button Name="hsBtn7" Left="1132" Top="20" Width="148" Height="36" Content="{Loc Button 8}"/>
+                    <Button Name="hsBtn8" Left="1292" Top="20" Width="148" Height="36" Content="{Loc Button 9}"/>
+                    <Button Name="hsBtn9" Left="1452" Top="20" Width="148" Height="36" Content="{Loc Button 10}"/>
+                </ScrollViewer>
+                <Button Name="hsLeft" Left="24" Top="622" Width="150" Height="30" Content="{Loc ◀ To the start}"/>
+                <Button Name="hsRight" Left="182" Top="622" Width="150" Height="30" Content="{Loc To the end ▶}"/>
+                <Label Name="hsStatus" Left="344" Top="628" Width="690" Height="20"
+                       Text="" Foreground="#A6E3A1"/>
+                <TextBlock Left="24" Top="672" Width="1010" Height="60" TextWrapping="Wrap"
+                           Foreground="#6C7086"
+                           Text="{Loc Children of the ScrollView stay in content coordinates: the engine itself maps the screen to the child, so hover, click, menus and the accessibility tree work after scrolling without any code in the widget.}"/>
+            </Canvas>
+        </TabItem>
+
+        <!-- ─────────────────────────────────────────────────────────────────
+             TAB «Меню» — сочетания клавиш и мнемоники
+             ───────────────────────────────────────────────────────────────── -->
+        <TabItem Header="{Loc Menus}">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="{Loc Menus: shortcuts and mnemonics}"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+
+                <TextBlock Left="24" Top="56" Foreground="#9399B2"
+                           Text="{Loc MenuBar with UseMnemonics: Alt+letter opens a menu, then press the underlined letter of an item.}"/>
+                <Menu Name="menuDemo" Left="24" Top="84" Width="700" Height="28" UseMnemonics="True">
+                    <MenuItem Header="{Loc _File}">
+                        <MenuItem Text="{Loc _New}" InputGestureText="Ctrl+N"/>
+                        <MenuItem Text="{Loc _Open…}" InputGestureText="Ctrl+O"/>
+                        <MenuItem Text="{Loc _Save}" InputGestureText="Ctrl+S"/>
+                        <MenuItem Separator="True"/>
+                        <MenuItem Text="{Loc E_xit}" InputGestureText="Alt+F4"/>
+                    </MenuItem>
+                    <MenuItem Header="{Loc _Edit}">
+                        <MenuItem Text="{Loc _Undo}" InputGestureText="Ctrl+Z"/>
+                        <MenuItem Text="{Loc _Redo}" InputGestureText="Ctrl+Y"/>
+                        <MenuItem Separator="True"/>
+                        <MenuItem Text="{Loc Cu_t}" InputGestureText="Ctrl+X"/>
+                        <MenuItem Text="{Loc _Copy}" InputGestureText="Ctrl+C"/>
+                        <MenuItem Text="{Loc _Paste}" InputGestureText="Ctrl+V"/>
+                    </MenuItem>
+                    <MenuItem Header="{Loc _Help}">
+                        <MenuItem Text="{Loc _Contents}" InputGestureText="F1"/>
+                        <MenuItem Text="{Loc _About}"/>
+                    </MenuItem>
+                </Menu>
+
+                <TextBlock Left="24" Top="150" Foreground="#9399B2"
+                           Text="{Loc PopupMenu: the shortcut is written on the right (MenuItem.Shortcut), the mnemonic is underlined.}"/>
+                <Button Name="menuShowPopup" Left="24" Top="176" Width="220" Height="34"
+                        Content="{Loc Show the menu}"/>
+                <PopupMenu Name="menuPopup" UseMnemonics="True">
+                    <MenuItem Text="{Loc _Open…}" InputGestureText="Ctrl+O"/>
+                    <MenuItem Text="{Loc _Save}" InputGestureText="Ctrl+S"/>
+                    <MenuItem Text="{Loc Save _as…}" InputGestureText="Ctrl+Shift+S"/>
+                    <MenuItem Separator="True"/>
+                    <MenuItem Text="{Loc _Delete}" InputGestureText="Del"/>
+                    <MenuItem Text="{Loc report__2026.txt}"/>
+                </PopupMenu>
+
+                <TextBlock Left="24" Top="240" Foreground="#9399B2"
+                           Text="{Loc Try the shortcuts Ctrl+N and Ctrl+O, and Alt+F / Alt+E / Alt+H:}"/>
+                <Label Name="menuStatus" Left="24" Top="266" Width="1010" Height="24"
+                       Text="{Loc Nothing chosen yet}" Foreground="#A6E3A1"/>
+
+                <TextBlock Left="24" Top="320" Width="1010" Height="150" TextWrapping="Wrap"
+                           Foreground="#6C7086"
+                           Text="{Loc The menu only SHOWS a shortcut: the keys are handled by the application. Here Ctrl+N and Ctrl+O are Window.InputBindings (Ctrl+S is the same binding as in the header menu), and Alt+letter is handed to MenuBar.ActivateMnemonic. Underscores in labels are mnemonics only when UseMnemonics is on: in a file name such as report__2026.txt a double underscore is a real underscore.}"/>
+            </Canvas>
+        </TabItem>
+
+        <!-- ─────────────────────────────────────────────────────────────────
+             TAB «Платформа» — таймер, тема ОС, ссылка, печать и PDF
+             (оконный showcase; в браузерной витрине вкладка скрыта)
+             ───────────────────────────────────────────────────────────────── -->
+        <TabItem Header="{Loc Platform}">
+            <Canvas Width="1060" Height="770" Background="#1E1E32">
+                <TextBlock Left="24" Top="16" Style="{StaticResource H324}"
+                           Text="{Loc Platform: timer, system theme, links, print and PDF}"/>
+                <Separator Left="24" Top="40" Width="1010" Height="1" Background="#313244"/>
+
+                <TextBlock Left="24" Top="56" Foreground="#9399B2"
+                           Text="{Loc Timer (Engine.Every runs on the interface goroutine and stops with the engine):}"/>
+                <Label Name="timerClock" Left="24" Top="84" Width="140" Height="24"
+                       Text="00:00:00" Foreground="#A6E3A1"/>
+                <Label Name="timerCount" Left="176" Top="84" Width="300" Height="24"
+                       Text="" Foreground="#CDD6F4"/>
+                <Button Name="timerToggle" Left="490" Top="78" Width="200" Height="34"
+                        Content="{Loc Stop the timer}"/>
+
+                <TextBlock Left="24" Top="140" Foreground="#9399B2"
+                           Text="{Loc System theme (window.DetectSystemTheme and the change notification):}"/>
+                <Label Name="sysThemeLbl" Left="24" Top="168" Width="500" Height="24"
+                       Text="" Foreground="#CDD6F4"/>
+                <CheckBox Name="sysThemeFollow" Left="540" Top="166" Width="340" Height="28"
+                          Content="{Loc Follow the system theme}"/>
+
+                <TextBlock Left="24" Top="220" Foreground="#9399B2"
+                           Text="{Loc Open a link with the system (window.OpenURL, only https://):}"/>
+                <TextBox Name="urlBox" Left="24" Top="248" Width="520" Height="32"
+                         Text="https://github.com/oops1/headless-gui"/>
+                <Button Name="urlOpen" Left="556" Top="248" Width="180" Height="32"
+                        Content="{Loc Open the site}" Style="Accent"/>
+                <Label Name="urlStatus" Left="24" Top="288" Width="1010" Height="20"
+                       Text="" Foreground="#9399B2"/>
+
+                <TextBlock Left="24" Top="336" Foreground="#9399B2"
+                           Text="{Loc Print and PDF: the pages are drawn by the engine itself (package printing):}"/>
+                <Button Name="pdfSave" Left="24" Top="364" Width="220" Height="34"
+                        Content="{Loc Save to PDF…}"/>
+                <Button Name="printGo" Left="254" Top="364" Width="220" Height="34"
+                        Content="{Loc Print…}"/>
+                <Label Name="printStatus" Left="24" Top="406" Width="1010" Height="20"
+                       Text="" Foreground="#A6E3A1"/>
+                <TextBlock Left="24" Top="448" Width="1010" Height="90" TextWrapping="Wrap"
+                           Foreground="#6C7086"
+                           Text="{Loc The document is two A4 pages: the first holds the text from the editor of the «Rich text» tab, the second the event log. Each page is rendered by a separate engine at the printer resolution, so the paper looks exactly like the screen. The PDF is written on any platform; the print dialog exists where the system has one (Windows).}"/>
+            </Canvas>
+        </TabItem>
     </TabControl>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
