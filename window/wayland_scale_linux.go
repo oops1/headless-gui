@@ -198,6 +198,12 @@ func (w *WaylandWindow) recomputeScale() {
 // единицах. Без этого при дробном масштабе картинка заняла бы столько
 // поверхностных единиц, сколько в ней пикселей, — то есть окно стало бы
 // крупнее экрана.
+//
+// Размер — БУФЕРА, а не окна. Пока ответ на ресайз в пути, они расходятся, и
+// назначение по размеру окна заставляло компоновщика сжать или растянуть
+// кадр: окно выглядело сплющенным, а щелчки, пришедшие в поверхностных
+// единицах, попадали мимо виджетов, разложенных по холсту. Буфера ещё нет —
+// тогда размер окна (масштаб сменился до первого кадра).
 func (w *WaylandWindow) applyViewport() {
 	w.scale.mu.Lock()
 	viewport := w.scale.viewportID
@@ -205,7 +211,13 @@ func (w *WaylandWindow) applyViewport() {
 	if viewport == 0 {
 		return
 	}
-	sw, sh := w.toSurface(w.width), w.toSurface(w.height)
+	w.mu.Lock()
+	bw, bh := w.poolW, w.poolH
+	if bw <= 0 || bh <= 0 {
+		bw, bh = w.width, w.height
+	}
+	w.mu.Unlock()
+	sw, sh := w.toSurface(bw), w.toSurface(bh)
 	if sw <= 0 || sh <= 0 {
 		return
 	}

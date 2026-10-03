@@ -634,6 +634,7 @@ func (win *Window) bringUp() error {
 
 	// Оконно-специфичные callbacks (resize, close).
 	win.setupResizeClose()
+	win.adoptCreatedSize()
 
 	// Общий проброс ввода (мышь/клавиатура) — surface.
 	win.setupInput()
@@ -842,6 +843,34 @@ func (win *Window) setupResizeClose() {
 		win.postToEngine(win.requestClose)
 		return false
 	})
+}
+
+// clientSizer — бэкенд, знающий размер окна, назначенный системой.
+type clientSizer interface {
+	ClientSize() (w, h int)
+}
+
+// adoptCreatedSize принимает размер, который система назначила окну ещё при
+// создании.
+//
+// Wayland ждёт первый configure внутри Create, а обработчик ресайза
+// подключается после: компоновщик, сразу назначивший размер (тайлинг,
+// половина экрана), сообщал его, когда слушать было некому. Холст оставался
+// прежним, окно на экране — другим: картинка сжималась, щелчки промахивались.
+// Сверка покрывает любой бэкенд, который умеет назвать свой размер.
+func (win *Window) adoptCreatedSize() {
+	cs, ok := win.native.(clientSizer)
+	if !ok {
+		return
+	}
+	cw, ch := cs.ClientSize()
+	if cw <= 0 || ch <= 0 {
+		return // «размер выбирает программа» — оставляем свой
+	}
+	if pw, ph := win.physicalSize(); cw == pw && ch == ph {
+		return
+	}
+	win.post(func() { win.resizeTo(cw, ch) })
 }
 
 // resizeTo применяет новый размер окна ОС (физические пиксели): холст движка,
