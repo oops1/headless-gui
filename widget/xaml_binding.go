@@ -204,6 +204,7 @@ type BindingScope struct {
 	virtuals []virtualTarget
 	locs     []locTarget
 	cmdTgts  []commandTarget
+	treeSrc  map[*TreeViewWidget]*dgridPkg.ObservableCollection // источник, уже поданный дереву
 	reg      map[string]Widget
 	baseDir  string
 	updating atomic.Bool // защита от петли обратной связи во время Refresh
@@ -769,6 +770,9 @@ func (s *BindingScope) Refresh() {
 				continue
 			}
 			v = applyConvert(t.spec, v)
+			if s.applyItemsSource(t.w, t.prop, v) {
+				continue
+			}
 			setWidgetProperty(t.w, t.prop, formatBindingValue(v, t.spec))
 		}
 	}

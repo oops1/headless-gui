@@ -19,6 +19,9 @@ package window
 // отвечаем разметкой. Проситель выбирает сам: Блокнот спросит текст, Word или
 // браузер — HTML.
 //
+// Список файлов (SetFiles) — так же, целями text/uri-list и
+// x-special/gnome-copied-files, как у GTK и Qt.
+//
 // Вставка: просим сервер сконвертировать CLIPBOARD в UTF8_STRING; ответ
 // приходит событием в цикле событий, поэтому GetText ждёт его по каналу с
 // коротким тайм-аутом. Владелец — чужой процесс и вправе не ответить вовсе.
@@ -32,6 +35,10 @@ import (
 // x11ClipboardTimeout — сколько ждём ответ владельца буфера.
 const x11ClipboardTimeout = 300 * time.Millisecond
 
+// x11ClipboardFilesTimeout — сколько ждём список файлов: владелец вправе
+// отдать его, только когда файлы готовы (см. clipboardFilesTimeout).
+const x11ClipboardFilesTimeout = 10 * time.Minute
+
 // x11Clipboard — буфер обмена одного X11-соединения.
 type x11Clipboard struct {
 	w *X11Window
@@ -40,8 +47,11 @@ type x11Clipboard struct {
 	owned string // наш текст, пока владеем CLIPBOARD
 	// ownedHTML — оформленная версия нашего содержимого; пусто — только текст.
 	ownedHTML string
-	owns      bool        // владеем ли мы буфером
-	wait      chan string // ждёт ответа на ConvertSelection; nil — не ждём
+	// ownedFiles — наш список файлов; nil — отдаём не файлы.
+	ownedFiles []string
+	ownedCut   bool
+	owns       bool        // владеем ли мы буфером
+	wait       chan string // ждёт ответа на ConvertSelection; nil — не ждём
 }
 
 func newX11Clipboard(w *X11Window) *x11Clipboard { return &x11Clipboard{w: w} }
@@ -49,22 +59,30 @@ func newX11Clipboard(w *X11Window) *x11Clipboard { return &x11Clipboard{w: w} }
 // SetText объявляет нас владельцем буфера обмена.
 //
 // Реализует widget.ClipboardProvider.
-func (c *x11Clipboard) SetText(s string) { c.setOwned(s, "") }
+func (c *x11Clipboard) SetText(s string) { c.setOwned(s, "", nil, false) }
 
 // SetHTML объявляет нас владельцем буфера и готовит к выдаче и текст, и HTML.
 //
 // Реализует widget.ClipboardHTMLProvider.
-func (c *x11Clipboard) SetHTML(html, plain string) { c.setOwned(plain, html) }
+func (c *x11Clipboard) SetHTML(html, plain string) { c.setOwned(plain, html, nil, false) }
+
+// SetFiles объявляет нас владельцем буфера со списком файлов и путями текстом.
+//
+// Реализует widget.ClipboardFilesProvider.
+func (c *x11Clipboard) SetFiles(paths []string, cut bool) {
+	c.setOwned(filesPlainText(paths), "", append([]string(nil), paths...), cut)
+}
 
 // setOwned запоминает содержимое и становится владельцем CLIPBOARD. Прежнее
 // оформление затирается всегда: иначе после SetText проситель text/html
 // получил бы разметку от прошлого копирования.
-func (c *x11Clipboard) setOwned(text, html string) {
+func (c *x11Clipboard) setOwned(text, html string, files []string, cut bool) {
 	if c == nil || c.w == nil || c.w.wid == 0 || c.w.atomClipboard == 0 {
 		return
 	}
 	c.mu.Lock()
 	c.owned, c.ownedHTML, c.owns = text, html, true
+	c.ownedFiles, c.ownedCut = files, cut
 	c.mu.Unlock()
 	c.w.x11SetSelectionOwner(c.w.atomClipboard, c.w.wid)
 }
@@ -108,9 +126,48 @@ func (c *x11Clipboard) GetHTML() (string, bool) {
 	return html, html != ""
 }
 
+// GetFiles читает список файлов из буфера обмена.
+//
+// Реализует widget.ClipboardFilesProvider. Сначала x-special/gnome-copied-files
+// — только он знает про cut, — при отказе text/uri-list. Владелец без такой
+// цели отвечает отказом сразу, а с ней вправе думать долго: звать не на
+// горутине движка.
+func (c *x11Clipboard) GetFiles() ([]string, bool, bool) {
+	if c == nil || c.w == nil || c.w.wid == 0 || c.w.atomClipboard == 0 {
+		return nil, false, false
+	}
+	c.mu.Lock()
+	if c.owns {
+		files, cut := c.ownedFiles, c.ownedCut
+		c.mu.Unlock()
+		if len(files) == 0 {
+			return nil, false, false
+		}
+		return append([]string(nil), files...), cut, true
+	}
+	c.mu.Unlock()
+	if a := c.w.atomGnomeCopied; a != 0 {
+		if p, cut, ok := parseGnomeCopiedFiles(c.convertTimeout(a, x11ClipboardFilesTimeout)); ok {
+			return p, cut, true
+		}
+	}
+	if a := c.w.atomTextUriList; a != 0 {
+		if p, ok := parseClipboardURIList(c.convertTimeout(a, x11ClipboardFilesTimeout)); ok {
+			return p, false, true
+		}
+	}
+	return nil, false, false
+}
+
 // convert просит сервер сконвертировать CLIPBOARD в указанную цель и ждёт
-// ответ с тайм-аутом. Пустая строка — отказ, молчание владельца или пустой буфер.
+// ответ с коротким тайм-аутом. Пустая строка — отказ, молчание владельца или
+// пустой буфер.
 func (c *x11Clipboard) convert(target uint32) string {
+	return c.convertTimeout(target, x11ClipboardTimeout)
+}
+
+// convertTimeout — convert с заданным сроком ожидания.
+func (c *x11Clipboard) convertTimeout(target uint32, timeout time.Duration) string {
 	c.mu.Lock()
 	if c.wait != nil {
 		c.mu.Unlock()
@@ -127,7 +184,7 @@ func (c *x11Clipboard) convert(target uint32) string {
 	select {
 	case s := <-ch:
 		return s
-	case <-time.After(x11ClipboardTimeout):
+	case <-time.After(timeout):
 		c.mu.Lock()
 		c.wait = nil
 		c.mu.Unlock()
@@ -183,7 +240,9 @@ func (c *x11Clipboard) handleRequest(buf []byte) {
 
 	c.mu.Lock()
 	text, html, owns := c.owned, c.ownedHTML, c.owns
+	files, cut := c.ownedFiles, c.ownedCut
 	c.mu.Unlock()
+	uriList, gnome := c.w.atomTextUriList, c.w.atomGnomeCopied
 
 	ok := false
 	switch {
@@ -195,6 +254,13 @@ func (c *x11Clipboard) handleRequest(buf []byte) {
 		targets := []uint32{c.w.atomTargets, c.w.atomUTF8String, 31 /*STRING*/, c.w.atomText}
 		if html != "" && c.w.atomTextHTML != 0 {
 			targets = append(targets, c.w.atomTextHTML)
+		}
+		if len(files) > 0 {
+			for _, a := range []uint32{uriList, gnome} {
+				if a != 0 {
+					targets = append(targets, a)
+				}
+			}
 		}
 		for _, a := range targets {
 			var b [4]byte
@@ -208,6 +274,12 @@ func (c *x11Clipboard) handleRequest(buf []byte) {
 		ok = true
 	case html != "" && c.w.atomTextHTML != 0 && target == c.w.atomTextHTML:
 		c.w.x11ChangeProperty(requestor, property, target, 8, []byte(html))
+		ok = true
+	case len(files) > 0 && uriList != 0 && target == uriList:
+		c.w.x11ChangeProperty(requestor, property, target, 8, []byte(buildURIList(files)))
+		ok = true
+	case len(files) > 0 && gnome != 0 && target == gnome:
+		c.w.x11ChangeProperty(requestor, property, target, 8, []byte(buildGnomeCopiedFiles(files, cut)))
 		ok = true
 	}
 	if !ok {
@@ -227,6 +299,7 @@ func (c *x11Clipboard) handleClear(buf []byte) {
 	}
 	c.mu.Lock()
 	c.owns, c.owned, c.ownedHTML = false, "", ""
+	c.ownedFiles, c.ownedCut = nil, false
 	c.mu.Unlock()
 }
 

@@ -323,9 +323,13 @@ func (env *xamlEnv) processAt(el *xElement, ctx interface{}, depth int) {
 	tag := strings.ToLower(el.Tag)
 	// Внутрь ресурсов/стилей/InputBindings/DataGrid-колонок не лезем —
 	// они обрабатываются отдельно (DataGrid сам разбирает Binding колонок).
+	// Шаблон дерева — так же: его {Binding Children} и {Binding Name} — пути
+	// внутри УЗЛА, а не свойства DataContext окна. Резолв против окна
+	// подставлял пустоту, и шаблон из разметки не находил ни детей, ни имён.
 	if isResourceContainer(tag) || tag == "style" || tag == "setter" ||
 		tag == "resourcedictionary" || strings.HasSuffix(tag, ".inputbindings") ||
-		strings.HasSuffix(tag, ".columns") || isDataGridColumnTag(tag) {
+		strings.HasSuffix(tag, ".columns") || isDataGridColumnTag(tag) ||
+		tag == "treeview.itemtemplate" || tag == "hierarchicaldatatemplate" {
 		return
 	}
 

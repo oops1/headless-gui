@@ -902,8 +902,13 @@ if e.Mod&widget.ModAlt != 0 && menu.ActivateMnemonic(e) {
 }
 ```
 
-`ActivateMnemonic` reports whether such a mnemonic was found. Once the menu is
-open, letters arrive the usual way and need not be passed on.
+`ActivateMnemonic` reports whether such a mnemonic was found. Having opened the
+menu, the bar takes the focus, so arrows, the item letter and Esc reach it the
+usual way, and on closing the menu gives the focus back to the previous widget
+(since v3.29.1; before, the application had to focus the bar by hand). This
+works when `ActivateMnemonic` is called while a key is being handled — from
+`OnKeyEvent` or `InputBindings`; called outside that, set the focus yourself
+(`eng.SetFocus`).
 
 Cascading submenus (nested MenuItem):
 
@@ -1113,7 +1118,7 @@ In XAML:
 With HierarchicalDataTemplate:
 
 ```xml
-<TreeView Name="tree" Width="300" Height="500">
+<TreeView Name="tree" Width="300" Height="500" ItemsSource="{Binding Roots}">
     <TreeView.ItemTemplate>
         <HierarchicalDataTemplate ItemsSource="{Binding Children}">
             <StackPanel Orientation="Horizontal">
@@ -1124,6 +1129,13 @@ With HierarchicalDataTemplate:
     </TreeView.ItemTemplate>
 </TreeView>
 ```
+
+`ItemsSource="{Binding Roots}"` on `TreeView` and `DataGrid` hands the widget
+the `*ObservableCollection` itself and replaces it when the model returns a
+different one. Paths inside the template — `{Binding Children}`,
+`{Binding Name}` — refer to the node, not to the window's model. Both work
+since v3.29.1: before, a grid from such markup stayed empty and the tree
+template lost its paths at load time.
 
 Virtualization: only visible rows are rendered. Supports 10,000+ nodes.
 
@@ -1506,9 +1518,25 @@ eng.SendKeyEvent(widget.KeyEvent{
 })
 ```
 
-Key codes: `KeyBackspace, KeyEnter, KeyEscape, KeyTab, KeySpace, KeyLeft/Right/Up/Down, KeyHome, KeyEnd, KeyDelete, KeyA/C/V/X/Z`.
+Key codes are a full table whose values equal Windows VK codes: all letters
+`KeyA…KeyZ`, digits `Key0…Key9`, the numpad (`KeyNumpad0…`, `+ − * / .`,
+Enter), OEM keys (`KeyOemPlus`, `KeyOemMinus` and others), `KeyF1…KeyF24`,
+navigation, `KeyCapsLock`, `KeyPrintScreen`, `KeyPause`, `KeyMenu` (the
+context-menu key). On X11 and Wayland the code comes from the PHYSICAL key of
+the Latin layout, so `Ctrl+S` works in a Russian layout too. Order of events: a
+press with `Code`, then a separate text event with `Rune`. `KeyEvent.Repeat`
+tells auto-repeat of a held key from a new press.
 
 Modifiers: `ModShift, ModCtrl, ModAlt, ModMeta`.
+
+**Alt and F10 — the menu bar.** Alt by itself is a modifier, not an event:
+`Alt+F` arrives as `KeyF` with `ModAlt`. The gesture «Alt pressed and released
+with nothing in between» — how Windows opens a menu bar — arrives as `KeyAlt`,
+the same on Windows, X11 and Wayland; F10 is an ordinary `KeyF10`. The
+application opens its menu itself. On Windows the window no longer slips into
+its system menu: before, after F10 or a lone Alt the next arrow never reached
+the application — the window's modal menu loop took it. `Alt+Space` still opens
+the window menu, `Alt+F4` closes the window.
 
 **Tab inside a widget.** The engine hands Tab to focus traversal before the
 focused widget sees it, so a code editor could not insert a tab. A widget that
@@ -3079,6 +3107,34 @@ Limits: no tab stops (Tab is four spaces), no lists, tables or images, no
 find/replace; a mouse click during an IME composition accepts it as text instead
 of cancelling; bold is expressed only through the built-in faces.
 
+**The edit model — `RichDocument`.** The editor holds a document that can also
+be used on its own — without the widget, for example to build a document in
+code or to apply edits in a batch:
+
+```go
+d := widget.NewRichDocument(paras)            // or NewRichDocumentFromText(s)
+end := d.Insert(at, "text", style)            // '\n' splits the paragraph
+d.Delete(from, to)                            // across runs and paragraphs
+d.ApplyStyle(from, to, func(r *widget.RichRun) { r.Underline = true })
+d.SetParagraphFormat(from, to, func(p *widget.RichParagraph) { p.Align = widget.TextAlignCenter })
+sel, ok := d.Undo()                           // where to put the caret and selection
+paras := widget.RichParagraphsFromHTML(src)   // clipboard HTML (Word, browser) → paragraphs
+```
+
+Positions are runes of the document, paragraphs separated by one `\n`. Typed
+text takes the style of the character to its left. After every edit adjacent
+runs with equal formatting are merged; an empty paragraph remembers its
+formatting so typing in it does not start «by default». Undo keeps only the
+affected paragraphs, not document snapshots; `Type` merges consecutive typing
+into one undo, `BreakUndoGroup` ends a typing run, `BeginGroup`/`EndGroup`
+combine several edits. HTML parsing has no dependencies; scripts, styles and
+`javascript:`/`data:` links are dropped, font names from HTML are not carried
+over.
+
+**The caret** exists in display mode too — for keyboard selection and for a
+screen reader: `CaretPosition()`, `SetCaretPosition(pos)`, `IMECaretRect()`.
+It is drawn in the editor or with `ShowCaret`.
+
 ### Browser viewer (output/webstream)
 
 Any engine app can be shown in a browser with no client build:
@@ -3728,6 +3784,45 @@ HTML is the optional `widget.ClipboardHTMLProvider` (`SetHTML(html, plain)`,
   UTF-16 that Firefox and some Qt programs put there. It works in a native
   window (`window.Run`): the window installs the Linux clipboard provider.
 - macOS, and Linux without a native window: plain text only.
+
+### Files on the clipboard
+
+Since v3.30 a list of files can be put on the clipboard — so that Windows
+Explorer, Nautilus, Dolphin and a remote desktop client accept it — and files
+copied there can be read:
+
+```go
+widget.ClipboardSetFiles([]string{"/home/u/report.odt", "/home/u/photo.png"}, false) // cut=true — "cut"
+
+go func() { // reading may wait — not on the engine goroutine
+    paths, cut, ok := widget.ClipboardFiles() // ok == false — no files on the clipboard
+    eng.Post(func() { /* paste paths; cut — move rather than copy */ })
+}()
+```
+
+`ClipboardSetFiles` replaces the clipboard contents, like `ClipboardSetText`,
+and puts the same paths as plain text next to them — for programs that take
+only text. `ClipboardFiles` may **wait**: the owner hands the data over when it
+is ready, and on a remote desktop files copied on the client are downloaded at
+paste time. So call it in your own goroutine and bring the result back with
+`Engine.Post`.
+
+A list with even one link that is not a local file (`https://`, a foreign host)
+is not files: `ok == false`. Otherwise a browser link would become a "file", and
+a paste would silently lose part of the list.
+
+- Windows: `CF_HDROP` (UTF-16 paths) and "Preferred DropEffect" — copy or move;
+  all in one opening of the clipboard.
+- Wayland and X11: `text/uri-list` and `x-special/gnome-copied-files` (which
+  carries `copy`/`cut`), as GTK and Qt do. When reading, the engine asks for
+  the gnome format first — only it knows about `cut` — then `text/uri-list`.
+- macOS: the fallback only — paths as text.
+
+As with HTML, this is the optional `widget.ClipboardFilesProvider`
+(`SetFiles(paths, cut)`, `GetFiles() (paths, cut, ok)`); a custom provider
+without it gets the paths as text from `ClipboardSetFiles`, and
+`ClipboardFiles` honestly answers `ok == false`. `UseMemoryClipboard()`
+supports files.
 
 ### Color emoji
 

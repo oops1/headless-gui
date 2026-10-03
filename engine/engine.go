@@ -72,6 +72,7 @@ type Engine struct {
 	damageAll bool              // Invalidate() — полный diff
 
 	focus    focusManager  // текущий виджет с фокусом
+	loan     focusLoan     // фокус, взятый виджетом по просьбе (focusreq.go)
 	captured widget.Widget // виджет, захвативший мышь (drag)
 	capMu    sync.Mutex
 	// capChain — контейнеры со сдвигом содержимого над захватившим мышь
@@ -366,7 +367,14 @@ func New(width, height, fps int) *Engine {
 	// Регистрация со снятием: остановленный движок возвращает измеритель
 	// предыдущему живому вместо того, чтобы оставить свой мёртвый холст.
 	e.measurerHandle = widget.RegisterMeasurers(widget.Measurers{
-		Text: e.canvas.MeasureText,
+		// Замыканием, а не значением метода: SetScale и SetResolution
+		// заменяют e.canvas копией, и привязанный к первому холсту метод
+		// отвечал бы по масштабу, которого давно нет (физическая ширина
+		// вместо логической — на HiDPI всё, что считает перенос до кадра,
+		// переносило раньше времени).
+		Text: func(text string, sizePt float64) int {
+			return e.canvas.MeasureText(text, sizePt)
+		},
 		TextFont: func(text string, sizePt float64, family string) int {
 			return e.canvas.MeasureTextFont(text, sizePt, family)
 		},

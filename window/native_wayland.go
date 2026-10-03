@@ -148,9 +148,6 @@ const (
 
 	// wl_data_device_manager.dnd_action
 	wlDndActionCopy = 1
-
-	// MIME-тип списка файлов при перетаскивании из файлового менеджера.
-	mimeTextUriList = "text/uri-list"
 )
 
 // wlBufWaitTimeout — сколько ждать wl_buffer.release перед пропуском кадра.
@@ -271,6 +268,11 @@ type WaylandWindow struct {
 	// новом окне композитор растянул бы, и ресайз шёл бы рывками.
 	pendingResize bool
 
+	// staleSkipped — сколько кадров прежнего размера не показано, пока ответ
+	// на configure с размером был в пути (skipStaleFrame). Счёт на всю жизнь
+	// окна: пропуск — мера против окна неверного размера, а не ожидание.
+	staleSkipped int
+
 	// resizable — разрешён ли пользователю ресайз. Create фиксирует размер
 	// (min == max), SetResizable снимает фиксацию: под Wayland это
 	// единственный способ запретить или разрешить растягивание окна.
@@ -343,6 +345,9 @@ type WaylandWindow struct {
 	// htmlOffers — предложения с HTML: offer → объявленный тип (его же и
 	// запрашиваем).
 	htmlOffers map[uint32]string
+	// gnomeOffers — предложения со списком файлов x-special/gnome-copied-files
+	// (там же пометка cut); text/uri-list отмечен в offers.
+	gnomeOffers map[uint32]bool
 	// dndOffer — активный offer текущего перетаскивания (между enter и drop).
 	dndOffer   uint32
 	dndSerial  uint32 // serial из enter (для accept)
@@ -803,8 +808,12 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		// 0×0 — «решай сам»: размер не трогаем (так приходит configure при
 		// первом показе и при выходе из развёрнутого состояния).
 		if nw > 0 && nh > 0 && (nw != w.width || nh != w.height) {
+			// Под замком: размер читают и горутина кадров (skipStaleFrame),
+			// и Run сразу после Create (clientSize).
+			w.mu.Lock()
 			w.width, w.height = nw, nh
 			w.pendingResize = true
+			w.mu.Unlock()
 			if w.onResize != nil {
 				w.onResize(nw, nh)
 			}
@@ -878,6 +887,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			}
 			if isHTMLMime(mime) {
 				w.offerSetHTML(obj, mime)
+			}
+			if mime == mimeGnomeCopiedFiles {
+				w.offerSetGnomeFiles(obj)
 			}
 		}
 
@@ -1311,6 +1323,9 @@ func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 		return
 	}
 	b := img.Bounds()
+	if w.skipStaleFrame(b) {
+		return
+	}
 	// Кадр другого размера — это ресайз: пул перестраивается под него, и
 	// область рисуется целиком (в новых буферах нет ничего).
 	if b.Dx() != w.poolW || b.Dy() != w.poolH {
@@ -1344,6 +1359,47 @@ func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	base := idx * w.stride * w.poolH
 	convRectBGRX(w.shmData[base:], w.stride, img.Pix, img.Stride, area)
 	w.attachAndCommit(area)
+}
+
+// maxStaleFrames — сколько кадров прежнего размера можно не показать.
+//
+// Кадр нового размера приходит следом (окно передаёт размер движку, и тот
+// перерисовывает всё), так что хватает одного-двух. Больше ждать нельзя:
+// окно, которое так и не показалось, хуже окна, на миг показанного не в
+// своём размере.
+const maxStaleFrames = 2
+
+// skipStaleFrame — не показывать кадр, нарисованный под прежний размер, пока
+// ответ на configure с новым размером ещё в пути.
+//
+// Компоновщик, который в первом configure сразу назначает размер (тайлинг,
+// половина экрана), получал первым буфер в размере холста программы: окно
+// открывалось не того размера, а дальше рывком менялось. Теперь первым
+// коммитится кадр уже нужного размера. Разница в точку — округление
+// логического размера на дробном масштабе, такой кадр годится.
+func (w *WaylandWindow) skipStaleFrame(b image.Rectangle) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.hasFrame || !w.pendingResize || w.staleSkipped >= maxStaleFrames {
+		return false
+	}
+	if near(b.Dx(), w.width) && near(b.Dy(), w.height) {
+		return false
+	}
+	w.staleSkipped++
+	wlLog("кадр %dx%d прежнего размера не показан: жду %dx%d", b.Dx(), b.Dy(), w.width, w.height)
+	return true
+}
+
+func near(a, b int) bool { return a-b <= 1 && b-a <= 1 }
+
+// clientSize — размер окна в пикселях буфера, каким его назначил
+// компоновщик. Окно сверяет его с холстом сразу после Create: первый
+// configure приходит ещё внутри Create, когда обработчика ресайза нет.
+func (w *WaylandWindow) clientSize() (int, int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.width, w.height
 }
 
 // ─── Управление окном ────────────────────────────────────────────────────────
@@ -1569,6 +1625,23 @@ func (w *WaylandWindow) offerHTMLMime(id uint32) string {
 	return w.htmlOffers[id]
 }
 
+// offerSetGnomeFiles отмечает, что offer предлагает x-special/gnome-copied-files.
+func (w *WaylandWindow) offerSetGnomeFiles(id uint32) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.gnomeOffers == nil {
+		w.gnomeOffers = map[uint32]bool{}
+	}
+	w.gnomeOffers[id] = true
+}
+
+// offerHasGnomeFiles сообщает, предлагает ли offer x-special/gnome-copied-files.
+func (w *WaylandWindow) offerHasGnomeFiles(id uint32) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.gnomeOffers[id]
+}
+
 // isTextMime — тип, под которым ходит простой текст.
 func isTextMime(mime string) bool {
 	switch mime {
@@ -1590,6 +1663,7 @@ func (w *WaylandWindow) offerDelete(id uint32) {
 	w.mu.Lock()
 	delete(w.textOffers, id)
 	delete(w.htmlOffers, id)
+	delete(w.gnomeOffers, id)
 	w.mu.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()

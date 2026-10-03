@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/cmd/internal/showcasedemo"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -130,6 +131,34 @@ func TestClearLog(t *testing.T) {
 	items := app.log.Items()
 	if len(items) != 1 || !strings.Contains(items[0], "Журнал очищен") {
 		t.Errorf("после очистки журнал = %v", items)
+	}
+}
+
+// TestNewTabsWired — вкладки версий 3.27–3.29 подключены общим кодом, а
+// «Платформа» (таймер, тема ОС, ссылка, печать), которой нужно окно ОС,
+// в браузерной витрине скрыта.
+func TestNewTabsWired(t *testing.T) {
+	app := buildForTest(t)
+
+	if ed, ok := app.reg["rtEdit"].(*widget.RichText); !ok || !ed.Editable || ed.Text() == "" {
+		t.Errorf("редактор RichText не подключён: %T", app.reg["rtEdit"])
+	}
+	if tb, ok := app.reg["codeBox"].(*widget.TextBox); !ok || tb.Wrap || tb.GetText() == "" {
+		t.Errorf("редактор кода не подключён: %T", app.reg["codeBox"])
+	}
+	if sv, ok := app.reg["hScroll"].(*widget.ScrollView); !ok || sv.ContentWidth == 0 {
+		t.Errorf("прокрутка вбок не подключена: %T", app.reg["hScroll"])
+	}
+
+	tabs, _ := app.reg["mainTabs"].(*widget.TabControl)
+	platform := showcasedemo.TabOf(tabs, app.reg["timerToggle"])
+	if platform < 0 {
+		t.Fatal("вкладка «Платформа» не найдена в разметке")
+	}
+	for i := 0; i < tabs.TabCount(); i++ {
+		if visible := tabs.IsTabVisible(i); visible == (i == platform) {
+			t.Errorf("вкладка %d: видна=%v, «Платформа» — %d", i, visible, platform)
+		}
 	}
 }
 

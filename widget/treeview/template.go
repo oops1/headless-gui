@@ -118,8 +118,12 @@ func (t *HierarchicalDataTemplate) resolveChildren(dataContext interface{}) []in
 		return nil
 	}
 
-	// *ObservableCollection
+	// *ObservableCollection. У листа поле детей обычно не заполнено —
+	// типизированный nil; без проверки дерево падало на первом же листе.
 	if oc, ok := val.(*datagrid.ObservableCollection); ok {
+		if oc == nil {
+			return nil
+		}
 		return oc.Items()
 	}
 

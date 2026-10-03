@@ -3006,6 +3006,7 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 | Текст для скринридера | UIA Value и Text | AT-SPI Text | Wayland — то же, что X11 (мост общий), macOS — моста нет |
 | Тема ОС (`window.DetectSystemTheme`, `SetOnSystemThemeChanged`) | `AppsUseLightTheme` + `WM_SETTINGCHANGE` | `GTK_THEME`, портал Settings (D-Bus), сигнал `SettingChanged` | Wayland — то же, что X11; macOS — всегда `SystemThemeUnknown`, смены не видно |
 | Открыть ссылку / файл (`window.OpenURL`, `OpenFile`, `RevealFile`) | `ShellExecuteW`, показ — Проводник `/select` | портал `OpenURI` и `FileManager1.ShowItems`; `xdg-open` только если портала на шине нет | Wayland — то же, что X11; macOS — `/usr/bin/open`; прочие — `ErrOpenUnsupported` |
+| Файлы в буфере (`widget.ClipboardSetFiles`, `ClipboardFiles`) | `CF_HDROP` + «Preferred DropEffect» | `text/uri-list`, `x-special/gnome-copied-files` (нативное окно) | Wayland — те же типы (нативное окно); macOS — пути текстом |
 | HTML в буфере (`widget.SetClipboardHTML`) | «HTML Format» | `text/html` (нативное окно) | Wayland — `text/html` (нативное окно); macOS — только простой текст |
 | Печать (`printing.Print`) | `PrintDlgEx` + GDI | CUPS по IPP, системного диалога нет | Wayland — то же, что X11; macOS — `ErrUnsupported`. `SavePDF` — везде |
 | Несколько окон в процессе | да | да | Wayland — да, macOS — не проверялось |
@@ -4278,6 +4279,56 @@ elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
 
+### Children of a scroll view: clicks, hover and repaint where they are seen — v3.29
+
+A long-standing and serious defect: in a scrolled `ScrollView` a click hit the
+wrong widget. A list of buttons A, B, C, D scrolled so that C and D are shown —
+a click on C pressed A, invisible, scrolled past the top edge.
+
+The cause is how the scroll view draws its children: the offset is applied by
+a translating draw context (PERF-12), and the children's `Bounds()` stay in
+CONTENT coordinates. Everything that looked at those bounds saw unshifted
+coordinates: hit testing; the coordinates of presses, moves, wheel and mouse
+capture; hover; repaint (a child refreshed the wrong place on screen); menus
+and drop-downs opened by children; the IME caret and accessibility bounds;
+nested scroll views; the same horizontally.
+
+Shifting the children's bounds for real is not an option: the performance
+tests require them not to change with scrolling, applications lay children out
+in content coordinates, and `Panel`/`Canvas` keep grandchildren in absolute
+coordinates — every wheel step would walk the whole subtree. So children stay
+in the content frame and coordinates are translated at every boundary with the
+outside world:
+
+```go
+// A container that shows its children shifted reports the offset:
+type ContentOffsetter interface {
+    ContentOffset() image.Point // screen = child-frame point + offset
+}
+```
+
+`ScrollView` implements it. Hit testing builds a path with a frame per step
+(`engine/frames.go`); presses, moves, wheel, file drops, cursor, tooltips, the
+mouse-capture owner and `ContextMenuAt` receive the point in their widget's
+frame; `Base` remembers its parent (set in `AddChild`, also by
+`TabControl.AddTab` and `DockManager`) and translates repaint areas up the
+chain, clipped to the visible part of the scroll view; overlays are drawn
+through `widget.OffsetContext`; `BuildAccessTree` reports screen bounds;
+`PopupMenu.Show` uses the frame of the event being handled
+(`widget.SetEventFrame`, set by the engine around the handler).
+
+Cost is unchanged: walking 5050 widgets on a mouse move takes the same ≈78 µs,
+scrolling stays one operation. With a zero offset behaviour is the same, with
+one deliberate difference: the cursor outside the scroll view no longer
+highlights children sticking out past its edge — hit testing behaved so
+before, hover now agrees with it.
+
+Remaining (documented in the code): hover after a wheel scroll updates on the
+next mouse move; a menu opened from the KEYBOARD by a widget inside a scroll
+view is clamped to the canvas the old way; overlays of scrolled children are
+drawn without the soft shadow; a custom container that keeps children past
+`Base.AddChild` translates repaint areas inexactly.
+
 ### Printing and saving to PDF — v3.29
 
 The engine had no printing. An application had to call the OS print subsystem
@@ -4484,6 +4535,41 @@ BOM) and UTF-16 (Firefox, some Qt). These two providers are installed by the
 native window (`window.Run`); without a native window Linux uses the xclip/xsel
 fallback, which has plain text only. macOS: plain text only (`pbcopy` cannot do
 `public.html`, and `NSPasteboard` is unreachable without CGO).
+
+### Files on the clipboard — v3.30
+
+The engine's file manager (WinLine Explorer) copied files into a list inside
+the program: only text reached the system clipboard, so files never got to
+another file manager or to the RDP client, and nothing came back.
+
+```go
+widget.ClipboardSetFiles(paths []string, cut bool)            // replaces the clipboard; paths as text next to it
+paths, cut, ok := widget.ClipboardFiles()                     // ok == false: not files, or the provider cannot do files
+
+type ClipboardFilesProvider interface {                       // optional, like ClipboardHTMLProvider
+    SetFiles(paths []string, cut bool)
+    GetFiles() (paths []string, cut bool, ok bool)
+}
+```
+
+`ClipboardFiles` may block for a long time (up to 10 minutes on Linux): a
+remote desktop downloads client files at paste time and the channel delivers
+the list when the download is done. Call it in a goroutine and `Engine.Post`
+the result. A list containing any non-`file://` URI or a foreign host is not
+files.
+
+| | Windows | X11 | Wayland |
+|---|---|---|---|
+| put | `CF_HDROP` (UTF-16) + `Preferred DropEffect` + `CF_UNICODETEXT` (CRLF) | targets `text/uri-list`, `x-special/gnome-copied-files`, text | `wl_data_source` with the same types |
+| read | `CF_HDROP` (UTF-16 parsed with bounds checks; ANSI via `DragQueryFileW`) + `Preferred DropEffect` | gnome format, then `text/uri-list` | the same; only types the offer announced |
+
+The gnome format is read first when offered — it is the only one carrying
+`cut`, with the same URIs. URIs are percent-encoded like `g_filename_to_uri`.
+Pure helpers: `window/clipboard_files.go` (uri-list, gnome format),
+`widget/clipboard_files.go` (DROPFILES, DropEffect). macOS has no provider —
+the text fallback applies. Verified on Windows in both directions against
+Windows PowerShell `Get-Clipboard -Format FileDropList` / `Set-Clipboard
+-Path`; Wayland and X11 on the wire (fake compositor and X server).
 
 ### Extra drop-downs in the file dialog — v3.29
 
@@ -4908,7 +4994,20 @@ event's character, when a backend supplies it, wins over that guess.
 
 The menu bar holds no focus while keys go to the focused widget, so Alt+letter
 is handed to it by the application: `MenuBar.ActivateMnemonic(e)` reports
-whether such a mnemonic was found.
+whether such a mnemonic was found. Since v3.29.1 the bar then takes the focus
+from the engine delivering the current key (`internal/focusreq`; the engine
+serves such requests during `SendKeyEvent`/`SendMouseButton`) and gives it back
+to the previous widget when the menu closes — Escape, a picked item, a click
+elsewhere. Called outside key or click handling it cannot ask, so focus the bar
+with `eng.SetFocus`.
+
+Also since v3.29.1, `ItemsSource="{Binding X}"` on `DataGrid` and `TreeView`
+passes the `*ObservableCollection` itself (it used to become a string and the
+grid stayed empty); the source is set again only when the model returns a
+different collection, so selection and sorting survive unrelated property
+changes. Paths inside `<TreeView.ItemTemplate>` (`{Binding Children}`,
+`{Binding Name}`) are no longer resolved against the window's DataContext, so a
+`HierarchicalDataTemplate` written in markup works.
 
 ### Click count in MouseEvent — v3.27
 
@@ -5035,6 +5134,16 @@ combination.
 
 F10 is an ordinary key with its own code (`KeyF10`) — the application opens
 its menu itself.
+
+**Since v3.29** the window also swallows the keyboard entry into its system
+menu. On releasing F10 or a lone Alt, `DefWindowProc` sent `WM_SYSCOMMAND` with
+`SC_KEYMENU` and `lParam == 0`; the engine window has no menu bar of its own,
+but the modal menu loop still started and took the keyboard — the application
+got `KeyF10`/`KeyAlt`, highlighted «File», and the next ↓ (even Escape) never
+reached it. Now exactly that entry returns 0 (`window/syskeymenu.go`);
+`Alt+Space` comes with `lParam == ' '` and still opens the window menu,
+`Alt+F4` goes through `SC_CLOSE` and is untouched. Verified with real key
+presses in a live window.
 
 ### Clipboard on Linux without external tools — v3.26
 
@@ -5292,6 +5401,51 @@ wins). In the editor a link opens only on Ctrl+click. `AccessReadOnly() ==
 adjacent runs with equal formatting and drops empty runs (document invariants);
 `AppendParagraph` keeps undo history, `AppendRun` resets it. Not done: tab
 stops, lists/tables/images, find/replace, bold for fonts not built in.
+
+**The edit model — `RichDocument`** (no widget, no locks; the editor holds one):
+
+```go
+d := widget.NewRichDocument(paras)          // or NewRichDocumentFromText(s)
+end := d.Insert(at, "text", style)          // '\n' splits the paragraph; returns position after
+end = d.Type(at, "a", style)                // typing: consecutive Type calls merge into one undo
+d.InsertInline(at, "line\nbreak", style)    // '\n' stays a soft line break
+d.InsertParagraphs(at, widget.RichParagraphsFromHTML(src)) // paste
+d.Delete(from, to)                          // across runs and paragraphs; '\n' merges paragraphs
+d.Replace(from, to, "new", style)           // one undo entry; TypeReplace also merges further typing
+d.ApplyStyle(from, to, func(r *widget.RichRun) { r.Underline = true })
+d.SetParagraphFormat(from, to, func(p *widget.RichParagraph) { p.Align = widget.TextAlignCenter })
+st := d.StyleAt(pos)                        // style new text gets here: the rune to the left
+sel, ok := d.Undo()                         // RichDocSel{Anchor, Caret}: where to put caret/selection
+d.BreakUndoGroup()                          // call on caret move, click, focus loss
+d.BeginGroup(); /* several edits */; d.EndGroup() // one undo entry
+d.Revision()                                // grows on every change, incl. Undo/Redo
+```
+
+Positions are runes of the document, paragraphs separated by one `\n` (same as
+layout and selection). After every edit adjacent runs with equal formatting are
+merged and empty runs dropped — except the single run of an empty paragraph,
+which remembers the formatting so typing there does not start «by default».
+An undo record keeps the range of affected paragraphs and what stood there, so
+undo and redo are one swap operation and restore bit-for-bit; there are no
+whole-document snapshots, text strings are shared. Depth 200 by default
+(`SetUndoDepth`).
+
+`RichParagraphsFromHTML(src)` parses clipboard HTML from Word and browsers with
+no dependencies: paragraphs, headings, bold, italic, underline, strike, links,
+inline `color`/`background-color`/`font-size`/`font-weight`/`font-style`/
+`text-decoration`/`text-align`, lists (bullet + indent), `code`/`pre` as
+`BuiltinFontMono`. Scripts, styles, comments and Word markers are dropped, as
+are `javascript:`/`vbscript:`/`data:` links. `font-family` is not carried over
+(the engine does not know foreign fonts). `RichParagraphsFromText` splits on
+`\n`, `\r\n`, `\r`.
+
+**Caret** (both modes): `CaretPosition()`, `SetCaretPosition(pos)` (clears the
+selection, scrolls to the caret), `IMECaretRect()` (canvas coordinates, 1 px
+wide — where the IME candidate window goes). The caret is the active end of
+the selection; ←/→, Ctrl+←/→ (words), ↑/↓ with a remembered «desired X»,
+Home/End (visual line), Ctrl+Home/End, PgUp/PgDn, all with Shift to extend;
+Shift+click extends from the anchor. In display mode the caret is not drawn
+unless `ShowCaret`, and plain ↑/↓/PgUp/PgDn/Home/End scroll as before.
 
 ### Window, theme and containers
 

@@ -20,7 +20,10 @@
 //   - Несколько вкладок браузера = несколько зрителей одного UI.
 //
 // Вкладки «Система» (трей, balloon, превью в панели задач) в браузере
-// неактивны: это возможности окна ОС, и сервер о них честно сообщает.
+// неактивны: это возможности окна ОС, и сервер о них честно сообщает. Вкладка
+// «Платформа» (таймер, тема ОС, ссылка, печать и PDF) требует окна ОС целиком,
+// поэтому здесь скрыта; остальные новые вкладки — «Форматированный текст»,
+// «Код и прокрутка», «Меню» — работают так же, как в оконной витрине.
 package main
 
 import (
@@ -32,6 +35,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/cmd/internal/showcasedemo"
 	"github.com/oops1/headless-gui/v3/cmd/internal/showcasestrings"
 	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/output/webstream"
@@ -235,6 +239,7 @@ func (a *webShowcase) wire() {
 	a.wireEditors()
 	a.wireLayoutTabs()
 	a.wireBindingTabs()
+	a.wireNewTabs()
 
 	// Фокус — на поле логина, как и в оконной витрине.
 	if ti, ok := a.reg["txtLogin"].(*widget.TextInput); ok {
@@ -242,6 +247,50 @@ func (a *webShowcase) wire() {
 	}
 
 	a.addLog("Web showcase started: the server has no OS window")
+}
+
+// wireNewTabs подключает вкладки версий 3.27–3.29 — тот же код, что и в
+// оконной витрине (cmd/internal/showcasedemo): RichText, TextBox для кода,
+// прокрутка вбок, меню с сочетаниями, колонки таблицы, дерево из модели,
+// ThemeScope. Вкладка «Платформа» (таймер, тема ОС, ссылка, печать и PDF)
+// требует настоящего окна, а у сервера его нет, поэтому здесь скрыта.
+func (a *webShowcase) wireNewTabs() {
+	showcasedemo.Wire(showcasedemo.Env{
+		Reg:          a.reg,
+		Log:          a.addLog,
+		OnRelocalize: func(fn func()) { a.langs = append(a.langs, fn) },
+		Focus:        a.eng.SetFocus,
+		// OpenURL не задан: ссылка из RichText открылась бы на сервере, а не
+		// у зрителя. Щелчок по ссылке только попадает в журнал.
+	})
+
+	if tabs, ok := a.reg["mainTabs"].(*widget.TabControl); ok {
+		if i := showcasedemo.TabOf(tabs, a.reg["timerToggle"]); i >= 0 {
+			tabs.SetTabVisible(i, false)
+		}
+	}
+
+	// «Сохранить с кодировкой»: файловая система сервера, список «Кодировка».
+	a.onClick("dlgEnc", func() {
+		o := widget.FileDialogOptions{
+			InitialName: "note.txt",
+			Choices: []widget.FileDialogChoice{
+				widget.EncodingChoice(),
+				{ID: "eol", LabelKey: "Line endings", Options: []string{"LF", "CRLF"}},
+			},
+		}
+		var fd *widget.FileDialog
+		fd = a.mbox.ShowSaveFile(o, func(path string, ok bool) {
+			if !ok {
+				return
+			}
+			enc, _ := fd.ChoiceText(widget.EncodingChoiceID)
+			eol, _ := fd.ChoiceText("eol")
+			if l := a.lbl("dlgResult"); l != nil {
+				l.SetText(widget.Trf("Save → %s (encoding %s, line endings %s)", path, enc, eol))
+			}
+		})
+	})
 }
 
 // wireWindowPreview — живое превью оформления окна на вкладке 3.2.5:
