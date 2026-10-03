@@ -44,6 +44,54 @@ type RichRun struct {
 	Link string
 }
 
+// richFontFlags раскладывает имя шрифта рана на жирность и курсив. known ==
+// false — шрифт чужой (RegisterFont, моноширинный): его начертание по имени не
+// определить и, главное, не изменить, потому что синтетического утолщения в
+// движке нет — жирный вариант чужого шрифта приложение должно зарегистрировать
+// само.
+func richFontFlags(font string) (bold, italic, known bool) {
+	switch font {
+	case "":
+		return false, false, true
+	case BuiltinFontBold:
+		return true, false, true
+	case BuiltinFontItalic:
+		return false, true, true
+	case BuiltinFontBoldItalic:
+		return true, true, true
+	}
+	return false, false, false
+}
+
+// richFontFromFlags — встроенный шрифт по жирности и курсиву; "" — шрифт
+// виджета. Жирный курсив — отдельное начертание, а не сумма двух: поэтому
+// переключение жирности у курсивного рана даёт именно BuiltinFontBoldItalic
+// (так же собирает шрифт разметка XAML, см. xrRun).
+func richFontFromFlags(bold, italic bool) string {
+	switch {
+	case bold && italic:
+		return BuiltinFontBoldItalic
+	case bold:
+		return BuiltinFontBold
+	case italic:
+		return BuiltinFontItalic
+	}
+	return ""
+}
+
+// IsBold — ран жирный (встроенным жирным или жирным курсивом). Для панели
+// инструментов: показать нажатой кнопку «Ж» по RichText.SelectionStyle.
+func (r RichRun) IsBold() bool {
+	b, _, _ := richFontFlags(r.Font)
+	return b
+}
+
+// IsItalic — ран курсивный (встроенным курсивом или жирным курсивом).
+func (r RichRun) IsItalic() bool {
+	_, i, _ := richFontFlags(r.Font)
+	return i
+}
+
 // RichParagraph — абзац: ряд ранов, выравнивание и отступы.
 type RichParagraph struct {
 	Runs []RichRun

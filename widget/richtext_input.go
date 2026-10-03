@@ -1,7 +1,8 @@
 package widget
 
 // richtext_input.go — ввод RichText: выделение мышью, копирование, ссылки,
-// прокрутка, курсор и семантика для скринридера.
+// прокрутка, курсор, клавиатура и семантика для скринридера. Правка текста
+// (ввод, удаление, отмена, оформление, вставка) — в richtext_edit.go.
 
 import (
 	"image"
@@ -76,7 +77,7 @@ func (t *RichText) Copy() bool {
 		return false
 	}
 	plain := string(t.doc.runes[lo:hi])
-	html := richSelectionHTML(t.paras, t.doc, lo, hi)
+	html := richSelectionHTML(t.parasLocked(), t.doc, lo, hi)
 	t.mu.Unlock()
 	// В буфер — вне замка: платформенный буфер может ходить в ОС долго.
 	SetClipboardHTML(html, plain)
@@ -86,13 +87,23 @@ func (t *RichText) Copy() bool {
 // ─── Фокус ──────────────────────────────────────────────────────────────────
 
 // SetFocused — Focusable. Фокус нужен ради клавиатуры: Ctrl+C, Ctrl+A,
-// листание.
+// листание, а в редакторе — ввод.
+//
+// Потеря фокуса прерывает набор (следующий символ, вернись фокус, начнёт новую
+// запись отмены) и принимает незавершённую композицию IME как текст: без
+// фокуса система ввода её уже не ведёт.
 func (t *RichText) SetFocused(f bool) {
 	t.mu.Lock()
 	changed := t.focused != f
 	t.focused = f
+	if changed && !f {
+		t.rdoc.BreakUndoGroup()
+	}
 	t.mu.Unlock()
 	if changed {
+		if !f {
+			t.imeFlush()
+		}
 		t.Invalidate()
 	}
 }
@@ -149,6 +160,11 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 	if !t.IsEnabled() {
 		return false
 	}
+	// Открытое меню старше текста: щелчок по пункту не должен доходить до
+	// текста под ним (и ставить туда каретку).
+	if t.menu.routeMouse(e) {
+		return true
+	}
 	b := t.Base.Bounds()
 	inside := image.Pt(e.X, e.Y).In(b)
 
@@ -189,6 +205,10 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 	if !inside {
 		return false
 	}
+	// Щелчок принимает незавершённую композицию IME как текст: каретка сейчас
+	// уйдёт, а композиция — часть документа, и оставить её висеть значило бы
+	// потерять подчёркнутый текст в середине абзаца.
+	t.imeFlush()
 
 	t.mu.Lock()
 	t.layoutLocked()
@@ -229,8 +249,13 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 		} else {
 			t.selAnchor, t.selCaret = off, off
 			// Ссылка запоминается на нажатии: щелчком считается нажатие и
-			// отпускание на одной и той же ссылке без протяжки.
-			t.pressLink = t.linkAtLocked(e.X, e.Y)
+			// отпускание на одной и той же ссылке без протяжки. В редакторе
+			// щелчок по ссылке ставит в неё каретку, а открывает её только
+			// Ctrl+щелчок (как в Word): иначе поправить слово внутри ссылки
+			// было бы нельзя — каждый щелчок уводил бы в браузер.
+			if !t.Editable || e.Mod&ModCtrl != 0 {
+				t.pressLink = t.linkAtLocked(e.X, e.Y)
+			}
 		}
 		t.dragging = true
 		t.caretJumpedLocked()
@@ -321,6 +346,9 @@ func (t *RichText) barDragToLocked(y int) bool {
 
 // OnMouseMove — протяжка выделения, перетаскивание ползунка, подсветка.
 func (t *RichText) OnMouseMove(x, y int) {
+	if t.menu.routeMove(x, y) {
+		return // курсор над меню — подсветку полосы и протяжку не трогаем
+	}
 	t.mu.Lock()
 	t.layoutLocked()
 	changed := false
@@ -391,7 +419,8 @@ func (t *RichText) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
 }
 
 // Cursor — рука над ссылкой, стрелка над полосой, I-образный над текстом
-// (текст можно выделять).
+// (текст можно выделять). В редакторе ссылка открывается только по
+// Ctrl+щелчку, поэтому руки над ней нет: обычный щелчок ставит каретку.
 func (t *RichText) Cursor(x, y int) Cursor {
 	if !t.IsEnabled() {
 		return CursorArrow
@@ -403,7 +432,7 @@ func (t *RichText) Cursor(x, y int) Cursor {
 	if t.barOn && x >= b.Max.X-richBarW {
 		return CursorArrow
 	}
-	if t.linkAtLocked(x, y) != "" {
+	if !t.Editable && t.linkAtLocked(x, y) != "" {
 		return CursorHand
 	}
 	return CursorIBeam
@@ -414,9 +443,24 @@ func (t *RichText) Cursor(x, y int) Cursor {
 // OnKeyEvent: Ctrl+C / Ctrl+Insert — копировать, Ctrl+A — выделить всё;
 // стрелки, Home/End, PgUp/PgDn — двигают каретку и выделение (с Shift — как
 // расширение выделения), правила — в navigateLocked. После каждого движения
-// каретка прокручивается в видимую область.
+// каретка прокручивается в видимую область. У редактора (Editable) сначала
+// разбираются клавиши правки (editKey): ввод, Enter, Backspace/Delete, отмена,
+// буфер обмена, Ctrl+B/I/U.
 func (t *RichText) OnKeyEvent(e KeyEvent) {
 	if !t.IsEnabled() || !e.Pressed {
+		return
+	}
+	// Открытое меню забирает клавиши (стрелки, Enter, Esc) себе. Без menuMu:
+	// пункт меню зовёт методы виджета и OnChange, а чужой код под замком
+	// звать нельзя; меню меняет только поток событий, замок нужен лишь тому,
+	// кто его читает из потока кадра.
+	if t.menu.routeKey(e) {
+		return
+	}
+	// Любая клавиша принимает композицию IME как текст: платформы, у которых
+	// клавиши идут в обход IME, иначе правили бы документ поверх неё.
+	t.imeFlush()
+	if t.editKey(e) {
 		return
 	}
 	ctrl := e.Mod&ModCtrl != 0
@@ -456,7 +500,9 @@ func (t *RichText) AccessInfo() AccessInfo {
 		Bounds:      t.Base.Bounds(),
 		Description: t.GetToolTip(),
 		Value:       t.Text(),
-		States:      []string{StateReadOnly},
+	}
+	if !t.isEditable() {
+		info.States = []string{StateReadOnly}
 	}
 	if !t.IsEnabled() {
 		info.States = append(info.States, StateDisabled)
@@ -482,8 +528,35 @@ func (t *RichText) AccessSelection() (int, int) {
 	return c, c
 }
 
-// AccessReadOnly — текст только для чтения.
-func (t *RichText) AccessReadOnly() bool { return true }
+// AccessReadOnly — текст только для чтения: всё, что не редактор.
+func (t *RichText) AccessReadOnly() bool { return !t.isEditable() }
+
+// AccessSetText — скринридер (или автоматизация) задаёт текст целиком. Это
+// правка пользователя, а не программная замена: она отменяется (одной
+// записью), вызывает OnChange и оставляет оформление первого символа.
+// false — виджет не редактор или выключен.
+func (t *RichText) AccessSetText(s string) bool {
+	if !t.IsEnabled() {
+		return false
+	}
+	return t.setTextEdit(s)
+}
+
+// setTextEdit заменяет весь текст одной правкой; false — не редактор.
+func (t *RichText) setTextEdit(s string) bool {
+	if !t.isEditable() {
+		return false
+	}
+	t.edit(func() {
+		style := t.baseStyleLocked(0, len(t.doc.runes))
+		t.pendOn = false
+		end := t.replaceLocked(0, len(t.doc.runes), func(at int) int {
+			return t.rdoc.Insert(at, s, style)
+		})
+		t.setCaretEditLocked(end)
+	})
+	return true
+}
 
 // AccessSetCaret — скринридер ставит каретку: выделение снимается, текст
 // прокручивается к ней.

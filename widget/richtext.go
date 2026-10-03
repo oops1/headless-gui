@@ -1,12 +1,14 @@
 package widget
 
-// richtext.go — виджет RichText: показ форматированного текста (без правки).
+// richtext.go — виджет RichText: показ и правка форматированного текста.
 //
 // Зачем он нужен. Label — один шрифт и один цвет на всю надпись, TextBox — один
 // кегль на всё поле. Приложениям же нужен текст «с оформлением»: предпросмотр
 // Markdown, справка, подписи с выделенным словом, журналы с цветными уровнями.
 // Виджет принимает готовые абзацы из ранов (см. RichRun) и ничего не знает про
-// исходную разметку.
+// исходную разметку. С полем Editable он становится редактором: ввод, отмена,
+// оформление выделения, буфер обмена и IME живут в richtext_edit.go и
+// richtext_ime.go, а содержимое хранит RichDocument (richtext_doc.go).
 //
 // Устройство. Всё, что можно посчитать без окна, лежит в чистых файлах:
 // richtext_layout.go (перенос, высота строки, базовая линия, выравнивание,
@@ -38,25 +40,34 @@ const (
 	richSpill = 4
 )
 
-// RichText — показ форматированного текста: абзацы из ранов с разными
-// шрифтами, кеглями, цветами, ссылками. Текст нельзя править, но можно
-// выделять мышью и копировать (Ctrl+C кладёт в буфер и простой текст, и HTML,
-// так что в Word вставится с оформлением).
+// RichText — форматированный текст: абзацы из ранов с разными шрифтами,
+// кеглями, цветами, ссылками. По умолчанию это ПРОСМОТР: текст нельзя
+// править, но можно выделять мышью и копировать (Ctrl+C кладёт в буфер и
+// простой текст, и HTML, так что в Word вставится с оформлением). С Editable
+// виджет — редактор форматированного текста (см. поле Editable).
 //
 // Если содержимое выше виджета, справа появляется полоса прокрутки; колесо,
-// PgUp/PgDn, стрелки и Home/End листают текст.
+// PgUp/PgDn, стрелки и Home/End листают текст (в редакторе — двигают каретку).
 type RichText struct {
 	Base
 
 	mu sync.Mutex
 
-	// Содержимое. doc — то же самое одной строкой (абзацы через '\n'): по
-	// смещениям в ней живут выделение, копирование и скринридер.
-	paras []RichParagraph
-	doc   *richDoc
-	// rev растёт при каждом изменении содержимого: по нему кэш раскладки
-	// узнаёт, что текст стал другим.
-	rev uint64
+	// Содержимое. rdoc — абзацы с историей правок; doc — то же самое одной
+	// строкой (абзацы через '\n'): по смещениям в ней живут выделение,
+	// копирование и скринридер. doc — производная от rdoc: её пересобирают
+	// после каждой правки (syncDocLocked) и дополняют на месте в Append*.
+	// Версия содержимого — rdoc.Revision(): по ней кэш раскладки узнаёт, что
+	// текст стал другим.
+	rdoc *RichDocument
+	doc  *richDoc
+	// noParas — у виджета нет ни одного абзаца (после SetParagraphs(nil),
+	// Clear и в новом виджете). RichDocument не бывает без абзацев — каретке
+	// некуда встать, — поэтому в нём лежит один пустой, а виджет делает вид,
+	// что его нет: Paragraphs пуст, раскладка без строк, AppendParagraph
+	// заменяет пустышку, как раньше заполнял пустой список. Сбрасывается
+	// любой правкой содержимого.
+	noParas bool
 
 	// measurer — измеритель шрифтов; в тестах подменяется на предсказуемый.
 	measurer richMeasurer
@@ -101,6 +112,25 @@ type RichText struct {
 	clicks  clickSeries
 	focused bool
 
+	// Редактор (richtext_edit.go, richtext_ime.go).
+	//
+	// pendOn/pendStyle — «стиль набора»: оформление, которое получит
+	// следующий набранный символ, если человек нажал Ctrl+B без выделения.
+	// Живёт, пока каретку не двинули.
+	pendOn    bool
+	pendStyle RichRun
+	// ime — незавершённая композиция (см. richtext_ime.go).
+	ime richIME
+	// menu — собственное контекстное меню редактора (richtext_edit.go): его
+	// отдаёт движку ContextMenuAt, а рисует и разбирает ввод сам виджет, как у
+	// таблицы и дерева (contextmenuat.go). Ребёнком виджета меню не делается:
+	// абзацы и меню — не дети-виджеты, и Children() у просмотра пуст, как был.
+	// menuMu защищает подмену и чтение меню потоком кадра (HasOverlay,
+	// DrawOverlay); ввод в меню идёт из потока событий без него — см.
+	// OnKeyEvent.
+	menu   rowMenuHost
+	menuMu sync.Mutex
+
 	// Оформление. Нулевая альфа цвета — «взять из темы» не умеет: цвета
 	// задаются конструктором и ApplyTheme; меняйте их после и вызывайте
 	// Invalidate.
@@ -118,9 +148,35 @@ type RichText struct {
 	// Ctrl+Home/End двигают её и выделение (это нужно и клавиатурному
 	// выделению, и скринридеру, у которого есть AccessCaret). Отличие только
 	// в простых Вверх/Вниз/PgUp/PgDn/Home/End: в режиме просмотра они, как
-	// раньше, листают текст, а в режиме с кареткой двигают её. Редактору
-	// (этап 2) нужно true.
+	// раньше, листают текст, а в режиме с кареткой двигают её. У редактора
+	// (Editable) каретка есть всегда — отдельно включать её не нужно; поле
+	// остаётся для просмотра с кареткой (выбор текста с клавиатуры).
 	ShowCaret bool
+
+	// Editable включает правку: ввод с клавиатуры, Enter, Backspace/Delete,
+	// отмену и возврат, вырезание и вставку из буфера, жирный/курсив/
+	// подчёркивание (Ctrl+B/I/U и методы Toggle*), IME и контекстное меню.
+	// По умолчанию false — виджет остаётся средством просмотра, как и был: те
+	// же клавиши в нём ничего не меняют. Флаг один на «можно печатать»:
+	// отдельного ReadOnly нет, потому что просмотр с выделением и кареткой
+	// (ShowCaret) уже есть, а два флага дали бы четыре сочетания, из которых
+	// осмысленны три.
+	Editable bool
+
+	// AcceptTab — в редакторе Tab вставляет отступ, а не уводит фокус (WPF
+	// AcceptsTab; контракт TabAcceptor). В раскладке RichText нет табстопов:
+	// символ табуляции занял бы ширину одного обычного знака (а то и
+	// нарисовался «коробкой»), поэтому вставляются четыре пробела. Ctrl+Tab
+	// остаётся навигацией.
+	AcceptTab bool
+
+	// OnChange вызывается после каждой правки содержимого человеком или
+	// командой панели инструментов: ввод, удаление, вставка, вырезание,
+	// оформление, отмена и возврат, коммит IME. Программная замена
+	// (SetParagraphs, SetText, SetHTML, Append*) его не вызывает — приложение
+	// знает, что меняет само, а обработчик, пишущий в виджет, зациклился бы.
+	// Вызывается без замков виджета: обработчик вправе звать любые методы.
+	OnChange func()
 
 	PaddingX, PaddingY int
 
@@ -149,6 +205,7 @@ type RichText struct {
 type richLayoutKey struct {
 	w, h       int // размер виджета
 	rev        uint64
+	noParas    bool   // «абзацев нет» (см. RichText.noParas)
 	metricsRev uint64 // смена DPI меняет ширины текста
 	font       string
 	size       float64
@@ -160,7 +217,9 @@ type richLayoutKey struct {
 func NewRichText() *RichText {
 	t := &RichText{
 		measurer:      richUIMeasurer{},
+		rdoc:          NewRichDocument(nil),
 		doc:           richBuildDoc(nil),
+		noParas:       true,
 		selAnchor:     -1,
 		PaddingX:      richDefaultPad,
 		PaddingY:      richDefaultPad,
@@ -191,30 +250,65 @@ func (t *RichText) ApplyTheme(th *Theme) {
 
 // ─── Содержимое ─────────────────────────────────────────────────────────────
 
+// parasLocked — абзацы для раскладки, выгрузки и Paragraphs: без пустышки
+// «абзацев нет». Срез принадлежит документу — менять его нельзя; раскладка
+// копирует из него раны по значению и ничего не хранит. Вызывать под t.mu.
+func (t *RichText) parasLocked() []RichParagraph {
+	if t.noParas {
+		return nil
+	}
+	return t.rdoc.paras
+}
+
+// syncDocLocked пересобирает doc по абзацам. Вызывать под t.mu после любой
+// правки rdoc. Пересборка линейна по размеру документа — как и раскладка,
+// которая после правки всё равно строится заново, так что отдельной
+// «дешёвой» поддержки doc при вводе не заводим: она добавила бы второй путь
+// обновления, который однажды разошёлся бы с первым.
+func (t *RichText) syncDocLocked() {
+	t.doc = richBuildDoc(t.parasLocked())
+}
+
 // SetParagraphs заменяет содержимое. Срезы копируются: после вызова приложение
-// вправе менять свои.
+// вправе менять свои. История отмены сбрасывается: её записи указывали бы в
+// прежний документ.
+//
+// Раны приводятся к инвариантам документа (RichDocument): пустые выбрасываются,
+// соседние с одинаковым оформлением сливаются — на вид это не меняется.
 //
 // Выделение сбрасывается — его смещения указывали бы в прежний текст.
 // Прокрутка сохраняется (зажимается по новой высоте при следующей раскладке),
 // чтобы живой предпросмотр не прыгал наверх при каждой правке документа.
 func (t *RichText) SetParagraphs(paras []RichParagraph) {
-	cp := richCopyParagraphs(paras)
-	doc := richBuildDoc(cp)
+	// Копия и разбор — вне замка: на большом документе это заметное время, а
+	// виджет в это время рисуется.
+	nd := NewRichDocument(paras)
 	t.mu.Lock()
-	t.paras, t.doc = cp, doc
-	t.rev++
+	t.setDocLocked(nd, len(paras) == 0)
+	t.mu.Unlock()
+	t.Invalidate()
+}
+
+// setDocLocked подставляет готовый документ. Версия нового продолжает версию
+// прежнего, а не начинается с нуля: иначе кэш раскладки мог бы принять новый
+// документ за прежний, у которого версия случайно та же.
+func (t *RichText) setDocLocked(nd *RichDocument, empty bool) {
+	nd.rev = t.rdoc.rev + 1
+	t.rdoc = nd
+	t.noParas = empty
+	t.syncDocLocked()
 	t.selAnchor, t.selCaret = -1, 0
 	t.caretEOL, t.wantXOk = false, false
 	t.dragging = false
-	t.mu.Unlock()
-	t.Invalidate()
+	t.pendOn = false
+	t.ime = richIME{}
 }
 
 // Paragraphs возвращает копию содержимого.
 func (t *RichText) Paragraphs() []RichParagraph {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return richCopyParagraphs(t.paras)
+	return richCopyParagraphs(t.parasLocked())
 }
 
 // SetText заменяет содержимое простым текстом без оформления: строка — абзац.
@@ -242,19 +336,25 @@ func (t *RichText) Clear() { t.SetParagraphs(nil) }
 // Документ дополняется на месте, без пересборки: журнал, в который строки
 // дописывают по одной, иначе стоил бы времени, растущего с квадратом числа
 // строк. Выделение и прокрутка сохраняются — смещения прежнего текста не
-// сдвигаются.
+// сдвигаются. Историю отмены метод не трогает и записей в неё не добавляет:
+// записи хранят абзацы по номерам от начала, а допись в конец их не сдвигает.
 func (t *RichText) AppendParagraph(p RichParagraph) {
 	cp := richCopyParagraphs([]RichParagraph{p})[0]
+	cp.Runs = richTidyRuns(cp.Runs)
 	t.mu.Lock()
-	if len(t.paras) > 0 {
+	t.imeFinishLocked()
+	if t.noParas {
+		t.rdoc.paras = []RichParagraph{cp}
+		t.noParas = false
+	} else {
+		t.rdoc.paras = append(t.rdoc.paras, cp)
 		t.doc.runes = append(t.doc.runes, '\n')
 	}
 	t.doc.paraStart = append(t.doc.paraStart, len(t.doc.runes))
 	for _, r := range cp.Runs {
 		t.doc.runes = append(t.doc.runes, []rune(r.Text)...)
 	}
-	t.paras = append(t.paras, cp)
-	t.rev++
+	t.rdoc.rev++
 	t.mu.Unlock()
 	t.Invalidate()
 }
@@ -262,17 +362,40 @@ func (t *RichText) AppendParagraph(p RichParagraph) {
 // AppendRun добавляет ран в конец последнего абзаца; если абзацев нет —
 // создаёт его. Так простой случай — «текст, несколько слов жирным» — не
 // требует собирать RichParagraph вручную.
+//
+// Ран дописывается как есть, без слияния с предыдущим: слияние склеивало бы
+// строки, и журнал, дописываемый по слову в один абзац, снова стал бы
+// квадратичным. Инварианты документа восстановит первая же правка этого
+// абзаца. Допись меняет абзац, на который могут ссылаться записи отмены, а
+// отмена такой записи вернула бы абзац без дописанного, — поэтому история,
+// если она есть, сбрасывается. В режиме просмотра (где журналы и живут) её
+// нет, и это ничего не стоит.
 func (t *RichText) AppendRun(r RichRun) {
 	r.Text = richNormalizeText(r.Text)
 	t.mu.Lock()
-	if len(t.paras) == 0 {
-		t.paras = append(t.paras, RichParagraph{})
+	t.imeFinishLocked()
+	d := t.rdoc
+	if t.noParas {
+		d.paras = []RichParagraph{{}}
+		t.noParas = false
 		t.doc.paraStart = append(t.doc.paraStart, 0)
 	}
-	last := len(t.paras) - 1
-	t.paras[last].Runs = append(t.paras[last].Runs, r)
+	if d.CanUndo() || d.CanRedo() {
+		d.ClearHistory()
+	}
+	last := len(d.paras) - 1
+	runs := d.paras[last].Runs
+	switch {
+	case len(runs) == 0 || (len(runs) == 1 && runs[0].Text == ""):
+		// В абзаце нет текста: пустой ран (он хранит оформление абзаца)
+		// уступает место настоящему, иначе в абзаце остался бы пустой ран
+		// перед непустым.
+		d.paras[last].Runs = []RichRun{r}
+	case r.Text != "":
+		d.paras[last].Runs = append(runs, r)
+	}
 	t.doc.runes = append(t.doc.runes, []rune(r.Text)...)
-	t.rev++
+	d.rev++
 	t.mu.Unlock()
 	t.Invalidate()
 }
@@ -290,7 +413,7 @@ func (t *RichText) AppendRun(r RichRun) {
 func (t *RichText) layoutLocked() *richLayout {
 	b := t.Base.Bounds()
 	key := richLayoutKey{
-		w: b.Dx(), h: b.Dy(), rev: t.rev, metricsRev: TextMetricsRev(),
+		w: b.Dx(), h: b.Dy(), rev: t.rdoc.rev, noParas: t.noParas, metricsRev: TextMetricsRev(),
 		font: t.FontName, size: t.FontSize, gap: t.LineSpacing,
 		padX: t.PaddingX, padY: t.PaddingY,
 	}
@@ -300,7 +423,7 @@ func (t *RichText) layoutLocked() *richLayout {
 			Font:  t.FontName, Size: fontSizeOrDefault(t.FontSize),
 			LineGap: t.LineSpacing, M: t.measurer,
 		}
-		lay := layoutRich(t.paras, opts)
+		lay := layoutRich(t.parasLocked(), opts)
 		bar := b.Dy() > 0 && lay.Height+2*t.PaddingY > b.Dy()
 		if bar {
 			if opts.Width > 0 {
@@ -308,7 +431,7 @@ func (t *RichText) layoutLocked() *richLayout {
 					opts.Width = 1
 				}
 			}
-			lay = layoutRich(t.paras, opts)
+			lay = layoutRich(t.parasLocked(), opts)
 		}
 		t.lay, t.layKey, t.barOn = lay, key, bar
 	}

@@ -2965,12 +2965,13 @@ bold and italic variants of the same monospaced font. `Shift+Tab` does not
 remove an indent. `SetText` with different text clears the undo history. Edits
 from the context menu and IME input are undone as one edit.
 
-### RichText — formatted text (display only)
+### RichText — formatted text (display and editing)
 
 `Label` has one font and colour, `TextBox` one size for the whole field. For
 a Markdown preview, help pages and highlighted logs there is `widget.RichText`:
 paragraphs of runs, each run with its own font, size, colour, background,
-underline, strike-through and link. It is not editable (that is the next stage).
+underline, strike-through and link. Display only by default; with
+`Editable = true` it is an editor (below).
 
 ```go
 rt := widget.NewRichText()
@@ -3007,6 +3008,76 @@ rt.AppendParagraph(widget.RichParagraph{Runs: ...})        // log: no document r
   `<Italic>`, `<Underline>`, `<Span>`, `<Hyperlink NavigateUri=>`,
   `<LineBreak/>`. Put a space at a run boundary into the `Text` attribute: the
   XAML parser trims text between tags.
+
+#### RichText as an editor (`Editable`)
+
+Before: `RichText` could only display and select; typing into it was
+impossible, so formatted text had to be built in plain `TextBox`-like fields
+without formatting. Now, with `Editable = true`, it is a rich-text editor.
+Without the flag (the default) nothing changes: the same keys do nothing and
+Up/Down/PgUp/PgDn/Home/End still scroll.
+
+```go
+ed := widget.NewRichText()
+ed.Editable = true                 // the caret is drawn on its own, ShowCaret is not needed
+ed.AcceptTab = true                // Tab inserts an indent (4 spaces) instead of moving focus
+ed.OnChange = func() { dirty = true } // after ANY edit; called without the widget's locks
+
+// The application's toolbar:
+boldBtn.OnClick = func() { ed.ToggleBold() }   // also ToggleItalic/Underline/Strike
+colorBtn.OnClick = func() {
+    ed.SetSelectionStyle(func(r *widget.RichRun) { r.Color = red }) // colour, size, font, link
+}
+centerBtn.OnClick = func() {
+    ed.SetParagraphFormat(func(p *widget.RichParagraph) { p.Align = widget.TextAlignCenter })
+}
+st := ed.SelectionStyle()          // formatting at the caret / start of the selection
+pressed := st.IsBold()             // RichRun.IsBold()/IsItalic() — to show the "B" button pressed
+ed.Undo(); ed.Redo(); ed.CanUndo(); ed.CanRedo()
+html := ed.HTML()                  // the whole document (same path as copying)
+ed.SetHTML(html)                   // and back; history and selection are reset
+```
+
+- **Typing.** Printable characters, Enter (new paragraph), Shift+Enter (soft
+  line break inside the paragraph), Backspace/Delete, Ctrl+Backspace/Ctrl+Delete
+  (word); typing over a selection replaces it. Everything scrolls to the caret.
+- **Undo.** Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z. A typed word is one undo step; caret
+  movement, a click and losing focus end the typing run, so the next letter
+  starts a new entry. Replacing a selection together with the typing after it is
+  one step; cut, paste and a formatting change are one step each.
+- **Formatting.** Ctrl+B/I/U are on (the application can intercept them earlier
+  through `InputBindings`). On a selection: if ALL of it already has the property
+  it is removed, otherwise it is set on all of it. **Without a selection** the
+  "typing style" changes: the next typed text gets it (as in Word); it is reset by
+  caret movement, a click, `Select`/`SetCaretPosition`. Bold on an italic run gives
+  bold italic (`BuiltinFontBoldItalic`), like `<Bold>` inside `<Italic>` in XAML.
+  A font registered by the application (`RegisterFont`) does not become bold: the
+  engine has no synthetic emboldening — register a bold face yourself and apply
+  it with `SetSelectionStyle`.
+- **Links.** In the editor a plain click on a link puts the caret in it;
+  `OnLinkClick` fires only on Ctrl+click; typing at a link's edge does not extend
+  it.
+- **Clipboard.** Ctrl+C/Ctrl+Insert, Ctrl+X/Shift+Delete, Ctrl+V/Shift+Insert.
+  Paste takes HTML from the clipboard (Word and browsers bring bold, italic,
+  colour, links, paragraphs), otherwise plain text in the caret's formatting; over
+  a selection it is a single undo step.
+- **IME** (Chinese/Japanese/Korean): the composition is shown underlined at the
+  caret, replaced by the next one and becomes text on commit — one undo entry for
+  the whole input. A click, a key and losing focus accept the composition as text.
+- **Context menu** on right click: Cut/Copy/Paste/Select All (the same strings as
+  `TextBox`, translated by the application). Your own `SetContextMenu(...)` wins.
+- **Accessibility.** `AccessReadOnly()` = `!Editable`, `AccessSetText` works (one
+  undoable edit). XAML: `IsReadOnly="False"` or `Editable="True"`,
+  `AcceptsTab="True"`: `<RichText IsReadOnly="False" AcceptsTab="True"/>`.
+- `SetParagraphs`/`SetText`/`SetHTML` reset history and selection and do not call
+  `OnChange` (the application does the replacing). `AppendParagraph` leaves the
+  history alone, `AppendRun` resets it: an append changes the paragraph the
+  entries refer to. On the way in, runs are brought to the document invariants:
+  empty ones are dropped, neighbours with identical formatting are merged.
+
+Limits: no tab stops (Tab is four spaces), no lists, tables or images, no
+find/replace; a mouse click during an IME composition accepts it as text instead
+of cancelling; bold is expressed only through the built-in faces.
 
 ### Browser viewer (output/webstream)
 

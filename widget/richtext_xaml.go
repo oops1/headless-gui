@@ -14,6 +14,12 @@ package widget
 //	    </Paragraph>
 //	</RichText>
 //
+// Правка. По умолчанию <RichText> — просмотр. IsReadOnly="False" (или
+// Editable="True") делает его редактором, AcceptsTab="True" — Tab вставляет
+// отступ вместо перехода фокуса:
+//
+//	<RichText x:Name="note" IsReadOnly="False" AcceptsTab="True" />
+//
 // Ограничение разбора. Разборщик XAML сохраняет у элемента ОДНУ строку текста
 // между тегами и теряет порядок «текст — тег — текст»: смешанное содержимое
 // <Paragraph>до <Bold>середина</Bold> после</Paragraph> восстановить нельзя.
@@ -54,6 +60,18 @@ func buildXAMLRichText(el xElement) Widget {
 	if v := el.attr("Padding"); v != "" {
 		m := parseMargin(v)
 		t.PaddingX, t.PaddingY = m.Left, m.Top
+	}
+	// Правка включается IsReadOnly="False" или Editable="True". По умолчанию
+	// виджет — просмотр, поэтому одного IsReadOnly="True" достаточно лишь для
+	// ясности; если заданы оба атрибута, решает Editable: он прямее.
+	if v := el.attr("IsReadOnly", "ReadOnly"); v != "" {
+		t.Editable = strings.EqualFold(v, "false")
+	}
+	if v := el.attr("Editable"); v != "" {
+		t.Editable = strings.EqualFold(v, "true")
+	}
+	if strings.EqualFold(el.attr("AcceptsTab"), "true") {
+		t.AcceptTab = true
 	}
 
 	var paras []RichParagraph

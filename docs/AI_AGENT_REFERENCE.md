@@ -577,7 +577,7 @@ Mapping of XAML tags to Go types with key attributes.
 | `<DataGrid>` | `DataGridWidget` | `ItemsSource`, `Columns` |
 | `<SplitPanel>` | `SplitPanel` | `Orientation`, `Position`, `SplitterSize`, `MinFirst`, `MinSecond` (first two children = panes) |
 | `<SVGIcon>` | `SVGIcon` | `Source`, `Color`, `Tint` |
-| `<RichText>` | `RichText` | `Foreground`, `Background`, `LinkForeground`, `FontSize`, `FontFamily`, `Padding`, `LineSpacing`, `Text`; children `<Paragraph>` (`TextAlignment`, `Margin`, `Indent`, `SpaceBefore/After`) with `<Run>`, `<Bold>`, `<Italic>`, `<Underline>`, `<Span>`, `<Hyperlink NavigateUri>`, `<LineBreak/>` (see "RichText") |
+| `<RichText>` | `RichText` | `Foreground`, `Background`, `LinkForeground`, `FontSize`, `FontFamily`, `Padding`, `LineSpacing`, `Text`, `IsReadOnly="False"`/`Editable="True"`, `AcceptsTab`; children `<Paragraph>` (`TextAlignment`, `Margin`, `Indent`, `SpaceBefore/After`) with `<Run>`, `<Bold>`, `<Italic>`, `<Underline>`, `<Span>`, `<Hyperlink NavigateUri>`, `<LineBreak/>` (see "RichText") |
 | `<DiffView>` | `DiffView` | `LeftFile`, `RightFile`, `ReadOnlyLeft/Right`, `HideUnchanged`, `ContextLines`, `IgnoreWhitespace`, `SyntaxHighlight`, `ShowHeaders`, `ShowReadOnlyMark`, `WatchFiles`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`TextChangedCommand`/`DiffChangedCommand`/`FileChangedCommand` (see "v3.17 additions") |
 | `<MergeView>` | `MergeView` | `OursFile`, `BaseFile`, `TheirsFile`, `ShowBase`, `ConflictStyle` (merge/diff3), `MarkerSize`, `ReadOnly`, `SyntaxHighlight`, `FontFamily`, `HeaderFontFamily`, `FontSize`, `SaveCommand`/`ResultEditedCommand`/`ResolvedCommand` |
 | `<DatePicker>` | `DatePicker` | `SelectedDate`, `DisplayDateStart`, `DisplayDateEnd` (ISO 8601 or invariant M/d/yyyy), `DateFormat` (.NET pattern or Go layout), `FirstDayOfWeek`, `Placeholder`, `FontSize`, `SelectedDateChangedCommand` |
@@ -5223,7 +5223,7 @@ widget.FlattenCubic(x0, y0, x1, y1, x2, y2, x3, y3) []widget.Point2F // same sub
 
 `StrokePolylineAA` now uses the same single-outline stroker (no notches at bends).
 
-### RichText (formatted text, display only)
+### RichText (formatted text, display and editing)
 
 ```go
 rt := widget.NewRichText()
@@ -5256,8 +5256,42 @@ is taller than the widget; wheel/PgUp/PgDn/Home/End scroll. Mouse: drag, double
 click = word, triple click = paragraph; Ctrl+C/Ctrl+A. Hand cursor over links
 (`CursorProvider`). Role `RoleDocument`. Layout is pure
 (`widget/richtext_layout.go`, testable with a fake measurer). Not done:
-editing, bullets/tables/images, per-run baseline shift, virtualization of very
+bullets/tables/images, per-run baseline shift, virtualization of very
 long documents (layout is recomputed whole when width or content changes).
+
+**Editor mode** (`Editable`, default `false` = display only, exactly as before):
+
+```go
+ed := widget.NewRichText(); ed.Editable = true   // caret drawn automatically (ShowCaret not needed)
+ed.AcceptTab = true                              // TabAcceptor: Tab inserts 4 spaces
+ed.OnChange = func() {}                          // after any user/panel edit; no widget locks held;
+                                                 // NOT called by SetParagraphs/SetText/SetHTML/Append*
+ed.ToggleBold(); ed.ToggleItalic(); ed.ToggleUnderline(); ed.ToggleStrike()
+//  selection: all-on -> off, else on for all; no selection: changes the "typing style"
+//  (next typed text), reset by caret move/click/Select/SetCaretPosition. Bold on italic = BuiltinFontBoldItalic.
+ed.SetSelectionStyle(func(r *widget.RichRun) { r.Color = c })   // selection, or typing style if none
+ed.SetParagraphFormat(func(p *widget.RichParagraph) { p.Align = widget.TextAlignRight })
+st := ed.SelectionStyle()            // RichRun at caret/selection start; st.IsBold(), st.IsItalic()
+pf := ed.SelectionParagraphFormat()  // RichParagraph (Runs nil) of the caret's paragraph
+ed.Undo(); ed.Redo(); ed.CanUndo(); ed.CanRedo()
+ed.Cut(); ed.Paste(); ed.Copy()      // Paste: clipboard HTML first, else plain text in the caret style
+ed.HTML() string; ed.SetHTML(src)    // whole document <-> HTML (RichParagraphsFromHTML)
+```
+
+Keys (editor only): printable runes, Enter (paragraph), Shift+Enter (soft break),
+Backspace/Delete, Ctrl+Backspace/Delete (word), Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z,
+Ctrl+X/Shift+Delete, Ctrl+V/Shift+Insert, Ctrl+B/I/U, Tab (with `AcceptTab`).
+A typed word, and a replaced selection plus the typing after it, are one undo
+entry; caret move, click and focus loss end the typing run. `IMEComposer` is
+implemented (composition underlined in the document, one undo entry per commit;
+click/key/focus loss accept the composition as text). Right click opens
+Cut/Copy/Paste/Select All (`ContextMenuProvider`; the app's own `ContextMenu`
+wins). In the editor a link opens only on Ctrl+click. `AccessReadOnly() ==
+!Editable`, `AccessSetText` edits (undoable). XAML: `IsReadOnly="False"` or
+`Editable="True"`, `AcceptsTab="True"` on `<RichText>`. `SetParagraphs` merges
+adjacent runs with equal formatting and drops empty runs (document invariants);
+`AppendParagraph` keeps undo history, `AppendRun` resets it. Not done: tab
+stops, lists/tables/images, find/replace, bold for fonts not built in.
 
 ### Window, theme and containers
 

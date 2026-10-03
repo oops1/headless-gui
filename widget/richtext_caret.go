@@ -173,7 +173,21 @@ func (t *RichText) caretJumpedLocked() {
 	t.caretEOL = false
 	t.wantXOk = false
 	t.caretStamp = richNowMs()
+	t.caretMovedLocked()
 }
+
+// caretMovedLocked — каретку двинули не правкой: набор прерывается (следующий
+// символ начнёт новую запись отмены), а «стиль набора» — жирный, включённый
+// Ctrl+B без выделения, — сбрасывается: он относился к тому месту, где каретка
+// стояла. Правка текста, двигающая каретку сама, сюда не заходит.
+func (t *RichText) caretMovedLocked() {
+	t.pendOn = false
+	t.rdoc.BreakUndoGroup()
+}
+
+// caretShownLocked — рисовать ли каретку и мигать ли ею (если есть фокус).
+// У редактора она есть всегда, у просмотра — по ShowCaret.
+func (t *RichText) caretShownLocked() bool { return t.ShowCaret || t.Editable }
 
 // placeCaretLocked ставит каретку на pos. extend — не трогать якорь (Shift):
 // если выделения не было, якорем становится прежняя каретка. keepX — не
@@ -192,6 +206,7 @@ func (t *RichText) placeCaretLocked(pos int, eol, extend, keepX bool) {
 		t.wantXOk = false
 	}
 	t.caretStamp = richNowMs()
+	t.caretMovedLocked()
 }
 
 // CaretPosition — положение каретки в рунах документа (0 — перед первым
@@ -234,8 +249,7 @@ func (t *RichText) caretRectLocked() image.Rectangle {
 
 // IMECaretRect — место каретки в координатах холста: по нему система ставит
 // окно кандидатов ввода под кареткой, а не в углу экрана. Как у
-// TextBox.IMECaretRect; сам RichText текст не принимает, но редактор поверх
-// него возьмёт точку отсюда.
+// TextBox.IMECaretRect; часть контракта IMEComposer (richtext_ime.go).
 func (t *RichText) IMECaretRect() image.Rectangle {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -275,7 +289,7 @@ func (t *RichText) ensureCaretVisibleLocked() bool {
 // мигания). Заодно запоминает отрисованную фазу — по ней NeedsAnimation
 // понимает, что фаза сменилась и нужен кадр.
 func (t *RichText) drawCaretLocked(focused bool) (image.Rectangle, bool) {
-	if !t.ShowCaret || !focused {
+	if !t.caretShownLocked() || !focused {
 		t.caretPhaseKnown = false
 		return image.Rectangle{}, false
 	}
@@ -299,10 +313,10 @@ func (t *RichText) caretPhaseNow() bool {
 // — заявляется ТОЛЬКО прямоугольник каретки (частичный кадр, а не полный
 // перебор всего дерева), а ответ всё равно «нет»: движок увидит новое
 // поколение инвалидации на следующем тике. Задержка в тик на полупериод
-// 530 мс незаметна. Без ShowCaret и без фокуса — всегда false.
+// 530 мс незаметна. Без ShowCaret и Editable и без фокуса — всегда false.
 func (t *RichText) NeedsAnimation() bool {
 	t.mu.Lock()
-	if !t.ShowCaret || !t.focused {
+	if !t.caretShownLocked() || !t.focused {
 		t.mu.Unlock()
 		return false
 	}
@@ -335,9 +349,9 @@ func (t *RichText) NeedsAnimation() bool {
 //   - Home/End — начало и конец ВИЗУАЛЬНОЙ строки, с Ctrl — документа;
 //   - PgUp/PgDn — на высоту видимой области, текст листается вместе с кареткой.
 //
-// В режиме просмотра (ShowCaret == false) простые ↑/↓/PgUp/PgDn/Home/End без
-// модификаторов листают текст, как до появления каретки; с Shift или Ctrl они
-// всегда двигают каретку.
+// В режиме просмотра (ни ShowCaret, ни Editable) простые ↑/↓/PgUp/PgDn/Home/End
+// без модификаторов листают текст, как до появления каретки; с Shift или Ctrl
+// они всегда двигают каретку.
 func (t *RichText) navigateLocked(code KeyCode, ctrl, shift bool) bool {
 	lay := t.lay
 	line := t.wheelStepLocked() / 3
@@ -345,7 +359,7 @@ func (t *RichText) navigateLocked(code KeyCode, ctrl, shift bool) bool {
 	if page < line {
 		page = line
 	}
-	scrollOnly := !t.ShowCaret && !ctrl && !shift
+	scrollOnly := !t.caretShownLocked() && !ctrl && !shift
 
 	caret := t.caretLocked()
 	lo, hi := t.selRangeLocked()

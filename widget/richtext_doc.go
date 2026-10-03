@@ -726,6 +726,33 @@ func (d *RichDocument) Replace(from, to int, text string, style RichRun) int {
 	return d.Insert(from, text, style)
 }
 
+// TypeReplace — Type поверх выделения: первый набранный символ замещает
+// [from, to) одним действием (удаление и вставка — один Undo), а дальнейший
+// набор подряд дописывается в ту же запись, как после обычного Type. Так в
+// Word: выделили слово, напечатали другое — один Ctrl+Z возвращает исходное.
+//
+// Отдельно от Replace, потому что Replace после себя набор не продолжает:
+// EndGroup закрывает запись, и вторая буква нового слова начала бы свою, а
+// отмена вернула бы «слово без первой буквы». Здесь признак набора после
+// закрытия группы возвращается, если набор не был прерван переводом абзаца.
+func (d *RichDocument) TypeReplace(from, to int, text string, style RichRun) int {
+	from, to = richOrdered(from, to)
+	_, _, a := d.locate(from)
+	_, _, b := d.locate(to)
+	if a == b {
+		return d.Type(from, text, style)
+	}
+	d.BeginGroup()
+	d.Delete(from, to)
+	end := d.Type(from, text, style)
+	typing := d.typeOpen
+	d.EndGroup()
+	if typing && d.groupDepth == 0 && len(d.undo) > 0 {
+		d.open, d.typeOpen = true, true
+	}
+	return end
+}
+
 // ApplyStyle применяет fn к оформлению каждого рана диапазона [from, to):
 // раны на границах разрезаются, к серединам применяется fn. Так делаются
 // жирный, курсив, цвет, кегль, шрифт, подчёркивание и ссылка. fn не должна
