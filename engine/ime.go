@@ -76,6 +76,12 @@ func (e *Engine) CaretRect() (image.Rectangle, bool) {
 	if r.Empty() {
 		return image.Rectangle{}, false
 	}
+	// Каретка — в кадре виджета, а система ставит окно кандидатов по экрану:
+	// у поля внутри прокрутки без этого окно встало бы на величину прокрутки
+	// мимо набираемого слова (см. frames.go).
+	if w, ok := c.(widget.Widget); ok {
+		r = r.Sub(e.frameOffsetOf(w))
+	}
 	k := e.Scale()
 	if k == 1 {
 		return r, true

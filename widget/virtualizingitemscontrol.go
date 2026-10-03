@@ -290,10 +290,17 @@ func (v *VirtualizingItemsControl) Draw(ctx DrawContext) {
 	tr := v.thumbRectLocked()
 	v.mu.Unlock()
 
-	// Видимые дети (уже спозиционированы updateVisible) — рисуем с клиппингом.
-	ctx.SetClip(image.Rect(b.Min.X, b.Min.Y, b.Min.X+cw, b.Max.Y))
-	v.drawChildren(ctx)
-	ctx.ClearClip()
+	// Видимые дети (уже спозиционированы updateVisible) — рисуем с
+	// клиппингом. Область ставится заново перед КАЖДЫМ ребёнком: ребёнок
+	// вправе снять своё сужение вместе с нашим, а соседи после этого
+	// рисовали бы мимо.
+	outer := ctx.Clip()
+	content := image.Rect(b.Min.X, b.Min.Y, b.Min.X+cw, b.Max.Y).Intersect(outer)
+	for _, child := range v.Children() {
+		ctx.SetClip(content)
+		child.Draw(ctx)
+	}
+	ctx.SetClip(outer)
 
 	// Скроллбар.
 	if needSB {

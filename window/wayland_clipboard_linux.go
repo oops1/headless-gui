@@ -15,6 +15,11 @@ package window
 // компоновщику как selection. Дальше он сам просит у нас данные (событие
 // send с file descriptor), и так — каждому, кто вставляет.
 //
+// Оформленный текст (SetHTML) объявляется тем же источником дополнительным
+// типом text/html: получатель выбирает сам, и Блокнот возьмёт простой текст, а
+// Word или браузерный редактор — HTML. Отдельного «режима» нет: событие send
+// называет тип, который запросили, и мы отвечаем именно им.
+//
 // Вставка: компоновщик присылает selection с готовым wl_data_offer; просим у
 // него данные подходящего типа и читаем из канала. Чужой клиент может
 // отвечать медленно или не ответить вовсе, поэтому чтение идёт с коротким
@@ -67,13 +72,19 @@ const (
 type wlClipboard struct {
 	w *WaylandWindow
 
-	mu     sync.Mutex
-	owned  string // текст, которым мы владеем; пусто — владеет кто-то другой
-	source uint32 // наш wl_data_source, 0 — нет
-	offer  uint32 // последний selection-offer компоновщика
+	mu    sync.Mutex
+	owned string // текст, которым мы владеем; пусто — владеет кто-то другой
+	// ownedHTML — оформленная версия нашего содержимого; пусто — только текст.
+	ownedHTML string
+	source    uint32 // наш wl_data_source, 0 — нет
+	offer     uint32 // последний selection-offer компоновщика
 	// offerText — типы, которые объявил этот offer: текст мы берём только
 	// если он среди них.
 	offerText bool
+	// offerHTML — тип HTML из объявленных этим offer'ом; пусто — HTML нет.
+	// Храним сам тип, а не флаг: запрашивать надо в точности тот, что
+	// предложен (text/html или вариант с кодировкой).
+	offerHTML string
 }
 
 // newWlClipboard создаёт буфер обмена для окна.
@@ -83,7 +94,17 @@ func newWlClipboard(w *WaylandWindow) *wlClipboard { return &wlClipboard{w: w} }
 //
 // Реализует widget.ClipboardProvider: окно регистрирует этот буфер глобально,
 // когда Wayland-соединение поднялось.
-func (c *wlClipboard) SetText(s string) {
+func (c *wlClipboard) SetText(s string) { c.setSelection(s, "") }
+
+// SetHTML отдаёт в буфер оформленный текст вместе с простым: рядом с текстовыми
+// типами объявляется text/html.
+//
+// Реализует widget.ClipboardHTMLProvider.
+func (c *wlClipboard) SetHTML(html, plain string) { c.setSelection(plain, html) }
+
+// setSelection объявляет источник: простой текст всегда, text/html — если есть
+// оформленная версия.
+func (c *wlClipboard) setSelection(s, html string) {
 	if c == nil || c.w == nil {
 		return
 	}
@@ -101,14 +122,18 @@ func (c *wlClipboard) SetText(s string) {
 	c.mu.Lock()
 	old := c.source
 	id := w.newID()
-	c.source, c.owned = id, s
+	c.source, c.owned, c.ownedHTML = id, s, html
 	c.mu.Unlock()
 
 	if old != 0 {
 		w.send(newWlMsg(old, wlDataSourceDestroy), -1)
 	}
 	w.send(newWlMsg(w.dataDevMgrID, wlDataDevMgrCreateDataSource).putUint(id), -1)
-	for _, mime := range []string{mimeTextUTF8, mimeTextPlain, mimeUTF8Str, mimeTextStr} {
+	mimes := []string{mimeTextUTF8, mimeTextPlain, mimeUTF8Str, mimeTextStr}
+	if html != "" {
+		mimes = append(mimes, mimeTextHTML)
+	}
+	for _, mime := range mimes {
 		w.send(newWlMsg(id, wlDataSourceOffer).putString(mime), -1)
 	}
 	w.send(newWlMsg(w.dataDeviceID, wlDataDeviceSetSelection).putUint(id).putUint(serial), -1)
@@ -132,33 +157,62 @@ func (c *wlClipboard) GetText() string {
 	if offer == 0 || !hasText {
 		return ""
 	}
-	return c.receive(offer)
+	return string(c.receive(offer, mimeTextUTF8))
 }
 
-// receive просит у владельца данные и читает их с тайм-аутом.
-func (c *wlClipboard) receive(offer uint32) string {
+// GetHTML читает оформленный текст из системного буфера обмена.
+//
+// Реализует widget.ClipboardHTMLProvider. Берёт text/html, только если
+// владелец его объявил: иначе ok == false, и вызывающий возьмёт простой текст
+// через GetText.
+func (c *wlClipboard) GetHTML() (string, bool) {
+	if c == nil || c.w == nil {
+		return "", false
+	}
+	c.mu.Lock()
+	html, offer, mime := c.ownedHTML, c.offer, c.offerHTML
+	src := c.source
+	c.mu.Unlock()
+
+	// Владеем сами — отвечаем из своей копии.
+	if src != 0 && html != "" {
+		return html, true
+	}
+	if offer == 0 || mime == "" {
+		return "", false
+	}
+	data := c.receive(offer, mime)
+	if len(data) == 0 {
+		return "", false
+	}
+	html = clipboardHTMLToString(data)
+	return html, html != ""
+}
+
+// receive просит у владельца данные указанного типа и читает их с тайм-аутом.
+func (c *wlClipboard) receive(offer uint32, mime string) []byte {
 	r, wr, err := os.Pipe()
 	if err != nil {
-		return ""
+		return nil
 	}
 	// receive(mime, fd): владелец пишет в наш write-конец, мы читаем read-конец.
-	c.w.send(newWlMsg(offer, wlDataOfferReceive).putString(mimeTextUTF8), int(wr.Fd()))
+	c.w.send(newWlMsg(offer, wlDataOfferReceive).putString(mime), int(wr.Fd()))
 	wr.Close() // свой конец закрываем сразу: иначе EOF не придёт никогда
 
-	done := make(chan string, 1)
+	done := make(chan []byte, 1)
 	go func() {
 		defer r.Close()
 		data, _ := io.ReadAll(io.LimitReader(r, maxClipboardBytes))
-		done <- string(data)
+		done <- data
 	}()
 	select {
-	case s := <-done:
-		return s
+	case data := <-done:
+		return data
 	case <-time.After(clipboardReadTimeout):
 		// Владелец не ответил. Канал дочитает горутина, и файл закроется
 		// там же; подвешивать на это интерфейс незачем.
 		r.SetReadDeadline(time.Now())
-		return ""
+		return nil
 	}
 }
 
@@ -167,14 +221,15 @@ func (c *wlClipboard) receive(offer uint32) string {
 func (c *wlClipboard) handleSelection(id uint32) {
 	c.mu.Lock()
 	old := c.offer
-	c.offer, c.offerText = id, false
+	c.offer, c.offerText, c.offerHTML = id, false, ""
 	if id != 0 {
 		// Типы этого offer пришли раньше, событиями offer: берём их из
 		// общего списка предложений окна.
 		c.offerText = c.w.offerHasText(id)
+		c.offerHTML = c.w.offerHTMLMime(id)
 		// Чужой selection означает, что владелец теперь не мы.
 		if c.source != 0 {
-			c.owned = ""
+			c.owned, c.ownedHTML = "", ""
 		}
 	}
 	c.mu.Unlock()
@@ -185,11 +240,17 @@ func (c *wlClipboard) handleSelection(id uint32) {
 	}
 }
 
-// handleSourceSend отдаёт владеющий текст запросившему: компоновщик передал
-// нам file descriptor, в который нужно записать данные.
-func (c *wlClipboard) handleSourceSend(source uint32, fd int) {
+// handleSourceSend отдаёт владеющее содержимое запросившему: компоновщик
+// передал нам file descriptor, в который нужно записать данные, и назвал тип,
+// который запросили. На text/html отвечаем разметкой, на остальное — текстом:
+// если бы отвечали всегда текстом, Word получил бы простую строку под видом
+// HTML и вставил её без оформления.
+func (c *wlClipboard) handleSourceSend(source uint32, mime string, fd int) {
 	c.mu.Lock()
 	ours, text := c.source == source, c.owned
+	if isHTMLMime(mime) && c.ownedHTML != "" {
+		text = c.ownedHTML
+	}
 	c.mu.Unlock()
 	if fd < 0 {
 		return
@@ -213,7 +274,7 @@ func (c *wlClipboard) handleSourceCancelled(source uint32) {
 	c.mu.Lock()
 	ours := c.source == source
 	if ours {
-		c.source, c.owned = 0, ""
+		c.source, c.owned, c.ownedHTML = 0, "", ""
 	}
 	c.mu.Unlock()
 	if ours {

@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"sync"
+	"sync/atomic"
 )
 
 // HorizontalAlignment — WPF HorizontalAlignment (позиционирование внутри родителя).
@@ -61,6 +62,17 @@ type Base struct {
 	// (см. drawChildren). Живёт на контейнере, чтобы не аллоцировать срез на
 	// каждый кадр.
 	skipBuf []bool
+
+	// parent — контейнер, в который виджет добавили через AddChild (nil — корень
+	// или добавлен не через Base). Нужен ровно для одного: узнать, лежит ли
+	// виджет внутри контейнера со сдвигом содержимого (ScrollView) и перевести
+	// заявленную им область перерисовки в экранные координаты. Подробности и
+	// границы применимости — в contentoffset.go.
+	parent atomic.Pointer[Base]
+
+	// shifter заполнен у контейнеров, показывающих детей со сдвигом
+	// (ScrollView): по нему цепочка родителей берёт текущее смещение.
+	shifter atomic.Pointer[contentShifter]
 
 	// disabled=true → виджет отключён (WPF IsEnabled="False").
 	// По умолчанию false (т.е. виджет включён), что соответствует WPF IsEnabled=True.
@@ -135,7 +147,9 @@ func (b *Base) SetBounds(r image.Rectangle) {
 	union := b.bounds.Union(r)
 	b.bounds = r
 	b.boundsMu.Unlock()
-	notifyRectChanged(union)
+	// Границы заданы в системе координат родителя, а перерисовывать надо место
+	// на экране: у ребёнка прокрутки это не одно и то же (см. contentoffset.go).
+	notifyRectChanged(screenRect(b.parent.Load(), union))
 }
 
 func (b *Base) Children() []Widget { return b.children }
@@ -143,18 +157,33 @@ func (b *Base) Children() []Widget { return b.children }
 // AddChild добавляет дочерний виджет и инвалидирует его область.
 func (b *Base) AddChild(w Widget) {
 	b.children = append(b.children, w)
-	notifyRectChanged(w.Bounds())
+	adoptChild(b, w)
+	// Область ребёнка задана в координатах ДЕТЕЙ этого контейнера: если он сам
+	// сдвигает содержимое, сдвиг входит и в этот перевод (поэтому от b, а не от
+	// его родителя).
+	notifyRectChanged(screenRect(b, w.Bounds()))
 }
 
 // Invalidate помечает область виджета изменившейся: движок перерисует её на
 // ближайшем кадре. Сеттеры виджетов вызывают его при фактическом изменении
 // визуального состояния; приложению он нужен после прямой мутации
 // экспортированных полей (btn.Text = ... → btn.Invalidate()).
+//
+// Виджет внутри прокрутки заявляет место, где он виден на экране, а не свои
+// координаты содержимого: иначе перерисовывалась бы чужая область, а то, что
+// изменилось, оставалось бы на экране старым.
 func (b *Base) Invalidate() {
 	b.boundsMu.Lock()
 	r := b.bounds
 	b.boundsMu.Unlock()
-	notifyRectChanged(r)
+	notifyRectChanged(screenRect(b.parent.Load(), r))
+}
+
+// invalidateRect — Invalidate для области, заданной не границами виджета, а им
+// самим (прямоугольник строки таблицы, свечение индикатора). r — в той же
+// системе координат, что и границы виджета.
+func (b *Base) invalidateRect(r image.Rectangle) {
+	notifyRectChanged(screenRect(b.parent.Load(), r))
 }
 
 // RemoveChild удаляет дочерний виджет из контейнера (по указателю).
@@ -164,7 +193,8 @@ func (b *Base) RemoveChild(w Widget) bool {
 	for i, child := range b.children {
 		if child == w {
 			b.children = append(b.children[:i], b.children[i+1:]...)
-			notifyRectChanged(w.Bounds())
+			releaseChild(b, w)
+			notifyRectChanged(screenRect(b, w.Bounds()))
 			return true
 		}
 	}
@@ -173,6 +203,9 @@ func (b *Base) RemoveChild(w Widget) bool {
 
 // ClearChildren удаляет всех потомков (используется при перестроении ItemsControl).
 func (b *Base) ClearChildren() {
+	for _, child := range b.children {
+		releaseChild(b, child)
+	}
 	b.children = nil
 	b.Invalidate()
 }

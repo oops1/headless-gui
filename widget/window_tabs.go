@@ -42,6 +42,22 @@ type titleTabsState struct {
 
 	// menu — выпадающее меню кнопки «v» (профили/команды, как в Terminal).
 	menu *PopupMenu
+
+	// Прокрутка полосы при переполнении (window_tabs_drag.go): сдвиг и его
+	// предел, посчитанный при последней отрисовке.
+	scrollX   int
+	maxScroll int
+	// scrollToActive — показать активную вкладку целиком на ближайшем кадре
+	// (её могли выбрать с клавиатуры или она уехала за край после закрытия
+	// соседней).
+	scrollToActive bool
+
+	// Перетаскивание вкладки: на какой нажали, откуда ведут и насколько
+	// увели. pressIdx = -1 — нажатия нет.
+	pressIdx int
+	pressAt  image.Point
+	dragging bool
+	dragDX   int
 }
 
 // Геометрия полосы вкладок заголовка.
@@ -92,7 +108,7 @@ func (w *Window) titleTabContentBG(content Widget) color.RGBA {
 // не рисуется (полосу занимают вкладки).
 func (w *Window) EnableTitleTabs() {
 	if w.titleTabs == nil {
-		w.titleTabs = &titleTabsState{active: -1, hoverIdx: -1, hoverClose: -1}
+		w.titleTabs = &titleTabsState{active: -1, hoverIdx: -1, hoverClose: -1, pressIdx: -1}
 	}
 }
 
@@ -185,6 +201,13 @@ func (w *Window) ActiveTitleTab() int {
 // SetActiveTitleTab делает вкладку idx активной: её Content становится
 // ребёнком окна (bounds = ContentBounds), прежний Content снимается.
 func (w *Window) SetActiveTitleTab(idx int) {
+	if tt := w.titleTabs; tt != nil {
+		// Активную вкладку показываем целиком: её могли выбрать с
+		// клавиатуры или она уехала за край после закрытия соседней.
+		tt.mu.Lock()
+		tt.scrollToActive = true
+		tt.mu.Unlock()
+	}
 	tt := w.titleTabs
 	if tt == nil {
 		return
@@ -505,13 +528,32 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 	}
 	if total > avail {
 		k := float64(avail) / float64(total)
+		total = 0
 		for i := range widths {
 			widths[i] = int(float64(widths[i]) * k)
 			if widths[i] < titleTabMinW {
 				widths[i] = titleTabMinW
 			}
+			total += widths[i] + titleTabGap
 		}
 	}
+
+	// Сжатых до предела вкладок всё ещё может не хватить места. Тогда полоса
+	// прокручивается: раньше лишние просто не рисовались и становились
+	// недостижимыми — ни щелчком, ни взглядом.
+	tt.mu.Lock()
+	tt.maxScroll = total - avail
+	if tt.maxScroll < 0 {
+		tt.maxScroll = 0
+	}
+	tt.scrollX = clampTabScroll(tt.scrollX, tt.maxScroll)
+	if tt.scrollToActive && active >= 0 && active < len(widths) && tt.maxScroll > 0 {
+		tt.scrollX = clampTabScroll(tabScrollFor(widths, active, avail, tt.scrollX), tt.maxScroll)
+	}
+	tt.scrollToActive = false
+	scrollX := tt.scrollX
+	dragIdx, dragDX := tt.dragState()
+	tt.mu.Unlock()
 
 	// Вертикальная геометрия по стилю. В современных темах корешок вкладки
 	// СРАСТАЕТСЯ с клиентской областью: прямоугольник вкладки тянется до
@@ -536,12 +578,20 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 	closeRects := make([]image.Rectangle, len(tabs))
 	_, _, tc := w.titleColors()
 
-	x := left
+	// Полоса не вылезает за отведённое место: при прокрутке крайние вкладки
+	// обрезаются краем, а не рисуются поверх кнопок окна.
+	restoreBand := PushClip(ctx, image.Rect(left, tabTop, right, tabBot))
+
+	x := left - scrollX
 	for i, tab := range tabs {
-		if x+widths[i] > right {
-			break // не влезающие вкладки не рисуем (rect остаётся пустым)
-		}
 		r := image.Rect(x, tabTop, x+widths[i], tabBot)
+		x += widths[i] + titleTabGap
+		if r.Max.X <= left || r.Min.X >= right {
+			continue // вкладка уехала за край полосы — её сейчас не видно
+		}
+		if i == dragIdx {
+			r = r.Add(image.Pt(dragDX, 0))
+		}
 		tabRects[i] = r
 
 		// «×» показываем у активной и наведённой вкладки (если влезает).
@@ -564,7 +614,26 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 		default:
 			w.drawModernTitleTab(ctx, r, tab, i == active, i == hoverIdx, tc, closeRects[i], hoverClose == i)
 		}
-		x += widths[i] + titleTabGap
+	}
+	restoreBand()
+
+	// Кнопки «+» и «v» стоят сразу за вкладками, но не дальше правого края
+	// отведённого места: при полной полосе их выталкивало за него, и
+	// открыть новую вкладку становилось нечем. Место под них вычтено из
+	// avail заранее, так что справа оно всегда есть.
+	btnBlockW := 0
+	if showPlus {
+		btnBlockW += titleTabPlusW + titleTabGap
+	}
+	if showMenu {
+		btnBlockW += titleTabMenuW + titleTabGap
+	}
+	x = left - scrollX + total - titleTabGap
+	if x < left {
+		x = left
+	}
+	if limit := right - btnBlockW - 8; x > limit {
+		x = limit
 	}
 
 	// Кнопки «+» и «v» — одинаковой высоты (чуть ниже карточки вкладки),
@@ -668,9 +737,9 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 		bg := w.titleTabContentBG(tab.Content)
 		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 8, bg)
 		ctx.FillRect(r.Min.X, r.Max.Y-8, r.Dx(), 8, bg)
-		ctx.SetClip(r)
+		restore := PushClip(ctx, r)
 		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy()+8, 8, cardBorder)
-		ctx.ClearClip()
+		restore()
 	case hover:
 		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), bandBot-r.Min.Y, 8, hoverBG)
 	}
@@ -893,6 +962,9 @@ func (w *Window) titleTabsMouseDown(pt image.Point) bool {
 		return true
 	case clickTab >= 0:
 		w.SetActiveTitleTab(clickTab)
+		// Нажатие на вкладке — ещё не перетаскивание: им оно станет, если
+		// мышь уведут дальше порога (window_tabs_drag.go).
+		w.titleTabDragStart(clickTab, pt)
 		return true
 	}
 	return false
@@ -905,6 +977,15 @@ func (w *Window) titleTabsMouseMove(x, y int) bool {
 		return false
 	}
 	pt := image.Pt(x, y)
+
+	// Если вкладку тащат, hover не трогаем: под курсором она сама.
+	tt.mu.Lock()
+	pressed := tt.pressIdx >= 0
+	tt.mu.Unlock()
+	if pressed {
+		return w.titleTabDragMove(pt)
+	}
+
 	tt.mu.Lock()
 	defer tt.mu.Unlock()
 

@@ -69,6 +69,7 @@ type FontCache struct {
 type vMetric struct {
 	ascent  int // подъём базовой линии
 	descent int // спуск под базовую линию
+	lineGap int // рекомендуемый зазор между строками (не отрицательный)
 }
 
 // glyphKey — ключ кэша глифов: размер шрифта в пунктах + руна.
@@ -269,25 +270,46 @@ func (fc *FontCache) Ascent(sizePt float64) int {
 
 // vMetrics возвращает (ascent, descent) в пикселях для размера sizePt (кэшируется).
 func (fc *FontCache) vMetrics(sizePt float64) (ascent, descent int) {
+	m := fc.vMetricsFull(sizePt)
+	return m.ascent, m.descent
+}
+
+// vMetricsFull возвращает все вертикальные метрики размера sizePt (кэшируется).
+//
+// Подъём и спуск округляются ровно так же, как это делает отрисовка
+// (drawTextWithFont берёт их из vMetrics): отдельный пересчёт «для приложений»
+// рисковал разойтись с ней на пиксель, и базовая линия, о которой сообщили
+// виджету, оказывалась не там, где реально встал текст.
+func (fc *FontCache) vMetricsFull(sizePt float64) vMetric {
 	fc.mu.RLock()
 	if m, ok := fc.metrics[sizePt]; ok {
 		fc.mu.RUnlock()
-		return m.ascent, m.descent
+		return m
 	}
 	fc.mu.RUnlock()
 
 	face := fc.Face(sizePt)
 	met := face.Metrics()
-	ascent = met.Ascent.Round()
-	descent = met.Descent.Round()
+	m := vMetric{
+		ascent:  met.Ascent.Round(),
+		descent: met.Descent.Round(),
+	}
+	// Height у font.Metrics — шаг между строками, УЖЕ включающий зазор
+	// (ascent+descent+lineGap по hhea), поэтому зазор — это остаток. У части
+	// шрифтов округлённые части в сумме дают больше округлённого целого —
+	// остаток тогда отрицательный, а отрицательный «зазор» сжал бы строки,
+	// наезжая друг на друга; его обрезаем нулём.
+	if gap := met.Height.Round() - m.ascent - m.descent; gap > 0 {
+		m.lineGap = gap
+	}
 
 	fc.mu.Lock()
 	if fc.metrics == nil {
 		fc.metrics = make(map[float64]vMetric)
 	}
-	fc.metrics[sizePt] = vMetric{ascent: ascent, descent: descent}
+	fc.metrics[sizePt] = m
 	fc.mu.Unlock()
-	return ascent, descent
+	return m
 }
 
 // Glyph возвращает растеризованный глиф руны r для размера sizePt.

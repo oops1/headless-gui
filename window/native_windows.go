@@ -80,6 +80,7 @@ const (
 	wmGetminmaxinfo    = 0x0024
 	wmNcactivate       = 0x0086
 	wmNcpaint          = 0x0085
+	wmSettingchange    = 0x001A // WM_SETTINGCHANGE: lParam — строка с названием области параметров
 	wmDpichanged       = 0x02E0
 	wmGetdpiscaledsize = 0x02E4
 	wmEntersizemove    = 0x0231 // начало интерактивного перемещения/ресайза (modal loop)
@@ -378,6 +379,11 @@ type Win32Window struct {
 	onTrayClick    func(button int, doubleClick bool)
 	onBalloonClick func()
 	iconicEnabled  bool // включено iconic-представление окна (DWM превью)
+
+	// onSettingChange — разбор WM_SETTINGCHANGE: зовётся с текстом из lParam
+	// (см. systheme_windows.go). Атомарно: подписку ставит и снимает
+	// горутина приложения, а читает поток цикла сообщений окна.
+	onSettingChange atomic.Pointer[func(area string)]
 
 	// Callbacks
 	onResize           func(w, h int)
@@ -1262,6 +1268,12 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
 		return ret
 
+	case wmSettingchange:
+		// Сообщение приходит по любому поводу; нужное нам различает строка
+		// в lParam (см. systheme_windows.go). Дальше уходит в DefWindowProc —
+		// как и положено широковещательному сообщению.
+		w.handleSettingChange(lparam)
+
 	case wmDpichanged:
 		// Окно перенесли на монитор с другим DPI. wparam: LOWORD = новый DPI;
 		// lparam → RECT с рекомендованным размером/позицией окна.
@@ -1533,6 +1545,15 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			return ret
 		}
 		return 0
+
+	case wmSyscommand:
+		// Вход в меню окна по F10 или одиночному Alt забирал бы клавиатуру у
+		// приложения, которое само рисует строку меню (syskeymenu.go).
+		if swallowKeyboardMenu(wparam, lparam) {
+			return 0
+		}
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+		return ret
 
 	case wmSyschar:
 		// Символ, набранный с зажатым Alt. По умолчанию система отвечает на

@@ -402,6 +402,10 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 	case "mergeview":
 		w = buildXAMLMergeView(el, baseDir)
 
+	// ── RichText — форматированный текст (абзацы из ранов) ──────────────────
+	case "richtext":
+		w = buildXAMLRichText(el)
+
 	// ── TreeViewItem вне TreeView — игнорируем ──────────────────────────────
 	case "treeviewitem":
 		return nil, nil
@@ -641,6 +645,11 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 	// Дочерние виджеты (пропускаем <Item>, <TabItem> — уже обработаны)
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
+		// Абзацы RichText разобраны в buildXAMLRichText: это не виджеты. Теги-
+		// свойства (RichText.ContextMenu) идут обычным путём.
+		if _, ok := w.(*RichText); ok && !strings.Contains(childTag, ".") {
+			continue
+		}
 		if childTag == "item" || childTag == "comboboxitem" || childTag == "listboxitem" ||
 			childTag == "tabitem" || childTag == "listviewitem" {
 			continue
@@ -1036,6 +1045,14 @@ func buildXAMLTextBox(el xElement) Widget {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			tb.FontSize = v
 		}
+	}
+	// FontFamily — именованный шрифт (RegisterFont); для кода — моноширинный.
+	if ff := el.attr("FontFamily"); ff != "" {
+		tb.FontName = ff
+	}
+	// AcceptsTab — Tab вставляет табуляцию, а не переводит фокус.
+	if strings.EqualFold(el.attr("AcceptsTab"), "true") {
+		tb.AcceptTab = true
 	}
 	return tb
 }

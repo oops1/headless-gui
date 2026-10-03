@@ -74,6 +74,10 @@ type Engine struct {
 	focus    focusManager  // текущий виджет с фокусом
 	captured widget.Widget // виджет, захвативший мышь (drag)
 	capMu    sync.Mutex
+	// capChain — контейнеры со сдвигом содержимого над захватившим мышь
+	// виджетом (см. captureOffset); capChainOK — цепочка уже найдена. Под capMu.
+	capChain   []widget.ContentOffsetter
+	capChainOK bool
 
 	// pressConsumer — виджет, поглотивший последний press ЛКМ.
 	// При release: если этот виджет больше не под курсором
@@ -142,6 +146,11 @@ type Engine struct {
 	frameSeq atomic.Uint64
 	started  atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
 	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
+
+	// timersMu защищает timers — таймеры After/Every, живые у этого движка. Stop
+	// гасит их все (см. timer.go).
+	timersMu sync.Mutex
+	timers   map[*Timer]struct{}
 
 	// Прежняя позиция курсора для адресного broadcastMouseMove. Доступ только
 	// из потока-источника ввода (SendMouseMove), синхронизация не нужна.
@@ -363,6 +372,9 @@ func New(width, height, fps int) *Engine {
 		},
 		RunePositions: func(text string, sizePt float64, family string) []int {
 			return e.canvas.MeasureRunePositionsFont(text, sizePt, family)
+		},
+		FontMetrics: func(sizePt float64, family string) (ascent, descent, lineGap int) {
+			return e.canvas.FontMetrics(family, sizePt)
 		},
 	})
 	return e
@@ -933,6 +945,8 @@ func (e *Engine) Stop() {
 	widget.UnregisterMoveSink(e.moveHandle)
 	widget.UnregisterTextMeasurer(e.measurerHandle)
 	close(e.quit)
+	// Таймеры гасим до ожидания цикла: stopped уже выставлен, новые не заведутся.
+	e.stopTimers()
 	started := e.started.Load()
 	if started {
 		<-e.done
@@ -1051,6 +1065,9 @@ func (e *Engine) activateAccessibleNow(w widget.Widget) bool {
 	if b.Empty() {
 		return false
 	}
+	// Границы — в кадре виджета; щелчок идёт по экрану. Для кнопки внутри
+	// прокрутки это разные точки (см. frames.go).
+	b = b.Sub(e.frameOffsetOf(w))
 	// Центр — в ЛОГИЧЕСКИХ координатах (в них живут Bounds), а SendMouse*
 	// принимают ФИЗИЧЕСКИЕ и сами делят на Scale() внутри toLogical.
 	k := e.Scale()
@@ -1583,20 +1600,30 @@ func (e *Engine) renderFrame() output.Frame {
 // здесь (в основном холсте) НЕ рисуются. Прочие оверлеи (например, меню выбора
 // локали widget.Window, не реализующее OverlayBoundsProvider) рисуются как прежде.
 func drawOverlays(w widget.Widget, ctx widget.DrawContext, hosted bool) {
-	drawOverlaysAt(w, ctx, hosted, 0)
+	drawOverlaysAt(w, ctx, hosted, image.Point{}, 0)
 }
 
-func drawOverlaysAt(w widget.Widget, ctx widget.DrawContext, hosted bool, depth int) {
+// drawOverlaysAt: off — смещение кадра w (см. frames.go). Оверлей рисуется в
+// координатах своего виджета, а холст — экранный: оверлей виджета внутри
+// прокрутки идёт через widget.OffsetContext. Без этого меню, открытое у
+// прокрученного поля, рисовалось бы там, где поле стоит в содержимом, — вне
+// видимой части, а то и вне холста.
+func drawOverlaysAt(w widget.Widget, ctx widget.DrawContext, hosted bool, off image.Point, depth int) {
 	if tooDeep(depth) {
 		return
 	}
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
 		if !hosted || !isHostedOverlay(w) {
-			od.DrawOverlay(ctx)
+			od.DrawOverlay(widget.OffsetContext(ctx, off.X, off.Y))
 		}
 	}
-	for _, child := range w.Children() {
-		drawOverlaysAt(child, ctx, hosted, depth+1)
+	children := w.Children()
+	if len(children) == 0 {
+		return
+	}
+	coff := off.Add(contentShift(w))
+	for _, child := range children {
+		drawOverlaysAt(child, ctx, hosted, coff, depth+1)
 	}
 }
 

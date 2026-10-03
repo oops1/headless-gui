@@ -1223,7 +1223,7 @@ func (t *TextInput) Draw(ctx DrawContext) {
 
 	// Клиппинг по внутренней области поля (без зоны глазика и без значка)
 	inner := image.Rect(b.Min.X+leadPad, b.Min.Y+1, b.Max.X-rightPad, b.Max.Y-1)
-	ctx.SetClip(inner)
+	restoreClip := PushClip(ctx, inner)
 
 	textX := b.Min.X + leadPad - scrollX
 
@@ -1275,7 +1275,7 @@ func (t *TextInput) Draw(ctx DrawContext) {
 		}
 	}
 
-	ctx.ClearClip()
+	restoreClip()
 
 	// Кнопка-глазик (показать/скрыть пароль)
 	if isPwd {

@@ -41,7 +41,12 @@ func (d *DiffView) Draw(ctx DrawContext) {
 	d.drawPane(ctx, g, DiffLeft, lt, content)
 	d.drawPane(ctx, g, DiffRight, rt, content)
 	d.drawConnectors(ctx, g, lt, rt, content)
+	// Линейка и горизонтальная полоса — у краёв ВИДЖЕТА, а не внутри
+	// панелей кода: возвращаем область рисования к его границам, иначе
+	// обрезок последней панели съел бы их.
+	ctx.SetClip(b.Intersect(outer))
 	d.drawRuler(ctx, g, viewH)
+	ctx.SetClip(b.Intersect(outer))
 	d.drawHScroll(ctx, g)
 	ctx.SetClip(outer)
 	d.drawChildren(ctx)
@@ -374,9 +379,8 @@ func (d *DiffView) drawHScroll(ctx DrawContext, g dvGeom) {
 	if tr.Empty() || th.Empty() {
 		return
 	}
-	ctx.SetClip(tr.Inset(-2).Intersect(g.b))
+	defer PushClip(ctx, tr.Inset(-2).Intersect(g.b))()
 	drawHBar(ctx, tr, th, d.pal.track, d.pal.thumb)
-	ctx.ClearClip()
 }
 
 func (d *DiffView) drawRuler(ctx DrawContext, g dvGeom, viewH float64) {
@@ -385,7 +389,7 @@ func (d *DiffView) drawRuler(ctx DrawContext, g dvGeom, viewH float64) {
 	if tr.Dy() <= 0 {
 		return
 	}
-	ctx.SetClip(tr.Inset(-2).Intersect(g.b))
+	defer PushClip(ctx, tr.Inset(-2).Intersect(g.b))()
 	ctx.FillRoundRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), dvRulerW/2, p.track)
 	V := d.bps[len(d.bps)-1].v
 	scale := float64(tr.Dy()) / V
