@@ -3785,6 +3785,45 @@ HTML is the optional `widget.ClipboardHTMLProvider` (`SetHTML(html, plain)`,
   window (`window.Run`): the window installs the Linux clipboard provider.
 - macOS, and Linux without a native window: plain text only.
 
+### Files on the clipboard
+
+Since v3.30 a list of files can be put on the clipboard — so that Windows
+Explorer, Nautilus, Dolphin and a remote desktop client accept it — and files
+copied there can be read:
+
+```go
+widget.ClipboardSetFiles([]string{"/home/u/report.odt", "/home/u/photo.png"}, false) // cut=true — "cut"
+
+go func() { // reading may wait — not on the engine goroutine
+    paths, cut, ok := widget.ClipboardFiles() // ok == false — no files on the clipboard
+    eng.Post(func() { /* paste paths; cut — move rather than copy */ })
+}()
+```
+
+`ClipboardSetFiles` replaces the clipboard contents, like `ClipboardSetText`,
+and puts the same paths as plain text next to them — for programs that take
+only text. `ClipboardFiles` may **wait**: the owner hands the data over when it
+is ready, and on a remote desktop files copied on the client are downloaded at
+paste time. So call it in your own goroutine and bring the result back with
+`Engine.Post`.
+
+A list with even one link that is not a local file (`https://`, a foreign host)
+is not files: `ok == false`. Otherwise a browser link would become a "file", and
+a paste would silently lose part of the list.
+
+- Windows: `CF_HDROP` (UTF-16 paths) and "Preferred DropEffect" — copy or move;
+  all in one opening of the clipboard.
+- Wayland and X11: `text/uri-list` and `x-special/gnome-copied-files` (which
+  carries `copy`/`cut`), as GTK and Qt do. When reading, the engine asks for
+  the gnome format first — only it knows about `cut` — then `text/uri-list`.
+- macOS: the fallback only — paths as text.
+
+As with HTML, this is the optional `widget.ClipboardFilesProvider`
+(`SetFiles(paths, cut)`, `GetFiles() (paths, cut, ok)`); a custom provider
+without it gets the paths as text from `ClipboardSetFiles`, and
+`ClipboardFiles` honestly answers `ok == false`. `UseMemoryClipboard()`
+supports files.
+
 ### Color emoji
 
 The text path renders color glyphs automatically — no separate API, just put

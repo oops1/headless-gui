@@ -97,6 +97,9 @@ type memoryClipboard struct {
 	mu   sync.Mutex
 	text string
 	html string // оформленная версия того же содержимого; пусто — только текст
+	// files — список файлов (ClipboardSetFiles); nil — в буфере не файлы.
+	files []string
+	cut   bool
 }
 
 func (c *memoryClipboard) GetText() string {
@@ -108,16 +111,16 @@ func (c *memoryClipboard) GetText() string {
 func (c *memoryClipboard) SetText(s string) {
 	c.mu.Lock()
 	c.text = s
-	// Новый простой текст вытесняет прежнее оформление: иначе GetHTML отдал бы
-	// разметку от предыдущего копирования, не связанную с текущим содержимым.
-	c.html = ""
+	// Новый простой текст вытесняет прежнее оформление и файлы: иначе GetHTML
+	// или GetFiles отдали бы содержимое предыдущего копирования.
+	c.html, c.files, c.cut = "", nil, false
 	c.mu.Unlock()
 }
 
 // SetHTML — реализация ClipboardHTMLProvider в памяти.
 func (c *memoryClipboard) SetHTML(html, plain string) {
 	c.mu.Lock()
-	c.text, c.html = plain, html
+	c.text, c.html, c.files, c.cut = plain, html, nil, false
 	c.mu.Unlock()
 }
 

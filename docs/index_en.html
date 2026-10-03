@@ -437,7 +437,7 @@ win.Run() // блокирующий вызов</code></pre>
 <tr><td>System move and resize</td><td><code>win.BeginMove()</code>, <code>win.BeginResize(edges)</code> (X11 and Wayland; <code>false</code> elsewhere)</td></tr>
 <tr><td>HiDPI</td><td>Per-monitor DPI on Windows, <code>Xft.dpi</code> on X11, <code>wl_output</code> / fractional scale on Wayland; <code>HEADLESS_GUI_SCALE</code> overrides</td></tr>
 <tr><td>Input method (IME)</td><td>Windows IMM32 and Wayland <code>text-input-v3</code>: the composition is shown in the field, the candidate window sits under the caret</td></tr>
-<tr><td>Clipboard</td><td>Text on all platforms (built in on Linux), HTML next to plain text: <code>widget.SetClipboardHTML(html, plain)</code>, <code>widget.ClipboardHTML()</code></td></tr>
+<tr><td>Clipboard</td><td>Text on all platforms (built in on Linux), HTML next to plain text: <code>widget.SetClipboardHTML(html, plain)</code>, <code>widget.ClipboardHTML()</code>; files — <code>widget.ClipboardSetFiles(paths, cut)</code>, <code>widget.ClipboardFiles()</code> (may wait — not on the engine goroutine)</td></tr>
 <tr><td>Accessibility bridges</td><td>UI Automation (Windows, Value and Text patterns), AT-SPI (Linux, Text interface)</td></tr>
 </table>
 

@@ -437,7 +437,7 @@ win.Run() // блокирующий вызов</code></pre>
 <tr><td>Системное перемещение и изменение размера</td><td><code>win.BeginMove()</code>, <code>win.BeginResize(edges)</code> (X11 и Wayland; в остальных случаях <code>false</code>)</td></tr>
 <tr><td>HiDPI</td><td>Per-monitor DPI на Windows, <code>Xft.dpi</code> на X11, <code>wl_output</code> / дробный масштаб на Wayland; <code>HEADLESS_GUI_SCALE</code> переопределяет</td></tr>
 <tr><td>Метод ввода (IME)</td><td>Windows IMM32 и Wayland <code>text-input-v3</code>: набираемое показывается в поле, окно кандидатов стоит под кареткой</td></tr>
-<tr><td>Буфер обмена</td><td>Текст на всех платформах (на Linux свой), HTML рядом с простым: <code>widget.SetClipboardHTML(html, plain)</code>, <code>widget.ClipboardHTML()</code></td></tr>
+<tr><td>Буфер обмена</td><td>Текст на всех платформах (на Linux свой), HTML рядом с простым: <code>widget.SetClipboardHTML(html, plain)</code>, <code>widget.ClipboardHTML()</code>; файлы — <code>widget.ClipboardSetFiles(paths, cut)</code>, <code>widget.ClipboardFiles()</code> (может ждать — звать не на горутине движка)</td></tr>
 <tr><td>Мосты доступности</td><td>UI Automation (Windows, паттерны Value и Text), AT-SPI (Linux, интерфейс Text)</td></tr>
 </table>
 

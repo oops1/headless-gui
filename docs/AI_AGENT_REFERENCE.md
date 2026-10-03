@@ -3006,6 +3006,7 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 | Текст для скринридера | UIA Value и Text | AT-SPI Text | Wayland — то же, что X11 (мост общий), macOS — моста нет |
 | Тема ОС (`window.DetectSystemTheme`, `SetOnSystemThemeChanged`) | `AppsUseLightTheme` + `WM_SETTINGCHANGE` | `GTK_THEME`, портал Settings (D-Bus), сигнал `SettingChanged` | Wayland — то же, что X11; macOS — всегда `SystemThemeUnknown`, смены не видно |
 | Открыть ссылку / файл (`window.OpenURL`, `OpenFile`, `RevealFile`) | `ShellExecuteW`, показ — Проводник `/select` | портал `OpenURI` и `FileManager1.ShowItems`; `xdg-open` только если портала на шине нет | Wayland — то же, что X11; macOS — `/usr/bin/open`; прочие — `ErrOpenUnsupported` |
+| Файлы в буфере (`widget.ClipboardSetFiles`, `ClipboardFiles`) | `CF_HDROP` + «Preferred DropEffect» | `text/uri-list`, `x-special/gnome-copied-files` (нативное окно) | Wayland — те же типы (нативное окно); macOS — пути текстом |
 | HTML в буфере (`widget.SetClipboardHTML`) | «HTML Format» | `text/html` (нативное окно) | Wayland — `text/html` (нативное окно); macOS — только простой текст |
 | Печать (`printing.Print`) | `PrintDlgEx` + GDI | CUPS по IPP, системного диалога нет | Wayland — то же, что X11; macOS — `ErrUnsupported`. `SavePDF` — везде |
 | Несколько окон в процессе | да | да | Wayland — да, macOS — не проверялось |
@@ -4534,6 +4535,41 @@ BOM) and UTF-16 (Firefox, some Qt). These two providers are installed by the
 native window (`window.Run`); without a native window Linux uses the xclip/xsel
 fallback, which has plain text only. macOS: plain text only (`pbcopy` cannot do
 `public.html`, and `NSPasteboard` is unreachable without CGO).
+
+### Files on the clipboard — v3.30
+
+The engine's file manager (WinLine Explorer) copied files into a list inside
+the program: only text reached the system clipboard, so files never got to
+another file manager or to the RDP client, and nothing came back.
+
+```go
+widget.ClipboardSetFiles(paths []string, cut bool)            // replaces the clipboard; paths as text next to it
+paths, cut, ok := widget.ClipboardFiles()                     // ok == false: not files, or the provider cannot do files
+
+type ClipboardFilesProvider interface {                       // optional, like ClipboardHTMLProvider
+    SetFiles(paths []string, cut bool)
+    GetFiles() (paths []string, cut bool, ok bool)
+}
+```
+
+`ClipboardFiles` may block for a long time (up to 10 minutes on Linux): a
+remote desktop downloads client files at paste time and the channel delivers
+the list when the download is done. Call it in a goroutine and `Engine.Post`
+the result. A list containing any non-`file://` URI or a foreign host is not
+files.
+
+| | Windows | X11 | Wayland |
+|---|---|---|---|
+| put | `CF_HDROP` (UTF-16) + `Preferred DropEffect` + `CF_UNICODETEXT` (CRLF) | targets `text/uri-list`, `x-special/gnome-copied-files`, text | `wl_data_source` with the same types |
+| read | `CF_HDROP` (UTF-16 parsed with bounds checks; ANSI via `DragQueryFileW`) + `Preferred DropEffect` | gnome format, then `text/uri-list` | the same; only types the offer announced |
+
+The gnome format is read first when offered — it is the only one carrying
+`cut`, with the same URIs. URIs are percent-encoded like `g_filename_to_uri`.
+Pure helpers: `window/clipboard_files.go` (uri-list, gnome format),
+`widget/clipboard_files.go` (DROPFILES, DropEffect). macOS has no provider —
+the text fallback applies. Verified on Windows in both directions against
+Windows PowerShell `Get-Clipboard -Format FileDropList` / `Set-Clipboard
+-Path`; Wayland and X11 on the wire (fake compositor and X server).
 
 ### Extra drop-downs in the file dialog — v3.29
 

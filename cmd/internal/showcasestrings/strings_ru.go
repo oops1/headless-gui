@@ -397,6 +397,11 @@ var showcaseRU = map[string]string{
 	"Print and PDF: the pages are drawn by the engine itself (package printing):": "Печать и PDF: страницы рисует сам движок (пакет printing):",
 	"Save to PDF…": "Сохранить в PDF…",
 	"Print…":       "Печать…",
+	"Files in the clipboard (widget.ClipboardSetFiles and ClipboardFiles):": "Файлы в буфере обмена (widget.ClipboardSetFiles и ClipboardFiles):",
+	"Copy files":  "Копировать файлы",
+	"Cut files":   "Вырезать файлы",
+	"Paste files": "Вставить файлы",
+	"Copy puts two files of the showcase (its markup and README.md) into the system clipboard as files: paste them into Explorer, Nautilus or Dolphin. Paste reads files copied in a file manager. Reading may wait — on a remote desktop the files are downloaded at paste time — so it runs in its own goroutine.":                             "«Копировать» кладёт в системный буфер два файла витрины (её разметку и README.md) именно как файлы: вставьте их в Проводник, Nautilus или Dolphin. «Вставить» читает файлы, скопированные в файловом менеджере. Чтение может ждать — на удалённом рабочем столе файлы скачиваются в момент вставки, — поэтому идёт в своей горутине.",
 	"The document is two A4 pages: the first holds the text from the editor of the «Rich text» tab, the second the event log. Each page is rendered by a separate engine at the printer resolution, so the paper looks exactly like the screen. The PDF is written on any platform; the print dialog exists where the system has one (Windows).": "Документ — две страницы A4: на первой текст из редактора вкладки «Форматированный текст», на второй журнал событий. Каждую страницу рисует отдельный движок в разрешении принтера, поэтому бумага выглядит как экран. PDF пишется на любой платформе; диалог печати есть там, где он есть у системы (Windows).",
 
 	// ── «Диалоги», «Деревья и таблицы», «Компоновка» ──

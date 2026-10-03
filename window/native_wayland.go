@@ -148,9 +148,6 @@ const (
 
 	// wl_data_device_manager.dnd_action
 	wlDndActionCopy = 1
-
-	// MIME-тип списка файлов при перетаскивании из файлового менеджера.
-	mimeTextUriList = "text/uri-list"
 )
 
 // wlBufWaitTimeout — сколько ждать wl_buffer.release перед пропуском кадра.
@@ -348,6 +345,9 @@ type WaylandWindow struct {
 	// htmlOffers — предложения с HTML: offer → объявленный тип (его же и
 	// запрашиваем).
 	htmlOffers map[uint32]string
+	// gnomeOffers — предложения со списком файлов x-special/gnome-copied-files
+	// (там же пометка cut); text/uri-list отмечен в offers.
+	gnomeOffers map[uint32]bool
 	// dndOffer — активный offer текущего перетаскивания (между enter и drop).
 	dndOffer   uint32
 	dndSerial  uint32 // serial из enter (для accept)
@@ -887,6 +887,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			}
 			if isHTMLMime(mime) {
 				w.offerSetHTML(obj, mime)
+			}
+			if mime == mimeGnomeCopiedFiles {
+				w.offerSetGnomeFiles(obj)
 			}
 		}
 
@@ -1622,6 +1625,23 @@ func (w *WaylandWindow) offerHTMLMime(id uint32) string {
 	return w.htmlOffers[id]
 }
 
+// offerSetGnomeFiles отмечает, что offer предлагает x-special/gnome-copied-files.
+func (w *WaylandWindow) offerSetGnomeFiles(id uint32) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.gnomeOffers == nil {
+		w.gnomeOffers = map[uint32]bool{}
+	}
+	w.gnomeOffers[id] = true
+}
+
+// offerHasGnomeFiles сообщает, предлагает ли offer x-special/gnome-copied-files.
+func (w *WaylandWindow) offerHasGnomeFiles(id uint32) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.gnomeOffers[id]
+}
+
 // isTextMime — тип, под которым ходит простой текст.
 func isTextMime(mime string) bool {
 	switch mime {
@@ -1643,6 +1663,7 @@ func (w *WaylandWindow) offerDelete(id uint32) {
 	w.mu.Lock()
 	delete(w.textOffers, id)
 	delete(w.htmlOffers, id)
+	delete(w.gnomeOffers, id)
 	w.mu.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()

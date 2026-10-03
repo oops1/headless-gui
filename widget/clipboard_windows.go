@@ -8,8 +8,11 @@ package widget
 // CF_UNICODETEXT = 13 — Unicode текст (UTF-16LE).
 // «HTML Format» — зарегистрированный формат оформленного текста; собирается и
 // разбирается чистыми функциями из clipboard_html.go.
+// CF_HDROP = 15 — список файлов (блок DROPFILES, clipboard_files.go) и рядом
+// «Preferred DropEffect» — копировать или переместить при вставке.
 
 import (
+	"strings"
 	"sync"
 	"syscall"
 	"unicode/utf16"
@@ -37,7 +40,12 @@ var (
 	procGlobalUnlock = kernel32.NewProc("GlobalUnlock")
 	procGlobalSize   = kernel32.NewProc("GlobalSize")
 	procGlobalFree   = kernel32.NewProc("GlobalFree")
+
+	shell32Clip       = syscall.NewLazyDLL("shell32.dll")
+	procDragQueryFile = shell32Clip.NewProc("DragQueryFileW")
 )
+
+const cfHDrop = 15
 
 // htmlFormat — идентификатор формата «HTML Format». У зарегистрированных
 // форматов он выдаётся системой при регистрации, константы для него нет.
@@ -52,6 +60,21 @@ func htmlFormat() uintptr {
 		htmlFormatID, _, _ = procRegisterFormat.Call(uintptr(unsafe.Pointer(name)))
 	})
 	return htmlFormatID
+}
+
+// dropEffectFormat — «Preferred DropEffect»: по нему Проводник отличает
+// вырезанные файлы от скопированных.
+var (
+	dropEffectOnce sync.Once
+	dropEffectID   uintptr
+)
+
+func dropEffectFormat() uintptr {
+	dropEffectOnce.Do(func() {
+		name, _ := syscall.UTF16PtrFromString("Preferred DropEffect")
+		dropEffectID, _, _ = procRegisterFormat.Call(uintptr(unsafe.Pointer(name)))
+	})
+	return dropEffectID
 }
 
 // winClipboard — Windows системный буфер обмена.
@@ -166,6 +189,96 @@ func (c *winClipboard) GetHTML() (string, bool) {
 	data := make([]byte, size)
 	copy(data, unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size))
 	return ParseCFHTML(data)
+}
+
+// SetFiles кладёт список файлов (CF_HDROP), пометку cut (Preferred DropEffect)
+// и пути текстом — за одно открытие буфера, по той же причине, что SetHTML.
+//
+// Реализует widget.ClipboardFilesProvider. Пути в тексте — через CRLF, как
+// принято в Windows: Блокнот иначе показал бы их одной строкой.
+func (c *winClipboard) SetFiles(paths []string, cut bool) {
+	effect := dropEffectFormat()
+	ret, _, _ := procOpenClipboard.Call(0)
+	if ret == 0 {
+		return
+	}
+	defer procCloseClipboard.Call()
+
+	procEmptyClipboard.Call()
+	setClipboardUnicode(strings.Join(paths, "\r\n"))
+	setClipboardBytes(cfHDrop, buildDropFiles(paths))
+	if effect != 0 {
+		setClipboardBytes(effect, dropEffectBytes(cut))
+	}
+}
+
+// GetFiles читает CF_HDROP и Preferred DropEffect.
+//
+// Реализует widget.ClipboardFilesProvider. Блок разбирается своими силами с
+// проверкой границ (содержимое чужое); пути в однобайтовой кодировке — от
+// старых программ — отдаются системе (DragQueryFileW), она знает кодовую
+// страницу.
+func (c *winClipboard) GetFiles() ([]string, bool, bool) {
+	effect := dropEffectFormat()
+	ret, _, _ := procOpenClipboard.Call(0)
+	if ret == 0 {
+		return nil, false, false
+	}
+	defer procCloseClipboard.Call()
+
+	h, _, _ := procGetClipboardData.Call(cfHDrop)
+	if h == 0 {
+		return nil, false, false
+	}
+	data := clipboardBlock(h)
+	paths, ok := parseDropFiles(data)
+	if !ok {
+		paths = dragQueryFiles(h)
+		ok = len(paths) > 0
+	}
+	if !ok {
+		return nil, false, false
+	}
+	cut := false
+	if effect != 0 {
+		if he, _, _ := procGetClipboardData.Call(effect); he != 0 {
+			cut = dropEffectIsCut(clipboardBlock(he))
+		}
+	}
+	return paths, cut, true
+}
+
+// clipboardBlock копирует блок буфера обмена целиком, по размеру от системы.
+// Буфер должен быть открыт.
+func clipboardBlock(h uintptr) []byte {
+	ptr, _, _ := procGlobalLock.Call(h)
+	if ptr == 0 {
+		return nil
+	}
+	defer procGlobalUnlock.Call(h)
+	size, _, _ := procGlobalSize.Call(h)
+	if size == 0 {
+		return nil
+	}
+	data := make([]byte, size)
+	copy(data, unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size))
+	return data
+}
+
+// dragQueryFiles достаёт пути из HDROP средствами системы.
+func dragQueryFiles(h uintptr) []string {
+	n, _, _ := procDragQueryFile.Call(h, 0xFFFFFFFF, 0, 0)
+	var out []string
+	for i := uintptr(0); i < n && i < 1<<16; i++ {
+		l, _, _ := procDragQueryFile.Call(h, i, 0, 0)
+		if l == 0 {
+			continue
+		}
+		buf := make([]uint16, l+1)
+		procDragQueryFile.Call(h, i, uintptr(unsafe.Pointer(&buf[0])), l+1)
+		out = append(out, syscall.UTF16ToString(buf))
+	}
+	return out
 }
 
 // setClipboardUnicode кладёт простой текст как CF_UNICODETEXT. Буфер обмена

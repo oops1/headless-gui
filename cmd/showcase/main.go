@@ -18,6 +18,8 @@ import (
 	"image"
 	"image/color"
 	"log"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -1168,6 +1170,62 @@ func main() {
 		}
 		return job, true
 	}
+	// Файлы в буфере обмена: «Копировать» и «Вырезать» кладут два файла
+	// витрины как файлы (их примет файловый менеджер), «Вставить» читает
+	// чужие. Чтение может ждать (удалённый рабочий стол скачивает файлы в
+	// момент вставки), поэтому идёт в горутине, а результат — через Post.
+	clipStatus := showcasedemo.NewLive(lbl("clipFilesStatus"), onRelocalize)
+	showcaseFiles := func() []string {
+		var out []string
+		for _, p := range []string{"./assets/ui/showcase.xaml", "README.md"} {
+			if abs, err := filepath.Abs(p); err == nil {
+				if _, err := os.Stat(abs); err == nil {
+					out = append(out, abs)
+				}
+			}
+		}
+		return out
+	}
+	putFiles := func(cut bool) {
+		files := showcaseFiles()
+		widget.ClipboardSetFiles(files, cut)
+		names := make([]string, len(files))
+		for i, f := range files {
+			names[i] = filepath.Base(f)
+		}
+		if cut {
+			clipStatus.Set("Cut to the clipboard as files: %s", strings.Join(names, ", "))
+		} else {
+			clipStatus.Set("Copied to the clipboard as files: %s", strings.Join(names, ", "))
+		}
+		addLog("ClipboardSetFiles: %d (cut=%v)", len(files), cut)
+	}
+	if b := btn("clipFilesCopy"); b != nil {
+		b.OnClick = func() { putFiles(false) }
+	}
+	if b := btn("clipFilesCut"); b != nil {
+		b.OnClick = func() { putFiles(true) }
+	}
+	if b := btn("clipFilesPaste"); b != nil {
+		b.OnClick = func() {
+			clipStatus.Set("Reading the clipboard…")
+			go func() {
+				files, cut, ok := widget.ClipboardFiles()
+				eng.Post(func() {
+					switch {
+					case !ok:
+						clipStatus.Set("No files in the clipboard")
+					case cut:
+						clipStatus.Set("Cut files in the clipboard: %s", strings.Join(files, ", "))
+					default:
+						clipStatus.Set("Files in the clipboard: %s", strings.Join(files, ", "))
+					}
+					addLog("ClipboardFiles: %d (cut=%v ok=%v)", len(files), cut, ok)
+				})
+			}()
+		}
+	}
+
 	if b := btn("pdfSave"); b != nil {
 		b.OnClick = func() {
 			o := widget.FileDialogOptions{

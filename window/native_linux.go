@@ -131,6 +131,9 @@ type X11Window struct {
 	atomTargets   uint32
 	atomText      uint32
 	atomTextHTML  uint32 // text/html — оформленный текст в буфере обмена
+	// atomGnomeCopied — x-special/gnome-copied-files: список файлов с
+	// пометкой copy/cut (text/uri-list — atomTextUriList, общий с XDND).
+	atomGnomeCopied uint32
 	// clip — буфер обмена своими силами (x11_clipboard_linux.go).
 	clip *x11Clipboard
 	// cursors — формы курсора окна (x11_cursor_linux.go).
@@ -287,6 +290,7 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomTargets = w.x11InternAtom("TARGETS")
 	w.atomText = w.x11InternAtom("TEXT")
 	w.atomTextHTML = w.x11InternAtom(mimeTextHTML)
+	w.atomGnomeCopied = w.x11InternAtom(mimeGnomeCopiedFiles)
 	w.atomNetWMName = w.x11InternAtom("_NET_WM_NAME")
 	w.atomNetWMIconName = w.x11InternAtom("_NET_WM_ICON_NAME")
 	w.atomMotifHints = w.x11InternAtom("_MOTIF_WM_HINTS")
