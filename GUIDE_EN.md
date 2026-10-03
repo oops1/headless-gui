@@ -902,8 +902,13 @@ if e.Mod&widget.ModAlt != 0 && menu.ActivateMnemonic(e) {
 }
 ```
 
-`ActivateMnemonic` reports whether such a mnemonic was found. Once the menu is
-open, letters arrive the usual way and need not be passed on.
+`ActivateMnemonic` reports whether such a mnemonic was found. Having opened the
+menu, the bar takes the focus, so arrows, the item letter and Esc reach it the
+usual way, and on closing the menu gives the focus back to the previous widget
+(since v3.29.1; before, the application had to focus the bar by hand). This
+works when `ActivateMnemonic` is called while a key is being handled — from
+`OnKeyEvent` or `InputBindings`; called outside that, set the focus yourself
+(`eng.SetFocus`).
 
 Cascading submenus (nested MenuItem):
 
@@ -1113,7 +1118,7 @@ In XAML:
 With HierarchicalDataTemplate:
 
 ```xml
-<TreeView Name="tree" Width="300" Height="500">
+<TreeView Name="tree" Width="300" Height="500" ItemsSource="{Binding Roots}">
     <TreeView.ItemTemplate>
         <HierarchicalDataTemplate ItemsSource="{Binding Children}">
             <StackPanel Orientation="Horizontal">
@@ -1124,6 +1129,13 @@ With HierarchicalDataTemplate:
     </TreeView.ItemTemplate>
 </TreeView>
 ```
+
+`ItemsSource="{Binding Roots}"` on `TreeView` and `DataGrid` hands the widget
+the `*ObservableCollection` itself and replaces it when the model returns a
+different one. Paths inside the template — `{Binding Children}`,
+`{Binding Name}` — refer to the node, not to the window's model. Both work
+since v3.29.1: before, a grid from such markup stayed empty and the tree
+template lost its paths at load time.
 
 Virtualization: only visible rows are rendered. Supports 10,000+ nodes.
 

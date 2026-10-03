@@ -4958,7 +4958,20 @@ event's character, when a backend supplies it, wins over that guess.
 
 The menu bar holds no focus while keys go to the focused widget, so Alt+letter
 is handed to it by the application: `MenuBar.ActivateMnemonic(e)` reports
-whether such a mnemonic was found.
+whether such a mnemonic was found. Since v3.29.1 the bar then takes the focus
+from the engine delivering the current key (`internal/focusreq`; the engine
+serves such requests during `SendKeyEvent`/`SendMouseButton`) and gives it back
+to the previous widget when the menu closes — Escape, a picked item, a click
+elsewhere. Called outside key or click handling it cannot ask, so focus the bar
+with `eng.SetFocus`.
+
+Also since v3.29.1, `ItemsSource="{Binding X}"` on `DataGrid` and `TreeView`
+passes the `*ObservableCollection` itself (it used to become a string and the
+grid stayed empty); the source is set again only when the model returns a
+different collection, so selection and sorting survive unrelated property
+changes. Paths inside `<TreeView.ItemTemplate>` (`{Binding Children}`,
+`{Binding Name}`) are no longer resolved against the window's DataContext, so a
+`HierarchicalDataTemplate` written in markup works.
 
 ### Click count in MouseEvent — v3.27
 

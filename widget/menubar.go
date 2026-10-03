@@ -5,6 +5,8 @@ import (
 	"image/color"
 	"sync"
 	"sync/atomic"
+
+	"github.com/oops1/headless-gui/v3/internal/focusreq"
 )
 
 // MenuBarItem описывает один пункт верхнего горизонтального меню.
@@ -176,8 +178,13 @@ func (mb *MenuBar) setHoverIdx(idx int) {
 // setActiveIdx обновляет индекс открытого пункта (подсветка в bounds полосы).
 // Само подменю — overlay: его показ/скрытие инвалидирует PopupMenu.
 func (mb *MenuBar) setActiveIdx(idx int) {
-	if atomic.SwapInt32(&mb.activeIdx, int32(idx)) != int32(idx) {
+	if prev := atomic.SwapInt32(&mb.activeIdx, int32(idx)); prev != int32(idx) {
 		mb.Invalidate()
+		if idx < 0 && prev >= 0 {
+			// Меню закрылось — фокус, взятый в ActivateMnemonic, уходит
+			// обратно, иначе набор текста после меню доставался бы полосе.
+			focusreq.Return(mb)
+		}
 	}
 }
 
@@ -470,8 +477,10 @@ func (mb *MenuBar) OnKeyEvent(e KeyEvent) {
 //
 // Нужен отдельным методом, потому что клавиши движок отдаёт фокусному
 // виджету, а полоса меню фокуса не держит: Alt+Ф приложение получает само и
-// передаёт сюда. Когда меню уже открыто, буквы доходят обычным путём, через
-// OnKeyEvent.
+// передаёт сюда. Раскрыв меню, полоса берёт фокус у движка, доставляющего
+// эту клавишу (internal/focusreq), и дальше буквы, стрелки и Esc приходят ей
+// через OnKeyEvent; закрывшись, меню отдаёт фокус обратно. Вызванный вне
+// доставки события фокус не возьмёт — тогда его ставит приложение.
 func (mb *MenuBar) ActivateMnemonic(e KeyEvent) bool {
 	if !mb.UseMnemonics || !e.Pressed || !mb.IsEnabled() {
 		return false
@@ -501,6 +510,10 @@ func (mb *MenuBar) ActivateMnemonic(e KeyEvent) bool {
 	}
 	mb.openSubmenu(hit)
 	mb.popup.setHoverIdx(mb.popup.nextActiveItem(-1))
+	// Следующие клавиши — стрелки, буква пункта, Esc — должны прийти сюда,
+	// а движок отдаёт их фокусному виджету. Фокус берём у движка, который
+	// доставляет нынешнее событие; закрывшись, меню его вернёт.
+	focusreq.Request(mb)
 	return true
 }
 

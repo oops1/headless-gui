@@ -893,8 +893,12 @@ if e.Mod&widget.ModAlt != 0 && menu.ActivateMnemonic(e) {
 }
 ```
 
-`ActivateMnemonic` сообщает, нашлась ли такая мнемоника. Когда меню уже
-раскрыто, буквы доходят обычным путём, и передавать их не нужно.
+`ActivateMnemonic` сообщает, нашлась ли такая мнемоника. Раскрыв меню,
+строка забирает фокус, поэтому стрелки, буква пункта и Esc доходят до неё
+обычным путём, а закрывшись, меню возвращает фокус прежнему виджету
+(с v3.29.1; раньше фокус приходилось отдавать строке вручную). Это работает,
+когда `ActivateMnemonic` вызван из обработки клавиши — из `OnKeyEvent` или
+`InputBindings`; вызванный вне её, фокус ставьте сами (`eng.SetFocus`).
 
 Каскадные подменю (вложенные MenuItem):
 
@@ -1104,7 +1108,7 @@ tw.Tree.SetItemsSource(coll)
 С HierarchicalDataTemplate:
 
 ```xml
-<TreeView Name="tree" Width="300" Height="500">
+<TreeView Name="tree" Width="300" Height="500" ItemsSource="{Binding Roots}">
     <TreeView.ItemTemplate>
         <HierarchicalDataTemplate ItemsSource="{Binding Children}">
             <StackPanel Orientation="Horizontal">
@@ -1115,6 +1119,12 @@ tw.Tree.SetItemsSource(coll)
     </TreeView.ItemTemplate>
 </TreeView>
 ```
+
+`ItemsSource="{Binding Roots}"` у `TreeView` и `DataGrid` подаёт виджету саму
+`*ObservableCollection` из модели и меняет её, когда модель вернёт другую.
+Пути внутри шаблона — `{Binding Children}`, `{Binding Name}` — относятся к
+узлу, а не к модели окна. Оба случая работают с v3.29.1: раньше таблица из
+такой разметки оставалась пустой, а шаблон дерева терял пути при загрузке.
 
 Виртуализация: рендерятся только видимые строки. Поддержка 10 000+ узлов.
 

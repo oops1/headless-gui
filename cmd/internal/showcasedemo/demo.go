@@ -539,13 +539,9 @@ func (d *demo) menus() {
 					if tabs == nil || tabs.Active() != menuTab {
 						return false
 					}
-					if !bar.ActivateMnemonic(widget.KeyEvent{Code: code, Mod: widget.ModAlt, Pressed: true}) {
-						return false
-					}
-					// Дальнейшие клавиши (стрелки, буква пункта, Esc) идут
-					// фокусному виджету, поэтому фокус отдаём строке меню.
-					d.focus(bar)
-					return true
+					// Фокус строка меню берёт сама и, закрывшись, возвращает:
+					// стрелки, буква пункта и Esc дойдут до неё.
+					return bar.ActivateMnemonic(widget.KeyEvent{Code: code, Mod: widget.ModAlt, Pressed: true})
 				},
 			},
 		})

@@ -72,6 +72,7 @@ type Engine struct {
 	damageAll bool              // Invalidate() — полный diff
 
 	focus    focusManager  // текущий виджет с фокусом
+	loan     focusLoan     // фокус, взятый виджетом по просьбе (focusreq.go)
 	captured widget.Widget // виджет, захвативший мышь (drag)
 	capMu    sync.Mutex
 	// capChain — контейнеры со сдвигом содержимого над захватившим мышь
