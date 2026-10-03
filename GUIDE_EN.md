@@ -1506,9 +1506,25 @@ eng.SendKeyEvent(widget.KeyEvent{
 })
 ```
 
-Key codes: `KeyBackspace, KeyEnter, KeyEscape, KeyTab, KeySpace, KeyLeft/Right/Up/Down, KeyHome, KeyEnd, KeyDelete, KeyA/C/V/X/Z`.
+Key codes are a full table whose values equal Windows VK codes: all letters
+`KeyA…KeyZ`, digits `Key0…Key9`, the numpad (`KeyNumpad0…`, `+ − * / .`,
+Enter), OEM keys (`KeyOemPlus`, `KeyOemMinus` and others), `KeyF1…KeyF24`,
+navigation, `KeyCapsLock`, `KeyPrintScreen`, `KeyPause`, `KeyMenu` (the
+context-menu key). On X11 and Wayland the code comes from the PHYSICAL key of
+the Latin layout, so `Ctrl+S` works in a Russian layout too. Order of events: a
+press with `Code`, then a separate text event with `Rune`. `KeyEvent.Repeat`
+tells auto-repeat of a held key from a new press.
 
 Modifiers: `ModShift, ModCtrl, ModAlt, ModMeta`.
+
+**Alt and F10 — the menu bar.** Alt by itself is a modifier, not an event:
+`Alt+F` arrives as `KeyF` with `ModAlt`. The gesture «Alt pressed and released
+with nothing in between» — how Windows opens a menu bar — arrives as `KeyAlt`,
+the same on Windows, X11 and Wayland; F10 is an ordinary `KeyF10`. The
+application opens its menu itself. On Windows the window no longer slips into
+its system menu: before, after F10 or a lone Alt the next arrow never reached
+the application — the window's modal menu loop took it. `Alt+Space` still opens
+the window menu, `Alt+F4` closes the window.
 
 **Tab inside a widget.** The engine hands Tab to focus traversal before the
 focused widget sees it, so a code editor could not insert a tab. A widget that
@@ -3078,6 +3094,34 @@ ed.SetHTML(html)                   // and back; history and selection are reset
 Limits: no tab stops (Tab is four spaces), no lists, tables or images, no
 find/replace; a mouse click during an IME composition accepts it as text instead
 of cancelling; bold is expressed only through the built-in faces.
+
+**The edit model — `RichDocument`.** The editor holds a document that can also
+be used on its own — without the widget, for example to build a document in
+code or to apply edits in a batch:
+
+```go
+d := widget.NewRichDocument(paras)            // or NewRichDocumentFromText(s)
+end := d.Insert(at, "text", style)            // '\n' splits the paragraph
+d.Delete(from, to)                            // across runs and paragraphs
+d.ApplyStyle(from, to, func(r *widget.RichRun) { r.Underline = true })
+d.SetParagraphFormat(from, to, func(p *widget.RichParagraph) { p.Align = widget.TextAlignCenter })
+sel, ok := d.Undo()                           // where to put the caret and selection
+paras := widget.RichParagraphsFromHTML(src)   // clipboard HTML (Word, browser) → paragraphs
+```
+
+Positions are runes of the document, paragraphs separated by one `\n`. Typed
+text takes the style of the character to its left. After every edit adjacent
+runs with equal formatting are merged; an empty paragraph remembers its
+formatting so typing in it does not start «by default». Undo keeps only the
+affected paragraphs, not document snapshots; `Type` merges consecutive typing
+into one undo, `BreakUndoGroup` ends a typing run, `BeginGroup`/`EndGroup`
+combine several edits. HTML parsing has no dependencies; scripts, styles and
+`javascript:`/`data:` links are dropped, font names from HTML are not carried
+over.
+
+**The caret** exists in display mode too — for keyboard selection and for a
+screen reader: `CaretPosition()`, `SetCaretPosition(pos)`, `IMECaretRect()`.
+It is drawn in the editor or with `ShowCaret`.
 
 ### Browser viewer (output/webstream)
 

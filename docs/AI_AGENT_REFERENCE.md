@@ -4278,6 +4278,56 @@ elsewhere centers the view there. Marks and thumb share one scale (content
 points): drawing and hit-testing both go through `rulerTrackLocked`,
 `rulerMarkLocked` and `rulerThumbLocked`, so what is drawn is what gets clicked.
 
+### Children of a scroll view: clicks, hover and repaint where they are seen — v3.29
+
+A long-standing and serious defect: in a scrolled `ScrollView` a click hit the
+wrong widget. A list of buttons A, B, C, D scrolled so that C and D are shown —
+a click on C pressed A, invisible, scrolled past the top edge.
+
+The cause is how the scroll view draws its children: the offset is applied by
+a translating draw context (PERF-12), and the children's `Bounds()` stay in
+CONTENT coordinates. Everything that looked at those bounds saw unshifted
+coordinates: hit testing; the coordinates of presses, moves, wheel and mouse
+capture; hover; repaint (a child refreshed the wrong place on screen); menus
+and drop-downs opened by children; the IME caret and accessibility bounds;
+nested scroll views; the same horizontally.
+
+Shifting the children's bounds for real is not an option: the performance
+tests require them not to change with scrolling, applications lay children out
+in content coordinates, and `Panel`/`Canvas` keep grandchildren in absolute
+coordinates — every wheel step would walk the whole subtree. So children stay
+in the content frame and coordinates are translated at every boundary with the
+outside world:
+
+```go
+// A container that shows its children shifted reports the offset:
+type ContentOffsetter interface {
+    ContentOffset() image.Point // screen = child-frame point + offset
+}
+```
+
+`ScrollView` implements it. Hit testing builds a path with a frame per step
+(`engine/frames.go`); presses, moves, wheel, file drops, cursor, tooltips, the
+mouse-capture owner and `ContextMenuAt` receive the point in their widget's
+frame; `Base` remembers its parent (set in `AddChild`, also by
+`TabControl.AddTab` and `DockManager`) and translates repaint areas up the
+chain, clipped to the visible part of the scroll view; overlays are drawn
+through `widget.OffsetContext`; `BuildAccessTree` reports screen bounds;
+`PopupMenu.Show` uses the frame of the event being handled
+(`widget.SetEventFrame`, set by the engine around the handler).
+
+Cost is unchanged: walking 5050 widgets on a mouse move takes the same ≈78 µs,
+scrolling stays one operation. With a zero offset behaviour is the same, with
+one deliberate difference: the cursor outside the scroll view no longer
+highlights children sticking out past its edge — hit testing behaved so
+before, hover now agrees with it.
+
+Remaining (documented in the code): hover after a wheel scroll updates on the
+next mouse move; a menu opened from the KEYBOARD by a widget inside a scroll
+view is clamped to the canvas the old way; overlays of scrolled children are
+drawn without the soft shadow; a custom container that keeps children past
+`Base.AddChild` translates repaint areas inexactly.
+
 ### Printing and saving to PDF — v3.29
 
 The engine had no printing. An application had to call the OS print subsystem
@@ -5036,6 +5086,16 @@ combination.
 F10 is an ordinary key with its own code (`KeyF10`) — the application opens
 its menu itself.
 
+**Since v3.29** the window also swallows the keyboard entry into its system
+menu. On releasing F10 or a lone Alt, `DefWindowProc` sent `WM_SYSCOMMAND` with
+`SC_KEYMENU` and `lParam == 0`; the engine window has no menu bar of its own,
+but the modal menu loop still started and took the keyboard — the application
+got `KeyF10`/`KeyAlt`, highlighted «File», and the next ↓ (even Escape) never
+reached it. Now exactly that entry returns 0 (`window/syskeymenu.go`);
+`Alt+Space` comes with `lParam == ' '` and still opens the window menu,
+`Alt+F4` goes through `SC_CLOSE` and is untouched. Verified with real key
+presses in a live window.
+
 ### Clipboard on Linux without external tools — v3.26
 
 The Linux clipboard ran `xclip` or `xsel` as a subprocess — a tool that may
@@ -5292,6 +5352,51 @@ wins). In the editor a link opens only on Ctrl+click. `AccessReadOnly() ==
 adjacent runs with equal formatting and drops empty runs (document invariants);
 `AppendParagraph` keeps undo history, `AppendRun` resets it. Not done: tab
 stops, lists/tables/images, find/replace, bold for fonts not built in.
+
+**The edit model — `RichDocument`** (no widget, no locks; the editor holds one):
+
+```go
+d := widget.NewRichDocument(paras)          // or NewRichDocumentFromText(s)
+end := d.Insert(at, "text", style)          // '\n' splits the paragraph; returns position after
+end = d.Type(at, "a", style)                // typing: consecutive Type calls merge into one undo
+d.InsertInline(at, "line\nbreak", style)    // '\n' stays a soft line break
+d.InsertParagraphs(at, widget.RichParagraphsFromHTML(src)) // paste
+d.Delete(from, to)                          // across runs and paragraphs; '\n' merges paragraphs
+d.Replace(from, to, "new", style)           // one undo entry; TypeReplace also merges further typing
+d.ApplyStyle(from, to, func(r *widget.RichRun) { r.Underline = true })
+d.SetParagraphFormat(from, to, func(p *widget.RichParagraph) { p.Align = widget.TextAlignCenter })
+st := d.StyleAt(pos)                        // style new text gets here: the rune to the left
+sel, ok := d.Undo()                         // RichDocSel{Anchor, Caret}: where to put caret/selection
+d.BreakUndoGroup()                          // call on caret move, click, focus loss
+d.BeginGroup(); /* several edits */; d.EndGroup() // one undo entry
+d.Revision()                                // grows on every change, incl. Undo/Redo
+```
+
+Positions are runes of the document, paragraphs separated by one `\n` (same as
+layout and selection). After every edit adjacent runs with equal formatting are
+merged and empty runs dropped — except the single run of an empty paragraph,
+which remembers the formatting so typing there does not start «by default».
+An undo record keeps the range of affected paragraphs and what stood there, so
+undo and redo are one swap operation and restore bit-for-bit; there are no
+whole-document snapshots, text strings are shared. Depth 200 by default
+(`SetUndoDepth`).
+
+`RichParagraphsFromHTML(src)` parses clipboard HTML from Word and browsers with
+no dependencies: paragraphs, headings, bold, italic, underline, strike, links,
+inline `color`/`background-color`/`font-size`/`font-weight`/`font-style`/
+`text-decoration`/`text-align`, lists (bullet + indent), `code`/`pre` as
+`BuiltinFontMono`. Scripts, styles, comments and Word markers are dropped, as
+are `javascript:`/`vbscript:`/`data:` links. `font-family` is not carried over
+(the engine does not know foreign fonts). `RichParagraphsFromText` splits on
+`\n`, `\r\n`, `\r`.
+
+**Caret** (both modes): `CaretPosition()`, `SetCaretPosition(pos)` (clears the
+selection, scrolls to the caret), `IMECaretRect()` (canvas coordinates, 1 px
+wide — where the IME candidate window goes). The caret is the active end of
+the selection; ←/→, Ctrl+←/→ (words), ↑/↓ with a remembered «desired X»,
+Home/End (visual line), Ctrl+Home/End, PgUp/PgDn, all with Shift to extend;
+Shift+click extends from the anchor. In display mode the caret is not drawn
+unless `ShowCaret`, and plain ↑/↓/PgUp/PgDn/Home/End scroll as before.
 
 ### Window, theme and containers
 
