@@ -923,7 +923,10 @@ if e.Mod&widget.ModAlt != 0 && menu.ActivateMnemonic(e) {
 обычным путём, а закрывшись, меню возвращает фокус прежнему виджету
 (с v3.29.1; раньше фокус приходилось отдавать строке вручную). Это работает,
 когда `ActivateMnemonic` вызван из обработки клавиши — из `OnKeyEvent` или
-`InputBindings`; вызванный вне её, фокус ставьте сами (`eng.SetFocus`).
+`InputBindings`; вызванный вне её, фокус ставьте сами (`eng.SetFocus`). Панель, открытую не
+событием движка (клавиша Win из сессии, таймер, другая горутина), фокус сама
+не просит: используйте `eng.RequestFocus(w)` / `eng.ReturnFocus(w)` (безопасно из
+любой горутины) или `desktop.FocusOnOpen(flyout, eng, target)`.
 
 Каскадные подменю (вложенные MenuItem):
 
@@ -2882,6 +2885,7 @@ mb := widget.NewMessageBox(eng)
 mb.ShowInfo("", "Документ сохранён.")                 // значок i, заголовок по severity
 mb.ShowQuestion("", "Сохранить изменения?", func(r widget.MessageBoxResult) { ... })
 id := mb.ShowInput("", "Имя:", "default", validate, onResult); id.SetHint("подсказка")
+// ширина диалога — по содержимому (380…640); явная: mb.ShowInputWidth(..., width)
 pd := mb.ShowProgress("Копирование", "file.jpg", onCancel)
 pd.SetDetail("34 из 120 · 61 МБ/с"); pd.SetProgress(0.28) // или SetIndeterminate(true)
 mb.ShowOpenFile(widget.FileDialogOptions{Filters: ...}, func(path string, ok bool) { ... })

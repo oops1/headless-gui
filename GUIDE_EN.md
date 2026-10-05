@@ -933,7 +933,10 @@ usual way, and on closing the menu gives the focus back to the previous widget
 (since v3.29.1; before, the application had to focus the bar by hand). This
 works when `ActivateMnemonic` is called while a key is being handled — from
 `OnKeyEvent` or `InputBindings`; called outside that, set the focus yourself
-(`eng.SetFocus`).
+(`eng.SetFocus`). A panel opened outside an engine event (a Win key from the
+session, a timer, another goroutine) cannot ask for focus itself: use
+`eng.RequestFocus(w)` / `eng.ReturnFocus(w)` (safe from any goroutine) or
+`desktop.FocusOnOpen(flyout, eng, target)`.
 
 Cascading submenus (nested MenuItem):
 
@@ -2901,6 +2904,7 @@ mb := widget.NewMessageBox(eng)
 mb.ShowInfo("", "Document saved.")                    // severity icon + default title
 mb.ShowQuestion("", "Save changes?", func(r widget.MessageBoxResult) { ... })
 id := mb.ShowInput("", "Name:", "default", validate, onResult); id.SetHint("hint")
+// dialog width follows the content (380..640); explicit: mb.ShowInputWidth(..., width)
 pd := mb.ShowProgress("Copying", "file.jpg", onCancel)
 pd.SetDetail("34 of 120 · 61 MB/s"); pd.SetProgress(0.28) // or SetIndeterminate(true)
 mb.ShowOpenFile(widget.FileDialogOptions{Filters: ...}, func(path string, ok bool) { ... })

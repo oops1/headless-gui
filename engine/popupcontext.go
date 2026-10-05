@@ -78,6 +78,13 @@ func (t *translatingContext) DrawTextFont(text string, x, y int, sizePt float64,
 	t.inner.DrawTextFont(text, x-t.dx, y-t.dy, sizePt, fontName, col)
 }
 
+// DrawTextRotated рисует повёрнутую строку в буфере попапа (см.
+// widget.RotatedTextDrawer): без этого вертикальная полоса меню «Пуск» в
+// отдельном окне пропадала бы.
+func (t *translatingContext) DrawTextRotated(text string, x, y int, sizePt float64, fontName string, angle int, col color.RGBA) bool {
+	return t.inner.DrawTextRotated(text, x-t.dx, y-t.dy, sizePt, fontName, angle, col)
+}
+
 func (t *translatingContext) MeasureText(text string, sizePt float64) int {
 	return t.inner.MeasureText(text, sizePt)
 }
@@ -144,6 +151,8 @@ var (
 	_ widget.ShadowDrawer   = (*translatingContext)(nil)
 	_ widget.RoundClipper   = (*translatingContext)(nil)
 	_ widget.OpacityDrawer  = (*translatingContext)(nil)
+
+	_ widget.RotatedTextDrawer = (*translatingContext)(nil)
 )
 
 // BlurBehind размывает уже нарисованное в r (в буфере попапа) и подкрашивает.

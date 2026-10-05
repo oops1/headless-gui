@@ -216,6 +216,7 @@ func Windows2000Profile() *Profile {
 	})
 	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
 	inheritTrayStyles(p)
+	addDialogStyles(p)
 	return p
 }
 
@@ -233,6 +234,7 @@ func Windows2000BlueProfile() *Profile {
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{
 		Fill: C(RGB(0, 84, 227)), Text: C(RGB(255, 255, 255)),
 	})
+	addDialogStyles(p)
 	return p
 }
 
@@ -512,6 +514,7 @@ func Windows10Profile() *Profile {
 	}
 
 	inheritTrayStyles(p)
+	addDialogStyles(p)
 	return p
 }
 
@@ -528,6 +531,7 @@ func Windows10DarkProfile() *Profile {
 		SetColor("border", RGB(70, 70, 70))
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface)})
 	p.SetStyle("menu", "", StateNormal, StyleDelta{Fill: C(RGB(43, 43, 43)), Text: C(text)})
+	addDialogStyles(p)
 	return p
 }
 
@@ -720,6 +724,7 @@ func Windows11Profile() *Profile {
 	}
 
 	inheritTrayStyles(p)
+	addDialogStyles(p)
 	return p
 }
 
@@ -756,6 +761,7 @@ func Windows11DarkProfile() *Profile {
 	})
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface)})
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{Fill: C(surface), Text: C(text)})
+	addDialogStyles(p)
 	return p
 }
 
@@ -967,6 +973,7 @@ func MacOSProfile() *Profile {
 	// без переопределения Corner/PadX задавать её отдельно незачем.
 
 	inheritTrayStyles(p)
+	addDialogStyles(p)
 	return p
 }
 
@@ -997,5 +1004,6 @@ func MacOSDarkProfile() *Profile {
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface)})
 	p.SetStyle("window", "titlebar", StateNormal, StyleDelta{Fill: C(RGB(50, 50, 52)), Text: C(RGB(150, 150, 150))})
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{Fill: C(RGB(50, 50, 52)), Text: C(text)})
+	addDialogStyles(p)
 	return p
 }

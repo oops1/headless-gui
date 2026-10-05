@@ -2820,6 +2820,8 @@ id := mb.ShowInput(title, label, initial,
     func(s string) string { return "" },
     func(text string, ok bool) {})
 id.SetHint("gray persistent hint under the field")   // error replaces it in red
+// Width follows the content (>= 380, <= 640: label, title, initial text);
+// ShowInputWidth(..., width) fixes it explicitly (width <= 0 = auto, min 200).
 
 // Progress dialog (thread-safe setters; onCancel nil -> no Cancel, no close btn).
 pd := mb.ShowProgress(title, status, onCancel)
@@ -3306,8 +3308,23 @@ func (d *svg.Document) RasterizeCached(w, h int, current color.RGBA, tint bool) 
     приоритет: атрибут < таблица стилей < `style=""`;
   - `<image href="data:image/png|jpeg|gif;base64,…">` (aspect, transform,
     opacity, усредняющее уменьшение);
-  - `filter`: `feGaussianBlur` и `feColorMatrix`; остальные примитивы
-    игнорируются; все именованные цвета CSS.
+  - `filter`: `feGaussianBlur` и `feColorMatrix` — прежним путём (покрытие и
+    цвет фигуры); `feOffset`, `feFlood`, `feComposite` (over/in/out/atop/xor/
+    arithmetic), `feMerge`, `feBlend` (normal/multiply/screen/darken/lighten),
+    `feDropShadow`, входы `SourceGraphic`/`SourceAlpha` и именованные `result` —
+    графом над слоем (`svg.FilterGraph`, `Group.Filter`; листовой фигуре с таким
+    фильтром движок заводит свою группу-слой), типичная тень и «Figma»-цепочка
+    с `BackgroundImageFix` совпадают с rsvg. Если в фильтре есть примитив
+    вне списка (`feTurbulence`, `feMorphology`, `feDisplacementMap`…), вход
+    `BackgroundImage`/`FillPaint`, ссылка на несуществующий `result` или
+    `primitiveUnits="objectBoundingBox"`, фильтр пропускается ЦЕЛИКОМ — элемент
+    рисуется без него (раньше оставалось «только размытие» и тень становилась
+    размытой копией элемента). Цвета фильтров считаются в sRGB, область
+    `x/y/width/height` фильтра не обрезает. Все именованные цвета CSS.
+  - Разбор терпим к сущностям: `&nbsp;`/`&copy;` (xml.HTMLEntity), голый `&` и
+    объявления `<!ENTITY>` из DOCTYPE (так Illustrator задаёт `xmlns`) не
+    роняют `svg.Parse`; структура проверяется строго (оборванный файл — ошибка),
+    корректные файлы разбираются побитно как раньше.
 - **API-дополнения** (`Shape` и новые типы, только добавления): `Shape.FillGradient/
   StrokeGradient *Gradient` (`Fill` для градиента = `Gradient.MeanColor()`),
   `Shape.Clips []*ClipPath`, `Shape.Masks []*Mask`, `Shape.BlurX/BlurY`,
@@ -4268,6 +4285,25 @@ the draw context cannot blur). `desktop.PaintStyle`: blur → tint → noise
 deterministic per-pixel hash, clip-aware, keeps the premultiplied invariant);
 no `BackdropDrawer` → `Fallback` if set, else the old translucent tint. JSON:
 `"noise"`, `"fallback"` in `backdrop`.
+
+**Rotated text.** `widget.RotatedTextDrawer` (optional context interface, like
+`BackdropDrawer`): `DrawTextRotated(text, x, y, sizePt, fontName, angle, col)
+bool` draws the string as `DrawTextFont` would at `(x, y)` rotated around that
+point by 90 (reads bottom-up; `(x, y)` is the bottom-left corner of the label),
+270 (top-down; top-right corner), 180 or 0. `engine.Canvas` lays the string out
+normally (shaping, fallbacks, kerning) into a physical-size scratch raster and
+permutes the glyph alpha mask by pixels — no resampling, so at 200 % the glyphs
+are as sharp as horizontal text. `translatingContext` (popup windows) and
+`widget.OffsetContext`/ScrollView forward it; a wrapper over a context without
+rotation returns `false` (nothing drawn). Width: `MeasureTextFont`; line height:
+`FontMetrics`/`MeasureUIFontMetrics`.
+
+**Dialog in built-in profiles.** The profiles declare `dialog.titlebar` (copy of
+the focused `window.titlebar`: navy with white text on Windows 2000, the blue
+variant its own) and `dialog.scrim` (black, alpha 90 classic / 110 others;
+`theme/dialogstyles.go`, added by each `…Profile()` constructor). Before, both
+fell back to `surface`: the scrim was opaque grey and hid the desktop and the
+title was white on grey. Declared styles are never overwritten.
 
 **Windows 10 profile.** The taskbar is acrylic (`win10Acrylic`: radius 20, tint
 `RGBA(31,31,31,210)`, noise 0.02, fallback `RGB(31,31,31)` — the previous
@@ -5772,6 +5808,15 @@ serves such requests during `SendKeyEvent`/`SendMouseButton`) and gives it back
 to the previous widget when the menu closes — Escape, a picked item, a click
 elsewhere. Called outside key or click handling it cannot ask, so focus the bar
 with `eng.SetFocus`.
+
+**Focus for a panel opened outside an engine event** (a Win key caught by the
+shell, a timer, another goroutine): `Engine.RequestFocus(w)` takes focus the way
+a widget's own request does (the previous owner is remembered) and
+`Engine.ReturnFocus(w)` gives it back unless focus has moved on. Safe from any
+goroutine: on the frame goroutine (or an engine that is not running) it runs at
+once, otherwise it is queued with `Post`, in call order. For flyouts:
+`desktop.FocusOnOpen(flyout, eng, target)` and `FlyoutManager.FocusOnOpen(eng)`
+(the `desktop.FocusRequester` interface is implemented by `*engine.Engine`).
 
 Also since v3.29.1, `ItemsSource="{Binding X}"` on `DataGrid` and `TreeView`
 passes the `*ObservableCollection` itself (it used to become a string and the

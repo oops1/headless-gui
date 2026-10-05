@@ -122,14 +122,22 @@ func (b *builder) applyEffects(n *xnode, pg propGetter, st inherited) inherited 
 	}
 	if v, ok := pg.get("filter"); ok {
 		if id, _, isURL := parseURLRef(v); isURL && id != "" {
-			if container {
-				if fs, ok := b.filterSpec(id, st.transform); ok {
-					if g == nil {
-						g = &Group{Opacity: 1}
-					}
-					g.BlurX, g.BlurY, g.ColorMatrix = fs.blurX, fs.blurY, fs.cmat
+			fs, fok := b.filterSpec(id, st.transform)
+			switch {
+			case !fok:
+			case fs.graph != nil:
+				// Сложный фильтр работает над склейкой слоя: листовой фигуре
+				// тоже нужна своя группа.
+				if g == nil {
+					g = &Group{Opacity: 1}
 				}
-			} else {
+				g.Filter = fs.graph
+			case container:
+				if g == nil {
+					g = &Group{Opacity: 1}
+				}
+				g.BlurX, g.BlurY, g.ColorMatrix = fs.blurX, fs.blurY, fs.cmat
+			default:
 				b.applyFilter(id, &st)
 			}
 		}
@@ -286,15 +294,54 @@ func (b *builder) maskFor(id string, n *xnode, st inherited) *Mask {
 type filterSpec struct {
 	blurX, blurY float64
 	cmat         *[20]float64
+	// graph — фильтр сложнее «размытие + матрица цвета» (сдвиг, заливка,
+	// композиция…): выполняется слоем целиком, blurX/blurY/cmat тогда пусты.
+	graph *FilterGraph
 }
 
-// filterSpec читает из <filter> то, что умеет: feGaussianBlur (размытие, в
-// единицах viewBox при преобразовании t) и feColorMatrix (цвет). Остальные
-// примитивы игнорируются. ok=false — фильтра нет или в нём нечего применять.
+// simpleFilter — фильтр целиком из feGaussianBlur и feColorMatrix, идущих
+// по цепочке от SourceGraphic: такой фильтр применяется прежним путём
+// (покрытие фигуры / цвет фигуры) без слоя.
+func simpleFilter(f *xnode) bool {
+	prev := ""
+	for i := range f.Nodes {
+		p := &f.Nodes[i]
+		if !isPrimTag(p.XMLName.Local) {
+			continue
+		}
+		if k := primKind(p.XMLName.Local); k != "blur" && k != "matrix" {
+			return false
+		}
+		in, _ := p.attr("in")
+		in = strings.TrimSpace(in)
+		if in != "" && in != "SourceGraphic" && in != prev {
+			return false
+		}
+		prev, _ = p.attr("result")
+		prev = strings.TrimSpace(prev)
+	}
+	return true
+}
+
+// filterSpec читает из <filter>: feGaussianBlur (размытие, в единицах viewBox
+// при преобразовании t) и feColorMatrix (цвет) — прежним путём; всё, что
+// сложнее (feOffset, feFlood, feComposite, feMerge, feBlend, feDropShadow,
+// входы SourceAlpha и именованные result), — графом (FilterGraph). Если в
+// фильтре есть примитив, которого движок не знает, фильтр пропускается
+// целиком (ok=false): размытая копия элемента вместо тени хуже, чем её
+// отсутствие. ok=false также — фильтра нет или в нём нечего применять.
 func (b *builder) filterSpec(id string, t Matrix) (fs filterSpec, ok bool) {
 	f := b.ids[id]
 	if f == nil || !strings.EqualFold(f.XMLName.Local, "filter") {
 		return fs, false
+	}
+	if !simpleFilter(f) {
+		g, gok := b.buildFilterGraph(f, t)
+		if !gok {
+			return fs, false
+		}
+		fs.graph = g
+		return fs, true
 	}
 	for i := range f.Nodes {
 		p := &f.Nodes[i]
