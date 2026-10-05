@@ -287,15 +287,17 @@ func TestGradient_UnresolvedPaint(t *testing.T) {
 	}
 }
 
-func TestGradient_PatternFallsBack(t *testing.T) {
-	const src = `<svg viewBox="0 0 8 8"><defs><pattern id="p" width="2" height="2"><rect width="1" height="1"/></pattern></defs>
+// Ссылка на элемент, который не paint server (здесь — rect), даёт запасной
+// цвет. Узоры pattern теперь поддержаны (pattern_test.go).
+func TestGradient_NonServerRefFallsBack(t *testing.T) {
+	const src = `<svg viewBox="0 0 8 8"><defs><rect id="p" width="2" height="2"/></defs>
 	<rect width="8" height="8" fill="url(#p) #f00"/></svg>`
 	doc, err := Parse([]byte(src))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(doc.Shapes) != 1 || doc.Shapes[0].Fill != (color.RGBA{255, 0, 0, 255}) {
-		t.Errorf("pattern не поддержан: ожидался запасной красный, got %+v", doc.Shapes)
+		t.Errorf("ссылка не на paint server: ожидался запасной красный, got %+v", doc.Shapes)
 	}
 }
 

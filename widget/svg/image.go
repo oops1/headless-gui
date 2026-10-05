@@ -135,6 +135,7 @@ func (b *builder) addImage(n *xnode, st inherited) {
 		FillOpacity: st.opacity,
 		Clips:       st.clips,
 		Masks:       st.masks,
+		Groups:      st.groups,
 		BlurX:       st.blurX,
 		BlurY:       st.blurY,
 		ColorMatrix: st.cmat,

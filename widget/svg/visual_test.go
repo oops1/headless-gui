@@ -29,6 +29,16 @@ func TestVisualSheet(t *testing.T) {
 		t.Skip("SVG_SHEET_DIR/SVG_SHEET_OUT не заданы")
 	}
 	refDir := os.Getenv("SVG_SHEET_REF")
+	// SVG_SHEET_OPTS: stroke, layers или all — точные режимы (Options).
+	var sheetOpts Options
+	switch os.Getenv("SVG_SHEET_OPTS") {
+	case "stroke":
+		sheetOpts.StrokeJoins = true
+	case "layers":
+		sheetOpts.GroupLayers = true
+	case "all":
+		sheetOpts = PreciseOptions
+	}
 	files, _ := filepath.Glob(filepath.Join(dir, "*.svg"))
 	sort.Strings(files)
 	cell := 128 // SVG_SHEET_CELL меняет размер ячейки (эталоны должны быть того же размера)
@@ -55,7 +65,7 @@ func TestVisualSheet(t *testing.T) {
 			t.Errorf("%s: %v", f, err)
 			continue
 		}
-		img := Render(doc, cell, cell, color.RGBA{})
+		img := RenderWith(doc, cell, cell, color.RGBA{}, sheetOpts)
 		x, y := 8+(i%cols)*per*(cell+8), 8+(i/cols)*(cell+8)
 		r := image.Rect(x, y, x+cell, y+cell)
 		draw.Draw(sheet, r, white, image.Point{}, draw.Src)

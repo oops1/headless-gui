@@ -3711,9 +3711,22 @@ ic.SetBounds(image.Rect(8, 8, 32, 32))
   a `data:` PNG, `display:none`, blur and `feColorMatrix` from `filter`.
   The content of `<defs>`, `<clipPath>`, `<mask>`, `<symbol>` is not drawn by
   itself.
-- Limitations: no `text` or `pattern`; stroke is a simple approximation (no
-  joins or caps); a group's `opacity`/`mask`/`filter` apply to each of its
-  shapes separately. The full list is in the `widget/svg` package comment.
+- Also: `pattern` (tiles, `patternUnits`/`patternContentUnits`/`viewBox`/
+  `patternTransform`), `<text>`/`<tspan>` drawn with the engine's fonts (`x y dx
+  dy`, `font-family/size/weight/style`, `text-anchor`) — `engine.New` registers
+  the bridge, without an engine text is not drawn; a group's `mask` and
+  `filter` apply to the composited group (as a layer).
+- Precise mode (off by default, the previous result bit for bit):
+  `svg.SetDefaultOptions(svg.PreciseOptions)` process-wide,
+  `doc.SetOptions(...)` per document, `doc.RasterizeCachedWith(..., opts)` /
+  `svg.RenderWith(doc, w, h, tint, opts)` per call. `StrokeJoins` —
+  `stroke-linejoin` (miter/round/bevel, `stroke-miterlimit`), `stroke-linecap`,
+  `stroke-dasharray`/`-dashoffset`, no "minimum width"; `GroupLayers` — a
+  group's `opacity` as an isolated layer (overlapping children no longer show
+  through each other).
+- Limitations: no external images, `marker`, `letter-spacing`, `textPath`,
+  `dominant-baseline`; without `StrokeJoins` the stroke is a simple
+  approximation. The full list is in the `widget/svg` package comment.
 
 The `widget/svg` package is also usable directly: `svg.Parse(data)` /
 `svg.ParseFile(path)` → `*svg.Document` with `RasterizeCached(w, h, current, tint)`.

@@ -3280,9 +3280,9 @@ func (d *svg.Document) RasterizeCached(w, h int, current color.RGBA, tint bool) 
     (атрибутом, `style`, CSS-классом; `currentColor`), стопы и атрибуты по
     цепочке `xlink:href`/`href`. Ссылка в пустоту без запасного цвета —
     «не рисовать» (по SVG), НЕ чёрный. Один стоп = сплошной цвет;
-    `pattern` не поддержан (запасной цвет или ничего);
+    `pattern` см. ниже;
   - `<defs>`, `<symbol>`, `<clipPath>`, `<mask>`, `<pattern>`, `<marker>`,
-    `<filter>`, `<style>`, `<text>` напрямую не рисуются; чужие XML-пространства
+    `<filter>`, `<style>` напрямую не рисуются; чужие XML-пространства
     (inkscape:, sodipodi:) пропускаются; `display:none`/`visibility:hidden`
     (атрибут, `style`, CSS) учитываются;
   - `<use>` (на фигуру/группу/`<symbol>`/вложенный `<svg>`, `x y width height
@@ -3301,13 +3301,68 @@ func (d *svg.Document) RasterizeCached(w, h int, current color.RGBA, tint bool) 
   `Shape.Clips []*ClipPath`, `Shape.Masks []*Mask`, `Shape.BlurX/BlurY`,
   `Shape.ColorMatrix`, `Shape.Image *Image`; `Paint.Ref/Fallback`, `PaintURL`.
   Геометрия в `Shape` по-прежнему в координатах viewBox.
-- **Ограничения (честно):** нет `text` (маска из текста даст сплошную
-  фигуру), `pattern`, внешних картинок; обводка (stroke) — упрощённая
-  аппроксимация (без join/cap/dash — на скруглённых кривых виден «гребень»);
-  `opacity`/`mask`/`filter` группы применяются к каждой фигуре отдельно, а не
-  к склеенной группе (разница видна лишь при перекрытии полупрозрачных
-  потомков). Проверка глазами: `SVG_SHEET_DIR=… SVG_SHEET_OUT=… [SVG_SHEET_REF=…]
-  go test ./widget/svg -run VisualSheet -v` (эталоны — `rsvg-convert`).
+- **`pattern`:** `fill|stroke="url(#id)"` — `patternUnits` (objectBoundingBox
+  по умолчанию), `patternContentUnits`, `viewBox`+`preserveAspectRatio`,
+  `patternTransform`, `x y width height`, цепочка `xlink:href` (атрибуты и
+  содержимое). Плитка растрируется под масштаб вывода и повторяется с
+  билинейной выборкой (`Shape.FillPattern/StrokePattern *Pattern`, содержимое —
+  `Pattern.Shapes`). Узор без размера/габаритов — «ничего»; ссылка в пустоту —
+  запасной цвет. Вложенные узоры и градиенты в узоре работают, цикл отсекается.
+- **`<text>` — мост к шрифтам.** Пакет `svg` шрифтов не знает: контуры букв
+  даёт интерфейс `svg.TextRasterizer` (`Outline(FontSpec, size, text)` →
+  контуры с началом на базовой линии, Y вниз, и ширина). Регистрация:
+  `svg.RegisterTextRasterizer(tr) uint64` / `UnregisterTextRasterizer(h)`
+  (отвечает последний; `svg.ParseWith(data, svg.ParseOptions{Text: tr})` — для
+  одного разбора). Движок регистрирует свою реализацию в `engine.New` и
+  снимает в `Stop` (`engine/svgtext.go`: контуры из sfnt-шрифтов канваса,
+  семейство/вес/наклон — по таблице семейств движка, запасные шрифты для
+  отсутствующих рун). Раскладка идёт при РАЗБОРЕ: документ, разобранный до
+  регистрации, останется без текста. Поддержано: `x y dx dy` (в том числе
+  списки по буквам), `font-family/size/weight/style` (px/pt/em/%/ключевые
+  слова), `text-anchor`, `<tspan>`/`<a>`, `xml:space`, `fill/stroke`/градиенты/
+  `clip-path`/`mask` (текст — обычные фигуры; маска из текста вырезает буквы).
+  Без моста текст не рисуется. Не поддержано: `letter-spacing`, `textPath`,
+  `dominant-baseline`, `textLength`, `text-decoration`, `rotate`.
+- **Точный режим `svg.Options`** (по умолчанию нулевой — прежний результат
+  побитно, хеш-тест `TestFlatRasterUnchanged`). Выбирается при РАСТЕРИЗАЦИИ, три
+  уровня: `svg.SetDefaultOptions(o)` (процесс) < `doc.SetOptions(o)` /
+  `doc.UseDefaultOptions()` (документ) < `doc.RasterizeWith/RasterizeCachedWith`,
+  `svg.RenderWith(doc, w, h, tint, o)` (вызов). Опции входят в ключ кэша.
+  `svg.PreciseOptions` = всё сразу. Поля:
+  - `StrokeJoins` — настоящая обводка (`stroke.go`): `stroke-linejoin`
+    (miter + `stroke-miterlimit`, round, bevel), `stroke-linecap` (butt, round,
+    square), `stroke-dasharray`/`-dashoffset` (нечётный список удваивается,
+    фаза по спецификации — окружность стартует справа), точки нулевой длины
+    при round/square, толщина ровно как задана (без «минимальных» 0,75 px).
+    Контур обводки — единый многоугольник на подконтур (левая сторона вперёд,
+    правая назад, у замкнутого — два встречных кольца), все одного направления
+    обхода: `vector.Rasterizer` считает покрытие знаковой суммой, и встречные
+    многоугольники вычли бы друг друга — НЕ нормализовать направление по знаку
+    площади. Атрибуты разбираются всегда (`Shape.StrokeJoin/StrokeCap/
+    MiterLimit/Dash/DashOffset`; поиск их в документе включается, только если
+    они где-то упомянуты — плоские значки разбираются как раньше), но без
+    флага не действуют;
+  - `GroupLayers` — `opacity` группы слоем. Опасное место: opacity по-прежнему
+    УМНОЖЕНА в `Shape.FillOpacity/StrokeOpacity` (для режима без флага), слой
+    её снимает делением (`rctx.div`), поэтому в `Shape.Groups` лежит ровно по
+    одной `Group{Opacity}` на каждый элемент с opacity<1 (контейнер или фигура
+    с заливкой И обводкой).
+  - Групповые `mask` и `filter` (блюр, `feColorMatrix`) контейнеров (g, svg, use,
+    symbol, text) рисуются слоем ВСЕГДА (`layer.go`: `Group.Masks/BlurX/BlurY/
+    ColorMatrix`, `Shape.Groups`, слой накладывается при смене цепочки групп —
+    фигуры группы лежат в `Document.Shapes` подряд; предел `maxLayerDepth`=16).
+    В `Shape.Masks/BlurX/ColorMatrix` теперь только эффекты самой листовой
+    фигуры. `clip-path` по-прежнему действует на каждую фигуру (результат тот
+    же). Флаг на mask/filter не влияет, плоские значки их не содержат.
+- **Ограничения (честно):** нет внешних картинок, `marker`, области фильтра
+  (`x/y/width/height` filter не обрезают размытие), `letter-spacing`, `textPath`;
+  без `StrokeJoins` обводка — упрощённая аппроксимация (на скруглённых кривых
+  виден «гребень»); без `GroupLayers` opacity группы действует на каждую фигуру
+  отдельно (разница видна лишь при перекрытии полупрозрачных потомков).
+  Проверка глазами: `SVG_SHEET_DIR=… SVG_SHEET_OUT=… [SVG_SHEET_REF=…]
+  [SVG_SHEET_OPTS=stroke|layers|all] go test ./widget/svg -run VisualSheet -v`
+  (эталоны — `rsvg-convert`); для текста (нужен движок) — то же в
+  `go test ./engine -run SVGTextVisualSheet`.
 - **Headless/нативно:** одинаково — чистый CPU-растеризатор, окно ОС не нужно
   (см. `tests/svgicon_test.go`).
 

@@ -22,6 +22,7 @@ import (
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v3/widget/svg"
 )
 
 // Engine управляет холстом, деревом виджетов и циклом рендеринга.
@@ -125,6 +126,10 @@ type Engine struct {
 	// measurerHandle — дескриптор регистрации измерителя текста
 	// (widget.RegisterTextMeasurer в New, снимается в Stop).
 	measurerHandle uint64
+
+	// svgTextHandle — дескриптор регистрации растеризатора <text> для
+	// widget/svg (svg.RegisterTextRasterizer в New, снимается в Stop).
+	svgTextHandle uint64
 
 	// moveHandle — дескриптор регистрации приёмника объявлений о переносе
 	// (widget.RegisterMoveSink в New, снимается в Stop).
@@ -393,6 +398,9 @@ func New(width, height, fps int) *Engine {
 			return e.canvas.FontMetrics(family, sizePt)
 		},
 	})
+	// <text> внутри SVG рисуется шрифтами этого движка (контуры глифов);
+	// регистрация со снятием, как и у измерителя.
+	e.svgTextHandle = svg.RegisterTextRasterizer(svgTextBridge{e})
 	return e
 }
 
@@ -991,6 +999,7 @@ func (e *Engine) Stop() {
 	widget.UnregisterUINotifier(e.notifierHandle)
 	widget.UnregisterMoveSink(e.moveHandle)
 	widget.UnregisterTextMeasurer(e.measurerHandle)
+	svg.UnregisterTextRasterizer(e.svgTextHandle)
 	close(e.quit)
 	// Таймеры гасим до ожидания цикла: stopped уже выставлен, новые не заведутся.
 	e.stopTimers()

@@ -14,6 +14,7 @@ type rasterKey struct {
 	r, g, b uint8
 	a       uint8
 	tint    bool
+	opt     uint8 // Options.bits(): режим входит в ключ
 }
 
 type rasterEntry struct {
@@ -29,10 +30,14 @@ const maxCacheEntries = 48
 //
 // Возвращаемый *image.RGBA принадлежит кэшу — вызывающий не должен его менять.
 func (d *Document) RasterizeCached(w, h int, current color.RGBA, tint bool) *image.RGBA {
+	return d.rasterizeCached(w, h, current, tint, d.Options())
+}
+
+func (d *Document) rasterizeCached(w, h int, current color.RGBA, tint bool, o Options) *image.RGBA {
 	if w <= 0 || h <= 0 {
 		return nil
 	}
-	key := rasterKey{w: w, h: h, r: current.R, g: current.G, b: current.B, a: current.A, tint: tint}
+	key := rasterKey{w: w, h: h, r: current.R, g: current.G, b: current.B, a: current.A, tint: tint, opt: o.bits()}
 	d.mu.Lock()
 	if d.cache != nil {
 		if e, ok := d.cache[key]; ok {
@@ -42,7 +47,7 @@ func (d *Document) RasterizeCached(w, h int, current color.RGBA, tint bool) *ima
 	}
 	d.mu.Unlock()
 
-	img := d.Rasterize(w, h, current, tint)
+	img := d.rasterize(w, h, current, tint, o)
 
 	d.mu.Lock()
 	if d.cache == nil {
@@ -68,6 +73,10 @@ func (d *Document) InvalidateCache() {
 // фон), сохраняя пропорции viewBox и центрируя содержимое. current
 // подставляется вместо currentColor; tint=true перекрашивает всё в current.
 func (d *Document) Rasterize(w, h int, current color.RGBA, tint bool) *image.RGBA {
+	return d.rasterize(w, h, current, tint, d.Options())
+}
+
+func (d *Document) rasterize(w, h int, current color.RGBA, tint bool, o Options) *image.RGBA {
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
 	if w <= 0 || h <= 0 {
 		return dst
@@ -89,7 +98,7 @@ func (d *Document) Rasterize(w, h int, current color.RGBA, tint bool) *image.RGB
 
 	c := &rctx{
 		w: w, h: h, s: s, tx: tx, ty: ty,
-		current: current, tint: tint,
+		current: current, tint: tint, opts: o, div: 1,
 		mapPt: func(p Point) (float32, float32) {
 			return float32(p.X*s + tx), float32(p.Y*s + ty)
 		},
@@ -106,8 +115,15 @@ type rctx struct {
 	s, tx, ty float64 // viewBox → пиксели: x*s+tx, y*s+ty
 	current   color.RGBA
 	tint      bool
+	opts      Options
 	mapPt     func(Point) (float32, float32)
 	dev2vb    Matrix
+
+	// div — произведение непрозрачностей открытых слоёв групп, уже лежащее в
+	// прозрачности текущей фигуры (см. syncLayers); 1 — слоёв нет.
+	div   float64
+	spare []*image.RGBA // закрытые слои для повторного использования
+	tiles map[*Pattern]*patTile
 
 	// Буферы even-odd создаются лениво: обычным иконкам они не нужны.
 	eo  *evenOddBuf
@@ -119,82 +135,133 @@ type rctx struct {
 	masks map[*Mask]*image.Alpha
 }
 
-// drawShapes рисует фигуры по порядку поверх dst.
+// drawShapes рисует фигуры по порядку поверх dst. Фигуры групп с эффектами
+// (см. Group) идут в отдельные слои.
 func (c *rctx) drawShapes(dst *image.RGBA, shapes []Shape) {
-	w, h := c.w, c.h
+	var ls layerState
+	target := dst
 	for i := range shapes {
 		sh := &shapes[i]
-
-		if sh.Image != nil {
-			c.drawImage(dst, sh)
-			continue
-		}
-		fx := sh.hasEffects()
-
-		if sh.HasFill {
-			col := sh.Fill
-			if sh.FillCurrent || c.tint {
-				col = c.current
-			}
-			if sh.ColorMatrix != nil {
-				col = applyColorMatrix(col, sh.ColorMatrix)
-			}
-			col = applyOpacity(col, sh.FillOpacity)
-			var gp *gradPainter
-			if sh.FillGradient != nil {
-				gp = newGradPainter(sh.FillGradient, c.dev2vb, c.current, c.tint, sh.ColorMatrix)
-			}
-			if (sh.FillGradient == nil && col.A > 0) || gp != nil {
-				var mask *image.Alpha
-				if sh.EvenOdd {
-					if c.eo == nil {
-						c.eo = newEvenOddBuf(w, h)
-					}
-					mask = c.eo.raster(sh.Paths, c.mapPt)
-				} else {
-					mask = rasterNonzero(w, h, sh.Paths, c.mapPt)
-				}
-				if fx {
-					mask = c.applyEffects(mask, sh)
-				}
-				if gp != nil {
-					blitPaint(dst, mask, sh.FillOpacity, gp)
-				} else {
-					blit(dst, mask, col)
-				}
+		if len(sh.Groups) > 0 || len(ls.stack) > 0 {
+			target = c.syncLayers(&ls, dst, sh)
+			if c.div <= 0 {
+				continue
 			}
 		}
+		c.drawShape(target, sh)
+	}
+	for len(ls.stack) > 0 {
+		c.closeLayer(&ls, dst)
+	}
+	c.div = 1
+}
 
-		if sh.HasStroke {
-			col := sh.Stroke
-			if sh.StrokeCurrent || c.tint {
-				col = c.current
-			}
-			if sh.ColorMatrix != nil {
-				col = applyColorMatrix(col, sh.ColorMatrix)
-			}
-			col = applyOpacity(col, sh.StrokeOpacity)
-			var gp *gradPainter
-			if sh.StrokeGradient != nil {
-				gp = newGradPainter(sh.StrokeGradient, c.dev2vb, c.current, c.tint, sh.ColorMatrix)
-			}
-			if (sh.StrokeGradient == nil && col.A > 0) || gp != nil {
-				sw := sh.StrokeWidth * c.s
-				if sw < 0.75 {
-					sw = 0.75 // минимальная видимая толщина
+// drawShape рисует одну фигуру: заливку, затем обводку.
+func (c *rctx) drawShape(dst *image.RGBA, sh *Shape) {
+	w, h := c.w, c.h
+	if sh.Image != nil {
+		c.drawImage(dst, sh)
+		return
+	}
+	fx := sh.hasEffects()
+
+	if sh.HasFill {
+		col := sh.Fill
+		if sh.FillCurrent || c.tint {
+			col = c.current
+		}
+		if sh.ColorMatrix != nil {
+			col = applyColorMatrix(col, sh.ColorMatrix)
+		}
+		fo := sh.FillOpacity / c.div
+		col = applyOpacity(col, fo)
+		var gp *gradPainter
+		if sh.FillGradient != nil {
+			gp = newGradPainter(sh.FillGradient, c.dev2vb, c.current, c.tint, sh.ColorMatrix)
+		}
+		var pp *patPainter
+		if sh.FillPattern != nil {
+			pp = c.newPatPainter(sh.FillPattern)
+		}
+		if (sh.FillGradient == nil && sh.FillPattern == nil && col.A > 0) || gp != nil || pp != nil {
+			var mask *image.Alpha
+			if sh.EvenOdd {
+				if c.eo == nil {
+					c.eo = newEvenOddBuf(w, h)
 				}
-				mask := rasterStroke(w, h, sh.Paths, sw, c.mapPt)
-				if fx {
-					mask = c.applyEffects(mask, sh)
-				}
-				if gp != nil {
-					blitPaint(dst, mask, sh.StrokeOpacity, gp)
-				} else {
-					blit(dst, mask, col)
-				}
+				mask = c.eo.raster(sh.Paths, c.mapPt)
+			} else {
+				mask = rasterNonzero(w, h, sh.Paths, c.mapPt)
+			}
+			if fx {
+				mask = c.applyEffects(mask, sh)
+			}
+			switch {
+			case gp != nil:
+				blitPaint(dst, mask, fo, gp)
+			case pp != nil:
+				blitPaint(dst, mask, fo, pp)
+			default:
+				blit(dst, mask, col)
 			}
 		}
 	}
+
+	if sh.HasStroke {
+		col := sh.Stroke
+		if sh.StrokeCurrent || c.tint {
+			col = c.current
+		}
+		if sh.ColorMatrix != nil {
+			col = applyColorMatrix(col, sh.ColorMatrix)
+		}
+		so := sh.StrokeOpacity / c.div
+		col = applyOpacity(col, so)
+		var gp *gradPainter
+		if sh.StrokeGradient != nil {
+			gp = newGradPainter(sh.StrokeGradient, c.dev2vb, c.current, c.tint, sh.ColorMatrix)
+		}
+		var pp *patPainter
+		if sh.StrokePattern != nil {
+			pp = c.newPatPainter(sh.StrokePattern)
+		}
+		if (sh.StrokeGradient == nil && sh.StrokePattern == nil && col.A > 0) || gp != nil || pp != nil {
+			sw := sh.StrokeWidth * c.s
+			var mask *image.Alpha
+			if c.opts.StrokeJoins {
+				mask = rasterStrokeJoins(w, h, sh.Paths, c.strokeParams(sh, sw), c.mapPt)
+			} else {
+				if sw < 0.75 {
+					sw = 0.75 // минимальная видимая толщина
+				}
+				mask = rasterStroke(w, h, sh.Paths, sw, c.mapPt)
+			}
+			if fx {
+				mask = c.applyEffects(mask, sh)
+			}
+			switch {
+			case gp != nil:
+				blitPaint(dst, mask, so, gp)
+			case pp != nil:
+				blitPaint(dst, mask, so, pp)
+			default:
+				blit(dst, mask, col)
+			}
+		}
+	}
+}
+
+// strokeParams переводит параметры обводки фигуры в пиксели устройства.
+func (c *rctx) strokeParams(sh *Shape, sw float64) strokeParams {
+	p := strokeParams{half: sw / 2, join: sh.StrokeJoin, cap: sh.StrokeCap, miter: sh.MiterLimit}
+	if len(sh.Dash) > 0 {
+		p.dash = make([]float64, len(sh.Dash))
+		for i, d := range sh.Dash {
+			p.dash[i] = d * c.s
+		}
+		p.dashAt = sh.DashOffset * c.s
+	}
+	return p
 }
 
 // hasEffects сообщает, нужны ли фигуре размытие, clip или mask.
@@ -212,7 +279,7 @@ func (c *rctx) drawImage(dst *image.RGBA, sh *Shape) {
 	if sh.hasEffects() {
 		mask = c.applyEffects(mask, sh)
 	}
-	blitPaint(dst, mask, sh.FillOpacity, p)
+	blitPaint(dst, mask, sh.FillOpacity/c.div, p)
 }
 
 // applyEffects применяет к покрытию фигуры размытие, затем clip-path и mask.
@@ -298,7 +365,8 @@ func (c *rctx) maskAlpha(m *Mask) *image.Alpha {
 	sub := &rctx{
 		w: c.w, h: c.h, s: c.s, tx: c.tx, ty: c.ty,
 		current: color.RGBA{A: 255}, // currentColor внутри маски — чёрный
-		mapPt:   c.mapPt, dev2vb: c.dev2vb,
+		opts:    c.opts, div: 1,
+		mapPt: c.mapPt, dev2vb: c.dev2vb,
 		clips: c.clips, masks: c.masks,
 	}
 	sub.drawShapes(tmp, m.Shapes)

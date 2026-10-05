@@ -99,19 +99,54 @@ func (b *builder) applyEffects(n *xnode, pg propGetter, st inherited) inherited 
 	if b.clipMode {
 		return st
 	}
+	// У контейнера mask и filter действуют на склейку всего содержимого, а не
+	// на каждую фигуру отдельно: они уходят в Group и рисуются слоем.
+	container := isContainerTag(n.XMLName.Local)
+	var g *Group
+	if container && st.own < 1 {
+		g = &Group{Opacity: st.own}
+	}
 	if v, ok := pg.get("mask"); ok {
 		if id, _, isURL := parseURLRef(v); isURL && id != "" {
 			if m := b.maskFor(id, n, st); m != nil {
-				st.masks = append(st.masks[:len(st.masks):len(st.masks)], m)
+				if container {
+					if g == nil {
+						g = &Group{Opacity: 1}
+					}
+					g.Masks = append(g.Masks, m)
+				} else {
+					st.masks = append(st.masks[:len(st.masks):len(st.masks)], m)
+				}
 			}
 		}
 	}
 	if v, ok := pg.get("filter"); ok {
 		if id, _, isURL := parseURLRef(v); isURL && id != "" {
-			b.applyFilter(id, &st)
+			if container {
+				if fs, ok := b.filterSpec(id, st.transform); ok {
+					if g == nil {
+						g = &Group{Opacity: 1}
+					}
+					g.BlurX, g.BlurY, g.ColorMatrix = fs.blurX, fs.blurY, fs.cmat
+				}
+			} else {
+				b.applyFilter(id, &st)
+			}
 		}
 	}
+	if g != nil {
+		st.groups = append(st.groups[:len(st.groups):len(st.groups)], g)
+	}
 	return st
+}
+
+// isContainerTag — элементы, чьё содержимое склеивается в группу.
+func isContainerTag(local string) bool {
+	switch strings.ToLower(local) {
+	case "svg", "g", "a", "switch", "use", "symbol", "text":
+		return true
+	}
+	return false
 }
 
 // clipFor строит вырезку для элемента n, ссылающегося на clipPath id.
@@ -247,13 +282,19 @@ func (b *builder) maskFor(id string, n *xnode, st inherited) *Mask {
 	return mask
 }
 
-// applyFilter учитывает из <filter> то, что умеет: feGaussianBlur (размытие
-// фигуры) и feColorMatrix (цвет). Остальные примитивы игнорируются — элемент
-// рисуется без них.
-func (b *builder) applyFilter(id string, st *inherited) {
+// filterSpec — то, что движок умеет из <filter>.
+type filterSpec struct {
+	blurX, blurY float64
+	cmat         *[20]float64
+}
+
+// filterSpec читает из <filter> то, что умеет: feGaussianBlur (размытие, в
+// единицах viewBox при преобразовании t) и feColorMatrix (цвет). Остальные
+// примитивы игнорируются. ok=false — фильтра нет или в нём нечего применять.
+func (b *builder) filterSpec(id string, t Matrix) (fs filterSpec, ok bool) {
 	f := b.ids[id]
 	if f == nil || !strings.EqualFold(f.XMLName.Local, "filter") {
-		return
+		return fs, false
 	}
 	for i := range f.Nodes {
 		p := &f.Nodes[i]
@@ -271,16 +312,34 @@ func (b *builder) applyFilter(id string, st *inherited) {
 			if sx < 0 || sy < 0 {
 				continue
 			}
-			t := st.transform
 			sx *= math.Hypot(t.A, t.B)
 			sy *= math.Hypot(t.C, t.D)
-			st.blurX = math.Hypot(st.blurX, sx)
-			st.blurY = math.Hypot(st.blurY, sy)
+			fs.blurX = math.Hypot(fs.blurX, sx)
+			fs.blurY = math.Hypot(fs.blurY, sy)
+			ok = true
 		case "fecolormatrix":
 			if m := parseColorMatrix(p); m != nil {
-				st.cmat = m
+				fs.cmat = m
+				ok = true
 			}
 		}
+	}
+	return fs, ok
+}
+
+// applyFilter добавляет фильтр листовой фигуры к её состоянию: размытие
+// складывается с унаследованным (вложенные размытия), матрица цвета заменяет.
+func (b *builder) applyFilter(id string, st *inherited) {
+	fs, ok := b.filterSpec(id, st.transform)
+	if !ok {
+		return
+	}
+	if fs.blurX > 0 || fs.blurY > 0 {
+		st.blurX = math.Hypot(st.blurX, fs.blurX)
+		st.blurY = math.Hypot(st.blurY, fs.blurY)
+	}
+	if fs.cmat != nil {
+		st.cmat = fs.cmat
 	}
 }
 

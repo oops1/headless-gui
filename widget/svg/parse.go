@@ -26,6 +26,9 @@ type Shape struct {
 	// градиента, а Fill хранит его средний цвет (для тех, кто градиенты не
 	// рисует). Градиент из одного стопа сводится к обычному Fill.
 	FillGradient *Gradient
+	// FillPattern — заливка fill="url(#pattern)": плитка узора. Тогда Fill не
+	// определён (нулевой цвет): узор рисует только растеризатор.
+	FillPattern *Pattern
 
 	// Обводка (базовая поддержка, см. doc.go).
 	HasStroke      bool
@@ -34,6 +37,15 @@ type Shape struct {
 	StrokeWidth    float64 // в координатах viewBox (масштаб предков учтён)
 	StrokeOpacity  float64
 	StrokeGradient *Gradient // как FillGradient, для stroke="url(#…)"
+	StrokePattern  *Pattern  // как FillPattern, для stroke="url(#…)"
+	// Параметры обводки, которые учитывает только режим Options.StrokeJoins
+	// (stroke-linejoin/-linecap/-miterlimit/-dasharray/-dashoffset). Длины в
+	// единицах viewBox, как StrokeWidth. MiterLimit 0 читается как 4.
+	StrokeJoin LineJoin
+	StrokeCap  LineCap
+	MiterLimit float64
+	Dash       []float64 // чётное число длин штрих/пробел; nil — сплошная
+	DashOffset float64
 
 	// Эффекты (всё в координатах viewBox, порядок применения: размытие, clip,
 	// mask, затем цвет и непрозрачность).
@@ -42,6 +54,12 @@ type Shape struct {
 	BlurX       float64     // feGaussianBlur stdDeviation, в единицах viewBox; 0 — без размытия
 	BlurY       float64
 	ColorMatrix *[20]float64 // feColorMatrix (строка за строкой, 4×5) над цветом заливки/обводки
+
+	// Groups — группы предков (внешняя первой), чей эффект действует на
+	// результат группы целиком: mask, filter и (с Options.GroupLayers)
+	// opacity. Групповые mask/filter в Masks/BlurX/ColorMatrix фигуры не
+	// попадают — они только здесь. Фигуры одной группы идут в Shapes подряд.
+	Groups []*Group
 
 	// Image — растровая картинка (<image>): тогда Paths — прямоугольник, в
 	// который она рисуется, а заливка/обводка не используются.
@@ -56,6 +74,10 @@ type Document struct {
 
 	mu    sync.Mutex
 	cache map[rasterKey]*rasterEntry
+
+	// Собственный режим растеризации (SetOptions); optSet=false — общий.
+	optSet bool
+	opt    Options
 }
 
 // inherited — наследуемое состояние при обходе дерева.
@@ -70,12 +92,27 @@ type inherited struct {
 	opacity       float64 // групповая непрозрачность (приближённо)
 	hidden        bool    // visibility: hidden|collapse
 
+	// own — opacity самого элемента (не накопленная): по ней строится Group.
+	own float64
+
+	// Параметры обводки (наследуются по CSS).
+	lineJoin   LineJoin
+	lineCap    LineCap
+	miterLimit float64
+	dash       []float64
+	dashOffset float64
+
+	// Шрифт (наследуется; разбирается только в документах с <text>).
+	font fontProps
+
 	// Эффекты предков: действуют на всё поддерево, а не наследуются по CSS,
-	// но для плоского списка фигур накапливаются так же.
+	// но для плоского списка фигур накапливаются так же. Исключение — mask и
+	// filter контейнеров: они в groups и рисуются слоем.
 	clips        []*ClipPath
 	masks        []*Mask
 	blurX, blurY float64
 	cmat         *[20]float64
+	groups       []*Group
 }
 
 func defaultInherited() inherited {
@@ -88,6 +125,9 @@ func defaultInherited() inherited {
 		strokeWidth:   1,
 		strokeOpacity: 1,
 		opacity:       1,
+		own:           1,
+		miterLimit:    defaultMiterLimit,
+		font:          defaultFont(),
 	}
 }
 
@@ -111,6 +151,12 @@ func (n *xnode) attr(name string) (string, bool) {
 // Parse разбирает SVG-данные в Document (лимиты MaxFileBytes и MaxDepth).
 // Неизвестные элементы и атрибуты игнорируются.
 func Parse(data []byte) (*Document, error) {
+	return parseDoc(data, nil)
+}
+
+// parseDoc — разбор; tr — растеризатор текста (nil — действующий
+// зарегистрированный).
+func parseDoc(data []byte, tr TextRasterizer) (*Document, error) {
 	if len(data) > MaxFileBytes {
 		return nil, fmt.Errorf("svg: данные слишком велики (%d байт > %d)", len(data), MaxFileBytes)
 	}
@@ -130,6 +176,10 @@ func Parse(data []byte) (*Document, error) {
 	}
 
 	b := newBuilder(doc, &root)
+	b.text = tr
+	if b.text == nil && b.shared.hasText {
+		b.text = currentTextRasterizer()
+	}
 	if vbSet {
 		b.vpW, b.vpH = doc.ViewBox[2], doc.ViewBox[3]
 	}
@@ -162,6 +212,7 @@ func decodeTree(data []byte) (xnode, error) {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	stack := make([]*xnode, 0, 32)
 	rootDone := false
+	textDepth := 0 // сколько <text> открыто: только внутри них копим буквы
 	for {
 		tok, err := dec.Token()
 		if err == io.EOF {
@@ -190,15 +241,26 @@ func decodeTree(data []byte) (xnode, error) {
 			p := stack[len(stack)-1]
 			p.Nodes = append(p.Nodes, xnode{XMLName: t.Name, Attrs: copyAttrs(t.Attr)})
 			stack = append(stack, &p.Nodes[len(p.Nodes)-1])
+			if t.Name.Local == "text" {
+				textDepth++
+			}
 		case xml.CharData:
-			// Текст нужен только таблице стилей; остальной (text, tspan…) не рисуем.
+			// Текст нужен таблице стилей и <text>: у второго буквы лежат
+			// узлами «#text» среди <tspan>, чтобы сохранить порядок.
 			if len(stack) > 0 {
-				if top := stack[len(stack)-1]; top.XMLName.Local == "style" {
+				top := stack[len(stack)-1]
+				switch {
+				case top.XMLName.Local == "style":
 					top.Text += string(t)
+				case textDepth > 0:
+					top.Nodes = append(top.Nodes, xnode{XMLName: xml.Name{Local: "#text"}, Text: string(t)})
 				}
 			}
 		case xml.EndElement:
 			if len(stack) > 0 {
+				if stack[len(stack)-1].XMLName.Local == "text" {
+					textDepth--
+				}
 				stack = stack[:len(stack)-1]
 				if len(stack) == 0 {
 					rootDone = true
@@ -286,6 +348,8 @@ type builder struct {
 	// noTransformFor — элемент, чей собственный transform не применяется (bbox
 	// считается в его локальной системе координат).
 	noTransformFor *xnode
+	// text — растеризатор для <text>; nil — текст не рисуется.
+	text TextRasterizer
 
 	shared *buildShared
 }
@@ -301,6 +365,10 @@ type buildShared struct {
 	clips     map[clipKey]*ClipPath
 	masks     map[maskKey]*Mask
 	pixels    int // сумма пикселей декодированных <image>
+	pats      map[patKey]*Pattern
+	hasText   bool // в документе есть <text>: нужен разбор свойств шрифта
+	hasStroke bool // есть stroke-linejoin/-linecap/-miterlimit/-dasharray/-dashoffset
+	textRuns  int  // сколько кусков текста уже разложено
 }
 
 func newBuilder(doc *Document, root *xnode) *builder {
@@ -336,6 +404,7 @@ func (b *builder) sub() *builder {
 		vpH:    b.vpH,
 		root:   b.root,
 		shared: b.shared,
+		text:   b.text,
 	}
 }
 
@@ -348,6 +417,22 @@ func (b *builder) index(n *xnode, depth int, css *strings.Builder) {
 		if _, dup := b.ids[v]; !dup {
 			b.ids[v] = n
 		}
+	}
+	if n.XMLName.Local == "text" {
+		b.shared.hasText = true
+	}
+	if !b.shared.hasStroke {
+		for _, at := range n.Attrs {
+			if strings.HasPrefix(at.Name.Local, "stroke-") || at.Name.Local == "style" {
+				if mentionsStrokeExt(at.Name.Local, at.Value) {
+					b.shared.hasStroke = true
+					break
+				}
+			}
+		}
+	}
+	if n.Text != "" && n.XMLName.Local == "style" && mentionsStrokeExt("style", n.Text) {
+		b.shared.hasStroke = true
 	}
 	if n.Text != "" && n.XMLName.Local == "style" {
 		if t, ok := n.attr("type"); !ok || t == "" || strings.EqualFold(t, "text/css") {
@@ -367,7 +452,7 @@ var nonRenderingTags = map[string]bool{
 	"defs": true, "clippath": true, "mask": true, "symbol": true,
 	"lineargradient": true, "radialgradient": true, "pattern": true,
 	"marker": true, "filter": true, "style": true, "title": true, "desc": true,
-	"metadata": true, "script": true, "text": true, "foreignobject": true,
+	"metadata": true, "script": true, "foreignobject": true,
 	"font": true, "font-face": true, "glyph": true, "cursor": true, "view": true,
 	"animate": true, "animatetransform": true, "animatemotion": true, "set": true,
 	"namedview": true,
@@ -436,6 +521,9 @@ func (b *builder) walk(n *xnode, parent inherited, depth int) {
 	st = b.applyEffects(n, pg, st)
 
 	switch tag {
+	case "text":
+		b.walkText(n, st, depth)
+		return
 	case "svg", "g", "a", "switch":
 		// контейнеры — только рекурсия; вложенный svg ещё и задаёт свой viewport
 		if tag == "svg" && depth > 0 {
@@ -469,13 +557,21 @@ func (b *builder) walk(n *xnode, parent inherited, depth int) {
 		cx := lenAttr(n, "cx")
 		cy := lenAttr(n, "cy")
 		r := lenAttr(n, "r")
-		b.addShape(st, circleContours(cx, cy, r))
+		if len(st.dash) > 0 {
+			b.addShape(st, ellipseContoursDash(cx, cy, r, r))
+		} else {
+			b.addShape(st, circleContours(cx, cy, r))
+		}
 	case "ellipse":
 		cx := lenAttr(n, "cx")
 		cy := lenAttr(n, "cy")
 		rx := lenAttr(n, "rx")
 		ry := lenAttr(n, "ry")
-		b.addShape(st, ellipseContours(cx, cy, rx, ry))
+		if len(st.dash) > 0 {
+			b.addShape(st, ellipseContoursDash(cx, cy, rx, ry))
+		} else {
+			b.addShape(st, ellipseContours(cx, cy, rx, ry))
+		}
 	case "line":
 		x1 := lenAttr(n, "x1")
 		y1 := lenAttr(n, "y1")
@@ -502,6 +598,8 @@ func (b *builder) walk(n *xnode, parent inherited, depth int) {
 // resolveState вычисляет наследуемое состояние для элемента n.
 func (b *builder) resolveState(n *xnode, parent inherited, get propGetter) inherited {
 	st := parent
+
+	st.own = 1
 
 	// transform
 	if s, ok := n.attr("transform"); ok && n != b.noTransformFor {
@@ -539,7 +637,34 @@ func (b *builder) resolveState(n *xnode, parent inherited, get propGetter) inher
 		st.strokeOpacity = clampUnit(parseOpacity(v))
 	}
 	if v, ok := get.get("opacity"); ok {
-		st.opacity = parent.opacity * clampUnit(parseOpacity(v))
+		st.own = clampUnit(parseOpacity(v))
+		st.opacity = parent.opacity * st.own
+	}
+	if b.shared.hasStroke {
+		if v, ok := get.get("stroke-linejoin"); ok {
+			if j, ok := parseLineJoin(v); ok {
+				st.lineJoin = j
+			}
+		}
+		if v, ok := get.get("stroke-linecap"); ok {
+			if c, ok := parseLineCap(v); ok {
+				st.lineCap = c
+			}
+		}
+		if v, ok := get.get("stroke-miterlimit"); ok {
+			if f := parseLength(v); f >= 1 {
+				st.miterLimit = f
+			}
+		}
+		if v, ok := get.get("stroke-dasharray"); ok {
+			st.dash = parseDashArray(v)
+		}
+		if v, ok := get.get("stroke-dashoffset"); ok {
+			st.dashOffset = parseLength(v)
+		}
+	}
+	if b.shared.hasText {
+		st.font = resolveFont(get, parent.font)
 	}
 	if v, ok := get.get("visibility"); ok {
 		switch strings.ToLower(strings.TrimSpace(v)) {
@@ -554,9 +679,10 @@ func (b *builder) resolveState(n *xnode, parent inherited, get propGetter) inher
 
 // rpaint — краска, разрешённая для конкретной фигуры.
 type rpaint struct {
-	kind uint8 // 0 — нет, 1 — цвет, 2 — currentColor, 3 — градиент
+	kind uint8 // 0 — нет, 1 — цвет, 2 — currentColor, 3 — градиент, 4 — узор
 	col  color.RGBA
 	grad *Gradient
+	pat  *Pattern
 }
 
 const (
@@ -564,6 +690,7 @@ const (
 	rpColor
 	rpCurrent
 	rpGradient
+	rpPattern
 )
 
 // resolvePaint превращает Paint в краску фигуры. Для fill="url(#…)" нужны
@@ -581,8 +708,8 @@ func (b *builder) resolvePaint(p Paint, st inherited, contours []Contour) rpaint
 }
 
 // resolveServer находит paint server по ссылке. Ссылка на отсутствующий или
-// неподдержанный объект (pattern) даёт запасную краску, а без неё — «ничего»
-// (как в браузерах), а не тихо чёрный.
+// неподдержанный объект даёт запасную краску, а без неё — «ничего» (как в
+// браузерах), а не тихо чёрный.
 func (b *builder) resolveServer(p Paint, st inherited, contours []Contour) rpaint {
 	fallback := func() rpaint {
 		if p.Fallback != nil {
@@ -591,6 +718,12 @@ func (b *builder) resolveServer(p Paint, st inherited, contours []Contour) rpain
 		return rpaint{}
 	}
 	n := b.ids[p.Ref]
+	if p.Ref != "" && n != nil && strings.EqualFold(n.XMLName.Local, "pattern") {
+		if pat := b.patternFor(n, st, contours); pat != nil {
+			return rpaint{kind: rpPattern, pat: pat}
+		}
+		return rpaint{} // узор найден, но рисовать нечем: «ничего»
+	}
 	if p.Ref == "" || n == nil || !isGradientTag(n) {
 		return fallback()
 	}
@@ -657,6 +790,13 @@ func (b *builder) addShape(st inherited, contours []Contour) {
 		return
 	}
 
+	scale := st.transform.AvgScale()
+	groups := st.groups
+	if hasFill && hasStroke && st.own < 1 {
+		// Заливка и обводка одной фигуры склеиваются, и только потом
+		// накладывается opacity (в режиме GroupLayers).
+		groups = append(groups[:len(groups):len(groups)], &Group{Opacity: st.own})
+	}
 	sh := Shape{
 		Paths:         applyTransform(contours, st.transform),
 		HasFill:       hasFill,
@@ -667,8 +807,12 @@ func (b *builder) addShape(st inherited, contours []Contour) {
 		HasStroke:     hasStroke,
 		StrokeCurrent: stroke.kind == rpCurrent,
 		Stroke:        stroke.col,
-		StrokeWidth:   st.strokeWidth * st.transform.AvgScale(),
+		StrokeWidth:   st.strokeWidth * scale,
 		StrokeOpacity: st.strokeOpacity * st.opacity,
+		StrokeJoin:    st.lineJoin,
+		StrokeCap:     st.lineCap,
+		MiterLimit:    st.miterLimit,
+		Groups:        groups,
 		Clips:         st.clips,
 		Masks:         st.masks,
 		BlurX:         st.blurX,
@@ -680,6 +824,19 @@ func (b *builder) addShape(st inherited, contours []Contour) {
 	}
 	if stroke.kind == rpGradient {
 		sh.StrokeGradient = stroke.grad
+	}
+	if fill.kind == rpPattern {
+		sh.FillPattern = fill.pat
+	}
+	if stroke.kind == rpPattern {
+		sh.StrokePattern = stroke.pat
+	}
+	if hasStroke && len(st.dash) > 0 {
+		sh.Dash = make([]float64, len(st.dash))
+		for i, d := range st.dash {
+			sh.Dash[i] = d * scale
+		}
+		sh.DashOffset = st.dashOffset * scale
 	}
 	b.doc.Shapes = append(b.doc.Shapes, sh)
 }
@@ -800,4 +957,18 @@ func maxf(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+// mentionsStrokeExt — упоминает ли значение атрибута (name — его имя) или
+// текст таблицы стилей свойства обводки, которые нужны только режиму
+// StrokeJoins. Без них разбор их не ищет: плоским значкам это лишние обходы.
+func mentionsStrokeExt(name, v string) bool {
+	if strings.HasPrefix(name, "stroke-") {
+		switch name {
+		case "stroke-linejoin", "stroke-linecap", "stroke-miterlimit", "stroke-dasharray", "stroke-dashoffset":
+			return true
+		}
+		return false
+	}
+	return strings.Contains(v, "stroke-line") || strings.Contains(v, "stroke-miter") || strings.Contains(v, "stroke-dash")
 }

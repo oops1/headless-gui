@@ -3686,9 +3686,22 @@ ic.SetBounds(image.Rect(8, 8, 32, 32))
   `clip-path`, `mask`, `<style>` с классами (`.st0{fill:…}`), `<image>` с
   `data:`-PNG, `display:none`, размытие и `feColorMatrix` из `filter`.
   Содержимое `<defs>`, `<clipPath>`, `<mask>`, `<symbol>` само не рисуется.
-- Ограничения: нет `text` и `pattern`; обводка (stroke) упрощённая (без
-  стыков и капов); `opacity`/`mask`/`filter` группы действуют на каждую фигуру
-  отдельно. Полный список — в комментарии пакета `widget/svg`.
+- Также: `pattern` (плитка, `patternUnits`/`patternContentUnits`/`viewBox`/
+  `patternTransform`), `<text>`/`<tspan>` (шрифтами движка: `x y dx dy`,
+  `font-family/size/weight/style`, `text-anchor`) — мост регистрирует
+  `engine.New`, без движка текст не рисуется; `mask` и `filter` группы
+  применяются к склеенной группе (слоем).
+- Точный режим (по умолчанию выключен, прежний результат побитно):
+  `svg.SetDefaultOptions(svg.PreciseOptions)` для всего процесса,
+  `doc.SetOptions(...)` для документа, `doc.RasterizeCachedWith(..., opts)` /
+  `svg.RenderWith(doc, w, h, tint, opts)` для одного вызова. `StrokeJoins` —
+  `stroke-linejoin` (miter/round/bevel, `stroke-miterlimit`),
+  `stroke-linecap`, `stroke-dasharray`/`-dashoffset`, без «минимальной
+  толщины»; `GroupLayers` — `opacity` группы слоем (перекрытия потомков не
+  просвечивают).
+- Ограничения: нет внешних картинок, `marker`, `letter-spacing`, `textPath`,
+  `dominant-baseline`; без режима `StrokeJoins` обводка упрощённая. Полный
+  список — в комментарии пакета `widget/svg`.
 
 Пакет `widget/svg` доступен и напрямую: `svg.Parse(data)` / `svg.ParseFile(path)`
 → `*svg.Document` с методом `RasterizeCached(w, h, current, tint)`.
