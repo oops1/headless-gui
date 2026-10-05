@@ -82,6 +82,8 @@ func declareWin11Taskbar(p *Profile) {
 		SetMetric("tray.group.height", 40).
 		SetMetric("tray.badge.size", 12)
 
+	// Пустой элемент (скрытый поиск) не оставляет двойного зазора.
+	p.SetFlag("taskbar.skip.empty", true)
 	p.SetFlag("taskbutton.attention", true).
 		SetFlag("tray.bell", true).
 		SetFlag("search.hint.short", true)

@@ -114,6 +114,11 @@ const (
 	KeyTaskbarHeight theme.Key = "taskbar.height"
 	KeyTaskbarPadX   theme.Key = "taskbar.pad.x"
 	KeyTaskbarGap    theme.Key = "taskbar.gap"
+	// KeyTaskbarSkipEmpty — флаг: элемент нулевой ширины не добавляет зазор
+	// слота (скрытое поле поиска не оставляет двойного промежутка).
+	// Флагом, а не всегда: в других темах такие элементы есть, и их панель
+	// обязана остаться побитно прежней.
+	KeyTaskbarSkipEmpty theme.Key = "taskbar.skip.empty"
 	// KeyTaskbarCentered — ставить ли группу «пуск + приложения» по центру
 	// панели (Windows 11) вместо прижатия влево (всё остальное).
 	KeyTaskbarCentered theme.Key = "taskbar.centered"
@@ -319,6 +324,7 @@ func (t *Taskbar) relayout() {
 	}
 	padX := t.metric(KeyTaskbarPadX)
 	gap := t.metric(KeyTaskbarGap)
+	skip := t.flag(KeyTaskbarSkipEmpty)
 	inner := image.Rect(b.Min.X+padX, b.Min.Y, b.Max.X-padX, b.Max.Y)
 	if inner.Empty() {
 		return
@@ -334,7 +340,7 @@ func (t *Taskbar) relayout() {
 		// всю высоту панели, остальные стоят по центру своей высоты.
 		sz := stretchToStrip(t.tm, it, t.sizeOf(it, avail), avail.Y)
 		place(it, image.Rect(right-sz.X, inner.Min.Y, right, inner.Min.Y+sz.Y), inner)
-		right -= sz.X + gap
+		right -= spanWithGap(sz.X, gap, skip)
 	}
 	trayStart := right
 	t.trayEdge = trayStart
@@ -358,7 +364,7 @@ func (t *Taskbar) relayout() {
 	startTotal := 0
 	for i, it := range start {
 		startW[i] = t.sizeOf(it, avail).X
-		startTotal += startW[i] + gap
+		startTotal += spanWithGap(startW[i], gap, skip)
 	}
 	appsAvail := trayStart - lead - startTotal
 	if appsAvail < 0 {
@@ -366,12 +372,16 @@ func (t *Taskbar) relayout() {
 	}
 	appsW := make([]int, len(apps))
 	appsTotal := 0
+	visibleApps := 0
 	for i, it := range apps {
 		appsW[i] = t.sizeOf(it, image.Pt(appsAvail, avail.Y)).X
 		appsTotal += appsW[i]
+		if appsW[i] > 0 || !skip {
+			visibleApps++
+		}
 	}
-	if len(apps) > 0 {
-		appsTotal += gap * (len(apps) - 1)
+	if visibleApps > 0 {
+		appsTotal += gap * (visibleApps - 1)
 	}
 
 	// Группа «пуск + приложения» либо прижата влево, либо стоит по центру
@@ -393,7 +403,7 @@ func (t *Taskbar) relayout() {
 
 	for i, it := range start {
 		place(it, image.Rect(x, inner.Min.Y, x+startW[i], inner.Min.Y+t.sizeOf(it, avail).Y), inner)
-		x += startW[i] + gap
+		x += spanWithGap(startW[i], gap, skip)
 	}
 	t.startEdge = x
 	if len(apps) == 0 {
@@ -409,7 +419,7 @@ func (t *Taskbar) relayout() {
 	}
 	scale := 1.0
 	if appsTotal > midAvail && appsTotal > 0 {
-		gaps := gap * (len(apps) - 1)
+		gaps := gap * max(visibleApps-1, 0)
 		if appsTotal > gaps {
 			scale = float64(midAvail-gaps) / float64(appsTotal-gaps)
 		}
@@ -420,8 +430,23 @@ func (t *Taskbar) relayout() {
 	for i, it := range apps {
 		w := int(float64(appsW[i]) * scale)
 		place(it, image.Rect(x, inner.Min.Y, x+w, inner.Max.Y), inner)
-		x += w + gap
+		if !skip || appsW[i] > 0 {
+			x += w + gap
+		}
 	}
+}
+
+// spanWithGap — сколько места элемент занимает в ряду вместе с зазором до
+// соседа. Элемент нулевой ширины (скрытое поле поиска, пустая область) места
+// не занимает вовсе: раньше он всё равно добавлял зазор слота, и соседи
+// стояли с двойным промежутком (замечание WinLine после этапа 0).
+//
+// Без флага темы (skip == false) — прежнее поведение: зазор есть всегда.
+func spanWithGap(w, gap int, skip bool) int {
+	if skip && w <= 0 {
+		return 0
+	}
+	return w + gap
 }
 
 // place ставит элемент в прямоугольник, вписывая его в границы панели.
