@@ -110,8 +110,19 @@ func (a *ApplicationArea) OnKeyEvent(e widget.KeyEvent) {
 
 // activateCell делает с ячейкой i то же, что щелчок по ней: запускает
 // закреплённое незапущенное, сворачивает активное окно, активирует остальные,
-// а у стопки окон переключает окна по кругу.
-func (a *ApplicationArea) activateCell(i int) { a.activate(i, false) }
+// а стопка окон открывает список окон с фокусом клавиатуры (GroupKeyArea) —
+// если за областью следит предпросмотр, иначе переключает окна по кругу.
+func (a *ApplicationArea) activateCell(i int) {
+	a.mu.RLock()
+	onKey := a.onGroupKey
+	stack := i >= 0 && i < len(a.entries) && a.entries[i].live && a.entries[i].stack()
+	a.mu.RUnlock()
+	if stack && onKey != nil {
+		onKey(i)
+		return
+	}
+	a.activate(i, false)
+}
 
 // FocusRing обводит выбранную ячейку, а не всю область.
 func (a *ApplicationArea) FocusRing() (image.Rectangle, *theme.Style) {

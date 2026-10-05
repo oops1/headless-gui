@@ -49,6 +49,9 @@ type ApplicationArea struct {
 	// onGroup — кому отдавать щелчок по кнопке со многими окнами (см.
 	// SetGroupListener).
 	onGroup func(idx int)
+	// onGroupKey — кому отдавать Enter и Space на кнопке со многими окнами (см.
+	// SetGroupKeyListener).
+	onGroupKey func(idx int)
 	// cmds — команды контекстного меню от потребителя; nil — DefaultAppCommands.
 	cmds AppCommands
 
@@ -64,6 +67,9 @@ type ApplicationArea struct {
 	// vertical — область лежит в столбце боковой панели: ячейки идут сверху
 	// вниз, без подписей и без презентера дока (applicationarea_vertical.go).
 	vertical bool
+	// edge — край экрана, у которого стоит панель; в столбце метка открытого
+	// окна рисуется на стороне ячейки, обращённой к нему (taskmark_edge.go).
+	edge Edge
 }
 
 // appEntry — одна ячейка области: либо окно, либо закреплённое приложение,
@@ -443,11 +449,14 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 		// Метка открытого окна: закреплённое, но незапущенное её не получает —
 		// в этом вся разница между «закреплено» и «открыто».
 		if e.live {
-			drawTaskMark(ctx, a.tm, r, e.active, s)
+			drawTaskMarkAt(ctx, a.tm, r, e.active, s, markEdgeOf(a.vertical, a.edge))
 		}
 
 		padX := int(s.PadX)
 		iconX := r.Min.X + padX
+		if a.vertical {
+			iconX = r.Min.X + (r.Dx()-iconSize)/2 // в столбце значок по центру ячейки
+		}
 		var iconRect image.Rectangle
 		if (e.icon != nil || e.iconAt != nil) && iconSize > 0 {
 			iconRect = image.Rect(iconX, r.Min.Y+(r.Dy()-iconSize)/2, iconX+iconSize, r.Min.Y+(r.Dy()-iconSize)/2+iconSize)
@@ -516,6 +525,14 @@ func (a *ApplicationArea) SetHoverListener(fn func(idx int)) {
 func (a *ApplicationArea) SetGroupListener(fn func(idx int)) {
 	a.mu.Lock()
 	a.onGroup = fn
+	a.mu.Unlock()
+}
+
+// SetGroupKeyListener реализует GroupKeyArea: кому отдавать Enter и Space на
+// кнопке со многими окнами. Без слушателя клавиши листают окна по кругу.
+func (a *ApplicationArea) SetGroupKeyListener(fn func(idx int)) {
+	a.mu.Lock()
+	a.onGroupKey = fn
 	a.mu.Unlock()
 }
 
@@ -626,8 +643,8 @@ func (a *ApplicationArea) OnMouseButton(e widget.MouseEvent) bool {
 // activate делает с ячейкой i то, что делает щелчок по ней: запускает
 // закреплённое незапущенное, сворачивает активное окно, активирует остальные,
 // а у стопки открывает список окон (showList) — или, когда списка не
-// показать, переключает окна по кругу. С клавиатуры список недоступен: в него
-// некуда перенести фокус, поэтому Enter и Space у стопки листают окна.
+// показать, переключает окна по кругу. Клавиши Enter и Space у стопки идут
+// отдельным путём (activateCell): список, открытый с клавиатуры, получает фокус.
 func (a *ApplicationArea) activate(i int, showList bool) {
 	a.mu.RLock()
 	var entry appEntry
@@ -700,9 +717,15 @@ func (a *ApplicationArea) ShowCommands(i int) {
 	} else {
 		cmds = DefaultAppCommands(a.cat, a.wm, btn)
 	}
-	// Панель вверху экрана (строка меню) раскрывает меню вниз.
-	below := a.tm != nil && a.tm.GetFlag(KeyTaskbarTop, false)
-	a.menu.show(a.tm, menuItems(cmds), anchor, below)
+	// Панель вверху экрана (строка меню) раскрывает меню вниз, боковая — вбок.
+	edge := EdgeBottom
+	switch {
+	case a.vertical:
+		edge = markEdgeOf(true, a.edge)
+	case a.tm != nil && a.tm.GetFlag(KeyTaskbarTop, false):
+		edge = EdgeTop
+	}
+	a.menu.show(a.tm, menuItems(cmds), anchor, edge)
 }
 
 // ToolTipAt возвращает подсказку кнопки под точкой: название приложения (у

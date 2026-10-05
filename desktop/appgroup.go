@@ -153,6 +153,10 @@ type GroupClickArea interface {
 type appMenuHost struct {
 	mu   sync.Mutex
 	menu *widget.PopupMenu
+	// tm — тема, которой красится меню: пока оно открыто, светлый режим панели
+	// (taskbar.light) могут переключить, и перекрашивать приходится на лету, а
+	// не пересоздавать меню.
+	tm *theme.Manager
 }
 
 func (h *appMenuHost) get() *widget.PopupMenu {
@@ -166,8 +170,10 @@ func (h *appMenuHost) open() bool {
 	return m != nil && m.IsOpen()
 }
 
-// show открывает меню над (или под) прямоугольником anchor.
-func (h *appMenuHost) show(tm *theme.Manager, items []widget.MenuItem, anchor image.Rectangle, below bool) {
+// show открывает меню у прямоугольника anchor, на стороне, обращённой к
+// рабочему столу: над кнопкой у нижней панели (EdgeBottom), под ней у верхней
+// (EdgeTop), справа от неё у левой (EdgeLeft) и слева у правой (EdgeRight).
+func (h *appMenuHost) show(tm *theme.Manager, items []widget.MenuItem, anchor image.Rectangle, edge Edge) {
 	if len(items) == 0 {
 		return
 	}
@@ -176,7 +182,7 @@ func (h *appMenuHost) show(tm *theme.Manager, items []widget.MenuItem, anchor im
 	themeMenu(m, tm)
 	h.mu.Lock()
 	old := h.menu
-	h.menu = m
+	h.menu, h.tm = m, tm
 	h.mu.Unlock()
 	if old != nil {
 		old.Close()
@@ -184,17 +190,30 @@ func (h *appMenuHost) show(tm *theme.Manager, items []widget.MenuItem, anchor im
 
 	// Меню ставят у края кнопки, обращённого к рабочему столу: PopupMenu
 	// умеет только «от точки», поэтому высоту узнаём пробным показом.
-	m.Show(anchor.Min.X, anchor.Max.Y)
-	if below {
-		return
-	}
-	if r := m.OverlayBounds(); !r.Empty() {
-		m.Show(anchor.Min.X, anchor.Min.Y-r.Dy())
+	switch edge {
+	case EdgeTop:
+		m.Show(anchor.Min.X, anchor.Max.Y)
+	case EdgeLeft:
+		m.Show(anchor.Max.X, anchor.Min.Y)
+	case EdgeRight:
+		m.Show(anchor.Min.X, anchor.Min.Y)
+		if r := m.OverlayBounds(); !r.Empty() {
+			m.Show(anchor.Min.X-r.Dx(), anchor.Min.Y)
+		}
+	default:
+		m.Show(anchor.Min.X, anchor.Max.Y)
+		if r := m.OverlayBounds(); !r.Empty() {
+			m.Show(anchor.Min.X, anchor.Min.Y-r.Dy())
+		}
 	}
 }
 
 func (h *appMenuHost) drawOverlay(ctx widget.DrawContext) {
 	if m := h.get(); m != nil && m.IsOpen() {
+		h.mu.Lock()
+		tm := h.tm
+		h.mu.Unlock()
+		themeMenu(m, tm) // режим панели мог смениться, пока меню открыто
 		m.DrawOverlay(ctx)
 	}
 }
@@ -359,5 +378,10 @@ func themeMenu(m *widget.PopupMenu, tm *theme.Manager) {
 		} else if base.Text.A != 0 {
 			m.HoverTextColor = base.Text
 		}
+	}
+	// Недоступный пункт: тема без своего правила отдаёт цвет обычного текста
+	// (состояние не объявлено), и тогда остаётся приглушённый по умолчанию.
+	if dis := tm.GetStyle("menu", "item", theme.StateDisabled); dis.Text.A != 0 && dis.Text != base.Text {
+		m.DisabledColor = dis.Text
 	}
 }

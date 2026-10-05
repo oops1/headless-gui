@@ -795,6 +795,7 @@ func (m *StartMenu) showContext(t StartTarget, at image.Point) {
 		if items := m.ContextMenu(t); len(items) > 0 {
 			p := m.ensurePopup()
 			p.SetItems(items)
+			themeMenu(p, m.tm) // светлая или тёмная панель — меню в её цвет
 			p.Show(at.X, at.Y)
 		}
 		return

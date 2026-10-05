@@ -76,11 +76,14 @@ func (t *Taskbar) Thickness() int {
 
 // syncOrientation сообщает элементам, лежат ли они в столбце.
 func (t *Taskbar) syncOrientation() {
-	v := t.Vertical()
+	v, edge := t.Vertical(), t.Edge()
 	for _, slot := range t.slots {
 		for _, it := range slot {
 			if vi, ok := it.(VerticalItem); ok {
 				vi.SetVertical(v)
+			}
+			if ei, ok := it.(EdgeAware); ok {
+				ei.SetBarEdge(edge)
 			}
 		}
 	}

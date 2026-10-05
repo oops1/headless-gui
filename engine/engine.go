@@ -72,6 +72,12 @@ type Engine struct {
 	damage    []image.Rectangle // области InvalidateRect с прошлого кадра
 	damageAll bool              // Invalidate() — полный diff
 
+	// subpixelOwn — подпиксельный текст включила или выключила тема, а не
+	// приложение; subpixelPinned — приложение распорядилось само
+	// (SetTextSubpixel), и тема режим больше не трогает; subpixelWant — что
+	// просил последний применённый профиль. Под frameMu.
+	subpixelOwn, subpixelPinned, subpixelWant bool
+
 	focus    focusManager  // текущий виджет с фокусом
 	loan     focusLoan     // фокус, взятый виджетом по просьбе (focusreq.go)
 	captured widget.Widget // виджет, захвативший мышь (drag)
@@ -779,12 +785,57 @@ func (e *Engine) SetDefaultFont(name string) bool {
 // Меняет ширину строк, поэтому включать нужно до построения интерфейса;
 // вызов на готовом интерфейсе перерисует его, но раскладка, посчитанная по
 // старым ширинам, не пересчитается. Профиль темы выражает пожелание флагом
-// theme.FlagTextSubpixel, применить его — дело того, кто владеет движком.
+// theme.FlagTextSubpixel; движок читает его при применении профиля
+// (SetThemeProfile, ApplyThemeProfile, SetTheme). Явный вызов SetTextSubpixel
+// главнее темы: пока приложение не вернёт выбор теме (UseThemeTextSubpixel),
+// смена профиля режим не трогает.
 func (e *Engine) SetTextSubpixel(on bool) {
 	e.frameMu.Lock()
-	e.canvas.setTextSubpixel(on)
+	e.subpixelPinned, e.subpixelOwn = true, false
+	e.setSubpixelLocked(on)
 	e.frameMu.Unlock()
 	e.Invalidate()
+}
+
+// UseThemeTextSubpixel возвращает выбор подпиксельного текста теме: явное
+// SetTextSubpixel приложения снимается, и режим тут же становится таким,
+// каким его просит последний применённый профиль.
+func (e *Engine) UseThemeTextSubpixel() {
+	e.frameMu.Lock()
+	e.subpixelPinned = false
+	e.setSubpixelLocked(e.subpixelWant)
+	e.subpixelOwn = e.subpixelWant
+	e.frameMu.Unlock()
+	e.Invalidate()
+}
+
+// setSubpixelLocked переключает режим глифов и, если он действительно
+// изменился, сбрасывает замеры строк: ширины у режимов разные, и раскладка,
+// посчитанная по старым, перестала бы совпадать с отрисовкой. Под frameMu.
+func (e *Engine) setSubpixelLocked(on bool) {
+	if e.canvas.fontCache.Subpixel() == on {
+		return
+	}
+	e.canvas.setTextSubpixel(on)
+	widget.BumpTextMetricsRev()
+}
+
+// followThemeSubpixel приводит режим к просьбе темы (ThemeStyle.TextSubpixel).
+// Включает его, когда тема просит; выключает только то, что включила сама
+// тема, — режим, выбранный приложением, остаётся. Под frameMu.
+func (e *Engine) followThemeSubpixel(want bool) {
+	e.subpixelWant = want
+	if e.subpixelPinned {
+		return
+	}
+	switch {
+	case want:
+		e.setSubpixelLocked(true)
+		e.subpixelOwn = true
+	case e.subpixelOwn:
+		e.setSubpixelLocked(false)
+		e.subpixelOwn = false
+	}
 }
 
 // TextSubpixel сообщает, включено ли подпиксельное позиционирование глифов.
@@ -846,6 +897,7 @@ func (e *Engine) SetTheme(t *widget.Theme) {
 	// не идёт, поэтому и палитра, и цвета дерева меняются атомарно для рендера.
 	e.frameMu.Lock() // массовая мутация цветов дерева — не во время отрисовки
 	widget.ApplyGlobalTheme(t)
+	e.followThemeSubpixel(t.Style.TextSubpixel)
 	e.mu.RLock()
 	root := e.root
 	e.mu.RUnlock()

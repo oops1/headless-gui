@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/focusreq"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -113,6 +114,13 @@ type WindowPreview struct {
 	listHover int
 	// pendingWins — список окон кнопки, ради которой заведён openTimer.
 	pendingWins []WindowInfo
+	// listKbd — выбор в списке сделан клавишами (или список открыт клавишей):
+	// выбранное окно обведено рамкой фокуса. focused — список держит фокус
+	// клавиатуры (groupKeyed).
+	listKbd, focused bool
+	// listAnchor — кнопка, к которой прижимается список; нужна, пока Open ещё не
+	// поставил Anchor, а размер списка уже спрашивают (listSpace).
+	listAnchor image.Rectangle
 }
 
 // HoverArea — область панели задач с кнопками окон, к которым прижимается
@@ -170,6 +178,10 @@ func (p *WindowPreview) Track(area HoverArea) {
 		// задержки наведения.
 		if g, ok := area.(GroupClickArea); ok {
 			g.SetGroupListener(p.groupClicked)
+		}
+		// Enter и Space на стопке открывают список с фокусом клавиатуры.
+		if g, ok := area.(GroupKeyArea); ok {
+			g.SetGroupKeyListener(p.groupKeyed)
 		}
 	}
 }
@@ -304,8 +316,8 @@ func (p *WindowPreview) scheduleOpen(idx int, info WindowInfo, wins []WindowInfo
 // scheduleClose заводит задержку перед закрытием: за это время курсор успеет
 // дойти с кнопки до самой миниатюры.
 func (p *WindowPreview) scheduleClose() {
-	if !p.IsOpen() {
-		return
+	if !p.IsOpen() || p.keyboardHeld() {
+		return // список в руках у клавиатуры: уход мыши его не закрывает
 	}
 	p.mu.Lock()
 	running := p.closeTimer != nil && p.closeTimer.Running()
@@ -494,7 +506,11 @@ func (p *WindowPreview) stopEverything() {
 	p.hasWin = false
 	p.thumb = nil
 	p.wins, p.thumbs, p.listApp, p.listHover = nil, nil, "", -1
+	p.listKbd = false
 	p.mu.Unlock()
+	// Список, открытый с клавиатуры, возвращает фокус на кнопку стопки. Вне
+	// доставки события (закрытие по таймеру) это ничего не делает.
+	focusreq.Return(p)
 }
 
 // Close закрывает панель и снимает все её таймеры.
@@ -515,6 +531,9 @@ func (p *WindowPreview) OnMouseMove(x, y int) {
 		p.cancelClose()
 		p.hoverItem(image.Pt(x, y))
 		return
+	}
+	if p.keyboardHeld() {
+		return // мышь прошла мимо, а выбор сделан клавишами: он остаётся
 	}
 	p.hoverItem(image.Pt(-1, -1))
 	p.scheduleClose()
@@ -591,13 +610,13 @@ func (p *WindowPreview) draw(ctx widget.DrawContext, r image.Rectangle) {
 	p.mu.Lock()
 	info, ok := p.win, p.hasWin
 	thumb := p.thumb
-	wins, thumbs, hover := p.wins, p.thumbs, p.listHover
+	wins, thumbs, hover, kbd := p.wins, p.thumbs, p.listHover, p.listKbd
 	p.mu.Unlock()
 	if !ok {
 		return
 	}
 	if len(wins) > 1 {
-		p.drawList(ctx, r, wins, thumbs, hover)
+		p.drawList(ctx, r, wins, thumbs, hover, kbd)
 		return
 	}
 

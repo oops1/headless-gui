@@ -2683,9 +2683,21 @@ pixel (`HintingFull`; x/image has no real hinting, only that rounding), which
 makes 11 px text uneven. `eng.SetTextSubpixel(true)` keeps advances fractional
 and rasterizes each glyph for the quarter-pixel its pen falls in (4 phases in
 the glyph cache). Off by default so existing themes and `tests/golden_*` stay
-byte-identical; the Windows 10 profile asks for it with
-`theme.FlagTextSubpixel` and the engine owner applies it. It changes string
-widths -- enable before building the UI. Shaped (RTL/complex) text is unchanged.
+byte-identical. It changes string widths. Shaped (RTL/complex) text is unchanged.
+
+**The profile flag is read by the engine.** The Windows 10 profile sets
+`theme.FlagTextSubpixel`; `Engine.SetTheme` / `SetThemeProfile` /
+`ApplyThemeProfile` read it (through `widget.ThemeStyle.TextSubpixel`, which
+`widget.Materialize` fills and `ProfileFromTheme` writes back): a profile with
+the flag turns the mode on, a profile without it turns off ONLY what a theme
+turned on. Priority: an explicit `Engine.SetTextSubpixel(on)` of the application
+(either value) wins over any theme until `Engine.UseThemeTextSubpixel()` hands
+the choice back (the mode then follows the last applied profile at once).
+A real switch drops cached glyph layouts and bumps the text-metrics revision
+(`widget.BumpTextMetricsRev`), so widgets re-measure on the next frame. Other
+profiles do not set the flag: their frames are byte-identical.
+`Manager.SetFlag(theme.FlagTextSubpixel, true)` + `ApplyThemeProfile` switches it
+on the fly for any profile. Tests: `tests/subpixel_theme_test.go`.
 
 XAML uses the family name via `FontFamily`:
 
@@ -4212,6 +4224,8 @@ unchanged (X11 would need an ARGB visual and a compositing manager).
 
 ### Accent, light taskbar and Windows 10 acrylic — v3.31
 
+(The `taskbar.light` flag also switches the `menu` style, see "App buttons".)
+
 **Accent is a live token** (`theme/accent.go`). `Manager.SetAccent(c)`
 re-resolves the active theme with another `accent` and notifies subscribers
 exactly as `SetTheme` does (`Taskbar` repaints without being recreated); the
@@ -4390,20 +4404,45 @@ colour transitions is the app, not the window.
   `GroupClickArea.SetGroupListener`; a click opens the window LIST at once
   (hover opens it after `preview.delay.open`). The list is the same `Flyout`:
   icon, title, thumbnail and a hover `×` (closes the window) per window; more
-  windows than fit in a row (max 7, never wider than `Screen`) become a column
-  of titles without thumbnails. It follows the window model while open
-  (`ListedWindows()`). Without a listener (no preview) a click cycles the windows;
-  Enter/Space from the keyboard always cycles. Optional interfaces:
-  `GroupHoverArea.WindowsAt`, `GroupClickArea.SetGroupListener` — an area that
-  does not know them keeps working as a one-window area.
+  windows than fit in a row (max 7, never wider than the room next to the bar:
+  the whole `Screen` at a bottom/top bar, the part of it beyond the button at a
+  side bar) become a column of titles without thumbnails. It follows the window
+  model while open (`ListedWindows()`). Without a listener (no preview) a click
+  and Enter/Space cycle the windows. Optional interfaces:
+  `GroupHoverArea.WindowsAt`, `GroupClickArea.SetGroupListener`,
+  `GroupKeyArea.SetGroupKeyListener` — an area that does not know them keeps
+  working as a one-window area.
+- **Keyboard control of the list.** Enter/Space on a stack opens the list through
+  `GroupKeyArea` and the list TAKES keyboard focus (`internal/focusreq`: the
+  widget asks the engine for focus during the key delivery, and gives it back
+  when it closes, whatever closed it). `WindowPreview` is `Focusable` with
+  `TabIndex() = -1`. Left/Up and Right/Down move the selection (wrapping),
+  Home/End jump to the ends, Enter/Space raise the window, Delete closes it (the
+  selection stays at the closed window's place; one window left closes the list),
+  Esc closes the list (the engine's `EscapeDismisser` path) and focus returns to
+  the stack button. The selected window is outlined with the two-colour focus ring
+  (`PaintFocusRing`, 2 px outside the item); `ListSelection() (idx, keyboard)`
+  tells the selection and whether the ring is on. The mouse over the list takes
+  the selection over (ring off); the mouse leaving does not close a list that holds
+  the keyboard; losing focus (Tab) closes it by a timer (NOT directly: the engine
+  calls `SetFocused` under its focus lock). A list opened by mouse never takes
+  focus. Tests: `desktop/previewkeys_test.go`.
 - **Right click / Menu key / Shift+F10** → `PopupMenu` from `AppCommands`
   (`area.SetCommands(...)`, `AppCommandsFunc`); the consumer gets an `AppButton`
   (`App`, `Title`, `Pinned`, `Windows`) and returns `[]AppCommand` (title, icon,
   disabled, separator, `Run`). Default set: `DefaultAppCommands(cat, wm, btn)` —
   launch, pin/unpin, close window / close all; captions are `widget.Tr` keys
   `desktop.app.pin|unpin|closeWindow|closeAll` (RU+EN). The menu opens at the
-  button edge facing the desktop (`taskbar.top` flips it) and takes colours from
-  the theme's `menu` styles. The area draws and routes the menu itself
+  button edge facing the desktop (`taskbar.top` flips it; at a side bar it opens
+  beside the button: right of it for `EdgeLeft`, left for `EdgeRight`) and takes
+  colours from the theme's `menu` styles (`themeMenu`: fill, text, border,
+  hover, disabled text — a style the theme does not declare keeps the widget
+  default). The Windows 10 profile declares `menu` for the dark panel and, under
+  the `taskbar.light` flag, a light one (`F2F2F2`, black text, `CCCCCC` border,
+  hover `DEDEDE`), so the command menu and the right-click menu of the Start menu
+  follow the panel mode. The mode may change while the menu is open: the area
+  re-themes the menu on every overlay draw, nothing is recreated. Tests:
+  `desktop/appmenu_light_test.go`. The area draws and routes the menu itself
   (`HasOverlay/DrawOverlay/OverlayBounds/Dismiss/DismissOnEscape`); the menu is
   NOT a child (a `PopupMenu` is `Focusable` and would become a Tab stop).
 - **Tooltip.** `ApplicationArea.ToolTipAt` returns the app title (with the window
@@ -4416,6 +4455,9 @@ colour transitions is the app, not the window.
   `.underline.idle` × `.underline.idle.len` in the TEXT colour; pinned-not-running
   = none. Hover is a rectangular film (`Corner 0`) also on minimised / pinned
   buttons (`taskbutton.muted=false`). Other themes keep `DrawUnderline` as is.
+  In a column of a side bar the same marks stand on the cell side facing the
+  screen edge (left bar: left side, right bar: right side), length measured along
+  the cell height (`taskmark_edge.go`: `drawTaskMarkAt`, `markEdgeOf`).
 - **Start button.** `StartButton.SetActive`/`Active` + `Track(OpenStateSource)` /
   `TrackManager(mgr, name)`: lit (`StateActive`) between the open and close
   events of any `*Flyout` (or manager panel), whoever closes it. Windows 10 has
@@ -4444,16 +4486,27 @@ byte-identical to before); the side layout is a separate code path.
 - **`VerticalItem`** (`Item` + `SetVertical(bool)`): an item that can lie in a
   column. In a column `PreferredSize(avail)` gets `avail.X` = thickness and
   returns X across / Y along. Implemented by `ApplicationArea` (icon-only cells
-  top to bottom, no dock presenter), `SystemTray` (icon grid, hidden icons behind
-  the chevron at the bottom) and `ClockItem` (full thickness; the date is dropped
-  if it does not fit the width). An item that does not implement it gets the full
+  top to bottom, icon centred across the bar, no dock presenter),
+  `RunningApplications` (the same column of squares; before it was a row squeezed
+  into one square), `SystemTray` (icon grid, hidden icons behind the chevron at
+  the bottom) and `ClockItem` (full thickness; the date is dropped if it does not
+  fit the width). **`EdgeAware`** (`SetBarEdge(Edge)`, optional, next to
+  `VerticalItem`): the bar tells an item which screen edge it stands at when the
+  item is added and on every relayout; `ApplicationArea` and
+  `RunningApplications` use it to put the running/active mark on the edge side. An item that does not implement it gets the full
   thickness across and the height it asks for a square avail, capped at the
   thickness (this is how Start and tray icons lie).
 - **Flyouts at a side edge.** `Flyout.Edge = EdgeLeft/EdgeRight` opens the window
   to the right/left of the anchor; `Align` then works vertically (`AlignStart` =
   window top at icon top, `AlignEnd` = window bottom at icon bottom; `fitInto`
   keeps it on screen). `SlideAuto` slides from the bar's side; the motion region
-  stops at the bar's edge so the window grows out of it.
+  stops at the bar's edge so the window grows out of it. The window list of a
+  stack (`WindowPreview`, bound with `BindFlyouts`) opens beside the bar too, and
+  its row of thumbnails is limited by the room between the button and the far
+  screen edge (`listSpace`): where three thumbnails do not fit it turns into a
+  column of titles instead of being pushed under the bar. Tests:
+  `desktop/sidestack_test.go`, `sidestack_edge_test.go` (PNGs with `GOLDEN_OUT`:
+  `win10_side_list_*.png`).
 - **Monitors.** `desktop.Monitor{ID, Name, Bounds, WorkArea, Primary}`,
   `Monitor.Work()`, consumer interface `Screens{Monitors(); Subscribe(func()) func()}`,
   `FakeScreens`. `Taskbar.DockTo(m)` puts the bar at its edge of monitor `m` and

@@ -11,7 +11,20 @@ import (
 	"github.com/oops1/headless-gui/v3/theme"
 )
 
-var _ VerticalItem = (*ApplicationArea)(nil)
+var (
+	_ VerticalItem = (*ApplicationArea)(nil)
+	_ EdgeAware    = (*ApplicationArea)(nil)
+)
+
+// SetBarEdge реализует EdgeAware: метка открытого окна встаёт на сторону
+// ячейки, обращённую к краю экрана.
+func (a *ApplicationArea) SetBarEdge(e Edge) {
+	if a.edge == e {
+		return
+	}
+	a.edge = e
+	a.Invalidate()
+}
 
 // SetVertical реализует VerticalItem.
 func (a *ApplicationArea) SetVertical(v bool) {

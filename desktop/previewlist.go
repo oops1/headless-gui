@@ -6,13 +6,17 @@
 // закрывает. Окон больше, чем влезает в ряд (до семи, как в Windows, и не шире
 // экрана), показываются столбцом из одних заголовков без миниатюр.
 //
-// Список открывают две вещи: наведение на кнопку (после задержки, как
-// предпросмотр одного окна) и щелчок по ней (сразу).
+// Список открывают три вещи: наведение на кнопку (после задержки, как
+// предпросмотр одного окна), щелчок по ней (сразу) и Enter или Space на кнопке
+// стопки. С клавиатуры список забирает фокус себе (internal/focusreq): стрелки
+// выбирают окно (рамка фокуса), Enter и Space поднимают его, Delete закрывает
+// окно, Esc закрывает список и возвращает фокус на кнопку.
 package desktop
 
 import (
 	"image"
 
+	"github.com/oops1/headless-gui/v3/internal/focusreq"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -41,11 +45,42 @@ func (p *WindowPreview) listLen() int {
 	return len(p.wins)
 }
 
+// listSpace — сколько ширины экрана достаётся списку. У нижнего и верхнего
+// краёв это весь экран; у бокового список раскрывается вбок от панели и
+// занимает только то, что осталось по ту сторону кнопки (шире — ушёл бы под
+// панель или за экран).
+func (p *WindowPreview) listSpace() int {
+	sw := p.Screen.Dx()
+	if sw <= 0 || !p.Edge.Vertical() {
+		return sw
+	}
+	p.mu.Lock()
+	anchor := p.listAnchor
+	p.mu.Unlock()
+	if anchor.Empty() {
+		anchor = p.Anchor
+	}
+	if anchor.Empty() {
+		return sw
+	}
+	space := sw
+	if p.Edge == EdgeLeft {
+		space = p.Screen.Max.X - anchor.Max.X
+	} else {
+		space = anchor.Min.X - p.Screen.Min.X
+	}
+	space -= p.Margin
+	if space < 1 {
+		return sw
+	}
+	return space
+}
+
 // listMaxCols — сколько окон помещается в ряд.
 func (p *WindowPreview) listMaxCols() int {
 	max := previewMaxListThumbs
 	pad := p.metric(KeyPreviewPad, previewDefPad)
-	if sw := p.Screen.Dx(); sw > 0 {
+	if sw := p.listSpace(); sw > 0 {
 		if c := (sw - pad) / (p.thumbMax().X + pad); c < max {
 			max = c
 		}
@@ -132,6 +167,7 @@ func (p *WindowPreview) showList(wins []WindowInfo, anchor image.Rectangle) {
 	}
 	p.mu.Lock()
 	p.wins = append([]WindowInfo(nil), wins...)
+	p.listAnchor = anchor // раньше Open: размер списка зависит от места рядом с кнопкой
 	p.listApp = wins[0].AppID
 	p.listHover = -1
 	p.win, p.hasWin = wins[0], true
@@ -170,6 +206,9 @@ func (p *WindowPreview) syncList() bool {
 	p.wins = next
 	if p.listHover >= len(next) {
 		p.listHover = -1
+		if p.listKbd {
+			p.listHover = len(next) - 1
+		}
 	}
 	p.mu.Unlock()
 	p.Open(p.Anchor) // размер панели изменился: перекладываем и перерисовываем
@@ -199,6 +238,9 @@ func (p *WindowPreview) hoverItem(pt image.Point) {
 	p.mu.Lock()
 	changed := p.listHover != idx
 	p.listHover = idx
+	if changed {
+		p.listKbd = false // выбор мышью главнее: рамка фокуса уходит
+	}
 	p.mu.Unlock()
 	if changed {
 		if r := p.rect(); !r.Empty() {
@@ -211,19 +253,36 @@ func (p *WindowPreview) hoverItem(pt image.Point) {
 // закрыть окно.
 func (p *WindowPreview) listPressed(pt image.Point) bool {
 	idx, onClose := p.itemAt(pt)
+	if onClose {
+		p.closeListWindow(idx)
+	} else {
+		p.activateListWindow(idx)
+	}
+	return true
+}
+
+// activateListWindow поднимает окно idx списка и закрывает список.
+func (p *WindowPreview) activateListWindow(idx int) {
 	p.mu.Lock()
 	wins := p.wins
 	p.mu.Unlock()
 	if idx < 0 || idx >= len(wins) || p.wm == nil {
-		return true
+		return
+	}
+	p.wm.Activate(wins[idx].ID)
+	p.Close()
+}
+
+// closeListWindow закрывает окно idx списка. Остальные остаются в списке;
+// когда не осталось и двух, список не нужен и закрывается сам.
+func (p *WindowPreview) closeListWindow(idx int) {
+	p.mu.Lock()
+	wins := p.wins
+	p.mu.Unlock()
+	if idx < 0 || idx >= len(wins) || p.wm == nil {
+		return
 	}
 	w := wins[idx]
-	if !onClose {
-		p.wm.Activate(w.ID)
-		p.Close()
-		return true
-	}
-
 	p.wm.Close(w.ID)
 	rest := make([]WindowInfo, 0, len(wins)-1)
 	for _, o := range wins {
@@ -233,27 +292,142 @@ func (p *WindowPreview) listPressed(pt image.Point) bool {
 	}
 	if len(rest) < 2 {
 		p.Close()
-		return true
+		return
 	}
 	p.mu.Lock()
 	p.wins = rest
 	p.listHover = -1
+	if p.listKbd {
+		// С клавиатуры выбор остаётся на месте закрытого окна: Delete
+		// несколько раз подряд закрывает окна одно за другим.
+		p.listHover = idx
+		if p.listHover >= len(rest) {
+			p.listHover = len(rest) - 1
+		}
+	}
 	p.mu.Unlock()
 	p.Open(p.Anchor)
-	return true
 }
 
-// OnKeyEvent: в списке стрелки выбирают окно, Enter и Space его поднимают,
-// Delete закрывает; Esc закрывает панель.
+// ─── Клавиатура ──────────────────────────────────────────────────────────────
+
+// GroupKeyArea — область кнопок, которая отличает нажатие Enter или Space на
+// стопке окон от щелчка мышью: список окон, открытый с клавиатуры, должен
+// получить фокус и управляться клавишами. Необязателен и дополняет
+// GroupClickArea: область, о нём не знающая, переключает окна стопки по кругу.
+type GroupKeyArea interface {
+	// SetGroupKeyListener сообщает, кому отдавать Enter и Space на кнопке со
+	// многими окнами. nil — область справляется сама.
+	SetGroupKeyListener(fn func(idx int))
+}
+
+// groupKeyed — Enter или Space на кнопке со многими окнами: открыть список,
+// взять в него фокус и выбрать активное окно (а без него первое).
+func (p *WindowPreview) groupKeyed(idx int) {
+	p.mu.Lock()
+	area := p.area
+	p.mu.Unlock()
+	if area == nil || !p.Enabled() {
+		return
+	}
+	wins := windowsOf(area, idx)
+	anchor := area.ButtonRect(idx)
+	if len(wins) < 2 || anchor.Empty() {
+		return
+	}
+	p.cancelOpen()
+	p.cancelClose()
+	p.showList(wins, anchor)
+
+	sel := 0
+	for i, w := range wins {
+		if w.Active {
+			sel = i
+			break
+		}
+	}
+	p.mu.Lock()
+	p.listHover, p.listKbd = sel, true
+	p.mu.Unlock()
+	if r := p.rect(); !r.Empty() {
+		widget.InvalidateRect(r)
+	}
+	// Фокус нужен, чтобы стрелки и Enter дошли до списка; вернётся он на
+	// кнопку при закрытии списка (stopEverything).
+	focusreq.Request(p)
+}
+
+// keyboardHeld — список открыт с клавиатуры и держит её фокус: мышь, ушедшая с
+// него, список не закрывает.
+func (p *WindowPreview) keyboardHeld() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.listKbd && p.focused
+}
+
+// ListSelection возвращает окно списка, выбранное с клавиатуры или наведением
+// (-1 — никакое), и признак того, что выбор сделан клавишами: тогда оно
+// обведено рамкой фокуса.
+func (p *WindowPreview) ListSelection() (idx int, keyboard bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.listHover, p.listKbd
+}
+
+// SetFocused реализует widget.Focusable. Список берёт фокус только у стопки,
+// открытой клавишей; потерянный фокус (Tab, щелчок в другое место) закрывает
+// такой список. Закрывает его таймер, а не прямой вызов: SetFocused зовётся
+// движком под замком фокуса, и Close (он возвращает фокус) заклинил бы его.
+func (p *WindowPreview) SetFocused(v bool) {
+	p.mu.Lock()
+	was := p.focused
+	p.focused = v
+	kbd := p.listKbd
+	if !v && was {
+		p.listKbd = false
+	}
+	p.mu.Unlock()
+	if !v && was && kbd && p.IsOpen() {
+		p.scheduleClose()
+		return
+	}
+	if kbd {
+		if r := p.rect(); !r.Empty() {
+			widget.InvalidateRect(r)
+		}
+	}
+}
+
+// IsFocused реализует widget.Focusable.
+func (p *WindowPreview) IsFocused() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.focused
+}
+
+// TabIndex исключает список из обхода Tab: фокус он получает только по запросу
+// (groupKeyed), а невидимой остановки на панели быть не должно.
+func (p *WindowPreview) TabIndex() int { return -1 }
+
+// OnKeyEvent: в списке стрелки (и Home, End) выбирают окно, Enter и Space его
+// поднимают, Delete закрывает; Esc закрывает панель.
 func (p *WindowPreview) OnKeyEvent(e widget.KeyEvent) {
 	n := p.listLen()
-	if !p.IsOpen() || !e.Pressed || n < 2 {
+	if !p.IsOpen() || !e.Pressed || n < 2 || !plainKey(e) {
 		p.Flyout.OnKeyEvent(e)
 		return
 	}
 	p.mu.Lock()
 	cur := p.listHover
 	p.mu.Unlock()
+	choose := func(next int) {
+		p.mu.Lock()
+		p.listHover, p.listKbd = next, true
+		p.mu.Unlock()
+		if r := p.rect(); !r.Empty() {
+			widget.InvalidateRect(r)
+		}
+	}
 	move := func(d int) {
 		next := cur + d
 		if cur < 0 {
@@ -265,31 +439,25 @@ func (p *WindowPreview) OnKeyEvent(e widget.KeyEvent) {
 		if next >= n {
 			next = 0
 		}
-		p.mu.Lock()
-		p.listHover = next
-		p.mu.Unlock()
-		if r := p.rect(); !r.Empty() {
-			widget.InvalidateRect(r)
-		}
+		choose(next)
 	}
 	switch e.Code {
 	case widget.KeyLeft, widget.KeyUp:
 		move(-1)
 	case widget.KeyRight, widget.KeyDown:
 		move(1)
-	case widget.KeyEnter, widget.KeySpace, widget.KeyDelete:
-		if cur < 0 {
-			return
+	case widget.KeyHome:
+		choose(0)
+	case widget.KeyEnd:
+		choose(n - 1)
+	case widget.KeyEnter, widget.KeySpace:
+		if cur >= 0 && !e.Repeat {
+			p.activateListWindow(cur)
 		}
-		items, vertical := p.listItems(p.contentRect(), n)
-		if cur >= len(items) {
-			return
+	case widget.KeyDelete:
+		if cur >= 0 && !e.Repeat {
+			p.closeListWindow(cur)
 		}
-		pt := items[cur].Min.Add(image.Pt(1, 1))
-		if e.Code == widget.KeyDelete {
-			pt = p.closeRect(items[cur], vertical).Min.Add(image.Pt(1, 1))
-		}
-		p.listPressed(pt)
 	default:
 		p.Flyout.OnKeyEvent(e)
 	}
@@ -307,7 +475,7 @@ func hoverFilm(s *theme.Style) *theme.Style {
 
 // drawList рисует окна списка: у каждого значок, заголовок и крестик (у окна
 // под курсором), в ряду — ещё и миниатюра.
-func (p *WindowPreview) drawList(ctx widget.DrawContext, r image.Rectangle, wins []WindowInfo, thumbs map[WindowID]image.Image, hover int) {
+func (p *WindowPreview) drawList(ctx widget.DrawContext, r image.Rectangle, wins []WindowInfo, thumbs map[WindowID]image.Image, hover int, kbd bool) {
 	header := p.metric(KeyPreviewHeader, previewDefHeader)
 	items, vertical := p.listItems(r, len(wins))
 	headStyle := styleOf(p.tm, ComponentPreview, previewPartHeader, theme.StateNormal)
@@ -339,6 +507,11 @@ func (p *WindowPreview) drawList(ctx widget.DrawContext, r image.Rectangle, wins
 
 		if !vertical {
 			p.drawThumb(ctx, image.Rect(it.Min.X, it.Min.Y+header, it.Max.X, it.Max.Y), thumbs[w.ID])
+		}
+		// Выбор с клавиатуры обведён рамкой фокуса поверх миниатюры: одной
+		// плёнки мало, она теряется на светлой миниатюре.
+		if i == hover && kbd {
+			PaintFocusRing(ctx, it.Inset(-2), p.tm, headStyle) // в поле между окнами, не на тексте
 		}
 	}
 }

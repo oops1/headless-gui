@@ -19,6 +19,12 @@ import (
 // Профиль с флагом theme.FlagFontDefaultGlobal (Windows 10) заодно делает
 // Fonts["default"].Size кеглем по умолчанию для всех виджетов, у которых свой
 // не задан (widget.DefaultFontSize); профиль без флага возвращает 10 pt.
+//
+// Профиль с флагом theme.FlagTextSubpixel (Windows 10) включает подпиксельное
+// позиционирование глифов (Engine.SetTextSubpixel), профиль без флага
+// выключает то, что включила тема. Режим, выбранный приложением явным вызовом
+// SetTextSubpixel, тема не трогает (Engine.UseThemeTextSubpixel возвращает
+// выбор теме). Переключение сбрасывает замеры строк: ширины в режимах разные.
 func (e *Engine) ApplyThemeProfile(m *theme.Manager) error {
 	if m == nil {
 		return fmt.Errorf("engine: ApplyThemeProfile без менеджера тем")

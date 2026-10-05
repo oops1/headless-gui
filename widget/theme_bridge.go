@@ -146,6 +146,9 @@ func ProfileFromTheme(t *Theme) *theme.Profile {
 	if t.Style.ScrollbarThin {
 		p.SetFlag(keyScrollbarThin, true)
 	}
+	if t.Style.TextSubpixel {
+		p.SetFlag(theme.FlagTextSubpixel, true)
+	}
 	// Кегль по умолчанию — флагом и шрифтом "default", только когда задан.
 	if t.Style.DefaultFontSize > 0 {
 		p.SetFlag(theme.FlagFontDefaultGlobal, true)
@@ -223,6 +226,8 @@ func Materialize(rt *theme.Theme) *Theme {
 		ScrollbarWidth:          int(rt.MetricOr(keyScrollbarWidth, 0)),
 		ScrollbarThinWidth:      int(rt.MetricOr(keyScrollbarThinWidth, 0)),
 		ScrollbarThinHoverWidth: int(rt.MetricOr(keyScrollbarThinHoverWidth, 0)),
+
+		TextSubpixel: rt.FlagOr(theme.FlagTextSubpixel, false),
 	}
 	// Кегль по умолчанию следует профилю только по его просьбе (флаг): иначе
 	// Fonts["default"] прежних тем (9 pt) изменил бы раскладку всех виджетов.

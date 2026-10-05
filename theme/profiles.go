@@ -421,6 +421,15 @@ func Windows10Profile() *Profile {
 		Shadow: C(RGBA(0, 0, 0, 90)),
 	})
 	p.SetStyle("menu", "item", StateHover, StyleDelta{Fill: C(RGB(62, 62, 62))})
+	p.SetStyle("menu", "item", StateDisabled, StyleDelta{Text: C(RGB(128, 128, 128))})
+	// Светлое меню для светлого режима оболочки: контекстное меню команд кнопок
+	// приложений и «Пуска» следует панели, а не остаётся тёмным.
+	p.SetStyleWhen(KeyTaskbarLight, "menu", "", StateNormal, StyleDelta{
+		Fill: C(RGB(242, 242, 242)), Text: C(RGB(0, 0, 0)),
+		Border: C(RGB(204, 204, 204)), Shadow: C(RGBA(0, 0, 0, 50)),
+	})
+	p.SetStyleWhen(KeyTaskbarLight, "menu", "item", StateHover, StyleDelta{Fill: C(RGB(222, 222, 222))})
+	p.SetStyleWhen(KeyTaskbarLight, "menu", "item", StateDisabled, StyleDelta{Text: C(RGB(150, 150, 150))})
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface)})
 	p.SetStyle("window", "titlebar", StateNormal, StyleDelta{
 		Fill: C(RGB(90, 90, 90)), Text: C(RGB(200, 200, 200)),

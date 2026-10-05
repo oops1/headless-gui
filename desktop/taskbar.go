@@ -170,6 +170,9 @@ func (t *Taskbar) AddItem(slot Slot, it Item) {
 	if v, ok := it.(VerticalItem); ok {
 		v.SetVertical(t.Vertical())
 	}
+	if v, ok := it.(EdgeAware); ok {
+		v.SetBarEdge(t.Edge())
+	}
 	if n, ok := it.(FocusNavigable); ok {
 		n.SetFocusNavigator(t)
 	}

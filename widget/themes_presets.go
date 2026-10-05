@@ -61,6 +61,12 @@ type ThemeStyle struct {
 	// DefaultFontSizePt, как у всех прежних тем. Профиль выражает просьбу флагом
 	// theme.FlagFontDefaultGlobal и шрифтом Fonts["default"].
 	DefaultFontSize float64
+
+	// TextSubpixel — тема просит дробное позиционирование глифов (Open Sans
+	// 8,5 pt без него выходит неровной). Профиль выражает просьбу флагом
+	// theme.FlagTextSubpixel; применяет её Engine.SetTheme — если приложение
+	// само не вызывало Engine.SetTextSubpixel.
+	TextSubpixel bool
 }
 
 // currentStyle возвращает стиль активной темы (для Draw виджетов).

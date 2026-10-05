@@ -117,6 +117,11 @@ type RunningApplications struct {
 	// fade — плавный переход цвета кнопок при наведении, нажатии и смене
 	// активного окна (тема: taskbar.item).
 	fade motion
+
+	// vertical и edge — полоса лежит в столбце боковой панели у края edge
+	// (runningapps_vertical.go).
+	vertical bool
+	edge     Edge
 }
 
 // NewRunningApplications создаёт область запущенных приложений,
@@ -180,6 +185,9 @@ func (r *RunningApplications) PreferredSize(avail image.Point) image.Point {
 	if n == 0 {
 		return image.Point{}
 	}
+	if r.vertical {
+		return r.preferredVertical(n, avail)
+	}
 	ideal := int(r.metric(KeyTaskButtonWidth))
 	gap := int(r.metric(KeyTaskButtonGap))
 	want := n*ideal + gap*(n-1)
@@ -231,6 +239,11 @@ func (r *RunningApplications) layout() {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.vertical {
+		r.layoutVertical(b, windows)
+		return
+	}
 
 	gap := int(r.metric(KeyTaskButtonGap))
 	ideal := int(r.metric(KeyTaskButtonWidth))
@@ -496,6 +509,10 @@ func (r *RunningApplications) HoverIndex() int {
 
 // presenter возвращает презентер, назначенный темой этому компоненту.
 func (r *RunningApplications) presenter() Presenter {
+	// Док macOS — ряд; в столбце боковой панели полоса рисуется сама.
+	if r.vertical {
+		return nil
+	}
 	return PresenterFor(r.tm, PresenterKeyRunningApps)
 }
 
@@ -540,13 +557,16 @@ func (r *RunningApplications) Draw(ctx widget.DrawContext) {
 
 		padX := int(style.PadX)
 		iconX := wb.rect.Min.X + padX
+		if r.vertical {
+			iconX = wb.rect.Min.X + (wb.rect.Dx()-iconSize)/2 // в столбце значок по центру
+		}
 		iconY := wb.rect.Min.Y + (wb.rect.Dy()-iconSize)/2
 		if wb.info.Icon != nil && iconSize > 0 {
 			ctx.DrawImageScaled(wb.info.Icon, iconX, iconY, iconSize, iconSize)
 		}
 
 		// Свёрнутое окно тоже открыто — метка под ним остаётся.
-		drawTaskMark(ctx, r.tm, wb.rect, wb.info.Active, style)
+		drawTaskMarkAt(ctx, r.tm, wb.rect, wb.info.Active, style, r.markEdge())
 
 		if wb.showLabel {
 			// Заголовок клипуется по кнопке: он не должен наезжать на
