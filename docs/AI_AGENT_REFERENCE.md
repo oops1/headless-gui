@@ -4194,6 +4194,93 @@ render loop on its own goroutine, so a consumer that mutates the widget tree
 from another goroutine races the render walk. External pacing lets it do both
 on one goroutine and remove the race by construction.
 
+### Context menu from the theme profile — v3.32
+
+`widget.PopupMenu` reads its look from the profile itself (WinLine remarks
+after v3.31.0, "Контекстное меню"): styles of the `menu` component and the
+metrics `theme.KeyMenu*` (`theme/menu.go`). A profile that declares none of
+them leaves the menu exactly as it was; golden frames of all flat presets are
+byte-identical.
+
+| Token | Meaning |
+|---|---|
+| style `menu` | `Fill`, `Text`, `Border`, `Corner` (menu rounding), `Shadow` + `Elevation` (soft shadow) |
+| style `menu.item` Hover | `Fill` (plate, translucent allowed), `Text`, `Corner` (plate rounding) |
+| style `menu.item` Disabled | `Text` |
+| style `menu.separator` | `Fill` — line colour (else the border colour) |
+| style `menu.shortcut` | `Text` — shortcut colour (else the text colour muted by 0.45) |
+| `menu.item.height`, `menu.separator.height`, `menu.icon.size`, `menu.icon.gap` | row, separator, icon side, icon-to-label gap |
+| `menu.pad.x` (+ `menu.pad.left`, `menu.pad.right`) | side margins; left = before check/icon, right = after the shortcut |
+| `menu.pad.y` | gap between the border and the first/last row |
+| `menu.item.inset` | hover plate inset from the menu edge; a declared 0 = flush to the border (min 1) |
+| `menu.separator.inset` | separator line inset |
+| `menu.width.min`, `menu.submenu.width.min` | min width of the ROOT menu; submenus have no minimum unless the second is set |
+| `menu.chevron.right`, `menu.chevron.size` | thin `›` chevron drawn as a shape; the number is the distance from the right edge to its centre |
+| `menu.submenu.delay` (ms) | open/close delay of a submenu on hover (click and keys do not wait) |
+| flag `menu.icon.tint` | icons are monochrome and drawn in the item's text colour |
+
+Built-in values: Windows 11 (24/8, pad 12, icon 16, inset 4, corner 8/4,
+chevron 18, min 290, hover `RGBA(0,0,0,9)`), Windows 10 (same, square, plate
+across the width), Windows 2000 (20/7, pad 10, submenu delay 400). macOS
+already declared `Corner`/`Elevation`, so its menu is now rounded with a soft
+shadow. Windows 11 Dark overrides colours only.
+
+```go
+// Where the menu gets the profile
+m := widget.NewPopupMenu()          // follows the theme the engine applied
+                                    // (ThemeStyle.Menu, set by Materialize)
+themeMenu / m.ApplyMenuStyle(widget.MenuStyleFromTheme(tm.Active())) // explicit
+
+// New API
+widget.MenuStyle                    // what a profile declared (zero = nothing)
+widget.MenuStyleFromTheme(rt)       // read it from a resolved theme
+(*PopupMenu).ApplyMenuStyle(ms)     // colours: only declared; sizes: reset then declared
+widget.ThemeStyle.Menu              // carried by Materialize / ProfileFromTheme
+widget.SetPopupWorkArea(r)          // popups stay inside r (screen minus taskbar)
+(*PopupMenu).WorkArea, .MaxHeight   // per-menu override / height limit
+widget.MenuItem{IconHover, IconTint}
+// PopupMenu fields filled by the profile (zero = old behaviour): PadLeft,
+// PadRight, PaddingY, ItemInset, SeparatorInset, CornerRadius, ItemCorner,
+// Elevation, ShortcutColor, IconSize, IconGap, ChevronRight, ChevronSize,
+// TintIcons, SubMenuMinWidth (0 = inherit, <0 = none), SubMenuDelay.
+```
+
+Behaviour changes that apply whenever the fields are set:
+
+- The hover plate, border and separator are blended (`FillRectAlpha`,
+  `FillRoundRect` with A<255), so a translucent plate (Windows 11 `(0,0,0,9)`)
+  is a film, not black.
+- `ApplyTheme` no longer resets the height to 30/22 for a profile that
+  declared it (`t.Style.Menu`); a profile that stops declaring a value gives the
+  default back.
+- Shadow: `Elevation > 0` + `ShadowDrawer` -> `DrawSoftShadow(rect, corner,
+  Elevation, ShadowColor)`, otherwise the old 2 px offset rectangle. All of it
+  is in `PopupMenu.drawShadow`: the shared theme shadow tokens
+  (`ShadowBlur/ShadowOffset/ShadowOpacity`) plug in there instead of
+  `Elevation`/`ShadowColor`. The shadow is not part of `OverlayBounds`: it
+  would turn clicks next to the menu into clicks on it, and a hosted native
+  popup window clips it (as it always clipped the offset rectangle).
+- Long lists: a menu taller than the work area (or `MaxHeight`) gets that
+  height and scrolls — wheel, a click on the arrow bands at both ends, hover
+  on a band (repeats every 50 ms), Up/Down keep the highlighted row visible.
+  There are no columns.
+- The work area: `widget.SetPopupWorkArea(bar.WorkArea())` (or
+  `PopupMenu.WorkArea`) keeps menus and submenus off the taskbar drawn on the
+  same canvas; empty = the whole canvas; ignored when popups are hosted.
+- `SubMenuDelay` is a timer built on `widget.Animate` (advance it with
+  `widget.StepAnimations(now)` in tests); while a switch is pending only the
+  hovered row carries the plate.
+- Icons: `MenuItem.IconTint` (or `PopupMenu.TintIcons`, flag
+  `menu.icon.tint`) repaints a monochrome icon in the item's text colour of
+  the current state; `IconHover` replaces the picture under the plate.
+
+`ThemeStyle.Menu` keeps only what the flat theme cannot carry (sizes, corners,
+`Elevation`, text/border/shadow/shortcut/separator colours): fill, plate and
+disabled colours stay in `MenuBG`/`MenuHoverBG`/`MenuHoverText`/`Disabled`, so
+the six presets round-trip unchanged and a preset's control corner is NOT read
+as a menu corner (a profile built from a flat theme declares none; use the
+metrics `menu.corner`/`menu.item.corner` to state one).
+
 ### A lagging channel consumer, and frames of another size — v3.31
 
 Frames are differences against the previous frame. The channel used to drop a

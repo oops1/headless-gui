@@ -67,6 +67,11 @@ type ThemeStyle struct {
 	// theme.FlagTextSubpixel; применяет её Engine.SetTheme — если приложение
 	// само не вызывало Engine.SetTextSubpixel.
 	TextSubpixel bool
+
+	// Menu — вид контекстного меню, объявленный профилем (см. MenuStyle).
+	// Нулевое значение — меню прежнее. Цвета заливки, плашки и недоступного
+	// пункта здесь не повторяются: их несёт сама плоская тема.
+	Menu MenuStyle
 }
 
 // currentStyle возвращает стиль активной темы (для Draw виджетов).

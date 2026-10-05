@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // MenuItem описывает один пункт контекстного / popup-меню.
@@ -21,6 +22,14 @@ type MenuItem struct {
 	// пункта: иначе подписи разъезжались бы по левому краю (то же правило, что
 	// у Checkable).
 	Icon image.Image
+	// IconHover — значок пункта, когда он под плашкой наведения. Нужен, если
+	// значок не одноцветный: тёмный на синей плашке классики не виден. Не
+	// задан — рисуется Icon.
+	IconHover image.Image
+	// IconTint — значок одноцветный: рисуется цветом текста пункта в его
+	// текущем состоянии (обычный, под плашкой, недоступный), по альфа-каналу
+	// картинки. Один рисунок тогда годится для всех состояний.
+	IconTint bool
 	// IconSize — сторона значка в точках; 0 — по высоте пункта.
 	IconSize int
 	// IconPath — путь, из которого значок загрузила разметка (XAML Icon="…").
@@ -76,6 +85,17 @@ type PopupMenu struct {
 	geoMu          sync.Mutex
 	popupX, popupY int
 	popupW, popupH int
+	// Прокрутка длинного меню (под geoMu): пикселей содержимого над видимой
+	// частью, высота содержимого, включена ли прокрутка.
+	scroll, contentH int
+	scrollable       bool
+	scrollDir        int        // -1/+1 — курсор на стрелке края, 0 — нет
+	scrollAnim       *Animation // повтор прокрутки, пока курсор на стрелке
+	// Отложенное переключение подменю (под geoMu): пункт, над которым ждём.
+	switchIdx  int
+	switchAnim *Animation
+	// applied — что профиль объявил при последнем ApplyMenuStyle.
+	applied MenuStyle
 
 	open     int32 // 1 — показано, 0 — скрыто (атомарно)
 	// dismissSeq — номер нажатия (CurrentPressSeq), которым меню было
@@ -104,6 +124,51 @@ type PopupMenu struct {
 	MinWidth     int // минимальная ширина меню
 	ArrowPadding int // отступ для стрелки ► справа
 
+	// Поля ниже заполняет профиль темы (ApplyMenuStyle, theme.KeyMenu*). Ноль
+	// везде означает прежнее поведение.
+
+	// PadLeft — поле от края меню до отметки/значка; PadRight — от сочетания
+	// клавиш до края. 0 — PaddingX.
+	PadLeft, PadRight int
+	// PaddingY — отступ первого пункта от верхней рамки и последнего от
+	// нижней. 0 — 2.
+	PaddingY int
+	// ItemInset — отступ плашки наведения от краёв меню. 0 — 2.
+	ItemInset int
+	// SeparatorInset — отступ линии разделителя от краёв. 0 — 8.
+	SeparatorInset int
+	// CornerRadius — скругление меню (и тени); ItemCorner — плашки наведения.
+	CornerRadius, ItemCorner int
+	// Elevation — высота над подложкой: > 0 заменяет прямоугольную тень со
+	// смещением мягкой (по ShadowColor), если контекст умеет ShadowDrawer.
+	Elevation float64
+	// ShortcutColor — цвет сочетаний клавиш. Прозрачный — приглушённый
+	// оттенок цвета текста. Под плашкой с другим цветом текста сочетание
+	// следует за ним.
+	ShortcutColor color.RGBA
+	// IconSize — сторона значка по умолчанию (0 — по высоте пункта); IconGap —
+	// зазор между значком и подписью (0 — 8).
+	IconSize, IconGap int
+	// ChevronRight > 0 включает тонкий шеврон подменю «›» вместо глифа «▸»;
+	// число — расстояние от правого края меню до его середины.
+	// ChevronSize — высота шеврона (0 — 8).
+	ChevronRight, ChevronSize int
+	// TintIcons — все значки меню одноцветные (см. MenuItem.IconTint).
+	TintIcons bool
+	// SubMenuMinWidth — наименьшая ширина подменю. 0 — как у родителя
+	// (MinWidth, прежнее поведение); отрицательное — без минимума.
+	SubMenuMinWidth int
+	// SubMenuDelay — задержка раскрытия и закрытия подменю при наведении, мс.
+	// 0 — сразу. Нажатие и клавиши задержку не ждут.
+	SubMenuDelay int
+	// WorkArea — область (в координатах холста), за которую меню не выходит:
+	// экран без панели задач. Пусто — SetPopupWorkArea, а если и она пуста —
+	// весь холст. Подменю наследуют.
+	WorkArea image.Rectangle
+	// MaxHeight — наибольшая высота меню; длиннее — прокрутка (колесо,
+	// стрелки на концах, клавиши). 0 — высота доступной области.
+	MaxHeight int
+
 	// UseMnemonics — читать в подписях пунктов мнемоники: «_Файл» рисуется
 	// как «Файл» с чертой под Ф, и нажатие этой буквы при открытом меню
 	// выбирает пункт. Двойное подчёркивание означает сам знак подчёркивания.
@@ -131,6 +196,29 @@ var (
 	activePopupMu   sync.Mutex
 	activeRootPopup *PopupMenu
 )
+
+var (
+	workAreaMu    sync.Mutex
+	popupWorkArea image.Rectangle
+)
+
+// SetPopupWorkArea задаёт область холста, за которую не выходят меню и их
+// подменю: экран без панели задач. Нужна, когда панель нарисована на том же
+// холсте, — иначе подменю, прижатое к нижнему краю, ложится на неё.
+// Пустой прямоугольник снимает ограничение (весь холст). Меню может
+// переопределить область полем PopupMenu.WorkArea.
+func SetPopupWorkArea(r image.Rectangle) {
+	workAreaMu.Lock()
+	popupWorkArea = r
+	workAreaMu.Unlock()
+}
+
+// PopupWorkArea возвращает область, заданную SetPopupWorkArea.
+func PopupWorkArea() image.Rectangle {
+	workAreaMu.Lock()
+	defer workAreaMu.Unlock()
+	return popupWorkArea
+}
 
 // SetScreenBounds сообщает виджетам размер канваса (вызывается движком при
 // создании/смене разрешения). Используется popup-меню и другими overlay'ами,
@@ -169,6 +257,7 @@ func NewPopupMenu() *PopupMenu {
 	m := &PopupMenu{
 		hoverIdx:       -1,
 		childForIdx:    -1,
+		switchIdx:      -1,
 		Background:     win10.MenuBG,
 		BorderColor:    win10.DropBorder,
 		TextColor:      win10.DropText,
@@ -186,6 +275,12 @@ func NewPopupMenu() *PopupMenu {
 	if win10.Style.Classic3D {
 		m.ItemHeight = 22 // классика: компактные пункты меню
 		m.SeparatorH = 7
+	}
+	// Вид, объявленный профилем текущей темы (Materialize кладёт его в
+	// ThemeStyle.Menu): меню, созданные на лету, следуют ему без помощи
+	// потребителя. Профиль без объявлений оставляет меню прежним.
+	if ms := currentStyle().Menu; !ms.isZero() {
+		m.ApplyMenuStyle(ms)
 	}
 	return m
 }
@@ -259,27 +354,43 @@ func (m *PopupMenu) Show(x, y int) {
 	w, h := m.calcSize()
 	m.mu.RUnlock()
 
+	// Содержимое выше доступной области — меню получает высоту области и
+	// прокрутку. Сама высота содержимого — без полей сверху и снизу.
+	contentH := h - 2*m.padY()
+	area, hasArea := m.availableArea()
+	limit := 0
+	if hasArea {
+		limit = area.Dy()
+	}
+	if m.MaxHeight > 0 && (limit == 0 || m.MaxHeight < limit) {
+		limit = m.MaxHeight
+	}
+	scrollable := false
+	if limit > 0 && h > limit {
+		h = limit
+		scrollable = true
+	}
+
 	// Клэмп в границы канваса — только БЕЗ хоста попапов. При активном хостинге
 	// экранное позиционирование делает popupHost, а меню вправе выходить за холст.
-	if sw, sh := getScreenBounds(); sw > 0 && sh > 0 && !popupsHosted.Load() {
+	if hasArea {
 		// Холст — в экранных координатах, а (x, y) пришли в кадре виджета: у
 		// меню поля, лежащего в прокрутке, это координаты содержимого. Холст в
-		// этом кадре — прямоугольник [fo, fo+(sw,sh)). Без поправки меню у
-		// виджета, прокрученного далеко вниз, прижималось бы к нижнему краю
-		// СОДЕРЖИМОГО и улетало за экран, а не открывалось у курсора.
-		fo := currentEventFrame()
-		maxX, maxY := fo.X+sw, fo.Y+sh
-		if x+w > maxX {
-			x = maxX - w
+		// этом кадре — прямоугольник [fo, fo+(sw,sh)) (availableArea уже
+		// сдвинут). Без поправки меню у виджета, прокрученного далеко вниз,
+		// прижималось бы к нижнему краю СОДЕРЖИМОГО и улетало за экран, а не
+		// открывалось у курсора.
+		if x+w > area.Max.X {
+			x = area.Max.X - w
 		}
-		if x < fo.X {
-			x = fo.X
+		if x < area.Min.X {
+			x = area.Min.X
 		}
-		if y+h > maxY {
-			y = maxY - h
+		if y+h > area.Max.Y {
+			y = area.Max.Y - h
 		}
-		if y < fo.Y {
-			y = fo.Y
+		if y < area.Min.Y {
+			y = area.Min.Y
 		}
 	}
 
@@ -288,6 +399,7 @@ func (m *PopupMenu) Show(x, y int) {
 	m.popupY = y
 	m.popupW = w
 	m.popupH = h
+	m.scroll, m.contentH, m.scrollable, m.scrollDir = 0, contentH, scrollable, 0
 	m.geoMu.Unlock()
 	atomic.StoreInt32(&m.hoverIdx, -1)
 	atomic.StoreInt32(&m.open, 1)
@@ -308,6 +420,7 @@ func (m *PopupMenu) ShowRight(w Widget) {
 
 // Close закрывает меню и все дочерние подменю.
 func (m *PopupMenu) Close() {
+	m.cancelTimers()
 	m.closeChild()
 	wasOpen := atomic.SwapInt32(&m.open, 0) == 1
 	atomic.StoreInt32(&m.hoverIdx, -1)
@@ -349,6 +462,228 @@ func (m *PopupMenu) geo() (x, y, w, h int) {
 	x, y, w, h = m.popupX, m.popupY, m.popupW, m.popupH
 	m.geoMu.Unlock()
 	return
+}
+
+// ─── Поля и вид по профилю ──────────────────────────────────────────────────
+
+func (m *PopupMenu) padL() int {
+	if m.PadLeft > 0 {
+		return m.PadLeft
+	}
+	return m.PaddingX
+}
+
+func (m *PopupMenu) padR() int {
+	if m.PadRight > 0 {
+		return m.PadRight
+	}
+	return m.PaddingX
+}
+
+// padY — отступ пунктов от верхней и нижней рамки.
+func (m *PopupMenu) padY() int {
+	if m.PaddingY > 0 {
+		return m.PaddingY
+	}
+	return 2
+}
+
+// itemInset — отступ плашки наведения от краёв меню.
+func (m *PopupMenu) itemInset() int {
+	if m.ItemInset > 0 {
+		return m.ItemInset
+	}
+	return 2
+}
+
+func (m *PopupMenu) sepInset() int {
+	if m.SeparatorInset > 0 {
+		return m.SeparatorInset
+	}
+	return 8
+}
+
+func (m *PopupMenu) iconGap() int {
+	if m.IconGap > 0 {
+		return m.IconGap
+	}
+	return menuIconGap
+}
+
+func (m *PopupMenu) chevronSize() int {
+	if m.ChevronSize > 0 {
+		return m.ChevronSize
+	}
+	return 8
+}
+
+// scrollBand — высота полосы со стрелкой на каждом конце прокручиваемого меню.
+const scrollBand = 14
+
+// availableArea — область, в которой меню обязано поместиться, в координатах
+// холста кадра обрабатываемого события. Второе значение false: ограничивать
+// нечем (холст неизвестен) или позиционирование ведёт хост попапов.
+func (m *PopupMenu) availableArea() (image.Rectangle, bool) {
+	if popupsHosted.Load() {
+		return image.Rectangle{}, false
+	}
+	r := m.WorkArea
+	if r.Empty() {
+		r = PopupWorkArea()
+	}
+	if r.Empty() {
+		sw, sh := getScreenBounds()
+		if sw <= 0 || sh <= 0 {
+			return image.Rectangle{}, false
+		}
+		r = image.Rect(0, 0, sw, sh)
+	}
+	return r.Add(currentEventFrame()), true
+}
+
+// menuLayout — геометрия меню, снятая за один раз под geoMu.
+type menuLayout struct {
+	x, y, w, h int
+	// itemsTop — Y первого пункта с учётом прокрутки; viewTop/viewBottom —
+	// видимая часть для пунктов (для обычного меню — внутри полей).
+	itemsTop, viewTop, viewBottom int
+	scroll, maxScroll             int
+	scrollable                    bool
+}
+
+func (m *PopupMenu) layout() menuLayout {
+	m.geoMu.Lock()
+	l := menuLayout{x: m.popupX, y: m.popupY, w: m.popupW, h: m.popupH,
+		scroll: m.scroll, scrollable: m.scrollable}
+	content := m.contentH
+	m.geoMu.Unlock()
+	pad := m.padY()
+	l.viewTop, l.viewBottom = l.y+pad, l.y+l.h-pad
+	if l.scrollable {
+		l.viewTop += scrollBand
+		l.viewBottom -= scrollBand
+		if l.maxScroll = content - (l.viewBottom - l.viewTop); l.maxScroll < 0 {
+			l.maxScroll = 0
+		}
+		if l.scroll > l.maxScroll {
+			l.scroll = l.maxScroll
+		}
+	}
+	l.itemsTop = l.viewTop - l.scroll
+	return l
+}
+
+// scrollBy сдвигает прокручиваемое меню на dy точек (вниз — положительное).
+func (m *PopupMenu) scrollBy(dy int) bool {
+	l := m.layout()
+	if !l.scrollable {
+		return false
+	}
+	n := l.scroll + dy
+	if n < 0 {
+		n = 0
+	}
+	if n > l.maxScroll {
+		n = l.maxScroll
+	}
+	if n == l.scroll {
+		return false
+	}
+	m.geoMu.Lock()
+	m.scroll = n
+	m.geoMu.Unlock()
+	notifyUIChanged()
+	return true
+}
+
+// ensureVisible прокручивает меню так, чтобы пункт idx был виден целиком.
+func (m *PopupMenu) ensureVisible(idx int) {
+	l := m.layout()
+	if !l.scrollable || idx < 0 {
+		return
+	}
+	m.mu.RLock()
+	top := 0
+	h := 0
+	for i, it := range m.items {
+		ih := m.ItemHeight
+		if it.Separator {
+			ih = m.SeparatorH
+		}
+		if i == idx {
+			h = ih
+			break
+		}
+		top += ih
+	}
+	m.mu.RUnlock()
+	view := l.viewBottom - l.viewTop
+	switch {
+	case top < l.scroll:
+		m.scrollBy(top - l.scroll)
+	case top+h > l.scroll+view:
+		m.scrollBy(top + h - l.scroll - view)
+	}
+}
+
+// bandAt сообщает, на какой стрелке прокрутки стоит курсор: -1 верхней,
+// +1 нижней, 0 — ни на какой (или меню не прокручивается).
+func (m *PopupMenu) bandAt(y int) int {
+	l := m.layout()
+	if !l.scrollable {
+		return 0
+	}
+	if y >= l.y && y < l.viewTop {
+		return -1
+	}
+	if y >= l.viewBottom && y < l.y+l.h {
+		return 1
+	}
+	return 0
+}
+
+// setScrollDir включает повторную прокрутку, пока курсор стоит на стрелке.
+func (m *PopupMenu) setScrollDir(dir int) {
+	m.geoMu.Lock()
+	same := m.scrollDir == dir
+	m.scrollDir = dir
+	running := m.scrollAnim != nil && m.scrollAnim.Running()
+	m.geoMu.Unlock()
+	if dir == 0 || (same && running) {
+		return
+	}
+	m.stepScroll()
+}
+
+// stepScroll прокручивает на шаг и заводит следующий, пока курсор на стрелке.
+func (m *PopupMenu) stepScroll() {
+	m.geoMu.Lock()
+	dir := m.scrollDir
+	m.geoMu.Unlock()
+	if dir == 0 || !m.IsOpen() {
+		return
+	}
+	m.scrollBy(dir * (m.ItemHeight/2 + 1))
+	a := Animate(50*time.Millisecond, nil, nil)
+	a.OnDone = func() { m.stepScroll() }
+	m.geoMu.Lock()
+	m.scrollAnim = a
+	m.geoMu.Unlock()
+}
+
+// cancelTimers снимает отложенное переключение подменю и повтор прокрутки.
+func (m *PopupMenu) cancelTimers() {
+	m.geoMu.Lock()
+	sa, ra := m.switchAnim, m.scrollAnim
+	m.switchAnim, m.scrollAnim = nil, nil
+	m.switchIdx, m.scrollDir = -1, 0
+	m.geoMu.Unlock()
+	if sa != nil {
+		sa.Stop()
+	}
+	if ra != nil {
+		ra.Stop()
+	}
 }
 
 // openChildOf возвращает текущее открытое дочернее подменю (nil, если его
@@ -395,8 +730,26 @@ func (m *PopupMenu) openChild(idx int) {
 	child.SeparatorH = m.SeparatorH
 	child.PaddingX = m.PaddingX
 	child.MinWidth = m.MinWidth
+	// Минимальная ширина нужна корневому меню; подменю профиль может
+	// освободить от неё (0 — прежнее наследование).
+	switch {
+	case m.SubMenuMinWidth > 0:
+		child.MinWidth = m.SubMenuMinWidth
+	case m.SubMenuMinWidth < 0:
+		child.MinWidth = 0
+	}
+	child.SubMenuMinWidth = m.SubMenuMinWidth
 	child.ArrowPadding = m.ArrowPadding
 	child.UseMnemonics = m.UseMnemonics
+	child.PadLeft, child.PadRight, child.PaddingY = m.PadLeft, m.PadRight, m.PaddingY
+	child.ItemInset, child.SeparatorInset = m.ItemInset, m.SeparatorInset
+	child.CornerRadius, child.ItemCorner, child.Elevation = m.CornerRadius, m.ItemCorner, m.Elevation
+	child.ShortcutColor = m.ShortcutColor
+	child.IconSize, child.IconGap = m.IconSize, m.IconGap
+	child.ChevronRight, child.ChevronSize = m.ChevronRight, m.ChevronSize
+	child.TintIcons = m.TintIcons
+	child.SubMenuDelay = m.SubMenuDelay
+	child.WorkArea, child.MaxHeight = m.WorkArea, m.MaxHeight
 	child.SetItems(subItems)
 	child.OnSelect = m.OnSelect
 
@@ -409,8 +762,8 @@ func (m *PopupMenu) openChild(idx int) {
 	px, _, pw, _ := m.geo()
 	x := px + pw - 2
 	// Разворот влево у правого края — только без хоста (хост позиционирует сам).
-	// Правый край холста — в кадре обрабатываемого события (см. Show).
-	if sw, _ := getScreenBounds(); sw > 0 && x+cw > sw+currentEventFrame().X && !popupsHosted.Load() {
+	// Правый край области — в кадре обрабатываемого события (см. Show).
+	if area, ok := m.availableArea(); ok && x+cw > area.Max.X {
 		x = px - cw + 2
 	}
 	child.Show(x, itemY)
@@ -423,10 +776,9 @@ func (m *PopupMenu) openChild(idx int) {
 
 // itemYForIndex возвращает абсолютную Y-координату верхнего края пункта.
 func (m *PopupMenu) itemYForIndex(idx int) int {
-	_, py, _, _ := m.geo()
+	y := m.layout().itemsTop
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	y := py + 2
 	for i, item := range m.items {
 		if i == idx {
 			return y
@@ -488,7 +840,7 @@ func (m *PopupMenu) calcSize() (w, h int) {
 			// Ширина по НАСТОЯЩЕМУ замеру подписи: len в Go считает байты, и
 			// кириллический пункт выходил вдвое шире нужного.
 			textW := MeasureUIText(mnemonicLabel(item.Text, m.UseMnemonics),
-				DefaultFontSize()) + m.PaddingX*2 + 24 + gutter
+				DefaultFontSize()) + m.padL() + m.padR() + 24 + gutter
 			if item.Shortcut != "" {
 				// Сочетание пишется справа, и место под него нужно
 				// отвести всему меню: иначе подпись и сочетание налезут
@@ -502,17 +854,34 @@ func (m *PopupMenu) calcSize() (w, h int) {
 	}
 	// Добавляем место для стрелки ► если есть подменю.
 	if hasSubItems {
-		w += m.ArrowPadding
+		w += m.arrowSpace()
 	}
-	h += 4 // верхний + нижний padding
+	h += 2 * m.padY() // верхний + нижний padding
 	return
+}
+
+// arrowSpace — сколько ширины добавляет шеврон подменю. Глиф стоит у правого
+// поля и требует ArrowPadding; тонкий шеврон ложится в зону поля и сочетания
+// (padR + 24) и добавляет только то, что в неё не поместилось.
+func (m *PopupMenu) arrowSpace() int {
+	if m.ChevronRight <= 0 {
+		return m.ArrowPadding
+	}
+	need := m.ChevronRight + m.chevronSize()/4 + 6
+	if extra := need - (m.padR() + 24); extra > 0 {
+		return extra
+	}
+	return 0
 }
 
 // itemAtY возвращает индекс пункта по Y-координатe (абсолютной).
 // Возвращает -1 если нет пункта (разделитель, за пределами).
 func (m *PopupMenu) itemAtY(y int) int {
-	_, py, _, _ := m.geo()
-	curY := py + 2 // верхний padding
+	l := m.layout()
+	if y < l.viewTop || y >= l.viewBottom {
+		return -1 // поля и стрелки прокрутки — не пункты
+	}
+	curY := l.itemsTop
 	for i, item := range m.items {
 		var itemH int
 		if item.Separator {
@@ -580,38 +949,71 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 	items := m.items
 	m.mu.RUnlock()
 
-	px, py, pw, ph := m.geo()
+	l := m.layout()
+	px, py, pw, ph := l.x, l.y, l.w, l.h
 	openChild, openChildIdx := m.openChildOf()
 	hover := int(atomic.LoadInt32(&m.hoverIdx))
+	pending := m.pendingSwitch()
+	corner := m.CornerRadius
 
-	// Тень (2px смещение вправо-вниз).
-	ctx.FillRectAlpha(px+2, py+2, pw, ph, m.ShadowColor)
+	// Тень.
+	m.drawShadow(ctx, px, py, pw, ph)
 
 	// Фон popup.
-	ctx.FillRect(px, py, pw, ph, m.Background)
+	if corner > 0 {
+		ctx.FillRoundRect(px, py, pw, ph, corner, m.Background)
+	} else {
+		ctx.FillRect(px, py, pw, ph, m.Background)
+	}
 
 	// Рамка: классика — выпуклый 3D-бордюр (как меню Win2000), иначе плоская.
 	if st := currentStyle(); st.Classic3D {
 		drawBevelRaised(ctx, px, py, pw, ph, st)
+	} else if corner > 0 {
+		ctx.DrawRoundBorder(px, py, pw, ph, corner, m.BorderColor)
 	} else {
 		ctx.DrawBorder(px, py, pw, ph, m.BorderColor)
 	}
 
-	// Пункты.
-	curY := py + 2
+	// Пункты. У прокручиваемого меню — внутри окна просмотра: всё, что
+	// выходит за него, обрезается, а в полосах на концах рисуются стрелки.
+	var prevClip image.Rectangle
+	if l.scrollable {
+		prevClip = ctx.Clip()
+		view := image.Rect(px, l.viewTop, px+pw, l.viewBottom)
+		if !prevClip.Empty() {
+			view = view.Intersect(prevClip)
+		}
+		ctx.SetClip(view)
+	}
+
+	padL, padR := m.padL(), m.padR()
+	inset := m.itemInset()
+	sepInset := m.sepInset()
+	curY := l.itemsTop
 	for i, item := range items {
 		if item.Separator {
 			sepY := curY + m.SeparatorH/2
-			ctx.DrawHLine(px+8, sepY, pw-16, m.SeparatorColor)
+			if m.SeparatorColor.A < 255 {
+				ctx.FillRectAlpha(px+sepInset, sepY, pw-2*sepInset, 1, m.SeparatorColor)
+			} else {
+				ctx.DrawHLine(px+sepInset, sepY, pw-2*sepInset, m.SeparatorColor)
+			}
 			curY += m.SeparatorH
 			continue
 		}
+		if curY+m.ItemHeight <= l.viewTop || curY >= l.viewBottom {
+			curY += m.ItemHeight // за пределами окна просмотра
+			continue
+		}
 
-		// Hover-подсветка (а также подсветка пункта с открытым дочерним подменю).
-		isChildOpen := openChild != nil && openChildIdx == i
+		// Hover-подсветка (а также подсветка пункта с открытым дочерним
+		// подменю). Пока подменю ждёт переключения на другой пункт, плашку
+		// держит только пункт под курсором: две сразу сбивали бы с толку.
+		isChildOpen := openChild != nil && openChildIdx == i && (pending < 0 || pending == i)
 		hovered := (i == hover || isChildOpen) && !item.Disabled
 		if hovered {
-			ctx.FillRect(px+2, curY, pw-4, m.ItemHeight, m.HoverBG)
+			m.drawHoverPlate(ctx, px+inset, curY, pw-2*inset, m.ItemHeight)
 		}
 
 		// Текст.
@@ -623,15 +1025,15 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 		if item.Disabled {
 			textCol = m.DisabledColor
 		}
-		textX := px + m.PaddingX + m.checkGutter() + m.iconGutter()
+		textX := px + padL + m.checkGutter() + m.iconGutter()
 		if item.Checkable && item.Checked {
-			drawCheckMark(ctx, image.Rect(px+m.PaddingX, curY, px+m.PaddingX+checkMarkSize,
+			drawCheckMark(ctx, image.Rect(px+padL, curY, px+padL+checkMarkSize,
 				curY+m.ItemHeight), textCol)
 		}
-		if item.Icon != nil {
+		if icon := m.iconFor(item, hovered, textCol); icon != nil {
 			sz := m.iconSizeOf(item)
-			ix := px + m.PaddingX + m.checkGutter()
-			ctx.DrawImageScaled(item.Icon, ix, curY+(m.ItemHeight-sz)/2, sz, sz)
+			ix := px + padL + m.checkGutter()
+			ctx.DrawImageScaled(icon, ix, curY+(m.ItemHeight-sz)/2, sz, sz)
 		}
 		drawMnemonicText(ctx, item.Text, textX, textY, textCol, m.UseMnemonics)
 
@@ -639,22 +1041,170 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 		// не вторая подпись, и спорить с названием пункта она не должна.
 		if item.Shortcut != "" && len(item.SubItems) == 0 {
 			sw := MeasureUIText(item.Shortcut, DefaultFontSize())
-			sx := px + pw - m.PaddingX - sw
-			ctx.DrawText(item.Shortcut, sx, textY, m.shortcutColor(textCol))
+			sx := px + pw - padR - sw
+			ctx.DrawText(item.Shortcut, sx, textY, m.shortcutColorFor(textCol, hovered, item.Disabled))
 		}
 
-		// Стрелка ► для пунктов с подменю.
+		// Стрелка для пунктов с подменю.
 		if len(item.SubItems) > 0 {
-			arrowX := px + pw - m.PaddingX
-			ctx.DrawText("\u25b8", arrowX, textY, textCol)
+			m.drawChevron(ctx, px, pw, curY, textY, textCol)
 		}
 
 		curY += m.ItemHeight
 	}
 
+	if l.scrollable {
+		ctx.SetClip(prevClip)
+		m.drawScrollArrows(ctx, l)
+	}
+
 	// Рекурсивно рисуем дочернее подменю.
 	if openChild != nil {
 		openChild.DrawOverlay(ctx)
+	}
+}
+
+// drawShadow рисует тень меню. Меню с Elevation (профиль объявил высоту)
+// получает мягкую тень через ShadowDrawer; без неё или без Elevation — прежнюю
+// прямоугольную со смещением на 2 точки.
+//
+// Единственная точка, где тень меню считается: общие токены теней темы
+// (размытие, смещение, непрозрачность) подключаются здесь — вместо
+// Elevation/ShadowColor.
+func (m *PopupMenu) drawShadow(ctx DrawContext, px, py, pw, ph int) {
+	if m.Elevation > 0 && m.ShadowColor.A > 0 {
+		if sd, ok := ctx.(ShadowDrawer); ok {
+			sd.DrawSoftShadow(image.Rect(px, py, px+pw, py+ph), m.CornerRadius, m.Elevation, m.ShadowColor)
+			return
+		}
+	}
+	if m.CornerRadius > 0 {
+		ctx.FillRoundRect(px+2, py+2, pw, ph, m.CornerRadius, m.ShadowColor)
+		return
+	}
+	ctx.FillRectAlpha(px+2, py+2, pw, ph, m.ShadowColor)
+}
+
+// drawHoverPlate рисует плашку наведения. Полупрозрачный цвет (у Windows 11 —
+// чёрная плёнка) кладётся поверх меню, а не записывается как есть: запись
+// превращала бы его в почти чёрный и закрывала текст.
+func (m *PopupMenu) drawHoverPlate(ctx DrawContext, x, y, w, h int) {
+	switch {
+	case m.ItemCorner > 0:
+		ctx.FillRoundRect(x, y, w, h, m.ItemCorner, m.HoverBG)
+	case m.HoverBG.A < 255:
+		ctx.FillRectAlpha(x, y, w, h, m.HoverBG)
+	default:
+		ctx.FillRect(x, y, w, h, m.HoverBG)
+	}
+}
+
+// iconFor выбирает картинку значка для состояния пункта: свою для плашки
+// наведения, если есть, и одноцветную — перекрашенную в цвет текста.
+func (m *PopupMenu) iconFor(item MenuItem, hovered bool, ink color.RGBA) image.Image {
+	icon := item.Icon
+	if hovered && item.IconHover != nil {
+		icon = item.IconHover
+	}
+	if icon == nil {
+		return nil
+	}
+	if item.IconTint || m.TintIcons {
+		return menuTintImage(icon, ink)
+	}
+	return icon
+}
+
+// menuTintImage перекрашивает картинку в один цвет по её альфа-каналу.
+func menuTintImage(src image.Image, col color.RGBA) image.Image {
+	b := src.Bounds()
+	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	for y := 0; y < b.Dy(); y++ {
+		for x := 0; x < b.Dx(); x++ {
+			_, _, _, a := src.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			if a == 0 {
+				continue
+			}
+			// Цвет предумножен: каждый канал, включая альфу, масштабируется
+			// на долю непрозрачности точки картинки.
+			k := func(c uint8) uint8 { return uint8(uint32(c) * a / 0xffff) }
+			out.SetRGBA(x, y, color.RGBA{R: k(col.R), G: k(col.G), B: k(col.B), A: k(col.A)})
+		}
+	}
+	return out
+}
+
+// shortcutColorFor — цвет сочетания пункта. Заданный профилем (ShortcutColor)
+// применяется к обычному пункту; недоступный и пункт под плашкой с иным цветом
+// текста следуют своему тексту, приглушённому.
+func (m *PopupMenu) shortcutColorFor(text color.RGBA, hovered, disabled bool) color.RGBA {
+	if m.ShortcutColor.A != 0 && !disabled &&
+		!(hovered && m.HoverTextColor.A > 0 && m.HoverTextColor != m.TextColor) {
+		return m.ShortcutColor
+	}
+	return m.shortcutColor(text)
+}
+
+// drawChevron рисует признак подменю у правого края пункта: тонкий «›» по
+// профилю (ChevronRight) или прежний глиф «▸» у поля.
+func (m *PopupMenu) drawChevron(ctx DrawContext, px, pw, rowY, textY int, col color.RGBA) {
+	if m.ChevronRight <= 0 {
+		ctx.DrawText("▸", px+pw-m.PaddingX, textY, col)
+		return
+	}
+	drawThinChevron(ctx, px+pw-m.ChevronRight, rowY+m.ItemHeight/2, m.chevronSize(), 1, col)
+}
+
+// drawThinChevron рисует «›» высотой size с серединой в (cx, cy); dir — 1
+// вправо, -1 влево. Фигура, а не символ шрифта: тонкая линия обязана выглядеть
+// одинаково в любом шрифте темы (тот же довод, что у галочки).
+func drawThinChevron(ctx DrawContext, cx, cy, size, dir int, col color.RGBA) {
+	half := size / 2
+	w := size / 4
+	if w < 2 {
+		w = 2
+	}
+	x0, x1 := cx-w/2, cx-w/2+w
+	if dir < 0 {
+		x0, x1 = x1, x0
+	}
+	if aa, ok := ctx.(AAShapes); ok {
+		aa.StrokePolylineAA([]image.Point{
+			{X: x0, Y: cy - half}, {X: x1, Y: cy}, {X: x0, Y: cy + half},
+		}, 1.1, false, col)
+		return
+	}
+	step := 1
+	if dir < 0 {
+		step = -1
+	}
+	for i := 0; i <= w; i++ {
+		ctx.SetPixel(x0+step*i, cy-half+i*half/w, col)
+		ctx.SetPixel(x0+step*i, cy+half-i*half/w, col)
+	}
+}
+
+// drawScrollArrows рисует стрелки в полосах на концах прокручиваемого меню:
+// яркая — в ту сторону, куда ещё есть что показать.
+func (m *PopupMenu) drawScrollArrows(ctx DrawContext, l menuLayout) {
+	cx := l.x + l.w/2
+	for _, up := range []bool{true, false} {
+		col := m.DisabledColor
+		if (up && l.scroll > 0) || (!up && l.scroll < l.maxScroll) {
+			col = m.TextColor
+		}
+		cy := l.y + m.padY() + scrollBand/2
+		if !up {
+			cy = l.y + l.h - m.padY() - scrollBand/2
+		}
+		// Треугольник из горизонтальных линий: вершина к краю меню.
+		for j := 0; j < 4; j++ {
+			y := cy - 2 + j
+			if !up {
+				y = cy + 1 - j
+			}
+			ctx.DrawHLine(cx-j, y, 1+2*j, col)
+		}
 	}
 }
 
@@ -683,6 +1233,8 @@ func (m *PopupMenu) OnMouseMove(x, y int) {
 	if c, _ := m.openChildOf(); c != nil {
 		childRect := c.fullBounds()
 		if image.Pt(x, y).In(childRect) {
+			// Курсор дошёл до подменю: ждать переключения больше не нужно.
+			m.cancelSwitch()
 			c.OnMouseMove(x, y)
 			return
 		}
@@ -691,8 +1243,17 @@ func (m *PopupMenu) OnMouseMove(x, y int) {
 	pr := m.popupRect()
 	if !image.Pt(x, y).In(pr) {
 		m.setHoverIdx(-1)
+		m.setScrollDir(0)
 		return
 	}
+
+	// Стрелка на конце прокручиваемого меню: курсор на ней листает список.
+	if band := m.bandAt(y); band != 0 {
+		m.setHoverIdx(-1)
+		m.setScrollDir(band)
+		return
+	}
+	m.setScrollDir(0)
 
 	m.mu.RLock()
 	idx := m.itemAtY(y)
@@ -704,13 +1265,78 @@ func (m *PopupMenu) OnMouseMove(x, y int) {
 		m.mu.RLock()
 		hasSubItems := idx < len(m.items) && len(m.items[idx].SubItems) > 0
 		m.mu.RUnlock()
-		if hasSubItems {
+		if m.SubMenuDelay > 0 {
+			m.switchChildLater(idx, hasSubItems)
+		} else if hasSubItems {
 			m.openChild(idx)
 		} else {
 			// Навели на пункт без подменю — закрываем дочернее.
 			m.closeChild()
 		}
 	}
+}
+
+// switchChildLater переключает подменю после задержки SubMenuDelay: пока
+// курсор идёт по диагонали от пункта к раскрытому подменю, он задевает
+// соседние пункты, и мгновенное переключение закрывало бы подменю под ним.
+// Плашка наведения при этом следует за курсором сразу — ждёт только подменю.
+func (m *PopupMenu) switchChildLater(idx int, hasSub bool) {
+	c, cIdx := m.openChildOf()
+	if (hasSub && c != nil && cIdx == idx) || (!hasSub && c == nil) {
+		m.cancelSwitch() // уже так, как надо
+		return
+	}
+	m.geoMu.Lock()
+	if m.switchIdx == idx && m.switchAnim != nil && m.switchAnim.Running() {
+		m.geoMu.Unlock()
+		return // отсчёт для этого пункта уже идёт
+	}
+	old := m.switchAnim
+	m.switchIdx = idx
+	m.geoMu.Unlock()
+	if old != nil {
+		old.Stop()
+	}
+	// Анимация без покадрового колбэка — ровно таймер движка.
+	a := Animate(time.Duration(m.SubMenuDelay)*time.Millisecond, nil, nil)
+	a.OnDone = func() {
+		m.geoMu.Lock()
+		still := m.switchIdx == idx
+		m.switchAnim, m.switchIdx = nil, -1
+		m.geoMu.Unlock()
+		if !still || !m.IsOpen() || int(atomic.LoadInt32(&m.hoverIdx)) != idx {
+			return
+		}
+		if hasSub {
+			m.openChild(idx)
+		} else {
+			m.closeChild()
+		}
+	}
+	m.geoMu.Lock()
+	m.switchAnim = a
+	m.geoMu.Unlock()
+}
+
+// cancelSwitch отменяет отложенное переключение подменю.
+func (m *PopupMenu) cancelSwitch() {
+	m.geoMu.Lock()
+	a := m.switchAnim
+	m.switchAnim, m.switchIdx = nil, -1
+	m.geoMu.Unlock()
+	if a != nil {
+		a.Stop()
+	}
+}
+
+// pendingSwitch — пункт, над которым подменю ждёт переключения (-1 — нет).
+func (m *PopupMenu) pendingSwitch() int {
+	m.geoMu.Lock()
+	defer m.geoMu.Unlock()
+	if m.switchAnim == nil {
+		return -1
+	}
+	return m.switchIdx
 }
 
 // OnMouseButton обрабатывает клик: выбор пункта или закрытие.
@@ -728,6 +1354,18 @@ func (m *PopupMenu) OnMouseButton(e MouseEvent) bool {
 		if image.Pt(e.X, e.Y).In(childRect) {
 			return c.OnMouseButton(e)
 		}
+	}
+
+	// Колесо листает длинное меню; короткое событие поглощает, как раньше.
+	if e.Button == MouseWheelUp || e.Button == MouseWheelDown {
+		if e.Pressed && image.Pt(e.X, e.Y).In(m.popupRect()) {
+			step := 3 * m.ItemHeight
+			if e.Button == MouseWheelUp {
+				step = -step
+			}
+			m.scrollBy(step)
+		}
+		return image.Pt(e.X, e.Y).In(m.popupRect())
 	}
 
 	if e.Button != MouseLeft || e.Pressed {
@@ -750,6 +1388,11 @@ func (m *PopupMenu) OnMouseButton(e MouseEvent) bool {
 	if !image.Pt(e.X, e.Y).In(pr) {
 		// Клик за пределами — закрыть всё.
 		m.Close()
+		return true
+	}
+
+	if band := m.bandAt(e.Y); band != 0 {
+		m.scrollBy(band * m.ItemHeight * 2) // щелчок по стрелке — на два пункта
 		return true
 	}
 
@@ -826,10 +1469,12 @@ func (m *PopupMenu) OnKeyEvent(e KeyEvent) {
 	case KeyUp:
 		hover = m.prevActiveItem(hover)
 		m.setHoverIdx(hover)
+		m.ensureVisible(hover)
 
 	case KeyDown:
 		hover = m.nextActiveItem(hover)
 		m.setHoverIdx(hover)
+		m.ensureVisible(hover)
 
 	case KeyRight:
 		// Войти в подменю, если у текущего пункта есть SubItems.
@@ -996,13 +1641,9 @@ func (m *PopupMenu) ApplyTheme(t *Theme) {
 	m.HoverTextColor = t.MenuHoverText
 	m.SeparatorColor = t.DropBorder
 	m.ShadowColor = t.ShadowColor
-	if t.Style.Classic3D {
-		m.ItemHeight = 22 // классика: компактные пункты
-		m.SeparatorH = 7
-	} else {
-		m.ItemHeight = 30
-		m.SeparatorH = 9
-	}
+	// Размеры и вид, объявленные профилем (ThemeStyle.Menu); без объявлений —
+	// прежние 22/7 для классики и 30/9 для остальных.
+	m.applyMenuStyle(t.Style.Menu, t.Style.Classic3D)
 }
 
 // ─── Отметки у пунктов (WPF MenuItem.IsChecked) ─────────────────────────────
@@ -1062,13 +1703,16 @@ func (m *PopupMenu) iconGutter() int {
 	if w == 0 {
 		return 0
 	}
-	return w + menuIconGap
+	return w + m.iconGap()
 }
 
 // iconSizeOf — сторона значка пункта: своя, если задана, иначе по высоте
 // пункта, но не крупнее её самой за вычетом полей.
 func (m *PopupMenu) iconSizeOf(item MenuItem) int {
 	sz := item.IconSize
+	if sz <= 0 {
+		sz = m.IconSize
+	}
 	if sz <= 0 {
 		sz = m.ItemHeight - menuIconInset
 	}

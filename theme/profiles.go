@@ -161,6 +161,10 @@ func Windows2000Profile() *Profile {
 	p.SetStyle("menu", "item", StateHover, StyleDelta{
 		FillFrom: KeySelection, TextFrom: KeyAccentText,
 	})
+	// Недоступный пункт — тёмно-серый на «лице»: приглушённый цвет по
+	// умолчанию на нём пропадает. Размеры меню — в menu.go.
+	p.SetStyle("menu", "item", StateDisabled, StyleDelta{Text: C(RGB(128, 128, 128))})
+	declareClassicMenu(p)
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(face), Bevel: bevel})
 	p.SetStyle("window", "titlebar", StateNormal, StyleDelta{
 		Fill: C(RGB(128, 128, 128)), Text: C(RGB(212, 208, 200)),
@@ -437,6 +441,7 @@ func Windows10Profile() *Profile {
 	})
 	p.SetStyleWhen(KeyTaskbarLight, "menu", "item", StateHover, StyleDelta{Fill: C(RGB(222, 222, 222))})
 	p.SetStyleWhen(KeyTaskbarLight, "menu", "item", StateDisabled, StyleDelta{Text: C(RGB(150, 150, 150))})
+	declareWin10Menu(p)
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface)})
 	p.SetStyle("window", "titlebar", StateNormal, StyleDelta{
 		Fill: C(RGB(90, 90, 90)), Text: C(RGB(200, 200, 200)),
@@ -662,7 +667,7 @@ func Windows11Profile() *Profile {
 		Text: C(text), Corner: N(8), Elevation: N(8), Shadow: C(RGBA(0, 0, 0, 70)),
 		Border: C(RGBA(0, 0, 0, 15)), BorderWidth: N(1),
 	})
-	p.SetStyle("menu", "item", StateHover, StyleDelta{Fill: C(RGBA(0, 0, 0, 18)), Corner: N(4)})
+	declareWin11Menu(p)
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface), Corner: N(12)})
 	p.SetStyle("window", "titlebar", StateNormal, StyleDelta{
 		Fill: C(RGB(243, 243, 243)), Text: C(RGB(120, 120, 120)),
@@ -765,6 +770,7 @@ func Windows11DarkProfile() *Profile {
 			Highlight: RGBA(255, 255, 255, 40)},
 		Text: C(text),
 	})
+	declareWin11DarkMenu(p)
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface)})
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{Fill: C(surface), Text: C(text)})
 	addDialogStyles(p)

@@ -130,6 +130,7 @@ func ProfileFromTheme(t *Theme) *theme.Profile {
 		}
 		styles[b.style] = d
 	}
+	writeMenuStyle(p, styles, t.Style.Menu)
 	for k, d := range styles {
 		p.Styles[k] = d
 	}
@@ -228,6 +229,8 @@ func Materialize(rt *theme.Theme) *Theme {
 		ScrollbarThinHoverWidth: int(rt.MetricOr(keyScrollbarThinHoverWidth, 0)),
 
 		TextSubpixel: rt.FlagOr(theme.FlagTextSubpixel, false),
+
+		Menu: menuStyleOf(rt, false),
 	}
 	// Кегль по умолчанию следует профилю только по его просьбе (флаг): иначе
 	// Fonts["default"] прежних тем (9 pt) изменил бы раскладку всех виджетов.
