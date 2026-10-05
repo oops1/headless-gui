@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/focusreq"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -100,6 +101,26 @@ type WindowPreview struct {
 
 	// area — область кнопок окон, за наведением которой следит панель.
 	area HoverArea
+
+	// Режим списка: у приложения несколько окон, и панель показывает их все
+	// рядом (wins, больше одного). Одиночное окно по-прежнему win.
+	wins []WindowInfo
+	// thumbs — миниатюры окон списка.
+	thumbs map[WindowID]image.Image
+	// listApp — приложение списка: по нему список сверяется с моделью окон,
+	// пока открыт (окно закрыли, открыли ещё одно).
+	listApp AppID
+	// listHover — окно списка под курсором (-1 — никакого).
+	listHover int
+	// pendingWins — список окон кнопки, ради которой заведён openTimer.
+	pendingWins []WindowInfo
+	// listKbd — выбор в списке сделан клавишами (или список открыт клавишей):
+	// выбранное окно обведено рамкой фокуса. focused — список держит фокус
+	// клавиатуры (groupKeyed).
+	listKbd, focused bool
+	// listAnchor — кнопка, к которой прижимается список; нужна, пока Open ещё не
+	// поставил Anchor, а размер списка уже спрашивают (listSpace).
+	listAnchor image.Rectangle
 }
 
 // HoverArea — область панели задач с кнопками окон, к которым прижимается
@@ -130,6 +151,7 @@ func NewWindowPreview(tm *theme.Manager, wm WindowModel) *WindowPreview {
 		tm:         tm,
 		wm:         wm,
 		pendingIdx: -1,
+		listHover:  -1,
 	}
 	p.Content = p.draw
 	p.Size = p.size
@@ -152,7 +174,50 @@ func (p *WindowPreview) Track(area HoverArea) {
 	p.mu.Unlock()
 	if area != nil {
 		area.SetHoverListener(p.hoverChanged)
+		// Щелчок по кнопке со многими окнами открывает их список сразу, без
+		// задержки наведения.
+		if g, ok := area.(GroupClickArea); ok {
+			g.SetGroupListener(p.groupClicked)
+		}
+		// Enter и Space на стопке открывают список с фокусом клавиатуры.
+		if g, ok := area.(GroupKeyArea); ok {
+			g.SetGroupKeyListener(p.groupKeyed)
+		}
 	}
+}
+
+// windowsOf — все окна кнопки idx (больше одного — стопка), если область
+// умеет об этом сообщать.
+func windowsOf(area HoverArea, idx int) []WindowInfo {
+	if g, ok := area.(GroupHoverArea); ok {
+		return g.WindowsAt(idx)
+	}
+	return nil
+}
+
+// groupClicked — щелчок по кнопке со многими окнами: показать их список.
+//
+// Если список только что закрыло нажатие на ту же кнопку (Flyout гасит панель
+// на нажатии, а кнопка срабатывает на отпускании), он остаётся закрытым:
+// повторный щелчок по кнопке закрывает список, а не открывает его заново.
+func (p *WindowPreview) groupClicked(idx int) {
+	p.mu.Lock()
+	area := p.area
+	p.mu.Unlock()
+	if area == nil || !p.Enabled() {
+		return
+	}
+	wins := windowsOf(area, idx)
+	anchor := area.ButtonRect(idx)
+	if len(wins) < 2 || anchor.Empty() {
+		return
+	}
+	p.cancelOpen()
+	p.cancelClose()
+	if !p.IsOpen() && p.DismissedByAnchor() {
+		return
+	}
+	p.showList(wins, anchor)
 }
 
 // Enabled сообщает, хочет ли тема предпросмотра вообще.
@@ -168,7 +233,7 @@ func (p *WindowPreview) previews() WindowPreviews {
 
 // hoverChanged — наведение на кнопках изменилось.
 func (p *WindowPreview) hoverChanged(idx int) {
-	if !p.Enabled() || p.previews() == nil {
+	if !p.Enabled() {
 		return
 	}
 	if idx < 0 {
@@ -191,22 +256,40 @@ func (p *WindowPreview) hoverChanged(idx int) {
 	if anchor.Empty() {
 		return
 	}
+	wins := windowsOf(area, idx)
+	if len(wins) < 2 {
+		wins = nil
+		// Миниатюры одиночного окна бывают только у модели, которая их отдаёт;
+		// список окон полезен и с одними заголовками.
+		if p.previews() == nil {
+			return
+		}
+	}
 
 	p.cancelClose()
 	if p.IsOpen() {
 		// Панель уже висит: переезжаем к соседней кнопке БЕЗ закрытия.
 		// Закрытие с новым открытием даёт заметное мигание.
-		p.showFor(info, anchor)
+		p.present(info, wins, anchor)
 		return
 	}
-	p.scheduleOpen(idx, info, anchor)
+	p.scheduleOpen(idx, info, wins, anchor)
+}
+
+// present показывает кнопку: список окон, если их несколько, иначе одно окно.
+func (p *WindowPreview) present(info WindowInfo, wins []WindowInfo, anchor image.Rectangle) {
+	if len(wins) > 1 {
+		p.showList(wins, anchor)
+		return
+	}
+	p.showFor(info, anchor)
 }
 
 // scheduleOpen заводит задержку перед появлением.
-func (p *WindowPreview) scheduleOpen(idx int, info WindowInfo, anchor image.Rectangle) {
+func (p *WindowPreview) scheduleOpen(idx int, info WindowInfo, wins []WindowInfo, anchor image.Rectangle) {
 	p.mu.Lock()
 	same := p.pendingIdx == idx && p.openTimer != nil && p.openTimer.Running()
-	p.pendingIdx, p.pendingWin, p.pendingAnchor = idx, info, anchor
+	p.pendingIdx, p.pendingWin, p.pendingAnchor, p.pendingWins = idx, info, anchor, wins
 	p.mu.Unlock()
 	if same {
 		return // та же кнопка, отсчёт уже идёт
@@ -218,11 +301,11 @@ func (p *WindowPreview) scheduleOpen(idx int, info WindowInfo, anchor image.Rect
 	a := widget.Animate(p.delay(KeyPreviewDelayOpen, previewDefOpenMs), nil, nil)
 	a.OnDone = func() {
 		p.mu.Lock()
-		info, anchor := p.pendingWin, p.pendingAnchor
+		info, anchor, wins := p.pendingWin, p.pendingAnchor, p.pendingWins
 		p.openTimer = nil
 		p.mu.Unlock()
 		if !anchor.Empty() {
-			p.showFor(info, anchor)
+			p.present(info, wins, anchor)
 		}
 	}
 	p.mu.Lock()
@@ -233,8 +316,8 @@ func (p *WindowPreview) scheduleOpen(idx int, info WindowInfo, anchor image.Rect
 // scheduleClose заводит задержку перед закрытием: за это время курсор успеет
 // дойти с кнопки до самой миниатюры.
 func (p *WindowPreview) scheduleClose() {
-	if !p.IsOpen() {
-		return
+	if !p.IsOpen() || p.keyboardHeld() {
+		return // список в руках у клавиатуры: уход мыши его не закрывает
 	}
 	p.mu.Lock()
 	running := p.closeTimer != nil && p.closeTimer.Running()
@@ -287,8 +370,9 @@ func (p *WindowPreview) cancelClose() {
 // showFor показывает миниатюру окна info, прижав панель к кнопке anchor.
 func (p *WindowPreview) showFor(info WindowInfo, anchor image.Rectangle) {
 	p.mu.Lock()
-	same := p.hasWin && p.win.ID == info.ID
+	same := p.hasWin && p.win.ID == info.ID && len(p.wins) == 0
 	p.win, p.hasWin = info, true
+	p.wins, p.thumbs, p.listApp, p.listHover = nil, nil, "", -1
 	if !same {
 		// Миниатюра прежнего окна к этому отношения не имеет: показать её —
 		// значит на мгновение подписать чужую картинку чужим заголовком.
@@ -327,6 +411,9 @@ func (p *WindowPreview) armRefresh() {
 		if !p.IsOpen() {
 			return
 		}
+		if p.syncList() {
+			return // список опустел и панель закрылась
+		}
 		p.grabThumb()
 		p.armRefresh()
 	}
@@ -357,8 +444,29 @@ func (p *WindowPreview) grabThumb() {
 	}
 	p.mu.Lock()
 	info, ok := p.win, p.hasWin
+	wins := p.wins
 	p.mu.Unlock()
 	if !ok {
+		return
+	}
+
+	if len(wins) > 1 {
+		// Список: миниатюры всех окон. В вертикальном виде (окон слишком
+		// много для ряда) их нет — только строки заголовков, и снимать окна
+		// незачем.
+		var thumbs map[WindowID]image.Image
+		if !p.listVertical(len(wins)) {
+			thumbs = make(map[WindowID]image.Image, len(wins))
+			for _, w := range wins {
+				thumbs[w.ID] = src.Preview(w.ID, p.thumbMax())
+			}
+		}
+		p.mu.Lock()
+		p.thumbs = thumbs
+		p.mu.Unlock()
+		if r := p.rect(); !r.Empty() {
+			widget.InvalidateRect(r)
+		}
 		return
 	}
 
@@ -397,7 +505,12 @@ func (p *WindowPreview) stopEverything() {
 	p.mu.Lock()
 	p.hasWin = false
 	p.thumb = nil
+	p.wins, p.thumbs, p.listApp, p.listHover = nil, nil, "", -1
+	p.listKbd = false
 	p.mu.Unlock()
+	// Список, открытый с клавиатуры, возвращает фокус на кнопку стопки. Вне
+	// доставки события (закрытие по таймеру) это ничего не делает.
+	focusreq.Return(p)
 }
 
 // Close закрывает панель и снимает все её таймеры.
@@ -416,8 +529,13 @@ func (p *WindowPreview) OnMouseMove(x, y int) {
 	}
 	if image.Pt(x, y).In(p.rect()) {
 		p.cancelClose()
+		p.hoverItem(image.Pt(x, y))
 		return
 	}
+	if p.keyboardHeld() {
+		return // мышь прошла мимо, а выбор сделан клавишами: он остаётся
+	}
+	p.hoverItem(image.Pt(-1, -1))
 	p.scheduleClose()
 }
 
@@ -431,6 +549,10 @@ func (p *WindowPreview) OnMouseButton(e widget.MouseEvent) bool {
 	}
 	if !e.Pressed {
 		return true
+	}
+
+	if p.listLen() > 1 {
+		return p.listPressed(image.Pt(e.X, e.Y))
 	}
 
 	p.mu.Lock()
@@ -471,6 +593,12 @@ func (p *WindowPreview) size() image.Point {
 	max := p.thumbMax()
 	pad := p.metric(KeyPreviewPad, previewDefPad)
 	header := p.metric(KeyPreviewHeader, previewDefHeader)
+	if n := p.listLen(); n > 1 {
+		if p.listVertical(n) {
+			return image.Pt(max.X+2*pad, p.listRows(n)*(header+pad)+2*pad)
+		}
+		return image.Pt(n*max.X+(n+1)*pad, max.Y+header+2*pad)
+	}
 	return image.Pt(max.X+2*pad, max.Y+header+2*pad)
 }
 
@@ -482,8 +610,13 @@ func (p *WindowPreview) draw(ctx widget.DrawContext, r image.Rectangle) {
 	p.mu.Lock()
 	info, ok := p.win, p.hasWin
 	thumb := p.thumb
+	wins, thumbs, hover, kbd := p.wins, p.thumbs, p.listHover, p.listKbd
 	p.mu.Unlock()
 	if !ok {
+		return
+	}
+	if len(wins) > 1 {
+		p.drawList(ctx, r, wins, thumbs, hover, kbd)
 		return
 	}
 
@@ -500,6 +633,11 @@ func (p *WindowPreview) draw(ctx widget.DrawContext, r image.Rectangle) {
 	}
 	DrawTextLeftElided(ctx, textRect, info.Title, headStyle)
 
+	p.drawThumb(ctx, thumbRect, thumb)
+}
+
+// drawThumb рисует подложку миниатюры и саму миниатюру (если она есть).
+func (p *WindowPreview) drawThumb(ctx widget.DrawContext, thumbRect image.Rectangle, thumb image.Image) {
 	thumbStyle := styleOf(p.tm, ComponentPreview, previewPartThumb, theme.StateNormal)
 	PaintStyle(ctx, thumbRect, thumbStyle)
 	if thumb == nil {

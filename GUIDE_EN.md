@@ -677,6 +677,31 @@ accessibility tree are screen coordinates. A widget inside a scroll view does no
 need to know about it. A custom container that shows its children shifted only
 has to implement `widget.ContentOffsetter`.
 
+#### Thin auto-hiding scrollbar
+
+The regular bar is a fixed 10 px, always visible, and takes width from the
+content. The thin one lies over the content (takes nothing), is hidden at rest,
+appears when the mouse moves over the view and on any scroll (wheel, drag,
+`ScrollBy`), and fades after a pause. A pointer on the bar widens it and keeps
+it visible:
+
+```go
+sv.SetScrollbarStyle(widget.ScrollbarThin)
+sv.SetThinScrollbar(4, 10)                  // width at rest and under the pointer
+sv.SetAutoHide(1200*time.Millisecond, 200*time.Millisecond) // pause, fade
+sv.SetThinColors(thumb, thumbHover, track)  // zero colour = theme colour
+sv.SetScrollbarWidth(14)                    // width of the regular bar
+```
+
+The theme sets them too: `ThemeStyle.ScrollbarThin`, `ScrollbarWidth`,
+`ScrollbarThinWidth`, `ScrollbarThinHoverWidth` (profile tokens
+`scrollbar.thin`, `scrollbar.width`, `scrollbar.thin.width`,
+`scrollbar.thin.hover.width`). An explicit choice on the instance wins over the
+theme. Default colours are the theme's regular bar colours (`ScrollThumbBG`,
+`Accent`, `ScrollTrackBG`). While nothing happens there are no animations and
+no frames; each step repaints only the bar column, not the content. Built-in
+presets declare none of this — their `ScrollView` is unchanged.
+
 ### ListView
 
 ```go
@@ -3679,8 +3704,29 @@ ic.SetBounds(image.Rect(8, 8, 32, 32))
 - Supported: `path` (all commands, including arcs and smooth curves),
   `rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`, group transforms,
   `fill`/`fill-rule` (nonzero + even-odd)/`fill-opacity`, the `style` attribute.
-- Limitations: no gradients, `clipPath`, or `text`; stroke is a simple
-  approximation.
+- Linux application icons (Adwaita, Humanity, hicolor) render as well:
+  `linearGradient`/`radialGradient` (`gradientUnits`, `gradientTransform`,
+  `spreadMethod`, inheritance through `xlink:href`), `<use>`/`<symbol>`,
+  `clip-path`, `mask`, `<style>` with classes (`.st0{fill:…}`), `<image>` with
+  a `data:` PNG, `display:none`, blur and `feColorMatrix` from `filter`.
+  The content of `<defs>`, `<clipPath>`, `<mask>`, `<symbol>` is not drawn by
+  itself.
+- Also: `pattern` (tiles, `patternUnits`/`patternContentUnits`/`viewBox`/
+  `patternTransform`), `<text>`/`<tspan>` drawn with the engine's fonts (`x y dx
+  dy`, `font-family/size/weight/style`, `text-anchor`) — `engine.New` registers
+  the bridge, without an engine text is not drawn; a group's `mask` and
+  `filter` apply to the composited group (as a layer).
+- Precise mode (off by default, the previous result bit for bit):
+  `svg.SetDefaultOptions(svg.PreciseOptions)` process-wide,
+  `doc.SetOptions(...)` per document, `doc.RasterizeCachedWith(..., opts)` /
+  `svg.RenderWith(doc, w, h, tint, opts)` per call. `StrokeJoins` —
+  `stroke-linejoin` (miter/round/bevel, `stroke-miterlimit`), `stroke-linecap`,
+  `stroke-dasharray`/`-dashoffset`, no "minimum width"; `GroupLayers` — a
+  group's `opacity` as an isolated layer (overlapping children no longer show
+  through each other).
+- Limitations: no external images, `marker`, `letter-spacing`, `textPath`,
+  `dominant-baseline`; without `StrokeJoins` the stroke is a simple
+  approximation. The full list is in the `widget/svg` package comment.
 
 The `widget/svg` package is also usable directly: `svg.Parse(data)` /
 `svg.ParseFile(path)` → `*svg.Document` with `RasterizeCached(w, h, current, tint)`.
@@ -4032,6 +4078,48 @@ them with a separable box blur (cost independent of the radius) and puts them
 back. `Canvas.SetRoundClip` clips along the rounded outline instead of its
 bounding box.
 
+#### Accent, light taskbar and Windows 10 acrylic (since v3.31)
+
+The accent is a theme token that can change on the fly. Styles reference it
+(`StyleDelta.FillFrom`, `TextFrom`, `BorderFrom`; in JSON `"fill": "@accent"`),
+so changing it needs neither recreated components nor a reloaded profile:
+
+```go
+m.SetAccent(theme.RGB(16, 137, 62))   // the theme is re-resolved, subscribers notified
+eng.SetAccent(m, c)                   // the same + the widget palette (widget.Theme)
+m.ResetAccent()                       // back to the profile's accent
+```
+
+Derived tokens follow by themselves: `accent.hover`, `accent.pressed`,
+`accent.dark`, `accent.light` and `accent.text` (white or black by lightness).
+The choice survives a theme switch. Windows 2000 does not use the accent in its
+styles and stays as it is.
+
+The light Windows 10 taskbar is behind a flag, set in a profile or live; it is
+dark by default, as before:
+
+```go
+m.SetFlag(theme.KeyTaskbarLight, true)   // taskbar, Start and notification panels turn light
+```
+
+The flag works through conditional styles: `p.SetStyleWhen(flag, comp, part,
+state, delta)` is layered over the ordinary rules while the flag is true.
+
+The Windows 10 taskbar is acrylic: the wallpaper under it is blurred, then a
+darkening tint and a faint grain (`BackdropSpec.Noise`) are applied. When the
+draw context cannot blur, the solid `BackdropSpec.Fallback` is painted:
+
+```go
+&theme.BackdropSpec{Mode: theme.BackdropBlur, Radius: 20,
+    Tint: theme.RGBA(31, 31, 31, 210), Noise: 0.02, Fallback: theme.RGB(31, 31, 31)}
+```
+
+For the Windows 10 shell the profile declares parts of `startmenu` (`panel`,
+`sidebar`, `sidebar.item`, `row`, `letter`, `tile`, `tile.group`) and
+`notificationcenter` (`panel`, `header`, `link`, `group`, `card`, `action`,
+`quick.tile`, `quick.tile.on`). `notificationcenter` inherits from
+`notifications` (`Profile.SetStyleBase`), so existing themes look the same.
+
 #### The taskbar and its components
 
 ```go
@@ -4072,6 +4160,41 @@ falls outside the notification centre, and that one closes:
 ```go
 desktop.NewFlyoutGroup(calendar.Flyout, notifications.Flyout)
 ```
+
+#### Tray icons and SVG on HiDPI
+
+Network, volume and power icons come from the theme's icon set
+(`theme.Manager.SetIconResolver`, `widget.IconSet`); when the profile has no such
+icon the old shapes are drawn. Keys in `Profile.Icons`:
+`tray.network.{none,wifi.0..4,wifi,ethernet,cellular,icon}`,
+`tray.volume.{muted,0..3,icon}`, `tray.power.{ac.0..10,ac,0..10,icon}`,
+`tray.notifications.{icon,icon.new}`; the most specific one found wins. The
+theme flag `tray.icon.tint` recolours the icon with the style's text colour.
+
+A custom tray icon is `desktop.NewTrayIcon` from an image, SVG, or a function
+"size in physical pixels → image":
+
+```go
+ic, _ := desktop.NewTraySVGIcon(m, svgData)
+ic.SetToolTipKey("CloudSync")     // tooltip via widget.Tr, follows the language
+ic.OnClick = openCloudPanel
+bar.AddItem(desktop.SlotTray, ic)
+```
+
+The notification-centre button with a counter is
+`desktop.NewNotificationButton(m, notifications)` (the number is `len(List())`,
+capped at "99+"); the "Show desktop" strip is `desktop.NewShowDesktopButton(m)`,
+added last in `SlotTray`, its width is the metric `tray.showdesktop.width`.
+Tooltips are the strings `ShowDesktop`, `NotificationCenter`,
+`NoNewNotifications`, `NewNotificationsCount` (`widget.RegisterStrings`
+overrides the built-in ru/en).
+
+SVG is rasterised **at physical size** (logical × canvas scale) instead of being
+stretched: on 125–200 % the icon stays sharp. `SVGIcon`, `desktop.TrayIcon` and
+the tray icons do it; for a custom widget use `widget.DrawSVG(ctx, doc, rect,
+current, tint)`, `widget.ContextScale(ctx)`, `widget.PhysicalRect(ctx, r)`.
+`desktop.AppInfo.IconAt(size)` returns a bitmap or SVG for the needed size (bar
+24, menu 20–32, tiles 48–64); without it `AppInfo.Icon` is used.
 
 #### Window preview
 
@@ -4321,6 +4444,23 @@ animations). This is what vblank pacing on a local output needs — and it also
 lets a consumer mutate the scene and produce the frame on one goroutine,
 removing that race by construction. `Frames()` keeps working: the sink is an
 alternative, not a replacement.
+
+#### When a channel consumer falls behind
+
+The `Frames()` channel is shallow (8 frames) and drops a frame on overflow.
+Since v3.31 a drop no longer goes unnoticed: frames are differences, and a
+consumer that lost one would lay the next ones over a picture it does not
+have. So as soon as there is room in the channel, the engine hands over the
+next frame **in full** — every tile of the canvas, even for an idle interface.
+A consumer that does not read the channel at all (it has a sink) gets no full
+frames.
+
+Each frame carries the canvas size it was taken for: `frame.Width`,
+`frame.Height` (physical pixels). After `SetResolution` or `SetScale` frames of
+the old size are dropped from the channel and the first frame of the new size
+is full. A consumer with its own buffer checks the size and skips a frame of
+another size — the window (`window`) does so: otherwise queued tiles of the old
+layout would land in the buffer of the new size.
 
 #### Vector kernels (Go experiment)
 

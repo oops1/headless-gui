@@ -42,6 +42,31 @@ type ThemeStyle struct {
 	// MacTitleBar — заголовок окна в стиле macOS (traffic lights слева, текст
 	// по центру). Win-стиль при false. Применяется через Window.ApplyTheme.
 	MacTitleBar bool
+
+	// Полоса прокрутки ScrollView (scrollbar_thin.go). Нулевые значения — прежний
+	// вид: фиксированная полоса 10 px, всегда видна.
+	//
+	// ScrollbarThin — тонкая полоса поверх содержимого с автоскрытием;
+	// ScrollbarWidth — ширина обычной полосы (0 → 10);
+	// ScrollbarThinWidth / ScrollbarThinHoverWidth — ширина тонкой полосы в покое
+	// и под курсором (0 → умолчание движка).
+	ScrollbarThin           bool
+	ScrollbarWidth          int
+	ScrollbarThinWidth      int
+	ScrollbarThinHoverWidth int
+
+	// DefaultFontSize — кегль (pt), который тема просит сделать размером по
+	// умолчанию для виджетов, у которых свой не задан (заголовки окон, вкладки,
+	// пункты меню; см. DefaultFontSize()). 0 — тема не просит: остаётся
+	// DefaultFontSizePt, как у всех прежних тем. Профиль выражает просьбу флагом
+	// theme.FlagFontDefaultGlobal и шрифтом Fonts["default"].
+	DefaultFontSize float64
+
+	// TextSubpixel — тема просит дробное позиционирование глифов (Open Sans
+	// 8,5 pt без него выходит неровной). Профиль выражает просьбу флагом
+	// theme.FlagTextSubpixel; применяет её Engine.SetTheme — если приложение
+	// само не вызывало Engine.SetTextSubpixel.
+	TextSubpixel bool
 }
 
 // currentStyle возвращает стиль активной темы (для Draw виджетов).
@@ -131,7 +156,7 @@ func fillTitleBarColors(ctx DrawContext, r image.Rectangle, bg, bg2 color.RGBA) 
 // drawTitleText выводит текст заголовка: в классике — жирным (как Win2000).
 func drawTitleText(ctx DrawContext, text string, x, y int, col color.RGBA) {
 	if win10.Style.Classic3D {
-		ctx.DrawTextFont(text, x, y, DefaultFontSizePt, BuiltinFontBold, col)
+		ctx.DrawTextFont(text, x, y, DefaultFontSize(), BuiltinFontBold, col)
 		return
 	}
 	ctx.DrawText(text, x, y, col)

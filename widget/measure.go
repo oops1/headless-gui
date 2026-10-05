@@ -399,5 +399,5 @@ func fontSizeOrDefault(v float64) float64 {
 	if v > 0 {
 		return v
 	}
-	return DefaultFontSizePt
+	return DefaultFontSize()
 }

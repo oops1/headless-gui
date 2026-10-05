@@ -54,6 +54,7 @@ var (
 	currentLanguage   = "EN"
 	languageListeners []langEntry
 	langNextID        int
+	langExplicit      bool // язык задан приложением (SetLanguage), а не взят по умолчанию
 )
 
 // SetLanguage задаёт ЯЗЫК ИНТЕРФЕЙСА (для перевода строк {Loc}/Tr) и уведомляет
@@ -63,6 +64,7 @@ func SetLanguage(code string) {
 	langMu.Lock()
 	changed := code != currentLanguage
 	currentLanguage = code
+	langExplicit = true
 	var ls []func(string)
 	if changed {
 		for _, e := range languageListeners {
@@ -102,6 +104,19 @@ func Language() string {
 	langMu.RLock()
 	defer langMu.RUnlock()
 	return currentLanguage
+}
+
+// LanguageExplicit сообщает, выбирало ли приложение язык интерфейса явно
+// (SetLanguage хотя бы раз). До этого Language() возвращает «EN» — запасное
+// значение, а не выбор пользователя.
+//
+// Нужно компонентам, у которых до появления переводов был один язык (русский
+// рабочий стол в пакете desktop): пока приложение язык не выбирало, они
+// остаются на нём, а не переключаются на английский. Потокобезопасно.
+func LanguageExplicit() bool {
+	langMu.RLock()
+	defer langMu.RUnlock()
+	return langExplicit
 }
 
 // AddLanguageListener подписывает колбэк на смену языка интерфейса и возвращает

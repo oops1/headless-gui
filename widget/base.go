@@ -411,7 +411,7 @@ func desiredHeight(w Widget) int {
 	case *Label:
 		fs := v.FontSize
 		if fs <= 0 {
-			fs = DefaultFontSizePt
+			fs = DefaultFontSize()
 		}
 		return int(fs*1.5+0.5) + v.PaddingY*2
 	case *Button, *MenuButton:

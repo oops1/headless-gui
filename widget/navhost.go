@@ -199,7 +199,7 @@ func (w *Window) drawTitleCaptionOverNav(ctx DrawContext) {
 	if maxW := right - textX; maxW <= 0 {
 		return
 	} else {
-		title = ellipsizeText(ctx, title, maxW, DefaultFontSizePt)
+		title = ellipsizeText(ctx, title, maxW, DefaultFontSize())
 	}
 	drawTitleText(ctx, title, textX, tb.Min.Y+(w.effTitleH()-13)/2, tc)
 }

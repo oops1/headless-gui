@@ -379,7 +379,7 @@ func (p *DockPane) Draw(ctx DrawContext) {
 	if maxW := p.titleTextLimit() - 4 - textX; maxW <= 0 {
 		title = ""
 	} else {
-		title = ellipsizeText(ctx, title, maxW, DefaultFontSizePt)
+		title = ellipsizeText(ctx, title, maxW, DefaultFontSize())
 	}
 	ctx.DrawText(title, textX, textY, ttext)
 

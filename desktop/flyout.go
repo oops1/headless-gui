@@ -14,7 +14,9 @@ package desktop
 
 import (
 	"image"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
@@ -28,7 +30,18 @@ const (
 	EdgeBottom Edge = iota
 	// EdgeTop — панель вверху (macOS), окно раскрывается вниз.
 	EdgeTop
+	// EdgeLeft — панель у левого края экрана, окно раскрывается вправо; слоты
+	// панели лежат столбцом. Align окна здесь действует по вертикали: AlignStart —
+	// верх окна на уровне верха значка (окно растёт вниз), AlignEnd — низ на
+	// уровне низа значка (окно растёт вверх).
+	EdgeLeft
+	// EdgeRight — панель у правого края, окно раскрывается влево.
+	EdgeRight
 )
+
+// Vertical сообщает, что край боковой (левый или правый): панель у такого края
+// — столбец, а не ряд.
+func (e Edge) Vertical() bool { return e == EdgeLeft || e == EdgeRight }
 
 // Align — к какому краю значка прижимается всплывающее окно.
 type Align int
@@ -42,10 +55,43 @@ const (
 	AlignEnd
 )
 
+// SlideFrom — откуда выезжает панель при появлении (и куда уезжает при
+// закрытии).
+type SlideFrom int
+
+const (
+	// SlideAuto — от края привязки: панель над нижней панелью задач выезжает
+	// снизу, под верхней строкой меню — сверху.
+	SlideAuto SlideFrom = iota
+	// SlideBottom — снизу («Пуск» над панелью задач).
+	SlideBottom
+	// SlideTop — сверху.
+	SlideTop
+	// SlideLeft — слева.
+	SlideLeft
+	// SlideRight — справа (центр уведомлений).
+	SlideRight
+	// SlideNone — без сдвига: панель только проявляется.
+	SlideNone
+)
+
+// KeyFlyoutSlideDistance — метрика темы: на сколько точек панель сдвинута в
+// момент начала появления. Не заявлена — flyoutSlideDefault.
+const KeyFlyoutSlideDistance theme.Key = "flyout.slide.distance"
+
+// flyoutSlideDefault — сдвиг в начале появления, если ни панель, ни тема своего
+// не назвали.
+const flyoutSlideDefault = 48
+
 // Flyout — общая основа всплывающей панели.
 //
 // Встраивается в конкретную панель, которая обязана задать Content —
 // отрисовку своего содержимого — и Size — желаемый размер.
+//
+// Открытие и закрытие идут по анимации темы (по умолчанию AnimMenuOpen):
+// панель выезжает от края привязки и проявляется, закрываясь — уезжает и
+// гаснет. Нулевая длительность в теме — мгновенно. Пока идёт анимация,
+// перерисовывается только область панели, в которой она движется.
 type Flyout struct {
 	widget.Base
 
@@ -74,6 +120,21 @@ type Flyout struct {
 	// нулевое и не показывается.
 	Size func() image.Point
 
+	// Place — необязательное собственное размещение: получает привязку, экран,
+	// сторону панели и желаемый размер, возвращает прямоугольник окна. Вторая
+	// пара «false» — разместить обычным образом (от значка).
+	//
+	// Нужно панелям, которые стоят не у значка, а у края экрана: центр
+	// уведомлений Windows 10 прижат к правому краю и тянется от верха
+	// рабочей области до панели задач, и значок кнопки ему для этого не нужен.
+	Place func(anchor, screen image.Rectangle, edge Edge, size image.Point) (image.Rectangle, bool)
+
+	// Plate — необязательный выбор стиля подложки: компонент и часть вместо
+	// (Component, ""). Вызывается при каждой отрисовке, поэтому следует за
+	// сменой темы: плоская тема даёт подложку целой панели, Windows 10 — часть
+	// "panel" с акрилом. Пустой компонент — оставить Component.
+	Plate func() (component, part string)
+
 	// afterClose — уборка встроенной панели при закрытии: таймеры,
 	// накопленное состояние. Своё поле, а не OnClose, потому что OnClose
 	// принадлежит ОБОЛОЧКЕ, и занять его значило бы отнять.
@@ -84,6 +145,24 @@ type Flyout struct {
 	// виртуальных вызовов не даёт.
 	afterClose func()
 
+	// beforeOpen и afterOpen — то же для открытия: первое зовётся до показа
+	// (сброс состояния, чтобы первый кадр был правильным), второе — сразу после
+	// (подписки, фокус). Открывают панель со стороны так же часто, как и сам
+	// компонент — Toggle кнопки, FlyoutManager, группа, — и виртуального
+	// Open у встраивания нет, поэтому переопределённый Open объемлющей панели
+	// в этих путях не вызывался бы.
+	beforeOpen func()
+	afterOpen  func()
+
+	// partFn и marginFn — необязательные подсказки встроенной панели: какой
+	// частью стиля компонента рисовать подложку ("" — самим компонентом) и
+	// какой зазор держать до значка. Меню «Пуск» с плитками рисует подложку
+	// акрилом части "panel" и стоит вплотную к панели задач, а плоское — по-
+	// прежнему; выбор зависит от темы и может смениться на открытом меню,
+	// поэтому это функции, а не поля.
+	partFn   func() string
+	marginFn func() int
+
 	// group — набор панелей, считающих прямоугольники друг друга своими
 	// (см. FlyoutGroup). nil — панель сама по себе.
 	group *FlyoutGroup
@@ -93,8 +172,47 @@ type Flyout struct {
 	OnOpen  func()
 	OnClose func()
 
+	// Slide — откуда выезжает панель; SlideAuto — от края привязки.
+	Slide SlideFrom
+	// SlideDistance — на сколько точек панель сдвинута в начале появления.
+	// 0 — взять метрику темы KeyFlyoutSlideDistance; отрицательное — до
+	// самого края экрана (боковая панель выезжает из-за края целиком).
+	SlideDistance int
+	// AnimKey — имя анимации темы, управляющей появлением. Пусто — AnimMenuOpen.
+	AnimKey theme.Key
+
 	open int32
+
+	// presence — «присутствие» панели: 0 — нет, 1 — на месте. Идёт за open с
+	// анимацией; меньше единицы — панель выезжает или уезжает (биты float64:
+	// читается из раскладки на каждый кадр без замков).
+	presence atomic.Uint64
+	amu      sync.Mutex
+	anim     *widget.Animation
+
+	// watchers — наблюдатели за открытием и закрытием (см. Subscribe); у них
+	// свой замок: наблюдатель вправе открывать и закрывать другие панели.
+	wmu      sync.Mutex
+	watchers map[int]func(open bool)
+	nextW    int
+
+	// monitor — экран панели (см. SetMonitor); pinEdge/pinned — прижатие к
+	// краю экрана вместо привязки к значку (см. PinToEdge). Пишутся из потока
+	// интерфейса, как и остальные поля раскладки.
+	monitor Monitor
+	pinEdge Edge
+	pinned  bool
+
+	// anchorDismissAt — когда панель в последний раз закрыло нажатие мимо
+	// неё, пришедшееся на её собственный якорь (unix-наносекунды; 0 — не
+	// закрывало). См. Toggle.
+	anchorDismissAt atomic.Int64
 }
+
+// anchorDismissWindow — сколько после такого закрытия Toggle помнит, что
+// нажатие на якорь уже его закрыло. Нажатие и отпускание одного клика
+// разделяют считанные десятки миллисекунд; с запасом на медленную мышь.
+const anchorDismissWindow = 600 * time.Millisecond
 
 // NewFlyout создаёт всплывающую панель компонента component темы tm.
 func NewFlyout(tm *theme.Manager, component string) *Flyout {
@@ -112,13 +230,33 @@ func (f *Flyout) IsOpen() bool { return atomic.LoadInt32(&f.open) == 1 }
 // Повторное открытие уже открытой панели ничего не меняет, кроме привязки:
 // значок мог переехать при перераскладке.
 func (f *Flyout) Open(anchor image.Rectangle) {
-	was := f.rect() // область прежнего положения — её тоже надо перерисовать
+	// Область прежнего положения — её тоже надо перерисовать. Но только если
+	// панель была показана: у закрытой прежнего положения нет, а расчёт по
+	// старой (чаще пустой) привязке дал бы прямоугольник в углу экрана, и
+	// открытие панели перерисовывало бы то, что с ней не связано.
+	var was image.Rectangle
+	if f.visible() {
+		was = f.dirtyRect()
+	}
+	if f.beforeOpen != nil && !f.IsOpen() {
+		f.beforeOpen()
+	}
 	f.Anchor = anchor
 	reopened := atomic.SwapInt32(&f.open, 1) == 1
+	if !reopened {
+		f.anchorDismissAt.Store(0)
+		f.animateTo(1)
+	}
 	f.invalidateOverlay(was)
 	if reopened {
 		return
 	}
+	if f.afterOpen != nil {
+		f.afterOpen()
+	}
+	// Наблюдатели раньше оболочки: менеджер панелей закрывает остальные до
+	// того, как оболочка зажжёт кнопку этой.
+	f.notify(true)
 	if f.OnOpen != nil {
 		f.OnOpen()
 	}
@@ -129,10 +267,11 @@ func (f *Flyout) Close() {
 	// Область считается ДО закрытия: после него rect() пуст, и заявлять
 	// освободившееся место было бы уже нечем — на экране осталась бы
 	// нестёртая панель.
-	was := f.rect()
+	was := f.dirtyRect()
 	if atomic.SwapInt32(&f.open, 0) == 0 {
 		return
 	}
+	f.animateTo(0)
 	f.invalidateOverlay(was)
 	// Сначала встроенная панель прибирает за собой, потом узнаёт оболочка.
 	// Порядок важен: обработчик оболочки вправе тут же открыть что-то ещё, а
@@ -140,6 +279,7 @@ func (f *Flyout) Close() {
 	if f.afterClose != nil {
 		f.afterClose()
 	}
+	f.notify(false)
 	if f.OnClose != nil {
 		f.OnClose()
 	}
@@ -147,12 +287,76 @@ func (f *Flyout) Close() {
 
 // Toggle открывает закрытую панель и закрывает открытую — то, что делает
 // повторный клик по значку.
+//
+// Если панель только что закрыло нажатие на её же якорь (клик мимо панели,
+// пришедшийся на кнопку, которая её открывала), Toggle её заново не открывает:
+// движок гасит панель на нажатии, а кнопка срабатывает на отпускании, и без
+// этой оговорки клик по кнопке открытой панели закрывал бы её и тут же
+// открывал снова.
 func (f *Flyout) Toggle(anchor image.Rectangle) {
 	if f.IsOpen() {
 		f.Close()
 		return
 	}
+	if f.consumeAnchorDismiss() {
+		return
+	}
 	f.Open(anchor)
+}
+
+// consumeAnchorDismiss сообщает, закрывало ли панель только что нажатие на её
+// якорь, и забывает об этом: одно закрытие гасит один Toggle.
+func (f *Flyout) consumeAnchorDismiss() bool {
+	t := f.anchorDismissAt.Swap(0)
+	return t != 0 && time.Since(time.Unix(0, t)) < anchorDismissWindow
+}
+
+// DismissedByAnchor сообщает, закрыло ли панель только что (в пределах
+// anchorDismissWindow) нажатие на её якорь. Кнопка, не использующая Toggle,
+// по этому признаку решает, открывать ли панель на отпускании.
+func (f *Flyout) DismissedByAnchor() bool {
+	t := f.anchorDismissAt.Load()
+	return t != 0 && time.Since(time.Unix(0, t)) < anchorDismissWindow
+}
+
+// Subscribe подписывает h на открытие (open=true) и закрытие (open=false)
+// панели и возвращает функцию отписки. h зовётся в горутине, открывшей или
+// закрывшей панель, до OnOpen и OnClose оболочки. В отличие от них, подписчиков
+// может быть сколько угодно — на это рассчитан FlyoutManager.
+func (f *Flyout) Subscribe(h func(open bool)) (unsubscribe func()) {
+	if h == nil {
+		return func() {}
+	}
+	f.wmu.Lock()
+	if f.watchers == nil {
+		f.watchers = map[int]func(bool){}
+	}
+	f.nextW++
+	id := f.nextW
+	f.watchers[id] = h
+	f.wmu.Unlock()
+	return func() {
+		f.wmu.Lock()
+		delete(f.watchers, id)
+		f.wmu.Unlock()
+	}
+}
+
+// notify сообщает наблюдателям об открытии или закрытии.
+func (f *Flyout) notify(open bool) {
+	f.wmu.Lock()
+	if len(f.watchers) == 0 {
+		f.wmu.Unlock()
+		return
+	}
+	hs := make([]func(bool), 0, len(f.watchers))
+	for _, h := range f.watchers {
+		hs = append(hs, h)
+	}
+	f.wmu.Unlock()
+	for _, h := range hs {
+		h(open)
+	}
 }
 
 // Invalidate заявляет движку область ОВЕРЛЕЯ, а не границы виджета.
@@ -166,7 +370,7 @@ func (f *Flyout) Invalidate() { f.invalidateOverlay(image.Rectangle{}) }
 // invalidateOverlay заявляет текущую область оверлея и, если задана, прежнюю.
 func (f *Flyout) invalidateOverlay(also image.Rectangle) {
 	f.Base.Invalidate() // значок мог измениться сам по себе
-	if r := f.rect(); !r.Empty() && f.IsOpen() {
+	if r := f.dirtyRect(); !r.Empty() && f.visible() {
 		widget.InvalidateRect(r)
 	}
 	if !also.Empty() {
@@ -187,7 +391,7 @@ func (f *Flyout) Bounds() image.Rectangle {
 	if !f.IsOpen() {
 		return base
 	}
-	return base.Union(f.rect())
+	return base.Union(f.restRect())
 }
 
 // Group возвращает группу панели (nil — панель сама по себе).
@@ -214,10 +418,29 @@ func (f *Flyout) DismissAt(x, y int) {
 	if !f.IsOpen() {
 		return
 	}
-	if f.ownsPoint(image.Pt(x, y)) {
+	pt := image.Pt(x, y)
+	if f.ownsPoint(pt) {
 		return
 	}
+	if !f.Anchor.Empty() && pt.In(f.Anchor) {
+		f.anchorDismissAt.Store(time.Now().UnixNano())
+	}
 	f.Close()
+}
+
+// DismissOnEscape реализует widget.EscapeDismisser: Esc закрывает открытую
+// панель вместе с группой, в которую она входит, где бы ни был клавиатурный
+// фокус. Возвращает true, если что-то закрыла.
+func (f *Flyout) DismissOnEscape() bool {
+	if !f.IsOpen() {
+		return false
+	}
+	if f.group != nil {
+		f.group.CloseAll()
+		return true
+	}
+	f.Close()
+	return true
 }
 
 // ownsPoint — принадлежит ли точка этой панели или её соседке по группе.
@@ -230,22 +453,50 @@ func (f *Flyout) ownsPoint(pt image.Point) bool {
 
 // OverlayBounds возвращает прямоугольник окна в абсолютных логических
 // координатах (пустой, если закрыто). Реализует widget.OverlayBoundsProvider.
+//
+// Это место панели в покое: пока она выезжает или уезжает, окно-носитель
+// остаётся прежним, а сдвигается рисунок внутри него. Закрываемая панель
+// остаётся в оверлее до конца анимации.
 func (f *Flyout) OverlayBounds() image.Rectangle {
-	if !f.IsOpen() {
+	if !f.visible() {
 		return image.Rectangle{}
 	}
-	return f.rect()
+	return f.restRect()
 }
 
 // HasOverlay реализует widget.OverlayDrawer.
-func (f *Flyout) HasOverlay() bool { return f.IsOpen() && !f.rect().Empty() }
+func (f *Flyout) HasOverlay() bool { return f.visible() && !f.restRect().Empty() }
 
 // DrawOverlay рисует подложку по стилю темы и отдаёт содержимому остальное.
+//
+// В покое — как всегда. Пока панель появляется или исчезает, она рисуется со
+// сдвигом от края привязки (его несёт сам прямоугольник r, а значит и всё
+// содержимое, считающее раскладку от него), обрезанная областью движения, и
+// как слой с прозрачностью — если контекст это умеет.
 func (f *Flyout) DrawOverlay(ctx widget.DrawContext) {
 	r := f.rect()
-	if !f.IsOpen() || r.Empty() {
+	if !f.visible() || r.Empty() {
 		return
 	}
+	p := f.Presence()
+	if p >= 1 {
+		f.paint(ctx, r)
+		return
+	}
+
+	region := f.dirtyRect()
+	prev := ctx.Clip()
+	ctx.SetClip(region.Intersect(prev))
+	if od, ok := ctx.(widget.OpacityDrawer); ok {
+		od.DrawWithOpacity(region, p, func() { f.paint(ctx, r) })
+	} else {
+		f.paint(ctx, r)
+	}
+	ctx.SetClip(prev)
+}
+
+// paint рисует подложку и содержимое панели в прямоугольнике r.
+func (f *Flyout) paint(ctx widget.DrawContext, r image.Rectangle) {
 	s := f.style(theme.StateNormal)
 	PaintStyle(ctx, r, s)
 	if f.Content == nil {
@@ -291,9 +542,20 @@ func (f *Flyout) OnKeyEvent(e widget.KeyEvent) {
 	}
 }
 
-// rect считает положение окна: желаемый размер, привязка к значку, вписывание
-// в экран.
+// rect — где панель сейчас: место в покое, сдвинутое на текущий шаг появления
+// или исчезновения. Раскладка и попадание мыши считаются отсюда, так что
+// нажимается то, что видно.
 func (f *Flyout) rect() image.Rectangle {
+	r := f.restRect()
+	if off := f.slideOffset(); off != (image.Point{}) {
+		r = r.Add(off)
+	}
+	return r
+}
+
+// restRect считает положение окна в покое: желаемый размер, привязка к
+// значку, вписывание в экран.
+func (f *Flyout) restRect() image.Rectangle {
 	if f.Size == nil {
 		return image.Rectangle{}
 	}
@@ -307,13 +569,39 @@ func (f *Flyout) rect() image.Rectangle {
 		screen = f.Anchor
 	}
 
+	// Порядок: явное прижатие к краю монитора (PinToEdge — выбор потребителя,
+	// он знает про боковые панели), затем своё размещение панели (Place —
+	// например, центр уведомлений Windows 10), затем панель у бокового края
+	// (flyoutedge.go); для нижней и верхней панели — прежний расчёт ниже.
+	fit := func(r image.Rectangle) image.Rectangle {
+		if screen.Empty() {
+			return r
+		}
+		return fitInto(r, screen)
+	}
+	if f.pinned {
+		return fit(f.pinnedRect(sz))
+	}
+	if f.Place != nil {
+		if r, ok := f.Place(f.Anchor, screen, f.Edge, sz); ok {
+			return fit(r)
+		}
+	}
+	if f.Edge.Vertical() {
+		return fit(f.sideRect(sz))
+	}
+
 	// По вертикали — от значка в сторону от края, к которому прижата панель.
+	margin := f.Margin
+	if f.marginFn != nil {
+		margin = f.marginFn()
+	}
 	var y int
 	switch f.Edge {
 	case EdgeTop:
-		y = f.Anchor.Max.Y + f.Margin
+		y = f.Anchor.Max.Y + margin
 	default:
-		y = f.Anchor.Min.Y - f.Margin - sz.Y
+		y = f.Anchor.Min.Y - margin - sz.Y
 	}
 
 	// По горизонтали — по выбранному краю значка.
@@ -357,7 +645,16 @@ func (f *Flyout) style(st theme.State) *theme.Style {
 	if f.tm == nil {
 		return &theme.Style{}
 	}
-	return f.tm.GetStyle(f.Component, "", st)
+	if f.Plate != nil {
+		if comp, part := f.Plate(); comp != "" {
+			return f.tm.GetStyle(comp, part, st)
+		}
+	}
+	part := ""
+	if f.partFn != nil {
+		part = f.partFn()
+	}
+	return f.tm.GetStyle(f.Component, part, st)
 }
 
 // metric читает метрику темы.

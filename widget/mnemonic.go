@@ -84,12 +84,12 @@ func drawMnemonicText(ctx DrawContext, text string, x, y int, col color.RGBA, on
 	if key == 0 || pos < 0 {
 		return
 	}
-	lead := MeasureUIText(label[:pos], DefaultFontSizePt)
-	w := MeasureUIText(string([]rune(label[pos:])[0]), DefaultFontSizePt)
+	lead := MeasureUIText(label[:pos], DefaultFontSize())
+	w := MeasureUIText(string([]rune(label[pos:])[0]), DefaultFontSize())
 	if w <= 0 {
 		return
 	}
-	ctx.DrawHLine(x+lead, y+int(DefaultFontSizePt*1.35+0.5), w, col)
+	ctx.DrawHLine(x+lead, y+int(DefaultFontSize()*1.35+0.5), w, col)
 }
 
 // matchesMnemonic — нажата ли клавиша этой мнемоники.

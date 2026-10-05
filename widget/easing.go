@@ -182,6 +182,42 @@ func LerpColor(a, b color.RGBA, t float64) color.RGBA {
 	}
 }
 
+// EasingByName возвращает кривую по имени, каким её называют данные темы
+// ("linear", "in-quad", "out-cubic", "in-out-sine", "out-back", …). Пустое или
+// незнакомое имя — nil, то есть линейная: Animate принимает nil именно так, и
+// опечатка в профиле темы не должна ронять анимацию.
+func EasingByName(name string) Easing {
+	switch name {
+	case "linear":
+		return EaseLinear
+	case "in-quad":
+		return EaseInQuad
+	case "out-quad":
+		return EaseOutQuad
+	case "in-out-quad":
+		return EaseInOutQuad
+	case "in-cubic":
+		return EaseInCubic
+	case "out-cubic":
+		return EaseOutCubic
+	case "in-out-cubic":
+		return EaseInOutCubic
+	case "in-sine":
+		return EaseInSine
+	case "out-sine":
+		return EaseOutSine
+	case "in-out-sine":
+		return EaseInOutSine
+	case "out-back":
+		return EaseOutBack
+	case "out-elastic":
+		return EaseOutElastic
+	case "out-bounce":
+		return EaseOutBounce
+	}
+	return nil
+}
+
 // ─── Обёртки поверх Animate (см. anim.go) ───────────────────────────────────
 
 // AnimateFloat анимирует значение от from до to за dur по кривой curve,

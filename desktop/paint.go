@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"image"
+	"image/color"
 	"sync"
 
 	"github.com/oops1/headless-gui/v3/theme"
@@ -54,6 +55,18 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 	if s.Backdrop.Mode == theme.BackdropBlur {
 		if bd, ok := ctx.(widget.BackdropDrawer); ok {
 			bd.BlurBehind(r, int(s.Backdrop.Radius), s.Backdrop.Tint)
+			// Зерно — после подкраски: acrylic Windows 10 кладёт шум поверх
+			// готового цвета, иначе подкраска закрасила бы его.
+			if s.Backdrop.Noise > 0 {
+				if nd, ok := ctx.(widget.NoiseDrawer); ok {
+					nd.DrawNoise(r, s.Backdrop.Noise)
+				}
+			}
+		} else if s.Backdrop.Fallback.A > 0 {
+			// Размывать нечем: полупрозрачная плёнка поверх неразмытых обоев
+			// читается грязью, поэтому тема сама называет близкий к стеклу
+			// непрозрачный цвет.
+			fillSolid(ctx, r, corner, s.Backdrop.Fallback)
 		} else if s.Backdrop.Tint.A > 0 {
 			fillAlpha(ctx, r, s.Backdrop.Tint)
 		}
@@ -80,17 +93,7 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 	if len(s.Gradient) > 0 {
 		PaintGradient(ctx, r, s)
 	} else if s.Fill.A > 0 && !glass {
-		switch {
-		case corner > 0:
-			ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), corner, s.Fill)
-		case s.Fill.A < 255:
-			// Полупрозрачная заливка — это плёнка поверх фона (подсветка
-			// кнопки под курсором), и класть её надо смешиванием: обычный
-			// FillRect записал бы цвет вместе с чужой альфой прямо в буфер.
-			ctx.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Fill)
-		default:
-			ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Fill)
-		}
+		fillSolid(ctx, r, corner, s.Fill)
 	}
 
 	// Объёмная рамка Windows 2000 вместо плоской, если профиль её объявил.
@@ -105,6 +108,22 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 		} else {
 			ctx.DrawBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Border)
 		}
+	}
+}
+
+// fillSolid заливает область цветом: скруглённую — фигурой, полупрозрачную —
+// смешиванием, прочую — записью.
+func fillSolid(ctx widget.DrawContext, r image.Rectangle, corner int, c color.RGBA) {
+	switch {
+	case corner > 0:
+		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), corner, c)
+	case c.A < 255:
+		// Полупрозрачная заливка — это плёнка поверх фона (подсветка
+		// кнопки под курсором), и класть её надо смешиванием: обычный
+		// FillRect записал бы цвет вместе с чужой альфой прямо в буфер.
+		ctx.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), c)
+	default:
+		ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), c)
 	}
 }
 
@@ -258,17 +277,25 @@ func DrawUnderline(ctx widget.DrawContext, r image.Rectangle, thickness int, rat
 	if ratio >= 1 && !active {
 		return // полная полоса — примета активного окна, остальным её не рисуют
 	}
+	k := ratio
+	if !active {
+		k /= 2
+	}
+	drawMarkBar(ctx, r, thickness, k, s)
+}
+
+// drawMarkBar рисует полосу толщиной thickness вдоль нижнего края r, шириной в долю
+// k от r, по центру. Цвет — рамка стиля, а без неё цвет текста.
+func drawMarkBar(ctx widget.DrawContext, r image.Rectangle, thickness int, k float64, s *theme.Style) {
+	if thickness <= 0 || s == nil || r.Empty() {
+		return
+	}
 	col := s.Border
 	if col.A == 0 {
 		col = s.Text
 	}
 	if col.A == 0 {
 		return
-	}
-
-	k := ratio
-	if !active {
-		k /= 2
 	}
 	w := int(float64(r.Dx()) * k)
 	if w < thickness {
@@ -289,7 +316,7 @@ func DrawTextCentered(ctx widget.DrawContext, r image.Rectangle, text string, s 
 	}
 	size := s.Font.Size
 	if size <= 0 {
-		size = widget.DefaultFontSizePt
+		size = widget.DefaultFontSize()
 	}
 	w := measure(ctx, text, size, s.Font)
 	x := r.Min.X + (r.Dx()-w)/2
@@ -305,7 +332,7 @@ func DrawTextLeft(ctx widget.DrawContext, r image.Rectangle, text string, s *the
 	}
 	size := s.Font.Size
 	if size <= 0 {
-		size = widget.DefaultFontSizePt
+		size = widget.DefaultFontSize()
 	}
 	x := r.Min.X + int(s.PadX)
 	y := r.Min.Y + (r.Dy()-int(size*1.4))/2
@@ -362,21 +389,36 @@ func MeasureText(ctx widget.DrawContext, text string, s *theme.Style) int {
 	}
 	size := s.Font.Size
 	if size <= 0 {
-		size = widget.DefaultFontSizePt
+		size = widget.DefaultFontSize()
 	}
 	return measure(ctx, text, size, s.Font)
 }
 
+// FontFaceName переводит шрифт темы в имя для DrawTextFont / MeasureTextFont:
+// семейство, вес (Weight, а при его отсутствии Bold) и наклон. Пустая строка —
+// шрифт по умолчанию, обычное начертание.
+//
+// Раньше сюда доходило одно Family, а Bold и Italic молча терялись: тема,
+// объявившая жирный заголовок, получала обычный. Движок сам подбирает
+// начертание зарегистрированного семейства (Open Sans + SemiBold →
+// OpenSans-SemiBold); у шрифта без нужного веса берётся ближайший.
+//
+// Потребитель, рисующий именованный шрифт темы (theme.Manager.GetFont), берёт
+// имя отсюда же.
+func FontFaceName(f theme.FontSpec) string {
+	return widget.FontFace(f.Family, f.EffectiveWeight(), f.Italic)
+}
+
 func measure(ctx widget.DrawContext, text string, size float64, f theme.FontSpec) int {
-	if f.Family != "" {
-		return ctx.MeasureTextFont(text, size, f.Family)
+	if name := FontFaceName(f); name != "" {
+		return ctx.MeasureTextFont(text, size, name)
 	}
 	return ctx.MeasureText(text, size)
 }
 
 func drawText(ctx widget.DrawContext, text string, x, y int, size float64, s *theme.Style) {
-	if s.Font.Family != "" {
-		ctx.DrawTextFont(text, x, y, size, s.Font.Family, s.Text)
+	if name := FontFaceName(s.Font); name != "" {
+		ctx.DrawTextFont(text, x, y, size, name, s.Text)
 		return
 	}
 	ctx.DrawTextSize(text, x, y, size, s.Text)

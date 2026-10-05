@@ -1368,7 +1368,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		// Курсор ушёл с кнопки заголовка — снимаем подсветку, уведя мышь
 		// за пределы окна.
 		if w.onMouseMove != nil {
-			w.onMouseMove(-1, -1)
+			w.onMouseMove(pointerOutside, pointerOutside)
 		}
 		return 0
 

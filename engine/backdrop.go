@@ -59,6 +59,9 @@ func (c *Canvas) BlurBehind(r image.Rectangle, radius int, tint color.RGBA) {
 	// Захватываем область с запасом: размытие у края берёт соседей, и без
 	// запаса вдоль границы слоя пошла бы кайма от зажима координат.
 	margin := pradius
+	// Область слоя целиком, без отсечения, — для расширения следующего
+	// частичного кадра (backdropdamage.go).
+	c.noteBackdrop(c.sRect(r))
 	src := pr.Inset(-margin).Intersect(c.back.Bounds())
 	if src.Empty() {
 		return

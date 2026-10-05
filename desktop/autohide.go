@@ -72,9 +72,13 @@ func (t *Taskbar) reveal(animated bool) {
 
 func (t *Taskbar) conceal(animated bool) {
 	atomic.StoreInt32(&t.revealed, 0)
+	// Панель уезжает на свою толщину: высоту ряда или ширину столбца.
 	h := t.fullBounds.Dy()
+	if t.Vertical() {
+		h = t.fullBounds.Dx()
+	}
 	if h <= 0 {
-		h = t.Height()
+		h = t.Thickness()
 	}
 	t.slideTo(h, animated)
 }
@@ -129,8 +133,13 @@ func (t *Taskbar) shiftedBounds() image.Rectangle {
 	if t.offset == 0 {
 		return r
 	}
-	if t.Edge() == EdgeTop {
+	switch t.Edge() {
+	case EdgeTop:
 		return r.Sub(image.Pt(0, t.offset))
+	case EdgeLeft:
+		return r.Sub(image.Pt(t.offset, 0))
+	case EdgeRight:
+		return r.Add(image.Pt(t.offset, 0))
 	}
 	return r.Add(image.Pt(0, t.offset))
 }
@@ -146,8 +155,13 @@ func (t *Taskbar) revealBand() image.Rectangle {
 		h = 2
 	}
 	r := t.fullBounds
-	if t.Edge() == EdgeTop {
+	switch t.Edge() {
+	case EdgeTop:
 		return image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+h)
+	case EdgeLeft:
+		return image.Rect(r.Min.X, r.Min.Y, r.Min.X+h, r.Max.Y)
+	case EdgeRight:
+		return image.Rect(r.Max.X-h, r.Min.Y, r.Max.X, r.Max.Y)
 	}
 	return image.Rect(r.Min.X, r.Max.Y-h, r.Max.X, r.Max.Y)
 }

@@ -130,7 +130,7 @@ func radioButtonContentWidth(rb *RadioButton) int {
 	if rb.Text == "" {
 		return diam
 	}
-	return diam + textPad + MeasureUIText(rb.Text, DefaultFontSizePt) + focusPad
+	return diam + textPad + MeasureUIText(rb.Text, DefaultFontSize()) + focusPad
 }
 
 // Draw рисует RadioButton: кружок 16×16 слева + текст справа.
@@ -181,7 +181,7 @@ func (rb *RadioButton) Draw(ctx DrawContext) {
 
 	// Классика Win2000: пунктирная рамка фокуса вокруг текста метки.
 	if st.Classic3D && rb.IsFocused() && rb.Text != "" {
-		tw := ctx.MeasureText(rb.Text, DefaultFontSizePt)
+		tw := ctx.MeasureText(rb.Text, DefaultFontSize())
 		drawDottedRect(ctx, textX-2, textY-2, tw+5, 17, st.BevelDark)
 	}
 

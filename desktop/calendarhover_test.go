@@ -181,7 +181,7 @@ func TestCalendarFlyout_CollapseShrinksThePanel(t *testing.T) {
 	ctx := &recCtx{}
 	c.DrawOverlay(ctx)
 	for _, tx := range ctx.texts {
-		for _, name := range calendarWeekdayNames {
+		for _, name := range c.weekdayNames() {
 			if tx.text == name {
 				t.Errorf("у свёрнутой панели нарисован день недели %q", tx.text)
 			}

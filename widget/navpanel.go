@@ -238,7 +238,7 @@ func (n *NavPanel) Draw(ctx DrawContext) {
 
 	size := n.FontSize
 	if size <= 0 {
-		size = DefaultFontSizePt
+		size = DefaultFontSize()
 	}
 	iconSz := n.IconSize
 	if iconSz <= 0 {

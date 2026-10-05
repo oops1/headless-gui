@@ -78,6 +78,17 @@ type StyleDelta struct {
 	Border *color.RGBA `json:"-"`
 	Shadow *color.RGBA `json:"-"`
 
+	// FillFrom, TextFrom, BorderFrom — цвет по ссылке на плоский токен темы
+	// ("accent", "accent.hover", "surface"…) вместо готового значения.
+	// Ссылка раскрывается при разрешении темы, по ГОТОВЫМ токенам цепочки, —
+	// поэтому смена токена (Manager.SetAccent) меняет и стили, которые на
+	// него ссылаются, а потомок профиля может подменить сам токен, не трогая
+	// стилей. Если задана и ссылка, и готовое значение ОДНОЙ дельты, побеждает
+	// ссылка; дельта потомка, как всегда, перекрывает дельту предка. Токен,
+	// которого в теме нет, ссылку отменяет: остаётся значение из предыдущих
+	// дельт.
+	FillFrom, TextFrom, BorderFrom Key `json:"-"`
+
 	Gradient      []GradientStop `json:"gradient,omitempty"`
 	GradientAngle *float64       `json:"gradient_angle,omitempty"`
 	GradientKind  *GradientKind  `json:"gradient_kind,omitempty"`
@@ -157,6 +168,29 @@ func (d *StyleDelta) applyTo(s *Style) {
 	if d.Bevel != nil {
 		b := *d.Bevel
 		s.Bevel = &b
+	}
+}
+
+// applyTokens раскрывает ссылки на цветовые токены поверх уже наложенных
+// значений дельты.
+func (d *StyleDelta) applyTokens(s *Style, colors map[Key]color.RGBA) {
+	if d == nil {
+		return
+	}
+	if d.FillFrom != "" {
+		if c, ok := colors[d.FillFrom]; ok {
+			s.Fill = c
+		}
+	}
+	if d.TextFrom != "" {
+		if c, ok := colors[d.TextFrom]; ok {
+			s.Text = c
+		}
+	}
+	if d.BorderFrom != "" {
+		if c, ok := colors[d.BorderFrom]; ok {
+			s.Border = c
+		}
 	}
 }
 

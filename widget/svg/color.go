@@ -18,12 +18,20 @@ const (
 	PaintCurrent
 	// PaintInherit — значение не задано на элементе (наследуется от родителя).
 	PaintInherit
+	// PaintURL — fill="url(#id)": ссылка на градиент (или другой paint
+	// server). Ref — id, Fallback — запасной цвет после ссылки (может быть nil).
+	PaintURL
 )
 
 // Paint — разобранное значение fill/stroke.
 type Paint struct {
 	Kind  PaintKind
 	Color color.RGBA // валиден при Kind==PaintColor
+	Ref   string     // id цели при Kind==PaintURL ("" — ссылка не на этот документ)
+	// Fallback — запасная краска из «url(#id) red»; используется, если цель
+	// не найдена или не поддержана. nil — запасной краски нет (по SVG это
+	// «none», а не чёрный).
+	Fallback *Paint
 }
 
 // namedColors — небольшое подмножество именованных цветов SVG/CSS.
@@ -67,10 +75,49 @@ func ParsePaint(s string) Paint {
 	case "inherit":
 		return Paint{Kind: PaintInherit}
 	}
+	if len(s) > 4 && strings.EqualFold(s[:4], "url(") {
+		return parsePaintURL(s)
+	}
 	if c, ok := ParseColor(s); ok {
 		return Paint{Kind: PaintColor, Color: c}
 	}
 	return Paint{Kind: PaintInherit}
+}
+
+// parsePaintURL разбирает «url(#id) [запасная краска]».
+func parsePaintURL(s string) Paint {
+	ref, rest, ok := parseURLRef(s)
+	if !ok {
+		return Paint{Kind: PaintInherit}
+	}
+	p := Paint{Kind: PaintURL, Ref: ref}
+	if rest = strings.TrimSpace(rest); rest != "" {
+		if fb := ParsePaint(rest); fb.Kind != PaintInherit && fb.Kind != PaintURL {
+			p.Fallback = &fb
+		}
+	}
+	return p
+}
+
+// parseURLRef разбирает начало строки вида «url(#id)» или «url('#id')».
+// Возвращает id (без '#'; пустой для ссылок на внешние файлы), остаток строки
+// после закрывающей скобки и признак того, что синтаксис url(...) соблюдён.
+func parseURLRef(s string) (id, rest string, ok bool) {
+	s = strings.TrimSpace(s)
+	if len(s) < 5 || !strings.EqualFold(s[:4], "url(") {
+		return "", s, false
+	}
+	end := strings.IndexByte(s, ')')
+	if end < 0 {
+		return "", s, false
+	}
+	inner := strings.TrimSpace(s[4:end])
+	inner = strings.Trim(inner, `"'`)
+	inner = strings.TrimSpace(inner)
+	if strings.HasPrefix(inner, "#") {
+		id = inner[1:]
+	}
+	return id, s[end+1:], true
 }
 
 // ParseColor разбирает цвет CSS/SVG: #rgb, #rgba, #rrggbb, #rrggbbaa,

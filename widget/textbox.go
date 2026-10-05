@@ -410,7 +410,7 @@ func (t *TextBox) fontSize() float64 {
 	if t.FontSize > 0 {
 		return t.FontSize
 	}
-	return DefaultFontSizePt
+	return DefaultFontSize()
 }
 
 // lineHeight — высота визуальной строки в px.

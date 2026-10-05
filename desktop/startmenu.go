@@ -6,6 +6,12 @@
 // остальные. Это предсказуемая деградация — обрезанный список честнее
 // скролла, реализовать который здесь было бы негде (Flyout не знает о
 // колесе мыши), и куда безопаснее меню, вылезающего за экран.
+//
+// Так устроен ПЛОСКИЙ вид. Тема, которая просит меню с боковой панелью, списком
+// с прокруткой и плитками (презентер theme.PresenterStartTiles — Windows 10),
+// получает второй вид того же компонента: startmenu_tiles*.go. Каждый метод
+// ниже сначала спрашивает StartMenu.tiled и, если тема просит плитки, отдаёт
+// работу ему; плоский путь остаётся прежним до пикселя.
 package desktop
 
 import (
@@ -33,11 +39,9 @@ const (
 	KeyStartMenuIconSize theme.Key = "startmenu.icon.size"
 )
 
-// Подписи разделов. Не размер и не цвет — обычный текст интерфейса.
-const (
-	startMenuLabelPinned  = "Закреплено"
-	startMenuLabelAllApps = "Все приложения"
-)
+// Подписи разделов («Закреплено», «Все приложения») — обычные строки
+// интерфейса с ключами StrStartPinned и StrStartAllApps (locale.go); текст
+// берётся при построении строк, поэтому следует за языком.
 
 // startMenuRowKind различает строку-заголовок раздела от строки приложения:
 // у заголовка нет AppID и по нему нельзя ни кликнуть, ни перейти стрелками.
@@ -55,6 +59,8 @@ type startMenuRow struct {
 	label string
 	id    AppID
 	icon  image.Image
+	// iconAt — значок по размеру (AppInfo.IconAt); при отрисовке побеждает icon.
+	iconAt func(size int) image.Image
 }
 
 // startMenuLaidRow — строка вместе с её прямоугольником в АБСОЛЮТНЫХ
@@ -79,6 +85,31 @@ type StartMenu struct {
 	hasHover   bool
 	selectedID AppID
 	hasSel     bool
+
+	// fade — плавный переход цвета строк при наведении и выделении.
+	fade motion
+
+	// Меню с плитками (см. startmenu_tiles.go).
+	v *startView
+
+	// OnSidebarActivate вызывается при выборе пункта боковой панели (id пункта
+	// из StartSidebarItem). Меню после этого закрывается, если у пункта нет
+	// KeepOpen.
+	OnSidebarActivate func(id string)
+	// OnTilesChanged вызывается после перетаскивания плитки: groups — новый
+	// порядок целиком (копия). Сохраняет его потребитель.
+	OnTilesChanged func(groups []TileGroup)
+	// OnTileLaunch вызывается по плитке без приложения (Tile.App пуст).
+	OnTileLaunch func(id TileID)
+	// ContextMenu собирает контекстное меню правой кнопки: пункты для цели
+	// (nil или пусто — меню не показывается). Меню рисует PopupMenu движка и
+	// живёт внутри «Пуска», поэтому клик по его пунктам не закрывает «Пуск»
+	// раньше команды.
+	ContextMenu func(target StartTarget) []widget.MenuItem
+	// OnContextMenu — тот же повод, но без готового меню: потребитель сам решает,
+	// что показать, и показывает своим способом. Вызывается, если ContextMenu
+	// не задан.
+	OnContextMenu func(target StartTarget, at image.Point)
 }
 
 // NewStartMenu создаёt меню «Пуск» каталога cat, оформляемое темой tm.
@@ -89,6 +120,12 @@ func NewStartMenu(tm *theme.Manager, cat AppCatalog) *StartMenu {
 	}
 	m.Content = m.drawContent
 	m.Size = m.size
+	m.v = newStartView(m)
+	m.Flyout.partFn = m.basePart
+	m.Flyout.marginFn = m.flyoutMargin
+	m.Flyout.beforeOpen = m.resetForOpen
+	m.Flyout.afterOpen = m.attachOnOpen
+	m.Flyout.afterClose = m.detachOnClose
 	return m
 }
 
@@ -117,6 +154,10 @@ func (m *StartMenu) OnMouseMove(x, y int) {
 	if !m.IsOpen() {
 		return
 	}
+	if m.tiled() {
+		m.mouseMoveTiled(x, y)
+		return
+	}
 	pt := image.Pt(x, y)
 	var id AppID
 	hit := false
@@ -140,6 +181,12 @@ func (m *StartMenu) OnMouseMove(x, y int) {
 // или вовсе мимо меню) отдаётся встроенной панели — она либо ничего не
 // делает (клик внутри), либо закрывает меню (клик снаружи).
 func (m *StartMenu) OnMouseButton(e widget.MouseEvent) bool {
+	if m.tiled() {
+		if handled, ok := m.mouseButtonTiled(e); ok {
+			return handled
+		}
+		return m.Flyout.OnMouseButton(e)
+	}
 	if m.IsOpen() && e.Button == widget.MouseLeft && e.Pressed {
 		pt := image.Pt(e.X, e.Y)
 		for _, lr := range m.layoutRows() {
@@ -156,6 +203,13 @@ func (m *StartMenu) OnMouseButton(e widget.MouseEvent) bool {
 // по Enter. Всё остальное (в первую очередь Esc) отдаётся встроенной
 // панели — она уже умеет закрываться сама.
 func (m *StartMenu) OnKeyEvent(e widget.KeyEvent) {
+	if m.tiled() {
+		if m.keyTiled(e) {
+			return
+		}
+		m.Flyout.OnKeyEvent(e)
+		return
+	}
 	if m.IsOpen() && e.Pressed {
 		switch e.Code {
 		case widget.KeyDown:
@@ -276,19 +330,19 @@ func (m *StartMenu) buildRows() []startMenuRow {
 
 	var rows []startMenuRow
 	if pinned := m.cat.Pinned(); len(pinned) > 0 {
-		rows = append(rows, startMenuRow{kind: startMenuRowSection, label: startMenuLabelPinned})
+		rows = append(rows, startMenuRow{kind: startMenuRowSection, label: tr(StrStartPinned)})
 		for _, id := range pinned {
 			info, ok := byID[id]
 			if !ok {
 				continue // закреплено, но уже удалено из каталога — строки не строим
 			}
-			rows = append(rows, startMenuRow{kind: startMenuRowApp, label: info.Title, id: info.ID, icon: info.Icon})
+			rows = append(rows, startMenuRow{kind: startMenuRowApp, label: info.Title, id: info.ID, icon: info.Icon, iconAt: info.IconAt})
 		}
 	}
 
-	rows = append(rows, startMenuRow{kind: startMenuRowSection, label: startMenuLabelAllApps})
+	rows = append(rows, startMenuRow{kind: startMenuRowSection, label: tr(StrStartAllApps)})
 	for _, a := range apps {
-		rows = append(rows, startMenuRow{kind: startMenuRowApp, label: a.Title, id: a.ID, icon: a.Icon})
+		rows = append(rows, startMenuRow{kind: startMenuRowApp, label: a.Title, id: a.ID, icon: a.Icon, iconAt: a.IconAt})
 	}
 	return rows
 }
@@ -337,6 +391,9 @@ func (m *StartMenu) contentRect() image.Rectangle {
 // задан. Не задан — меню показывает список целиком, границам его ужать
 // нечем.
 func (m *StartMenu) size() image.Point {
+	if m.tiled() {
+		return m.sizeTiled()
+	}
 	width := m.metric(KeyStartMenuWidth)
 	rowH := m.metric(KeyStartMenuRowHeight)
 	if width <= 0 || rowH <= 0 {
@@ -360,7 +417,11 @@ func (m *StartMenu) size() image.Point {
 }
 
 // drawContent — Flyout.Content: рисует видимые строки меню.
-func (m *StartMenu) drawContent(ctx widget.DrawContext, _ image.Rectangle) {
+func (m *StartMenu) drawContent(ctx widget.DrawContext, r image.Rectangle) {
+	if m.tiled() {
+		m.drawTiled(ctx, r)
+		return
+	}
 	m.mu.Lock()
 	hoveredID, hasHover := m.hoveredID, m.hasHover
 	selectedID, hasSel := m.selectedID, m.hasSel
@@ -379,14 +440,16 @@ func (m *StartMenu) drawContent(ctx widget.DrawContext, _ image.Rectangle) {
 		if highlighted {
 			st = theme.StateHover
 		}
-		s := m.partStyle("", st)
+		s := m.fade.Style(m.Theme(), lr.row.id, lr.rect, st, func(st theme.State) *theme.Style {
+			return m.partStyle("", st)
+		})
 		PaintStyle(ctx, lr.rect, s)
 
 		textLeft := lr.rect.Min.X
-		if lr.row.icon != nil && iconSize > 0 {
+		if (lr.row.icon != nil || lr.row.iconAt != nil) && iconSize > 0 {
 			iconX := lr.rect.Min.X + int(s.PadX)
 			iconY := lr.rect.Min.Y + (lr.rect.Dy()-iconSize)/2
-			ctx.DrawImageScaled(lr.row.icon, iconX, iconY, iconSize, iconSize)
+			drawAppIcon(ctx, lr.row.icon, lr.row.iconAt, image.Rect(iconX, iconY, iconX+iconSize, iconY+iconSize))
 			textLeft = iconX + iconSize + int(s.PadX)
 		}
 		textRect := image.Rect(textLeft, lr.rect.Min.Y, lr.rect.Max.X, lr.rect.Max.Y)

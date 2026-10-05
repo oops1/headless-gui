@@ -29,6 +29,7 @@ const KeyTrayLabelMinWidth theme.Key = "tray.label.width.min"
 // TrayLabel — короткая надпись в трее.
 type TrayLabel struct {
 	widget.Base
+	FocusState
 
 	tm *theme.Manager
 
@@ -41,6 +42,9 @@ type TrayLabel struct {
 
 	hovered int32
 	pressed int32
+
+	// fade — плавный переход цвета при наведении и нажатии.
+	fade motion
 }
 
 // NewTrayLabel создаёт надпись, оформляемую темой tm.
@@ -103,6 +107,9 @@ func (l *TrayLabel) OnMouseMove(x, y int) {
 // OnMouseButton — щелчок срабатывает на отпускании над надписью, как у всех
 // элементов панели задач.
 func (l *TrayLabel) OnMouseButton(e widget.MouseEvent) bool {
+	if l.NotePointer(e) {
+		l.Invalidate()
+	}
 	if l.OnClick == nil {
 		return false
 	}
@@ -118,7 +125,7 @@ func (l *TrayLabel) Draw(ctx widget.DrawContext) {
 	if text == "" {
 		return
 	}
-	s := trayStyle(l.tm, ComponentTrayLabel, trayState(&l.hovered, &l.pressed))
+	s := l.fade.tray(l.tm, ComponentTrayLabel, b, trayState(&l.hovered, &l.pressed))
 	PaintStyle(ctx, b, s)
 	DrawTextCentered(ctx, b, text, s)
 }

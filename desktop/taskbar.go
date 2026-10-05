@@ -57,6 +57,10 @@ type Taskbar struct {
 	// unsubTheme снимает подписку на смену темы. Панель перерисовывается
 	// сама: она живёт вне обхода дерева, когда её показывают оболочкой.
 	unsubTheme func()
+	// unsubLang снимает подписку на смену языка интерфейса. От языка зависят
+	// ширины элементов (часы, подписи), поэтому панель перекладывает их сама,
+	// не требуя пересоздания.
+	unsubLang func()
 
 	// autoHide, revealed, offset, fullBounds — состояние автоскрытия
 	// (см. autohide.go). fullBounds — место, которое панель занимает
@@ -75,6 +79,18 @@ type Taskbar struct {
 	// заново при отрисовке, чтобы разделитель не разъехался с элементами.
 	startEdge int
 	trayEdge  int
+
+	// edge и edgeSet — край, назначенный панели явно (SetEdge). Без явного
+	// назначения край выводит тема (флаг taskbar.top).
+	edge    Edge
+	edgeSet bool
+
+	// monitor и docked — монитор, на который панель поставлена (DockTo), и
+	// признак того, что она ставилась; bound — всплывающие панели, привязанные
+	// к её краю и монитору (BindFlyouts).
+	monitor Monitor
+	docked  bool
+	bound   []*Flyout
 }
 
 // Ключи токенов, которыми тема управляет панелью.
@@ -92,6 +108,9 @@ const (
 	// KeyDockHeight — высота отдельной нижней полосы (док macOS). Ноль —
 	// отдельной полосы нет, всё живёт в одной панели.
 	KeyDockHeight theme.Key = "dock.height"
+	// KeyTaskbarWidth — толщина панели у бокового края (EdgeLeft, EdgeRight).
+	// Не заявлена — берётся taskbar.height: ряд и столбец одной толщины.
+	KeyTaskbarWidth theme.Key = "taskbar.width"
 	// KeyTaskbarSeparators — рисовать ли разделители между секциями панели.
 	// Примета классической панели: между кнопкой «Пуск», кнопками окон и
 	// треем стоят вертикальные хваталки с фаской.
@@ -107,9 +126,21 @@ const (
 // NewTaskbar создаёт панель задач, оформляемую темами из tm.
 func NewTaskbar(tm *theme.Manager) *Taskbar {
 	t := &Taskbar{tm: tm}
+	langID := widget.AddLanguageListener(func(string) {
+		t.relayout()
+		t.Invalidate()
+	})
+	t.unsubLang = func() { widget.RemoveLanguageListener(langID) }
 	if tm != nil {
 		t.unsubTheme = tm.Subscribe(theme.ObserverFunc(func(*theme.Theme) {
-			t.relayout()
+			// Тема может сменить край и толщину: поставленная на монитор панель
+			// становится на место заново, а не остаётся там, где была.
+			if t.docked {
+				t.DockTo(t.monitor)
+			} else {
+				t.relayout()
+				t.syncFlyouts()
+			}
 			t.Invalidate()
 		}))
 	}
@@ -119,6 +150,10 @@ func NewTaskbar(tm *theme.Manager) *Taskbar {
 // Close снимает подписку на тему. Панель, которую сняли со сцены и не
 // закрыли, остаётся в списке наблюдателей менеджера — это утечка.
 func (t *Taskbar) Close() {
+	if t.unsubLang != nil {
+		t.unsubLang()
+		t.unsubLang = nil
+	}
 	if t.unsubTheme != nil {
 		t.unsubTheme()
 		t.unsubTheme = nil
@@ -132,6 +167,23 @@ func (t *Taskbar) AddItem(slot Slot, it Item) {
 	}
 	t.slots[slot] = append(t.slots[slot], it)
 	t.AddChild(it)
+	if v, ok := it.(VerticalItem); ok {
+		v.SetVertical(t.Vertical())
+	}
+	if v, ok := it.(EdgeAware); ok {
+		v.SetBarEdge(t.Edge())
+	}
+	if n, ok := it.(FocusNavigable); ok {
+		n.SetFocusNavigator(t)
+	}
+	// Элемент, который сам меняет свою ширину (строка поиска при смене режима),
+	// просит панель переложить элементы заново.
+	if r, ok := it.(interface{ SetRelayout(func()) }); ok {
+		r.SetRelayout(func() {
+			t.relayout()
+			t.Invalidate()
+		})
+	}
 	t.relayout()
 	t.Invalidate()
 }
@@ -144,11 +196,15 @@ func (t *Taskbar) Items(slot Slot) []Item {
 	return append([]Item(nil), t.slots[slot]...)
 }
 
-// Edge сообщает, к какому краю экрана прижата панель по мнению активной темы.
+// Edge сообщает, к какому краю экрана прижата панель: назначенный явно
+// (SetEdge) или, если не назначен, выведенный из активной темы.
 //
 // Нужно не самой панели (она рисуется в тех границах, что ей дали), а
 // оболочке и всплывающим панелям: от края зависит, куда им раскрываться.
 func (t *Taskbar) Edge() Edge {
+	if t.edgeSet {
+		return t.edge
+	}
 	if t.flag(KeyTaskbarTop) {
 		return EdgeTop
 	}
@@ -219,7 +275,11 @@ func (t *Taskbar) SetBounds(r image.Rectangle) {
 	// стоит за краем экрана, и без этого она не знала бы, куда возвращаться.
 	t.fullBounds = r
 	if t.autoHide && !t.IsRevealed() {
+		// Скрытая панель уходит на свою толщину: высоту ряда или ширину столбца.
 		h := r.Dy()
+		if t.Vertical() {
+			h = r.Dx()
+		}
 		if h > 0 {
 			t.offset = h
 		}
@@ -232,6 +292,13 @@ func (t *Taskbar) SetBounds(r image.Rectangle) {
 func (t *Taskbar) relayout() {
 	b := t.Bounds()
 	if b.Empty() {
+		return
+	}
+	t.syncOrientation()
+	// У бокового края слоты идут столбцом (taskbar_vertical.go); горизонтальная
+	// раскладка ниже от этого не зависит и не менялась.
+	if t.Vertical() {
+		t.relayoutVertical(b)
 		return
 	}
 	padX := t.metric(KeyTaskbarPadX)
@@ -413,6 +480,7 @@ func (t *Taskbar) Draw(ctx widget.DrawContext) {
 
 	t.drawSeparators(ctx)
 	t.DrawChildren(ctx)
+	t.drawFocus(ctx)
 }
 
 // drawSeparators рисует вертикальные разделители между секциями панели.
@@ -434,6 +502,19 @@ func (t *Taskbar) drawSeparators(ctx widget.DrawContext) {
 		return
 	}
 	gap := t.metric(KeyTaskbarGap)
+	if t.Vertical() {
+		// В столбце хваталки лежат горизонтально: те же две линии, повёрнутые.
+		inset := b.Dx() / 6
+		for _, y := range []int{t.startEdge, t.trayEdge} {
+			cy := y - gap/2
+			if cy <= b.Min.Y+1 || cy >= b.Max.Y-1 {
+				continue
+			}
+			ctx.FillRect(b.Min.X+inset, cy, b.Dx()-2*inset, 1, shadow)
+			ctx.FillRect(b.Min.X+inset, cy+1, b.Dx()-2*inset, 1, light)
+		}
+		return
+	}
 	inset := b.Dy() / 6
 
 	for _, x := range []int{t.startEdge, t.trayEdge} {

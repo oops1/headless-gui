@@ -22,7 +22,7 @@ func drawLocaleBadge(ctx DrawContext, rightX, top, barH int, fg color.RGBA) imag
 	}
 
 	const padX = 6
-	tw := ctx.MeasureText(label, DefaultFontSizePt)
+	tw := ctx.MeasureText(label, DefaultFontSize())
 	badgeW := tw + padX*2
 	badgeH := localeBadgeHeight
 	if badgeH > barH-4 && barH > 4 {
@@ -56,7 +56,7 @@ func drawLocaleMenu(ctx DrawContext, badge image.Rectangle, items []string, cur 
 	// Ширина меню — не уже плашки и достаточной для самого длинного пункта.
 	w := badge.Dx()
 	for _, it := range items {
-		iw := ctx.MeasureText(it, DefaultFontSizePt) + 24
+		iw := ctx.MeasureText(it, DefaultFontSize()) + 24
 		if iw > w {
 			w = iw
 		}

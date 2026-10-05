@@ -980,7 +980,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 		if titleMaxW := titleRight - textX; titleMaxW <= 0 {
 			title = ""
 		} else {
-			title = ellipsizeText(ctx, title, titleMaxW, DefaultFontSizePt)
+			title = ellipsizeText(ctx, title, titleMaxW, DefaultFontSize())
 		}
 		drawTitleText(ctx, title, textX, textY, tc)
 	}

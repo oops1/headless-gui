@@ -69,6 +69,28 @@ type ScrollView struct {
 	dragStartScr   int
 	thumbHovered   bool
 
+	// Вид полосы и тонкая полоса с автоскрытием (scrollbar_thin.go). По
+	// умолчанию — прежняя фиксированная полоса.
+	//   sbStyle/sbStyleSet — вид и признак явного выбора (тема явный не меняет);
+	//   sbWidthSet/sbWidthFromTheme — ширина обычной полосы задана явно / взята
+	//     из темы (чтобы смена темы могла вернуть умолчание);
+	//   thinIdle/thinHover — ширина тонкой полосы, заданная явно (0 — из темы);
+	//   themeThinIdle/themeThinHover — то же, из темы;
+	//   thinThumb/thinThumbHover/thinTrack — цвета тонкой полосы (A=0 — обычные);
+	//   thin — состояние показа (свой замок).
+	sbStyle          ScrollbarStyle
+	sbStyleSet       bool
+	sbWidthSet       bool
+	sbWidthFromTheme bool
+	thinIdle         int
+	thinHover        int
+	themeThinIdle    int
+	themeThinHover   int
+	thinThumb        color.RGBA
+	thinThumbHover   color.RGBA
+	thinTrack        color.RGBA
+	thin             thinBar
+
 	// Кэш транслирующей обёртки DrawContext (PERF-12, см. Draw): создаётся один
 	// раз на конкретный внешний контекст и переиспользуется между кадрами.
 	// Трогается ТОЛЬКО из Draw (рендер-горутина), поэтому мьютекс не нужен.
@@ -101,7 +123,7 @@ func NewScrollView() *ScrollView {
 		ThumbColor:     win10.ScrollThumbBG,
 		ThumbHoverBG:   win10.Accent,
 		BorderColor:    win10.Border,
-		scrollbarWidth: 10,
+		scrollbarWidth: defaultScrollbarWidth,
 	}
 	sv.setContentShifter(sv)
 	return sv
@@ -150,6 +172,7 @@ func (sv *ScrollView) SetScrollY(y int) {
 	sv.mu.Unlock()
 	if changed {
 		sv.Invalidate()
+		sv.thinPoke()
 	}
 }
 
@@ -192,7 +215,7 @@ func (sv *ScrollView) needsScrollbar() bool {
 func (sv *ScrollView) contentWidth() int {
 	w := sv.bounds.Dx()
 	if sv.needsScrollbar() {
-		w -= sv.scrollbarWidth
+		w -= sv.reserve()
 	}
 	return w
 }
@@ -209,8 +232,8 @@ func (sv *ScrollView) thumbRect() image.Rectangle {
 	// не доходил до низа трека.
 	vb := sv.vbarRect()
 	trackX := vb.Min.X
-	top, workH := sbWorkArea(vb, sv.scrollbarWidth) // в классике — между кнопками ▲▼
-	ratio := float64(vb.Dy()) / float64(sv.ContentHeight)
+	top, workH := sv.workArea(vb) // в классике — между кнопками ▲▼
+	ratio := float64(sv.contentHeight()) / float64(sv.ContentHeight)
 	thumbH := int(ratio * float64(workH))
 	if thumbH < 20 {
 		thumbH = 20
@@ -248,6 +271,9 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 	vActive := sv.thumbHovered || sv.dragging
 	hActive := sv.hthumbHovered || sv.hdragging
 	hScrollable := sv.ContentWidth > 0
+	thin := sv.isThin()
+	idleW, hoverW := sv.thinWidths()
+	thinThumb, thinHoverCol, thinTrack := sv.thinColors()
 	sv.mu.Unlock()
 
 	// Фон
@@ -306,8 +332,8 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 
 	ctx.SetClip(outer)
 
-	// Вертикальная полоса
-	if vert {
+	// Вертикальная полоса (тонкая рисуется ниже, одним проходом с горизонтальной)
+	if vert && !thin {
 		ctx.FillRect(vbar.Min.X, vbar.Min.Y, vbar.Dx(), vbar.Dy(), sv.TrackColor)
 
 		tc := sv.ThumbColor
@@ -323,7 +349,7 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 	}
 
 	// Горизонтальная полоса — тем же drawHBar, что и в сравнении/слиянии.
-	if horiz {
+	if horiz && !thin {
 		ctx.FillRect(hstrip.Min.X, hstrip.Min.Y, hstrip.Dx(), hstrip.Dy(), sv.TrackColor)
 		tc := sv.ThumbColor
 		if hActive {
@@ -336,8 +362,14 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 	// горизонтальная — левее вертикальной, поэтому ни одна его не закрашивает;
 	// заливаем один раз здесь. Если бы каждая полоса тянулась до края, угол
 	// рисовался бы дважды, и на полупрозрачной теме он был бы темнее остального.
-	if vert && horiz {
+	if vert && horiz && !thin {
 		ctx.FillRect(vbar.Min.X, hstrip.Min.Y, vbar.Dx(), hstrip.Dy(), sv.TrackColor)
+	}
+
+	// Тонкая полоса — поверх содержимого, с прозрачностью автоскрытия.
+	if thin && (vert || horiz) {
+		sv.drawThinBars(ctx, vert, horiz, vbar, thumb, hstrip, hthumb, vActive, hActive,
+			idleW, hoverW, thinThumb, thinHoverCol, thinTrack)
 	}
 
 	// Рамка
@@ -566,10 +598,11 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 	if e.Pressed {
 		// Проверяем клик на ползунке
 		tr := sv.thumbRect()
-		if image.Pt(e.X, e.Y).In(tr) {
+		if sv.interactive() && image.Pt(e.X, e.Y).In(tr) {
 			sv.dragging = true
 			sv.dragStartY = e.Y
 			sv.dragStartScr = sv.scrollY
+			sv.thinHold(true)
 			sv.Invalidate() // ползунок подсвечивается при drag
 			return true
 		}
@@ -582,10 +615,10 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 		// а угол между полосами не принадлежит ни одной из них.
 		b := sv.bounds
 		vb := sv.vbarRect()
-		trackX := b.Max.X - sv.scrollbarWidth
+		trackX := b.Max.X - sv.sbW()
 		inCorner := sv.needsHScrollbar() && e.Y >= vb.Max.Y
-		if e.X >= trackX && e.X <= b.Max.X && !inCorner && sv.needsScrollbar() {
-			if currentStyle().Classic3D {
+		if e.X >= trackX && e.X <= b.Max.X && !inCorner && sv.needsScrollbar() && sv.interactive() {
+			if !sv.isThin() && currentStyle().Classic3D {
 				btn := classicSBBtnH(sv.scrollbarWidth)
 				const arrowStep = 40
 				if e.Y < vb.Min.Y+btn {
@@ -601,7 +634,7 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 					return true
 				}
 			}
-			top, workH := sbWorkArea(vb, sv.scrollbarWidth)
+			top, workH := sv.workArea(vb)
 			ratio := float64(e.Y-top) / float64(workH)
 			if sv.setScrollYLocked(int(ratio * float64(sv.ContentHeight))) {
 				sv.Invalidate()
@@ -611,11 +644,13 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 	} else {
 		if sv.dragging {
 			sv.dragging = false
+			sv.thinHold(false)
 			sv.Invalidate() // подсветка ползунка гаснет
 			return true
 		}
 		if sv.hdragging {
 			sv.hdragging = false
+			sv.thinHold(false)
 			sv.Invalidate()
 			return true
 		}
@@ -641,6 +676,9 @@ func (sv *ScrollView) WantsCapture(e MouseEvent) bool {
 	if !sv.needsScrollbar() && !sv.needsHScrollbar() {
 		return false
 	}
+	if !sv.interactive() {
+		return false // скрытая тонкая полоса не перехватывает нажатия у содержимого
+	}
 	pt := image.Pt(e.X, e.Y)
 	if pt.In(sv.hbarStrip()) {
 		return true
@@ -662,7 +700,7 @@ func (sv *ScrollView) OnMouseMove(x, y int) {
 
 	if sv.dragging {
 		dy := y - sv.dragStartY
-		_, workH := sbWorkArea(sv.vbarRect(), sv.scrollbarWidth)
+		_, workH := sv.workArea(sv.vbarRect())
 		tr := sv.thumbRect()
 		thumbH := tr.Dy()
 		trackUsable := workH - thumbH
@@ -673,6 +711,19 @@ func (sv *ScrollView) OnMouseMove(x, y int) {
 			}
 		}
 		return
+	}
+
+	// Тонкая полоса: движение над областью её показывает, курсор на самой
+	// полосе — расширяет и не даёт погаснуть.
+	if sv.isThin() {
+		bnd := sv.bounds
+		in := image.Pt(x, y).In(bnd)
+		if in {
+			sv.thinPoke()
+		}
+		hw := sv.sbW()
+		onBar := in && ((sv.needsScrollbar() && x >= bnd.Max.X-hw) || (sv.needsHScrollbar() && y >= bnd.Max.Y-hw))
+		sv.thinHold(onBar)
 	}
 
 	// Hover на ползунке
@@ -700,6 +751,7 @@ func (sv *ScrollView) ScrollBy(delta int) {
 	sv.mu.Unlock()
 	if changed {
 		sv.Invalidate()
+		sv.thinPoke()
 	}
 }
 
@@ -736,12 +788,14 @@ func (sv *ScrollView) wheelPixelsY(dy float64) bool {
 		if changed {
 			sv.Invalidate()
 		}
+		sv.thinPoke()
 		return true
 	}
 
 	// Маховик: инжектируем импульс скорости. Стационарный путь ≈ dy.
 	sv.vel += dy / inertiaTau
 	sv.mu.Unlock()
+	sv.thinPoke()
 	sv.ensureInertia()
 	return true
 }
@@ -795,6 +849,7 @@ func (sv *ScrollView) inertiaTick(t float64) {
 	sv.mu.Unlock()
 	if changed {
 		sv.Invalidate()
+		sv.thinPoke()
 	}
 	if stop && a != nil {
 		a.Stop()
@@ -820,6 +875,7 @@ func (sv *ScrollView) ApplyTheme(t *Theme) {
 	sv.ThumbColor = t.ScrollThumbBG
 	sv.ThumbHoverBG = t.Accent
 	sv.BorderColor = t.Border
+	sv.applyScrollbarTheme(t)
 	// Непрозрачный фон следует за темой (единая семантика SetTheme).
 	if sv.Background.A > 0 {
 		sv.Background = t.PanelBG

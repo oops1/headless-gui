@@ -670,6 +670,31 @@ sv.ScrollXBy(-40)        // положительное — вправо
 прокрутки знать о ней не нужно. Своему контейнеру, который показывает детей со
 сдвигом, достаточно реализовать `widget.ContentOffsetter`.
 
+#### Тонкая полоса прокрутки с автоскрытием
+
+Обычная полоса — фиксированные 10 px, всегда на виду, отнимает ширину у
+содержимого. Тонкая лежит поверх содержимого (ничего не отнимает), в покое
+скрыта, появляется при движении мыши над областью и при любой прокрутке (колесо,
+перетаскивание, `ScrollBy`), через паузу плавно гаснет. Курсор на самой полосе
+расширяет её и не даёт погаснуть:
+
+```go
+sv.SetScrollbarStyle(widget.ScrollbarThin)
+sv.SetThinScrollbar(4, 10)                  // ширина в покое и под курсором
+sv.SetAutoHide(1200*time.Millisecond, 200*time.Millisecond) // пауза, затухание
+sv.SetThinColors(thumb, thumbHover, track)  // нулевой цвет — цвет темы
+sv.SetScrollbarWidth(14)                    // ширина обычной полосы
+```
+
+Вид и ширины задаёт и тема — поля `ThemeStyle.ScrollbarThin`, `ScrollbarWidth`,
+`ScrollbarThinWidth`, `ScrollbarThinHoverWidth` (в профиле — токены
+`scrollbar.thin`, `scrollbar.width`, `scrollbar.thin.width`,
+`scrollbar.thin.hover.width`). Явный выбор экземпляра главнее темы. Цвета по
+умолчанию — цвета обычной полосы темы (`ScrollThumbBG`, `Accent`,
+`ScrollTrackBG`). Пока ничего не происходит, анимаций нет и кадры не готовятся;
+каждый шаг перерисовывает только колонку полосы, а не всё содержимое. Пресеты
+тем полос не объявляют — их `ScrollView` прежний.
+
 ### ListView
 
 ```go
@@ -3655,7 +3680,28 @@ ic.SetBounds(image.Rect(8, 8, 32, 32))
 - Поддержано: `path` (все команды, включая дуги и smooth-кривые),
   `rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`, трансформы групп,
   `fill`/`fill-rule` (nonzero + even-odd)/`fill-opacity`, атрибут `style`.
-- Ограничения: нет градиентов, `clipPath` и `text`; обводка (stroke) упрощённая.
+- Так же рисуются значки приложений Linux (Adwaita, Humanity, hicolor):
+  `linearGradient`/`radialGradient` (`gradientUnits`, `gradientTransform`,
+  `spreadMethod`, наследование через `xlink:href`), `<use>`/`<symbol>`,
+  `clip-path`, `mask`, `<style>` с классами (`.st0{fill:…}`), `<image>` с
+  `data:`-PNG, `display:none`, размытие и `feColorMatrix` из `filter`.
+  Содержимое `<defs>`, `<clipPath>`, `<mask>`, `<symbol>` само не рисуется.
+- Также: `pattern` (плитка, `patternUnits`/`patternContentUnits`/`viewBox`/
+  `patternTransform`), `<text>`/`<tspan>` (шрифтами движка: `x y dx dy`,
+  `font-family/size/weight/style`, `text-anchor`) — мост регистрирует
+  `engine.New`, без движка текст не рисуется; `mask` и `filter` группы
+  применяются к склеенной группе (слоем).
+- Точный режим (по умолчанию выключен, прежний результат побитно):
+  `svg.SetDefaultOptions(svg.PreciseOptions)` для всего процесса,
+  `doc.SetOptions(...)` для документа, `doc.RasterizeCachedWith(..., opts)` /
+  `svg.RenderWith(doc, w, h, tint, opts)` для одного вызова. `StrokeJoins` —
+  `stroke-linejoin` (miter/round/bevel, `stroke-miterlimit`),
+  `stroke-linecap`, `stroke-dasharray`/`-dashoffset`, без «минимальной
+  толщины»; `GroupLayers` — `opacity` группы слоем (перекрытия потомков не
+  просвечивают).
+- Ограничения: нет внешних картинок, `marker`, `letter-spacing`, `textPath`,
+  `dominant-baseline`; без режима `StrokeJoins` обводка упрощённая. Полный
+  список — в комментарии пакета `widget/svg`.
 
 Пакет `widget/svg` доступен и напрямую: `svg.Parse(data)` / `svg.ParseFile(path)`
 → `*svg.Document` с методом `RasterizeCached(w, h, current, tint)`.
@@ -4010,6 +4056,49 @@ p.SetStyle("taskbar", "", theme.StateNormal, theme.StyleDelta{
 обратно. `Canvas.SetRoundClip` обрезает по скруглённому контуру, а не по
 охватывающему прямоугольнику.
 
+#### Акцент, светлая панель и акрил Windows 10 (с v3.31)
+
+Акцент — токен темы, который можно менять на лету. Стили ссылаются на него
+(`StyleDelta.FillFrom`, `TextFrom`, `BorderFrom`; в JSON — `"fill": "@accent"`),
+поэтому смена не требует ни пересоздания компонентов, ни перечитывания профиля:
+
+```go
+m.SetAccent(theme.RGB(16, 137, 62))   // тема пересобирается, подписчики уведомляются
+eng.SetAccent(m, c)                   // то же + палитра виджетов (widget.Theme)
+m.ResetAccent()                       // вернуть акцент профиля
+```
+
+Производные считаются от акцента сами: `accent.hover`, `accent.pressed`,
+`accent.dark`, `accent.light` и `accent.text` (белый или чёрный, смотря по
+яркости). Выбор переживает смену темы. Windows 2000 акцент в стилях не
+использует и не меняется.
+
+Светлая панель задач Windows 10 включается флагом — профилем или на лету; по
+умолчанию панель тёмная, как раньше:
+
+```go
+m.SetFlag(theme.KeyTaskbarLight, true)   // панель, «Пуск» и центр уведомлений светлеют
+```
+
+Флаг работает через условные стили: `p.SetStyleWhen(flag, comp, part, state,
+delta)` накладывается на обычные правила, пока флаг поднят.
+
+Панель Windows 10 — акрил: размытие обоев под панелью, затемняющая подкраска и
+слабое зерно (`BackdropSpec.Noise`). Если контекст размывать не умеет, рисуется
+сплошной `BackdropSpec.Fallback`:
+
+```go
+&theme.BackdropSpec{Mode: theme.BackdropBlur, Radius: 20,
+    Tint: theme.RGBA(31, 31, 31, 210), Noise: 0.02, Fallback: theme.RGB(31, 31, 31)}
+```
+
+Для оболочки Windows 10 профиль объявляет части стилей `startmenu` (`panel`,
+`sidebar`, `sidebar.item`, `row`, `letter`, `tile`, `tile.group`) и
+`notificationcenter` (`panel`, `header`, `link`, `group`, `card`, `action`,
+`quick.tile`, `quick.tile.on`). Компонент `notificationcenter` унаследован от
+`notifications` (`Profile.SetStyleBase`), поэтому у существующих тем вид не
+меняется.
+
 #### Панель задач и её компоненты
 
 ```go
@@ -4051,6 +4140,40 @@ root.AddChild(menu)                       // в дереве — иначе ов
 ```go
 desktop.NewFlyoutGroup(calendar.Flyout, notifications.Flyout)
 ```
+
+#### Значки трея и SVG на HiDPI
+
+Значки сети, звука и питания берутся из набора иконок темы
+(`theme.Manager.SetIconResolver`, `widget.IconSet`), а если в профиле нужной
+иконки нет, рисуются прежними фигурами. Ключи в `Profile.Icons`:
+`tray.network.{none,wifi.0..4,wifi,ethernet,cellular,icon}`,
+`tray.volume.{muted,0..3,icon}`, `tray.power.{ac.0..10,ac,0..10,icon}`,
+`tray.notifications.{icon,icon.new}`; самый конкретный найденный побеждает.
+Флаг темы `tray.icon.tint` перекрашивает иконку цветом текста стиля.
+
+Свой значок трея — `desktop.NewTrayIcon` из картинки, SVG или функции «размер
+в физических пикселях → картинка»:
+
+```go
+ic, _ := desktop.NewTraySVGIcon(m, svgData)
+ic.SetToolTipKey("CloudSync")     // подсказка через widget.Tr, следует за языком
+ic.OnClick = openCloudPanel
+bar.AddItem(desktop.SlotTray, ic)
+```
+
+Кнопка центра уведомлений со счётчиком —
+`desktop.NewNotificationButton(m, notifications)` (число — `len(List())`, «99+»
+сверху); полоска «Показать рабочий стол» — `desktop.NewShowDesktopButton(m)`,
+кладётся последней в `SlotTray`, ширина — метрика `tray.showdesktop.width`.
+Подсказки — строки `ShowDesktop`, `NotificationCenter`, `NoNewNotifications`,
+`NewNotificationsCount` (`widget.RegisterStrings` перекрывает встроенные ru/en).
+
+SVG растеризуется **в физическом размере** (логический × масштаб холста), а не
+растягивается: на 125–200 % значок остаётся чётким. Так делают `SVGIcon`,
+`desktop.TrayIcon` и значки трея; для своего виджета — `widget.DrawSVG(ctx, doc,
+rect, current, tint)`, `widget.ContextScale(ctx)`, `widget.PhysicalRect(ctx, r)`.
+`desktop.AppInfo.IconAt(size)` отдаёт растр или SVG под нужный размер (панель 24,
+меню 20–32, плитки 48–64); без него работает `AppInfo.Icon`.
 
 #### Предпросмотр окна
 
@@ -4301,6 +4424,22 @@ eng.RequestFrame()              // сток готов принять
 выводе — и заодно позволяет потребителю менять сцену и готовить кадр в одной
 горутине, устранив гонку по построению. `Frames()` продолжает работать: сток
 — альтернатива, а не замена.
+
+#### Если потребитель канала отстаёт
+
+Канал `Frames()` неглубокий (8 кадров) и при переполнении кадр выбрасывает. С
+v3.31 выброс не проходит бесследно: кадры — разности, и потребитель, потерявший
+один, накладывал бы следующие на картинку, которой у него нет. Поэтому, как
+только в канале появляется место, движок отдаёт следующий кадр **полным** —
+все тайлы холста, и в статичный интерфейс тоже. Тот, кто канал не читает
+вовсе (у него сток), полных кадров не получает.
+
+Каждый кадр несёт размер холста, под который снят: `frame.Width`,
+`frame.Height` (физические пиксели). После `SetResolution` или `SetScale`
+кадры прежнего размера выбрасываются из канала, первый кадр нового размера —
+полный. Потребитель со своим буфером сверяет размер и кадр чужого размера
+пропускает — так делает окно (`window`): иначе тайлы прежней раскладки,
+стоявшие в очереди, ложились бы в буфер нового размера.
 
 #### Векторные ядра (эксперимент Go)
 

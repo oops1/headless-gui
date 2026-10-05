@@ -325,6 +325,7 @@ func (w *X11Window) Create(title string, width, height int) error {
 			0x00000002 | // KeyRelease
 			0x00000004 | // ButtonPress
 			0x00000008 | // ButtonRelease
+			0x00000020 | // LeaveWindow — снять наведение (pointerleave.go)
 			0x00000040 | // PointerMotion
 			0x00008000 | // ExposureMask
 			0x00020000 | // StructureNotifyMask (resize/close)
@@ -422,6 +423,7 @@ func (w *X11Window) CreatePopup(width, height int) error {
 			0x00000002 | // KeyRelease
 			0x00000004 | // ButtonPress
 			0x00000008 | // ButtonRelease
+			0x00000020 | // LeaveWindow
 			0x00000040 | // PointerMotion
 			0x00008000) // Exposure
 	values := []uint32{
@@ -480,7 +482,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	// не отвечает на ввод, пока открыт диалог.
 	if w.disabled.Load() {
 		switch evType {
-		case 2, 3, 4, 5, 6:
+		case 2, 3, 4, 5, 6, 8:
 			return
 		}
 	}
@@ -488,7 +490,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	case 2: // KeyPress
 		keycode := buf[1]
 		state := binary.LittleEndian.Uint16(buf[28:30])
-		vk := x11KeycodeToVK(int(keycode))
+		vk := w.x11VKForKey(keycode)
 		if w.onKeyDown != nil && vk != 0 {
 			w.onKeyDown(vk)
 		}
@@ -506,7 +508,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 
 	case 3: // KeyRelease
 		keycode := buf[1]
-		vk := x11KeycodeToVK(int(keycode))
+		vk := w.x11VKForKey(keycode)
 		if w.onKeyUp != nil && vk != 0 {
 			w.onKeyUp(vk)
 		}
@@ -560,6 +562,11 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
 		if w.onMouseMove != nil {
 			w.onMouseMove(x, y)
+		}
+
+	case 8: // LeaveNotify: detail — buf[1], mode — buf[30]
+		if x11PointerLeft(buf[1], buf[30]) && w.onMouseMove != nil {
+			w.onMouseMove(pointerOutside, pointerOutside)
 		}
 
 	case 9: // FocusIn
@@ -1157,6 +1164,29 @@ func (w *X11Window) readFull(buf []byte) bool {
 		got += n
 	}
 	return true
+}
+
+// x11VKForKey — виртуальный код клавиши. Сначала по физическому месту
+// (x11KeycodeToVK), затем по таблице keysym сервера: так находится клавиша
+// Windows (Super_L/Super_R), переставленная на нестандартное место.
+func (w *X11Window) x11VKForKey(keycode byte) int {
+	if vk := x11KeycodeToVK(int(keycode)); vk != 0 {
+		return vk
+	}
+	if w.keysyms == nil || keycode < w.minKeycode {
+		return 0
+	}
+	row := int(keycode-w.minKeycode) * w.symsPerCode
+	if row+w.symsPerCode > len(w.keysyms) {
+		return 0
+	}
+	// Super может стоять в любой из колонок первых двух групп.
+	for _, sym := range w.keysyms[row : row+w.symsPerCode] {
+		if vk := keysymToVK(sym); vk != 0 {
+			return vk
+		}
+	}
+	return 0
 }
 
 // x11RuneForKey возвращает руну для keycode с учётом state события

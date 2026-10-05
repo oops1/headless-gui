@@ -6,12 +6,17 @@
 // такому запускает его, щелчок по запущенному — переключает окно. Именно так
 // устроена панель задач начиная с Windows 7 и док macOS.
 //
+// Тема может попросить сгруппировать окна (taskbutton.group): несколько окон
+// одного приложения тогда живут в одной кнопке, щелчок по ней отдаёт список
+// окон предпросмотру, правый щелчок открывает меню команд (AppCommands).
+//
 // Компонент, как и RunningApplications, отдаёт отрисовку презентеру темы,
 // если та его назначила: под macOS это тот же док. Поведение при этом
 // остаётся здесь и одинаково для всех тем.
 package desktop
 
 import (
+	"fmt"
 	"image"
 	"sync"
 
@@ -22,6 +27,7 @@ import (
 // ApplicationArea — область закреплённых и запущенных приложений.
 type ApplicationArea struct {
 	widget.Base
+	FocusState
 
 	tm  *theme.Manager
 	cat AppCatalog
@@ -32,28 +38,79 @@ type ApplicationArea struct {
 	rects    []image.Rectangle
 	hoverIdx int
 	armedIdx int
+	// grouped — по какому режиму собраны entries. Тема могла смениться на ту,
+	// что группирует окна иначе; layout и PreferredSize замечают это и
+	// пересобирают ячейки, не требуя от оболочки пересоздавать область.
+	grouped bool
 
 	// onHover — кому сообщать о смене ячейки под курсором (см.
 	// SetHoverListener). Этим живёт предпросмотр окна.
 	onHover func(idx int)
+	// onGroup — кому отдавать щелчок по кнопке со многими окнами (см.
+	// SetGroupListener).
+	onGroup func(idx int)
+	// onGroupKey — кому отдавать Enter и Space на кнопке со многими окнами (см.
+	// SetGroupKeyListener).
+	onGroupKey func(idx int)
+	// cmds — команды контекстного меню от потребителя; nil — DefaultAppCommands.
+	cmds AppCommands
+
+	// menu — контекстное меню кнопки; рисует и разбирает его сама область.
+	menu appMenuHost
 
 	unsubCat func()
 	unsubWM  func()
+
+	// fade — плавный переход цвета ячеек (тема: taskbar.item).
+	fade motion
+
+	// vertical — область лежит в столбце боковой панели: ячейки идут сверху
+	// вниз, без подписей и без презентера дока (applicationarea_vertical.go).
+	vertical bool
+	// edge — край экрана, у которого стоит панель; в столбце метка открытого
+	// окна рисуется на стороне ячейки, обращённой к нему (taskmark_edge.go).
+	edge Edge
 }
 
-// appEntry — одна ячейка области: либо окно, либо закреплённое приложение.
+// appEntry — одна ячейка области: либо окно, либо закреплённое приложение,
+// либо все окна одного приложения.
 //
 // Закреплённое приложение, у которого есть открытое окно, показывается ОДИН
 // раз — окном: две ячейки на одно и то же приложение сбивают с толку, а
 // щелчок по ним делает разное.
 type appEntry struct {
-	app    AppID
-	title  string
-	icon   image.Image
+	app   AppID
+	title string
+	icon  image.Image
+	// iconAt — значок по размеру (AppInfo.IconAt); при отрисовке побеждает icon.
+	iconAt func(size int) image.Image
+	// window — окно ячейки; у стопки — главное (активное, а без него первое).
 	window WindowID
+	// wins — все окна ячейки: одно у обычной, несколько у стопки.
+	wins   []WindowInfo
 	live   bool // есть открытое окно
-	active bool
-	min    bool
+	active bool // активно любое из окон
+	min    bool // свёрнуты все окна
+	// group — ячейка собрана по правилу «окна одного приложения — одна кнопка»:
+	// её ключ — приложение, а не окно, и он не меняется, пока меняется главное
+	// окно стопки.
+	group bool
+}
+
+// stack — у ячейки больше одного окна.
+func (e appEntry) stack() bool { return len(e.wins) > 1 }
+
+// key — устойчивый ключ ячейки для плавных переходов: номер окна, пока оно
+// есть, иначе закреплённое приложение. Индекс не годится: при закрытии окна
+// ячейки сдвигаются, и переход перетёк бы на соседа.
+func (e appEntry) key() any {
+	if e.group {
+		return e.app
+	}
+	if e.live && e.window != 0 {
+		return e.window
+	}
+	return e.app
 }
 
 // NewApplicationArea создаёт область приложений: закреплённые берутся из cat,
@@ -83,6 +140,7 @@ func (a *ApplicationArea) Close() {
 		a.unsubWM()
 		a.unsubWM = nil
 	}
+	a.menu.dismiss()
 }
 
 // refresh перестраивает содержимое и перерисовывает область.
@@ -92,25 +150,44 @@ func (a *ApplicationArea) refresh() {
 	a.Invalidate()
 }
 
+// groupMode сообщает, просит ли тема собирать окна одного приложения в одну
+// кнопку.
+func (a *ApplicationArea) groupMode() bool {
+	return a.tm != nil && a.tm.GetFlag(KeyTaskButtonGroup, false)
+}
+
+// syncGrouping пересобирает ячейки, если тема с тех пор сменила режим
+// группировки.
+func (a *ApplicationArea) syncGrouping() {
+	a.mu.RLock()
+	stale := a.grouped != a.groupMode()
+	a.mu.RUnlock()
+	if stale {
+		a.rebuild()
+	}
+}
+
 // rebuild собирает ячейки: сначала закреплённые (в порядке закрепления),
-// затем окна незакреплённых приложений.
+// затем окна незакреплённых приложений. В режиме группировки все окна одного
+// приложения собраны в одну ячейку.
 func (a *ApplicationArea) rebuild() {
+	group := a.groupMode()
 	var entries []appEntry
 
-	windows := map[AppID]WindowInfo{}
+	byApp := map[AppID][]WindowInfo{}
 	var order []WindowInfo
 	if a.wm != nil {
 		order = a.wm.Windows()
 		for _, w := range order {
-			if _, seen := windows[w.AppID]; !seen && w.AppID != "" {
-				windows[w.AppID] = w
+			if w.AppID != "" {
+				byApp[w.AppID] = append(byApp[w.AppID], w)
 			}
 		}
 	}
 
+	apps := map[AppID]AppInfo{}
 	pinned := map[AppID]bool{}
 	if a.cat != nil {
-		apps := map[AppID]AppInfo{}
 		for _, app := range a.cat.Apps() {
 			apps[app.ID] = app
 		}
@@ -118,31 +195,72 @@ func (a *ApplicationArea) rebuild() {
 			pinned[id] = true
 			e := appEntry{app: id, title: string(id)}
 			if info, ok := apps[id]; ok {
-				e.title, e.icon = info.Title, info.Icon
+				e.title, e.icon, e.iconAt = info.Title, info.Icon, info.IconAt
 			}
-			if w, ok := windows[id]; ok {
-				e.window, e.live, e.active, e.min = w.ID, true, w.Active, w.Minimized
-				if w.Icon != nil {
-					e.icon = w.Icon
+			if wins := byApp[id]; len(wins) > 0 {
+				if !group {
+					wins = wins[:1] // без группировки показывается первое окно
 				}
+				e = withWindows(e, wins, group)
 			}
 			entries = append(entries, e)
 		}
 	}
 
+	seen := map[AppID]bool{}
 	for _, w := range order {
 		if w.AppID != "" && pinned[w.AppID] {
 			continue // уже показано закреплённой ячейкой
 		}
+		if group && w.AppID != "" {
+			if seen[w.AppID] {
+				continue // окно уже вошло в ячейку своего приложения
+			}
+			seen[w.AppID] = true
+			e := appEntry{app: w.AppID, title: w.Title}
+			if info, ok := apps[w.AppID]; ok {
+				e.title, e.icon, e.iconAt = info.Title, info.Icon, info.IconAt
+			}
+			entries = append(entries, withWindows(e, byApp[w.AppID], true))
+			continue
+		}
 		entries = append(entries, appEntry{
 			app: w.AppID, title: w.Title, icon: w.Icon,
-			window: w.ID, live: true, active: w.Active, min: w.Minimized,
+			window: w.ID, wins: []WindowInfo{w}, live: true, active: w.Active, min: w.Minimized,
 		})
 	}
 
 	a.mu.Lock()
 	a.entries = entries
+	a.grouped = group
 	a.mu.Unlock()
+}
+
+// withWindows дописывает ячейке её окна. Главным становится активное окно, а
+// без него первое не свёрнутое, а без него первое: щелчок по кнопке с одним
+// окном обязан вести в то, что видно.
+func withWindows(e appEntry, wins []WindowInfo, group bool) appEntry {
+	rep := wins[0]
+	for _, w := range wins {
+		if w.Active {
+			rep = w
+			break
+		}
+		if rep.Minimized && !w.Minimized {
+			rep = w
+		}
+	}
+	e.wins = append([]WindowInfo(nil), wins...)
+	e.window, e.live, e.group = rep.ID, true, group
+	e.min = true
+	for _, w := range wins {
+		e.active = e.active || w.Active
+		e.min = e.min && w.Minimized
+	}
+	if rep.Icon != nil {
+		e.icon, e.iconAt = rep.Icon, nil
+	}
+	return e
 }
 
 // SetBounds задаёт границы области и раскладывает ячейки.
@@ -154,12 +272,16 @@ func (a *ApplicationArea) SetBounds(r image.Rectangle) {
 // PreferredSize — как у полосы кнопок окон; презентеру темы, если он есть,
 // размер решать самому.
 func (a *ApplicationArea) PreferredSize(avail image.Point) image.Point {
+	a.syncGrouping()
 	if p := a.presenter(); p != nil {
 		return p.Measure(a, avail)
 	}
 	n := len(a.Cells())
 	if n == 0 {
 		return image.Point{}
+	}
+	if a.vertical {
+		return a.preferredVertical(n, avail)
 	}
 	ideal := int(a.metric(KeyTaskButtonWidth))
 	if a.tm != nil && !a.tm.GetFlag(KeyTaskButtonLabel, true) {
@@ -177,6 +299,7 @@ func (a *ApplicationArea) PreferredSize(avail image.Point) image.Point {
 // layout считает прямоугольники ячеек: у презентера — его раскладку, иначе
 // ряд равных кнопок, сжимающихся до значков.
 func (a *ApplicationArea) layout() {
+	a.syncGrouping()
 	b := a.Bounds()
 
 	a.mu.Lock()
@@ -195,6 +318,11 @@ func (a *ApplicationArea) layout() {
 		a.mu.Lock()
 		a.rects = rects
 		a.mu.Unlock()
+		return
+	}
+
+	if a.vertical {
+		a.layoutVertical(b, n)
 		return
 	}
 
@@ -246,6 +374,7 @@ func (a *ApplicationArea) Theme() *theme.Manager { return a.tm }
 
 // Cells реализует Component: закреплённые и запущенные одним списком.
 func (a *ApplicationArea) Cells() []Cell {
+	a.syncGrouping()
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	cells := make([]Cell, 0, len(a.entries))
@@ -270,6 +399,10 @@ func (a *ApplicationArea) HoverIndex() int {
 }
 
 func (a *ApplicationArea) presenter() Presenter {
+	// Док macOS — ряд; в столбце боковой панели область рисуется сама.
+	if a.vertical {
+		return nil
+	}
 	return PresenterFor(a.tm, PresenterKeyRunningApps)
 }
 
@@ -291,10 +424,15 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 	rects := append([]image.Rectangle(nil), a.rects...)
 	hover, armed := a.hoverIdx, a.armedIdx
 	a.mu.RUnlock()
+	focus := -1
+	if a.FocusVisible() {
+		focus = a.FocusState.Cell(len(rects))
+	}
 
 	iconSize := int(a.metric(KeyTaskButtonIconSize))
 	labelGap := int(a.metric(KeyTaskButtonLabelGap))
-	labels := a.tm == nil || a.tm.GetFlag(KeyTaskButtonLabel, true)
+	labels := (a.tm == nil || a.tm.GetFlag(KeyTaskButtonLabel, true)) && !a.vertical
+	muted := taskButtonMuted(a.tm)
 	prev := ctx.Clip()
 
 	for i, r := range rects {
@@ -302,21 +440,35 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 			break
 		}
 		e := entries[i]
-		st := StateOf(i == hover, i == armed, e.active, e.min || !e.live, false)
-		s := styleOf(a.tm, ComponentTaskButton, "", st)
+		st := StateOf(i == hover, i == armed, e.active, (e.min || !e.live) && muted, i == focus)
+		s := a.fade.ItemStyle(a.tm, e.key(), r, st, func(st theme.State) *theme.Style {
+			return styleOf(a.tm, ComponentTaskButton, "", st)
+		})
 		PaintStyle(ctx, r, s)
 
 		// Метка открытого окна: закреплённое, но незапущенное её не получает —
 		// в этом вся разница между «закреплено» и «открыто».
 		if e.live {
-			DrawUnderline(ctx, r, int(a.metric(KeyTaskButtonUnderline)),
-				a.metric(KeyTaskButtonUnderlineLen), e.active, s)
+			drawTaskMarkAt(ctx, a.tm, r, e.active, s, markEdgeOf(a.vertical, a.edge))
 		}
 
 		padX := int(s.PadX)
 		iconX := r.Min.X + padX
-		if e.icon != nil && iconSize > 0 {
-			ctx.DrawImageScaled(e.icon, iconX, r.Min.Y+(r.Dy()-iconSize)/2, iconSize, iconSize)
+		if a.vertical {
+			iconX = r.Min.X + (r.Dx()-iconSize)/2 // в столбце значок по центру ячейки
+		}
+		var iconRect image.Rectangle
+		if (e.icon != nil || e.iconAt != nil) && iconSize > 0 {
+			iconRect = image.Rect(iconX, r.Min.Y+(r.Dy()-iconSize)/2, iconX+iconSize, r.Min.Y+(r.Dy()-iconSize)/2+iconSize)
+			drawAppIcon(ctx, e.icon, e.iconAt, iconRect)
+		}
+		// Торцы стопки: за значком видно, что окон несколько.
+		if e.stack() {
+			stackIcon := iconRect
+			if stackIcon.Empty() {
+				stackIcon = image.Rect(iconX, r.Min.Y+(r.Dy()-iconSize)/2, iconX+iconSize, r.Min.Y+(r.Dy()-iconSize)/2+iconSize)
+			}
+			drawStack(ctx, a.tm, stackIcon, s)
 		}
 		// Подпись помещается не всегда, и тема вправе не хотеть её вовсе.
 		textLeft := iconX + iconSize + labelGap
@@ -333,6 +485,9 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 
 // OnMouseMove подсвечивает ячейку под курсором.
 func (a *ApplicationArea) OnMouseMove(x, y int) {
+	if a.menu.routeMove(x, y) {
+		return // курсор над открытым меню: ячейки под ним не подсвечиваем
+	}
 	idx := a.hit(x, y)
 	a.mu.Lock()
 	changed := idx != a.hoverIdx
@@ -362,6 +517,30 @@ func (a *ApplicationArea) OnMouseMove(x, y int) {
 func (a *ApplicationArea) SetHoverListener(fn func(idx int)) {
 	a.mu.Lock()
 	a.onHover = fn
+	a.mu.Unlock()
+}
+
+// SetGroupListener реализует GroupClickArea: кому отдавать щелчок по кнопке со
+// многими окнами. Без слушателя область переключает окна приложения по кругу.
+func (a *ApplicationArea) SetGroupListener(fn func(idx int)) {
+	a.mu.Lock()
+	a.onGroup = fn
+	a.mu.Unlock()
+}
+
+// SetGroupKeyListener реализует GroupKeyArea: кому отдавать Enter и Space на
+// кнопке со многими окнами. Без слушателя клавиши листают окна по кругу.
+func (a *ApplicationArea) SetGroupKeyListener(fn func(idx int)) {
+	a.mu.Lock()
+	a.onGroupKey = fn
+	a.mu.Unlock()
+}
+
+// SetCommands задаёт источник команд контекстного меню кнопки. nil возвращает
+// набор по умолчанию (DefaultAppCommands).
+func (a *ApplicationArea) SetCommands(c AppCommands) {
+	a.mu.Lock()
+	a.cmds = c
 	a.mu.Unlock()
 }
 
@@ -404,10 +583,34 @@ func (a *ApplicationArea) WindowAt(i int) (WindowInfo, bool) {
 	}, true
 }
 
+// WindowsAt реализует GroupHoverArea: все окна ячейки i (у незапущенной —
+// ни одного).
+func (a *ApplicationArea) WindowsAt(i int) []WindowInfo {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if i < 0 || i >= len(a.entries) || !a.entries[i].live {
+		return nil
+	}
+	return append([]WindowInfo(nil), a.entries[i].wins...)
+}
+
 // OnMouseButton: щелчок по закреплённому незапущенному запускает его, по
-// запущенному — активирует или сворачивает. Срабатывает на отпускании над
-// той же ячейкой — как у всех кнопок панели задач.
+// запущенному — активирует или сворачивает, по кнопке со многими окнами —
+// открывает их список. Срабатывает на отпускании над той же ячейкой — как у
+// всех кнопок панели задач. Правая кнопка открывает меню команд.
 func (a *ApplicationArea) OnMouseButton(e widget.MouseEvent) bool {
+	if a.menu.routeMouse(e) {
+		return true
+	}
+	if e.Button == widget.MouseRight {
+		if !e.Pressed {
+			if idx := a.hit(e.X, e.Y); idx >= 0 {
+				a.ShowCommands(idx)
+				return true
+			}
+		}
+		return false
+	}
 	if e.Button != widget.MouseLeft {
 		return false
 	}
@@ -416,6 +619,7 @@ func (a *ApplicationArea) OnMouseButton(e widget.MouseEvent) bool {
 		if idx < 0 {
 			return false
 		}
+		a.NotePointer(e)
 		a.mu.Lock()
 		a.armedIdx = idx
 		a.mu.Unlock()
@@ -426,25 +630,136 @@ func (a *ApplicationArea) OnMouseButton(e widget.MouseEvent) bool {
 	a.mu.Lock()
 	was := a.armedIdx
 	a.armedIdx = -1
-	entry := appEntry{}
-	if was >= 0 && was < len(a.entries) {
-		entry = a.entries[was]
-	}
 	a.mu.Unlock()
 	a.Invalidate()
 
 	if was < 0 || was != idx {
 		return was >= 0 // нажатие мы поглотили, отпускание в сторону — отмена
 	}
+	a.activate(was, true)
+	return true
+}
+
+// activate делает с ячейкой i то, что делает щелчок по ней: запускает
+// закреплённое незапущенное, сворачивает активное окно, активирует остальные,
+// а у стопки открывает список окон (showList) — или, когда списка не
+// показать, переключает окна по кругу. Клавиши Enter и Space у стопки идут
+// отдельным путём (activateCell): список, открытый с клавиатуры, получает фокус.
+func (a *ApplicationArea) activate(i int, showList bool) {
+	a.mu.RLock()
+	var entry appEntry
+	ok := i >= 0 && i < len(a.entries)
+	if ok {
+		entry = a.entries[i]
+	}
+	onGroup := a.onGroup
+	a.mu.RUnlock()
+	if !ok {
+		return
+	}
 	switch {
 	case !entry.live && a.cat != nil:
 		_ = a.cat.Launch(entry.app)
-	case entry.live && entry.active:
+	case !entry.live:
+	case entry.stack() && showList && onGroup != nil:
+		onGroup(i)
+	case entry.stack():
+		a.cycle(entry)
+	case entry.active:
 		a.wm.Minimize(entry.window)
-	case entry.live:
+	default:
 		a.wm.Activate(entry.window)
 	}
-	return true
+}
+
+// cycle переключает окна стопки по кругу: от активного к следующему, а без
+// активного — к главному. Так кнопка со многими окнами работает, пока никто
+// не показывает их список.
+func (a *ApplicationArea) cycle(e appEntry) {
+	next := e.window
+	for i, w := range e.wins {
+		if w.Active {
+			next = e.wins[(i+1)%len(e.wins)].ID
+			break
+		}
+	}
+	a.wm.Activate(next)
+}
+
+// ShowCommands открывает меню команд кнопки i. Команды берутся у потребителя
+// (SetCommands), а без него — DefaultAppCommands. Меню встаёт у края кнопки,
+// обращённого к рабочему столу.
+func (a *ApplicationArea) ShowCommands(i int) {
+	a.mu.RLock()
+	var e appEntry
+	ok := i >= 0 && i < len(a.entries) && i < len(a.rects)
+	var anchor image.Rectangle
+	if ok {
+		e, anchor = a.entries[i], a.rects[i]
+	}
+	src := a.cmds
+	a.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	btn := AppButton{App: e.app, Title: e.title, Windows: e.wins}
+	if a.cat != nil {
+		for _, id := range a.cat.Pinned() {
+			if id == e.app && id != "" {
+				btn.Pinned = true
+			}
+		}
+	}
+	var cmds []AppCommand
+	if src != nil {
+		cmds = src.Commands(btn)
+	} else {
+		cmds = DefaultAppCommands(a.cat, a.wm, btn)
+	}
+	// Панель вверху экрана (строка меню) раскрывает меню вниз, боковая — вбок.
+	edge := EdgeBottom
+	switch {
+	case a.vertical:
+		edge = markEdgeOf(true, a.edge)
+	case a.tm != nil && a.tm.GetFlag(KeyTaskbarTop, false):
+		edge = EdgeTop
+	}
+	a.menu.show(a.tm, menuItems(cmds), anchor, edge)
+}
+
+// ToolTipAt возвращает подсказку кнопки под точкой: название приложения (у
+// стопки — с числом окон). Там, где есть предпросмотр, подсказка не нужна —
+// его показывает наведение; остаются закреплённые незапущенные кнопки и
+// области без предпросмотра. Реализует интерфейс подсказок движка.
+func (a *ApplicationArea) ToolTipAt(x, y int) string {
+	i := a.hit(x, y)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if i < 0 || i >= len(a.entries) {
+		return ""
+	}
+	e := a.entries[i]
+	if e.title == "" || (e.live && a.previewShown()) {
+		return ""
+	}
+	if e.stack() {
+		return fmt.Sprintf(tr(StrAppWindows), e.title, len(e.wins))
+	}
+	return e.title
+}
+
+// previewShown — покажет ли наведение на живую кнопку предпросмотр: за
+// областью следят, тема его допускает, а модель умеет отдавать миниатюры.
+// Вызывается под a.mu.
+func (a *ApplicationArea) previewShown() bool {
+	if a.onHover == nil || a.wm == nil {
+		return false
+	}
+	if _, ok := a.wm.(WindowPreviews); !ok {
+		return false
+	}
+	return a.tm == nil || a.tm.GetFlag(KeyPreview, true)
 }
 
 // hit возвращает индекс ячейки под точкой или -1.
@@ -465,4 +780,28 @@ func (a *ApplicationArea) metric(k theme.Key) float64 {
 		return 0
 	}
 	return a.tm.GetMetric(k)
+}
+
+// ─── Контекстное меню как оверлей ───────────────────────────────────────────
+
+// HasOverlay реализует widget.OverlayDrawer: меню команд рисуется поверх всего.
+func (a *ApplicationArea) HasOverlay() bool { return a.menu.open() }
+
+// DrawOverlay реализует widget.OverlayDrawer.
+func (a *ApplicationArea) DrawOverlay(ctx widget.DrawContext) { a.menu.drawOverlay(ctx) }
+
+// OverlayBounds реализует widget.OverlayBoundsProvider (для выноса меню в
+// окно ОС).
+func (a *ApplicationArea) OverlayBounds() image.Rectangle { return a.menu.overlayBounds() }
+
+// Dismiss реализует widget.Dismissable: клик мимо закрывает меню.
+func (a *ApplicationArea) Dismiss() { a.menu.dismiss() }
+
+// DismissOnEscape реализует widget.EscapeDismisser.
+func (a *ApplicationArea) DismissOnEscape() bool {
+	if !a.menu.open() {
+		return false
+	}
+	a.menu.dismiss()
+	return true
 }

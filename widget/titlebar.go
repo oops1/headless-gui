@@ -261,7 +261,7 @@ func (d *Dialog) titleTextW() int {
 		return 0
 	}
 	if currentStyle().Classic3D {
-		return MeasureUITextFont(d.Title, DefaultFontSizePt, BuiltinFontBold)
+		return MeasureUITextFont(d.Title, DefaultFontSize(), BuiltinFontBold)
 	}
 	return MeasureUITextFont(d.Title, 11, BuiltinFontBold)
 }
@@ -472,7 +472,7 @@ func (w *Window) titleTextW() int {
 		return 0
 	}
 	if w.style().Classic3D {
-		return MeasureUITextFont(w.Title, DefaultFontSizePt, BuiltinFontBold)
+		return MeasureUITextFont(w.Title, DefaultFontSize(), BuiltinFontBold)
 	}
 	return MeasureUIText(w.Title, 10)
 }

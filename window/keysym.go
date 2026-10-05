@@ -47,6 +47,39 @@ func keysymToRune(sym uint32) rune {
 	return 0
 }
 
+// Keysym клавиш Super (клавиша Windows) из keysymdef.h.
+const (
+	xkSuperL = 0xFFEB
+	xkSuperR = 0xFFEC
+)
+
+// keysymToVK переводит keysym клавиши Windows в виртуальный код (VK_LWIN или
+// VK_RWIN); для остальных keysym — 0.
+//
+// Основной путь к клавише — физический код (x11VKTable). Keysym нужен, когда
+// Super переставлен на другую клавишу (xmodmap, xkb-опции вроде
+// altwin:left_meta_win): физическое место тогда не говорит, что это Win.
+func keysymToVK(sym uint32) int {
+	switch sym {
+	case xkSuperL:
+		return VK_LWIN
+	case xkSuperR:
+		return VK_RWIN
+	}
+	return 0
+}
+
+// keysymNameToVK — то же по имени keysym из текстового xkb-keymap.
+func keysymNameToVK(name string) int {
+	switch name {
+	case "Super_L":
+		return VK_LWIN
+	case "Super_R":
+		return VK_RWIN
+	}
+	return 0
+}
+
 // namedKeysyms — именованные keysym текстового xkb-формата → числовой keysym.
 // ASCII-пунктуация + частые европейские имена (Latin-1).
 var namedKeysyms = map[string]uint32{

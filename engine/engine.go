@@ -22,6 +22,7 @@ import (
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v3/widget/svg"
 )
 
 // Engine управляет холстом, деревом виджетов и циклом рендеринга.
@@ -70,6 +71,12 @@ type Engine struct {
 	damageMu  sync.Mutex
 	damage    []image.Rectangle // области InvalidateRect с прошлого кадра
 	damageAll bool              // Invalidate() — полный diff
+
+	// subpixelOwn — подпиксельный текст включила или выключила тема, а не
+	// приложение; subpixelPinned — приложение распорядилось само
+	// (SetTextSubpixel), и тема режим больше не трогает; subpixelWant — что
+	// просил последний применённый профиль. Под frameMu.
+	subpixelOwn, subpixelPinned, subpixelWant bool
 
 	focus    focusManager  // текущий виджет с фокусом
 	loan     focusLoan     // фокус, взятый виджетом по просьбе (focusreq.go)
@@ -126,6 +133,10 @@ type Engine struct {
 	// (widget.RegisterTextMeasurer в New, снимается в Stop).
 	measurerHandle uint64
 
+	// svgTextHandle — дескриптор регистрации растеризатора <text> для
+	// widget/svg (svg.RegisterTextRasterizer в New, снимается в Stop).
+	svgTextHandle uint64
+
 	// moveHandle — дескриптор регистрации приёмника объявлений о переносе
 	// (widget.RegisterMoveSink в New, снимается в Stop).
 	moveHandle uint64
@@ -168,8 +179,12 @@ type Engine struct {
 	dblClickDelay time.Duration // 0 — значение по умолчанию (defaultDoubleClick)
 
 	frames chan output.Frame
-	quit   chan struct{}
-	done   chan struct{}
+	// fullNext — следующий кадр полный (холст пересоздан); lostFrame — кадр
+	// выброшен из переполненного канала, потребитель отстал (fullframe.go).
+	fullNext  atomic.Bool
+	lostFrame atomic.Bool
+	quit      chan struct{}
+	done      chan struct{}
 
 	fps     int     // целевой FPS, 1–120
 	userDPI float64 // пользовательский DPI шрифтов (без учёта HiDPI-масштаба)
@@ -352,7 +367,11 @@ func New(width, height, fps int) *Engine {
 	// перспективе — floating-панели) сосуществуют, и уведомления доходят до
 	// КАЖДОГО, а не только до последнего созданного. Снимаем регистрацию в
 	// Stop (см. Stop). full → e.Invalidate, rect (точечно) → e.InvalidateRect.
-	e.notifierHandle = widget.RegisterUINotifier(e.Invalidate, e.InvalidateRect)
+	// Заведённая анимация кадр целиком не инвалидирует: цикл шагает анимации на
+	// каждом тике, а тик заявляет только свою область. Полная инвалидация на
+	// старте каждой анимации — переход цвета кнопки, выезд меню — перерисовывала
+	// бы весь экран ради того, что меняется в одной его части.
+	e.notifierHandle = widget.RegisterUINotifierWake(e.Invalidate, e.InvalidateRect, func() {})
 	e.moveHandle = widget.RegisterMoveSink(e.noteMove)
 	// Точный замер текста для компоновки до отрисовки (размеры диалогов).
 	//
@@ -385,6 +404,9 @@ func New(width, height, fps int) *Engine {
 			return e.canvas.FontMetrics(family, sizePt)
 		},
 	})
+	// <text> внутри SVG рисуется шрифтами этого движка (контуры глифов);
+	// регистрация со снятием, как и у измерителя.
+	e.svgTextHandle = svg.RegisterTextRasterizer(svgTextBridge{e})
 	return e
 }
 
@@ -514,6 +536,7 @@ func (e *Engine) SetScale(k float64) {
 	e.canvas.setDPIAll(e.userDPI * k)
 	e.scaleBits.Store(math.Float64bits(k))
 	e.mu.Unlock()
+	e.markCanvasReplaced()
 	widget.BumpTextMetricsRev() // ширины текста изменились — сброс кэшей переноса
 	e.Invalidate()
 }
@@ -533,6 +556,7 @@ func (e *Engine) SetResolution(width, height int) {
 	e.canvas = e.canvas.cloneForSize(width, height, e.canvas.scale, e.bgSrc)
 	root := e.root
 	e.mu.Unlock()
+	e.markCanvasReplaced()
 	// ВАЖНО: SetBounds — вне e.mu. Изменение bounds триггерит авто-damage
 	// (notifyRectChanged → InvalidateRect); повторный захват e.mu на том же
 	// потоке дал бы дедлок (см. scaleBits).
@@ -747,6 +771,80 @@ func (e *Engine) SetDefaultFont(name string) bool {
 	return ok
 }
 
+// SetTextSubpixel включает позиционирование глифов по долям пикселя.
+//
+// По умолчанию выключено: шаг каждого глифа округляется до целого пикселя
+// (HintingFull в x/image), и это вид, на который рассчитаны все существующие
+// темы и эталонные снимки. На мелком кегле у шрифта с «нецелой» шириной
+// букв — Open Sans 8,5 pt (11,33 px), 6,3 px на букву — округление даёт
+// строку неровную: соседние одинаковые буквы получают то 6, то 7 пикселей.
+// Подпиксельный режим держит шаг дробным, а маску глифа снимает для четверти
+// пикселя, в которую попало перо, — строка идёт ровно и по ширине совпадает с
+// шрифтом, по которому брался макет. Текст при этом чуть мягче.
+//
+// Меняет ширину строк, поэтому включать нужно до построения интерфейса;
+// вызов на готовом интерфейсе перерисует его, но раскладка, посчитанная по
+// старым ширинам, не пересчитается. Профиль темы выражает пожелание флагом
+// theme.FlagTextSubpixel; движок читает его при применении профиля
+// (SetThemeProfile, ApplyThemeProfile, SetTheme). Явный вызов SetTextSubpixel
+// главнее темы: пока приложение не вернёт выбор теме (UseThemeTextSubpixel),
+// смена профиля режим не трогает.
+func (e *Engine) SetTextSubpixel(on bool) {
+	e.frameMu.Lock()
+	e.subpixelPinned, e.subpixelOwn = true, false
+	e.setSubpixelLocked(on)
+	e.frameMu.Unlock()
+	e.Invalidate()
+}
+
+// UseThemeTextSubpixel возвращает выбор подпиксельного текста теме: явное
+// SetTextSubpixel приложения снимается, и режим тут же становится таким,
+// каким его просит последний применённый профиль.
+func (e *Engine) UseThemeTextSubpixel() {
+	e.frameMu.Lock()
+	e.subpixelPinned = false
+	e.setSubpixelLocked(e.subpixelWant)
+	e.subpixelOwn = e.subpixelWant
+	e.frameMu.Unlock()
+	e.Invalidate()
+}
+
+// setSubpixelLocked переключает режим глифов и, если он действительно
+// изменился, сбрасывает замеры строк: ширины у режимов разные, и раскладка,
+// посчитанная по старым, перестала бы совпадать с отрисовкой. Под frameMu.
+func (e *Engine) setSubpixelLocked(on bool) {
+	if e.canvas.fontCache.Subpixel() == on {
+		return
+	}
+	e.canvas.setTextSubpixel(on)
+	widget.BumpTextMetricsRev()
+}
+
+// followThemeSubpixel приводит режим к просьбе темы (ThemeStyle.TextSubpixel).
+// Включает его, когда тема просит; выключает только то, что включила сама
+// тема, — режим, выбранный приложением, остаётся. Под frameMu.
+func (e *Engine) followThemeSubpixel(want bool) {
+	e.subpixelWant = want
+	if e.subpixelPinned {
+		return
+	}
+	switch {
+	case want:
+		e.setSubpixelLocked(true)
+		e.subpixelOwn = true
+	case e.subpixelOwn:
+		e.setSubpixelLocked(false)
+		e.subpixelOwn = false
+	}
+}
+
+// TextSubpixel сообщает, включено ли подпиксельное позиционирование глифов.
+func (e *Engine) TextSubpixel() bool {
+	e.frameMu.Lock()
+	defer e.frameMu.Unlock()
+	return e.canvas.fontCache.Subpixel()
+}
+
 // AvailableFonts возвращает список зарегистрированных именованных шрифтов.
 func (e *Engine) AvailableFonts() []string {
 	e.frameMu.Lock()
@@ -799,6 +897,7 @@ func (e *Engine) SetTheme(t *widget.Theme) {
 	// не идёт, поэтому и палитра, и цвета дерева меняются атомарно для рендера.
 	e.frameMu.Lock() // массовая мутация цветов дерева — не во время отрисовки
 	widget.ApplyGlobalTheme(t)
+	e.followThemeSubpixel(t.Style.TextSubpixel)
 	e.mu.RLock()
 	root := e.root
 	e.mu.RUnlock()
@@ -952,6 +1051,7 @@ func (e *Engine) Stop() {
 	widget.UnregisterUINotifier(e.notifierHandle)
 	widget.UnregisterMoveSink(e.moveHandle)
 	widget.UnregisterTextMeasurer(e.measurerHandle)
+	svg.UnregisterTextRasterizer(e.svgTextHandle)
 	close(e.quit)
 	// Таймеры гасим до ожидания цикла: stopped уже выставлен, новые не заведутся.
 	e.stopTimers()
@@ -1380,7 +1480,7 @@ func (e *Engine) loop() {
 				continue
 			}
 			gen := e.invGen.Load()
-			if gen == lastGen {
+			if gen == lastGen && !e.fullFramePending() {
 				continue
 			}
 			lastGen = gen
@@ -1410,7 +1510,10 @@ func (e *Engine) loop() {
 			}
 			if e.onDemand.Load() {
 				gen := e.invGen.Load()
-				if gen == lastGen && !e.animationNeeded(interval) {
+				// Полный кадр после потери или смены размера рисуется и без
+				// изменений: иначе статичный интерфейс остался бы у
+				// потребителя неверным (fullframe.go).
+				if gen == lastGen && !e.animationNeeded(interval) && !e.fullFramePending() {
 					continue // UI не менялся — пропускаем кадр целиком
 				}
 				lastGen = gen // снимаем ДО рендера: инвалидация во время кадра не потеряется
@@ -1446,6 +1549,17 @@ func (e *Engine) renderFrame() output.Frame {
 	e.mu.RUnlock()
 
 	damageRects, damageAll := e.consumeDamage()
+	// Повреждение, задевшее размытую подложку, расширяется на неё целиком:
+	// иначе размытие посчиталось бы по куску поверх прошлого кадра
+	// (backdropdamage.go).
+	if !damageAll {
+		damageRects = canvas.expandForBackdrops(damageRects)
+	}
+	// Полный кадр (fullframe.go): рисуется всё и отдаётся всё, без диффа.
+	full := e.takeFullFrame()
+	if full {
+		damageAll = true
+	}
 	// Объединение нужно там, где область может быть только одна: клип
 	// канваса — прямоугольник, и попапы отбираются по одному прямоугольнику.
 	damage := unionRects(damageRects)
@@ -1495,7 +1609,7 @@ func (e *Engine) renderFrame() output.Frame {
 	if partial {
 		damage = damage.Intersect(image.Rect(0, 0, canvas.W, canvas.H))
 		if damage.Empty() {
-			return output.Frame{Seq: e.frameSeq.Add(1), Timestamp: time.Now()}
+			return output.Frame{Seq: e.frameSeq.Add(1), Timestamp: time.Now(), Width: canvas.W, Height: canvas.H}
 		}
 		// Сброс признаков — ДО блита фона: фон помечает тайлы, которые
 		// накрыл, и сброс после него стёр бы эту пометку. Тогда тайл, на
@@ -1569,11 +1683,16 @@ func (e *Engine) renderFrame() output.Frame {
 	// Diff: при частичной перерисовке сравниваем только тайлы,
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
-	if partial {
+	switch {
+	case full:
+		tiles = canvas.allTiles()
+	case partial:
 		tiles = canvas.diffAndSyncInRects(damageRects)
-	} else {
+	default:
 		tiles = canvas.diffAndSync()
 	}
+
+	canvas.finishBackdrops(partial, damageRects)
 
 	seq := e.frameSeq.Add(1)
 
@@ -1596,6 +1715,8 @@ func (e *Engine) renderFrame() output.Frame {
 		Tiles:     tiles,
 		Regions:   canvas.regionsFor(tiles),
 		Moves:     moves,
+		Width:     canvas.W,
+		Height:    canvas.H,
 	}
 }
 

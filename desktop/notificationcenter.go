@@ -55,60 +55,104 @@ func severityPart(sev Severity) string {
 	}
 }
 
-// notifTimeFormat — формат времени на карточке. Отдельного поля под него не
-// заводим (в отличие от ClockItem.TimeFormat): часы — самостоятельный
-// компонент с разными профилями отображения, а тут это деталь одной
-// карточки, а не то, чем управляет тема или оболочка.
-const notifTimeFormat = "15:04"
+// Формат времени на карточке — от культуры (NotificationCenter.Culture, по
+// умолчанию LocaleCulture): «15:04» по-русски, «3:04 PM» по-английски.
+// Отдельного поля под формат не заводим (в отличие от ClockItem.TimeFormat):
+// это деталь одной карточки, а не то, чем управляет тема или оболочка.
 
 // notifCloseSizeDiv — доля высоты карточки под квадрат крестика закрытия.
 // Не пиксельный размер (как и делители в tray.go), а пропорция фигуры.
 const notifCloseSizeDiv = 3
 
 // NotificationCenter — панель со списком уведомлений.
+//
+// Вид выбирает тема. Профили, у которых есть презентер компонента
+// "notificationcenter" (Windows 10), получают центр с группами по приложению,
+// действиями в карточках, быстрыми действиями и прокруткой — на всю высоту от
+// верха рабочей области до панели задач. Остальные темы (Windows 11,
+// Windows 2000, macOS) рисуют плоский список карточек, как раньше. Компонент
+// имени темы не знает: он спрашивает PresenterFor.
 type NotificationCenter struct {
 	*Flyout
 
 	ns Notifications
 
 	mu           sync.Mutex
-	unsub        func()
+	unsub        func() // подписка на уведомления; есть только пока панель открыта
+	unsubQuick   func() // подписка на быстрые действия; то же
+	quick        QuickActionModel
 	pressedClose NotificationID // 0 — ничего не нажато (FakeNotifications выдаёт ID с 1)
 	pressedClear bool
 
-	// EmptyText — подпись, когда уведомлений нет. Задаётся с осмысленным
-	// значением по умолчанию в конструкторе; можно переопределить.
+	// EmptyText — подпись, когда уведомлений нет. Пусто — стандартная
+	// подпись на текущем языке (ключ StrNotifEmpty), которая следует за
+	// widget.SetLanguage; непустое значение показывается как есть.
 	EmptyText string
+
+	// Culture — региональные правила времени на карточках; nil —
+	// LocaleCulture (из строк движка для текущего языка).
+	Culture DateCulture
+
+	// OnManage — нажата ссылка «Управление уведомлениями» (центр Windows 10).
+	// Панель к этому моменту уже закрыта: параметры открываются поверх
+	// рабочего стола, а не под центром.
+	OnManage func()
+	// OnAction — пользователь нажал кнопку, ссылку или карточку, ввёл ответ,
+	// выбрал пункт списка. Источник уведомлений, реализующий
+	// NotificationActions, получает то же событие; нужен любой один путь.
+	OnAction func(NotificationActionEvent)
+	// Clock — источник «сейчас» для подписи времени карточек (сегодня,
+	// вчера); nil — системное время.
+	Clock Clock
+	// WorkArea — область, которую центр Windows 10 занимает по высоте: от её
+	// верха до панели задач. Пусто — высота считается от экрана (Screen) и
+	// значка, открывшего панель. Оболочка с несколькими мониторами задаёт сюда
+	// рабочую область своего монитора.
+	WorkArea image.Rectangle
+
+	fs      FocusState
+	view    *richView
+	capture widget.CaptureManager // захват мыши для перетаскивания бегунка (под mu)
 }
 
 // NewNotificationCenter создаёт центр уведомлений, оформляемый темой tm и
 // читающий список из ns.
+//
+// На источник центр подписывается, когда открывается, и отписывается, когда
+// закрывается чем угодно — кнопкой, кликом мимо, Esc. Закрытая панель не будит
+// ни рендер, ни источник, а открытая после закрытия получает изменения снова.
 func NewNotificationCenter(tm *theme.Manager, ns Notifications) *NotificationCenter {
 	nc := &NotificationCenter{
-		Flyout:    NewFlyout(tm, ComponentNotifications),
-		ns:        ns,
-		EmptyText: "Новых уведомлений нет",
+		Flyout: NewFlyout(tm, ComponentNotifications),
+		ns:     ns,
 	}
-	if ns != nil {
-		nc.unsub = ns.Subscribe(nc.Invalidate)
-	}
+	nc.view = newRichView(tm, ncModeCenter, nc.viewSource())
 	nc.Content = nc.draw
 	nc.Size = nc.size
+	nc.Place = nc.place
+	nc.Plate = nc.plate
+	// Центр уведомлений выезжает справа, из-за края экрана, а не снизу.
+	nc.Slide = SlideRight
+	nc.SlideDistance = -1
+	nc.Flyout.Subscribe(nc.onOpenChanged)
 	return nc
 }
 
-// Close закрывает панель (как и полагается Flyout) и отписывается от
-// Notifications — забытая отписка удерживала бы центр уведомлений в памяти
-// у источника вечно, даже после того как панель убрали со сцены.
+// EmptyLabel — подпись пустого центра: EmptyText, если задан, иначе
+// стандартная на текущем языке.
+func (nc *NotificationCenter) EmptyLabel() string {
+	if nc.EmptyText != "" {
+		return nc.EmptyText
+	}
+	return tr(StrNotifEmpty)
+}
+
+// Close закрывает панель. Отписка от источника уходит вместе с закрытием (см.
+// onOpenChanged), а не только отсюда: панель закрывают и со стороны — клик
+// мимо, Esc, другая панель, — и забытая подписка удерживала бы центр у
+// источника вечно.
 func (nc *NotificationCenter) Close() {
 	nc.Flyout.Close()
-	nc.mu.Lock()
-	unsub := nc.unsub
-	nc.unsub = nil
-	nc.mu.Unlock()
-	if unsub != nil {
-		unsub()
-	}
 }
 
 func (nc *NotificationCenter) list() []Notification {
@@ -159,6 +203,9 @@ func (nc *NotificationCenter) contentRect() image.Rectangle {
 // кнопка "Очистить все" (прятать её при одном уведомлении незачем — нечего
 // очищать оптом).
 func (nc *NotificationCenter) size() image.Point {
+	if p := nc.presenter(); p != nil {
+		return p.Measure(nc, image.Point{})
+	}
 	width := nc.metric(KeyNotificationsWidth)
 	cardH := nc.metric(KeyNotificationsCardHeight)
 	gap := nc.metric(KeyNotificationsGap)
@@ -222,9 +269,13 @@ func (nc *NotificationCenter) draw(ctx widget.DrawContext, r image.Rectangle) {
 	if r.Empty() {
 		return
 	}
+	if p := nc.presenter(); p != nil {
+		p.Draw(ctx, nc)
+		return
+	}
 	list := nc.list()
 	if len(list) == 0 {
-		DrawTextCentered(ctx, r, nc.EmptyText, nc.themeStyle(notifPartEmpty, theme.StateNormal))
+		DrawTextCentered(ctx, r, nc.EmptyLabel(), nc.themeStyle(notifPartEmpty, theme.StateNormal))
 		return
 	}
 
@@ -238,7 +289,7 @@ func (nc *NotificationCenter) draw(ctx widget.DrawContext, r image.Rectangle) {
 	if !layout.clearAll.Empty() {
 		style := nc.themeStyle(notifPartClear, theme.StateNormal)
 		PaintStyle(ctx, layout.clearAll, style)
-		DrawTextCentered(ctx, layout.clearAll, "Очистить все", style)
+		DrawTextCentered(ctx, layout.clearAll, tr(StrNotifClearAll), style)
 	}
 }
 
@@ -253,7 +304,7 @@ func (nc *NotificationCenter) drawCard(ctx widget.DrawContext, card notifCardLay
 
 	size := fontSizeOf(style)
 	pad := int(style.PadX)
-	timeStr := card.n.Time.Format(notifTimeFormat)
+	timeStr := card.n.Time.Format(cultureOrDefault(nc.Culture).TimeFormat())
 	timeW := MeasureText(ctx, timeStr, style)
 	timeX := top.Max.X - timeW - pad
 	timeY := top.Min.Y + (top.Dy()-lineHeight(size))/2
@@ -299,6 +350,9 @@ func drawCross(ctx widget.DrawContext, r image.Rectangle, col color.RGBA) {
 func (nc *NotificationCenter) OnMouseButton(e widget.MouseEvent) bool {
 	if e.Button != widget.MouseLeft || !nc.IsOpen() {
 		return false
+	}
+	if nc.presenter() != nil {
+		return nc.richMouseButton(e)
 	}
 	outer := nc.rect()
 	pt := image.Pt(e.X, e.Y)
