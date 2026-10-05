@@ -32,6 +32,19 @@ type Profile struct {
 
 	Styles map[StyleKey]StyleDelta `json:"-"`
 
+	// Conditional — правила стиля, которые действуют, только пока в
+	// разрешённой теме поднят флаг (см. SetStyleWhen). Так «светлая панель
+	// задач» остаётся данными профиля, а не веткой в компоненте: флаг
+	// включает тот же набор стилей, и менеджер умеет переключать его на лету.
+	Conditional []ConditionalStyle `json:"-"`
+
+	// StyleBase — «компонент → компонент, у которого берутся стили»: запись
+	// {"notificationcenter": "notifications"} значит, что стиль
+	// notificationcenter начинается со всех правил notifications, а свои
+	// правила ложатся поверх. Позволяет завести новое имя компонента, не
+	// меняя вид существующих тем (см. SetStyleBase).
+	StyleBase map[string]string `json:"-"`
+
 	// Presenters — имена презентеров, которыми профиль подменяет отрисовку
 	// компонента целиком: macOS рисует область приложений не полосой
 	// кнопок, а Dock, и одной палитрой это не выражается. Значение —
@@ -61,6 +74,45 @@ func (p *Profile) SetStyle(component, part string, state State, d StyleDelta) *P
 		p.Styles = map[StyleKey]StyleDelta{}
 	}
 	p.Styles[StyleKey{Component: component, Part: part, State: state.Dominant()}] = d
+	return p
+}
+
+// ConditionalStyle — правило стиля, зависящее от флага темы.
+type ConditionalStyle struct {
+	// Flag — имя флага; правило действует, пока флаг истинен.
+	Flag  Key
+	Key   StyleKey
+	Delta StyleDelta
+}
+
+// SetStyleWhen объявляет правило, действующее только при поднятом флаге.
+//
+// Правило накладывается ПОВЕРХ обычных правил того же профиля (и всех
+// предков), поэтому достаточно перечислить то, что флаг меняет: светлая
+// панель задач переписывает подкраску и цвет текста, а геометрию, шрифты и
+// состояния берёт у обычных стилей. Флаг ставит профиль (SetFlag) либо
+// приложение на лету (Manager.SetFlag).
+func (p *Profile) SetStyleWhen(flag Key, component, part string, state State, d StyleDelta) *Profile {
+	p.Conditional = append(p.Conditional, ConditionalStyle{
+		Flag:  flag,
+		Key:   StyleKey{Component: component, Part: part, State: state.Dominant()},
+		Delta: d,
+	})
+	return p
+}
+
+// SetStyleBase делает стили компонента component продолжением стилей
+// компонента base: всё, что объявлено для base (в этом профиле и у
+// предков), действует и для component, а собственные правила component
+// перекрывают унаследованные.
+//
+// Нужно, чтобы вводить новые имена компонентов без визуальных последствий:
+// пока профиль ничего не объявил для нового имени, оно выглядит как старое.
+func (p *Profile) SetStyleBase(component, base string) *Profile {
+	if p.StyleBase == nil {
+		p.StyleBase = map[string]string{}
+	}
+	p.StyleBase[component] = base
 	return p
 }
 
@@ -97,5 +149,6 @@ func (p *Profile) SetFlag(k Key, v bool) *Profile {
 func (p *Profile) TokenCount() int {
 	return len(p.Colors) + len(p.Metrics) + len(p.Flags) +
 		len(p.Fonts) + len(p.Icons) + len(p.Anims) +
-		len(p.Styles) + len(p.Presenters)
+		len(p.Styles) + len(p.Presenters) +
+		len(p.Conditional) + len(p.StyleBase)
 }

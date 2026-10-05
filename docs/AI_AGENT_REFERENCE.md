@@ -2655,7 +2655,49 @@ eng.RegisterFallbackFont(ttfBytes)        // glyph fallback (✓✗⚠, …)
 //      var fontsFS embed.FS
 //
 err := eng.RegisterFontFS(fontsFS, "assets/fonts") // same names as on disk
+
+// 3. Or take Open Sans (Light/Regular/SemiBold/Bold/Italic/BoldItalic, ~0.8 MB)
+//    already embedded by the engine's own package -- opt-in, so programs that
+//    do not import it do not grow:
+//      import "github.com/oops1/headless-gui/v3/assets/fonts"
+err = fonts.Register(eng) // then eng.SetDefaultFont("OpenSans") if wanted
 ```
+
+**Family + weight + italic.** Every registered font is indexed by its own
+metadata (name table, `OS/2.usWeightClass`; the registration name is only a
+fallback), so a font is selectable as "family, weight, italic" besides by file
+name. Family names ignore case/spaces/hyphens ("Open Sans" == "OpenSans").
+`widget.FontFace(family, weight, italic)` builds the name for
+`DrawTextFont`/`MeasureTextFont`/`Label.FontName` (regular weight returns the
+family unchanged; the DrawContext interface did not change). Matching follows
+CSS Fonts (nearest weight; italic beats weight). An empty/unknown family means
+"default font at that weight": Open Sans default -> `OpenSans-Bold`; built-in Go
+Regular -> built-in Go Bold. In themes: `theme.FontSpec{Family, Size (may be
+fractional, 8.5), Weight (theme.WeightLight/SemiBold/...), Bold, Italic}`;
+`desktop.FontFaceName(spec)` converts it (desktop/paint.go uses it, so
+`Bold`/`Italic` are no longer dropped). `Manager.GetFont(key)` returns named
+theme fonts ("default", "caption", "title", "clock.large" in Windows 10).
+
+**Sub-pixel text (opt-in).** By default each glyph advance is rounded to a whole
+pixel (`HintingFull`; x/image has no real hinting, only that rounding), which
+makes 11 px text uneven. `eng.SetTextSubpixel(true)` keeps advances fractional
+and rasterizes each glyph for the quarter-pixel its pen falls in (4 phases in
+the glyph cache). Off by default so existing themes and `tests/golden_*` stay
+byte-identical. It changes string widths. Shaped (RTL/complex) text is unchanged.
+
+**The profile flag is read by the engine.** The Windows 10 profile sets
+`theme.FlagTextSubpixel`; `Engine.SetTheme` / `SetThemeProfile` /
+`ApplyThemeProfile` read it (through `widget.ThemeStyle.TextSubpixel`, which
+`widget.Materialize` fills and `ProfileFromTheme` writes back): a profile with
+the flag turns the mode on, a profile without it turns off ONLY what a theme
+turned on. Priority: an explicit `Engine.SetTextSubpixel(on)` of the application
+(either value) wins over any theme until `Engine.UseThemeTextSubpixel()` hands
+the choice back (the mode then follows the last applied profile at once).
+A real switch drops cached glyph layouts and bumps the text-metrics revision
+(`widget.BumpTextMetricsRev`), so widgets re-measure on the next frame. Other
+profiles do not set the flag: their frames are byte-identical.
+`Manager.SetFlag(theme.FlagTextSubpixel, true)` + `ApplyThemeProfile` switches it
+on the fly for any profile. Tests: `tests/subpixel_theme_test.go`.
 
 XAML uses the family name via `FontFamily`:
 
@@ -3242,8 +3284,97 @@ func (d *svg.Document) RasterizeCached(w, h int, current color.RGBA, tint bool) 
   `fill`/`fill-rule` (nonzero + even-odd)/`fill-opacity`/`currentColor`,
   атрибут `style`. Растеризация через `x/image/vector` (AA), кэш по
   face-независимым параметрам (размер/цвет/tint).
-- **Ограничения (честно):** нет градиентов, `clipPath`, `text`; обводка (stroke) —
-  упрощённая аппроксимация.
+- **Значки приложений Linux (Adwaita/Humanity/hicolor) рисуются:**
+  - градиенты `fill|stroke="url(#id) [fallback]"`: `linearGradient`
+    (`x1 y1 x2 y2`) и `radialGradient` (`cx cy r fx fy`), `gradientUnits`
+    (objectBoundingBox по умолчанию / userSpaceOnUse), `gradientTransform`,
+    `spreadMethod` (pad/reflect/repeat), `<stop offset stop-color stop-opacity>`
+    (атрибутом, `style`, CSS-классом; `currentColor`), стопы и атрибуты по
+    цепочке `xlink:href`/`href`. Ссылка в пустоту без запасного цвета —
+    «не рисовать» (по SVG), НЕ чёрный. Один стоп = сплошной цвет;
+    `pattern` см. ниже;
+  - `<defs>`, `<symbol>`, `<clipPath>`, `<mask>`, `<pattern>`, `<marker>`,
+    `<filter>`, `<style>` напрямую не рисуются; чужие XML-пространства
+    (inkscape:, sodipodi:) пропускаются; `display:none`/`visibility:hidden`
+    (атрибут, `style`, CSS) учитываются;
+  - `<use>` (на фигуру/группу/`<symbol>`/вложенный `<svg>`, `x y width height
+    transform`, `viewBox`+`preserveAspectRatio`), вложенный `<svg>`; защита от
+    циклов и «взрыва» (`maxUseVisits`, `maxUsePoints`);
+  - `clip-path` (clipPathUnits, clip-rule, цепочка clip-path на самом clipPath),
+    `mask` (maskUnits/maskContentUnits, область, яркость×альфа, `mask-type`);
+  - `<style>`: селекторы `tag`, `.class`, `#id`, их сочетания, `*`, списки;
+    приоритет: атрибут < таблица стилей < `style=""`;
+  - `<image href="data:image/png|jpeg|gif;base64,…">` (aspect, transform,
+    opacity, усредняющее уменьшение);
+  - `filter`: `feGaussianBlur` и `feColorMatrix`; остальные примитивы
+    игнорируются; все именованные цвета CSS.
+- **API-дополнения** (`Shape` и новые типы, только добавления): `Shape.FillGradient/
+  StrokeGradient *Gradient` (`Fill` для градиента = `Gradient.MeanColor()`),
+  `Shape.Clips []*ClipPath`, `Shape.Masks []*Mask`, `Shape.BlurX/BlurY`,
+  `Shape.ColorMatrix`, `Shape.Image *Image`; `Paint.Ref/Fallback`, `PaintURL`.
+  Геометрия в `Shape` по-прежнему в координатах viewBox.
+- **`pattern`:** `fill|stroke="url(#id)"` — `patternUnits` (objectBoundingBox
+  по умолчанию), `patternContentUnits`, `viewBox`+`preserveAspectRatio`,
+  `patternTransform`, `x y width height`, цепочка `xlink:href` (атрибуты и
+  содержимое). Плитка растрируется под масштаб вывода и повторяется с
+  билинейной выборкой (`Shape.FillPattern/StrokePattern *Pattern`, содержимое —
+  `Pattern.Shapes`). Узор без размера/габаритов — «ничего»; ссылка в пустоту —
+  запасной цвет. Вложенные узоры и градиенты в узоре работают, цикл отсекается.
+- **`<text>` — мост к шрифтам.** Пакет `svg` шрифтов не знает: контуры букв
+  даёт интерфейс `svg.TextRasterizer` (`Outline(FontSpec, size, text)` →
+  контуры с началом на базовой линии, Y вниз, и ширина). Регистрация:
+  `svg.RegisterTextRasterizer(tr) uint64` / `UnregisterTextRasterizer(h)`
+  (отвечает последний; `svg.ParseWith(data, svg.ParseOptions{Text: tr})` — для
+  одного разбора). Движок регистрирует свою реализацию в `engine.New` и
+  снимает в `Stop` (`engine/svgtext.go`: контуры из sfnt-шрифтов канваса,
+  семейство/вес/наклон — по таблице семейств движка, запасные шрифты для
+  отсутствующих рун). Раскладка идёт при РАЗБОРЕ: документ, разобранный до
+  регистрации, останется без текста. Поддержано: `x y dx dy` (в том числе
+  списки по буквам), `font-family/size/weight/style` (px/pt/em/%/ключевые
+  слова), `text-anchor`, `<tspan>`/`<a>`, `xml:space`, `fill/stroke`/градиенты/
+  `clip-path`/`mask` (текст — обычные фигуры; маска из текста вырезает буквы).
+  Без моста текст не рисуется. Не поддержано: `letter-spacing`, `textPath`,
+  `dominant-baseline`, `textLength`, `text-decoration`, `rotate`.
+- **Точный режим `svg.Options`** (по умолчанию нулевой — прежний результат
+  побитно, хеш-тест `TestFlatRasterUnchanged`). Выбирается при РАСТЕРИЗАЦИИ, три
+  уровня: `svg.SetDefaultOptions(o)` (процесс) < `doc.SetOptions(o)` /
+  `doc.UseDefaultOptions()` (документ) < `doc.RasterizeWith/RasterizeCachedWith`,
+  `svg.RenderWith(doc, w, h, tint, o)` (вызов). Опции входят в ключ кэша.
+  `svg.PreciseOptions` = всё сразу. Поля:
+  - `StrokeJoins` — настоящая обводка (`stroke.go`): `stroke-linejoin`
+    (miter + `stroke-miterlimit`, round, bevel), `stroke-linecap` (butt, round,
+    square), `stroke-dasharray`/`-dashoffset` (нечётный список удваивается,
+    фаза по спецификации — окружность стартует справа), точки нулевой длины
+    при round/square, толщина ровно как задана (без «минимальных» 0,75 px).
+    Контур обводки — единый многоугольник на подконтур (левая сторона вперёд,
+    правая назад, у замкнутого — два встречных кольца), все одного направления
+    обхода: `vector.Rasterizer` считает покрытие знаковой суммой, и встречные
+    многоугольники вычли бы друг друга — НЕ нормализовать направление по знаку
+    площади. Атрибуты разбираются всегда (`Shape.StrokeJoin/StrokeCap/
+    MiterLimit/Dash/DashOffset`; поиск их в документе включается, только если
+    они где-то упомянуты — плоские значки разбираются как раньше), но без
+    флага не действуют;
+  - `GroupLayers` — `opacity` группы слоем. Опасное место: opacity по-прежнему
+    УМНОЖЕНА в `Shape.FillOpacity/StrokeOpacity` (для режима без флага), слой
+    её снимает делением (`rctx.div`), поэтому в `Shape.Groups` лежит ровно по
+    одной `Group{Opacity}` на каждый элемент с opacity<1 (контейнер или фигура
+    с заливкой И обводкой).
+  - Групповые `mask` и `filter` (блюр, `feColorMatrix`) контейнеров (g, svg, use,
+    symbol, text) рисуются слоем ВСЕГДА (`layer.go`: `Group.Masks/BlurX/BlurY/
+    ColorMatrix`, `Shape.Groups`, слой накладывается при смене цепочки групп —
+    фигуры группы лежат в `Document.Shapes` подряд; предел `maxLayerDepth`=16).
+    В `Shape.Masks/BlurX/ColorMatrix` теперь только эффекты самой листовой
+    фигуры. `clip-path` по-прежнему действует на каждую фигуру (результат тот
+    же). Флаг на mask/filter не влияет, плоские значки их не содержат.
+- **Ограничения (честно):** нет внешних картинок, `marker`, области фильтра
+  (`x/y/width/height` filter не обрезают размытие), `letter-spacing`, `textPath`;
+  без `StrokeJoins` обводка — упрощённая аппроксимация (на скруглённых кривых
+  виден «гребень»); без `GroupLayers` opacity группы действует на каждую фигуру
+  отдельно (разница видна лишь при перекрытии полупрозрачных потомков).
+  Проверка глазами: `SVG_SHEET_DIR=… SVG_SHEET_OUT=… [SVG_SHEET_REF=…]
+  [SVG_SHEET_OPTS=stroke|layers|all] go test ./widget/svg -run VisualSheet -v`
+  (эталоны — `rsvg-convert`); для текста (нужен движок) — то же в
+  `go test ./engine -run SVGTextVisualSheet`.
 - **Headless/нативно:** одинаково — чистый CPU-растеризатор, окно ОС не нужно
   (см. `tests/svgicon_test.go`).
 
@@ -3731,6 +3862,10 @@ Beyond colors and sizes, these decide what the taskbar *is*:
 | `taskbutton.label` | flag | show window titles on task buttons (Windows 10/11 hide them) |
 | `taskbutton.underline` | metric | thickness of the mark under an open window |
 | `taskbutton.underline.len` | metric | mark length as a fraction of button width: 1 = full bar (Windows 10), 0.4 = short tick (Windows 11, doubled for the active window) |
+| `taskbutton.group` | flag | several windows of one app share ONE button (Windows 10); default off = a button per window |
+| `taskbutton.muted` | flag | minimised windows and pinned-not-running apps are drawn `StateDisabled` (default true; Windows 10 sets false so hover highlights them) |
+| `taskbutton.underline.idle`, `.idle.len` | metric | thickness / length (fraction of the button) of the mark under a running but NOT active window; length 0 = old rule |
+| `taskbutton.stack`, `.stack.width`, `.stack.gap`, `.stack.offset` | metric | "stack" edges drawn right of the icon of a multi-window button: count (0 = none), thickness, gap, distance from the icon |
 | `clock.date` | flag | show the date under the time (classic clocks never do) |
 | `tray.gap`, `tray.chevron.width`, `tray.overflow.columns` | metrics | tray row and its overflow grid |
 
@@ -3770,7 +3905,7 @@ startBtn.OnClick = func() { menu.Toggle(startBtn.Bounds()) }
 root.AddChild(menu)                       // must be in the tree, or no overlay
 ```
 
-`Flyout` fields: `Component`, `Anchor`, `Edge` (EdgeBottom/EdgeTop), `Align`
+`Flyout` fields: `Component`, `Anchor`, `Edge` (EdgeBottom/EdgeTop/EdgeLeft/EdgeRight), `Align`
 (AlignStart/Center/End), `Margin`, `Screen`, `Content`, `Size`, `OnOpen`,
 `OnClose`. Methods: `Open(anchor)`, `Close()`, `Toggle(anchor)`, `IsOpen()`.
 A flyout closes on a click outside and on Esc; a click **inside** is not
@@ -4041,6 +4176,643 @@ Why a consumer wants this beyond vblank pacing: `Engine.Start()` runs the
 render loop on its own goroutine, so a consumer that mutates the widget tree
 from another goroutine races the render walk. External pacing lets it do both
 on one goroutine and remove the race by construction.
+
+### A lagging channel consumer, and frames of another size — v3.31
+
+Frames are differences against the previous frame. The channel used to drop a
+frame silently on overflow while the engine's `front` already matched it, so
+every following frame was a difference against a picture the consumer never
+got. A window lagging during a resize kept the old layout forever (WinLine
+calculator: 1920-wide keys in an 851-wide window after maximize/restore).
+
+Now (`engine/fullframe.go`):
+
+- a drop sets `lostFrame`; the next frame rendered while the channel has room
+  is FULL — all tiles via `Canvas.allTiles()`, no diff — and the ticker renders
+  it even when nothing changed (`fullFramePending`);
+- `SetResolution` / `SetScale` drain the channel (frames of the old size are
+  useless) and mark the next frame full;
+- `output.Frame.Width`, `Height` — canvas size (physical px) the frame was
+  taken for; zero = unknown (not produced by the engine);
+- the window's `applyFrame` skips a frame whose size differs from the canvas
+  its buffer was made for, under the same lock that `resizeTo` uses to swap
+  the buffer; in `FitScale` it compares with the canvas, not the letterboxed
+  buffer;
+- a consumer that never reads the channel (sink-only) pays nothing: its
+  channel never has room, so no full frames are rendered.
+
+Tests: `engine/fullframe_test.go` — a consumer 100 ms slower than the engine,
+resizes 851→1920→851 and scale 1→2→1 with mouse activity; after settling its
+buffer equals `front` byte for byte. Without the fix 60–270 KB differ.
+
+### Pointer leaving the window — v3.31
+
+`wl_pointer.leave` (main surface or popup) and X11 `LeaveNotify` now deliver a
+move to (-1,-1), as Win32 already did on `WM_NCMOUSELEAVE`: hover and tooltips
+clear the same way as when the mouse crosses the edge. X11 adds `LeaveWindow`
+to the event mask; `NotifyInferior` and `NotifyUngrab` are ignored
+(`window/pointerleave.go`).
+
+### Rounded window corners on Wayland — v3.31
+
+A top-level with `CornerRadius > 0` gets an ARGB8888 shm buffer; after the
+usual conversion the four corners are masked (`window/cornermask.go`): outside
+the arc (0,0,0,0), on it a premultiplied partial alpha. `set_opaque_region`
+covers the window minus the corners. A maximized or fullscreen window is not
+rounded and fully opaque; windows without a radius stay XRGB. X11 and Win32 are
+unchanged (X11 would need an ARGB visual and a compositing manager).
+
+### Accent, light taskbar and Windows 10 acrylic — v3.31
+
+(The `taskbar.light` flag also switches the `menu` style, see "App buttons".)
+
+**Accent is a live token** (`theme/accent.go`). `Manager.SetAccent(c)`
+re-resolves the active theme with another `accent` and notifies subscribers
+exactly as `SetTheme` does (`Taskbar` repaints without being recreated); the
+choice survives `SetTheme` and `RegisterTheme`. `ResetAccent()` returns the
+profile's accent; `Accent()` reads the effective one;
+`Engine.SetAccent(m, c)` / `Engine.ApplyThemeProfile(m)` (`engine/themeapply.go`)
+also re-materialise the legacy `widget.Theme`. Setting the same colour again
+does nothing.
+
+- Derived tokens are computed from the base: `accent.hover` (+12 % white),
+  `accent.pressed` (+15 % black), `accent.dark` (+25 % black), `accent.light`
+  (+30 % white), `accent.text` (white, black when the accent is light).
+  `theme.DeriveAccent(c) AccentSet` exposes the arithmetic. A value the profile
+  declares itself wins until `SetAccent`; after it everything is recomputed.
+- `selection` defaults to the accent when a profile does not declare it.
+- Styles follow the token **by reference**: `StyleDelta.FillFrom / TextFrom /
+  BorderFrom Key` (JSON: `"fill": "@accent.hover"`). Resolved against the final
+  merged tokens of the chain, so a child profile may swap the token without
+  rewriting styles. A literal in a LATER delta (a child's) overrides an earlier
+  reference; within one delta the reference wins; a missing token leaves the
+  colour alone. Windows 10/11/macOS profiles use references for every accent
+  fill, border and text-on-accent; Windows 2000 deliberately does not.
+
+**Flags override live too.** `Manager.SetFlag(k, v)` / `ResetFlag(k)` re-resolve
+like `SetAccent`. A flag is useful because of conditional styles:
+`Profile.SetStyleWhen(flag, component, part, state, delta)` is applied on top of
+the profile's ordinary rules only while the flag is true
+(`Profile.Conditional`, `ConditionalStyle`).
+
+**Component aliases.** `Profile.SetStyleBase("notificationcenter",
+"notifications")` makes a new component name start from every rule of the old
+one (own rules win), so new names add no visual change to existing themes.
+All base profiles declare `notificationcenter → notifications`; the flat
+`desktop.NotificationCenter` still uses `"notifications"`.
+
+**Acrylic.** `BackdropSpec` gained `Noise float64` (grain amplitude as a share
+of full scale, 0.02 = ±2 %) and `Fallback color.RGBA` (opaque colour used when
+the draw context cannot blur). `desktop.PaintStyle`: blur → tint → noise
+(`widget.NoiseDrawer`, implemented by `Canvas.DrawNoise(r, amount)` — a
+deterministic per-pixel hash, clip-aware, keeps the premultiplied invariant);
+no `BackdropDrawer` → `Fallback` if set, else the old translucent tint. JSON:
+`"noise"`, `"fallback"` in `backdrop`.
+
+**Windows 10 profile.** The taskbar is acrylic (`win10Acrylic`: radius 20, tint
+`RGBA(31,31,31,210)`, noise 0.02, fallback `RGB(31,31,31)` — the previous
+solid colour). Hover/pressed/active on the bar are white films instead of grey
+plates (same shade on a solid bar). Flag `theme.KeyTaskbarLight`
+(`"taskbar.light"`, default false = as before) switches the bar, its items and
+the new shell panels to a light palette via conditional styles. Windows 11,
+Windows 2000 and macOS render byte-identical to v3.31 (checked on rendered
+frames of all eight profiles).
+
+New style PARTS for the Windows 10 shell (`theme/profiles_win10_shell.go`;
+they do not exist for other themes, existing flat panels are untouched):
+
+| component | parts |
+| --- | --- |
+| `startmenu` | `panel`, `sidebar` (acrylic); `sidebar.item`, `row`, `letter` (Normal/Hover/Pressed/Active/Focused/Disabled); `tile` (accent fill, hover frame); `tile.group` |
+| `notificationcenter` | `panel` (acrylic), `header`, `link` (accent text), `group`, `card`, `action`, `quick.tile` (off), `quick.tile.on` (accent) |
+
+Parts already drop the inherited border/shadow/elevation (`flat`). A presenter
+asks `GetStyle("startmenu", "row", state)` and never branches on a theme name.
+
+Tests: `theme/accent_test.go`, `desktop/accent_test.go`, `engine/noise_test.go`.
+`TestGolden_Windows10Acrylic` writes dark and light bar PNGs when `GOLDEN_OUT`
+is set.
+
+### Physical-size SVG, tray icons from the theme set, thin scrollbar — v3.31
+
+- `widget/physical.go`: `ContextScale(ctx)` (1 for contexts without `Scale()`),
+  `PhysicalRect(ctx, r)` (edge-rounded like `Canvas.sRect`), `DrawSVG(ctx, doc,
+  rect, current, tint)` rasterises at physical size and hands the engine an image
+  of exactly the receiver's physical size. `Canvas.DrawImageScaled` blits an
+  `*image.RGBA` of that size as is (no resample, no cache copy);
+  `engine/popupcontext.go` forwards `Scale()` so popups see the scale too.
+  `SVGIcon.Draw` uses it when the scale is not 1 (scale 1 path unchanged).
+- `desktop/trayglyph.go`: network/volume/power ask `tm.GetIcon(key, physicalSide)`
+  with keys from most specific to general (`tray.network.wifi.N`, `tray.volume.N`,
+  `tray.power.ac.N`, …, `*.icon`); no key declared → the old shapes, pixel for
+  pixel. Flag `tray.icon.tint` recolours by the alpha channel.
+  `TrayIcon` (image / SVG / `func(size) image.Image`), `NotificationButton`
+  (counter, `99+`), `ShowDesktopButton` (`tray.showdesktop.width`).
+  `theme/profiles_tray.go` copies the `tray.volume` styles to the new components in
+  every built-in profile (otherwise the default surface fill shows through).
+  `AppInfo.IconAt(size)` + `IconFor`; `appicon.go:drawAppIcon` feeds it the
+  physical side. Strings (`ShowDesktop`, `NotificationCenter`,
+  `NoNewNotifications`, `NewNotificationsCount`) are `widget.Tr` keys registered
+  for EN/RU in `traystrings.go`.
+- `widget/scrollbar_thin.go`: `ScrollbarThin` is an overlay (`reserve()==0`),
+  hidden at rest (`alpha`), shown by `thinPoke()` on mouse move / any scroll,
+  hidden by a single pause timer that re-arms itself for the remainder instead of
+  being recreated per event. `animateQuiet` is `AnimateOwned` without the full
+  `notifyUIChanged` (that wakes `Engine.Invalidate` = whole frame); steps repaint
+  only the bar column (`stripW`/`horiz` atomics so a tick never takes `sv.mu`).
+  Lock order `sv.mu → thin.mu`, never the reverse. A hidden bar is not
+  `interactive()` and neither captures nor hit-tests the mouse. Theme fields
+  `ThemeStyle.Scrollbar*` ⇄ profile tokens `scrollbar.*` (declared only when set,
+  so presets round-trip unchanged); instance setters win over the theme.
+
+### Windows key — `widget.KeyWin`
+
+`KeyWin` (0x5B, VK_LWIN) is the Windows/Super key; the right one (VK_RWIN, 0x5C)
+is folded into the same code. Win32 passes both VKs through `vkToKeyCode`;
+X11/Wayland map the physical keycodes 133/134 (`x11VKTable`), and fall back to
+the keysym (`Super_L`/`Super_R`: `keysymToVK` for the X11 keymap,
+`xkbKeymap.vkFor` for the Wayland keymap) when Super was moved to another key.
+The key is also a modifier: `surface.keyEventRepeat` keeps `modMeta`, so events
+while Win is held carry `ModMeta`, the `KeyWin` press itself too, and Win in the
+middle of an Alt tap cancels the menu gesture. XAML `Key="Win"` (also `LWin`,
+`RWin`, `Super`) parses to `KeyWin`. Wayland does not auto-repeat it.
+
+### Desktop localization — `desktop/locale.go`
+
+Strings of `desktop/` are `widget.Tr` keys `desktop.*` (`StrStart`,
+`StrStartPinned`, `StrStartAllApps`, `StrNotifEmpty`, `StrNotifClearAll`,
+tray tooltips `StrNet*`, `StrSound*`, `StrPower*`) with RU and EN tables
+registered in `init`. A consumer overrides a key with `RegisterStrings`, adds a
+language, or points the keys at its own table with `widget.AliasStrings`.
+Components read the string at draw time, so `widget.SetLanguage` (which redraws
+the whole frame) changes the text without re-creating anything; `Taskbar`
+listens to the language and re-lays its items out (clock width depends on the
+format); tray tooltips (`trayTooltip.build`) rebuild themselves on a language
+change, a tooltip set by `SetToolTip` is left alone.
+
+Until the application calls `widget.SetLanguage` (`widget.LanguageExplicit()` is
+false) the desktop stays Russian as before: `desktop.DefaultLanguage = "RU"`.
+
+Clock, calendar and notification times take their rules from a
+`desktop.DateCulture` (`ClockItem.Culture`, `CalendarFlyout.Culture`,
+`NotificationCenter.Culture`; nil = `LocaleCulture`): month names (nominative
+and genitive), short weekday names, first day of the week, time/date layouts and
+the long date (`{d} {M} {y}` template). `LocaleCulture` reads the same
+`date.month.N`, `date.wd.N`, `date.firstDay` keys as `widget.DatePicker`, plus
+`desktop.clock.timeFormat`, `desktop.clock.dateFormat`, `desktop.cal.longDate`,
+`desktop.cal.monthGen.N`. A consumer embeds `LocaleCulture` and overrides what
+differs (ru-KZ). `ClockItem.TimeFormat/DateFormat` still win over the culture.
+`NotificationCenter.EmptyText` is now empty by default (use `EmptyLabel()`).
+
+### Keyboard focus on the taskbar — `desktop/focus*.go`
+
+Every taskbar item is a `widget.Focusable`: `StartButton`, `ApplicationArea`,
+`RunningApplications`, `NetworkItem`, `VolumeItem`, `PowerItem`, `TrayLabel`,
+`ClockItem` (the last two only when `OnClick` is set), and a hidden child
+`trayChevronButton` for the overflow chevron. A custom item embeds
+`desktop.FocusState` and writes `SetFocused`, `TabIndex` (return
+`-1` when it has no bounds — `CollectFocusables` ignores visibility),
+`OnKeyEvent` (call `HandleKey` or, for a many-cell item, `HandleCellKey`) and
+optionally `FocusRing`. The search box of the Windows 10 start slot only needs
+to be a focusable `Item` in `SlotStart`; nothing else is required for it to take
+part in Tab and the arrow keys.
+
+- Tab order is the slot order: `Taskbar.Children()` returns items by slot
+  (start, apps, tray), not by insertion.
+- Arrows/Home/End move inside one slot through `FocusNavigator`
+  (`Taskbar.MoveFocus`, wired by `AddItem` via `FocusNavigable`) and do not wrap;
+  in the application area they move the selected cell (`FocusState.Cell`).
+- Enter and Space activate (not on `Repeat`, not with Ctrl/Alt/Meta).
+- The ring is painted by `Taskbar.drawFocus` over the children
+  (`PaintFocusRing`): an outer outline in the text colour of the item's style (or
+  the `focus.ring` colour token, `focus.ring.width` metric, default 1) and a
+  1 px inner outline of the contrasting black/white, so it shows on any
+  background in light and dark themes. It is shown only for keyboard focus:
+  `FocusState.NotePointer` (called from `OnMouseButton`) hides it after a click.
+  `StateFocused` is also passed to `StateOf` by the start button and the app
+  cells, so a profile can style it.
+
+### App buttons — window groups, command menu, tooltip, Start "active" (`desktop/appgroup.go`, `previewlist.go`)
+
+With `taskbutton.group` (Windows 10 profile) `ApplicationArea` shows all windows
+of one app (`AppID != ""`) as ONE cell; `WindowsAt(i)` lists them, the cell is
+active if any window is, minimised only if all are. The grouping follows a theme
+switch by itself (`syncGrouping` in `layout`/`PreferredSize`). The cell key for
+colour transitions is the app, not the window.
+
+- **Click on a stack.** `WindowPreview.Track(area)` also registers
+  `GroupClickArea.SetGroupListener`; a click opens the window LIST at once
+  (hover opens it after `preview.delay.open`). The list is the same `Flyout`:
+  icon, title, thumbnail and a hover `×` (closes the window) per window; more
+  windows than fit in a row (max 7, never wider than the room next to the bar:
+  the whole `Screen` at a bottom/top bar, the part of it beyond the button at a
+  side bar) become a column of titles without thumbnails. It follows the window
+  model while open (`ListedWindows()`). Without a listener (no preview) a click
+  and Enter/Space cycle the windows. Optional interfaces:
+  `GroupHoverArea.WindowsAt`, `GroupClickArea.SetGroupListener`,
+  `GroupKeyArea.SetGroupKeyListener` — an area that does not know them keeps
+  working as a one-window area.
+- **Keyboard control of the list.** Enter/Space on a stack opens the list through
+  `GroupKeyArea` and the list TAKES keyboard focus (`internal/focusreq`: the
+  widget asks the engine for focus during the key delivery, and gives it back
+  when it closes, whatever closed it). `WindowPreview` is `Focusable` with
+  `TabIndex() = -1`. Left/Up and Right/Down move the selection (wrapping),
+  Home/End jump to the ends, Enter/Space raise the window, Delete closes it (the
+  selection stays at the closed window's place; one window left closes the list),
+  Esc closes the list (the engine's `EscapeDismisser` path) and focus returns to
+  the stack button. The selected window is outlined with the two-colour focus ring
+  (`PaintFocusRing`, 2 px outside the item); `ListSelection() (idx, keyboard)`
+  tells the selection and whether the ring is on. The mouse over the list takes
+  the selection over (ring off); the mouse leaving does not close a list that holds
+  the keyboard; losing focus (Tab) closes it by a timer (NOT directly: the engine
+  calls `SetFocused` under its focus lock). A list opened by mouse never takes
+  focus. Tests: `desktop/previewkeys_test.go`.
+- **Right click / Menu key / Shift+F10** → `PopupMenu` from `AppCommands`
+  (`area.SetCommands(...)`, `AppCommandsFunc`); the consumer gets an `AppButton`
+  (`App`, `Title`, `Pinned`, `Windows`) and returns `[]AppCommand` (title, icon,
+  disabled, separator, `Run`). Default set: `DefaultAppCommands(cat, wm, btn)` —
+  launch, pin/unpin, close window / close all; captions are `widget.Tr` keys
+  `desktop.app.pin|unpin|closeWindow|closeAll` (RU+EN). The menu opens at the
+  button edge facing the desktop (`taskbar.top` flips it; at a side bar it opens
+  beside the button: right of it for `EdgeLeft`, left for `EdgeRight`) and takes
+  colours from the theme's `menu` styles (`themeMenu`: fill, text, border,
+  hover, disabled text — a style the theme does not declare keeps the widget
+  default). The Windows 10 profile declares `menu` for the dark panel and, under
+  the `taskbar.light` flag, a light one (`F2F2F2`, black text, `CCCCCC` border,
+  hover `DEDEDE`), so the command menu and the right-click menu of the Start menu
+  follow the panel mode. The mode may change while the menu is open: the area
+  re-themes the menu on every overlay draw, nothing is recreated. Tests:
+  `desktop/appmenu_light_test.go`. The area draws and routes the menu itself
+  (`HasOverlay/DrawOverlay/OverlayBounds/Dismiss/DismissOnEscape`); the menu is
+  NOT a child (a `PopupMenu` is `Focusable` and would become a Tab stop).
+- **Tooltip.** `ApplicationArea.ToolTipAt` returns the app title (with the window
+  count for a stack, key `desktop.app.windows`) only where no preview will show:
+  pinned-not-running buttons, or when nothing tracks the area / the theme has
+  `preview` off / the model has no `WindowPreviews`. Tray icons already carry
+  tooltips (`NetworkItem`, `VolumeItem`, `PowerItem`, `TrayIcon.SetToolTip`).
+- **Marks.** `drawTaskMark`: active = `taskbutton.underline` × `.underline.len`
+  (full width in Windows 10, accent via `BorderFrom`); running non-active =
+  `.underline.idle` × `.underline.idle.len` in the TEXT colour; pinned-not-running
+  = none. Hover is a rectangular film (`Corner 0`) also on minimised / pinned
+  buttons (`taskbutton.muted=false`). Other themes keep `DrawUnderline` as is.
+  In a column of a side bar the same marks stand on the cell side facing the
+  screen edge (left bar: left side, right bar: right side), length measured along
+  the cell height (`taskmark_edge.go`: `drawTaskMarkAt`, `markEdgeOf`).
+- **Start button.** `StartButton.SetActive`/`Active` + `Track(OpenStateSource)` /
+  `TrackManager(mgr, name)`: lit (`StateActive`) between the open and close
+  events of any `*Flyout` (or manager panel), whoever closes it. Windows 10 has
+  the film, Windows 2000 a sunken bevel, Windows 11 the pressed film.
+- Windows 10 geometry: button 48 (`taskbutton.icon.size` 24 + `PadX` 12 each side),
+  `taskbutton.gap` 0. `ClockItem.GetToolTip` defaults to the long date.
+- Windows 10 preview panel styles (`preview`, `preview.header`, `preview.thumb`)
+  are acrylic in dark and light (`theme/profiles_win10_taskbutton.go`).
+
+Tests: `desktop/appbuttons_test.go`; `TestGolden_Windows10AppButtons` writes PNGs
+with `GOLDEN_OUT`.
+
+### Edges and monitors — `desktop/taskbar_vertical.go`, `screens.go`, `screenbars.go`, `flyoutedge.go`
+
+`desktop.Edge` gained `EdgeLeft` and `EdgeRight` (`Edge.Vertical()`). The bottom
+and top layouts are untouched (rendered frames of all built-in profiles are
+byte-identical to before); the side layout is a separate code path.
+
+- **Side bar.** `Taskbar.SetEdge(e)` / `ResetEdge()` set the edge explicitly (the
+  theme only knows `taskbar.top`); `Edge()` returns the explicit one, else the
+  theme's. At a side edge the slots lie in a column: Start on top, apps in the
+  middle (squeezed proportionally), tray and clock at the bottom.
+  `Thickness()` = metric `taskbar.width` (declared by Windows 2000 and 10: 62),
+  falling back to `taskbar.height`. Auto-hide (`autohide.go`) slides along the
+  bar's own axis and the reveal band lies on the left/right edge.
+- **`VerticalItem`** (`Item` + `SetVertical(bool)`): an item that can lie in a
+  column. In a column `PreferredSize(avail)` gets `avail.X` = thickness and
+  returns X across / Y along. Implemented by `ApplicationArea` (icon-only cells
+  top to bottom, icon centred across the bar, no dock presenter),
+  `RunningApplications` (the same column of squares; before it was a row squeezed
+  into one square), `SystemTray` (icon grid, hidden icons behind the chevron at
+  the bottom) and `ClockItem` (full thickness; the date is dropped if it does not
+  fit the width). **`EdgeAware`** (`SetBarEdge(Edge)`, optional, next to
+  `VerticalItem`): the bar tells an item which screen edge it stands at when the
+  item is added and on every relayout; `ApplicationArea` and
+  `RunningApplications` use it to put the running/active mark on the edge side. An item that does not implement it gets the full
+  thickness across and the height it asks for a square avail, capped at the
+  thickness (this is how Start and tray icons lie).
+- **Flyouts at a side edge.** `Flyout.Edge = EdgeLeft/EdgeRight` opens the window
+  to the right/left of the anchor; `Align` then works vertically (`AlignStart` =
+  window top at icon top, `AlignEnd` = window bottom at icon bottom; `fitInto`
+  keeps it on screen). `SlideAuto` slides from the bar's side; the motion region
+  stops at the bar's edge so the window grows out of it. The window list of a
+  stack (`WindowPreview`, bound with `BindFlyouts`) opens beside the bar too, and
+  its row of thumbnails is limited by the room between the button and the far
+  screen edge (`listSpace`): where three thumbnails do not fit it turns into a
+  column of titles instead of being pushed under the bar. Tests:
+  `desktop/sidestack_test.go`, `sidestack_edge_test.go` (PNGs with `GOLDEN_OUT`:
+  `win10_side_list_*.png`).
+- **Monitors.** `desktop.Monitor{ID, Name, Bounds, WorkArea, Primary}`,
+  `Monitor.Work()`, consumer interface `Screens{Monitors(); Subscribe(func()) func()}`,
+  `FakeScreens`. `Taskbar.DockTo(m)` puts the bar at its edge of monitor `m` and
+  returns the rectangle; `Monitor()`, `WorkArea()` (monitor work area minus the
+  bar). `Taskbar.BindFlyouts(panels...)` hands `Edge` and the monitor (`Screen` =
+  bounds, work area without the bar) to the panels and keeps them in sync on every
+  edge/theme/monitor change; `UnbindFlyouts`, `BoundFlyouts`. A theme switch that
+  changes edge or thickness re-docks the bar by itself.
+- **`Flyout.SetMonitor(m)` / `Monitor()`** — screen of the panel.
+  **`Flyout.PinToEdge(e)` / `Unpin()` / `Pinned()`** — press the window against an
+  edge of the monitor's work area instead of the anchor (the notification center
+  at the right edge of its monitor: `center.PinToEdge(desktop.EdgeRight)`; `Align`
+  chooses top/bottom/middle along the edge, `Margin` is the gap from the edge,
+  `SlideAuto` slides from that edge). The anchor is still used for `Toggle` /
+  `DismissAt`.
+- **`ScreenBars`** (a widget; put it in the root instead of the bars and the
+  `FlyoutManager`): `NewScreenBars(screens, func(Monitor) *MonitorShell)` asks the
+  consumer for `MonitorShell{Bar, Flyouts map[string]FlyoutPanel}` of every new
+  monitor, docks and binds it, registers the flyouts in ONE shared
+  `FlyoutManager` (names `"<monitorID>/<name>"`, so one panel is open on the
+  whole desktop), re-docks on `Sync()` and on `Screens` changes (`Post` field —
+  `Engine.Post` — marshals the change to the UI thread), removes shells of gone
+  monitors (`OnShellRemoved`, then flyouts closed and `Bar.Close()`). `Bars()`,
+  `Shell(id)`, `BarAt(pt)`, `Flyout(id, name)`, `Toggle(id, name, anchor)`,
+  `Flyouts()`, `Close()`.
+
+Tests: `desktop/edges_test.go`, `edges_items_test.go`, `flyoutedge_test.go`;
+`GOLDEN_OUT=<dir> go test ./desktop -run "TestEdges_Shots|TestScreens"` writes the
+PNGs of every edge and of two monitors.
+
+### Default font size follows the theme
+
+`widget.DefaultFontSizePt` stays a constant (10 pt), but widgets that have no
+size of their own (window titles, tabs, menu items, labels, `Canvas.DrawText`)
+now read `widget.DefaultFontSize()`. It is 10 pt until the app calls
+`widget.SetDefaultFontSize(pt)` (0 = back to 10; an explicit value beats the
+theme) or a theme asks for it: a profile with the flag
+`theme.FlagFontDefaultGlobal` (`"font.default.global"`) makes `Fonts["default"].Size`
+the default (`ThemeStyle.DefaultFontSize`, applied by `ApplyGlobalTheme`, i.e. by
+`Engine.SetTheme`, `SetThemeProfile` and `ApplyThemeProfile`); switching to a
+profile without the flag restores 10 pt. Only the Windows 10 profiles set the flag
+(8.5 pt); Windows 11/2000/macOS declare 9 pt in `Fonts["default"]` but do not ask,
+so applying them changes nothing. Any profile can opt in on the fly:
+`m.SetFlag(theme.FlagFontDefaultGlobal, true)` + `Engine.ApplyThemeProfile(m)`.
+The size changes widths and line heights: set it before building the UI (a built
+UI is repainted, but sizes already computed are kept until the next layout).
+`desktop/` falls back to it as well when a style has no font size.
+Tests: `tests/defaultfont_theme_test.go`.
+
+### Notification center of Windows 10 — `desktop/notifyview*.go`, `notificationcenter_win10.go`
+
+`desktop.NotificationCenter` stays one component; a profile picks its look through
+a presenter (`Profile.Presenters["notificationcenter"] = theme.NotificationCenterPresenter`,
+set by the Windows 10 profile and inherited by its dark variant). The component
+asks `PresenterFor(tm, "notificationcenter")`, never the theme name. Windows 11,
+Windows 2000 and macOS keep the flat list (rendered frames are byte-identical to
+before; checked on 4 themes x 4 panels). The flat tests of the repo run under
+Windows 11 for that reason.
+
+Rich variant, all sizes are metrics `notificationcenter.*` (`theme/profiles_win10_notify.go`):
+the panel is `width` (396) wide, glued to the right screen edge and spans from the
+top of the work area to the taskbar (`Flyout.Place` hook: height = anchor top minus
+`margin`, which is 0 here; other flyouts keep `Flyout.Margin` 6). Set
+`NotificationCenter.WorkArea` when the anchor is a small tray icon: the anchor is
+used as the bar edge otherwise, so pass a rectangle that spans the bar height.
+Layout (top to bottom): header link "Manage notifications" (`OnManage`, the panel
+closes first) / scrolling list of groups (icon, name, collapse, close group) with
+cards / footer links "Expand|Collapse" (left) and "Clear notifications" (right) /
+quick action tiles (4 columns, one row collapsed). Cards: icon, title (theme font
+`title`), body (2 lines, 8 expanded, ellipsis), time (`caption`), hover cross,
+chevron, actions. Theme parts of component `notificationcenter`: `panel`, `toast`,
+`header`, `link`, `group`, `card`, `action`, `field`, `glyph`, `dim`, `quick.tile`,
+`quick.tile.on` (accent), `scrollbar`; they follow `SetAccent` and `taskbar.light`
+live.
+
+Model additions (all additive): `Notification{AppName, Icon, IconAt, Timestamp,
+Actions}` (`At()` = `Timestamp` or `Time`), `NotificationAction{ID, Kind, Title,
+Placeholder, Options, Selected, Keep}` with kinds Button / Link / Reply (field +
+send button) / Select (dropdown), `NotificationActionEvent{Notification, Action,
+Kind, Value, Index, Inputs}` (Action "" = the card itself was pressed; `Inputs` carries
+current values of fields, so a button sends the chosen dropdown value). Delivery:
+`NotificationCenter.OnAction` and/or the optional source interface
+`NotificationActions.InvokeNotificationAction`. A button/link/reply removes the
+notification unless `Keep`; pressing the card removes it and closes the center.
+Quick actions: `QuickAction{ID, Title, Icon, IconAt, On, Disabled}`,
+`QuickActionModel{List, Toggle, Subscribe}`, ready `QuickActionList`;
+`nc.SetQuickActions(m)`, `SetQuickExpanded`, `SetGroupCollapsed`. A change of
+`On`/`Disabled`/`Title` of tiles in an unchanged set repaints only those tiles
+(a partial repaint is pixel-equal to a full one: tested).
+
+Fixed errors: the center subscribes to its sources on open and unsubscribes on any
+close (button, outside click, Esc, `DismissAt`) so the list updates after reopen;
+an open center repaints on a new notification; height no longer depends on the
+number of cards (list scrolls: wheel, keys, the thin auto-hiding thumb).
+
+Scrollbar: the thumb is dragged with the mouse. Pressing it grabs the mouse
+(`NotificationCenter` is `widget.CaptureAware`, so the drag keeps working outside
+the panel), the list moves proportionally to the thumb (`dy * maxScroll / free
+track`, the grab point does not jump), the thumb never fades while held and is
+drawn in the `scrollbar` part state `Pressed` (`Hover` under the cursor). A click
+on the track above/below the thumb scrolls one page (90 % of the list height) in
+that direction. Only the list area is repainted while dragging.
+
+Expand/collapse animations: the text of a card (2 lines <-> up to 8, actions), a
+whole group and the quick action grid change height smoothly, the cards below
+slide with them. Duration and curve come from the theme animation token
+`notification.expand` (`desktop.AnimNotificationExpand`; Windows 10 declares
+150 ms `out-cubic`; a profile that does not declare it falls back to `menu.open`;
+0 = instant, no frames at all). The view keeps only a `k` (0..1 openness) per
+card/group/grid (`notifyview_slide.go`); while `k` is on the way the layout takes
+the height between the collapsed and the expanded layout and clips the expanded
+content by the card frame. The motion starts on demand: the layout notices that
+the target state changed (click, key, `SetGroupCollapsed`, `SetQuickExpanded`),
+so no setter has to be wired. An item seen for the first time (panel just
+opened, new notification) is drawn in its state at once; closing the panel drops
+all motions. An interrupted motion goes back from the current height without a
+jump. Each step repaints only the rectangle from the top of the moving element to
+the bottom of the list (the grid: from the list top to the panel bottom); the
+header is not repainted. `k` is clamped to 0..1, so an `out-back` fallback cannot
+turn the height inside out.
+
+Severity: `Notification.Severity` Warning/Error is drawn on a Windows 10 card as
+a strip of `notificationcenter.severity.width` (3 px) at the left edge, in the
+colour of the theme part `severity.warning` / `severity.error` (dark panel:
+yellow/pink, light panel: dark amber/red); Info gets nothing. The toast has the
+same strip. Flat themes keep the old `card.warning` / `card.error` border.
+
+Keyboard: the open rich center is `Focusable` + `TabAcceptor`; Tab/Shift+Tab,
+Up/Down walk stops (link, groups, cards, actions, reply field, footer links, tiles),
+arrows walk the tile grid, Left/Right collapse/expand a card or group, Enter/Space
+activate, Delete dismisses a card or group, PgUp/PgDn scroll, typing goes into the
+reply field (Backspace, Delete, arrows, Home/End, Ctrl+V, Enter sends), Esc closes
+the dropdown first, then the center. Focus ring: `PaintFocusRing`, keyboard only.
+Strings are `desktop.notif.*` (`notifystrings.go`); to reuse a catalog map them with
+`widget.AliasStrings(map[string]string{desktop.StrNotifManage: "ManageNotifications",
+desktop.StrNotifClear: "ClearAllNotifications", desktop.StrNotifExpand: "Expand",
+desktop.StrNotifCollapse: "Collapse"})`. Time on a card: today -> `TimeFormat`,
+yesterday -> "Yesterday", older -> `DateFormat` of the `DateCulture`; `nc.Clock` fixes "now".
+
+Toast: `desktop.NewNotificationToast(tm, ns)` shows each NEW notification (those in
+the source at creation are ignored) as the same card in the bottom right corner above
+the tray (`Anchor`/`Screen` or `WorkArea`), slides in from the right, hides after
+`Timeout` (default metric `notificationcenter.toast.timeout`, 5000 ms), stays while the
+mouse is over it, cross hides only the toast, actions work as in the center. It is
+NOT registered in `FlyoutManager` (opening it must not close the Start menu) and is
+added to the root after the manager; `toast.Suppress(center)` keeps it quiet while
+the center is open; only themes with the presenter show it. In the flat themes
+(Windows 11, Windows 2000, macOS) the toast is intentionally NOT shown: there is
+no rich card to pop up (a shell that needs a pop-up there can use the tray
+balloon, see "Tray, balloon notifications"). It is a limitation of the flat
+variant, not a bug.
+
+Hooks added to `Flyout` (nil = old behaviour): `Place` (own placement) and `Plate`
+(component and part of the plate style).
+
+Tests: `desktop/notifyview_test.go` (behaviour, errors, keyboard, toast),
+`desktop/notifyview_render_test.go` (pixels: accent, light flag, partial repaint,
+open area), `desktop/notifyview_slide_test.go` (expand/collapse animation, thumb
+drag, severity), `theme/profiles_win10_notify_test.go`,
+`theme/profiles_win10_notify_severity_test.go`. Pictures: `NC_OUT=<dir> go test
+./desktop -run TestVisual_NotificationCenter` and `...Toast` (also
+`dark_card_expanding`, `dark_group_collapsing`, `dark_quick_expanding`,
+`*_scrollbar_drag`, `*_severity`). A test that toggles a card, a group or the grid
+finishes the animation first (`finishAnimations()`), because the theme animates.
+
+### Windows 10 Start menu with tiles and the taskbar search box — v3.33
+
+`desktop.StartMenu` has a second layout: sidebar | app list | tiles. A theme asks
+for it with the presenter `theme.PresenterStartTiles` (`"tiles"`,
+`Profile.Presenters["startmenu"]`, set by the Windows 10 profile and inherited by
+its dark variant); the component asks `StartMenu.tiled()` and never looks at the
+theme name. Windows 11, Windows 2000 and macOS keep the flat list (rendered
+frames of all eight profiles are byte-identical to v3.30, only Windows 10
+changes). Same object, same `Open/Close/Toggle`: a theme switch on an open menu
+changes the look without re-creating anything.
+
+```go
+menu := desktop.NewStartMenu(m, catalog)
+menu.Screen = screen
+menu.SetSource(src)                        // desktop.StartMenuSource: Recent(), Groups(), Subscribe()
+menu.SetSidebarItems([]desktop.StartSidebarItem{
+    {ID: "user", Title: "oops", Glyph: desktop.GlyphUser},
+    {ID: "power", Title: "Power", Glyph: desktop.GlyphPower, KeepOpen: true},
+})
+menu.OnSidebarActivate = func(id string) { ... }
+menu.SetTileGroups(groups)                 // []desktop.TileGroup{ID, Title, Tiles []Tile}
+menu.SetTileContent("mail", desktop.TileContent{Title: "Mail", Badge: "3"}) // repaints ONE tile
+menu.OnTilesChanged = func(g []desktop.TileGroup) { save(g) }   // after a drag
+menu.ContextMenu = func(t desktop.StartTarget) []widget.MenuItem { ... } // right button
+box := desktop.NewSearchBox(m, provider)   // Item for SlotStart, after the Start button
+box.Bind(menu, startButton.Bounds)         // results appear IN the menu instead of the list
+bar.AddItem(desktop.SlotStart, box)
+```
+
+- **Data comes from the consumer.** `StartMenuSource` (recent, letter groups,
+  folders, second line) is optional: without it the menu groups `AppCatalog.Apps()`
+  by the first letter of the title (`GroupByLetter`, `StartLetter`: `#`, Latin,
+  Cyrillic). `AppInfo.IconAt`/`StartEntry.IconAt`/`TileContent.IconAt` get the side
+  in PHYSICAL pixels. Built-in vector glyphs (`GlyphUser`, `GlyphDocuments`,
+  `GlyphPictures`, `GlyphSettings`, `GlyphPower`; hamburger, magnifier and
+  chevrons are internal) are SVG rasterised at physical size, drawn in the style's
+  text colour. `FakeStartSource`, `FakeSearchProvider` are the test fakes.
+- **Metrics (profile, logical px at 100 %):** `startmenu.sidebar.collapsed` 48,
+  `.sidebar.expanded` 256, `.sidebar.icon.size` 20, `startmenu.list.width` 260,
+  `.row.height` 36, `.letter.height` 36, `.icon.size` 24, `.row.pad` 20,
+  `.row.icon.gap` 8, `.corner` 0, `.tiles.pad.left/right/top/bottom` 21/16/18/12,
+  `.tiles.columns` 6, `.height` 700 (0 = fill), `.height.min` 320, `.margin` 0;
+  `tile.unit` 48, `tile.gap` 4 (medium 100, wide/large 204), `tile.group.header`
+  32, `.header.gap` 5, `tile.group.gap` 4; `scrollbar.thin.width/.hover.width`;
+  `search.width` 344, `.icon.width` 48, `.icon.size` 16, `.pad` 12, `.icon.gap` 8.
+  Width = 48 + 260 + 21 + 308 + 16 + 2 (border) = 655; height = min(`startmenu.height`,
+  anchor.Min.Y - Screen.Min.Y - margin) but not below `.height.min` while it
+  fits. A narrower screen shrinks the tile columns, below two columns the tile area
+  is hidden.
+- **Style parts** (`theme/profiles_win10_shell.go`, both palettes): `startmenu`:
+  `panel` (PadX/PadY 1 = border), `sidebar`, `sidebar.item`, `row`, `row.sub`,
+  `letter`, `tile`, `tile.group`, `scrollbar`; `searchbox`: `""` (field), `hint`,
+  `icon`. `Flyout` got four unexported hooks: `partFn` (which part paints the
+  base — `panel` for tiles), `marginFn` (`startmenu.margin`, 0 for tiles) and
+  `beforeOpen`/`afterOpen` (state reset, subscriptions, focus request). The last
+  two exist because Go embedding has no virtual `Open`: a menu opened through
+  `Toggle`, `FlyoutManager` or a group never ran an `Open` override of the
+  enclosing type.
+- **Sidebar.** Collapsed 48 px (icons only), the hamburger toggles it to 256 px
+  with a `Tween` on the `menu.open` token (0 ms = instant); the expanded panel
+  lies over the list; each animation step invalidates only the panel column. A
+  press outside the sidebar collapses it. The title is the upper-cased
+  `desktop.start`.
+- **List.** `Recent`, then letter groups; folder rows expand in place
+  (`StartEntry.Folder/Children`, Right/Left keys, `SetFolderExpanded`). Rows are
+  laid out by cumulative offsets and only the visible range is drawn
+  (`firstRowAt`, 3000 apps draw <120 strings). Wheel = 3 rows, `OnMouseWheelPixels`
+  for smooth devices; the thin scrollbar (`fadeBar`) shows on mouse move/scroll and
+  fades after 1.2 s on one timer.
+- **Tiles.** `placeTiles` packs tiles first-fit into `tiles.columns` units
+  (small 1×1, medium 2×2, wide 4×2, large 4×4); a group is header + grid; groups
+  stack in one scrollable column. `SetTileContent` is copy-on-write and
+  invalidates the one tile rectangle. Drag: press on a tile captures the mouse
+  (`WantsCapture`), a threshold of `tile.gap` starts the drag, the layout previews
+  the drop (`dragPreview`), release calls `OnTilesChanged` with the whole new
+  order (between groups too). The consumer persists it. A tile released into
+  EMPTY space makes a new group (`startmenu_tiles_groups.go`): below the last group,
+  in the gap between two groups together with the upper half of the lower header,
+  or above the first group; the lower half of a header and the tile rows still mean
+  "into this group". The new group has an empty `Title` and a unique `ID`
+  (`group-N`) and is reported by `OnTilesChanged` like any other; while it is
+  carried the preview shows it with the muted hint `desktop.start.newGroup` over the
+  header. A group emptied by the drag is removed on release (kept as a bare header
+  while dragging so the layout does not jump); dropping the lone tile of a group
+  into a "new group" right next to it changes nothing and fires no event. While a
+  tile is carried the scrollable height gets extra room under the last group
+  (`dragExtra`) so a full area can still be dropped below. A left release outside
+  the menu now ends a drag (the mouse is captured). Tile layout cache is keyed by
+  `tilesRev` too — before, `SetTileGroups` and a drop did not refresh it.
+- **Letter jump.** A click (or Enter/Space) on a letter header opens, in place of the
+  list, a grid of all letters (`startmenu_tiles_letters.go`): `#`, A-Z, the
+  Cyrillic block when the list has Cyrillic groups (Ё after Е), then any other
+  letters of the source. 4 columns, up to 8 on a low menu so the alphabet fits
+  without scrolling. Letters without a group are muted (`letter` part, Disabled)
+  and inert; active ones sit on a faint tint and use `letter` hover/pressed/active.
+  Picking a letter scrolls the list so the group header is on top (clamped at the
+  end) and closes the grid; Esc closes only the grid (selection goes back to the
+  header), Tab, a press on tiles/sidebar, typing (search) and reopening the menu
+  close it too; the wheel is ignored over it. The grid fades in by the `menu.open`
+  token (`gridFade`). Letter headers became focusable rows: arrows walk through
+  them, Home/End and the first Down still land on applications. API:
+  `LetterGridOpen`, `OpenLetterGrid`, `CloseLetterGrid`, `JumpToLetter(letter)`.
+- **Scrollbar mouse control** (`startmenu_tiles_scrollbar.go`). The track is a column
+  at the right edge of the list and of the tile area, `scrollbar.thin.hover.width`+2
+  wide (narrower than `startmenu.row.pad`/2, so a folder chevron stays clickable).
+  Press on the thumb captures the mouse; the thumb follows it proportionally (scroll
+  is computed from the pointer, not accumulated; the grab offset is kept), it is
+  drawn wide and in the `scrollbar` Hover colour and is pinned (`fadeBar.pin`) while
+  dragged or hovered; release anywhere ends it. A press on the empty track pages by
+  the view height minus one row (list) / one tile step (tiles). Same for the tile area.
+- **Keyboard.** The open menu requests focus (`focusreq`), is `Focusable` and a
+  `TabAcceptor`: Tab/Shift+Tab cycle sidebar → list → tiles (empty areas are
+  skipped); arrows inside; in tiles the arrows follow the grid geometry
+  (`nearestTile`: along + 2×across); Home/End, PageUp/PageDown, Enter/Space, Esc
+  (closes the context menu first, then the menu). A printable character moves
+  input to the bound search box (focus moves to it) or, without a box, into the
+  menu's own query bar. The keyboard selection is drawn with `PaintFocusRing`.
+- **Search.** `SearchBox` (modes `SearchModeHidden/IconOnly/Box`, width from
+  `search.width`, placeholder `desktop.search.placeholder`, hover/focus styles,
+  caret editing, Ctrl+V). It talks to `SearchProvider` (`SetQuery`, `Results`,
+  `Activate`, `Subscribe`); the menu shows `Results()` instead of the list
+  (grouped by `Category`, "No results" row) and re-reads them on the provider's
+  notification. Enter/Up/Down in the box are forwarded to the menu
+  (`StartMenu.SearchKey`); Esc closes the menu and clears the text. A press on
+  the box does not dismiss the open menu (`StartMenu.DismissAt`). `SetMode`
+  relayouts the taskbar (the item implements `SetRelayout`, `Taskbar.AddItem`
+  hands it the callback).
+- **Strings.** `desktop.start.recent|expand|collapse|noResults|results|newGroup`,
+  `desktop.search.placeholder|label`, RU and EN. To read them from your own table:
+  `widget.AliasStrings(desktop.StartMenuAliases("Start", "RecentlyAdded",
+  "SearchPlaceholder", "Expand", "Collapse"))`.
+- **Lifetime.** Subscriptions (theme, language, source, provider) live while the
+  menu is open (`resubscribe` / `detachOnClose`); closing clears the query and
+  the box. Not done: naming a new tile group in place (the consumer sets `Title`
+  after `OnTilesChanged`), scrolling the new group into view after a drop.
+
+Cost (1280×720, 300 apps, Windows 10, `TestStartMenu10_FirstFrameUnder100ms`):
+first frame after `Open` ≈ 9 ms cold, ≈ 8 ms warm; opening invalidates only the
+menu rectangle (`TestStartMenu10_OpenDamagesOnlyMenuArea`). Snapshots:
+`GOLDEN_OUT=dir go test ./desktop -run TestStartMenu10_` writes dark/light PNGs at
+100/150/200 %.
 
 ### Measured cost of a frame
 

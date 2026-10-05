@@ -54,6 +54,9 @@ func TestDesktopFlyout_DrawsAsEngineOverlay(t *testing.T) {
 	}
 
 	fl.Open(image.Rect(0, h-40, 60, h))
+	// Тема Windows 10 выезжает панель по анимации, а RenderOnce часы анимаций не
+	// двигает: до конца её доводит Settle (в живом движке это делает цикл кадров).
+	fl.Settle()
 	img := eng.RenderOnce()
 	if painted == 0 {
 		t.Fatal("открытая панель не попала в отрисовку оверлеев движка")

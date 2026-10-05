@@ -136,7 +136,7 @@ func (l *Label) Draw(ctx DrawContext) {
 
 	fontSize := l.FontSize
 	if fontSize <= 0 {
-		fontSize = DefaultFontSizePt
+		fontSize = DefaultFontSize()
 	}
 
 	font := l.effectiveFont()
@@ -345,7 +345,7 @@ func (l *Label) DesiredSize() (int, int) {
 	}
 	fontSize := l.FontSize
 	if fontSize <= 0 {
-		fontSize = DefaultFontSizePt
+		fontSize = DefaultFontSize()
 	}
 	w := MeasureUITextFont(text, fontSize, l.effectiveFont()) + l.PaddingX*2
 	h := int(fontSize*1.5+0.5) + l.PaddingY*2

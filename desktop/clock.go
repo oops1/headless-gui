@@ -19,7 +19,10 @@ import (
 // под ней.
 const ComponentClock = "clock"
 
-// Форматы по умолчанию, если поля TimeFormat/DateFormat не заданы.
+// Форматы по умолчанию, если поля TimeFormat/DateFormat не заданы и культура
+// не отвечает: «15:04» и «02.01.2006» — то, что часы показывали до появления
+// культуры. Обычно же формат даёт Culture (по умолчанию — LocaleCulture, то
+// есть строки движка для текущего языка).
 const (
 	defaultTimeFormat = "15:04"
 	defaultDateFormat = "02.01.2006"
@@ -36,14 +39,19 @@ const (
 // "date" — вертикальный зазор между строкой времени и строкой даты.
 type ClockItem struct {
 	widget.Base
+	FocusState
 
 	tm  *theme.Manager
 	clk Clock
 
-	// TimeFormat/DateFormat — форматы time.Time.Format. Пустые — берутся
-	// значения по умолчанию (defaultTimeFormat/defaultDateFormat).
+	// TimeFormat/DateFormat — форматы time.Time.Format. Заданные здесь
+	// побеждают всё остальное; пустые берутся у Culture.
 	TimeFormat string
 	DateFormat string
+
+	// Culture — региональные правила записи времени и даты. nil —
+	// LocaleCulture: формат следует за языком интерфейса (widget.SetLanguage).
+	Culture DateCulture
 
 	// OnClick — щелчок по часам. Оболочка вешает на него календарь: именно
 	// так он открывается на настоящем рабочем столе.
@@ -51,6 +59,9 @@ type ClockItem struct {
 
 	hovered int32
 	pressed int32
+
+	// vertical — часы лежат в столбце боковой панели (VerticalItem).
+	vertical bool
 
 	mu       sync.Mutex
 	lastTime string
@@ -72,10 +83,24 @@ func (c *ClockItem) OnMouseMove(x, y int) {
 // OnMouseButton — щелчок срабатывает на отпускании над часами, как у всех
 // кнопок панели задач.
 func (c *ClockItem) OnMouseButton(e widget.MouseEvent) bool {
+	if c.NotePointer(e) {
+		c.Invalidate()
+	}
 	if c.OnClick == nil {
 		return false
 	}
 	return trayHandleClick(&c.pressed, c.Bounds(), e, c.OnClick, c.Invalidate)
+}
+
+// GetToolTip перекрывает промоутнутый из widget.Base: подсказка часов — дата
+// словами по правилам культуры («14 марта 2026»), пока оболочка не задала свою
+// через SetToolTip. Строится при показе подсказки, поэтому следует за языком и
+// за временем.
+func (c *ClockItem) GetToolTip() string {
+	if t := c.Base.GetToolTip(); t != "" {
+		return t
+	}
+	return cultureOrDefault(c.Culture).LongDate(c.now())
 }
 
 // Close останавливает секундный тик. Часы, снятые со сцены и не закрытые,
@@ -102,12 +127,18 @@ func (c *ClockItem) timeFormat() string {
 	if c.TimeFormat != "" {
 		return c.TimeFormat
 	}
+	if f := cultureOrDefault(c.Culture).TimeFormat(); f != "" {
+		return f
+	}
 	return defaultTimeFormat
 }
 
 func (c *ClockItem) dateFormat() string {
 	if c.DateFormat != "" {
 		return c.DateFormat
+	}
+	if f := cultureOrDefault(c.Culture).DateFormat(); f != "" {
+		return f
 	}
 	return defaultDateFormat
 }
@@ -128,7 +159,7 @@ func fontSizeOf(s *theme.Style) float64 {
 	if s.Font.Size > 0 {
 		return s.Font.Size
 	}
-	return widget.DefaultFontSizePt
+	return widget.DefaultFontSize()
 }
 
 // lineHeight — высота строки текста тем же способом, каким её считает
@@ -150,7 +181,7 @@ const KeyClockDate theme.Key = "clock.date"
 
 // twoLine решает, показывать ли вторую строку (дату): разрешает ли её тема и
 // хватает ли высоты.
-func (c *ClockItem) twoLine(availY int, timeSize float64) bool {
+func (c *ClockItem) twoLine(availW, availY int, timeSize float64) bool {
 	if c.tm != nil && !c.tm.GetFlag(KeyClockDate, true) {
 		return false
 	}
@@ -158,7 +189,30 @@ func (c *ClockItem) twoLine(availY int, timeSize float64) bool {
 	dateSize := fontSizeOf(dateStyle)
 	gap := int(dateStyle.PadY)
 	need := lineHeight(timeSize) + gap + lineHeight(dateSize)
-	return availY >= need
+	if availY < need {
+		return false
+	}
+	// В столбце боковой панели дата может не поместиться по ширине: часы тогда
+	// показывают одно время, а не дату, вылезающую за панель.
+	if c.vertical {
+		dateStr := c.now().Format(c.dateFormat())
+		if widget.MeasureUIText(dateStr, dateSize)+2*int(dateStyle.PadX) > availW {
+			return false
+		}
+	}
+	return true
+}
+
+var _ VerticalItem = (*ClockItem)(nil)
+
+// SetVertical реализует VerticalItem: в столбце часы занимают всю толщину
+// панели, а высоту считают по строкам.
+func (c *ClockItem) SetVertical(v bool) {
+	if c.vertical == v {
+		return
+	}
+	c.vertical = v
+	c.Invalidate()
 }
 
 // PreferredSize считает желаемый размер по фактической строке (см.
@@ -174,7 +228,7 @@ func (c *ClockItem) PreferredSize(avail image.Point) image.Point {
 	w := widget.MeasureUIText(timeStr, timeSize)
 	h := lineHeight(timeSize)
 
-	if c.twoLine(avail.Y, timeSize) {
+	if c.twoLine(avail.X, avail.Y, timeSize) {
 		dateStyle := c.style("date", theme.StateNormal)
 		dateSize := fontSizeOf(dateStyle)
 		dateStr := now.Format(c.dateFormat())
@@ -184,6 +238,11 @@ func (c *ClockItem) PreferredSize(avail image.Point) image.Point {
 		h = lineHeight(timeSize) + int(dateStyle.PadY) + lineHeight(dateSize)
 	}
 
+	if c.vertical && avail.X > 0 {
+		// Поперёк столбца часы занимают всю толщину панели; отступ стиля, который
+		// в ряду стоит по бокам строки, в столбце стоит над и под ней.
+		return image.Point{X: avail.X, Y: h + 2*padX}
+	}
 	return image.Point{X: w + padX*2, Y: h}
 }
 
@@ -209,7 +268,7 @@ func (c *ClockItem) Draw(ctx widget.DrawContext) {
 	c.mu.Unlock()
 	c.ensureTick()
 
-	if c.twoLine(b.Dy(), timeSize) {
+	if c.twoLine(b.Dx(), b.Dy(), timeSize) {
 		dateStyle := c.style("date", theme.StateNormal)
 		half := b.Min.Y + b.Dy()/2
 		top := image.Rect(b.Min.X, b.Min.Y, b.Max.X, half)

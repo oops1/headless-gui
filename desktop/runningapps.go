@@ -37,6 +37,29 @@ const (
 	KeyTaskButtonUnderlineLen theme.Key = "taskbutton.underline.len"
 	// KeyTaskButtonLabelGap — зазор между значком и заголовком окна.
 	KeyTaskButtonLabelGap theme.Key = "taskbutton.label.gap"
+
+	// KeyTaskButtonGroup — признак темы: несколько окон одного приложения
+	// живут в ОДНОЙ кнопке (Windows 10). Без него у каждого окна своя кнопка,
+	// как было всегда.
+	KeyTaskButtonGroup theme.Key = "taskbutton.group"
+	// KeyTaskButtonMuted — признак темы: свёрнутое окно и незапущенное
+	// закреплённое приложение рисуются состоянием Disabled (по умолчанию да).
+	// Windows 10 так не делает — наведение подсвечивает такие кнопки, как все.
+	KeyTaskButtonMuted theme.Key = "taskbutton.muted"
+	// KeyTaskButtonUnderlineIdle и KeyTaskButtonUnderlineIdleLen — толщина и
+	// длина (доля ширины кнопки) метки запущенного, но не активного окна.
+	// Длина 0 (по умолчанию) — метки у неактивного окна нет, если полоса
+	// активного идёт во всю ширину; толщина 0 — как у KeyTaskButtonUnderline.
+	KeyTaskButtonUnderlineIdle    theme.Key = "taskbutton.underline.idle"
+	KeyTaskButtonUnderlineIdleLen theme.Key = "taskbutton.underline.idle.len"
+	// Стопка окон: у кнопки со многими окнами за значком видны торцы нескольких
+	// «листов». KeyTaskButtonStack — сколько чёрточек (0 — не рисовать),
+	// .width — их толщина, .gap — просвет между ними (он же шаг, на который
+	// каждая следующая короче), .offset — расстояние от значка до первой.
+	KeyTaskButtonStack       theme.Key = "taskbutton.stack"
+	KeyTaskButtonStackWidth  theme.Key = "taskbutton.stack.width"
+	KeyTaskButtonStackGap    theme.Key = "taskbutton.stack.gap"
+	KeyTaskButtonStackOffset theme.Key = "taskbutton.stack.offset"
 )
 
 // winButton — раскладка одной кнопки окна, посчитанная layout(). Хранит
@@ -67,6 +90,7 @@ type winButton struct {
 //     нет: пользователю показывается «сколько влезло».
 type RunningApplications struct {
 	widget.Base
+	FocusState
 
 	tm *theme.Manager
 	wm WindowModel
@@ -89,6 +113,15 @@ type RunningApplications struct {
 	// компонент в списке наблюдателей модели — утечка, если область убрали
 	// со сцены и не закрыли.
 	unsubWM func()
+
+	// fade — плавный переход цвета кнопок при наведении, нажатии и смене
+	// активного окна (тема: taskbar.item).
+	fade motion
+
+	// vertical и edge — полоса лежит в столбце боковой панели у края edge
+	// (runningapps_vertical.go).
+	vertical bool
+	edge     Edge
 }
 
 // NewRunningApplications создаёт область запущенных приложений,
@@ -152,6 +185,9 @@ func (r *RunningApplications) PreferredSize(avail image.Point) image.Point {
 	if n == 0 {
 		return image.Point{}
 	}
+	if r.vertical {
+		return r.preferredVertical(n, avail)
+	}
 	ideal := int(r.metric(KeyTaskButtonWidth))
 	gap := int(r.metric(KeyTaskButtonGap))
 	want := n*ideal + gap*(n-1)
@@ -203,6 +239,11 @@ func (r *RunningApplications) layout() {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.vertical {
+		r.layoutVertical(b, windows)
+		return
+	}
 
 	gap := int(r.metric(KeyTaskButtonGap))
 	ideal := int(r.metric(KeyTaskButtonWidth))
@@ -371,6 +412,7 @@ func (r *RunningApplications) OnMouseButton(e widget.MouseEvent) bool {
 			if idx < 0 {
 				return false
 			}
+			r.NotePointer(e)
 			r.mu.Lock()
 			r.armedIdx = idx
 			r.mu.Unlock()
@@ -467,6 +509,10 @@ func (r *RunningApplications) HoverIndex() int {
 
 // presenter возвращает презентер, назначенный темой этому компоненту.
 func (r *RunningApplications) presenter() Presenter {
+	// Док macOS — ряд; в столбце боковой панели полоса рисуется сама.
+	if r.vertical {
+		return nil
+	}
 	return PresenterFor(r.tm, PresenterKeyRunningApps)
 }
 
@@ -493,6 +539,10 @@ func (r *RunningApplications) Draw(ctx widget.DrawContext) {
 	btns := append([]winButton(nil), r.btns...)
 	hoverIdx, armedIdx := r.hoverIdx, r.armedIdx
 	r.mu.RUnlock()
+	focusIdx := -1
+	if r.FocusVisible() {
+		focusIdx = r.FocusState.Cell(len(btns))
+	}
 
 	prevClip := ctx.Clip()
 	for i, wb := range btns {
@@ -501,20 +551,22 @@ func (r *RunningApplications) Draw(ctx widget.DrawContext) {
 		// кнопка в смысле ввода — клик по ней по-прежнему разворачивает
 		// окно, приглушение чисто визуальное: так их видно от обычных
 		// свёрнутых на настоящей панели задач).
-		st := StateOf(i == hoverIdx, i == armedIdx, wb.info.Active, wb.info.Minimized, false)
-		style := r.style(st)
+		st := StateOf(i == hoverIdx, i == armedIdx, wb.info.Active, wb.info.Minimized && taskButtonMuted(r.tm), i == focusIdx)
+		style := r.fade.ItemStyle(r.tm, wb.info.ID, wb.rect, st, r.style)
 		PaintStyle(ctx, wb.rect, style)
 
 		padX := int(style.PadX)
 		iconX := wb.rect.Min.X + padX
+		if r.vertical {
+			iconX = wb.rect.Min.X + (wb.rect.Dx()-iconSize)/2 // в столбце значок по центру
+		}
 		iconY := wb.rect.Min.Y + (wb.rect.Dy()-iconSize)/2
 		if wb.info.Icon != nil && iconSize > 0 {
 			ctx.DrawImageScaled(wb.info.Icon, iconX, iconY, iconSize, iconSize)
 		}
 
 		// Свёрнутое окно тоже открыто — метка под ним остаётся.
-		DrawUnderline(ctx, wb.rect, int(r.metric(KeyTaskButtonUnderline)),
-			r.metric(KeyTaskButtonUnderlineLen), wb.info.Active, style)
+		drawTaskMarkAt(ctx, r.tm, wb.rect, wb.info.Active, style, r.markEdge())
 
 		if wb.showLabel {
 			// Заголовок клипуется по кнопке: он не должен наезжать на

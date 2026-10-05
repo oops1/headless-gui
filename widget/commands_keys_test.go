@@ -18,6 +18,10 @@ func TestParseKeyName_NewKeys(t *testing.T) {
 		"CapsLock":    KeyCapsLock,
 		"PrintScreen": KeyPrintScreen,
 		"Apps":        KeyMenu,
+		"Win":         KeyWin,
+		"LWin":        KeyWin,
+		"RWin":        KeyWin,
+		"Super":       KeyWin,
 		"F13":         KeyF13,
 		"Escape":      KeyEscape,
 	}

@@ -150,7 +150,7 @@ func layoutRich(paras []RichParagraph, opt richLayoutOpts) *richLayout {
 	lay := &richLayout{Width: opt.Width, LineGap: opt.LineGap, ParaStart: make([]int, len(paras))}
 	b := &richBuilder{opt: opt, mcache: map[richMKey]FontMetrics{}}
 	if b.opt.Size <= 0 {
-		b.opt.Size = DefaultFontSizePt
+		b.opt.Size = DefaultFontSize()
 	}
 	y, base := 0, 0
 	for pi, p := range paras {

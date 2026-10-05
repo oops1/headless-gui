@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"image"
+	"sync/atomic"
 
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
@@ -20,6 +21,7 @@ import (
 // клик, уведя курсор в сторону перед отпусканием.
 type StartButton struct {
 	widget.Base
+	FocusState
 
 	tm *theme.Manager
 
@@ -30,6 +32,13 @@ type StartButton struct {
 
 	hovered bool
 	armed   bool
+	// active — меню «Пуск» открыто: кнопка остаётся подсвеченной (StateActive).
+	// Атомарно: флаг ставит подписка на панель, то есть горутина, открывшая или
+	// закрывшая меню, а читает горутина кадра.
+	active int32
+
+	// fade — плавный переход цвета при наведении и нажатии (тема: taskbar.item).
+	fade motion
 
 	// OnClick вызывается при успешном клике (press+release над кнопкой).
 	// Оболочка вешает сюда открытие меню «Пуск».
@@ -66,8 +75,9 @@ const (
 )
 
 // startButtonLabel — текст подписи кнопки. Не размер и не цвет — обычная
-// строка интерфейса, наравне с любым другим текстом виджета.
-const startButtonLabel = "Пуск"
+// строка интерфейса (ключ StrStart), берётся при отрисовке и потому следует
+// за языком без пересоздания кнопки.
+func startButtonLabel() string { return tr(StrStart) }
 
 // NewStartButton создаёт кнопку «Пуск», оформляемую темами из tm.
 func NewStartButton(tm *theme.Manager) *StartButton {
@@ -90,6 +100,69 @@ func (s *StartButton) PreferredSize(avail image.Point) image.Point {
 		width = avail.X
 	}
 	return image.Pt(width, 0)
+}
+
+// Active сообщает, горит ли кнопка как «меню открыто».
+func (s *StartButton) Active() bool { return atomic.LoadInt32(&s.active) == 1 }
+
+// SetActive зажигает или гасит кнопку: пока открыто меню «Пуск», кнопка
+// остаётся в состоянии StateActive. Сама кнопка меню не знает — зажигает её
+// оболочка либо Track и TrackManager по событиям панели.
+func (s *StartButton) SetActive(v bool) {
+	want := int32(0)
+	if v {
+		want = 1
+	}
+	if atomic.SwapInt32(&s.active, want) != want {
+		s.Invalidate()
+	}
+}
+
+// OpenStateSource — то, что сообщает об открытии и закрытии: *Flyout и любая
+// панель, встраивающая его (StartMenu), а в общем случае — что угодно со
+// Subscribe такого вида. Кнопка зависит от этого интерфейса, а не от
+// конкретного меню.
+type OpenStateSource interface {
+	// Subscribe подписывает h на открытие (true) и закрытие (false) и
+	// возвращает функцию отписки.
+	Subscribe(h func(open bool)) (unsubscribe func())
+	// IsOpen — открыто ли сейчас.
+	IsOpen() bool
+}
+
+// Track связывает кнопку с источником: она горит, пока тот открыт, и гаснет,
+// когда он закрыт чем бы то ни было — кликом мимо, Esc, запуском приложения,
+// открытием другой панели. Возвращает функцию, которая разрывает связь
+// (и гасит кнопку).
+func (s *StartButton) Track(src OpenStateSource) (untrack func()) {
+	if src == nil {
+		return func() {}
+	}
+	s.SetActive(src.IsOpen())
+	unsub := src.Subscribe(s.SetActive)
+	return func() {
+		unsub()
+		s.SetActive(false)
+	}
+}
+
+// TrackManager — то же для панели name менеджера всплывающих панелей: кнопка
+// горит между событиями FlyoutOpened и FlyoutClosed этой панели. Панель можно
+// зарегистрировать позже — события придут, когда она откроется.
+func (s *StartButton) TrackManager(m *FlyoutManager, name string) (untrack func()) {
+	if m == nil {
+		return func() {}
+	}
+	s.SetActive(m.IsOpen(name))
+	unsub := m.Subscribe(func(ev FlyoutEvent) {
+		if ev.Name == name {
+			s.SetActive(ev.Kind == FlyoutOpened)
+		}
+	})
+	return func() {
+		unsub()
+		s.SetActive(false)
+	}
 }
 
 // OnMouseMove реализует widget.MouseMoveHandler — обновляет наведение.
@@ -115,6 +188,7 @@ func (s *StartButton) OnMouseButton(e widget.MouseEvent) bool {
 		if !over {
 			return false
 		}
+		s.NotePointer(e)
 		s.armed = true
 		s.Invalidate()
 		return true
@@ -137,8 +211,8 @@ func (s *StartButton) Draw(ctx widget.DrawContext) {
 	if b.Empty() {
 		return
 	}
-	st := StateOf(s.hovered, s.armed, false, false, false)
-	style := s.style(st)
+	st := StateOf(s.hovered, s.armed, s.Active(), false, s.FocusVisible())
+	style := s.fade.ItemStyle(s.tm, 0, b, st, s.style)
 	PaintStyle(ctx, b, style)
 
 	iconSize := int(s.metric(KeyStartButtonIconSize))
@@ -149,7 +223,7 @@ func (s *StartButton) Draw(ctx widget.DrawContext) {
 	labelGap := int(s.metric(KeyStartButtonLabelGap))
 	labelW := 0
 	if wantLabel {
-		labelW = MeasureText(ctx, startButtonLabel, style)
+		labelW = MeasureText(ctx, startButtonLabel(), style)
 	}
 	showLabel := wantLabel && labelW > 0 &&
 		iconSize+2*padX+labelGap+labelW <= b.Dx()
@@ -165,7 +239,7 @@ func (s *StartButton) Draw(ctx widget.DrawContext) {
 	if showLabel {
 		textLeft := iconX + iconSize + labelGap
 		labelRect := image.Rect(textLeft-int(style.PadX), b.Min.Y, b.Max.X, b.Max.Y)
-		DrawTextLeft(ctx, labelRect, startButtonLabel, style)
+		DrawTextLeft(ctx, labelRect, startButtonLabel(), style)
 	}
 
 	s.DrawChildren(ctx)

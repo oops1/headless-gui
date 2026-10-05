@@ -14,7 +14,6 @@
 package engine
 
 import (
-
 	"github.com/oops1/headless-gui/v3/output"
 )
 
@@ -101,6 +100,9 @@ func (e *Engine) takeFrameRequest() bool {
 //
 // Сток первым: он синхронный и не теряет кадров, а канал — очередь с
 // ограниченной глубиной, из которой при переполнении кадр выбрасывается.
+// Выброс запоминается: следующий кадр, для которого в канале найдётся место,
+// уйдёт полным (fullframe.go) — разности после потерянного кадра потребитель
+// наложил бы на картинку, которой у него нет.
 func (e *Engine) deliver(frame output.Frame) {
 	if s := e.getFrameSink(); s != nil {
 		s.Present(frame)
@@ -108,8 +110,8 @@ func (e *Engine) deliver(frame output.Frame) {
 	select {
 	case e.frames <- frame:
 	default:
-		// Потребитель не успевает — кадр теряется. Так было всегда; кому
-		// потеря недопустима, тот берёт сток.
+		// Потребитель не успевает — кадр теряется, но не молча.
+		e.lostFrame.Store(true)
 	}
 }
 
@@ -117,4 +119,3 @@ func (e *Engine) deliver(frame output.Frame) {
 func (e *Engine) pacingIsExternal() bool {
 	return Pacing(e.pacing.Load()) == PacingExternal
 }
-

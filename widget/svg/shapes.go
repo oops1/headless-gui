@@ -30,6 +30,25 @@ func ellipseContours(cx, cy, rx, ry float64) []Contour {
 	return b.contours
 }
 
+// ellipseContoursDash — тот же эллипс, но с начала, которое задаёт SVG: правая
+// точка (cx+rx, cy), обход по часовой. От начала зависит фаза пунктира
+// stroke-dasharray; контур без пунктира остаётся прежним (с верхней точки), чтобы
+// растр существующих значков не менялся.
+func ellipseContoursDash(cx, cy, rx, ry float64) []Contour {
+	if rx <= 0 || ry <= 0 {
+		return nil
+	}
+	b := &pathBuilder{}
+	kx, ky := kappa*rx, kappa*ry
+	b.moveTo(cx+rx, cy)
+	b.cubicTo(cx+rx, cy+ky, cx+kx, cy+ry, cx, cy+ry)
+	b.cubicTo(cx-kx, cy+ry, cx-rx, cy+ky, cx-rx, cy)
+	b.cubicTo(cx-rx, cy-ky, cx-kx, cy-ry, cx, cy-ry)
+	b.cubicTo(cx+kx, cy-ry, cx+rx, cy-ky, cx+rx, cy)
+	b.close()
+	return b.contours
+}
+
 // rectContours строит контур прямоугольника (возможно со скруглением rx,ry).
 func rectContours(x, y, w, h, rx, ry float64) []Contour {
 	if w <= 0 || h <= 0 {

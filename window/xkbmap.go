@@ -28,6 +28,19 @@ type xkbKeymap struct {
 	// keys: xkb-keycode → группа → уровень → руна.
 	// Wayland-событие key несёт evdev-код; xkb-код = evdev + 8.
 	keys map[uint32][][]rune
+	// supers: xkb-keycode → VK_LWIN/VK_RWIN для клавиш, на которых keymap
+	// держит Super_L/Super_R. Руны у них нет, поэтому в keys их не видно.
+	supers map[uint32]int
+}
+
+// vkFor возвращает VK_LWIN или VK_RWIN, если на клавише xkbCode keymap держит
+// Super; иначе 0. Запасной путь для раскладок, где Win стоит не на штатной
+// физической клавише.
+func (m *xkbKeymap) vkFor(xkbCode uint32) int {
+	if m == nil {
+		return 0
+	}
+	return m.supers[xkbCode]
 }
 
 // runeFor возвращает руну для xkb-кода с учётом группы (раскладки),
@@ -166,11 +179,28 @@ func parseXkbKeymap(data string) *xkbKeymap {
 		if len(groups) > 0 {
 			km.keys[code] = groups
 		}
+		if vk := superInKeyBody(body); vk != 0 {
+			if km.supers == nil {
+				km.supers = make(map[uint32]int)
+			}
+			km.supers[code] = vk
+		}
 	}
 	if len(km.keys) == 0 {
 		return nil
 	}
 	return km
+}
+
+// superInKeyBody ищет в теле key {...} символ Super_L или Super_R и отдаёт
+// соответствующий виртуальный код (0 — такого символа нет).
+func superInKeyBody(body string) int {
+	for _, name := range []string{"Super_L", "Super_R"} {
+		if strings.Contains(body, name) {
+			return keysymNameToVK(name)
+		}
+	}
+	return 0
 }
 
 // parseXkbKeyBody извлекает группы символов из тела key {...}:

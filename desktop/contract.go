@@ -108,10 +108,30 @@ type WindowPreviews interface {
 
 // AppInfo — приложение в каталоге (меню «Пуск», закреплённые значки).
 type AppInfo struct {
-	ID         AppID
-	Title      string
-	Icon       image.Image
+	ID    AppID
+	Title string
+	// Icon — значок одной картинкой. Годится, когда у приложения один растр;
+	// на панели (24), в меню (20–32) и на плитках (48–64) он одинаково
+	// уменьшается или растягивается, то есть где-то мягок.
+	Icon image.Image
+	// IconAt — необязательный источник значка по размеру: получает сторону
+	// квадрата в ФИЗИЧЕСКИХ пикселях (логический размер × масштаб экрана) и
+	// отдаёт картинку подходящего размера — растр ближайшего размера или SVG,
+	// растеризованный под него. nil или пустой ответ — берётся Icon.
+	// Вызывается при отрисовке: функция должна быть быстрой и потокобезопасной.
+	IconAt     func(size int) image.Image
 	Categories []string
+}
+
+// IconFor возвращает значок для квадрата со стороной size (физические пиксели):
+// IconAt(size), а при его отсутствии или пустом ответе — Icon.
+func (a AppInfo) IconFor(size int) image.Image {
+	if a.IconAt != nil && size > 0 {
+		if img := a.IconAt(size); img != nil {
+			return img
+		}
+	}
+	return a.Icon
 }
 
 // AppCatalog — каталог приложений и закрепление.
@@ -176,6 +196,11 @@ const (
 )
 
 // Notification — одно уведомление.
+//
+// Первые шесть полей — прежняя модель, её хватает плоскому центру. Остальные
+// нужны центру в стиле Windows 10 (группы по приложению, значок, действия):
+// плоский их не читает, а потребитель, который их не заполнял, ничего не
+// теряет.
 type Notification struct {
 	ID       NotificationID
 	Title    string
@@ -183,6 +208,102 @@ type Notification struct {
 	AppID    AppID
 	Severity Severity
 	Time     time.Time
+
+	// AppName — название приложения в заголовке группы. Пусто — берётся
+	// AppID: группа не должна остаться без подписи.
+	AppName string
+	// Icon — значок приложения. Показывается в заголовке группы (малый) и на
+	// карточке (крупный), поэтому лучше отдавать картинку покрупнее — до
+	// 48 логических пикселей. IconAt, если задан, главнее: получает сторону в
+	// ФИЗИЧЕСКИХ пикселях (как AppInfo.IconAt) и отдаёт растр подходящего
+	// размера или SVG, растеризованный под него.
+	Icon   image.Image
+	IconAt func(size int) image.Image
+	// Timestamp — момент прихода; когда задан, главнее Time (поле Time
+	// осталось от прежней модели, и двух источников времени не нужно ни
+	// тому, ни другому потребителю: читать надо At()).
+	Timestamp time.Time
+	// Actions — кнопки, ссылки, поле ответа и выпадающий список внутри
+	// карточки. Нет действий — карточка без них.
+	Actions []NotificationAction
+}
+
+// At возвращает время уведомления: Timestamp, а если он не задан, Time.
+func (n Notification) At() time.Time {
+	if !n.Timestamp.IsZero() {
+		return n.Timestamp
+	}
+	return n.Time
+}
+
+// IconFor возвращает значок для квадрата со стороной size (физические пиксели):
+// IconAt(size), а при его отсутствии или пустом ответе — Icon.
+func (n Notification) IconFor(size int) image.Image {
+	if n.IconAt != nil && size > 0 {
+		if img := n.IconAt(size); img != nil {
+			return img
+		}
+	}
+	return n.Icon
+}
+
+// NotificationActionKind — вид действия внутри карточки.
+type NotificationActionKind int
+
+const (
+	// NotificationActionButton — кнопка. Соседние кнопки встают в один ряд
+	// и делят его ширину поровну.
+	NotificationActionButton NotificationActionKind = iota
+	// NotificationActionLink — ссылка, текст цветом акцента без подложки.
+	NotificationActionLink
+	// NotificationActionReply — поле ответа и кнопка отправки справа от него.
+	NotificationActionReply
+	// NotificationActionSelect — выпадающий список с подписью над ним.
+	NotificationActionSelect
+)
+
+// NotificationAction — одно действие в карточке уведомления.
+type NotificationAction struct {
+	// ID возвращается в событии; уникален в пределах уведомления.
+	ID   string
+	Kind NotificationActionKind
+	// Title — надпись кнопки или ссылки; у поля ответа — кнопки отправки
+	// (пусто — «Ответить» на языке интерфейса); у выпадающего списка —
+	// подпись над списком («Напомнить ещё раз через:»).
+	Title string
+	// Placeholder — подсказка пустого поля ответа.
+	Placeholder string
+	// Options и Selected — пункты выпадающего списка и выбранный сначала.
+	Options  []string
+	Selected int
+	// Keep оставляет уведомление в центре после нажатия. По умолчанию
+	// кнопка, ссылка и отправка ответа его снимают, как в Windows.
+	Keep bool
+}
+
+// NotificationActionEvent — что пользователь сделал с карточкой.
+type NotificationActionEvent struct {
+	// Notification — уведомление, на котором сделано действие.
+	Notification NotificationID
+	// Action — NotificationAction.ID; пусто — нажата сама карточка
+	// (активация по умолчанию: открыть приложение).
+	Action string
+	Kind   NotificationActionKind
+	// Value — введённый ответ либо выбранный пункт списка (для кнопки и
+	// ссылки пусто); Index — номер выбранного пункта (иначе -1).
+	Value string
+	Index int
+	// Inputs — текущие значения полей карточки (ответ и списки) по
+	// NotificationAction.ID: кнопка «Приступим» несёт выбранное «1 неделю».
+	Inputs map[string]string
+}
+
+// NotificationActions — необязательный интерфейс источника уведомлений:
+// получатель действий. Центр вызывает его, если Notifications его
+// реализует, и в придачу зовёт колбэк NotificationCenter.OnAction — годится
+// любой из двух путей, пользоваться обоими сразу незачем.
+type NotificationActions interface {
+	InvokeNotificationAction(NotificationActionEvent)
 }
 
 // Notifications — центр уведомлений.

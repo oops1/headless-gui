@@ -62,6 +62,41 @@ type DismissableAt interface {
 	DismissAt(x, y int)
 }
 
+// EscapeDismisser — виджет, который закрывается по Esc независимо от того, где
+// клавиатурный фокус: всплывающая панель рабочего стола, у которой фокуса
+// может не быть вовсе.
+//
+// Движок зовёт DismissOnEscape у таких виджетов по нажатию Esc, прежде чем
+// отдать клавишу виджету с фокусом (см. DismissOnEscape). Метод возвращает
+// true, если что-то закрыл: тогда клавиша считается обработанной.
+type EscapeDismisser interface {
+	DismissOnEscape() bool
+}
+
+// DismissOnEscape обходит поддерево w от верхних слоёв к нижним (последний
+// ребёнок — верхний) и закрывает ПЕРВЫЙ найденный EscapeDismisser, у которого
+// есть что закрывать. Один Esc — один слой: открытые друг над другом панели
+// закрываются по очереди, сверху вниз. Возвращает true, если что-то закрыто.
+func DismissOnEscape(w Widget) bool {
+	return dismissOnEscape(w, 0)
+}
+
+func dismissOnEscape(w Widget, depth int) bool {
+	if w == nil || depth > 256 {
+		return false
+	}
+	children := w.Children()
+	for i := len(children) - 1; i >= 0; i-- {
+		if dismissOnEscape(children[i], depth+1) {
+			return true
+		}
+	}
+	if d, ok := w.(EscapeDismisser); ok {
+		return d.DismissOnEscape()
+	}
+	return false
+}
+
 // DismissAll рекурсивно закрывает все Dismissable-виджеты в поддереве w.
 func DismissAll(w Widget) {
 	if d, ok := w.(Dismissable); ok {

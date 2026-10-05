@@ -127,7 +127,10 @@ func resolveOrder(name string, byName map[string]*Profile) ([]*Profile, error) {
 // читает готовые таблицы. Здесь же раскрываются откаты по состояниям —
 // каждому объявленному (компонент, часть) заполняются все шесть состояний,
 // чтобы поиск во время отрисовки был одним обращением к карте.
-func resolve(name string, byName map[string]*Profile) (*Theme, error) {
+//
+// ov — переопределения приложения поверх профилей (акцент, флаги); нулевое
+// значение — «ничего не переопределено».
+func resolve(name string, byName map[string]*Profile, ov overrides) (*Theme, error) {
 	chain, err := resolveOrder(name, byName)
 	if err != nil {
 		return nil, err
@@ -173,15 +176,36 @@ func resolve(name string, byName map[string]*Profile) (*Theme, error) {
 		}
 	}
 
+	// ── Переопределения приложения: флаги и акцент ───────────────────────
+	for k, v := range ov.flags {
+		t.flags[k] = v
+	}
+	t.applyAccent(ov.accent)
+
 	// ── Стили: слияние дельт по цепочке ─────────────────────────────────
 	// merged[ключ] — накопленные дельты предков и потомков в порядке цепочки.
 	merged := map[StyleKey][]StyleDelta{}
+	bases := map[string]string{}
 	for _, p := range chain {
 		for k, d := range p.Styles {
 			k.State = k.State.Dominant()
 			merged[k] = append(merged[k], d)
 		}
+		// Условные правила профиля идут после его обычных: флаг уточняет
+		// то, что профиль уже сказал, а не заменяет его.
+		for _, c := range p.Conditional {
+			if !t.flags[c.Flag] {
+				continue
+			}
+			k := c.Key
+			k.State = k.State.Dominant()
+			merged[k] = append(merged[k], c.Delta)
+		}
+		for comp, base := range p.StyleBase {
+			bases[comp] = base
+		}
 	}
+	applyStyleBases(merged, bases)
 
 	// Пары (компонент, часть), о которых тема вообще что-то знает.
 	type compPart struct{ component, part string }
@@ -197,12 +221,12 @@ func resolve(name string, byName map[string]*Profile) (*Theme, error) {
 	// наследуются остальные), затем прочие — каждое поверх покоя.
 	for cp := range parts {
 		normal := base.Clone()
-		applyAll(normal, merged[StyleKey{cp.component, cp.part, StateNormal}])
+		applyAll(normal, t.colors, merged[StyleKey{cp.component, cp.part, StateNormal}])
 		// Часть наследует стиль компонента целиком, если он объявлен.
 		if cp.part != "" {
 			whole := base.Clone()
-			applyAll(whole, merged[StyleKey{cp.component, "", StateNormal}])
-			applyAll(whole, merged[StyleKey{cp.component, cp.part, StateNormal}])
+			applyAll(whole, t.colors, merged[StyleKey{cp.component, "", StateNormal}])
+			applyAll(whole, t.colors, merged[StyleKey{cp.component, cp.part, StateNormal}])
 			normal = whole
 		}
 		t.styles[StyleKey{cp.component, cp.part, StateNormal}] = normal
@@ -210,9 +234,9 @@ func resolve(name string, byName map[string]*Profile) (*Theme, error) {
 		for _, st := range statePriority {
 			s := normal.Clone()
 			if cp.part != "" {
-				applyAll(s, merged[StyleKey{cp.component, "", st}])
+				applyAll(s, t.colors, merged[StyleKey{cp.component, "", st}])
 			}
-			applyAll(s, merged[StyleKey{cp.component, cp.part, st}])
+			applyAll(s, t.colors, merged[StyleKey{cp.component, cp.part, st}])
 			t.styles[StyleKey{cp.component, cp.part, st}] = s
 		}
 	}
@@ -220,9 +244,75 @@ func resolve(name string, byName map[string]*Profile) (*Theme, error) {
 	return t, nil
 }
 
-func applyAll(s *Style, deltas []StyleDelta) {
+func applyAll(s *Style, colors map[Key]color.RGBA, deltas []StyleDelta) {
 	for i := range deltas {
 		deltas[i].applyTo(s)
+		deltas[i].applyTokens(s, colors)
+	}
+}
+
+// overrides — то, что приложение накладывает поверх профилей: акцент и флаги
+// (Manager.SetAccent, Manager.SetFlag). Переживает смену темы: пользователь
+// выбирает акцент для оболочки, а не для одного профиля.
+type overrides struct {
+	accent *color.RGBA
+	flags  map[Key]bool
+}
+
+// applyAccent доводит токены акцента до итогового вида.
+//
+// С переопределением производные считаются заново от него, а значения,
+// объявленные профилем, отбрасываются: наведение от старого акцента на новом
+// выглядело бы чужим. Без переопределения профиль хозяин своих токенов, и
+// считаются только недостающие производные. Выделение по умолчанию равно
+// акценту — профилю не нужно объявлять его отдельно, чтобы оно следовало за
+// сменой.
+func (t *Theme) applyAccent(override *color.RGBA) {
+	if override != nil {
+		for k, c := range DeriveAccent(*override).tokens() {
+			t.colors[k] = c
+		}
+		// Выделение, объявленное профилем, остаётся его решением.
+		if _, own := t.colors[KeySelection]; !own {
+			t.colors[KeySelection] = t.colors[KeyAccent]
+		}
+		return
+	}
+	base, ok := t.colors[KeyAccent]
+	if !ok {
+		return
+	}
+	for k, c := range DeriveAccent(base).tokens() {
+		if _, declared := t.colors[k]; !declared {
+			t.colors[k] = c
+		}
+	}
+	if _, declared := t.colors[KeySelection]; !declared {
+		t.colors[KeySelection] = t.colors[KeyAccent]
+	}
+}
+
+// applyStyleBases дописывает правила базовых компонентов перед правилами
+// производных (см. Profile.SetStyleBase).
+func applyStyleBases(merged map[StyleKey][]StyleDelta, bases map[string]string) {
+	if len(bases) == 0 {
+		return
+	}
+	// Снимок ключей: карта дополняется по ходу.
+	keys := make([]StyleKey, 0, len(merged))
+	for k := range merged {
+		keys = append(keys, k)
+	}
+	for comp, base := range bases {
+		for _, k := range keys {
+			if k.Component != base {
+				continue
+			}
+			dk := k
+			dk.Component = comp
+			// Правила базы идут первыми: свои правила компонента перекрывают.
+			merged[dk] = append(append([]StyleDelta(nil), merged[k]...), merged[dk]...)
+		}
 	}
 }
 

@@ -68,6 +68,9 @@ type QuickSettings struct {
 	mu       sync.Mutex
 	unsub    func()
 	dragging bool
+
+	// fade — плавный переход цвета плиток при смене Active (тема: hover).
+	fade motion
 }
 
 // NewQuickSettings создаёт панель быстрых настроек, оформляемую темой tm и
@@ -324,7 +327,7 @@ func (q *QuickSettings) drawNetworkTile(ctx widget.DrawContext) {
 	if r.Empty() {
 		return
 	}
-	s := q.tileStyle("tile.network", q.netActive())
+	s := q.tileStyle("tile.network", r, q.netActive())
 	PaintStyle(ctx, r, s)
 	inner := shrinkByPad(r, s)
 	if inner.Empty() {
@@ -346,7 +349,7 @@ func (q *QuickSettings) drawVolumeTile(ctx widget.DrawContext) {
 	if r.Empty() {
 		return
 	}
-	s := q.tileStyle("tile.volume", q.volumeActive())
+	s := q.tileStyle("tile.volume", r, q.volumeActive())
 	PaintStyle(ctx, r, s)
 	inner := shrinkByPad(r, s)
 	if inner.Empty() {
@@ -367,7 +370,7 @@ func (q *QuickSettings) drawPowerTile(ctx widget.DrawContext) {
 	if r.Empty() {
 		return
 	}
-	s := q.tileStyle("tile.power", q.powerActive())
+	s := q.tileStyle("tile.power", r, q.powerActive())
 	PaintStyle(ctx, r, s)
 	inner := shrinkByPad(r, s)
 	if inner.Empty() {
@@ -447,14 +450,16 @@ func drawBar(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 
 // ─── Тема и состояние ───────────────────────────────────────────────────────
 
-// tileStyle читает стиль плитки part в состоянии Active (active=true) или
-// Normal.
-func (q *QuickSettings) tileStyle(part string, active bool) *theme.Style {
+// tileStyle читает стиль плитки part (занимающей r) в состоянии Active
+// (active=true) или Normal. Смена состояния идёт плавным переходом цвета.
+func (q *QuickSettings) tileStyle(part string, r image.Rectangle, active bool) *theme.Style {
 	st := theme.StateNormal
 	if active {
 		st = theme.StateActive
 	}
-	return q.partStyle(part, st)
+	return q.fade.Style(q.Theme(), part, r, st, func(st theme.State) *theme.Style {
+		return q.partStyle(part, st)
+	})
 }
 
 // partStyle читает стиль части part панели из активной темы (пустой стиль,

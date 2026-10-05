@@ -36,7 +36,9 @@ func startMenuFixture(t *testing.T) (*StartMenu, *StaticAppCatalog) {
 		AppInfo{ID: "files", Title: "Проводник"},
 		AppInfo{ID: "mail", Title: "Почта"},
 	)
-	m := NewStartMenu(panelTheme(t), cat)
+	// Плоский вид меню: его сохраняют темы без презентера плиток. Windows 10
+	// получает меню с боковой панелью и плитками (startmenu_tiles_test.go).
+	m := NewStartMenu(managerFor(t, theme.ProfileWindows11), cat)
 	m.Screen = panelScreen()
 	m.Open(panelAnchor())
 	return m, cat
@@ -181,7 +183,7 @@ func TestQuickSettings_CloseUnsubscribes(t *testing.T) {
 func notifFixture(t *testing.T) (*NotificationCenter, *FakeNotifications) {
 	t.Helper()
 	ns := notesFake()
-	nc := NewNotificationCenter(panelTheme(t), ns)
+	nc := NewNotificationCenter(flatNotifTheme(t), ns)
 	nc.Screen = panelScreen()
 	nc.Open(panelAnchor())
 	return nc, ns
@@ -226,13 +228,13 @@ func TestNotificationCenter_ClearAll(t *testing.T) {
 }
 
 func TestNotificationCenter_EmptyStateAndClose(t *testing.T) {
-	tm := panelTheme(t)
+	tm := flatNotifTheme(t)
 	ns := NewFakeNotifications()
 	nc := NewNotificationCenter(tm, ns)
 	nc.Screen = panelScreen()
 	nc.Open(panelAnchor())
 
-	if nc.EmptyText == "" {
+	if nc.EmptyLabel() == "" {
 		t.Error("не задан текст пустого состояния")
 	}
 	if nc.OverlayBounds().Empty() {
