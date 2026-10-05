@@ -42,7 +42,7 @@ func barOfMenu(t *testing.T, m *StartMenu, a startArea) barGeom {
 	return b
 }
 
-func press(m *StartMenu, x, y int) {
+func pressMenu(m *StartMenu, x, y int) {
 	m.OnMouseButton(widget.MouseEvent{X: x, Y: y, Button: widget.MouseLeft, Pressed: true})
 }
 func release(m *StartMenu, x, y int) {
@@ -61,7 +61,7 @@ func TestScrollbar_DragThumbScrollsList(t *testing.T) {
 	if !m.WantsCapture(widget.MouseEvent{X: x, Y: y, Button: widget.MouseLeft, Pressed: true}) {
 		t.Error("нажатие на бегунок не запросило захват мыши")
 	}
-	press(m, x, y)
+	pressMenu(m, x, y)
 	if !m.v.bar.active || m.v.bar.area != areaList {
 		t.Fatalf("перетаскивание не началось: %+v", m.v.bar)
 	}
@@ -121,7 +121,7 @@ func TestScrollbar_ThumbDoesNotFadeWhileDragged(t *testing.T) {
 	b := barOfMenu(t, m, areaList)
 	x, y := b.thumb.Min.X+2, b.thumb.Min.Y+5
 	m.OnMouseMove(x, y)
-	press(m, x, y)
+	pressMenu(m, x, y)
 	m.OnMouseMove(x, y+20)
 
 	time.Sleep(90 * time.Millisecond) // втрое дольше паузы
@@ -189,7 +189,7 @@ func TestScrollbar_TrackClickPagesList(t *testing.T) {
 
 	x, y := b.track.Min.X+3, b.track.Max.Y-10 // ниже бегунка
 	m.OnMouseMove(x, y)
-	press(m, x, y)
+	pressMenu(m, x, y)
 	release(m, x, y)
 	if m.v.listScroll != page {
 		t.Errorf("щелчок под бегунком: прокрутка %d, ждали страницу %d", m.v.listScroll, page)
@@ -197,7 +197,7 @@ func TestScrollbar_TrackClickPagesList(t *testing.T) {
 	if m.v.bar.active {
 		t.Error("щелчок по дорожке начал перетаскивание")
 	}
-	press(m, x, y)
+	pressMenu(m, x, y)
 	release(m, x, y)
 	if m.v.listScroll != 2*page {
 		t.Errorf("второй щелчок: %d, ждали %d", m.v.listScroll, 2*page)
@@ -206,7 +206,7 @@ func TestScrollbar_TrackClickPagesList(t *testing.T) {
 	nb := barOfMenu(t, m, areaList)
 	x, y = nb.track.Min.X+3, nb.track.Min.Y+2 // выше бегунка
 	m.OnMouseMove(x, y)
-	press(m, x, y)
+	pressMenu(m, x, y)
 	release(m, x, y)
 	if m.v.listScroll != page {
 		t.Errorf("щелчок над бегунком: прокрутка %d, ждали %d", m.v.listScroll, page)
@@ -217,7 +217,7 @@ func TestScrollbar_TrackClickPagesList(t *testing.T) {
 	// Дальше конца не уходит.
 	for i := 0; i < 50; i++ {
 		b = barOfMenu(t, m, areaList)
-		press(m, b.track.Min.X+3, b.track.Max.Y-2)
+		pressMenu(m, b.track.Min.X+3, b.track.Max.Y-2)
 		release(m, b.track.Min.X+3, b.track.Max.Y-2)
 	}
 	if want := b.content - b.viewH; m.v.listScroll != want {
@@ -248,7 +248,7 @@ func TestScrollbar_DragThumbScrollsTiles(t *testing.T) {
 	if !m.WantsCapture(widget.MouseEvent{X: x, Y: y, Button: widget.MouseLeft, Pressed: true}) {
 		t.Error("нажатие на бегунок плиток не запросило захват")
 	}
-	press(m, x, y)
+	pressMenu(m, x, y)
 	if m.v.drag.pending || m.v.drag.active {
 		t.Fatal("нажатие на бегунок плиток начало перенос плитки")
 	}
@@ -277,7 +277,7 @@ func TestScrollbar_DragThumbScrollsTiles(t *testing.T) {
 	step := m.metricInt(KeyTileUnit) + m.metricInt(KeyTileGap)
 	x, y = nb.track.Min.X+3, nb.track.Min.Y+2
 	m.OnMouseMove(x, y)
-	press(m, x, y)
+	pressMenu(m, x, y)
 	release(m, x, y)
 	if got, want := m.v.tileScroll, span-(nb.viewH-step); got != want {
 		t.Errorf("страница вверх по плиткам: прокрутка %d, ждали %d", got, want)
@@ -291,7 +291,7 @@ func TestScrollbar_DragInvalidatesOnlyItsArea(t *testing.T) {
 	b := barOfMenu(t, m, areaList)
 	x, y := b.thumb.Min.X+2, b.thumb.Min.Y+5
 	m.OnMouseMove(x, y)
-	press(m, x, y)
+	pressMenu(m, x, y)
 
 	var rects []image.Rectangle
 	fulls := 0

@@ -41,7 +41,7 @@ func dragTile(t *testing.T, m *StartMenu, id TileID, to image.Point, drop bool) 
 	}
 	fx, fy := pointIn(from)
 	m.OnMouseMove(fx, fy)
-	press(m, fx, fy)
+	pressMenu(m, fx, fy)
 	m.OnMouseMove(fx+10, fy+10)
 	m.OnMouseMove(to.X, to.Y)
 	if !m.v.drag.active {
@@ -226,7 +226,7 @@ func TestGroups_DropBelowLastWhenContentFillsArea(t *testing.T) {
 	from := m.tileRectAbs("g0t0")
 	fx, fy := pointIn(from)
 	m.OnMouseMove(fx, fy)
-	press(m, fx, fy)
+	pressMenu(m, fx, fy)
 	m.OnMouseMove(fx+10, fy+10)
 	// Тянем к нижней кромке: каждое движение у неё прокручивает область.
 	bottom := image.Pt(fx, g.tinner.Max.Y-2)
@@ -264,7 +264,7 @@ func TestGroups_ReleaseOutsideMenuCompletesDrop(t *testing.T) {
 	m.OnTilesChanged = func(gs []TileGroup) { got = gs }
 	from := m.tileRectAbs("t0")
 	fx, fy := pointIn(from)
-	press(m, fx, fy)
+	pressMenu(m, fx, fy)
 	m.OnMouseMove(fx+10, fy+10)
 	to := tilesPt(m, 100, 560)
 	m.OnMouseMove(to.X, to.Y)
