@@ -1488,6 +1488,12 @@ func (e *Engine) renderFrame() output.Frame {
 	e.mu.RUnlock()
 
 	damageRects, damageAll := e.consumeDamage()
+	// Повреждение, задевшее размытую подложку, расширяется на неё целиком:
+	// иначе размытие посчиталось бы по куску поверх прошлого кадра
+	// (backdropdamage.go).
+	if !damageAll {
+		damageRects = canvas.expandForBackdrops(damageRects)
+	}
 	// Полный кадр (fullframe.go): рисуется всё и отдаётся всё, без диффа.
 	full := e.takeFullFrame()
 	if full {
@@ -1624,6 +1630,8 @@ func (e *Engine) renderFrame() output.Frame {
 	default:
 		tiles = canvas.diffAndSync()
 	}
+
+	canvas.finishBackdrops(partial, damageRects)
 
 	seq := e.frameSeq.Add(1)
 

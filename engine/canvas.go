@@ -31,6 +31,9 @@ import (
 // Реализует интерфейс widget.DrawContext.
 type Canvas struct {
 	front      *image.RGBA           // последний отправленный кадр
+	// backdrops — области размытия прошлого кадра, backdropsNext — текущего
+	// (backdropdamage.go).
+	backdrops, backdropsNext []image.Rectangle
 	back       *image.RGBA           // текущий рендер-таргет (может быть чужой памятью — см. SetSurface)
 	backOwn    *image.RGBA           // собственный back-буфер холста; back переключается на него, когда внешняя память не задана
 	format     PixelFormat           // порядок каналов back-буфера (см. pixelformat.go)
