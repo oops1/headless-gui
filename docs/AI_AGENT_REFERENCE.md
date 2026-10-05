@@ -5052,9 +5052,9 @@ finishes the animation first (`finishAnimations()`), because the theme animates.
 for it with the presenter `theme.PresenterStartTiles` (`"tiles"`,
 `Profile.Presenters["startmenu"]`, set by the Windows 10 profile and inherited by
 its dark variant); the component asks `StartMenu.tiled()` and never looks at the
-theme name. Windows 11, Windows 2000 and macOS keep the flat list (rendered
-frames of all eight profiles are byte-identical to v3.30, only Windows 10
-changes). Same object, same `Open/Close/Toggle`: a theme switch on an open menu
+theme name. Windows 2000 and macOS keep the flat list (rendered frames of those
+profiles are byte-identical to v3.30; Windows 11 got its own grid layout, see
+"Windows 11 Start menu" below). Same object, same `Open/Close/Toggle`: a theme switch on an open menu
 changes the look without re-creating anything.
 
 ```go
@@ -5278,6 +5278,124 @@ edit and reorder, footer, keyboard, ring, accent/theme/language live, first fram
 < 100 ms, no subscriptions when closed), `quickpanel_clip_test.go` (nothing is
 drawn outside the grid or the panel), `theme/profiles_win11_quick_test.go`.
 Frames: `QS_OUT=dir go test -run TestVisual_QuickSettingsWin11 ./desktop/`.
+
+### Windows 11 Start menu — pinned grid, Recommended, All apps (next minor)
+
+`desktop.StartMenu` has a third layout. A theme asks for it with the presenter
+`theme.PresenterStartGrid` (`"grid"`, `Profile.Presenters["startmenu"]`, set by the
+Windows 11 profile and inherited by its dark variant); the component asks
+`StartMenu.grid()` / `AsGrid()` and never looks at the theme name. Windows 10 keeps
+tiles, Windows 2000 and macOS keep the flat list: rendered frames of those three
+are byte-identical to before (every frame of the desktop golden and snapshot tests,
+135 PNGs; only the Windows 11 `start` frames and the `edge_Windows11 Dark_*_start`
+goldens changed). Same object, same `Open/Close/
+Toggle`: switching the theme between the three on an open menu changes the look
+without re-creating anything (`syncKind` resets the state that belongs to the old
+look: area, selection, hover, page, drag, view).
+
+```go
+menu := desktop.NewStartMenu(m, catalog)
+menu.Screen = monitorBounds
+menu.SetPinned([]desktop.StartPinned{{ID: "edge", App: "edge", Title: "Edge", IconAt: icon}}) // nil = AppCatalog.Pinned()
+menu.OnPinnedChanged = func(p []desktop.StartPinned) { save(p) }  // after a drag: whole new order
+menu.OnPinnedLaunch = func(id string) { ... }                      // cell without App
+menu.SetRecommended(src)            // desktop.StartRecommendedSource; nil = StartMenuSource.Recent()
+menu.SetRecommendedEnabled(false)   // policy: the section disappears, pinned take its room
+menu.OnRecommendedActivate = func(id string) { ... }               // row without App
+menu.SetUser(desktop.StartUser{Name: "oops", AvatarAt: avatar})
+menu.UserMenu = func() []widget.MenuItem { ... }                   // footer menus (consumer decides)
+menu.PowerMenu = func() []widget.MenuItem { ... }                  // nil -> OnSidebarActivate("user"|"power")
+menu.GroupBounds = func() image.Rectangle { return appsGroup }     // centre of the taskbar group
+menu.ContextMenu = func(t desktop.StartTarget) []widget.MenuItem  // StartTargetPinned/Recommended/User/Power
+menu.SetSource(src); menu.SetSearchProvider(p)   // "All apps" list and search: same as Windows 10
+menu.View() / SetView(desktop.StartViewMain | StartViewAllApps | StartViewRecommended)
+menu.PageCount() / Page() / SetPage(n)           // pages of the pinned grid
+```
+
+- **Data comes from the consumer.** `StartPinned{ID, App, Title, Icon, IconAt}`,
+  `StartRecommendedItem{ID, App, Title, Subtitle, Icon, IconAt}`, `StartUser{Name,
+  Avatar, AvatarAt}`; `FakeStartRecommended` is the test fake. A cell with `App` is
+  launched through `AppCatalog.Launch`, without it through `OnPinnedLaunch` /
+  `OnRecommendedActivate`; the menu closes after a launch. Once the user drags a cell
+  the menu keeps its own order (`SetPinned` semantics) and the catalog's later
+  changes are no longer read until the consumer calls `SetPinned(nil)`.
+- **Layout (profile metrics, logical px at 100 %).** `startmenu.w11.width` 642,
+  `.height` 726 (`.height.min` 360), `.corner` 8, `.pad` 32, `.margin` 12 (gap above
+  the Start button), `.grid.columns` 6, `.grid.cell.w/.h` 96×84, `.grid.gap.y` 16,
+  `.grid.icon` 32, `.footer.height` 64, `.search.top/.height/.corner/.pad/.icon`
+  28/32/16/12/16, `.section.height` 28, `.section.gap` 16, `.rec.columns/.rows` 2/3,
+  `.rec.row.height` 56, `.rec.icon` 32, `.dots.size/.gap` 6/8, `.footer.avatar` 32,
+  `.footer.button` 40. A value the profile does not declare falls back to the one
+  above (`StartMenu.gm`). The list ("All apps", "All recommendations", results) uses
+  the Windows 10 metrics `startmenu.row.height` (40 here), `.letter.height`,
+  `.icon.size`, `.row.pad`, `.row.icon.gap`, `scrollbar.thin.*`.
+  Geometry is one function, `gridGeometry(panel)` (search 32 high at the top, section
+  headers 28, grid centred, recommended rows anchored to the footer, footer inside the
+  1 px border); hit testing, drawing and keys use it, so they never disagree. The
+  number of Recommended rows (3 → 0) and of pinned rows shrinks with the available
+  height, a narrower screen drops grid columns; the panel never leaves the monitor
+  (`Flyout.fitInto`) and its height is cut to the work area. Checked for 100-200 %
+  on 1920×1080, 1366×768 and 1280×720 (`TestStartGrid_ScalesWithoutClipping`).
+- **Position** (`Flyout.Place`, `StartMenu.placeGrid`): above the Start button with the
+  `.margin` gap; with the flag `taskbar.centered` (read live, so the alignment
+  switch needs no re-creation) centred on `GroupBounds()` or, without it, on the
+  monitor centre (the taskbar centres its group on the panel); with it off, at the
+  left edge of the button. Side taskbars use the ordinary side placement.
+- **Views.** Main: search, "Pinned" + "All apps ›", pinned grid, "Recommended" +
+  "More ›", footer. "All apps" is the Windows 10 list unchanged (letters, folders,
+  letter-jump grid, thin scrollbar) under a "Back" header; "More ›" shows every
+  recommendation as two-line rows of the same list (`rowRec`). A non-empty query
+  replaces the middle with search results (`SearchProvider`), like Windows 10. Opening
+  always starts on the main view. Only the middle changes: search and footer stay.
+- **Pinned pages.** Pinned apps that do not fit are paged, dots on the right
+  (`dots`, `Page`); wheel flips one page (not more often than `wheelFlipGap`, 220 ms —
+  a touchpad sends dozens of events per gesture), dots click, PageUp/PageDown.
+- **Drag.** Press on a cell captures the mouse (`WantsCapture`), a 4 px threshold
+  starts the drag, the layout previews the new order (the dragged cell leaves an
+  outline, the cell follows the pointer), hovering the dots flips the page, release
+  calls `OnPinnedChanged` with the whole new order; the same order is no event; a
+  release outside the menu still ends the drag.
+- **Search field.** Own, inside the menu (32 high, corner 16): typing in any area goes
+  into it (`typeToSearch`), caret editing (Left/Right/Home/End/Backspace/Delete,
+  Ctrl+V), click places the caret, accent frame while it is the keyboard area. The
+  query/results/provider are the shared `startView` ones, so a taskbar `SearchBox`
+  bound with `Bind` still works and mirrors the text. `AsTiled()` is false for this
+  view: the taskbar search box is not needed for it.
+- **Keyboard.** Tab/Shift+Tab: search → pinned → recommended → footer (list views:
+  search → list → footer); arrows follow the grid (Up from the first row → "All apps",
+  Down from the last → Recommended → footer), Home/End, PageUp/PageDown, Enter/Space,
+  Esc (closes the context menu, then the letter grid, then the menu), Backspace with
+  an empty query goes back from a list view, Menu or Shift+F10 opens the context
+  menu of the selected object. Focus ring: `PaintFocusRing`.
+- **Look (`theme/profiles_win11_start.go`).** Parts of `startmenu`: `heading`, `link`
+  (the "All apps ›" button), `pin`, `rec`, `rec.sub`, `row`, `row.sub`, `letter`,
+  `scrollbar`, `search`, `search.hint`, `footer`, `footer.item`, `avatar`, `dot`.
+  Plates are neutral grey films (`RGBA(128,128,128,a)`) that work on both light and
+  dark surfaces, text and hairlines are token references (`text`, `border`,
+  `accent`), so `Windows11Dark` only gained ONE token, `field` (`theme.KeyField`, the
+  search field fill) — 13 of its 15. The declaration runs before
+  `declareWin11Materials`, so the parts get no Mica and no big shadow of their own;
+  the panel itself follows `FlagBackdropMica`/`FlagBackdropMicaAlt`/`FlagShadowSoft`
+  (Solid by default). The base style got the 1 px `border` token frame.
+- **Strings.** `desktop.start.recommended|more|back|power`, RU and EN; "Pinned",
+  "All apps", the search hint and "No results" are shared with Windows 10.
+  `desktop.StartGridAliases(recommended, more, back, power)` binds them to the
+  consumer's table (`widget.AliasStrings`).
+- **Shared code touched.** `startGeometry`, `hitTest`, `keyRect`, `activate`,
+  `targetFor`, `refreshResults`, `typeToSearch`, `SearchKey`, letter grid and the
+  wheel dispatch on `grid()`; `tiled()` stays Windows-10-only and `modern()` is
+  `tiled() || grid()` for what both share (focus request, Tab, capture, subscriptions).
+  New `startArea`s: `areaSearch/Pinned/Rec/Footer`; the list keeps `areaList`.
+
+Cost (1280×800, 300 apps, Windows 11, `TestStartMenu11_FirstFrameUnder100ms`): first
+frame after `Open` ≈ 13 ms cold, ≈ 12 ms warm, the 300-app "All apps" frame < 100 ms,
+hover frame ≈ 1 ms; opening, hover, keys, paging and search invalidate only the menu
+rectangle (`TestStartMenu11_OpenDamagesOnlyMenuArea`). Snapshots: `GOLDEN_OUT=dir go
+test ./desktop -run TestStartMenu11_` writes light/dark PNGs of the main view, hover,
+focus, All apps, More, search, drag, pages, context/power menus, Mica, 100/150/200 %.
+Not done: moving a pinned cell with the keyboard (drag only), a separate Windows 11
+power flyout width (the menu takes the profile's `menu.width.min`), animated page
+change (instant), recommendation rows beyond 2 columns in "All recommendations".
 
 ### Measured cost of a frame
 

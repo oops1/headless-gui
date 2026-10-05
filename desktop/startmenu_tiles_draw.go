@@ -48,7 +48,7 @@ func (m *StartMenu) snapshot() startSnap {
 		hover: v.hover, press: v.press, sel: sel, kbd: v.kbd, area: v.area,
 		listScroll: v.listScroll, tileScroll: v.tileScroll,
 		sidebar: v.sidebar, groups: v.groups, query: v.query, drag: v.drag,
-		bar: v.bar, grid: v.grid, hasBox: v.box != nil,
+		bar: v.bar, grid: v.grid, hasBox: v.box != nil || m.grid(),
 	}
 }
 

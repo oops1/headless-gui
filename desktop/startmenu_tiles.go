@@ -81,6 +81,12 @@ const (
 	areaSidebar
 	areaList
 	areaTiles
+	// Области меню Windows 11 (startmenu_grid*.go); список «Все приложения» и
+	// результаты поиска занимают общую areaList.
+	areaSearch
+	areaPinned
+	areaRec
+	areaFooter
 )
 
 // rowKind — вид строки списка приложений.
@@ -94,11 +100,12 @@ const (
 	rowChild                 // приложение внутри раскрытой папки
 	rowResult                // результат поиска
 	rowEmpty                 // «Ничего не найдено»
+	rowRec                   // строка «Все рекомендации» (меню Windows 11)
 )
 
 // interactive — строку можно навести, нажать и выбрать клавишами.
 func (k rowKind) interactive() bool {
-	return k == rowApp || k == rowFolder || k == rowChild || k == rowResult
+	return k == rowApp || k == rowFolder || k == rowChild || k == rowResult || k == rowRec
 }
 
 // focusable — на строку можно встать: приложения, папки и заголовки букв, по
@@ -119,6 +126,7 @@ type listRow struct {
 	iconAt   func(int) image.Image
 	expanded bool
 	result   SearchResult
+	rec      string // идентификатор строки «Рекомендуем» (rowRec)
 	y, h     int
 }
 
@@ -291,6 +299,9 @@ func (m *StartMenu) basePart() string {
 
 // flyoutMargin — зазор между кнопкой и меню: токен темы у меню с плитками.
 func (m *StartMenu) flyoutMargin() int {
+	if m.grid() {
+		return m.gm(KeyStartW11Margin, 12)
+	}
 	if m.tiled() {
 		return m.metricInt(KeyStartMargin)
 	}
@@ -397,6 +408,9 @@ type startGeo struct {
 
 // startGeometry раскладывает внутренность панели inner на области.
 func (m *StartMenu) startGeometry(inner image.Rectangle) startGeo {
+	if m.grid() {
+		return m.gridStartGeo(inner)
+	}
 	g := startGeo{inner: inner}
 	g.collapsed = m.metricInt(KeyStartSidebarCollapsed)
 	expanded := m.metricInt(KeyStartSidebarExpanded)
@@ -637,6 +651,8 @@ func (m *StartMenu) listRows() ([]listRow, int) {
 	var rows []listRow
 	if query != "" {
 		rows = buildResultRows(results, key)
+	} else if m.grid() && m.View() == StartViewRecommended {
+		rows = buildRecRows(m.recommendedList(), key)
 	} else {
 		rows = buildAppRows(m.startSource(), folders, key)
 	}
@@ -709,6 +725,20 @@ func buildAppRows(src StartMenuSource, folders map[string]bool, k rowsKey) []lis
 	return rows
 }
 
+// buildRecRows — строки «Все рекомендации» меню Windows 11: значок, заголовок и
+// подзаголовок в две строки обычной высоты строки списка.
+func buildRecRows(items []StartRecommendedItem, k rowsKey) []listRow {
+	rows := make([]listRow, 0, len(items))
+	y := 0
+	h := k.rowH
+	for _, it := range items {
+		rows = append(rows, listRow{kind: rowRec, key: prefRec + it.ID, label: it.Title, sub: it.Subtitle,
+			app: it.App, icon: it.Icon, iconAt: it.IconAt, rec: it.ID, y: y, h: h})
+		y += h
+	}
+	return rows
+}
+
 func buildResultRows(results []SearchResult, k rowsKey) []listRow {
 	var rows []listRow
 	add := func(r listRow) {
@@ -770,6 +800,9 @@ func (m *StartMenu) listViewport(g startGeo) image.Rectangle {
 // inlineQueryBar — нужна ли в списке своя строка с запросом: запрос есть, а
 // строки поиска на панели, куда его вводят, нет.
 func (m *StartMenu) inlineQueryBar() bool {
+	if m.grid() {
+		return false // в меню Windows 11 запрос виден в строке поиска сверху
+	}
 	m.v.mu.Lock()
 	defer m.v.mu.Unlock()
 	return m.v.query != "" && m.v.box == nil

@@ -740,6 +740,9 @@ func Windows11Profile() *Profile {
 	// Быстрые настройки 24H2 — презентер, метрики и части (profiles_win11_quick.go).
 	// До материалов: части, объявленные к их вызову, получают сброс Mica и тени.
 	declareWin11QuickSettings(p)
+	// «Пуск» Windows 11 (profiles_win11_start.go): до материалов — те сбрасывают
+	// материал и тень у уже объявленных частей.
+	declareWin11StartMenu(p)
 
 	// Mica, MicaAlt и мягкие тени — только под флагами (profiles_win11_material.go).
 	declareWin11Materials(p, RGB(224, 224, 224), RGBA(0, 0, 0, 77))
@@ -785,6 +788,8 @@ func Windows11DarkProfile() *Profile {
 	})
 	declareWin11DarkMenu(p)
 
+	// Поле поиска «Пуска» — тёмно-серое (светлое задано у родителя).
+	p.SetColor(KeyField, RGB(45, 45, 45))
 	// Тёмные MicaAlt и мягкая тень — два токена: стили родителя ссылаются на них.
 	p.SetColor(KeySurfaceAlt, RGB(14, 14, 14)).
 		SetColor(KeyShadowColor, RGBA(0, 0, 0, 115))

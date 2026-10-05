@@ -352,6 +352,14 @@ const (
 	StartTargetSidebar
 	// StartTargetResult — результат поиска.
 	StartTargetResult
+	// StartTargetPinned — ячейка закреплённого в меню Windows 11.
+	StartTargetPinned
+	// StartTargetRecommended — строка «Рекомендуем» в меню Windows 11.
+	StartTargetRecommended
+	// StartTargetUser — пользователь нижней полосы меню Windows 11.
+	StartTargetUser
+	// StartTargetPower — кнопка питания нижней полосы меню Windows 11.
+	StartTargetPower
 )
 
 // StartTarget описывает объект, на котором пользователь нажал правую кнопку:
@@ -368,4 +376,10 @@ type StartTarget struct {
 	Sidebar string
 	// Result — результат поиска.
 	Result SearchResult
+	// Pinned — идентификатор закреплённого (StartPinned.ID); App — его
+	// приложение, если оно есть.
+	Pinned string
+	// Recommended — идентификатор строки «Рекомендуем»
+	// (StartRecommendedItem.ID).
+	Recommended string
 }

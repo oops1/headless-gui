@@ -114,7 +114,7 @@ func (m *StartMenu) OpenLetterGrid() bool {
 // openLetterGridFrom открывает сетку с заголовка буквы letter (строка списка с
 // ключом rowKey): на ней стоит выбор, к ней вернётся выбор по Esc.
 func (m *StartMenu) openLetterGridFrom(rowKey, letter string) bool {
-	if !m.IsOpen() || !m.tiled() || m.Query() != "" {
+	if !m.IsOpen() || !m.modern() || m.Query() != "" {
 		return false
 	}
 	v := m.v
@@ -156,7 +156,7 @@ func (m *StartMenu) CloseLetterGrid() {
 // наверх, насколько позволяет конец списка), ставит на заголовок выбор и
 // закрывает сетку. false — в списке нет такой группы.
 func (m *StartMenu) JumpToLetter(letter string) bool {
-	if !m.IsOpen() || !m.tiled() {
+	if !m.IsOpen() || !m.modern() {
 		return false
 	}
 	inner := m.contentRect()
