@@ -47,11 +47,17 @@ func TestWin11Start_MetricsFromTask(t *testing.T) {
 // (плёнки наведения, рамки, текст) одинаковы, а токены дают свои значения.
 func TestWin11Start_DarkChangesTokensOnly(t *testing.T) {
 	l, d := win10Manager(t, ProfileWindows11), win10Manager(t, ProfileWindows11Dark)
-	if lc, _ := l.Active().Color(KeyField); lc.R < 240 {
-		t.Errorf("светлое поле поиска %v: ждали почти белое", lc)
+	// Поле — плёнка токена field.fill поверх поверхности меню: итоговый цвет.
+	over := func(m *Manager) uint8 {
+		f, _ := m.Active().Color(KeyField)
+		s, _ := m.Active().Color("surface")
+		return uint8(int(f.R) + int(s.R)*(255-int(f.A))/255)
 	}
-	if dc, _ := d.Active().Color(KeyField); dc.R > 80 {
-		t.Errorf("тёмное поле поиска %v: ждали тёмно-серое", dc)
+	if v := over(l); v < 240 {
+		t.Errorf("светлое поле поиска %d: ждали почти белое", v)
+	}
+	if v := over(d); v > 80 {
+		t.Errorf("тёмное поле поиска %d: ждали тёмно-серое", v)
 	}
 	for _, part := range []string{"pin", "rec", "row", "link", "footer.item"} {
 		lf := l.GetStyle("startmenu", part, StateHover).Fill

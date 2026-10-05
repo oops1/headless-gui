@@ -792,8 +792,6 @@ func Windows11DarkProfile() *Profile {
 	})
 	declareWin11DarkMenu(p)
 
-	// Поле поиска «Пуска» — тёмно-серое (светлое задано у родителя).
-	p.SetColor(KeyField, RGB(45, 45, 45))
 	// Тёмные MicaAlt и мягкая тень — два токена: стили родителя ссылаются на них.
 	p.SetColor(KeySurfaceAlt, RGB(14, 14, 14)).
 		SetColor(KeyShadowColor, RGBA(0, 0, 0, 115))
