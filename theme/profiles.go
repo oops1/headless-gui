@@ -486,6 +486,7 @@ func Windows10Profile() *Profile {
 	}, win10ShellLight)
 	// Размеры центра уведомлений и его презентер (profiles_win10_notify.go).
 	declareWin10NotificationMetrics(p)
+	declareWin10StartMenu(p)
 
 	// Элементы панели не носят собственной заливки в покое: фон им даёт сама
 	// панель, а своя плашка появляется только под курсором и у активного

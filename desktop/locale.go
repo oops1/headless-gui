@@ -34,6 +34,17 @@ const (
 	// StrStartPinned и StrStartAllApps — заголовки разделов меню «Пуск».
 	StrStartPinned  = "desktop.startmenu.pinned"
 	StrStartAllApps = "desktop.startmenu.allApps"
+	// Меню «Пуск» с боковой панелью и плитками (презентер tiles) и строка
+	// поиска на панели. Соответствие ключам WinLine для widget.AliasStrings —
+	// StartMenuAliases.
+	StrStartRecent       = "desktop.start.recent"       // раздел «Недавно добавленные»
+	StrStartExpand       = "desktop.start.expand"       // подсказка гамбургера в свёрнутой боковой панели
+	StrStartCollapse     = "desktop.start.collapse"     // …и в развёрнутой
+	StrStartNoResults    = "desktop.start.noResults"    // поиск ничего не нашёл
+	StrStartResults      = "desktop.start.results"      // заголовок списка результатов поиска
+	StrSearchPlaceholder = "desktop.search.placeholder" // подсказка в пустой строке поиска
+	StrSearchLabel       = "desktop.search.label"       // подпись и подсказка значка поиска
+
 	// StrNotifEmpty и StrNotifClearAll — центр уведомлений.
 	StrNotifEmpty    = "desktop.notif.empty"
 	StrNotifClearAll = "desktop.notif.clearAll"
@@ -66,6 +77,30 @@ const (
 	strCalMonthGenPref = "desktop.cal.monthGen." // + номер месяца 1..12
 )
 
+// StartMenuAliases — как подключить ключи меню «Пуск» и строки поиска к таблице
+// приложения, которое хранит те же надписи под своими именами (WinLine:
+// Start, RecentlyAdded, SearchPlaceholder, Expand, Collapse):
+//
+//	widget.AliasStrings(desktop.StartMenuAliases("Start", "RecentlyAdded",
+//	    "SearchPlaceholder", "Expand", "Collapse"))
+//
+// Пустое имя пропускается, и ключ остаётся со встроенным переводом.
+func StartMenuAliases(start, recent, placeholder, expand, collapse string) map[string]string {
+	out := map[string]string{}
+	for key, own := range map[string]string{
+		StrStart:             start,
+		StrStartRecent:       recent,
+		StrSearchPlaceholder: placeholder,
+		StrStartExpand:       expand,
+		StrStartCollapse:     collapse,
+	} {
+		if own != "" {
+			out[key] = own
+		}
+	}
+	return out
+}
+
 func init() {
 	// Запасной язык движка нужен всегда: язык без своих переводов получает
 	// английские строки, а не голые ключи.
@@ -79,6 +114,14 @@ func init() {
 		StrStartAllApps:  "Все приложения",
 		StrNotifEmpty:    "Новых уведомлений нет",
 		StrNotifClearAll: "Очистить все",
+
+		StrStartRecent:       "Недавно добавленные",
+		StrStartExpand:       "Развернуть",
+		StrStartCollapse:     "Свернуть",
+		StrStartNoResults:    "Ничего не найдено",
+		StrStartResults:      "Результаты поиска",
+		StrSearchPlaceholder: "Чтобы начать поиск, введите здесь запрос",
+		StrSearchLabel:       "Поиск",
 
 		StrNetNone:      "Сеть: нет подключения",
 		StrNetConnected: "Сеть: подключено",
@@ -105,6 +148,14 @@ func init() {
 		StrStartAllApps:  "All apps",
 		StrNotifEmpty:    "No new notifications",
 		StrNotifClearAll: "Clear all",
+
+		StrStartRecent:       "Recently added",
+		StrStartExpand:       "Expand",
+		StrStartCollapse:     "Collapse",
+		StrStartNoResults:    "No results found",
+		StrStartResults:      "Search results",
+		StrSearchPlaceholder: "Type here to search",
+		StrSearchLabel:       "Search",
 
 		StrNetNone:      "Network: not connected",
 		StrNetConnected: "Network: connected",

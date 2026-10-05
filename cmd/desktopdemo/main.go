@@ -173,6 +173,31 @@ func buildDesktop(eng *engine.Engine) scene {
 	screen := image.Rect(0, 0, screenW, screenH)
 	menu := desktop.NewStartMenu(tm, cat)
 	menu.Screen = screen
+	// Данные меню Windows 10 (боковая панель, плитки, поиск): темы без плиток
+	// их не используют и показывают прежний плоский список.
+	menu.SetSidebarItems([]desktop.StartSidebarItem{
+		{ID: "user", Title: "Пользователь", Glyph: desktop.GlyphUser},
+		{ID: "docs", Title: "Документы", Glyph: desktop.GlyphDocuments},
+		{ID: "pics", Title: "Изображения", Glyph: desktop.GlyphPictures},
+		{ID: "settings", Title: "Параметры", Glyph: desktop.GlyphSettings},
+		{ID: "power", Title: "Выключение", Glyph: desktop.GlyphPower, KeepOpen: true},
+	})
+	var tiles []desktop.Tile
+	for i, a := range cat.Apps() {
+		size := desktop.TileMedium
+		if i == 0 {
+			size = desktop.TileWide
+		}
+		tiles = append(tiles, desktop.Tile{ID: desktop.TileID(a.ID), App: a.ID, Size: size,
+			Content: desktop.TileContent{Title: a.Title, Icon: a.Icon}})
+	}
+	menu.SetTileGroups([]desktop.TileGroup{{ID: "main", Title: "Приложения", Tiles: tiles}})
+	var found []desktop.SearchResult
+	for _, a := range cat.Apps() {
+		found = append(found, desktop.SearchResult{ID: string(a.ID), Title: a.Title, Subtitle: "Приложение", Icon: a.Icon})
+	}
+	search := desktop.NewSearchBox(tm, desktop.NewFakeSearchProvider(found...))
+	search.Bind(menu, startBtn.Bounds)
 	quick := desktop.NewQuickSettings(tm, status)
 	quick.Screen = screen
 	quick.Align = desktop.AlignEnd
@@ -264,7 +289,12 @@ func buildDesktop(eng *engine.Engine) scene {
 			bar.SetItems(desktop.SlotTray, tray, clock)
 			dock.SetItems(desktop.SlotApps, apps)
 		} else {
-			bar.SetItems(desktop.SlotStart, startBtn)
+			// Строка поиска нужна темам, чьё меню показывает результаты в себе.
+			if menu.AsTiled() {
+				bar.SetItems(desktop.SlotStart, startBtn, search)
+			} else {
+				bar.SetItems(desktop.SlotStart, startBtn)
+			}
 			bar.SetItems(desktop.SlotApps, apps)
 			bar.SetItems(desktop.SlotTray, tray, clock)
 			dock.SetItems(desktop.SlotApps)

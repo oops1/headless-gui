@@ -145,6 +145,24 @@ type Flyout struct {
 	// виртуальных вызовов не даёт.
 	afterClose func()
 
+	// beforeOpen и afterOpen — то же для открытия: первое зовётся до показа
+	// (сброс состояния, чтобы первый кадр был правильным), второе — сразу после
+	// (подписки, фокус). Открывают панель со стороны так же часто, как и сам
+	// компонент — Toggle кнопки, FlyoutManager, группа, — и виртуального
+	// Open у встраивания нет, поэтому переопределённый Open объемлющей панели
+	// в этих путях не вызывался бы.
+	beforeOpen func()
+	afterOpen  func()
+
+	// partFn и marginFn — необязательные подсказки встроенной панели: какой
+	// частью стиля компонента рисовать подложку ("" — самим компонентом) и
+	// какой зазор держать до значка. Меню «Пуск» с плитками рисует подложку
+	// акрилом части "panel" и стоит вплотную к панели задач, а плоское — по-
+	// прежнему; выбор зависит от темы и может смениться на открытом меню,
+	// поэтому это функции, а не поля.
+	partFn   func() string
+	marginFn func() int
+
 	// group — набор панелей, считающих прямоугольники друг друга своими
 	// (см. FlyoutGroup). nil — панель сама по себе.
 	group *FlyoutGroup
@@ -220,6 +238,9 @@ func (f *Flyout) Open(anchor image.Rectangle) {
 	if f.visible() {
 		was = f.dirtyRect()
 	}
+	if f.beforeOpen != nil && !f.IsOpen() {
+		f.beforeOpen()
+	}
 	f.Anchor = anchor
 	reopened := atomic.SwapInt32(&f.open, 1) == 1
 	if !reopened {
@@ -229,6 +250,9 @@ func (f *Flyout) Open(anchor image.Rectangle) {
 	f.invalidateOverlay(was)
 	if reopened {
 		return
+	}
+	if f.afterOpen != nil {
+		f.afterOpen()
 	}
 	// Наблюдатели раньше оболочки: менеджер панелей закрывает остальные до
 	// того, как оболочка зажжёт кнопку этой.
@@ -568,12 +592,16 @@ func (f *Flyout) restRect() image.Rectangle {
 	}
 
 	// По вертикали — от значка в сторону от края, к которому прижата панель.
+	margin := f.Margin
+	if f.marginFn != nil {
+		margin = f.marginFn()
+	}
 	var y int
 	switch f.Edge {
 	case EdgeTop:
-		y = f.Anchor.Max.Y + f.Margin
+		y = f.Anchor.Max.Y + margin
 	default:
-		y = f.Anchor.Min.Y - f.Margin - sz.Y
+		y = f.Anchor.Min.Y - margin - sz.Y
 	}
 
 	// По горизонтали — по выбранному краю значка.
@@ -622,7 +650,11 @@ func (f *Flyout) style(st theme.State) *theme.Style {
 			return f.tm.GetStyle(comp, part, st)
 		}
 	}
-	return f.tm.GetStyle(f.Component, "", st)
+	part := ""
+	if f.partFn != nil {
+		part = f.partFn()
+	}
+	return f.tm.GetStyle(f.Component, part, st)
 }
 
 // metric читает метрику темы.

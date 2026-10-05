@@ -4523,6 +4523,114 @@ Tests: `desktop/notifyview_test.go` (behaviour, errors, keyboard, toast),
 open area), `theme/profiles_win10_notify_test.go`. Pictures: `NC_OUT=<dir> go test
 ./desktop -run TestVisual_NotificationCenter` and `...Toast`.
 
+### Windows 10 Start menu with tiles and the taskbar search box — v3.33
+
+`desktop.StartMenu` has a second layout: sidebar | app list | tiles. A theme asks
+for it with the presenter `theme.PresenterStartTiles` (`"tiles"`,
+`Profile.Presenters["startmenu"]`, set by the Windows 10 profile and inherited by
+its dark variant); the component asks `StartMenu.tiled()` and never looks at the
+theme name. Windows 11, Windows 2000 and macOS keep the flat list (rendered
+frames of all eight profiles are byte-identical to v3.32, only Windows 10
+changes). Same object, same `Open/Close/Toggle`: a theme switch on an open menu
+changes the look without re-creating anything.
+
+```go
+menu := desktop.NewStartMenu(m, catalog)
+menu.Screen = screen
+menu.SetSource(src)                        // desktop.StartMenuSource: Recent(), Groups(), Subscribe()
+menu.SetSidebarItems([]desktop.StartSidebarItem{
+    {ID: "user", Title: "oops", Glyph: desktop.GlyphUser},
+    {ID: "power", Title: "Power", Glyph: desktop.GlyphPower, KeepOpen: true},
+})
+menu.OnSidebarActivate = func(id string) { ... }
+menu.SetTileGroups(groups)                 // []desktop.TileGroup{ID, Title, Tiles []Tile}
+menu.SetTileContent("mail", desktop.TileContent{Title: "Mail", Badge: "3"}) // repaints ONE tile
+menu.OnTilesChanged = func(g []desktop.TileGroup) { save(g) }   // after a drag
+menu.ContextMenu = func(t desktop.StartTarget) []widget.MenuItem { ... } // right button
+box := desktop.NewSearchBox(m, provider)   // Item for SlotStart, after the Start button
+box.Bind(menu, startButton.Bounds)         // results appear IN the menu instead of the list
+bar.AddItem(desktop.SlotStart, box)
+```
+
+- **Data comes from the consumer.** `StartMenuSource` (recent, letter groups,
+  folders, second line) is optional: without it the menu groups `AppCatalog.Apps()`
+  by the first letter of the title (`GroupByLetter`, `StartLetter`: `#`, Latin,
+  Cyrillic). `AppInfo.IconAt`/`StartEntry.IconAt`/`TileContent.IconAt` get the side
+  in PHYSICAL pixels. Built-in vector glyphs (`GlyphUser`, `GlyphDocuments`,
+  `GlyphPictures`, `GlyphSettings`, `GlyphPower`; hamburger, magnifier and
+  chevrons are internal) are SVG rasterised at physical size, drawn in the style's
+  text colour. `FakeStartSource`, `FakeSearchProvider` are the test fakes.
+- **Metrics (profile, logical px at 100 %):** `startmenu.sidebar.collapsed` 48,
+  `.sidebar.expanded` 256, `.sidebar.icon.size` 20, `startmenu.list.width` 260,
+  `.row.height` 36, `.letter.height` 36, `.icon.size` 24, `.row.pad` 20,
+  `.row.icon.gap` 8, `.corner` 0, `.tiles.pad.left/right/top/bottom` 21/16/18/12,
+  `.tiles.columns` 6, `.height` 700 (0 = fill), `.height.min` 320, `.margin` 0;
+  `tile.unit` 48, `tile.gap` 4 (medium 100, wide/large 204), `tile.group.header`
+  32, `.header.gap` 5, `tile.group.gap` 4; `scrollbar.thin.width/.hover.width`;
+  `search.width` 344, `.icon.width` 48, `.icon.size` 16, `.pad` 12, `.icon.gap` 8.
+  Width = 48 + 260 + 21 + 308 + 16 + 2 (border) = 655; height = min(`startmenu.height`,
+  anchor.Min.Y - Screen.Min.Y - margin) but not below `.height.min` while it
+  fits. A narrower screen shrinks the tile columns, below two columns the tile area
+  is hidden.
+- **Style parts** (`theme/profiles_win10_shell.go`, both palettes): `startmenu`:
+  `panel` (PadX/PadY 1 = border), `sidebar`, `sidebar.item`, `row`, `row.sub`,
+  `letter`, `tile`, `tile.group`, `scrollbar`; `searchbox`: `""` (field), `hint`,
+  `icon`. `Flyout` got four unexported hooks: `partFn` (which part paints the
+  base — `panel` for tiles), `marginFn` (`startmenu.margin`, 0 for tiles) and
+  `beforeOpen`/`afterOpen` (state reset, subscriptions, focus request). The last
+  two exist because Go embedding has no virtual `Open`: a menu opened through
+  `Toggle`, `FlyoutManager` or a group never ran an `Open` override of the
+  enclosing type.
+- **Sidebar.** Collapsed 48 px (icons only), the hamburger toggles it to 256 px
+  with a `Tween` on the `menu.open` token (0 ms = instant); the expanded panel
+  lies over the list; each animation step invalidates only the panel column. A
+  press outside the sidebar collapses it. The title is the upper-cased
+  `desktop.start`.
+- **List.** `Recent`, then letter groups; folder rows expand in place
+  (`StartEntry.Folder/Children`, Right/Left keys, `SetFolderExpanded`). Rows are
+  laid out by cumulative offsets and only the visible range is drawn
+  (`firstRowAt`, 3000 apps draw <120 strings). Wheel = 3 rows, `OnMouseWheelPixels`
+  for smooth devices; the thin scrollbar (`fadeBar`) shows on mouse move/scroll and
+  fades after 1.2 s on one timer.
+- **Tiles.** `placeTiles` packs tiles first-fit into `tiles.columns` units
+  (small 1×1, medium 2×2, wide 4×2, large 4×4); a group is header + grid; groups
+  stack in one scrollable column. `SetTileContent` is copy-on-write and
+  invalidates the one tile rectangle. Drag: press on a tile captures the mouse
+  (`WantsCapture`), a threshold of `tile.gap` starts the drag, the layout previews
+  the drop (`dragPreview`), release calls `OnTilesChanged` with the whole new
+  order (between groups too). The consumer persists it.
+- **Keyboard.** The open menu requests focus (`focusreq`), is `Focusable` and a
+  `TabAcceptor`: Tab/Shift+Tab cycle sidebar → list → tiles (empty areas are
+  skipped); arrows inside; in tiles the arrows follow the grid geometry
+  (`nearestTile`: along + 2×across); Home/End, PageUp/PageDown, Enter/Space, Esc
+  (closes the context menu first, then the menu). A printable character moves
+  input to the bound search box (focus moves to it) or, without a box, into the
+  menu's own query bar. The keyboard selection is drawn with `PaintFocusRing`.
+- **Search.** `SearchBox` (modes `SearchModeHidden/IconOnly/Box`, width from
+  `search.width`, placeholder `desktop.search.placeholder`, hover/focus styles,
+  caret editing, Ctrl+V). It talks to `SearchProvider` (`SetQuery`, `Results`,
+  `Activate`, `Subscribe`); the menu shows `Results()` instead of the list
+  (grouped by `Category`, "No results" row) and re-reads them on the provider's
+  notification. Enter/Up/Down in the box are forwarded to the menu
+  (`StartMenu.SearchKey`); Esc closes the menu and clears the text. A press on
+  the box does not dismiss the open menu (`StartMenu.DismissAt`). `SetMode`
+  relayouts the taskbar (the item implements `SetRelayout`, `Taskbar.AddItem`
+  hands it the callback).
+- **Strings.** `desktop.start.recent|expand|collapse|noResults|results`,
+  `desktop.search.placeholder|label`, RU and EN. To read them from your own table:
+  `widget.AliasStrings(desktop.StartMenuAliases("Start", "RecentlyAdded",
+  "SearchPlaceholder", "Expand", "Collapse"))`.
+- **Lifetime.** Subscriptions (theme, language, source, provider) live while the
+  menu is open (`resubscribe` / `detachOnClose`); closing clears the query and
+  the box. Not done: the letter-jump grid on a letter header, dragging the
+  scrollbar thumb, new tile groups by dropping into empty space.
+
+Cost (1280×720, 300 apps, Windows 10, `TestStartMenu10_FirstFrameUnder100ms`):
+first frame after `Open` ≈ 9 ms cold, ≈ 8 ms warm; opening invalidates only the
+menu rectangle (`TestStartMenu10_OpenDamagesOnlyMenuArea`). Snapshots:
+`GOLDEN_OUT=dir go test ./desktop -run TestStartMenu10_` writes dark/light PNGs at
+100/150/200 %.
+
 ### Measured cost of a frame
 
 Desktop scene from `desktop/` at 1280×800, Windows 11 theme, fake system data

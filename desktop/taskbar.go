@@ -173,6 +173,14 @@ func (t *Taskbar) AddItem(slot Slot, it Item) {
 	if n, ok := it.(FocusNavigable); ok {
 		n.SetFocusNavigator(t)
 	}
+	// Элемент, который сам меняет свою ширину (строка поиска при смене режима),
+	// просит панель переложить элементы заново.
+	if r, ok := it.(interface{ SetRelayout(func()) }); ok {
+		r.SetRelayout(func() {
+			t.relayout()
+			t.Invalidate()
+		})
+	}
 	t.relayout()
 	t.Invalidate()
 }
