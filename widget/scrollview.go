@@ -411,9 +411,10 @@ type svOffsetCtxAA struct {
 }
 
 var (
-	_ DrawContext      = (*svOffsetCtx)(nil)
-	_ DrawContextAlpha = (*svOffsetCtx)(nil)
-	_ AAShapes         = (*svOffsetCtxAA)(nil)
+	_ DrawContext       = (*svOffsetCtx)(nil)
+	_ DrawContextAlpha  = (*svOffsetCtx)(nil)
+	_ RotatedTextDrawer = (*svOffsetCtx)(nil)
+	_ AAShapes          = (*svOffsetCtxAA)(nil)
 )
 
 // offsetContext возвращает обёртку над ctx со сдвигом (dx, dy), переиспользуя
@@ -484,6 +485,16 @@ func (o *svOffsetCtx) DrawTextSize(text string, x, y int, sizePt float64, col co
 
 func (o *svOffsetCtx) DrawTextFont(text string, x, y int, sizePt float64, fontName string, col color.RGBA) {
 	o.inner.DrawTextFont(text, x-o.dx, y-o.dy, sizePt, fontName, col)
+}
+
+// DrawTextRotated пробрасывает повёрнутый текст внутреннему контексту (см.
+// RotatedTextDrawer). Обёртка заявляет метод всегда, а честность держит
+// результат: false — внутренний контекст поворот не умеет.
+func (o *svOffsetCtx) DrawTextRotated(text string, x, y int, sizePt float64, fontName string, angle int, col color.RGBA) bool {
+	if rt, ok := o.inner.(RotatedTextDrawer); ok {
+		return rt.DrawTextRotated(text, x-o.dx, y-o.dy, sizePt, fontName, angle, col)
+	}
+	return false
 }
 
 func (o *svOffsetCtx) MeasureText(text string, sizePt float64) int {

@@ -2,7 +2,6 @@
 package desktop
 
 import (
-	"fmt"
 	"image"
 	"image/color"
 	"strconv"
@@ -45,7 +44,10 @@ type NotificationButton struct {
 
 	hovered int32
 	pressed int32
-	manual  atomic.Int64 // счётчик, заданный SetCount (когда нет источника)
+	// active — центр уведомлений открыт: кнопка горит (StateActive), как в
+	// Windows. Атомарно: ставит подписка на панель, читает горутина кадра.
+	active int32
+	manual atomic.Int64 // счётчик, заданный SetCount (когда нет источника)
 
 	glyph glyphMemo
 	unsub func()
@@ -79,6 +81,59 @@ func (b *NotificationButton) Count() int {
 	return int(b.manual.Load())
 }
 
+// Active сообщает, горит ли кнопка как «центр уведомлений открыт».
+func (b *NotificationButton) Active() bool { return atomic.LoadInt32(&b.active) == 1 }
+
+// SetActive зажигает или гасит кнопку: пока центр открыт, она остаётся в
+// состоянии StateActive. Центра кнопка не знает — зажигает её оболочка либо
+// Track и TrackManager по событиям панели.
+func (b *NotificationButton) SetActive(v bool) {
+	want := int32(0)
+	if v {
+		want = 1
+	}
+	if atomic.SwapInt32(&b.active, want) != want {
+		b.Invalidate()
+	}
+}
+
+// Track связывает кнопку с источником (центром уведомлений — *Flyout или любая
+// панель, встраивающая его): кнопка горит, пока тот открыт, и гаснет, когда он
+// закрыт чем бы то ни было. Возвращает функцию, которая разрывает связь
+// (и гасит кнопку).
+func (b *NotificationButton) Track(src OpenStateSource) (untrack func()) {
+	if src == nil {
+		return func() {}
+	}
+	b.SetActive(src.IsOpen())
+	unsub := src.Subscribe(b.SetActive)
+	return func() {
+		unsub()
+		b.SetActive(false)
+	}
+}
+
+// TrackManager — то же для панели name менеджера всплывающих панелей: кнопка
+// горит между событиями FlyoutOpened и FlyoutClosed этой панели.
+func (b *NotificationButton) TrackManager(m *FlyoutManager, name string) (untrack func()) {
+	if m == nil {
+		return func() {}
+	}
+	b.SetActive(m.IsOpen(name))
+	unsub := m.Subscribe(func(ev FlyoutEvent) {
+		if ev.Name == name {
+			b.SetActive(ev.Kind == FlyoutOpened)
+		}
+	})
+	return func() {
+		unsub()
+		b.SetActive(false)
+	}
+}
+
+// fillsStrip — подсветка на всю высоту полосы, если тема просит.
+func (b *NotificationButton) fillsStrip() bool { return trayFillsStrip(b.tm) }
+
 // Close снимает подписку на источник уведомлений.
 func (b *NotificationButton) Close() {
 	if b.unsub != nil {
@@ -88,12 +143,13 @@ func (b *NotificationButton) Close() {
 }
 
 // GetToolTip перекрывает промоутнутый из widget.Base: текст строится из
-// текущего счётчика и языка при каждом показе.
+// текущего счётчика (с формой по числу) и языка при каждом показе, тем же tr()
+// и тем же языком по умолчанию, что у остальных компонентов рабочего стола.
 func (b *NotificationButton) GetToolTip() string {
 	if n := b.Count(); n > 0 {
-		return trayTrf(StrNewNotifications, n)
+		return trayCount(n)
 	}
-	return widget.Tr(StrNoNewNotifications)
+	return trayText(StrTrayNoNewNotifications, StrNoNewNotifications)
 }
 
 // PreferredSize — квадрат стороной из темы плюс отступы стиля по бокам.
@@ -118,11 +174,11 @@ func (b *NotificationButton) Draw(ctx widget.DrawContext) {
 	if r.Empty() {
 		return
 	}
-	st := trayState(&b.hovered, &b.pressed)
+	st := StateOf(atomic.LoadInt32(&b.hovered) == 1, atomic.LoadInt32(&b.pressed) == 1, b.Active(), false, false)
 	s := trayStyle(b.tm, ComponentTrayNotifications, st)
 	PaintStyle(ctx, r, s)
 
-	inner := shrinkByPad(r, s)
+	inner := trayInner(b.tm, r, s)
 	box := glyphSquare(inner)
 	if box.Empty() {
 		return
@@ -204,9 +260,4 @@ func contrastOn(bg color.RGBA) color.RGBA {
 		return color.RGBA{R: 255, G: 255, B: 255, A: 255}
 	}
 	return color.RGBA{A: 255}
-}
-
-// trayTrf форматирует перевод ключа: в строке из каталога — verbs fmt.
-func trayTrf(key string, args ...any) string {
-	return fmt.Sprintf(widget.Tr(key), args...)
 }

@@ -118,7 +118,9 @@ func (s *IconSet) ResolveIcon(ref theme.IconRef, size int) image.Image {
 			return img
 		}
 	case ref.Source != "":
-		if img := s.resolveSourced(ref.Source, size); img != nil {
+		// Источник с оптическими размерами (IconRef.Sizes): файл выбирается по
+		// запрошенному размеру, у каждого размера свой рисунок и своя запись кэша.
+		if img := s.resolveSourced(ref.SourceFor(size), size); img != nil {
 			return img
 		}
 	}

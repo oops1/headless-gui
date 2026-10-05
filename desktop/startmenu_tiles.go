@@ -970,7 +970,7 @@ func (f *fadeBar) expire(inval func()) {
 	f.timer = nil
 	f.live = true
 	f.mu.Unlock()
-	a := widget.AnimateOwned(f, "fade", thinBarFade, nil, func(t float64) {
+	a := widget.AnimateOwned(f, "fade", widget.MotionDur(thinBarFade), nil, func(t float64) {
 		f.mu.Lock()
 		if !f.live {
 			f.mu.Unlock()

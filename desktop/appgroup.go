@@ -354,34 +354,20 @@ func textOnly(s *theme.Style) *theme.Style {
 	return &c
 }
 
-// themeMenu красит меню стилями компонента «menu» темы рабочего стола. Без
-// этого оно берёт цвета общей палитры виджетов и не следует за темой оболочки.
-// Чего тема не объявила (нулевая альфа), то остаётся по умолчанию.
+// themeMenu красит меню стилями компонента «menu» темы рабочего стола и
+// задаёт его размеры метриками theme.KeyMenu*. Без этого оно берёт цвета
+// общей палитры виджетов и не следует за темой оболочки. Чего тема не
+// объявила (нулевая альфа, нет метрики), то остаётся по умолчанию.
+//
+// Чтение профиля — в widget.MenuStyleFromTheme: то же самое делает меню,
+// созданное на лету, когда тема применена движком.
 func themeMenu(m *widget.PopupMenu, tm *theme.Manager) {
 	if tm == nil {
 		return
 	}
-	base := tm.GetStyle("menu", "", theme.StateNormal)
-	if base.Fill.A != 0 {
-		m.Background = base.Fill
+	rt := tm.Active()
+	if rt == nil {
+		return
 	}
-	if base.Text.A != 0 {
-		m.TextColor = base.Text
-	}
-	if base.Border.A != 0 {
-		m.BorderColor, m.SeparatorColor = base.Border, base.Border
-	}
-	if hover := tm.GetStyle("menu", "item", theme.StateHover); hover.Fill.A != 0 && hover.Fill != base.Fill {
-		m.HoverBG = hover.Fill
-		if hover.Text.A != 0 {
-			m.HoverTextColor = hover.Text
-		} else if base.Text.A != 0 {
-			m.HoverTextColor = base.Text
-		}
-	}
-	// Недоступный пункт: тема без своего правила отдаёт цвет обычного текста
-	// (состояние не объявлено), и тогда остаётся приглушённый по умолчанию.
-	if dis := tm.GetStyle("menu", "item", theme.StateDisabled); dis.Text.A != 0 && dis.Text != base.Text {
-		m.DisabledColor = dis.Text
-	}
+	m.ApplyMenuStyle(widget.MenuStyleFromTheme(rt))
 }

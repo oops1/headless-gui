@@ -149,6 +149,7 @@ func (ent *popupEntry) overlayCanvas(src *Canvas, r image.Rectangle) *Canvas {
 	if oc == nil || ent.src != src || ent.fontRev != src.fontRev ||
 		oc.logicalW != r.Dx() || oc.logicalH != r.Dy() || oc.scale != src.scale {
 		oc = src.cloneForSize(r.Dx(), r.Dy(), src.scale, nil)
+		oc.wallParent = src.wallOwner()
 		ent.canvas, ent.src, ent.fontRev = oc, src, src.fontRev
 		return oc
 	}
@@ -199,7 +200,9 @@ func widgetID(w widget.Widget) uintptr {
 // renderOverlay рендерит оверлей od в отдельный буфер размером с r (логический),
 // в физическом масштабе движка. Возвращает ФИЗИЧЕСКИЙ RGBA.
 func (c *Canvas) renderOverlay(od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
-	return renderOverlayInto(c.cloneForSize(r.Dx(), r.Dy(), c.scale, nil), od, r)
+	oc := c.cloneForSize(r.Dx(), r.Dy(), c.scale, nil)
+	oc.wallParent = c.wallOwner()
+	return renderOverlayInto(oc, od, r)
 }
 
 // renderOverlayInto рисует оверлей в подготовленный канвас oc. Координаты

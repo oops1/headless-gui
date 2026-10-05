@@ -189,6 +189,11 @@ type Flyout struct {
 	presence atomic.Uint64
 	amu      sync.Mutex
 	anim     *widget.Animation
+	// closeRest — где панель стояла в покое в момент Close (под amu). Пока
+	// панель уезжает и на последнем шаге закрытия её restRect() может уже
+	// ничего не дать (размер зависит от содержимого, привязка сброшена), а
+	// освободившееся место всё равно надо перерисовать.
+	closeRest image.Rectangle
 
 	// watchers — наблюдатели за открытием и закрытием (см. Subscribe); у них
 	// свой замок: наблюдатель вправе открывать и закрывать другие панели.
@@ -202,6 +207,10 @@ type Flyout struct {
 	monitor Monitor
 	pinEdge Edge
 	pinned  bool
+	// pinEdgeGap, pinPanelGap, pinSplit — раздельные зазоры прижатой панели
+	// (SetPinMargins): до края экрана и до панели задач.
+	pinEdgeGap, pinPanelGap int
+	pinSplit                bool
 
 	// anchorDismissAt — когда панель в последний раз закрыло нажатие мимо
 	// неё, пришедшееся на её собственный якорь (unix-наносекунды; 0 — не
@@ -245,6 +254,9 @@ func (f *Flyout) Open(anchor image.Rectangle) {
 	reopened := atomic.SwapInt32(&f.open, 1) == 1
 	if !reopened {
 		f.anchorDismissAt.Store(0)
+		f.amu.Lock()
+		f.closeRest = image.Rectangle{}
+		f.amu.Unlock()
 		f.animateTo(1)
 	}
 	f.invalidateOverlay(was)
@@ -268,9 +280,16 @@ func (f *Flyout) Close() {
 	// освободившееся место было бы уже нечем — на экране осталась бы
 	// нестёртая панель.
 	was := f.dirtyRect()
+	rest := f.restRect()
 	if atomic.SwapInt32(&f.open, 0) == 0 {
 		return
 	}
+	// Место в покое запоминается: на последнем шаге закрытия restRect() может
+	// быть уже пуст, а след панели в кадре надо стереть именно там, где она
+	// стояла.
+	f.amu.Lock()
+	f.closeRest = rest
+	f.amu.Unlock()
 	f.animateTo(0)
 	f.invalidateOverlay(was)
 	// Сначала встроенная панель прибирает за собой, потом узнаёт оболочка.

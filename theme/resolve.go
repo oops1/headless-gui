@@ -206,6 +206,7 @@ func resolve(name string, byName map[string]*Profile, ov overrides) (*Theme, err
 		}
 	}
 	applyStyleBases(merged, bases)
+	applyPartFallbacks(merged)
 
 	// Пары (компонент, часть), о которых тема вообще что-то знает.
 	type compPart struct{ component, part string }
@@ -312,6 +313,33 @@ func applyStyleBases(merged map[StyleKey][]StyleDelta, bases map[string]string) 
 			dk.Component = comp
 			// Правила базы идут первыми: свои правила компонента перекрывают.
 			merged[dk] = append(append([]StyleDelta(nil), merged[k]...), merged[dk]...)
+		}
+	}
+}
+
+// partFallbacks — части, которые по умолчанию повторяют другую часть той же
+// темы, пока ни один профиль цепочки не объявил их сам.
+//
+// Заголовок диалога — это заголовок окна: диалог и есть окно. Раньше каждый
+// профиль копировал себе заголовок окна под именем диалога, и тёмные
+// разновидности, наследующие светлые, раздувались лишним токеном на каждую
+// такую копию. Повтор на уровне разрешения берёт заголовок окна той темы,
+// что собирается, — с поправками всех профилей цепочки.
+var partFallbacks = []struct{ to, from StyleKey }{
+	{
+		to:   StyleKey{Component: "dialog", Part: "titlebar", State: StateNormal},
+		from: StyleKey{Component: "window", Part: "titlebar", State: StateFocused},
+	},
+}
+
+// applyPartFallbacks дописывает необъявленным частям правила их образцов.
+func applyPartFallbacks(merged map[StyleKey][]StyleDelta) {
+	for _, f := range partFallbacks {
+		if len(merged[f.to]) > 0 {
+			continue
+		}
+		if src := merged[f.from]; len(src) > 0 {
+			merged[f.to] = append([]StyleDelta(nil), src...)
 		}
 	}
 }

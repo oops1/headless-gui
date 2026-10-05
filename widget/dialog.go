@@ -306,7 +306,7 @@ func (d *Dialog) SetModal(v bool) {
 			// AnimateOwned(d,"fade",...) сам останавливает предыдущую
 			// fade-анимацию этого диалога, если ShowModal вызвали повторно
 			// до завершения предыдущего fade-in.
-			d.fadeAnim = AnimateOwned(d, "fade", dlgFadeDur, EaseOutCubic, func(t float64) {
+			d.fadeAnim = AnimateOwned(d, "fade", MotionDur(dlgFadeDur), EaseOutCubic, func(t float64) {
 				d.fading.Store(true)
 				d.setDimAlpha(uint8(math.Round(LerpF(0, float64(target), t))))
 				if t >= 1.0 {
@@ -389,8 +389,11 @@ func (d *Dialog) Draw(ctx DrawContext) {
 		cr = 0
 	}
 
-	// Тень: полосы с честным альфа-смешиванием справа и снизу.
-	if d.Shadow.A > 0 {
+	// Тень: мягкая по токенам профиля (theme.Style.ShadowBlur стиля "dialog"),
+	// а без них — полосы с честным альфа-смешиванием справа и снизу.
+	if sp, ok := DialogShadow(); ok {
+		DrawShadowSpec(ctx, b, cr, sp)
+	} else if d.Shadow.A > 0 {
 		sc := d.Shadow
 		half := color.RGBA{R: sc.R, G: sc.G, B: sc.B, A: sc.A / 2}
 		ctx.FillRectAlpha(b.Min.X+cr, b.Max.Y, b.Dx()-cr+3, 3, sc)

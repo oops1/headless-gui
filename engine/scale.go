@@ -101,6 +101,10 @@ func (c *Canvas) cloneForSize(w, h int, scale float64, bgSrc image.Image) *Canva
 	if bgSrc != nil {
 		nc.setBackground(bgSrc)
 	}
+	// Отдельный источник обоев Mica переживает смену разрешения так же, как фон.
+	if c.wallImg != nil {
+		nc.setWallpaperSource(c.wallImg)
+	}
 	return nc
 }
 

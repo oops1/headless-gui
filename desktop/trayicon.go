@@ -127,6 +127,9 @@ func (t *TrayIcon) style(st theme.State) *theme.Style {
 	return trayStyle(t.tm, ComponentTrayIcon, st)
 }
 
+// fillsStrip — подсветка на всю высоту полосы, если тема просит.
+func (t *TrayIcon) fillsStrip() bool { return trayFillsStrip(t.tm) }
+
 // PreferredSize — квадрат стороной из темы плюс отступы стиля по бокам.
 func (t *TrayIcon) PreferredSize(image.Point) image.Point {
 	size := trayIconSize(t.tm)

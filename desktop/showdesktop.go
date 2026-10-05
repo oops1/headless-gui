@@ -20,7 +20,7 @@ const KeyTrayShowDesktopWidth theme.Key = "tray.showdesktop.width"
 // в область трея панели, чтобы встать к правому краю). Клик вызывает OnClick:
 // оболочка сворачивает все окна или возвращает их обратно. Наведение
 // подсвечивает полоску по стилю «tray.showdesktop»; подсказка — строка
-// widget.Tr("ShowDesktop").
+// «desktop.tray.showDesktop» (прежний ключ ShowDesktop остаётся алиасом).
 type ShowDesktopButton struct {
 	widget.Base
 
@@ -40,7 +40,9 @@ func NewShowDesktopButton(tm *theme.Manager) *ShowDesktopButton {
 
 // GetToolTip перекрывает промоутнутый из widget.Base: строка берётся при каждом
 // показе и следует за языком.
-func (b *ShowDesktopButton) GetToolTip() string { return widget.Tr(StrShowDesktop) }
+func (b *ShowDesktopButton) GetToolTip() string {
+	return trayText(StrTrayShowDesktop, StrShowDesktop)
+}
 
 // width — ширина полоски в логических пикселях.
 func (b *ShowDesktopButton) width() int {
@@ -54,6 +56,11 @@ func (b *ShowDesktopButton) width() int {
 	}
 	return 1
 }
+
+// KeyTrayShowDesktopLine — толщина линии слева от полоски. В Windows 10 полоска
+// отделена от кнопки центра уведомлений линией в один пиксель; без метрики (или
+// с нулём) линии нет. Цвет — часть "line" стиля «tray.showdesktop».
+const KeyTrayShowDesktopLine theme.Key = "tray.showdesktop.line"
 
 // PreferredSize — ширина из метрики, высота — вся доступная.
 func (b *ShowDesktopButton) PreferredSize(avail image.Point) image.Point {
@@ -77,4 +84,12 @@ func (b *ShowDesktopButton) Draw(ctx widget.DrawContext) {
 		return
 	}
 	PaintStyle(ctx, r, trayStyle(b.tm, ComponentTrayShowDesktop, trayState(&b.hovered, &b.pressed)))
+	if b.tm == nil {
+		return
+	}
+	if w := int(b.tm.GetMetric(KeyTrayShowDesktopLine)); w > 0 && w < r.Dx() {
+		if c := b.tm.GetStyle(ComponentTrayShowDesktop, "line", theme.StateNormal).Fill; c.A > 0 {
+			ctx.FillRectAlpha(r.Min.X, r.Min.Y, w, r.Dy(), c)
+		}
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -207,9 +208,44 @@ const svgNS = "http://www.w3.org/2000/svg"
 const maxUseVisits = 400000
 
 // decodeTree строит дерево потоковым декодером, без рекурсии.
+//
+// Разбор терпимый к сущностям: значки из чужих наборов нередко содержат
+// HTML-сущности (&nbsp;, &copy;), голый «&» в тексте и объявления <!ENTITY> в
+// DOCTYPE (так Illustrator прячет адреса пространств имён) — строгий
+// декодер отвергал такой файл целиком, хотя рисовать в нём есть что.
+// Структура при этом проверяется по-прежнему строго: Strict=false молча
+// закрыл бы лишний или оборванный элемент, а обрезанный файл принимать нельзя.
+// Корректные файлы разбираются ровно так же, как раньше.
 func decodeTree(data []byte) (xnode, error) {
+	ents := xml.HTMLEntity
+	if m := doctypeEntities(data); len(m) > 0 {
+		// xml.HTMLEntity — общая таблица пакета: дополняем только копию.
+		own := make(map[string]string, len(xml.HTMLEntity)+len(m))
+		for k, v := range xml.HTMLEntity {
+			own[k] = v
+		}
+		for k, v := range m {
+			own[k] = v
+		}
+		ents = own
+	}
+	root, err := decodeTreeWith(data, ents)
+	if err != nil && bytes.IndexByte(data, '&') >= 0 {
+		// Неизвестная сущность или одинокий «&»: экранируем их и пробуем ещё раз.
+		if fixed, changed := escapeStrayAmps(data, ents); changed {
+			if r2, err2 := decodeTreeWith(fixed, ents); err2 == nil {
+				return r2, nil
+			}
+		}
+	}
+	return root, err
+}
+
+// decodeTreeWith — разбор строгим декодером с таблицей сущностей ents.
+func decodeTreeWith(data []byte, ents map[string]string) (xnode, error) {
 	var root xnode
 	dec := xml.NewDecoder(bytes.NewReader(data))
+	dec.Entity = ents
 	stack := make([]*xnode, 0, 32)
 	rootDone := false
 	textDepth := 0 // сколько <text> открыто: только внутри них копим буквы
@@ -272,6 +308,113 @@ func decodeTree(data []byte) (xnode, error) {
 		return root, io.EOF // корневого элемента нет — как у xml.Unmarshal
 	}
 	return root, nil
+}
+
+// entityDecl — <!ENTITY имя "значение"> внутри DOCTYPE.
+var entityDecl = regexp.MustCompile(`<!ENTITY\s+([A-Za-z_][\w.-]*)\s+(?:"([^"]*)"|'([^']*)')\s*>`)
+
+// maxEntities — сколько объявлений сущностей берём из одного документа.
+const maxEntities = 64
+
+// doctypeEntities достаёт простые текстовые объявления сущностей из
+// директивы DOCTYPE. Значения берутся как есть, без раскрытия вложенных
+// ссылок: «взрыва» сущностей быть не может.
+func doctypeEntities(dir []byte) map[string]string {
+	if !bytes.Contains(dir, []byte("ENTITY")) {
+		return nil
+	}
+	var out map[string]string
+	for _, m := range entityDecl.FindAllSubmatch(dir, maxEntities) {
+		if out == nil {
+			out = map[string]string{}
+		}
+		v := m[2]
+		if v == nil {
+			v = m[3]
+		}
+		out[string(m[1])] = string(v)
+	}
+	return out
+}
+
+// escapeStrayAmps заменяет «&» на «&amp;» везде, где он не начинает
+// известную ссылку: числовую, из пяти предопределённых, из ents. Комментарии,
+// CDATA и DOCTYPE не трогает. changed=false — менять было нечего.
+func escapeStrayAmps(data []byte, ents map[string]string) (out []byte, changed bool) {
+	out = make([]byte, 0, len(data)+16)
+	skipTo := func(i int, end string) int {
+		if j := bytes.Index(data[i:], []byte(end)); j >= 0 {
+			return i + j + len(end)
+		}
+		return len(data)
+	}
+	for i := 0; i < len(data); {
+		switch {
+		case bytes.HasPrefix(data[i:], []byte("<!--")):
+			j := skipTo(i, "-->")
+			out = append(out, data[i:j]...)
+			i = j
+		case bytes.HasPrefix(data[i:], []byte("<![CDATA[")):
+			j := skipTo(i, "]]>")
+			out = append(out, data[i:j]...)
+			i = j
+		case bytes.HasPrefix(data[i:], []byte("<!DOCTYPE")):
+			end := ">"
+			if lb := bytes.IndexByte(data[i:], '['); lb >= 0 && lb < bytes.IndexByte(data[i:], '>') {
+				end = "]>"
+			}
+			j := skipTo(i, end)
+			out = append(out, data[i:j]...)
+			i = j
+		case data[i] == '&':
+			if n := refLen(data[i:], ents); n > 0 {
+				out = append(out, data[i:i+n]...)
+				i += n
+			} else {
+				out = append(out, "&amp;"...)
+				changed = true
+				i++
+			}
+		default:
+			out = append(out, data[i])
+			i++
+		}
+	}
+	return out, changed
+}
+
+// refLen — длина ссылки на сущность в начале b («&#10;», «&nbsp;»); 0 — это
+// не ссылка или сущность неизвестна.
+func refLen(b []byte, ents map[string]string) int {
+	semi := bytes.IndexByte(b, ';')
+	if semi < 2 || semi > 40 {
+		return 0
+	}
+	name := string(b[1:semi])
+	if name[0] == '#' {
+		digits, base := name[1:], 10
+		if len(digits) > 0 && (digits[0] == 'x' || digits[0] == 'X') {
+			digits, base = digits[1:], 16
+		}
+		if digits == "" {
+			return 0
+		}
+		for _, r := range digits {
+			ok := r >= '0' && r <= '9' || base == 16 && (r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F')
+			if !ok {
+				return 0
+			}
+		}
+		return semi + 1
+	}
+	switch name {
+	case "lt", "gt", "amp", "apos", "quot":
+		return semi + 1
+	}
+	if _, ok := ents[name]; ok {
+		return semi + 1
+	}
+	return 0
 }
 
 func copyAttrs(a []xml.Attr) []xml.Attr {

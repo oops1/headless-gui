@@ -323,11 +323,11 @@ func TestNotificationButton_CountAndTooltip(t *testing.T) {
 	if b.Count() != 2 {
 		t.Fatalf("счётчик %d, ожидалось 2", b.Count())
 	}
-	if got := b.GetToolTip(); got != "New notifications: 2" {
+	if got := b.GetToolTip(); got != "2 new notifications" {
 		t.Errorf("EN: %q", got)
 	}
 	widget.SetLanguage("RU")
-	if got := b.GetToolTip(); got != "Новых уведомлений: 2" {
+	if got := b.GetToolTip(); got != "2 новых уведомления" {
 		t.Errorf("RU: %q", got)
 	}
 

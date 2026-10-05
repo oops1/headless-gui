@@ -40,16 +40,30 @@ import (
 // потребовало бы нового поля в структуре Canvas (canvas.go), которая в
 // рамках этой задачи не редактируется.
 func (c *Canvas) DrawSoftShadow(r image.Rectangle, corner int, elevation float64, col color.RGBA) {
-	if elevation <= 0 || col.A == 0 || r.Dx() <= 0 || r.Dy() <= 0 {
+	// Высота — частный случай явных параметров: размытие равно высоте, сдвиг
+	// вниз — её половине, сдвига вбок нет. Результат побайтно прежний.
+	c.DrawShadow(r, corner, elevation, 0, elevation/2, col)
+}
+
+// DrawShadow — мягкая тень с явными параметрами (токены тени профиля:
+// theme.Style.ShadowBlur, ShadowOffsetX/Y, ShadowOpacity): blur — радиус
+// размытия, offsetX/offsetY — смещение силуэта относительно r, оба в
+// ЛОГИЧЕСКИХ пикселях. Прозрачность тени задаёт альфа col (премультиплицированная,
+// множитель ShadowOpacity уже в ней — theme.Style.ResolveShadow).
+//
+// Остальное — как у DrawSoftShadow, который теперь лишь вызывает эту функцию.
+func (c *Canvas) DrawShadow(r image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA) {
+	if blur <= 0 || col.A == 0 || r.Dx() <= 0 || r.Dy() <= 0 {
 		return
 	}
 
-	// Радиус размытия и смещение вниз — из elevation, в ЛОГИЧЕСКИХ пикселях.
-	blurRadius := int(math.Round(elevation))
+	// Радиус размытия и смещение — в ЛОГИЧЕСКИХ пикселях.
+	blurRadius := int(math.Round(blur))
 	if blurRadius < 1 {
 		blurRadius = 1
 	}
-	offsetY := int(math.Round(elevation / 2))
+	shiftY := int(math.Round(offsetY))
+	shiftX := int(math.Round(offsetX))
 
 	// Переход в физические координаты (единожды, как и в остальном Canvas).
 	pr := c.sRect(r)
@@ -65,7 +79,8 @@ func (c *Canvas) DrawSoftShadow(r image.Rectangle, corner int, elevation float64
 		pCorner = ph / 2
 	}
 	pRadius := c.st(blurRadius)
-	pOffset := c.sx(offsetY)
+	pOffset := c.sx(shiftY)
+	pOffsetX := c.sx(shiftX)
 
 	// Запас по краям буфера: за 2 прохода box-размытия эффективный разброс
 	// растёт быстрее одного радиуса — запас 2×radius не даёт границе буфера
@@ -86,8 +101,8 @@ func (c *Canvas) DrawSoftShadow(r image.Rectangle, corner int, elevation float64
 	// Запас margin с каждой стороны сохранён: у видимого края затухание
 	// считается по тем же данным, что и раньше. Сдвиг тени вниз учтён сразу
 	// в координатах буфера.
-	full := image.Rect(pr.Min.X-margin, pr.Min.Y-margin+pOffset,
-		pr.Max.X+margin, pr.Max.Y+margin+pOffset)
+	full := image.Rect(pr.Min.X-margin+pOffsetX, pr.Min.Y-margin+pOffset,
+		pr.Max.X+margin+pOffsetX, pr.Max.Y+margin+pOffset)
 	area := full.Intersect(c.shadowClip())
 	if area.Empty() {
 		return // фигура целиком за отсечением — тени всё равно не видно
@@ -103,7 +118,7 @@ func (c *Canvas) DrawSoftShadow(r image.Rectangle, corner int, elevation float64
 	// отрицательным смещением, когда фигура уходит за видимую область:
 	// иначе скругление углов и затухание считались бы от обрезка и поехали
 	// бы. За границы буфера fillRectImg не пишет.
-	fillSilhouette(tmp, pr.Min.X-area.Min.X, pr.Min.Y+pOffset-area.Min.Y, pw, ph, pCorner, col)
+	fillSilhouette(tmp, pr.Min.X+pOffsetX-area.Min.X, pr.Min.Y+pOffset-area.Min.Y, pw, ph, pCorner, col)
 	BlurRGBA(tmp, pRadius, 2)
 
 	// Левый верхний угол размытого буфера на холсте: буфер уже построен в

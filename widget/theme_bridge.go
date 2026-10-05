@@ -130,6 +130,7 @@ func ProfileFromTheme(t *Theme) *theme.Profile {
 		}
 		styles[b.style] = d
 	}
+	writeMenuStyle(p, styles, t.Style.Menu)
 	for k, d := range styles {
 		p.Styles[k] = d
 	}
@@ -228,6 +229,19 @@ func Materialize(rt *theme.Theme) *Theme {
 		ScrollbarThinHoverWidth: int(rt.MetricOr(keyScrollbarThinHoverWidth, 0)),
 
 		TextSubpixel: rt.FlagOr(theme.FlagTextSubpixel, false),
+
+		Menu: menuStyleOf(rt, false),
+	}
+	// Мягкие тени — только если профиль объявил токены (ShadowBlur > 0):
+	// иначе компоненты остаются на прежней тени.
+	if sp, ok := rt.Style("menu", "", theme.StateNormal).ExplicitShadow(); ok {
+		t.Style.MenuShadow = sp
+	}
+	if sp, ok := rt.Style("window", "", theme.StateNormal).ExplicitShadow(); ok {
+		t.Style.WindowShadow = sp
+	}
+	if sp, ok := rt.Style("dialog", "", theme.StateNormal).ExplicitShadow(); ok {
+		t.Style.DialogShadow = sp
 	}
 	// Кегль по умолчанию следует профилю только по его просьбе (флаг): иначе
 	// Fonts["default"] прежних тем (9 pt) изменил бы раскладку всех виджетов.

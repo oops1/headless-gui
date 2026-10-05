@@ -21,6 +21,8 @@ import (
 	"image/color"
 	"sync"
 	"sync/atomic"
+
+	"github.com/oops1/headless-gui/v3/theme"
 )
 
 // ─── Перечисления (совместимы с WPF) ────────────────────────────────────────
@@ -156,6 +158,13 @@ type Window struct {
 
 	// CornerRadius — радиус скругления углов (0 = острые).
 	CornerRadius int
+
+	// Backdrop — материал фона окна (theme.MaterialMica и др., см.
+	// SetBackdrop). Нулевой — окно заливается Background, как всегда.
+	Backdrop theme.BackdropSpec
+	// Shadow — своя тень окна поверх темы (SetShadow). Пустая — тень из
+	// токенов темы (стиль "window"), а без них окно рисуется без тени.
+	Shadow theme.ShadowSpec
 
 	// ── Настройки заголовка ──────────────────────────────────────────────────
 
@@ -389,7 +398,9 @@ func DetectedTitleStyle() WindowTitleStyle {
 // в клиентской области (ContentBounds).
 // Вызывается при создании и при resize нативного окна.
 func (w *Window) SetBounds(r image.Rectangle) {
+	old := w.Bounds()
 	w.Base.SetBounds(r)
+	w.invalidateMoved(old)
 
 	// Перестраиваем дочерние виджеты — заполняют ContentBounds
 	cb := w.ContentBounds()
@@ -523,7 +534,9 @@ func (w *Window) style() ThemeStyle {
 // поэтому закрывает оно всё, кроме скруглённых углов. Полупрозрачный фон не
 // закрывает ничего: под ним видно то, что лежит ниже, и рисовать это надо.
 func (w *Window) OpaqueRegion() []image.Rectangle {
-	if w.Background.A < 255 {
+	// Материал фона может лечь прозрачной подкраской (Mica без обоев):
+	// закрывающим окно не считаем.
+	if w.Backdrop.Material != theme.MaterialDefault || w.Background.A < 255 {
 		return nil
 	}
 	return oneRegion(&w.opaqueBuf, opaqueRect(w.Bounds(), w.CornerRadius))
@@ -791,8 +804,13 @@ func (w *Window) Draw(ctx DrawContext) {
 	th := w.titleH()
 	cr := w.CornerRadius
 
+	// ── Тень (токены стиля "window") ────────────────────────────────────────
+	w.drawShadow(ctx)
+
 	// ── Фон клиентской области ──────────────────────────────────────────────
-	if cr > 0 {
+	if w.drawBackdrop(ctx) {
+		// Фон нарисовал материал (Mica, Solid…).
+	} else if cr > 0 {
 		ctx.FillRoundRect(x, y, bw, bh, cr, w.Background)
 	} else {
 		ctx.FillRect(x, y, bw, bh, w.Background)

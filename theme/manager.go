@@ -367,6 +367,10 @@ func (m *Manager) GetFlag(k Key, def bool) bool {
 // GetAnimation возвращает анимацию активной темы. Незаданная анимация —
 // нулевая длительность, то есть «мгновенно»: так классические темы
 // отключают движение, не сообщая об этом компонентам.
+//
+// Это единая точка режима «меньше движения» (FlagMotionReduce, motion.go):
+// при включённом флаге декоративные анимации приходят с нулевой
+// длительностью, функциональные — нулевой или укороченной.
 func (m *Manager) GetAnimation(k Key) AnimSpec {
 	m.mu.RLock()
 	t := m.active
@@ -375,7 +379,7 @@ func (m *Manager) GetAnimation(k Key) AnimSpec {
 		return AnimSpec{}
 	}
 	a, _ := t.Anim(k)
-	return a
+	return t.AnimReduced(k, a)
 }
 
 // GetIcon возвращает иконку активной темы нужного размера. nil — иконки
