@@ -37,6 +37,29 @@ const (
 	KeyTaskButtonUnderlineLen theme.Key = "taskbutton.underline.len"
 	// KeyTaskButtonLabelGap — зазор между значком и заголовком окна.
 	KeyTaskButtonLabelGap theme.Key = "taskbutton.label.gap"
+
+	// KeyTaskButtonGroup — признак темы: несколько окон одного приложения
+	// живут в ОДНОЙ кнопке (Windows 10). Без него у каждого окна своя кнопка,
+	// как было всегда.
+	KeyTaskButtonGroup theme.Key = "taskbutton.group"
+	// KeyTaskButtonMuted — признак темы: свёрнутое окно и незапущенное
+	// закреплённое приложение рисуются состоянием Disabled (по умолчанию да).
+	// Windows 10 так не делает — наведение подсвечивает такие кнопки, как все.
+	KeyTaskButtonMuted theme.Key = "taskbutton.muted"
+	// KeyTaskButtonUnderlineIdle и KeyTaskButtonUnderlineIdleLen — толщина и
+	// длина (доля ширины кнопки) метки запущенного, но не активного окна.
+	// Длина 0 (по умолчанию) — метки у неактивного окна нет, если полоса
+	// активного идёт во всю ширину; толщина 0 — как у KeyTaskButtonUnderline.
+	KeyTaskButtonUnderlineIdle    theme.Key = "taskbutton.underline.idle"
+	KeyTaskButtonUnderlineIdleLen theme.Key = "taskbutton.underline.idle.len"
+	// Стопка окон: у кнопки со многими окнами за значком видны торцы нескольких
+	// «листов». KeyTaskButtonStack — сколько чёрточек (0 — не рисовать),
+	// .width — их толщина, .gap — просвет между ними (он же шаг, на который
+	// каждая следующая короче), .offset — расстояние от значка до первой.
+	KeyTaskButtonStack       theme.Key = "taskbutton.stack"
+	KeyTaskButtonStackWidth  theme.Key = "taskbutton.stack.width"
+	KeyTaskButtonStackGap    theme.Key = "taskbutton.stack.gap"
+	KeyTaskButtonStackOffset theme.Key = "taskbutton.stack.offset"
 )
 
 // winButton — раскладка одной кнопки окна, посчитанная layout(). Хранит
@@ -511,7 +534,7 @@ func (r *RunningApplications) Draw(ctx widget.DrawContext) {
 		// кнопка в смысле ввода — клик по ней по-прежнему разворачивает
 		// окно, приглушение чисто визуальное: так их видно от обычных
 		// свёрнутых на настоящей панели задач).
-		st := StateOf(i == hoverIdx, i == armedIdx, wb.info.Active, wb.info.Minimized, i == focusIdx)
+		st := StateOf(i == hoverIdx, i == armedIdx, wb.info.Active, wb.info.Minimized && taskButtonMuted(r.tm), i == focusIdx)
 		style := r.fade.ItemStyle(r.tm, wb.info.ID, wb.rect, st, r.style)
 		PaintStyle(ctx, wb.rect, style)
 
@@ -523,8 +546,7 @@ func (r *RunningApplications) Draw(ctx widget.DrawContext) {
 		}
 
 		// Свёрнутое окно тоже открыто — метка под ним остаётся.
-		DrawUnderline(ctx, wb.rect, int(r.metric(KeyTaskButtonUnderline)),
-			r.metric(KeyTaskButtonUnderlineLen), wb.info.Active, style)
+		drawTaskMark(ctx, r.tm, wb.rect, wb.info.Active, style)
 
 		if wb.showLabel {
 			// Заголовок клипуется по кнопке: он не должен наезжать на

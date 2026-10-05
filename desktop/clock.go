@@ -89,6 +89,17 @@ func (c *ClockItem) OnMouseButton(e widget.MouseEvent) bool {
 	return trayHandleClick(&c.pressed, c.Bounds(), e, c.OnClick, c.Invalidate)
 }
 
+// GetToolTip перекрывает промоутнутый из widget.Base: подсказка часов — дата
+// словами по правилам культуры («14 марта 2026»), пока оболочка не задала свою
+// через SetToolTip. Строится при показе подсказки, поэтому следует за языком и
+// за временем.
+func (c *ClockItem) GetToolTip() string {
+	if t := c.Base.GetToolTip(); t != "" {
+		return t
+	}
+	return cultureOrDefault(c.Culture).LongDate(c.now())
+}
+
 // Close останавливает секундный тик. Часы, снятые со сцены и не закрытые,
 // продолжали бы будить рендер раз в секунду вечно.
 func (c *ClockItem) Close() {

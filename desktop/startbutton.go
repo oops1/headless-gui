@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"image"
+	"sync/atomic"
 
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
@@ -31,6 +32,10 @@ type StartButton struct {
 
 	hovered bool
 	armed   bool
+	// active — меню «Пуск» открыто: кнопка остаётся подсвеченной (StateActive).
+	// Атомарно: флаг ставит подписка на панель, то есть горутина, открывшая или
+	// закрывшая меню, а читает горутина кадра.
+	active int32
 
 	// fade — плавный переход цвета при наведении и нажатии (тема: taskbar.item).
 	fade motion
@@ -97,6 +102,69 @@ func (s *StartButton) PreferredSize(avail image.Point) image.Point {
 	return image.Pt(width, 0)
 }
 
+// Active сообщает, горит ли кнопка как «меню открыто».
+func (s *StartButton) Active() bool { return atomic.LoadInt32(&s.active) == 1 }
+
+// SetActive зажигает или гасит кнопку: пока открыто меню «Пуск», кнопка
+// остаётся в состоянии StateActive. Сама кнопка меню не знает — зажигает её
+// оболочка либо Track и TrackManager по событиям панели.
+func (s *StartButton) SetActive(v bool) {
+	want := int32(0)
+	if v {
+		want = 1
+	}
+	if atomic.SwapInt32(&s.active, want) != want {
+		s.Invalidate()
+	}
+}
+
+// OpenStateSource — то, что сообщает об открытии и закрытии: *Flyout и любая
+// панель, встраивающая его (StartMenu), а в общем случае — что угодно со
+// Subscribe такого вида. Кнопка зависит от этого интерфейса, а не от
+// конкретного меню.
+type OpenStateSource interface {
+	// Subscribe подписывает h на открытие (true) и закрытие (false) и
+	// возвращает функцию отписки.
+	Subscribe(h func(open bool)) (unsubscribe func())
+	// IsOpen — открыто ли сейчас.
+	IsOpen() bool
+}
+
+// Track связывает кнопку с источником: она горит, пока тот открыт, и гаснет,
+// когда он закрыт чем бы то ни было — кликом мимо, Esc, запуском приложения,
+// открытием другой панели. Возвращает функцию, которая разрывает связь
+// (и гасит кнопку).
+func (s *StartButton) Track(src OpenStateSource) (untrack func()) {
+	if src == nil {
+		return func() {}
+	}
+	s.SetActive(src.IsOpen())
+	unsub := src.Subscribe(s.SetActive)
+	return func() {
+		unsub()
+		s.SetActive(false)
+	}
+}
+
+// TrackManager — то же для панели name менеджера всплывающих панелей: кнопка
+// горит между событиями FlyoutOpened и FlyoutClosed этой панели. Панель можно
+// зарегистрировать позже — события придут, когда она откроется.
+func (s *StartButton) TrackManager(m *FlyoutManager, name string) (untrack func()) {
+	if m == nil {
+		return func() {}
+	}
+	s.SetActive(m.IsOpen(name))
+	unsub := m.Subscribe(func(ev FlyoutEvent) {
+		if ev.Name == name {
+			s.SetActive(ev.Kind == FlyoutOpened)
+		}
+	})
+	return func() {
+		unsub()
+		s.SetActive(false)
+	}
+}
+
 // OnMouseMove реализует widget.MouseMoveHandler — обновляет наведение.
 func (s *StartButton) OnMouseMove(x, y int) {
 	hovered := image.Pt(x, y).In(s.Bounds())
@@ -143,7 +211,7 @@ func (s *StartButton) Draw(ctx widget.DrawContext) {
 	if b.Empty() {
 		return
 	}
-	st := StateOf(s.hovered, s.armed, false, false, s.FocusVisible())
+	st := StateOf(s.hovered, s.armed, s.Active(), false, s.FocusVisible())
 	style := s.fade.ItemStyle(s.tm, 0, b, st, s.style)
 	PaintStyle(ctx, b, style)
 

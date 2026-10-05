@@ -142,6 +142,8 @@ func Windows2000Profile() *Profile {
 		PadX: N(6), PadY: N(3),
 	})
 	p.SetStyle("startbutton", "", StatePressed, StyleDelta{Bevel: sunken})
+	// Пока меню «Пуск» открыто, кнопка остаётся вдавленной.
+	p.SetStyle("startbutton", "", StateActive, StyleDelta{Bevel: sunken})
 	p.SetStyle("taskbutton", "", StateNormal, StyleDelta{
 		Fill: C(face), Text: C(text), Bevel: bevel, PadX: N(6),
 	})
@@ -311,6 +313,8 @@ func Windows10Profile() *Profile {
 		SetFlag("startbutton.label", false).
 		SetFlag("taskbutton.label", false).
 		SetFlag(KeyTaskbarLight, false)
+	// Кнопки приложений: размеры, линии состояний, группировка окон.
+	declareWin10TaskButtons(p)
 
 	// Значок кнопки «Пуск» берётся из набора иконок темы.
 	p.Icons["startbutton.icon"] = IconRef{Name: "start"}
@@ -356,8 +360,9 @@ func Windows10Profile() *Profile {
 	p.SetStyle("startbutton", "", StateHover, StyleDelta{Fill: C(hover)})
 	p.SetStyle("startbutton", "", StatePressed, StyleDelta{Fill: C(pressed)})
 
+	// Отступ по бокам 12 при значке 24 даёт кнопку шириной 48, как в Windows 10.
 	p.SetStyle("taskbutton", "", StateNormal, StyleDelta{
-		Fill: C(taskbarFill), Text: C(RGB(230, 230, 230)), PadX: N(8),
+		Fill: C(taskbarFill), Text: C(RGB(230, 230, 230)), PadX: N(12),
 	})
 	p.SetStyle("taskbutton", "", StateHover, StyleDelta{Fill: C(hover)})
 	// Полоса под кнопкой вместо обводки — как на панели Windows 10.
@@ -401,6 +406,7 @@ func Windows10Profile() *Profile {
 	}
 	when("clock", "", StateNormal, StyleDelta{Text: C(RGB(0, 0, 0))})
 	when("clock", "", StateHover, StyleDelta{Fill: C(lightHover)})
+	declareWin10TaskButtonStyles(p)
 
 	p.SetStyle("menu", "", StateNormal, StyleDelta{
 		Fill: C(RGB(43, 43, 43)), Text: C(RGB(240, 240, 240)),
@@ -599,6 +605,8 @@ func Windows11Profile() *Profile {
 	})
 	p.SetStyle("startbutton", "", StateHover, StyleDelta{Fill: C(RGBA(0, 0, 0, 20))})
 	p.SetStyle("startbutton", "", StatePressed, StyleDelta{Fill: C(RGBA(0, 0, 0, 32))})
+	// Меню «Пуск» открыто — кнопка подсвечена как нажатая.
+	p.SetStyle("startbutton", "", StateActive, StyleDelta{Fill: C(RGBA(0, 0, 0, 32))})
 
 	p.SetStyle("taskbutton", "", StateNormal, StyleDelta{
 		Text: C(text), Corner: N(6), PadX: N(8),

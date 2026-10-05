@@ -3795,6 +3795,10 @@ Beyond colors and sizes, these decide what the taskbar *is*:
 | `taskbutton.label` | flag | show window titles on task buttons (Windows 10/11 hide them) |
 | `taskbutton.underline` | metric | thickness of the mark under an open window |
 | `taskbutton.underline.len` | metric | mark length as a fraction of button width: 1 = full bar (Windows 10), 0.4 = short tick (Windows 11, doubled for the active window) |
+| `taskbutton.group` | flag | several windows of one app share ONE button (Windows 10); default off = a button per window |
+| `taskbutton.muted` | flag | minimised windows and pinned-not-running apps are drawn `StateDisabled` (default true; Windows 10 sets false so hover highlights them) |
+| `taskbutton.underline.idle`, `.idle.len` | metric | thickness / length (fraction of the button) of the mark under a running but NOT active window; length 0 = old rule |
+| `taskbutton.stack`, `.stack.width`, `.stack.gap`, `.stack.offset` | metric | "stack" edges drawn right of the icon of a multi-window button: count (0 = none), thickness, gap, distance from the icon |
 | `clock.date` | flag | show the date under the time (classic clocks never do) |
 | `tray.gap`, `tray.chevron.width`, `tray.overflow.columns` | metrics | tray row and its overflow grid |
 
@@ -4318,6 +4322,56 @@ part in Tab and the arrow keys.
   `FocusState.NotePointer` (called from `OnMouseButton`) hides it after a click.
   `StateFocused` is also passed to `StateOf` by the start button and the app
   cells, so a profile can style it.
+
+### App buttons — window groups, command menu, tooltip, Start "active" (`desktop/appgroup.go`, `previewlist.go`)
+
+With `taskbutton.group` (Windows 10 profile) `ApplicationArea` shows all windows
+of one app (`AppID != ""`) as ONE cell; `WindowsAt(i)` lists them, the cell is
+active if any window is, minimised only if all are. The grouping follows a theme
+switch by itself (`syncGrouping` in `layout`/`PreferredSize`). The cell key for
+colour transitions is the app, not the window.
+
+- **Click on a stack.** `WindowPreview.Track(area)` also registers
+  `GroupClickArea.SetGroupListener`; a click opens the window LIST at once
+  (hover opens it after `preview.delay.open`). The list is the same `Flyout`:
+  icon, title, thumbnail and a hover `×` (closes the window) per window; more
+  windows than fit in a row (max 7, never wider than `Screen`) become a column
+  of titles without thumbnails. It follows the window model while open
+  (`ListedWindows()`). Without a listener (no preview) a click cycles the windows;
+  Enter/Space from the keyboard always cycles. Optional interfaces:
+  `GroupHoverArea.WindowsAt`, `GroupClickArea.SetGroupListener` — an area that
+  does not know them keeps working as a one-window area.
+- **Right click / Menu key / Shift+F10** → `PopupMenu` from `AppCommands`
+  (`area.SetCommands(...)`, `AppCommandsFunc`); the consumer gets an `AppButton`
+  (`App`, `Title`, `Pinned`, `Windows`) and returns `[]AppCommand` (title, icon,
+  disabled, separator, `Run`). Default set: `DefaultAppCommands(cat, wm, btn)` —
+  launch, pin/unpin, close window / close all; captions are `widget.Tr` keys
+  `desktop.app.pin|unpin|closeWindow|closeAll` (RU+EN). The menu opens at the
+  button edge facing the desktop (`taskbar.top` flips it) and takes colours from
+  the theme's `menu` styles. The area draws and routes the menu itself
+  (`HasOverlay/DrawOverlay/OverlayBounds/Dismiss/DismissOnEscape`); the menu is
+  NOT a child (a `PopupMenu` is `Focusable` and would become a Tab stop).
+- **Tooltip.** `ApplicationArea.ToolTipAt` returns the app title (with the window
+  count for a stack, key `desktop.app.windows`) only where no preview will show:
+  pinned-not-running buttons, or when nothing tracks the area / the theme has
+  `preview` off / the model has no `WindowPreviews`. Tray icons already carry
+  tooltips (`NetworkItem`, `VolumeItem`, `PowerItem`, `TrayIcon.SetToolTip`).
+- **Marks.** `drawTaskMark`: active = `taskbutton.underline` × `.underline.len`
+  (full width in Windows 10, accent via `BorderFrom`); running non-active =
+  `.underline.idle` × `.underline.idle.len` in the TEXT colour; pinned-not-running
+  = none. Hover is a rectangular film (`Corner 0`) also on minimised / pinned
+  buttons (`taskbutton.muted=false`). Other themes keep `DrawUnderline` as is.
+- **Start button.** `StartButton.SetActive`/`Active` + `Track(OpenStateSource)` /
+  `TrackManager(mgr, name)`: lit (`StateActive`) between the open and close
+  events of any `*Flyout` (or manager panel), whoever closes it. Windows 10 has
+  the film, Windows 2000 a sunken bevel, Windows 11 the pressed film.
+- Windows 10 geometry: button 48 (`taskbutton.icon.size` 24 + `PadX` 12 each side),
+  `taskbutton.gap` 0. `ClockItem.GetToolTip` defaults to the long date.
+- Windows 10 preview panel styles (`preview`, `preview.header`, `preview.thumb`)
+  are acrylic in dark and light (`theme/profiles_win10_taskbutton.go`).
+
+Tests: `desktop/appbuttons_test.go`; `TestGolden_Windows10AppButtons` writes PNGs
+with `GOLDEN_OUT`.
 
 ### Measured cost of a frame
 

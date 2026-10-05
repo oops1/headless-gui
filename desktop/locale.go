@@ -47,6 +47,15 @@ const (
 	StrPowerAC      = "desktop.power.ac"
 	StrPowerBattery = "desktop.power.battery" // %d — процент
 
+	// Кнопки приложений: команды меню по умолчанию (DefaultAppCommands) и
+	// подсказка кнопки со многими окнами.
+	StrAppPin         = "desktop.app.pin"
+	StrAppUnpin       = "desktop.app.unpin"
+	StrAppCloseWindow = "desktop.app.closeWindow"
+	StrAppCloseAll    = "desktop.app.closeAll"
+	StrAppWindows     = "desktop.app.windows" // %s — название, %d — число окон
+	StrAppCloseTip    = "desktop.app.closeTip"
+
 	// Культура часов и календаря (см. DateCulture). Названия месяцев в
 	// именительном падеже и сокращения дней недели — общие с виджетом выбора
 	// даты (ключи date.month.N, date.wd.N, date.firstDay), чтобы язык,
@@ -79,6 +88,13 @@ func init() {
 		StrPowerAC:      "Питание от сети",
 		StrPowerBattery: "Батарея: %d%%",
 
+		StrAppPin:         "Закрепить на панели задач",
+		StrAppUnpin:       "Открепить от панели задач",
+		StrAppCloseWindow: "Закрыть окно",
+		StrAppCloseAll:    "Закрыть все окна",
+		StrAppWindows:     "%s — окон: %d",
+		StrAppCloseTip:    "Закрыть окно",
+
 		StrClockTimeFormat: "15:04",
 		StrClockDateFormat: "02.01.2006",
 		StrCalLongDate:     "{d} {M} {y}",
@@ -97,6 +113,13 @@ func init() {
 		StrSoundLevel:   "Sound: %d%%",
 		StrPowerAC:      "Plugged in",
 		StrPowerBattery: "Battery: %d%%",
+
+		StrAppPin:         "Pin to taskbar",
+		StrAppUnpin:       "Unpin from taskbar",
+		StrAppCloseWindow: "Close window",
+		StrAppCloseAll:    "Close all windows",
+		StrAppWindows:     "%s — %d windows",
+		StrAppCloseTip:    "Close window",
 
 		StrClockTimeFormat: "3:04 PM",
 		StrClockDateFormat: "1/2/2006",

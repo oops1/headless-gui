@@ -277,17 +277,25 @@ func DrawUnderline(ctx widget.DrawContext, r image.Rectangle, thickness int, rat
 	if ratio >= 1 && !active {
 		return // полная полоса — примета активного окна, остальным её не рисуют
 	}
+	k := ratio
+	if !active {
+		k /= 2
+	}
+	drawMarkBar(ctx, r, thickness, k, s)
+}
+
+// drawMarkBar рисует полосу толщиной thickness вдоль нижнего края r, шириной в долю
+// k от r, по центру. Цвет — рамка стиля, а без неё цвет текста.
+func drawMarkBar(ctx widget.DrawContext, r image.Rectangle, thickness int, k float64, s *theme.Style) {
+	if thickness <= 0 || s == nil || r.Empty() {
+		return
+	}
 	col := s.Border
 	if col.A == 0 {
 		col = s.Text
 	}
 	if col.A == 0 {
 		return
-	}
-
-	k := ratio
-	if !active {
-		k /= 2
 	}
 	w := int(float64(r.Dx()) * k)
 	if w < thickness {

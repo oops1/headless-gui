@@ -215,6 +215,8 @@ func buildDesktop(eng *engine.Engine) scene {
 		closeOthers(menu)
 		menu.Toggle(startBtn.Bounds())
 	}
+	// Пока меню открыто, кнопка «Пуск» горит; гаснет, чем бы меню ни закрыли.
+	startBtn.Track(menu)
 	clock.OnClick = func() {
 		closeOthers(cal)
 		cal.Toggle(clock.Bounds())

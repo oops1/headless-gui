@@ -94,31 +94,24 @@ func (a *ApplicationArea) cellCount() int {
 // OnKeyEvent: стрелки, Home и End выбирают ячейку, Enter и Space нажимают её
 // так же, как щелчок мышью.
 func (a *ApplicationArea) OnKeyEvent(e widget.KeyEvent) {
+	// Открытое меню команд забирает клавиши себе (стрелки, Enter, Esc).
+	if a.menu.routeKey(e) {
+		return
+	}
+	// Клавиша меню и Shift+F10 открывают меню команд выбранной ячейки — то же,
+	// что правый щелчок мышью.
+	if e.Pressed && !e.Repeat && (e.Code == widget.KeyMenu ||
+		(e.Code == widget.KeyF10 && e.Mod&widget.ModShift != 0)) {
+		a.ShowCommands(a.FocusState.Cell(a.cellCount()))
+		return
+	}
 	a.HandleCellKey(e, a.cellCount(), a.activateCell, a.Invalidate)
 }
 
 // activateCell делает с ячейкой i то же, что щелчок по ней: запускает
-// закреплённое незапущенное, сворачивает активное окно, активирует остальные.
-func (a *ApplicationArea) activateCell(i int) {
-	a.mu.RLock()
-	var entry appEntry
-	ok := i >= 0 && i < len(a.entries)
-	if ok {
-		entry = a.entries[i]
-	}
-	a.mu.RUnlock()
-	if !ok {
-		return
-	}
-	switch {
-	case !entry.live && a.cat != nil:
-		_ = a.cat.Launch(entry.app)
-	case entry.live && entry.active && a.wm != nil:
-		a.wm.Minimize(entry.window)
-	case entry.live && a.wm != nil:
-		a.wm.Activate(entry.window)
-	}
-}
+// закреплённое незапущенное, сворачивает активное окно, активирует остальные,
+// а у стопки окон переключает окна по кругу.
+func (a *ApplicationArea) activateCell(i int) { a.activate(i, false) }
 
 // FocusRing обводит выбранную ячейку, а не всю область.
 func (a *ApplicationArea) FocusRing() (image.Rectangle, *theme.Style) {
