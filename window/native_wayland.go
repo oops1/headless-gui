@@ -927,12 +927,22 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		// окном остаётся тем, каким его оставил сосед.
 		w.applyCursor()
 	case wlPointerEvLeave:
+		onPopup := w.ptrOnPopup
 		w.ptrOnPopup = false
 		// Указатель ушёл — в том числе потому, что компоновщик забрал
 		// нажатие себе (начались move/resize). Отпускания мы уже не
 		// получим, поэтому отпускаем зажатые кнопки сами: иначе движок
 		// навсегда остался бы с «нажатой» кнопкой и захватом мыши.
 		w.releaseHeldButtons()
+		// И снимаем наведение — движением за пределы той поверхности, с
+		// которой ушли (pointerleave.go).
+		if onPopup {
+			if h := w.popupHandlers(); h.Move != nil {
+				h.Move(w.ptrPopupID, pointerOutside, pointerOutside)
+			}
+		} else if w.onMouseMove != nil {
+			w.onMouseMove(pointerOutside, pointerOutside)
+		}
 	case wlPointerEvMotion:
 		// time, x(fixed), y(fixed)
 		w.ptrX = int(int32(binary.LittleEndian.Uint32(b[4:8]))) >> 8
