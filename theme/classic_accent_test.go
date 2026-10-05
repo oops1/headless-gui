@@ -48,6 +48,9 @@ func classicDump(t *testing.T, name string) string {
 	for _, c := range []string{"tray.icon", "tray.notifications", "tray.showdesktop", "searchbox", "menu"} {
 		seen[cp{c, ""}] = true
 	}
+	// Заголовок диалога профиль не объявляет — его даёт разрешение темы
+	// (partFallbacks); снимок обязан его видеть.
+	seen[cp{"dialog", "titlebar"}] = true
 	var keys []cp
 	for k := range seen {
 		keys = append(keys, k)
@@ -92,11 +95,12 @@ func classicHash(t *testing.T, name string) string {
 // Снимки сняты на профилях ДО замены литералов акцента ссылками.
 func TestClassic_LookIsBitIdenticalWithoutSetAccent(t *testing.T) {
 	want := map[string]string{
-		// Хэши включают стили заголовка и затемнения диалога
-		// (theme/dialogstyles.go): они добавлены намеренно, без них хэши
-		// были 6e38def94d5286e3 и d4da5b1d98443b59.
-		theme.ProfileWindows2000:     "55f17c214cf64e74",
-		theme.ProfileWindows2000Blue: "19fa4cc9bf21998b",
+		// Хэши включают намеренные добавления после снятия снимка: стили
+		// заголовка и затемнения диалога (theme/dialogstyles.go) и вид
+		// контекстного меню из профиля (theme/menu.go). Без них хэши были
+		// 6e38def94d5286e3 и d4da5b1d98443b59.
+		theme.ProfileWindows2000:     "1a2c2b76c5a06acf",
+		theme.ProfileWindows2000Blue: "00ab4f33c7ce8c40",
 	}
 	for name, hash := range want {
 		if got := classicHash(t, name); got != hash {
