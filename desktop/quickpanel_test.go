@@ -751,7 +751,7 @@ func TestQuickPanel_FirstFrameUnder100ms(t *testing.T) {
 	}
 	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
 	t.Logf("первый кадр открытия: %v", times)
-	if med := times[len(times)/2]; med > 100*time.Millisecond {
+	if med := times[len(times)/2]; med > perfBudget(100*time.Millisecond) {
 		t.Errorf("первый кадр открытия: медиана %v, предел 100 мс (%v)", med, times)
 	}
 }

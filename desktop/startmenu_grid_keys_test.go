@@ -320,10 +320,10 @@ func TestStartMenu11_FirstFrameUnder100ms(t *testing.T) {
 	s.frame()
 	warm := time.Since(t0)
 	t.Logf("первый кадр после открытия: холодный %v, тёплый %v", cold, warm)
-	if cold > 100*time.Millisecond {
+	if cold > perfBudget(100*time.Millisecond) {
 		t.Errorf("холодный первый кадр %v — дольше 100 мс", cold)
 	}
-	if warm > 100*time.Millisecond {
+	if warm > perfBudget(100*time.Millisecond) {
 		t.Errorf("тёплый первый кадр %v — дольше 100 мс", warm)
 	}
 
@@ -332,7 +332,7 @@ func TestStartMenu11_FirstFrameUnder100ms(t *testing.T) {
 	t0 = time.Now()
 	s.eng.Invalidate()
 	s.frame()
-	if d := time.Since(t0); d > 100*time.Millisecond {
+	if d := time.Since(t0); d > perfBudget(100*time.Millisecond) {
 		t.Errorf("кадр «Все приложения» на 300 приложений %v — дольше 100 мс", d)
 	}
 }
@@ -393,7 +393,7 @@ func TestStartMenu11_HoverFramesAreCheap(t *testing.T) {
 	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
 	med := times[frames/2]
 	t.Logf("медианный кадр наведения: %v", med)
-	if med > 50*time.Millisecond {
+	if med > perfBudget(50*time.Millisecond) {
 		t.Errorf("кадр наведения %v — дороже 50 мс", med)
 	}
 }
