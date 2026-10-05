@@ -40,6 +40,9 @@ type ApplicationArea struct {
 
 	unsubCat func()
 	unsubWM  func()
+
+	// fade — плавный переход цвета ячеек (тема: taskbar.item).
+	fade motion
 }
 
 // appEntry — одна ячейка области: либо окно, либо закреплённое приложение.
@@ -57,6 +60,16 @@ type appEntry struct {
 	live   bool // есть открытое окно
 	active bool
 	min    bool
+}
+
+// key — устойчивый ключ ячейки для плавных переходов: номер окна, пока оно
+// есть, иначе закреплённое приложение. Индекс не годится: при закрытии окна
+// ячейки сдвигаются, и переход перетёк бы на соседа.
+func (e appEntry) key() any {
+	if e.live && e.window != 0 {
+		return e.window
+	}
+	return e.app
 }
 
 // NewApplicationArea создаёт область приложений: закреплённые берутся из cat,
@@ -310,7 +323,9 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 		}
 		e := entries[i]
 		st := StateOf(i == hover, i == armed, e.active, e.min || !e.live, i == focus)
-		s := styleOf(a.tm, ComponentTaskButton, "", st)
+		s := a.fade.ItemStyle(a.tm, e.key(), r, st, func(st theme.State) *theme.Style {
+			return styleOf(a.tm, ComponentTaskButton, "", st)
+		})
 		PaintStyle(ctx, r, s)
 
 		// Метка открытого окна: закреплённое, но незапущенное её не получает —

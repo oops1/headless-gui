@@ -47,6 +47,9 @@ type uiReceiver struct {
 	handle uint64
 	full   func()
 	rect   func(image.Rectangle)
+	// wake — «в UI появилась анимация»: разбудить цикл, не объявляя кадр
+	// изменившимся. nil — приёмник старого вида, ему достаётся full.
+	wake func()
 }
 
 var (
@@ -69,10 +72,23 @@ var (
 // прежнего SetUIChangeNotifier); fnRect — точечная (аналог прежнего
 // SetUIRectChangeNotifier, может быть nil).
 func RegisterUINotifier(fnFull func(), fnRect func(image.Rectangle)) uint64 {
+	return RegisterUINotifierWake(fnFull, fnRect, nil)
+}
+
+// RegisterUINotifierWake — RegisterUINotifier с третьим колбэком: fnWake зовётся,
+// когда заведена анимация (Animate, AnimateOwned).
+//
+// Приёмник без fnWake получает на это полную инвалидацию — прежнее поведение. Но
+// полная инвалидация означает перерисовку всего кадра, а анимация, меняющая
+// кнопку или выезжающую панель, ничего, кроме их областей, не затрагивает: её
+// тики сами заявляют свои прямоугольники. Поэтому движок, чей цикл и так шагает
+// анимации на каждом тике, регистрируется с fnWake, не объявляющим кадр
+// изменившимся.
+func RegisterUINotifierWake(fnFull func(), fnRect func(image.Rectangle), fnWake func()) uint64 {
 	uiNotifyMu.Lock()
 	uiHandleSeq++
 	h := uiHandleSeq
-	uiReceivers = append(uiReceivers, uiReceiver{handle: h, full: fnFull, rect: fnRect})
+	uiReceivers = append(uiReceivers, uiReceiver{handle: h, full: fnFull, rect: fnRect, wake: fnWake})
 	uiNotifyMu.Unlock()
 	return h
 }
@@ -146,6 +162,25 @@ func notifyUIChanged() {
 	defer uiNotifyMu.RUnlock()
 	for i := range uiReceivers {
 		if uiReceivers[i].full != nil {
+			uiReceivers[i].full()
+		}
+	}
+	if uiExtNotify != nil {
+		uiExtNotify()
+	}
+}
+
+// notifyAnimationAdded сообщает приёмникам, что заведена анимация: будит их, не
+// заявляя изменений (см. RegisterUINotifierWake). Приёмникам без wake и внешнему
+// слоту SetUIChangeNotifier достаётся прежняя полная инвалидация.
+func notifyAnimationAdded() {
+	uiNotifyMu.RLock()
+	defer uiNotifyMu.RUnlock()
+	for i := range uiReceivers {
+		switch {
+		case uiReceivers[i].wake != nil:
+			uiReceivers[i].wake()
+		case uiReceivers[i].full != nil:
 			uiReceivers[i].full()
 		}
 	}

@@ -97,6 +97,9 @@ func NewNotificationCenter(tm *theme.Manager, ns Notifications) *NotificationCen
 	}
 	nc.Content = nc.draw
 	nc.Size = nc.size
+	// Центр уведомлений выезжает справа, из-за края экрана, а не снизу.
+	nc.Slide = SlideRight
+	nc.SlideDistance = -1
 	return nc
 }
 

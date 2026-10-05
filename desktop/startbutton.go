@@ -32,6 +32,9 @@ type StartButton struct {
 	hovered bool
 	armed   bool
 
+	// fade — плавный переход цвета при наведении и нажатии (тема: taskbar.item).
+	fade motion
+
 	// OnClick вызывается при успешном клике (press+release над кнопкой).
 	// Оболочка вешает сюда открытие меню «Пуск».
 	OnClick func()
@@ -141,7 +144,7 @@ func (s *StartButton) Draw(ctx widget.DrawContext) {
 		return
 	}
 	st := StateOf(s.hovered, s.armed, false, false, s.FocusVisible())
-	style := s.style(st)
+	style := s.fade.ItemStyle(s.tm, 0, b, st, s.style)
 	PaintStyle(ctx, b, style)
 
 	iconSize := int(s.metric(KeyStartButtonIconSize))

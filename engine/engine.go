@@ -356,7 +356,11 @@ func New(width, height, fps int) *Engine {
 	// перспективе — floating-панели) сосуществуют, и уведомления доходят до
 	// КАЖДОГО, а не только до последнего созданного. Снимаем регистрацию в
 	// Stop (см. Stop). full → e.Invalidate, rect (точечно) → e.InvalidateRect.
-	e.notifierHandle = widget.RegisterUINotifier(e.Invalidate, e.InvalidateRect)
+	// Заведённая анимация кадр целиком не инвалидирует: цикл шагает анимации на
+	// каждом тике, а тик заявляет только свою область. Полная инвалидация на
+	// старте каждой анимации — переход цвета кнопки, выезд меню — перерисовывала
+	// бы весь экран ради того, что меняется в одной его части.
+	e.notifierHandle = widget.RegisterUINotifierWake(e.Invalidate, e.InvalidateRect, func() {})
 	e.moveHandle = widget.RegisterMoveSink(e.noteMove)
 	// Точный замер текста для компоновки до отрисовки (размеры диалогов).
 	//

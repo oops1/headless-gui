@@ -90,6 +90,10 @@ type RunningApplications struct {
 	// компонент в списке наблюдателей модели — утечка, если область убрали
 	// со сцены и не закрыли.
 	unsubWM func()
+
+	// fade — плавный переход цвета кнопок при наведении, нажатии и смене
+	// активного окна (тема: taskbar.item).
+	fade motion
 }
 
 // NewRunningApplications создаёт область запущенных приложений,
@@ -508,7 +512,7 @@ func (r *RunningApplications) Draw(ctx widget.DrawContext) {
 		// окно, приглушение чисто визуальное: так их видно от обычных
 		// свёрнутых на настоящей панели задач).
 		st := StateOf(i == hoverIdx, i == armedIdx, wb.info.Active, wb.info.Minimized, i == focusIdx)
-		style := r.style(st)
+		style := r.fade.ItemStyle(r.tm, wb.info.ID, wb.rect, st, r.style)
 		PaintStyle(ctx, wb.rect, style)
 
 		padX := int(style.PadX)

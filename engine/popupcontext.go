@@ -129,6 +129,48 @@ func (t *translatingContext) DrawLineAA(x1, y1, x2, y2 int, thickness float64, c
 	t.inner.DrawLineAA(x1-t.dx, y1-t.dy, x2-t.dx, y2-t.dy, thickness, col)
 }
 
+// ─── Опциональные возможности контекста ─────────────────────────────────────
+//
+// Размытие подложки, мягкая тень и скруглённый клип — не часть DrawContext, а
+// возможности, о которых виджет спрашивает приведением типа (BackdropDrawer,
+// ShadowDrawer, RoundClipper). Обёртка, не реализующая их, делает слой
+// «глухим»: PaintStyle не находит ни тени, ни скругления и рисует панель
+// плоским прямоугольником — именно это случалось с оверлеями, вынесенными в
+// отдельное окно. Здесь они пробрасываются в нижележащий канвас с тем же
+// переводом координат, что и остальное рисование.
+
+var (
+	_ widget.BackdropDrawer = (*translatingContext)(nil)
+	_ widget.ShadowDrawer   = (*translatingContext)(nil)
+	_ widget.RoundClipper   = (*translatingContext)(nil)
+	_ widget.OpacityDrawer  = (*translatingContext)(nil)
+)
+
+// BlurBehind размывает уже нарисованное в r (в буфере попапа) и подкрашивает.
+func (t *translatingContext) BlurBehind(r image.Rectangle, radius int, tint color.RGBA) {
+	t.inner.BlurBehind(r.Sub(image.Pt(t.dx, t.dy)), radius, tint)
+}
+
+// DrawSoftShadow рисует мягкую тень под r.
+func (t *translatingContext) DrawSoftShadow(r image.Rectangle, corner int, elevation float64, col color.RGBA) {
+	t.inner.DrawSoftShadow(r.Sub(image.Pt(t.dx, t.dy)), corner, elevation, col)
+}
+
+// SetRoundClip включает отсечение по скруглённому контуру r.
+func (t *translatingContext) SetRoundClip(r image.Rectangle, radius int) {
+	t.inner.SetRoundClip(r.Sub(image.Pt(t.dx, t.dy)), radius)
+}
+
+// ClearRoundClip снимает скруглённое отсечение (прямоугольное остаётся).
+func (t *translatingContext) ClearRoundClip() { t.inner.ClearRoundClip() }
+
+// DrawWithOpacity рисует draw в слое с прозрачностью alpha (см.
+// Canvas.DrawWithOpacity). Нужно панелям, которые выезжают с проявлением: в
+// отдельном окне прозрачность слоя означает смесь с прозрачным буфером окна.
+func (t *translatingContext) DrawWithOpacity(r image.Rectangle, alpha float64, draw func()) {
+	t.inner.DrawWithOpacity(r.Sub(image.Pt(t.dx, t.dy)), alpha, draw)
+}
+
 // shift возвращает копию точек, сдвинутых на -(dx,dy).
 func (t *translatingContext) shift(pts []image.Point) []image.Point {
 	if len(pts) == 0 {

@@ -103,8 +103,8 @@ func TestDraw_AsksThemeForStyle(t *testing.T) {
 			continue
 		}
 		switch path {
-		case "contract.go", "fakes.go", "paint.go":
-			continue // контракт, оснастка и общая отрисовка — не компоненты
+		case "contract.go", "fakes.go", "paint.go", "flyoutmanager.go":
+			continue // контракт, оснастка, общая отрисовка и слой панелей — не компоненты
 		}
 		src, err := os.ReadFile(path)
 		if err != nil {

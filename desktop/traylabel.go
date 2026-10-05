@@ -42,6 +42,9 @@ type TrayLabel struct {
 
 	hovered int32
 	pressed int32
+
+	// fade — плавный переход цвета при наведении и нажатии.
+	fade motion
 }
 
 // NewTrayLabel создаёт надпись, оформляемую темой tm.
@@ -122,7 +125,7 @@ func (l *TrayLabel) Draw(ctx widget.DrawContext) {
 	if text == "" {
 		return
 	}
-	s := trayStyle(l.tm, ComponentTrayLabel, trayState(&l.hovered, &l.pressed))
+	s := l.fade.tray(l.tm, ComponentTrayLabel, b, trayState(&l.hovered, &l.pressed))
 	PaintStyle(ctx, b, s)
 	DrawTextCentered(ctx, b, text, s)
 }

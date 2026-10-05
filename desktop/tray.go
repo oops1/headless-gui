@@ -345,6 +345,9 @@ type NetworkItem struct {
 	hovered int32
 	pressed int32
 
+	// fade — плавный переход цвета при наведении и нажатии.
+	fade motion
+
 	// tt — подсказка «Сеть: <имя>, подключено» / «Сеть: нет подключения»,
 	// обновляемая подпиской на st (см. trayTooltip — своя синхронизация,
 	// потому что промоутнутое Base.ToolTip её не даёт).
@@ -421,7 +424,7 @@ func (n *NetworkItem) Draw(ctx widget.DrawContext) {
 		return
 	}
 	st := trayState(&n.hovered, &n.pressed)
-	s := trayStyle(n.tm, ComponentNetwork, st)
+	s := n.fade.tray(n.tm, ComponentNetwork, b, st)
 	PaintStyle(ctx, b, s)
 
 	inner := shrinkByPad(b, s)
@@ -486,6 +489,9 @@ type VolumeItem struct {
 
 	hovered int32
 	pressed int32
+
+	// fade — плавный переход цвета при наведении и нажатии.
+	fade motion
 
 	// tt — подсказка «Звук: N%» / «Звук: выключен» (см. NetworkItem.tt —
 	// та же причина: Base.ToolTip без замка, а подписка зовётся из
@@ -559,7 +565,7 @@ func (v *VolumeItem) Draw(ctx widget.DrawContext) {
 		return
 	}
 	st := trayState(&v.hovered, &v.pressed)
-	s := trayStyle(v.tm, ComponentVolume, st)
+	s := v.fade.tray(v.tm, ComponentVolume, b, st)
 	PaintStyle(ctx, b, s)
 
 	inner := shrinkByPad(b, s)
@@ -619,6 +625,9 @@ type PowerItem struct {
 
 	hovered int32
 	pressed int32
+
+	// fade — плавный переход цвета при наведении и нажатии.
+	fade motion
 
 	// tt — подсказка «Батарея: N%» / «Питание от сети» (см. NetworkItem.tt).
 	tt trayTooltip
@@ -697,7 +706,7 @@ func (p *PowerItem) Draw(ctx widget.DrawContext) {
 		return
 	}
 	st := trayState(&p.hovered, &p.pressed)
-	s := trayStyle(p.tm, ComponentPower, st)
+	s := p.fade.tray(p.tm, ComponentPower, b, st)
 	PaintStyle(ctx, b, s)
 
 	inner := shrinkByPad(b, s)

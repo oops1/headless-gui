@@ -119,6 +119,21 @@ type ShadowDrawer interface {
 	DrawSoftShadow(r image.Rectangle, corner int, elevation float64, col color.RGBA)
 }
 
+// OpacityDrawer — опциональная возможность контекста: выполнить рисование как
+// слой с заданной прозрачностью (реализуется engine.Canvas методом
+// DrawWithOpacity).
+//
+// draw рисует тем же контекстом как обычно, а контекст после него смешивает
+// область r с тем, что в ней лежало до draw: alpha=1 — слой как нарисован,
+// alpha=0 — его нет. Это прозрачность слоя целиком, а не каждого примитива:
+// подложка со стеклом, тенью и текстом проявляется как одно целое.
+//
+// Контекст без этой возможности компонент обходит: слой появляется сразу, без
+// проявления, — раскладка от этого не меняется.
+type OpacityDrawer interface {
+	DrawWithOpacity(r image.Rectangle, alpha float64, draw func())
+}
+
 // DrawContext — API рисования, предоставляемый движком каждому виджету.
 // Реализуется типом engine.Canvas.
 //

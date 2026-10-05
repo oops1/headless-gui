@@ -89,6 +89,9 @@ type CalendarFlyout struct {
 	// Culture — региональные правила календаря: названия, первый день недели,
 	// запись даты. nil — LocaleCulture (из строк движка для текущего языка).
 	Culture DateCulture
+
+	// fade — плавный переход цвета чисел при наведении.
+	fade motion
 }
 
 // NewCalendarFlyout создаёт календарь, оформляемый темой tm и читающий
@@ -378,11 +381,22 @@ func (c *CalendarFlyout) draw(ctx widget.DrawContext, r image.Rectangle) {
 				!cell.day.inMonth,
 				hasSelection && sameDay(cell.day.date, selected),
 			)
-			dayStyle := c.themeStyle(calendarPartDay, st)
+			// Ключ числа несёт и «в этом ли месяце оно»: при листании то же
+			// число из соседнего месяца меняет вид не плавно, а сразу.
+			key := calendarDayKey{cell.day.date.Year(), cell.day.date.YearDay(), cell.day.inMonth}
+			dayStyle := c.fade.Style(c.Theme(), key, cell.rect, st, func(st theme.State) *theme.Style {
+				return c.themeStyle(calendarPartDay, st)
+			})
 			PaintStyle(ctx, cell.rect, dayStyle)
 			DrawTextCentered(ctx, cell.rect, strconv.Itoa(cell.day.date.Day()), dayStyle)
 		}
 	}
+}
+
+// calendarDayKey — ключ ячейки числа для плавных переходов цвета.
+type calendarDayKey struct {
+	year, yday int
+	inMonth    bool
 }
 
 // drawArrow рисует треугольник-стрелку внутри r цветом col: фигура, а не

@@ -79,6 +79,9 @@ type StartMenu struct {
 	hasHover   bool
 	selectedID AppID
 	hasSel     bool
+
+	// fade — плавный переход цвета строк при наведении и выделении.
+	fade motion
 }
 
 // NewStartMenu создаёt меню «Пуск» каталога cat, оформляемое темой tm.
@@ -379,7 +382,9 @@ func (m *StartMenu) drawContent(ctx widget.DrawContext, _ image.Rectangle) {
 		if highlighted {
 			st = theme.StateHover
 		}
-		s := m.partStyle("", st)
+		s := m.fade.Style(m.Theme(), lr.row.id, lr.rect, st, func(st theme.State) *theme.Style {
+			return m.partStyle("", st)
+		})
 		PaintStyle(ctx, lr.rect, s)
 
 		textLeft := lr.rect.Min.X

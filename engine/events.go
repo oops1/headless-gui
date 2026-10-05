@@ -138,6 +138,15 @@ func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
 		}
 	}
 
+	// Escape закрывает всплывающие панели (widget.EscapeDismisser) — тем, у
+	// кого может не быть фокуса вовсе, например меню «Пуск» и центр
+	// уведомлений. Один Esc закрывает один слой. Если фокус у виджета с
+	// собственным открытым оверлеем (выпадающий список, меню), Esc принадлежит
+	// ему: сначала закрывается он.
+	if ev.Code == widget.KeyEscape && ev.Pressed && e.dismissOnEscape() {
+		return
+	}
+
 	// Горячие клавиши окна (WPF InputBindings/KeyBinding) — до фокус-диспатча.
 	if ev.Pressed {
 		var hostRoot widget.Widget
@@ -166,6 +175,23 @@ func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
 	if kh, ok := w.(widget.KeyHandler); ok {
 		kh.OnKeyEvent(ev)
 	}
+}
+
+// dismissOnEscape закрывает верхнюю панель, закрывающуюся по Esc. Возвращает
+// true, если что-то закрыто и клавишу дальше отдавать не нужно.
+func (e *Engine) dismissOnEscape() bool {
+	if w := e.focus.get(); w != nil {
+		if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
+			return false
+		}
+	}
+	e.mu.RLock()
+	root := e.root
+	e.mu.RUnlock()
+	if root == nil {
+		return false
+	}
+	return widget.DismissOnEscape(root)
 }
 
 // tabCycle переключает фокус на следующий (или предыдущий) Focusable-виджет.
