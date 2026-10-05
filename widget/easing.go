@@ -223,7 +223,7 @@ func EasingByName(name string) Easing {
 // AnimateFloat анимирует значение от from до to за dur по кривой curve,
 // вызывая set на каждом кадре (последний вызов — ровно to).
 func AnimateFloat(from, to float64, dur time.Duration, curve Easing, set func(v float64)) *Animation {
-	return Animate(dur, curve, func(t float64) { set(LerpF(from, to, t)) })
+	return Animate(MotionDur(dur), curve, func(t float64) { set(LerpF(from, to, t)) })
 }
 
 // AnimateRect анимирует границы виджета w от текущего w.Bounds() до to
@@ -232,7 +232,7 @@ func AnimateFloat(from, to float64, dur time.Duration, curve Easing, set func(v 
 // предыдущую анимацию границ ("bounds" — тег владения).
 func AnimateRect(w Widget, to image.Rectangle, dur time.Duration, curve Easing) *Animation {
 	from := w.Bounds()
-	return AnimateOwned(w, "bounds", dur, curve, func(t float64) {
+	return AnimateOwned(w, "bounds", MotionDur(dur), curve, func(t float64) {
 		w.SetBounds(LerpRect(from, to, t))
 	})
 }

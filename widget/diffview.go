@@ -1147,7 +1147,7 @@ func (d *DiffView) scrollForV(v float64) float64 {
 func (d *DiffView) animateToLocked(target float64) {
 	d.stopAnim()
 	from := d.scroll
-	d.anim = AnimateOwned(d, "scroll", 220*time.Millisecond, EaseOutCubic, func(t float64) {
+	d.anim = AnimateOwned(d, "scroll", MotionDur(220*time.Millisecond), EaseOutCubic, func(t float64) {
 		d.mu.Lock()
 		d.setScrollLocked(from + (target-from)*t)
 		d.mu.Unlock()

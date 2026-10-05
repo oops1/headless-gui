@@ -50,7 +50,13 @@
 //     opacity; сильное уменьшение усредняется по блокам);
 //   - filter="url(#id)": feGaussianBlur (размытие покрытия фигуры) и
 //     feColorMatrix (matrix/saturate/hueRotate/luminanceToAlpha над цветом
-//     фигуры); остальные примитивы игнорируются, элемент рисуется без них.
+//     фигуры); feOffset, feFlood, feComposite, feMerge, feBlend, feDropShadow
+//     и цепочки с in/result (SourceGraphic, SourceAlpha, имена) — графом над
+//     слоем (FilterGraph): так рисуется обычная «тень». Если в фильтре есть
+//     примитив, которого нет в этом списке (feTurbulence, feMorphology…),
+//     или вход BackgroundImage, фильтр пропускается целиком, элемент рисуется
+//     без него. Цвета фильтров считаются в sRGB (спецификация по умолчанию
+//     требует linearRGB), область фильтра x/y/width/height не обрезает.
 //     Фильтр и mask группы применяются к склеенной группе (слоем, Group);
 //   - <pattern>: fill|stroke="url(#id)" (patternUnits, patternContentUnits,
 //     viewBox, patternTransform, x/y/width/height, href-цепочка); плитка

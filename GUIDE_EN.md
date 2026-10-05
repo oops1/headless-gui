@@ -933,7 +933,10 @@ usual way, and on closing the menu gives the focus back to the previous widget
 (since v3.29.1; before, the application had to focus the bar by hand). This
 works when `ActivateMnemonic` is called while a key is being handled — from
 `OnKeyEvent` or `InputBindings`; called outside that, set the focus yourself
-(`eng.SetFocus`).
+(`eng.SetFocus`). A panel opened outside an engine event (a Win key from the
+session, a timer, another goroutine) cannot ask for focus itself: use
+`eng.RequestFocus(w)` / `eng.ReturnFocus(w)` (safe from any goroutine) or
+`desktop.FocusOnOpen(flyout, eng, target)`.
 
 Cascading submenus (nested MenuItem):
 
@@ -2901,6 +2904,7 @@ mb := widget.NewMessageBox(eng)
 mb.ShowInfo("", "Document saved.")                    // severity icon + default title
 mb.ShowQuestion("", "Save changes?", func(r widget.MessageBoxResult) { ... })
 id := mb.ShowInput("", "Name:", "default", validate, onResult); id.SetHint("hint")
+// dialog width follows the content (380..640); explicit: mb.ShowInputWidth(..., width)
 pd := mb.ShowProgress("Copying", "file.jpg", onCancel)
 pd.SetDetail("34 of 120 · 61 MB/s"); pd.SetProgress(0.28) // or SetIndeterminate(true)
 mb.ShowOpenFile(widget.FileDialogOptions{Filters: ...}, func(path string, ok bool) { ... })
@@ -4092,8 +4096,11 @@ m.ResetAccent()                       // back to the profile's accent
 
 Derived tokens follow by themselves: `accent.hover`, `accent.pressed`,
 `accent.dark`, `accent.light` and `accent.text` (white or black by lightness).
-The choice survives a theme switch. Windows 2000 does not use the accent in its
-styles and stays as it is.
+The choice survives a theme switch. Windows 2000 follows the accent: the active
+window caption and the menu, Start, slider and selected-calendar-day highlights
+are token references (bit-identical without `SetAccent`; the grey palette and
+bevels stay). The blue variant (`Windows2000 Blue`) declares its own selection,
+so there only its caption follows the accent.
 
 The light Windows 10 taskbar is behind a flag, set in a profile or live; it is
 dark by default, as before:
@@ -4119,6 +4126,84 @@ For the Windows 10 shell the profile declares parts of `startmenu` (`panel`,
 `notificationcenter` (`panel`, `header`, `link`, `group`, `card`, `action`,
 `quick.tile`, `quick.tile.on`). `notificationcenter` inherits from
 `notifications` (`Profile.SetStyleBase`), so existing themes look the same.
+
+#### Backdrop materials, soft shadows and reduced motion (Windows 11)
+
+**Backdrop material.** `BackdropSpec.Material`: `MaterialSolid` (a plain theme
+colour), `MaterialAcrylic` (the blurred CONTENT under the layer, tint, noise),
+`MaterialMica` and `MaterialMicaAlt` (a heavily blurred and darkened copy of the
+desktop WALLPAPER, no noise; MicaAlt is darker). The zero material keeps the old
+behaviour driven by `Mode`. Mica blurs the wallpaper, not what was painted under
+the panel, so a window above a window does not show through. The wallpaper is
+the engine background (`Engine.SetBackground`); if a widget paints it, use a
+separate source:
+
+```go
+eng.SetBackground(wallpaper)           // Mica samples this
+eng.SetWallpaperSource(wallpaper)      // or a dedicated source (nil clears it)
+```
+
+With neither (or a context that cannot do Mica) the layer is a plain
+`BackdropSpec.Fallback`, the theme colour. The blurred wallpaper is computed
+once per "wallpaper + radius"; afterwards a layer is a row copy and does not
+depend on the previous frame, so a partial redraw equals a full one
+(`engine/mica.go`, unlike acrylic, which needs `backdropdamage.go`).
+
+The Windows 11 profile stays solid by default (Mica is expensive over remote
+desktop when windows move: a large smooth area changes on every move). The
+consumer turns it on with flags:
+
+```go
+m.SetFlag(theme.FlagBackdropMica, true)     // Start, quick settings, notification centre, calendar, window
+m.SetFlag(theme.FlagBackdropMicaAlt, true)  // together with the above: darker
+eng.ApplyThemeProfile(m)
+```
+
+Material colours are tokens: `surface` (Mica, Solid), `surface.alt` (MicaAlt), so
+the dark variant of the profile stays short. A window gets its material
+explicitly: `w.SetBackdrop(m.GetStyle("window", "", theme.StateNormal).Backdrop)`;
+the window content must not cover the client area with an opaque background.
+Panel parts (tiles, rows, cards) do not inherit the material.
+
+**Shadows.** The style tokens `ShadowBlur`, `ShadowOffsetX/Y`, `ShadowOpacity`
+(JSON: `shadow_blur`, `shadow_offset_x`, `shadow_offset_y`, `shadow_opacity`) are
+shared by menus, popup panels and windows. Without them a shadow is computed
+from `Elevation` exactly as before (blur = height, downward offset = half of
+it), so existing themes did not change. `Style.ResolveShadow()` is the single
+read point and `widget.DrawShadowSpec(ctx, rect, corner, spec)` the single
+painter; `desktop.PaintStyle`, `widget.Window` (call `w.SetShadow` or declare the
+tokens on the `window` style; the shadow lies outside the window bounds and
+`DrawMargin` reports the reserve), `widget.Dialog` (tokens of the `dialog`
+style; otherwise the old strips) and menus use it: `widget.MenuShadow()` returns
+the context menu shadow from the active theme tokens. Windows 11 soft shadows are
+switched on with `theme.FlagShadowSoft`.
+
+**Reduced motion.** The flag `theme.FlagMotionReduce` (`motion.reduce`):
+
+```go
+eng.SetMotionReduce(m, true)   // Manager.SetFlag + ApplyThemeProfile + widgets
+```
+
+The single decision point is `Manager.GetAnimation`: decorative animations
+(hover, panel slide, window open, auto-hide, switches, dialog fade, the thin
+scrollbar) get a zero duration; **functional** ones (notification card expand)
+get zero or at most the metric `theme.KeyMotionReduceFunctionalMS`. A consumer
+classifies its own animation with `theme.RegisterAnimationKind(key,
+theme.AnimFunctional)`; widgets with their own durations wrap them in
+`widget.MotionDur(d)`. Timers (tooltip delays, the clock, the caret) are not
+touched.
+
+**Different DPI on two monitors.** The engine has one scale per canvas:
+`Engine.SetScale(k)` grows the physical buffers, fonts and vector icons are
+re-rendered at the physical size, while layout stays in logical pixels. A
+`desktop.Monitor` is described by logical bounds in one shared canvas space and
+has no scale of its own. So two monitors with different DPI in ONE canvas get
+the same scale, the one chosen for the canvas; the engine neither hides nor
+fakes this. Different scales are possible only with different canvases: one
+`engine.Engine` (and one OS window) per monitor, each with its own `SetScale`;
+several engines in one process are supported (see "Several engines in one
+process"). A bar per monitor, Start / quick settings coordination across
+monitors and the scale of each monitor are the consumer's job.
 
 #### The taskbar and its components
 
@@ -4184,10 +4269,26 @@ bar.AddItem(desktop.SlotTray, ic)
 The notification-centre button with a counter is
 `desktop.NewNotificationButton(m, notifications)` (the number is `len(List())`,
 capped at "99+"); the "Show desktop" strip is `desktop.NewShowDesktopButton(m)`,
-added last in `SlotTray`, its width is the metric `tray.showdesktop.width`.
-Tooltips are the strings `ShowDesktop`, `NotificationCenter`,
-`NoNewNotifications`, `NewNotificationsCount` (`widget.RegisterStrings`
-overrides the built-in ru/en).
+added last in `SlotTray`, its width is the metric `tray.showdesktop.width`, the
+left line is the metric `tray.showdesktop.line` (colour — the `line` part of the
+`tray.showdesktop` style). The notification button lights up while the centre is
+open: `nb.Track(center)` (or `TrackManager`, `SetActive`). The theme flag
+`tray.fill.strip` (Windows 10) stretches the tray icons and the button to the
+full strip height: hover highlight over the whole bar, the glyph stays centred.
+
+Tooltips are the strings `desktop.tray.showDesktop`,
+`desktop.tray.notificationCenter`, `desktop.tray.noNotifications` and the counter
+`desktop.tray.notifications` with plural forms (`.one/.few/.many/.other`, chosen by
+`desktop.PluralForm(language, n)`: Russian 1 / 2-4 / 5+, English 1 / other). The old
+keys `ShowDesktop`, `NotificationCenter`, `NoNewNotifications`,
+`NewNotificationsCount` stay as aliases: if the app overrode them its string is
+used. The language is the same `tr()` with `DefaultLanguage` as the other
+components (`widget.RegisterStrings` overrides the built-in ru/en).
+
+Optical icon sizes (Fluent draws 16/20/24 separately): `theme.IconRef` takes
+`Source: "wifi_{size}.svg"` and `Sizes: theme.IconSizes(16, 20, 24)`; `IconSet`
+picks the smallest file not below the requested (physical) size, the largest for
+a bigger one (`IconRef.SourceFor`, `theme.OpticalSize`).
 
 SVG is rasterised **at physical size** (logical × canvas scale) instead of being
 stretched: on 125–200 % the icon stays sharp. `SVGIcon`, `desktop.TrayIcon` and

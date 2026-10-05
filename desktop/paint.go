@@ -27,7 +27,11 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 	corner := int(s.Corner)
 
 	// Тень — до всего остального: она лежит под слоем.
-	if s.Elevation > 0 && s.Shadow.A > 0 {
+	// Токены тени профиля (ShadowBlur…) главнее высоты; без них тень та же,
+	// что считалась из Elevation всегда (Style.ResolveShadow).
+	if sp, ok := s.ExplicitShadow(); ok {
+		widget.DrawShadowSpec(ctx, r, corner, sp)
+	} else if s.Elevation > 0 && s.Shadow.A > 0 {
 		if sd, ok := ctx.(widget.ShadowDrawer); ok {
 			sd.DrawSoftShadow(r, corner, s.Elevation, s.Shadow)
 		}
@@ -51,8 +55,11 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 		}
 	}
 
-	// Стекло: размытая подложка, если тема просит и контекст умеет.
-	if s.Backdrop.Mode == theme.BackdropBlur {
+	// Материал подложки (Solid, Acrylic, Mica, MicaAlt) главнее режима.
+	if widget.PaintMaterial(ctx, r, corner, s.Backdrop) {
+		// нарисован
+	} else if s.Backdrop.Mode == theme.BackdropBlur {
+		// Стекло: размытая подложка, если тема просит и контекст умеет.
 		if bd, ok := ctx.(widget.BackdropDrawer); ok {
 			bd.BlurBehind(r, int(s.Backdrop.Radius), s.Backdrop.Tint)
 			// Зерно — после подкраски: acrylic Windows 10 кладёт шум поверх
@@ -87,7 +94,7 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 	// Заливка приходит сюда из общих токенов темы (surface), даже когда
 	// компонент её не просил, и отличить «тема задала» от «досталось по
 	// умолчанию» в готовом стиле уже нельзя — поэтому решает Backdrop.
-	glass := s.Backdrop.Mode != theme.BackdropNone
+	glass := s.Backdrop.Mode != theme.BackdropNone || s.Backdrop.Material != theme.MaterialDefault
 
 	// Градиент заменяет заливку, когда тема его задала.
 	if len(s.Gradient) > 0 {

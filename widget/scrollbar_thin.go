@@ -322,7 +322,7 @@ func (sv *ScrollView) thinFadeTo(from, to float64, dur time.Duration) {
 		sv.thinInvalidate()
 		return
 	}
-	animateQuiet(sv, "sb-fade", dur, EaseOutQuad, func(p float64) {
+	animateQuiet(sv, "sb-fade", MotionDur(dur), EaseOutQuad, func(p float64) {
 		t.mu.Lock()
 		t.alpha = LerpF(from, to, p)
 		t.mu.Unlock()
@@ -379,7 +379,7 @@ func (sv *ScrollView) thinHold(on bool) {
 	}
 	t.mu.Unlock()
 
-	animateQuiet(sv, "sb-expand", time.Duration(float64(expandDuration)*absF(to-from)), EaseOutQuad, func(p float64) {
+	animateQuiet(sv, "sb-expand", MotionDur(time.Duration(float64(expandDuration)*absF(to-from))), EaseOutQuad, func(p float64) {
 		t.mu.Lock()
 		t.expand = LerpF(from, to, p)
 		t.mu.Unlock()

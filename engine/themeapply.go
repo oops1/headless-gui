@@ -33,8 +33,27 @@ func (e *Engine) ApplyThemeProfile(m *theme.Manager) error {
 	if t == nil {
 		return fmt.Errorf("engine: у менеджера нет активной темы")
 	}
+	// «Меньше движения» (theme.FlagMotionReduce) доходит и до виджетов со
+	// своими анимациями — компоненты оболочки получают его через
+	// Manager.GetAnimation сами.
+	widget.SetReduceMotion(t.MotionReduced())
 	e.SetTheme(widget.Materialize(t))
 	return nil
+}
+
+// SetMotionReduce включает и выключает режим «меньше движения» на лету:
+// ставит флаг theme.FlagMotionReduce менеджеру тем и применяет тему к
+// движку. Потребитель вызывает это из своих настроек доступности: декоративные
+// анимации (наведение, выезд панелей, появление окон, переключатели)
+// становятся мгновенными, функциональные (раскрытие карточки уведомления) —
+// мгновенными или короткими (метрика theme.KeyMotionReduceFunctionalMS).
+// Идущие анимации доигрывают как были, новые стартуют уже без движения.
+func (e *Engine) SetMotionReduce(m *theme.Manager, on bool) error {
+	if m == nil {
+		return fmt.Errorf("engine: SetMotionReduce без менеджера тем")
+	}
+	m.SetFlag(theme.FlagMotionReduce, on)
+	return e.ApplyThemeProfile(m)
 }
 
 // SetAccent меняет акцент менеджера тем на лету и применяет тему к движку:

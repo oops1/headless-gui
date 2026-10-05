@@ -139,7 +139,7 @@ func (ts *ToggleSwitch) animateKnobTo(on bool) {
 	// поэтому между AnimateOwned и первым реальным тиком должно пройти Draw
 	// по-прежнему как канонический IsOn() — иначе тест/вызов "SetOn без
 	// работающего движка" увидит устаревший (ещё не сдвинутый) knobPos.
-	AnimateOwned(ts, "knob", toggleAnimDur, EaseOutCubic, func(t float64) {
+	AnimateOwned(ts, "knob", MotionDur(toggleAnimDur), EaseOutCubic, func(t float64) {
 		ts.animating.Store(true)
 		ts.setKnobPos(LerpF(from, target, t))
 		if t >= 1.0 {

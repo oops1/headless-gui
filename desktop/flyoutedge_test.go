@@ -155,3 +155,44 @@ func TestFlyoutEdge_SetMonitorSetsScreen(t *testing.T) {
 		t.Errorf("Work без WorkArea = %v", w)
 	}
 }
+
+// Центр уведомлений Windows 10: вплотную к правому краю экрана, но с зазором
+// над панелью задач. Один Margin этого не выражал — приходилось уменьшать
+// рабочую область вручную.
+func TestFlyoutEdge_PinMarginsSplitScreenEdgeAndPanel(t *testing.T) {
+	screen := image.Rect(0, 0, 800, 600)
+	mon := Monitor{Bounds: screen, WorkArea: image.Rect(0, 0, 800, 560)} // панель внизу, 40
+	mk := func() *Flyout {
+		f := NewFlyout(nil, "x")
+		f.Margin = 6
+		f.SetMonitor(mon)
+		f.Size = func() image.Point { return image.Pt(200, 300) }
+		f.PinToEdge(EdgeRight)
+		f.Align = AlignEnd
+		return f
+	}
+
+	// Прежнее поведение: один Margin и на край, и на панель.
+	if got, want := mk().restRect(), image.Rect(594, 254, 794, 554); got != want {
+		t.Errorf("без SetPinMargins: %v, ждали %v", got, want)
+	}
+
+	f := mk()
+	f.SetPinMargins(0, 6)
+	if got, want := f.restRect(), image.Rect(600, 254, 800, 554); got != want {
+		t.Errorf("край 0, панель 6: %v, ждали %v (вплотную к краю, зазор над панелью)", got, want)
+	}
+	if e, p := f.PinMargins(); e != 0 || p != 6 {
+		t.Errorf("PinMargins = %d, %d, ждали 0, 6", e, p)
+	}
+
+	// Панель слева в рабочей области: левая сторона вырезана панелью.
+	mon = Monitor{Bounds: screen, WorkArea: image.Rect(48, 0, 800, 600)}
+	f = mk()
+	f.PinToEdge(EdgeLeft)
+	f.Align = AlignStart
+	f.SetPinMargins(2, 10)
+	if got, want := f.restRect(), image.Rect(58, 2, 258, 302); got != want {
+		t.Errorf("панель слева: %v, ждали %v", got, want)
+	}
+}

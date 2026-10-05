@@ -55,14 +55,14 @@ func (f *Flyout) Settle() {
 	if prev != nil {
 		prev.Stop()
 	}
-	was := f.dirtyRect()
+	was := f.paintedRegion()
 	if f.IsOpen() {
 		f.setPresence(1)
 	} else {
 		f.setPresence(0)
 	}
 	widget.InvalidateRect(was)
-	widget.InvalidateRect(f.dirtyRect())
+	widget.InvalidateRect(f.paintedRegion())
 }
 
 // visible — панель показана: открыта или ещё уезжает.
@@ -104,7 +104,7 @@ func (f *Flyout) animateTo(to float64) {
 			v = 0
 		}
 		f.setPresence(v)
-		widget.InvalidateRect(f.dirtyRect())
+		widget.InvalidateRect(f.paintedRegion())
 	})
 	f.amu.Lock()
 	f.anim = a
@@ -205,6 +205,49 @@ func (f *Flyout) dirtyRect() image.Rectangle {
 	return f.motionRegion(rest)
 }
 
+// paintedRegion — область, которую надо перерисовать на шаге анимации: то, что
+// панель занимает сейчас, а пока она закрыта и уезжает — ещё и место, где она
+// стояла в покое на момент Close.
+//
+// Одного dirtyRect мало: на последнем шаге закрытия restRect() вправе уже быть
+// пустым (размер панели зависит от содержимого, которое при закрытии
+// освобождается), и тогда освободившаяся область не заявлялась — предыдущий
+// кадр, на котором почти прозрачная панель ещё видна, оставался последним,
+// что получал потребитель, собирающий кадр по повреждениям.
+func (f *Flyout) paintedRegion() image.Rectangle {
+	r := f.dirtyRect()
+	if f.IsOpen() {
+		return r
+	}
+	f.amu.Lock()
+	rest := f.closeRest
+	f.amu.Unlock()
+	if rest.Empty() {
+		return r
+	}
+	rest = rest.Inset(-f.shadowPad())
+	if !f.Screen.Empty() {
+		rest = rest.Intersect(f.Screen)
+	}
+	return r.Union(rest)
+}
+
+// shadowPad — запас вокруг окна под тень стиля (0, если тени нет).
+func (f *Flyout) shadowPad() int {
+	s := f.style(theme.StateNormal)
+	if s == nil {
+		return 0
+	}
+	if sp, ok := s.ExplicitShadow(); ok {
+		// Мягкая тень по токенам: размытие, умноженное на два, плюс смещение.
+		return sp.Extent()
+	}
+	if s.Elevation > 0 && s.Shadow.A > 0 {
+		return int(s.Elevation*2.5) + 1
+	}
+	return 0
+}
+
 // motionRegion — всё, что панель способна закрасить, пока движется: место в
 // покое, тень вокруг него и путь от края привязки.
 //
@@ -212,11 +255,7 @@ func (f *Flyout) dirtyRect() image.Rectangle {
 // край панели задач или экрана: панель вырастает из-за него и не залезает
 // поверх. С остальных сторон добавляется запас под тень.
 func (f *Flyout) motionRegion(rest image.Rectangle) image.Rectangle {
-	pad := 0
-	if s := f.style(theme.StateNormal); s != nil && s.Elevation > 0 && s.Shadow.A > 0 {
-		pad = int(s.Elevation*2.5) + 1
-	}
-	r := rest.Inset(-pad)
+	r := rest.Inset(-f.shadowPad())
 
 	switch f.slideFrom() {
 	case SlideBottom:

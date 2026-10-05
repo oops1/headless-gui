@@ -23,6 +23,16 @@ func inheritTrayStyles(p *Profile) {
 			src = append(src, pair{k, d})
 		}
 	}
+	// Условные правила (светлая панель и подобные) копируются так же: иначе под
+	// флагом значок, кнопка центра и полоска остаются в цветах тёмной панели.
+	var cond []ConditionalStyle
+	have := map[condID]bool{}
+	for _, c := range p.Conditional {
+		if c.Key.Component == "tray.volume" {
+			cond = append(cond, c)
+		}
+		have[condID{c.Flag, c.Key}] = true
+	}
 	for _, comp := range trayExtraComponents {
 		for _, e := range src {
 			nk := e.key
@@ -31,5 +41,20 @@ func inheritTrayStyles(p *Profile) {
 				p.Styles[nk] = e.d
 			}
 		}
+		for _, c := range cond {
+			nc := c
+			nc.Key.Component = comp
+			// Явное правило профиля с тем же флагом и ключом не перетирается.
+			if !have[condID{nc.Flag, nc.Key}] {
+				p.Conditional = append(p.Conditional, nc)
+			}
+		}
 	}
+}
+
+// condID — флаг и ключ условного правила: по ним inheritTrayStyles
+// узнаёт, что профиль уже объявил своё правило.
+type condID struct {
+	Flag Key
+	Key  StyleKey
 }

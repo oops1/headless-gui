@@ -97,6 +97,10 @@ func (e *Engine) SetPixelFormat(f PixelFormat) error {
 	if e.bgSrc != nil {
 		e.canvas.setBackground(e.bgSrc) // перестроить фон в новом порядке байт
 	}
+	if e.canvas.wallImg != nil {
+		e.canvas.setWallpaperSource(e.canvas.wallImg) // и обои Mica
+	}
+	e.canvas.mica = nil // размытые обои закодированы в прежнем порядке
 	e.mu.Unlock()
 	e.frameMu.Unlock()
 	e.Invalidate() // формат сменился целиком — старый back теперь не в счёт

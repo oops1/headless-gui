@@ -29,9 +29,26 @@ type InputDialog struct {
 //	validate — проверка значения (возврат "" = ок, иначе сообщение),
 //	           может быть nil;
 //	onResult — результат: (текст, ok). ok=false при Отмена/Escape/✕.
+//
+// Ширина — по содержимому (см. ShowInputWidth с width=0): не уже
+// inputDlgMinW, шире — если не помещаются подпись, заголовок или начальный
+// текст (длинный путь, имя файла).
 func (mb *MessageBox) ShowInput(title, label, initial string, validate func(string) string, onResult func(text string, ok bool)) *InputDialog {
+	return mb.ShowInputWidth(title, label, initial, validate, onResult, 0)
+}
+
+// Пределы ширины диалога ввода.
+const (
+	inputDlgMinW = 380 // прежняя фиксированная ширина — нижняя граница
+	inputDlgMaxW = 640 // верхняя граница автоматической ширины
+)
+
+// ShowInputWidth — ShowInput с заданной шириной диалога. width > 0 — ровно
+// столько логических пикселей (не меньше 200: уже кнопки и поле не лягут);
+// width <= 0 — по содержимому: подпись, заголовок и начальный текст целиком,
+// но не уже inputDlgMinW и не шире inputDlgMaxW.
+func (mb *MessageBox) ShowInputWidth(title, label, initial string, validate func(string) string, onResult func(text string, ok bool), width int) *InputDialog {
 	const (
-		dlgW   = 380
 		padX   = dlgPad
 		titleH = dlgTitleH
 		fieldH = 30
@@ -41,6 +58,26 @@ func (mb *MessageBox) ShowInput(title, label, initial string, validate func(stri
 	)
 	if title == "" {
 		title = Tr("dlg.title.input")
+	}
+	dlgW := width
+	if dlgW <= 0 {
+		dlgW = inputDlgMinW
+		// Подпись, начальный текст (с запасом на поле и каретку) и заголовок
+		// (с кнопкой ✕); кнопки в нижнюю строку влезают при любой ширине ≥ min.
+		for _, need := range []int{
+			MeasureUIText(label, 11) + 2*padX,
+			MeasureUIText(initial, DefaultFontSizePt) + 2*padX + 24,
+			MeasureUITextFont(title, 11, BuiltinFontBold) + 2*padX + dlgCloseSize,
+		} {
+			if need > dlgW {
+				dlgW = need
+			}
+		}
+		if dlgW > inputDlgMaxW {
+			dlgW = inputDlgMaxW
+		}
+	} else if dlgW < 200 {
+		dlgW = 200
 	}
 	labelY := titleH + 12
 	fieldY := labelY + 24

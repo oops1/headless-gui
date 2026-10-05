@@ -1121,7 +1121,7 @@ func (m *DockManager) openFlyout(p *DockPane) {
 	}
 	// Косметический выезд: анимируем только долю «раскрытия» для Draw-обрезки.
 	m.flyoutReveal = 0
-	m.flyoutAnim = AnimateOwned(m, "flyout", dockFlyoutMs*time.Millisecond, EaseOutCubic, func(t float64) {
+	m.flyoutAnim = AnimateOwned(m, "flyout", MotionDur(dockFlyoutMs*time.Millisecond), EaseOutCubic, func(t float64) {
 		m.flyoutReveal = t
 		notifyUIChanged()
 	})

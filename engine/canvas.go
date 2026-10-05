@@ -40,6 +40,13 @@ type Canvas struct {
 	format     PixelFormat           // порядок каналов back-буфера (см. pixelformat.go)
 	formatOwn  PixelFormat           // порядок каналов СОБСТВЕННОГО буфера: чужая память вправе иметь свой, и после возврата к своему буферу надо вернуться к нему же
 	bgImage    *image.RGBA           // фоновое изображение (масштабировано под холст, закодировано в format — см. setBackground)
+	// Обои для материала Mica (mica.go): отдельный источник, его исходник (для
+	// пересборки при смене разрешения), кэш размытых обоев и, у буфера
+	// всплывающего оверлея, основной холст, у которого обои берутся.
+	wallImg    image.Image
+	wallScaled *image.RGBA
+	mica       *micaCache
+	wallParent *Canvas
 	fontCache  *FontCache            // кэш шрифта по умолчанию
 	namedFonts map[string]*FontCache // именованные шрифты (FontFamily из XAML)
 	families   *fontFamilies         // таблица семейств: выбор шрифта по весу и наклону (fontfamily.go)

@@ -28,12 +28,15 @@ type Group struct {
 	BlurX, BlurY float64
 	// ColorMatrix — feColorMatrix над цветом всего слоя.
 	ColorMatrix *[20]float64
+	// Filter — фильтр со сдвигом, заливкой, композицией и т. п. (см.
+	// FilterGraph); выполняется после Blur/ColorMatrix, до масок.
+	Filter *FilterGraph
 }
 
 // hasEffects — нужен ли группе слой независимо от режима (всё, кроме
 // непрозрачности).
 func (g *Group) hasEffects() bool {
-	return len(g.Masks) > 0 || g.BlurX > 0 || g.BlurY > 0 || g.ColorMatrix != nil
+	return len(g.Masks) > 0 || g.BlurX > 0 || g.BlurY > 0 || g.ColorMatrix != nil || g.Filter != nil
 }
 
 // maxLayerDepth — сколько слоёв открыто одновременно. Каждый весит w×h×4
@@ -136,6 +139,9 @@ func (c *rctx) finishLayer(img *image.RGBA, g *Group) *image.RGBA {
 	}
 	if g.ColorMatrix != nil {
 		matrixRGBA(img, g.ColorMatrix)
+	}
+	if g.Filter != nil {
+		img = g.Filter.run(img, c.s)
 	}
 	for _, m := range g.Masks {
 		mulRGBAAlpha(img, c.maskAlpha(m))

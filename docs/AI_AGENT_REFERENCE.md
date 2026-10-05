@@ -2820,6 +2820,8 @@ id := mb.ShowInput(title, label, initial,
     func(s string) string { return "" },
     func(text string, ok bool) {})
 id.SetHint("gray persistent hint under the field")   // error replaces it in red
+// Width follows the content (>= 380, <= 640: label, title, initial text);
+// ShowInputWidth(..., width) fixes it explicitly (width <= 0 = auto, min 200).
 
 // Progress dialog (thread-safe setters; onCancel nil -> no Cancel, no close btn).
 pd := mb.ShowProgress(title, status, onCancel)
@@ -3306,8 +3308,23 @@ func (d *svg.Document) RasterizeCached(w, h int, current color.RGBA, tint bool) 
     приоритет: атрибут < таблица стилей < `style=""`;
   - `<image href="data:image/png|jpeg|gif;base64,…">` (aspect, transform,
     opacity, усредняющее уменьшение);
-  - `filter`: `feGaussianBlur` и `feColorMatrix`; остальные примитивы
-    игнорируются; все именованные цвета CSS.
+  - `filter`: `feGaussianBlur` и `feColorMatrix` — прежним путём (покрытие и
+    цвет фигуры); `feOffset`, `feFlood`, `feComposite` (over/in/out/atop/xor/
+    arithmetic), `feMerge`, `feBlend` (normal/multiply/screen/darken/lighten),
+    `feDropShadow`, входы `SourceGraphic`/`SourceAlpha` и именованные `result` —
+    графом над слоем (`svg.FilterGraph`, `Group.Filter`; листовой фигуре с таким
+    фильтром движок заводит свою группу-слой), типичная тень и «Figma»-цепочка
+    с `BackgroundImageFix` совпадают с rsvg. Если в фильтре есть примитив
+    вне списка (`feTurbulence`, `feMorphology`, `feDisplacementMap`…), вход
+    `BackgroundImage`/`FillPaint`, ссылка на несуществующий `result` или
+    `primitiveUnits="objectBoundingBox"`, фильтр пропускается ЦЕЛИКОМ — элемент
+    рисуется без него (раньше оставалось «только размытие» и тень становилась
+    размытой копией элемента). Цвета фильтров считаются в sRGB, область
+    `x/y/width/height` фильтра не обрезает. Все именованные цвета CSS.
+  - Разбор терпим к сущностям: `&nbsp;`/`&copy;` (xml.HTMLEntity), голый `&` и
+    объявления `<!ENTITY>` из DOCTYPE (так Illustrator задаёт `xmlns`) не
+    роняют `svg.Parse`; структура проверяется строго (оборванный файл — ошибка),
+    корректные файлы разбираются побитно как раньше.
 - **API-дополнения** (`Shape` и новые типы, только добавления): `Shape.FillGradient/
   StrokeGradient *Gradient` (`Fill` для градиента = `Gradient.MeanColor()`),
   `Shape.Clips []*ClipPath`, `Shape.Masks []*Mask`, `Shape.BlurX/BlurY`,
@@ -4177,6 +4194,93 @@ render loop on its own goroutine, so a consumer that mutates the widget tree
 from another goroutine races the render walk. External pacing lets it do both
 on one goroutine and remove the race by construction.
 
+### Context menu from the theme profile — v3.32
+
+`widget.PopupMenu` reads its look from the profile itself (WinLine remarks
+after v3.31.0, "Контекстное меню"): styles of the `menu` component and the
+metrics `theme.KeyMenu*` (`theme/menu.go`). A profile that declares none of
+them leaves the menu exactly as it was; golden frames of all flat presets are
+byte-identical.
+
+| Token | Meaning |
+|---|---|
+| style `menu` | `Fill`, `Text`, `Border`, `Corner` (menu rounding), `Shadow` + `Elevation` (soft shadow) |
+| style `menu.item` Hover | `Fill` (plate, translucent allowed), `Text`, `Corner` (plate rounding) |
+| style `menu.item` Disabled | `Text` |
+| style `menu.separator` | `Fill` — line colour (else the border colour) |
+| style `menu.shortcut` | `Text` — shortcut colour (else the text colour muted by 0.45) |
+| `menu.item.height`, `menu.separator.height`, `menu.icon.size`, `menu.icon.gap` | row, separator, icon side, icon-to-label gap |
+| `menu.pad.x` (+ `menu.pad.left`, `menu.pad.right`) | side margins; left = before check/icon, right = after the shortcut |
+| `menu.pad.y` | gap between the border and the first/last row |
+| `menu.item.inset` | hover plate inset from the menu edge; a declared 0 = flush to the border (min 1) |
+| `menu.separator.inset` | separator line inset |
+| `menu.width.min`, `menu.submenu.width.min` | min width of the ROOT menu; submenus have no minimum unless the second is set |
+| `menu.chevron.right`, `menu.chevron.size` | thin `›` chevron drawn as a shape; the number is the distance from the right edge to its centre |
+| `menu.submenu.delay` (ms) | open/close delay of a submenu on hover (click and keys do not wait) |
+| flag `menu.icon.tint` | icons are monochrome and drawn in the item's text colour |
+
+Built-in values: Windows 11 (24/8, pad 12, icon 16, inset 4, corner 8/4,
+chevron 18, min 290, hover `RGBA(0,0,0,9)`), Windows 10 (same, square, plate
+across the width), Windows 2000 (20/7, pad 10, submenu delay 400). macOS
+already declared `Corner`/`Elevation`, so its menu is now rounded with a soft
+shadow. Windows 11 Dark overrides colours only.
+
+```go
+// Where the menu gets the profile
+m := widget.NewPopupMenu()          // follows the theme the engine applied
+                                    // (ThemeStyle.Menu, set by Materialize)
+themeMenu / m.ApplyMenuStyle(widget.MenuStyleFromTheme(tm.Active())) // explicit
+
+// New API
+widget.MenuStyle                    // what a profile declared (zero = nothing)
+widget.MenuStyleFromTheme(rt)       // read it from a resolved theme
+(*PopupMenu).ApplyMenuStyle(ms)     // colours: only declared; sizes: reset then declared
+widget.ThemeStyle.Menu              // carried by Materialize / ProfileFromTheme
+widget.SetPopupWorkArea(r)          // popups stay inside r (screen minus taskbar)
+(*PopupMenu).WorkArea, .MaxHeight   // per-menu override / height limit
+widget.MenuItem{IconHover, IconTint}
+// PopupMenu fields filled by the profile (zero = old behaviour): PadLeft,
+// PadRight, PaddingY, ItemInset, SeparatorInset, CornerRadius, ItemCorner,
+// Elevation, ShortcutColor, IconSize, IconGap, ChevronRight, ChevronSize,
+// TintIcons, SubMenuMinWidth (0 = inherit, <0 = none), SubMenuDelay.
+```
+
+Behaviour changes that apply whenever the fields are set:
+
+- The hover plate, border and separator are blended (`FillRectAlpha`,
+  `FillRoundRect` with A<255), so a translucent plate (Windows 11 `(0,0,0,9)`)
+  is a film, not black.
+- `ApplyTheme` no longer resets the height to 30/22 for a profile that
+  declared it (`t.Style.Menu`); a profile that stops declaring a value gives the
+  default back.
+- Shadow: `Elevation > 0` + `ShadowDrawer` -> `DrawSoftShadow(rect, corner,
+  Elevation, ShadowColor)`, otherwise the old 2 px offset rectangle. All of it
+  is in `PopupMenu.drawShadow`: the shared theme shadow tokens
+  (`ShadowBlur/ShadowOffset/ShadowOpacity`) plug in there instead of
+  `Elevation`/`ShadowColor`. The shadow is not part of `OverlayBounds`: it
+  would turn clicks next to the menu into clicks on it, and a hosted native
+  popup window clips it (as it always clipped the offset rectangle).
+- Long lists: a menu taller than the work area (or `MaxHeight`) gets that
+  height and scrolls — wheel, a click on the arrow bands at both ends, hover
+  on a band (repeats every 50 ms), Up/Down keep the highlighted row visible.
+  There are no columns.
+- The work area: `widget.SetPopupWorkArea(bar.WorkArea())` (or
+  `PopupMenu.WorkArea`) keeps menus and submenus off the taskbar drawn on the
+  same canvas; empty = the whole canvas; ignored when popups are hosted.
+- `SubMenuDelay` is a timer built on `widget.Animate` (advance it with
+  `widget.StepAnimations(now)` in tests); while a switch is pending only the
+  hovered row carries the plate.
+- Icons: `MenuItem.IconTint` (or `PopupMenu.TintIcons`, flag
+  `menu.icon.tint`) repaints a monochrome icon in the item's text colour of
+  the current state; `IconHover` replaces the picture under the plate.
+
+`ThemeStyle.Menu` keeps only what the flat theme cannot carry (sizes, corners,
+`Elevation`, text/border/shadow/shortcut/separator colours): fill, plate and
+disabled colours stay in `MenuBG`/`MenuHoverBG`/`MenuHoverText`/`Disabled`, so
+the six presets round-trip unchanged and a preset's control corner is NOT read
+as a menu corner (a profile built from a flat theme declares none; use the
+metrics `menu.corner`/`menu.item.corner` to state one).
+
 ### A lagging channel consumer, and frames of another size — v3.31
 
 Frames are differences against the previous frame. The channel used to drop a
@@ -4247,7 +4351,13 @@ does nothing.
   rewriting styles. A literal in a LATER delta (a child's) overrides an earlier
   reference; within one delta the reference wins; a missing token leaves the
   colour alone. Windows 10/11/macOS profiles use references for every accent
-  fill, border and text-on-accent; Windows 2000 deliberately does not.
+  fill, border and text-on-accent. Windows 2000 follows `SetAccent` too (since
+  the v3.32 work): caption (`FillFrom accent`), menu / Start / slider / tile /
+  calendar highlights (`FillFrom selection`, text `accent.text`); `selection`
+  is no longer declared there, so it equals the accent, and without `SetAccent`
+  every style is bit-identical (`theme/classic_accent_test.go` hashes them).
+  `Windows2000 Blue` declares `selection` itself (it was navy, not the accent),
+  so only its caption follows.
 
 **Flags override live too.** `Manager.SetFlag(k, v)` / `ResetFlag(k)` re-resolve
 like `SetAccent`. A flag is useful because of conditional styles:
@@ -4268,6 +4378,25 @@ the draw context cannot blur). `desktop.PaintStyle`: blur → tint → noise
 deterministic per-pixel hash, clip-aware, keeps the premultiplied invariant);
 no `BackdropDrawer` → `Fallback` if set, else the old translucent tint. JSON:
 `"noise"`, `"fallback"` in `backdrop`.
+
+**Rotated text.** `widget.RotatedTextDrawer` (optional context interface, like
+`BackdropDrawer`): `DrawTextRotated(text, x, y, sizePt, fontName, angle, col)
+bool` draws the string as `DrawTextFont` would at `(x, y)` rotated around that
+point by 90 (reads bottom-up; `(x, y)` is the bottom-left corner of the label),
+270 (top-down; top-right corner), 180 or 0. `engine.Canvas` lays the string out
+normally (shaping, fallbacks, kerning) into a physical-size scratch raster and
+permutes the glyph alpha mask by pixels — no resampling, so at 200 % the glyphs
+are as sharp as horizontal text. `translatingContext` (popup windows) and
+`widget.OffsetContext`/ScrollView forward it; a wrapper over a context without
+rotation returns `false` (nothing drawn). Width: `MeasureTextFont`; line height:
+`FontMetrics`/`MeasureUIFontMetrics`.
+
+**Dialog in built-in profiles.** The profiles declare `dialog.titlebar` (copy of
+the focused `window.titlebar`: navy with white text on Windows 2000, the blue
+variant its own) and `dialog.scrim` (black, alpha 90 classic / 110 others;
+`theme/dialogstyles.go`, added by each `…Profile()` constructor). Before, both
+fell back to `surface`: the scrim was opaque grey and hid the desktop and the
+title was white on grey. Declared styles are never overwritten.
 
 **Windows 10 profile.** The taskbar is acrylic (`win10Acrylic`: radius 20, tint
 `RGBA(31,31,31,210)`, noise 0.02, fallback `RGB(31,31,31)` — the previous
@@ -4293,6 +4422,93 @@ Tests: `theme/accent_test.go`, `desktop/accent_test.go`, `engine/noise_test.go`.
 `TestGolden_Windows10Acrylic` writes dark and light bar PNGs when `GOLDEN_OUT`
 is set.
 
+### Backdrop materials, shadow tokens, reduced motion (next minor)
+
+New public API only; every built-in profile renders byte-identically without
+the new flags (checked on 48 frames: 8 profiles × start/quick/notify/calendar/
+menu/window — `desktop/snapshots_test.go`, `SNAP_OUT=dir` writes PNGs and
+`sums.txt` to diff before/after).
+
+**Materials.** `theme.BackdropMaterial` (`MaterialDefault` = old behaviour by
+`Mode`, `MaterialSolid`, `MaterialAcrylic`, `MaterialMica`, `MaterialMicaAlt`),
+`BackdropSpec.Material`, JSON `backdrop.material` (`solid|acrylic|mica|mica-alt`).
+Painting is one function: `widget.PaintMaterial(ctx, rect, corner, spec) bool`
+(false = no material named, caller paints by `Mode`); `desktop.PaintStyle` and
+`widget.Window` use it. Context capabilities: `widget.MicaDrawer`
+(`MicaBehind(r, radius, tint) bool`, implemented by `engine.Canvas` and
+`translatingContext`) and `widget.ShadowParamDrawer`. No `MicaDrawer`, or it
+returns false (no wallpaper) → solid `Fallback` (else `Tint`).
+
+*Mica = blurred WALLPAPER, not content.* `engine/mica.go`: wallpaper
+(`Canvas.bgImage`, or `Engine.SetWallpaperSource(img)` which overrides it; nil
+clears) is box-averaged by 16, blurred (3 passes) once per (wallpaper, radius)
+and cached; a layer bilinearly stretches the small image into its rect
+(`Src` write, honours clip and round clip) and lays `Tint` over it. The result is
+a pure function of (pixel position, wallpaper), so partial redraw == full
+redraw and `backdropdamage.go` needs no change. Popup overlay buffers
+(`cloneForSize` clones) get `wallParent` = the main canvas and a shift through
+`translatingContext.MicaBehind`. `SetResolution/SetScale/SetPixelFormat` rebuild
+the cache. Radius ≤ 0 → 80 logical px.
+
+*Profile.* `theme.FlagBackdropMica` (`backdrop.mica`), `FlagBackdropMicaAlt`
+(`backdrop.mica.alt`, wins when both), `FlagShadowSoft` (`shadow.soft`). Conditional
+styles in `theme/profiles_win11_material.go` (`declareWin11Materials`, called at
+the END of `Windows11Profile`): panels `startmenu quicksettings notifications
+notificationcenter calendar window`. Colours are tokens, so `Windows11Dark` only
+adds two: `surface.alt` (`KeySurfaceAlt`) and `shadow.color` (`KeyShadowColor`);
+styles reference them through the new `StyleDelta.BackdropFrom` (Fallback and the
+Tint colour from a token, Tint alpha stays declared) and `StyleDelta.ShadowFrom`.
+**Parts do not inherit**: every part of those components declared before the call
+gets `Backdrop{}` / `ShadowBlur 0` under the flags (a tile painted by
+`PaintStyle` would otherwise get its own Mica); a part declared after must do the
+same. Mica is OFF by default in all profiles.
+
+**Shadow tokens.** `Style.ShadowBlur`, `ShadowOffsetX`, `ShadowOffsetY`,
+`ShadowOpacity` (+ `StyleDelta` fields, JSON `shadow_*`). `Style.ExplicitShadow()`
+(tokens only), `Style.ResolveShadow() (theme.ShadowSpec, bool)` (tokens, else the
+old `Elevation`/`Shadow` formula: blur = elevation, offset Y = elevation/2),
+`ShadowSpec.Extent()` (reserve in px). Engine: `Canvas.DrawShadow(r, corner,
+blur, offX, offY, col)`; `DrawSoftShadow` now calls it (byte-identical).
+`widget.DrawShadowSpec(ctx, r, corner, spec)` draws via `ShadowParamDrawer`, else
+approximates through `DrawSoftShadow`. Consumers: `PaintStyle`,
+`Flyout.motionRegion` (reserve), `widget.Window` (`SetShadow`, tokens of style
+`window` via `ThemeStyle.WindowShadow`, `DrawMargin()` for culling,
+`SetBounds` invalidates the shadow ring), `widget.Dialog` (`ThemeStyle.DialogShadow`;
+without tokens the old strips). `ThemeStyle.MenuShadow/WindowShadow/DialogShadow`
+are filled by `Materialize` only when the profile declares tokens.
+
+*How `PopupMenu` should take the tokens* (not wired here — its file belongs to
+another change): in `Draw`, `if sp, ok := widget.MenuShadow(); ok {
+DrawShadowSpec(ctx, menuRect, corner, sp) } else { /* legacy offset rect */ }`,
+and add `sp.Extent()` to the overlay bounds / invalidation margin. Windows 11
+declares the tokens on style `menu` under `FlagShadowSoft`.
+
+**Reduced motion.** `theme.FlagMotionReduce` (`motion.reduce`).
+`Manager.GetAnimation` is the single point (`theme/motion.go`): decorative
+tokens → duration 0, functional (`notification.expand`, `RegisterAnimationKind`)
+→ 0 or ≤ metric `motion.reduce.functional_ms`. `Manager.GetAnimationRaw`,
+`MotionReduced`, `Theme.AnimReduced`. Consumers needing no change: Flyout,
+`Tween`, task button transitions, `notification.expand` (without its own token
+the `menu.open` duration is shortened as functional), Start menu. Fixed:
+`Taskbar` auto-hide treated a zero token as "absent" and fell back to 140 ms.
+Widgets with hard-coded durations go through `widget.MotionDur(d)` (toggle knob,
+dialog fade, progress value, thin scrollbar fade/expand, DiffView scroll, dock
+flyout, `AnimateFloat/AnimateRect`) fed by `widget.SetReduceMotion(bool)`;
+timers and scroll inertia are untouched. `Engine.ApplyThemeProfile` /
+`SetThemeProfile` copy the flag to the widgets; `Engine.SetMotionReduce(m, on)`
+does flag + apply.
+
+**One canvas, one DPI.** `Engine.SetScale(k)` is per canvas; `desktop.Monitor`
+has logical bounds in one space and no scale. Two monitors with different DPI in
+one canvas share one scale. Different scales need one `engine.Engine` (and OS
+window) per monitor; the bar-per-monitor logic and the scale per monitor are the
+consumer's.
+
+Tests: `theme/materials_test.go`, `engine/mica_test.go`,
+`engine/window_shadow_test.go`, `widget/backdrop_material_test.go`,
+`desktop/reducemotion_test.go`, `desktop/materials_visual_test.go`
+(`MAT_OUT=dir` writes Solid/Mica/MicaAlt/soft-shadow PNGs).
+
 ### Physical-size SVG, tray icons from the theme set, thin scrollbar — v3.31
 
 - `widget/physical.go`: `ContextScale(ctx)` (1 for contexts without `Scale()`),
@@ -4309,7 +4525,28 @@ is set.
   `TrayIcon` (image / SVG / `func(size) image.Image`), `NotificationButton`
   (counter, `99+`), `ShowDesktopButton` (`tray.showdesktop.width`).
   `theme/profiles_tray.go` copies the `tray.volume` styles to the new components in
-  every built-in profile (otherwise the default surface fill shows through).
+  every built-in profile (otherwise the default surface fill shows through);
+  conditional rules (`taskbar.light`) are copied too (unless the profile declared
+  the same flag+key itself).
+- **Windows 10 tray (`theme/profiles_win10_tray.go`)**: `taskbar.gap` 0, Start
+  button 48 (`PadX` 16, icon 16), tray step 24 (`PadX` 4), notification button 40
+  (`PadX` 12), show-desktop strip 5 px + 1 px left line (`tray.showdesktop.line`,
+  colour = part `line` of `tray.showdesktop`). Flag `tray.fill.strip`
+  (`desktop.KeyTrayFillStrip`): `Taskbar`/`SystemTray` stretch `stripFiller` items
+  (network, volume, power, `TrayIcon`, `NotificationButton`) to the full strip
+  height (`stretchToStrip`); `trayInner` keeps the glyph at icon size, centred.
+  Vertical bars are untouched. `NotificationButton.SetActive / Active / Track /
+  TrackManager` — lit (`StateActive`) while the centre is open.
+- **Tray strings**: keys `desktop.tray.showDesktop|notificationCenter|noNotifications`
+  and `desktop.tray.notifications.{one,few,many,other}` (`desktop.PluralForm`:
+  RU/UK/BE 1·2-4·5+, PL, CS/SK, default one/other). Legacy keys (`ShowDesktop`…)
+  are aliases: an app override of a legacy key (value differs from the built-in)
+  is honoured unless the new key was overridden too. All tray tooltips use `tr()`
+  with `DefaultLanguage`.
+- **Optical icon sizes**: `theme.IconRef.Sizes` (string `"16 20 24"`,
+  `theme.IconSizes`) + `{size}` in `Source`; `IconRef.SourceFor(size)` /
+  `theme.OpticalSize` choose the smallest size >= requested else the largest;
+  `IconSet.ResolveIcon` uses it (requested size is physical). JSON `sizes`.
   `AppInfo.IconAt(size)` + `IconFor`; `appicon.go:drawAppIcon` feeds it the
   physical side. Strings (`ShowDesktop`, `NotificationCenter`,
   `NoNewNotifications`, `NewNotificationsCount`) are `widget.Tr` keys registered
@@ -4521,7 +4758,14 @@ byte-identical to before); the side layout is a separate code path.
   at the right edge of its monitor: `center.PinToEdge(desktop.EdgeRight)`; `Align`
   chooses top/bottom/middle along the edge, `Margin` is the gap from the edge,
   `SlideAuto` slides from that edge). The anchor is still used for `Toggle` /
-  `DismissAt`.
+  `DismissAt`. **`SetPinMargins(edge, panel)` / `PinMargins()`** split the gap:
+  `edge` to the screen edge, `panel` to the sides the taskbar cut out of the work
+  area (without it both are `Margin`) — the Windows 10 centre sits flush with the
+  screen edge yet keeps a gap above the taskbar.
+- **Flyout close**: `Close` remembers `restRect` (`closeRest`); every animation step
+  and the last one (presence 0) invalidate `paintedRegion()` = `dirtyRect()` plus
+  that rect (shadow padding, clipped to the screen), so no 9 % trace of the panel
+  stays for a consumer that assembles frames from damage.
 - **`ScreenBars`** (a widget; put it in the root instead of the bars and the
   `FlyoutManager`): `NewScreenBars(screens, func(Monitor) *MonitorShell)` asks the
   consumer for `MonitorShell{Bar, Flyouts map[string]FlyoutPanel}` of every new
@@ -5772,6 +6016,15 @@ serves such requests during `SendKeyEvent`/`SendMouseButton`) and gives it back
 to the previous widget when the menu closes — Escape, a picked item, a click
 elsewhere. Called outside key or click handling it cannot ask, so focus the bar
 with `eng.SetFocus`.
+
+**Focus for a panel opened outside an engine event** (a Win key caught by the
+shell, a timer, another goroutine): `Engine.RequestFocus(w)` takes focus the way
+a widget's own request does (the previous owner is remembered) and
+`Engine.ReturnFocus(w)` gives it back unless focus has moved on. Safe from any
+goroutine: on the frame goroutine (or an engine that is not running) it runs at
+once, otherwise it is queued with `Post`, in call order. For flyouts:
+`desktop.FocusOnOpen(flyout, eng, target)` and `FlyoutManager.FocusOnOpen(eng)`
+(the `desktop.FocusRequester` interface is implemented by `*engine.Engine`).
 
 Also since v3.29.1, `ItemsSource="{Binding X}"` on `DataGrid` and `TreeView`
 passes the `*ObservableCollection` itself (it used to become a string and the
