@@ -20,15 +20,53 @@
 //     none, currentColor; fill-rule: nonzero | evenodd; fill-opacity;
 //   - базовая stroke: сплошной цвет, stroke-width, stroke-opacity;
 //   - presentation-атрибуты и style="fill:...;..." (style приоритетнее);
-//   - групповая opacity (приближённо — умножается в альфу заливки/обводки).
+//   - групповая opacity (приближённо — умножается в альфу заливки/обводки);
+//   - градиенты: fill/stroke="url(#id) [запасной цвет]" на <linearGradient> и
+//     <radialGradient> — x1/y1/x2/y2, cx/cy/r/fx/fy, gradientUnits
+//     (objectBoundingBox по умолчанию и userSpaceOnUse), gradientTransform,
+//     spreadMethod (pad/reflect/repeat), <stop offset stop-color stop-opacity>
+//     (атрибутами, через style или CSS-класс; stop-color=currentColor),
+//     наследование стопов и атрибутов по цепочке xlink:href/href. Ссылка на
+//     отсутствующий объект даёт запасной цвет, а без него — «не рисовать»
+//     (как в браузерах), но не чёрный. Градиент из одного стопа — сплошной
+//     цвет; Shape.Fill для градиентной фигуры хранит средний цвет;
+//   - <defs>, <symbol>, <clipPath>, <mask>, <pattern>, <marker>, <filter>,
+//     <style>, <title>, <desc>, <metadata> напрямую не рисуются; чужие
+//     пространства имён (inkscape:, sodipodi:) пропускаются;
+//   - <use> (href/xlink:href на фигуру, группу, <symbol> или вложенный <svg>;
+//     x, y, width, height, transform; viewBox и preserveAspectRatio символа).
+//     Циклы ссылок отсекаются, раскрытие ограничено (maxUseVisits,
+//     maxUsePoints);
+//   - вложенный <svg> со своими x/y/width/height/viewBox;
+//   - clip-path="url(#id)" (clipPathUnits, clip-rule, вложенные clip-path,
+//     clip-path на самом clipPath; границы сглажены, покрытия перемножаются);
+//   - mask="url(#id)" (maskUnits, maskContentUnits, область x/y/width/height,
+//     яркость×альфа содержимого, mask-type:alpha; маска сама может быть
+//     градиентной);
+//   - display:none и visibility:hidden|collapse (атрибутом, в style и в CSS);
+//   - <style>: селекторы тега, .класса, #id и их сочетания (rect.st0, g#a),
+//     «*», списки через запятую; приоритет — атрибут < таблица стилей < style="";
+//   - <image> с data:-ссылкой на PNG/JPEG/GIF (preserveAspectRatio, transform,
+//     opacity; сильное уменьшение усредняется по блокам);
+//   - filter="url(#id)": feGaussianBlur (размытие покрытия фигуры) и
+//     feColorMatrix (matrix/saturate/hueRotate/luminanceToAlpha над цветом
+//     фигуры); остальные примитивы игнорируются, элемент рисуется без них.
+//     Фильтр группы применяется к каждой её фигуре отдельно;
+//   - все именованные цвета CSS.
 //
 // # Ограничения
 //
 //   - stroke рисуется квадами по сегментам, БЕЗ линейных стыков (join),
 //     скруглённых/квадратных капов, штриховки (dash) и masking. Пригодно для
 //     тонких иконочных линий; острые углы могут иметь микрозазор;
-//   - нет gradient/pattern/clipPath/mask/filter/text/image/use/symbol,
-//     CSS-классов и внешних стилей, единиц кроме px, процентных координат;
+//   - нет <text> (его не рисуем; маска из текста даст сплошную фигуру),
+//     <pattern> (fill="url(#pattern)" берёт запасной цвет или не рисуется),
+//     внешних картинок и вложенных SVG в <image>, внешних таблиц стилей и
+//     сложных CSS-селекторов (потомки, дочерние, атрибутные, псевдоклассы),
+//     marker, единиц кроме px и процентов в градиентах/масках;
+//   - групповая opacity не изолирует группу (перекрывающиеся потомки
+//     просвечивают друг через друга); filter/mask/clip группы действуют на
+//     каждую её фигуру отдельно, а не на склеенную картинку группы;
 //   - контуры хранятся уже сплющенными (полилинии); экстремальное увеличение
 //     (>~30× от единиц viewBox) может дать лёгкую огранку кривых;
 //   - even-odd объединяет покрытия XOR-формулой попиксельно — корректно для
@@ -85,6 +123,23 @@ func (m Matrix) AvgScale() float64 {
 		return 0
 	}
 	return math.Sqrt(d)
+}
+
+// inverse возвращает обратную матрицу; ok=false для вырожденной.
+func (m Matrix) inverse() (Matrix, bool) {
+	det := m.Det()
+	if det == 0 || math.IsNaN(det) || math.IsInf(det, 0) {
+		return Matrix{}, false
+	}
+	id := 1 / det
+	return Matrix{
+		A: m.D * id,
+		B: -m.B * id,
+		C: -m.C * id,
+		D: m.A * id,
+		E: (m.C*m.F - m.D*m.E) * id,
+		F: (m.B*m.E - m.A*m.F) * id,
+	}, true
 }
 
 // Translate — матрица сдвига.

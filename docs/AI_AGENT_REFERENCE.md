@@ -3272,8 +3272,42 @@ func (d *svg.Document) RasterizeCached(w, h int, current color.RGBA, tint bool) 
   `fill`/`fill-rule` (nonzero + even-odd)/`fill-opacity`/`currentColor`,
   атрибут `style`. Растеризация через `x/image/vector` (AA), кэш по
   face-независимым параметрам (размер/цвет/tint).
-- **Ограничения (честно):** нет градиентов, `clipPath`, `text`; обводка (stroke) —
-  упрощённая аппроксимация.
+- **Значки приложений Linux (Adwaita/Humanity/hicolor) рисуются:**
+  - градиенты `fill|stroke="url(#id) [fallback]"`: `linearGradient`
+    (`x1 y1 x2 y2`) и `radialGradient` (`cx cy r fx fy`), `gradientUnits`
+    (objectBoundingBox по умолчанию / userSpaceOnUse), `gradientTransform`,
+    `spreadMethod` (pad/reflect/repeat), `<stop offset stop-color stop-opacity>`
+    (атрибутом, `style`, CSS-классом; `currentColor`), стопы и атрибуты по
+    цепочке `xlink:href`/`href`. Ссылка в пустоту без запасного цвета —
+    «не рисовать» (по SVG), НЕ чёрный. Один стоп = сплошной цвет;
+    `pattern` не поддержан (запасной цвет или ничего);
+  - `<defs>`, `<symbol>`, `<clipPath>`, `<mask>`, `<pattern>`, `<marker>`,
+    `<filter>`, `<style>`, `<text>` напрямую не рисуются; чужие XML-пространства
+    (inkscape:, sodipodi:) пропускаются; `display:none`/`visibility:hidden`
+    (атрибут, `style`, CSS) учитываются;
+  - `<use>` (на фигуру/группу/`<symbol>`/вложенный `<svg>`, `x y width height
+    transform`, `viewBox`+`preserveAspectRatio`), вложенный `<svg>`; защита от
+    циклов и «взрыва» (`maxUseVisits`, `maxUsePoints`);
+  - `clip-path` (clipPathUnits, clip-rule, цепочка clip-path на самом clipPath),
+    `mask` (maskUnits/maskContentUnits, область, яркость×альфа, `mask-type`);
+  - `<style>`: селекторы `tag`, `.class`, `#id`, их сочетания, `*`, списки;
+    приоритет: атрибут < таблица стилей < `style=""`;
+  - `<image href="data:image/png|jpeg|gif;base64,…">` (aspect, transform,
+    opacity, усредняющее уменьшение);
+  - `filter`: `feGaussianBlur` и `feColorMatrix`; остальные примитивы
+    игнорируются; все именованные цвета CSS.
+- **API-дополнения** (`Shape` и новые типы, только добавления): `Shape.FillGradient/
+  StrokeGradient *Gradient` (`Fill` для градиента = `Gradient.MeanColor()`),
+  `Shape.Clips []*ClipPath`, `Shape.Masks []*Mask`, `Shape.BlurX/BlurY`,
+  `Shape.ColorMatrix`, `Shape.Image *Image`; `Paint.Ref/Fallback`, `PaintURL`.
+  Геометрия в `Shape` по-прежнему в координатах viewBox.
+- **Ограничения (честно):** нет `text` (маска из текста даст сплошную
+  фигуру), `pattern`, внешних картинок; обводка (stroke) — упрощённая
+  аппроксимация (без join/cap/dash — на скруглённых кривых виден «гребень»);
+  `opacity`/`mask`/`filter` группы применяются к каждой фигуре отдельно, а не
+  к склеенной группе (разница видна лишь при перекрытии полупрозрачных
+  потомков). Проверка глазами: `SVG_SHEET_DIR=… SVG_SHEET_OUT=… [SVG_SHEET_REF=…]
+  go test ./widget/svg -run VisualSheet -v` (эталоны — `rsvg-convert`).
 - **Headless/нативно:** одинаково — чистый CPU-растеризатор, окно ОС не нужно
   (см. `tests/svgicon_test.go`).
 

@@ -3680,7 +3680,15 @@ ic.SetBounds(image.Rect(8, 8, 32, 32))
 - Поддержано: `path` (все команды, включая дуги и smooth-кривые),
   `rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`, трансформы групп,
   `fill`/`fill-rule` (nonzero + even-odd)/`fill-opacity`, атрибут `style`.
-- Ограничения: нет градиентов, `clipPath` и `text`; обводка (stroke) упрощённая.
+- Так же рисуются значки приложений Linux (Adwaita, Humanity, hicolor):
+  `linearGradient`/`radialGradient` (`gradientUnits`, `gradientTransform`,
+  `spreadMethod`, наследование через `xlink:href`), `<use>`/`<symbol>`,
+  `clip-path`, `mask`, `<style>` с классами (`.st0{fill:…}`), `<image>` с
+  `data:`-PNG, `display:none`, размытие и `feColorMatrix` из `filter`.
+  Содержимое `<defs>`, `<clipPath>`, `<mask>`, `<symbol>` само не рисуется.
+- Ограничения: нет `text` и `pattern`; обводка (stroke) упрощённая (без
+  стыков и капов); `opacity`/`mask`/`filter` группы действуют на каждую фигуру
+  отдельно. Полный список — в комментарии пакета `widget/svg`.
 
 Пакет `widget/svg` доступен и напрямую: `svg.Parse(data)` / `svg.ParseFile(path)`
 → `*svg.Document` с методом `RasterizeCached(w, h, current, tint)`.

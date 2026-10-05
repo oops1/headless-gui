@@ -3704,8 +3704,16 @@ ic.SetBounds(image.Rect(8, 8, 32, 32))
 - Supported: `path` (all commands, including arcs and smooth curves),
   `rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`, group transforms,
   `fill`/`fill-rule` (nonzero + even-odd)/`fill-opacity`, the `style` attribute.
-- Limitations: no gradients, `clipPath`, or `text`; stroke is a simple
-  approximation.
+- Linux application icons (Adwaita, Humanity, hicolor) render as well:
+  `linearGradient`/`radialGradient` (`gradientUnits`, `gradientTransform`,
+  `spreadMethod`, inheritance through `xlink:href`), `<use>`/`<symbol>`,
+  `clip-path`, `mask`, `<style>` with classes (`.st0{fill:…}`), `<image>` with
+  a `data:` PNG, `display:none`, blur and `feColorMatrix` from `filter`.
+  The content of `<defs>`, `<clipPath>`, `<mask>`, `<symbol>` is not drawn by
+  itself.
+- Limitations: no `text` or `pattern`; stroke is a simple approximation (no
+  joins or caps); a group's `opacity`/`mask`/`filter` apply to each of its
+  shapes separately. The full list is in the `widget/svg` package comment.
 
 The `widget/svg` package is also usable directly: `svg.Parse(data)` /
 `svg.ParseFile(path)` → `*svg.Document` with `RasterizeCached(w, h, current, tint)`.
