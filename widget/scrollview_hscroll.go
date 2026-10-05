@@ -37,11 +37,11 @@ func (sv *ScrollView) bars() (vert, horiz bool) {
 	}
 	availW := w
 	if vert {
-		availW -= sv.scrollbarWidth
+		availW -= sv.reserve()
 	}
 	horiz = sv.ContentWidth > availW
 	if horiz && !vert {
-		vert = sv.ContentHeight > h-sv.scrollbarWidth
+		vert = sv.ContentHeight > h-sv.reserve()
 	}
 	return vert, horiz
 }
@@ -64,7 +64,7 @@ func (sv *ScrollView) hscrollAvailable() bool {
 func (sv *ScrollView) contentHeight() int {
 	h := sv.bounds.Dy()
 	if sv.needsHScrollbar() {
-		h -= sv.scrollbarWidth
+		h -= sv.reserve()
 	}
 	return h
 }
@@ -111,6 +111,7 @@ func (sv *ScrollView) SetScrollX(x int) {
 	sv.mu.Unlock()
 	if changed {
 		sv.Invalidate()
+		sv.thinPoke()
 	}
 }
 
@@ -121,6 +122,7 @@ func (sv *ScrollView) ScrollXBy(delta int) {
 	sv.mu.Unlock()
 	if changed {
 		sv.Invalidate()
+		sv.thinPoke()
 	}
 }
 
@@ -147,7 +149,11 @@ func (sv *ScrollView) setScrollXLocked(x int) bool {
 // иначе обе полосы накрывали бы его, и рисовался он дважды.
 func (sv *ScrollView) vbarRect() image.Rectangle {
 	b := sv.bounds
-	return image.Rect(b.Max.X-sv.scrollbarWidth, b.Min.Y, b.Max.X, b.Min.Y+sv.contentHeight())
+	bottom := b.Max.Y
+	if sv.needsHScrollbar() {
+		bottom -= sv.sbW()
+	}
+	return image.Rect(b.Max.X-sv.sbW(), b.Min.Y, b.Max.X, bottom)
 }
 
 // hbarStrip — вся полоса у нижнего края: до вертикальной полосы, а не до
@@ -157,7 +163,11 @@ func (sv *ScrollView) hbarStrip() image.Rectangle {
 		return image.Rectangle{}
 	}
 	b := sv.bounds
-	return image.Rect(b.Min.X, b.Max.Y-sv.scrollbarWidth, b.Min.X+sv.contentWidth(), b.Max.Y)
+	right := b.Max.X
+	if sv.needsScrollbar() {
+		right -= sv.sbW()
+	}
+	return image.Rect(b.Min.X, b.Max.Y-sv.sbW(), right, b.Max.Y)
 }
 
 // hbarTrack — трек, по которому ходит ползунок: полоса с небольшими полями,
@@ -168,6 +178,9 @@ func (sv *ScrollView) hbarTrack() image.Rectangle {
 	strip := sv.hbarStrip()
 	if strip.Empty() {
 		return image.Rectangle{}
+	}
+	if sv.isThin() {
+		return strip // тонкая полоса рисуется на всю свою колонку, без полей
 	}
 	return strip.Inset(sv.scrollbarWidth / 5)
 }
@@ -185,7 +198,7 @@ func (sv *ScrollView) hbarThumbLocked() image.Rectangle {
 // hbarThumbHitLocked — курсор над ползунком. По вертикали годится вся полоса,
 // а не только 6-пиксельный ползунок: иначе в него надо было бы целиться.
 func (sv *ScrollView) hbarThumbHitLocked(x, y int) bool {
-	if !image.Pt(x, y).In(sv.hbarStrip()) {
+	if !image.Pt(x, y).In(sv.hbarStrip()) || !sv.interactive() {
 		return false
 	}
 	th := sv.hbarThumbLocked()
@@ -203,10 +216,11 @@ func (sv *ScrollView) hbarThumbHitLocked(x, y int) bool {
 // ползунок стоит серединой под курсором, поэтому и «хват» — его середина:
 // иначе при первом же сдвиге ползунок дёрнулся бы левым краем под курсор.
 func (sv *ScrollView) hbarPressLocked(e MouseEvent) bool {
-	if !image.Pt(e.X, e.Y).In(sv.hbarStrip()) {
+	if !image.Pt(e.X, e.Y).In(sv.hbarStrip()) || !sv.interactive() {
 		return false
 	}
 	sv.hdragging = true
+	sv.thinHold(true)
 	if th := sv.hbarThumbLocked(); !th.Empty() && e.X >= th.Min.X && e.X < th.Max.X {
 		sv.hdragGrab = e.X - th.Min.X
 	} else {
@@ -293,5 +307,6 @@ func (sv *ScrollView) wheelPixelsX(dx float64) bool {
 	if changed {
 		sv.Invalidate()
 	}
+	sv.thinPoke()
 	return true
 }

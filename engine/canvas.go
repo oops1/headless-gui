@@ -1285,8 +1285,15 @@ func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
 	if dstRect.Empty() {
 		return
 	}
-	tmp := c.scaledFor(src, pw, ph)
 	offset := image.Pt(dstRect.Min.X-px, dstRect.Min.Y-py)
+	// Картинка уже нужного ФИЗИЧЕСКОГО размера (векторный значок, растеризованный
+	// под масштаб холста, — widget.DrawSVG) кладётся как есть: растяжение 1:1
+	// ничего не добавило бы, кроме копии в кэше и лишнего прохода по пикселям.
+	if rgba, ok := src.(*image.RGBA); ok && rgba.Bounds().Dx() == pw && rgba.Bounds().Dy() == ph {
+		c.blitOver(dstRect, rgba, rgba.Bounds().Min.Add(offset))
+		return
+	}
+	tmp := c.scaledFor(src, pw, ph)
 	c.blitOver(dstRect, tmp, offset)
 }
 

@@ -211,6 +211,7 @@ func Windows2000Profile() *Profile {
 		Border: C(selection), BorderWidth: N(1), Corner: N(0),
 	})
 	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	inheritTrayStyles(p)
 	return p
 }
 
@@ -485,6 +486,7 @@ func Windows10Profile() *Profile {
 		p.SetStyle(comp, "", StateNormal, st)
 	}
 
+	inheritTrayStyles(p)
 	return p
 }
 
@@ -690,6 +692,7 @@ func Windows11Profile() *Profile {
 		p.SetStyle(comp, "", StateNormal, st)
 	}
 
+	inheritTrayStyles(p)
 	return p
 }
 
@@ -936,6 +939,7 @@ func MacOSProfile() *Profile {
 	// то же самое (Fill/Text/Corner/PadX), что уже входит в цикл выше —
 	// без переопределения Corner/PadX задавать её отдельно незачем.
 
+	inheritTrayStyles(p)
 	return p
 }
 

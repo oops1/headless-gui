@@ -136,6 +136,13 @@ func (w *SVGIcon) Draw(ctx DrawContext) {
 		w.drawChildren(ctx)
 		return
 	}
+	if ContextScale(ctx) != 1 {
+		// HiDPI: растр в физическом размере, а не логический, растянутый на
+		// масштаб, — иначе значок на 125–200 % мягкий.
+		DrawSVG(ctx, doc, b, col, tint)
+		w.drawChildren(ctx)
+		return
+	}
 	img := doc.RasterizeCached(b.Dx(), b.Dy(), col, tint)
 	if img != nil {
 		ctx.DrawImage(img, b.Min.X, b.Min.Y)

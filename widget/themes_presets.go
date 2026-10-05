@@ -42,6 +42,18 @@ type ThemeStyle struct {
 	// MacTitleBar — заголовок окна в стиле macOS (traffic lights слева, текст
 	// по центру). Win-стиль при false. Применяется через Window.ApplyTheme.
 	MacTitleBar bool
+
+	// Полоса прокрутки ScrollView (scrollbar_thin.go). Нулевые значения — прежний
+	// вид: фиксированная полоса 10 px, всегда видна.
+	//
+	// ScrollbarThin — тонкая полоса поверх содержимого с автоскрытием;
+	// ScrollbarWidth — ширина обычной полосы (0 → 10);
+	// ScrollbarThinWidth / ScrollbarThinHoverWidth — ширина тонкой полосы в покое
+	// и под курсором (0 → умолчание движка).
+	ScrollbarThin           bool
+	ScrollbarWidth          int
+	ScrollbarThinWidth      int
+	ScrollbarThinHoverWidth int
 }
 
 // currentStyle возвращает стиль активной темы (для Draw виджетов).

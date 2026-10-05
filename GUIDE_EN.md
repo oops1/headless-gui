@@ -677,6 +677,31 @@ accessibility tree are screen coordinates. A widget inside a scroll view does no
 need to know about it. A custom container that shows its children shifted only
 has to implement `widget.ContentOffsetter`.
 
+#### Thin auto-hiding scrollbar
+
+The regular bar is a fixed 10 px, always visible, and takes width from the
+content. The thin one lies over the content (takes nothing), is hidden at rest,
+appears when the mouse moves over the view and on any scroll (wheel, drag,
+`ScrollBy`), and fades after a pause. A pointer on the bar widens it and keeps
+it visible:
+
+```go
+sv.SetScrollbarStyle(widget.ScrollbarThin)
+sv.SetThinScrollbar(4, 10)                  // width at rest and under the pointer
+sv.SetAutoHide(1200*time.Millisecond, 200*time.Millisecond) // pause, fade
+sv.SetThinColors(thumb, thumbHover, track)  // zero colour = theme colour
+sv.SetScrollbarWidth(14)                    // width of the regular bar
+```
+
+The theme sets them too: `ThemeStyle.ScrollbarThin`, `ScrollbarWidth`,
+`ScrollbarThinWidth`, `ScrollbarThinHoverWidth` (profile tokens
+`scrollbar.thin`, `scrollbar.width`, `scrollbar.thin.width`,
+`scrollbar.thin.hover.width`). An explicit choice on the instance wins over the
+theme. Default colours are the theme's regular bar colours (`ScrollThumbBG`,
+`Accent`, `ScrollTrackBG`). While nothing happens there are no animations and
+no frames; each step repaints only the bar column, not the content. Built-in
+presets declare none of this — their `ScrollView` is unchanged.
+
 ### ListView
 
 ```go
@@ -4114,6 +4139,41 @@ falls outside the notification centre, and that one closes:
 ```go
 desktop.NewFlyoutGroup(calendar.Flyout, notifications.Flyout)
 ```
+
+#### Tray icons and SVG on HiDPI
+
+Network, volume and power icons come from the theme's icon set
+(`theme.Manager.SetIconResolver`, `widget.IconSet`); when the profile has no such
+icon the old shapes are drawn. Keys in `Profile.Icons`:
+`tray.network.{none,wifi.0..4,wifi,ethernet,cellular,icon}`,
+`tray.volume.{muted,0..3,icon}`, `tray.power.{ac.0..10,ac,0..10,icon}`,
+`tray.notifications.{icon,icon.new}`; the most specific one found wins. The
+theme flag `tray.icon.tint` recolours the icon with the style's text colour.
+
+A custom tray icon is `desktop.NewTrayIcon` from an image, SVG, or a function
+"size in physical pixels → image":
+
+```go
+ic, _ := desktop.NewTraySVGIcon(m, svgData)
+ic.SetToolTipKey("CloudSync")     // tooltip via widget.Tr, follows the language
+ic.OnClick = openCloudPanel
+bar.AddItem(desktop.SlotTray, ic)
+```
+
+The notification-centre button with a counter is
+`desktop.NewNotificationButton(m, notifications)` (the number is `len(List())`,
+capped at "99+"); the "Show desktop" strip is `desktop.NewShowDesktopButton(m)`,
+added last in `SlotTray`, its width is the metric `tray.showdesktop.width`.
+Tooltips are the strings `ShowDesktop`, `NotificationCenter`,
+`NoNewNotifications`, `NewNotificationsCount` (`widget.RegisterStrings`
+overrides the built-in ru/en).
+
+SVG is rasterised **at physical size** (logical × canvas scale) instead of being
+stretched: on 125–200 % the icon stays sharp. `SVGIcon`, `desktop.TrayIcon` and
+the tray icons do it; for a custom widget use `widget.DrawSVG(ctx, doc, rect,
+current, tint)`, `widget.ContextScale(ctx)`, `widget.PhysicalRect(ctx, r)`.
+`desktop.AppInfo.IconAt(size)` returns a bitmap or SVG for the needed size (bar
+24, menu 20–32, tiles 48–64); without it `AppInfo.Icon` is used.
 
 #### Window preview
 

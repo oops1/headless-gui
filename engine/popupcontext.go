@@ -102,6 +102,11 @@ func (t *translatingContext) Clip() image.Rectangle {
 	return t.inner.Clip().Add(image.Pt(t.dx, t.dy))
 }
 
+// Scale сообщает HiDPI-масштаб буфера попапа (widget.ContextScale): векторные
+// значки внутри всплывающей области растеризуются в физическом размере, а не
+// растягиваются движком.
+func (t *translatingContext) Scale() float64 { return t.inner.Scale() }
+
 // ─── widget.AAShapes ─────────────────────────────────────────────────────────
 
 func (t *translatingContext) FillEllipseAA(cx, cy, rx, ry int, col color.RGBA) {

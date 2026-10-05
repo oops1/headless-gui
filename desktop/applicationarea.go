@@ -47,9 +47,11 @@ type ApplicationArea struct {
 // раз — окном: две ячейки на одно и то же приложение сбивают с толку, а
 // щелчок по ним делает разное.
 type appEntry struct {
-	app    AppID
-	title  string
-	icon   image.Image
+	app   AppID
+	title string
+	icon  image.Image
+	// iconAt — значок по размеру (AppInfo.IconAt); при отрисовке побеждает icon.
+	iconAt func(size int) image.Image
 	window WindowID
 	live   bool // есть открытое окно
 	active bool
@@ -118,12 +120,12 @@ func (a *ApplicationArea) rebuild() {
 			pinned[id] = true
 			e := appEntry{app: id, title: string(id)}
 			if info, ok := apps[id]; ok {
-				e.title, e.icon = info.Title, info.Icon
+				e.title, e.icon, e.iconAt = info.Title, info.Icon, info.IconAt
 			}
 			if w, ok := windows[id]; ok {
 				e.window, e.live, e.active, e.min = w.ID, true, w.Active, w.Minimized
 				if w.Icon != nil {
-					e.icon = w.Icon
+					e.icon, e.iconAt = w.Icon, nil
 				}
 			}
 			entries = append(entries, e)
@@ -315,8 +317,9 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 
 		padX := int(s.PadX)
 		iconX := r.Min.X + padX
-		if e.icon != nil && iconSize > 0 {
-			ctx.DrawImageScaled(e.icon, iconX, r.Min.Y+(r.Dy()-iconSize)/2, iconSize, iconSize)
+		if (e.icon != nil || e.iconAt != nil) && iconSize > 0 {
+			iconRect := image.Rect(iconX, r.Min.Y+(r.Dy()-iconSize)/2, iconX+iconSize, r.Min.Y+(r.Dy()-iconSize)/2+iconSize)
+			drawAppIcon(ctx, e.icon, e.iconAt, iconRect)
 		}
 		// Подпись помещается не всегда, и тема вправе не хотеть её вовсе.
 		textLeft := iconX + iconSize + labelGap

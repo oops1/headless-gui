@@ -55,6 +55,8 @@ type startMenuRow struct {
 	label string
 	id    AppID
 	icon  image.Image
+	// iconAt — значок по размеру (AppInfo.IconAt); при отрисовке побеждает icon.
+	iconAt func(size int) image.Image
 }
 
 // startMenuLaidRow — строка вместе с её прямоугольником в АБСОЛЮТНЫХ
@@ -282,13 +284,13 @@ func (m *StartMenu) buildRows() []startMenuRow {
 			if !ok {
 				continue // закреплено, но уже удалено из каталога — строки не строим
 			}
-			rows = append(rows, startMenuRow{kind: startMenuRowApp, label: info.Title, id: info.ID, icon: info.Icon})
+			rows = append(rows, startMenuRow{kind: startMenuRowApp, label: info.Title, id: info.ID, icon: info.Icon, iconAt: info.IconAt})
 		}
 	}
 
 	rows = append(rows, startMenuRow{kind: startMenuRowSection, label: startMenuLabelAllApps})
 	for _, a := range apps {
-		rows = append(rows, startMenuRow{kind: startMenuRowApp, label: a.Title, id: a.ID, icon: a.Icon})
+		rows = append(rows, startMenuRow{kind: startMenuRowApp, label: a.Title, id: a.ID, icon: a.Icon, iconAt: a.IconAt})
 	}
 	return rows
 }
@@ -383,10 +385,10 @@ func (m *StartMenu) drawContent(ctx widget.DrawContext, _ image.Rectangle) {
 		PaintStyle(ctx, lr.rect, s)
 
 		textLeft := lr.rect.Min.X
-		if lr.row.icon != nil && iconSize > 0 {
+		if (lr.row.icon != nil || lr.row.iconAt != nil) && iconSize > 0 {
 			iconX := lr.rect.Min.X + int(s.PadX)
 			iconY := lr.rect.Min.Y + (lr.rect.Dy()-iconSize)/2
-			ctx.DrawImageScaled(lr.row.icon, iconX, iconY, iconSize, iconSize)
+			drawAppIcon(ctx, lr.row.icon, lr.row.iconAt, image.Rect(iconX, iconY, iconX+iconSize, iconY+iconSize))
 			textLeft = iconX + iconSize + int(s.PadX)
 		}
 		textRect := image.Rect(textLeft, lr.rect.Min.Y, lr.rect.Max.X, lr.rect.Max.Y)

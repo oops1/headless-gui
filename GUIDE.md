@@ -670,6 +670,31 @@ sv.ScrollXBy(-40)        // положительное — вправо
 прокрутки знать о ней не нужно. Своему контейнеру, который показывает детей со
 сдвигом, достаточно реализовать `widget.ContentOffsetter`.
 
+#### Тонкая полоса прокрутки с автоскрытием
+
+Обычная полоса — фиксированные 10 px, всегда на виду, отнимает ширину у
+содержимого. Тонкая лежит поверх содержимого (ничего не отнимает), в покое
+скрыта, появляется при движении мыши над областью и при любой прокрутке (колесо,
+перетаскивание, `ScrollBy`), через паузу плавно гаснет. Курсор на самой полосе
+расширяет её и не даёт погаснуть:
+
+```go
+sv.SetScrollbarStyle(widget.ScrollbarThin)
+sv.SetThinScrollbar(4, 10)                  // ширина в покое и под курсором
+sv.SetAutoHide(1200*time.Millisecond, 200*time.Millisecond) // пауза, затухание
+sv.SetThinColors(thumb, thumbHover, track)  // нулевой цвет — цвет темы
+sv.SetScrollbarWidth(14)                    // ширина обычной полосы
+```
+
+Вид и ширины задаёт и тема — поля `ThemeStyle.ScrollbarThin`, `ScrollbarWidth`,
+`ScrollbarThinWidth`, `ScrollbarThinHoverWidth` (в профиле — токены
+`scrollbar.thin`, `scrollbar.width`, `scrollbar.thin.width`,
+`scrollbar.thin.hover.width`). Явный выбор экземпляра главнее темы. Цвета по
+умолчанию — цвета обычной полосы темы (`ScrollThumbBG`, `Accent`,
+`ScrollTrackBG`). Пока ничего не происходит, анимаций нет и кадры не готовятся;
+каждый шаг перерисовывает только колонку полосы, а не всё содержимое. Пресеты
+тем полос не объявляют — их `ScrollView` прежний.
+
 ### ListView
 
 ```go
@@ -4094,6 +4119,40 @@ root.AddChild(menu)                       // в дереве — иначе ов
 ```go
 desktop.NewFlyoutGroup(calendar.Flyout, notifications.Flyout)
 ```
+
+#### Значки трея и SVG на HiDPI
+
+Значки сети, звука и питания берутся из набора иконок темы
+(`theme.Manager.SetIconResolver`, `widget.IconSet`), а если в профиле нужной
+иконки нет, рисуются прежними фигурами. Ключи в `Profile.Icons`:
+`tray.network.{none,wifi.0..4,wifi,ethernet,cellular,icon}`,
+`tray.volume.{muted,0..3,icon}`, `tray.power.{ac.0..10,ac,0..10,icon}`,
+`tray.notifications.{icon,icon.new}`; самый конкретный найденный побеждает.
+Флаг темы `tray.icon.tint` перекрашивает иконку цветом текста стиля.
+
+Свой значок трея — `desktop.NewTrayIcon` из картинки, SVG или функции «размер
+в физических пикселях → картинка»:
+
+```go
+ic, _ := desktop.NewTraySVGIcon(m, svgData)
+ic.SetToolTipKey("CloudSync")     // подсказка через widget.Tr, следует за языком
+ic.OnClick = openCloudPanel
+bar.AddItem(desktop.SlotTray, ic)
+```
+
+Кнопка центра уведомлений со счётчиком —
+`desktop.NewNotificationButton(m, notifications)` (число — `len(List())`, «99+»
+сверху); полоска «Показать рабочий стол» — `desktop.NewShowDesktopButton(m)`,
+кладётся последней в `SlotTray`, ширина — метрика `tray.showdesktop.width`.
+Подсказки — строки `ShowDesktop`, `NotificationCenter`, `NoNewNotifications`,
+`NewNotificationsCount` (`widget.RegisterStrings` перекрывает встроенные ru/en).
+
+SVG растеризуется **в физическом размере** (логический × масштаб холста), а не
+растягивается: на 125–200 % значок остаётся чётким. Так делают `SVGIcon`,
+`desktop.TrayIcon` и значки трея; для своего виджета — `widget.DrawSVG(ctx, doc,
+rect, current, tint)`, `widget.ContextScale(ctx)`, `widget.PhysicalRect(ctx, r)`.
+`desktop.AppInfo.IconAt(size)` отдаёт растр или SVG под нужный размер (панель 24,
+меню 20–32, плитки 48–64); без него работает `AppInfo.Icon`.
 
 #### Предпросмотр окна
 

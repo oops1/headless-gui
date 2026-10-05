@@ -4186,6 +4186,38 @@ Tests: `theme/accent_test.go`, `desktop/accent_test.go`, `engine/noise_test.go`.
 `TestGolden_Windows10Acrylic` writes dark and light bar PNGs when `GOLDEN_OUT`
 is set.
 
+### Physical-size SVG, tray icons from the theme set, thin scrollbar — v3.32
+
+- `widget/physical.go`: `ContextScale(ctx)` (1 for contexts without `Scale()`),
+  `PhysicalRect(ctx, r)` (edge-rounded like `Canvas.sRect`), `DrawSVG(ctx, doc,
+  rect, current, tint)` rasterises at physical size and hands the engine an image
+  of exactly the receiver's physical size. `Canvas.DrawImageScaled` blits an
+  `*image.RGBA` of that size as is (no resample, no cache copy);
+  `engine/popupcontext.go` forwards `Scale()` so popups see the scale too.
+  `SVGIcon.Draw` uses it when the scale is not 1 (scale 1 path unchanged).
+- `desktop/trayglyph.go`: network/volume/power ask `tm.GetIcon(key, physicalSide)`
+  with keys from most specific to general (`tray.network.wifi.N`, `tray.volume.N`,
+  `tray.power.ac.N`, …, `*.icon`); no key declared → the old shapes, pixel for
+  pixel. Flag `tray.icon.tint` recolours by the alpha channel.
+  `TrayIcon` (image / SVG / `func(size) image.Image`), `NotificationButton`
+  (counter, `99+`), `ShowDesktopButton` (`tray.showdesktop.width`).
+  `theme/profiles_tray.go` copies the `tray.volume` styles to the new components in
+  every built-in profile (otherwise the default surface fill shows through).
+  `AppInfo.IconAt(size)` + `IconFor`; `appicon.go:drawAppIcon` feeds it the
+  physical side. Strings (`ShowDesktop`, `NotificationCenter`,
+  `NoNewNotifications`, `NewNotificationsCount`) are `widget.Tr` keys registered
+  for EN/RU in `traystrings.go`.
+- `widget/scrollbar_thin.go`: `ScrollbarThin` is an overlay (`reserve()==0`),
+  hidden at rest (`alpha`), shown by `thinPoke()` on mouse move / any scroll,
+  hidden by a single pause timer that re-arms itself for the remainder instead of
+  being recreated per event. `animateQuiet` is `AnimateOwned` without the full
+  `notifyUIChanged` (that wakes `Engine.Invalidate` = whole frame); steps repaint
+  only the bar column (`stripW`/`horiz` atomics so a tick never takes `sv.mu`).
+  Lock order `sv.mu → thin.mu`, never the reverse. A hidden bar is not
+  `interactive()` and neither captures nor hit-tests the mouse. Theme fields
+  `ThemeStyle.Scrollbar*` ⇄ profile tokens `scrollbar.*` (declared only when set,
+  so presets round-trip unchanged); instance setters win over the theme.
+
 ### Measured cost of a frame
 
 Desktop scene from `desktop/` at 1280×800, Windows 11 theme, fake system data

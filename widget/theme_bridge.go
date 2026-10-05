@@ -70,6 +70,13 @@ const (
 	keyClassic3D   theme.Key = "style.classic3d"
 	keyMacTitleBar theme.Key = "style.mac.titlebar"
 
+	// Полоса прокрутки (ThemeStyle.Scrollbar*). Токены объявляются в профиле
+	// только когда заданы: профиль без них — прежняя полоса 10 px.
+	keyScrollbarThin           theme.Key = "scrollbar.thin"
+	keyScrollbarWidth          theme.Key = "scrollbar.width"
+	keyScrollbarThinWidth      theme.Key = "scrollbar.thin.width"
+	keyScrollbarThinHoverWidth theme.Key = "scrollbar.thin.hover.width"
+
 	// Фаска — общий вид темы, а не свойство компонента: одну и ту же
 	// тройку цветов рисуют кнопка, флажок, вкладки, меню и окно.
 	keyBevelLight  theme.Key = "bevel.light"
@@ -132,6 +139,18 @@ func ProfileFromTheme(t *Theme) *theme.Profile {
 	p.SetColor(keyBevelShadow, t.Style.BevelShadow)
 	p.SetColor(keyBevelDark, t.Style.BevelDark)
 	p.SetColor(keyStyleName, encodeName(t.Style.Name))
+	if t.Style.ScrollbarThin {
+		p.SetFlag(keyScrollbarThin, true)
+	}
+	for k, v := range map[theme.Key]int{
+		keyScrollbarWidth:          t.Style.ScrollbarWidth,
+		keyScrollbarThinWidth:      t.Style.ScrollbarThinWidth,
+		keyScrollbarThinHoverWidth: t.Style.ScrollbarThinHoverWidth,
+	} {
+		if v > 0 {
+			p.SetMetric(k, float64(v))
+		}
+	}
 
 	// Радиус окна принадлежит окну — объявляем и стилем, чтобы профиль
 	// читался осмысленно тем, кто пишет тему руками.
@@ -190,6 +209,11 @@ func Materialize(rt *theme.Theme) *Theme {
 		BevelLight:    rt.ColorOr(keyBevelLight, color.RGBA{}),
 		BevelShadow:   rt.ColorOr(keyBevelShadow, color.RGBA{}),
 		BevelDark:     rt.ColorOr(keyBevelDark, color.RGBA{}),
+
+		ScrollbarThin:           rt.FlagOr(keyScrollbarThin, false),
+		ScrollbarWidth:          int(rt.MetricOr(keyScrollbarWidth, 0)),
+		ScrollbarThinWidth:      int(rt.MetricOr(keyScrollbarThinWidth, 0)),
+		ScrollbarThinHoverWidth: int(rt.MetricOr(keyScrollbarThinHoverWidth, 0)),
 	}
 	return t
 }

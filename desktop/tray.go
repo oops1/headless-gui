@@ -1,9 +1,9 @@
 // tray.go — значки состояния в трее панели задач: сеть, звук, питание.
 //
-// Настоящих иконок пока нет (будут позже, из набора темы) — значки рисуются
-// фигурами через DrawContext: полосками (сеть, шкала звука), прямоугольником
-// с заполнением (батарея). Цвета и отступы — из стиля темы; ничего, что
-// зависит от профиля, здесь не зашито числом.
+// Значок берётся из набора иконок темы (ключи — в trayglyph.go), а если темы с
+// такой иконкой нет, рисуется фигурами через DrawContext: полосками (сеть,
+// шкала звука), прямоугольником с заполнением (батарея). Цвета и отступы — из
+// стиля темы; ничего, что зависит от профиля, здесь не зашито числом.
 package desktop
 
 import (
@@ -329,6 +329,9 @@ type NetworkItem struct {
 	// потому что промоутнутое Base.ToolTip её не даёт).
 	tt trayTooltip
 
+	// glyph — перекрашенная копия иконки темы (см. trayglyph.go).
+	glyph glyphMemo
+
 	unsub func()
 }
 
@@ -402,6 +405,11 @@ func (n *NetworkItem) Draw(ctx widget.DrawContext) {
 		return
 	}
 	net := n.networkState()
+	// Иконка из набора темы — первой; фигуры ниже остаются запасным вариантом
+	// для тем, у которых такой иконки нет.
+	if drawThemeGlyph(ctx, n.tm, networkIconKeys(net), inner, s, &n.glyph) {
+		return
+	}
 	if net.Kind == NetNone {
 		// Раньше «нет сети» рисовалось как ratio=0 — те же полоски, что и у
 		// слабого сигнала, просто все тусклые. С одного взгляда «отключено»
@@ -458,6 +466,9 @@ type VolumeItem struct {
 	// та же причина: Base.ToolTip без замка, а подписка зовётся из
 	// горутины потребителя).
 	tt trayTooltip
+
+	// glyph — перекрашенная копия иконки темы (см. trayglyph.go).
+	glyph glyphMemo
 
 	unsub func()
 }
@@ -528,6 +539,9 @@ func (v *VolumeItem) Draw(ctx widget.DrawContext) {
 		return
 	}
 	vol := v.volumeState()
+	if drawThemeGlyph(ctx, v.tm, volumeIconKeys(vol), inner, s, &v.glyph) {
+		return
+	}
 
 	bodyW := inner.Dx() / volumeBodyDiv
 	body := image.Rect(inner.Min.X, inner.Min.Y, inner.Min.X+bodyW, inner.Max.Y)
@@ -579,6 +593,9 @@ type PowerItem struct {
 
 	// tt — подсказка «Батарея: N%» / «Питание от сети» (см. NetworkItem.tt).
 	tt trayTooltip
+
+	// glyph — перекрашенная копия иконки темы (см. trayglyph.go).
+	glyph glyphMemo
 
 	unsub func()
 }
@@ -653,6 +670,9 @@ func (p *PowerItem) Draw(ctx widget.DrawContext) {
 
 	inner := shrinkByPad(b, s)
 	if inner.Empty() {
+		return
+	}
+	if drawThemeGlyph(ctx, p.tm, powerIconKeys(pw), inner, s, &p.glyph) {
 		return
 	}
 
