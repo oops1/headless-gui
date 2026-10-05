@@ -358,6 +358,12 @@ func (nc *NotificationCenter) deliver(ev NotificationActionEvent, keep bool) {
 func (nc *NotificationCenter) richMouseButton(e widget.MouseEvent) bool {
 	outer := nc.rect()
 	pt := image.Pt(e.X, e.Y)
+	// Отпускание бегунка, который тянули за край панели, приходит оттуда же —
+	// извне панели: его надо принять, иначе бегунок так и остался бы схваченным.
+	if !e.Pressed && nc.view.dragging() {
+		nc.view.onButton(outer, e)
+		return true
+	}
 	if !pt.In(outer) {
 		if e.Pressed {
 			nc.Close()
@@ -372,7 +378,25 @@ func (nc *NotificationCenter) richMouseButton(e widget.MouseEvent) bool {
 		}
 	}
 	nc.view.onButton(outer, e)
+	if e.Pressed && nc.view.dragging() {
+		// Бегунок схвачен: мышь принадлежит ему, пока кнопка не отпущена, и
+		// курсор волен выходить за панель (движок снимет захват сам на отпускании).
+		nc.mu.Lock()
+		cm := nc.capture
+		nc.mu.Unlock()
+		if cm != nil {
+			cm.SetCapture(nc)
+		}
+	}
 	return true
+}
+
+// SetCaptureManager реализует widget.CaptureAware: менеджер захвата нужен,
+// чтобы тянуть бегунок полосы прокрутки за пределы панели.
+func (nc *NotificationCenter) SetCaptureManager(cm widget.CaptureManager) {
+	nc.mu.Lock()
+	nc.capture = cm
+	nc.mu.Unlock()
 }
 
 // OnMouseMove подсвечивает элемент под курсором.

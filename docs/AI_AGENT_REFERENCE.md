@@ -4492,7 +4492,39 @@ Quick actions: `QuickAction{ID, Title, Icon, IconAt, On, Disabled}`,
 Fixed errors: the center subscribes to its sources on open and unsubscribes on any
 close (button, outside click, Esc, `DismissAt`) so the list updates after reopen;
 an open center repaints on a new notification; height no longer depends on the
-number of cards (list scrolls: wheel, keys, click on the thin auto-hiding thumb).
+number of cards (list scrolls: wheel, keys, the thin auto-hiding thumb).
+
+Scrollbar: the thumb is dragged with the mouse. Pressing it grabs the mouse
+(`NotificationCenter` is `widget.CaptureAware`, so the drag keeps working outside
+the panel), the list moves proportionally to the thumb (`dy * maxScroll / free
+track`, the grab point does not jump), the thumb never fades while held and is
+drawn in the `scrollbar` part state `Pressed` (`Hover` under the cursor). A click
+on the track above/below the thumb scrolls one page (90 % of the list height) in
+that direction. Only the list area is repainted while dragging.
+
+Expand/collapse animations: the text of a card (2 lines <-> up to 8, actions), a
+whole group and the quick action grid change height smoothly, the cards below
+slide with them. Duration and curve come from the theme animation token
+`notification.expand` (`desktop.AnimNotificationExpand`; Windows 10 declares
+150 ms `out-cubic`; a profile that does not declare it falls back to `menu.open`;
+0 = instant, no frames at all). The view keeps only a `k` (0..1 openness) per
+card/group/grid (`notifyview_slide.go`); while `k` is on the way the layout takes
+the height between the collapsed and the expanded layout and clips the expanded
+content by the card frame. The motion starts on demand: the layout notices that
+the target state changed (click, key, `SetGroupCollapsed`, `SetQuickExpanded`),
+so no setter has to be wired. An item seen for the first time (panel just
+opened, new notification) is drawn in its state at once; closing the panel drops
+all motions. An interrupted motion goes back from the current height without a
+jump. Each step repaints only the rectangle from the top of the moving element to
+the bottom of the list (the grid: from the list top to the panel bottom); the
+header is not repainted. `k` is clamped to 0..1, so an `out-back` fallback cannot
+turn the height inside out.
+
+Severity: `Notification.Severity` Warning/Error is drawn on a Windows 10 card as
+a strip of `notificationcenter.severity.width` (3 px) at the left edge, in the
+colour of the theme part `severity.warning` / `severity.error` (dark panel:
+yellow/pink, light panel: dark amber/red); Info gets nothing. The toast has the
+same strip. Flat themes keep the old `card.warning` / `card.error` border.
 
 Keyboard: the open rich center is `Focusable` + `TabAcceptor`; Tab/Shift+Tab,
 Up/Down walk stops (link, groups, cards, actions, reply field, footer links, tiles),
@@ -4513,15 +4545,24 @@ the tray (`Anchor`/`Screen` or `WorkArea`), slides in from the right, hides afte
 mouse is over it, cross hides only the toast, actions work as in the center. It is
 NOT registered in `FlyoutManager` (opening it must not close the Start menu) and is
 added to the root after the manager; `toast.Suppress(center)` keeps it quiet while
-the center is open; only themes with the presenter show it.
+the center is open; only themes with the presenter show it. In the flat themes
+(Windows 11, Windows 2000, macOS) the toast is intentionally NOT shown: there is
+no rich card to pop up (a shell that needs a pop-up there can use the tray
+balloon, see "Tray, balloon notifications"). It is a limitation of the flat
+variant, not a bug.
 
 Hooks added to `Flyout` (nil = old behaviour): `Place` (own placement) and `Plate`
 (component and part of the plate style).
 
 Tests: `desktop/notifyview_test.go` (behaviour, errors, keyboard, toast),
 `desktop/notifyview_render_test.go` (pixels: accent, light flag, partial repaint,
-open area), `theme/profiles_win10_notify_test.go`. Pictures: `NC_OUT=<dir> go test
-./desktop -run TestVisual_NotificationCenter` and `...Toast`.
+open area), `desktop/notifyview_slide_test.go` (expand/collapse animation, thumb
+drag, severity), `theme/profiles_win10_notify_test.go`,
+`theme/profiles_win10_notify_severity_test.go`. Pictures: `NC_OUT=<dir> go test
+./desktop -run TestVisual_NotificationCenter` and `...Toast` (also
+`dark_card_expanding`, `dark_group_collapsing`, `dark_quick_expanding`,
+`*_scrollbar_drag`, `*_severity`). A test that toggles a card, a group or the grid
+finishes the animation first (`finishAnimations()`), because the theme animates.
 
 ### Windows 10 Start menu with tiles and the taskbar search box — v3.33
 

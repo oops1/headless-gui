@@ -56,6 +56,15 @@ func (v *richView) invalidateAll() {
 // панелью больше нет.
 func (v *richView) onMove(panel image.Rectangle, pt image.Point, nowhere bool) {
 	l := v.layout(panel)
+	// Бегунок тянут: курсор ведёт список, а наведение на карточки не следит, как
+	// и положено захвату мыши (курсор может быть уже за краем панели).
+	v.mu.Lock()
+	dragging := v.drag
+	v.mu.Unlock()
+	if dragging {
+		v.dragTo(l, pt.Y)
+		return
+	}
 	var key zoneKey
 	if !nowhere {
 		if z, ok := l.zoneAt(pt); ok {
@@ -63,24 +72,30 @@ func (v *richView) onMove(panel image.Rectangle, pt image.Point, nowhere bool) {
 		}
 	}
 	over := !nowhere && pt.In(l.viewport) && l.maxScrl > 0
+	hot := over && l.onThumb(pt)
 
 	v.mu.Lock()
 	old := v.hover
 	v.hover = key
-	hot := false
+	thumbChanged := v.thumbHot != hot
+	v.thumbHot = hot
+	dropHot := false
 	if key.kind == zoneOption && v.dropHot != key.index {
-		v.dropHot, hot = key.index, true
+		v.dropHot, dropHot = key.index, true
 	}
 	v.mu.Unlock()
 
 	if over {
 		v.poke()
 	}
+	if thumbChanged {
+		v.invalidate(l.thumbStrip())
+	}
 	if old != key {
 		v.invalidate(l.invalRect(old))
 		v.invalidate(l.invalRect(key))
 	}
-	if hot {
+	if dropHot {
 		v.invalidate(l.dropRect)
 	}
 }
@@ -110,11 +125,100 @@ func (l *richLayout) thumbStrip() image.Rectangle {
 	return image.Rect(vp.Max.X-l.m.sbW-4, vp.Min.Y, vp.Max.X, vp.Max.Y)
 }
 
+// thumb возвращает бегунок полосы прокрутки в абсолютных координатах; пусто,
+// если список помещается целиком. Рисование и мышь берут его отсюда, так что
+// хватается то, что нарисовано.
+func (l *richLayout) thumb() image.Rectangle {
+	if l.maxScrl <= 0 || l.contentH <= 0 {
+		return image.Rectangle{}
+	}
+	track := l.viewport
+	th := track.Dy() * track.Dy() / l.contentH
+	if th < ncThumbMin {
+		th = ncThumbMin
+	}
+	if th > track.Dy() {
+		th = track.Dy()
+	}
+	ty := track.Min.Y + (track.Dy()-th)*l.scroll/l.maxScrl
+	x := track.Max.X - l.m.sbW - 2
+	return image.Rect(x, ty, x+l.m.sbW, ty+th)
+}
+
+// trackX — левая граница полосы, по которой хватают бегунок и щёлкают
+// дорожку: шире самого бегунка, в него попасть мышью проще.
+func (l *richLayout) trackX() int { return l.viewport.Max.X - l.m.sbW - 8 }
+
+// onTrack — точка над полосой прокрутки (дорожкой с бегунком).
+func (l *richLayout) onTrack(pt image.Point) bool {
+	return l.maxScrl > 0 && pt.In(l.viewport) && pt.X >= l.trackX()
+}
+
+// onThumb — точка над самим бегунком (в ширине полосы).
+func (l *richLayout) onThumb(pt image.Point) bool {
+	th := l.thumb()
+	return l.onTrack(pt) && pt.Y >= th.Min.Y && pt.Y < th.Max.Y
+}
+
+// dragTo переносит список за курсором, который держит бегунок: смещение по
+// дорожке пропорционально смещению списка. grab — на сколько ниже верха
+// бегунка схвачена точка, чтобы бегунок не прыгал под курсор.
+func (v *richView) dragTo(l *richLayout, y int) {
+	th := l.thumb()
+	free := l.viewport.Dy() - th.Dy()
+	if free <= 0 || l.maxScrl <= 0 {
+		return
+	}
+	v.mu.Lock()
+	top := y - v.dragGrab - l.viewport.Min.Y
+	scroll := (top*l.maxScrl + free/2) / free
+	if top < 0 {
+		scroll = 0
+	}
+	if scroll > l.maxScrl {
+		scroll = l.maxScrl
+	}
+	moved := v.scroll != scroll
+	v.scroll = scroll
+	v.thumbUntil = time.Now().Add(ncThumbHold)
+	v.mu.Unlock()
+	if moved {
+		v.invalidate(l.viewport)
+	}
+}
+
+// dragging сообщает, тянут ли бегунок.
+func (v *richView) dragging() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.drag
+}
+
+// endDrag отпускает бегунок. Он остаётся на виду ещё на ncThumbHold и гаснет
+// обычным порядком.
+func (v *richView) endDrag(l *richLayout) bool {
+	v.mu.Lock()
+	was := v.drag
+	v.drag = false
+	v.mu.Unlock()
+	if !was {
+		return false
+	}
+	v.poke()
+	v.invalidate(l.thumbStrip())
+	return true
+}
+
 // thumbExpired перезапускает таймер на остаток времени или гасит бегунок.
-// Один таймер на вид, а не по таймеру на каждое движение мыши.
+// Один таймер на вид, а не по таймеру на каждое движение мыши. Пока бегунок
+// тянут, он не гаснет, сколько бы ни прошло.
 func (v *richView) thumbExpired() {
 	v.mu.Lock()
 	left := time.Until(v.thumbUntil)
+	if v.drag && left <= 0 {
+		v.thumbUntil = time.Now().Add(ncThumbHold)
+		left = ncThumbHold
+	}
 	if left > 0 {
 		v.thumbTimer.Reset(left)
 		v.mu.Unlock()
@@ -190,14 +294,21 @@ func (v *richView) onButton(panel image.Rectangle, e widget.MouseEvent) {
 				return
 			}
 		}
-		// Полоса прокрутки: щелчок по ней переносит список.
-		if v.mode == ncModeCenter && l.maxScrl > 0 && pt.In(l.viewport) && pt.X >= l.viewport.Max.X-l.m.sbW-8 {
-			frac := float64(pt.Y-l.viewport.Min.Y) / float64(l.viewport.Dy())
-			v.mu.Lock()
-			v.scroll = int(frac * float64(l.maxScrl))
-			v.mu.Unlock()
-			v.poke()
-			v.invalidate(l.viewport)
+		// Полоса прокрутки: бегунок хватается и тянется, щелчок по дорожке выше
+		// или ниже него сдвигает список на страницу в ту сторону.
+		if v.mode == ncModeCenter && l.onTrack(pt) {
+			if th := l.thumb(); pt.Y >= th.Min.Y && pt.Y < th.Max.Y {
+				v.mu.Lock()
+				v.drag, v.dragGrab = true, pt.Y-th.Min.Y
+				v.pressed = zoneKey{}
+				v.mu.Unlock()
+				v.poke()
+				v.invalidate(l.thumbStrip())
+			} else if pt.Y < th.Min.Y {
+				v.scrollBy(-l.viewport.Dy() * 9 / 10)
+			} else {
+				v.scrollBy(l.viewport.Dy() * 9 / 10)
+			}
 			return
 		}
 		v.mu.Lock()
@@ -218,6 +329,9 @@ func (v *richView) onButton(panel image.Rectangle, e widget.MouseEvent) {
 		return
 	}
 
+	if v.endDrag(l) {
+		return
+	}
 	v.mu.Lock()
 	was := v.pressed
 	v.pressed = zoneKey{}
@@ -326,7 +440,7 @@ func (v *richView) activate(l *richLayout, z zone) {
 		v.mu.Lock()
 		v.quickOpen = !v.quickOpen
 		v.mu.Unlock()
-		v.invalidate(l.panel)
+		v.slideTick(ncSlideKey{kind: slideQuick})
 	case zoneGroup, zoneGroupToggle:
 		v.mu.Lock()
 		if v.collapsed == nil {
@@ -334,7 +448,7 @@ func (v *richView) activate(l *richLayout, z zone) {
 		}
 		v.collapsed[k.app] = !v.collapsed[k.app]
 		v.mu.Unlock()
-		v.invalidate(l.viewport)
+		v.slideTick(ncSlideKey{kind: slideGroup, app: k.app})
 	case zoneGroupClose:
 		v.dismissWhere(func(n Notification) bool { return n.AppID == k.app })
 	case zoneCard:
@@ -356,7 +470,7 @@ func (v *richView) activate(l *richLayout, z zone) {
 		}
 		v.bodyOpen[k.note] = !v.cardOpen(n)
 		v.mu.Unlock()
-		v.invalidate(l.viewport)
+		v.slideTick(ncSlideKey{kind: slideCard, note: k.note})
 	case zoneAction:
 		n, ok := v.findNote(k.note)
 		if !ok {
@@ -496,6 +610,7 @@ func (v *richView) prune(live []Notification) {
 	if v.focus.note != 0 && !ids[v.focus.note] {
 		v.focus = zoneKey{}
 	}
+	v.forgetSlides(ids, apps)
 }
 
 // ─── Клавиатура ──────────────────────────────────────────────────────────────
@@ -732,7 +847,7 @@ func (v *richView) setCardOpen(l *richLayout, id NotificationID, open bool) {
 	}
 	v.bodyOpen[id] = open
 	v.mu.Unlock()
-	v.invalidate(l.viewport)
+	v.slideTick(ncSlideKey{kind: slideCard, note: id})
 }
 
 func (v *richView) setGroupCollapsed(l *richLayout, app AppID, c bool) {
@@ -746,7 +861,7 @@ func (v *richView) setGroupCollapsed(l *richLayout, app AppID, c bool) {
 	}
 	v.collapsed[app] = c
 	v.mu.Unlock()
-	v.invalidate(l.viewport)
+	v.slideTick(ncSlideKey{kind: slideGroup, app: app})
 }
 
 // dropKey разбирает клавиши раскрытого списка: стрелки двигают подсветку,

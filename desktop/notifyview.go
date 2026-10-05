@@ -64,6 +64,7 @@ const (
 	ncKeyQuickPad    theme.Key = "notificationcenter.quick.pad"
 	ncKeyQuickIcon   theme.Key = "notificationcenter.quick.icon"
 	ncKeyScrollbar   theme.Key = "notificationcenter.scrollbar.width"
+	ncKeySeverity    theme.Key = "notificationcenter.severity.width"
 	ncKeyToastWidth  theme.Key = "notificationcenter.toast.width"
 	ncKeyToastMargin theme.Key = "notificationcenter.toast.margin"
 )
@@ -90,6 +91,8 @@ const (
 	ncPartTile      = "quick.tile"
 	ncPartTileOn    = "quick.tile.on"
 	ncPartScrollbar = "scrollbar"
+	ncPartSevWarn   = "severity.warning"
+	ncPartSevError  = "severity.error"
 )
 
 // Доли и пределы, которые не размеры, а пропорции или защита от вырожденных
@@ -112,6 +115,9 @@ const (
 	ncWheelStep = 48
 	// ncThumbMin — наименьшая высота бегунка полосы прокрутки.
 	ncThumbMin = 24
+	// ncSevMin — наименьшая ширина полосы важности, даже если метрика задана
+	// нулём: полоса в точку шириной не видна.
+	ncSevMin = 1
 	// ncThumbHold — сколько бегунок остаётся на виду после прокрутки.
 	ncThumbHold = 1200 * time.Millisecond
 	// ncBodyMaxScan — защита от текста-простыни: дальше этого числа строк
@@ -130,7 +136,7 @@ type ncMetrics struct {
 	actH, actGap, actRow                   int
 	footerH, listMin                       int
 	qCols, qH, qGap, qPad, qIcon           int
-	sbW                                    int
+	sbW, sevW                              int
 	toastW, toastMargin                    int
 }
 
@@ -179,6 +185,7 @@ func ncReadMetrics(tm *theme.Manager) ncMetrics {
 		qPad:        get(ncKeyQuickPad, 10),
 		qIcon:       get(ncKeyQuickIcon, 16),
 		sbW:         get(ncKeyScrollbar, 4),
+		sevW:        get(ncKeySeverity, 3),
 		toastW:      get(ncKeyToastWidth, 364),
 		toastMargin: zero(ncKeyToastMargin),
 	}
@@ -393,8 +400,13 @@ type richView struct {
 	dropHot    int        // подсвеченный пункт списка
 	thumbUntil time.Time
 	thumbTimer *time.Timer
-	lastLayout richLayout    // последняя раскладка: для прокрутки колесом и подсветки
-	qsnap      []QuickAction // быстрые действия, как их видел вид в последний раз
+	drag       bool                    // бегунок тянут мышью
+	dragGrab   int                     // на сколько ниже верха бегунка схвачена точка
+	thumbHot   bool                    // курсор над бегунком
+	slides     map[ncSlideKey]*ncSlide // плавное раскрытие карточек, групп и быстрых действий
+	starts     []func()                // анимации, которые раскладка просит запустить после снятия замка
+	lastLayout richLayout              // последняя раскладка: для прокрутки колесом и подсветки
+	qsnap      []QuickAction           // быстрые действия, как их видел вид в последний раз
 }
 
 // setQuickSnapshot запоминает набор быстрых действий, с которым сравнивается
@@ -450,6 +462,8 @@ func (v *richView) reset() {
 	v.reply = nil
 	v.focus = zoneKey{}
 	v.scroll = 0
+	v.drag, v.thumbHot = false, false
+	v.forgetSlides(nil, nil)
 	if v.thumbTimer != nil {
 		v.thumbTimer.Stop()
 		v.thumbTimer = nil
@@ -534,6 +548,9 @@ type richCard struct {
 	closeRect  image.Rectangle
 	toggleRect image.Rectangle
 	acts       []richAct
+	// anim — высота карточки сейчас меняется: содержимое раскрытого вида
+	// обрезается её рамкой.
+	anim bool
 }
 
 // richAct — действие карточки в раскладке.
@@ -556,6 +573,10 @@ type richGroup struct {
 	collapsed   bool
 	count       int
 	cards       []richCard
+	// anim — группа сворачивается или раскрывается; clip — видимая часть её
+	// карточек в этот момент (может быть пуста).
+	anim bool
+	clip image.Rectangle
 }
 
 // richTile — плитка быстрого действия.
@@ -689,8 +710,31 @@ func (v *richView) replyOf(n Notification, a NotificationAction) *ncReply {
 // (x, y) и шириной w. Возвращает карточку с заполненными прямоугольниками;
 // высота — rect.Dy().
 func (v *richView) layoutCard(m ncMetrics, f ncFonts, n Notification, x, y, w int, hasIcon bool) richCard {
+	open := v.cardOpen(n)
+	k, live := v.slideStep(ncSlideKey{kind: slideCard, note: n.ID}, open)
+	if !live {
+		return v.layoutCardAs(m, f, n, x, y, w, hasIcon, open)
+	}
+	// Раскрытие идёт: высота — между свёрнутой и раскрытой, а содержимое берётся
+	// от раскрытого вида и обрезается рамкой карточки. Текст не перекладывается
+	// посреди движения, строки просто открываются снизу вверх.
+	full := v.layoutCardAs(m, f, n, x, y, w, hasIcon, true)
+	short := v.layoutCardAs(m, f, n, x, y, w, hasIcon, false)
+	hf, hs := full.rect.Dy(), short.rect.Dy()
+	if hf == hs {
+		// Раскрывать нечего (текст в две строки, действий нет): без движения.
+		v.slideSettle(ncSlideKey{kind: slideCard, note: n.ID}, open)
+		return v.layoutCardAs(m, f, n, x, y, w, hasIcon, open)
+	}
+	full.rect.Max.Y = y + hs + int(float64(hf-hs)*k+0.5)
+	full.open, full.anim = open, true
+	return full
+}
+
+// layoutCardAs раскладывает карточку, раскрытую (open) или свёрнутую.
+func (v *richView) layoutCardAs(m ncMetrics, f ncFonts, n Notification, x, y, w int, hasIcon, open bool) richCard {
 	c := richCard{n: n, hasIcon: hasIcon}
-	c.open = v.cardOpen(n)
+	c.open = open
 	p := m.cardPad
 	iconW := 0
 	if hasIcon {
@@ -831,6 +875,20 @@ func (v *richView) layoutActions(m ncMetrics, f ncFonts, n Notification, x, y, w
 	return out, y
 }
 
+// quickRows — сколько рядов плиток помещается в раскрытой сетке: все, но не
+// больше, чем оставляет списку его наименьшая высота.
+func (v *richView) quickRows(m ncMetrics, panel image.Rectangle, rows int) int {
+	avail := panel.Dy() - m.headerH - m.footerH - m.listMin - 2*m.qGap
+	maxRows := (avail + m.qGap) / (m.qH + m.qGap)
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	if rows > maxRows {
+		rows = maxRows
+	}
+	return rows
+}
+
 // hasIcon сообщает, есть ли у уведомления значок.
 func hasNoteIcon(n Notification) bool { return n.Icon != nil || n.IconAt != nil }
 
@@ -853,6 +911,9 @@ func (v *richView) layout(panel image.Rectangle) *richLayout {
 		quick = v.src.quick()
 	}
 
+	// Анимации раскрытия запускаются уже без замка (см. slideStep): defer идут
+	// в обратном порядке, и flushSlides отработает после Unlock.
+	defer v.flushSlides()
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -879,17 +940,22 @@ func (v *richView) layout(panel image.Rectangle) *richLayout {
 		l.canExp = rows > 1
 		show := 1
 		if v.quickOpen {
-			show = rows
-			avail := panel.Dy() - m.headerH - m.footerH - m.listMin - 2*m.qGap
-			maxRows := (avail + m.qGap) / (m.qH + m.qGap)
-			if maxRows < 1 {
-				maxRows = 1
-			}
-			if show > maxRows {
-				show = maxRows
-			}
+			show = v.quickRows(m, panel, rows)
 		}
 		qh := show*m.qH + (show-1)*m.qGap
+		if l.canExp {
+			// Сетка раскрывается плавно: высота едет между одним рядом и всеми,
+			// плитки лежат в раскрытой раскладке и обрезаются рамкой сетки.
+			if k, live := v.slideStep(ncSlideKey{kind: slideQuick}, v.quickOpen); live {
+				if rowsFull := v.quickRows(m, panel, rows); rowsFull > 1 {
+					fullH := rowsFull*m.qH + (rowsFull-1)*m.qGap
+					qh = m.qH + int(float64(fullH-m.qH)*k+0.5)
+					show = rowsFull
+				} else {
+					v.slideSettle(ncSlideKey{kind: slideQuick}, v.quickOpen)
+				}
+			}
+		}
 		l.quick = image.Rect(x0, bottom-qh, x0+w, bottom)
 		visible := show * m.qCols
 		if visible > n {
@@ -959,11 +1025,24 @@ func (v *richView) layout(panel image.Rectangle) *richLayout {
 		}
 		grp.rect = image.Rect(x0, y, x0+w, y+hdr)
 		y += hdr
-		if !grp.collapsed {
+		// Группа сворачивается плавно: пока идёт движение, карточки лежат как у
+		// раскрытой, а их область обрезается и укорачивается до долей высоты.
+		gk, glive := 1.0, false
+		if hdr > 0 {
+			gk, glive = v.slideStep(ncSlideKey{kind: slideGroup, app: first.AppID}, !grp.collapsed)
+		}
+		if !grp.collapsed || glive {
+			yCards := y
 			for _, n := range g {
 				c := v.layoutCard(m, f, n, x0, y, w, hasNoteIcon(n))
 				grp.cards = append(grp.cards, c)
 				y = c.rect.Max.Y + m.cardGap
+			}
+			if glive {
+				grp.anim = true
+				shown := int(float64(y-yCards)*gk + 0.5)
+				grp.clip = image.Rect(x0, yCards, x0+w, yCards+shown)
+				y = yCards + shown
 			}
 		}
 		l.groups = append(l.groups, grp)
@@ -990,6 +1069,7 @@ func (v *richView) layout(panel image.Rectangle) *richLayout {
 	for gi := range l.groups {
 		g := &l.groups[gi]
 		g.rect = shift(g.rect)
+		g.clip = shift(g.clip)
 		if !g.rect.Empty() {
 			g.closeRect = image.Rect(g.rect.Max.X-m.slot, g.rect.Min.Y+(m.groupH-m.slot)/2, g.rect.Max.X, g.rect.Min.Y+(m.groupH-m.slot)/2+m.slot)
 			g.chevronRect = g.closeRect.Sub(image.Pt(m.slot, 0))
@@ -1036,22 +1116,31 @@ func (v *richView) buildZones(l *richLayout) {
 		add(zoneKey{kind: zoneGroup, app: g.app}, g.rect, true, vp)
 		add(zoneKey{kind: zoneGroupToggle, app: g.app}, g.chevronRect, false, vp)
 		add(zoneKey{kind: zoneGroupClose, app: g.app}, g.closeRect, false, vp)
+		// Пока группа сворачивается, нажимается только то, что ещё видно.
+		gvp := vp
+		if g.anim {
+			gvp = vp.Intersect(g.clip)
+		}
 		for _, c := range g.cards {
 			id := c.n.ID
-			add(zoneKey{kind: zoneCard, note: id}, c.rect, true, vp)
-			if c.canToggle {
-				add(zoneKey{kind: zoneCardToggle, note: id}, c.toggleRect, false, vp)
+			cvp := gvp
+			if c.anim {
+				cvp = gvp.Intersect(c.rect)
 			}
-			add(zoneKey{kind: zoneCardClose, note: id}, c.closeRect, false, vp)
+			add(zoneKey{kind: zoneCard, note: id}, c.rect, true, gvp)
+			if c.canToggle {
+				add(zoneKey{kind: zoneCardToggle, note: id}, c.toggleRect, false, cvp)
+			}
+			add(zoneKey{kind: zoneCardClose, note: id}, c.closeRect, false, cvp)
 			for _, a := range c.acts {
 				switch a.a.Kind {
 				case NotificationActionSelect:
-					add(zoneKey{kind: zoneSelect, note: id, action: a.a.ID}, a.rect, true, vp)
+					add(zoneKey{kind: zoneSelect, note: id, action: a.a.ID}, a.rect, true, cvp)
 				case NotificationActionReply:
-					add(zoneKey{kind: zoneReply, note: id, action: a.a.ID}, a.rect, true, vp)
-					add(zoneKey{kind: zoneReplySend, note: id, action: a.a.ID}, a.send, true, vp)
+					add(zoneKey{kind: zoneReply, note: id, action: a.a.ID}, a.rect, true, cvp)
+					add(zoneKey{kind: zoneReplySend, note: id, action: a.a.ID}, a.send, true, cvp)
 				default:
-					add(zoneKey{kind: zoneAction, note: id, action: a.a.ID}, a.rect, true, vp)
+					add(zoneKey{kind: zoneAction, note: id, action: a.a.ID}, a.rect, true, cvp)
 				}
 			}
 		}
@@ -1059,7 +1148,9 @@ func (v *richView) buildZones(l *richLayout) {
 	add(zoneKey{kind: zoneExpand}, l.expand, true, whole)
 	add(zoneKey{kind: zoneClear}, l.clear, true, whole)
 	for _, t := range l.tiles {
-		add(zoneKey{kind: zoneTile, action: string(t.a.ID)}, t.rect, !t.a.Disabled, whole)
+		// Плитки обрезаются рамкой сетки: пока она раскрывается, нижний ряд
+		// выглядывает не весь.
+		add(zoneKey{kind: zoneTile, action: string(t.a.ID)}, t.rect, !t.a.Disabled, l.quick)
 	}
 	v.buildDropdown(l)
 }

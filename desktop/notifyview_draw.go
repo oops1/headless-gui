@@ -30,6 +30,7 @@ type ncUI struct {
 	hoverNote             NotificationID
 	hoverApp              AppID
 	thumb                 bool
+	thumbHot, drag        bool
 	dropHot               int
 	dropSel               int
 }
@@ -45,7 +46,9 @@ func (v *richView) uiSnapshot(ring bool) ncUI {
 	case zoneGroup, zoneGroupClose, zoneGroupToggle:
 		u.hoverApp = v.hover.app
 	}
-	u.thumb = time.Now().Before(v.thumbUntil)
+	u.drag, u.thumbHot = v.drag, v.thumbHot
+	// Бегунок на виду, пока его тянут, как бы давно ни была последняя прокрутка.
+	u.thumb = v.drag || time.Now().Before(v.thumbUntil)
 	return u
 }
 
@@ -91,8 +94,18 @@ func (v *richView) draw(ctx widget.DrawContext, panel image.Rectangle, ring bool
 	}
 	for _, g := range l.groups {
 		v.drawGroup(ctx, l, u, g)
+		// Сворачивающаяся группа показывает лишь ту часть карточек, что ещё не
+		// заехала под заголовок.
+		vis := l.viewport.Intersect(prev)
+		if g.anim {
+			vis = vis.Intersect(g.clip)
+			ctx.SetClip(vis)
+		}
 		for _, c := range g.cards {
-			v.drawCard(ctx, l, u, c, l.viewport.Intersect(prev))
+			v.drawCard(ctx, l, u, c, vis)
+		}
+		if g.anim {
+			ctx.SetClip(l.viewport.Intersect(prev))
 		}
 	}
 	v.drawScrollbar(ctx, l, u)
@@ -111,9 +124,13 @@ func (v *richView) draw(ctx widget.DrawContext, panel image.Rectangle, ring bool
 		v.mu.Unlock()
 		v.drawLink(ctx, l, u, zoneKey{kind: zoneExpand}, l.expand, tr(label))
 	}
+	// Плитки обрезаются рамкой сетки: пока она раскрывается, нижний ряд виден
+	// не весь.
+	ctx.SetClip(l.quick.Intersect(prev))
 	for _, t := range l.tiles {
 		v.drawTile(ctx, l, u, t)
 	}
+	ctx.SetClip(prev)
 	v.drawDropdown(ctx, l, u)
 	v.drawFocusRing(ctx, l, u, prev)
 }
@@ -205,6 +222,14 @@ func (v *richView) drawCard(ctx widget.DrawContext, l *richLayout, u ncUI, c ric
 	cardState := StateOf(u.hoverNote == id, u.pressed == k && u.hover == k, false, false, u.ring && u.focus == k)
 	cs := v.mo.Style(v.tm, k, c.rect, cardState, func(s theme.State) *theme.Style { return v.part(ncPartCard, s) })
 	PaintStyle(ctx, c.rect, cs)
+	// Пока высота карточки меняется, её содержимое (раскрытый вид) торчит ниже
+	// рамки: обрезаем по рамке.
+	if c.anim {
+		prev := ctx.Clip()
+		ctx.SetClip(c.rect.Intersect(prev))
+		defer ctx.SetClip(prev)
+	}
+	v.drawSeverity(ctx, l, c)
 
 	if c.hasIcon {
 		drawAppIcon(ctx, c.n.Icon, c.n.IconAt, c.icon)
@@ -230,6 +255,30 @@ func (v *richView) drawCard(ctx widget.DrawContext, l *richLayout, u ncUI, c ric
 	for _, a := range c.acts {
 		v.drawAction(ctx, l, u, c, a)
 	}
+}
+
+// drawSeverity метит предупреждение и ошибку полосой цвета у левого края
+// карточки. Обычное уведомление не получает ничего. Цвет — часть стиля темы
+// (severity.warning, severity.error), не литерал.
+func (v *richView) drawSeverity(ctx widget.DrawContext, l *richLayout, c richCard) {
+	part := ""
+	switch c.n.Severity {
+	case SeverityWarning:
+		part = ncPartSevWarn
+	case SeverityError:
+		part = ncPartSevError
+	default:
+		return
+	}
+	st := v.part(part, theme.StateNormal)
+	if st.Fill.A == 0 {
+		return
+	}
+	w := l.m.sevW
+	if w < ncSevMin {
+		w = ncSevMin
+	}
+	ctx.FillRectAlpha(c.rect.Min.X, c.rect.Min.Y, w, c.rect.Dy(), st.Fill)
 }
 
 // drawAction рисует одно действие карточки.
@@ -400,23 +449,24 @@ func (v *richView) drawDropdown(ctx widget.DrawContext, l *richLayout, u ncUI) {
 }
 
 // drawScrollbar рисует тонкий бегунок на правом краю списка: он виден, пока
-// мышь над списком или вскоре после прокрутки, и не занимает места.
+// мышь над списком или вскоре после прокрутки, и не занимает места. Под
+// курсором он ярче, а пока его тянут, — как нажатая кнопка и не гаснет.
 func (v *richView) drawScrollbar(ctx widget.DrawContext, l *richLayout, u ncUI) {
 	if l.maxScrl <= 0 || !u.thumb {
 		return
 	}
-	track := l.viewport
-	th := track.Dy() * track.Dy() / l.contentH
-	if th < ncThumbMin {
-		th = ncThumbMin
+	r := l.thumb()
+	if r.Empty() {
+		return
 	}
-	if th > track.Dy() {
-		th = track.Dy()
+	state := theme.StateNormal
+	switch {
+	case u.drag:
+		state = theme.StatePressed
+	case u.thumbHot:
+		state = theme.StateHover
 	}
-	ty := track.Min.Y + (track.Dy()-th)*l.scroll/l.maxScrl
-	x := track.Max.X - l.m.sbW - 2
-	r := image.Rect(x, ty, x+l.m.sbW, ty+th)
-	st := v.part(ncPartScrollbar, theme.StateNormal)
+	st := v.part(ncPartScrollbar, state)
 	if st.Fill.A > 0 {
 		ctx.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st.Fill)
 	}

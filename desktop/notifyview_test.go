@@ -393,6 +393,7 @@ func TestNotificationCenter_CollapseGroup(t *testing.T) {
 	app := nc.testLayout().groups[0].app
 	cards := len(nc.testLayout().groups[0].cards)
 	nc.clickZone(t, zoneKey{kind: zoneGroup, app: app})
+	finishAnimations() // сворачивание плавное: ждём конца движения
 	g := nc.testLayout().groups[0]
 	if !g.collapsed || len(g.cards) != 0 {
 		t.Fatalf("группа не свернулась: collapsed=%v, карточек %d", g.collapsed, len(g.cards))
@@ -491,6 +492,7 @@ func TestNotificationCenter_CardBodyExpands(t *testing.T) {
 		t.Errorf("обрезанный текст без многоточия: %q", last)
 	}
 	nc.clickZone(t, zoneKey{kind: zoneCardToggle, note: id})
+	finishAnimations()
 	c2 := nc.testLayout().groups[0].cards[0]
 	if !c2.open || len(c2.bodyLines) <= 2 {
 		t.Errorf("раскрытая карточка: open=%v, строк %d", c2.open, len(c2.bodyLines))
@@ -499,6 +501,7 @@ func TestNotificationCenter_CardBodyExpands(t *testing.T) {
 		t.Error("раскрытая карточка не стала выше")
 	}
 	nc.clickZone(t, zoneKey{kind: zoneCardToggle, note: id})
+	finishAnimations()
 	if got := len(nc.testLayout().groups[0].cards[0].bodyLines); got != 2 {
 		t.Errorf("свёрнутая заново: строк %d", got)
 	}
@@ -729,6 +732,7 @@ func TestNotificationCenter_QuickCollapsedIsOneRow(t *testing.T) {
 	}
 
 	nc.clickZone(t, zoneKey{kind: zoneExpand})
+	finishAnimations()
 	if !nc.QuickExpanded() {
 		t.Fatal("«Развернуть» не развернуло")
 	}
@@ -740,6 +744,7 @@ func TestNotificationCenter_QuickCollapsedIsOneRow(t *testing.T) {
 		t.Error("пятая плитка не во втором ряду")
 	}
 	nc.clickZone(t, zoneKey{kind: zoneExpand})
+	finishAnimations()
 	if nc.QuickExpanded() || len(nc.testLayout().tiles) != 4 {
 		t.Error("«Свернуть» не вернуло один ряд")
 	}

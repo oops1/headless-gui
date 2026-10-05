@@ -110,8 +110,9 @@ type NotificationCenter struct {
 	// рабочую область своего монитора.
 	WorkArea image.Rectangle
 
-	fs   FocusState
-	view *richView
+	fs      FocusState
+	view    *richView
+	capture widget.CaptureManager // захват мыши для перетаскивания бегунка (под mu)
 }
 
 // NewNotificationCenter создаёт центр уведомлений, оформляемый темой tm и

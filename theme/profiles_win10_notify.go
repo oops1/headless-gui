@@ -1,6 +1,9 @@
 package theme
 
-import "image/color"
+import (
+	"image/color"
+	"time"
+)
 
 // Центр уведомлений Windows 10: метрики, презентер и части стилей, которых нет
 // у плоского центра. Вынесено из profiles.go и profiles_win10_shell.go, чтобы
@@ -49,7 +52,14 @@ func declareWin10NotificationMetrics(p *Profile) {
 		SetMetric("notificationcenter.scrollbar.width", 4).
 		SetMetric("notificationcenter.toast.width", 364).
 		SetMetric("notificationcenter.toast.margin", 8).
-		SetMetric("notificationcenter.toast.timeout", 5000)
+		SetMetric("notificationcenter.toast.timeout", 5000).
+		SetMetric("notificationcenter.severity.width", 3)
+
+	// Раскрытие и сворачивание карточки, группы и сетки быстрых действий.
+	// Высота едет по кривой без отскока: out-back у отдельных профилей на
+	// высоте превращается в дрожание краёв. Профиль, не назвавший токен
+	// (Windows 2000, чужие), получает menu.open — он же даёт мгновенно при 0.
+	p.Anims["notification.expand"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}
 }
 
 // declareWin10NotificationParts объявляет части стилей центра уведомлений,
@@ -60,7 +70,9 @@ func declareWin10NotificationMetrics(p *Profile) {
 //	field      — поле ответа и выпадающий список (покой, наведение, фокус);
 //	dim        — приглушённый текст: тело уведомления, время, подсказки;
 //	glyph      — крестик и шевроны карточки: приглушённые, под курсором яркие;
-//	scrollbar  — бегунок тонкой полосы прокрутки списка.
+//	scrollbar  — бегунок тонкой полосы прокрутки списка;
+//	severity.warning, severity.error — полоса у левого края карточки с
+//	           предупреждением и ошибкой (Fill — цвет полосы).
 //
 // Режим (светлый или тёмный) определяется палитрой: тёмный текст — светлая
 // панель.
@@ -114,6 +126,17 @@ func declareWin10NotificationParts(set func(comp, part string, st State, d Style
 	set(comp, "glyph", StateFocused, flat(StyleDelta{
 		Text: C(pal.text), Border: C(pal.focus), BorderWidth: N(1),
 	}))
+
+	// Важность уведомления. Windows 10 различает её значком приложения, а не
+	// цветом, но заказчику нужна видимая метка: полоса у края карточки теми же
+	// цветами, что у системных предупреждений Windows 11 — тёмной и светлой
+	// панели нужны разные оттенки, иначе жёлтый на белом не читается.
+	warn, fail := RGB(252, 225, 0), RGB(255, 153, 164)
+	if light {
+		warn, fail = RGB(157, 93, 0), RGB(196, 43, 28)
+	}
+	set(comp, "severity.warning", StateNormal, flat(StyleDelta{Fill: C(warn)}))
+	set(comp, "severity.error", StateNormal, flat(StyleDelta{Fill: C(fail)}))
 
 	set(comp, "scrollbar", StateNormal, flat(StyleDelta{Fill: C(thumb)}))
 	set(comp, "scrollbar", StateHover, flat(StyleDelta{Fill: C(thumbHover)}))
