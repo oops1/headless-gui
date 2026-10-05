@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"sort"
 	"testing"
 	"time"
 
@@ -142,8 +143,10 @@ func TestStartMenu10_ThemeAccentLanguageOnOpenMenu(t *testing.T) {
 	_ = color.RGBA{}
 }
 
-// Кадры анимации ширины боковой панели дешёвые: перерисовывается только её
-// столбец. Измеряется среднее время кадра за анимацию.
+// Кадры анимации ширины боковой панели дешёвые. Меряется медиана кадров, а
+// не среднее: тест идёт параллельно с другими пакетами, и один кадр,
+// застрявший за чужой работой, растягивал среднее за порог (52 мс при
+// обычных 8).
 func TestStartMenu10_SidebarAnimationFramesAreCheap(t *testing.T) {
 	s := newWin10Scene(t, 1280, 720, false, 1)
 	manyApps(s, 300)
@@ -153,18 +156,19 @@ func TestStartMenu10_SidebarAnimationFramesAreCheap(t *testing.T) {
 	s.menu.SetSidebarExpanded(true)
 	t0 := time.Now()
 	widget.StepAnimations(t0)
-	var total time.Duration
 	const frames = 9
+	times := make([]time.Duration, 0, frames)
 	for i := 1; i <= frames; i++ {
 		widget.StepAnimations(t0.Add(time.Duration(i) * 16 * time.Millisecond))
 		start := time.Now()
 		s.frame()
-		total += time.Since(start)
+		times = append(times, time.Since(start))
 	}
-	avg := total / frames
-	t.Logf("средний кадр анимации панели: %v", avg)
-	if avg > 50*time.Millisecond {
-		t.Errorf("кадр анимации панели %v — дороже 50 мс", avg)
+	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
+	med := times[frames/2]
+	t.Logf("медианный кадр анимации панели: %v", med)
+	if med > 50*time.Millisecond {
+		t.Errorf("кадр анимации панели %v — дороже 50 мс", med)
 	}
 	widget.StepAnimations(t0.Add(time.Second))
 }
