@@ -31,6 +31,8 @@ type startSnap struct {
 	groups       []TileGroup
 	query        string
 	drag         tileDrag
+	bar          barDrag
+	grid         bool
 	hasBox       bool
 }
 
@@ -46,7 +48,7 @@ func (m *StartMenu) snapshot() startSnap {
 		hover: v.hover, press: v.press, sel: sel, kbd: v.kbd, area: v.area,
 		listScroll: v.listScroll, tileScroll: v.tileScroll,
 		sidebar: v.sidebar, groups: v.groups, query: v.query, drag: v.drag,
-		hasBox: v.box != nil,
+		bar: v.bar, grid: v.grid, hasBox: v.box != nil,
 	}
 }
 
@@ -87,22 +89,37 @@ func (m *StartMenu) drawTilesArea(ctx widget.DrawContext, g startGeo, sn startSn
 	}
 	groups := sn.groups
 	var l *tileLayout
+	newGroup, extra := -1, 0
 	if sn.drag.active {
-		groups = dragPreview(groups, sn.drag)
+		groups, newGroup = dragApply(groups, sn.drag, false)
 		l = computeTileLayout(groups, m.tileKeyFor(g))
+		extra = m.dragExtra()
 	} else {
 		l = m.layoutTiles(g)
 	}
-	scroll := clampScroll(sn.tileScroll, l.height, tilesViewHeight(g))
+	scroll := clampScroll(sn.tileScroll, l.height+extra, tilesViewHeight(g))
 	origin := image.Pt(g.tinner.Min.X, g.tinner.Min.Y-scroll)
 
 	hs := m.withFont(m.tpart("tile.group", theme.StateNormal), "title")
-	for _, gg := range l.groups {
+	for gi, gg := range l.groups {
 		hr := gg.header.Add(origin)
-		if !hr.Overlaps(clip) || gg.title == "" {
+		if !hr.Overlaps(clip) {
 			continue
 		}
-		drawTextAt(ctx, hr, hr.Min.X, Elide(ctx, gg.title, hs, hr.Dx()), hs)
+		title := gg.title
+		if title == "" {
+			if gi != newGroup {
+				continue
+			}
+			// Будущая группа: подсказка вместо названия, приглушённая — её ещё
+			// нет, она лишь показана в предпросмотре.
+			title = tr(StrStartNewGroup)
+			dim := *hs
+			dim.Text = withAlpha(hs.Text, 150)
+			drawTextAt(ctx, hr, hr.Min.X, Elide(ctx, title, &dim, hr.Dx()), &dim)
+			continue
+		}
+		drawTextAt(ctx, hr, hr.Min.X, Elide(ctx, title, hs, hr.Dx()), hs)
 	}
 
 	for _, tg := range l.tiles {
@@ -136,8 +153,9 @@ func (m *StartMenu) drawTilesArea(ctx widget.DrawContext, g startGeo, sn startSn
 		m.drawTile(ctx, rect, t, st, key)
 	}
 
-	if bar := m.thinBarRect(g.tiles, l.height, tilesViewHeight(g), scroll, g.tinner.Min.Y); !bar.Empty() {
-		m.drawThumb(ctx, bar, m.v.tileBar.Alpha())
+	hot := thumbHot(sn, areaTiles)
+	if bar := m.thinBarRectW(g.tiles, l.height+extra, tilesViewHeight(g), scroll, g.tinner.Min.Y, m.thumbWidth(hot)); !bar.Empty() {
+		m.drawThumb(ctx, bar, m.v.tileBar.Alpha(), hot)
 	}
 }
 
@@ -303,6 +321,13 @@ func (m *StartMenu) drawList(ctx widget.DrawContext, g startGeo, sn startSnap, p
 	rows, contentH := m.listRows()
 	scroll := clampScroll(sn.listScroll, contentH, vp.Dy())
 
+	if sn.grid {
+		// Сетка перехода по буквам занимает место списка.
+		m.drawLetterGrid(ctx, vp, sn)
+		ctx.SetClip(prev)
+		return
+	}
+
 	rowPad := m.metricInt(KeyStartRowPad)
 	gap := m.metricInt(KeyStartRowIconGap)
 	iconSide := m.metricInt(KeyStartMenuIconSize)
@@ -320,8 +345,7 @@ func (m *StartMenu) drawList(ctx widget.DrawContext, g startGeo, sn startSnap, p
 		iconX := rect.Min.X + rowPad
 		switch row.kind {
 		case rowLetter:
-			w := MeasureText(ctx, row.label, letterS)
-			drawTextAt(ctx, rect, iconX+iconSide/2-w/2, row.label, letterS)
+			m.drawLetterRow(ctx, rect, row, sn, iconX+iconSide/2)
 		case rowHeader:
 			label := row.label
 			if row.labelKey != "" {
@@ -337,8 +361,9 @@ func (m *StartMenu) drawList(ctx widget.DrawContext, g startGeo, sn startSnap, p
 		}
 	}
 
-	if bar := m.thinBarRect(vp, contentH, vp.Dy(), scroll, vp.Min.Y); !bar.Empty() {
-		m.drawThumb(ctx, bar, m.v.listBar.Alpha())
+	hot := thumbHot(sn, areaList)
+	if bar := m.thinBarRectW(vp, contentH, vp.Dy(), scroll, vp.Min.Y, m.thumbWidth(hot)); !bar.Empty() {
+		m.drawThumb(ctx, bar, m.v.listBar.Alpha(), hot)
 	}
 	ctx.SetClip(prev)
 }
@@ -416,12 +441,28 @@ func (m *StartMenu) drawRow(ctx widget.DrawContext, rect image.Rectangle, row li
 // области view: content — высота содержимого, viewH — высота окна, scroll —
 // смещение, top — верх окна. Пустой, если прокручивать нечего.
 func (m *StartMenu) thinBarRect(view image.Rectangle, content, viewH, scroll, top int) image.Rectangle {
+	return m.thinBarRectW(view, content, viewH, scroll, top, m.thumbWidth(false))
+}
+
+// thumbWidth — ширина ползунка: тонкая в покое, широкая под курсором и пока
+// бегунок тянут.
+func (m *StartMenu) thumbWidth(hot bool) int {
+	if hot {
+		if w := m.metricInt(KeyScrollThinHoverWidth); w > 0 {
+			return w
+		}
+		return 8
+	}
+	if w := m.metricInt(KeyScrollThinWidth); w > 0 {
+		return w
+	}
+	return 4
+}
+
+// thinBarRectW — thinBarRect с заданной шириной ползунка.
+func (m *StartMenu) thinBarRectW(view image.Rectangle, content, viewH, scroll, top, w int) image.Rectangle {
 	if content <= viewH || viewH <= 0 {
 		return image.Rectangle{}
-	}
-	w := m.metricInt(KeyScrollThinWidth)
-	if w <= 0 {
-		w = 4
 	}
 	thumb := viewH * viewH / content
 	if min := w * 4; thumb < min {
@@ -438,12 +479,17 @@ func (m *StartMenu) thinBarRect(view image.Rectangle, content, viewH, scroll, to
 	return image.Rect(view.Max.X-w-1, y, view.Max.X-1, y+thumb)
 }
 
-// drawThumb рисует ползунок с прозрачностью alpha (0..1).
-func (m *StartMenu) drawThumb(ctx widget.DrawContext, r image.Rectangle, alpha float64) {
+// drawThumb рисует ползунок с прозрачностью alpha (0..1); hot — цвет «под
+// курсором» (стиль scrollbar в состоянии Hover).
+func (m *StartMenu) drawThumb(ctx widget.DrawContext, r image.Rectangle, alpha float64, hot bool) {
 	if alpha <= 0.01 || r.Empty() {
 		return
 	}
-	s := m.tpart("scrollbar", theme.StateNormal)
+	st := theme.StateNormal
+	if hot {
+		st = theme.StateHover
+	}
+	s := m.tpart("scrollbar", st)
 	a := uint8(alpha * 255)
 	ctx.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), withAlpha(s.Fill, a))
 }

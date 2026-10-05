@@ -45,6 +45,8 @@ func (m *StartMenu) resetForOpen() {
 	v.kbd = false
 	v.area = areaList
 	v.drag = tileDrag{}
+	v.bar = barDrag{}
+	v.grid, v.gridFrom = false, ""
 	if !v.keepFocus {
 		// Меню открывает не строка поиска: запрос прошлого раза не нужен.
 		v.query, v.results = "", nil
@@ -52,6 +54,7 @@ func (m *StartMenu) resetForOpen() {
 	v.rev++
 	v.mu.Unlock()
 	v.sideW.Set(m.sidebarTarget(false))
+	v.gridFade.Set(0)
 }
 
 // attachOnOpen подписывается на всё, что способно изменить открытое меню
@@ -125,6 +128,8 @@ func (m *StartMenu) detachOnClose() {
 	hadQuery := v.query != ""
 	v.query, v.results = "", nil
 	v.drag = tileDrag{}
+	v.bar = barDrag{}
+	v.grid, v.gridFrom = false, ""
 	v.hover, v.press = "", ""
 	popup := v.popup
 	cm := v.capture
@@ -135,6 +140,7 @@ func (m *StartMenu) detachOnClose() {
 	}
 	v.listBar.hide()
 	v.tileBar.hide()
+	v.gridFade.Set(0)
 	if popup != nil {
 		popup.Close()
 	}
@@ -214,7 +220,9 @@ func (m *StartMenu) WantsCapture(e widget.MouseEvent) bool {
 		return false
 	}
 	h := m.hitTest(image.Pt(e.X, e.Y))
-	return h.area == areaTiles && h.key != ""
+	// Плитка — для перетаскивания, дорожка полосы — чтобы бегунок можно было
+	// вести и за пределами меню.
+	return (h.area == areaTiles && h.key != "") || isBarKey(h.key)
 }
 
 // ─── Попадание ───────────────────────────────────────────────────────────────
@@ -256,9 +264,18 @@ func (m *StartMenu) hitTest(pt image.Point) startHit {
 		if !pt.In(vp) {
 			return startHit{area: areaList}
 		}
+		if grid := m.gridOpen(); grid {
+			if c, ok := m.gridCellAt(vp, pt); ok && c.active {
+				return startHit{areaList, prefGrid + c.letter}
+			}
+			return startHit{area: areaList}
+		}
+		if k := m.barHit(g, areaList, pt); k != "" {
+			return startHit{areaList, k}
+		}
 		rows, contentH := m.listRows()
 		scroll := clampScroll(listScroll, contentH, vp.Dy())
-		if i := firstRowAt(rows, scroll+pt.Y-vp.Min.Y); i < len(rows) && rows[i].kind.interactive() {
+		if i := firstRowAt(rows, scroll+pt.Y-vp.Min.Y); i < len(rows) && rows[i].kind.focusable() {
 			return startHit{areaList, prefRow + rows[i].key}
 		}
 		return startHit{area: areaList}
@@ -266,6 +283,9 @@ func (m *StartMenu) hitTest(pt image.Point) startHit {
 	if pt.In(g.tiles) {
 		if g.cols == 0 {
 			return startHit{area: areaTiles}
+		}
+		if k := m.barHit(g, areaTiles, pt); k != "" {
+			return startHit{areaTiles, k}
 		}
 		l := m.layoutTiles(g)
 		scroll := clampScroll(tileScroll, l.height, tilesViewHeight(g))
@@ -304,6 +324,12 @@ func (m *StartMenu) keyRect(key string) image.Rectangle {
 		m.v.mu.Unlock()
 		if i := rowIndex(rows, strings.TrimPrefix(key, prefRow)); i >= 0 {
 			return m.rowRectAbs(g, rows, i, scroll).Intersect(vp)
+		}
+	case isBarKey(key):
+		return m.barRectAbs(key)
+	case strings.HasPrefix(key, prefGrid):
+		if c, ok := m.gridCellByLetter(m.listViewport(g), strings.TrimPrefix(key, prefGrid)); ok {
+			return c.rect
 		}
 	case strings.HasPrefix(key, prefSide):
 		items := m.SidebarItems()
@@ -362,6 +388,9 @@ func (m *StartMenu) setHover(key string) {
 	v.mu.Unlock()
 	if changed {
 		m.invalidateKeys(old, key)
+		if isBarKey(old) || isBarKey(key) {
+			m.syncBarPins()
+		}
 	}
 }
 
@@ -372,7 +401,13 @@ func (m *StartMenu) mouseMoveTiled(x, y int) {
 	v.mu.Lock()
 	v.mouse, v.mouseOK = pt, pt.In(m.rect())
 	dragging := v.drag.pending || v.drag.active
+	barDragging := v.bar.active
 	v.mu.Unlock()
+	if barDragging {
+		// Бегунок ведут за мышью, наведение на остальное не обновляется.
+		m.barMove(pt)
+		return
+	}
 	if dragging {
 		m.dragMove(pt)
 	}
@@ -437,6 +472,12 @@ func (m *StartMenu) mouseButtonTiled(e widget.MouseEvent) (handled, ok bool) {
 	pt := image.Pt(e.X, e.Y)
 	inside := pt.In(m.rect())
 	if !inside {
+		// Отпускание кнопки за пределами меню всё равно заканчивает перенос
+		// плитки или перетаскивание бегунка: мышь захвачена, и без этого
+		// состояние осталось бы «зажатым».
+		if e.Button == widget.MouseLeft && !e.Pressed && m.holding() {
+			return m.leftButton(e, pt), true
+		}
 		return false, false
 	}
 
@@ -464,13 +505,15 @@ func (m *StartMenu) leftButton(e widget.MouseEvent, pt image.Point) bool {
 	v := m.v
 	h := m.hitTest(pt)
 	if e.Pressed {
+		m.closeGridOnPress(h, pt)
 		v.mu.Lock()
 		v.press = h.key
 		v.kbd = false
 		if h.area != areaNone {
 			v.area = h.area
 		}
-		if h.area == areaTiles && h.key != "" {
+		isBar := isBarKey(h.key)
+		if h.area == areaTiles && h.key != "" && !isBar {
 			v.drag = tileDrag{pending: true, id: TileID(strings.TrimPrefix(h.key, prefTile)), start: pt, pos: pt}
 		}
 		v.mu.Unlock()
@@ -478,10 +521,20 @@ func (m *StartMenu) leftButton(e widget.MouseEvent, pt image.Point) bool {
 		if h.area != areaSidebar && m.SidebarExpanded() {
 			m.SetSidebarExpanded(false)
 		}
+		if isBar {
+			m.barPress(h.area, pt)
+			return true
+		}
 		m.invalidateKeys(h.key)
 		return true
 	}
 
+	if m.barRelease() {
+		v.mu.Lock()
+		v.press = ""
+		v.mu.Unlock()
+		return true
+	}
 	v.mu.Lock()
 	press := v.press
 	v.press = ""
@@ -542,6 +595,9 @@ func (m *StartMenu) scrollAt(pt image.Point, dy float64) {
 	h := m.hitTest(pt)
 	switch h.area {
 	case areaSidebar, areaList:
+		if m.gridOpen() {
+			return // сетка букв не прокручивается: колесо ничего не делает
+		}
 		m.scrollList(int(dy))
 	case areaTiles:
 		m.scrollTiles(int(dy))
@@ -581,7 +637,9 @@ func (m *StartMenu) scrollTiles(d int) {
 	l := m.layoutTiles(g)
 	v := m.v
 	v.mu.Lock()
-	next := clampScroll(v.tileScroll+d, l.height, tilesViewHeight(g))
+	// Пока плитку несут, снизу есть запас: на нём отпускают плитку в новую
+	// группу под последней.
+	next := clampScroll(v.tileScroll+d, l.height+m.dragExtraLocked(), tilesViewHeight(g))
 	changed := next != v.tileScroll
 	v.tileScroll = next
 	v.mu.Unlock()
@@ -640,7 +698,11 @@ func (m *StartMenu) activate(key string) {
 			m.toggleFolder(r.folder)
 		case rowResult:
 			m.activateResult(r.result)
+		case rowLetter:
+			m.openLetterGridFrom(r.key, r.label)
 		}
+	case strings.HasPrefix(key, prefGrid):
+		m.JumpToLetter(strings.TrimPrefix(key, prefGrid))
 	case strings.HasPrefix(key, prefTile):
 		id := TileID(strings.TrimPrefix(key, prefTile))
 		for _, g := range m.TileGroups() {
@@ -818,9 +880,16 @@ func (m *StartMenu) applyQuery(q string) {
 	v.query = q
 	v.listScroll = 0
 	v.sel[areaList] = ""
+	if q != "" {
+		// У результатов поиска букв нет: сетка перехода закрывается.
+		v.grid, v.gridFrom = false, ""
+	}
 	v.rev++
 	provider := v.provider
 	v.mu.Unlock()
+	if q != "" {
+		v.gridFade.Set(0)
+	}
 	if !changed {
 		return
 	}
@@ -930,11 +999,16 @@ func (m *StartMenu) keyTiled(e widget.KeyEvent) bool {
 		}
 		return true
 	}
+	if e.Code == widget.KeyEscape && m.gridOpen() {
+		m.CloseLetterGrid() // первый Esc закрывает сетку букв, второй — меню
+		return true
+	}
 	if e.Mod&(widget.ModCtrl|widget.ModAlt|widget.ModMeta) != 0 || e.Code == widget.KeyEscape {
 		return false // Esc закрывает меню: его разбирает встроенная панель
 	}
 
 	if e.Code == widget.KeyTab {
+		m.CloseLetterGrid() // уходя из списка, сетка закрывается
 		m.cycleArea(e.Mod&widget.ModShift != 0)
 		return true
 	}
@@ -964,7 +1038,11 @@ func (m *StartMenu) keyTiled(e widget.KeyEvent) bool {
 	case areaTiles:
 		m.keyTiles(e)
 	default:
-		m.keyList(e)
+		if m.gridOpen() {
+			m.keyGrid(e)
+		} else {
+			m.keyList(e)
+		}
 	}
 	return true
 }
@@ -1121,6 +1199,38 @@ func (m *StartMenu) ensureVisible(a startArea, key string) {
 	}
 }
 
+// focusRows возвращает строки списка, по которым ходят стрелки: приложения,
+// папки и заголовки букв (Enter и Пробел на букве открывают сетку перехода).
+func (m *StartMenu) focusRows() []listRow {
+	rows, _ := m.listRows()
+	out := make([]listRow, 0, len(rows))
+	for _, r := range rows {
+		if r.kind.focusable() {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// firstLastApp возвращает индексы первой и последней строки, которая не буква:
+// Home и End, как и первый выбор, встают на приложения, а не на заголовки.
+func firstLastApp(rows []listRow) (first, last int) {
+	first, last = -1, -1
+	for i, r := range rows {
+		if r.kind == rowLetter {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		last = i
+	}
+	if first < 0 { // одни заголовки
+		first, last = 0, len(rows)-1
+	}
+	return first, last
+}
+
 // interactiveRows возвращает строки списка, на которые можно встать.
 func (m *StartMenu) interactiveRows() []listRow {
 	rows, _ := m.listRows()
@@ -1202,7 +1312,7 @@ func indexOfKey(keys []string, key string) int {
 // End — к краям, Вправо раскрывает папку, Влево сворачивает папку (или
 // переходит из её содержимого на саму папку), Enter и Space запускают.
 func (m *StartMenu) keyList(e widget.KeyEvent) {
-	rows := m.interactiveRows()
+	rows := m.focusRows()
 	if len(rows) == 0 {
 		return
 	}
@@ -1215,6 +1325,12 @@ func (m *StartMenu) keyList(e widget.KeyEvent) {
 		if prefRow+r.key == cur {
 			idx = i
 		}
+	}
+	first, last := firstLastApp(rows)
+	if idx < 0 && e.Code == widget.KeyDown {
+		// Первое нажатие вниз встаёт на первое приложение, а не на заголовок
+		// буквы над ним.
+		idx = first - 1
 	}
 	page := 1
 	if inner := m.contentRect(); !inner.Empty() {
@@ -1235,9 +1351,9 @@ func (m *StartMenu) keyList(e widget.KeyEvent) {
 	case widget.KeyPageUp:
 		idx -= page
 	case widget.KeyHome:
-		idx = 0
+		idx = first
 	case widget.KeyEnd:
-		idx = len(rows) - 1
+		idx = last
 	case widget.KeyRight:
 		if idx >= 0 && rows[idx].kind == rowFolder && !rows[idx].expanded {
 			m.toggleFolder(rows[idx].folder)
@@ -1269,9 +1385,9 @@ func (m *StartMenu) keyList(e widget.KeyEvent) {
 	if idx < 0 {
 		// Первое нажатие уже что-то выбирает, а не требует лишнего повтора.
 		if e.Code == widget.KeyUp || e.Code == widget.KeyPageUp || e.Code == widget.KeyEnd {
-			idx = len(rows) - 1
+			idx = last
 		} else {
-			idx = 0
+			idx = first
 		}
 	}
 	if idx >= len(rows) {
@@ -1410,7 +1526,7 @@ func (m *StartMenu) dragMove(pt image.Point) {
 		return
 	}
 	g := m.startGeometry(inner)
-	d.toGroup, d.toIndex = m.dropTarget(g, d.id, pt)
+	d.toGroup, d.toIndex, d.toNew = m.dropTarget(g, d.id, pt)
 	v.mu.Lock()
 	v.drag = d
 	v.hover = ""
@@ -1433,128 +1549,6 @@ func absInt(a int) int {
 		return -a
 	}
 	return a
-}
-
-// withoutTile возвращает группы без плитки id и сами её данные.
-func withoutTile(groups []TileGroup, id TileID) ([]TileGroup, Tile, bool) {
-	out := make([]TileGroup, len(groups))
-	var found Tile
-	ok := false
-	for i, g := range groups {
-		out[i] = g
-		out[i].Tiles = nil
-		for _, t := range g.Tiles {
-			if t.ID == id {
-				found, ok = t, true
-				continue
-			}
-			out[i].Tiles = append(out[i].Tiles, t)
-		}
-	}
-	return out, found, ok
-}
-
-// dragPreview возвращает группы с плиткой перетаскивания, вставленной на
-// целевое место: по ним рисуется раскладка во время переноса.
-func dragPreview(groups []TileGroup, d tileDrag) []TileGroup {
-	rest, tile, ok := withoutTile(groups, d.id)
-	if !ok || len(rest) == 0 {
-		return groups
-	}
-	gi := d.toGroup
-	if gi < 0 {
-		gi = 0
-	}
-	if gi >= len(rest) {
-		gi = len(rest) - 1
-	}
-	tiles := rest[gi].Tiles
-	idx := d.toIndex
-	if idx < 0 {
-		idx = 0
-	}
-	if idx > len(tiles) {
-		idx = len(tiles)
-	}
-	next := make([]Tile, 0, len(tiles)+1)
-	next = append(next, tiles[:idx]...)
-	next = append(next, tile)
-	next = append(next, tiles[idx:]...)
-	rest[gi].Tiles = next
-	return rest
-}
-
-// dropTarget определяет, куда ляжет перетаскиваемая плитка при отпускании в
-// точке pt: группа по вертикали и место в ней по ближайшей плитке.
-func (m *StartMenu) dropTarget(g startGeo, id TileID, pt image.Point) (group, index int) {
-	if g.cols == 0 {
-		return 0, 0
-	}
-	v := m.v
-	v.mu.Lock()
-	groups := v.groups
-	scroll := v.tileScroll
-	v.mu.Unlock()
-	rest, _, ok := withoutTile(groups, id)
-	if !ok || len(rest) == 0 {
-		return 0, 0
-	}
-	l := computeTileLayout(rest, m.tileKeyFor(g))
-	scroll = clampScroll(scroll, l.height, tilesViewHeight(g))
-	origin := image.Pt(g.tinner.Min.X, g.tinner.Min.Y-scroll)
-
-	group = 0
-	for i, gg := range l.groups {
-		if pt.Y >= gg.header.Min.Y+origin.Y {
-			group = i
-		}
-	}
-	gg := l.groups[group]
-	if gg.count == 0 {
-		return group, 0
-	}
-	tiles := l.tiles[gg.first : gg.first+gg.count]
-	best, bestD := 0, -1
-	for i, t := range tiles {
-		r := t.rect.Add(origin)
-		c := centerOf(r)
-		d := absInt(pt.X-c.X) + absInt(pt.Y-c.Y)
-		if pt.In(r) {
-			d = -1
-		}
-		if bestD < 0 || d < bestD || d == -1 {
-			best, bestD = i, d
-		}
-		if d == -1 {
-			break
-		}
-	}
-	index = best
-	if c := centerOf(tiles[best].rect.Add(origin)); pt.X > c.X || pt.Y > tiles[best].rect.Add(origin).Max.Y {
-		index = best + 1
-	}
-	return group, index
-}
-
-// dropDrag завершает перетаскивание: плитка встаёт на целевое место, потребитель
-// получает новый порядок.
-func (m *StartMenu) dropDrag(d tileDrag) {
-	v := m.v
-	v.mu.Lock()
-	next := dragPreview(v.groups, d)
-	changed := !sameOrder(v.groups, next)
-	if changed {
-		v.groups = cloneGroups(next)
-		v.tilesRev++
-	}
-	cb := m.OnTilesChanged
-	out := cloneGroups(v.groups)
-	v.mu.Unlock()
-	widget.InvalidateRect(m.areaRect(areaTiles))
-	widget.InvalidateRect(m.contentRect())
-	if changed && cb != nil {
-		cb(out)
-	}
 }
 
 // sameOrder — порядок плиток и групп не изменился.

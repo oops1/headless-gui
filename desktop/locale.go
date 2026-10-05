@@ -44,6 +44,10 @@ const (
 	StrStartResults      = "desktop.start.results"      // заголовок списка результатов поиска
 	StrSearchPlaceholder = "desktop.search.placeholder" // подсказка в пустой строке поиска
 	StrSearchLabel       = "desktop.search.label"       // подпись и подсказка значка поиска
+	// StrStartNewGroup — подсказка в заголовке группы плиток без названия: её
+	// видно, пока плитку несут в пустое место и будущая группа показана в
+	// предпросмотре.
+	StrStartNewGroup = "desktop.start.newGroup"
 
 	// StrNotifEmpty и StrNotifClearAll — центр уведомлений.
 	StrNotifEmpty    = "desktop.notif.empty"
@@ -122,6 +126,7 @@ func init() {
 		StrStartResults:      "Результаты поиска",
 		StrSearchPlaceholder: "Чтобы начать поиск, введите здесь запрос",
 		StrSearchLabel:       "Поиск",
+		StrStartNewGroup:     "Назовите группу",
 
 		StrNetNone:      "Сеть: нет подключения",
 		StrNetConnected: "Сеть: подключено",
@@ -156,6 +161,7 @@ func init() {
 		StrStartResults:      "Search results",
 		StrSearchPlaceholder: "Type here to search",
 		StrSearchLabel:       "Search",
+		StrStartNewGroup:     "Name group",
 
 		StrNetNone:      "Network: not connected",
 		StrNetConnected: "Network: connected",

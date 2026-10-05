@@ -101,6 +101,11 @@ func (k rowKind) interactive() bool {
 	return k == rowApp || k == rowFolder || k == rowChild || k == rowResult
 }
 
+// focusable — на строку можно встать: приложения, папки и заголовки букв, по
+// которым открывается сетка перехода (rowLetter). Результаты поиска букв не
+// имеют, так что для них focusable совпадает с interactive.
+func (k rowKind) focusable() bool { return k.interactive() || k == rowLetter }
+
 // listRow — строка списка вместе с её местом в координатах содержимого.
 type listRow struct {
 	kind     rowKind
@@ -141,6 +146,7 @@ type groupGeom struct {
 	title  string
 	first  int // индекс первой плитки в tileLayout.tiles
 	count  int
+	bottom int // низ сетки плиток группы (у пустой группы — её верх под заголовком)
 }
 
 // tileLayout — раскладка плиток; строится целиком и не меняется после
@@ -180,6 +186,7 @@ type startView struct {
 	contentH   int
 	rowsK      rowsKey
 	tilesRev   int
+	tilesCRev  int // ревизия, по которой построен tilesC
 	tilesC     *tileLayout
 	tilesK     tileKey
 	tilesBuilt bool
@@ -207,6 +214,16 @@ type startView struct {
 	// Перетаскивание плитки.
 	drag tileDrag
 
+	// Перетаскивание бегунка полосы прокрутки мышью.
+	bar barDrag
+
+	// Сетка перехода по буквам (startmenu_tiles_letters.go): открыта ли она,
+	// строка списка, с которой её открыли (туда возвращается выбор при Esc), и
+	// появление по теме.
+	grid     bool
+	gridFrom string
+	gridFade *Tween
+
 	// Подписки на время открытости.
 	unsubs []func()
 
@@ -231,6 +248,9 @@ type tileDrag struct {
 	pos     image.Point
 	// Целевое место: группа и индекс вставки (после удаления перетаскиваемой).
 	toGroup, toIndex int
+	// toNew — плитку отпустят в пустое место между группами или под последней:
+	// на месте toGroup появится новая группа из одной этой плитки.
+	toNew bool
 }
 
 func newStartView(m *StartMenu) *startView {
@@ -240,6 +260,7 @@ func newStartView(m *StartMenu) *startView {
 		area:    areaList,
 	}
 	v.sideW = NewTween(m.tm, AnimMenuOpen, 0, m.sidebarChanged)
+	v.gridFade = NewTween(m.tm, AnimMenuOpen, 0, m.gridChanged)
 	return v
 }
 
@@ -783,7 +804,9 @@ func (m *StartMenu) layoutTiles(g startGeo) *tileLayout {
 	k := m.tileKeyFor(g)
 	v := m.v
 	v.mu.Lock()
-	if v.tilesBuilt && v.tilesC != nil && v.tilesK == k {
+	// Кэш годен, пока не сменились ни метрики, ни модель: ревизия растёт при
+	// SetTileGroups, переносе плитки и смене темы.
+	if v.tilesBuilt && v.tilesC != nil && v.tilesK == k && v.tilesCRev == v.tilesRev {
 		l := v.tilesC
 		v.mu.Unlock()
 		return l
@@ -796,7 +819,7 @@ func (m *StartMenu) layoutTiles(g startGeo) *tileLayout {
 
 	v.mu.Lock()
 	if v.tilesRev == rev {
-		v.tilesC, v.tilesK, v.tilesBuilt = l, k, true
+		v.tilesC, v.tilesK, v.tilesBuilt, v.tilesCRev = l, k, true, rev
 	}
 	v.mu.Unlock()
 	return l
@@ -835,6 +858,7 @@ func computeTileLayout(groups []TileGroup, k tileKey) *tileLayout {
 		if rows > 0 {
 			bottom = top + rows*step - k.gap
 		}
+		gg.bottom = bottom
 		l.groups = append(l.groups, gg)
 		y = bottom + k.groupGap
 	}
@@ -888,6 +912,9 @@ type fadeBar struct {
 	timer *time.Timer
 	live  bool
 	anim  *widget.Animation
+	// pinned — полоса удерживается на виду (бегунок тянут или над дорожкой
+	// курсор): затухание не стартует, пока флаг не снят.
+	pinned bool
 }
 
 // Alpha — прозрачность для кадра.
@@ -902,6 +929,11 @@ func (f *fadeBar) Alpha() float64 {
 func (f *fadeBar) poke(inval func()) {
 	f.mu.Lock()
 	f.last = time.Now()
+	if f.pinned {
+		// Удерживается: таймер затухания не нужен, а на виду полоса уже.
+		f.mu.Unlock()
+		return
+	}
 	shown := f.alpha == 1 && !f.live
 	f.alpha = 1
 	f.live = false
@@ -925,6 +957,11 @@ func (f *fadeBar) poke(inval func()) {
 // таймер на остаток, иначе запускает затухание.
 func (f *fadeBar) expire(inval func()) {
 	f.mu.Lock()
+	if f.pinned {
+		f.timer = nil
+		f.mu.Unlock()
+		return
+	}
 	if rem := thinBarHold - time.Since(f.last); rem > 0 {
 		f.timer.Reset(rem)
 		f.mu.Unlock()
@@ -951,9 +988,42 @@ func (f *fadeBar) expire(inval func()) {
 	f.mu.Unlock()
 }
 
+// pin удерживает полосу на виду, пока бегунок тянут или над дорожкой курсор;
+// снятие удержания отсчитывает паузу затухания заново. inval перерисовывает
+// только саму полосу и зовётся лишь тогда, когда она действительно появилась.
+func (f *fadeBar) pin(on bool, inval func()) {
+	f.mu.Lock()
+	if f.pinned == on {
+		f.mu.Unlock()
+		return
+	}
+	f.pinned = on
+	if !on {
+		f.mu.Unlock()
+		f.poke(inval)
+		return
+	}
+	shown := f.alpha == 1 && !f.live
+	f.alpha, f.live = 1, false
+	if f.timer != nil {
+		f.timer.Stop()
+		f.timer = nil
+	}
+	prev := f.anim
+	f.anim = nil
+	f.mu.Unlock()
+	if prev != nil {
+		prev.Stop()
+	}
+	if !shown {
+		inval()
+	}
+}
+
 // hide мгновенно убирает полосу (меню закрыто).
 func (f *fadeBar) hide() {
 	f.mu.Lock()
+	f.pinned = false
 	f.alpha, f.live = 0, false
 	if f.timer != nil {
 		f.timer.Stop()

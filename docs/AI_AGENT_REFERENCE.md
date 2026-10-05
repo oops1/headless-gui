@@ -4639,7 +4639,41 @@ bar.AddItem(desktop.SlotStart, box)
   invalidates the one tile rectangle. Drag: press on a tile captures the mouse
   (`WantsCapture`), a threshold of `tile.gap` starts the drag, the layout previews
   the drop (`dragPreview`), release calls `OnTilesChanged` with the whole new
-  order (between groups too). The consumer persists it.
+  order (between groups too). The consumer persists it. A tile released into
+  EMPTY space makes a new group (`startmenu_tiles_groups.go`): below the last group,
+  in the gap between two groups together with the upper half of the lower header,
+  or above the first group; the lower half of a header and the tile rows still mean
+  "into this group". The new group has an empty `Title` and a unique `ID`
+  (`group-N`) and is reported by `OnTilesChanged` like any other; while it is
+  carried the preview shows it with the muted hint `desktop.start.newGroup` over the
+  header. A group emptied by the drag is removed on release (kept as a bare header
+  while dragging so the layout does not jump); dropping the lone tile of a group
+  into a "new group" right next to it changes nothing and fires no event. While a
+  tile is carried the scrollable height gets extra room under the last group
+  (`dragExtra`) so a full area can still be dropped below. A left release outside
+  the menu now ends a drag (the mouse is captured). Tile layout cache is keyed by
+  `tilesRev` too — before, `SetTileGroups` and a drop did not refresh it.
+- **Letter jump.** A click (or Enter/Space) on a letter header opens, in place of the
+  list, a grid of all letters (`startmenu_tiles_letters.go`): `#`, A-Z, the
+  Cyrillic block when the list has Cyrillic groups (Ё after Е), then any other
+  letters of the source. 4 columns, up to 8 on a low menu so the alphabet fits
+  without scrolling. Letters without a group are muted (`letter` part, Disabled)
+  and inert; active ones sit on a faint tint and use `letter` hover/pressed/active.
+  Picking a letter scrolls the list so the group header is on top (clamped at the
+  end) and closes the grid; Esc closes only the grid (selection goes back to the
+  header), Tab, a press on tiles/sidebar, typing (search) and reopening the menu
+  close it too; the wheel is ignored over it. The grid fades in by the `menu.open`
+  token (`gridFade`). Letter headers became focusable rows: arrows walk through
+  them, Home/End and the first Down still land on applications. API:
+  `LetterGridOpen`, `OpenLetterGrid`, `CloseLetterGrid`, `JumpToLetter(letter)`.
+- **Scrollbar mouse control** (`startmenu_tiles_scrollbar.go`). The track is a column
+  at the right edge of the list and of the tile area, `scrollbar.thin.hover.width`+2
+  wide (narrower than `startmenu.row.pad`/2, so a folder chevron stays clickable).
+  Press on the thumb captures the mouse; the thumb follows it proportionally (scroll
+  is computed from the pointer, not accumulated; the grab offset is kept), it is
+  drawn wide and in the `scrollbar` Hover colour and is pinned (`fadeBar.pin`) while
+  dragged or hovered; release anywhere ends it. A press on the empty track pages by
+  the view height minus one row (list) / one tile step (tiles). Same for the tile area.
 - **Keyboard.** The open menu requests focus (`focusreq`), is `Focusable` and a
   `TabAcceptor`: Tab/Shift+Tab cycle sidebar → list → tiles (empty areas are
   skipped); arrows inside; in tiles the arrows follow the grid geometry
@@ -4657,14 +4691,14 @@ bar.AddItem(desktop.SlotStart, box)
   the box does not dismiss the open menu (`StartMenu.DismissAt`). `SetMode`
   relayouts the taskbar (the item implements `SetRelayout`, `Taskbar.AddItem`
   hands it the callback).
-- **Strings.** `desktop.start.recent|expand|collapse|noResults|results`,
+- **Strings.** `desktop.start.recent|expand|collapse|noResults|results|newGroup`,
   `desktop.search.placeholder|label`, RU and EN. To read them from your own table:
   `widget.AliasStrings(desktop.StartMenuAliases("Start", "RecentlyAdded",
   "SearchPlaceholder", "Expand", "Collapse"))`.
 - **Lifetime.** Subscriptions (theme, language, source, provider) live while the
   menu is open (`resubscribe` / `detachOnClose`); closing clears the query and
-  the box. Not done: the letter-jump grid on a letter header, dragging the
-  scrollbar thumb, new tile groups by dropping into empty space.
+  the box. Not done: naming a new tile group in place (the consumer sets `Title`
+  after `OnTilesChanged`), scrolling the new group into view after a drop.
 
 Cost (1280×720, 300 apps, Windows 10, `TestStartMenu10_FirstFrameUnder100ms`):
 first frame after `Open` ≈ 9 ms cold, ≈ 8 ms warm; opening invalidates only the
