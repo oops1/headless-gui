@@ -741,6 +741,9 @@ func Windows11Profile() *Profile {
 	declareWin11Materials(p, RGB(224, 224, 224), RGBA(0, 0, 0, 77))
 
 	inheritTrayStyles(p)
+	// Панель по замерам: кнопки 40, пилюли, Task View, виджеты, поиск, трей
+	// (profiles_win11_taskbar.go). После унаследования стилей трея.
+	declareWin11Taskbar(p)
 	addDialogStyles(p)
 	return p
 }
@@ -766,9 +769,10 @@ func Windows11DarkProfile() *Profile {
 			Highlight: RGBA(255, 255, 255, 40)},
 	})
 	// Текст кнопок, часов и окна приходит из токена "text", поверхность окна —
-	// из "surface" (стили родителя ссылаются на них).
-	p.SetStyle("startbutton", "", StateHover, StyleDelta{Fill: C(RGBA(255, 255, 255, 24))})
-	p.SetStyle("taskbutton", "", StateHover, StyleDelta{Fill: C(RGBA(255, 255, 255, 24))})
+	// из "surface", плёнки подсветки кнопок и заливка поиска — из film.hover,
+	// film.pressed и field.fill (стили родителя ссылаются на них).
+	hover, pressed, field := win11DarkFilms()
+	p.SetColor(KeyFilmHover, hover).SetColor(KeyFilmPressed, pressed).SetColor(KeyFieldFill, field)
 	p.SetStyle("menu", "", StateNormal, StyleDelta{
 		Backdrop: &BackdropSpec{
 			Mode: BackdropBlur, Radius: 22, Tint: RGBA(44, 44, 44, 150),

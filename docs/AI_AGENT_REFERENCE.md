@@ -4509,6 +4509,136 @@ Tests: `theme/materials_test.go`, `engine/mica_test.go`,
 `desktop/reducemotion_test.go`, `desktop/materials_visual_test.go`
 (`MAT_OUT=dir` writes Solid/Mica/MicaAlt/soft-shadow PNGs).
 
+### Windows 11 taskbar — `desktop/taskpill.go`, `taskbar_align.go`, `iconbutton.go`, `taskview.go`, `widgetsbutton.go`, `traygroup.go`, `theme/profiles_win11_taskbar.go` (next minor)
+
+Public API is additive; Windows 10, Windows 2000 and macOS render byte-identical
+frames (`TestTaskbar_OtherProfilesFrozen`: sha256 of the frames of 7 profile variants
+× 100 %/200 %, taken BEFORE the work; `TestOverlay_OtherProfilesIgnoreModelFields`).
+Everything below is switched on by Windows 11 TOKENS — a component never asks for a
+theme name; a theme without the tokens gets the old drawing.
+
+**Geometry (100 %, plan §2).** Bar 48; Start, search, Task View and window buttons
+40×40 (metric `taskbar.item.height` 40 for items that ask for no height,
+`taskbutton.height` 40 for the app area, centred in the bar), gap 4, icon 24,
+highlight corner 4. Metrics: `taskbutton.icon.size`, `taskbutton.width`.
+
+**Alignment on the fly.** The centred group is `SlotStart` + `SlotApps` (put Start,
+search and Task View in `SlotStart`, the window buttons in `SlotApps`). Two live
+ways: `Manager.SetFlag("taskbar.centered", v)` (the bar is a theme observer) or
+`Taskbar.SetAlignment(desktop.BarAlignLeft|BarAlignCenter)` / `ResetAlignment()` /
+`Alignment()` (an explicit choice beats the flag, survives theme switches). Items are
+re-laid out, not recreated, and only the bar strip is invalidated
+(`TestWin11Bar_AlignmentDamagesOnlyBar`). New slot `desktop.SlotWidgets` (value after
+`SlotTray`, so old values are unchanged) — the far left edge (top of a side bar)
+whatever the alignment; the centred group never goes under it. Tab order is
+`slotOrder` = widgets, start, apps, tray.
+
+**Widgets button** — `desktop.NewWidgetsButton(tm)`, put in `SlotWidgets`. Data from
+the consumer: `SetContent(WidgetsContent{Icon|IconAt, Temperature, Caption, ToolTip})`
+(an empty content is the plain widgets glyph); the width follows the text
+(`widgets.width.max` caps it, text is elided) and the bar re-lays out by itself
+(`SetRelayout`). Metrics `widgets.icon.size/text.gap/width.max`, icon `widgets.icon`,
+style component `widgets` (parts `temperature`, `caption`), string `desktop.widgets`.
+
+**Task View button** — `desktop.NewTaskViewButton(tm)`: plate + glyph (built-in SVG,
+theme icon `taskview.icon`, or `Icon/IconAt`), states hover/pressed/"open"
+(`SetActive`, `Track(src)`, `TrackManager(mgr, name)`), focus ring, `OnClick` (what
+it opens is the consumer's), tooltip `desktop.taskview`. Style `taskview`, metric
+`taskview.icon.size`. `widgets`, `taskview` and `tray.group` share `iconButton`
+(`iconbutton.go`): press arms, release over fires, Enter/Space = click (no auto-repeat),
+ring only for the keyboard.
+
+**Search.** New mode `SearchModeIconAndLabel` (value after `SearchModeBox`): magnifier
++ the word "Search" on the field plate, width `search.label.width`. Metric
+`search.height` (32; Box and IconAndLabel only, 0 = bar decides), flag
+`search.hint.short` (empty field shows "Search" instead of the long Windows 10 hint).
+Windows 11 declares the field through profile styles `searchbox` (`""`, `hint`,
+`icon`): `FillFrom field.fill`, corner 16, 1 px border from `border`, accent border
+on focus/open. Without text the icon modes are buttons: Enter/Space open the search
+(like a click), arrows/Home/End move focus along the slot (in the field they still move
+the caret); a printable character still goes to the query. This keyboard behaviour also
+applies to Windows 10 `SearchModeIconOnly` (before, Enter called `OnSubmit("")`, Space
+typed a blank, arrows did nothing).
+
+**Tray.** `desktop.NewTrayGroup(tm, items...)` — "network + volume + power" as ONE
+button: one plate (style `tray.group`, metrics `tray.group.pad/gap/height`), one
+`OnClick`, one Tab stop, one hover for the whole group. Members are not tree children
+(the group draws them and takes mouse/keys); `ToolTipAt` returns the tooltip of the
+member under the pointer; `Close()` closes members; a zero-width member (no battery)
+takes no room. `Track/TrackManager/SetActive` as for the buttons. Metric
+`tray.item.height` (40) is the plate height of tray icons when the theme does not fill
+the whole strip (`tray.fill.strip`); the glyph stays centred. Windows 11 tray icons
+have `PadX` 4 (step 24; group = 3·24 + 2·4 = 80).
+
+**Bell and Do Not Disturb.** `NotificationButton.SetDoNotDisturb(bool)` /
+`DoNotDisturb()`; a notification source may implement the optional
+`desktop.DoNotDisturbReporter{ DoNotDisturb() bool }` and then wins over the manual
+flag (read on every draw; the source's `Subscribe` already repaints the button).
+**This is the taskbar agent's own DND model — one bool, no events**; the notification
+centre agent introduces its own model, to be unified when merging. DND: tooltip
+`desktop.tray.dnd`, bell crossed out, counter hidden; theme icon key
+`tray.notifications.icon.dnd` is tried first. Flag `tray.bell` draws a bell (outline
+SVG, `taskglyph.go`) with a round counter badge (`tray.badge.size`, part `badge` of
+`tray.notifications`) instead of the old speech bubble; it also makes the button a Tab
+stop (`TabIndex() == -1` without the flag, so classic themes get no new stop). The
+button is `Focusable` now (Enter/Space = click).
+
+**Window buttons — indicators from the window model.** `desktop.WindowInfo` got
+`ProgressState` (`ProgressNone/Normal/Paused/Error`), `Progress` (0..1), `Badge` (int,
+>99 shows "99+") and `Attention` (ignored for the active window). A stack (`group`
+mode) shows the worst progress (error > pause > normal, the largest share inside that
+state), the SUM of the counters and attention of any non-active window
+(`overlayOf`). Theme gating (nothing is drawn unless the metric is set):
+- **Pill** (`taskbutton.pill.height` 3): running = `taskbutton.pill.idle` (6) wide in
+  the text colour at `taskbutton.pill.idle.opacity` 0.6, active = `.active` (16) in the
+  accent; width and colour glide between them (`AnimTaskPill`, 150 ms out-cubic;
+  `numMotion`), centred under the button at `taskbutton.pill.offset` (-2 = below the
+  plate, at the bar edge). A cell seen for the first time stands at its target at once
+  (no growth from nothing on the first frame). Styles: part `pill`
+  Normal (`FillFrom text`) and Active (`FillFrom accent`). Replaces `drawTaskMarkAt`
+  (the Windows 10 mark) only where the metric is set; `RunningApplications` keeps the old
+  mark, the indicators live in `ApplicationArea`.
+- **Progress** (`taskbutton.progress.height` 4): track the width of the icon at the
+  icon's bottom edge + bar by the share; parts `progress`, `progress.fill` (accent),
+  `progress.paused` (yellow), `progress.error` (red).
+- **Badge** (`taskbutton.badge.size` 14): accent circle (oval for 2-3 chars) at the
+  top-right corner of the icon, clamped inside the button; part `badge` (`Text`,
+  `Font.Size`, `PadX`).
+- **Attention** (flag `taskbutton.attention`): the plate (part `attention`) blinks
+  `taskbutton.attention.blinks` (3) times, one blink = `AnimTaskAttention` (450 ms,
+  linear), then stays lit until the window is activated or the flag is cleared.
+- `motion.reduce`: pill width changes at once, attention is steady at once, no
+  animation is registered (`TestWin11Pill_ReducedMotionIsInstant`,
+  `TestWin11Attention_BlinksThenSteady`).
+- **Partial repaint.** `ApplicationArea.refresh` compares old and new cells; when only
+  overlays changed (`overlayChanges`, `sameLook`) it invalidates just those buttons'
+  rectangles (a download percent does not repaint the area); anything else repaints the
+  area. Every animation step repaints its own button only
+  (`TestWin11Pill_AnimatesAndRepaintsOnlyItsButtons`,
+  `TestWin11Overlay_RepaintsOnlyChangedButton`).
+
+**Profile.** `theme/profiles_win11_taskbar.go` (`declareWin11Taskbar`, called from
+`Windows11Profile` after `inheritTrayStyles`); `profiles.go` got one call and the dark
+profile three tokens. New colour tokens `film.hover`, `film.pressed`, `field.fill`
+(Windows11Dark overrides only these; its two hover styles were removed — it declares 13
+own tokens, limit 15, `TestBuiltinProfiles_DarkVariantsAreThin`). Tray icon colour is
+`TextFrom text` (it was the light theme's black literal — black icons on the dark bar
+before). Other palette needs go through tokens too.
+
+Built-in glyphs (`taskglyph.go`): `glyphTaskView`, `glyphWidgets`, `glyphBell`,
+`glyphBellFilled`, `glyphSlash` — added to the Start-menu glyph table at package init.
+
+Tests: `desktop/win11shell_test.go` (scene, geometry, alignment, theme/accent live),
+`win11shell_indicators_test.go` (pill, progress, badge, attention, partial repaint, other
+profiles), `win11shell_items_test.go` (keyboard, tray group, bell, widgets, Task View,
+search, scales 100-200 %), `taskbar_frozen_test.go`. Pictures:
+`GOLDEN_OUT=dir go test ./desktop -run TestWin11Bar_Shots` (light/dark × centred/left, search
+modes, DND bell, mid-blink attention; `*_x2.png` at 200 %).
+
+Not done: indicators in `RunningApplications` and in the side-bar column; the Windows 11
+"widgets after Task View" placement for left alignment (the widgets slot stays at the far
+left); indeterminate progress; badge on the Start button; the clock plate is not 40 high.
+
 ### Physical-size SVG, tray icons from the theme set, thin scrollbar — v3.31
 
 - `widget/physical.go`: `ContextScale(ctx)` (1 for contexts without `Scale()`),

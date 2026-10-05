@@ -4285,6 +4285,36 @@ keys `ShowDesktop`, `NotificationCenter`, `NoNewNotifications`,
 used. The language is the same `tr()` with `DefaultLanguage` as the other
 components (`widget.RegisterStrings` overrides the built-in ru/en).
 
+#### Windows 11 taskbar
+
+Everything below is switched on by the Windows 11 profile tokens; a theme without the
+tokens keeps the old drawing (the Windows 10, Windows 2000 and macOS frames are unchanged).
+
+```go
+bar.AddItem(desktop.SlotWidgets, wb)     // far left edge whatever the alignment
+bar.AddItem(desktop.SlotStart, start)    // Start, search, Task View: the centred group
+bar.AddItem(desktop.SlotStart, box)      // box.SetMode(desktop.SearchModeIconAndLabel)
+bar.AddItem(desktop.SlotStart, taskView)
+bar.AddItem(desktop.SlotApps, area)
+tray.AddItem(desktop.NewTrayGroup(m, net, vol, power))   // one button, one OnClick
+```
+
+- **Alignment on the fly:** `bar.SetAlignment(desktop.BarAlignLeft)` (and `ResetAlignment`)
+  or `m.SetFlag("taskbar.centered", false)`; items are not recreated, only the bar strip
+  is repainted.
+- **Widgets:** `wb.SetContent(desktop.WidgetsContent{IconAt: sunny, Temperature: "21°",
+  Caption: "Sunny"})`; the button width follows the text and the bar re-lays out itself.
+- **Task View:** `desktop.NewTaskViewButton(m)`; what it opens is up to the consumer
+  (`OnClick`), it lights up while open (`Track`, `TrackManager`).
+- **Bell:** `nb.SetDoNotDisturb(true)` or a source implementing
+  `desktop.DoNotDisturbReporter`; in the mode the bell is crossed out and the counter hidden.
+- **Window-button indicators** are `desktop.WindowInfo` fields: `ProgressState`
+  (`ProgressNormal/Paused/Error`) and `Progress` 0..1 - a progress bar on the icon;
+  `Badge` - a counter circle ("99+" cap); `Attention` - the plate blinks three times and
+  stays lit until the window is active. The pill under the button: running 6 px grey,
+  active 16 px in the accent colour, the width glides. With `motion.reduce` everything
+  changes at once. When only progress or a counter changed, one button is repainted.
+
 Optical icon sizes (Fluent draws 16/20/24 separately): `theme.IconRef` takes
 `Source: "wifi_{size}.svg"` and `Sizes: theme.IconSizes(16, 20, 24)`; `IconSet`
 picks the smallest file not below the requested (physical) size, the largest for

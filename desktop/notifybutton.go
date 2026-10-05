@@ -35,6 +35,7 @@ const (
 // Подсказка собирается из строк widget.Tr и следует за языком.
 type NotificationButton struct {
 	widget.Base
+	FocusState
 
 	tm *theme.Manager
 	n  Notifications
@@ -48,9 +49,50 @@ type NotificationButton struct {
 	// Windows. Атомарно: ставит подписка на панель, читает горутина кадра.
 	active int32
 	manual atomic.Int64 // счётчик, заданный SetCount (когда нет источника)
+	// dnd — «Не беспокоить», заданное SetDoNotDisturb (когда источник не сообщает
+	// его сам, см. DoNotDisturbReporter).
+	dnd int32
 
 	glyph glyphMemo
 	unsub func()
+}
+
+// Ключи темы колокольчика Windows 11.
+const (
+	// KeyTrayBell — признак темы: кнопка рисует колокольчик (контур, с
+	// перечёркиванием при «Не беспокоить») вместо прежнего «облачка сообщения».
+	KeyTrayBell theme.Key = "tray.bell"
+	// KeyTrayBadgeSize — диаметр кружка счётчика на колокольчике; 0 — число
+	// рисуется прямо на значке, как раньше.
+	KeyTrayBadgeSize theme.Key = "tray.badge.size"
+)
+
+// DoNotDisturbReporter — необязательный интерфейс источника уведомлений:
+// сообщает, включён ли режим «Не беспокоить». Кнопка проверяет его приведением
+// типа, как проверяются остальные необязательные интерфейсы источников, и берёт
+// состояние у источника на каждой отрисовке — смена режима у источника
+// достаточна, если он зовёт подписчиков (Notifications.Subscribe). Источник без
+// интерфейса (или nil) — состояние задаёт SetDoNotDisturb.
+type DoNotDisturbReporter interface {
+	DoNotDisturb() bool
+}
+
+// SetDoNotDisturb задаёт «Не беспокоить» вручную (когда источник уведомлений не
+// реализует DoNotDisturbReporter). Включённый режим меняет значок (колокольчик
+// перечёркнут), прячет счётчик и подсказку.
+func (b *NotificationButton) SetDoNotDisturb(on bool) {
+	if atomic.SwapInt32(&b.dnd, b2i32(on)) != b2i32(on) {
+		b.Invalidate()
+	}
+}
+
+// DoNotDisturb сообщает, включён ли режим «Не беспокоить»: у источника, если он
+// его знает, иначе по SetDoNotDisturb.
+func (b *NotificationButton) DoNotDisturb() bool {
+	if r, ok := b.n.(DoNotDisturbReporter); ok && r != nil {
+		return r.DoNotDisturb()
+	}
+	return atomic.LoadInt32(&b.dnd) == 1
 }
 
 // NewNotificationButton создаёт кнопку, оформляемую темой tm. Счётчик — число
@@ -146,6 +188,9 @@ func (b *NotificationButton) Close() {
 // текущего счётчика (с формой по числу) и языка при каждом показе, тем же tr()
 // и тем же языком по умолчанию, что у остальных компонентов рабочего стола.
 func (b *NotificationButton) GetToolTip() string {
+	if b.DoNotDisturb() {
+		return tr(StrTrayDND)
+	}
 	if n := b.Count(); n > 0 {
 		return trayCount(n)
 	}
@@ -165,7 +210,43 @@ func (b *NotificationButton) OnMouseMove(x, y int) {
 
 // OnMouseButton реализует клик (отпускание над кнопкой).
 func (b *NotificationButton) OnMouseButton(e widget.MouseEvent) bool {
+	if b.NotePointer(e) {
+		b.Invalidate()
+	}
 	return trayHandleClick(&b.pressed, b.Bounds(), e, b.OnClick, b.Invalidate)
+}
+
+var (
+	_ widget.Focusable = (*NotificationButton)(nil)
+	_ FocusNavigable   = (*NotificationButton)(nil)
+	_ FocusRinger      = (*NotificationButton)(nil)
+)
+
+// SetFocused реализует widget.Focusable.
+func (b *NotificationButton) SetFocused(v bool) {
+	if b.FocusState.Set(v) {
+		b.Invalidate()
+	}
+}
+
+// TabIndex: колокольчик с рисунком Windows 11 (флаг tray.bell) — остановка Tab, а
+// прежние кнопки уведомлений обхода не получают, как и раньше (без этого
+// профили Windows 10 и классические получили бы лишнюю остановку).
+func (b *NotificationButton) TabIndex() int {
+	if b.tm == nil || !b.tm.GetFlag(KeyTrayBell, false) {
+		return -1
+	}
+	return focusTabIndex(b)
+}
+
+// OnKeyEvent: Enter и Space — как щелчок, стрелки — к соседу по области.
+func (b *NotificationButton) OnKeyEvent(e widget.KeyEvent) {
+	b.HandleKey(b, e, click(b.OnClick), b.Invalidate)
+}
+
+// FocusRing реализует FocusRinger: рамка обводит всю плашку кнопки.
+func (b *NotificationButton) FocusRing() (image.Rectangle, *theme.Style) {
+	return b.Bounds(), styleNormal(b.tm, ComponentTrayNotifications)
 }
 
 // Draw рисует подложку, значок и счётчик.
@@ -184,18 +265,59 @@ func (b *NotificationButton) Draw(ctx widget.DrawContext) {
 		return
 	}
 	count := b.Count()
+	dnd := b.DoNotDisturb()
+	bell := b.tm != nil && b.tm.GetFlag(KeyTrayBell, false)
 
 	keys := []theme.Key{KeyTrayNotificationsIcon}
-	if count > 0 {
+	if dnd {
+		keys = []theme.Key{KeyTrayNotificationsIcon + ".dnd", KeyTrayNotificationsIcon}
+	} else if count > 0 {
 		keys = []theme.Key{KeyTrayNotificationsIcon + ".new", KeyTrayNotificationsIcon}
 	}
 	filled := count > 0
 	if !drawThemeGlyph(ctx, b.tm, keys, inner, s, &b.glyph) {
-		drawBubble(ctx, box, ink(s), filled)
+		switch {
+		case bell:
+			drawGlyph(ctx, glyphBell, box, ink(s))
+			if dnd {
+				drawGlyph(ctx, glyphSlash, box, ink(s))
+			}
+		default:
+			drawBubble(ctx, box, ink(s), filled && !dnd)
+			if dnd {
+				drawDiagonalStrike(ctx, box, ink(s))
+			}
+		}
 	}
-	if count > 0 {
-		b.drawBadge(ctx, box, s, count)
+	// Счётчик в «Не беспокоить» молчит: уведомления копятся, но не зовут.
+	if count > 0 && !dnd {
+		if size := int(tmMetric(b.tm, KeyTrayBadgeSize)); bell && size > 0 {
+			b.drawBellBadge(ctx, box, count, size)
+		} else {
+			b.drawBadge(ctx, box, s, count)
+		}
 	}
+}
+
+// drawBellBadge рисует счётчик на колокольчике: кружок цвета части "badge" у
+// верхнего правого угла значка, число по его центру.
+func (b *NotificationButton) drawBellBadge(ctx widget.DrawContext, box image.Rectangle, count, size int) {
+	bs := styleOf(b.tm, ComponentTrayNotifications, "badge", theme.StateNormal)
+	text := strconv.Itoa(count)
+	if count > maxBadgeCount {
+		text = strconv.Itoa(maxBadgeCount) + "+"
+	}
+	w := size
+	if tw := MeasureText(ctx, text, bs) + 2*int(bs.PadX); tw > w {
+		w = tw
+	}
+	right := box.Max.X + size/3
+	top := box.Min.Y - size/3
+	r := image.Rect(right-w, top, right, top+size)
+	if bs.Fill.A > 0 {
+		fillSolid(ctx, r, size/2, bs.Fill)
+	}
+	DrawTextCentered(ctx, r, text, bs)
 }
 
 // drawBadge рисует число по центру квадрата значка.

@@ -57,7 +57,26 @@ type AppID string
 // NotificationID — идентификатор уведомления.
 type NotificationID uint64
 
+// ProgressState — вид наложения прогресса на кнопке окна.
+type ProgressState int
+
+const (
+	// ProgressNone — прогресса нет (нулевое значение: потребитель, который
+	// поля не заполнял, наложения не получает).
+	ProgressNone ProgressState = iota
+	// ProgressNormal — обычный: полоса цвета акцента.
+	ProgressNormal
+	// ProgressPaused — пауза: полоса жёлтая.
+	ProgressPaused
+	// ProgressError — ошибка: полоса красная.
+	ProgressError
+)
+
 // WindowInfo — что панель задач знает об окне.
+//
+// Первые шесть полей — прежняя модель. Остальные нужны кнопкам Windows 11
+// (наложение прогресса, счётчик, «внимание»): тема, которая их не рисует,
+// их не читает, а потребитель, который их не заполнял, ничего не теряет.
 type WindowInfo struct {
 	ID        WindowID
 	Title     string
@@ -65,6 +84,20 @@ type WindowInfo struct {
 	Icon      image.Image
 	Active    bool // окно на переднем плане
 	Minimized bool
+
+	// ProgressState и Progress — наложение прогресса: полоса снизу значка.
+	// Progress — доля 0..1 (вне диапазона обрезается), видна только при
+	// ProgressState != ProgressNone. У кнопки со многими окнами (стопки)
+	// показывается самое важное состояние: ошибка, затем пауза, затем обычный.
+	ProgressState ProgressState
+	Progress      float64
+	// Badge — счётчик в кружке на значке (непрочитанные письма); 0 — нет.
+	// Больше 99 показывается как «99+». У стопки счётчики окон суммируются.
+	Badge int
+	// Attention — окно просит внимания: подложка кнопки мигает несколько раз
+	// и остаётся подсвеченной, пока окно не станет активным. У активного окна
+	// флаг игнорируется.
+	Attention bool
 }
 
 // WindowModel — список окон и действия над ними.

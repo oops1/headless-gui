@@ -80,11 +80,23 @@ func trayFillsStrip(tm *theme.Manager) bool {
 	return tm != nil && tm.GetFlag(KeyTrayFillStrip, false)
 }
 
+// KeyTrayItemHeight — высота подсветки значков трея, когда тема не заливает
+// всю полосу (tray.fill.strip): Windows 11 объявляет 40 в панели 48, значок
+// остаётся своего размера по центру плашки. 0 — плашка по размеру значка.
+const KeyTrayItemHeight theme.Key = "tray.item.height"
+
 // stretchToStrip возвращает размер значка с высотой во всю полосу (h), если
-// значок и тема этого хотят; иначе размер как есть.
-func stretchToStrip(it Item, sz image.Point, h int) image.Point {
-	if f, ok := it.(stripFiller); ok && f.fillsStrip() && h > sz.Y {
+// значок и тема этого хотят; иначе — высотой плашки из темы (tray.item.height),
+// если она выше значка; иначе размер как есть.
+func stretchToStrip(tm *theme.Manager, it Item, sz image.Point, h int) image.Point {
+	f, ok := it.(stripFiller)
+	if !ok {
+		return sz
+	}
+	if f.fillsStrip() && h > sz.Y {
 		sz.Y = h
+	} else if th := int(tmMetric(tm, KeyTrayItemHeight)); th > sz.Y && th <= h {
+		sz.Y = th
 	}
 	return sz
 }

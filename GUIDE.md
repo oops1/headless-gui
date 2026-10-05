@@ -4264,6 +4264,37 @@ bar.AddItem(desktop.SlotTray, ic)
 тот же `tr()` с `DefaultLanguage`, что у остальных компонентов (`widget.RegisterStrings`
 перекрывает встроенные ru/en).
 
+#### Панель задач Windows 11
+
+Всё ниже включается токенами профиля Windows 11; тема без токенов рисует по-старому
+(кадры Windows 10, Windows 2000 и macOS не изменились).
+
+```go
+bar.AddItem(desktop.SlotWidgets, wb)     // у левого края при любом выравнивании
+bar.AddItem(desktop.SlotStart, start)    // «Пуск», поиск, Task View — группа по центру
+bar.AddItem(desktop.SlotStart, box)      // box.SetMode(desktop.SearchModeIconAndLabel)
+bar.AddItem(desktop.SlotStart, taskView)
+bar.AddItem(desktop.SlotApps, area)
+tray.AddItem(desktop.NewTrayGroup(m, net, vol, power))   // одна кнопка, один OnClick
+```
+
+- **Выравнивание на лету:** `bar.SetAlignment(desktop.BarAlignLeft)` (и `ResetAlignment`)
+  либо `m.SetFlag("taskbar.centered", false)`; элементы не пересоздаются, перерисовывается
+  только полоса панели.
+- **Виджеты:** `wb.SetContent(desktop.WidgetsContent{IconAt: sunny, Temperature: "21°",
+  Caption: "Ясно"})`; ширина кнопки идёт за текстом, панель перекладывается сама.
+- **Task View:** `desktop.NewTaskViewButton(m)`; что он открывает — решает потребитель
+  (`OnClick`), горит, пока открыт (`Track`, `TrackManager`).
+- **Колокольчик:** `nb.SetDoNotDisturb(true)` либо источник, реализующий
+  `desktop.DoNotDisturbReporter`; в режиме колокольчик перечёркнут, счётчик скрыт.
+- **Индикаторы кнопок окон** — поля `desktop.WindowInfo`: `ProgressState`
+  (`ProgressNormal/Paused/Error`) и `Progress` 0..1 — полоса прогресса на значке; `Badge` —
+  кружок со счётчиком («99+» сверху); `Attention` — подложка мигает три раза и остаётся
+  постоянной, пока окно не активно. Пилюля под кнопкой: запущено 6 px серым, активно
+  16 px цветом акцента, ширина меняется плавно. Под «меньше движения»
+  (`motion.reduce`) всё меняется сразу. Изменился только прогресс или счётчик —
+  перерисовывается одна кнопка.
+
 Оптические размеры значков (у Fluent свой рисунок для 16/20/24): в
 `theme.IconRef` — `Source: "wifi_{size}.svg"` и `Sizes: theme.IconSizes(16, 20, 24)`;
 `IconSet` берёт наименьший файл не меньше запрошенного (физического) размера,

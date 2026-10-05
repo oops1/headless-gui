@@ -19,7 +19,18 @@ const (
 	SlotApps
 	// SlotTray — конец панели: значки состояния, часы, уведомления.
 	SlotTray
+	// SlotWidgets — самый левый край панели (у бокового края — самый верх):
+	// кнопка виджетов с погодой, Windows 11. Стоит у края при любом выравнивании,
+	// а группа «пуск + приложения» центруется правее неё. Номер после SlotTray —
+	// чтобы числовые значения прежних областей не менялись.
+	SlotWidgets
 )
+
+// slotCount — число областей; slotOrder — порядок обхода и раскладки слева
+// направо: края (виджеты), начало, середина, конец.
+const slotCount = 4
+
+var slotOrder = [slotCount]Slot{SlotWidgets, SlotStart, SlotApps, SlotTray}
 
 // Item — элемент панели задач.
 //
@@ -52,7 +63,7 @@ type Taskbar struct {
 
 	tm *theme.Manager
 
-	slots [3][]Item
+	slots [slotCount][]Item
 
 	// unsubTheme снимает подписку на смену темы. Панель перерисовывается
 	// сама: она живёт вне обхода дерева, когда её показывают оболочкой.
@@ -84,6 +95,11 @@ type Taskbar struct {
 	// назначения край выводит тема (флаг taskbar.top).
 	edge    Edge
 	edgeSet bool
+
+	// align и alignSet — выравнивание группы «пуск + приложения», назначенное
+	// явно (SetAlignment); без него решает флаг темы taskbar.centered.
+	align    BarAlign
+	alignSet bool
 
 	// monitor и docked — монитор, на который панель поставлена (DockTo), и
 	// признак того, что она ставилась; bound — всплывающие панели, привязанные
@@ -162,7 +178,7 @@ func (t *Taskbar) Close() {
 
 // AddItem ставит элемент в область панели.
 func (t *Taskbar) AddItem(slot Slot, it Item) {
-	if it == nil || slot < SlotStart || slot > SlotTray {
+	if it == nil || slot < SlotStart || slot > SlotWidgets {
 		return
 	}
 	t.slots[slot] = append(t.slots[slot], it)
@@ -190,7 +206,7 @@ func (t *Taskbar) AddItem(slot Slot, it Item) {
 
 // Items возвращает элементы области в порядке добавления.
 func (t *Taskbar) Items(slot Slot) []Item {
-	if slot < SlotStart || slot > SlotTray {
+	if slot < SlotStart || slot > SlotWidgets {
 		return nil
 	}
 	return append([]Item(nil), t.slots[slot]...)
@@ -316,12 +332,22 @@ func (t *Taskbar) relayout() {
 		it := t.slots[SlotTray][i]
 		// Значок трея с подсветкой на всю полосу (тема: tray.fill.strip) занимает
 		// всю высоту панели, остальные стоят по центру своей высоты.
-		sz := stretchToStrip(it, t.sizeOf(it, avail), avail.Y)
+		sz := stretchToStrip(t.tm, it, t.sizeOf(it, avail), avail.Y)
 		place(it, image.Rect(right-sz.X, inner.Min.Y, right, inner.Min.Y+sz.Y), inner)
 		right -= sz.X + gap
 	}
 	trayStart := right
 	t.trayEdge = trayStart
+
+	// Слот виджетов — у самого левого края; остальное начинается правее него.
+	lead := inner.Min.X
+	for _, it := range t.slots[SlotWidgets] {
+		sz := t.sizeOf(it, avail)
+		place(it, image.Rect(lead, inner.Min.Y, lead+sz.X, inner.Min.Y+sz.Y), inner)
+		if sz.X > 0 {
+			lead += sz.X + gap
+		}
+	}
 
 	start, apps := t.slots[SlotStart], t.slots[SlotApps]
 
@@ -334,7 +360,7 @@ func (t *Taskbar) relayout() {
 		startW[i] = t.sizeOf(it, avail).X
 		startTotal += startW[i] + gap
 	}
-	appsAvail := trayStart - inner.Min.X - startTotal
+	appsAvail := trayStart - lead - startTotal
 	if appsAvail < 0 {
 		appsAvail = 0
 	}
@@ -352,16 +378,16 @@ func (t *Taskbar) relayout() {
 	// ПАНЕЛИ — так это устроено в Windows 11. По центру именно панели, а не
 	// оставшегося места: иначе группа съезжала бы влево от того, что справа
 	// висит трей, и центр переставал быть центром.
-	x := inner.Min.X
-	if t.flag(KeyTaskbarCentered) {
+	x := lead
+	if t.centeredGroup() {
 		group := startTotal + appsTotal
 		x = inner.Min.X + (inner.Dx()-group)/2
-		// Но не поверх трея и не левее края.
+		// Но не поверх трея и не левее края (и слота виджетов).
 		if x+group > trayStart {
 			x = trayStart - group
 		}
-		if x < inner.Min.X {
-			x = inner.Min.X
+		if x < lead {
+			x = lead
 		}
 	}
 
@@ -432,7 +458,15 @@ func (t *Taskbar) sizeOf(it Item, avail image.Point) image.Point {
 	if sz.X <= 0 {
 		sz.X = 0
 	}
-	if sz.Y <= 0 || sz.Y > avail.Y {
+	if sz.Y <= 0 {
+		// Элемент высоты не просит: тема может ограничить подсветку кнопок
+		// (Windows 11: 40 в панели 48), иначе — вся высота панели.
+		sz.Y = avail.Y
+		if h := t.metric(KeyTaskbarItemHeight); h > 0 && h < avail.Y {
+			sz.Y = h
+		}
+	}
+	if sz.Y > avail.Y {
 		sz.Y = avail.Y
 	}
 	return sz

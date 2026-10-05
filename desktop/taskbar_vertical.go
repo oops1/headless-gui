@@ -148,6 +148,14 @@ func (t *Taskbar) relayoutVertical(b image.Rectangle) {
 	start, apps := t.slots[SlotStart], t.slots[SlotApps]
 
 	y := inner.Min.Y
+	// Слот виджетов — самый верх столбца, над «Пуском».
+	for _, it := range t.slots[SlotWidgets] {
+		sz := t.sizeOfV(it, avail)
+		placeV(it, image.Rect(inner.Min.X, y, inner.Min.X+sz.X, y+sz.Y), inner)
+		if sz.Y > 0 {
+			y += sz.Y + gap
+		}
+	}
 	for _, it := range start {
 		sz := t.sizeOfV(it, avail)
 		placeV(it, image.Rect(inner.Min.X, y, inner.Min.X+sz.X, y+sz.Y), inner)
