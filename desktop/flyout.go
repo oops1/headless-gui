@@ -545,27 +545,26 @@ func (f *Flyout) restRect() image.Rectangle {
 		screen = f.Anchor
 	}
 
-	if f.Place != nil {
-		if r, ok := f.Place(f.Anchor, screen, f.Edge, sz); ok {
-			if screen.Empty() {
-				return r
-			}
-			return fitInto(r, screen)
-		}
-	}
-	// Прижатая к краю экрана панель и панель у бокового края считаются по-своему
+	// Порядок: явное прижатие к краю монитора (PinToEdge — выбор потребителя,
+	// он знает про боковые панели), затем своё размещение панели (Place —
+	// например, центр уведомлений Windows 10), затем панель у бокового края
 	// (flyoutedge.go); для нижней и верхней панели — прежний расчёт ниже.
-	if f.pinned || f.Edge.Vertical() {
-		var r image.Rectangle
-		if f.pinned {
-			r = f.pinnedRect(sz)
-		} else {
-			r = f.sideRect(sz)
-		}
+	fit := func(r image.Rectangle) image.Rectangle {
 		if screen.Empty() {
 			return r
 		}
 		return fitInto(r, screen)
+	}
+	if f.pinned {
+		return fit(f.pinnedRect(sz))
+	}
+	if f.Place != nil {
+		if r, ok := f.Place(f.Anchor, screen, f.Edge, sz); ok {
+			return fit(r)
+		}
+	}
+	if f.Edge.Vertical() {
+		return fit(f.sideRect(sz))
 	}
 
 	// По вертикали — от значка в сторону от края, к которому прижата панель.
