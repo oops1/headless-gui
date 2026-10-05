@@ -1,6 +1,9 @@
 package theme
 
-import "image/color"
+import (
+	"image/color"
+	"math"
+)
 
 // Style — как выглядит компонент в одном состоянии. Плоская структура:
 // всё, что нужно отрисовке, лежит рядом и читается без обращений к теме.
@@ -43,8 +46,80 @@ type Style struct {
 	// 0 — тени нет.
 	Elevation float64
 
+	// Токены тени (Windows 11): ShadowBlur — радиус размытия, ShadowOffsetX/Y —
+	// смещение, ShadowOpacity — множитель прозрачности цвета Shadow. Общие для
+	// меню, всплывающих панелей и окон; значение читается через ResolveShadow.
+	//
+	// ShadowBlur == 0 (все прежние профили) — токены не заданы, тень считается
+	// из Elevation, как раньше. ShadowOpacity == 0 — «не задан», то есть 1.
+	ShadowBlur                   float64
+	ShadowOffsetX, ShadowOffsetY float64
+	ShadowOpacity                float64
+
 	// Bevel — объёмная рамка вместо плоской (Windows 2000). nil — плоская.
 	Bevel *BevelSpec
+}
+
+// ShadowSpec — разрешённая тень одного слоя: радиус размытия и смещение в
+// логических пикселях, цвет уже с учётом прозрачности (alpha-premultiplied).
+// Отдаётся Style.ResolveShadow и рисуется widget.DrawShadowSpec.
+type ShadowSpec struct {
+	Blur             float64
+	OffsetX, OffsetY float64
+	Color            color.RGBA
+}
+
+// IsZero — тени нет.
+func (s ShadowSpec) IsZero() bool { return s.Blur <= 0 || s.Color.A == 0 }
+
+// Extent — на сколько пикселей тень выходит за границы слоя: по радиусу
+// размытия (в две стороны — тень строится двухпроходным размытием) и смещению.
+// Нужен тому, кто резервирует место под тень (область движения панели,
+// DrawMargin окна).
+func (s ShadowSpec) Extent() int {
+	if s.IsZero() {
+		return 0
+	}
+	off := math.Max(math.Max(math.Abs(s.OffsetX), math.Abs(s.OffsetY)), 0)
+	return int(math.Ceil(s.Blur*2+off)) + 1
+}
+
+// ExplicitShadow возвращает тень по ТОКЕНАМ стиля. false — токены не заданы
+// (ShadowBlur == 0): компонент остаётся на прежней тени от Elevation.
+//
+// Цвет — Shadow стиля; у профиля, объявившего токены без цвета, тень чёрная.
+// ShadowOpacity умножает альфу цвета (премультиплицированные каналы — вместе с
+// ней).
+func (s *Style) ExplicitShadow() (ShadowSpec, bool) {
+	if s == nil || s.ShadowBlur <= 0 {
+		return ShadowSpec{}, false
+	}
+	col := s.Shadow
+	if col.A == 0 {
+		col = color.RGBA{A: 255}
+	}
+	if op := s.ShadowOpacity; op > 0 && op < 1 {
+		scale := func(v uint8) uint8 { return uint8(float64(v)*op + 0.5) }
+		col = color.RGBA{R: scale(col.R), G: scale(col.G), B: scale(col.B), A: scale(col.A)}
+	}
+	return ShadowSpec{Blur: s.ShadowBlur, OffsetX: s.ShadowOffsetX, OffsetY: s.ShadowOffsetY, Color: col}, true
+}
+
+// ResolveShadow возвращает тень стиля: по токенам, а если их нет — из
+// Elevation и Shadow ровно так, как рисовалось всегда (размытие = высота,
+// смещение вниз = высота/2). false — тени нет. Единая точка для всех, кто
+// рисует тень по стилю: PaintStyle, окна, диалоги, меню.
+func (s *Style) ResolveShadow() (ShadowSpec, bool) {
+	if s == nil {
+		return ShadowSpec{}, false
+	}
+	if sp, ok := s.ExplicitShadow(); ok {
+		return sp, !sp.IsZero()
+	}
+	if s.Elevation > 0 && s.Shadow.A > 0 {
+		return ShadowSpec{Blur: s.Elevation, OffsetY: s.Elevation / 2, Color: s.Shadow}, true
+	}
+	return ShadowSpec{}, false
 }
 
 // Clone возвращает независимую копию: срез точек градиента и BevelSpec
@@ -89,6 +164,15 @@ type StyleDelta struct {
 	// дельт.
 	FillFrom, TextFrom, BorderFrom Key `json:"-"`
 
+	// ShadowFrom — цвет тени по ссылке на токен (то же, что BorderFrom, для
+	// Shadow): тёмная разновидность темы меняет токен, а не переписывает стили.
+	ShadowFrom Key `json:"-"`
+	// BackdropFrom — основа материала подложки по ссылке на цветовой токен
+	// ("surface", "surface.alt"): из него берутся непрозрачный Fallback и цвет
+	// подкраски Tint (альфа подкраски остаётся из объявленного Backdrop.Tint).
+	// Так Mica светлой и тёмной тем отличается одним токеном, а не копией стилей.
+	BackdropFrom Key `json:"-"`
+
 	Gradient      []GradientStop `json:"gradient,omitempty"`
 	GradientAngle *float64       `json:"gradient_angle,omitempty"`
 	GradientKind  *GradientKind  `json:"gradient_kind,omitempty"`
@@ -107,6 +191,12 @@ type StyleDelta struct {
 
 	Elevation *float64   `json:"elevation,omitempty"`
 	Bevel     *BevelSpec `json:"bevel,omitempty"`
+
+	// Токены тени (см. Style.ShadowBlur).
+	ShadowBlur    *float64 `json:"shadow_blur,omitempty"`
+	ShadowOffsetX *float64 `json:"shadow_offset_x,omitempty"`
+	ShadowOffsetY *float64 `json:"shadow_offset_y,omitempty"`
+	ShadowOpacity *float64 `json:"shadow_opacity,omitempty"`
 }
 
 // applyTo накладывает заданные поля дельты на стиль.
@@ -165,6 +255,18 @@ func (d *StyleDelta) applyTo(s *Style) {
 	if d.Elevation != nil {
 		s.Elevation = *d.Elevation
 	}
+	if d.ShadowBlur != nil {
+		s.ShadowBlur = *d.ShadowBlur
+	}
+	if d.ShadowOffsetX != nil {
+		s.ShadowOffsetX = *d.ShadowOffsetX
+	}
+	if d.ShadowOffsetY != nil {
+		s.ShadowOffsetY = *d.ShadowOffsetY
+	}
+	if d.ShadowOpacity != nil {
+		s.ShadowOpacity = *d.ShadowOpacity
+	}
 	if d.Bevel != nil {
 		b := *d.Bevel
 		s.Bevel = &b
@@ -190,6 +292,20 @@ func (d *StyleDelta) applyTokens(s *Style, colors map[Key]color.RGBA) {
 	if d.BorderFrom != "" {
 		if c, ok := colors[d.BorderFrom]; ok {
 			s.Border = c
+		}
+	}
+	if d.ShadowFrom != "" {
+		if c, ok := colors[d.ShadowFrom]; ok {
+			s.Shadow = c
+		}
+	}
+	if d.BackdropFrom != "" {
+		if c, ok := colors[d.BackdropFrom]; ok {
+			base := RGB(c.R, c.G, c.B)
+			s.Backdrop.Fallback = base
+			if a := s.Backdrop.Tint.A; a > 0 {
+				s.Backdrop.Tint = RGBA(base.R, base.G, base.B, a)
+			}
 		}
 	}
 }

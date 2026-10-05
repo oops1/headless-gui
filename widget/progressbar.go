@@ -89,7 +89,7 @@ func (pb *ProgressBar) AnimateValue(newValue float64) {
 		return
 	}
 	from := pb.Value()
-	AnimateOwned(pb, "value", progressAnimDur, EaseOutCubic, func(t float64) {
+	AnimateOwned(pb, "value", MotionDur(progressAnimDur), EaseOutCubic, func(t float64) {
 		pb.SetValue(LerpF(from, newValue, t))
 	})
 }

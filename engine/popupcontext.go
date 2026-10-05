@@ -147,10 +147,12 @@ func (t *translatingContext) DrawLineAA(x1, y1, x2, y2 int, thickness float64, c
 // переводом координат, что и остальное рисование.
 
 var (
-	_ widget.BackdropDrawer = (*translatingContext)(nil)
-	_ widget.ShadowDrawer   = (*translatingContext)(nil)
-	_ widget.RoundClipper   = (*translatingContext)(nil)
-	_ widget.OpacityDrawer  = (*translatingContext)(nil)
+	_ widget.BackdropDrawer    = (*translatingContext)(nil)
+	_ widget.ShadowDrawer      = (*translatingContext)(nil)
+	_ widget.ShadowParamDrawer = (*translatingContext)(nil)
+	_ widget.MicaDrawer        = (*translatingContext)(nil)
+	_ widget.RoundClipper      = (*translatingContext)(nil)
+	_ widget.OpacityDrawer     = (*translatingContext)(nil)
 
 	_ widget.RotatedTextDrawer = (*translatingContext)(nil)
 )
@@ -158,6 +160,17 @@ var (
 // BlurBehind размывает уже нарисованное в r (в буфере попапа) и подкрашивает.
 func (t *translatingContext) BlurBehind(r image.Rectangle, radius int, tint color.RGBA) {
 	t.inner.BlurBehind(r.Sub(image.Pt(t.dx, t.dy)), radius, tint)
+}
+
+// MicaBehind кладёт размытые обои в r. Буфер попапа — окошко основного
+// холста, поэтому обои берутся у него со сдвигом (dx, dy).
+func (t *translatingContext) MicaBehind(r image.Rectangle, radius int, tint color.RGBA) bool {
+	return t.inner.micaAt(r.Sub(image.Pt(t.dx, t.dy)), image.Pt(t.dx, t.dy), radius, tint)
+}
+
+// DrawShadow рисует мягкую тень с явными размытием и смещением.
+func (t *translatingContext) DrawShadow(r image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA) {
+	t.inner.DrawShadow(r.Sub(image.Pt(t.dx, t.dy)), corner, blur, offsetX, offsetY, col)
 }
 
 // DrawSoftShadow рисует мягкую тень под r.

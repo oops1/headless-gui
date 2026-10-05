@@ -4422,6 +4422,93 @@ Tests: `theme/accent_test.go`, `desktop/accent_test.go`, `engine/noise_test.go`.
 `TestGolden_Windows10Acrylic` writes dark and light bar PNGs when `GOLDEN_OUT`
 is set.
 
+### Backdrop materials, shadow tokens, reduced motion (next minor)
+
+New public API only; every built-in profile renders byte-identically without
+the new flags (checked on 48 frames: 8 profiles × start/quick/notify/calendar/
+menu/window — `desktop/snapshots_test.go`, `SNAP_OUT=dir` writes PNGs and
+`sums.txt` to diff before/after).
+
+**Materials.** `theme.BackdropMaterial` (`MaterialDefault` = old behaviour by
+`Mode`, `MaterialSolid`, `MaterialAcrylic`, `MaterialMica`, `MaterialMicaAlt`),
+`BackdropSpec.Material`, JSON `backdrop.material` (`solid|acrylic|mica|mica-alt`).
+Painting is one function: `widget.PaintMaterial(ctx, rect, corner, spec) bool`
+(false = no material named, caller paints by `Mode`); `desktop.PaintStyle` and
+`widget.Window` use it. Context capabilities: `widget.MicaDrawer`
+(`MicaBehind(r, radius, tint) bool`, implemented by `engine.Canvas` and
+`translatingContext`) and `widget.ShadowParamDrawer`. No `MicaDrawer`, or it
+returns false (no wallpaper) → solid `Fallback` (else `Tint`).
+
+*Mica = blurred WALLPAPER, not content.* `engine/mica.go`: wallpaper
+(`Canvas.bgImage`, or `Engine.SetWallpaperSource(img)` which overrides it; nil
+clears) is box-averaged by 16, blurred (3 passes) once per (wallpaper, radius)
+and cached; a layer bilinearly stretches the small image into its rect
+(`Src` write, honours clip and round clip) and lays `Tint` over it. The result is
+a pure function of (pixel position, wallpaper), so partial redraw == full
+redraw and `backdropdamage.go` needs no change. Popup overlay buffers
+(`cloneForSize` clones) get `wallParent` = the main canvas and a shift through
+`translatingContext.MicaBehind`. `SetResolution/SetScale/SetPixelFormat` rebuild
+the cache. Radius ≤ 0 → 80 logical px.
+
+*Profile.* `theme.FlagBackdropMica` (`backdrop.mica`), `FlagBackdropMicaAlt`
+(`backdrop.mica.alt`, wins when both), `FlagShadowSoft` (`shadow.soft`). Conditional
+styles in `theme/profiles_win11_material.go` (`declareWin11Materials`, called at
+the END of `Windows11Profile`): panels `startmenu quicksettings notifications
+notificationcenter calendar window`. Colours are tokens, so `Windows11Dark` only
+adds two: `surface.alt` (`KeySurfaceAlt`) and `shadow.color` (`KeyShadowColor`);
+styles reference them through the new `StyleDelta.BackdropFrom` (Fallback and the
+Tint colour from a token, Tint alpha stays declared) and `StyleDelta.ShadowFrom`.
+**Parts do not inherit**: every part of those components declared before the call
+gets `Backdrop{}` / `ShadowBlur 0` under the flags (a tile painted by
+`PaintStyle` would otherwise get its own Mica); a part declared after must do the
+same. Mica is OFF by default in all profiles.
+
+**Shadow tokens.** `Style.ShadowBlur`, `ShadowOffsetX`, `ShadowOffsetY`,
+`ShadowOpacity` (+ `StyleDelta` fields, JSON `shadow_*`). `Style.ExplicitShadow()`
+(tokens only), `Style.ResolveShadow() (theme.ShadowSpec, bool)` (tokens, else the
+old `Elevation`/`Shadow` formula: blur = elevation, offset Y = elevation/2),
+`ShadowSpec.Extent()` (reserve in px). Engine: `Canvas.DrawShadow(r, corner,
+blur, offX, offY, col)`; `DrawSoftShadow` now calls it (byte-identical).
+`widget.DrawShadowSpec(ctx, r, corner, spec)` draws via `ShadowParamDrawer`, else
+approximates through `DrawSoftShadow`. Consumers: `PaintStyle`,
+`Flyout.motionRegion` (reserve), `widget.Window` (`SetShadow`, tokens of style
+`window` via `ThemeStyle.WindowShadow`, `DrawMargin()` for culling,
+`SetBounds` invalidates the shadow ring), `widget.Dialog` (`ThemeStyle.DialogShadow`;
+without tokens the old strips). `ThemeStyle.MenuShadow/WindowShadow/DialogShadow`
+are filled by `Materialize` only when the profile declares tokens.
+
+*How `PopupMenu` should take the tokens* (not wired here — its file belongs to
+another change): in `Draw`, `if sp, ok := widget.MenuShadow(); ok {
+DrawShadowSpec(ctx, menuRect, corner, sp) } else { /* legacy offset rect */ }`,
+and add `sp.Extent()` to the overlay bounds / invalidation margin. Windows 11
+declares the tokens on style `menu` under `FlagShadowSoft`.
+
+**Reduced motion.** `theme.FlagMotionReduce` (`motion.reduce`).
+`Manager.GetAnimation` is the single point (`theme/motion.go`): decorative
+tokens → duration 0, functional (`notification.expand`, `RegisterAnimationKind`)
+→ 0 or ≤ metric `motion.reduce.functional_ms`. `Manager.GetAnimationRaw`,
+`MotionReduced`, `Theme.AnimReduced`. Consumers needing no change: Flyout,
+`Tween`, task button transitions, `notification.expand` (without its own token
+the `menu.open` duration is shortened as functional), Start menu. Fixed:
+`Taskbar` auto-hide treated a zero token as "absent" and fell back to 140 ms.
+Widgets with hard-coded durations go through `widget.MotionDur(d)` (toggle knob,
+dialog fade, progress value, thin scrollbar fade/expand, DiffView scroll, dock
+flyout, `AnimateFloat/AnimateRect`) fed by `widget.SetReduceMotion(bool)`;
+timers and scroll inertia are untouched. `Engine.ApplyThemeProfile` /
+`SetThemeProfile` copy the flag to the widgets; `Engine.SetMotionReduce(m, on)`
+does flag + apply.
+
+**One canvas, one DPI.** `Engine.SetScale(k)` is per canvas; `desktop.Monitor`
+has logical bounds in one space and no scale. Two monitors with different DPI in
+one canvas share one scale. Different scales need one `engine.Engine` (and OS
+window) per monitor; the bar-per-monitor logic and the scale per monitor are the
+consumer's.
+
+Tests: `theme/materials_test.go`, `engine/mica_test.go`,
+`engine/window_shadow_test.go`, `widget/backdrop_material_test.go`,
+`desktop/reducemotion_test.go`, `desktop/materials_visual_test.go`
+(`MAT_OUT=dir` writes Solid/Mica/MicaAlt/soft-shadow PNGs).
+
 ### Physical-size SVG, tray icons from the theme set, thin scrollbar — v3.31
 
 - `widget/physical.go`: `ContextScale(ctx)` (1 for contexts without `Scale()`),

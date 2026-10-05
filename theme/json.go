@@ -55,6 +55,12 @@ type jsonStyle struct {
 	PadY        *float64 `json:"pad_y,omitempty"`
 	Elevation   *float64 `json:"elevation,omitempty"`
 
+	// Токены тени (Style.ShadowBlur и далее).
+	ShadowBlur    *float64 `json:"shadow_blur,omitempty"`
+	ShadowOffsetX *float64 `json:"shadow_offset_x,omitempty"`
+	ShadowOffsetY *float64 `json:"shadow_offset_y,omitempty"`
+	ShadowOpacity *float64 `json:"shadow_opacity,omitempty"`
+
 	Gradient []struct {
 		Pos   float64 `json:"pos"`
 		Color string  `json:"color"`
@@ -80,6 +86,8 @@ type jsonStyle struct {
 		Mode   string  `json:"mode,omitempty"` // none | alpha | blur
 		Radius float64 `json:"radius,omitempty"`
 		Tint   string  `json:"tint,omitempty"`
+		// Материал: solid | acrylic | mica | mica-alt ("" — по mode).
+		Material string `json:"material,omitempty"`
 		// Блик по верхней кромке: именно он делает размытую подложку
 		// стеклом, а не плоской заливкой.
 		Highlight string `json:"highlight,omitempty"`
@@ -217,6 +225,8 @@ func (js jsonStyle) toDelta() (StyleDelta, []string) {
 
 	d.Corner, d.BorderWidth, d.PadX, d.PadY = js.Corner, js.BorderWidth, js.PadX, js.PadY
 	d.Elevation = js.Elevation
+	d.ShadowBlur, d.ShadowOpacity = js.ShadowBlur, js.ShadowOpacity
+	d.ShadowOffsetX, d.ShadowOffsetY = js.ShadowOffsetX, js.ShadowOffsetY
 	d.GradientAngle = js.GradientAngle
 
 	if js.GradientKind != "" {
@@ -253,6 +263,11 @@ func (js jsonStyle) toDelta() (StyleDelta, []string) {
 			b.Mode = BackdropBlur
 		default:
 			warns = append(warns, fmt.Sprintf("подложка: неизвестный режим %q", js.Backdrop.Mode))
+		}
+		if m, ok := ParseBackdropMaterial(js.Backdrop.Material); ok {
+			b.Material = m
+		} else {
+			warns = append(warns, fmt.Sprintf("подложка: неизвестный материал %q", js.Backdrop.Material))
 		}
 		if js.Backdrop.Tint != "" {
 			if c, err := ParseColor(js.Backdrop.Tint); err == nil {

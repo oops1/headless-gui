@@ -734,6 +734,9 @@ func Windows11Profile() *Profile {
 		p.SetStyle(comp, "", StateNormal, st)
 	}
 
+	// Mica, MicaAlt и мягкие тени — только под флагами (profiles_win11_material.go).
+	declareWin11Materials(p, RGB(224, 224, 224), RGBA(0, 0, 0, 77))
+
 	inheritTrayStyles(p)
 	addDialogStyles(p)
 	return p
@@ -773,6 +776,10 @@ func Windows11DarkProfile() *Profile {
 	declareWin11DarkMenu(p)
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface)})
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{Fill: C(surface), Text: C(text)})
+
+	// Тёмные MicaAlt и мягкая тень — два токена: стили родителя ссылаются на них.
+	p.SetColor(KeySurfaceAlt, RGB(14, 14, 14)).
+		SetColor(KeyShadowColor, RGBA(0, 0, 0, 115))
 	addDialogStyles(p)
 	return p
 }

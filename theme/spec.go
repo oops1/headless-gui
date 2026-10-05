@@ -173,6 +173,88 @@ const (
 	BackdropBlur
 )
 
+// BackdropMaterial — материал подложки слоя в терминах Windows 11. Уточняет
+// BackdropSpec.Mode: сам режим говорит «размывать ли», материал — ЧТО
+// размывать и как это называется в теме.
+type BackdropMaterial uint8
+
+const (
+	// MaterialDefault — материал не назван (все прежние профили): слой
+	// ведёт себя, как велит его Mode, — акрил Windows 10/11, macOS.
+	MaterialDefault BackdropMaterial = iota
+	// MaterialSolid — сплошной цвет темы (BackdropSpec.Fallback, а без него
+	// Tint): ни размытия, ни обоев. Значение Windows 11 по умолчанию — Mica
+	// по RDP дорога при движении окон.
+	MaterialSolid
+	// MaterialAcrylic — размытое СОДЕРЖИМОЕ под слоем (то, что уже нарисовано
+	// в кадре), подкраска и шум: акрил.
+	MaterialAcrylic
+	// MaterialMica — сильно размытые и затемнённые ОБОИ рабочего стола под
+	// слоем, а не содержимое: окно над окном Mica не просвечивает. Без шума.
+	// Обои берёт движок (Engine.SetBackground, Engine.SetWallpaperSource);
+	// контекст, который их не знает, рисует сплошной Fallback.
+	MaterialMica
+	// MaterialMicaAlt — тот же способ, что у Mica, но темнее (заголовки
+	// вкладок, окна с подчёркнутой полосой): темноту даёт подкраска Tint
+	// профиля, поэтому материал различается данными, а не кодом.
+	MaterialMicaAlt
+)
+
+// String — имя материала для JSON и диагностики.
+func (m BackdropMaterial) String() string {
+	switch m {
+	case MaterialSolid:
+		return "solid"
+	case MaterialAcrylic:
+		return "acrylic"
+	case MaterialMica:
+		return "mica"
+	case MaterialMicaAlt:
+		return "mica-alt"
+	}
+	return ""
+}
+
+// ParseBackdropMaterial разбирает имя материала ("" — MaterialDefault).
+func ParseBackdropMaterial(s string) (BackdropMaterial, bool) {
+	switch s {
+	case "", "default":
+		return MaterialDefault, true
+	case "solid":
+		return MaterialSolid, true
+	case "acrylic":
+		return MaterialAcrylic, true
+	case "mica":
+		return MaterialMica, true
+	case "mica-alt", "micaalt":
+		return MaterialMicaAlt, true
+	}
+	return MaterialDefault, false
+}
+
+// IsMica — материал берёт обои (Mica или MicaAlt).
+func (m BackdropMaterial) IsMica() bool { return m == MaterialMica || m == MaterialMicaAlt }
+
+// Флаги профиля, включающие материал Mica на панелях оболочки Windows 11.
+// Без флагов профиль остаётся прежним (сплошная заливка панелей): Mica по RDP
+// дорога при движении окон, и включает её потребитель из своих настроек
+// (Manager.SetFlag с последующим Engine.ApplyThemeProfile).
+const (
+	// FlagBackdropMica — панели Windows 11 (меню «Пуск», быстрые настройки,
+	// центр уведомлений, календарь) рисуются на Mica.
+	FlagBackdropMica Key = "backdrop.mica"
+	// FlagBackdropMicaAlt — вместе с FlagBackdropMica: Mica Alt, темнее.
+	FlagBackdropMicaAlt Key = "backdrop.mica.alt"
+	// FlagShadowSoft — мягкие тени Windows 11 (токены ShadowBlur,
+	// ShadowOffsetX/Y, ShadowOpacity) на меню, панелях и окнах.
+	FlagShadowSoft Key = "shadow.soft"
+	// FlagMotionReduce — «меньше движения»: длительности декоративных
+	// анимаций становятся нулевыми, функциональных — нулевыми или короткими
+	// (см. AnimationKind). Потребитель ставит флаг из своих настроек:
+	// Manager.SetFlag(theme.FlagMotionReduce, true).
+	FlagMotionReduce Key = "motion.reduce"
+)
+
 // BackdropSpec — описание подложки слоя.
 //
 // Режим BackdropBlur размывает композицию под слоем: движок умеет это
@@ -185,6 +267,13 @@ type BackdropSpec struct {
 	Mode   BackdropMode `json:"mode,omitempty"`
 	Radius float64      `json:"radius,omitempty"` // радиус размытия в логических пикселях
 	Tint   color.RGBA   `json:"-"`                // подмешиваемый цвет (alpha-premultiplied)
+
+	// Material — материал слоя (Solid, Acrylic, Mica, MicaAlt). Нулевой —
+	// прежнее поведение по Mode. Не нулевой выбирает способ отрисовки
+	// независимо от Mode: слой Mica — это размытые обои, а не размытое
+	// содержимое. Mica рисуется без шума (Noise игнорируется); Fallback —
+	// сплошной цвет темы, когда обоев нет или контекст не умеет Mica.
+	Material BackdropMaterial `json:"-"`
 
 	// Noise — амплитуда зернистого шума поверх подкраски (acrylic Windows 10),
 	// доля полной шкалы яркости: 0 — шума нет, 0.02 — ±2 % (заметно только
@@ -208,7 +297,7 @@ type BackdropSpec struct {
 
 // IsZero — подложка не задана.
 func (b BackdropSpec) IsZero() bool {
-	return b.Mode == BackdropNone && b.Radius == 0 && b.Tint == color.RGBA{}
+	return b.Mode == BackdropNone && b.Radius == 0 && b.Tint == color.RGBA{} && b.Material == MaterialDefault
 }
 
 // BevelSpec — объёмная рамка Windows 2000: две светлые грани сверху-слева и

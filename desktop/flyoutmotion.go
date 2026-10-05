@@ -234,7 +234,15 @@ func (f *Flyout) paintedRegion() image.Rectangle {
 
 // shadowPad — запас вокруг окна под тень стиля (0, если тени нет).
 func (f *Flyout) shadowPad() int {
-	if s := f.style(theme.StateNormal); s != nil && s.Elevation > 0 && s.Shadow.A > 0 {
+	s := f.style(theme.StateNormal)
+	if s == nil {
+		return 0
+	}
+	if sp, ok := s.ExplicitShadow(); ok {
+		// Мягкая тень по токенам: размытие, умноженное на два, плюс смещение.
+		return sp.Extent()
+	}
+	if s.Elevation > 0 && s.Shadow.A > 0 {
 		return int(s.Elevation*2.5) + 1
 	}
 	return 0

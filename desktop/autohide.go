@@ -101,7 +101,11 @@ func (t *Taskbar) slideTo(want int, animated bool) {
 	}
 	dur := defaultSlide
 	if t.tm != nil {
-		if a := t.tm.GetAnimation(AnimTaskbarSlide); a.Duration > 0 {
+		if t.tm.MotionReduced() {
+			// «Меньше движения»: нулевая длительность токена — не «токена нет»,
+			// и умолчание в 140 мс сюда подставлять нельзя.
+			dur = 0
+		} else if a := t.tm.GetAnimation(AnimTaskbarSlide); a.Duration > 0 {
 			dur = a.Duration
 		}
 	}

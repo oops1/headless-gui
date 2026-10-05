@@ -934,6 +934,7 @@ func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
 	if err := m.SetTheme(name); err != nil {
 		return err
 	}
+	widget.SetReduceMotion(m.MotionReduced())
 	e.SetTheme(widget.Materialize(m.Active()))
 	return nil
 }

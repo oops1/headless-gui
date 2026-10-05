@@ -232,6 +232,17 @@ func Materialize(rt *theme.Theme) *Theme {
 
 		Menu: menuStyleOf(rt, false),
 	}
+	// Мягкие тени — только если профиль объявил токены (ShadowBlur > 0):
+	// иначе компоненты остаются на прежней тени.
+	if sp, ok := rt.Style("menu", "", theme.StateNormal).ExplicitShadow(); ok {
+		t.Style.MenuShadow = sp
+	}
+	if sp, ok := rt.Style("window", "", theme.StateNormal).ExplicitShadow(); ok {
+		t.Style.WindowShadow = sp
+	}
+	if sp, ok := rt.Style("dialog", "", theme.StateNormal).ExplicitShadow(); ok {
+		t.Style.DialogShadow = sp
+	}
 	// Кегль по умолчанию следует профилю только по его просьбе (флаг): иначе
 	// Fonts["default"] прежних тем (9 pt) изменил бы раскладку всех виджетов.
 	if rt.FlagOr(theme.FlagFontDefaultGlobal, false) {

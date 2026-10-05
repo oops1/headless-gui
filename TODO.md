@@ -350,6 +350,14 @@
       WM_SETTINGCHANGE, Linux — GTK_THEME и портал настроек), `Engine.After`/
       `Every` на горутине движка (отмена, гашение вместе с движком, `Every`
       не копит очередь).
+- [x] Материалы Windows 11, тени по токенам, «меньше движения» — сделано
+      2026-10-05: `BackdropMaterial` Solid/Acrylic/Mica/MicaAlt (Mica — размытые
+      обои, `Engine.SetWallpaperSource`; флаги `backdrop.mica`, `backdrop.mica.alt`),
+      токены `ShadowBlur/ShadowOffsetX/Y/ShadowOpacity` для меню, панелей, окон и
+      диалогов (`widget.DrawShadowSpec`, `widget.MenuShadow`), флаг
+      `motion.reduce` (`Manager.GetAnimation`, `Engine.SetMotionReduce`);
+      разный DPI мониторов в одном холсте — ограничение, описано в GUIDE.
+      Осталось: PopupMenu берёт `widget.MenuShadow()` (его файл правится отдельно).
 - [x] `OpenURL`/`OpenFile`/`RevealFile` — сделано 2026-10-03 (v3.29.0):
       ShellExecute, портал OpenURI на Linux без внешних утилит, `open` на
       macOS; только безопасные схемы ссылок, исполняемые файлы отклоняются.

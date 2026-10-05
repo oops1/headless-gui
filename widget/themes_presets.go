@@ -15,6 +15,8 @@ package widget
 import (
 	"image"
 	"image/color"
+
+	"github.com/oops1/headless-gui/v3/theme"
 )
 
 // ThemeStyle — параметры отрисовки контролов (форма, а не цвета).
@@ -72,6 +74,13 @@ type ThemeStyle struct {
 	// Нулевое значение — меню прежнее. Цвета заливки, плашки и недоступного
 	// пункта здесь не повторяются: их несёт сама плоская тема.
 	Menu MenuStyle
+
+	// Мягкие тени по токенам профиля (theme.Style.ShadowBlur, ShadowOffsetX/Y,
+	// ShadowOpacity) стилей "menu", "window" и "dialog". Нулевая — токены не
+	// заданы, и компонент рисует прежнюю тень (Dialog — полосы, PopupMenu —
+	// сдвинутый прямоугольник, Window — без тени). Заполняет Materialize;
+	// читают DrawShadowSpec, Window и Dialog, а PopupMenu — через MenuShadow().
+	MenuShadow, WindowShadow, DialogShadow theme.ShadowSpec
 }
 
 // currentStyle возвращает стиль активной темы (для Draw виджетов).
