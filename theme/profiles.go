@@ -634,8 +634,11 @@ func Windows11Profile() *Profile {
 		},
 		Border: C(RGBA(0, 0, 0, 15)), BorderWidth: N(1),
 	})
+	// Цвета текста и поверхности ниже — ссылками на токены "text" и
+	// "surface": тёмная разновидность меняет только токены и не повторяет
+	// эти стили (предел её собственных токенов — 15).
 	p.SetStyle("startbutton", "", StateNormal, StyleDelta{
-		Text: C(text), Corner: N(6), PadX: N(10),
+		TextFrom: "text", Corner: N(6), PadX: N(10),
 	})
 	p.SetStyle("startbutton", "", StateHover, StyleDelta{Fill: C(RGBA(0, 0, 0, 20))})
 	p.SetStyle("startbutton", "", StatePressed, StyleDelta{Fill: C(RGBA(0, 0, 0, 32))})
@@ -643,7 +646,7 @@ func Windows11Profile() *Profile {
 	p.SetStyle("startbutton", "", StateActive, StyleDelta{Fill: C(RGBA(0, 0, 0, 32))})
 
 	p.SetStyle("taskbutton", "", StateNormal, StyleDelta{
-		Text: C(text), Corner: N(6), PadX: N(8),
+		TextFrom: "text", Corner: N(6), PadX: N(8),
 	})
 	p.SetStyle("taskbutton", "", StateHover, StyleDelta{Fill: C(RGBA(0, 0, 0, 20))})
 	// Активное окно отмечено меткой под кнопкой, а не обводкой: цвет метки
@@ -656,7 +659,7 @@ func Windows11Profile() *Profile {
 		p.SetStyle(comp, "", StateNormal, StyleDelta{Text: C(text), Corner: N(6), PadX: N(6)})
 		p.SetStyle(comp, "", StateHover, StyleDelta{Fill: C(RGBA(0, 0, 0, 20))})
 	}
-	p.SetStyle("clock", "", StateNormal, StyleDelta{Text: C(text), Corner: N(6), PadX: N(10)})
+	p.SetStyle("clock", "", StateNormal, StyleDelta{TextFrom: "text", Corner: N(6), PadX: N(10)})
 	p.SetStyle("clock", "", StateHover, StyleDelta{Fill: C(RGBA(0, 0, 0, 20))})
 
 	// Всплывающие поверхности: стекло, крупное скругление, мягкая тень.
@@ -668,12 +671,12 @@ func Windows11Profile() *Profile {
 		Border: C(RGBA(0, 0, 0, 15)), BorderWidth: N(1),
 	})
 	declareWin11Menu(p)
-	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface), Corner: N(12)})
+	p.SetStyle("window", "", StateNormal, StyleDelta{FillFrom: "surface", Corner: N(12)})
 	p.SetStyle("window", "titlebar", StateNormal, StyleDelta{
 		Fill: C(RGB(243, 243, 243)), Text: C(RGB(120, 120, 120)),
 	})
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{
-		Fill: C(RGB(243, 243, 243)), Text: C(text),
+		FillFrom: "surface", TextFrom: "text",
 	})
 
 	// Всплывающие панели — меню «Пуск», быстрые настройки, уведомления,
@@ -762,11 +765,10 @@ func Windows11DarkProfile() *Profile {
 			Mode: BackdropBlur, Radius: 22, Tint: RGBA(32, 32, 32, 150),
 			Highlight: RGBA(255, 255, 255, 40)},
 	})
-	p.SetStyle("startbutton", "", StateNormal, StyleDelta{Text: C(text)})
+	// Текст кнопок, часов и окна приходит из токена "text", поверхность окна —
+	// из "surface" (стили родителя ссылаются на них).
 	p.SetStyle("startbutton", "", StateHover, StyleDelta{Fill: C(RGBA(255, 255, 255, 24))})
-	p.SetStyle("taskbutton", "", StateNormal, StyleDelta{Text: C(text)})
 	p.SetStyle("taskbutton", "", StateHover, StyleDelta{Fill: C(RGBA(255, 255, 255, 24))})
-	p.SetStyle("clock", "", StateNormal, StyleDelta{Text: C(text)})
 	p.SetStyle("menu", "", StateNormal, StyleDelta{
 		Backdrop: &BackdropSpec{
 			Mode: BackdropBlur, Radius: 22, Tint: RGBA(44, 44, 44, 150),
@@ -774,8 +776,6 @@ func Windows11DarkProfile() *Profile {
 		Text: C(text),
 	})
 	declareWin11DarkMenu(p)
-	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface)})
-	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{Fill: C(surface), Text: C(text)})
 
 	// Тёмные MicaAlt и мягкая тень — два токена: стили родителя ссылаются на них.
 	p.SetColor(KeySurfaceAlt, RGB(14, 14, 14)).

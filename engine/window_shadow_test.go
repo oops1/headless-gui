@@ -164,6 +164,15 @@ func TestDialogShadow_Tokens(t *testing.T) {
 		}
 
 		e.SetRenderOnDemand(true)
+		// Светлый фон: на пустом (чёрном) холсте тень неразличима, а
+		// затемнение диалога теперь полупрозрачное и фон не закрывает.
+		bg := image.NewRGBA(image.Rect(0, 0, 400, 300))
+		for i := range bg.Pix {
+			bg.Pix[i] = 255
+		}
+		if err := e.SetBackground(bg); err != nil {
+			t.Fatal(err)
+		}
 		root := widget.NewCanvas()
 		root.SetBounds(image.Rect(0, 0, 400, 300))
 		e.SetRoot(root)

@@ -98,9 +98,11 @@ func TestClassic_LookIsBitIdenticalWithoutSetAccent(t *testing.T) {
 		// Хэши включают намеренные добавления после снятия снимка: стили
 		// заголовка и затемнения диалога (theme/dialogstyles.go) и вид
 		// контекстного меню из профиля (theme/menu.go). Без них хэши были
-		// 6e38def94d5286e3 и d4da5b1d98443b59.
-		theme.ProfileWindows2000:     "1a2c2b76c5a06acf",
-		theme.ProfileWindows2000Blue: "00ab4f33c7ce8c40",
+		// 6e38def94d5286e3 и d4da5b1d98443b59. Затем в Style появились поля
+		// мягкой тени и материала (нулевые у классики) — меняется только
+		// запись дампа, сравнение без них совпадает побайтно.
+		theme.ProfileWindows2000:     "d10f9e1f73a9e954",
+		theme.ProfileWindows2000Blue: "f86aeb0f57a4ddfe",
 	}
 	for name, hash := range want {
 		if got := classicHash(t, name); got != hash {

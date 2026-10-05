@@ -1072,6 +1072,15 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 // (размытие, смещение, непрозрачность) подключаются здесь — вместо
 // Elevation/ShadowColor.
 func (m *PopupMenu) drawShadow(ctx DrawContext, px, py, pw, ph int) {
+	// Мягкая тень по общим токенам темы (ShadowBlur, ShadowOffset,
+	// ShadowOpacity стиля "menu"), если профиль их объявил, — та же, что у
+	// всплывающих панелей и окон. Появление и исчезновение меню и так
+	// перерисовывают кадр целиком, поэтому запас под тень в повреждение не
+	// добавляется.
+	if sp, ok := MenuShadow(); ok {
+		DrawShadowSpec(ctx, image.Rect(px, py, px+pw, py+ph), m.CornerRadius, sp)
+		return
+	}
 	if m.Elevation > 0 && m.ShadowColor.A > 0 {
 		if sd, ok := ctx.(ShadowDrawer); ok {
 			sd.DrawSoftShadow(image.Rect(px, py, px+pw, py+ph), m.CornerRadius, m.Elevation, m.ShadowColor)
