@@ -355,6 +355,15 @@
       WM_SETTINGCHANGE, Linux — GTK_THEME и портал настроек), `Engine.After`/
       `Every` на горутине движка (отмена, гашение вместе с движком, `Every`
       не копит очередь).
+- [x] Быстрые настройки Windows 11 24H2 — сделано 2026-10-05: презентер
+      `quicksettings.win11` и `QuickSettings.SetQuickActions` (модель плиток
+      `QuickAction{Unavailable, Detail, HasDetails}`), плитки 96×48 с подписью под
+      ними, «›» и вложенная страница от потребителя со сдвигом вбок, три колонки
+      с прокруткой, режим правки с перестановкой (`OnReorder`,
+      `QuickActionReorderer`), ползунки громкости и яркости, нижняя строка
+      (батарея, «Изменить», «Параметры»), клавиатура; тёмный Windows 11 без новых
+      токенов. Другие темы и Windows 11 без модели — кадры прежние.
+      Не сделано: подписи плиток в две строки, подсказка к обрезанной подписи.
 - [x] Материалы Windows 11, тени по токенам, «меньше движения» — сделано
       2026-10-05: `BackdropMaterial` Solid/Acrylic/Mica/MicaAlt (Mica — размытые
       обои, `Engine.SetWallpaperSource`; флаги `backdrop.mica`, `backdrop.mica.alt`),

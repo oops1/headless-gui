@@ -4401,6 +4401,69 @@ eng.SetTheme(widget.DarkTheme()) // область останется класс
 до детей.
 
 
+#### Быстрые настройки Windows 11 24H2
+
+`desktop.QuickSettings` остаётся одним компонентом. Вид выбирает презентер
+профиля (`Profile.Presenters["quicksettings"] = theme.QuickSettingsPresenter`;
+его назначает профиль Windows 11, тёмный наследует). Вариант 24H2 включается,
+когда есть и презентер, и модель плиток (`SetQuickActions`); без модели и у
+других тем рисуется прежняя панель с тремя плитками и ползунком громкости —
+кадры Windows 10, Windows 2000, macOS и Windows 11 без модели не менялись.
+
+```go
+q := desktop.NewQuickSettings(m, status) // status даёт громкость и батарею
+q.SetQuickActions(model)                 // QuickActionModel; QuickActionList — готовая
+q.SetBrightness(0.7)                     // нет данных — ползунка яркости нет
+q.VolumeDetails = true                   // «›» у громкости (выбор устройства)
+q.Details = func(id desktop.QuickActionID) *desktop.QuickDetails {
+    // id плитки с HasDetails либо desktop.QuickVolumeID
+    return &desktop.QuickDetails{Content: список, OnClose: func() {}}
+}
+q.OnVolumeChange = setVolume             // уже было: уровень 0..1
+q.OnToggleMute = toggleMute              // уже было: значок громкости
+q.OnBrightnessChange = setBrightness
+q.OnReorder = saveOrder                  // []QuickActionID после режима правки
+q.OnEdit = func(editing bool) {}
+q.OnSettings = openSettings              // панель к этому моменту закрыта
+```
+
+Модель плитки: `QuickAction{ID, Title, Icon/IconAt, On, Disabled, Unavailable,
+Detail, HasDetails}`. `Disabled` и `Unavailable` рисуются приглушённо и не
+переключаются; у недоступной плитки «›» работает (во вложенной странице видно,
+почему), у отключённой — нет. `Detail` — вторая строка подписи под плиткой,
+`HasDetails` рисует «›» справа. Модель, реализующая `QuickActionReorderer`
+(`QuickActionList` уже реализует), получает новый порядок, остальным панель
+показывает его до закрытия. Центр уведомлений Windows 10 новые поля не читает.
+
+Что внутри: плитки 96×48 со скруглением 4 и подписью под ними, три колонки,
+два видимых ряда и прокрутка (колесо, тонкий бегунок, клавиатура); «›» —
+отдельная зона плитки; вложенная страница с заголовком и стрелкой «назад»
+(Backspace, Alt+←, Esc), на которую панель переходит сдвигом вбок (токен
+`quicksettings.page`, «меньше движения» делает переход мгновенным); содержимое
+страницы — любой `widget.Widget`: он получает границы, отрисовку, мышь, колесо и
+клавиши. Ползунки громкости (значок выключает звук, значение, «›») и яркости;
+нижняя строка: батарея из `SystemStatus` (нет батареи — пусто), карандаш
+(режим правки: плитки переставляются перетаскиванием или Alt/Ctrl+стрелки,
+«Готово» выходит) и шестерёнка. Esc отступает на шаг: правка → страница →
+закрытие панели. Обновление модели перерисовывает только изменившиеся плитки,
+показаний системы — только ползунок и батарею.
+
+Все размеры — метрики `quicksettings.w11.*` (ширина 360, поля 24, плитка 96×48,
+зазор 12, подпись 32, нижняя строка 48…), цвета — части стиля `quicksettings`
+(`w11.tile`, `w11.tile.on`, `w11.tile.chevron`, `w11.tile.edit`, `w11.label`,
+`w11.detail`, `w11.title`, `w11.button`, `w11.done`, `w11.slider.*`,
+`w11.footer`, `w11.scrollbar`, `w11.dim`). Панель — стиль компонента: скругление 8,
+Mica и мягкая тень приходят по флагам `backdrop.mica` и `shadow.soft` и не
+дублируются у частей. Значки плиток по флагу `quicksettings.icon.tint`
+(включён) перекрашиваются цветом текста плитки, как значки Windows 11; цветные
+значки потребитель оставляет флагом `m.SetFlag(theme.KeyQuickIconTint, false)`.
+Тёмный Windows 11 не получил ни одного собственного токена: серые накладки и
+ссылки на `accent`/`surface`/`text` читаются на обоих фонах. Строки — ключи
+`desktop.quick.*` (русский и английский, `widget.RegisterStrings`). Подсказки у
+значков без подписи — `QuickSettings.ToolTipAt`. Рамка клавиатурного фокуса —
+`PaintFocusRing`, как на панели задач.
+
+
 ### Конвейер кадра
 
 Кадр рождается и уходит потребителю; здесь — то, что движок о нём сообщает и

@@ -4422,6 +4422,71 @@ inner one restores the OUTER style rather than resetting to the global one.
 `NewThemeScope(nil)` is a plain container — a global theme reaches its children.
 
 
+#### Quick settings of Windows 11 24H2
+
+`desktop.QuickSettings` stays one component. A profile picks the look through a
+presenter (`Profile.Presenters["quicksettings"] = theme.QuickSettingsPresenter`,
+set by the Windows 11 profile and inherited by its dark variant). The 24H2
+variant is on when there is both a presenter and a tile model
+(`SetQuickActions`); without a model, and under other themes, the old panel with
+three tiles and a volume slider is drawn — frames of Windows 10, Windows 2000,
+macOS and Windows 11 without a model are unchanged.
+
+```go
+q := desktop.NewQuickSettings(m, status) // status supplies volume and battery
+q.SetQuickActions(model)                 // QuickActionModel; QuickActionList is ready-made
+q.SetBrightness(0.7)                     // no data — no brightness slider
+q.VolumeDetails = true                   // "›" next to volume (output device)
+q.Details = func(id desktop.QuickActionID) *desktop.QuickDetails {
+    // id of a tile with HasDetails, or desktop.QuickVolumeID
+    return &desktop.QuickDetails{Content: list, OnClose: func() {}}
+}
+q.OnVolumeChange = setVolume             // existing: level 0..1
+q.OnToggleMute = toggleMute              // existing: the volume icon
+q.OnBrightnessChange = setBrightness
+q.OnReorder = saveOrder                  // []QuickActionID after edit mode
+q.OnEdit = func(editing bool) {}
+q.OnSettings = openSettings              // the panel is already closed
+```
+
+Tile model: `QuickAction{ID, Title, Icon/IconAt, On, Disabled, Unavailable,
+Detail, HasDetails}`. `Disabled` and `Unavailable` are dimmed and do not toggle;
+an unavailable tile keeps a working "›" (the nested page shows why), a disabled
+one does not. `Detail` is the second caption line under the tile, `HasDetails`
+draws "›" at the right. A model implementing `QuickActionReorderer`
+(`QuickActionList` does) receives the new order; for the others the panel keeps
+showing it until it closes. The Windows 10 notification center ignores the new
+fields.
+
+Inside: 96x48 tiles with corner 4 and a caption under them, three columns, two
+visible rows and scrolling (wheel, thin thumb, keyboard); "›" is a separate zone of
+the tile; a nested page with a title and a "back" arrow (Backspace, Alt+Left,
+Esc) the panel moves to by sliding sideways (token `quicksettings.page`, reduced
+motion makes the switch instant); the page content is any `widget.Widget`: it
+gets its bounds, drawing, mouse, wheel and keys. Volume (the icon mutes, value,
+"›") and brightness sliders; footer: battery from `SystemStatus` (no battery —
+nothing), the pencil (edit mode: tiles are reordered by dragging or
+Alt/Ctrl+arrows, "Done" leaves it) and the gear. Esc steps back one level:
+edit → page → closing the panel. A model update repaints only the changed tiles,
+a system status update only the slider and the battery.
+
+All sizes are metrics `quicksettings.w11.*` (width 360, padding 24, tile 96x48,
+gap 12, caption 32, footer 48...), colours are parts of style `quicksettings`
+(`w11.tile`, `w11.tile.on`, `w11.tile.chevron`, `w11.tile.edit`, `w11.label`,
+`w11.detail`, `w11.title`, `w11.button`, `w11.done`, `w11.slider.*`,
+`w11.footer`, `w11.scrollbar`, `w11.dim`). The panel itself is the component
+style: corner 8, Mica and the soft shadow come with the `backdrop.mica` and
+`shadow.soft` flags and are not repeated on parts. Tile icons are recoloured
+with the tile text colour under flag `quicksettings.icon.tint` (on), as in
+Windows 11; a consumer with coloured icons turns it off with
+`m.SetFlag(theme.KeyQuickIconTint, false)`. Dark Windows 11 got no own tokens:
+grey overlays and references to `accent`/`surface`/`text` read on both
+backgrounds. Strings are `desktop.quick.*` keys (Russian and English,
+`widget.RegisterStrings`). Tooltips of icons without captions come from
+`QuickSettings.ToolTipAt`. The keyboard focus ring is `PaintFocusRing`, as on the
+taskbar.
+
+
 ### The frame pipeline
 
 A frame is produced and handed to a consumer; this is what the engine tells

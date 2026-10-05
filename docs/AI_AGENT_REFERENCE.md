@@ -5188,6 +5188,97 @@ menu rectangle (`TestStartMenu10_OpenDamagesOnlyMenuArea`). Snapshots:
 `GOLDEN_OUT=dir go test ./desktop -run TestStartMenu10_` writes dark/light PNGs at
 100/150/200 %.
 
+### Quick settings of Windows 11 24H2 — `desktop/quickpanel*.go`, `quickglyphs.go`, `theme/profiles_win11_quick.go`
+
+`desktop.QuickSettings` stays one component. The Windows 11 profile names the
+presenter (`Profile.Presenters["quicksettings"] = theme.QuickSettingsPresenter`;
+the dark profile inherits it, it adds no token of its own). The component asks
+`PresenterFor(tm, "quicksettings")` — never the theme name — and draws the 24H2
+variant only when it also has a tile model (`SetQuickActions`). Windows 10,
+Windows 2000, macOS and Windows 11 without a model draw the old three-tile panel;
+their frames are byte-identical to before (checked on 8 profiles x 2 scales, two
+states each).
+
+Consumer API (all additive):
+
+| what | API |
+|---|---|
+| tiles | `QuickSettings.SetQuickActions(QuickActionModel)`, `QuickActions()`; `QuickAction` got `Unavailable`, `Detail`, `HasDetails` |
+| reorder | `QuickActionReorderer` (optional model interface), `QuickActionList.Reorder([]QuickActionID)`, `QuickSettings.OnReorder` |
+| volume | existing `SystemStatus.Volume()`, `OnVolumeChange`, `OnToggleMute`; new `VolumeDetails` (shows the volume "›") |
+| brightness | `SetBrightness(0..1)`, `ClearBrightness()`, `Brightness()`, `OnBrightnessChange`; no data = no slider |
+| nested page | `Details func(QuickActionID) *QuickDetails` (`Title`, `Content widget.Widget`, `OnClose`), `QuickVolumeID`, `OpenDetails(id)`, `CloseDetails()`, `DetailsOpen()` |
+| footer | battery from `SystemStatus.Power()` (`NoBattery` hides it), `OnEdit(bool)`, `OnSettings()` |
+| edit mode | `SetEditing(bool)`, `Editing()` |
+| theme | `theme.QuickSettingsPresenter`, `theme.KeyQuickPage` (animation), `theme.KeyQuickIconTint` (flag, on) |
+| strings | `desktop.StrQuick*` (`desktop.quick.*`, RU and EN) |
+
+Layout is plain arithmetic from the panel rectangle and the state
+(`quickpanel_layout.go`): the same `qsLayout` is used by drawing and by hit
+testing, so what is clicked is what is drawn, also while the panel slides in.
+Sizes are metrics `quicksettings.w11.*` (width 360, side padding 24, top 24,
+tile 96x48, column and row gap 12, caption 6 + 32, "›" zone 28, slider row 40,
+footer 48, header 48, margin 12). Panel height = padding + visible tile rows
+(`rows`, 2) + sliders + footer; it does not depend on the page or on edit mode
+(the sliders area shows a hint in edit mode), so the panel never jumps. Parts of
+style `quicksettings`: `w11.tile`, `w11.tile.on` (accent; hover/pressed use
+`accent.hover`/`accent.pressed`; Active is not used), `w11.tile.chevron`,
+`w11.tile.edit`, `w11.label`, `w11.detail`, `w11.title`, `w11.dim`, `w11.button`,
+`w11.done`, `w11.slider.track|fill|thumb|dot`, `w11.footer`, `w11.scrollbar`.
+They are declared BEFORE `declareWin11Materials`, so Mica and the soft shadow of the
+panel are not inherited by tiles.
+
+Behaviour worth knowing:
+
+- Tile click -> `model.Toggle(id)`; `Disabled`/`Unavailable` do not toggle (the
+  list model also refuses them). "›" is a separate focus and hit zone; it opens
+  `Details(id)` (nil result = nothing opens). Not drawn in edit mode.
+- Nested page: both pages are drawn shifted by `page` (`Tween`, token
+  `quicksettings.page`, decorative: 0 under `motion.reduce`). Content gets
+  `SetBounds(body)` when drawn, receives the mouse through its own deepest
+  widget under the cursor (`MouseClickHandler`, `MouseMoveHandler`,
+  `OnMouseWheelPixels`) and keys on the root if it is a `widget.KeyHandler`; Tab
+  switches between "back" and the content. Back: arrow, Backspace, Alt+Left.
+  Esc steps back one level: edit mode -> page -> panel (also through
+  `DismissOnEscape`, which the engine calls when the panel is not focused).
+- Scroll: wheel, thin thumb (drag with mouse capture), focus follows the tile
+  (`ensureVisible`). Rows scrolled under the edge are clipped by the grid:
+  `PaintStyle` of a rounded layer replaces the rect clip, so parts inside a
+  clipped area (tiles, and everything while pages slide) are painted by
+  `qsPaint` (fill + border under the rect clip) when they are not fully inside.
+- Edit mode (pencil): drag a tile (threshold 5 px, mouse capture, auto-scroll at
+  the grid edge, others make room live), or Alt/Ctrl+arrows on the focused tile.
+  The new order goes to the model (`QuickActionReorderer`), `OnReorder`, and stays
+  visible until the panel closes (`pn.order`). A drop on the same place is not an
+  event.
+- Sliders: click, drag (capture), wheel, keys (arrows 5 %, PageUp/PageDown 10 %,
+  Home/End). The shown level follows the hand at once (`volOver`, `bright`) and the
+  consumer's `SystemStatus`/`SetBrightness` wins on the next notification.
+- Repaint: a model change with the same set and order repaints only the changed
+  tile and its caption (`InvalidateRect`, no `Invalidate`); a status change only the
+  volume row and the battery; hover only the zone. Subscriptions (model, status)
+  live while the panel is open and are set by the `Flyout` hooks (`afterOpen`,
+  `afterClose`), so they work when a `FlyoutManager` or a group opens the panel.
+- Placement (`Flyout.Place`, bottom/top bars): centred on the anchor, `margin` (12)
+  from the screen edge and from the bar; side bars use the common placement.
+- Keyboard: Tab/Shift+Tab walk tiles (each followed by its "›"), brightness, volume
+  icon, volume, "›", pencil, gear; arrows move over the grid and adjust sliders;
+  Enter/Space activate; the ring is `PaintFocusRing`, shown only after a key.
+- Tile icons: `QuickAction.IconAt(physicalSide)` / `Icon`; under flag
+  `quicksettings.icon.tint` they are recoloured with the tile text colour.
+  Glyphs of the panel (chevrons, pencil, gear, sun, speaker, grip, bolt) are SVG
+  rasterised at physical size (`quickglyphs.go`).
+- Not done: the Windows 11 flyout shows tile labels on one line (elided), not two;
+  `Unavailable` is ignored by the Windows 10 center; tooltips of tile captions that
+  are elided are not shown.
+
+Tests: `desktop/quickpanel_test.go` (variant selection, geometry at 100-200 %,
+toggle, single-tile repaint, nested page and reduce motion, scroll, sliders,
+edit and reorder, footer, keyboard, ring, accent/theme/language live, first frame
+< 100 ms, no subscriptions when closed), `quickpanel_clip_test.go` (nothing is
+drawn outside the grid or the panel), `theme/profiles_win11_quick_test.go`.
+Frames: `QS_OUT=dir go test -run TestVisual_QuickSettingsWin11 ./desktop/`.
+
 ### Measured cost of a frame
 
 Desktop scene from `desktop/` at 1280×800, Windows 11 theme, fake system data

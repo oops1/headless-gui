@@ -30,6 +30,20 @@ type QuickAction struct {
 	// прав): плитка приглушена и не нажимается. Честное «недоступно» лучше
 	// плитки, которая включается и ничего не делает.
 	Disabled bool
+
+	// Unavailable — действие сейчас недоступно, хотя вообще бывает (нет
+	// сети для VPN, нет подключённого устройства): плитка Windows 11
+	// приглушена и не переключается, но «›» у неё работает — во вложенной
+	// панели видно, почему. Модель плиток (QuickActionList.Toggle) такую
+	// плитку тоже не переключает. Центр уведомлений Windows 10 это поле не
+	// читает.
+	Unavailable bool
+	// Detail — вторая строка подписи плитки Windows 11 под названием
+	// (имя сети, «Подключено»). Центр уведомлений Windows 10 её не рисует.
+	Detail string
+	// HasDetails — у плитки есть вложенная панель: Windows 11 рисует справа
+	// «›», по нажатию на который QuickSettings.Details отдаёт содержимое.
+	HasDetails bool
 }
 
 // IconFor возвращает значок для квадрата со стороной size (физические пиксели).
@@ -42,7 +56,18 @@ func (a QuickAction) IconFor(size int) image.Image {
 	return a.Icon
 }
 
-// QuickActionModel — быстрые действия центра уведомлений.
+// QuickActionReorderer — необязательное расширение модели: потребитель
+// запоминает порядок плиток, который пользователь выбрал в режиме правки
+// быстрых настроек Windows 11. Модель без него порядок не хранит; панель всё
+// равно сообщает новый порядок колбэком QuickSettings.OnReorder и до закрытия
+// показывает его.
+type QuickActionReorderer interface {
+	// Reorder получает идентификаторы плиток в новом порядке. Плитки, которых
+	// в нём нет, остаются в конце в прежнем порядке.
+	Reorder(order []QuickActionID)
+}
+
+// QuickActionModel — быстрые действия центра уведомлений и быстрых настроек.
 //
 // Subscribe возвращает функцию отписки, замыкание зовётся из горутины
 // потребителя (см. раздел «Из какой горутины что зовётся» в описании пакета).
@@ -130,6 +155,42 @@ func (q *QuickActionList) SetOn(id QuickActionID, on bool) {
 	}
 }
 
+// Reorder ставит плитки в порядок order (идентификаторы) и уведомляет
+// подписчиков. Неизвестные идентификаторы и повторы пропускаются, плитки, не
+// названные в order, остаются в конце в прежнем порядке. Тот же порядок — не
+// событие. Реализует QuickActionReorderer.
+func (q *QuickActionList) Reorder(order []QuickActionID) {
+	q.mu.Lock()
+	byID := make(map[QuickActionID]QuickAction, len(q.list))
+	for _, a := range q.list {
+		byID[a.ID] = a
+	}
+	next := make([]QuickAction, 0, len(q.list))
+	for _, id := range order {
+		if a, ok := byID[id]; ok {
+			next = append(next, a)
+			delete(byID, id)
+		}
+	}
+	for _, a := range q.list {
+		if _, left := byID[a.ID]; left {
+			next = append(next, a)
+		}
+	}
+	changed := false
+	for i := range next {
+		if next[i].ID != q.list[i].ID {
+			changed = true
+			break
+		}
+	}
+	q.list = next
+	q.mu.Unlock()
+	if changed {
+		q.notify()
+	}
+}
+
 // Toggle записывает нажатие в журнал и либо зовёт OnToggle, либо
 // переключает плитку сама. Недоступная плитка не нажимается.
 func (q *QuickActionList) Toggle(id QuickActionID) {
@@ -141,7 +202,7 @@ func (q *QuickActionList) Toggle(id QuickActionID) {
 			break
 		}
 	}
-	if cur == nil || cur.Disabled {
+	if cur == nil || cur.Disabled || cur.Unavailable {
 		q.mu.Unlock()
 		return
 	}

@@ -737,6 +737,10 @@ func Windows11Profile() *Profile {
 		p.SetStyle(comp, "", StateNormal, st)
 	}
 
+	// Быстрые настройки 24H2 — презентер, метрики и части (profiles_win11_quick.go).
+	// До материалов: части, объявленные к их вызову, получают сброс Mica и тени.
+	declareWin11QuickSettings(p)
+
 	// Mica, MicaAlt и мягкие тени — только под флагами (profiles_win11_material.go).
 	declareWin11Materials(p, RGB(224, 224, 224), RGBA(0, 0, 0, 77))
 

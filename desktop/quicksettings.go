@@ -6,6 +6,11 @@
 // сообщает о действиях пользователя колбэками (OnToggleWiFi, OnToggleMute,
 // OnVolumeChange) — включать Wi-Fi, приглушать звук и менять громкость
 // системы должен тот, кто эту панель создал.
+//
+// Это прежний вид панели. Вариант Windows 11 24H2 — список плиток из модели
+// потребителя, ползунки громкости и яркости, вложенные страницы, режим
+// правки — выбирается презентером профиля темы и включается, когда задана
+// модель плиток (SetQuickActions); он описан в quickpanel.go.
 package desktop
 
 import (
@@ -65,12 +70,34 @@ type QuickSettings struct {
 	// новый уровень в [0,1].
 	OnVolumeChange func(float64)
 
+	// Колбэки и источники варианта Windows 11 (quickpanel.go). Прежний вид
+	// панели их не читает.
+	//
+	// Details отдаёт вложенную страницу «›» плитки (QuickVolumeID — громкости);
+	// nil — страниц нет. VolumeDetails включает «›» у громкости.
+	Details       func(QuickActionID) *QuickDetails
+	VolumeDetails bool
+	// OnBrightnessChange — пользователь двигает ползунок яркости, новый
+	// уровень в [0,1]. Ползунок есть, только если потребитель задал яркость
+	// (SetBrightness).
+	OnBrightnessChange func(float64)
+	// OnReorder — новый порядок плиток после режима правки.
+	OnReorder func([]QuickActionID)
+	// OnEdit — режим правки включён или выключен (карандаш внизу).
+	OnEdit func(editing bool)
+	// OnSettings — нажата шестерёнка («Параметры»). Панель к этому моменту уже
+	// закрыта: параметры открываются поверх рабочего стола, а не под ней.
+	OnSettings func()
+
 	mu       sync.Mutex
 	unsub    func()
 	dragging bool
 
 	// fade — плавный переход цвета плиток при смене Active (тема: hover).
 	fade motion
+
+	pn *qsPanel // вариант Windows 11
+	fs FocusState
 }
 
 // NewQuickSettings создаёт панель быстрых настроек, оформляемую темой tm и
@@ -82,26 +109,47 @@ func NewQuickSettings(tm *theme.Manager, st SystemStatus) *QuickSettings {
 	}
 	q.Content = q.drawContent
 	q.Size = q.size
+	q.Place = q.place
+	q.pn = newQSPanel(q)
+	// Подписки и фокус открывают панель со стороны (менеджер, группа) так же
+	// часто, как её собственный Open, — поэтому крючки Flyout, а не Open.
+	q.Flyout.afterOpen = q.onOpened
+	q.Flyout.afterClose = q.onClosed
+	q.Flyout.beforeOpen = q.pn.reset
 	return q
 }
 
-// Open открывает панель и подписывается на SystemStatus. Подписка живёт,
-// пока панель открыта — вне экрана перерисовывать её по чужим уведомлениям
-// незачем; Close (симметрично) отписывается.
-func (q *QuickSettings) Open(anchor image.Rectangle) {
-	q.mu.Lock()
-	if q.unsub == nil && q.st != nil {
-		q.unsub = q.st.Subscribe(q.Invalidate)
+// place — Flyout.Place: вариант Windows 11 парит над значком с полем до края
+// экрана и до панели задач; прежний вид размещается обычным образом.
+func (q *QuickSettings) place(anchor, screen image.Rectangle, edge Edge, size image.Point) (image.Rectangle, bool) {
+	if !q.rich() {
+		return image.Rectangle{}, false
 	}
-	q.mu.Unlock()
-	q.Flyout.Open(anchor)
+	return q.pn.place(anchor, screen, edge, size)
 }
 
-// Close закрывает панель (как обычный Flyout.Close) и отписывается от
-// SystemStatus — иначе закрытая, но не отпущенная панель продолжала бы
-// держать подписчика и просыпаться на каждое изменение сети, звука или
-// питания вечно.
-func (q *QuickSettings) Close() {
+// attach подписывает панель на SystemStatus. Подписка живёт, пока панель
+// открыта — вне экрана перерисовывать её по чужим уведомлениям незачем.
+func (q *QuickSettings) attach() {
+	q.mu.Lock()
+	need := q.unsub == nil && q.st != nil
+	q.mu.Unlock()
+	if !need {
+		return
+	}
+	u := q.st.Subscribe(q.onStatus)
+	q.mu.Lock()
+	if q.unsub == nil {
+		q.unsub, u = u, nil
+	}
+	q.mu.Unlock()
+	if u != nil {
+		u()
+	}
+}
+
+// detach снимает подписку на SystemStatus.
+func (q *QuickSettings) detach() {
 	q.mu.Lock()
 	unsub := q.unsub
 	q.unsub = nil
@@ -109,6 +157,28 @@ func (q *QuickSettings) Close() {
 	if unsub != nil {
 		unsub()
 	}
+}
+
+// onStatus — изменились показания системы (горутина потребителя).
+func (q *QuickSettings) onStatus() {
+	if q.rich() {
+		q.pn.onStatus()
+		return
+	}
+	q.Invalidate()
+}
+
+// Open открывает панель; подписка на SystemStatus ставится крючком
+// Flyout.afterOpen и живёт, пока панель открыта.
+func (q *QuickSettings) Open(anchor image.Rectangle) {
+	q.Flyout.Open(anchor)
+}
+
+// Close закрывает панель (как обычный Flyout.Close); крючок afterClose
+// отписывается от SystemStatus — иначе закрытая, но не отпущенная панель
+// продолжала бы держать подписчика и просыпаться на каждое изменение сети,
+// звука или питания вечно.
+func (q *QuickSettings) Close() {
 	q.Flyout.Close()
 }
 
@@ -140,6 +210,9 @@ func (q *QuickSettings) Draw(widget.DrawContext) {}
 // мимо панели, клик по пустому месту внутри неё) отдаётся встроенному
 // Flyout — он либо ничего не делает, либо закрывает панель.
 func (q *QuickSettings) OnMouseButton(e widget.MouseEvent) bool {
+	if q.IsOpen() && q.rich() {
+		return q.richMouseButton(e)
+	}
 	if !q.IsOpen() || e.Button != widget.MouseLeft {
 		return q.Flyout.OnMouseButton(e)
 	}
@@ -174,7 +247,11 @@ func (q *QuickSettings) OnMouseButton(e widget.MouseEvent) bool {
 }
 
 // OnMouseMove продолжает перетаскивание ползунка, если оно идёт.
-func (q *QuickSettings) OnMouseMove(x, _ int) {
+func (q *QuickSettings) OnMouseMove(x, y int) {
+	if q.IsOpen() && q.rich() {
+		q.richMouseMove(x, y)
+		return
+	}
 	if q.isDragging() {
 		q.applyDragX(x)
 	}
@@ -298,6 +375,9 @@ func (q *QuickSettings) trackRect() image.Rectangle {
 // size — Flyout.Size: ширина из темы, высота — ряд плиток плюс зазор плюс
 // полоса ползунка (той же высоты, что и плитка) плюс внутренние отступы.
 func (q *QuickSettings) size() image.Point {
+	if q.rich() {
+		return q.pn.size()
+	}
 	width := q.metric(KeyQuickSettingsWidth)
 	tile := q.metric(KeyQuickSettingsTile)
 	gap := q.metric(KeyQuickSettingsGap)
@@ -313,6 +393,10 @@ func (q *QuickSettings) size() image.Point {
 
 // drawContent — Flyout.Content: три плитки и ползунок громкости.
 func (q *QuickSettings) drawContent(ctx widget.DrawContext, _ image.Rectangle) {
+	if q.rich() {
+		q.richDraw(ctx)
+		return
+	}
 	q.drawNetworkTile(ctx)
 	q.drawVolumeTile(ctx)
 	q.drawPowerTile(ctx)
