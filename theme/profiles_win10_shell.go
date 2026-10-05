@@ -143,4 +143,6 @@ func declareWin10Panels(set func(comp, part string, st State, d StyleDelta), pal
 	button("notificationcenter", "action", pal.action, pal.actionHover, pal.pressed, pal.actionHover)
 	button("notificationcenter", "quick.tile", pal.action, pal.actionHover, pal.pressed, pal.actionHover)
 	tile("notificationcenter", "quick.tile.on", KeyAccent, KeyAccentHover, KeyAccentPressed)
+	// toast, field, glyph, scrollbar — см. profiles_win10_notify.go.
+	declareWin10NotificationParts(set, pal)
 }

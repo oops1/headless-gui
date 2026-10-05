@@ -120,6 +120,21 @@ type Flyout struct {
 	// нулевое и не показывается.
 	Size func() image.Point
 
+	// Place — необязательное собственное размещение: получает привязку, экран,
+	// сторону панели и желаемый размер, возвращает прямоугольник окна. Вторая
+	// пара «false» — разместить обычным образом (от значка).
+	//
+	// Нужно панелям, которые стоят не у значка, а у края экрана: центр
+	// уведомлений Windows 10 прижат к правому краю и тянется от верха
+	// рабочей области до панели задач, и значок кнопки ему для этого не нужен.
+	Place func(anchor, screen image.Rectangle, edge Edge, size image.Point) (image.Rectangle, bool)
+
+	// Plate — необязательный выбор стиля подложки: компонент и часть вместо
+	// (Component, ""). Вызывается при каждой отрисовке, поэтому следует за
+	// сменой темы: плоская тема даёт подложку целой панели, Windows 10 — часть
+	// "panel" с акрилом. Пустой компонент — оставить Component.
+	Plate func() (component, part string)
+
 	// afterClose — уборка встроенной панели при закрытии: таймеры,
 	// накопленное состояние. Своё поле, а не OnClose, потому что OnClose
 	// принадлежит ОБОЛОЧКЕ, и занять его значило бы отнять.
@@ -530,6 +545,14 @@ func (f *Flyout) restRect() image.Rectangle {
 		screen = f.Anchor
 	}
 
+	if f.Place != nil {
+		if r, ok := f.Place(f.Anchor, screen, f.Edge, sz); ok {
+			if screen.Empty() {
+				return r
+			}
+			return fitInto(r, screen)
+		}
+	}
 	// Прижатая к краю экрана панель и панель у бокового края считаются по-своему
 	// (flyoutedge.go); для нижней и верхней панели — прежний расчёт ниже.
 	if f.pinned || f.Edge.Vertical() {
@@ -594,6 +617,11 @@ func fitInto(r, screen image.Rectangle) image.Rectangle {
 func (f *Flyout) style(st theme.State) *theme.Style {
 	if f.tm == nil {
 		return &theme.Style{}
+	}
+	if f.Plate != nil {
+		if comp, part := f.Plate(); comp != "" {
+			return f.tm.GetStyle(comp, part, st)
+		}
 	}
 	return f.tm.GetStyle(f.Component, "", st)
 }

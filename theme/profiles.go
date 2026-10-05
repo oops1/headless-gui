@@ -484,6 +484,8 @@ func Windows10Profile() *Profile {
 	declareWin10Panels(func(comp, part string, st State, d StyleDelta) {
 		p.SetStyleWhen(KeyTaskbarLight, comp, part, st, d)
 	}, win10ShellLight)
+	// Размеры центра уведомлений и его презентер (profiles_win10_notify.go).
+	declareWin10NotificationMetrics(p)
 
 	// Элементы панели не носят собственной заливки в покое: фон им даёт сама
 	// панель, а своя плашка появляется только под курсором и у активного

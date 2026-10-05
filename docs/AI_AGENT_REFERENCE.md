@@ -4448,6 +4448,81 @@ UI is repainted, but sizes already computed are kept until the next layout).
 `desktop/` falls back to it as well when a style has no font size.
 Tests: `tests/defaultfont_theme_test.go`.
 
+### Notification center of Windows 10 — `desktop/notifyview*.go`, `notificationcenter_win10.go`
+
+`desktop.NotificationCenter` stays one component; a profile picks its look through
+a presenter (`Profile.Presenters["notificationcenter"] = theme.NotificationCenterPresenter`,
+set by the Windows 10 profile and inherited by its dark variant). The component
+asks `PresenterFor(tm, "notificationcenter")`, never the theme name. Windows 11,
+Windows 2000 and macOS keep the flat list (rendered frames are byte-identical to
+before; checked on 4 themes x 4 panels). The flat tests of the repo run under
+Windows 11 for that reason.
+
+Rich variant, all sizes are metrics `notificationcenter.*` (`theme/profiles_win10_notify.go`):
+the panel is `width` (396) wide, glued to the right screen edge and spans from the
+top of the work area to the taskbar (`Flyout.Place` hook: height = anchor top minus
+`margin`, which is 0 here; other flyouts keep `Flyout.Margin` 6). Set
+`NotificationCenter.WorkArea` when the anchor is a small tray icon: the anchor is
+used as the bar edge otherwise, so pass a rectangle that spans the bar height.
+Layout (top to bottom): header link "Manage notifications" (`OnManage`, the panel
+closes first) / scrolling list of groups (icon, name, collapse, close group) with
+cards / footer links "Expand|Collapse" (left) and "Clear notifications" (right) /
+quick action tiles (4 columns, one row collapsed). Cards: icon, title (theme font
+`title`), body (2 lines, 8 expanded, ellipsis), time (`caption`), hover cross,
+chevron, actions. Theme parts of component `notificationcenter`: `panel`, `toast`,
+`header`, `link`, `group`, `card`, `action`, `field`, `glyph`, `dim`, `quick.tile`,
+`quick.tile.on` (accent), `scrollbar`; they follow `SetAccent` and `taskbar.light`
+live.
+
+Model additions (all additive): `Notification{AppName, Icon, IconAt, Timestamp,
+Actions}` (`At()` = `Timestamp` or `Time`), `NotificationAction{ID, Kind, Title,
+Placeholder, Options, Selected, Keep}` with kinds Button / Link / Reply (field +
+send button) / Select (dropdown), `NotificationActionEvent{Notification, Action,
+Kind, Value, Index, Inputs}` (Action "" = the card itself was pressed; `Inputs` carries
+current values of fields, so a button sends the chosen dropdown value). Delivery:
+`NotificationCenter.OnAction` and/or the optional source interface
+`NotificationActions.InvokeNotificationAction`. A button/link/reply removes the
+notification unless `Keep`; pressing the card removes it and closes the center.
+Quick actions: `QuickAction{ID, Title, Icon, IconAt, On, Disabled}`,
+`QuickActionModel{List, Toggle, Subscribe}`, ready `QuickActionList`;
+`nc.SetQuickActions(m)`, `SetQuickExpanded`, `SetGroupCollapsed`. A change of
+`On`/`Disabled`/`Title` of tiles in an unchanged set repaints only those tiles
+(a partial repaint is pixel-equal to a full one: tested).
+
+Fixed errors: the center subscribes to its sources on open and unsubscribes on any
+close (button, outside click, Esc, `DismissAt`) so the list updates after reopen;
+an open center repaints on a new notification; height no longer depends on the
+number of cards (list scrolls: wheel, keys, click on the thin auto-hiding thumb).
+
+Keyboard: the open rich center is `Focusable` + `TabAcceptor`; Tab/Shift+Tab,
+Up/Down walk stops (link, groups, cards, actions, reply field, footer links, tiles),
+arrows walk the tile grid, Left/Right collapse/expand a card or group, Enter/Space
+activate, Delete dismisses a card or group, PgUp/PgDn scroll, typing goes into the
+reply field (Backspace, Delete, arrows, Home/End, Ctrl+V, Enter sends), Esc closes
+the dropdown first, then the center. Focus ring: `PaintFocusRing`, keyboard only.
+Strings are `desktop.notif.*` (`notifystrings.go`); to reuse a catalog map them with
+`widget.AliasStrings(map[string]string{desktop.StrNotifManage: "ManageNotifications",
+desktop.StrNotifClear: "ClearAllNotifications", desktop.StrNotifExpand: "Expand",
+desktop.StrNotifCollapse: "Collapse"})`. Time on a card: today -> `TimeFormat`,
+yesterday -> "Yesterday", older -> `DateFormat` of the `DateCulture`; `nc.Clock` fixes "now".
+
+Toast: `desktop.NewNotificationToast(tm, ns)` shows each NEW notification (those in
+the source at creation are ignored) as the same card in the bottom right corner above
+the tray (`Anchor`/`Screen` or `WorkArea`), slides in from the right, hides after
+`Timeout` (default metric `notificationcenter.toast.timeout`, 5000 ms), stays while the
+mouse is over it, cross hides only the toast, actions work as in the center. It is
+NOT registered in `FlyoutManager` (opening it must not close the Start menu) and is
+added to the root after the manager; `toast.Suppress(center)` keeps it quiet while
+the center is open; only themes with the presenter show it.
+
+Hooks added to `Flyout` (nil = old behaviour): `Place` (own placement) and `Plate`
+(component and part of the plate style).
+
+Tests: `desktop/notifyview_test.go` (behaviour, errors, keyboard, toast),
+`desktop/notifyview_render_test.go` (pixels: accent, light flag, partial repaint,
+open area), `theme/profiles_win10_notify_test.go`. Pictures: `NC_OUT=<dir> go test
+./desktop -run TestVisual_NotificationCenter` and `...Toast`.
+
 ### Measured cost of a frame
 
 Desktop scene from `desktop/` at 1280×800, Windows 11 theme, fake system data

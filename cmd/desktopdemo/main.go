@@ -132,9 +132,14 @@ func buildDesktop(eng *engine.Engine) scene {
 	cat.Pin("term")
 	status := desktop.NewFakeSystemStatus()
 	notes := desktop.NewFakeNotifications()
-	notes.Add(desktop.Notification{Title: "Обновление", Body: "Готово к установке"})
+	notes.Add(desktop.Notification{Title: "Обновление", Body: "Готово к установке",
+		AppID: "updates", AppName: "Обновления",
+		Actions: []desktop.NotificationAction{
+			{ID: "install", Kind: desktop.NotificationActionButton, Title: "Установить"},
+			{ID: "later", Kind: desktop.NotificationActionButton, Title: "Позже"},
+		}})
 	notes.Add(desktop.Notification{Title: "Батарея", Body: "Заряд ниже 20%",
-		Severity: desktop.SeverityWarning})
+		AppID: "power", AppName: "Питание", Severity: desktop.SeverityWarning})
 
 	// ─── Панель задач ───────────────────────────────────────────────────────
 	bar := desktop.NewTaskbar(tm)
@@ -174,6 +179,13 @@ func buildDesktop(eng *engine.Engine) scene {
 	center := desktop.NewNotificationCenter(tm, notes)
 	center.Screen = screen
 	center.Align = desktop.AlignEnd
+	// Быстрые действия показывает центр Windows 10; плоские темы их не рисуют.
+	center.SetQuickActions(desktop.NewQuickActionList(
+		desktop.QuickAction{ID: "wifi", Title: "Wi-Fi", On: true},
+		desktop.QuickAction{ID: "bt", Title: "Bluetooth"},
+		desktop.QuickAction{ID: "night", Title: "Ночной свет"},
+		desktop.QuickAction{ID: "plane", Title: "В самолёте"},
+	))
 	cal := desktop.NewCalendarFlyout(tm, desktop.SystemClock{})
 	cal.Screen = screen
 	cal.Align = desktop.AlignEnd

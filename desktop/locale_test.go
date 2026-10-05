@@ -139,7 +139,7 @@ func TestLocale_StartMenuSectionsFollowLanguage(t *testing.T) {
 
 func TestLocale_NotificationCenterFollowsLanguage(t *testing.T) {
 	// Пустой центр.
-	empty := NewNotificationCenter(panelTheme(t), NewFakeNotifications())
+	empty := NewNotificationCenter(flatNotifTheme(t), NewFakeNotifications())
 	empty.Screen = panelScreen()
 	empty.Open(panelAnchor())
 	defer empty.Close()

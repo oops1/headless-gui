@@ -181,7 +181,7 @@ func TestQuickSettings_CloseUnsubscribes(t *testing.T) {
 func notifFixture(t *testing.T) (*NotificationCenter, *FakeNotifications) {
 	t.Helper()
 	ns := notesFake()
-	nc := NewNotificationCenter(panelTheme(t), ns)
+	nc := NewNotificationCenter(flatNotifTheme(t), ns)
 	nc.Screen = panelScreen()
 	nc.Open(panelAnchor())
 	return nc, ns
@@ -226,7 +226,7 @@ func TestNotificationCenter_ClearAll(t *testing.T) {
 }
 
 func TestNotificationCenter_EmptyStateAndClose(t *testing.T) {
-	tm := panelTheme(t)
+	tm := flatNotifTheme(t)
 	ns := NewFakeNotifications()
 	nc := NewNotificationCenter(tm, ns)
 	nc.Screen = panelScreen()
