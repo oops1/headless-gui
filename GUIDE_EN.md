@@ -3471,6 +3471,26 @@ state (`IsNavCollapsed`, `SetNavCollapsed`) and calls `OnNavToggle`.
 `SetNavIcons`, `OnNavToggle`. The widget in the bar is the one child of a window
 that is not stretched to the client area: its geometry comes from the bar.
 
+**Window icon and the system menu.** `win.SetIcon(img)` (or `SetIconSVG(data)`)
+puts an icon left of the caption — not to be confused with `SetNavIcons`, which
+is the icon of the panel collapse button. The caption moves aside by itself; the
+size comes from the theme (metric `window.caption.icon.size`, 16 in Windows
+2000). A click on the icon opens the system menu (Restore, Move, Size, Minimize,
+Maximize, Close — labels through `Tr`, actions on `OnMinimize` / `OnMaximize` /
+`OnClose` / `OnNativeMove` / `OnNativeResize`); a double click closes the
+window. Your own items: `win.SetSystemMenu(items)`, the starting list is
+`win.SystemMenuItems()`.
+
+**A press on the title bar belongs to the window.** The window asks for the
+mouse capture on every press in the bar (to drag itself), and the engine looks
+for the capturer from the deepest child up: a widget lying over the title bar
+gets the press only if it returned `true` from its own `WantsCapture`; otherwise
+the press goes to the window. If the widget does not need the capture (a plain
+button), implement `OwnsTitleBarPress(pt image.Point) bool`
+(`widget.TitleBarPressOwner`) or give the window
+`win.SetTitleBarHitTest(func(pt) bool)` for an area no widget owns: such a press
+takes the ordinary path and does not drag the window.
+
 **The mac title-bar layout does not offer this mode.** The window buttons sit on
 the left and the caption is centered, so an application widget would have to be
 squeezed between them — no macOS window has a bar like that. There
@@ -4205,6 +4225,52 @@ several engines in one process are supported (see "Several engines in one
 process"). A bar per monitor, Start / quick settings coordination across
 monitors and the scale of each monitor are the consumer's job.
 
+#### Notification center and calendar of Windows 11
+
+The Windows 11 profile draws the notification center as cards and the calendar as a
+separate rounded card under it (364 wide, radius 8 for panels and 4 for cards).
+The components are the same — `NotificationCenter` and `CalendarFlyout`; the
+profile's presenter picks the look, they never know the theme name, and a change of
+theme, accent or language on open panels recreates nothing. Center: the
+"Notifications" title, a "Do not disturb" bell and "Clear all" (inactive while the
+list is empty); a card with an app row (icon, name, time), title, text, expand,
+cross and the four kinds of actions; a group — a header with a counter when an app
+has several notifications. Calendar: "Monday, October 5", the month, ‹ ›, today as
+an accent circle, collapse/expand and the "Focus" module.
+
+```go
+center := desktop.NewNotificationCenter(m, notes)
+cal := desktop.NewCalendarFlyout(m, desktop.SystemClock{})
+center.Screen, cal.Screen = screen, screen
+
+dnd := desktop.NewDoNotDisturb(false)    // one model for the centre, the toast and the tray button
+center.SetDoNotDisturb(dnd)
+toast.SetDoNotDisturb(dnd)               // the toast stays silent while the mode is on
+
+cal.SetFocusSession(session)             // desktop.FocusSession from the consumer
+cal.Ticker = func(d time.Duration, f func()) func() { t := eng.Every(d, f); return t.Stop }
+
+group := desktop.LinkNotificationCenter(center, cal) // centre above the calendar, closed together
+fm.Register("calendar", cal)             // both panels go to the flyout manager
+fm.Register("notifications", center)
+clock.OnClick = func() { group.OpenAll(clock.Bounds()) } // from the clock and from the bell
+```
+
+`FocusSession` is the state (`Duration`, `Running`, `EndsAt`) and the actions
+(`SetDuration`, `Start`, `Stop`, `Subscribe`) supplied by the consumer; what focus
+actually does (turns "Do not disturb" on, mutes sound) is its decision. The
+calendar draws the duration picker (`−` / `+` in 5 minute steps, 5–240) and
+"Start", and a running session as a countdown, a progress line and "Stop"; the
+once-a-second repaint runs while the calendar is open and repaints only the module.
+`desktop.NewFakeFocusSession(clock)` is a ready model for demos. On a short screen
+the calendar stays collapsed while the centre above it would not have room; the
+user's choice (`Collapsed`) is not changed. Keyboard: Tab walks the centre, then the
+calendar (buttons, the day grid — arrows move the day, Enter selects), Enter/Space
+press, PgUp/PgDn page months, Esc closes both panels. Strings are
+the keys `desktop.notif.title|dnd`, `desktop.focus.*`,
+`desktop.cal.headDate|weekdayLong.N` (RU/EN, `widget.Tr`; a `DateCulture` may
+additionally implement `DateHeaderCulture`).
+
 #### The taskbar and its components
 
 ```go
@@ -4284,6 +4350,36 @@ keys `ShowDesktop`, `NotificationCenter`, `NoNewNotifications`,
 `NewNotificationsCount` stay as aliases: if the app overrode them its string is
 used. The language is the same `tr()` with `DefaultLanguage` as the other
 components (`widget.RegisterStrings` overrides the built-in ru/en).
+
+#### Windows 11 taskbar
+
+Everything below is switched on by the Windows 11 profile tokens; a theme without the
+tokens keeps the old drawing (the Windows 10, Windows 2000 and macOS frames are unchanged).
+
+```go
+bar.AddItem(desktop.SlotWidgets, wb)     // far left edge whatever the alignment
+bar.AddItem(desktop.SlotStart, start)    // Start, search, Task View: the centred group
+bar.AddItem(desktop.SlotStart, box)      // box.SetMode(desktop.SearchModeIconAndLabel)
+bar.AddItem(desktop.SlotStart, taskView)
+bar.AddItem(desktop.SlotApps, area)
+tray.AddItem(desktop.NewTrayGroup(m, net, vol, power))   // one button, one OnClick
+```
+
+- **Alignment on the fly:** `bar.SetAlignment(desktop.BarAlignLeft)` (and `ResetAlignment`)
+  or `m.SetFlag("taskbar.centered", false)`; items are not recreated, only the bar strip
+  is repainted.
+- **Widgets:** `wb.SetContent(desktop.WidgetsContent{IconAt: sunny, Temperature: "21°",
+  Caption: "Sunny"})`; the button width follows the text and the bar re-lays out itself.
+- **Task View:** `desktop.NewTaskViewButton(m)`; what it opens is up to the consumer
+  (`OnClick`), it lights up while open (`Track`, `TrackManager`).
+- **Bell:** `nb.SetDoNotDisturb(true)` or a source implementing
+  `desktop.DoNotDisturbReporter`; in the mode the bell is crossed out and the counter hidden.
+- **Window-button indicators** are `desktop.WindowInfo` fields: `ProgressState`
+  (`ProgressNormal/Paused/Error`) and `Progress` 0..1 - a progress bar on the icon;
+  `Badge` - a counter circle ("99+" cap); `Attention` - the plate blinks three times and
+  stays lit until the window is active. The pill under the button: running 6 px grey,
+  active 16 px in the accent colour, the width glides. With `motion.reduce` everything
+  changes at once. When only progress or a counter changed, one button is repainted.
 
 Optical icon sizes (Fluent draws 16/20/24 separately): `theme.IconRef` takes
 `Source: "wifi_{size}.svg"` and `Sizes: theme.IconSizes(16, 20, 24)`; `IconSet`
@@ -4390,6 +4486,71 @@ flag — is read from a shared variable inside `Draw`, so it is swapped for the
 duration of the subtree's drawing and restored via `defer`. Scopes nest: an
 inner one restores the OUTER style rather than resetting to the global one.
 `NewThemeScope(nil)` is a plain container — a global theme reaches its children.
+
+
+#### Quick settings of Windows 11 24H2
+
+`desktop.QuickSettings` stays one component. A profile picks the look through a
+presenter (`Profile.Presenters["quicksettings"] = theme.QuickSettingsPresenter`,
+set by the Windows 11 profile and inherited by its dark variant). The 24H2
+variant is on when there is both a presenter and a tile model
+(`SetQuickActions`); without a model, and under other themes, the old panel with
+three tiles and a volume slider is drawn — frames of Windows 10, Windows 2000,
+macOS and Windows 11 without a model are unchanged.
+
+```go
+q := desktop.NewQuickSettings(m, status) // status supplies volume and battery
+q.SetQuickActions(model)                 // QuickActionModel; QuickActionList is ready-made
+q.SetBrightness(0.7)                     // no data — no brightness slider
+q.VolumeDetails = true                   // "›" next to volume (output device)
+q.Details = func(id desktop.QuickActionID) *desktop.QuickDetails {
+    // id of a tile with HasDetails, or desktop.QuickVolumeID
+    return &desktop.QuickDetails{Content: list, OnClose: func() {}}
+}
+q.OnVolumeChange = setVolume             // existing: level 0..1
+q.OnToggleMute = toggleMute              // existing: the volume icon
+q.OnBrightnessChange = setBrightness
+q.OnReorder = saveOrder                  // []QuickActionID after edit mode
+q.OnEdit = func(editing bool) {}
+q.OnSettings = openSettings              // the panel is already closed
+```
+
+Tile model: `QuickAction{ID, Title, Icon/IconAt, On, Disabled, Unavailable,
+Detail, HasDetails}`. `Disabled` and `Unavailable` are dimmed and do not toggle;
+an unavailable tile keeps a working "›" (the nested page shows why), a disabled
+one does not. `Detail` is the second caption line under the tile, `HasDetails`
+draws "›" at the right. A model implementing `QuickActionReorderer`
+(`QuickActionList` does) receives the new order; for the others the panel keeps
+showing it until it closes. The Windows 10 notification center ignores the new
+fields.
+
+Inside: 96x48 tiles with corner 4 and a caption under them, three columns, two
+visible rows and scrolling (wheel, thin thumb, keyboard); "›" is a separate zone of
+the tile; a nested page with a title and a "back" arrow (Backspace, Alt+Left,
+Esc) the panel moves to by sliding sideways (token `quicksettings.page`, reduced
+motion makes the switch instant); the page content is any `widget.Widget`: it
+gets its bounds, drawing, mouse, wheel and keys. Volume (the icon mutes, value,
+"›") and brightness sliders; footer: battery from `SystemStatus` (no battery —
+nothing), the pencil (edit mode: tiles are reordered by dragging or
+Alt/Ctrl+arrows, "Done" leaves it) and the gear. Esc steps back one level:
+edit → page → closing the panel. A model update repaints only the changed tiles,
+a system status update only the slider and the battery.
+
+All sizes are metrics `quicksettings.w11.*` (width 360, padding 24, tile 96x48,
+gap 12, caption 32, footer 48...), colours are parts of style `quicksettings`
+(`w11.tile`, `w11.tile.on`, `w11.tile.chevron`, `w11.tile.edit`, `w11.label`,
+`w11.detail`, `w11.title`, `w11.button`, `w11.done`, `w11.slider.*`,
+`w11.footer`, `w11.scrollbar`, `w11.dim`). The panel itself is the component
+style: corner 8, Mica and the soft shadow come with the `backdrop.mica` and
+`shadow.soft` flags and are not repeated on parts. Tile icons are recoloured
+with the tile text colour under flag `quicksettings.icon.tint` (on), as in
+Windows 11; a consumer with coloured icons turns it off with
+`m.SetFlag(theme.KeyQuickIconTint, false)`. Dark Windows 11 got no own tokens:
+grey overlays and references to `accent`/`surface`/`text` read on both
+backgrounds. Strings are `desktop.quick.*` keys (Russian and English,
+`widget.RegisterStrings`). Tooltips of icons without captions come from
+`QuickSettings.ToolTipAt`. The keyboard focus ring is `PaintFocusRing`, as on the
+taskbar.
 
 
 ### The frame pipeline

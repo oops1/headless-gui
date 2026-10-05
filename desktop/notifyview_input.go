@@ -436,6 +436,10 @@ func (v *richView) activate(l *richLayout, z zone) {
 		}
 	case zoneClear:
 		v.dismissWhere(func(Notification) bool { return true })
+	case zoneDND:
+		if v.src.toggleDND != nil {
+			v.src.toggleDND()
+		}
 	case zoneExpand:
 		v.mu.Lock()
 		v.quickOpen = !v.quickOpen
@@ -646,11 +650,16 @@ func (v *richView) onKey(panel image.Rectangle, e widget.KeyEvent) bool {
 	plain := e.Mod&(widget.ModCtrl|widget.ModAlt|widget.ModMeta) == 0
 	switch e.Code {
 	case widget.KeyTab:
+		delta := +1
 		if e.Mod&widget.ModShift != 0 {
-			v.moveFocus(l, -1)
-		} else {
-			v.moveFocus(l, +1)
+			delta = -1
 		}
+		// Центр Windows 11 стоит над календарём: Tab с последней остановки
+		// уходит в календарь, а Shift+Tab с первой — возвращается из него.
+		if v.edgeHandoff(l, delta) {
+			return true
+		}
+		v.moveFocus(l, delta)
 		return true
 	case widget.KeyDown:
 		if foc.kind == zoneTile && v.moveTile(l, foc, +l.m.qCols) {
@@ -721,6 +730,47 @@ func (v *richView) onKey(panel image.Rectangle, e widget.KeyEvent) bool {
 		return true
 	}
 	return false
+}
+
+// edgeHandoff передаёт клавиатурный фокус соседней панели группы (календарю),
+// когда Tab выходит за последнюю остановку центра, а Shift+Tab — за первую.
+// Истина — фокус ушёл, центр свою остановку снял.
+func (v *richView) edgeHandoff(l *richLayout, delta int) bool {
+	if v.src.handoff == nil || !l.w11 {
+		return false
+	}
+	stops := l.stops()
+	if len(stops) == 0 {
+		return false
+	}
+	v.mu.Lock()
+	cur := -1
+	for i, s := range stops {
+		if s.key == v.focus {
+			cur = i
+			break
+		}
+	}
+	v.mu.Unlock()
+	if cur < 0 || (delta > 0 && cur != len(stops)-1) || (delta < 0 && cur != 0) {
+		return false
+	}
+	if !v.src.handoff(delta) {
+		return false
+	}
+	v.mu.Lock()
+	old := v.focus
+	v.focus = zoneKey{}
+	v.mu.Unlock()
+	v.invalidate(l.invalRect(old))
+	return true
+}
+
+// takeFocus ставит клавиатурный фокус на первую (last=false) или последнюю
+// остановку: так принимает фокус центр, когда его передаёт календарь.
+func (v *richView) takeFocus(panel image.Rectangle, last bool) {
+	l := v.layout(panel)
+	v.focusEdge(l, last)
 }
 
 // moveFocus переносит фокус на соседнюю остановку; по кругу.
@@ -816,7 +866,7 @@ func (v *richView) reveal(l *richLayout, z zone) {
 		return
 	}
 	k := z.key.kind
-	if k == zoneManage || k == zoneClear || k == zoneExpand || k == zoneTile {
+	if k == zoneManage || k == zoneClear || k == zoneExpand || k == zoneTile || k == zoneDND {
 		return
 	}
 	vp := l.viewport

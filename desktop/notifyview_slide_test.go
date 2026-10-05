@@ -325,7 +325,7 @@ func TestSlide_AnimationToken(t *testing.T) {
 			t.Errorf("%s: нет анимации раскрытия", name)
 		}
 	}
-	m := managerFor(t, theme.ProfileWindows11)
+	m := managerFor(t, theme.ProfileMacOS)
 	want, _ := animation(m, AnimMenuOpen)
 	if got, _ := expandAnimation(m); got != want {
 		t.Errorf("без токена длительность %v, ждали menu.open = %v", got, want)

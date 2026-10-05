@@ -9,9 +9,11 @@
 //
 // Так устроен ПЛОСКИЙ вид. Тема, которая просит меню с боковой панелью, списком
 // с прокруткой и плитками (презентер theme.PresenterStartTiles — Windows 10),
-// получает второй вид того же компонента: startmenu_tiles*.go. Каждый метод
-// ниже сначала спрашивает StartMenu.tiled и, если тема просит плитки, отдаёт
-// работу ему; плоский путь остаётся прежним до пикселя.
+// получает второй вид того же компонента: startmenu_tiles*.go, а тема, которая
+// просит сетку закреплённых (презентер theme.PresenterStartGrid — Windows 11), —
+// третий: startmenu_grid*.go. Каждый метод ниже сначала спрашивает
+// StartMenu.grid и StartMenu.tiled и, если тема просит другой вид, отдаёт работу
+// ему; плоский путь остаётся прежним до пикселя.
 package desktop
 
 import (
@@ -91,6 +93,8 @@ type StartMenu struct {
 
 	// Меню с плитками (см. startmenu_tiles.go).
 	v *startView
+	// Меню Windows 11 с сеткой закреплённых (см. startmenu_grid*.go).
+	g *startGrid
 
 	// OnSidebarActivate вызывается при выборе пункта боковой панели (id пункта
 	// из StartSidebarItem). Меню после этого закрывается, если у пункта нет
@@ -110,6 +114,27 @@ type StartMenu struct {
 	// что показать, и показывает своим способом. Вызывается, если ContextMenu
 	// не задан.
 	OnContextMenu func(target StartTarget, at image.Point)
+
+	// Только для меню Windows 11 (презентер theme.PresenterStartGrid):
+
+	// OnPinnedChanged вызывается после перетаскивания закреплённого: новый порядок
+	// целиком (копия). Сохраняет его потребитель.
+	OnPinnedChanged func(pinned []StartPinned)
+	// OnPinnedLaunch вызывается по закреплённому без приложения (App пуст).
+	OnPinnedLaunch func(id string)
+	// OnRecommendedActivate вызывается по строке «Рекомендуем» без приложения.
+	OnRecommendedActivate func(id string)
+	// UserMenu и PowerMenu собирают меню нажатия на пользователя и на кнопку
+	// питания нижней полосы (состав решает потребитель). Меню открывается над
+	// кнопкой и живёт внутри «Пуска». Без них нажатие зовёт OnSidebarActivate с
+	// идентификатором "user" или "power" и закрывает меню.
+	UserMenu  func() []widget.MenuItem
+	PowerMenu func() []widget.MenuItem
+	// GroupBounds возвращает прямоугольник группы «Пуск + приложения» панели
+	// задач. При центрированной панели (флаг taskbar.centered) меню центруется по
+	// ней; nil или пустой прямоугольник — по центру экрана (группа стоит по центру
+	// панели).
+	GroupBounds func() image.Rectangle
 }
 
 // NewStartMenu создаёt меню «Пуск» каталога cat, оформляемое темой tm.
@@ -121,6 +146,8 @@ func NewStartMenu(tm *theme.Manager, cat AppCatalog) *StartMenu {
 	m.Content = m.drawContent
 	m.Size = m.size
 	m.v = newStartView(m)
+	m.g = &startGrid{kind: startKindFlat}
+	m.Flyout.Place = m.placeGrid
 	m.Flyout.partFn = m.basePart
 	m.Flyout.marginFn = m.flyoutMargin
 	m.Flyout.beforeOpen = m.resetForOpen
@@ -154,6 +181,10 @@ func (m *StartMenu) OnMouseMove(x, y int) {
 	if !m.IsOpen() {
 		return
 	}
+	if m.grid() {
+		m.mouseMoveGrid(x, y)
+		return
+	}
 	if m.tiled() {
 		m.mouseMoveTiled(x, y)
 		return
@@ -181,6 +212,12 @@ func (m *StartMenu) OnMouseMove(x, y int) {
 // или вовсе мимо меню) отдаётся встроенной панели — она либо ничего не
 // делает (клик внутри), либо закрывает меню (клик снаружи).
 func (m *StartMenu) OnMouseButton(e widget.MouseEvent) bool {
+	if m.grid() {
+		if handled, ok := m.mouseButtonGrid(e); ok {
+			return handled
+		}
+		return m.Flyout.OnMouseButton(e)
+	}
 	if m.tiled() {
 		if handled, ok := m.mouseButtonTiled(e); ok {
 			return handled
@@ -203,6 +240,13 @@ func (m *StartMenu) OnMouseButton(e widget.MouseEvent) bool {
 // по Enter. Всё остальное (в первую очередь Esc) отдаётся встроенной
 // панели — она уже умеет закрываться сама.
 func (m *StartMenu) OnKeyEvent(e widget.KeyEvent) {
+	if m.grid() {
+		if m.keyGridView(e) {
+			return
+		}
+		m.Flyout.OnKeyEvent(e)
+		return
+	}
 	if m.tiled() {
 		if m.keyTiled(e) {
 			return
@@ -383,6 +427,10 @@ func (m *StartMenu) contentRect() image.Rectangle {
 	if r.Empty() {
 		return r
 	}
+	if m.grid() {
+		// Меню Windows 11 раскладывается от всей панели: поля — метрики вида.
+		return r
+	}
 	return r.Inset(int(m.style(theme.StateNormal).PadX))
 }
 
@@ -391,6 +439,9 @@ func (m *StartMenu) contentRect() image.Rectangle {
 // задан. Не задан — меню показывает список целиком, границам его ужать
 // нечем.
 func (m *StartMenu) size() image.Point {
+	if m.grid() {
+		return m.sizeGrid()
+	}
 	if m.tiled() {
 		return m.sizeTiled()
 	}
@@ -418,6 +469,10 @@ func (m *StartMenu) size() image.Point {
 
 // drawContent — Flyout.Content: рисует видимые строки меню.
 func (m *StartMenu) drawContent(ctx widget.DrawContext, r image.Rectangle) {
+	if m.grid() {
+		m.drawGrid(ctx, r)
+		return
+	}
 	if m.tiled() {
 		m.drawTiled(ctx, r)
 		return

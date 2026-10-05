@@ -42,7 +42,7 @@ func TestWindows10NotificationExpandAnimation(t *testing.T) {
 			t.Errorf("%s: кривая с отскоком на высоте даёт дрожание краёв", name)
 		}
 	}
-	for _, name := range []string{ProfileWindows11, ProfileWindows2000, ProfileMacOS} {
+	for _, name := range []string{ProfileWindows2000, ProfileMacOS} {
 		if a := notifyManager(t, name).GetAnimation("notification.expand"); a.Duration != 0 {
 			t.Errorf("%s: у плоского центра появилась анимация раскрытия %+v", name, a)
 		}

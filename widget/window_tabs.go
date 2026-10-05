@@ -929,17 +929,11 @@ func (w *Window) titleTabsMouseDown(pt image.Point) bool {
 		mx, my := tt.menuRect.Min.X, tt.menuRect.Max.Y+4
 		tt.mu.Unlock()
 		if menu != nil {
-			switch {
-			case menu.IsOpen():
-				menu.Close()
-			case menu.dismissedByPress(CurrentPressSeq()):
-				// Меню уже закрыто ЭТИМ нажатием: движок гасит overlay'и вне
-				// пути клика до доставки события, а кнопка «v» лежит в окне,
-				// не в меню. Без этой ветки шеврон никогда не сворачивал бы
-				// собственное меню — оно закрывалось и тут же открывалось.
-			default:
-				menu.Show(mx, my)
-			}
+			// Меню, закрытое ЭТИМ нажатием, повторно не открывается: движок
+			// гасит overlay'и вне пути клика до доставки события, а кнопка «v»
+			// лежит в окне, не в меню. Без этого шеврон никогда не сворачивал
+			// бы собственное меню — оно закрывалось и тут же открывалось.
+			menu.Toggle(mx, my)
 		}
 		return true
 	}

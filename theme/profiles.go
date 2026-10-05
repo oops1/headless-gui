@@ -74,8 +74,23 @@ func Windows2000Profile() *Profile {
 		SetColor("bevel.shadow", shadow).
 		SetColor("bevel.dark", dark)
 
+	// Градиент заголовка: тёмно-синий акцента → светло-голубой #A6CAF0 у
+	// активного окна, серый → светло-серый у неактивного (первые точки —
+	// заливки стиля window/titlebar ниже). После SetAccent вторая точка
+	// следует за светлым оттенком акцента: без этого градиент уходил бы из
+	// выбранного цвета в прежний голубой.
+	p.SetColor(KeyWindowTitleGradient2, RGB(166, 202, 240)).
+		SetColor(KeyWindowTitleGradient2Inactive, RGB(192, 192, 192)).
+		SetColorFrom(KeyWindowTitleGradient2, KeyAccentLight)
+
 	p.SetMetric("control.corner", 0).
 		SetMetric("window.corner", 0).
+		// Заголовок окна Windows 2000 — 18 px, кнопки управления 16×14, значок
+		// 16. Без метрик классическое окно рисует заголовок 24 px и кнопки 18×18.
+		SetMetric(KeyWindowTitleBarHeight, 18).
+		SetMetric(KeyWindowCaptionButtonW, 16).
+		SetMetric(KeyWindowCaptionButtonH, 14).
+		SetMetric(KeyWindowCaptionIconSize, 16).
 		SetMetric("control.pad.x", 8).
 		SetMetric("control.pad.y", 4).
 		SetMetric("taskbar.height", 28).
@@ -737,10 +752,24 @@ func Windows11Profile() *Profile {
 		p.SetStyle(comp, "", StateNormal, st)
 	}
 
+	// Быстрые настройки 24H2 — презентер, метрики и части (profiles_win11_quick.go).
+	// До материалов: части, объявленные к их вызову, получают сброс Mica и тени.
+	declareWin11QuickSettings(p)
+	// «Пуск» Windows 11 (profiles_win11_start.go): до материалов — те сбрасывают
+	// материал и тень у уже объявленных частей.
+	declareWin11StartMenu(p)
+	// Центр уведомлений и календарь Windows 11 (profiles_win11_notify.go): после
+	// стилей панелей выше и до материалов — те отключают материал у частей.
+	declareWin11NotificationTokens(p)
+	declareWin11Notifications(p)
 	// Mica, MicaAlt и мягкие тени — только под флагами (profiles_win11_material.go).
 	declareWin11Materials(p, RGB(224, 224, 224), RGBA(0, 0, 0, 77))
+	declareWin11NotificationMaterials(p, KeyShadowColor)
 
 	inheritTrayStyles(p)
+	// Панель по замерам: кнопки 40, пилюли, Task View, виджеты, поиск, трей
+	// (profiles_win11_taskbar.go). После унаследования стилей трея.
+	declareWin11Taskbar(p)
 	addDialogStyles(p)
 	return p
 }
@@ -766,9 +795,10 @@ func Windows11DarkProfile() *Profile {
 			Highlight: RGBA(255, 255, 255, 40)},
 	})
 	// Текст кнопок, часов и окна приходит из токена "text", поверхность окна —
-	// из "surface" (стили родителя ссылаются на них).
-	p.SetStyle("startbutton", "", StateHover, StyleDelta{Fill: C(RGBA(255, 255, 255, 24))})
-	p.SetStyle("taskbutton", "", StateHover, StyleDelta{Fill: C(RGBA(255, 255, 255, 24))})
+	// из "surface", плёнки подсветки кнопок и заливка поиска — из film.hover,
+	// film.pressed и field.fill (стили родителя ссылаются на них).
+	hover, pressed, field := win11DarkFilms()
+	p.SetColor(KeyFilmHover, hover).SetColor(KeyFilmPressed, pressed).SetColor(KeyFieldFill, field)
 	p.SetStyle("menu", "", StateNormal, StyleDelta{
 		Backdrop: &BackdropSpec{
 			Mode: BackdropBlur, Radius: 22, Tint: RGBA(44, 44, 44, 150),
@@ -780,6 +810,7 @@ func Windows11DarkProfile() *Profile {
 	// Тёмные MicaAlt и мягкая тень — два токена: стили родителя ссылаются на них.
 	p.SetColor(KeySurfaceAlt, RGB(14, 14, 14)).
 		SetColor(KeyShadowColor, RGBA(0, 0, 0, 115))
+	declareWin11DarkNotificationTokens(p)
 	addDialogStyles(p)
 	return p
 }

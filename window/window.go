@@ -907,6 +907,12 @@ func (win *Window) resizeTo(newW, newH int) {
 	// Обновляем bounds корневого виджета (widget.Window заполняет всё окно)
 	if root := win.eng.Root(); root != nil {
 		root.SetBounds(image.Rect(0, 0, lw, lh))
+		// Развёрнуто окно или нет — известно только ОС, а системное меню
+		// виджетного окна (Window.SetIcon) включает «Восстановить» по этому
+		// признаку. Размер меняется при любом разворачивании и восстановлении.
+		if ww, ok := root.(*widget.Window); ok && win.native != nil {
+			ww.SetMaximized(win.native.IsMaximized())
+		}
 	}
 }
 

@@ -188,7 +188,7 @@ func (t *SystemTray) relayout() {
 			}
 			break
 		}
-		sz := stretchToStrip(it, it.PreferredSize(avail), b.Dy())
+		sz := stretchToStrip(t.tm, it, it.PreferredSize(avail), b.Dy())
 		place(it, image.Rect(x, b.Min.Y, x+w, b.Min.Y+sz.Y), b)
 		x += w + gap
 	}

@@ -1526,6 +1526,17 @@ fires on **release** only if the cursor is still over the same button.
 Releasing off the button (or moving away first) cancels the action without
 firing. This lets a user abort a close/minimize/maximize by dragging away.
 
+### A Child Over a Window's Title Bar Gets the Press Only If It Owns It
+
+`Window.WantsCapture` answers true to every left press in the title bar (the window
+drags itself by it), and the engine asks for a capturer from the deepest child up.
+A button or label you lay over the bar without `WantsCapture` therefore never sees
+the press — the window starts a drag. Either return true from your own
+`WantsCapture`, or (no mouse capture needed) implement
+`widget.TitleBarPressOwner.OwnsTitleBarPress(pt) bool`, or give the window
+`SetTitleBarHitTest(func(pt) bool)`. Details: "Window caption" near the end of this
+file.
+
 ### DrawContext is Only Valid Inside Draw()
 
 You **cannot** cache or use `DrawContext` outside the `Draw()` call:
@@ -4509,6 +4520,136 @@ Tests: `theme/materials_test.go`, `engine/mica_test.go`,
 `desktop/reducemotion_test.go`, `desktop/materials_visual_test.go`
 (`MAT_OUT=dir` writes Solid/Mica/MicaAlt/soft-shadow PNGs).
 
+### Windows 11 taskbar — `desktop/taskpill.go`, `taskbar_align.go`, `iconbutton.go`, `taskview.go`, `widgetsbutton.go`, `traygroup.go`, `theme/profiles_win11_taskbar.go` (next minor)
+
+Public API is additive; Windows 10, Windows 2000 and macOS render byte-identical
+frames (`TestTaskbar_OtherProfilesFrozen`: sha256 of the frames of 7 profile variants
+× 100 %/200 %, taken BEFORE the work; `TestOverlay_OtherProfilesIgnoreModelFields`).
+Everything below is switched on by Windows 11 TOKENS — a component never asks for a
+theme name; a theme without the tokens gets the old drawing.
+
+**Geometry (100 %, plan §2).** Bar 48; Start, search, Task View and window buttons
+40×40 (metric `taskbar.item.height` 40 for items that ask for no height,
+`taskbutton.height` 40 for the app area, centred in the bar), gap 4, icon 24,
+highlight corner 4. Metrics: `taskbutton.icon.size`, `taskbutton.width`.
+
+**Alignment on the fly.** The centred group is `SlotStart` + `SlotApps` (put Start,
+search and Task View in `SlotStart`, the window buttons in `SlotApps`). Two live
+ways: `Manager.SetFlag("taskbar.centered", v)` (the bar is a theme observer) or
+`Taskbar.SetAlignment(desktop.BarAlignLeft|BarAlignCenter)` / `ResetAlignment()` /
+`Alignment()` (an explicit choice beats the flag, survives theme switches). Items are
+re-laid out, not recreated, and only the bar strip is invalidated
+(`TestWin11Bar_AlignmentDamagesOnlyBar`). New slot `desktop.SlotWidgets` (value after
+`SlotTray`, so old values are unchanged) — the far left edge (top of a side bar)
+whatever the alignment; the centred group never goes under it. Tab order is
+`slotOrder` = widgets, start, apps, tray.
+
+**Widgets button** — `desktop.NewWidgetsButton(tm)`, put in `SlotWidgets`. Data from
+the consumer: `SetContent(WidgetsContent{Icon|IconAt, Temperature, Caption, ToolTip})`
+(an empty content is the plain widgets glyph); the width follows the text
+(`widgets.width.max` caps it, text is elided) and the bar re-lays out by itself
+(`SetRelayout`). Metrics `widgets.icon.size/text.gap/width.max`, icon `widgets.icon`,
+style component `widgets` (parts `temperature`, `caption`), string `desktop.widgets`.
+
+**Task View button** — `desktop.NewTaskViewButton(tm)`: plate + glyph (built-in SVG,
+theme icon `taskview.icon`, or `Icon/IconAt`), states hover/pressed/"open"
+(`SetActive`, `Track(src)`, `TrackManager(mgr, name)`), focus ring, `OnClick` (what
+it opens is the consumer's), tooltip `desktop.taskview`. Style `taskview`, metric
+`taskview.icon.size`. `widgets`, `taskview` and `tray.group` share `iconButton`
+(`iconbutton.go`): press arms, release over fires, Enter/Space = click (no auto-repeat),
+ring only for the keyboard.
+
+**Search.** New mode `SearchModeIconAndLabel` (value after `SearchModeBox`): magnifier
++ the word "Search" on the field plate, width `search.label.width`. Metric
+`search.height` (32; Box and IconAndLabel only, 0 = bar decides), flag
+`search.hint.short` (empty field shows "Search" instead of the long Windows 10 hint).
+Windows 11 declares the field through profile styles `searchbox` (`""`, `hint`,
+`icon`): `FillFrom field.fill`, corner 16, 1 px border from `border`, accent border
+on focus/open. Without text the icon modes are buttons: Enter/Space open the search
+(like a click), arrows/Home/End move focus along the slot (in the field they still move
+the caret); a printable character still goes to the query. This keyboard behaviour also
+applies to Windows 10 `SearchModeIconOnly` (before, Enter called `OnSubmit("")`, Space
+typed a blank, arrows did nothing).
+
+**Tray.** `desktop.NewTrayGroup(tm, items...)` — "network + volume + power" as ONE
+button: one plate (style `tray.group`, metrics `tray.group.pad/gap/height`), one
+`OnClick`, one Tab stop, one hover for the whole group. Members are not tree children
+(the group draws them and takes mouse/keys); `ToolTipAt` returns the tooltip of the
+member under the pointer; `Close()` closes members; a zero-width member (no battery)
+takes no room. `Track/TrackManager/SetActive` as for the buttons. Metric
+`tray.item.height` (40) is the plate height of tray icons when the theme does not fill
+the whole strip (`tray.fill.strip`); the glyph stays centred. Windows 11 tray icons
+have `PadX` 4 (step 24; group = 3·24 + 2·4 = 80).
+
+**Bell and Do Not Disturb.** `NotificationButton.SetDoNotDisturb(bool)` /
+`DoNotDisturb()`; a notification source may implement the optional
+`desktop.DoNotDisturbReporter{ DoNotDisturb() bool }` and then wins over the manual
+flag (read on every draw; the source's `Subscribe` already repaints the button).
+**This is the taskbar agent's own DND model — one bool, no events**; the notification
+centre agent introduces its own model, to be unified when merging. DND: tooltip
+`desktop.tray.dnd`, bell crossed out, counter hidden; theme icon key
+`tray.notifications.icon.dnd` is tried first. Flag `tray.bell` draws a bell (outline
+SVG, `taskglyph.go`) with a round counter badge (`tray.badge.size`, part `badge` of
+`tray.notifications`) instead of the old speech bubble; it also makes the button a Tab
+stop (`TabIndex() == -1` without the flag, so classic themes get no new stop). The
+button is `Focusable` now (Enter/Space = click).
+
+**Window buttons — indicators from the window model.** `desktop.WindowInfo` got
+`ProgressState` (`ProgressNone/Normal/Paused/Error`), `Progress` (0..1), `Badge` (int,
+>99 shows "99+") and `Attention` (ignored for the active window). A stack (`group`
+mode) shows the worst progress (error > pause > normal, the largest share inside that
+state), the SUM of the counters and attention of any non-active window
+(`overlayOf`). Theme gating (nothing is drawn unless the metric is set):
+- **Pill** (`taskbutton.pill.height` 3): running = `taskbutton.pill.idle` (6) wide in
+  the text colour at `taskbutton.pill.idle.opacity` 0.6, active = `.active` (16) in the
+  accent; width and colour glide between them (`AnimTaskPill`, 150 ms out-cubic;
+  `numMotion`), centred under the button at `taskbutton.pill.offset` (-2 = below the
+  plate, at the bar edge). A cell seen for the first time stands at its target at once
+  (no growth from nothing on the first frame). Styles: part `pill`
+  Normal (`FillFrom text`) and Active (`FillFrom accent`). Replaces `drawTaskMarkAt`
+  (the Windows 10 mark) only where the metric is set; `RunningApplications` keeps the old
+  mark, the indicators live in `ApplicationArea`.
+- **Progress** (`taskbutton.progress.height` 4): track the width of the icon at the
+  icon's bottom edge + bar by the share; parts `progress`, `progress.fill` (accent),
+  `progress.paused` (yellow), `progress.error` (red).
+- **Badge** (`taskbutton.badge.size` 14): accent circle (oval for 2-3 chars) at the
+  top-right corner of the icon, clamped inside the button; part `badge` (`Text`,
+  `Font.Size`, `PadX`).
+- **Attention** (flag `taskbutton.attention`): the plate (part `attention`) blinks
+  `taskbutton.attention.blinks` (3) times, one blink = `AnimTaskAttention` (450 ms,
+  linear), then stays lit until the window is activated or the flag is cleared.
+- `motion.reduce`: pill width changes at once, attention is steady at once, no
+  animation is registered (`TestWin11Pill_ReducedMotionIsInstant`,
+  `TestWin11Attention_BlinksThenSteady`).
+- **Partial repaint.** `ApplicationArea.refresh` compares old and new cells; when only
+  overlays changed (`overlayChanges`, `sameLook`) it invalidates just those buttons'
+  rectangles (a download percent does not repaint the area); anything else repaints the
+  area. Every animation step repaints its own button only
+  (`TestWin11Pill_AnimatesAndRepaintsOnlyItsButtons`,
+  `TestWin11Overlay_RepaintsOnlyChangedButton`).
+
+**Profile.** `theme/profiles_win11_taskbar.go` (`declareWin11Taskbar`, called from
+`Windows11Profile` after `inheritTrayStyles`); `profiles.go` got one call and the dark
+profile three tokens. New colour tokens `film.hover`, `film.pressed`, `field.fill`
+(Windows11Dark overrides only these; its two hover styles were removed — it declares 13
+own tokens, limit 15, `TestBuiltinProfiles_DarkVariantsAreThin`). Tray icon colour is
+`TextFrom text` (it was the light theme's black literal — black icons on the dark bar
+before). Other palette needs go through tokens too.
+
+Built-in glyphs (`taskglyph.go`): `glyphTaskView`, `glyphWidgets`, `glyphBell`,
+`glyphBellFilled`, `glyphSlash` — added to the Start-menu glyph table at package init.
+
+Tests: `desktop/win11shell_test.go` (scene, geometry, alignment, theme/accent live),
+`win11shell_indicators_test.go` (pill, progress, badge, attention, partial repaint, other
+profiles), `win11shell_items_test.go` (keyboard, tray group, bell, widgets, Task View,
+search, scales 100-200 %), `taskbar_frozen_test.go`. Pictures:
+`GOLDEN_OUT=dir go test ./desktop -run TestWin11Bar_Shots` (light/dark × centred/left, search
+modes, DND bell, mid-blink attention; `*_x2.png` at 200 %).
+
+Not done: indicators in `RunningApplications` and in the side-bar column; the Windows 11
+"widgets after Task View" placement for left alignment (the widgets slot stays at the far
+left); indeterminate progress; badge on the Start button; the clock plate is not 40 high.
+
 ### Physical-size SVG, tray icons from the theme set, thin scrollbar — v3.31
 
 - `widget/physical.go`: `ContextScale(ctx)` (1 for contexts without `Scale()`),
@@ -4805,10 +4946,12 @@ Tests: `tests/defaultfont_theme_test.go`.
 `desktop.NotificationCenter` stays one component; a profile picks its look through
 a presenter (`Profile.Presenters["notificationcenter"] = theme.NotificationCenterPresenter`,
 set by the Windows 10 profile and inherited by its dark variant). The component
-asks `PresenterFor(tm, "notificationcenter")`, never the theme name. Windows 11,
-Windows 2000 and macOS keep the flat list (rendered frames are byte-identical to
-before; checked on 4 themes x 4 panels). The flat tests of the repo run under
-Windows 11 for that reason.
+asks `PresenterFor(tm, "notificationcenter")`, never the theme name. Windows 2000
+and macOS keep the flat list (rendered frames are byte-identical to before;
+checked on 4 themes x 4 panels). Windows 11 has its own presenter since the
+next minor (see "Notification center and calendar of Windows 11" below); the
+flat tests of the repo run under `flatNotifTheme` — Windows 11 without the
+centre and calendar presenters.
 
 Rich variant, all sizes are metrics `notificationcenter.*` (`theme/profiles_win10_notify.go`):
 the panel is `width` (396) wide, glued to the right screen edge and spans from the
@@ -4898,7 +5041,7 @@ mouse is over it, cross hides only the toast, actions work as in the center. It 
 NOT registered in `FlyoutManager` (opening it must not close the Start menu) and is
 added to the root after the manager; `toast.Suppress(center)` keeps it quiet while
 the center is open; only themes with the presenter show it. In the flat themes
-(Windows 11, Windows 2000, macOS) the toast is intentionally NOT shown: there is
+(Windows 2000, macOS) the toast is intentionally NOT shown: there is
 no rich card to pop up (a shell that needs a pop-up there can use the tray
 balloon, see "Tray, balloon notifications"). It is a limitation of the flat
 variant, not a bug.
@@ -4916,15 +5059,136 @@ drag, severity), `theme/profiles_win10_notify_test.go`,
 `*_scrollbar_drag`, `*_severity`). A test that toggles a card, a group or the grid
 finishes the animation first (`finishAnimations()`), because the theme animates.
 
+### Notification center and calendar of Windows 11 — `desktop/notifyview_w11.go`, `notificationcenter_win11.go`, `calendarflyout_win11.go` (next minor)
+
+Third presenter of `desktop.NotificationCenter` (next to flat and Windows 10) and a
+Windows 11 look of `desktop.CalendarFlyout` with a "Focus" module. Public API is
+additions only; Windows 10, Windows 2000 and macOS frames are unchanged (checked
+with `SNAP_OUT` before/after: only `Windows11*__notify` and `Windows11*__calendar`
+differ; flat `__notify` hashes of the base commit itself differ run to run, the raw
+pixels of an isolated frame are identical).
+
+**Choosing the look.** Profile `Windows11Profile` sets
+`Presenters["notificationcenter"] = theme.NotificationCenterWin11Presenter` and
+`Presenters["calendar"] = theme.CalendarWin11Presenter` (`theme/profiles_win11_notify.go`,
+`declareWin11Notifications`, called before `declareWin11Materials` because that
+one switches the material off for every part declared before it). The components
+ask the presenter name of their own component (`richView.w11()`, `CalendarFlyout.win11()`),
+never the theme name. A theme switch on open panels re-lays them out without
+re-creating anything (tested: Win11 light → dark → Win10 → Win11).
+
+**Center.** Card 364 wide (`notificationcenter.width`), radius 8 from the panel
+style, glued to the right edge of the work area with `notificationcenter.edge` (12);
+its bottom is `notificationcenter.stack.gap` (8) above the calendar when the
+calendar is linked and open, otherwise `edge` above the bar (`w11Area`: `WorkArea`,
+else `Screen` cut at the anchor). Height = content (header 52 + list + pad), capped
+by the free space; empty list = `list.min` under the "No new notifications" label.
+Header: "Notifications" (font `heading`), bell "Do not disturb" (zone `zoneDND`,
+part `headbtn`, `headbtn.on` + slash when on) and "Clear all" (inactive and without
+a hit zone while the list is empty). Cards (radius 4, part `card`): app row (icon,
+name, time) for a single notification; title; text (2 lines, 8 expanded); chevron
+(expand) and cross (the cross replaces the time under the pointer); the four action
+kinds exactly as in Windows 10 (shared `layoutActions`, zones, dropdown, reply);
+severity strip inset from the rounded corners. A group exists only for 2+
+notifications of one app: header with icon, name, count pill (`pill`), chevron and
+cross; its cards drop the app row and carry the time in their title row. The list
+scrolls (thin thumb), expand/collapse use `notification.expand` (150 ms out-cubic,
+shortened by `motion.reduce`). Quick actions are not drawn (Windows 11 has a
+separate `QuickSettings`). The toast (`NewNotificationToast`) shows the same card
+(`toast` part, solid + hairline, radius 8) 12 from the corner. Hit-testing,
+scrolling, keyboard and animation are the Windows 10 code: `richView` got
+`flowGroups`/`shiftGroups` (extracted from `layout`, identical for Windows 10) and
+dispatches `layoutW11`, `drawW11`, `drawCardW11`, `layoutCardAsW11`. Rounded parts:
+`PaintStyle` now returns the caller clip after `SetRoundClip` (it replaced the clip
+with the layer rect and a card at the edge of a scrolling list painted over its
+neighbours).
+
+**Do not disturb (the model the taskbar bell uses).**
+`desktop.DoNotDisturb{ Enabled() bool; SetEnabled(bool); Subscribe(func()) func() }`,
+ready `desktop.NewDoNotDisturb(initial) *DoNotDisturbState` (+ `OnChange` hook).
+`nc.SetDoNotDisturb(d)` / `toast.SetDoNotDisturb(d)`: the centre subscribes while
+open and repaints only the bell rect; the toast stays silent while `Enabled()` (the
+notification still lands in the centre) and hides a shown toast when the mode turns
+on. What the mode does elsewhere (sound, focus assist) is the consumer's. The tray
+bell takes the same model: `bell.BindDoNotDisturb(d)` reads it at once and follows
+every switch (unsubscribed in `Close`; `nil` unbinds). The older manual
+`bell.SetDoNotDisturb(bool)` and a source implementing `DoNotDisturbReporter` still
+work; one model for centre, toast and bell is the intended setup.
+
+**Calendar.** Card 364 wide (`calendar.w11.*`), at the right edge `calendar.w11.edge`
+(12) above the bar (`CalendarFlyout.WorkArea` is new, like the centre's). Top row:
+"Monday, October 5" (`DateHeaderCulture.DateHeader`, optional extension of
+`DateCulture`; `LocaleCulture` implements it through `desktop.cal.headDate` and
+`desktop.cal.weekdayLong.N`; a culture without it gets `{W}, {d} {M}` from
+`WeekdayShort`/`MonthGenitive`) and the collapse chevron; then month title with
+‹ ›, weekday row, 4–6 week grid (first weekday by culture, today = accent circle
+`calendar.w11.day`, selected = ring), then the Focus module. Collapse hides the
+grid; `SetCollapsed`/month change repaint the OLD rect too and re-lay the centre
+above (`CalendarFlyout.relayout`). On a low screen the calendar stays collapsed
+while it is linked and the centre would otherwise get less than header + `list.min`
+(`effCollapsed`; the user's `Collapsed()` is unchanged).
+
+**Group.** `desktop.LinkNotificationCenter(nc, cal) *FlyoutGroup` sets both in one
+`FlyoutGroup`, makes `nc` sit on `cal` and returns the group: `group.OpenAll(anchor)`
+from the clock or the bell, `CloseAll`, Esc in either closes both, a click in the
+neighbour neither closes nor is swallowed (`richMouseButton` and the calendar
+now use `ownsPoint`). Register both in `FlyoutManager` (the group keeps them
+open together). Win+N is the consumer's.
+
+**Focus.** `desktop.FocusSession{ State() FocusSessionState; SetDuration(time.Duration);
+Start(); Stop(); Subscribe(func()) func() }`, `FocusSessionState{Duration, Running,
+EndsAt}`; `cal.SetFocusSession(s)` (nil = no module). Idle: "Focus", `−` `30 min`
+`+` (step `FocusStep` 5 min, `FocusMinDuration`..`FocusMaxDuration` 5..240) and the
+accent "Start". Running: `mm:ss` countdown (rounded up), a progress line and
+"Stop"; remaining = `EndsAt − now` where now is the calendar `Clock` (never
+negative — the consumer calls `Stop` at the end, it is idempotent). While open and
+running the calendar redraws only the module once a second through
+`cal.Ticker func(d, f) (stop func())` (default: a `time.AfterFunc` chain; set
+`cal.Ticker = func(d, f) func() { t := eng.Every(d, f); return t.Stop }` to run it
+on the engine goroutine). The tick is not an animation: `motion.reduce` does not
+touch it. Ready model for demos and tests: `NewFakeFocusSession(clock)`.
+
+**Keyboard.** Tab in the centre: bell, "Clear all", cards/groups/actions…; from the
+last stop it hands focus to the calendar (collapse, ‹, ›, the day grid, `−`, `+`,
+Start/Stop) and Shift+Tab from the calendar's first stop hands it back; Enter/Space
+activate; on the grid the arrows move the day (leaving the month pages it) and
+Enter selects, elsewhere ←/→ and PgUp/PgDn page months; Esc closes the group; the
+focus ring is drawn for the keyboard only. Both panels are `Focusable` + `TabAcceptor` while open and Windows 11.
+
+**Profile.** Tokens: `surface.card` (`KeySurfaceCard`), `text.secondary`
+(`KeyTextSecondary`); `Windows11Dark` replaces exactly these two (14 of 15
+allowed own tokens; the other Windows 11 panels must fit in the one left). Parts of
+component `notificationcenter`: `toast header headbtn headbtn.on link group pill
+card action field glyph dim severity.* scrollbar`; of `calendar`: `date month nav
+divider dim focus.title focus.value focus.button focus.accent progress
+progress.fill` and `day` (circle, no shadow). Colours are tokens, accent or a
+neutral grey film (readable in both modes); links use the accent (dark mode: the
+default accent is low contrast on dark — a profile may override `link`).
+Strings (RU/EN, `widget.Tr`): `desktop.notif.title|dnd`,
+`desktop.focus.title|minutes|hours|hoursMinutes|start|stop|less|more`,
+`desktop.cal.headDate|weekdayLong.N`.
+
+**Cost.** First frame of both panels (open + one draw each, warm font cache) is
+well under 100 ms (`TestW11_OpensUnder100ms`); a hover repaints the card, a bell
+change the bell, a tick the Focus module, a month page the calendar and the
+centre. Heights at 100–200 %: 1920×1080 … 640×480 logical fit the screen without
+overlap (`TestW11_FitsEveryScreen`); on a short screen the list scrolls.
+
+Tests: `desktop/notifycenter_win11_test.go` (behaviour), `desktop/paint_clip_test.go`,
+`theme/profiles_win11_notify_test.go`; pictures: `NC_OUT=dir go test ./desktop -run
+TestVisual_NotificationCenterWin11` and `TestVisual_NotificationToastWin11`
+(`light`, `dark`, `*_collapsed`, `*_running`, `*_dnd`, `*_empty`, `*_focus_ring*`,
+`*_group_collapsed`, `light_200`…).
+
 ### Windows 10 Start menu with tiles and the taskbar search box — v3.33
 
 `desktop.StartMenu` has a second layout: sidebar | app list | tiles. A theme asks
 for it with the presenter `theme.PresenterStartTiles` (`"tiles"`,
 `Profile.Presenters["startmenu"]`, set by the Windows 10 profile and inherited by
 its dark variant); the component asks `StartMenu.tiled()` and never looks at the
-theme name. Windows 11, Windows 2000 and macOS keep the flat list (rendered
-frames of all eight profiles are byte-identical to v3.30, only Windows 10
-changes). Same object, same `Open/Close/Toggle`: a theme switch on an open menu
+theme name. Windows 2000 and macOS keep the flat list (rendered frames of those
+profiles are byte-identical to v3.30; Windows 11 got its own grid layout, see
+"Windows 11 Start menu" below). Same object, same `Open/Close/Toggle`: a theme switch on an open menu
 changes the look without re-creating anything.
 
 ```go
@@ -5057,6 +5321,215 @@ first frame after `Open` ≈ 9 ms cold, ≈ 8 ms warm; opening invalidates only 
 menu rectangle (`TestStartMenu10_OpenDamagesOnlyMenuArea`). Snapshots:
 `GOLDEN_OUT=dir go test ./desktop -run TestStartMenu10_` writes dark/light PNGs at
 100/150/200 %.
+
+### Quick settings of Windows 11 24H2 — `desktop/quickpanel*.go`, `quickglyphs.go`, `theme/profiles_win11_quick.go`
+
+`desktop.QuickSettings` stays one component. The Windows 11 profile names the
+presenter (`Profile.Presenters["quicksettings"] = theme.QuickSettingsPresenter`;
+the dark profile inherits it, it adds no token of its own). The component asks
+`PresenterFor(tm, "quicksettings")` — never the theme name — and draws the 24H2
+variant only when it also has a tile model (`SetQuickActions`). Windows 10,
+Windows 2000, macOS and Windows 11 without a model draw the old three-tile panel;
+their frames are byte-identical to before (checked on 8 profiles x 2 scales, two
+states each).
+
+Consumer API (all additive):
+
+| what | API |
+|---|---|
+| tiles | `QuickSettings.SetQuickActions(QuickActionModel)`, `QuickActions()`; `QuickAction` got `Unavailable`, `Detail`, `HasDetails` |
+| reorder | `QuickActionReorderer` (optional model interface), `QuickActionList.Reorder([]QuickActionID)`, `QuickSettings.OnReorder` |
+| volume | existing `SystemStatus.Volume()`, `OnVolumeChange`, `OnToggleMute`; new `VolumeDetails` (shows the volume "›") |
+| brightness | `SetBrightness(0..1)`, `ClearBrightness()`, `Brightness()`, `OnBrightnessChange`; no data = no slider |
+| nested page | `Details func(QuickActionID) *QuickDetails` (`Title`, `Content widget.Widget`, `OnClose`), `QuickVolumeID`, `OpenDetails(id)`, `CloseDetails()`, `DetailsOpen()` |
+| footer | battery from `SystemStatus.Power()` (`NoBattery` hides it), `OnEdit(bool)`, `OnSettings()` |
+| edit mode | `SetEditing(bool)`, `Editing()` |
+| theme | `theme.QuickSettingsPresenter`, `theme.KeyQuickPage` (animation), `theme.KeyQuickIconTint` (flag, on) |
+| strings | `desktop.StrQuick*` (`desktop.quick.*`, RU and EN) |
+
+Layout is plain arithmetic from the panel rectangle and the state
+(`quickpanel_layout.go`): the same `qsLayout` is used by drawing and by hit
+testing, so what is clicked is what is drawn, also while the panel slides in.
+Sizes are metrics `quicksettings.w11.*` (width 360, side padding 24, top 24,
+tile 96x48, column and row gap 12, caption 6 + 32, "›" zone 28, slider row 40,
+footer 48, header 48, margin 12). Panel height = padding + visible tile rows
+(`rows`, 2) + sliders + footer; it does not depend on the page or on edit mode
+(the sliders area shows a hint in edit mode), so the panel never jumps. Parts of
+style `quicksettings`: `w11.tile`, `w11.tile.on` (accent; hover/pressed use
+`accent.hover`/`accent.pressed`; Active is not used), `w11.tile.chevron`,
+`w11.tile.edit`, `w11.label`, `w11.detail`, `w11.title`, `w11.dim`, `w11.button`,
+`w11.done`, `w11.slider.track|fill|thumb|dot`, `w11.footer`, `w11.scrollbar`.
+They are declared BEFORE `declareWin11Materials`, so Mica and the soft shadow of the
+panel are not inherited by tiles.
+
+Behaviour worth knowing:
+
+- Tile click -> `model.Toggle(id)`; `Disabled`/`Unavailable` do not toggle (the
+  list model also refuses them). "›" is a separate focus and hit zone; it opens
+  `Details(id)` (nil result = nothing opens). Not drawn in edit mode.
+- Nested page: both pages are drawn shifted by `page` (`Tween`, token
+  `quicksettings.page`, decorative: 0 under `motion.reduce`). Content gets
+  `SetBounds(body)` when drawn, receives the mouse through its own deepest
+  widget under the cursor (`MouseClickHandler`, `MouseMoveHandler`,
+  `OnMouseWheelPixels`) and keys on the root if it is a `widget.KeyHandler`; Tab
+  switches between "back" and the content. Back: arrow, Backspace, Alt+Left.
+  Esc steps back one level: edit mode -> page -> panel (also through
+  `DismissOnEscape`, which the engine calls when the panel is not focused).
+- Scroll: wheel, thin thumb (drag with mouse capture), focus follows the tile
+  (`ensureVisible`). Rows scrolled under the edge are clipped by the grid:
+  `PaintStyle` of a rounded layer replaces the rect clip, so parts inside a
+  clipped area (tiles, and everything while pages slide) are painted by
+  `qsPaint` (fill + border under the rect clip) when they are not fully inside.
+- Edit mode (pencil): drag a tile (threshold 5 px, mouse capture, auto-scroll at
+  the grid edge, others make room live), or Alt/Ctrl+arrows on the focused tile.
+  The new order goes to the model (`QuickActionReorderer`), `OnReorder`, and stays
+  visible until the panel closes (`pn.order`). A drop on the same place is not an
+  event.
+- Sliders: click, drag (capture), wheel, keys (arrows 5 %, PageUp/PageDown 10 %,
+  Home/End). The shown level follows the hand at once (`volOver`, `bright`) and the
+  consumer's `SystemStatus`/`SetBrightness` wins on the next notification.
+- Repaint: a model change with the same set and order repaints only the changed
+  tile and its caption (`InvalidateRect`, no `Invalidate`); a status change only the
+  volume row and the battery; hover only the zone. Subscriptions (model, status)
+  live while the panel is open and are set by the `Flyout` hooks (`afterOpen`,
+  `afterClose`), so they work when a `FlyoutManager` or a group opens the panel.
+- Placement (`Flyout.Place`, bottom/top bars): centred on the anchor, `margin` (12)
+  from the screen edge and from the bar; side bars use the common placement.
+- Keyboard: Tab/Shift+Tab walk tiles (each followed by its "›"), brightness, volume
+  icon, volume, "›", pencil, gear; arrows move over the grid and adjust sliders;
+  Enter/Space activate; the ring is `PaintFocusRing`, shown only after a key.
+- Tile icons: `QuickAction.IconAt(physicalSide)` / `Icon`; under flag
+  `quicksettings.icon.tint` they are recoloured with the tile text colour.
+  Glyphs of the panel (chevrons, pencil, gear, sun, speaker, grip, bolt) are SVG
+  rasterised at physical size (`quickglyphs.go`).
+- Not done: the Windows 11 flyout shows tile labels on one line (elided), not two;
+  `Unavailable` is ignored by the Windows 10 center; tooltips of tile captions that
+  are elided are not shown.
+
+Tests: `desktop/quickpanel_test.go` (variant selection, geometry at 100-200 %,
+toggle, single-tile repaint, nested page and reduce motion, scroll, sliders,
+edit and reorder, footer, keyboard, ring, accent/theme/language live, first frame
+< 100 ms, no subscriptions when closed), `quickpanel_clip_test.go` (nothing is
+drawn outside the grid or the panel), `theme/profiles_win11_quick_test.go`.
+Frames: `QS_OUT=dir go test -run TestVisual_QuickSettingsWin11 ./desktop/`.
+
+### Windows 11 Start menu — pinned grid, Recommended, All apps (next minor)
+
+`desktop.StartMenu` has a third layout. A theme asks for it with the presenter
+`theme.PresenterStartGrid` (`"grid"`, `Profile.Presenters["startmenu"]`, set by the
+Windows 11 profile and inherited by its dark variant); the component asks
+`StartMenu.grid()` / `AsGrid()` and never looks at the theme name. Windows 10 keeps
+tiles, Windows 2000 and macOS keep the flat list: rendered frames of those three
+are byte-identical to before (every frame of the desktop golden and snapshot tests,
+135 PNGs; only the Windows 11 `start` frames and the `edge_Windows11 Dark_*_start`
+goldens changed). Same object, same `Open/Close/
+Toggle`: switching the theme between the three on an open menu changes the look
+without re-creating anything (`syncKind` resets the state that belongs to the old
+look: area, selection, hover, page, drag, view).
+
+```go
+menu := desktop.NewStartMenu(m, catalog)
+menu.Screen = monitorBounds
+menu.SetPinned([]desktop.StartPinned{{ID: "edge", App: "edge", Title: "Edge", IconAt: icon}}) // nil = AppCatalog.Pinned()
+menu.OnPinnedChanged = func(p []desktop.StartPinned) { save(p) }  // after a drag: whole new order
+menu.OnPinnedLaunch = func(id string) { ... }                      // cell without App
+menu.SetRecommended(src)            // desktop.StartRecommendedSource; nil = StartMenuSource.Recent()
+menu.SetRecommendedEnabled(false)   // policy: the section disappears, pinned take its room
+menu.OnRecommendedActivate = func(id string) { ... }               // row without App
+menu.SetUser(desktop.StartUser{Name: "oops", AvatarAt: avatar})
+menu.UserMenu = func() []widget.MenuItem { ... }                   // footer menus (consumer decides)
+menu.PowerMenu = func() []widget.MenuItem { ... }                  // nil -> OnSidebarActivate("user"|"power")
+menu.GroupBounds = func() image.Rectangle { return appsGroup }     // centre of the taskbar group
+menu.ContextMenu = func(t desktop.StartTarget) []widget.MenuItem  // StartTargetPinned/Recommended/User/Power
+menu.SetSource(src); menu.SetSearchProvider(p)   // "All apps" list and search: same as Windows 10
+menu.View() / SetView(desktop.StartViewMain | StartViewAllApps | StartViewRecommended)
+menu.PageCount() / Page() / SetPage(n)           // pages of the pinned grid
+```
+
+- **Data comes from the consumer.** `StartPinned{ID, App, Title, Icon, IconAt}`,
+  `StartRecommendedItem{ID, App, Title, Subtitle, Icon, IconAt}`, `StartUser{Name,
+  Avatar, AvatarAt}`; `FakeStartRecommended` is the test fake. A cell with `App` is
+  launched through `AppCatalog.Launch`, without it through `OnPinnedLaunch` /
+  `OnRecommendedActivate`; the menu closes after a launch. Once the user drags a cell
+  the menu keeps its own order (`SetPinned` semantics) and the catalog's later
+  changes are no longer read until the consumer calls `SetPinned(nil)`.
+- **Layout (profile metrics, logical px at 100 %).** `startmenu.w11.width` 642,
+  `.height` 726 (`.height.min` 360), `.corner` 8, `.pad` 32, `.margin` 12 (gap above
+  the Start button), `.grid.columns` 6, `.grid.cell.w/.h` 96×84, `.grid.gap.y` 16,
+  `.grid.icon` 32, `.footer.height` 64, `.search.top/.height/.corner/.pad/.icon`
+  28/32/16/12/16, `.section.height` 28, `.section.gap` 16, `.rec.columns/.rows` 2/3,
+  `.rec.row.height` 56, `.rec.icon` 32, `.dots.size/.gap` 6/8, `.footer.avatar` 32,
+  `.footer.button` 40. A value the profile does not declare falls back to the one
+  above (`StartMenu.gm`). The list ("All apps", "All recommendations", results) uses
+  the Windows 10 metrics `startmenu.row.height` (40 here), `.letter.height`,
+  `.icon.size`, `.row.pad`, `.row.icon.gap`, `scrollbar.thin.*`.
+  Geometry is one function, `gridGeometry(panel)` (search 32 high at the top, section
+  headers 28, grid centred, recommended rows anchored to the footer, footer inside the
+  1 px border); hit testing, drawing and keys use it, so they never disagree. The
+  number of Recommended rows (3 → 0) and of pinned rows shrinks with the available
+  height, a narrower screen drops grid columns; the panel never leaves the monitor
+  (`Flyout.fitInto`) and its height is cut to the work area. Checked for 100-200 %
+  on 1920×1080, 1366×768 and 1280×720 (`TestStartGrid_ScalesWithoutClipping`).
+- **Position** (`Flyout.Place`, `StartMenu.placeGrid`): above the Start button with the
+  `.margin` gap; with the flag `taskbar.centered` (read live, so the alignment
+  switch needs no re-creation) centred on `GroupBounds()` or, without it, on the
+  monitor centre (the taskbar centres its group on the panel); with it off, at the
+  left edge of the button. Side taskbars use the ordinary side placement.
+- **Views.** Main: search, "Pinned" + "All apps ›", pinned grid, "Recommended" +
+  "More ›", footer. "All apps" is the Windows 10 list unchanged (letters, folders,
+  letter-jump grid, thin scrollbar) under a "Back" header; "More ›" shows every
+  recommendation as two-line rows of the same list (`rowRec`). A non-empty query
+  replaces the middle with search results (`SearchProvider`), like Windows 10. Opening
+  always starts on the main view. Only the middle changes: search and footer stay.
+- **Pinned pages.** Pinned apps that do not fit are paged, dots on the right
+  (`dots`, `Page`); wheel flips one page (not more often than `wheelFlipGap`, 220 ms —
+  a touchpad sends dozens of events per gesture), dots click, PageUp/PageDown.
+- **Drag.** Press on a cell captures the mouse (`WantsCapture`), a 4 px threshold
+  starts the drag, the layout previews the new order (the dragged cell leaves an
+  outline, the cell follows the pointer), hovering the dots flips the page, release
+  calls `OnPinnedChanged` with the whole new order; the same order is no event; a
+  release outside the menu still ends the drag.
+- **Search field.** Own, inside the menu (32 high, corner 16): typing in any area goes
+  into it (`typeToSearch`), caret editing (Left/Right/Home/End/Backspace/Delete,
+  Ctrl+V), click places the caret, accent frame while it is the keyboard area. The
+  query/results/provider are the shared `startView` ones, so a taskbar `SearchBox`
+  bound with `Bind` still works and mirrors the text. `AsTiled()` is false for this
+  view: the taskbar search box is not needed for it.
+- **Keyboard.** Tab/Shift+Tab: search → pinned → recommended → footer (list views:
+  search → list → footer); arrows follow the grid (Up from the first row → "All apps",
+  Down from the last → Recommended → footer), Home/End, PageUp/PageDown, Enter/Space,
+  Esc (closes the context menu, then the letter grid, then the menu), Backspace with
+  an empty query goes back from a list view, Menu or Shift+F10 opens the context
+  menu of the selected object. Focus ring: `PaintFocusRing`.
+- **Look (`theme/profiles_win11_start.go`).** Parts of `startmenu`: `heading`, `link`
+  (the "All apps ›" button), `pin`, `rec`, `rec.sub`, `row`, `row.sub`, `letter`,
+  `scrollbar`, `search`, `search.hint`, `footer`, `footer.item`, `avatar`, `dot`.
+  Plates are neutral grey films (`RGBA(128,128,128,a)`) that work on both light and
+  dark surfaces, text and hairlines are token references (`text`, `border`,
+  `accent`), so `Windows11Dark` only gained ONE token, `field` (`theme.KeyField`, the
+  search field fill) — 13 of its 15. The declaration runs before
+  `declareWin11Materials`, so the parts get no Mica and no big shadow of their own;
+  the panel itself follows `FlagBackdropMica`/`FlagBackdropMicaAlt`/`FlagShadowSoft`
+  (Solid by default). The base style got the 1 px `border` token frame.
+- **Strings.** `desktop.start.recommended|more|back|power`, RU and EN; "Pinned",
+  "All apps", the search hint and "No results" are shared with Windows 10.
+  `desktop.StartGridAliases(recommended, more, back, power)` binds them to the
+  consumer's table (`widget.AliasStrings`).
+- **Shared code touched.** `startGeometry`, `hitTest`, `keyRect`, `activate`,
+  `targetFor`, `refreshResults`, `typeToSearch`, `SearchKey`, letter grid and the
+  wheel dispatch on `grid()`; `tiled()` stays Windows-10-only and `modern()` is
+  `tiled() || grid()` for what both share (focus request, Tab, capture, subscriptions).
+  New `startArea`s: `areaSearch/Pinned/Rec/Footer`; the list keeps `areaList`.
+
+Cost (1280×800, 300 apps, Windows 11, `TestStartMenu11_FirstFrameUnder100ms`): first
+frame after `Open` ≈ 13 ms cold, ≈ 12 ms warm, the 300-app "All apps" frame < 100 ms,
+hover frame ≈ 1 ms; opening, hover, keys, paging and search invalidate only the menu
+rectangle (`TestStartMenu11_OpenDamagesOnlyMenuArea`). Snapshots: `GOLDEN_OUT=dir go
+test ./desktop -run TestStartMenu11_` writes light/dark PNGs of the main view, hover,
+focus, All apps, More, search, drag, pages, context/power menus, Mica, 100/150/200 %.
+Not done: moving a pinned cell with the keyboard (drag only), a separate Windows 11
+power flyout width (the menu takes the profile's `menu.width.min`), animated page
+change (instant), recommendation rows beyond 2 columns in "All recommendations".
 
 ### Measured cost of a frame
 
@@ -6485,6 +6958,134 @@ dd.ArrowStyle = widget.ArrowChevron        // ArrowAuto (theme decides) | ArrowT
 panel.SetBackgroundRole(widget.BackgroundPanel) // StackPanel/DockPanel follow Theme.PanelBG / WindowBG;
                                                 // XAML Background="{Theme PanelBG}"
 ```
+
+---
+
+## Window caption: gradient, metrics, window icon, system menu, title-bar presses (next minor)
+
+Answers the WinLine remarks on the classic Windows 2000 window
+(`pkg/apps/terminal/classic.go`). Public API is additive; Windows 10, Windows 11
+and macOS windows render byte-identical to before (checked on rendered frames
+active and inactive); Windows 2000 changed only where the remarks ask.
+
+**Title gradient.** The Windows 2000 profile declares the second point of the
+caption gradient: flat tokens `window.titlebar.gradient2` (#A6CAF0) and
+`window.titlebar.gradient2.inactive` (#C0C0C0); the first points are the fills of
+`window/titlebar` (navy / grey #808080). `widget.Window` already drew a gradient
+whenever `Theme.TitleBG2` was set — only the profile never filled it.
+`theme.KeyWindowTitleGradient2` / `KeyWindowTitleGradient2Inactive` name the keys.
+After `Manager.SetAccent` the active gradient ends at `accent.light`
+(`Profile.SetColorFrom`, below); `ResetAccent` brings #A6CAF0 back. The inactive
+grey never follows the accent. `Windows2000 Blue` inherits both.
+
+```go
+// Profile.SetColorFrom(k, from): token k follows token `from` when the application
+// overrides the accent. Without SetAccent the value declared with SetColor stays
+// (bit-identical look); a token the profile did not declare is taken from `from`
+// even without SetAccent. A child profile's reference overrides its parent's;
+// a missing source cancels the reference. Counts in Profile.TokenCount.
+p.SetColor(theme.KeyWindowTitleGradient2, theme.RGB(166, 202, 240)).
+    SetColorFrom(theme.KeyWindowTitleGradient2, theme.KeyAccentLight)
+```
+
+**Caption metrics.** Theme metrics, read by `widget.Window` through
+`ThemeStyle` (`Materialize` / `ProfileFromTheme` carry them both ways; 0 = not
+declared = old look):
+
+| metric (`theme.Key…`) | `ThemeStyle` | Windows 2000 | without |
+|---|---|---|---|
+| `window.titlebar.height` (`KeyWindowTitleBarHeight`) | `TitleBarHeight` | 18 | 32 (24 classic) |
+| `window.caption.button.w` / `.h` | `CaptionButtonW/H` | 16 × 14 | square, `height-6` (18×18) |
+| `window.caption.icon.size` | `CaptionIconSize` | 16 | 16 |
+
+Rules: an explicit `Window.TitleBarHeight` beats the metric; title tabs
+(`EnableTitleTabs`) ignore it (tabs need the room); the buttons are centered
+vertically in the bar (18 − 14 → 2 px, the old 24 − 18 → 3 px). Only
+`widget.Window` reads them — `Dialog` keeps its own title height. A Windows 2000
+window now has an 18 px bar, 16×14 buttons, frame 5, content starts at
+`frame + 18`. The locale badge (`ShowLocaleIndicator`) is one pixel taller on bars
+under 20 px (`bar-3`, was `bar-4`) so its text no longer touches the bottom border.
+
+**Window icon and system menu** (`widget/window_icon.go`).
+
+```go
+win.SetIcon(img)                 // image.Image, scaled to the metric size; nil removes
+win.SetIconSVG(svgBytes) error   // rasterized at the physical size; currentColor = caption text
+win.HasIcon(); win.IconBounds()  // absolute rect, empty when hidden (mac layout, no bar)
+// The caption moves behind the icon by itself (titleTextLeft, also for
+// TitleBarContentBounds and title tabs); the nav button ("≡") goes after the icon.
+// Icon: 2 px from the bar edge on classic, 8 on the others; vertically centred.
+// Windows layout only: in the mac layout the buttons sit left and there is no icon.
+
+// A press on the icon opens the system menu (on the PRESS, like Windows); a second
+// press on the open menu closes it (PopupMenu.Toggle). A DOUBLE click calls OnClose.
+// The press does not drag the window.
+items := win.SystemMenuItems() // []MenuItem: Restore, Move, Size, Minimize, Maximize, —, Close (Alt+F4)
+win.SetSystemMenu(items)       // your own list (build it from the default one); nil = default;
+                               // an empty non-nil slice removes the menu (icon = a picture, drags the window)
+win.SystemMenu() *PopupMenu; win.OpenSystemMenu() bool
+win.SetMaximized(true); win.IsMaximized() // host state; window.Window reports it on every resize
+```
+
+Labels go through `widget.Tr` (`win.sys.restore|move|size|minimize|maximize|close`,
+EN and RU built in, live language switching on the next open). Actions use what
+the window already has: Restore and Maximize call `OnMaximize` (the host toggles);
+Minimize `OnMinimize`; Close `OnClose`; Move `OnNativeMove`; Size
+`OnNativeResize(NativeEdgeBottom|NativeEdgeRight)`. An item without its handler
+(or a button the window does not have: `Resize`, `Style`) is shown DISABLED, not
+removed, so the menu does not jump from window to window; Move/Size exist only in
+a host that can move a window by the OS (Wayland) — elsewhere they stay grey and
+the window is dragged by its caption. The default list is rebuilt on every open;
+a list you set is yours (its `Disabled` flags are not recomputed).
+
+**Who owns a press on the title bar** (the unobvious part, `widget/titlebar_hit.go`).
+`Window.WantsCapture` answers true to every left press in the bar — the window
+drags itself by it — and the engine looks for a capturer from the DEEPEST child up
+to the root. A child lying over the bar therefore gets the press only if its own
+`WantsCapture` returns true; otherwise the press goes to the window and starts a
+drag, and the child never sees it. Built-in exceptions the window knows itself:
+the collapse button, `SetTitleBarContent`, the window icon, the caption buttons,
+title tabs. Two explicit ways for the rest, neither needs a mouse capture and
+neither changes an existing application:
+
+```go
+// 1. The child says "presses on me are mine" (any descendant of the window, any depth).
+func (b *MyBtn) OwnsTitleBarPress(pt image.Point) bool { return pt.In(b.Bounds()) }  // widget.TitleBarPressOwner
+// 2. The application decides by point (areas drawn by the app, widgets you cannot change).
+win.SetTitleBarHitTest(func(pt image.Point) bool { return pt.In(searchArea) }); win.SetTitleBarHitTest(nil)
+```
+
+The press then takes the ordinary path (deepest widget first, bubbling up) and the
+window does not start a drag; the question is asked only for points inside the bar.
+Keep `WantsCapture` when the widget needs the mouse AFTER the press (slider, text
+selection, release semantics of a button). `AddDragArea` still beats everything.
+
+**`PopupMenu.DismissedByPress()` and `Toggle`.** The engine dismisses open menus
+outside the click path BEFORE the press reaches widgets, so a button that opens a
+menu finds it already closed and would reopen it — the menu could not be closed by
+pressing its button again. `DismissedByPress()` is true when the press being handled
+is the one that dismissed the menu. The "time window" is ONE PRESS, not a duration
+(unlike `desktop.Flyout.DismissedByAnchor`): true from the dismissal until the next
+press begins (`widget.CurrentPressSeq`, bumped by the engine), so it does not depend
+on the user's speed, and a menu closed by Esc does not make the button lose the next
+press. Without an engine (unit tests) there are no presses and it is always false.
+`Toggle(x, y)` is the usual button body: open → close; just dismissed by this press →
+do nothing; else `Show(x, y)`; returns whether the menu is open afterwards. The tab
+strip chevron and the system menu use it.
+
+Also fixed on the way: a menu built from a built-in Windows profile
+(`Materialize(Windows2000/Windows10)`) drew its DISABLED items with a transparent
+text (the flat token `disabled.default` is not declared there) — `Materialize` now
+takes the colour from `menu.item` in the Disabled state (only when the flat token
+and the menu style do not carry one).
+
+Tests: `theme/window_title_test.go` (gradient, accent following, `SetColorFrom`,
+metrics, other profiles untouched), `tests/window_caption_test.go` (gradient pixels
+active / inactive / accent, 18 px bar and 16×14 buttons, hit-test of the small
+button, old geometry without metrics, bridge round trip, icon placement and pixels,
+caption shift, SVG, system menu items / languages / callbacks / click / toggle /
+double click / custom list, press owner, `SetTitleBarHitTest`,
+`DismissedByPress`+`Toggle`).
 
 ---
 

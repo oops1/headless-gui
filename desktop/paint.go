@@ -48,6 +48,10 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 			// оказывалось обрезано его границами.
 			prev := ctx.Clip()
 			rc.SetRoundClip(r, corner)
+			// SetRoundClip заменяет прямоугольный клип рамкой слоя, и слой,
+			// выступающий за клип вызывающего (карточка на краю окна списка), лёг бы
+			// поверх соседей: прежний клип возвращается пересечением.
+			ctx.SetClip(r.Intersect(prev))
 			defer func() {
 				rc.ClearRoundClip()
 				ctx.SetClip(prev)

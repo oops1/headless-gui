@@ -92,6 +92,31 @@ type CalendarFlyout struct {
 
 	// fade — плавный переход цвета чисел при наведении.
 	fade motion
+
+	// WorkArea — область над панелью задач, в правом нижнем углу которой стоит
+	// календарь Windows 11. Пусто — от экрана (Screen) и значка (Anchor).
+	WorkArea image.Rectangle
+	// Ticker — заводит секундный отсчёт идущего сеанса «Фокусировки»: повторяет f
+	// каждые d и возвращает функцию остановки. nil — таймер стандартной
+	// библиотеки; приложение с движком ставит сюда его Every:
+	//
+	//	cal.Ticker = func(d time.Duration, f func()) func() {
+	//	    t := eng.Every(d, f)
+	//	    return t.Stop
+	//	}
+	Ticker func(d time.Duration, f func()) (stop func())
+
+	// Календарь Windows 11 (calendarflyout_win11.go): сеанс «Фокусировки» и его
+	// подписка, секундный отсчёт, центр над календарём, кнопка под курсором и
+	// кнопка в клавиатурном фокусе (всё под mu), фокус ввода.
+	focusSess  FocusSession
+	unsubFocus func()
+	stopTick   func()
+	above      *NotificationCenter
+	hot        calStop
+	focusStop  calStop
+	kbDay      time.Time // день под клавиатурным курсором сетки (нулевое — ещё не вставал)
+	fs         FocusState
 }
 
 // NewCalendarFlyout создаёт календарь, оформляемый темой tm и читающий
@@ -104,6 +129,8 @@ func NewCalendarFlyout(tm *theme.Manager, clk Clock) *CalendarFlyout {
 	c.viewMonth = firstOfMonth(c.now())
 	c.Content = c.draw
 	c.Size = c.size
+	c.Place = c.place
+	c.Flyout.Subscribe(c.onOpenChanged)
 	return c
 }
 
@@ -133,16 +160,25 @@ func (c *CalendarFlyout) Collapsed() bool {
 func (c *CalendarFlyout) SetCollapsed(v bool) {
 	c.mu.Lock()
 	changed := c.collapsed != v
-	c.collapsed = v
-	if v {
-		// Свёрнутая сетка курсора не видит — иначе развёрнутая панель
-		// показала бы подсвеченным день, над которым курсора давно нет.
+	if !changed && v {
 		c.hovered = time.Time{}
 	}
 	c.mu.Unlock()
-	if changed {
-		c.Invalidate()
+	if !changed {
+		return
 	}
+	// Высота карточки Windows 11 меняется: прежнее место перерисовывается
+	// вместе с новым, а центр над ней перекладывается.
+	c.relayout(func() {
+		c.mu.Lock()
+		c.collapsed = v
+		if v {
+			// Свёрнутая сетка курсора не видит — иначе развёрнутая панель
+			// показала бы подсвеченным день, над которым курсора давно нет.
+			c.hovered = time.Time{}
+		}
+		c.mu.Unlock()
+	})
 }
 
 // ToggleCollapsed переключает свёрнутость.
@@ -154,10 +190,13 @@ func (c *CalendarFlyout) PrevMonth() { c.shiftMonth(-1) }
 func (c *CalendarFlyout) NextMonth() { c.shiftMonth(1) }
 
 func (c *CalendarFlyout) shiftMonth(delta int) {
-	c.mu.Lock()
-	c.viewMonth = c.viewMonth.AddDate(0, delta, 0)
-	c.mu.Unlock()
-	c.Invalidate()
+	// В месяце от четырёх до шести недель, и карточка Windows 11 при листании
+	// меняет высоту: прежнее место перерисовывается вместе с новым.
+	c.relayout(func() {
+		c.mu.Lock()
+		c.viewMonth = c.viewMonth.AddDate(0, delta, 0)
+		c.mu.Unlock()
+	})
 }
 
 // ViewMonth возвращает месяц, который сейчас показан (всегда 1-е число).
@@ -238,6 +277,9 @@ func (c *CalendarFlyout) contentRect() image.Rectangle {
 // недель в показанном месяце (4–6), поэтому при листании панель может
 // слегка менять высоту — так же ведёт себя системный календарь Windows.
 func (c *CalendarFlyout) size() image.Point {
+	if c.win11() {
+		return c.w11Size()
+	}
 	width := c.metric(KeyCalendarWidth)
 	headerH := c.metric(KeyCalendarHeaderHeight)
 	cell := c.metric(KeyCalendarCell)
@@ -337,6 +379,10 @@ func (c *CalendarFlyout) computeLayout(content image.Rectangle) calendarLayout {
 
 func (c *CalendarFlyout) draw(ctx widget.DrawContext, r image.Rectangle) {
 	if r.Empty() {
+		return
+	}
+	if c.win11() {
+		c.w11Draw(ctx, r)
 		return
 	}
 	layout := c.computeLayout(r)
@@ -444,6 +490,9 @@ func (c *CalendarFlyout) dateTitle() string { return c.culture().LongDate(c.now(
 // панели поглощается целиком: иначе он "проваливался" бы сквозь панель к
 // тому, что расположено под ней.
 func (c *CalendarFlyout) OnMouseButton(e widget.MouseEvent) bool {
+	if c.win11() {
+		return c.w11Mouse(e)
+	}
 	if e.Button != widget.MouseLeft || !c.IsOpen() {
 		return false
 	}
@@ -498,6 +547,10 @@ func (c *CalendarFlyout) hoveredDay() time.Time {
 // признак наведения ложью всегда, и заданная темой заливка при наведении была
 // не видна.
 func (c *CalendarFlyout) OnMouseMove(x, y int) {
+	if c.win11() {
+		c.w11Move(x, y)
+		return
+	}
 	var day time.Time
 	if c.IsOpen() && !widget.CursorIsNowhere(x, y) {
 		pt := image.Pt(x, y)
@@ -525,6 +578,9 @@ func (c *CalendarFlyout) OnMouseMove(x, y int) {
 // OnKeyEvent листает месяцы стрелками влево/вправо, а закрытие по Esc
 // оставляет базовому Flyout.
 func (c *CalendarFlyout) OnKeyEvent(e widget.KeyEvent) {
+	if c.win11() && c.w11Key(e) {
+		return
+	}
 	if c.IsOpen() && e.Pressed {
 		switch e.Code {
 		case widget.KeyLeft:

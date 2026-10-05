@@ -431,10 +431,7 @@ func (w *Window) macTitleBar() bool {
 // сворачивания и после подписи.
 func (w *Window) titleContentLeft() int {
 	tb := w.titleBarRect()
-	x := tb.Min.X + 12
-	if w.navBtn != nil && !w.navBtn.bounds.Empty() {
-		x = w.navBtn.bounds.Max.X + titleBarGap
-	}
+	x := w.titleTextLeft(tb)
 	if w.Title != "" && !w.titleTabsActive() {
 		x += w.titleTextW() + titleBarGap
 	}
@@ -531,6 +528,7 @@ func (w *Window) IsNavCollapsed() bool { return w.navBtn != nil && w.navBtn.coll
 // layoutTitleBar расставляет кнопку сворачивания и начинку полосы заголовка.
 func (w *Window) layoutTitleBar() {
 	tb := w.titleBarRect()
+	w.layoutIcon(tb)
 	if w.navBtn != nil {
 		// В mac-раскладке своей начинки в полосе нет — и кнопке сворачивания
 		// там тоже не место: слева стоят кнопки окна.
@@ -543,6 +541,9 @@ func (w *Window) layoutTitleBar() {
 				sz = h
 			}
 			left := tb.Min.X + 6
+			if ir := w.IconBounds(); !ir.Empty() {
+				left = ir.Max.X + titleBarGap/2 // за значком окна, а не поверх него
+			}
 			top := tb.Min.Y + (tb.Dy()-sz)/2
 			w.navBtn.SetVisible(true)
 			w.navBtn.SetBounds(image.Rect(left, top, left+sz, top+sz))
@@ -568,7 +569,12 @@ func (w *Window) titleBarChildHit(pt image.Point) bool {
 		pt.In(w.titleBarContent.Bounds()) {
 		return true
 	}
-	return false
+	if w.iconClaims(pt) {
+		return true
+	}
+	// Явные способы приложения (titlebar_hit.go): виджет, назвавшийся
+	// владельцем нажатия, и решение по точке.
+	return w.titleBarOwnedByApp(pt)
 }
 
 // isTitleBarWidget сообщает, принадлежит ли ребёнок полосе заголовка.
@@ -580,5 +586,5 @@ func (w *Window) isTitleBarWidget(c Widget) bool {
 		return false
 	}
 	return (w.navBtn != nil && Widget(w.navBtn) == c) || w.titleBarContent == c ||
-		w.navPanel == c
+		w.navPanel == c || w.isIconWidget(c)
 }

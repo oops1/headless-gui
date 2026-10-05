@@ -8,8 +8,8 @@ import (
 
 var _ FocusNavigator = (*Taskbar)(nil)
 
-// Children возвращает детей панели в порядке областей — «Пуск», приложения,
-// трей, — а не в порядке добавления. Именно по Children движок обходит дерево
+// Children возвращает детей панели в порядке областей — виджеты, «Пуск»,
+// приложения, трей, — а не в порядке добавления. Именно по Children движок обходит дерево
 // при Tab: оболочка, добавившая трей раньше приложений, иначе получила бы
 // обход справа налево. Дети, не попавшие ни в одну область, идут в конце.
 func (t *Taskbar) Children() []widget.Widget {
@@ -19,8 +19,8 @@ func (t *Taskbar) Children() []widget.Widget {
 	}
 	out := make([]widget.Widget, 0, len(base))
 	inSlot := make(map[widget.Widget]struct{}, len(base))
-	for _, slot := range t.slots {
-		for _, it := range slot {
+	for _, s := range slotOrder {
+		for _, it := range t.slots[s] {
 			out = append(out, it)
 			inSlot[it] = struct{}{}
 		}
@@ -51,7 +51,7 @@ func (t *Taskbar) slotFocusables(slot Slot) []widget.Widget {
 // той же области панели. Область не зацикливается: у её края стрелка ничего
 // не делает, а Tab вынесет фокус к следующей области.
 func (t *Taskbar) MoveFocus(from widget.Widget, move FocusMove) bool {
-	for slot := SlotStart; slot <= SlotTray; slot++ {
+	for _, slot := range slotOrder {
 		list := t.slotFocusables(slot)
 		idx := -1
 		for i, w := range list {

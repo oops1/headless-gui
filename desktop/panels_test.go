@@ -36,9 +36,10 @@ func startMenuFixture(t *testing.T) (*StartMenu, *StaticAppCatalog) {
 		AppInfo{ID: "files", Title: "Проводник"},
 		AppInfo{ID: "mail", Title: "Почта"},
 	)
-	// Плоский вид меню: его сохраняют темы без презентера плиток. Windows 10
-	// получает меню с боковой панелью и плитками (startmenu_tiles_test.go).
-	m := NewStartMenu(managerFor(t, theme.ProfileWindows11), cat)
+	// Плоский вид меню: его сохраняют темы без презентера. Windows 10 получает
+	// меню с боковой панелью и плитками (startmenu_tiles_test.go), Windows 11 —
+	// сетку закреплённых (startmenu_grid_test.go).
+	m := NewStartMenu(managerFor(t, theme.ProfileWindows2000), cat)
 	m.Screen = panelScreen()
 	m.Open(panelAnchor())
 	return m, cat

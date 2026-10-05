@@ -70,8 +70,13 @@ func TestMaterials_Win11Panels(t *testing.T) {
 			if la >= lm {
 				t.Errorf("%s/%s: MicaAlt (%.1f) не темнее Mica (%.1f)", tag, panel, la, lm)
 			}
-			// Мягкая тень: полоса над панелью темнее, чем без тени.
+			// Мягкая тень: полоса над панелью темнее, чем без тени. Панель во всю
+			// высоту экрана (меню «Пуск» Windows 11 на низком экране) тени сверху
+			// не оставляет места — тогда берётся полоса слева.
 			above := image.Rect(area.Min.X+20, area.Min.Y-14, area.Max.X-20, area.Min.Y-2)
+			if area.Min.Y < 14 {
+				above = image.Rect(area.Min.X-14, area.Min.Y+20, area.Min.X-2, area.Max.Y-20)
+			}
 			if meanLum(soft, above) >= meanLum(mica, above) {
 				t.Errorf("%s/%s: мягкая тень не затемнила область над панелью", tag, panel)
 			}

@@ -53,6 +53,8 @@ type NotificationToast struct {
 	hovered    bool
 	suppressed int
 	unwatch    []func()
+	dnd        DoNotDisturb // режим «Не беспокоить»: пока включён, тост молчит
+	unsubDND   func()
 }
 
 // NewNotificationToast создаёт тост, следящий за источником ns. Уведомления,
@@ -87,6 +89,43 @@ func NewNotificationToast(tm *theme.Manager, ns Notifications) *NotificationToas
 	return t
 }
 
+// SetDoNotDisturb задаёт модель «Не беспокоить» (nil — тост показывается всегда).
+// Пока режим включён, новые уведомления тостом не показываются, а в центре
+// уведомлений остаются: тост — предложение отвлечься, и режим его отменяет.
+// Уже показанный тост режим убирает.
+func (t *NotificationToast) SetDoNotDisturb(d DoNotDisturb) {
+	t.mu.Lock()
+	t.dnd = d
+	old := t.unsubDND
+	t.unsubDND = nil
+	t.mu.Unlock()
+	if old != nil {
+		old()
+	}
+	if d == nil {
+		return
+	}
+	u := d.Subscribe(func() {
+		if d.Enabled() {
+			t.Hide()
+		}
+	})
+	t.mu.Lock()
+	t.unsubDND = u
+	t.mu.Unlock()
+	if d.Enabled() {
+		t.Hide()
+	}
+}
+
+// muted — включён ли режим «Не беспокоить».
+func (t *NotificationToast) muted() bool {
+	t.mu.Lock()
+	d := t.dnd
+	t.mu.Unlock()
+	return d != nil && d.Enabled()
+}
+
 // Close прекращает слежение за источником и убирает тост. После Close тост не
 // оживёт: забытая подписка держала бы его у источника вечно.
 func (t *NotificationToast) Close() {
@@ -97,9 +136,14 @@ func (t *NotificationToast) Close() {
 		w()
 	}
 	t.unwatch = nil
+	du := t.unsubDND
+	t.unsubDND = nil
 	t.mu.Unlock()
 	if u != nil {
 		u()
+	}
+	if du != nil {
+		du()
 	}
 	t.Hide()
 }
@@ -233,7 +277,7 @@ func (t *NotificationToast) onChanged() {
 		t.Hide()
 		cur = 0
 	}
-	if fresh == nil || muted || t.presenter() == nil {
+	if fresh == nil || muted || t.muted() || t.presenter() == nil {
 		return
 	}
 	t.show(fresh.ID)
@@ -306,7 +350,11 @@ func (t *NotificationToast) size() image.Point {
 	}
 	f := t.view.fonts()
 	t.view.mu.Lock()
-	c := t.view.layoutCard(m, f, n[0], 0, 0, m.toastW, hasNoteIcon(n[0]))
+	iconArg := hasNoteIcon(n[0])
+	if t.view.w11() {
+		iconArg = true // тост Windows 11 — карточка со строкой приложения
+	}
+	c := t.view.layoutCard(m, f, n[0], 0, 0, m.toastW, iconArg)
 	t.view.mu.Unlock()
 	return image.Pt(m.toastW, c.rect.Dy())
 }
