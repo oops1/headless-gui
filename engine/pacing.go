@@ -14,7 +14,6 @@
 package engine
 
 import (
-
 	"github.com/oops1/headless-gui/v3/output"
 )
 
@@ -120,4 +119,3 @@ func (e *Engine) deliver(frame output.Frame) {
 func (e *Engine) pacingIsExternal() bool {
 	return Pacing(e.pacing.Load()) == PacingExternal
 }
-

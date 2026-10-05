@@ -173,7 +173,7 @@ type Engine struct {
 	fullNext  atomic.Bool
 	lostFrame atomic.Bool
 	quit      chan struct{}
-	done   chan struct{}
+	done      chan struct{}
 
 	fps     int     // целевой FPS, 1–120
 	userDPI float64 // пользовательский DPI шрифтов (без учёта HiDPI-масштаба)

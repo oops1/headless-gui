@@ -20,7 +20,7 @@ import (
 // придёт полный кадр.
 type columns struct {
 	widget.Base
-	mu      sync.Mutex
+	mu     sync.Mutex
 	visits map[int]int
 }
 
