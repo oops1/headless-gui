@@ -76,6 +76,20 @@ func frozenBar(t *testing.T, tm *theme.Manager, w, h int) *widget.Panel {
 	return root
 }
 
+// fmaMulAdd не встраивается: операнды приходят в регистрах, как в коде
+// растеризации. Из памяти загрузка уходит в умножение, и слияния нет даже там,
+// где оно есть в рабочем коде.
+//
+//go:noinline
+func fmaMulAdd(a, b, c float64) float64 { return a*b + c }
+
+// fmaFused сообщает, сливает ли эта сборка a*b+c в FMA. Точное a*b = 1-2⁻⁶⁰
+// при раздельном умножении округляется до 1, и сумма даёт ровно 0; FMA
+// округляет один раз и даёт -2⁻⁶⁰.
+func fmaFused() bool {
+	return fmaMulAdd(1+0x1p-30, 1-0x1p-30, -1) != 0
+}
+
 func frameHash(img *image.RGBA) string {
 	sum := sha256.Sum256(img.Pix)
 	return hex.EncodeToString(sum[:8])
@@ -85,6 +99,11 @@ func TestTaskbar_OtherProfilesFrozen(t *testing.T) {
 	want := map[string]string{}
 	for k, v := range frozenHashes {
 		want[k] = v
+	}
+	if fmaFused() {
+		for k, v := range frozenHashesFMA {
+			want[k] = v
+		}
 	}
 	type variant struct {
 		name  string
