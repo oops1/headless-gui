@@ -4155,7 +4155,7 @@ covers the window minus the corners. A maximized or fullscreen window is not
 rounded and fully opaque; windows without a radius stay XRGB. X11 and Win32 are
 unchanged (X11 would need an ARGB visual and a compositing manager).
 
-### Accent, light taskbar and Windows 10 acrylic — v3.32
+### Accent, light taskbar and Windows 10 acrylic — v3.31
 
 **Accent is a live token** (`theme/accent.go`). `Manager.SetAccent(c)`
 re-resolves the active theme with another `accent` and notifies subscribers
@@ -4224,7 +4224,7 @@ Tests: `theme/accent_test.go`, `desktop/accent_test.go`, `engine/noise_test.go`.
 `TestGolden_Windows10Acrylic` writes dark and light bar PNGs when `GOLDEN_OUT`
 is set.
 
-### Physical-size SVG, tray icons from the theme set, thin scrollbar — v3.32
+### Physical-size SVG, tray icons from the theme set, thin scrollbar — v3.31
 
 - `widget/physical.go`: `ContextScale(ctx)` (1 for contexts without `Scale()`),
   `PhysicalRect(ctx, r)` (edge-rounded like `Canvas.sRect`), `DrawSVG(ctx, doc,
@@ -4530,7 +4530,7 @@ for it with the presenter `theme.PresenterStartTiles` (`"tiles"`,
 `Profile.Presenters["startmenu"]`, set by the Windows 10 profile and inherited by
 its dark variant); the component asks `StartMenu.tiled()` and never looks at the
 theme name. Windows 11, Windows 2000 and macOS keep the flat list (rendered
-frames of all eight profiles are byte-identical to v3.32, only Windows 10
+frames of all eight profiles are byte-identical to v3.30, only Windows 10
 changes). Same object, same `Open/Close/Toggle`: a theme switch on an open menu
 changes the look without re-creating anything.
 

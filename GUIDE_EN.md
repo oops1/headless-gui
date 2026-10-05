@@ -4065,7 +4065,7 @@ them with a separable box blur (cost independent of the radius) and puts them
 back. `Canvas.SetRoundClip` clips along the rounded outline instead of its
 bounding box.
 
-#### Accent, light taskbar and Windows 10 acrylic (since v3.32)
+#### Accent, light taskbar and Windows 10 acrylic (since v3.31)
 
 The accent is a theme token that can change on the fly. Styles reference it
 (`StyleDelta.FillFrom`, `TextFrom`, `BorderFrom`; in JSON `"fill": "@accent"`),

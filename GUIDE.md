@@ -4043,7 +4043,7 @@ p.SetStyle("taskbar", "", theme.StateNormal, theme.StyleDelta{
 обратно. `Canvas.SetRoundClip` обрезает по скруглённому контуру, а не по
 охватывающему прямоугольнику.
 
-#### Акцент, светлая панель и акрил Windows 10 (с v3.32)
+#### Акцент, светлая панель и акрил Windows 10 (с v3.31)
 
 Акцент — токен темы, который можно менять на лету. Стили ссылаются на него
 (`StyleDelta.FillFrom`, `TextFrom`, `BorderFrom`; в JSON — `"fill": "@accent"`),
