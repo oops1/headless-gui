@@ -28,6 +28,7 @@ type jsonProfile struct {
 		Size   float64 `json:"size,omitempty"`
 		Bold   bool    `json:"bold,omitempty"`
 		Italic bool    `json:"italic,omitempty"`
+		Weight int     `json:"weight,omitempty"`
 	} `json:"fonts,omitempty"`
 	Icons map[string]struct {
 		Name   string `json:"name,omitempty"`
@@ -71,6 +72,7 @@ type jsonStyle struct {
 		Size   float64 `json:"size,omitempty"`
 		Bold   bool    `json:"bold,omitempty"`
 		Italic bool    `json:"italic,omitempty"`
+		Weight int     `json:"weight,omitempty"`
 	} `json:"font,omitempty"`
 
 	Backdrop *struct {
@@ -141,7 +143,7 @@ func LoadTheme(r io.Reader) (*LoadResult, error) {
 		p.Flags[Key(k)] = v
 	}
 	for k, v := range jp.Fonts {
-		p.Fonts[Key(k)] = FontSpec{Family: v.Family, Size: v.Size, Bold: v.Bold, Italic: v.Italic}
+		p.Fonts[Key(k)] = FontSpec{Family: v.Family, Size: v.Size, Bold: v.Bold, Italic: v.Italic, Weight: v.Weight}
 	}
 	for k, v := range jp.Icons {
 		p.Icons[Key(k)] = IconRef{Name: v.Name, Source: v.Source}
@@ -219,7 +221,7 @@ func (js jsonStyle) toDelta() (StyleDelta, []string) {
 	}
 
 	if js.Font != nil {
-		d.Font = &FontSpec{Family: js.Font.Family, Size: js.Font.Size, Bold: js.Font.Bold, Italic: js.Font.Italic}
+		d.Font = &FontSpec{Family: js.Font.Family, Size: js.Font.Size, Bold: js.Font.Bold, Italic: js.Font.Italic, Weight: js.Font.Weight}
 	}
 
 	if js.Backdrop != nil {

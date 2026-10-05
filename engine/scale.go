@@ -85,6 +85,7 @@ func (c *Canvas) LogicalSize() (w, h int) { return c.logicalW, c.logicalH }
 func (c *Canvas) cloneForSize(w, h int, scale float64, bgSrc image.Image) *Canvas {
 	nc := newCanvasScaled(w, h, scale, c.fontCache)
 	nc.namedFonts = c.namedFonts
+	nc.families = c.families
 	nc.fallbacks = c.fallbacks
 	// Настройки движка переезжают вместе с холстом: смена разрешения не
 	// повод молча вернуть пропуск поддеревьев или порядок каналов к

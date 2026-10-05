@@ -38,6 +38,7 @@ type Canvas struct {
 	bgImage    *image.RGBA           // фоновое изображение (масштабировано под холст, закодировано в format — см. setBackground)
 	fontCache  *FontCache            // кэш шрифта по умолчанию
 	namedFonts map[string]*FontCache // именованные шрифты (FontFamily из XAML)
+	families   *fontFamilies         // таблица семейств: выбор шрифта по весу и наклону (fontfamily.go)
 	fallbacks  []*FontCache          // fallback-шрифты для отсутствующих глифов (BUG-2)
 	clip       image.Rectangle       // активная область отсечения
 	hasClip    bool                  // включено ли отсечение
@@ -93,15 +94,25 @@ func (c *Canvas) RegisterFont(fontName string, ttfData []byte) {
 	}
 	fc := newFontCacheFromData(ttfData, c.fontCache.dpi)
 	if fc != nil {
+		fc.subpixel = c.fontCache.Subpixel()
 		c.namedFonts[fontName] = fc
+		c.registerFace(fontName, fc)
 		c.fontRev++
 	}
 }
 
 // fontFor возвращает FontCache для именованного шрифта; если не найден — default.
+//
+// Имя, которого в реестре нет буквально, ещё не значит «шрифт по умолчанию»:
+// это может быть название семейства («Open Sans» при файле
+// OpenSans-Regular.ttf) или составное имя widget.FontFace с весом и наклоном —
+// их разбирает таблица семейств.
 func (c *Canvas) fontFor(fontName string) *FontCache {
 	if fontName != "" && c.namedFonts != nil {
 		if fc, ok := c.namedFonts[fontName]; ok {
+			return fc
+		}
+		if fc := c.faceFor(fontName); fc != nil {
 			return fc
 		}
 	}
@@ -123,6 +134,9 @@ func (c *Canvas) SetDefaultFont(name string) bool {
 	}
 	if fc, ok := c.namedFonts[name]; ok && fc != nil {
 		c.fontCache = fc
+		if c.families != nil {
+			c.families.setDefault(fc.famKey)
+		}
 		c.fontRev++
 		return true
 	}
@@ -146,6 +160,7 @@ func (c *Canvas) AddFallbackFont(ttfData []byte) bool {
 	if fc == nil {
 		return false
 	}
+	fc.subpixel = c.fontCache.Subpixel()
 	c.fallbacks = append(c.fallbacks, fc)
 	c.fontRev++
 	return true
@@ -195,6 +210,7 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 		backOwn:    backBuf,
 		fontCache:  fc,
 		namedFonts: make(map[string]*FontCache),
+		families:   newFontFamilies(),
 		W:          pw,
 		H:          ph,
 		tilesX:     (pw + ts - 1) / ts,
@@ -763,6 +779,10 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 		penLimit = fixed.I(c.clip.Max.X + clipPenSlackX)
 	}
 
+	// Дробное позиционирование (Engine.SetTextSubpixel) включено на всех
+	// шрифтах разом, поэтому достаточно спросить основной.
+	sub := fc.Subpixel()
+
 	// Быстрый путь: нет fallback-шрифтов — один шрифт, с кернингом
 	// (поведение прежнего font.Drawer.DrawString; отсутствующий глиф
 	// пропускается без продвижения пера — как делал Drawer с opentype).
@@ -776,11 +796,11 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 			if prev >= 0 {
 				pen += fc.Kern(sizePt, prev, r)
 			}
-			g := fc.Glyph(sizePt, r)
+			g, gx := penGlyph(fc, sub, sizePt, r, pen)
 			if !g.ok {
 				continue
 			}
-			c.drawGlyphMask(g, pen.Round()+g.offX, baseline+g.offY, col)
+			c.drawGlyphMask(g, gx+g.offX, baseline+g.offY, col)
 			pen += g.advance
 			prev = r
 		}
@@ -795,9 +815,9 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 			break
 		}
 		chosen, found := c.fcForRune(fc, r)
-		g := chosen.Glyph(sizePt, r)
+		g, gx := penGlyph(chosen, sub, sizePt, r, pen)
 		if found && g.ok {
-			c.drawGlyphMask(g, pen.Round()+g.offX, baseline+g.offY, col)
+			c.drawGlyphMask(g, gx+g.offX, baseline+g.offY, col)
 		}
 		// Отсутствующий глиф не рисуем (без .notdef-квадрата), но сохраняем
 		// интервал по ширине пробела, чтобы текст не «слипался».

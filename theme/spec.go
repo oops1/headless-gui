@@ -10,18 +10,54 @@ import (
 // не занимается.
 type Key string
 
+// Веса шрифта по шкале CSS/OpenType для FontSpec.Weight. Движок подбирает
+// ближайшее начертание семейства из тех, что зарегистрированы.
+const (
+	WeightThin     = 100
+	WeightLight    = 300
+	WeightRegular  = 400
+	WeightMedium   = 500
+	WeightSemiBold = 600
+	WeightBold     = 700
+	WeightBlack    = 900
+)
+
+// FlagTextSubpixel — флаг профиля: тема рассчитана на подпиксельное
+// позиционирование глифов (engine.Engine.SetTextSubpixel). Профиль только
+// просит; включает режим тот, кто владеет движком. Без флага шаг глифов
+// округляется до целого пикселя, как у всех прежних тем.
+const FlagTextSubpixel Key = "text.subpixel"
+
 // FontSpec — шрифт как данные темы. Имя семейства соответствует шрифту,
-// зарегистрированному в движке (engine.RegisterFont); пустое — шрифт по
-// умолчанию.
+// зарегистрированному в движке (engine.RegisterFont, RegisterFontFS): либо
+// имени шрифта («OpenSans-Bold»), либо названию семейства («Open Sans») — во
+// втором случае начертание выбирается по Weight и Italic. Пустое семейство —
+// шрифт по умолчанию.
 type FontSpec struct {
 	Family string  `json:"family,omitempty"`
-	Size   float64 `json:"size,omitempty"` // в пунктах; 0 — размер по умолчанию
+	Size   float64 `json:"size,omitempty"` // в пунктах, может быть дробным (8.5); 0 — размер по умолчанию
 	Bold   bool    `json:"bold,omitempty"`
 	Italic bool    `json:"italic,omitempty"`
+	// Weight — вес 100..900 (WeightLight, WeightSemiBold…); 0 — не задан:
+	// тогда вес даёт Bold (700) либо обычное начертание. Заданный Weight
+	// важнее Bold.
+	Weight int `json:"weight,omitempty"`
 }
 
 // IsZero — спецификация ничего не задаёт (её можно наследовать целиком).
 func (f FontSpec) IsZero() bool { return f == FontSpec{} }
+
+// EffectiveWeight — вес, который просит спецификация: Weight, а если он не
+// задан, 700 при Bold и 0 («обычный») иначе.
+func (f FontSpec) EffectiveWeight() int {
+	switch {
+	case f.Weight > 0:
+		return f.Weight
+	case f.Bold:
+		return WeightBold
+	}
+	return 0
+}
 
 // IconRef — ссылка на иконку в наборе темы. Источником может быть файл SVG
 // или заранее зарегистрированное имя; разрешает ссылку IconSet, а не тема.

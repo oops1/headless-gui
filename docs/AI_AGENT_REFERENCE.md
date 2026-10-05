@@ -2655,7 +2655,37 @@ eng.RegisterFallbackFont(ttfBytes)        // glyph fallback (✓✗⚠, …)
 //      var fontsFS embed.FS
 //
 err := eng.RegisterFontFS(fontsFS, "assets/fonts") // same names as on disk
+
+// 3. Or take Open Sans (Light/Regular/SemiBold/Bold/Italic/BoldItalic, ~0.8 MB)
+//    already embedded by the engine's own package -- opt-in, so programs that
+//    do not import it do not grow:
+//      import "github.com/oops1/headless-gui/v3/assets/fonts"
+err = fonts.Register(eng) // then eng.SetDefaultFont("OpenSans") if wanted
 ```
+
+**Family + weight + italic.** Every registered font is indexed by its own
+metadata (name table, `OS/2.usWeightClass`; the registration name is only a
+fallback), so a font is selectable as "family, weight, italic" besides by file
+name. Family names ignore case/spaces/hyphens ("Open Sans" == "OpenSans").
+`widget.FontFace(family, weight, italic)` builds the name for
+`DrawTextFont`/`MeasureTextFont`/`Label.FontName` (regular weight returns the
+family unchanged; the DrawContext interface did not change). Matching follows
+CSS Fonts (nearest weight; italic beats weight). An empty/unknown family means
+"default font at that weight": Open Sans default -> `OpenSans-Bold`; built-in Go
+Regular -> built-in Go Bold. In themes: `theme.FontSpec{Family, Size (may be
+fractional, 8.5), Weight (theme.WeightLight/SemiBold/...), Bold, Italic}`;
+`desktop.FontFaceName(spec)` converts it (desktop/paint.go uses it, so
+`Bold`/`Italic` are no longer dropped). `Manager.GetFont(key)` returns named
+theme fonts ("default", "caption", "title", "clock.large" in Windows 10).
+
+**Sub-pixel text (opt-in).** By default each glyph advance is rounded to a whole
+pixel (`HintingFull`; x/image has no real hinting, only that rounding), which
+makes 11 px text uneven. `eng.SetTextSubpixel(true)` keeps advances fractional
+and rasterizes each glyph for the quarter-pixel its pen falls in (4 phases in
+the glyph cache). Off by default so existing themes and `tests/golden_*` stay
+byte-identical; the Windows 10 profile asks for it with
+`theme.FlagTextSubpixel` and the engine owner applies it. It changes string
+widths -- enable before building the UI. Shaped (RTL/complex) text is unchanged.
 
 XAML uses the family name via `FontFamily`:
 

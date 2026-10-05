@@ -296,7 +296,26 @@ func Windows10Profile() *Profile {
 
 	// Значок кнопки «Пуск» берётся из набора иконок темы.
 	p.Icons["startbutton.icon"] = IconRef{Name: "start"}
-	p.Fonts["default"] = FontSpec{Size: 9}
+
+	// Windows 10 пишет Segoe UI — шрифтом несвободным, класть его в пакет
+	// нельзя. Заменой выбран Open Sans (OFL, лежит в assets/fonts): рисунок
+	// того же гуманистического круга, а ширина строки при кегле ×0,94 ложится
+	// в 1 % от Segoe UI (измерения — план WinLine, §2.1). Поэтому 8,5 pt там,
+	// где в Windows 10 стоит 9 pt. Семейство названо по-человечески, с
+	// пробелом: движок находит его и по такому названию, и по имени файла.
+	//
+	// Если Open Sans в движке не зарегистрирован (assets/fonts не найден,
+	// fonts.Register не вызван), текст пишется шрифтом по умолчанию тем же
+	// кеглем: ничего не пропадает, только рисунок букв другой.
+	p.Fonts["default"] = FontSpec{Family: "Open Sans", Size: 8.5}
+	// На 11 пикселях округление шага глифов до целого делает строку неровной:
+	// профиль просит дробное позиционирование (engine.SetTextSubpixel).
+	p.Flags[FlagTextSubpixel] = true
+	// Именованные шрифты оболочки; компонент берёт их через Manager.GetFont.
+	// Размеры — Segoe UI Windows 10, умноженные на тот же 0,94.
+	p.Fonts["caption"] = FontSpec{Family: "Open Sans", Size: 7.5}                         // 8 pt: время и вторая строка в уведомлениях и плитках
+	p.Fonts["title"] = FontSpec{Family: "Open Sans", Size: 10, Weight: WeightSemiBold}    // 10,5 pt Semibold: заголовки групп и уведомлений
+	p.Fonts["clock.large"] = FontSpec{Family: "Open Sans", Size: 28, Weight: WeightLight} // крупные часы календаря
 	p.Anims["hover"] = AnimSpec{Duration: 120 * time.Millisecond, Curve: "out-cubic"}
 	p.Anims["menu.open"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}
 	p.Anims["window.open"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}

@@ -367,16 +367,31 @@ func MeasureText(ctx widget.DrawContext, text string, s *theme.Style) int {
 	return measure(ctx, text, size, s.Font)
 }
 
+// FontFaceName переводит шрифт темы в имя для DrawTextFont / MeasureTextFont:
+// семейство, вес (Weight, а при его отсутствии Bold) и наклон. Пустая строка —
+// шрифт по умолчанию, обычное начертание.
+//
+// Раньше сюда доходило одно Family, а Bold и Italic молча терялись: тема,
+// объявившая жирный заголовок, получала обычный. Движок сам подбирает
+// начертание зарегистрированного семейства (Open Sans + SemiBold →
+// OpenSans-SemiBold); у шрифта без нужного веса берётся ближайший.
+//
+// Потребитель, рисующий именованный шрифт темы (theme.Manager.GetFont), берёт
+// имя отсюда же.
+func FontFaceName(f theme.FontSpec) string {
+	return widget.FontFace(f.Family, f.EffectiveWeight(), f.Italic)
+}
+
 func measure(ctx widget.DrawContext, text string, size float64, f theme.FontSpec) int {
-	if f.Family != "" {
-		return ctx.MeasureTextFont(text, size, f.Family)
+	if name := FontFaceName(f); name != "" {
+		return ctx.MeasureTextFont(text, size, name)
 	}
 	return ctx.MeasureText(text, size)
 }
 
 func drawText(ctx widget.DrawContext, text string, x, y int, size float64, s *theme.Style) {
-	if s.Font.Family != "" {
-		ctx.DrawTextFont(text, x, y, size, s.Font.Family, s.Text)
+	if name := FontFaceName(s.Font); name != "" {
+		ctx.DrawTextFont(text, x, y, size, name, s.Text)
 		return
 	}
 	ctx.DrawTextSize(text, x, y, size, s.Text)

@@ -63,6 +63,14 @@ type FontCache struct {
 	ttfData      []byte
 	shapeFace    *tsfont.Face
 	shapeFaceErr bool // парсинг не удался — не пытаться снова
+
+	// subpixel — позиционирование глифов по долям пикселя (SetSubpixel).
+	// По умолчанию выключено: шаг каждого глифа округляется до целого, как
+	// было всегда, и вид существующих тем не меняется.
+	subpixel bool
+	// famKey — ключ семейства, под которым шрифт записан в таблице семейств
+	// (fontfamily.go); "" — шрифт в таблицу не входит.
+	famKey string
 }
 
 // vMetric — вертикальные метрики шрифта одного размера (в пикселях).
@@ -72,10 +80,12 @@ type vMetric struct {
 	lineGap int // рекомендуемый зазор между строками (не отрицательный)
 }
 
-// glyphKey — ключ кэша глифов: размер шрифта в пунктах + руна.
+// glyphKey — ключ кэша глифов: размер шрифта в пунктах + руна + доля пикселя,
+// на которую сдвинуто перо (см. FontCache.GlyphAt; 0 при целочисленном пере).
 type glyphKey struct {
-	size float64
-	r    rune
+	size  float64
+	r     rune
+	phase uint8
 }
 
 // kernKey — ключ кэша кернинга: размер в пунктах + упорядоченная пара рун.
@@ -197,10 +207,19 @@ func (fc *FontCache) Face(sizePt float64) font.Face {
 	if f, ok := fc.cache[sizePt]; ok {
 		return f
 	}
+	// HintingFull в x/image не правит контуры (хинтинга там нет) — он только
+	// округляет шаг каждого глифа и кернинг до целого пикселя. На мелком
+	// кегле это и делает строку неровной: у Open Sans 8,5 pt (11,33 px)
+	// «ширина» буквы 6,3 px становится то 6, то 7. Для подпиксельного режима
+	// шаг оставляем дробным.
+	hint := font.HintingFull
+	if fc.subpixel {
+		hint = font.HintingNone
+	}
 	face, err := opentype.NewFace(fc.ttf, &opentype.FaceOptions{
 		Size:    sizePt,
 		DPI:     fc.dpi,
-		Hinting: font.HintingFull,
+		Hinting: hint,
 	})
 	if err != nil {
 		return basicfont.Face7x13
@@ -261,6 +280,29 @@ func (fc *FontCache) SetDPI(dpi float64) {
 	fc.kern = nil // кернинг зависит от DPI/размера
 }
 
+// SetSubpixel включает и выключает дробное позиционирование глифов. Меняет
+// шаг и кернинг, поэтому сбрасывает все кэши, зависящие от них. Вызывать до
+// отрисовки (через Engine.SetTextSubpixel, под блокировкой кадра).
+func (fc *FontCache) SetSubpixel(on bool) {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	if fc.subpixel == on {
+		return
+	}
+	fc.subpixel = on
+	fc.cache = make(map[float64]font.Face)
+	fc.glyphs = nil
+	fc.metrics = nil
+	fc.kern = nil
+}
+
+// Subpixel сообщает, включено ли дробное позиционирование глифов.
+func (fc *FontCache) Subpixel() bool {
+	fc.mu.RLock()
+	defer fc.mu.RUnlock()
+	return fc.subpixel
+}
+
 // Ascent возвращает подъём базовой линии (в пикселях) для размера sizePt.
 // Кэшируется — Face.Metrics пересчитывает метрики при каждом вызове.
 func (fc *FontCache) Ascent(sizePt float64) int {
@@ -316,7 +358,22 @@ func (fc *FontCache) vMetricsFull(sizePt float64) vMetric {
 // Первое обращение растеризует контур через opentype и сохраняет плотную
 // копию альфа-маски; последующие — только чтение кэша.
 func (fc *FontCache) Glyph(sizePt float64, r rune) cachedGlyph {
-	k := glyphKey{size: sizePt, r: r}
+	return fc.GlyphAt(sizePt, r, 0)
+}
+
+// subpixelPhases — на сколько долей делится пиксель по горизонтали при
+// дробном позиционировании. Четверти достаточно: глаз на 11-пиксельной строке
+// различает сдвиг в 1/4 px едва-едва, а кэш глифов растёт ровно вчетверо.
+const subpixelPhases = 4
+
+// GlyphAt — Glyph для пера, сдвинутого на phase/subpixelPhases пикселя вправо
+// от целочисленной позиции. Маска растеризуется с этим сдвигом, поэтому её
+// offX отсчитывается от того же целого пикселя, что и у phase == 0.
+func (fc *FontCache) GlyphAt(sizePt float64, r rune, phase int) cachedGlyph {
+	if phase < 0 || phase >= subpixelPhases {
+		phase = 0
+	}
+	k := glyphKey{size: sizePt, r: r, phase: uint8(phase)}
 	fc.mu.RLock()
 	if g, ok := fc.glyphs[k]; ok {
 		fc.mu.RUnlock()
@@ -339,8 +396,11 @@ func (fc *FontCache) Glyph(sizePt float64, r rune) cachedGlyph {
 
 	// Растеризация в целочисленной позиции пера: при HintingFull advance
 	// квантуется до целых пикселей, поэтому дробная часть пера всегда 0 и
-	// маска, снятая в (0,0), корректна для любой целочисленной позиции.
-	dr, maskImg, maskPt, adv, ok := face.Glyph(fixed.Point26_6{}, r)
+	// маска, снятая в (0,0), корректна для любой целочисленной позиции. В
+	// подпиксельном режиме шаг дробный, и маска снимается для каждой из
+	// четвертей пикселя отдельно (phase).
+	dot := fixed.Point26_6{X: fixed.Int26_6(phase * (64 / subpixelPhases))}
+	dr, maskImg, maskPt, adv, ok := face.Glyph(dot, r)
 	g := cachedGlyph{advance: adv, ok: ok}
 	if ok && !dr.Empty() {
 		g.offX, g.offY = dr.Min.X, dr.Min.Y
