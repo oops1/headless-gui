@@ -44,6 +44,9 @@ func (m *StartMenu) resetForOpen() {
 	v.sel = map[startArea]string{}
 	v.kbd = false
 	v.area = areaList
+	if m.grid() {
+		v.area = areaSearch // набор с клавиатуры сразу идёт в строку поиска
+	}
 	v.drag = tileDrag{}
 	v.bar = barDrag{}
 	v.grid, v.gridFrom = false, ""
@@ -55,6 +58,7 @@ func (m *StartMenu) resetForOpen() {
 	v.mu.Unlock()
 	v.sideW.Set(m.sidebarTarget(false))
 	v.gridFade.Set(0)
+	m.resetGrid()
 }
 
 // attachOnOpen подписывается на всё, что способно изменить открытое меню
@@ -68,7 +72,7 @@ func (m *StartMenu) attachOnOpen() {
 	keep := v.keepFocus
 	v.keepFocus = false
 	v.mu.Unlock()
-	if !keep && m.tiled() {
+	if !keep && m.modern() {
 		focusreq.Request(m)
 	}
 	if m.Query() != "" {
@@ -91,6 +95,9 @@ func (m *StartMenu) resubscribe() {
 	var subs []func()
 	if m.tm != nil {
 		subs = append(subs, m.tm.Subscribe(theme.ObserverFunc(func(*theme.Theme) {
+			// Смена темы могла сменить и вид меню: состояние прежнего вида
+			// (область, выбор, наведение) новому не годится.
+			m.syncKind()
 			v.mu.Lock()
 			v.rev++
 			v.tilesRev++
@@ -110,6 +117,12 @@ func (m *StartMenu) resubscribe() {
 	}))
 	if provider != nil {
 		subs = append(subs, provider.Subscribe(m.refreshResults))
+	}
+	m.g.mu.Lock()
+	rec := m.g.recSrc
+	m.g.mu.Unlock()
+	if rec != nil {
+		subs = append(subs, rec.Subscribe(m.relayoutGrid))
 	}
 	v.mu.Lock()
 	v.unsubs = subs
@@ -159,7 +172,7 @@ func (m *StartMenu) DismissAt(x, y int) {
 	m.v.mu.Lock()
 	box := m.v.box
 	m.v.mu.Unlock()
-	if box != nil && m.tiled() && image.Pt(x, y).In(box.Bounds()) {
+	if box != nil && m.modern() && image.Pt(x, y).In(box.Bounds()) {
 		return
 	}
 	m.Flyout.DismissAt(x, y)
@@ -196,7 +209,7 @@ func (m *StartMenu) IsFocused() bool { return m.v.focused.Load() }
 // TabIndex исключает меню из обхода Tab движка, пока оно закрыто: невидимой
 // остановки быть не должно. Открытое меню с плитками обходит области само.
 func (m *StartMenu) TabIndex() int {
-	if m.IsOpen() && m.tiled() {
+	if m.IsOpen() && m.modern() {
 		return 0
 	}
 	return -1
@@ -204,7 +217,7 @@ func (m *StartMenu) TabIndex() int {
 
 // AcceptsTab реализует widget.TabAcceptor: открытому меню Tab нужен для обхода
 // трёх областей, а не для перехода фокуса движка.
-func (m *StartMenu) AcceptsTab() bool { return m.IsOpen() && m.tiled() }
+func (m *StartMenu) AcceptsTab() bool { return m.IsOpen() && m.modern() }
 
 // SetCaptureManager реализует widget.CaptureAware.
 func (m *StartMenu) SetCaptureManager(cm widget.CaptureManager) {
@@ -216,10 +229,15 @@ func (m *StartMenu) SetCaptureManager(cm widget.CaptureManager) {
 // WantsCapture реализует widget.CaptureRequester: нажатие на плитку захватывает
 // мышь, чтобы перетаскивание не обрывалось на границе меню.
 func (m *StartMenu) WantsCapture(e widget.MouseEvent) bool {
-	if !m.IsOpen() || !m.tiled() || e.Button != widget.MouseLeft || !e.Pressed {
+	if !m.IsOpen() || !m.modern() || e.Button != widget.MouseLeft || !e.Pressed {
 		return false
 	}
 	h := m.hitTest(image.Pt(e.X, e.Y))
+	if m.grid() {
+		// Ячейка закреплённого — для перетаскивания, дорожка полосы — чтобы бегунок
+		// можно было вести и за пределами меню.
+		return strings.HasPrefix(h.key, prefPin) || isBarKey(h.key)
+	}
 	// Плитка — для перетаскивания, дорожка полосы — чтобы бегунок можно было
 	// вести и за пределами меню.
 	return (h.area == areaTiles && h.key != "") || isBarKey(h.key)
@@ -236,6 +254,9 @@ type startHit struct {
 // hitTest определяет область и объект под точкой. Боковая панель проверяется
 // первой: развёрнутая, она лежит поверх списка.
 func (m *StartMenu) hitTest(pt image.Point) startHit {
+	if m.grid() {
+		return m.hitTestGrid(pt)
+	}
 	inner := m.contentRect()
 	if inner.Empty() || !pt.In(inner) {
 		return startHit{}
@@ -308,6 +329,11 @@ func (m *StartMenu) keyRect(key string) image.Rectangle {
 	if key == "" {
 		return image.Rectangle{}
 	}
+	if m.grid() {
+		if r, ok := m.gridKeyRect(key); ok {
+			return r
+		}
+	}
 	inner := m.contentRect()
 	if inner.Empty() {
 		return image.Rectangle{}
@@ -360,6 +386,9 @@ func (m *StartMenu) areaRect(a startArea) image.Rectangle {
 	inner := m.contentRect()
 	if inner.Empty() {
 		return image.Rectangle{}
+	}
+	if m.grid() && a != areaList {
+		return inner
 	}
 	g := m.startGeometry(inner)
 	switch a {
@@ -583,11 +612,28 @@ func (m *StartMenu) wheelStep(pt image.Point) int {
 // OnMouseWheelPixels принимает точную дельту прокрутки (тачпад, колесо с
 // пикселями).
 func (m *StartMenu) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
-	if !m.IsOpen() || !m.tiled() || !image.Pt(x, y).In(m.rect()) {
+	if !m.IsOpen() || !m.modern() || !image.Pt(x, y).In(m.rect()) {
 		return false
+	}
+	if m.grid() {
+		if dy != 0 {
+			dir := 1
+			if dy < 0 {
+				dir = -1
+			}
+			m.wheelGrid(image.Pt(x, y), dir, int(absF(dy)))
+		}
+		return true
 	}
 	m.scrollAt(image.Pt(x, y), dy)
 	return true
+}
+
+func absF(f float64) float64 {
+	if f < 0 {
+		return -f
+	}
+	return f
 }
 
 // scrollAt прокручивает область под точкой на dy пикселей (вниз — положительно).
@@ -668,6 +714,9 @@ func (m *StartMenu) refreshHover() {
 // activate выполняет действие объекта с ключом key: запуск, раскрытие папки,
 // пункт боковой панели.
 func (m *StartMenu) activate(key string) {
+	if m.grid() && m.activateGrid(key) {
+		return
+	}
 	switch {
 	case key == keySideMenu:
 		m.SetSidebarExpanded(!m.SidebarExpanded())
@@ -698,6 +747,10 @@ func (m *StartMenu) activate(key string) {
 			m.toggleFolder(r.folder)
 		case rowResult:
 			m.activateResult(r.result)
+		case rowRec:
+			if it, ok := m.recommendedByID(r.rec); ok {
+				m.launchRecommended(it)
+			}
 		case rowLetter:
 			m.openLetterGridFrom(r.key, r.label)
 		}
@@ -758,6 +811,11 @@ func (m *StartMenu) activateResult(r SearchResult) {
 
 // targetFor описывает объект с ключом key для контекстного меню.
 func (m *StartMenu) targetFor(key string) (StartTarget, bool) {
+	if m.grid() {
+		if t, ok := m.targetForGrid(key); ok {
+			return t, true
+		}
+	}
 	switch {
 	case strings.HasPrefix(key, prefSide):
 		if key == keySideMenu {
@@ -774,6 +832,8 @@ func (m *StartMenu) targetFor(key string) (StartTarget, bool) {
 				return StartTarget{Kind: StartTargetFolder, Folder: r.folder}, true
 			case rowResult:
 				return StartTarget{Kind: StartTargetResult, Result: r.result}, true
+			case rowRec:
+				return StartTarget{Kind: StartTargetRecommended, Recommended: r.rec, App: r.app}, true
 			}
 		}
 	case strings.HasPrefix(key, prefTile):
@@ -891,6 +951,11 @@ func (m *StartMenu) applyQuery(q string) {
 	if q != "" {
 		v.gridFade.Set(0)
 	}
+	// Каретка поля поиска меню Windows 11 встаёт в конец нового запроса; правка
+	// с клавиатуры потом ставит её сама (setQueryCaret).
+	m.g.mu.Lock()
+	m.g.caret = len([]rune(q))
+	m.g.mu.Unlock()
 	if !changed {
 		return
 	}
@@ -915,6 +980,10 @@ func (m *StartMenu) refreshResults() {
 	v.rev++
 	v.mu.Unlock()
 	if m.IsOpen() {
+		if m.grid() {
+			m.Invalidate() // результаты меняют всю середину меню Windows 11
+			return
+		}
 		widget.InvalidateRect(m.areaRect(areaList))
 	}
 }
@@ -929,6 +998,16 @@ func (m *StartMenu) bindSearchBox(b *SearchBox) {
 // typeToSearch переводит набранный на меню символ в запрос: в строку на панели,
 // если она привязана (фокус уходит к ней), иначе в запрос самого меню.
 func (m *StartMenu) typeToSearch(r rune) {
+	if m.grid() {
+		// Строка поиска — внутри меню: фокус клавиатуры остаётся у меню, ввод
+		// уходит в неё.
+		m.v.mu.Lock()
+		m.v.area = areaSearch
+		m.v.kbd = true
+		m.v.mu.Unlock()
+		m.insertQuery(string(r))
+		return
+	}
 	v := m.v
 	v.mu.Lock()
 	box := v.box
@@ -946,7 +1025,7 @@ func (m *StartMenu) typeToSearch(r rune) {
 // выбранный (первый, если выбора нет). Возвращает true, если клавиша
 // использована.
 func (m *StartMenu) SearchKey(e widget.KeyEvent) bool {
-	if !m.IsOpen() || !m.tiled() || !e.Pressed {
+	if !m.IsOpen() || !m.modern() || !e.Pressed {
 		return false
 	}
 	m.v.mu.Lock()

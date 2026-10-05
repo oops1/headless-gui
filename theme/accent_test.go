@@ -486,6 +486,11 @@ func TestNotificationCenter_InheritsNotifications(t *testing.T) {
 	states := []theme.State{theme.StateNormal, theme.StateHover, theme.StatePressed, theme.StateActive}
 	for _, name := range m.ThemeNames() {
 		th, _ := m.GetTheme(name)
+		// У Windows 11 центр — свой вид (карточки, заголовок) со своими частями
+		// и рамкой панели; плоский центр остальных тем неизменен.
+		if th.PresenterName("notificationcenter") == theme.NotificationCenterWin11Presenter {
+			continue
+		}
 		for _, part := range parts {
 			for _, st := range states {
 				want := th.Style("notifications", part, st)

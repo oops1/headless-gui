@@ -19,7 +19,18 @@ const (
 	SlotApps
 	// SlotTray — конец панели: значки состояния, часы, уведомления.
 	SlotTray
+	// SlotWidgets — самый левый край панели (у бокового края — самый верх):
+	// кнопка виджетов с погодой, Windows 11. Стоит у края при любом выравнивании,
+	// а группа «пуск + приложения» центруется правее неё. Номер после SlotTray —
+	// чтобы числовые значения прежних областей не менялись.
+	SlotWidgets
 )
+
+// slotCount — число областей; slotOrder — порядок обхода и раскладки слева
+// направо: края (виджеты), начало, середина, конец.
+const slotCount = 4
+
+var slotOrder = [slotCount]Slot{SlotWidgets, SlotStart, SlotApps, SlotTray}
 
 // Item — элемент панели задач.
 //
@@ -52,7 +63,7 @@ type Taskbar struct {
 
 	tm *theme.Manager
 
-	slots [3][]Item
+	slots [slotCount][]Item
 
 	// unsubTheme снимает подписку на смену темы. Панель перерисовывается
 	// сама: она живёт вне обхода дерева, когда её показывают оболочкой.
@@ -85,6 +96,11 @@ type Taskbar struct {
 	edge    Edge
 	edgeSet bool
 
+	// align и alignSet — выравнивание группы «пуск + приложения», назначенное
+	// явно (SetAlignment); без него решает флаг темы taskbar.centered.
+	align    BarAlign
+	alignSet bool
+
 	// monitor и docked — монитор, на который панель поставлена (DockTo), и
 	// признак того, что она ставилась; bound — всплывающие панели, привязанные
 	// к её краю и монитору (BindFlyouts).
@@ -98,6 +114,11 @@ const (
 	KeyTaskbarHeight theme.Key = "taskbar.height"
 	KeyTaskbarPadX   theme.Key = "taskbar.pad.x"
 	KeyTaskbarGap    theme.Key = "taskbar.gap"
+	// KeyTaskbarSkipEmpty — флаг: элемент нулевой ширины не добавляет зазор
+	// слота (скрытое поле поиска не оставляет двойного промежутка).
+	// Флагом, а не всегда: в других темах такие элементы есть, и их панель
+	// обязана остаться побитно прежней.
+	KeyTaskbarSkipEmpty theme.Key = "taskbar.skip.empty"
 	// KeyTaskbarCentered — ставить ли группу «пуск + приложения» по центру
 	// панели (Windows 11) вместо прижатия влево (всё остальное).
 	KeyTaskbarCentered theme.Key = "taskbar.centered"
@@ -162,7 +183,7 @@ func (t *Taskbar) Close() {
 
 // AddItem ставит элемент в область панели.
 func (t *Taskbar) AddItem(slot Slot, it Item) {
-	if it == nil || slot < SlotStart || slot > SlotTray {
+	if it == nil || slot < SlotStart || slot > SlotWidgets {
 		return
 	}
 	t.slots[slot] = append(t.slots[slot], it)
@@ -190,7 +211,7 @@ func (t *Taskbar) AddItem(slot Slot, it Item) {
 
 // Items возвращает элементы области в порядке добавления.
 func (t *Taskbar) Items(slot Slot) []Item {
-	if slot < SlotStart || slot > SlotTray {
+	if slot < SlotStart || slot > SlotWidgets {
 		return nil
 	}
 	return append([]Item(nil), t.slots[slot]...)
@@ -303,6 +324,7 @@ func (t *Taskbar) relayout() {
 	}
 	padX := t.metric(KeyTaskbarPadX)
 	gap := t.metric(KeyTaskbarGap)
+	skip := t.flag(KeyTaskbarSkipEmpty)
 	inner := image.Rect(b.Min.X+padX, b.Min.Y, b.Max.X-padX, b.Max.Y)
 	if inner.Empty() {
 		return
@@ -316,12 +338,22 @@ func (t *Taskbar) relayout() {
 		it := t.slots[SlotTray][i]
 		// Значок трея с подсветкой на всю полосу (тема: tray.fill.strip) занимает
 		// всю высоту панели, остальные стоят по центру своей высоты.
-		sz := stretchToStrip(it, t.sizeOf(it, avail), avail.Y)
+		sz := stretchToStrip(t.tm, it, t.sizeOf(it, avail), avail.Y)
 		place(it, image.Rect(right-sz.X, inner.Min.Y, right, inner.Min.Y+sz.Y), inner)
-		right -= sz.X + gap
+		right -= spanWithGap(sz.X, gap, skip)
 	}
 	trayStart := right
 	t.trayEdge = trayStart
+
+	// Слот виджетов — у самого левого края; остальное начинается правее него.
+	lead := inner.Min.X
+	for _, it := range t.slots[SlotWidgets] {
+		sz := t.sizeOf(it, avail)
+		place(it, image.Rect(lead, inner.Min.Y, lead+sz.X, inner.Min.Y+sz.Y), inner)
+		if sz.X > 0 {
+			lead += sz.X + gap
+		}
+	}
 
 	start, apps := t.slots[SlotStart], t.slots[SlotApps]
 
@@ -332,42 +364,46 @@ func (t *Taskbar) relayout() {
 	startTotal := 0
 	for i, it := range start {
 		startW[i] = t.sizeOf(it, avail).X
-		startTotal += startW[i] + gap
+		startTotal += spanWithGap(startW[i], gap, skip)
 	}
-	appsAvail := trayStart - inner.Min.X - startTotal
+	appsAvail := trayStart - lead - startTotal
 	if appsAvail < 0 {
 		appsAvail = 0
 	}
 	appsW := make([]int, len(apps))
 	appsTotal := 0
+	visibleApps := 0
 	for i, it := range apps {
 		appsW[i] = t.sizeOf(it, image.Pt(appsAvail, avail.Y)).X
 		appsTotal += appsW[i]
+		if appsW[i] > 0 || !skip {
+			visibleApps++
+		}
 	}
-	if len(apps) > 0 {
-		appsTotal += gap * (len(apps) - 1)
+	if visibleApps > 0 {
+		appsTotal += gap * (visibleApps - 1)
 	}
 
 	// Группа «пуск + приложения» либо прижата влево, либо стоит по центру
 	// ПАНЕЛИ — так это устроено в Windows 11. По центру именно панели, а не
 	// оставшегося места: иначе группа съезжала бы влево от того, что справа
 	// висит трей, и центр переставал быть центром.
-	x := inner.Min.X
-	if t.flag(KeyTaskbarCentered) {
+	x := lead
+	if t.centeredGroup() {
 		group := startTotal + appsTotal
 		x = inner.Min.X + (inner.Dx()-group)/2
-		// Но не поверх трея и не левее края.
+		// Но не поверх трея и не левее края (и слота виджетов).
 		if x+group > trayStart {
 			x = trayStart - group
 		}
-		if x < inner.Min.X {
-			x = inner.Min.X
+		if x < lead {
+			x = lead
 		}
 	}
 
 	for i, it := range start {
 		place(it, image.Rect(x, inner.Min.Y, x+startW[i], inner.Min.Y+t.sizeOf(it, avail).Y), inner)
-		x += startW[i] + gap
+		x += spanWithGap(startW[i], gap, skip)
 	}
 	t.startEdge = x
 	if len(apps) == 0 {
@@ -383,7 +419,7 @@ func (t *Taskbar) relayout() {
 	}
 	scale := 1.0
 	if appsTotal > midAvail && appsTotal > 0 {
-		gaps := gap * (len(apps) - 1)
+		gaps := gap * max(visibleApps-1, 0)
 		if appsTotal > gaps {
 			scale = float64(midAvail-gaps) / float64(appsTotal-gaps)
 		}
@@ -394,8 +430,23 @@ func (t *Taskbar) relayout() {
 	for i, it := range apps {
 		w := int(float64(appsW[i]) * scale)
 		place(it, image.Rect(x, inner.Min.Y, x+w, inner.Max.Y), inner)
-		x += w + gap
+		if !skip || appsW[i] > 0 {
+			x += w + gap
+		}
 	}
+}
+
+// spanWithGap — сколько места элемент занимает в ряду вместе с зазором до
+// соседа. Элемент нулевой ширины (скрытое поле поиска, пустая область) места
+// не занимает вовсе: раньше он всё равно добавлял зазор слота, и соседи
+// стояли с двойным промежутком (замечание WinLine после этапа 0).
+//
+// Без флага темы (skip == false) — прежнее поведение: зазор есть всегда.
+func spanWithGap(w, gap int, skip bool) int {
+	if skip && w <= 0 {
+		return 0
+	}
+	return w + gap
 }
 
 // place ставит элемент в прямоугольник, вписывая его в границы панели.
@@ -432,7 +483,15 @@ func (t *Taskbar) sizeOf(it Item, avail image.Point) image.Point {
 	if sz.X <= 0 {
 		sz.X = 0
 	}
-	if sz.Y <= 0 || sz.Y > avail.Y {
+	if sz.Y <= 0 {
+		// Элемент высоты не просит: тема может ограничить подсветку кнопок
+		// (Windows 11: 40 в панели 48), иначе — вся высота панели.
+		sz.Y = avail.Y
+		if h := t.metric(KeyTaskbarItemHeight); h > 0 && h < avail.Y {
+			sz.Y = h
+		}
+	}
+	if sz.Y > avail.Y {
 		sz.Y = avail.Y
 	}
 	return sz

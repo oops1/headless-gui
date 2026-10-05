@@ -372,7 +372,7 @@ func TestLetters_GridDrawnInsteadOfList(t *testing.T) {
 // OpenLetterGrid ничего не делает.
 func TestLetters_NotInFlatMenu(t *testing.T) {
 	defer widget.StopAllAnimations()
-	m := NewStartMenu(managerFor(t, theme.ProfileWindows11), NewStaticAppCatalog(tileApps()...))
+	m := NewStartMenu(managerFor(t, theme.ProfileWindows2000), NewStaticAppCatalog(tileApps()...))
 	m.Screen = tileScreen()
 	m.Open(tileAnchor())
 	m.Settle()

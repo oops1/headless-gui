@@ -17,11 +17,12 @@ func win10Manager(t *testing.T, name string) *Manager {
 }
 
 // Меню с плитками просит только Windows 10 (и её тёмная разновидность по
-// наследству): остальные темы остаются на плоском списке.
+// наследству), сетку закреплённых — Windows 11: остальные темы остаются на
+// плоском списке.
 func TestWin10Start_PresenterOnlyForWindows10(t *testing.T) {
 	for name, want := range map[string]string{
 		ProfileWindows10: PresenterStartTiles, ProfileWindows10Dark: PresenterStartTiles,
-		ProfileWindows11: "", ProfileWindows11Dark: "",
+		ProfileWindows11: PresenterStartGrid, ProfileWindows11Dark: PresenterStartGrid,
 		ProfileWindows2000: "", ProfileWindows2000Blue: "",
 		ProfileMacOS: "", ProfileMacOSDark: "",
 	} {

@@ -67,10 +67,11 @@ const notifCloseSizeDiv = 3
 // NotificationCenter — панель со списком уведомлений.
 //
 // Вид выбирает тема. Профили, у которых есть презентер компонента
-// "notificationcenter" (Windows 10), получают центр с группами по приложению,
-// действиями в карточках, быстрыми действиями и прокруткой — на всю высоту от
-// верха рабочей области до панели задач. Остальные темы (Windows 11,
-// Windows 2000, macOS) рисуют плоский список карточек, как раньше. Компонент
+// "notificationcenter" (Windows 10, Windows 11), получают центр с группами по
+// приложению, действиями в карточках и прокруткой: Windows 10 — на всю высоту от
+// верха рабочей области до панели задач и с быстрыми действиями, Windows 11 —
+// карточкой по содержимому над календарём, с «Не беспокоить». Остальные темы
+// (Windows 2000, macOS) рисуют плоский список карточек, как раньше. Компонент
 // имени темы не знает: он спрашивает PresenterFor.
 type NotificationCenter struct {
 	*Flyout
@@ -113,6 +114,15 @@ type NotificationCenter struct {
 	fs      FocusState
 	view    *richView
 	capture widget.CaptureManager // захват мыши для перетаскивания бегунка (под mu)
+
+	// Центр Windows 11 (notificationcenter_win11.go): модель «Не беспокоить» и
+	// её подписка (под mu), календарь под центром и отписка от него, положение,
+	// в котором центр рисовался в последний раз.
+	dnd       DoNotDisturb
+	unsubDND  func()
+	below     *CalendarFlyout
+	unlinkCal func()
+	lastRect  image.Rectangle
 }
 
 // NewNotificationCenter создаёт центр уведомлений, оформляемый темой tm и
@@ -134,6 +144,7 @@ func NewNotificationCenter(tm *theme.Manager, ns Notifications) *NotificationCen
 	// Центр уведомлений выезжает справа, из-за края экрана, а не снизу.
 	nc.Slide = SlideRight
 	nc.SlideDistance = -1
+	nc.Flyout.beforeOpen = nc.applySlide
 	nc.Flyout.Subscribe(nc.onOpenChanged)
 	return nc
 }

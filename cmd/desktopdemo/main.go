@@ -201,6 +201,22 @@ func buildDesktop(eng *engine.Engine) scene {
 	quick := desktop.NewQuickSettings(tm, status)
 	quick.Screen = screen
 	quick.Align = desktop.AlignEnd
+	// Быстрые настройки Windows 11 24H2: плитки из модели, вложенные страницы
+	// «›», ползунки громкости и яркости, режим правки. Другие темы рисуют
+	// прежние три плитки и этих данных не читают.
+	quick.SetQuickActions(desktop.NewQuickActionList(
+		desktop.QuickAction{ID: "wifi", Title: "Wi-Fi", Detail: "Сеть", On: true, HasDetails: true},
+		desktop.QuickAction{ID: "bt", Title: "Bluetooth", Detail: "Не подключено", HasDetails: true},
+		desktop.QuickAction{ID: "plane", Title: "В самолёте"},
+		desktop.QuickAction{ID: "saver", Title: "Экономия заряда", Unavailable: true},
+		desktop.QuickAction{ID: "night", Title: "Ночной свет"},
+		desktop.QuickAction{ID: "access", Title: "Доступность", HasDetails: true},
+	))
+	quick.SetBrightness(0.7)
+	quick.VolumeDetails = true
+	quick.Details = func(id desktop.QuickActionID) *desktop.QuickDetails {
+		return &desktop.QuickDetails{Content: widget.NewListView("Первый вариант", "Второй вариант", "Третий вариант")}
+	}
 	center := desktop.NewNotificationCenter(tm, notes)
 	center.Screen = screen
 	center.Align = desktop.AlignEnd
@@ -225,7 +241,11 @@ func buildDesktop(eng *engine.Engine) scene {
 
 	// Уведомления и календарь Windows показывает один над другим — значит
 	// они группа: клик по числу календаря не должен гасить центр уведомлений.
-	desktop.NewFlyoutGroup(cal.Flyout, center.Flyout)
+	// LinkNotificationCenter ещё и ставит центр Windows 11 над календарём.
+	group := desktop.LinkNotificationCenter(center, cal)
+	// «Не беспокоить» и «Фокусировка» показывает только вид Windows 11.
+	center.SetDoNotDisturb(desktop.NewDoNotDisturb(false))
+	cal.SetFocusSession(desktop.NewFakeFocusSession(desktop.SystemClock{}))
 	tray.Overflow().Screen = screen
 	// Раскрывающаяся область трея — оверлей, и движок находит оверлеи обходом
 	// ДЕРЕВА: без этой строки шеврон открывался бы, а показывать было бы
@@ -256,6 +276,15 @@ func buildDesktop(eng *engine.Engine) scene {
 	startBtn.Track(menu)
 	clock.OnClick = func() {
 		closeOthers(cal)
+		if tm.Active().PresenterName("notificationcenter") == theme.NotificationCenterWin11Presenter {
+			// Windows 11: часы открывают центр уведомлений вместе с календарём.
+			if cal.IsOpen() {
+				group.CloseAll()
+			} else {
+				group.OpenAll(clock.Bounds())
+			}
+			return
+		}
 		cal.Toggle(clock.Bounds())
 	}
 	net.OnClick = func() {

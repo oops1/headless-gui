@@ -45,6 +45,10 @@ type Profile struct {
 	// меняя вид существующих тем (см. SetStyleBase).
 	StyleBase map[string]string `json:"-"`
 
+	// ColorFrom — «цветовой токен → токен, за которым он следует при смене
+	// акцента» (см. SetColorFrom).
+	ColorFrom map[Key]Key `json:"-"`
+
 	// Presenters — имена презентеров, которыми профиль подменяет отрисовку
 	// компонента целиком: macOS рисует область приложений не полосой
 	// кнопок, а Dock, и одной палитрой это не выражается. Значение —
@@ -116,6 +120,24 @@ func (p *Profile) SetStyleBase(component, base string) *Profile {
 	return p
 }
 
+// SetColorFrom заставляет цветовой токен k следовать за токеном from, когда
+// приложение меняет акцент (Manager.SetAccent): второй цвет градиента
+// заголовка Windows 2000 — светлый оттенок акцента, а не зашитый голубой.
+//
+// Без SetAccent действует значение, объявленное SetColor (классический
+// голубой градиент остаётся побитно прежним); если токен профиль не
+// объявлял вовсе, он берётся у from и без SetAccent. После SetAccent ссылка
+// сильнее объявленного значения — по той же причине, по какой производные
+// акцента считаются заново: цвет от прежнего акцента на новом выглядел бы
+// чужим. ResetAccent возвращает значение профиля.
+func (p *Profile) SetColorFrom(k, from Key) *Profile {
+	if p.ColorFrom == nil {
+		p.ColorFrom = map[Key]Key{}
+	}
+	p.ColorFrom[k] = from
+	return p
+}
+
 // SetColor, SetMetric, SetFlag — плоские токены. Возвращают профиль,
 // чтобы объявление темы читалось цепочкой.
 func (p *Profile) SetColor(k Key, c color.RGBA) *Profile {
@@ -150,5 +172,5 @@ func (p *Profile) TokenCount() int {
 	return len(p.Colors) + len(p.Metrics) + len(p.Flags) +
 		len(p.Fonts) + len(p.Icons) + len(p.Anims) +
 		len(p.Styles) + len(p.Presenters) +
-		len(p.Conditional) + len(p.StyleBase)
+		len(p.Conditional) + len(p.StyleBase) + len(p.ColorFrom)
 }

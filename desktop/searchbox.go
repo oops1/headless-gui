@@ -45,6 +45,12 @@ const (
 	KeySearchPad theme.Key = "search.pad"
 	// KeySearchIconGap — зазор между лупой и текстом.
 	KeySearchIconGap theme.Key = "search.icon.gap"
+	// KeySearchHeight — высота поля и кнопки «значок и подпись», по центру
+	// высоты панели (Windows 11: 32 в панели 48). 0 — решает панель, как раньше.
+	KeySearchHeight theme.Key = "search.height"
+	// KeySearchLabelWidth — ширина кнопки «значок и подпись»; 0 — как у поля
+	// (search.width).
+	KeySearchLabelWidth theme.Key = "search.label.width"
 )
 
 // SearchMode — как строка поиска показывается на панели.
@@ -57,6 +63,10 @@ const (
 	SearchModeIconOnly
 	// SearchModeBox — поле ввода шириной search.width.
 	SearchModeBox
+	// SearchModeIconAndLabel — кнопка «значок и подпись» (Windows 11): лупа и
+	// слово «Поиск» на плашке поля шириной search.label.width. Набор с
+	// клавиатуры, щелчок и Enter открывают поиск так же, как у остальных видов.
+	SearchModeIconAndLabel
 )
 
 // SearchResult — один результат поиска.
@@ -209,6 +219,11 @@ func (b *SearchBox) PreferredSize(avail image.Point) image.Point {
 		w = b.metric(KeySearchIconWidth)
 	case SearchModeBox:
 		w = b.metric(KeySearchWidth)
+	case SearchModeIconAndLabel:
+		w = b.metric(KeySearchLabelWidth)
+		if w <= 0 {
+			w = b.metric(KeySearchWidth)
+		}
 	}
 	if avail.X > 0 && w > avail.X {
 		w = avail.X
@@ -216,7 +231,13 @@ func (b *SearchBox) PreferredSize(avail image.Point) image.Point {
 	if w < 0 {
 		w = 0
 	}
-	return image.Pt(w, 0)
+	// Поле и кнопка с подписью ниже кнопок панели (Windows 11: 32 против 40);
+	// значок и всё прежнее высоты не просят.
+	h := 0
+	if mode == SearchModeBox || mode == SearchModeIconAndLabel {
+		h = b.metric(KeySearchHeight)
+	}
+	return image.Pt(w, h)
 }
 
 // GetToolTip перекрывает промоутнутый из widget.Base: у кнопки-значка подсказка
@@ -330,9 +351,20 @@ func (b *SearchBox) OnKeyEvent(e widget.KeyEvent) {
 	}
 
 	b.mu.Lock()
-	menu := b.menu
+	menu, mode := b.menu, b.mode
 	n, caret := len(b.text), b.caret
 	b.mu.Unlock()
+
+	// Значок и «значок и подпись» без введённого текста — кнопка: Enter и Space
+	// открывают поиск, как щелчок, а стрелки, Home и End переносят фокус к соседу
+	// по области (в поле они двигают каретку). Печатный символ по-прежнему идёт в
+	// запрос и открывает поиск.
+	if (mode == SearchModeIconOnly || mode == SearchModeIconAndLabel) && n == 0 &&
+		(menu == nil || !menu.IsOpen()) {
+		if b.HandleKey(b, e, b.activate, b.Invalidate) {
+			return
+		}
+	}
 
 	switch e.Code {
 	case widget.KeyUp, widget.KeyDown, widget.KeyPageUp, widget.KeyPageDown:
@@ -462,6 +494,19 @@ func (b *SearchBox) OnMouseButton(e widget.MouseEvent) bool {
 	return was
 }
 
+// activate делает то же, что щелчок по строке: зовёт OnActivate, а без него
+// открывает меню «Пуск» в режиме поиска.
+func (b *SearchBox) activate() {
+	b.mu.Lock()
+	menu, anchor, cb := b.menu, b.anchor, b.OnActivate
+	b.mu.Unlock()
+	if cb != nil {
+		cb()
+	} else if menu != nil && anchor != nil {
+		menu.openForSearch(anchor())
+	}
+}
+
 // caretAt переводит координату щелчка в позицию каретки. Под b.mu.
 func (b *SearchBox) caretAt(x int) int {
 	field, _ := b.fieldRect()
@@ -561,11 +606,19 @@ func (b *SearchBox) Draw(ctx widget.DrawContext) {
 	ctx.SetClip(field.Intersect(prev))
 	defer ctx.SetClip(prev)
 
+	// «Значок и подпись»: вместо поля слово «Поиск» подсказкой, без каретки.
+	if mode == SearchModeIconAndLabel {
+		hs := *b.part("hint", theme.StateNormal)
+		hs.Font = s.Font
+		drawTextAt(ctx, field, field.Min.X, tr(StrSearchLabel), &hs)
+		return
+	}
+
 	if len(text) == 0 {
 		hint := b.part("hint", theme.StateNormal)
 		hs := *hint
 		hs.Font = s.Font
-		drawTextAt(ctx, field, field.Min.X, tr(StrSearchPlaceholder), &hs)
+		drawTextAt(ctx, field, field.Min.X, b.placeholder(), &hs)
 		if focused {
 			drawCaret(ctx, field, field.Min.X, size, s)
 		}
@@ -584,6 +637,19 @@ func (b *SearchBox) Draw(ctx widget.DrawContext) {
 	if focused {
 		drawCaret(ctx, field, x+caretX, size, s)
 	}
+}
+
+// KeySearchShortHint — флаг темы: пустое поле показывает короткое слово «Поиск»
+// (Windows 11), а не длинную подсказку «Чтобы начать поиск, введите здесь запрос»
+// (Windows 10), которая в поле шириной 200 не помещается.
+const KeySearchShortHint theme.Key = "search.hint.short"
+
+// placeholder — подсказка пустого поля: длинная или, по флагу темы, короткая.
+func (b *SearchBox) placeholder() string {
+	if b.tm != nil && b.tm.GetFlag(KeySearchShortHint, false) {
+		return tr(StrSearchLabel)
+	}
+	return tr(StrSearchPlaceholder)
 }
 
 // drawTextAt рисует строку со смещением x по вертикальному центру r.

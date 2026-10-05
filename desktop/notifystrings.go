@@ -37,6 +37,22 @@ const (
 	StrNotifReplyHint = "desktop.notif.replyHint"
 	// StrNotifYesterday — время вчерашнего уведомления.
 	StrNotifYesterday = "desktop.notif.yesterday"
+
+	// Центр уведомлений Windows 11: заголовок и подпись колокольчика.
+	StrNotifTitle = "desktop.notif.title"
+	StrNotifDND   = "desktop.notif.dnd"
+
+	// Модуль «Фокусировка» под календарём Windows 11. Шаблоны — для
+	// fmt.Sprintf: StrFocusMinutes — %d минут, StrFocusHours — %d часов,
+	// StrFocusHoursMinutes — %d часов и %d минут.
+	StrFocusTitle        = "desktop.focus.title"
+	StrFocusMinutes      = "desktop.focus.minutes"
+	StrFocusHours        = "desktop.focus.hours"
+	StrFocusHoursMinutes = "desktop.focus.hoursMinutes"
+	StrFocusStart        = "desktop.focus.start"
+	StrFocusStop         = "desktop.focus.stop"
+	StrFocusLess         = "desktop.focus.less"
+	StrFocusMore         = "desktop.focus.more"
 )
 
 func init() {
@@ -48,6 +64,18 @@ func init() {
 		StrNotifReply:     "Ответить",
 		StrNotifReplyHint: "Введите ответ",
 		StrNotifYesterday: "Вчера",
+
+		StrNotifTitle: "Уведомления",
+		StrNotifDND:   "Не беспокоить",
+
+		StrFocusTitle:        "Фокусировка",
+		StrFocusMinutes:      "%d мин",
+		StrFocusHours:        "%d ч",
+		StrFocusHoursMinutes: "%d ч %d мин",
+		StrFocusStart:        "Начать",
+		StrFocusStop:         "Остановить",
+		StrFocusLess:         "Меньше",
+		StrFocusMore:         "Больше",
 	})
 	widget.RegisterStrings("EN", map[string]string{
 		StrNotifManage:    "Manage notifications",
@@ -57,5 +85,17 @@ func init() {
 		StrNotifReply:     "Reply",
 		StrNotifReplyHint: "Type a reply",
 		StrNotifYesterday: "Yesterday",
+
+		StrNotifTitle: "Notifications",
+		StrNotifDND:   "Do not disturb",
+
+		StrFocusTitle:        "Focus",
+		StrFocusMinutes:      "%d min",
+		StrFocusHours:        "%d h",
+		StrFocusHoursMinutes: "%d h %d min",
+		StrFocusStart:        "Start",
+		StrFocusStop:         "Stop",
+		StrFocusLess:         "Decrease",
+		StrFocusMore:         "Increase",
 	})
 }

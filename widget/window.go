@@ -104,6 +104,21 @@ type Window struct {
 	navBtn          *titleNavBtn
 	navPanel        Widget
 
+	// icon — значок окна в заголовке и системное меню по нему
+	// (window_icon.go). nil — значка нет, заголовок прежний.
+	icon *windowIcon
+	// sysMenu — popup-меню значка (создаётся при первом открытии), sysItems —
+	// пункты, заданные приложением (SetSystemMenu), sysCustom отличает
+	// «задан пустой» от «не задан». maximized — состояние от хоста.
+	sysMenu   *PopupMenu
+	sysItems  []MenuItem
+	sysCustom bool
+	maximized bool
+
+	// titleHitTest — решение приложения «эта точка заголовка — не
+	// перетаскивание» (SetTitleBarHitTest).
+	titleHitTest func(pt image.Point) bool
+
 	// OnNavToggle вызывается кнопкой сворачивания (SetNavButton): collapsed —
 	// состояние ПОСЛЕ нажатия. Сворачивает боковую область приложение.
 	OnNavToggle func(collapsed bool)
@@ -491,6 +506,11 @@ func (w *Window) titleH() int {
 	if w.TitleBarHeight > 0 {
 		return w.TitleBarHeight
 	}
+	// Высота из темы (Windows 2000 — 18). Режим вкладок её не слушает: вкладкам
+	// нужна высота, которую даёт им окно, а не полоса из одной подписи.
+	if h := w.style().TitleBarHeight; h > 0 && !w.titleTabsActive() {
+		return h
+	}
 	if w.Style == WindowStyleToolWindow {
 		return 24
 	}
@@ -695,29 +715,48 @@ func (w *Window) classicBtnSide() int {
 	return s
 }
 
+// classicBtnSize возвращает ширину и высоту кнопки заголовка в классике. Тема
+// может задать их метриками (Windows 2000 — 16×14); без метрик кнопка
+// квадратная (classicBtnSide), как у всех прежних классических окон.
+func (w *Window) classicBtnSize() (bw, bh int) {
+	st := w.style()
+	if st.CaptionButtonW > 0 && st.CaptionButtonH > 0 {
+		return st.CaptionButtonW, st.CaptionButtonH
+	}
+	s := w.classicBtnSide()
+	return s, s
+}
+
 // classicTitleBtnRects возвращает прямоугольники кнопок ×, □, ─ для
 // классического стиля Win2000 (общая геометрия для отрисовки и hit-test).
 // Кнопки прижаты к правому краю заголовка (внутри рамки) с отступом 2px справа
 // и 3px сверху; крест отделён от пары ─ □ зазором 2px. Отсутствующие кнопки —
 // пустой Rectangle.
+//
+// С метриками темы кнопка стоит по центру полосы по вертикали: при заголовке
+// 18 и кнопке 14 это те же 2 px, что в настоящей Windows 2000, а при прежних
+// 24 и 18 — прежние 3 px.
 func (w *Window) classicTitleBtnRects() (closeR, maxR, minR image.Rectangle) {
 	tb := w.titleBarRect()
 	if tb.Empty() {
 		return
 	}
 	const edgePad, topPad, gap = 2, 3, 2
-	side := w.classicBtnSide()
+	bw, bh := w.classicBtnSize()
 	nc := w.btnCount()
 	by := tb.Min.Y + topPad
-	closeX := tb.Max.X - edgePad - side
-	closeR = image.Rect(closeX, by, closeX+side, by+side)
+	if st := w.style(); st.CaptionButtonW > 0 && st.CaptionButtonH > 0 {
+		by = tb.Min.Y + (tb.Dy()-bh)/2
+	}
+	closeX := tb.Max.X - edgePad - bw
+	closeR = image.Rect(closeX, by, closeX+bw, by+bh)
 	if nc >= 3 {
-		mxX := closeX - gap - side
-		maxR = image.Rect(mxX, by, mxX+side, by+side)
-		minR = image.Rect(mxX-side, by, mxX, by+side)
+		mxX := closeX - gap - bw
+		maxR = image.Rect(mxX, by, mxX+bw, by+bh)
+		minR = image.Rect(mxX-bw, by, mxX, by+bh)
 	} else if nc == 2 {
-		mnX := closeX - gap - side
-		minR = image.Rect(mnX, by, mnX+side, by+side)
+		mnX := closeX - gap - bw
+		minR = image.Rect(mnX, by, mnX+bw, by+bh)
 	}
 	return closeR, maxR, minR
 }
@@ -980,10 +1019,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 		}
 	}
 
-	textX := x + 12
-	if w.navBtn != nil && !w.navBtn.bounds.Empty() {
-		textX = w.navBtn.bounds.Max.X + titleBarGap
-	}
+	textX := w.titleTextLeft(tb)
 	textY := y + (th-13)/2
 	if w.navBtn != nil {
 		w.navBtn.fg = tc
@@ -992,7 +1028,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 		// Режим вкладок: полосу заголовка занимают вкладки, текст Title
 		// не рисуется. В классике старт после отступа иконки, потолок —
 		// эффективная высота заголовка.
-		w.drawTitleTabs(ctx, x+8, titleRight-4, y, th)
+		w.drawTitleTabs(ctx, w.titleTabsLeft(x+8), titleRight-4, y, th)
 	} else {
 		title := w.Title
 		if titleMaxW := titleRight - textX; titleMaxW <= 0 {
@@ -1297,6 +1333,12 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 // кнопки управления (release-семантика — нужен release даже если курсор
 // ушёл с кнопки), полосы ресайза по краям и drag-зона заголовка.
 // Захват позволяет движку доставлять move/release только этому Window.
+//
+// Заголовок целиком — зона перетаскивания, а захватчика движок ищет от самого
+// глубокого ребёнка: виджет поверх заголовка получает нажатие, только если сам
+// просит захват. Исключения, где нажатие остаётся виджету без захвата, —
+// titleBarChildHit: штатные органы полосы, TitleBarPressOwner и
+// SetTitleBarHitTest (titlebar_hit.go).
 func (w *Window) WantsCapture(e MouseEvent) bool {
 	if e.Button != MouseLeft {
 		return false

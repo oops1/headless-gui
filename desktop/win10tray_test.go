@@ -139,11 +139,18 @@ func TestWin10Tray_HoverFillsWholeStrip(t *testing.T) {
 		}
 	}
 
-	// Windows 11: значок остаётся своего размера.
+	// Windows 11: плашка не во всю полосу, а своей высоты из темы (tray.item.height
+	// — 40 в панели 48); сам значок остаётся своего размера по центру плашки.
 	tm11 := managerFor(t, theme.ProfileWindows11)
 	_, net11, _ := trayStripScene(tm11)
-	if got, want := net11.Bounds().Dy(), int(tm11.GetMetric(KeyTrayIconSize)); got != want {
-		t.Errorf("Windows 11: высота значка %d, ждали %d (без растяжки)", got, want)
+	if got, want := net11.Bounds().Dy(), int(tm11.GetMetric(KeyTrayItemHeight)); got != want || got >= tmHeight(tm11) {
+		t.Errorf("Windows 11: высота плашки %d, ждали %d (меньше полосы %d)", got, want, tmHeight(tm11))
+	}
+	// Тема без tray.item.height и без заливки полосы (macOS): значок своего размера.
+	tmMac := managerFor(t, theme.ProfileMacOS)
+	_, netMac, _ := trayStripScene(tmMac)
+	if got, want := netMac.Bounds().Dy(), int(tmMac.GetMetric(KeyTrayIconSize)); got != want {
+		t.Errorf("macOS: высота значка %d, ждали %d (без растяжки)", got, want)
 	}
 }
 

@@ -3448,6 +3448,25 @@ dlg.SetMaximized(true)     // глиф «развернуть» → «восст
 `SetNavIcons`, `OnNavToggle`. Виджет в полосе — единственный ребёнок окна,
 который не растягивается на клиентскую область: его геометрию задаёт полоса.
 
+**Значок окна и системное меню.** `win.SetIcon(img)` (или `SetIconSVG(data)`)
+кладёт значок слева от подписи — не путать с `SetNavIcons`, это иконка кнопки
+сворачивания панели. Подпись сдвигается за значок сама; размер значка берёт
+тема (метрика `window.caption.icon.size`, у Windows 2000 — 16). Щелчок по
+значку открывает системное меню («Восстановить», «Переместить», «Размер»,
+«Свернуть», «Развернуть», «Закрыть» — подписи через `Tr`, действия на
+`OnMinimize`/`OnMaximize`/`OnClose`/`OnNativeMove`/`OnNativeResize`), двойной —
+закрывает окно. Свой набор пунктов — `win.SetSystemMenu(items)`, заготовка —
+`win.SystemMenuItems()`.
+
+**Нажатие на заголовок принадлежит окну.** Окно просит захват мыши на любое
+нажатие в полосе — чтобы тащить себя, — а движок ищет захватчика от самого
+глубокого ребёнка: виджет, лежащий поверх заголовка, получает нажатие только
+если сам вернул `true` из `WantsCapture`, иначе нажатие уходит окну. Если
+захват виджету не нужен (обычная кнопка), реализуйте
+`OwnsTitleBarPress(pt image.Point) bool` (`widget.TitleBarPressOwner`) или
+задайте `win.SetTitleBarHitTest(func(pt) bool)` для области, не принадлежащей
+виджету: такое нажатие идёт обычным разбором и окно не тащит.
+
 **В mac-раскладке заголовка этого режима нет.** Кнопки окна стоят слева,
 подпись центрирована, и виджет приложения пришлось бы втискивать между ними —
 такой полосы в macOS нет ни у одного окна. `TitleBarContentBounds` там пуст,
@@ -4183,6 +4202,50 @@ eng.SetMotionReduce(m, true)   // Manager.SetFlag + ApplyThemeProfile + видж
 координацию «Пуска» и быстрых настроек по мониторам и выбор масштаба для
 каждого монитора решает потребитель.
 
+#### Центр уведомлений и календарь Windows 11
+
+Профиль Windows 11 рисует центр уведомлений карточками, а календарь — отдельной
+скруглённой карточкой под ним (ширина 364, скругление 8 у панелей и 4 у карточек).
+Компоненты те же — `NotificationCenter` и `CalendarFlyout`; вид выбирает
+презентер профиля, имени темы они не знают, смена темы, акцента и языка на
+открытых панелях ничего не пересоздаёт. Центр: заголовок «Уведомления», колокольчик
+«Не беспокоить» и «Очистить все» (неактивна при пустом списке); карточка со
+строкой приложения (значок, название, время), заголовком, текстом, раскрытием,
+крестиком и действиями четырёх видов; группа — заголовок со счётчиком, если
+уведомлений приложения несколько. Календарь: «понедельник, 5 октября», месяц,
+‹ ›, сегодня — круг акцента, свернуть/развернуть и модуль «Фокусировка».
+
+```go
+center := desktop.NewNotificationCenter(m, notes)
+cal := desktop.NewCalendarFlyout(m, desktop.SystemClock{})
+center.Screen, cal.Screen = screen, screen
+
+dnd := desktop.NewDoNotDisturb(false)    // одна модель на центр, тост и кнопку трея
+center.SetDoNotDisturb(dnd)
+toast.SetDoNotDisturb(dnd)               // пока режим включён, тост молчит
+
+cal.SetFocusSession(session)             // desktop.FocusSession от потребителя
+cal.Ticker = func(d time.Duration, f func()) func() { t := eng.Every(d, f); return t.Stop }
+
+group := desktop.LinkNotificationCenter(center, cal) // центр над календарём, закрываются вместе
+fm.Register("calendar", cal)             // обе панели — в менеджере панелей
+fm.Register("notifications", center)
+clock.OnClick = func() { group.OpenAll(clock.Bounds()) } // от часов и от колокольчика
+```
+
+`FocusSession` — состояние (`Duration`, `Running`, `EndsAt`) и действия (`SetDuration`,
+`Start`, `Stop`, `Subscribe`) от потребителя; что фокусировка делает (включает
+«Не беспокоить», глушит звук), решает он. Календарь рисует выбор длительности
+(`−` / `+` по 5 минут, 5–240) и «Начать», а идущий сеанс — отсчёт, полосу
+прогресса и «Остановить»; секундная перерисовка идёт, пока календарь открыт, и
+перерисовывает только модуль. `desktop.NewFakeFocusSession(clock)` — готовая
+модель для демо. На низком экране календарь остаётся свёрнутым, пока центру над
+ним не хватает места; выбор пользователя (`Collapsed`) не меняется. С клавиатуры:
+Tab ходит по центру, затем по календарю (кнопки, сетка дней — стрелки двигают день,
+Enter выбирает), Enter/Space нажимают, PgUp/PgDn листают месяцы, Esc закрывает обе панели. Строки — ключи `desktop.notif.title|dnd`,
+`desktop.focus.*`, `desktop.cal.headDate|weekdayLong.N` (RU/EN, `widget.Tr`;
+`DateCulture` может дополнительно реализовать `DateHeaderCulture`).
+
 #### Панель задач и её компоненты
 
 ```go
@@ -4263,6 +4326,37 @@ bar.AddItem(desktop.SlotTray, ic)
 алиасами: если приложение переопределило их, используется его строка. Язык —
 тот же `tr()` с `DefaultLanguage`, что у остальных компонентов (`widget.RegisterStrings`
 перекрывает встроенные ru/en).
+
+#### Панель задач Windows 11
+
+Всё ниже включается токенами профиля Windows 11; тема без токенов рисует по-старому
+(кадры Windows 10, Windows 2000 и macOS не изменились).
+
+```go
+bar.AddItem(desktop.SlotWidgets, wb)     // у левого края при любом выравнивании
+bar.AddItem(desktop.SlotStart, start)    // «Пуск», поиск, Task View — группа по центру
+bar.AddItem(desktop.SlotStart, box)      // box.SetMode(desktop.SearchModeIconAndLabel)
+bar.AddItem(desktop.SlotStart, taskView)
+bar.AddItem(desktop.SlotApps, area)
+tray.AddItem(desktop.NewTrayGroup(m, net, vol, power))   // одна кнопка, один OnClick
+```
+
+- **Выравнивание на лету:** `bar.SetAlignment(desktop.BarAlignLeft)` (и `ResetAlignment`)
+  либо `m.SetFlag("taskbar.centered", false)`; элементы не пересоздаются, перерисовывается
+  только полоса панели.
+- **Виджеты:** `wb.SetContent(desktop.WidgetsContent{IconAt: sunny, Temperature: "21°",
+  Caption: "Ясно"})`; ширина кнопки идёт за текстом, панель перекладывается сама.
+- **Task View:** `desktop.NewTaskViewButton(m)`; что он открывает — решает потребитель
+  (`OnClick`), горит, пока открыт (`Track`, `TrackManager`).
+- **Колокольчик:** `nb.SetDoNotDisturb(true)` либо источник, реализующий
+  `desktop.DoNotDisturbReporter`; в режиме колокольчик перечёркнут, счётчик скрыт.
+- **Индикаторы кнопок окон** — поля `desktop.WindowInfo`: `ProgressState`
+  (`ProgressNormal/Paused/Error`) и `Progress` 0..1 — полоса прогресса на значке; `Badge` —
+  кружок со счётчиком («99+» сверху); `Attention` — подложка мигает три раза и остаётся
+  постоянной, пока окно не активно. Пилюля под кнопкой: запущено 6 px серым, активно
+  16 px цветом акцента, ширина меняется плавно. Под «меньше движения»
+  (`motion.reduce`) всё меняется сразу. Изменился только прогресс или счётчик —
+  перерисовывается одна кнопка.
 
 Оптические размеры значков (у Fluent свой рисунок для 16/20/24): в
 `theme.IconRef` — `Source: "wifi_{size}.svg"` и `Sizes: theme.IconSizes(16, 20, 24)`;
@@ -4368,6 +4462,69 @@ eng.SetTheme(widget.DarkTheme()) // область останется класс
 вкладываются друг в друга: внутренняя возвращает стиль ВНЕШНЕЙ, а не сбрасывает
 его в общий. `NewThemeScope(nil)` — обычный контейнер, глобальная тема доходит
 до детей.
+
+
+#### Быстрые настройки Windows 11 24H2
+
+`desktop.QuickSettings` остаётся одним компонентом. Вид выбирает презентер
+профиля (`Profile.Presenters["quicksettings"] = theme.QuickSettingsPresenter`;
+его назначает профиль Windows 11, тёмный наследует). Вариант 24H2 включается,
+когда есть и презентер, и модель плиток (`SetQuickActions`); без модели и у
+других тем рисуется прежняя панель с тремя плитками и ползунком громкости —
+кадры Windows 10, Windows 2000, macOS и Windows 11 без модели не менялись.
+
+```go
+q := desktop.NewQuickSettings(m, status) // status даёт громкость и батарею
+q.SetQuickActions(model)                 // QuickActionModel; QuickActionList — готовая
+q.SetBrightness(0.7)                     // нет данных — ползунка яркости нет
+q.VolumeDetails = true                   // «›» у громкости (выбор устройства)
+q.Details = func(id desktop.QuickActionID) *desktop.QuickDetails {
+    // id плитки с HasDetails либо desktop.QuickVolumeID
+    return &desktop.QuickDetails{Content: список, OnClose: func() {}}
+}
+q.OnVolumeChange = setVolume             // уже было: уровень 0..1
+q.OnToggleMute = toggleMute              // уже было: значок громкости
+q.OnBrightnessChange = setBrightness
+q.OnReorder = saveOrder                  // []QuickActionID после режима правки
+q.OnEdit = func(editing bool) {}
+q.OnSettings = openSettings              // панель к этому моменту закрыта
+```
+
+Модель плитки: `QuickAction{ID, Title, Icon/IconAt, On, Disabled, Unavailable,
+Detail, HasDetails}`. `Disabled` и `Unavailable` рисуются приглушённо и не
+переключаются; у недоступной плитки «›» работает (во вложенной странице видно,
+почему), у отключённой — нет. `Detail` — вторая строка подписи под плиткой,
+`HasDetails` рисует «›» справа. Модель, реализующая `QuickActionReorderer`
+(`QuickActionList` уже реализует), получает новый порядок, остальным панель
+показывает его до закрытия. Центр уведомлений Windows 10 новые поля не читает.
+
+Что внутри: плитки 96×48 со скруглением 4 и подписью под ними, три колонки,
+два видимых ряда и прокрутка (колесо, тонкий бегунок, клавиатура); «›» —
+отдельная зона плитки; вложенная страница с заголовком и стрелкой «назад»
+(Backspace, Alt+←, Esc), на которую панель переходит сдвигом вбок (токен
+`quicksettings.page`, «меньше движения» делает переход мгновенным); содержимое
+страницы — любой `widget.Widget`: он получает границы, отрисовку, мышь, колесо и
+клавиши. Ползунки громкости (значок выключает звук, значение, «›») и яркости;
+нижняя строка: батарея из `SystemStatus` (нет батареи — пусто), карандаш
+(режим правки: плитки переставляются перетаскиванием или Alt/Ctrl+стрелки,
+«Готово» выходит) и шестерёнка. Esc отступает на шаг: правка → страница →
+закрытие панели. Обновление модели перерисовывает только изменившиеся плитки,
+показаний системы — только ползунок и батарею.
+
+Все размеры — метрики `quicksettings.w11.*` (ширина 360, поля 24, плитка 96×48,
+зазор 12, подпись 32, нижняя строка 48…), цвета — части стиля `quicksettings`
+(`w11.tile`, `w11.tile.on`, `w11.tile.chevron`, `w11.tile.edit`, `w11.label`,
+`w11.detail`, `w11.title`, `w11.button`, `w11.done`, `w11.slider.*`,
+`w11.footer`, `w11.scrollbar`, `w11.dim`). Панель — стиль компонента: скругление 8,
+Mica и мягкая тень приходят по флагам `backdrop.mica` и `shadow.soft` и не
+дублируются у частей. Значки плиток по флагу `quicksettings.icon.tint`
+(включён) перекрашиваются цветом текста плитки, как значки Windows 11; цветные
+значки потребитель оставляет флагом `m.SetFlag(theme.KeyQuickIconTint, false)`.
+Тёмный Windows 11 не получил ни одного собственного токена: серые накладки и
+ссылки на `accent`/`surface`/`text` читаются на обоих фонах. Строки — ключи
+`desktop.quick.*` (русский и английский, `widget.RegisterStrings`). Подсказки у
+значков без подписи — `QuickSettings.ToolTipAt`. Рамка клавиатурного фокуса —
+`PaintFocusRing`, как на панели задач.
 
 
 ### Конвейер кадра

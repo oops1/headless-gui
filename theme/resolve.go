@@ -181,6 +181,7 @@ func resolve(name string, byName map[string]*Profile, ov overrides) (*Theme, err
 		t.flags[k] = v
 	}
 	t.applyAccent(ov.accent)
+	t.applyColorFrom(chain, ov.accent != nil)
 
 	// ── Стили: слияние дельт по цепочке ─────────────────────────────────
 	// merged[ключ] — накопленные дельты предков и потомков в порядке цепочки.
@@ -290,6 +291,35 @@ func (t *Theme) applyAccent(override *color.RGBA) {
 	}
 	if _, declared := t.colors[KeySelection]; !declared {
 		t.colors[KeySelection] = t.colors[KeyAccent]
+	}
+}
+
+// applyColorFrom раскрывает ссылки «токен следует за токеном»
+// (Profile.SetColorFrom) по цепочке профилей: ссылка потомка перекрывает
+// ссылку предка. Идёт после applyAccent — производные акцента уже посчитаны.
+//
+// С переопределённым акцентом ссылка сильнее объявленного значения; без
+// него — только заполняет необъявленный токен. Токен-источник, которого в
+// теме нет, ссылку отменяет.
+func (t *Theme) applyColorFrom(chain []*Profile, accentOverridden bool) {
+	var follow map[Key]Key
+	for _, p := range chain {
+		for k, from := range p.ColorFrom {
+			if follow == nil {
+				follow = map[Key]Key{}
+			}
+			follow[k] = from
+		}
+	}
+	for k, from := range follow {
+		src, ok := t.colors[from]
+		if !ok {
+			continue
+		}
+		if _, declared := t.colors[k]; declared && !accentOverridden {
+			continue
+		}
+		t.colors[k] = src
 	}
 }
 

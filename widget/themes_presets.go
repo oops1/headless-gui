@@ -70,6 +70,19 @@ type ThemeStyle struct {
 	// само не вызывало Engine.SetTextSubpixel.
 	TextSubpixel bool
 
+	// Геометрия заголовка окна (widget.Window), заданная темой; 0 — не задано,
+	// окно рисуется как прежде. Профиль выражает их метриками
+	// theme.KeyWindowTitleBarHeight, KeyWindowCaptionButtonW/H и
+	// KeyWindowCaptionIconSize.
+	//
+	// TitleBarHeight — высота заголовка (Windows 2000 — 18); CaptionButtonW/H —
+	// размер кнопки управления в классике (Windows 2000 — 16×14);
+	// CaptionIconSize — сторона значка окна, Window.SetIcon (0 → 16).
+	TitleBarHeight  int
+	CaptionButtonW  int
+	CaptionButtonH  int
+	CaptionIconSize int
+
 	// Menu — вид контекстного меню, объявленный профилем (см. MenuStyle).
 	// Нулевое значение — меню прежнее. Цвета заливки, плашки и недоступного
 	// пункта здесь не повторяются: их несёт сама плоская тема.

@@ -63,6 +63,11 @@ type ApplicationArea struct {
 
 	// fade — плавный переход цвета ячеек (тема: taskbar.item).
 	fade motion
+	// pills — ширина пилюли каждой ячейки и attn — мигание «внимания»
+	// (taskpill.go): оба двигаются по анимациям темы, а каждый шаг
+	// перерисовывает только свою кнопку.
+	pills numMotion
+	attn  attnMotion
 
 	// vertical — область лежит в столбце боковой панели: ячейки идут сверху
 	// вниз, без подписей и без презентера дока (applicationarea_vertical.go).
@@ -95,6 +100,8 @@ type appEntry struct {
 	// её ключ — приложение, а не окно, и он не меняется, пока меняется главное
 	// окно стопки.
 	group bool
+	// ov — прогресс, счётчик и «внимание» из модели окон (taskpill.go).
+	ov taskOverlay
 }
 
 // stack — у ячейки больше одного окна.
@@ -143,10 +150,26 @@ func (a *ApplicationArea) Close() {
 	a.menu.dismiss()
 }
 
-// refresh перестраивает содержимое и перерисовывает область.
+// refresh перестраивает содержимое и перерисовывает область — а если изменились
+// только наложения (прогресс, счётчик, «внимание»), то лишь кнопки, у которых
+// они изменились: проценты загрузки не должны перерисовывать всю область.
 func (a *ApplicationArea) refresh() {
+	a.mu.RLock()
+	old := a.entries
+	a.mu.RUnlock()
 	a.rebuild()
 	a.layout()
+	a.mu.RLock()
+	cur, rects := a.entries, a.rects
+	a.mu.RUnlock()
+	if a.presenter() == nil && len(rects) == len(cur) {
+		if idx, ok := overlayChanges(old, cur); ok {
+			for _, i := range idx {
+				widget.InvalidateRect(rects[i])
+			}
+			return
+		}
+	}
 	a.Invalidate()
 }
 
@@ -228,6 +251,10 @@ func (a *ApplicationArea) rebuild() {
 			app: w.AppID, title: w.Title, icon: w.Icon,
 			window: w.ID, wins: []WindowInfo{w}, live: true, active: w.Active, min: w.Minimized,
 		})
+	}
+
+	for i := range entries {
+		entries[i].ov = overlayOf(entries[i].wins)
 	}
 
 	a.mu.Lock()
@@ -356,9 +383,16 @@ func (a *ApplicationArea) layout() {
 	if w < 1 {
 		return
 	}
+	// Тема может просить кнопку ниже панели (Windows 11: 40 в панели 48): она
+	// стоит по центру высоты, а не прилипает к краям.
+	top, bottom := b.Min.Y, b.Max.Y
+	if h := int(a.metric(KeyTaskButtonHeight)); h > 0 && h < b.Dy() {
+		top = b.Min.Y + (b.Dy()-h)/2
+		bottom = top + h
+	}
 	x := b.Min.X
 	for i := 0; i < n; i++ {
-		r := image.Rect(x, b.Min.Y, x+w, b.Max.Y).Intersect(b)
+		r := image.Rect(x, top, x+w, bottom).Intersect(b)
 		if r.Empty() {
 			break
 		}
@@ -434,6 +468,11 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 	labels := (a.tm == nil || a.tm.GetFlag(KeyTaskButtonLabel, true)) && !a.vertical
 	muted := taskButtonMuted(a.tm)
 	prev := ctx.Clip()
+	// Индикаторы Windows 11 (taskpill.go) включает тема; в столбце боковой панели
+	// их нет, как и подписей.
+	pills := !a.vertical && pillEnabled(a.tm)
+	indicators := !a.vertical && a.tm != nil
+	attentionOn := indicators && a.tm.GetFlag(KeyTaskAttention, false)
 
 	for i, r := range rects {
 		if i >= len(entries) {
@@ -446,9 +485,19 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 		})
 		PaintStyle(ctx, r, s)
 
+		// «Внимание»: подложка поверх подсветки, под значком. Вызывается и без
+		// просьбы окна — так затухшее мигание забывается.
+		if indicators {
+			drawAttention(ctx, a.tm, r, a.attn.factor(a.tm, e.key(), r, attentionOn && e.ov.attention && !e.active))
+		}
+
 		// Метка открытого окна: закреплённое, но незапущенное её не получает —
-		// в этом вся разница между «закреплено» и «открыто».
-		if e.live {
+		// в этом вся разница между «закреплено» и «открыто». Тема с пилюлями
+		// (Windows 11) рисует вместо метки пилюлю, и та плавно сжимается и при
+		// закрытии окна.
+		if pills {
+			a.drawPill(ctx, r, e)
+		} else if e.live {
 			drawTaskMarkAt(ctx, a.tm, r, e.active, s, markEdgeOf(a.vertical, a.edge))
 		}
 
@@ -469,6 +518,12 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 				stackIcon = image.Rect(iconX, r.Min.Y+(r.Dy()-iconSize)/2, iconX+iconSize, r.Min.Y+(r.Dy()-iconSize)/2+iconSize)
 			}
 			drawStack(ctx, a.tm, stackIcon, s)
+		}
+		// Прогресс и счётчик лежат на значке.
+		if indicators && e.live && iconSize > 0 {
+			ico := image.Rect(iconX, r.Min.Y+(r.Dy()-iconSize)/2, iconX+iconSize, r.Min.Y+(r.Dy()-iconSize)/2+iconSize)
+			drawProgress(ctx, a.tm, ico, e.ov)
+			drawTaskBadge(ctx, a.tm, r, ico, e.ov.badge)
 		}
 		// Подпись помещается не всегда, и тема вправе не хотеть её вовсе.
 		textLeft := iconX + iconSize + labelGap

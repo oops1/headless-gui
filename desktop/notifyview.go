@@ -67,6 +67,12 @@ const (
 	ncKeySeverity    theme.Key = "notificationcenter.severity.width"
 	ncKeyToastWidth  theme.Key = "notificationcenter.toast.width"
 	ncKeyToastMargin theme.Key = "notificationcenter.toast.margin"
+
+	// Центр Windows 11: зазор до края экрана и панели задач, зазор между центром
+	// и календарём под ним, сторона кнопок заголовка (колокольчик, «Очистить все»).
+	ncKeyEdge     theme.Key = "notificationcenter.edge"
+	ncKeyStackGap theme.Key = "notificationcenter.stack.gap"
+	ncKeyHeadBtn  theme.Key = "notificationcenter.header.button"
 )
 
 // Именованные шрифты темы, которыми пишется центр. Нет в теме — берётся шрифт
@@ -74,6 +80,8 @@ const (
 const (
 	ncFontTitle   theme.Key = "title"
 	ncFontCaption theme.Key = "caption"
+	// ncFontHeading — заголовок панели Windows 11 («Уведомления»).
+	ncFontHeading theme.Key = "heading"
 )
 
 // Части стиля центра (к компоненту "notificationcenter").
@@ -93,6 +101,9 @@ const (
 	ncPartScrollbar = "scrollbar"
 	ncPartSevWarn   = "severity.warning"
 	ncPartSevError  = "severity.error"
+	// Части центра Windows 11: кнопки заголовка и счётчик группы.
+	ncPartHeadBtn = "headbtn"
+	ncPartPill    = "pill"
 )
 
 // Доли и пределы, которые не размеры, а пропорции или защита от вырожденных
@@ -138,6 +149,7 @@ type ncMetrics struct {
 	qCols, qH, qGap, qPad, qIcon           int
 	sbW, sevW                              int
 	toastW, toastMargin                    int
+	edge, stackGap, headBtn                int
 }
 
 // metrics читает размеры из темы. Нулевое значение вместо положительного
@@ -188,6 +200,9 @@ func ncReadMetrics(tm *theme.Manager) ncMetrics {
 		sevW:        get(ncKeySeverity, 3),
 		toastW:      get(ncKeyToastWidth, 364),
 		toastMargin: zero(ncKeyToastMargin),
+		edge:        zero(ncKeyEdge),
+		stackGap:    get(ncKeyStackGap, 8),
+		headBtn:     get(ncKeyHeadBtn, 32),
 	}
 }
 
@@ -330,6 +345,7 @@ const (
 	zoneSelect
 	zoneOption
 	zoneTile
+	zoneDND // колокольчик «Не беспокоить» в заголовке центра Windows 11
 )
 
 // zoneKey однозначно называет зону, не привязывая её к положению: раскладка
@@ -374,6 +390,12 @@ type ncSource struct {
 	culture    func() DateCulture
 	now        func() time.Time
 	emptyMsg   func() string
+	// Центр Windows 11: «Не беспокоить» (включено ли и переключить) и передача
+	// клавиатурного фокуса календарю под центром (delta — направление Tab;
+	// true — календарь принял фокус).
+	dnd       func() bool
+	toggleDND func()
+	handoff   func(delta int) bool
 }
 
 // richView — вид центра: состояние пользовательского интерфейса и всё, что из
@@ -483,8 +505,15 @@ func (v *richView) part(part string, st theme.State) *theme.Style {
 // namedFont возвращает шрифт из набора темы под именем name; если темa такого
 // не объявила — шрифт base (с утолщением, если bold).
 func (v *richView) namedFont(name theme.Key, base theme.FontSpec, bold bool, scale float64) theme.FontSpec {
-	if v.tm != nil {
-		if f, ok := v.tm.GetFont(name); ok {
+	return themeFont(v.tm, name, base, bold, scale)
+}
+
+// themeFont возвращает шрифт из набора темы под именем name; если тема такого не
+// объявила — шрифт base, утолщённый (bold) и умноженный на scale. Им же пользуется
+// календарь Windows 11.
+func themeFont(tm *theme.Manager, name theme.Key, base theme.FontSpec, bold bool, scale float64) theme.FontSpec {
+	if tm != nil {
+		if f, ok := tm.GetFont(name); ok {
 			if f.Size <= 0 {
 				f.Size = base.Size
 			}
@@ -508,6 +537,8 @@ func (v *richView) namedFont(name theme.Key, base theme.FontSpec, bold bool, sca
 // ncFonts — шрифты строк вида.
 type ncFonts struct {
 	body, title, caption, link ncText
+	// heading — заголовок панели Windows 11.
+	heading ncText
 }
 
 func ncTextOf(f theme.FontSpec) ncText {
@@ -525,6 +556,7 @@ func (v *richView) fonts() ncFonts {
 		title:   ncTextOf(v.namedFont(ncFontTitle, base, true, 1.1)),
 		caption: ncTextOf(v.namedFont(ncFontCaption, base, false, 0.9)),
 		link:    ncTextOf(base),
+		heading: ncTextOf(v.namedFont(ncFontHeading, base, true, 1.5)),
 	}
 }
 
@@ -551,6 +583,12 @@ type richCard struct {
 	// anim — высота карточки сейчас меняется: содержимое раскрытого вида
 	// обрезается её рамкой.
 	anim bool
+	// Карточка Windows 11: строка приложения (значок в icon, название в
+	// appRect) есть только у одиночного уведомления; в группе приложение
+	// названо её заголовком, а время стоит в строке заголовка карточки.
+	showApp bool
+	appRect image.Rectangle
+	appText string
 }
 
 // richAct — действие карточки в раскладке.
@@ -612,6 +650,13 @@ type richLayout struct {
 	dropNote  NotificationID
 	dropAct   string
 	dropItems []string
+
+	// Центр Windows 11: заголовок, колокольчик «Не беспокоить», «Очистить все»
+	// (неактивно, пока уведомлений нет) и признак раскладки.
+	w11      bool
+	heading  image.Rectangle
+	dnd      image.Rectangle
+	clearOff bool
 }
 
 // groupNotes раскладывает уведомления по группам: внутри группы новые сверху,
@@ -713,22 +758,32 @@ func (v *richView) layoutCard(m ncMetrics, f ncFonts, n Notification, x, y, w in
 	open := v.cardOpen(n)
 	k, live := v.slideStep(ncSlideKey{kind: slideCard, note: n.ID}, open)
 	if !live {
-		return v.layoutCardAs(m, f, n, x, y, w, hasIcon, open)
+		return v.cardAs(m, f, n, x, y, w, hasIcon, open)
 	}
 	// Раскрытие идёт: высота — между свёрнутой и раскрытой, а содержимое берётся
 	// от раскрытого вида и обрезается рамкой карточки. Текст не перекладывается
 	// посреди движения, строки просто открываются снизу вверх.
-	full := v.layoutCardAs(m, f, n, x, y, w, hasIcon, true)
-	short := v.layoutCardAs(m, f, n, x, y, w, hasIcon, false)
+	full := v.cardAs(m, f, n, x, y, w, hasIcon, true)
+	short := v.cardAs(m, f, n, x, y, w, hasIcon, false)
 	hf, hs := full.rect.Dy(), short.rect.Dy()
 	if hf == hs {
 		// Раскрывать нечего (текст в две строки, действий нет): без движения.
 		v.slideSettle(ncSlideKey{kind: slideCard, note: n.ID}, open)
-		return v.layoutCardAs(m, f, n, x, y, w, hasIcon, open)
+		return v.cardAs(m, f, n, x, y, w, hasIcon, open)
 	}
 	full.rect.Max.Y = y + hs + int(float64(hf-hs)*k+0.5)
 	full.open, full.anim = open, true
 	return full
+}
+
+// cardAs раскладывает карточку видом активной темы: Windows 11 или Windows 10.
+// hasIcon у Windows 11 — признак «показать строку приложения» (одиночное
+// уведомление), а не крупного значка.
+func (v *richView) cardAs(m ncMetrics, f ncFonts, n Notification, x, y, w int, hasIcon, open bool) richCard {
+	if v.w11() {
+		return v.layoutCardAsW11(m, f, n, x, y, w, hasIcon, open)
+	}
+	return v.layoutCardAs(m, f, n, x, y, w, hasIcon, open)
 }
 
 // layoutCardAs раскладывает карточку, раскрытую (open) или свёрнутую.
@@ -901,6 +956,10 @@ func (v *richView) layout(panel image.Rectangle) *richLayout {
 		v.layoutToast(l)
 		return l
 	}
+	if v.w11() {
+		v.layoutW11(l)
+		return l
+	}
 
 	var notes []Notification
 	if v.src.notes != nil {
@@ -999,9 +1058,41 @@ func (v *richView) layout(panel image.Rectangle) *richLayout {
 	l.viewport = image.Rectangle{Min: image.Pt(panel.Min.X, top), Max: image.Pt(panel.Max.X, bottom)}
 
 	// Содержимое списка в системе координат «сверху вниз от начала списка».
+	groups, y := v.flowGroups(m, f, notes, x0, w)
+	l.groups = groups
+	l.empty = len(groups) == 0
+	l.contentH = y + m.cardGap
+	if l.empty {
+		l.contentH = 0
+	}
+	l.maxScrl = l.contentH - l.viewport.Dy()
+	if l.maxScrl < 0 {
+		l.maxScrl = 0
+	}
+	if v.scroll > l.maxScrl {
+		v.scroll = l.maxScrl
+	}
+	if v.scroll < 0 {
+		v.scroll = 0
+	}
+	l.scroll = v.scroll
+
+	v.shiftGroups(l)
+
+	v.buildZones(l)
+	l.lastKeep(v)
+	return l
+}
+
+// flowGroups раскладывает группы уведомлений сверху вниз от начала списка и
+// возвращает их с высотой, до которой дошла раскладка (без нижнего зазора).
+// Координаты относительные: y = 0 — начало списка, x0 и w — полоса карточек.
+// Зовётся под замком вида.
+func (v *richView) flowGroups(m ncMetrics, f ncFonts, notes []Notification, x0, w int) ([]richGroup, int) {
+	w11 := v.w11()
+	var out []richGroup
 	y := 0
 	groups := groupNotes(notes)
-	l.empty = len(groups) == 0
 	for _, g := range groups {
 		first := g[0]
 		grp := richGroup{app: first.AppID, name: first.AppName, note: first, count: len(g)}
@@ -1021,7 +1112,14 @@ func (v *richView) layout(panel image.Rectangle) *richLayout {
 		hdr := m.groupH
 		if grp.name == "" {
 			hdr = 0
-			y += m.cardGap
+			if !w11 {
+				y += m.cardGap
+			}
+		}
+		// Windows 11: заголовок группы нужен, только когда в ней несколько
+		// уведомлений; одиночное — просто карточка со строкой приложения.
+		if w11 && len(g) < 2 {
+			hdr = 0
 		}
 		grp.rect = image.Rect(x0, y, x0+w, y+hdr)
 		y += hdr
@@ -1034,7 +1132,11 @@ func (v *richView) layout(panel image.Rectangle) *richLayout {
 		if !grp.collapsed || glive {
 			yCards := y
 			for _, n := range g {
-				c := v.layoutCard(m, f, n, x0, y, w, hasNoteIcon(n))
+				iconArg := hasNoteIcon(n)
+				if w11 {
+					iconArg = len(g) < 2 // строка приложения — у одиночного уведомления
+				}
+				c := v.layoutCard(m, f, n, x0, y, w, iconArg)
 				grp.cards = append(grp.cards, c)
 				y = c.rect.Max.Y + m.cardGap
 			}
@@ -1045,24 +1147,16 @@ func (v *richView) layout(panel image.Rectangle) *richLayout {
 				y = yCards + shown
 			}
 		}
-		l.groups = append(l.groups, grp)
+		out = append(out, grp)
 	}
-	l.contentH = y + m.cardGap
-	if l.empty {
-		l.contentH = 0
-	}
-	l.maxScrl = l.contentH - l.viewport.Dy()
-	if l.maxScrl < 0 {
-		l.maxScrl = 0
-	}
-	if v.scroll > l.maxScrl {
-		v.scroll = l.maxScrl
-	}
-	if v.scroll < 0 {
-		v.scroll = 0
-	}
-	l.scroll = v.scroll
+	return out, y
+}
 
+// shiftGroups переводит раскладку групп из координат списка в абсолютные:
+// сдвигает на верх окна списка за вычетом прокрутки и ставит крестик и шеврон
+// заголовка группы.
+func (v *richView) shiftGroups(l *richLayout) {
+	m := l.m
 	// Сдвиг в абсолютные координаты.
 	dy := l.viewport.Min.Y - l.scroll
 	shift := func(r image.Rectangle) image.Rectangle { return r.Add(image.Pt(0, dy)) }
@@ -1078,6 +1172,7 @@ func (v *richView) layout(panel image.Rectangle) *richLayout {
 			c := &g.cards[ci]
 			c.rect, c.icon = shift(c.rect), shift(c.icon)
 			c.title, c.timeRect = shift(c.title), shift(c.timeRect)
+			c.appRect = shift(c.appRect)
 			c.bodyY += dy
 			c.closeRect, c.toggleRect = shift(c.closeRect), shift(c.toggleRect)
 			for ai := range c.acts {
@@ -1086,10 +1181,6 @@ func (v *richView) layout(panel image.Rectangle) *richLayout {
 			}
 		}
 	}
-
-	v.buildZones(l)
-	l.lastKeep(v)
-	return l
 }
 
 // lastKeep запоминает раскладку: колесо мыши и подсветка читают её, не считая
@@ -1111,6 +1202,14 @@ func (v *richView) buildZones(l *richLayout) {
 	}
 	whole := l.panel
 	add(zoneKey{kind: zoneManage}, l.manage, true, whole)
+	if l.w11 {
+		// Заголовок Windows 11: колокольчик и «Очистить все»; последняя
+		// недоступна, пока очищать нечего.
+		add(zoneKey{kind: zoneDND}, l.dnd, true, whole)
+		if !l.clearOff {
+			add(zoneKey{kind: zoneClear}, l.clear, true, whole)
+		}
+	}
 	vp := l.viewport
 	for _, g := range l.groups {
 		add(zoneKey{kind: zoneGroup, app: g.app}, g.rect, true, vp)
@@ -1146,7 +1245,9 @@ func (v *richView) buildZones(l *richLayout) {
 		}
 	}
 	add(zoneKey{kind: zoneExpand}, l.expand, true, whole)
-	add(zoneKey{kind: zoneClear}, l.clear, true, whole)
+	if !l.w11 {
+		add(zoneKey{kind: zoneClear}, l.clear, true, whole)
+	}
 	for _, t := range l.tiles {
 		// Плитки обрезаются рамкой сетки: пока она раскрывается, нижний ряд
 		// выглядывает не весь.
@@ -1242,7 +1343,11 @@ func (v *richView) toastCard(l *richLayout) (richCard, bool) {
 	n := notes[0]
 	m := l.m
 	v.mu.Lock()
-	c := v.layoutCard(m, l.fonts, n, l.panel.Min.X, l.panel.Min.Y, l.panel.Dx(), hasNoteIcon(n))
+	iconArg := hasNoteIcon(n)
+	if v.w11() {
+		iconArg = true // тост Windows 11 — всегда одиночная карточка со строкой приложения
+	}
+	c := v.layoutCard(m, l.fonts, n, l.panel.Min.X, l.panel.Min.Y, l.panel.Dx(), iconArg)
 	v.mu.Unlock()
 	return c, true
 }
