@@ -20,6 +20,7 @@ package theme
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"sync"
 )
 
@@ -53,6 +54,10 @@ type Manager struct {
 	profiles map[string]*Profile
 	resolved map[string]*Theme // кэш разрешённых тем
 	active   *Theme
+
+	// ov — переопределения приложения поверх профилей (акцент, флаги).
+	// Читается и пишется под mu.
+	ov overrides
 
 	icons IconResolver
 
@@ -124,7 +129,7 @@ func (m *Manager) GetTheme(name string) (*Theme, bool) {
 	if t, ok := m.resolved[name]; ok { // мог собрать сосед, пока ждали
 		return t, true
 	}
-	t, err := resolve(name, m.profiles)
+	t, err := resolve(name, m.profiles, m.ov)
 	if err != nil {
 		return nil, false
 	}
@@ -138,7 +143,7 @@ func (m *Manager) SetTheme(name string) error {
 	t, ok := m.resolved[name]
 	if !ok {
 		var err error
-		t, err = resolve(name, m.profiles)
+		t, err = resolve(name, m.profiles, m.ov)
 		if err != nil {
 			m.mu.Unlock()
 			return err
@@ -150,6 +155,120 @@ func (m *Manager) SetTheme(name string) error {
 
 	m.notify(t)
 	return nil
+}
+
+// SetAccent задаёт цвет акцента для всех тем менеджера и пересобирает активную
+// тему на лету.
+//
+// Акцент — плоский токен "accent" со своими производными (наведение, нажатие,
+// тёмный и светлый оттенки, цвет текста на акценте — см. DeriveAccent). Стили,
+// которые ссылаются на токены (StyleDelta.FillFrom), меняются вместе с ним, а
+// темы, у которых акцента в стилях нет (Windows 2000), остаются прежними.
+// Наблюдатели получают новую тему так же, как при SetTheme, поэтому
+// компоненты перерисовываются без пересоздания.
+//
+// Выбор переживает смену темы и RegisterTheme; вернуть акцент профиля —
+// ResetAccent. Прозрачность c отбрасывается. Повторная установка того же
+// цвета ничего не перестраивает и не рассылает.
+func (m *Manager) SetAccent(c color.RGBA) {
+	c.A = 255
+	m.mu.Lock()
+	if m.ov.accent != nil && *m.ov.accent == c {
+		m.mu.Unlock()
+		return
+	}
+	m.ov.accent = &c
+	m.mu.Unlock()
+	m.rebuild()
+}
+
+// ResetAccent возвращает акцент, объявленный профилем активной темы.
+func (m *Manager) ResetAccent() {
+	m.mu.Lock()
+	if m.ov.accent == nil {
+		m.mu.Unlock()
+		return
+	}
+	m.ov.accent = nil
+	m.mu.Unlock()
+	m.rebuild()
+}
+
+// Accent возвращает действующий акцент активной темы (false — темы нет или у
+// неё нет акцента).
+func (m *Manager) Accent() (color.RGBA, bool) {
+	m.mu.RLock()
+	t := m.active
+	m.mu.RUnlock()
+	if t == nil {
+		return color.RGBA{}, false
+	}
+	return t.Color(KeyAccent)
+}
+
+// SetFlag переопределяет флаг для всех тем менеджера и пересобирает активную
+// тему: условные стили (Profile.SetStyleWhen) включаются и выключаются на
+// лету, например светлая панель задач при смене режима Windows. Выбор
+// переживает смену темы; снять его — ResetFlag.
+func (m *Manager) SetFlag(k Key, v bool) {
+	m.mu.Lock()
+	if cur, ok := m.ov.flags[k]; ok && cur == v {
+		m.mu.Unlock()
+		return
+	}
+	// Карта копируется: разрешённая тема не держит ссылку на неё, но
+	// копия исключает гонку с чтением в resolve у соседней горутины.
+	flags := make(map[Key]bool, len(m.ov.flags)+1)
+	for fk, fv := range m.ov.flags {
+		flags[fk] = fv
+	}
+	flags[k] = v
+	m.ov.flags = flags
+	m.mu.Unlock()
+	m.rebuild()
+}
+
+// ResetFlag снимает переопределение флага: снова действует значение профиля.
+func (m *Manager) ResetFlag(k Key) {
+	m.mu.Lock()
+	if _, ok := m.ov.flags[k]; !ok {
+		m.mu.Unlock()
+		return
+	}
+	flags := make(map[Key]bool, len(m.ov.flags))
+	for fk, fv := range m.ov.flags {
+		if fk != k {
+			flags[fk] = fv
+		}
+	}
+	m.ov.flags = flags
+	m.mu.Unlock()
+	m.rebuild()
+}
+
+// rebuild сбрасывает кэш разрешённых тем (переопределения изменились) и
+// пересобирает активную, уведомив наблюдателей. Активной темы нет —
+// пересобирать нечего: новые переопределения учтёт первое же SetTheme.
+func (m *Manager) rebuild() {
+	m.mu.Lock()
+	m.resolved = map[string]*Theme{}
+	if m.active == nil {
+		m.mu.Unlock()
+		return
+	}
+	name := m.active.name
+	t, err := resolve(name, m.profiles, m.ov)
+	if err != nil {
+		// Профиль разрешался минуту назад; ошибка значит, что реестр
+		// изменился из-под нас. Оставляем прежнюю тему как есть.
+		m.mu.Unlock()
+		return
+	}
+	m.resolved[name] = t
+	m.active = t
+	m.mu.Unlock()
+
+	m.notify(t)
 }
 
 // Active возвращает активную тему (nil, если SetTheme ещё не звали).

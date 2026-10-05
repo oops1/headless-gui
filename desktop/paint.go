@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"image"
+	"image/color"
 	"sync"
 
 	"github.com/oops1/headless-gui/v3/theme"
@@ -54,6 +55,18 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 	if s.Backdrop.Mode == theme.BackdropBlur {
 		if bd, ok := ctx.(widget.BackdropDrawer); ok {
 			bd.BlurBehind(r, int(s.Backdrop.Radius), s.Backdrop.Tint)
+			// Зерно — после подкраски: acrylic Windows 10 кладёт шум поверх
+			// готового цвета, иначе подкраска закрасила бы его.
+			if s.Backdrop.Noise > 0 {
+				if nd, ok := ctx.(widget.NoiseDrawer); ok {
+					nd.DrawNoise(r, s.Backdrop.Noise)
+				}
+			}
+		} else if s.Backdrop.Fallback.A > 0 {
+			// Размывать нечем: полупрозрачная плёнка поверх неразмытых обоев
+			// читается грязью, поэтому тема сама называет близкий к стеклу
+			// непрозрачный цвет.
+			fillSolid(ctx, r, corner, s.Backdrop.Fallback)
 		} else if s.Backdrop.Tint.A > 0 {
 			fillAlpha(ctx, r, s.Backdrop.Tint)
 		}
@@ -80,17 +93,7 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 	if len(s.Gradient) > 0 {
 		PaintGradient(ctx, r, s)
 	} else if s.Fill.A > 0 && !glass {
-		switch {
-		case corner > 0:
-			ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), corner, s.Fill)
-		case s.Fill.A < 255:
-			// Полупрозрачная заливка — это плёнка поверх фона (подсветка
-			// кнопки под курсором), и класть её надо смешиванием: обычный
-			// FillRect записал бы цвет вместе с чужой альфой прямо в буфер.
-			ctx.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Fill)
-		default:
-			ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Fill)
-		}
+		fillSolid(ctx, r, corner, s.Fill)
 	}
 
 	// Объёмная рамка Windows 2000 вместо плоской, если профиль её объявил.
@@ -105,6 +108,22 @@ func PaintStyle(ctx widget.DrawContext, r image.Rectangle, s *theme.Style) {
 		} else {
 			ctx.DrawBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), s.Border)
 		}
+	}
+}
+
+// fillSolid заливает область цветом: скруглённую — фигурой, полупрозрачную —
+// смешиванием, прочую — записью.
+func fillSolid(ctx widget.DrawContext, r image.Rectangle, corner int, c color.RGBA) {
+	switch {
+	case corner > 0:
+		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), corner, c)
+	case c.A < 255:
+		// Полупрозрачная заливка — это плёнка поверх фона (подсветка
+		// кнопки под курсором), и класть её надо смешиванием: обычный
+		// FillRect записал бы цвет вместе с чужой альфой прямо в буфер.
+		ctx.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), c)
+	default:
+		ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), c)
 	}
 }
 

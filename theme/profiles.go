@@ -65,6 +65,8 @@ func Windows2000Profile() *Profile {
 	selection := RGB(10, 36, 106)
 
 	p := NewProfile(ProfileWindows2000)
+	// Имя notificationcenter — продолжение notifications (см. Windows10Profile).
+	p.SetStyleBase("notificationcenter", "notifications")
 	p.SetColor("accent", navy).
 		SetColor("surface", face).
 		SetColor("text", text).
@@ -231,8 +233,19 @@ func Windows2000BlueProfile() *Profile {
 
 // ─── Windows 10 ─────────────────────────────────────────────────────────────
 
-// Windows10Profile — плоская тема: прямые углы, сплошные цвета, короткие
-// анимации.
+// KeyTaskbarLight — флаг светлого оформления оболочки Windows 10: светлая
+// панель задач и светлые панели «Пуска» и центра уведомлений (в Windows 10 это
+// один режим «Светлый»). По умолчанию флага нет — оболочка тёмная, как была.
+// Включить можно в профиле (SetFlag) или на лету через Manager.SetFlag.
+const KeyTaskbarLight Key = "taskbar.light"
+
+// Windows10Profile — плоская тема: прямые углы, плоские цвета, короткие
+// анимации. Панель задач и панели оболочки — акрил: затемнение, размытие
+// того, что лежит под ними, и слабый шум; там, где размывать нечем, тема
+// отдаёт близкий непрозрачный цвет (BackdropSpec.Fallback).
+//
+// Акцент — сменяемый токен: стили ссылаются на него (FillFrom/BorderFrom), и
+// Manager.SetAccent перекрашивает тему, не пересоздавая компонентов.
 func Windows10Profile() *Profile {
 	accent := RGB(0, 120, 215)
 	surface := RGB(243, 243, 243)
@@ -242,8 +255,10 @@ func Windows10Profile() *Profile {
 	p.SetColor("accent", accent).
 		SetColor("surface", surface).
 		SetColor("text", text).
-		SetColor("border", RGB(200, 200, 200)).
-		SetColor("selection", accent)
+		SetColor("border", RGB(200, 200, 200))
+
+	// Выделение (токен "selection") не объявляется: по умолчанию оно равно
+	// акценту и следует за его сменой.
 
 	p.SetMetric("control.corner", 0).
 		SetMetric("window.corner", 0).
@@ -289,10 +304,12 @@ func Windows10Profile() *Profile {
 	p.SetFlag("style.classic3d", false).
 		SetFlag("style.mac.titlebar", false).
 		SetFlag("taskbar.centered", false).
-		// Панель Windows 10 тёмная и при светлой теме окон, а кнопки окон
-		// показывают только значки: подписи включаются в настройках.
+		// Панель Windows 10 тёмная и при светлой теме окон (светлую включает
+		// флаг taskbar.light), а кнопки окон показывают только значки:
+		// подписи включаются в настройках.
 		SetFlag("startbutton.label", false).
-		SetFlag("taskbutton.label", false)
+		SetFlag("taskbutton.label", false).
+		SetFlag(KeyTaskbarLight, false)
 
 	// Значок кнопки «Пуск» берётся из набора иконок темы.
 	p.Icons["startbutton.icon"] = IconRef{Name: "start"}
@@ -320,21 +337,31 @@ func Windows10Profile() *Profile {
 	p.Anims["menu.open"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}
 	p.Anims["window.open"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}
 
+	// Панель задач — акрил. Запасной непрозрачный цвет — прежний цвет панели:
+	// без размытия она выглядит как раньше.
 	taskbarFill := RGB(31, 31, 31)
-	p.SetStyle("taskbar", "", StateNormal, StyleDelta{Fill: C(taskbarFill)})
+	p.SetStyle("taskbar", "", StateNormal, StyleDelta{
+		Fill:     C(taskbarFill),
+		Backdrop: win10Acrylic(RGBA(31, 31, 31, 210), taskbarFill),
+	})
+	// Наведение, нажатие и «активно» — белые плёнки, а не серые плашки: на
+	// акриле под панелью лежат обои, и непрозрачный серый выглядел бы чужим.
+	// Альфы подобраны так, чтобы на сплошном taskbarFill получались прежние
+	// оттенки (56, 72 и 64).
+	hover, pressed, active := RGBA(255, 255, 255, 28), RGBA(255, 255, 255, 47), RGBA(255, 255, 255, 38)
 	p.SetStyle("startbutton", "", StateNormal, StyleDelta{
 		Fill: C(taskbarFill), Text: C(RGB(255, 255, 255)), PadX: N(10),
 	})
-	p.SetStyle("startbutton", "", StateHover, StyleDelta{Fill: C(RGB(56, 56, 56))})
-	p.SetStyle("startbutton", "", StatePressed, StyleDelta{Fill: C(RGB(72, 72, 72))})
+	p.SetStyle("startbutton", "", StateHover, StyleDelta{Fill: C(hover)})
+	p.SetStyle("startbutton", "", StatePressed, StyleDelta{Fill: C(pressed)})
 
 	p.SetStyle("taskbutton", "", StateNormal, StyleDelta{
 		Fill: C(taskbarFill), Text: C(RGB(230, 230, 230)), PadX: N(8),
 	})
-	p.SetStyle("taskbutton", "", StateHover, StyleDelta{Fill: C(RGB(56, 56, 56))})
+	p.SetStyle("taskbutton", "", StateHover, StyleDelta{Fill: C(hover)})
 	// Полоса под кнопкой вместо обводки — как на панели Windows 10.
 	p.SetStyle("taskbutton", "", StateActive, StyleDelta{
-		Fill: C(RGB(64, 64, 64)), Border: C(accent),
+		Fill: C(active), BorderFrom: KeyAccent,
 	})
 	p.SetStyle("taskbutton", "", StateDisabled, StyleDelta{Text: C(RGB(150, 150, 150))})
 
@@ -342,12 +369,37 @@ func Windows10Profile() *Profile {
 		p.SetStyle(comp, "", StateNormal, StyleDelta{
 			Fill: C(taskbarFill), Text: C(RGB(230, 230, 230)), PadX: N(6),
 		})
-		p.SetStyle(comp, "", StateHover, StyleDelta{Fill: C(RGB(56, 56, 56))})
+		p.SetStyle(comp, "", StateHover, StyleDelta{Fill: C(hover)})
 	}
 	p.SetStyle("clock", "", StateNormal, StyleDelta{
 		Fill: C(taskbarFill), Text: C(RGB(240, 240, 240)), PadX: N(10),
 	})
-	p.SetStyle("clock", "", StateHover, StyleDelta{Fill: C(RGB(56, 56, 56))})
+	p.SetStyle("clock", "", StateHover, StyleDelta{Fill: C(hover)})
+
+	// Светлая панель: те же компоненты, другая подкраска и цвет текста.
+	// Правила лежат поверх тёмных и включаются флагом taskbar.light.
+	lightFill := RGB(240, 240, 240)
+	lightHover, lightPressed, lightActive := RGBA(0, 0, 0, 26), RGBA(0, 0, 0, 42), RGBA(0, 0, 0, 34)
+	when := func(comp, part string, st State, d StyleDelta) {
+		p.SetStyleWhen(KeyTaskbarLight, comp, part, st, d)
+	}
+	when("taskbar", "", StateNormal, StyleDelta{
+		Fill:     C(lightFill),
+		Backdrop: win10Acrylic(RGBA(240, 240, 240, 210), lightFill),
+	})
+	when("startbutton", "", StateNormal, StyleDelta{Text: C(RGB(0, 0, 0))})
+	when("startbutton", "", StateHover, StyleDelta{Fill: C(lightHover)})
+	when("startbutton", "", StatePressed, StyleDelta{Fill: C(lightPressed)})
+	when("taskbutton", "", StateNormal, StyleDelta{Text: C(RGB(20, 20, 20))})
+	when("taskbutton", "", StateHover, StyleDelta{Fill: C(lightHover)})
+	when("taskbutton", "", StateActive, StyleDelta{Fill: C(lightActive)})
+	when("taskbutton", "", StateDisabled, StyleDelta{Text: C(RGB(120, 120, 120))})
+	for _, comp := range []string{"tray.network", "tray.volume", "tray.power"} {
+		when(comp, "", StateNormal, StyleDelta{Text: C(RGB(20, 20, 20))})
+		when(comp, "", StateHover, StyleDelta{Fill: C(lightHover)})
+	}
+	when("clock", "", StateNormal, StyleDelta{Text: C(RGB(0, 0, 0))})
+	when("clock", "", StateHover, StyleDelta{Fill: C(lightHover)})
 
 	p.SetStyle("menu", "", StateNormal, StyleDelta{
 		Fill: C(RGB(43, 43, 43)), Text: C(RGB(240, 240, 240)),
@@ -360,7 +412,7 @@ func Windows10Profile() *Profile {
 		Fill: C(RGB(90, 90, 90)), Text: C(RGB(200, 200, 200)),
 	})
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{
-		Fill: C(accent), Text: C(RGB(255, 255, 255)),
+		FillFrom: KeyAccent, TextFrom: KeyAccentText,
 	})
 
 	// Всплывающие панели — меню «Пуск», быстрые настройки, уведомления,
@@ -373,14 +425,14 @@ func Windows10Profile() *Profile {
 			Border: C(RGBA(0, 0, 0, 40)), BorderWidth: N(1), Elevation: N(6), Shadow: C(RGBA(0, 0, 0, 70)),
 		})
 	}
-	p.SetStyle("startmenu", "", StateHover, StyleDelta{Fill: C(accent), Text: C(RGB(255, 255, 255))})
+	p.SetStyle("startmenu", "", StateHover, StyleDelta{FillFrom: KeyAccent, TextFrom: KeyAccentText})
 	p.SetStyle("startmenu", "section", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200)), PadX: N(6)})
 	p.SetStyle("quicksettings", "slider", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
-	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{Fill: C(accent), Corner: N(0)})
+	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{FillFrom: KeyAccent, Corner: N(0)})
 	for _, tile := range []string{"tile.network", "tile.volume", "tile.power"} {
 		p.SetStyle("quicksettings", tile, StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
 		p.SetStyle("quicksettings", tile, StateActive, StyleDelta{
-			Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(0),
+			FillFrom: KeyAccent, TextFrom: KeyAccentText, Corner: N(0),
 		})
 	}
 	// Карточка уведомления: рамка задаёт важность, заливка приходит из палитры.
@@ -401,12 +453,24 @@ func Windows10Profile() *Profile {
 	p.SetStyle("calendar", "day", StateNormal, StyleDelta{Corner: N(0)})
 	p.SetStyle("calendar", "day", StateHover, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
 	p.SetStyle("calendar", "day", StateActive, StyleDelta{
-		Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(0),
+		FillFrom: KeyAccent, TextFrom: KeyAccentText, Corner: N(0),
 	})
 	p.SetStyle("calendar", "day", StateFocused, StyleDelta{
-		Border: C(accent), BorderWidth: N(1), Corner: N(0),
+		BorderFrom: KeyAccent, BorderWidth: N(1), Corner: N(0),
 	})
 	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
+	// Панели оболочки: «Пуск» и центр уведомлений. Новое имя компонента
+	// notificationcenter начинается со всех правил notifications, поэтому
+	// существующий центр выглядит как раньше, а презентер Windows 10 берёт
+	// части (panel, header, card…), которых у плоского центра нет.
+	p.SetStyleBase("notificationcenter", "notifications")
+	declareWin10Panels(func(comp, part string, st State, d StyleDelta) {
+		p.SetStyle(comp, part, st, d)
+	}, win10ShellDark)
+	declareWin10Panels(func(comp, part string, st State, d StyleDelta) {
+		p.SetStyleWhen(KeyTaskbarLight, comp, part, st, d)
+	}, win10ShellLight)
+
 	// Элементы панели не носят собственной заливки в покое: фон им даёт сама
 	// панель, а своя плашка появляется только под курсором и у активного
 	// окна. Заливка иначе приходит из общего токена surface, и на панели
@@ -445,21 +509,25 @@ func Windows10DarkProfile() *Profile {
 // Windows11Profile — скруглённая тема со стеклом: панель задач по центру,
 // подложка acrylic, мягкие тени у всплывающих поверхностей.
 //
-// Размытая подложка объявлена честно, а не подделана плоским цветом: пока
-// рендерер не умел размывать, такой профиль рисовался бы полупрозрачной
-// плёнкой, а с появлением BlurBehind начал бы размывать сам — заменой
-// реализации, без правки темы.
+// Размытая подложка объявлена честно, а не подделана плоским цветом: движок
+// размывает композицию под панелью (Canvas.BlurBehind), а контекст без
+// размытия (например, окно-попап) рисует тот же слой полупрозрачной
+// подкраской Tint.
 func Windows11Profile() *Profile {
 	accent := RGB(0, 103, 192)
 	surface := RGB(243, 243, 243)
 	text := RGB(0, 0, 0)
 
 	p := NewProfile(ProfileWindows11)
+	// Имя notificationcenter — продолжение notifications (см. Windows10Profile).
+	p.SetStyleBase("notificationcenter", "notifications")
 	p.SetColor("accent", accent).
 		SetColor("surface", surface).
 		SetColor("text", text).
-		SetColor("border", RGBA(0, 0, 0, 20)).
-		SetColor("selection", accent)
+		SetColor("border", RGBA(0, 0, 0, 20))
+
+	// Выделение (токен "selection") не объявляется: по умолчанию оно равно
+	// акценту и следует за его сменой.
 
 	p.SetMetric("control.corner", 6).
 		SetMetric("window.corner", 12).
@@ -537,7 +605,7 @@ func Windows11Profile() *Profile {
 	// Активное окно отмечено меткой под кнопкой, а не обводкой: цвет метки
 	// берётся из Border, но саму рамку не рисуем — BorderWidth остаётся нулём.
 	p.SetStyle("taskbutton", "", StateActive, StyleDelta{
-		Fill: C(RGBA(0, 0, 0, 28)), Border: C(accent),
+		Fill: C(RGBA(0, 0, 0, 28)), BorderFrom: KeyAccent,
 	})
 
 	for _, comp := range []string{"tray.network", "tray.volume", "tray.power"} {
@@ -574,14 +642,14 @@ func Windows11Profile() *Profile {
 			Elevation: N(12), Shadow: C(RGBA(0, 0, 0, 70)),
 		})
 	}
-	p.SetStyle("startmenu", "", StateHover, StyleDelta{Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6)})
+	p.SetStyle("startmenu", "", StateHover, StyleDelta{FillFrom: KeyAccent, TextFrom: KeyAccentText, Corner: N(6)})
 	p.SetStyle("startmenu", "section", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200)), PadX: N(6)})
 	p.SetStyle("quicksettings", "slider", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
-	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{Fill: C(accent), Corner: N(6)})
+	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{FillFrom: KeyAccent, Corner: N(6)})
 	for _, tile := range []string{"tile.network", "tile.volume", "tile.power"} {
 		p.SetStyle("quicksettings", tile, StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
 		p.SetStyle("quicksettings", tile, StateActive, StyleDelta{
-			Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6),
+			FillFrom: KeyAccent, TextFrom: KeyAccentText, Corner: N(6),
 		})
 	}
 	// Карточка уведомления: рамка задаёт важность, заливка приходит из палитры.
@@ -602,10 +670,10 @@ func Windows11Profile() *Profile {
 	p.SetStyle("calendar", "day", StateNormal, StyleDelta{Corner: N(6)})
 	p.SetStyle("calendar", "day", StateHover, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
 	p.SetStyle("calendar", "day", StateActive, StyleDelta{
-		Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6),
+		FillFrom: KeyAccent, TextFrom: KeyAccentText, Corner: N(6),
 	})
 	p.SetStyle("calendar", "day", StateFocused, StyleDelta{
-		Border: C(accent), BorderWidth: N(1), Corner: N(6),
+		BorderFrom: KeyAccent, BorderWidth: N(1), Corner: N(6),
 	})
 	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
 	// Элементы панели не носят собственной заливки в покое: фон им даёт сама
@@ -677,11 +745,15 @@ func MacOSProfile() *Profile {
 	text := RGB(0, 0, 0)
 
 	p := NewProfile(ProfileMacOS)
+	// Имя notificationcenter — продолжение notifications (см. Windows10Profile).
+	p.SetStyleBase("notificationcenter", "notifications")
 	p.SetColor("accent", accent).
 		SetColor("surface", surface).
 		SetColor("text", text).
-		SetColor("border", RGBA(0, 0, 0, 25)).
-		SetColor("selection", accent)
+		SetColor("border", RGBA(0, 0, 0, 25))
+
+	// Выделение (токен "selection") не объявляется: по умолчанию оно равно
+	// акценту и следует за его сменой.
 
 	p.SetMetric("control.corner", 8).
 		SetMetric("window.corner", 10).
@@ -767,7 +839,7 @@ func MacOSProfile() *Profile {
 			Highlight: RGBA(255, 255, 255, 100)},
 		Text: C(text), Corner: N(10), Elevation: N(10), Shadow: C(RGBA(0, 0, 0, 60)),
 	})
-	p.SetStyle("menu", "item", StateHover, StyleDelta{Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6)})
+	p.SetStyle("menu", "item", StateHover, StyleDelta{FillFrom: KeyAccent, TextFrom: KeyAccentText, Corner: N(6)})
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(surface), Corner: N(10)})
 	p.SetStyle("window", "titlebar", StateNormal, StyleDelta{
 		Fill: C(RGB(236, 236, 236)), Text: C(RGB(120, 120, 120)),
@@ -786,14 +858,14 @@ func MacOSProfile() *Profile {
 			Elevation: N(10), Shadow: C(RGBA(0, 0, 0, 60)),
 		})
 	}
-	p.SetStyle("startmenu", "", StateHover, StyleDelta{Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6)})
+	p.SetStyle("startmenu", "", StateHover, StyleDelta{FillFrom: KeyAccent, TextFrom: KeyAccentText, Corner: N(6)})
 	p.SetStyle("startmenu", "section", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200)), PadX: N(6)})
 	p.SetStyle("quicksettings", "slider", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
-	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{Fill: C(accent), Corner: N(6)})
+	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{FillFrom: KeyAccent, Corner: N(6)})
 	for _, tile := range []string{"tile.network", "tile.volume", "tile.power"} {
 		p.SetStyle("quicksettings", tile, StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
 		p.SetStyle("quicksettings", tile, StateActive, StyleDelta{
-			Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6),
+			FillFrom: KeyAccent, TextFrom: KeyAccentText, Corner: N(6),
 		})
 	}
 	// Карточка уведомления: рамка задаёт важность, заливка приходит из палитры.
@@ -814,10 +886,10 @@ func MacOSProfile() *Profile {
 	p.SetStyle("calendar", "day", StateNormal, StyleDelta{Corner: N(6)})
 	p.SetStyle("calendar", "day", StateHover, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(6)})
 	p.SetStyle("calendar", "day", StateActive, StyleDelta{
-		Fill: C(accent), Text: C(RGB(255, 255, 255)), Corner: N(6),
+		FillFrom: KeyAccent, TextFrom: KeyAccentText, Corner: N(6),
 	})
 	p.SetStyle("calendar", "day", StateFocused, StyleDelta{
-		Border: C(accent), BorderWidth: N(1), Corner: N(6),
+		BorderFrom: KeyAccent, BorderWidth: N(1), Corner: N(6),
 	})
 	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
 

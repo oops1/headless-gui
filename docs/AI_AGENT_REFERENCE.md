@@ -4117,6 +4117,75 @@ covers the window minus the corners. A maximized or fullscreen window is not
 rounded and fully opaque; windows without a radius stay XRGB. X11 and Win32 are
 unchanged (X11 would need an ARGB visual and a compositing manager).
 
+### Accent, light taskbar and Windows 10 acrylic — v3.32
+
+**Accent is a live token** (`theme/accent.go`). `Manager.SetAccent(c)`
+re-resolves the active theme with another `accent` and notifies subscribers
+exactly as `SetTheme` does (`Taskbar` repaints without being recreated); the
+choice survives `SetTheme` and `RegisterTheme`. `ResetAccent()` returns the
+profile's accent; `Accent()` reads the effective one;
+`Engine.SetAccent(m, c)` / `Engine.ApplyThemeProfile(m)` (`engine/themeapply.go`)
+also re-materialise the legacy `widget.Theme`. Setting the same colour again
+does nothing.
+
+- Derived tokens are computed from the base: `accent.hover` (+12 % white),
+  `accent.pressed` (+15 % black), `accent.dark` (+25 % black), `accent.light`
+  (+30 % white), `accent.text` (white, black when the accent is light).
+  `theme.DeriveAccent(c) AccentSet` exposes the arithmetic. A value the profile
+  declares itself wins until `SetAccent`; after it everything is recomputed.
+- `selection` defaults to the accent when a profile does not declare it.
+- Styles follow the token **by reference**: `StyleDelta.FillFrom / TextFrom /
+  BorderFrom Key` (JSON: `"fill": "@accent.hover"`). Resolved against the final
+  merged tokens of the chain, so a child profile may swap the token without
+  rewriting styles. A literal in a LATER delta (a child's) overrides an earlier
+  reference; within one delta the reference wins; a missing token leaves the
+  colour alone. Windows 10/11/macOS profiles use references for every accent
+  fill, border and text-on-accent; Windows 2000 deliberately does not.
+
+**Flags override live too.** `Manager.SetFlag(k, v)` / `ResetFlag(k)` re-resolve
+like `SetAccent`. A flag is useful because of conditional styles:
+`Profile.SetStyleWhen(flag, component, part, state, delta)` is applied on top of
+the profile's ordinary rules only while the flag is true
+(`Profile.Conditional`, `ConditionalStyle`).
+
+**Component aliases.** `Profile.SetStyleBase("notificationcenter",
+"notifications")` makes a new component name start from every rule of the old
+one (own rules win), so new names add no visual change to existing themes.
+All base profiles declare `notificationcenter → notifications`; the flat
+`desktop.NotificationCenter` still uses `"notifications"`.
+
+**Acrylic.** `BackdropSpec` gained `Noise float64` (grain amplitude as a share
+of full scale, 0.02 = ±2 %) and `Fallback color.RGBA` (opaque colour used when
+the draw context cannot blur). `desktop.PaintStyle`: blur → tint → noise
+(`widget.NoiseDrawer`, implemented by `Canvas.DrawNoise(r, amount)` — a
+deterministic per-pixel hash, clip-aware, keeps the premultiplied invariant);
+no `BackdropDrawer` → `Fallback` if set, else the old translucent tint. JSON:
+`"noise"`, `"fallback"` in `backdrop`.
+
+**Windows 10 profile.** The taskbar is acrylic (`win10Acrylic`: radius 20, tint
+`RGBA(31,31,31,210)`, noise 0.02, fallback `RGB(31,31,31)` — the previous
+solid colour). Hover/pressed/active on the bar are white films instead of grey
+plates (same shade on a solid bar). Flag `theme.KeyTaskbarLight`
+(`"taskbar.light"`, default false = as before) switches the bar, its items and
+the new shell panels to a light palette via conditional styles. Windows 11,
+Windows 2000 and macOS render byte-identical to v3.31 (checked on rendered
+frames of all eight profiles).
+
+New style PARTS for the Windows 10 shell (`theme/profiles_win10_shell.go`;
+they do not exist for other themes, existing flat panels are untouched):
+
+| component | parts |
+| --- | --- |
+| `startmenu` | `panel`, `sidebar` (acrylic); `sidebar.item`, `row`, `letter` (Normal/Hover/Pressed/Active/Focused/Disabled); `tile` (accent fill, hover frame); `tile.group` |
+| `notificationcenter` | `panel` (acrylic), `header`, `link` (accent text), `group`, `card`, `action`, `quick.tile` (off), `quick.tile.on` (accent) |
+
+Parts already drop the inherited border/shadow/elevation (`flat`). A presenter
+asks `GetStyle("startmenu", "row", state)` and never branches on a theme name.
+
+Tests: `theme/accent_test.go`, `desktop/accent_test.go`, `engine/noise_test.go`.
+`TestGolden_Windows10Acrylic` writes dark and light bar PNGs when `GOLDEN_OUT`
+is set.
+
 ### Measured cost of a frame
 
 Desktop scene from `desktop/` at 1280×800, Windows 11 theme, fake system data

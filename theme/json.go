@@ -82,6 +82,10 @@ type jsonStyle struct {
 		// Блик по верхней кромке: именно он делает размытую подложку
 		// стеклом, а не плоской заливкой.
 		Highlight string `json:"highlight,omitempty"`
+		// Шум поверх подкраски и непрозрачный цвет на случай, когда
+		// размытие недоступно (acrylic Windows 10).
+		Noise    float64 `json:"noise,omitempty"`
+		Fallback string  `json:"fallback,omitempty"`
 	} `json:"backdrop,omitempty"`
 
 	Bevel *struct {
@@ -192,9 +196,22 @@ func (js jsonStyle) toDelta() (StyleDelta, []string) {
 		}
 		*dst = &c
 	}
-	colorField(js.Fill, "fill", &d.Fill)
-	colorField(js.Text, "text", &d.Text)
-	colorField(js.Border, "border", &d.Border)
+	// Запись «@accent» — ссылка на цветовой токен, а не готовый цвет: так
+	// стиль из файла следует за сменой акцента (см. StyleDelta.FillFrom).
+	tokenField := func(raw, name string, dst **color.RGBA, from *Key) {
+		if strings.HasPrefix(raw, "@") {
+			if len(raw) == 1 {
+				warns = append(warns, fmt.Sprintf("%s: пустое имя токена", name))
+				return
+			}
+			*from = Key(raw[1:])
+			return
+		}
+		colorField(raw, name, dst)
+	}
+	tokenField(js.Fill, "fill", &d.Fill, &d.FillFrom)
+	tokenField(js.Text, "text", &d.Text, &d.TextFrom)
+	tokenField(js.Border, "border", &d.Border, &d.BorderFrom)
 	colorField(js.Shadow, "shadow", &d.Shadow)
 
 	d.Corner, d.BorderWidth, d.PadX, d.PadY = js.Corner, js.BorderWidth, js.PadX, js.PadY
@@ -225,7 +242,7 @@ func (js jsonStyle) toDelta() (StyleDelta, []string) {
 	}
 
 	if js.Backdrop != nil {
-		b := BackdropSpec{Radius: js.Backdrop.Radius}
+		b := BackdropSpec{Radius: js.Backdrop.Radius, Noise: js.Backdrop.Noise}
 		switch js.Backdrop.Mode {
 		case "", "none":
 			b.Mode = BackdropNone
@@ -248,6 +265,13 @@ func (js jsonStyle) toDelta() (StyleDelta, []string) {
 				b.Highlight = c
 			} else {
 				warns = append(warns, fmt.Sprintf("подложка, highlight: %v", err))
+			}
+		}
+		if js.Backdrop.Fallback != "" {
+			if c, err := ParseColor(js.Backdrop.Fallback); err == nil {
+				b.Fallback = c
+			} else {
+				warns = append(warns, fmt.Sprintf("подложка, fallback: %v", err))
 			}
 		}
 		d.Backdrop = &b

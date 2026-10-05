@@ -4032,6 +4032,48 @@ them with a separable box blur (cost independent of the radius) and puts them
 back. `Canvas.SetRoundClip` clips along the rounded outline instead of its
 bounding box.
 
+#### Accent, light taskbar and Windows 10 acrylic (since v3.32)
+
+The accent is a theme token that can change on the fly. Styles reference it
+(`StyleDelta.FillFrom`, `TextFrom`, `BorderFrom`; in JSON `"fill": "@accent"`),
+so changing it needs neither recreated components nor a reloaded profile:
+
+```go
+m.SetAccent(theme.RGB(16, 137, 62))   // the theme is re-resolved, subscribers notified
+eng.SetAccent(m, c)                   // the same + the widget palette (widget.Theme)
+m.ResetAccent()                       // back to the profile's accent
+```
+
+Derived tokens follow by themselves: `accent.hover`, `accent.pressed`,
+`accent.dark`, `accent.light` and `accent.text` (white or black by lightness).
+The choice survives a theme switch. Windows 2000 does not use the accent in its
+styles and stays as it is.
+
+The light Windows 10 taskbar is behind a flag, set in a profile or live; it is
+dark by default, as before:
+
+```go
+m.SetFlag(theme.KeyTaskbarLight, true)   // taskbar, Start and notification panels turn light
+```
+
+The flag works through conditional styles: `p.SetStyleWhen(flag, comp, part,
+state, delta)` is layered over the ordinary rules while the flag is true.
+
+The Windows 10 taskbar is acrylic: the wallpaper under it is blurred, then a
+darkening tint and a faint grain (`BackdropSpec.Noise`) are applied. When the
+draw context cannot blur, the solid `BackdropSpec.Fallback` is painted:
+
+```go
+&theme.BackdropSpec{Mode: theme.BackdropBlur, Radius: 20,
+    Tint: theme.RGBA(31, 31, 31, 210), Noise: 0.02, Fallback: theme.RGB(31, 31, 31)}
+```
+
+For the Windows 10 shell the profile declares parts of `startmenu` (`panel`,
+`sidebar`, `sidebar.item`, `row`, `letter`, `tile`, `tile.group`) and
+`notificationcenter` (`panel`, `header`, `link`, `group`, `card`, `action`,
+`quick.tile`, `quick.tile.on`). `notificationcenter` inherits from
+`notifications` (`Profile.SetStyleBase`), so existing themes look the same.
+
 #### The taskbar and its components
 
 ```go

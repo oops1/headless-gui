@@ -4010,6 +4010,49 @@ p.SetStyle("taskbar", "", theme.StateNormal, theme.StyleDelta{
 обратно. `Canvas.SetRoundClip` обрезает по скруглённому контуру, а не по
 охватывающему прямоугольнику.
 
+#### Акцент, светлая панель и акрил Windows 10 (с v3.32)
+
+Акцент — токен темы, который можно менять на лету. Стили ссылаются на него
+(`StyleDelta.FillFrom`, `TextFrom`, `BorderFrom`; в JSON — `"fill": "@accent"`),
+поэтому смена не требует ни пересоздания компонентов, ни перечитывания профиля:
+
+```go
+m.SetAccent(theme.RGB(16, 137, 62))   // тема пересобирается, подписчики уведомляются
+eng.SetAccent(m, c)                   // то же + палитра виджетов (widget.Theme)
+m.ResetAccent()                       // вернуть акцент профиля
+```
+
+Производные считаются от акцента сами: `accent.hover`, `accent.pressed`,
+`accent.dark`, `accent.light` и `accent.text` (белый или чёрный, смотря по
+яркости). Выбор переживает смену темы. Windows 2000 акцент в стилях не
+использует и не меняется.
+
+Светлая панель задач Windows 10 включается флагом — профилем или на лету; по
+умолчанию панель тёмная, как раньше:
+
+```go
+m.SetFlag(theme.KeyTaskbarLight, true)   // панель, «Пуск» и центр уведомлений светлеют
+```
+
+Флаг работает через условные стили: `p.SetStyleWhen(flag, comp, part, state,
+delta)` накладывается на обычные правила, пока флаг поднят.
+
+Панель Windows 10 — акрил: размытие обоев под панелью, затемняющая подкраска и
+слабое зерно (`BackdropSpec.Noise`). Если контекст размывать не умеет, рисуется
+сплошной `BackdropSpec.Fallback`:
+
+```go
+&theme.BackdropSpec{Mode: theme.BackdropBlur, Radius: 20,
+    Tint: theme.RGBA(31, 31, 31, 210), Noise: 0.02, Fallback: theme.RGB(31, 31, 31)}
+```
+
+Для оболочки Windows 10 профиль объявляет части стилей `startmenu` (`panel`,
+`sidebar`, `sidebar.item`, `row`, `letter`, `tile`, `tile.group`) и
+`notificationcenter` (`panel`, `header`, `link`, `group`, `card`, `action`,
+`quick.tile`, `quick.tile.on`). Компонент `notificationcenter` унаследован от
+`notifications` (`Profile.SetStyleBase`), поэтому у существующих тем вид не
+меняется.
+
 #### Панель задач и её компоненты
 
 ```go
