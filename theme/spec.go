@@ -28,6 +28,18 @@ const (
 // округляется до целого пикселя, как у всех прежних тем.
 const FlagTextSubpixel Key = "text.subpixel"
 
+// FlagFontDefaultGlobal — флаг профиля: Fonts["default"].Size становится
+// размером шрифта по умолчанию для ВСЕХ виджетов, у которых свой кегль не задан
+// (заголовки окон widget.Window, диалоги, вкладки, пункты меню), а не только
+// для компонентов оболочки, читающих шрифт из своих стилей.
+//
+// Без флага (все прежние темы) виджеты остаются на widget.DefaultFontSizePt =
+// 10 pt: профиль Windows 11 объявляет Fonts["default"] = 9 pt, и применение
+// профиля не должно было менять раскладку каждого окна. Флаг можно включить на
+// лету: Manager.SetFlag(FlagFontDefaultGlobal, true) с последующим
+// Engine.ApplyThemeProfile. Применяет его widget.ApplyGlobalTheme.
+const FlagFontDefaultGlobal Key = "font.default.global"
+
 // FontSpec — шрифт как данные темы. Имя семейства соответствует шрифту,
 // зарегистрированному в движке (engine.RegisterFont, RegisterFontFS): либо
 // имени шрифта («OpenSans-Bold»), либо названию семейства («Open Sans») — во

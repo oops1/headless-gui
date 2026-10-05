@@ -488,12 +488,12 @@ func (m *PopupMenu) calcSize() (w, h int) {
 			// Ширина по НАСТОЯЩЕМУ замеру подписи: len в Go считает байты, и
 			// кириллический пункт выходил вдвое шире нужного.
 			textW := MeasureUIText(mnemonicLabel(item.Text, m.UseMnemonics),
-				DefaultFontSizePt) + m.PaddingX*2 + 24 + gutter
+				DefaultFontSize()) + m.PaddingX*2 + 24 + gutter
 			if item.Shortcut != "" {
 				// Сочетание пишется справа, и место под него нужно
 				// отвести всему меню: иначе подпись и сочетание налезут
 				// друг на друга в самом длинном пункте.
-				textW += MeasureUIText(item.Shortcut, DefaultFontSizePt) + menuShortcutGap
+				textW += MeasureUIText(item.Shortcut, DefaultFontSize()) + menuShortcutGap
 			}
 			if textW > w {
 				w = textW
@@ -638,7 +638,7 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 		// Сочетание клавиш — справа, приглушённым цветом: это подсказка, а
 		// не вторая подпись, и спорить с названием пункта она не должна.
 		if item.Shortcut != "" && len(item.SubItems) == 0 {
-			sw := MeasureUIText(item.Shortcut, DefaultFontSizePt)
+			sw := MeasureUIText(item.Shortcut, DefaultFontSize())
 			sx := px + pw - m.PaddingX - sw
 			ctx.DrawText(item.Shortcut, sx, textY, m.shortcutColor(textCol))
 		}

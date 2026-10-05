@@ -938,7 +938,7 @@ func (m *DockManager) layoutSideRegion(s DockSide) {
 	x := region.Min.X
 	tabY0 := region.Max.Y - tsh
 	for _, p := range docked {
-		w := MeasureUIText(p.Title, DefaultFontSizePt) + 16
+		w := MeasureUIText(p.Title, DefaultFontSize()) + 16
 		if w < 40 {
 			w = 40
 		}
@@ -977,7 +977,7 @@ func (m *DockManager) layoutStripLabels(s DockSide) {
 		// Вертикальная полоса: ярлыки стопкой сверху вниз, высота ≈ текст + кнопки.
 		y := strip.Min.Y + 2
 		for _, p := range panes {
-			h := MeasureUIText(p.Title, DefaultFontSizePt) + 16 + btnArea
+			h := MeasureUIText(p.Title, DefaultFontSize()) + 16 + btnArea
 			if h < 24+btnArea {
 				h = 24 + btnArea
 			}
@@ -997,7 +997,7 @@ func (m *DockManager) layoutStripLabels(s DockSide) {
 		// Горизонтальная полоса: ярлыки слева направо, ширина ≈ текст + кнопки.
 		x := strip.Min.X + 2
 		for _, p := range panes {
-			w := MeasureUIText(p.Title, DefaultFontSizePt) + 16 + btnArea
+			w := MeasureUIText(p.Title, DefaultFontSize()) + 16 + btnArea
 			if w < 40+btnArea {
 				w = 40 + btnArea
 			}

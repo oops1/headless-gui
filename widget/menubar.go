@@ -204,7 +204,7 @@ func (mb *MenuBar) recalcRects() {
 	x := b.Min.X
 	for i, item := range mb.items {
 		textW := MeasureUIText(mnemonicLabel(item.Text, mb.UseMnemonics),
-			DefaultFontSizePt) + mb.ItemPaddingX*2
+			DefaultFontSize()) + mb.ItemPaddingX*2
 		rects[i] = image.Rect(x, b.Min.Y, x+textW, b.Max.Y)
 		x += textW
 	}

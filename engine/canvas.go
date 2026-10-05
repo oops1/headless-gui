@@ -25,6 +25,7 @@ import (
 
 	"github.com/oops1/headless-gui/v3/internal/pixsimd"
 	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // Canvas — off-screen RGBA-холст с двойной буферизацией.
@@ -724,9 +725,10 @@ func (c *Canvas) DrawBorder(x, y, w, h int, col color.RGBA) {
 	c.fillRectPx(image.Rect(px+pw-t, py, px+pw, py+ph), encCol, blend) // право
 }
 
-// DrawText рисует строку TTF-шрифтом (Go Regular) размером DefaultFontSize.
+// DrawText рисует строку TTF-шрифтом (Go Regular) размером widget.DefaultFontSize()
+// (DefaultFontSize, пока приложение или тема не назначили другой).
 func (c *Canvas) DrawText(text string, x, y int, col color.RGBA) {
-	c.DrawTextSize(text, x, y, DefaultFontSize, col)
+	c.DrawTextSize(text, x, y, widget.DefaultFontSize(), col)
 }
 
 // DrawTextSize рисует строку шрифтом по умолчанию произвольного размера (в пунктах).

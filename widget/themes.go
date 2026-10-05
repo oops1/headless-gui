@@ -626,4 +626,8 @@ func ApplyGlobalTheme(t *Theme) {
 
 	// Стиль отрисовки (скругления / классический bevel)
 	win10.Style = t.Style
+
+	// Кегль по умолчанию: тема, не просившая его, возвращает прежние 10 pt
+	// (но не отнимает размер, назначенный приложением).
+	applyThemeFontSize(t.Style.DefaultFontSize)
 }

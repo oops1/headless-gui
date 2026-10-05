@@ -60,6 +60,9 @@ type ClockItem struct {
 	hovered int32
 	pressed int32
 
+	// vertical — часы лежат в столбце боковой панели (VerticalItem).
+	vertical bool
+
 	mu       sync.Mutex
 	lastTime string
 	lastDate string
@@ -156,7 +159,7 @@ func fontSizeOf(s *theme.Style) float64 {
 	if s.Font.Size > 0 {
 		return s.Font.Size
 	}
-	return widget.DefaultFontSizePt
+	return widget.DefaultFontSize()
 }
 
 // lineHeight — высота строки текста тем же способом, каким её считает
@@ -178,7 +181,7 @@ const KeyClockDate theme.Key = "clock.date"
 
 // twoLine решает, показывать ли вторую строку (дату): разрешает ли её тема и
 // хватает ли высоты.
-func (c *ClockItem) twoLine(availY int, timeSize float64) bool {
+func (c *ClockItem) twoLine(availW, availY int, timeSize float64) bool {
 	if c.tm != nil && !c.tm.GetFlag(KeyClockDate, true) {
 		return false
 	}
@@ -186,7 +189,30 @@ func (c *ClockItem) twoLine(availY int, timeSize float64) bool {
 	dateSize := fontSizeOf(dateStyle)
 	gap := int(dateStyle.PadY)
 	need := lineHeight(timeSize) + gap + lineHeight(dateSize)
-	return availY >= need
+	if availY < need {
+		return false
+	}
+	// В столбце боковой панели дата может не поместиться по ширине: часы тогда
+	// показывают одно время, а не дату, вылезающую за панель.
+	if c.vertical {
+		dateStr := c.now().Format(c.dateFormat())
+		if widget.MeasureUIText(dateStr, dateSize)+2*int(dateStyle.PadX) > availW {
+			return false
+		}
+	}
+	return true
+}
+
+var _ VerticalItem = (*ClockItem)(nil)
+
+// SetVertical реализует VerticalItem: в столбце часы занимают всю толщину
+// панели, а высоту считают по строкам.
+func (c *ClockItem) SetVertical(v bool) {
+	if c.vertical == v {
+		return
+	}
+	c.vertical = v
+	c.Invalidate()
 }
 
 // PreferredSize считает желаемый размер по фактической строке (см.
@@ -202,7 +228,7 @@ func (c *ClockItem) PreferredSize(avail image.Point) image.Point {
 	w := widget.MeasureUIText(timeStr, timeSize)
 	h := lineHeight(timeSize)
 
-	if c.twoLine(avail.Y, timeSize) {
+	if c.twoLine(avail.X, avail.Y, timeSize) {
 		dateStyle := c.style("date", theme.StateNormal)
 		dateSize := fontSizeOf(dateStyle)
 		dateStr := now.Format(c.dateFormat())
@@ -212,6 +238,11 @@ func (c *ClockItem) PreferredSize(avail image.Point) image.Point {
 		h = lineHeight(timeSize) + int(dateStyle.PadY) + lineHeight(dateSize)
 	}
 
+	if c.vertical && avail.X > 0 {
+		// Поперёк столбца часы занимают всю толщину панели; отступ стиля, который
+		// в ряду стоит по бокам строки, в столбце стоит над и под ней.
+		return image.Point{X: avail.X, Y: h + 2*padX}
+	}
 	return image.Point{X: w + padX*2, Y: h}
 }
 
@@ -237,7 +268,7 @@ func (c *ClockItem) Draw(ctx widget.DrawContext) {
 	c.mu.Unlock()
 	c.ensureTick()
 
-	if c.twoLine(b.Dy(), timeSize) {
+	if c.twoLine(b.Dx(), b.Dy(), timeSize) {
 		dateStyle := c.style("date", theme.StateNormal)
 		half := b.Min.Y + b.Dy()/2
 		top := image.Rect(b.Min.X, b.Min.Y, b.Max.X, half)

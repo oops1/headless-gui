@@ -77,6 +77,10 @@ const (
 	keyScrollbarThinWidth      theme.Key = "scrollbar.thin.width"
 	keyScrollbarThinHoverWidth theme.Key = "scrollbar.thin.hover.width"
 
+	// Шрифт профиля, из которого берётся кегль по умолчанию
+	// (ThemeStyle.DefaultFontSize, флаг theme.FlagFontDefaultGlobal).
+	keyFontDefault theme.Key = "default"
+
 	// Фаска — общий вид темы, а не свойство компонента: одну и ту же
 	// тройку цветов рисуют кнопка, флажок, вкладки, меню и окно.
 	keyBevelLight  theme.Key = "bevel.light"
@@ -141,6 +145,11 @@ func ProfileFromTheme(t *Theme) *theme.Profile {
 	p.SetColor(keyStyleName, encodeName(t.Style.Name))
 	if t.Style.ScrollbarThin {
 		p.SetFlag(keyScrollbarThin, true)
+	}
+	// Кегль по умолчанию — флагом и шрифтом "default", только когда задан.
+	if t.Style.DefaultFontSize > 0 {
+		p.SetFlag(theme.FlagFontDefaultGlobal, true)
+		p.Fonts[keyFontDefault] = theme.FontSpec{Size: t.Style.DefaultFontSize}
 	}
 	for k, v := range map[theme.Key]int{
 		keyScrollbarWidth:          t.Style.ScrollbarWidth,
@@ -214,6 +223,13 @@ func Materialize(rt *theme.Theme) *Theme {
 		ScrollbarWidth:          int(rt.MetricOr(keyScrollbarWidth, 0)),
 		ScrollbarThinWidth:      int(rt.MetricOr(keyScrollbarThinWidth, 0)),
 		ScrollbarThinHoverWidth: int(rt.MetricOr(keyScrollbarThinHoverWidth, 0)),
+	}
+	// Кегль по умолчанию следует профилю только по его просьбе (флаг): иначе
+	// Fonts["default"] прежних тем (9 pt) изменил бы раскладку всех виджетов.
+	if rt.FlagOr(theme.FlagFontDefaultGlobal, false) {
+		if f, ok := rt.Font(keyFontDefault); ok && f.Size > 0 {
+			t.Style.DefaultFontSize = f.Size
+		}
 	}
 	return t
 }

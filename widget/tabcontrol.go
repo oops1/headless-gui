@@ -337,7 +337,7 @@ func (tc *TabControl) layoutTabs() []int {
 		if tab.Hidden {
 			continue // ширина 0 — не занимает места в полосе заголовков
 		}
-		widths[i] = MeasureUIText(tab.Header, DefaultFontSizePt) + tc.TabPadH*2
+		widths[i] = MeasureUIText(tab.Header, DefaultFontSize()) + tc.TabPadH*2
 	}
 	return widths
 }
@@ -349,7 +349,7 @@ func (tc *TabControl) tabRects(ctx DrawContext) []image.Rectangle {
 	rects := make([]image.Rectangle, len(tc.tabs))
 	x := b.Min.X
 	for i, tab := range tc.tabs {
-		textW := ctx.MeasureText(tab.Header, DefaultFontSizePt)
+		textW := ctx.MeasureText(tab.Header, DefaultFontSize())
 		tabW := textW + tc.TabPadH*2
 		rects[i] = image.Rect(x, b.Min.Y, x+tabW, b.Min.Y+tc.TabHeight)
 		x += tabW

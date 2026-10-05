@@ -15,6 +15,10 @@ import (
 // Компоненты оболочки (пакет desktop) читают стили у менеджера при каждой
 // отрисовке и подписаны на его смену, а виджетам со своей палитрой нужен
 // обход дерева — его и делает SetTheme. Без активной темы возвращает ошибку.
+//
+// Профиль с флагом theme.FlagFontDefaultGlobal (Windows 10) заодно делает
+// Fonts["default"].Size кеглем по умолчанию для всех виджетов, у которых свой
+// не задан (widget.DefaultFontSize); профиль без флага возвращает 10 pt.
 func (e *Engine) ApplyThemeProfile(m *theme.Manager) error {
 	if m == nil {
 		return fmt.Errorf("engine: ApplyThemeProfile без менеджера тем")

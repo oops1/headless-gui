@@ -30,7 +30,18 @@ const (
 	EdgeBottom Edge = iota
 	// EdgeTop — панель вверху (macOS), окно раскрывается вниз.
 	EdgeTop
+	// EdgeLeft — панель у левого края экрана, окно раскрывается вправо; слоты
+	// панели лежат столбцом. Align окна здесь действует по вертикали: AlignStart —
+	// верх окна на уровне верха значка (окно растёт вниз), AlignEnd — низ на
+	// уровне низа значка (окно растёт вверх).
+	EdgeLeft
+	// EdgeRight — панель у правого края, окно раскрывается влево.
+	EdgeRight
 )
+
+// Vertical сообщает, что край боковой (левый или правый): панель у такого края
+// — столбец, а не ряд.
+func (e Edge) Vertical() bool { return e == EdgeLeft || e == EdgeRight }
 
 // Align — к какому краю значка прижимается всплывающее окно.
 type Align int
@@ -151,6 +162,13 @@ type Flyout struct {
 	wmu      sync.Mutex
 	watchers map[int]func(open bool)
 	nextW    int
+
+	// monitor — экран панели (см. SetMonitor); pinEdge/pinned — прижатие к
+	// краю экрана вместо привязки к значку (см. PinToEdge). Пишутся из потока
+	// интерфейса, как и остальные поля раскладки.
+	monitor Monitor
+	pinEdge Edge
+	pinned  bool
 
 	// anchorDismissAt — когда панель в последний раз закрыло нажатие мимо
 	// неё, пришедшееся на её собственный якорь (unix-наносекунды; 0 — не
@@ -510,6 +528,21 @@ func (f *Flyout) restRect() image.Rectangle {
 	screen := f.Screen
 	if screen.Empty() {
 		screen = f.Anchor
+	}
+
+	// Прижатая к краю экрана панель и панель у бокового края считаются по-своему
+	// (flyoutedge.go); для нижней и верхней панели — прежний расчёт ниже.
+	if f.pinned || f.Edge.Vertical() {
+		var r image.Rectangle
+		if f.pinned {
+			r = f.pinnedRect(sz)
+		} else {
+			r = f.sideRect(sz)
+		}
+		if screen.Empty() {
+			return r
+		}
+		return fitInto(r, screen)
 	}
 
 	// По вертикали — от значка в сторону от края, к которому прижата панель.

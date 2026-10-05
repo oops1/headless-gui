@@ -3838,7 +3838,7 @@ startBtn.OnClick = func() { menu.Toggle(startBtn.Bounds()) }
 root.AddChild(menu)                       // must be in the tree, or no overlay
 ```
 
-`Flyout` fields: `Component`, `Anchor`, `Edge` (EdgeBottom/EdgeTop), `Align`
+`Flyout` fields: `Component`, `Anchor`, `Edge` (EdgeBottom/EdgeTop/EdgeLeft/EdgeRight), `Align`
 (AlignStart/Center/End), `Margin`, `Screen`, `Content`, `Size`, `OnOpen`,
 `OnClose`. Methods: `Open(anchor)`, `Close()`, `Toggle(anchor)`, `IsOpen()`.
 A flyout closes on a click outside and on Esc; a click **inside** is not
@@ -4372,6 +4372,81 @@ colour transitions is the app, not the window.
 
 Tests: `desktop/appbuttons_test.go`; `TestGolden_Windows10AppButtons` writes PNGs
 with `GOLDEN_OUT`.
+
+### Edges and monitors — `desktop/taskbar_vertical.go`, `screens.go`, `screenbars.go`, `flyoutedge.go`
+
+`desktop.Edge` gained `EdgeLeft` and `EdgeRight` (`Edge.Vertical()`). The bottom
+and top layouts are untouched (rendered frames of all built-in profiles are
+byte-identical to before); the side layout is a separate code path.
+
+- **Side bar.** `Taskbar.SetEdge(e)` / `ResetEdge()` set the edge explicitly (the
+  theme only knows `taskbar.top`); `Edge()` returns the explicit one, else the
+  theme's. At a side edge the slots lie in a column: Start on top, apps in the
+  middle (squeezed proportionally), tray and clock at the bottom.
+  `Thickness()` = metric `taskbar.width` (declared by Windows 2000 and 10: 62),
+  falling back to `taskbar.height`. Auto-hide (`autohide.go`) slides along the
+  bar's own axis and the reveal band lies on the left/right edge.
+- **`VerticalItem`** (`Item` + `SetVertical(bool)`): an item that can lie in a
+  column. In a column `PreferredSize(avail)` gets `avail.X` = thickness and
+  returns X across / Y along. Implemented by `ApplicationArea` (icon-only cells
+  top to bottom, no dock presenter), `SystemTray` (icon grid, hidden icons behind
+  the chevron at the bottom) and `ClockItem` (full thickness; the date is dropped
+  if it does not fit the width). An item that does not implement it gets the full
+  thickness across and the height it asks for a square avail, capped at the
+  thickness (this is how Start and tray icons lie).
+- **Flyouts at a side edge.** `Flyout.Edge = EdgeLeft/EdgeRight` opens the window
+  to the right/left of the anchor; `Align` then works vertically (`AlignStart` =
+  window top at icon top, `AlignEnd` = window bottom at icon bottom; `fitInto`
+  keeps it on screen). `SlideAuto` slides from the bar's side; the motion region
+  stops at the bar's edge so the window grows out of it.
+- **Monitors.** `desktop.Monitor{ID, Name, Bounds, WorkArea, Primary}`,
+  `Monitor.Work()`, consumer interface `Screens{Monitors(); Subscribe(func()) func()}`,
+  `FakeScreens`. `Taskbar.DockTo(m)` puts the bar at its edge of monitor `m` and
+  returns the rectangle; `Monitor()`, `WorkArea()` (monitor work area minus the
+  bar). `Taskbar.BindFlyouts(panels...)` hands `Edge` and the monitor (`Screen` =
+  bounds, work area without the bar) to the panels and keeps them in sync on every
+  edge/theme/monitor change; `UnbindFlyouts`, `BoundFlyouts`. A theme switch that
+  changes edge or thickness re-docks the bar by itself.
+- **`Flyout.SetMonitor(m)` / `Monitor()`** — screen of the panel.
+  **`Flyout.PinToEdge(e)` / `Unpin()` / `Pinned()`** — press the window against an
+  edge of the monitor's work area instead of the anchor (the notification center
+  at the right edge of its monitor: `center.PinToEdge(desktop.EdgeRight)`; `Align`
+  chooses top/bottom/middle along the edge, `Margin` is the gap from the edge,
+  `SlideAuto` slides from that edge). The anchor is still used for `Toggle` /
+  `DismissAt`.
+- **`ScreenBars`** (a widget; put it in the root instead of the bars and the
+  `FlyoutManager`): `NewScreenBars(screens, func(Monitor) *MonitorShell)` asks the
+  consumer for `MonitorShell{Bar, Flyouts map[string]FlyoutPanel}` of every new
+  monitor, docks and binds it, registers the flyouts in ONE shared
+  `FlyoutManager` (names `"<monitorID>/<name>"`, so one panel is open on the
+  whole desktop), re-docks on `Sync()` and on `Screens` changes (`Post` field —
+  `Engine.Post` — marshals the change to the UI thread), removes shells of gone
+  monitors (`OnShellRemoved`, then flyouts closed and `Bar.Close()`). `Bars()`,
+  `Shell(id)`, `BarAt(pt)`, `Flyout(id, name)`, `Toggle(id, name, anchor)`,
+  `Flyouts()`, `Close()`.
+
+Tests: `desktop/edges_test.go`, `edges_items_test.go`, `flyoutedge_test.go`;
+`GOLDEN_OUT=<dir> go test ./desktop -run "TestEdges_Shots|TestScreens"` writes the
+PNGs of every edge and of two monitors.
+
+### Default font size follows the theme
+
+`widget.DefaultFontSizePt` stays a constant (10 pt), but widgets that have no
+size of their own (window titles, tabs, menu items, labels, `Canvas.DrawText`)
+now read `widget.DefaultFontSize()`. It is 10 pt until the app calls
+`widget.SetDefaultFontSize(pt)` (0 = back to 10; an explicit value beats the
+theme) or a theme asks for it: a profile with the flag
+`theme.FlagFontDefaultGlobal` (`"font.default.global"`) makes `Fonts["default"].Size`
+the default (`ThemeStyle.DefaultFontSize`, applied by `ApplyGlobalTheme`, i.e. by
+`Engine.SetTheme`, `SetThemeProfile` and `ApplyThemeProfile`); switching to a
+profile without the flag restores 10 pt. Only the Windows 10 profiles set the flag
+(8.5 pt); Windows 11/2000/macOS declare 9 pt in `Fonts["default"]` but do not ask,
+so applying them changes nothing. Any profile can opt in on the fly:
+`m.SetFlag(theme.FlagFontDefaultGlobal, true)` + `Engine.ApplyThemeProfile(m)`.
+The size changes widths and line heights: set it before building the UI (a built
+UI is repainted, but sizes already computed are kept until the next layout).
+`desktop/` falls back to it as well when a style has no font size.
+Tests: `tests/defaultfont_theme_test.go`.
 
 ### Measured cost of a frame
 

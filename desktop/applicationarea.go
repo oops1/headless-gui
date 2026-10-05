@@ -60,6 +60,10 @@ type ApplicationArea struct {
 
 	// fade — плавный переход цвета ячеек (тема: taskbar.item).
 	fade motion
+
+	// vertical — область лежит в столбце боковой панели: ячейки идут сверху
+	// вниз, без подписей и без презентера дока (applicationarea_vertical.go).
+	vertical bool
 }
 
 // appEntry — одна ячейка области: либо окно, либо закреплённое приложение,
@@ -270,6 +274,9 @@ func (a *ApplicationArea) PreferredSize(avail image.Point) image.Point {
 	if n == 0 {
 		return image.Point{}
 	}
+	if a.vertical {
+		return a.preferredVertical(n, avail)
+	}
 	ideal := int(a.metric(KeyTaskButtonWidth))
 	if a.tm != nil && !a.tm.GetFlag(KeyTaskButtonLabel, true) {
 		st := styleOf(a.tm, ComponentTaskButton, "", theme.StateNormal)
@@ -305,6 +312,11 @@ func (a *ApplicationArea) layout() {
 		a.mu.Lock()
 		a.rects = rects
 		a.mu.Unlock()
+		return
+	}
+
+	if a.vertical {
+		a.layoutVertical(b, n)
 		return
 	}
 
@@ -381,6 +393,10 @@ func (a *ApplicationArea) HoverIndex() int {
 }
 
 func (a *ApplicationArea) presenter() Presenter {
+	// Док macOS — ряд; в столбце боковой панели область рисуется сама.
+	if a.vertical {
+		return nil
+	}
 	return PresenterFor(a.tm, PresenterKeyRunningApps)
 }
 
@@ -409,7 +425,7 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 
 	iconSize := int(a.metric(KeyTaskButtonIconSize))
 	labelGap := int(a.metric(KeyTaskButtonLabelGap))
-	labels := a.tm == nil || a.tm.GetFlag(KeyTaskButtonLabel, true)
+	labels := (a.tm == nil || a.tm.GetFlag(KeyTaskButtonLabel, true)) && !a.vertical
 	muted := taskButtonMuted(a.tm)
 	prev := ctx.Clip()
 

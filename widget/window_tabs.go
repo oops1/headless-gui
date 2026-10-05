@@ -512,7 +512,7 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 	widths := make([]int, len(tabs))
 	total := 0
 	for i, tab := range tabs {
-		tw := ctx.MeasureText(tab.Header, DefaultFontSizePt) + titleTabPadH*2 +
+		tw := ctx.MeasureText(tab.Header, DefaultFontSize()) + titleTabPadH*2 +
 			titleTabCloseW + titleTabCloseGap
 		if tab.Icon != nil {
 			tw += titleTabIconW + titleTabIconGap
@@ -760,7 +760,7 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 		maxW = closeR.Min.X - textX - 4
 	}
 	if maxW > 0 {
-		txt := ellipsizeText(ctx, tab.Header, maxW, DefaultFontSizePt)
+		txt := ellipsizeText(ctx, tab.Header, maxW, DefaultFontSize())
 		ctx.DrawText(txt, textX, r.Min.Y+(bandH-13)/2, textCol)
 	}
 	w.drawTabClose(ctx, closeR, hoverClose, textCol, false)
@@ -804,7 +804,7 @@ func (w *Window) drawClassicTitleTab(ctx DrawContext, r image.Rectangle, tab Tab
 		maxW = closeR.Min.X - textX - 4
 	}
 	if maxW > 0 {
-		txt := ellipsizeText(ctx, tab.Header, maxW, DefaultFontSizePt)
+		txt := ellipsizeText(ctx, tab.Header, maxW, DefaultFontSize())
 		ctx.DrawText(txt, textX, top+(bandH-13)/2, win10.BtnText)
 	}
 	w.drawTabClose(ctx, closeR, hoverClose, win10.BtnText, true)

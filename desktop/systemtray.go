@@ -58,6 +58,9 @@ type SystemTray struct {
 	chev *trayChevronButton
 	// nav — навигатор панели; передаётся значкам (FocusNavigable).
 	nav FocusNavigator
+
+	// vertical — трей лежит в столбце боковой панели (systemtray_vertical.go).
+	vertical bool
 }
 
 // NewSystemTray создаёт контейнер значков, оформляемый темой tm.
@@ -115,6 +118,9 @@ func (t *SystemTray) PreferredSize(avail image.Point) image.Point {
 	if len(t.items) == 0 {
 		return image.Point{}
 	}
+	if t.vertical {
+		return t.preferredVertical(avail)
+	}
 	gap := t.metric(KeyTrayGap)
 	want := 0
 	for i, it := range t.items {
@@ -147,6 +153,10 @@ func (t *SystemTray) relayout() {
 	t.hidden = nil
 	t.chevron = image.Rectangle{}
 	if b.Empty() || len(t.items) == 0 {
+		return
+	}
+	if t.vertical {
+		t.relayoutVertical(b)
 		return
 	}
 

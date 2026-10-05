@@ -316,7 +316,7 @@ func DrawTextCentered(ctx widget.DrawContext, r image.Rectangle, text string, s 
 	}
 	size := s.Font.Size
 	if size <= 0 {
-		size = widget.DefaultFontSizePt
+		size = widget.DefaultFontSize()
 	}
 	w := measure(ctx, text, size, s.Font)
 	x := r.Min.X + (r.Dx()-w)/2
@@ -332,7 +332,7 @@ func DrawTextLeft(ctx widget.DrawContext, r image.Rectangle, text string, s *the
 	}
 	size := s.Font.Size
 	if size <= 0 {
-		size = widget.DefaultFontSizePt
+		size = widget.DefaultFontSize()
 	}
 	x := r.Min.X + int(s.PadX)
 	y := r.Min.Y + (r.Dy()-int(size*1.4))/2
@@ -389,7 +389,7 @@ func MeasureText(ctx widget.DrawContext, text string, s *theme.Style) int {
 	}
 	size := s.Font.Size
 	if size <= 0 {
-		size = widget.DefaultFontSizePt
+		size = widget.DefaultFontSize()
 	}
 	return measure(ctx, text, size, s.Font)
 }

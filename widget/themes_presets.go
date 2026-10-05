@@ -54,6 +54,13 @@ type ThemeStyle struct {
 	ScrollbarWidth          int
 	ScrollbarThinWidth      int
 	ScrollbarThinHoverWidth int
+
+	// DefaultFontSize — кегль (pt), который тема просит сделать размером по
+	// умолчанию для виджетов, у которых свой не задан (заголовки окон, вкладки,
+	// пункты меню; см. DefaultFontSize()). 0 — тема не просит: остаётся
+	// DefaultFontSizePt, как у всех прежних тем. Профиль выражает просьбу флагом
+	// theme.FlagFontDefaultGlobal и шрифтом Fonts["default"].
+	DefaultFontSize float64
 }
 
 // currentStyle возвращает стиль активной темы (для Draw виджетов).
@@ -143,7 +150,7 @@ func fillTitleBarColors(ctx DrawContext, r image.Rectangle, bg, bg2 color.RGBA) 
 // drawTitleText выводит текст заголовка: в классике — жирным (как Win2000).
 func drawTitleText(ctx DrawContext, text string, x, y int, col color.RGBA) {
 	if win10.Style.Classic3D {
-		ctx.DrawTextFont(text, x, y, DefaultFontSizePt, BuiltinFontBold, col)
+		ctx.DrawTextFont(text, x, y, DefaultFontSize(), BuiltinFontBold, col)
 		return
 	}
 	ctx.DrawText(text, x, y, col)

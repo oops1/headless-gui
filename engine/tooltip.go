@@ -140,7 +140,7 @@ func tooltipAt(root widget.Widget, x, y int) string {
 // drawTooltipBox рисует плашку подсказки рядом с курсором, не выходя за холст.
 func (e *Engine) drawTooltipBox(c *Canvas, text string, mx, my int) {
 	const padX, padY = 8, 5
-	tw := c.MeasureText(text, DefaultFontSize)
+	tw := c.MeasureText(text, widget.DefaultFontSize())
 	bw := tw + padX*2
 	bh := 13 + padY*2
 

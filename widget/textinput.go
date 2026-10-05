@@ -1087,7 +1087,7 @@ func (t *TextInput) OnMouseMove(x, y int) {
 const eyeButtonWidth = 28
 
 func (t *TextInput) Draw(ctx DrawContext) {
-	const sizePt = DefaultFontSizePt
+	sizePt := DefaultFontSize()
 	metricsRev := TextMetricsRev()
 
 	t.mu.Lock()

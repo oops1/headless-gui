@@ -81,6 +81,8 @@ func Windows2000Profile() *Profile {
 		SetMetric("control.pad.x", 8).
 		SetMetric("control.pad.y", 4).
 		SetMetric("taskbar.height", 28).
+		// Толщина панели у бокового края: часам нужна ширина строки «15:09».
+		SetMetric("taskbar.width", 62).
 		SetMetric("taskbar.pad.x", 2).
 		SetMetric("taskbar.gap", 2).
 		SetMetric("tray.icon.size", 14).
@@ -268,6 +270,8 @@ func Windows10Profile() *Profile {
 		SetMetric("control.pad.x", 12).
 		SetMetric("control.pad.y", 6).
 		SetMetric("taskbar.height", 40).
+		// Толщина панели у бокового края: по ширине даты «14.03.2026».
+		SetMetric("taskbar.width", 62).
 		SetMetric("taskbar.pad.x", 0).
 		SetMetric("taskbar.gap", 2).
 		SetMetric("tray.icon.size", 16).
@@ -333,6 +337,9 @@ func Windows10Profile() *Profile {
 	// На 11 пикселях округление шага глифов до целого делает строку неровной:
 	// профиль просит дробное позиционирование (engine.SetTextSubpixel).
 	p.Flags[FlagTextSubpixel] = true
+	// Кегль по умолчанию для виджетов вне оболочки (заголовки окон, диалоги,
+	// вкладки) следует Fonts["default"]: без флага они остались бы на 10 pt.
+	p.Flags[FlagFontDefaultGlobal] = true
 	// Именованные шрифты оболочки; компонент берёт их через Manager.GetFont.
 	// Размеры — Segoe UI Windows 10, умноженные на тот же 0,94.
 	p.Fonts["caption"] = FontSpec{Family: "Open Sans", Size: 7.5}                         // 8 pt: время и вторая строка в уведомлениях и плитках

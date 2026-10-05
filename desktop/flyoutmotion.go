@@ -116,8 +116,19 @@ func (f *Flyout) slideFrom() SlideFrom {
 	if f.Slide != SlideAuto {
 		return f.Slide
 	}
-	if f.Edge == EdgeTop {
+	// Прижатая к краю монитора панель выезжает из-за этого края, остальные — от
+	// края панели задач, к которой привязаны.
+	e := f.Edge
+	if f.pinned {
+		e = f.pinEdge
+	}
+	switch e {
+	case EdgeTop:
 		return SlideTop
+	case EdgeLeft:
+		return SlideLeft
+	case EdgeRight:
+		return SlideRight
 	}
 	return SlideBottom
 }
@@ -223,10 +234,17 @@ func (f *Flyout) motionRegion(rest image.Rectangle) image.Rectangle {
 		if !f.Screen.Empty() {
 			r.Max.X = f.Screen.Max.X
 		}
+		// Боковая панель справа: окно вырастает из-за неё и не залезает на неё.
+		if !f.pinned && f.Edge == EdgeRight && !f.Anchor.Empty() && f.Anchor.Min.X >= rest.Max.X {
+			r.Max.X = f.Anchor.Min.X
+		}
 	case SlideLeft:
 		r.Min.X = rest.Min.X
 		if !f.Screen.Empty() {
 			r.Min.X = f.Screen.Min.X
+		}
+		if !f.pinned && f.Edge == EdgeLeft && !f.Anchor.Empty() && f.Anchor.Max.X <= rest.Min.X {
+			r.Min.X = f.Anchor.Max.X
 		}
 	}
 	if !f.Screen.Empty() {
