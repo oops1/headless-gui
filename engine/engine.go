@@ -168,7 +168,11 @@ type Engine struct {
 	dblClickDelay time.Duration // 0 — значение по умолчанию (defaultDoubleClick)
 
 	frames chan output.Frame
-	quit   chan struct{}
+	// fullNext — следующий кадр полный (холст пересоздан); lostFrame — кадр
+	// выброшен из переполненного канала, потребитель отстал (fullframe.go).
+	fullNext  atomic.Bool
+	lostFrame atomic.Bool
+	quit      chan struct{}
 	done   chan struct{}
 
 	fps     int     // целевой FPS, 1–120
@@ -514,6 +518,7 @@ func (e *Engine) SetScale(k float64) {
 	e.canvas.setDPIAll(e.userDPI * k)
 	e.scaleBits.Store(math.Float64bits(k))
 	e.mu.Unlock()
+	e.markCanvasReplaced()
 	widget.BumpTextMetricsRev() // ширины текста изменились — сброс кэшей переноса
 	e.Invalidate()
 }
@@ -533,6 +538,7 @@ func (e *Engine) SetResolution(width, height int) {
 	e.canvas = e.canvas.cloneForSize(width, height, e.canvas.scale, e.bgSrc)
 	root := e.root
 	e.mu.Unlock()
+	e.markCanvasReplaced()
 	// ВАЖНО: SetBounds — вне e.mu. Изменение bounds триггерит авто-damage
 	// (notifyRectChanged → InvalidateRect); повторный захват e.mu на том же
 	// потоке дал бы дедлок (см. scaleBits).
@@ -1380,7 +1386,7 @@ func (e *Engine) loop() {
 				continue
 			}
 			gen := e.invGen.Load()
-			if gen == lastGen {
+			if gen == lastGen && !e.fullFramePending() {
 				continue
 			}
 			lastGen = gen
@@ -1410,7 +1416,10 @@ func (e *Engine) loop() {
 			}
 			if e.onDemand.Load() {
 				gen := e.invGen.Load()
-				if gen == lastGen && !e.animationNeeded(interval) {
+				// Полный кадр после потери или смены размера рисуется и без
+				// изменений: иначе статичный интерфейс остался бы у
+				// потребителя неверным (fullframe.go).
+				if gen == lastGen && !e.animationNeeded(interval) && !e.fullFramePending() {
 					continue // UI не менялся — пропускаем кадр целиком
 				}
 				lastGen = gen // снимаем ДО рендера: инвалидация во время кадра не потеряется
@@ -1446,6 +1455,11 @@ func (e *Engine) renderFrame() output.Frame {
 	e.mu.RUnlock()
 
 	damageRects, damageAll := e.consumeDamage()
+	// Полный кадр (fullframe.go): рисуется всё и отдаётся всё, без диффа.
+	full := e.takeFullFrame()
+	if full {
+		damageAll = true
+	}
 	// Объединение нужно там, где область может быть только одна: клип
 	// канваса — прямоугольник, и попапы отбираются по одному прямоугольнику.
 	damage := unionRects(damageRects)
@@ -1495,7 +1509,7 @@ func (e *Engine) renderFrame() output.Frame {
 	if partial {
 		damage = damage.Intersect(image.Rect(0, 0, canvas.W, canvas.H))
 		if damage.Empty() {
-			return output.Frame{Seq: e.frameSeq.Add(1), Timestamp: time.Now()}
+			return output.Frame{Seq: e.frameSeq.Add(1), Timestamp: time.Now(), Width: canvas.W, Height: canvas.H}
 		}
 		// Сброс признаков — ДО блита фона: фон помечает тайлы, которые
 		// накрыл, и сброс после него стёр бы эту пометку. Тогда тайл, на
@@ -1569,9 +1583,12 @@ func (e *Engine) renderFrame() output.Frame {
 	// Diff: при частичной перерисовке сравниваем только тайлы,
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
-	if partial {
+	switch {
+	case full:
+		tiles = canvas.allTiles()
+	case partial:
 		tiles = canvas.diffAndSyncInRects(damageRects)
-	} else {
+	default:
 		tiles = canvas.diffAndSync()
 	}
 
@@ -1596,6 +1613,8 @@ func (e *Engine) renderFrame() output.Frame {
 		Tiles:     tiles,
 		Regions:   canvas.regionsFor(tiles),
 		Moves:     moves,
+		Width:     canvas.W,
+		Height:    canvas.H,
 	}
 }
 

@@ -246,6 +246,10 @@ type surface struct {
 	// ContentFit=FitScale). Пишутся под mu при ресайзе, читаются событиями
 	// ввода — то и другое на горутине движка — и applyFrame (под mu).
 	fitOX, fitOY int
+	// fitCanvasW, fitCanvasH — размер холста движка в FitScale: буфер окна
+	// там больше холста на поля. Нули — холст равен буферу (обычный режим).
+	// Пишутся под mu вместе с буфером; applyFrame сверяет с ними размер кадра.
+	fitCanvasW, fitCanvasH int
 }
 
 // toContent переводит координаты окна в координаты контента (letterbox).
@@ -942,6 +946,7 @@ func (win *Window) handleFitResize(newW, newH int) {
 	}
 	win.current = buf
 	win.fitOX, win.fitOY = ox, oy
+	win.fitCanvasW, win.fitCanvasH = pw, ph
 	win.mu.Unlock()
 
 	// Полный кадр в новом масштабе.
@@ -1275,7 +1280,12 @@ func (s *surface) framePump() {
 	var lastBounds image.Rectangle // границы буфера на момент прошлого блита
 
 	for frame := range frames {
-		s.applyFrame(frame)
+		if !s.applyFrame(frame) {
+			// Кадр снят под прежний размер холста: его тайлы — чужая
+			// раскладка, класть их в новый буфер нельзя. Следующий кадр
+			// нового размера движок отдаёт полным (engine/fullframe.go).
+			continue
+		}
 
 		s.mu.Lock()
 		cur := s.current
@@ -1321,9 +1331,19 @@ func (s *surface) currentMod() widget.KeyMod {
 
 // applyFrame накладывает dirty-тайлы кадра на текущий буфер и копит
 // объединение их областей в pendingDirty (для частичного блита).
-func (s *surface) applyFrame(frame output.Frame) {
+//
+// Возвращает false, если кадр снят под другой размер холста, чем тот, под
+// который заведён буфер: окно сменило размер, а кадр уже стоял в очереди.
+// Раньше его тайлы ложились в новый буфер, обрезанные по краю, и в окне
+// оставалась раскладка прежнего размера (задание WinLine, калькулятор).
+// Сверка — здесь, под тем же замком, что и замена буфера в resizeTo: между
+// проверкой и наложением буфер смениться не может.
+func (s *surface) applyFrame(frame output.Frame) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.frameFitsLocked(frame) {
+		return false
+	}
 	ox, oy := s.fitOX, s.fitOY
 	for _, tile := range frame.Tiles {
 		tx, ty := tile.X+ox, tile.Y+oy
@@ -1344,6 +1364,21 @@ func (s *surface) applyFrame(frame output.Frame) {
 			copy(s.current.Pix[dstOff:dstEnd], tile.Data[srcOff:srcOff+rowBytes])
 		}
 	}
+	return true
+}
+
+// frameFitsLocked — кадр снят под холст того размера, под который заведён
+// буфер окна. Кадр без размера (Width == 0: собран не движком) принимается
+// как прежде. Вызывать под s.mu.
+func (s *surface) frameFitsLocked(frame output.Frame) bool {
+	if frame.Width == 0 || frame.Height == 0 || s.current == nil {
+		return true
+	}
+	cw, ch := s.current.Bounds().Dx(), s.current.Bounds().Dy()
+	if s.fitCanvasW > 0 && s.fitCanvasH > 0 {
+		cw, ch = s.fitCanvasW, s.fitCanvasH
+	}
+	return frame.Width == cw && frame.Height == ch
 }
 
 // ─── Маппинг VK → widget.KeyCode ────────────────────────────────────────────
