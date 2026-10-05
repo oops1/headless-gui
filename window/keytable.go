@@ -8,6 +8,15 @@ package window
 // композитор. Пользуются ею native_linux.go (X11) и native_wayland.go
 // (evdev + 8).
 
+// isModifierVK — клавиша-модификатор, повторять которую при удержании нечего.
+func isModifierVK(vk int) bool {
+	switch vk {
+	case VK_SHIFT, VK_CONTROL, VK_ALT, VK_LWIN, VK_RWIN:
+		return true
+	}
+	return false
+}
+
 func x11KeycodeToVK(keycode int) int {
 	if vk, ok := x11VKTable[keycode]; ok {
 		return vk
@@ -62,4 +71,8 @@ var x11VKTable = map[int]int{
 	110: VK_HOME, 111: VK_UP, 112: VK_PRIOR, 113: VK_LEFT, 114: VK_RIGHT,
 	115: VK_END, 116: VK_DOWN, 117: VK_NEXT, 118: VK_INSERT, 119: VK_DELETE,
 	127: VK_PAUSE, 135: VK_APPS,
+	// Клавиши Windows: evdev KEY_LEFTMETA (125) и KEY_RIGHTMETA (126), на
+	// стороне X11 и Wayland — Super_L и Super_R. Если раскладка вынесла Super
+	// на другую физическую клавишу, её находит keysymToVK (keysym.go).
+	133: VK_LWIN, 134: VK_RWIN,
 }

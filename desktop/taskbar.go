@@ -57,6 +57,10 @@ type Taskbar struct {
 	// unsubTheme снимает подписку на смену темы. Панель перерисовывается
 	// сама: она живёт вне обхода дерева, когда её показывают оболочкой.
 	unsubTheme func()
+	// unsubLang снимает подписку на смену языка интерфейса. От языка зависят
+	// ширины элементов (часы, подписи), поэтому панель перекладывает их сама,
+	// не требуя пересоздания.
+	unsubLang func()
 
 	// autoHide, revealed, offset, fullBounds — состояние автоскрытия
 	// (см. autohide.go). fullBounds — место, которое панель занимает
@@ -107,6 +111,11 @@ const (
 // NewTaskbar создаёт панель задач, оформляемую темами из tm.
 func NewTaskbar(tm *theme.Manager) *Taskbar {
 	t := &Taskbar{tm: tm}
+	langID := widget.AddLanguageListener(func(string) {
+		t.relayout()
+		t.Invalidate()
+	})
+	t.unsubLang = func() { widget.RemoveLanguageListener(langID) }
 	if tm != nil {
 		t.unsubTheme = tm.Subscribe(theme.ObserverFunc(func(*theme.Theme) {
 			t.relayout()
@@ -119,6 +128,10 @@ func NewTaskbar(tm *theme.Manager) *Taskbar {
 // Close снимает подписку на тему. Панель, которую сняли со сцены и не
 // закрыли, остаётся в списке наблюдателей менеджера — это утечка.
 func (t *Taskbar) Close() {
+	if t.unsubLang != nil {
+		t.unsubLang()
+		t.unsubLang = nil
+	}
 	if t.unsubTheme != nil {
 		t.unsubTheme()
 		t.unsubTheme = nil
@@ -132,6 +145,9 @@ func (t *Taskbar) AddItem(slot Slot, it Item) {
 	}
 	t.slots[slot] = append(t.slots[slot], it)
 	t.AddChild(it)
+	if n, ok := it.(FocusNavigable); ok {
+		n.SetFocusNavigator(t)
+	}
 	t.relayout()
 	t.Invalidate()
 }
@@ -413,6 +429,7 @@ func (t *Taskbar) Draw(ctx widget.DrawContext) {
 
 	t.drawSeparators(ctx)
 	t.DrawChildren(ctx)
+	t.drawFocus(ctx)
 }
 
 // drawSeparators рисует вертикальные разделители между секциями панели.

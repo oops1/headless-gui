@@ -52,11 +52,19 @@ type SystemTray struct {
 
 	// overflow — всплывающая область со скрытыми значками.
 	overflow *Flyout
+
+	// chev — кнопка раскрытия как элемент фокуса (focus_items.go): рисует её
+	// сам трей, а ребёнок нужен, чтобы до шеврона доходил Tab и клавиши.
+	chev *trayChevronButton
+	// nav — навигатор панели; передаётся значкам (FocusNavigable).
+	nav FocusNavigator
 }
 
 // NewSystemTray создаёт контейнер значков, оформляемый темой tm.
 func NewSystemTray(tm *theme.Manager) *SystemTray {
 	t := &SystemTray{tm: tm}
+	t.chev = &trayChevronButton{tray: t}
+	t.AddChild(t.chev)
 	t.overflow = NewFlyout(tm, ComponentTrayOverflow)
 	t.overflow.Align = AlignEnd
 	t.overflow.Size = t.overflowSize
@@ -85,6 +93,9 @@ func (t *SystemTray) AddItem(it Item) {
 	}
 	t.items = append(t.items, it)
 	t.AddChild(it)
+	if n, ok := it.(FocusNavigable); ok && t.nav != nil {
+		n.SetFocusNavigator(t.nav)
+	}
 	t.relayout()
 }
 
@@ -131,6 +142,7 @@ func (t *SystemTray) SetBounds(r image.Rectangle) {
 // под неё — от того, прячем ли мы значки. Поэтому сначала считается, влезают
 // ли все значки без кнопки, и только если нет — резервируется место под неё.
 func (t *SystemTray) relayout() {
+	defer t.syncChevron()
 	b := t.Bounds()
 	t.hidden = nil
 	t.chevron = image.Rectangle{}
@@ -264,6 +276,7 @@ func (t *SystemTray) drawOverflow(ctx widget.DrawContext, r image.Rectangle) {
 		}
 		it.SetBounds(cellRect)
 		it.Draw(ctx)
+		paintFocusOf(ctx, it, t.tm, t.style(ComponentTrayOverflow, theme.StateNormal), image.Rectangle{})
 	}
 }
 

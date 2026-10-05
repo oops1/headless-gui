@@ -56,15 +56,11 @@ const (
 // (batteryNubDiv, acStripeDiv и соседи).
 const calendarArrowInsetDiv = 4
 
-// Русские названия месяцев (именительный падеж) и сокращения дней недели.
-// Компонент рабочего стола локализован на русский так же, как остальные
-// строки пакета (см. fakes.go: "Сеть", ошибки StaticAppCatalog).
-var calendarMonthNames = [...]string{
-	"Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-	"Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-}
-
-var calendarWeekdayNames = [...]string{"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"}
+// Названия месяцев и дней недели, первый день недели и запись даты не
+// зашиты в календарь: их даёт DateCulture (CalendarFlyout.Culture), по
+// умолчанию — LocaleCulture, то есть строки движка для текущего языка
+// (locale.go). Русский вид — Пн…Вс, «Август 2026», «27 августа 2026» —
+// остаётся тем, что получает приложение, не выбравшее язык.
 
 // CalendarFlyout — панель-календарь, всплывающая по клику на часы.
 type CalendarFlyout struct {
@@ -89,6 +85,10 @@ type CalendarFlyout struct {
 
 	// OnSelect вызывается при выборе дня кликом (необязателен).
 	OnSelect func(time.Time)
+
+	// Culture — региональные правила календаря: названия, первый день недели,
+	// запись даты. nil — LocaleCulture (из строк движка для текущего языка).
+	Culture DateCulture
 }
 
 // NewCalendarFlyout создаёт календарь, оформляемый темой tm и читающий
@@ -192,16 +192,31 @@ func (c *CalendarFlyout) themeStyle(part string, st theme.State) *theme.Style {
 	return tm.GetStyle(c.Component, part, st)
 }
 
+// culture — правила, по которым календарь называет и раскладывает дни.
+func (c *CalendarFlyout) culture() DateCulture { return cultureOrDefault(c.Culture) }
+
 // monthTitle — строка заголовка вида «Август 2026».
 func (c *CalendarFlyout) monthTitle() string {
 	vm := c.ViewMonth()
-	return fmt.Sprintf("%s %d", calendarMonthNames[vm.Month()-1], vm.Year())
+	return fmt.Sprintf("%s %d", c.culture().MonthName(vm.Month()), vm.Year())
 }
 
-// gridSnapshot строит сетку показанного месяца.
+// gridSnapshot строит сетку показанного месяца с первым днём недели культуры.
 func (c *CalendarFlyout) gridSnapshot() [][]dayCell {
 	vm := c.ViewMonth()
-	return monthGrid(vm.Year(), vm.Month(), vm.Location())
+	return monthGridFrom(vm.Year(), vm.Month(), vm.Location(), c.culture().FirstWeekday())
+}
+
+// weekdayNames — сокращения дней недели в порядке столбцов сетки: первый
+// столбец — первый день недели культуры.
+func (c *CalendarFlyout) weekdayNames() [7]string {
+	cul := c.culture()
+	first := cul.FirstWeekday()
+	var names [7]string
+	for col := range names {
+		names[col] = cul.WeekdayShort((first + time.Weekday(col)) % 7)
+	}
+	return names
 }
 
 // contentRect — прямоугольник содержимого: то же, что получает draw через
@@ -345,7 +360,7 @@ func (c *CalendarFlyout) draw(ctx widget.DrawContext, r image.Rectangle) {
 	if r.Dx() > 0 {
 		colW = r.Dx() / 7
 	}
-	for col, name := range calendarWeekdayNames {
+	for col, name := range c.weekdayNames() {
 		cellR := image.Rect(r.Min.X+col*colW, layout.weekday.Min.Y, r.Min.X+(col+1)*colW, layout.weekday.Max.Y)
 		DrawTextCentered(ctx, cellR, name, weekdayStyle)
 	}
@@ -400,21 +415,9 @@ func drawArrow(ctx widget.DrawContext, r image.Rectangle, pointLeft bool, col co
 	}
 }
 
-// dateTitle — строка с датой для свёрнутой панели: «27 августа 2026».
-func dateTitleFor(t time.Time) string {
-	return strconv.Itoa(t.Day()) + " " + calendarMonthGenitive[int(t.Month())-1] +
-		" " + strconv.Itoa(t.Year())
-}
-
-func (c *CalendarFlyout) dateTitle() string { return dateTitleFor(c.now()) }
-
-// calendarMonthGenitive — месяцы в родительном падеже: «27 августа», а не
-// «27 август». Отдельный список, потому что заголовок месяца («Август 2026»)
-// требует именительного, и одним набором не обойтись.
-var calendarMonthGenitive = [...]string{
-	"января", "февраля", "марта", "апреля", "мая", "июня",
-	"июля", "августа", "сентября", "октября", "ноября", "декабря",
-}
+// dateTitle — строка с датой для свёрнутой панели: «27 августа 2026». Падеж
+// месяца и порядок слов («August 27, 2026») решает культура.
+func (c *CalendarFlyout) dateTitle() string { return c.culture().LongDate(c.now()) }
 
 // ─── Ввод ────────────────────────────────────────────────────────────────────
 
@@ -539,9 +542,15 @@ func weekdayMondayIndex(t time.Time) int {
 // осознанно (это выбор, а не случайность): пакет ориентирован в первую
 // очередь на профили Windows для российского и европейского рынка.
 func monthGrid(year int, month time.Month, loc *time.Location) [][]dayCell {
+	return monthGridFrom(year, month, loc, time.Monday)
+}
+
+// monthGridFrom — monthGrid с заданным первым днём недели: воскресенье для
+// американской культуры, понедельник для русской и европейской.
+func monthGridFrom(year int, month time.Month, loc *time.Location, first time.Weekday) [][]dayCell {
 	// Расчёт сетки общий с выбором даты (widget.DatePicker) — internal/calendar;
 	// здесь только перекладка в свою ячейку.
-	grid := calendar.MonthGrid(year, month, loc, time.Monday)
+	grid := calendar.MonthGrid(year, month, loc, first)
 	rows := make([][]dayCell, len(grid))
 	for r, week := range grid {
 		rows[r] = make([]dayCell, len(week))

@@ -4218,6 +4218,73 @@ is set.
   `ThemeStyle.Scrollbar*` ⇄ profile tokens `scrollbar.*` (declared only when set,
   so presets round-trip unchanged); instance setters win over the theme.
 
+### Windows key — `widget.KeyWin`
+
+`KeyWin` (0x5B, VK_LWIN) is the Windows/Super key; the right one (VK_RWIN, 0x5C)
+is folded into the same code. Win32 passes both VKs through `vkToKeyCode`;
+X11/Wayland map the physical keycodes 133/134 (`x11VKTable`), and fall back to
+the keysym (`Super_L`/`Super_R`: `keysymToVK` for the X11 keymap,
+`xkbKeymap.vkFor` for the Wayland keymap) when Super was moved to another key.
+The key is also a modifier: `surface.keyEventRepeat` keeps `modMeta`, so events
+while Win is held carry `ModMeta`, the `KeyWin` press itself too, and Win in the
+middle of an Alt tap cancels the menu gesture. XAML `Key="Win"` (also `LWin`,
+`RWin`, `Super`) parses to `KeyWin`. Wayland does not auto-repeat it.
+
+### Desktop localization — `desktop/locale.go`
+
+Strings of `desktop/` are `widget.Tr` keys `desktop.*` (`StrStart`,
+`StrStartPinned`, `StrStartAllApps`, `StrNotifEmpty`, `StrNotifClearAll`,
+tray tooltips `StrNet*`, `StrSound*`, `StrPower*`) with RU and EN tables
+registered in `init`. A consumer overrides a key with `RegisterStrings`, adds a
+language, or points the keys at its own table with `widget.AliasStrings`.
+Components read the string at draw time, so `widget.SetLanguage` (which redraws
+the whole frame) changes the text without re-creating anything; `Taskbar`
+listens to the language and re-lays its items out (clock width depends on the
+format); tray tooltips (`trayTooltip.build`) rebuild themselves on a language
+change, a tooltip set by `SetToolTip` is left alone.
+
+Until the application calls `widget.SetLanguage` (`widget.LanguageExplicit()` is
+false) the desktop stays Russian as before: `desktop.DefaultLanguage = "RU"`.
+
+Clock, calendar and notification times take their rules from a
+`desktop.DateCulture` (`ClockItem.Culture`, `CalendarFlyout.Culture`,
+`NotificationCenter.Culture`; nil = `LocaleCulture`): month names (nominative
+and genitive), short weekday names, first day of the week, time/date layouts and
+the long date (`{d} {M} {y}` template). `LocaleCulture` reads the same
+`date.month.N`, `date.wd.N`, `date.firstDay` keys as `widget.DatePicker`, plus
+`desktop.clock.timeFormat`, `desktop.clock.dateFormat`, `desktop.cal.longDate`,
+`desktop.cal.monthGen.N`. A consumer embeds `LocaleCulture` and overrides what
+differs (ru-KZ). `ClockItem.TimeFormat/DateFormat` still win over the culture.
+`NotificationCenter.EmptyText` is now empty by default (use `EmptyLabel()`).
+
+### Keyboard focus on the taskbar — `desktop/focus*.go`
+
+Every taskbar item is a `widget.Focusable`: `StartButton`, `ApplicationArea`,
+`RunningApplications`, `NetworkItem`, `VolumeItem`, `PowerItem`, `TrayLabel`,
+`ClockItem` (the last two only when `OnClick` is set), and a hidden child
+`trayChevronButton` for the overflow chevron. A custom item embeds
+`desktop.FocusState` and writes `SetFocused`, `TabIndex` (return
+`-1` when it has no bounds — `CollectFocusables` ignores visibility),
+`OnKeyEvent` (call `HandleKey` or, for a many-cell item, `HandleCellKey`) and
+optionally `FocusRing`. The search box of the Windows 10 start slot only needs
+to be a focusable `Item` in `SlotStart`; nothing else is required for it to take
+part in Tab and the arrow keys.
+
+- Tab order is the slot order: `Taskbar.Children()` returns items by slot
+  (start, apps, tray), not by insertion.
+- Arrows/Home/End move inside one slot through `FocusNavigator`
+  (`Taskbar.MoveFocus`, wired by `AddItem` via `FocusNavigable`) and do not wrap;
+  in the application area they move the selected cell (`FocusState.Cell`).
+- Enter and Space activate (not on `Repeat`, not with Ctrl/Alt/Meta).
+- The ring is painted by `Taskbar.drawFocus` over the children
+  (`PaintFocusRing`): an outer outline in the text colour of the item's style (or
+  the `focus.ring` colour token, `focus.ring.width` metric, default 1) and a
+  1 px inner outline of the contrasting black/white, so it shows on any
+  background in light and dark themes. It is shown only for keyboard focus:
+  `FocusState.NotePointer` (called from `OnMouseButton`) hides it after a click.
+  `StateFocused` is also passed to `StateOf` by the start button and the app
+  cells, so a profile can style it.
+
 ### Measured cost of a frame
 
 Desktop scene from `desktop/` at 1280×800, Windows 11 theme, fake system data

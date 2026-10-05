@@ -490,7 +490,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	case 2: // KeyPress
 		keycode := buf[1]
 		state := binary.LittleEndian.Uint16(buf[28:30])
-		vk := x11KeycodeToVK(int(keycode))
+		vk := w.x11VKForKey(keycode)
 		if w.onKeyDown != nil && vk != 0 {
 			w.onKeyDown(vk)
 		}
@@ -508,7 +508,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 
 	case 3: // KeyRelease
 		keycode := buf[1]
-		vk := x11KeycodeToVK(int(keycode))
+		vk := w.x11VKForKey(keycode)
 		if w.onKeyUp != nil && vk != 0 {
 			w.onKeyUp(vk)
 		}
@@ -1164,6 +1164,29 @@ func (w *X11Window) readFull(buf []byte) bool {
 		got += n
 	}
 	return true
+}
+
+// x11VKForKey — виртуальный код клавиши. Сначала по физическому месту
+// (x11KeycodeToVK), затем по таблице keysym сервера: так находится клавиша
+// Windows (Super_L/Super_R), переставленная на нестандартное место.
+func (w *X11Window) x11VKForKey(keycode byte) int {
+	if vk := x11KeycodeToVK(int(keycode)); vk != 0 {
+		return vk
+	}
+	if w.keysyms == nil || keycode < w.minKeycode {
+		return 0
+	}
+	row := int(keycode-w.minKeycode) * w.symsPerCode
+	if row+w.symsPerCode > len(w.keysyms) {
+		return 0
+	}
+	// Super может стоять в любой из колонок первых двух групп.
+	for _, sym := range w.keysyms[row : row+w.symsPerCode] {
+		if vk := keysymToVK(sym); vk != 0 {
+			return vk
+		}
+	}
+	return 0
 }
 
 // x11RuneForKey возвращает руну для keycode с учётом state события

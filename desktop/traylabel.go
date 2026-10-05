@@ -29,6 +29,7 @@ const KeyTrayLabelMinWidth theme.Key = "tray.label.width.min"
 // TrayLabel — короткая надпись в трее.
 type TrayLabel struct {
 	widget.Base
+	FocusState
 
 	tm *theme.Manager
 
@@ -103,6 +104,9 @@ func (l *TrayLabel) OnMouseMove(x, y int) {
 // OnMouseButton — щелчок срабатывает на отпускании над надписью, как у всех
 // элементов панели задач.
 func (l *TrayLabel) OnMouseButton(e widget.MouseEvent) bool {
+	if l.NotePointer(e) {
+		l.Invalidate()
+	}
 	if l.OnClick == nil {
 		return false
 	}

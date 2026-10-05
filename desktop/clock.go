@@ -19,7 +19,10 @@ import (
 // под ней.
 const ComponentClock = "clock"
 
-// Форматы по умолчанию, если поля TimeFormat/DateFormat не заданы.
+// Форматы по умолчанию, если поля TimeFormat/DateFormat не заданы и культура
+// не отвечает: «15:04» и «02.01.2006» — то, что часы показывали до появления
+// культуры. Обычно же формат даёт Culture (по умолчанию — LocaleCulture, то
+// есть строки движка для текущего языка).
 const (
 	defaultTimeFormat = "15:04"
 	defaultDateFormat = "02.01.2006"
@@ -36,14 +39,19 @@ const (
 // "date" — вертикальный зазор между строкой времени и строкой даты.
 type ClockItem struct {
 	widget.Base
+	FocusState
 
 	tm  *theme.Manager
 	clk Clock
 
-	// TimeFormat/DateFormat — форматы time.Time.Format. Пустые — берутся
-	// значения по умолчанию (defaultTimeFormat/defaultDateFormat).
+	// TimeFormat/DateFormat — форматы time.Time.Format. Заданные здесь
+	// побеждают всё остальное; пустые берутся у Culture.
 	TimeFormat string
 	DateFormat string
+
+	// Culture — региональные правила записи времени и даты. nil —
+	// LocaleCulture: формат следует за языком интерфейса (widget.SetLanguage).
+	Culture DateCulture
 
 	// OnClick — щелчок по часам. Оболочка вешает на него календарь: именно
 	// так он открывается на настоящем рабочем столе.
@@ -72,6 +80,9 @@ func (c *ClockItem) OnMouseMove(x, y int) {
 // OnMouseButton — щелчок срабатывает на отпускании над часами, как у всех
 // кнопок панели задач.
 func (c *ClockItem) OnMouseButton(e widget.MouseEvent) bool {
+	if c.NotePointer(e) {
+		c.Invalidate()
+	}
 	if c.OnClick == nil {
 		return false
 	}
@@ -102,12 +113,18 @@ func (c *ClockItem) timeFormat() string {
 	if c.TimeFormat != "" {
 		return c.TimeFormat
 	}
+	if f := cultureOrDefault(c.Culture).TimeFormat(); f != "" {
+		return f
+	}
 	return defaultTimeFormat
 }
 
 func (c *ClockItem) dateFormat() string {
 	if c.DateFormat != "" {
 		return c.DateFormat
+	}
+	if f := cultureOrDefault(c.Culture).DateFormat(); f != "" {
+		return f
 	}
 	return defaultDateFormat
 }

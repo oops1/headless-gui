@@ -55,11 +55,10 @@ func severityPart(sev Severity) string {
 	}
 }
 
-// notifTimeFormat — формат времени на карточке. Отдельного поля под него не
-// заводим (в отличие от ClockItem.TimeFormat): часы — самостоятельный
-// компонент с разными профилями отображения, а тут это деталь одной
-// карточки, а не то, чем управляет тема или оболочка.
-const notifTimeFormat = "15:04"
+// Формат времени на карточке — от культуры (NotificationCenter.Culture, по
+// умолчанию LocaleCulture): «15:04» по-русски, «3:04 PM» по-английски.
+// Отдельного поля под формат не заводим (в отличие от ClockItem.TimeFormat):
+// это деталь одной карточки, а не то, чем управляет тема или оболочка.
 
 // notifCloseSizeDiv — доля высоты карточки под квадрат крестика закрытия.
 // Не пиксельный размер (как и делители в tray.go), а пропорция фигуры.
@@ -76,18 +75,22 @@ type NotificationCenter struct {
 	pressedClose NotificationID // 0 — ничего не нажато (FakeNotifications выдаёт ID с 1)
 	pressedClear bool
 
-	// EmptyText — подпись, когда уведомлений нет. Задаётся с осмысленным
-	// значением по умолчанию в конструкторе; можно переопределить.
+	// EmptyText — подпись, когда уведомлений нет. Пусто — стандартная
+	// подпись на текущем языке (ключ StrNotifEmpty), которая следует за
+	// widget.SetLanguage; непустое значение показывается как есть.
 	EmptyText string
+
+	// Culture — региональные правила времени на карточках; nil —
+	// LocaleCulture (из строк движка для текущего языка).
+	Culture DateCulture
 }
 
 // NewNotificationCenter создаёт центр уведомлений, оформляемый темой tm и
 // читающий список из ns.
 func NewNotificationCenter(tm *theme.Manager, ns Notifications) *NotificationCenter {
 	nc := &NotificationCenter{
-		Flyout:    NewFlyout(tm, ComponentNotifications),
-		ns:        ns,
-		EmptyText: "Новых уведомлений нет",
+		Flyout: NewFlyout(tm, ComponentNotifications),
+		ns:     ns,
 	}
 	if ns != nil {
 		nc.unsub = ns.Subscribe(nc.Invalidate)
@@ -95,6 +98,15 @@ func NewNotificationCenter(tm *theme.Manager, ns Notifications) *NotificationCen
 	nc.Content = nc.draw
 	nc.Size = nc.size
 	return nc
+}
+
+// EmptyLabel — подпись пустого центра: EmptyText, если задан, иначе
+// стандартная на текущем языке.
+func (nc *NotificationCenter) EmptyLabel() string {
+	if nc.EmptyText != "" {
+		return nc.EmptyText
+	}
+	return tr(StrNotifEmpty)
 }
 
 // Close закрывает панель (как и полагается Flyout) и отписывается от
@@ -224,7 +236,7 @@ func (nc *NotificationCenter) draw(ctx widget.DrawContext, r image.Rectangle) {
 	}
 	list := nc.list()
 	if len(list) == 0 {
-		DrawTextCentered(ctx, r, nc.EmptyText, nc.themeStyle(notifPartEmpty, theme.StateNormal))
+		DrawTextCentered(ctx, r, nc.EmptyLabel(), nc.themeStyle(notifPartEmpty, theme.StateNormal))
 		return
 	}
 
@@ -238,7 +250,7 @@ func (nc *NotificationCenter) draw(ctx widget.DrawContext, r image.Rectangle) {
 	if !layout.clearAll.Empty() {
 		style := nc.themeStyle(notifPartClear, theme.StateNormal)
 		PaintStyle(ctx, layout.clearAll, style)
-		DrawTextCentered(ctx, layout.clearAll, "Очистить все", style)
+		DrawTextCentered(ctx, layout.clearAll, tr(StrNotifClearAll), style)
 	}
 }
 
@@ -253,7 +265,7 @@ func (nc *NotificationCenter) drawCard(ctx widget.DrawContext, card notifCardLay
 
 	size := fontSizeOf(style)
 	pad := int(style.PadX)
-	timeStr := card.n.Time.Format(notifTimeFormat)
+	timeStr := card.n.Time.Format(cultureOrDefault(nc.Culture).TimeFormat())
 	timeW := MeasureText(ctx, timeStr, style)
 	timeX := top.Max.X - timeW - pad
 	timeY := top.Min.Y + (top.Dy()-lineHeight(size))/2

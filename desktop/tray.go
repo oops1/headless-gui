@@ -291,6 +291,11 @@ func drawDiagonalStrike(ctx widget.DrawContext, r image.Rectangle, col color.RGB
 type trayTooltip struct {
 	mu   sync.Mutex
 	text string
+	// build и lang — как строился текст и на каком языке: подсказка
+	// пересобирается сама, когда язык интерфейса сменился (build != nil).
+	// Текст, заданный явным SetToolTip, не пересобирается.
+	build func() string
+	lang  string
 }
 
 // get читает текст под замком — вызывается из горутины кадра (движком,
@@ -298,14 +303,29 @@ type trayTooltip struct {
 func (t *trayTooltip) get() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.build != nil {
+		if lang := uiLanguage(); lang != t.lang {
+			t.text, t.lang = t.build(), lang
+		}
+	}
 	return t.text
 }
 
-// set меняет текст под замком — вызывается из горутины потребителя (из
-// замыкания Subscribe) или явным SetToolTip.
+// set меняет текст под замком — вызывается явным SetToolTip. Свой текст
+// пользователя языку не подчиняется.
 func (t *trayTooltip) set(s string) {
 	t.mu.Lock()
-	t.text = s
+	t.text, t.build = s, nil
+	t.mu.Unlock()
+}
+
+// refresh перестраивает подсказку функцией build и запоминает её, чтобы
+// пересобрать при смене языка. Вызывается из горутины потребителя (из
+// замыкания Subscribe).
+func (t *trayTooltip) refresh(build func() string) {
+	text := build()
+	t.mu.Lock()
+	t.text, t.build, t.lang = text, build, uiLanguage()
 	t.mu.Unlock()
 }
 
@@ -314,6 +334,7 @@ func (t *trayTooltip) set(s string) {
 // NetworkItem — значок состояния сети в трее.
 type NetworkItem struct {
 	widget.Base
+	FocusState
 
 	tm *theme.Manager
 	st SystemStatus
@@ -355,7 +376,7 @@ func NewNetworkStatus(tm *theme.Manager, st SystemStatus) *NetworkItem {
 
 // refreshTooltip пересчитывает подсказку по текущему состоянию сети.
 func (n *NetworkItem) refreshTooltip() {
-	n.tt.set(networkTooltip(n.networkState()))
+	n.tt.refresh(func() string { return networkTooltip(n.networkState()) })
 }
 
 // GetToolTip / SetToolTip перекрывают промоутнутые из widget.Base — см.
@@ -386,6 +407,9 @@ func (n *NetworkItem) OnMouseMove(x, y int) {
 
 // OnMouseButton реализует клик (release над границами).
 func (n *NetworkItem) OnMouseButton(e widget.MouseEvent) bool {
+	if n.NotePointer(e) {
+		n.Invalidate()
+	}
 	return trayHandleClick(&n.pressed, n.Bounds(), e, n.OnClick, n.Invalidate)
 }
 
@@ -439,12 +463,12 @@ func (n *NetworkItem) networkState() NetState {
 // нужна подсказка, а не только ради самого факта её наличия.
 func networkTooltip(net NetState) string {
 	if net.Kind == NetNone {
-		return "Сеть: нет подключения"
+		return tr(StrNetNone)
 	}
 	if net.Name == "" {
-		return "Сеть: подключено"
+		return tr(StrNetConnected)
 	}
-	return "Сеть: " + net.Name + ", подключено"
+	return fmt.Sprintf(tr(StrNetNamed), net.Name)
 }
 
 // ─── Звук ────────────────────────────────────────────────────────────────────
@@ -452,6 +476,7 @@ func networkTooltip(net NetState) string {
 // VolumeItem — значок громкости в трее.
 type VolumeItem struct {
 	widget.Base
+	FocusState
 
 	tm *theme.Manager
 	st SystemStatus
@@ -489,7 +514,7 @@ func NewVolumeStatus(tm *theme.Manager, st SystemStatus) *VolumeItem {
 
 // refreshTooltip пересчитывает подсказку по текущему состоянию звука.
 func (v *VolumeItem) refreshTooltip() {
-	v.tt.set(volumeTooltip(v.volumeState()))
+	v.tt.refresh(func() string { return volumeTooltip(v.volumeState()) })
 }
 
 // GetToolTip / SetToolTip перекрывают промоутнутые из widget.Base — см.
@@ -520,6 +545,9 @@ func (v *VolumeItem) OnMouseMove(x, y int) {
 
 // OnMouseButton реализует клик (release над границами).
 func (v *VolumeItem) OnMouseButton(e widget.MouseEvent) bool {
+	if v.NotePointer(e) {
+		v.Invalidate()
+	}
 	return trayHandleClick(&v.pressed, v.Bounds(), e, v.OnClick, v.Invalidate)
 }
 
@@ -569,9 +597,9 @@ func (v *VolumeItem) volumeState() VolState {
 // volumeTooltip формирует текст подсказки звука.
 func volumeTooltip(vol VolState) string {
 	if vol.Muted {
-		return "Звук: выключен"
+		return tr(StrSoundMuted)
 	}
-	return fmt.Sprintf("Звук: %d%%", int(math.Round(vol.Level*100)))
+	return fmt.Sprintf(tr(StrSoundLevel), int(math.Round(vol.Level*100)))
 }
 
 // ─── Питание ─────────────────────────────────────────────────────────────────
@@ -581,6 +609,7 @@ func volumeTooltip(vol VolState) string {
 // PreferredSize отдаёт нулевую ширину, и панель не отводит ему места.
 type PowerItem struct {
 	widget.Base
+	FocusState
 
 	tm *theme.Manager
 	st SystemStatus
@@ -616,7 +645,7 @@ func NewPowerStatus(tm *theme.Manager, st SystemStatus) *PowerItem {
 
 // refreshTooltip пересчитывает подсказку по текущему состоянию питания.
 func (p *PowerItem) refreshTooltip() {
-	p.tt.set(powerTooltip(p.powerState()))
+	p.tt.refresh(func() string { return powerTooltip(p.powerState()) })
 }
 
 // GetToolTip / SetToolTip перекрывают промоутнутые из widget.Base — см.
@@ -650,6 +679,9 @@ func (p *PowerItem) OnMouseMove(x, y int) {
 
 // OnMouseButton реализует клик (release над границами).
 func (p *PowerItem) OnMouseButton(e widget.MouseEvent) bool {
+	if p.NotePointer(e) {
+		p.Invalidate()
+	}
 	return trayHandleClick(&p.pressed, p.Bounds(), e, p.OnClick, p.Invalidate)
 }
 
@@ -721,7 +753,7 @@ func (p *PowerItem) powerState() PowerState {
 // powerTooltip формирует текст подсказки питания.
 func powerTooltip(pw PowerState) string {
 	if pw.OnAC {
-		return "Питание от сети"
+		return tr(StrPowerAC)
 	}
-	return fmt.Sprintf("Батарея: %d%%", int(math.Round(pw.Charge*100)))
+	return fmt.Sprintf(tr(StrPowerBattery), int(math.Round(pw.Charge*100)))
 }

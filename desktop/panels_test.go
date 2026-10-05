@@ -232,7 +232,7 @@ func TestNotificationCenter_EmptyStateAndClose(t *testing.T) {
 	nc.Screen = panelScreen()
 	nc.Open(panelAnchor())
 
-	if nc.EmptyText == "" {
+	if nc.EmptyLabel() == "" {
 		t.Error("не задан текст пустого состояния")
 	}
 	if nc.OverlayBounds().Empty() {

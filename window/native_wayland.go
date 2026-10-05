@@ -1092,7 +1092,7 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 		pressed := binary.LittleEndian.Uint32(b[12:16]) == 1
 		if !pressed {
 			w.repeat.stopKey(key)
-			if vk := x11KeycodeToVK(int(key) + 8); vk != 0 && w.onKeyUp != nil {
+			if vk := w.vkForKey(key); vk != 0 && w.onKeyUp != nil {
 				w.onKeyUp(vk)
 			}
 			return
@@ -1100,7 +1100,7 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 		w.deliverKey(key, false)
 		// Повтор ведёт клиент: композитор между нажатием и отпусканием
 		// молчит. Модификаторы не повторяем — повторять нечего.
-		if vk := x11KeycodeToVK(int(key) + 8); vk != VK_SHIFT && vk != VK_CONTROL && vk != VK_ALT {
+		if vk := w.vkForKey(key); !isModifierVK(vk) {
 			w.repeat.start(key, func() { w.deliverKey(key, true) })
 		}
 
@@ -1118,12 +1118,22 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 	}
 }
 
+// vkForKey — виртуальный код клавиши по evdev-коду из события wl_keyboard.key.
+// Сначала по физическому месту (x11KeycodeToVK), затем по keymap композитора:
+// так находится клавиша Windows, переставленная на нестандартное место.
+func (w *WaylandWindow) vkForKey(key uint32) int {
+	if vk := x11KeycodeToVK(int(key) + 8); vk != 0 {
+		return vk
+	}
+	return w.keymap.vkFor(key + 8)
+}
+
 // deliverKey отдаёт нажатие приложению: сначала код клавиши, затем символ.
 //
 // repeat=true — это автоповтор, а не новое нажатие: приложению важно знать
 // разницу там, где нажатие что-то переключает.
 func (w *WaylandWindow) deliverKey(key uint32, repeat bool) {
-	if vk := x11KeycodeToVK(int(key) + 8); vk != 0 {
+	if vk := w.vkForKey(key); vk != 0 {
 		if w.onKeyDownRepeat != nil {
 			w.onKeyDownRepeat(vk, repeat)
 		} else if w.onKeyDown != nil {

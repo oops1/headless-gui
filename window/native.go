@@ -195,6 +195,8 @@ const (
 
 	// Клавиша контекстного меню и переключатели.
 	VK_APPS     = 0x5D
+	VK_LWIN     = 0x5B // левая клавиша Windows (Super_L)
+	VK_RWIN     = 0x5C // правая клавиша Windows (Super_R)
 	VK_PAUSE    = 0x13
 	VK_CAPITAL  = 0x14 // Caps Lock
 	VK_SNAPSHOT = 0x2C // Print Screen

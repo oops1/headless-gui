@@ -22,6 +22,7 @@ import (
 // ApplicationArea — область закреплённых и запущенных приложений.
 type ApplicationArea struct {
 	widget.Base
+	FocusState
 
 	tm  *theme.Manager
 	cat AppCatalog
@@ -293,6 +294,10 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 	rects := append([]image.Rectangle(nil), a.rects...)
 	hover, armed := a.hoverIdx, a.armedIdx
 	a.mu.RUnlock()
+	focus := -1
+	if a.FocusVisible() {
+		focus = a.FocusState.Cell(len(rects))
+	}
 
 	iconSize := int(a.metric(KeyTaskButtonIconSize))
 	labelGap := int(a.metric(KeyTaskButtonLabelGap))
@@ -304,7 +309,7 @@ func (a *ApplicationArea) Draw(ctx widget.DrawContext) {
 			break
 		}
 		e := entries[i]
-		st := StateOf(i == hover, i == armed, e.active, e.min || !e.live, false)
+		st := StateOf(i == hover, i == armed, e.active, e.min || !e.live, i == focus)
 		s := styleOf(a.tm, ComponentTaskButton, "", st)
 		PaintStyle(ctx, r, s)
 
@@ -419,6 +424,7 @@ func (a *ApplicationArea) OnMouseButton(e widget.MouseEvent) bool {
 		if idx < 0 {
 			return false
 		}
+		a.NotePointer(e)
 		a.mu.Lock()
 		a.armedIdx = idx
 		a.mu.Unlock()

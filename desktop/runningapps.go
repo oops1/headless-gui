@@ -67,6 +67,7 @@ type winButton struct {
 //     нет: пользователю показывается «сколько влезло».
 type RunningApplications struct {
 	widget.Base
+	FocusState
 
 	tm *theme.Manager
 	wm WindowModel
@@ -371,6 +372,7 @@ func (r *RunningApplications) OnMouseButton(e widget.MouseEvent) bool {
 			if idx < 0 {
 				return false
 			}
+			r.NotePointer(e)
 			r.mu.Lock()
 			r.armedIdx = idx
 			r.mu.Unlock()
@@ -493,6 +495,10 @@ func (r *RunningApplications) Draw(ctx widget.DrawContext) {
 	btns := append([]winButton(nil), r.btns...)
 	hoverIdx, armedIdx := r.hoverIdx, r.armedIdx
 	r.mu.RUnlock()
+	focusIdx := -1
+	if r.FocusVisible() {
+		focusIdx = r.FocusState.Cell(len(btns))
+	}
 
 	prevClip := ctx.Clip()
 	for i, wb := range btns {
@@ -501,7 +507,7 @@ func (r *RunningApplications) Draw(ctx widget.DrawContext) {
 		// кнопка в смысле ввода — клик по ней по-прежнему разворачивает
 		// окно, приглушение чисто визуальное: так их видно от обычных
 		// свёрнутых на настоящей панели задач).
-		st := StateOf(i == hoverIdx, i == armedIdx, wb.info.Active, wb.info.Minimized, false)
+		st := StateOf(i == hoverIdx, i == armedIdx, wb.info.Active, wb.info.Minimized, i == focusIdx)
 		style := r.style(st)
 		PaintStyle(ctx, wb.rect, style)
 

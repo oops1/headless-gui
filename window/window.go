@@ -230,6 +230,7 @@ type surface struct {
 	modShift atomic.Bool
 	modCtrl  atomic.Bool
 	modAlt   atomic.Bool
+	modMeta  atomic.Bool // клавиша Windows (Super)
 	// altTap — Alt нажат и пока ничего другого не нажимали: при отпускании
 	// это жест открытия строки меню (см. widget.KeyAlt).
 	altTap atomic.Bool
@@ -1057,6 +1058,16 @@ func (s *surface) keyEventRepeat(vk int, pressed, repeat bool) {
 		s.modShift.Store(pressed)
 	case VK_CONTROL:
 		s.modCtrl.Store(pressed)
+	case VK_LWIN, VK_RWIN:
+		// Win — модификатор (ModMeta) и одновременно клавиша (KeyWin): оболочке
+		// одиночное нажатие открывает «Пуск», а сочетания Win+X идут с
+		// ModMeta. Состояние держим по обеим клавишам сразу: отпускание
+		// правой при зажатой левой снимет его раньше времени, но так же ведут
+		// себя Shift и Ctrl выше.
+		s.modMeta.Store(pressed)
+		if pressed {
+			s.altTap.Store(false)
+		}
 	case VK_ALT:
 		s.modAlt.Store(pressed)
 		// Alt сам по себе — не клавиша, а модификатор, и своего события у
@@ -1324,6 +1335,9 @@ func (s *surface) currentMod() widget.KeyMod {
 	if s.modAlt.Load() {
 		mod |= widget.ModAlt
 	}
+	if s.modMeta.Load() {
+		mod |= widget.ModMeta
+	}
 	return mod
 }
 
@@ -1410,6 +1424,10 @@ func vkToKeyCode(vk int) widget.KeyCode {
 		VK_OEM_1, VK_OEM_PLUS, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD,
 		VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7:
 		return widget.KeyCode(vk)
+	case VK_LWIN, VK_RWIN:
+		// Обе клавиши Windows — одна KeyWin (0x5B): приложению важно, что
+		// нажали «Win», а не с какой стороны.
+		return widget.KeyWin
 	}
 	return widget.KeyUnknown
 }

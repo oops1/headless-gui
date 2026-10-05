@@ -33,11 +33,9 @@ const (
 	KeyStartMenuIconSize theme.Key = "startmenu.icon.size"
 )
 
-// Подписи разделов. Не размер и не цвет — обычный текст интерфейса.
-const (
-	startMenuLabelPinned  = "Закреплено"
-	startMenuLabelAllApps = "Все приложения"
-)
+// Подписи разделов («Закреплено», «Все приложения») — обычные строки
+// интерфейса с ключами StrStartPinned и StrStartAllApps (locale.go); текст
+// берётся при построении строк, поэтому следует за языком.
 
 // startMenuRowKind различает строку-заголовок раздела от строки приложения:
 // у заголовка нет AppID и по нему нельзя ни кликнуть, ни перейти стрелками.
@@ -278,7 +276,7 @@ func (m *StartMenu) buildRows() []startMenuRow {
 
 	var rows []startMenuRow
 	if pinned := m.cat.Pinned(); len(pinned) > 0 {
-		rows = append(rows, startMenuRow{kind: startMenuRowSection, label: startMenuLabelPinned})
+		rows = append(rows, startMenuRow{kind: startMenuRowSection, label: tr(StrStartPinned)})
 		for _, id := range pinned {
 			info, ok := byID[id]
 			if !ok {
@@ -288,7 +286,7 @@ func (m *StartMenu) buildRows() []startMenuRow {
 		}
 	}
 
-	rows = append(rows, startMenuRow{kind: startMenuRowSection, label: startMenuLabelAllApps})
+	rows = append(rows, startMenuRow{kind: startMenuRowSection, label: tr(StrStartAllApps)})
 	for _, a := range apps {
 		rows = append(rows, startMenuRow{kind: startMenuRowApp, label: a.Title, id: a.ID, icon: a.Icon, iconAt: a.IconAt})
 	}

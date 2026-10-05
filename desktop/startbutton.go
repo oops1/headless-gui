@@ -20,6 +20,7 @@ import (
 // клик, уведя курсор в сторону перед отпусканием.
 type StartButton struct {
 	widget.Base
+	FocusState
 
 	tm *theme.Manager
 
@@ -66,8 +67,9 @@ const (
 )
 
 // startButtonLabel — текст подписи кнопки. Не размер и не цвет — обычная
-// строка интерфейса, наравне с любым другим текстом виджета.
-const startButtonLabel = "Пуск"
+// строка интерфейса (ключ StrStart), берётся при отрисовке и потому следует
+// за языком без пересоздания кнопки.
+func startButtonLabel() string { return tr(StrStart) }
 
 // NewStartButton создаёт кнопку «Пуск», оформляемую темами из tm.
 func NewStartButton(tm *theme.Manager) *StartButton {
@@ -115,6 +117,7 @@ func (s *StartButton) OnMouseButton(e widget.MouseEvent) bool {
 		if !over {
 			return false
 		}
+		s.NotePointer(e)
 		s.armed = true
 		s.Invalidate()
 		return true
@@ -137,7 +140,7 @@ func (s *StartButton) Draw(ctx widget.DrawContext) {
 	if b.Empty() {
 		return
 	}
-	st := StateOf(s.hovered, s.armed, false, false, false)
+	st := StateOf(s.hovered, s.armed, false, false, s.FocusVisible())
 	style := s.style(st)
 	PaintStyle(ctx, b, style)
 
@@ -149,7 +152,7 @@ func (s *StartButton) Draw(ctx widget.DrawContext) {
 	labelGap := int(s.metric(KeyStartButtonLabelGap))
 	labelW := 0
 	if wantLabel {
-		labelW = MeasureText(ctx, startButtonLabel, style)
+		labelW = MeasureText(ctx, startButtonLabel(), style)
 	}
 	showLabel := wantLabel && labelW > 0 &&
 		iconSize+2*padX+labelGap+labelW <= b.Dx()
@@ -165,7 +168,7 @@ func (s *StartButton) Draw(ctx widget.DrawContext) {
 	if showLabel {
 		textLeft := iconX + iconSize + labelGap
 		labelRect := image.Rect(textLeft-int(style.PadX), b.Min.Y, b.Max.X, b.Max.Y)
-		DrawTextLeft(ctx, labelRect, startButtonLabel, style)
+		DrawTextLeft(ctx, labelRect, startButtonLabel(), style)
 	}
 
 	s.DrawChildren(ctx)

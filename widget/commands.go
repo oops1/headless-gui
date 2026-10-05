@@ -129,6 +129,8 @@ func parseKeyName(s string) KeyCode {
 		return KeyPause
 	case "apps", "menu", "contextmenu":
 		return KeyMenu
+	case "win", "windows", "lwin", "rwin", "super":
+		return KeyWin
 	// Цифровая клавиатура — отдельно от цифрового ряда: калькулятору важно,
 	// с какой стороны нажали.
 	case "numpad0", "num0":
