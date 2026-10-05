@@ -3,7 +3,6 @@ package desktop_test
 import (
 	"image"
 	"image/color"
-	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -244,19 +243,4 @@ func (s *win10Scene) open() {
 
 func (s *win10Scene) frame() *image.RGBA { return s.eng.RenderOnce() }
 
-// savePNG сохраняет кадр, если задан GOLDEN_OUT.
-func savePNG(t *testing.T, img *image.RGBA, name string) {
-	t.Helper()
-	dir := os.Getenv("GOLDEN_OUT")
-	if dir == "" || img == nil {
-		return
-	}
-	f, err := os.Create(filepath.Join(dir, name+".png"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	if err := png.Encode(f, img); err != nil {
-		t.Fatal(err)
-	}
-}
+// savePNG — общий для тестов пакета, см. edges_test.go.

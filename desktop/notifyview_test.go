@@ -251,7 +251,9 @@ func TestNotificationCenter_FlatStillGrows(t *testing.T) {
 }
 
 // Зазор до панели задач: у центра Windows 10 — ноль (метрика), у прочих
-// всплывающих панелей остаётся зазор Flyout.
+// всплывающих панелей остаётся зазор Flyout. «Пуск» Windows 10 с плитками
+// тоже прилегает к панели вплотную — так на референсе WinLine; его зазор
+// задаёт собственная метрика меню.
 func TestNotificationCenter_MarginOnlyForWin10Center(t *testing.T) {
 	tm := richNotifTheme(t)
 	nc, _, _ := richFixture(t, 3)
@@ -269,8 +271,8 @@ func TestNotificationCenter_MarginOnlyForWin10Center(t *testing.T) {
 	menu.Screen = panelScreen()
 	menu.Open(panelAnchor())
 	menu.Settle()
-	if got := panelAnchor().Min.Y - menu.OverlayBounds().Max.Y; got != 6 {
-		t.Errorf("зазор «Пуска» до панели %d, ждал прежние 6", got)
+	if got := panelAnchor().Min.Y - menu.OverlayBounds().Max.Y; got != 0 {
+		t.Errorf("зазор «Пуска» Windows 10 до панели %d, ждал 0", got)
 	}
 }
 

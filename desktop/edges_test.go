@@ -124,7 +124,7 @@ func edgeManager(t *testing.T, profile string) (*theme.Manager, *engine.Engine) 
 func savePNG(t *testing.T, img *image.RGBA, name string) {
 	t.Helper()
 	dir := os.Getenv("GOLDEN_OUT")
-	if dir == "" {
+	if dir == "" || img == nil {
 		return
 	}
 	f, err := os.Create(filepath.Join(dir, name+".png"))
