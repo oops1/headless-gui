@@ -47,11 +47,11 @@ func TestStartMenu10_FirstFrameUnder100ms(t *testing.T) {
 	warm := time.Since(t0)
 
 	t.Logf("первый кадр после открытия: холодный %v, тёплый %v", cold, warm)
-	if cold > 100*time.Millisecond {
-		t.Errorf("холодный первый кадр %v — дольше 100 мс", cold)
+	if lim := perfBudget(100 * time.Millisecond); cold > lim {
+		t.Errorf("холодный первый кадр %v — дольше %v", cold, lim)
 	}
-	if warm > 100*time.Millisecond {
-		t.Errorf("тёплый первый кадр %v — дольше 100 мс", warm)
+	if lim := perfBudget(100 * time.Millisecond); warm > lim {
+		t.Errorf("тёплый первый кадр %v — дольше %v", warm, lim)
 	}
 }
 
@@ -167,8 +167,8 @@ func TestStartMenu10_SidebarAnimationFramesAreCheap(t *testing.T) {
 	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
 	med := times[frames/2]
 	t.Logf("медианный кадр анимации панели: %v", med)
-	if med > 50*time.Millisecond {
-		t.Errorf("кадр анимации панели %v — дороже 50 мс", med)
+	if lim := perfBudget(50 * time.Millisecond); med > lim {
+		t.Errorf("кадр анимации панели %v — дороже %v", med, lim)
 	}
 	widget.StepAnimations(t0.Add(time.Second))
 }
