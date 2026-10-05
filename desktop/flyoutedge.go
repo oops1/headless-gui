@@ -102,6 +102,63 @@ func (f *Flyout) sideRect(sz image.Point) image.Rectangle {
 	return image.Rect(x, y, x+sz.X, y+sz.Y)
 }
 
+// SetPinMargins разводит два зазора прижатой панели (PinToEdge): edge — до
+// края экрана, panel — до панели задач (тех сторон рабочей области, которые
+// вырезала панель). Без вызова оба зазора равны Margin, как раньше.
+//
+// В Windows 10 центр уведомлений стоит вплотную к краю экрана и всё же с
+// зазором над панелью задач; одним Margin этого не выразить, и потребителю
+// приходилось уменьшать рабочую область самому.
+func (f *Flyout) SetPinMargins(edge, panel int) {
+	var was image.Rectangle
+	if f.visible() {
+		was = f.dirtyRect()
+	}
+	f.pinEdgeGap, f.pinPanelGap, f.pinSplit = edge, panel, true
+	if f.visible() {
+		f.invalidateOverlay(was)
+	}
+}
+
+// PinMargins возвращает зазоры прижатой панели: до края экрана и до панели
+// задач. Без SetPinMargins оба равны Margin.
+func (f *Flyout) PinMargins() (edge, panel int) {
+	if f.pinSplit {
+		return f.pinEdgeGap, f.pinPanelGap
+	}
+	return f.Margin, f.Margin
+}
+
+// pinGap — зазор до стороны area: до края экрана, если сторона совпала с
+// границей экрана, и до панели задач, если область здесь вырезана ею.
+func (f *Flyout) pinGap(area image.Rectangle, side Edge) int {
+	if !f.pinSplit {
+		return f.Margin
+	}
+	scr := f.monitor.Bounds
+	if scr.Empty() {
+		scr = f.Screen
+	}
+	if scr.Empty() {
+		return f.pinEdgeGap
+	}
+	cut := false
+	switch side {
+	case EdgeLeft:
+		cut = area.Min.X > scr.Min.X
+	case EdgeRight:
+		cut = area.Max.X < scr.Max.X
+	case EdgeTop:
+		cut = area.Min.Y > scr.Min.Y
+	default:
+		cut = area.Max.Y < scr.Max.Y
+	}
+	if cut {
+		return f.pinPanelGap
+	}
+	return f.pinEdgeGap
+}
+
 // pinnedRect — положение окна, прижатого к краю рабочей области.
 func (f *Flyout) pinnedRect(sz image.Point) image.Rectangle {
 	area := f.workArea()
@@ -113,31 +170,31 @@ func (f *Flyout) pinnedRect(sz image.Point) image.Rectangle {
 	switch f.pinEdge {
 	case EdgeLeft, EdgeRight:
 		if f.pinEdge == EdgeLeft {
-			x = area.Min.X + f.Margin
+			x = area.Min.X + f.pinGap(area, EdgeLeft)
 		} else {
-			x = area.Max.X - f.Margin - sz.X
+			x = area.Max.X - f.pinGap(area, EdgeRight) - sz.X
 		}
 		switch f.Align {
 		case AlignCenter:
 			y = area.Min.Y + (area.Dy()-sz.Y)/2
 		case AlignEnd:
-			y = area.Max.Y - f.Margin - sz.Y
+			y = area.Max.Y - f.pinGap(area, EdgeBottom) - sz.Y
 		default:
-			y = area.Min.Y + f.Margin
+			y = area.Min.Y + f.pinGap(area, EdgeTop)
 		}
 	default:
 		if f.pinEdge == EdgeTop {
-			y = area.Min.Y + f.Margin
+			y = area.Min.Y + f.pinGap(area, EdgeTop)
 		} else {
-			y = area.Max.Y - f.Margin - sz.Y
+			y = area.Max.Y - f.pinGap(area, EdgeBottom) - sz.Y
 		}
 		switch f.Align {
 		case AlignCenter:
 			x = area.Min.X + (area.Dx()-sz.X)/2
 		case AlignEnd:
-			x = area.Max.X - f.Margin - sz.X
+			x = area.Max.X - f.pinGap(area, EdgeRight) - sz.X
 		default:
-			x = area.Min.X + f.Margin
+			x = area.Min.X + f.pinGap(area, EdgeLeft)
 		}
 	}
 	return image.Rect(x, y, x+sz.X, y+sz.Y)

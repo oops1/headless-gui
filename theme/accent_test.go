@@ -198,17 +198,38 @@ func TestSetAccent_BeforeAnyTheme(t *testing.T) {
 	}
 }
 
-// TestSetAccent_ClassicIgnoresIt — Windows 2000 акцента в стилях не имеет:
-// заголовок остаётся синим «навигатором» при любом выбранном акценте.
-func TestSetAccent_ClassicIgnoresIt(t *testing.T) {
+// TestSetAccent_ClassicFollowsIt — Windows 2000 следует акценту: заголовок
+// активного окна и выделение идут за ним (раньше были литералами и не менялись).
+// Серая палитра и фаски остаются классическими. Синяя разновидность объявляет
+// выделение сама, поэтому за акцентом идёт только её заголовок.
+func TestSetAccent_ClassicFollowsIt(t *testing.T) {
+	red := theme.RGB(255, 0, 0)
 	m := builtinManager(t, theme.ProfileWindows2000)
-	titleBefore := m.Active().Style("window", "titlebar", theme.StateFocused).Fill
-	m.SetAccent(theme.RGB(255, 0, 0))
-	if got := m.Active().Style("window", "titlebar", theme.StateFocused).Fill; got != titleBefore {
-		t.Errorf("заголовок классики сменил цвет: %v → %v", titleBefore, got)
+	if got := m.Active().Style("window", "titlebar", theme.StateFocused).Fill; got != theme.RGB(10, 36, 106) {
+		t.Fatalf("без SetAccent заголовок классики %v, ждали прежний тёмно-синий", got)
 	}
-	if got, _ := m.Active().Color(theme.KeySelection); got != theme.RGB(10, 36, 106) {
-		t.Errorf("выделение классики %v: профиль объявил его сам, акцент не должен его менять", got)
+	m.SetAccent(red)
+	if got := m.Active().Style("window", "titlebar", theme.StateFocused).Fill; got != red {
+		t.Errorf("заголовок классики %v, ждали акцент %v", got, red)
+	}
+	if got, _ := m.Active().Color(theme.KeySelection); got != red {
+		t.Errorf("выделение классики %v, ждали акцент %v", got, red)
+	}
+	if got := m.Active().Style("menu", "item", theme.StateHover).Fill; got != red {
+		t.Errorf("плашка меню классики %v, ждали акцент %v", got, red)
+	}
+	m.ResetAccent()
+	if got := m.Active().Style("window", "titlebar", theme.StateFocused).Fill; got != theme.RGB(10, 36, 106) {
+		t.Errorf("ResetAccent не вернул заголовок: %v", got)
+	}
+
+	blue := builtinManager(t, theme.ProfileWindows2000Blue)
+	blue.SetAccent(red)
+	if got := blue.Active().Style("window", "titlebar", theme.StateFocused).Fill; got != red {
+		t.Errorf("заголовок синей классики %v, ждали акцент %v", got, red)
+	}
+	if got, _ := blue.Active().Color(theme.KeySelection); got != theme.RGB(10, 36, 106) {
+		t.Errorf("выделение синей классики %v: профиль объявил его сам", got)
 	}
 }
 

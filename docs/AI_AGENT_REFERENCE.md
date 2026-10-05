@@ -4264,7 +4264,13 @@ does nothing.
   rewriting styles. A literal in a LATER delta (a child's) overrides an earlier
   reference; within one delta the reference wins; a missing token leaves the
   colour alone. Windows 10/11/macOS profiles use references for every accent
-  fill, border and text-on-accent; Windows 2000 deliberately does not.
+  fill, border and text-on-accent. Windows 2000 follows `SetAccent` too (since
+  the v3.32 work): caption (`FillFrom accent`), menu / Start / slider / tile /
+  calendar highlights (`FillFrom selection`, text `accent.text`); `selection`
+  is no longer declared there, so it equals the accent, and without `SetAccent`
+  every style is bit-identical (`theme/classic_accent_test.go` hashes them).
+  `Windows2000 Blue` declares `selection` itself (it was navy, not the accent),
+  so only its caption follows.
 
 **Flags override live too.** `Manager.SetFlag(k, v)` / `ResetFlag(k)` re-resolve
 like `SetAccent`. A flag is useful because of conditional styles:
@@ -4345,7 +4351,28 @@ is set.
   `TrayIcon` (image / SVG / `func(size) image.Image`), `NotificationButton`
   (counter, `99+`), `ShowDesktopButton` (`tray.showdesktop.width`).
   `theme/profiles_tray.go` copies the `tray.volume` styles to the new components in
-  every built-in profile (otherwise the default surface fill shows through).
+  every built-in profile (otherwise the default surface fill shows through);
+  conditional rules (`taskbar.light`) are copied too (unless the profile declared
+  the same flag+key itself).
+- **Windows 10 tray (`theme/profiles_win10_tray.go`)**: `taskbar.gap` 0, Start
+  button 48 (`PadX` 16, icon 16), tray step 24 (`PadX` 4), notification button 40
+  (`PadX` 12), show-desktop strip 5 px + 1 px left line (`tray.showdesktop.line`,
+  colour = part `line` of `tray.showdesktop`). Flag `tray.fill.strip`
+  (`desktop.KeyTrayFillStrip`): `Taskbar`/`SystemTray` stretch `stripFiller` items
+  (network, volume, power, `TrayIcon`, `NotificationButton`) to the full strip
+  height (`stretchToStrip`); `trayInner` keeps the glyph at icon size, centred.
+  Vertical bars are untouched. `NotificationButton.SetActive / Active / Track /
+  TrackManager` — lit (`StateActive`) while the centre is open.
+- **Tray strings**: keys `desktop.tray.showDesktop|notificationCenter|noNotifications`
+  and `desktop.tray.notifications.{one,few,many,other}` (`desktop.PluralForm`:
+  RU/UK/BE 1·2-4·5+, PL, CS/SK, default one/other). Legacy keys (`ShowDesktop`…)
+  are aliases: an app override of a legacy key (value differs from the built-in)
+  is honoured unless the new key was overridden too. All tray tooltips use `tr()`
+  with `DefaultLanguage`.
+- **Optical icon sizes**: `theme.IconRef.Sizes` (string `"16 20 24"`,
+  `theme.IconSizes`) + `{size}` in `Source`; `IconRef.SourceFor(size)` /
+  `theme.OpticalSize` choose the smallest size >= requested else the largest;
+  `IconSet.ResolveIcon` uses it (requested size is physical). JSON `sizes`.
   `AppInfo.IconAt(size)` + `IconFor`; `appicon.go:drawAppIcon` feeds it the
   physical side. Strings (`ShowDesktop`, `NotificationCenter`,
   `NoNewNotifications`, `NewNotificationsCount`) are `widget.Tr` keys registered
@@ -4557,7 +4584,14 @@ byte-identical to before); the side layout is a separate code path.
   at the right edge of its monitor: `center.PinToEdge(desktop.EdgeRight)`; `Align`
   chooses top/bottom/middle along the edge, `Margin` is the gap from the edge,
   `SlideAuto` slides from that edge). The anchor is still used for `Toggle` /
-  `DismissAt`.
+  `DismissAt`. **`SetPinMargins(edge, panel)` / `PinMargins()`** split the gap:
+  `edge` to the screen edge, `panel` to the sides the taskbar cut out of the work
+  area (without it both are `Margin`) — the Windows 10 centre sits flush with the
+  screen edge yet keeps a gap above the taskbar.
+- **Flyout close**: `Close` remembers `restRect` (`closeRest`); every animation step
+  and the last one (presence 0) invalidate `paintedRegion()` = `dirtyRect()` plus
+  that rect (shadow padding, clipped to the screen), so no 9 % trace of the panel
+  stays for a consumer that assembles frames from damage.
 - **`ScreenBars`** (a widget; put it in the root instead of the bars and the
   `FlyoutManager`): `NewScreenBars(screens, func(Monitor) *MonitorShell)` asks the
   consumer for `MonitorShell{Bar, Flyouts map[string]FlyoutPanel}` of every new

@@ -2,6 +2,8 @@ package theme
 
 import (
 	"image/color"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -78,10 +80,65 @@ func (f FontSpec) EffectiveWeight() int {
 type IconRef struct {
 	Name   string `json:"name,omitempty"`   // имя в наборе: "start", "volume.muted"
 	Source string `json:"source,omitempty"` // путь к SVG относительно профиля
+	// Sizes — оптические размеры, в которых у значка есть свой рисунок: у
+	// Fluent отдельные файлы для 16, 20 и 24, и мелкий вариант не просто
+	// уменьшенный большой. Записываются через пробел или запятую («16 20 24»);
+	// в Source на месте размера стоит {size} («icons/wifi_{size}.svg»), и набор
+	// иконок подставляет подходящий (см. SourceFor). Без Sizes Source — один
+	// файл на любой размер, как было. Строка, а не срез: ссылка остаётся
+	// сравнимой (==).
+	Sizes string `json:"sizes,omitempty"`
 }
 
 // IsZero — ссылка пуста.
 func (r IconRef) IsZero() bool { return r == IconRef{} }
+
+// IconSizes собирает значение IconRef.Sizes из списка размеров.
+func IconSizes(sizes ...int) string {
+	parts := make([]string, len(sizes))
+	for i, v := range sizes {
+		parts[i] = strconv.Itoa(v)
+	}
+	return strings.Join(parts, " ")
+}
+
+// OpticalSize выбирает оптический размер для запрошенного size: наименьший из
+// sizes, не меньший запрошенного (крупный рисунок честно уменьшается, мелкий
+// пришлось бы растягивать), а если запрошенный больше всех — наибольший.
+// Размеры — строка IconRef.Sizes. 0 — размеров в строке нет.
+func OpticalSize(sizes string, size int) int {
+	best, largest := 0, 0
+	for _, f := range strings.FieldsFunc(sizes, func(r rune) bool { return r == ' ' || r == ',' || r == ';' }) {
+		v, err := strconv.Atoi(f)
+		if err != nil || v <= 0 {
+			continue
+		}
+		if v > largest {
+			largest = v
+		}
+		if v >= size && (best == 0 || v < best) {
+			best = v
+		}
+	}
+	if best == 0 {
+		return largest
+	}
+	return best
+}
+
+// SourceFor возвращает путь файла для запрошенного размера: {size} в Source
+// заменяется оптическим размером из Sizes. Без Sizes (или без {size}) это
+// просто Source.
+func (r IconRef) SourceFor(size int) string {
+	if r.Sizes == "" || !strings.Contains(r.Source, "{size}") {
+		return r.Source
+	}
+	v := OpticalSize(r.Sizes, size)
+	if v == 0 {
+		return r.Source
+	}
+	return strings.ReplaceAll(r.Source, "{size}", strconv.Itoa(v))
+}
 
 // AnimSpec — анимация как данные темы: сколько длится и по какой кривой
 // идёт. Имя кривой соответствует easing-кривым движка ("linear",

@@ -314,7 +314,9 @@ func (t *Taskbar) relayout() {
 	right := inner.Max.X
 	for i := len(t.slots[SlotTray]) - 1; i >= 0; i-- {
 		it := t.slots[SlotTray][i]
-		sz := t.sizeOf(it, avail)
+		// Значок трея с подсветкой на всю полосу (тема: tray.fill.strip) занимает
+		// всю высоту панели, остальные стоят по центру своей высоты.
+		sz := stretchToStrip(it, t.sizeOf(it, avail), avail.Y)
 		place(it, image.Rect(right-sz.X, inner.Min.Y, right, inner.Min.Y+sz.Y), inner)
 		right -= sz.X + gap
 	}

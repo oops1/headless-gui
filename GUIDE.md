@@ -4074,8 +4074,11 @@ m.ResetAccent()                       // вернуть акцент профи�
 
 Производные считаются от акцента сами: `accent.hover`, `accent.pressed`,
 `accent.dark`, `accent.light` и `accent.text` (белый или чёрный, смотря по
-яркости). Выбор переживает смену темы. Windows 2000 акцент в стилях не
-использует и не меняется.
+яркости). Выбор переживает смену темы. Windows 2000 следует акценту: заголовок
+активного окна, выделение меню, «Пуска», ползунок и выбранный день календаря —
+ссылки на токены (без `SetAccent` вид прежний побитно; серая палитра и фаски
+остаются). У синей разновидности (`Windows2000 Blue`) выделение объявлено
+профилем и за акцентом не идёт, за ним идёт заголовок.
 
 Светлая панель задач Windows 10 включается флагом — профилем или на лету; по
 умолчанию панель тёмная, как раньше:
@@ -4168,9 +4171,26 @@ bar.AddItem(desktop.SlotTray, ic)
 Кнопка центра уведомлений со счётчиком —
 `desktop.NewNotificationButton(m, notifications)` (число — `len(List())`, «99+»
 сверху); полоска «Показать рабочий стол» — `desktop.NewShowDesktopButton(m)`,
-кладётся последней в `SlotTray`, ширина — метрика `tray.showdesktop.width`.
-Подсказки — строки `ShowDesktop`, `NotificationCenter`, `NoNewNotifications`,
-`NewNotificationsCount` (`widget.RegisterStrings` перекрывает встроенные ru/en).
+кладётся последней в `SlotTray`, ширина — метрика `tray.showdesktop.width`,
+линия слева — метрика `tray.showdesktop.line` (цвет — часть `line` стиля
+`tray.showdesktop`). Кнопка центра уведомлений горит, пока центр открыт:
+`nb.Track(center)` (или `TrackManager`, `SetActive`). Флаг темы
+`tray.fill.strip` (Windows 10) растягивает значки трея и кнопку на всю высоту
+полосы: подсветка наведения во всю панель, сам значок по центру.
+
+Подсказки — строки `desktop.tray.showDesktop`, `desktop.tray.notificationCenter`,
+`desktop.tray.noNotifications` и счётчик `desktop.tray.notifications` с формами
+по числу (`.one/.few/.many/.other`, выбор — `desktop.PluralForm(язык, n)`: русские
+1 / 2–4 / 5+, английские 1 / остальные). Прежние ключи `ShowDesktop`,
+`NotificationCenter`, `NoNewNotifications`, `NewNotificationsCount` остаются
+алиасами: если приложение переопределило их, используется его строка. Язык —
+тот же `tr()` с `DefaultLanguage`, что у остальных компонентов (`widget.RegisterStrings`
+перекрывает встроенные ru/en).
+
+Оптические размеры значков (у Fluent свой рисунок для 16/20/24): в
+`theme.IconRef` — `Source: "wifi_{size}.svg"` и `Sizes: theme.IconSizes(16, 20, 24)`;
+`IconSet` берёт наименьший файл не меньше запрошенного (физического) размера,
+а для большего — наибольший (`IconRef.SourceFor`, `theme.OpticalSize`).
 
 SVG растеризуется **в физическом размере** (логический × масштаб холста), а не
 растягивается: на 125–200 % значок остаётся чётким. Так делают `SVGIcon`,

@@ -4096,8 +4096,11 @@ m.ResetAccent()                       // back to the profile's accent
 
 Derived tokens follow by themselves: `accent.hover`, `accent.pressed`,
 `accent.dark`, `accent.light` and `accent.text` (white or black by lightness).
-The choice survives a theme switch. Windows 2000 does not use the accent in its
-styles and stays as it is.
+The choice survives a theme switch. Windows 2000 follows the accent: the active
+window caption and the menu, Start, slider and selected-calendar-day highlights
+are token references (bit-identical without `SetAccent`; the grey palette and
+bevels stay). The blue variant (`Windows2000 Blue`) declares its own selection,
+so there only its caption follows the accent.
 
 The light Windows 10 taskbar is behind a flag, set in a profile or live; it is
 dark by default, as before:
@@ -4188,10 +4191,26 @@ bar.AddItem(desktop.SlotTray, ic)
 The notification-centre button with a counter is
 `desktop.NewNotificationButton(m, notifications)` (the number is `len(List())`,
 capped at "99+"); the "Show desktop" strip is `desktop.NewShowDesktopButton(m)`,
-added last in `SlotTray`, its width is the metric `tray.showdesktop.width`.
-Tooltips are the strings `ShowDesktop`, `NotificationCenter`,
-`NoNewNotifications`, `NewNotificationsCount` (`widget.RegisterStrings`
-overrides the built-in ru/en).
+added last in `SlotTray`, its width is the metric `tray.showdesktop.width`, the
+left line is the metric `tray.showdesktop.line` (colour — the `line` part of the
+`tray.showdesktop` style). The notification button lights up while the centre is
+open: `nb.Track(center)` (or `TrackManager`, `SetActive`). The theme flag
+`tray.fill.strip` (Windows 10) stretches the tray icons and the button to the
+full strip height: hover highlight over the whole bar, the glyph stays centred.
+
+Tooltips are the strings `desktop.tray.showDesktop`,
+`desktop.tray.notificationCenter`, `desktop.tray.noNotifications` and the counter
+`desktop.tray.notifications` with plural forms (`.one/.few/.many/.other`, chosen by
+`desktop.PluralForm(language, n)`: Russian 1 / 2-4 / 5+, English 1 / other). The old
+keys `ShowDesktop`, `NotificationCenter`, `NoNewNotifications`,
+`NewNotificationsCount` stay as aliases: if the app overrode them its string is
+used. The language is the same `tr()` with `DefaultLanguage` as the other
+components (`widget.RegisterStrings` overrides the built-in ru/en).
+
+Optical icon sizes (Fluent draws 16/20/24 separately): `theme.IconRef` takes
+`Source: "wifi_{size}.svg"` and `Sizes: theme.IconSizes(16, 20, 24)`; `IconSet`
+picks the smallest file not below the requested (physical) size, the largest for
+a bigger one (`IconRef.SourceFor`, `theme.OpticalSize`).
 
 SVG is rasterised **at physical size** (logical × canvas scale) instead of being
 stretched: on 125–200 % the icon stays sharp. `SVGIcon`, `desktop.TrayIcon` and

@@ -61,6 +61,46 @@ const (
 	diagonalThicknessDiv = 6
 )
 
+// KeyTrayFillStrip — признак темы: подсветка наведения значков трея и кнопки
+// центра уведомлений занимает всю высоту полосы панели (Windows 10), а не
+// квадрат значка. Сам значок при этом остаётся своего размера и стоит по
+// центру полосы.
+const KeyTrayFillStrip theme.Key = theme.KeyTrayFillStrip
+
+// stripFiller — значок трея, подсветка которого может занимать всю высоту
+// полосы. Контейнеры (Taskbar, SystemTray) растягивают такие значки по высоте,
+// когда тема просит; значки сторонних авторов, не знающие интерфейса,
+// остаются своего размера.
+type stripFiller interface {
+	fillsStrip() bool
+}
+
+// trayFillsStrip — просит ли тема подсветку на всю высоту полосы.
+func trayFillsStrip(tm *theme.Manager) bool {
+	return tm != nil && tm.GetFlag(KeyTrayFillStrip, false)
+}
+
+// stretchToStrip возвращает размер значка с высотой во всю полосу (h), если
+// значок и тема этого хотят; иначе размер как есть.
+func stretchToStrip(it Item, sz image.Point, h int) image.Point {
+	if f, ok := it.(stripFiller); ok && f.fillsStrip() && h > sz.Y {
+		sz.Y = h
+	}
+	return sz
+}
+
+// trayInner — область значка внутри границ b: обжатая отступами стиля и, если
+// границы выше значка (подсветка на всю полосу), сжатая до высоты значка и
+// поставленная по центру. Фигуры и глифы рисуются по ней, а подложка — по b.
+func trayInner(tm *theme.Manager, b image.Rectangle, s *theme.Style) image.Rectangle {
+	inner := shrinkByPad(b, s)
+	if size := trayIconSize(tm); size > 0 && inner.Dy() > size {
+		top := inner.Min.Y + (inner.Dy()-size)/2
+		inner = image.Rect(inner.Min.X, top, inner.Max.X, top+size)
+	}
+	return inner
+}
+
 // boolState переводит bool в 0|1 для атомарных полей hover/pressed —
 // см. widget.b2i (недоступен отсюда, пакет другой).
 func boolState(v bool) int32 {
@@ -395,6 +435,9 @@ func (n *NetworkItem) Close() {
 	}
 }
 
+// fillsStrip — подсветка на всю высоту полосы, если тема просит.
+func (n *NetworkItem) fillsStrip() bool { return trayFillsStrip(n.tm) }
+
 // PreferredSize — квадрат стороной из темы.
 func (n *NetworkItem) PreferredSize(image.Point) image.Point {
 	size := trayIconSize(n.tm)
@@ -427,7 +470,7 @@ func (n *NetworkItem) Draw(ctx widget.DrawContext) {
 	s := n.fade.tray(n.tm, ComponentNetwork, b, st)
 	PaintStyle(ctx, b, s)
 
-	inner := shrinkByPad(b, s)
+	inner := trayInner(n.tm, b, s)
 	if inner.Empty() {
 		return
 	}
@@ -536,6 +579,9 @@ func (v *VolumeItem) Close() {
 	}
 }
 
+// fillsStrip — подсветка на всю высоту полосы, если тема просит.
+func (v *VolumeItem) fillsStrip() bool { return trayFillsStrip(v.tm) }
+
 // PreferredSize — квадрат стороной из темы.
 func (v *VolumeItem) PreferredSize(image.Point) image.Point {
 	size := trayIconSize(v.tm)
@@ -568,7 +614,7 @@ func (v *VolumeItem) Draw(ctx widget.DrawContext) {
 	s := v.fade.tray(v.tm, ComponentVolume, b, st)
 	PaintStyle(ctx, b, s)
 
-	inner := shrinkByPad(b, s)
+	inner := trayInner(v.tm, b, s)
 	if inner.Empty() {
 		return
 	}
@@ -670,6 +716,9 @@ func (p *PowerItem) Close() {
 	}
 }
 
+// fillsStrip — подсветка на всю высоту полосы, если тема просит.
+func (p *PowerItem) fillsStrip() bool { return trayFillsStrip(p.tm) }
+
 // PreferredSize — квадрат стороной из темы; нулевая ширина, если батареи нет.
 func (p *PowerItem) PreferredSize(image.Point) image.Point {
 	if p.powerState().NoBattery {
@@ -709,7 +758,7 @@ func (p *PowerItem) Draw(ctx widget.DrawContext) {
 	s := p.fade.tray(p.tm, ComponentPower, b, st)
 	PaintStyle(ctx, b, s)
 
-	inner := shrinkByPad(b, s)
+	inner := trayInner(p.tm, b, s)
 	if inner.Empty() {
 		return
 	}

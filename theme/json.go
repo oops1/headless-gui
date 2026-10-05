@@ -33,6 +33,7 @@ type jsonProfile struct {
 	Icons map[string]struct {
 		Name   string `json:"name,omitempty"`
 		Source string `json:"source,omitempty"`
+		Sizes  string `json:"sizes,omitempty"`
 	} `json:"icons,omitempty"`
 	Anims map[string]struct {
 		DurationMS int    `json:"duration_ms,omitempty"`
@@ -150,7 +151,7 @@ func LoadTheme(r io.Reader) (*LoadResult, error) {
 		p.Fonts[Key(k)] = FontSpec{Family: v.Family, Size: v.Size, Bold: v.Bold, Italic: v.Italic, Weight: v.Weight}
 	}
 	for k, v := range jp.Icons {
-		p.Icons[Key(k)] = IconRef{Name: v.Name, Source: v.Source}
+		p.Icons[Key(k)] = IconRef{Name: v.Name, Source: v.Source, Sizes: v.Sizes}
 	}
 	for k, v := range jp.Anims {
 		p.Anims[Key(k)] = AnimSpec{

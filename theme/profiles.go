@@ -60,9 +60,8 @@ func Windows2000Profile() *Profile {
 	light := RGB(255, 255, 255)  // светлая грань фаски
 	shadow := RGB(128, 128, 128) // тёмная грань
 	dark := RGB(64, 64, 64)      // внутренняя тень
-	navy := RGB(10, 36, 106)     // заголовок активного окна
+	navy := RGB(10, 36, 106)     // акцент: заголовок активного окна и выделение
 	text := RGB(0, 0, 0)
-	selection := RGB(10, 36, 106)
 
 	p := NewProfile(ProfileWindows2000)
 	// Имя notificationcenter — продолжение notifications (см. Windows10Profile).
@@ -71,7 +70,6 @@ func Windows2000Profile() *Profile {
 		SetColor("surface", face).
 		SetColor("text", text).
 		SetColor("border", shadow).
-		SetColor("selection", selection).
 		SetColor("bevel.light", light).
 		SetColor("bevel.shadow", shadow).
 		SetColor("bevel.dark", dark)
@@ -161,14 +159,14 @@ func Windows2000Profile() *Profile {
 
 	p.SetStyle("menu", "", StateNormal, StyleDelta{Fill: C(face), Text: C(text), Bevel: bevel})
 	p.SetStyle("menu", "item", StateHover, StyleDelta{
-		Fill: C(selection), Text: C(RGB(255, 255, 255)),
+		FillFrom: KeySelection, TextFrom: KeyAccentText,
 	})
 	p.SetStyle("window", "", StateNormal, StyleDelta{Fill: C(face), Bevel: bevel})
 	p.SetStyle("window", "titlebar", StateNormal, StyleDelta{
 		Fill: C(RGB(128, 128, 128)), Text: C(RGB(212, 208, 200)),
 	})
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{
-		Fill: C(navy), Text: C(RGB(255, 255, 255)),
+		FillFrom: KeyAccent, TextFrom: KeyAccentText,
 	})
 
 	// Всплывающие панели — меню «Пуск», быстрые настройки, уведомления,
@@ -181,14 +179,14 @@ func Windows2000Profile() *Profile {
 			Bevel: &BevelSpec{Light: light, Shadow: shadow, Dark: dark},
 		})
 	}
-	p.SetStyle("startmenu", "", StateHover, StyleDelta{Fill: C(selection), Text: C(RGB(255, 255, 255))})
+	p.SetStyle("startmenu", "", StateHover, StyleDelta{FillFrom: KeySelection, TextFrom: KeyAccentText})
 	p.SetStyle("startmenu", "section", StateNormal, StyleDelta{Text: C(RGBA(128, 128, 128, 200)), PadX: N(4)})
 	p.SetStyle("quicksettings", "slider", StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
-	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{Fill: C(selection), Corner: N(0)})
+	p.SetStyle("quicksettings", "slider.fill", StateNormal, StyleDelta{FillFrom: KeySelection, Corner: N(0)})
 	for _, tile := range []string{"tile.network", "tile.volume", "tile.power"} {
 		p.SetStyle("quicksettings", tile, StateNormal, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
 		p.SetStyle("quicksettings", tile, StateActive, StyleDelta{
-			Fill: C(selection), Text: C(RGB(255, 255, 255)), Corner: N(0),
+			FillFrom: KeySelection, TextFrom: KeyAccentText, Corner: N(0),
 		})
 	}
 	// Карточка уведомления: рамка задаёт важность, заливка приходит из палитры.
@@ -209,10 +207,10 @@ func Windows2000Profile() *Profile {
 	p.SetStyle("calendar", "day", StateNormal, StyleDelta{Corner: N(0)})
 	p.SetStyle("calendar", "day", StateHover, StyleDelta{Fill: C(RGBA(128, 128, 128, 60)), Corner: N(0)})
 	p.SetStyle("calendar", "day", StateActive, StyleDelta{
-		Fill: C(selection), Text: C(RGB(255, 255, 255)), Corner: N(0),
+		FillFrom: KeySelection, TextFrom: KeyAccentText, Corner: N(0),
 	})
 	p.SetStyle("calendar", "day", StateFocused, StyleDelta{
-		Border: C(selection), BorderWidth: N(1), Corner: N(0),
+		BorderFrom: KeySelection, BorderWidth: N(1), Corner: N(0),
 	})
 	p.SetStyle("calendar", "day", StateDisabled, StyleDelta{Text: C(RGBA(128, 128, 128, 200))})
 	inheritTrayStyles(p)
@@ -227,12 +225,17 @@ func Windows2000BlueProfile() *Profile {
 	p.Parent = ProfileWindows2000
 
 	face := RGB(198, 210, 236)
+	// Заголовок окна идёт за акцентом (SetAccent его перекрашивает). Выделение
+	// меню в синей разновидности всегда было тёмно-синим, не акцентным: оно
+	// объявлено здесь явно, чтобы вид без SetAccent остался прежним, и поэтому
+	// остаётся решением профиля, когда акцент меняют.
 	p.SetColor("surface", face).
-		SetColor("accent", RGB(0, 84, 227))
+		SetColor("accent", RGB(0, 84, 227)).
+		SetColor("selection", RGB(10, 36, 106))
 	p.SetStyle("taskbar", "", StateNormal, StyleDelta{Fill: C(RGB(58, 110, 216))})
 	p.SetStyle("startbutton", "", StateNormal, StyleDelta{Fill: C(RGB(60, 152, 60))})
 	p.SetStyle("window", "titlebar", StateFocused, StyleDelta{
-		Fill: C(RGB(0, 84, 227)), Text: C(RGB(255, 255, 255)),
+		FillFrom: KeyAccent, TextFrom: KeyAccentText,
 	})
 	addDialogStyles(p)
 	return p
@@ -275,9 +278,11 @@ func Windows10Profile() *Profile {
 		// Толщина панели у бокового края: по ширине даты «14.03.2026».
 		SetMetric("taskbar.width", 62).
 		SetMetric("taskbar.pad.x", 0).
-		SetMetric("taskbar.gap", 2).
+		// Замеры Windows 10 при 100 %: элементы панели стоят вплотную, «Пуск»
+		// 48×40 со значком 16.
+		SetMetric("taskbar.gap", 0).
 		SetMetric("tray.icon.size", 16).
-		SetMetric("startbutton.icon.size", 18).
+		SetMetric("startbutton.icon.size", 16).
 		SetMetric("startbutton.icon.gap", 2).
 		SetMetric("startbutton.label.gap", 6).
 		SetMetric("startbutton.label.width", 40).
@@ -364,7 +369,7 @@ func Windows10Profile() *Profile {
 	// оттенки (56, 72 и 64).
 	hover, pressed, active := RGBA(255, 255, 255, 28), RGBA(255, 255, 255, 47), RGBA(255, 255, 255, 38)
 	p.SetStyle("startbutton", "", StateNormal, StyleDelta{
-		Fill: C(taskbarFill), Text: C(RGB(255, 255, 255)), PadX: N(10),
+		Fill: C(taskbarFill), Text: C(RGB(255, 255, 255)), PadX: N(16),
 	})
 	p.SetStyle("startbutton", "", StateHover, StyleDelta{Fill: C(hover)})
 	p.SetStyle("startbutton", "", StatePressed, StyleDelta{Fill: C(pressed)})
@@ -514,6 +519,7 @@ func Windows10Profile() *Profile {
 	}
 
 	inheritTrayStyles(p)
+	declareWin10Tray(p)
 	addDialogStyles(p)
 	return p
 }
