@@ -4322,6 +4322,23 @@ lets a consumer mutate the scene and produce the frame on one goroutine,
 removing that race by construction. `Frames()` keeps working: the sink is an
 alternative, not a replacement.
 
+#### When a channel consumer falls behind
+
+The `Frames()` channel is shallow (8 frames) and drops a frame on overflow.
+Since v3.31 a drop no longer goes unnoticed: frames are differences, and a
+consumer that lost one would lay the next ones over a picture it does not
+have. So as soon as there is room in the channel, the engine hands over the
+next frame **in full** — every tile of the canvas, even for an idle interface.
+A consumer that does not read the channel at all (it has a sink) gets no full
+frames.
+
+Each frame carries the canvas size it was taken for: `frame.Width`,
+`frame.Height` (physical pixels). After `SetResolution` or `SetScale` frames of
+the old size are dropped from the channel and the first frame of the new size
+is full. A consumer with its own buffer checks the size and skips a frame of
+another size — the window (`window`) does so: otherwise queued tiles of the old
+layout would land in the buffer of the new size.
+
 #### Vector kernels (Go experiment)
 
 The engine's hottest pixel loops — blending an alpha mask with a color (glyphs,

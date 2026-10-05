@@ -4042,6 +4042,51 @@ render loop on its own goroutine, so a consumer that mutates the widget tree
 from another goroutine races the render walk. External pacing lets it do both
 on one goroutine and remove the race by construction.
 
+### A lagging channel consumer, and frames of another size — v3.31
+
+Frames are differences against the previous frame. The channel used to drop a
+frame silently on overflow while the engine's `front` already matched it, so
+every following frame was a difference against a picture the consumer never
+got. A window lagging during a resize kept the old layout forever (WinLine
+calculator: 1920-wide keys in an 851-wide window after maximize/restore).
+
+Now (`engine/fullframe.go`):
+
+- a drop sets `lostFrame`; the next frame rendered while the channel has room
+  is FULL — all tiles via `Canvas.allTiles()`, no diff — and the ticker renders
+  it even when nothing changed (`fullFramePending`);
+- `SetResolution` / `SetScale` drain the channel (frames of the old size are
+  useless) and mark the next frame full;
+- `output.Frame.Width`, `Height` — canvas size (physical px) the frame was
+  taken for; zero = unknown (not produced by the engine);
+- the window's `applyFrame` skips a frame whose size differs from the canvas
+  its buffer was made for, under the same lock that `resizeTo` uses to swap
+  the buffer; in `FitScale` it compares with the canvas, not the letterboxed
+  buffer;
+- a consumer that never reads the channel (sink-only) pays nothing: its
+  channel never has room, so no full frames are rendered.
+
+Tests: `engine/fullframe_test.go` — a consumer 100 ms slower than the engine,
+resizes 851→1920→851 and scale 1→2→1 with mouse activity; after settling its
+buffer equals `front` byte for byte. Without the fix 60–270 KB differ.
+
+### Pointer leaving the window — v3.31
+
+`wl_pointer.leave` (main surface or popup) and X11 `LeaveNotify` now deliver a
+move to (-1,-1), as Win32 already did on `WM_NCMOUSELEAVE`: hover and tooltips
+clear the same way as when the mouse crosses the edge. X11 adds `LeaveWindow`
+to the event mask; `NotifyInferior` and `NotifyUngrab` are ignored
+(`window/pointerleave.go`).
+
+### Rounded window corners on Wayland — v3.31
+
+A top-level with `CornerRadius > 0` gets an ARGB8888 shm buffer; after the
+usual conversion the four corners are masked (`window/cornermask.go`): outside
+the arc (0,0,0,0), on it a premultiplied partial alpha. `set_opaque_region`
+covers the window minus the corners. A maximized or fullscreen window is not
+rounded and fully opaque; windows without a radius stay XRGB. X11 and Win32 are
+unchanged (X11 would need an ARGB visual and a compositing manager).
+
 ### Measured cost of a frame
 
 Desktop scene from `desktop/` at 1280×800, Windows 11 theme, fake system data
