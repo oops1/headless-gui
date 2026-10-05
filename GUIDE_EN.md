@@ -3471,6 +3471,26 @@ state (`IsNavCollapsed`, `SetNavCollapsed`) and calls `OnNavToggle`.
 `SetNavIcons`, `OnNavToggle`. The widget in the bar is the one child of a window
 that is not stretched to the client area: its geometry comes from the bar.
 
+**Window icon and the system menu.** `win.SetIcon(img)` (or `SetIconSVG(data)`)
+puts an icon left of the caption — not to be confused with `SetNavIcons`, which
+is the icon of the panel collapse button. The caption moves aside by itself; the
+size comes from the theme (metric `window.caption.icon.size`, 16 in Windows
+2000). A click on the icon opens the system menu (Restore, Move, Size, Minimize,
+Maximize, Close — labels through `Tr`, actions on `OnMinimize` / `OnMaximize` /
+`OnClose` / `OnNativeMove` / `OnNativeResize`); a double click closes the
+window. Your own items: `win.SetSystemMenu(items)`, the starting list is
+`win.SystemMenuItems()`.
+
+**A press on the title bar belongs to the window.** The window asks for the
+mouse capture on every press in the bar (to drag itself), and the engine looks
+for the capturer from the deepest child up: a widget lying over the title bar
+gets the press only if it returned `true` from its own `WantsCapture`; otherwise
+the press goes to the window. If the widget does not need the capture (a plain
+button), implement `OwnsTitleBarPress(pt image.Point) bool`
+(`widget.TitleBarPressOwner`) or give the window
+`win.SetTitleBarHitTest(func(pt) bool)` for an area no widget owns: such a press
+takes the ordinary path and does not drag the window.
+
 **The mac title-bar layout does not offer this mode.** The window buttons sit on
 the left and the caption is centered, so an application widget would have to be
 squeezed between them — no macOS window has a bar like that. There

@@ -1526,6 +1526,17 @@ fires on **release** only if the cursor is still over the same button.
 Releasing off the button (or moving away first) cancels the action without
 firing. This lets a user abort a close/minimize/maximize by dragging away.
 
+### A Child Over a Window's Title Bar Gets the Press Only If It Owns It
+
+`Window.WantsCapture` answers true to every left press in the title bar (the window
+drags itself by it), and the engine asks for a capturer from the deepest child up.
+A button or label you lay over the bar without `WantsCapture` therefore never sees
+the press — the window starts a drag. Either return true from your own
+`WantsCapture`, or (no mouse capture needed) implement
+`widget.TitleBarPressOwner.OwnsTitleBarPress(pt) bool`, or give the window
+`SetTitleBarHitTest(func(pt) bool)`. Details: "Window caption" near the end of this
+file.
+
 ### DrawContext is Only Valid Inside Draw()
 
 You **cannot** cache or use `DrawContext` outside the `Draw()` call:
@@ -6947,6 +6958,134 @@ dd.ArrowStyle = widget.ArrowChevron        // ArrowAuto (theme decides) | ArrowT
 panel.SetBackgroundRole(widget.BackgroundPanel) // StackPanel/DockPanel follow Theme.PanelBG / WindowBG;
                                                 // XAML Background="{Theme PanelBG}"
 ```
+
+---
+
+## Window caption: gradient, metrics, window icon, system menu, title-bar presses (next minor)
+
+Answers the WinLine remarks on the classic Windows 2000 window
+(`pkg/apps/terminal/classic.go`). Public API is additive; Windows 10, Windows 11
+and macOS windows render byte-identical to before (checked on rendered frames
+active and inactive); Windows 2000 changed only where the remarks ask.
+
+**Title gradient.** The Windows 2000 profile declares the second point of the
+caption gradient: flat tokens `window.titlebar.gradient2` (#A6CAF0) and
+`window.titlebar.gradient2.inactive` (#C0C0C0); the first points are the fills of
+`window/titlebar` (navy / grey #808080). `widget.Window` already drew a gradient
+whenever `Theme.TitleBG2` was set — only the profile never filled it.
+`theme.KeyWindowTitleGradient2` / `KeyWindowTitleGradient2Inactive` name the keys.
+After `Manager.SetAccent` the active gradient ends at `accent.light`
+(`Profile.SetColorFrom`, below); `ResetAccent` brings #A6CAF0 back. The inactive
+grey never follows the accent. `Windows2000 Blue` inherits both.
+
+```go
+// Profile.SetColorFrom(k, from): token k follows token `from` when the application
+// overrides the accent. Without SetAccent the value declared with SetColor stays
+// (bit-identical look); a token the profile did not declare is taken from `from`
+// even without SetAccent. A child profile's reference overrides its parent's;
+// a missing source cancels the reference. Counts in Profile.TokenCount.
+p.SetColor(theme.KeyWindowTitleGradient2, theme.RGB(166, 202, 240)).
+    SetColorFrom(theme.KeyWindowTitleGradient2, theme.KeyAccentLight)
+```
+
+**Caption metrics.** Theme metrics, read by `widget.Window` through
+`ThemeStyle` (`Materialize` / `ProfileFromTheme` carry them both ways; 0 = not
+declared = old look):
+
+| metric (`theme.Key…`) | `ThemeStyle` | Windows 2000 | without |
+|---|---|---|---|
+| `window.titlebar.height` (`KeyWindowTitleBarHeight`) | `TitleBarHeight` | 18 | 32 (24 classic) |
+| `window.caption.button.w` / `.h` | `CaptionButtonW/H` | 16 × 14 | square, `height-6` (18×18) |
+| `window.caption.icon.size` | `CaptionIconSize` | 16 | 16 |
+
+Rules: an explicit `Window.TitleBarHeight` beats the metric; title tabs
+(`EnableTitleTabs`) ignore it (tabs need the room); the buttons are centered
+vertically in the bar (18 − 14 → 2 px, the old 24 − 18 → 3 px). Only
+`widget.Window` reads them — `Dialog` keeps its own title height. A Windows 2000
+window now has an 18 px bar, 16×14 buttons, frame 5, content starts at
+`frame + 18`. The locale badge (`ShowLocaleIndicator`) is one pixel taller on bars
+under 20 px (`bar-3`, was `bar-4`) so its text no longer touches the bottom border.
+
+**Window icon and system menu** (`widget/window_icon.go`).
+
+```go
+win.SetIcon(img)                 // image.Image, scaled to the metric size; nil removes
+win.SetIconSVG(svgBytes) error   // rasterized at the physical size; currentColor = caption text
+win.HasIcon(); win.IconBounds()  // absolute rect, empty when hidden (mac layout, no bar)
+// The caption moves behind the icon by itself (titleTextLeft, also for
+// TitleBarContentBounds and title tabs); the nav button ("≡") goes after the icon.
+// Icon: 2 px from the bar edge on classic, 8 on the others; vertically centred.
+// Windows layout only: in the mac layout the buttons sit left and there is no icon.
+
+// A press on the icon opens the system menu (on the PRESS, like Windows); a second
+// press on the open menu closes it (PopupMenu.Toggle). A DOUBLE click calls OnClose.
+// The press does not drag the window.
+items := win.SystemMenuItems() // []MenuItem: Restore, Move, Size, Minimize, Maximize, —, Close (Alt+F4)
+win.SetSystemMenu(items)       // your own list (build it from the default one); nil = default;
+                               // an empty non-nil slice removes the menu (icon = a picture, drags the window)
+win.SystemMenu() *PopupMenu; win.OpenSystemMenu() bool
+win.SetMaximized(true); win.IsMaximized() // host state; window.Window reports it on every resize
+```
+
+Labels go through `widget.Tr` (`win.sys.restore|move|size|minimize|maximize|close`,
+EN and RU built in, live language switching on the next open). Actions use what
+the window already has: Restore and Maximize call `OnMaximize` (the host toggles);
+Minimize `OnMinimize`; Close `OnClose`; Move `OnNativeMove`; Size
+`OnNativeResize(NativeEdgeBottom|NativeEdgeRight)`. An item without its handler
+(or a button the window does not have: `Resize`, `Style`) is shown DISABLED, not
+removed, so the menu does not jump from window to window; Move/Size exist only in
+a host that can move a window by the OS (Wayland) — elsewhere they stay grey and
+the window is dragged by its caption. The default list is rebuilt on every open;
+a list you set is yours (its `Disabled` flags are not recomputed).
+
+**Who owns a press on the title bar** (the unobvious part, `widget/titlebar_hit.go`).
+`Window.WantsCapture` answers true to every left press in the bar — the window
+drags itself by it — and the engine looks for a capturer from the DEEPEST child up
+to the root. A child lying over the bar therefore gets the press only if its own
+`WantsCapture` returns true; otherwise the press goes to the window and starts a
+drag, and the child never sees it. Built-in exceptions the window knows itself:
+the collapse button, `SetTitleBarContent`, the window icon, the caption buttons,
+title tabs. Two explicit ways for the rest, neither needs a mouse capture and
+neither changes an existing application:
+
+```go
+// 1. The child says "presses on me are mine" (any descendant of the window, any depth).
+func (b *MyBtn) OwnsTitleBarPress(pt image.Point) bool { return pt.In(b.Bounds()) }  // widget.TitleBarPressOwner
+// 2. The application decides by point (areas drawn by the app, widgets you cannot change).
+win.SetTitleBarHitTest(func(pt image.Point) bool { return pt.In(searchArea) }); win.SetTitleBarHitTest(nil)
+```
+
+The press then takes the ordinary path (deepest widget first, bubbling up) and the
+window does not start a drag; the question is asked only for points inside the bar.
+Keep `WantsCapture` when the widget needs the mouse AFTER the press (slider, text
+selection, release semantics of a button). `AddDragArea` still beats everything.
+
+**`PopupMenu.DismissedByPress()` and `Toggle`.** The engine dismisses open menus
+outside the click path BEFORE the press reaches widgets, so a button that opens a
+menu finds it already closed and would reopen it — the menu could not be closed by
+pressing its button again. `DismissedByPress()` is true when the press being handled
+is the one that dismissed the menu. The "time window" is ONE PRESS, not a duration
+(unlike `desktop.Flyout.DismissedByAnchor`): true from the dismissal until the next
+press begins (`widget.CurrentPressSeq`, bumped by the engine), so it does not depend
+on the user's speed, and a menu closed by Esc does not make the button lose the next
+press. Without an engine (unit tests) there are no presses and it is always false.
+`Toggle(x, y)` is the usual button body: open → close; just dismissed by this press →
+do nothing; else `Show(x, y)`; returns whether the menu is open afterwards. The tab
+strip chevron and the system menu use it.
+
+Also fixed on the way: a menu built from a built-in Windows profile
+(`Materialize(Windows2000/Windows10)`) drew its DISABLED items with a transparent
+text (the flat token `disabled.default` is not declared there) — `Materialize` now
+takes the colour from `menu.item` in the Disabled state (only when the flat token
+and the menu style do not carry one).
+
+Tests: `theme/window_title_test.go` (gradient, accent following, `SetColorFrom`,
+metrics, other profiles untouched), `tests/window_caption_test.go` (gradient pixels
+active / inactive / accent, 18 px bar and 16×14 buttons, hit-test of the small
+button, old geometry without metrics, bridge round trip, icon placement and pixels,
+caption shift, SVG, system menu items / languages / callbacks / click / toggle /
+double click / custom list, press owner, `SetTitleBarHitTest`,
+`DismissedByPress`+`Toggle`).
 
 ---
 

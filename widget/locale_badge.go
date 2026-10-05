@@ -27,6 +27,12 @@ func drawLocaleBadge(ctx DrawContext, rightX, top, barH int, fg color.RGBA) imag
 	badgeH := localeBadgeHeight
 	if badgeH > barH-4 && barH > 4 {
 		badgeH = barH - 4
+		// В низкой полосе (заголовок Windows 2000 — 18 px) плашка в barH-4
+		// оставляла 13-точечному тексту ровно её высоту, и «EN» упиралось в
+		// нижнюю рамку: берём на точку выше.
+		if barH < 20 {
+			badgeH = barH - 3
+		}
 	}
 
 	bx := rightX - badgeW

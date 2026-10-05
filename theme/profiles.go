@@ -74,8 +74,23 @@ func Windows2000Profile() *Profile {
 		SetColor("bevel.shadow", shadow).
 		SetColor("bevel.dark", dark)
 
+	// Градиент заголовка: тёмно-синий акцента → светло-голубой #A6CAF0 у
+	// активного окна, серый → светло-серый у неактивного (первые точки —
+	// заливки стиля window/titlebar ниже). После SetAccent вторая точка
+	// следует за светлым оттенком акцента: без этого градиент уходил бы из
+	// выбранного цвета в прежний голубой.
+	p.SetColor(KeyWindowTitleGradient2, RGB(166, 202, 240)).
+		SetColor(KeyWindowTitleGradient2Inactive, RGB(192, 192, 192)).
+		SetColorFrom(KeyWindowTitleGradient2, KeyAccentLight)
+
 	p.SetMetric("control.corner", 0).
 		SetMetric("window.corner", 0).
+		// Заголовок окна Windows 2000 — 18 px, кнопки управления 16×14, значок
+		// 16. Без метрик классическое окно рисует заголовок 24 px и кнопки 18×18.
+		SetMetric(KeyWindowTitleBarHeight, 18).
+		SetMetric(KeyWindowCaptionButtonW, 16).
+		SetMetric(KeyWindowCaptionButtonH, 14).
+		SetMetric(KeyWindowCaptionIconSize, 16).
 		SetMetric("control.pad.x", 8).
 		SetMetric("control.pad.y", 4).
 		SetMetric("taskbar.height", 28).

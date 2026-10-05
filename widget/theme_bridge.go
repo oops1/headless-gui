@@ -156,9 +156,13 @@ func ProfileFromTheme(t *Theme) *theme.Profile {
 		p.Fonts[keyFontDefault] = theme.FontSpec{Size: t.Style.DefaultFontSize}
 	}
 	for k, v := range map[theme.Key]int{
-		keyScrollbarWidth:          t.Style.ScrollbarWidth,
-		keyScrollbarThinWidth:      t.Style.ScrollbarThinWidth,
-		keyScrollbarThinHoverWidth: t.Style.ScrollbarThinHoverWidth,
+		keyScrollbarWidth:              t.Style.ScrollbarWidth,
+		keyScrollbarThinWidth:          t.Style.ScrollbarThinWidth,
+		keyScrollbarThinHoverWidth:     t.Style.ScrollbarThinHoverWidth,
+		theme.KeyWindowTitleBarHeight:  t.Style.TitleBarHeight,
+		theme.KeyWindowCaptionButtonW:  t.Style.CaptionButtonW,
+		theme.KeyWindowCaptionButtonH:  t.Style.CaptionButtonH,
+		theme.KeyWindowCaptionIconSize: t.Style.CaptionIconSize,
 	} {
 		if v > 0 {
 			p.SetMetric(k, float64(v))
@@ -230,7 +234,22 @@ func Materialize(rt *theme.Theme) *Theme {
 
 		TextSubpixel: rt.FlagOr(theme.FlagTextSubpixel, false),
 
+		TitleBarHeight:  int(rt.MetricOr(theme.KeyWindowTitleBarHeight, 0)),
+		CaptionButtonW:  int(rt.MetricOr(theme.KeyWindowCaptionButtonW, 0)),
+		CaptionButtonH:  int(rt.MetricOr(theme.KeyWindowCaptionButtonH, 0)),
+		CaptionIconSize: int(rt.MetricOr(theme.KeyWindowCaptionIconSize, 0)),
+
 		Menu: menuStyleOf(rt, false),
+	}
+	// Недоступный пункт меню. Плоская тема несёт его цвет токеном
+	// "disabled.default", но встроенные профили Windows его не объявляют, а
+	// объявляют "menu.item" в состоянии Disabled — и меню из такой темы рисовало
+	// недоступный пункт прозрачным текстом: пункт пропадал вовсе.
+	if t.Disabled.A == 0 && t.Style.Menu.Disabled.A == 0 {
+		base := rt.Style("menu", "", theme.StateNormal)
+		if dis := rt.Style("menu", "item", theme.StateDisabled); dis.Text.A != 0 && dis.Text != base.Text {
+			t.Style.Menu.Disabled = dis.Text
+		}
 	}
 	// Мягкие тени — только если профиль объявил токены (ShadowBlur > 0):
 	// иначе компоненты остаются на прежней тени.
