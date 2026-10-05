@@ -92,8 +92,11 @@ func classicHash(t *testing.T, name string) string {
 // Снимки сняты на профилях ДО замены литералов акцента ссылками.
 func TestClassic_LookIsBitIdenticalWithoutSetAccent(t *testing.T) {
 	want := map[string]string{
-		theme.ProfileWindows2000:     "6e38def94d5286e3",
-		theme.ProfileWindows2000Blue: "d4da5b1d98443b59",
+		// Хэши включают стили заголовка и затемнения диалога
+		// (theme/dialogstyles.go): они добавлены намеренно, без них хэши
+		// были 6e38def94d5286e3 и d4da5b1d98443b59.
+		theme.ProfileWindows2000:     "55f17c214cf64e74",
+		theme.ProfileWindows2000Blue: "19fa4cc9bf21998b",
 	}
 	for name, hash := range want {
 		if got := classicHash(t, name); got != hash {
