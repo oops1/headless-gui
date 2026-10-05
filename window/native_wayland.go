@@ -268,6 +268,12 @@ type WaylandWindow struct {
 	// новом окне композитор растянул бы, и ресайз шёл бы рывками.
 	pendingResize bool
 
+	// cornerR — скругление углов окна в логических точках (SetCornerRadius);
+	// не ноль — буфер ARGB с прозрачными углами (cornermask.go).
+	cornerR atomic.Int32
+	// poolARGB — пул создан в формате ARGB8888. Пишется в setupPool.
+	poolARGB bool
+
 	// staleSkipped — сколько кадров прежнего размера не показано, пока ответ
 	// на configure с размером был в пути (skipStaleFrame). Счёт на всю жизнь
 	// окна: пропуск — мера против окна неверного размера, а не ожидание.
@@ -1148,8 +1154,14 @@ func (w *WaylandWindow) SetOnKeyDownRepeat(fn func(vk int, repeat bool)) {
 
 // ─── SHM-пул и блит ─────────────────────────────────────────────────────────
 
-// setupPool создаёт memfd-пул на два буфера width×height (XRGB8888).
+// setupPool создаёт memfd-пул на два буфера width×height: XRGB8888, а у окна
+// со скруглением — ARGB8888 (прозрачные углы, cornermask.go).
 func (w *WaylandWindow) setupPool(width, height int) error {
+	format := uint32(wlShmFormatXRGB8888)
+	argb := w.wantARGB()
+	if argb {
+		format = wlShmFormatARGB8888
+	}
 	stride := width * 4
 	size := stride * height * 2 // два кадровых буфера
 
@@ -1169,6 +1181,7 @@ func (w *WaylandWindow) setupPool(width, height int) error {
 
 	w.shmFD, w.shmData = fd, data
 	w.stride, w.poolW, w.poolH = stride, width, height
+	w.poolARGB = argb
 
 	w.poolID = w.newID()
 	w.send(newWlMsg(w.shmID, wlShmCreatePool).putUint(w.poolID).putInt(int32(size)), fd)
@@ -1179,7 +1192,7 @@ func (w *WaylandWindow) setupPool(width, height int) error {
 			putInt(int32(i*stride*height)).
 			putInt(int32(width)).putInt(int32(height)).
 			putInt(int32(stride)).
-			putUint(wlShmFormatXRGB8888), -1)
+			putUint(format), -1)
 	}
 	return nil
 }
@@ -1191,7 +1204,7 @@ func (w *WaylandWindow) setupPool(width, height int) error {
 // пересоздаётся — так под Wayland поступают все клиенты.
 func (w *WaylandWindow) ensurePool(width, height int) error {
 	w.mu.Lock()
-	same := w.poolID != 0 && w.poolW == width && w.poolH == height
+	same := w.poolID != 0 && w.poolW == width && w.poolH == height && w.poolARGB == w.wantARGB()
 	w.mu.Unlock()
 	if same {
 		return nil
@@ -1337,13 +1350,15 @@ func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 		return
 	}
 	// Кадр другого размера — это ресайз: пул перестраивается под него, и
-	// область рисуется целиком (в новых буферах нет ничего).
-	if b.Dx() != w.poolW || b.Dy() != w.poolH {
+	// область рисуется целиком (в новых буферах нет ничего). То же, когда
+	// окно получило или потеряло скругление: формат буфера другой.
+	if b.Dx() != w.poolW || b.Dy() != w.poolH || w.poolARGB != w.wantARGB() {
 		if err := w.ensurePool(b.Dx(), b.Dy()); err != nil {
 			wlLog("пул под %dx%d: %v", b.Dx(), b.Dy(), err)
 			return
 		}
 		dirty = b
+		w.applyOpaqueRegion(b.Dx(), b.Dy())
 	}
 	if w.shmData == nil {
 		return
@@ -1368,6 +1383,9 @@ func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 
 	base := idx * w.stride * w.poolH
 	convRectBGRX(w.shmData[base:], w.stride, img.Pix, img.Stride, area)
+	if w.poolARGB {
+		applyCornerMask(w.shmData[base:], w.stride, w.poolW, w.poolH, w.maskRadius(), area)
+	}
 	w.attachAndCommit(area)
 }
 
@@ -1439,7 +1457,58 @@ func (w *WaylandWindow) SetSize(width, height int)  { w.width, w.height = width,
 func (w *WaylandWindow) GetSize() (int, int)        { return w.width, w.height }
 func (w *WaylandWindow) SetPosition(x, y int)    {} // Wayland: позицией владеет композитор
 func (w *WaylandWindow) GetPosition() (int, int) { return 0, 0 }
-func (w *WaylandWindow) SetCornerRadius(int)     {}
+// SetCornerRadius задаёт скругление углов окна (логические точки). Со
+// скруглением буфер окна — ARGB с прозрачными углами; пул пересоздаётся на
+// следующем кадре.
+func (w *WaylandWindow) SetCornerRadius(r int) {
+	if r < 0 {
+		r = 0
+	}
+	w.cornerR.Store(int32(r))
+}
+
+// wantARGB — окну нужен буфер с альфой.
+func (w *WaylandWindow) wantARGB() bool { return w.cornerR.Load() > 0 }
+
+// maskRadius — радиус маски в пикселях буфера. Развёрнутое и полноэкранное
+// окно не скругляется: оно прилегает к краям экрана и непрозрачно целиком.
+func (w *WaylandWindow) maskRadius() int {
+	if w.maximized.Load() || w.fullscreen.Load() {
+		return 0
+	}
+	return int(float64(w.cornerR.Load())*w.scaleFactor() + 0.5)
+}
+
+// applyOpaqueRegion сообщает компоновщику непрозрачную часть окна, чтобы он
+// не смешивал с фоном всё окно ради четырёх углов. Без скругления — всё окно.
+// Применяется вместе с ближайшим commit.
+func (w *WaylandWindow) applyOpaqueRegion(pw, ph int) {
+	if w.compositorID == 0 || w.surfaceID == 0 {
+		return
+	}
+	sw, sh := w.toSurface(pw), w.toSurface(ph)
+	sr := 0
+	if w.wantARGB() {
+		sr = w.toSurface(w.maskRadius())
+	}
+	sr = min(sr, sw/2, sh/2)
+	rid := w.newID()
+	w.send(newWlMsg(w.compositorID, wlCompositorCreateRegion).putUint(rid), -1)
+	add := func(x, y, rw, rh int) {
+		if rw > 0 && rh > 0 {
+			w.send(newWlMsg(rid, wlRegionAdd).
+				putInt(int32(x)).putInt(int32(y)).putInt(int32(rw)).putInt(int32(rh)), -1)
+		}
+	}
+	if sr == 0 {
+		add(0, 0, sw, sh)
+	} else {
+		add(0, sr, sw, sh-2*sr) // полоса без углов по высоте
+		add(sr, 0, sw-2*sr, sh) // и по ширине
+	}
+	w.send(newWlMsg(w.surfaceID, wlSurfaceSetOpaqueRegion).putUint(rid), -1)
+	w.send(newWlMsg(rid, wlRegionDestroy), -1)
+}
 
 // ─── Перемещение, размер и состояние окна (xdg_toplevel) ─────────────────────
 //
