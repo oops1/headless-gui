@@ -4183,6 +4183,50 @@ eng.SetMotionReduce(m, true)   // Manager.SetFlag + ApplyThemeProfile + видж
 координацию «Пуска» и быстрых настроек по мониторам и выбор масштаба для
 каждого монитора решает потребитель.
 
+#### Центр уведомлений и календарь Windows 11
+
+Профиль Windows 11 рисует центр уведомлений карточками, а календарь — отдельной
+скруглённой карточкой под ним (ширина 364, скругление 8 у панелей и 4 у карточек).
+Компоненты те же — `NotificationCenter` и `CalendarFlyout`; вид выбирает
+презентер профиля, имени темы они не знают, смена темы, акцента и языка на
+открытых панелях ничего не пересоздаёт. Центр: заголовок «Уведомления», колокольчик
+«Не беспокоить» и «Очистить все» (неактивна при пустом списке); карточка со
+строкой приложения (значок, название, время), заголовком, текстом, раскрытием,
+крестиком и действиями четырёх видов; группа — заголовок со счётчиком, если
+уведомлений приложения несколько. Календарь: «понедельник, 5 октября», месяц,
+‹ ›, сегодня — круг акцента, свернуть/развернуть и модуль «Фокусировка».
+
+```go
+center := desktop.NewNotificationCenter(m, notes)
+cal := desktop.NewCalendarFlyout(m, desktop.SystemClock{})
+center.Screen, cal.Screen = screen, screen
+
+dnd := desktop.NewDoNotDisturb(false)    // одна модель на центр, тост и кнопку трея
+center.SetDoNotDisturb(dnd)
+toast.SetDoNotDisturb(dnd)               // пока режим включён, тост молчит
+
+cal.SetFocusSession(session)             // desktop.FocusSession от потребителя
+cal.Ticker = func(d time.Duration, f func()) func() { t := eng.Every(d, f); return t.Stop }
+
+group := desktop.LinkNotificationCenter(center, cal) // центр над календарём, закрываются вместе
+fm.Register("calendar", cal)             // обе панели — в менеджере панелей
+fm.Register("notifications", center)
+clock.OnClick = func() { group.OpenAll(clock.Bounds()) } // от часов и от колокольчика
+```
+
+`FocusSession` — состояние (`Duration`, `Running`, `EndsAt`) и действия (`SetDuration`,
+`Start`, `Stop`, `Subscribe`) от потребителя; что фокусировка делает (включает
+«Не беспокоить», глушит звук), решает он. Календарь рисует выбор длительности
+(`−` / `+` по 5 минут, 5–240) и «Начать», а идущий сеанс — отсчёт, полосу
+прогресса и «Остановить»; секундная перерисовка идёт, пока календарь открыт, и
+перерисовывает только модуль. `desktop.NewFakeFocusSession(clock)` — готовая
+модель для демо. На низком экране календарь остаётся свёрнутым, пока центру над
+ним не хватает места; выбор пользователя (`Collapsed`) не меняется. С клавиатуры:
+Tab ходит по центру, затем по календарю (кнопки, сетка дней — стрелки двигают день,
+Enter выбирает), Enter/Space нажимают, PgUp/PgDn листают месяцы, Esc закрывает обе панели. Строки — ключи `desktop.notif.title|dnd`,
+`desktop.focus.*`, `desktop.cal.headDate|weekdayLong.N` (RU/EN, `widget.Tr`;
+`DateCulture` может дополнительно реализовать `DateHeaderCulture`).
+
 #### Панель задач и её компоненты
 
 ```go

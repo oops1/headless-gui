@@ -4935,10 +4935,12 @@ Tests: `tests/defaultfont_theme_test.go`.
 `desktop.NotificationCenter` stays one component; a profile picks its look through
 a presenter (`Profile.Presenters["notificationcenter"] = theme.NotificationCenterPresenter`,
 set by the Windows 10 profile and inherited by its dark variant). The component
-asks `PresenterFor(tm, "notificationcenter")`, never the theme name. Windows 11,
-Windows 2000 and macOS keep the flat list (rendered frames are byte-identical to
-before; checked on 4 themes x 4 panels). The flat tests of the repo run under
-Windows 11 for that reason.
+asks `PresenterFor(tm, "notificationcenter")`, never the theme name. Windows 2000
+and macOS keep the flat list (rendered frames are byte-identical to before;
+checked on 4 themes x 4 panels). Windows 11 has its own presenter since the
+next minor (see "Notification center and calendar of Windows 11" below); the
+flat tests of the repo run under `flatNotifTheme` — Windows 11 without the
+centre and calendar presenters.
 
 Rich variant, all sizes are metrics `notificationcenter.*` (`theme/profiles_win10_notify.go`):
 the panel is `width` (396) wide, glued to the right screen edge and spans from the
@@ -5028,7 +5030,7 @@ mouse is over it, cross hides only the toast, actions work as in the center. It 
 NOT registered in `FlyoutManager` (opening it must not close the Start menu) and is
 added to the root after the manager; `toast.Suppress(center)` keeps it quiet while
 the center is open; only themes with the presenter show it. In the flat themes
-(Windows 11, Windows 2000, macOS) the toast is intentionally NOT shown: there is
+(Windows 2000, macOS) the toast is intentionally NOT shown: there is
 no rich card to pop up (a shell that needs a pop-up there can use the tray
 balloon, see "Tray, balloon notifications"). It is a limitation of the flat
 variant, not a bug.
@@ -5045,6 +5047,124 @@ drag, severity), `theme/profiles_win10_notify_test.go`,
 `dark_card_expanding`, `dark_group_collapsing`, `dark_quick_expanding`,
 `*_scrollbar_drag`, `*_severity`). A test that toggles a card, a group or the grid
 finishes the animation first (`finishAnimations()`), because the theme animates.
+
+### Notification center and calendar of Windows 11 — `desktop/notifyview_w11.go`, `notificationcenter_win11.go`, `calendarflyout_win11.go` (next minor)
+
+Third presenter of `desktop.NotificationCenter` (next to flat and Windows 10) and a
+Windows 11 look of `desktop.CalendarFlyout` with a "Focus" module. Public API is
+additions only; Windows 10, Windows 2000 and macOS frames are unchanged (checked
+with `SNAP_OUT` before/after: only `Windows11*__notify` and `Windows11*__calendar`
+differ; flat `__notify` hashes of the base commit itself differ run to run, the raw
+pixels of an isolated frame are identical).
+
+**Choosing the look.** Profile `Windows11Profile` sets
+`Presenters["notificationcenter"] = theme.NotificationCenterWin11Presenter` and
+`Presenters["calendar"] = theme.CalendarWin11Presenter` (`theme/profiles_win11_notify.go`,
+`declareWin11Notifications`, called before `declareWin11Materials` because that
+one switches the material off for every part declared before it). The components
+ask the presenter name of their own component (`richView.w11()`, `CalendarFlyout.win11()`),
+never the theme name. A theme switch on open panels re-lays them out without
+re-creating anything (tested: Win11 light → dark → Win10 → Win11).
+
+**Center.** Card 364 wide (`notificationcenter.width`), radius 8 from the panel
+style, glued to the right edge of the work area with `notificationcenter.edge` (12);
+its bottom is `notificationcenter.stack.gap` (8) above the calendar when the
+calendar is linked and open, otherwise `edge` above the bar (`w11Area`: `WorkArea`,
+else `Screen` cut at the anchor). Height = content (header 52 + list + pad), capped
+by the free space; empty list = `list.min` under the "No new notifications" label.
+Header: "Notifications" (font `heading`), bell "Do not disturb" (zone `zoneDND`,
+part `headbtn`, `headbtn.on` + slash when on) and "Clear all" (inactive and without
+a hit zone while the list is empty). Cards (radius 4, part `card`): app row (icon,
+name, time) for a single notification; title; text (2 lines, 8 expanded); chevron
+(expand) and cross (the cross replaces the time under the pointer); the four action
+kinds exactly as in Windows 10 (shared `layoutActions`, zones, dropdown, reply);
+severity strip inset from the rounded corners. A group exists only for 2+
+notifications of one app: header with icon, name, count pill (`pill`), chevron and
+cross; its cards drop the app row and carry the time in their title row. The list
+scrolls (thin thumb), expand/collapse use `notification.expand` (150 ms out-cubic,
+shortened by `motion.reduce`). Quick actions are not drawn (Windows 11 has a
+separate `QuickSettings`). The toast (`NewNotificationToast`) shows the same card
+(`toast` part, solid + hairline, radius 8) 12 from the corner. Hit-testing,
+scrolling, keyboard and animation are the Windows 10 code: `richView` got
+`flowGroups`/`shiftGroups` (extracted from `layout`, identical for Windows 10) and
+dispatches `layoutW11`, `drawW11`, `drawCardW11`, `layoutCardAsW11`. Rounded parts:
+`PaintStyle` now returns the caller clip after `SetRoundClip` (it replaced the clip
+with the layer rect and a card at the edge of a scrolling list painted over its
+neighbours).
+
+**Do not disturb (the model the taskbar bell uses).**
+`desktop.DoNotDisturb{ Enabled() bool; SetEnabled(bool); Subscribe(func()) func() }`,
+ready `desktop.NewDoNotDisturb(initial) *DoNotDisturbState` (+ `OnChange` hook).
+`nc.SetDoNotDisturb(d)` / `toast.SetDoNotDisturb(d)`: the centre subscribes while
+open and repaints only the bell rect; the toast stays silent while `Enabled()` (the
+notification still lands in the centre) and hides a shown toast when the mode turns
+on. What the mode does elsewhere (sound, focus assist) is the consumer's. The tray
+bell (`NotificationButton`, taskbar work) takes the same `DoNotDisturb` value.
+
+**Calendar.** Card 364 wide (`calendar.w11.*`), at the right edge `calendar.w11.edge`
+(12) above the bar (`CalendarFlyout.WorkArea` is new, like the centre's). Top row:
+"Monday, October 5" (`DateHeaderCulture.DateHeader`, optional extension of
+`DateCulture`; `LocaleCulture` implements it through `desktop.cal.headDate` and
+`desktop.cal.weekdayLong.N`; a culture without it gets `{W}, {d} {M}` from
+`WeekdayShort`/`MonthGenitive`) and the collapse chevron; then month title with
+‹ ›, weekday row, 4–6 week grid (first weekday by culture, today = accent circle
+`calendar.w11.day`, selected = ring), then the Focus module. Collapse hides the
+grid; `SetCollapsed`/month change repaint the OLD rect too and re-lay the centre
+above (`CalendarFlyout.relayout`). On a low screen the calendar stays collapsed
+while it is linked and the centre would otherwise get less than header + `list.min`
+(`effCollapsed`; the user's `Collapsed()` is unchanged).
+
+**Group.** `desktop.LinkNotificationCenter(nc, cal) *FlyoutGroup` sets both in one
+`FlyoutGroup`, makes `nc` sit on `cal` and returns the group: `group.OpenAll(anchor)`
+from the clock or the bell, `CloseAll`, Esc in either closes both, a click in the
+neighbour neither closes nor is swallowed (`richMouseButton` and the calendar
+now use `ownsPoint`). Register both in `FlyoutManager` (the group keeps them
+open together). Win+N is the consumer's.
+
+**Focus.** `desktop.FocusSession{ State() FocusSessionState; SetDuration(time.Duration);
+Start(); Stop(); Subscribe(func()) func() }`, `FocusSessionState{Duration, Running,
+EndsAt}`; `cal.SetFocusSession(s)` (nil = no module). Idle: "Focus", `−` `30 min`
+`+` (step `FocusStep` 5 min, `FocusMinDuration`..`FocusMaxDuration` 5..240) and the
+accent "Start". Running: `mm:ss` countdown (rounded up), a progress line and
+"Stop"; remaining = `EndsAt − now` where now is the calendar `Clock` (never
+negative — the consumer calls `Stop` at the end, it is idempotent). While open and
+running the calendar redraws only the module once a second through
+`cal.Ticker func(d, f) (stop func())` (default: a `time.AfterFunc` chain; set
+`cal.Ticker = func(d, f) func() { t := eng.Every(d, f); return t.Stop }` to run it
+on the engine goroutine). The tick is not an animation: `motion.reduce` does not
+touch it. Ready model for demos and tests: `NewFakeFocusSession(clock)`.
+
+**Keyboard.** Tab in the centre: bell, "Clear all", cards/groups/actions…; from the
+last stop it hands focus to the calendar (collapse, ‹, ›, the day grid, `−`, `+`,
+Start/Stop) and Shift+Tab from the calendar's first stop hands it back; Enter/Space
+activate; on the grid the arrows move the day (leaving the month pages it) and
+Enter selects, elsewhere ←/→ and PgUp/PgDn page months; Esc closes the group; the
+focus ring is drawn for the keyboard only. Both panels are `Focusable` + `TabAcceptor` while open and Windows 11.
+
+**Profile.** Tokens: `surface.card` (`KeySurfaceCard`), `text.secondary`
+(`KeyTextSecondary`); `Windows11Dark` replaces exactly these two (14 of 15
+allowed own tokens; the other Windows 11 panels must fit in the one left). Parts of
+component `notificationcenter`: `toast header headbtn headbtn.on link group pill
+card action field glyph dim severity.* scrollbar`; of `calendar`: `date month nav
+divider dim focus.title focus.value focus.button focus.accent progress
+progress.fill` and `day` (circle, no shadow). Colours are tokens, accent or a
+neutral grey film (readable in both modes); links use the accent (dark mode: the
+default accent is low contrast on dark — a profile may override `link`).
+Strings (RU/EN, `widget.Tr`): `desktop.notif.title|dnd`,
+`desktop.focus.title|minutes|hours|hoursMinutes|start|stop|less|more`,
+`desktop.cal.headDate|weekdayLong.N`.
+
+**Cost.** First frame of both panels (open + one draw each, warm font cache) is
+well under 100 ms (`TestW11_OpensUnder100ms`); a hover repaints the card, a bell
+change the bell, a tick the Focus module, a month page the calendar and the
+centre. Heights at 100–200 %: 1920×1080 … 640×480 logical fit the screen without
+overlap (`TestW11_FitsEveryScreen`); on a short screen the list scrolls.
+
+Tests: `desktop/notifycenter_win11_test.go` (behaviour), `desktop/paint_clip_test.go`,
+`theme/profiles_win11_notify_test.go`; pictures: `NC_OUT=dir go test ./desktop -run
+TestVisual_NotificationCenterWin11` and `TestVisual_NotificationToastWin11`
+(`light`, `dark`, `*_collapsed`, `*_running`, `*_dnd`, `*_empty`, `*_focus_ring*`,
+`*_group_collapsed`, `light_200`…).
 
 ### Windows 10 Start menu with tiles and the taskbar search box — v3.33
 

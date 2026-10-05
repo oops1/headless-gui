@@ -14,8 +14,9 @@ func notifyManager(t *testing.T, name string) *Manager {
 	return m
 }
 
-// Презентер центра уведомлений назначен только Windows 10 (и его тёмной
-// разновидности, что наследует профиль); остальные темы остаются плоскими.
+// Презентер центра уведомлений назначен Windows 10 и Windows 11 (и их тёмным
+// разновидностям, что наследуют профиль) — у каждой свой; остальные темы
+// остаются плоскими.
 func TestNotificationCenterPresenterOnlyForWindows10(t *testing.T) {
 	for _, name := range []string{ProfileWindows10, ProfileWindows10Dark} {
 		m := notifyManager(t, name)
@@ -23,7 +24,13 @@ func TestNotificationCenterPresenterOnlyForWindows10(t *testing.T) {
 			t.Errorf("%s: презентер %q", name, got)
 		}
 	}
-	for _, name := range []string{ProfileWindows11, ProfileWindows11Dark, ProfileWindows2000, ProfileMacOS} {
+	for _, name := range []string{ProfileWindows11, ProfileWindows11Dark} {
+		m := notifyManager(t, name)
+		if got := m.Active().PresenterName("notificationcenter"); got != NotificationCenterWin11Presenter {
+			t.Errorf("%s: презентер %q", name, got)
+		}
+	}
+	for _, name := range []string{ProfileWindows2000, ProfileMacOS} {
 		m := notifyManager(t, name)
 		if got := m.Active().PresenterName("notificationcenter"); got != "" {
 			t.Errorf("%s: у плоской темы презентер центра %q", name, got)

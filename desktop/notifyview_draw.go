@@ -84,6 +84,11 @@ func (v *richView) draw(ctx widget.DrawContext, panel image.Rectangle, ring bool
 		return
 	}
 
+	if l.w11 {
+		v.drawW11(ctx, l, u, prev)
+		return
+	}
+
 	v.drawLink(ctx, l, u, zoneKey{kind: zoneManage}, l.manage, tr(StrNotifManage))
 
 	// Список: всё, что не помещается, обрезается областью просмотра.
@@ -214,6 +219,10 @@ func (v *richView) drawGroup(ctx widget.DrawContext, l *richLayout, u ncUI, g ri
 // крестик и шеврон раскрытия, действия.
 func (v *richView) drawCard(ctx widget.DrawContext, l *richLayout, u ncUI, c richCard, visible image.Rectangle) {
 	if c.rect.Intersect(visible).Empty() {
+		return
+	}
+	if v.w11() {
+		v.drawCardW11(ctx, l, u, c, visible)
 		return
 	}
 	f := l.fonts

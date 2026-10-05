@@ -743,9 +743,13 @@ func Windows11Profile() *Profile {
 	// «Пуск» Windows 11 (profiles_win11_start.go): до материалов — те сбрасывают
 	// материал и тень у уже объявленных частей.
 	declareWin11StartMenu(p)
-
+	// Центр уведомлений и календарь Windows 11 (profiles_win11_notify.go): после
+	// стилей панелей выше и до материалов — те отключают материал у частей.
+	declareWin11NotificationTokens(p)
+	declareWin11Notifications(p)
 	// Mica, MicaAlt и мягкие тени — только под флагами (profiles_win11_material.go).
 	declareWin11Materials(p, RGB(224, 224, 224), RGBA(0, 0, 0, 77))
+	declareWin11NotificationMaterials(p, KeyShadowColor)
 
 	inheritTrayStyles(p)
 	// Панель по замерам: кнопки 40, пилюли, Task View, виджеты, поиск, трей
@@ -793,6 +797,7 @@ func Windows11DarkProfile() *Profile {
 	// Тёмные MicaAlt и мягкая тень — два токена: стили родителя ссылаются на них.
 	p.SetColor(KeySurfaceAlt, RGB(14, 14, 14)).
 		SetColor(KeyShadowColor, RGBA(0, 0, 0, 115))
+	declareWin11DarkNotificationTokens(p)
 	addDialogStyles(p)
 	return p
 }

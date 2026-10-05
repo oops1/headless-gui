@@ -79,6 +79,12 @@ const (
 	StrClockDateFormat = "desktop.clock.dateFormat"
 	StrCalLongDate     = "desktop.cal.longDate"
 	strCalMonthGenPref = "desktop.cal.monthGen." // + номер месяца 1..12
+	// StrCalHeadDate — шаблон строки над календарём Windows 11 («понедельник,
+	// 5 октября»): {W} — день недели словом, {d} — число, {M} — месяц в
+	// родительном падеже. Названия дней — ключи desktop.cal.weekdayLong.N
+	// (N — номер time.Weekday, 0 — воскресенье).
+	StrCalHeadDate       = "desktop.cal.headDate"
+	strCalWeekdayLongPre = "desktop.cal.weekdayLong."
 )
 
 // StartMenuAliases — как подключить ключи меню «Пуск» и строки поиска к таблице
@@ -146,6 +152,7 @@ func init() {
 		StrClockTimeFormat: "15:04",
 		StrClockDateFormat: "02.01.2006",
 		StrCalLongDate:     "{d} {M} {y}",
+		StrCalHeadDate:     "{W}, {d} {M}",
 	}
 	en := map[string]string{
 		StrStart:         "Start",
@@ -181,6 +188,7 @@ func init() {
 		StrClockTimeFormat: "3:04 PM",
 		StrClockDateFormat: "1/2/2006",
 		StrCalLongDate:     "{M} {d}, {y}",
+		StrCalHeadDate:     "{W}, {M} {d}",
 	}
 	ruGen := []string{"января", "февраля", "марта", "апреля", "мая", "июня",
 		"июля", "августа", "сентября", "октября", "ноября", "декабря"}
@@ -190,6 +198,14 @@ func init() {
 		key := strCalMonthGenPref + strconv.Itoa(i+1)
 		ru[key] = ruGen[i]
 		en[key] = enGen[i]
+	}
+	// Дни недели словом, с воскресенья (time.Weekday).
+	ruWd := []string{"воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"}
+	enWd := []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+	for i := range ruWd {
+		key := strCalWeekdayLongPre + strconv.Itoa(i)
+		ru[key] = ruWd[i]
+		en[key] = enWd[i]
 	}
 	widget.RegisterStrings("RU", ru)
 	widget.RegisterStrings("EN", en)
@@ -241,6 +257,14 @@ type DateCulture interface {
 	LongDate(t time.Time) string
 }
 
+// DateHeaderCulture — необязательное расширение DateCulture: строка над
+// календарём Windows 11 («понедельник, 5 октября»). Культура, которая его не
+// реализует, получает строку из сокращения дня недели и родительного падежа
+// месяца по шаблону desktop.cal.headDate.
+type DateHeaderCulture interface {
+	DateHeader(t time.Time) string
+}
+
 // LocaleCulture — культура по умолчанию: названия, формат и первый день
 // недели берутся из таблиц строк движка для текущего языка. Нулевое значение
 // готово к работе; встраивается в свою реализацию, когда нужно переопределить
@@ -288,6 +312,41 @@ func (LocaleCulture) DateFormat() string { return trOr(StrClockDateFormat, "02.0
 // {d} — число, {M} — месяц в родительном падеже, {y} — год.
 func (c LocaleCulture) LongDate(t time.Time) string {
 	return expandLongDate(trOr(StrCalLongDate, "{d} {M} {y}"), t, c.MonthGenitive(t.Month()))
+}
+
+// WeekdayLong — день недели словом: ключ desktop.cal.weekdayLong.N, а без
+// перевода — сокращение.
+func (LocaleCulture) WeekdayLong(d time.Weekday) string {
+	key := strCalWeekdayLongPre + strconv.Itoa(int(d))
+	if v := tr(key); v != key {
+		return v
+	}
+	return LocaleCulture{}.WeekdayShort(d)
+}
+
+// DateHeader — строка над календарём: день недели, число и месяц по шаблону
+// desktop.cal.headDate.
+func (c LocaleCulture) DateHeader(t time.Time) string {
+	return expandHeadDate(trOr(StrCalHeadDate, "{W}, {d} {M}"), t, c.WeekdayLong(t.Weekday()), c.MonthGenitive(t.Month()))
+}
+
+// dateHeader — строка над календарём для любой культуры: свою строку культура
+// отдаёт сама (DateHeaderCulture), иначе она собирается из её сокращения дня
+// недели и родительного падежа месяца.
+func dateHeader(c DateCulture, t time.Time) string {
+	c = cultureOrDefault(c)
+	if h, ok := c.(DateHeaderCulture); ok {
+		return h.DateHeader(t)
+	}
+	return expandHeadDate(trOr(StrCalHeadDate, "{W}, {d} {M}"), t, c.WeekdayShort(t.Weekday()), c.MonthGenitive(t.Month()))
+}
+
+func expandHeadDate(tmpl string, t time.Time, weekday, monthWord string) string {
+	return strings.NewReplacer(
+		"{W}", weekday,
+		"{d}", strconv.Itoa(t.Day()),
+		"{M}", monthWord,
+	).Replace(tmpl)
 }
 
 // expandLongDate раскрывает шаблон длинной даты. Вынесена, чтобы свои

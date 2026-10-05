@@ -64,6 +64,9 @@ func (nc *NotificationCenter) presenter() Presenter {
 }
 
 func (nc *NotificationCenter) richSize() image.Point {
+	if nc.win11() {
+		return nc.w11Size()
+	}
 	m := ncReadMetrics(nc.Theme())
 	w, h := m.width, ncFallbackHeight
 	switch {
@@ -92,7 +95,11 @@ func (nc *NotificationCenter) richSize() image.Point {
 }
 
 func (nc *NotificationCenter) richDraw(ctx widget.DrawContext) {
-	nc.view.draw(ctx, nc.rect(), nc.fs.FocusVisible())
+	r := nc.rect()
+	nc.mu.Lock()
+	nc.lastRect = r
+	nc.mu.Unlock()
+	nc.view.draw(ctx, r, nc.fs.FocusVisible())
 }
 
 // place — Flyout.Place: центр Windows 10 прижат к правому краю экрана и тянется
@@ -100,6 +107,9 @@ func (nc *NotificationCenter) richDraw(ctx widget.DrawContext) {
 func (nc *NotificationCenter) place(anchor, screen image.Rectangle, edge Edge, size image.Point) (image.Rectangle, bool) {
 	if nc.presenter() == nil {
 		return image.Rectangle{}, false
+	}
+	if nc.win11() {
+		return nc.w11Place(size), true
 	}
 	margin := nc.metric(KeyNotificationCenterMargin)
 	if wa := nc.WorkArea; !wa.Empty() {
@@ -206,7 +216,21 @@ func (nc *NotificationCenter) attach() {
 	needNotes := nc.ns != nil && nc.unsub == nil
 	needQuick := nc.quick != nil && nc.unsubQuick == nil
 	q := nc.quick
+	needDND := nc.dnd != nil && nc.unsubDND == nil
+	dnd := nc.dnd
 	nc.mu.Unlock()
+
+	if needDND {
+		u := dnd.Subscribe(nc.onDNDChanged)
+		nc.mu.Lock()
+		if nc.unsubDND == nil {
+			nc.unsubDND, u = u, nil
+		}
+		nc.mu.Unlock()
+		if u != nil {
+			u()
+		}
+	}
 
 	if needNotes {
 		u := nc.ns.Subscribe(nc.onNotesChanged)
@@ -237,14 +261,17 @@ func (nc *NotificationCenter) attach() {
 // detach снимает подписки: закрытая панель не будит ни источник, ни рендер.
 func (nc *NotificationCenter) detach() {
 	nc.mu.Lock()
-	u1, u2 := nc.unsub, nc.unsubQuick
-	nc.unsub, nc.unsubQuick = nil, nil
+	u1, u2, u3 := nc.unsub, nc.unsubQuick, nc.unsubDND
+	nc.unsub, nc.unsubQuick, nc.unsubDND = nil, nil, nil
 	nc.mu.Unlock()
 	if u1 != nil {
 		u1()
 	}
 	if u2 != nil {
 		u2()
+	}
+	if u3 != nil {
+		u3()
 	}
 }
 
@@ -316,6 +343,9 @@ func (nc *NotificationCenter) viewSource() ncSource {
 		culture:    func() DateCulture { return nc.Culture },
 		now:        nc.now,
 		emptyMsg:   nc.EmptyLabel,
+		dnd:        nc.dndEnabled,
+		toggleDND:  nc.toggleDND,
+		handoff:    nc.handoffFocus,
 	}
 }
 
@@ -365,7 +395,8 @@ func (nc *NotificationCenter) richMouseButton(e widget.MouseEvent) bool {
 		return true
 	}
 	if !pt.In(outer) {
-		if e.Pressed {
+		// Соседка по группе (календарь под центром Windows 11) — не «мимо».
+		if e.Pressed && !nc.ownsPoint(pt) {
 			nc.Close()
 			return true
 		}

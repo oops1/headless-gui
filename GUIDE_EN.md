@@ -4205,6 +4205,52 @@ several engines in one process are supported (see "Several engines in one
 process"). A bar per monitor, Start / quick settings coordination across
 monitors and the scale of each monitor are the consumer's job.
 
+#### Notification center and calendar of Windows 11
+
+The Windows 11 profile draws the notification center as cards and the calendar as a
+separate rounded card under it (364 wide, radius 8 for panels and 4 for cards).
+The components are the same — `NotificationCenter` and `CalendarFlyout`; the
+profile's presenter picks the look, they never know the theme name, and a change of
+theme, accent or language on open panels recreates nothing. Center: the
+"Notifications" title, a "Do not disturb" bell and "Clear all" (inactive while the
+list is empty); a card with an app row (icon, name, time), title, text, expand,
+cross and the four kinds of actions; a group — a header with a counter when an app
+has several notifications. Calendar: "Monday, October 5", the month, ‹ ›, today as
+an accent circle, collapse/expand and the "Focus" module.
+
+```go
+center := desktop.NewNotificationCenter(m, notes)
+cal := desktop.NewCalendarFlyout(m, desktop.SystemClock{})
+center.Screen, cal.Screen = screen, screen
+
+dnd := desktop.NewDoNotDisturb(false)    // one model for the centre, the toast and the tray button
+center.SetDoNotDisturb(dnd)
+toast.SetDoNotDisturb(dnd)               // the toast stays silent while the mode is on
+
+cal.SetFocusSession(session)             // desktop.FocusSession from the consumer
+cal.Ticker = func(d time.Duration, f func()) func() { t := eng.Every(d, f); return t.Stop }
+
+group := desktop.LinkNotificationCenter(center, cal) // centre above the calendar, closed together
+fm.Register("calendar", cal)             // both panels go to the flyout manager
+fm.Register("notifications", center)
+clock.OnClick = func() { group.OpenAll(clock.Bounds()) } // from the clock and from the bell
+```
+
+`FocusSession` is the state (`Duration`, `Running`, `EndsAt`) and the actions
+(`SetDuration`, `Start`, `Stop`, `Subscribe`) supplied by the consumer; what focus
+actually does (turns "Do not disturb" on, mutes sound) is its decision. The
+calendar draws the duration picker (`−` / `+` in 5 minute steps, 5–240) and
+"Start", and a running session as a countdown, a progress line and "Stop"; the
+once-a-second repaint runs while the calendar is open and repaints only the module.
+`desktop.NewFakeFocusSession(clock)` is a ready model for demos. On a short screen
+the calendar stays collapsed while the centre above it would not have room; the
+user's choice (`Collapsed`) is not changed. Keyboard: Tab walks the centre, then the
+calendar (buttons, the day grid — arrows move the day, Enter selects), Enter/Space
+press, PgUp/PgDn page months, Esc closes both panels. Strings are
+the keys `desktop.notif.title|dnd`, `desktop.focus.*`,
+`desktop.cal.headDate|weekdayLong.N` (RU/EN, `widget.Tr`; a `DateCulture` may
+additionally implement `DateHeaderCulture`).
+
 #### The taskbar and its components
 
 ```go

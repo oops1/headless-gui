@@ -241,7 +241,11 @@ func buildDesktop(eng *engine.Engine) scene {
 
 	// Уведомления и календарь Windows показывает один над другим — значит
 	// они группа: клик по числу календаря не должен гасить центр уведомлений.
-	desktop.NewFlyoutGroup(cal.Flyout, center.Flyout)
+	// LinkNotificationCenter ещё и ставит центр Windows 11 над календарём.
+	group := desktop.LinkNotificationCenter(center, cal)
+	// «Не беспокоить» и «Фокусировка» показывает только вид Windows 11.
+	center.SetDoNotDisturb(desktop.NewDoNotDisturb(false))
+	cal.SetFocusSession(desktop.NewFakeFocusSession(desktop.SystemClock{}))
 	tray.Overflow().Screen = screen
 	// Раскрывающаяся область трея — оверлей, и движок находит оверлеи обходом
 	// ДЕРЕВА: без этой строки шеврон открывался бы, а показывать было бы
@@ -272,6 +276,15 @@ func buildDesktop(eng *engine.Engine) scene {
 	startBtn.Track(menu)
 	clock.OnClick = func() {
 		closeOthers(cal)
+		if tm.Active().PresenterName("notificationcenter") == theme.NotificationCenterWin11Presenter {
+			// Windows 11: часы открывают центр уведомлений вместе с календарём.
+			if cal.IsOpen() {
+				group.CloseAll()
+			} else {
+				group.OpenAll(clock.Bounds())
+			}
+			return
+		}
 		cal.Toggle(clock.Bounds())
 	}
 	net.OnClick = func() {

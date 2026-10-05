@@ -12,10 +12,26 @@ import (
 )
 
 // flatNotifTheme — тема, в которой центр уведомлений остаётся плоским списком
-// (у Windows 10 презентер назначен, и центр рисуется с группами и действиями).
+// (у Windows 10 и Windows 11 презентер назначен, и центр рисуется с группами и
+// карточками). Это профиль Windows 11 без презентеров центра и календаря: метрики
+// и стили плоских панелей те же, что у него были до презентера.
 func flatNotifTheme(t *testing.T) *theme.Manager {
 	t.Helper()
-	return managerFor(t, theme.ProfileWindows11)
+	m := theme.NewManager()
+	if err := theme.RegisterBuiltinProfiles(m); err != nil {
+		t.Fatal(err)
+	}
+	p := theme.Windows11Profile()
+	p.Name = "Windows11FlatTest"
+	delete(p.Presenters, "notificationcenter")
+	delete(p.Presenters, "calendar")
+	if err := m.RegisterTheme(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetTheme(p.Name); err != nil {
+		t.Fatal(err)
+	}
+	return m
 }
 
 // richNotifTheme — тема с центром уведомлений Windows 10.
@@ -241,7 +257,7 @@ func TestNotificationCenter_FlatStillGrows(t *testing.T) {
 		nc.Settle()
 		heights[n] = nc.OverlayBounds().Dy()
 		if nc.presenter() != nil {
-			t.Fatal("у Windows 11 назначен презентер центра уведомлений")
+			t.Fatal("у плоской темы назначен презентер центра уведомлений")
 		}
 		nc.Close()
 	}
