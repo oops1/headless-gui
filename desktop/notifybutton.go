@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"strconv"
+	"sync"
 	"sync/atomic"
 
 	"github.com/oops1/headless-gui/v3/theme"
@@ -52,6 +53,9 @@ type NotificationButton struct {
 	// dnd — «Не беспокоить», заданное SetDoNotDisturb (когда источник не сообщает
 	// его сам, см. DoNotDisturbReporter).
 	dnd int32
+	// dndMu, dndUnsub — привязка к модели «Не беспокоить» (notifybutton_dnd.go).
+	dndMu    sync.Mutex
+	dndUnsub func()
 
 	glyph glyphMemo
 	unsub func()
@@ -182,6 +186,7 @@ func (b *NotificationButton) Close() {
 		b.unsub()
 		b.unsub = nil
 	}
+	b.unbindDoNotDisturb()
 }
 
 // GetToolTip перекрывает промоутнутый из widget.Base: текст строится из

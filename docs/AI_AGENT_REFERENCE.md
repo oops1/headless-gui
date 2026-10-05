@@ -5099,7 +5099,10 @@ ready `desktop.NewDoNotDisturb(initial) *DoNotDisturbState` (+ `OnChange` hook).
 open and repaints only the bell rect; the toast stays silent while `Enabled()` (the
 notification still lands in the centre) and hides a shown toast when the mode turns
 on. What the mode does elsewhere (sound, focus assist) is the consumer's. The tray
-bell (`NotificationButton`, taskbar work) takes the same `DoNotDisturb` value.
+bell takes the same model: `bell.BindDoNotDisturb(d)` reads it at once and follows
+every switch (unsubscribed in `Close`; `nil` unbinds). The older manual
+`bell.SetDoNotDisturb(bool)` and a source implementing `DoNotDisturbReporter` still
+work; one model for centre, toast and bell is the intended setup.
 
 **Calendar.** Card 364 wide (`calendar.w11.*`), at the right edge `calendar.w11.edge`
 (12) above the bar (`CalendarFlyout.WorkArea` is new, like the centre's). Top row:
