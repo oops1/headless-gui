@@ -1239,7 +1239,48 @@ func (c *Canvas) DrawImage(src image.Image, x, y int) {
 // затрагиваемой области back (снова R↔B), затем — обычный Over, затем
 // результат переносим назад с той же перестановкой. Дороже прямой записи,
 // зато арифметика смешивания гарантированно та же, что и в FormatRGBA.
+//
+// Скруглённый клип (SetRoundClip): изображение обязано обрезаться той же
+// кривой, что и заливки, — иначе у картинки внутри скруглённой панели торчат
+// прямые углы. Прямая часть контура (середина клипа) блитится одним вызовом,
+// как и без скругления; построчно, с суженным интервалом (spanX), идут только
+// угловые зоны — по radius строк сверху и снизу. Без скругления путь прежний,
+// байт в байт.
 func (c *Canvas) blitOver(r image.Rectangle, src image.Image, offset image.Point) {
+	if !c.round.active {
+		c.blitOverRect(r, src, offset)
+		return
+	}
+	rd := &c.round
+	top := rd.rect.Min.Y + rd.radius
+	bot := rd.rect.Max.Y - rd.radius
+	row := func(y int) {
+		x0, x1, ok := rd.spanX(y, r.Min.X, r.Max.X)
+		if !ok {
+			return
+		}
+		c.blitOverRect(image.Rect(x0, y, x1, y+1), src, offset.Add(image.Pt(x0-r.Min.X, y-r.Min.Y)))
+	}
+	// Верхняя угловая зона (строки выше контура rd.rect отсекаются spanX).
+	for y := max(r.Min.Y, rd.rect.Min.Y); y < min(r.Max.Y, top); y++ {
+		row(y)
+	}
+	// Прямая часть: по вертикали — вся, по горизонтали — в границах контура.
+	if y0, y1 := max(r.Min.Y, top), min(r.Max.Y, bot); y0 < y1 {
+		x0, x1 := max(r.Min.X, rd.rect.Min.X), min(r.Max.X, rd.rect.Max.X)
+		if x0 < x1 {
+			c.blitOverRect(image.Rect(x0, y0, x1, y1), src, offset.Add(image.Pt(x0-r.Min.X, y0-r.Min.Y)))
+		}
+	}
+	// Нижняя угловая зона.
+	for y := max(r.Min.Y, bot); y < min(r.Max.Y, rd.rect.Max.Y); y++ {
+		row(y)
+	}
+}
+
+// blitOverRect — сам блит Over в прямоугольник r без учёта скруглённого
+// клипа (см. blitOver).
+func (c *Canvas) blitOverRect(r image.Rectangle, src image.Image, offset image.Point) {
 	if c.format != FormatBGRX {
 		stdraw.Draw(c.back, r, src, offset, stdraw.Over)
 		return
