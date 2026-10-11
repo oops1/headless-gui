@@ -42,6 +42,7 @@ import (
 type Engine struct {
 	canvas    *Canvas
 	fontCache *FontCache
+	imgInv    *imageInvalidator // журнал сбросов кэша изображений всех холстов движка (imagecache.go)
 	bgSrc     image.Image // исходный фон (до масштабирования); нужен при SetResolution
 	root      widget.Widget
 	mu        sync.RWMutex // защищает УКАЗАТЕЛИ root/canvas/bgSrc (короткие секции)
@@ -372,6 +373,8 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 		ttDelay:   600 * time.Millisecond,
 	}
 	e.scaleBits.Store(math.Float64bits(1))
+	e.imgInv = &imageInvalidator{}
+	e.canvas.inv = e.imgInv
 	// Рендер по запросу — режим по умолчанию (v3.5): виджеты самоинвалидируются
 	// (Base.Invalidate, авто-damage в SetBounds/сеттерах), события и слой данных
 	// инвалидируют через движок. Кадры рендерятся только при изменениях UI,

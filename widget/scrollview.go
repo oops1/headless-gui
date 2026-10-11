@@ -414,6 +414,9 @@ var (
 	_ DrawContext       = (*svOffsetCtx)(nil)
 	_ DrawContextAlpha  = (*svOffsetCtx)(nil)
 	_ RotatedTextDrawer = (*svOffsetCtx)(nil)
+
+	_ ImageRectDrawer       = (*svOffsetCtx)(nil)
+	_ ImageCacheInvalidator = (*svOffsetCtx)(nil)
 	_ AAShapes          = (*svOffsetCtxAA)(nil)
 )
 
@@ -473,6 +476,18 @@ func (o *svOffsetCtx) DrawImage(src image.Image, x, y int) {
 
 func (o *svOffsetCtx) DrawImageScaled(src image.Image, x, y, w, h int) {
 	o.inner.DrawImageScaled(src, x-o.dx, y-o.dy, w, h)
+}
+
+// DrawImageRect пробрасывает частичную отрисовку изображения (ImageRectDrawer)
+// внутреннему контексту; без поддержки в нём — запасной путь помощника.
+func (o *svOffsetCtx) DrawImageRect(src image.Image, sr, dr image.Rectangle, f ImageFilter) {
+	DrawImageRect(o.inner, src, sr, dr.Sub(image.Pt(o.dx, o.dy)), f)
+}
+
+// InvalidateImageCache пробрасывает сброс кэша масштабирования внутреннему
+// контексту (ImageCacheInvalidator); без кэша в нём — ничего не делает.
+func (o *svOffsetCtx) InvalidateImageCache(src image.Image) {
+	InvalidateImageCache(o.inner, src)
 }
 
 func (o *svOffsetCtx) DrawText(text string, x, y int, col color.RGBA) {
