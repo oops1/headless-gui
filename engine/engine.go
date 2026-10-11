@@ -193,6 +193,7 @@ type Engine struct {
 	done      chan struct{}
 
 	fps     int     // целевой FPS, 1–120
+	maxFPS  atomic.Int32 // потолок частоты кадров поверх fps; 0 — не задан (maxfps.go)
 	userDPI float64 // пользовательский DPI шрифтов (без учёта HiDPI-масштаба)
 
 	// scaleBits — текущий HiDPI-масштаб (math.Float64bits) для lock-free
@@ -1494,7 +1495,7 @@ func (e *Engine) loop() {
 	// вторичного движка диалога свои обработчики и своя горутина (GG-68).
 	defer widget.BindAnimationLoop(e)()
 
-	interval := time.Duration(float64(time.Second) / float64(e.fps))
+	interval := e.frameInterval()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -1545,6 +1546,11 @@ func (e *Engine) loop() {
 			e.deliver(frame)
 
 		case <-ticker.C:
+			// Потолок частоты (SetMaxFPS) мог смениться с прошлого тика.
+			if iv := e.frameInterval(); iv != interval {
+				interval = iv
+				ticker.Reset(iv)
+			}
 			// Отложенные вызовы — раньше всего: они меняют дерево, а решение
 			// о пропуске кадра принимается по заявленному damage, и damage от
 			// них обязан успеть.
