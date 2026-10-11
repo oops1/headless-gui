@@ -377,6 +377,10 @@ type Window struct {
 	// работает независимо от этого колбэка.
 	onFilesDropped func(paths []string, x, y int)
 
+	// drag — подписки на перетаскивание файлов: события приёмника и конец
+	// перетаскивания из окна (dnd_drag.go).
+	drag dragState
+
 	// sysTheme — подписка приложения на смену светлой/тёмной темы ОС
 	// (см. SetOnSystemThemeChanged в systheme.go).
 	sysTheme systemThemeState
@@ -1206,6 +1210,7 @@ func (win *Window) SetOnFilesDropped(fn func(paths []string, x, y int)) {
 //     — маршрутизация виджету под точкой (widget.FileDropTarget), headless-симметрия;
 //   - win.onFilesDropped (логические) — колбэк приложения, если задан.
 func (win *Window) setupFilesDrop() {
+	win.setupDragEvents()
 	fd, ok := win.native.(filesDropTarget)
 	if !ok {
 		return

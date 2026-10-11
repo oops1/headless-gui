@@ -425,8 +425,16 @@ type Win32Window struct {
 	imeCaret         func() (image.Rectangle, bool)
 	onFilesDropped   func(paths []string, x, y int)
 
-	// fileDropEnabled — DragAcceptFiles(TRUE) уже вызван для этого окна.
+	// fileDropEnabled — приём файлов для этого окна уже включён (IDropTarget
+	// или, запасным путём, DragAcceptFiles).
 	fileDropEnabled bool
+
+	// События приёмника перетаскивания и OLE-регистрация (dnd_windows.go).
+	onDragEnter func(x, y int)
+	onDragOver  func(x, y int) bool
+	onDragLeave func()
+	dropTarget  *dropTargetState // нет — окно принимает файлы через WM_DROPFILES
+	oleReady    bool             // OLE поднят на потоке окна: годится для DoDragDrop
 }
 
 // Реестр окон для WndProc (Win32 callback не может быть методом): маршрутизация
@@ -560,14 +568,23 @@ func (w *Win32Window) Create(title string, width, height int) error {
 	return nil
 }
 
-// enableFileDrop включает приём Drag&Drop файлов из ОС (DragAcceptFiles).
-// Идемпотентно; no-op до создания окна.
+// enableFileDrop включает приём Drag&Drop файлов из ОС: окно регистрируется
+// приёмником OLE (IDropTarget — события входа/движения/выхода и сброс), а если
+// OLE не поднялся или регистрация отказала — запасным путём DragAcceptFiles
+// (WM_DROPFILES, только сброс). Идемпотентно; no-op до создания окна.
+//
+// Регистрация OLE привязана к потоку, на котором создано окно, поэтому
+// реально работает только вызов из Create; поздний вызов из
+// SetOnFilesDropped видит уже включённый приём и ничего не делает.
 func (w *Win32Window) enableFileDrop() {
 	if w.hwnd == 0 || w.fileDropEnabled {
 		return
 	}
-	procDragAcceptFiles.Call(uintptr(w.hwnd), 1)
 	w.fileDropEnabled = true
+	if w.registerDropTarget() {
+		return
+	}
+	procDragAcceptFiles.Call(uintptr(w.hwnd), 1)
 }
 
 // CreatePopup создаёт окно-вьюпорт оверлея (dropdown/меню): WS_POPUP без рамки,
@@ -1226,6 +1243,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmDestroy:
+		w.revokeDropTarget() // IDropTarget окна (dnd_windows.go)
 		win32Mu.Lock()
 		delete(win32Windows, hwnd)
 		win32Mu.Unlock()
