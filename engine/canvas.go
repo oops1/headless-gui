@@ -48,7 +48,7 @@ type Canvas struct {
 	mica       *micaCache
 	wallParent *Canvas
 	fontCache  *FontCache            // кэш шрифта по умолчанию
-	namedFonts map[string]*FontCache // именованные шрифты (FontFamily из XAML)
+	namedFonts *fontTable            // именованные шрифты (FontFamily из XAML), под замком — fonttable.go
 	families   *fontFamilies         // таблица семейств: выбор шрифта по весу и наклону (fontfamily.go)
 	fallbacks  []*FontCache          // fallback-шрифты для отсутствующих глифов (BUG-2)
 	clip       image.Rectangle       // активная область отсечения
@@ -88,8 +88,9 @@ type Canvas struct {
 	logicalW, logicalH int
 
 	// fontRev растёт при смене состава шрифтов: по нему кэшированные
-	// клоны канваса (popup-оверлеи) понимают, что устарели.
-	fontRev uint64
+	// клоны канваса (popup-оверлеи) понимают, что устарели. Атомарный: шрифты
+	// регистрирует горутина приложения, а сверяет горутина кадра.
+	fontRev atomic.Uint64
 
 	// Кэш результата масштабирования (см. DrawImageScaled).
 	scaledCache  map[scaledKey]*scaledEntry
@@ -101,14 +102,14 @@ type Canvas struct {
 // fontName соответствует FontFamily в XAML.
 func (c *Canvas) RegisterFont(fontName string, ttfData []byte) {
 	if c.namedFonts == nil {
-		c.namedFonts = make(map[string]*FontCache)
+		c.namedFonts = newFontTable()
 	}
 	fc := newFontCacheFromData(ttfData, c.fontCache.dpi)
 	if fc != nil {
 		fc.subpixel = c.fontCache.Subpixel()
-		c.namedFonts[fontName] = fc
+		c.namedFonts.set(fontName, fc)
 		c.registerFace(fontName, fc)
-		c.fontRev++
+		c.fontRev.Add(1)
 	}
 }
 
@@ -120,7 +121,7 @@ func (c *Canvas) RegisterFont(fontName string, ttfData []byte) {
 // их разбирает таблица семейств.
 func (c *Canvas) fontFor(fontName string) *FontCache {
 	if fontName != "" && c.namedFonts != nil {
-		if fc, ok := c.namedFonts[fontName]; ok {
+		if fc, ok := c.namedFonts.get(fontName); ok {
 			return fc
 		}
 		if fc := c.faceFor(fontName); fc != nil {
@@ -132,7 +133,10 @@ func (c *Canvas) fontFor(fontName string) *FontCache {
 
 // hasFont сообщает, зарегистрирован ли именованный шрифт.
 func (c *Canvas) hasFont(name string) bool {
-	_, ok := c.namedFonts[name]
+	if c.namedFonts == nil {
+		return false
+	}
+	_, ok := c.namedFonts.get(name)
 	return ok
 }
 
@@ -143,12 +147,15 @@ func (c *Canvas) SetDefaultFont(name string) bool {
 	if name == "" {
 		return false
 	}
-	if fc, ok := c.namedFonts[name]; ok && fc != nil {
+	if c.namedFonts == nil {
+		return false
+	}
+	if fc, ok := c.namedFonts.get(name); ok && fc != nil {
 		c.fontCache = fc
 		if c.families != nil {
 			c.families.setDefault(fc.famKey)
 		}
-		c.fontRev++
+		c.fontRev.Add(1)
 		return true
 	}
 	return false
@@ -156,12 +163,10 @@ func (c *Canvas) SetDefaultFont(name string) bool {
 
 // fontNames возвращает отсортированный список зарегистрированных именованных шрифтов.
 func (c *Canvas) fontNames() []string {
-	out := make([]string, 0, len(c.namedFonts))
-	for k := range c.namedFonts {
-		out = append(out, k)
+	if c.namedFonts == nil {
+		return nil
 	}
-	sort.Strings(out)
-	return out
+	return c.namedFonts.names()
 }
 
 // AddFallbackFont добавляет fallback-шрифт из TTF/OTF-данных (BUG-2).
@@ -173,7 +178,7 @@ func (c *Canvas) AddFallbackFont(ttfData []byte) bool {
 	}
 	fc.subpixel = c.fontCache.Subpixel()
 	c.fallbacks = append(c.fallbacks, fc)
-	c.fontRev++
+	c.fontRev.Add(1)
 	return true
 }
 
@@ -220,7 +225,7 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 		back:       backBuf,
 		backOwn:    backBuf,
 		fontCache:  fc,
-		namedFonts: make(map[string]*FontCache),
+		namedFonts: newFontTable(),
 		families:   newFontFamilies(),
 		W:          pw,
 		H:          ph,

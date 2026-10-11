@@ -51,7 +51,9 @@ README_RU.md, GUIDE.md / GUIDE_EN.md; roadmap: TODO.md.
   the precise measurer registered by the engine (`RegisterTextMeasurer`;
   `SetTextMeasurer` still works for a consumer that sets one once and for
   all). The most recently created engine answers; a stopped engine hands the
-  measurer back to the previous live one. Use it
+  measurer back to the previous live one. An engine made with
+  `engine.NewOffscreen` (printing, thumbnails, export) never takes it (v3.34).
+  Use it
   for layout computed before painting (dialogs, TextBox). Inside Draw use
   `ctx.MeasureText`.
 - **Theming:** constructors read the global palette `win10.*` (updated by
@@ -5852,11 +5854,31 @@ def, err := printing.DefaultPrinter()             // errors.Is(err, printing.Err
 
 // Rendering a widget tree into a page: a canvas scaled by dpi/96.
 k := float64(setup.EffectiveDPI()) / 96
-eng := engine.New(int(float64(w)/k+0.5), int(float64(h)/k+0.5), 1)
+eng := engine.NewOffscreen(int(float64(w)/k+0.5), int(float64(h)/k+0.5), 1)
+defer eng.Stop()
 eng.SetScale(k)
 eng.SetRoot(pageUI)
 img := eng.RenderOnce() // may differ from w x h by one pixel
 ```
+
+**Offscreen engine — v3.34.** `engine.New` takes three services shared by the
+process: it becomes the text measurer outside `Draw` (`widget.MeasureUIText`,
+`MeasureUITextFont`, rune positions, font metrics), the rasterizer of SVG
+`<text>`, and it reports its size as the screen (`widget.SetScreenBounds`,
+which keeps popup menus on screen). A print job, thumbnail or export made with
+`New` took all three from the window: while the job ran, the window measured
+text with the job's canvas, fonts and scale, and its menus were clamped to the
+page size. `engine.NewOffscreen(w, h, fps)` is the same engine without them —
+same default fonts, `RenderOnce`, `Start`, `Stop`; `Engine.IsOffscreen()`
+tells which one it is. Inside `Draw` widgets measure with `ctx.MeasureText` of
+their own canvas, so the page is exact; measurement OUTSIDE `Draw` by widgets
+of an offscreen engine is answered by the process's measurer (the window), so a
+font known only to the job falls back to the default there.
+
+The named-font registry of a canvas is now under a lock (`engine/fonttable.go`)
+and `fontRev` is atomic: `RegisterFont` from the application's goroutine while
+another goroutine measures or draws is no longer a data race (it was, under
+`-race`, in Notepad's PDF export).
 
 Paper: `A3 A4 A5 A6 Letter Legal Tabloid Executive`, `CustomPaper(name, wMM, hMM)`;
 `Portrait` (zero value) / `Landscape`. A page image covers the WHOLE sheet;

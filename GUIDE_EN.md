@@ -3226,11 +3226,19 @@ does not come out tiny on a 300 dpi sheet:
 
 ```go
 k := float64(setup.EffectiveDPI()) / 96
-eng := engine.New(int(float64(w)/k+0.5), int(float64(h)/k+0.5), 1)
+eng := engine.NewOffscreen(int(float64(w)/k+0.5), int(float64(h)/k+0.5), 1)
+defer eng.Stop()
 eng.SetScale(k)
 eng.SetRoot(pageUI)
 img := eng.RenderOnce() // *image.RGBA; its size may differ from w×h by a pixel
 ```
+
+`engine.NewOffscreen` (v3.34) is the same engine without the services shared
+by the process. A plain `engine.New` becomes the text measurer outside drawing
+and the SVG `<text>` rasterizer, and reports its size as the screen. A print
+engine made with `New` took all of that from the window: while the job ran,
+the window measured text with the job's canvas and menus were clamped to the
+page. Inside `Draw` the page measures with its own canvas and comes out exact.
 
 The size of a page image need not match `SheetSize()`: the physical size is then
 taken from the pixels and the resolution. A match is the only way to guarantee

@@ -146,11 +146,11 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 // очищенный под новый рендер.
 func (ent *popupEntry) overlayCanvas(src *Canvas, r image.Rectangle) *Canvas {
 	oc := ent.canvas
-	if oc == nil || ent.src != src || ent.fontRev != src.fontRev ||
+	if oc == nil || ent.src != src || ent.fontRev != src.fontRev.Load() ||
 		oc.logicalW != r.Dx() || oc.logicalH != r.Dy() || oc.scale != src.scale {
 		oc = src.cloneForSize(r.Dx(), r.Dy(), src.scale, nil)
 		oc.wallParent = src.wallOwner()
-		ent.canvas, ent.src, ent.fontRev = oc, src, src.fontRev
+		ent.canvas, ent.src, ent.fontRev = oc, src, src.fontRev.Load()
 		return oc
 	}
 	clear(oc.back.Pix)

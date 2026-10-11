@@ -47,7 +47,7 @@ func TestFontFamily_PicksWeightAndItalic(t *testing.T) {
 	face := func(family string, weight int, italic bool) *FontCache {
 		return c.fontFor(widget.FontFace(family, weight, italic))
 	}
-	byName := func(n string) *FontCache { return c.namedFonts[n] }
+	byName := func(n string) *FontCache { fc, _ := c.namedFonts.get(n); return fc }
 
 	cases := []struct {
 		weight int
@@ -107,14 +107,14 @@ func TestFontFamily_DefaultFamilyWeights(t *testing.T) {
 
 	// Встроенный Go Regular жирного начертания в семействе не имеет:
 	// берётся встроенный Go Bold — как у widget.Label{Bold: true}.
-	if c.fontFor(widget.FontFace("", 700, false)) != c.namedFonts[widget.BuiltinFontBold] {
+	if c.fontFor(widget.FontFace("", 700, false)) != byNameT(c, widget.BuiltinFontBold) {
 		t.Error("bold без семейства при шрифте Go Regular — не встроенный жирный")
 	}
-	if c.fontFor(widget.FontFace("", 0, true)) != c.namedFonts[widget.BuiltinFontItalic] {
+	if c.fontFor(widget.FontFace("", 0, true)) != byNameT(c, widget.BuiltinFontItalic) {
 		t.Error("курсив без семейства при шрифте Go Regular — не встроенный курсивный")
 	}
 	// Незнакомое семейство ведёт себя так же: нет шрифта — нет и спора.
-	if c.fontFor(widget.FontFace("Нет Такого", 700, false)) != c.namedFonts[widget.BuiltinFontBold] {
+	if c.fontFor(widget.FontFace("Нет Такого", 700, false)) != byNameT(c, widget.BuiltinFontBold) {
 		t.Error("bold незнакомого семейства — не встроенный жирный")
 	}
 	// Лёгкий вес без семейства — просто шрифт по умолчанию.
@@ -129,13 +129,13 @@ func TestFontFamily_DefaultFamilyWeights(t *testing.T) {
 	if !eng.SetDefaultFont("OpenSans") {
 		t.Fatal("SetDefaultFont")
 	}
-	if c.fontFor(widget.FontFace("", 700, false)) != c.namedFonts["OpenSans-Bold"] {
+	if c.fontFor(widget.FontFace("", 700, false)) != byNameT(c, "OpenSans-Bold") {
 		t.Error("bold при шрифте по умолчанию Open Sans — не OpenSans-Bold")
 	}
-	if c.fontFor(widget.FontFace("", 600, false)) != c.namedFonts["OpenSans-SemiBold"] {
+	if c.fontFor(widget.FontFace("", 600, false)) != byNameT(c, "OpenSans-SemiBold") {
 		t.Error("SemiBold при шрифте по умолчанию Open Sans — не OpenSans-SemiBold")
 	}
-	if c.fontFor(widget.FontFace("", 700, true)) != c.namedFonts["OpenSans-BoldItalic"] {
+	if c.fontFor(widget.FontFace("", 700, true)) != byNameT(c, "OpenSans-BoldItalic") {
 		t.Error("bold italic при шрифте по умолчанию Open Sans — не OpenSans-BoldItalic")
 	}
 }

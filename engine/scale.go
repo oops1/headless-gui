@@ -112,7 +112,7 @@ func (c *Canvas) cloneForSize(w, h int, scale float64, bgSrc image.Image) *Canva
 // и сбрасывает кэши глифов, метрик и раскладок шейпера.
 func (c *Canvas) setDPIAll(dpi float64) {
 	c.fontCache.SetDPI(dpi)
-	for _, fc := range c.namedFonts {
+	for _, fc := range c.namedFonts.all() {
 		fc.SetDPI(dpi)
 	}
 	for _, fb := range c.fallbacks {
