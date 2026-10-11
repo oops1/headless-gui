@@ -368,6 +368,18 @@ type WaylandWindow struct {
 	dndOffer   uint32
 	dndSerial  uint32 // serial из enter (для accept)
 	dndX, dndY int    // позиция курсора в поверхностных пикселях
+
+	// События приёмника (dragTargetEvents) и их состояние в текущей сессии.
+	onDragEnter func(x, y int)
+	onDragOver  func(x, y int) bool
+	onDragLeave func()
+	dndEntered  bool // в окне идёт перетаскивание файлов (enter сообщён приложению)
+	dndAnswered bool // компоновщику уже отвечено accept (дальше — только при смене)
+	dndAccepted bool // последний ответ: сброс здесь принимается
+	dndActions  bool // set_actions уже отправлен для этого offer
+
+	// drag — перетаскивание, начатое самим окном (BeginDragFiles).
+	drag wlDragSource
 }
 
 // waylandSocketPath возвращает путь к сокету композитора или "".
@@ -893,6 +905,10 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		case wlDataSourceEvCancelled:
 			w.clip.handleSourceCancelled(obj)
 		}
+
+	case w.drag.is(obj):
+		// События нашего источника перетаскивания (wayland_drag_linux.go).
+		w.handleDragSourceEvent(obj, opcode, b)
 
 	case w.isOfferObject(obj):
 		// wl_data_offer.offer(mime): фиксируем, что предложено.
@@ -1659,15 +1675,16 @@ func (w *WaylandWindow) SetOnFilesDropped(fn func(paths []string, x, y int)) { w
 
 // ─── Drag&Drop (wl_data_device) ──────────────────────────────────────────────
 //
-// Каркас приёма файлов из файлового менеджера. Поддерживается text/uri-list в
-// один проход: enter→(accept)→drop→receive(pipe)→parse→finish. Ограничения:
+// Приём файлов из файлового менеджера. Поддерживается text/uri-list в один
+// проход: enter→(accept)→motion…→drop→receive(pipe)→parse→finish. Приложение
+// видит вход, движение (с правом отказать) и уход (SetOnDragEnter/Over/Leave).
+// Ограничения:
 //   - действие фиксировано copy; альтернативные действия (move/ask) не согласуются;
 //   - offer буфера обмена (selection) уничтожается без обработки;
 //   - finish/set_actions доступны только при версии wl_data_device_manager ≥ 3
 //     (при v<3 — совместимый путь без них);
 //   - позиция сброса берётся из последнего enter/motion (поверхностные пиксели).
-// Компилируемость и корректность на современных композиторах (v3) обеспечены;
-// углублённый torn-drag feedback не реализован.
+// Начатое самим окном перетаскивание (источник) — wayland_drag_linux.go.
 
 // isOfferObject сообщает, известен ли объект obj как data_offer.
 func (w *WaylandWindow) isOfferObject(id uint32) bool {
@@ -1813,19 +1830,16 @@ func (w *WaylandWindow) handleDataDevice(opcode uint16, b []byte) {
 		w.dndX = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
 		w.dndY = int(int32(binary.LittleEndian.Uint32(b[12:16]))) >> 8
 		w.dndOffer = binary.LittleEndian.Uint32(b[16:20])
-		w.dndAcceptOffer()
+		w.dndEnter()
 
 	case wlDataDeviceEvMotion:
 		// time, x(fixed), y(fixed)
 		w.dndX = int(int32(binary.LittleEndian.Uint32(b[4:8]))) >> 8
 		w.dndY = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
+		w.dndAnswer()
 
 	case wlDataDeviceEvLeave:
-		if w.dndOffer != 0 {
-			w.send(newWlMsg(w.dndOffer, wlDataOfferDestroy), -1)
-			w.offerDelete(w.dndOffer)
-			w.dndOffer = 0
-		}
+		w.dndLeave()
 
 	case wlDataDeviceEvDrop:
 		w.dndReceive()
@@ -1839,31 +1853,83 @@ func (w *WaylandWindow) handleDataDevice(opcode uint16, b []byte) {
 	}
 }
 
-// dndAcceptOffer сообщает компоненту, принимаем ли мы предложение (accept +
-// set_actions при v≥3).
-func (w *WaylandWindow) dndAcceptOffer() {
+// dndEnter начинает сессию приёма: если в offer есть text/uri-list, сообщает
+// приложению о входе (SetOnDragEnter) и отвечает компоновщику. Перетаскивание
+// без файлов (текст, изображение) приложению не показывается.
+func (w *WaylandWindow) dndEnter() {
+	w.dndAnswered, w.dndAccepted, w.dndActions = false, false, false
+	w.dndEntered = w.dndOffer != 0 && w.offerGet(w.dndOffer)
+	if w.dndEntered && w.onDragEnter != nil {
+		w.onDragEnter(w.dndX, w.dndY)
+	}
+	w.dndAnswer()
+}
+
+// dndAnswer сообщает компоновщику, принимаем ли сброс в текущей точке:
+// accept с типом text/uri-list или с null-строкой (отказ — курсор «нельзя»,
+// drop не придёт). Решает приложение (SetOnDragOver), без него файлы
+// принимаются везде. Одинаковый ответ повторно не шлём. Действие фиксировано
+// copy (set_actions при v≥3, один раз за offer).
+func (w *WaylandWindow) dndAnswer() {
 	if w.dndOffer == 0 {
 		return
 	}
-	if w.offerGet(w.dndOffer) {
-		w.send(newWlMsg(w.dndOffer, wlDataOfferAccept).
-			putUint(w.dndSerial).putString(mimeTextUriList), -1)
-		if w.dataDevVersion >= 3 {
-			w.send(newWlMsg(w.dndOffer, wlDataOfferSetActions).
-				putUint(wlDndActionCopy).putUint(wlDndActionCopy), -1)
-		}
+	ok := w.dndEntered
+	if ok && w.onDragOver != nil {
+		ok = w.onDragOver(w.dndX, w.dndY)
+	}
+	if w.dndAnswered && ok == w.dndAccepted {
 		return
 	}
-	// Отклоняем: accept с null-строкой (длина 0).
-	w.send(newWlMsg(w.dndOffer, wlDataOfferAccept).putUint(w.dndSerial).putUint(0), -1)
+	w.dndAnswered, w.dndAccepted = true, ok
+	if !ok {
+		// Отклоняем: accept с null-строкой (длина 0).
+		w.send(newWlMsg(w.dndOffer, wlDataOfferAccept).putUint(w.dndSerial).putUint(0), -1)
+		return
+	}
+	w.send(newWlMsg(w.dndOffer, wlDataOfferAccept).
+		putUint(w.dndSerial).putString(mimeTextUriList), -1)
+	if w.dataDevVersion >= 3 && !w.dndActions {
+		w.dndActions = true
+		w.send(newWlMsg(w.dndOffer, wlDataOfferSetActions).
+			putUint(wlDndActionCopy).putUint(wlDndActionCopy), -1)
+	}
 }
+
+// dndLeave завершает сессию: курсор ушёл из окна без сброса. Offer уничтожается,
+// приложение узнаёт об уходе (SetOnDragLeave), если до этого был enter.
+// Сброс уже забрал offer (dndReceive обнулил dndOffer и dndEntered), поэтому
+// leave после drop приложению не шлётся.
+func (w *WaylandWindow) dndLeave() {
+	if w.dndOffer != 0 {
+		w.send(newWlMsg(w.dndOffer, wlDataOfferDestroy), -1)
+		w.offerDelete(w.dndOffer)
+		w.dndOffer = 0
+	}
+	if w.dndEntered {
+		w.dndEntered = false
+		if w.onDragLeave != nil {
+			w.onDragLeave()
+		}
+	}
+	w.dndAnswered, w.dndAccepted, w.dndActions = false, false, false
+}
+
+// SetOnDragEnter / Over / Leave — события приёмника (dragTargetEvents).
+// Координаты — поверхностные (как у SetOnFilesDropped).
+func (w *WaylandWindow) SetOnDragEnter(fn func(x, y int))     { w.onDragEnter = fn }
+func (w *WaylandWindow) SetOnDragOver(fn func(x, y int) bool) { w.onDragOver = fn }
+func (w *WaylandWindow) SetOnDragLeave(fn func())             { w.onDragLeave = fn }
 
 // dndReceive запрашивает данные (text/uri-list) через pipe и асинхронно их
 // читает, парсит и доставляет колбэку, после чего завершает offer.
 func (w *WaylandWindow) dndReceive() {
 	offer := w.dndOffer
 	w.dndOffer = 0
-	if offer == 0 || !w.offerGet(offer) {
+	// Сессия закончилась сбросом: leave после drop приложению не шлём.
+	accepted := w.dndAccepted
+	w.dndEntered, w.dndAnswered, w.dndAccepted, w.dndActions = false, false, false, false
+	if offer == 0 || !accepted || !w.offerGet(offer) {
 		w.completeOffer(offer, false)
 		return
 	}
