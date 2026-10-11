@@ -89,6 +89,11 @@ type X11Window struct {
 	onKeyDown          func(vk int)
 	onKeyUp            func(vk int)
 	onChar             func(r rune)
+	// onKeyDownRepeat — приёмник нажатий, отличающий автоповтор от нового
+	// нажатия (keyRepeatSource); keys — состояние клавиш для этого различения
+	// (x11_keyrepeat_linux.go). Задан приёмник — onKeyDown не вызывается.
+	onKeyDownRepeat func(vk int, repeat bool)
+	keys            x11KeyState
 
 	// Atom IDs для WM протоколов
 	atomWMProtocols     uint32
@@ -451,7 +456,7 @@ func (w *X11Window) CreatePopup(width, height int) error {
 func (w *X11Window) RunEventLoop() error {
 	buf := make([]byte, 32)
 	for !w.closed.Load() {
-		if !w.readFull(buf) {
+		if !w.readEvent(buf) {
 			if w.closed.Load() {
 				return nil
 			}
@@ -475,6 +480,10 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		w.x11ShmCompletion()
 		return
 	}
+	// Таблица нажатых клавиш ведётся ДО отбрасывания ввода заблокированным
+	// окном: пропущенное отпускание оставило бы клавишу «нажатой», и следующее
+	// настоящее нажатие сошло бы за повтор.
+	repeat := w.keys.note(evType, buf[1])
 	// Окно заблокировано модалкой (SetEnabled(false)): дропаем ввод
 	// (KeyPress=2, KeyRelease=3, ButtonPress=4, ButtonRelease=5, MotionNotify=6),
 	// но НЕ Expose/ConfigureNotify/ClientMessage — окно должно перерисовываться
@@ -491,8 +500,12 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		keycode := buf[1]
 		state := binary.LittleEndian.Uint16(buf[28:30])
 		vk := w.x11VKForKey(keycode)
-		if w.onKeyDown != nil && vk != 0 {
-			w.onKeyDown(vk)
+		if vk != 0 {
+			if w.onKeyDownRepeat != nil {
+				w.onKeyDownRepeat(vk, repeat)
+			} else if w.onKeyDown != nil {
+				w.onKeyDown(vk)
+			}
 		}
 		// Символьный ввод: полноценный маппинг по GetKeyboardMapping
 		// (раскладка/Shift/Caps/группа); фолбэк — упрощённая таблица.
@@ -1560,7 +1573,7 @@ func (w *X11Window) StartEventPump() {
 func (w *X11Window) eventPumpLoop() {
 	buf := make([]byte, 32)
 	for !w.closed.Load() {
-		if !w.readFull(buf) {
+		if !w.readEvent(buf) {
 			return
 		}
 		w.handleX11Event(buf)
