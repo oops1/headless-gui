@@ -1141,8 +1141,12 @@ type DrawContext interface {
     DrawImage(src image.Image, x, y int)
     DrawImageScaled(src image.Image, x, y, w, h int)
     // Scaled result is cached by source identity (pointer + Bounds) and
-    // size (32 entries / 16 Mpx LRU). Mutating an image in place requires
-    // canvas.InvalidateImageCache(src) (nil clears everything).
+    // size (32 entries / 16 Mpx LRU); an entry retains the source. Mutating an
+    // image in place requires eng.InvalidateImageCache(src) (nil clears
+    // everything) or widget.InvalidateImageCache(ctx, src). Images obey
+    // SetRoundClip. For zoom/pan of big pictures use the optional
+    // widget.ImageRectDrawer / widget.DrawImageRect(ctx, src, sr, dr, filter):
+    // only the part under the clip is scaled (see "v3.34 additions").
     
     // ── Text ──
     DrawText(text string, x, y int, col color.RGBA)  // default font, DefaultFontSizePt
@@ -2609,12 +2613,12 @@ returns) — use it for a "File → Exit" menu item.
 
 ## Render-on-demand & invalidation
 
-By default the engine redraws every tick (full backward compatibility). Enable
-on-demand rendering to skip frames while the UI is unchanged — near-zero CPU on
-idle:
+Since v3.5 the engine renders on demand by default (`engine.New` turns it on):
+frames are skipped while the UI is unchanged — near-zero CPU on idle. The old
+behaviour, a redraw every tick, is the opt-out `eng.SetRenderOnDemand(false)`:
 
 ```go
-eng.SetRenderOnDemand(true)
+eng.SetRenderOnDemand(true)     // the default; false = redraw every tick
 
 eng.Invalidate()                 // mark the whole frame changed (cheap, atomic)
 eng.InvalidateRect(r)            // declare a changed region; the next frame's
@@ -2633,8 +2637,8 @@ What is tracked automatically (no Invalidate needed):
   tooltip is "ripening", frames keep flowing.
 
 **You must call `Invalidate()` yourself** only when mutating widgets directly
-from app code in on-demand mode (e.g. `label.SetText` from your own goroutine).
-In the default mode nothing changes.
+from app code in on-demand mode — the default (e.g. `label.SetText` from your own
+goroutine). With `SetRenderOnDemand(false)` every tick is drawn anyway.
 
 Locking note: a frame no longer holds the engine's main lock — `SetRoot`/`Root`
 and event dispatch are never blocked by rendering. Structural operations
@@ -3044,8 +3048,8 @@ ww.OnNativeMove = func() bool { return true }            // одна прось�
 ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop и т. д.
 ```
 
-Бэкенд, который этого не умеет (Win32, X11, macOS), хуки не получает, и окно
-двигается прежним путём — `OnDragMove` плюс `SetPosition`; край окна в
+Бэкенд, который этого не умеет (Win32, macOS), хуки не получает (на X11 они
+ставятся — `_NET_WM_MOVERESIZE`, с v3.26), и окно двигается прежним путём — `OnDragMove` плюс `SetPosition`; край окна в
 нативном режиме там по-прежнему отдан системе.
 
 ### Поведение по платформам
@@ -3054,8 +3058,8 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 |---|---|---|---|
 | Модалка в своём окне (`ModalHost`) | нативно | нативно | in-canvas фолбэк |
 | Popup-оверлей в своём окне (`PopupSink`) | нативно | нативно | Wayland — `xdg_popup`, macOS — in-canvas |
-| Трей / balloon / превью | да | no-op (ошибка/false) | no-op (ошибка/false) |
-| Перетащить / растянуть окно | `SetPosition` | `SetPosition` | Wayland — просит компоновщик, macOS — нет |
+| Трей / balloon / превью | да | трей — StatusNotifierItem по D-Bus (`tray_sni_linux.go`, меню — dbusmenu), balloon — `org.freedesktop.Notifications`; превью нет | Wayland — трей и balloon как на X11 (`HideToTray` — no-op); macOS/headless — no-op (ошибка/false) |
+| Перетащить / растянуть окно | `SetPosition` | `_NET_WM_MOVERESIZE` (`BeginMove`/`BeginResize`, с v3.26) | Wayland — просит компоновщик, macOS — нет |
 | Свернуть / развернуть | да | да | Wayland — да (`set_minimized`/`set_maximized`) |
 | Форма курсора | да | да (шрифт «cursor») | Wayland — да (`cursor_shape` или своя картинка) |
 | Масштаб интерфейса (HiDPI) | да (per-monitor DPI) | да (`Xft.dpi`) | Wayland — да (fractional / `wl_output`), macOS — `HEADLESS_GUI_SCALE` |
@@ -3116,11 +3120,15 @@ type OverlayBoundsProvider interface { OverlayBounds() image.Rectangle } // аб
 `widget.SetPopupsHosted(true)` отключает клэмп меню по границам холста —
 позиционированием занимается хост, оверлей вправе выходить за окно.
 
-### Трей, balloon-уведомления, превью (Windows)
+### Трей, balloon-уведомления, превью (Windows; трей и balloon есть и на Linux)
 
 Публичный API на `*window.Window`. Можно вызывать до `Run()` (состояние
-буферизуется и применяется при создании окна) или из обработчиков UI. На
-не-Windows — no-op/ошибка.
+буферизуется и применяется при создании окна) или из обработчиков UI. На Linux
+(X11 и Wayland) трей — StatusNotifierItem по D-Bus (`window/tray_sni_linux.go`:
+нужен `StatusNotifierWatcher` на шине, в GNOME — расширение AppIndicator; меню
+рисует панель, одиночный клик вместо двойного), balloon —
+`org.freedesktop.Notifications` без иконки в трее; превью в панели задач — только
+Windows. На macOS и без нативного окна — no-op/ошибка.
 
 ```go
 // Иконка в трее. icon масштабируется до SM_CXSMICON, прозрачность из альфы.
@@ -6628,7 +6636,9 @@ win.Native() to an unexported interface — reaching into the engine.
     win.BeginMove() bool          // drag the window as the system does
     win.BeginResize(edges) bool   // edges: widget.NativeEdgeTop и далее
 
-Both answer false when the backend cannot do it (Win32, X11, macOS today) or
+Both answer false when the backend cannot do it (Win32 and macOS today; X11
+implements them since v3.26 through `_NET_WM_MOVERESIZE`, Wayland through
+`xdg_toplevel.move/resize`) or
 the system refused — then the application moves the window itself through
 SetPosition, exactly as before.
 
@@ -6709,7 +6719,8 @@ release, on a new key (only one key repeats, the last one), on focus loss and
 on close. Modifiers are never repeated.
 
 `KeyEvent.Repeat` marks a repeat on every platform (on Windows from bit 30 of
-`lParam`). It matters where a press toggles something: holding Caps Lock must
+`lParam`; on X11 since v3.34 from the `KeyRelease`+`KeyPress` pair of equal time, see
+"v3.34 additions"). It matters where a press toggles something: holding Caps Lock must
 not flip it twenty-five times a second. For typing and caret movement the
 repeat IS what is wanted, so most handlers ignore the flag.
 
@@ -7108,6 +7119,139 @@ button, old geometry without metrics, bridge round trip, icon placement and pixe
 caption shift, SVG, system menu items / languages / callbacks / click / toggle /
 double click / custom list, press owner, `SetTitleBarHitTest`,
 `DismissedByPress`+`Toggle`).
+
+---
+
+## v3.34 additions (images under a round clip, image cache, DrawImageRect, X11 key repeat, SetMaxFPS)
+
+Answers the PixGo (image viewer) remarks E8, E9, E10, E13. Public API is
+additive; frames of existing scenes are byte-identical (golden and hash tests pass
+without updates).
+
+### Images under `SetRoundClip`
+
+`DrawImage`, `DrawImageScaled` (stretched, 1:1 fast path, HiDPI) and the new
+`DrawImageRect` now obey the rounded clip like fills do. Before, `blitOver` honoured
+only the rectangular clip, and a picture inside a rounded panel had square corners.
+Only the corner rows (`radius` rows at the top and at the bottom) are blitted line by
+line with the narrowed span; the straight middle is ONE blit, as without rounding.
+Without `SetRoundClip` the path is the old one, byte for byte. Benchmarks
+(`go test ./engine -bench Image`) did not move: 64→24 icon 1.81 µs/op before and after;
+a 300×200 picture under a round clip costs the same as without it.
+
+### Scaled-image cache: source is retained, `InvalidateImageCache` everywhere
+
+```go
+eng.InvalidateImageCache(src image.Image)    // nil — the whole cache; any goroutine
+widget.InvalidateImageCache(ctx, src)        // helper for the draw context (no-op if unsupported)
+// optional interface (engine.Canvas, translatingContext, ScrollView wrapper implement it):
+type widget.ImageCacheInvalidator interface{ InvalidateImageCache(src image.Image) }
+```
+
+- **A cache entry now holds `src`.** The key is the address of the source plus bounds
+  and target size; the GC was free to collect the image and hand its address to a NEW
+  image of the same size, which then received somebody else's frame. While the entry
+  lives the address is taken, and a hit is additionally verified by `ent.src == src`.
+  `weak.Pointer` was not used: `go.mod` says Go 1.22, `weak` appeared in 1.24.
+  Cost: the 32 cached sources stay alive until evicted or invalidated (the byte budget
+  still counts only scaled results).
+- **`Engine.InvalidateImageCache`.** The cache lives on a canvas, and an engine has
+  several (main plus one per popup in its own native window). The call goes through
+  a journal shared by the engine's canvases and is applied by each of them before its
+  next use of the cache, so it is safe from any goroutine and reaches popups. A canvas
+  that lags more than 64 entries behind drops its whole cache (always correct). The call
+  does not schedule a frame: if the picture is on screen, call `Invalidate`/`InvalidateRect`.
+- Wrappers forward it: `svOffsetCtx` (ScrollView) and `translatingContext` (popups). The
+  narrow adapters of `widget/datagrid` and `widget/treeview` do not (their own context
+  types have no image-cache notion).
+
+### `DrawImageRect` with a filter — only the visible part is scaled
+
+```go
+widget.DrawImageRect(ctx, src, sr, dr, widget.FilterCatmullRom)  // helper with a fallback
+// optional interface, implemented by engine.Canvas and the wrappers:
+type widget.ImageRectDrawer interface {
+    DrawImageRect(src image.Image, sr, dr image.Rectangle, f widget.ImageFilter)
+}
+// filters: widget.FilterNearest, FilterBilinear, FilterCatmullRom
+sr, dr = widget.ClampImageRect(src.Bounds(), sr, dr)   // clamp sr to the source, shrink dr proportionally
+```
+
+`sr` is the source rectangle (pixels of `src`), `dr` the destination in LOGICAL
+coordinates of the context (like `x, y, w, h` of `DrawImageScaled`; may be far larger
+than the window and run past its edges). Unlike `DrawImageScaled`, which stretches the
+WHOLE source to the FULL size before the clip, only the destination pixels under the
+current clip (rectangular and rounded) are computed, and only the source rows and
+columns they need. A 12000×8000 picture at 400 % in a 1200×800 window costs like
+1200×800 pixels. The result is not cached; the cost is proportional to the visible area
+(`TestDrawImageRect_WorkProportionalToClip`).
+
+- Kernels follow `golang.org/x/image/draw` (centre projection `(d+0.5)·s−0.5`, kernel
+  widened by the scale when shrinking, weights normalised, edges truncated) but are an
+  own separable implementation: x/image builds an intermediate `dw×sh` buffer for the
+  whole destination width, which is exactly what must be avoided. Memory is a sliding
+  window of a few rows, independent of the source and `dr` sizes.
+- Sources read directly: `*image.RGBA`, `*image.NRGBA`, `*image.YCbCr` (all subsamplings),
+  `*image.Gray`; any other through `RGBA64Image`/`At`. Output is premultiplied; colour
+  never exceeds alpha (Catmull-Rom ringing is clamped).
+- Matches full scaling by `x/image/draw` in the visible part within ±2 (±3 for YCbCr and
+  Gray: other YCbCr→RGB rounding), exactly for `FilterNearest` on RGBA.
+- `sr` outside `src.Bounds()` is clamped together with a proportional part of `dr`.
+- Fallback for a context without `ImageRectDrawer` (`widget.DrawImageRect` helper): the
+  cropped source goes through `DrawImageScaled` — bilinear regardless of the filter and
+  without the clip saving. A part of the source is a new object on each call, so the
+  32-entry cache turns over.
+- Reference timings (i7, 1200×800 window, 4000×3000 source): zoom ×4 — nearest 6 ms,
+  bilinear 7 ms, Catmull-Rom 9 ms; fit-to-window (shrink 3.3×) bilinear 48 ms.
+
+### X11: `KeyEvent.Repeat` and the end of spurious key-ups
+
+By default an X server shows auto-repeat as a `KeyRelease` + `KeyPress` pair with the
+SAME time and key code. The application saw a stream of "released, pressed", `Repeat` was
+always false, and toggling keys fired on every tick. The backend now applies the standard
+trick of toolkits: on `KeyRelease` it peeks (2 ms, once per ordinary release) whether a
+`KeyPress` with the same time and code follows; if so, the release is swallowed and the
+press is delivered with `Repeat=true`. A press of a key already held is a repeat in any
+case, so a server with XKB `DetectableAutoRepeat` works unchanged. XKB itself is not used
+(the backend speaks the bare protocol). The table of held keys is kept even for a window
+blocked by a modal, and reset on `FocusOut`. A half-read event is always completed.
+`X11Window` implements `keyRepeatSource` (`SetOnKeyDownRepeat`). Tests drive
+`readEvent`/`handleX11Event` over `net.Pipe`: pairs, real release+press, single release,
+split event, detectable repeat, disabled window (`window/x11_keyrepeat_linux_test.go`).
+Checked on the wire only, not against a live server.
+
+### `Window.SetMaxFPS` now limits the main engine
+
+It used to change only a field read by modal windows and dock hosts when they create
+their engines; the main engine ran at the `fps` of `engine.New` whatever the window said.
+Now `Window.SetMaxFPS(n)` also calls the optional `Engine.SetMaxFPS(n)` (atomic, any
+goroutine, picked up on the next tick, the animation step follows). It is a CAP, not a
+target: an engine created at 20 fps stays at 20 under `SetMaxFPS(60)`. Until the window
+method is called the engine keeps its own rate, even when it is above the window default
+of 60. `n <= 0` removes the cap.
+
+### Documentation corrections
+
+- Render on demand has been the default since v3.5 (`engine.New` sets it); the
+  "redraws every tick by default" text is gone, `SetRenderOnDemand(false)` is the opt-out.
+- `BeginMove`/`BeginResize` are implemented on X11 (`_NET_WM_MOVERESIZE`, v3.26) and Wayland;
+  they answer false only on Win32 and macOS. The native-move hooks of `widget.Window` are
+  installed on X11 too.
+- Tray on X11 and Wayland works through StatusNotifierItem (`window/tray_sni_linux.go`,
+  dbusmenu for the menu); balloons through `org.freedesktop.Notifications`
+  (`notify_linux.go`). The taskbar preview stays Windows-only.
+- The statement that `KeyEvent.Repeat` marks a repeat "on every platform" was false for X11
+  (the field was always false there); it is true since this version.
+
+Tests: `engine/imageround_test.go` (round clip: every drawing path, scales 1 and 2,
+RGBA and BGRX, opaque and translucent, partial overlap, unchanged frame without rounding),
+`engine/imagecache_engine_test.go` (finalizer-based retention test, forged key, engine
+invalidation of main and popup canvases, journal overflow, concurrency, popup wrapper),
+`engine/imagerect_test.go` (full-scale reference for 3 filters × 6 source types × 6
+geometries, ×1000 destination, work proportional to the clip, `sr` clamp, round clip and
+BGRX, agreement with `DrawImageScaled` at scales 1, 1.5, 2), `widget/imagerect_test.go`
+(fallback, `ClampImageRect`, ScrollView wrapper), `engine/maxfps_test.go`,
+`window/maxfps_test.go`, `window/x11_keyrepeat_linux_test.go`.
 
 ---
 

@@ -1546,7 +1546,7 @@ OEM-клавиши (`KeyOemPlus`, `KeyOemMinus` и др.), `KeyF1…KeyF24`, н�
 меню). На X11 и Wayland код берётся по ФИЗИЧЕСКОЙ клавише латинской раскладки,
 поэтому `Ctrl+S` срабатывает и в русской. Порядок событий: нажатие с `Code`,
 затем отдельное текстовое событие с `Rune`. `KeyEvent.Repeat` отличает
-автоповтор удерживаемой клавиши от нового нажатия.
+автоповтор удерживаемой клавиши от нового нажатия (Win32, Wayland и X11).
 
 Модификаторы: `ModShift, ModCtrl, ModAlt, ModMeta`.
 
@@ -1772,7 +1772,7 @@ eng := engine.New(1280, 720, 30)
 // ... строим UI, eng.Start() ...
 
 win := window.New(eng, "Заголовок окна")
-win.SetMaxFPS(60)
+win.SetMaxFPS(60)    // потолок частоты кадров движка окна (не выше fps из engine.New)
 win.SetResizable(true)
 
 if err := win.Run(); err != nil {  // блокирует до закрытия
@@ -1957,6 +1957,11 @@ ctx.SetPixel(x, y int, col color.RGBA)
 // Изображения
 ctx.DrawImage(src image.Image, x, y int)
 ctx.DrawImageScaled(src image.Image, x, y, w, h int)
+// Часть картинки с фильтром: масштабируется только то, что под клипом (v3.34).
+// Контекст без поддержки получает запасной путь — DrawImageScaled от вырезки.
+widget.DrawImageRect(ctx, src, sr, dr image.Rectangle, widget.FilterCatmullRom)
+// Картинку переписали на месте — сбросить кэш масштабирования (nil — весь):
+widget.InvalidateImageCache(ctx, src)     // из Draw; из приложения — eng.InvalidateImageCache(src)
 
 // Текст
 ctx.DrawText(text string, x, y int, col color.RGBA)
@@ -4085,7 +4090,7 @@ p.SetStyle("taskbar", "", theme.StateNormal, theme.StyleDelta{
 Размытие подложки берёт готовые пиксели холста, уменьшает их вчетверо,
 размывает разделимым box-blur (стоимость не зависит от радиуса) и возвращает
 обратно. `Canvas.SetRoundClip` обрезает по скруглённому контуру, а не по
-охватывающему прямоугольнику.
+охватывающему прямоугольнику; так же обрезаются и изображения (`DrawImage*`).
 
 #### Акцент, светлая панель и акрил Windows 10 (с v3.31)
 

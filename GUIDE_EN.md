@@ -1553,7 +1553,7 @@ navigation, `KeyCapsLock`, `KeyPrintScreen`, `KeyPause`, `KeyMenu` (the
 context-menu key). On X11 and Wayland the code comes from the PHYSICAL key of
 the Latin layout, so `Ctrl+S` works in a Russian layout too. Order of events: a
 press with `Code`, then a separate text event with `Rune`. `KeyEvent.Repeat`
-tells auto-repeat of a held key from a new press.
+tells auto-repeat of a held key from a new press (Win32, Wayland and X11).
 
 Modifiers: `ModShift, ModCtrl, ModAlt, ModMeta`.
 
@@ -1779,7 +1779,7 @@ eng := engine.New(1280, 720, 30)
 // ... build UI, eng.Start() ...
 
 win := window.New(eng, "Window Title")
-win.SetMaxFPS(60)
+win.SetMaxFPS(60)    // cap of the window engine's frame rate (never above the fps of engine.New)
 win.SetResizable(true)
 
 if err := win.Run(); err != nil {  // blocks until window closes
@@ -1968,6 +1968,11 @@ ctx.SetPixel(x, y int, col color.RGBA)
 // Images
 ctx.DrawImage(src image.Image, x, y int)
 ctx.DrawImageScaled(src image.Image, x, y, w, h int)
+// A part of the picture with a filter: only what is under the clip is scaled (v3.34).
+// A context without support gets a fallback — DrawImageScaled of the cropped source.
+widget.DrawImageRect(ctx, src, sr, dr image.Rectangle, widget.FilterCatmullRom)
+// The picture was rewritten in place — drop the scaling cache (nil — all of it):
+widget.InvalidateImageCache(ctx, src)     // from Draw; from the app — eng.InvalidateImageCache(src)
 
 // Text
 ctx.DrawText(text string, x, y int, col color.RGBA)
@@ -4108,7 +4113,7 @@ p.SetStyle("taskbar", "", theme.StateNormal, theme.StyleDelta{
 Backdrop blur takes the pixels already on the canvas, downscales them 4×, blurs
 them with a separable box blur (cost independent of the radius) and puts them
 back. `Canvas.SetRoundClip` clips along the rounded outline instead of its
-bounding box.
+bounding box; images (`DrawImage*`) are clipped the same way.
 
 #### Accent, light taskbar and Windows 10 acrylic (since v3.31)
 
