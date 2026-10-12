@@ -241,7 +241,7 @@ type WaylandWindow struct {
 
 	width, height int
 	title         string
-	closed        bool
+	closed        atomic.Bool // атомарный: пишет Close из горутины приложения, читает цикл событий
 	configured    bool
 	hasFrame      bool // был ли закоммичен хотя бы один кадр
 	pendingSerial uint32
@@ -649,7 +649,7 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	}
 	if !w.configured {
 		// дочитываем события до configure
-		for !w.configured && !w.closed {
+		for !w.configured && !w.closed.Load() {
 			if err := w.dispatchOne(); err != nil {
 				return fmt.Errorf("wayland: ожидание configure: %w", err)
 			}
@@ -719,9 +719,9 @@ func (w *WaylandWindow) dispatchOne() error {
 }
 
 func (w *WaylandWindow) RunEventLoop() error {
-	for !w.closed {
+	for !w.closed.Load() {
 		if err := w.dispatchOne(); err != nil {
-			if w.closed {
+			if w.closed.Load() {
 				return nil
 			}
 			return err
@@ -762,7 +762,7 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		_, off := binary.LittleEndian.Uint32(b[0:4]), 8
 		msg, _ := wlString(b, off)
 		fmt.Fprintf(os.Stderr, "wayland: protocol error: %s\n", msg)
-		w.closed = true
+		w.closed.Store(true)
 
 	case obj == wlDisplayID && opcode == wlDisplayEvDeleteID:
 		// подтверждение удаления объекта — освобождать нечего (id не переиспользуем)
@@ -856,7 +856,7 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 
 	case obj == w.toplevelID && opcode == xdgToplevelEvClose:
 		if w.onClose == nil || w.onClose() {
-			w.closed = true
+			w.closed.Store(true)
 		}
 
 	case obj == w.seatID && opcode == wlSeatEvCapabilities:
@@ -1395,7 +1395,7 @@ func (w *WaylandWindow) waitBufFree() bool {
 // BlitRGBADirty конвертирует и коммитит только изменившуюся область. Если
 // композитор ещё держит целевой буфер — кадр пропускается, область копится.
 func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
-	if w.surfaceID == 0 || img == nil || w.closed {
+	if w.surfaceID == 0 || img == nil || w.closed.Load() {
 		return
 	}
 	b := img.Bounds()
@@ -1492,7 +1492,7 @@ func (w *WaylandWindow) Close() {
 	w.icon.mu.Lock()
 	w.closeIconMemory()
 	w.icon.mu.Unlock()
-	w.closed = true
+	w.closed.Store(true)
 	// Соединение закрываем ПОСЛЕ памяти: destroyPool ещё пишет в сокет
 	// (wl_buffer.destroy, wl_shm_pool.destroy), а Close по протоколу — это
 	// разрыв, после которого композитор объекты и так забудет.

@@ -4,7 +4,7 @@ package window
 
 import (
 	"os"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 )
@@ -25,11 +25,20 @@ func TestX11FullscreenE2E(t *testing.T) {
 	}
 	defer w.Close()
 
-	var events []bool
-	var calls atomic.Int32
+	// Колбэк зовёт цикл событий, а читает тест — срез под замком.
+	var (
+		mu     sync.Mutex
+		events []bool
+	)
+	snapshot := func() []bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]bool(nil), events...)
+	}
 	w.SetOnFullscreenChanged(func(on bool) {
+		mu.Lock()
 		events = append(events, on)
-		calls.Add(1)
+		mu.Unlock()
 	})
 	go w.RunEventLoop()
 
@@ -39,16 +48,16 @@ func TestX11FullscreenE2E(t *testing.T) {
 	if !fsWaitFor(func() bool { return w.IsFullscreen() }) {
 		t.Skip("оконный менеджер не перевёл окно в полный экран (нет WM или он не умеет)")
 	}
-	if calls.Load() < 1 || !events[0] {
-		t.Errorf("уведомления %v, ждал первым true", events)
+	if ev := snapshot(); len(ev) < 1 || !ev[0] {
+		t.Errorf("уведомления %v, ждал первым true", ev)
 	}
 
 	w.SetFullscreen(false)
 	if !fsWaitFor(func() bool { return !w.IsFullscreen() }) {
 		t.Fatal("после REMOVE окно осталось в полном экране")
 	}
-	if last := events[len(events)-1]; last {
-		t.Errorf("последнее уведомление %v, ждал false", last)
+	if !fsWaitFor(func() bool { ev := snapshot(); return len(ev) > 0 && !ev[len(ev)-1] }) {
+		t.Errorf("уведомления %v, ждал последним false", snapshot())
 	}
 }
 
