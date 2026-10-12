@@ -24,6 +24,8 @@ func (w *X11Window) handleXdndEnter(buf []byte) {
 	w.dndVersion = int(l1 >> 24)
 	w.dndAccept = false
 	w.dndDropPending = false
+	w.dndEntered = false
+	w.dndLastOK = true // до первого XdndPosition сброс не запрещён
 
 	if l1&1 != 0 {
 		// Более 3 типов — полный список в свойстве XdndTypeList источника.
@@ -56,8 +58,40 @@ func (w *X11Window) handleXdndPosition(buf []byte) {
 	packed := binary.LittleEndian.Uint32(buf[20:24]) // data.l[2] = (x<<16)|y
 	w.dndX = int(packed >> 16 & 0xFFFF)
 	w.dndY = int(packed & 0xFFFF)
-	w.sendXdndStatus(src, w.dndAccept)
+	accept := w.dndAccept
+	if accept {
+		// Файлы предложены: приложение узнаёт о входе с первым движением (в
+		// XdndEnter точки нет) и решает, принимается ли сброс здесь.
+		lx, ly := w.dndLocalPos()
+		if !w.dndEntered {
+			w.dndEntered = true
+			if w.onDragEnter != nil {
+				w.onDragEnter(lx, ly)
+			}
+		}
+		if w.onDragOver != nil {
+			accept = w.onDragOver(lx, ly)
+		}
+	}
+	w.dndLastOK = accept
+	w.sendXdndStatus(src, accept)
 }
+
+// handleXdndLeave — курсор ушёл из окна без сброса (или источник отменил
+// перетаскивание): приложению сообщается об уходе, если было о входе.
+func (w *X11Window) handleXdndLeave() {
+	entered := w.dndEntered
+	w.dndReset()
+	if entered && w.onDragLeave != nil {
+		w.onDragLeave()
+	}
+}
+
+// SetOnDragEnter / Over / Leave — события приёмника (dragTargetEvents).
+// Координаты — клиентские физические пиксели.
+func (w *X11Window) SetOnDragEnter(fn func(x, y int))     { w.onDragEnter = fn }
+func (w *X11Window) SetOnDragOver(fn func(x, y int) bool) { w.onDragOver = fn }
+func (w *X11Window) SetOnDragLeave(fn func())             { w.onDragLeave = fn }
 
 // handleXdndDrop запрашивает данные выделения (если принимаем) — ответ придёт
 // событием SelectionNotify. Иначе сразу сообщает источнику XdndFinished(отказ).
@@ -67,7 +101,8 @@ func (w *X11Window) handleXdndDrop(buf []byte) {
 		src = w.dndSource
 	}
 	w.dndTime = binary.LittleEndian.Uint32(buf[20:24]) // data.l[2] = timestamp
-	if !w.dndAccept || w.onFilesDropped == nil {
+	w.dndEntered = false // после сброса leave приложению не шлётся
+	if !w.dndAccept || !w.dndLastOK || w.onFilesDropped == nil {
 		w.sendXdndFinished(src, false)
 		w.dndReset()
 		return
@@ -115,6 +150,7 @@ func (w *X11Window) dndReset() {
 	w.dndVersion = 0
 	w.dndAccept = false
 	w.dndDropPending = false
+	w.dndEntered = false
 }
 
 // ─── XDND: низкоуровневые запросы ────────────────────────────────────────────
@@ -149,10 +185,19 @@ func (w *X11Window) sendXdndFinished(dest uint32, accepted bool) {
 // x11SendClientMessage отправляет ClientMessage (format 32, 5×CARD32) окну dest
 // через SendEvent (mask 0 — доставляется владельцу окна dest).
 func (w *X11Window) x11SendClientMessage(dest, msgType uint32, data [5]uint32) {
+	w.x11SendClientMessageVia(dest, dest, msgType, data)
+}
+
+// x11SendClientMessageVia — x11SendClientMessage через посредника: событие
+// уходит окну to (владельцу окна to, SendEvent), а в поле window сообщения
+// остаётся окно-приёмник target. Для обычного окна to == target; для окна с
+// XdndProxy (спецификация XDND) to — окно-прокси.
+func (w *X11Window) x11SendClientMessageVia(to, target, msgType uint32, data [5]uint32) {
+	dest := to
 	ev := make([]byte, 32)
 	ev[0] = 33 // ClientMessage
 	ev[1] = 32 // format
-	binary.LittleEndian.PutUint32(ev[4:8], dest) // window = получатель
+	binary.LittleEndian.PutUint32(ev[4:8], target) // window = окно-приёмник
 	binary.LittleEndian.PutUint32(ev[8:12], msgType)
 	for i := 0; i < 5; i++ {
 		binary.LittleEndian.PutUint32(ev[12+i*4:16+i*4], data[i])
@@ -260,7 +305,9 @@ func (w *X11Window) x11GetProperty(window, property uint32, del bool) (uint32, i
 		case 0: // error-пакет — запрос отвергнут
 			return 0, 0, nil
 		default: // обычное событие — обрабатываем на месте
-			w.handleX11Event(hdr)
+			if full, ok := w.x11CompleteEvent(hdr); ok && full != nil {
+				w.handleX11Event(full)
+			}
 		}
 	}
 	return 0, 0, nil

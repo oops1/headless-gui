@@ -11,6 +11,7 @@ import (
 
 	"github.com/oops1/headless-gui/v3/desktop"
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -45,6 +46,8 @@ type qsOpts struct {
 	dark     bool
 	theme    string // профиль; пусто — Windows 11 (по dark)
 	reduce   bool   // «меньше движения»
+	scroll   bool   // прежний вид: сетка прокручивается, а не листается страницами
+	editOld  bool   // прежняя нижняя полоса: батарея слева, «Изменить» справа
 	mica     bool   // Mica и мягкие тени поверх обоев
 	scale    float64
 	w, h     int
@@ -87,6 +90,12 @@ func qsBuild(t *testing.T, o qsOpts) *qsScene {
 	if o.reduce {
 		m.SetFlag(theme.FlagMotionReduce, true)
 	}
+	if o.scroll {
+		m.SetFlag(theme.KeyQuickPaged, false)
+	}
+	if o.editOld {
+		m.SetFlag(theme.KeyQuickFooterEditLeft, false)
+	}
 	m.SetIconResolver(widget.BuiltinIcons())
 	w, h := o.w, o.h
 	if w == 0 {
@@ -123,7 +132,7 @@ func qsBuild(t *testing.T, o qsOpts) *qsScene {
 	if scale <= 0 {
 		scale = 1
 	}
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	eng.SetScale(scale)
 	if o.mica {
 		m.SetFlag(theme.FlagBackdropMica, true)

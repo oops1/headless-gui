@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/oops1/headless-gui/v3/internal/clipimage"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -89,6 +90,11 @@ type X11Window struct {
 	onKeyDown          func(vk int)
 	onKeyUp            func(vk int)
 	onChar             func(r rune)
+	// onKeyDownRepeat — приёмник нажатий, отличающий автоповтор от нового
+	// нажатия (keyRepeatSource); keys — состояние клавиш для этого различения
+	// (x11_keyrepeat_linux.go). Задан приёмник — onKeyDown не вызывается.
+	onKeyDownRepeat func(vk int, repeat bool)
+	keys            x11KeyState
 
 	// Atom IDs для WM протоколов
 	atomWMProtocols     uint32
@@ -99,6 +105,12 @@ type X11Window struct {
 	atomNetWMState      uint32
 	atomNetWMStateModal uint32 // _NET_WM_STATE_MODAL (модальность у EWMH-WM)
 	atomNetActiveWindow uint32 // _NET_ACTIVE_WINDOW (передача фокуса окну)
+
+	// Полный экран (x11_fullscreen_linux.go): атомы и состояние.
+	atomWMStateFullscreen uint32 // _NET_WM_STATE_FULLSCREEN
+	atomNetSupported      uint32 // _NET_SUPPORTED (что умеет оконный менеджер)
+	atomFsMonitors        uint32 // _NET_WM_FULLSCREEN_MONITORS (полный экран на выбранном мониторе)
+	fs                    x11Fullscreen
 
 	// disabled — окно заблокировано на время модального диалога (аналог
 	// Win32 EnableWindow(false)). У X11 нет системного отключения ввода,
@@ -134,6 +146,9 @@ type X11Window struct {
 	// atomGnomeCopied — x-special/gnome-copied-files: список файлов с
 	// пометкой copy/cut (text/uri-list — atomTextUriList, общий с XDND).
 	atomGnomeCopied uint32
+	// Изображение в буфере обмена: image/png и image/bmp — цели, INCR — тип
+	// свойства, в котором большие данные идут по частям (x11_clipboard_image_linux.go).
+	atomImagePNG, atomImageBMP, atomIncr uint32
 	// clip — буфер обмена своими силами (x11_clipboard_linux.go).
 	clip *x11Clipboard
 	// cursors — формы курсора окна (x11_cursor_linux.go).
@@ -170,9 +185,15 @@ type X11Window struct {
 	atomXdndDrop       uint32
 	atomXdndFinished   uint32
 	atomXdndSelection  uint32
+	atomXdndProxy      uint32 // XdndProxy: окно-посредник приёмника (x11_drag_linux.go)
 	atomXdndTypeList   uint32
 	atomXdndActionCopy uint32
 	atomTextUriList    uint32
+	// Действия «переместить»/«ссылка» и служебное сообщение «начни
+	// перетаскивание» (источник XDND, x11_drag_linux.go).
+	atomXdndActionMove uint32
+	atomXdndActionLink uint32
+	atomDragBegin      uint32
 
 	// Состояние текущей DnD-сессии (заполняется из ClientMessage-событий).
 	dndSource      uint32 // окно-источник перетаскивания (0 — нет сессии)
@@ -183,6 +204,23 @@ type X11Window struct {
 	dndDropPending bool   // ждём SelectionNotify после XConvertSelection
 
 	onFilesDropped func(paths []string, x, y int)
+
+	// События приёмника (dragTargetEvents) и состояние сессии: enter
+	// сообщается приложению с первым XdndPosition (в XdndEnter точки нет).
+	onDragEnter func(x, y int)
+	onDragOver  func(x, y int) bool
+	onDragLeave func()
+	dndEntered  bool // приложению сообщено о входе, leave после drop не шлётся
+	dndLastOK   bool // последний ответ приложения: сброс принимается
+
+	// btnDown — маска зажатых кнопок мыши (бит 1<<(n-1) для кнопки X n):
+	// перетаскивание можно начать, только пока кнопка зажата.
+	btnDown atomic.Uint32
+	// drag — перетаскивание, начатое самим окном (x11_drag_linux.go).
+	drag x11Drag
+
+	// touch — касания через XInput 2.2 (x11touch_linux.go).
+	touch x11Touch
 }
 
 type x11Screen struct {
@@ -282,6 +320,9 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomWMStateMaxV = w.x11InternAtom("_NET_WM_STATE_MAXIMIZED_VERT")
 	w.atomNetWMStateModal = w.x11InternAtom("_NET_WM_STATE_MODAL")
 	w.atomNetActiveWindow = w.x11InternAtom("_NET_ACTIVE_WINDOW")
+	w.atomWMStateFullscreen = w.x11InternAtom("_NET_WM_STATE_FULLSCREEN")
+	w.atomNetSupported = w.x11InternAtom("_NET_SUPPORTED")
+	w.atomFsMonitors = w.x11InternAtom("_NET_WM_FULLSCREEN_MONITORS")
 	w.atomNetWMMoveResize = w.x11InternAtom("_NET_WM_MOVERESIZE")
 	w.atomUTF8String = w.x11InternAtom("UTF8_STRING")
 	w.clip = newX11Clipboard(w)
@@ -291,9 +332,15 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomText = w.x11InternAtom("TEXT")
 	w.atomTextHTML = w.x11InternAtom(mimeTextHTML)
 	w.atomGnomeCopied = w.x11InternAtom(mimeGnomeCopiedFiles)
+	w.atomImagePNG = w.x11InternAtom(clipimage.MimePNG)
+	w.atomImageBMP = w.x11InternAtom(clipimage.MimeBMP)
+	w.atomIncr = w.x11InternAtom("INCR")
 	w.atomNetWMName = w.x11InternAtom("_NET_WM_NAME")
 	w.atomNetWMIconName = w.x11InternAtom("_NET_WM_ICON_NAME")
 	w.atomMotifHints = w.x11InternAtom("_MOTIF_WM_HINTS")
+	// Умеет ли менеджер полный экран — до создания окна, пока на соединении
+	// нет событий и ответ читается напрямую.
+	w.x11DetectFullscreenSupport()
 
 	// XDND (Drag&Drop файлов из ОС).
 	w.atomXdndAware = w.x11InternAtom("XdndAware")
@@ -304,9 +351,13 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomXdndDrop = w.x11InternAtom("XdndDrop")
 	w.atomXdndFinished = w.x11InternAtom("XdndFinished")
 	w.atomXdndSelection = w.x11InternAtom("XdndSelection")
+	w.atomXdndProxy = w.x11InternAtom("XdndProxy")
 	w.atomXdndTypeList = w.x11InternAtom("XdndTypeList")
 	w.atomXdndActionCopy = w.x11InternAtom("XdndActionCopy")
 	w.atomTextUriList = w.x11InternAtom("text/uri-list")
+	w.atomXdndActionMove = w.x11InternAtom("XdndActionMove")
+	w.atomXdndActionLink = w.x11InternAtom("XdndActionLink")
+	w.atomDragBegin = w.x11InternAtom("_HEADLESS_GUI_DRAG_BEGIN")
 
 	// CreateWindow request
 	x := (int(w.screen.WidthInPixels) - width) / 2
@@ -320,16 +371,7 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.posCached = true
 	w.posMu.Unlock()
 
-	eventMask := uint32(
-		0x00000001 | // KeyPress
-			0x00000002 | // KeyRelease
-			0x00000004 | // ButtonPress
-			0x00000008 | // ButtonRelease
-			0x00000020 | // LeaveWindow — снять наведение (pointerleave.go)
-			0x00000040 | // PointerMotion
-			0x00008000 | // ExposureMask
-			0x00020000 | // StructureNotifyMask (resize/close)
-			0x00400000) // FocusChangeMask
+	eventMask := x11TopLevelEventMask
 
 	values := []uint32{
 		w.screen.BlackPixel, // background
@@ -342,6 +384,10 @@ func (w *X11Window) Create(title string, width, height int) error {
 
 	// Graphics Context
 	w.x11CreateGC(w.gcID, w.wid)
+
+	// Касания (XInput 2.2), если окно их просило: ответы читаются напрямую, пока
+	// окно не показано и посторонних событий на соединении нет.
+	w.x11InitTouch()
 
 	// WM_PROTOCOLS — чтобы получать WM_DELETE_WINDOW
 	w.x11ChangeProperty(w.wid, w.atomWMProtocols, 4 /*ATOM*/, 32,
@@ -450,14 +496,31 @@ func (w *X11Window) CreatePopup(width, height int) error {
 
 func (w *X11Window) RunEventLoop() error {
 	buf := make([]byte, 32)
+	// Просьба о касаниях могла прийти после Create и до запуска цикла: сразу
+	// выполняем отложенную подписку; looping заявляем ДО проверки, чтобы просьба,
+	// пришедшая ровно сейчас, не потерялась (см. SetTouchEnabled).
+	w.touch.looping.Store(true)
+	defer w.touch.looping.Store(false)
+	w.x11SyncTouch()
 	for !w.closed.Load() {
-		if !w.readFull(buf) {
+		if !w.readEvent(buf) {
 			if w.closed.Load() {
 				return nil
 			}
 			return fmt.Errorf("x11: read event: соединение закрыто")
 		}
-		w.handleX11Event(buf)
+		full, ok := w.x11CompleteEvent(buf)
+		if !ok {
+			if w.closed.Load() {
+				return nil
+			}
+			return fmt.Errorf("x11: read event: соединение закрыто")
+		}
+		if full != nil {
+			w.handleX11Event(full)
+		}
+		w.x11SyncWMState()
+		w.x11SyncTouch()
 	}
 	return nil
 }
@@ -475,6 +538,16 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		w.x11ShmCompletion()
 		return
 	}
+	// Таблица нажатых клавиш ведётся ДО отбрасывания ввода заблокированным
+	// окном: пропущенное отпускание оставило бы клавишу «нажатой», и следующее
+	// настоящее нажатие сошло бы за повтор. По той же причине — и до
+	// перетаскивания, которое забирает ввод себе (Esc).
+	repeat := w.keys.note(evType, buf[1])
+	// Перетаскивание из этого окна идёт: ввод, статусы приёмника и запросы
+	// данных разбирает источник (x11_drag_linux.go).
+	if w.drag.active.Load() && w.dragHandleEvent(buf) {
+		return
+	}
 	// Окно заблокировано модалкой (SetEnabled(false)): дропаем ввод
 	// (KeyPress=2, KeyRelease=3, ButtonPress=4, ButtonRelease=5, MotionNotify=6),
 	// но НЕ Expose/ConfigureNotify/ClientMessage — окно должно перерисовываться
@@ -482,7 +555,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	// не отвечает на ввод, пока открыт диалог.
 	if w.disabled.Load() {
 		switch evType {
-		case 2, 3, 4, 5, 6, 8:
+		case 2, 3, 4, 5, 6, 8, x11GenericEvent:
 			return
 		}
 	}
@@ -491,8 +564,12 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		keycode := buf[1]
 		state := binary.LittleEndian.Uint16(buf[28:30])
 		vk := w.x11VKForKey(keycode)
-		if w.onKeyDown != nil && vk != 0 {
-			w.onKeyDown(vk)
+		if vk != 0 {
+			if w.onKeyDownRepeat != nil {
+				w.onKeyDownRepeat(vk, repeat)
+			} else if w.onKeyDown != nil {
+				w.onKeyDown(vk)
+			}
 		}
 		// Символьный ввод: полноценный маппинг по GetKeyboardMapping
 		// (раскладка/Shift/Caps/группа); фолбэк — упрощённая таблица.
@@ -514,6 +591,10 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		}
 
 	case 4: // ButtonPress
+		if w.touchSwallowsPointer(buf) {
+			return // эмуляция указателя от касания (x11TouchGuard)
+		}
+		w.noteButton(buf[1], true)
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
 		w.rememberRoot(buf)
@@ -531,33 +612,31 @@ func (w *X11Window) handleX11Event(buf []byte) {
 			}
 			return
 		}
-		button := int(buf[1]) - 1 // X11: 1=left, 2=mid, 3=right → 0,1,2
-		if button == 2 {
-			button = 1 // right
-		} else if button == 1 {
-			button = 2 // middle
-		}
-		if w.onMouseButton != nil {
+		// 1=left, 2=middle, 3=right, 4/5=колесо, 8/9=боковые «назад»/«вперёд».
+		button, ok := x11ButtonID(int(buf[1]))
+		if ok && w.onMouseButton != nil {
 			w.onMouseButton(x, y, button, true)
 		}
 
 	case 5: // ButtonRelease
+		if w.touchSwallowsPointer(buf) {
+			return
+		}
+		w.noteButton(buf[1], false)
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
 		if raw := int(buf[1]); raw == 6 || raw == 7 {
 			return // прокрутку отдали на нажатии; отпускание ничего не значит
 		}
-		button := int(buf[1]) - 1
-		if button == 2 {
-			button = 1
-		} else if button == 1 {
-			button = 2
-		}
-		if w.onMouseButton != nil {
+		button, ok := x11ButtonID(int(buf[1]))
+		if ok && w.onMouseButton != nil {
 			w.onMouseButton(x, y, button, false)
 		}
 
 	case 6: // MotionNotify
+		if w.touchSwallowsPointer(buf) {
+			return
+		}
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
 		if w.onMouseMove != nil {
@@ -568,6 +647,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		if x11PointerLeft(buf[1], buf[30]) && w.onMouseMove != nil {
 			w.onMouseMove(pointerOutside, pointerOutside)
 		}
+
+	case x11GenericEvent: // XInput 2: касания
+		w.handleGenericEvent(buf)
 
 	case 9: // FocusIn
 		if w.onActivate != nil {
@@ -607,10 +689,19 @@ func (w *X11Window) handleX11Event(buf []byte) {
 			}
 		}
 
+	case x11EvPropertyNotify:
+		// Менеджер мог сменить _NET_WM_STATE окна (полный экран,
+		// разворачивание) — или это очередной кусок INCR буфера обмена либо
+		// удаление нашего куска. Каждый обработчик сверяет окно и атом сам.
+		w.x11NoteWMStateChanged(buf)
+		w.clip.handlePropertyNotify(buf)
+
 	case 29: // SelectionClear — буфером обмена завладел другой
 		w.clip.handleClear(buf)
 
 	case 30: // SelectionRequest — у нас просят содержимое буфера обмена
+		// (XdndSelection отдаёт источник перетаскивания, при активном
+		// перетаскивании он перехватывает запрос раньше — см. dragHandleEvent).
 		w.clip.handleRequest(buf)
 
 	case 31: // SelectionNotify — ответ на XConvertSelection
@@ -636,7 +727,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		case w.atomXdndPosition:
 			w.handleXdndPosition(buf)
 		case w.atomXdndLeave:
-			w.dndReset()
+			w.handleXdndLeave()
+		case w.atomDragBegin:
+			w.dragBegin()
 		case w.atomXdndDrop:
 			w.handleXdndDrop(buf)
 		}
@@ -692,7 +785,9 @@ func (w *X11Window) x11ReloadKeyboardMapping() {
 		case 0: // error-пакет (32 байта) — запрос отвергнут
 			return
 		default: // обычное событие — обрабатываем на месте
-			w.handleX11Event(pkt)
+			if full, ok := w.x11CompleteEvent(pkt); ok && full != nil {
+				w.handleX11Event(full)
+			}
 		}
 	}
 }
@@ -1560,10 +1655,17 @@ func (w *X11Window) StartEventPump() {
 func (w *X11Window) eventPumpLoop() {
 	buf := make([]byte, 32)
 	for !w.closed.Load() {
-		if !w.readFull(buf) {
+		if !w.readEvent(buf) {
 			return
 		}
-		w.handleX11Event(buf)
+		full, ok := w.x11CompleteEvent(buf)
+		if !ok {
+			return
+		}
+		if full != nil {
+			w.handleX11Event(full)
+		}
+		w.x11SyncWMState()
 	}
 }
 
@@ -1638,3 +1740,24 @@ func (w *X11Window) x11NetWMStateAdd(prop uint32) {
 	copy(sendBuf[12:], buf)
 	w.x11Send(sendBuf)
 }
+
+// x11TopLevelEventMask — события, которые слушает окно верхнего уровня.
+//
+// FocusChange (1<<21) долго отсутствовал: на его месте стоял 0x00400000 с
+// подписью «FocusChangeMask», а это PropertyChange (1<<22). FocusIn/FocusOut
+// поэтому не приходили вовсе — SetOnActivate на X11 молчал, а таблица
+// нажатых клавиш для KeyEvent.Repeat не сбрасывалась при уходе фокуса, и
+// клавиша, отпущенная в чужом окне, при следующем нажатии считалась бы
+// повтором. PropertyChange нужен и сам: _NET_WM_STATE (полный экран,
+// разворачивание) читается по PropertyNotify.
+const x11TopLevelEventMask = uint32(
+	0x00000001 | // KeyPress
+		0x00000002 | // KeyRelease
+		0x00000004 | // ButtonPress
+		0x00000008 | // ButtonRelease
+		0x00000020 | // LeaveWindow — снять наведение (pointerleave.go)
+		0x00000040 | // PointerMotion
+		0x00008000 | // Exposure
+		0x00020000 | // StructureNotify (resize/close)
+		0x00200000 | // FocusChange — FocusIn/FocusOut
+		0x00400000) // PropertyChange — PropertyNotify по _NET_WM_STATE

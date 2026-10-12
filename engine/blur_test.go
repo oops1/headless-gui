@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // solidRGBA создаёт изображение w×h, целиком залитое цветом c.
@@ -23,6 +25,7 @@ func solidRGBA(w, h int, c color.RGBA) *image.RGBA {
 // появилась бы тёмная кайма; при clamp-to-edge заливка остаётся точной,
 // поскольку окно скользящей суммы всегда видит только сам цвет заливки.
 func TestBlurRGBA_UniformFillUnchanged(t *testing.T) {
+	testreset.Globals(t)
 	c := color.RGBA{R: 100, G: 150, B: 200, A: 255}
 	img := solidRGBA(40, 30, c)
 
@@ -43,6 +46,7 @@ func TestBlurRGBA_UniformFillUnchanged(t *testing.T) {
 // полупрозрачной premultiplied заливки — усреднение всех четырёх каналов
 // одинаковым образом должно вернуть точно тот же premultiplied цвет.
 func TestBlurRGBA_UniformFillUnchanged_Alpha(t *testing.T) {
+	testreset.Globals(t)
 	// Premultiplied: straight (200,100,50,128) -> premultiplied ~ (100,50,25,128).
 	c := color.RGBA{R: 100, G: 50, B: 25, A: 128}
 	img := solidRGBA(25, 25, c)
@@ -65,6 +69,7 @@ func TestBlurRGBA_UniformFillUnchanged_Alpha(t *testing.T) {
 // строки сохраняется приблизительно (с точностью до ошибки округления
 // целочисленного деления в скользящем окне).
 func TestBlurRGBA_SharpEdgeSymmetric(t *testing.T) {
+	testreset.Globals(t)
 	const w, h, border = 60, 8, 30
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
@@ -115,6 +120,7 @@ func TestBlurRGBA_SharpEdgeSymmetric(t *testing.T) {
 // TestBlurRGBA_NoOpOnZeroRadiusOrPasses проверяет, что radius<=0 или
 // passes<=0 не меняют изображение (и не паникуют).
 func TestBlurRGBA_NoOpOnZeroRadiusOrPasses(t *testing.T) {
+	testreset.Globals(t)
 	mk := func() *image.RGBA {
 		img := image.NewRGBA(image.Rect(0, 0, 12, 9))
 		for y := 0; y < 9; y++ {
@@ -155,6 +161,7 @@ func TestBlurRGBA_NoOpOnZeroRadiusOrPasses(t *testing.T) {
 // TestBlurRegion_DoesNotAffectOutsidePixels проверяет, что размытие
 // прямоугольной области не задевает пиксели за её пределами.
 func TestBlurRegion_DoesNotAffectOutsidePixels(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 50, 40
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	orig := image.NewRGBA(image.Rect(0, 0, w, h))

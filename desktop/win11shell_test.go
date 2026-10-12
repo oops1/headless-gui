@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -144,7 +145,7 @@ func newW11Scene(t *testing.T, profile string) *w11Scene {
 
 // render рисует кадр сцены на холсте масштаба scale и доводит анимации до конца.
 func (s *w11Scene) render(scale float64) *image.RGBA {
-	eng := engine.New(w11W, w11H, 30)
+	eng := testengine.New(s.t, w11W, w11H, 30)
 	if scale != 1 {
 		eng.SetScale(scale)
 	}
@@ -162,6 +163,7 @@ func (s *w11Scene) render(scale float64) *image.RGBA {
 
 // Кнопки 40×40 с зазором 4, значок 24, панель 48 (100 %).
 func TestWin11Bar_GeometryByPlan(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	if h := s.bar.Height(); h != 48 {
 		t.Fatalf("высота панели %d, ждали 48", h)
@@ -200,6 +202,7 @@ func TestWin11Bar_GeometryByPlan(t *testing.T) {
 
 // Поле поиска: высота 32 по центру панели, скругление 16.
 func TestWin11Search_BoxIs32High(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.search.SetMode(SearchModeBox)
 	b := s.search.Bounds()
@@ -225,6 +228,7 @@ func TestWin11Search_BoxIs32High(t *testing.T) {
 // ─── Выравнивание на лету ────────────────────────────────────────────────────
 
 func TestWin11Bar_AlignmentLive(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	bar := s.bar.Bounds()
 	groupLeft := func() int { return s.start.Bounds().Min.X }
@@ -278,6 +282,7 @@ func TestWin11Bar_AlignmentLive(t *testing.T) {
 
 // Смена выравнивания и темы перерисовывает только полосу панели.
 func TestWin11Bar_AlignmentDamagesOnlyBar(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.render(1)
 	var rects []image.Rectangle
@@ -303,6 +308,7 @@ func TestWin11Bar_AlignmentDamagesOnlyBar(t *testing.T) {
 // Смена темы (светлая ↔ тёмная) и акцента на живой панели: те же объекты, кадр
 // другой.
 func TestWin11Bar_ThemeAndAccentLive(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	light := s.render(1)
 	startBefore := s.start

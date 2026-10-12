@@ -48,7 +48,7 @@ type Canvas struct {
 	mica       *micaCache
 	wallParent *Canvas
 	fontCache  *FontCache            // кэш шрифта по умолчанию
-	namedFonts map[string]*FontCache // именованные шрифты (FontFamily из XAML)
+	namedFonts *fontTable            // именованные шрифты (FontFamily из XAML), под замком — fonttable.go
 	families   *fontFamilies         // таблица семейств: выбор шрифта по весу и наклону (fontfamily.go)
 	fallbacks  []*FontCache          // fallback-шрифты для отсутствующих глифов (BUG-2)
 	clip       image.Rectangle       // активная область отсечения
@@ -57,6 +57,7 @@ type Canvas struct {
 	baseClip   image.Rectangle       // базовый клип кадра (damage-область частичной перерисовки)
 	hasBase    bool                  // активен ли базовый клип
 	scaleTmp   *image.RGBA           // переиспользуемый буфер для DrawImageScaled
+	rscr       *rectScratch          // рабочие буферы DrawImageRect (imagerect.go)
 	shaper     textShaper            // шейпинг сложного текста (RTL, лигатуры; см. shaper.go)
 	W, H       int                   // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
 	// marks — признак содержимого по тайлам за текущий кадр (regions.go).
@@ -88,27 +89,34 @@ type Canvas struct {
 	logicalW, logicalH int
 
 	// fontRev растёт при смене состава шрифтов: по нему кэшированные
-	// клоны канваса (popup-оверлеи) понимают, что устарели.
-	fontRev uint64
+	// клоны канваса (popup-оверлеи) понимают, что устарели. Атомарный: шрифты
+	// регистрирует горутина приложения, а сверяет горутина кадра.
+	fontRev atomic.Uint64
 
 	// Кэш результата масштабирования (см. DrawImageScaled).
 	scaledCache  map[scaledKey]*scaledEntry
 	scaledClock  uint64
 	scaledPixels int
+	// inv — общий журнал сбросов кэша движка (imagecache.go): сброс, заказанный
+	// у движка, доходит до каждого его холста, включая холсты попапов. nil у
+	// холста, созданного отдельно от движка. invSeen — номер последней
+	// применённой записи журнала.
+	inv     *imageInvalidator
+	invSeen uint64
 }
 
 // RegisterFont регистрирует именованный шрифт (TTF-данные) в реестре холста.
 // fontName соответствует FontFamily в XAML.
 func (c *Canvas) RegisterFont(fontName string, ttfData []byte) {
 	if c.namedFonts == nil {
-		c.namedFonts = make(map[string]*FontCache)
+		c.namedFonts = newFontTable()
 	}
 	fc := newFontCacheFromData(ttfData, c.fontCache.dpi)
 	if fc != nil {
 		fc.subpixel = c.fontCache.Subpixel()
-		c.namedFonts[fontName] = fc
+		c.namedFonts.set(fontName, fc)
 		c.registerFace(fontName, fc)
-		c.fontRev++
+		c.fontRev.Add(1)
 	}
 }
 
@@ -120,7 +128,7 @@ func (c *Canvas) RegisterFont(fontName string, ttfData []byte) {
 // их разбирает таблица семейств.
 func (c *Canvas) fontFor(fontName string) *FontCache {
 	if fontName != "" && c.namedFonts != nil {
-		if fc, ok := c.namedFonts[fontName]; ok {
+		if fc, ok := c.namedFonts.get(fontName); ok {
 			return fc
 		}
 		if fc := c.faceFor(fontName); fc != nil {
@@ -132,7 +140,10 @@ func (c *Canvas) fontFor(fontName string) *FontCache {
 
 // hasFont сообщает, зарегистрирован ли именованный шрифт.
 func (c *Canvas) hasFont(name string) bool {
-	_, ok := c.namedFonts[name]
+	if c.namedFonts == nil {
+		return false
+	}
+	_, ok := c.namedFonts.get(name)
 	return ok
 }
 
@@ -143,12 +154,15 @@ func (c *Canvas) SetDefaultFont(name string) bool {
 	if name == "" {
 		return false
 	}
-	if fc, ok := c.namedFonts[name]; ok && fc != nil {
+	if c.namedFonts == nil {
+		return false
+	}
+	if fc, ok := c.namedFonts.get(name); ok && fc != nil {
 		c.fontCache = fc
 		if c.families != nil {
 			c.families.setDefault(fc.famKey)
 		}
-		c.fontRev++
+		c.fontRev.Add(1)
 		return true
 	}
 	return false
@@ -156,12 +170,10 @@ func (c *Canvas) SetDefaultFont(name string) bool {
 
 // fontNames возвращает отсортированный список зарегистрированных именованных шрифтов.
 func (c *Canvas) fontNames() []string {
-	out := make([]string, 0, len(c.namedFonts))
-	for k := range c.namedFonts {
-		out = append(out, k)
+	if c.namedFonts == nil {
+		return nil
 	}
-	sort.Strings(out)
-	return out
+	return c.namedFonts.names()
 }
 
 // AddFallbackFont добавляет fallback-шрифт из TTF/OTF-данных (BUG-2).
@@ -173,7 +185,7 @@ func (c *Canvas) AddFallbackFont(ttfData []byte) bool {
 	}
 	fc.subpixel = c.fontCache.Subpixel()
 	c.fallbacks = append(c.fallbacks, fc)
-	c.fontRev++
+	c.fontRev.Add(1)
 	return true
 }
 
@@ -220,7 +232,7 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 		back:       backBuf,
 		backOwn:    backBuf,
 		fontCache:  fc,
-		namedFonts: make(map[string]*FontCache),
+		namedFonts: newFontTable(),
 		families:   newFontFamilies(),
 		W:          pw,
 		H:          ph,
@@ -1234,7 +1246,48 @@ func (c *Canvas) DrawImage(src image.Image, x, y int) {
 // затрагиваемой области back (снова R↔B), затем — обычный Over, затем
 // результат переносим назад с той же перестановкой. Дороже прямой записи,
 // зато арифметика смешивания гарантированно та же, что и в FormatRGBA.
+//
+// Скруглённый клип (SetRoundClip): изображение обязано обрезаться той же
+// кривой, что и заливки, — иначе у картинки внутри скруглённой панели торчат
+// прямые углы. Прямая часть контура (середина клипа) блитится одним вызовом,
+// как и без скругления; построчно, с суженным интервалом (spanX), идут только
+// угловые зоны — по radius строк сверху и снизу. Без скругления путь прежний,
+// байт в байт.
 func (c *Canvas) blitOver(r image.Rectangle, src image.Image, offset image.Point) {
+	if !c.round.active {
+		c.blitOverRect(r, src, offset)
+		return
+	}
+	rd := &c.round
+	top := rd.rect.Min.Y + rd.radius
+	bot := rd.rect.Max.Y - rd.radius
+	row := func(y int) {
+		x0, x1, ok := rd.spanX(y, r.Min.X, r.Max.X)
+		if !ok {
+			return
+		}
+		c.blitOverRect(image.Rect(x0, y, x1, y+1), src, offset.Add(image.Pt(x0-r.Min.X, y-r.Min.Y)))
+	}
+	// Верхняя угловая зона (строки выше контура rd.rect отсекаются spanX).
+	for y := max(r.Min.Y, rd.rect.Min.Y); y < min(r.Max.Y, top); y++ {
+		row(y)
+	}
+	// Прямая часть: по вертикали — вся, по горизонтали — в границах контура.
+	if y0, y1 := max(r.Min.Y, top), min(r.Max.Y, bot); y0 < y1 {
+		x0, x1 := max(r.Min.X, rd.rect.Min.X), min(r.Max.X, rd.rect.Max.X)
+		if x0 < x1 {
+			c.blitOverRect(image.Rect(x0, y0, x1, y1), src, offset.Add(image.Pt(x0-r.Min.X, y0-r.Min.Y)))
+		}
+	}
+	// Нижняя угловая зона.
+	for y := max(r.Min.Y, bot); y < min(r.Max.Y, rd.rect.Max.Y); y++ {
+		row(y)
+	}
+}
+
+// blitOverRect — сам блит Over в прямоугольник r без учёта скруглённого
+// клипа (см. blitOver).
+func (c *Canvas) blitOverRect(r image.Rectangle, src image.Image, offset image.Point) {
 	if c.format != FormatBGRX {
 		stdraw.Draw(c.back, r, src, offset, stdraw.Over)
 		return
@@ -1282,6 +1335,13 @@ type scaledKey struct {
 type scaledEntry struct {
 	img  *image.RGBA
 	used uint64 // такт последнего обращения (LRU)
+	// src удерживает источник, пока жива запись. Ключ хранит лишь АДРЕС
+	// источника (uintptr), а сборщик мусора вправе освободить объект и отдать
+	// тот же адрес новому изображению тех же размеров — оно получило бы чужой
+	// кадр. Пока запись держит src, адрес занят, и ключ не может «переехать».
+	// weak.Pointer здесь не подходит: go.mod объявляет Go 1.22, а пакет weak
+	// появился в 1.24.
+	src image.Image
 }
 
 // DrawImageScaled рисует изображение масштабированным до (w × h) логических
@@ -1314,7 +1374,10 @@ func (c *Canvas) scaledFor(src image.Image, pw, ph int) *image.RGBA {
 	need := image.Rect(0, 0, pw, ph)
 	key, cacheable := scaledCacheKey(src, pw, ph)
 	if cacheable {
-		if ent, ok := c.scaledCache[key]; ok {
+		c.syncImageInvalidations()
+		// ent.src == src — страховка поверх удержания ссылки: запись другого
+		// объекта с тем же ключом чужим кадром не отдаётся никогда.
+		if ent, ok := c.scaledCache[key]; ok && ent.src == src {
 			c.scaledClock++
 			ent.used = c.scaledClock
 			return ent.img
@@ -1335,7 +1398,7 @@ func (c *Canvas) scaledFor(src image.Image, pw, ph int) *image.RGBA {
 	}
 	img := image.NewRGBA(need)
 	draw.BiLinear.Scale(img, need, src, src.Bounds(), stdraw.Src, nil)
-	c.putScaled(key, img, pw*ph)
+	c.putScaled(key, src, img, pw*ph)
 	return img
 }
 
@@ -1349,7 +1412,7 @@ func scaledCacheKey(src image.Image, w, h int) (scaledKey, bool) {
 }
 
 // putScaled кладёт запись в кэш, вытесняя давние при переполнении.
-func (c *Canvas) putScaled(key scaledKey, img *image.RGBA, pixels int) {
+func (c *Canvas) putScaled(key scaledKey, src image.Image, img *image.RGBA, pixels int) {
 	if pixels > maxScaledPixels {
 		return
 	}
@@ -1362,7 +1425,10 @@ func (c *Canvas) putScaled(key scaledKey, img *image.RGBA, pixels int) {
 		}
 	}
 	c.scaledClock++
-	c.scaledCache[key] = &scaledEntry{img: img, used: c.scaledClock}
+	if old, ok := c.scaledCache[key]; ok { // запись с тем же ключом, но другим src — заменяем
+		c.scaledPixels -= old.img.Rect.Dx() * old.img.Rect.Dy()
+	}
+	c.scaledCache[key] = &scaledEntry{img: img, used: c.scaledClock, src: src}
 	c.scaledPixels += pixels
 }
 
@@ -1387,10 +1453,16 @@ func (c *Canvas) evictScaled() bool {
 
 // InvalidateImageCache сбрасывает кэш масштабирования для src (nil — целиком).
 // Вызывать после мутации пикселей картинки на месте, из потока отрисовки.
+//
+// У холста, созданного движком, сброс заодно записывается в общий журнал
+// (imagecache.go): остальные холсты движка — попапы — применят его перед
+// следующим обращением к кэшу.
 func (c *Canvas) InvalidateImageCache(src image.Image) {
 	if src == nil {
-		c.scaledCache = nil
-		c.scaledPixels = 0
+		c.dropScaled(0, true)
+		if c.inv != nil {
+			c.inv.add(0, true)
+		}
 		return
 	}
 	v := reflect.ValueOf(src)
@@ -1398,6 +1470,19 @@ func (c *Canvas) InvalidateImageCache(src image.Image) {
 		return
 	}
 	ptr := v.Pointer()
+	c.dropScaled(ptr, false)
+	if c.inv != nil {
+		c.inv.add(ptr, false)
+	}
+}
+
+// dropScaled выбрасывает из кэша записи источника с адресом ptr (all — все).
+func (c *Canvas) dropScaled(ptr uintptr, all bool) {
+	if all {
+		c.scaledCache = nil
+		c.scaledPixels = 0
+		return
+	}
 	for k, ent := range c.scaledCache {
 		if k.src == ptr {
 			delete(c.scaledCache, k)

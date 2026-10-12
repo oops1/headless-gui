@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -87,6 +88,7 @@ func filledWith(ctx *recCtx, r image.Rectangle, col color.RGBA) bool {
 }
 
 func TestCalendarFlyout_HoveredDayIsHighlighted(t *testing.T) {
+	testreset.Globals(t)
 	c := newHoverCalendar(t)
 	cell := anyDayCell(t, c)
 	mid := cell.rect.Min.Add(image.Pt(cell.rect.Dx()/2, cell.rect.Dy()/2))
@@ -110,6 +112,7 @@ func TestCalendarFlyout_HoveredDayIsHighlighted(t *testing.T) {
 // Курсор ушёл — подсветка снялась. В том числе когда он ушёл под другой
 // оверлей и движок прислал CursorNowhere.
 func TestCalendarFlyout_HoverClearsWhenCursorLeaves(t *testing.T) {
+	testreset.Globals(t)
 	for _, tc := range []struct {
 		name string
 		x, y int
@@ -137,6 +140,7 @@ func TestCalendarFlyout_HoverClearsWhenCursorLeaves(t *testing.T) {
 // Закрытая панель наведение не запоминает: открывшись, она не должна
 // показывать подсвеченным день, над которым курсора давно нет.
 func TestCalendarFlyout_ClosedPanelTakesNoHover(t *testing.T) {
+	testreset.Globals(t)
 	c := newHoverCalendar(t)
 	cell := anyDayCell(t, c)
 	mid := cell.rect.Min.Add(image.Pt(cell.rect.Dx()/2, cell.rect.Dy()/2))
@@ -159,6 +163,7 @@ func TestCalendarFlyout_ClosedPanelTakesNoHover(t *testing.T) {
 // и когда нужен только список уведомлений, месяц мешает.
 
 func TestCalendarFlyout_CollapseShrinksThePanel(t *testing.T) {
+	testreset.Globals(t)
 	c := newHoverCalendar(t)
 
 	full := c.Size()
@@ -191,6 +196,7 @@ func TestCalendarFlyout_CollapseShrinksThePanel(t *testing.T) {
 
 // Стрелка в заголовке сворачивает и разворачивает.
 func TestCalendarFlyout_ChevronTogglesCollapse(t *testing.T) {
+	testreset.Globals(t)
 	c := newHoverCalendar(t)
 
 	click := func() {
@@ -217,6 +223,7 @@ func TestCalendarFlyout_ChevronTogglesCollapse(t *testing.T) {
 // Состояние переживает закрытие и повторное открытие: свернувший календарь
 // один раз обычно хочет его свёрнутым и дальше.
 func TestCalendarFlyout_CollapseSurvivesReopen(t *testing.T) {
+	testreset.Globals(t)
 	c := newHoverCalendar(t)
 	c.SetCollapsed(true)
 
@@ -231,6 +238,7 @@ func TestCalendarFlyout_CollapseSurvivesReopen(t *testing.T) {
 // Свёрнутая панель не листает месяцы: листать нечего, и клик по месту, где
 // были стрелки, не должен менять показанный месяц.
 func TestCalendarFlyout_CollapsedDoesNotPageMonths(t *testing.T) {
+	testreset.Globals(t)
 	c := newHoverCalendar(t)
 	expandedLayout := c.computeLayout(c.contentRect())
 	prev := expandedLayout.prevBtn

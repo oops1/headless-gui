@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -64,6 +65,7 @@ func themeWithIcons(t *testing.T, bind map[theme.Key]string, extra func(p *theme
 
 // Тема с иконкой звука: значок берётся из набора, а не рисуется фигурами.
 func TestVolumeItem_UsesThemeIcon(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, map[theme.Key]string{"tray.volume.icon": "vol"}, nil)
 	st := NewFakeSystemStatus()
 	it := NewVolumeStatus(tm, st)
@@ -85,6 +87,7 @@ func TestVolumeItem_UsesThemeIcon(t *testing.T) {
 
 // Без иконки в теме значки рисуются прежними фигурами (запасной вариант).
 func TestTrayItems_FallBackToShapes(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus()
 	for name, it := range map[string]Item{
@@ -106,6 +109,7 @@ func TestTrayItems_FallBackToShapes(t *testing.T) {
 
 // Иконка запрашивается в физическом размере: на 150 % квадрат 12 px — 18 px.
 func TestTrayGlyph_RequestedInPhysicalSize(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, map[theme.Key]string{"tray.network.icon": "net"}, nil)
 	st := NewFakeSystemStatus()
 	it := NewNetworkStatus(tm, st)
@@ -134,6 +138,7 @@ func TestTrayGlyph_RequestedInPhysicalSize(t *testing.T) {
 
 // Ключи иконок идут от конкретного к общему и зависят от состояния.
 func TestTrayIconKeys(t *testing.T) {
+	testreset.Globals(t)
 	has := func(keys []theme.Key, want theme.Key) bool {
 		for _, k := range keys {
 			if k == want {
@@ -170,6 +175,7 @@ func TestTrayIconKeys(t *testing.T) {
 
 // Самый конкретный ключ побеждает общий.
 func TestTrayGlyph_SpecificKeyWins(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, map[theme.Key]string{
 		"tray.volume.muted": "muted",
 		"tray.volume.icon":  "generic",
@@ -189,6 +195,7 @@ func TestTrayGlyph_SpecificKeyWins(t *testing.T) {
 
 // Перекраска по флагу темы: цвет значка — цвет текста, альфа сохранена.
 func TestTrayGlyph_Tint(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, map[theme.Key]string{"tray.volume.icon": "vol"}, func(p *theme.Profile) {
 		p.SetFlag(KeyTrayIconTint, true)
 	})
@@ -209,6 +216,7 @@ func TestTrayGlyph_Tint(t *testing.T) {
 // ─── Обобщённый значок ──────────────────────────────────────────────────────
 
 func TestTrayIcon_SVGRasterizedPhysical(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, nil, nil)
 	ic, err := NewTraySVGIcon(tm, []byte(solidSVG))
 	if err != nil {
@@ -231,6 +239,7 @@ func TestTrayIcon_SVGRasterizedPhysical(t *testing.T) {
 }
 
 func TestTrayIcon_BadSVGKeepsPrevious(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, nil, nil)
 	ic, _ := NewTraySVGIcon(tm, []byte(solidSVG))
 	if err := ic.SetSVG([]byte("не svg")); err == nil {
@@ -245,6 +254,7 @@ func TestTrayIcon_BadSVGKeepsPrevious(t *testing.T) {
 }
 
 func TestTrayIcon_ImageSourceGetsPhysicalSize(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, nil, nil)
 	ic := NewTrayIcon(tm)
 	var asked []int
@@ -260,6 +270,7 @@ func TestTrayIcon_ImageSourceGetsPhysicalSize(t *testing.T) {
 }
 
 func TestTrayIcon_ClickAndTooltip(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, nil, nil)
 	ic := NewTrayImageIcon(tm, image.NewRGBA(image.Rect(0, 0, 4, 4)))
 	ic.SetBounds(image.Rect(0, 0, 20, 16))
@@ -299,6 +310,7 @@ func TestTrayIcon_ClickAndTooltip(t *testing.T) {
 // ─── Кнопка центра уведомлений ──────────────────────────────────────────────
 
 func TestNotificationButton_CountAndTooltip(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, nil, nil)
 	notes := NewFakeNotifications()
 	b := NewNotificationButton(tm, notes)
@@ -339,6 +351,7 @@ func TestNotificationButton_CountAndTooltip(t *testing.T) {
 }
 
 func TestNotificationButton_BigCountAndManual(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, nil, nil)
 	b := NewNotificationButton(tm, nil)
 	b.SetBounds(image.Rect(0, 0, 20, 16))
@@ -363,6 +376,7 @@ func TestNotificationButton_BigCountAndManual(t *testing.T) {
 }
 
 func TestNotificationButton_ThemeIconNewState(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, map[theme.Key]string{
 		"tray.notifications.icon":     "bell",
 		"tray.notifications.icon.new": "bell-new",
@@ -383,6 +397,7 @@ func TestNotificationButton_ThemeIconNewState(t *testing.T) {
 }
 
 func TestNotificationButton_UnsubscribesOnClose(t *testing.T) {
+	testreset.Globals(t)
 	notes := NewFakeNotifications()
 	b := NewNotificationButton(nil, notes)
 	b.Close()
@@ -398,6 +413,7 @@ func TestNotificationButton_UnsubscribesOnClose(t *testing.T) {
 // ─── Полоска «Показать рабочий стол» ────────────────────────────────────────
 
 func TestShowDesktopButton_WidthFromMetric(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, nil, func(p *theme.Profile) {
 		p.SetMetric(KeyTrayShowDesktopWidth, 7)
 	})
@@ -409,6 +425,7 @@ func TestShowDesktopButton_WidthFromMetric(t *testing.T) {
 }
 
 func TestShowDesktopButton_WidthFallsBackToIconSize(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, nil, nil) // метрики нет, размер значка 16
 	b := NewShowDesktopButton(tm)
 	if got := b.PreferredSize(image.Pt(500, 40)).X; got != 4 {
@@ -420,6 +437,7 @@ func TestShowDesktopButton_WidthFallsBackToIconSize(t *testing.T) {
 }
 
 func TestShowDesktopButton_ClickAndTooltip(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, nil, nil)
 	b := NewShowDesktopButton(tm)
 	b.SetBounds(image.Rect(100, 0, 104, 40))
@@ -443,6 +461,7 @@ func TestShowDesktopButton_ClickAndTooltip(t *testing.T) {
 }
 
 func TestShowDesktopButton_HoverPaintsFill(t *testing.T) {
+	testreset.Globals(t)
 	tm := themeWithIcons(t, nil, func(p *theme.Profile) {
 		p.SetStyle(ComponentTrayShowDesktop, "", theme.StateHover, theme.StyleDelta{Fill: theme.C(theme.RGB(90, 90, 90))})
 	})
@@ -461,6 +480,7 @@ func TestShowDesktopButton_HoverPaintsFill(t *testing.T) {
 // Встроенные профили: новые компоненты трея унаследовали стили значков
 // состояния — иначе подложкой им досталась бы заливка общей поверхности.
 func TestBuiltinProfiles_TrayExtrasInheritStyles(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	if err := theme.RegisterBuiltinProfiles(m); err != nil {
 		t.Fatal(err)
@@ -485,6 +505,7 @@ func TestBuiltinProfiles_TrayExtrasInheritStyles(t *testing.T) {
 // ─── Значок приложения по размеру ───────────────────────────────────────────
 
 func TestAppInfo_IconFor(t *testing.T) {
+	testreset.Globals(t)
 	one := image.NewRGBA(image.Rect(0, 0, 64, 64))
 	a := AppInfo{Icon: one}
 	if a.IconFor(24) != image.Image(one) {
@@ -505,6 +526,7 @@ func TestAppInfo_IconFor(t *testing.T) {
 }
 
 func TestDrawAppIcon_UsesPhysicalSize(t *testing.T) {
+	testreset.Globals(t)
 	var asked []int
 	at := func(size int) image.Image {
 		asked = append(asked, size)

@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -38,6 +39,7 @@ func finishAnimations() {
 }
 
 func TestFlyout_OpensByAnimationToken(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows10)
 	f := motionFlyout(tm)
@@ -76,6 +78,7 @@ func TestFlyout_OpensByAnimationToken(t *testing.T) {
 }
 
 func TestFlyout_ClosingStaysDrawnUntilTheEnd(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows10)
 	f := motionFlyout(tm)
@@ -113,6 +116,7 @@ func TestFlyout_ClosingStaysDrawnUntilTheEnd(t *testing.T) {
 }
 
 func TestFlyout_ReopenDuringCloseContinuesFromWhereItWas(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows10)
 	f := motionFlyout(tm)
@@ -144,6 +148,7 @@ func TestFlyout_ReopenDuringCloseContinuesFromWhereItWas(t *testing.T) {
 }
 
 func TestFlyout_ZeroDurationIsInstant(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows2000)
 	f := motionFlyout(tm)
@@ -162,6 +167,7 @@ func TestFlyout_ZeroDurationIsInstant(t *testing.T) {
 }
 
 func TestFlyout_SlideDirections(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows10)
 
@@ -203,6 +209,7 @@ func sign(v int) int {
 }
 
 func TestFlyout_SlideToScreenEdge(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows10)
 	f := motionFlyout(tm)
@@ -219,6 +226,7 @@ func TestFlyout_SlideToScreenEdge(t *testing.T) {
 }
 
 func TestFlyout_ThemeDistanceMetricOverrides(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows10)
 	f := motionFlyout(tm)
@@ -233,6 +241,7 @@ func TestFlyout_ThemeDistanceMetricOverrides(t *testing.T) {
 // ─── Перерисовывается только область панели ────────────────────────────────
 
 func TestFlyout_AnimationInvalidatesOnlyItsArea(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	const w, h = 900, 600
 
@@ -257,7 +266,7 @@ func TestFlyout_AnimationInvalidatesOnlyItsArea(t *testing.T) {
 	f.SetBounds(image.Rect(0, h-40, 48, h))
 	root.AddChild(f)
 
-	eng := engine.New(w, h, 60)
+	eng := testengine.New(t, w, h, 60)
 	eng.SetRenderOnDemand(true)
 	eng.SetRoot(root)
 	eng.RenderOnce()
@@ -299,6 +308,7 @@ func TestFlyout_AnimationInvalidatesOnlyItsArea(t *testing.T) {
 func pixelAt(img *image.RGBA, x, y int) color.RGBA { return img.RGBAAt(x, y) }
 
 func TestFlyout_FadesIn(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	const w, h = 600, 400
 
@@ -312,7 +322,7 @@ func TestFlyout_FadesIn(t *testing.T) {
 	f.Screen = image.Rect(0, 0, w, h)
 	root.AddChild(f)
 
-	eng := engine.New(w, h, 60)
+	eng := testengine.New(t, w, h, 60)
 	eng.SetRoot(root)
 	bg := pixelAt(eng.RenderOnce(), 150, 100)
 

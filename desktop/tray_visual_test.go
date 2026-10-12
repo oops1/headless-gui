@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -74,8 +75,8 @@ func trayScene(t *testing.T, tm *theme.Manager, w, h int) *trayParts {
 	return &trayParts{root: root, bar: bar, volume: vol, notify: nb}
 }
 
-func renderTray(root *widget.Panel, w, h int, scale float64) *image.RGBA {
-	eng := engine.New(w, h, 30)
+func renderTray(t *testing.T, root *widget.Panel, w, h int, scale float64) *image.RGBA {
+	eng := testengine.New(t, w, h, 30)
 	if scale != 1 {
 		eng.SetScale(scale)
 	}
@@ -116,13 +117,14 @@ func trayTheme(t *testing.T, name string) *theme.Manager {
 // Панель с треем во всех темах: для сравнения до и после (Windows 11, macOS и
 // классика не должны измениться).
 func TestVisual_TrayAllThemes(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 460, 80
 	// Порядок фиксирован, сцена строится заново на каждый кадр: раскладка часов
 	// зависит от измерителя текста последнего созданного движка, и случайный
 	// порядок обхода карты давал разные кадры от запуска к запуску.
 	// Движок регистрирует измеритель текста: без него первая же сцена строила бы
 	// раскладку часов по запасным метрикам и отличалась бы от остальных.
-	engine.New(w, h, 30)
+	testengine.New(t, w, h, 30)
 	for _, tc := range []struct{ file, name string }{
 		{"win2000", theme.ProfileWindows2000}, {"win2000blue", theme.ProfileWindows2000Blue},
 		{"win11", theme.ProfileWindows11}, {"win11dark", theme.ProfileWindows11Dark},
@@ -130,7 +132,7 @@ func TestVisual_TrayAllThemes(t *testing.T) {
 	} {
 		for _, scale := range []float64{1, 2} {
 			p := trayScene(t, trayTheme(t, tc.name), w, h)
-			img := renderTray(p.root, w, h, scale)
+			img := renderTray(t, p.root, w, h, scale)
 			suffix := ""
 			if scale != 1 {
 				suffix = "_x2"
@@ -143,6 +145,7 @@ func TestVisual_TrayAllThemes(t *testing.T) {
 // Windows 10: наведение на значок звука подсвечивает всю полосу, кнопка центра
 // уведомлений горит, пока центр открыт.
 func TestVisual_Win10TrayHoverAndActive(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 460, 80
 	var frames []*image.RGBA
 	for _, light := range []bool{false, true} {
@@ -159,15 +162,15 @@ func TestVisual_Win10TrayHoverAndActive(t *testing.T) {
 		}
 		p.volume.OnMouseMove(vb.Min.X+3, vb.Min.Y+3)
 		p.notify.SetActive(true)
-		img := renderTray(p.root, w, h, 1)
+		img := renderTray(t, p.root, w, h, 1)
 		saveTrayPNG(t, "tray_win10_"+name+"_hover.png", img)
-		saveTrayPNG(t, "tray_win10_"+name+"_hover_x2.png", renderTray(p.root, w, h, 2))
+		saveTrayPNG(t, "tray_win10_"+name+"_hover_x2.png", renderTray(t, p.root, w, h, 2))
 		frames = append(frames, img)
 
 		// Подсветка наведения доходит до верха и низа полосы.
 		top, bottom := vb.Min.Y, vb.Max.Y-1
 		mid := vb.Min.X + 2
-		base := renderTray(trayScene(t, func() *theme.Manager {
+		base := renderTray(t, trayScene(t, func() *theme.Manager {
 			m := trayTheme(t, theme.ProfileWindows10)
 			m.SetFlag(theme.KeyTaskbarLight, light)
 			return m
@@ -186,6 +189,7 @@ func TestVisual_Win10TrayHoverAndActive(t *testing.T) {
 // Классика следует SetAccent: календарь с выбранным днём (и меню «Пуск»)
 // перекрашиваются, серая палитра остаётся.
 func TestVisual_ClassicWithAccent(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 460, 300
 	var frames []*image.RGBA
 	for _, accent := range []*color.RGBA{nil, {R: 16, G: 124, B: 16, A: 255}} {
@@ -198,7 +202,7 @@ func TestVisual_ClassicWithAccent(t *testing.T) {
 		cal.Screen = image.Rect(0, 0, w, h)
 		p.root.AddChild(cal)
 		cal.Open(image.Rect(w-120, h-28, w-60, h))
-		img := renderTray(p.root, w, h, 1)
+		img := renderTray(t, p.root, w, h, 1)
 		name := "tray_win2000_accent_default.png"
 		if accent != nil {
 			name = "tray_win2000_accent_green.png"

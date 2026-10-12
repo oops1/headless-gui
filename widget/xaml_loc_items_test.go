@@ -32,6 +32,7 @@ const locItemsXAML = `<Window Title="T" Width="400" Height="300">
 // и подсказка поля. Раньше они оставались на языке загрузки — из-за чего
 // приложение выглядело переведённым лишь наполовину.
 func TestLocalizedFoldedItems(t *testing.T) {
+	keepStrings(t)
 	ClearStrings()
 	ClearLocalizedItems()
 	t.Cleanup(func() {

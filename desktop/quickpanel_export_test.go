@@ -1,6 +1,11 @@
 package desktop
 
-import "image"
+import (
+	"image"
+
+	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v3/widget"
+)
 
 // Окно в раскладку быстрых настроек для внешних тестов (package desktop_test):
 // где что лежит на экране, чтобы нажимать в нужные точки, не вшивая числа.
@@ -80,8 +85,29 @@ func QSZoneRect(q *QuickSettings, name string) image.Rectangle {
 		return l.battery
 	case "body":
 		return l.body
+	case "pager":
+		return l.pager
+	case "pageup":
+		return l.up
+	case "pagedown":
+		return l.down
 	}
 	return image.Rectangle{}
+}
+
+// QSDotRect — точка страницы i столбца страниц.
+func QSDotRect(q *QuickSettings, i int) image.Rectangle {
+	l, _ := q.pn.layout(q.rect())
+	if i < 0 || i >= len(l.dots) {
+		return image.Rectangle{}
+	}
+	return l.dots[i]
+}
+
+// QSWrapLabel разбивает подпись плитки на строки шириной до maxW (мерой служит
+// ctx), как это делает панель.
+func QSWrapLabel(ctx widget.DrawContext, text string, maxW, maxLines int) []string {
+	return qsWrapLabel(ctx, text, &theme.Style{}, maxW, maxLines)
 }
 
 // QSRich сообщает, рисует ли панель вариант Windows 11.
@@ -112,7 +138,16 @@ const (
 	QSKindEdit    = int(qzEdit)
 	QSKindGear    = int(qzSettings)
 	QSKindBack    = int(qzBack)
+	QSKindPageUp  = int(qzPageUp)
+	QSKindPageDn  = int(qzPageDown)
+	QSKindPageDot = int(qzPageDot)
 )
+
+// QSSlide возвращает положение сетки плиток в страницах (дробное, пока она едет
+// к новой странице) и признак «движение идёт».
+func QSSlide(q *QuickSettings) (float64, bool) {
+	return q.pn.pageAnim.Value(), q.pn.pageAnim.Animating()
+}
 
 // QSPage возвращает положение перехода между страницами: 0 — главная, 1 —
 // вложенная.
@@ -127,4 +162,37 @@ func QSHeight(q *QuickSettings, n int, hasVol, hasBright bool) int {
 func QSMetrics(q *QuickSettings) (width, tileW, tileH, colGap, pad int) {
 	m := readQSMetrics(q.Theme())
 	return m.width, m.tileW, m.tileH, m.colGap, m.pad
+}
+
+// DPRect — прямоугольник строки sub элемента item страницы-строителя.
+func DPRect(p *DetailPage, item, sub int) image.Rectangle {
+	m := readQSMetrics(p.tm)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pl, _ := p.places(m)
+	if item < 0 || item >= len(pl) {
+		return image.Rectangle{}
+	}
+	return pl[item].e.rowRect(p, m, pl[item].r, sub)
+}
+
+// DPScroll — прокрутка страницы-строителя.
+func DPScroll(p *DetailPage) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.scroll
+}
+
+// CalFocusAction — прямоугольник кнопки «Фокусировка» календаря Windows 11.
+func CalFocusAction(c *CalendarFlyout) image.Rectangle { return c.w11Layout(c.rect()).faction }
+
+// CalFocusMenuBounds — область открытого меню выбора длительности.
+func CalFocusMenuBounds(c *CalendarFlyout) image.Rectangle {
+	c.mu.Lock()
+	p := c.focusMenu
+	c.mu.Unlock()
+	if p == nil {
+		return image.Rectangle{}
+	}
+	return p.OverlayBounds()
 }

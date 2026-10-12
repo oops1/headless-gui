@@ -130,7 +130,7 @@ func (pn *qsPanel) draw(ctx widget.DrawContext, panel image.Rectangle) {
 	w := panel.Dx()
 	if t < 1 {
 		off := image.Pt(-int(float64(w)*t+0.5), 0)
-		l, list := pn.layout(panel.Add(off))
+		l, list := pn.layoutFor(panel.Add(off), true)
 		pn.drawMain(ctx, l, list, u, panel)
 	}
 	if t > 0 && u.details != nil {
@@ -201,6 +201,7 @@ func (pn *qsPanel) drawMain(ctx widget.DrawContext, l *qsLayout, list []QuickAct
 		ctx.SetClip(clip)
 	}
 	pn.drawScrollbar(ctx, l, u)
+	pn.drawPager(ctx, l, u)
 
 	if u.editing {
 		if !l.hint.Empty() {
@@ -210,11 +211,11 @@ func (pn *qsPanel) drawMain(ctx widget.DrawContext, l *qsLayout, list []QuickAct
 	} else {
 		if !l.bright.row.Empty() {
 			pn.drawSlider(ctx, l, l.bright, u, qsZone{kind: qzBrightIcon}, qsZone{kind: qzBright},
-				qsGlyphSun, u.bright, qsZone{})
+				qsGlyphSun, u.bright, qsZone{}, l.brightOff)
 		}
 		if !l.vol.row.Empty() {
 			pn.drawSlider(ctx, l, l.vol, u, qsZone{kind: qzVolIcon}, qsZone{kind: qzVol},
-				qsVolumeGlyph(u.vol.Level, u.vol.Muted), u.vol.Level, qsZone{kind: qzVolChevron})
+				qsVolumeGlyph(u.vol.Level, u.vol.Muted), u.vol.Level, qsZone{kind: qzVolChevron}, l.volOff)
 		}
 	}
 	pn.drawFooter(ctx, l, u, truePanel)
@@ -230,9 +231,13 @@ func (pn *qsPanel) drawMain(ctx widget.DrawContext, l *qsLayout, list []QuickAct
 }
 
 // drawTile рисует плитку: подложку по состоянию, значок, «›» (или ручку в
-// режиме правки) и подпись под ней. Окно clip — сетка плиток, из-под края
-// которой плитка может выглядывать (см. qsPaint); пустое окно — плитка в руке
-// при перетаскивании: без подписи и без наведения, поверх всего.
+// режиме правки) и подпись под ней. Плитка с подробностями (HasDetails) делится
+// на две половинки с тонкой линией между ними: левая переключает, правая («›»)
+// открывает страницу, и каждая подсвечивается отдельно. Плитка «только страница»
+// (PageOnly) целая: одна подложка, «›» справа — её часть. Окно clip — сетка
+// плиток, из-под края которой плитка может выглядывать (см. qsPaint); пустое
+// окно — плитка в руке при перетаскивании: без подписи и без наведения, поверх
+// всего.
 func (pn *qsPanel) drawTile(ctx widget.DrawContext, l *qsLayout, a QuickAction, idx int,
 	body, label image.Rectangle, u qsUI, clip image.Rectangle) {
 
@@ -245,44 +250,71 @@ func (pn *qsPanel) drawTile(ctx widget.DrawContext, l *qsLayout, a QuickAction, 
 	if a.On && !disabled {
 		part = "w11.tile.on"
 	}
-	s := pn.style(zt, body, part, StateOf(hover, pressed, false, disabled, false))
-	qsPaint(ctx, body, s, clip)
-	if u.editing {
-		qsPaint(ctx, body, pn.partStyle("w11.tile.edit", theme.StateNormal), clip)
-	}
-
-	// «›» — отдельная зона справа; в режиме правки вместо неё ручка.
 	chevron := l.chevron(body)
 	iconArea := body
+	var textCol color.RGBA
 	switch {
-	case u.editing:
-		iconArea.Max.X = chevron.Min.X
-		drawQSGlyph(ctx, qsGlyphGrip, chevron, qsChevronSide, s.Text)
-	case a.HasDetails:
-		iconArea.Max.X = chevron.Min.X
-		if !a.Disabled {
-			ch := pn.style(zc, chevron, "w11.tile.chevron",
-				StateOf(!floating && u.hover == zc, !floating && u.press == zc && u.hover == zc, false, false, false))
-			qsPaint(ctx, chevron, ch, clip)
+	case a.split() && !u.editing:
+		// Две половинки: у каждой своё наведение и нажатие. Недоступная
+		// (Unavailable) плитка не переключается, но «›» у неё живая.
+		left := image.Rect(body.Min.X, body.Min.Y, chevron.Min.X, body.Max.Y)
+		hl, hr := !floating && u.hover == zt, !floating && u.hover == zc
+		sl := pn.style(zt, left, part, StateOf(hl, hl && u.press == zt, false, disabled, false))
+		sr := pn.style(zc, chevron, part, StateOf(hr, hr && u.press == zc, false, a.Disabled, false))
+		pn.paintHalf(ctx, body, left, sl, clip)
+		pn.paintHalf(ctx, body, chevron, sr, clip)
+		sp := pn.partStyle("w11.tile.split", StateOf(false, false, false, a.Disabled, false))
+		if sp.Fill.A > 0 {
+			ctx.FillRectAlpha(chevron.Min.X, body.Min.Y, 1, body.Dy(), sp.Fill)
 		}
-		drawQSGlyph(ctx, qsGlyphChevron, chevron, qsChevronSide, s.Text)
+		drawQSGlyph(ctx, qsGlyphChevron, chevron, qsChevronSide, sr.Text)
+		iconArea, textCol = left, sl.Text
+	default:
+		s := pn.style(zt, body, part, StateOf(hover, pressed, false, disabled, false))
+		qsPaint(ctx, body, s, clip)
+		if u.editing {
+			qsPaint(ctx, body, pn.partStyle("w11.tile.edit", theme.StateNormal), clip)
+			// В режиме правки вместо «›» ручка перетаскивания.
+			iconArea.Max.X = chevron.Min.X
+			drawQSGlyph(ctx, qsGlyphGrip, chevron, qsChevronSide, s.Text)
+		} else if a.PageOnly {
+			// «Только страница»: плитка целая, одна подложка и одно наведение;
+			// «›» справа — просто часть плитки, без линии и своей подсветки.
+			iconArea.Max.X = chevron.Min.X
+			drawQSGlyph(ctx, qsGlyphChevron, chevron, qsChevronSide, s.Text)
+		}
+		textCol = s.Text
 	}
-	pn.drawTileIcon(ctx, a, iconArea, s.Text)
+	pn.drawTileIcon(ctx, a, iconArea, textCol)
 
 	if floating || label.Empty() {
 		return
 	}
 	ls := pn.partStyle("w11.label", StateOf(false, false, false, disabled, false))
 	row := l.m.labelH / 2
-	titleR := image.Rect(label.Min.X, label.Min.Y, label.Max.X, label.Min.Y+row)
-	if a.Title != "" {
-		DrawTextCentered(ctx, titleR, Elide(ctx, a.Title, ls, label.Dx()-4), ls)
+	maxW := label.Dx() - qsLabelMargin
+	lines := qsWrapLabel(ctx, a.Title, ls, maxW, qsLabelLines)
+	for i, line := range lines {
+		r := image.Rect(label.Min.X, label.Min.Y+i*row, label.Max.X, label.Min.Y+(i+1)*row)
+		DrawTextCentered(ctx, r, line, ls)
 	}
-	if a.Detail != "" {
+	// Подпись заняла одну строку — вторая отдана подробности (имя сети,
+	// «Подключено»); две строки названия её вытесняют.
+	if a.Detail != "" && len(lines) < qsLabelLines {
 		ds := pn.partStyle("w11.detail", theme.StateNormal)
-		detailR := image.Rect(label.Min.X, titleR.Max.Y, label.Max.X, label.Max.Y)
-		DrawTextCentered(ctx, detailR, Elide(ctx, a.Detail, ds, label.Dx()-4), ds)
+		r := image.Rect(label.Min.X, label.Min.Y+len(lines)*row, label.Max.X, label.Min.Y+(len(lines)+1)*row)
+		DrawTextCentered(ctx, r, Elide(ctx, a.Detail, ds, maxW), ds)
 	}
+}
+
+// paintHalf рисует подложку плитки body только в пределах её половинки half:
+// плитка целиком со скруглением, обрезанная прямоугольником половинки, так что
+// внешние углы остаются круглыми, а внутренние прямые.
+func (pn *qsPanel) paintHalf(ctx widget.DrawContext, body, half image.Rectangle, s *theme.Style, clip image.Rectangle) {
+	prev := ctx.Clip()
+	ctx.SetClip(half.Intersect(prev))
+	qsPaint(ctx, body, s, half.Intersect(clip))
+	ctx.SetClip(prev)
 }
 
 // drawTileIcon рисует значок плитки по центру области: потребитель отдаёт
@@ -326,30 +358,47 @@ func (pn *qsPanel) drawButton(ctx widget.DrawContext, u qsUI, z qsZone, r image.
 	drawQSGlyph(ctx, g, r, qsChevronSide, s.Text)
 }
 
+// drawButtonOff рисует кнопку-значок неактивной: без наведения, цветом
+// отключённого текста.
+func (pn *qsPanel) drawButtonOff(ctx widget.DrawContext, r image.Rectangle, g qsGlyph) {
+	s := pn.partStyle("w11.button", theme.StateDisabled)
+	pn.paint(ctx, r, s)
+	drawQSGlyph(ctx, g, r, qsChevronSide, s.Text)
+}
+
 // drawSlider рисует строку ползунка: значок, дорожку с заполнением, бегунок,
 // значение и (у громкости) «›».
 func (pn *qsPanel) drawSlider(ctx widget.DrawContext, l *qsLayout, row qsRow, u qsUI,
-	zIcon, zSlider qsZone, g qsGlyph, level float64, zChev qsZone) {
+	zIcon, zSlider qsZone, g qsGlyph, level float64, zChev qsZone, off bool) {
 
 	// Значок нажимается только у громкости (выключает звук); у яркости это
-	// просто метка.
-	pn.drawButton(ctx, u, zIcon, row.icon, g, zIcon.kind == qzVolIcon)
+	// просто метка. Неактивный ползунок серый целиком: значок, дорожка, «›».
+	if off {
+		pn.drawButtonOff(ctx, row.icon, g)
+	} else {
+		pn.drawButton(ctx, u, zIcon, row.icon, g, zIcon.kind == qzVolIcon)
+	}
 
+	st := theme.StateNormal
+	if off {
+		st = theme.StateDisabled
+	}
 	cy := row.row.Min.Y + row.row.Dy()/2
 	th := l.m.sliderTrack
 	track := image.Rect(row.track.Min.X, cy-th/2, row.track.Max.X, cy-th/2+th)
-	pn.paint(ctx, track, pn.partStyle("w11.slider.track", theme.StateNormal))
+	pn.paint(ctx, track, pn.partStyle("w11.slider.track", st))
 	cx := row.thumbCenter(level, l.m.sliderThumb)
 	if fill := image.Rect(track.Min.X, track.Min.Y, cx, track.Max.Y); !fill.Empty() {
-		pn.paint(ctx, fill, pn.partStyle("w11.slider.fill", theme.StateNormal))
+		pn.paint(ctx, fill, pn.partStyle("w11.slider.fill", st))
 	}
 	thumb := image.Rect(cx-l.m.sliderThumb/2, cy-l.m.sliderThumb/2,
 		cx-l.m.sliderThumb/2+l.m.sliderThumb, cy-l.m.sliderThumb/2+l.m.sliderThumb)
-	pn.paint(ctx, thumb, pn.partStyle("w11.slider.thumb", theme.StateNormal))
+	pn.paint(ctx, thumb, pn.partStyle("w11.slider.thumb", st))
 
 	// Точка в бегунке: под курсором крупнее, под рукой мельче.
-	dot, dst := qsDotRest, theme.StateNormal
+	dot, dst := qsDotRest, st
 	switch {
+	case off:
 	case u.drag.kind == qdSlider && u.drag.zone == zSlider:
 		dot, dst = qsDotPressed, theme.StatePressed
 	case u.hover == zSlider:
@@ -361,7 +410,11 @@ func (pn *qsPanel) drawSlider(ctx widget.DrawContext, l *qsLayout, row qsRow, u 
 	vs := pn.partStyle("w11.dim", theme.StateNormal)
 	DrawTextCentered(ctx, row.value, strconv.Itoa(int(level*100+0.5)), vs)
 	if !row.chev.Empty() {
-		pn.drawButton(ctx, u, zChev, row.chev, qsGlyphChevron, true)
+		if off {
+			pn.drawButtonOff(ctx, row.chev, qsGlyphChevron)
+		} else {
+			pn.drawButton(ctx, u, zChev, row.chev, qsGlyphChevron, true)
+		}
 	}
 }
 
@@ -389,13 +442,24 @@ func (pn *qsPanel) drawFooter(ctx widget.DrawContext, l *qsLayout, u qsUI, trueP
 	if u.hasBat && !l.battery.Empty() {
 		pn.drawBattery(ctx, l.battery, u.pow, fs.Text)
 	}
-	if u.editing {
+	switch {
+	case u.editing:
 		z := qsZone{kind: qzEdit}
 		hover := u.hover == z
 		ds := pn.style(z, l.edit, "w11.done", StateOf(hover, u.press == z && hover, false, false, false))
 		pn.paint(ctx, l.edit, ds)
 		DrawTextCentered(ctx, l.edit, tr(StrQuickDone), ds)
-	} else {
+	case l.editLabel:
+		// Карандаш с подписью «Изменить» слева.
+		z := qsZone{kind: qzEdit}
+		hover := u.hover == z
+		es := pn.style(z, l.edit, "w11.button", StateOf(hover, u.press == z && hover, false, false, false))
+		pn.paint(ctx, l.edit, es)
+		gr := image.Rect(l.edit.Min.X+qsEditPadL, l.edit.Min.Y, l.edit.Min.X+qsEditPadL+qsChevronSide, l.edit.Max.Y)
+		drawQSGlyph(ctx, qsGlyphPencil, gr, qsChevronSide, es.Text)
+		txt := image.Rect(gr.Max.X+qsEditGap, l.edit.Min.Y, l.edit.Max.X, l.edit.Max.Y)
+		DrawTextLeft(ctx, txt, tr(StrQuickEditShort), pn.partStyle("w11.label", theme.StateNormal))
+	default:
 		pn.drawButton(ctx, u, qsZone{kind: qzEdit}, l.edit, qsGlyphPencil, true)
 	}
 	pn.drawButton(ctx, u, qsZone{kind: qzSettings}, l.settings, qsGlyphGear, true)

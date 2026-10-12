@@ -4,6 +4,7 @@ import (
 	"image"
 	"math/rand"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -25,6 +26,9 @@ func runeW(r rune) int {
 func useTestMeasurer(t testing.TB) {
 	t.Helper()
 	prev := uiTextMeasurer.Load()
+	measurersMu.Lock()
+	prevBase := baseMeasurer
+	measurersMu.Unlock()
 	SetTextMeasurer(func(text string, sizePt float64) int {
 		w := 0
 		for _, r := range text {
@@ -33,8 +37,19 @@ func useTestMeasurer(t testing.TB) {
 		return int(float64(w) * sizePt / 14)
 	})
 	t.Cleanup(func() {
+		// SetTextMeasurer запоминает измеритель в baseMeasurer и публикует его в
+		// uiTextMeasurer. Вернуть надо оба: иначе тестовый измеритель остаётся
+		// действующим для всех следующих тестов, рассчитанных на эвристику ширины
+		// (меню, обёртки, флажки) — зависимость от порядка запуска.
+		measurersMu.Lock()
+		baseMeasurer = prevBase
+		measurersMu.Unlock()
 		if prev != nil {
 			uiTextMeasurer.Store(prev)
+		} else {
+			// В atomic.Value nil не положить; до первой публикации он пуст, и
+			// MeasureUIText считает эвристикой — вернём его в то же состояние.
+			uiTextMeasurer = atomic.Value{}
 		}
 		BumpTextMetricsRev()
 	})

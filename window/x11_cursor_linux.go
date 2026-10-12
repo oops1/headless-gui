@@ -28,6 +28,9 @@ const (
 	xcSbVDoubleArrow = 116 // ↕
 	xcTopLeftCorner  = 134 // ⤡ — угол northwest↔southeast
 	xcTopRightCorner = 136 // ⤢ — угол northeast↔southwest
+	xcCrosshair      = 34  // перекрестие
+	xcFleur          = 52  // четыре стрелки: перемещение
+	xcWatch          = 150 // «занят»
 )
 
 // x11Cursors — формы курсора, созданные по требованию.
@@ -70,6 +73,16 @@ func (w *X11Window) cursorResourceLocked(c int) uint32 {
 	if id, ok := w.cursors.byID[c]; ok {
 		return id
 	}
+	// Формы без глифа в шрифте «cursor»: невидимая (CursorNone) и нарисованные
+	// (рука раскрытая и сжатая) — из 1-битных карт через ядро протокола.
+	if c == wlCursorNone || x11ArtCursor(c) {
+		id := w.x11GenID()
+		for _, req := range x11BitmapCursorRequests(w.x11CursorIDs(id, w.wid), c) {
+			w.x11Send(req)
+		}
+		w.cursors.remember(c, id)
+		return id
+	}
 	if w.cursors.font == 0 {
 		w.cursors.font = w.x11GenID()
 		w.x11OpenFont(w.cursors.font, "cursor")
@@ -80,11 +93,28 @@ func (w *X11Window) cursorResourceLocked(c int) uint32 {
 	}
 	id := w.x11GenID()
 	w.x11CreateGlyphCursor(id, w.cursors.font, glyph)
-	if w.cursors.byID == nil {
-		w.cursors.byID = map[int]uint32{}
-	}
-	w.cursors.byID[c] = id
+	w.cursors.remember(c, id)
 	return id
+}
+
+// x11CursorIDs выдаёт идентификаторы на сборку курсора cursor в окне drawable.
+func (w *X11Window) x11CursorIDs(cursor, drawable uint32) x11CursorIDs {
+	return x11CursorIDs{
+		cursor:   cursor,
+		drawable: drawable,
+		pixSrc:   w.x11GenID(),
+		pixMask:  w.x11GenID(),
+		gc0:      w.x11GenID(),
+		gc1:      w.x11GenID(),
+	}
+}
+
+// remember запоминает ресурс курсора формы c.
+func (cs *x11Cursors) remember(c int, id uint32) {
+	if cs.byID == nil {
+		cs.byID = map[int]uint32{}
+	}
+	cs.byID[c] = id
 }
 
 // x11CursorGlyph переводит форму движка в глиф шрифта «cursor».
@@ -107,8 +137,20 @@ func x11CursorGlyph(c int) (int, bool) {
 		return xcTopLeftCorner, true
 	case wlCursorSizeNESW:
 		return xcTopRightCorner, true
+	case wlCursorSizeAll:
+		return xcFleur, true
+	case wlCursorCrosshair:
+		return xcCrosshair, true
+	case wlCursorWait:
+		return xcWatch, true
 	}
 	return 0, false
+}
+
+// x11ArtCursor — форма рисуется своей картинкой: в шрифте «cursor» нет ни
+// раскрытой, ни сжатой руки.
+func x11ArtCursor(c int) bool {
+	return c == wlCursorGrab || c == wlCursorGrabbing
 }
 
 // ─── Запросы протокола ──────────────────────────────────────────────────────

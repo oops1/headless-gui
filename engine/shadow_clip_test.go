@@ -4,6 +4,8 @@ import (
 	"image"
 	"runtime"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // Буфер тени строился по всей фигуре, а не по видимой её части. В сравнении
@@ -23,6 +25,7 @@ func allocBytes(fn func()) uint64 {
 }
 
 func TestDrawSoftShadow_TallShapeStaysSmall(t *testing.T) {
+	testreset.Globals(t)
 	c := newWhiteTestCanvas(400, 300)
 
 	// Фигура высотой полмиллиона пикселей — как карточка блока в сравнении
@@ -44,6 +47,7 @@ func TestDrawSoftShadow_TallShapeStaysSmall(t *testing.T) {
 // сотню пикселей, и у такой же, уходящей на тысячи, видимая часть тени
 // совпадает пиксель в пиксель.
 func TestDrawSoftShadow_ClipDoesNotChangePicture(t *testing.T) {
+	testreset.Globals(t)
 	draw := func(bottom int) *Canvas {
 		c := newWhiteTestCanvas(300, 200)
 		c.DrawSoftShadow(image.Rect(40, 40, 260, bottom), 8, 3, shadowColor)
@@ -64,6 +68,7 @@ func TestDrawSoftShadow_ClipDoesNotChangePicture(t *testing.T) {
 // Фигура целиком за отсечением тени не даёт: раньше буфер всё равно
 // строился и композитился впустую.
 func TestDrawSoftShadow_OutsideClipDrawsNothing(t *testing.T) {
+	testreset.Globals(t)
 	c := newWhiteTestCanvas(200, 150)
 	before := append([]uint8(nil), c.back.Pix...)
 
@@ -79,6 +84,7 @@ func TestDrawSoftShadow_OutsideClipDrawsNothing(t *testing.T) {
 // Отсечение сужает буфер: тень фигуры, от которой видна узкая полоска,
 // стоит примерно столько же, сколько сама полоска.
 func TestDrawSoftShadow_HonoursClip(t *testing.T) {
+	testreset.Globals(t)
 	c := newWhiteTestCanvas(600, 400)
 	c.SetClip(image.Rect(0, 0, 600, 40))
 	defer c.ClearClip()

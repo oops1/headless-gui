@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -38,6 +39,7 @@ func (c *fontCtx) MeasureTextFont(text string, sizePt float64, fontName string) 
 // DrawTextFont уходило одно Family: Bold и Italic терялись, и жирный
 // заголовок темы рисовался обычным.
 func TestFontFaceName(t *testing.T) {
+	testreset.Globals(t)
 	cases := []struct {
 		name string
 		f    theme.FontSpec
@@ -67,6 +69,7 @@ func TestFontFaceName(t *testing.T) {
 // Дробный кегль темы (8.5) доходит до контекста рисования целым, как есть, —
 // без округления на пути от стиля до DrawTextFont и MeasureTextFont.
 func TestDrawText_FractionalSizeAndWeightReachContext(t *testing.T) {
+	testreset.Globals(t)
 	ctx := &fontCtx{}
 	s := &theme.Style{Font: theme.FontSpec{Family: "Open Sans", Size: 8.5, Weight: theme.WeightSemiBold}}
 	r := image.Rect(0, 0, 200, 40)
@@ -100,6 +103,7 @@ func TestDrawText_FractionalSizeAndWeightReachContext(t *testing.T) {
 // Стиль без Family и без веса идёт прежней дорогой — DrawTextSize: вид
 // существующих тем не должен зависеть от появления весов.
 func TestDrawText_PlainStyleKeepsOldPath(t *testing.T) {
+	testreset.Globals(t)
 	ctx := &fontCtx{}
 	s := &theme.Style{Font: theme.FontSpec{Size: 9}}
 	DrawTextLeft(ctx, image.Rect(0, 0, 100, 30), "ab", s)

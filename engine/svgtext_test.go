@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	hgfonts "github.com/oops1/headless-gui/v3/assets/fonts"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget/svg"
 )
 
@@ -55,6 +56,7 @@ func renderSVG(t *testing.T, src string, w, h int) *image.RGBA {
 // Движок регистрирует растеризатор текста: <text> рисуется. Без моста (пакет
 // svg сам по себе) текст не рисуется — это проверяет svg.TestText_NoBridge.
 func TestSVGText_DrawnByEngineFonts(t *testing.T) {
+	testreset.Globals(t)
 	svgTextEngine(t)
 	img := renderSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40">
 	<text x="10" y="30" font-size="30" fill="#000">HI</text></svg>`, 100, 40)
@@ -69,6 +71,7 @@ func TestSVGText_DrawnByEngineFonts(t *testing.T) {
 }
 
 func TestSVGText_AnchorMiddleAndEnd(t *testing.T) {
+	testreset.Globals(t)
 	svgTextEngine(t)
 	mk := func(anchor string) image.Rectangle {
 		img := renderSVG(t, fmt.Sprintf(`<svg viewBox="0 0 200 40"><text x="100" y="30" font-size="30" text-anchor="%s">Hello</text></svg>`, anchor), 200, 40)
@@ -91,6 +94,7 @@ func TestSVGText_AnchorMiddleAndEnd(t *testing.T) {
 }
 
 func TestSVGText_WeightAndStyleChangeOutline(t *testing.T) {
+	testreset.Globals(t)
 	eng := svgTextEngine(t)
 	br := svgTextBridge{eng}
 	_, wReg, ok1 := br.Outline(svg.FontSpec{Families: []string{"Open Sans"}, Weight: 400}, 20, "Hamburg")
@@ -108,6 +112,7 @@ func TestSVGText_WeightAndStyleChangeOutline(t *testing.T) {
 }
 
 func TestSVGText_FontSizeScalesAndMatchesMeasure(t *testing.T) {
+	testreset.Globals(t)
 	eng := svgTextEngine(t)
 	br := svgTextBridge{eng}
 	_, a10, _ := br.Outline(svg.FontSpec{}, 10, "Hello")
@@ -125,6 +130,7 @@ func TestSVGText_FontSizeScalesAndMatchesMeasure(t *testing.T) {
 }
 
 func TestSVGText_UnknownFamilyFallsBackToDefault(t *testing.T) {
+	testreset.Globals(t)
 	svgTextEngine(t)
 	img := renderSVG(t, `<svg viewBox="0 0 60 30"><text x="2" y="24" font-family="Нет Такого, sans-serif" font-size="24">Ag</text></svg>`, 60, 30)
 	if _, ok := alphaBounds(img); !ok {
@@ -133,6 +139,7 @@ func TestSVGText_UnknownFamilyFallsBackToDefault(t *testing.T) {
 }
 
 func TestSVGText_FillStrokeAndTspan(t *testing.T) {
+	testreset.Globals(t)
 	svgTextEngine(t)
 	img := renderSVG(t, `<svg viewBox="0 0 120 40"><text x="4" y="30" font-size="30" fill="#f00">I<tspan fill="#00f" dx="10">I</tspan></text></svg>`, 120, 40)
 	var red, blue int
@@ -153,6 +160,7 @@ func TestSVGText_FillStrokeAndTspan(t *testing.T) {
 }
 
 func TestSVGText_MaskedTextCutsHole(t *testing.T) {
+	testreset.Globals(t)
 	svgTextEngine(t)
 	// Как в значках раскладки клавиатуры: плашка с буквами, вырезанными маской.
 	img := renderSVG(t, `<svg viewBox="0 0 40 40"><defs><mask id="m"><rect width="40" height="40" fill="#fff"/>
@@ -174,6 +182,7 @@ func TestSVGText_MaskedTextCutsHole(t *testing.T) {
 }
 
 func TestSVGText_StopUnregistersBridge(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(64, 64, 30)
 	_ = hgfonts.Register(eng)
 	eng.Stop()
@@ -188,6 +197,7 @@ func TestSVGText_StopUnregistersBridge(t *testing.T) {
 // движком (Open Sans/Go) в лист SVG_SHEET_OUT, рядом — эталоны SVG_SHEET_REF
 // (rsvg-convert -w 128 -h 128). Без переменных пропускается.
 func TestSVGTextVisualSheet(t *testing.T) {
+	testreset.Globals(t)
 	dir, out := os.Getenv("SVG_SHEET_DIR"), os.Getenv("SVG_SHEET_OUT")
 	if dir == "" || out == "" {
 		t.Skip("SVG_SHEET_DIR/SVG_SHEET_OUT не заданы")

@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -34,6 +35,7 @@ func frameScene(t *testing.T, scrollY int) (root *widget.Panel, sv *widget.Scrol
 }
 
 func TestHitPath_ShiftsFramesThroughScroll(t *testing.T) {
+	testreset.Globals(t)
 	root, sv, btn := frameScene(t, 200)
 
 	path := hitPath(root, 100, 15)
@@ -55,6 +57,7 @@ func TestHitPath_ShiftsFramesThroughScroll(t *testing.T) {
 // Точка вне прокрутки не задевает её содержимое, даже если в координатах
 // содержимого там что-то лежит.
 func TestHitPath_OutsideScrollMissesContent(t *testing.T) {
+	testreset.Globals(t)
 	root, _, _ := frameScene(t, 200)
 	path := hitPath(root, 100, 215) // под прокруткой (0..100); в содержимом там кнопка
 	if len(path) != 1 {
@@ -64,6 +67,7 @@ func TestHitPath_OutsideScrollMissesContent(t *testing.T) {
 
 // Вложенная прокрутка: кадры складываются.
 func TestHitPath_NestedFramesAdd(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 300, 400))
 	outer := widget.NewScrollView()
@@ -102,6 +106,7 @@ func e2eFrameOf(root, w widget.Widget) image.Point {
 
 // Подсказка берётся у кнопки, которую видно под курсором.
 func TestTooltipAt_InScroll(t *testing.T) {
+	testreset.Globals(t)
 	root, sv, btn := frameScene(t, 200)
 	btn.SetToolTip("видимая")
 	other := widget.NewButton("A")
@@ -130,6 +135,7 @@ func (d *dismissSpy) DismissAt(x, y int) {
 // DismissAt получает точку в кадре виджета: виджет, сверяющий её со своими
 // Bounds, внутри прокрутки иначе ошибался бы на величину прокрутки.
 func TestDismissOutside_PointInWidgetFrame(t *testing.T) {
+	testreset.Globals(t)
 	root, sv, _ := frameScene(t, 200)
 	spy := &dismissSpy{}
 	spy.SetBounds(image.Rect(0, 250, 50, 280))
@@ -151,6 +157,7 @@ func TestDismissOutside_PointInWidgetFrame(t *testing.T) {
 // Оверлей виджета внутри прокрутки находится по экранной точке; а площадь
 // самого виджета, обрезанная клипом, оверлей не «ловит».
 func TestFindOverlayStep_InScroll(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 300, 400))
 	sv := widget.NewScrollView()
@@ -184,6 +191,7 @@ func TestFindOverlayStep_InScroll(t *testing.T) {
 // Попап, вынесенный в окно ОС, стоит на экране, а оверлей рисуется в координатах
 // поля: прямоугольник — экранный, содержимое — то же, что рисует холст.
 func TestPopupItems_ScreenRectInScroll(t *testing.T) {
+	testreset.Globals(t)
 	e := New(300, 400, 20)
 	e.SetTooltipsEnabled(false)
 	root := widget.NewPanel(color.RGBA{R: 20, G: 20, B: 20, A: 255})
@@ -234,6 +242,7 @@ func (c *capSpy) OnMouseMove(x, y int)    { c.moves = append(c.moves, image.Pt(x
 // Захватчик внутри прокрутки получает движение в своём кадре, и кадр следует за
 // прокруткой, которая сдвинулась посреди перетаскивания.
 func TestCapture_FrameFollowsScroll(t *testing.T) {
+	testreset.Globals(t)
 	e := New(300, 400, 20)
 	e.SetTooltipsEnabled(false)
 	root, sv, _ := frameScene(t, 100)
@@ -261,6 +270,7 @@ func TestCapture_FrameFollowsScroll(t *testing.T) {
 
 // Виджет вне дерева не ломает поиск кадра: его координаты считаются экранными.
 func TestFrameOffsetOf_NotInTree(t *testing.T) {
+	testreset.Globals(t)
 	e := New(100, 100, 20)
 	root, _, _ := frameScene(t, 200)
 	e.SetRoot(root)

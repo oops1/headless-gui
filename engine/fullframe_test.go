@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -162,6 +163,7 @@ func hoverAround(e *Engine, n int, w, h int) {
 // движок считал доставленным и слал разности поверх картинки, которой у
 // потребителя не было, а кадры прежнего размера ложились в новый буфер.
 func TestSlowConsumer_ResizeKeepsPictureWhole(t *testing.T) {
+	testreset.Globals(t)
 	if testing.Short() {
 		t.Skip("долгий тест")
 	}
@@ -179,6 +181,7 @@ func TestSlowConsumer_ResizeKeepsPictureWhole(t *testing.T) {
 // То же при смене масштаба (FitScale и перенос окна на монитор с другим DPI
 // меняют масштаб, а не логический размер).
 func TestSlowConsumer_ScaleKeepsPictureWhole(t *testing.T) {
+	testreset.Globals(t)
 	if testing.Short() {
 		t.Skip("долгий тест")
 	}
@@ -196,6 +199,7 @@ func TestSlowConsumer_ScaleKeepsPictureWhole(t *testing.T) {
 // а потом замирает. Полный кадр приходит и в статичный интерфейс — сам, без
 // новых изменений.
 func TestSlowConsumer_LostFrameHealsWhenIdle(t *testing.T) {
+	testreset.Globals(t)
 	if testing.Short() {
 		t.Skip("долгий тест")
 	}
@@ -207,6 +211,7 @@ func TestSlowConsumer_LostFrameHealsWhenIdle(t *testing.T) {
 // Потребитель, который канал не читает вовсе, полных кадров не получает:
 // места в канале у него не бывает, и движок не рисует их впустую.
 func TestUnreadChannel_NoFullFrames(t *testing.T) {
+	testreset.Globals(t)
 	e := New(320, 200, 60)
 	e.SetRoot(&columns{})
 	var mu sync.Mutex
@@ -243,6 +248,7 @@ func (f sinkFunc) Present(fr output.Frame) { f(fr) }
 
 // Кадр несёт размер холста, под который снят.
 func TestFrameCarriesCanvasSize(t *testing.T) {
+	testreset.Globals(t)
 	e := New(300, 200, 30)
 	e.SetRoot(&columns{})
 	e.mu.RLock()

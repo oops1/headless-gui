@@ -9,6 +9,7 @@ import (
 
 	"github.com/oops1/headless-gui/v3/desktop"
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -84,7 +85,7 @@ func newWin11Scene(t *testing.T, w, h int, dark bool, scale float64) *win11Scene
 	}
 	tm.SetIconResolver(widget.BuiltinIcons())
 
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	if scale != 1 {
 		eng.SetScale(scale)
 	}

@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -16,7 +17,7 @@ import (
 // renderMid рисует кадр в середине первого мигания «внимания»: анимации заведены
 // рисованием и продвинуты на d, но не доведены до конца.
 func (s *w11Scene) renderMid(scale float64, d time.Duration) *image.RGBA {
-	eng := engine.New(w11W, w11H, 30)
+	eng := testengine.New(s.t, w11W, w11H, 30)
 	if scale != 1 {
 		eng.SetScale(scale)
 	}
@@ -39,6 +40,7 @@ func w11Save(t *testing.T, name string, img *image.RGBA) {
 }
 
 func TestWin11Bar_Shots(t *testing.T) {
+	testreset.Globals(t)
 	type shot struct {
 		name    string
 		profile string

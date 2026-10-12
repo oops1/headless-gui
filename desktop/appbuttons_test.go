@@ -8,7 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -76,6 +77,7 @@ func rightClick(a *ApplicationArea, r image.Rectangle) bool {
 // ─── Группировка ─────────────────────────────────────────────────────────────
 
 func TestAppButtons_GroupsWindowsOfOneApp(t *testing.T) {
+	testreset.Globals(t)
 	a, _, _ := groupScene(t, win10Fast(t))
 
 	cells := a.Cells()
@@ -102,6 +104,7 @@ func TestAppButtons_GroupsWindowsOfOneApp(t *testing.T) {
 
 // Без признака темы окна не склеиваются: прежнее поведение.
 func TestAppButtons_NoGroupingWithoutThemeFlag(t *testing.T) {
+	testreset.Globals(t)
 	for _, name := range []string{theme.ProfileWindows2000, theme.ProfileWindows11, theme.ProfileMacOS} {
 		tm := managerFor(t, name)
 		if tm.GetFlag(KeyTaskButtonGroup, false) {
@@ -123,6 +126,7 @@ func TestAppButtons_NoGroupingWithoutThemeFlag(t *testing.T) {
 
 // Тема сменилась на ту, что группирует: область пересобирается сама.
 func TestAppButtons_FollowsThemeSwitch(t *testing.T) {
+	testreset.Globals(t)
 	tm := managerFor(t, theme.ProfileWindows11)
 	a, _, _ := groupScene(t, tm)
 	if got := len(a.Cells()); got != 5 {
@@ -139,6 +143,7 @@ func TestAppButtons_FollowsThemeSwitch(t *testing.T) {
 
 // Ширина кнопки Windows 10 — 48 при значке 24, кнопки вплотную.
 func TestAppButtons_Windows10ButtonGeometry(t *testing.T) {
+	testreset.Globals(t)
 	a, _, _ := groupScene(t, managerFor(t, theme.ProfileWindows10))
 	if got, want := a.PreferredSize(image.Pt(600, 40)).X, 4*48; got != want {
 		t.Errorf("ширина области %d, ждали %d (4 кнопки по 48)", got, want)
@@ -153,6 +158,7 @@ func TestAppButtons_Windows10ButtonGeometry(t *testing.T) {
 
 // Без предпросмотра окна стопки переключаются по кругу.
 func TestAppButtons_StackClickCyclesWithoutPreview(t *testing.T) {
+	testreset.Globals(t)
 	a, _, wm := groupScene(t, win10Fast(t))
 	r := cellRect(t, a, 1) // term: активно окно 1
 
@@ -171,6 +177,7 @@ func TestAppButtons_StackClickCyclesWithoutPreview(t *testing.T) {
 
 // С клавиатуры Enter у стопки листает окна: в список некуда перенести фокус.
 func TestAppButtons_StackEnterCycles(t *testing.T) {
+	testreset.Globals(t)
 	a, _, wm := groupScene(t, win10Fast(t))
 	a.SetFocused(true)
 	a.FocusState.SetCell(1)
@@ -181,6 +188,7 @@ func TestAppButtons_StackEnterCycles(t *testing.T) {
 }
 
 func TestAppButtons_StackClickShowsWindowList(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	a, _, wm := groupScene(t, tm)
 	p := NewWindowPreview(tm, wm)
@@ -224,6 +232,7 @@ func pressList(p *WindowPreview, pt image.Point) {
 }
 
 func TestAppButtons_ListCloseButtonClosesWindow(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	a, _, wm := groupScene(t, tm)
 	p := NewWindowPreview(tm, wm)
@@ -250,6 +259,7 @@ func TestAppButtons_ListCloseButtonClosesWindow(t *testing.T) {
 
 // Наведение на стопку показывает список после задержки.
 func TestAppButtons_HoverShowsWindowList(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	a, _, wm := groupScene(t, tm)
 	p := NewWindowPreview(tm, wm)
@@ -281,6 +291,7 @@ func TestAppButtons_HoverShowsWindowList(t *testing.T) {
 // Список следит за моделью: закрытое снаружи окно уходит из него, последнее —
 // закрывает панель.
 func TestAppButtons_ListFollowsWindowModel(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	a, _, wm := groupScene(t, tm)
 	p := NewWindowPreview(tm, wm)
@@ -302,6 +313,7 @@ func TestAppButtons_ListFollowsWindowModel(t *testing.T) {
 
 // Окон больше, чем влезает в ряд, — столбец заголовков без миниатюр.
 func TestAppButtons_ManyWindowsBecomeAColumn(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	cat := NewStaticAppCatalog()
 	var wins []WindowInfo
@@ -363,6 +375,7 @@ func eq(a, b []string) bool {
 }
 
 func TestAppButtons_RightClickOpensDefaultCommands(t *testing.T) {
+	testreset.Globals(t)
 	a, cat, wm := groupScene(t, win10Fast(t))
 
 	// Закреплённое незапущенное: запуск и «Открепить».
@@ -403,6 +416,7 @@ func TestAppButtons_RightClickOpensDefaultCommands(t *testing.T) {
 }
 
 func TestAppButtons_ConsumerCommandsReplaceDefaults(t *testing.T) {
+	testreset.Globals(t)
 	a, _, _ := groupScene(t, win10Fast(t))
 	var seen AppButton
 	ran := false
@@ -438,6 +452,7 @@ func TestAppButtons_ConsumerCommandsReplaceDefaults(t *testing.T) {
 // Меню рисует и разбирает сама область: пункт выбирается мышью, Esc и клик
 // мимо закрывают, а меню не попадает в обход Tab.
 func TestAppButtons_MenuMouseAndDismiss(t *testing.T) {
+	testreset.Globals(t)
 	a, cat, _ := groupScene(t, win10Fast(t))
 	rightClick(a, cellRect(t, a, 0))
 	ob := a.OverlayBounds()
@@ -474,6 +489,7 @@ func TestAppButtons_MenuMouseAndDismiss(t *testing.T) {
 }
 
 func TestAppButtons_ContextKeyOpensMenuOfFocusedCell(t *testing.T) {
+	testreset.Globals(t)
 	a, _, _ := groupScene(t, win10Fast(t))
 	a.SetFocused(true)
 	a.FocusState.SetCell(2)
@@ -489,6 +505,7 @@ func TestAppButtons_ContextKeyOpensMenuOfFocusedCell(t *testing.T) {
 
 // Строки команд — widget.Tr: переопределяются и следуют за языком.
 func TestAppButtons_DefaultCommandStringsAreTranslatable(t *testing.T) {
+	testreset.Globals(t)
 	for _, key := range []string{StrAppPin, StrAppUnpin, StrAppCloseWindow, StrAppCloseAll, StrAppWindows, StrAppCloseTip} {
 		for _, lang := range []string{"RU", "EN"} {
 			if v := widget.TrIn(lang, key); v == key || v == "" {
@@ -505,6 +522,7 @@ func TestAppButtons_DefaultCommandStringsAreTranslatable(t *testing.T) {
 // ─── Подсказка ───────────────────────────────────────────────────────────────
 
 func TestAppButtons_ToolTips(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	a, _, wm := groupScene(t, tm)
 	at := func(i int) string {
@@ -541,6 +559,7 @@ func TestAppButtons_ToolTips(t *testing.T) {
 
 // Трей: у каждого значка подсказка уже есть — проверка, что не потеряна.
 func TestAppButtons_TrayItemsHaveToolTips(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	st := NewFakeSystemStatus()
 	for name, tip := range map[string]string{
@@ -564,7 +583,7 @@ func renderArea(t *testing.T, a *ApplicationArea, w, h int) *image.RGBA {
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, w, h))
 	root.AddChild(a)
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	eng.SetRoot(root)
 	return eng.RenderOnce()
 }
@@ -584,6 +603,7 @@ func areaAt(t *testing.T, tm *theme.Manager, wins ...WindowInfo) (*ApplicationAr
 var panelBG = color.RGBA{R: 31, G: 31, B: 31, A: 255}
 
 func TestAppButtons_Windows10StateMarks(t *testing.T) {
+	testreset.Globals(t)
 	tm := managerFor(t, theme.ProfileWindows10)
 	a, _ := areaAt(t, tm,
 		WindowInfo{ID: 1, AppID: "term", Title: "t", Active: false},
@@ -623,6 +643,7 @@ func TestAppButtons_Windows10StateMarks(t *testing.T) {
 
 // Наведение подсвечивает и закреплённое незапущенное, и свёрнутое окно.
 func TestAppButtons_Windows10HoverHighlightsEverything(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows10)
 	a, _ := areaAt(t, tm, WindowInfo{ID: 1, AppID: "term", Title: "t", Minimized: true})
@@ -644,6 +665,7 @@ func TestAppButtons_Windows10HoverHighlightsEverything(t *testing.T) {
 }
 
 func TestAppButtons_StackMarkOnlyOnStacks(t *testing.T) {
+	testreset.Globals(t)
 	tm := managerFor(t, theme.ProfileWindows10)
 	a, _ := areaAt(t, tm,
 		WindowInfo{ID: 1, AppID: "term", Title: "t"},
@@ -667,6 +689,7 @@ func TestAppButtons_StackMarkOnlyOnStacks(t *testing.T) {
 // Метки прежних тем не изменились: Windows 11 рисует короткую чёрточку у
 // активного, а у запущенного неактивного — вдвое короче, как и раньше.
 func TestAppButtons_Windows11MarksUnchanged(t *testing.T) {
+	testreset.Globals(t)
 	tm := managerFor(t, theme.ProfileWindows11)
 	a, _ := areaAt(t, tm,
 		WindowInfo{ID: 1, AppID: "term", Title: "t", Active: true},
@@ -688,6 +711,7 @@ func TestAppButtons_Windows11MarksUnchanged(t *testing.T) {
 // ─── «Пуск» горит, пока меню открыто ────────────────────────────────────────
 
 func TestStartButton_ActiveWhileFlyoutOpen(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows10)
 	sb := NewStartButton(tm)
@@ -722,6 +746,7 @@ func TestStartButton_ActiveWhileFlyoutOpen(t *testing.T) {
 }
 
 func TestStartButton_TrackManager(t *testing.T) {
+	testreset.Globals(t)
 	tm := managerFor(t, theme.ProfileWindows10)
 	sb := NewStartButton(tm)
 	mgr := NewFlyoutManager()
@@ -752,6 +777,7 @@ func TestStartButton_TrackManager(t *testing.T) {
 
 // Кнопка, у которой меню уже открыто к моменту связывания, горит сразу.
 func TestStartButton_TrackSyncsInitialState(t *testing.T) {
+	testreset.Globals(t)
 	tm := managerFor(t, theme.ProfileWindows10)
 	f := NewFlyout(tm, ComponentStartMenu)
 	f.Size = func() image.Point { return image.Pt(100, 100) }
@@ -770,7 +796,7 @@ func renderStart(t *testing.T, sb *StartButton) *image.RGBA {
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 100, 40))
 	root.AddChild(sb)
-	eng := engine.New(100, 40, 30)
+	eng := testengine.New(t, 100, 40, 30)
 	eng.SetRoot(root)
 	return eng.RenderOnce()
 }
@@ -778,6 +804,7 @@ func renderStart(t *testing.T, sb *StartButton) *image.RGBA {
 // Другие темы не получили «горящую» кнопку молча: у Windows 2000 она
 // вдавлена, как и при нажатии.
 func TestStartButton_ActiveStyleExistsInClassicThemes(t *testing.T) {
+	testreset.Globals(t)
 	for _, name := range []string{theme.ProfileWindows2000, theme.ProfileWindows11, theme.ProfileWindows10} {
 		tm := managerFor(t, name)
 		act := tm.GetStyle(ComponentStartButton, "", theme.StateActive)
@@ -790,6 +817,7 @@ func TestStartButton_ActiveStyleExistsInClassicThemes(t *testing.T) {
 
 // Подсказка часов — дата словами; заданная оболочкой побеждает.
 func TestClockToolTip_LongDateUnlessSet(t *testing.T) {
+	testreset.Globals(t)
 	c := NewClock(win10Fast(t), NewFakeClock(time.Date(2026, 3, 14, 15, 9, 26, 0, time.UTC)))
 	if got := c.GetToolTip(); !strings.Contains(got, "2026") || !strings.Contains(got, "14") {
 		t.Errorf("подсказка часов %q: ждали дату словами", got)

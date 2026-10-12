@@ -172,3 +172,28 @@ func TestWaylandScale_NoChangeAtOne(t *testing.T) {
 		t.Errorf("масштаб %v", k)
 	}
 }
+
+// Координаты указателя приходят в поверхностных единицах, а движок живёт в
+// пикселях буфера. При масштабе 2 указатель на (100, 50) поверхности — это
+// (200, 100) кадра; раньше движок получал (100, 50) и промахивался.
+func TestWaylandScale_PointerInBufferPixels(t *testing.T) {
+	for _, tc := range []struct {
+		k          float64
+		sx, sy     int32 // fixed 24.8
+		wantX, wan int
+	}{
+		{2, 100 << 8, 50 << 8, 200, 100},
+		{1.5, 101<<8 + 128, 7 << 8, 152, 10}, // 101.5×1.5 = 152.25, 7×1.5 = 10.5
+		{1, 100 << 8, 50 << 8, 100, 50},
+	} {
+		c := newWlTestWindow(t)
+		c.w.scale.current = tc.k
+		var gx, gy int
+		c.w.onMouseMove = func(x, y int) { gx, gy = x, y }
+		body := append(wlU32(0), wlU32(uint32(tc.sx), uint32(tc.sy))...) // time, x, y
+		c.w.handlePointer(wlPointerEvMotion, body)
+		if gx != tc.wantX || gy != tc.wan {
+			t.Errorf("масштаб %v: движок получил (%d,%d), ждал (%d,%d)", tc.k, gx, gy, tc.wantX, tc.wan)
+		}
+	}
+}

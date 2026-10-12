@@ -6,11 +6,14 @@ import (
 	"testing"
 
 	"github.com/go-text/typesetting/font/opentype/tables"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // TestEmoji_NeedsShaping — эмодзи и селекторы вариаций уходят в шейпер
 // (кластеры ZWJ/тона), а не в быстрый per-rune путь.
 func TestEmoji_NeedsShaping(t *testing.T) {
+	testreset.Globals(t)
 	shaped := []string{
 		"🙂",       // U+1F642 (эмотикон)
 		"👍🏽",       // палец + модификатор тона кожи
@@ -34,6 +37,7 @@ func TestEmoji_NeedsShaping(t *testing.T) {
 
 // TestEmoji_PremulColor — перевод straight→premultiplied альфа.
 func TestEmoji_PremulColor(t *testing.T) {
+	testreset.Globals(t)
 	cases := []struct{ in, want color.RGBA }{
 		{color.RGBA{255, 0, 0, 255}, color.RGBA{255, 0, 0, 255}},   // непрозрачный — без изменений
 		{color.RGBA{255, 0, 0, 128}, color.RGBA{128, 0, 0, 128}},   // половинная альфа
@@ -50,6 +54,7 @@ func TestEmoji_PremulColor(t *testing.T) {
 // TestEmoji_CompositeMaskColor — композиция слоя (альфа-маска × цвет) на
 // синтетических данных: проверка Over-смешивания premultiplied.
 func TestEmoji_CompositeMaskColor(t *testing.T) {
+	testreset.Globals(t)
 	dst := image.NewRGBA(image.Rect(0, 0, 2, 1))
 	mask := image.NewAlpha(image.Rect(0, 0, 2, 1))
 	mask.Pix[0] = 255 // полностью покрыт
@@ -80,6 +85,7 @@ func TestEmoji_CompositeMaskColor(t *testing.T) {
 // TestEmoji_CPALPremul — выбор цвета из палитры CPAL с домножением на alpha и
 // премультипликацией; foreground (0xFFFF) и индекс за пределами палитры.
 func TestEmoji_CPALPremul(t *testing.T) {
+	testreset.Globals(t)
 	// CPAL хранит записи как B,G,R,A.
 	pal := []tables.ColorRecord{
 		{Blue: 0, Green: 0, Red: 255, Alpha: 255},   // 0: красный
@@ -115,6 +121,7 @@ func TestEmoji_CPALPremul(t *testing.T) {
 // TestEmoji_RepresentativeColor — цвет заливки PaintGlyph: сплошной сквозь
 // преобразование, усреднённый градиент.
 func TestEmoji_RepresentativeColor(t *testing.T) {
+	testreset.Globals(t)
 	pal := []tables.ColorRecord{
 		{Blue: 0, Green: 0, Red: 255, Alpha: 255}, // 0: красный
 		{Blue: 255, Green: 0, Red: 0, Alpha: 255}, // 1: синий
@@ -142,6 +149,7 @@ func TestEmoji_RepresentativeColor(t *testing.T) {
 
 // TestEmoji_Affine — композиция аффинных преобразований (перенос + масштаб).
 func TestEmoji_Affine(t *testing.T) {
+	testreset.Globals(t)
 	// Масштаб ×2, затем (внешний) перенос на (10, 0): точка (1,1) → (12, 2).
 	m := compose(affTranslate(10, 0), affScale(2, 2))
 	x := m.xx*1 + m.xy*1 + m.dx
@@ -155,6 +163,7 @@ func TestEmoji_Affine(t *testing.T) {
 // (Segoe UI Emoji и т.п.): даёт непрозрачные ЦВЕТНЫЕ (не серые) пиксели.
 // Пропускается, если в системе нет шрифта с покрытием эмодзи.
 func TestEmoji_RenderColorPixels(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(120, 80, 20)
 	c := eng.canvas
 	if _, found := c.fcForRune(c.fontCache, '🙂'); !found {

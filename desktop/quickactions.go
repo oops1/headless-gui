@@ -44,7 +44,23 @@ type QuickAction struct {
 	// HasDetails — у плитки есть вложенная панель: Windows 11 рисует справа
 	// «›», по нажатию на который QuickSettings.Details отдаёт содержимое.
 	HasDetails bool
+	// PageOnly — плитка только открывает вложенную страницу («Специальные
+	// возможности»): переключать ей нечего. Windows 11 рисует её целой, не
+	// делит на половинки, щелчок по любому месту открывает страницу
+	// (QuickSettings.Details), а «›» справа — часть плитки, не отдельная
+	// кнопка. Признак сам включает страницу: HasDetails при нём не нужен.
+	// model.Toggle такая плитка в Windows 11 не вызывает; Disabled её гасит.
+	// Центр уведомлений Windows 10 поле не читает.
+	PageOnly bool
 }
+
+// opensPage — у плитки есть вложенная страница: обычная с «›» или «только
+// страница».
+func (a QuickAction) opensPage() bool { return a.HasDetails || a.PageOnly }
+
+// split — плитка делится на две половинки (переключатель | «›»): у неё есть
+// страница и есть что переключать.
+func (a QuickAction) split() bool { return a.HasDetails && !a.PageOnly }
 
 // IconFor возвращает значок для квадрата со стороной size (физические пиксели).
 func (a QuickAction) IconFor(size int) image.Image {

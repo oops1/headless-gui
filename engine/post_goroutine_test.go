@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -21,6 +22,7 @@ import (
 
 // Post будит тикерный цикл сразу: при темпе раз в секунду работа не ждёт тика.
 func TestPost_WakesTickerLoop(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 1)
 	e.SetRenderOnDemand(true)
 	e.Start()
@@ -44,6 +46,7 @@ func TestPost_WakesTickerLoop(t *testing.T) {
 // Кадр следует за разобранной работой, а не ждёт следующего тика: через
 // очередь приходит ввод окна, и нажатие должно отзываться сразу.
 func TestPost_FrameFollowsPostedChange(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 2) // тик раз в полсекунды
 	e.SetRenderOnDemand(true)
 	// Изменение должно быть ВИДИМЫМ: кадр отдаёт только изменившиеся тайлы, и
@@ -82,6 +85,7 @@ func TestPost_FrameFollowsPostedChange(t *testing.T) {
 // С запущенным циклом RenderOnce очередь не разбирает: работа выполняется на
 // горутине цикла, а не на той, что попросила кадр.
 func TestPost_RenderOnceLeavesQueueToLoop(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	e.SetRenderOnDemand(true)
 	e.Start()
@@ -105,6 +109,7 @@ func TestPost_RenderOnceLeavesQueueToLoop(t *testing.T) {
 // Ввод и Post, поставленные из разных горутин (насос ОС и фоновая задача),
 // выполняются на ОДНОЙ горутине — горутине цикла.
 func TestPost_InputAndPostShareOneGoroutine(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	e.SetRenderOnDemand(true)
 	e.Start()
@@ -153,6 +158,7 @@ func TestPost_InputAndPostShareOneGoroutine(t *testing.T) {
 // Flush без запущенного цикла разбирает очередь на месте — и цепочку, которая
 // ставит себя заново.
 func TestFlush_NotStarted(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	steps := 0
 	var chain func()
@@ -171,6 +177,7 @@ func TestFlush_NotStarted(t *testing.T) {
 
 // Flush с запущенным циклом ждёт, пока цикл выполнит поставленное.
 func TestFlush_WaitsForLoop(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	e.Start()
 	defer e.Stop()
@@ -188,6 +195,7 @@ func TestFlush_WaitsForLoop(t *testing.T) {
 
 // Flush из горутины движка не виснет: ждать собственную очередь изнутри нельзя.
 func TestFlush_FromEngineGoroutineReturns(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	e.Start()
 	defer e.Stop()
@@ -206,6 +214,7 @@ func TestFlush_FromEngineGoroutineReturns(t *testing.T) {
 
 // После Stop Flush не ждёт остановленный цикл.
 func TestFlush_AfterStop(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	e.Start()
 	e.Stop()

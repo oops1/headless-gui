@@ -64,6 +64,13 @@ func (s *surface) onNative(fn func()) {
 func (s *surface) deliverMove(x, y int) {
 	x, y = s.toContent(x, y)
 	s.eng.SendMouseMove(x, y)
+	s.ptrX, s.ptrY, s.ptrKnown = x, y, true
+	s.syncCursor(x, y)
+}
+
+// syncCursor отдаёт окну ОС форму курсора для точки (x, y) контента — только
+// если она изменилась. Горутина движка.
+func (s *surface) syncCursor(x, y int) {
 	sc, ok := s.native.(interface{ SetCursor(c int) })
 	if !ok {
 		return
@@ -74,6 +81,51 @@ func (s *surface) deliverMove(x, y int) {
 	}
 	s.cursor, s.cursorSet = c, true
 	s.onNative(func() { sc.SetCursor(c) })
+}
+
+// refreshCursor пересчитывает курсор по последнему положению мыши, не ожидая
+// её движения. Зовётся, когда курсор изменился сам, а мышь стоит: движок
+// задал или снял принудительный курсор (Engine.SetCursorOverride). Горутина
+// движка.
+//
+// Мыши в окне ещё не было — берём точку вне окна: виджеты там курсора не
+// задают, и после ClearCursorOverride вернётся обычная стрелка.
+func (s *surface) refreshCursor() {
+	x, y := s.ptrX, s.ptrY
+	if !s.ptrKnown {
+		x, y = pointerOutside, pointerOutside
+	}
+	s.syncCursor(x, y)
+	if fn := s.popupCursor.Load(); fn != nil {
+		(*fn)() // окна-попапы получают принудительный курсор тоже
+	}
+}
+
+// setPopupCursor подключает хост вынесенных попапов к смене принудительного
+// курсора: fn зовётся на горутине движка вместе с refreshCursor.
+func (s *surface) setPopupCursor(fn func()) {
+	if fn == nil {
+		s.popupCursor.Store(nil)
+		return
+	}
+	s.popupCursor.Store(&fn)
+}
+
+// cursorOverrideNotifier — опциональное уведомление движка о смене
+// принудительного курсора (реализует *engine.Engine). Опциональное по той же
+// причине, что modifierSink: EngineAPI — обязательный минимум.
+type cursorOverrideNotifier interface {
+	SetOnCursorOverrideChanged(fn func())
+}
+
+// setupCursorOverride подключает смену принудительного курсора движка к окну:
+// форма уходит ОС сразу, без движения мыши.
+func (s *surface) setupCursorOverride() {
+	n, ok := s.eng.(cursorOverrideNotifier)
+	if !ok {
+		return
+	}
+	n.SetOnCursorOverrideChanged(func() { s.onEngine(s.refreshCursor) })
 }
 
 // inputQueue склеивает движения мыши, стоящие в очереди движка.

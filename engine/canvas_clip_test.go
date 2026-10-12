@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // GG-73: пустая область отсечения снимала отсечение вовсе. В полном кадре
@@ -30,6 +32,7 @@ func countColor(img *image.RGBA, col color.RGBA) int {
 
 // Клип за краем холста в полном кадре — ничего не рисуется.
 func TestCanvas_EmptyClipDrawsNothing(t *testing.T) {
+	testreset.Globals(t)
 	c := clipCanvas(t)
 	red := color.RGBA{R: 255, A: 255}
 
@@ -62,6 +65,7 @@ func TestCanvas_EmptyClipDrawsNothing(t *testing.T) {
 // Полный и частичный кадр ведут себя одинаково: пустой клип в обоих случаях —
 // «ничего».
 func TestCanvas_EmptyClipSameInPartialFrame(t *testing.T) {
+	testreset.Globals(t)
 	c := clipCanvas(t)
 	red := color.RGBA{R: 255, A: 255}
 

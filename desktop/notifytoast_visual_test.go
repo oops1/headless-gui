@@ -7,13 +7,15 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // Тост над треем: тот же вид, что и карточка центра. Снимки — при NC_OUT.
 func TestVisual_NotificationToastWin10(t *testing.T) {
+	testreset.Globals(t)
 	for _, light := range []bool{false, true} {
 		name := "toast_dark"
 		if light {
@@ -43,7 +45,7 @@ func TestVisual_NotificationToastWin10(t *testing.T) {
 			ts.Timeout = time.Hour
 			root.AddChild(ts)
 
-			eng := engine.New(w, h, 30)
+			eng := testengine.New(t, w, h, 30)
 			eng.SetRoot(root)
 			ns.Add(desktop.Notification{
 				AppID: "mail", AppName: "Почта", Icon: ncGlyph(48, color.RGBA{R: 60, G: 170, B: 90, A: 255}, 2),

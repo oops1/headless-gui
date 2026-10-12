@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -33,6 +34,7 @@ func searchFixture(t *testing.T) (*SearchBox, *FakeSearchProvider, *StartMenu, *
 }
 
 func TestSearchBox_ModesAndWidthsFromMetrics(t *testing.T) {
+	testreset.Globals(t)
 	box, _, _, bar, start := searchFixture(t)
 	if got := box.PreferredSize(image.Pt(1000, 40)).X; got != 344 {
 		t.Errorf("ширина поля %d, ждали 344 из метрики search.width", got)
@@ -66,6 +68,7 @@ func TestSearchBox_ModesAndWidthsFromMetrics(t *testing.T) {
 }
 
 func TestSearchBox_TypingEditsTextAndNotifies(t *testing.T) {
+	testreset.Globals(t)
 	box, prov, _, _, _ := searchFixture(t)
 	var changes []string
 	box.OnQueryChange = func(q string) { changes = append(changes, q) }
@@ -110,6 +113,7 @@ func TestSearchBox_TypingEditsTextAndNotifies(t *testing.T) {
 // Набор в строке открывает меню «Пуск» с результатами; Enter открывает первый
 // результат, стрелки ходят по списку.
 func TestSearchBox_TypingOpensStartMenuWithResults(t *testing.T) {
+	testreset.Globals(t)
 	box, prov, menu, _, _ := searchFixture(t)
 	box.OnKeyEvent(widget.KeyEvent{Code: widget.KeyC, Rune: 'c', Pressed: true})
 	menu.Settle()
@@ -142,6 +146,7 @@ func TestSearchBox_TypingOpensStartMenuWithResults(t *testing.T) {
 }
 
 func TestSearchBox_EscapeClosesMenuThenClearsText(t *testing.T) {
+	testreset.Globals(t)
 	box, _, menu, _, _ := searchFixture(t)
 	box.OnKeyEvent(widget.KeyEvent{Code: widget.KeyE, Rune: 'e', Pressed: true})
 	menu.Settle()
@@ -162,6 +167,7 @@ func TestSearchBox_EscapeClosesMenuThenClearsText(t *testing.T) {
 
 // Нажатие на поле открывает меню в режиме поиска; значок режима IconOnly — тоже.
 func TestSearchBox_ClickOpensStartMenu(t *testing.T) {
+	testreset.Globals(t)
 	box, _, menu, _, _ := searchFixture(t)
 	x, y := pointIn(box.Bounds())
 	box.OnMouseButton(widget.MouseEvent{X: x, Y: y, Button: widget.MouseLeft, Pressed: true})
@@ -190,6 +196,7 @@ func TestSearchBox_ClickOpensStartMenu(t *testing.T) {
 
 // Каретка встаёт туда, куда щёлкнули.
 func TestSearchBox_ClickPlacesCaret(t *testing.T) {
+	testreset.Globals(t)
 	box, _, _, _, _ := searchFixture(t)
 	box.SetText("abcdef")
 	field, _ := box.fieldRect()
@@ -202,6 +209,7 @@ func TestSearchBox_ClickPlacesCaret(t *testing.T) {
 }
 
 func TestSearchBox_PlaceholderFollowsLanguage(t *testing.T) {
+	testreset.Globals(t)
 	box, _, _, _, _ := searchFixture(t)
 	box.SetBounds(image.Rect(40, 680, 384, 720))
 	useLanguage(t, "RU")
@@ -226,6 +234,7 @@ func TestSearchBox_PlaceholderFollowsLanguage(t *testing.T) {
 
 // Наведение и фокус меняют вид поля через стили темы, а не через литералы.
 func TestSearchBox_HoverAndFocusStyles(t *testing.T) {
+	testreset.Globals(t)
 	box, _, _, _, _ := searchFixture(t)
 	box.SetBounds(image.Rect(40, 680, 384, 720))
 	fill := func() uint8 {
@@ -259,6 +268,7 @@ func TestSearchBox_HoverAndFocusStyles(t *testing.T) {
 // Набор буквы на меню, к которому привязана строка, переносит ввод в строку и
 // отдаёт ей фокус.
 func TestSearchBox_TypingOnMenuMovesInputToBox(t *testing.T) {
+	testreset.Globals(t)
 	box, _, menu, _, start := searchFixture(t)
 	menu.Open(start.Bounds())
 	menu.Settle()
@@ -278,6 +288,7 @@ func TestSearchBox_TypingOnMenuMovesInputToBox(t *testing.T) {
 
 // Без привязанной строки меню показывает запрос само.
 func TestSearchBox_UnboundMenuShowsInlineQuery(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	m.OnKeyEvent(widget.KeyEvent{Code: widget.KeyX, Rune: 'x', Pressed: true})
 	ctx := &recCtx{}
@@ -294,6 +305,7 @@ func TestSearchBox_UnboundMenuShowsInlineQuery(t *testing.T) {
 // оно закрывалось бы на нажатии и открывалось заново на отпускании); нажатие
 // куда-либо ещё — закрывает.
 func TestSearchBox_ClickOnBoxDoesNotDismissMenu(t *testing.T) {
+	testreset.Globals(t)
 	box, _, menu, _, start := searchFixture(t)
 	menu.Open(start.Bounds())
 	menu.Settle()
@@ -310,6 +322,7 @@ func TestSearchBox_ClickOnBoxDoesNotDismissMenu(t *testing.T) {
 
 // Плоское меню (Windows 11) тоже отписывается от темы при закрытии.
 func TestStartMenu_FlatMenuReleasesSubscriptionsOnClose(t *testing.T) {
+	testreset.Globals(t)
 	tm := managerFor(t, theme.ProfileWindows11)
 	base := tm.ObserverCount()
 	m := NewStartMenu(tm, NewStaticAppCatalog(tileApps()...))
@@ -329,6 +342,7 @@ func TestStartMenu_FlatMenuReleasesSubscriptionsOnClose(t *testing.T) {
 // Подписи без видимого текста — подсказка кнопки-значка поиска и гамбургера —
 // берутся из строк интерфейса и следуют за языком.
 func TestStartMenu_UnlabelledControlsHaveLocalisedLabels(t *testing.T) {
+	testreset.Globals(t)
 	box, _, menu, _, _ := searchFixture(t)
 	useLanguage(t, "RU")
 	if box.GetToolTip() != "" {

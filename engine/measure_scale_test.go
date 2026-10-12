@@ -3,6 +3,7 @@ package engine
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -14,6 +15,7 @@ import (
 // масштабе 2 ширина строки приходила вдвое больше, и всё, что считает перенос
 // до кадра (RichText, TextBox, диалоги), переносило строки раньше времени.
 func TestMeasureUIText_LogicalAfterSetScale(t *testing.T) {
+	testreset.Globals(t)
 	const text = "Длинный абзац текста для проверки переноса слов"
 	e := New(400, 100, 1)
 	defer e.Stop()

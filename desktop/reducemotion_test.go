@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -22,6 +23,7 @@ func reducedManager(t *testing.T, profile string) *theme.Manager {
 }
 
 func TestReduceMotion_AnimationHelperReturnsZero(t *testing.T) {
+	testreset.Globals(t)
 	tm := managerFor(t, theme.ProfileWindows11)
 	if d, _ := animation(tm, AnimMenuOpen); d <= 0 {
 		t.Fatal("без флага у Windows 11 есть выезд панели")
@@ -39,6 +41,7 @@ func TestReduceMotion_AnimationHelperReturnsZero(t *testing.T) {
 
 // Панель открывается и закрывается разом: ни движения, ни анимаций в реестре.
 func TestReduceMotion_FlyoutIsInstant(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	f := motionFlyout(reducedManager(t, theme.ProfileWindows11))
 	f.Open(motionAnchor)
@@ -56,6 +59,7 @@ func TestReduceMotion_FlyoutIsInstant(t *testing.T) {
 
 // Число (боковая панель «Пуска») меняется сразу.
 func TestReduceMotion_TweenIsInstant(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := reducedManager(t, theme.ProfileWindows11)
 	changed := 0
@@ -68,6 +72,7 @@ func TestReduceMotion_TweenIsInstant(t *testing.T) {
 
 // Наведение: цвет меняется скачком, переход не заводится.
 func TestReduceMotion_HoverHasNoTransition(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := reducedManager(t, theme.ProfileWindows11)
 	get := buttonStyle(tm)
@@ -88,6 +93,7 @@ func TestReduceMotion_HoverHasNoTransition(t *testing.T) {
 
 // Автоскрытие: панель выезжает разом, а не за умолчание в 140 мс.
 func TestReduceMotion_AutoHideIsInstant(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := reducedManager(t, theme.ProfileWindows10)
 	bar := NewTaskbar(tm)
@@ -108,6 +114,7 @@ func TestReduceMotion_AutoHideIsInstant(t *testing.T) {
 // Раскрытие карточки уведомления — функциональная анимация: по умолчанию
 // мгновенная, а профиль может оставить её короткой.
 func TestReduceMotion_NotificationExpandIsFunctional(t *testing.T) {
+	testreset.Globals(t)
 	m := managerFor(t, theme.ProfileWindows10)
 	if d, _ := expandAnimation(m); d <= 0 {
 		t.Fatal("без флага раскрытие анимировано")
@@ -138,6 +145,7 @@ func TestReduceMotion_NotificationExpandIsFunctional(t *testing.T) {
 
 // Раскрытие карточки в панели: при флаге высота меняется с первого же шага.
 func TestReduceMotion_CardExpandsAtOnce(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	if err := theme.RegisterBuiltinProfiles(m); err != nil {
 		t.Fatal(err)
@@ -194,6 +202,7 @@ func (c *paintRec) MicaBehind(r image.Rectangle, radius int, tint color.RGBA) bo
 // Без токенов тень — прежняя (DrawSoftShadow от Elevation), с токенами — с
 // явными размытием и смещением.
 func TestPaintStyle_ShadowTokens(t *testing.T) {
+	testreset.Globals(t)
 	r := image.Rect(0, 0, 100, 100)
 	legacy := &theme.Style{Corner: 8, Elevation: 12, Shadow: theme.RGBA(0, 0, 0, 70), Fill: theme.RGB(240, 240, 240)}
 	rec := &paintRec{}
@@ -213,6 +222,7 @@ func TestPaintStyle_ShadowTokens(t *testing.T) {
 
 // Материал Mica стиля доходит до контекста; заливка стиля поверх не кладётся.
 func TestPaintStyle_Mica(t *testing.T) {
+	testreset.Globals(t)
 	s := &theme.Style{Fill: theme.RGB(243, 243, 243), Backdrop: theme.BackdropSpec{
 		Mode: theme.BackdropBlur, Material: theme.MaterialMica, Radius: 80,
 		Tint: theme.RGBA(243, 243, 243, 190), Fallback: theme.RGB(243, 243, 243)}}
@@ -228,6 +238,7 @@ func TestPaintStyle_Mica(t *testing.T) {
 
 // Запас движения панели растёт вместе с мягкой тенью: тень не обрезается.
 func TestFlyout_MotionRegionCoversSoftShadow(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows11)
 	f := motionFlyout(tm)

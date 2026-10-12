@@ -4,11 +4,14 @@ import (
 	"image/color"
 	"os"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // TestShaping_VisualSample рендерит мультиязычную сцену в PNG для ручной
 // проверки (путь в env HEADLESS_GUI_SHAPER_PNG; без него тест пропускается).
 func TestShaping_VisualSample(t *testing.T) {
+	testreset.Globals(t)
 	out := os.Getenv("HEADLESS_GUI_SHAPER_PNG")
 	if out == "" {
 		t.Skip("HEADLESS_GUI_SHAPER_PNG не задан")

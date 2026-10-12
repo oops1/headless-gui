@@ -324,10 +324,11 @@ func (c *Canvas) faceFor(req string) *FontCache {
 		t.resolved[req] = name
 		t.mu.Unlock()
 	}
-	if name == "" {
+	if name == "" || c.namedFonts == nil {
 		return nil
 	}
-	return c.namedFonts[name]
+	fc, _ := c.namedFonts.get(name)
+	return fc
 }
 
 // resolveFace подбирает имя шрифта в реестре под (семейство, вес, наклон).
@@ -367,8 +368,10 @@ func (c *Canvas) resolveFace(family string, weight int, italic bool) string {
 	case italic:
 		fb = widget.BuiltinFontItalic
 	}
-	if _, ok := c.namedFonts[fb]; ok {
-		return fb
+	if c.namedFonts != nil {
+		if _, ok := c.namedFonts.get(fb); ok {
+			return fb
+		}
 	}
 	return ""
 }
@@ -391,12 +394,12 @@ func penGlyph(fc *FontCache, subpixel bool, sizePt float64, r rune, pen fixed.In
 // позже, наследуют режим от основного (RegisterFont, AddFallbackFont).
 func (c *Canvas) setTextSubpixel(on bool) {
 	c.fontCache.SetSubpixel(on)
-	for _, fc := range c.namedFonts {
+	for _, fc := range c.namedFonts.all() {
 		fc.SetSubpixel(on)
 	}
 	for _, fc := range c.fallbacks {
 		fc.SetSubpixel(on)
 	}
 	c.shaper.dropLayouts()
-	c.fontRev++
+	c.fontRev.Add(1)
 }

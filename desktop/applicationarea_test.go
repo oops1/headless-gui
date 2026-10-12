@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -30,6 +31,7 @@ func areaFixture(t *testing.T) (*ApplicationArea, *StaticAppCatalog, *FakeWindow
 
 // Закреплённое приложение с открытым окном показывается ОДНОЙ ячейкой.
 func TestApplicationArea_PinnedAndRunningMerge(t *testing.T) {
+	testreset.Globals(t)
 	a, _, _ := areaFixture(t)
 	defer a.Close()
 
@@ -50,6 +52,7 @@ func TestApplicationArea_PinnedAndRunningMerge(t *testing.T) {
 
 // Щелчок по закреплённому незапущенному запускает приложение.
 func TestApplicationArea_ClickLaunchesPinned(t *testing.T) {
+	testreset.Globals(t)
 	a, cat, wm := areaFixture(t)
 	defer a.Close()
 
@@ -66,6 +69,7 @@ func TestApplicationArea_ClickLaunchesPinned(t *testing.T) {
 
 // Щелчок по активному окну сворачивает его, по неактивному — активирует.
 func TestApplicationArea_ClickTogglesWindow(t *testing.T) {
+	testreset.Globals(t)
 	a, _, wm := areaFixture(t)
 	defer a.Close()
 
@@ -82,6 +86,7 @@ func TestApplicationArea_ClickTogglesWindow(t *testing.T) {
 
 // Отпускание в стороне отменяет нажатие — как у всех кнопок панели.
 func TestApplicationArea_ReleaseElsewhereCancels(t *testing.T) {
+	testreset.Globals(t)
 	a, cat, wm := areaFixture(t)
 	defer a.Close()
 
@@ -96,6 +101,7 @@ func TestApplicationArea_ReleaseElsewhereCancels(t *testing.T) {
 
 // Появление окна перестраивает содержимое: подписка на модель работает.
 func TestApplicationArea_FollowsWindowModel(t *testing.T) {
+	testreset.Globals(t)
 	a, _, wm := areaFixture(t)
 	defer a.Close()
 
@@ -112,6 +118,7 @@ func TestApplicationArea_FollowsWindowModel(t *testing.T) {
 
 // Под macOS отрисовку забирает док, и поведение при этом не меняется.
 func TestApplicationArea_UsesThemePresenter(t *testing.T) {
+	testreset.Globals(t)
 	tm := managerFor(t, theme.ProfileMacOS)
 	cat := NewStaticAppCatalog(AppInfo{ID: "term", Title: "Терминал"})
 	cat.Pin("term")

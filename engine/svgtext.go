@@ -99,20 +99,20 @@ func (c *Canvas) svgFont(spec svg.FontSpec) *FontCache {
 		known := len(c.families.fam[familyKey(fam)]) > 0
 		c.families.mu.RUnlock()
 		if !known {
-			if fc, ok := c.namedFonts[fam]; ok && fc != nil {
+			if fc, ok := c.namedFonts.get(fam); ok && fc != nil {
 				return fc
 			}
 			continue
 		}
 		if name := c.resolveFace(fam, weight, spec.Italic); name != "" {
-			if fc := c.namedFonts[name]; fc != nil {
+			if fc, _ := c.namedFonts.get(name); fc != nil {
 				return fc
 			}
 		}
 	}
 	if c.families != nil {
 		if name := c.resolveFace("", weight, spec.Italic); name != "" {
-			if fc := c.namedFonts[name]; fc != nil {
+			if fc, _ := c.namedFonts.get(name); fc != nil {
 				return fc
 			}
 		}

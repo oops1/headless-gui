@@ -11,6 +11,8 @@ import (
 
 	"github.com/oops1/headless-gui/v3/desktop"
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -112,7 +114,7 @@ func edgeManager(t *testing.T, profile string) (*theme.Manager, *engine.Engine) 
 	if err := theme.RegisterBuiltinProfiles(m); err != nil {
 		t.Fatal(err)
 	}
-	eng := engine.New(1, 1, 30)
+	eng := testengine.New(t, 1, 1, 30)
 	if err := eng.SetThemeProfile(m, profile); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +143,7 @@ func savePNG(t *testing.T, img *image.RGBA, name string) {
 func oneScreen(t *testing.T, profile string, edge desktop.Edge, w, h int) (*engine.Engine, *desktop.ScreenBars, *edgeShell) {
 	t.Helper()
 	tm, _ := edgeManager(t, profile)
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	if err := eng.SetThemeProfile(tm, profile); err != nil {
 		t.Fatal(err)
 	}
@@ -159,6 +161,7 @@ func oneScreen(t *testing.T, profile string, edge desktop.Edge, w, h int) (*engi
 }
 
 func TestEdges_VerticalLayout(t *testing.T) {
+	testreset.Globals(t)
 	for _, edge := range []desktop.Edge{desktop.EdgeLeft, desktop.EdgeRight} {
 		edge := edge
 		t.Run(map[desktop.Edge]string{desktop.EdgeLeft: "left", desktop.EdgeRight: "right"}[edge], func(t *testing.T) {
@@ -211,6 +214,7 @@ func TestEdges_VerticalLayout(t *testing.T) {
 
 // Окно раскрывается рядом с панелью, в сторону от неё, и остаётся на экране.
 func TestEdges_FlyoutOpensAwayFromSideBar(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 900, 600
 	for _, edge := range []desktop.Edge{desktop.EdgeLeft, desktop.EdgeRight, desktop.EdgeTop, desktop.EdgeBottom} {
 		eng, bars, s := oneScreen(t, theme.ProfileWindows10, edge, w, h)
@@ -252,6 +256,7 @@ func TestEdges_FlyoutOpensAwayFromSideBar(t *testing.T) {
 }
 
 func TestEdges_AutoHideSideBar(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 900, 600
 	for _, edge := range []desktop.Edge{desktop.EdgeLeft, desktop.EdgeRight} {
 		_, _, s := oneScreen(t, theme.ProfileWindows10, edge, w, h)
@@ -297,6 +302,7 @@ func TestEdges_AutoHideSideBar(t *testing.T) {
 
 // Смена края на лету переставляет панель и привязанные окна без пересоздания.
 func TestEdges_SetEdgeMovesBarAndFlyouts(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 900, 600
 	_, _, s := oneScreen(t, theme.ProfileWindows10, desktop.EdgeBottom, w, h)
 	start := s.start
@@ -324,6 +330,7 @@ func TestEdges_SetEdgeMovesBarAndFlyouts(t *testing.T) {
 
 // Горизонтальная раскладка прежняя: слоты в ряд на всю ширину.
 func TestEdges_HorizontalLayoutKept(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 900, 600
 	_, _, s := oneScreen(t, theme.ProfileWindows10, desktop.EdgeBottom, w, h)
 	b := s.bar.Bounds()
@@ -344,9 +351,10 @@ func twoMonitors() (desktop.Monitor, desktop.Monitor) {
 }
 
 func TestScreens_BarPerMonitorWithOwnFlyouts(t *testing.T) {
+	testreset.Globals(t)
 	m1, m2 := twoMonitors()
 	tm, _ := edgeManager(t, theme.ProfileWindows10)
-	eng := engine.New(1600, 600, 30)
+	eng := testengine.New(t, 1600, 600, 30)
 	if err := eng.SetThemeProfile(tm, theme.ProfileWindows10); err != nil {
 		t.Fatal(err)
 	}
@@ -424,6 +432,7 @@ func TestScreens_BarPerMonitorWithOwnFlyouts(t *testing.T) {
 // Изменение набора мониторов: панель переезжает, новая появляется, пропавшая
 // закрывается; компоненты остающихся не пересоздаются.
 func TestScreens_SyncAddsMovesRemoves(t *testing.T) {
+	testreset.Globals(t)
 	m1, m2 := twoMonitors()
 	tm, _ := edgeManager(t, theme.ProfileWindows11)
 	screens := desktop.NewFakeScreens(m1)
@@ -465,6 +474,7 @@ func TestScreens_SyncAddsMovesRemoves(t *testing.T) {
 // Пока панель стоит на втором мониторе, окно прижимается к краю ЕГО области, а
 // не общего экрана; панель справа вычитается из области.
 func TestScreens_PinnedFlyoutUsesWorkAreaWithoutSideBar(t *testing.T) {
+	testreset.Globals(t)
 	m1, m2 := twoMonitors()
 	tm, _ := edgeManager(t, theme.ProfileWindows10)
 	var s2 *edgeShell
@@ -478,7 +488,7 @@ func TestScreens_PinnedFlyoutUsesWorkAreaWithoutSideBar(t *testing.T) {
 	defer bars.Close()
 	root := wallpaper(1600, 600)
 	root.AddChild(bars)
-	engine.New(1600, 600, 30).SetRoot(root)
+	testengine.New(t, 1600, 600, 30).SetRoot(root)
 
 	s2.center.PinToEdge(desktop.EdgeRight)
 	s2.center.Margin = 0
@@ -493,6 +503,7 @@ func TestScreens_PinnedFlyoutUsesWorkAreaWithoutSideBar(t *testing.T) {
 
 // Полный цикл: снимки панели у каждого края с открытым окном.
 func TestEdges_Shots(t *testing.T) {
+	testreset.Globals(t)
 	if os.Getenv("GOLDEN_OUT") == "" {
 		t.Skip("снимки делаются только при заданном GOLDEN_OUT")
 	}

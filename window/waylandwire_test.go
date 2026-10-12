@@ -192,6 +192,9 @@ func TestDefaultAppID(t *testing.T) {
 func TestWlCursorPixels(t *testing.T) {
 	seen := map[string]int{}
 	for c := 0; c < wlCursorCount; c++ {
+		if c == wlCursorNone {
+			continue // спрятанный курсор картинки не имеет
+		}
 		pix, w, h, hx, hy := wlCursorPixels(c)
 		if w != wlCursorSize || h != wlCursorSize {
 			t.Fatalf("курсор %d: размер %dx%d, ждал %dx%d", c, w, h, wlCursorSize, wlCursorSize)

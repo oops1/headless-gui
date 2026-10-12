@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // checkerCanvas — холст в крупную шахматную клетку: на нём размытие видно
@@ -28,6 +30,7 @@ func checkerCanvas(w, h, cell int) *Canvas {
 // TestBlurBehind_MixesWhatIsUnderneath — под слоем остаётся не чёрное и не
 // белое, а усреднённое: это и значит «сквозь стекло видно размытое».
 func TestBlurBehind_MixesWhatIsUnderneath(t *testing.T) {
+	testreset.Globals(t)
 	c := checkerCanvas(120, 120, 10)
 	area := image.Rect(20, 20, 100, 100)
 
@@ -49,6 +52,7 @@ func TestBlurBehind_MixesWhatIsUnderneath(t *testing.T) {
 
 // TestBlurBehind_LeavesOutsideAlone — за пределами области кадр не тронут.
 func TestBlurBehind_LeavesOutsideAlone(t *testing.T) {
+	testreset.Globals(t)
 	c := checkerCanvas(120, 120, 10)
 	before := append([]uint8(nil), c.back.Pix...)
 	area := image.Rect(40, 40, 80, 80)
@@ -71,6 +75,7 @@ func TestBlurBehind_LeavesOutsideAlone(t *testing.T) {
 // TestBlurBehind_TintPaintsOver — подкраска ложится поверх размытия: именно
 // она отличает стекло одной темы от другой.
 func TestBlurBehind_TintPaintsOver(t *testing.T) {
+	testreset.Globals(t)
 	c := checkerCanvas(80, 80, 8)
 	area := image.Rect(10, 10, 70, 70)
 
@@ -87,6 +92,7 @@ func TestBlurBehind_TintPaintsOver(t *testing.T) {
 // TestBlurBehind_NoRadiusIsJustTint — без радиуса остаётся простая
 // полупрозрачная заливка, то есть прежнее поведение UseAlpha.
 func TestBlurBehind_NoRadiusIsJustTint(t *testing.T) {
+	testreset.Globals(t)
 	c := checkerCanvas(60, 60, 6)
 	before := c.back.RGBAAt(30, 30)
 
@@ -104,6 +110,7 @@ func TestBlurBehind_NoRadiusIsJustTint(t *testing.T) {
 // TestBlurBehind_RespectsClips — подложка уважает и прямоугольное, и
 // скруглённое отсечение: стекло получает форму панели, а не её габарита.
 func TestBlurBehind_RespectsClips(t *testing.T) {
+	testreset.Globals(t)
 	c := checkerCanvas(120, 120, 10)
 	before := append([]uint8(nil), c.back.Pix...)
 

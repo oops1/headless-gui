@@ -33,6 +33,8 @@ const (
 	qsGlyphVol2    qsGlyph = "vol.2"
 	qsGlyphGrip    qsGlyph = "grip" // ручка перетаскивания в режиме правки
 	qsGlyphBatPlug qsGlyph = "plug" // молния: батарея на зарядке
+	qsGlyphPlay    qsGlyph = "play" // ▶ запуск «Фокусировки»
+	qsGlyphStop    qsGlyph = "stop" // ■ остановка «Фокусировки»
 )
 
 // qsSVG оборачивает тело в svg с общими для линейных значков параметрами.
@@ -81,6 +83,8 @@ var qsGlyphSources = map[qsGlyph]string{
 		`<circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>` +
 		`<circle cx="9" cy="17.5" r="1.5"/><circle cx="15" cy="17.5" r="1.5"/></g>`,
 	qsGlyphBatPlug: `<path d="M13 3 6.5 13.2h5L10.5 21 17.5 10.6h-5z"/>`,
+	qsGlyphPlay:    `<path d="M8 5.2v13.6L19 12z" fill="currentColor"/>`,
+	qsGlyphStop:    `<rect x="6.5" y="6.5" width="11" height="11" rx="1.5" fill="currentColor"/>`,
 }
 
 var (

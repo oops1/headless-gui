@@ -23,3 +23,55 @@ func x11PointerLeft(detail, mode byte) bool {
 	const notifyInferior, notifyUngrab = 2, 2
 	return detail != notifyInferior && mode != notifyUngrab
 }
+
+// ─── Win32: WM_MOUSELEAVE ───────────────────────────────────────────────────
+//
+// Windows сообщает об уходе указателя только тому, кто об этом попросил:
+// TrackMouseEvent(TME_LEAVE) срабатывает один раз и после этого снимается. Без
+// запроса выход через клиентскую область не сообщался вовсе — наведение
+// «залипало». Теперь окно взводит запрос на первом движении после входа, а
+// WM_MOUSELEAVE идёт тем же путём, что LeaveNotify и wl_pointer.leave.
+
+// leaveTracker помнит, взведён ли у системы запрос на уход указателя.
+//
+// TME_LEAVE одноразовый: взводить его на каждое движение значило бы звать
+// систему сотни раз в секунду, а не взводить после ухода — не узнать о
+// следующем. Нулевое значение — запрос не взведён.
+type leaveTracker struct {
+	armed bool
+}
+
+// needArm — стоит ли взводить запрос (вызывать на движении мыши).
+func (t *leaveTracker) needArm() bool { return !t.armed }
+
+// armedOK запоминает результат TrackMouseEvent: при отказе системы
+// (окна уже нет) запрос не считается взведённым, и следующее движение
+// попробует снова.
+func (t *leaveTracker) armedOK(ok bool) { t.armed = ok }
+
+// left сбрасывает запрос: система сняла его, отправив WM_MOUSELEAVE.
+func (t *leaveTracker) left() { t.armed = false }
+
+// mouseLeaveReal — действительно ли WM_MOUSELEAVE означает уход указателя
+// с окна.
+//
+// Не означает, когда указатель перешёл с клиентской области на кнопку
+// заголовка, которую окно нарисовало само: система считает её нерабочей
+// областью (HTMINBUTTON/HTMAXBUTTON/HTCLOSE ради макетов привязки Windows 11),
+// шлёт WM_MOUSELEAVE, а подсветку кнопки ведёт тем же указателем уже
+// WM_NCMOUSEMOVE. Сообщи мы здесь об уходе — наведение на кнопку снималось бы
+// сразу после того, как его поставили (порядок сообщений не гарантирован).
+// Заголовок как таковой (HitCaption) и края окна — настоящий уход: там
+// виджеты содержимого указателя больше не видят.
+//
+// inWindow — указатель в пределах окна; under — зона под ним.
+func mouseLeaveReal(under HitArea, inWindow bool) bool {
+	if !inWindow {
+		return true
+	}
+	switch under {
+	case HitMinButton, HitMaxButton, HitCloseButton:
+		return false
+	}
+	return true
+}

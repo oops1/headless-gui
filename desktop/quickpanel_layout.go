@@ -33,6 +33,7 @@ type qsMetrics struct {
 	sliderValue, sliderBottom              int
 	footerH, footerPad, footerBtn          int
 	headerH, scrollW                       int
+	pageRow, pageIcon                      int // строка списка и значок страницы-строителя (DetailPage)
 }
 
 // pitch — шаг рядов сетки: плитка, подпись под ней и зазор до следующего ряда.
@@ -63,6 +64,7 @@ func readQSMetrics(tm *theme.Manager) qsMetrics {
 		sliderBottom: g(qsKey+"slider.bottom", 16),
 		footerH:      g(qsKey+"footer.h", 48), footerPad: g(qsKey+"footer.pad", 16), footerBtn: g(qsKey+"footer.btn", 32),
 		headerH: g(qsKey+"header.h", 48), scrollW: g(qsKey+"scrollbar.w", 4),
+		pageRow: g(qsKey+"page.row", 48), pageIcon: g(qsKey+"page.icon", 24),
 	}
 }
 
@@ -83,6 +85,9 @@ const (
 	qzBack                  // «‹» вложенной страницы
 	qzContent               // содержимое вложенной страницы
 	qzThumb                 // бегунок прокрутки сетки
+	qzPageUp                // ▲ страниц плиток (постраничный режим)
+	qzPageDown              // ▼ страниц плиток
+	qzPageDot               // точка страницы (idx — номер страницы)
 )
 
 // qsZone — адрес зоны. Сравнимое значение: служит ключом переходов цвета.
@@ -118,6 +123,15 @@ type qsLayout struct {
 	edit        image.Rectangle
 	settings    image.Rectangle
 	thumb       image.Rectangle
+
+	// Постраничный режим: страница, число страниц и то, что стоит справа от
+	// сетки — ▲, точки, ▼. paged ложно — сетка прокручивается (см. KeyQuickPaged).
+	paged               bool
+	page, pages         int
+	pager, up, down     image.Rectangle
+	dots                []image.Rectangle
+	volOff, brightOff   bool // ползунок неактивен: не нажимается и не в обходе Tab
+	editLeft, editLabel bool // «Изменить» стоит слева; на кнопке подпись
 
 	header, back, body image.Rectangle
 }
@@ -162,6 +176,20 @@ type qsViewState struct {
 	hasBat    bool
 	editLabel string // подпись кнопки правки в режиме правки; пусто — карандаш
 	pos       []int
+
+	// Постраничный режим и номер страницы.
+	paged bool
+	page  int
+	// sliding — окно сетки едет между страницами (кадр): slide — его положение
+	// в страницах (дробное). Раскладка событий этого не знает.
+	sliding bool
+	slide   float64
+	// volOff и brightOff — ползунки неактивны.
+	volOff, brightOff bool
+	// editLeft — «Изменить» слева (флаг KeyQuickFooterEditLeft); editName — её
+	// подпись рядом с карандашом (пусто — карандаш без подписи).
+	editLeft bool
+	editName string
 }
 
 // qsLayoutFor считает раскладку панели panel.
@@ -189,6 +217,32 @@ func qsLayoutFor(m qsMetrics, panel image.Rectangle, v qsViewState) *qsLayout {
 		}
 		if l.scroll < 0 {
 			l.scroll = 0
+		}
+		if v.paged {
+			// Страницы: окно сетки встаёт на целое число страниц, пиксельной
+			// прокрутки и полосы нет.
+			l.paged = true
+			l.pages = (l.rows + m.rows - 1) / m.rows
+			l.page = v.page
+			if l.page >= l.pages {
+				l.page = l.pages - 1
+			}
+			if l.page < 0 {
+				l.page = 0
+			}
+			l.scroll = l.page * m.rows * m.pitch()
+			if v.sliding {
+				s := v.slide
+				if s < 0 {
+					s = 0
+				}
+				if max := float64(l.pages - 1); s > max {
+					s = max
+				}
+				l.scroll = int(s*float64(m.rows*m.pitch()) + 0.5)
+			}
+			l.maxScrl = 0
+			l.layoutPager()
 		}
 		y += viewH + m.gridGap
 	}
@@ -221,20 +275,35 @@ func qsLayoutFor(m qsMetrics, panel image.Rectangle, v qsViewState) *qsLayout {
 		l.hint = image.Rect(x0, sliderTop, x1, sliderTop+k*m.sliderH+(k-1)*m.sliderGap)
 	}
 
+	l.volOff, l.brightOff = v.volOff, v.brightOff
+
 	l.footer = image.Rect(panel.Min.X, panel.Max.Y-m.footerH, panel.Max.X, panel.Max.Y)
 	fy := l.footer.Min.Y + (m.footerH-m.footerBtn)/2
 	btn := func(x int) image.Rectangle { return image.Rect(x, fy, x+m.footerBtn, fy+m.footerBtn) }
 	l.settings = btn(l.footer.Max.X - m.footerPad - m.footerBtn)
 	editW := m.footerBtn
-	if v.editLabel != "" {
+	switch {
+	case v.editLabel != "":
 		editW = widget.MeasureUIText(v.editLabel, widget.DefaultFontSize()) + 24
 		if editW < m.footerBtn {
 			editW = m.footerBtn
 		}
+	case v.editLeft && v.editName != "":
+		// Карандаш с подписью: поле, значок, зазор, текст, поле.
+		editW = qsEditPadL + qsChevronSide + qsEditGap + widget.MeasureUIText(v.editName, widget.DefaultFontSize()) + qsEditPadR
+		l.editLabel = true
 	}
-	l.edit = image.Rect(l.settings.Min.X-4-editW, fy, l.settings.Min.X-4, fy+m.footerBtn)
-	if v.hasBat {
-		l.battery = image.Rect(l.footer.Min.X+m.footerPad, l.footer.Min.Y, l.edit.Min.X-8, l.footer.Max.Y)
+	if v.editLeft {
+		l.editLeft = true
+		l.edit = image.Rect(l.footer.Min.X+m.footerPad, fy, l.footer.Min.X+m.footerPad+editW, fy+m.footerBtn)
+		if v.hasBat {
+			l.battery = image.Rect(l.edit.Max.X+12, l.footer.Min.Y, l.settings.Min.X-8, l.footer.Max.Y)
+		}
+	} else {
+		l.edit = image.Rect(l.settings.Min.X-4-editW, fy, l.settings.Min.X-4, fy+m.footerBtn)
+		if v.hasBat {
+			l.battery = image.Rect(l.footer.Min.X+m.footerPad, l.footer.Min.Y, l.edit.Min.X-8, l.footer.Max.Y)
+		}
 	}
 
 	l.header = image.Rect(panel.Min.X, panel.Min.Y, panel.Max.X, panel.Min.Y+m.headerH)
@@ -321,7 +390,7 @@ func (l *qsLayout) thumbHit() image.Rectangle {
 
 // zoneAt находит зону главной страницы под точкой pt. chevrons — рисуются ли
 // «›» на плитках (в режиме правки их нет), list — плитки списка (нужны для
-// признака HasDetails).
+// признака «плитка делится на половинки», см. QuickAction.split).
 func (l *qsLayout) zoneAt(pt image.Point, list []QuickAction, chevrons bool) qsZone {
 	if !pt.In(l.panel) {
 		return qsZone{}
@@ -335,6 +404,9 @@ func (l *qsLayout) zoneAt(pt image.Point, list []QuickAction, chevrons bool) qsZ
 		}
 		return qsZone{}
 	}
+	if z := l.pagerZoneAt(pt); z.kind != qzNone {
+		return z
+	}
 	if pt.In(l.thumbHit()) {
 		return qsZone{kind: qzThumb}
 	}
@@ -345,7 +417,7 @@ func (l *qsLayout) zoneAt(pt image.Point, list []QuickAction, chevrons bool) qsZ
 				continue
 			}
 			idx := l.at(p)
-			if chevrons && idx < len(list) && list[idx].HasDetails && pt.In(l.chevron(body)) {
+			if chevrons && idx < len(list) && list[idx].split() && pt.In(l.chevron(body)) {
 				return qsZone{kind: qzChevron, idx: idx}
 			}
 			return qsZone{kind: qzTile, idx: idx}
@@ -394,6 +466,14 @@ func (l *qsLayout) zoneRect(z qsZone) image.Rectangle {
 		return l.back
 	case qzThumb:
 		return l.thumb
+	case qzPageUp:
+		return l.up
+	case qzPageDown:
+		return l.down
+	case qzPageDot:
+		if z.idx >= 0 && z.idx < len(l.dots) {
+			return l.dots[z.idx]
+		}
 	}
 	return image.Rectangle{}
 }
@@ -416,21 +496,24 @@ func (l *qsLayout) focusRect(z qsZone) image.Rectangle {
 }
 
 // focusOrder перечисляет зоны в порядке обхода Tab: плитки (за каждой — её
-// «›»), ползунки, нижняя строка. В режиме правки — плитки и «Готово».
+// «›»), столбец страниц (▲, точки, ▼), ползунки, нижняя строка. В режиме
+// правки — плитки, столбец страниц и «Готово». Стрелка на крайней странице
+// приглушена и в обход не входит.
 func (l *qsLayout) focusOrder(list []QuickAction, editing bool) []qsZone {
 	out := make([]qsZone, 0, l.n*2+8)
 	for p := 0; p < l.n; p++ {
 		idx := l.at(p)
 		out = append(out, qsZone{kind: qzTile, idx: idx})
-		if !editing && idx < len(list) && list[idx].HasDetails {
+		if !editing && idx < len(list) && list[idx].split() {
 			out = append(out, qsZone{kind: qzChevron, idx: idx})
 		}
 	}
+	out = append(out, l.pagerOrder()...)
 	if !editing {
-		if !l.bright.row.Empty() {
+		if !l.bright.row.Empty() && !l.brightOff {
 			out = append(out, qsZone{kind: qzBright})
 		}
-		if !l.vol.row.Empty() {
+		if !l.vol.row.Empty() && !l.volOff {
 			out = append(out, qsZone{kind: qzVolIcon}, qsZone{kind: qzVol})
 			if !l.vol.chev.Empty() {
 				out = append(out, qsZone{kind: qzVolChevron})

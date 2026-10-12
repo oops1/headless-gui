@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -53,6 +54,7 @@ func pacedEngine(t *testing.T) (*Engine, *recordingSink, *widget.Panel) {
 
 // Без запроса кадры не готовятся вовсе — главное обещание внешнего темпа.
 func TestPacing_ExternalPreparesNothingWithoutRequest(t *testing.T) {
+	testreset.Globals(t)
 	eng, sink, root := pacedEngine(t)
 	eng.SetPacing(PacingExternal)
 	eng.Start()
@@ -70,6 +72,7 @@ func TestPacing_ExternalPreparesNothingWithoutRequest(t *testing.T) {
 
 // Запрос даёт кадр, и он приходит в сток.
 func TestPacing_RequestFrameDelivers(t *testing.T) {
+	testreset.Globals(t)
 	eng, sink, root := pacedEngine(t)
 	eng.SetPacing(PacingExternal)
 	eng.Start()
@@ -90,6 +93,7 @@ func TestPacing_RequestFrameDelivers(t *testing.T) {
 
 // Тикерный темп работает как раньше: кадры идут сами.
 func TestPacing_TickerStillDrivesFrames(t *testing.T) {
+	testreset.Globals(t)
 	eng, sink, root := pacedEngine(t)
 	eng.Start()
 	defer eng.Stop()
@@ -108,6 +112,7 @@ func TestPacing_TickerStillDrivesFrames(t *testing.T) {
 
 // Сток получает то же, что и канал: он альтернатива, а не замена.
 func TestPacing_SinkAndChannelAgree(t *testing.T) {
+	testreset.Globals(t)
 	eng, sink, root := pacedEngine(t)
 	eng.Start()
 	defer eng.Stop()
@@ -132,6 +137,7 @@ func TestPacing_SinkAndChannelAgree(t *testing.T) {
 // нужным. Иначе приложение, написанное под внешний темп, при переключении
 // режима переставало получать кадры вовсе — запрос молча исчезал.
 func TestPacing_RequestFrameWorksUnderTicker(t *testing.T) {
+	testreset.Globals(t)
 	eng, sink, root := pacedEngine(t)
 	eng.SetRenderOnDemand(true)
 	eng.Start()

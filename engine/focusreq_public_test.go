@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -27,6 +28,7 @@ func focusPair() (*Engine, *mnemonicHost, *widget.MenuBar) {
 // ReturnFocus отдаёт его прежнему владельцу. focusreq.Request вне доставки
 // события ничего не делает — ради этого метод и заведён.
 func TestEngineRequestFocus_OutsideEventDelivery(t *testing.T) {
+	testreset.Globals(t)
 	e, host, bar := focusPair()
 	defer e.Stop()
 
@@ -51,6 +53,7 @@ func TestEngineRequestFocus_OutsideEventDelivery(t *testing.T) {
 // Из чужой горутины при запущенном движке вызов уходит в очередь Post и
 // выполняется на горутине кадра, в порядке вызовов.
 func TestEngineRequestFocus_FromOtherGoroutine(t *testing.T) {
+	testreset.Globals(t)
 	e, host, bar := focusPair()
 	e.Start()
 	defer e.Stop()

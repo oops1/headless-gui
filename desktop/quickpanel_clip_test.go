@@ -6,12 +6,14 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // Плитка, заехавшая под край окна сетки, не рисуется за его пределами: ни над
 // панелью, ни на ползунках (скруглённый слой не должен сбрасывать отсечение).
 func TestQuickPanel_ScrolledTilesStayInGrid(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	rest := s.render()
@@ -38,6 +40,7 @@ func TestQuickPanel_ScrolledTilesStayInGrid(t *testing.T) {
 // Пока страницы едут вбок, ничего не рисуется за краем панели: ни плитки, ни
 // бегунки ползунков, ни нижняя полоса.
 func TestQuickPanel_TransitionStaysInsidePanel(t *testing.T) {
+	testreset.Globals(t)
 	for _, dark := range []bool{false, true} {
 		s := qsBuild(t, qsOpts{dark: dark})
 		q := s.q

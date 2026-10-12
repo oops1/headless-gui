@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -21,6 +22,7 @@ func finishAnims() {
 // развёрнутая боковая панель, поиск, масштабы 100/150/200 %. Сами по себе тесты
 // проверяют лишь, что кадр получен; смотреть результат надо глазами.
 func TestStartMenu10_Snapshots(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 1280, 720
 	for _, light := range []bool{false, true} {
 		name := "dark"
@@ -54,6 +56,7 @@ func TestStartMenu10_Snapshots(t *testing.T) {
 
 // Состояния меню: наведение, клавиатурный выбор в трёх областях, поиск.
 func TestStartMenu10_StateSnapshots(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 1280, 720
 	for _, light := range []bool{false, true} {
 		name := "dark"
@@ -95,6 +98,7 @@ func TestStartMenu10_StateSnapshots(t *testing.T) {
 // Снимки перехода по буквам, перетаскивания бегунка и предпросмотра новой группы
 // (GOLDEN_OUT=каталог, тёмная и светлая тема).
 func TestStartMenu10_JumpScrollGroupSnapshots(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 1280, 720
 	for _, light := range []bool{false, true} {
 		name := "dark"

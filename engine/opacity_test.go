@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 func solidCanvas(w, h int, c color.RGBA) *Canvas {
@@ -21,6 +23,7 @@ func near(a, b uint8) bool {
 // TestDrawWithOpacity_MixesLayerWithWhatWasUnderIt — слой с прозрачностью 0,5
 // даёт среднее между прежним кадром и нарисованным.
 func TestDrawWithOpacity_MixesLayerWithWhatWasUnderIt(t *testing.T) {
+	testreset.Globals(t)
 	c := solidCanvas(100, 100, color.RGBA{R: 200, A: 255})
 	area := image.Rect(20, 20, 80, 80)
 
@@ -43,6 +46,7 @@ func TestDrawWithOpacity_MixesLayerWithWhatWasUnderIt(t *testing.T) {
 }
 
 func TestDrawWithOpacity_Extremes(t *testing.T) {
+	testreset.Globals(t)
 	base := color.RGBA{R: 200, A: 255}
 	blue := color.RGBA{B: 255, A: 255}
 	area := image.Rect(10, 10, 60, 60)
@@ -70,6 +74,7 @@ func TestDrawWithOpacity_Extremes(t *testing.T) {
 
 // TestDrawWithOpacity_RespectsClip — отсечение канваса действует и на смесь.
 func TestDrawWithOpacity_RespectsClip(t *testing.T) {
+	testreset.Globals(t)
 	base := color.RGBA{R: 200, A: 255}
 	c := solidCanvas(80, 80, base)
 	c.SetClip(image.Rect(0, 0, 40, 80))
@@ -87,6 +92,7 @@ func TestDrawWithOpacity_RespectsClip(t *testing.T) {
 // TestDrawWithOpacity_BlurSeesTheRealBackdrop — размытие внутри слоя берёт
 // настоящую подложку, а не пустоту: стекло проявляется стеклом.
 func TestDrawWithOpacity_BlurSeesTheRealBackdrop(t *testing.T) {
+	testreset.Globals(t)
 	area := image.Rect(20, 20, 100, 100)
 	tint := color.RGBA{R: 10, G: 10, B: 10, A: 40}
 

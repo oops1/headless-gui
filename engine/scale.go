@@ -92,6 +92,11 @@ func (c *Canvas) cloneForSize(w, h int, scale float64, bgSrc image.Image) *Canva
 	// значениям по умолчанию.
 	nc.cullingOn.Store(c.cullingOn.Load())
 	nc.occlusionOn.Store(c.occlusionOn.Load())
+	// Журнал сбросов кэша изображений общий на движок: новый холст начинает с
+	// пустого кэша, поэтому прежние записи журнала ему применять незачем.
+	if c.inv != nil {
+		nc.inv, nc.invSeen = c.inv, c.inv.seq.Load()
+	}
 	// Формат — только СОБСТВЕННОГО буфера. Новый холст рисует в свою память:
 	// буфер потребителя, отданный через SetSurface, размера прежнего экрана и
 	// после смены разрешения не годится, а его порядок каналов относится
@@ -112,7 +117,7 @@ func (c *Canvas) cloneForSize(w, h int, scale float64, bgSrc image.Image) *Canva
 // и сбрасывает кэши глифов, метрик и раскладок шейпера.
 func (c *Canvas) setDPIAll(dpi float64) {
 	c.fontCache.SetDPI(dpi)
-	for _, fc := range c.namedFonts {
+	for _, fc := range c.namedFonts.all() {
 		fc.SetDPI(dpi)
 	}
 	for _, fb := range c.fallbacks {

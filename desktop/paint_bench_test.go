@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -65,6 +66,7 @@ func BenchmarkPaintGradient(b *testing.B) {
 // стилем — первый заполняет кэш, второй берёт из него) обязан дать те же
 // заливки, что и ручная конвертация стопов без всякого кэша.
 func TestPaintGradient_CacheMatchesManualConversion(t *testing.T) {
+	testreset.Globals(t)
 	s := gradientStyle(
 		theme.GradientStop{Pos: 0, Color: color.RGBA{R: 5, G: 6, B: 7, A: 255}},
 		theme.GradientStop{Pos: 1, Color: color.RGBA{R: 250, G: 240, B: 230, A: 255}},
@@ -97,6 +99,7 @@ func TestPaintGradient_CacheMatchesManualConversion(t *testing.T) {
 // цвета, а не унаследовать цвета из-под другого указателя, — иначе после
 // переключения темы панель осталась бы раскрашена старыми цветами.
 func TestPaintGradient_StyleChangeIsNotStaleCache(t *testing.T) {
+	testreset.Globals(t)
 	before := gradientStyle(
 		theme.GradientStop{Pos: 0, Color: color.RGBA{R: 255, A: 255}},
 		theme.GradientStop{Pos: 1, Color: color.RGBA{B: 255, A: 255}},
@@ -141,6 +144,7 @@ func TestPaintGradient_StyleChangeIsNotStaleCache(t *testing.T) {
 // gradientStopsCache должен пережить это под -race без гонок и без
 // перепутанных цветов.
 func TestPaintGradient_ConcurrentStylesSafe(t *testing.T) {
+	testreset.Globals(t)
 	styles := make([]*theme.Style, 8)
 	for i := range styles {
 		styles[i] = gradientStyle(

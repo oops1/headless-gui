@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -33,6 +34,7 @@ func popupImageFor(t *testing.T, c *Canvas, od widget.OverlayDrawer, r image.Rec
 }
 
 func TestPopupHost_CascadeLeavesATransparentHole(t *testing.T) {
+	testreset.Globals(t)
 	e := New(900, 400, 60)
 	c := e.canvas
 
@@ -115,6 +117,7 @@ func TestPopupHost_CascadeLeavesATransparentHole(t *testing.T) {
 // Хост обязан узнать, какие части картинки закрашены: по ним он выкроит окно
 // и чернота не появится.
 func TestOpaqueBands_FindsThePaintedPart(t *testing.T) {
+	testreset.Globals(t)
 	img := image.NewRGBA(image.Rect(0, 0, 10, 6))
 	// Две закрашенные полосы с прозрачным промежутком между ними.
 	fill := func(r image.Rectangle) {
@@ -155,6 +158,7 @@ func TestOpaqueBands_FindsThePaintedPart(t *testing.T) {
 
 // Сплошная картинка выкройки не требует: окно остаётся прямоугольником.
 func TestOpaqueBands_FullImageNeedsNoRegion(t *testing.T) {
+	testreset.Globals(t)
 	img := image.NewRGBA(image.Rect(0, 0, 8, 5))
 	for i := 3; i < len(img.Pix); i += 4 {
 		img.Pix[i] = 255
@@ -171,6 +175,7 @@ func TestOpaqueBands_FullImageNeedsNoRegion(t *testing.T) {
 // каждое движение курсора по пунктам, — а окно от этого мигает на глазах.
 // Выигрыш при этом нулевой: несколько точек в углах.
 func TestOpaqueBands_RoundedCornersAreNotAHole(t *testing.T) {
+	testreset.Globals(t)
 	const w, h, r = 200, 120, 10
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
@@ -192,6 +197,7 @@ func TestOpaqueBands_RoundedCornersAreNotAHole(t *testing.T) {
 
 // А настоящая дыра — строка, разорванная надвое, — выкройку требует.
 func TestOpaqueBands_SplitRowIsAHole(t *testing.T) {
+	testreset.Globals(t)
 	img := image.NewRGBA(image.Rect(0, 0, 200, 40))
 	for y := 0; y < 40; y++ {
 		for x := 0; x < 200; x++ {
@@ -208,6 +214,7 @@ func TestOpaqueBands_SplitRowIsAHole(t *testing.T) {
 
 // Пустая и полностью прозрачная картинки полос не дают.
 func TestOpaqueBands_EmptyAndTransparent(t *testing.T) {
+	testreset.Globals(t)
 	if got := OpaqueBands(nil); got != nil {
 		t.Errorf("nil дал %v", got)
 	}

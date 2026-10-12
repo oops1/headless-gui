@@ -49,6 +49,21 @@ func (w *WaylandWindow) SetCursor(c int) {
 	w.applyCursor()
 }
 
+// SetPopupCursor задаёт форму курсора для времени, когда указатель на попапе
+// (childPopupCursor): set — принудительный курсор движка c, иначе над попапом
+// остаётся форма окна. Попап — отдельная поверхность, но указатель и курсор у
+// них общие, и без этого принудительный курсор, заданный пока указатель на
+// попапе, остался бы невидимым до возврата в окно.
+func (w *WaylandWindow) SetPopupCursor(c int, set bool) {
+	w.cursorMu.Lock()
+	same := w.popupShapeSet == set && (!set || w.popupShape == c)
+	w.popupShape, w.popupShapeSet = c, set
+	w.cursorMu.Unlock()
+	if !same && w.ptrOverPopup.Load() {
+		w.applyCursor()
+	}
+}
+
 // applyCursor отдаёт компоновщику текущую форму курсора.
 //
 // Без serial'а enter просьбу отклонят: set_cursor принимается только от окна,
@@ -62,10 +77,33 @@ func (w *WaylandWindow) applyCursor() {
 	if !w.cursorSet {
 		w.cursorShape, w.cursorSet = wlCursorArrow, true
 	}
-	if w.setCursorByShape(w.cursorShape) {
+	shape := w.cursorShape
+	if w.popupShapeSet && w.ptrOverPopup.Load() {
+		shape = w.popupShape // над попапом действует принудительный курсор
+	}
+	if shape == wlCursorNone {
+		w.hideCursor()
 		return
 	}
-	w.setCursorBySurface(w.cursorShape)
+	if w.setCursorByShape(shape) {
+		return
+	}
+	w.setCursorBySurface(shape)
+}
+
+// hideCursor прячет курсор: wl_pointer.set_cursor(serial, NULL, 0, 0).
+// Пустая поверхность — единственный способ спрятать курсор, у
+// wp_cursor_shape_v1 такой формы нет. Вызывать под w.cursorMu.
+func (w *WaylandWindow) hideCursor() {
+	w.send(wlHideCursorMsg(w.pointerID, w.ptrEnterSerial.Load()), -1)
+}
+
+// wlHideCursorMsg собирает wl_pointer.set_cursor с нулевой поверхностью:
+// compositor перестаёт рисовать курсор над окном. Чистая функция — проверяется
+// на проводе.
+func wlHideCursorMsg(pointerID, serial uint32) *wlMsg {
+	return newWlMsg(pointerID, wlPointerSetCursor).
+		putUint(serial).putUint(0).putInt(0).putInt(0)
 }
 
 // setCursorByShape просит форму у компоновщика (wp_cursor_shape_manager_v1).

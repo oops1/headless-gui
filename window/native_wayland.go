@@ -36,6 +36,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/oops1/headless-gui/v3/internal/clipimage"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -121,11 +122,6 @@ const (
 
 	wlShmFormatXRGB8888 = 1
 
-	// linux input-event-codes
-	btnLeft   = 0x110
-	btnRight  = 0x111
-	btnMiddle = 0x112
-
 	// wl_data_device_manager
 	wlDataDevMgrGetDataDevice = 1
 
@@ -190,6 +186,13 @@ type WaylandWindow struct {
 	viewporterID uint32
 	fracMgrID    uint32
 
+	// Геометрия мониторов (wayland_monitor_linux.go) и их логическое описание
+	// (zxdg_output_manager_v1, если композитор его объявил).
+	outs        wlOutputs
+	gXdgOutMgr  uint32
+	gXdgOutVer  uint32
+	xdgOutMgrID uint32
+
 	// repeat — автоповтор удерживаемой клавиши (wayland_repeat_linux.go).
 	repeat *wlRepeater
 
@@ -217,6 +220,10 @@ type WaylandWindow struct {
 	pointerID    uint32
 	keyboardID   uint32
 
+	// touch — касания (wayland_touch_linux.go): wl_touch берётся только по
+	// просьбе окна.
+	touch wlTouch
+
 	// shm-пул с двумя кадровыми буферами
 	poolID   uint32
 	shmFD    int
@@ -234,7 +241,7 @@ type WaylandWindow struct {
 
 	width, height int
 	title         string
-	closed        bool
+	closed        atomic.Bool // атомарный: пишет Close из горутины приложения, читает цикл событий
 	configured    bool
 	hasFrame      bool // был ли закоммичен хотя бы один кадр
 	pendingSerial uint32
@@ -262,6 +269,8 @@ type WaylandWindow struct {
 	// читает движок (кнопка «развернуть» спрашивает IsMaximized).
 	maximized  atomic.Bool
 	fullscreen atomic.Bool
+	// fs — запрос полного экрана и уведомление о нём (wayland_fullscreen_linux.go).
+	fs wlFullscreen
 
 	// pendingResize — пришёл новый размер, кадра под него ещё нет. Пока он
 	// взведён, ack_configure не сопровождается рекоммитом: старый кадр в
@@ -307,12 +316,20 @@ type WaylandWindow struct {
 	cursorMu         sync.Mutex
 	cursorShape      int
 	cursorSet        bool
+	// popupShape/popupShapeSet — принудительный курсор движка для времени,
+	// когда указатель на попапе (SetPopupCursor); под cursorMu. ptrOverPopup
+	// — зеркало ptrOnPopup для чтения из горутины движка.
+	popupShape     int
+	popupShapeSet  bool
+	ptrOverPopup   atomic.Bool
 	cursorSurfID     uint32
 	cursorPoolID     uint32
 	cursorFD         int
 	cursorData       []byte
 	cursorSlots      map[int]wlCursorSlot
 	gCursorShapeMgr  uint32 // имя глобала wp_cursor_shape_manager_v1
+	gToplevelIcon    uint32 // имя глобала xdg_toplevel_icon_manager_v1 (значок окна)
+	icon             wlIconState
 	cursorShapeMgrID uint32
 	cursorShapeDevID uint32
 
@@ -354,10 +371,25 @@ type WaylandWindow struct {
 	// gnomeOffers — предложения со списком файлов x-special/gnome-copied-files
 	// (там же пометка cut); text/uri-list отмечен в offers.
 	gnomeOffers map[uint32]bool
+	// imageOffers — предложения с изображением: offer → читаемый тип
+	// (image/png, а при его отсутствии image/bmp), его же и запрашиваем.
+	imageOffers map[uint32]string
 	// dndOffer — активный offer текущего перетаскивания (между enter и drop).
 	dndOffer   uint32
 	dndSerial  uint32 // serial из enter (для accept)
-	dndX, dndY int    // позиция курсора в поверхностных пикселях
+	dndX, dndY int    // позиция курсора в пикселях буфера (fixedToPixels)
+
+	// События приёмника (dragTargetEvents) и их состояние в текущей сессии.
+	onDragEnter func(x, y int)
+	onDragOver  func(x, y int) bool
+	onDragLeave func()
+	dndEntered  bool // в окне идёт перетаскивание файлов (enter сообщён приложению)
+	dndAnswered bool // компоновщику уже отвечено accept (дальше — только при смене)
+	dndAccepted bool // последний ответ: сброс здесь принимается
+	dndActions  bool // set_actions уже отправлен для этого offer
+
+	// drag — перетаскивание, начатое самим окном (BeginDragFiles).
+	drag wlDragSource
 }
 
 // waylandSocketPath возвращает путь к сокету композитора или "".
@@ -574,19 +606,7 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 
 	// Мониторы и расширения масштаба: без них окно рисуется один к одному,
 	// как было до HiDPI.
-	for name, ver := range w.gOutputs {
-		v := ver
-		if v > wlOutputVersionScale {
-			v = wlOutputVersionScale
-		}
-		id := w.bind(name, "wl_output", v)
-		w.scale.mu.Lock()
-		if w.scale.outputs == nil {
-			w.scale.outputs = map[uint32]float64{}
-		}
-		w.scale.outputs[id] = 0 // масштаб придёт событием scale
-		w.scale.mu.Unlock()
-	}
+	w.bindOutputs()
 	if w.gViewporter != 0 {
 		w.viewporterID = w.bind(w.gViewporter, "wp_viewporter", 1)
 	}
@@ -629,7 +649,7 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	}
 	if !w.configured {
 		// дочитываем события до configure
-		for !w.configured && !w.closed {
+		for !w.configured && !w.closed.Load() {
 			if err := w.dispatchOne(); err != nil {
 				return fmt.Errorf("wayland: ожидание configure: %w", err)
 			}
@@ -652,6 +672,9 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	if w.dataDeviceID != 0 {
 		widget.SetClipboardProvider(w.clip)
 	}
+	// Значок, заданный до создания окна, ставится теперь, когда известны
+	// глобалы компоновщика и есть toplevel.
+	w.applyPendingWlIcon()
 	return nil
 }
 
@@ -696,9 +719,9 @@ func (w *WaylandWindow) dispatchOne() error {
 }
 
 func (w *WaylandWindow) RunEventLoop() error {
-	for !w.closed {
+	for !w.closed.Load() {
 		if err := w.dispatchOne(); err != nil {
-			if w.closed {
+			if w.closed.Load() {
 				return nil
 			}
 			return err
@@ -739,7 +762,7 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		_, off := binary.LittleEndian.Uint32(b[0:4]), 8
 		msg, _ := wlString(b, off)
 		fmt.Fprintf(os.Stderr, "wayland: protocol error: %s\n", msg)
-		w.closed = true
+		w.closed.Store(true)
 
 	case obj == wlDisplayID && opcode == wlDisplayEvDeleteID:
 		// подтверждение удаления объекта — освобождать нечего (id не переиспользуем)
@@ -769,6 +792,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 				w.gOutputs = map[uint32]uint32{}
 			}
 			w.gOutputs[name] = version
+		case "zxdg_output_manager_v1":
+			w.gXdgOutMgr = name
+			w.gXdgOutVer = version
 		case "zwp_text_input_manager_v3":
 			w.gTextInputMgr = name
 		case "wp_viewporter":
@@ -779,6 +805,10 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			// Необязательное расширение: с ним курсор рисует компоновщик
 			// из системной темы, без него — своя картинка.
 			w.gCursorShapeMgr = name
+		case "xdg_toplevel_icon_manager_v1":
+			// Необязательное расширение: без него значок окна не поставить
+			// (SetIcon вернёт ErrIconUnsupported).
+			w.gToplevelIcon = name
 		}
 
 	case obj == w.wmBaseID && opcode == xdgWmBaseEvPing:
@@ -806,8 +836,7 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		active, maximized, fullscreen := wlParseStates(b[8:])
 		wlLog("toplevel.configure: %dx%d active=%v maximized=%v fullscreen=%v",
 			nw, nh, active, maximized, fullscreen)
-		w.maximized.Store(maximized)
-		w.fullscreen.Store(fullscreen)
+		w.noteToplevelStates(maximized, fullscreen)
 		if w.onActivate != nil {
 			w.onActivate(active)
 		}
@@ -827,7 +856,7 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 
 	case obj == w.toplevelID && opcode == xdgToplevelEvClose:
 		if w.onClose == nil || w.onClose() {
-			w.closed = true
+			w.closed.Store(true)
 		}
 
 	case obj == w.seatID && opcode == wlSeatEvCapabilities:
@@ -840,12 +869,19 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			w.keyboardID = w.newID()
 			w.send(newWlMsg(w.seatID, wlSeatGetKeyboard).putUint(w.keyboardID), -1)
 		}
+		w.noteSeatCaps(caps)
 
 	case obj == w.surfaceID && opcode == wlSurfaceEvEnter:
 		// Окно показалось на мониторе: его масштаб и есть масштаб окна.
 		if len(b) >= 4 {
 			w.noteSurfaceEnter(binary.LittleEndian.Uint32(b[0:4]))
 		}
+
+	case w.outs.isOutput(obj):
+		w.handleOutputEvent(obj, opcode, b)
+
+	case w.outs.isXdgOutput(obj):
+		w.handleXdgOutputEvent(obj, opcode, b)
 
 	case w.isOutputObject(obj) && opcode == wlOutputEvScale:
 		if len(b) >= 4 {
@@ -867,6 +903,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 	case obj == w.keyboardID:
 		w.handleKeyboard(opcode, b)
 
+	case w.touch.id.Load() != 0 && obj == w.touch.id.Load():
+		w.handleTouch(opcode, b)
+
 	case w.dataDeviceID != 0 && obj == w.dataDeviceID:
 		w.handleDataDevice(opcode, b)
 
@@ -880,6 +919,10 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		case wlDataSourceEvCancelled:
 			w.clip.handleSourceCancelled(obj)
 		}
+
+	case w.drag.is(obj):
+		// События нашего источника перетаскивания (wayland_drag_linux.go).
+		w.handleDragSourceEvent(obj, opcode, b)
 
 	case w.isOfferObject(obj):
 		// wl_data_offer.offer(mime): фиксируем, что предложено.
@@ -896,6 +939,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			}
 			if mime == mimeGnomeCopiedFiles {
 				w.offerSetGnomeFiles(obj)
+			}
+			if clipimage.IsPNGMime(mime) || clipimage.IsBMPMime(mime) {
+				w.offerSetImage(obj, mime)
 			}
 		}
 
@@ -927,14 +973,16 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		if pop := w.popupForSurface(surf); pop != nil {
 			w.ptrOnPopup, w.ptrPopupID = true, pop.id
 		}
-		w.ptrX = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
-		w.ptrY = int(int32(binary.LittleEndian.Uint32(b[12:16]))) >> 8
+		w.ptrOverPopup.Store(w.ptrOnPopup)
+		w.ptrX = w.fixedToPixels(binary.LittleEndian.Uint32(b[8:12]))
+		w.ptrY = w.fixedToPixels(binary.LittleEndian.Uint32(b[12:16]))
 		// Форму курсора ставим сразу: без set_cursor после enter курсор над
 		// окном остаётся тем, каким его оставил сосед.
 		w.applyCursor()
 	case wlPointerEvLeave:
 		onPopup := w.ptrOnPopup
 		w.ptrOnPopup = false
+		w.ptrOverPopup.Store(false)
 		// Указатель ушёл — в том числе потому, что компоновщик забрал
 		// нажатие себе (начались move/resize). Отпускания мы уже не
 		// получим, поэтому отпускаем зажатые кнопки сами: иначе движок
@@ -951,8 +999,8 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		}
 	case wlPointerEvMotion:
 		// time, x(fixed), y(fixed)
-		w.ptrX = int(int32(binary.LittleEndian.Uint32(b[4:8]))) >> 8
-		w.ptrY = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
+		w.ptrX = w.fixedToPixels(binary.LittleEndian.Uint32(b[4:8]))
+		w.ptrY = w.fixedToPixels(binary.LittleEndian.Uint32(b[8:12]))
 		if w.ptrOnPopup {
 			if h := w.popupHandlers(); h.Move != nil {
 				h.Move(w.ptrPopupID, w.ptrX, w.ptrY)
@@ -967,14 +1015,9 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		serial := binary.LittleEndian.Uint32(b[0:4])
 		btn := binary.LittleEndian.Uint32(b[8:12])
 		pressed := binary.LittleEndian.Uint32(b[12:16]) == 1
-		id := -1
-		switch btn {
-		case btnLeft:
-			id = 0
-		case btnRight:
-			id = 1
-		case btnMiddle:
-			id = 2
+		id, known := wlButtonID(btn)
+		if !known {
+			id = -1
 		}
 		if pressed {
 			// Serial нажатия — пропуск к xdg_toplevel.move/resize: им
@@ -1352,7 +1395,7 @@ func (w *WaylandWindow) waitBufFree() bool {
 // BlitRGBADirty конвертирует и коммитит только изменившуюся область. Если
 // композитор ещё держит целевой буфер — кадр пропускается, область копится.
 func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
-	if w.surfaceID == 0 || img == nil || w.closed {
+	if w.surfaceID == 0 || img == nil || w.closed.Load() {
 		return
 	}
 	b := img.Bounds()
@@ -1446,7 +1489,10 @@ func (w *WaylandWindow) Close() {
 	w.repeat.cancel()
 	w.closeAllPopups()
 	w.closeCursor()
-	w.closed = true
+	w.icon.mu.Lock()
+	w.closeIconMemory()
+	w.icon.mu.Unlock()
+	w.closed.Store(true)
 	// Соединение закрываем ПОСЛЕ памяти: destroyPool ещё пишет в сокет
 	// (wl_buffer.destroy, wl_shm_pool.destroy), а Close по протоколу — это
 	// разрыв, после которого композитор объекты и так забудет.
@@ -1572,7 +1618,7 @@ func (w *WaylandWindow) releaseHeldButtons() {
 	if held == 0 || w.onMouseButton == nil {
 		return
 	}
-	for id := 0; id < 3; id++ {
+	for id := 0; id <= buttonCodeX2; id++ {
 		if held&(1<<uint(id)) != 0 {
 			w.onMouseButton(w.ptrX, w.ptrY, id, false)
 		}
@@ -1617,8 +1663,11 @@ func (w *WaylandWindow) Restore() {
 }
 
 // IsMaximized сообщает состояние из последнего configure. Полноэкранное окно
-// для кнопки □ — тоже «развёрнуто»: нажатие на неё должно возвращать окно.
-func (w *WaylandWindow) IsMaximized() bool { return w.maximized.Load() || w.fullscreen.Load() }
+// развёрнутым НЕ считается: «полный экран» — отдельное состояние
+// (IsFullscreen), а на его время сохраняется прежнее значение «развёрнуто»
+// (noteToplevelStates). Кнопка □ полноэкранного окна возвращает его обратно
+// через window.Window, как раньше.
+func (w *WaylandWindow) IsMaximized() bool { return w.maximized.Load() }
 
 // Callbacks
 func (w *WaylandWindow) SetOnResize(fn func(w, h int))                           { w.onResize = fn }
@@ -1642,15 +1691,16 @@ func (w *WaylandWindow) SetOnFilesDropped(fn func(paths []string, x, y int)) { w
 
 // ─── Drag&Drop (wl_data_device) ──────────────────────────────────────────────
 //
-// Каркас приёма файлов из файлового менеджера. Поддерживается text/uri-list в
-// один проход: enter→(accept)→drop→receive(pipe)→parse→finish. Ограничения:
+// Приём файлов из файлового менеджера. Поддерживается text/uri-list в один
+// проход: enter→(accept)→motion…→drop→receive(pipe)→parse→finish. Приложение
+// видит вход, движение (с правом отказать) и уход (SetOnDragEnter/Over/Leave).
+// Ограничения:
 //   - действие фиксировано copy; альтернативные действия (move/ask) не согласуются;
 //   - offer буфера обмена (selection) уничтожается без обработки;
 //   - finish/set_actions доступны только при версии wl_data_device_manager ≥ 3
 //     (при v<3 — совместимый путь без них);
 //   - позиция сброса берётся из последнего enter/motion (поверхностные пиксели).
-// Компилируемость и корректность на современных композиторах (v3) обеспечены;
-// углублённый torn-drag feedback не реализован.
+// Начатое самим окном перетаскивание (источник) — wayland_drag_linux.go.
 
 // isOfferObject сообщает, известен ли объект obj как data_offer.
 func (w *WaylandWindow) isOfferObject(id uint32) bool {
@@ -1731,6 +1781,28 @@ func (w *WaylandWindow) offerHasGnomeFiles(id uint32) bool {
 	return w.gnomeOffers[id]
 }
 
+// offerSetImage отмечает, что offer предлагает изображение этим типом. Из
+// нескольких остаётся лучший по порядку предпочтения: PNG, затем BMP.
+func (w *WaylandWindow) offerSetImage(id uint32, mime string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.imageOffers == nil {
+		w.imageOffers = map[uint32]string{}
+	}
+	if old, ok := w.imageOffers[id]; ok {
+		mime = clipimage.PickMime([]string{old, mime})
+	}
+	w.imageOffers[id] = mime
+}
+
+// offerImageMime возвращает читаемый тип изображения, предложенный offer'ом,
+// или пустую строку.
+func (w *WaylandWindow) offerImageMime(id uint32) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.imageOffers[id]
+}
+
 // isTextMime — тип, под которым ходит простой текст.
 func isTextMime(mime string) bool {
 	switch mime {
@@ -1753,6 +1825,7 @@ func (w *WaylandWindow) offerDelete(id uint32) {
 	delete(w.textOffers, id)
 	delete(w.htmlOffers, id)
 	delete(w.gnomeOffers, id)
+	delete(w.imageOffers, id)
 	w.mu.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -1770,22 +1843,19 @@ func (w *WaylandWindow) handleDataDevice(opcode uint16, b []byte) {
 	case wlDataDeviceEvEnter:
 		// serial, surface, x(fixed), y(fixed), id(offer)
 		w.dndSerial = binary.LittleEndian.Uint32(b[0:4])
-		w.dndX = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
-		w.dndY = int(int32(binary.LittleEndian.Uint32(b[12:16]))) >> 8
+		w.dndX = w.fixedToPixels(binary.LittleEndian.Uint32(b[8:12]))
+		w.dndY = w.fixedToPixels(binary.LittleEndian.Uint32(b[12:16]))
 		w.dndOffer = binary.LittleEndian.Uint32(b[16:20])
-		w.dndAcceptOffer()
+		w.dndEnter()
 
 	case wlDataDeviceEvMotion:
 		// time, x(fixed), y(fixed)
-		w.dndX = int(int32(binary.LittleEndian.Uint32(b[4:8]))) >> 8
-		w.dndY = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
+		w.dndX = w.fixedToPixels(binary.LittleEndian.Uint32(b[4:8]))
+		w.dndY = w.fixedToPixels(binary.LittleEndian.Uint32(b[8:12]))
+		w.dndAnswer()
 
 	case wlDataDeviceEvLeave:
-		if w.dndOffer != 0 {
-			w.send(newWlMsg(w.dndOffer, wlDataOfferDestroy), -1)
-			w.offerDelete(w.dndOffer)
-			w.dndOffer = 0
-		}
+		w.dndLeave()
 
 	case wlDataDeviceEvDrop:
 		w.dndReceive()
@@ -1799,31 +1869,83 @@ func (w *WaylandWindow) handleDataDevice(opcode uint16, b []byte) {
 	}
 }
 
-// dndAcceptOffer сообщает компоненту, принимаем ли мы предложение (accept +
-// set_actions при v≥3).
-func (w *WaylandWindow) dndAcceptOffer() {
+// dndEnter начинает сессию приёма: если в offer есть text/uri-list, сообщает
+// приложению о входе (SetOnDragEnter) и отвечает компоновщику. Перетаскивание
+// без файлов (текст, изображение) приложению не показывается.
+func (w *WaylandWindow) dndEnter() {
+	w.dndAnswered, w.dndAccepted, w.dndActions = false, false, false
+	w.dndEntered = w.dndOffer != 0 && w.offerGet(w.dndOffer)
+	if w.dndEntered && w.onDragEnter != nil {
+		w.onDragEnter(w.dndX, w.dndY)
+	}
+	w.dndAnswer()
+}
+
+// dndAnswer сообщает компоновщику, принимаем ли сброс в текущей точке:
+// accept с типом text/uri-list или с null-строкой (отказ — курсор «нельзя»,
+// drop не придёт). Решает приложение (SetOnDragOver), без него файлы
+// принимаются везде. Одинаковый ответ повторно не шлём. Действие фиксировано
+// copy (set_actions при v≥3, один раз за offer).
+func (w *WaylandWindow) dndAnswer() {
 	if w.dndOffer == 0 {
 		return
 	}
-	if w.offerGet(w.dndOffer) {
-		w.send(newWlMsg(w.dndOffer, wlDataOfferAccept).
-			putUint(w.dndSerial).putString(mimeTextUriList), -1)
-		if w.dataDevVersion >= 3 {
-			w.send(newWlMsg(w.dndOffer, wlDataOfferSetActions).
-				putUint(wlDndActionCopy).putUint(wlDndActionCopy), -1)
-		}
+	ok := w.dndEntered
+	if ok && w.onDragOver != nil {
+		ok = w.onDragOver(w.dndX, w.dndY)
+	}
+	if w.dndAnswered && ok == w.dndAccepted {
 		return
 	}
-	// Отклоняем: accept с null-строкой (длина 0).
-	w.send(newWlMsg(w.dndOffer, wlDataOfferAccept).putUint(w.dndSerial).putUint(0), -1)
+	w.dndAnswered, w.dndAccepted = true, ok
+	if !ok {
+		// Отклоняем: accept с null-строкой (длина 0).
+		w.send(newWlMsg(w.dndOffer, wlDataOfferAccept).putUint(w.dndSerial).putUint(0), -1)
+		return
+	}
+	w.send(newWlMsg(w.dndOffer, wlDataOfferAccept).
+		putUint(w.dndSerial).putString(mimeTextUriList), -1)
+	if w.dataDevVersion >= 3 && !w.dndActions {
+		w.dndActions = true
+		w.send(newWlMsg(w.dndOffer, wlDataOfferSetActions).
+			putUint(wlDndActionCopy).putUint(wlDndActionCopy), -1)
+	}
 }
+
+// dndLeave завершает сессию: курсор ушёл из окна без сброса. Offer уничтожается,
+// приложение узнаёт об уходе (SetOnDragLeave), если до этого был enter.
+// Сброс уже забрал offer (dndReceive обнулил dndOffer и dndEntered), поэтому
+// leave после drop приложению не шлётся.
+func (w *WaylandWindow) dndLeave() {
+	if w.dndOffer != 0 {
+		w.send(newWlMsg(w.dndOffer, wlDataOfferDestroy), -1)
+		w.offerDelete(w.dndOffer)
+		w.dndOffer = 0
+	}
+	if w.dndEntered {
+		w.dndEntered = false
+		if w.onDragLeave != nil {
+			w.onDragLeave()
+		}
+	}
+	w.dndAnswered, w.dndAccepted, w.dndActions = false, false, false
+}
+
+// SetOnDragEnter / Over / Leave — события приёмника (dragTargetEvents).
+// Координаты — поверхностные (как у SetOnFilesDropped).
+func (w *WaylandWindow) SetOnDragEnter(fn func(x, y int))     { w.onDragEnter = fn }
+func (w *WaylandWindow) SetOnDragOver(fn func(x, y int) bool) { w.onDragOver = fn }
+func (w *WaylandWindow) SetOnDragLeave(fn func())             { w.onDragLeave = fn }
 
 // dndReceive запрашивает данные (text/uri-list) через pipe и асинхронно их
 // читает, парсит и доставляет колбэку, после чего завершает offer.
 func (w *WaylandWindow) dndReceive() {
 	offer := w.dndOffer
 	w.dndOffer = 0
-	if offer == 0 || !w.offerGet(offer) {
+	// Сессия закончилась сбросом: leave после drop приложению не шлём.
+	accepted := w.dndAccepted
+	w.dndEntered, w.dndAnswered, w.dndAccepted, w.dndActions = false, false, false, false
+	if offer == 0 || !accepted || !w.offerGet(offer) {
 		w.completeOffer(offer, false)
 		return
 	}

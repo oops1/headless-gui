@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -165,6 +166,7 @@ func themeSlug(name string) string {
 
 // TestGolden_WidgetsSampler — сэмплер основных виджетов в каждой теме.
 func TestGolden_WidgetsSampler(t *testing.T) {
+	testreset.Globals(t)
 	for _, themeName := range []string{"Win10 Dark", "Win11 Light", "Win2000", "Mac"} {
 		themeName := themeName
 		t.Run(themeName, func(t *testing.T) {
@@ -232,6 +234,7 @@ func TestGolden_WidgetsSampler(t *testing.T) {
 
 // TestGolden_WindowChrome — окно активное/неактивное в Win2000 и Win11 Light.
 func TestGolden_WindowChrome(t *testing.T) {
+	testreset.Globals(t)
 	for _, themeName := range []string{"Win2000", "Win11 Light"} {
 		themeName := themeName
 		t.Run(themeName, func(t *testing.T) {
@@ -257,6 +260,7 @@ func TestGolden_WindowChrome(t *testing.T) {
 
 // TestGolden_AAShapes — сглаженные примитивы (углы, эллипсы, линии, полигон).
 func TestGolden_AAShapes(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(420, 240, 20)
 	c := eng.canvas
 	c.blitBackground()
@@ -281,6 +285,7 @@ func TestGolden_AAShapes(t *testing.T) {
 // TestGolden_HiDPI2x — та же кнопочная сцена при масштабе 2: текст должен
 // растеризоваться в физическом размере (не растянутый 1x).
 func TestGolden_HiDPI2x(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(220, 80, 20)
 	eng.SetScale(2)
 	c := eng.canvas

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // realFont — настоящий TTF из assets/fonts: подделка из случайных байт не
@@ -29,6 +31,7 @@ func registered(e *Engine, name string) bool {
 }
 
 func TestRegisterFontFS_RegistersFileAndFamily(t *testing.T) {
+	testreset.Globals(t)
 	data := realFont(t)
 	fsys := fstest.MapFS{
 		"ui/fonts/LiberationSans-Regular.ttf": {Data: data},
@@ -58,6 +61,7 @@ func TestRegisterFontFS_RegistersFileAndFamily(t *testing.T) {
 
 // Корень fs.FS: embed.FS часто кладут шрифты прямо в корень.
 func TestRegisterFontFS_RootDir(t *testing.T) {
+	testreset.Globals(t)
 	fsys := fstest.MapFS{"Inter-Regular.ttf": {Data: realFont(t)}}
 	eng := New(64, 64, 30)
 	if err := eng.RegisterFontFS(fsys, ""); err != nil {
@@ -71,6 +75,7 @@ func TestRegisterFontFS_RootDir(t *testing.T) {
 // Опечатка в //go:embed обязана быть слышной: иначе её ищут по пропавшему
 // шрифту на экране.
 func TestRegisterFontFS_ReportsEmptyAndMissing(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(64, 64, 30)
 	fsys := fstest.MapFS{"fonts/README.md": {Data: []byte("не шрифт")}}
 
@@ -88,6 +93,7 @@ func TestRegisterFontFS_ReportsEmptyAndMissing(t *testing.T) {
 // Битый файл рядом с целым не отменяет регистрацию целого: каталог поставки
 // не обязан быть стерильным.
 func TestRegisterFontFS_SkipsBrokenFile(t *testing.T) {
+	testreset.Globals(t)
 	fsys := fstest.MapFS{
 		"f/Broken-Regular.ttf":         {Data: []byte("это не шрифт")},
 		"f/LiberationSans-Regular.ttf": {Data: realFont(t)},
@@ -107,6 +113,7 @@ func TestRegisterFontFS_SkipsBrokenFile(t *testing.T) {
 // Имя семейства, уже занятое приложением, каталог не перебивает: приложение
 // зарегистрировало его позже и намеренно.
 func TestRegisterFontFS_DoesNotStealTakenFamily(t *testing.T) {
+	testreset.Globals(t)
 	data := realFont(t)
 	eng := New(64, 64, 30)
 	// Своё «Roboto» приложения — это на самом деле Liberation, и подмену видно
@@ -134,6 +141,7 @@ func TestRegisterFontFS_DoesNotStealTakenFamily(t *testing.T) {
 // Каталог на диске и каталог в fs.FS дают ОДИН И ТОТ ЖЕ набор имён: иначе
 // поставка в embed.FS расходилась бы с разработкой из корня репозитория.
 func TestRegisterFontFS_SameNamesAsDisk(t *testing.T) {
+	testreset.Globals(t)
 	dir := filepath.Join("..", "assets", "fonts")
 	entries, err := os.ReadDir(dir)
 	if err != nil {

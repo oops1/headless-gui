@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -56,6 +57,7 @@ func newMicaEngine(t *testing.T, bg bool) (*Engine, *micaPanel) {
 // Mica размывает ОБОИ: рисунок обоев под слоем сглажен (разброс значений
 // резко меньше, чем у самих обоев), а цвет смещён к подкраске.
 func TestMica_BlursWallpaper(t *testing.T) {
+	testreset.Globals(t)
 	e, p := newMicaEngine(t, true)
 	img := e.RenderOnce()
 
@@ -99,6 +101,7 @@ func TestMica_BlursWallpaper(t *testing.T) {
 // Частичная перерисовка внутри Mica даёт те же пиксели, что полный кадр —
 // слой не зависит от прошлого кадра и от повреждённой области.
 func TestMica_PartialRedrawMatchesFull(t *testing.T) {
+	testreset.Globals(t)
 	render := func(partial bool) []byte {
 		e, p := newMicaEngine(t, true)
 		e.RenderOnce()
@@ -125,6 +128,7 @@ func TestMica_PartialRedrawMatchesFull(t *testing.T) {
 // Mica детерминирована: два кадра подряд побайтно равны (никакого размытия
 // поверх размытия).
 func TestMica_StableAcrossFrames(t *testing.T) {
+	testreset.Globals(t)
 	e, p := newMicaEngine(t, true)
 	a := bytes.Clone(e.RenderOnce().Pix)
 	p.Invalidate()
@@ -138,6 +142,7 @@ func TestMica_StableAcrossFrames(t *testing.T) {
 // Без обоев контекст не может нарисовать Mica: MicaBehind возвращает false, а
 // слой рисуется сплошным цветом темы (Fallback).
 func TestMica_NoWallpaperFallsBackToSolid(t *testing.T) {
+	testreset.Globals(t)
 	e, _ := newMicaEngine(t, false)
 	if e.canvas.MicaBehind(image.Rect(0, 0, 10, 10), 20, color.RGBA{}) {
 		t.Error("MicaBehind без обоев вернула true")
@@ -150,6 +155,7 @@ func TestMica_NoWallpaperFallsBackToSolid(t *testing.T) {
 
 // Отдельный источник обоев главнее фона и переживает смену разрешения.
 func TestMica_WallpaperSourceOverridesBackground(t *testing.T) {
+	testreset.Globals(t)
 	e, _ := newMicaEngine(t, true)
 	red := image.NewRGBA(image.Rect(0, 0, 40, 20))
 	for i := 0; i < len(red.Pix); i += 4 {
@@ -183,6 +189,7 @@ func TestMica_WallpaperSourceOverridesBackground(t *testing.T) {
 
 // Подкраска темнит: Mica с тёмной подкраской темнее светлой на тех же обоях.
 func TestMica_TintDarkens(t *testing.T) {
+	testreset.Globals(t)
 	lum := func(spec theme.BackdropSpec) int {
 		e, p := newMicaEngine(t, true)
 		p.spec = spec
@@ -202,6 +209,7 @@ func TestMica_TintDarkens(t *testing.T) {
 // Буфер всплывающего оверлея берёт обои у основного холста: тот же пиксель
 // Mica и в окне, и в попапе (со сдвигом).
 func TestMica_PopupCanvasUsesParentWallpaper(t *testing.T) {
+	testreset.Globals(t)
 	e, _ := newMicaEngine(t, true)
 	r := image.Rect(150, 100, 250, 160)
 	oc := e.canvas.cloneForSize(r.Dx(), r.Dy(), e.canvas.scale, nil)
@@ -226,6 +234,7 @@ func TestMica_PopupCanvasUsesParentWallpaper(t *testing.T) {
 // DrawShadow с параметрами DrawSoftShadow побайтно совпадает с ним: прежние
 // тени не изменились.
 func TestDrawShadow_LegacyIdentical(t *testing.T) {
+	testreset.Globals(t)
 	draw := func(f func(c *Canvas)) []byte {
 		c := newCanvasScaled(160, 120, 1, nil)
 		c.FillRect(0, 0, 160, 120, color.RGBA{230, 230, 230, 255})
@@ -243,6 +252,7 @@ func TestDrawShadow_LegacyIdentical(t *testing.T) {
 
 // Смещение по X двигает тень вбок, непрозрачность (альфа цвета) ослабляет.
 func TestDrawShadow_OffsetAndOpacity(t *testing.T) {
+	testreset.Globals(t)
 	shadowAt := func(ox, oy float64, a uint8, x, y int) uint8 {
 		c := newCanvasScaled(200, 160, 1, nil)
 		c.FillRect(0, 0, 200, 160, color.RGBA{255, 255, 255, 255})

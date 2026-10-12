@@ -1487,6 +1487,7 @@ mb.ShowYesNoCancel("Save", "Save changes?", callback)        // Yes/No/Cancel
 eng.SendMouseMove(x, y int)
 eng.SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 // btn: widget.MouseLeft | widget.MouseRight | widget.MouseMiddle
+//      | widget.MouseButtonX1 (back) | widget.MouseButtonX2 (forward) — side buttons
 ```
 
 The engine performs hit-testing and dispatches the event to the appropriate widget. On left click, focus automatically transfers to the `Focusable` widget under the cursor.
@@ -1553,7 +1554,7 @@ navigation, `KeyCapsLock`, `KeyPrintScreen`, `KeyPause`, `KeyMenu` (the
 context-menu key). On X11 and Wayland the code comes from the PHYSICAL key of
 the Latin layout, so `Ctrl+S` works in a Russian layout too. Order of events: a
 press with `Code`, then a separate text event with `Rune`. `KeyEvent.Repeat`
-tells auto-repeat of a held key from a new press.
+tells auto-repeat of a held key from a new press (Win32, Wayland and X11).
 
 Modifiers: `ModShift, ModCtrl, ModAlt, ModMeta`.
 
@@ -1603,6 +1604,48 @@ An alias outranks a direct translation of the key: both are set by the
 application, and the more specific one wins. With no translation behind the
 alias the built-in one is used — never worse than before. `SetLanguage` drives
 the dialogs and the application alike: one language for the whole window.
+
+### Touch and gestures (v3.34)
+
+Touch is opt-in per window: `win.SetTouchEnabled(true)` before `Run` (or later — on X11
+it is applied from the event loop; or make the root widget implement
+`widget.TouchHandler`). Without it the OS keeps turning touches
+into mouse events, so apps that don't care are unchanged. Works on Win32
+(`WM_POINTER`), Wayland (`wl_touch`) and X11 (XInput 2.2).
+
+A widget takes touches by implementing `OnTouch(widget.TouchEvent) bool`; returning
+`true` on `TouchBegan` makes it the owner of that finger until `Ended`/`Cancelled`
+(coordinates are logical, in the widget's own frame). A touch nobody takes becomes a
+left mouse button in the window, so ordinary buttons and menus keep working; a finger
+that lay still for `win.SetTouchLongPress` (500 ms by default) becomes a right click on
+lift — a context menu, like Windows does.
+
+The event carries `Pressure` (0..1) and `Major`/`Minor`/`Orientation` (contact ellipse
+in pixels): zero means "unknown" — not every device and backend can report them
+(Wayland has no pressure at all).
+
+For gestures embed `widget.TouchGestures` (or call `GestureRecognizer.Feed`):
+
+```go
+type Viewer struct {
+    widget.Base
+    widget.TouchGestures
+}
+
+v.OnGesture = func(g widget.Gesture) {
+    switch g := g.(type) {
+    case widget.Pinch: // g.Scale since start, g.Step since previous, g.Center
+    case widget.Swipe: // g.Dir (SwipeLeft/Right/Up/Down), g.Velocity px/s
+    case widget.Pan:   // g.Delta since previous, g.Phase
+    case widget.Tap:   // g.Count == 2 for a double tap
+    case widget.LongPress: // finger lay still for 500 ms (no Tap or Pan follows)
+    }
+}
+```
+
+Thresholds (`GestureConfig`) are in logical pixels; see the reference for the list.
+
+---
 
 ---
 
@@ -1779,7 +1822,7 @@ eng := engine.New(1280, 720, 30)
 // ... build UI, eng.Start() ...
 
 win := window.New(eng, "Window Title")
-win.SetMaxFPS(60)
+win.SetMaxFPS(60)    // cap of the window engine's frame rate (never above the fps of engine.New)
 win.SetResizable(true)
 
 if err := win.Run(); err != nil {  // blocks until window closes
@@ -1968,6 +2011,11 @@ ctx.SetPixel(x, y int, col color.RGBA)
 // Images
 ctx.DrawImage(src image.Image, x, y int)
 ctx.DrawImageScaled(src image.Image, x, y, w, h int)
+// A part of the picture with a filter: only what is under the clip is scaled (v3.34).
+// A context without support gets a fallback — DrawImageScaled of the cropped source.
+widget.DrawImageRect(ctx, src, sr, dr image.Rectangle, widget.FilterCatmullRom)
+// The picture was rewritten in place — drop the scaling cache (nil — all of it):
+widget.InvalidateImageCache(ctx, src)     // from Draw; from the app — eng.InvalidateImageCache(src)
 
 // Text
 ctx.DrawText(text string, x, y int, col color.RGBA)
@@ -2599,7 +2647,13 @@ when the filter/sort/group changes.
 - `ToolTip="..."` on any widget; delay/toggle via
   `eng.SetTooltipsEnabled`/`SetTooltipDelay`.
 - Mouse cursors: widgets implement `Cursor() widget.Cursor` (TextBox → I-beam,
-  GridSplitter → resize); `eng.CursorAt(x, y)`.
+  GridSplitter → resize); `eng.CursorAt(x, y)`. Shapes `CursorNone` (hidden),
+  `CursorGrab`/`CursorGrabbing`, `CursorSizeAll`, `CursorCrosshair`, `CursorWait`.
+  A shape over every widget, applied at once without a mouse move:
+  `eng.SetCursorOverride(widget.CursorNone)` / `eng.ClearCursorOverride()`
+  (a slide show hides the cursor on a timer; dragging shows the closed hand). The
+  shape also applies over menus and lists moved into their own OS windows
+  (Win32, X11, Wayland).
 - Keyboard-layout indicator in windows/dialogs — `ShowLocaleIndicator` property
   with a switch context menu.
 
@@ -3226,11 +3280,19 @@ does not come out tiny on a 300 dpi sheet:
 
 ```go
 k := float64(setup.EffectiveDPI()) / 96
-eng := engine.New(int(float64(w)/k+0.5), int(float64(h)/k+0.5), 1)
+eng := engine.NewOffscreen(int(float64(w)/k+0.5), int(float64(h)/k+0.5), 1)
+defer eng.Stop()
 eng.SetScale(k)
 eng.SetRoot(pageUI)
 img := eng.RenderOnce() // *image.RGBA; its size may differ from w×h by a pixel
 ```
+
+`engine.NewOffscreen` (v3.34) is the same engine without the services shared
+by the process. A plain `engine.New` becomes the text measurer outside drawing
+and the SVG `<text>` rasterizer, and reports its size as the screen. A print
+engine made with `New` took all of that from the window: while the job ran,
+the window measured text with the job's canvas and menus were clamped to the
+page. Inside `Draw` the page measures with its own canvas and comes out exact.
 
 The size of a page image need not match `SheetSize()`: the physical size is then
 taken from the pixels and the resolution. A match is the only way to guarantee
@@ -3580,6 +3642,68 @@ All three backends honour the limit: Win32 (`WM_GETMINMAXINFO`), X11
 (`WM_NORMAL_HINTS`) and Wayland (`xdg_toplevel.set_min_size`). On macOS it is a
 no-op.
 
+### Full screen and monitors
+
+```go
+win.SetFullscreen(true)  // true: the request was sent; false: the backend cannot
+win.IsFullscreen()       // what the system reports
+win.SetOnFullscreenChanged(func(on bool) { /* engine goroutine */ })
+
+for _, m := range window.Monitors() { // primary first
+    fmt.Println(m.Name, m.Bounds, m.Work, m.Scale, m.Primary)
+}
+m, ok := window.MonitorOf(win)                      // the window's monitor
+_, onScreen := window.MonitorForRect(window.Monitors(), savedRect) // is the saved position still on a screen?
+```
+
+`SetFullscreen` answers "the request was accepted", not "done": Win32 moves the
+window a moment later, X11 and Wayland answer asynchronously, and the compositor may
+refuse. The outcome is in `IsFullscreen` and `SetOnFullscreenChanged`, which fires on
+**every** change, including those the system makes itself (the user pressed Esc at the
+compositor). A refusal arrives as `false`: that is how WinLine answers without
+`WINLINE_FULLSCREEN` — the request went out (`SetFullscreen` returned `true`) and the
+`configure` came back without the fullscreen state; time for the application to fall
+back (say, maximize the window the ordinary way). Before `Run` the request is
+remembered and applied when the window is created.
+
+"Maximized" and "full screen" are different states. `IsMaximized` of a full-screen
+window returns the value it had before full screen. A full-screen window is not
+rounded, and the `□` button takes it out of full screen.
+
+- **Win32.** Position, size, style and "was maximized" are remembered, `WS_THICKFRAME`
+  is dropped for the time being, and the window takes the monitor's `rcMonitor` (the
+  taskbar is covered). Leaving restores everything; a rectangle that fell off a
+  disconnected monitor is moved to the nearest one. A resolution change, a move to
+  another monitor and a DPI change re-fit the rectangle.
+- **X11.** `_NET_WM_STATE_FULLSCREEN` through `ClientMessage`; the state is read from
+  the `_NET_WM_STATE` property on `PropertyNotify`.
+- **Wayland.** `xdg_toplevel.set_fullscreen` / `unset_fullscreen`; the state comes
+  from `configure`.
+- **macOS.** A stub: `SetFullscreen` returns `false`; `Monitors()` is empty.
+
+Full screen on a chosen monitor (leave with the same `SetFullscreen(false)`):
+
+```go
+ms := window.Monitors()
+if len(ms) > 1 && !win.SetFullscreenOn(ms[1]) { /* the monitor is gone — normal mode */ }
+```
+
+`SetFullscreenOn(m)` takes a value from `Monitors()`/`MonitorAt`/`MonitorOf` and
+finds the same monitor in the current list (by a hidden key, then `Name`, then
+`Bounds`); `false` means the monitor is already disconnected. A window that is
+already full screen is moved to `m`. Win32 — `rcMonitor` of the chosen monitor;
+X11 — `_NET_WM_FULLSCREEN_MONITORS`, or, if the manager does not advertise it, the
+window is moved onto the monitor before `_NET_WM_STATE_FULLSCREEN`; Wayland —
+`set_fullscreen(wl_output)` (the compositor may pick another output — check
+`MonitorOf`).
+
+Monitors: Win32 — `EnumDisplayMonitors` + `GetDpiForMonitor`; X11 — RandR 1.5
+(without RandR or older than 1.5 the whole screen counts as one monitor); Wayland —
+`wl_output` and `xdg_output`. Units: on Win32 and X11 `Bounds`/`Work` are pixels, on
+Wayland the compositor's logical coordinates (`Scale` is buffer pixels per unit).
+Wayland has no work area (`Work == Bounds`) and the first output is the primary one.
+Details are in `docs/AI_AGENT_REFERENCE.md` ("v3.34").
+
 ### Window icon
 
 ```go
@@ -3595,9 +3719,10 @@ Call it any time after the window exists — to show the progress of a long
 operation, say — or before `Run()`: the icon is applied when the window is
 created.
 
-Works on **Win32** (`WM_SETICON`) and **X11** (`_NET_WM_ICON`). A backend that
-cannot do it (Wayland before `xdg-toplevel-icon-v1`) returns
-`window.ErrIconUnsupported` — deliberately not silence: an application with no
+Works on **Win32** (`WM_SETICON`), **X11** (`_NET_WM_ICON`) and **Wayland**
+(`xdg-toplevel-icon-v1`, since v3.34 — when the compositor announces that global:
+KDE 6.1+, Sway). A backend that cannot do it (Wayland without the global, macOS)
+returns `window.ErrIconUnsupported` — deliberately not silence: an application with no
 visible icon should learn why here, not go hunting through desktop settings.
 
 Before `Run()` the method always returns `nil`: there is no backend yet, so
@@ -3808,10 +3933,49 @@ type FileDropTarget interface {
 }
 ```
 
-By platform: **Win32** (`WM_DROPFILES`) and **X11** (XDND v5) are complete;
-**Wayland** (`wl_data_device`) is a skeleton that needs live-session verification;
-macOS is not supported. Headless routing to `FileDropTarget` is testable via
+By platform: **Win32**, **X11** (XDND v5) and **Wayland** (`wl_data_device`,
+`text/uri-list`; verified on the wire against a fake compositor) are supported;
+macOS is not. Headless routing to `FileDropTarget` is testable via
 `SendFilesDropped` without a window.
+
+#### Highlighting a drop zone and dragging files out of the window (v3.34)
+
+While files are dragged over the window the application can highlight a zone or
+refuse the drop:
+
+```go
+win.SetOnDragEnter(func(x, y int) { zone.Highlight(true) })
+win.SetOnDragOver(func(x, y int) bool { return zone.Bounds().Contains(image.Pt(x, y)) }) // false: "not allowed"
+win.SetOnDragLeave(func() { zone.Highlight(false) }) // not sent after a drop: clear in SetOnFilesDropped too
+```
+
+The window can also start a drag of files, e.g. from a thumbnail into Explorer:
+
+```go
+// In a mouse handler, while the button is held and the pointer moved off the press point:
+win.SetOnDragFinished(func(e window.DragEffect) {
+    if e == window.DragEffectMove { removeOriginals() } // the OS does not touch the originals
+})
+ok := win.BeginDragFiles([]string{path}, window.DragEffectCopy|window.DragEffectMove)
+```
+
+`BeginDragFiles` returns `false` when it cannot start (button not held, backend
+cannot, Wayland compositor without `wl_data_device_manager` v3); the result
+(`0` — cancelled) comes to `SetOnDragFinished`. Win32: `DoDragDrop`; X11: XDND
+source (understands `XdndProxy`); Wayland: `start_drag`. With an icon next to the
+cursor:
+
+```go
+ok := win.BeginDragFilesImage([]string{path}, window.DragEffectCopy, thumb, image.Pt(16, 16))
+// thumb is an image.Image in screen pixels (up to 512 px on the long side),
+// image.Pt(16, 16) is the point of the picture under the cursor.
+// win.DragImageSupported() == false (X11, macOS): the drag runs, no icon is drawn.
+```
+
+Win32 draws the icon through `IDragSourceHelper` (over the window itself too),
+Wayland with an icon surface in `start_drag`. Details and gaps are in
+`docs/AI_AGENT_REFERENCE.md`, sections "v3.34 additions" and "v3.34: full screen on
+a chosen monitor, cursor over popups, drag icon, XdndProxy".
 
 ### Rich text on the clipboard
 
@@ -3893,6 +4057,36 @@ As with HTML, this is the optional `widget.ClipboardFilesProvider`
 without it gets the paths as text from `ClipboardSetFiles`, and
 `ClipboardFiles` honestly answers `ok == false`. `UseMemoryClipboard()`
 supports files.
+
+### Image on the clipboard
+
+Since v3.34 a picture can be put on the clipboard ("Copy image") and read back:
+
+```go
+if err := widget.ClipboardSetImage(img); err != nil { /* ErrClipboardImageUnsupported — the provider cannot */ }
+
+go func() { // reading may wait — not on the engine goroutine
+    img, ok := widget.ClipboardImage() // ok == false — not an image on the clipboard
+    eng.Post(func() { /* show img */ })
+}()
+```
+
+`ClipboardSetImage` replaces the clipboard contents and copies the picture, so
+the original may be changed afterwards. On Windows PNG and DIB are encoded
+immediately — call it in its own goroutine for big pictures.
+
+- Windows: three formats are put in one `OpenClipboard` — "PNG", `CF_DIBV5`
+  (32-bit BGRA, alpha not premultiplied) and `CF_DIB` (24-bit, transparency
+  blended over white); reading goes PNG → `CF_DIBV5` → `CF_DIB`. Paint, GIMP,
+  Office and browsers paste it.
+- X11 and Wayland: `image/png`, encoded lazily — when somebody asks for it. Reading
+  takes `image/png`, else `image/bmp`. Big pictures on X11 go through `INCR` (both
+  directions). The wait is 300 ms for the owner's answer and for every next chunk.
+- macOS and a custom provider without `widget.ClipboardImageProvider` —
+  `ErrClipboardImageUnsupported`. `UseMemoryClipboard()` supports images.
+
+In a WinLine session the picture does not reach the RDP client yet: `cliprdr`
+carries only text and files.
 
 ### Color emoji
 
@@ -4100,7 +4294,7 @@ p.SetStyle("taskbar", "", theme.StateNormal, theme.StyleDelta{
 Backdrop blur takes the pixels already on the canvas, downscales them 4×, blurs
 them with a separable box blur (cost independent of the radius) and puts them
 back. `Canvas.SetRoundClip` clips along the rounded outline instead of its
-bounding box.
+bounding box; images (`DrawImage*`) are clipped the same way.
 
 #### Accent, light taskbar and Windows 10 acrylic (since v3.31)
 
@@ -4551,6 +4745,15 @@ backgrounds. Strings are `desktop.quick.*` keys (Russian and English,
 `widget.RegisterStrings`). Tooltips of icons without captions come from
 `QuickSettings.ToolTipAt`. The keyboard focus ring is `PaintFocusRing`, as on the
 taskbar.
+
+v3.34 additions (see `docs/AI_AGENT_REFERENCE.md`, "v3.34"): `QuickAction.PageOnly`
+is a "page only" tile (whole, no halves, a click anywhere opens the page); tile
+pages (`theme.KeyQuickPaged`) slide vertically (token `theme.KeyQuickPages`) and the
+pager arrows and dots are in the Tab order; notification stacks expand smoothly
+(token `notification.expand`), reduced motion makes both transitions instant; a
+right click on the "Focus" button of the calendar (or the Menu key, Shift+F10)
+opens a 15/30/45/60/90 minute menu (`CalendarFlyout.FocusDurations`,
+`OpenFocusDurationMenu`).
 
 
 ### The frame pipeline

@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // flatCanvas — холст, залитый одним серым: на нём шум виден как отклонение
@@ -18,6 +20,7 @@ func flatCanvas(w, h int, v uint8) *Canvas {
 // TestDrawNoise_BoundedAndGrainy — зерно есть (не все пиксели одинаковы),
 // отклонение не больше заявленной амплитуды, а среднее почти не сдвигается.
 func TestDrawNoise_BoundedAndGrainy(t *testing.T) {
+	testreset.Globals(t)
 	c := flatCanvas(100, 100, 128)
 	area := image.Rect(10, 10, 90, 90)
 
@@ -53,6 +56,7 @@ func TestDrawNoise_BoundedAndGrainy(t *testing.T) {
 // привязано к пикселям кадра, а не к области: два пересекающихся слоя не
 // спорят о значении в общем пикселе.
 func TestDrawNoise_Deterministic(t *testing.T) {
+	testreset.Globals(t)
 	a := flatCanvas(80, 40, 100)
 	b := flatCanvas(80, 40, 100)
 	a.DrawNoise(image.Rect(0, 0, 80, 40), 0.05)
@@ -73,6 +77,7 @@ func TestDrawNoise_Deterministic(t *testing.T) {
 // TestDrawNoise_NoOpCases — нулевая амплитуда и пустая область ничего не
 // меняют.
 func TestDrawNoise_NoOpCases(t *testing.T) {
+	testreset.Globals(t)
 	c := flatCanvas(40, 40, 90)
 	before := append([]uint8(nil), c.back.Pix...)
 	c.DrawNoise(image.Rect(0, 0, 40, 40), 0)
@@ -88,6 +93,7 @@ func TestDrawNoise_NoOpCases(t *testing.T) {
 // TestDrawNoise_RespectsClips — зерно не выходит ни за прямоугольное, ни за
 // скруглённое отсечение.
 func TestDrawNoise_RespectsClips(t *testing.T) {
+	testreset.Globals(t)
 	c := flatCanvas(120, 120, 100)
 	c.SetClip(image.Rect(0, 0, 60, 120))
 	c.DrawNoise(image.Rect(0, 0, 120, 120), 0.1)
@@ -119,6 +125,7 @@ func TestDrawNoise_RespectsClips(t *testing.T) {
 // TestDrawNoise_KeepsPremultipliedInvariant — на полупрозрачном буфере канал
 // не выходит за альфу, а полностью прозрачные пиксели остаются прозрачными.
 func TestDrawNoise_KeepsPremultipliedInvariant(t *testing.T) {
+	testreset.Globals(t)
 	c := newCanvas(60, 20, newFontCache("assets"))
 	c.blitBackground()
 	for x := 0; x < 60; x++ {

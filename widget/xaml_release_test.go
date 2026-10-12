@@ -31,6 +31,7 @@ func xamlScopeCount() int {
 
 func setupLocRelease(t *testing.T) {
 	t.Helper()
+	keepStrings(t)
 	ClearStrings()
 	ClearLocalizedItems()
 	t.Cleanup(func() {
