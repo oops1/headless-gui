@@ -2651,7 +2651,9 @@ when the filter/sort/group changes.
   `CursorGrab`/`CursorGrabbing`, `CursorSizeAll`, `CursorCrosshair`, `CursorWait`.
   A shape over every widget, applied at once without a mouse move:
   `eng.SetCursorOverride(widget.CursorNone)` / `eng.ClearCursorOverride()`
-  (a slide show hides the cursor on a timer; dragging shows the closed hand).
+  (a slide show hides the cursor on a timer; dragging shows the closed hand). The
+  shape also applies over menus and lists moved into their own OS windows
+  (Win32, X11, Wayland).
 - Keyboard-layout indicator in windows/dialogs — `ShowLocaleIndicator` property
   with a switch context menu.
 
@@ -3679,6 +3681,22 @@ rounded, and the `□` button takes it out of full screen.
   from `configure`.
 - **macOS.** A stub: `SetFullscreen` returns `false`; `Monitors()` is empty.
 
+Full screen on a chosen monitor (leave with the same `SetFullscreen(false)`):
+
+```go
+ms := window.Monitors()
+if len(ms) > 1 && !win.SetFullscreenOn(ms[1]) { /* the monitor is gone — normal mode */ }
+```
+
+`SetFullscreenOn(m)` takes a value from `Monitors()`/`MonitorAt`/`MonitorOf` and
+finds the same monitor in the current list (by a hidden key, then `Name`, then
+`Bounds`); `false` means the monitor is already disconnected. A window that is
+already full screen is moved to `m`. Win32 — `rcMonitor` of the chosen monitor;
+X11 — `_NET_WM_FULLSCREEN_MONITORS`, or, if the manager does not advertise it, the
+window is moved onto the monitor before `_NET_WM_STATE_FULLSCREEN`; Wayland —
+`set_fullscreen(wl_output)` (the compositor may pick another output — check
+`MonitorOf`).
+
 Monitors: Win32 — `EnumDisplayMonitors` + `GetDpiForMonitor`; X11 — RandR 1.5
 (without RandR or older than 1.5 the whole screen counts as one monitor); Wayland —
 `wl_output` and `xdg_output`. Units: on Win32 and X11 `Bounds`/`Work` are pixels, on
@@ -3944,8 +3962,20 @@ ok := win.BeginDragFiles([]string{path}, window.DragEffectCopy|window.DragEffect
 `BeginDragFiles` returns `false` when it cannot start (button not held, backend
 cannot, Wayland compositor without `wl_data_device_manager` v3); the result
 (`0` — cancelled) comes to `SetOnDragFinished`. Win32: `DoDragDrop`; X11: XDND
-source; Wayland: `start_drag`. Details and gaps (no drag icon, no `XdndProxy`) are
-in `docs/AI_AGENT_REFERENCE.md`, section "v3.34 additions".
+source (understands `XdndProxy`); Wayland: `start_drag`. With an icon next to the
+cursor:
+
+```go
+ok := win.BeginDragFilesImage([]string{path}, window.DragEffectCopy, thumb, image.Pt(16, 16))
+// thumb is an image.Image in screen pixels (up to 512 px on the long side),
+// image.Pt(16, 16) is the point of the picture under the cursor.
+// win.DragImageSupported() == false (X11, macOS): the drag runs, no icon is drawn.
+```
+
+Win32 draws the icon through `IDragSourceHelper` (over the window itself too),
+Wayland with an icon surface in `start_drag`. Details and gaps are in
+`docs/AI_AGENT_REFERENCE.md`, sections "v3.34 additions" and "v3.34: full screen on
+a chosen monitor, cursor over popups, drag icon, XdndProxy".
 
 ### Rich text on the clipboard
 

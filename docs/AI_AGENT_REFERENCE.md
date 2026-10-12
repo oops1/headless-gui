@@ -7294,8 +7294,9 @@ change (`cursorOverrideNotifier`, optional like `modifierSink`) and on the engin
 goroutine recomputes the cursor for the LAST known mouse position and hands it to
 the OS window (`surface.refreshCursor`). Before the mouse was ever in the window
 the point is (-1,-1), so after `ClearCursorOverride` the arrow comes back.
-Popup windows (menus moved into their own OS window) are not covered: they never
-had cursor handling and the override does not reach them.
+Popup windows (menus moved into their own OS window) are covered since the second
+round of v3.34: see "Full screen on a chosen monitor, cursor over popups, drag
+icon, XdndProxy" below.
 A custom `EngineAPI` without `SetOnCursorOverrideChanged` just never gets the
 immediate refresh (the override still wins on the next move).
 
@@ -7457,12 +7458,12 @@ is not rounded on any backend (`SetCornerRadius`: Win32 `applyCorners`, Wayland
   per frame. "Does the saved window rect still land on a monitor?":
   `_, ok := window.MonitorForRect(window.Monitors(), saved)`.
 
-**Not done / limits.** No choice of the target monitor in `SetFullscreen` (the
-monitor the window is on is used; Win32 takes it from `MonitorFromWindow` (so
-`SetPosition` onto the wanted monitor before the request selects it; checked on one
-monitor only), X11 leaves it to the window manager, Wayland to the compositor).
+**Not done / limits.** `SetFullscreen` itself takes no monitor (the one the window
+is on is used) — the monitor is chosen with `SetFullscreenOn` (below).
 Win32 `Name` is the device name, not the marketing name from the monitor EDID.
-macOS has neither full screen nor monitors yet.
+macOS has neither full screen nor monitors yet. Wayland: `Work == Bounds` (the
+protocol has no work area; layer-shell panels are invisible to a client) and
+`Primary` is simply the first output — documented on `Monitor`, nothing to fix.
 
 Tests: `window/fullscreen_rect_test.go` (Win32 save/restore arithmetic: style, rect,
 vanished monitor, re-fit), `window/fullscreen_test.go` (the `Window` layer: pre-Run
@@ -7761,9 +7762,11 @@ Per platform:
 | X11 | XDND v5 source: owns `XdndSelection`, grabs pointer and keyboard (Esc), finds the `XdndAware` window under the cursor, `XdndEnter/Position/Leave/Drop`, serves `TARGETS` and `text/uri-list`, waits for `XdndFinished`. Starts from the event pump (a service `ClientMessage` to itself), because only the pump may read server replies |
 | Wayland | `wl_data_device.start_drag` with a `wl_data_source` offering `text/uri-list`, actions copy/move (`set_actions`), data written lazily on `send`; finish from `dnd_finished`/`action`/`cancelled`. `Link` has no Wayland action (it is dropped; link-only returns `false`) |
 
-Not done (honestly): no drag icon / drag cursor (the cursor under the pointer stays),
-X11 `XdndProxy` and target type lists longer than one type, drag from a popup
-window on Wayland, dropping a virtual (non-file) item on Win32 (`FileGroupDescriptor`).
+The drag icon (`BeginDragFilesImage`) and X11 `XdndProxy` came in the second round —
+see "Full screen on a chosen monitor, cursor over popups, drag icon, XdndProxy".
+Not done (honestly): X11 draws no drag icon, target type lists longer than one type,
+drag from a popup window on Wayland, dropping a virtual (non-file) item on Win32
+(`FileGroupDescriptor`).
 Checked: Win32 on the real OLE (two windows, `SendInput`, `HEADLESS_GUI_DND_E2E=1`),
 X11 on a real X server (two windows, two connections; the pointer events are fed to
 the source directly, no XTest), Wayland on the wire against a fake compositor only
@@ -7775,6 +7778,111 @@ wiring), `window/dnd_hdrop_test.go` (`CF_HDROP` block, `QueryContinueDrag` table
 `GetData`/`EnumFormatEtc`, the receiver cycle), `window/dnd_windows_e2e_test.go`,
 `window/wayland_drag_linux_test.go`, `window/x11_drag_linux_test.go`,
 `window/x11_drag_e2e_linux_test.go`.
+
+---
+
+## v3.34: full screen on a chosen monitor, cursor over popups, drag icon, XdndProxy
+
+Second round for the PixGo list "not done" (`ENGINE_TASKS.md`). Package `window`.
+Additive; nothing removed, no signature changed.
+
+### `SetFullscreenOn(Monitor)`
+
+```go
+func (win *Window) SetFullscreenOn(m Monitor) bool
+// leave: the same win.SetFullscreen(false); state/notifications: IsFullscreen, SetOnFullscreenChanged
+```
+
+`m` is a value from `Monitors()`, `MonitorAt` or `MonitorOf`. `Monitor` got an
+UNEXPORTED key (`id`: Win32 `HMONITOR`, X11 the 1-based index in the `RRGetMonitors`
+reply — also the EWMH monitor index —, Wayland the registry global name of the
+`wl_output`, which is the same on every connection to the compositor). The public
+fields did not change. A monitor is found again in the CURRENT list by key, then by
+`Name`, then by `Bounds` (`matchMonitor`), so a stored `Monitor` survives a replug
+as long as one of the three still matches.
+
+- `false`: the monitor is gone (matches nothing), `Monitor{}`, or the backend cannot
+  choose (macOS). Nothing is sent in that case.
+- Before `Run` the request is remembered with the monitor; at window creation
+  `SetFullscreenOn` is applied, and when the monitor vanished meanwhile the window
+  falls back to plain `SetFullscreen(true)`. A later `SetFullscreen(true)` before
+  `Run` replaces the remembered monitor.
+- A window that is ALREADY full screen is moved to `m`.
+
+| | how |
+|---|---|
+| Win32 | window thread: `enterFullscreen(rcMonitor of the matched monitor)` instead of the monitor the window lies on. Already full screen: `SetWindowPos` to the new `rcMonitor`, no exit, no notification, the snapshot for leaving stays the first one. Checked live: every monitor of the machine in turn (one monitor on the development machine; the "other rect" path is checked with a synthetic rect) |
+| X11 | monitors are re-queried (RandR 1.5, separate connection). If the window manager lists `_NET_WM_FULLSCREEN_MONITORS` in `_NET_SUPPORTED`: that `ClientMessage` (top = bottom = left = right = the index, source = application) and then `ADD _NET_WM_STATE_FULLSCREEN`; the window is NOT moved, so after leaving it returns to where it was. Without it: the window is moved to the monitor's top-left corner and then `ADD` (managers put a full-screen window on the monitor it mostly lies on); the window stays on that monitor after leaving. Already full screen: with the hint just the message; without it `REMOVE`, move, `ADD` (the application sees `false` then `true`) |
+| Wayland | `xdg_toplevel.set_fullscreen(wl_output)` with the output object of the window's OWN connection that matches the monitor (a `Monitors()` value comes from another connection: matched via the global name). Already full screen: another `set_fullscreen(output)` (allowed by the protocol), the saved size is kept. The compositor may pick another output — `MonitorOf` shows where the window really is |
+
+### Forced cursor over popup windows
+
+`Engine.SetCursorOverride` now reaches menus and drop-down lists moved to their own OS
+window ("popup host"). Each popup is an OS window with its own cursor; before, the
+cursor of the carrier window never got there.
+
+- Win32/X11 (`popupHost`): on a change (`surface.refreshCursor` → `popupCursor` hook)
+  the form is set on every open popup window (window thread), and on a popup that is
+  being created (so an override set before the menu opened works). Cleared → the
+  arrow. The cursor of widgets inside popups is still not computed (arrow, as before).
+- Wayland (`childPopups`): the popup is a `wl_surface` of the same client and the
+  pointer/cursor are shared, so the cursor of the carrier already applied; what was
+  missing is a form for the time the pointer is ON a popup. `WaylandWindow.SetPopupCursor`
+  keeps it; `applyCursor` uses it while `ptrOverPopup` and falls back to the window's
+  form otherwise. Dialog and dock windows (`modal_host`, `dock_host`) are wired the same way.
+
+### Drag icon — `BeginDragFilesImage`
+
+```go
+func (win *Window) BeginDragFilesImage(paths []string, effect DragEffect, img image.Image, hotspot image.Point) bool
+func (win *Window) DragImageSupported() bool // false: the drag starts but no icon is drawn (X11, macOS)
+```
+
+`img` is in SCREEN pixels (the window scale is not applied), `hotspot` is the point of
+`img` under the cursor. A side above 512 px is scaled down (hotspot with it), the
+alpha channel is kept; `nil`/empty `img` = plain `BeginDragFiles`. Return value and
+`SetOnDragFinished` are the same as for `BeginDragFiles`.
+
+- Win32: `IDragSourceHelper.InitializeFromBitmap` (`CLSID_DragDropHelper`,
+  `SHDRAGIMAGE`, 32 bpp premultiplied DIB, `CLR_NONE` colour key = alpha). The helper
+  stores the picture and service flags in OUR `IDataObject` through `SetData`, so the
+  data object now keeps arbitrary `HGLOBAL`/`IStream` blocks (`CF_HDROP` cannot be
+  replaced) and lists them in `EnumFormatEtc`. The window's `IDropTarget` forwards
+  `DragEnter/Over/Leave/Drop` to `IDropTargetHelper`, so the icon is drawn over the
+  window itself too, not only over foreign programs. Without the helpers the drag runs
+  without an icon.
+- Wayland: `wl_shm` pool (memfd, destroyed right after `create_buffer`) → ARGB8888
+  premultiplied buffer → `wl_surface` passed as the `icon` of `wl_data_device.start_drag`;
+  after `start_drag`: `attach(buffer, -hx, -hy)` (the compositor puts the surface's
+  top-left at the cursor), `damage_buffer`, `commit`. HiDPI: integer window scale →
+  `set_buffer_scale`, offsets in surface units. Surface and buffer are destroyed when the
+  drag ends. Needs `wl_data_device_manager` v3 (as the source itself).
+- X11: **no icon, on purpose.** XDND has no icon; a ghost window under the pointer needs
+  a compositing manager (or the SHAPE extension) to be transparent, and the target search
+  descends the windows under the pointer, so the ghost would be found as the target.
+  `X11Window` does not implement the icon interface; the drag runs plain.
+
+### X11 `XdndProxy` in the source
+
+When the window under the pointer has an `XdndProxy` property (type `WINDOW`) the source
+validates it per the XDND specification (the proxy window must carry its own `XdndProxy`
+pointing to itself — otherwise it is a leftover of a crashed program and is ignored; a
+window pointing to itself is not a proxy), reads `XdndAware` from the PROXY (then from
+the window), and sends `XdndEnter/Position/Leave/Drop` to the proxy with the target
+window in the event's `window` field. `XdndStatus`/`XdndFinished` still come from the
+target window id. The property is read once per window per drag (cache cleared at the
+start and end of a drag). Checked against a fake server only (no real proxying program
+available); the `window`-field rule is taken from the specification.
+
+Tests: `window/fullscreen_test.go` (`fsOnSpy`, `matchMonitor`, request before `Run`),
+`window/fullscreen_windows_test.go` (`TestWin32Fullscreen_OnMonitor`,
+`..._SetFullscreenOnPumped`), `window/x11_fullscreen_on_linux_test.go`,
+`window/wayland_fullscreen_on_linux_test.go`, `window/popup_cursor_test.go`,
+`window/popup_cursor_windows_test.go` (real popup windows),
+`window/wayland_popup_cursor_linux_test.go`, `window/dnd_image_test.go`,
+`window/dnd_image_windows_test.go` (live shell helpers, `SetData`/`IStream` store),
+`window/dnd_windows_e2e_test.go` (`TestDndE2E_DragWithImage`, `HEADLESS_GUI_DND_E2E=1`),
+`window/wayland_drag_image_linux_test.go`, `window/x11_drag_proxy_linux_test.go`.
 
 ---
 

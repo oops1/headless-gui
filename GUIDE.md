@@ -2637,7 +2637,8 @@ view.Groups()   // []CollectionViewGroup{Name, Items}
   Форма поверх всех виджетов, применяемая сразу, без движения мыши:
   `eng.SetCursorOverride(widget.CursorNone)` / `eng.ClearCursorOverride()`
   (слайд-шоу прячет курсор по таймеру бездействия; перетаскивание показывает
-  «сжатую руку»).
+  «сжатую руку»). Форма действует и над меню и списками, вынесенными в
+  отдельные окна ОС (Win32, X11, Wayland).
 - Индикатор раскладки в окнах/диалогах — свойство `ShowLocaleIndicator`,
   контекстное меню переключения.
 
@@ -3624,6 +3625,10 @@ win.SetFullscreen(true)  // true — запрос отправлен; false — 
 win.IsFullscreen()       // что сообщает система
 win.SetOnFullscreenChanged(func(on bool) { /* горутина движка */ })
 
+// Полный экран на выбранном мониторе (выход — тот же SetFullscreen(false)):
+ms := window.Monitors()
+if len(ms) > 1 && !win.SetFullscreenOn(ms[1]) { /* монитор отключён — обычный режим */ }
+
 for _, m := range window.Monitors() { // основной первым
     fmt.Println(m.Name, m.Bounds, m.Work, m.Scale, m.Primary)
 }
@@ -3655,6 +3660,14 @@ _, onScreen := window.MonitorForRect(window.Monitors(), savedRect) // сохра
 - **Wayland.** `xdg_toplevel.set_fullscreen` / `unset_fullscreen`; состояние — из
   `configure`.
 - **macOS.** Заглушка: `SetFullscreen` возвращает `false`; `Monitors()` пуст.
+
+`SetFullscreenOn(m)` принимает значение из `Monitors()`/`MonitorAt`/`MonitorOf` и
+находит тот же монитор в текущем списке (по скрытому ключу, затем по `Name`, затем
+по `Bounds`); `false` — монитор уже отключён. Окно, уже стоящее в полном экране,
+переносится на `m`. Win32 — `rcMonitor` выбранного монитора; X11 —
+`_NET_WM_FULLSCREEN_MONITORS`, а если менеджер его не объявил, окно переносится на
+монитор перед `_NET_WM_STATE_FULLSCREEN`; Wayland — `set_fullscreen(wl_output)`
+(композитор вправе выбрать другой вывод — смотрите `MonitorOf`).
 
 Мониторы: Win32 — `EnumDisplayMonitors` + `GetDpiForMonitor`; X11 — RandR 1.5
 (без RandR или старше 1.5 весь экран считается одним монитором); Wayland —
@@ -3918,9 +3931,20 @@ ok := win.BeginDragFiles([]string{path}, window.DragEffectCopy|window.DragEffect
 
 `BeginDragFiles` вернёт `false`, если начать нельзя (кнопка не зажата, бэкенд не
 умеет, Wayland-компоновщик без `wl_data_device_manager` v3); итог (`0` — отмена)
-приходит в `SetOnDragFinished`. Win32: `DoDragDrop`; X11: XDND-источник;
-Wayland: `start_drag`. Подробности и чего нет (значок перетаскиваемого,
-`XdndProxy`) — в `docs/AI_AGENT_REFERENCE.md`, раздел «v3.34 additions».
+приходит в `SetOnDragFinished`. Win32: `DoDragDrop`; X11: XDND-источник (понимает
+`XdndProxy`); Wayland: `start_drag`. Со значком возле курсора:
+
+```go
+ok := win.BeginDragFilesImage([]string{path}, window.DragEffectCopy, thumb, image.Pt(16, 16))
+// thumb — image.Image в пикселях экрана (до 512 px по большей стороне),
+// image.Pt(16, 16) — точка картинки под курсором. win.DragImageSupported() == false
+// (X11, macOS): перетаскивание идёт, но значок не рисуется.
+```
+
+Win32 рисует значок через `IDragSourceHelper` (и над самим окном тоже), Wayland —
+поверхностью-значком в `start_drag`. Подробности и чего нет — в
+`docs/AI_AGENT_REFERENCE.md`, разделы «v3.34 additions» и «v3.34: full screen on a
+chosen monitor, cursor over popups, drag icon, XdndProxy».
 
 ### Оформленный текст в буфере обмена
 
