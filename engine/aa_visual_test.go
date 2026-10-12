@@ -6,12 +6,14 @@ import (
 	"os"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // TestAA_VisualSample рендерит сцену с AA-примитивами в PNG для ручной
 // проверки (путь в env HEADLESS_GUI_AA_PNG; без него тест пропускается).
 func TestAA_VisualSample(t *testing.T) {
+	testreset.Globals(t)
 	out := os.Getenv("HEADLESS_GUI_AA_PNG")
 	if out == "" {
 		t.Skip("HEADLESS_GUI_AA_PNG не задан")

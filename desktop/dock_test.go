@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -35,6 +36,7 @@ func threeWindows() *FakeWindowModel {
 // Windows 11 рисуется полосой кнопок, под macOS — доком. Это требование
 // приёмки: тема меняет форму, а не только палитру.
 func TestDock_SameComponentDifferentShape(t *testing.T) {
+	testreset.Globals(t)
 	wm := threeWindows()
 
 	win := NewRunningApplications(managerFor(t, theme.ProfileWindows11), wm)
@@ -70,6 +72,7 @@ func TestDock_SameComponentDifferentShape(t *testing.T) {
 // TestDock_BehaviourIsIdenticalUnderBothThemes — активация и сворачивание
 // работают одинаково под обеими темами: презентер меняет вид, а не логику.
 func TestDock_BehaviourIsIdenticalUnderBothThemes(t *testing.T) {
+	testreset.Globals(t)
 	for _, name := range []string{theme.ProfileWindows11, theme.ProfileMacOS} {
 		name := name
 		t.Run(name, func(t *testing.T) {
@@ -97,6 +100,7 @@ func TestDock_BehaviourIsIdenticalUnderBothThemes(t *testing.T) {
 
 // TestDock_MagnifiesUnderCursor — значок под курсором крупнее соседей.
 func TestDock_MagnifiesUnderCursor(t *testing.T) {
+	testreset.Globals(t)
 	tm := managerFor(t, theme.ProfileMacOS)
 	icon, mag, _ := dockMetrics(tm)
 	if icon <= 0 || mag <= 1 {
@@ -122,6 +126,7 @@ func TestDock_MagnifiesUnderCursor(t *testing.T) {
 // TestDock_MeasureLeavesRoomForMagnification — док просит ширину с запасом,
 // иначе увеличенный значок выпихивал бы соседей за край.
 func TestDock_MeasureLeavesRoomForMagnification(t *testing.T) {
+	testreset.Globals(t)
 	wm := threeWindows()
 	r := NewRunningApplications(managerFor(t, theme.ProfileMacOS), wm)
 	defer r.Close()

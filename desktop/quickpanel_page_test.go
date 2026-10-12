@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -61,6 +62,7 @@ func newPageScene(t *testing.T, o qsOpts) *pageScene {
 }
 
 func TestDetailPage_LayoutAndBounds(t *testing.T) {
+	testreset.Globals(t)
 	s := newPageScene(t, qsOpts{})
 	body := desktop.QSZoneRect(s.q, "body")
 	if s.page.Bounds() != body {
@@ -85,6 +87,7 @@ func TestDetailPage_LayoutAndBounds(t *testing.T) {
 }
 
 func TestDetailPage_ListSelectToggleButton(t *testing.T) {
+	testreset.Globals(t)
 	s := newPageScene(t, qsOpts{})
 	q := s.q
 	// Строка списка: выбор и вызов onSelect; недоступная не нажимается.
@@ -128,6 +131,7 @@ func TestDetailPage_ListSelectToggleButton(t *testing.T) {
 // Ползунок страницы тянется мышью; отпускание за краем страницы и панели его
 // не «залипает».
 func TestDetailPage_SliderDragAndRelease(t *testing.T) {
+	testreset.Globals(t)
 	s := newPageScene(t, qsOpts{})
 	q := s.q
 	row := desktop.DPRect(s.page, 1, 0)
@@ -163,6 +167,7 @@ func TestDetailPage_SliderDragAndRelease(t *testing.T) {
 
 // Смена профиля и акцента перекрашивает страницу сама — без ApplyThemeTree.
 func TestDetailPage_RecolorsWithThemeAndAccent(t *testing.T) {
+	testreset.Globals(t)
 	s := newPageScene(t, qsOpts{})
 	list := desktop.DPRect(s.page, 0, 0)
 	btn := desktop.DPRect(s.page, 3, 0)
@@ -190,6 +195,7 @@ func TestDetailPage_RecolorsWithThemeAndAccent(t *testing.T) {
 // Клавиатура: Tab переводит на содержимое, стрелки ходят по строкам, Enter
 // выбирает, стрелки двигают ползунок.
 func TestDetailPage_Keyboard(t *testing.T) {
+	testreset.Globals(t)
 	s := newPageScene(t, qsOpts{})
 	q := s.q
 	q.SetFocused(true)
@@ -229,6 +235,7 @@ func TestDetailPage_Keyboard(t *testing.T) {
 // Страница выше области прокручивается колесом; рамка и содержимое не
 // выходят за границы.
 func TestDetailPage_ScrollsWhenTooTall(t *testing.T) {
+	testreset.Globals(t)
 	var p *desktop.DetailPage
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
 		q.Details = func(desktop.QuickActionID) *desktop.QuickDetails {
@@ -261,6 +268,7 @@ func TestDetailPage_ScrollsWhenTooTall(t *testing.T) {
 
 // SetItems, Clear и пустая страница не падают.
 func TestDetailPage_SetItemsAndClear(t *testing.T) {
+	testreset.Globals(t)
 	s := newPageScene(t, qsOpts{})
 	s.list.SetItems([]desktop.DetailListItem{{Title: "A"}, {Title: "B", Selected: true}})
 	if s.list.Selected() != 1 || len(s.list.Items()) != 2 {

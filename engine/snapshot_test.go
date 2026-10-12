@@ -4,11 +4,14 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // TestCanvasSnapshot_CopiesFilledRegion: Snapshot возвращает независимую копию
 // области back-буфера с известной заливкой (пиксельная проверка).
 func TestCanvasSnapshot_CopiesFilledRegion(t *testing.T) {
+	testreset.Globals(t)
 	e := New(100, 80, 20)
 	c := e.canvas
 	c.blitBackground() // чёрный фон
@@ -41,6 +44,7 @@ func TestCanvasSnapshot_CopiesFilledRegion(t *testing.T) {
 // TestCanvasSnapshot_ClipAndEmpty: область клипится по границам холста;
 // полностью вне холста → nil.
 func TestCanvasSnapshot_ClipAndEmpty(t *testing.T) {
+	testreset.Globals(t)
 	e := New(60, 40, 20)
 	c := e.canvas
 	c.blitBackground()
@@ -62,6 +66,7 @@ func TestCanvasSnapshot_ClipAndEmpty(t *testing.T) {
 // TestCanvasSnapshot_HiDPIPhysicalPixels: при scale>1 снимок отдаёт ФИЗИЧЕСКИЕ
 // пиксели (логический прямоугольник × scale).
 func TestCanvasSnapshot_HiDPIPhysicalPixels(t *testing.T) {
+	testreset.Globals(t)
 	e := New(100, 80, 20)
 	e.SetScale(2)
 	c := e.canvas

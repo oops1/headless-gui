@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -27,6 +28,7 @@ func stackGroup(t *testing.T, w *w11Fix, app AppID) richGroup {
 // Несколько уведомлений одного приложения сворачиваются в стопку: самое свежее
 // и кнопка «+N уведомл.».
 func TestW11Stack_CollapsedByDefault(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	g := stackGroup(t, w, "vpn")
@@ -61,6 +63,7 @@ func TestW11Stack_CollapsedByDefault(t *testing.T) {
 }
 
 func TestW11Stack_ClickExpandsAndHeaderCollapses(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	before := w.nc.OverlayBounds().Dy()
@@ -96,6 +99,7 @@ func TestW11Stack_ClickExpandsAndHeaderCollapses(t *testing.T) {
 }
 
 func TestW11Stack_CountFollowsNotifications(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.ns.Add(Notification{AppID: "vpn", AppName: "VPN", Title: "Ещё", Timestamp: w11Time().Add(-80 * time.Hour)})
 	w.open()
@@ -116,6 +120,7 @@ func TestW11Stack_CountFollowsNotifications(t *testing.T) {
 
 // Закрытие стопки целиком — крестиком заголовка.
 func TestW11Stack_GroupCloseDismissesAll(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	h := w.zone(t, zoneKey{kind: zoneGroup, app: "vpn"}).rect
@@ -130,6 +135,7 @@ func TestW11Stack_GroupCloseDismissesAll(t *testing.T) {
 }
 
 func TestW11Stack_Keyboard(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	w.nc.SetFocused(true)
@@ -161,6 +167,7 @@ func TestW11Stack_Keyboard(t *testing.T) {
 
 // Строка «+N уведомл.» берёт форму по числу и языку.
 func TestW11Stack_LabelPlural(t *testing.T) {
+	testreset.Globals(t)
 	for _, n := range []int{1, 2, 5, 11, 21, 100} {
 		if got := stackLabel(n); got != "+"+strconv.Itoa(n)+" уведомл." {
 			t.Errorf("RU %d: %q", n, got)
@@ -181,6 +188,7 @@ func TestW11Stack_LabelPlural(t *testing.T) {
 
 // Прежний вид (флаг погашен): заголовок со счётчиком и все карточки, стопки нет.
 func TestW11Stack_FlagOffKeepsGroup(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.tm.SetFlag(theme.KeyNotifyStack, false)
 	w.open()
@@ -200,6 +208,7 @@ func TestW11Stack_FlagOffKeepsGroup(t *testing.T) {
 // ─── «Фокусировка» ───────────────────────────────────────────────────────────
 
 func TestW11Focus_CompactLikeRealWindows11(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	l := w.cal.w11Layout(w.cal.rect())
@@ -241,6 +250,7 @@ func TestW11Focus_CompactLikeRealWindows11(t *testing.T) {
 
 // Прежний вид — флагом: заголовок и «Начать», модуль выше.
 func TestW11Focus_LegacyByFlag(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	compact := w.cal.OverlayBounds().Dy()
@@ -260,6 +270,7 @@ func TestW11Focus_LegacyByFlag(t *testing.T) {
 
 // Одна кнопка без выбора длительности.
 func TestW11Focus_SingleButton(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.cal.FocusSingleButton = true
 	w.open()

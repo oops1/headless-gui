@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -34,6 +35,7 @@ func popupCacheEngine(t *testing.T) (*Engine, *widget.Dropdown, *int, *sync.Mute
 
 // Инвалидация вне меню не заставляет пересобирать и переотдавать попап.
 func TestPopupCache_OutsideDamageKeepsSink(t *testing.T) {
+	testreset.Globals(t)
 	e, dd, calls, mu := popupCacheEngine(t)
 	defer e.Stop()
 
@@ -64,6 +66,7 @@ func TestPopupCache_OutsideDamageKeepsSink(t *testing.T) {
 
 // Кадры без рендера попапа не аллоцируют.
 func TestPopupCache_NoAllocPerFrame(t *testing.T) {
+	testreset.Globals(t)
 	e, dd, _, _ := popupCacheEngine(t)
 	defer e.Stop()
 
@@ -86,6 +89,7 @@ func TestPopupCache_NoAllocPerFrame(t *testing.T) {
 
 // Изменение содержимого меню доходит до хоста.
 func TestPopupCache_ContentChangeReachesSink(t *testing.T) {
+	testreset.Globals(t)
 	e, dd, calls, mu := popupCacheEngine(t)
 	defer e.Stop()
 	e.renderFrame()
@@ -109,6 +113,7 @@ func TestPopupCache_ContentChangeReachesSink(t *testing.T) {
 
 // Закрытие меню чистит кэш оверлеев.
 func TestPopupCache_ClearedOnClose(t *testing.T) {
+	testreset.Globals(t)
 	e, dd, _, _ := popupCacheEngine(t)
 	defer e.Stop()
 	e.renderFrame()
@@ -133,6 +138,7 @@ func TestPopupCache_ClearedOnClose(t *testing.T) {
 
 // Кэшированный канвас даёт те же пиксели, что и свежий.
 func TestPopupCache_PixelIdentity(t *testing.T) {
+	testreset.Globals(t)
 	e, dd, _, _ := popupCacheEngine(t)
 	defer e.Stop()
 	e.renderFrame()

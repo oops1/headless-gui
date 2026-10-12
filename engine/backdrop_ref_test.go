@@ -6,6 +6,8 @@ import (
 	"image/color"
 	"math/rand"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // Уменьшение и растяжение подложки переписаны ради скорости; кадр обязан
@@ -76,6 +78,7 @@ func noiseCanvas(r *rand.Rand, w, h int) *Canvas {
 }
 
 func TestBackdropScaleMatchesLegacy(t *testing.T) {
+	testreset.Globals(t)
 	r := rand.New(rand.NewSource(21))
 	const W, H = 157, 93
 	for iter := 0; iter < 300; iter++ {

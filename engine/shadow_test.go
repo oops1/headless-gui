@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // shadowColor — базовый цвет тени для тестов: полупрозрачный чёрный.
@@ -32,6 +34,7 @@ func darkness(c *Canvas, x, y int) int {
 // центром прямоугольника и монотонно светлеет по мере ухода в сторону от
 // него по горизонтали.
 func TestSoftShadow_DarkerUnderCenterFadesOutward(t *testing.T) {
+	testreset.Globals(t)
 	c := newWhiteTestCanvas(300, 200) // шире обычного — точка "далеко" должна остаться в границах холста
 	r := image.Rect(60, 60, 140, 100) // 80×40
 	c.DrawSoftShadow(r, 8, 16, shadowColor)
@@ -59,6 +62,7 @@ func TestSoftShadow_DarkerUnderCenterFadesOutward(t *testing.T) {
 // TestSoftShadow_OffsetDown — тень смещена вниз: под нижней гранью она
 // заметнее, чем над верхней (на равном расстоянии от границ прямоугольника).
 func TestSoftShadow_OffsetDown(t *testing.T) {
+	testreset.Globals(t)
 	c := newWhiteTestCanvas(200, 200)
 	r := image.Rect(60, 60, 140, 120)
 	c.DrawSoftShadow(r, 8, 20, shadowColor)
@@ -76,6 +80,7 @@ func TestSoftShadow_OffsetDown(t *testing.T) {
 // TestSoftShadow_NoOpWhenElevationZeroOrTransparent — elevation<=0 либо
 // полностью прозрачный цвет не меняют холст ни на пиксель.
 func TestSoftShadow_NoOpWhenElevationZeroOrTransparent(t *testing.T) {
+	testreset.Globals(t)
 	r := image.Rect(50, 50, 150, 130)
 
 	t.Run("elevation<=0", func(t *testing.T) {
@@ -101,6 +106,7 @@ func TestSoftShadow_NoOpWhenElevationZeroOrTransparent(t *testing.T) {
 // TestSoftShadow_RespectsRectClip — тень не рисуется за пределами
 // прямоугольного отсечения, установленного SetClip.
 func TestSoftShadow_RespectsRectClip(t *testing.T) {
+	testreset.Globals(t)
 	c := newWhiteTestCanvas(200, 200)
 	r := image.Rect(60, 60, 140, 120)
 
@@ -128,6 +134,7 @@ func TestSoftShadow_RespectsRectClip(t *testing.T) {
 // TestSoftShadow_RespectsRoundClip — тень не рисуется в углу, срезанном
 // SetRoundClip.
 func TestSoftShadow_RespectsRoundClip(t *testing.T) {
+	testreset.Globals(t)
 	c := newWhiteTestCanvas(200, 200)
 	r := image.Rect(20, 20, 180, 180)
 

@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // flatImage — однотонное изображение w×h.
@@ -45,6 +47,7 @@ func maxPixDiff(a, b *image.RGBA) int {
 // ту же форму, что и заливка под тем же клипом, — для каждого пути отрисовки,
 // масштаба и порядка каналов.
 func TestBlitOver_RoundClip(t *testing.T) {
+	testreset.Globals(t)
 	opaque := color.RGBA{R: 220, G: 10, B: 10, A: 255}
 	// Полупрозрачное изображение: premultiplied (110/255 от 220 ≈ 95).
 	halfImg := color.RGBA{R: 95, G: 4, B: 4, A: 110}
@@ -134,6 +137,7 @@ func TestBlitOver_RoundClip(t *testing.T) {
 
 // Картинка частично за пределами контура — обрезается так же, как заливка.
 func TestBlitOver_RoundClipPartialOverlap(t *testing.T) {
+	testreset.Globals(t)
 	c := imageRoundCanvas(120, 100, 1, FormatRGBA)
 	ref := imageRoundCanvas(120, 100, 1, FormatRGBA)
 	col := color.RGBA{R: 200, G: 200, B: 0, A: 255}
@@ -156,6 +160,7 @@ func TestBlitOver_RoundClipPartialOverlap(t *testing.T) {
 // Без скругления блит идёт прежним путём: кадр тот же, что у прямого
 // blitOverRect.
 func TestBlitOver_NoRoundUnchanged(t *testing.T) {
+	testreset.Globals(t)
 	c := imageRoundCanvas(120, 100, 1, FormatRGBA)
 	ref := imageRoundCanvas(120, 100, 1, FormatRGBA)
 	img := testIcon(3)

@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -88,6 +89,7 @@ func diffGoldenScene(t *testing.T, th *widget.Theme, prep func(d *widget.DiffVie
 }
 
 func TestGolden_DiffView(t *testing.T) {
+	testreset.Globals(t)
 	withTheme(t, "Win11 Light", func(th *widget.Theme) {
 		img := diffGoldenScene(t, th, func(d *widget.DiffView) {
 			d.SetReadOnly(widget.DiffLeft, true)

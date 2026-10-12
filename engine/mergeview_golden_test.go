@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -91,6 +92,7 @@ func mergeGoldenScene(t *testing.T, th *widget.Theme, prep func(m *widget.MergeV
 }
 
 func TestGolden_MergeView(t *testing.T) {
+	testreset.Globals(t)
 	withTheme(t, "Win11 Light", func(th *widget.Theme) {
 		img := mergeGoldenScene(t, th, func(m *widget.MergeView) {
 			m.SetFocused(true)

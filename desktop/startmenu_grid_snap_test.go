@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -13,6 +14,7 @@ import (
 // 100/150/200 %. Сами по себе тесты проверяют лишь, что кадр получен; смотреть
 // результат надо глазами.
 func TestStartMenu11_Snapshots(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 1280, 800
 	for _, dark := range []bool{false, true} {
 		name := "light"

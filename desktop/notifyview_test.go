@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -144,6 +145,7 @@ func key(e widget.KeyCode) widget.KeyEvent { return widget.KeyEvent{Code: e, Pre
 // После закрытия и повторного открытия центр снова получает изменения
 // источника. Раньше подписка оформлялась в конструкторе, а Close её снимал.
 func TestNotificationCenter_ResubscribesAfterReopen(t *testing.T) {
+	testreset.Globals(t)
 	for _, name := range []struct {
 		what string
 		tm   func(*testing.T) *theme.Manager
@@ -193,6 +195,7 @@ func pointInRect(r image.Rectangle) image.Point {
 // Закрытие любым способом (клик мимо, Esc, DismissAt) отписывает центр:
 // источник не держит закрытую панель.
 func TestNotificationCenter_UnsubscribesOnAnyClose(t *testing.T) {
+	testreset.Globals(t)
 	ns := notesFake()
 	nc := NewNotificationCenter(richNotifTheme(t), ns)
 	nc.Screen = panelScreen()
@@ -225,6 +228,7 @@ func TestNotificationCenter_UnsubscribesOnAnyClose(t *testing.T) {
 // Высота центра Windows 10 не зависит от числа карточек: от верха экрана до
 // панели задач. Раньше она росла и при ~12 карточках закрывала панель.
 func TestNotificationCenter_Win10HeightIsFixed(t *testing.T) {
+	testreset.Globals(t)
 	var want image.Rectangle
 	for _, n := range []int{0, 1, 3, 12, 60} {
 		nc, _, _ := richFixture(t, n)
@@ -245,6 +249,7 @@ func TestNotificationCenter_Win10HeightIsFixed(t *testing.T) {
 
 // Плоский центр не меняется: растёт вместе с карточками, как раньше.
 func TestNotificationCenter_FlatStillGrows(t *testing.T) {
+	testreset.Globals(t)
 	heights := map[int]int{}
 	for _, n := range []int{1, 3} {
 		ns := NewFakeNotifications()
@@ -271,6 +276,7 @@ func TestNotificationCenter_FlatStillGrows(t *testing.T) {
 // тоже прилегает к панели вплотную — так на референсе WinLine; его зазор
 // задаёт собственная метрика меню.
 func TestNotificationCenter_MarginOnlyForWin10Center(t *testing.T) {
+	testreset.Globals(t)
 	tm := richNotifTheme(t)
 	nc, _, _ := richFixture(t, 3)
 	if got := nc.OverlayBounds().Max.Y; got != panelAnchor().Min.Y {
@@ -294,6 +300,7 @@ func TestNotificationCenter_MarginOnlyForWin10Center(t *testing.T) {
 
 // Метрика зазора работает: ненулевое значение отодвигает центр от панели.
 func TestNotificationCenter_MarginFromMetric(t *testing.T) {
+	testreset.Globals(t)
 	tm := richNotifTheme(t)
 	p := theme.NewProfile("win10-gap")
 	p.Parent = theme.ProfileWindows10
@@ -316,6 +323,7 @@ func TestNotificationCenter_MarginFromMetric(t *testing.T) {
 
 // WorkArea главнее значка: тот может быть ниже панели.
 func TestNotificationCenter_WorkAreaWins(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 2)
 	nc.WorkArea = image.Rect(0, 30, 800, 500)
 	nc.Invalidate()
@@ -327,6 +335,7 @@ func TestNotificationCenter_WorkAreaWins(t *testing.T) {
 
 // Карточки лежат в прокрутке: колесо двигает список, а не панель.
 func TestNotificationCenter_ListScrolls(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 14)
 	l := nc.testLayout()
 	if l.maxScrl <= 0 {
@@ -365,6 +374,7 @@ func TestNotificationCenter_ListScrolls(t *testing.T) {
 
 // Карточка, ушедшая за край списка, не нажимается там, где её не видно.
 func TestNotificationCenter_ClippedCardNotClickable(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 14)
 	l := nc.testLayout()
 	// Точка под областью списка — на строке ссылок/плитках — не попадает в карточки.
@@ -377,6 +387,7 @@ func TestNotificationCenter_ClippedCardNotClickable(t *testing.T) {
 // ─── Группы, карточки, очистка ───────────────────────────────────────────────
 
 func TestNotificationCenter_GroupsByApp(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 6)
 	l := nc.testLayout()
 	if len(l.groups) != 2 {
@@ -405,6 +416,7 @@ func TestNotificationCenter_GroupsByApp(t *testing.T) {
 }
 
 func TestNotificationCenter_CollapseGroup(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 6)
 	app := nc.testLayout().groups[0].app
 	cards := len(nc.testLayout().groups[0].cards)
@@ -424,6 +436,7 @@ func TestNotificationCenter_CollapseGroup(t *testing.T) {
 }
 
 func TestNotificationCenter_CloseGroupAndClear(t *testing.T) {
+	testreset.Globals(t)
 	nc, ns, _ := richFixture(t, 6)
 	app := nc.testLayout().groups[0].app
 	// Крестик группы виден при наведении, но нажимается всегда.
@@ -449,6 +462,7 @@ func TestNotificationCenter_CloseGroupAndClear(t *testing.T) {
 }
 
 func TestNotificationCenter_CardCloseDismissesOne(t *testing.T) {
+	testreset.Globals(t)
 	nc, ns, _ := richFixture(t, 4)
 	c := nc.testLayout().groups[0].cards[0]
 	nc.clickZone(t, zoneKey{kind: zoneCardClose, note: c.n.ID})
@@ -463,6 +477,7 @@ func TestNotificationCenter_CardCloseDismissesOne(t *testing.T) {
 }
 
 func TestNotificationCenter_ManageLink(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 2)
 	var called, wasOpen int
 	nc.OnManage = func() {
@@ -486,6 +501,7 @@ func TestNotificationCenter_ManageLink(t *testing.T) {
 // Длинный текст: свёрнутая карточка — две строки с многоточием и шеврон;
 // раскрытая — весь текст.
 func TestNotificationCenter_CardBodyExpands(t *testing.T) {
+	testreset.Globals(t)
 	ns := NewFakeNotifications()
 	long := ""
 	for i := 0; i < 30; i++ {
@@ -525,6 +541,7 @@ func TestNotificationCenter_CardBodyExpands(t *testing.T) {
 
 // Короткий текст без действий: раскрывать нечего, шеврона нет.
 func TestNotificationCenter_ShortCardHasNoToggle(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 1)
 	if c := nc.testLayout().groups[0].cards[0]; c.canToggle {
 		t.Error("у короткой карточки без действий есть шеврон раскрытия")
@@ -558,6 +575,7 @@ func actionFixture(t *testing.T, keep bool) (*NotificationCenter, *FakeNotificat
 }
 
 func TestNotificationCenter_ButtonActionCarriesInputsAndDismisses(t *testing.T) {
+	testreset.Globals(t)
 	nc, ns, id, events := actionFixture(t, false)
 	nc.clickZone(t, zoneKey{kind: zoneAction, note: id, action: "go"})
 	if len(*events) != 1 {
@@ -576,6 +594,7 @@ func TestNotificationCenter_ButtonActionCarriesInputsAndDismisses(t *testing.T) 
 }
 
 func TestNotificationCenter_KeepActionLeavesNotification(t *testing.T) {
+	testreset.Globals(t)
 	nc, ns, id, events := actionFixture(t, true)
 	nc.clickZone(t, zoneKey{kind: zoneAction, note: id, action: "go"})
 	nc.clickZone(t, zoneKey{kind: zoneAction, note: id, action: "more"})
@@ -588,6 +607,7 @@ func TestNotificationCenter_KeepActionLeavesNotification(t *testing.T) {
 }
 
 func TestNotificationCenter_SelectDropdown(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, id, events := actionFixture(t, false)
 	sel := zoneKey{kind: zoneSelect, note: id, action: "when"}
 	nc.clickZone(t, sel)
@@ -611,6 +631,7 @@ func TestNotificationCenter_SelectDropdown(t *testing.T) {
 }
 
 func TestNotificationCenter_DropdownClosesOnOutsideClickAndEsc(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, id, _ := actionFixture(t, false)
 	sel := zoneKey{kind: zoneSelect, note: id, action: "when"}
 	nc.clickZone(t, sel)
@@ -632,6 +653,7 @@ func TestNotificationCenter_DropdownClosesOnOutsideClickAndEsc(t *testing.T) {
 }
 
 func TestNotificationCenter_ReplyField(t *testing.T) {
+	testreset.Globals(t)
 	nc, ns, id, events := actionFixture(t, false)
 	field := zoneKey{kind: zoneReply, note: id, action: "say"}
 	nc.clickZone(t, field)
@@ -662,6 +684,7 @@ func TestNotificationCenter_ReplyField(t *testing.T) {
 }
 
 func TestNotificationCenter_EmptyReplyIsNotSent(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, id, events := actionFixture(t, false)
 	nc.clickZone(t, zoneKey{kind: zoneReplySend, note: id, action: "say"})
 	if len(*events) != 0 {
@@ -672,6 +695,7 @@ func TestNotificationCenter_EmptyReplyIsNotSent(t *testing.T) {
 // Нажатие на саму карточку — активация по умолчанию: событие без действия,
 // карточка снимается, центр закрывается.
 func TestNotificationCenter_CardClickActivates(t *testing.T) {
+	testreset.Globals(t)
 	nc, ns, id, events := actionFixture(t, false)
 	l := nc.testLayout()
 	c := l.groups[0].cards[0]
@@ -698,6 +722,7 @@ type actionSource struct {
 func (a *actionSource) InvokeNotificationAction(e NotificationActionEvent) { a.got = append(a.got, e) }
 
 func TestNotificationCenter_SourceReceivesActions(t *testing.T) {
+	testreset.Globals(t)
 	src := &actionSource{FakeNotifications: NewFakeNotifications()}
 	id := src.Add(Notification{AppID: "a", Title: "x", Time: sampleTime(),
 		Actions: []NotificationAction{{ID: "ok", Kind: NotificationActionButton, Title: "Да"}}})
@@ -715,6 +740,7 @@ func TestNotificationCenter_SourceReceivesActions(t *testing.T) {
 
 // Модель без значка и без действий не мешает: Notification из прежней модели.
 func TestNotification_LegacyModelStillWorks(t *testing.T) {
+	testreset.Globals(t)
 	n := Notification{ID: 1, Title: "a", Body: "b", AppID: "x", Time: sampleTime()}
 	if !n.At().Equal(sampleTime()) {
 		t.Error("At() не вернул Time")
@@ -728,6 +754,7 @@ func TestNotification_LegacyModelStillWorks(t *testing.T) {
 // ─── Быстрые действия ────────────────────────────────────────────────────────
 
 func TestNotificationCenter_QuickCollapsedIsOneRow(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 2)
 	l := nc.testLayout()
 	if len(l.tiles) != 4 {
@@ -767,6 +794,7 @@ func TestNotificationCenter_QuickCollapsedIsOneRow(t *testing.T) {
 }
 
 func TestNotificationCenter_TileToggle(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, q := richFixture(t, 1)
 	nc.clickZone(t, zoneKey{kind: zoneTile, action: "bt"})
 	if len(q.Toggled) != 1 || q.Toggled[0] != "bt" {
@@ -790,6 +818,7 @@ func TestNotificationCenter_TileToggle(t *testing.T) {
 
 // Изменение одной плитки перерисовывает только её.
 func TestNotificationCenter_SingleTileRepaintsOnlyThatTile(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, q := richFixture(t, 2)
 	inv := watchInvalidations(t)
 	var tile image.Rectangle
@@ -826,6 +855,7 @@ func TestNotificationCenter_SingleTileRepaintsOnlyThatTile(t *testing.T) {
 // ─── Клавиатура ──────────────────────────────────────────────────────────────
 
 func TestNotificationCenter_KeyboardTabOrderAndActivation(t *testing.T) {
+	testreset.Globals(t)
 	nc, ns, q := richFixture(t, 2)
 	if !nc.AcceptsTab() || nc.TabIndex() != 0 {
 		t.Fatal("открытый центр не принимает Tab")
@@ -869,6 +899,7 @@ func TestNotificationCenter_KeyboardTabOrderAndActivation(t *testing.T) {
 }
 
 func TestNotificationCenter_KeyboardTilesFollowGrid(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 1)
 	nc.SetQuickExpanded(true)
 	nc.view.focus = zoneKey{kind: zoneTile, action: "wifi"}
@@ -893,6 +924,7 @@ func TestNotificationCenter_KeyboardTilesFollowGrid(t *testing.T) {
 }
 
 func TestNotificationCenter_FocusRingOnlyForKeyboard(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 2)
 	nc.SetFocused(true)
 	if !nc.FocusVisible() {
@@ -910,6 +942,7 @@ func TestNotificationCenter_FocusRingOnlyForKeyboard(t *testing.T) {
 
 // Esc из списка закрывает всю группу панелей; фокус возвращается.
 func TestNotificationCenter_RevealScrollsFocusedCardIntoView(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 14)
 	checked := 0
 	for i := 0; i < 10; i++ {
@@ -942,6 +975,7 @@ func drawTexts(nc *NotificationCenter) []recText {
 }
 
 func TestNotificationCenter_LanguageSwitchOnOpenCenter(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 3)
 	useLanguage(t, "RU")
 	if tx := drawTexts(nc); !containsText(tx, "Управление уведомлениями") || !containsText(tx, "Очистить уведомления") {
@@ -963,6 +997,7 @@ func TestNotificationCenter_LanguageSwitchOnOpenCenter(t *testing.T) {
 
 // Тот же компонент меняет вид вместе с темой: плоский → Windows 10 → плоский.
 func TestNotificationCenter_ThemeSwitchWithoutRecreate(t *testing.T) {
+	testreset.Globals(t)
 	tm := flatNotifTheme(t)
 	ns := notesFake()
 	nc := NewNotificationCenter(tm, ns)
@@ -996,6 +1031,7 @@ func TestNotificationCenter_ThemeSwitchWithoutRecreate(t *testing.T) {
 
 // Открытие инвалидирует только область центра (и значок, от которого открыт).
 func TestNotificationCenter_OpenInvalidatesOnlyItsArea(t *testing.T) {
+	testreset.Globals(t)
 	ns := notesFake()
 	nc := NewNotificationCenter(richNotifTheme(t), ns)
 	nc.Screen = panelScreen()
@@ -1016,6 +1052,7 @@ func TestNotificationCenter_OpenInvalidatesOnlyItsArea(t *testing.T) {
 // ─── Масштаб: текст не вылезает из своих рамок ───────────────────────────────
 
 func TestNotificationCenter_TextFitsItsBoxes(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 1)
 	// Карточка с длинными словами и действиями.
 	ns := NewFakeNotifications()
@@ -1061,6 +1098,7 @@ func TestNotificationCenter_TextFitsItsBoxes(t *testing.T) {
 }
 
 func TestNotificationCenter_LayoutScaleIndependent(t *testing.T) {
+	testreset.Globals(t)
 	// Раскладка идёт в логических точках: тот же набор даёт те же прямоугольники
 	// при любом масштабе (масштаб применяет холст).
 	nc, _, _ := richFixture(t, 5)
@@ -1092,6 +1130,7 @@ func toastFixture(t *testing.T) (*NotificationToast, *FakeNotifications) {
 }
 
 func TestNotificationToast_ShowsOnlyNewNotifications(t *testing.T) {
+	testreset.Globals(t)
 	ts, ns := toastFixture(t)
 	if ts.IsOpen() {
 		t.Fatal("тост показал уведомление, лежавшее до него")
@@ -1115,6 +1154,7 @@ func TestNotificationToast_ShowsOnlyNewNotifications(t *testing.T) {
 }
 
 func TestNotificationToast_AutoHides(t *testing.T) {
+	testreset.Globals(t)
 	ts, ns := toastFixture(t)
 	ts.Timeout = 40 * time.Millisecond
 	ns.Add(Notification{AppID: "mail", Title: "Письмо", Time: sampleTime()})
@@ -1134,6 +1174,7 @@ func TestNotificationToast_AutoHides(t *testing.T) {
 }
 
 func TestNotificationToast_HoverPausesTimer(t *testing.T) {
+	testreset.Globals(t)
 	ts, ns := toastFixture(t)
 	ts.Timeout = 60 * time.Millisecond
 	ns.Add(Notification{AppID: "mail", Title: "Письмо", Time: sampleTime()})
@@ -1155,6 +1196,7 @@ func TestNotificationToast_HoverPausesTimer(t *testing.T) {
 }
 
 func TestNotificationToast_CloseButtonHidesButKeepsNotification(t *testing.T) {
+	testreset.Globals(t)
 	ts, ns := toastFixture(t)
 	id := ns.Add(Notification{AppID: "mail", Title: "Письмо", Time: sampleTime()})
 	ts.Settle()
@@ -1175,6 +1217,7 @@ func TestNotificationToast_CloseButtonHidesButKeepsNotification(t *testing.T) {
 }
 
 func TestNotificationToast_ActionButton(t *testing.T) {
+	testreset.Globals(t)
 	ts, ns := toastFixture(t)
 	var got []NotificationActionEvent
 	ts.OnAction = func(e NotificationActionEvent) { got = append(got, e) }
@@ -1198,6 +1241,7 @@ func TestNotificationToast_ActionButton(t *testing.T) {
 }
 
 func TestNotificationToast_SuppressedWhileCenterOpen(t *testing.T) {
+	testreset.Globals(t)
 	ts, ns := toastFixture(t)
 	center := NewNotificationCenter(richNotifTheme(t), ns)
 	center.Screen = panelScreen()
@@ -1221,6 +1265,7 @@ func TestNotificationToast_SuppressedWhileCenterOpen(t *testing.T) {
 }
 
 func TestNotificationToast_NotShownInFlatTheme(t *testing.T) {
+	testreset.Globals(t)
 	ns := NewFakeNotifications()
 	ts := NewNotificationToast(flatNotifTheme(t), ns)
 	ts.Screen = panelScreen()
@@ -1233,6 +1278,7 @@ func TestNotificationToast_NotShownInFlatTheme(t *testing.T) {
 }
 
 func TestNotificationToast_ClickOutsideAndEscDoNotHide(t *testing.T) {
+	testreset.Globals(t)
 	ts, ns := toastFixture(t)
 	ns.Add(Notification{AppID: "mail", Title: "Письмо", Time: sampleTime()})
 	ts.Settle()
@@ -1247,6 +1293,7 @@ func TestNotificationToast_ClickOutsideAndEscDoNotHide(t *testing.T) {
 }
 
 func TestNotificationToast_CloseUnsubscribes(t *testing.T) {
+	testreset.Globals(t)
 	ts, ns := toastFixture(t)
 	ts.Close()
 	ns.mu.Lock()

@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/image/draw"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -85,6 +86,7 @@ func diffMax(a, b *image.RGBA, r image.Rectangle) int {
 // источника и направления масштабирования; допуск — на округление (x/image
 // отбрасывает младший байт 16-битного значения, здесь округление).
 func TestDrawImageRect_MatchesFullScale(t *testing.T) {
+	testreset.Globals(t)
 	base := noiseRGBA(97, 71, 1, false)
 	baseA := noiseRGBA(97, 71, 2, true)
 	sources := []struct {
@@ -160,6 +162,7 @@ func TestDrawImageRect_MatchesFullScale(t *testing.T) {
 
 // Гигантский dr (×1000), клип — небольшое окно: рисуется мгновенно и гладко.
 func TestDrawImageRect_HugeDestination(t *testing.T) {
+	testreset.Globals(t)
 	src := noiseRGBA(60, 40, 3, false)
 	sr := image.Rect(0, 0, 60, 40)
 	dr := image.Rect(-30000, -20000, 30000, 20000) // ×1000
@@ -201,6 +204,7 @@ func TestDrawImageRect_HugeDestination(t *testing.T) {
 // Работа пропорциональна клипу: тот же dr с узким клипом дороже совсем
 // чуть-чуть, а не как полный размер.
 func TestDrawImageRect_WorkProportionalToClip(t *testing.T) {
+	testreset.Globals(t)
 	src := noiseRGBA(2000, 1500, 4, false)
 	sr := image.Rect(0, 0, 2000, 1500)
 	dr := image.Rect(-4000, -3000, 12000, 9000) // ×8
@@ -227,6 +231,7 @@ func TestDrawImageRect_WorkProportionalToClip(t *testing.T) {
 
 // Клип целиком вне dr — ничего не делает и ничего не выделяет.
 func TestDrawImageRect_NothingVisible(t *testing.T) {
+	testreset.Globals(t)
 	src := noiseRGBA(32, 32, 5, false)
 	c := newTestCanvas(100, 100)
 	before := append([]byte(nil), c.back.Pix...)
@@ -244,6 +249,7 @@ func TestDrawImageRect_NothingVisible(t *testing.T) {
 // sr за границами источника обрезается вместе с пропорциональной частью dr:
 // картинка не растягивается.
 func TestDrawImageRect_SrcOutOfBounds(t *testing.T) {
+	testreset.Globals(t)
 	src := noiseRGBA(50, 50, 6, false)
 	a := newTestCanvas(200, 200)
 	a.back = image.NewRGBA(image.Rect(0, 0, 200, 200))
@@ -261,6 +267,7 @@ func TestDrawImageRect_SrcOutOfBounds(t *testing.T) {
 // Скруглённый клип и порядок каналов BGRX работают как у остальных
 // изображений.
 func TestDrawImageRect_RoundClipAndBGRX(t *testing.T) {
+	testreset.Globals(t)
 	src := noiseRGBA(64, 48, 7, false)
 	sr := src.Bounds()
 	dr := image.Rect(10, 10, 90, 70)
@@ -297,6 +304,7 @@ func TestDrawImageRect_RoundClipAndBGRX(t *testing.T) {
 // даёт то же, что DrawImageScaled (оба — билинейное ядро x/image), — это и
 // есть «DrawImageRect рисует так же, как раньше, только дешевле».
 func TestDrawImageRect_AgreesWithDrawImageScaled(t *testing.T) {
+	testreset.Globals(t)
 	src := noiseRGBA(80, 60, 8, false)
 	for _, scale := range []float64{1, 1.5, 2} {
 		a := imageRoundCanvas(160, 120, scale, FormatRGBA)

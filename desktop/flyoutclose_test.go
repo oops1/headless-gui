@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -15,6 +16,7 @@ import (
 // прямоугольник. Кадр собирается по повреждениям (RenderOnDemand), как у
 // потребителя, который отдаёт только изменившееся.
 func TestFlyout_CloseLeavesNoTrace(t *testing.T) {
+	testreset.Globals(t)
 	testCloseLeavesNoTrace(t, false)
 }
 
@@ -22,6 +24,7 @@ func TestFlyout_CloseLeavesNoTrace(t *testing.T) {
 // совсем, содержимое освобождено и Size() отдаёт ноль. На последнем шаге
 // restRect() пуст, и без запомненного при Close места область не заявлялась.
 func TestFlyout_CloseLeavesNoTraceWhenSizeCollapses(t *testing.T) {
+	testreset.Globals(t)
 	testCloseLeavesNoTrace(t, true)
 }
 
@@ -45,7 +48,7 @@ func testCloseLeavesNoTrace(t *testing.T, collapse bool) {
 	f.SetBounds(image.Rect(0, h-40, 48, h))
 	root.AddChild(f)
 
-	eng := engine.New(w, h, 60)
+	eng := testengine.New(t, w, h, 60)
 	eng.SetRenderOnDemand(true)
 	eng.SetRoot(root)
 	bg := eng.RenderOnce().RGBAAt(150, 100)

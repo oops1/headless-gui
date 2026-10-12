@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -64,6 +65,9 @@ func tiledMenu(t *testing.T) (*StartMenu, *StaticAppCatalog) {
 	m.SetSidebarItems(tileSidebar())
 	m.SetTileGroups(tileGroups())
 	m.Open(tileAnchor())
+	// Закрытие гасит таймер тонкой полосы прокрутки (fadeBar): без него он
+	// срабатывает через 1,2 с уже в чужом тесте и будит там кадры.
+	t.Cleanup(m.Close)
 	m.Settle()
 	finishAnimations()
 	return m, cat
@@ -85,6 +89,7 @@ func pressKey(m *StartMenu, code widget.KeyCode) {
 // Вид меню выбирает презентер темы, а не имя темы: Windows 10 получает плитки,
 // Windows 11 и остальные — прежний плоский список.
 func TestTiles_PresenterChosenByThemeToken(t *testing.T) {
+	testreset.Globals(t)
 	for name, want := range map[string]bool{
 		theme.ProfileWindows10: true, theme.ProfileWindows10Dark: true,
 		theme.ProfileWindows11: false, theme.ProfileWindows2000: false, theme.ProfileMacOS: false,
@@ -99,6 +104,7 @@ func TestTiles_PresenterChosenByThemeToken(t *testing.T) {
 // Смена темы на открытом меню меняет его вид без пересоздания: тот же объект
 // и открытая панель.
 func TestTiles_ThemeSwitchOnOpenMenuKeepsComponent(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	tm := m.Theme()
 	if !m.tiled() {
@@ -134,6 +140,7 @@ func TestTiles_ThemeSwitchOnOpenMenuKeepsComponent(t *testing.T) {
 // рамка в один пиксель с каждой стороны; высота — до верха рабочей области
 // (экран минус панель), но не больше желаемой.
 func TestTiles_SizeFromMetrics(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	sz := m.OverlayBounds()
 	if want := 653 + 2; sz.Dx() != want {
@@ -148,6 +155,7 @@ func TestTiles_SizeFromMetrics(t *testing.T) {
 }
 
 func TestTiles_HeightClampedByScreenAndMinimum(t *testing.T) {
+	testreset.Globals(t)
 	cases := []struct {
 		name   string
 		screen image.Rectangle
@@ -189,6 +197,7 @@ func TestTiles_HeightClampedByScreenAndMinimum(t *testing.T) {
 // ─── Боковая панель ──────────────────────────────────────────────────────────
 
 func TestTiles_SidebarExpandsByTweenAndCollapsesOnClickOutside(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	g := m.startGeometry(m.contentRect())
 	if g.sideW != 48 {
@@ -226,6 +235,7 @@ func TestTiles_SidebarExpandsByTweenAndCollapsesOnClickOutside(t *testing.T) {
 // Нулевая длительность в теме — панель разворачивается сразу (Windows 2000
 // держит так все анимации).
 func TestTiles_SidebarInstantWhenThemeHasNoAnimation(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows10)
 	p := theme.NewProfile("win10-instant")
@@ -247,6 +257,7 @@ func TestTiles_SidebarInstantWhenThemeHasNoAnimation(t *testing.T) {
 }
 
 func TestTiles_SidebarItemsActivateAndKeepOpen(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	var got []string
 	m.OnSidebarActivate = func(id string) { got = append(got, id) }
@@ -268,6 +279,7 @@ func TestTiles_SidebarItemsActivateAndKeepOpen(t *testing.T) {
 }
 
 func TestTiles_HamburgerTogglesSidebar(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	clickMenu(m, m.keyRect(keySideMenu))
 	if !m.SidebarExpanded() {
@@ -283,6 +295,7 @@ func TestTiles_HamburgerTogglesSidebar(t *testing.T) {
 // ─── Список приложений ───────────────────────────────────────────────────────
 
 func TestTiles_ListHasLettersAndRecent(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	src := NewFakeStartSource(
 		[]StartEntry{{ID: "new", Title: "Новая"}},
@@ -306,6 +319,7 @@ func TestTiles_ListHasLettersAndRecent(t *testing.T) {
 // Список строится из каталога, когда источник не задан: буквы по первой букве
 // названия.
 func TestTiles_ListFromCatalogByDefault(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	rows, _ := m.listRows()
 	letters := 0
@@ -320,6 +334,7 @@ func TestTiles_ListFromCatalogByDefault(t *testing.T) {
 }
 
 func TestTiles_FolderExpandsInPlace(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	folder := StartEntry{ID: "", Title: "7-Zip", Folder: true, Children: []StartEntry{
 		{ID: "z1", Title: "7-Zip File Manager"}, {ID: "z2", Title: "7-Zip Help"},
@@ -348,6 +363,7 @@ func TestTiles_FolderExpandsInPlace(t *testing.T) {
 }
 
 func TestTiles_ClickLaunchesAppAndCloses(t *testing.T) {
+	testreset.Globals(t)
 	m, cat := tiledMenu(t)
 	rows := m.interactiveRows()
 	clickMenu(m, m.keyRect(prefRow+rows[0].key))
@@ -360,6 +376,7 @@ func TestTiles_ClickLaunchesAppAndCloses(t *testing.T) {
 }
 
 func TestTiles_WheelScrollsListAndClamps(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	g := m.startGeometry(m.contentRect())
 	pt := image.Pt(g.list.Min.X+50, g.list.Min.Y+100)
@@ -390,6 +407,7 @@ func TestTiles_WheelScrollsListAndClamps(t *testing.T) {
 // Виртуализация: в кадр попадают только видимые строки, как бы ни был длинен
 // список.
 func TestTiles_ListIsVirtualised(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	var apps []AppInfo
 	for i := 0; i < 3000; i++ {
@@ -433,6 +451,7 @@ func containsPrefixText(texts []recText, prefix string) bool {
 // Сетка: средняя плитка 100×100, широкая 204×100, с шагом 4; в группе из шести
 // средних — две строки по три (308 px).
 func TestTiles_GridGeometry(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	g := m.startGeometry(m.contentRect())
 	l := m.layoutTiles(g)
@@ -469,6 +488,7 @@ func TestTiles_GridGeometry(t *testing.T) {
 }
 
 func TestPlaceTiles(t *testing.T) {
+	testreset.Globals(t)
 	// Малые плитки заполняют пустоты, оставшиеся рядом с широкой.
 	places, rows := placeTiles([]TileSize{TileWide, TileSmall, TileSmall, TileMedium, TileLarge}, 6)
 	want := []tilePlace{
@@ -507,6 +527,7 @@ func TestPlaceTiles(t *testing.T) {
 
 // SetTileContent перерисовывает ровно одну плитку и ничего больше.
 func TestTiles_SetTileContentInvalidatesOnlyThatTile(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	var rects []image.Rectangle
 	fulls := 0
@@ -539,6 +560,7 @@ func TestTiles_SetTileContentInvalidatesOnlyThatTile(t *testing.T) {
 }
 
 func TestTiles_TileClickLaunchesAppOrCallback(t *testing.T) {
+	testreset.Globals(t)
 	m, cat := tiledMenu(t)
 	clickMenu(m, m.tileRectAbs("t1"))
 	if len(cat.Launched) != 1 || cat.Launched[0] != "t1" {
@@ -559,6 +581,7 @@ func TestTiles_TileClickLaunchesAppOrCallback(t *testing.T) {
 }
 
 func TestTiles_DragReordersAndReportsNewOrder(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	var got []TileGroup
 	m.OnTilesChanged = func(g []TileGroup) { got = g }
@@ -601,6 +624,7 @@ func TestTiles_DragReordersAndReportsNewOrder(t *testing.T) {
 }
 
 func TestTiles_DragBetweenGroups(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	var got []TileGroup
 	m.OnTilesChanged = func(g []TileGroup) { got = g }
@@ -619,6 +643,7 @@ func TestTiles_DragBetweenGroups(t *testing.T) {
 // ─── Клавиатура ──────────────────────────────────────────────────────────────
 
 func TestTiles_TabCyclesThreeAreas(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	if m.v.area != areaList {
 		t.Fatalf("начальная область %v, ждали список", m.v.area)
@@ -647,6 +672,7 @@ func TestTiles_TabCyclesThreeAreas(t *testing.T) {
 }
 
 func TestTiles_ArrowsInListSkipLettersAndEnterLaunches(t *testing.T) {
+	testreset.Globals(t)
 	m, cat := tiledMenu(t)
 	pressKey(m, widget.KeyDown)
 	pressKey(m, widget.KeyDown)
@@ -659,6 +685,7 @@ func TestTiles_ArrowsInListSkipLettersAndEnterLaunches(t *testing.T) {
 }
 
 func TestTiles_ListKeysHomeEndPage(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	rows := m.interactiveRows()
 	pressKey(m, widget.KeyEnd)
@@ -680,6 +707,7 @@ func TestTiles_ListKeysHomeEndPage(t *testing.T) {
 
 // Стрелки в плитках идут по геометрии сетки, а не по порядку в списке.
 func TestTiles_ArrowsFollowGridGeometry(t *testing.T) {
+	testreset.Globals(t)
 	m, cat := tiledMenu(t)
 	m.OnKeyEvent(widget.KeyEvent{Code: widget.KeyTab, Pressed: true}) // → плитки
 	sel := func() string { return m.v.sel[areaTiles] }
@@ -724,6 +752,7 @@ func TestTiles_ArrowsFollowGridGeometry(t *testing.T) {
 }
 
 func TestTiles_SidebarKeys(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	var got []string
 	m.OnSidebarActivate = func(id string) { got = append(got, id) }
@@ -744,6 +773,7 @@ func TestTiles_SidebarKeys(t *testing.T) {
 }
 
 func TestTiles_EscapeCloses(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	pressKey(m, widget.KeyEscape)
 	if m.IsOpen() {
@@ -754,6 +784,7 @@ func TestTiles_EscapeCloses(t *testing.T) {
 // После повторного открытия состояние сброшено: ничего не выбрано, панель
 // свёрнута, списки сверху.
 func TestTiles_ReopenResetsState(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	m.SetSidebarExpanded(true)
 	finishAnimations()
@@ -788,6 +819,7 @@ func searchMenu(t *testing.T) (*StartMenu, *FakeSearchProvider, *StaticAppCatalo
 // Набор буквы на открытом меню — переход в поиск: список заменяется
 // результатами, запрос уходит поставщику.
 func TestTiles_TypingStartsSearchAndShowsResultsInsteadOfList(t *testing.T) {
+	testreset.Globals(t)
 	m, p, _ := searchMenu(t)
 	m.OnKeyEvent(widget.KeyEvent{Code: widget.KeyE, Rune: 'e', Pressed: true})
 	m.OnKeyEvent(widget.KeyEvent{Code: widget.KeyD, Rune: 'd', Pressed: true})
@@ -827,6 +859,7 @@ func TestTiles_TypingStartsSearchAndShowsResultsInsteadOfList(t *testing.T) {
 }
 
 func TestTiles_SearchResultsNavigateAndActivate(t *testing.T) {
+	testreset.Globals(t)
 	m, p, _ := searchMenu(t)
 	m.SetQuery("edge")
 	m.SearchKey(widget.KeyEvent{Code: widget.KeyDown, Pressed: true})
@@ -846,6 +879,7 @@ func TestTiles_SearchResultsNavigateAndActivate(t *testing.T) {
 }
 
 func TestTiles_EnterWithoutSelectionOpensFirstResult(t *testing.T) {
+	testreset.Globals(t)
 	m, p, _ := searchMenu(t)
 	m.SetQuery("paint")
 	m.SearchKey(widget.KeyEvent{Code: widget.KeyEnter, Pressed: true})
@@ -855,6 +889,7 @@ func TestTiles_EnterWithoutSelectionOpensFirstResult(t *testing.T) {
 }
 
 func TestTiles_NoResultsShowsMessage(t *testing.T) {
+	testreset.Globals(t)
 	m, _, _ := searchMenu(t)
 	m.SetQuery("яяяя")
 	rows, _ := m.listRows()
@@ -871,6 +906,7 @@ func TestTiles_NoResultsShowsMessage(t *testing.T) {
 // Результаты, пришедшие от поставщика позже запроса, подхватываются по
 // подписке.
 func TestTiles_AsyncResultsArriveBySubscription(t *testing.T) {
+	testreset.Globals(t)
 	m, p, _ := searchMenu(t)
 	m.SetQuery("zz")
 	if rows, _ := m.listRows(); rows[0].kind != rowEmpty {
@@ -894,6 +930,7 @@ func TestTiles_AsyncResultsArriveBySubscription(t *testing.T) {
 
 // Закрытое меню не держит подписок: смена данных его не будит.
 func TestTiles_ClosedMenuDoesNotWakeFrame(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	src := NewFakeStartSource(nil, nil)
 	m.SetSource(src)
@@ -910,6 +947,7 @@ func TestTiles_ClosedMenuDoesNotWakeFrame(t *testing.T) {
 }
 
 func TestTiles_LanguageSwitchOnOpenMenu(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	m.SetSource(NewFakeStartSource([]StartEntry{{ID: "n", Title: "N"}}, nil))
 	m.SetSidebarExpanded(true)
@@ -931,6 +969,7 @@ func TestTiles_LanguageSwitchOnOpenMenu(t *testing.T) {
 // Ключи меню и поиска переведены на оба языка и подключаются к таблице
 // потребителя через StartMenuAliases.
 func TestLocale_StartKeysAndAliases(t *testing.T) {
+	testreset.Globals(t)
 	keys := []string{StrStartRecent, StrStartExpand, StrStartCollapse, StrStartNoResults, StrStartResults, StrSearchPlaceholder, StrSearchLabel}
 	for _, lang := range []string{"RU", "EN"} {
 		for _, k := range keys {
@@ -951,6 +990,7 @@ func TestLocale_StartKeysAndAliases(t *testing.T) {
 // ─── Контекстное меню ────────────────────────────────────────────────────────
 
 func TestTiles_RightClickBuildsContextMenu(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	var targets []StartTarget
 	m.ContextMenu = func(tg StartTarget) []widget.MenuItem {
@@ -991,6 +1031,7 @@ func TestTiles_RightClickBuildsContextMenu(t *testing.T) {
 // ─── Наведение и перерисовка ─────────────────────────────────────────────────
 
 func TestTiles_HoverInvalidatesOnlyItsRow(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	var rects []image.Rectangle
 	fulls := 0
@@ -1018,6 +1059,7 @@ func TestTiles_HoverInvalidatesOnlyItsRow(t *testing.T) {
 }
 
 func TestTiles_OpenInvalidatesOnlyItsArea(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	m := NewStartMenu(managerFor(t, theme.ProfileWindows10), NewStaticAppCatalog(tileApps()...))
 	m.Screen = tileScreen()
@@ -1046,6 +1088,7 @@ func TestTiles_OpenInvalidatesOnlyItsArea(t *testing.T) {
 // Шаги анимации ширины боковой панели перерисовывают только её область, а не
 // меню целиком.
 func TestTiles_SidebarAnimationInvalidatesOnlySidebarColumn(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	var rects []image.Rectangle
 	h := widget.RegisterUINotifier(nil, func(r image.Rectangle) { rects = append(rects, r) })
@@ -1070,6 +1113,7 @@ func TestTiles_SidebarAnimationInvalidatesOnlySidebarColumn(t *testing.T) {
 // ─── Полоса прокрутки ────────────────────────────────────────────────────────
 
 func TestTiles_ThinScrollbarAppearsOnWheelAndFades(t *testing.T) {
+	testreset.Globals(t)
 	old1, old2 := thinBarHold, thinBarFade
 	thinBarHold, thinBarFade = 30*time.Millisecond, 20*time.Millisecond
 	defer func() { thinBarHold, thinBarFade = old1, old2 }()

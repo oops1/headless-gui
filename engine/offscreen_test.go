@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/image/font/gofont/gomono"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -20,6 +21,7 @@ func byNameT(c *Canvas, name string) *FontCache {
 // печать, продолжает мерить своим холстом и своими шрифтами (замечание
 // WinLine после v3.33.0).
 func TestOffscreen_DoesNotTakeMeasurer(t *testing.T) {
+	testreset.Globals(t)
 	win := New(320, 200, 20)
 	defer win.Stop()
 	// Шрифт, известный только окну: моноширинный, у него «iiii» шире, чем у
@@ -53,6 +55,7 @@ func TestOffscreen_DoesNotTakeMeasurer(t *testing.T) {
 // измеритель процесса: так печать Блокнота регистрировала шрифты задания,
 // пока окно мерило. Под -race гонки быть не должно.
 func TestFonts_RegisterWhileMeasuring(t *testing.T) {
+	testreset.Globals(t)
 	e := New(320, 200, 20)
 	defer e.Stop()
 	var wg sync.WaitGroup

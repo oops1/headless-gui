@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -35,6 +36,7 @@ func samePixels(t *testing.T, big, small *Canvas, rect, inner image.Rectangle) {
 // обязан отзываться на те же приведения типа, что и обычный холст: иначе
 // PaintStyle не найдёт ни тени, ни размытия, ни скругления.
 func TestTranslatingContext_ImplementsOptionalCapabilities(t *testing.T) {
+	testreset.Globals(t)
 	var ctx widget.DrawContext = &translatingContext{inner: newCanvas(10, 10, newFontCache("assets"))}
 	if _, ok := ctx.(widget.BackdropDrawer); !ok {
 		t.Error("контекст попапа не реализует BackdropDrawer")
@@ -51,6 +53,7 @@ func TestTranslatingContext_ImplementsOptionalCapabilities(t *testing.T) {
 // совпадает с размытием на обычном холсте (вдали от краёв буфера, где захват
 // у холстов разный).
 func TestTranslatingContext_BlurBehindMatchesCanvas(t *testing.T) {
+	testreset.Globals(t)
 	rect := image.Rect(40, 20, 140, 120)
 	big, tc, small := popupPair(rect)
 	area := rect.Inset(10)
@@ -77,6 +80,7 @@ func TestTranslatingContext_BlurBehindMatchesCanvas(t *testing.T) {
 // TestTranslatingContext_DrawSoftShadowMatchesCanvas — тень в буфере попапа
 // ложится туда же, куда и на холсте, с учётом смещения.
 func TestTranslatingContext_DrawSoftShadowMatchesCanvas(t *testing.T) {
+	testreset.Globals(t)
 	rect := image.Rect(40, 20, 140, 120)
 	big, tc, small := popupPair(rect)
 	body := rect.Inset(20)
@@ -97,6 +101,7 @@ func TestTranslatingContext_DrawSoftShadowMatchesCanvas(t *testing.T) {
 // TestTranslatingContext_RoundClipMatchesCanvas — скруглённый клип обрезает
 // углы заливки в попапе так же, как на холсте, и снимается по ClearRoundClip.
 func TestTranslatingContext_RoundClipMatchesCanvas(t *testing.T) {
+	testreset.Globals(t)
 	rect := image.Rect(40, 20, 140, 120)
 	big, tc, small := popupPair(rect)
 	red := color.RGBA{R: 255, A: 255}

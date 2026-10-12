@@ -4,11 +4,14 @@ import (
 	"image"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // Уведомления прежней модели (без AppID и AppName) показываются карточками без
 // заголовка группы: пустую подпись над ними рисовать нечем.
 func TestNotificationCenter_LegacyNotificationsHaveNoGroupHeader(t *testing.T) {
+	testreset.Globals(t)
 	nc := NewNotificationCenter(richNotifTheme(t), notesFake())
 	nc.Screen = panelScreen()
 	nc.Open(panelAnchor())
@@ -33,6 +36,7 @@ func TestNotificationCenter_LegacyNotificationsHaveNoGroupHeader(t *testing.T) {
 // появляется один раз полосой, повторные движения в ту же точку ничего не
 // заявляют.
 func TestNotificationCenter_MouseMoveDoesNotRepaintWholeList(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := richFixture(t, 14)
 	inv := watchInvalidations(t)
 	l := nc.testLayout()
@@ -54,6 +58,7 @@ func TestNotificationCenter_MouseMoveDoesNotRepaintWholeList(t *testing.T) {
 // Крохотный экран и сотня карточек: раскладка и рисование не падают, зоны не
 // выходят за панель.
 func TestNotificationCenter_TinyScreenDoesNotBreak(t *testing.T) {
+	testreset.Globals(t)
 	ns := NewFakeNotifications()
 	for i := 0; i < 100; i++ {
 		ns.Add(Notification{AppID: AppID("a" + string(rune('a'+i%7))), AppName: "Приложение", Title: "Заголовок",

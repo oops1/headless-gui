@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 )
 
@@ -28,6 +29,7 @@ func (c *clipCtx) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
 // вызывающего: SetRoundClip подменяет прямоугольный клип рамкой слоя, и без
 // возврата пересечения слой ложился поверх соседей.
 func TestPaintStyle_RoundedLayerStaysInsideCallerClip(t *testing.T) {
+	testreset.Globals(t)
 	ctx := &clipCtx{clip: image.Rect(0, 0, 100, 50)}
 	st := &theme.Style{Fill: theme.RGB(200, 200, 200), Corner: 4}
 	card := image.Rect(10, 30, 90, 120) // выступает за низ клипа

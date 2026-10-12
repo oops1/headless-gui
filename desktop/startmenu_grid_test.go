@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -21,6 +22,7 @@ func launched(s *win11Scene) []string {
 }
 
 func TestStartMenu11_LaunchPinnedByClick(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.frame()
@@ -34,6 +36,7 @@ func TestStartMenu11_LaunchPinnedByClick(t *testing.T) {
 }
 
 func TestStartMenu11_PinnedWithoutAppUsesCallback(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.menu.SetPinned([]desktop.StartPinned{{ID: "doc", Title: "Заметки"}})
 	var got string
@@ -46,6 +49,7 @@ func TestStartMenu11_PinnedWithoutAppUsesCallback(t *testing.T) {
 }
 
 func TestStartMenu11_RecommendedActivate(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	var got string
 	s.menu.OnRecommendedActivate = func(id string) { got = id }
@@ -61,6 +65,7 @@ func TestStartMenu11_RecommendedActivate(t *testing.T) {
 
 // Закреплённые по умолчанию берутся из каталога.
 func TestStartMenu11_PinnedFromCatalog(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.menu.SetPinned(nil)
 	s.cat.Pin("edge")
@@ -79,6 +84,7 @@ func TestStartMenu11_PinnedFromCatalog(t *testing.T) {
 // Перетаскивание ячейки: порог, новый порядок событием, клик без переноса не
 // меняет порядок.
 func TestStartMenu11_DragReorder(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	var orders [][]string
 	s.menu.OnPinnedChanged = func(p []desktop.StartPinned) {
@@ -136,6 +142,7 @@ func TestStartMenu11_DragReorder(t *testing.T) {
 // Постраничная прокрутка: колесо листает, точки справа переключают, клавиши
 // PageUp/PageDown листают.
 func TestStartMenu11_PagesByWheelDotsAndKeys(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.menu.SetPinned(win11Pinned(40))
 	s.open()
@@ -187,6 +194,7 @@ func TestStartMenu11_PagesByWheelDotsAndKeys(t *testing.T) {
 }
 
 func TestStartMenu11_AllAppsViewAndBack(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.frame()
@@ -238,6 +246,7 @@ func TestStartMenu11_AllAppsViewAndBack(t *testing.T) {
 }
 
 func TestStartMenu11_AllAppsLaunchesFromList(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.menu.SetView(desktop.StartViewAllApps)
@@ -252,6 +261,7 @@ func TestStartMenu11_AllAppsLaunchesFromList(t *testing.T) {
 }
 
 func TestStartMenu11_RecommendedMoreView(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	var got string
 	s.menu.OnRecommendedActivate = func(id string) { got = id }
@@ -274,6 +284,7 @@ func TestStartMenu11_RecommendedMoreView(t *testing.T) {
 
 // Набор с клавиатуры уходит в строку поиска; результаты — вместо содержимого.
 func TestStartMenu11_SearchTypingAndResults(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.frame()
@@ -309,6 +320,7 @@ func TestStartMenu11_SearchTypingAndResults(t *testing.T) {
 
 // Набор в других областях (закреплённые, нижняя полоса) тоже уходит в поиск.
 func TestStartMenu11_TypingFromAnyArea(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.key(widget.KeyTab)
@@ -322,6 +334,7 @@ func TestStartMenu11_TypingFromAnyArea(t *testing.T) {
 }
 
 func TestStartMenu11_SearchFieldEditing(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.typ("abcd")
@@ -355,6 +368,7 @@ func TestStartMenu11_SearchFieldEditing(t *testing.T) {
 }
 
 func TestStartMenu11_EscClosesAndClearsQuery(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.typ("ed")
@@ -373,6 +387,7 @@ func TestStartMenu11_EscClosesAndClearsQuery(t *testing.T) {
 
 // Tab: поиск → закреплённые → рекомендуемые → нижняя полоса → поиск.
 func TestStartMenu11_TabOrder(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	var rec string
 	var side []string

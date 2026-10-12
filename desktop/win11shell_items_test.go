@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -29,6 +30,7 @@ func click11(w interface {
 // View, кнопки окон, группа трея, колокольчик — и колокольчик Windows 11 в нём
 // есть, а у Windows 10 его по-прежнему нет.
 func TestWin11Focus_TabOrderLeftToRight(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	var got []widget.Widget
 	for _, w := range widget.CollectFocusables(s.bar) {
@@ -56,6 +58,7 @@ func TestWin11Focus_TabOrderLeftToRight(t *testing.T) {
 // Enter и Space нажимают кнопки с клавиатуры, стрелки идут по области, рамка
 // фокуса видна и гаснет от щелчка мыши.
 func TestWin11Focus_KeysActivateAndArrowsMove(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 
 	s.start.SetFocused(true)
@@ -95,6 +98,7 @@ func TestWin11Focus_KeysActivateAndArrowsMove(t *testing.T) {
 
 // Рамка фокуса Task View видна с клавиатуры и убирается щелчком мыши.
 func TestWin11Focus_RingShowsForKeyboardOnly(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	plain := s.render(1)
 	s.taskview.SetFocused(true)
@@ -123,6 +127,7 @@ func TestWin11Focus_RingShowsForKeyboardOnly(t *testing.T) {
 // Один щелчок по любому значку группы, общая подсветка при наведении, подсказка
 // у каждого значка своя.
 func TestWin11TrayGroup_OneButton(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	items := s.group.Items()
 	for i, it := range items {
@@ -173,6 +178,7 @@ func TestWin11TrayGroup_OneButton(t *testing.T) {
 
 // Значок без батареи места не занимает.
 func TestWin11TrayGroup_NoBatteryIsNarrower(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	full := s.group.Bounds().Dx()
 	s.status.SetPower(PowerState{NoBattery: true})
@@ -183,6 +189,7 @@ func TestWin11TrayGroup_NoBatteryIsNarrower(t *testing.T) {
 
 // Группа горит, пока открыта панель, за которой она следит.
 func TestWin11TrayGroup_TracksPanel(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	f := NewFlyout(s.tm, ComponentQuickSettings)
 	f.Size = func() image.Point { return image.Pt(300, 300) }
@@ -212,6 +219,7 @@ type dndSource struct {
 func (d *dndSource) DoNotDisturb() bool { return d.on }
 
 func TestWin11Bell_DoNotDisturb(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	normal := &recCtx{}
 	s.bell.Draw(normal)
@@ -253,6 +261,7 @@ func TestWin11Bell_DoNotDisturb(t *testing.T) {
 // Содержимое от потребителя: текст меняет ширину кнопки, панель перекладывается
 // сама; без текста — один значок; подсказка потребителя главнее умолчания.
 func TestWin11Widgets_ContentChangesWidth(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	withText := s.widgets.Bounds().Dx()
 	if withText <= 40 {
@@ -283,6 +292,7 @@ func TestWin11Widgets_ContentChangesWidth(t *testing.T) {
 
 // Длинный текст не раздувает кнопку выше предела widgets.width.max.
 func TestWin11Widgets_WidthIsCapped(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.widgets.SetContent(WidgetsContent{Temperature: strings.Repeat("W", 60), Caption: strings.Repeat("w", 80)})
 	limit := int(s.tm.GetMetric("widgets.width.max"))
@@ -295,6 +305,7 @@ func TestWin11Widgets_WidthIsCapped(t *testing.T) {
 // ─── Task View ───────────────────────────────────────────────────────────────
 
 func TestWin11TaskView_ClickTooltipAndState(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	cx, cy := center(s.taskview.Bounds())
 	click11(s.taskview, cx, cy)
@@ -339,6 +350,7 @@ func TestWin11TaskView_ClickTooltipAndState(t *testing.T) {
 // «Значок и подпись»: Enter и Space открывают поиск, как щелчок; набор текста
 // уходит в запрос; в поле Enter по-прежнему отправляет запрос.
 func TestWin11Search_IconAndLabelActivates(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.search.SetMode(SearchModeIconAndLabel)
 	s.search.OnKeyEvent(w11key(widget.KeyEnter))
@@ -374,6 +386,7 @@ func TestWin11Search_IconAndLabelActivates(t *testing.T) {
 
 // Windows 10: подсказка поля прежняя, длинная.
 func TestWin10Search_PlaceholderUnchanged(t *testing.T) {
+	testreset.Globals(t)
 	b := NewSearchBox(win10Fast(t), nil)
 	if got := b.placeholder(); got != tr(StrSearchPlaceholder) {
 		t.Errorf("подсказка поля Windows 10 %q", got)
@@ -384,6 +397,7 @@ func TestWin10Search_PlaceholderUnchanged(t *testing.T) {
 
 // У бокового края слот виджетов — самый верх столбца, над «Пуском».
 func TestWin11Bar_WidgetsSlotAtTopOfColumn(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.bar.SetEdge(EdgeLeft)
 	s.bar.SetBounds(image.Rect(0, 0, 62, 400))
@@ -396,6 +410,7 @@ func TestWin11Bar_WidgetsSlotAtTopOfColumn(t *testing.T) {
 // 100–200 %: пилюля активной кнопки, счётчик и полоса прогресса видны на кадре
 // целиком, ничем не обрезаны.
 func TestWin11Indicators_VisibleAtScales(t *testing.T) {
+	testreset.Globals(t)
 	for _, scale := range []float64{1, 1.25, 1.5, 1.75, 2} {
 		s := newW11Scene(t, theme.ProfileWindows11)
 		img := s.render(scale)
@@ -434,6 +449,7 @@ func TestWin11Indicators_VisibleAtScales(t *testing.T) {
 // Смена масштаба холста на живой панели не ломает раскладку: логические границы
 // те же.
 func TestWin11Bar_LayoutIndependentOfScale(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	before := s.area.ButtonRect(2)
 	s.render(1.5)

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -68,7 +70,7 @@ func hoverScene(t *testing.T) (*engine.Engine, *ApplicationArea, *StartMenu) {
 	menu.Close()
 	area.SetBounds(image.Rect(over.Min.X, over.Min.Y+40, over.Max.X, over.Min.Y+80))
 
-	eng := engine.New(800, 600, 60)
+	eng := testengine.New(t, 800, 600, 60)
 	eng.SetRenderOnDemand(true)
 	eng.SetRoot(root)
 	eng.RenderOnce()
@@ -85,6 +87,7 @@ func moveTo(eng *engine.Engine, r image.Rectangle) {
 }
 
 func TestHover_ButtonUnderOpenMenuIsNotHighlighted(t *testing.T) {
+	testreset.Globals(t)
 	eng, area, menu := hoverScene(t)
 
 	first := cellRect(t, area, 0)
@@ -114,6 +117,7 @@ func TestHover_ButtonUnderOpenMenuIsNotHighlighted(t *testing.T) {
 
 // Без оверлея доставка прежняя: наведение работает как работало.
 func TestHover_WithoutOverlayNothingChanged(t *testing.T) {
+	testreset.Globals(t)
 	eng, area, _ := hoverScene(t)
 
 	for i := 0; i < 2; i++ {
@@ -131,6 +135,7 @@ func TestHover_WithoutOverlayNothingChanged(t *testing.T) {
 
 // Сам оверлей движение получает: иначе исчезла бы подсветка внутри меню.
 func TestHover_OverlayItselfStillGetsTheMove(t *testing.T) {
+	testreset.Globals(t)
 	eng, _, menu := hoverScene(t)
 
 	menu.Toggle(image.Rect(0, 560, 40, 600))

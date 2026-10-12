@@ -5,6 +5,8 @@ import (
 	"image/color"
 	"strings"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // cliptext_bench_test.go — стоимость отрисовки текста под активным клипом
@@ -76,6 +78,7 @@ func BenchmarkDrawTextNoClip(b *testing.B) {
 // результатом отрисовки той же строки без отсева (эмулируется широким клипом
 // и последующим сравнением только внутри узкой области).
 func TestDrawTextClipHorizontalCulling_Identical(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 400, 60
 	clip := image.Rect(120, 20, 260, 44)
 

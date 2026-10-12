@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 func testIcon(seed uint8) *image.RGBA {
@@ -18,6 +20,7 @@ func testIcon(seed uint8) *image.RGBA {
 
 // Кэш масштабирования не меняет пиксели результата.
 func TestScaledCache_PixelIdentity(t *testing.T) {
+	testreset.Globals(t)
 	fc := newFontCache("assets")
 	a := newCanvas(120, 120, fc)
 	b := newCanvas(120, 120, fc)
@@ -36,6 +39,7 @@ func TestScaledCache_PixelIdentity(t *testing.T) {
 
 // Повторный вызов берёт результат из кэша, не растеризуя заново.
 func TestScaledCache_ReusesResult(t *testing.T) {
+	testreset.Globals(t)
 	c := newCanvas(120, 120, newFontCache("assets"))
 	ic := testIcon(0)
 	c.DrawImageScaled(ic, 10, 10, 24, 24)
@@ -51,6 +55,7 @@ func TestScaledCache_ReusesResult(t *testing.T) {
 
 // InvalidateImageCache выбрасывает записи изменённой картинки.
 func TestScaledCache_Invalidate(t *testing.T) {
+	testreset.Globals(t)
 	c := newCanvas(120, 120, newFontCache("assets"))
 	ic := testIcon(0)
 	c.DrawImageScaled(ic, 10, 10, 24, 24)
@@ -65,6 +70,7 @@ func TestScaledCache_Invalidate(t *testing.T) {
 
 // Кэш не растёт сверх предела записей.
 func TestScaledCache_EvictsByCount(t *testing.T) {
+	testreset.Globals(t)
 	c := newCanvas(120, 120, newFontCache("assets"))
 	for i := 0; i < maxScaledEntries*2; i++ {
 		c.DrawImageScaled(testIcon(uint8(i)), 10, 10, 24, 24)

@@ -20,6 +20,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/output"
 )
 
@@ -184,6 +185,7 @@ func runAgainstReference(t *testing.T, c *Canvas, calls []regionsMarkCall) {
 // НЕ кратен TileSize (200×150 при TileSize=64) специально: задевает крайние
 // тайлы по обеим осям, для которых canBeFull считается отдельно.
 func TestMarkTiles_GradientRowsMatchReference(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 200, 150
 	eng := New(w, h, 30)
 	c := eng.canvas
@@ -211,6 +213,7 @@ func TestMarkTiles_GradientRowsMatchReference(t *testing.T) {
 // разного вида»: здесь вместо склейки — прямое применение, и дифференциальный
 // тест ловит любое расхождение с исходным алгоритмом на любом из кейсов.
 func TestMarkTiles_MixedCallSequenceMatchesReference(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 200, 150
 	eng := New(w, h, 30)
 	c := eng.canvas
@@ -250,6 +253,7 @@ func TestMarkTiles_MixedCallSequenceMatchesReference(t *testing.T) {
 // вызовов kind=Image без разрывов должна дать тот же Kind на каждом тайле,
 // что и один вызов на всю область.
 func TestMarkTiles_NonSolidStripsMatchOneShot(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 192, 192
 
 	rowByRow := New(w, h, 30).canvas
@@ -283,6 +287,7 @@ func TestMarkTiles_NonSolidStripsMatchOneShot(t *testing.T) {
 // начала СКЛЕИВАТЬ такие строки в один вызов: это была бы уже не оптимизация
 // цены, а другой результат классификации.
 func TestMarkTiles_StripedFillStaysMixedEvenSameColor(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 128, 128
 	col := color.RGBA{R: 90, G: 90, B: 200, A: 255}
 
@@ -317,6 +322,7 @@ func TestMarkTiles_StripedFillStaysMixedEvenSameColor(t *testing.T) {
 // на обрезку сплошная заливка нижней строки экрана уехала бы к потребителю
 // как mixed — то есть картинкой вместо цвета, самый дорогой вид тайла.
 func TestMarkTiles_ThinStripFillsATruncatedEdgeTile(t *testing.T) {
+	testreset.Globals(t)
 	const ts = output.TileSize
 	// Высота с остатком в одну точку: последний ряд тайлов — высотой 1.
 	eng := New(2*ts, 2*ts+1, 30)

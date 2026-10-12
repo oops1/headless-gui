@@ -5,7 +5,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -15,6 +16,7 @@ import (
 // был рассчитан на нижний край: на экране, где ряд не помещался правее панели,
 // его сдвигало под саму панель.
 func TestSideStack_ListOpensBesideBar(t *testing.T) {
+	testreset.Globals(t)
 	for _, edge := range []Edge{EdgeLeft, EdgeRight} {
 		for _, screenW := range []int{960, 640} {
 			g := sideScene(t, edge, false)
@@ -53,6 +55,7 @@ func TestSideStack_ListOpensBesideBar(t *testing.T) {
 // Метка открытого окна в столбце стоит на стороне ячейки, обращённой к краю
 // экрана, а не снизу ячейки (посреди столбца, между соседями).
 func TestSideStack_MarksOnScreenEdgeSide(t *testing.T) {
+	testreset.Globals(t)
 	for _, edge := range []Edge{EdgeLeft, EdgeRight} {
 		g := sideScene(t, edge, false)
 		g.area.layout()
@@ -106,6 +109,7 @@ func TestSideStack_MarksOnScreenEdgeSide(t *testing.T) {
 // Значок в ячейке столбца стоит по центру, а не прижат к левому краю: ячейка
 // шире значка на всю толщину панели.
 func TestSideStack_IconCentered(t *testing.T) {
+	testreset.Globals(t)
 	g := sideScene(t, EdgeLeft, false)
 	g.area.layout()
 	img := g.renderSize(960, 420)
@@ -134,6 +138,7 @@ func TestSideStack_IconCentered(t *testing.T) {
 // Полоса кнопок окон (RunningApplications) в столбце — столбец квадратов с
 // метками у края экрана, а не ряд, втиснутый в квадрат панели.
 func TestSideStack_RunningApplicationsColumn(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	wm := NewFakeWindowModel(
 		WindowInfo{ID: 1, AppID: "a", Title: "one", Icon: solidIcon(color.RGBA{R: 240, G: 180, B: 40, A: 255})},
@@ -169,7 +174,7 @@ func TestSideStack_RunningApplicationsColumn(t *testing.T) {
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 200, 300))
 	root.AddChild(bar)
-	eng := engine.New(200, 300, 30)
+	eng := testengine.New(t, 200, 300, 30)
 	eng.SetRoot(root)
 	img := eng.RenderOnce()
 	accent := tm.GetStyle(ComponentTaskButton, "", theme.StateActive).Border
@@ -185,10 +190,11 @@ func TestSideStack_RunningApplicationsColumn(t *testing.T) {
 // Меню команд кнопки у боковой панели раскрывается вбок от неё, а не над
 // кнопкой поверх соседних.
 func TestSideStack_CommandMenuOpensBeside(t *testing.T) {
+	testreset.Globals(t)
 	for _, edge := range []Edge{EdgeLeft, EdgeRight} {
 		g := sideScene(t, edge, false)
 		g.area.layout()
-		eng := engine.New(960, 420, 30)
+		eng := testengine.New(t, 960, 420, 30)
 		eng.SetRoot(g.root)
 		eng.RenderOnce()
 		btn := g.area.ButtonRect(1)

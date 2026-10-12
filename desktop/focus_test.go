@@ -11,6 +11,8 @@ import (
 
 	"github.com/oops1/headless-gui/v3/desktop"
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -105,7 +107,7 @@ func newFocusScene(t *testing.T, name string, trayFirst bool) *focusScene {
 	s.bar.SetBounds(image.Rect(0, h-barH, w, h))
 	root.AddChild(s.bar)
 
-	s.eng = engine.New(w, h, 30)
+	s.eng = testengine.New(t, w, h, 30)
 	s.eng.SetRoot(root)
 	return s
 }
@@ -140,6 +142,7 @@ func (s *focusScene) focused() string {
 }
 
 func TestFocus_TabWalksTaskbarInSlotOrder(t *testing.T) {
+	testreset.Globals(t)
 	for _, trayFirst := range []bool{false, true} {
 		s := newFocusScene(t, theme.ProfileWindows10, trayFirst)
 		want := []string{"start", "apps", "net", "vol", "pow", "clock", "start"}
@@ -163,6 +166,7 @@ func TestFocus_TabWalksTaskbarInSlotOrder(t *testing.T) {
 
 // Значок без места на панели (батареи нет) не остаётся невидимой остановкой.
 func TestFocus_TabSkipsItemsWithoutRoom(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	if err := theme.RegisterBuiltinProfiles(m); err != nil {
 		t.Fatal(err)
@@ -189,7 +193,7 @@ func TestFocus_TabSkipsItemsWithoutRoom(t *testing.T) {
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 400, 100))
 	root.AddChild(bar)
-	eng := engine.New(400, 100, 30)
+	eng := testengine.New(t, 400, 100, 30)
 	eng.SetRoot(root)
 
 	if !pow.Bounds().Empty() {
@@ -204,6 +208,7 @@ func TestFocus_TabSkipsItemsWithoutRoom(t *testing.T) {
 }
 
 func TestFocus_ClockWithoutClickHandlerIsNotAStop(t *testing.T) {
+	testreset.Globals(t)
 	s := newFocusScene(t, theme.ProfileWindows10, false)
 	s.clock.OnClick = nil
 	var order []string
@@ -219,6 +224,7 @@ func TestFocus_ClockWithoutClickHandlerIsNotAStop(t *testing.T) {
 }
 
 func TestFocus_EnterAndSpaceActivate(t *testing.T) {
+	testreset.Globals(t)
 	s := newFocusScene(t, theme.ProfileWindows10, false)
 
 	s.press(widget.KeyTab) // «Пуск»
@@ -264,6 +270,7 @@ func TestFocus_EnterAndSpaceActivate(t *testing.T) {
 }
 
 func TestFocus_ArrowsStayInsideArea(t *testing.T) {
+	testreset.Globals(t)
 	s := newFocusScene(t, theme.ProfileWindows10, false)
 
 	for s.focused() != "net" {
@@ -303,6 +310,7 @@ func TestFocus_ArrowsStayInsideArea(t *testing.T) {
 }
 
 func TestFocus_ApplicationAreaCells(t *testing.T) {
+	testreset.Globals(t)
 	s := newFocusScene(t, theme.ProfileWindows11, false)
 	s.press(widget.KeyTab)
 	s.press(widget.KeyTab)
@@ -357,6 +365,7 @@ func TestFocus_ApplicationAreaCells(t *testing.T) {
 // Шеврон раскрытия скрытых значков доступен с клавиатуры, когда значки не
 // поместились.
 func TestFocus_TrayChevronReachableAndToggles(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	if err := theme.RegisterBuiltinProfiles(m); err != nil {
 		t.Fatal(err)
@@ -380,7 +389,7 @@ func TestFocus_TrayChevronReachableAndToggles(t *testing.T) {
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 200, 100))
 	root.AddChild(bar)
-	eng := engine.New(200, 100, 30)
+	eng := testengine.New(t, 200, 100, 30)
 	eng.SetRoot(root)
 
 	if len(tray.Hidden()) == 0 {
@@ -406,6 +415,7 @@ func pixelAt(img *image.RGBA, x, y int) color.RGBA { return img.RGBAAt(x, y) }
 // контуры отличаются от кадра без фокуса и друг от друга. Кадры при
 // FOCUS_OUT=каталог сохраняются в PNG для просмотра.
 func TestFocus_RingIsVisibleInEveryTheme(t *testing.T) {
+	testreset.Globals(t)
 	names := []string{
 		theme.ProfileWindows2000,
 		theme.ProfileWindows10,
@@ -459,6 +469,7 @@ func TestFocus_RingIsVisibleInEveryTheme(t *testing.T) {
 // Рамка есть и у ячейки области приложений: обводится выбранная ячейка, а не
 // вся область.
 func TestFocus_RingOutlinesSelectedCell(t *testing.T) {
+	testreset.Globals(t)
 	s := newFocusScene(t, theme.ProfileWindows10Dark, false)
 	before := snapshot(s.eng.RenderOnce())
 	s.press(widget.KeyTab)
@@ -483,6 +494,7 @@ func TestFocus_RingOutlinesSelectedCell(t *testing.T) {
 // Щелчок мышью по «Пуску» отдаёт ему фокус, но рамки после щелчка нет: так
 // ведёт себя Windows, и контур вокруг только что нажатой кнопки был бы шумом.
 func TestFocus_MouseClickShowsNoRing(t *testing.T) {
+	testreset.Globals(t)
 	s := newFocusScene(t, theme.ProfileWindows10, false)
 	b := s.start.Bounds()
 	cx, cy := (b.Min.X+b.Max.X)/2, (b.Min.Y+b.Max.Y)/2

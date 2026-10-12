@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 )
 
@@ -12,6 +13,7 @@ import (
 // когда тема просит об этом флагом (Windows 11). Без флага — прежняя
 // раскладка: в других темах такие элементы есть, и их кадры не меняются.
 func TestTaskbar_EmptyItemAddsNoGap(t *testing.T) {
+	testreset.Globals(t)
 	for _, tc := range []struct {
 		profile string
 		skip    bool

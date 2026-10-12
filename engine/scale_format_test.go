@@ -2,6 +2,8 @@ package engine
 
 import (
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // Смена разрешения сохраняет настройки движка, но не чужой буфер.
@@ -13,6 +15,7 @@ import (
 // бы кодировать собственную память чужим порядком: кадр уехал бы с
 // переставленными красным и синим.
 func TestSetResolution_KeepsOwnFormatNotForeignOne(t *testing.T) {
+	testreset.Globals(t)
 	e := New(320, 240, 60)
 
 	e.SetSubtreeCulling(false)

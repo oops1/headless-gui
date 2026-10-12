@@ -5,7 +5,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -18,6 +19,7 @@ import (
 // указывать туда, где была область, — и следующий клик по пустому месту
 // панели попадёт в невидимый значок (дефект аудита №2).
 func TestSystemTray_OverflowClearsBoundsOnClose(t *testing.T) {
+	testreset.Globals(t)
 	tray, _ := trayTrio(t)
 	defer tray.Close()
 
@@ -46,7 +48,7 @@ func TestSystemTray_OverflowClearsBoundsOnClose(t *testing.T) {
 		t.Fatal("щелчок по шеврону не раскрыл область")
 	}
 
-	eng := engine.New(200, 200, 30)
+	eng := testengine.New(t, 200, 200, 30)
 	eng.SetRoot(root)
 	if img := eng.RenderOnce(); img == nil {
 		t.Fatal("кадр не отрисован")

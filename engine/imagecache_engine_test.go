@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/image/draw"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -18,6 +19,7 @@ import (
 // картинку, а значит, и не отдаст её адрес новому объекту тех же размеров
 // (иначе тот получил бы чужой кадр из кэша по совпавшему ключу).
 func TestScaledCache_EntryKeepsSourceAlive(t *testing.T) {
+	testreset.Globals(t)
 	c := newCanvas(120, 120, newFontCache("assets"))
 	var freed atomic.Bool
 	func() {
@@ -46,6 +48,7 @@ func TestScaledCache_EntryKeepsSourceAlive(t *testing.T) {
 // Запись с чужим src под тем же ключом не отдаётся: подделываем ключ второго
 // изображения записью первого — ровно то, что случилось бы при переезде адреса.
 func TestScaledCache_ForeignEntryNotReused(t *testing.T) {
+	testreset.Globals(t)
 	c := newCanvas(120, 120, newFontCache("assets"))
 	a, b := testIcon(0), testIcon(100)
 	ka, _ := scaledCacheKey(a, 24, 24)
@@ -73,6 +76,7 @@ func TestScaledCache_ForeignEntryNotReused(t *testing.T) {
 
 // Engine.InvalidateImageCache доходит до основного холста и холстов попапов.
 func TestEngine_InvalidateImageCache(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 200, 20)
 	popup := e.canvas.cloneForSize(60, 60, 1, nil)
 
@@ -103,6 +107,7 @@ func TestEngine_InvalidateImageCache(t *testing.T) {
 
 // Сброс целого кэша (nil) и переполнение журнала.
 func TestEngine_InvalidateImageCache_AllAndOverflow(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 200, 20)
 	ic := testIcon(0)
 	other := testIcon(50)
@@ -128,6 +133,7 @@ func TestEngine_InvalidateImageCache_AllAndOverflow(t *testing.T) {
 
 // Сброс можно заказывать с любой горутины, пока холст рисует.
 func TestEngine_InvalidateImageCache_Concurrent(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 200, 20)
 	ic := testIcon(0)
 	done := make(chan struct{})
@@ -145,6 +151,7 @@ func TestEngine_InvalidateImageCache_Concurrent(t *testing.T) {
 
 // Обёртка попапа пробрасывает DrawImageRect со сдвигом и сброс кэша.
 func TestTranslatingContext_ImageRectAndInvalidate(t *testing.T) {
+	testreset.Globals(t)
 	rect := image.Rect(40, 20, 140, 120)
 	big, tc, small := popupPair(rect)
 	src := noiseRGBA(40, 30, 11, false)

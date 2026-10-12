@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -52,6 +53,7 @@ func tch(id, x, y int, ph widget.TouchPhase) widget.TouchEvent {
 // Захват по ID: владелец получает весь разговор, даже когда палец ушёл с его
 // площади на соседа.
 func TestSendTouch_CaptureByID(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	root := touchRoot()
 	a := newTouchSpy(image.Rect(0, 0, 200, 300), true)
@@ -96,6 +98,7 @@ func TestSendTouch_CaptureByID(t *testing.T) {
 // Два пальца на разных виджетах и два пальца на одном: у каждого пальца
 // свой разговор.
 func TestSendTouch_TwoFingers(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	root := touchRoot()
 	a := newTouchSpy(image.Rect(0, 0, 200, 300), true)
@@ -148,6 +151,7 @@ func TestSendTouch_TwoFingers(t *testing.T) {
 
 // Всплытие: глубокий виджет, не взявший касание, передаёт его родителю.
 func TestSendTouch_BubblesToParent(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	root := touchRoot()
 	parent := newTouchSpy(image.Rect(0, 0, 400, 300), true)
@@ -176,6 +180,7 @@ func TestSendTouch_BubblesToParent(t *testing.T) {
 // Если взять касание некому, SendTouch возвращает false, ничего не делая с
 // мышью: превращение в мышь — не дело движка.
 func TestSendTouch_UnclaimedIsNotMouse(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	root := touchRoot()
 	var clicks int
@@ -210,6 +215,7 @@ func TestSendTouch_UnclaimedIsNotMouse(t *testing.T) {
 
 // Корень, берущий касания, получает те, что не взял никто глубже.
 func TestSendTouch_RootHandler(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	root := newRootSpy()
 	e.SetRoot(root)
@@ -238,6 +244,7 @@ func (r *rootSpy) OnTouch(ev widget.TouchEvent) bool {
 
 // Физические пиксели -> логические, и кадр прокрутки.
 func TestSendTouch_LogicalAndFrame(t *testing.T) {
+	testreset.Globals(t)
 	e := New(300, 400, 20)
 	e.SetScale(2)
 	root, sv, _ := frameScene(t, 200)
@@ -264,6 +271,7 @@ func TestSendTouch_LogicalAndFrame(t *testing.T) {
 // Касание получает время: событие без штампа движок помечает сам, штамп
 // источника не трогает.
 func TestSendTouch_Timestamp(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	root := touchRoot()
 	a := newTouchSpy(image.Rect(0, 0, 400, 300), true)
@@ -284,6 +292,7 @@ func TestSendTouch_Timestamp(t *testing.T) {
 
 // Повторный Began с занятым ID сообщает прежнему владельцу об отмене.
 func TestSendTouch_DuplicateBeganCancelsOld(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	root := touchRoot()
 	a := newTouchSpy(image.Rect(0, 0, 200, 300), true)
@@ -303,6 +312,7 @@ func TestSendTouch_DuplicateBeganCancelsOld(t *testing.T) {
 }
 
 func TestCancelTouches(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	root := touchRoot()
 	a := newTouchSpy(image.Rect(0, 0, 400, 300), true)
@@ -332,6 +342,7 @@ func TestCancelTouches(t *testing.T) {
 // Открытый оверлей старше дерева: касание по нему не достаётся виджету под
 // ним — иначе меню, открытое над просмотрщиком, не работало бы пальцем.
 func TestSendTouch_OverlayShadowsTree(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	root := touchRoot()
 	under := newTouchSpy(image.Rect(0, 0, 400, 300), true)
@@ -381,6 +392,7 @@ func (o *touchOverlay) OnTouch(ev widget.TouchEvent) bool {
 
 // Принятое касание закрывает всплывающие панели вне своего пути, как нажатие.
 func TestSendTouch_DismissesOutside(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	root := touchRoot()
 	a := newTouchSpy(image.Rect(0, 0, 200, 300), true)
@@ -400,6 +412,7 @@ func TestSendTouch_DismissesOutside(t *testing.T) {
 
 // Модальный виджет ограничивает доставку: касание вне его не уходит дереву.
 func TestSendTouch_ModalScope(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	root := touchRoot()
 	under := newTouchSpy(image.Rect(0, 0, 400, 300), true)
@@ -437,6 +450,7 @@ func (v *viewer) Draw(widget.DrawContext) {}
 // Пороги распознавателя логические: на HiDPI x2 физическое смещение в 8 пикселей
 // — это 4 логических, и щипком оно ещё не считается.
 func TestSendTouch_PinchThroughEngineHiDPI(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 20)
 	e.SetScale(2)
 	root := touchRoot()

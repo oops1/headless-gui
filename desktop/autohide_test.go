@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -41,6 +42,7 @@ func settle() {
 }
 
 func TestAutoHide_ConcealsAndRevealsOnEdge(t *testing.T) {
+	testreset.Globals(t)
 	bar := hidingBar(t, theme.ProfileWindows10)
 	full := bar.Bounds()
 
@@ -72,6 +74,7 @@ func TestAutoHide_ConcealsAndRevealsOnEdge(t *testing.T) {
 
 // Скрытая панель не занимает места: развёрнутое окно идёт под неё.
 func TestAutoHide_ReservedAreaIsEmpty(t *testing.T) {
+	testreset.Globals(t)
 	bar := hidingBar(t, theme.ProfileWindows10)
 	if bar.ReservedArea().Empty() {
 		t.Fatal("обычная панель не занимает места")
@@ -88,6 +91,7 @@ func TestAutoHide_ReservedAreaIsEmpty(t *testing.T) {
 
 // Верхняя панель (строка меню macOS) уезжает ВВЕРХ, а не вниз.
 func TestAutoHide_TopBarSlidesUp(t *testing.T) {
+	testreset.Globals(t)
 	tm := managerFor(t, theme.ProfileMacOS)
 	bar := NewTaskbar(tm)
 	defer bar.Close()
@@ -105,6 +109,7 @@ func TestAutoHide_TopBarSlidesUp(t *testing.T) {
 
 // Панель без автоскрытия ведёт себя как раньше и мышью не двигается.
 func TestAutoHide_OffKeepsBarInPlace(t *testing.T) {
+	testreset.Globals(t)
 	bar := hidingBar(t, theme.ProfileWindows10)
 	before := bar.Bounds()
 
@@ -120,6 +125,7 @@ func TestAutoHide_OffKeepsBarInPlace(t *testing.T) {
 // Смена границ (другое разрешение) не путает скрытую панель: она остаётся
 // скрытой и возвращается на НОВОЕ место.
 func TestAutoHide_SurvivesResize(t *testing.T) {
+	testreset.Globals(t)
 	bar := hidingBar(t, theme.ProfileWindows10)
 	bar.SetAutoHide(true)
 

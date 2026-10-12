@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -18,6 +19,7 @@ import (
 // Плитка с подробностями делится на две половинки с тонкой линией: левая
 // переключает, правая открывает страницу. Плитка без подробностей не делится.
 func TestQuickPanel_SplitTileZonesAndDivider(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	bt, chev := desktop.QSTileRect(q, "bt"), desktop.QSChevronRect(q, "bt")
@@ -58,6 +60,7 @@ func TestQuickPanel_SplitTileZonesAndDivider(t *testing.T) {
 
 // Наведение подсвечивает только свою половинку: другая остаётся как была.
 func TestQuickPanel_SplitTileHoverIsPerHalf(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	bt, chev := desktop.QSTileRect(q, "bt"), desktop.QSChevronRect(q, "bt")
@@ -98,6 +101,7 @@ func TestQuickPanel_SplitTileHoverIsPerHalf(t *testing.T) {
 
 // Недоступная плитка не переключается, но её «›» живая.
 func TestQuickPanel_SplitTileUnavailableKeepsChevron(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	saver, chev := desktop.QSTileRect(q, "saver"), desktop.QSChevronRect(q, "saver")
@@ -115,6 +119,7 @@ func TestQuickPanel_SplitTileUnavailableKeepsChevron(t *testing.T) {
 // ─── Страницы ────────────────────────────────────────────────────────────────
 
 func TestQuickPanel_PagesInsteadOfScroll(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	if got := q.Pages(); got != 2 {
@@ -169,6 +174,7 @@ func TestQuickPanel_PagesInsteadOfScroll(t *testing.T) {
 // Мелкие события колеса копятся до порога: сенсорная панель не пролистывает
 // все страницы одним жестом.
 func TestQuickPanel_WheelAccumulates(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	grid := desktop.QSZoneRect(q, "grid")
@@ -191,6 +197,7 @@ func TestQuickPanel_WheelAccumulates(t *testing.T) {
 }
 
 func TestQuickPanel_PagerArrowsAndDots(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	qsClick(q, centreOf(desktop.QSZoneRect(q, "pageup")))
@@ -238,6 +245,7 @@ func TestQuickPanel_PagerArrowsAndDots(t *testing.T) {
 
 // Страница сбрасывается при повторном открытии панели.
 func TestQuickPanel_PageResetsOnReopen(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	q.SetPage(1)
@@ -254,6 +262,7 @@ func TestQuickPanel_PageResetsOnReopen(t *testing.T) {
 // Плитку в режиме правки тянут к нижнему краю сетки — страница листается один
 // раз за заход в краевую зону; потом плитку кладут на другую страницу.
 func TestQuickPanel_DragToEdgeTurnsPage(t *testing.T) {
+	testreset.Globals(t)
 	var order []desktop.QuickActionID
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
 		q.OnReorder = func(o []desktop.QuickActionID) { order = o }
@@ -291,6 +300,7 @@ func TestQuickPanel_DragToEdgeTurnsPage(t *testing.T) {
 
 // Флаг профиля погашен — прежняя прокрутка, столбца страниц нет.
 func TestQuickPanel_PagedFlagOffKeepsScroll(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{scroll: true})
 	q := s.q
 	if q.Pages() != 1 || !desktop.QSZoneRect(q, "pager").Empty() {
@@ -312,6 +322,7 @@ func TestQuickPanel_PagedFlagOffKeepsScroll(t *testing.T) {
 
 // Одна страница плиток — столбца страниц нет.
 func TestQuickPanel_SinglePageHasNoPager(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{model: func(m *desktop.QuickActionList) { m.Replace(m.List()[:6]) }})
 	if s.q.Pages() != 1 || !desktop.QSZoneRect(s.q, "pager").Empty() {
 		t.Errorf("шесть плиток на одной странице: страниц %d, столбец %v", s.q.Pages(), desktop.QSZoneRect(s.q, "pager"))
@@ -321,6 +332,7 @@ func TestQuickPanel_SinglePageHasNoPager(t *testing.T) {
 // ─── Нижняя полоса ───────────────────────────────────────────────────────────
 
 func TestQuickPanel_FooterEditLeft(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	edit, bat, gear := desktop.QSZoneRect(q, "edit"), desktop.QSZoneRect(q, "battery"), desktop.QSZoneRect(q, "settings")
@@ -357,6 +369,7 @@ func TestQuickPanel_FooterEditLeft(t *testing.T) {
 
 // Флаг погашен — прежняя полоса: батарея слева, карандаш и шестерёнка справа.
 func TestQuickPanel_FooterOldLayoutByFlag(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{editOld: true})
 	q := s.q
 	edit, bat, gear := desktop.QSZoneRect(q, "edit"), desktop.QSZoneRect(q, "battery"), desktop.QSZoneRect(q, "settings")
@@ -370,6 +383,7 @@ func TestQuickPanel_FooterOldLayoutByFlag(t *testing.T) {
 
 // Режим правки: «Готово» встаёт на то же место, что «Изменить».
 func TestQuickPanel_FooterDoneKeepsPlace(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	before := desktop.QSZoneRect(q, "edit")
@@ -390,6 +404,7 @@ func trackPix(s *qsScene, zone string) color.RGBA {
 }
 
 func TestQuickPanel_VolumeDisabled(t *testing.T) {
+	testreset.Globals(t)
 	var levels []float64
 	var mutes int
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
@@ -457,6 +472,7 @@ func TestQuickPanel_VolumeDisabled(t *testing.T) {
 }
 
 func TestQuickPanel_BrightnessDisabled(t *testing.T) {
+	testreset.Globals(t)
 	var got []float64
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
 		q.OnBrightnessChange = func(v float64) { got = append(got, v) }
@@ -485,6 +501,7 @@ func TestQuickPanel_BrightnessDisabled(t *testing.T) {
 
 // Ползунок выключили посреди перетаскивания — оно обрывается.
 func TestQuickPanel_DisableWhileDragging(t *testing.T) {
+	testreset.Globals(t)
 	var levels []float64
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
 		q.OnVolumeChange = func(v float64) { levels = append(levels, v) }
@@ -507,6 +524,7 @@ func TestQuickPanel_DisableWhileDragging(t *testing.T) {
 // На экране: подпись из двух слов легла на две строки, детали (имя сети) —
 // только когда название заняло одну.
 func TestQuickPanel_LabelTwoLinesOnScreen(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	img := s.render()

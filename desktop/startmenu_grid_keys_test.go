@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -17,6 +18,7 @@ import (
 // Стрелки идут по сетке: вправо, вниз; вверх с первого ряда — на «Все
 // приложения», вниз с последнего — в «Рекомендуем»; Home, End.
 func TestStartMenu11_ArrowsOnGrid(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.key(widget.KeyTab) // первая ячейка
@@ -69,6 +71,7 @@ func TestStartMenu11_ArrowsOnGrid(t *testing.T) {
 }
 
 func TestStartMenu11_ArrowsOnRecommended(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	var rec string
 	s.menu.OnRecommendedActivate = func(id string) { rec = id }
@@ -94,6 +97,7 @@ func TestStartMenu11_ArrowsOnRecommended(t *testing.T) {
 
 // Рамка клавиатурного фокуса видна: кадр с выбором отличается от кадра без него.
 func TestStartMenu11_FocusRingIsVisible(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.frame()
@@ -121,6 +125,7 @@ func TestStartMenu11_FocusRingIsVisible(t *testing.T) {
 
 // Правая кнопка и клавиша «Меню»: контекстное меню потребителя с целью.
 func TestStartMenu11_ContextMenu(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	var targets []desktop.StartTarget
 	s.menu.ContextMenu = func(tg desktop.StartTarget) []widget.MenuItem {
@@ -158,6 +163,7 @@ func TestStartMenu11_ContextMenu(t *testing.T) {
 
 // Нижняя полоса: пользователь и питание — меню потребителя над кнопкой.
 func TestStartMenu11_FooterMenus(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.menu.UserMenu = func() []widget.MenuItem {
 		return []widget.MenuItem{{Text: "Параметры учётной записи"}, {Text: "Блокировка"}, {Text: "Сменить пользователя"}}
@@ -198,6 +204,7 @@ func TestStartMenu11_FooterMenus(t *testing.T) {
 
 // Смена темы, акцента и языка на открытом меню — без пересоздания.
 func TestStartMenu11_ThemeAccentLanguageOnOpenMenu(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	menuBefore := s.menu
@@ -255,6 +262,7 @@ func TestStartMenu11_ThemeAccentLanguageOnOpenMenu(t *testing.T) {
 // Смена профиля на открытом меню меняет вид (сетка ↔ плитки ↔ плоский список)
 // без пересоздания и без чужого состояния: после возврата вид главный.
 func TestStartMenu11_ThemeSwitchChangesPresenter(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.menu.SetView(desktop.StartViewAllApps)
@@ -296,6 +304,7 @@ func TestStartMenu11_ThemeSwitchChangesPresenter(t *testing.T) {
 // Открытие: первый кадр быстрее 100 мс (холодный и тёплый), перерисовывается
 // только область меню.
 func TestStartMenu11_FirstFrameUnder100ms(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	var entries []desktop.StartEntry
 	for i := 0; i < 300; i++ {
@@ -338,6 +347,7 @@ func TestStartMenu11_FirstFrameUnder100ms(t *testing.T) {
 }
 
 func TestStartMenu11_OpenDamagesOnlyMenuArea(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.frame()
 	var rects []image.Rectangle
@@ -378,6 +388,7 @@ func TestStartMenu11_OpenDamagesOnlyMenuArea(t *testing.T) {
 
 // Кадры наведения дешёвые: медиана кадра при движении по ячейкам.
 func TestStartMenu11_HoverFramesAreCheap(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.frame()
@@ -400,6 +411,7 @@ func TestStartMenu11_HoverFramesAreCheap(t *testing.T) {
 
 // Mica по флагу: панель берёт цвет у размытых обоев; без флага — сплошная.
 func TestStartMenu11_MicaByFlag(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	r := s.rect()

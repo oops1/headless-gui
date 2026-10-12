@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -62,6 +63,7 @@ func paintScene(t *testing.T) output.Frame {
 }
 
 func TestRegions_ClassifiesFillImageAndText(t *testing.T) {
+	testreset.Globals(t)
 	frame := paintScene(t)
 	if len(frame.Regions) == 0 {
 		t.Fatal("кадр не принёс ни одного признака")
@@ -104,6 +106,7 @@ func TestRegions_ClassifiesFillImageAndText(t *testing.T) {
 // нельзя. Обратный порядок (картинка поверх фона) — не тот случай: там
 // содержимое легло НА фон, и признаком считается содержимое.
 func TestRegions_MixedWhenTwoKindsShareTile(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 128, 128
 	eng := New(w, h, 30)
 
@@ -145,6 +148,7 @@ func TestRegions_MixedWhenTwoKindsShareTile(t *testing.T) {
 
 // Частичная заливка тайла — тоже «не знаю»: рядом осталось что-то ещё.
 func TestRegions_PartialFillIsMixed(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(128, 128, 30)
 	root := widget.NewPanel(color.RGBA{R: 10, G: 10, B: 10, A: 255})
 	root.ShowHeader = false
@@ -173,6 +177,7 @@ func TestRegions_PartialFillIsMixed(t *testing.T) {
 // и размытого силуэта тени. Пока вид объявлялся самим путём, потребитель
 // применял к серому размытию текстовый кодек.
 func TestRegions_ShapesAndShadowsAreNotText(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 192, 192
 	eng := New(w, h, 30)
 
@@ -221,6 +226,7 @@ func TestRegions_ShapesAndShadowsAreNotText(t *testing.T) {
 // остаются прежними. Потребитель, выполняющий Solid командой заливки,
 // нарисовал бы там квадратный угол чужим цветом.
 func TestRegions_RoundClipCornerIsNotSolid(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 192, 192
 	eng := New(w, h, 30)
 	root := widget.NewPanel(color.RGBA{R: 12, G: 14, B: 18, A: 255})
@@ -258,6 +264,7 @@ func TestRegions_RoundClipCornerIsNotSolid(t *testing.T) {
 // «неизвестно что». Потребитель, выбирающий кодек по Regions, на обоях не
 // получал ни одной подсказки.
 func TestRegions_WallpaperIsDescribedAsImage(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 320, 320
 	eng := New(w, h, 30)
 
@@ -302,6 +309,7 @@ func TestRegions_WallpaperIsDescribedAsImage(t *testing.T) {
 // Пустой фон — сплошная чёрная заливка, и сказать об этом стоит: потребитель
 // отправит команду заливки вместо тайла с пикселями.
 func TestRegions_EmptyBackgroundIsSolidBlack(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 320, 320
 	eng := New(w, h, 30)
 
@@ -329,6 +337,7 @@ func TestRegions_EmptyBackgroundIsSolidBlack(t *testing.T) {
 // Виджет поверх обоев остаётся собой: сплошная панель, накрывшая тайл
 // целиком, описывается заливкой, а не картинкой.
 func TestRegions_WidgetOverWallpaperWins(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 320, 320
 	eng := New(w, h, 30)
 

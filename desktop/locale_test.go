@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -27,6 +28,7 @@ func useLanguage(t *testing.T, code string) {
 // Тест обязан идти до всех, кто зовёт SetLanguage, — после первого вызова
 // язык считается выбранным.
 func TestLocale_DefaultIsRussianUntilAppChoosesLanguage(t *testing.T) {
+	testreset.Globals(t)
 	if widget.LanguageExplicit() {
 		t.Skip("язык уже выбран другим тестом пакета")
 	}
@@ -39,6 +41,7 @@ func TestLocale_DefaultIsRussianUntilAppChoosesLanguage(t *testing.T) {
 }
 
 func TestLocale_EveryKeyHasBothTranslations(t *testing.T) {
+	testreset.Globals(t)
 	keys := []string{
 		StrStart, StrStartPinned, StrStartAllApps, StrNotifEmpty, StrNotifClearAll,
 		StrNetNone, StrNetConnected, StrNetNamed, StrSoundMuted, StrSoundLevel,
@@ -72,6 +75,7 @@ func widgetItoa(n int) string {
 }
 
 func TestLocale_StartButtonLabelFollowsLanguage(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	sb := NewStartButton(tm)
 	sb.SetBounds(image.Rect(0, 0, 120, 32))
@@ -103,6 +107,7 @@ func TestLocale_StartButtonLabelFollowsLanguage(t *testing.T) {
 }
 
 func TestLocale_StartMenuSectionsFollowLanguage(t *testing.T) {
+	testreset.Globals(t)
 	m, cat := startMenuFixture(t)
 	defer m.Close()
 	cat.Pin("term")
@@ -138,6 +143,7 @@ func TestLocale_StartMenuSectionsFollowLanguage(t *testing.T) {
 }
 
 func TestLocale_NotificationCenterFollowsLanguage(t *testing.T) {
+	testreset.Globals(t)
 	// Пустой центр.
 	empty := NewNotificationCenter(flatNotifTheme(t), NewFakeNotifications())
 	empty.Screen = panelScreen()
@@ -174,6 +180,7 @@ func TestLocale_NotificationCenterFollowsLanguage(t *testing.T) {
 }
 
 func TestLocale_NotificationTimeFollowsCulture(t *testing.T) {
+	testreset.Globals(t)
 	nc, _ := notifFixture(t)
 	defer nc.Close()
 
@@ -204,6 +211,7 @@ func calendarTexts(c *CalendarFlyout) []string {
 }
 
 func TestLocale_CalendarRussianByDefaultLooksAsBefore(t *testing.T) {
+	testreset.Globals(t)
 	useLanguage(t, "RU")
 	c, _ := newTestCalendar(t, time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC))
 	defer c.Close()
@@ -226,6 +234,7 @@ func TestLocale_CalendarRussianByDefaultLooksAsBefore(t *testing.T) {
 }
 
 func TestLocale_CalendarEnglishFollowsLanguageWithoutRecreate(t *testing.T) {
+	testreset.Globals(t)
 	useLanguage(t, "RU")
 	c, _ := newTestCalendar(t, time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC))
 	defer c.Close()
@@ -273,6 +282,7 @@ func (c ruKZ) LongDate(t time.Time) string {
 }
 
 func TestLocale_CalendarUsesConsumerCulture(t *testing.T) {
+	testreset.Globals(t)
 	useLanguage(t, "EN") // язык не должен влиять, когда культуру дал потребитель
 	c, _ := newTestCalendar(t, time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC))
 	defer c.Close()
@@ -295,6 +305,7 @@ func TestLocale_CalendarUsesConsumerCulture(t *testing.T) {
 }
 
 func TestLocale_CultureFallsBackWhenLanguageHasNoTables(t *testing.T) {
+	testreset.Globals(t)
 	useLanguage(t, "DE") // перевода нет: запасной английский, а не голые ключи
 	var cul LocaleCulture
 	if got := cul.MonthName(time.March); got != "March" {
@@ -314,6 +325,7 @@ func TestLocale_CultureFallsBackWhenLanguageHasNoTables(t *testing.T) {
 // ─── Часы ────────────────────────────────────────────────────────────────────
 
 func TestLocale_ClockFormatFollowsLanguageAndOverrides(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	clk := NewFakeClock(time.Date(2026, 8, 27, 14, 5, 0, 0, time.UTC))
 	c := NewClock(tm, clk)
@@ -350,6 +362,7 @@ func TestLocale_ClockFormatFollowsLanguageAndOverrides(t *testing.T) {
 // Ширина часов зависит от формата, а значит и от языка: панель обязана
 // переложить элементы сама, иначе новая строка не поместится в старую ширину.
 func TestLocale_TaskbarRelayoutsOnLanguageChange(t *testing.T) {
+	testreset.Globals(t)
 	useLanguage(t, "RU")
 	p := theme.NewProfile("TaskbarLoc")
 	p.SetMetric(KeyTaskbarHeight, 40)
@@ -389,6 +402,7 @@ func TestLocale_TaskbarRelayoutsOnLanguageChange(t *testing.T) {
 // ─── Подсказки трея ──────────────────────────────────────────────────────────
 
 func TestLocale_TrayTooltipsFollowLanguageWithoutStateChange(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus() // сеть Wi-Fi «Сеть», звук, питание от сети
 	net := NewNetworkStatus(tm, st)
@@ -429,6 +443,7 @@ func TestLocale_TrayTooltipsFollowLanguageWithoutStateChange(t *testing.T) {
 // Псевдонимы ключей (widget.AliasStrings) подхватываются: приложение связывает
 // «desktop.start» со своим «Start» и получает свой текст.
 func TestLocale_AppAliasWins(t *testing.T) {
+	testreset.Globals(t)
 	useLanguage(t, "RU")
 	widget.RegisterString("RU", "app.Start", "ПУСК")
 	widget.AliasString(StrStart, "app.Start")

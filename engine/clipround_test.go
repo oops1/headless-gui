@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // newTestCanvas — холст нужного размера с чёрным фоном.
@@ -20,6 +22,7 @@ func pixAt(c *Canvas, x, y int) color.RGBA {
 // TestRoundClip_CutsCornersKeepsMiddle — заливка, отсечённая скруглённым
 // контуром, не попадает в углы, но занимает всё остальное.
 func TestRoundClip_CutsCornersKeepsMiddle(t *testing.T) {
+	testreset.Globals(t)
 	c := newTestCanvas(100, 100)
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 
@@ -49,6 +52,7 @@ func TestRoundClip_CutsCornersKeepsMiddle(t *testing.T) {
 // заливки скруглённого прямоугольника. Иначе на углу остаётся щель в
 // пиксель или содержимое наползает на фон.
 func TestRoundClip_MatchesFilledShape(t *testing.T) {
+	testreset.Globals(t)
 	const w, h, r = 80, 60, 16
 	rect := image.Rect(0, 0, w, h)
 	red := color.RGBA{R: 200, G: 0, B: 0, A: 255}
@@ -83,6 +87,7 @@ func TestRoundClip_MatchesFilledShape(t *testing.T) {
 // TestRoundClip_AppliesToTextAndPixels — кривая режет не только заливки:
 // текст и отдельные пиксели тоже.
 func TestRoundClip_AppliesToTextAndPixels(t *testing.T) {
+	testreset.Globals(t)
 	c := newTestCanvas(120, 60)
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 
@@ -114,6 +119,7 @@ func TestRoundClip_AppliesToTextAndPixels(t *testing.T) {
 // TestRoundClip_ClearRestoresRectangular — снятие скруглённого отсечения
 // возвращает обычное прямоугольное поведение.
 func TestRoundClip_ClearRestoresRectangular(t *testing.T) {
+	testreset.Globals(t)
 	c := newTestCanvas(60, 60)
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 
@@ -135,6 +141,7 @@ func TestRoundClip_ClearRestoresRectangular(t *testing.T) {
 // TestRoundClip_ZeroRadiusIsRectangular — нулевой радиус равнозначен
 // обычному прямоугольному отсечению, а не отсутствию отсечения.
 func TestRoundClip_ZeroRadiusIsRectangular(t *testing.T) {
+	testreset.Globals(t)
 	c := newTestCanvas(60, 60)
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 
@@ -156,6 +163,7 @@ func TestRoundClip_ZeroRadiusIsRectangular(t *testing.T) {
 // TestRoundClip_HiDPI — при масштабе контур считается в физических
 // пикселях: радиус и границы масштабируются вместе с остальным.
 func TestRoundClip_HiDPI(t *testing.T) {
+	testreset.Globals(t)
 	c := newCanvasScaled(60, 60, 2, newFontCache("assets"))
 	c.blitBackground()
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
@@ -181,6 +189,7 @@ func TestRoundClip_HiDPI(t *testing.T) {
 // TestRoundClip_IntersectsWithBaseClip — скруглённое отсечение не отменяет
 // базовый клип кадра (область частичной перерисовки).
 func TestRoundClip_IntersectsWithBaseClip(t *testing.T) {
+	testreset.Globals(t)
 	c := newTestCanvas(100, 100)
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 
@@ -204,6 +213,7 @@ func TestRoundClip_IntersectsWithBaseClip(t *testing.T) {
 // Прямые стороны это уже умели, а четыре угла — нет: на стеклянной панели
 // обводка ложилась плёнкой по сторонам и «дырами» на углах.
 func TestRoundBorder_TranslucentCornersBlend(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 80, 60
 	c := newCanvas(w, h, nil)
 

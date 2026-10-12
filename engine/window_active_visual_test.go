@@ -5,12 +5,14 @@ import (
 	"os"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // TestWindowActive_VisualSample — окно в активном и неактивном состоянии
 // для тем Win2000 и Win11 Light (HEADLESS_GUI_ACTIVE_PNG=file.png).
 func TestWindowActive_VisualSample(t *testing.T) {
+	testreset.Globals(t)
 	out := os.Getenv("HEADLESS_GUI_ACTIVE_PNG")
 	if out == "" {
 		t.Skip("HEADLESS_GUI_ACTIVE_PNG не задан")

@@ -3,9 +3,12 @@ package engine
 import (
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 func TestFrameInterval_MaxFPSIsCapOnly(t *testing.T) {
+	testreset.Globals(t)
 	e := &Engine{fps: 20}
 	if got, want := e.frameInterval(), 50*time.Millisecond; got != want {
 		t.Fatalf("без потолка: %v, ожидалось %v", got, want)
@@ -33,6 +36,7 @@ func TestFrameInterval_MaxFPSIsCapOnly(t *testing.T) {
 // режимом «по требованию» (кадр каждый тик) под потолком 10 даёт примерно
 // десять кадров в секунду, а не сто.
 func TestEngine_SetMaxFPS_SlowsLoop(t *testing.T) {
+	testreset.Globals(t)
 	e := New(64, 64, 100)
 	e.SetRenderOnDemand(false)
 	e.Start()

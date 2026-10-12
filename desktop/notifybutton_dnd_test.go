@@ -4,12 +4,14 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 )
 
 // Одна модель «Не беспокоить» на центр, тост и кнопку трея: кнопка следует за
 // переключениями модели сама, без пересылки потребителем.
 func TestNotificationButton_FollowsDoNotDisturbModel(t *testing.T) {
+	testreset.Globals(t)
 	tm, _ := edgeManager(t, theme.ProfileWindows11)
 	b := desktop.NewNotificationButton(tm, desktop.NewFakeNotifications())
 	dnd := desktop.NewDoNotDisturb(true)

@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -26,6 +27,7 @@ func solidImage(w, h int, col color.RGBA) *image.RGBA {
 }
 
 func TestSetBackground_FromMemory(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 120, 80
 	eng := New(w, h, 30)
 
@@ -56,6 +58,7 @@ func TestSetBackground_FromMemory(t *testing.T) {
 }
 
 func TestSetBackground_RejectsEmpty(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(40, 30, 30)
 	if err := eng.SetBackground(nil); err == nil {
 		t.Error("nil принят как фон — снятие фона делается ClearBackground")

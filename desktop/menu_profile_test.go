@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -24,6 +25,7 @@ func menuTheme(t *testing.T, name string) *theme.Manager {
 }
 
 func TestThemeMenu_Windows11LookFromProfile(t *testing.T) {
+	testreset.Globals(t)
 	m := widget.NewPopupMenu()
 	themeMenu(m, menuTheme(t, theme.ProfileWindows11))
 
@@ -46,6 +48,7 @@ func TestThemeMenu_Windows11LookFromProfile(t *testing.T) {
 // Смена темы на лету: меню, показанное под одной темой, под другой получает
 // её размеры, а значения прежней не остаются.
 func TestThemeMenu_SwitchingProfilesLeavesNothingBehind(t *testing.T) {
+	testreset.Globals(t)
 	m := widget.NewPopupMenu()
 	themeMenu(m, menuTheme(t, theme.ProfileWindows11))
 	themeMenu(m, menuTheme(t, theme.ProfileWindows2000))
@@ -57,6 +60,7 @@ func TestThemeMenu_SwitchingProfilesLeavesNothingBehind(t *testing.T) {
 
 // Профиль без токенов меню: то, что было, остаётся — ни размеров, ни скруглений.
 func TestThemeMenu_ProfileWithoutTokensKeepsEngineMenu(t *testing.T) {
+	testreset.Globals(t)
 	p := theme.NewProfile("bare")
 	p.SetStyle("menu", "", theme.StateNormal, theme.StyleDelta{
 		Fill: theme.C(color.RGBA{R: 9, G: 9, B: 9, A: 255}),

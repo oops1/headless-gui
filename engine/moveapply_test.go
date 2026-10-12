@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -14,6 +15,7 @@ import (
 // запрашивает), их не разбирает: приёмник только складывает, забирает —
 // сборка кадра. Без ограничения список рос бы всё время работы приложения.
 func TestNoteMove_IdleEngineDoesNotHoard(t *testing.T) {
+	testreset.Globals(t)
 	e := New(600, 400, 60)
 	e.SetRenderOnDemand(true)
 
@@ -36,6 +38,7 @@ func TestNoteMove_IdleEngineDoesNotHoard(t *testing.T) {
 // Чужие объявления движок не берёт: перенос целиком за пределами его холста
 // заставил бы копировать пиксели с места, где ничего не переезжало.
 func TestNoteMove_IgnoresWhatIsNotOnThisCanvas(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 
 	off := image.Rect(400, 300, 600, 450)

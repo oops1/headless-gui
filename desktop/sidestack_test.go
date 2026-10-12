@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -81,11 +82,11 @@ func sideScene(t *testing.T, edge Edge, light bool) *goldenParts {
 	bar.BindFlyouts(prev)
 	root.AddChild(prev)
 	t.Cleanup(func() { prev.Close(); bar.Close(); widget.StopAllAnimations() })
-	return &goldenParts{root: root, bar: bar, area: area, start: start, prev: prev, wm: wm, tm: tm}
+	return &goldenParts{t: t, root: root, bar: bar, area: area, start: start, prev: prev, wm: wm, tm: tm}
 }
 
 func (g *goldenParts) renderSize(w, h int) *image.RGBA {
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(g.t, w, h, 30)
 	eng.SetRoot(g.root)
 	eng.RenderOnce()
 	finishAnimations()
@@ -93,6 +94,7 @@ func (g *goldenParts) renderSize(w, h int) *image.RGBA {
 }
 
 func TestSideStack_Shots(t *testing.T) {
+	testreset.Globals(t)
 	for _, tc := range []struct {
 		edge  Edge
 		light bool

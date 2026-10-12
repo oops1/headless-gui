@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -21,6 +22,7 @@ func trayTrio(t *testing.T) (*SystemTray, *FakeSystemStatus) {
 
 // Места хватает — прячется ничего и шеврона нет.
 func TestSystemTray_AllFitNoChevron(t *testing.T) {
+	testreset.Globals(t)
 	tray, _ := trayTrio(t)
 	defer tray.Close()
 
@@ -37,6 +39,7 @@ func TestSystemTray_AllFitNoChevron(t *testing.T) {
 
 // Места мало — лишние прячутся, и появляется шеврон.
 func TestSystemTray_OverflowHidesExtras(t *testing.T) {
+	testreset.Globals(t)
 	tray, _ := trayTrio(t)
 	defer tray.Close()
 
@@ -77,6 +80,7 @@ func TestSystemTray_OverflowHidesExtras(t *testing.T) {
 
 // Щелчок мимо шеврона контейнер не трогает: он должен дойти до значка.
 func TestSystemTray_ClickOutsideChevronPassesThrough(t *testing.T) {
+	testreset.Globals(t)
 	tray, _ := trayTrio(t)
 	defer tray.Close()
 	tray.SetBounds(image.Rect(0, 0, 30, 24))
@@ -88,6 +92,7 @@ func TestSystemTray_ClickOutsideChevronPassesThrough(t *testing.T) {
 
 // Ширина запрашивается по значкам, а не берётся с потолка.
 func TestSystemTray_PreferredSizeFollowsItems(t *testing.T) {
+	testreset.Globals(t)
 	tray, _ := trayTrio(t)
 	defer tray.Close()
 

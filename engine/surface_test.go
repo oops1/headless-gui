@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -71,6 +72,7 @@ func premulAlphaForTest(base color.RGBA, alpha uint8) color.RGBA {
 // PixelFormat) обязан быть RGBA: SetPixelFormat никогда не вызывался,
 // поведение обязано остаться прежним, байт в байт.
 func TestPixelFormatDefaultIsRGBA(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(64, 64, 30)
 	if got := eng.PixelFormat(); got != FormatRGBA {
 		t.Fatalf("формат по умолчанию = %v, ждали %v", got, FormatRGBA)
@@ -81,6 +83,7 @@ func TestPixelFormatDefaultIsRGBA(t *testing.T) {
 // молча приниматься (иначе enc() тихо решит, что это не BGRX, и просто
 // ничего не переставит — а вызывающий будет думать, что задал формат).
 func TestSetPixelFormatRejectsUnknown(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(64, 64, 30)
 	if err := eng.SetPixelFormat(PixelFormat(99)); err == nil {
 		t.Fatal("SetPixelFormat(99) — ждали ошибку, получили nil")
@@ -95,6 +98,7 @@ func TestSetPixelFormatRejectsUnknown(t *testing.T) {
 // при FormatRGBA, на ОДНОЙ и той же сцене (заливка, включая alpha-blend,
 // изображение и текст).
 func TestPixelFormatBGRXMatchesRGBASwapped(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 320, 320
 
 	rgba := New(w, h, 30)
@@ -141,6 +145,7 @@ func TestPixelFormatBGRXMatchesRGBASwapped(t *testing.T) {
 // формат ПОСЛЕ загрузки фона, чтобы проверить перекодирование уже
 // установленного bgImage в SetPixelFormat.
 func TestPixelFormatBGRXBackgroundImage(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 128, 96
 
 	bg := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -182,6 +187,7 @@ func TestPixelFormatBGRXBackgroundImage(t *testing.T) {
 // ─── SetSurface: рисование в чужую память ───────────────────────────────────
 
 func TestSetSurfaceRejectsSmallStride(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(64, 64, 30)
 	buf := make([]byte, 64*64*4)
 	if err := eng.SetSurface(buf, 64*4-1, FormatRGBA); err == nil {
@@ -190,6 +196,7 @@ func TestSetSurfaceRejectsSmallStride(t *testing.T) {
 }
 
 func TestSetSurfaceRejectsSmallBuffer(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(64, 64, 30)
 	buf := make([]byte, 64*64*4-1) // на 1 байт меньше необходимого
 	if err := eng.SetSurface(buf, 64*4, FormatRGBA); err == nil {
@@ -198,6 +205,7 @@ func TestSetSurfaceRejectsSmallBuffer(t *testing.T) {
 }
 
 func TestSetSurfaceRejectsUnknownFormat(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(64, 64, 30)
 	buf := make([]byte, 64*64*4)
 	if err := eng.SetSurface(buf, 64*4, PixelFormat(99)); err == nil {
@@ -208,6 +216,7 @@ func TestSetSurfaceRejectsUnknownFormat(t *testing.T) {
 // TestSetSurfaceNilReverts — SetSurface(nil, …) обязан вернуть движок к
 // собственному back-буферу (не к nil, не к последней чужой памяти).
 func TestSetSurfaceNilReverts(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(64, 64, 30)
 	buf := make([]byte, 64*64*4)
 	if err := eng.SetSurface(buf, 64*4, FormatRGBA); err != nil {
@@ -229,6 +238,7 @@ func TestSetSurfaceNilReverts(t *testing.T) {
 // сцена, что и в TestPixelFormatBGRXMatchesRGBASwapped: заливка, включая
 // alpha-blend, изображение и текст).
 func TestSetSurfaceMatchesInternalBuffer(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 320, 320
 
 	internal := New(w, h, 30)
@@ -262,6 +272,7 @@ func TestSetSurfaceMatchesInternalBuffer(t *testing.T) {
 // что запись идёт по PixOffset (учитывает stride), а не плоским циклом по
 // w×4 — иначе со второй строки данные бы поехали в паддинг.
 func TestSetSurfacePaddedStride(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 65, 40 // нечётная ширина — паддинг не выравнивается сам собой
 	stride := w*4 + 32
 	buf := make([]byte, stride*h)
@@ -292,6 +303,7 @@ func TestSetSurfacePaddedStride(t *testing.T) {
 // через SetPixelFormat. Иначе после круга «BGRX → внешний RGBA → свой» все
 // кадры кодировались бы не тем форматом, а PixelFormat() сообщал бы неправду.
 func TestSetSurfaceRestoresOwnFormatOnNil(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(64, 48, 30)
 	if err := eng.SetPixelFormat(FormatBGRX); err != nil {
 		t.Fatal(err)

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -49,6 +50,7 @@ func timersLeft(e *Engine) int {
 }
 
 func TestTimer_AfterRunsOnEngineGoroutine(t *testing.T) {
+	testreset.Globals(t)
 	e := timerEngine(t)
 	defer e.Stop()
 
@@ -76,6 +78,7 @@ func TestTimer_AfterRunsOnEngineGoroutine(t *testing.T) {
 // Из fn можно трогать дерево виджетов, пока движок рисует кадры: под -race
 // это проверяет, что таймер не выполняет работу на своей горутине.
 func TestTimer_TouchesWidgetTreeWithoutRace(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 120)
 	e.SetRenderOnDemand(true)
 	root := widget.NewPanel(color.RGBA{R: 30, G: 30, B: 30, A: 255})
@@ -102,6 +105,7 @@ func TestTimer_TouchesWidgetTreeWithoutRace(t *testing.T) {
 }
 
 func TestTimer_AfterCancel(t *testing.T) {
+	testreset.Globals(t)
 	e := timerEngine(t)
 	defer e.Stop()
 
@@ -126,6 +130,7 @@ func TestTimer_AfterCancel(t *testing.T) {
 // уже стоит в Post, и отмена обязана его погасить. Движок не запущен, поэтому
 // очередь стоит, пока её не разберёт Flush.
 func TestTimer_CancelAfterQueued(t *testing.T) {
+	testreset.Globals(t)
 	e := New(100, 100, 60)
 	defer e.Stop()
 
@@ -144,6 +149,7 @@ func TestTimer_CancelAfterQueued(t *testing.T) {
 }
 
 func TestTimer_EveryRepeatsAndStops(t *testing.T) {
+	testreset.Globals(t)
 	e := timerEngine(t)
 	defer e.Stop()
 
@@ -169,6 +175,7 @@ func TestTimer_EveryRepeatsAndStops(t *testing.T) {
 
 // Every останавливает сам себя из fn: следующий запуск не планируется.
 func TestTimer_EveryStopsItself(t *testing.T) {
+	testreset.Globals(t)
 	e := timerEngine(t)
 	defer e.Stop()
 
@@ -198,6 +205,7 @@ func TestTimer_EveryStopsItself(t *testing.T) {
 // Следующий запуск планируется после fn: медленный обработчик не копит
 // очередь, между концом одного вызова и началом следующего проходит период.
 func TestTimer_EveryWaitsForHandler(t *testing.T) {
+	testreset.Globals(t)
 	e := timerEngine(t)
 	defer e.Stop()
 
@@ -233,6 +241,7 @@ func TestTimer_EveryWaitsForHandler(t *testing.T) {
 
 // Остановка движка гасит все его таймеры.
 func TestTimer_EngineStopStopsTimers(t *testing.T) {
+	testreset.Globals(t)
 	e := timerEngine(t)
 
 	var calls atomic.Int32
@@ -258,6 +267,7 @@ func TestTimer_EngineStopStopsTimers(t *testing.T) {
 
 // У остановленного движка таймеры не заводятся.
 func TestTimer_OnStoppedEngine(t *testing.T) {
+	testreset.Globals(t)
 	e := timerEngine(t)
 	e.Stop()
 
@@ -280,6 +290,7 @@ func TestTimer_OnStoppedEngine(t *testing.T) {
 }
 
 func TestTimer_NilFunc(t *testing.T) {
+	testreset.Globals(t)
 	e := New(100, 100, 60)
 	defer e.Stop()
 	if !e.After(0, nil).Stopped() || !e.Every(time.Millisecond, nil).Stopped() {
@@ -290,6 +301,7 @@ func TestTimer_NilFunc(t *testing.T) {
 // Stop из многих горутин сразу и параллельно с остановкой движка: гонок нет,
 // паники нет.
 func TestTimer_ConcurrentStop(t *testing.T) {
+	testreset.Globals(t)
 	e := timerEngine(t)
 
 	timers := make([]*Timer, 0, 50)
@@ -325,6 +337,7 @@ func TestTimer_ConcurrentStop(t *testing.T) {
 // Утечек горутин нет: после остановки движка с десятками живых таймеров их
 // число возвращается к исходному.
 func TestTimer_NoGoroutineLeak(t *testing.T) {
+	testreset.Globals(t)
 	// Даём завершиться горутинам, оставшимся от предыдущих тестов.
 	time.Sleep(100 * time.Millisecond)
 	before := runtime.NumGoroutine()
@@ -354,6 +367,7 @@ func TestTimer_NoGoroutineLeak(t *testing.T) {
 // Ожидающий таймер не держит горутин: тысяча таймеров на час не прибавляет
 // ни одной.
 func TestTimer_WaitingTimersHoldNoGoroutines(t *testing.T) {
+	testreset.Globals(t)
 	e := timerEngine(t)
 	defer e.Stop()
 	time.Sleep(50 * time.Millisecond)

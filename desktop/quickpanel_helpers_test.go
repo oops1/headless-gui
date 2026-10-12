@@ -11,6 +11,7 @@ import (
 
 	"github.com/oops1/headless-gui/v3/desktop"
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -131,7 +132,7 @@ func qsBuild(t *testing.T, o qsOpts) *qsScene {
 	if scale <= 0 {
 		scale = 1
 	}
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	eng.SetScale(scale)
 	if o.mica {
 		m.SetFlag(theme.FlagBackdropMica, true)

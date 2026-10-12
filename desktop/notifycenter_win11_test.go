@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -116,6 +117,7 @@ func (f *w11Fix) drawn(w interface{ DrawOverlay(widget.DrawContext) }) *recCtx {
 // ─── Презентер и размещение ──────────────────────────────────────────────────
 
 func TestW11_PresenterChoosesVariant(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	if w.nc.presenter() == nil || !w.nc.win11() || !w.cal.win11() {
 		t.Fatal("Windows 11: презентер центра и календаря не назначен")
@@ -129,6 +131,7 @@ func TestW11_PresenterChoosesVariant(t *testing.T) {
 }
 
 func TestW11_StackGeometry(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	n, c := w.nc.OverlayBounds(), w.cal.OverlayBounds()
@@ -154,6 +157,7 @@ func TestW11_StackGeometry(t *testing.T) {
 
 // Свернули календарь — центр опустился к нему, а прежнее место перерисовалось.
 func TestW11_CollapseMovesCenterAndRepaintsOldArea(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	// Экран пониже: тогда центру над развёрнутым календарём тесно, а над
 	// свёрнутым — просторно.
@@ -189,6 +193,7 @@ func pointOf(p image.Point) image.Point { return p }
 
 // Центр без календаря стоит прямо над панелью задач.
 func TestW11_CenterAloneSitsAbovePanel(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.nc.Open(w.anchor)
 	w.nc.Settle()
@@ -201,6 +206,7 @@ func TestW11_CenterAloneSitsAbovePanel(t *testing.T) {
 // 100–200 %: панели вписаны в экран, не наползают друг на друга и не меньше
 // заголовка, на каком бы логическом размере экрана ни считались.
 func TestW11_FitsEveryScreen(t *testing.T) {
+	testreset.Globals(t)
 	for _, sz := range []image.Point{{1920, 1080}, {1280, 800}, {960, 540}, {800, 600}, {640, 480}} {
 		w := newW11Fix(t, theme.ProfileWindows11, true)
 		w.screen = image.Rect(0, 0, sz.X, sz.Y)
@@ -223,6 +229,7 @@ func TestW11_FitsEveryScreen(t *testing.T) {
 // ─── Заголовок ───────────────────────────────────────────────────────────────
 
 func TestW11_HeaderTextsFollowLanguage(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	useLanguage(t, "EN")
@@ -242,6 +249,7 @@ func TestW11_HeaderTextsFollowLanguage(t *testing.T) {
 }
 
 func TestW11_ClearAllInactiveWhenEmpty(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	l := w.nc.view.layout(w.nc.rect())
@@ -263,6 +271,7 @@ func TestW11_ClearAllInactiveWhenEmpty(t *testing.T) {
 }
 
 func TestW11_ClearAllRemovesEverything(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	w11Click(w.nc, w.zone(t, zoneKey{kind: zoneClear}).rect)
@@ -273,6 +282,7 @@ func TestW11_ClearAllRemovesEverything(t *testing.T) {
 
 // Колокольчик переключает общую модель и перерисовывает только себя.
 func TestW11_BellTogglesSharedModelAndRepaintsOnlyItself(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	bell := w.zone(t, zoneKey{kind: zoneDND}).rect
@@ -317,6 +327,7 @@ func TestW11_BellTogglesSharedModelAndRepaintsOnlyItself(t *testing.T) {
 // ─── Карточки и группы ───────────────────────────────────────────────────────
 
 func TestW11_SingleCardHasAppRowGroupHasCounter(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.tm.SetFlag(theme.KeyNotifyStack, false) // прежний вид группы: заголовок со счётчиком и все карточки
 	w.open()
@@ -354,6 +365,7 @@ func TestW11_SingleCardHasAppRowGroupHasCounter(t *testing.T) {
 }
 
 func TestW11_GroupCollapsesByClickAndKeepsCounter(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.tm.SetFlag(theme.KeyNotifyStack, false) // прежний вид: группа сворачивается шевроном
 	w.open()
@@ -375,6 +387,7 @@ func TestW11_GroupCollapsesByClickAndKeepsCounter(t *testing.T) {
 }
 
 func TestW11_CardCloseAndTimeLabel(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	ctx := w.drawn(w.nc)
@@ -401,6 +414,7 @@ func TestW11_CardCloseAndTimeLabel(t *testing.T) {
 
 // Карточка не показывает время, пока над ней мышь: на его месте крестик.
 func TestW11_HoverSwapsTimeForCross(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	id := w.ns.List()[0].ID
@@ -417,6 +431,7 @@ func TestW11_HoverSwapsTimeForCross(t *testing.T) {
 
 // Четыре вида действий работают так же, как в Windows 10.
 func TestW11_ActionKindsDeliverEvents(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	id := w.ns.List()[0].ID
@@ -460,6 +475,7 @@ func TestW11_ActionKindsDeliverEvents(t *testing.T) {
 // ─── Тост и «Не беспокоить» ─────────────────────────────────────────────────
 
 func TestW11_ToastShowsCardAndRespectsDoNotDisturb(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows11)
 	ns := NewFakeNotifications()
@@ -512,6 +528,7 @@ func drawnTexts(w interface{ DrawOverlay(widget.DrawContext) }) []recText {
 // ─── Календарь ───────────────────────────────────────────────────────────────
 
 func TestW11Calendar_HeaderMonthAndToday(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	ctx := w.drawn(w.cal)
@@ -551,6 +568,7 @@ type bareCulture struct{ LocaleCulture }
 func (c bareCulture) DateHeader() {} // скрывает расширение: подпись не совпадает
 
 func TestW11Calendar_DateHeaderFallsBackForPlainCulture(t *testing.T) {
+	testreset.Globals(t)
 	tm := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
 	if got := dateHeader(LocaleCulture{}, tm); got != "понедельник, 5 октября" {
 		t.Errorf("своя строка культуры: %q", got)
@@ -565,6 +583,7 @@ func TestW11Calendar_DateHeaderFallsBackForPlainCulture(t *testing.T) {
 }
 
 func TestW11Calendar_CollapseMonthAndSelection(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	l := w.cal.w11Layout(w.cal.rect())
@@ -601,6 +620,7 @@ func TestW11Calendar_CollapseMonthAndSelection(t *testing.T) {
 
 // Клик по календарю не закрывает центр над ним, клик мимо закрывает обоих.
 func TestW11_GroupSurvivesClickInNeighbourAndClosesOutside(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	cal := w.cal.rect()
@@ -618,6 +638,7 @@ func TestW11_GroupSurvivesClickInNeighbourAndClosesOutside(t *testing.T) {
 }
 
 func TestW11_EscapeClosesWholeGroup(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	w.cal.OnKeyEvent(widget.KeyEvent{Code: widget.KeyEscape, Pressed: true})
@@ -634,6 +655,7 @@ func TestW11_EscapeClosesWholeGroup(t *testing.T) {
 // ─── «Фокусировка» ───────────────────────────────────────────────────────────
 
 func TestW11Focus_DurationStepsAndLimits(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	press := func(id calStop) { w.cal.activateStop(id) }
@@ -667,6 +689,7 @@ func TestW11Focus_DurationStepsAndLimits(t *testing.T) {
 }
 
 func TestW11Focus_StartCountdownStop(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	w11Click(w.cal, w.cal.w11Layout(w.cal.rect()).faction)
@@ -696,6 +719,7 @@ func TestW11Focus_StartCountdownStop(t *testing.T) {
 }
 
 func TestFocusCountdownFormat(t *testing.T) {
+	testreset.Globals(t)
 	cases := map[time.Duration]string{
 		25 * time.Minute: "25:00",
 		24*time.Minute + 59*time.Second + 400*time.Millisecond: "25:00",
@@ -714,6 +738,7 @@ func TestFocusCountdownFormat(t *testing.T) {
 // Секундный отсчёт живёт, пока календарь открыт и сеанс идёт, и перерисовывает
 // только модуль «Фокусировки».
 func TestW11Focus_TickerLifecycleAndRepaintArea(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	var starts, stops int
 	var tick func()
@@ -774,6 +799,7 @@ func TestW11Focus_TickerLifecycleAndRepaintArea(t *testing.T) {
 // Без своего Ticker отсчёт идёт на таймере стандартной библиотеки и
 // останавливается.
 func TestW11Focus_DefaultTickerFiresAndStops(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.cal.Ticker = nil
 	n := make(chan struct{}, 8)
@@ -795,6 +821,7 @@ func TestW11Focus_DefaultTickerFiresAndStops(t *testing.T) {
 }
 
 func TestW11Focus_NoSessionNoModule(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.cal.SetFocusSession(nil)
 	w.open()
@@ -815,6 +842,7 @@ func kev(code widget.KeyCode, mod widget.KeyMod) widget.KeyEvent {
 }
 
 func TestW11Keyboard_TabWalksCenterThenCalendarAndBack(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	w.nc.SetFocused(true)
@@ -852,6 +880,7 @@ func TestW11Keyboard_TabWalksCenterThenCalendarAndBack(t *testing.T) {
 }
 
 func TestW11Keyboard_CalendarButtonsActivateWithEnter(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	w.cal.SetFocused(true)
@@ -886,6 +915,7 @@ func TestW11Keyboard_CalendarButtonsActivateWithEnter(t *testing.T) {
 // Сетка дней доступна с клавиатуры: стрелки двигают день, Enter выбирает,
 // выход за месяц листает месяц.
 func TestW11Keyboard_GridCursorMovesAndSelects(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	w.cal.SetFocused(true)
@@ -924,6 +954,7 @@ func TestW11Keyboard_GridCursorMovesAndSelects(t *testing.T) {
 // ─── Тема, акцент, язык, меньше движения ────────────────────────────────────
 
 func TestW11_ThemeAccentLanguageSwitchWithoutRecreate(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	light := w.drawn(w.nc)
@@ -977,6 +1008,7 @@ func TestW11_ThemeAccentLanguageSwitchWithoutRecreate(t *testing.T) {
 }
 
 func TestW11_ReduceMotionOpensInstantly(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.tm.SetFlag(theme.FlagMotionReduce, true)
@@ -1006,6 +1038,7 @@ func TestW11_ReduceMotionOpensInstantly(t *testing.T) {
 
 // Открытие группы вместе с первой отрисовкой обеих панелей — меньше 100 мс.
 func TestW11_OpensUnder100ms(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open() // прогрев: измерения шрифтов кешируются
 	w.group.CloseAll()
@@ -1022,6 +1055,7 @@ func TestW11_OpensUnder100ms(t *testing.T) {
 
 // Наведение на карточку перерисовывает карточку, а не весь центр.
 func TestW11_HoverRepaintsOnlyTheCard(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	inv := watchInvalidations(t)
@@ -1043,6 +1077,7 @@ func TestW11_HoverRepaintsOnlyTheCard(t *testing.T) {
 // ─── Модели ─────────────────────────────────────────────────────────────────
 
 func TestDoNotDisturbState(t *testing.T) {
+	testreset.Globals(t)
 	d := NewDoNotDisturb(false)
 	n := 0
 	unsub := d.Subscribe(func() { n++ })
@@ -1065,6 +1100,7 @@ func TestDoNotDisturbState(t *testing.T) {
 }
 
 func TestFakeFocusSession(t *testing.T) {
+	testreset.Globals(t)
 	clk := NewFakeClock(w11Time())
 	s := NewFakeFocusSession(clk)
 	n := 0
@@ -1094,6 +1130,7 @@ func TestFakeFocusSession(t *testing.T) {
 }
 
 func TestW11_NoColorLiteralsInStrings(t *testing.T) {
+	testreset.Globals(t)
 	// Строки RU и EN есть для каждого нового ключа.
 	for _, k := range []string{StrNotifTitle, StrNotifDND, StrFocusTitle, StrFocusMinutes, StrFocusHours,
 		StrFocusHoursMinutes, StrFocusStart, StrFocusStop, StrFocusLess, StrFocusMore, StrCalHeadDate} {

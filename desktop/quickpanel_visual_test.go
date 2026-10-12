@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -13,6 +14,7 @@ import (
 // вложенная, режим правки. Кадры пишутся при QS_OUT.
 
 func TestVisual_QuickSettingsWin11(t *testing.T) {
+	testreset.Globals(t)
 	cases := []struct {
 		name string
 		o    qsOpts

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -33,6 +34,7 @@ func pillWidth(c *recCtx, cell image.Rectangle) int {
 // Запущено — 6 серым, активно — 16 акцентом, закреплённое незапущенное — без
 // пилюли; цвет активной — акцент темы.
 func TestWin11Pill_WidthsAndColor(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.area.layout()
 	c := areaFills(s.area)
@@ -56,6 +58,7 @@ func TestWin11Pill_WidthsAndColor(t *testing.T) {
 // Смена активного окна плавно меняет ширину пилюль; каждый шаг перерисовывает
 // только две затронутые кнопки.
 func TestWin11Pill_AnimatesAndRepaintsOnlyItsButtons(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.area.layout()
@@ -110,6 +113,7 @@ func TestWin11Pill_AnimatesAndRepaintsOnlyItsButtons(t *testing.T) {
 
 // «Меньше движения»: ширина меняется сразу, анимаций нет.
 func TestWin11Pill_ReducedMotionIsInstant(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.tm.SetFlag(theme.FlagMotionReduce, true)
@@ -131,6 +135,7 @@ func TestWin11Pill_ReducedMotionIsInstant(t *testing.T) {
 // Наложение прогресса: дорожка во всю ширину значка и полоса долей; цвет по
 // состоянию — акцент, жёлтый, красный.
 func TestWin11Progress_StatesAndShare(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.area.layout()
 	c := areaFills(s.area)
@@ -178,6 +183,7 @@ func TestWin11Progress_StatesAndShare(t *testing.T) {
 
 // Счётчик: число в кружке; больше 99 — «99+»; у кнопки без счётчика его нет.
 func TestWin11Badge_CountsAndCap(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.area.layout()
 	c := areaFills(s.area)
@@ -211,6 +217,7 @@ func TestWin11Badge_CountsAndCap(t *testing.T) {
 // Сборка наложений стопки: ошибка важнее паузы и обычного, счётчики складываются,
 // «внимание» не активного окна.
 func TestOverlayOf_Aggregation(t *testing.T) {
+	testreset.Globals(t)
 	o := overlayOf([]WindowInfo{
 		{ProgressState: ProgressNormal, Progress: 0.9, Badge: 2},
 		{ProgressState: ProgressPaused, Progress: 0.3, Badge: 5},
@@ -248,6 +255,7 @@ func attentionAlpha(c *recCtx, cell image.Rectangle) int {
 // сразу постоянная; пропадает, когда окно просить перестаёт или становится
 // активным.
 func TestWin11Attention_BlinksThenSteady(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.area.layout()
@@ -291,6 +299,7 @@ func TestWin11Attention_BlinksThenSteady(t *testing.T) {
 // Смена прогресса и счётчика перерисовывает только их кнопку; смена заголовка —
 // всю область.
 func TestWin11Overlay_RepaintsOnlyChangedButton(t *testing.T) {
+	testreset.Globals(t)
 	s := newW11Scene(t, theme.ProfileWindows11)
 	s.area.layout()
 	areaFills(s.area)
@@ -333,6 +342,7 @@ func TestWin11Overlay_RepaintsOnlyChangedButton(t *testing.T) {
 // если модель заполняет прогресс, счётчик и «внимание»: рисунок кнопок тот же,
 // что и без этих полей.
 func TestOverlay_OtherProfilesIgnoreModelFields(t *testing.T) {
+	testreset.Globals(t)
 	plain := []WindowInfo{
 		{ID: 1, AppID: "web", Title: "Browser", Active: true},
 		{ID: 2, AppID: "mail", Title: "Inbox"},

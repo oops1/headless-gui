@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -44,6 +45,7 @@ func newHostEngine() *Engine {
 // Хост принял модалку → она НЕ попадает в стек движка, ввод родителя не
 // блокируется, а CloseModal маршрутизируется хосту.
 func TestModalHost_Accepts(t *testing.T) {
+	testreset.Globals(t)
 	e := newHostEngine()
 
 	// Кнопка в корне: проверим, что клик по ней проходит (родитель не заблокирован).
@@ -83,6 +85,7 @@ func TestModalHost_Accepts(t *testing.T) {
 // Хост отказал → прежнее in-canvas поведение: модалка в стеке, центрирована
 // (клэмп для больших диалогов проверяется отдельно в tests/dialogs_test.go).
 func TestModalHost_Declines(t *testing.T) {
+	testreset.Globals(t)
 	e := newHostEngine()
 	host := &fakeHost{accept: false}
 	e.SetModalHost(host)
@@ -106,6 +109,7 @@ func TestModalHost_Declines(t *testing.T) {
 // SetOnModalClosed: колбэк вызывается в конце CloseModal с фактически закрытой
 // модалкой (путь вторичного движка: диалог закрывается своим closer'ом).
 func TestOnModalClosed_Fires(t *testing.T) {
+	testreset.Globals(t)
 	e := newHostEngine() // без хоста → in-canvas
 	var got widget.ModalWidget
 	e.SetOnModalClosed(func(m widget.ModalWidget) { got = m })

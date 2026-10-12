@@ -3,6 +3,8 @@ package desktop
 import (
 	"image"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // Положение окна у бокового края и при прижатии к краю монитора считается без
@@ -18,6 +20,7 @@ func sideFlyout(edge Edge, align Align, anchor, screen image.Rectangle) *Flyout 
 }
 
 func TestFlyoutEdge_Vertical(t *testing.T) {
+	testreset.Globals(t)
 	for e, want := range map[Edge]bool{EdgeBottom: false, EdgeTop: false, EdgeLeft: true, EdgeRight: true} {
 		if e.Vertical() != want {
 			t.Errorf("Edge(%d).Vertical() = %v", e, !want)
@@ -26,6 +29,7 @@ func TestFlyoutEdge_Vertical(t *testing.T) {
 }
 
 func TestFlyoutEdge_LeftBarOpensToTheRight(t *testing.T) {
+	testreset.Globals(t)
 	screen := image.Rect(0, 0, 800, 600)
 	anchor := image.Rect(0, 10, 40, 50)
 	f := sideFlyout(EdgeLeft, AlignStart, anchor, screen)
@@ -45,6 +49,7 @@ func TestFlyoutEdge_LeftBarOpensToTheRight(t *testing.T) {
 }
 
 func TestFlyoutEdge_RightBarOpensToTheLeft(t *testing.T) {
+	testreset.Globals(t)
 	screen := image.Rect(0, 0, 800, 600)
 	f := sideFlyout(EdgeRight, AlignStart, image.Rect(760, 560, 800, 600), screen)
 	// Низ значка у низа экрана: окно сдвинуто вверх.
@@ -54,6 +59,7 @@ func TestFlyoutEdge_RightBarOpensToTheLeft(t *testing.T) {
 }
 
 func TestFlyoutEdge_SlideFollowsEdge(t *testing.T) {
+	testreset.Globals(t)
 	for e, want := range map[Edge]SlideFrom{
 		EdgeBottom: SlideBottom, EdgeTop: SlideTop, EdgeLeft: SlideLeft, EdgeRight: SlideRight,
 	} {
@@ -68,6 +74,7 @@ func TestFlyoutEdge_SlideFollowsEdge(t *testing.T) {
 // Окно у левой панели вырастает из-за её края: область движения упирается в
 // панель, а не тянется до края экрана и не рисуется поверх панели.
 func TestFlyoutEdge_MotionRegionStopsAtBar(t *testing.T) {
+	testreset.Globals(t)
 	screen := image.Rect(0, 0, 800, 600)
 	f := sideFlyout(EdgeLeft, AlignStart, image.Rect(0, 10, 40, 50), screen)
 	rest := f.restRect()
@@ -90,6 +97,7 @@ func TestFlyoutEdge_MotionRegionStopsAtBar(t *testing.T) {
 }
 
 func TestFlyoutEdge_PinToEdge(t *testing.T) {
+	testreset.Globals(t)
 	screen := image.Rect(1000, 0, 1800, 600)
 	f := sideFlyout(EdgeBottom, AlignStart, image.Rect(1700, 560, 1740, 600), screen)
 	f.Margin = 0
@@ -135,6 +143,7 @@ func TestFlyoutEdge_PinToEdge(t *testing.T) {
 // Окно, прижатое к монитору, вписывается в границы монитора, даже если рабочая
 // область не задана.
 func TestFlyoutEdge_PinWithoutWorkAreaUsesScreen(t *testing.T) {
+	testreset.Globals(t)
 	screen := image.Rect(0, 0, 500, 400)
 	f := sideFlyout(EdgeBottom, AlignStart, image.Rect(0, 360, 40, 400), screen)
 	f.Margin = 0
@@ -145,6 +154,7 @@ func TestFlyoutEdge_PinWithoutWorkAreaUsesScreen(t *testing.T) {
 }
 
 func TestFlyoutEdge_SetMonitorSetsScreen(t *testing.T) {
+	testreset.Globals(t)
 	f := NewFlyout(nil, "x")
 	m := Monitor{ID: "m", Bounds: image.Rect(10, 20, 810, 620)}
 	f.SetMonitor(m)
@@ -160,6 +170,7 @@ func TestFlyoutEdge_SetMonitorSetsScreen(t *testing.T) {
 // над панелью задач. Один Margin этого не выражал — приходилось уменьшать
 // рабочую область вручную.
 func TestFlyoutEdge_PinMarginsSplitScreenEdgeAndPanel(t *testing.T) {
+	testreset.Globals(t)
 	screen := image.Rect(0, 0, 800, 600)
 	mon := Monitor{Bounds: screen, WorkArea: image.Rect(0, 0, 800, 560)} // панель внизу, 40
 	mk := func() *Flyout {

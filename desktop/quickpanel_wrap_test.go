@@ -3,12 +3,14 @@ package desktop
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 )
 
 // Подпись плитки: до двух строк с переносом по словам, вторая обрезается
 // многоточием. Мера ширины — recCtx (testCharW на знак).
 func TestQuickPanel_LabelWrapsToTwoLines(t *testing.T) {
+	testreset.Globals(t)
 	ctx := &recCtx{}
 	s := &theme.Style{}
 	const w = 14 * testCharW

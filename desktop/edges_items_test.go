@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -15,6 +16,7 @@ import (
 // Дата, которая не помещается по ширине столбца, не показывается: часы
 // сводятся к одному времени, а не вылезают за панель.
 func TestEdges_VerticalClockDropsWideDate(t *testing.T) {
+	testreset.Globals(t)
 	tm, _ := edgeManager(t, theme.ProfileWindows10)
 	clk := desktop.NewClock(tm, desktop.NewFakeClock(time.Date(2026, 3, 14, 15, 9, 26, 0, time.UTC)))
 	clk.SetVertical(true)
@@ -36,6 +38,7 @@ func TestEdges_VerticalClockDropsWideDate(t *testing.T) {
 
 // Значки трея в столбце идут сеткой, а что не поместилось, прячется за шеврон.
 func TestEdges_VerticalTrayHidesWhatDoesNotFit(t *testing.T) {
+	testreset.Globals(t)
 	tm, _ := edgeManager(t, theme.ProfileWindows10)
 	status := desktop.NewFakeSystemStatus()
 	tray := desktop.NewSystemTray(tm)
@@ -76,6 +79,7 @@ func TestEdges_VerticalTrayHidesWhatDoesNotFit(t *testing.T) {
 
 // Область, занятая панелью у бокового края, — её столбец.
 func TestEdges_ReservedAreaOfSideBar(t *testing.T) {
+	testreset.Globals(t)
 	_, _, s := oneScreen(t, theme.ProfileWindows10, desktop.EdgeLeft, 900, 600)
 	if got := s.bar.ReservedArea(); got != s.bar.Bounds() || got.Dx() != s.bar.Thickness() {
 		t.Errorf("зарезервировано %v", got)
@@ -95,6 +99,7 @@ func (r *rowOnlyItem) PreferredSize(image.Point) image.Point { return r.want }
 func (r *rowOnlyItem) Draw(widget.DrawContext)               {}
 
 func TestEdges_RowOnlyItemGetsSquare(t *testing.T) {
+	testreset.Globals(t)
 	tm, _ := edgeManager(t, theme.ProfileWindows10)
 	bar := desktop.NewTaskbar(tm)
 	defer bar.Close()

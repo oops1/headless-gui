@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -160,6 +161,7 @@ func buildTestTheme() *theme.Manager {
 // ─── StartButton ─────────────────────────────────────────────────────────────
 
 func TestStartButton_ClickFiresOnce(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	sb := NewStartButton(tm)
 	sb.SetBounds(image.Rect(0, 0, 60, 32))
@@ -185,6 +187,7 @@ func TestStartButton_ClickFiresOnce(t *testing.T) {
 }
 
 func TestStartButton_ReleaseAwayDoesNotFire(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	sb := NewStartButton(tm)
 	sb.SetBounds(image.Rect(0, 0, 60, 32))
@@ -201,6 +204,7 @@ func TestStartButton_ReleaseAwayDoesNotFire(t *testing.T) {
 }
 
 func TestStartButton_PressOutsideBoundsIgnored(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	sb := NewStartButton(tm)
 	sb.SetBounds(image.Rect(0, 0, 60, 32))
@@ -214,6 +218,7 @@ func TestStartButton_PressOutsideBoundsIgnored(t *testing.T) {
 }
 
 func TestStartButton_HoverChangesStyle(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	bounds := image.Rect(0, 0, 60, 32)
 

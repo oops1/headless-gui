@@ -7,12 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // Смежные логические прямоугольники на дробном масштабе не оставляют
 // ни щелей, ни нахлёстов (edge-based округление).
 func TestScale_NoGapsAdjacentRects(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(100, 100, 20)
 	eng.SetScale(1.5)
 	c := eng.canvas
@@ -50,6 +52,7 @@ func TestScale_NoGapsAdjacentRects(t *testing.T) {
 // Логическая ширина текста стабильна между масштабами (±2px на округление),
 // а физическая растёт пропорционально.
 func TestScale_TextMeasureStable(t *testing.T) {
+	testreset.Globals(t)
 	eng1 := New(400, 100, 20)
 	w1 := eng1.canvas.MeasureText("Пример Example 123", 12)
 
@@ -69,6 +72,7 @@ func TestScale_TextMeasureStable(t *testing.T) {
 
 // События мыши приходят в физических пикселях и делятся на масштаб.
 func TestScale_MouseEventsDivide(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(300, 200, 20)
 	eng.SetScale(2)
 	btn := widget.NewButton("btn")
@@ -90,6 +94,7 @@ func TestScale_MouseEventsDivide(t *testing.T) {
 
 // SetScale сохраняет именованные шрифты и fallback-цепочку (cloneForSize).
 func TestScale_PreservesFonts(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(200, 100, 20)
 	before := len(eng.AvailableFonts())
 	if before == 0 {
@@ -107,6 +112,7 @@ func TestScale_PreservesFonts(t *testing.T) {
 
 // SetResolution тоже сохраняет шрифты (латентный баг до HiDPI).
 func TestScale_SetResolutionPreservesFonts(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(200, 100, 20)
 	fallbacks := len(eng.canvas.fallbacks)
 	if fallbacks == 0 {
@@ -121,6 +127,7 @@ func TestScale_SetResolutionPreservesFonts(t *testing.T) {
 // Кадры (тайлы) — физические: damage от логического InvalidateRect
 // покрывает соответствующие физические тайлы.
 func TestScale_FramesPhysical(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(100, 100, 20)
 	eng.SetScale(2)
 	if pw, ph := eng.PhysicalSize(); pw != 200 || ph != 200 {
@@ -158,6 +165,7 @@ func TestScale_FramesPhysical(t *testing.T) {
 // брал e.mu.RLock под удерживаемым e.mu.Lock (регрессия HiDPI: окно showcase
 // зависало до создания).
 func TestEngine_SetResolutionNoDeadlock(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(100, 100, 20)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 100, 100))
@@ -183,6 +191,7 @@ func TestEngine_SetResolutionNoDeadlock(t *testing.T) {
 // TestScale_VisualSample рендерит одну сцену при 1x и 2x
 // (HEADLESS_GUI_SCALE_PNG_PREFIX=path — сохранит path_1x.png и path_2x.png).
 func TestScale_VisualSample(t *testing.T) {
+	testreset.Globals(t)
 	prefix := os.Getenv("HEADLESS_GUI_SCALE_PNG_PREFIX")
 	if prefix == "" {
 		t.Skip("HEADLESS_GUI_SCALE_PNG_PREFIX не задан")

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -41,6 +42,7 @@ func (s *win10Scene) tileCentre(col, row int) image.Point {
 }
 
 func TestStartMenu10_EngineStartButtonOpensAndKeyboardLaunches(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin10Scene(t, 1280, 720, false, 1)
 	s.clickCentre(s.start.Bounds())
 	s.menu.Settle()
@@ -69,6 +71,7 @@ func TestStartMenu10_EngineStartButtonOpensAndKeyboardLaunches(t *testing.T) {
 }
 
 func TestStartMenu10_EngineEscapeAndClickAwayClose(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin10Scene(t, 1280, 720, false, 1)
 	s.clickCentre(s.start.Bounds())
 	s.menu.Settle()
@@ -93,6 +96,7 @@ func TestStartMenu10_EngineEscapeAndClickAwayClose(t *testing.T) {
 }
 
 func TestStartMenu10_EngineTileClickAndDrag(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin10Scene(t, 1280, 720, false, 1)
 	s.open()
 	var order []desktop.TileGroup
@@ -128,6 +132,7 @@ func TestStartMenu10_EngineTileClickAndDrag(t *testing.T) {
 }
 
 func TestStartMenu10_EngineWheelScrollsAndTypingSearches(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin10Scene(t, 1280, 720, false, 1)
 	manyApps(s, 100)
 	s.clickCentre(s.start.Bounds())

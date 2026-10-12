@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -17,6 +18,7 @@ import (
 // Вариант Windows 11 включается презентером профиля и моделью плиток. Другие
 // темы и панель без модели рисуют прежние три плитки.
 func TestQuickPanel_VariantByPresenterAndModel(t *testing.T) {
+	testreset.Globals(t)
 	win11 := qsBuild(t, qsOpts{})
 	if !desktop.QSRich(win11.q) {
 		t.Fatal("Windows 11 с моделью плиток должна рисовать вариант 24H2")
@@ -39,6 +41,7 @@ func TestQuickPanel_VariantByPresenterAndModel(t *testing.T) {
 // Геометрия по таблице плана: ширина 360, плитки 96×48 при зазоре 12, подпись
 // под плиткой, три колонки.
 func TestQuickPanel_Geometry(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	if w := desktop.QSPanelRect(q).Dx(); w != 360 {
@@ -76,6 +79,7 @@ func TestQuickPanel_Geometry(t *testing.T) {
 // 100–200 %: логическая раскладка не зависит от масштаба и не выходит за
 // панель.
 func TestQuickPanel_Scales(t *testing.T) {
+	testreset.Globals(t)
 	var want image.Rectangle
 	for _, sc := range []float64{1, 1.25, 1.5, 2} {
 		s := qsBuild(t, qsOpts{scale: sc, w: 640, h: 560})
@@ -106,6 +110,7 @@ func TestQuickPanel_Scales(t *testing.T) {
 // Щелчок по плитке переключает её через модель; отключённая и недоступная
 // плитки не нажимаются.
 func TestQuickPanel_TileToggle(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	click := func(id desktop.QuickActionID) {
 		r := desktop.QSTileRect(s.q, id)
@@ -133,6 +138,7 @@ func TestQuickPanel_TileToggle(t *testing.T) {
 
 // Обновление одной плитки заявляет только её область, а не панель.
 func TestQuickPanel_SingleTileRepaint(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	before := s.render()
 	var mu sync.Mutex
@@ -181,6 +187,7 @@ func TestQuickPanel_SingleTileRepaint(t *testing.T) {
 // Смена состава плиток (добавили плитку) перерисовывает панель целиком: у неё
 // могла измениться высота.
 func TestQuickPanel_ModelShapeChange(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{model: func(m *desktop.QuickActionList) { m.Replace(m.List()[:3]) }})
 	h3 := desktop.QSPanelRect(s.q).Dy()
 	s.model.Replace(qsSampleActions().List())
@@ -195,6 +202,7 @@ func TestQuickPanel_ModelShapeChange(t *testing.T) {
 // ─── Вложенная страница ──────────────────────────────────────────────────────
 
 func TestQuickPanel_DetailsNavigation(t *testing.T) {
+	testreset.Globals(t)
 	var closed int
 	var asked []desktop.QuickActionID
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
@@ -260,6 +268,7 @@ func TestQuickPanel_DetailsNavigation(t *testing.T) {
 
 // «Меньше движения»: переход между страницами мгновенный.
 func TestQuickPanel_ReduceMotionPageInstant(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{reduce: true})
 	qsClick(s.q, centreOf(desktop.QSChevronRect(s.q, "wifi")))
 	if p := desktop.QSPage(s.q); p != 1 {
@@ -274,6 +283,7 @@ func TestQuickPanel_ReduceMotionPageInstant(t *testing.T) {
 // Содержимое вложенной страницы получает мышь, колесо и клавиши: список
 // устройств выбирает строку по щелчку, а панель при этом остаётся на странице.
 func TestQuickPanel_DetailsContentInput(t *testing.T) {
+	testreset.Globals(t)
 	var lv *widget.ListView
 	var selected []int
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
@@ -314,6 +324,7 @@ func TestQuickPanel_DetailsContentInput(t *testing.T) {
 
 // Все строки быстрых настроек переведены на русский и английский.
 func TestQuickPanel_StringsInBothLanguages(t *testing.T) {
+	testreset.Globals(t)
 	keys := []string{
 		desktop.StrQuickEdit, desktop.StrQuickDone, desktop.StrQuickEditHint, desktop.StrQuickSettings,
 		desktop.StrQuickBack, desktop.StrQuickMore, desktop.StrQuickVolume, desktop.StrQuickBrightness,
@@ -330,6 +341,7 @@ func TestQuickPanel_StringsInBothLanguages(t *testing.T) {
 // ─── Сетка и прокрутка ───────────────────────────────────────────────────────
 
 func TestQuickPanel_Scroll(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{scroll: true}) // флаг страниц погашен — прежняя прокрутка
 	q := s.q
 	grid := desktop.QSZoneRect(q, "grid")
@@ -369,6 +381,7 @@ func TestQuickPanel_Scroll(t *testing.T) {
 // ─── Ползунки ────────────────────────────────────────────────────────────────
 
 func TestQuickPanel_VolumeSlider(t *testing.T) {
+	testreset.Globals(t)
 	var levels []float64
 	var mutes int
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
@@ -403,6 +416,7 @@ func TestQuickPanel_VolumeSlider(t *testing.T) {
 }
 
 func TestQuickPanel_BrightnessHiddenWithoutData(t *testing.T) {
+	testreset.Globals(t)
 	var got []float64
 	s := qsBuild(t, qsOpts{noBright: true, setup: func(q *desktop.QuickSettings) {
 		q.OnBrightnessChange = func(v float64) { got = append(got, v) }
@@ -440,6 +454,7 @@ func TestQuickPanel_BrightnessHiddenWithoutData(t *testing.T) {
 // ─── Режим правки ────────────────────────────────────────────────────────────
 
 func TestQuickPanel_EditReorder(t *testing.T) {
+	testreset.Globals(t)
 	var order []desktop.QuickActionID
 	var edits []bool
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
@@ -497,6 +512,7 @@ func TestQuickPanel_EditReorder(t *testing.T) {
 // Перетаскивание без сдвига порядка (бросили на то же место) событие не
 // порождает.
 func TestQuickPanel_EditDropSamePlace(t *testing.T) {
+	testreset.Globals(t)
 	called := 0
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
 		q.OnReorder = func([]desktop.QuickActionID) { called++ }
@@ -516,6 +532,7 @@ func TestQuickPanel_EditDropSamePlace(t *testing.T) {
 // Модель без QuickActionReorderer: порядок не хранится, но панель его
 // показывает до закрытия.
 func TestQuickPanel_ReorderWithoutModelSupport(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	plain := &plainModel{QuickActionModel: s.model}
@@ -535,6 +552,7 @@ type plainModel struct{ desktop.QuickActionModel }
 
 // Esc в режиме правки выходит из неё, а не закрывает панель.
 func TestQuickPanel_EscapeLeavesEditMode(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	s.q.SetEditing(true)
 	qsKey(s.q, widget.KeyEscape, 0)
@@ -550,6 +568,7 @@ func TestQuickPanel_EscapeLeavesEditMode(t *testing.T) {
 // ─── Нижняя строка ───────────────────────────────────────────────────────────
 
 func TestQuickPanel_Footer(t *testing.T) {
+	testreset.Globals(t)
 	settings := 0
 	open := true
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
@@ -575,6 +594,7 @@ func TestQuickPanel_Footer(t *testing.T) {
 // ─── Клавиатура ──────────────────────────────────────────────────────────────
 
 func TestQuickPanel_Keyboard(t *testing.T) {
+	testreset.Globals(t)
 	var levels []float64
 	s := qsBuild(t, qsOpts{setup: func(q *desktop.QuickSettings) {
 		q.OnVolumeChange = func(v float64) { levels = append(levels, v) }
@@ -653,6 +673,7 @@ func TestQuickPanel_Keyboard(t *testing.T) {
 
 // Рамка фокуса видна: кадр с фокусом отличается от кадра без него.
 func TestQuickPanel_FocusRingVisible(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	plain := s.render()
@@ -680,6 +701,7 @@ func TestQuickPanel_FocusRingVisible(t *testing.T) {
 
 // Акцент и тема меняются на открытой панели: плитка «включено» берёт акцент.
 func TestQuickPanel_AccentAndThemeLive(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	pix := func() [4]uint8 {
@@ -707,6 +729,7 @@ func TestQuickPanel_AccentAndThemeLive(t *testing.T) {
 
 // Язык: подсказки и подписи следуют за widget.SetLanguage без пересоздания.
 func TestQuickPanel_LanguageLive(t *testing.T) {
+	testreset.Globals(t)
 	prev := widget.Language()
 	t.Cleanup(func() { widget.SetLanguage(prev) })
 	s := qsBuild(t, qsOpts{})
@@ -733,6 +756,7 @@ func TestQuickPanel_LanguageLive(t *testing.T) {
 
 // Первый кадр открытия быстрее 100 мс (медиана нескольких открытий).
 func TestQuickPanel_FirstFrameUnder100ms(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	bb := s.bar.Bounds()
@@ -758,6 +782,7 @@ func TestQuickPanel_FirstFrameUnder100ms(t *testing.T) {
 
 // Закрытая панель не держит подписок: ни на модель, ни на показания системы.
 func TestQuickPanel_NoSubscriptionsWhenClosed(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	s.q.Close()
 	rects := 0

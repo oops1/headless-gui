@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -21,6 +22,7 @@ func wheelRoot(t *testing.T) (*Engine, *widget.Panel) {
 
 // Пиксельное колесо над списком повреждает только область виджета.
 func TestWheelPixels_DamageIsWidgetRect(t *testing.T) {
+	testreset.Globals(t)
 	e, root := wheelRoot(t)
 	defer e.Stop()
 
@@ -52,6 +54,7 @@ func TestWheelPixels_DamageIsWidgetRect(t *testing.T) {
 
 // Тиковый фолбэк: N тиков дают одну инвалидацию области виджета.
 func TestWheelTicks_FallbackSingleDamage(t *testing.T) {
+	testreset.Globals(t)
 	e, root := wheelRoot(t)
 	defer e.Stop()
 
@@ -80,6 +83,7 @@ func TestWheelTicks_FallbackSingleDamage(t *testing.T) {
 
 // Колесо над пустым местом никого не будит.
 func TestWheel_NoTargetNoDamage(t *testing.T) {
+	testreset.Globals(t)
 	e, _ := wheelRoot(t)
 	defer e.Stop()
 	e.consumeDamage()

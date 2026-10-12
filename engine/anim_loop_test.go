@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -14,6 +15,7 @@ import (
 // Раньше каждый движок шагал общий реестр целиком, и тик анимации одного
 // движка выполнялся на горутине другого.
 func TestAnimations_StepOnOwnEngine(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 

@@ -3,6 +3,7 @@ package desktop
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -16,6 +17,7 @@ func (l *focusLog) ReturnFocus(w widget.Widget)  { l.log = append(l.log, "return
 // закрывшись — возвращает его; после снятия подписки не делает ни того ни
 // другого.
 func TestFocusOnOpen_RequestsOnOpenReturnsOnClose(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows2000)
 	f := motionFlyout(tm)
@@ -36,6 +38,7 @@ func TestFocusOnOpen_RequestsOnOpenReturnsOnClose(t *testing.T) {
 }
 
 func TestFlyoutManager_FocusOnOpen(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	m, _, _ := managerFixture(t, theme.ProfileWindows2000, "start", "quick")
 	rec := &focusLog{}

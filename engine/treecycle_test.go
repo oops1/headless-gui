@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -29,6 +30,7 @@ func (c *cyclicWidget) OnMouseMove(x, y int)           {}
 
 // Обходы движка не должны зацикливаться на дереве с циклом в Children().
 func TestTreeCycle_DoesNotHang(t *testing.T) {
+	testreset.Globals(t)
 	w := &cyclicWidget{b: image.Rect(0, 0, 200, 200), overlay: true}
 
 	e := New(200, 200, 20)
@@ -61,6 +63,7 @@ func TestTreeCycle_DoesNotHang(t *testing.T) {
 
 // Хостируемые попапы в циклическом дереве собираются не глубже предела.
 func TestTreeCycle_CollectPopupsBounded(t *testing.T) {
+	testreset.Globals(t)
 	w := &cyclicWidget{b: image.Rect(0, 0, 200, 200), overlay: true}
 	items := collectPopups(nil, w, 0)
 	if len(items) != maxTreeDepth {

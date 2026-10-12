@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -83,6 +84,7 @@ func stepAnim(d time.Duration) {
 // свёрнутой и раскрытой, карточки ниже съезжают вместе, а к концу всё ровно
 // как у статичной раскладки.
 func TestSlide_CardExpandsGradually(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, ids := slideFixture(t)
 	id, below := ids[2], ids[1] // новые сверху: ids[2] — самая верхняя карточка группы
 	l0 := nc.testLayout()
@@ -146,6 +148,7 @@ func TestSlide_CardExpandsGradually(t *testing.T) {
 
 // Сворачивание — обратное движение; оборванное раскрытие не прыгает.
 func TestSlide_CardCollapsesAndReverses(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, ids := slideFixture(t)
 	id := ids[2]
 	closedH := func() int { c, _ := nc.testLayout().cardOf(id); return c.rect.Dy() }
@@ -174,6 +177,7 @@ func TestSlide_CardCollapsesAndReverses(t *testing.T) {
 // Группа сворачивается плавно: нижняя группа едет вверх, нажимается только
 // видимая часть карточек.
 func TestSlide_GroupCollapsesGradually(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, ids := slideFixture(t)
 	l0 := nc.testLayout()
 	a0, _ := l0.groupOf("a")
@@ -234,6 +238,7 @@ func TestSlide_GroupCollapsesGradually(t *testing.T) {
 // Сетка быстрых действий растёт и сжимается плавно; перерисовывается список и
 // подвал, шапка не трогается.
 func TestSlide_QuickGridExpandsGradually(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := slideFixture(t)
 	l0 := nc.testLayout()
 	oneRow := l0.quick.Dy()
@@ -280,6 +285,7 @@ func TestSlide_QuickGridExpandsGradually(t *testing.T) {
 
 // Нулевая длительность в теме — мгновенно, без единого кадра анимации.
 func TestSlide_ZeroDurationIsInstant(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	m := theme.NewManager()
 	if err := theme.RegisterBuiltinProfiles(m); err != nil {
@@ -319,6 +325,7 @@ func TestSlide_ZeroDurationIsInstant(t *testing.T) {
 
 // Токен не объявлен профилем — берётся menu.open; у Windows 10 объявлен свой.
 func TestSlide_AnimationToken(t *testing.T) {
+	testreset.Globals(t)
 	for _, name := range []string{theme.ProfileWindows10, theme.ProfileWindows10Dark} {
 		d, _ := expandAnimation(managerFor(t, name))
 		if d <= 0 {
@@ -337,6 +344,7 @@ func TestSlide_AnimationToken(t *testing.T) {
 
 // Закрытие панели прерывает движения: после повторного открытия всё статично.
 func TestSlide_ReopenDoesNotReplay(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, ids := slideFixture(t)
 	nc.clickZone(t, zoneKey{kind: zoneCardToggle, note: ids[2]})
 	stepAnim(30 * time.Millisecond)
@@ -395,6 +403,7 @@ func thumbPoint(l *richLayout) image.Point {
 // Бегунок хватается мышью, тянется пропорционально, не гаснет, пока его
 // держат, и отпускается там, где бы ни оказался курсор.
 func TestScrollbar_DragsThumb(t *testing.T) {
+	testreset.Globals(t)
 	nc, ns, cm := scrollFixture(t)
 	inv := watchInvalidations(t)
 	before := len(ns.List())
@@ -479,6 +488,7 @@ func TestScrollbar_DragsThumb(t *testing.T) {
 
 // Щелчок по дорожке выше или ниже бегунка сдвигает список на страницу.
 func TestScrollbar_TrackClickPages(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := scrollFixture(t)
 	l := nc.testLayout()
 	page := l.viewport.Dy() * 9 / 10
@@ -511,6 +521,7 @@ func TestScrollbar_TrackClickPages(t *testing.T) {
 
 // Под курсором бегунок ярче, нажатый — как нажатая кнопка.
 func TestScrollbar_ThumbStates(t *testing.T) {
+	testreset.Globals(t)
 	nc, _, _ := scrollFixture(t)
 	l := nc.testLayout()
 	p := thumbPoint(l)
@@ -537,6 +548,7 @@ func TestScrollbar_ThumbStates(t *testing.T) {
 // Предупреждение и ошибка метятся полосой цвета у края карточки, обычное
 // уведомление — нет. Цвет берётся из темы.
 func TestSeverity_StripeOnWindows10(t *testing.T) {
+	testreset.Globals(t)
 	f := newRenderFixture(t, 1)
 	f.ns.Add(Notification{AppID: "s", AppName: "Система", Title: "Инфо", Body: "x", Time: sampleTime().Add(3 * time.Hour)})
 	warn := f.ns.Add(Notification{AppID: "s", AppName: "Система", Title: "Внимание", Body: "x", Time: sampleTime().Add(4 * time.Hour), Severity: SeverityWarning})

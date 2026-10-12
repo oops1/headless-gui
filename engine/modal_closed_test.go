@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -28,6 +29,7 @@ func modalTestEngine(t *testing.T) (*Engine, *widget.Dialog) {
 
 // Подписок может быть сколько угодно, и слот хоста их не вытесняет.
 func TestModalClosed_MultipleSubscribers(t *testing.T) {
+	testreset.Globals(t)
 	e, dlg := modalTestEngine(t)
 
 	var order []string
@@ -67,6 +69,7 @@ func TestModalClosed_MultipleSubscribers(t *testing.T) {
 // NotifyModalClosed — путь хоста нативных окон: диалог закрыт вместе со своим
 // окном ОС, CloseModal этого движка не звали.
 func TestModalClosed_NotifyFromNativeHost(t *testing.T) {
+	testreset.Globals(t)
 	e, dlg := modalTestEngine(t)
 
 	closed := 0

@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -36,6 +37,7 @@ func ink(c *Canvas, x, y int) int {
 // Дробная координата доходит до холста: линия на y=10.25 и на y=10.75 ложится
 // по-разному. С целыми точками обе округлились бы в одну.
 func TestPathAA_FractionalCoordinates(t *testing.T) {
+	testreset.Globals(t)
 	draw := func(y float64) (int, int) {
 		c := pathCanvas(40, 30, 1)
 		c.StrokePathAA([]widget.Point2F{{X: 5, Y: y}, {X: 35, Y: y}}, 1, false, black)
@@ -54,6 +56,7 @@ func TestPathAA_FractionalCoordinates(t *testing.T) {
 
 // На изгибе нет зубца: точка снаружи угла закрыта сопряжением.
 func TestPathAA_JoinClosesTheNotch(t *testing.T) {
+	testreset.Globals(t)
 	c := pathCanvas(60, 60, 1)
 	// Прямой угол в (30,30): вправо, затем вниз. Снаружи угла — (31,29)…
 	c.StrokePolylineAA([]image.Point{{X: 5, Y: 30}, {X: 30, Y: 30}, {X: 30, Y: 55}}, 6, false, black)
@@ -68,6 +71,7 @@ func TestPathAA_JoinClosesTheNotch(t *testing.T) {
 // Концы незамкнутой ломаной прямые, как раньше: круглые удлинили бы каждую
 // нарисованную линию на полтолщины.
 func TestPathAA_EndsStayButt(t *testing.T) {
+	testreset.Globals(t)
 	c := pathCanvas(60, 30, 1)
 	c.DrawLineAA(10, 15, 50, 15, 6, black)
 	if v := ink(c, 7, 15); v > 16 {
@@ -80,6 +84,7 @@ func TestPathAA_EndsStayButt(t *testing.T) {
 
 // Кривая Безье ложится непрерывно: нет ни одного разрыва вдоль неё.
 func TestPathAA_CubicIsContinuous(t *testing.T) {
+	testreset.Globals(t)
 	c := pathCanvas(120, 240, 1)
 	// S-коннектор: пролёт 70 по x, 200 по y — как между блоками сравнения.
 	c.StrokeCubicAA(20, 20, 60, 20, 60, 220, 90, 220, 2, black)
@@ -95,6 +100,7 @@ func TestPathAA_CubicIsContinuous(t *testing.T) {
 // Заливка дробного многоугольника: край, пришедшийся на середину точки, даёт
 // полупрозрачную точку.
 func TestPathAA_FillFractional(t *testing.T) {
+	testreset.Globals(t)
 	c := pathCanvas(40, 40, 1)
 	// Целая координата — центр точки: правый край X=21 лежит в физических
 	// 21.5, то есть делит точку 21 пополам.
@@ -110,6 +116,7 @@ func TestPathAA_FillFractional(t *testing.T) {
 // HiDPI учитывает холст: приложению больше не нужно передавать масштаб в
 // виджет, чтобы кривая не вышла вдвое тоньше.
 func TestPathAA_ScaledByCanvas(t *testing.T) {
+	testreset.Globals(t)
 	c := pathCanvas(80, 80, 2) // физически 160×160
 	c.StrokePathAA([]widget.Point2F{{X: 5, Y: 20}, {X: 35, Y: 20}}, 2, false, black)
 	// Snapshot берёт ЛОГИЧЕСКИЙ прямоугольник и отдаёт физические точки:

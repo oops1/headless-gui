@@ -6,7 +6,8 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -35,6 +36,7 @@ func withFlags(flags ...theme.Key) func(m *theme.Manager) {
 // Снимки «Пуска» и быстрых настроек на Solid, Mica, MicaAlt и с мягкими
 // тенями — светлая и тёмная.
 func TestMaterials_Win11Panels(t *testing.T) {
+	testreset.Globals(t)
 	for _, profile := range []string{theme.ProfileWindows11, theme.ProfileWindows11Dark} {
 		tag := map[string]string{theme.ProfileWindows11: "light", theme.ProfileWindows11Dark: "dark"}[profile]
 		for _, panel := range []matPanel{matStart, matQuick, matNotify, matCalendar, matMenu, matWindow} {
@@ -86,6 +88,7 @@ func TestMaterials_Win11Panels(t *testing.T) {
 
 // Два кадра Mica на одних обоях побайтно равны: размытие не копится.
 func TestMaterials_MicaIsStable(t *testing.T) {
+	testreset.Globals(t)
 	a, _ := matScene(t, theme.ProfileWindows11, matStart, withFlags(theme.FlagBackdropMica))
 	b, _ := matScene(t, theme.ProfileWindows11, matStart, withFlags(theme.FlagBackdropMica))
 	if !equalImages(a, b) {
@@ -95,11 +98,12 @@ func TestMaterials_MicaIsStable(t *testing.T) {
 
 // Без обоев Mica — сплошной цвет темы (Fallback = surface).
 func TestMaterials_MicaWithoutWallpaperIsSolid(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	_ = theme.RegisterBuiltinProfiles(m)
 	_ = m.SetTheme(theme.ProfileWindows11)
 	m.SetFlag(theme.FlagBackdropMica, true)
-	eng := engine.New(matW, matH, 30)
+	eng := testengine.New(t, matW, matH, 30)
 	if err := eng.ApplyThemeProfile(m); err != nil {
 		t.Fatal(err)
 	}
@@ -127,10 +131,11 @@ func TestMaterials_MicaWithoutWallpaperIsSolid(t *testing.T) {
 // Включение Mica на лету перерисовывает панели без пересоздания: тот же
 // компонент, другой кадр.
 func TestMaterials_FlagSwitchesLive(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	_ = theme.RegisterBuiltinProfiles(m)
 	_ = m.SetTheme(theme.ProfileWindows11)
-	eng := engine.New(matW, matH, 30)
+	eng := testengine.New(t, matW, matH, 30)
 	if err := eng.SetBackground(matWallpaper(matW, matH)); err != nil {
 		t.Fatal(err)
 	}
@@ -171,10 +176,11 @@ func cloneImg(src *image.RGBA) *image.RGBA {
 
 // SetMotionReduce переключает режим у менеджера и у виджетов.
 func TestMaterials_EngineSetMotionReduce(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	_ = theme.RegisterBuiltinProfiles(m)
 	_ = m.SetTheme(theme.ProfileWindows11)
-	eng := engine.New(100, 100, 30)
+	eng := testengine.New(t, 100, 100, 30)
 	defer widget.SetReduceMotion(false)
 	if err := eng.SetMotionReduce(m, true); err != nil {
 		t.Fatal(err)

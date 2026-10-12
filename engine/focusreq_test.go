@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -33,6 +34,7 @@ func (h *mnemonicHost) OnKeyEvent(e widget.KeyEvent) {
 // оставался у прежнего: ↓ и буква пункта уходили ему, а меню висело
 // открытым, пока по нему не щёлкнут мышью.
 func TestActivateMnemonic_TakesAndReturnsFocus(t *testing.T) {
+	testreset.Globals(t)
 	e := New(400, 300, 1)
 	defer e.Stop()
 

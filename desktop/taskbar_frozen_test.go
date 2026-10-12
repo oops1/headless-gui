@@ -10,7 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -96,6 +97,7 @@ func frameHash(img *image.RGBA) string {
 }
 
 func TestTaskbar_OtherProfilesFrozen(t *testing.T) {
+	testreset.Globals(t)
 	want := map[string]string{}
 	for k, v := range frozenHashes {
 		want[k] = v
@@ -122,7 +124,7 @@ func TestTaskbar_OtherProfilesFrozen(t *testing.T) {
 				tm.SetFlag(theme.KeyTaskbarLight, true)
 			}
 			root := frozenBar(t, tm, 640, 120)
-			eng := engine.New(640, 120, 30)
+			eng := testengine.New(t, 640, 120, 30)
 			if scale != 1 {
 				eng.SetScale(scale)
 			}
