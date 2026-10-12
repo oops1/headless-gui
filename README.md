@@ -94,7 +94,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **AVX2 pixel kernels** — optional `GOEXPERIMENT=simd` build (Go 1.27+, amd64): text, AA shapes, fills, blur and frame presentation on AVX2, bit-identical to the scalar path, with CPU detection and a startup self-test falling back automatically
 - **Docking panels** — `DockManager`/`DockPane`, Visual Studio-style Toolbox docking: center + 4 dockable sides, stack tabs, auto-hide, drag&dock with guides, gutter resize, save/restore layout (JSON)
 - **Smooth / inertial scroll** — pixel-precise wheel/touchpad deltas (`SendMouseWheelPixels`) with a decaying flywheel in `ScrollView` (Win32 + Wayland pixel deltas; X11 keeps ticks); `ScrollView` also scrolls sideways (`ContentWidth`, horizontal wheel, Shift+wheel)
-- **File drag & drop from the OS** — drop files from Explorer/Finder into the window (`SetOnFilesDropped` / `FileDropTarget`); Win32 + X11 native, Wayland skeleton
+- **File drag & drop from the OS** — drop files from Explorer/Finder into the window (`SetOnFilesDropped` / `FileDropTarget`); Win32 + X11 + Wayland; enter/over/leave events for drop zones and `BeginDragFiles` to drag files out of the window (v3.34)
 - **Color emoji** — COLR/CBDT/sbix color glyphs render automatically in the text path (COLRv1 gradients averaged; regional-flag ligatures a known gap)
 - **Tooltips & cursors** — `ToolTip` on every widget; per-widget mouse cursors; hidden/grab/crosshair/busy shapes and an application-wide `SetCursorOverride`; side mouse buttons X1/X2
 - **Free bundled fonts** — Roboto (default), Open Sans, Inter + system glyph fallback chain (no tofu)

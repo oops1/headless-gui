@@ -3849,9 +3849,36 @@ type FileDropTarget interface {
 ```
 
 По платформам: **Win32** (`WM_DROPFILES`) и **X11** (XDND v5) — полностью;
-**Wayland** (`wl_data_device`) — каркас, требует проверки на живой сессии;
-macOS — нет. В headless маршрутизация к `FileDropTarget` тестируется через
-`SendFilesDropped` без окна.
+**Wayland** (`wl_data_device`) — приём `text/uri-list` (проверен на проводе с
+фальшивым компоновщиком); macOS — нет. В headless маршрутизация к
+`FileDropTarget` тестируется через `SendFilesDropped` без окна.
+
+#### Подсветка зоны сброса и перетаскивание из окна (v3.34)
+
+Пока файлы тащат над окном, приложение узнаёт об этом и может подсветить зону
+или отказать в сбросе:
+
+```go
+win.SetOnDragEnter(func(x, y int) { zone.Highlight(true) })
+win.SetOnDragOver(func(x, y int) bool { return zone.Bounds().Contains(image.Pt(x, y)) }) // false — «нельзя»
+win.SetOnDragLeave(func() { zone.Highlight(false) }) // после сброса не приходит — гасите и в SetOnFilesDropped
+```
+
+Окно умеет и начинать перетаскивание файлов — например, из миниатюры в Проводник:
+
+```go
+// В обработчике мыши, пока кнопка зажата и курсор отошёл от точки нажатия:
+win.SetOnDragFinished(func(e window.DragEffect) {
+    if e == window.DragEffectMove { removeOriginals() } // ОС оригиналы не трогает
+})
+ok := win.BeginDragFiles([]string{path}, window.DragEffectCopy|window.DragEffectMove)
+```
+
+`BeginDragFiles` вернёт `false`, если начать нельзя (кнопка не зажата, бэкенд не
+умеет, Wayland-компоновщик без `wl_data_device_manager` v3); итог (`0` — отмена)
+приходит в `SetOnDragFinished`. Win32: `DoDragDrop`; X11: XDND-источник;
+Wayland: `start_drag`. Подробности и чего нет (значок перетаскиваемого,
+`XdndProxy`) — в `docs/AI_AGENT_REFERENCE.md`, раздел «v3.34 additions».
 
 ### Оформленный текст в буфере обмена
 

@@ -3460,8 +3460,9 @@ type FileDropTarget interface {
 - **Нативно по платформам:** **Win32** — полно (`WM_DROPFILES`, `DragAcceptFiles`
   на главном окне, не на попапах); **X11** — полно (XDND v5: `XdndAware`,
   Enter/Position/Status/Drop, `XConvertSelection` → async `SelectionNotify`,
-  `text/uri-list`); **Wayland** — **каркас** (`wl_data_device`, принимает
-  `text/uri-list`, требует живой проверки на реальной сессии); macOS — нет.
+  `text/uri-list`); **Wayland** — `wl_data_device` (`text/uri-list`; проверено
+  на проводе с фальшивым компоновщиком, на живой сессии — нет); macOS — нет.
+  События входа/движения/выхода и перетаскивание ИЗ окна — раздел «v3.34 additions».
   `parseURIList` декодирует `file://` URI (percent-escapes, hostname, CRLF).
 
 ### Цветные эмодзи (COLR/CBDT) — автоматически
@@ -7642,6 +7643,94 @@ all. A single notification stays a plain card with the app row.
 Tests: `desktop/quickpanel_v334_test.go`, `quickpanel_page_test.go`,
 `quickpanel_wrap_test.go`, `notifycenter_stack_test.go`, `theme/profiles_win11_quick_test.go`;
 visual frames with `QS_OUT` / `NC_OUT`.
+
+---
+
+## v3.34 additions (drag of files: receiver events and source)
+
+Two additions to file drag & drop. The drop itself (`SetOnFilesDropped`) is unchanged
+on every platform; everything below is added next to it. Package `window`.
+
+### Receiver events — `SetOnDragEnter` / `SetOnDragOver` / `SetOnDragLeave`
+
+Lets a drop zone light up while files are dragged over the window.
+
+```go
+func (win *Window) SetOnDragEnter(fn func(x, y int))
+func (win *Window) SetOnDragOver(fn func(x, y int) bool) // true: a drop here is accepted
+func (win *Window) SetOnDragLeave(fn func())
+```
+
+- `x, y` are LOGICAL pixels of the client area (like `SetOnFilesDropped`). The
+  callbacks run on the engine goroutine.
+- `enter` is always followed by `over` at the same point (on X11 `XdndEnter` carries no
+  point, so `enter` is reported with the first `XdndPosition`).
+- `over` answers whether a drop at that point is accepted. `false` becomes a refusal
+  on the OS side (Win32 `DROPEFFECT_NONE`, X11 `XdndStatus` without accept, Wayland
+  `wl_data_offer.accept(null)`), `SetOnFilesDropped` is not called. Without the
+  callback a drop is accepted everywhere (as before). The backend waits for the
+  answer for 25 ms; a slower callback is answered with its previous answer.
+- `leave` is reported when the pointer leaves or the drag is cancelled. After a drop
+  `leave` does NOT come — clear the highlight in `SetOnFilesDropped` too.
+- Only drags that carry FILES are reported (`CF_HDROP` / `text/uri-list`); a text or
+  image drag does not reach the callbacks and is refused.
+- Win32 effect for an accepted drag follows the keys, as in Explorer: nothing/Ctrl —
+  copy, Shift — move, Ctrl+Shift or Alt — link (limited to what the source allows).
+  Wayland and X11 accept as copy. The application only reads the files: it never
+  moves them for the source.
+
+Win32: the window is now registered as an OLE drop target (`RegisterDragDrop`,
+`IDropTarget`) instead of `DragAcceptFiles`. If OLE cannot be started or the
+registration is refused, the old `WM_DROPFILES` path is enabled (no enter/over/leave
+then, `SetOnFilesDropped` works as before).
+
+### Source — `BeginDragFiles`
+
+```go
+type DragEffect uint32 // bit mask; values equal DROPEFFECT_*
+const ( DragEffectCopy DragEffect = 1; DragEffectMove = 2; DragEffectLink = 4 )
+
+func (win *Window) BeginDragFiles(paths []string, effect DragEffect) bool
+func (win *Window) SetOnDragFinished(fn func(effect DragEffect))
+```
+
+Call it from a mouse handler while the button is HELD (usually from the first move
+that leaves the press point by a few pixels). `effect` is the set of actions the
+source allows; the target chooses one.
+
+- Return `true`: the drag was started (it is carried by the OS asynchronously or in a
+  modal OS loop). `false`: it cannot be started — no button held / no press serial,
+  the backend cannot (macOS; Wayland compositor older than `wl_data_device_manager`
+  v3), empty list or mask, another drag is running. Relative paths are made absolute.
+- The end is reported once to `SetOnDragFinished(effect)`: the action chosen by the
+  target (`DragEffectCopy|Move|Link`), `0` — cancelled or refused (Esc, drop on
+  nothing, target refused, the pointer grab failed, X11 target silent for 10 s).
+  For `DragEffectMove` the APPLICATION removes the originals — the OS does not.
+- The engine is told the button was released when the drag ends (the OS took the
+  release), so widgets do not keep a mouse capture.
+
+Per platform:
+
+| | mechanism |
+|---|---|
+| Win32 | `DoDragDrop` on the window thread with a hand-built `IDataObject` (`CF_HDROP`, `IEnumFORMATETC` from the shell) and `IDropSource` (Esc cancels, release of the starting button drops) |
+| X11 | XDND v5 source: owns `XdndSelection`, grabs pointer and keyboard (Esc), finds the `XdndAware` window under the cursor, `XdndEnter/Position/Leave/Drop`, serves `TARGETS` and `text/uri-list`, waits for `XdndFinished`. Starts from the event pump (a service `ClientMessage` to itself), because only the pump may read server replies |
+| Wayland | `wl_data_device.start_drag` with a `wl_data_source` offering `text/uri-list`, actions copy/move (`set_actions`), data written lazily on `send`; finish from `dnd_finished`/`action`/`cancelled`. `Link` has no Wayland action (it is dropped; link-only returns `false`) |
+
+Not done (honestly): no drag icon / drag cursor (the cursor under the pointer stays),
+X11 `XdndProxy` and target type lists longer than one type, drag from a popup
+window on Wayland, dropping a virtual (non-file) item on Win32 (`FileGroupDescriptor`).
+Checked: Win32 on the real OLE (two windows, `SendInput`, `HEADLESS_GUI_DND_E2E=1`),
+X11 on a real X server (two windows, two connections; the pointer events are fed to
+the source directly, no XTest), Wayland on the wire against a fake compositor only
+(not on a live one).
+
+Tests: `window/dnd_drag_test.go` (events, coordinates, answer timeout, source
+wiring), `window/dnd_hdrop_test.go` (`CF_HDROP` block, `QueryContinueDrag` table),
+`window/dnd_windows_test.go` (vtable layout, `QueryInterface`/`AddRef`/`Release`,
+`GetData`/`EnumFormatEtc`, the receiver cycle), `window/dnd_windows_e2e_test.go`,
+`window/wayland_drag_linux_test.go`, `window/x11_drag_linux_test.go`,
+`window/x11_drag_e2e_linux_test.go`.
 
 ---
 

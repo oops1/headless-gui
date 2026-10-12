@@ -3873,10 +3873,37 @@ type FileDropTarget interface {
 }
 ```
 
-By platform: **Win32** (`WM_DROPFILES`) and **X11** (XDND v5) are complete;
-**Wayland** (`wl_data_device`) is a skeleton that needs live-session verification;
-macOS is not supported. Headless routing to `FileDropTarget` is testable via
+By platform: **Win32**, **X11** (XDND v5) and **Wayland** (`wl_data_device`,
+`text/uri-list`; verified on the wire against a fake compositor) are supported;
+macOS is not. Headless routing to `FileDropTarget` is testable via
 `SendFilesDropped` without a window.
+
+#### Highlighting a drop zone and dragging files out of the window (v3.34)
+
+While files are dragged over the window the application can highlight a zone or
+refuse the drop:
+
+```go
+win.SetOnDragEnter(func(x, y int) { zone.Highlight(true) })
+win.SetOnDragOver(func(x, y int) bool { return zone.Bounds().Contains(image.Pt(x, y)) }) // false: "not allowed"
+win.SetOnDragLeave(func() { zone.Highlight(false) }) // not sent after a drop: clear in SetOnFilesDropped too
+```
+
+The window can also start a drag of files, e.g. from a thumbnail into Explorer:
+
+```go
+// In a mouse handler, while the button is held and the pointer moved off the press point:
+win.SetOnDragFinished(func(e window.DragEffect) {
+    if e == window.DragEffectMove { removeOriginals() } // the OS does not touch the originals
+})
+ok := win.BeginDragFiles([]string{path}, window.DragEffectCopy|window.DragEffectMove)
+```
+
+`BeginDragFiles` returns `false` when it cannot start (button not held, backend
+cannot, Wayland compositor without `wl_data_device_manager` v3); the result
+(`0` — cancelled) comes to `SetOnDragFinished`. Win32: `DoDragDrop`; X11: XDND
+source; Wayland: `start_drag`. Details and gaps (no drag icon, no `XdndProxy`) are
+in `docs/AI_AGENT_REFERENCE.md`, section "v3.34 additions".
 
 ### Rich text on the clipboard
 
