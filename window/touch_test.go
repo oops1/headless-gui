@@ -3,6 +3,7 @@ package window
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/widget"
@@ -227,5 +228,186 @@ func TestTouch_EngineWithoutSupport(t *testing.T) {
 	win.setupTouch()
 	if n.onTouch != nil {
 		t.Error("подписка на касания при движке, который их не принимает")
+	}
+}
+
+// ─── Долгое нажатие «ничьего» пальца: правая кнопка ─────────────────────────
+
+// mouseLog — только мышиные строки журнала (без самих касаний).
+func mouseLog(r *touchRecorder) []string {
+	var out []string
+	for _, l := range r.log {
+		if len(l) < 5 || l[:5] != "touch" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// clockedSurface — поверхность с ручными часами прихода событий.
+func clockedSurface(claim bool) (*surface, *touchRecorder, *time.Time) {
+	s, r := newTouchSurface(claim)
+	now := time.Unix(1000, 0)
+	s.emuNow = func() time.Time { return now }
+	return s, r, &now
+}
+
+// Палец, пролежавший на месте дольше срока, при отрыве даёт правый щелчок: левая
+// кнопка отпускается вне окна (не кликая), затем в точке отрыва — правая.
+func TestTouchEmu_LongPressIsRightClick(t *testing.T) {
+	s, r, now := clockedSurface(false)
+	s.deliverTouch(ev(1, 10, 20, widget.TouchBegan))
+	*now = now.Add(600 * time.Millisecond)
+	s.deliverTouch(ev(1, 12, 21, widget.TouchEnded)) // дрожь в пределах порога
+
+	want := []string{
+		"move 10,20", "button 0 10,20 down=true",
+		"move -1,-1", "button 0 -1,-1 down=false",
+		"move 12,21", "button 1 12,21 down=true", "button 1 12,21 down=false",
+	}
+	if got := mouseLog(r); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("долгое нажатие:\n got  %v\n want %v", got, want)
+	}
+	if s.emu.active {
+		t.Error("эмуляция осталась взведённой")
+	}
+}
+
+// Короткое касание остаётся обычным левым щелчком.
+func TestTouchEmu_ShortPressStaysLeftClick(t *testing.T) {
+	s, r, now := clockedSurface(false)
+	s.deliverTouch(ev(1, 10, 20, widget.TouchBegan))
+	*now = now.Add(200 * time.Millisecond)
+	s.deliverTouch(ev(1, 10, 20, widget.TouchEnded))
+	want := []string{"move 10,20", "button 0 10,20 down=true", "move 10,20", "button 0 10,20 down=false"}
+	if got := mouseLog(r); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("короткое касание:\n got  %v\n want %v", got, want)
+	}
+}
+
+// Палец, уходивший дальше порога тапа, долгим нажатием уже не станет, даже
+// вернувшись на место: так «целился и потянул» остаётся левой кнопкой.
+func TestTouchEmu_MovedFingerIsNotLongPress(t *testing.T) {
+	s, r, now := clockedSurface(false)
+	s.deliverTouch(ev(1, 10, 20, widget.TouchBegan))
+	s.deliverTouch(ev(1, 60, 20, widget.TouchMoved))
+	s.deliverTouch(ev(1, 10, 20, widget.TouchMoved))
+	*now = now.Add(2 * time.Second)
+	s.deliverTouch(ev(1, 10, 20, widget.TouchEnded))
+	for _, l := range mouseLog(r) {
+		if l == "button 1 10,20 down=true" {
+			t.Fatalf("сдвинутый палец дал правую кнопку: %v", mouseLog(r))
+		}
+	}
+	last := mouseLog(r)
+	if last[len(last)-1] != "button 0 10,20 down=false" {
+		t.Errorf("отрыв не левой кнопкой: %v", last)
+	}
+
+	// Отрыв далеко от места касания — тоже не «лежал».
+	s2, r2, now2 := clockedSurface(false)
+	s2.deliverTouch(ev(1, 10, 20, widget.TouchBegan))
+	*now2 = now2.Add(2 * time.Second)
+	s2.deliverTouch(ev(1, 80, 20, widget.TouchEnded))
+	if got := mouseLog(r2); got[len(got)-1] != "button 0 80,20 down=false" {
+		t.Errorf("отрыв вдали: %v", got)
+	}
+}
+
+// Порог тапа — в логических пикселях: при масштабе 2 дрожь в 15 физических
+// пикселей ещё «на месте».
+func TestTouchEmu_SlopFollowsScale(t *testing.T) {
+	s, r, now := clockedSurface(false)
+	s.scale = 2
+	s.deliverTouch(ev(1, 100, 100, widget.TouchBegan))
+	s.deliverTouch(ev(1, 115, 100, widget.TouchMoved))
+	*now = now.Add(time.Second)
+	s.deliverTouch(ev(1, 115, 100, widget.TouchEnded))
+	got := mouseLog(r)
+	if got[len(got)-1] != "button 1 115,100 down=false" {
+		t.Errorf("при масштабе 2: %v", got)
+	}
+}
+
+// Срок берётся по часам события, когда бэкенд их знает: опоздавшая доставка не
+// превращает быстрый тап в долгое нажатие.
+func TestTouchEmu_UsesEventClock(t *testing.T) {
+	s, r, now := clockedSurface(false)
+	b := ev(1, 10, 20, widget.TouchBegan)
+	b.Time = 5 * time.Second
+	s.deliverTouch(b)
+	*now = now.Add(3 * time.Second) // очередь запоздала
+	e := ev(1, 10, 20, widget.TouchEnded)
+	e.Time = 5*time.Second + 100*time.Millisecond
+	s.deliverTouch(e)
+	got := mouseLog(r)
+	if got[len(got)-1] != "button 0 10,20 down=false" {
+		t.Errorf("быстрый тап стал долгим: %v", got)
+	}
+
+	// И наоборот: по часам события лежал долго, хотя доставили сразу.
+	s2, r2, _ := clockedSurface(false)
+	b2 := ev(1, 10, 20, widget.TouchBegan)
+	b2.Time = time.Second
+	s2.deliverTouch(b2)
+	e2 := ev(1, 10, 20, widget.TouchEnded)
+	e2.Time = 2 * time.Second
+	s2.deliverTouch(e2)
+	got = mouseLog(r2)
+	if got[len(got)-1] != "button 1 10,20 down=false" {
+		t.Errorf("долгое по часам события: %v", got)
+	}
+}
+
+func TestTouchEmu_LongPressDurationSetting(t *testing.T) {
+	// Свой срок.
+	s, r, now := clockedSurface(false)
+	s.emuLongPress.Store(int64(2 * time.Second))
+	s.deliverTouch(ev(1, 1, 1, widget.TouchBegan))
+	*now = now.Add(time.Second)
+	s.deliverTouch(ev(1, 1, 1, widget.TouchEnded))
+	if got := mouseLog(r); got[len(got)-1] != "button 0 1,1 down=false" {
+		t.Errorf("срок 2с, секунда — не долго: %v", got)
+	}
+	// Выключено.
+	s2, r2, now2 := clockedSurface(false)
+	s2.emuLongPress.Store(int64(-1))
+	s2.deliverTouch(ev(1, 1, 1, widget.TouchBegan))
+	*now2 = now2.Add(10 * time.Second)
+	s2.deliverTouch(ev(1, 1, 1, widget.TouchEnded))
+	if got := mouseLog(r2); got[len(got)-1] != "button 0 1,1 down=false" {
+		t.Errorf("отключённое долгое нажатие сработало: %v", got)
+	}
+	// Публичный метод пишет в то же поле.
+	win := New(&touchRecorder{root: widget.NewWindow("a", 100, 100)}, "a")
+	win.SetTouchLongPress(750 * time.Millisecond)
+	if d := win.emuLongPressDuration(); d != 750*time.Millisecond {
+		t.Errorf("SetTouchLongPress: %v", d)
+	}
+	win.SetTouchLongPress(0)
+	if d := win.emuLongPressDuration(); d != 500*time.Millisecond {
+		t.Errorf("по умолчанию: %v", d)
+	}
+}
+
+// Взятое виджетом касание правой кнопкой не становится ни при каком сроке, а
+// отменённое долгое нажатие не даёт и левого щелчка.
+func TestTouchEmu_ClaimedAndCancelled(t *testing.T) {
+	s, r, now := clockedSurface(true)
+	s.deliverTouch(ev(1, 10, 20, widget.TouchBegan))
+	*now = now.Add(2 * time.Second)
+	s.deliverTouch(ev(1, 10, 20, widget.TouchEnded))
+	if got := mouseLog(r); len(got) != 0 {
+		t.Errorf("взятое касание породило мышь: %v", got)
+	}
+
+	s2, r2, now2 := clockedSurface(false)
+	s2.deliverTouch(ev(1, 10, 20, widget.TouchBegan))
+	*now2 = now2.Add(2 * time.Second)
+	s2.deliverTouch(ev(1, 10, 20, widget.TouchCancelled))
+	for _, l := range mouseLog(r2) {
+		if l == "button 1 10,20 down=true" {
+			t.Errorf("отмена дала правый щелчок: %v", mouseLog(r2))
+		}
 	}
 }

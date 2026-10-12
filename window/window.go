@@ -256,6 +256,11 @@ type surface struct {
 	// emu — палец, превращённый в мышь, пока касание никто не взял (touch.go).
 	// Только горутина движка.
 	emu touchEmu
+	// emuLongPress — срок долгого нажатия «ничьего» пальца (SetTouchLongPress;
+	// 0 — по умолчанию, <0 — выключено; атомарное: задаёт приложение, читает
+	// горутина движка); emuNow — часы прихода событий, в тестах подменяются.
+	emuLongPress atomic.Int64
+	emuNow       func() time.Time
 
 	// fitOX, fitOY — смещение контента в буфере окна (letterbox при
 	// ContentFit=FitScale). Пишутся под mu при ресайзе, читаются событиями
