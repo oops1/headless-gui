@@ -116,18 +116,6 @@ func (w *X11Window) x11ExtensionMajor(name string) (byte, bool) {
 	return major, present
 }
 
-// x11QueryExtensionRequest — QueryExtension (опкод 98) для расширения name.
-func x11QueryExtensionRequest(name string) []byte {
-	pad := (4 - len(name)%4) % 4
-	reqLen := 2 + (len(name)+pad)/4
-	buf := make([]byte, reqLen*4)
-	buf[0] = 98
-	binary.LittleEndian.PutUint16(buf[2:4], uint16(reqLen))
-	binary.LittleEndian.PutUint16(buf[4:6], uint16(len(name)))
-	copy(buf[8:], name)
-	return buf
-}
-
 // x11RandrAtLeast15 — сервер говорит по RandR не старше 1.5 (до неё нет
 // RRGetMonitors).
 func (w *X11Window) x11RandrAtLeast15(major byte) bool {

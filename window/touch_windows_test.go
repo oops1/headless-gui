@@ -93,9 +93,9 @@ func TestHandlePointerMsg_DisabledPassesThrough(t *testing.T) {
 // ─── Живая проверка: InjectTouchInput в настоящее окно ──────────────────────
 
 var (
+	// procWindowFromPoint — общий, из mouse_windows.go.
 	procInitializeTouchInjection = user32.NewProc("InitializeTouchInjection")
 	procInjectTouchInput         = user32.NewProc("InjectTouchInput")
-	procWindowFromPoint          = user32.NewProc("WindowFromPoint")
 	procSetWindowPosTop          = user32.NewProc("SetWindowPos")
 )
 
