@@ -105,6 +105,12 @@ type CalendarFlyout struct {
 	//	    return t.Stop
 	//	}
 	Ticker func(d time.Duration, f func()) (stop func())
+	// FocusSingleButton — модуль «Фокусировка» Windows 11 без «− 30 мин +»: одна
+	// кнопка «▶ Фокусировка» на всю ширину, сеанс идёт на ту длительность, что
+	// уже стоит у FocusSession (потребитель задаёт её SetDuration). Работает
+	// при флаге профиля theme.KeyCalendarFocusCompact. По умолчанию ложь: как на
+	// настоящей Windows 11, длительность выбирается «−» и «+».
+	FocusSingleButton bool
 
 	// Календарь Windows 11 (calendarflyout_win11.go): сеанс «Фокусировки» и его
 	// подписка, секундный отсчёт, центр над календарём, кнопка под курсором и

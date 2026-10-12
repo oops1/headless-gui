@@ -7540,6 +7540,111 @@ and applied after the first configure.
 
 ---
 
+## Windows 11 shell remarks: quick settings, notification stacks, focus card — v3.34
+
+Answers the WinLine remarks after connecting v3.33 (real Windows 11 screenshots
+`real_quick_settings.png`, `real_notification_center_calendar.png`). Public API is
+additive; Windows 10, Windows 2000 and macOS frames are byte-identical to before
+(the frozen taskbar tests and the golden tests pass without updates). The Windows
+11 frames change where the remarks ask. Every new look is switched by a **profile
+flag** raised in the Windows 11 profiles (light and dark); a consumer that relied
+on the v3.33 look lowers the flag: `m.SetFlag(theme.KeyQuickPaged, false)`. The
+dark profile still declares ≤ 15 own tokens (all new colours are grey veils or
+references to existing tokens).
+
+| Flag (theme key) | Default (Windows 11) | Off = v3.33 look |
+|---|---|---|
+| `theme.KeyQuickPaged` `quicksettings.paged` | on | tile grid scrolls pixel by pixel with a thin bar |
+| `theme.KeyQuickFooterEditLeft` `quicksettings.footer.edit.left` | on | battery left, pencil and gear right |
+| `theme.KeyNotifyStack` `notificationcenter.stack` | on | group header with a counter and all cards |
+| `theme.KeyCalendarFocusCompact` `calendar.focus.compact` | on | title row and an accent «Start» button |
+
+A custom profile that names the presenter but not the flag keeps the old look.
+
+**1. Split tile.** A tile with `QuickAction.HasDetails` is two halves with a 1 px
+line between them (part `w11.tile.split`): the left half toggles (`model.Toggle`),
+the right half (`›`, metric `quicksettings.w11.chev.w` = 48, half the tile) opens
+the page. Hover and press highlight each half separately (the rounded tile is
+clipped to the half, so outer corners stay round). An `Unavailable` tile keeps a
+live `›`. Tiles without details are single buttons.
+
+**2. Pages instead of scrolling** (`KeyQuickPaged`). A page is `rows` tile rows;
+the column right of the grid shows ▲, one dot per page (current = text colour) and
+▼ (ends dimmed). Wheel over the grid or the column turns pages (pixels accumulate
+to 30 per turn, so a touchpad does not skip pages); click ▲ ▼ and dots; keyboard
+focus on a hidden tile turns the page; in edit mode dragging a tile to the grid
+edge turns the page once per entry into the edge zone. New: `QuickSettings.Pages()`,
+`Page()`, `SetPage(i)` (no-op with scrolling). The page resets to 0 on reopen.
+
+**3. Footer** (`KeyQuickFooterEditLeft`): left «Edit» (pencil + label, string
+`StrQuickEditShort`), then the battery, gear on the right. «Done» of edit mode takes
+the pencil's place.
+
+**4. Disabled sliders.** `QuickSettings.SetVolumeEnabled(bool)` /
+`VolumeEnabled()`, `SetBrightnessEnabled(bool)` / `BrightnessEnabled()` (enabled by
+default). A disabled slider is grey (disabled states of `w11.slider.*`), ignores
+mouse, wheel and keys, gives no tooltip and drops out of Tab order; disabling in
+the middle of a drag ends the drag.
+
+**5. Two-line tile label.** The title wraps on words to at most two lines, the
+second one ends with `…`; a word wider than the cell is elided. When the title takes
+one line the second line is `QuickAction.Detail` (it is dropped when the title takes
+two).
+
+**6. Page builder** (`desktop/quickpage.go`). Instead of own widgets plus
+`ApplyThemeTree`:
+
+```go
+q.Details = func(id desktop.QuickActionID) *desktop.QuickDetails {
+    page := q.NewDetailPage()            // or desktop.NewDetailPage(tm)
+    list := page.AddList([]desktop.DetailListItem{
+        {Icon: wifi, Title: "Avanpost", Subtitle: "Secured", State: "Connected", Selected: true},
+        {Title: "Guest", Subtitle: "Open"},
+    }, func(i int, it desktop.DetailListItem) { connect(it) })
+    page.AddSlider(sunIcon, 0.7, setBrightness)
+    page.AddToggle("Metered connection", false, setMetered)
+    page.AddButton("More networks", openSettings).SetAccent(true)
+    page.AddText("Hint")
+    return page.Details("Wi-Fi")         // QuickDetails{Title, Content: page}
+}
+```
+
+The page draws every frame from the theme parts `w11.page.*`, `w11.slider.*`,
+`w11.label/detail/dim`, so theme, dark mode and accent changes show immediately.
+Handles: `DetailList` (`SetItems`, `Items`, `Selected`, `SetSelected`),
+`DetailSlider` (`SetLevel`, `Level`, `SetEnabled`, `SetIconAt`), `DetailToggle`
+(`SetOn`, `On`, `SetTitle`, `SetEnabled`), `DetailButton` (`SetTitle`, `SetAccent`,
+`SetEnabled`), `DetailText.SetText`; `Set*` are safe from any goroutine and do not
+call the callbacks. The page lays elements out in a column, scrolls with the wheel
+when too tall, supports keyboard (Up/Down between rows, Enter/Space, Left/Right on
+the slider) and tints list icons like tiles (`KeyQuickIconTint`). Panel side:
+the widget that took a press keeps the mouse until release (a slider released
+outside the page does not stick), and `widget.Focusable` content is told when
+the keyboard enters or leaves it. Existing `QuickDetails.Content` widgets work as
+before.
+
+**7. Focus card** (`KeyCalendarFocusCompact`). As in the screenshot: no title, one
+row `− 30 min +` … `▶ Focus` (neutral button, string `StrFocusTitle`; running:
+countdown and `■ Stop`, progress bar under the row); module height metric
+`calendar.w11.focus.compact` = 60. `CalendarFlyout.FocusSingleButton = true` leaves a
+single full-width `▶ Focus` button without the duration stepper (the session runs
+for the duration already set by `FocusSession.SetDuration`). Flag off: title,
+stepper and accent «Start» as in v3.33. Note: the screenshot itself shows the
+stepper together with the button, so the stepper is the default.
+
+**8. Notification stacks** (`KeyNotifyStack`). Several notifications of one app:
+group header (icon, name), the newest card and a pill button inside it
+`+N notifications` (`StrNotifStackMore` + `.one/.few/.many/.other`, Russian
+«+N уведомл.», picked by `PluralForm`); click expands all cards, the header
+(click, ←/→) collapses back; Tab/Enter work on the pill. Closing the group (×) removes
+all. A single notification stays a plain card with the app row.
+
+Tests: `desktop/quickpanel_v334_test.go`, `quickpanel_page_test.go`,
+`quickpanel_wrap_test.go`, `notifycenter_stack_test.go`, `theme/profiles_win11_quick_test.go`;
+visual frames with `QS_OUT` / `NC_OUT`.
+
+---
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

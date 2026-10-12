@@ -318,6 +318,7 @@ func TestW11_BellTogglesSharedModelAndRepaintsOnlyItself(t *testing.T) {
 
 func TestW11_SingleCardHasAppRowGroupHasCounter(t *testing.T) {
 	w := newW11Fix(t, theme.ProfileWindows11, true)
+	w.tm.SetFlag(theme.KeyNotifyStack, false) // прежний вид группы: заголовок со счётчиком и все карточки
 	w.open()
 	l := w.nc.view.layout(w.nc.rect())
 	var single, group *richGroup
@@ -354,6 +355,7 @@ func TestW11_SingleCardHasAppRowGroupHasCounter(t *testing.T) {
 
 func TestW11_GroupCollapsesByClickAndKeepsCounter(t *testing.T) {
 	w := newW11Fix(t, theme.ProfileWindows11, true)
+	w.tm.SetFlag(theme.KeyNotifyStack, false) // прежний вид: группа сворачивается шевроном
 	w.open()
 	h := w.zone(t, zoneKey{kind: zoneGroup, app: "vpn"}).rect
 	w11Click(w.nc, h)
@@ -513,10 +515,14 @@ func TestW11Calendar_HeaderMonthAndToday(t *testing.T) {
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	ctx := w.drawn(w.cal)
-	for _, want := range []string{"понедельник, 5 октября", "Октябрь 2026", "Пн", "Вс", "5", "31", tr(StrFocusTitle), "30 мин", tr(StrFocusStart)} {
+	for _, want := range []string{"понедельник, 5 октября", "Октябрь 2026", "Пн", "Вс", "5", "31", tr(StrFocusTitle), "30 мин"} {
 		if !containsText(ctx.texts, want) {
 			t.Errorf("в календаре нет %q", want)
 		}
+	}
+	// Вид настоящей Windows 11: «▶ Фокусировка», без «Начать».
+	if containsText(ctx.texts, tr(StrFocusStart)) {
+		t.Errorf("у Windows 11 кнопка запуска подписана %q", tr(StrFocusStart))
 	}
 	// Сегодня — круг акцента.
 	acc, _ := w.tm.Accent()
@@ -531,7 +537,7 @@ func TestW11Calendar_HeaderMonthAndToday(t *testing.T) {
 	}
 	useLanguage(t, "EN")
 	ctx = w.drawn(w.cal)
-	for _, want := range []string{"Monday, October 5", "October 2026", "Mo", "Focus", "30 min", "Start"} {
+	for _, want := range []string{"Monday, October 5", "October 2026", "Mo", "Focus", "30 min"} {
 		if !containsText(ctx.texts, want) {
 			t.Errorf("по-английски нет %q: %+v", want, ctx.texts)
 		}

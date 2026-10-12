@@ -351,19 +351,27 @@ func (v *richView) drawGroupW11(ctx widget.DrawContext, l *richLayout, u ncUI, g
 	}
 	count := strconv.Itoa(g.count)
 	pillW := f.caption.width(count) + ncW11PillPad
+	if g.stack {
+		// В стопке счётчик несёт кнопка «+N уведомл.» в карточке, а не заголовок.
+		pillW = -ncW11TextGap
+	}
 	name := f.title.elide(g.name, g.rect.Max.X-2*m.slot-pillW-ncW11TextGap-x)
 	f.title.draw(ctx, name, x, g.rect.Min.Y+(g.rect.Dy()-f.title.lineH())/2, st.Text)
 	x += f.title.width(name) + ncW11TextGap
 
-	pr := image.Rect(x, g.rect.Min.Y+(g.rect.Dy()-ncW11PillH)/2, x+pillW, g.rect.Min.Y+(g.rect.Dy()-ncW11PillH)/2+ncW11PillH)
-	ps := v.part(ncPartPill, theme.StateNormal)
-	PaintStyle(ctx, pr, ps)
-	f.caption.draw(ctx, count, pr.Min.X+(pr.Dx()-f.caption.width(count))/2, pr.Min.Y+(pr.Dy()-f.caption.lineH())/2, ps.Text)
+	if !g.stack {
+		pr := image.Rect(x, g.rect.Min.Y+(g.rect.Dy()-ncW11PillH)/2, x+pillW, g.rect.Min.Y+(g.rect.Dy()-ncW11PillH)/2+ncW11PillH)
+		ps := v.part(ncPartPill, theme.StateNormal)
+		PaintStyle(ctx, pr, ps)
+		f.caption.draw(ctx, count, pr.Min.X+(pr.Dx()-f.caption.width(count))/2, pr.Min.Y+(pr.Dy()-f.caption.lineH())/2, ps.Text)
+	}
 
 	gside := m.slot / ncGlyphDiv
-	gk := zoneKey{kind: zoneGroupToggle, app: g.app}
-	gs := v.style(gk, g.chevronRect, ncPartGlyph, u.state(gk, false))
-	drawGlyphChevron(ctx, g.chevronRect, !g.collapsed, gs.Text, gside)
+	if !g.stack || g.stackOpen {
+		gk := zoneKey{kind: zoneGroupToggle, app: g.app}
+		gs := v.style(gk, g.chevronRect, ncPartGlyph, u.state(gk, false))
+		drawGlyphChevron(ctx, g.chevronRect, !g.collapsed, gs.Text, gside)
+	}
 	if u.hoverApp == g.app || (u.focus.kind == zoneGroup && u.focus.app == g.app) {
 		ck := zoneKey{kind: zoneGroupClose, app: g.app}
 		cs := v.style(ck, g.closeRect, ncPartGlyph, u.state(ck, false))
@@ -420,6 +428,9 @@ func (v *richView) drawCardW11(ctx widget.DrawContext, l *richLayout, u ncUI, c 
 	}
 	for _, a := range c.acts {
 		v.drawAction(ctx, l, u, c, a)
+	}
+	if !c.stackRect.Empty() {
+		v.drawStackButton(ctx, l, u, c)
 	}
 }
 

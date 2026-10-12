@@ -224,6 +224,10 @@ func TestVisual_NotificationCenterWin11(t *testing.T) {
 			widget.StepAnimations(finish)
 			widget.StepAnimations(finish.Add(time.Hour))
 		}}},
+		{"light_stack", nc11Opts{empty: true, extra: nc11StackNotes}},
+		{"dark_stack_open", nc11Opts{dark: true, empty: true, extra: nc11StackNotes, after: func(s *nc11Scene) {
+			s.click(1030, 245)
+		}}},
 		{"light_severity", nc11Opts{extra: func(ns *desktop.FakeNotifications) {
 			clock := nc11Time()
 			ns.Add(desktop.Notification{AppID: "sys", AppName: "Система", Icon: ncGlyph(48, color.RGBA{R: 90, G: 90, B: 90, A: 255}, 2),
@@ -308,4 +312,18 @@ func TestVisual_NotificationToastWin11(t *testing.T) {
 		bar.Close()
 		widget.StopAllAnimations()
 	}
+}
+
+// nc11StackNotes — приложение с несколькими уведомлениями (свёрнутая стопка) и
+// одиночное с действием.
+func nc11StackNotes(ns *desktop.FakeNotifications) {
+	clock := nc11Time()
+	white := color.RGBA{R: 235, G: 240, B: 245, A: 255}
+	for i, title := range []string{"Анализ панели задач и меню", "Предыдущая задача", "Ещё одна"} {
+		ns.Add(desktop.Notification{AppID: "claude", AppName: "Claude", Icon: ncGlyph(48, white, 0),
+			Title: title, Body: "engine v3.32.0 upgrade complete; menus styled, taskbar updated",
+			Timestamp: clock.Add(-time.Duration(20+i*5) * time.Minute)})
+	}
+	ns.Add(desktop.Notification{AppID: "vpn", AppName: "Cisco Secure Client", Icon: ncGlyph(48, white, 0),
+		Title: "AnyConnect VPN", Body: "Подключено: gate.avanpost.ru", Timestamp: clock.Add(-30 * time.Hour)})
 }

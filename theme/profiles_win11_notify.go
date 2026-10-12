@@ -20,6 +20,20 @@ const (
 )
 
 const (
+	// KeyNotifyStack — флаг профиля: несколько уведомлений одного приложения
+	// сворачиваются в стопку — самое свежее и кнопка-пилюля «+N уведомл.», щелчок
+	// по ней разворачивает группу. Погашенный флаг возвращает прежний вид:
+	// заголовок группы со счётчиком и все карточки (v3.33). Профиль без флага
+	// остаётся с прежним видом.
+	KeyNotifyStack Key = "notificationcenter.stack"
+	// KeyCalendarFocusCompact — флаг профиля: модуль «Фокусировка» под календарём
+	// — как у настоящей Windows 11: одна строка «− 30 мин +» и кнопка
+	// «▶ Фокусировка», без заголовка. Погашенный флаг возвращает прежний вид
+	// (заголовок и акцентная кнопка «Начать»).
+	KeyCalendarFocusCompact Key = "calendar.focus.compact"
+)
+
+const (
 	// KeySurfaceCard — заливка карточки на панели: уведомления, плитки
 	// модулей. Светлая — белая плёнка поверх серой панели, тёмная — светлая
 	// плёнка на тёмной. Тёмный профиль подменяет токен, а не стили.
@@ -56,6 +70,10 @@ func declareWin11DarkNotificationTokens(p *Profile) {
 func declareWin11Notifications(p *Profile) {
 	p.Presenters["notificationcenter"] = NotificationCenterWin11Presenter
 	p.Presenters["calendar"] = CalendarWin11Presenter
+	// Вид настоящей Windows 11 — по умолчанию; прежний включается погашенными
+	// флагами (см. KeyNotifyStack, KeyCalendarFocusCompact).
+	p.SetFlag(KeyNotifyStack, true)
+	p.SetFlag(KeyCalendarFocusCompact, true)
 
 	// ── Центр уведомлений ───────────────────────────────────────────────
 	// Ширина 364, скругление 8 (из стиля панели), карточки со скруглением 4.
@@ -105,6 +123,7 @@ func declareWin11Notifications(p *Profile) {
 		SetMetric("calendar.w11.day", 36).
 		SetMetric("calendar.w11.nav", 32).
 		SetMetric("calendar.w11.focus", 100).
+		SetMetric("calendar.w11.focus.compact", 60).
 		SetMetric("calendar.w11.button", 32).
 		SetMetric("calendar.w11.edge", 12)
 
@@ -165,6 +184,11 @@ func declareWin11Notifications(p *Profile) {
 	set("group", StateActive, StyleDelta{TextFrom: text, Corner: N(4)})
 	set("group", StateFocused, StyleDelta{TextFrom: text, Corner: N(4), BorderFrom: text, BorderWidth: N(1)})
 	set("pill", StateNormal, StyleDelta{Fill: veil(56), TextFrom: text, Corner: N(9)})
+	// «+N уведомл.» свёрнутой стопки: кнопка-пилюля внутри карточки.
+	set("stack", StateNormal, StyleDelta{Fill: veil(40), Border: veil(70), BorderWidth: N(1), TextFrom: text, Corner: N(4)})
+	set("stack", StateHover, StyleDelta{Fill: veil(64), Border: veil(90), BorderWidth: N(1), TextFrom: text, Corner: N(4)})
+	set("stack", StatePressed, StyleDelta{Fill: veil(88), Border: veil(90), BorderWidth: N(1), TextFrom: text, Corner: N(4)})
+	set("stack", StateFocused, StyleDelta{Fill: veil(40), TextFrom: text, Corner: N(4), BorderFrom: text, BorderWidth: N(1)})
 
 	// Карточка: заливка-плёнка, тонкая рамка, скругление 4.
 	card := func(st State, b Key) {

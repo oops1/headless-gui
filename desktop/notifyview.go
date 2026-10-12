@@ -104,6 +104,8 @@ const (
 	// Части центра Windows 11: кнопки заголовка и счётчик группы.
 	ncPartHeadBtn = "headbtn"
 	ncPartPill    = "pill"
+	// ncPartStack — кнопка «+N уведомл.» свёрнутой стопки.
+	ncPartStack = "stack"
 )
 
 // Доли и пределы, которые не размеры, а пропорции или защита от вырожденных
@@ -346,6 +348,8 @@ const (
 	zoneOption
 	zoneTile
 	zoneDND // колокольчик «Не беспокоить» в заголовке центра Windows 11
+	// zoneStack — кнопка «+N уведомл.» свёрнутой стопки Windows 11 (app — группа).
+	zoneStack
 )
 
 // zoneKey однозначно называет зону, не привязывая её к положению: раскладка
@@ -410,6 +414,7 @@ type richView struct {
 
 	mu         sync.Mutex
 	collapsed  map[AppID]bool          // свёрнутые группы
+	stackOpen  map[AppID]bool          // развёрнутые стопки Windows 11 (по умолчанию стопка свёрнута)
 	bodyOpen   map[NotificationID]bool // раскрытие карточки, заданное пользователем
 	quickOpen  bool                    // сетка быстрых действий развёрнута
 	scroll     int
@@ -589,6 +594,9 @@ type richCard struct {
 	showApp bool
 	appRect image.Rectangle
 	appText string
+	// Свёрнутая стопка Windows 11: кнопка «+N уведомл.» внизу карточки.
+	stackRect image.Rectangle
+	stackText string
 }
 
 // richAct — действие карточки в раскладке.
@@ -610,7 +618,10 @@ type richGroup struct {
 	chevronRect image.Rectangle
 	collapsed   bool
 	count       int
-	cards       []richCard
+	// stack — группа Windows 11 в виде стопки (флаг theme.KeyNotifyStack);
+	// stackOpen — стопка развёрнута и показывает все карточки.
+	stack, stackOpen bool
+	cards            []richCard
 	// anim — группа сворачивается или раскрывается; clip — видимая часть её
 	// карточек в этот момент (может быть пуста).
 	anim bool
@@ -1108,6 +1119,13 @@ func (v *richView) flowGroups(m ncMetrics, f ncFonts, notes []Notification, x0, 
 			grp.name = string(first.AppID)
 		}
 		grp.collapsed = v.collapsed[first.AppID]
+		// Windows 11 со стопкой: группа из нескольких уведомлений — самое
+		// свежее и «+N уведомл.», щелчок разворачивает все. Прежняя
+		// сворачиваемость группы (collapsed) в этом виде не нужна.
+		stack := w11 && len(g) >= 2 && v.stackMode()
+		if stack {
+			grp.stack, grp.stackOpen, grp.collapsed = true, v.stackOpen[first.AppID], false
+		}
 		// Уведомления без приложения (прежняя модель) идут без заголовка группы.
 		hdr := m.groupH
 		if grp.name == "" {
@@ -1126,17 +1144,24 @@ func (v *richView) flowGroups(m ncMetrics, f ncFonts, notes []Notification, x0, 
 		// Группа сворачивается плавно: пока идёт движение, карточки лежат как у
 		// раскрытой, а их область обрезается и укорачивается до долей высоты.
 		gk, glive := 1.0, false
-		if hdr > 0 {
+		if hdr > 0 && !stack {
 			gk, glive = v.slideStep(ncSlideKey{kind: slideGroup, app: first.AppID}, !grp.collapsed)
 		}
 		if !grp.collapsed || glive {
 			yCards := y
-			for _, n := range g {
+			shown := g
+			if stack && !grp.stackOpen {
+				shown = g[:1]
+			}
+			for ci, n := range shown {
 				iconArg := hasNoteIcon(n)
 				if w11 {
 					iconArg = len(g) < 2 // строка приложения — у одиночного уведомления
 				}
 				c := v.layoutCard(m, f, n, x0, y, w, iconArg)
+				if stack && !grp.stackOpen && ci == 0 {
+					v.stackCard(&c, m, f, len(g)-1)
+				}
 				grp.cards = append(grp.cards, c)
 				y = c.rect.Max.Y + m.cardGap
 			}
@@ -1175,6 +1200,7 @@ func (v *richView) shiftGroups(l *richLayout) {
 			c.appRect = shift(c.appRect)
 			c.bodyY += dy
 			c.closeRect, c.toggleRect = shift(c.closeRect), shift(c.toggleRect)
+			c.stackRect = shift(c.stackRect)
 			for ai := range c.acts {
 				a := &c.acts[ai]
 				a.rect, a.label, a.send = shift(a.rect), shift(a.label), shift(a.send)
@@ -1213,7 +1239,9 @@ func (v *richView) buildZones(l *richLayout) {
 	vp := l.viewport
 	for _, g := range l.groups {
 		add(zoneKey{kind: zoneGroup, app: g.app}, g.rect, true, vp)
-		add(zoneKey{kind: zoneGroupToggle, app: g.app}, g.chevronRect, false, vp)
+		if !g.stack || g.stackOpen {
+			add(zoneKey{kind: zoneGroupToggle, app: g.app}, g.chevronRect, false, vp)
+		}
 		add(zoneKey{kind: zoneGroupClose, app: g.app}, g.closeRect, false, vp)
 		// Пока группа сворачивается, нажимается только то, что ещё видно.
 		gvp := vp
@@ -1231,6 +1259,9 @@ func (v *richView) buildZones(l *richLayout) {
 				add(zoneKey{kind: zoneCardToggle, note: id}, c.toggleRect, false, cvp)
 			}
 			add(zoneKey{kind: zoneCardClose, note: id}, c.closeRect, false, cvp)
+			if !c.stackRect.Empty() {
+				add(zoneKey{kind: zoneStack, app: g.app}, c.stackRect, true, cvp)
+			}
 			for _, a := range c.acts {
 				switch a.a.Kind {
 				case NotificationActionSelect:
