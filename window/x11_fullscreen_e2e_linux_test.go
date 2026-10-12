@@ -36,7 +36,7 @@ func TestX11FullscreenE2E(t *testing.T) {
 	if !w.SetFullscreen(true) {
 		t.Skip("оконный менеджер не объявил _NET_WM_STATE_FULLSCREEN")
 	}
-	if !waitFor(func() bool { return w.IsFullscreen() }) {
+	if !fsWaitFor(func() bool { return w.IsFullscreen() }) {
 		t.Skip("оконный менеджер не перевёл окно в полный экран (нет WM или он не умеет)")
 	}
 	if calls.Load() < 1 || !events[0] {
@@ -44,7 +44,7 @@ func TestX11FullscreenE2E(t *testing.T) {
 	}
 
 	w.SetFullscreen(false)
-	if !waitFor(func() bool { return !w.IsFullscreen() }) {
+	if !fsWaitFor(func() bool { return !w.IsFullscreen() }) {
 		t.Fatal("после REMOVE окно осталось в полном экране")
 	}
 	if last := events[len(events)-1]; last {
@@ -52,7 +52,7 @@ func TestX11FullscreenE2E(t *testing.T) {
 	}
 }
 
-func waitFor(cond func() bool) bool {
+func fsWaitFor(cond func() bool) bool {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {

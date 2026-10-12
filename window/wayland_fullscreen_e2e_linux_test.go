@@ -35,7 +35,7 @@ func TestWaylandFullscreenE2E(t *testing.T) {
 		t.Fatal("SetFullscreen вернул false: запрос должен быть отправлен")
 	}
 	// Любой исход (согласие или отказ) заканчивается уведомлением.
-	if !waitFor(func() bool { mu.Lock(); defer mu.Unlock(); return len(events) > 0 }) {
+	if !fsWaitFor(func() bool { mu.Lock(); defer mu.Unlock(); return len(events) > 0 }) {
 		t.Skip("композитор не ответил на set_fullscreen configure'ом")
 	}
 	mu.Lock()
@@ -47,7 +47,7 @@ func TestWaylandFullscreenE2E(t *testing.T) {
 	t.Logf("композитор %s set_fullscreen; IsFullscreen=%v", map[bool]string{true: "принял", false: "отклонил"}[first], w.IsFullscreen())
 	if first {
 		w.SetFullscreen(false)
-		if !waitFor(func() bool { return !w.IsFullscreen() }) {
+		if !fsWaitFor(func() bool { return !w.IsFullscreen() }) {
 			t.Error("после unset_fullscreen окно осталось в полном экране")
 		}
 	}
