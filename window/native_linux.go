@@ -335,16 +335,7 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.posCached = true
 	w.posMu.Unlock()
 
-	eventMask := uint32(
-		0x00000001 | // KeyPress
-			0x00000002 | // KeyRelease
-			0x00000004 | // ButtonPress
-			0x00000008 | // ButtonRelease
-			0x00000020 | // LeaveWindow — снять наведение (pointerleave.go)
-			0x00000040 | // PointerMotion
-			0x00008000 | // ExposureMask
-			0x00020000 | // StructureNotifyMask (resize/close)
-			0x00400000) // PropertyChange — PropertyNotify по _NET_WM_STATE (полный экран, разворачивание)
+	eventMask := x11TopLevelEventMask
 
 	values := []uint32{
 		w.screen.BlackPixel, // background
@@ -1657,3 +1648,24 @@ func (w *X11Window) x11NetWMStateAdd(prop uint32) {
 	copy(sendBuf[12:], buf)
 	w.x11Send(sendBuf)
 }
+
+// x11TopLevelEventMask — события, которые слушает окно верхнего уровня.
+//
+// FocusChange (1<<21) долго отсутствовал: на его месте стоял 0x00400000 с
+// подписью «FocusChangeMask», а это PropertyChange (1<<22). FocusIn/FocusOut
+// поэтому не приходили вовсе — SetOnActivate на X11 молчал, а таблица
+// нажатых клавиш для KeyEvent.Repeat не сбрасывалась при уходе фокуса, и
+// клавиша, отпущенная в чужом окне, при следующем нажатии считалась бы
+// повтором. PropertyChange нужен и сам: _NET_WM_STATE (полный экран,
+// разворачивание) читается по PropertyNotify.
+const x11TopLevelEventMask = uint32(
+	0x00000001 | // KeyPress
+		0x00000002 | // KeyRelease
+		0x00000004 | // ButtonPress
+		0x00000008 | // ButtonRelease
+		0x00000020 | // LeaveWindow — снять наведение (pointerleave.go)
+		0x00000040 | // PointerMotion
+		0x00008000 | // Exposure
+		0x00020000 | // StructureNotify (resize/close)
+		0x00200000 | // FocusChange — FocusIn/FocusOut
+		0x00400000) // PropertyChange — PropertyNotify по _NET_WM_STATE
