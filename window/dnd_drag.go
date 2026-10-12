@@ -1,10 +1,14 @@
 package window
 
 import (
+	"image"
+	"image/draw"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	xdraw "golang.org/x/image/draw"
 )
 
 // dnd_drag.go — перетаскивание файлов, общая часть для всех бэкендов (v3.34):
@@ -85,6 +89,19 @@ type dragTargetEvents interface {
 type fileDragSource interface {
 	BeginDragFiles(paths []string, effect DragEffect, done func(effect DragEffect)) bool
 }
+
+// fileDragImageSource — необязательная возможность бэкенда показать значок
+// перетаскивания (fileDragSource + картинка). img — премультиплицированный
+// RGBA с началом в (0,0) и размером не больше dragImageMaxSide, hotspot —
+// точка картинки под курсором. Остальное — как у BeginDragFiles.
+type fileDragImageSource interface {
+	BeginDragFilesImage(paths []string, effect DragEffect, img *image.RGBA, hotspot image.Point, done func(effect DragEffect)) bool
+}
+
+// dragImageMaxSide — наибольшая сторона значка перетаскивания в пикселях.
+// Больше нельзя: оболочка Windows обрезает картинку, а компоновщик рисует
+// значок поверх всего экрана. Большую картинку окно уменьшает само.
+const dragImageMaxSide = 512
 
 // dragAnswerTimeout — сколько бэкенд ждёт ответа приложения на «принимается ли
 // сброс здесь»: ответ считается на горутине движка, а источнику (X11, Win32)
@@ -168,6 +185,41 @@ func (win *Window) SetOnDragFinished(fn func(effect DragEffect)) {
 // X11: XDND-источник (захват указателя, XdndEnter/Position/Drop);
 // Wayland: wl_data_device.start_drag с источником text/uri-list.
 func (win *Window) BeginDragFiles(paths []string, effect DragEffect) bool {
+	return win.beginDragFiles(paths, effect, nil, image.Point{})
+}
+
+// BeginDragFilesImage — BeginDragFiles со значком: img показывается рядом с
+// курсором, пока идёт перетаскивание, hotspot — точка img под курсором
+// (относительно её левого верхнего угла; за границы картинки не выходит).
+// Размер img — в пикселях экрана (масштаб окна не применяется); картинка с
+// стороной больше 512 пикселей уменьшается, прозрачность сохраняется. nil —
+// без значка (как BeginDragFiles).
+//
+// Win32: IDragSourceHelper.InitializeFromBitmap, значок рисует оболочка —
+// и над чужими окнами, и над этим же (приёмник окна подключён к
+// IDropTargetHelper). Wayland: поверхность-значок в wl_data_device.start_drag
+// (ARGB8888 из wl_shm). X11: XDND значка не определяет, а рисовать
+// окно-призрак под курсором без композитора нечем — перетаскивание
+// начинается без значка (DragImageSupported() == false), курсор остаётся
+// курсором окна.
+//
+// Возврат и SetOnDragFinished — как у BeginDragFiles.
+func (win *Window) BeginDragFilesImage(paths []string, effect DragEffect, img image.Image, hotspot image.Point) bool {
+	return win.beginDragFiles(paths, effect, img, hotspot)
+}
+
+// DragImageSupported сообщает, нарисует ли бэкенд окна значок, заданный в
+// BeginDragFilesImage. false — перетаскивание начнётся, но без значка (X11,
+// macOS); приложение может показать свою подсказку. До Run — false.
+func (win *Window) DragImageSupported() bool {
+	if ds, ok := win.native.(interface{ dragImageSupported() bool }); ok {
+		return ds.dragImageSupported()
+	}
+	_, ok := win.native.(fileDragImageSource)
+	return ok
+}
+
+func (win *Window) beginDragFiles(paths []string, effect DragEffect, img image.Image, hotspot image.Point) bool {
 	src, ok := win.native.(fileDragSource)
 	if !ok {
 		return false
@@ -177,7 +229,7 @@ func (win *Window) BeginDragFiles(paths []string, effect DragEffect) bool {
 	if len(paths) == 0 || effect == 0 {
 		return false
 	}
-	return src.BeginDragFiles(paths, effect, func(res DragEffect) {
+	done := func(res DragEffect) {
 		win.post(func() {
 			win.drag.mu.Lock()
 			fn := win.drag.finished
@@ -186,7 +238,44 @@ func (win *Window) BeginDragFiles(paths []string, effect DragEffect) bool {
 				fn(res & dragEffectAll)
 			}
 		})
-	})
+	}
+	if is, ok := src.(fileDragImageSource); ok && img != nil {
+		if rgba, hot, ok := prepareDragImage(img, hotspot); ok {
+			return is.BeginDragFilesImage(paths, effect, rgba, hot, done)
+		}
+	}
+	return src.BeginDragFiles(paths, effect, done)
+}
+
+// prepareDragImage приводит значок к виду, который ждут бэкенды: RGBA
+// (премультиплицированный) с началом в (0,0), сторона не больше
+// dragImageMaxSide (большая уменьшается с сохранением пропорций, точка
+// захвата пересчитывается), hotspot внутри картинки. ok=false — картинки нет
+// (пустая).
+func prepareDragImage(img image.Image, hotspot image.Point) (*image.RGBA, image.Point, bool) {
+	if img == nil {
+		return nil, image.Point{}, false
+	}
+	b := img.Bounds()
+	if b.Empty() {
+		return nil, image.Point{}, false
+	}
+	w, h := b.Dx(), b.Dy()
+	tw, th := w, h
+	if m := max(w, h); m > dragImageMaxSide {
+		tw = max(w*dragImageMaxSide/m, 1)
+		th = max(h*dragImageMaxSide/m, 1)
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, tw, th))
+	if tw == w && th == h {
+		draw.Draw(dst, dst.Bounds(), img, b.Min, draw.Src)
+	} else {
+		xdraw.CatmullRom.Scale(dst, dst.Bounds(), img, b, xdraw.Src, nil)
+		hotspot = image.Pt(hotspot.X*tw/w, hotspot.Y*th/h)
+	}
+	hotspot.X = min(max(hotspot.X, 0), tw-1)
+	hotspot.Y = min(max(hotspot.Y, 0), th-1)
+	return dst, hotspot, true
 }
 
 // normalizeDragPaths отбрасывает пустые пути и приводит остальные к

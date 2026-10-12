@@ -23,16 +23,26 @@ package window
 // ещё на лету, и по первому send итог не определить. На более старом
 // компоновщике BeginDragFiles возвращает false.
 //
-// Чего нет: значка перетаскиваемого (start_drag без icon — компоновщик
-// показывает обычный курсор); действие «ссылка» (в протоколе его нет:
-// ask — это «спросить пользователя», а не link); перетаскивание с попапа.
+// Значок (BeginDragFilesImage): третий аргумент start_drag — wl_surface с
+// буфером ARGB8888 из wl_shm. Левый верхний угол поверхности компоновщик
+// ставит в точку курсора, а attach(buffer, -hx, -hy) сдвигает его так, чтобы
+// под курсором оказалась точка захвата картинки. На HiDPI картинка (пиксели
+// экрана) показывается 1:1 через wl_surface.set_buffer_scale. Поверхность и
+// буфер живут до конца перетаскивания (dragFinish). Без значка (BeginDragFiles
+// или картинка не получилась) start_drag идёт с icon = NULL — обычный курсор.
+//
+// Чего нет: действие «ссылка» (в протоколе его нет: ask — это «спросить
+// пользователя», а не link); перетаскивание с попапа.
 
 import (
 	"encoding/binary"
+	"image"
 	"io"
 	"os"
 	"strings"
 	"sync"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -57,6 +67,9 @@ type wlDragSource struct {
 	done     func(DragEffect)
 	action   DragEffect // действие, о котором сообщил компоновщик
 	dropped  bool       // кнопку отпустили над приёмником (dnd_drop_performed)
+
+	// Значок: поверхность и буфер (0 — значка нет). Освобождаются в dragFinish.
+	iconSurf, iconBuf uint32
 }
 
 // is сообщает, наш ли это wl_data_source (для разбора событий).
@@ -94,6 +107,21 @@ func wlEffectFromAction(a uint32) DragEffect {
 // wl_data_device.start_drag. Нужны: wl_data_device, зажатая кнопка мыши и её
 // serial; фокус указателя — на самом окне, не на попапе.
 func (w *WaylandWindow) BeginDragFiles(paths []string, effect DragEffect, done func(DragEffect)) bool {
+	return w.beginDrag(paths, effect, nil, image.Point{}, done)
+}
+
+// BeginDragFilesImage — BeginDragFiles со значком (fileDragImageSource).
+func (w *WaylandWindow) BeginDragFilesImage(paths []string, effect DragEffect, img *image.RGBA, hotspot image.Point, done func(DragEffect)) bool {
+	return w.beginDrag(paths, effect, img, hotspot, done)
+}
+
+// dragImageSupported — у компоновщика есть всё для поверхности-значка.
+func (w *WaylandWindow) dragImageSupported() bool {
+	return w.dataDevMgrID != 0 && w.dataDeviceID != 0 && w.dataDevVersion >= 3 &&
+		w.shmID != 0 && w.compositorID != 0
+}
+
+func (w *WaylandWindow) beginDrag(paths []string, effect DragEffect, img *image.RGBA, hot image.Point, done func(DragEffect)) bool {
 	actions := wlActionsFor(effect)
 	serial := w.ptrButtonSerial.Load()
 	if len(paths) == 0 || actions == 0 || done == nil {
@@ -117,9 +145,19 @@ func (w *WaylandWindow) BeginDragFiles(paths []string, effect DragEffect, done f
 	w.send(newWlMsg(w.dataDevMgrID, wlDataDevMgrCreateDataSource).putUint(id), -1)
 	w.send(newWlMsg(id, wlDataSourceOffer).putString(mimeTextUriList), -1)
 	w.send(newWlMsg(id, wlDataSourceSetActions).putUint(actions), -1)
-	// start_drag(source, origin, icon=nil, serial)
+
+	// Значок: поверхность с буфером; без него (или если не вышло) — NULL.
+	var icon wlDragIcon
+	if img != nil && w.dragImageSupported() {
+		icon = w.dragIconCreate(img, hot)
+	}
+	d.mu.Lock()
+	d.iconSurf, d.iconBuf = icon.surf, icon.buf
+	d.mu.Unlock()
+	// start_drag(source, origin, icon, serial)
 	w.send(newWlMsg(w.dataDeviceID, wlDataDeviceStartDrag).
-		putUint(id).putUint(w.surfaceID).putUint(0).putUint(serial), -1)
+		putUint(id).putUint(w.surfaceID).putUint(icon.surf).putUint(serial), -1)
+	w.dragIconShow(icon)
 	// Нажатие ушло компоновщику, отпускания мы не получим (как после
 	// xdg_toplevel.move): снимаем кнопки в движке сами.
 	w.releaseHeldButtons()
@@ -191,10 +229,115 @@ func (w *WaylandWindow) dragFinish(src uint32, effect DragEffect) {
 		return
 	}
 	done := d.done
+	iconSurf, iconBuf := d.iconSurf, d.iconBuf
 	d.id, d.body, d.done = 0, "", nil
+	d.iconSurf, d.iconBuf = 0, 0
 	d.mu.Unlock()
 	w.send(newWlMsg(src, wlDataSourceDestroy), -1)
+	w.dragIconDestroy(iconSurf, iconBuf)
 	if done != nil {
 		done(effect)
+	}
+}
+
+// ─── Значок перетаскивания ───────────────────────────────────────────────────
+
+// wlDragIcon — поверхность значка, ещё не показанная (attach/commit после
+// start_drag: роль «значок перетаскивания» поверхность получает от него).
+type wlDragIcon struct {
+	surf, buf uint32
+	scale     int // целый масштаб буфера (1 — без set_buffer_scale)
+	w, h      int // размер буфера в пикселях
+	hot       image.Point
+}
+
+// dragIconCreate готовит поверхность значка: shm-буфер с картинкой и пустая
+// wl_surface. Любая неудача — нулевой wlDragIcon (перетаскивание пойдёт без
+// значка). Память пула отдаётся компоновщику сразу и здесь же освобождается:
+// пул уничтожается после create_buffer, а отображение живёт, пока жив буфер.
+func (w *WaylandWindow) dragIconCreate(img *image.RGBA, hot image.Point) wlDragIcon {
+	b := img.Bounds()
+	pw, ph := b.Dx(), b.Dy()
+	if pw <= 0 || ph <= 0 || w.shmID == 0 || w.compositorID == 0 {
+		return wlDragIcon{}
+	}
+	stride := pw * 4
+	size := stride * ph
+	fd, err := unix.MemfdCreate("headless-gui-dragicon", unix.MFD_CLOEXEC)
+	if err != nil {
+		return wlDragIcon{}
+	}
+	if err := unix.Ftruncate(fd, int64(size)); err != nil {
+		unix.Close(fd)
+		return wlDragIcon{}
+	}
+	data, err := unix.Mmap(fd, 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		unix.Close(fd)
+		return wlDragIcon{}
+	}
+	wlIconBGRA(data, stride, img)
+
+	poolID := w.newID()
+	w.send(newWlMsg(w.shmID, wlShmCreatePool).putUint(poolID).putInt(int32(size)), fd)
+	bufID := w.newID()
+	w.send(newWlMsg(poolID, wlShmPoolCreateBuffer).
+		putUint(bufID).putInt(0).
+		putInt(int32(pw)).putInt(int32(ph)).putInt(int32(stride)).
+		putUint(wlShmFormatARGB8888), -1)
+	w.send(newWlMsg(poolID, wlShmPoolDestroy), -1)
+	unix.Munmap(data)
+	unix.Close(fd)
+
+	surfID := w.newID()
+	w.send(newWlMsg(w.compositorID, wlCompositorCreateSurface).putUint(surfID), -1)
+	scale := 1
+	if k := w.scaleFactor(); k >= 2 && k == float64(int(k)) && w.gCompositorVer >= 3 {
+		scale = int(k)
+		w.send(newWlMsg(surfID, wlSurfaceSetBufferScale).putInt(int32(scale)), -1)
+	}
+	return wlDragIcon{surf: surfID, buf: bufID, scale: scale, w: pw, h: ph, hot: hot}
+}
+
+// wlIconBGRA раскладывает премультиплицированный RGBA в ARGB8888 wl_shm
+// (в памяти B, G, R, A — тоже премультиплицированный).
+func wlIconBGRA(dst []byte, dstStride int, img *image.RGBA) {
+	b := img.Bounds()
+	for y := 0; y < b.Dy(); y++ {
+		src := img.Pix[img.PixOffset(b.Min.X, b.Min.Y+y):]
+		row := dst[y*dstStride : y*dstStride+b.Dx()*4]
+		for x := 0; x < b.Dx(); x++ {
+			row[x*4+0], row[x*4+1], row[x*4+2], row[x*4+3] = src[x*4+2], src[x*4+1], src[x*4+0], src[x*4+3]
+		}
+	}
+}
+
+// dragIconShow показывает значок: attach с отрицательным смещением на
+// точку захвата, damage и commit. Зовётся после start_drag.
+func (w *WaylandWindow) dragIconShow(ic wlDragIcon) {
+	if ic.surf == 0 {
+		return
+	}
+	// Компоновщик ставит левый верхний угол в курсор; сдвиг на -hotspot (в
+	// единицах поверхности) подводит под курсор точку захвата.
+	ax, ay := -ic.hot.X/ic.scale, -ic.hot.Y/ic.scale
+	w.send(newWlMsg(ic.surf, wlSurfaceAttach).putUint(ic.buf).putInt(int32(ax)).putInt(int32(ay)), -1)
+	if ic.scale > 1 || w.gCompositorVer >= wlCompositorVersionBufferDamage {
+		w.send(newWlMsg(ic.surf, wlSurfaceDamageBuffer).
+			putInt(0).putInt(0).putInt(int32(ic.w)).putInt(int32(ic.h)), -1)
+	} else {
+		w.send(newWlMsg(ic.surf, wlSurfaceDamage).
+			putInt(0).putInt(0).putInt(int32(ic.w)).putInt(int32(ic.h)), -1)
+	}
+	w.send(newWlMsg(ic.surf, wlSurfaceCommit), -1)
+}
+
+// dragIconDestroy освобождает поверхность и буфер значка.
+func (w *WaylandWindow) dragIconDestroy(surf, buf uint32) {
+	if surf != 0 {
+		w.send(newWlMsg(surf, wlSurfaceDestroy), -1)
+	}
+	if buf != 0 {
+		w.send(newWlMsg(buf, wlBufferDestroy), -1)
 	}
 }

@@ -24,11 +24,21 @@ package window
 // Адрес объекта отдаётся ОС числом, а по числу объект находится в реестре —
 // никаких обратных преобразований uintptr в указатель на Go-память.
 //
+// Значок перетаскивания (BeginDragFilesImage): оболочка рисует его сама, если
+// объект IDataObject хранит «DragImageBits» и приёмник вызывает
+// IDropTargetHelper. Первое делает IDragSourceHelper.InitializeFromBitmap —
+// он кладёт картинку и служебные форматы в наш объект через SetData (поэтому
+// SetData/GetData хранят произвольные блоки HGLOBAL), второе — приёмник окна
+// (dropTargetHelper): так значок виден и над самим окном, не только над
+// чужими программами.
+//
 // Ограничение: POINTL приходит в IDropTarget по значению, и разбор «одним
 // машинным словом» верен для 64-разрядных Windows (amd64, arm64) — на них
 // пакет и собирается.
 
 import (
+	"image"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -47,6 +57,8 @@ var (
 	procRevokeDragDrop   = ole32.NewProc("RevokeDragDrop")
 	procDoDragDrop       = ole32.NewProc("DoDragDrop")
 	procReleaseStgMedium = ole32.NewProc("ReleaseStgMedium")
+	procCoCreateInstance = ole32.NewProc("CoCreateInstance")
+	procCreateStreamOnHG = ole32.NewProc("CreateStreamOnHGlobal")
 
 	procSHCreateStdEnumFmtEtc = shell32.NewProc("SHCreateStdEnumFmtEtc")
 
@@ -55,12 +67,14 @@ var (
 	procGlobalLock    = kernel32dnd.NewProc("GlobalLock")
 	procGlobalUnlock  = kernel32dnd.NewProc("GlobalUnlock")
 	procGlobalSize    = kernel32dnd.NewProc("GlobalSize")
+	procGlobalFree    = kernel32dnd.NewProc("GlobalFree")
 	procGetAsyncKeyst = user32.NewProc("GetAsyncKeyState")
 )
 
 const (
 	cfHDropFormat   = 15 // CF_HDROP
 	tymedHGlobal    = 1  // TYMED_HGLOBAL
+	tymedIStream    = 4  // TYMED_ISTREAM
 	dvAspectContent = 1  // DVASPECT_CONTENT
 	dataDirGet      = 1  // DATADIR_GET
 	gmemMoveableDnd = 0x0002
@@ -71,6 +85,8 @@ const (
 	dvEAspect       = uintptr(0x8004006B) // DV_E_DVASPECT
 	oleEAdviseNoSup = uintptr(0x80040003) // OLE_E_ADVISENOTSUPPORTED
 	dataSSameFmt    = uintptr(0x00040130) // DATA_S_SAMEFORMATETC
+
+	clsctxInprocServer = 1 // CLSCTX_INPROC_SERVER
 
 	smSwapButton = 23 // SM_SWAPBUTTON
 	vkLButton    = 0x01
@@ -83,6 +99,11 @@ var (
 	iidIDropTarget = comGUID{0x00000122, 0x0000, 0x0000, [8]byte{0xC0, 0, 0, 0, 0, 0, 0, 0x46}}
 	iidIDropSource = comGUID{0x00000121, 0x0000, 0x0000, [8]byte{0xC0, 0, 0, 0, 0, 0, 0, 0x46}}
 	iidIDataObject = comGUID{0x0000010E, 0x0000, 0x0000, [8]byte{0xC0, 0, 0, 0, 0, 0, 0, 0x46}}
+
+	// Помощники оболочки для значка перетаскивания.
+	clsidDragDropHelper  = comGUID{0x4657278A, 0x411B, 0x11D2, [8]byte{0x83, 0x9A, 0x00, 0xC0, 0x4F, 0xD9, 0x18, 0xD0}}
+	iidIDragSourceHelper = comGUID{0xDE5BF786, 0x477A, 0x11D2, [8]byte{0x83, 0x9D, 0x00, 0xC0, 0x4F, 0xD9, 0x18, 0xD0}}
+	iidIDropTargetHelper = comGUID{0x4657278B, 0x411B, 0x11D2, [8]byte{0x83, 0x9A, 0x00, 0xC0, 0x4F, 0xD9, 0x18, 0xD0}}
 )
 
 // formatEtc — FORMATETC (32 байта на x64: поля раскладываются как в C).
@@ -134,9 +155,19 @@ func comInvoke(obj uintptr, slot int, args ...uintptr) uintptr {
 const (
 	slotUnkRelease = 2
 
+	slotStreamRead = 3 // ISequentialStream::Read
+	slotStreamSeek = 5 // IStream::Seek
+
 	slotDataGetData       = 3 // IDataObject::GetData
 	slotDataQueryGetData  = 5 // IDataObject::QueryGetData
 	slotDataEnumFormatEtc = 8 // IDataObject::EnumFormatEtc
+
+	slotDragSrcFromBitmap = 3 // IDragSourceHelper::InitializeFromBitmap
+
+	slotDropHelperEnter = 3 // IDropTargetHelper::DragEnter
+	slotDropHelperLeave = 4 // IDropTargetHelper::DragLeave
+	slotDropHelperOver  = 5 // IDropTargetHelper::DragOver
+	slotDropHelperDrop  = 6 // IDropTargetHelper::Drop
 )
 
 // ─── COM-объект ──────────────────────────────────────────────────────────────
@@ -158,12 +189,27 @@ type dndComObj struct {
 	// IDropTarget
 	win      *Win32Window
 	hasFiles bool // в текущем перетаскивании есть CF_HDROP
+	helperOn bool // IDropTargetHelper получил DragEnter и ждёт Leave/Drop
 
 	// IDataObject
 	hdrop []byte // готовый блок CF_HDROP
+	// extra — блоки, положенные в объект через SetData (формат → HGLOBAL-
+	// содержимое): помощник значка хранит в них картинку и служебные флаги.
+	// Защищён extraMu: SetData и GetData приходят и от оболочки, и из потока
+	// модального цикла.
+	extraMu sync.Mutex
+	extra   map[uint16]dndBlock
 
 	// IDropSource
 	mask uint32 // MK_*-кнопка(и), с которой начали перетаскивание
+}
+
+// dndBlock — блок, положенный в объект данных через SetData: содержимое и среда
+// (HGLOBAL или IStream), в которой его положили. Отдаём в той же среде, а на
+// просьбу о другой — преобразуем: оба вида хранят одни и те же байты.
+type dndBlock struct {
+	data  []byte
+	tymed uint32
 }
 
 var (
@@ -299,6 +345,10 @@ func dndInitVTables() {
 // dropTargetState — состояние регистрации окна: объект и признак успеха.
 type dropTargetState struct {
 	obj *dndComObj
+	// helper — IDropTargetHelper оболочки (0 — не создан или недоступен):
+	// рисует значок перетаскивания над окном. Создаётся при первом входе.
+	helper     uintptr
+	helperFail bool
 }
 
 // oleInit поднимает OLE на текущем потоке (STA). RegisterDragDrop и
@@ -338,6 +388,10 @@ func (w *Win32Window) revokeDropTarget() {
 	}
 	w.dropTarget = nil
 	procRevokeDragDrop.Call(uintptr(w.hwnd))
+	if st.helper != 0 {
+		comInvoke(st.helper, slotUnkRelease)
+		st.helper = 0
+	}
 	dndRelease(st.obj.ptr())
 }
 
@@ -440,6 +494,7 @@ func dndTargetDragEnter(this, dataObj, keys, pt, pdwEffect uintptr) uintptr {
 	}
 	o.hasFiles = dataObjectHasHDrop(dataObj)
 	dndTargetAnswer(o, true, uint32(keys), pt, pdwEffect)
+	o.helperEnter(dataObj, pt, pdwEffect)
 	return sOK
 }
 
@@ -449,6 +504,7 @@ func dndTargetDragOver(this, keys, pt, pdwEffect uintptr) uintptr {
 		return eFail
 	}
 	dndTargetAnswer(o, false, uint32(keys), pt, pdwEffect)
+	o.helperCall(slotDropHelperOver, pt, pdwEffect)
 	return sOK
 }
 
@@ -461,6 +517,7 @@ func dndTargetDragLeave(this uintptr) uintptr {
 		o.win.onDragLeave()
 	}
 	o.hasFiles = false
+	o.helperLeave()
 	return sOK
 }
 
@@ -475,6 +532,7 @@ func dndTargetDrop(this, dataObj, keys, pt, pdwEffect uintptr) uintptr {
 	if pdwEffect != 0 {
 		eff = ptrAt[uint32](pdwEffect)
 	}
+	o.helperDrop(dataObj, pt, pdwEffect)
 	paths := dataObjectFiles(dataObj)
 	if w == nil || len(paths) == 0 {
 		if eff != nil {
@@ -516,12 +574,31 @@ func dndDataGetData(this, pformatetc, pmedium uintptr) uintptr {
 	if o == nil || pformatetc == 0 || pmedium == 0 {
 		return eInvalidArg
 	}
-	if hr := o.checkFormat(ptrAt[formatEtc](pformatetc)); hr != sOK {
+	fe := ptrAt[formatEtc](pformatetc)
+	blob, out := o.hdrop, uint32(tymedHGlobal)
+	if fe.cfFormat != cfHDropFormat {
+		// Блок, положенный через SetData (значок перетаскивания).
+		blk, tymed, hr := o.checkExtra(fe)
+		if hr != sOK {
+			return hr
+		}
+		blob, out = blk.data, tymed
+	} else if hr := o.checkFormat(fe); hr != sOK {
 		return hr
 	}
-	h := newGlobalCopy(o.hdrop)
+	h := newGlobalCopy(blob)
 	if h == 0 {
 		return eFail
+	}
+	if out == tymedIStream {
+		// Поток владеет HGLOBAL (fDeleteOnRelease) и освободит его сам.
+		var stm uintptr
+		if hr, _, _ := procCreateStreamOnHG.Call(h, 1, uintptr(unsafe.Pointer(&stm))); int32(hr) < 0 || stm == 0 {
+			procGlobalFree.Call(h)
+			return eFail
+		}
+		*ptrAt[stgMedium](pmedium) = stgMedium{tymed: tymedIStream, data: stm}
+		return sOK
 	}
 	*ptrAt[stgMedium](pmedium) = stgMedium{tymed: tymedHGlobal, data: h}
 	return sOK
@@ -534,7 +611,93 @@ func dndDataQueryGetData(this, pformatetc uintptr) uintptr {
 	if o == nil || pformatetc == 0 {
 		return eInvalidArg
 	}
-	return o.checkFormat(ptrAt[formatEtc](pformatetc))
+	fe := ptrAt[formatEtc](pformatetc)
+	if fe.cfFormat != cfHDropFormat {
+		_, _, hr := o.checkExtra(fe)
+		return hr
+	}
+	return o.checkFormat(fe)
+}
+
+// checkExtra сверяет запрошенный формат с блоками, положенными через SetData,
+// и возвращает найденный блок и среду, в которой его отдать: та, в которой
+// положили, если запрошена она, иначе другая из запрошенных (HGLOBAL или IStream).
+func (o *dndComObj) checkExtra(fe *formatEtc) (dndBlock, uint32, uintptr) {
+	o.extraMu.Lock()
+	blk, ok := o.extra[fe.cfFormat]
+	o.extraMu.Unlock()
+	want := fe.tymed & (tymedHGlobal | tymedIStream)
+	switch {
+	case !ok:
+		return dndBlock{}, 0, dvEFormatEtc
+	case fe.dwAspect != dvAspectContent:
+		return dndBlock{}, 0, dvEAspect
+	case want == 0:
+		return dndBlock{}, 0, dvETymed
+	case want&blk.tymed != 0:
+		return blk, blk.tymed, sOK
+	case want&tymedHGlobal != 0:
+		return blk, tymedHGlobal, sOK
+	}
+	return blk, tymedIStream, sOK
+}
+
+// putExtra запоминает блок формата cf (перезаписывает прежний).
+func (o *dndComObj) putExtra(cf uint16, blk dndBlock) {
+	o.extraMu.Lock()
+	if o.extra == nil {
+		o.extra = map[uint16]dndBlock{}
+	}
+	o.extra[cf] = blk
+	o.extraMu.Unlock()
+}
+
+// extraFormats — форматы блоков SetData по возрастанию (для перечислителя).
+func (o *dndComObj) extraFormats() []uint16 {
+	o.extraMu.Lock()
+	defer o.extraMu.Unlock()
+	out := make([]uint16, 0, len(o.extra))
+	for cf := range o.extra {
+		out = append(out, cf)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// globalBytes копирует содержимое HGLOBAL (nil — не удалось).
+func globalBytes(h uintptr) []byte {
+	size, _, _ := procGlobalSize.Call(h)
+	if size == 0 || size > 1<<26 {
+		return nil
+	}
+	p, _, _ := procGlobalLock.Call(h)
+	if p == 0 {
+		return nil
+	}
+	defer procGlobalUnlock.Call(h)
+	out := make([]byte, size)
+	copy(out, unsafe.Slice(ptrAt[byte](p), int(size)))
+	return out
+}
+
+// streamBytes читает IStream целиком с начала (nil — не вышло или слишком
+// большой).
+func streamBytes(stm uintptr) []byte {
+	comInvoke(stm, slotStreamSeek, 0, 0, 0) // в начало
+	var out []byte
+	buf := make([]byte, 64<<10)
+	for len(out) <= 1<<26 {
+		var n uint32
+		hr := comInvoke(stm, slotStreamRead, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), uintptr(unsafe.Pointer(&n)))
+		if int32(hr) < 0 {
+			return nil
+		}
+		out = append(out, buf[:n]...)
+		if n == 0 {
+			break
+		}
+	}
+	return out
 }
 
 // checkFormat сверяет запрошенный формат с тем, что объект умеет отдать:
@@ -559,7 +722,35 @@ func dndDataGetCanonical(this, pformatetcIn, pformatetcOut uintptr) uintptr {
 	return dataSSameFmt
 }
 
-func dndDataSetData(this, pformatetc, pmedium, fRelease uintptr) uintptr { return eNotImpl }
+// dndDataSetData принимает блоки (HGLOBAL и IStream) от помощника значка
+// перетаскивания (картинка «DragImageBits» и служебные флаги) и отдаёт их
+// обратно в GetData. Остальное — E_NOTIMPL, как раньше; формат CF_HDROP
+// перезаписать нельзя.
+func dndDataSetData(this, pformatetc, pmedium, fRelease uintptr) uintptr {
+	o := dndLookup(this)
+	if o == nil || o.kind != dndKindData || pformatetc == 0 || pmedium == 0 {
+		return eNotImpl
+	}
+	fe := ptrAt[formatEtc](pformatetc)
+	st := ptrAt[stgMedium](pmedium)
+	if fe.cfFormat == cfHDropFormat || st.data == 0 || (st.tymed != tymedHGlobal && st.tymed != tymedIStream) {
+		return eNotImpl
+	}
+	var blob []byte
+	if st.tymed == tymedHGlobal {
+		blob = globalBytes(st.data)
+	} else {
+		blob = streamBytes(st.data)
+	}
+	if blob == nil {
+		return eFail
+	}
+	o.putExtra(fe.cfFormat, dndBlock{data: blob, tymed: st.tymed})
+	if fRelease != 0 {
+		procReleaseStgMedium.Call(pmedium) // хозяин среды — мы
+	}
+	return sOK
+}
 
 // dndDataEnumFormatEtc отдаёт стандартный перечислитель оболочки с единственным
 // форматом CF_HDROP — свой IEnumFORMATETC писать незачем.
@@ -571,8 +762,15 @@ func dndDataEnumFormatEtc(this, direction, ppenum uintptr) uintptr {
 	if direction != dataDirGet {
 		return eNotImpl
 	}
-	fe := hdropFormat()
-	hr, _, _ := procSHCreateStdEnumFmtEtc.Call(1, uintptr(unsafe.Pointer(&fe)), ppenum)
+	// CF_HDROP и блоки, положенные через SetData.
+	o := dndLookup(this)
+	fes := []formatEtc{hdropFormat()}
+	if o != nil {
+		for _, cf := range o.extraFormats() {
+			fes = append(fes, formatEtc{cfFormat: cf, dwAspect: dvAspectContent, lindex: -1, tymed: tymedHGlobal | tymedIStream})
+		}
+	}
+	hr, _, _ := procSHCreateStdEnumFmtEtc.Call(uintptr(len(fes)), uintptr(unsafe.Pointer(&fes[0])), ppenum)
 	return hr
 }
 
@@ -629,6 +827,20 @@ func physicalButtons() (mk uint32, held []int) {
 // BeginDragFiles начинает перетаскивание файлов (fileDragSource): DoDragDrop
 // на потоке окна. Кнопка мыши должна быть зажата прямо сейчас.
 func (w *Win32Window) BeginDragFiles(paths []string, effect DragEffect, done func(DragEffect)) bool {
+	return w.beginDrag(paths, effect, nil, image.Point{}, done)
+}
+
+// BeginDragFilesImage — BeginDragFiles со значком (fileDragImageSource): img
+// уходит оболочке через IDragSourceHelper. Без помощника (его нет в системе)
+// перетаскивание идёт без значка.
+func (w *Win32Window) BeginDragFilesImage(paths []string, effect DragEffect, img *image.RGBA, hotspot image.Point, done func(DragEffect)) bool {
+	return w.beginDrag(paths, effect, img, hotspot, done)
+}
+
+// dragImageSupported — значок рисует оболочка, когда поднят OLE.
+func (w *Win32Window) dragImageSupported() bool { return w.oleReady }
+
+func (w *Win32Window) beginDrag(paths []string, effect DragEffect, img *image.RGBA, hot image.Point, done func(DragEffect)) bool {
 	if w.hwnd == 0 || !w.oleReady || len(paths) == 0 || effect&dragEffectAll == 0 {
 		return false
 	}
@@ -638,7 +850,7 @@ func (w *Win32Window) BeginDragFiles(paths []string, effect DragEffect, done fun
 	}
 	block := buildHDrop(paths)
 	w.InvokeOnUIThread(func() {
-		res := runDragDrop(block, effect, mask)
+		res := runDragDropImage(block, effect, mask, img, hot)
 		// Модальный цикл ОС забрал отпускание кнопки: сообщаем движку сами.
 		if w.onMouseButton != nil {
 			var pt point
@@ -659,9 +871,17 @@ func (w *Win32Window) BeginDragFiles(paths []string, effect DragEffect, done fun
 // выбранное приёмником действие (0 — отмена или ошибка). Блокирует до конца
 // перетаскивания; только на потоке с OLE.
 func runDragDrop(block []byte, effect DragEffect, mask uint32) DragEffect {
+	return runDragDropImage(block, effect, mask, nil, image.Point{})
+}
+
+// runDragDropImage — runDragDrop со значком (img == nil — без него).
+func runDragDropImage(block []byte, effect DragEffect, mask uint32, img *image.RGBA, hot image.Point) DragEffect {
 	dndInitVTables()
 	data := newDndObj(dndKindData, dndVTData)
 	data.hdrop = block
+	if img != nil {
+		initDragImage(data.ptr(), img, hot)
+	}
 	src := newDndObj(dndKindSource, dndVTSource)
 	src.mask = mask
 	defer dndRelease(data.ptr())

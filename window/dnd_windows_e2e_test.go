@@ -3,6 +3,7 @@
 package window
 
 import (
+	"image"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -51,7 +52,13 @@ func sendMouse(flags uint32) {
 
 func moveCursor(x, y int) { procSetCursorPos.Call(uintptr(x), uintptr(y)) }
 
-func TestDndE2E_DragBetweenWindows(t *testing.T) {
+func TestDndE2E_DragBetweenWindows(t *testing.T) { dndE2EDrag(t, false) }
+
+// То же перетаскивание со значком (BeginDragFilesImage): оболочка принимает
+// картинку, приёмник окна подключён к IDropTargetHelper, сброс проходит так же.
+func TestDndE2E_DragWithImage(t *testing.T) { dndE2EDrag(t, true) }
+
+func dndE2EDrag(t *testing.T, withImage bool) {
 	if os.Getenv("HEADLESS_GUI_DND_E2E") != "1" {
 		t.Skip("включается HEADLESS_GUI_DND_E2E=1: двигает курсор пользователя")
 	}
@@ -130,9 +137,20 @@ func TestDndE2E_DragBetweenWindows(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	sendMouse(miLeftDown)
 	time.Sleep(100 * time.Millisecond)
-	if !a.BeginDragFiles(files, DragEffectCopy|DragEffectMove, func(e DragEffect) { finished <- e }) {
+	done := func(e DragEffect) { finished <- e }
+	began := false
+	if withImage {
+		img := image.NewRGBA(image.Rect(0, 0, 96, 64))
+		for i := 0; i < len(img.Pix); i += 4 {
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = 220, 90, 30, 200
+		}
+		began = a.BeginDragFilesImage(files, DragEffectCopy|DragEffectMove, img, image.Pt(8, 8), done)
+	} else {
+		began = a.BeginDragFiles(files, DragEffectCopy|DragEffectMove, done)
+	}
+	if !began {
 		sendMouse(miLeftUp)
-		t.Fatal("BeginDragFiles отказал при зажатой кнопке")
+		t.Fatal("перетаскивание не началось при зажатой кнопке")
 	}
 	time.Sleep(300 * time.Millisecond)
 	for i := 1; i <= 20; i++ {

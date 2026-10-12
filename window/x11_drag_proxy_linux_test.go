@@ -4,6 +4,7 @@ package window
 
 import (
 	"encoding/binary"
+	"image"
 	"testing"
 )
 
@@ -209,6 +210,26 @@ func TestX11_DragSource_MessagesViaProxy(t *testing.T) {
 	}
 	if f3.find(via(tAtomEnter, 60, 60)) == nil {
 		t.Error("Enter окну без посредника ушёл не ему самому")
+	}
+}
+
+// X11 значка не рисует: окно не объявляет fileDragImageSource, и Window честно
+// отвечает DragImageSupported() == false, а перетаскивание всё равно идёт.
+func TestX11_NoDragImage(t *testing.T) {
+	w, f := newX11DragWindow(t)
+	if _, ok := any(w).(fileDragImageSource); ok {
+		t.Fatal("X11Window объявил fileDragImageSource, хотя значок не рисует")
+	}
+	win := &Window{surface: surface{native: w, scale: 1}}
+	if win.DragImageSupported() {
+		t.Error("DragImageSupported true на X11")
+	}
+	w.btnDown.Store(1)
+	if !win.BeginDragFilesImage([]string{"/tmp/a"}, DragEffectCopy, image.NewRGBA(image.Rect(0, 0, 8, 8)), image.Pt(1, 1)) {
+		t.Fatal("BeginDragFilesImage на X11 не начал перетаскивание без значка")
+	}
+	if f.find(clientMsg(tAtomBegin, 1)) == nil {
+		t.Error("служебное сообщение насосу не отправлено")
 	}
 }
 
