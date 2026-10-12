@@ -333,6 +333,10 @@ type Win32Window struct {
 
 	maximized bool
 
+	// fs — полный экран (fullscreen_windows.go). Пока он включён, maximized
+	// хранит «было ли окно развёрнуто до него» — IsMaximized возвращает это же.
+	fs fullscreenWin32
+
 	// resizable — разрешён ли пользовательский resize за края окна
 	// (см. WM_NCHITTEST: у borderless-окна зоны рамки отдаём вручную).
 	resizable atomic.Bool
@@ -703,6 +707,14 @@ func (w *Win32Window) SetTitle(title string) {
 }
 
 func (w *Win32Window) SetSize(width, height int) {
+	if w.fs.on.Load() {
+		// Полноэкранное окно держит размер монитора. Заказанный размер
+		// достанется окну при выходе: в снимок его положения.
+		w.fs.mu.Lock()
+		w.fs.snap.Rect.Max = w.fs.snap.Rect.Min.Add(image.Pt(width, height))
+		w.fs.mu.Unlock()
+		return
+	}
 	w.width = width
 	w.height = height
 	if w.hwnd != 0 {
@@ -727,6 +739,13 @@ func (w *Win32Window) GetSize() (int, int) {
 }
 
 func (w *Win32Window) SetPosition(x, y int) {
+	if w.fs.on.Load() {
+		// То же, что в SetSize: позиция применится при выходе.
+		w.fs.mu.Lock()
+		w.fs.snap.Rect = image.Rectangle{Min: image.Pt(x, y), Max: image.Pt(x, y).Add(w.fs.snap.Rect.Size())}
+		w.fs.mu.Unlock()
+		return
+	}
 	if w.hwnd != 0 {
 		// SWP_NOACTIVATE обязателен: перемещение не должно активировать окно.
 		// Без него позиционирование окна-попапа (WS_EX_NOACTIVATE защищает
@@ -783,6 +802,14 @@ func (w *Win32Window) Minimize() {
 }
 
 func (w *Win32Window) Maximize() {
+	if w.fs.on.Load() {
+		// Развернуть полноэкранное окно значило бы вернуть таскбар. Просьба
+		// запоминается: после выхода окно будет развёрнуто.
+		w.fs.mu.Lock()
+		w.fs.snap.Maximized, w.maximized = true, true
+		w.fs.mu.Unlock()
+		return
+	}
 	if w.hwnd != 0 {
 		procShowWindow.Call(uintptr(w.hwnd), uintptr(swMaximize))
 		w.maximized = true
@@ -790,6 +817,12 @@ func (w *Win32Window) Maximize() {
 }
 
 func (w *Win32Window) Restore() {
+	if w.fs.on.Load() {
+		w.fs.mu.Lock()
+		w.fs.snap.Maximized, w.maximized = false, false
+		w.fs.mu.Unlock()
+		return
+	}
 	if w.hwnd != 0 {
 		procShowWindow.Call(uintptr(w.hwnd), uintptr(swRestore))
 		w.maximized = false
@@ -797,6 +830,13 @@ func (w *Win32Window) Restore() {
 }
 
 func (w *Win32Window) IsMaximized() bool {
+	if w.fs.on.Load() {
+		// Полноэкранное окно системе не «развёрнуто» (IsZoomed ложно), а
+		// приложение спрашивает про прежнее значение.
+		w.fs.mu.Lock()
+		defer w.fs.mu.Unlock()
+		return w.fs.snap.Maximized
+	}
 	if w.hwnd != 0 {
 		ret, _, _ := procIsZoomed.Call(uintptr(w.hwnd))
 		w.maximized = ret != 0
@@ -1039,7 +1079,7 @@ func (w *Win32Window) applyCorners() {
 	if w.hwnd == 0 {
 		return
 	}
-	if w.cornerRadius <= 0 || w.maximized {
+	if w.cornerRadius <= 0 || w.maximized || w.fs.on.Load() {
 		// Прямые углы (или развёрнутое окно): DWM → не скруглять, регион снять.
 		w.setDwmCorner(false)
 		procSetWindowRgn.Call(uintptr(w.hwnd), 0, 1)
@@ -1221,8 +1261,11 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		if newW > 0 && newH > 0 {
 			w.width = newW
 			w.height = newH
-			// wparam: 2 = SIZE_MAXIMIZED, 0 = SIZE_RESTORED.
-			w.maximized = wparam == 2
+			// wparam: 2 = SIZE_MAXIMIZED, 0 = SIZE_RESTORED. Полноэкранное
+			// окно не меняет запомненное «было развёрнуто» (fullscreen_windows.go).
+			if !w.fs.on.Load() {
+				w.maximized = wparam == 2
+			}
 			w.applyCorners() // регион в координатах окна — пересоздаём под новый размер
 			if w.resizing.Load() {
 				// Интерактивный ресайз: немедленно закрашиваем НОВЫЙ размер
@@ -1287,7 +1330,11 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		// Окно перенесли на монитор с другим DPI. wparam: LOWORD = новый DPI;
 		// lparam → RECT с рекомендованным размером/позицией окна.
 		newDpi := wparam & 0xFFFF
-		if r := (*rect)(unsafe.Pointer(lparam)); r != nil {
+		if w.fs.on.Load() {
+			// Рекомендованный прямоугольник — для обычного окна; полноэкранное
+			// встаёт на монитор, на который переехало.
+			w.refitFullscreen()
+		} else if r := (*rect)(unsafe.Pointer(lparam)); r != nil {
 			procSetWindowPos.Call(hwnd, 0,
 				uintptr(r.Left), uintptr(r.Top),
 				uintptr(r.Right-r.Left), uintptr(r.Bottom-r.Top),
@@ -1299,6 +1346,11 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmNchittest:
+		if w.fs.on.Load() {
+			// Полный экран: ни краёв ресайза, ни заголовка, за который можно
+			// тащить окно (и привязывать его к краям экрана).
+			return htClient
+		}
 		// Borderless-окно: рамки ОС нет, зоны resize отдаём вручную.
 		// lParam — ЭКРАННЫЕ координаты курсора (signed 16-bit слова).
 		sx := int(int16(lparam & 0xFFFF))
@@ -1384,6 +1436,18 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		w.handleMouseLeave(hwnd)
 		return 0
 
+	case wmDisplaychange:
+		// Сменилось разрешение или состав мониторов: полноэкранное окно
+		// пересчитывает прямоугольник (иначе остаётся с прежним размером).
+		w.refitFullscreen()
+
+	case wmWindowposchanged:
+		// Окно перенесли (Win+Shift+стрелка) — на другом мониторе тот же
+		// прямоугольник ему не годится.
+		if w.fs.on.Load() && !w.fs.refitting {
+			w.refitFullscreen()
+		}
+
 	case wmGetminmaxinfo:
 		// Значения минимума согласованы с fitMinTrack (см. createInternal).
 		// Минимальный размер окна при пользовательском resize.
@@ -1400,6 +1464,15 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			mm := (*[10]int32)(unsafe.Pointer(lparam))
 			mm[6] = minW // ptMinTrackSize.x
 			mm[7] = minH // ptMinTrackSize.y
+			if w.fs.on.Load() {
+				// Полный экран: потолок размера — сам монитор, даже если он
+				// больше основного (по умолчанию потолок — основной экран).
+				if mon := w.monitorRectOfWindow(); !mon.Empty() {
+					mm[2], mm[3] = int32(mon.Min.X), int32(mon.Min.Y) // ptMaxPosition
+					mm[4], mm[5] = int32(mon.Dx()), int32(mon.Dy())   // ptMaxSize
+					mm[8], mm[9] = int32(mon.Dx()), int32(mon.Dy())   // ptMaxTrackSize
+				}
+			}
 			return 0
 		}
 

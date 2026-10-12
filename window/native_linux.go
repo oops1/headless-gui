@@ -105,6 +105,11 @@ type X11Window struct {
 	atomNetWMStateModal uint32 // _NET_WM_STATE_MODAL (модальность у EWMH-WM)
 	atomNetActiveWindow uint32 // _NET_ACTIVE_WINDOW (передача фокуса окну)
 
+	// Полный экран (x11_fullscreen_linux.go): атомы и состояние.
+	atomWMStateFullscreen uint32 // _NET_WM_STATE_FULLSCREEN
+	atomNetSupported      uint32 // _NET_SUPPORTED (что умеет оконный менеджер)
+	fs                    x11Fullscreen
+
 	// disabled — окно заблокировано на время модального диалога (аналог
 	// Win32 EnableWindow(false)). У X11 нет системного отключения ввода,
 	// поэтому обработчик событий сам ДРОПАЕТ ввод (Key/Button/Motion) при
@@ -287,6 +292,8 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomWMStateMaxV = w.x11InternAtom("_NET_WM_STATE_MAXIMIZED_VERT")
 	w.atomNetWMStateModal = w.x11InternAtom("_NET_WM_STATE_MODAL")
 	w.atomNetActiveWindow = w.x11InternAtom("_NET_ACTIVE_WINDOW")
+	w.atomWMStateFullscreen = w.x11InternAtom("_NET_WM_STATE_FULLSCREEN")
+	w.atomNetSupported = w.x11InternAtom("_NET_SUPPORTED")
 	w.atomNetWMMoveResize = w.x11InternAtom("_NET_WM_MOVERESIZE")
 	w.atomUTF8String = w.x11InternAtom("UTF8_STRING")
 	w.clip = newX11Clipboard(w)
@@ -299,6 +306,9 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomNetWMName = w.x11InternAtom("_NET_WM_NAME")
 	w.atomNetWMIconName = w.x11InternAtom("_NET_WM_ICON_NAME")
 	w.atomMotifHints = w.x11InternAtom("_MOTIF_WM_HINTS")
+	// Умеет ли менеджер полный экран — до создания окна, пока на соединении
+	// нет событий и ответ читается напрямую.
+	w.x11DetectFullscreenSupport()
 
 	// XDND (Drag&Drop файлов из ОС).
 	w.atomXdndAware = w.x11InternAtom("XdndAware")
@@ -334,7 +344,7 @@ func (w *X11Window) Create(title string, width, height int) error {
 			0x00000040 | // PointerMotion
 			0x00008000 | // ExposureMask
 			0x00020000 | // StructureNotifyMask (resize/close)
-			0x00400000) // FocusChangeMask
+			0x00400000) // PropertyChange — PropertyNotify по _NET_WM_STATE (полный экран, разворачивание)
 
 	values := []uint32{
 		w.screen.BlackPixel, // background
@@ -463,6 +473,7 @@ func (w *X11Window) RunEventLoop() error {
 			return fmt.Errorf("x11: read event: соединение закрыто")
 		}
 		w.handleX11Event(buf)
+		w.x11SyncWMState()
 	}
 	return nil
 }
@@ -610,6 +621,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 				w.onResize(newW, newH)
 			}
 		}
+
+	case x11EvPropertyNotify: // менеджер мог сменить _NET_WM_STATE окна
+		w.x11NoteWMStateChanged(buf)
 
 	case 29: // SelectionClear — буфером обмена завладел другой
 		w.clip.handleClear(buf)
@@ -1568,6 +1582,7 @@ func (w *X11Window) eventPumpLoop() {
 			return
 		}
 		w.handleX11Event(buf)
+		w.x11SyncWMState()
 	}
 }
 

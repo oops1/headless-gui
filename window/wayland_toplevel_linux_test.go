@@ -331,17 +331,22 @@ func TestWayland_ConfigureStates(t *testing.T) {
 	}
 }
 
-// Полноэкранное окно для кнопки «развернуть» — тоже развёрнутое: нажатие
-// должно возвращать окно, а не пытаться развернуть его ещё раз.
-func TestWayland_FullscreenCountsAsMaximized(t *testing.T) {
+// Полный экран — отдельное состояние: IsMaximized его не включает (раньше
+// включал, и приложение не могло отличить полноэкранное окно от развёрнутого).
+// Кнопку □ полноэкранного окна обрабатывает window.Window — она выводит окно
+// из полного экрана (TestFullscreen_MaximizeButtonLeavesFullscreen).
+func TestWayland_FullscreenIsNotMaximized(t *testing.T) {
 	c := newWlTestWindow(t)
 	body := make([]byte, 12)
 	binary.LittleEndian.PutUint32(body[8:12], 4)
 	body = binary.LittleEndian.AppendUint32(body, xdgStateFullscreen)
 	c.w.handleEvent(c.w.toplevelID, xdgToplevelEvConfigure, body)
 
-	if !c.w.IsMaximized() {
-		t.Error("полноэкранное окно не считается развёрнутым")
+	if c.w.IsMaximized() {
+		t.Error("полноэкранное окно считается развёрнутым")
+	}
+	if !c.w.IsFullscreen() {
+		t.Error("полноэкранное окно не считается полноэкранным")
 	}
 }
 

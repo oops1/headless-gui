@@ -3038,7 +3038,8 @@ win.SetAppID("winline-calc") // xdg_toplevel.app_id, под X11 — WM_CLASS
   восьми краёв — `xdg_toplevel.resize` (с serial'ом нажатия);
 - кнопки заголовка — `set_minimized` / `set_maximized` / `unset_maximized`, а
   `IsMaximized` читается из состояний `configure`, поэтому кнопка
-  разворачивания переключается в «восстановить»;
+  разворачивания переключается в «восстановить» (полный экран развёрнутым не
+  считается — см. «v3.34»);
 - форма курсора — `wp_cursor_shape_manager_v1`, если компоновщик его объявил,
   иначе своя картинка через `wl_pointer.set_cursor`;
 - кадровые буферы пересоздаются под новый размер окна.
@@ -7373,6 +7374,103 @@ mapping), `window/pointerleave_tracker_test.go` (arm once, false-leave rule),
 caption-button case, hidden cursor, own cursors), `window/x11_cursor_shapes_linux_test.go`
 and `window/wayland_cursor_linux_test.go` (on the wire: hidden cursor, shapes,
 side buttons).
+
+---
+
+## v3.34: full screen and monitor geometry (`window` package)
+
+Answers the PixGo task E1 (full screen) and E11 (monitors = E1 item 5). The API is
+additive; nothing public was removed, no signature changed. One behaviour change:
+**on Wayland `IsMaximized` no longer reports a full-screen window as maximized**
+(see "Maximized vs full screen").
+
+```go
+win.SetFullscreen(true) bool             // false: the backend (or the window system) cannot; true: the request was SENT
+win.IsFullscreen() bool                  // what the system reports; before Run and without backend support: false
+win.SetOnFullscreenChanged(func(on bool)) // engine goroutine; may be set before Run
+
+window.Monitors() []window.Monitor       // primary first, then left→right, top→bottom; may be empty (macOS, no session)
+window.MonitorOf(win) (window.Monitor, bool)  // monitor with the biggest share of the window
+window.MonitorAt(x, y int) (window.Monitor, bool)
+window.MonitorForRect(list []Monitor, r image.Rectangle) (Monitor, bool) // ok=false: r touches no monitor
+
+type Monitor struct {
+    Name         string          // may be empty
+    Bounds, Work image.Rectangle // whole monitor / without panels
+    Scale        float64         // 1.0 = 96 dpi
+    Primary      bool
+}
+```
+
+**`SetFullscreen` contract.** The answer is "was the request accepted for execution",
+not "it is done": Win32 changes the window on the window thread a moment later, X11
+and Wayland answer asynchronously and the compositor may refuse. The result is always
+visible through `IsFullscreen` and `SetOnFullscreenChanged`. The callback fires for
+**every** change, including those the system makes itself (the user pressed Esc/F11
+at the compositor, the window manager returned the window). Before `Run` the request
+is remembered and applied when the window is created (the answer is then only
+"the platform can do it at all": `false` on macOS). The default `□` caption button of
+a full-screen window leaves full screen (it used to "restore" because Wayland counted
+full screen as maximized — that behaviour is kept explicitly in `window.Window`).
+
+**Maximized vs full screen.** `IsMaximized` of a full-screen window returns the value
+it had before full screen (a maximized window stays "maximized" underneath, a normal
+one stays "normal"); on every backend. Consumers checked: the `□` button and
+`widget.Window.SetMaximized` (system menu "Restore") in `window/window.go`, the
+dialog hosts (`window/modal_host.go`, they never go full screen). A full-screen window
+is not rounded on any backend (`SetCornerRadius`: Win32 `applyCorners`, Wayland
+`maskRadius`; X11 never rounds).
+
+**Backends.**
+
+| | request | state |
+|---|---|---|
+| Win32 | window thread: remember rect + style + "was maximized" (a maximized window is first restored, otherwise the system keeps it `zoomed` and the taskbar stays), drop `WS_THICKFRAME`, `SetWindowPos` to `rcMonitor` of `MonitorFromWindow` (not `rcWork`: the taskbar is covered) | `IsFullscreen` is our own flag. Back: style and rect restored (a rect that fell off all monitors is moved to the nearest one), `SW_MAXIMIZE` again if it was maximized. `WM_DISPLAYCHANGE`, `WM_WINDOWPOSCHANGED` (Win+Shift+arrow), `WM_DPICHANGED` re-fit the window to its monitor; `WM_GETMINMAXINFO` raises the size ceiling to that monitor; no resize edges/caption drag in full screen. `SetSize`/`SetPosition`/`Maximize`/`Restore` in full screen are remembered and applied on exit |
+| X11 | `ClientMessage _NET_WM_STATE` (`ADD`/`REMOVE` `_NET_WM_STATE_FULLSCREEN`) to the root window. `false` if the window manager lists its supported states in `_NET_SUPPORTED` and full screen is not among them | read from `_NET_WM_STATE` after `PropertyNotify` (the manager may refuse or leave itself); the maximized atoms refresh `IsMaximized` too, except while full screen |
+| Wayland | `xdg_toplevel.set_fullscreen(output=nil)` (opcode 11) / `unset_fullscreen` (12); a fixed-size window gets its size limits lifted first and fixed again at the old size afterwards | the `fullscreen` state of `configure`. A `configure` WITHOUT it after a request in flight is a refusal (this is how WinLine answers without `WINLINE_FULLSCREEN`): the callback gets `false`, `IsFullscreen()==false`, `SetFullscreen` had returned `true`. A stale `configure` that was already on its way can look like a refusal: then `false` is followed by `true` when the real answer arrives |
+| Cocoa | stub: `SetFullscreen` returns `false` | - |
+
+**Monitors.** `Bounds`/`Work` are in the coordinates of `NativeWindow.GetPosition`.
+
+- Win32: `EnumDisplayMonitors` + `GetMonitorInfoW` (`rcMonitor`/`rcWork`, device name
+  `\\.\DISPLAY1`) + `GetDpiForMonitor` (Windows 8.1+, else 1.0); physical pixels, `Scale = dpi/96`.
+- X11: **RandR 1.5 `RRGetMonitors`** over a short separate connection (the window's
+  connection is read by its event loop). `Work` is `_NET_WORKAREA` clipped by the
+  monitor (EWMH has no per-monitor work area: exact for one panel, an approximation
+  for several). `Scale` is `Xft.dpi` (same for all monitors — X11 has no per-monitor
+  scale). **Without RandR or older than 1.5 the root window is reported as ONE
+  monitor.**
+- Wayland: `wl_output` (geometry, mode, scale, name) and, when the compositor
+  advertises `zxdg_output_manager_v1`, `zxdg_output_v1` (logical position/size, name).
+  `Bounds` are LOGICAL (compositor coordinates, the units of `configure`); `Scale` is
+  the integer `wl_output` scale, i.e. buffer pixels per `Bounds` unit (fractional
+  scale is per surface, not per monitor — see `SetOnDpiChanged`). `Work == Bounds`
+  (the protocol has no work area). There is no "primary" in `wl_output`: the first
+  output is reported as primary. `MonitorOf` is the output of the last
+  `wl_surface.enter`.
+- macOS: `Monitors()` is empty, `MonitorOf` returns `false`.
+- `Monitors()` without a window costs one short connection on Linux; do not call it
+  per frame. "Does the saved window rect still land on a monitor?":
+  `_, ok := window.MonitorForRect(window.Monitors(), saved)`.
+
+**Not done / limits.** No choice of the target monitor in `SetFullscreen` (the
+monitor the window is on is used; Win32 takes it from `MonitorFromWindow` (so
+`SetPosition` onto the wanted monitor before the request selects it; checked on one
+monitor only), X11 leaves it to the window manager, Wayland to the compositor).
+Win32 `Name` is the device name, not the marketing name from the monitor EDID.
+macOS has neither full screen nor monitors yet.
+
+Tests: `window/fullscreen_rect_test.go` (Win32 save/restore arithmetic: style, rect,
+vanished monitor, re-fit), `window/fullscreen_test.go` (the `Window` layer: pre-Run
+request, delegation, `□` button, monitor helpers), `window/fullscreen_windows_test.go`
+(a real Win32 window: enter/leave, maximized round trip, re-fit, monitors),
+`window/wayland_fullscreen_linux_test.go` (wire: opcodes 11/12, accepted, refused
+like WinLine, left by the compositor, maximized value kept, fixed size restored),
+`window/wayland_monitor_linux_test.go` (`wl_output`/`xdg_output` events and a full
+query against a fake compositor on a real unix socket), `window/x11_fullscreen_linux_test.go`
+(`ClientMessage` bytes, state from `_NET_WM_STATE`, `_NET_SUPPORTED`, RandR 1.5
+over a fake server, fallback), `*_e2e_linux_test.go` (live X server / compositor via
+`DISPLAY` / `WAYLAND_DISPLAY`; skipped without them).
 
 ---
 

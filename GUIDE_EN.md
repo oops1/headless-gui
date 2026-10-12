@@ -3598,6 +3598,52 @@ All three backends honour the limit: Win32 (`WM_GETMINMAXINFO`), X11
 (`WM_NORMAL_HINTS`) and Wayland (`xdg_toplevel.set_min_size`). On macOS it is a
 no-op.
 
+### Full screen and monitors
+
+```go
+win.SetFullscreen(true)  // true: the request was sent; false: the backend cannot
+win.IsFullscreen()       // what the system reports
+win.SetOnFullscreenChanged(func(on bool) { /* engine goroutine */ })
+
+for _, m := range window.Monitors() { // primary first
+    fmt.Println(m.Name, m.Bounds, m.Work, m.Scale, m.Primary)
+}
+m, ok := window.MonitorOf(win)                      // the window's monitor
+_, onScreen := window.MonitorForRect(window.Monitors(), savedRect) // is the saved position still on a screen?
+```
+
+`SetFullscreen` answers "the request was accepted", not "done": Win32 moves the
+window a moment later, X11 and Wayland answer asynchronously, and the compositor may
+refuse. The outcome is in `IsFullscreen` and `SetOnFullscreenChanged`, which fires on
+**every** change, including those the system makes itself (the user pressed Esc at the
+compositor). A refusal arrives as `false`: that is how WinLine answers without
+`WINLINE_FULLSCREEN` — the request went out (`SetFullscreen` returned `true`) and the
+`configure` came back without the fullscreen state; time for the application to fall
+back (say, maximize the window the ordinary way). Before `Run` the request is
+remembered and applied when the window is created.
+
+"Maximized" and "full screen" are different states. `IsMaximized` of a full-screen
+window returns the value it had before full screen. A full-screen window is not
+rounded, and the `□` button takes it out of full screen.
+
+- **Win32.** Position, size, style and "was maximized" are remembered, `WS_THICKFRAME`
+  is dropped for the time being, and the window takes the monitor's `rcMonitor` (the
+  taskbar is covered). Leaving restores everything; a rectangle that fell off a
+  disconnected monitor is moved to the nearest one. A resolution change, a move to
+  another monitor and a DPI change re-fit the rectangle.
+- **X11.** `_NET_WM_STATE_FULLSCREEN` through `ClientMessage`; the state is read from
+  the `_NET_WM_STATE` property on `PropertyNotify`.
+- **Wayland.** `xdg_toplevel.set_fullscreen` / `unset_fullscreen`; the state comes
+  from `configure`.
+- **macOS.** A stub: `SetFullscreen` returns `false`; `Monitors()` is empty.
+
+Monitors: Win32 — `EnumDisplayMonitors` + `GetDpiForMonitor`; X11 — RandR 1.5
+(without RandR or older than 1.5 the whole screen counts as one monitor); Wayland —
+`wl_output` and `xdg_output`. Units: on Win32 and X11 `Bounds`/`Work` are pixels, on
+Wayland the compositor's logical coordinates (`Scale` is buffer pixels per unit).
+Wayland has no work area (`Work == Bounds`) and the first output is the primary one.
+Details are in `docs/AI_AGENT_REFERENCE.md` ("v3.34").
+
 ### Window icon
 
 ```go

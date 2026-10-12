@@ -3575,6 +3575,52 @@ win.MinSize()            // спросить заданное
 Ограничение соблюдают все три бэкенда: Win32 (`WM_GETMINMAXINFO`), X11
 (`WM_NORMAL_HINTS`) и Wayland (`xdg_toplevel.set_min_size`). На macOS — no-op.
 
+### Полный экран и мониторы
+
+```go
+win.SetFullscreen(true)  // true — запрос отправлен; false — бэкенд не умеет
+win.IsFullscreen()       // что сообщает система
+win.SetOnFullscreenChanged(func(on bool) { /* горутина движка */ })
+
+for _, m := range window.Monitors() { // основной первым
+    fmt.Println(m.Name, m.Bounds, m.Work, m.Scale, m.Primary)
+}
+m, ok := window.MonitorOf(win)                      // монитор окна
+_, onScreen := window.MonitorForRect(window.Monitors(), savedRect) // сохранённое положение ещё на экране?
+```
+
+`SetFullscreen` отвечает «запрос принят», а не «готово»: Win32 переставляет окно
+чуть позже, X11 и Wayland отвечают асинхронно, и компоновщик вправе отказать.
+Итог — в `IsFullscreen` и `SetOnFullscreenChanged`, которое срабатывает при
+**любой** смене, в том числе по воле системы (пользователь нажал Esc у
+компоновщика). Отказ приходит как `false`: так отвечает WinLine без
+`WINLINE_FULLSCREEN` — запрос ушёл (`SetFullscreen` вернул `true`), а `configure`
+пришёл без состояния fullscreen; приложению пора переходить в запасной режим
+(например, развернуть окно обычным путём). До `Run` запрос запоминается и
+применяется при создании окна.
+
+«Развёрнуто» и «полный экран» — разные состояния. `IsMaximized` полноэкранного
+окна возвращает значение, которое было до полного экрана. Полноэкранное окно не
+скругляется, кнопка «□» выводит его из полного экрана.
+
+- **Win32.** Положение, размер, стиль и «было развёрнуто» запоминаются, на время
+  снимается `WS_THICKFRAME`, окно встаёт на `rcMonitor` своего монитора (таскбар
+  закрыт). Выход возвращает всё как было; прямоугольник, оказавшийся за краем
+  отключённого монитора, переносится на ближайший. Смена разрешения, перенос
+  окна на другой монитор и смена DPI пересчитывают прямоугольник.
+- **X11.** `_NET_WM_STATE_FULLSCREEN` через `ClientMessage`; состояние читается из
+  свойства `_NET_WM_STATE` по `PropertyNotify`.
+- **Wayland.** `xdg_toplevel.set_fullscreen` / `unset_fullscreen`; состояние — из
+  `configure`.
+- **macOS.** Заглушка: `SetFullscreen` возвращает `false`; `Monitors()` пуст.
+
+Мониторы: Win32 — `EnumDisplayMonitors` + `GetDpiForMonitor`; X11 — RandR 1.5
+(без RandR или старше 1.5 весь экран считается одним монитором); Wayland —
+`wl_output` и `xdg_output`. Единицы: на Win32 и X11 `Bounds`/`Work` — пиксели, на
+Wayland — логические координаты компоновщика (`Scale` — сколько пикселей буфера в
+единице). Рабочей области на Wayland нет (`Work == Bounds`), основной монитор
+там — первый. Подробности — в `docs/AI_AGENT_REFERENCE.md` («v3.34»).
+
 ### Значок окна
 
 ```go

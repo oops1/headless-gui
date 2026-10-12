@@ -185,6 +185,13 @@ type WaylandWindow struct {
 	viewporterID uint32
 	fracMgrID    uint32
 
+	// Геометрия мониторов (wayland_monitor_linux.go) и их логическое описание
+	// (zxdg_output_manager_v1, если композитор его объявил).
+	outs        wlOutputs
+	gXdgOutMgr  uint32
+	gXdgOutVer  uint32
+	xdgOutMgrID uint32
+
 	// repeat — автоповтор удерживаемой клавиши (wayland_repeat_linux.go).
 	repeat *wlRepeater
 
@@ -257,6 +264,8 @@ type WaylandWindow struct {
 	// читает движок (кнопка «развернуть» спрашивает IsMaximized).
 	maximized  atomic.Bool
 	fullscreen atomic.Bool
+	// fs — запрос полного экрана и уведомление о нём (wayland_fullscreen_linux.go).
+	fs wlFullscreen
 
 	// pendingResize — пришёл новый размер, кадра под него ещё нет. Пока он
 	// взведён, ack_configure не сопровождается рекоммитом: старый кадр в
@@ -569,19 +578,7 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 
 	// Мониторы и расширения масштаба: без них окно рисуется один к одному,
 	// как было до HiDPI.
-	for name, ver := range w.gOutputs {
-		v := ver
-		if v > wlOutputVersionScale {
-			v = wlOutputVersionScale
-		}
-		id := w.bind(name, "wl_output", v)
-		w.scale.mu.Lock()
-		if w.scale.outputs == nil {
-			w.scale.outputs = map[uint32]float64{}
-		}
-		w.scale.outputs[id] = 0 // масштаб придёт событием scale
-		w.scale.mu.Unlock()
-	}
+	w.bindOutputs()
 	if w.gViewporter != 0 {
 		w.viewporterID = w.bind(w.gViewporter, "wp_viewporter", 1)
 	}
@@ -764,6 +761,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 				w.gOutputs = map[uint32]uint32{}
 			}
 			w.gOutputs[name] = version
+		case "zxdg_output_manager_v1":
+			w.gXdgOutMgr = name
+			w.gXdgOutVer = version
 		case "zwp_text_input_manager_v3":
 			w.gTextInputMgr = name
 		case "wp_viewporter":
@@ -801,8 +801,7 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		active, maximized, fullscreen := wlParseStates(b[8:])
 		wlLog("toplevel.configure: %dx%d active=%v maximized=%v fullscreen=%v",
 			nw, nh, active, maximized, fullscreen)
-		w.maximized.Store(maximized)
-		w.fullscreen.Store(fullscreen)
+		w.noteToplevelStates(maximized, fullscreen)
 		if w.onActivate != nil {
 			w.onActivate(active)
 		}
@@ -841,6 +840,12 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		if len(b) >= 4 {
 			w.noteSurfaceEnter(binary.LittleEndian.Uint32(b[0:4]))
 		}
+
+	case w.outs.isOutput(obj):
+		w.handleOutputEvent(obj, opcode, b)
+
+	case w.outs.isXdgOutput(obj):
+		w.handleXdgOutputEvent(obj, opcode, b)
 
 	case w.isOutputObject(obj) && opcode == wlOutputEvScale:
 		if len(b) >= 4 {
@@ -1607,8 +1612,11 @@ func (w *WaylandWindow) Restore() {
 }
 
 // IsMaximized сообщает состояние из последнего configure. Полноэкранное окно
-// для кнопки □ — тоже «развёрнуто»: нажатие на неё должно возвращать окно.
-func (w *WaylandWindow) IsMaximized() bool { return w.maximized.Load() || w.fullscreen.Load() }
+// развёрнутым НЕ считается: «полный экран» — отдельное состояние
+// (IsFullscreen), а на его время сохраняется прежнее значение «развёрнуто»
+// (noteToplevelStates). Кнопка □ полноэкранного окна возвращает его обратно
+// через window.Window, как раньше.
+func (w *WaylandWindow) IsMaximized() bool { return w.maximized.Load() }
 
 // Callbacks
 func (w *WaylandWindow) SetOnResize(fn func(w, h int))                           { w.onResize = fn }

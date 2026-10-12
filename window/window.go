@@ -295,6 +295,10 @@ type Window struct {
 	minW, minH int
 	minWant    bool
 
+	// fs — полный экран: колбэк приложения и запрос, заданный до Run
+	// (fullscreen.go).
+	fs fullscreenState
+
 	// pendingIcons/iconWant — значок окна, заданный до Run() (icon.go).
 	// Бэкенда до Run() ещё нет, а задать значок сразу после window.New —
 	// естественно, и именно так написано в руководстве.
@@ -666,6 +670,9 @@ func (win *Window) bringUp() error {
 	win.setupResizeClose()
 	win.adoptCreatedSize()
 
+	// Полный экран: уведомления бэкенда и запрос, заданный до Run.
+	win.setupFullscreen()
+
 	// Общий проброс ввода (мышь/клавиатура) — surface.
 	win.setupInput()
 
@@ -835,7 +842,13 @@ func (win *Window) setupWidgetWindow() {
 	if ww.OnMaximize == nil {
 		ww.OnMaximize = func() {
 			win.onNative(func() {
-				if win.native.IsMaximized() {
+				// Полноэкранное окно кнопка □ возвращает в обычное
+				// состояние: раньше Wayland считал его «развёрнутым», и
+				// нажатие шло в Restore; теперь IsMaximized полный экран не
+				// включает, и это поведение сохранено явно.
+				if fb, ok := win.native.(fullscreenBackend); ok && fb.IsFullscreen() {
+					fb.SetFullscreen(false)
+				} else if win.native.IsMaximized() {
 					win.native.Restore()
 				} else {
 					win.native.Maximize()

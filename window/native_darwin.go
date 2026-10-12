@@ -531,6 +531,18 @@ func (w *CocoaWindow) IsMaximized() bool {
 // стандартные окна сама).
 func (w *CocoaWindow) SetCornerRadius(int) {}
 
+// SetFullscreen — полный экран на macOS пока не реализован (NSWindow
+// toggleFullScreen потребует отдельной проверки на живой системе): false —
+// «бэкенд не умеет». Реализует fullscreenBackend, чтобы API был одинаков на
+// всех платформах.
+func (w *CocoaWindow) SetFullscreen(bool) bool { return false }
+
+// IsFullscreen всегда false (см. SetFullscreen).
+func (w *CocoaWindow) IsFullscreen() bool { return false }
+
+// SetOnFullscreenChanged ничего не запоминает: уведомлять не о чем.
+func (w *CocoaWindow) SetOnFullscreenChanged(func(bool)) {}
+
 func (w *CocoaWindow) BlitRGBA(img *image.RGBA) {
 	if w.nsView == 0 || img == nil {
 		return
