@@ -95,7 +95,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **Smooth / inertial scroll** — pixel-precise wheel/touchpad deltas (`SendMouseWheelPixels`) with a decaying flywheel in `ScrollView` (Win32 + Wayland pixel deltas; X11 keeps ticks); `ScrollView` also scrolls sideways (`ContentWidth`, horizontal wheel, Shift+wheel)
 - **File drag & drop from the OS** — drop files from Explorer/Finder into the window (`SetOnFilesDropped` / `FileDropTarget`); Win32 + X11 native, Wayland skeleton
 - **Color emoji** — COLR/CBDT/sbix color glyphs render automatically in the text path (COLRv1 gradients averaged; regional-flag ligatures a known gap)
-- **Tooltips & cursors** — `ToolTip` on every widget; per-widget mouse cursors
+- **Tooltips & cursors** — `ToolTip` on every widget; per-widget mouse cursors; hidden/grab/crosshair/busy shapes and an application-wide `SetCursorOverride`; side mouse buttons X1/X2
 - **Free bundled fonts** — Roboto (default), Open Sans, Inter + system glyph fallback chain (no tofu)
 
 ## Widget List

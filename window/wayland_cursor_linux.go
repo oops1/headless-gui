@@ -62,10 +62,29 @@ func (w *WaylandWindow) applyCursor() {
 	if !w.cursorSet {
 		w.cursorShape, w.cursorSet = wlCursorArrow, true
 	}
+	if w.cursorShape == wlCursorNone {
+		w.hideCursor()
+		return
+	}
 	if w.setCursorByShape(w.cursorShape) {
 		return
 	}
 	w.setCursorBySurface(w.cursorShape)
+}
+
+// hideCursor прячет курсор: wl_pointer.set_cursor(serial, NULL, 0, 0).
+// Пустая поверхность — единственный способ спрятать курсор, у
+// wp_cursor_shape_v1 такой формы нет. Вызывать под w.cursorMu.
+func (w *WaylandWindow) hideCursor() {
+	w.send(wlHideCursorMsg(w.pointerID, w.ptrEnterSerial.Load()), -1)
+}
+
+// wlHideCursorMsg собирает wl_pointer.set_cursor с нулевой поверхностью:
+// compositor перестаёт рисовать курсор над окном. Чистая функция — проверяется
+// на проводе.
+func wlHideCursorMsg(pointerID, serial uint32) *wlMsg {
+	return newWlMsg(pointerID, wlPointerSetCursor).
+		putUint(serial).putUint(0).putInt(0).putInt(0)
 }
 
 // setCursorByShape просит форму у компоновщика (wp_cursor_shape_manager_v1).

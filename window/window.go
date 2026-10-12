@@ -243,6 +243,12 @@ type surface struct {
 	cursor    int
 	cursorSet bool
 
+	// ptrX, ptrY — последнее положение мыши в координатах контента; ptrKnown —
+	// была ли мышь в окне. Нужны, чтобы пересчитать курсор без движения мыши
+	// (refreshCursor). Только горутина движка.
+	ptrX, ptrY int
+	ptrKnown   bool
+
 	// fitOX, fitOY — смещение контента в буфере окна (letterbox при
 	// ContentFit=FitScale). Пишутся под mu при ресайзе, читаются событиями
 	// ввода — то и другое на горутине движка — и applyFrame (под mu).
@@ -990,6 +996,8 @@ func (win *Window) handleFitResize(newW, newH int) {
 // (модификаторы), снимается здесь и едет в замыкании: к исполнению Ctrl могли
 // уже отпустить.
 func (s *surface) setupInput() {
+	s.setupCursorOverride()
+
 	// ── Mouse move ───────────────────────────────────────────────────────────
 	// Движения склеиваются: пока предыдущее стоит в очереди, новое лишь
 	// обновляет его координаты (input_queue.go).
@@ -1156,6 +1164,10 @@ func nativeButton(button int) (widget.MouseButton, bool) {
 		return widget.MouseWheelUp, true
 	case 4:
 		return widget.MouseWheelDown, true
+	case 5:
+		return widget.MouseButtonX1, true
+	case 6:
+		return widget.MouseButtonX2, true
 	}
 	return 0, false
 }

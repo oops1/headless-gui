@@ -372,6 +372,14 @@ type Win32Window struct {
 
 	cursorHandle uintptr         // текущий желаемый курсор (HCURSOR)
 	cursorCache  map[int]uintptr // кэш загруженных IDC-курсоров
+	cursorHidden bool            // курсор спрятан (CursorNone): WM_SETCURSOR ставит SetCursor(NULL)
+
+	// Уход указателя: запросы TrackMouseEvent на клиентскую и нерабочую
+	// область (pointerleave.go, mouse_windows.go). trackMouse — подмена
+	// системного вызова в тестах.
+	leave      leaveTracker
+	ncLeave    leaveTracker
+	trackMouse func(hwnd uintptr, flags uint32) bool
 
 	// Трей/уведомления (Shell_NotifyIcon) — см. tray_windows.go.
 	trayAdded      bool           // иконка добавлена (NIM_ADD выполнен)
@@ -1182,6 +1190,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		delete(win32Windows, hwnd)
 		win32Mu.Unlock()
 		dropUICalls(hwnd) // WM_APP этому окну уже не придёт
+		w.destroyArtCursors()
 		// Вторичные окна модалок (noQuit) не завершают цикл сообщений — иначе
 		// закрытие диалога уронило бы всё приложение. Главное окно — завершает.
 		if !w.noQuit {
@@ -1350,9 +1359,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
 		switch umsg {
 		case wmNcmousemove:
-			if w.onMouseMove != nil {
-				w.onMouseMove(int(pt.X), int(pt.Y))
-			}
+			w.ncButtonMouseMove(hwnd, int(pt.X), int(pt.Y))
 		case wmNclbuttondown:
 			if w.onMouseButton != nil {
 				w.onMouseButton(int(pt.X), int(pt.Y), 0, true)
@@ -1367,9 +1374,14 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	case wmNcmouseleave:
 		// Курсор ушёл с кнопки заголовка — снимаем подсветку, уведя мышь
 		// за пределы окна.
-		if w.onMouseMove != nil {
-			w.onMouseMove(pointerOutside, pointerOutside)
-		}
+		w.ncMouseLeft()
+		return 0
+
+	case wmMouseleave:
+		// Указатель покинул клиентскую область (TrackMouseEvent, см.
+		// clientMouseMove): тот же путь, что LeaveNotify на X11. Переход на
+		// кнопку заголовка уходом не считается — mouseLeaveReal.
+		w.handleMouseLeave(hwnd)
 		return 0
 
 	case wmGetminmaxinfo:
@@ -1394,8 +1406,8 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	case wmSetcursor:
 		// Удерживаем выбранную форму курсора в клиентской области.
 		// Младшее слово lParam = hit-test; HTCLIENT=1.
-		if (lparam&0xFFFF) == 1 && w.cursorHandle != 0 {
-			procSetCursor.Call(w.cursorHandle)
+		if h, ok := w.setCursorMessage(lparam & 0xFFFF); ok {
+			procSetCursor.Call(h) // h == 0 прячет курсор (CursorNone)
 			return 1
 		}
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
@@ -1407,10 +1419,17 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	case wmMousemove:
 		x := int(int16(lparam & 0xFFFF))
 		y := int(int16((lparam >> 16) & 0xFFFF))
-		if w.onMouseMove != nil {
-			w.onMouseMove(x, y)
-		}
+		w.clientMouseMove(hwnd, x, y)
 		return 0
+
+	case wmXbuttondown, wmXbuttonup, wmXbuttondblclk:
+		// Боковые кнопки «назад/вперёд» (XBUTTON1/2). Обработчик обязан
+		// вернуть TRUE, иначе DefWindowProc отправит окну WM_APPCOMMAND.
+		if w.handleXButton(umsg, wparam, lparam) {
+			return 1
+		}
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+		return ret
 
 	case wmLbuttondown, wmLbuttondblclk:
 		// Захватываем мышь — гарантируем, что WM_LBUTTONUP придёт к нам,
@@ -1663,35 +1682,20 @@ func (w *Win32Window) keyboardLayoutList() []uintptr {
 }
 
 // SetCursor задаёт форму курсора по коду widget.Cursor (0=Arrow,1=IBeam,
-// 2=Hand,3=SizeWE,4=SizeNS,5=SizeNWSE,6=SizeNESW). Реальное применение —
-// в WndProc (WM_SETCURSOR).
+// 2=Hand,3=SizeWE,4=SizeNS,5=SizeNWSE,6=SizeNESW,7=None,8=Grab,9=Grabbing,
+// 10=SizeAll,11=Crosshair,12=Wait; см. win32CursorSpecFor). Реальное
+// применение — в WndProc (WM_SETCURSOR).
 func (w *Win32Window) SetCursor(c int) {
-	idc := idcArrow
-	switch c {
-	case 1:
-		idc = idcIBeam
-	case 2:
-		idc = idcHand
-	case 3:
-		idc = idcSizeWE
-	case 4:
-		idc = idcSizeNS
-	case 5:
-		idc = idcSizeNWSE
-	case 6:
-		idc = idcSizeNESW
+	h, hidden := w.cursorFor(c)
+	if w.cursorHandle == h && w.cursorHidden == hidden {
+		return
 	}
-	if w.cursorCache == nil {
-		w.cursorCache = map[int]uintptr{}
-	}
-	h, ok := w.cursorCache[idc]
-	if !ok {
-		h, _, _ = procLoadCursorW.Call(0, uintptr(idc))
-		w.cursorCache[idc] = h
-	}
-	if w.cursorHandle != h {
-		w.cursorHandle = h
-		procSetCursor.Call(h) // применяем сразу (и далее держим через WM_SETCURSOR)
+	w.cursorHandle, w.cursorHidden = h, hidden
+	// Применяем сразу, не дожидаясь движения мыши (и далее держим через
+	// WM_SETCURSOR) — но только если под указателем наше окно: курсор
+	// ставится глобально.
+	if w.pointerOverWindow() {
+		procSetCursor.Call(h) // h == 0 прячет курсор (CursorNone)
 	}
 }
 

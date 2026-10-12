@@ -184,6 +184,9 @@ type Engine struct {
 	clickN        int
 	dblClickDelay time.Duration // 0 — значение по умолчанию (defaultDoubleClick)
 
+	// cursorOvr — принудительный курсор поверх курсора виджетов (cursoroverride.go).
+	cursorOvr cursorOverride
+
 	frames chan output.Frame
 	// fullNext — следующий кадр полный (холст пересоздан); lostFrame — кадр
 	// выброшен из переполненного канала, потребитель отстал (fullframe.go).

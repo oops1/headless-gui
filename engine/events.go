@@ -242,6 +242,10 @@ func (e *Engine) toLogical(x, y int) (int, int) {
 // курсор самого глубокого виджета под точкой, реализующего
 // widget.CursorProvider (иначе — стрелка).
 func (e *Engine) CursorAt(x, y int) widget.Cursor {
+	// Принудительный курсор сильнее любого виджета и модального окна.
+	if c, ok := e.CursorOverride(); ok {
+		return c
+	}
 	x, y = e.toLogical(x, y)
 	var disp widget.Widget
 	if m := e.topModal(); m != nil {

@@ -396,8 +396,10 @@ func (w *CocoaWindow) handleCocoaEvent(event objc.ID, evType int) {
 	case 5, 6: // NSMouseMoved, NSLeftMouseDragged
 		w.handleMouseMove(event)
 	case 25, 26: // NSOtherMouseDown/Up
-		pressed := evType == 25
-		w.handleMouseButton(event, 2, pressed)
+		// Средняя кнопка — номер 2, боковые «назад/вперёд» — 3 и 4.
+		if id, ok := cocoaOtherButton(int(objc.Send[uintptr](event, selButtonNumber))); ok {
+			w.handleMouseButton(event, id, evType == 25)
+		}
 	case 10: // NSKeyDown
 		w.handleKeyDown(event)
 	case 11: // NSKeyUp

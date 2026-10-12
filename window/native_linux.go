@@ -544,13 +544,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 			}
 			return
 		}
-		button := int(buf[1]) - 1 // X11: 1=left, 2=mid, 3=right → 0,1,2
-		if button == 2 {
-			button = 1 // right
-		} else if button == 1 {
-			button = 2 // middle
-		}
-		if w.onMouseButton != nil {
+		// 1=left, 2=middle, 3=right, 4/5=колесо, 8/9=боковые «назад»/«вперёд».
+		button, ok := x11ButtonID(int(buf[1]))
+		if ok && w.onMouseButton != nil {
 			w.onMouseButton(x, y, button, true)
 		}
 
@@ -560,13 +556,8 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		if raw := int(buf[1]); raw == 6 || raw == 7 {
 			return // прокрутку отдали на нажатии; отпускание ничего не значит
 		}
-		button := int(buf[1]) - 1
-		if button == 2 {
-			button = 1
-		} else if button == 1 {
-			button = 2
-		}
-		if w.onMouseButton != nil {
+		button, ok := x11ButtonID(int(buf[1]))
+		if ok && w.onMouseButton != nil {
 			w.onMouseButton(x, y, button, false)
 		}
 

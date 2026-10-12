@@ -1487,6 +1487,7 @@ mb.ShowYesNoCancel("Save", "Save changes?", callback)        // Yes/No/Cancel
 eng.SendMouseMove(x, y int)
 eng.SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 // btn: widget.MouseLeft | widget.MouseRight | widget.MouseMiddle
+//      | widget.MouseButtonX1 (back) | widget.MouseButtonX2 (forward) — side buttons
 ```
 
 The engine performs hit-testing and dispatches the event to the appropriate widget. On left click, focus automatically transfers to the `Focusable` widget under the cursor.
@@ -2604,7 +2605,11 @@ when the filter/sort/group changes.
 - `ToolTip="..."` on any widget; delay/toggle via
   `eng.SetTooltipsEnabled`/`SetTooltipDelay`.
 - Mouse cursors: widgets implement `Cursor() widget.Cursor` (TextBox → I-beam,
-  GridSplitter → resize); `eng.CursorAt(x, y)`.
+  GridSplitter → resize); `eng.CursorAt(x, y)`. Shapes `CursorNone` (hidden),
+  `CursorGrab`/`CursorGrabbing`, `CursorSizeAll`, `CursorCrosshair`, `CursorWait`.
+  A shape over every widget, applied at once without a mouse move:
+  `eng.SetCursorOverride(widget.CursorNone)` / `eng.ClearCursorOverride()`
+  (a slide show hides the cursor on a timer; dragging shows the closed hand).
 - Keyboard-layout indicator in windows/dialogs — `ShowLocaleIndicator` property
   with a switch context menu.
 

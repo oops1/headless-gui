@@ -121,11 +121,6 @@ const (
 
 	wlShmFormatXRGB8888 = 1
 
-	// linux input-event-codes
-	btnLeft   = 0x110
-	btnRight  = 0x111
-	btnMiddle = 0x112
-
 	// wl_data_device_manager
 	wlDataDevMgrGetDataDevice = 1
 
@@ -967,14 +962,9 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		serial := binary.LittleEndian.Uint32(b[0:4])
 		btn := binary.LittleEndian.Uint32(b[8:12])
 		pressed := binary.LittleEndian.Uint32(b[12:16]) == 1
-		id := -1
-		switch btn {
-		case btnLeft:
-			id = 0
-		case btnRight:
-			id = 1
-		case btnMiddle:
-			id = 2
+		id, known := wlButtonID(btn)
+		if !known {
+			id = -1
 		}
 		if pressed {
 			// Serial нажатия — пропуск к xdg_toplevel.move/resize: им
@@ -1572,7 +1562,7 @@ func (w *WaylandWindow) releaseHeldButtons() {
 	if held == 0 || w.onMouseButton == nil {
 		return
 	}
-	for id := 0; id < 3; id++ {
+	for id := 0; id <= buttonCodeX2; id++ {
 		if held&(1<<uint(id)) != 0 {
 			w.onMouseButton(w.ptrX, w.ptrY, id, false)
 		}

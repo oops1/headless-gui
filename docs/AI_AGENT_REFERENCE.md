@@ -1241,6 +1241,8 @@ const (
     MouseMiddle     MouseButton = 2
     MouseWheelUp    MouseButton = 3
     MouseWheelDown  MouseButton = 4
+    MouseButtonX1   MouseButton = 5 // side "back" (v3.34)
+    MouseButtonX2   MouseButton = 6 // side "forward" (v3.34)
 )
 ```
 
@@ -2354,7 +2356,8 @@ AncestorType`, rich-text inlines inside `TextBlock` (use `<RichText>`, see
 - **ScrollViewer mouse wheel** — `ScrollView` scrolls on wheel up/down.
 - **Mouse cursors** — widgets implement `widget.CursorProvider` (`Cursor(x,y)`):
   TextBox → I-beam, GridSplitter → resize. `Engine.CursorAt(x,y)` computes it; the
-  Windows backend applies it natively (Linux/macOS: no-op for now).
+  Windows, X11 and Wayland backends apply it natively (macOS: no-op). An
+  application-wide shape that beats every widget: `Engine.SetCursorOverride` (v3.34).
 - **TabIndex** — `<TextBox TabIndex="1"/>` controls focus order; negative excludes
   from Tab navigation. Honored by `CollectFocusables` (stable sort by TabIndex).
 
@@ -7252,6 +7255,124 @@ geometries, ×1000 destination, work proportional to the clip, `sr` clamp, round
 BGRX, agreement with `DrawImageScaled` at scales 1, 1.5, 2), `widget/imagerect_test.go`
 (fallback, `ClampImageRect`, ScrollView wrapper), `engine/maxfps_test.go`,
 `window/maxfps_test.go`, `window/x11_keyrepeat_linux_test.go`.
+
+---
+
+## v3.34 additions (cursor override and new shapes, pointer leave on Win32, side mouse buttons)
+
+Answers the PixGo remarks E2, E4, E5 (image viewer: slide show that hides the
+cursor, panning with a "grab" hand, back/forward mouse buttons). Public API is
+additive; existing numeric values (`widget.Cursor` 0–6, `widget.MouseButton` 0–4)
+did not move.
+
+### Hiding the cursor and new shapes (E2)
+
+```go
+// Appended to the END of widget.Cursor (values 7..12).
+widget.CursorNone      // hidden
+widget.CursorGrab      // open hand (panning)
+widget.CursorGrabbing  // closed hand (dragging right now)
+widget.CursorSizeAll   // four arrows
+widget.CursorCrosshair // crosshair (crop, picker)
+widget.CursorWait      // busy
+
+// A shape over EVERY widget, applied at once, without waiting for a mouse move.
+eng.SetCursorOverride(widget.CursorNone)   // any goroutine; same shape again = no-op
+eng.ClearCursorOverride()                  // back to the cursor of the widget under the mouse
+c, ok := eng.CursorOverride()
+eng.SetOnCursorOverrideChanged(fn)         // window.Run installs it; applications do not
+```
+
+`Engine.CursorAt` returns the override first (stronger than any widget and any
+modal), so the window needs no new interface: `window.Run` subscribes to the
+change (`cursorOverrideNotifier`, optional like `modifierSink`) and on the engine
+goroutine recomputes the cursor for the LAST known mouse position and hands it to
+the OS window (`surface.refreshCursor`). Before the mouse was ever in the window
+the point is (-1,-1), so after `ClearCursorOverride` the arrow comes back.
+Popup windows (menus moved into their own OS window) are not covered: they never
+had cursor handling and the override does not reach them.
+A custom `EngineAPI` without `SetOnCursorOverrideChanged` just never gets the
+immediate refresh (the override still wins on the next move).
+
+How each backend shows the shapes:
+
+| shape | Win32 | X11 | Wayland |
+|---|---|---|---|
+| None | `SetCursor(NULL)` in `WM_SETCURSOR` (`ShowCursor` untouched) | transparent cursor from two 1×1 depth-1 pixmaps (`CreatePixmap`, `CreateGC`, `PolyFillRectangle`, `CreateCursor`) | `wl_pointer.set_cursor(serial, NULL, 0, 0)` — also with `cursor-shape-v1` (it has no hidden shape) |
+| Grab / Grabbing | own 24×24 `HCURSOR` (`CreateIconIndirect`, cached per window, freed on `WM_DESTROY`); falls back to `IDC_HAND`/`IDC_SIZEALL` | own image via two pixmaps + `CreateCursor` (core protocol, no RENDER) | `grab` / `grabbing` shapes; without `cursor-shape-v1` the same 24×24 image |
+| SizeAll | `IDC_SIZEALL` | glyph `fleur` (52) | `all-scroll` (33) |
+| Crosshair | `IDC_CROSS` | glyph `crosshair` (34) | `crosshair` (8) |
+| Wait | `IDC_WAIT` | glyph `watch` (150) | `wait` (6) |
+
+XAML: `Cursor="None|Grab|Grabbing|SizeAll|Cross|Crosshair|Wait"` joins the old
+`Arrow|IBeam|Hand|SizeWE|SizeNS`.
+
+Own images are 24×24 (`wlCursorSize`, the RDP limit for WinLine is 32×32); the
+art lives in `window/waylandcursor.go` (`wlCursorShapes`, `wlCursorImage`) and is
+shared by all three backends. macOS has no cursor support at all (`CocoaWindow`
+has no `SetCursor`): the override is simply ignored there.
+
+Win32 detail: `SetCursor` applies the shape at once only when the window is under
+the pointer (`WindowFromPoint`), because the cursor is global.
+
+### Pointer leave on Win32 (E4)
+
+`WM_MOUSEMOVE` arms `TrackMouseEvent(TME_LEAVE)` once per entry
+(`leaveTracker`, one-shot like the system request; a refusal is retried on the
+next move); `WM_MOUSELEAVE` goes the same way as `LeaveNotify` on X11 and
+`wl_pointer.leave`: the application gets `OnMouseMove(-1, -1)` (`pointerOutside`),
+so hover and tooltips are dropped. Not a leave (`mouseLeaveReal`): the pointer
+moved from the client area onto a caption button the application drew itself
+(`SetHitTest` → `HTMIN/MAX/CLOSE`): the system calls it non-client, sends
+`WM_MOUSELEAVE` and drives the highlight with `WM_NCMOUSEMOVE`; the order is not
+guaranteed, so the handler looks at the cursor position and the hit area and stays
+quiet for the buttons. The caption itself and the resize edges are a real leave.
+`WM_NCMOUSEMOVE` over our buttons arms `TME_LEAVE|TME_NONCLIENT` the same way, so
+`WM_NCMOUSELEAVE` no longer depends on `DefWindowProc` (which we skip for them).
+While a button is held (mouse capture) Windows sends no leave; it comes after the
+release if the pointer is outside.
+
+### Side mouse buttons X1 / X2 (E5)
+
+```go
+widget.MouseButtonX1 // "back"    (Win32 XBUTTON1, X11 button 8, Linux BTN_SIDE)
+widget.MouseButtonX2 // "forward" (Win32 XBUTTON2, X11 button 9, Linux BTN_EXTRA)
+eng.SendMouseButton(x, y, widget.MouseButtonX1, true)
+```
+
+Backends: Win32 `WM_XBUTTONDOWN/UP/DBLCLK` (`GET_XBUTTON_WPARAM`; returns TRUE,
+otherwise `DefWindowProc` turns the release into `WM_APPCOMMAND`); X11 buttons 8
+and 9; Wayland `BTN_SIDE`/`BTN_BACK` → X1 and `BTN_EXTRA`/`BTN_FORWARD` → X2
+(multimedia mice and drivers name the buttons by purpose); Cocoa `buttonNumber`
+3/4 (before, any "other" button was taken for the middle one). Codes in
+`NativeWindow.SetOnMouseButton`: 5 = X1, 6 = X2. No mouse capture. A held X1/X2 is
+released by the Wayland backend on pointer leave like the others.
+
+Handling rules for widgets: the event bubbles from the deepest widget under the
+pointer to the root like any button. All standard widgets react to `MouseLeft`
+only (checked: `OnMouseButton` of every widget, `switch` on buttons have no
+default that falls to the left button), so an application hangs back/forward on
+its root or on a container:
+
+```go
+func (r *Root) OnMouseButton(e widget.MouseEvent) bool {
+    if e.Pressed && e.Button == widget.MouseButtonX1 { r.goBack(); return true }
+    if e.Pressed && e.Button == widget.MouseButtonX2 { r.goForward(); return true }
+    return false
+}
+```
+
+Tests: `tests/cursor_override_test.go` (values, override without a move, change
+notifications, concurrency), `tests/xbuttons_test.go` (values, X1/X2 reach the
+root, Button/CheckBox/ToggleSwitch/RadioButton/TextInput/Dropdown ignore them),
+`window/cursor_override_test.go` (the window applies the override without a move,
+real engine), `window/mousebuttons_test.go` (X11 / evdev / `WM_XBUTTON` / Cocoa
+mapping), `window/pointerleave_tracker_test.go` (arm once, false-leave rule),
+`window/x11cursorbitmap_test.go` (pixmap-cursor request stream, art limits),
+`window/mouse_windows_test.go` (`WM_XBUTTON*`, `WM_MOUSELEAVE` through `wndProc`,
+caption-button case, hidden cursor, own cursors), `window/x11_cursor_shapes_linux_test.go`
+and `window/wayland_cursor_linux_test.go` (on the wire: hidden cursor, shapes,
+side buttons).
 
 ---
 

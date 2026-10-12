@@ -102,7 +102,8 @@ type NativeWindow interface {
 	SetOnMouseMove(fn func(x, y int))
 
 	// SetOnMouseButton — callback при нажатии/отпускании кнопки мыши.
-	// button: 0=left, 1=right, 2=middle. pressed: true=нажата.
+	// button: 0=left, 1=right, 2=middle, 3/4=тик колеса вверх/вниз, 5=X1
+	// («назад»), 6=X2 («вперёд»). pressed: true=нажата.
 	SetOnMouseButton(fn func(x, y, button int, pressed bool))
 
 	// SetOnKeyDown — callback при нажатии клавиши.

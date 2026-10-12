@@ -1480,6 +1480,7 @@ mb.ShowYesNoCancel("Сохранение", "Сохранить?", callback)     
 eng.SendMouseMove(x, y int)
 eng.SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 // btn: widget.MouseLeft | widget.MouseRight | widget.MouseMiddle
+//      | widget.MouseButtonX1 («назад») | widget.MouseButtonX2 («вперёд») — боковые кнопки
 ```
 
 Движок делает hit-test и передаёт событие нужному виджету. При ЛКМ фокус переходит на `Focusable`-виджет под курсором.
@@ -2589,7 +2590,12 @@ view.Groups()   // []CollectionViewGroup{Name, Items}
 - `ToolTip="..."` на любом виджете; задержка/вкл-выкл через
   `eng.SetTooltipsEnabled`/`SetTooltipDelay`.
 - Курсоры мыши: виджеты реализуют `Cursor() widget.Cursor` (TextBox → I-beam,
-  GridSplitter → resize); `eng.CursorAt(x, y)`.
+  GridSplitter → resize); `eng.CursorAt(x, y)`. Формы `CursorNone` (спрятан),
+  `CursorGrab`/`CursorGrabbing`, `CursorSizeAll`, `CursorCrosshair`, `CursorWait`.
+  Форма поверх всех виджетов, применяемая сразу, без движения мыши:
+  `eng.SetCursorOverride(widget.CursorNone)` / `eng.ClearCursorOverride()`
+  (слайд-шоу прячет курсор по таймеру бездействия; перетаскивание показывает
+  «сжатую руку»).
 - Индикатор раскладки в окнах/диалогах — свойство `ShowLocaleIndicator`,
   контекстное меню переключения.
 

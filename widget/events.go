@@ -17,6 +17,14 @@ const (
 	MouseMiddle    MouseButton = 2
 	MouseWheelUp   MouseButton = 3
 	MouseWheelDown MouseButton = 4
+
+	// Боковые кнопки «назад/вперёд» (v3.34). X1 — «назад» (Win32 XBUTTON1,
+	// X11 кнопка 8, Linux BTN_SIDE), X2 — «вперёд» (XBUTTON2, кнопка 9,
+	// BTN_EXTRA). Виджеты, которым они не нужны, их игнорируют: все
+	// стандартные виджеты реагируют только на MouseLeft; до корня дерева
+	// событие всплывает как любое непоглощённое.
+	MouseButtonX1 MouseButton = 5
+	MouseButtonX2 MouseButton = 6
 )
 
 // MouseEvent содержит данные события мыши.

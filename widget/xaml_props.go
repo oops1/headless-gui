@@ -218,6 +218,18 @@ func applyCursor(w Widget, el xElement) {
 		sc.SetCursor(CursorSizeNS)
 	case "arrow":
 		sc.SetCursor(CursorArrow)
+	case "none":
+		sc.SetCursor(CursorNone)
+	case "grab":
+		sc.SetCursor(CursorGrab)
+	case "grabbing":
+		sc.SetCursor(CursorGrabbing)
+	case "sizeall":
+		sc.SetCursor(CursorSizeAll)
+	case "cross", "crosshair":
+		sc.SetCursor(CursorCrosshair)
+	case "wait":
+		sc.SetCursor(CursorWait)
 	}
 }
 
