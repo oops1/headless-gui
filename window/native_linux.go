@@ -492,6 +492,12 @@ func (w *X11Window) CreatePopup(width, height int) error {
 
 func (w *X11Window) RunEventLoop() error {
 	buf := make([]byte, 32)
+	// Просьба о касаниях могла прийти после Create и до запуска цикла: сразу
+	// выполняем отложенную подписку; looping заявляем ДО проверки, чтобы просьба,
+	// пришедшая ровно сейчас, не потерялась (см. SetTouchEnabled).
+	w.touch.looping.Store(true)
+	defer w.touch.looping.Store(false)
+	w.x11SyncTouch()
 	for !w.closed.Load() {
 		if !w.readEvent(buf) {
 			if w.closed.Load() {
@@ -510,6 +516,7 @@ func (w *X11Window) RunEventLoop() error {
 			w.handleX11Event(full)
 		}
 		w.x11SyncWMState()
+		w.x11SyncTouch()
 	}
 	return nil
 }

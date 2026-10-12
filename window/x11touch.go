@@ -15,6 +15,9 @@ package window
 //     подписывает окно; события приходят как GenericEvent (тип 35) с хвостом,
 //     длина которого в 4-байтовых словах — в заголовке.
 //
+// Нажим и размер пятна контакта приходят осями устройства (валюаторами) в хвосте
+// события; как их найти и перевести — в блоке «Нажим и контакт» ниже.
+//
 // Окно, выбравшее события касаний, получает их вместо эмулируемого указателя
 // (сервер эмулирует указатель только для клиентов, не выбравших касания); на
 // случай расхождения сервера со спецификацией есть x11TouchGuard.
@@ -124,6 +127,9 @@ type xiTouchEvent struct {
 	EventX   float64 // относительно окна, получившего событие
 	EventY   float64
 	Flags    uint32
+	// raw — событие целиком: за фиксированной частью идут маски и значения
+	// осей (нажим, пятно контакта), см. axisValue.
+	raw []byte
 }
 
 // fp1616 переводит число с фиксированной точкой 16.16 в float64.
@@ -149,6 +155,7 @@ func parseXITouchEvent(buf []byte, xiOpcode byte) (xiTouchEvent, bool) {
 		EventX:   fp1616(binary.LittleEndian.Uint32(buf[40:44])),
 		EventY:   fp1616(binary.LittleEndian.Uint32(buf[44:48])),
 		Flags:    binary.LittleEndian.Uint32(buf[56:60]),
+		raw:      buf,
 	}, true
 }
 
@@ -216,4 +223,296 @@ func (g *x11TouchGuard) swallowsPointer(serverTime uint32) bool {
 func (g *x11TouchGuard) reset() {
 	g.emulating = nil
 	g.hasEnd = false
+}
+
+// ─── Нажим и контакт: валюаторы устройства ──────────────────────────────────
+//
+// Давление и размер пятна контакта в X11 — не поля события, а оси (валюаторы)
+// сенсорного устройства: у каждой есть метка-атом ("Abs MT Pressure",
+// "Abs MT Touch Major"…) и пределы. Поэтому порядок такой:
+//
+//   - XIQueryDevice(XIAllDevices) один раз, при подписке, даёт для каждого
+//     устройства список его валюаторов: номер, атом-метка, min, max;
+//   - InternAtom(only_if_exists) по именам нужных меток даёт сами атомы (0 —
+//     такой оси ни у кого нет);
+//   - в touch-событии за фиксированной частью идут маска кнопок, маска
+//     валюаторов и по одному FP3232 на каждый установленный бит маски.
+//
+// Событие несёт только те оси, которые менялись, поэтому последнее значение
+// каждой оси помним на время касания (x11TouchAxisTracker).
+//
+// Единицы. Давление нормируется по min..max оси в 0..1. Размеры пятна драйвер
+// отдаёт в единицах той же оси, что и положение (для evdev — «поверхностные
+// единицы» устройства), поэтому в пиксели их переводит множитель «ширина экрана в
+// пикселях / размах оси X». Это верно, если сенсорный экран растянут на весь
+// экран X; на нескольких мониторах с экраном на одном из них размеры будут
+// завышены. Угол ABS_MT_ORIENTATION — «знаковая четверть оборота»: значение,
+// делённое на предел оси, умноженное на 90°.
+
+const (
+	xiMinorQueryDevice = 48
+	xiAllDevices       = 0
+
+	xiValuatorClass = 2 // XIValuatorClass в XIDeviceInfo
+)
+
+// Метки осей касания, по которым ищутся валюаторы.
+const (
+	xiAxisPressure = "Abs MT Pressure"
+	xiAxisMajor    = "Abs MT Touch Major"
+	xiAxisMinor    = "Abs MT Touch Minor"
+	xiAxisOrient   = "Abs MT Orientation"
+	xiAxisPosX     = "Abs MT Position X"
+)
+
+// x11InternAtomRequest — InternAtom (opcode 16).
+func x11InternAtomRequest(name string, onlyIfExists bool) []byte {
+	pad := (4 - len(name)%4) % 4
+	reqLen := 2 + (len(name)+pad)/4
+	buf := make([]byte, reqLen*4)
+	buf[0] = 16
+	if onlyIfExists {
+		buf[1] = 1
+	}
+	binary.LittleEndian.PutUint16(buf[2:4], uint16(reqLen))
+	binary.LittleEndian.PutUint16(buf[4:6], uint16(len(name)))
+	copy(buf[8:], name)
+	return buf
+}
+
+// xiQueryDeviceRequest — XIQueryDevice(deviceid).
+func xiQueryDeviceRequest(xiOpcode byte, deviceID uint16) []byte {
+	buf := make([]byte, 8)
+	buf[0] = xiOpcode
+	buf[1] = xiMinorQueryDevice
+	binary.LittleEndian.PutUint16(buf[2:4], 2)
+	binary.LittleEndian.PutUint16(buf[4:6], deviceID)
+	return buf
+}
+
+// fp3232 переводит FP3232 (int32 целая часть, uint32 дробная) в float64.
+func fp3232(b []byte) float64 {
+	return float64(int32(binary.LittleEndian.Uint32(b[0:4]))) +
+		float64(binary.LittleEndian.Uint32(b[4:8]))/4294967296
+}
+
+// xiValuator — ось устройства (XIValuatorClass).
+type xiValuator struct {
+	Number   uint16
+	Label    uint32 // атом
+	Min, Max float64
+}
+
+// xiDevice — устройство из ответа XIQueryDevice и его валюаторы.
+type xiDevice struct {
+	ID        uint16
+	Valuators []xiValuator
+}
+
+// parseXIQueryDeviceReply разбирает ответ XIQueryDevice целиком (32 байта
+// заголовка и хвост). Обрезанное или неправдоподобное — разбор прекращается на
+// последнем целом устройстве, а не паникой.
+func parseXIQueryDeviceReply(reply []byte) []xiDevice {
+	if len(reply) < 32 || reply[0] != 1 {
+		return nil
+	}
+	n := int(binary.LittleEndian.Uint16(reply[8:10]))
+	var out []xiDevice
+	off := 32
+	for i := 0; i < n; i++ {
+		if off+12 > len(reply) {
+			break
+		}
+		dev := xiDevice{ID: binary.LittleEndian.Uint16(reply[off : off+2])}
+		numClasses := int(binary.LittleEndian.Uint16(reply[off+6 : off+8]))
+		nameLen := int(binary.LittleEndian.Uint16(reply[off+8 : off+10]))
+		off += 12 + (nameLen+3)&^3
+		for c := 0; c < numClasses; c++ {
+			if off+4 > len(reply) {
+				break
+			}
+			typ := binary.LittleEndian.Uint16(reply[off : off+2])
+			size := int(binary.LittleEndian.Uint16(reply[off+2:off+4])) * 4
+			if size < 8 || off+size > len(reply) {
+				off = len(reply)
+				break
+			}
+			if typ == xiValuatorClass && size >= 40 {
+				dev.Valuators = append(dev.Valuators, xiValuator{
+					Number: binary.LittleEndian.Uint16(reply[off+6 : off+8]),
+					Label:  binary.LittleEndian.Uint32(reply[off+8 : off+12]),
+					Min:    fp3232(reply[off+12 : off+20]),
+					Max:    fp3232(reply[off+20 : off+28]),
+				})
+			}
+			off += size
+		}
+		out = append(out, dev)
+	}
+	return out
+}
+
+// x11TouchAtoms — атомы меток осей касания (0 — такого атома на сервере нет).
+type x11TouchAtoms struct {
+	pressure, major, minor, orient, posX uint32
+}
+
+// x11AxisSel — выбранная ось: есть ли, её номер и пределы.
+type x11AxisSel struct {
+	ok       bool
+	num      uint16
+	min, max float64
+}
+
+// x11TouchAxes — нужные оси одного сенсорного устройства.
+type x11TouchAxes struct {
+	pressure, major, minor, orient x11AxisSel
+	// pxPerUnit — пикселей экрана на единицу оси положения (для размеров пятна);
+	// 0 — перевести нечем, и размеров пятна нет.
+	pxPerUnit float64
+}
+
+// resolveTouchAxes выбирает оси касания из валюаторов устройства. screenW — ширина
+// экрана в пикселях (для перевода единиц пятна в пиксели).
+func resolveTouchAxes(dev xiDevice, at x11TouchAtoms, screenW int) x11TouchAxes {
+	var ax x11TouchAxes
+	pick := func(atom uint32) x11AxisSel {
+		if atom == 0 {
+			return x11AxisSel{}
+		}
+		for _, v := range dev.Valuators {
+			if v.Label == atom {
+				return x11AxisSel{ok: true, num: v.Number, min: v.Min, max: v.Max}
+			}
+		}
+		return x11AxisSel{}
+	}
+	ax.pressure = pick(at.pressure)
+	ax.major = pick(at.major)
+	ax.minor = pick(at.minor)
+	ax.orient = pick(at.orient)
+	// Ось положения X: по метке, а если метки нет, то нулевая — по соглашению XI
+	// абсолютные устройства начинают с X.
+	pos := pick(at.posX)
+	if !pos.ok {
+		for _, v := range dev.Valuators {
+			if v.Number == 0 {
+				pos = x11AxisSel{ok: true, num: 0, min: v.Min, max: v.Max}
+			}
+		}
+	}
+	if pos.ok && pos.max > pos.min && screenW > 0 {
+		ax.pxPerUnit = float64(screenW) / (pos.max - pos.min)
+	}
+	return ax
+}
+
+// axisValue достаёт из touch-события значение оси n; ok=false — события эта ось
+// не несёт (или событие обрезано).
+func (e xiTouchEvent) axisValue(n uint16) (float64, bool) {
+	b := e.raw
+	if len(b) < 80 {
+		return 0, false
+	}
+	buttonsLen := int(binary.LittleEndian.Uint16(b[48:50])) * 4
+	maskLen := int(binary.LittleEndian.Uint16(b[50:52])) * 4
+	maskOff := 80 + buttonsLen
+	valOff := maskOff + maskLen
+	if valOff > len(b) || int(n)/8 >= maskLen || b[maskOff+int(n)/8]&(1<<(n%8)) == 0 {
+		return 0, false
+	}
+	idx := 0 // сколько осей с меньшим номером в событии есть до нашей
+	for i := 0; i < int(n); i++ {
+		if b[maskOff+i/8]&(1<<(i%8)) != 0 {
+			idx++
+		}
+	}
+	at := valOff + idx*8
+	if at+8 > len(b) {
+		return 0, false
+	}
+	return fp3232(b[at : at+8]), true
+}
+
+// x11Contact — последние известные нажим и пятно пальца в единицах осей.
+type x11Contact struct {
+	pressure, major, minor, orient float64
+	has                            [4]bool
+}
+
+// x11TouchAxisTracker переводит значения осей в события виджетов. Только цикл
+// событий.
+type x11TouchAxisTracker struct {
+	axes map[uint16]x11TouchAxes // по SourceID: устройство-источник касания
+	last map[uint32]*x11Contact  // по Detail: касание
+	// asked — источники, ради которых уже просили обновить список устройств: без
+	// этого неизвестный источник гнал бы повторные запросы на каждое событие.
+	asked map[uint16]bool
+}
+
+// setDevices запоминает оси всех устройств (устройство без осей тоже вносится:
+// «известно, что давления нет»).
+func (tr *x11TouchAxisTracker) setDevices(devs []xiDevice, at x11TouchAtoms, screenW int) {
+	tr.axes = make(map[uint16]x11TouchAxes, len(devs))
+	for _, d := range devs {
+		tr.axes[d.ID] = resolveTouchAxes(d, at, screenW)
+	}
+}
+
+// apply дописывает в ev нажим и пятно, а возвращает true, если источник события
+// неизвестен и стоит обновить список устройств (не чаще раза на источник).
+func (tr *x11TouchAxisTracker) apply(ev *widget.TouchEvent, e xiTouchEvent) (refresh bool) {
+	ax, known := tr.axes[e.SourceID]
+	if !known {
+		if tr.asked == nil {
+			tr.asked = make(map[uint16]bool)
+		}
+		if tr.axes != nil && !tr.asked[e.SourceID] {
+			tr.asked[e.SourceID] = true
+			refresh = true
+		}
+		return refresh
+	}
+	c := tr.last[e.Detail]
+	if c == nil {
+		c = &x11Contact{}
+		if tr.last == nil {
+			tr.last = make(map[uint32]*x11Contact)
+		}
+		tr.last[e.Detail] = c
+	}
+	read := func(sel x11AxisSel, i int, dst *float64) {
+		if !sel.ok {
+			return
+		}
+		if v, ok := e.axisValue(sel.num); ok {
+			*dst, c.has[i] = v, true
+		}
+	}
+	read(ax.pressure, 0, &c.pressure)
+	read(ax.major, 1, &c.major)
+	read(ax.minor, 2, &c.minor)
+	read(ax.orient, 3, &c.orient)
+
+	if c.has[0] && ax.pressure.max > ax.pressure.min {
+		p := (c.pressure - ax.pressure.min) / (ax.pressure.max - ax.pressure.min)
+		ev.Pressure = math.Min(math.Max(p, 0), 1)
+	}
+	if ax.pxPerUnit > 0 && c.has[1] && c.major > 0 {
+		ev.Major = c.major * ax.pxPerUnit
+		if c.has[2] {
+			ev.Minor = c.minor * ax.pxPerUnit
+		}
+		if ev.Minor > ev.Major {
+			ev.Major, ev.Minor = ev.Minor, ev.Major
+		}
+		lim := math.Max(math.Abs(ax.orient.min), math.Abs(ax.orient.max))
+		if c.has[3] && lim > 0 {
+			ev.Orientation = c.orient / lim * 90
+		}
+	}
+	if e.Type == xiEvTouchEnd {
+		delete(tr.last, e.Detail)
+	}
+	return false
 }
