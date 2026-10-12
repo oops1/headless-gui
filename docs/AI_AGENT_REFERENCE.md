@@ -879,7 +879,8 @@ widget.AliasStrings(map[string]string{"dlg.ok": "btn.ok"})
 win.SetMinSize(800, 600)
 win.MinSize() (int, int)
 
-// Window icon at runtime: Win32 WM_SETICON, X11 _NET_WM_ICON.
+// Window icon at runtime: Win32 WM_SETICON, X11 _NET_WM_ICON, Wayland
+// xdg-toplevel-icon-v1 (v3.34, only if the compositor announces the global).
 // Nearest size wins; a backend without support returns ErrIconUnsupported.
 win.SetIcon(icon16, icon32)
 win.SetIcon() // drop it
@@ -3073,6 +3074,8 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 | Открыть ссылку / файл (`window.OpenURL`, `OpenFile`, `RevealFile`) | `ShellExecuteW`, показ — Проводник `/select` | портал `OpenURI` и `FileManager1.ShowItems`; `xdg-open` только если портала на шине нет | Wayland — то же, что X11; macOS — `/usr/bin/open`; прочие — `ErrOpenUnsupported` |
 | Файлы в буфере (`widget.ClipboardSetFiles`, `ClipboardFiles`) | `CF_HDROP` + «Preferred DropEffect» | `text/uri-list`, `x-special/gnome-copied-files` (нативное окно) | Wayland — те же типы (нативное окно); macOS — пути текстом |
 | HTML в буфере (`widget.SetClipboardHTML`) | «HTML Format» | `text/html` (нативное окно) | Wayland — `text/html` (нативное окно); macOS — только простой текст |
+| Изображение в буфере (`widget.ClipboardSetImage`, `ClipboardImage`, v3.34) | «PNG» + `CF_DIBV5` + `CF_DIB` | `image/png` лениво, INCR для больших; читает `image/png`, затем `image/bmp` | Wayland — `image/png` лениво, читает `image/png`, затем `image/bmp`; macOS — нет (`ErrClipboardImageUnsupported`) |
+| Значок окна (`Window.SetIcon`) | `WM_SETICON` | `_NET_WM_ICON` | Wayland — `xdg-toplevel-icon-v1` (v3.34), иначе `ErrIconUnsupported`; macOS — `ErrIconUnsupported` |
 | Печать (`printing.Print`) | `PrintDlgEx` + GDI | CUPS по IPP, системного диалога нет | Wayland — то же, что X11; macOS — `ErrUnsupported`. `SavePDF` — везде |
 | Несколько окон в процессе | да | да | Wayland — да, macOS — не проверялось |
 | Имя для панели задач | — | `WM_CLASS` | Wayland — `app_id` |
@@ -7471,6 +7474,69 @@ query against a fake compositor on a real unix socket), `window/x11_fullscreen_l
 (`ClientMessage` bytes, state from `_NET_WM_STATE`, `_NET_SUPPORTED`, RandR 1.5
 over a fake server, fallback), `*_e2e_linux_test.go` (live X server / compositor via
 `DISPLAY` / `WAYLAND_DISPLAY`; skipped without them).
+
+---
+
+## v3.34 additions: image on the clipboard, Wayland window icon
+
+### Image on the clipboard (E3)
+
+```go
+// Optional extension of ClipboardProvider (like ClipboardHTMLProvider / ClipboardFilesProvider):
+type ClipboardImageProvider interface {
+    SetImage(img image.Image) error
+    GetImage() (img image.Image, ok bool)
+}
+err := widget.ClipboardSetImage(img)   // replaces the clipboard; the image is copied
+img, ok := widget.ClipboardImage()     // ok == false: not an image, or the provider cannot do images
+
+widget.ErrClipboardImageUnsupported    // provider without ClipboardImageProvider (custom provider, macOS)
+widget.ErrClipboardImageEmpty          // nil or empty image
+```
+
+`ClipboardImage` may BLOCK (waits for the owner: 300 ms for the owner's answer and
+again 300 ms for every next chunk of a big picture on X11/Wayland, then PNG/BMP
+decoding): call it in a goroutine and `Engine.Post` the result, like
+`ClipboardFiles`. `ClipboardSetImage` on Windows encodes PNG/DIB immediately
+(no window owner, so no delayed rendering) — for big pictures call it off the
+engine goroutine too; on X11/Wayland it only copies the picture and encodes PNG
+on the first request (cached for the next ones). `UseMemoryClipboard()` supports
+images (copy in, copy out; text/HTML/files and the image displace each other).
+
+| | Windows | X11 | Wayland |
+|---|---|---|---|
+| put | `PNG` (registered), `CF_DIBV5` (32-bit BGRA, `BI_BITFIELDS`, NOT premultiplied), `CF_DIB` (24-bit, alpha blended over white) — one `OpenClipboard`, most descriptive first | owner of `CLIPBOARD`; `TARGETS` = `TARGETS`, `image/png` only (no text targets); `INCR` above 128 KiB | `wl_data_source` with the single type `image/png` |
+| read | `PNG` → `CF_DIBV5` → `CF_DIB` (a present-but-broken format falls through to the next) | `TARGETS`, then `image/png`, else `image/bmp`; owner not answering `TARGETS` with a refusal is probed blindly (PNG, BMP); `INCR` from the owner supported | the offer's `image/png`, else `image/bmp`/`image/x-bmp` |
+
+- DIB decoder (`internal/dib`): `BI_RGB`, `BI_BITFIELDS`, `BI_ALPHABITFIELDS`;
+  1/4/8-bit palettes, 16/24/32-bit; bottom-up and top-down; `CORE`/`INFO`/`V4`/`V5`
+  headers; alpha only from an explicit alpha mask (the 4th byte of 32-bit
+  `BI_RGB` is ignored). RLE and JPEG/PNG-in-DIB are `ErrUnsupported`. Limits:
+  100 Mpx, 64 MiB of data on Linux; PNG size is checked from the header before
+  decoding.
+- X11 `INCR` (both directions): sending uses 128 KiB chunks (a `ChangeProperty`
+  without BIG-REQUESTS is capped at 256 KiB), subscribes to `PropertyNotify` of
+  the requestor window and unsubscribes at the end; an abandoned transfer is
+  dropped after 30 s. Receiving collects chunks on `PropertyNotify`. Text
+  paste from an `INCR` owner works too now (it used to return the 4-byte size).
+- Pure helpers: `internal/dib` (DIB/BMP), `internal/clipimage` (type choice,
+  PNG, clone), `window/clipboard_image.go` (lazy PNG), `widget/clipboard_image.go`.
+- WinLine note: `cliprdr` carries only text and files, so an image does not reach
+  the RDP client until WinLine adds `CF_DIB` there; `image/png` works for ordinary desktops.
+- Limitations: no `image/bmp` is offered (only read); macOS has no provider.
+
+### Wayland window icon (E7)
+
+`Window.SetIcon(icons...)` now works on Wayland through
+`xdg_toplevel_icon_manager_v1` (`xdg-toplevel-icon-v1`; KDE 6.1+, Sway, ...) when
+the compositor announces the global in the registry; otherwise it returns
+`ErrIconUnsupported` as before (WinLine takes the icon from `.desktop`). Each image
+becomes a square ARGB8888 `wl_shm` buffer (premultiplied; non-square is centred
+in a transparent square; equal sizes deduplicated; more than 1024 px skipped),
+`add_buffer(scale=1)`, then `set_icon(toplevel, icon)` and `icon.destroy`; the
+pool of the previous icon is released on replacement, `SetIcon()` with no
+arguments sends `set_icon(toplevel, null)`. Before `Run()` the icon is remembered
+and applied after the first configure.
 
 ---
 

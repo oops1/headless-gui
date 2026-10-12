@@ -3659,9 +3659,10 @@ Call it any time after the window exists — to show the progress of a long
 operation, say — or before `Run()`: the icon is applied when the window is
 created.
 
-Works on **Win32** (`WM_SETICON`) and **X11** (`_NET_WM_ICON`). A backend that
-cannot do it (Wayland before `xdg-toplevel-icon-v1`) returns
-`window.ErrIconUnsupported` — deliberately not silence: an application with no
+Works on **Win32** (`WM_SETICON`), **X11** (`_NET_WM_ICON`) and **Wayland**
+(`xdg-toplevel-icon-v1`, since v3.34 — when the compositor announces that global:
+KDE 6.1+, Sway). A backend that cannot do it (Wayland without the global, macOS)
+returns `window.ErrIconUnsupported` — deliberately not silence: an application with no
 visible icon should learn why here, not go hunting through desktop settings.
 
 Before `Run()` the method always returns `nil`: there is no backend yet, so
@@ -3957,6 +3958,36 @@ As with HTML, this is the optional `widget.ClipboardFilesProvider`
 without it gets the paths as text from `ClipboardSetFiles`, and
 `ClipboardFiles` honestly answers `ok == false`. `UseMemoryClipboard()`
 supports files.
+
+### Image on the clipboard
+
+Since v3.34 a picture can be put on the clipboard ("Copy image") and read back:
+
+```go
+if err := widget.ClipboardSetImage(img); err != nil { /* ErrClipboardImageUnsupported — the provider cannot */ }
+
+go func() { // reading may wait — not on the engine goroutine
+    img, ok := widget.ClipboardImage() // ok == false — not an image on the clipboard
+    eng.Post(func() { /* show img */ })
+}()
+```
+
+`ClipboardSetImage` replaces the clipboard contents and copies the picture, so
+the original may be changed afterwards. On Windows PNG and DIB are encoded
+immediately — call it in its own goroutine for big pictures.
+
+- Windows: three formats are put in one `OpenClipboard` — "PNG", `CF_DIBV5`
+  (32-bit BGRA, alpha not premultiplied) and `CF_DIB` (24-bit, transparency
+  blended over white); reading goes PNG → `CF_DIBV5` → `CF_DIB`. Paint, GIMP,
+  Office and browsers paste it.
+- X11 and Wayland: `image/png`, encoded lazily — when somebody asks for it. Reading
+  takes `image/png`, else `image/bmp`. Big pictures on X11 go through `INCR` (both
+  directions). The wait is 300 ms for the owner's answer and for every next chunk.
+- macOS and a custom provider without `widget.ClipboardImageProvider` —
+  `ErrClipboardImageUnsupported`. `UseMemoryClipboard()` supports images.
+
+In a WinLine session the picture does not reach the RDP client yet: `cliprdr`
+carries only text and files.
 
 ### Color emoji
 

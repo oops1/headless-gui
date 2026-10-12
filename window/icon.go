@@ -24,9 +24,9 @@ var ErrIconUnsupported = errors.New("window: смена значка окна н
 
 // iconSetter — опциональная возможность бэкенда сменить значок окна.
 //
-// Опциональная, а не часть NativeWindow: не всякий бэкенд это умеет (у
-// Wayland до xdg-toplevel-icon-v1 такого протокола просто нет), и требовать
-// метод от всех значило бы заставить их писать заглушки.
+// Опциональная, а не часть NativeWindow: не всякий бэкенд это умеет (macOS не
+// умеет; Wayland — только если компоновщик объявил xdg-toplevel-icon-v1), и
+// требовать метод от всех значило бы заставить их писать заглушки.
 type iconSetter interface {
 	setIcon(icons []image.Image) error
 }
