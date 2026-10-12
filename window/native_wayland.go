@@ -318,6 +318,8 @@ type WaylandWindow struct {
 	cursorData       []byte
 	cursorSlots      map[int]wlCursorSlot
 	gCursorShapeMgr  uint32 // имя глобала wp_cursor_shape_manager_v1
+	gToplevelIcon    uint32 // имя глобала xdg_toplevel_icon_manager_v1 (значок окна)
+	icon             wlIconState
 	cursorShapeMgrID uint32
 	cursorShapeDevID uint32
 
@@ -648,6 +650,9 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	if w.dataDeviceID != 0 {
 		widget.SetClipboardProvider(w.clip)
 	}
+	// Значок, заданный до создания окна, ставится теперь, когда известны
+	// глобалы компоновщика и есть toplevel.
+	w.applyPendingWlIcon()
 	return nil
 }
 
@@ -778,6 +783,10 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			// Необязательное расширение: с ним курсор рисует компоновщик
 			// из системной темы, без него — своя картинка.
 			w.gCursorShapeMgr = name
+		case "xdg_toplevel_icon_manager_v1":
+			// Необязательное расширение: без него значок окна не поставить
+			// (SetIcon вернёт ErrIconUnsupported).
+			w.gToplevelIcon = name
 		}
 
 	case obj == w.wmBaseID && opcode == xdgWmBaseEvPing:
@@ -1448,6 +1457,9 @@ func (w *WaylandWindow) Close() {
 	w.repeat.cancel()
 	w.closeAllPopups()
 	w.closeCursor()
+	w.icon.mu.Lock()
+	w.closeIconMemory()
+	w.icon.mu.Unlock()
 	w.closed = true
 	// Соединение закрываем ПОСЛЕ памяти: destroyPool ещё пишет в сокет
 	// (wl_buffer.destroy, wl_shm_pool.destroy), а Close по протоколу — это
