@@ -185,6 +185,7 @@ type X11Window struct {
 	atomXdndDrop       uint32
 	atomXdndFinished   uint32
 	atomXdndSelection  uint32
+	atomXdndProxy      uint32 // XdndProxy: окно-посредник приёмника (x11_drag_linux.go)
 	atomXdndTypeList   uint32
 	atomXdndActionCopy uint32
 	atomTextUriList    uint32
@@ -350,6 +351,7 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomXdndDrop = w.x11InternAtom("XdndDrop")
 	w.atomXdndFinished = w.x11InternAtom("XdndFinished")
 	w.atomXdndSelection = w.x11InternAtom("XdndSelection")
+	w.atomXdndProxy = w.x11InternAtom("XdndProxy")
 	w.atomXdndTypeList = w.x11InternAtom("XdndTypeList")
 	w.atomXdndActionCopy = w.x11InternAtom("XdndActionCopy")
 	w.atomTextUriList = w.x11InternAtom("text/uri-list")

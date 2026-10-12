@@ -72,6 +72,7 @@ type x11Drag struct {
 	grab   bool // указатель захвачен нами
 
 	target        uint32 // окно-приёмник; 0 — нет
+	proxy         uint32 // его XdndProxy (кому слать сообщения); 0 — прокси нет
 	targetVer     int
 	sentEnter     bool
 	accepted      bool       // последний XdndStatus: приёмник принимает
@@ -90,6 +91,12 @@ type x11Drag struct {
 	// find ищет приёмник под точкой: окно и версию XDND. nil — настоящий
 	// поиск по серверу; подменяется тестом.
 	find func(rx, ry int) (win uint32, ver int)
+	// proxyOf возвращает окно-посредник приёмника win (XdndProxy) или 0. nil —
+	// настоящее чтение свойства; подменяется тестом. proxies — его кэш на время
+	// перетаскивания: свойство читается по разу на окно, а не на каждое
+	// движение мыши.
+	proxyOf func(win uint32) uint32
+	proxies map[uint32]uint32
 }
 
 // noteButton ведёт маску зажатых кнопок мыши.
@@ -137,6 +144,7 @@ func (w *X11Window) BeginDragFiles(paths []string, effect DragEffect, done func(
 	d.body, d.effect, d.done, d.button = buildURIList(paths), effect&dragEffectAll, done, button
 	d.target, d.sentEnter, d.accepted, d.statusPending, d.queued = 0, false, false, false, false
 	d.busy, d.havePos, d.grab = false, false, false
+	d.proxy, d.proxies = 0, nil
 	d.mu.Unlock()
 	// Самому себе: событие придёт в насос, и тот начнёт перетаскивание.
 	w.x11SendClientMessage(w.wid, w.atomDragBegin, [5]uint32{})
@@ -267,19 +275,27 @@ func (w *X11Window) dragStep(p x11DragPos) {
 
 	d.mu.Lock()
 	changed := win != d.target
-	prev, prevSent := d.target, d.sentEnter
+	d.mu.Unlock()
+	var proxy uint32
+	if changed && win != 0 {
+		proxy = w.dndProxy(win) // чтение свойства — вне замка
+	}
+
+	d.mu.Lock()
+	prev, prevProxy, prevSent := d.target, d.proxy, d.sentEnter
 	if changed {
-		d.target, d.targetVer, d.sentEnter = win, ver, false
+		d.target, d.proxy, d.targetVer, d.sentEnter = win, proxy, ver, false
 		d.accepted, d.statusPending, d.queued, d.action = false, false, false, 0
 	}
+	proxy = d.proxy
 	d.mu.Unlock()
 
 	if changed {
 		if prev != 0 && prevSent {
-			w.sendXdndLeave(prev)
+			w.sendXdndLeave(prev, prevProxy)
 		}
 		if win != 0 {
-			w.sendXdndEnter(win, ver)
+			w.sendXdndEnter(win, proxy, ver)
 			d.mu.Lock()
 			d.sentEnter = true
 			d.mu.Unlock()
@@ -296,7 +312,7 @@ func (w *X11Window) dragStep(p x11DragPos) {
 	}
 	d.statusPending, d.posSentAt = true, time.Now()
 	d.mu.Unlock()
-	w.sendXdndPosition(win, p)
+	w.sendXdndPosition(win, proxy, p)
 }
 
 // dragOnStatus — XdndStatus от приёмника: принимает ли он и какое действие.
@@ -314,14 +330,14 @@ func (w *X11Window) dragOnStatus(buf []byte) {
 	d.accepted = flags&1 != 0
 	d.action = w.dndActionEffect(action)
 	d.statusPending = false
-	q, qp, win := d.queued, d.queuedPos, d.target
+	q, qp, win, proxy := d.queued, d.queuedPos, d.target, d.proxy
 	d.queued = false
 	if q {
 		d.statusPending, d.posSentAt = true, time.Now()
 	}
 	d.mu.Unlock()
 	if q {
-		w.sendXdndPosition(win, qp)
+		w.sendXdndPosition(win, proxy, qp)
 	}
 }
 
@@ -357,14 +373,14 @@ func (w *X11Window) dragRelease(time32 uint32) {
 		d.mu.Unlock()
 		return
 	}
-	target, ver, sent, accepted := d.target, d.targetVer, d.sentEnter, d.accepted
+	target, proxy, ver, sent, accepted := d.target, d.proxy, d.targetVer, d.sentEnter, d.accepted
 	action := d.action
 	d.mu.Unlock()
 	w.dragUngrab()
 
 	if target == 0 || !accepted {
 		if target != 0 && sent {
-			w.sendXdndLeave(target)
+			w.sendXdndLeave(target, proxy)
 		}
 		w.dragFinish(0)
 		return
@@ -375,7 +391,7 @@ func (w *X11Window) dragRelease(time32 uint32) {
 		d.timer = time.AfterFunc(x11DragFinishTimeout, func() { w.dragTimeout() })
 	}
 	d.mu.Unlock()
-	w.sendXdndDrop(target, time32)
+	w.sendXdndDrop(target, proxy, time32)
 	if ver < 2 {
 		// Приёмник старше v2 XdndFinished не шлёт: итог — последнее согласованное.
 		w.dragFinish(action)
@@ -401,10 +417,10 @@ func (w *X11Window) dragCancel() {
 		d.mu.Unlock()
 		return
 	}
-	target, sent := d.target, d.sentEnter
+	target, proxy, sent := d.target, d.proxy, d.sentEnter
 	d.mu.Unlock()
 	if target != 0 && sent {
-		w.sendXdndLeave(target)
+		w.sendXdndLeave(target, proxy)
 	}
 	w.dragFinish(0)
 }
@@ -447,6 +463,7 @@ func (w *X11Window) dragFinish(effect DragEffect) {
 	owned := d.phase != dragPending
 	d.phase, d.done, d.body = dragNone, nil, ""
 	d.target, d.sentEnter, d.accepted, d.queued, d.statusPending = 0, false, false, false, false
+	d.proxy, d.proxies = 0, nil
 	d.mu.Unlock()
 	d.active.Store(false)
 	w.dragUngrab()
@@ -503,7 +520,7 @@ func (w *X11Window) dragServeSelection(buf []byte) {
 
 // ─── Сообщения XDND источника ────────────────────────────────────────────────
 
-func (w *X11Window) sendXdndEnter(dest uint32, ver int) {
+func (w *X11Window) sendXdndEnter(dest, proxy uint32, ver int) {
 	if ver > 5 {
 		ver = 5
 	}
@@ -511,10 +528,10 @@ func (w *X11Window) sendXdndEnter(dest uint32, ver int) {
 	data[0] = w.wid
 	data[1] = uint32(ver) << 24 // бит 0 снят: типы — в data[2..4]
 	data[2] = w.atomTextUriList
-	w.x11SendClientMessage(dest, w.atomXdndEnter, data)
+	w.xdndSend(dest, proxy, w.atomXdndEnter, data)
 }
 
-func (w *X11Window) sendXdndPosition(dest uint32, p x11DragPos) {
+func (w *X11Window) sendXdndPosition(dest, proxy uint32, p x11DragPos) {
 	d := &w.drag
 	d.mu.Lock()
 	allowed := d.effect
@@ -525,21 +542,86 @@ func (w *X11Window) sendXdndPosition(dest uint32, p x11DragPos) {
 	data[2] = uint32(p.x&0xFFFF)<<16 | uint32(p.y&0xFFFF)
 	data[3] = p.time
 	data[4] = w.dndEffectAtom(eff)
-	w.x11SendClientMessage(dest, w.atomXdndPosition, data)
+	w.xdndSend(dest, proxy, w.atomXdndPosition, data)
 }
 
-func (w *X11Window) sendXdndLeave(dest uint32) {
+func (w *X11Window) sendXdndLeave(dest, proxy uint32) {
 	var data [5]uint32
 	data[0] = w.wid
-	w.x11SendClientMessage(dest, w.atomXdndLeave, data)
+	w.xdndSend(dest, proxy, w.atomXdndLeave, data)
 }
 
-func (w *X11Window) sendXdndDrop(dest, time32 uint32) {
+func (w *X11Window) sendXdndDrop(dest, proxy, time32 uint32) {
 	var data [5]uint32
 	data[0] = w.wid
 	data[2] = time32
-	w.x11SendClientMessage(dest, w.atomXdndDrop, data)
+	w.xdndSend(dest, proxy, w.atomXdndDrop, data)
 }
+
+// xdndSend отправляет сообщение XDND приёмнику dest. Если у приёмника есть
+// XdndProxy (proxy != 0), событие уходит окну-посреднику, а в поле window
+// остаётся сам приёмник (так требует спецификация XDND, раздел о прокси).
+func (w *X11Window) xdndSend(dest, proxy, msgType uint32, data [5]uint32) {
+	to := dest
+	if proxy != 0 {
+		to = proxy
+	}
+	w.x11SendClientMessageVia(to, dest, msgType, data)
+}
+
+// dndProxy возвращает окно-посредник приёмника win (XdndProxy) с проверкой по
+// спецификации: свойство должно быть типа WINDOW, а у самого посредника свой
+// XdndProxy обязан указывать на него же — иначе это остаток от упавшей
+// программы, и посредник игнорируется. 0 — прокси нет. Результат кэшируется на
+// время перетаскивания. Только на насосе событий (читает свойства).
+func (w *X11Window) dndProxy(win uint32) uint32 {
+	d := &w.drag
+	d.mu.Lock()
+	if p, ok := d.proxies[win]; ok {
+		d.mu.Unlock()
+		return p
+	}
+	of := d.proxyOf
+	d.mu.Unlock()
+	if of == nil {
+		of = w.x11ReadDndProxy
+	}
+	p := of(win)
+	d.mu.Lock()
+	if d.proxies == nil {
+		d.proxies = map[uint32]uint32{}
+	}
+	d.proxies[win] = p
+	d.mu.Unlock()
+	return p
+}
+
+// x11ReadDndProxy читает и проверяет XdndProxy окна win (см. dndProxy).
+func (w *X11Window) x11ReadDndProxy(win uint32) uint32 {
+	if w.atomXdndProxy == 0 || win == 0 {
+		return 0
+	}
+	p := w.x11WindowProp(win, w.atomXdndProxy)
+	if p == 0 || p == win {
+		return 0
+	}
+	if w.x11WindowProp(p, w.atomXdndProxy) != p {
+		return 0
+	}
+	return p
+}
+
+// x11WindowProp — значение свойства типа WINDOW (format 32) или 0.
+func (w *X11Window) x11WindowProp(win, prop uint32) uint32 {
+	typ, format, data := w.x11GetProperty(win, prop, false)
+	if typ != x11AtomWindow || format != 32 || len(data) < 4 {
+		return 0
+	}
+	return binary.LittleEndian.Uint32(data[:4])
+}
+
+// x11AtomWindow — предопределённый атом типа WINDOW.
+const x11AtomWindow = 33
 
 // dndEffectAtom — атом действия XDND для DragEffect.
 func (w *X11Window) dndEffectAtom(e DragEffect) uint32 {
@@ -637,6 +719,15 @@ func (w *X11Window) x11GrabKeyboardSync() bool {
 	return r != nil && r[1] == 0
 }
 
+// x11DndAwareVersion — версия XDND окна win (свойство XdndAware) или 0.
+func (w *X11Window) x11DndAwareVersion(win uint32) int {
+	typ, _, data := w.x11GetProperty(win, w.atomXdndAware, false)
+	if typ == 0 || len(data) < 4 {
+		return 0
+	}
+	return int(binary.LittleEndian.Uint32(data[:4]))
+}
+
 // x11FindDndTarget ищет под точкой (корневые координаты) окно с XdndAware:
 // спуск от корня, на каждом уровне — потомок под точкой и свойство. Берётся
 // первое подходящее окно сверху: у оконных менеджеров с рамкой это окно
@@ -667,11 +758,15 @@ func (w *X11Window) x11FindDndTarget(rx, ry int) (uint32, int) {
 		if w.atomXdndAware == 0 {
 			continue
 		}
-		if typ, _, data := w.x11GetProperty(cur, w.atomXdndAware, false); typ != 0 && len(data) >= 4 {
-			ver := int(binary.LittleEndian.Uint32(data[:4]))
-			if ver >= 3 {
+		// Окно с XdndProxy: приёмником отвечает посредник, и XdndAware ищется
+		// на нём; у самого окна свойства может не быть вовсе.
+		if proxy := w.dndProxy(cur); proxy != 0 {
+			if ver := w.x11DndAwareVersion(proxy); ver >= 3 {
 				return cur, ver
 			}
+		}
+		if ver := w.x11DndAwareVersion(cur); ver >= 3 {
+			return cur, ver
 		}
 	}
 	return 0, 0

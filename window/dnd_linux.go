@@ -185,10 +185,19 @@ func (w *X11Window) sendXdndFinished(dest uint32, accepted bool) {
 // x11SendClientMessage отправляет ClientMessage (format 32, 5×CARD32) окну dest
 // через SendEvent (mask 0 — доставляется владельцу окна dest).
 func (w *X11Window) x11SendClientMessage(dest, msgType uint32, data [5]uint32) {
+	w.x11SendClientMessageVia(dest, dest, msgType, data)
+}
+
+// x11SendClientMessageVia — x11SendClientMessage через посредника: событие
+// уходит окну to (владельцу окна to, SendEvent), а в поле window сообщения
+// остаётся окно-приёмник target. Для обычного окна to == target; для окна с
+// XdndProxy (спецификация XDND) to — окно-прокси.
+func (w *X11Window) x11SendClientMessageVia(to, target, msgType uint32, data [5]uint32) {
+	dest := to
 	ev := make([]byte, 32)
 	ev[0] = 33 // ClientMessage
 	ev[1] = 32 // format
-	binary.LittleEndian.PutUint32(ev[4:8], dest) // window = получатель
+	binary.LittleEndian.PutUint32(ev[4:8], target) // window = окно-приёмник
 	binary.LittleEndian.PutUint32(ev[8:12], msgType)
 	for i := 0; i < 5; i++ {
 		binary.LittleEndian.PutUint32(ev[12+i*4:16+i*4], data[i])
