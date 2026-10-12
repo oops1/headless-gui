@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -39,7 +41,7 @@ func stackedPanels(t *testing.T) (*engine.Engine, *CalendarFlyout, *Flyout) {
 	above.Content = func(widget.DrawContext, image.Rectangle) {}
 	root.AddChild(above)
 
-	eng := engine.New(800, 600, 60)
+	eng := testengine.New(t, 800, 600, 60)
 	eng.SetRenderOnDemand(true)
 	eng.SetRoot(root)
 	eng.RenderOnce()
@@ -71,6 +73,7 @@ func dayPoint(t *testing.T, c *CalendarFlyout) image.Point {
 // Без группы соседка закрывается — это по-прежнему верно: две несвязанные
 // панели друг другу никто.
 func TestFlyoutGroup_WithoutGroupNeighbourStillCloses(t *testing.T) {
+	testreset.Globals(t)
 	eng, cal, above := stackedPanels(t)
 
 	pt := dayPoint(t, cal)
@@ -87,6 +90,7 @@ func TestFlyoutGroup_WithoutGroupNeighbourStillCloses(t *testing.T) {
 
 // В группе клик по соседке не закрывает панель и не пропадает.
 func TestFlyoutGroup_ClickInNeighbourKeepsBothOpen(t *testing.T) {
+	testreset.Globals(t)
 	eng, cal, above := stackedPanels(t)
 	NewFlyoutGroup(cal.Flyout, above)
 
@@ -106,6 +110,7 @@ func TestFlyoutGroup_ClickInNeighbourKeepsBothOpen(t *testing.T) {
 
 // Клик мимо ВСЕЙ группы закрывает её целиком.
 func TestFlyoutGroup_ClickOutsideClosesTheWholeGroup(t *testing.T) {
+	testreset.Globals(t)
 	eng, cal, above := stackedPanels(t)
 	NewFlyoutGroup(cal.Flyout, above)
 
@@ -124,6 +129,7 @@ func TestFlyoutGroup_ClickOutsideClosesTheWholeGroup(t *testing.T) {
 
 // Панель, вынутая из группы, снова считает соседку чужой.
 func TestFlyoutGroup_LeavingTheGroupRestoresOldBehaviour(t *testing.T) {
+	testreset.Globals(t)
 	eng, cal, above := stackedPanels(t)
 	g := NewFlyoutGroup(cal.Flyout, above)
 
@@ -141,6 +147,7 @@ func TestFlyoutGroup_LeavingTheGroupRestoresOldBehaviour(t *testing.T) {
 
 // CloseAll закрывает всю группу разом.
 func TestFlyoutGroup_CloseAll(t *testing.T) {
+	testreset.Globals(t)
 	_, cal, above := stackedPanels(t)
 	g := NewFlyoutGroup(cal.Flyout, above)
 
@@ -154,6 +161,7 @@ func TestFlyoutGroup_CloseAll(t *testing.T) {
 // Нулевая группа безопасна: панель без группы не требует проверок на месте
 // вызова.
 func TestFlyoutGroup_NilGroupIsSafe(t *testing.T) {
+	testreset.Globals(t)
 	var g *FlyoutGroup
 	g.CloseAll()
 	g.OpenAll(image.Rect(0, 0, 10, 10))
@@ -166,6 +174,7 @@ func TestFlyoutGroup_NilGroupIsSafe(t *testing.T) {
 // только меню «Пуск» и быстрые настройки, а календарь и центр уведомлений —
 // нет, и движок их попросту не видел.
 func TestFlyout_IsReachableByTheEngine(t *testing.T) {
+	testreset.Globals(t)
 	m := calendarHoverTheme(t)
 	for _, tc := range []struct {
 		name string

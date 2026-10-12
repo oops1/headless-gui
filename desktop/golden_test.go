@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -84,7 +85,7 @@ func buildScene(t *testing.T, tm *theme.Manager, w, h int) (*widget.Panel, *desk
 // границы, а не от выбранного наугад числа пикселей.
 func renderScene(t *testing.T, tm *theme.Manager, w, h int) (*image.RGBA, int) {
 	t.Helper()
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	root, bar := buildScene(t, tm, w, h)
 	defer bar.Close()
 	eng.SetRoot(root)
@@ -93,6 +94,7 @@ func renderScene(t *testing.T, tm *theme.Manager, w, h int) (*image.RGBA, int) {
 
 // TestGolden_TaskbarPerTheme — по кадру на каждую из четырёх тем.
 func TestGolden_TaskbarPerTheme(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 640, 220
 	names := []string{
 		theme.ProfileWindows2000,
@@ -127,13 +129,14 @@ func TestGolden_TaskbarPerTheme(t *testing.T) {
 // картинку, а панель остаётся работоспособной. Это и есть требование
 // заказчика: смена вида без перезапуска.
 func TestGolden_ThemeSwitchChangesPicture(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 640, 220
 	m := theme.NewManager()
 	if err := theme.RegisterBuiltinProfiles(m); err != nil {
 		t.Fatal(err)
 	}
 
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	if err := m.SetTheme(theme.ProfileWindows2000); err != nil {
 		t.Fatal(err)
 	}
@@ -170,6 +173,7 @@ func TestGolden_ThemeSwitchChangesPicture(t *testing.T) {
 // разрешение и другой масштаб (требование приёмки: SetBounds и SetScale
 // 1.0/1.25/1.5).
 func TestGolden_TaskbarSurvivesResizeAndScale(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	if err := theme.RegisterBuiltinProfiles(m); err != nil {
 		t.Fatal(err)
@@ -181,7 +185,7 @@ func TestGolden_TaskbarSurvivesResizeAndScale(t *testing.T) {
 	for _, scale := range []float64{1.0, 1.25, 1.5} {
 		for _, size := range [][2]int{{640, 200}, {1024, 300}, {320, 160}} {
 			w, h := size[0], size[1]
-			eng := engine.New(w, h, 30)
+			eng := testengine.New(t, w, h, 30)
 			eng.SetScale(scale)
 			root, bar := buildScene(t, m, w, h)
 			eng.SetRoot(root)
@@ -273,6 +277,7 @@ func saveIfAsked(t *testing.T, img *image.RGBA, name string) {
 // Проверка та же, что у панели задач: панель должна быть видна на фоне обоев.
 // Кадры сохраняются при GOLDEN_OUT — смотреть глазами.
 func TestGolden_FlyoutsLook(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 720, 480
 
 	for _, name := range []string{theme.ProfileWindows2000, theme.ProfileWindows11Dark} {
@@ -309,7 +314,7 @@ func TestGolden_FlyoutsLook(t *testing.T) {
 			root.AddChild(cal)
 			cal.Open(image.Rect(w-90, barTop, w, h))
 
-			eng := engine.New(w, h, 30)
+			eng := testengine.New(t, w, h, 30)
 			eng.SetRoot(root)
 			img := eng.RenderOnce()
 			if img == nil {
@@ -342,6 +347,7 @@ func TestGolden_FlyoutsLook(t *testing.T) {
 // Сцена каждой темы рисуется дважды — с пропуском поддеревьев и без него — и
 // кадры обязаны совпасть до пикселя.
 func TestGolden_PipelineDoesNotChangePixels(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 640, 220
 
 	for _, name := range []string{
@@ -360,7 +366,7 @@ func TestGolden_PipelineDoesNotChangePixels(t *testing.T) {
 				}
 				m.SetIconResolver(widget.BuiltinIcons())
 
-				eng := engine.New(w, h, 30)
+				eng := testengine.New(t, w, h, 30)
 				eng.SetSubtreeCulling(culling)
 				root, bar := buildScene(t, m, w, h)
 				defer bar.Close()

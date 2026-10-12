@@ -445,7 +445,16 @@ func (v *richView) activate(l *richLayout, z zone) {
 		v.quickOpen = !v.quickOpen
 		v.mu.Unlock()
 		v.slideTick(ncSlideKey{kind: slideQuick})
+	case zoneStack:
+		v.setStackOpen(k.app, true)
 	case zoneGroup, zoneGroupToggle:
+		if v.stackMode() {
+			v.mu.Lock()
+			open := !v.stackOpen[k.app]
+			v.mu.Unlock()
+			v.setStackOpen(k.app, open)
+			return
+		}
 		v.mu.Lock()
 		if v.collapsed == nil {
 			v.collapsed = map[AppID]bool{}
@@ -606,6 +615,11 @@ func (v *richView) prune(live []Notification) {
 	for app := range v.collapsed {
 		if !apps[app] {
 			delete(v.collapsed, app)
+		}
+	}
+	for app := range v.stackOpen {
+		if !apps[app] {
+			delete(v.stackOpen, app)
 		}
 	}
 	if v.drop != (ncInputKey{}) && !ids[v.drop.note] {
@@ -901,6 +915,10 @@ func (v *richView) setCardOpen(l *richLayout, id NotificationID, open bool) {
 }
 
 func (v *richView) setGroupCollapsed(l *richLayout, app AppID, c bool) {
+	if v.stackMode() {
+		v.setStackOpen(app, !c)
+		return
+	}
 	v.mu.Lock()
 	if v.collapsed == nil {
 		v.collapsed = map[AppID]bool{}

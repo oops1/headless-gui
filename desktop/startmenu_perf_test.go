@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -26,6 +27,7 @@ func manyApps(s *win10Scene, n int) {
 // холодный (первый кадр процесса: кэши глифов и растров пусты), и тёплый.
 // Сколько занимает каждый — в сообщении теста.
 func TestStartMenu10_FirstFrameUnder100ms(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin10Scene(t, 1280, 720, false, 1)
 	manyApps(s, 300)
 
@@ -58,6 +60,7 @@ func TestStartMenu10_FirstFrameUnder100ms(t *testing.T) {
 // Кадр после открытия не больше области меню: открытие панели не будит
 // отрисовку всего экрана. Заявленные движку области лежат внутри меню.
 func TestStartMenu10_OpenDamagesOnlyMenuArea(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin10Scene(t, 1280, 720, false, 1)
 	s.frame() // обои и панель нарисованы
 
@@ -82,6 +85,7 @@ func TestStartMenu10_OpenDamagesOnlyMenuArea(t *testing.T) {
 // Смена темы, акцента и языка на открытом меню не пересоздаёт компонентов: тот
 // же объект, меню открыто, кадр получается и отличается от прежнего.
 func TestStartMenu10_ThemeAccentLanguageOnOpenMenu(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin10Scene(t, 1280, 720, false, 1)
 	s.open()
 	menuBefore := s.menu
@@ -148,6 +152,7 @@ func TestStartMenu10_ThemeAccentLanguageOnOpenMenu(t *testing.T) {
 // застрявший за чужой работой, растягивал среднее за порог (52 мс при
 // обычных 8).
 func TestStartMenu10_SidebarAnimationFramesAreCheap(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin10Scene(t, 1280, 720, false, 1)
 	manyApps(s, 300)
 	s.open()

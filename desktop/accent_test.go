@@ -9,7 +9,8 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -45,9 +46,10 @@ func countColor(img *image.RGBA, r image.Rectangle, c color.RGBA) int {
 // перекрашивает уже собранную панель: те же компоненты, тот же движок, новый
 // кадр. Полоса под активной кнопкой окна — акцентная.
 func TestSetAccent_RepaintsShellWithoutRecreating(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 640, 220
 	m := win10Manager(t, theme.ProfileWindows10)
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	root, bar := buildScene(t, m, w, h)
 	defer bar.Close()
 	eng.SetRoot(root)
@@ -84,8 +86,9 @@ func TestSetAccent_RepaintsShellWithoutRecreating(t *testing.T) {
 // TestEngineSetAccent_ReappliesProfile — Engine.SetAccent меняет акцент и
 // перекрашивает виджеты со своей палитрой (widget.Theme.Accent).
 func TestEngineSetAccent_ReappliesProfile(t *testing.T) {
+	testreset.Globals(t)
 	m := win10Manager(t, theme.ProfileWindows10)
-	eng := engine.New(200, 100, 30)
+	eng := testengine.New(t, 200, 100, 30)
 	// Палитра виджетов глобальна на процесс: возвращаем её, чтобы тест не
 	// влиял на соседей по пакету.
 	prev := widget.CurrentTheme()
@@ -159,7 +162,7 @@ func paintOnCheckers(t *testing.T, s *theme.Style, r image.Rectangle, wrap func(
 	}}
 	pr.SetBounds(image.Rect(0, 0, w, h))
 	root.AddChild(pr)
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	eng.SetRoot(root)
 	return snapshot(eng.RenderOnce())
 }
@@ -168,6 +171,7 @@ func paintOnCheckers(t *testing.T, s *theme.Style, r image.Rectangle, wrap func(
 // размывает обои (клетки исчезают), поверх лежит зерно; в соседней точке
 // значения различаются.
 func TestPaintStyle_Windows10Acrylic(t *testing.T) {
+	testreset.Globals(t)
 	m := win10Manager(t, theme.ProfileWindows10)
 	s := m.GetStyle("taskbar", "", theme.StateNormal)
 	r := image.Rect(20, 40, 380, 80)
@@ -209,6 +213,7 @@ func TestPaintStyle_Windows10Acrylic(t *testing.T) {
 // TestPaintStyle_AcrylicFallbackIsSolid — без размытия вместо стекла
 // сплошной запасной цвет: ровно RGB(31,31,31), как была панель до акрила.
 func TestPaintStyle_AcrylicFallbackIsSolid(t *testing.T) {
+	testreset.Globals(t)
 	m := win10Manager(t, theme.ProfileWindows10)
 	s := m.GetStyle("taskbar", "", theme.StateNormal)
 	r := image.Rect(20, 40, 380, 80)
@@ -235,6 +240,7 @@ func TestPaintStyle_AcrylicFallbackIsSolid(t *testing.T) {
 // TestPaintStyle_LightTaskbarIsLighter — флаг светлой панели делает акрил
 // светлым, в обоих режимах отрисовки.
 func TestPaintStyle_LightTaskbarIsLighter(t *testing.T) {
+	testreset.Globals(t)
 	m := win10Manager(t, theme.ProfileWindows10)
 	dark := m.GetStyle("taskbar", "", theme.StateNormal)
 	m.SetFlag(theme.KeyTaskbarLight, true)
@@ -257,6 +263,7 @@ func TestPaintStyle_LightTaskbarIsLighter(t *testing.T) {
 // TestGolden_Windows10Acrylic — светлая и тёмная панель Windows 10 целиком, с
 // содержимым. Кадры сохраняются при GOLDEN_OUT — смотреть глазами.
 func TestGolden_Windows10Acrylic(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 640, 220
 	for _, tc := range []struct {
 		name  string
@@ -266,7 +273,7 @@ func TestGolden_Windows10Acrylic(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := win10Manager(t, theme.ProfileWindows10)
 			m.SetFlag(theme.KeyTaskbarLight, tc.light)
-			eng := engine.New(w, h, 30)
+			eng := testengine.New(t, w, h, 30)
 			root, bar := buildScene(t, m, w, h)
 			defer bar.Close()
 			eng.SetRoot(root)

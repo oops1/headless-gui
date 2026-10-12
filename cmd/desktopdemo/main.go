@@ -210,7 +210,7 @@ func buildDesktop(eng *engine.Engine) scene {
 		desktop.QuickAction{ID: "plane", Title: "В самолёте"},
 		desktop.QuickAction{ID: "saver", Title: "Экономия заряда", Unavailable: true},
 		desktop.QuickAction{ID: "night", Title: "Ночной свет"},
-		desktop.QuickAction{ID: "access", Title: "Доступность", HasDetails: true},
+		desktop.QuickAction{ID: "access", Title: "Доступность", PageOnly: true},
 	))
 	quick.SetBrightness(0.7)
 	quick.VolumeDetails = true

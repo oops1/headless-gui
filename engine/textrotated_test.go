@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -23,6 +24,7 @@ func rotatedTextCanvas(w, h int, scale float64) *Canvas {
 // переставленными на прямой угол вокруг точки (x, y): без передискретизации,
 // на любом масштабе.
 func TestDrawTextRotated_IsExactPixelRotation(t *testing.T) {
+	testreset.Globals(t)
 	const text = "WinLine Project"
 	black := color.RGBA{0, 0, 0, 255}
 	for _, scale := range []float64{1, 2} {
@@ -73,6 +75,7 @@ func TestDrawTextRotated_IsExactPixelRotation(t *testing.T) {
 // Расположение: 90° — надпись левее-выше точки не выходит, растёт вверх от
 // (x, y) и вправо на высоту строки; 270° — вниз и влево.
 func TestDrawTextRotated_Placement(t *testing.T) {
+	testreset.Globals(t)
 	black := color.RGBA{0, 0, 0, 255}
 	inkBounds := func(c *Canvas) image.Rectangle {
 		var b image.Rectangle
@@ -100,6 +103,7 @@ func TestDrawTextRotated_Placement(t *testing.T) {
 }
 
 func TestDrawTextRotated_ClipAndOddAngles(t *testing.T) {
+	testreset.Globals(t)
 	black := color.RGBA{0, 0, 0, 255}
 	c := rotatedTextCanvas(120, 200, 1)
 	if c.DrawTextRotated("x", 10, 10, 12, "", 45, black) {
@@ -138,6 +142,7 @@ func TestDrawTextRotated_ClipAndOddAngles(t *testing.T) {
 
 // Контексты-обёртки пробрасывают поворот с учётом своего сдвига.
 func TestDrawTextRotated_WrappersForward(t *testing.T) {
+	testreset.Globals(t)
 	black := color.RGBA{0, 0, 0, 255}
 	direct := rotatedTextCanvas(200, 200, 1)
 	direct.DrawTextRotated("Hello", 80, 150, 12, "", 90, black)
@@ -168,6 +173,7 @@ func TestDrawTextRotated_WrappersForward(t *testing.T) {
 type noRotateCtx struct{ widget.DrawContext }
 
 func TestDrawTextRotated_WrapperOverPlainContextReportsFalse(t *testing.T) {
+	testreset.Globals(t)
 	c := rotatedTextCanvas(50, 50, 1)
 	w := widget.OffsetContext(noRotateCtx{c}, 5, 5)
 	rt, ok := w.(widget.RotatedTextDrawer)

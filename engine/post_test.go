@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // Очередь вызовов в горутину кадра.
@@ -12,6 +14,7 @@ import (
 // гонка с обходом в root.Draw. Post даёт обратный путь.
 
 func TestPost_RunsInTheFrameGoroutine(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	e.SetRenderOnDemand(true)
 	e.Start()
@@ -30,6 +33,7 @@ func TestPost_RunsInTheFrameGoroutine(t *testing.T) {
 // Порядок постановки сохраняется: приложение планирует шаги, а не мешок
 // независимых действий.
 func TestPost_KeepsOrder(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	e.SetRenderOnDemand(true)
 	e.Start()
@@ -71,6 +75,7 @@ func TestPost_KeepsOrder(t *testing.T) {
 // зацикливает текущий: иначе цикл, планирующий сам себя, никогда не дошёл бы
 // до отрисовки.
 func TestPost_FromInsidePostDoesNotStarveTheFrame(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	e.SetRenderOnDemand(true)
 	e.Start()
@@ -99,6 +104,7 @@ func TestPost_FromInsidePostDoesNotStarveTheFrame(t *testing.T) {
 // Без Start() очередь разбирают RenderOnce и RenderFrameNow: приложение
 // попросило кадр, и отложенная работа обязана попасть именно в него.
 func TestPost_DrainedByExplicitFrame(t *testing.T) {
+	testreset.Globals(t)
 	for _, tc := range []struct {
 		name string
 		draw func(*Engine)
@@ -126,6 +132,7 @@ func TestPost_DrainedByExplicitFrame(t *testing.T) {
 // Изменение дерева из отложенного вызова попадает в ТОТ ЖЕ кадр: очередь
 // разбирается до отрисовки, а не после.
 func TestPost_ChangesLandInTheSameFrame(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	e.SetRenderOnDemand(true)
 
@@ -147,6 +154,7 @@ func TestPost_ChangesLandInTheSameFrame(t *testing.T) {
 
 // Post из любой горутины и одновременно с кадрами — под детектором гонок.
 func TestPost_IsSafeFromManyGoroutines(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	e.SetRenderOnDemand(true)
 	e.Start()
@@ -187,6 +195,7 @@ func TestPost_IsSafeFromManyGoroutines(t *testing.T) {
 
 // Пустой вызов не ставится: nil в очереди уронил бы горутину кадра.
 func TestPost_NilIsIgnored(t *testing.T) {
+	testreset.Globals(t)
 	e := New(200, 150, 60)
 	e.Post(nil)
 	e.RenderOnce() // без правки здесь была бы паника

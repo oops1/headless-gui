@@ -17,8 +17,11 @@ package window
 // Файл без платформенного суффикса: рисование — чистая функция, её тесты идут
 // в общем прогоне.
 
+import "image"
+
 // Размер картинки курсора. 24×24 хватает всем формам и совпадает с обычным
-// размером курсора темы при масштабе 1.
+// размером курсора темы при масштабе 1. Не больше 32×32: пользовательский
+// указатель крупнее не пройдёт через RDP (WinLine).
 const wlCursorSize = 24
 
 // Формы курсора движка (widget.Cursor): значения приходят в SetCursor числом.
@@ -30,6 +33,12 @@ const (
 	wlCursorSizeNS
 	wlCursorSizeNWSE
 	wlCursorSizeNESW
+	wlCursorNone // курсор спрятан: картинки нет, поверхность курсора не показывается
+	wlCursorGrab
+	wlCursorGrabbing
+	wlCursorSizeAll
+	wlCursorCrosshair
+	wlCursorWait
 	wlCursorCount
 )
 
@@ -51,7 +60,19 @@ func wlCursorShape(c int) uint32 {
 		return 29 // nwse-resize
 	case wlCursorSizeNESW:
 		return 28 // nesw-resize
+	case wlCursorGrab:
+		return 16 // grab
+	case wlCursorGrabbing:
+		return 17 // grabbing
+	case wlCursorSizeAll:
+		return 33 // all-scroll
+	case wlCursorCrosshair:
+		return 8 // crosshair
+	case wlCursorWait:
+		return 6 // wait
 	}
+	// wlCursorNone тоже без имени: спрятать курсор можно только пустой
+	// поверхностью (wl_pointer.set_cursor), у cursor-shape-v1 такой формы нет.
 	return 0
 }
 
@@ -85,6 +106,19 @@ func wlCursorPixels(c int) (pix []byte, w, h, hotX, hotY int) {
 		}
 	}
 	return pix, wlCursorSize, wlCursorSize, shape.hotX, shape.hotY
+}
+
+// wlCursorImage — то же изображение курсора, но как *image.RGBA (домноженная
+// альфа, байты R,G,B,A) и с горячей точкой. Для бэкендов, которым нужна не
+// память wl_shm, а картинка: Win32 строит из неё HCURSOR, X11 — две 1-битные
+// карты (контур и маска).
+func wlCursorImage(c int) (img *image.RGBA, hotX, hotY int) {
+	pix, w, h, hx, hy := wlCursorPixels(c)
+	img = image.NewRGBA(image.Rect(0, 0, w, h))
+	for i := 0; i+3 < len(pix); i += 4 {
+		img.Pix[i+0], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = pix[i+2], pix[i+1], pix[i+0], pix[i+3]
+	}
+	return img, hx, hy
 }
 
 // wlCursorShape описывает форму: строки картинки ('X' — контур, 'o' —
@@ -227,5 +261,125 @@ var wlCursorShapes = [wlCursorCount]wlCursorArt{
 		"XooooX......XXXXXX",
 		"XoooooX",
 		"XXXXXXXX",
+	}},
+	wlCursorGrab: {hotX: 12, hotY: 12, rows: []string{
+		"",
+		"............XXXXX",
+		"........XXXXXoooX",
+		"........XoooXoooX",
+		"........XoooXoooXXXXX",
+		"....XXXXXoooXoooXoooX",
+		"....XoooXoooXoooXoooX",
+		"....XoooXoooXoooXoooX",
+		"....XoooXoooXoooXoooX",
+		"....XoooXoooXoooXoooX",
+		".XXXXoooXoooXoooXoooX",
+		".XooooooXoooXoooXoooX",
+		".XooooooooooooooooooX",
+		".XooooooooooooooooooX",
+		".XooooooooooooooooooX",
+		".XooooooooooooooooooX",
+		".XooooooooooooooooooX",
+		".XXXXoooooooooooooooX",
+		"....XoooooooooooooooX",
+		"....XXoooooooooooooXX",
+		".....XXXXXXXXXXXXXXX",
+	}},
+	wlCursorGrabbing: {hotX: 12, hotY: 12, rows: []string{
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"........XXXXXXXXX",
+		"....XXXXXoooXoooXXXXX",
+		"....XoooXoooXoooXoooX",
+		"....XoooXoooXoooXoooX",
+		"....XoooXoooXoooXoooX",
+		".XXXXoooXoooXoooXoooX",
+		".XooooooXoooXoooXoooX",
+		".XooooooooooooooooooX",
+		".XooooooooooooooooooX",
+		".XooooooooooooooooooX",
+		".XooooooooooooooooooX",
+		".XXXXoooooooooooooooX",
+		"....XoooooooooooooooX",
+		"....XXoooooooooooooXX",
+		".....XXXXXXXXXXXXXXX",
+	}},
+	wlCursorSizeAll: {hotX: 11, hotY: 11, rows: []string{
+		"..........XXX",
+		".........XXoXX",
+		"........XXoooXX",
+		".......XXoooooXX",
+		".......XoooooooX",
+		".......XXXXoXXXX",
+		"..........XoX",
+		"...XXX....XoX....XXX",
+		"..XXoX....XoX....XoXX",
+		".XXooX....XoX....XooXX",
+		"XXoooXXXXXXoXXXXXXoooXX",
+		"XoooooooooooooooooooooX",
+		"XXoooXXXXXXoXXXXXXoooXX",
+		".XXooX....XoX....XooXX",
+		"..XXoX....XoX....XoXX",
+		"...XXX....XoX....XXX",
+		"..........XoX",
+		".......XXXXoXXXX",
+		".......XoooooooX",
+		".......XXoooooXX",
+		"........XXoooXX",
+		".........XXoXX",
+		"..........XXX",
+	}},
+	wlCursorCrosshair: {hotX: 11, hotY: 11, rows: []string{
+		"..........XXX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XXX",
+		"XXXXXXXXXX...XXXXXXXXXX",
+		"XooooooooX...XooooooooX",
+		"XXXXXXXXXX...XXXXXXXXXX",
+		"..........XXX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XoX",
+		"..........XXX",
+	}},
+	wlCursorWait: {hotX: 11, hotY: 11, rows: []string{
+		"",
+		".....XXXXXXXXXXXXX",
+		".....XoooooooooooX",
+		".....XoooooooooooX",
+		".....XXoooooooooXX",
+		"......XoooooooooX",
+		"......XXoooooooXX",
+		".......XXoooooXX",
+		"........XoooooX",
+		"........XXoooXX",
+		".........XXoXX",
+		"..........XoX",
+		".........XXoXX",
+		".........XoooX",
+		"........XXoooXX",
+		"........XoooooX",
+		".......XXoooooXX",
+		"......XXoooooooXX",
+		".....XXoooooooooXX",
+		".....XoooooooooooX",
+		".....XoooooooooooX",
+		".....XXXXXXXXXXXXX",
 	}},
 }

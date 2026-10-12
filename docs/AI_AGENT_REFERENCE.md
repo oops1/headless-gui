@@ -51,7 +51,9 @@ README_RU.md, GUIDE.md / GUIDE_EN.md; roadmap: TODO.md.
   the precise measurer registered by the engine (`RegisterTextMeasurer`;
   `SetTextMeasurer` still works for a consumer that sets one once and for
   all). The most recently created engine answers; a stopped engine hands the
-  measurer back to the previous live one. Use it
+  measurer back to the previous live one. An engine made with
+  `engine.NewOffscreen` (printing, thumbnails, export) never takes it (v3.34).
+  Use it
   for layout computed before painting (dialogs, TextBox). Inside Draw use
   `ctx.MeasureText`.
 - **Theming:** constructors read the global palette `win10.*` (updated by
@@ -877,7 +879,8 @@ widget.AliasStrings(map[string]string{"dlg.ok": "btn.ok"})
 win.SetMinSize(800, 600)
 win.MinSize() (int, int)
 
-// Window icon at runtime: Win32 WM_SETICON, X11 _NET_WM_ICON.
+// Window icon at runtime: Win32 WM_SETICON, X11 _NET_WM_ICON, Wayland
+// xdg-toplevel-icon-v1 (v3.34, only if the compositor announces the global).
 // Nearest size wins; a backend without support returns ErrIconUnsupported.
 win.SetIcon(icon16, icon32)
 win.SetIcon() // drop it
@@ -1139,8 +1142,12 @@ type DrawContext interface {
     DrawImage(src image.Image, x, y int)
     DrawImageScaled(src image.Image, x, y, w, h int)
     // Scaled result is cached by source identity (pointer + Bounds) and
-    // size (32 entries / 16 Mpx LRU). Mutating an image in place requires
-    // canvas.InvalidateImageCache(src) (nil clears everything).
+    // size (32 entries / 16 Mpx LRU); an entry retains the source. Mutating an
+    // image in place requires eng.InvalidateImageCache(src) (nil clears
+    // everything) or widget.InvalidateImageCache(ctx, src). Images obey
+    // SetRoundClip. For zoom/pan of big pictures use the optional
+    // widget.ImageRectDrawer / widget.DrawImageRect(ctx, src, sr, dr, filter):
+    // only the part under the clip is scaled (see "v3.34 additions").
     
     // ── Text ──
     DrawText(text string, x, y int, col color.RGBA)  // default font, DefaultFontSizePt
@@ -1235,6 +1242,8 @@ const (
     MouseMiddle     MouseButton = 2
     MouseWheelUp    MouseButton = 3
     MouseWheelDown  MouseButton = 4
+    MouseButtonX1   MouseButton = 5 // side "back" (v3.34)
+    MouseButtonX2   MouseButton = 6 // side "forward" (v3.34)
 )
 ```
 
@@ -2348,7 +2357,8 @@ AncestorType`, rich-text inlines inside `TextBlock` (use `<RichText>`, see
 - **ScrollViewer mouse wheel** — `ScrollView` scrolls on wheel up/down.
 - **Mouse cursors** — widgets implement `widget.CursorProvider` (`Cursor(x,y)`):
   TextBox → I-beam, GridSplitter → resize. `Engine.CursorAt(x,y)` computes it; the
-  Windows backend applies it natively (Linux/macOS: no-op for now).
+  Windows, X11 and Wayland backends apply it natively (macOS: no-op). An
+  application-wide shape that beats every widget: `Engine.SetCursorOverride` (v3.34).
 - **TabIndex** — `<TextBox TabIndex="1"/>` controls focus order; negative excludes
   from Tab navigation. Honored by `CollectFocusables` (stable sort by TabIndex).
 
@@ -2607,12 +2617,12 @@ returns) — use it for a "File → Exit" menu item.
 
 ## Render-on-demand & invalidation
 
-By default the engine redraws every tick (full backward compatibility). Enable
-on-demand rendering to skip frames while the UI is unchanged — near-zero CPU on
-idle:
+Since v3.5 the engine renders on demand by default (`engine.New` turns it on):
+frames are skipped while the UI is unchanged — near-zero CPU on idle. The old
+behaviour, a redraw every tick, is the opt-out `eng.SetRenderOnDemand(false)`:
 
 ```go
-eng.SetRenderOnDemand(true)
+eng.SetRenderOnDemand(true)     // the default; false = redraw every tick
 
 eng.Invalidate()                 // mark the whole frame changed (cheap, atomic)
 eng.InvalidateRect(r)            // declare a changed region; the next frame's
@@ -2631,8 +2641,8 @@ What is tracked automatically (no Invalidate needed):
   tooltip is "ripening", frames keep flowing.
 
 **You must call `Invalidate()` yourself** only when mutating widgets directly
-from app code in on-demand mode (e.g. `label.SetText` from your own goroutine).
-In the default mode nothing changes.
+from app code in on-demand mode — the default (e.g. `label.SetText` from your own
+goroutine). With `SetRenderOnDemand(false)` every tick is drawn anyway.
 
 Locking note: a frame no longer holds the engine's main lock — `SetRoot`/`Root`
 and event dispatch are never blocked by rendering. Structural operations
@@ -3029,7 +3039,8 @@ win.SetAppID("winline-calc") // xdg_toplevel.app_id, под X11 — WM_CLASS
   восьми краёв — `xdg_toplevel.resize` (с serial'ом нажатия);
 - кнопки заголовка — `set_minimized` / `set_maximized` / `unset_maximized`, а
   `IsMaximized` читается из состояний `configure`, поэтому кнопка
-  разворачивания переключается в «восстановить»;
+  разворачивания переключается в «восстановить» (полный экран развёрнутым не
+  считается — см. «v3.34»);
 - форма курсора — `wp_cursor_shape_manager_v1`, если компоновщик его объявил,
   иначе своя картинка через `wl_pointer.set_cursor`;
 - кадровые буферы пересоздаются под новый размер окна.
@@ -3042,8 +3053,8 @@ ww.OnNativeMove = func() bool { return true }            // одна прось�
 ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop и т. д.
 ```
 
-Бэкенд, который этого не умеет (Win32, X11, macOS), хуки не получает, и окно
-двигается прежним путём — `OnDragMove` плюс `SetPosition`; край окна в
+Бэкенд, который этого не умеет (Win32, macOS), хуки не получает (на X11 они
+ставятся — `_NET_WM_MOVERESIZE`, с v3.26), и окно двигается прежним путём — `OnDragMove` плюс `SetPosition`; край окна в
 нативном режиме там по-прежнему отдан системе.
 
 ### Поведение по платформам
@@ -3052,8 +3063,8 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 |---|---|---|---|
 | Модалка в своём окне (`ModalHost`) | нативно | нативно | in-canvas фолбэк |
 | Popup-оверлей в своём окне (`PopupSink`) | нативно | нативно | Wayland — `xdg_popup`, macOS — in-canvas |
-| Трей / balloon / превью | да | no-op (ошибка/false) | no-op (ошибка/false) |
-| Перетащить / растянуть окно | `SetPosition` | `SetPosition` | Wayland — просит компоновщик, macOS — нет |
+| Трей / balloon / превью | да | трей — StatusNotifierItem по D-Bus (`tray_sni_linux.go`, меню — dbusmenu), balloon — `org.freedesktop.Notifications`; превью нет | Wayland — трей и balloon как на X11 (`HideToTray` — no-op); macOS/headless — no-op (ошибка/false) |
+| Перетащить / растянуть окно | `SetPosition` | `_NET_WM_MOVERESIZE` (`BeginMove`/`BeginResize`, с v3.26) | Wayland — просит компоновщик, macOS — нет |
 | Свернуть / развернуть | да | да | Wayland — да (`set_minimized`/`set_maximized`) |
 | Форма курсора | да | да (шрифт «cursor») | Wayland — да (`cursor_shape` или своя картинка) |
 | Масштаб интерфейса (HiDPI) | да (per-monitor DPI) | да (`Xft.dpi`) | Wayland — да (fractional / `wl_output`), macOS — `HEADLESS_GUI_SCALE` |
@@ -3063,6 +3074,8 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 | Открыть ссылку / файл (`window.OpenURL`, `OpenFile`, `RevealFile`) | `ShellExecuteW`, показ — Проводник `/select` | портал `OpenURI` и `FileManager1.ShowItems`; `xdg-open` только если портала на шине нет | Wayland — то же, что X11; macOS — `/usr/bin/open`; прочие — `ErrOpenUnsupported` |
 | Файлы в буфере (`widget.ClipboardSetFiles`, `ClipboardFiles`) | `CF_HDROP` + «Preferred DropEffect» | `text/uri-list`, `x-special/gnome-copied-files` (нативное окно) | Wayland — те же типы (нативное окно); macOS — пути текстом |
 | HTML в буфере (`widget.SetClipboardHTML`) | «HTML Format» | `text/html` (нативное окно) | Wayland — `text/html` (нативное окно); macOS — только простой текст |
+| Изображение в буфере (`widget.ClipboardSetImage`, `ClipboardImage`, v3.34) | «PNG» + `CF_DIBV5` + `CF_DIB` | `image/png` лениво, INCR для больших; читает `image/png`, затем `image/bmp` | Wayland — `image/png` лениво, читает `image/png`, затем `image/bmp`; macOS — нет (`ErrClipboardImageUnsupported`) |
+| Значок окна (`Window.SetIcon`) | `WM_SETICON` | `_NET_WM_ICON` | Wayland — `xdg-toplevel-icon-v1` (v3.34), иначе `ErrIconUnsupported`; macOS — `ErrIconUnsupported` |
 | Печать (`printing.Print`) | `PrintDlgEx` + GDI | CUPS по IPP, системного диалога нет | Wayland — то же, что X11; macOS — `ErrUnsupported`. `SavePDF` — везде |
 | Несколько окон в процессе | да | да | Wayland — да, macOS — не проверялось |
 | Имя для панели задач | — | `WM_CLASS` | Wayland — `app_id` |
@@ -3114,11 +3127,15 @@ type OverlayBoundsProvider interface { OverlayBounds() image.Rectangle } // аб
 `widget.SetPopupsHosted(true)` отключает клэмп меню по границам холста —
 позиционированием занимается хост, оверлей вправе выходить за окно.
 
-### Трей, balloon-уведомления, превью (Windows)
+### Трей, balloon-уведомления, превью (Windows; трей и balloon есть и на Linux)
 
 Публичный API на `*window.Window`. Можно вызывать до `Run()` (состояние
-буферизуется и применяется при создании окна) или из обработчиков UI. На
-не-Windows — no-op/ошибка.
+буферизуется и применяется при создании окна) или из обработчиков UI. На Linux
+(X11 и Wayland) трей — StatusNotifierItem по D-Bus (`window/tray_sni_linux.go`:
+нужен `StatusNotifierWatcher` на шине, в GNOME — расширение AppIndicator; меню
+рисует панель, одиночный клик вместо двойного), balloon —
+`org.freedesktop.Notifications` без иконки в трее; превью в панели задач — только
+Windows. На macOS и без нативного окна — no-op/ошибка.
 
 ```go
 // Иконка в трее. icon масштабируется до SM_CXSMICON, прозрачность из альфы.
@@ -3443,8 +3460,9 @@ type FileDropTarget interface {
 - **Нативно по платформам:** **Win32** — полно (`WM_DROPFILES`, `DragAcceptFiles`
   на главном окне, не на попапах); **X11** — полно (XDND v5: `XdndAware`,
   Enter/Position/Status/Drop, `XConvertSelection` → async `SelectionNotify`,
-  `text/uri-list`); **Wayland** — **каркас** (`wl_data_device`, принимает
-  `text/uri-list`, требует живой проверки на реальной сессии); macOS — нет.
+  `text/uri-list`); **Wayland** — `wl_data_device` (`text/uri-list`; проверено
+  на проводе с фальшивым компоновщиком, на живой сессии — нет); macOS — нет.
+  События входа/движения/выхода и перетаскивание ИЗ окна — раздел «v3.34 additions».
   `parseURIList` декодирует `file://` URI (percent-escapes, hostname, CRLF).
 
 ### Цветные эмодзи (COLR/CBDT) — автоматически
@@ -5852,11 +5870,31 @@ def, err := printing.DefaultPrinter()             // errors.Is(err, printing.Err
 
 // Rendering a widget tree into a page: a canvas scaled by dpi/96.
 k := float64(setup.EffectiveDPI()) / 96
-eng := engine.New(int(float64(w)/k+0.5), int(float64(h)/k+0.5), 1)
+eng := engine.NewOffscreen(int(float64(w)/k+0.5), int(float64(h)/k+0.5), 1)
+defer eng.Stop()
 eng.SetScale(k)
 eng.SetRoot(pageUI)
 img := eng.RenderOnce() // may differ from w x h by one pixel
 ```
+
+**Offscreen engine — v3.34.** `engine.New` takes three services shared by the
+process: it becomes the text measurer outside `Draw` (`widget.MeasureUIText`,
+`MeasureUITextFont`, rune positions, font metrics), the rasterizer of SVG
+`<text>`, and it reports its size as the screen (`widget.SetScreenBounds`,
+which keeps popup menus on screen). A print job, thumbnail or export made with
+`New` took all three from the window: while the job ran, the window measured
+text with the job's canvas, fonts and scale, and its menus were clamped to the
+page size. `engine.NewOffscreen(w, h, fps)` is the same engine without them —
+same default fonts, `RenderOnce`, `Start`, `Stop`; `Engine.IsOffscreen()`
+tells which one it is. Inside `Draw` widgets measure with `ctx.MeasureText` of
+their own canvas, so the page is exact; measurement OUTSIDE `Draw` by widgets
+of an offscreen engine is answered by the process's measurer (the window), so a
+font known only to the job falls back to the default there.
+
+The named-font registry of a canvas is now under a lock (`engine/fonttable.go`)
+and `fontRev` is atomic: `RegisterFont` from the application's goroutine while
+another goroutine measures or draws is no longer a data race (it was, under
+`-race`, in Notepad's PDF export).
 
 Paper: `A3 A4 A5 A6 Letter Legal Tabloid Executive`, `CustomPaper(name, wMM, hMM)`;
 `Portrait` (zero value) / `Landscape`. A page image covers the WHOLE sheet;
@@ -6606,7 +6644,9 @@ win.Native() to an unexported interface — reaching into the engine.
     win.BeginMove() bool          // drag the window as the system does
     win.BeginResize(edges) bool   // edges: widget.NativeEdgeTop и далее
 
-Both answer false when the backend cannot do it (Win32, X11, macOS today) or
+Both answer false when the backend cannot do it (Win32 and macOS today; X11
+implements them since v3.26 through `_NET_WM_MOVERESIZE`, Wayland through
+`xdg_toplevel.move/resize`) or
 the system refused — then the application moves the window itself through
 SetPosition, exactly as before.
 
@@ -6687,7 +6727,8 @@ release, on a new key (only one key repeats, the last one), on focus loss and
 on close. Modifiers are never repeated.
 
 `KeyEvent.Repeat` marks a repeat on every platform (on Windows from bit 30 of
-`lParam`). It matters where a press toggles something: holding Caps Lock must
+`lParam`; on X11 since v3.34 from the `KeyRelease`+`KeyPress` pair of equal time, see
+"v3.34 additions"). It matters where a press toggles something: holding Caps Lock must
 not flip it twenty-five times a second. For typing and caret movement the
 repeat IS what is wanted, so most handlers ignore the flag.
 
@@ -7086,6 +7127,889 @@ button, old geometry without metrics, bridge round trip, icon placement and pixe
 caption shift, SVG, system menu items / languages / callbacks / click / toggle /
 double click / custom list, press owner, `SetTitleBarHitTest`,
 `DismissedByPress`+`Toggle`).
+
+---
+
+## v3.34 additions (images under a round clip, image cache, DrawImageRect, X11 key repeat, SetMaxFPS)
+
+Answers the PixGo (image viewer) remarks E8, E9, E10, E13. Public API is
+additive; frames of existing scenes are byte-identical (golden and hash tests pass
+without updates).
+
+### Images under `SetRoundClip`
+
+`DrawImage`, `DrawImageScaled` (stretched, 1:1 fast path, HiDPI) and the new
+`DrawImageRect` now obey the rounded clip like fills do. Before, `blitOver` honoured
+only the rectangular clip, and a picture inside a rounded panel had square corners.
+Only the corner rows (`radius` rows at the top and at the bottom) are blitted line by
+line with the narrowed span; the straight middle is ONE blit, as without rounding.
+Without `SetRoundClip` the path is the old one, byte for byte. Benchmarks
+(`go test ./engine -bench Image`) did not move: 64→24 icon 1.81 µs/op before and after;
+a 300×200 picture under a round clip costs the same as without it.
+
+### Scaled-image cache: source is retained, `InvalidateImageCache` everywhere
+
+```go
+eng.InvalidateImageCache(src image.Image)    // nil — the whole cache; any goroutine
+widget.InvalidateImageCache(ctx, src)        // helper for the draw context (no-op if unsupported)
+// optional interface (engine.Canvas, translatingContext, ScrollView wrapper implement it):
+type widget.ImageCacheInvalidator interface{ InvalidateImageCache(src image.Image) }
+```
+
+- **A cache entry now holds `src`.** The key is the address of the source plus bounds
+  and target size; the GC was free to collect the image and hand its address to a NEW
+  image of the same size, which then received somebody else's frame. While the entry
+  lives the address is taken, and a hit is additionally verified by `ent.src == src`.
+  `weak.Pointer` was not used: `go.mod` says Go 1.22, `weak` appeared in 1.24.
+  Cost: the 32 cached sources stay alive until evicted or invalidated (the byte budget
+  still counts only scaled results).
+- **`Engine.InvalidateImageCache`.** The cache lives on a canvas, and an engine has
+  several (main plus one per popup in its own native window). The call goes through
+  a journal shared by the engine's canvases and is applied by each of them before its
+  next use of the cache, so it is safe from any goroutine and reaches popups. A canvas
+  that lags more than 64 entries behind drops its whole cache (always correct). The call
+  does not schedule a frame: if the picture is on screen, call `Invalidate`/`InvalidateRect`.
+- Wrappers forward it: `svOffsetCtx` (ScrollView) and `translatingContext` (popups). The
+  narrow adapters of `widget/datagrid` and `widget/treeview` do not (their own context
+  types have no image-cache notion).
+
+### `DrawImageRect` with a filter — only the visible part is scaled
+
+```go
+widget.DrawImageRect(ctx, src, sr, dr, widget.FilterCatmullRom)  // helper with a fallback
+// optional interface, implemented by engine.Canvas and the wrappers:
+type widget.ImageRectDrawer interface {
+    DrawImageRect(src image.Image, sr, dr image.Rectangle, f widget.ImageFilter)
+}
+// filters: widget.FilterNearest, FilterBilinear, FilterCatmullRom
+sr, dr = widget.ClampImageRect(src.Bounds(), sr, dr)   // clamp sr to the source, shrink dr proportionally
+```
+
+`sr` is the source rectangle (pixels of `src`), `dr` the destination in LOGICAL
+coordinates of the context (like `x, y, w, h` of `DrawImageScaled`; may be far larger
+than the window and run past its edges). Unlike `DrawImageScaled`, which stretches the
+WHOLE source to the FULL size before the clip, only the destination pixels under the
+current clip (rectangular and rounded) are computed, and only the source rows and
+columns they need. A 12000×8000 picture at 400 % in a 1200×800 window costs like
+1200×800 pixels. The result is not cached; the cost is proportional to the visible area
+(`TestDrawImageRect_WorkProportionalToClip`).
+
+- Kernels follow `golang.org/x/image/draw` (centre projection `(d+0.5)·s−0.5`, kernel
+  widened by the scale when shrinking, weights normalised, edges truncated) but are an
+  own separable implementation: x/image builds an intermediate `dw×sh` buffer for the
+  whole destination width, which is exactly what must be avoided. Memory is a sliding
+  window of a few rows, independent of the source and `dr` sizes.
+- Sources read directly: `*image.RGBA`, `*image.NRGBA`, `*image.YCbCr` (all subsamplings),
+  `*image.Gray`; any other through `RGBA64Image`/`At`. Output is premultiplied; colour
+  never exceeds alpha (Catmull-Rom ringing is clamped).
+- Matches full scaling by `x/image/draw` in the visible part within ±2 (±3 for YCbCr and
+  Gray: other YCbCr→RGB rounding), exactly for `FilterNearest` on RGBA.
+- `sr` outside `src.Bounds()` is clamped together with a proportional part of `dr`.
+- Fallback for a context without `ImageRectDrawer` (`widget.DrawImageRect` helper): the
+  cropped source goes through `DrawImageScaled` — bilinear regardless of the filter and
+  without the clip saving. A part of the source is a new object on each call, so the
+  32-entry cache turns over.
+- Reference timings (i7, 1200×800 window, 4000×3000 source): zoom ×4 — nearest 6 ms,
+  bilinear 7 ms, Catmull-Rom 9 ms; fit-to-window (shrink 3.3×) bilinear 48 ms.
+
+### X11: `KeyEvent.Repeat` and the end of spurious key-ups
+
+By default an X server shows auto-repeat as a `KeyRelease` + `KeyPress` pair with the
+SAME time and key code. The application saw a stream of "released, pressed", `Repeat` was
+always false, and toggling keys fired on every tick. The backend now applies the standard
+trick of toolkits: on `KeyRelease` it peeks (2 ms, once per ordinary release) whether a
+`KeyPress` with the same time and code follows; if so, the release is swallowed and the
+press is delivered with `Repeat=true`. A press of a key already held is a repeat in any
+case, so a server with XKB `DetectableAutoRepeat` works unchanged. XKB itself is not used
+(the backend speaks the bare protocol). The table of held keys is kept even for a window
+blocked by a modal, and reset on `FocusOut`. A half-read event is always completed.
+`X11Window` implements `keyRepeatSource` (`SetOnKeyDownRepeat`). Tests drive
+`readEvent`/`handleX11Event` over `net.Pipe`: pairs, real release+press, single release,
+split event, detectable repeat, disabled window (`window/x11_keyrepeat_linux_test.go`).
+Checked on the wire only, not against a live server.
+
+### `Window.SetMaxFPS` now limits the main engine
+
+It used to change only a field read by modal windows and dock hosts when they create
+their engines; the main engine ran at the `fps` of `engine.New` whatever the window said.
+Now `Window.SetMaxFPS(n)` also calls the optional `Engine.SetMaxFPS(n)` (atomic, any
+goroutine, picked up on the next tick, the animation step follows). It is a CAP, not a
+target: an engine created at 20 fps stays at 20 under `SetMaxFPS(60)`. Until the window
+method is called the engine keeps its own rate, even when it is above the window default
+of 60. `n <= 0` removes the cap.
+
+### Documentation corrections
+
+- Render on demand has been the default since v3.5 (`engine.New` sets it); the
+  "redraws every tick by default" text is gone, `SetRenderOnDemand(false)` is the opt-out.
+- `BeginMove`/`BeginResize` are implemented on X11 (`_NET_WM_MOVERESIZE`, v3.26) and Wayland;
+  they answer false only on Win32 and macOS. The native-move hooks of `widget.Window` are
+  installed on X11 too.
+- Tray on X11 and Wayland works through StatusNotifierItem (`window/tray_sni_linux.go`,
+  dbusmenu for the menu); balloons through `org.freedesktop.Notifications`
+  (`notify_linux.go`). The taskbar preview stays Windows-only.
+- The statement that `KeyEvent.Repeat` marks a repeat "on every platform" was false for X11
+  (the field was always false there); it is true since this version.
+
+Tests: `engine/imageround_test.go` (round clip: every drawing path, scales 1 and 2,
+RGBA and BGRX, opaque and translucent, partial overlap, unchanged frame without rounding),
+`engine/imagecache_engine_test.go` (finalizer-based retention test, forged key, engine
+invalidation of main and popup canvases, journal overflow, concurrency, popup wrapper),
+`engine/imagerect_test.go` (full-scale reference for 3 filters × 6 source types × 6
+geometries, ×1000 destination, work proportional to the clip, `sr` clamp, round clip and
+BGRX, agreement with `DrawImageScaled` at scales 1, 1.5, 2), `widget/imagerect_test.go`
+(fallback, `ClampImageRect`, ScrollView wrapper), `engine/maxfps_test.go`,
+`window/maxfps_test.go`, `window/x11_keyrepeat_linux_test.go`.
+
+---
+
+## v3.34 additions (cursor override and new shapes, pointer leave on Win32, side mouse buttons)
+
+Answers the PixGo remarks E2, E4, E5 (image viewer: slide show that hides the
+cursor, panning with a "grab" hand, back/forward mouse buttons). Public API is
+additive; existing numeric values (`widget.Cursor` 0–6, `widget.MouseButton` 0–4)
+did not move.
+
+### Hiding the cursor and new shapes (E2)
+
+```go
+// Appended to the END of widget.Cursor (values 7..12).
+widget.CursorNone      // hidden
+widget.CursorGrab      // open hand (panning)
+widget.CursorGrabbing  // closed hand (dragging right now)
+widget.CursorSizeAll   // four arrows
+widget.CursorCrosshair // crosshair (crop, picker)
+widget.CursorWait      // busy
+
+// A shape over EVERY widget, applied at once, without waiting for a mouse move.
+eng.SetCursorOverride(widget.CursorNone)   // any goroutine; same shape again = no-op
+eng.ClearCursorOverride()                  // back to the cursor of the widget under the mouse
+c, ok := eng.CursorOverride()
+eng.SetOnCursorOverrideChanged(fn)         // window.Run installs it; applications do not
+```
+
+`Engine.CursorAt` returns the override first (stronger than any widget and any
+modal), so the window needs no new interface: `window.Run` subscribes to the
+change (`cursorOverrideNotifier`, optional like `modifierSink`) and on the engine
+goroutine recomputes the cursor for the LAST known mouse position and hands it to
+the OS window (`surface.refreshCursor`). Before the mouse was ever in the window
+the point is (-1,-1), so after `ClearCursorOverride` the arrow comes back.
+Popup windows (menus moved into their own OS window) are covered since the second
+round of v3.34: see "Full screen on a chosen monitor, cursor over popups, drag
+icon, XdndProxy" below.
+A custom `EngineAPI` without `SetOnCursorOverrideChanged` just never gets the
+immediate refresh (the override still wins on the next move).
+
+How each backend shows the shapes:
+
+| shape | Win32 | X11 | Wayland |
+|---|---|---|---|
+| None | `SetCursor(NULL)` in `WM_SETCURSOR` (`ShowCursor` untouched) | transparent cursor from two 1×1 depth-1 pixmaps (`CreatePixmap`, `CreateGC`, `PolyFillRectangle`, `CreateCursor`) | `wl_pointer.set_cursor(serial, NULL, 0, 0)` — also with `cursor-shape-v1` (it has no hidden shape) |
+| Grab / Grabbing | own 24×24 `HCURSOR` (`CreateIconIndirect`, cached per window, freed on `WM_DESTROY`); falls back to `IDC_HAND`/`IDC_SIZEALL` | own image via two pixmaps + `CreateCursor` (core protocol, no RENDER) | `grab` / `grabbing` shapes; without `cursor-shape-v1` the same 24×24 image |
+| SizeAll | `IDC_SIZEALL` | glyph `fleur` (52) | `all-scroll` (33) |
+| Crosshair | `IDC_CROSS` | glyph `crosshair` (34) | `crosshair` (8) |
+| Wait | `IDC_WAIT` | glyph `watch` (150) | `wait` (6) |
+
+XAML: `Cursor="None|Grab|Grabbing|SizeAll|Cross|Crosshair|Wait"` joins the old
+`Arrow|IBeam|Hand|SizeWE|SizeNS`.
+
+Own images are 24×24 (`wlCursorSize`, the RDP limit for WinLine is 32×32); the
+art lives in `window/waylandcursor.go` (`wlCursorShapes`, `wlCursorImage`) and is
+shared by all three backends. macOS has no cursor support at all (`CocoaWindow`
+has no `SetCursor`): the override is simply ignored there.
+
+Win32 detail: `SetCursor` applies the shape at once only when the window is under
+the pointer (`WindowFromPoint`), because the cursor is global.
+
+### Pointer leave on Win32 (E4)
+
+`WM_MOUSEMOVE` arms `TrackMouseEvent(TME_LEAVE)` once per entry
+(`leaveTracker`, one-shot like the system request; a refusal is retried on the
+next move); `WM_MOUSELEAVE` goes the same way as `LeaveNotify` on X11 and
+`wl_pointer.leave`: the application gets `OnMouseMove(-1, -1)` (`pointerOutside`),
+so hover and tooltips are dropped. Not a leave (`mouseLeaveReal`): the pointer
+moved from the client area onto a caption button the application drew itself
+(`SetHitTest` → `HTMIN/MAX/CLOSE`): the system calls it non-client, sends
+`WM_MOUSELEAVE` and drives the highlight with `WM_NCMOUSEMOVE`; the order is not
+guaranteed, so the handler looks at the cursor position and the hit area and stays
+quiet for the buttons. The caption itself and the resize edges are a real leave.
+`WM_NCMOUSEMOVE` over our buttons arms `TME_LEAVE|TME_NONCLIENT` the same way, so
+`WM_NCMOUSELEAVE` no longer depends on `DefWindowProc` (which we skip for them).
+While a button is held (mouse capture) Windows sends no leave; it comes after the
+release if the pointer is outside.
+
+### Side mouse buttons X1 / X2 (E5)
+
+```go
+widget.MouseButtonX1 // "back"    (Win32 XBUTTON1, X11 button 8, Linux BTN_SIDE)
+widget.MouseButtonX2 // "forward" (Win32 XBUTTON2, X11 button 9, Linux BTN_EXTRA)
+eng.SendMouseButton(x, y, widget.MouseButtonX1, true)
+```
+
+Backends: Win32 `WM_XBUTTONDOWN/UP/DBLCLK` (`GET_XBUTTON_WPARAM`; returns TRUE,
+otherwise `DefWindowProc` turns the release into `WM_APPCOMMAND`); X11 buttons 8
+and 9; Wayland `BTN_SIDE`/`BTN_BACK` → X1 and `BTN_EXTRA`/`BTN_FORWARD` → X2
+(multimedia mice and drivers name the buttons by purpose); Cocoa `buttonNumber`
+3/4 (before, any "other" button was taken for the middle one). Codes in
+`NativeWindow.SetOnMouseButton`: 5 = X1, 6 = X2. No mouse capture. A held X1/X2 is
+released by the Wayland backend on pointer leave like the others.
+
+Handling rules for widgets: the event bubbles from the deepest widget under the
+pointer to the root like any button. All standard widgets react to `MouseLeft`
+only (checked: `OnMouseButton` of every widget, `switch` on buttons have no
+default that falls to the left button), so an application hangs back/forward on
+its root or on a container:
+
+```go
+func (r *Root) OnMouseButton(e widget.MouseEvent) bool {
+    if e.Pressed && e.Button == widget.MouseButtonX1 { r.goBack(); return true }
+    if e.Pressed && e.Button == widget.MouseButtonX2 { r.goForward(); return true }
+    return false
+}
+```
+
+Tests: `tests/cursor_override_test.go` (values, override without a move, change
+notifications, concurrency), `tests/xbuttons_test.go` (values, X1/X2 reach the
+root, Button/CheckBox/ToggleSwitch/RadioButton/TextInput/Dropdown ignore them),
+`window/cursor_override_test.go` (the window applies the override without a move,
+real engine), `window/mousebuttons_test.go` (X11 / evdev / `WM_XBUTTON` / Cocoa
+mapping), `window/pointerleave_tracker_test.go` (arm once, false-leave rule),
+`window/x11cursorbitmap_test.go` (pixmap-cursor request stream, art limits),
+`window/mouse_windows_test.go` (`WM_XBUTTON*`, `WM_MOUSELEAVE` through `wndProc`,
+caption-button case, hidden cursor, own cursors), `window/x11_cursor_shapes_linux_test.go`
+and `window/wayland_cursor_linux_test.go` (on the wire: hidden cursor, shapes,
+side buttons).
+
+---
+
+## v3.34: full screen and monitor geometry (`window` package)
+
+Answers the PixGo task E1 (full screen) and E11 (monitors = E1 item 5). The API is
+additive; nothing public was removed, no signature changed. One behaviour change:
+**on Wayland `IsMaximized` no longer reports a full-screen window as maximized**
+(see "Maximized vs full screen").
+
+```go
+win.SetFullscreen(true) bool             // false: the backend (or the window system) cannot; true: the request was SENT
+win.IsFullscreen() bool                  // what the system reports; before Run and without backend support: false
+win.SetOnFullscreenChanged(func(on bool)) // engine goroutine; may be set before Run
+
+window.Monitors() []window.Monitor       // primary first, then left→right, top→bottom; may be empty (macOS, no session)
+window.MonitorOf(win) (window.Monitor, bool)  // monitor with the biggest share of the window
+window.MonitorAt(x, y int) (window.Monitor, bool)
+window.MonitorForRect(list []Monitor, r image.Rectangle) (Monitor, bool) // ok=false: r touches no monitor
+
+type Monitor struct {
+    Name         string          // may be empty
+    Bounds, Work image.Rectangle // whole monitor / without panels
+    Scale        float64         // 1.0 = 96 dpi
+    Primary      bool
+}
+```
+
+**`SetFullscreen` contract.** The answer is "was the request accepted for execution",
+not "it is done": Win32 changes the window on the window thread a moment later, X11
+and Wayland answer asynchronously and the compositor may refuse. The result is always
+visible through `IsFullscreen` and `SetOnFullscreenChanged`. The callback fires for
+**every** change, including those the system makes itself (the user pressed Esc/F11
+at the compositor, the window manager returned the window). Before `Run` the request
+is remembered and applied when the window is created (the answer is then only
+"the platform can do it at all": `false` on macOS). The default `□` caption button of
+a full-screen window leaves full screen (it used to "restore" because Wayland counted
+full screen as maximized — that behaviour is kept explicitly in `window.Window`).
+
+**Maximized vs full screen.** `IsMaximized` of a full-screen window returns the value
+it had before full screen (a maximized window stays "maximized" underneath, a normal
+one stays "normal"); on every backend. Consumers checked: the `□` button and
+`widget.Window.SetMaximized` (system menu "Restore") in `window/window.go`, the
+dialog hosts (`window/modal_host.go`, they never go full screen). A full-screen window
+is not rounded on any backend (`SetCornerRadius`: Win32 `applyCorners`, Wayland
+`maskRadius`; X11 never rounds).
+
+**Backends.**
+
+| | request | state |
+|---|---|---|
+| Win32 | window thread: remember rect + style + "was maximized" (a maximized window is first restored, otherwise the system keeps it `zoomed` and the taskbar stays), drop `WS_THICKFRAME`, `SetWindowPos` to `rcMonitor` of `MonitorFromWindow` (not `rcWork`: the taskbar is covered) | `IsFullscreen` is our own flag. Back: style and rect restored (a rect that fell off all monitors is moved to the nearest one), `SW_MAXIMIZE` again if it was maximized. `WM_DISPLAYCHANGE`, `WM_WINDOWPOSCHANGED` (Win+Shift+arrow), `WM_DPICHANGED` re-fit the window to its monitor; `WM_GETMINMAXINFO` raises the size ceiling to that monitor; no resize edges/caption drag in full screen. `SetSize`/`SetPosition`/`Maximize`/`Restore` in full screen are remembered and applied on exit |
+| X11 | `ClientMessage _NET_WM_STATE` (`ADD`/`REMOVE` `_NET_WM_STATE_FULLSCREEN`) to the root window. `false` if the window manager lists its supported states in `_NET_SUPPORTED` and full screen is not among them | read from `_NET_WM_STATE` after `PropertyNotify` (the manager may refuse or leave itself); the maximized atoms refresh `IsMaximized` too, except while full screen |
+| Wayland | `xdg_toplevel.set_fullscreen(output=nil)` (opcode 11) / `unset_fullscreen` (12); a fixed-size window gets its size limits lifted first and fixed again at the old size afterwards | the `fullscreen` state of `configure`. A `configure` WITHOUT it after a request in flight is a refusal (this is how WinLine answers without `WINLINE_FULLSCREEN`): the callback gets `false`, `IsFullscreen()==false`, `SetFullscreen` had returned `true`. A stale `configure` that was already on its way can look like a refusal: then `false` is followed by `true` when the real answer arrives |
+| Cocoa | stub: `SetFullscreen` returns `false` | - |
+
+**Monitors.** `Bounds`/`Work` are in the coordinates of `NativeWindow.GetPosition`.
+
+- Win32: `EnumDisplayMonitors` + `GetMonitorInfoW` (`rcMonitor`/`rcWork`, device name
+  `\\.\DISPLAY1`) + `GetDpiForMonitor` (Windows 8.1+, else 1.0); physical pixels, `Scale = dpi/96`.
+- X11: **RandR 1.5 `RRGetMonitors`** over a short separate connection (the window's
+  connection is read by its event loop). `Work` is `_NET_WORKAREA` clipped by the
+  monitor (EWMH has no per-monitor work area: exact for one panel, an approximation
+  for several). `Scale` is `Xft.dpi` (same for all monitors — X11 has no per-monitor
+  scale). **Without RandR or older than 1.5 the root window is reported as ONE
+  monitor.**
+- Wayland: `wl_output` (geometry, mode, scale, name) and, when the compositor
+  advertises `zxdg_output_manager_v1`, `zxdg_output_v1` (logical position/size, name).
+  `Bounds` are LOGICAL (compositor coordinates, the units of `configure`); `Scale` is
+  the integer `wl_output` scale, i.e. buffer pixels per `Bounds` unit (fractional
+  scale is per surface, not per monitor — see `SetOnDpiChanged`). `Work == Bounds`
+  (the protocol has no work area). There is no "primary" in `wl_output`: the first
+  output is reported as primary. `MonitorOf` is the output of the last
+  `wl_surface.enter`.
+- macOS: `Monitors()` is empty, `MonitorOf` returns `false`.
+- `Monitors()` without a window costs one short connection on Linux; do not call it
+  per frame. "Does the saved window rect still land on a monitor?":
+  `_, ok := window.MonitorForRect(window.Monitors(), saved)`.
+
+**Not done / limits.** `SetFullscreen` itself takes no monitor (the one the window
+is on is used) — the monitor is chosen with `SetFullscreenOn` (below).
+Win32 `Name` is the device name, not the marketing name from the monitor EDID.
+macOS has neither full screen nor monitors yet. Wayland: `Work == Bounds` (the
+protocol has no work area; layer-shell panels are invisible to a client) and
+`Primary` is simply the first output — documented on `Monitor`, nothing to fix.
+
+Tests: `window/fullscreen_rect_test.go` (Win32 save/restore arithmetic: style, rect,
+vanished monitor, re-fit), `window/fullscreen_test.go` (the `Window` layer: pre-Run
+request, delegation, `□` button, monitor helpers), `window/fullscreen_windows_test.go`
+(a real Win32 window: enter/leave, maximized round trip, re-fit, monitors),
+`window/wayland_fullscreen_linux_test.go` (wire: opcodes 11/12, accepted, refused
+like WinLine, left by the compositor, maximized value kept, fixed size restored),
+`window/wayland_monitor_linux_test.go` (`wl_output`/`xdg_output` events and a full
+query against a fake compositor on a real unix socket), `window/x11_fullscreen_linux_test.go`
+(`ClientMessage` bytes, state from `_NET_WM_STATE`, `_NET_SUPPORTED`, RandR 1.5
+over a fake server, fallback), `*_e2e_linux_test.go` (live X server / compositor via
+`DISPLAY` / `WAYLAND_DISPLAY`; skipped without them).
+
+---
+
+## v3.34 additions: image on the clipboard, Wayland window icon
+
+### Image on the clipboard (E3)
+
+```go
+// Optional extension of ClipboardProvider (like ClipboardHTMLProvider / ClipboardFilesProvider):
+type ClipboardImageProvider interface {
+    SetImage(img image.Image) error
+    GetImage() (img image.Image, ok bool)
+}
+err := widget.ClipboardSetImage(img)   // replaces the clipboard; the image is copied
+img, ok := widget.ClipboardImage()     // ok == false: not an image, or the provider cannot do images
+
+widget.ErrClipboardImageUnsupported    // provider without ClipboardImageProvider (custom provider, macOS)
+widget.ErrClipboardImageEmpty          // nil or empty image
+```
+
+`ClipboardImage` may BLOCK (waits for the owner: 300 ms for the owner's answer and
+again 300 ms for every next chunk of a big picture on X11/Wayland, then PNG/BMP
+decoding): call it in a goroutine and `Engine.Post` the result, like
+`ClipboardFiles`. `ClipboardSetImage` on Windows encodes PNG/DIB immediately
+(no window owner, so no delayed rendering) — for big pictures call it off the
+engine goroutine too; on X11/Wayland it only copies the picture and encodes PNG
+on the first request (cached for the next ones). `UseMemoryClipboard()` supports
+images (copy in, copy out; text/HTML/files and the image displace each other).
+
+| | Windows | X11 | Wayland |
+|---|---|---|---|
+| put | `PNG` (registered), `CF_DIBV5` (32-bit BGRA, `BI_BITFIELDS`, NOT premultiplied), `CF_DIB` (24-bit, alpha blended over white) — one `OpenClipboard`, most descriptive first | owner of `CLIPBOARD`; `TARGETS` = `TARGETS`, `image/png` only (no text targets); `INCR` above 128 KiB | `wl_data_source` with the single type `image/png` |
+| read | `PNG` → `CF_DIBV5` → `CF_DIB` (a present-but-broken format falls through to the next) | `TARGETS`, then `image/png`, else `image/bmp`; owner not answering `TARGETS` with a refusal is probed blindly (PNG, BMP); `INCR` from the owner supported | the offer's `image/png`, else `image/bmp`/`image/x-bmp` |
+
+- DIB decoder (`internal/dib`): `BI_RGB`, `BI_BITFIELDS`, `BI_ALPHABITFIELDS`;
+  1/4/8-bit palettes, 16/24/32-bit; bottom-up and top-down; `CORE`/`INFO`/`V4`/`V5`
+  headers; alpha only from an explicit alpha mask (the 4th byte of 32-bit
+  `BI_RGB` is ignored). RLE and JPEG/PNG-in-DIB are `ErrUnsupported`. Limits:
+  100 Mpx, 64 MiB of data on Linux; PNG size is checked from the header before
+  decoding.
+- X11 `INCR` (both directions): sending uses 128 KiB chunks (a `ChangeProperty`
+  without BIG-REQUESTS is capped at 256 KiB), subscribes to `PropertyNotify` of
+  the requestor window and unsubscribes at the end; an abandoned transfer is
+  dropped after 30 s. Receiving collects chunks on `PropertyNotify`. Text
+  paste from an `INCR` owner works too now (it used to return the 4-byte size).
+- Pure helpers: `internal/dib` (DIB/BMP), `internal/clipimage` (type choice,
+  PNG, clone), `window/clipboard_image.go` (lazy PNG), `widget/clipboard_image.go`.
+- WinLine note: `cliprdr` carries only text and files, so an image does not reach
+  the RDP client until WinLine adds `CF_DIB` there; `image/png` works for ordinary desktops.
+- Limitations: no `image/bmp` is offered (only read); macOS has no provider.
+
+### Wayland window icon (E7)
+
+`Window.SetIcon(icons...)` now works on Wayland through
+`xdg_toplevel_icon_manager_v1` (`xdg-toplevel-icon-v1`; KDE 6.1+, Sway, ...) when
+the compositor announces the global in the registry; otherwise it returns
+`ErrIconUnsupported` as before (WinLine takes the icon from `.desktop`). Each image
+becomes a square ARGB8888 `wl_shm` buffer (premultiplied; non-square is centred
+in a transparent square; equal sizes deduplicated; more than 1024 px skipped),
+`add_buffer(scale=1)`, then `set_icon(toplevel, icon)` and `icon.destroy`; the
+pool of the previous icon is released on replacement, `SetIcon()` with no
+arguments sends `set_icon(toplevel, null)`. Before `Run()` the icon is remembered
+and applied after the first configure.
+
+---
+
+## Windows 11 shell remarks: quick settings, notification stacks, focus card — v3.34
+
+Answers the WinLine remarks after connecting v3.33 (real Windows 11 screenshots
+`real_quick_settings.png`, `real_notification_center_calendar.png`). Public API is
+additive; Windows 10, Windows 2000 and macOS frames are byte-identical to before
+(the frozen taskbar tests and the golden tests pass without updates). The Windows
+11 frames change where the remarks ask. Every new look is switched by a **profile
+flag** raised in the Windows 11 profiles (light and dark); a consumer that relied
+on the v3.33 look lowers the flag: `m.SetFlag(theme.KeyQuickPaged, false)`. The
+dark profile still declares ≤ 15 own tokens (all new colours are grey veils or
+references to existing tokens).
+
+| Flag (theme key) | Default (Windows 11) | Off = v3.33 look |
+|---|---|---|
+| `theme.KeyQuickPaged` `quicksettings.paged` | on | tile grid scrolls pixel by pixel with a thin bar |
+| `theme.KeyQuickFooterEditLeft` `quicksettings.footer.edit.left` | on | battery left, pencil and gear right |
+| `theme.KeyNotifyStack` `notificationcenter.stack` | on | group header with a counter and all cards |
+| `theme.KeyCalendarFocusCompact` `calendar.focus.compact` | on | title row and an accent «Start» button |
+
+A custom profile that names the presenter but not the flag keeps the old look.
+
+**1. Split tile.** A tile with `QuickAction.HasDetails` is two halves with a 1 px
+line between them (part `w11.tile.split`): the left half toggles (`model.Toggle`),
+the right half (`›`, metric `quicksettings.w11.chev.w` = 48, half the tile) opens
+the page. Hover and press highlight each half separately (the rounded tile is
+clipped to the half, so outer corners stay round). An `Unavailable` tile keeps a
+live `›`. Tiles without details are single buttons.
+
+**2. Pages instead of scrolling** (`KeyQuickPaged`). A page is `rows` tile rows;
+the column right of the grid shows ▲, one dot per page (current = text colour) and
+▼ (ends dimmed). Wheel over the grid or the column turns pages (pixels accumulate
+to 30 per turn, so a touchpad does not skip pages); click ▲ ▼ and dots; keyboard
+focus on a hidden tile turns the page; in edit mode dragging a tile to the grid
+edge turns the page once per entry into the edge zone. New: `QuickSettings.Pages()`,
+`Page()`, `SetPage(i)` (no-op with scrolling). The page resets to 0 on reopen.
+
+**3. Footer** (`KeyQuickFooterEditLeft`): left «Edit» (pencil + label, string
+`StrQuickEditShort`), then the battery, gear on the right. «Done» of edit mode takes
+the pencil's place.
+
+**4. Disabled sliders.** `QuickSettings.SetVolumeEnabled(bool)` /
+`VolumeEnabled()`, `SetBrightnessEnabled(bool)` / `BrightnessEnabled()` (enabled by
+default). A disabled slider is grey (disabled states of `w11.slider.*`), ignores
+mouse, wheel and keys, gives no tooltip and drops out of Tab order; disabling in
+the middle of a drag ends the drag.
+
+**5. Two-line tile label.** The title wraps on words to at most two lines, the
+second one ends with `…`; a word wider than the cell is elided. When the title takes
+one line the second line is `QuickAction.Detail` (it is dropped when the title takes
+two).
+
+**6. Page builder** (`desktop/quickpage.go`). Instead of own widgets plus
+`ApplyThemeTree`:
+
+```go
+q.Details = func(id desktop.QuickActionID) *desktop.QuickDetails {
+    page := q.NewDetailPage()            // or desktop.NewDetailPage(tm)
+    list := page.AddList([]desktop.DetailListItem{
+        {Icon: wifi, Title: "Avanpost", Subtitle: "Secured", State: "Connected", Selected: true},
+        {Title: "Guest", Subtitle: "Open"},
+    }, func(i int, it desktop.DetailListItem) { connect(it) })
+    page.AddSlider(sunIcon, 0.7, setBrightness)
+    page.AddToggle("Metered connection", false, setMetered)
+    page.AddButton("More networks", openSettings).SetAccent(true)
+    page.AddText("Hint")
+    return page.Details("Wi-Fi")         // QuickDetails{Title, Content: page}
+}
+```
+
+The page draws every frame from the theme parts `w11.page.*`, `w11.slider.*`,
+`w11.label/detail/dim`, so theme, dark mode and accent changes show immediately.
+Handles: `DetailList` (`SetItems`, `Items`, `Selected`, `SetSelected`),
+`DetailSlider` (`SetLevel`, `Level`, `SetEnabled`, `SetIconAt`), `DetailToggle`
+(`SetOn`, `On`, `SetTitle`, `SetEnabled`), `DetailButton` (`SetTitle`, `SetAccent`,
+`SetEnabled`), `DetailText.SetText`; `Set*` are safe from any goroutine and do not
+call the callbacks. The page lays elements out in a column, scrolls with the wheel
+when too tall, supports keyboard (Up/Down between rows, Enter/Space, Left/Right on
+the slider) and tints list icons like tiles (`KeyQuickIconTint`). Panel side:
+the widget that took a press keeps the mouse until release (a slider released
+outside the page does not stick), and `widget.Focusable` content is told when
+the keyboard enters or leaves it. Existing `QuickDetails.Content` widgets work as
+before.
+
+**7. Focus card** (`KeyCalendarFocusCompact`). As in the screenshot: no title, one
+row `− 30 min +` … `▶ Focus` (neutral button, string `StrFocusTitle`; running:
+countdown and `■ Stop`, progress bar under the row); module height metric
+`calendar.w11.focus.compact` = 60. `CalendarFlyout.FocusSingleButton = true` leaves a
+single full-width `▶ Focus` button without the duration stepper (the session runs
+for the duration already set by `FocusSession.SetDuration`). Flag off: title,
+stepper and accent «Start» as in v3.33. Note: the screenshot itself shows the
+stepper together with the button, so the stepper is the default.
+
+**8. Notification stacks** (`KeyNotifyStack`). Several notifications of one app:
+group header (icon, name), the newest card and a pill button inside it
+`+N notifications` (`StrNotifStackMore` + `.one/.few/.many/.other`, Russian
+«+N уведомл.», picked by `PluralForm`); click expands all cards, the header
+(click, ←/→) collapses back; Tab/Enter work on the pill. Closing the group (×) removes
+all. A single notification stays a plain card with the app row.
+
+**9. Page-only tile** (`QuickAction.PageOnly`). A tile that only opens a nested
+page ("Accessibility"): no halves, no divider line, one hover/press over the whole
+tile; click anywhere (and Enter/Space on the focused tile) opens the page via
+`QuickSettings.Details`, and the "›" at the right is just a part of the tile (no own
+zone, no own focus stop, no "More" tooltip). `PageOnly` wins over `HasDetails`, so a
+tile with both flags is whole; `PageOnly` alone is enough to get a page. `Disabled`
+keeps it shut; `Unavailable` dims it, the page still opens (it shows why);
+`model.Toggle` is not called for the tile; in edit mode it is a draggable tile
+as any other. The flag is only read by the Windows 11 quick settings.
+
+**10. Animations** (existing animation system, tokens in `theme.GetAnimation`).
+- Quick settings pages slide vertically (`theme.KeyQuickPages`
+  `quicksettings.pages`, 200 ms `out-cubic`, a decorative animation: reduced motion
+  = instant). The grid window moves between pages; events and focus are laid out
+  for the target page at once, only the frame is animated; a new `SetPage` during
+  the motion restarts it from the current position. Only the grid window is
+  repainted (the pager column stays still). The page resets without motion on reopen.
+- Notification stack expand/collapse uses the existing token `notification.expand`
+  (functional: reduced motion makes it instant). While moving, the cards are laid out
+  as expanded and cut by a growing window; the first card shrinks between the view
+  with the "+N" pill and without it, the pill leaves with the card's bottom edge, the
+  panel (it grows upward from the calendar) is repainted as a whole, old and new
+  rectangles only. The end of the motion equals the static layout.
+
+**11. Tab order.** The pager column joins the Tab order right after the tiles:
+▲ (when not on the first page), one stop per dot, ▼ (when not on the last page); an
+arrow on an end page is dimmed and skipped. Enter/Space turns the page / goes to the
+dot; when the arrow the focus stood on gets dimmed, the focus moves to the dot of the
+shown page. The focus ring is the usual one. Arrow Down from the last tile row still
+goes to the sliders.
+
+**12. Focus duration menu** (`CalendarFlyout.OpenFocusDurationMenu`,
+`FocusMenuOpen`, `CloseFocusMenu`, `FocusDurations`). Right click on the "▶ Focus"
+button (on release) or the Menu key / Shift+F10 on the focused button opens a
+`PopupMenu` above it: 15, 30, 45, 60, 90 min (`DefaultFocusDurations`, replace per
+calendar with `FocusDurations`), a check on the current one; a choice calls
+`FocusSession.SetDuration` (clamped to `FocusMinDuration`..`FocusMaxDuration`). The
+menu is a child of the calendar, so a click on an item is not a click outside; Esc
+closes the menu first and the calendar next; closing the calendar closes the menu;
+no menu while a session runs. Works with `FocusSingleButton` too. The menu is
+painted by the theme's menu style like every shell menu.
+
+Tests: `desktop/quickpanel_v334_test.go`, `quickpanel_page_test.go`,
+`quickpanel_wrap_test.go`, `notifycenter_stack_test.go`, `quickpanel_pageonly_test.go`
+(page-only tile, pager Tab order, page slide), `notifycenter_stackanim_test.go`,
+`calendarflyout_focusmenu_test.go` (+ `_engine_test.go`), `theme/profiles_win11_quick_test.go`;
+visual frames with `QS_OUT` / `NC_OUT`.
+
+---
+
+## v3.34 additions (drag of files: receiver events and source)
+
+Two additions to file drag & drop. The drop itself (`SetOnFilesDropped`) is unchanged
+on every platform; everything below is added next to it. Package `window`.
+
+### Receiver events — `SetOnDragEnter` / `SetOnDragOver` / `SetOnDragLeave`
+
+Lets a drop zone light up while files are dragged over the window.
+
+```go
+func (win *Window) SetOnDragEnter(fn func(x, y int))
+func (win *Window) SetOnDragOver(fn func(x, y int) bool) // true: a drop here is accepted
+func (win *Window) SetOnDragLeave(fn func())
+```
+
+- `x, y` are LOGICAL pixels of the client area (like `SetOnFilesDropped`). The
+  callbacks run on the engine goroutine.
+- `enter` is always followed by `over` at the same point (on X11 `XdndEnter` carries no
+  point, so `enter` is reported with the first `XdndPosition`).
+- `over` answers whether a drop at that point is accepted. `false` becomes a refusal
+  on the OS side (Win32 `DROPEFFECT_NONE`, X11 `XdndStatus` without accept, Wayland
+  `wl_data_offer.accept(null)`), `SetOnFilesDropped` is not called. Without the
+  callback a drop is accepted everywhere (as before). The backend waits for the
+  answer for 25 ms; a slower callback is answered with its previous answer.
+- `leave` is reported when the pointer leaves or the drag is cancelled. After a drop
+  `leave` does NOT come — clear the highlight in `SetOnFilesDropped` too.
+- Only drags that carry FILES are reported (`CF_HDROP` / `text/uri-list`); a text or
+  image drag does not reach the callbacks and is refused.
+- Win32 effect for an accepted drag follows the keys, as in Explorer: nothing/Ctrl —
+  copy, Shift — move, Ctrl+Shift or Alt — link (limited to what the source allows).
+  Wayland and X11 accept as copy. The application only reads the files: it never
+  moves them for the source.
+
+Win32: the window is now registered as an OLE drop target (`RegisterDragDrop`,
+`IDropTarget`) instead of `DragAcceptFiles`. If OLE cannot be started or the
+registration is refused, the old `WM_DROPFILES` path is enabled (no enter/over/leave
+then, `SetOnFilesDropped` works as before).
+
+### Source — `BeginDragFiles`
+
+```go
+type DragEffect uint32 // bit mask; values equal DROPEFFECT_*
+const ( DragEffectCopy DragEffect = 1; DragEffectMove = 2; DragEffectLink = 4 )
+
+func (win *Window) BeginDragFiles(paths []string, effect DragEffect) bool
+func (win *Window) SetOnDragFinished(fn func(effect DragEffect))
+```
+
+Call it from a mouse handler while the button is HELD (usually from the first move
+that leaves the press point by a few pixels). `effect` is the set of actions the
+source allows; the target chooses one.
+
+- Return `true`: the drag was started (it is carried by the OS asynchronously or in a
+  modal OS loop). `false`: it cannot be started — no button held / no press serial,
+  the backend cannot (macOS; Wayland compositor older than `wl_data_device_manager`
+  v3), empty list or mask, another drag is running. Relative paths are made absolute.
+- The end is reported once to `SetOnDragFinished(effect)`: the action chosen by the
+  target (`DragEffectCopy|Move|Link`), `0` — cancelled or refused (Esc, drop on
+  nothing, target refused, the pointer grab failed, X11 target silent for 10 s).
+  For `DragEffectMove` the APPLICATION removes the originals — the OS does not.
+- The engine is told the button was released when the drag ends (the OS took the
+  release), so widgets do not keep a mouse capture.
+
+Per platform:
+
+| | mechanism |
+|---|---|
+| Win32 | `DoDragDrop` on the window thread with a hand-built `IDataObject` (`CF_HDROP`, `IEnumFORMATETC` from the shell) and `IDropSource` (Esc cancels, release of the starting button drops) |
+| X11 | XDND v5 source: owns `XdndSelection`, grabs pointer and keyboard (Esc), finds the `XdndAware` window under the cursor, `XdndEnter/Position/Leave/Drop`, serves `TARGETS` and `text/uri-list`, waits for `XdndFinished`. Starts from the event pump (a service `ClientMessage` to itself), because only the pump may read server replies |
+| Wayland | `wl_data_device.start_drag` with a `wl_data_source` offering `text/uri-list`, actions copy/move (`set_actions`), data written lazily on `send`; finish from `dnd_finished`/`action`/`cancelled`. `Link` has no Wayland action (it is dropped; link-only returns `false`) |
+
+The drag icon (`BeginDragFilesImage`) and X11 `XdndProxy` came in the second round —
+see "Full screen on a chosen monitor, cursor over popups, drag icon, XdndProxy".
+Not done (honestly): X11 draws no drag icon, target type lists longer than one type,
+drag from a popup window on Wayland, dropping a virtual (non-file) item on Win32
+(`FileGroupDescriptor`).
+Checked: Win32 on the real OLE (two windows, `SendInput`, `HEADLESS_GUI_DND_E2E=1`),
+X11 on a real X server (two windows, two connections; the pointer events are fed to
+the source directly, no XTest), Wayland on the wire against a fake compositor only
+(not on a live one).
+
+Tests: `window/dnd_drag_test.go` (events, coordinates, answer timeout, source
+wiring), `window/dnd_hdrop_test.go` (`CF_HDROP` block, `QueryContinueDrag` table),
+`window/dnd_windows_test.go` (vtable layout, `QueryInterface`/`AddRef`/`Release`,
+`GetData`/`EnumFormatEtc`, the receiver cycle), `window/dnd_windows_e2e_test.go`,
+`window/wayland_drag_linux_test.go`, `window/x11_drag_linux_test.go`,
+`window/x11_drag_e2e_linux_test.go`.
+
+---
+
+## v3.34: full screen on a chosen monitor, cursor over popups, drag icon, XdndProxy
+
+Second round for the PixGo list "not done" (`ENGINE_TASKS.md`). Package `window`.
+Additive; nothing removed, no signature changed.
+
+### `SetFullscreenOn(Monitor)`
+
+```go
+func (win *Window) SetFullscreenOn(m Monitor) bool
+// leave: the same win.SetFullscreen(false); state/notifications: IsFullscreen, SetOnFullscreenChanged
+```
+
+`m` is a value from `Monitors()`, `MonitorAt` or `MonitorOf`. `Monitor` got an
+UNEXPORTED key (`id`: Win32 `HMONITOR`, X11 the 1-based index in the `RRGetMonitors`
+reply — also the EWMH monitor index —, Wayland the registry global name of the
+`wl_output`, which is the same on every connection to the compositor). The public
+fields did not change. A monitor is found again in the CURRENT list by key, then by
+`Name`, then by `Bounds` (`matchMonitor`), so a stored `Monitor` survives a replug
+as long as one of the three still matches.
+
+- `false`: the monitor is gone (matches nothing), `Monitor{}`, or the backend cannot
+  choose (macOS). Nothing is sent in that case.
+- Before `Run` the request is remembered with the monitor; at window creation
+  `SetFullscreenOn` is applied, and when the monitor vanished meanwhile the window
+  falls back to plain `SetFullscreen(true)`. A later `SetFullscreen(true)` before
+  `Run` replaces the remembered monitor.
+- A window that is ALREADY full screen is moved to `m`.
+
+| | how |
+|---|---|
+| Win32 | window thread: `enterFullscreen(rcMonitor of the matched monitor)` instead of the monitor the window lies on. Already full screen: `SetWindowPos` to the new `rcMonitor`, no exit, no notification, the snapshot for leaving stays the first one. Checked live: every monitor of the machine in turn (one monitor on the development machine; the "other rect" path is checked with a synthetic rect) |
+| X11 | monitors are re-queried (RandR 1.5, separate connection). If the window manager lists `_NET_WM_FULLSCREEN_MONITORS` in `_NET_SUPPORTED`: that `ClientMessage` (top = bottom = left = right = the index, source = application) and then `ADD _NET_WM_STATE_FULLSCREEN`; the window is NOT moved, so after leaving it returns to where it was. Without it: the window is moved to the monitor's top-left corner and then `ADD` (managers put a full-screen window on the monitor it mostly lies on); the window stays on that monitor after leaving. Already full screen: with the hint just the message; without it `REMOVE`, move, `ADD` (the application sees `false` then `true`) |
+| Wayland | `xdg_toplevel.set_fullscreen(wl_output)` with the output object of the window's OWN connection that matches the monitor (a `Monitors()` value comes from another connection: matched via the global name). Already full screen: another `set_fullscreen(output)` (allowed by the protocol), the saved size is kept. The compositor may pick another output — `MonitorOf` shows where the window really is |
+
+### Forced cursor over popup windows
+
+`Engine.SetCursorOverride` now reaches menus and drop-down lists moved to their own OS
+window ("popup host"). Each popup is an OS window with its own cursor; before, the
+cursor of the carrier window never got there.
+
+- Win32/X11 (`popupHost`): on a change (`surface.refreshCursor` → `popupCursor` hook)
+  the form is set on every open popup window (window thread), and on a popup that is
+  being created (so an override set before the menu opened works). Cleared → the
+  arrow. The cursor of widgets inside popups is still not computed (arrow, as before).
+- Wayland (`childPopups`): the popup is a `wl_surface` of the same client and the
+  pointer/cursor are shared, so the cursor of the carrier already applied; what was
+  missing is a form for the time the pointer is ON a popup. `WaylandWindow.SetPopupCursor`
+  keeps it; `applyCursor` uses it while `ptrOverPopup` and falls back to the window's
+  form otherwise. Dialog and dock windows (`modal_host`, `dock_host`) are wired the same way.
+
+### Drag icon — `BeginDragFilesImage`
+
+```go
+func (win *Window) BeginDragFilesImage(paths []string, effect DragEffect, img image.Image, hotspot image.Point) bool
+func (win *Window) DragImageSupported() bool // false: the drag starts but no icon is drawn (X11, macOS)
+```
+
+`img` is in SCREEN pixels (the window scale is not applied), `hotspot` is the point of
+`img` under the cursor. A side above 512 px is scaled down (hotspot with it), the
+alpha channel is kept; `nil`/empty `img` = plain `BeginDragFiles`. Return value and
+`SetOnDragFinished` are the same as for `BeginDragFiles`.
+
+- Win32: `IDragSourceHelper.InitializeFromBitmap` (`CLSID_DragDropHelper`,
+  `SHDRAGIMAGE`, 32 bpp premultiplied DIB, `CLR_NONE` colour key = alpha). The helper
+  stores the picture and service flags in OUR `IDataObject` through `SetData`, so the
+  data object now keeps arbitrary `HGLOBAL`/`IStream` blocks (`CF_HDROP` cannot be
+  replaced) and lists them in `EnumFormatEtc`. The window's `IDropTarget` forwards
+  `DragEnter/Over/Leave/Drop` to `IDropTargetHelper`, so the icon is drawn over the
+  window itself too, not only over foreign programs. Without the helpers the drag runs
+  without an icon.
+- Wayland: `wl_shm` pool (memfd, destroyed right after `create_buffer`) → ARGB8888
+  premultiplied buffer → `wl_surface` passed as the `icon` of `wl_data_device.start_drag`;
+  after `start_drag`: `attach(buffer, -hx, -hy)` (the compositor puts the surface's
+  top-left at the cursor), `damage_buffer`, `commit`. HiDPI: integer window scale →
+  `set_buffer_scale`, offsets in surface units. Surface and buffer are destroyed when the
+  drag ends. Needs `wl_data_device_manager` v3 (as the source itself).
+- X11: **no icon, on purpose.** XDND has no icon; a ghost window under the pointer needs
+  a compositing manager (or the SHAPE extension) to be transparent, and the target search
+  descends the windows under the pointer, so the ghost would be found as the target.
+  `X11Window` does not implement the icon interface; the drag runs plain.
+
+### X11 `XdndProxy` in the source
+
+When the window under the pointer has an `XdndProxy` property (type `WINDOW`) the source
+validates it per the XDND specification (the proxy window must carry its own `XdndProxy`
+pointing to itself — otherwise it is a leftover of a crashed program and is ignored; a
+window pointing to itself is not a proxy), reads `XdndAware` from the PROXY (then from
+the window), and sends `XdndEnter/Position/Leave/Drop` to the proxy with the target
+window in the event's `window` field. `XdndStatus`/`XdndFinished` still come from the
+target window id. The property is read once per window per drag (cache cleared at the
+start and end of a drag). Checked against a fake server only (no real proxying program
+available); the `window`-field rule is taken from the specification.
+
+Tests: `window/fullscreen_test.go` (`fsOnSpy`, `matchMonitor`, request before `Run`),
+`window/fullscreen_windows_test.go` (`TestWin32Fullscreen_OnMonitor`,
+`..._SetFullscreenOnPumped`), `window/x11_fullscreen_on_linux_test.go`,
+`window/wayland_fullscreen_on_linux_test.go`, `window/popup_cursor_test.go`,
+`window/popup_cursor_windows_test.go` (real popup windows),
+`window/wayland_popup_cursor_linux_test.go`, `window/dnd_image_test.go`,
+`window/dnd_image_windows_test.go` (live shell helpers, `SetData`/`IStream` store),
+`window/dnd_windows_e2e_test.go` (`TestDndE2E_DragWithImage`, `HEADLESS_GUI_DND_E2E=1`),
+`window/wayland_drag_image_linux_test.go`, `window/x11_drag_proxy_linux_test.go`.
+
+---
+
+## Touch and gestures (v3.34)
+
+Touch is a separate kind of input, not "a mouse with a finger": there are several
+fingers, each with its own history. Everything below is **additive**; an app that
+knows nothing about touch behaves exactly as before.
+
+### Widget API (`widget/touch.go`, `widget/gesture.go`)
+
+```go
+type TouchPhase int // TouchBegan, TouchMoved, TouchEnded, TouchCancelled
+type TouchEvent struct {
+    ID   int           // same from Began to Ended/Cancelled; unique among simultaneous fingers
+    X, Y int           // widget gets LOGICAL px in ITS OWN frame (inside a ScrollView: content coords)
+    Phase TouchPhase
+    Time  time.Duration // monotonic, from the OS timestamp; 0 = unset (the engine stamps it)
+
+    Pressure     float64 // 0..1; 0 = UNKNOWN (no force sensor / backend cannot read it), not "light touch"
+    Major, Minor float64 // contact ellipse axes (diameters) in px, same units as X, Y; 0 = unknown
+    Orientation  float64 // major-axis angle from vertical, clockwise, degrees; meaningful only if Major > 0
+}
+// ev.HasPressure(), ev.HasContact() — "is it known"
+type TouchHandler interface{ OnTouch(ev TouchEvent) bool }
+```
+
+Delivery (`Engine.SendTouch(ev) bool`; input is PHYSICAL px like `SendMouseMove`):
+
+1. `Began`: widgets under the point, deepest first (bubbling, like a mouse press), get
+   `OnTouch`. The first one that returns `true` becomes the **owner** of this touch.
+   An open overlay (menu, dropdown) is older than the tree: if the point is inside it
+   the overlay takes the touch or nobody does — a widget under a menu never steals it.
+   Like a press, a `Began` dismisses popups outside the path (`Dismissable`).
+2. `Moved/Ended/Cancelled` go ONLY to the owner, wherever the finger went (capture by
+   ID). Each finger has its own owner; two fingers on one widget arrive as two ID
+   streams — that is what a pinch is built from. A ScrollView scrolling mid-touch is
+   followed (frame re-evaluated per event).
+3. A touch nobody took: `SendTouch` returns `false`. **The engine does NOT turn it
+   into a mouse.** Stray events (Moved with an unknown ID) also return `false`.
+4. `Engine.CancelTouches()` cancels all (focus lost, system gesture); a repeated
+   `Began` with a busy ID cancels the old owner first. `Engine.TouchActive()`.
+
+`Window.SetTouchEnabled(on)` / `TouchEnabled()` (package `window`): touch is **opt-in**.
+Not asked ⇒ no backend catches touches and the OS keeps producing mouse as always
+(Explorer, Calculator, Notepad, the shell are unchanged). Auto-on when the root widget
+itself implements `TouchHandler`; an explicit call always wins. Call before `Run`
+(Win32 and Wayland also accept it later; X11 turns it on later from the event loop,
+so touch starts a moment after the call — see the table).
+
+**No duplicate mouse.** A window that took touch takes it entirely:
+
+| Backend | How the OS mouse-from-touch is kept out |
+|---|---|
+| Win32 | `WM_POINTERDOWN/UPDATE/UP/CAPTURECHANGED` for `PT_TOUCH` only (`GetPointerType`, `GetPointerTouchInfo`, syscall, no CGO). The message is handled and NOT passed to `DefWindowProc` ⇒ the system generates neither mouse nor `WM_GESTURE`. Pen and everything else go to `DefWindowProc` as before. **Pressure / contact**: `POINTER_TOUCH_INFO.pressure` (0..1024 → 0..1) and `rcContact` are read ONLY when the matching `TOUCH_MASK_*` bit is set (a driver stub in an unmasked field is not "force"); `Major`/`Minor` are the long/short side of the contact BOUNDING RECT (Windows gives no ellipse), `Orientation` is passed through when masked. `EnableMouseInPointer` is NOT enabled, so a real mouse is unchanged. The `0xFF515700` mouse signature is deliberately not filtered: it marks the pen too. Not asked ⇒ every `WM_POINTER*` goes to `DefWindowProc` (verified live: 4 touch events and 0 mouse when enabled; mouse events and 0 touch when disabled). Cancel: `POINTERUP` with `CANCELED` and `CAPTURECHANGED` of a still-tracked touch. |
+| Wayland | `wl_seat.get_touch` only when asked AND the seat advertises `touch`; `down/up/motion/frame/cancel`; surface units × surface scale = buffer px (like window sizes); `up` has no coordinates — the last point is reused; `cancel` / losing the capability ⇒ `Cancelled`. **Contact shape** (`shape`/`orientation`, `wl_touch` v6; there is NO pressure in `wl_touch`, `Pressure` stays 0): the version of `wl_touch` is the version of the seat it was created from, and the window's main seat is bound at v4 on purpose (higher changes pointer events). So when the compositor advertises `wl_seat` ≥ 6, a SECOND `wl_seat` object of the same global is bound at v6 only for `get_touch` (released together with `wl_touch`); pointer/keyboard stay on v4. With v6 the events are held until `frame` (shape events follow `down`/`motion` of the same frame) and then delivered with `Major`/`Minor` (× surface scale) and `Orientation`; below v6 delivery is immediate as before. |
+| X11 | XInput 2.2: `QueryExtension("XInputExtension")`, `XIQueryVersion(2,2)`, `XISelectEvents(XIAllMasterDevices, TouchBegin|Update|End)` at window creation; `GenericEvent` (type 35) tails are now read in full in every event loop. **Enabling after the window exists** (`Window.SetTouchEnabled(true)` later): the request is remembered, the sleeping event loop is woken with a harmless `GetInputFocus`, and at the top level of the loop (between events, like `x11SyncWMState`) the same negotiation runs through `x11Reply`, which dispatches events that arrive before the reply instead of dropping them (a request made before the loop starts runs first thing in `RunEventLoop`). Repeated enabling does not resubscribe. **Pressure / contact** are device axes (valuators), not event fields: after subscribing, `InternAtom(only_if_exists)` for "Abs MT Pressure" / "Touch Major" / "Touch Minor" / "Orientation" / "Position X" and one `XIQueryDevice(XIAllDevices)` give each device's axes with min/max; the event tail (buttons mask, valuator mask, FP3232 values) is read per `sourceid`; events carry only CHANGED axes, so the last value per touch is remembered. Pressure = (v−min)/(max−min); contact axes are in device units and are converted to px by `screen width / range of the X axis` (right when the touchscreen spans the whole X screen; overstated on multi-monitor setups); orientation = v / axis limit × 90°. A device that appears later (unknown `sourceid`) triggers ONE re-query between events. libinput-driven touchscreens usually expose no pressure axis (then 0), evdev-driven ones do. The server does not emulate a pointer for a client that selected touch; if one does anyway, core Button/Motion events of an emulating touch (`XITouchEmulatingPointer`, same timestamp as its end) are dropped (`x11TouchGuard`). |
+
+**Unclaimed touch ⇒ mouse (done by the window, not the engine).** Otherwise ordinary
+buttons, menus and text fields would be dead under a finger in a touch-enabled window.
+The first unclaimed finger becomes: `MouseMove`, left `Down`, `MouseMove`s, left `Up`;
+other unclaimed fingers are ignored (one mouse). `Cancelled` releases the button
+OUTSIDE the window (`-1,-1`) so nothing is clicked. Lost activation cancels all touches.
+**Long press ⇒ right button, as Windows does it:** a finger that lay within the tap slop (10 logical px, scaled)
+for at least `Window.SetTouchLongPress` (0 = 500 ms, <0 = never) is released as a right click at the lift point
+instead of a left one: the left button (already down, press feedback is immediate) is released OUTSIDE the window
+(nothing fires, like on cancel), then the pointer moves back and `MouseRight` down+up is sent ⇒ context menu. It acts
+on LIFT, not on timeout, so a finger that aims at a slider thumb or a selection and then drags (leaving the slop
+at any moment, even if it returns) stays an ordinary left button, and no timer is needed. Time is taken from the
+event timestamps when the backend gives them, else from arrival time. Claimed touches are never converted.
+Cost: the OS touch-pan wheel is still not produced for unclaimed touches — use the recognizer's `Pan`/`Swipe`.
+Wayland popups (`xdg_popup`) take only mouse: the first finger on a popup is its
+mouse (same handlers as the pointer), other fingers there are ignored, cancel releases
+outside so a menu item does not fire.
+
+### Gesture recognizer
+
+```go
+var r widget.GestureRecognizer          // zero value = default thresholds
+gs := r.Feed(ev)                        // []Gesture: Tap, Pan, Pinch, Swipe
+// or embed the ready handler:
+type Viewer struct{ widget.Base; widget.TouchGestures }
+v.OnGesture = func(g widget.Gesture) { switch g := g.(type) { case widget.Pinch: … } }
+```
+
+* `Tap{X, Y, Count}` — short touch without movement; `Count` 2 = double (the first Tap
+  is not delayed).
+* `LongPress{X, Y}` — the finger lay still (within `TapSlop`) for `LongPressDuration` (500 ms). Fires while
+  the finger is still down. No `Tap` after it, and the same finger no longer produces `Pan`/`Swipe` (Android
+  semantics: a menu opened by long press must not scroll under a trembling finger); a second finger starts
+  a pinch as usual. The recognizer has no goroutines and no timers; time comes from the owner, either through
+  events (every event with `Time` first "settles" an overdue long press) or `Tick(now)` (same clock as
+  `TouchEvent.Time`); `NextDeadline()` says when `Tick` is due (`ok=false`: nothing to wait for). `TouchGestures`
+  does this itself with `widget.Animate` (engine-driven, same goroutine as `OnTouch`; `Reset()` also stops it).
+* `Pan{Phase, X, Y, Delta, Total}` — one finger dragging. `Began.Delta` is the path
+  already walked to the threshold (nothing is lost); `Ended`/`Cancelled` follow.
+* `Swipe{Dir, Velocity, VX, VY, Start, End}` — a fast flick; comes AFTER the `Pan Ended`
+  it grew from (use `Swipe` alone for page flipping, `Pan`+`Swipe` for inertia).
+* `Pinch{Phase, Scale, Step, Center, CenterDelta}` — two fingers: `Scale` relative to
+  the start, `Step` relative to the previous event (multiply zoom by `Step`), midpoint
+  and its shift. Two-finger scrolling arrives as `Pinch` with `Scale≈1`.
+* Second finger ends a `Pan`; the finger left after a pinch is dead until all lift;
+  a third finger changes nothing.
+
+`GestureConfig` (zero field = default; all in LOGICAL px): `TapSlop` 10,
+`TapMaxDuration` 300 ms, `DoubleTapInterval` 300 ms, `DoubleTapSlop` 32, `PanSlop` 10,
+`PinchSlop` 10 (change of finger distance), `SwipeMinDistance` 48,
+`LongPressDuration` 500 ms (<0 = off), `SwipeMinVelocity` 350 px/s, `SwipeVelocityWindow` 100 ms (finger stopped before lift
+⇒ no swipe), `SwipeAxisRatio` 1.5 (≈34° from the axis). Pure logic, no platform.
+Events without `Time` cannot give tap duration or swipe speed.
+
+Tests: `widget/gesture_test.go` (synthetic sequences), `engine/touch_test.go` (capture by
+ID, two fingers, bubbling, overlay, modal, HiDPI + scroll frame, pinch through the engine),
+`window/touch_test.go` (opt-in, mouse emulation, long press ⇒ right button with an injected clock), `window/touch_windows_test.go`
+(struct layout, phases, pressure/contact by `TouchMask`, live `InjectTouchInput` with `HEADLESS_GUI_TOUCH_E2E=1` — checks pressure 32/1024 and a 4×4 contact arrive),
+`window/waylandtouch_test.go` + `wayland_touch_linux_test.go` (wire bodies, binding,
+popups, `wl_touch` v6 shape/orientation, second seat), `window/x11touch_test.go` +
+`x11touch_linux_test.go` (requests, event bytes, `XIQueryDevice` reply parsing, valuator decoding,
+fake X server handshake incl. events before a reply, deferred enabling, event loop with `GenericEvent`
+tails, live XInput 2.2 on a real server, incl. enabling after creation).
+
+Not verified on live hardware: Wayland `wl_touch` (incl. v6 shape, the second seat) against a real
+compositor, and X11 touch events / pressure axes from a real touch device (wire format and fake server
+only; the XI 2.2 negotiation, the deferred subscription and the parsing of a real `XIQueryDevice` reply were
+checked against a real XWayland, which has no touch device). Win32 touch with pressure/contact was checked
+live with `InjectTouchInput`; real digitizer force is not verified. Not done: Cocoa (no touch on macOS
+desktop), `WM_POINTER` history points, a pen's pressure/tilt (the pen still goes to `DefWindowProc` as a mouse).
 
 ---
 

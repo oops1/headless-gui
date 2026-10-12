@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -52,6 +53,7 @@ func release(m *StartMenu, x, y int) {
 // Бегунок списка: нажатие захватывает мышь, смещение бегунка пропорционально
 // прокрутке, верх бегунка остаётся там, где его схватили.
 func TestScrollbar_DragThumbScrollsList(t *testing.T) {
+	testreset.Globals(t)
 	m, cat := tiledMenu(t)
 	b := barOfMenu(t, m, areaList)
 	span, room := b.content-b.viewH, b.viewH-b.thumb.Dy()
@@ -113,6 +115,7 @@ func TestScrollbar_DragThumbScrollsList(t *testing.T) {
 // Пока бегунок тянут, полоса не гаснет; после отпускания гаснет через обычную
 // паузу.
 func TestScrollbar_ThumbDoesNotFadeWhileDragged(t *testing.T) {
+	testreset.Globals(t)
 	old1, old2 := thinBarHold, thinBarFade
 	thinBarHold, thinBarFade = 30*time.Millisecond, 20*time.Millisecond
 	defer func() { thinBarHold, thinBarFade = old1, old2 }()
@@ -157,6 +160,7 @@ func TestScrollbar_ThumbDoesNotFadeWhileDragged(t *testing.T) {
 
 // Курсор над дорожкой тоже удерживает полосу на виду.
 func TestScrollbar_HoverKeepsBarVisible(t *testing.T) {
+	testreset.Globals(t)
 	old1, old2 := thinBarHold, thinBarFade
 	thinBarHold, thinBarFade = 30*time.Millisecond, 20*time.Millisecond
 	defer func() { thinBarHold, thinBarFade = old1, old2 }()
@@ -183,6 +187,7 @@ func TestScrollbar_HoverKeepsBarVisible(t *testing.T) {
 
 // Щелчок по дорожке вне бегунка сдвигает список на страницу в его сторону.
 func TestScrollbar_TrackClickPagesList(t *testing.T) {
+	testreset.Globals(t)
 	m, cat := tiledMenu(t)
 	b := barOfMenu(t, m, areaList)
 	page := b.viewH - m.metricInt(KeyStartMenuRowHeight)
@@ -228,6 +233,7 @@ func TestScrollbar_TrackClickPagesList(t *testing.T) {
 // Дорожка не отнимает у строки стрелку раскрытия папки: узкая колонка у самого
 // края, шире отступа строки она не бывает.
 func TestScrollbar_TrackNarrowerThanRowPad(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	b := barOfMenu(t, m, areaList)
 	if w := b.track.Dx(); w > m.metricInt(KeyStartRowPad)/2 {
@@ -237,6 +243,7 @@ func TestScrollbar_TrackNarrowerThanRowPad(t *testing.T) {
 
 // У плиток своя прокрутка, и бегунок ведёт её так же.
 func TestScrollbar_DragThumbScrollsTiles(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := scrollMenu(t)
 	var changed bool
 	m.OnTilesChanged = func([]TileGroup) { changed = true }
@@ -287,6 +294,7 @@ func TestScrollbar_DragThumbScrollsTiles(t *testing.T) {
 // Перетаскивание бегунка перерисовывает область прокручиваемого, а не меню
 // целиком, и не будит полных кадров.
 func TestScrollbar_DragInvalidatesOnlyItsArea(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	b := barOfMenu(t, m, areaList)
 	x, y := b.thumb.Min.X+2, b.thumb.Min.Y+5

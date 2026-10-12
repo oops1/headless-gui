@@ -5,11 +5,13 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/desktop"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // Точка страницы справа переключает страницу закреплённых.
 func TestStartMenu11_ClickDotSwitchesPage(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.menu.SetPinned(win11Pinned(40))
 	s.open()
@@ -42,6 +44,7 @@ func TestStartMenu11_ClickDotSwitchesPage(t *testing.T) {
 
 // Закреплённых стало меньше — страница возвращается в допустимые пределы.
 func TestStartMenu11_PageClampedWhenPinnedShrink(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.menu.SetPinned(win11Pinned(40))
 	s.open()
@@ -59,6 +62,7 @@ func TestStartMenu11_PageClampedWhenPinnedShrink(t *testing.T) {
 // Источник «Рекомендуем» сообщает о смене — меню перерисовывается и раздел
 // исчезает или появляется.
 func TestStartMenu11_RecommendedSourceUpdates(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	var got string
 	s.menu.OnRecommendedActivate = func(id string) { got = id }
@@ -88,6 +92,7 @@ func TestStartMenu11_RecommendedSourceUpdates(t *testing.T) {
 // Строка поиска панели задач связана с меню Windows 11: набор в ней открывает
 // меню с результатами, запрос виден и в строке меню, Esc закрывает и очищает.
 func TestStartMenu11_BoundTaskbarSearchBox(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	box := desktop.NewSearchBox(s.tm, s.prov)
 	box.Bind(s.menu, s.start.Bounds)
@@ -120,6 +125,7 @@ func TestStartMenu11_BoundTaskbarSearchBox(t *testing.T) {
 // Перенос ячейки за пределы меню: мышь захвачена, отпускание снаружи завершает
 // перенос (и сообщает порядок, если он изменился).
 func TestStartMenu11_DragEndsOutsideMenu(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	changed := 0
 	s.menu.OnPinnedChanged = func([]desktop.StartPinned) { changed++ }
@@ -144,6 +150,7 @@ func TestStartMenu11_DragEndsOutsideMenu(t *testing.T) {
 
 // Правка языка: русские и английские подписи разделов.
 func TestStartMenu11_LocalizedCaptions(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.SetLanguage("RU")
 	for lang, want := range map[string][]string{
 		"RU": {"Закреплено", "Все приложения", "Рекомендуем", "Дополнительно", "Назад"},
@@ -168,6 +175,7 @@ func TestStartMenu11_LocalizedCaptions(t *testing.T) {
 // «Все рекомендации» следуют за источником: смена строк на открытом виде видна
 // сразу (кэш строк списка не устаревает).
 func TestStartMenu11_MoreViewFollowsSource(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	var got string
 	s.menu.OnRecommendedActivate = func(id string) { got = id }
@@ -188,6 +196,7 @@ func TestStartMenu11_MoreViewFollowsSource(t *testing.T) {
 // Backspace при пустом запросе возвращает из
 // списка на главный вид.
 func TestStartMenu11_BackspaceGoesBack(t *testing.T) {
+	testreset.Globals(t)
 	s := newWin11Scene(t, 1280, 800, false, 1)
 	s.open()
 	s.menu.SetView(desktop.StartViewAllApps)

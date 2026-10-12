@@ -51,6 +51,8 @@ const (
 	calW11KeyFocus   theme.Key = "calendar.w11.focus"
 	calW11KeyButton  theme.Key = "calendar.w11.button"
 	calW11KeyEdge    theme.Key = "calendar.w11.edge"
+	// calW11KeyFocusCompact — высота модуля «Фокусировка» без заголовка.
+	calW11KeyFocusCompact theme.Key = "calendar.w11.focus.compact"
 )
 
 // Части стиля календаря Windows 11.
@@ -84,6 +86,11 @@ const (
 	calW11ButtonPad = 24
 	// calW11GlyphDiv — доля стороны кнопки под фигуру значка («−», «+», шеврон).
 	calW11GlyphDiv = 3
+	// calW11ActionPad, calW11ActionIcon и calW11ActionGap — поля, значок и зазор
+	// кнопки «▶ Фокусировка».
+	calW11ActionPad  = 12
+	calW11ActionIcon = 14
+	calW11ActionGap  = 6
 )
 
 // calStop — остановка клавиатурного фокуса и цель наведения в календаре.
@@ -167,6 +174,9 @@ func (c *CalendarFlyout) relayout(change func()) {
 
 type calW11Metrics struct {
 	width, pad, head, month, weekday, cell, day, nav, focus, button, edge int
+	// compact — модуль «Фокусировка» как у настоящей Windows 11: без заголовка,
+	// в одну строку; single — без выбора длительности (одна кнопка).
+	compact, single bool
 }
 
 func (c *CalendarFlyout) w11Metrics() calW11Metrics {
@@ -176,7 +186,7 @@ func (c *CalendarFlyout) w11Metrics() calW11Metrics {
 		}
 		return def
 	}
-	return calW11Metrics{
+	m := calW11Metrics{
 		width:   get(calW11KeyWidth, 364),
 		pad:     get(calW11KeyPad, 16),
 		head:    get(calW11KeyHead, 44),
@@ -189,6 +199,12 @@ func (c *CalendarFlyout) w11Metrics() calW11Metrics {
 		button:  get(calW11KeyButton, 32),
 		edge:    c.metric(calW11KeyEdge),
 	}
+	if tm := c.Theme(); tm != nil && tm.GetFlag(theme.KeyCalendarFocusCompact, false) {
+		m.compact = true
+		m.single = c.FocusSingleButton
+		m.focus = get(calW11KeyFocusCompact, 60)
+	}
+	return m
 }
 
 // calStopRect — остановка и её прямоугольник.
@@ -261,7 +277,27 @@ func (c *CalendarFlyout) w11Layout(panel image.Rectangle) calW11Layout {
 		}
 	}
 
-	if sess := c.FocusSession(); sess != nil {
+	if sess := c.FocusSession(); sess != nil && m.compact {
+		l.divider = image.Rect(panel.Min.X+m.pad, y+m.pad/2, panel.Max.X-m.pad, y+m.pad/2+1)
+		my := l.divider.Max.Y
+		l.focus = image.Rect(panel.Min.X, my, panel.Max.X, my+m.focus)
+		ry := my + calW11FocusTop
+		b := m.button
+		l.fremain = image.Rect(x0, ry, x0+w/2, ry+b)
+		l.fprogress = image.Rect(x0, ry+b+calW11FocusGap, x0+w, ry+b+calW11FocusGap+calW11ProgressH)
+		st := sess.State()
+		if m.single && !st.Running {
+			l.faction = image.Rect(x0, ry, x0+w, ry+b)
+		} else {
+			bw := calW11ActionPad + calW11ActionIcon + calW11ActionGap + c.w11Fonts().body.width(focusActionLabelFor(st, true)) + calW11ActionPad
+			l.faction = image.Rect(x0+w-bw, ry, x0+w, ry+b)
+		}
+		if !m.single {
+			l.fless = image.Rect(x0, ry, x0+b, ry+b)
+			l.fvalue = image.Rect(l.fless.Max.X, ry, l.fless.Max.X+calW11ValueW, ry+b)
+			l.fmore = image.Rect(l.fvalue.Max.X, ry, l.fvalue.Max.X+b, ry+b)
+		}
+	} else if sess != nil {
 		l.divider = image.Rect(panel.Min.X+m.pad, y+m.pad/2, panel.Max.X-m.pad, y+m.pad/2+1)
 		my := l.divider.Max.Y
 		l.focus = image.Rect(panel.Min.X, my, panel.Max.X, my+m.focus)
@@ -366,8 +402,10 @@ func (l *calW11Layout) stops() []calStopRect {
 			calStopRect{calStopGrid, l.grid})
 	}
 	if !l.focus.Empty() {
-		out = append(out, calStopRect{calStopLess, l.fless}, calStopRect{calStopMore, l.fmore},
-			calStopRect{calStopAction, l.faction})
+		if !l.fless.Empty() {
+			out = append(out, calStopRect{calStopLess, l.fless}, calStopRect{calStopMore, l.fmore})
+		}
+		out = append(out, calStopRect{calStopAction, l.faction})
 	}
 	return out
 }
@@ -428,6 +466,15 @@ func focusActionLabel(st FocusSessionState) string {
 		return tr(StrFocusStop)
 	}
 	return tr(StrFocusStart)
+}
+
+// focusActionLabelFor — надпись кнопки: compact — вид настоящей Windows 11, где в
+// покое на кнопке «Фокусировка» (рядом с ▶), а не «Начать».
+func focusActionLabelFor(st FocusSessionState, compact bool) string {
+	if compact && !st.Running {
+		return tr(StrFocusTitle)
+	}
+	return focusActionLabel(st)
 }
 
 // focusAction выполняет «Начать» или «Остановить» и возвращает, что сделано.
@@ -598,6 +645,7 @@ func (c *CalendarFlyout) onOpenChanged(open bool) {
 		return
 	}
 	c.detachFocus()
+	c.CloseFocusMenu()
 	c.mu.Lock()
 	c.hot, c.focusStop = calStopNone, calStopNone
 	c.mu.Unlock()
@@ -741,22 +789,41 @@ func (c *CalendarFlyout) drawFocusModule(ctx widget.DrawContext, l calW11Layout,
 	if div.Fill.A > 0 {
 		ctx.FillRectAlpha(l.divider.Min.X, l.divider.Min.Y, l.divider.Dx(), l.divider.Dy(), div.Fill)
 	}
-	ts := c.themeStyle(calPartFocusTitle, theme.StateNormal)
-	f.title.draw(ctx, f.title.elide(tr(StrFocusTitle), l.ftitle.Dx()), l.ftitle.Min.X,
-		l.ftitle.Min.Y+(l.ftitle.Dy()-f.title.lineH())/2, ts.Text)
+	if !l.ftitle.Empty() {
+		ts := c.themeStyle(calPartFocusTitle, theme.StateNormal)
+		f.title.draw(ctx, f.title.elide(tr(StrFocusTitle), l.ftitle.Dx()), l.ftitle.Min.X,
+			l.ftitle.Min.Y+(l.ftitle.Dy()-f.title.lineH())/2, ts.Text)
+	}
 
 	b := l.m.button
-	// Правая кнопка: «Начать» (акцент) или «Остановить».
-	label, part := focusActionLabel(st), calPartFocusAccent
-	if st.Running {
+	// Правая кнопка: «Начать» (акцент) или «Остановить»; у Windows 11 —
+	// нейтральная «▶ Фокусировка» и «■ Остановить».
+	label, part := focusActionLabelFor(st, l.m.compact), calPartFocusAccent
+	if st.Running || l.m.compact {
 		part = calPartFocusButton
 	}
 	action := l.faction
 	as := c.themeStyle(part, c.stopState(calStopAction, hot, focus, ring))
 	PaintStyle(ctx, action, as)
-	f.body.draw(ctx, label, action.Min.X+(action.Dx()-f.body.width(label))/2,
-		action.Min.Y+(action.Dy()-f.body.lineH())/2, as.Text)
+	if l.m.compact {
+		// Значок и подпись одной группой по центру кнопки.
+		tw := f.body.width(label)
+		gw := calW11ActionIcon + calW11ActionGap + tw
+		x := action.Min.X + (action.Dx()-gw)/2
+		g := qsGlyphPlay
+		if st.Running {
+			g = qsGlyphStop
+		}
+		drawQSGlyph(ctx, g, image.Rect(x, action.Min.Y, x+calW11ActionIcon, action.Max.Y), calW11ActionIcon, as.Text)
+		f.body.draw(ctx, label, x+calW11ActionIcon+calW11ActionGap, action.Min.Y+(action.Dy()-f.body.lineH())/2, as.Text)
+	} else {
+		f.body.draw(ctx, label, action.Min.X+(action.Dx()-f.body.width(label))/2,
+			action.Min.Y+(action.Dy()-f.body.lineH())/2, as.Text)
+	}
 
+	if !st.Running && l.fless.Empty() {
+		return // одна кнопка без выбора длительности
+	}
 	if !st.Running {
 		less := c.themeStyle(calPartFocusButton, c.stopState(calStopLess, hot, focus, ring))
 		more := c.themeStyle(calPartFocusButton, c.stopState(calStopMore, hot, focus, ring))
@@ -835,6 +902,9 @@ func drawGlyphPlus(ctx widget.DrawContext, r image.Rectangle, col color.RGBA, si
 // обработано; клик по кнопке или дню срабатывает на нажатии, как у плоского
 // календаря.
 func (c *CalendarFlyout) w11Mouse(e widget.MouseEvent) bool {
+	if e.Button == widget.MouseRight {
+		return c.focusMenuMouse(e)
+	}
 	if e.Button != widget.MouseLeft || !c.IsOpen() {
 		return false
 	}
@@ -932,6 +1002,9 @@ func (c *CalendarFlyout) w11Move(x, y int) {
 func (c *CalendarFlyout) w11Key(e widget.KeyEvent) bool {
 	if !c.IsOpen() || !e.Pressed {
 		return false
+	}
+	if c.focusMenuKey(e) {
+		return true
 	}
 	c.mu.Lock()
 	onGrid := c.focusStop == calStopGrid

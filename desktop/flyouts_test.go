@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -27,6 +28,7 @@ func allBuiltinThemes(t *testing.T) []string {
 }
 
 func TestFlyouts_OpenUnderEveryTheme(t *testing.T) {
+	testreset.Globals(t)
 	screen := image.Rect(0, 0, 800, 600)
 	anchor := image.Rect(0, 560, 48, 600)
 

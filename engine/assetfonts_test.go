@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // Шрифты из assets/fonts движок ищет относительно рабочего каталога процесса,
@@ -15,6 +17,7 @@ const assetFontsDir = "../assets/fonts"
 // молча оставить движок без покрытия для псевдографики и ✓ ✗ ⚠ на машине, где
 // системных шрифтов нет. Тест держит это имя.
 func TestAssetFallbackFontsPresent(t *testing.T) {
+	testreset.Globals(t)
 	for _, p := range assetFallbackFontPaths() {
 		full := filepath.Join("..", p)
 		data, err := os.ReadFile(full)
@@ -32,6 +35,7 @@ func TestAssetFallbackFontsPresent(t *testing.T) {
 // нечитаемые. Битый файл там оборачивается пропавшим шрифтом без единого
 // сообщения, поэтому разбор проверяется здесь.
 func TestAssetFontsParse(t *testing.T) {
+	testreset.Globals(t)
 	entries, err := os.ReadDir(assetFontsDir)
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +67,7 @@ func TestAssetFontsParse(t *testing.T) {
 // лицензии, потерянный при чистке папки, — это нарушение, которое иначе
 // обнаружится не у нас.
 func TestAssetFontLicensesPresent(t *testing.T) {
+	testreset.Globals(t)
 	// префикс имени файла шрифта → файл лицензии рядом с ним
 	licenses := map[string]string{
 		"Roboto":     "Roboto-OFL.txt",

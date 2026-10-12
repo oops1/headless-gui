@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -133,6 +134,7 @@ func testThemeManager(t *testing.T) *theme.Manager {
 // ─── Часы ────────────────────────────────────────────────────────────────────
 
 func TestClockItem_ShowsFakeTime(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	clk := NewFakeClock(time.Date(2026, 8, 27, 14, 5, 0, 0, time.UTC))
 	c := NewClock(tm, clk)
@@ -148,6 +150,7 @@ func TestClockItem_ShowsFakeTime(t *testing.T) {
 }
 
 func TestClockItem_StringChangesOnMinuteAdvance(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	clk := NewFakeClock(time.Date(2026, 8, 27, 14, 5, 30, 0, time.UTC))
 	c := NewClock(tm, clk)
@@ -172,6 +175,7 @@ func TestClockItem_StringChangesOnMinuteAdvance(t *testing.T) {
 // TestClockItem_TickInvalidatesOnlyWhenStringChanges — требование №8: тик раз
 // в секунду не должен будить рендер, пока отображаемая строка не изменилась.
 func TestClockItem_TickInvalidatesOnlyWhenStringChanges(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	clk := NewFakeClock(time.Date(2026, 8, 27, 14, 5, 30, 0, time.UTC))
 	c := NewClock(tm, clk)
@@ -202,6 +206,7 @@ func TestClockItem_TickInvalidatesOnlyWhenStringChanges(t *testing.T) {
 }
 
 func TestClockItem_CloseStopsTicking(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	clk := NewFakeClock(time.Date(2026, 8, 27, 14, 5, 30, 0, time.UTC))
 	c := NewClock(tm, clk)
@@ -221,6 +226,7 @@ func TestClockItem_CloseStopsTicking(t *testing.T) {
 }
 
 func TestClockItem_PreferredSizeGrowsWithLength(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	clk := NewFakeClock(time.Date(2026, 8, 27, 14, 5, 0, 0, time.UTC))
 
@@ -242,6 +248,7 @@ func TestClockItem_PreferredSizeGrowsWithLength(t *testing.T) {
 }
 
 func TestClockItem_TwoLineWhenTallEnough(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	clk := NewFakeClock(time.Date(2026, 8, 27, 14, 5, 0, 0, time.UTC))
 	c := NewClock(tm, clk)

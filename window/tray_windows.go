@@ -351,6 +351,12 @@ func (w *Win32Window) imageToHICON(icon image.Image) windows.Handle {
 
 // rgbaToHICON создаёт HICON из RGBA (32bpp цветной DIB + 1bpp AND-маска).
 func rgbaToHICON(img *image.RGBA) windows.Handle {
+	return rgbaToHandle(img, true, 0, 0)
+}
+
+// rgbaToHandle создаёт HICON (icon=true) или HCURSOR (icon=false, с горячей
+// точкой hotX, hotY) из RGBA: 32bpp цветной DIB с альфой + 1bpp AND-маска.
+func rgbaToHandle(img *image.RGBA, icon bool, hotX, hotY uint32) windows.Handle {
 	b := img.Bounds()
 	cw, ch := b.Dx(), b.Dy()
 	if cw <= 0 || ch <= 0 {
@@ -384,9 +390,13 @@ func rgbaToHICON(img *image.RGBA) windows.Handle {
 		uintptr(unsafe.Pointer(&mask[0])))
 
 	ii := iconInfo{
-		FIcon:    1,
 		HbmMask:  windows.Handle(hbmMask),
 		HbmColor: windows.Handle(hbmColor),
+	}
+	if icon {
+		ii.FIcon = 1
+	} else {
+		ii.XHotspot, ii.YHotspot = hotX, hotY
 	}
 	hicon, _, _ := procCreateIconIndirect.Call(uintptr(unsafe.Pointer(&ii)))
 

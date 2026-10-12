@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -20,6 +21,7 @@ import (
 // заявленных областей, наружу не уходит.
 
 func TestDamage_KeepsRectsApart(t *testing.T) {
+	testreset.Globals(t)
 	e := New(640, 480, 60)
 	e.SetRenderOnDemand(true)
 	e.consumeDamage()
@@ -37,6 +39,7 @@ func TestDamage_KeepsRectsApart(t *testing.T) {
 }
 
 func TestDamage_AbsorbsNested(t *testing.T) {
+	testreset.Globals(t)
 	e := New(640, 480, 60)
 	e.consumeDamage()
 
@@ -56,6 +59,7 @@ func TestDamage_AbsorbsNested(t *testing.T) {
 }
 
 func TestDamage_CollapsesWhenTooMany(t *testing.T) {
+	testreset.Globals(t)
 	e := New(640, 480, 60)
 	e.consumeDamage()
 
@@ -80,6 +84,7 @@ func TestDamage_CollapsesWhenTooMany(t *testing.T) {
 // Тест намеренно нарушает контракт InvalidateRect (заявлены не все
 // изменившиеся области) — иначе разницу не увидеть.
 func TestDamage_UnclaimedChangeStaysHome(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 640, 480
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 
@@ -130,6 +135,7 @@ func TestDamage_UnclaimedChangeStaysHome(t *testing.T) {
 // потребителя останутся старые пиксели. Тест закрепляет инвариант на будущее:
 // после серии поглощений каждая заявленная область по-прежнему покрыта.
 func TestDamage_AbsorptionKeepsEveryArea(t *testing.T) {
+	testreset.Globals(t)
 	e := New(640, 480, 60)
 	e.consumeDamage()
 

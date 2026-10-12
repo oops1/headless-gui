@@ -42,6 +42,7 @@ import (
 type Engine struct {
 	canvas    *Canvas
 	fontCache *FontCache
+	imgInv    *imageInvalidator // журнал сбросов кэша изображений всех холстов движка (imagecache.go)
 	bgSrc     image.Image // исходный фон (до масштабирования); нужен при SetResolution
 	root      widget.Widget
 	mu        sync.RWMutex // защищает УКАЗАТЕЛИ root/canvas/bgSrc (короткие секции)
@@ -93,6 +94,9 @@ type Engine struct {
 	// на виджет, оказавшийся под курсором после закрытия.
 	pressConsumer widget.Widget
 
+	// touch — владельцы активных касаний по ID (см. touch.go).
+	touch touchState
+
 	modals []widget.ModalWidget // стек модальных виджетов (последний = верхний)
 	modMu  sync.Mutex
 
@@ -140,6 +144,11 @@ type Engine struct {
 	// moveHandle — дескриптор регистрации приёмника объявлений о переносе
 	// (widget.RegisterMoveSink в New, снимается в Stop).
 	moveHandle uint64
+
+	// offscreen — движок создан NewOffscreen и не занимает служб, общих для
+	// процесса: измерителя текста, растеризатора <text> в SVG и границ экрана
+	// для всплывающих меню.
+	offscreen bool
 	// postMu защищает posted: ставят в очередь из любых горутин, разбирает
 	// горутина кадра (см. post.go).
 	postMu sync.Mutex
@@ -178,6 +187,9 @@ type Engine struct {
 	clickN        int
 	dblClickDelay time.Duration // 0 — значение по умолчанию (defaultDoubleClick)
 
+	// cursorOvr — принудительный курсор поверх курсора виджетов (cursoroverride.go).
+	cursorOvr cursorOverride
+
 	frames chan output.Frame
 	// fullNext — следующий кадр полный (холст пересоздан); lostFrame — кадр
 	// выброшен из переполненного канала, потребитель отстал (fullframe.go).
@@ -187,6 +199,7 @@ type Engine struct {
 	done      chan struct{}
 
 	fps     int     // целевой FPS, 1–120
+	maxFPS  atomic.Int32 // потолок частоты кадров поверх fps; 0 — не задан (maxfps.go)
 	userDPI float64 // пользовательский DPI шрифтов (без учёта HiDPI-масштаба)
 
 	// scaleBits — текущий HiDPI-масштаб (math.Float64bits) для lock-free
@@ -311,7 +324,41 @@ func clampCanvasSize(width, height int) (int, int) {
 // Размер холста приводится к допустимым границам (см. clampCanvasSize):
 // отрицательные и нулевые значения поднимаются до 1, заведомо неподъёмные —
 // опускаются до предела, вместо аллокации на десятки гигабайт.
+//
+// Движок занимает службы, общие для процесса: становится измерителем текста
+// вне отрисовки (widget.MeasureUIText и родня), растеризатором <text> в SVG и
+// сообщает виджетам размер экрана. Движку, который не показывается на экране
+// (печать, миниатюры), это не нужно и вредно — для него NewOffscreen.
 func New(width, height, fps int) *Engine {
+	return newEngine(width, height, fps, false)
+}
+
+// NewOffscreen создаёт движок для отрисовки вне экрана — задание печати,
+// миниатюру, экспорт в картинку.
+//
+// В отличие от New, он не занимает служб, общих для процесса:
+//   - не становится измерителем текста. Иначе окно, пока идёт задание,
+//     мерило бы текст холстом задания, его шрифтами и в его масштабе, а
+//     шрифты, которые задание регистрирует из своей горутины, попадали бы в
+//     измеритель одновременно с замерами окна;
+//   - не становится растеризатором <text> в SVG;
+//   - не сообщает виджетам размер экрана (widget.SetScreenBounds) ни при
+//     создании, ни в SetResolution: размер страницы — не экран, и всплывающие
+//     меню окна удерживались бы в его пределах.
+//
+// Всё остальное — как у New: те же шрифты по умолчанию, RenderOnce, Start,
+// Stop. Внутри Draw виджеты меряют ctx.MeasureText своего холста, так что
+// отрисовка точна. На замеры ВНЕ Draw (MeasureUIText) у виджетов такого
+// движка отвечает измеритель процесса, то есть движок окна: шрифт, известный
+// только заданию, там подменится шрифтом по умолчанию.
+func NewOffscreen(width, height, fps int) *Engine {
+	return newEngine(width, height, fps, true)
+}
+
+// IsOffscreen сообщает, создан ли движок NewOffscreen.
+func (e *Engine) IsOffscreen() bool { return e.offscreen }
+
+func newEngine(width, height, fps int, offscreen bool) *Engine {
 	if fps < 1 {
 		fps = 20
 	}
@@ -327,11 +374,14 @@ func New(width, height, fps int) *Engine {
 		quit:      make(chan struct{}),
 		done:      make(chan struct{}),
 		fps:       fps,
+		offscreen: offscreen,
 		userDPI:   DefaultDPI,
 		ttEnabled: true,
 		ttDelay:   600 * time.Millisecond,
 	}
 	e.scaleBits.Store(math.Float64bits(1))
+	e.imgInv = &imageInvalidator{}
+	e.canvas.inv = e.imgInv
 	// Рендер по запросу — режим по умолчанию (v3.5): виджеты самоинвалидируются
 	// (Base.Invalidate, авто-damage в SetBounds/сеттерах), события и слой данных
 	// инвалидируют через движок. Кадры рендерятся только при изменениях UI,
@@ -354,7 +404,9 @@ func New(width, height, fps int) *Engine {
 	e.canvas.RegisterFont(widget.BuiltinFontBoldItalic, gobolditalic.TTF)
 	e.canvas.RegisterFont(widget.BuiltinFontMono, gomono.TTF)
 	// Сообщаем виджетам размер канваса (для удержания popup-меню в пределах экрана).
-	widget.SetScreenBounds(width, height)
+	if !offscreen {
+		widget.SetScreenBounds(width, height)
+	}
 	// Авто-регистрация пользовательских шрифтов из assets/fonts (Roboto, Inter, …).
 	e.loadFontDirectory(filepath.Join("assets", "fonts"))
 	// Шрифт по умолчанию — Roboto, если он есть в assets/fonts; иначе остаётся
@@ -385,6 +437,11 @@ func New(width, height, fps int) *Engine {
 	//
 	// Регистрация со снятием: остановленный движок возвращает измеритель
 	// предыдущему живому вместо того, чтобы оставить свой мёртвый холст.
+	//
+	// Движок вне экрана (NewOffscreen) измерителем не становится.
+	if offscreen {
+		return e
+	}
 	e.measurerHandle = widget.RegisterMeasurers(widget.Measurers{
 		// Замыканием, а не значением метода: SetScale и SetResolution
 		// заменяют e.canvas копией, и привязанный к первому холсту метод
@@ -563,7 +620,9 @@ func (e *Engine) SetResolution(width, height int) {
 	if root != nil {
 		root.SetBounds(image.Rect(0, 0, width, height))
 	}
-	widget.SetScreenBounds(width, height)
+	if !e.offscreen {
+		widget.SetScreenBounds(width, height)
+	}
 
 	// Открытые модалки центрированы под прежний холст: при уменьшении окна
 	// они уезжали за край и обрезались (диалог «в пределах родительского
@@ -1442,7 +1501,7 @@ func (e *Engine) loop() {
 	// вторичного движка диалога свои обработчики и своя горутина (GG-68).
 	defer widget.BindAnimationLoop(e)()
 
-	interval := time.Duration(float64(time.Second) / float64(e.fps))
+	interval := e.frameInterval()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -1493,6 +1552,11 @@ func (e *Engine) loop() {
 			e.deliver(frame)
 
 		case <-ticker.C:
+			// Потолок частоты (SetMaxFPS) мог смениться с прошлого тика.
+			if iv := e.frameInterval(); iv != interval {
+				interval = iv
+				ticker.Reset(iv)
+			}
 			// Отложенные вызовы — раньше всего: они меняют дерево, а решение
 			// о пропуске кадра принимается по заявленному damage, и damage от
 			// них обязан успеть.

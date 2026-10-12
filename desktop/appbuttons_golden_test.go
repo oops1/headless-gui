@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -51,6 +52,7 @@ func (c colorPreviews) Preview(id WindowID, max image.Point) image.Image {
 }
 
 type goldenParts struct {
+	t     *testing.T
 	root  *widget.Panel
 	bar   *Taskbar
 	area  *ApplicationArea
@@ -117,11 +119,11 @@ func goldenScene(t *testing.T, light bool) *goldenParts {
 	prev.Track(area)
 	root.AddChild(prev)
 	t.Cleanup(func() { prev.Close(); bar.Close(); widget.StopAllAnimations() })
-	return &goldenParts{root: root, bar: bar, area: area, start: start, prev: prev, wm: wm, tm: tm}
+	return &goldenParts{t: t, root: root, bar: bar, area: area, start: start, prev: prev, wm: wm, tm: tm}
 }
 
 func (g *goldenParts) render(scale float64) *image.RGBA {
-	eng := engine.New(640, 240, 30)
+	eng := testengine.New(g.t, 640, 240, 30)
 	if scale != 1 {
 		eng.SetScale(scale)
 	}
@@ -148,6 +150,7 @@ func savePNG(t *testing.T, name string, img *image.RGBA) {
 }
 
 func TestGolden_Windows10AppButtons(t *testing.T) {
+	testreset.Globals(t)
 	var frames []*image.RGBA
 	for _, light := range []bool{false, true} {
 		name := "dark"

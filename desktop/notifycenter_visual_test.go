@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -66,20 +67,27 @@ func ncSceneWallpaper(w, h int) *widget.Panel {
 // ncSampleNotes заполняет центр примером из снимка Windows 10.
 func ncSampleNotes(clock time.Time) *desktop.FakeNotifications {
 	ns := desktop.NewFakeNotifications()
+	// Классический центр (Windows 2000) подписывает карточку по Time, а Timestamp
+	// не читает; пустой Time фейк заменяет текущим временем, и кадр зависел от
+	// минуты, в которую его рисуют (два кадра подряд на стыке минут различались).
+	add := func(n desktop.Notification) {
+		n.Time = n.Timestamp
+		ns.Add(n)
+	}
 	blue := color.RGBA{R: 40, G: 140, B: 230, A: 255}
 	white := color.RGBA{R: 235, G: 240, B: 245, A: 255}
 	green := color.RGBA{R: 60, G: 170, B: 90, A: 255}
-	ns.Add(desktop.Notification{
+	add(desktop.Notification{
 		AppID: "cisco", AppName: "Cisco Secure Client", Icon: ncGlyph(48, white, 0),
 		Title: "AnyConnect VPN", Body: "Подключено: gate.avanpost.ru",
 		Timestamp: clock.Add(-30 * time.Hour),
 	})
-	ns.Add(desktop.Notification{
+	add(desktop.Notification{
 		AppID: "cisco", AppName: "Cisco Secure Client", Icon: ncGlyph(48, white, 0),
 		Title: "AnyConnect VPN", Body: "Подключено: gate.avanpost.ru",
 		Timestamp: clock.Add(-52 * time.Hour),
 	})
-	ns.Add(desktop.Notification{
+	add(desktop.Notification{
 		AppID: "mail", AppName: "Почта", Icon: ncGlyph(48, green, 2),
 		Title: "Анна Иванова", Body: "Привет! Посмотри, пожалуйста, договор до конца дня.",
 		Timestamp: clock.Add(-40 * time.Minute),
@@ -88,7 +96,7 @@ func ncSampleNotes(clock time.Time) *desktop.FakeNotifications {
 			{ID: "open", Kind: desktop.NotificationActionLink, Title: "Открыть письмо"},
 		},
 	})
-	ns.Add(desktop.Notification{
+	add(desktop.Notification{
 		AppID: "onedrive", AppName: "OneDrive", Icon: ncGlyph(48, blue, 0),
 		Title:     "Включить \"Архивация Windows\"",
 		Body:      "Автоматическое сохранение рабочего стола, документов и изображений в OneDrive, чтобы защитить их и получить к ним доступ с других устройств.",
@@ -175,7 +183,7 @@ func ncRender(t *testing.T, o ncSceneOpts) (*image.RGBA, *desktop.NotificationCe
 	if scale <= 0 {
 		scale = 1
 	}
-	eng := engine.New(w, h, 30) // размер логический, физический — умноженный на масштаб
+	eng := testengine.New(t, w, h, 30) // размер логический, физический — умноженный на масштаб
 	eng.SetScale(scale)
 	eng.SetRoot(root)
 	// Значок в трее ниже панели, а центр должен лечь на неё вплотную: якорем
@@ -208,6 +216,7 @@ func ncSave(t *testing.T, img *image.RGBA, name string) {
 var _ = draw.Draw
 
 func TestVisual_NotificationCenterWin10(t *testing.T) {
+	testreset.Globals(t)
 	cases := []struct {
 		name string
 		o    ncSceneOpts

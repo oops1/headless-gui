@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -37,6 +38,7 @@ func trayLabelTheme(t *testing.T, minWidth float64) *theme.Manager {
 }
 
 func TestTrayLabel_DrawsItsText(t *testing.T) {
+	testreset.Globals(t)
 	l := NewTrayLabel(trayLabelTheme(t, 0), "РУС")
 	l.SetBounds(image.Rect(0, 0, 40, 24))
 
@@ -57,6 +59,7 @@ func TestTrayLabel_DrawsItsText(t *testing.T) {
 // Ширина не меньше заданной темой: иначе соседние значки прыгали бы при
 // каждой смене раскладки.
 func TestTrayLabel_KeepsMinimumWidth(t *testing.T) {
+	testreset.Globals(t)
 	const min = 40
 	l := NewTrayLabel(trayLabelTheme(t, min), "EN")
 
@@ -77,6 +80,7 @@ func TestTrayLabel_KeepsMinimumWidth(t *testing.T) {
 // Пустая надпись места не занимает: трей не должен держать дыру под текст,
 // которого нет.
 func TestTrayLabel_EmptyTakesNoRoom(t *testing.T) {
+	testreset.Globals(t)
 	l := NewTrayLabel(trayLabelTheme(t, 40), "")
 	if got := l.PreferredSize(image.Pt(200, 24)); got.X != 0 {
 		t.Errorf("пустая надпись просит %d точек ширины", got.X)
@@ -92,6 +96,7 @@ func TestTrayLabel_EmptyTakesNoRoom(t *testing.T) {
 
 // Щелчок доходит до оболочки — на нём висит переключение раскладки.
 func TestTrayLabel_ClickReachesTheShell(t *testing.T) {
+	testreset.Globals(t)
 	l := NewTrayLabel(trayLabelTheme(t, 0), "РУС")
 	l.SetBounds(image.Rect(0, 0, 40, 24))
 
@@ -117,6 +122,7 @@ func TestTrayLabel_ClickReachesTheShell(t *testing.T) {
 
 // Наведение видно: тема задаёт для него свою заливку.
 func TestTrayLabel_HoverIsVisible(t *testing.T) {
+	testreset.Globals(t)
 	l := NewTrayLabel(trayLabelTheme(t, 0), "РУС")
 	l.SetBounds(image.Rect(0, 0, 40, 24))
 
@@ -134,6 +140,7 @@ func TestTrayLabel_HoverIsVisible(t *testing.T) {
 
 // Смена текста — из горутины оболочки, отрисовка — из горутины кадра.
 func TestTrayLabel_TextIsSafeAcrossGoroutines(t *testing.T) {
+	testreset.Globals(t)
 	l := NewTrayLabel(trayLabelTheme(t, 0), "РУС")
 	l.SetBounds(image.Rect(0, 0, 40, 24))
 

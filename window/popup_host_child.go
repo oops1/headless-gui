@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // childPopupHandlers — приёмники ввода попапов. Координаты локальные для
@@ -44,6 +45,15 @@ type childPopupHost interface {
 	SetChildPopupHandlers(h childPopupHandlers)
 }
 
+// childPopupCursor — бэкенд умеет выбирать форму курсора над своими попапами.
+// У xdg_popup курсор общий с указателем, и над попапом он остаётся тем, что
+// выбрало окно-носитель, пока указатель был на нём; SetPopupCursor задаёт
+// форму для времени, когда указатель на попапе: set — принудительный курсор
+// движка (c), иначе стрелка.
+type childPopupCursor interface {
+	SetPopupCursor(c int, set bool)
+}
+
 // overlayCloser — движок умеет закрыть все вынесенные оверлеи (реализует
 // *engine.Engine).
 type overlayCloser interface {
@@ -64,6 +74,11 @@ type childPopups struct {
 
 	mu   sync.Mutex
 	open map[uintptr]*childPopup
+
+	// ovrCursor/ovrSet — принудительный курсор движка, как его последний раз
+	// получил бэкенд (syncCursorOverride). Под mu.
+	ovrCursor widget.Cursor
+	ovrSet    bool
 }
 
 // childPopup — один показанный оверлей.
@@ -145,17 +160,46 @@ func (c *childPopups) apply(frames []engine.PopupFrame) {
 	for _, id := range closed {
 		c.be.CloseChildPopup(id)
 	}
+	opened := false
 	for _, j := range jobs {
 		switch {
 		case j.created:
 			if err := c.be.OpenChildPopup(j.id, j.x, j.y, j.w, j.h); err != nil {
 				continue
 			}
+			opened = true
 		case j.reopen:
 			c.be.MoveChildPopup(j.id, j.x, j.y, j.w, j.h)
 		}
 		c.be.BlitChildPopup(j.id, j.img, j.bands)
 	}
+	if opened {
+		c.syncCursorOverride() // попап открылся под действующим принудительным курсором
+	}
+}
+
+// syncCursorOverride отдаёт бэкенду принудительный курсор движка (форма над
+// попапами). Зовётся на горутине движка при смене override
+// (surface.refreshCursor) и после открытия попапа; повтор того же значения
+// бэкенда не беспокоит.
+func (c *childPopups) syncCursorOverride() {
+	cb, ok := c.be.(childPopupCursor)
+	if !ok {
+		return
+	}
+	src, ok := c.eng.(cursorOverrideSource)
+	if !ok {
+		return
+	}
+	cur, set := src.CursorOverride()
+	c.mu.Lock()
+	same := c.ovrSet == set && (!set || c.ovrCursor == cur)
+	c.ovrCursor, c.ovrSet = cur, set
+	c.mu.Unlock()
+	if same {
+		return
+	}
+	cb.SetPopupCursor(int(cur), set)
 }
 
 // closeAll убирает все попапы (окно-носитель разбирается).

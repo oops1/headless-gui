@@ -13,7 +13,8 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -94,7 +95,7 @@ func matScene(t *testing.T, profile string, panel matPanel, tune func(m *theme.M
 	icons := widget.BuiltinIcons()
 	m.SetIconResolver(icons)
 
-	eng := engine.New(matW, matH, 30)
+	eng := testengine.New(t, matW, matH, 30)
 	registerFonts(t, eng)
 	if err := eng.SetBackground(matWallpaper(matW, matH)); err != nil {
 		t.Fatal(err)
@@ -254,6 +255,7 @@ func equalImages(a, b *image.RGBA) bool {
 // Кадры панелей всех встроенных профилей без флагов — для сравнения «до и
 // после» (SNAP_OUT). Тест без каталога проверяет только, что кадр стабилен.
 func TestSnapshots_AllProfilesDefault(t *testing.T) {
+	testreset.Globals(t)
 	profiles := []string{
 		theme.ProfileWindows2000, theme.ProfileWindows2000Blue, theme.ProfileWindows10, theme.ProfileWindows10Dark,
 		theme.ProfileWindows11, theme.ProfileWindows11Dark, theme.ProfileMacOS, theme.ProfileMacOSDark,

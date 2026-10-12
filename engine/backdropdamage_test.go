@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -42,6 +43,7 @@ func stripes(w, h int) *image.RGBA {
 // кадр. Раньше размытие считалось по куску поверх прошлого кадра — пятно
 // светлее остальной полосы там, где сменилась подсветка.
 func TestBackdrop_PartialRedrawMatchesFull(t *testing.T) {
+	testreset.Globals(t)
 	render := func(lit bool, partial bool) []byte {
 		e := New(400, 120, 30)
 		e.SetRenderOnDemand(true)

@@ -155,7 +155,23 @@ var (
 	_ widget.OpacityDrawer     = (*translatingContext)(nil)
 
 	_ widget.RotatedTextDrawer = (*translatingContext)(nil)
+
+	_ widget.ImageRectDrawer       = (*translatingContext)(nil)
+	_ widget.ImageCacheInvalidator = (*translatingContext)(nil)
 )
+
+// DrawImageRect рисует часть изображения с выбором фильтра в буфер попапа
+// (widget.ImageRectDrawer): без пробрасывания картинка внутри попапа шла бы
+// запасным путём — целиком и билинейно.
+func (t *translatingContext) DrawImageRect(src image.Image, sr, dr image.Rectangle, f widget.ImageFilter) {
+	t.inner.DrawImageRect(src, sr, dr.Sub(image.Pt(t.dx, t.dy)), f)
+}
+
+// InvalidateImageCache сбрасывает кэш масштабирования в канвасе попапа и, через
+// общий журнал движка, во всех остальных (widget.ImageCacheInvalidator).
+func (t *translatingContext) InvalidateImageCache(src image.Image) {
+	t.inner.InvalidateImageCache(src)
+}
 
 // BlurBehind размывает уже нарисованное в r (в буфере попапа) и подкрашивает.
 func (t *translatingContext) BlurBehind(r image.Rectangle, radius int, tint color.RGBA) {

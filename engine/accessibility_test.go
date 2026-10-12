@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -36,6 +37,7 @@ func hasState(n *widget.AccessNode, s string) bool {
 }
 
 func TestAccessibility_Tree(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(400, 300, 20)
 
 	root := widget.NewPanel(color.RGBA{A: 255})
@@ -141,6 +143,7 @@ func TestAccessibility_Tree(t *testing.T) {
 }
 
 func TestAccessibility_ModalAndJSON(t *testing.T) {
+	testreset.Globals(t)
 	// Диалог остаётся открытым до конца теста — ShowModal запускает fade-in
 	// затемнения (AnimateOwned); подчищаем глобальный реестр анимаций, иначе
 	// "зависшая" анимация тикает в других тестах пакета (движок здесь не
@@ -184,6 +187,7 @@ func (c *customAccessWidget) AccessInfo() widget.AccessInfo {
 }
 
 func TestAccessibility_CustomWidget(t *testing.T) {
+	testreset.Globals(t)
 	w := &customAccessWidget{}
 	w.SetBounds(image.Rect(0, 0, 10, 10))
 	tree := widget.BuildAccessTree(w, nil)

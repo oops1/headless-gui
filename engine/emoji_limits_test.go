@@ -12,6 +12,8 @@ import (
 
 	tsfont "github.com/go-text/typesetting/font"
 	"golang.org/x/image/math/fixed"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // pngHeaderOnly собирает PNG из сигнатуры и IHDR заданных размеров.
@@ -31,6 +33,7 @@ func pngHeaderOnly(w, h uint32) []byte {
 
 // PNG-бомба в растровом глифе отклоняется по заголовку, без аллокации пикселей.
 func TestGlyphPNG_BombRejected(t *testing.T) {
+	testreset.Globals(t)
 	bomb := pngHeaderOnly(40000, 40000)
 	if _, err := png.DecodeConfig(bytes.NewReader(bomb)); err != nil {
 		t.Fatalf("тестовый заголовок PNG невалиден: %v", err)
@@ -54,6 +57,7 @@ func TestGlyphPNG_BombRejected(t *testing.T) {
 
 // Заголовок разумного размера принимается, слишком большие данные — нет.
 func TestGlyphPNG_SaneAndOversized(t *testing.T) {
+	testreset.Globals(t)
 	if !glyphPNGSane(pngHeaderOnly(64, 64)) {
 		t.Error("PNG 64×64 отвергнут")
 	}
@@ -75,6 +79,7 @@ func TestGlyphPNG_SaneAndOversized(t *testing.T) {
 
 // Бюджет итоговой маски цветного глифа.
 func TestGlyphBudget_Bounds(t *testing.T) {
+	testreset.Globals(t)
 	cases := []struct {
 		w, h int
 		want bool
@@ -96,6 +101,7 @@ func TestGlyphBudget_Bounds(t *testing.T) {
 
 // Суммарный бюджет пикселей по слоям COLRv1 останавливает обход.
 func TestColrWalk_LayerBudget(t *testing.T) {
+	testreset.Globals(t)
 	w := &colrWalk{}
 	layer := v1Layer{box: glyphBox{w: 2048, h: 2048}} // 4 Мпикс на слой
 	added := 0
@@ -118,6 +124,7 @@ func TestColrWalk_LayerBudget(t *testing.T) {
 
 // Обычные слои укладываются в бюджет и попадают в список.
 func TestColrWalk_NormalLayersFit(t *testing.T) {
+	testreset.Globals(t)
 	w := &colrWalk{}
 	for i := 0; i < maxColrLayers; i++ {
 		if !w.addLayer(v1Layer{box: glyphBox{w: 64, h: 64}}) {
@@ -131,6 +138,7 @@ func TestColrWalk_NormalLayersFit(t *testing.T) {
 
 // Глифы, зависящие от цвета текста, берутся из кэша без ре-композита.
 func TestEmoji_DynColorCacheHit(t *testing.T) {
+	testreset.Globals(t)
 	var ts textShaper
 	col := color.RGBA{R: 10, G: 20, B: 30, A: 255}
 	key := maskKey{gid: 7, sizePx: fixed.I(16)}
@@ -153,6 +161,7 @@ func TestEmoji_DynColorCacheHit(t *testing.T) {
 
 // Повторная отрисовка эмодзи тем же цветом не растит кэши цветных глифов.
 func TestEmoji_ColorGlyphCacheStable(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(120, 80, 20)
 	c := eng.canvas
 	if _, found := c.fcForRune(c.fontCache, '🙂'); !found {
@@ -182,6 +191,7 @@ func TestEmoji_ColorGlyphCacheStable(t *testing.T) {
 
 // Смена DPI сразу меняет ширину сложного текста: раскладки сброшены.
 func TestShaping_SetDPIDropsLayouts(t *testing.T) {
+	testreset.Globals(t)
 	c := newShapingCanvas(t, 'م')
 	const text = "مرحبا"
 	w1 := c.measureWithFallback(c.fontCache, text, 14)

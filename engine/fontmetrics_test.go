@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -49,6 +50,7 @@ func checkConsistent(t *testing.T, label string, m widget.FontMetrics) {
 }
 
 func TestFontMetrics_BuiltinConsistent(t *testing.T) {
+	testreset.Globals(t)
 	metricsEngine(t)
 	for _, fam := range []string{"", widget.BuiltinFontBold, widget.BuiltinFontMono, widget.BuiltinFontItalic} {
 		m := widget.MeasureUIFontMetrics(widget.DefaultFontSizePt, fam)
@@ -59,6 +61,7 @@ func TestFontMetrics_BuiltinConsistent(t *testing.T) {
 
 // Крупный кегль даёт пропорционально большие метрики.
 func TestFontMetrics_ScalesWithSize(t *testing.T) {
+	testreset.Globals(t)
 	metricsEngine(t)
 	small := widget.MeasureUIFontMetrics(10, "")
 	big := widget.MeasureUIFontMetrics(40, "")
@@ -85,6 +88,7 @@ func TestFontMetrics_ScalesWithSize(t *testing.T) {
 // Два разных шрифта дают разные метрики; незарегистрированное имя — шрифт по
 // умолчанию, как и при отрисовке.
 func TestFontMetrics_DifferentFonts(t *testing.T) {
+	testreset.Globals(t)
 	e := metricsEngine(t)
 	loadAssetFont(t, e, "TestRoboto", "Roboto-Regular.ttf")
 	loadAssetFont(t, e, "TestLiberation", "LiberationSans-Regular.ttf")
@@ -121,6 +125,7 @@ func inkBottom(c *Canvas) int {
 // Это и есть обещание, ради которого метрики открыты: выровненный по Ascent
 // текст встаёт туда, где его нарисует движок.
 func TestFontMetrics_BaselineMatchesDrawText(t *testing.T) {
+	testreset.Globals(t)
 	e := metricsEngine(t)
 	loadAssetFont(t, e, "TestRoboto", "Roboto-Regular.ttf")
 
@@ -157,6 +162,7 @@ func TestFontMetrics_BaselineMatchesDrawText(t *testing.T) {
 // Метрики в логических пикселях: масштаб меняет их не более чем на пиксель
 // округления — как ширины MeasureUIText.
 func TestFontMetrics_LogicalAcrossScale(t *testing.T) {
+	testreset.Globals(t)
 	e := metricsEngine(t)
 	base := widget.MeasureUIFontMetrics(14, "")
 	for _, scale := range []float64{1.25, 1.5, 2, 3} {

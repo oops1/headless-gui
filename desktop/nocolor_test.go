@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // Компоненты рабочего стола не знают цветов.
@@ -23,6 +25,7 @@ import (
 // отрисовки. Проверять глазами это невозможно — цвет добавляется одной
 // строкой и не ломает ничего, кроме темизации.
 func TestDraw_HasNoColorLiterals(t *testing.T) {
+	testreset.Globals(t)
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -94,6 +97,7 @@ func isColorLiteral(expr ast.Expr) bool {
 // обращения к стилю или метрике, либо ничего не рисует, либо рисует мимо
 // темы — и то и другое стоит заметить.
 func TestDraw_AsksThemeForStyle(t *testing.T) {
+	testreset.Globals(t)
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)

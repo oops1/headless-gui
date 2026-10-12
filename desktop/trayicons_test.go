@@ -18,6 +18,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 )
 
@@ -106,6 +107,7 @@ func testThemeManagerSized(t *testing.T, size float64) *theme.Manager {
 // перечёркнуто», а не «нет сети», — значок обязан сперва читаться как значок
 // сети и только потом как выключенный.
 func TestNetworkItem_NoneDiffersFromWeakSignal(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus()
 	it := NewNetworkStatus(tm, st)
@@ -161,6 +163,7 @@ func TestNetworkItem_NoneDiffersFromWeakSignal(t *testing.T) {
 // TestVolumeItem_MutedDiffersFromUnmutedAtSizes — Muted обязан отличаться от
 // обычного состояния при любом размере значка, не только при исходном 16px.
 func TestVolumeItem_MutedDiffersFromUnmutedAtSizes(t *testing.T) {
+	testreset.Globals(t)
 	for _, size := range []int{12, 16, 24, 32} {
 		size := size
 		t.Run(fmt.Sprintf("size=%d", size), func(t *testing.T) {
@@ -196,6 +199,7 @@ func TestVolumeItem_MutedDiffersFromUnmutedAtSizes(t *testing.T) {
 // достаточная на исходных 16px, тонет среди остальных фигур на поднятом
 // заказчиком KeyTrayIconSize (24, 32).
 func TestVolumeItem_MutedStrikeThickensWithSize(t *testing.T) {
+	testreset.Globals(t)
 	sizes := []int{12, 16, 24, 32}
 	thickness := make(map[int]int, len(sizes))
 	prev := 0
@@ -240,6 +244,7 @@ func TestVolumeItem_MutedStrikeThickensWithSize(t *testing.T) {
 // создания и меняется вслед за состоянием (обновляется в подписке на
 // SystemStatus, не в Draw).
 func TestNetworkItem_ToolTipTracksState(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus() // Kind: NetWiFi, Quality: 0.8, Name: "Сеть"
 	it := NewNetworkStatus(tm, st)
@@ -272,6 +277,7 @@ func TestNetworkItem_ToolTipTracksState(t *testing.T) {
 // TestVolumeItem_ToolTipTracksState — подсказка звука непустая сразу после
 // создания и меняется вслед за уровнем/Muted.
 func TestVolumeItem_ToolTipTracksState(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus() // Level: 0.65
 	it := NewVolumeStatus(tm, st)
@@ -298,6 +304,7 @@ func TestVolumeItem_ToolTipTracksState(t *testing.T) {
 // TestPowerItem_ToolTipTracksState — подсказка питания непустая сразу после
 // создания и меняется вслед за OnAC/Charge.
 func TestPowerItem_ToolTipTracksState(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus() // Charge: 0.5, OnAC: true
 	it := NewPowerStatus(tm, st)
@@ -320,6 +327,7 @@ func TestPowerItem_ToolTipTracksState(t *testing.T) {
 // (горутина кадра, как его вызывал бы engine/tooltip.go) должны быть
 // безопасны при гонке: без замка вокруг trayTooltip -race валит этот тест.
 func TestTrayIcons_ToolTipRace(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus()
 	net := NewNetworkStatus(tm, st)
@@ -353,6 +361,7 @@ func TestTrayIcons_ToolTipRace(t *testing.T) {
 // (KeyTrayIconSize уменьшать нельзя, но потребитель вправе задать любой
 // размер от мелкого до вдвое большего).
 func TestTrayIcons_ShapesStayWithinBounds(t *testing.T) {
+	testreset.Globals(t)
 	for _, size := range []int{12, 16, 24, 32} {
 		size := size
 		t.Run(fmt.Sprintf("size=%d", size), func(t *testing.T) {
@@ -426,6 +435,7 @@ func TestTrayIcons_ShapesStayWithinBounds(t *testing.T) {
 // крупном значке: ширина каждой полоски меньше её собственного шага, значит
 // между их правым и левым краями есть промежуток.
 func TestDrawLevelBars_GapKeepsBarsApart(t *testing.T) {
+	testreset.Globals(t)
 	on := color.RGBA{R: 255, A: 255}
 	off := color.RGBA{A: 0}
 	r := image.Rect(0, 0, 24, 24)

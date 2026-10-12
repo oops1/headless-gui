@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -19,6 +20,7 @@ var (
 )
 
 func TestMenuStyle_FollowsLightFlag(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	tm.SetFlag(theme.KeyTaskbarLight, false)
 	if got := tm.GetStyle("menu", "", theme.StateNormal); got.Fill != menuDarkFill {
@@ -67,6 +69,7 @@ func menuProbe(t *testing.T, g *goldenParts) (*image.RGBA, image.Point) {
 }
 
 func TestAppMenu_LightPanelGivesLightMenu(t *testing.T) {
+	testreset.Globals(t)
 	for _, tc := range []struct {
 		light bool
 		want  color.RGBA
@@ -82,6 +85,7 @@ func TestAppMenu_LightPanelGivesLightMenu(t *testing.T) {
 
 // Флаг переключают, пока меню открыто: оно перекрашивается без пересоздания.
 func TestAppMenu_RecolorsWhileOpen(t *testing.T) {
+	testreset.Globals(t)
 	g := goldenScene(t, false)
 	g.area.ShowCommands(0)
 	menu := g.area.menu.get()
@@ -107,6 +111,7 @@ func TestAppMenu_RecolorsWhileOpen(t *testing.T) {
 
 // Меню «Пуска» по ПКМ красится так же, как меню кнопок.
 func TestStartContextMenu_FollowsPanelMode(t *testing.T) {
+	testreset.Globals(t)
 	for _, light := range []bool{false, true} {
 		tm := win10Fast(t)
 		tm.SetFlag(theme.KeyTaskbarLight, light)

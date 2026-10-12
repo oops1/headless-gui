@@ -118,7 +118,7 @@ func (w *WaylandWindow) SetChildPopupHandlers(h childPopupHandlers) {
 // угол в координатах окна-носителя, (pw, ph) — размер. Всё в физических
 // пикселях.
 func (w *WaylandWindow) OpenChildPopup(id uintptr, x, y, pw, ph int) error {
-	if w.closed || w.xdgSurfaceID == 0 || w.compositorID == 0 || w.wmBaseID == 0 {
+	if w.closed.Load() || w.xdgSurfaceID == 0 || w.compositorID == 0 || w.wmBaseID == 0 {
 		return fmt.Errorf("wayland: окно не готово для попапа")
 	}
 	if pw <= 0 || ph <= 0 {

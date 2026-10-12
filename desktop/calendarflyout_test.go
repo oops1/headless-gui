@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -73,6 +74,7 @@ func newTestCalendar(t *testing.T, at time.Time) (*CalendarFlyout, *FakeClock) {
 // ─── Открытие/закрытие ───────────────────────────────────────────────────────
 
 func TestCalendarFlyout_OpenClose(t *testing.T) {
+	testreset.Globals(t)
 	c, _ := newTestCalendar(t, time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC))
 	if !c.IsOpen() {
 		t.Fatal("после Open панель не открыта")
@@ -84,6 +86,7 @@ func TestCalendarFlyout_OpenClose(t *testing.T) {
 }
 
 func TestCalendarFlyout_EscCloses(t *testing.T) {
+	testreset.Globals(t)
 	c, _ := newTestCalendar(t, time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC))
 	c.OnKeyEvent(widget.KeyEvent{Code: widget.KeyEscape, Pressed: true})
 	if c.IsOpen() {
@@ -92,6 +95,7 @@ func TestCalendarFlyout_EscCloses(t *testing.T) {
 }
 
 func TestCalendarFlyout_ClickOutsideCloses(t *testing.T) {
+	testreset.Globals(t)
 	c, _ := newTestCalendar(t, time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC))
 	r := c.rect()
 	// Точка заведомо вне прямоугольника панели, но внутри экрана.
@@ -107,6 +111,7 @@ func TestCalendarFlyout_ClickOutsideCloses(t *testing.T) {
 }
 
 func TestCalendarFlyout_ClickInsideDoesNotClose(t *testing.T) {
+	testreset.Globals(t)
 	c, _ := newTestCalendar(t, time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC))
 	r := c.rect()
 	center := r.Min.Add(image.Pt(r.Dx()/2, r.Dy()/2))
@@ -124,6 +129,7 @@ func TestCalendarFlyout_ClickInsideDoesNotClose(t *testing.T) {
 // пакета time — так тест проверяет НАШУ раскладку по неделям, а не
 // повторяет вручную вычисление дня недели.
 func TestMonthGrid_KnownMonth(t *testing.T) {
+	testreset.Globals(t)
 	loc := time.UTC
 	grid := monthGrid(2026, time.August, loc)
 
@@ -172,6 +178,7 @@ func TestMonthGrid_KnownMonth(t *testing.T) {
 // TestMonthGrid_NeighbourDaysAreDimmed — дни соседних месяцев в сетке есть
 // (иначе последняя/первая неделя была бы неполной) и помечены inMonth=false.
 func TestMonthGrid_NeighbourDaysAreDimmed(t *testing.T) {
+	testreset.Globals(t)
 	grid := monthGrid(2026, time.August, time.UTC)
 	first := grid[0][0]
 	if first.date.Month() == time.August && first.date.Day() == 1 {
@@ -189,6 +196,7 @@ func TestMonthGrid_NeighbourDaysAreDimmed(t *testing.T) {
 // ─── Листание месяцев ────────────────────────────────────────────────────────
 
 func TestCalendarFlyout_NextMonthCrossesYearBoundary(t *testing.T) {
+	testreset.Globals(t)
 	c, _ := newTestCalendar(t, time.Date(2026, 12, 15, 10, 0, 0, 0, time.UTC))
 	if got := c.ViewMonth(); got.Month() != time.December || got.Year() != 2026 {
 		t.Fatalf("начальный месяц = %v, ждали декабрь 2026", got)
@@ -201,6 +209,7 @@ func TestCalendarFlyout_NextMonthCrossesYearBoundary(t *testing.T) {
 }
 
 func TestCalendarFlyout_PrevMonthCrossesYearBoundary(t *testing.T) {
+	testreset.Globals(t)
 	c, _ := newTestCalendar(t, time.Date(2027, 1, 10, 10, 0, 0, 0, time.UTC))
 	c.PrevMonth()
 	got := c.ViewMonth()
@@ -210,6 +219,7 @@ func TestCalendarFlyout_PrevMonthCrossesYearBoundary(t *testing.T) {
 }
 
 func TestCalendarFlyout_ArrowKeysChangeMonth(t *testing.T) {
+	testreset.Globals(t)
 	c, _ := newTestCalendar(t, time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC))
 
 	c.OnKeyEvent(widget.KeyEvent{Code: widget.KeyRight, Pressed: true})
@@ -224,6 +234,7 @@ func TestCalendarFlyout_ArrowKeysChangeMonth(t *testing.T) {
 }
 
 func TestCalendarFlyout_ArrowClickChangesMonth(t *testing.T) {
+	testreset.Globals(t)
 	c, _ := newTestCalendar(t, time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC))
 	layout := c.computeLayout(c.contentRect())
 	next := layout.nextBtn.Min.Add(image.Pt(layout.nextBtn.Dx()/2, layout.nextBtn.Dy()/2))
@@ -237,6 +248,7 @@ func TestCalendarFlyout_ArrowClickChangesMonth(t *testing.T) {
 // ─── Сегодня и выбор ─────────────────────────────────────────────────────────
 
 func TestCalendarFlyout_HighlightsToday(t *testing.T) {
+	testreset.Globals(t)
 	today := time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC)
 	c, _ := newTestCalendar(t, today)
 
@@ -271,6 +283,7 @@ func TestCalendarFlyout_HighlightsToday(t *testing.T) {
 }
 
 func TestCalendarFlyout_ClickSelectsDay(t *testing.T) {
+	testreset.Globals(t)
 	c, _ := newTestCalendar(t, time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC))
 	layout := c.computeLayout(c.contentRect())
 
@@ -306,6 +319,7 @@ func TestCalendarFlyout_ClickSelectsDay(t *testing.T) {
 // ─── Устойчивость без темы ───────────────────────────────────────────────────
 
 func TestCalendarFlyout_NilThemeManagerDoesNotPanic(t *testing.T) {
+	testreset.Globals(t)
 	clk := NewFakeClock(time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC))
 	c := NewCalendarFlyout(nil, clk)
 	c.Screen = image.Rect(0, 0, 2000, 2000)

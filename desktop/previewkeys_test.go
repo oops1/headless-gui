@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -19,7 +21,7 @@ import (
 func keyScene(t *testing.T, light bool) (*goldenParts, *engine.Engine, int) {
 	t.Helper()
 	g := goldenScene(t, light)
-	eng := engine.New(640, 240, 30)
+	eng := testengine.New(t, 640, 240, 30)
 	eng.SetRoot(g.root)
 	eng.RenderOnce()
 	finishAnimations()
@@ -45,6 +47,7 @@ func press(eng *engine.Engine, code widget.KeyCode) {
 }
 
 func TestPreviewList_EnterOpensListWithFocus(t *testing.T) {
+	testreset.Globals(t)
 	g, eng, _ := keyScene(t, false)
 	press(eng, widget.KeyEnter)
 
@@ -69,6 +72,7 @@ func TestPreviewList_EnterOpensListWithFocus(t *testing.T) {
 }
 
 func TestPreviewList_ArrowsSelectAndRingIsDrawn(t *testing.T) {
+	testreset.Globals(t)
 	g, eng, _ := keyScene(t, false)
 	press(eng, widget.KeyEnter)
 
@@ -107,6 +111,7 @@ func TestPreviewList_ArrowsSelectAndRingIsDrawn(t *testing.T) {
 }
 
 func TestPreviewList_EnterActivatesSelectedAndReturnsFocus(t *testing.T) {
+	testreset.Globals(t)
 	g, eng, _ := keyScene(t, false)
 	press(eng, widget.KeyEnter)
 	press(eng, widget.KeyRight) // второе окно (id 4)
@@ -124,6 +129,7 @@ func TestPreviewList_EnterActivatesSelectedAndReturnsFocus(t *testing.T) {
 }
 
 func TestPreviewList_DeleteClosesSelectedWindow(t *testing.T) {
+	testreset.Globals(t)
 	g, eng, _ := keyScene(t, false)
 	press(eng, widget.KeyEnter)
 	press(eng, widget.KeyRight) // окно 4
@@ -149,6 +155,7 @@ func TestPreviewList_DeleteClosesSelectedWindow(t *testing.T) {
 }
 
 func TestPreviewList_EscapeClosesAndReturnsFocus(t *testing.T) {
+	testreset.Globals(t)
 	g, eng, mail := keyScene(t, false)
 	press(eng, widget.KeyEnter)
 	press(eng, widget.KeyEscape)
@@ -175,6 +182,7 @@ func TestPreviewList_EscapeClosesAndReturnsFocus(t *testing.T) {
 // Мышь, ушедшая мимо, выбор клавишами не сбрасывает и список не закрывает;
 // мышь над списком выбор забирает себе.
 func TestPreviewList_MouseDoesNotStealKeyboardSelection(t *testing.T) {
+	testreset.Globals(t)
 	g, eng, _ := keyScene(t, false)
 	press(eng, widget.KeyEnter)
 	press(eng, widget.KeyRight)
@@ -198,6 +206,7 @@ func TestPreviewList_MouseDoesNotStealKeyboardSelection(t *testing.T) {
 
 // Список, открытый мышью, фокус не берёт: клавиши остаются у панели.
 func TestPreviewList_MouseOpenedListKeepsPanelFocus(t *testing.T) {
+	testreset.Globals(t)
 	g, eng, mail := keyScene(t, false)
 	clickAt(g.area, g.area.ButtonRect(mail))
 	if !g.prev.IsOpen() {
@@ -214,6 +223,7 @@ func TestPreviewList_MouseOpenedListKeepsPanelFocus(t *testing.T) {
 
 // Потеря фокуса (Tab) закрывает список, открытый с клавиатуры.
 func TestPreviewList_TabAwayClosesList(t *testing.T) {
+	testreset.Globals(t)
 	g, eng, _ := keyScene(t, false)
 	press(eng, widget.KeyEnter)
 	press(eng, widget.KeyTab)
@@ -225,6 +235,7 @@ func TestPreviewList_TabAwayClosesList(t *testing.T) {
 
 // Без предпросмотра за областью Enter на стопке по-прежнему листает окна.
 func TestPreviewList_NoPreviewKeepsCycling(t *testing.T) {
+	testreset.Globals(t)
 	a, _, wm := groupScene(t, win10Fast(t))
 	a.SetFocused(true)
 	a.FocusState.SetCell(1)
@@ -236,6 +247,7 @@ func TestPreviewList_NoPreviewKeepsCycling(t *testing.T) {
 
 // Снимки: список окон стопки с рамкой фокуса на выбранном окне (при GOLDEN_OUT).
 func TestPreviewList_Shots(t *testing.T) {
+	testreset.Globals(t)
 	for _, light := range []bool{false, true} {
 		name := "dark"
 		if light {

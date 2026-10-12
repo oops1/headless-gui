@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -27,6 +28,7 @@ func buildDropdownEngine(t *testing.T) (*Engine, *widget.Dropdown, widget.Widget
 // popup-канвас через транслирующий DrawContext, попиксельно совпадает с
 // соответствующей областью прежней in-canvas отрисовки (оверлей внутри холста).
 func TestTranslatingContext_PixelMatch(t *testing.T) {
+	testreset.Globals(t)
 	e, dd, root := buildDropdownEngine(t)
 	dd.SetOpen(true)
 
@@ -65,6 +67,7 @@ func TestTranslatingContext_PixelMatch(t *testing.T) {
 // TestPopupSink_OpenClose: sink получает корректный Rect при открытии Dropdown,
 // не вызывается при отсутствии изменений и получает пустой slice при закрытии.
 func TestPopupSink_OpenClose(t *testing.T) {
+	testreset.Globals(t)
 	e, dd, _ := buildDropdownEngine(t)
 
 	var mu sync.Mutex
@@ -122,6 +125,7 @@ func TestPopupSink_OpenClose(t *testing.T) {
 // TestPopupSink_NotDrawnInCanvas: при активном sink оверлей НЕ рисуется в
 // основной холст (там, где раньше был список, содержимое не меняется).
 func TestPopupSink_NotDrawnInCanvas(t *testing.T) {
+	testreset.Globals(t)
 	e, dd, root := buildDropdownEngine(t)
 	e.SetPopupSink(func(f []PopupFrame) {})
 

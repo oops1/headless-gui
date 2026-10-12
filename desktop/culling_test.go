@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -28,6 +29,7 @@ func (c *countingItem) Draw(ctx widget.DrawContext) {
 }
 
 func TestCulling_ClockTickDoesNotWakeTheDesktop(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 900, 600
 
 	tm := managerFor(t, theme.ProfileWindows11)
@@ -54,7 +56,7 @@ func TestCulling_ClockTickDoesNotWakeTheDesktop(t *testing.T) {
 	bar.SetBounds(image.Rect(0, h-bar.Height(), w, h))
 	root.AddChild(bar)
 
-	eng := engine.New(w, h, 60)
+	eng := testengine.New(t, w, h, 60)
 	eng.SetRenderOnDemand(true)
 	eng.SetRoot(root)
 	eng.RenderOnce() // первый кадр рисует всё

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -15,6 +16,7 @@ func rectIn(r, bound image.Rectangle) bool {
 }
 
 func TestRunningApplications_ClickInactiveActivates(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	wm := NewFakeWindowModel(
 		WindowInfo{ID: 1, Title: "Один", Active: true},
@@ -44,6 +46,7 @@ func TestRunningApplications_ClickInactiveActivates(t *testing.T) {
 }
 
 func TestRunningApplications_ClickActiveMinimizes(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	wm := NewFakeWindowModel(
 		WindowInfo{ID: 1, Title: "Один", Active: true},
@@ -66,6 +69,7 @@ func TestRunningApplications_ClickActiveMinimizes(t *testing.T) {
 }
 
 func TestRunningApplications_MiddleClickCloses(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	wm := NewFakeWindowModel(
 		WindowInfo{ID: 7, Title: "Семь", Active: false},
@@ -85,6 +89,7 @@ func TestRunningApplications_MiddleClickCloses(t *testing.T) {
 }
 
 func TestRunningApplications_ReleaseAwayDoesNotAct(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	wm := NewFakeWindowModel(WindowInfo{ID: 1, Title: "Один", Active: false})
 	ra := NewRunningApplications(tm, wm)
@@ -103,6 +108,7 @@ func TestRunningApplications_ReleaseAwayDoesNotAct(t *testing.T) {
 }
 
 func TestRunningApplications_WindowListChangeRelayouts(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	wm := NewFakeWindowModel(WindowInfo{ID: 1, Title: "Один"})
 	ra := NewRunningApplications(tm, wm)
@@ -124,6 +130,7 @@ func TestRunningApplications_WindowListChangeRelayouts(t *testing.T) {
 }
 
 func TestRunningApplications_Close_Unsubscribes(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	wm := NewFakeWindowModel(WindowInfo{ID: 1, Title: "Один"})
 	ra := NewRunningApplications(tm, wm)
@@ -154,6 +161,7 @@ func manyWindows(n int) []WindowInfo {
 }
 
 func TestRunningApplications_Degrade_Ideal(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme() // ideal=150, min=70, icon=16+2*4=24, gap=4
 	wm := NewFakeWindowModel(manyWindows(3)...)
 	ra := NewRunningApplications(tm, wm)
@@ -177,6 +185,7 @@ func TestRunningApplications_Degrade_Ideal(t *testing.T) {
 }
 
 func TestRunningApplications_Degrade_ShrinkWithLabel(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	wm := NewFakeWindowModel(manyWindows(5)...)
 	ra := NewRunningApplications(tm, wm)
@@ -201,6 +210,7 @@ func TestRunningApplications_Degrade_ShrinkWithLabel(t *testing.T) {
 }
 
 func TestRunningApplications_Degrade_IconOnly(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	wm := NewFakeWindowModel(manyWindows(5)...)
 	ra := NewRunningApplications(tm, wm)
@@ -222,6 +232,7 @@ func TestRunningApplications_Degrade_IconOnly(t *testing.T) {
 }
 
 func TestRunningApplications_Degrade_OverflowHidesExtraButtons(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	wm := NewFakeWindowModel(manyWindows(10)...)
 	ra := NewRunningApplications(tm, wm)
@@ -243,6 +254,7 @@ func TestRunningApplications_Degrade_OverflowHidesExtraButtons(t *testing.T) {
 }
 
 func TestRunningApplications_Draw_NoOverflowingButtons(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	wm := NewFakeWindowModel(manyWindows(7)...)
 	ra := NewRunningApplications(tm, wm)
@@ -280,6 +292,7 @@ func TestRunningApplications_Draw_NoOverflowingButtons(t *testing.T) {
 // клики. Сам по себе тест ничего не проверяет по значению: его работа —
 // попасться детектору гонок (-race) на btns/hoverIdx/armedIdx.
 func TestRunningApplications_ConcurrentModelAndFrame(t *testing.T) {
+	testreset.Globals(t)
 	tm := buildTestTheme()
 	wm := NewFakeWindowModel(manyWindows(6)...)
 	ra := NewRunningApplications(tm, wm)

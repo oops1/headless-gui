@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -41,6 +43,7 @@ func managerFixture(t *testing.T, themeName string, names ...string) (*FlyoutMan
 }
 
 func TestFlyoutManager_OpeningOneClosesTheOthers(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	m, p, rec := managerFixture(t, theme.ProfileWindows2000, "start", "quick")
 
@@ -77,6 +80,7 @@ func TestFlyoutManager_OpeningOneClosesTheOthers(t *testing.T) {
 }
 
 func TestFlyoutManager_ClosedByAnythingIsReported(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	m, p, rec := managerFixture(t, theme.ProfileWindows2000, "start")
 	m.Open("start", motionAnchor)
@@ -92,6 +96,7 @@ func TestFlyoutManager_ClosedByAnythingIsReported(t *testing.T) {
 }
 
 func TestFlyoutManager_GroupOpensTogether(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	m, p, _ := managerFixture(t, theme.ProfileWindows2000, "calendar", "notifications", "start")
 	g := m.Group("calendar", "notifications")
@@ -127,6 +132,7 @@ func (c *customPanel) Open(a image.Rectangle) {
 }
 
 func TestFlyoutManager_ConsumerCanRegisterOwnPanel(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows2000)
 	m := NewFlyoutManager()
@@ -152,6 +158,7 @@ func TestFlyoutManager_ConsumerCanRegisterOwnPanel(t *testing.T) {
 }
 
 func TestFlyoutManager_Unregister(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	m, p, rec := managerFixture(t, theme.ProfileWindows2000, "a", "b")
 	unreg := m.Register("c", motionFlyout(managerFor(t, theme.ProfileWindows2000)))
@@ -177,6 +184,7 @@ func TestFlyoutManager_Unregister(t *testing.T) {
 }
 
 func TestFlyoutManager_ReplacingNameDropsTheOld(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows2000)
 	m := NewFlyoutManager()
@@ -189,6 +197,7 @@ func TestFlyoutManager_ReplacingNameDropsTheOld(t *testing.T) {
 }
 
 func TestFlyoutManager_ToggleAndAnchorDismiss(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	m, p, _ := managerFixture(t, theme.ProfileWindows2000, "start")
 
@@ -215,6 +224,7 @@ func TestFlyoutManager_ToggleAndAnchorDismiss(t *testing.T) {
 }
 
 func TestFlyoutManager_AnchorDismissIsForgottenByDeadline(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows2000)
 	f := motionFlyout(tm)
@@ -230,6 +240,7 @@ func TestFlyoutManager_AnchorDismissIsForgottenByDeadline(t *testing.T) {
 }
 
 func TestFlyout_ClickOutsideNotOnAnchorDoesNotMarkIt(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows2000)
 	f := motionFlyout(tm)
@@ -276,13 +287,14 @@ func engineFixture(t *testing.T) (*engine.Engine, *FlyoutManager, *clickProbe, *
 	m.Register("b", b)
 	root.AddChild(m)
 
-	eng := engine.New(w, h, 60)
+	eng := testengine.New(t, w, h, 60)
 	eng.SetRoot(root)
 	eng.RenderOnce()
 	return eng, m, a, b
 }
 
 func TestFlyoutManager_EscapeClosesWithoutFocus(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	eng, m, _, _ := engineFixture(t)
 	m.Open("a", motionAnchor)
@@ -294,6 +306,7 @@ func TestFlyoutManager_EscapeClosesWithoutFocus(t *testing.T) {
 }
 
 func TestFlyoutManager_ClickOutsideClosesInsideDoesNot(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	eng, m, a, _ := engineFixture(t)
 	m.Open("a", motionAnchor)
@@ -318,6 +331,7 @@ func TestFlyoutManager_ClickOutsideClosesInsideDoesNot(t *testing.T) {
 }
 
 func TestFlyoutManager_BoundsFollowOpenPanels(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	_, m, a, _ := engineFixture(t)
 	if !m.Bounds().Empty() {
@@ -332,6 +346,7 @@ func TestFlyoutManager_BoundsFollowOpenPanels(t *testing.T) {
 // Слой над панелью задач: оверлей менеджера рисуется поверх соседа, стоящего
 // в дереве раньше него.
 func TestFlyoutManager_LayerIsAboveTheTaskbar(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	const w, h = 800, 600
 	tm := managerFor(t, theme.ProfileWindows2000)
@@ -350,7 +365,7 @@ func TestFlyoutManager_LayerIsAboveTheTaskbar(t *testing.T) {
 	m.Register("start", f)
 	root.AddChild(m)
 
-	eng := engine.New(w, h, 60)
+	eng := testengine.New(t, w, h, 60)
 	eng.SetRoot(root)
 	before := eng.RenderOnce()
 	m.Open("start", motionAnchor)
@@ -370,6 +385,7 @@ func TestFlyoutManager_LayerIsAboveTheTaskbar(t *testing.T) {
 // (клик мимо неё), а кнопка срабатывает на отпускании. Панель должна остаться
 // закрытой, а не открыться заново.
 func TestFlyoutManager_ClickOnAnchorOfOpenPanelClosesIt(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	const w, h = 800, 600
 	tm := managerFor(t, theme.ProfileWindows2000)
@@ -386,7 +402,7 @@ func TestFlyoutManager_ClickOnAnchorOfOpenPanelClosesIt(t *testing.T) {
 	root.AddChild(btn)
 	root.AddChild(m)
 
-	eng := engine.New(w, h, 60)
+	eng := testengine.New(t, w, h, 60)
 	eng.SetRoot(root)
 	eng.RenderOnce()
 

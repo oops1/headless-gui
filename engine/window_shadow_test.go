@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -36,6 +37,7 @@ func softShadow() theme.ShadowSpec {
 // По умолчанию окно без тени: кадр с токенами по умолчанию побайтно такой же,
 // как раньше, и запаса под тень нет.
 func TestWindowShadow_OffByDefault(t *testing.T) {
+	testreset.Globals(t)
 	e, w, _ := windowEngine(t, true)
 	if w.DrawMargin() != 0 {
 		t.Errorf("DrawMargin окна без тени = %d", w.DrawMargin())
@@ -53,6 +55,7 @@ func TestWindowShadow_OffByDefault(t *testing.T) {
 // Тень окна ложится за его границами: пиксели вокруг темнее обоев, внутри окна
 // — как было; DrawMargin сообщает запас.
 func TestWindowShadow_DrawnOutsideBounds(t *testing.T) {
+	testreset.Globals(t)
 	e0, _, _ := windowEngine(t, true)
 	base := e0.RenderOnce().RGBAAt(180, 215) // под окном, в зоне тени
 
@@ -75,6 +78,7 @@ func TestWindowShadow_DrawnOutsideBounds(t *testing.T) {
 // Окно с тенью, сдвинутое частичной перерисовкой, оставляет тот же кадр, что и
 // полная отрисовка на новом месте: кольцо тени вокруг старого положения убрано.
 func TestWindowShadow_MoveLeavesNoGhost(t *testing.T) {
+	testreset.Globals(t)
 	moved := image.Rect(180, 120, 340, 240)
 
 	e, w, _ := windowEngine(t, true)
@@ -102,6 +106,7 @@ func TestWindowShadow_MoveLeavesNoGhost(t *testing.T) {
 
 // Включение и снятие тени перерисовывает кольцо вокруг окна.
 func TestWindowShadow_ToggleRedrawsRing(t *testing.T) {
+	testreset.Globals(t)
 	e, w, _ := windowEngine(t, true)
 	plain := bytes.Clone(e.RenderOnce().Pix)
 	w.SetShadow(softShadow())
@@ -119,6 +124,7 @@ func TestWindowShadow_ToggleRedrawsRing(t *testing.T) {
 // Материал Mica у окна: фон клиентской области — размытые обои, а не
 // Background; без обоев — сплошной Fallback.
 func TestWindowBackdrop_Mica(t *testing.T) {
+	testreset.Globals(t)
 	spec := theme.BackdropSpec{Mode: theme.BackdropBlur, Material: theme.MaterialMica, Radius: 60,
 		Tint: theme.RGBA(240, 240, 240, 120), Fallback: theme.RGB(243, 243, 243)}
 
@@ -142,6 +148,7 @@ func TestWindowBackdrop_Mica(t *testing.T) {
 
 // Тень диалога по токенам: мягкая тень вместо полос, вид без токенов прежний.
 func TestDialogShadow_Tokens(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	if err := theme.RegisterBuiltinProfiles(m); err != nil {
 		t.Fatal(err)
@@ -192,6 +199,7 @@ func TestDialogShadow_Tokens(t *testing.T) {
 // Mica при масштабе 2: слой рисуется в физических пикселях без паники и без
 // провалов в размытии.
 func TestMica_Scale2(t *testing.T) {
+	testreset.Globals(t)
 	e, _ := newMicaEngine(t, true)
 	e.SetScale(2)
 	img := e.RenderOnce()

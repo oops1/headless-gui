@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -47,6 +48,7 @@ func datePickerGoldenScene(t *testing.T, th *widget.Theme) *image.RGBA {
 }
 
 func TestGolden_DatePicker(t *testing.T) {
+	testreset.Globals(t)
 	withTheme(t, "Win11 Light", func(th *widget.Theme) {
 		goldenCompare(t, "datepicker_win11_light", datePickerGoldenScene(t, th))
 	})

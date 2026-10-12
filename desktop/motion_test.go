@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -27,6 +28,7 @@ func between(v, a, b uint8) bool {
 }
 
 func TestMotion_HoverFadesBetweenStyles(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows11)
 	get := buttonStyle(tm)
@@ -84,6 +86,7 @@ func TestMotion_HoverFadesBetweenStyles(t *testing.T) {
 }
 
 func TestMotion_ZeroDurationIsInstant(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows2000)
 	get := buttonStyle(tm)
@@ -101,6 +104,7 @@ func TestMotion_ZeroDurationIsInstant(t *testing.T) {
 }
 
 func TestMotion_CellsAreIndependent(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows11)
 	get := buttonStyle(tm)
@@ -127,6 +131,7 @@ func TestMotion_CellsAreIndependent(t *testing.T) {
 }
 
 func TestMotion_StepsInvalidateOnlyTheCell(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows11)
 	get := buttonStyle(tm)
@@ -164,6 +169,7 @@ func TestMotion_StepsInvalidateOnlyTheCell(t *testing.T) {
 // ─── Кнопка на экране ───────────────────────────────────────────────────────
 
 func TestMotion_StartButtonFadesOnScreen(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows11)
 	tm.SetIconResolver(widget.BuiltinIcons())
@@ -176,7 +182,7 @@ func TestMotion_StartButtonFadesOnScreen(t *testing.T) {
 	btn.SetBounds(image.Rect(10, 10, 50, 50))
 	root.AddChild(btn)
 
-	eng := engine.New(w, h, 60)
+	eng := testengine.New(t, w, h, 60)
 	eng.SetRoot(root)
 	probe := image.Pt(12, 12) // угол кнопки: значок сюда не залезает
 	rest := eng.RenderOnce().RGBAAt(probe.X, probe.Y)
@@ -210,6 +216,7 @@ func TestMotion_StartButtonFadesOnScreen(t *testing.T) {
 // ─── Tween ──────────────────────────────────────────────────────────────────
 
 func TestTween_MovesByThemeAnimation(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows11)
 
@@ -252,6 +259,7 @@ func TestTween_MovesByThemeAnimation(t *testing.T) {
 }
 
 func TestTween_ZeroDurationIsInstant(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows2000)
 	changes := 0
@@ -266,6 +274,7 @@ func TestTween_ZeroDurationIsInstant(t *testing.T) {
 }
 
 func TestTween_SetStopsAnimation(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	tm := managerFor(t, theme.ProfileWindows11)
 	tw := NewTween(tm, AnimMenuOpen, 0, nil)

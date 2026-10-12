@@ -4,12 +4,15 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // Картинка, размер которой равен физическому размеру приёмника, ложится на
 // холст пиксель в пиксель — без передискретизации (так рисуются векторные
 // значки, растеризованные под масштаб: widget.DrawSVG).
 func TestDrawImageScaled_ExactPhysicalSizeIsBlitted(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(40, 40, 20)
 	eng.SetScale(1.5)
 	c := eng.canvas

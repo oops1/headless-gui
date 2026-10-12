@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // SaveFrames не пишет больше кадров, чем разрешено лимитом.
 func TestSaveFrames_LimitStops(t *testing.T) {
+	testreset.Globals(t)
 	dir := t.TempDir()
 	e := New(64, 64, 20)
 	e.SetTooltipsEnabled(false)
@@ -48,6 +50,7 @@ func TestSaveFrames_LimitStops(t *testing.T) {
 
 // Лимит по умолчанию выставляется в SaveFrames.
 func TestSaveFrames_DefaultLimit(t *testing.T) {
+	testreset.Globals(t)
 	e := New(32, 32, 20)
 	e.SaveFrames(t.TempDir())
 	if got := e.saveLimit.Load(); got != DefaultSaveFramesLimit {

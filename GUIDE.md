@@ -1480,6 +1480,7 @@ mb.ShowYesNoCancel("Сохранение", "Сохранить?", callback)     
 eng.SendMouseMove(x, y int)
 eng.SendMouseButton(x, y int, btn widget.MouseButton, pressed bool)
 // btn: widget.MouseLeft | widget.MouseRight | widget.MouseMiddle
+//      | widget.MouseButtonX1 («назад») | widget.MouseButtonX2 («вперёд») — боковые кнопки
 ```
 
 Движок делает hit-test и передаёт событие нужному виджету. При ЛКМ фокус переходит на `Focusable`-виджет под курсором.
@@ -1546,7 +1547,7 @@ OEM-клавиши (`KeyOemPlus`, `KeyOemMinus` и др.), `KeyF1…KeyF24`, н�
 меню). На X11 и Wayland код берётся по ФИЗИЧЕСКОЙ клавише латинской раскладки,
 поэтому `Ctrl+S` срабатывает и в русской. Порядок событий: нажатие с `Code`,
 затем отдельное текстовое событие с `Rune`. `KeyEvent.Repeat` отличает
-автоповтор удерживаемой клавиши от нового нажатия.
+автоповтор удерживаемой клавиши от нового нажатия (Win32, Wayland и X11).
 
 Модификаторы: `ModShift, ModCtrl, ModAlt, ModMeta`.
 
@@ -1596,6 +1597,48 @@ widget.AliasStrings(map[string]string{
 побеждает названный конкретнее. Если по псевдониму перевода нет, берётся
 встроенный — хуже, чем было, не станет. `SetLanguage` управляет и диалогами, и
 приложением: язык у окна один.
+
+### Касания и жесты (v3.34)
+
+Касания включаются по окну: `win.SetTouchEnabled(true)` до `Run` (или позже — на X11
+это выполнится отложенно, из цикла событий; или корневой виджет реализует
+`widget.TouchHandler`). Без этого ОС по-прежнему превращает касания
+в мышь, и приложения, которым касания не нужны, не меняются. Работает на Win32
+(`WM_POINTER`), Wayland (`wl_touch`) и X11 (XInput 2.2).
+
+Виджет принимает касания методом `OnTouch(widget.TouchEvent) bool`; `true` на
+`TouchBegan` делает его владельцем этого пальца до `Ended`/`Cancelled` (координаты
+логические, в кадре самого виджета). Касание, которое никто не взял, становится левой
+кнопкой мыши в окне — обычные кнопки и меню продолжают работать; а палец, пролежавший
+на месте дольше `win.SetTouchLongPress` (по умолчанию 500 мс), при отрыве даёт правую
+кнопку — контекстное меню, как у Windows.
+
+У события есть `Pressure` (0..1), `Major`/`Minor`/`Orientation` (пятно контакта в
+пикселях): нуль значит «неизвестно» — не все устройства и бэкенды это умеют (у Wayland
+давления нет вовсе).
+
+Для жестов встройте `widget.TouchGestures` (или вызывайте `GestureRecognizer.Feed`):
+
+```go
+type Viewer struct {
+    widget.Base
+    widget.TouchGestures
+}
+
+v.OnGesture = func(g widget.Gesture) {
+    switch g := g.(type) {
+    case widget.Pinch: // g.Scale от начала, g.Step от прошлого события, g.Center
+    case widget.Swipe: // g.Dir (SwipeLeft/Right/Up/Down), g.Velocity пикс/с
+    case widget.Pan:   // g.Delta с прошлого события, g.Phase
+    case widget.Tap:   // g.Count == 2 — двойной тап
+    case widget.LongPress: // палец лежит на месте дольше 500 мс (после него нет Tap и Pan)
+    }
+}
+```
+
+Пороги (`GestureConfig`) — в логических пикселях; перечень — в справочнике.
+
+---
 
 ---
 
@@ -1772,7 +1815,7 @@ eng := engine.New(1280, 720, 30)
 // ... строим UI, eng.Start() ...
 
 win := window.New(eng, "Заголовок окна")
-win.SetMaxFPS(60)
+win.SetMaxFPS(60)    // потолок частоты кадров движка окна (не выше fps из engine.New)
 win.SetResizable(true)
 
 if err := win.Run(); err != nil {  // блокирует до закрытия
@@ -1957,6 +2000,11 @@ ctx.SetPixel(x, y int, col color.RGBA)
 // Изображения
 ctx.DrawImage(src image.Image, x, y int)
 ctx.DrawImageScaled(src image.Image, x, y, w, h int)
+// Часть картинки с фильтром: масштабируется только то, что под клипом (v3.34).
+// Контекст без поддержки получает запасной путь — DrawImageScaled от вырезки.
+widget.DrawImageRect(ctx, src, sr, dr image.Rectangle, widget.FilterCatmullRom)
+// Картинку переписали на месте — сбросить кэш масштабирования (nil — весь):
+widget.InvalidateImageCache(ctx, src)     // из Draw; из приложения — eng.InvalidateImageCache(src)
 
 // Текст
 ctx.DrawText(text string, x, y int, col color.RGBA)
@@ -2584,7 +2632,13 @@ view.Groups()   // []CollectionViewGroup{Name, Items}
 - `ToolTip="..."` на любом виджете; задержка/вкл-выкл через
   `eng.SetTooltipsEnabled`/`SetTooltipDelay`.
 - Курсоры мыши: виджеты реализуют `Cursor() widget.Cursor` (TextBox → I-beam,
-  GridSplitter → resize); `eng.CursorAt(x, y)`.
+  GridSplitter → resize); `eng.CursorAt(x, y)`. Формы `CursorNone` (спрятан),
+  `CursorGrab`/`CursorGrabbing`, `CursorSizeAll`, `CursorCrosshair`, `CursorWait`.
+  Форма поверх всех виджетов, применяемая сразу, без движения мыши:
+  `eng.SetCursorOverride(widget.CursorNone)` / `eng.ClearCursorOverride()`
+  (слайд-шоу прячет курсор по таймеру бездействия; перетаскивание показывает
+  «сжатую руку»). Форма действует и над меню и списками, вынесенными в
+  отдельные окна ОС (Win32, X11, Wayland).
 - Индикатор раскладки в окнах/диалогах — свойство `ShowLocaleIndicator`,
   контекстное меню переключения.
 
@@ -3211,11 +3265,19 @@ err = printing.Print(target, job)
 
 ```go
 k := float64(setup.EffectiveDPI()) / 96
-eng := engine.New(int(float64(w)/k+0.5), int(float64(h)/k+0.5), 1)
+eng := engine.NewOffscreen(int(float64(w)/k+0.5), int(float64(h)/k+0.5), 1)
+defer eng.Stop()
 eng.SetScale(k)
 eng.SetRoot(pageUI)
 img := eng.RenderOnce() // *image.RGBA; размер может отличаться от w×h на пиксель
 ```
+
+`engine.NewOffscreen` (v3.34) — тот же движок, но он не занимает служб,
+общих для процесса. Обычный `engine.New` становится измерителем текста вне
+отрисовки и растеризатором `<text>` в SVG и сообщает виджетам размер экрана.
+Движок печати, созданный через `New`, забирал всё это у окна: пока шло
+задание, окно мерило текст холстом задания, а меню удерживались в пределах
+страницы. Внутри `Draw` страница меряет своим холстом и выходит точной.
 
 Размер страницы-картинки не обязан совпадать с `SheetSize()`: тогда
 физический размер берётся из пикселей и разрешения. Совпадение — единственный
@@ -3556,6 +3618,64 @@ win.MinSize()            // спросить заданное
 Ограничение соблюдают все три бэкенда: Win32 (`WM_GETMINMAXINFO`), X11
 (`WM_NORMAL_HINTS`) и Wayland (`xdg_toplevel.set_min_size`). На macOS — no-op.
 
+### Полный экран и мониторы
+
+```go
+win.SetFullscreen(true)  // true — запрос отправлен; false — бэкенд не умеет
+win.IsFullscreen()       // что сообщает система
+win.SetOnFullscreenChanged(func(on bool) { /* горутина движка */ })
+
+// Полный экран на выбранном мониторе (выход — тот же SetFullscreen(false)):
+ms := window.Monitors()
+if len(ms) > 1 && !win.SetFullscreenOn(ms[1]) { /* монитор отключён — обычный режим */ }
+
+for _, m := range window.Monitors() { // основной первым
+    fmt.Println(m.Name, m.Bounds, m.Work, m.Scale, m.Primary)
+}
+m, ok := window.MonitorOf(win)                      // монитор окна
+_, onScreen := window.MonitorForRect(window.Monitors(), savedRect) // сохранённое положение ещё на экране?
+```
+
+`SetFullscreen` отвечает «запрос принят», а не «готово»: Win32 переставляет окно
+чуть позже, X11 и Wayland отвечают асинхронно, и компоновщик вправе отказать.
+Итог — в `IsFullscreen` и `SetOnFullscreenChanged`, которое срабатывает при
+**любой** смене, в том числе по воле системы (пользователь нажал Esc у
+компоновщика). Отказ приходит как `false`: так отвечает WinLine без
+`WINLINE_FULLSCREEN` — запрос ушёл (`SetFullscreen` вернул `true`), а `configure`
+пришёл без состояния fullscreen; приложению пора переходить в запасной режим
+(например, развернуть окно обычным путём). До `Run` запрос запоминается и
+применяется при создании окна.
+
+«Развёрнуто» и «полный экран» — разные состояния. `IsMaximized` полноэкранного
+окна возвращает значение, которое было до полного экрана. Полноэкранное окно не
+скругляется, кнопка «□» выводит его из полного экрана.
+
+- **Win32.** Положение, размер, стиль и «было развёрнуто» запоминаются, на время
+  снимается `WS_THICKFRAME`, окно встаёт на `rcMonitor` своего монитора (таскбар
+  закрыт). Выход возвращает всё как было; прямоугольник, оказавшийся за краем
+  отключённого монитора, переносится на ближайший. Смена разрешения, перенос
+  окна на другой монитор и смена DPI пересчитывают прямоугольник.
+- **X11.** `_NET_WM_STATE_FULLSCREEN` через `ClientMessage`; состояние читается из
+  свойства `_NET_WM_STATE` по `PropertyNotify`.
+- **Wayland.** `xdg_toplevel.set_fullscreen` / `unset_fullscreen`; состояние — из
+  `configure`.
+- **macOS.** Заглушка: `SetFullscreen` возвращает `false`; `Monitors()` пуст.
+
+`SetFullscreenOn(m)` принимает значение из `Monitors()`/`MonitorAt`/`MonitorOf` и
+находит тот же монитор в текущем списке (по скрытому ключу, затем по `Name`, затем
+по `Bounds`); `false` — монитор уже отключён. Окно, уже стоящее в полном экране,
+переносится на `m`. Win32 — `rcMonitor` выбранного монитора; X11 —
+`_NET_WM_FULLSCREEN_MONITORS`, а если менеджер его не объявил, окно переносится на
+монитор перед `_NET_WM_STATE_FULLSCREEN`; Wayland — `set_fullscreen(wl_output)`
+(композитор вправе выбрать другой вывод — смотрите `MonitorOf`).
+
+Мониторы: Win32 — `EnumDisplayMonitors` + `GetDpiForMonitor`; X11 — RandR 1.5
+(без RandR или старше 1.5 весь экран считается одним монитором); Wayland —
+`wl_output` и `xdg_output`. Единицы: на Win32 и X11 `Bounds`/`Work` — пиксели, на
+Wayland — логические координаты компоновщика (`Scale` — сколько пикселей буфера в
+единице). Рабочей области на Wayland нет (`Work == Bounds`), основной монитор
+там — первый. Подробности — в `docs/AI_AGENT_REFERENCE.md` («v3.34»).
+
 ### Значок окна
 
 ```go
@@ -3570,9 +3690,10 @@ win.SetIcon()                        // снять значок
 Вызывать можно в любой момент после создания окна — например, чтобы показать
 ход длительной операции, — и до `Run()`: значок применится при создании окна.
 
-Работает на **Win32** (`WM_SETICON`) и **X11** (`_NET_WM_ICON`). Бэкенд, который
-этого не умеет (Wayland до `xdg-toplevel-icon-v1`), возвращает
-`window.ErrIconUnsupported` — молчания здесь нет намеренно: приложение, у
+Работает на **Win32** (`WM_SETICON`), **X11** (`_NET_WM_ICON`) и **Wayland**
+(`xdg-toplevel-icon-v1`, с v3.34 — если компоновщик объявляет этот глобал: KDE
+6.1+, Sway). Бэкенд, который этого не умеет (Wayland без глобала, macOS),
+возвращает `window.ErrIconUnsupported` — молчания здесь нет намеренно: приложение, у
 которого значка не видно, должно узнать причину сразу, а не искать её в
 настройках рабочего стола.
 
@@ -3783,9 +3904,47 @@ type FileDropTarget interface {
 ```
 
 По платформам: **Win32** (`WM_DROPFILES`) и **X11** (XDND v5) — полностью;
-**Wayland** (`wl_data_device`) — каркас, требует проверки на живой сессии;
-macOS — нет. В headless маршрутизация к `FileDropTarget` тестируется через
-`SendFilesDropped` без окна.
+**Wayland** (`wl_data_device`) — приём `text/uri-list` (проверен на проводе с
+фальшивым компоновщиком); macOS — нет. В headless маршрутизация к
+`FileDropTarget` тестируется через `SendFilesDropped` без окна.
+
+#### Подсветка зоны сброса и перетаскивание из окна (v3.34)
+
+Пока файлы тащат над окном, приложение узнаёт об этом и может подсветить зону
+или отказать в сбросе:
+
+```go
+win.SetOnDragEnter(func(x, y int) { zone.Highlight(true) })
+win.SetOnDragOver(func(x, y int) bool { return zone.Bounds().Contains(image.Pt(x, y)) }) // false — «нельзя»
+win.SetOnDragLeave(func() { zone.Highlight(false) }) // после сброса не приходит — гасите и в SetOnFilesDropped
+```
+
+Окно умеет и начинать перетаскивание файлов — например, из миниатюры в Проводник:
+
+```go
+// В обработчике мыши, пока кнопка зажата и курсор отошёл от точки нажатия:
+win.SetOnDragFinished(func(e window.DragEffect) {
+    if e == window.DragEffectMove { removeOriginals() } // ОС оригиналы не трогает
+})
+ok := win.BeginDragFiles([]string{path}, window.DragEffectCopy|window.DragEffectMove)
+```
+
+`BeginDragFiles` вернёт `false`, если начать нельзя (кнопка не зажата, бэкенд не
+умеет, Wayland-компоновщик без `wl_data_device_manager` v3); итог (`0` — отмена)
+приходит в `SetOnDragFinished`. Win32: `DoDragDrop`; X11: XDND-источник (понимает
+`XdndProxy`); Wayland: `start_drag`. Со значком возле курсора:
+
+```go
+ok := win.BeginDragFilesImage([]string{path}, window.DragEffectCopy, thumb, image.Pt(16, 16))
+// thumb — image.Image в пикселях экрана (до 512 px по большей стороне),
+// image.Pt(16, 16) — точка картинки под курсором. win.DragImageSupported() == false
+// (X11, macOS): перетаскивание идёт, но значок не рисуется.
+```
+
+Win32 рисует значок через `IDragSourceHelper` (и над самим окном тоже), Wayland —
+поверхностью-значком в `start_drag`. Подробности и чего нет — в
+`docs/AI_AGENT_REFERENCE.md`, разделы «v3.34 additions» и «v3.34: full screen on a
+chosen monitor, cursor over popups, drag icon, XdndProxy».
 
 ### Оформленный текст в буфере обмена
 
@@ -3865,6 +4024,38 @@ go func() { // чтение может ждать — не на горутине
 (`SetFiles(paths, cut)`, `GetFiles() (paths, cut, ok)`); свой провайдер без
 него получает от `ClipboardSetFiles` пути текстом, а `ClipboardFiles` честно
 отвечает `ok == false`. `UseMemoryClipboard()` файлы умеет.
+
+### Изображение в буфере обмена
+
+С v3.34 в буфер можно положить картинку («Копировать изображение») и прочитать
+её оттуда:
+
+```go
+if err := widget.ClipboardSetImage(img); err != nil { /* ErrClipboardImageUnsupported — провайдер не умеет */ }
+
+go func() { // чтение может ждать — не на горутине движка
+    img, ok := widget.ClipboardImage() // ok == false — в буфере не изображение
+    eng.Post(func() { /* показать img */ })
+}()
+```
+
+`ClipboardSetImage` заменяет содержимое буфера и копирует картинку: менять
+оригинал после вызова можно. На Windows PNG и DIB кодируются сразу — для больших
+картинок звать в своей горутине.
+
+- Windows: кладутся три формата за одно открытие — «PNG», `CF_DIBV5` (32 бита
+  BGRA, альфа не премультиплицирована) и `CF_DIB` (24 бита, прозрачность смешана
+  с белым); читается в порядке PNG → `CF_DIBV5` → `CF_DIB`. Так вставляют Paint,
+  GIMP, Office, браузеры.
+- X11 и Wayland: `image/png`, который кодируется лениво — когда его попросили.
+  Читаются `image/png`, а при его отсутствии `image/bmp`. Большие картинки на X11
+  идут по `INCR` (в обе стороны). Ожидание — 300 мс на ответ владельца и на каждый
+  следующий кусок.
+- macOS и свой провайдер без `widget.ClipboardImageProvider` — `ErrClipboardImageUnsupported`.
+  `UseMemoryClipboard()` картинки умеет.
+
+В сессии WinLine картинка до RDP-клиента пока не доедет: `cliprdr` несёт только
+текст и файлы.
 
 ### Цветные эмодзи
 
@@ -4077,7 +4268,7 @@ p.SetStyle("taskbar", "", theme.StateNormal, theme.StyleDelta{
 Размытие подложки берёт готовые пиксели холста, уменьшает их вчетверо,
 размывает разделимым box-blur (стоимость не зависит от радиуса) и возвращает
 обратно. `Canvas.SetRoundClip` обрезает по скруглённому контуру, а не по
-охватывающему прямоугольнику.
+охватывающему прямоугольнику; так же обрезаются и изображения (`DrawImage*`).
 
 #### Акцент, светлая панель и акрил Windows 10 (с v3.31)
 
@@ -4525,6 +4716,37 @@ Mica и мягкая тень приходят по флагам `backdrop.mica`
 `desktop.quick.*` (русский и английский, `widget.RegisterStrings`). Подсказки у
 значков без подписи — `QuickSettings.ToolTipAt`. Рамка клавиатурного фокуса —
 `PaintFocusRing`, как на панели задач.
+
+**Что добавила v3.34** (замечания WinLine по настоящим снимкам Windows 11; каждый
+вид включается флагом профиля, погашенный флаг возвращает вид v3.33):
+- плитка с `HasDetails` — две половинки с линией между ними: левая переключает,
+  правая «›» открывает страницу, подсветка у каждой своя;
+- флаг `theme.KeyQuickPaged`: вместо прокрутки — страницы с точками и ▲▼ справа от
+  сетки (колесо листает; `Pages`, `Page`, `SetPage`);
+- флаг `theme.KeyQuickFooterEditLeft`: нижняя полоса «Изменить» (карандаш с
+  подписью), батарея, шестерёнка справа;
+- `SetVolumeEnabled(false)` и `SetBrightnessEnabled(false)`: серый ползунок, не
+  реагирует и выпадает из Tab;
+- подпись плитки — до двух строк по словам, вторая с многоточием (вторая строка
+  отдаётся `Detail`, если название заняло одну);
+- `q.NewDetailPage()` — страница из готовых элементов (`AddList`, `AddSlider`,
+  `AddToggle`, `AddButton`, `AddText`), которые сами берут цвета у темы, без
+  `ApplyThemeTree`: `return page.Details("Wi-Fi")`.
+- `QuickAction.PageOnly` — плитка «только страница» («Специальные возможности»):
+  целая, без половинок; щелчок по любому месту открывает страницу, «›» справа —
+  часть плитки;
+- страницы плиток сдвигаются по вертикали (токен `theme.KeyQuickPages`), стопка
+  уведомлений раскрывается плавно (токен `notification.expand`); «меньше движения»
+  делает оба перехода мгновенными;
+- стрелки ▲▼ и точки страниц входят в обход Tab (Enter и Space листают);
+- правый щелчок по «▶ Фокусировка» (или клавиша меню, Shift+F10) открывает меню
+  15/30/45/60/90 минут: `CalendarFlyout.FocusDurations`, `OpenFocusDurationMenu`.
+
+Центр уведомлений и календарь (флаги `theme.KeyNotifyStack` и
+`theme.KeyCalendarFocusCompact`): несколько уведомлений одного приложения — стопка
+(самое свежее и кнопка «+N уведомл.», щелчок разворачивает); «Фокусировка» — одна
+строка «− 30 мин +» и «▶ Фокусировка» без заголовка (`CalendarFlyout.FocusSingleButton`
+оставляет одну кнопку). Подробнее — `docs/AI_AGENT_REFERENCE.md`, раздел v3.34.
 
 
 ### Конвейер кадра

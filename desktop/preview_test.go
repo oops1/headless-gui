@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -138,6 +139,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 }
 
 func TestPreview_HoverOpensAnchoredToTheButton(t *testing.T) {
+	testreset.Globals(t)
 	area, p, _ := previewScene(t, 10)
 
 	btn := hoverButton(t, area, 1)
@@ -167,6 +169,7 @@ func TestPreview_HoverOpensAnchoredToTheButton(t *testing.T) {
 
 // Проведение вдоль панели переносит окно, а не закрывает и открывает заново.
 func TestPreview_SlidingAlongButtonsDoesNotBlink(t *testing.T) {
+	testreset.Globals(t)
 	area, p, _ := previewScene(t, 10)
 
 	hoverButton(t, area, 0)
@@ -190,6 +193,7 @@ func TestPreview_SlidingAlongButtonsDoesNotBlink(t *testing.T) {
 // Увод курсора закрывает — но не мгновенно: за задержку курсор успевает
 // дойти до самой миниатюры.
 func TestPreview_LeavingClosesAfterDelay(t *testing.T) {
+	testreset.Globals(t)
 	area, p, _ := previewScene(t, 10)
 
 	hoverButton(t, area, 0)
@@ -204,6 +208,7 @@ func TestPreview_LeavingClosesAfterDelay(t *testing.T) {
 
 // Курсор, доведённый до самой миниатюры, держит её открытой.
 func TestPreview_CursorOnThePanelKeepsItOpen(t *testing.T) {
+	testreset.Globals(t)
 	area, p, _ := previewScene(t, 20)
 
 	hoverButton(t, area, 0)
@@ -227,6 +232,7 @@ func TestPreview_CursorOnThePanelKeepsItOpen(t *testing.T) {
 // Свёрнутое окно предпросмотр имеет: это главный случай, ради которого он и
 // нужен.
 func TestPreview_MinimizedWindowHasAPreview(t *testing.T) {
+	testreset.Globals(t)
 	area, p, _ := previewScene(t, 10)
 
 	hoverButton(t, area, 2) // «Заметки» свёрнуты
@@ -243,6 +249,7 @@ func TestPreview_MinimizedWindowHasAPreview(t *testing.T) {
 
 // Клик по миниатюре поднимает окно и закрывает предпросмотр.
 func TestPreview_ClickRaisesTheWindow(t *testing.T) {
+	testreset.Globals(t)
 	area, p, wm := previewScene(t, 10)
 
 	hoverButton(t, area, 1)
@@ -264,6 +271,7 @@ func TestPreview_ClickRaisesTheWindow(t *testing.T) {
 
 // Тема вправе не хотеть предпросмотра вовсе — Windows 2000 его не имела.
 func TestPreview_ThemeCanTurnItOff(t *testing.T) {
+	testreset.Globals(t)
 	area, p, wm := previewScene(t, 10)
 
 	prof := theme.NewProfile("NoPreview")
@@ -296,6 +304,7 @@ func TestPreview_ThemeCanTurnItOff(t *testing.T) {
 
 // Модель без миниатюр предпросмотра не получает — и не падает.
 func TestPreview_ModelWithoutPreviewsIsSilent(t *testing.T) {
+	testreset.Globals(t)
 	m := previewTheme(t, 10)
 	wm := NewFakeWindowModel(WindowInfo{ID: 10, Title: "Терминал"})
 
@@ -323,6 +332,7 @@ func TestPreview_ModelWithoutPreviewsIsSilent(t *testing.T) {
 // просит тема. Это требование по трафику, а не мелочь: живая миниатюра в
 // каждом кадре вернула бы непрерывный поток кадров.
 func TestPreview_SourceIsAskedOnlyWhileOpen(t *testing.T) {
+	testreset.Globals(t)
 	area, p, wm := previewScene(t, 30)
 
 	before := wm.calls
@@ -367,6 +377,7 @@ func TestPreview_SourceIsAskedOnlyWhileOpen(t *testing.T) {
 
 // Источник получает тот размер, который просит тема.
 func TestPreview_AsksForTheThemeSize(t *testing.T) {
+	testreset.Globals(t)
 	area, p, wm := previewScene(t, 10)
 
 	hoverButton(t, area, 0)
@@ -380,6 +391,7 @@ func TestPreview_AsksForTheThemeSize(t *testing.T) {
 // Окно без миниатюры панель показывает без неё, а не пустым местом с чужой
 // картинкой.
 func TestPreview_MissingThumbnailIsNotSomeoneElses(t *testing.T) {
+	testreset.Globals(t)
 	area, p, wm := previewScene(t, 10)
 
 	hoverButton(t, area, 0)
@@ -410,6 +422,7 @@ func abs(v int) int {
 // ровно тот дефект, который движок чинил в 3.16.1 — неподвижный рабочий стол
 // начинал слать кадры непрерывно.
 func TestPreview_OpenPanelDoesNotFloodFrames(t *testing.T) {
+	testreset.Globals(t)
 	const refreshMs = 50
 
 	m := previewTheme(t, refreshMs)
@@ -433,7 +446,7 @@ func TestPreview_OpenPanelDoesNotFloodFrames(t *testing.T) {
 	root.AddChild(p)
 	defer p.Close()
 
-	eng := engine.New(800, 600, 60)
+	eng := testengine.New(t, 800, 600, 60)
 	eng.SetRenderOnDemand(true)
 	eng.SetRoot(root)
 	eng.Start()
@@ -474,6 +487,7 @@ func TestPreview_OpenPanelDoesNotFloodFrames(t *testing.T) {
 // значками (ApplicationArea); предпросмотру довольно трёх вопросов, и он
 // задаёт их через HoverArea.
 func TestPreview_WorksWithApplicationAreaToo(t *testing.T) {
+	testreset.Globals(t)
 	m := previewTheme(t, 10)
 	wm := newFakePreviews(
 		WindowInfo{ID: 10, AppID: "term", Title: "Терминал", Active: true},

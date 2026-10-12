@@ -127,6 +127,10 @@ func (win *Window) setupActivation() {
 		// Заголовок и оверлеи — виджеты: на горутине движка.
 		win.post(func() {
 			ww.SetActive(active)
+			// Окно потеряло ввод: конца идущих касаний оно уже не увидит.
+			if !active {
+				win.cancelTouches()
+			}
 			// При деактивации носителя (клик в другое приложение) закрываем
 			// вынесенные popup-оверлеи — как системные меню. Только в hosted-режиме.
 			if !active && (win.popupHost != nil || win.childPopups != nil) {
@@ -166,6 +170,7 @@ func (win *Window) installPopupHost() {
 	if cph, ok := win.native.(childPopupHost); ok {
 		win.childPopups = newChildPopups(cph, peng, win.scale, &win.in)
 		setter.SetPopupSink(win.childPopups.apply)
+		win.setPopupCursor(win.childPopups.syncCursorOverride)
 		return
 	}
 
@@ -178,6 +183,7 @@ func (win *Window) installPopupHost() {
 	}
 	win.popupHost = newPopupHost(win.native, inv, peng, win.scale, &win.in)
 	setter.SetPopupSink(win.popupHost.apply)
+	win.setPopupCursor(win.popupHost.syncCursorOverride)
 }
 
 // detectScale возвращает HiDPI-масштаб: env HEADLESS_GUI_SCALE имеет
@@ -243,6 +249,27 @@ type surface struct {
 	cursor    int
 	cursorSet bool
 
+	// ptrX, ptrY — последнее положение мыши в координатах контента; ptrKnown —
+	// была ли мышь в окне. Нужны, чтобы пересчитать курсор без движения мыши
+	// (refreshCursor). Только горутина движка.
+	ptrX, ptrY int
+	ptrKnown   bool
+
+	// popupCursor — хост вынесенных попапов (popupHost / childPopups) просит
+	// пересмотреть принудительный курсор движка (Engine.SetCursorOverride):
+	// попапы — окна ОС со своим курсором, и до них форма окна-носителя не
+	// доходит. Ставится при установке хоста, читается горутиной движка.
+	popupCursor atomic.Pointer[func()]
+
+	// emu — палец, превращённый в мышь, пока касание никто не взял (touch.go).
+	// Только горутина движка.
+	emu touchEmu
+	// emuLongPress — срок долгого нажатия «ничьего» пальца (SetTouchLongPress;
+	// 0 — по умолчанию, <0 — выключено; атомарное: задаёт приложение, читает
+	// горутина движка); emuNow — часы прихода событий, в тестах подменяются.
+	emuLongPress atomic.Int64
+	emuNow       func() time.Time
+
 	// fitOX, fitOY — смещение контента в буфере окна (letterbox при
 	// ContentFit=FitScale). Пишутся под mu при ресайзе, читаются событиями
 	// ввода — то и другое на горутине движка — и applyFrame (под mu).
@@ -288,6 +315,10 @@ type Window struct {
 	// (minsize.go). Заданный до Run(), применяется при создании окна.
 	minW, minH int
 	minWant    bool
+
+	// fs — полный экран: колбэк приложения и запрос, заданный до Run
+	// (fullscreen.go).
+	fs fullscreenState
 
 	// pendingIcons/iconWant — значок окна, заданный до Run() (icon.go).
 	// Бэкенда до Run() ещё нет, а задать значок сразу после window.New —
@@ -367,9 +398,17 @@ type Window struct {
 	// работает независимо от этого колбэка.
 	onFilesDropped func(paths []string, x, y int)
 
+	// drag — подписки на перетаскивание файлов: события приёмника и конец
+	// перетаскивания из окна (dnd_drag.go).
+	drag dragState
+
 	// sysTheme — подписка приложения на смену светлой/тёмной темы ОС
 	// (см. SetOnSystemThemeChanged в systheme.go).
 	sysTheme systemThemeState
+
+	// touchWant — явное решение приложения о касаниях (SetTouchEnabled, touch.go);
+	// nil — решает корень окна: он принимает касания, если сам TouchHandler.
+	touchWant *bool
 }
 
 // New создаёт окно для заданного движка с указанным заголовком.
@@ -387,9 +426,28 @@ func New(eng EngineAPI, title string) *Window {
 	return win
 }
 
+// maxFPSSink — движок принимает потолок частоты кадров (реализует
+// *engine.Engine). Опциональный по той же причине, что modifierSink: EngineAPI
+// — обязательный минимум, и добавлять в него метод значило бы сломать сборку
+// всякому, кто его уже реализует. Движок без него живёт на своей частоте.
+type maxFPSSink interface {
+	SetMaxFPS(fps int)
+}
+
 // SetMaxFPS задаёт максимальный FPS отрисовки окна (по умолчанию 60).
+//
+// Действует на всё, что окно рисует:
+//   - движок окна — ограничивает потолком (Engine.SetMaxFPS): выше частоты,
+//     с которой создан движок, он не разгонится; вызов можно делать и после
+//     Run. Пока SetMaxFPS не вызывали, движок работает на своей частоте,
+//     даже если она выше умолчания 60;
+//   - модальные диалоги и плавающие панели в собственных окнах — их движки
+//     создаются с этой частотой (значение, заданное в момент создания).
 func (win *Window) SetMaxFPS(fps int) *Window {
 	win.maxFPS = fps
+	if s, ok := win.eng.(maxFPSSink); ok {
+		s.SetMaxFPS(fps)
+	}
 	return win
 }
 
@@ -591,6 +649,10 @@ func (win *Window) bringUp() error {
 		}
 	}
 
+	// Касания — тоже до Create: Wayland берёт wl_touch и X11 выбирает события
+	// XInput2 при создании окна (touch.go).
+	win.prepareTouch()
+
 	if err := win.native.Create(win.title, pw, ph); err != nil {
 		return err
 	}
@@ -641,8 +703,14 @@ func (win *Window) bringUp() error {
 	win.setupResizeClose()
 	win.adoptCreatedSize()
 
+	// Полный экран: уведомления бэкенда и запрос, заданный до Run.
+	win.setupFullscreen()
+
 	// Общий проброс ввода (мышь/клавиатура) — surface.
 	win.setupInput()
+
+	// Касания (если окно их просило).
+	win.setupTouch()
 
 	// Редактор метода ввода (китайский, японский, корейский): набираемое от
 	// системы — фокусному полю. Бэкенд без поддержки — no-op.
@@ -810,7 +878,13 @@ func (win *Window) setupWidgetWindow() {
 	if ww.OnMaximize == nil {
 		ww.OnMaximize = func() {
 			win.onNative(func() {
-				if win.native.IsMaximized() {
+				// Полноэкранное окно кнопка □ возвращает в обычное
+				// состояние: раньше Wayland считал его «развёрнутым», и
+				// нажатие шло в Restore; теперь IsMaximized полный экран не
+				// включает, и это поведение сохранено явно.
+				if fb, ok := win.native.(fullscreenBackend); ok && fb.IsFullscreen() {
+					fb.SetFullscreen(false)
+				} else if win.native.IsMaximized() {
 					win.native.Restore()
 				} else {
 					win.native.Maximize()
@@ -971,6 +1045,8 @@ func (win *Window) handleFitResize(newW, newH int) {
 // (модификаторы), снимается здесь и едет в замыкании: к исполнению Ctrl могли
 // уже отпустить.
 func (s *surface) setupInput() {
+	s.setupCursorOverride()
+
 	// ── Mouse move ───────────────────────────────────────────────────────────
 	// Движения склеиваются: пока предыдущее стоит в очереди, новое лишь
 	// обновляет его координаты (input_queue.go).
@@ -1137,6 +1213,10 @@ func nativeButton(button int) (widget.MouseButton, bool) {
 		return widget.MouseWheelUp, true
 	case 4:
 		return widget.MouseWheelDown, true
+	case 5:
+		return widget.MouseButtonX1, true
+	case 6:
+		return widget.MouseButtonX2, true
 	}
 	return 0, false
 }
@@ -1162,6 +1242,7 @@ func (win *Window) SetOnFilesDropped(fn func(paths []string, x, y int)) {
 //     — маршрутизация виджету под точкой (widget.FileDropTarget), headless-симметрия;
 //   - win.onFilesDropped (логические) — колбэк приложения, если задан.
 func (win *Window) setupFilesDrop() {
+	win.setupDragEvents()
 	fd, ok := win.native.(filesDropTarget)
 	if !ok {
 		return

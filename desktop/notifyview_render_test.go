@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -45,7 +47,7 @@ func newRenderFixture(t *testing.T, scale float64) *renderFixture {
 	fm.Register("notifications", nc)
 	root.AddChild(fm)
 
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	eng.SetScale(scale)
 	eng.SetRoot(root)
 	// richFixture уже открыл центр на другой теме; нужная тема — та, что в nc.
@@ -89,6 +91,7 @@ func nearColor(a, b color.RGBA, tol int) bool {
 // Включённая плитка залита акцентом, выключенная — нет; смена акцента на
 // открытом центре перекрашивает плитку без пересоздания.
 func TestRender_QuickTileOnFollowsAccent(t *testing.T) {
+	testreset.Globals(t)
 	f := newRenderFixture(t, 1)
 	on, off := f.tileRect("wifi"), f.tileRect("bt")
 	if on.Empty() || off.Empty() {
@@ -114,6 +117,7 @@ func TestRender_QuickTileOnFollowsAccent(t *testing.T) {
 
 // Светлая и тёмная палитры переключаются флагом на открытом центре.
 func TestRender_LightFlagRecoloursOpenCenter(t *testing.T) {
+	testreset.Globals(t)
 	f := newRenderFixture(t, 1)
 	probe := image.Pt(f.nc.OverlayBounds().Min.X+8, f.nc.OverlayBounds().Min.Y+f.nc.OverlayBounds().Dy()/2)
 	lum := func(c color.RGBA) int { return (int(c.R) + int(c.G) + int(c.B)) / 3 }
@@ -132,6 +136,7 @@ func TestRender_LightFlagRecoloursOpenCenter(t *testing.T) {
 // Перерисовка одной плитки по заявленной области даёт тот же кадр, что полная
 // перерисовка: частичная не портит ни размытую подложку, ни соседей.
 func TestRender_PartialTileRepaintEqualsFull(t *testing.T) {
+	testreset.Globals(t)
 	f := newRenderFixture(t, 1)
 	f.frame()
 	f.q.SetOn("night", true) // заявляет только область плитки
@@ -156,6 +161,7 @@ func mustAccent(tm *theme.Manager) color.RGBA {
 
 // Открытие центра меняет пиксели только внутри его области.
 func TestRender_OpenChangesOnlyItsArea(t *testing.T) {
+	testreset.Globals(t)
 	f := newRenderFixture(t, 1)
 	f.nc.Close()
 	f.nc.Settle()
@@ -185,6 +191,7 @@ func TestRender_OpenChangesOnlyItsArea(t *testing.T) {
 
 // 100–200 %: текст помещается в свои рамки при любом масштабе.
 func TestRender_TextFitsAtAllScales(t *testing.T) {
+	testreset.Globals(t)
 	for _, scale := range []float64{1, 1.25, 1.5, 1.75, 2} {
 		f := newRenderFixture(t, scale)
 		ns := NewFakeNotifications()

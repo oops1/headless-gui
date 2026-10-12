@@ -340,6 +340,7 @@ func (nc *NotificationCenter) viewSource() ncSource {
 		action:     nc.deliver,
 		invalid:    widget.InvalidateRect,
 		invalidAll: nc.Invalidate,
+		relayout:   nc.relayout,
 		culture:    func() DateCulture { return nc.Culture },
 		now:        nc.now,
 		emptyMsg:   nc.EmptyLabel,

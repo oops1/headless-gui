@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -13,6 +14,7 @@ import (
 // рабочий стол» 5 px с линией 1 px слева, подсветка значков на всю полосу.
 
 func TestWin10Geometry_MatchesMeasurements(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	if got := tm.GetMetric(KeyTaskbarGap); got != 0 {
 		t.Errorf("taskbar.gap = %v, ждали 0", got)
@@ -44,6 +46,7 @@ func TestWin10Geometry_MatchesMeasurements(t *testing.T) {
 
 // ширина полоски и линии слева: линия рисуется цветом части "line".
 func TestWin10ShowDesktop_DrawsLeftLine(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	b := NewShowDesktopButton(tm)
 	b.SetBounds(image.Rect(100, 0, 105, 40))
@@ -103,6 +106,7 @@ func hoverFills(it Item) []recFill {
 // а не квадрат значка 24×16; сам значок остаётся по центру. У остальных тем
 // значок подсвечивается своим квадратом.
 func TestWin10Tray_HoverFillsWholeStrip(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	_, net, nb := trayStripScene(tm)
 	if b := net.Bounds(); b.Dy() != 40 || b.Dx() != 24 {
@@ -157,6 +161,7 @@ func TestWin10Tray_HoverFillsWholeStrip(t *testing.T) {
 // Условные стили трея наследуются: на светлой панели значок, кнопка уведомлений
 // и полоска не остаются белыми.
 func TestWin10Tray_LightStylesInherited(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	tm.SetFlag(theme.KeyTaskbarLight, true)
 	vol := tm.GetStyle(ComponentVolume, "", theme.StateNormal)
@@ -178,6 +183,7 @@ func TestWin10Tray_LightStylesInherited(t *testing.T) {
 
 // Кнопка центра уведомлений горит, пока центр открыт.
 func TestNotificationButton_ActiveWhileCenterOpen(t *testing.T) {
+	testreset.Globals(t)
 	tm := win10Fast(t)
 	b := NewNotificationButton(tm, nil)
 	b.SetBounds(image.Rect(0, 0, 40, 40))
@@ -209,6 +215,7 @@ func TestNotificationButton_ActiveWhileCenterOpen(t *testing.T) {
 
 // Формы множественного числа счётчика.
 func TestPluralForm(t *testing.T) {
+	testreset.Globals(t)
 	ru := map[int]string{
 		0: PluralMany, 1: PluralOne, 2: PluralFew, 4: PluralFew, 5: PluralMany,
 		11: PluralMany, 12: PluralMany, 14: PluralMany, 21: PluralOne, 22: PluralFew,
@@ -227,6 +234,7 @@ func TestPluralForm(t *testing.T) {
 }
 
 func TestNotificationButton_PluralTooltip(t *testing.T) {
+	testreset.Globals(t)
 	prev := widget.Language()
 	defer widget.SetLanguage(prev)
 	b := NewNotificationButton(nil, nil)
@@ -254,6 +262,7 @@ func TestNotificationButton_PluralTooltip(t *testing.T) {
 // Новые ключи desktop.tray.* и прежние как алиасы: приложение, переопределившее
 // прежний ключ, получает свою строку; новый ключ побеждает прежний.
 func TestTrayStrings_LegacyKeysStayAliases(t *testing.T) {
+	testreset.Globals(t)
 	prev := widget.Language()
 	defer widget.SetLanguage(prev)
 	widget.SetLanguage("EN")
@@ -291,6 +300,7 @@ func TestTrayStrings_LegacyKeysStayAliases(t *testing.T) {
 // Подсказки берутся тем же tr() с языком по умолчанию, что у остальных
 // компонентов: до явного SetLanguage языки не расходятся.
 func TestTrayStrings_SameLanguageAsDesktop(t *testing.T) {
+	testreset.Globals(t)
 	b := NewNotificationButton(nil, nil)
 	if got, want := b.GetToolTip(), tr(StrTrayNoNewNotifications); got != want {
 		t.Errorf("подсказка кнопки %q, а tr() даёт %q", got, want)

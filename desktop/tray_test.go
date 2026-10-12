@@ -4,12 +4,14 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // ─── Сеть ────────────────────────────────────────────────────────────────────
 
 func TestNetworkItem_PreferredSizeFromTheme(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus()
 	it := NewNetworkStatus(tm, st)
@@ -26,6 +28,7 @@ func TestNetworkItem_PreferredSizeFromTheme(t *testing.T) {
 }
 
 func TestNetworkItem_ClickFiresOnRelease(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus()
 	it := NewNetworkStatus(tm, st)
@@ -51,6 +54,7 @@ func TestNetworkItem_ClickFiresOnRelease(t *testing.T) {
 // рисуется, а на её месте перечёркивание: число закрашенных прямоугольников
 // должно отличаться от «нормального» состояния.
 func TestVolumeItem_MutedDrawsDifferently(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus()
 	it := NewVolumeStatus(tm, st)
@@ -76,6 +80,7 @@ func TestVolumeItem_MutedDrawsDifferently(t *testing.T) {
 }
 
 func TestVolumeItem_StatusChangeInvalidates(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus()
 	it := NewVolumeStatus(tm, st)
@@ -93,6 +98,7 @@ func TestVolumeItem_StatusChangeInvalidates(t *testing.T) {
 }
 
 func TestVolumeItem_CloseUnsubscribes(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus()
 	it := NewVolumeStatus(tm, st)
@@ -112,6 +118,7 @@ func TestVolumeItem_CloseUnsubscribes(t *testing.T) {
 // ─── Питание ─────────────────────────────────────────────────────────────────
 
 func TestPowerItem_NoBatteryZeroWidth(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus()
 	st.SetPower(PowerState{NoBattery: true})
@@ -125,6 +132,7 @@ func TestPowerItem_NoBatteryZeroWidth(t *testing.T) {
 }
 
 func TestPowerItem_HasWidthWithBattery(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus()
 	st.SetPower(PowerState{Charge: 0.5, NoBattery: false})
@@ -138,6 +146,7 @@ func TestPowerItem_HasWidthWithBattery(t *testing.T) {
 }
 
 func TestPowerItem_DoesNotDrawWithoutBattery(t *testing.T) {
+	testreset.Globals(t)
 	tm := testThemeManager(t)
 	st := NewFakeSystemStatus()
 	st.SetPower(PowerState{NoBattery: true})

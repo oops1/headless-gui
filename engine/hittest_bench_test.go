@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -45,6 +46,7 @@ func BenchmarkHitTestPathDepth24(b *testing.B) { benchHitTestPath(b, 24) }
 
 // TestHitTestPathOrder — путь идёт от корня к самому глубокому виджету.
 func TestHitTestPathOrder(t *testing.T) {
+	testreset.Globals(t)
 	root := benchDeepTree(5)
 	path := hitTestPath(root, 5, 5)
 	if len(path) != 6 {

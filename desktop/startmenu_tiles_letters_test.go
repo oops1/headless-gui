@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -40,6 +41,7 @@ func openGridByClick(t *testing.T, m *StartMenu, letter string) {
 }
 
 func TestLetters_AlphabetBuiltFromPresentGroups(t *testing.T) {
+	testreset.Globals(t)
 	lat := startAlphabet([]string{"A", "C"})
 	if lat[0] != "#" || len(lat) != 1+26 || lat[1] != "A" || lat[26] != "Z" {
 		t.Errorf("латинский алфавит: %v", lat)
@@ -69,6 +71,7 @@ func TestLetters_AlphabetBuiltFromPresentGroups(t *testing.T) {
 // Щелчок по заголовку буквы открывает сетку на месте списка; доступны только
 // буквы с группами.
 func TestLetters_ClickHeaderOpensGrid(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	openGridByClick(t, m, "D")
 
@@ -96,6 +99,7 @@ func TestLetters_ClickHeaderOpensGrid(t *testing.T) {
 // Выбор доступной буквы прокручивает список к её группе и закрывает сетку;
 // недоступная буква не реагирует.
 func TestLetters_PickJumpsAndClosesGrid(t *testing.T) {
+	testreset.Globals(t)
 	m, cat := tiledMenu(t)
 	openGridByClick(t, m, "D")
 
@@ -130,6 +134,7 @@ func TestLetters_PickJumpsAndClosesGrid(t *testing.T) {
 // Группа в конце списка не может встать наверх (прокрутка упирается в конец):
 // список остаётся на пределе прокрутки.
 func TestLetters_JumpToLastGroupClampsScroll(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	openGridByClick(t, m, "A")
 	if !m.JumpToLetter("T") {
@@ -145,6 +150,7 @@ func TestLetters_JumpToLastGroupClampsScroll(t *testing.T) {
 }
 
 func TestLetters_EscClosesGridThenMenu(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	openGridByClick(t, m, "C")
 	pressKey(m, widget.KeyEscape)
@@ -169,6 +175,7 @@ func TestLetters_EscClosesGridThenMenu(t *testing.T) {
 // С клавиатуры: стрелки доходят до заголовка буквы, Enter открывает сетку,
 // стрелки ходят по её геометрии, Enter выбирает.
 func TestLetters_KeyboardOpensAndNavigatesGrid(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	pressKey(m, widget.KeyDown) // первое приложение
 	pressKey(m, widget.KeyUp)   // заголовок буквы над ним
@@ -226,6 +233,7 @@ func TestLetters_KeyboardOpensAndNavigatesGrid(t *testing.T) {
 
 // Home и End в списке по-прежнему встают на приложения, а не на заголовки букв.
 func TestLetters_HomeEndInListStayOnApps(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	pressKey(m, widget.KeyEnd)
 	if got := m.v.sel[areaList]; strings.HasPrefix(got, prefRow+"l:") {
@@ -240,6 +248,7 @@ func TestLetters_HomeEndInListStayOnApps(t *testing.T) {
 // Наведение на ячейку перерисовывает только её, а недоступная букву не
 // подсвечивает.
 func TestLetters_HoverInvalidatesOnlyItsCell(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	openGridByClick(t, m, "A")
 	var rects []image.Rectangle
@@ -275,6 +284,7 @@ func TestLetters_HoverInvalidatesOnlyItsCell(t *testing.T) {
 // Колесо над сеткой её не прокручивает и не сдвигает список под ней; нажатие на
 // плитку закрывает сетку.
 func TestLetters_WheelIgnoredAndPressElsewhereCloses(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	openGridByClick(t, m, "A")
 	pt := image.Pt(letterVP(m).Min.X+50, letterVP(m).Min.Y+100)
@@ -292,6 +302,7 @@ func TestLetters_WheelIgnoredAndPressElsewhereCloses(t *testing.T) {
 
 // Набор текста переводит в поиск: у результатов нет букв, сетка закрывается.
 func TestLetters_TypingClosesGrid(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	openGridByClick(t, m, "A")
 	m.OnKeyEvent(widget.KeyEvent{Code: widget.KeyUnknown, Rune: 'x', Pressed: true})
@@ -308,6 +319,7 @@ func TestLetters_TypingClosesGrid(t *testing.T) {
 
 // Закрытие и переоткрытие меню сбрасывает сетку.
 func TestLetters_ResetOnReopen(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	openGridByClick(t, m, "A")
 	a := m.Anchor
@@ -321,6 +333,7 @@ func TestLetters_ResetOnReopen(t *testing.T) {
 
 // Сетка появляется по анимации темы, а не рывком; по Tab из списка закрывается.
 func TestLetters_GridFadesIn(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	openGridByClick(t, m, "A")
 	if !m.v.gridFade.Animating() {
@@ -344,6 +357,7 @@ func TestLetters_GridFadesIn(t *testing.T) {
 
 // Кадр с сеткой: буквы нарисованы вместо списка (приложений в кадре нет).
 func TestLetters_GridDrawnInsteadOfList(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	ctx := &recCtx{}
 	m.drawContent(ctx, m.contentRect())
@@ -371,6 +385,7 @@ func TestLetters_GridDrawnInsteadOfList(t *testing.T) {
 // Другие темы не знают сетки: в плоском меню заголовков-букв нет вовсе, а
 // OpenLetterGrid ничего не делает.
 func TestLetters_NotInFlatMenu(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	m := NewStartMenu(managerFor(t, theme.ProfileWindows2000), NewStaticAppCatalog(tileApps()...))
 	m.Screen = tileScreen()

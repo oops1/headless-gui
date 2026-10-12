@@ -3,11 +3,14 @@ package desktop
 import (
 	"fmt"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // Модель меню «Пуск»: буквы, группировка, источник по умолчанию.
 
 func TestStartLetter(t *testing.T) {
+	testreset.Globals(t)
 	cases := map[string]string{
 		"7-Zip":         "#",
 		"  Cisco":       "C",
@@ -26,6 +29,7 @@ func TestStartLetter(t *testing.T) {
 }
 
 func TestGroupByLetter_OrderAndSorting(t *testing.T) {
+	testreset.Globals(t)
 	titles := []string{"Яндекс", "paint", "Блокнот", "7-Zip", "Calc", "calendar", "Alpha", "Zeta", "1C"}
 	var in []StartEntry
 	for i, tl := range titles {
@@ -68,6 +72,7 @@ func (c *recentCatalog) Subscribe(fn func()) func() {
 }
 
 func TestCatalogSource_GroupsAndRecent(t *testing.T) {
+	testreset.Globals(t)
 	cat := &recentCatalog{
 		StaticAppCatalog: NewStaticAppCatalog(
 			AppInfo{ID: "b", Title: "Beta"}, AppInfo{ID: "a", Title: "Alpha"}, AppInfo{ID: "c", Title: "Яблоко"},
@@ -100,6 +105,7 @@ func TestCatalogSource_GroupsAndRecent(t *testing.T) {
 }
 
 func TestFakeStartSource_NotifiesAndUnsubscribes(t *testing.T) {
+	testreset.Globals(t)
 	s := NewFakeStartSource(nil, nil)
 	n := 0
 	un := s.Subscribe(func() { n++ })
@@ -115,6 +121,7 @@ func TestFakeStartSource_NotifiesAndUnsubscribes(t *testing.T) {
 }
 
 func TestTileSizeUnits(t *testing.T) {
+	testreset.Globals(t)
 	cases := []struct {
 		s      TileSize
 		w, h   int
@@ -129,6 +136,7 @@ func TestTileSizeUnits(t *testing.T) {
 }
 
 func TestComputeTileLayout_GroupsStackWithGaps(t *testing.T) {
+	testreset.Globals(t)
 	groups := []TileGroup{
 		{Title: "A", Tiles: []Tile{{ID: "1", Size: TileMedium}, {ID: "2", Size: TileMedium}}},
 		{Title: "B", Tiles: []Tile{{ID: "3", Size: TileLarge}}},

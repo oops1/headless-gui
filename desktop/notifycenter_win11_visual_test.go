@@ -8,6 +8,8 @@ import (
 
 	"github.com/oops1/headless-gui/v3/desktop"
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -77,7 +79,7 @@ func newNC11Scene(t *testing.T, o nc11Opts) *nc11Scene {
 	if scale <= 0 {
 		scale = 1
 	}
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	registerFonts(t, eng)
 	eng.SetScale(scale)
 	if err := eng.SetBackground(matWallpaper(w, h)); err != nil {
@@ -172,6 +174,7 @@ func (s *nc11Scene) click(x, y int) {
 var _ = color.RGBA{}
 
 func TestVisual_NotificationCenterWin11(t *testing.T) {
+	testreset.Globals(t)
 	cases := []struct {
 		name string
 		o    nc11Opts
@@ -224,6 +227,10 @@ func TestVisual_NotificationCenterWin11(t *testing.T) {
 			widget.StepAnimations(finish)
 			widget.StepAnimations(finish.Add(time.Hour))
 		}}},
+		{"light_stack", nc11Opts{empty: true, extra: nc11StackNotes}},
+		{"dark_stack_open", nc11Opts{dark: true, empty: true, extra: nc11StackNotes, after: func(s *nc11Scene) {
+			s.click(1030, 245)
+		}}},
 		{"light_severity", nc11Opts{extra: func(ns *desktop.FakeNotifications) {
 			clock := nc11Time()
 			ns.Add(desktop.Notification{AppID: "sys", AppName: "Система", Icon: ncGlyph(48, color.RGBA{R: 90, G: 90, B: 90, A: 255}, 2),
@@ -252,6 +259,7 @@ func TestVisual_NotificationCenterWin11(t *testing.T) {
 
 // Тост Windows 11: карточка со строкой приложения в правом нижнем углу.
 func TestVisual_NotificationToastWin11(t *testing.T) {
+	testreset.Globals(t)
 	for _, dark := range []bool{false, true} {
 		m := theme.NewManager()
 		if err := theme.RegisterBuiltinProfiles(m); err != nil {
@@ -266,7 +274,7 @@ func TestVisual_NotificationToastWin11(t *testing.T) {
 		}
 		m.SetIconResolver(widget.BuiltinIcons())
 		const w, h = 1280, 800
-		eng := engine.New(w, h, 30)
+		eng := testengine.New(t, w, h, 30)
 		registerFonts(t, eng)
 		if err := eng.SetBackground(matWallpaper(w, h)); err != nil {
 			t.Fatal(err)
@@ -308,4 +316,18 @@ func TestVisual_NotificationToastWin11(t *testing.T) {
 		bar.Close()
 		widget.StopAllAnimations()
 	}
+}
+
+// nc11StackNotes — приложение с несколькими уведомлениями (свёрнутая стопка) и
+// одиночное с действием.
+func nc11StackNotes(ns *desktop.FakeNotifications) {
+	clock := nc11Time()
+	white := color.RGBA{R: 235, G: 240, B: 245, A: 255}
+	for i, title := range []string{"Анализ панели задач и меню", "Предыдущая задача", "Ещё одна"} {
+		ns.Add(desktop.Notification{AppID: "claude", AppName: "Claude", Icon: ncGlyph(48, white, 0),
+			Title: title, Body: "engine v3.32.0 upgrade complete; menus styled, taskbar updated",
+			Timestamp: clock.Add(-time.Duration(20+i*5) * time.Minute)})
+	}
+	ns.Add(desktop.Notification{AppID: "vpn", AppName: "Cisco Secure Client", Icon: ncGlyph(48, white, 0),
+		Title: "AnyConnect VPN", Body: "Подключено: gate.avanpost.ru", Timestamp: clock.Add(-30 * time.Hour)})
 }

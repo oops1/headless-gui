@@ -3,6 +3,8 @@ package engine
 import (
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // newShapingCanvas — движок с системными fallback-шрифтами (arial/DejaVu
@@ -18,6 +20,7 @@ func newShapingCanvas(t *testing.T, probe rune) *Canvas {
 }
 
 func TestNeedsShaping(t *testing.T) {
+	testreset.Globals(t)
 	for _, s := range []string{"Hello", "Привет 123", "Ünïcödé", "καλημέρα"} {
 		if needsShaping(s) {
 			t.Errorf("needsShaping(%q) = true, want false", s)
@@ -33,6 +36,7 @@ func TestNeedsShaping(t *testing.T) {
 // Лам-алеф «لا» обязан слиться в лигатуру: глифов меньше, чем рун,
 // и ширина меньше суммы ширин изолированных букв.
 func TestShaping_ArabicLigature(t *testing.T) {
+	testreset.Globals(t)
 	c := newShapingCanvas(t, 'ل')
 	l := c.shaper.layout(c.fontCache, c.fallbacks, "لا", 14)
 	if l == nil {
@@ -51,6 +55,7 @@ func TestShaping_ArabicLigature(t *testing.T) {
 
 // Иврит: первый ВИДИМЫЙ (левый) глиф — последняя логическая руна (RTL).
 func TestShaping_RTLVisualOrder(t *testing.T) {
+	testreset.Globals(t)
 	c := newShapingCanvas(t, 'א')
 	l := c.shaper.layout(c.fontCache, c.fallbacks, "אב", 14)
 	if l == nil {
@@ -67,6 +72,7 @@ func TestShaping_RTLVisualOrder(t *testing.T) {
 
 // Отрисовка арабского текста реально оставляет пиксели на холсте.
 func TestShaping_DrawArabicPixels(t *testing.T) {
+	testreset.Globals(t)
 	c := newShapingCanvas(t, 'م')
 	c.blitBackground()
 	c.DrawTextSize("مرحبا بالعالم", 10, 30, 16, color.RGBA{R: 255, G: 255, B: 255, A: 255})
@@ -84,6 +90,7 @@ func TestShaping_DrawArabicPixels(t *testing.T) {
 // Смешанный LTR+RTL: layout строится, ширина согласована с measure,
 // позиции рун монотонны в логическом порядке.
 func TestShaping_MixedBidi(t *testing.T) {
+	testreset.Globals(t)
 	c := newShapingCanvas(t, 'ש')
 	text := "id: שלום!"
 	w := c.measureWithFallback(c.fontCache, text, 14)
@@ -110,6 +117,7 @@ func TestShaping_MixedBidi(t *testing.T) {
 
 // Кириллица/латиница НЕ должны ходить через шейпер (гибридный контракт).
 func TestShaping_SimpleTextBypasses(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(200, 50, 20)
 	c := eng.canvas
 	c.DrawTextSize("Привет World", 5, 5, 12, color.RGBA{A: 255, R: 200, G: 200, B: 200})
@@ -123,6 +131,7 @@ func TestShaping_SimpleTextBypasses(t *testing.T) {
 
 // Повторная отрисовка берёт layout из кэша (не растёт).
 func TestShaping_LayoutCached(t *testing.T) {
+	testreset.Globals(t)
 	c := newShapingCanvas(t, 'م')
 	col := color.RGBA{A: 255, R: 255}
 	for i := 0; i < 5; i++ {

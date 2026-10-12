@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -46,6 +47,7 @@ func startMenuFixture(t *testing.T) (*StartMenu, *StaticAppCatalog) {
 }
 
 func TestStartMenu_ClickLaunchesAndCloses(t *testing.T) {
+	testreset.Globals(t)
 	m, cat := startMenuFixture(t)
 
 	rows := m.layoutRows()
@@ -73,6 +75,7 @@ func TestStartMenu_ClickLaunchesAndCloses(t *testing.T) {
 }
 
 func TestStartMenu_KeyboardSelectsAndLaunches(t *testing.T) {
+	testreset.Globals(t)
 	m, cat := startMenuFixture(t)
 
 	// Первое нажатие вниз уже что-то выделяет — без лишнего повтора.
@@ -89,6 +92,7 @@ func TestStartMenu_KeyboardSelectsAndLaunches(t *testing.T) {
 }
 
 func TestStartMenu_EscapeAndClickAwayClose(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := startMenuFixture(t)
 
 	m.OnKeyEvent(widget.KeyEvent{Code: widget.KeyEscape, Pressed: true})
@@ -117,6 +121,7 @@ func quickFixture(t *testing.T) (*QuickSettings, *FakeSystemStatus) {
 }
 
 func TestQuickSettings_TilesFireCallbacks(t *testing.T) {
+	testreset.Globals(t)
 	q, _ := quickFixture(t)
 	defer q.Close()
 
@@ -139,6 +144,7 @@ func TestQuickSettings_TilesFireCallbacks(t *testing.T) {
 }
 
 func TestQuickSettings_DragChangesVolume(t *testing.T) {
+	testreset.Globals(t)
 	q, _ := quickFixture(t)
 	defer q.Close()
 
@@ -161,6 +167,7 @@ func TestQuickSettings_DragChangesVolume(t *testing.T) {
 }
 
 func TestQuickSettings_CloseUnsubscribes(t *testing.T) {
+	testreset.Globals(t)
 	q, st := quickFixture(t)
 
 	q.Close()
@@ -191,6 +198,7 @@ func notifFixture(t *testing.T) (*NotificationCenter, *FakeNotifications) {
 }
 
 func TestNotificationCenter_CrossDismissesOnRelease(t *testing.T) {
+	testreset.Globals(t)
 	nc, ns := notifFixture(t)
 	defer nc.Close()
 
@@ -212,6 +220,7 @@ func TestNotificationCenter_CrossDismissesOnRelease(t *testing.T) {
 }
 
 func TestNotificationCenter_ClearAll(t *testing.T) {
+	testreset.Globals(t)
 	nc, ns := notifFixture(t)
 	defer nc.Close()
 
@@ -229,6 +238,7 @@ func TestNotificationCenter_ClearAll(t *testing.T) {
 }
 
 func TestNotificationCenter_EmptyStateAndClose(t *testing.T) {
+	testreset.Globals(t)
 	tm := flatNotifTheme(t)
 	ns := NewFakeNotifications()
 	nc := NewNotificationCenter(tm, ns)

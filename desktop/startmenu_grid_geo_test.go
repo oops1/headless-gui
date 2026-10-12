@@ -5,6 +5,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -44,6 +45,7 @@ func gridMenu(t *testing.T, profile string, w, h, pinned, rec int) (*StartMenu, 
 }
 
 func TestStartGrid_PresenterByTheme(t *testing.T) {
+	testreset.Globals(t)
 	for name, want := range map[string]startKind{
 		theme.ProfileWindows11: startKindGrid, theme.ProfileWindows11Dark: startKindGrid,
 		theme.ProfileWindows10: startKindTiles, theme.ProfileWindows10Dark: startKindTiles,
@@ -62,6 +64,7 @@ func TestStartGrid_PresenterByTheme(t *testing.T) {
 // Метрики задания: 642×726, скругление 8, поля 32, сетка 6 колонок, ячейка 96×84,
 // значок 32, нижняя полоса 64, поиск 32 высотой со скруглением 16.
 func TestStartGrid_Metrics100(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := gridMenu(t, theme.ProfileWindows11, 1920, 1080, 18, 6)
 	want := map[theme.Key]float64{
 		KeyStartW11Width: 642, KeyStartW11Height: 726, KeyStartW11Corner: 8, KeyStartW11Pad: 32,
@@ -159,6 +162,7 @@ func checkGridSane(t *testing.T, g gridGeo) {
 // Меню над кнопкой «Пуск»: при центрированной панели — по центру группы, при
 // левой — у левого края кнопки; зазор до кнопки из метрики.
 func TestStartGrid_PlacementCenteredAndLeft(t *testing.T) {
+	testreset.Globals(t)
 	m, anchor := gridMenu(t, theme.ProfileWindows11, 1920, 1080, 18, 6)
 	r := m.OverlayBounds()
 	if cx := (r.Min.X + r.Max.X) / 2; cx != 960 {
@@ -189,6 +193,7 @@ func TestStartGrid_PlacementCenteredAndLeft(t *testing.T) {
 // Меню не уезжает за край монитора: ни справа, ни слева, ни вверх; на низкой
 // рабочей области высота ужимается.
 func TestStartGrid_StaysInsideMonitor(t *testing.T) {
+	testreset.Globals(t)
 	// Кнопка у правого края при левой панели.
 	tm := managerFor(t, theme.ProfileWindows11)
 	tm.SetFlag(KeyTaskbarCentered, false)
@@ -221,6 +226,7 @@ func TestStartGrid_StaysInsideMonitor(t *testing.T) {
 // Масштабы 100–200 %: логический экран меньше физического, раскладка не
 // обрезается и не выходит за панель.
 func TestStartGrid_ScalesWithoutClipping(t *testing.T) {
+	testreset.Globals(t)
 	for _, phys := range []image.Point{{1920, 1080}, {1366, 768}, {1280, 720}} {
 		for _, scale := range []float64{1, 1.25, 1.5, 1.75, 2} {
 			w, h := int(float64(phys.X)/scale), int(float64(phys.Y)/scale)
@@ -249,6 +255,7 @@ func TestStartGrid_ScalesWithoutClipping(t *testing.T) {
 // Выключенный источник: раздел «Рекомендуем» исчезает, закреплённые занимают
 // его место.
 func TestStartGrid_RecommendedOffGivesRoomToPinned(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := gridMenu(t, theme.ProfileWindows11, 1920, 1080, 40, 6)
 	with := m.gridGeometry(m.OverlayBounds())
 	if with.recRows == 0 {
@@ -272,6 +279,7 @@ func TestStartGrid_RecommendedOffGivesRoomToPinned(t *testing.T) {
 
 // Закреплённых больше страницы: появляются точки страниц справа.
 func TestStartGrid_PagesAndDots(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := gridMenu(t, theme.ProfileWindows11, 1920, 1080, 40, 6)
 	g := m.gridGeometry(m.OverlayBounds())
 	if g.perPage != g.cols*g.rows {
@@ -291,6 +299,7 @@ func TestStartGrid_PagesAndDots(t *testing.T) {
 
 // Тёмный Windows 11 даёт ту же раскладку: меняются только токены.
 func TestStartGrid_DarkSameGeometry(t *testing.T) {
+	testreset.Globals(t)
 	l, _ := gridMenu(t, theme.ProfileWindows11, 1920, 1080, 18, 6)
 	d, _ := gridMenu(t, theme.ProfileWindows11Dark, 1920, 1080, 18, 6)
 	if l.OverlayBounds() != d.OverlayBounds() {

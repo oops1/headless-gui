@@ -333,6 +333,10 @@ type Win32Window struct {
 
 	maximized bool
 
+	// fs — полный экран (fullscreen_windows.go). Пока он включён, maximized
+	// хранит «было ли окно развёрнуто до него» — IsMaximized возвращает это же.
+	fs fullscreenWin32
+
 	// resizable — разрешён ли пользовательский resize за края окна
 	// (см. WM_NCHITTEST: у borderless-окна зоны рамки отдаём вручную).
 	resizable atomic.Bool
@@ -372,6 +376,14 @@ type Win32Window struct {
 
 	cursorHandle uintptr         // текущий желаемый курсор (HCURSOR)
 	cursorCache  map[int]uintptr // кэш загруженных IDC-курсоров
+	cursorHidden bool            // курсор спрятан (CursorNone): WM_SETCURSOR ставит SetCursor(NULL)
+
+	// Уход указателя: запросы TrackMouseEvent на клиентскую и нерабочую
+	// область (pointerleave.go, mouse_windows.go). trackMouse — подмена
+	// системного вызова в тестах.
+	leave      leaveTracker
+	ncLeave    leaveTracker
+	trackMouse func(hwnd uintptr, flags uint32) bool
 
 	// Трей/уведомления (Shell_NotifyIcon) — см. tray_windows.go.
 	trayAdded      bool           // иконка добавлена (NIM_ADD выполнен)
@@ -413,8 +425,19 @@ type Win32Window struct {
 	imeCaret         func() (image.Rectangle, bool)
 	onFilesDropped   func(paths []string, x, y int)
 
-	// fileDropEnabled — DragAcceptFiles(TRUE) уже вызван для этого окна.
+	// fileDropEnabled — приём файлов для этого окна уже включён (IDropTarget
+	// или, запасным путём, DragAcceptFiles).
 	fileDropEnabled bool
+
+	// События приёмника перетаскивания и OLE-регистрация (dnd_windows.go).
+	onDragEnter func(x, y int)
+	onDragOver  func(x, y int) bool
+	onDragLeave func()
+	dropTarget  *dropTargetState // нет — окно принимает файлы через WM_DROPFILES
+	oleReady    bool             // OLE поднят на потоке окна: годится для DoDragDrop
+
+	// touch — касания (WM_POINTER*, touch_windows.go).
+	touch win32TouchState
 }
 
 // Реестр окон для WndProc (Win32 callback не может быть методом): маршрутизация
@@ -548,14 +571,23 @@ func (w *Win32Window) Create(title string, width, height int) error {
 	return nil
 }
 
-// enableFileDrop включает приём Drag&Drop файлов из ОС (DragAcceptFiles).
-// Идемпотентно; no-op до создания окна.
+// enableFileDrop включает приём Drag&Drop файлов из ОС: окно регистрируется
+// приёмником OLE (IDropTarget — события входа/движения/выхода и сброс), а если
+// OLE не поднялся или регистрация отказала — запасным путём DragAcceptFiles
+// (WM_DROPFILES, только сброс). Идемпотентно; no-op до создания окна.
+//
+// Регистрация OLE привязана к потоку, на котором создано окно, поэтому
+// реально работает только вызов из Create; поздний вызов из
+// SetOnFilesDropped видит уже включённый приём и ничего не делает.
 func (w *Win32Window) enableFileDrop() {
 	if w.hwnd == 0 || w.fileDropEnabled {
 		return
 	}
-	procDragAcceptFiles.Call(uintptr(w.hwnd), 1)
 	w.fileDropEnabled = true
+	if w.registerDropTarget() {
+		return
+	}
+	procDragAcceptFiles.Call(uintptr(w.hwnd), 1)
 }
 
 // CreatePopup создаёт окно-вьюпорт оверлея (dropdown/меню): WS_POPUP без рамки,
@@ -695,6 +727,14 @@ func (w *Win32Window) SetTitle(title string) {
 }
 
 func (w *Win32Window) SetSize(width, height int) {
+	if w.fs.on.Load() {
+		// Полноэкранное окно держит размер монитора. Заказанный размер
+		// достанется окну при выходе: в снимок его положения.
+		w.fs.mu.Lock()
+		w.fs.snap.Rect.Max = w.fs.snap.Rect.Min.Add(image.Pt(width, height))
+		w.fs.mu.Unlock()
+		return
+	}
 	w.width = width
 	w.height = height
 	if w.hwnd != 0 {
@@ -719,6 +759,13 @@ func (w *Win32Window) GetSize() (int, int) {
 }
 
 func (w *Win32Window) SetPosition(x, y int) {
+	if w.fs.on.Load() {
+		// То же, что в SetSize: позиция применится при выходе.
+		w.fs.mu.Lock()
+		w.fs.snap.Rect = image.Rectangle{Min: image.Pt(x, y), Max: image.Pt(x, y).Add(w.fs.snap.Rect.Size())}
+		w.fs.mu.Unlock()
+		return
+	}
 	if w.hwnd != 0 {
 		// SWP_NOACTIVATE обязателен: перемещение не должно активировать окно.
 		// Без него позиционирование окна-попапа (WS_EX_NOACTIVATE защищает
@@ -775,6 +822,14 @@ func (w *Win32Window) Minimize() {
 }
 
 func (w *Win32Window) Maximize() {
+	if w.fs.on.Load() {
+		// Развернуть полноэкранное окно значило бы вернуть таскбар. Просьба
+		// запоминается: после выхода окно будет развёрнуто.
+		w.fs.mu.Lock()
+		w.fs.snap.Maximized, w.maximized = true, true
+		w.fs.mu.Unlock()
+		return
+	}
 	if w.hwnd != 0 {
 		procShowWindow.Call(uintptr(w.hwnd), uintptr(swMaximize))
 		w.maximized = true
@@ -782,6 +837,12 @@ func (w *Win32Window) Maximize() {
 }
 
 func (w *Win32Window) Restore() {
+	if w.fs.on.Load() {
+		w.fs.mu.Lock()
+		w.fs.snap.Maximized, w.maximized = false, false
+		w.fs.mu.Unlock()
+		return
+	}
 	if w.hwnd != 0 {
 		procShowWindow.Call(uintptr(w.hwnd), uintptr(swRestore))
 		w.maximized = false
@@ -789,6 +850,13 @@ func (w *Win32Window) Restore() {
 }
 
 func (w *Win32Window) IsMaximized() bool {
+	if w.fs.on.Load() {
+		// Полноэкранное окно системе не «развёрнуто» (IsZoomed ложно), а
+		// приложение спрашивает про прежнее значение.
+		w.fs.mu.Lock()
+		defer w.fs.mu.Unlock()
+		return w.fs.snap.Maximized
+	}
 	if w.hwnd != 0 {
 		ret, _, _ := procIsZoomed.Call(uintptr(w.hwnd))
 		w.maximized = ret != 0
@@ -1031,7 +1099,7 @@ func (w *Win32Window) applyCorners() {
 	if w.hwnd == 0 {
 		return
 	}
-	if w.cornerRadius <= 0 || w.maximized {
+	if w.cornerRadius <= 0 || w.maximized || w.fs.on.Load() {
 		// Прямые углы (или развёрнутое окно): DWM → не скруглять, регион снять.
 		w.setDwmCorner(false)
 		procSetWindowRgn.Call(uintptr(w.hwnd), 0, 1)
@@ -1178,10 +1246,12 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmDestroy:
+		w.revokeDropTarget() // IDropTarget окна (dnd_windows.go)
 		win32Mu.Lock()
 		delete(win32Windows, hwnd)
 		win32Mu.Unlock()
 		dropUICalls(hwnd) // WM_APP этому окну уже не придёт
+		w.destroyArtCursors()
 		// Вторичные окна модалок (noQuit) не завершают цикл сообщений — иначе
 		// закрытие диалога уронило бы всё приложение. Главное окно — завершает.
 		if !w.noQuit {
@@ -1212,8 +1282,11 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		if newW > 0 && newH > 0 {
 			w.width = newW
 			w.height = newH
-			// wparam: 2 = SIZE_MAXIMIZED, 0 = SIZE_RESTORED.
-			w.maximized = wparam == 2
+			// wparam: 2 = SIZE_MAXIMIZED, 0 = SIZE_RESTORED. Полноэкранное
+			// окно не меняет запомненное «было развёрнуто» (fullscreen_windows.go).
+			if !w.fs.on.Load() {
+				w.maximized = wparam == 2
+			}
 			w.applyCorners() // регион в координатах окна — пересоздаём под новый размер
 			if w.resizing.Load() {
 				// Интерактивный ресайз: немедленно закрашиваем НОВЫЙ размер
@@ -1278,7 +1351,11 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		// Окно перенесли на монитор с другим DPI. wparam: LOWORD = новый DPI;
 		// lparam → RECT с рекомендованным размером/позицией окна.
 		newDpi := wparam & 0xFFFF
-		if r := (*rect)(unsafe.Pointer(lparam)); r != nil {
+		if w.fs.on.Load() {
+			// Рекомендованный прямоугольник — для обычного окна; полноэкранное
+			// встаёт на монитор, на который переехало.
+			w.refitFullscreen()
+		} else if r := (*rect)(unsafe.Pointer(lparam)); r != nil {
 			procSetWindowPos.Call(hwnd, 0,
 				uintptr(r.Left), uintptr(r.Top),
 				uintptr(r.Right-r.Left), uintptr(r.Bottom-r.Top),
@@ -1290,6 +1367,11 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmNchittest:
+		if w.fs.on.Load() {
+			// Полный экран: ни краёв ресайза, ни заголовка, за который можно
+			// тащить окно (и привязывать его к краям экрана).
+			return htClient
+		}
 		// Borderless-окно: рамки ОС нет, зоны resize отдаём вручную.
 		// lParam — ЭКРАННЫЕ координаты курсора (signed 16-bit слова).
 		sx := int(int16(lparam & 0xFFFF))
@@ -1350,9 +1432,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
 		switch umsg {
 		case wmNcmousemove:
-			if w.onMouseMove != nil {
-				w.onMouseMove(int(pt.X), int(pt.Y))
-			}
+			w.ncButtonMouseMove(hwnd, int(pt.X), int(pt.Y))
 		case wmNclbuttondown:
 			if w.onMouseButton != nil {
 				w.onMouseButton(int(pt.X), int(pt.Y), 0, true)
@@ -1367,10 +1447,27 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	case wmNcmouseleave:
 		// Курсор ушёл с кнопки заголовка — снимаем подсветку, уведя мышь
 		// за пределы окна.
-		if w.onMouseMove != nil {
-			w.onMouseMove(pointerOutside, pointerOutside)
-		}
+		w.ncMouseLeft()
 		return 0
+
+	case wmMouseleave:
+		// Указатель покинул клиентскую область (TrackMouseEvent, см.
+		// clientMouseMove): тот же путь, что LeaveNotify на X11. Переход на
+		// кнопку заголовка уходом не считается — mouseLeaveReal.
+		w.handleMouseLeave(hwnd)
+		return 0
+
+	case wmDisplaychange:
+		// Сменилось разрешение или состав мониторов: полноэкранное окно
+		// пересчитывает прямоугольник (иначе остаётся с прежним размером).
+		w.refitFullscreen()
+
+	case wmWindowposchanged:
+		// Окно перенесли (Win+Shift+стрелка) — на другом мониторе тот же
+		// прямоугольник ему не годится.
+		if w.fs.on.Load() && !w.fs.refitting {
+			w.refitFullscreen()
+		}
 
 	case wmGetminmaxinfo:
 		// Значения минимума согласованы с fitMinTrack (см. createInternal).
@@ -1388,14 +1485,23 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			mm := (*[10]int32)(unsafe.Pointer(lparam))
 			mm[6] = minW // ptMinTrackSize.x
 			mm[7] = minH // ptMinTrackSize.y
+			if w.fs.on.Load() {
+				// Полный экран: потолок размера — сам монитор, даже если он
+				// больше основного (по умолчанию потолок — основной экран).
+				if mon := w.monitorRectOfWindow(); !mon.Empty() {
+					mm[2], mm[3] = int32(mon.Min.X), int32(mon.Min.Y) // ptMaxPosition
+					mm[4], mm[5] = int32(mon.Dx()), int32(mon.Dy())   // ptMaxSize
+					mm[8], mm[9] = int32(mon.Dx()), int32(mon.Dy())   // ptMaxTrackSize
+				}
+			}
 			return 0
 		}
 
 	case wmSetcursor:
 		// Удерживаем выбранную форму курсора в клиентской области.
 		// Младшее слово lParam = hit-test; HTCLIENT=1.
-		if (lparam&0xFFFF) == 1 && w.cursorHandle != 0 {
-			procSetCursor.Call(w.cursorHandle)
+		if h, ok := w.setCursorMessage(lparam & 0xFFFF); ok {
+			procSetCursor.Call(h) // h == 0 прячет курсор (CursorNone)
 			return 1
 		}
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
@@ -1407,10 +1513,17 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	case wmMousemove:
 		x := int(int16(lparam & 0xFFFF))
 		y := int(int16((lparam >> 16) & 0xFFFF))
-		if w.onMouseMove != nil {
-			w.onMouseMove(x, y)
-		}
+		w.clientMouseMove(hwnd, x, y)
 		return 0
+
+	case wmXbuttondown, wmXbuttonup, wmXbuttondblclk:
+		// Боковые кнопки «назад/вперёд» (XBUTTON1/2). Обработчик обязан
+		// вернуть TRUE, иначе DefWindowProc отправит окну WM_APPCOMMAND.
+		if w.handleXButton(umsg, wparam, lparam) {
+			return 1
+		}
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+		return ret
 
 	case wmLbuttondown, wmLbuttondblclk:
 		// Захватываем мышь — гарантируем, что WM_LBUTTONUP придёт к нам,
@@ -1513,6 +1626,14 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			}
 		}
 		return 0
+
+	case wmPointerDown, wmPointerUpdate, wmPointerUp, wmPointerCaptureChanged:
+		// Касание, взятое окном, в DefWindowProc не отдаём: иначе система
+		// породит ещё и мышь (touch_windows.go). Перо и окно без касаний —
+		// как раньше, через DefWindowProc ниже.
+		if w.handlePointerMsg(hwnd, umsg, wparam) {
+			return 0
+		}
 
 	case wmImeSetContext, wmImeStartComposition, wmImeComposition, wmImeEndComposition:
 		if ret, done := w.handleIMEMessage(hwnd, umsg, wparam, lparam); done {
@@ -1663,35 +1784,20 @@ func (w *Win32Window) keyboardLayoutList() []uintptr {
 }
 
 // SetCursor задаёт форму курсора по коду widget.Cursor (0=Arrow,1=IBeam,
-// 2=Hand,3=SizeWE,4=SizeNS,5=SizeNWSE,6=SizeNESW). Реальное применение —
-// в WndProc (WM_SETCURSOR).
+// 2=Hand,3=SizeWE,4=SizeNS,5=SizeNWSE,6=SizeNESW,7=None,8=Grab,9=Grabbing,
+// 10=SizeAll,11=Crosshair,12=Wait; см. win32CursorSpecFor). Реальное
+// применение — в WndProc (WM_SETCURSOR).
 func (w *Win32Window) SetCursor(c int) {
-	idc := idcArrow
-	switch c {
-	case 1:
-		idc = idcIBeam
-	case 2:
-		idc = idcHand
-	case 3:
-		idc = idcSizeWE
-	case 4:
-		idc = idcSizeNS
-	case 5:
-		idc = idcSizeNWSE
-	case 6:
-		idc = idcSizeNESW
+	h, hidden := w.cursorFor(c)
+	if w.cursorHandle == h && w.cursorHidden == hidden {
+		return
 	}
-	if w.cursorCache == nil {
-		w.cursorCache = map[int]uintptr{}
-	}
-	h, ok := w.cursorCache[idc]
-	if !ok {
-		h, _, _ = procLoadCursorW.Call(0, uintptr(idc))
-		w.cursorCache[idc] = h
-	}
-	if w.cursorHandle != h {
-		w.cursorHandle = h
-		procSetCursor.Call(h) // применяем сразу (и далее держим через WM_SETCURSOR)
+	w.cursorHandle, w.cursorHidden = h, hidden
+	// Применяем сразу, не дожидаясь движения мыши (и далее держим через
+	// WM_SETCURSOR) — но только если под указателем наше окно: курсор
+	// ставится глобально.
+	if w.pointerOverWindow() {
+		procSetCursor.Call(h) // h == 0 прячет курсор (CursorNone)
 	}
 }
 

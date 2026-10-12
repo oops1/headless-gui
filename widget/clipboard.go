@@ -1,6 +1,9 @@
 package widget
 
-import "sync"
+import (
+	"image"
+	"sync"
+)
 
 // clipboard.go — кросс-платформенный буфер обмена.
 //
@@ -100,6 +103,8 @@ type memoryClipboard struct {
 	// files — список файлов (ClipboardSetFiles); nil — в буфере не файлы.
 	files []string
 	cut   bool
+	// img — изображение (ClipboardSetImage); nil — в буфере не картинка.
+	img *image.NRGBA
 }
 
 func (c *memoryClipboard) GetText() string {
@@ -113,14 +118,14 @@ func (c *memoryClipboard) SetText(s string) {
 	c.text = s
 	// Новый простой текст вытесняет прежнее оформление и файлы: иначе GetHTML
 	// или GetFiles отдали бы содержимое предыдущего копирования.
-	c.html, c.files, c.cut = "", nil, false
+	c.html, c.files, c.cut, c.img = "", nil, false, nil
 	c.mu.Unlock()
 }
 
 // SetHTML — реализация ClipboardHTMLProvider в памяти.
 func (c *memoryClipboard) SetHTML(html, plain string) {
 	c.mu.Lock()
-	c.text, c.html, c.files, c.cut = plain, html, nil, false
+	c.text, c.html, c.files, c.cut, c.img = plain, html, nil, false, nil
 	c.mu.Unlock()
 }
 

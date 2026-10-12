@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -27,6 +28,7 @@ func accessFindByName(n *widget.AccessNode, name string) *widget.AccessNode {
 // TestAccessNode_WidgetRef — узлы дерева ссылаются на свои виджеты: без этого
 // мост доступности не сможет ничего сделать с найденным элементом.
 func TestAccessNode_WidgetRef(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(400, 300, 20)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 400, 300))
@@ -51,6 +53,7 @@ func TestAccessNode_WidgetRef(t *testing.T) {
 // TestActivateAccessible_ClicksButton — синтетический клик доходит до OnClick
 // и попутно проходит штатный путь ввода (кнопка получает фокус, как от мыши).
 func TestActivateAccessible_ClicksButton(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(400, 300, 20)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 400, 300))
@@ -85,6 +88,7 @@ func TestActivateAccessible_ClicksButton(t *testing.T) {
 // TestActivateAccessible_HiDPI — центр виджета переводится в ФИЗИЧЕСКИЕ
 // координаты: при Scale != 1 клик иначе улетел бы мимо.
 func TestActivateAccessible_HiDPI(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(400, 300, 20)
 	eng.SetScale(2)
 
@@ -109,6 +113,7 @@ func TestActivateAccessible_HiDPI(t *testing.T) {
 // TestActivateAccessible_Rejects — скрытый, выключенный, пустой и nil-виджет
 // не активируются: скринридер не должен уметь того, чего не может мышь.
 func TestActivateAccessible_Rejects(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(400, 300, 20)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 400, 300))
@@ -159,6 +164,7 @@ func TestActivateAccessible_Rejects(t *testing.T) {
 // TestFocusAccessible — фокус переходит на виджет, и это видно в снапшоте
 // семантики (состояние focused) — ровно то, что читает скринридер.
 func TestFocusAccessible(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(400, 300, 20)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 400, 300))
@@ -200,6 +206,7 @@ func TestFocusAccessible(t *testing.T) {
 // TestFocusAccessible_Rejects — скрытый/выключенный/нефокусируемый виджет
 // фокус не забирает.
 func TestFocusAccessible_Rejects(t *testing.T) {
+	testreset.Globals(t)
 	eng := New(400, 300, 20)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 400, 300))

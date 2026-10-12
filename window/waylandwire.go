@@ -18,15 +18,17 @@ import (
 const (
 	// xdg_toplevel — запросы. Все они есть в версии 1 xdg-shell: версию
 	// привязки поднимать не нужно (новая обязывает принимать новые события).
-	xdgToplevelSetTitle       = 2
-	xdgToplevelSetAppID       = 3
-	xdgToplevelMove           = 5
-	xdgToplevelResize         = 6
-	xdgToplevelSetMaxSize     = 7
-	xdgToplevelSetMinSize     = 8
-	xdgToplevelSetMaximized   = 9
-	xdgToplevelUnsetMaximized = 10
-	xdgToplevelSetMinimized   = 13
+	xdgToplevelSetTitle        = 2
+	xdgToplevelSetAppID        = 3
+	xdgToplevelMove            = 5
+	xdgToplevelResize          = 6
+	xdgToplevelSetMaxSize      = 7
+	xdgToplevelSetMinSize      = 8
+	xdgToplevelSetMaximized    = 9
+	xdgToplevelUnsetMaximized  = 10
+	xdgToplevelSetFullscreen   = 11 // set_fullscreen(output): output = 0 — на усмотрение компоновщика
+	xdgToplevelUnsetFullscreen = 12
+	xdgToplevelSetMinimized    = 13
 
 	// xdg_toplevel.state — всё, что нужно, есть в версии 1 протокола.
 	// Неизвестные значения пропускаем: компоновщик вправе прислать состояния

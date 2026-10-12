@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -11,6 +12,7 @@ import (
 // общую подсказку виджета (GetToolTip) и различать части не умел; виджет с
 // разными подсказками по частям отвечает через ToolTipAt(x, y).
 func TestTooltipAt_PerPartTooltip(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewDockPane("branches", "Ветки", nil)
 	p.ToolTip = "Панель веток"
 	p.SetBounds(image.Rect(0, 0, 300, 200))

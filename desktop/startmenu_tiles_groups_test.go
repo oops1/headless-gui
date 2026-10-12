@@ -5,6 +5,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -62,6 +63,7 @@ func tilesPt(m *StartMenu, x, y int) image.Point {
 
 // Под последней группой плитка создаёт новую группу.
 func TestGroups_DropBelowLastCreatesGroup(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	got := dragTile(t, m, "t0", tilesPt(m, 100, 560), true)
 	if got == nil {
@@ -99,6 +101,7 @@ func TestGroups_DropBelowLastCreatesGroup(t *testing.T) {
 
 // Между двумя группами новая группа встаёт между ними.
 func TestGroups_DropBetweenGroupsCreatesGroup(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	g := m.startGeometry(m.contentRect())
 	// Раскладка без переносимой s1: первая группа та же, граница под ней.
@@ -114,6 +117,7 @@ func TestGroups_DropBetweenGroupsCreatesGroup(t *testing.T) {
 
 // Над первой группой — новая первая.
 func TestGroups_DropAboveFirstCreatesFirstGroup(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	got := dragTile(t, m, "w0", tilesPt(m, 100, 3), true)
 	if groupsOrder(got) != "group-3:w0|g1:t0 t1 t2 t3 t4 t5|g2:s0 s1" {
@@ -123,6 +127,7 @@ func TestGroups_DropAboveFirstCreatesFirstGroup(t *testing.T) {
 
 // Нижняя половина заголовка и ряд плиток по-прежнему «в эту группу».
 func TestGroups_DropOnHeaderLowerHalfOrTilesStaysInGroup(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	g := m.startGeometry(m.contentRect())
 	rest, _, _ := withoutTile(m.TileGroups(), "s1")
@@ -137,6 +142,7 @@ func TestGroups_DropOnHeaderLowerHalfOrTilesStaysInGroup(t *testing.T) {
 
 // Группа, опустевшая после переноса, удаляется.
 func TestGroups_EmptiedSourceGroupIsRemoved(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	one := func(id string) Tile { return Tile{ID: TileID(id), App: AppID(id), Size: TileMedium} }
 	m.SetTileGroups([]TileGroup{
@@ -155,6 +161,7 @@ func TestGroups_EmptiedSourceGroupIsRemoved(t *testing.T) {
 // Единственную плитку группы в «новую группу» рядом с её же пустой группой не
 // переносят: ничего не меняется и потребителя не беспокоят.
 func TestGroups_LoneTileDroppedBesideItsGroupChangesNothing(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	one := func(id string) Tile { return Tile{ID: TileID(id), App: AppID(id), Size: TileMedium} }
 	m.SetTileGroups([]TileGroup{
@@ -179,6 +186,7 @@ func TestGroups_LoneTileDroppedBesideItsGroupChangesNothing(t *testing.T) {
 // Предпросмотр показывает будущую группу: подсказка вместо названия и плитка
 // в ней; вне пустого места подсказки нет.
 func TestGroups_PreviewShowsFutureGroup(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	hint := tr(StrStartNewGroup)
 
@@ -218,6 +226,7 @@ func TestGroups_PreviewShowsFutureGroup(t *testing.T) {
 // Запас снизу: при заполненной области плитку тоже можно отпустить под
 // последней группой — пока несут, прокрутка уходит дальше конца содержимого.
 func TestGroups_DropBelowLastWhenContentFillsArea(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := scrollMenu(t)
 	g := m.startGeometry(m.contentRect())
 	var got []TileGroup
@@ -259,6 +268,7 @@ func TestGroups_DropBelowLastWhenContentFillsArea(t *testing.T) {
 // Отпускание за пределами меню завершает перенос, а не оставляет плитку
 // «зажатой».
 func TestGroups_ReleaseOutsideMenuCompletesDrop(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	var got []TileGroup
 	m.OnTilesChanged = func(gs []TileGroup) { got = gs }
@@ -282,6 +292,7 @@ func TestGroups_ReleaseOutsideMenuCompletesDrop(t *testing.T) {
 
 // Закрытие меню во время переноса не оставляет его активным.
 func TestGroups_CloseDuringDragCancels(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	dragTile(t, m, "t0", tilesPt(m, 100, 560), false)
 	m.Close()
@@ -295,6 +306,7 @@ func TestGroups_CloseDuringDragCancels(t *testing.T) {
 
 // Идентификатор новой группы не совпадает с занятыми.
 func TestGroups_NewGroupIDIsUnique(t *testing.T) {
+	testreset.Globals(t)
 	gs := []TileGroup{{ID: "group-2"}, {ID: "group-3"}}
 	if id := newGroupID(gs); id == "group-2" || id == "group-3" {
 		t.Errorf("идентификатор %q уже занят", id)
@@ -304,6 +316,7 @@ func TestGroups_NewGroupIDIsUnique(t *testing.T) {
 // Перетаскивание плитки в существующую группу работает как прежде: порядок
 // плиток внутри группы и между группами, без лишних групп.
 func TestGroups_ExistingDropTargetsUnchanged(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	to := m.tileRectAbs("t1")
 	got := dragTile(t, m, "t0", image.Pt(to.Max.X-10, to.Min.Y+50), true)
@@ -316,6 +329,7 @@ func TestGroups_ExistingDropTargetsUnchanged(t *testing.T) {
 // Раскладка плиток следует за моделью: после SetTileGroups кэш не отдаёт
 // прежнюю раскладку (раньше он сбрасывался только сменой метрик).
 func TestGroups_LayoutFollowsModelChange(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := tiledMenu(t)
 	g := m.startGeometry(m.contentRect())
 	if n := len(m.layoutTiles(g).groups); n != 2 {
