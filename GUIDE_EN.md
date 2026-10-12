@@ -1607,15 +1607,22 @@ the dialogs and the application alike: one language for the whole window.
 
 ### Touch and gestures (v3.34)
 
-Touch is opt-in per window: `win.SetTouchEnabled(true)` before `Run` (or make the
-root widget implement `widget.TouchHandler`). Without it the OS keeps turning touches
+Touch is opt-in per window: `win.SetTouchEnabled(true)` before `Run` (or later — on X11
+it is applied from the event loop; or make the root widget implement
+`widget.TouchHandler`). Without it the OS keeps turning touches
 into mouse events, so apps that don't care are unchanged. Works on Win32
 (`WM_POINTER`), Wayland (`wl_touch`) and X11 (XInput 2.2).
 
 A widget takes touches by implementing `OnTouch(widget.TouchEvent) bool`; returning
 `true` on `TouchBegan` makes it the owner of that finger until `Ended`/`Cancelled`
 (coordinates are logical, in the widget's own frame). A touch nobody takes becomes a
-left mouse button in the window, so ordinary buttons and menus keep working.
+left mouse button in the window, so ordinary buttons and menus keep working; a finger
+that lay still for `win.SetTouchLongPress` (500 ms by default) becomes a right click on
+lift — a context menu, like Windows does.
+
+The event carries `Pressure` (0..1) and `Major`/`Minor`/`Orientation` (contact ellipse
+in pixels): zero means "unknown" — not every device and backend can report them
+(Wayland has no pressure at all).
 
 For gestures embed `widget.TouchGestures` (or call `GestureRecognizer.Feed`):
 
@@ -1631,6 +1638,7 @@ v.OnGesture = func(g widget.Gesture) {
     case widget.Swipe: // g.Dir (SwipeLeft/Right/Up/Down), g.Velocity px/s
     case widget.Pan:   // g.Delta since previous, g.Phase
     case widget.Tap:   // g.Count == 2 for a double tap
+    case widget.LongPress: // finger lay still for 500 ms (no Tap or Pan follows)
     }
 }
 ```

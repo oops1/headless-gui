@@ -7793,7 +7793,12 @@ type TouchEvent struct {
     X, Y int           // widget gets LOGICAL px in ITS OWN frame (inside a ScrollView: content coords)
     Phase TouchPhase
     Time  time.Duration // monotonic, from the OS timestamp; 0 = unset (the engine stamps it)
+
+    Pressure     float64 // 0..1; 0 = UNKNOWN (no force sensor / backend cannot read it), not "light touch"
+    Major, Minor float64 // contact ellipse axes (diameters) in px, same units as X, Y; 0 = unknown
+    Orientation  float64 // major-axis angle from vertical, clockwise, degrees; meaningful only if Major > 0
 }
+// ev.HasPressure(), ev.HasContact() — "is it known"
 type TouchHandler interface{ OnTouch(ev TouchEvent) bool }
 ```
 
@@ -7817,23 +7822,30 @@ Delivery (`Engine.SendTouch(ev) bool`; input is PHYSICAL px like `SendMouseMove`
 Not asked ⇒ no backend catches touches and the OS keeps producing mouse as always
 (Explorer, Calculator, Notepad, the shell are unchanged). Auto-on when the root widget
 itself implements `TouchHandler`; an explicit call always wins. Call before `Run`
-(Win32 and Wayland also accept it later; on X11 only turning off works later).
+(Win32 and Wayland also accept it later; X11 turns it on later from the event loop,
+so touch starts a moment after the call — see the table).
 
 **No duplicate mouse.** A window that took touch takes it entirely:
 
 | Backend | How the OS mouse-from-touch is kept out |
 |---|---|
-| Win32 | `WM_POINTERDOWN/UPDATE/UP/CAPTURECHANGED` for `PT_TOUCH` only (`GetPointerType`, `GetPointerTouchInfo`, syscall, no CGO). The message is handled and NOT passed to `DefWindowProc` ⇒ the system generates neither mouse nor `WM_GESTURE`. Pen and everything else go to `DefWindowProc` as before. `EnableMouseInPointer` is NOT enabled, so a real mouse is unchanged. The `0xFF515700` mouse signature is deliberately not filtered: it marks the pen too. Not asked ⇒ every `WM_POINTER*` goes to `DefWindowProc` (verified live: 4 touch events and 0 mouse when enabled; mouse events and 0 touch when disabled). Cancel: `POINTERUP` with `CANCELED` and `CAPTURECHANGED` of a still-tracked touch. |
-| Wayland | `wl_seat.get_touch` only when asked AND the seat advertises `touch`; `down/up/motion/frame/cancel`; surface units × surface scale = buffer px (like window sizes); `up` has no coordinates — the last point is reused; `cancel` / losing the capability ⇒ `Cancelled`. |
-| X11 | XInput 2.2: `QueryExtension("XInputExtension")`, `XIQueryVersion(2,2)`, `XISelectEvents(XIAllMasterDevices, TouchBegin|Update|End)` at window creation; `GenericEvent` (type 35) tails are now read in full in every event loop. The server does not emulate a pointer for a client that selected touch; if one does anyway, core Button/Motion events of an emulating touch (`XITouchEmulatingPointer`, same timestamp as its end) are dropped (`x11TouchGuard`). |
+| Win32 | `WM_POINTERDOWN/UPDATE/UP/CAPTURECHANGED` for `PT_TOUCH` only (`GetPointerType`, `GetPointerTouchInfo`, syscall, no CGO). The message is handled and NOT passed to `DefWindowProc` ⇒ the system generates neither mouse nor `WM_GESTURE`. Pen and everything else go to `DefWindowProc` as before. **Pressure / contact**: `POINTER_TOUCH_INFO.pressure` (0..1024 → 0..1) and `rcContact` are read ONLY when the matching `TOUCH_MASK_*` bit is set (a driver stub in an unmasked field is not "force"); `Major`/`Minor` are the long/short side of the contact BOUNDING RECT (Windows gives no ellipse), `Orientation` is passed through when masked. `EnableMouseInPointer` is NOT enabled, so a real mouse is unchanged. The `0xFF515700` mouse signature is deliberately not filtered: it marks the pen too. Not asked ⇒ every `WM_POINTER*` goes to `DefWindowProc` (verified live: 4 touch events and 0 mouse when enabled; mouse events and 0 touch when disabled). Cancel: `POINTERUP` with `CANCELED` and `CAPTURECHANGED` of a still-tracked touch. |
+| Wayland | `wl_seat.get_touch` only when asked AND the seat advertises `touch`; `down/up/motion/frame/cancel`; surface units × surface scale = buffer px (like window sizes); `up` has no coordinates — the last point is reused; `cancel` / losing the capability ⇒ `Cancelled`. **Contact shape** (`shape`/`orientation`, `wl_touch` v6; there is NO pressure in `wl_touch`, `Pressure` stays 0): the version of `wl_touch` is the version of the seat it was created from, and the window's main seat is bound at v4 on purpose (higher changes pointer events). So when the compositor advertises `wl_seat` ≥ 6, a SECOND `wl_seat` object of the same global is bound at v6 only for `get_touch` (released together with `wl_touch`); pointer/keyboard stay on v4. With v6 the events are held until `frame` (shape events follow `down`/`motion` of the same frame) and then delivered with `Major`/`Minor` (× surface scale) and `Orientation`; below v6 delivery is immediate as before. |
+| X11 | XInput 2.2: `QueryExtension("XInputExtension")`, `XIQueryVersion(2,2)`, `XISelectEvents(XIAllMasterDevices, TouchBegin|Update|End)` at window creation; `GenericEvent` (type 35) tails are now read in full in every event loop. **Enabling after the window exists** (`Window.SetTouchEnabled(true)` later): the request is remembered, the sleeping event loop is woken with a harmless `GetInputFocus`, and at the top level of the loop (between events, like `x11SyncWMState`) the same negotiation runs through `x11Reply`, which dispatches events that arrive before the reply instead of dropping them (a request made before the loop starts runs first thing in `RunEventLoop`). Repeated enabling does not resubscribe. **Pressure / contact** are device axes (valuators), not event fields: after subscribing, `InternAtom(only_if_exists)` for "Abs MT Pressure" / "Touch Major" / "Touch Minor" / "Orientation" / "Position X" and one `XIQueryDevice(XIAllDevices)` give each device's axes with min/max; the event tail (buttons mask, valuator mask, FP3232 values) is read per `sourceid`; events carry only CHANGED axes, so the last value per touch is remembered. Pressure = (v−min)/(max−min); contact axes are in device units and are converted to px by `screen width / range of the X axis` (right when the touchscreen spans the whole X screen; overstated on multi-monitor setups); orientation = v / axis limit × 90°. A device that appears later (unknown `sourceid`) triggers ONE re-query between events. libinput-driven touchscreens usually expose no pressure axis (then 0), evdev-driven ones do. The server does not emulate a pointer for a client that selected touch; if one does anyway, core Button/Motion events of an emulating touch (`XITouchEmulatingPointer`, same timestamp as its end) are dropped (`x11TouchGuard`). |
 
 **Unclaimed touch ⇒ mouse (done by the window, not the engine).** Otherwise ordinary
 buttons, menus and text fields would be dead under a finger in a touch-enabled window.
 The first unclaimed finger becomes: `MouseMove`, left `Down`, `MouseMove`s, left `Up`;
 other unclaimed fingers are ignored (one mouse). `Cancelled` releases the button
 OUTSIDE the window (`-1,-1`) so nothing is clicked. Lost activation cancels all touches.
-Cost: the OS-made long-press right-click and touch-pan wheel are not produced for
-unclaimed touches — use the recognizer's `Pan`/`Swipe`.
+**Long press ⇒ right button, as Windows does it:** a finger that lay within the tap slop (10 logical px, scaled)
+for at least `Window.SetTouchLongPress` (0 = 500 ms, <0 = never) is released as a right click at the lift point
+instead of a left one: the left button (already down, press feedback is immediate) is released OUTSIDE the window
+(nothing fires, like on cancel), then the pointer moves back and `MouseRight` down+up is sent ⇒ context menu. It acts
+on LIFT, not on timeout, so a finger that aims at a slider thumb or a selection and then drags (leaving the slop
+at any moment, even if it returns) stays an ordinary left button, and no timer is needed. Time is taken from the
+event timestamps when the backend gives them, else from arrival time. Claimed touches are never converted.
+Cost: the OS touch-pan wheel is still not produced for unclaimed touches — use the recognizer's `Pan`/`Swipe`.
 Wayland popups (`xdg_popup`) take only mouse: the first finger on a popup is its
 mouse (same handlers as the pointer), other fingers there are ignored, cancel releases
 outside so a menu item does not fire.
@@ -7850,6 +7862,13 @@ v.OnGesture = func(g widget.Gesture) { switch g := g.(type) { case widget.Pinch:
 
 * `Tap{X, Y, Count}` — short touch without movement; `Count` 2 = double (the first Tap
   is not delayed).
+* `LongPress{X, Y}` — the finger lay still (within `TapSlop`) for `LongPressDuration` (500 ms). Fires while
+  the finger is still down. No `Tap` after it, and the same finger no longer produces `Pan`/`Swipe` (Android
+  semantics: a menu opened by long press must not scroll under a trembling finger); a second finger starts
+  a pinch as usual. The recognizer has no goroutines and no timers; time comes from the owner, either through
+  events (every event with `Time` first "settles" an overdue long press) or `Tick(now)` (same clock as
+  `TouchEvent.Time`); `NextDeadline()` says when `Tick` is due (`ok=false`: nothing to wait for). `TouchGestures`
+  does this itself with `widget.Animate` (engine-driven, same goroutine as `OnTouch`; `Reset()` also stops it).
 * `Pan{Phase, X, Y, Delta, Total}` — one finger dragging. `Began.Delta` is the path
   already walked to the threshold (nothing is lost); `Ended`/`Cancelled` follow.
 * `Swipe{Dir, Velocity, VX, VY, Start, End}` — a fast flick; comes AFTER the `Pan Ended`
@@ -7863,23 +7882,26 @@ v.OnGesture = func(g widget.Gesture) { switch g := g.(type) { case widget.Pinch:
 `GestureConfig` (zero field = default; all in LOGICAL px): `TapSlop` 10,
 `TapMaxDuration` 300 ms, `DoubleTapInterval` 300 ms, `DoubleTapSlop` 32, `PanSlop` 10,
 `PinchSlop` 10 (change of finger distance), `SwipeMinDistance` 48,
-`SwipeMinVelocity` 350 px/s, `SwipeVelocityWindow` 100 ms (finger stopped before lift
+`LongPressDuration` 500 ms (<0 = off), `SwipeMinVelocity` 350 px/s, `SwipeVelocityWindow` 100 ms (finger stopped before lift
 ⇒ no swipe), `SwipeAxisRatio` 1.5 (≈34° from the axis). Pure logic, no platform.
 Events without `Time` cannot give tap duration or swipe speed.
 
 Tests: `widget/gesture_test.go` (synthetic sequences), `engine/touch_test.go` (capture by
 ID, two fingers, bubbling, overlay, modal, HiDPI + scroll frame, pinch through the engine),
-`window/touch_test.go` (opt-in, mouse emulation), `window/touch_windows_test.go`
-(struct layout, phases, live `InjectTouchInput` with `HEADLESS_GUI_TOUCH_E2E=1`),
+`window/touch_test.go` (opt-in, mouse emulation, long press ⇒ right button with an injected clock), `window/touch_windows_test.go`
+(struct layout, phases, pressure/contact by `TouchMask`, live `InjectTouchInput` with `HEADLESS_GUI_TOUCH_E2E=1` — checks pressure 32/1024 and a 4×4 contact arrive),
 `window/waylandtouch_test.go` + `wayland_touch_linux_test.go` (wire bodies, binding,
-popups), `window/x11touch_test.go` + `x11touch_linux_test.go` (requests, event bytes,
-fake X server handshake, event loop with `GenericEvent` tails, live XInput 2.2 on a
-real server).
+popups, `wl_touch` v6 shape/orientation, second seat), `window/x11touch_test.go` +
+`x11touch_linux_test.go` (requests, event bytes, `XIQueryDevice` reply parsing, valuator decoding,
+fake X server handshake incl. events before a reply, deferred enabling, event loop with `GenericEvent`
+tails, live XInput 2.2 on a real server, incl. enabling after creation).
 
-Not verified on live hardware: Wayland `wl_touch` against a real compositor and X11
-touch events from a real touch device (wire format only; the XI 2.2 negotiation was
-checked against a real XWayland). Not done: Cocoa (no touch on macOS desktop), pressure /
-contact area, long press, `WM_POINTER` history points.
+Not verified on live hardware: Wayland `wl_touch` (incl. v6 shape, the second seat) against a real
+compositor, and X11 touch events / pressure axes from a real touch device (wire format and fake server
+only; the XI 2.2 negotiation, the deferred subscription and the parsing of a real `XIQueryDevice` reply were
+checked against a real XWayland, which has no touch device). Win32 touch with pressure/contact was checked
+live with `InjectTouchInput`; real digitizer force is not verified. Not done: Cocoa (no touch on macOS
+desktop), `WM_POINTER` history points, a pen's pressure/tilt (the pen still goes to `DefWindowProc` as a mouse).
 
 ---
 
