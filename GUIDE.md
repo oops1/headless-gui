@@ -1598,6 +1598,40 @@ widget.AliasStrings(map[string]string{
 встроенный — хуже, чем было, не станет. `SetLanguage` управляет и диалогами, и
 приложением: язык у окна один.
 
+### Касания и жесты (v3.34)
+
+Касания включаются по окну: `win.SetTouchEnabled(true)` до `Run` (или корневой
+виджет реализует `widget.TouchHandler`). Без этого ОС по-прежнему превращает касания
+в мышь, и приложения, которым касания не нужны, не меняются. Работает на Win32
+(`WM_POINTER`), Wayland (`wl_touch`) и X11 (XInput 2.2).
+
+Виджет принимает касания методом `OnTouch(widget.TouchEvent) bool`; `true` на
+`TouchBegan` делает его владельцем этого пальца до `Ended`/`Cancelled` (координаты
+логические, в кадре самого виджета). Касание, которое никто не взял, становится левой
+кнопкой мыши в окне — обычные кнопки и меню продолжают работать.
+
+Для жестов встройте `widget.TouchGestures` (или вызывайте `GestureRecognizer.Feed`):
+
+```go
+type Viewer struct {
+    widget.Base
+    widget.TouchGestures
+}
+
+v.OnGesture = func(g widget.Gesture) {
+    switch g := g.(type) {
+    case widget.Pinch: // g.Scale от начала, g.Step от прошлого события, g.Center
+    case widget.Swipe: // g.Dir (SwipeLeft/Right/Up/Down), g.Velocity пикс/с
+    case widget.Pan:   // g.Delta с прошлого события, g.Phase
+    case widget.Tap:   // g.Count == 2 — двойной тап
+    }
+}
+```
+
+Пороги (`GestureConfig`) — в логических пикселях; перечень — в справочнике.
+
+---
+
 ---
 
 ## Темы

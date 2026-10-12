@@ -216,6 +216,9 @@ type X11Window struct {
 	btnDown atomic.Uint32
 	// drag — перетаскивание, начатое самим окном (x11_drag_linux.go).
 	drag x11Drag
+
+	// touch — касания через XInput 2.2 (x11touch_linux.go).
+	touch x11Touch
 }
 
 type x11Screen struct {
@@ -378,6 +381,10 @@ func (w *X11Window) Create(title string, width, height int) error {
 	// Graphics Context
 	w.x11CreateGC(w.gcID, w.wid)
 
+	// Касания (XInput 2.2), если окно их просило: ответы читаются напрямую, пока
+	// окно не показано и посторонних событий на соединении нет.
+	w.x11InitTouch()
+
 	// WM_PROTOCOLS — чтобы получать WM_DELETE_WINDOW
 	w.x11ChangeProperty(w.wid, w.atomWMProtocols, 4 /*ATOM*/, 32,
 		uint32ToBytes(w.atomWMDeleteWindow))
@@ -492,7 +499,16 @@ func (w *X11Window) RunEventLoop() error {
 			}
 			return fmt.Errorf("x11: read event: соединение закрыто")
 		}
-		w.handleX11Event(buf)
+		full, ok := w.x11CompleteEvent(buf)
+		if !ok {
+			if w.closed.Load() {
+				return nil
+			}
+			return fmt.Errorf("x11: read event: соединение закрыто")
+		}
+		if full != nil {
+			w.handleX11Event(full)
+		}
 		w.x11SyncWMState()
 	}
 	return nil
@@ -528,7 +544,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	// не отвечает на ввод, пока открыт диалог.
 	if w.disabled.Load() {
 		switch evType {
-		case 2, 3, 4, 5, 6, 8:
+		case 2, 3, 4, 5, 6, 8, x11GenericEvent:
 			return
 		}
 	}
@@ -564,6 +580,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		}
 
 	case 4: // ButtonPress
+		if w.touchSwallowsPointer(buf) {
+			return // эмуляция указателя от касания (x11TouchGuard)
+		}
 		w.noteButton(buf[1], true)
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
@@ -589,6 +608,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		}
 
 	case 5: // ButtonRelease
+		if w.touchSwallowsPointer(buf) {
+			return
+		}
 		w.noteButton(buf[1], false)
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
@@ -601,6 +623,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		}
 
 	case 6: // MotionNotify
+		if w.touchSwallowsPointer(buf) {
+			return
+		}
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
 		if w.onMouseMove != nil {
@@ -611,6 +636,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		if x11PointerLeft(buf[1], buf[30]) && w.onMouseMove != nil {
 			w.onMouseMove(pointerOutside, pointerOutside)
 		}
+
+	case x11GenericEvent: // XInput 2: касания
+		w.handleGenericEvent(buf)
 
 	case 9: // FocusIn
 		if w.onActivate != nil {
@@ -746,7 +774,9 @@ func (w *X11Window) x11ReloadKeyboardMapping() {
 		case 0: // error-пакет (32 байта) — запрос отвергнут
 			return
 		default: // обычное событие — обрабатываем на месте
-			w.handleX11Event(pkt)
+			if full, ok := w.x11CompleteEvent(pkt); ok && full != nil {
+				w.handleX11Event(full)
+			}
 		}
 	}
 }
@@ -1617,7 +1647,13 @@ func (w *X11Window) eventPumpLoop() {
 		if !w.readEvent(buf) {
 			return
 		}
-		w.handleX11Event(buf)
+		full, ok := w.x11CompleteEvent(buf)
+		if !ok {
+			return
+		}
+		if full != nil {
+			w.handleX11Event(full)
+		}
 		w.x11SyncWMState()
 	}
 }

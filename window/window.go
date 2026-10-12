@@ -127,6 +127,10 @@ func (win *Window) setupActivation() {
 		// Заголовок и оверлеи — виджеты: на горутине движка.
 		win.post(func() {
 			ww.SetActive(active)
+			// Окно потеряло ввод: конца идущих касаний оно уже не увидит.
+			if !active {
+				win.cancelTouches()
+			}
 			// При деактивации носителя (клик в другое приложение) закрываем
 			// вынесенные popup-оверлеи — как системные меню. Только в hosted-режиме.
 			if !active && (win.popupHost != nil || win.childPopups != nil) {
@@ -248,6 +252,10 @@ type surface struct {
 	// (refreshCursor). Только горутина движка.
 	ptrX, ptrY int
 	ptrKnown   bool
+
+	// emu — палец, превращённый в мышь, пока касание никто не взял (touch.go).
+	// Только горутина движка.
+	emu touchEmu
 
 	// fitOX, fitOY — смещение контента в буфере окна (letterbox при
 	// ContentFit=FitScale). Пишутся под mu при ресайзе, читаются событиями
@@ -384,6 +392,10 @@ type Window struct {
 	// sysTheme — подписка приложения на смену светлой/тёмной темы ОС
 	// (см. SetOnSystemThemeChanged в systheme.go).
 	sysTheme systemThemeState
+
+	// touchWant — явное решение приложения о касаниях (SetTouchEnabled, touch.go);
+	// nil — решает корень окна: он принимает касания, если сам TouchHandler.
+	touchWant *bool
 }
 
 // New создаёт окно для заданного движка с указанным заголовком.
@@ -624,6 +636,10 @@ func (win *Window) bringUp() error {
 		}
 	}
 
+	// Касания — тоже до Create: Wayland берёт wl_touch и X11 выбирает события
+	// XInput2 при создании окна (touch.go).
+	win.prepareTouch()
+
 	if err := win.native.Create(win.title, pw, ph); err != nil {
 		return err
 	}
@@ -679,6 +695,9 @@ func (win *Window) bringUp() error {
 
 	// Общий проброс ввода (мышь/клавиатура) — surface.
 	win.setupInput()
+
+	// Касания (если окно их просило).
+	win.setupTouch()
 
 	// Редактор метода ввода (китайский, японский, корейский): набираемое от
 	// системы — фокусному полю. Бэкенд без поддержки — no-op.

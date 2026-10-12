@@ -94,6 +94,9 @@ type Engine struct {
 	// на виджет, оказавшийся под курсором после закрытия.
 	pressConsumer widget.Widget
 
+	// touch — владельцы активных касаний по ID (см. touch.go).
+	touch touchState
+
 	modals []widget.ModalWidget // стек модальных виджетов (последний = верхний)
 	modMu  sync.Mutex
 

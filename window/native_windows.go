@@ -435,6 +435,9 @@ type Win32Window struct {
 	onDragLeave func()
 	dropTarget  *dropTargetState // нет — окно принимает файлы через WM_DROPFILES
 	oleReady    bool             // OLE поднят на потоке окна: годится для DoDragDrop
+
+	// touch — касания (WM_POINTER*, touch_windows.go).
+	touch win32TouchState
 }
 
 // Реестр окон для WndProc (Win32 callback не может быть методом): маршрутизация
@@ -1623,6 +1626,14 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			}
 		}
 		return 0
+
+	case wmPointerDown, wmPointerUpdate, wmPointerUp, wmPointerCaptureChanged:
+		// Касание, взятое окном, в DefWindowProc не отдаём: иначе система
+		// породит ещё и мышь (touch_windows.go). Перо и окно без касаний —
+		// как раньше, через DefWindowProc ниже.
+		if w.handlePointerMsg(hwnd, umsg, wparam) {
+			return 0
+		}
 
 	case wmImeSetContext, wmImeStartComposition, wmImeComposition, wmImeEndComposition:
 		if ret, done := w.handleIMEMessage(hwnd, umsg, wparam, lparam); done {

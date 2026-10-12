@@ -7734,6 +7734,111 @@ wiring), `window/dnd_hdrop_test.go` (`CF_HDROP` block, `QueryContinueDrag` table
 
 ---
 
+## Touch and gestures (v3.34)
+
+Touch is a separate kind of input, not "a mouse with a finger": there are several
+fingers, each with its own history. Everything below is **additive**; an app that
+knows nothing about touch behaves exactly as before.
+
+### Widget API (`widget/touch.go`, `widget/gesture.go`)
+
+```go
+type TouchPhase int // TouchBegan, TouchMoved, TouchEnded, TouchCancelled
+type TouchEvent struct {
+    ID   int           // same from Began to Ended/Cancelled; unique among simultaneous fingers
+    X, Y int           // widget gets LOGICAL px in ITS OWN frame (inside a ScrollView: content coords)
+    Phase TouchPhase
+    Time  time.Duration // monotonic, from the OS timestamp; 0 = unset (the engine stamps it)
+}
+type TouchHandler interface{ OnTouch(ev TouchEvent) bool }
+```
+
+Delivery (`Engine.SendTouch(ev) bool`; input is PHYSICAL px like `SendMouseMove`):
+
+1. `Began`: widgets under the point, deepest first (bubbling, like a mouse press), get
+   `OnTouch`. The first one that returns `true` becomes the **owner** of this touch.
+   An open overlay (menu, dropdown) is older than the tree: if the point is inside it
+   the overlay takes the touch or nobody does — a widget under a menu never steals it.
+   Like a press, a `Began` dismisses popups outside the path (`Dismissable`).
+2. `Moved/Ended/Cancelled` go ONLY to the owner, wherever the finger went (capture by
+   ID). Each finger has its own owner; two fingers on one widget arrive as two ID
+   streams — that is what a pinch is built from. A ScrollView scrolling mid-touch is
+   followed (frame re-evaluated per event).
+3. A touch nobody took: `SendTouch` returns `false`. **The engine does NOT turn it
+   into a mouse.** Stray events (Moved with an unknown ID) also return `false`.
+4. `Engine.CancelTouches()` cancels all (focus lost, system gesture); a repeated
+   `Began` with a busy ID cancels the old owner first. `Engine.TouchActive()`.
+
+`Window.SetTouchEnabled(on)` / `TouchEnabled()` (package `window`): touch is **opt-in**.
+Not asked ⇒ no backend catches touches and the OS keeps producing mouse as always
+(Explorer, Calculator, Notepad, the shell are unchanged). Auto-on when the root widget
+itself implements `TouchHandler`; an explicit call always wins. Call before `Run`
+(Win32 and Wayland also accept it later; on X11 only turning off works later).
+
+**No duplicate mouse.** A window that took touch takes it entirely:
+
+| Backend | How the OS mouse-from-touch is kept out |
+|---|---|
+| Win32 | `WM_POINTERDOWN/UPDATE/UP/CAPTURECHANGED` for `PT_TOUCH` only (`GetPointerType`, `GetPointerTouchInfo`, syscall, no CGO). The message is handled and NOT passed to `DefWindowProc` ⇒ the system generates neither mouse nor `WM_GESTURE`. Pen and everything else go to `DefWindowProc` as before. `EnableMouseInPointer` is NOT enabled, so a real mouse is unchanged. The `0xFF515700` mouse signature is deliberately not filtered: it marks the pen too. Not asked ⇒ every `WM_POINTER*` goes to `DefWindowProc` (verified live: 4 touch events and 0 mouse when enabled; mouse events and 0 touch when disabled). Cancel: `POINTERUP` with `CANCELED` and `CAPTURECHANGED` of a still-tracked touch. |
+| Wayland | `wl_seat.get_touch` only when asked AND the seat advertises `touch`; `down/up/motion/frame/cancel`; surface units × surface scale = buffer px (like window sizes); `up` has no coordinates — the last point is reused; `cancel` / losing the capability ⇒ `Cancelled`. |
+| X11 | XInput 2.2: `QueryExtension("XInputExtension")`, `XIQueryVersion(2,2)`, `XISelectEvents(XIAllMasterDevices, TouchBegin|Update|End)` at window creation; `GenericEvent` (type 35) tails are now read in full in every event loop. The server does not emulate a pointer for a client that selected touch; if one does anyway, core Button/Motion events of an emulating touch (`XITouchEmulatingPointer`, same timestamp as its end) are dropped (`x11TouchGuard`). |
+
+**Unclaimed touch ⇒ mouse (done by the window, not the engine).** Otherwise ordinary
+buttons, menus and text fields would be dead under a finger in a touch-enabled window.
+The first unclaimed finger becomes: `MouseMove`, left `Down`, `MouseMove`s, left `Up`;
+other unclaimed fingers are ignored (one mouse). `Cancelled` releases the button
+OUTSIDE the window (`-1,-1`) so nothing is clicked. Lost activation cancels all touches.
+Cost: the OS-made long-press right-click and touch-pan wheel are not produced for
+unclaimed touches — use the recognizer's `Pan`/`Swipe`.
+Wayland popups (`xdg_popup`) take only mouse: the first finger on a popup is its
+mouse (same handlers as the pointer), other fingers there are ignored, cancel releases
+outside so a menu item does not fire.
+
+### Gesture recognizer
+
+```go
+var r widget.GestureRecognizer          // zero value = default thresholds
+gs := r.Feed(ev)                        // []Gesture: Tap, Pan, Pinch, Swipe
+// or embed the ready handler:
+type Viewer struct{ widget.Base; widget.TouchGestures }
+v.OnGesture = func(g widget.Gesture) { switch g := g.(type) { case widget.Pinch: … } }
+```
+
+* `Tap{X, Y, Count}` — short touch without movement; `Count` 2 = double (the first Tap
+  is not delayed).
+* `Pan{Phase, X, Y, Delta, Total}` — one finger dragging. `Began.Delta` is the path
+  already walked to the threshold (nothing is lost); `Ended`/`Cancelled` follow.
+* `Swipe{Dir, Velocity, VX, VY, Start, End}` — a fast flick; comes AFTER the `Pan Ended`
+  it grew from (use `Swipe` alone for page flipping, `Pan`+`Swipe` for inertia).
+* `Pinch{Phase, Scale, Step, Center, CenterDelta}` — two fingers: `Scale` relative to
+  the start, `Step` relative to the previous event (multiply zoom by `Step`), midpoint
+  and its shift. Two-finger scrolling arrives as `Pinch` with `Scale≈1`.
+* Second finger ends a `Pan`; the finger left after a pinch is dead until all lift;
+  a third finger changes nothing.
+
+`GestureConfig` (zero field = default; all in LOGICAL px): `TapSlop` 10,
+`TapMaxDuration` 300 ms, `DoubleTapInterval` 300 ms, `DoubleTapSlop` 32, `PanSlop` 10,
+`PinchSlop` 10 (change of finger distance), `SwipeMinDistance` 48,
+`SwipeMinVelocity` 350 px/s, `SwipeVelocityWindow` 100 ms (finger stopped before lift
+⇒ no swipe), `SwipeAxisRatio` 1.5 (≈34° from the axis). Pure logic, no platform.
+Events without `Time` cannot give tap duration or swipe speed.
+
+Tests: `widget/gesture_test.go` (synthetic sequences), `engine/touch_test.go` (capture by
+ID, two fingers, bubbling, overlay, modal, HiDPI + scroll frame, pinch through the engine),
+`window/touch_test.go` (opt-in, mouse emulation), `window/touch_windows_test.go`
+(struct layout, phases, live `InjectTouchInput` with `HEADLESS_GUI_TOUCH_E2E=1`),
+`window/waylandtouch_test.go` + `wayland_touch_linux_test.go` (wire bodies, binding,
+popups), `window/x11touch_test.go` + `x11touch_linux_test.go` (requests, event bytes,
+fake X server handshake, event loop with `GenericEvent` tails, live XInput 2.2 on a
+real server).
+
+Not verified on live hardware: Wayland `wl_touch` against a real compositor and X11
+touch events from a real touch device (wire format only; the XI 2.2 negotiation was
+checked against a real XWayland). Not done: Cocoa (no touch on macOS desktop), pressure /
+contact area, long press, `WM_POINTER` history points.
+
+---
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

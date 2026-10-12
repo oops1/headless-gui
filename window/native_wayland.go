@@ -220,6 +220,10 @@ type WaylandWindow struct {
 	pointerID    uint32
 	keyboardID   uint32
 
+	// touch — касания (wayland_touch_linux.go): wl_touch берётся только по
+	// просьбе окна.
+	touch wlTouch
+
 	// shm-пул с двумя кадровыми буферами
 	poolID   uint32
 	shmFD    int
@@ -859,6 +863,7 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			w.keyboardID = w.newID()
 			w.send(newWlMsg(w.seatID, wlSeatGetKeyboard).putUint(w.keyboardID), -1)
 		}
+		w.noteSeatCaps(caps)
 
 	case obj == w.surfaceID && opcode == wlSurfaceEvEnter:
 		// Окно показалось на мониторе: его масштаб и есть масштаб окна.
@@ -891,6 +896,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 
 	case obj == w.keyboardID:
 		w.handleKeyboard(opcode, b)
+
+	case w.touch.id.Load() != 0 && obj == w.touch.id.Load():
+		w.handleTouch(opcode, b)
 
 	case w.dataDeviceID != 0 && obj == w.dataDeviceID:
 		w.handleDataDevice(opcode, b)

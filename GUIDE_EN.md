@@ -1605,6 +1605,40 @@ application, and the more specific one wins. With no translation behind the
 alias the built-in one is used — never worse than before. `SetLanguage` drives
 the dialogs and the application alike: one language for the whole window.
 
+### Touch and gestures (v3.34)
+
+Touch is opt-in per window: `win.SetTouchEnabled(true)` before `Run` (or make the
+root widget implement `widget.TouchHandler`). Without it the OS keeps turning touches
+into mouse events, so apps that don't care are unchanged. Works on Win32
+(`WM_POINTER`), Wayland (`wl_touch`) and X11 (XInput 2.2).
+
+A widget takes touches by implementing `OnTouch(widget.TouchEvent) bool`; returning
+`true` on `TouchBegan` makes it the owner of that finger until `Ended`/`Cancelled`
+(coordinates are logical, in the widget's own frame). A touch nobody takes becomes a
+left mouse button in the window, so ordinary buttons and menus keep working.
+
+For gestures embed `widget.TouchGestures` (or call `GestureRecognizer.Feed`):
+
+```go
+type Viewer struct {
+    widget.Base
+    widget.TouchGestures
+}
+
+v.OnGesture = func(g widget.Gesture) {
+    switch g := g.(type) {
+    case widget.Pinch: // g.Scale since start, g.Step since previous, g.Center
+    case widget.Swipe: // g.Dir (SwipeLeft/Right/Up/Down), g.Velocity px/s
+    case widget.Pan:   // g.Delta since previous, g.Phase
+    case widget.Tap:   // g.Count == 2 for a double tap
+    }
+}
+```
+
+Thresholds (`GestureConfig`) are in logical pixels; see the reference for the list.
+
+---
+
 ---
 
 ## Themes

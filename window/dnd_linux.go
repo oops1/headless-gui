@@ -296,7 +296,9 @@ func (w *X11Window) x11GetProperty(window, property uint32, del bool) (uint32, i
 		case 0: // error-пакет — запрос отвергнут
 			return 0, 0, nil
 		default: // обычное событие — обрабатываем на месте
-			w.handleX11Event(hdr)
+			if full, ok := w.x11CompleteEvent(hdr); ok && full != nil {
+				w.handleX11Event(full)
+			}
 		}
 	}
 	return 0, 0, nil
