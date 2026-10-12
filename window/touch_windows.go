@@ -46,6 +46,14 @@ const (
 	// POINTER_FLAGS (HIWORD(wParam) несёт младшие 16 бит)
 	pointerFlagCanceled       = 0x00008000
 	pointerFlagCaptureChanged = 0x00200000
+
+	// TOUCH_MASK_*: какие поля POINTER_TOUCH_INFO устройство заполнило.
+	touchMaskContactArea = 0x00000001
+	touchMaskOrientation = 0x00000002
+	touchMaskPressure    = 0x00000004
+
+	// touchPressureMax — верхняя граница pressure в POINTER_TOUCH_INFO (0..1024).
+	touchPressureMax = 1024
 )
 
 var (
@@ -164,6 +172,50 @@ func touchEventFromPointer(id uint32, phase widget.TouchPhase, dwTime uint32, cx
 	}
 }
 
+// touchEventFromInfo — событие касания из POINTER_TOUCH_INFO с нажимом и
+// площадью контакта; cx, cy — клиентские физические пиксели.
+func touchEventFromInfo(id uint32, phase widget.TouchPhase, info *pointerTouchInfo, cx, cy int) widget.TouchEvent {
+	ev := touchEventFromPointer(id, phase, info.PointerInfo.DwTime, cx, cy)
+	ev.Pressure, ev.Major, ev.Minor, ev.Orientation = touchDetailsFromInfo(info)
+	return ev
+}
+
+// touchDetailsFromInfo достаёт из POINTER_TOUCH_INFO нажим и площадь контакта.
+//
+// Поля читаются только по TouchMask: без бита устройство их не измеряет, и
+// значение в структуре — мусор или заглушка драйвера (у ёмкостных экранов без
+// датчика силы pressure нередко равно 32 при любом нажатии). Нажим нормируется
+// 0..1024 -> 0..1. Контакт Windows отдаёт охватывающим прямоугольником (rcContact,
+// физические пиксели), а не эллипсом, поэтому Major — длинная сторона
+// прямоугольника, Minor — короткая; угол Orientation (0..359°, по часовой от
+// вертикали) передаётся как есть, если устройство его знает.
+func touchDetailsFromInfo(info *pointerTouchInfo) (pressure, major, minor, orientation float64) {
+	if info.TouchMask&touchMaskPressure != 0 {
+		pressure = float64(info.Pressure) / touchPressureMax
+		if pressure > 1 {
+			pressure = 1
+		}
+	}
+	if info.TouchMask&touchMaskContactArea != 0 {
+		w := float64(info.RcContact.Right - info.RcContact.Left)
+		h := float64(info.RcContact.Bottom - info.RcContact.Top)
+		if w < 0 {
+			w = -w
+		}
+		if h < 0 {
+			h = -h
+		}
+		major, minor = w, h
+		if minor > major {
+			major, minor = minor, major
+		}
+		if info.TouchMask&touchMaskOrientation != 0 && major > 0 {
+			orientation = float64(info.Orientation % 360)
+		}
+	}
+	return
+}
+
 // handlePointerMsg разбирает WM_POINTER*. true — сообщение обработано и в
 // DefWindowProc отдавать нельзя (иначе система доставит ещё и мышь).
 func (w *Win32Window) handlePointerMsg(hwnd uintptr, umsg uint32, wparam uintptr) bool {
@@ -217,6 +269,6 @@ func (w *Win32Window) handlePointerMsg(hwnd uintptr, umsg uint32, wparam uintptr
 	} else {
 		w.touch.active[id] = at
 	}
-	(*fn)(touchEventFromPointer(id, phase, info.PointerInfo.DwTime, at.X, at.Y))
+	(*fn)(touchEventFromInfo(id, phase, &info, at.X, at.Y))
 	return true
 }

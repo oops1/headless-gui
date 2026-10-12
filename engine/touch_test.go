@@ -486,3 +486,40 @@ func TestSendTouch_PinchThroughEngineHiDPI(t *testing.T) {
 		t.Errorf("свайп: %+v", swipes)
 	}
 }
+
+// Нажим и площадь контакта доходят до виджета: нажим как есть, оси контакта —
+// в логических пикселях (как и точка), угол и нажим масштаб не трогает.
+func TestSendTouch_PressureAndContact(t *testing.T) {
+	for _, scale := range []float64{1, 2} {
+		e := New(400, 300, 20)
+		e.SetScale(scale)
+		root := touchRoot()
+		a := newTouchSpy(image.Rect(0, 0, 400, 300), true)
+		root.AddChild(a)
+		e.SetRoot(root)
+
+		ev := tch(1, 40, 40, widget.TouchBegan)
+		ev.Pressure, ev.Major, ev.Minor, ev.Orientation = 0.5, 40, 20, 30
+		e.SendTouch(ev)
+		got := a.got[0]
+		if got.Pressure != 0.5 || got.Orientation != 30 {
+			t.Errorf("scale %v: нажим/угол %v/%v, ждал 0.5/30", scale, got.Pressure, got.Orientation)
+		}
+		if got.Major != 40/scale || got.Minor != 20/scale {
+			t.Errorf("scale %v: оси %v x %v, ждал %v x %v", scale, got.Major, got.Minor, 40/scale, 20/scale)
+		}
+		if !got.HasPressure() || !got.HasContact() {
+			t.Errorf("scale %v: HasPressure/HasContact = %v/%v", scale, got.HasPressure(), got.HasContact())
+		}
+	}
+	// Без сведений — нули, а не «лёгкое касание».
+	e := New(400, 300, 20)
+	root := touchRoot()
+	a := newTouchSpy(image.Rect(0, 0, 400, 300), true)
+	root.AddChild(a)
+	e.SetRoot(root)
+	e.SendTouch(tch(1, 5, 5, widget.TouchBegan))
+	if g := a.got[0]; g.HasPressure() || g.HasContact() {
+		t.Errorf("неизвестные нажим/контакт стали известными: %+v", g)
+	}
+}

@@ -243,3 +243,147 @@ func TestWlTouch_ShortBodiesIgnored(t *testing.T) {
 		t.Errorf("мусор породил события: %v %v", r.touches, r.popup)
 	}
 }
+
+// ─── Форма контакта (wl_touch версии 6) ─────────────────────────────────────
+
+func shapeBody(id int32, major, minor float64) []byte {
+	return tw(uint32(id), fx(major), fx(minor))
+}
+func orientBody(id int32, deg float64) []byte { return tw(uint32(id), fx(deg)) }
+
+func TestWlTouch_ParseShapeBodies(t *testing.T) {
+	if id, a, b, ok := parseWlTouchShape(shapeBody(3, 12.5, 6.25)); !ok || id != 3 || a != 12.5 || b != 6.25 {
+		t.Errorf("shape: %d %v %v %v", id, a, b, ok)
+	}
+	if id, deg, ok := parseWlTouchOrientation(orientBody(4, -45.5)); !ok || id != 4 || deg != -45.5 {
+		t.Errorf("orientation: %d %v %v", id, deg, ok)
+	}
+	if _, _, _, ok := parseWlTouchShape(make([]byte, 11)); ok {
+		t.Error("обрезанное shape принято")
+	}
+	if _, _, ok := parseWlTouchOrientation(make([]byte, 7)); ok {
+		t.Error("обрезанное orientation принято")
+	}
+}
+
+func shapedRig(scale float64) *sinkRig {
+	r := newSinkRig(scale)
+	r.sink.shapes = func() bool { return true }
+	return r
+}
+
+// События копятся до frame и уходят с формой контакта, переведённой в пиксели
+// буфера; давления у Wayland нет.
+func TestWlTouch_ShapeAttachedAtFrame(t *testing.T) {
+	r := shapedRig(2)
+	r.sink.handle(wlTouchEvDown, touchDownBody(1, 100, mainSurf, 1, 10, 20))
+	if len(r.touches) != 0 {
+		t.Fatalf("событие ушло до frame: %+v", r.touches)
+	}
+	r.sink.handle(wlTouchEvShape, shapeBody(1, 20, 10))
+	r.sink.handle(wlTouchEvOrientation, orientBody(1, 30))
+	r.sink.handle(wlTouchEvFrame, nil)
+	if len(r.touches) != 1 {
+		t.Fatalf("после frame событий %d", len(r.touches))
+	}
+	ev := r.touches[0]
+	if ev.Phase != widget.TouchBegan || ev.X != 20 || ev.Y != 40 {
+		t.Errorf("основа: %+v", ev)
+	}
+	if ev.Major != 40 || ev.Minor != 20 || ev.Orientation != 30 {
+		t.Errorf("форма: %v x %v под %v, ждал 40 x 20 под 30 (масштаб 2)", ev.Major, ev.Minor, ev.Orientation)
+	}
+	if ev.Pressure != 0 {
+		t.Errorf("у wl_touch нет давления, а Pressure = %v", ev.Pressure)
+	}
+
+	// Форма не повторяется, пока не меняется: Moved наследует прежнюю.
+	r.sink.handle(wlTouchEvMotion, touchMotionBody(116, 1, 11, 20))
+	r.sink.handle(wlTouchEvFrame, nil)
+	if got := r.touches[1]; got.Phase != widget.TouchMoved || got.Major != 40 || got.Minor != 20 {
+		t.Errorf("Moved без новой формы: %+v", got)
+	}
+	// А изменившаяся подхватывается.
+	r.sink.handle(wlTouchEvMotion, touchMotionBody(132, 1, 12, 20))
+	r.sink.handle(wlTouchEvShape, shapeBody(1, 30, 15))
+	r.sink.handle(wlTouchEvFrame, nil)
+	if got := r.touches[2]; got.Major != 60 || got.Minor != 30 || got.Orientation != 30 {
+		t.Errorf("новая форма: %+v", got)
+	}
+	// Отрыв несёт последнюю форму и стирает её: следующий палец с тем же номером
+	// начинает без неё.
+	r.sink.handle(wlTouchEvUp, touchUpBody(2, 150, 1))
+	r.sink.handle(wlTouchEvFrame, nil)
+	if got := r.touches[3]; got.Phase != widget.TouchEnded || got.Major != 60 {
+		t.Errorf("отрыв: %+v", got)
+	}
+	r.sink.handle(wlTouchEvDown, touchDownBody(3, 200, mainSurf, 1, 5, 5))
+	r.sink.handle(wlTouchEvFrame, nil)
+	if got := r.touches[4]; got.Major != 0 || got.Minor != 0 || got.Orientation != 0 {
+		t.Errorf("форма прежнего пальца протекла в новый: %+v", got)
+	}
+}
+
+// Два пальца в одном кадре получают каждый свою форму; down и up одного пальца в
+// одном кадре доходят оба и по порядку.
+func TestWlTouch_ShapePerFingerAndOrder(t *testing.T) {
+	r := shapedRig(1)
+	r.sink.handle(wlTouchEvDown, touchDownBody(1, 10, mainSurf, 1, 5, 5))
+	r.sink.handle(wlTouchEvDown, touchDownBody(2, 10, mainSurf, 2, 50, 50))
+	r.sink.handle(wlTouchEvShape, shapeBody(2, 9, 7))
+	r.sink.handle(wlTouchEvShape, shapeBody(1, 4, 3))
+	r.sink.handle(wlTouchEvFrame, nil)
+	if len(r.touches) != 2 || r.touches[0].ID != 1 || r.touches[1].ID != 2 {
+		t.Fatalf("порядок: %+v", r.touches)
+	}
+	if r.touches[0].Major != 4 || r.touches[0].Minor != 3 || r.touches[1].Major != 9 || r.touches[1].Minor != 7 {
+		t.Errorf("формы: %+v", r.touches)
+	}
+
+	r2 := shapedRig(1)
+	r2.sink.handle(wlTouchEvDown, touchDownBody(1, 10, mainSurf, 1, 5, 5))
+	r2.sink.handle(wlTouchEvUp, touchUpBody(2, 20, 1))
+	r2.sink.handle(wlTouchEvFrame, nil)
+	if len(r2.touches) != 2 || r2.touches[0].Phase != widget.TouchBegan || r2.touches[1].Phase != widget.TouchEnded {
+		t.Errorf("down+up в одном кадре: %+v", r2.touches)
+	}
+}
+
+// Без версии 6 события идут сразу, как и раньше, а форму не присылают и не ждут.
+func TestWlTouch_NoShapeWithoutV6(t *testing.T) {
+	r := newSinkRig(1)
+	r.sink.handle(wlTouchEvDown, touchDownBody(1, 10, mainSurf, 1, 5, 5))
+	if len(r.touches) != 1 {
+		t.Fatalf("без версии 6 событие задержано: %+v", r.touches)
+	}
+	r.sink.handle(wlTouchEvShape, shapeBody(1, 9, 9)) // чужое событие не ломает
+	r.sink.handle(wlTouchEvFrame, nil)
+	if len(r.touches) != 1 || r.touches[0].Major != 0 {
+		t.Errorf("форма появилась без версии 6: %+v", r.touches)
+	}
+}
+
+// Отмена доставляет накопленное до себя; выключение молча сбрасывает.
+func TestWlTouch_ShapeCancelFlushesPending(t *testing.T) {
+	r := shapedRig(1)
+	r.sink.handle(wlTouchEvDown, touchDownBody(1, 10, mainSurf, 1, 5, 5))
+	r.sink.handle(wlTouchEvShape, shapeBody(1, 8, 6))
+	r.sink.handle(wlTouchEvCancel, nil)
+	if len(r.touches) != 2 || r.touches[0].Phase != widget.TouchBegan || r.touches[0].Major != 8 ||
+		r.touches[1].Phase != widget.TouchCancelled {
+		t.Errorf("отмена: %+v", r.touches)
+	}
+
+	r2 := shapedRig(1)
+	r2.sink.handle(wlTouchEvDown, touchDownBody(1, 10, mainSurf, 1, 5, 5))
+	r2.sink.drop()
+	r2.sink.handle(wlTouchEvFrame, nil)
+	if len(r2.touches) != 0 {
+		t.Errorf("сброшенное событие доставлено: %+v", r2.touches)
+	}
+	// Форма неизвестного пальца игнорируется.
+	r2.sink.handle(wlTouchEvShape, shapeBody(77, 1, 1))
+	if len(r2.sink.shape) != 0 {
+		t.Errorf("форма чужого пальца запомнена: %v", r2.sink.shape)
+	}
+}

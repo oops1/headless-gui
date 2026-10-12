@@ -105,6 +105,11 @@ func (e *Engine) SendTouch(ev widget.TouchEvent) bool {
 	defer e.serveFocusRequests()()
 
 	ev.X, ev.Y = e.toLogical(ev.X, ev.Y)
+	if k := e.Scale(); k != 1 && k > 0 {
+		// Оси контакта — те же пиксели окна, что и точка: виджету тоже логические.
+		ev.Major /= k
+		ev.Minor /= k
+	}
 	if ev.Time == 0 {
 		ev.Time = time.Since(touchEpoch) + 1
 	}

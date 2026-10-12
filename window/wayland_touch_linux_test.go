@@ -170,3 +170,95 @@ func TestWaylandTouch_PopupSurface(t *testing.T) {
 		t.Errorf("касание попапа ушло окну: %d", toWindow)
 	}
 }
+
+// ─── wl_touch версии 6: второй wl_seat ради формы контакта ──────────────────
+
+// Сиденье версии 6: wl_touch берётся из второго объекта wl_seat (основной остаётся
+// на версии 4), и события формы доходят до приложения с осями контакта.
+func TestWaylandTouch_V6UsesSecondSeat(t *testing.T) {
+	c := newWlTestWindow(t)
+	c.w.gSeat, c.w.gSeatVer = 5, 8
+	c.w.SetTouchEnabled(true)
+	c.w.handleEvent(c.w.seatID, wlSeatEvCapabilities, wlU32(seatCapPointer|seatCapKeyboard|seatCapTouch))
+	msgs := splitWlMsgs(t, c.drainAny(t))
+
+	seat6 := c.w.touch.seat6.Load()
+	if seat6 == 0 || seat6 == c.w.seatID {
+		t.Fatalf("второй wl_seat не заведён: %d", seat6)
+	}
+	if _, ok := findWlMsg(msgs, c.w.seatID, wlSeatGetTouch); ok {
+		t.Error("get_touch ушёл основному сиденью (версия 4: формы не будет)")
+	}
+	m, ok := findWlMsg(msgs, seat6, wlSeatGetTouch)
+	if !ok || len(m.args) != 1 || m.args[0] != c.w.touch.id.Load() {
+		t.Fatalf("get_touch на втором сиденье: %+v ok=%v", m, ok)
+	}
+	// Привязка второго сиденья — wl_registry.bind с версией 6 и новым id, и она
+	// идёт раньше get_touch.
+	bindAt, touchAt := -1, -1
+	for i, mm := range msgs {
+		if mm.obj == c.w.registryID && mm.opcode == wlRegistryBind && len(mm.args) > 0 && mm.args[len(mm.args)-1] == seat6 {
+			bindAt = i
+			if v := mm.args[len(mm.args)-2]; v != wlSeatTouchShapeVersion {
+				t.Errorf("версия привязки %d, ждал %d", v, wlSeatTouchShapeVersion)
+			}
+		}
+		if mm.obj == seat6 && mm.opcode == wlSeatGetTouch {
+			touchAt = i
+		}
+	}
+	if bindAt < 0 || touchAt < 0 || bindAt > touchAt {
+		t.Errorf("порядок: bind=%d get_touch=%d", bindAt, touchAt)
+	}
+
+	// События формы доходят до приёмника окна.
+	tid := c.w.touch.id.Load()
+	var got []widget.TouchEvent
+	c.w.SetOnTouch(func(ev widget.TouchEvent) { got = append(got, ev) })
+	c.w.handleEvent(tid, wlTouchEvDown, touchDownBody(5, 100, c.w.surfaceID, 4, 30, 40))
+	c.w.handleEvent(tid, wlTouchEvShape, shapeBody(4, 14, 10))
+	c.w.handleEvent(tid, wlTouchEvOrientation, orientBody(4, 90))
+	if len(got) != 0 {
+		t.Fatalf("событие ушло до frame: %+v", got)
+	}
+	c.w.handleEvent(tid, wlTouchEvFrame, nil)
+	if len(got) != 1 || got[0].Major != 14 || got[0].Minor != 10 || got[0].Orientation != 90 {
+		t.Errorf("событие с формой: %+v", got)
+	}
+
+	// Сенсорное устройство пропало: wl_touch и второе сиденье отпущены.
+	c.w.handleEvent(c.w.seatID, wlSeatEvCapabilities, wlU32(seatCapPointer|seatCapKeyboard))
+	msgs = splitWlMsgs(t, c.drainAny(t))
+	if _, ok := findWlMsg(msgs, tid, wlTouchRelease); !ok {
+		t.Error("wl_touch не отпущен")
+	}
+	if _, ok := findWlMsg(msgs, seat6, wlSeatRelease); !ok {
+		t.Error("второй wl_seat не отпущен")
+	}
+	if c.w.touch.seat6.Load() != 0 || c.w.touch.shaped.Load() {
+		t.Error("следы версии 6 остались после отпускания")
+	}
+}
+
+// Компоновщик с сиденьем ниже 6: ничего лишнего не привязывается, касания идут
+// как раньше, без ожидания frame.
+func TestWaylandTouch_OldSeatStaysOnMainSeat(t *testing.T) {
+	c := newWlTestWindow(t)
+	c.w.gSeat, c.w.gSeatVer = 5, 5
+	c.w.SetTouchEnabled(true)
+	c.w.handleEvent(c.w.seatID, wlSeatEvCapabilities, wlU32(seatCapPointer|seatCapKeyboard|seatCapTouch))
+	msgs := splitWlMsgs(t, c.drainAny(t))
+	if _, ok := findWlMsg(msgs, c.w.seatID, wlSeatGetTouch); !ok {
+		t.Error("get_touch не ушёл основному сиденью")
+	}
+	if c.w.touch.seat6.Load() != 0 || c.w.touch.shaped.Load() {
+		t.Error("второе сиденье заведено при версии 5")
+	}
+	tid := c.w.touch.id.Load()
+	var got []widget.TouchEvent
+	c.w.SetOnTouch(func(ev widget.TouchEvent) { got = append(got, ev) })
+	c.w.handleEvent(tid, wlTouchEvDown, touchDownBody(5, 100, c.w.surfaceID, 4, 30, 40))
+	if len(got) != 1 {
+		t.Errorf("при версии 5 событие задержано: %+v", got)
+	}
+}

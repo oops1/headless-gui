@@ -229,6 +229,18 @@ func TestWin32TouchLive(t *testing.T) {
 				if mouse != 0 {
 					t.Errorf("мышь из касаний не подавлена: %d событий", mouse)
 				}
+				// Нажим и контакт, посланные инжектором (pressure 32 из 1024,
+				// контакт 4x4 под углом 90), доходят до приёмника.
+				for i, ev := range touches {
+					t.Logf("событие %d: %v pressure=%.4f major=%.1f minor=%.1f orientation=%.0f",
+						i, ev.Phase, ev.Pressure, ev.Major, ev.Minor, ev.Orientation)
+				}
+				if p := touches[0].Pressure; p < 0.02 || p > 0.04 {
+					t.Errorf("нажим первого касания %v, ждал около 32/1024", p)
+				}
+				if touches[0].Major <= 0 || touches[0].Minor <= 0 || touches[0].Minor > touches[0].Major {
+					t.Errorf("контакт первого касания %v x %v", touches[0].Major, touches[0].Minor)
+				}
 			} else {
 				if len(touches) != 0 {
 					t.Errorf("выключенные касания дошли до приёмника: %+v", touches)
@@ -238,5 +250,59 @@ func TestWin32TouchLive(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Нажим и контакт читаются только по TouchMask: заглушка драйвера в полях без
+// бита не должна превращаться в «давление».
+func TestTouchDetailsFromInfo(t *testing.T) {
+	var info pointerTouchInfo
+	info.Pressure = 512
+	info.Orientation = 90
+	info.RcContact = rect{Left: 10, Top: 20, Right: 22, Bottom: 50}
+	if p, a, b, o := touchDetailsFromInfo(&info); p != 0 || a != 0 || b != 0 || o != 0 {
+		t.Errorf("без маски: %v %v %v %v, ждал нули", p, a, b, o)
+	}
+
+	info.TouchMask = touchMaskPressure
+	if p, a, _, _ := touchDetailsFromInfo(&info); p != 0.5 || a != 0 {
+		t.Errorf("только нажим: %v %v", p, a)
+	}
+
+	info.TouchMask = touchMaskContactArea
+	p, major, minor, o := touchDetailsFromInfo(&info)
+	if p != 0 || major != 30 || minor != 12 || o != 0 {
+		t.Errorf("только контакт: p=%v major=%v minor=%v o=%v, ждал 0/30/12/0", p, major, minor, o)
+	}
+
+	info.TouchMask = touchMaskContactArea | touchMaskOrientation | touchMaskPressure
+	info.Pressure = 2000 // драйвер вышел за диапазон
+	info.Orientation = 450
+	p, major, minor, o = touchDetailsFromInfo(&info)
+	if p != 1 || major != 30 || minor != 12 || o != 90 {
+		t.Errorf("всё сразу: p=%v major=%v minor=%v o=%v, ждал 1/30/12/90", p, major, minor, o)
+	}
+
+	// Широкий контакт: длинная сторона — Major.
+	info.RcContact = rect{Left: 0, Top: 0, Right: 40, Bottom: 8}
+	if _, major, minor, _ := touchDetailsFromInfo(&info); major != 40 || minor != 8 {
+		t.Errorf("широкий контакт: %v x %v", major, minor)
+	}
+}
+
+// Событие из POINTER_TOUCH_INFO несёт и точку, и время, и нажим с контактом.
+func TestTouchEventFromInfo(t *testing.T) {
+	var info pointerTouchInfo
+	info.PointerInfo.DwTime = 2500
+	info.TouchMask = touchMaskPressure | touchMaskContactArea | touchMaskOrientation
+	info.Pressure = 256
+	info.Orientation = 45
+	info.RcContact = rect{Left: 0, Top: 0, Right: 6, Bottom: 10}
+	ev := touchEventFromInfo(9, widget.TouchMoved, &info, 31, 41)
+	if ev.ID != 9 || ev.X != 31 || ev.Y != 41 || ev.Phase != widget.TouchMoved || ev.Time != 2500*time.Millisecond {
+		t.Errorf("основа события: %+v", ev)
+	}
+	if ev.Pressure != 0.25 || ev.Major != 10 || ev.Minor != 6 || ev.Orientation != 45 {
+		t.Errorf("нажим/контакт: %+v", ev)
 	}
 }

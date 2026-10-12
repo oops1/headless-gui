@@ -13,6 +13,14 @@ package window
 // одного момента группирует frame; мы доставляем каждое событие сразу, в порядке
 // прихода, — для приёмника результат тот же, а задержки на ожидание frame нет.
 //
+// Площадь контакта (wl_touch версии 6). События shape (большая и малая оси
+// эллипса) и orientation (угол большой оси) приходят ПОСЛЕ down или motion своего
+// момента и перед frame: они относятся к пальцам этого кадра, а не к
+// предыдущему событию. Поэтому, если компоновщик умеет версию 6, события не
+// доставляются сразу, а копятся до frame и уходят с добавленными осями; у версий
+// ниже frame по-прежнему не ждём. Давления в wl_touch нет вовсе — Pressure
+// остаётся нулём.
+//
 // Координаты — fixed 24.8 в ПОВЕРХНОСТНЫХ единицах; движок живёт в пикселях
 // буфера, поэтому умножаем на масштаб поверхности (как размеры окна, только в
 // обратную сторону: configure делает fromSurface).
@@ -42,8 +50,16 @@ const (
 	wlTouchEvMotion = 2
 	wlTouchEvFrame  = 3
 	wlTouchEvCancel = 4
+	// События версии 6.
+	wlTouchEvShape       = 5 // id, major(fixed), minor(fixed)
+	wlTouchEvOrientation = 6 // id, orientation(fixed, градусы)
 
 	wlTouchRelease = 0 // wl_touch.release (версия 3)
+
+	// wlSeatTouchShapeVersion — версия wl_seat (а с ней и wl_touch), с которой
+	// у касаний есть shape и orientation.
+	wlSeatTouchShapeVersion = 6
+	wlSeatRelease           = 3 // wl_seat.release (версия 5)
 )
 
 // wlFixedToFloat переводит wl_fixed (24.8) в число.
@@ -90,6 +106,33 @@ func parseWlTouchMotion(b []byte) (t uint32, id int32, x, y float64, ok bool) {
 		wlFixedToFloat(int32(binary.LittleEndian.Uint32(b[12:16]))), true
 }
 
+// parseWlTouchShape разбирает shape: id, major, minor (поверхностные единицы).
+func parseWlTouchShape(b []byte) (id int32, major, minor float64, ok bool) {
+	if len(b) < 12 {
+		return 0, 0, 0, false
+	}
+	return int32(binary.LittleEndian.Uint32(b[0:4])),
+		wlFixedToFloat(int32(binary.LittleEndian.Uint32(b[4:8]))),
+		wlFixedToFloat(int32(binary.LittleEndian.Uint32(b[8:12]))), true
+}
+
+// parseWlTouchOrientation разбирает orientation: id, угол в градусах.
+func parseWlTouchOrientation(b []byte) (id int32, deg float64, ok bool) {
+	if len(b) < 8 {
+		return 0, 0, false
+	}
+	return int32(binary.LittleEndian.Uint32(b[0:4])),
+		wlFixedToFloat(int32(binary.LittleEndian.Uint32(b[4:8]))), true
+}
+
+// wlShape — последняя известная форма контакта пальца (поверхностные единицы и
+// градусы); хранится до отрыва: shape и orientation приходят только когда
+// меняются.
+type wlShape struct {
+	major, minor float64
+	orient       float64
+}
+
 // wlTouchPoint — палец, известный приёмнику.
 type wlTouchPoint struct {
 	popup   bool    // упал на попап
@@ -111,7 +154,14 @@ type wlTouchSink struct {
 	// serial запоминает serial ввода (нужен xdg_popup.grab и буферу обмена).
 	serial func(uint32)
 
+	// shapes сообщает, что wl_touch версии 6 и события надо копить до frame,
+	// чтобы приложить к ним форму контакта (nil — нет).
+	shapes func() bool
+
 	points map[int32]*wlTouchPoint
+	// shape — форма контакта пальцев; pend — события, ждущие frame.
+	shape map[int32]wlShape
+	pend  []widget.TouchEvent
 	// popupPrimary — палец, превращённый в мышь попапа.
 	popupPrimary    int32
 	hasPopupPrimary bool
@@ -130,12 +180,55 @@ func (t *wlTouchSink) px(v float64) int {
 
 func wlTime(ms uint32) time.Duration { return time.Duration(ms) * time.Millisecond }
 
-// emit отдаёт событие приёмнику окна.
+// emit отдаёт событие приёмнику окна: сразу или, если компоновщик присылает
+// форму контакта, после frame.
 func (t *wlTouchSink) emit(id int32, ph widget.TouchPhase, ms uint32, x, y int) {
 	if t.onTouch == nil {
 		return
 	}
-	t.onTouch(widget.TouchEvent{ID: int(id), X: x, Y: y, Phase: ph, Time: wlTime(ms)})
+	ev := widget.TouchEvent{ID: int(id), X: x, Y: y, Phase: ph, Time: wlTime(ms)}
+	if t.shapes != nil && t.shapes() {
+		t.pend = append(t.pend, ev)
+		return
+	}
+	t.onTouch(ev)
+}
+
+// flush отдаёт накопленные события с формой контакта; зовётся на frame, отмене и
+// выключении. Оси переводятся в пиксели буфера тем же масштабом, что и координаты.
+func (t *wlTouchSink) flush() {
+	pend := t.pend
+	t.pend = nil
+	k := 1.0
+	if t.scale != nil {
+		if s := t.scale(); s > 0 {
+			k = s
+		}
+	}
+	for _, ev := range pend {
+		if sh, ok := t.shape[int32(ev.ID)]; ok && sh.major > 0 {
+			ev.Major, ev.Minor, ev.Orientation = sh.major*k, sh.minor*k, sh.orient
+		}
+		if t.onTouch != nil {
+			t.onTouch(ev)
+		}
+		if ev.Phase.Terminal() {
+			delete(t.shape, int32(ev.ID))
+		}
+	}
+}
+
+// noteShape запоминает форму контакта известного пальца.
+func (t *wlTouchSink) noteShape(id int32, f func(*wlShape)) {
+	if t.points[id] == nil {
+		return
+	}
+	if t.shape == nil {
+		t.shape = make(map[int32]wlShape)
+	}
+	sh := t.shape[id]
+	f(&sh)
+	t.shape[id] = sh
 }
 
 // handle разбирает одно событие wl_touch.
@@ -217,14 +310,27 @@ func (t *wlTouchSink) handle(opcode uint16, b []byte) {
 	case wlTouchEvCancel:
 		t.cancelAll()
 
+	case wlTouchEvShape:
+		if id, major, minor, ok := parseWlTouchShape(b); ok {
+			t.noteShape(id, func(s *wlShape) { s.major, s.minor = major, minor })
+		}
+
+	case wlTouchEvOrientation:
+		if id, deg, ok := parseWlTouchOrientation(b); ok {
+			t.noteShape(id, func(s *wlShape) { s.orient = deg })
+		}
+
 	case wlTouchEvFrame:
-		// Группировка событий одного момента: доставляем сразу, ждать нечего.
+		// Группировка событий одного момента. Без формы контакта доставляем
+		// сразу и ждать нечего; с формой (версия 6) события копились до сих пор.
+		t.flush()
 	}
 }
 
 // cancelAll отменяет все касания: компоновщик забрал их себе (системный жест,
 // потеря ввода). Отпускания мы уже не получим.
 func (t *wlTouchSink) cancelAll() {
+	t.flush() // всё, что уже случилось, доходит до отмены
 	for id, p := range t.points {
 		if p.popup {
 			if t.hasPopupPrimary && t.popupPrimary == id {
@@ -236,14 +342,19 @@ func (t *wlTouchSink) cancelAll() {
 			}
 			continue
 		}
-		t.emit(id, widget.TouchCancelled, 0, p.x, p.y)
+		if t.onTouch != nil {
+			t.onTouch(widget.TouchEvent{ID: int(id), X: p.x, Y: p.y, Phase: widget.TouchCancelled})
+		}
 	}
 	t.points = nil
+	t.shape = nil
 	t.hasPopupPrimary = false
 }
 
 // drop молча забывает все касания (приём выключен: отменять уже некому).
 func (t *wlTouchSink) drop() {
 	t.points = nil
+	t.shape = nil
+	t.pend = nil
 	t.hasPopupPrimary = false
 }

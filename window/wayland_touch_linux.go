@@ -9,6 +9,14 @@ package window
 // wl_touch, остаётся на прежнем содержании ввода — указатель, а касания для него
 // компоновщик (если он это умеет) превращает в указатель сам. Разбор событий —
 // в waylandtouch.go.
+//
+// Форма контакта (shape, orientation) есть только у wl_touch версии 6, а версию
+// wl_touch задаёт сиденье, из которого он создан. Основное сиденье окна связано
+// на версии 4 (wlSeatVersion) намеренно: выше меняются события указателя. Поэтому
+// для касаний, если компоновщик объявил wl_seat не ниже 6, привязывается ВТОРОЙ
+// объект wl_seat той же глобали на версии 6 — только ради get_touch; указатель и
+// клавиатура остаются на старом. События этого второго объекта (capabilities,
+// name) окну не нужны и отбрасываются.
 
 import (
 	"sync/atomic"
@@ -18,9 +26,13 @@ import (
 
 // wlTouch — состояние касаний окна Wayland.
 type wlTouch struct {
-	want   atomic.Bool   // окно просило касания
-	id     atomic.Uint32 // объект wl_touch; 0 — не привязан
-	caps   atomic.Uint32 // последние возможности wl_seat
+	want atomic.Bool   // окно просило касания
+	id   atomic.Uint32 // объект wl_touch; 0 — не привязан
+	caps atomic.Uint32 // последние возможности wl_seat
+	// seat6 — второй wl_seat на версии 6, из которого взят wl_touch (0 — касания
+	// идут от основного сиденья без формы контакта). shaped — wl_touch версии 6.
+	seat6  atomic.Uint32
+	shaped atomic.Bool
 	cb     atomic.Pointer[func(ev widget.TouchEvent)]
 	sink   wlTouchSink // только цикл событий
 	inited bool        // sink связан с окном
@@ -54,7 +66,13 @@ func (w *WaylandWindow) ensureTouch(caps uint32) {
 	if !w.touch.id.CompareAndSwap(0, id) {
 		return // уже привязан (id остался неиспользованным — id не переиспользуем)
 	}
-	w.send(newWlMsg(w.seatID, wlSeatGetTouch).putUint(id), -1)
+	seat := w.seatID
+	if w.gSeat != 0 && w.gSeatVer >= wlSeatTouchShapeVersion {
+		seat = w.bind(w.gSeat, "wl_seat", wlSeatTouchShapeVersion)
+		w.touch.seat6.Store(seat)
+		w.touch.shaped.Store(true)
+	}
+	w.send(newWlMsg(seat, wlSeatGetTouch).putUint(id), -1)
 }
 
 // noteSeatCaps разбирает возможности сиденья: берёт wl_touch, когда он нужен, и
@@ -66,6 +84,10 @@ func (w *WaylandWindow) noteSeatCaps(caps uint32) {
 		if id := w.touch.id.Swap(0); id != 0 {
 			w.touchSink().cancelAll()
 			w.send(newWlMsg(id, wlTouchRelease), -1)
+			if s6 := w.touch.seat6.Swap(0); s6 != 0 {
+				w.send(newWlMsg(s6, wlSeatRelease), -1)
+			}
+			w.touch.shaped.Store(false)
 		}
 	}
 }
@@ -76,6 +98,7 @@ func (w *WaylandWindow) touchSink() *wlTouchSink {
 	if !w.touch.inited {
 		w.touch.inited = true
 		t.scale = w.scaleFactor
+		t.shapes = w.touch.shaped.Load
 		t.popupFor = func(surf uint32) (uintptr, bool) {
 			if pop := w.popupForSurface(surf); pop != nil {
 				return pop.id, true
