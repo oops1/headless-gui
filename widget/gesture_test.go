@@ -39,14 +39,20 @@ func TestGesture_Tap(t *testing.T) {
 	}
 }
 
+// Палец, пролежавший дольше срока, — долгое нажатие, а не тап. Событие отрыва
+// само «доводит» просроченное долгое нажатие, так что оно приходит и тогда,
+// когда владелец Tick не звал.
 func TestGesture_LongPressIsNotTap(t *testing.T) {
 	var r GestureRecognizer
 	got := feedAll(&r,
 		tev(1, 50, 50, TouchBegan, 0),
 		tev(1, 50, 50, TouchEnded, 700),
 	)
-	if len(got) != 0 {
-		t.Errorf("долгое нажатие дало жесты: %v", got)
+	if len(got) != 1 {
+		t.Fatalf("жестов %d (%v), ждал один LongPress", len(got), got)
+	}
+	if lp, ok := got[0].(LongPress); !ok || lp.X != 50 || lp.Y != 50 {
+		t.Errorf("получил %+v", got[0])
 	}
 }
 
@@ -471,5 +477,265 @@ func TestTouchPhase_String(t *testing.T) {
 	}
 	if TouchBegan.Terminal() || TouchMoved.Terminal() || !TouchEnded.Terminal() || !TouchCancelled.Terminal() {
 		t.Error("Terminal")
+	}
+}
+
+// Долгое нажатие по Tick: до срока тишина, в срок — LongPress, второй раз не
+// приходит, а отрыв после него тапа не даёт.
+func TestGesture_LongPressByTick(t *testing.T) {
+	var r GestureRecognizer
+	r.Feed(tev(1, 50, 60, TouchBegan, 1000))
+	at, ok := r.NextDeadline()
+	if !ok || at != ms(1500) {
+		t.Fatalf("NextDeadline = %v, %v, ждал 1.5с", at, ok)
+	}
+	if got := r.Tick(ms(1499)); len(got) != 0 {
+		t.Errorf("до срока: %v", got)
+	}
+	got := r.Tick(ms(1500))
+	if len(got) != 1 {
+		t.Fatalf("в срок жестов %d (%v)", len(got), got)
+	}
+	if lp, ok := got[0].(LongPress); !ok || lp.X != 50 || lp.Y != 60 {
+		t.Errorf("получил %+v", got[0])
+	}
+	if got := r.Tick(ms(2500)); len(got) != 0 {
+		t.Errorf("долгое нажатие пришло дважды: %v", got)
+	}
+	if _, ok := r.NextDeadline(); ok {
+		t.Error("срок остался после выдачи")
+	}
+	if got := r.Feed(tev(1, 50, 60, TouchEnded, 1600)); len(got) != 0 {
+		t.Errorf("отрыв после долгого нажатия дал %v (тап не нужен)", got)
+	}
+	// Следующее касание — снова с чистого листа.
+	r.Feed(tev(2, 5, 5, TouchBegan, 3000))
+	if _, ok := r.NextDeadline(); !ok {
+		t.Error("новое касание не взводит долгое нажатие")
+	}
+}
+
+// Сдвиг дальше порога тапа лишает палец права на долгое нажатие; дрожь в пределах
+// порога — нет, и жест называет последнюю точку.
+func TestGesture_LongPressNeedsStillFinger(t *testing.T) {
+	var r GestureRecognizer
+	r.Feed(tev(1, 50, 50, TouchBegan, 0))
+	r.Feed(tev(1, 55, 52, TouchMoved, 100)) // дрожь
+	got := r.Tick(ms(600))
+	if len(got) != 1 {
+		t.Fatalf("после дрожи жестов %d", len(got))
+	}
+	if lp := got[0].(LongPress); lp.X != 55 || lp.Y != 52 {
+		t.Errorf("точка %+v, ждал последнюю (55,52)", lp)
+	}
+
+	var r2 GestureRecognizer
+	r2.Feed(tev(1, 50, 50, TouchBegan, 0))
+	g := r2.Feed(tev(1, 50, 80, TouchMoved, 100)) // ушёл: Pan
+	if len(g) != 1 {
+		t.Fatalf("Pan не начался: %v", g)
+	}
+	if _, ok := r2.NextDeadline(); ok {
+		t.Error("тянущий палец ждёт долгого нажатия")
+	}
+	if got := r2.Tick(ms(900)); len(got) != 0 {
+		t.Errorf("тянущий палец дал %v", got)
+	}
+
+	// Ушёл дальше тапа, но не дальше PanSlop (пороги разведены): долгого нажатия
+	// тоже нет, хотя Pan ещё не начался.
+	r3 := GestureRecognizer{Config: GestureConfig{TapSlop: 5, PanSlop: 30}}
+	r3.Feed(tev(1, 50, 50, TouchBegan, 0))
+	r3.Feed(tev(1, 50, 60, TouchMoved, 100))
+	if got := r3.Tick(ms(900)); len(got) != 0 {
+		t.Errorf("палец за порогом тапа дал %v", got)
+	}
+}
+
+// Событие, пришедшее позже срока, называет долгое нажатие первым: палец лежал на
+// месте до этого события, и жест относится к прежней точке.
+func TestGesture_LongPressFlushedByLaterEvent(t *testing.T) {
+	var r GestureRecognizer
+	r.Feed(tev(1, 50, 50, TouchBegan, 0))
+	got := r.Feed(tev(1, 50, 120, TouchMoved, 800)) // лежал 800 мс, потом ушёл
+	if len(got) != 1 {
+		t.Fatalf("жестов %d (%v)", len(got), got)
+	}
+	if lp, ok := got[0].(LongPress); !ok || lp.X != 50 || lp.Y != 50 {
+		t.Errorf("получил %+v, ждал LongPress в прежней точке", got[0])
+	}
+	// События без метки времени срок не двигают.
+	var r2 GestureRecognizer
+	r2.Feed(TouchEvent{ID: 1, X: 1, Y: 1, Phase: TouchBegan})
+	if got := r2.Feed(TouchEvent{ID: 1, X: 1, Y: 1, Phase: TouchMoved}); len(got) != 0 {
+		t.Errorf("событие без времени дало %v", got)
+	}
+}
+
+// После долгого нажатия тот же палец не тянет и не смахивает: меню, открытое по
+// долгому нажатию, не должно прокручиваться дрожащим пальцем.
+func TestGesture_NoPanAfterLongPress(t *testing.T) {
+	var r GestureRecognizer
+	r.Feed(tev(1, 50, 50, TouchBegan, 0))
+	r.Tick(ms(500))
+	got := feedAll(&r,
+		tev(1, 50, 100, TouchMoved, 520),
+		tev(1, 50, 200, TouchMoved, 540),
+		tev(1, 50, 300, TouchEnded, 560),
+	)
+	if len(got) != 0 {
+		t.Errorf("после долгого нажатия получено %v", got)
+	}
+	if r.Active() != 0 {
+		t.Errorf("пальцев осталось %d", r.Active())
+	}
+}
+
+// Второй палец после долгого нажатия начинает щипок как обычно, а при двух
+// пальцах долгого нажатия нет.
+func TestGesture_LongPressAndSecondFinger(t *testing.T) {
+	var r GestureRecognizer
+	r.Feed(tev(1, 100, 100, TouchBegan, 0))
+	r.Feed(tev(2, 200, 100, TouchBegan, 100))
+	if _, ok := r.NextDeadline(); ok {
+		t.Error("с двумя пальцами ждём долгого нажатия")
+	}
+	if got := r.Tick(ms(900)); len(got) != 0 {
+		t.Errorf("два пальца дали %v", got)
+	}
+
+	var r2 GestureRecognizer
+	r2.Feed(tev(1, 100, 100, TouchBegan, 0))
+	r2.Tick(ms(500))
+	r2.Feed(tev(2, 200, 100, TouchBegan, 600))
+	got := feedAll(&r2, tev(2, 260, 100, TouchMoved, 650))
+	if len(got) != 1 {
+		t.Fatalf("щипок после долгого нажатия: %v", got)
+	}
+	if _, ok := got[0].(Pinch); !ok {
+		t.Errorf("получил %+v", got[0])
+	}
+}
+
+func TestGesture_LongPressConfig(t *testing.T) {
+	r := GestureRecognizer{Config: GestureConfig{LongPressDuration: 200 * time.Millisecond}}
+	r.Feed(tev(1, 5, 5, TouchBegan, 0))
+	if at, ok := r.NextDeadline(); !ok || at != ms(200) {
+		t.Errorf("срок %v, %v, ждал 200 мс", at, ok)
+	}
+	if got := r.Tick(ms(200)); len(got) != 1 {
+		t.Errorf("по настроенному сроку: %v", got)
+	}
+	if d := DefaultGestureConfig().LongPressDuration; d != 500*time.Millisecond {
+		t.Errorf("срок по умолчанию %v", d)
+	}
+	off := GestureRecognizer{Config: GestureConfig{LongPressDuration: -1}}
+	off.Feed(tev(1, 5, 5, TouchBegan, 0))
+	if _, ok := off.NextDeadline(); ok {
+		t.Error("отключённое долгое нажатие взведено")
+	}
+	if got := off.Feed(tev(1, 5, 5, TouchEnded, 2000)); len(got) != 0 {
+		t.Errorf("отключённое долгое нажатие дало %v", got)
+	}
+}
+
+func TestGesture_LongPressCancelledAndReset(t *testing.T) {
+	var r GestureRecognizer
+	r.Feed(tev(1, 5, 5, TouchBegan, 0))
+	r.Feed(tev(1, 5, 5, TouchCancelled, 100))
+	if _, ok := r.NextDeadline(); ok {
+		t.Error("после отмены срок остался")
+	}
+	r.Feed(tev(2, 5, 5, TouchBegan, 200))
+	r.Tick(ms(700))
+	r.Reset()
+	r.Feed(tev(3, 9, 9, TouchBegan, 1000))
+	if _, ok := r.NextDeadline(); !ok {
+		t.Error("после Reset долгое нажатие не взводится заново")
+	}
+	if got := r.Feed(tev(3, 9, 9, TouchEnded, 1100)); len(got) != 1 {
+		t.Errorf("тап после Reset: %v", got)
+	}
+}
+
+// TouchGestures сам заводит таймер на оставшийся до срока отрезок и снимает его,
+// как только долгое нажатие стало невозможным.
+func TestTouchGestures_LongPressTimer(t *testing.T) {
+	var got []Gesture
+	h := &TouchGestures{OnGesture: func(g Gesture) { got = append(got, g) }}
+
+	h.OnTouch(tev(1, 40, 50, TouchBegan, 1000))
+	if h.lp == nil || h.lp.duration != 500*time.Millisecond {
+		t.Fatalf("таймер не заведён на 500 мс: %+v", h.lp)
+	}
+	base := time.Now()
+	StepAnimations(base)
+	StepAnimations(base.Add(499 * time.Millisecond))
+	if len(got) != 0 {
+		t.Fatalf("до срока: %v", got)
+	}
+	StepAnimations(base.Add(501 * time.Millisecond))
+	if len(got) != 1 {
+		t.Fatalf("в срок жестов %d (%v)", len(got), got)
+	}
+	if lp, ok := got[0].(LongPress); !ok || lp.X != 40 || lp.Y != 50 {
+		t.Errorf("получил %+v", got[0])
+	}
+	if h.lp != nil {
+		t.Error("отработавший таймер остался")
+	}
+	h.OnTouch(tev(1, 40, 50, TouchEnded, 1700))
+	if len(got) != 1 {
+		t.Errorf("отрыв после долгого нажатия: %v", got)
+	}
+
+	// Отрыв до срока снимает таймер, и тот ничего не даёт.
+	got = nil
+	h.OnTouch(tev(2, 40, 50, TouchBegan, 5000))
+	h.OnTouch(tev(2, 40, 50, TouchEnded, 5100))
+	if h.lp != nil {
+		t.Error("таймер пережил отрыв")
+	}
+	if len(got) != 1 {
+		t.Fatalf("тап: %v", got)
+	}
+	got = nil
+	b2 := time.Now()
+	StepAnimations(b2)
+	StepAnimations(b2.Add(time.Second))
+	if len(got) != 0 {
+		t.Errorf("снятый таймер сработал: %v", got)
+	}
+
+	// Палец ушёл — таймера нет; Reset тоже снимает.
+	h.OnTouch(tev(3, 40, 50, TouchBegan, 8000))
+	h.OnTouch(tev(3, 40, 90, TouchMoved, 8050))
+	if h.lp != nil {
+		t.Error("таймер пережил Pan")
+	}
+	h.OnTouch(tev(3, 40, 90, TouchEnded, 8100))
+	h.OnTouch(tev(4, 1, 1, TouchBegan, 9000))
+	if h.lp == nil {
+		t.Fatal("таймер не взведён")
+	}
+	h.Reset()
+	if h.lp != nil || h.Recognizer.Active() != 0 {
+		t.Error("Reset не снял таймер и касания")
+	}
+}
+
+// Даже с очень терпеливым TapMaxDuration палец, давший долгое нажатие, тапа не
+// даёт: одно касание — один жест.
+func TestGesture_LongPressSuppressesTap(t *testing.T) {
+	r := GestureRecognizer{Config: GestureConfig{TapMaxDuration: 5 * time.Second}}
+	got := feedAll(&r,
+		tev(1, 50, 50, TouchBegan, 0),
+		tev(1, 50, 50, TouchEnded, 900),
+	)
+	if len(got) != 1 {
+		t.Fatalf("жестов %d (%v), ждал один LongPress", len(got), got)
+	}
+	if _, ok := got[0].(LongPress); !ok {
+		t.Errorf("получил %+v", got[0])
 	}
 }

@@ -13,6 +13,16 @@ package widget
 //     — с Count == 2, и приложение само решает, ждать ли ему.
 //   - Pan — один палец ушёл дальше PanSlop и тянет. Приходит потоком Began, Changed…,
 //     Ended (или Cancelled). Delta — сдвиг с прошлого события, Total — от начала.
+//   - LongPress — палец лежит на месте дольше LongPressDuration (по умолчанию
+//     500 мс) и не ушёл дальше TapSlop. Приходит, пока палец ещё на экране, а не
+//     при отрыве, поэтому ему нужны часы: у распознавателя нет ни горутин, ни
+//     таймеров, и время в него приносит владелец — либо событиями (каждое
+//     событие с Time сначала «доводит» просроченное долгое нажатие), либо
+//     вызовом Tick(now); когда звать Tick, говорит NextDeadline. TouchGestures
+//     делает это сам через анимацию движка. После LongPress тап не выдаётся, а
+//     дальнейшее движение того же пальца Pan не порождает (как в Android: меню
+//     по долгому нажатию и прокрутка под ним не уживаются); второй палец щипок
+//     начинает как обычно.
 //   - Swipe — быстрый «мазок»: палец оторван на скорости не ниже SwipeMinVelocity,
 //     пройдя не меньше SwipeMinDistance вдоль одной из осей. Приходит ПОСЛЕ Ended
 //     того Pan, из которого вырос: приложение, которому нужно только листание,
@@ -65,6 +75,10 @@ type GestureConfig struct {
 	// SwipeVelocityWindow — по какому отрезку перед отрывом считается скорость.
 	// Палец, остановившийся перед отрывом, свайпа не даёт. По умолчанию 100 мс.
 	SwipeVelocityWindow time.Duration
+	// LongPressDuration — как долго палец должен пролежать на месте, чтобы
+	// получилось долгое нажатие. По умолчанию 500 мс; отрицательное значение
+	// отключает долгое нажатие вовсе (нуль — значение по умолчанию, как у всех).
+	LongPressDuration time.Duration
 	// SwipeAxisRatio — во сколько раз скорость вдоль главной оси должна
 	// превосходить скорость поперёк, иначе жест слишком «косой» и свайпом не
 	// считается. По умолчанию 1.5 (угол от оси не больше примерно 34°).
@@ -83,6 +97,7 @@ func DefaultGestureConfig() GestureConfig {
 		SwipeMinDistance:    48,
 		SwipeMinVelocity:    350,
 		SwipeVelocityWindow: 100 * time.Millisecond,
+		LongPressDuration:   500 * time.Millisecond,
 		SwipeAxisRatio:      1.5,
 	}
 }
@@ -120,6 +135,9 @@ func (c GestureConfig) withDefaults() GestureConfig {
 	if c.SwipeAxisRatio > 0 {
 		d.SwipeAxisRatio = c.SwipeAxisRatio
 	}
+	if c.LongPressDuration != 0 {
+		d.LongPressDuration = c.LongPressDuration
+	}
 	return d
 }
 
@@ -146,6 +164,11 @@ type Tap struct {
 	X, Y int
 	// Count — номер тапа в серии: 1 — одиночный, 2 — двойной и так далее.
 	Count int
+}
+
+// LongPress — палец лежит на месте дольше LongPressDuration. X, Y — где он лежит.
+type LongPress struct {
+	X, Y int
 }
 
 // Pan — перетаскивание одним пальцем.
@@ -210,10 +233,11 @@ type Swipe struct {
 	Start, End image.Point
 }
 
-func (Tap) isGesture()   {}
-func (Pan) isGesture()   {}
-func (Pinch) isGesture() {}
-func (Swipe) isGesture() {}
+func (Tap) isGesture()       {}
+func (LongPress) isGesture() {}
+func (Pan) isGesture()       {}
+func (Pinch) isGesture()     {}
+func (Swipe) isGesture()     {}
 
 // gMode — состояние распознавателя.
 type gMode int
@@ -259,6 +283,10 @@ type GestureRecognizer struct {
 	touches []*gTouch
 	mode    gMode
 
+	// lpFired — долгое нажатие уже выдано единственному пальцу: тапа и Pan из
+	// него больше не будет.
+	lpFired bool
+
 	// Перетаскивание: где палец был при последнем отданном событии.
 	panLast image.Point
 
@@ -285,6 +313,7 @@ func (r *GestureRecognizer) Reset() {
 	r.mode = gIdle
 	r.pinchStarted = false
 	r.hasTap = false
+	r.lpFired = false
 }
 
 // Active — сколько пальцев сейчас известно распознавателю.
@@ -309,7 +338,49 @@ func (r *GestureRecognizer) remove(id int) {
 	if len(r.touches) == 0 {
 		r.mode = gIdle
 		r.pinchStarted = false
+		r.lpFired = false
 	}
+}
+
+// longPressDue — единственный палец лежит на месте и долгое нажатие ещё не
+// выдано; возвращает палец и момент (по часам событий), когда оно наступает.
+func (r *GestureRecognizer) longPressDue(cfg GestureConfig) (*gTouch, time.Duration, bool) {
+	if r.mode != gSingle || len(r.touches) != 1 || r.lpFired || cfg.LongPressDuration <= 0 {
+		return nil, 0, false
+	}
+	t := r.touches[0]
+	if dist(t.sx, t.sy, t.x, t.y) > float64(cfg.TapSlop) {
+		return nil, 0, false // ушёл дальше тапа: долгим нажатием уже не станет
+	}
+	return t, t.st + cfg.LongPressDuration, true
+}
+
+// NextDeadline — когда (по часам событий, то есть в тех же единицах, что
+// TouchEvent.Time) надо вызвать Tick, чтобы получить долгое нажатие. ok=false —
+// ждать нечего: пальцев нет или их больше одного, палец ушёл дальше тапа, долгое
+// нажатие уже выдано или отключено. Владельцу, который заводит таймер сам:
+// после каждого Feed спросить срок и по наступлении позвать Tick(срок).
+func (r *GestureRecognizer) NextDeadline() (at time.Duration, ok bool) {
+	_, at, ok = r.longPressDue(r.Config.withDefaults())
+	return at, ok
+}
+
+// Tick сообщает распознавателю, что на часах событий now, и возвращает жесты,
+// которые от времени наступили: сейчас это только LongPress. Вызывать можно
+// когда угодно и сколько угодно — до срока он ничего не даёт. Часы те же, что у
+// TouchEvent.Time (см. NextDeadline); у распознавателя нет своих.
+func (r *GestureRecognizer) Tick(now time.Duration) []Gesture {
+	return r.expire(now, r.Config.withDefaults(), nil)
+}
+
+// expire выдаёт долгое нажатие, если к моменту now его срок прошёл.
+func (r *GestureRecognizer) expire(now time.Duration, cfg GestureConfig, out []Gesture) []Gesture {
+	t, at, ok := r.longPressDue(cfg)
+	if !ok || now < at {
+		return out
+	}
+	r.lpFired = true
+	return append(out, LongPress{X: t.x, Y: t.y})
 }
 
 // Feed принимает событие касания и возвращает жесты, которые из него
@@ -317,6 +388,11 @@ func (r *GestureRecognizer) remove(id int) {
 func (r *GestureRecognizer) Feed(ev TouchEvent) []Gesture {
 	cfg := r.Config.withDefaults()
 	var out []Gesture
+	// Долгое нажатие, чей срок вышел до этого события, наступило раньше него: в
+	// порядке рассказа оно идёт первым (палец отпустили или сдвинули уже после).
+	if ev.Time > 0 {
+		out = r.expire(ev.Time, cfg, out)
+	}
 	switch ev.Phase {
 	case TouchBegan:
 		if r.find(ev.ID) != nil {
@@ -339,6 +415,7 @@ func (r *GestureRecognizer) began(ev TouchEvent, cfg GestureConfig, out []Gestur
 	switch len(r.touches) {
 	case 1:
 		r.mode = gSingle
+		r.lpFired = false
 	case 2:
 		switch r.mode {
 		case gPan:
@@ -377,6 +454,9 @@ func (r *GestureRecognizer) moved(ev TouchEvent, cfg GestureConfig, out []Gestur
 
 	switch r.mode {
 	case gSingle:
+		if r.lpFired {
+			break // после долгого нажатия палец тянуть уже нечего
+		}
 		if dist(t.sx, t.sy, t.x, t.y) > float64(cfg.PanSlop) {
 			r.mode = gPan
 			r.panLast = image.Pt(t.x, t.y)
@@ -442,7 +522,7 @@ func (r *GestureRecognizer) finish(ev TouchEvent, cfg GestureConfig, out []Gestu
 
 	switch r.mode {
 	case gSingle:
-		if !cancelled {
+		if !cancelled && !r.lpFired {
 			if tap, ok := r.tap(t, ev.Time, cfg); ok {
 				out = append(out, tap)
 			}
@@ -587,17 +667,78 @@ func mid(a, b *gTouch) image.Point {
 //	v.OnGesture = func(g widget.Gesture) { switch g := g.(type) { case widget.Pinch: … } }
 //
 // Всегда принимает касание (возвращает true на любой фазе).
+//
+// Долгое нажатие обслуживает сама: пока единственный палец лежит на месте, она
+// заводит анимацию движка (Animate) на оставшийся до срока отрезок и по её
+// завершении зовёт Recognizer.Tick. Анимация идёт на горутине движка, как и
+// OnTouch, поэтому OnGesture с LongPress вызывается там же.
 type TouchGestures struct {
 	Recognizer GestureRecognizer
 	OnGesture  func(Gesture)
+
+	lp    *Animation    // ожидающий таймер долгого нажатия
+	lpAt  time.Duration // срок, на который он заведён (часы событий)
+	lastT time.Duration // время последнего события с меткой
 }
 
 // OnTouch реализует TouchHandler.
 func (h *TouchGestures) OnTouch(ev TouchEvent) bool {
-	for _, g := range h.Recognizer.Feed(ev) {
+	if ev.Time > 0 {
+		h.lastT = ev.Time
+	}
+	h.deliver(h.Recognizer.Feed(ev))
+	h.rearm()
+	return true
+}
+
+// Reset забывает все касания и снимает таймер долгого нажатия (виджет скрыт, и
+// конца касаний до него не дойдёт).
+func (h *TouchGestures) Reset() {
+	h.Recognizer.Reset()
+	h.stopTimer()
+}
+
+func (h *TouchGestures) deliver(gs []Gesture) {
+	for _, g := range gs {
 		if h.OnGesture != nil {
 			h.OnGesture(g)
 		}
 	}
-	return true
+}
+
+func (h *TouchGestures) stopTimer() {
+	if h.lp != nil {
+		h.lp.Stop()
+		h.lp = nil
+	}
+}
+
+// rearm приводит таймер долгого нажатия в соответствие с распознавателем: нужен
+// ровно один, на актуальный срок, и ни одного, когда ждать нечего.
+func (h *TouchGestures) rearm() {
+	at, ok := h.Recognizer.NextDeadline()
+	if !ok {
+		h.stopTimer()
+		return
+	}
+	if h.lp != nil && h.lp.Running() && h.lpAt == at {
+		return
+	}
+	h.stopTimer()
+	d := at - h.lastT
+	if d < 0 {
+		d = 0
+	}
+	h.lpAt = at
+	var a *Animation
+	a = Animate(d, nil, nil)
+	a.OnDone = func() {
+		if h.lp != a {
+			return
+		}
+		h.lp = nil
+		h.deliver(h.Recognizer.Tick(at))
+		h.rearm()
+	}
+	h.lp = a
 }
