@@ -43,6 +43,15 @@ type Monitor struct {
 	Scale float64
 	// Primary — основной монитор.
 	Primary bool
+
+	// id — внутренний ключ монитора в его бэкенде: Win32 — HMONITOR, X11 —
+	// номер в ответе RRGetMonitors (с единицы: он же индекс для
+	// _NET_WM_FULLSCREEN_MONITORS), Wayland — имя глобала wl_output в
+	// registry (одинаково у любого подключения к композитору). 0 — ключа нет
+	// (Monitor собран руками). По нему SetFullscreenOn находит «тот самый»
+	// монитор, даже если список переупорядочен, а Name пуст; запасные пути —
+	// Name и Bounds (matchMonitor).
+	id uint64
 }
 
 // monitorSource — бэкенд знает, на каком мониторе его окно. Необязательная
@@ -106,6 +115,35 @@ func monitorAt(list []Monitor, x, y int) (Monitor, bool) {
 	for _, m := range list {
 		if pt.In(m.Bounds) {
 			return m, true
+		}
+	}
+	return Monitor{}, false
+}
+
+// matchMonitor находит в списке монитор, который описывает m: сперва по
+// внутреннему ключу (он однозначен), затем по имени, затем по границам.
+// ok=false — такого монитора больше нет (его отключили, сменилась раскладка).
+// Возвращается запись СПИСКА, а не m: у неё свежие границы и ключ.
+func matchMonitor(list []Monitor, m Monitor) (Monitor, bool) {
+	if m.id != 0 {
+		for _, c := range list {
+			if c.id == m.id {
+				return c, true
+			}
+		}
+	}
+	if m.Name != "" {
+		for _, c := range list {
+			if c.Name == m.Name {
+				return c, true
+			}
+		}
+	}
+	if !m.Bounds.Empty() {
+		for _, c := range list {
+			if c.Bounds == m.Bounds {
+				return c, true
+			}
 		}
 	}
 	return Monitor{}, false

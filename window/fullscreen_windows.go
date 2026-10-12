@@ -68,6 +68,22 @@ func (w *Win32Window) SetFullscreen(on bool) bool {
 	return true
 }
 
+// SetFullscreenOn встаёт в полный экран на мониторе m (fullscreenOnBackend):
+// HMONITOR/имя/границы сверяются с текущим списком мониторов, окно ставится на
+// rcMonitor найденного. Окно, уже стоящее в полном экране, переезжает на него
+// без выхода из режима и без уведомлений: состояние не меняется.
+func (w *Win32Window) SetFullscreenOn(m Monitor) bool {
+	if w.hwnd == 0 {
+		return false
+	}
+	cur, ok := matchMonitor(platformMonitors(), m)
+	if !ok || cur.Bounds.Empty() {
+		return false
+	}
+	w.InvokeOnUIThread(func() { w.applyFullscreenOn(cur.Bounds) })
+	return true
+}
+
 // IsFullscreen — окно закрывает монитор. Реализует fullscreenBackend.
 func (w *Win32Window) IsFullscreen() bool { return w.fs.on.Load() }
 
@@ -125,7 +141,7 @@ func (w *Win32Window) applyFullscreen(on bool) {
 		return
 	}
 	if on {
-		w.enterFullscreen()
+		w.enterFullscreen(image.Rectangle{})
 	} else {
 		w.leaveFullscreen()
 	}
@@ -133,7 +149,28 @@ func (w *Win32Window) applyFullscreen(on bool) {
 	w.notifyFullscreen(on)
 }
 
-func (w *Win32Window) enterFullscreen() {
+// applyFullscreenOn — полный экран на прямоугольнике монитора target, на
+// потоке окна: вход, если окно ещё не в полном экране, иначе перенос.
+func (w *Win32Window) applyFullscreenOn(target image.Rectangle) {
+	if w.hwnd == 0 || target.Empty() {
+		return
+	}
+	if !w.fs.on.Load() {
+		w.enterFullscreen(target)
+		w.applyCorners()
+		w.notifyFullscreen(true)
+		return
+	}
+	// Уже в полном экране: перенос на другой монитор. Стиль и снимок для
+	// выхода остаются прежними; refitting не пускает вложенный refit.
+	w.fs.refitting = true
+	w.setWindowRect(target, swpNoownerzorder)
+	w.fs.refitting = false
+}
+
+// enterFullscreen входит в полный экран на прямоугольнике монитора monitor
+// (rcMonitor); пустой — на мониторе, где лежит окно.
+func (w *Win32Window) enterFullscreen(monitor image.Rectangle) {
 	zoomed, _, _ := procIsZoomed.Call(uintptr(w.hwnd))
 	if zoomed != 0 {
 		// Развёрнутое окно сначала возвращается в нормальное состояние:
@@ -147,7 +184,10 @@ func (w *Win32Window) enterFullscreen() {
 	w.fs.snap = snap
 	w.fs.mu.Unlock()
 
-	style, target := fsEnterPlan(snap.Style, w.monitorRectOfWindow())
+	if monitor.Empty() {
+		monitor = w.monitorRectOfWindow()
+	}
+	style, target := fsEnterPlan(snap.Style, monitor)
 	// Флаг — до первого же сообщения от SetWindowPos: WM_SIZE не должен
 	// записать «не развёрнуто» поверх запомненного значения.
 	w.maximized = snap.Maximized
@@ -216,6 +256,7 @@ func win32MonitorFromHandle(hmon uintptr) (Monitor, bool) {
 		Work:    image.Rect(int(mi.RcWork.Left), int(mi.RcWork.Top), int(mi.RcWork.Right), int(mi.RcWork.Bottom)),
 		Scale:   1,
 		Primary: mi.DwFlags&monitorInfoFPrimary != 0,
+		id:      uint64(hmon),
 	}
 	// GetDpiForMonitor — Windows 8.1+; без неё (или при ошибке) масштаб 1.
 	if procGetDpiForMonitor.Find() == nil {

@@ -109,6 +109,7 @@ type X11Window struct {
 	// Полный экран (x11_fullscreen_linux.go): атомы и состояние.
 	atomWMStateFullscreen uint32 // _NET_WM_STATE_FULLSCREEN
 	atomNetSupported      uint32 // _NET_SUPPORTED (что умеет оконный менеджер)
+	atomFsMonitors        uint32 // _NET_WM_FULLSCREEN_MONITORS (полный экран на выбранном мониторе)
 	fs                    x11Fullscreen
 
 	// disabled — окно заблокировано на время модального диалога (аналог
@@ -320,6 +321,7 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomNetActiveWindow = w.x11InternAtom("_NET_ACTIVE_WINDOW")
 	w.atomWMStateFullscreen = w.x11InternAtom("_NET_WM_STATE_FULLSCREEN")
 	w.atomNetSupported = w.x11InternAtom("_NET_SUPPORTED")
+	w.atomFsMonitors = w.x11InternAtom("_NET_WM_FULLSCREEN_MONITORS")
 	w.atomNetWMMoveResize = w.x11InternAtom("_NET_WM_MOVERESIZE")
 	w.atomUTF8String = w.x11InternAtom("UTF8_STRING")
 	w.clip = newX11Clipboard(w)

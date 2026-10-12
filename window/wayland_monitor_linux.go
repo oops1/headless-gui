@@ -293,7 +293,7 @@ func (i *wlOutputInfo) monitor() (Monitor, bool) {
 	if name == "" {
 		name = trimJoin(i.make, i.model)
 	}
-	return Monitor{Name: name, Bounds: b, Work: b, Scale: float64(scale)}, true
+	return Monitor{Name: name, Bounds: b, Work: b, Scale: float64(scale), id: uint64(i.global)}, true
 }
 
 func trimJoin(a, b string) string {

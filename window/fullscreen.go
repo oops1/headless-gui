@@ -43,6 +43,16 @@ type fullscreenBackend interface {
 	SetOnFullscreenChanged(fn func(on bool))
 }
 
+// fullscreenOnBackend — бэкенд умеет встать в полный экран на указанном
+// мониторе (SetFullscreenOn). Отдельный интерфейс по той же причине, что и
+// fullscreenBackend.
+type fullscreenOnBackend interface {
+	// SetFullscreenOn просит полный экран на мониторе m. Если окно уже в
+	// полном экране — переносит его на m. false — монитор не найден среди
+	// текущих (отключён) или оконная система выбор монитора не поддерживает.
+	SetFullscreenOn(m Monitor) bool
+}
+
 // fullscreenState — то, что окно помнит о полном экране само: колбэк
 // приложения и запрос, заданный до Run (бэкенда тогда ещё нет).
 type fullscreenState struct {
@@ -50,6 +60,7 @@ type fullscreenState struct {
 	onChange func(bool)
 	pre      bool // запрошенное до Run состояние
 	preSet   bool
+	preMon   *Monitor // монитор запроса до Run (SetFullscreenOn); nil — любой
 }
 
 // SetFullscreen переводит окно в полный экран (on) или возвращает обратно.
@@ -68,7 +79,7 @@ type fullscreenState struct {
 func (win *Window) SetFullscreen(on bool) bool {
 	if win.native == nil {
 		win.fs.mu.Lock()
-		win.fs.pre, win.fs.preSet = on, true
+		win.fs.pre, win.fs.preSet, win.fs.preMon = on, true, nil
 		win.fs.mu.Unlock()
 		return runtime.GOOS != "darwin"
 	}
@@ -77,6 +88,47 @@ func (win *Window) SetFullscreen(on bool) bool {
 		return false
 	}
 	return fb.SetFullscreen(on)
+}
+
+// SetFullscreenOn переводит окно в полный экран на выбранном мониторе m
+// (значение из Monitors, MonitorAt или MonitorOf). Выйти из него можно тем же
+// SetFullscreen(false); уведомления и итог — те же, что у SetFullscreen
+// (IsFullscreen, SetOnFullscreenChanged).
+//
+// Окно, которое уже в полном экране, переносится на m: на Win32 и Wayland без
+// выхода из режима, на X11 — через _NET_WM_FULLSCREEN_MONITORS, а если
+// менеджер его не объявил, то выходом, переносом и новым входом (приложение
+// получит false и сразу true).
+//
+//	Win32   окно встаёт на rcMonitor выбранного монитора;
+//	X11     окно переносится на монитор, затем _NET_WM_STATE_FULLSCREEN и,
+//	        если менеджер объявил, _NET_WM_FULLSCREEN_MONITORS;
+//	Wayland xdg_toplevel.set_fullscreen(wl_output) — композитор вправе
+//	        поступить по-своему (выбрать другой вывод), итог виден из
+//	        IsFullscreen и MonitorOf.
+//
+// false — запрос не принят: монитор уже отключён (m не нашёлся среди текущих
+// ни по ключу, ни по имени, ни по границам), нулевой Monitor{}, или бэкенд
+// выбора монитора не умеет (macOS). До Run запрос запоминается, и ответ
+// предварительный — «умеет ли платформа вообще»; если монитор к тому времени
+// исчез, окно встанет в обычный полный экран.
+func (win *Window) SetFullscreenOn(m Monitor) bool {
+	if m.id == 0 && m.Name == "" && m.Bounds.Empty() {
+		return false
+	}
+	if win.native == nil {
+		win.fs.mu.Lock()
+		win.fs.pre, win.fs.preSet = true, true
+		mc := m
+		win.fs.preMon = &mc
+		win.fs.mu.Unlock()
+		return runtime.GOOS != "darwin"
+	}
+	fb, ok := win.native.(fullscreenOnBackend)
+	if !ok {
+		return false
+	}
+	return fb.SetFullscreenOn(m)
 }
 
 // IsFullscreen сообщает, закрывает ли окно сейчас весь монитор. До Run и на
@@ -121,10 +173,16 @@ func (win *Window) setupFullscreen() {
 		})
 	})
 	win.fs.mu.Lock()
-	on, set := win.fs.pre, win.fs.preSet
-	win.fs.preSet = false
+	on, set, mon := win.fs.pre, win.fs.preSet, win.fs.preMon
+	win.fs.preSet, win.fs.preMon = false, nil
 	win.fs.mu.Unlock()
 	if set {
+		if mon != nil && on {
+			// Монитор мог исчезнуть к запуску окна — тогда обычный полный экран.
+			if fo, ok := win.native.(fullscreenOnBackend); ok && fo.SetFullscreenOn(*mon) {
+				return
+			}
+		}
 		fb.SetFullscreen(on)
 	}
 }

@@ -33,7 +33,10 @@ type x11Fullscreen struct {
 	// (_NET_SUPPORTED), и полного экрана в нём нет. Пишет Create до показа
 	// окна.
 	unsupported bool
-	onChange    atomic.Pointer[func(bool)]
+	// monitorsSupported — менеджер объявил _NET_WM_FULLSCREEN_MONITORS: полный
+	// экран на выбранном мониторе задаётся им, а окно с места не двигается.
+	monitorsSupported bool
+	onChange          atomic.Pointer[func(bool)]
 	// stale — менялось свойство _NET_WM_STATE: его надо перечитать. Читать на
 	// месте нельзя: событие может прийти посреди чужого запроса-ответа, и
 	// вложенный запрос перепутал бы ответы. Перечитывает цикл событий на
@@ -118,6 +121,76 @@ func (w *X11Window) x11DetectFullscreenSupport() {
 	if format == 32 && len(data) > 0 && !x11StateHas(data, w.atomWMStateFullscreen) {
 		w.fs.unsupported = true
 	}
+	if format == 32 {
+		w.fs.monitorsSupported = x11StateHas(data, w.atomFsMonitors)
+	}
+}
+
+// x11MonitorList возвращает мониторы X11 для SetFullscreenOn. Переменная —
+// чтобы тест не ходил на настоящий сервер (по умолчанию короткое отдельное
+// соединение, как у Monitors).
+var x11MonitorList = x11PlatformMonitors
+
+// SetFullscreenOn просит полный экран на мониторе m (fullscreenOnBackend).
+//
+// Монитор сверяется с текущим списком RandR (ключ — номер в RRGetMonitors, он
+// же индекс для EWMH, затем имя, затем границы). Дальше два пути.
+//
+//   - Менеджер объявил _NET_WM_FULLSCREEN_MONITORS: шлём ему индекс монитора
+//     (четыре края — один и тот же), затем _NET_WM_STATE_FULLSCREEN. Окно с
+//     места не двигается: по выходе из полного экрана оно вернётся туда, где
+//     было. Окно, уже стоящее в полном экране, просто переезжает.
+//   - Не объявил: окно переносится на левый верхний угол монитора, затем
+//     ADD _NET_WM_STATE_FULLSCREEN — менеджеры ставят полноэкранное окно на
+//     монитор, где оно лежит. Окно, уже стоящее в полном экране, сначала из
+//     него выходит (REMOVE), переносится и входит снова: приложение увидит
+//     false и сразу true. После выхода окно останется на новом мониторе.
+func (w *X11Window) SetFullscreenOn(m Monitor) bool {
+	if w.wid == 0 || w.atomNetWMState == 0 || w.atomWMStateFullscreen == 0 || w.fs.unsupported {
+		return false
+	}
+	cur, ok := matchMonitor(x11MonitorList(), m)
+	if !ok || cur.Bounds.Empty() || cur.id == 0 {
+		return false
+	}
+	on := w.fs.on.Load()
+	switch {
+	case w.fs.monitorsSupported && w.atomFsMonitors != 0:
+		w.x11Send(x11FullscreenMonitorsMessage(w.rootWin, w.wid, w.atomFsMonitors, uint32(cur.id-1)))
+	case on:
+		w.x11Send(x11NetWMStateMessage(w.rootWin, w.wid, w.atomNetWMState, netWMStateRemove, w.atomWMStateFullscreen))
+		w.SetPosition(cur.Bounds.Min.X, cur.Bounds.Min.Y)
+	default:
+		w.SetPosition(cur.Bounds.Min.X, cur.Bounds.Min.Y)
+	}
+	if !on || !w.fs.monitorsSupported || w.atomFsMonitors == 0 {
+		w.x11Send(x11NetWMStateMessage(w.rootWin, w.wid, w.atomNetWMState, netWMStateAdd, w.atomWMStateFullscreen))
+	}
+	return true
+}
+
+// x11FullscreenMonitorsMessage собирает ClientMessage _NET_WM_FULLSCREEN_MONITORS
+// корневому окну: окно wid должно занять монитор с индексом idx (верхний,
+// нижний, левый и правый край — один монитор). Чистая функция: раскладка
+// проверяется тестом.
+func x11FullscreenMonitorsMessage(root, wid, atom, idx uint32) []byte {
+	msg := make([]byte, 32)
+	msg[0] = 33 // ClientMessage
+	msg[1] = 32 // формат данных: 32 бита
+	binary.LittleEndian.PutUint32(msg[4:8], wid)
+	binary.LittleEndian.PutUint32(msg[8:12], atom)
+	for i := 0; i < 4; i++ { // top, bottom, left, right
+		binary.LittleEndian.PutUint32(msg[12+i*4:16+i*4], idx)
+	}
+	binary.LittleEndian.PutUint32(msg[28:32], 1) // источник — приложение
+
+	req := make([]byte, 44)
+	req[0] = 25                                 // SendEvent
+	binary.LittleEndian.PutUint16(req[2:4], 11) // длина запроса в словах
+	binary.LittleEndian.PutUint32(req[4:8], root)
+	binary.LittleEndian.PutUint32(req[8:12], 0x00180000) // SubstructureRedirect|SubstructureNotify
+	copy(req[12:], msg)
+	return req
 }
 
 // x11NoteWMStateChanged запоминает, что менеджер поменял _NET_WM_STATE окна.

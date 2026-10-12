@@ -6,6 +6,7 @@ import (
 	"image"
 	"runtime"
 	"testing"
+	"unsafe"
 )
 
 // Полный экран Win32 на настоящем окне: окно создаётся в этом же потоке, поэтому
@@ -132,6 +133,101 @@ func TestWin32Fullscreen_RefitAfterMove(t *testing.T) {
 	w.refitFullscreen()
 	if got := w.windowRect(); got != w.monitorRectOfWindow() {
 		t.Errorf("после refit окно %v, ждал монитор %v", got, w.monitorRectOfWindow())
+	}
+}
+
+// Полный экран на выбранном мониторе: окно встаёт на rcMonitor именно этого
+// монитора (с несколькими мониторами — на каждом по очереди, включая перенос
+// без выхода из режима), а исчезнувший монитор отвергается.
+func TestWin32Fullscreen_OnMonitor(t *testing.T) {
+	w := newFsWindow(t)
+	list := Monitors()
+	if len(list) == 0 {
+		t.Skip("мониторов нет")
+	}
+	var seen []bool
+	w.SetOnFullscreenChanged(func(on bool) { seen = append(seen, on) })
+
+	for _, m := range list {
+		cur, ok := matchMonitor(platformMonitors(), m)
+		if !ok {
+			t.Fatalf("монитор %+v не найден в текущем списке", m)
+		}
+		w.applyFullscreenOn(cur.Bounds)
+		if !w.IsFullscreen() {
+			t.Fatalf("на мониторе %q нет полного экрана", m.Name)
+		}
+		if got := w.windowRect(); got != m.Bounds {
+			t.Errorf("монитор %q: окно %v, ждал rcMonitor %v", m.Name, got, m.Bounds)
+		}
+		if got, ok := w.monitorOfWindow(); !ok || got.id != m.id {
+			t.Errorf("монитор %q: окно сообщает монитор %+v", m.Name, got)
+		}
+	}
+	// Перенос между мониторами не выходит из режима: одно уведомление «вошёл».
+	if len(seen) != 1 || !seen[0] {
+		t.Errorf("уведомления %v, ждал единственное [true]", seen)
+	}
+	// Окно встаёт именно на переданный прямоугольник, а не на монитор, где оно
+	// лежит сейчас (на одном мониторе это единственное, что отличает выбор от
+	// умолчания).
+	fake := image.Rect(list[0].Bounds.Min.X, list[0].Bounds.Min.Y, list[0].Bounds.Min.X+800, list[0].Bounds.Min.Y+600)
+	w.applyFullscreenOn(fake)
+	if got := w.windowRect(); got != fake {
+		t.Errorf("перенос на %v: окно %v", fake, got)
+	}
+	w.applyFullscreen(false)
+	if len(seen) != 2 || seen[1] {
+		t.Errorf("после выхода уведомления %v", seen)
+	}
+	// Вход сразу на заданный прямоугольник. Без applyCorners: регион окна
+	// (SetWindowRgn) шлёт WM_WINDOWPOSCHANGED, и refit вернул бы «монитор»
+	// ненастоящего размера на настоящий, а настоящий монитор уже совпадает.
+	w.enterFullscreen(fake)
+	if !w.IsFullscreen() || w.windowRect() != fake {
+		t.Errorf("вход на %v: полный экран=%v, окно %v", fake, w.IsFullscreen(), w.windowRect())
+	}
+	w.applyFullscreen(false)
+
+	// Вход прямо на нужный монитор (SetFullscreenOn → поток окна).
+	if w.SetFullscreenOn(Monitor{id: 0xDEAD, Name: "нет такого", Bounds: image.Rect(90000, 0, 91000, 800)}) {
+		t.Error("несуществующий монитор принят")
+	}
+	if w.SetFullscreenOn(Monitor{}) {
+		t.Error("нулевой Monitor принят")
+	}
+}
+
+var procPeekMessageW = user32.NewProc("PeekMessageW")
+
+// fsPumpMessages разбирает очередь сообщений потока окна (тест — поток окна).
+func fsPumpMessages() {
+	var m msg
+	for {
+		if r, _, _ := procPeekMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0, 1); r == 0 {
+			return
+		}
+		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
+	}
+}
+
+// SetFullscreenOn целиком: монитор из Monitors() → поток окна → rcMonitor.
+func TestWin32Fullscreen_SetFullscreenOnPumped(t *testing.T) {
+	w := newFsWindow(t)
+	for _, m := range Monitors() {
+		if !w.SetFullscreenOn(m) {
+			t.Fatalf("SetFullscreenOn(%q) отказал", m.Name)
+		}
+		fsPumpMessages()
+		if !w.IsFullscreen() || w.windowRect() != m.Bounds {
+			t.Errorf("монитор %q: полный экран=%v, окно %v, ждал %v",
+				m.Name, w.IsFullscreen(), w.windowRect(), m.Bounds)
+		}
+	}
+	w.SetFullscreen(false)
+	fsPumpMessages()
+	if w.IsFullscreen() {
+		t.Error("SetFullscreen(false) не вывел окно из полного экрана")
 	}
 }
 

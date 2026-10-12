@@ -42,13 +42,14 @@ func (w *X11Window) x11Monitors() []Monitor {
 	var out []Monitor
 	if major, ok := w.x11ExtensionMajor("RANDR"); ok && w.x11RandrAtLeast15(major) {
 		if reply, ok := w.x11Call(x11RRGetMonitorsRequest(major, w.rootWin)); ok {
-			for _, rm := range parseRRMonitors(reply) {
+			for i, rm := range parseRRMonitors(reply) {
 				out = append(out, Monitor{
 					Name:    w.x11AtomName(rm.name),
 					Bounds:  rm.bounds,
 					Work:    rm.bounds,
 					Scale:   scale,
 					Primary: rm.primary,
+					id:      uint64(i + 1), // индекс для _NET_WM_FULLSCREEN_MONITORS — id-1
 				})
 			}
 		}
@@ -56,7 +57,7 @@ func (w *X11Window) x11Monitors() []Monitor {
 	if len(out) == 0 {
 		// Без RandR 1.5: весь экран сервера — один монитор.
 		r := image.Rect(0, 0, int(w.screen.WidthInPixels), int(w.screen.HeightInPixels))
-		out = []Monitor{{Bounds: r, Work: r, Scale: scale, Primary: true}}
+		out = []Monitor{{Bounds: r, Work: r, Scale: scale, Primary: true, id: 1}}
 	}
 	if !hasPrimaryMonitor(out) {
 		out[0].Primary = true

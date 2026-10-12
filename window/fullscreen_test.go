@@ -100,6 +100,120 @@ func TestFullscreen_BeforeRunAndCallback(t *testing.T) {
 	}
 }
 
+// fsOnSpy — fsSpy, умеющий выбирать монитор.
+type fsOnSpy struct {
+	fsSpy
+	onCalls []Monitor
+	accept  bool
+}
+
+func (f *fsOnSpy) SetFullscreenOn(m Monitor) bool {
+	f.onCalls = append(f.onCalls, m)
+	return f.accept
+}
+
+// SetFullscreenOn доходит до бэкенда с тем же Monitor, а его отказ — до
+// приложения; нулевой Monitor и бэкенд без выбора монитора отвергаются.
+func TestFullscreenOn_DelegatesToBackend(t *testing.T) {
+	win, _, _, _ := closeTestWindow(t)
+	mon := Monitor{Name: "HDMI-1", Bounds: image.Rect(1920, 0, 3840, 1080), id: 7}
+
+	win.native = &fsSpy{supported: true} // выбора монитора нет
+	if win.SetFullscreenOn(mon) {
+		t.Error("бэкенд без fullscreenOnBackend принял SetFullscreenOn")
+	}
+
+	spy := &fsOnSpy{fsSpy: fsSpy{supported: true}, accept: true}
+	win.native = spy
+	if win.SetFullscreenOn(Monitor{}) {
+		t.Error("нулевой Monitor принят")
+	}
+	if len(spy.onCalls) != 0 {
+		t.Errorf("нулевой Monitor дошёл до бэкенда: %v", spy.onCalls)
+	}
+	if !win.SetFullscreenOn(mon) {
+		t.Error("SetFullscreenOn вернул false при согласии бэкенда")
+	}
+	if len(spy.onCalls) != 1 || spy.onCalls[0] != mon {
+		t.Errorf("бэкенд получил %v, ждал %v", spy.onCalls, mon)
+	}
+	spy.accept = false
+	if win.SetFullscreenOn(mon) {
+		t.Error("отказ бэкенда (монитор исчез) не дошёл до приложения")
+	}
+}
+
+// Запрос до Run помнит монитор: при создании окна применяется SetFullscreenOn,
+// а если монитор к тому времени исчез — обычный полный экран. SetFullscreen
+// после SetFullscreenOn забывает монитор.
+func TestFullscreenOn_BeforeRun(t *testing.T) {
+	mon := Monitor{Name: "DP-2", Bounds: image.Rect(0, 0, 2560, 1440), id: 3}
+
+	win, _, _, _ := closeTestWindow(t)
+	win.native = nil
+	if !win.SetFullscreenOn(mon) {
+		t.Skip("платформа без полного экрана")
+	}
+	spy := &fsOnSpy{fsSpy: fsSpy{supported: true}, accept: true}
+	win.native = spy
+	win.setupFullscreen()
+	if len(spy.onCalls) != 1 || spy.onCalls[0] != mon {
+		t.Fatalf("монитор из запроса до Run не применён: %v", spy.onCalls)
+	}
+	if len(spy.calls) != 0 {
+		t.Errorf("кроме SetFullscreenOn позван и SetFullscreen: %v", spy.calls)
+	}
+
+	// Монитор исчез: запасной путь — обычный полный экран.
+	win, _, _, _ = closeTestWindow(t)
+	win.native = nil
+	win.SetFullscreenOn(mon)
+	spy = &fsOnSpy{fsSpy: fsSpy{supported: true}, accept: false}
+	win.native = spy
+	win.setupFullscreen()
+	if len(spy.calls) != 1 || !spy.calls[0] {
+		t.Errorf("при исчезнувшем мониторе ждал SetFullscreen(true), вызовы %v", spy.calls)
+	}
+
+	// Поздний SetFullscreen(true) вытесняет запомненный монитор.
+	win, _, _, _ = closeTestWindow(t)
+	win.native = nil
+	win.SetFullscreenOn(mon)
+	win.SetFullscreen(true)
+	spy = &fsOnSpy{fsSpy: fsSpy{supported: true}, accept: true}
+	win.native = spy
+	win.setupFullscreen()
+	if len(spy.onCalls) != 0 || len(spy.calls) != 1 {
+		t.Errorf("SetFullscreen(true) после SetFullscreenOn: on=%v calls=%v", spy.onCalls, spy.calls)
+	}
+}
+
+// matchMonitor: ключ сильнее имени, имя сильнее границ; чужой монитор не
+// находится; результат — запись списка со свежими границами.
+func TestMatchMonitor(t *testing.T) {
+	a := Monitor{Name: "A", Bounds: image.Rect(0, 0, 1920, 1080), id: 1}
+	b := Monitor{Name: "B", Bounds: image.Rect(1920, 0, 3840, 1080), id: 2}
+	list := []Monitor{a, b}
+
+	if m, ok := matchMonitor(list, Monitor{id: 2, Name: "A"}); !ok || m.id != 2 {
+		t.Errorf("по ключу: %+v %v", m, ok)
+	}
+	// Ключ устарел (монитор переподключили), имя то же, границы сменились.
+	moved := Monitor{id: 99, Name: "B", Bounds: image.Rect(0, 0, 10, 10)}
+	if m, ok := matchMonitor(list, moved); !ok || m.id != 2 || m.Bounds != b.Bounds {
+		t.Errorf("по имени: %+v %v", m, ok)
+	}
+	if m, ok := matchMonitor(list, Monitor{Bounds: a.Bounds}); !ok || m.id != 1 {
+		t.Errorf("по границам: %+v %v", m, ok)
+	}
+	if _, ok := matchMonitor(list, Monitor{id: 5, Name: "C", Bounds: image.Rect(5000, 0, 6000, 800)}); ok {
+		t.Error("отключённый монитор нашёлся")
+	}
+	if _, ok := matchMonitor(list, Monitor{}); ok {
+		t.Error("пустой Monitor нашёлся")
+	}
+}
+
 // Кнопка □ полноэкранного окна возвращает его, а не разворачивает: так вело
 // себя окно, когда Wayland считал полный экран «развёрнутым».
 func TestFullscreen_MaximizeButtonLeavesFullscreen(t *testing.T) {

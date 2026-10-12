@@ -41,11 +41,70 @@ type wlFullscreen struct {
 // true — запрос отправлен; результат придёт в configure. Компоновщик вправе
 // отказать — тогда SetOnFullscreenChanged получит false.
 func (w *WaylandWindow) SetFullscreen(on bool) bool {
+	return w.setFullscreen(on, 0)
+}
+
+// SetFullscreenOn просит полный экран на мониторе m (fullscreenOnBackend):
+// xdg_toplevel.set_fullscreen(wl_output) с выводом этого же соединения,
+// который соответствует m. Monitor из window.Monitors пришёл с ДРУГОГО
+// подключения (там свои номера объектов), поэтому сопоставление идёт по
+// имени глобала registry (ключ монитора), а затем по имени и границам.
+//
+// Окно, уже стоящее в полном экране, получает новый set_fullscreen с другим
+// выводом — протокол разрешает переносить так, без выхода из режима.
+// Композитор вправе выбрать другой вывод; где окно оказалось на самом деле,
+// видно из MonitorOf. false — вывода нет среди известных (отключён).
+func (w *WaylandWindow) SetFullscreenOn(m Monitor) bool {
+	out, ok := w.outputObjectFor(m)
+	if !ok {
+		return false
+	}
+	return w.setFullscreen(true, out)
+}
+
+// outputObjectFor находит объект wl_output этого соединения для монитора m.
+func (w *WaylandWindow) outputObjectFor(m Monitor) (uint32, bool) {
+	w.outs.mu.Lock()
+	var list []Monitor
+	var objs []uint32
+	for _, i := range w.outs.list {
+		if mon, ok := i.monitor(); ok {
+			list = append(list, mon)
+			objs = append(objs, i.id)
+		}
+	}
+	w.outs.mu.Unlock()
+	cur, ok := matchMonitor(list, m)
+	if !ok {
+		return 0, false
+	}
+	for i, c := range list {
+		if c.id == cur.id {
+			return objs[i], true
+		}
+	}
+	return 0, false
+}
+
+// setFullscreen — SetFullscreen и SetFullscreenOn: output — объект wl_output
+// (0 — выбор за компоновщиком).
+func (w *WaylandWindow) setFullscreen(on bool, output uint32) bool {
 	if w.toplevelID == 0 {
 		return false
 	}
 	if on {
+		if w.fullscreen.Load() && output != 0 {
+			// Уже в полном экране: перенос на другой вывод. Сохранённый
+			// размер и фиксация не трогаются, ответ придёт обычным configure.
+			wlLog("set_fullscreen(output %d): перенос", output)
+			w.send(newWlMsg(w.toplevelID, xdgToplevelSetFullscreen).putUint(output), -1)
+			return true
+		}
 		if w.fullscreen.Load() || w.fs.pending.Load() {
+			if output != 0 && w.fs.pending.Load() {
+				// Запрос ещё в пути, а монитор другой — уточняем его.
+				w.send(newWlMsg(w.toplevelID, xdgToplevelSetFullscreen).putUint(output), -1)
+			}
 			return true // уже запрошено или выполнено
 		}
 		w.mu.Lock()
@@ -57,7 +116,7 @@ func (w *WaylandWindow) SetFullscreen(on bool) bool {
 		w.applySizeLimits(true)
 		w.fs.pending.Store(true)
 		wlLog("set_fullscreen")
-		w.send(newWlMsg(w.toplevelID, xdgToplevelSetFullscreen).putUint(0), -1)
+		w.send(newWlMsg(w.toplevelID, xdgToplevelSetFullscreen).putUint(output), -1)
 		return true
 	}
 	if !w.fullscreen.Load() && !w.fs.pending.Load() {
