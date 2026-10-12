@@ -187,6 +187,11 @@ type X11Window struct {
 	atomXdndTypeList   uint32
 	atomXdndActionCopy uint32
 	atomTextUriList    uint32
+	// Действия «переместить»/«ссылка» и служебное сообщение «начни
+	// перетаскивание» (источник XDND, x11_drag_linux.go).
+	atomXdndActionMove uint32
+	atomXdndActionLink uint32
+	atomDragBegin      uint32
 
 	// Состояние текущей DnD-сессии (заполняется из ClientMessage-событий).
 	dndSource      uint32 // окно-источник перетаскивания (0 — нет сессии)
@@ -197,6 +202,20 @@ type X11Window struct {
 	dndDropPending bool   // ждём SelectionNotify после XConvertSelection
 
 	onFilesDropped func(paths []string, x, y int)
+
+	// События приёмника (dragTargetEvents) и состояние сессии: enter
+	// сообщается приложению с первым XdndPosition (в XdndEnter точки нет).
+	onDragEnter func(x, y int)
+	onDragOver  func(x, y int) bool
+	onDragLeave func()
+	dndEntered  bool // приложению сообщено о входе, leave после drop не шлётся
+	dndLastOK   bool // последний ответ приложения: сброс принимается
+
+	// btnDown — маска зажатых кнопок мыши (бит 1<<(n-1) для кнопки X n):
+	// перетаскивание можно начать, только пока кнопка зажата.
+	btnDown atomic.Uint32
+	// drag — перетаскивание, начатое самим окном (x11_drag_linux.go).
+	drag x11Drag
 }
 
 type x11Screen struct {
@@ -329,6 +348,9 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomXdndTypeList = w.x11InternAtom("XdndTypeList")
 	w.atomXdndActionCopy = w.x11InternAtom("XdndActionCopy")
 	w.atomTextUriList = w.x11InternAtom("text/uri-list")
+	w.atomXdndActionMove = w.x11InternAtom("XdndActionMove")
+	w.atomXdndActionLink = w.x11InternAtom("XdndActionLink")
+	w.atomDragBegin = w.x11InternAtom("_HEADLESS_GUI_DRAG_BEGIN")
 
 	// CreateWindow request
 	x := (int(w.screen.WidthInPixels) - width) / 2
@@ -491,8 +513,14 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	}
 	// Таблица нажатых клавиш ведётся ДО отбрасывания ввода заблокированным
 	// окном: пропущенное отпускание оставило бы клавишу «нажатой», и следующее
-	// настоящее нажатие сошло бы за повтор.
+	// настоящее нажатие сошло бы за повтор. По той же причине — и до
+	// перетаскивания, которое забирает ввод себе (Esc).
 	repeat := w.keys.note(evType, buf[1])
+	// Перетаскивание из этого окна идёт: ввод, статусы приёмника и запросы
+	// данных разбирает источник (x11_drag_linux.go).
+	if w.drag.active.Load() && w.dragHandleEvent(buf) {
+		return
+	}
 	// Окно заблокировано модалкой (SetEnabled(false)): дропаем ввод
 	// (KeyPress=2, KeyRelease=3, ButtonPress=4, ButtonRelease=5, MotionNotify=6),
 	// но НЕ Expose/ConfigureNotify/ClientMessage — окно должно перерисовываться
@@ -536,6 +564,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		}
 
 	case 4: // ButtonPress
+		w.noteButton(buf[1], true)
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
 		w.rememberRoot(buf)
@@ -560,6 +589,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		}
 
 	case 5: // ButtonRelease
+		w.noteButton(buf[1], false)
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
 		if raw := int(buf[1]); raw == 6 || raw == 7 {
@@ -631,6 +661,8 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		w.clip.handleClear(buf)
 
 	case 30: // SelectionRequest — у нас просят содержимое буфера обмена
+		// (XdndSelection отдаёт источник перетаскивания, при активном
+		// перетаскивании он перехватывает запрос раньше — см. dragHandleEvent).
 		w.clip.handleRequest(buf)
 
 	case 31: // SelectionNotify — ответ на XConvertSelection
@@ -656,7 +688,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		case w.atomXdndPosition:
 			w.handleXdndPosition(buf)
 		case w.atomXdndLeave:
-			w.dndReset()
+			w.handleXdndLeave()
+		case w.atomDragBegin:
+			w.dragBegin()
 		case w.atomXdndDrop:
 			w.handleXdndDrop(buf)
 		}
