@@ -371,7 +371,7 @@ type WaylandWindow struct {
 	// dndOffer — активный offer текущего перетаскивания (между enter и drop).
 	dndOffer   uint32
 	dndSerial  uint32 // serial из enter (для accept)
-	dndX, dndY int    // позиция курсора в поверхностных пикселях
+	dndX, dndY int    // позиция курсора в пикселях буфера (fixedToPixels)
 
 	// События приёмника (dragTargetEvents) и их состояние в текущей сессии.
 	onDragEnter func(x, y int)
@@ -967,8 +967,8 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		if pop := w.popupForSurface(surf); pop != nil {
 			w.ptrOnPopup, w.ptrPopupID = true, pop.id
 		}
-		w.ptrX = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
-		w.ptrY = int(int32(binary.LittleEndian.Uint32(b[12:16]))) >> 8
+		w.ptrX = w.fixedToPixels(binary.LittleEndian.Uint32(b[8:12]))
+		w.ptrY = w.fixedToPixels(binary.LittleEndian.Uint32(b[12:16]))
 		// Форму курсора ставим сразу: без set_cursor после enter курсор над
 		// окном остаётся тем, каким его оставил сосед.
 		w.applyCursor()
@@ -991,8 +991,8 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		}
 	case wlPointerEvMotion:
 		// time, x(fixed), y(fixed)
-		w.ptrX = int(int32(binary.LittleEndian.Uint32(b[4:8]))) >> 8
-		w.ptrY = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
+		w.ptrX = w.fixedToPixels(binary.LittleEndian.Uint32(b[4:8]))
+		w.ptrY = w.fixedToPixels(binary.LittleEndian.Uint32(b[8:12]))
 		if w.ptrOnPopup {
 			if h := w.popupHandlers(); h.Move != nil {
 				h.Move(w.ptrPopupID, w.ptrX, w.ptrY)
@@ -1835,15 +1835,15 @@ func (w *WaylandWindow) handleDataDevice(opcode uint16, b []byte) {
 	case wlDataDeviceEvEnter:
 		// serial, surface, x(fixed), y(fixed), id(offer)
 		w.dndSerial = binary.LittleEndian.Uint32(b[0:4])
-		w.dndX = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
-		w.dndY = int(int32(binary.LittleEndian.Uint32(b[12:16]))) >> 8
+		w.dndX = w.fixedToPixels(binary.LittleEndian.Uint32(b[8:12]))
+		w.dndY = w.fixedToPixels(binary.LittleEndian.Uint32(b[12:16]))
 		w.dndOffer = binary.LittleEndian.Uint32(b[16:20])
 		w.dndEnter()
 
 	case wlDataDeviceEvMotion:
 		// time, x(fixed), y(fixed)
-		w.dndX = int(int32(binary.LittleEndian.Uint32(b[4:8]))) >> 8
-		w.dndY = int(int32(binary.LittleEndian.Uint32(b[8:12]))) >> 8
+		w.dndX = w.fixedToPixels(binary.LittleEndian.Uint32(b[4:8]))
+		w.dndY = w.fixedToPixels(binary.LittleEndian.Uint32(b[8:12]))
 		w.dndAnswer()
 
 	case wlDataDeviceEvLeave:
