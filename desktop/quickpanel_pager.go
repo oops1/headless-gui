@@ -65,6 +65,30 @@ func (l *qsLayout) layoutPager() {
 	l.pager = l.up.Union(l.down)
 }
 
+// pagerOrder перечисляет зоны столбца страниц для обхода Tab: ▲ (если есть куда
+// листать назад), точки, ▼. Нет столбца — пусто.
+func (l *qsLayout) pagerOrder() []qsZone {
+	if l.pager.Empty() {
+		return nil
+	}
+	var out []qsZone
+	if l.page > 0 {
+		out = append(out, qsZone{kind: qzPageUp})
+	}
+	for i := range l.dots {
+		out = append(out, qsZone{kind: qzPageDot, idx: i})
+	}
+	if l.page < l.pages-1 {
+		out = append(out, qsZone{kind: qzPageDown})
+	}
+	return out
+}
+
+// isPager — зона принадлежит столбцу страниц.
+func (z qsZone) isPager() bool {
+	return z.kind == qzPageUp || z.kind == qzPageDown || z.kind == qzPageDot
+}
+
 // pagerZoneAt находит зону столбца страниц под точкой.
 func (l *qsLayout) pagerZoneAt(pt image.Point) qsZone {
 	if l.pager.Empty() || !pt.In(l.pager) {
@@ -222,6 +246,34 @@ func (pn *qsPanel) setPage(p int) {
 	pn.mu.Unlock()
 	if changed {
 		widget.InvalidateRect(l.grid.Union(l.pager).Inset(-2).Intersect(l.panel))
+		// Плитки едут к новой странице; «меньше движения» и нулевая длительность
+		// токена ставят её сразу.
+		pn.pageAnim.To(float64(p))
+	}
+}
+
+// keepPagerFocus держит клавиатурный фокус в столбце страниц: стрелка, на
+// которой он стоял, дошла до крайней страницы и приглушилась (из обхода Tab она
+// уходит) — фокус переходит на точку показанной страницы, а без точек на
+// противоположную стрелку.
+func (pn *qsPanel) keepPagerFocus(z qsZone) {
+	pn.mu.Lock()
+	on := pn.focus == z
+	pn.mu.Unlock()
+	if !on {
+		return
+	}
+	l, _ := pn.layout(pn.q.rect())
+	if !((z.kind == qzPageUp && l.page <= 0) || (z.kind == qzPageDown && l.page >= l.pages-1)) {
+		return
+	}
+	switch {
+	case l.page < len(l.dots):
+		pn.focusZone(qsZone{kind: qzPageDot, idx: l.page})
+	case z.kind == qzPageUp:
+		pn.focusZone(qsZone{kind: qzPageDown})
+	default:
+		pn.focusZone(qsZone{kind: qzPageUp})
 	}
 }
 

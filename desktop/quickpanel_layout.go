@@ -180,6 +180,10 @@ type qsViewState struct {
 	// Постраничный режим и номер страницы.
 	paged bool
 	page  int
+	// sliding — окно сетки едет между страницами (кадр): slide — его положение
+	// в страницах (дробное). Раскладка событий этого не знает.
+	sliding bool
+	slide   float64
 	// volOff и brightOff — ползунки неактивны.
 	volOff, brightOff bool
 	// editLeft — «Изменить» слева (флаг KeyQuickFooterEditLeft); editName — её
@@ -227,6 +231,16 @@ func qsLayoutFor(m qsMetrics, panel image.Rectangle, v qsViewState) *qsLayout {
 				l.page = 0
 			}
 			l.scroll = l.page * m.rows * m.pitch()
+			if v.sliding {
+				s := v.slide
+				if s < 0 {
+					s = 0
+				}
+				if max := float64(l.pages - 1); s > max {
+					s = max
+				}
+				l.scroll = int(s*float64(m.rows*m.pitch()) + 0.5)
+			}
 			l.maxScrl = 0
 			l.layoutPager()
 		}
@@ -376,7 +390,7 @@ func (l *qsLayout) thumbHit() image.Rectangle {
 
 // zoneAt находит зону главной страницы под точкой pt. chevrons — рисуются ли
 // «›» на плитках (в режиме правки их нет), list — плитки списка (нужны для
-// признака HasDetails).
+// признака «плитка делится на половинки», см. QuickAction.split).
 func (l *qsLayout) zoneAt(pt image.Point, list []QuickAction, chevrons bool) qsZone {
 	if !pt.In(l.panel) {
 		return qsZone{}
@@ -403,7 +417,7 @@ func (l *qsLayout) zoneAt(pt image.Point, list []QuickAction, chevrons bool) qsZ
 				continue
 			}
 			idx := l.at(p)
-			if chevrons && idx < len(list) && list[idx].HasDetails && pt.In(l.chevron(body)) {
+			if chevrons && idx < len(list) && list[idx].split() && pt.In(l.chevron(body)) {
 				return qsZone{kind: qzChevron, idx: idx}
 			}
 			return qsZone{kind: qzTile, idx: idx}
@@ -482,16 +496,19 @@ func (l *qsLayout) focusRect(z qsZone) image.Rectangle {
 }
 
 // focusOrder перечисляет зоны в порядке обхода Tab: плитки (за каждой — её
-// «›»), ползунки, нижняя строка. В режиме правки — плитки и «Готово».
+// «›»), столбец страниц (▲, точки, ▼), ползунки, нижняя строка. В режиме
+// правки — плитки, столбец страниц и «Готово». Стрелка на крайней странице
+// приглушена и в обход не входит.
 func (l *qsLayout) focusOrder(list []QuickAction, editing bool) []qsZone {
 	out := make([]qsZone, 0, l.n*2+8)
 	for p := 0; p < l.n; p++ {
 		idx := l.at(p)
 		out = append(out, qsZone{kind: qzTile, idx: idx})
-		if !editing && idx < len(list) && list[idx].HasDetails {
+		if !editing && idx < len(list) && list[idx].split() {
 			out = append(out, qsZone{kind: qzChevron, idx: idx})
 		}
 	}
+	out = append(out, l.pagerOrder()...)
 	if !editing {
 		if !l.bright.row.Empty() && !l.brightOff {
 			out = append(out, qsZone{kind: qzBright})

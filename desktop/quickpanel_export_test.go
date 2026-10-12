@@ -138,7 +138,16 @@ const (
 	QSKindEdit    = int(qzEdit)
 	QSKindGear    = int(qzSettings)
 	QSKindBack    = int(qzBack)
+	QSKindPageUp  = int(qzPageUp)
+	QSKindPageDn  = int(qzPageDown)
+	QSKindPageDot = int(qzPageDot)
 )
+
+// QSSlide возвращает положение сетки плиток в страницах (дробное, пока она едет
+// к новой странице) и признак «движение идёт».
+func QSSlide(q *QuickSettings) (float64, bool) {
+	return q.pn.pageAnim.Value(), q.pn.pageAnim.Animating()
+}
 
 // QSPage возвращает положение перехода между страницами: 0 — главная, 1 —
 // вложенная.
@@ -172,4 +181,18 @@ func DPScroll(p *DetailPage) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.scroll
+}
+
+// CalFocusAction — прямоугольник кнопки «Фокусировка» календаря Windows 11.
+func CalFocusAction(c *CalendarFlyout) image.Rectangle { return c.w11Layout(c.rect()).faction }
+
+// CalFocusMenuBounds — область открытого меню выбора длительности.
+func CalFocusMenuBounds(c *CalendarFlyout) image.Rectangle {
+	c.mu.Lock()
+	p := c.focusMenu
+	c.mu.Unlock()
+	if p == nil {
+		return image.Rectangle{}
+	}
+	return p.OverlayBounds()
 }

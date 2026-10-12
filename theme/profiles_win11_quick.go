@@ -23,6 +23,12 @@ const QuickSettingsPresenter = "quicksettings.win11"
 // вложенной (страница выезжает в сторону). Не объявлен — переход мгновенный.
 const KeyQuickPage Key = "quicksettings.page"
 
+// KeyQuickPages — токен анимации смены страницы плиток (постраничный режим,
+// KeyQuickPaged): ряды плиток сдвигаются по вертикали, как в Windows 11. Это
+// украшение (род по умолчанию — декоративный): при «меньше движения»
+// (FlagMotionReduce) страница меняется мгновенно. Не объявлен — тоже мгновенно.
+const KeyQuickPages Key = "quicksettings.pages"
+
 // KeyQuickIconTint — флаг профиля: значки плиток Windows 11 перекрашиваются
 // цветом текста плитки (по альфа-каналу значка). Windows 11 рисует значки
 // плиток одним цветом — тёмным на серой плитке и светлым на акцентной; значок
@@ -96,6 +102,8 @@ func declareWin11QuickSettings(p *Profile) {
 	// Переход на вложенную страницу — ход вбок. Это украшение: при «меньше
 	// движения» мгновенно (род по умолчанию — декоративный).
 	p.Anims[KeyQuickPage] = AnimSpec{Duration: 220 * time.Millisecond, Curve: "out-cubic"}
+	// Смена страницы плиток — вертикальный сдвиг рядов, тоже украшение.
+	p.Anims[KeyQuickPages] = AnimSpec{Duration: 200 * time.Millisecond, Curve: "out-cubic"}
 
 	const comp = "quicksettings"
 	clear := C(RGBA(0, 0, 0, 0))

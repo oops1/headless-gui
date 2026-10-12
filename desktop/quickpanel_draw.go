@@ -130,7 +130,7 @@ func (pn *qsPanel) draw(ctx widget.DrawContext, panel image.Rectangle) {
 	w := panel.Dx()
 	if t < 1 {
 		off := image.Pt(-int(float64(w)*t+0.5), 0)
-		l, list := pn.layout(panel.Add(off))
+		l, list := pn.layoutFor(panel.Add(off), true)
 		pn.drawMain(ctx, l, list, u, panel)
 	}
 	if t > 0 && u.details != nil {
@@ -233,7 +233,8 @@ func (pn *qsPanel) drawMain(ctx widget.DrawContext, l *qsLayout, list []QuickAct
 // drawTile рисует плитку: подложку по состоянию, значок, «›» (или ручку в
 // режиме правки) и подпись под ней. Плитка с подробностями (HasDetails) делится
 // на две половинки с тонкой линией между ними: левая переключает, правая («›»)
-// открывает страницу, и каждая подсвечивается отдельно. Окно clip — сетка
+// открывает страницу, и каждая подсвечивается отдельно. Плитка «только страница»
+// (PageOnly) целая: одна подложка, «›» справа — её часть. Окно clip — сетка
 // плиток, из-под края которой плитка может выглядывать (см. qsPaint); пустое
 // окно — плитка в руке при перетаскивании: без подписи и без наведения, поверх
 // всего.
@@ -253,7 +254,7 @@ func (pn *qsPanel) drawTile(ctx widget.DrawContext, l *qsLayout, a QuickAction, 
 	iconArea := body
 	var textCol color.RGBA
 	switch {
-	case a.HasDetails && !u.editing:
+	case a.split() && !u.editing:
 		// Две половинки: у каждой своё наведение и нажатие. Недоступная
 		// (Unavailable) плитка не переключается, но «›» у неё живая.
 		left := image.Rect(body.Min.X, body.Min.Y, chevron.Min.X, body.Max.Y)
@@ -276,6 +277,11 @@ func (pn *qsPanel) drawTile(ctx widget.DrawContext, l *qsLayout, a QuickAction, 
 			// В режиме правки вместо «›» ручка перетаскивания.
 			iconArea.Max.X = chevron.Min.X
 			drawQSGlyph(ctx, qsGlyphGrip, chevron, qsChevronSide, s.Text)
+		} else if a.PageOnly {
+			// «Только страница»: плитка целая, одна подложка и одно наведение;
+			// «›» справа — просто часть плитки, без линии и своей подсветки.
+			iconArea.Max.X = chevron.Min.X
+			drawQSGlyph(ctx, qsGlyphChevron, chevron, qsChevronSide, s.Text)
 		}
 		textCol = s.Text
 	}

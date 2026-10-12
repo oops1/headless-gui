@@ -179,3 +179,28 @@ func TestQuickSettingsWin11_V334Parts(t *testing.T) {
 		}
 	}
 }
+
+// Сдвиг страниц плиток — декоративная анимация quicksettings.pages: объявлена у
+// светлого и тёмного Windows 11 (тёмный её наследует, своих токенов не прибавляет),
+// у других профилей её нет, «меньше движения» делает её мгновенной.
+func TestQuickSettingsWin11_PagesSlideToken(t *testing.T) {
+	for _, name := range []string{theme.ProfileWindows11, theme.ProfileWindows11Dark} {
+		m := builtinManager(t, name)
+		a := m.GetAnimation(theme.KeyQuickPages)
+		if a.Duration <= 0 || a.Curve == "" {
+			t.Errorf("%s: сдвиг страниц не анимирован: %+v", name, a)
+		}
+		m.SetFlag(theme.FlagMotionReduce, true)
+		if a := m.GetAnimation(theme.KeyQuickPages); a.Duration != 0 {
+			t.Errorf("%s: при «меньше движения» сдвиг идёт %v", name, a.Duration)
+		}
+	}
+	if theme.AnimationKindOf(theme.KeyQuickPages) != theme.AnimDecorative {
+		t.Error("сдвиг страниц плиток должен быть украшением")
+	}
+	for _, name := range []string{theme.ProfileWindows10, theme.ProfileWindows2000, theme.ProfileMacOS} {
+		if a := builtinManager(t, name).GetAnimation(theme.KeyQuickPages); a.Duration != 0 {
+			t.Errorf("%s: чужой профиль объявил сдвиг страниц: %+v", name, a)
+		}
+	}
+}

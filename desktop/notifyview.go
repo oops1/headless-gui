@@ -391,9 +391,13 @@ type ncSource struct {
 	invalid func(r image.Rectangle) // перерисовать область (абсолютные координаты)
 	// invalidAll перерисовывает всю панель.
 	invalidAll func()
-	culture    func() DateCulture
-	now        func() time.Time
-	emptyMsg   func() string
+	// relayout перерисовывает панель там, где она стояла, и там, где встала
+	// после смены размера (стопка Windows 11 меняет высоту панели на каждом шаге
+	// движения). nil — как invalidAll.
+	relayout func()
+	culture  func() DateCulture
+	now      func() time.Time
+	emptyMsg func() string
 	// Центр Windows 11: «Не беспокоить» (включено ли и переключить) и передача
 	// клавиатурного фокуса календарю под центром (delta — направление Tab;
 	// true — календарь принял фокус).
@@ -1147,20 +1151,33 @@ func (v *richView) flowGroups(m ncMetrics, f ncFonts, notes []Notification, x0, 
 		if hdr > 0 && !stack {
 			gk, glive = v.slideStep(ncSlideKey{kind: slideGroup, app: first.AppID}, !grp.collapsed)
 		}
+		// Стопка раскрывается и сворачивается плавно (токен notification.expand):
+		// пока движение идёт, карточки лежат как у раскрытой, а первая тянется
+		// между видом с кнопкой «+N» и без неё.
+		sk, slive := 1.0, false
+		if stack {
+			sk, slive = v.slideStep(ncSlideKey{kind: slideStack, app: first.AppID}, grp.stackOpen)
+		}
 		if !grp.collapsed || glive {
 			yCards := y
 			shown := g
-			if stack && !grp.stackOpen {
+			if stack && !grp.stackOpen && !slive {
 				shown = g[:1]
 			}
+			var st stackSpan
 			for ci, n := range shown {
 				iconArg := hasNoteIcon(n)
 				if w11 {
 					iconArg = len(g) < 2 // строка приложения — у одиночного уведомления
 				}
 				c := v.layoutCard(m, f, n, x0, y, w, iconArg)
-				if stack && !grp.stackOpen && ci == 0 {
-					v.stackCard(&c, m, f, len(g)-1)
+				if stack && ci == 0 {
+					switch {
+					case slive:
+						st = v.stackSpanCard(&c, m, f, len(g)-1, sk)
+					case !grp.stackOpen:
+						v.stackCard(&c, m, f, len(g)-1)
+					}
 				}
 				grp.cards = append(grp.cards, c)
 				y = c.rect.Max.Y + m.cardGap
@@ -1170,6 +1187,16 @@ func (v *richView) flowGroups(m ncMetrics, f ncFonts, notes []Notification, x0, 
 				shown := int(float64(y-yCards)*gk + 0.5)
 				grp.clip = image.Rect(x0, yCards, x0+w, yCards+shown)
 				y = yCards + shown
+			}
+			if slive {
+				if shown, ok := st.visible(y-yCards, m.cardGap, sk); ok {
+					grp.anim = true
+					grp.clip = image.Rect(x0, yCards, x0+w, yCards+shown)
+					y = yCards + shown
+				} else {
+					// Свёрнутый и раскрытый вид одной высоты: двигать нечего.
+					v.slideSettle(ncSlideKey{kind: slideStack, app: first.AppID}, grp.stackOpen)
+				}
 			}
 		}
 		out = append(out, grp)

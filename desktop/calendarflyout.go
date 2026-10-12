@@ -111,11 +111,16 @@ type CalendarFlyout struct {
 	// при флаге профиля theme.KeyCalendarFocusCompact. По умолчанию ложь: как на
 	// настоящей Windows 11, длительность выбирается «−» и «+».
 	FocusSingleButton bool
+	// FocusDurations — длительности меню выбора, которое открывает правый щелчок
+	// по кнопке «Фокусировка» (OpenFocusDurationMenu). nil — DefaultFocusDurations:
+	// 15, 30, 45, 60 и 90 минут.
+	FocusDurations []time.Duration
 
 	// Календарь Windows 11 (calendarflyout_win11.go): сеанс «Фокусировки» и его
 	// подписка, секундный отсчёт, центр над календарём, кнопка под курсором и
 	// кнопка в клавиатурном фокусе (всё под mu), фокус ввода.
 	focusSess  FocusSession
+	focusMenu  *widget.PopupMenu // меню выбора длительности (дочернее), создаётся при первом показе
 	unsubFocus func()
 	stopTick   func()
 	above      *NotificationCenter

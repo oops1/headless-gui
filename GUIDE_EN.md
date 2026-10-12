@@ -4708,6 +4708,15 @@ backgrounds. Strings are `desktop.quick.*` keys (Russian and English,
 `QuickSettings.ToolTipAt`. The keyboard focus ring is `PaintFocusRing`, as on the
 taskbar.
 
+v3.34 additions (see `docs/AI_AGENT_REFERENCE.md`, "v3.34"): `QuickAction.PageOnly`
+is a "page only" tile (whole, no halves, a click anywhere opens the page); tile
+pages (`theme.KeyQuickPaged`) slide vertically (token `theme.KeyQuickPages`) and the
+pager arrows and dots are in the Tab order; notification stacks expand smoothly
+(token `notification.expand`), reduced motion makes both transitions instant; a
+right click on the "Focus" button of the calendar (or the Menu key, Shift+F10)
+opens a 15/30/45/60/90 minute menu (`CalendarFlyout.FocusDurations`,
+`OpenFocusDurationMenu`).
+
 
 ### The frame pipeline
 

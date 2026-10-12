@@ -4700,6 +4700,15 @@ Mica и мягкая тень приходят по флагам `backdrop.mica`
 - `q.NewDetailPage()` — страница из готовых элементов (`AddList`, `AddSlider`,
   `AddToggle`, `AddButton`, `AddText`), которые сами берут цвета у темы, без
   `ApplyThemeTree`: `return page.Details("Wi-Fi")`.
+- `QuickAction.PageOnly` — плитка «только страница» («Специальные возможности»):
+  целая, без половинок; щелчок по любому месту открывает страницу, «›» справа —
+  часть плитки;
+- страницы плиток сдвигаются по вертикали (токен `theme.KeyQuickPages`), стопка
+  уведомлений раскрывается плавно (токен `notification.expand`); «меньше движения»
+  делает оба перехода мгновенными;
+- стрелки ▲▼ и точки страниц входят в обход Tab (Enter и Space листают);
+- правый щелчок по «▶ Фокусировка» (или клавиша меню, Shift+F10) открывает меню
+  15/30/45/60/90 минут: `CalendarFlyout.FocusDurations`, `OpenFocusDurationMenu`.
 
 Центр уведомлений и календарь (флаги `theme.KeyNotifyStack` и
 `theme.KeyCalendarFocusCompact`): несколько уведомлений одного приложения — стопка

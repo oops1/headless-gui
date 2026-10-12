@@ -66,6 +66,7 @@ func TestW11Stack_ClickExpandsAndHeaderCollapses(t *testing.T) {
 	before := w.nc.OverlayBounds().Dy()
 	z := w.zone(t, zoneKey{kind: zoneStack, app: "vpn"})
 	w11Click(w.nc, z.rect)
+	finishAnimations() // стопка раскрывается плавно (v3.34): ждём конца движения
 	g := stackGroup(t, w, "vpn")
 	if !g.stackOpen || len(g.cards) != 2 {
 		t.Fatalf("после щелчка: open=%v карточек %d", g.stackOpen, len(g.cards))
@@ -83,6 +84,7 @@ func TestW11Stack_ClickExpandsAndHeaderCollapses(t *testing.T) {
 	}
 	// Заголовок группы сворачивает обратно.
 	w11Click(w.nc, w.zone(t, zoneKey{kind: zoneGroup, app: "vpn"}).rect)
+	finishAnimations()
 	if g := stackGroup(t, w, "vpn"); g.stackOpen || len(g.cards) != 1 {
 		t.Errorf("заголовок не свернул стопку: open=%v карточек %d", g.stackOpen, len(g.cards))
 	}

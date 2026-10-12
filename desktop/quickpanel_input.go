@@ -176,13 +176,21 @@ func (pn *qsPanel) activate(z qsZone) {
 	}
 	switch z.kind {
 	case qzTile:
-		if !editing && m != nil && !a.Disabled && !a.Unavailable {
+		if a.PageOnly {
+			// Плитка «только страница» целиком открывает страницу; недоступная
+			// (Unavailable) страницу тоже открывает — там видно, почему.
+			if !editing && !a.Disabled {
+				q.OpenDetails(a.ID)
+			}
+		} else if !editing && m != nil && !a.Disabled && !a.Unavailable {
 			m.Toggle(a.ID)
 		}
 	case qzPageUp:
 		pn.stepPage(-1)
+		pn.keepPagerFocus(z)
 	case qzPageDown:
 		pn.stepPage(1)
+		pn.keepPagerFocus(z)
 	case qzPageDot:
 		pn.setPage(z.idx)
 	case qzChevron:
@@ -721,7 +729,7 @@ func (pn *qsPanel) arrowTile(l *qsLayout, list []QuickAction, focus qsZone, e wi
 		} else if at >= 0 {
 			// Под сеткой — следующая зона обхода.
 			for i := at + 1; i < len(order); i++ {
-				if order[i].kind != qzTile && order[i].kind != qzChevron {
+				if order[i].kind != qzTile && order[i].kind != qzChevron && !order[i].isPager() {
 					pn.focusZone(order[i])
 					return
 				}

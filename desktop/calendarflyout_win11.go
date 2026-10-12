@@ -645,6 +645,7 @@ func (c *CalendarFlyout) onOpenChanged(open bool) {
 		return
 	}
 	c.detachFocus()
+	c.CloseFocusMenu()
 	c.mu.Lock()
 	c.hot, c.focusStop = calStopNone, calStopNone
 	c.mu.Unlock()
@@ -901,6 +902,9 @@ func drawGlyphPlus(ctx widget.DrawContext, r image.Rectangle, col color.RGBA, si
 // обработано; клик по кнопке или дню срабатывает на нажатии, как у плоского
 // календаря.
 func (c *CalendarFlyout) w11Mouse(e widget.MouseEvent) bool {
+	if e.Button == widget.MouseRight {
+		return c.focusMenuMouse(e)
+	}
 	if e.Button != widget.MouseLeft || !c.IsOpen() {
 		return false
 	}
@@ -998,6 +1002,9 @@ func (c *CalendarFlyout) w11Move(x, y int) {
 func (c *CalendarFlyout) w11Key(e widget.KeyEvent) bool {
 	if !c.IsOpen() || !e.Pressed {
 		return false
+	}
+	if c.focusMenuKey(e) {
+		return true
 	}
 	c.mu.Lock()
 	onGrid := c.focusStop == calStopGrid

@@ -70,6 +70,28 @@ func TestVisual_QuickSettingsWin11(t *testing.T) {
 		{"light_scrolled", qsOpts{after: func(q *desktop.QuickSettings) {
 			g := desktop.QSZoneRect(q, "grid")
 			q.OnMouseWheelPixels(g.Min.X+10, g.Min.Y+10, 0, 60)
+			qsFinish() // страница сдвигается плавно: ждём конца движения
+		}}},
+		{"light_pageonly_hover", qsOpts{model: pageOnlyModel, after: func(q *desktop.QuickSettings) {
+			t := desktop.QSTileRect(q, "access")
+			q.OnMouseMove(t.Min.X+10, t.Min.Y+10)
+		}}},
+		{"dark_pageonly", qsOpts{dark: true, model: pageOnlyAlone}},
+		{"light_page_slide", qsOpts{after: func(q *desktop.QuickSettings) {
+			q.SetPage(1)
+			t0 := time.Now()
+			widget.StepAnimations(t0)
+			widget.StepAnimations(t0.Add(90 * time.Millisecond))
+		}}},
+		{"dark_pager_focus", qsOpts{dark: true, after: func(q *desktop.QuickSettings) {
+			q.SetFocused(true)
+			for i := 0; i < 40; i++ {
+				qsKey(q, widget.KeyTab, 0)
+				if k, n := desktop.QSFocus(q); k == desktop.QSKindPageDot && n == 0 {
+					break
+				}
+			}
+			qsFinish()
 		}}},
 	}
 	for _, c := range cases {

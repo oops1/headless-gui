@@ -36,6 +36,9 @@ const (
 	slideCard slideKind = iota + 1
 	slideGroup
 	slideQuick
+	// slideStack — раскрытие и сворачивание стопки уведомлений Windows 11
+	// (notifyview_stack.go); привязана к приложению, как группа.
+	slideStack
 )
 
 // ncSlideKey называет раскрывающийся элемент. Привязка к уведомлению и
@@ -200,6 +203,11 @@ func (v *richView) slideTick(key ncSlideKey) {
 	// Раскладка заново: она же подтягивает прокрутку к новой высоте.
 	nl := v.layout(old.panel)
 	switch {
+	case key.kind == slideStack && v.src.relayout != nil:
+		// Стопка Windows 11 меняет высоту панели, а вместе с ней — её место
+		// (панель стоит нижней стороной на календаре): перерисовывается панель,
+		// прежняя и новая, но не экран.
+		v.src.relayout()
 	case nl.scroll != old.scroll:
 		v.invalidate(nl.viewport)
 	case key.kind == slideQuick:
@@ -214,7 +222,7 @@ func (v *richView) slideTick(key ncSlideKey) {
 func (l *richLayout) slideTop(key ncSlideKey) int {
 	top := l.viewport.Min.Y
 	for _, g := range l.groups {
-		if key.kind == slideGroup && g.app == key.app {
+		if (key.kind == slideGroup || key.kind == slideStack) && g.app == key.app {
 			top = g.rect.Min.Y
 		}
 		for _, c := range g.cards {
@@ -237,7 +245,7 @@ func (v *richView) forgetSlides(ids map[NotificationID]bool, apps map[AppID]bool
 		switch k.kind {
 		case slideCard:
 			keep = ids != nil && ids[k.note]
-		case slideGroup:
+		case slideGroup, slideStack:
 			keep = apps != nil && apps[k.app]
 		case slideQuick:
 			keep = ids != nil // набор плиток живёт, пока открыта панель

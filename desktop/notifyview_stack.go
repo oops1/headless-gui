@@ -70,6 +70,39 @@ func (v *richView) stackCard(c *richCard, m ncMetrics, f ncFonts, more int) {
 	c.rect.Max.Y = c.stackRect.Max.Y + p
 }
 
+// stackSpan — высоты первой карточки стопки в двух видах: раскрытом (без кнопки
+// «+N») и свёрнутом (с кнопкой) и высота, до которой она тянется на этом шаге.
+type stackSpan struct {
+	open, closed, cur int
+}
+
+// stackSpanCard готовит первую карточку стопки на шаге движения: выкладывается
+// как свёрнутая (с кнопкой «+N уведомл.»), а её высота — между раскрытой (sk=1) и
+// свёрнутой (sk=0); кнопка уходит вместе с нижним краем карточки, потому что
+// карточка в движении обрезает рисунок по своей рамке. Возвращает высоты для
+// видимой части группы.
+func (v *richView) stackSpanCard(c *richCard, m ncMetrics, f ncFonts, more int, sk float64) stackSpan {
+	open := c.rect.Dy()
+	v.stackCard(c, m, f, more)
+	closed := c.rect.Dy()
+	cur := open + int(float64(closed-open)*(1-sk)+0.5)
+	c.rect.Max.Y = c.rect.Min.Y + cur
+	c.anim = true
+	return stackSpan{open: open, closed: closed, cur: cur}
+}
+
+// visible возвращает высоту видимой части группы на шаге sk, если вид
+// раскрытой стопки выше свёрнутого (total — высота уже выложенных карточек с
+// зазором gap после каждой): от свёрнутого вида к раскрытому линейно.
+func (s stackSpan) visible(total, gap int, sk float64) (int, bool) {
+	hc := s.closed + gap
+	he := total - s.cur + s.open
+	if he <= hc {
+		return 0, false
+	}
+	return hc + int(float64(he-hc)*sk+0.5), true
+}
+
 // setStackOpen разворачивает или сворачивает стопку группы app. Клавиатурный
 // фокус переходит на заголовок группы: кнопка стопки после раскрытия исчезает.
 func (v *richView) setStackOpen(app AppID, open bool) {

@@ -7640,8 +7640,52 @@ group header (icon, name), the newest card and a pill button inside it
 (click, ←/→) collapses back; Tab/Enter work on the pill. Closing the group (×) removes
 all. A single notification stays a plain card with the app row.
 
+**9. Page-only tile** (`QuickAction.PageOnly`). A tile that only opens a nested
+page ("Accessibility"): no halves, no divider line, one hover/press over the whole
+tile; click anywhere (and Enter/Space on the focused tile) opens the page via
+`QuickSettings.Details`, and the "›" at the right is just a part of the tile (no own
+zone, no own focus stop, no "More" tooltip). `PageOnly` wins over `HasDetails`, so a
+tile with both flags is whole; `PageOnly` alone is enough to get a page. `Disabled`
+keeps it shut; `Unavailable` dims it, the page still opens (it shows why);
+`model.Toggle` is not called for the tile; in edit mode it is a draggable tile
+as any other. The flag is only read by the Windows 11 quick settings.
+
+**10. Animations** (existing animation system, tokens in `theme.GetAnimation`).
+- Quick settings pages slide vertically (`theme.KeyQuickPages`
+  `quicksettings.pages`, 200 ms `out-cubic`, a decorative animation: reduced motion
+  = instant). The grid window moves between pages; events and focus are laid out
+  for the target page at once, only the frame is animated; a new `SetPage` during
+  the motion restarts it from the current position. Only the grid window is
+  repainted (the pager column stays still). The page resets without motion on reopen.
+- Notification stack expand/collapse uses the existing token `notification.expand`
+  (functional: reduced motion makes it instant). While moving, the cards are laid out
+  as expanded and cut by a growing window; the first card shrinks between the view
+  with the "+N" pill and without it, the pill leaves with the card's bottom edge, the
+  panel (it grows upward from the calendar) is repainted as a whole, old and new
+  rectangles only. The end of the motion equals the static layout.
+
+**11. Tab order.** The pager column joins the Tab order right after the tiles:
+▲ (when not on the first page), one stop per dot, ▼ (when not on the last page); an
+arrow on an end page is dimmed and skipped. Enter/Space turns the page / goes to the
+dot; when the arrow the focus stood on gets dimmed, the focus moves to the dot of the
+shown page. The focus ring is the usual one. Arrow Down from the last tile row still
+goes to the sliders.
+
+**12. Focus duration menu** (`CalendarFlyout.OpenFocusDurationMenu`,
+`FocusMenuOpen`, `CloseFocusMenu`, `FocusDurations`). Right click on the "▶ Focus"
+button (on release) or the Menu key / Shift+F10 on the focused button opens a
+`PopupMenu` above it: 15, 30, 45, 60, 90 min (`DefaultFocusDurations`, replace per
+calendar with `FocusDurations`), a check on the current one; a choice calls
+`FocusSession.SetDuration` (clamped to `FocusMinDuration`..`FocusMaxDuration`). The
+menu is a child of the calendar, so a click on an item is not a click outside; Esc
+closes the menu first and the calendar next; closing the calendar closes the menu;
+no menu while a session runs. Works with `FocusSingleButton` too. The menu is
+painted by the theme's menu style like every shell menu.
+
 Tests: `desktop/quickpanel_v334_test.go`, `quickpanel_page_test.go`,
-`quickpanel_wrap_test.go`, `notifycenter_stack_test.go`, `theme/profiles_win11_quick_test.go`;
+`quickpanel_wrap_test.go`, `notifycenter_stack_test.go`, `quickpanel_pageonly_test.go`
+(page-only tile, pager Tab order, page slide), `notifycenter_stackanim_test.go`,
+`calendarflyout_focusmenu_test.go` (+ `_engine_test.go`), `theme/profiles_win11_quick_test.go`;
 visual frames with `QS_OUT` / `NC_OUT`.
 
 ---

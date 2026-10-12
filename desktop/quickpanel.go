@@ -12,7 +12,7 @@
 // Что в панели решает потребитель, а что — движок:
 //
 //   - состав и состояние плиток — модель QuickActionModel (ID, Title, Icon,
-//     On, Disabled, Unavailable, Detail, HasDetails); нажатие плитки —
+//     On, Disabled, Unavailable, Detail, HasDetails, PageOnly); нажатие плитки —
 //     model.Toggle;
 //   - «›» у плитки и у громкости открывает вложенную страницу: содержимое
 //     отдаёт QuickSettings.Details, а панель рисует заголовок со стрелкой
@@ -103,6 +103,11 @@ type qsPanel struct {
 	// накопленные пиксели колеса до порога листания.
 	pageIdx  int
 	wheelAcc float64
+	// pageAnim — положение окна сетки в страницах (дробное): плитки едут по
+	// вертикали к странице pageIdx по токену theme.KeyQuickPages. Раскладка
+	// событий считается от pageIdx (нажимается то, к чему идёт сетка), кадр —
+	// от pageAnim.
+	pageAnim *Tween
 
 	bright    float64
 	hasBright bool
@@ -141,6 +146,7 @@ type qsPanel struct {
 func newQSPanel(q *QuickSettings) *qsPanel {
 	pn := &qsPanel{q: q, memos: map[QuickActionID]*glyphMemo{}}
 	pn.page = NewTween(q.Theme(), theme.KeyQuickPage, 0, pn.onPage)
+	pn.pageAnim = NewTween(q.Theme(), theme.KeyQuickPages, 0, pn.onPageSlide)
 	return pn
 }
 
@@ -379,6 +385,17 @@ func (pn *qsPanel) onPage() {
 	pn.releaseDetails()
 }
 
+// onPageSlide — шаг сдвига страницы плиток: перерисовывается только окно сетки
+// (столбец страниц и остальное от сдвига не меняются).
+func (pn *qsPanel) onPageSlide() {
+	q := pn.q
+	if !q.IsOpen() || pn.page.Value() > 0 {
+		return
+	}
+	l, _ := pn.layout(q.rect())
+	widget.InvalidateRect(l.grid)
+}
+
 // releaseDetails снимает вложенную страницу и сообщает ей об этом.
 func (pn *qsPanel) releaseDetails() {
 	pn.mu.Lock()
@@ -439,7 +456,7 @@ func qsSameShape(a, b []QuickAction) bool {
 func qsTileChanged(a, b QuickAction) bool {
 	return a.Title != b.Title || a.Detail != b.Detail || a.On != b.On ||
 		a.Disabled != b.Disabled || a.Unavailable != b.Unavailable ||
-		a.HasDetails != b.HasDetails || !qsSameIcon(a.Icon, b.Icon)
+		a.HasDetails != b.HasDetails || a.PageOnly != b.PageOnly || !qsSameIcon(a.Icon, b.Icon)
 }
 
 // qsSameIcon сравнивает значки, не падая на несравнимых типах.
@@ -486,6 +503,10 @@ func (pn *qsPanel) onModelChanged() {
 		return
 	}
 	l, _ := pn.layout(q.rect())
+	if pn.pageAnim.Animating() {
+		widget.InvalidateRect(l.grid)
+		return
+	}
 	for i := range next {
 		if !qsTileChanged(old[i], next[i]) {
 			continue
@@ -521,7 +542,11 @@ func (pn *qsPanel) invalidateZone(z qsZone) {
 		return
 	}
 	l, _ := pn.layout(q.rect())
-	widget.InvalidateRect(l.zoneRect(z))
+	r := l.zoneRect(z)
+	if (z.kind == qzTile || z.kind == qzChevron) && pn.pageAnim.Animating() {
+		r = l.grid // плитки едут: раскладка событий уже на новой странице
+	}
+	widget.InvalidateRect(r)
 }
 
 // ─── Подписки и жизненный цикл ───────────────────────────────────────────────
@@ -604,6 +629,7 @@ func (pn *qsPanel) reset() {
 		pn.vol, pn.pow, pn.seen = q.st.Volume(), q.st.Power(), true
 	}
 	pn.mu.Unlock()
+	pn.pageAnim.Set(0)
 	pn.page.Set(0)
 	pn.releaseDetails()
 }
@@ -654,6 +680,13 @@ func (pn *qsPanel) commitOrder(ids []QuickActionID) {
 // layout считает раскладку панели panel по текущему состоянию. Возвращает и
 // список плиток, по которому она посчитана.
 func (pn *qsPanel) layout(panel image.Rectangle) (*qsLayout, []QuickAction) {
+	return pn.layoutFor(panel, false)
+}
+
+// layoutFor — layout; frame включает сдвиг страницы плиток (pageAnim): так
+// раскладка рисует кадр, пока сетка едет к новой странице. События и подсказки
+// спрашивают раскладку без сдвига, от целевой страницы.
+func (pn *qsPanel) layoutFor(panel image.Rectangle, frame bool) (*qsLayout, []QuickAction) {
 	m := readQSMetrics(pn.q.Theme())
 	pn.mu.Lock()
 	list := pn.list
@@ -673,5 +706,8 @@ func (pn *qsPanel) layout(panel image.Rectangle) (*qsLayout, []QuickAction) {
 		v.pos = qsDisplayOrder(len(list), pn.drag.idx, pn.drag.slot)
 	}
 	pn.mu.Unlock()
+	if frame && v.paged && pn.pageAnim.Animating() {
+		v.slide, v.sliding = pn.pageAnim.Value(), true
+	}
 	return qsLayoutFor(m, panel, v), list
 }
