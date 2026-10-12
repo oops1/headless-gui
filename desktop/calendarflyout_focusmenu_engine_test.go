@@ -1,12 +1,13 @@
 package desktop_test
 
 import (
+	"github.com/oops1/headless-gui/v3/internal/testengine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"image"
 	"testing"
 	"time"
 
 	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -16,6 +17,7 @@ import (
 // его рамку вверх не обязано), щелчок по пункту не считается щелчком мимо
 // календаря, Esc гасит сперва меню.
 func TestFocusMenu_ThroughEngine(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	if err := theme.RegisterBuiltinProfiles(m); err != nil {
 		t.Fatal(err)
@@ -35,7 +37,7 @@ func TestFocusMenu_ThroughEngine(t *testing.T) {
 	cal.Ticker = func(time.Duration, func()) func() { return func() {} }
 	cal.SetFocusSession(fs)
 	root.AddChild(cal)
-	eng := engine.New(w, h, 30)
+	eng := testengine.New(t, w, h, 30)
 	eng.SetRoot(root)
 	bb := bar.Bounds()
 	cal.Open(image.Rect(w-150, bb.Min.Y, w-100, bb.Max.Y))

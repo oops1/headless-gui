@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"image"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 // группа между свёрнутой и раскрытой, кнопка уходит вместе с нижним краем
 // карточки, а к концу раскладка равна статичной.
 func TestStackAnim_ExpandIsGradual(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	finishAnimations()
@@ -79,6 +81,7 @@ func TestStackAnim_ExpandIsGradual(t *testing.T) {
 // Сворачивание — то же в обратную сторону и приходит ровно к статичной свёрнутой
 // раскладке (кнопка «+N» на месте).
 func TestStackAnim_CollapseIsGradual(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	w11Click(w.nc, w.zone(t, zoneKey{kind: zoneStack, app: "vpn"}).rect)
@@ -116,6 +119,7 @@ func TestStackAnim_CollapseIsGradual(t *testing.T) {
 
 // «Меньше движения»: раскрытие мгновенно, без промежуточных кадров.
 func TestStackAnim_ReduceMotionIsInstant(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.tm.SetFlag(theme.FlagMotionReduce, true)
 	w.open()
@@ -132,6 +136,7 @@ func TestStackAnim_ReduceMotionIsInstant(t *testing.T) {
 
 // Шаги движения перерисовывают только область панели (прежнюю и новую), а не экран.
 func TestStackAnim_InvalidatesOnlyPanel(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.open()
 	finishAnimations()
@@ -164,6 +169,7 @@ func TestStackAnim_InvalidatesOnlyPanel(t *testing.T) {
 
 // Расклад в тосте и без флага стопки не меняется: движения стопки нет.
 func TestStackAnim_NoStackNoSlide(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, true)
 	w.tm.SetFlag(theme.KeyNotifyStack, false)
 	w.open()

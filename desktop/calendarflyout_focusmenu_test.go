@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ func focusMenuTexts(w *w11Fix) (texts []string, checked []bool) {
 // Правый щелчок по кнопке открывает меню 15/30/45/60/90 минут с отметкой на текущей;
 // выбор пункта уходит в SetDuration.
 func TestFocusMenu_RightClickOpensAndChooses(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	l := w.cal.w11Layout(w.cal.rect())
@@ -75,6 +77,7 @@ func TestFocusMenu_RightClickOpensAndChooses(t *testing.T) {
 // Меню с клавиатуры: клавиша меню и Shift+F10 на кнопке, стрелки и Enter, Esc
 // закрывает сначала меню, потом календарь.
 func TestFocusMenu_Keyboard(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	w.cal.SetFocused(true)
@@ -139,6 +142,7 @@ func TestFocusMenu_Keyboard(t *testing.T) {
 
 // Идущий сеанс, чужие места и закрытие календаря.
 func TestFocusMenu_Guards(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.open()
 	l := w.cal.w11Layout(w.cal.rect())
@@ -180,6 +184,7 @@ func TestFocusMenu_Guards(t *testing.T) {
 // Одна кнопка (FocusSingleButton) меню тоже получает; свои длительности сжимаются
 // пределами сеанса.
 func TestFocusMenu_SingleButtonAndCustomDurations(t *testing.T) {
+	testreset.Globals(t)
 	w := newW11Fix(t, theme.ProfileWindows11, false)
 	w.cal.FocusSingleButton = true
 	w.cal.FocusDurations = []time.Duration{2 * time.Minute, 25 * time.Minute, 10 * time.Hour}

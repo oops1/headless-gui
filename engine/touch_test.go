@@ -504,6 +504,7 @@ func TestSendTouch_PinchThroughEngineHiDPI(t *testing.T) {
 // Нажим и площадь контакта доходят до виджета: нажим как есть, оси контакта —
 // в логических пикселях (как и точка), угол и нажим масштаб не трогает.
 func TestSendTouch_PressureAndContact(t *testing.T) {
+	testreset.Globals(t)
 	for _, scale := range []float64{1, 2} {
 		e := New(400, 300, 20)
 		e.SetScale(scale)

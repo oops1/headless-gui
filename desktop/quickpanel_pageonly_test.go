@@ -1,6 +1,7 @@
 package desktop_test
 
 import (
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"image"
 	"testing"
 	"time"
@@ -48,6 +49,7 @@ func qsTabs(q *desktop.QuickSettings, n int) [][2]int {
 // Щелчок по любому месту плитки «только страница» — левее и правее прежней
 // границы половинок — открывает страницу; Toggle не зовётся.
 func TestPageOnly_WholeTileOpensPage(t *testing.T) {
+	testreset.Globals(t)
 	for name, model := range map[string]func(*desktop.QuickActionList){"с HasDetails": pageOnlyModel, "без HasDetails": pageOnlyAlone} {
 		t.Run(name, func(t *testing.T) { pageOnlyWholeTile(t, model) })
 	}
@@ -79,6 +81,7 @@ func pageOnlyWholeTile(t *testing.T, model func(*desktop.QuickActionList)) {
 // Плитка целая: линии между половинками нет, наведение накрывает всю плитку, а у
 // обычной плитки с «›» линия и раздельная подсветка остаются.
 func TestPageOnly_NotSplit(t *testing.T) {
+	testreset.Globals(t)
 	for name, model := range map[string]func(*desktop.QuickActionList){"с HasDetails": pageOnlyModel, "без HasDetails": pageOnlyAlone} {
 		t.Run(name, func(t *testing.T) { pageOnlyNotSplit(t, model) })
 	}
@@ -130,6 +133,7 @@ func pageOnlyNotSplit(t *testing.T, model func(*desktop.QuickActionList)) {
 // Обход Tab: у плитки «только страница» «›» не отдельная остановка; Enter на
 // плитке открывает страницу.
 func TestPageOnly_TabAndEnter(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{model: pageOnlyModel})
 	q := s.q
 	q.SetFocused(true)
@@ -165,6 +169,7 @@ func TestPageOnly_TabAndEnter(t *testing.T) {
 // Отключённая плитка «только страница» не открывает страницу; в режиме правки её
 // не открывает ни щелчок, ни Enter.
 func TestPageOnly_DisabledAndEditing(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{model: func(m *desktop.QuickActionList) {
 		pageOnlyModel(m)
 		for _, a := range m.List() {
@@ -194,6 +199,7 @@ func TestPageOnly_DisabledAndEditing(t *testing.T) {
 // Недоступная (Unavailable) плитка «только страница» страницу всё равно открывает:
 // там видно, почему плитка недоступна.
 func TestPageOnly_UnavailableStillOpens(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{model: func(m *desktop.QuickActionList) {
 		pageOnlyModel(m)
 		for _, a := range m.List() {
@@ -220,6 +226,7 @@ func TestPageOnly_UnavailableStillOpens(t *testing.T) {
 // скрытой плитке переворачивает страницу), так что к столбцу страниц Tab приходит
 // со второй страницы: ▲ в обходе, ▼ приглушена и нет. Shift+Tab ходит назад.
 func TestPager_TabOrder(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	q.SetFocused(true)
@@ -281,6 +288,7 @@ func TestPager_TabOrder(t *testing.T) {
 // Enter и Space на точках и стрелках листают; крайняя стрелка, нажатая с клавиатуры,
 // отдаёт фокус точке страницы; рамка фокуса видна.
 func TestPager_KeyboardActivates(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	q.SetFocused(true)
@@ -377,6 +385,7 @@ func samePixels(a, b []byte) bool {
 // SetPage сетка ещё на старом месте, посреди движения кадр отличается от обеих
 // страниц, а в конце совпадает с мгновенным переключением при «меньше движения».
 func TestPageSlide_MovesThenSettles(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	grid := desktop.QSZoneRect(q, "grid")
@@ -423,6 +432,7 @@ func TestPageSlide_MovesThenSettles(t *testing.T) {
 // Сдвиг заявляет перерисовку только окна сетки, а встречный SetPage подхватывает
 // движение с текущего положения без скачка.
 func TestPageSlide_InvalidatesGridAndRetargets(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	grid := desktop.QSZoneRect(q, "grid")
@@ -465,6 +475,7 @@ func TestPageSlide_InvalidatesGridAndRetargets(t *testing.T) {
 
 // Новое открытие панели сбрасывает сдвиг: страница 0 без движения.
 func TestPageSlide_ResetsOnReopen(t *testing.T) {
+	testreset.Globals(t)
 	s := qsBuild(t, qsOpts{})
 	q := s.q
 	q.SetPage(1)
