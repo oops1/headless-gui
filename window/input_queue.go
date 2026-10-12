@@ -96,6 +96,19 @@ func (s *surface) refreshCursor() {
 		x, y = pointerOutside, pointerOutside
 	}
 	s.syncCursor(x, y)
+	if fn := s.popupCursor.Load(); fn != nil {
+		(*fn)() // окна-попапы получают принудительный курсор тоже
+	}
+}
+
+// setPopupCursor подключает хост вынесенных попапов к смене принудительного
+// курсора: fn зовётся на горутине движка вместе с refreshCursor.
+func (s *surface) setPopupCursor(fn func()) {
+	if fn == nil {
+		s.popupCursor.Store(nil)
+		return
+	}
+	s.popupCursor.Store(&fn)
 }
 
 // cursorOverrideNotifier — опциональное уведомление движка о смене

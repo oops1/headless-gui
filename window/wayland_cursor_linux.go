@@ -49,6 +49,21 @@ func (w *WaylandWindow) SetCursor(c int) {
 	w.applyCursor()
 }
 
+// SetPopupCursor задаёт форму курсора для времени, когда указатель на попапе
+// (childPopupCursor): set — принудительный курсор движка c, иначе над попапом
+// остаётся форма окна. Попап — отдельная поверхность, но указатель и курсор у
+// них общие, и без этого принудительный курсор, заданный пока указатель на
+// попапе, остался бы невидимым до возврата в окно.
+func (w *WaylandWindow) SetPopupCursor(c int, set bool) {
+	w.cursorMu.Lock()
+	same := w.popupShapeSet == set && (!set || w.popupShape == c)
+	w.popupShape, w.popupShapeSet = c, set
+	w.cursorMu.Unlock()
+	if !same && w.ptrOverPopup.Load() {
+		w.applyCursor()
+	}
+}
+
 // applyCursor отдаёт компоновщику текущую форму курсора.
 //
 // Без serial'а enter просьбу отклонят: set_cursor принимается только от окна,
@@ -62,14 +77,18 @@ func (w *WaylandWindow) applyCursor() {
 	if !w.cursorSet {
 		w.cursorShape, w.cursorSet = wlCursorArrow, true
 	}
-	if w.cursorShape == wlCursorNone {
+	shape := w.cursorShape
+	if w.popupShapeSet && w.ptrOverPopup.Load() {
+		shape = w.popupShape // над попапом действует принудительный курсор
+	}
+	if shape == wlCursorNone {
 		w.hideCursor()
 		return
 	}
-	if w.setCursorByShape(w.cursorShape) {
+	if w.setCursorByShape(shape) {
 		return
 	}
-	w.setCursorBySurface(w.cursorShape)
+	w.setCursorBySurface(shape)
 }
 
 // hideCursor прячет курсор: wl_pointer.set_cursor(serial, NULL, 0, 0).

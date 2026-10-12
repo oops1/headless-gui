@@ -170,6 +170,7 @@ func (win *Window) installPopupHost() {
 	if cph, ok := win.native.(childPopupHost); ok {
 		win.childPopups = newChildPopups(cph, peng, win.scale, &win.in)
 		setter.SetPopupSink(win.childPopups.apply)
+		win.setPopupCursor(win.childPopups.syncCursorOverride)
 		return
 	}
 
@@ -182,6 +183,7 @@ func (win *Window) installPopupHost() {
 	}
 	win.popupHost = newPopupHost(win.native, inv, peng, win.scale, &win.in)
 	setter.SetPopupSink(win.popupHost.apply)
+	win.setPopupCursor(win.popupHost.syncCursorOverride)
 }
 
 // detectScale возвращает HiDPI-масштаб: env HEADLESS_GUI_SCALE имеет
@@ -252,6 +254,12 @@ type surface struct {
 	// (refreshCursor). Только горутина движка.
 	ptrX, ptrY int
 	ptrKnown   bool
+
+	// popupCursor — хост вынесенных попапов (popupHost / childPopups) просит
+	// пересмотреть принудительный курсор движка (Engine.SetCursorOverride):
+	// попапы — окна ОС со своим курсором, и до них форма окна-носителя не
+	// доходит. Ставится при установке хоста, читается горутиной движка.
+	popupCursor atomic.Pointer[func()]
 
 	// emu — палец, превращённый в мышь, пока касание никто не взял (touch.go).
 	// Только горутина движка.

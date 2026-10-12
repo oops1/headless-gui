@@ -48,6 +48,23 @@ type popupHost struct {
 
 	mu      sync.Mutex
 	windows map[uintptr]*hostedPopup // ID оверлея → окно
+
+	// ovrCursor/ovrSet — принудительный курсор движка, как его последний раз
+	// получили окна-попапы (cursorOverrideSync). Под mu.
+	ovrCursor widget.Cursor
+	ovrSet    bool
+}
+
+// cursorOverrideSource — движок знает принудительный курсор (реализует
+// *engine.Engine).
+type cursorOverrideSource interface {
+	CursorOverride() (widget.Cursor, bool)
+}
+
+// popupCursorSetter — окно ОС умеет менять форму курсора (SetCursor с кодом
+// widget.Cursor), как окно-носитель.
+type popupCursorSetter interface {
+	SetCursor(c int)
 }
 
 // hostedPopup — одно окно-попап под конкретный оверлей.
@@ -227,8 +244,57 @@ func (h *popupHost) createPopup(id uintptr) {
 	}
 	hp.native = native
 	latest := hp.img // мог обновиться, пока окно поднималось
+	ovr, ovrSet := h.ovrCursor, h.ovrSet
 	h.mu.Unlock()
 	blitPopup(native, latest)
+	// Принудительный курсор, заданный до открытия попапа (или пока он
+	// поднимался), действует и над ним. Мы на потоке окна.
+	if ovrSet {
+		if sc, ok := native.(popupCursorSetter); ok {
+			sc.SetCursor(int(ovr))
+		}
+	}
+}
+
+// syncCursorOverride переносит принудительный курсор движка на окна-попапы.
+// Зовётся на горутине движка при смене override (surface.refreshCursor) и
+// после открытия попапа.
+//
+// Курсор окна-носителя до попапов не доходит: у каждого окна ОС свой. Поэтому
+// заданная Engine.SetCursorOverride форма ставится и им; снятая — возвращает им
+// стрелку (курсор виджетов в попапах не определяется, там стрелка, как и была).
+func (h *popupHost) syncCursorOverride() {
+	src, ok := h.eng.(cursorOverrideSource)
+	if !ok {
+		return
+	}
+	c, set := src.CursorOverride()
+
+	h.mu.Lock()
+	if h.ovrSet == set && (!set || h.ovrCursor == c) {
+		h.mu.Unlock()
+		return // ничего не изменилось
+	}
+	h.ovrCursor, h.ovrSet = c, set
+	natives := make([]NativeWindow, 0, len(h.windows))
+	for _, hp := range h.windows {
+		if hp.native != nil {
+			natives = append(natives, hp.native)
+		}
+	}
+	h.mu.Unlock()
+
+	shape := int(widget.CursorArrow)
+	if set {
+		shape = int(c)
+	}
+	for _, n := range natives {
+		sc, ok := n.(popupCursorSetter)
+		if !ok {
+			continue
+		}
+		h.invoker.InvokeOnUIThread(func() { sc.SetCursor(shape) })
+	}
 }
 
 // popupRegionSetter — бэкенд умеет выкроить окно по закрашенной части кадра.

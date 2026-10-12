@@ -358,6 +358,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 		if inv, ok := native.(uiThreadInvoker); ok {
 			ph := newPopupHost(native, inv, eng, scale, &surf.in)
 			eng.SetPopupSink(ph.apply)
+			surf.setPopupCursor(ph.syncCursorOverride)
 			h.mu.Lock()
 			hm.popupHost = ph
 			h.mu.Unlock()

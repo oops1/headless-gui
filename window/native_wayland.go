@@ -316,6 +316,12 @@ type WaylandWindow struct {
 	cursorMu         sync.Mutex
 	cursorShape      int
 	cursorSet        bool
+	// popupShape/popupShapeSet — принудительный курсор движка для времени,
+	// когда указатель на попапе (SetPopupCursor); под cursorMu. ptrOverPopup
+	// — зеркало ptrOnPopup для чтения из горутины движка.
+	popupShape     int
+	popupShapeSet  bool
+	ptrOverPopup   atomic.Bool
 	cursorSurfID     uint32
 	cursorPoolID     uint32
 	cursorFD         int
@@ -967,6 +973,7 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		if pop := w.popupForSurface(surf); pop != nil {
 			w.ptrOnPopup, w.ptrPopupID = true, pop.id
 		}
+		w.ptrOverPopup.Store(w.ptrOnPopup)
 		w.ptrX = w.fixedToPixels(binary.LittleEndian.Uint32(b[8:12]))
 		w.ptrY = w.fixedToPixels(binary.LittleEndian.Uint32(b[12:16]))
 		// Форму курсора ставим сразу: без set_cursor после enter курсор над
@@ -975,6 +982,7 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 	case wlPointerEvLeave:
 		onPopup := w.ptrOnPopup
 		w.ptrOnPopup = false
+		w.ptrOverPopup.Store(false)
 		// Указатель ушёл — в том числе потому, что компоновщик забрал
 		// нажатие себе (начались move/resize). Отпускания мы уже не
 		// получим, поэтому отпускаем зажатые кнопки сами: иначе движок
