@@ -63,7 +63,7 @@ func ClipboardFiles() (paths []string, cut bool, ok bool) {
 func (c *memoryClipboard) SetFiles(paths []string, cut bool) {
 	c.mu.Lock()
 	c.text, c.html = strings.Join(paths, "\n"), ""
-	c.files, c.cut = append([]string(nil), paths...), cut
+	c.files, c.cut, c.img = append([]string(nil), paths...), cut, nil
 	c.mu.Unlock()
 }
 

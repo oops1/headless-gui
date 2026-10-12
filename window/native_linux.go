@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/oops1/headless-gui/v3/internal/clipimage"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -144,6 +145,9 @@ type X11Window struct {
 	// atomGnomeCopied — x-special/gnome-copied-files: список файлов с
 	// пометкой copy/cut (text/uri-list — atomTextUriList, общий с XDND).
 	atomGnomeCopied uint32
+	// Изображение в буфере обмена: image/png и image/bmp — цели, INCR — тип
+	// свойства, в котором большие данные идут по частям (x11_clipboard_image_linux.go).
+	atomImagePNG, atomImageBMP, atomIncr uint32
 	// clip — буфер обмена своими силами (x11_clipboard_linux.go).
 	clip *x11Clipboard
 	// cursors — формы курсора окна (x11_cursor_linux.go).
@@ -303,6 +307,9 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomText = w.x11InternAtom("TEXT")
 	w.atomTextHTML = w.x11InternAtom(mimeTextHTML)
 	w.atomGnomeCopied = w.x11InternAtom(mimeGnomeCopiedFiles)
+	w.atomImagePNG = w.x11InternAtom(clipimage.MimePNG)
+	w.atomImageBMP = w.x11InternAtom(clipimage.MimeBMP)
+	w.atomIncr = w.x11InternAtom("INCR")
 	w.atomNetWMName = w.x11InternAtom("_NET_WM_NAME")
 	w.atomNetWMIconName = w.x11InternAtom("_NET_WM_ICON_NAME")
 	w.atomMotifHints = w.x11InternAtom("_MOTIF_WM_HINTS")
@@ -613,8 +620,12 @@ func (w *X11Window) handleX11Event(buf []byte) {
 			}
 		}
 
-	case x11EvPropertyNotify: // менеджер мог сменить _NET_WM_STATE окна
+	case x11EvPropertyNotify:
+		// Менеджер мог сменить _NET_WM_STATE окна (полный экран,
+		// разворачивание) — или это очередной кусок INCR буфера обмена либо
+		// удаление нашего куска. Каждый обработчик сверяет окно и атом сам.
 		w.x11NoteWMStateChanged(buf)
+		w.clip.handlePropertyNotify(buf)
 
 	case 29: // SelectionClear — буфером обмена завладел другой
 		w.clip.handleClear(buf)

@@ -37,6 +37,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/internal/clipimage"
 )
 
 const (
@@ -102,6 +104,11 @@ type wlClipboard struct {
 	offerHTML string
 	// offerURIList / offerGnome — offer предлагает список файлов этими типами.
 	offerURIList, offerGnome bool
+	// ownedImg — изображение, которым мы владеем; nil — отдаём не картинку.
+	ownedImg *ownedImage
+	// offerImage — читаемый тип изображения из объявленных offer'ом
+	// (image/png, а при его отсутствии image/bmp); пусто — картинки нет.
+	offerImage string
 }
 
 // newWlClipboard создаёт буфер обмена для окна.
@@ -111,25 +118,27 @@ func newWlClipboard(w *WaylandWindow) *wlClipboard { return &wlClipboard{w: w} }
 //
 // Реализует widget.ClipboardProvider: окно регистрирует этот буфер глобально,
 // когда Wayland-соединение поднялось.
-func (c *wlClipboard) SetText(s string) { c.setSelection(s, "", nil, false) }
+func (c *wlClipboard) SetText(s string) { c.setSelection(s, "", nil, false, nil) }
 
 // SetHTML отдаёт в буфер оформленный текст вместе с простым: рядом с текстовыми
 // типами объявляется text/html.
 //
 // Реализует widget.ClipboardHTMLProvider.
-func (c *wlClipboard) SetHTML(html, plain string) { c.setSelection(plain, html, nil, false) }
+func (c *wlClipboard) SetHTML(html, plain string) { c.setSelection(plain, html, nil, false, nil) }
 
 // SetFiles отдаёт в буфер список файлов: text/uri-list и
 // x-special/gnome-copied-files рядом с путями простым текстом.
 //
 // Реализует widget.ClipboardFilesProvider.
 func (c *wlClipboard) SetFiles(paths []string, cut bool) {
-	c.setSelection(filesPlainText(paths), "", append([]string(nil), paths...), cut)
+	c.setSelection(filesPlainText(paths), "", append([]string(nil), paths...), cut, nil)
 }
 
 // setSelection объявляет источник: простой текст всегда, text/html — если есть
-// оформленная версия, типы списка файлов — если отдаём файлы.
-func (c *wlClipboard) setSelection(s, html string, files []string, cut bool) {
+// оформленная версия, типы списка файлов — если отдаём файлы, image/png — если
+// отдаём картинку (тогда текста нет вовсе: вставка в редактор пустой строки
+// вместо отказа сбивала бы с толку).
+func (c *wlClipboard) setSelection(s, html string, files []string, cut bool, img *ownedImage) {
 	if c == nil || c.w == nil {
 		return
 	}
@@ -148,7 +157,7 @@ func (c *wlClipboard) setSelection(s, html string, files []string, cut bool) {
 	old := c.source
 	id := w.newID()
 	c.source, c.owned, c.ownedHTML = id, s, html
-	c.ownedFiles, c.ownedCut = files, cut
+	c.ownedFiles, c.ownedCut, c.ownedImg = files, cut, img
 	c.mu.Unlock()
 
 	if old != 0 {
@@ -164,6 +173,9 @@ func (c *wlClipboard) setSelection(s, html string, files []string, cut bool) {
 		// должен увидеть их раньше текста.
 		mimes = append([]string{mimeTextUriList, mimeGnomeCopiedFiles}, mimes...)
 	}
+	if img != nil {
+		mimes = []string{clipimage.MimePNG}
+	}
 	for _, mime := range mimes {
 		w.send(newWlMsg(id, wlDataSourceOffer).putString(mime), -1)
 	}
@@ -177,8 +189,12 @@ func (c *wlClipboard) GetText() string {
 	}
 	c.mu.Lock()
 	owned, offer, hasText := c.owned, c.offer, c.offerText
-	src := c.source
+	src, ownImg := c.source, c.ownedImg != nil
 	c.mu.Unlock()
+
+	if src != 0 && ownImg {
+		return "" // в буфере наша картинка, текста нет
+	}
 
 	// Владеем сами — отвечаем из своей копии, не гоняя данные через
 	// компоновщика и собственный канал.
@@ -202,8 +218,12 @@ func (c *wlClipboard) GetHTML() (string, bool) {
 	}
 	c.mu.Lock()
 	html, offer, mime := c.ownedHTML, c.offer, c.offerHTML
-	src := c.source
+	src, ownImg := c.source, c.ownedImg != nil
 	c.mu.Unlock()
+
+	if src != 0 && ownImg {
+		return "", false
+	}
 
 	// Владеем сами — отвечаем из своей копии.
 	if src != 0 && html != "" {
@@ -233,9 +253,12 @@ func (c *wlClipboard) GetFiles() ([]string, bool, bool) {
 	c.mu.Lock()
 	files, cut := c.ownedFiles, c.ownedCut
 	offer, uri, gnome := c.offer, c.offerURIList, c.offerGnome
-	src := c.source
+	src, ownImg := c.source, c.ownedImg != nil
 	c.mu.Unlock()
 
+	if src != 0 && ownImg {
+		return nil, false, false
+	}
 	if src != 0 && len(files) > 0 {
 		return append([]string(nil), files...), cut, true
 	}
@@ -290,13 +313,47 @@ func (c *wlClipboard) receiveTimeout(offer uint32, mime string, timeout time.Dur
 	}
 }
 
+// receiveIdle просит у владельца данные указанного типа и читает их, пока они
+// идут: срок idle отсчитывается заново после каждого прочитанного куска, а не
+// на весь ответ целиком. Изображение — единицы мегабайт, и владелец отдаёт их
+// кусками; общий короткий срок обрубил бы честного, но не мгновенного
+// владельца, а срок на кусок всё так же не даёт зависшему подвесить вызов
+// дольше 300 мс. limit ограничивает размер: превысивший — отказ, а не
+// обрезанные данные (обрезанный PNG всё равно не разберётся).
+func (c *wlClipboard) receiveIdle(offer uint32, mime string, idle time.Duration, limit int) []byte {
+	r, wr, err := os.Pipe()
+	if err != nil {
+		return nil
+	}
+	defer r.Close()
+	c.w.send(newWlMsg(offer, wlDataOfferReceive).putString(mime), int(wr.Fd()))
+	wr.Close() // свой конец закрываем сразу: иначе EOF не придёт никогда
+
+	var data []byte
+	chunk := make([]byte, 64<<10)
+	for {
+		r.SetReadDeadline(time.Now().Add(idle))
+		n, err := r.Read(chunk)
+		data = append(data, chunk[:n]...)
+		if len(data) > limit {
+			return nil
+		}
+		if err != nil {
+			if err == io.EOF {
+				return data
+			}
+			return nil // срок вышел или канал оборвался: неполной картинке верить нельзя
+		}
+	}
+}
+
 // handleSelection запоминает offer, присланный компоновщиком как содержимое
 // буфера обмена. id == 0 означает «буфер пуст».
 func (c *wlClipboard) handleSelection(id uint32) {
 	c.mu.Lock()
 	old := c.offer
 	c.offer, c.offerText, c.offerHTML = id, false, ""
-	c.offerURIList, c.offerGnome = false, false
+	c.offerURIList, c.offerGnome, c.offerImage = false, false, ""
 	if id != 0 {
 		// Типы этого offer пришли раньше, событиями offer: берём их из
 		// общего списка предложений окна.
@@ -304,10 +361,11 @@ func (c *wlClipboard) handleSelection(id uint32) {
 		c.offerHTML = c.w.offerHTMLMime(id)
 		c.offerURIList = c.w.offerGet(id)
 		c.offerGnome = c.w.offerHasGnomeFiles(id)
+		c.offerImage = c.w.offerImageMime(id)
 		// Чужой selection означает, что владелец теперь не мы.
 		if c.source != 0 {
 			c.owned, c.ownedHTML = "", ""
-			c.ownedFiles, c.ownedCut = nil, false
+			c.ownedFiles, c.ownedCut, c.ownedImg = nil, false, nil
 		}
 	}
 	c.mu.Unlock()
@@ -326,6 +384,7 @@ func (c *wlClipboard) handleSelection(id uint32) {
 func (c *wlClipboard) handleSourceSend(source uint32, mime string, fd int) {
 	c.mu.Lock()
 	ours, text := c.source == source, c.owned
+	img := c.ownedImg
 	switch {
 	case isHTMLMime(mime) && c.ownedHTML != "":
 		text = c.ownedHTML
@@ -343,6 +402,22 @@ func (c *wlClipboard) handleSourceSend(source uint32, mime string, fd int) {
 		f.Close()
 		return
 	}
+	if img != nil {
+		// Картинка: PNG кодируется здесь, в первый раз за всё владение, и
+		// именно в горутине — на крупном снимке это десятки миллисекунд, а
+		// цикл событий занят кадрами и вводом. На любой другой тип (текст,
+		// HTML) картинка отвечает пустотой: данных такого вида у нас нет.
+		go func() {
+			defer f.Close()
+			if !clipimage.IsPNGMime(mime) {
+				return
+			}
+			if data, err := img.PNG(); err == nil {
+				f.Write(data)
+			}
+		}()
+		return
+	}
 	// Пишем в своей горутине: получатель читает не торопясь, а канал имеет
 	// размер буфера — запись блокируется, и цикл событий встал бы вместе с
 	// ней.
@@ -358,7 +433,7 @@ func (c *wlClipboard) handleSourceCancelled(source uint32) {
 	ours := c.source == source
 	if ours {
 		c.source, c.owned, c.ownedHTML = 0, "", ""
-		c.ownedFiles, c.ownedCut = nil, false
+		c.ownedFiles, c.ownedCut, c.ownedImg = nil, false, nil
 	}
 	c.mu.Unlock()
 	if ours {

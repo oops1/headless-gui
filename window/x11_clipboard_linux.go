@@ -50,8 +50,15 @@ type x11Clipboard struct {
 	// ownedFiles — наш список файлов; nil — отдаём не файлы.
 	ownedFiles []string
 	ownedCut   bool
-	owns       bool        // владеем ли мы буфером
-	wait       chan string // ждёт ответа на ConvertSelection; nil — не ждём
+	owns       bool     // владеем ли мы буфером
+	wait       *x11Wait // ждёт ответа на ConvertSelection; nil — не ждём
+	// ownedImg — наша картинка; nil — отдаём не изображение.
+	ownedImg *ownedImage
+	// incrSends — передачи INCR, которые мы ведём получателям (x11_clipboard_image_linux.go).
+	incrSends map[x11IncrKey]*x11IncrSend
+	// pending считает ответы, готовящиеся в горутинах (кодирование PNG); нужен
+	// тестам, чтобы дождаться их без пауз.
+	pending sync.WaitGroup
 }
 
 func newX11Clipboard(w *X11Window) *x11Clipboard { return &x11Clipboard{w: w} }
@@ -59,30 +66,30 @@ func newX11Clipboard(w *X11Window) *x11Clipboard { return &x11Clipboard{w: w} }
 // SetText объявляет нас владельцем буфера обмена.
 //
 // Реализует widget.ClipboardProvider.
-func (c *x11Clipboard) SetText(s string) { c.setOwned(s, "", nil, false) }
+func (c *x11Clipboard) SetText(s string) { c.setOwned(s, "", nil, false, nil) }
 
 // SetHTML объявляет нас владельцем буфера и готовит к выдаче и текст, и HTML.
 //
 // Реализует widget.ClipboardHTMLProvider.
-func (c *x11Clipboard) SetHTML(html, plain string) { c.setOwned(plain, html, nil, false) }
+func (c *x11Clipboard) SetHTML(html, plain string) { c.setOwned(plain, html, nil, false, nil) }
 
 // SetFiles объявляет нас владельцем буфера со списком файлов и путями текстом.
 //
 // Реализует widget.ClipboardFilesProvider.
 func (c *x11Clipboard) SetFiles(paths []string, cut bool) {
-	c.setOwned(filesPlainText(paths), "", append([]string(nil), paths...), cut)
+	c.setOwned(filesPlainText(paths), "", append([]string(nil), paths...), cut, nil)
 }
 
 // setOwned запоминает содержимое и становится владельцем CLIPBOARD. Прежнее
 // оформление затирается всегда: иначе после SetText проситель text/html
 // получил бы разметку от прошлого копирования.
-func (c *x11Clipboard) setOwned(text, html string, files []string, cut bool) {
+func (c *x11Clipboard) setOwned(text, html string, files []string, cut bool, img *ownedImage) {
 	if c == nil || c.w == nil || c.w.wid == 0 || c.w.atomClipboard == 0 {
 		return
 	}
 	c.mu.Lock()
 	c.owned, c.ownedHTML, c.owns = text, html, true
-	c.ownedFiles, c.ownedCut = files, cut
+	c.ownedFiles, c.ownedCut, c.ownedImg = files, cut, img
 	c.mu.Unlock()
 	c.w.x11SetSelectionOwner(c.w.atomClipboard, c.w.wid)
 }
@@ -96,7 +103,7 @@ func (c *x11Clipboard) GetText() string {
 	if c.owns {
 		s := c.owned
 		c.mu.Unlock()
-		return s // владеем сами — незачем ходить через сервер
+		return s // владеем сами — незачем ходить через сервер (у картинки текста нет)
 	}
 	c.mu.Unlock()
 	return c.convert(c.w.atomUTF8String)
@@ -168,27 +175,76 @@ func (c *x11Clipboard) convert(target uint32) string {
 
 // convertTimeout — convert с заданным сроком ожидания.
 func (c *x11Clipboard) convertTimeout(target uint32, timeout time.Duration) string {
+	return string(c.convertBytes(target, timeout, maxClipboardBytes))
+}
+
+// x11Wait — ожидание ответа на ConvertSelection.
+type x11Wait struct {
+	ch       chan []byte   // готовый ответ; nil — отказ
+	progress chan struct{} // INCR: пришёл очередной кусок, срок ожидания начинается заново
+	// Состояние передачи INCR: владелец отдаёт большие данные кусками, и вместо
+	// ответа приходит свойство типа INCR (ICCCM §2.7.2).
+	incr  bool
+	buf   []byte
+	limit int // предел размера ответа
+}
+
+// notifyProgress будит ожидающего: владелец жив, срок отсчитывается заново.
+func (wt *x11Wait) notifyProgress() {
+	select {
+	case wt.progress <- struct{}{}:
+	default:
+	}
+}
+
+// convertBytes — convert с заданным сроком и пределом размера, отдающий байты.
+// Срок относится к ответу владельца и, при передаче INCR, к каждому следующему
+// куску: цельный срок на всю большую картинку обрубил бы честного владельца,
+// а срок на кусок не даёт зависшему подвесить вызов.
+func (c *x11Clipboard) convertBytes(target uint32, timeout time.Duration, limit int) []byte {
+	data, _ := c.convertAnswer(target, timeout, limit)
+	return data
+}
+
+// convertAnswer — convertBytes, различающий отказ и молчание: answered == false
+// значит, владелец не ответил в срок (или запрос уже был в пути), а пустой
+// data при answered == true — он ответил отказом.
+func (c *x11Clipboard) convertAnswer(target uint32, timeout time.Duration, limit int) (data []byte, answered bool) {
 	c.mu.Lock()
 	if c.wait != nil {
 		c.mu.Unlock()
-		return "" // запрос уже в пути; второй ответ всё равно будет один
+		return nil, false // запрос уже в пути; второй ответ всё равно будет один
 	}
-	ch := make(chan string, 1)
-	c.wait = ch
+	wt := &x11Wait{ch: make(chan []byte, 1), progress: make(chan struct{}, 1), limit: limit}
+	c.wait = wt
 	c.mu.Unlock()
 
 	// Ответ придёт событием SelectionNotify в цикл событий — он и разбудит
 	// этот канал (см. handleNotify).
 	c.w.x11ConvertSelection(c.w.atomClipboard, target, c.w.atomClipProp, 0)
 
-	select {
-	case s := <-ch:
-		return s
-	case <-time.After(timeout):
-		c.mu.Lock()
-		c.wait = nil
-		c.mu.Unlock()
-		return "" // владелец молчит: буфер обмена не повод вешать интерфейс
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case res := <-wt.ch:
+			return res, true
+		case <-wt.progress:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(timeout)
+		case <-timer.C:
+			c.mu.Lock()
+			if c.wait == wt {
+				c.wait = nil
+			}
+			c.mu.Unlock()
+			return nil, false // владелец молчит: буфер обмена не повод вешать интерфейс
+		}
 	}
 }
 
@@ -204,17 +260,32 @@ func (c *x11Clipboard) handleNotify(buf []byte) bool {
 	}
 	property := binary.LittleEndian.Uint32(buf[20:24]) // None(0) — конверсия не удалась
 
-	text := ""
+	var data []byte
 	if property != 0 {
-		_, _, data := c.w.x11GetProperty(c.w.wid, property, true)
-		text = string(data)
+		var typ uint32
+		typ, _, data = c.w.x11GetProperty(c.w.wid, property, true)
+		if c.w.atomIncr != 0 && typ == c.w.atomIncr {
+			// Владелец отдаёт данные кусками. Свойство мы только что удалили —
+			// это и есть сигнал «присылай первый кусок»; дальше куски приходят
+			// событиями PropertyNotify (handlePropertyNotify).
+			c.mu.Lock()
+			wt := c.wait
+			if wt != nil {
+				wt.incr, wt.buf = true, nil
+			}
+			c.mu.Unlock()
+			if wt != nil {
+				wt.notifyProgress()
+			}
+			return true
+		}
 	}
 	c.mu.Lock()
-	ch := c.wait
+	wt := c.wait
 	c.wait = nil
 	c.mu.Unlock()
-	if ch != nil {
-		ch <- text
+	if wt != nil {
+		wt.ch <- data
 	}
 	return true
 }
@@ -241,6 +312,7 @@ func (c *x11Clipboard) handleRequest(buf []byte) {
 	c.mu.Lock()
 	text, html, owns := c.owned, c.ownedHTML, c.owns
 	files, cut := c.ownedFiles, c.ownedCut
+	img := c.ownedImg
 	c.mu.Unlock()
 	uriList, gnome := c.w.atomTextUriList, c.w.atomGnomeCopied
 
@@ -252,6 +324,14 @@ func (c *x11Clipboard) handleRequest(buf []byte) {
 		// Список форматов, которые мы умеем отдать.
 		data := make([]byte, 0, 20)
 		targets := []uint32{c.w.atomTargets, c.w.atomUTF8String, 31 /*STRING*/, c.w.atomText}
+		if img != nil {
+			// Картинка: текстовых целей нет, иначе редактор вставил бы пустую
+			// строку вместо того, чтобы понять, что вставлять нечего.
+			targets = []uint32{c.w.atomTargets}
+			if c.w.atomImagePNG != 0 {
+				targets = append(targets, c.w.atomImagePNG)
+			}
+		}
 		if html != "" && c.w.atomTextHTML != 0 {
 			targets = append(targets, c.w.atomTextHTML)
 		}
@@ -269,6 +349,17 @@ func (c *x11Clipboard) handleRequest(buf []byte) {
 		}
 		c.w.x11ChangeProperty(requestor, property, 4 /*ATOM*/, 32, data)
 		ok = true
+	case img != nil && c.w.atomImagePNG != 0 && target == c.w.atomImagePNG:
+		// PNG кодируется при первом запросе и не в цикле событий: на большом
+		// снимке это десятки миллисекунд. Ответ уйдёт из горутины.
+		c.pending.Add(1)
+		go func() {
+			defer c.pending.Done()
+			c.serveImage(img, requestor, property, timestamp, selection, target)
+		}()
+		return
+	case img != nil:
+		// Остальные цели у картинки — отказ.
 	case target == c.w.atomUTF8String || target == 31 /*STRING*/ || target == c.w.atomText:
 		c.w.x11ChangeProperty(requestor, property, target, 8, []byte(text))
 		ok = true
@@ -299,7 +390,7 @@ func (c *x11Clipboard) handleClear(buf []byte) {
 	}
 	c.mu.Lock()
 	c.owns, c.owned, c.ownedHTML = false, "", ""
-	c.ownedFiles, c.ownedCut = nil, false
+	c.ownedFiles, c.ownedCut, c.ownedImg = nil, false, nil
 	c.mu.Unlock()
 }
 

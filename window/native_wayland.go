@@ -36,6 +36,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/oops1/headless-gui/v3/internal/clipimage"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -358,6 +359,9 @@ type WaylandWindow struct {
 	// gnomeOffers — предложения со списком файлов x-special/gnome-copied-files
 	// (там же пометка cut); text/uri-list отмечен в offers.
 	gnomeOffers map[uint32]bool
+	// imageOffers — предложения с изображением: offer → читаемый тип
+	// (image/png, а при его отсутствии image/bmp), его же и запрашиваем.
+	imageOffers map[uint32]string
 	// dndOffer — активный offer текущего перетаскивания (между enter и drop).
 	dndOffer   uint32
 	dndSerial  uint32 // serial из enter (для accept)
@@ -896,6 +900,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			}
 			if mime == mimeGnomeCopiedFiles {
 				w.offerSetGnomeFiles(obj)
+			}
+			if clipimage.IsPNGMime(mime) || clipimage.IsBMPMime(mime) {
+				w.offerSetImage(obj, mime)
 			}
 		}
 
@@ -1729,6 +1736,28 @@ func (w *WaylandWindow) offerHasGnomeFiles(id uint32) bool {
 	return w.gnomeOffers[id]
 }
 
+// offerSetImage отмечает, что offer предлагает изображение этим типом. Из
+// нескольких остаётся лучший по порядку предпочтения: PNG, затем BMP.
+func (w *WaylandWindow) offerSetImage(id uint32, mime string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.imageOffers == nil {
+		w.imageOffers = map[uint32]string{}
+	}
+	if old, ok := w.imageOffers[id]; ok {
+		mime = clipimage.PickMime([]string{old, mime})
+	}
+	w.imageOffers[id] = mime
+}
+
+// offerImageMime возвращает читаемый тип изображения, предложенный offer'ом,
+// или пустую строку.
+func (w *WaylandWindow) offerImageMime(id uint32) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.imageOffers[id]
+}
+
 // isTextMime — тип, под которым ходит простой текст.
 func isTextMime(mime string) bool {
 	switch mime {
@@ -1751,6 +1780,7 @@ func (w *WaylandWindow) offerDelete(id uint32) {
 	delete(w.textOffers, id)
 	delete(w.htmlOffers, id)
 	delete(w.gnomeOffers, id)
+	delete(w.imageOffers, id)
 	w.mu.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()
