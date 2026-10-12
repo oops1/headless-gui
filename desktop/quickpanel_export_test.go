@@ -1,6 +1,11 @@
 package desktop
 
-import "image"
+import (
+	"image"
+
+	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v3/widget"
+)
 
 // Окно в раскладку быстрых настроек для внешних тестов (package desktop_test):
 // где что лежит на экране, чтобы нажимать в нужные точки, не вшивая числа.
@@ -80,8 +85,29 @@ func QSZoneRect(q *QuickSettings, name string) image.Rectangle {
 		return l.battery
 	case "body":
 		return l.body
+	case "pager":
+		return l.pager
+	case "pageup":
+		return l.up
+	case "pagedown":
+		return l.down
 	}
 	return image.Rectangle{}
+}
+
+// QSDotRect — точка страницы i столбца страниц.
+func QSDotRect(q *QuickSettings, i int) image.Rectangle {
+	l, _ := q.pn.layout(q.rect())
+	if i < 0 || i >= len(l.dots) {
+		return image.Rectangle{}
+	}
+	return l.dots[i]
+}
+
+// QSWrapLabel разбивает подпись плитки на строки шириной до maxW (мерой служит
+// ctx), как это делает панель.
+func QSWrapLabel(ctx widget.DrawContext, text string, maxW, maxLines int) []string {
+	return qsWrapLabel(ctx, text, &theme.Style{}, maxW, maxLines)
 }
 
 // QSRich сообщает, рисует ли панель вариант Windows 11.
@@ -127,4 +153,23 @@ func QSHeight(q *QuickSettings, n int, hasVol, hasBright bool) int {
 func QSMetrics(q *QuickSettings) (width, tileW, tileH, colGap, pad int) {
 	m := readQSMetrics(q.Theme())
 	return m.width, m.tileW, m.tileH, m.colGap, m.pad
+}
+
+// DPRect — прямоугольник строки sub элемента item страницы-строителя.
+func DPRect(p *DetailPage, item, sub int) image.Rectangle {
+	m := readQSMetrics(p.tm)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pl, _ := p.places(m)
+	if item < 0 || item >= len(pl) {
+		return image.Rectangle{}
+	}
+	return pl[item].e.rowRect(p, m, pl[item].r, sub)
+}
+
+// DPScroll — прокрутка страницы-строителя.
+func DPScroll(p *DetailPage) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.scroll
 }

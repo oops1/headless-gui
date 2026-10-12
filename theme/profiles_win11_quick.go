@@ -30,6 +30,19 @@ const KeyQuickPage Key = "quicksettings.page"
 // Потребитель с цветными значками гасит флаг: m.SetFlag(theme.KeyQuickIconTint, false).
 const KeyQuickIconTint Key = "quicksettings.icon.tint"
 
+// KeyQuickPaged — флаг профиля: плитки Windows 11 идут страницами (по rows
+// рядов на странице), справа от сетки стоят точки страниц и стрелки ▲▼, колесо
+// листает страницы. Погашенный флаг возвращает прокрутку сетки пиксель за
+// пикселем с тонкой полосой, как было до v3.34: потребитель, опиравшийся на неё,
+// пишет m.SetFlag(theme.KeyQuickPaged, false). Профиль без флага (чужой, назвавший
+// презентер) остаётся с прокруткой.
+const KeyQuickPaged Key = "quicksettings.paged"
+
+// KeyQuickFooterEditLeft — флаг профиля: в нижней полосе «Изменить» (карандаш с
+// подписью) стоит слева, батарея — правее него, шестерёнка — справа. Погашенный
+// флаг возвращает прежнюю раскладку: батарея слева, карандаш и шестерёнка справа.
+const KeyQuickFooterEditLeft Key = "quicksettings.footer.edit.left"
+
 // declareWin11QuickSettings объявляет презентер, метрики и части стилей
 // панели. Зовётся ДО declareWin11Materials: части, объявленные к тому часу,
 // получают от него сброс материала и тени панели (плитке не нужны ни Mica, ни
@@ -44,6 +57,10 @@ func declareWin11QuickSettings(p *Profile) {
 	// Размеры — логические пиксели при 100 %. Ширина панели 360, поля 24,
 	// плитки 96×48 при зазоре 12: 24+3·96+2·12+24 = 360.
 	p.SetFlag(KeyQuickIconTint, true)
+	// Страницы с точками и «Изменить» слева — вид настоящей Windows 11; оба флага
+	// гасятся потребителем, которому нужен прежний вид.
+	p.SetFlag(KeyQuickPaged, true)
+	p.SetFlag(KeyQuickFooterEditLeft, true)
 
 	p.SetMetric("quicksettings.w11.width", 360).
 		SetMetric("quicksettings.w11.margin", 12).
@@ -57,7 +74,7 @@ func declareWin11QuickSettings(p *Profile) {
 		SetMetric("quicksettings.w11.row.gap", 12).
 		SetMetric("quicksettings.w11.label.gap", 6).
 		SetMetric("quicksettings.w11.label.h", 32).
-		SetMetric("quicksettings.w11.chev.w", 28).
+		SetMetric("quicksettings.w11.chev.w", 48). // правая половинка разделённой плитки: «›»
 		SetMetric("quicksettings.w11.icon", 20).
 		SetMetric("quicksettings.w11.grid.gap", 16).
 		SetMetric("quicksettings.w11.slider.h", 40).
@@ -72,7 +89,9 @@ func declareWin11QuickSettings(p *Profile) {
 		SetMetric("quicksettings.w11.footer.pad", 16).
 		SetMetric("quicksettings.w11.footer.btn", 32).
 		SetMetric("quicksettings.w11.header.h", 48).
-		SetMetric("quicksettings.w11.scrollbar.w", 4)
+		SetMetric("quicksettings.w11.scrollbar.w", 4).
+		SetMetric("quicksettings.w11.page.row", 48).
+		SetMetric("quicksettings.w11.page.icon", 24)
 
 	// Переход на вложенную страницу — ход вбок. Это украшение: при «меньше
 	// движения» мгновенно (род по умолчанию — декоративный).
@@ -153,6 +172,56 @@ func declareWin11QuickSettings(p *Profile) {
 	set("w11.slider.dot", StateNormal, StyleDelta{FillFrom: KeyAccent, Corner: N(6)})
 	set("w11.slider.dot", StateHover, StyleDelta{FillFrom: KeyAccentHover, Corner: N(6)})
 	set("w11.slider.dot", StatePressed, StyleDelta{FillFrom: KeyAccentPressed, Corner: N(6)})
+	// Неактивный ползунок (SetVolumeEnabled(false)): всё серое, ни акцента, ни
+	// отклика на наведение.
+	set("w11.slider.track", StateDisabled, StyleDelta{Fill: C(gray(60)), Corner: N(2)})
+	set("w11.slider.fill", StateDisabled, StyleDelta{Fill: C(gray(120)), Corner: N(2)})
+	set("w11.slider.thumb", StateDisabled, StyleDelta{FillFrom: "surface", Border: C(gray(80)), BorderWidth: N(1), Corner: N(10)})
+	set("w11.slider.dot", StateDisabled, StyleDelta{Fill: C(gray(130)), Corner: N(6)})
+
+	// Половинки разделённой плитки: тонкая линия между ними. Серая накладка
+	// читается и на светлой плитке, и на акцентной.
+	set("w11.tile.split", StateNormal, StyleDelta{Fill: C(gray(120))})
+	set("w11.tile.split", StateDisabled, StyleDelta{Fill: C(gray(60))})
+
+	// Страницы плиток: точки и стрелки ▲▼ справа от сетки. Точка текущей страницы
+	// — цвет текста (Active), прочие — серые.
+	set("w11.pager.dot", StateNormal, StyleDelta{Fill: C(gray(140)), Corner: N(3)})
+	set("w11.pager.dot", StateActive, StyleDelta{FillFrom: "text", Corner: N(3)})
+	set("w11.pager.arrow", StateNormal, StyleDelta{TextFrom: "text", Corner: N(4)})
+	set("w11.pager.arrow", StateHover, StyleDelta{Fill: C(gray(60)), TextFrom: "text", Corner: N(4)})
+	set("w11.pager.arrow", StatePressed, StyleDelta{Fill: C(gray(90)), TextFrom: "text", Corner: N(4)})
+	set("w11.pager.arrow", StateDisabled, StyleDelta{Text: C(gray(110)), Corner: N(4)})
+
+	// Элементы страницы-строителя (DetailPage): строка списка, выбранная строка с
+	// полосой акцента, переключатель, кнопка. Только серые накладки и токены
+	// профиля: тёмный профиль не повторяет стили.
+	set("w11.page.item", StateNormal, StyleDelta{TextFrom: "text", Corner: N(4)})
+	set("w11.page.item", StateHover, StyleDelta{Fill: C(gray(40)), TextFrom: "text", Corner: N(4)})
+	set("w11.page.item", StatePressed, StyleDelta{Fill: C(gray(64)), TextFrom: "text", Corner: N(4)})
+	set("w11.page.item", StateDisabled, StyleDelta{Text: C(gray(150)), Corner: N(4)})
+	set("w11.page.item.on", StateNormal, StyleDelta{Fill: C(gray(46)), TextFrom: "text", Corner: N(4)})
+	set("w11.page.item.on", StateHover, StyleDelta{Fill: C(gray(66)), TextFrom: "text", Corner: N(4)})
+	set("w11.page.item.on", StatePressed, StyleDelta{Fill: C(gray(84)), TextFrom: "text", Corner: N(4)})
+	set("w11.page.item.on", StateDisabled, StyleDelta{Fill: C(gray(24)), Text: C(gray(150)), Corner: N(4)})
+	set("w11.page.bar", StateNormal, StyleDelta{FillFrom: KeyAccent, Corner: N(2)})
+	set("w11.page.toggle", StateNormal, StyleDelta{Border: C(gray(170)), BorderWidth: N(1), Corner: N(10)})
+	set("w11.page.toggle", StateHover, StyleDelta{Fill: C(gray(30)), Border: C(gray(200)), BorderWidth: N(1), Corner: N(10)})
+	set("w11.page.toggle", StateDisabled, StyleDelta{Border: C(gray(90)), BorderWidth: N(1), Corner: N(10)})
+	set("w11.page.toggle.on", StateNormal, StyleDelta{FillFrom: KeyAccent, BorderFrom: KeyAccent, BorderWidth: N(1), Corner: N(10)})
+	set("w11.page.toggle.on", StateHover, StyleDelta{FillFrom: KeyAccentHover, BorderFrom: KeyAccentHover, BorderWidth: N(1), Corner: N(10)})
+	set("w11.page.toggle.on", StateDisabled, StyleDelta{Fill: C(gray(110)), Border: C(gray(110)), BorderWidth: N(1), Corner: N(10)})
+	set("w11.page.thumb", StateNormal, StyleDelta{FillFrom: "text", Corner: N(6)})
+	set("w11.page.thumb", StateDisabled, StyleDelta{Fill: C(gray(130)), Corner: N(6)})
+	set("w11.page.thumb.on", StateNormal, StyleDelta{FillFrom: KeyAccentText, Corner: N(6)})
+	set("w11.page.button", StateNormal, StyleDelta{Fill: C(gray(46)), Border: C(gray(70)), BorderWidth: N(1), TextFrom: "text", Corner: N(4)})
+	set("w11.page.button", StateHover, StyleDelta{Fill: C(gray(72)), Border: C(gray(90)), BorderWidth: N(1), TextFrom: "text", Corner: N(4)})
+	set("w11.page.button", StatePressed, StyleDelta{Fill: C(gray(96)), Border: C(gray(90)), BorderWidth: N(1), TextFrom: "text", Corner: N(4)})
+	set("w11.page.button", StateDisabled, StyleDelta{Fill: C(gray(24)), Border: C(gray(50)), BorderWidth: N(1), Text: C(gray(150)), Corner: N(4)})
+	set("w11.page.button.accent", StateNormal, StyleDelta{FillFrom: KeyAccent, TextFrom: KeyAccentText, Corner: N(4)})
+	set("w11.page.button.accent", StateHover, StyleDelta{FillFrom: KeyAccentHover, TextFrom: KeyAccentText, Corner: N(4)})
+	set("w11.page.button.accent", StatePressed, StyleDelta{FillFrom: KeyAccentPressed, TextFrom: KeyAccentText, Corner: N(4)})
+	set("w11.page.button.accent", StateDisabled, StyleDelta{Fill: C(gray(24)), Text: C(gray(150)), Corner: N(4)})
 
 	// Нижняя строка: полоса со своей заливкой и тонкой линией сверху.
 	set("w11.footer", StateNormal, StyleDelta{Fill: C(gray(30)), Border: C(gray(52)), BorderWidth: N(1), TextFrom: "text"})

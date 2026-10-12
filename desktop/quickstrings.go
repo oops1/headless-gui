@@ -13,6 +13,9 @@ import "github.com/oops1/headless-gui/v3/widget"
 const (
 	// StrQuickEdit — подсказка карандаша внизу панели.
 	StrQuickEdit = "desktop.quick.edit"
+	// StrQuickEditShort — подпись рядом с карандашом в нижней полосе
+	// («Изменить»), когда кнопка стоит слева (theme.KeyQuickFooterEditLeft).
+	StrQuickEditShort = "desktop.quick.editShort"
 	// StrQuickDone — кнопка выхода из режима правки.
 	StrQuickDone = "desktop.quick.done"
 	// StrQuickEditHint — подсказка вместо ползунков в режиме правки.
@@ -36,11 +39,16 @@ const (
 	StrQuickBattery = "desktop.quick.battery"
 	// StrQuickCharging — подсказка заряда при питании от сети; один %d.
 	StrQuickCharging = "desktop.quick.charging"
+	// StrQuickToggleOn и StrQuickToggleOff — надпись рядом с переключателем
+	// страницы-строителя (DetailPage.AddToggle).
+	StrQuickToggleOn  = "desktop.quick.toggleOn"
+	StrQuickToggleOff = "desktop.quick.toggleOff"
 )
 
 func init() {
 	widget.RegisterStrings("RU", map[string]string{
 		StrQuickEdit:       "Изменить быстрые параметры",
+		StrQuickEditShort:  "Изменить",
 		StrQuickDone:       "Готово",
 		StrQuickEditHint:   "Перетащите плитки, чтобы изменить порядок",
 		StrQuickSettings:   "Все параметры",
@@ -52,9 +60,12 @@ func init() {
 		StrQuickUnmute:     "Включить звук",
 		StrQuickBattery:    "Заряд батареи: %d %%",
 		StrQuickCharging:   "Заряд батареи: %d %%, идёт зарядка",
+		StrQuickToggleOn:   "Вкл.",
+		StrQuickToggleOff:  "Откл.",
 	})
 	widget.RegisterStrings("EN", map[string]string{
 		StrQuickEdit:       "Edit quick settings",
+		StrQuickEditShort:  "Edit",
 		StrQuickDone:       "Done",
 		StrQuickEditHint:   "Drag tiles to change their order",
 		StrQuickSettings:   "All settings",
@@ -66,5 +77,7 @@ func init() {
 		StrQuickUnmute:     "Unmute",
 		StrQuickBattery:    "Battery: %d%%",
 		StrQuickCharging:   "Battery: %d%%, charging",
+		StrQuickToggleOn:   "On",
+		StrQuickToggleOff:  "Off",
 	})
 }

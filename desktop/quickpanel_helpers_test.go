@@ -45,6 +45,8 @@ type qsOpts struct {
 	dark     bool
 	theme    string // профиль; пусто — Windows 11 (по dark)
 	reduce   bool   // «меньше движения»
+	scroll   bool   // прежний вид: сетка прокручивается, а не листается страницами
+	editOld  bool   // прежняя нижняя полоса: батарея слева, «Изменить» справа
 	mica     bool   // Mica и мягкие тени поверх обоев
 	scale    float64
 	w, h     int
@@ -86,6 +88,12 @@ func qsBuild(t *testing.T, o qsOpts) *qsScene {
 	}
 	if o.reduce {
 		m.SetFlag(theme.FlagMotionReduce, true)
+	}
+	if o.scroll {
+		m.SetFlag(theme.KeyQuickPaged, false)
+	}
+	if o.editOld {
+		m.SetFlag(theme.KeyQuickFooterEditLeft, false)
 	}
 	m.SetIconResolver(widget.BuiltinIcons())
 	w, h := o.w, o.h

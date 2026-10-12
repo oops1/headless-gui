@@ -116,3 +116,66 @@ func TestQuickSettingsWin11_PartsKeepOutOfMaterial(t *testing.T) {
 		t.Errorf("сама панель без Mica: %v", s.Backdrop.Material)
 	}
 }
+
+// v3.34: страницы, «Изменить» слева, стопки и компактная «Фокусировка» — флаги
+// профиля Windows 11 (светлого и тёмного); прочие профили их не поднимают, и
+// флаги гасятся потребителем.
+func TestWin11_V334FlagsOnlyForWindows11(t *testing.T) {
+	keys := []theme.Key{theme.KeyQuickPaged, theme.KeyQuickFooterEditLeft, theme.KeyNotifyStack, theme.KeyCalendarFocusCompact}
+	for _, name := range allProfiles {
+		m := builtinManager(t, name)
+		want := name == theme.ProfileWindows11 || name == theme.ProfileWindows11Dark
+		for _, k := range keys {
+			if got := m.GetFlag(k, false); got != want {
+				t.Errorf("%s: флаг %s = %v, ждали %v", name, k, got, want)
+			}
+		}
+	}
+	m := builtinManager(t, theme.ProfileWindows11)
+	for _, k := range keys {
+		m.SetFlag(k, false)
+		if m.GetFlag(k, true) {
+			t.Errorf("флаг %s не гасится", k)
+		}
+	}
+}
+
+// Новые части стиля объявлены для нужных состояний и не несут материала и тени
+// панели; правая половинка плитки — половина плитки.
+func TestQuickSettingsWin11_V334Parts(t *testing.T) {
+	for _, name := range []string{theme.ProfileWindows11, theme.ProfileWindows11Dark} {
+		m := builtinManager(t, name)
+		if got := m.GetMetric("quicksettings.w11.chev.w"); got != 48 {
+			t.Errorf("%s: правая половинка плитки %v, ждали 48", name, got)
+		}
+		for _, p := range []string{"w11.tile.split", "w11.pager.dot", "w11.pager.arrow", "w11.page.item", "w11.page.item.on",
+			"w11.page.bar", "w11.page.toggle", "w11.page.toggle.on", "w11.page.thumb", "w11.page.thumb.on",
+			"w11.page.button", "w11.page.button.accent"} {
+			s := m.GetStyle("quicksettings", p, theme.StateNormal)
+			if s.Elevation != 0 || s.ShadowBlur != 0 || s.Backdrop.Material != theme.MaterialDefault {
+				t.Errorf("%s: часть %s унаследовала тень или материал панели", name, p)
+			}
+		}
+		// Неактивный ползунок серый, без акцента.
+		accent, _ := m.Active().Color(theme.KeyAccent)
+		for _, p := range []string{"w11.slider.fill", "w11.slider.dot"} {
+			on := m.GetStyle("quicksettings", p, theme.StateNormal).Fill
+			off := m.GetStyle("quicksettings", p, theme.StateDisabled).Fill
+			if on != accent || off == on || off.R != off.G || off.G != off.B {
+				t.Errorf("%s: %s в покое %v, неактивная %v", name, p, on, off)
+			}
+		}
+		if on := m.GetStyle("quicksettings", "w11.page.toggle.on", theme.StateNormal).Fill; on != accent {
+			t.Errorf("%s: включённый переключатель %v, ждали акцент", name, on)
+		}
+		if off := m.GetStyle("quicksettings", "w11.page.toggle", theme.StateNormal).Fill; off.A != 0 {
+			t.Errorf("%s: выключенный переключатель залит %v", name, off)
+		}
+		if st := m.GetStyle("notificationcenter", "stack", theme.StateNormal); st.Fill.A == 0 || st.Corner != 4 {
+			t.Errorf("%s: кнопка стопки %+v", name, st)
+		}
+		if got := m.GetMetric("calendar.w11.focus.compact"); got != 60 {
+			t.Errorf("%s: высота компактной «Фокусировки» %v", name, got)
+		}
+	}
+}

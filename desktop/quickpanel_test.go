@@ -330,7 +330,7 @@ func TestQuickPanel_StringsInBothLanguages(t *testing.T) {
 // ─── Сетка и прокрутка ───────────────────────────────────────────────────────
 
 func TestQuickPanel_Scroll(t *testing.T) {
-	s := qsBuild(t, qsOpts{})
+	s := qsBuild(t, qsOpts{scroll: true}) // флаг страниц погашен — прежняя прокрутка
 	q := s.q
 	grid := desktop.QSZoneRect(q, "grid")
 	if desktop.QSZoneRect(q, "thumb").Empty() {
@@ -614,8 +614,8 @@ func TestQuickPanel_Keyboard(t *testing.T) {
 	if k, i := focus(); k != desktop.QSKindTile || i != 7 {
 		t.Errorf("↓ из второго ряда: зона %d/%d, ждали восьмую (последнюю) плитку", k, i)
 	}
-	if desktop.QSScroll(q) == 0 {
-		t.Error("фокус на скрытой плитке не прокрутил сетку")
+	if q.Page() != 1 {
+		t.Errorf("фокус на плитке третьего ряда не перелистнул страницу: %d", q.Page())
 	}
 	if !desktop.QSTileRect(q, "focus").In(desktop.QSZoneRect(q, "grid")) {
 		t.Error("плитка с фокусом не видна в окне сетки")

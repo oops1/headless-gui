@@ -45,7 +45,11 @@ func (pn *qsPanel) zoneAt(pt image.Point) (qsZone, *qsLayout, []QuickAction) {
 	pn.mu.Lock()
 	chevrons := !pn.editing
 	pn.mu.Unlock()
-	return l.zoneAt(pt, list, chevrons), l, list
+	z := l.zoneAt(pt, list, chevrons)
+	if pn.sliderOff(z) {
+		z = qsZone{} // неактивный ползунок не нажимается, не светится и не даёт подсказки
+	}
+	return z, l, list
 }
 
 // ─── Мышь ────────────────────────────────────────────────────────────────────
@@ -167,11 +171,20 @@ func (pn *qsPanel) activate(z qsZone) {
 	editing := pn.editing
 	pn.mu.Unlock()
 
+	if pn.sliderOff(z) {
+		return
+	}
 	switch z.kind {
 	case qzTile:
 		if !editing && m != nil && !a.Disabled && !a.Unavailable {
 			m.Toggle(a.ID)
 		}
+	case qzPageUp:
+		pn.stepPage(-1)
+	case qzPageDown:
+		pn.stepPage(1)
+	case qzPageDot:
+		pn.setPage(z.idx)
 	case qzChevron:
 		if !a.Disabled {
 			q.OpenDetails(a.ID)
@@ -239,6 +252,9 @@ func (pn *qsPanel) dragSlider(z qsZone, l *qsLayout, x int) {
 // (SystemStatus, SetBrightness), но ползунок не должен отставать от руки.
 func (pn *qsPanel) setLevel(z qsZone, level float64) {
 	q := pn.q
+	if pn.sliderOff(z) {
+		return
+	}
 	if level < 0 {
 		level = 0
 	}
@@ -386,7 +402,9 @@ func (pn *qsPanel) dragTile(d qsDrag, pt image.Point) {
 	if !d.moved {
 		pn.grabMouse()
 	}
-	if pt.Y < l.grid.Min.Y+qsEdgeZone && l.scroll > 0 {
+	if l.paged {
+		pn.dragPageEdge(l, pt)
+	} else if pt.Y < l.grid.Min.Y+qsEdgeZone && l.scroll > 0 {
 		pn.scrollTo(l.scroll - qsAutoScroll)
 	} else if pt.Y > l.grid.Max.Y-qsEdgeZone && l.scroll < l.maxScrl {
 		pn.scrollTo(l.scroll + qsAutoScroll)
@@ -481,6 +499,13 @@ func (q *QuickSettings) richWheel(x, y int, dx, dy float64) bool {
 		pn.setLevel(qsZone{kind: kind}, cur+step)
 		return true
 	}
+	if l.paged {
+		// Страницы: колесо над сеткой и над столбцом страниц листает их.
+		if pt.In(l.grid) || pt.In(l.pager) {
+			pn.wheelPage(dy)
+		}
+		return true
+	}
 	if l.maxScrl > 0 && pt.In(l.grid) {
 		step := int(dy)
 		if step == 0 && dy != 0 {
@@ -562,6 +587,12 @@ func (pn *qsPanel) focusZone(z qsZone) {
 	old := pn.focus
 	pn.focus = z
 	pn.mu.Unlock()
+	// Страница-строитель (DetailPage) узнаёт, что клавиатура у неё.
+	if (old.kind == qzContent) != (z.kind == qzContent) {
+		if f, ok := pn.contentRoot().(widget.Focusable); ok {
+			f.SetFocused(z.kind == qzContent)
+		}
+	}
 	if z.kind == qzTile || z.kind == qzChevron {
 		pn.ensureVisible(z.idx)
 	}
@@ -575,6 +606,10 @@ func (pn *qsPanel) focusZone(z qsZone) {
 // вместе с подписью.
 func (pn *qsPanel) ensureVisible(idx int) {
 	l, _ := pn.layout(pn.q.rect())
+	if l.paged {
+		pn.setPage(l.place(idx) / l.m.cols / l.m.rows)
+		return
+	}
 	if l.maxScrl <= 0 {
 		return
 	}
@@ -853,8 +888,12 @@ func (pn *qsPanel) pressDetails(e widget.MouseEvent, pt image.Point) bool {
 	if root != nil && pt.In(root.Bounds()) {
 		pn.mu.Lock()
 		pn.press = qsZone{kind: qzContent}
+		was := pn.focus
 		pn.focus = qsZone{kind: qzContent}
 		pn.mu.Unlock()
+		if f, ok := root.(widget.Focusable); ok && was.kind != qzContent {
+			f.SetFocused(true)
+		}
 		pn.deliverButton(e)
 	}
 	return true
@@ -867,13 +906,39 @@ func (pn *qsPanel) deliverButton(e widget.MouseEvent) {
 	if root == nil {
 		return
 	}
+	if !e.Pressed {
+		// Отпускание идёт тому, кто взял нажатие, где бы ни оказался курсор: так
+		// ползунок на странице не «залипает», если кнопку отпустили за его краем.
+		pn.mu.Lock()
+		t := pn.pressTarget
+		pn.pressTarget = nil
+		pn.mu.Unlock()
+		if h, ok := t.(widget.MouseClickHandler); ok {
+			h.OnMouseButton(e)
+			pn.q.Invalidate()
+			return
+		}
+	}
 	path := qsPath(root, image.Pt(e.X, e.Y))
 	for i := len(path) - 1; i >= 0; i-- {
 		if h, ok := path[i].(widget.MouseClickHandler); ok && h.OnMouseButton(e) {
+			if e.Pressed {
+				pn.mu.Lock()
+				pn.pressTarget = path[i]
+				pn.mu.Unlock()
+				pn.grabMouse()
+			}
 			break
 		}
 	}
 	pn.q.Invalidate()
+}
+
+// contentPressed сообщает, что кнопка мыши зажата на виджете страницы.
+func (pn *qsPanel) contentPressed() bool {
+	pn.mu.Lock()
+	defer pn.mu.Unlock()
+	return pn.pressTarget != nil
 }
 
 // moveContent отдаёт движение мыши содержимому: самому вложенному виджету под
@@ -881,6 +946,16 @@ func (pn *qsPanel) deliverButton(e widget.MouseEvent) {
 func (pn *qsPanel) moveContent(x, y int) {
 	root := pn.contentRoot()
 	if root == nil {
+		return
+	}
+	// Пока кнопка зажата на виджете (ползунок, список), движение идёт ему, даже
+	// если курсор ушёл за границы страницы.
+	pn.mu.Lock()
+	held := pn.pressTarget
+	pn.mu.Unlock()
+	if h, ok := held.(widget.MouseMoveHandler); ok {
+		h.OnMouseMove(x, y)
+		pn.q.Invalidate()
 		return
 	}
 	var target widget.Widget

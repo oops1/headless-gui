@@ -80,6 +80,7 @@ type qsDrag struct {
 	moved bool // сдвинулась дальше порога: это перетаскивание, не щелчок
 	slot  int  // место, куда ляжет плитка
 	grab  image.Point
+	latch bool // плитку держат у края сетки: страница уже перелистнута (постраничный режим)
 }
 
 // qsDragThreshold — на сколько точек надо сдвинуть мышь, чтобы нажатие на
@@ -98,9 +99,16 @@ type qsPanel struct {
 	order      []QuickActionID // порядок, выбранный в режиме правки (nil — как у модели)
 
 	scroll int
+	// pageIdx — показанная страница плиток (постраничный режим), wheelAcc —
+	// накопленные пиксели колеса до порога листания.
+	pageIdx  int
+	wheelAcc float64
 
 	bright    float64
 	hasBright bool
+	// volOff и brightOff — ползунок неактивен (SetVolumeEnabled,
+	// SetBrightnessEnabled); нулевое значение — активен.
+	volOff, brightOff bool
 
 	vol        VolState // последнее показание звука
 	pow        PowerState
@@ -118,8 +126,10 @@ type qsPanel struct {
 	focus        qsZone
 	drag         qsDrag
 	capture      widget.CaptureManager
-	// contentHover — виджет вложенной страницы, над которым сейчас курсор.
+	// contentHover — виджет вложенной страницы, над которым сейчас курсор;
+	// pressTarget — тот, кто взял нажатие и держит мышь до отпускания.
 	contentHover widget.Widget
+	pressTarget  widget.Widget
 
 	mo    motion
 	memos map[QuickActionID]*glyphMemo
@@ -580,7 +590,8 @@ func (pn *qsPanel) onStatus() {
 func (pn *qsPanel) reset() {
 	q := pn.q
 	pn.mu.Lock()
-	pn.scroll = 0
+	pn.scroll, pn.pageIdx, pn.wheelAcc = 0, 0, 0
+	pn.pressTarget = nil
 	pn.hover, pn.press, pn.focus = qsZone{}, qsZone{}, qsZone{}
 	pn.drag = qsDrag{}
 	pn.editing = false
@@ -650,9 +661,13 @@ func (pn *qsPanel) layout(panel image.Rectangle) (*qsLayout, []QuickAction) {
 		n: len(list), scroll: pn.scroll, hasVol: pn.q.st != nil, volChev: pn.q.VolumeDetails,
 		hasBright: pn.hasBright, editing: pn.editing,
 		hasBat: pn.q.st != nil && pn.seen && !pn.pow.NoBattery,
+		paged:  pn.q.paged(), page: pn.pageIdx, volOff: pn.volOff, brightOff: pn.brightOff,
+		editLeft: pn.q.editLeft(),
 	}
 	if pn.editing {
 		v.editLabel = tr(StrQuickDone)
+	} else {
+		v.editName = tr(StrQuickEditShort)
 	}
 	if pn.drag.kind == qdTile && pn.drag.moved && len(list) > 0 {
 		v.pos = qsDisplayOrder(len(list), pn.drag.idx, pn.drag.slot)
