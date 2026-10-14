@@ -3704,6 +3704,59 @@ Wayland the compositor's logical coordinates (`Scale` is buffer pixels per unit)
 Wayland has no work area (`Work == Bounds`) and the first output is the primary one.
 Details are in `docs/AI_AGENT_REFERENCE.md` ("v3.34").
 
+### Bringing the window to the front: one process, a second launch (v3.35)
+
+A viewer lives in one window: a second launch (double click on a file) passes the
+path to the first process, which must come out from under other windows and out of
+the minimized state.
+
+```go
+// Second process — as early in main as possible, before launching anything else:
+tok := window.TakeActivationToken() // reads and clears XDG_ACTIVATION_TOKEN / DESKTOP_STARTUP_ID
+window.AllowForeground(mainPID)     // Win32: grant the right BEFORE sending
+send(path, tok)                     // your own channel between processes: as strings
+
+// Main process, in the handler of that message:
+win.ActivateWithToken(tok) // empty token = win.Activate()
+
+win.IsMinimized()                          // is it minimized (Win32, X11; Wayland: always false)
+win.SetOnMinimizedChanged(func(m bool) {}) // minimized state changes (Wayland never fires)
+```
+
+`Activate` restores a minimized window, raises it and gives it focus; it may be called
+from any goroutine. What `true` means:
+
+- **Win32.** The window is restored (`SW_RESTORE`; one hidden to the tray is shown),
+  raised (`BringWindowToTop`) and **really became the active one**
+  (`SetForegroundWindow`). The system lets only a process with the right to the
+  foreground do that: the one that handled the last input, or one that was given the
+  right by `window.AllowForeground(pid)`. A refusal is not silent: the window is
+  restored anyway and its taskbar button flashes (`FlashWindowEx`) until the user
+  switches to it; `Activate` returns `false`. Workarounds of the system protection
+  (`AttachThreadInput`, a fake Alt) are not used. No token is needed:
+  `ActivateWithToken` = `Activate`.
+- **X11.** `_NET_ACTIVE_WINDOW` from the "application" with a timestamp. The time comes
+  from `_TIME<number>` of the token (`DESKTOP_STARTUP_ID`); without it, the time of the
+  last input in the window itself; the window manager may refuse if the time is older
+  than its last input. A minimized window is mapped first (`MapWindow`). `true` means
+  the request was sent. With a token the launcher is also told that startup is over
+  (`_NET_STARTUP_INFO remove`), otherwise the desktop keeps the busy cursor until a
+  timeout. `SetForeground` now sends the time too, not 0.
+- **Wayland.** `xdg_activation_v1`: with a token — `activate(token, surface)`; without
+  one the window asks the compositor for a token itself under its last input and
+  activates on the answer (asynchronous). `true` — the request was sent; `false` — the
+  compositor does not announce `xdg_activation_v1` (WinLine, Weston in WSLg), there is
+  nothing to raise with. Without a token from the launcher GNOME and KDE usually only
+  highlight the window.
+- **Minimized state.** Win32 knows it exactly, X11 reads `_NET_WM_STATE_HIDDEN` /
+  `WM_STATE` (updated by an event; right after `Minimize()` the old value is still
+  returned). `xdg_toplevel` has no minimized state: on Wayland `IsMinimized` is always
+  `false` and no change events arrive.
+- **`AllowForeground`** returns `false` on Linux and macOS: the right is proven by a
+  token there, not by a process. macOS: `Activate` returns `false`.
+
+Details and the per-platform table: `docs/AI_AGENT_REFERENCE.md`, section "v3.35".
+
 ### Window icon
 
 ```go

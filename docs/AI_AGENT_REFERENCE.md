@@ -3076,6 +3076,7 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 | HTML в буфере (`widget.SetClipboardHTML`) | «HTML Format» | `text/html` (нативное окно) | Wayland — `text/html` (нативное окно); macOS — только простой текст |
 | Изображение в буфере (`widget.ClipboardSetImage`, `ClipboardImage`, v3.34) | «PNG» + `CF_DIBV5` + `CF_DIB` | `image/png` лениво, INCR для больших; читает `image/png`, затем `image/bmp` | Wayland — `image/png` лениво, читает `image/png`, затем `image/bmp`; macOS — нет (`ErrClipboardImageUnsupported`) |
 | Значок окна (`Window.SetIcon`) | `WM_SETICON` | `_NET_WM_ICON` | Wayland — `xdg-toplevel-icon-v1` (v3.34), иначе `ErrIconUnsupported`; macOS — `ErrIconUnsupported` |
+| Окно на передний план (`Window.Activate`, `ActivateWithToken`, `IsMinimized`, `window.TakeActivationToken`, `AllowForeground`, v3.35) | разворачивание + `SetForegroundWindow`; отказ — мигает кнопка (`FlashWindowEx`); `AllowSetForegroundWindow`; `IsIconic` | `_NET_ACTIVE_WINDOW` с меткой времени из `DESKTOP_STARTUP_ID` / последнего ввода, `_NET_STARTUP_INFO remove`; `_NET_WM_STATE_HIDDEN` / `WM_STATE` | Wayland — `xdg_activation_v1` (токен из `XDG_ACTIVATION_TOKEN` или свой), без глобала `false`; `IsMinimized` всегда `false`; macOS — `false` |
 | Печать (`printing.Print`) | `PrintDlgEx` + GDI | CUPS по IPP, системного диалога нет | Wayland — то же, что X11; macOS — `ErrUnsupported`. `SavePDF` — везде |
 | Несколько окон в процессе | да | да | Wayland — да, macOS — не проверялось |
 | Имя для панели задач | — | `WM_CLASS` | Wayland — `app_id` |
@@ -8010,6 +8011,92 @@ only; the XI 2.2 negotiation, the deferred subscription and the parsing of a rea
 checked against a real XWayland, which has no touch device). Win32 touch with pressure/contact was checked
 live with `InjectTouchInput`; real digitizer force is not verified. Not done: Cocoa (no touch on macOS
 desktop), `WM_POINTER` history points, a pen's pressure/tilt (the pen still goes to `DefWindowProc` as a mouse).
+
+---
+
+## v3.35: bringing the window to the front (`window` package)
+
+Answers the PixGo task E14. The API is additive; nothing public was removed, no
+signature changed. `SetForeground` of `Win32Window` / `X11Window` keeps working
+(the X11 one now sends a timestamp, see below).
+
+Use case: a viewer lives in one window. A second launch (double click in the file
+manager) passes the file to the first process, which must come out from under other
+windows and out of the minimized state.
+
+```go
+win.Activate() bool                       // un-minimize + bring to front; meaning of true differs per platform (below)
+win.ActivateWithToken(token string) bool  // same with the launcher's activation token; "" = Activate()
+win.IsMinimized() bool                    // Win32/X11 exact, Wayland always false; before Run: false
+win.SetOnMinimizedChanged(func(minimized bool)) // engine goroutine; may be set before Run; Wayland never fires
+
+window.TakeActivationToken() string       // reads AND clears XDG_ACTIVATION_TOKEN / DESKTOP_STARTUP_ID; "" if none
+window.AllowForeground(pid int) bool      // Win32 AllowSetForegroundWindow; other platforms: always false
+```
+
+All three `Window` methods are goroutine-safe and may be called from the handler of an
+inter-process message. Before `Run` and on a backend without support (macOS)
+`Activate*` return `false`. They are optional backend interfaces (`activateBackend`,
+`minimizedBackend`), so `NativeWindow` did not change.
+
+### The two-process scheme
+
+```go
+// second process (started by the file manager), as early as possible in main:
+tok := window.TakeActivationToken()          // before launching anything: the token is one-shot
+window.AllowForeground(mainPID)               // Win32: grant the right BEFORE sending
+instance.Send(path, tok)                      // PixGo's own channel; strings between processes
+
+// main process, in the handler of that message:
+win.ActivateWithToken(tok)                    // token empty / unknown platform: plain Activate()
+```
+
+`TakeActivationToken` reads both variables and always removes both from the process
+environment (a child process must not inherit a one-shot token). In a Wayland session
+(`WAYLAND_DISPLAY` set and `HEADLESS_GUI_X11` not `1`) it returns `XDG_ACTIVATION_TOKEN`
+first, otherwise `DESKTOP_STARTUP_ID` first; if the preferred one is empty it returns
+the other. On Windows and macOS there are no tokens: always `""`.
+
+### What `true` means, per platform
+
+| | `Activate()` | `ActivateWithToken(tok)` | `IsMinimized()` |
+|---|---|---|---|
+| Win32 | A minimized window is restored (`SW_RESTORE`), a hidden one is shown (`SW_SHOW`, e.g. hidden to the tray), then `BringWindowToTop` + `SetForegroundWindow`. **`true` = the window really became the foreground one.** On refusal: the window IS restored but stays under the others, its taskbar button flashes until the user switches to it (`FlashWindowEx`, `FLASHW_ALL \| FLASHW_TIMERNOFG`) and the result is `false`. No `AttachThreadInput` / fake Alt tricks: they circumvent the system's focus-stealing protection. | = `Activate()` (no token; the right is given by `AllowForeground`) | `IsIconic`; the event comes from `WM_SIZE` / `SIZE_MINIMIZED` |
+| X11 | `_NET_ACTIVE_WINDOW` (source 1 = application) with the **time of the last key/button event in the window** (0 = `CurrentTime` if there was none) + `MapWindow` first if the window is minimized (ICCCM 4.1.4: Iconic → Normal is done by the client) + raise + `SetInputFocus` (skipped for a minimized window, it is not viewable yet). **`true` = the request was sent**; the window manager may only highlight the window if the time is older than its last input. | the time comes from `_TIME<n>` of the token (`DESKTOP_STARTUP_ID`, startup-notification); no `_TIME` ⇒ the time of the last input. The launcher is told that startup is over: `_NET_STARTUP_INFO` `remove: ID=<id>` (chunks of 20 bytes, `_NET_STARTUP_INFO_BEGIN` first, `PropertyChange` mask), otherwise GNOME/KDE keep the busy cursor until the timeout | `_NET_WM_STATE_HIDDEN` or `WM_STATE` = Iconic; both re-read at the top level of the event loop after `PropertyNotify`, so right after `Minimize()` the old value is still returned |
+| Wayland | `xdg_activation_v1`: asks the compositor for a token (`get_activation_token` + `set_serial(serial of the window's last input, seat)` + `set_surface` + `set_app_id` + `commit`) and on `done(token)` sends `activate(token, surface)` and destroys the token. **`true` = the request was sent** (the answer is asynchronous); **`false` = no `xdg_activation_v1` global** (WinLine, Weston/WSLg): nothing can be raised. Without a fresh input serial GNOME/KDE usually only highlight the window. | `activate(token, surface)` at once | **always `false`**: `xdg_toplevel` has no "minimized" state (there is only the `set_minimized` request), the compositor does not tell the client. A window minimized by the user cannot be told from a hidden one. Compositors normally un-minimize on `activate` |
+
+`Win32Window.SetForeground()` (SetForegroundWindow only, no restore) is unchanged.
+`X11Window.SetForeground()` and the tray restore now put the last-input time into
+`_NET_ACTIVE_WINDOW` instead of 0, with the same logic as `Activate`. On Wayland
+`SetForeground` stays a no-op; use `Activate`.
+
+### Incidental fix on X11
+
+- `Window.Minimize` (`WM_CHANGE_STATE`, IconicState) addressed the **root** window
+  instead of the client window, so window managers ignored it; the atom was also
+  interned inside the event loop (a request-reply in the middle of reading events).
+  Now the message names the client window (ICCCM 4.1.4) and the atoms
+  (`WM_CHANGE_STATE`, `WM_STATE`, `_NET_WM_STATE_HIDDEN`, `_NET_STARTUP_INFO*`) are
+  interned in `Create`.
+
+### Verified
+
+Tests: `window/activate_test.go` (common layer, `_TIME` parsing, `TakeActivationToken`
+incl. the real process environment), `activate_windows_test.go` (a real window:
+minimize → `Activate` → not minimized, hidden window shown, `FLASHWINFO` layout,
+`AllowSetForegroundWindow` argument), `activate_x11_linux_test.go` (bytes of
+`_NET_ACTIVE_WINDOW`, time from input events, `_TIME` token, `_NET_STARTUP_INFO`
+chunks, `MapWindow` of a minimized window, state from `_NET_WM_STATE` and `WM_STATE`),
+`activate_wayland_linux_test.go` (`bind`, `activate`, the whole token round trip),
+`activate_e2e_linux_test.go` (live X11 / Wayland, skipped without the feature).
+Every change was checked by mutation.
+
+Not verified live: **a successful foreground change on a real X11 window manager**
+(the WSLg window manager does not minimize or activate at all, so the e2e test
+skips), **Wayland `xdg_activation_v1` against a real compositor** (WSLg/Weston and
+WinLine do not announce the global; only the wire against a fake server), the Win32
+refusal path with `FlashWindowEx` (the test session always has the foreground right).
+Not done: macOS (`Activate` = `false`).
 
 ---
 
