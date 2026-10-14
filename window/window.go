@@ -320,6 +320,9 @@ type Window struct {
 	// (fullscreen.go).
 	fs fullscreenState
 
+	// act — активация окна: колбэк смены свёрнутости (activate.go).
+	act activateState
+
 	// pendingIcons/iconWant — значок окна, заданный до Run() (icon.go).
 	// Бэкенда до Run() ещё нет, а задать значок сразу после window.New —
 	// естественно, и именно так написано в руководстве.
@@ -705,6 +708,9 @@ func (win *Window) bringUp() error {
 
 	// Полный экран: уведомления бэкенда и запрос, заданный до Run.
 	win.setupFullscreen()
+
+	// Уведомление о смене свёрнутости (Win32, X11).
+	win.setupActivate()
 
 	// Общий проброс ввода (мышь/клавиатура) — surface.
 	win.setupInput()

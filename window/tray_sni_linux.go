@@ -753,9 +753,10 @@ func (w *WaylandWindow) hideToTray() {}
 // restoreFromTray на Wayland — no-op: скрывать было нечего (см. hideToTray).
 func (w *WaylandWindow) restoreFromTray() {}
 
-// SetForeground на Wayland — no-op: активацию окна раздаёт композитор
-// (xdg-activation-v1 у нас не реализован). Метод нужен, чтобы окно
-// удовлетворяло интерфейсу trayHost.
+// SetForeground на Wayland — no-op: активацию окна раздаёт композитор. Вывод
+// окна на передний план по запросу приложения — Activate (xdg-activation-v1,
+// activate_wayland_linux.go). Метод нужен, чтобы окно удовлетворяло интерфейсу
+// trayHost.
 func (w *WaylandWindow) SetForeground() {}
 
 // ─── Introspection ───────────────────────────────────────────────────────────

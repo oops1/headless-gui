@@ -196,13 +196,20 @@ func x11FullscreenMonitorsMessage(root, wid, atom, idx uint32) []byte {
 // x11NoteWMStateChanged запоминает, что менеджер поменял _NET_WM_STATE окна.
 // Зовётся из handleX11Event по PropertyNotify.
 func (w *X11Window) x11NoteWMStateChanged(buf []byte) {
-	if len(buf) < 12 || w.atomNetWMState == 0 {
+	if len(buf) < 12 {
 		return
 	}
 	win := binary.LittleEndian.Uint32(buf[4:8])
 	atom := binary.LittleEndian.Uint32(buf[8:12])
-	if win == w.wid && atom == w.atomNetWMState {
+	if win != w.wid {
+		return
+	}
+	if w.atomNetWMState != 0 && atom == w.atomNetWMState {
 		w.fs.stale.Store(true)
+	}
+	// WM_STATE (ICCCM) — свёрнутость у менеджеров без EWMH-свойства.
+	if w.atomWMStateProp != 0 && atom == w.atomWMStateProp {
+		w.act.staleICCCM.Store(true)
 	}
 }
 
@@ -215,6 +222,7 @@ func (w *X11Window) x11NoteWMStateChanged(buf []byte) {
 // просьбы. На время полного экрана «развёрнуто» не трогаем: оно хранит прежнее
 // значение (так же, как на Win32).
 func (w *X11Window) x11SyncWMState() {
+	w.x11SyncICCCM()
 	if !w.fs.stale.Swap(false) || w.wid == 0 {
 		return
 	}
@@ -222,6 +230,8 @@ func (w *X11Window) x11SyncWMState() {
 	if format != 32 {
 		data = nil
 	}
+	hidden := x11StateHas(data, w.atomWMStateHidden)
+	w.setMinimizedFlags(&hidden, nil)
 	full := x11StateHas(data, w.atomWMStateFullscreen)
 	if !full {
 		w.maximized = x11StateHas(data, w.atomWMStateMaxH) && x11StateHas(data, w.atomWMStateMaxV)
