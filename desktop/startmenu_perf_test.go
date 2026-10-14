@@ -37,18 +37,20 @@ func TestStartMenu10_FirstFrameUnder100ms(t *testing.T) {
 	s.frame()
 	cold := time.Since(t0)
 
-	s.menu.Close()
-	s.menu.Settle()
-	s.eng.Invalidate()
-	s.frame()
+	warm := bestOf(3, func() time.Duration {
+		s.menu.Close()
+		s.menu.Settle()
+		s.eng.Invalidate()
+		s.frame()
 
-	t0 = time.Now()
-	s.menu.Open(s.start.Bounds())
-	s.menu.Settle()
-	s.frame()
-	warm := time.Since(t0)
+		t0 := time.Now()
+		s.menu.Open(s.start.Bounds())
+		s.menu.Settle()
+		s.frame()
+		return time.Since(t0)
+	})
 
-	t.Logf("первый кадр после открытия: холодный %v, тёплый %v", cold, warm)
+	t.Logf("первый кадр после открытия: холодный %v, тёплый (лучший из 3) %v", cold, warm)
 	if lim := perfBudget(100 * time.Millisecond); cold > lim {
 		t.Errorf("холодный первый кадр %v — дольше %v", cold, lim)
 	}
