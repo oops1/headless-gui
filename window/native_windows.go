@@ -337,6 +337,9 @@ type Win32Window struct {
 	// хранит «было ли окно развёрнуто до него» — IsMaximized возвращает это же.
 	fs fullscreenWin32
 
+	// act — свёрнутость и её уведомление (activate_windows.go).
+	act activateWin32
+
 	// resizable — разрешён ли пользовательский resize за края окна
 	// (см. WM_NCHITTEST: у borderless-окна зоны рамки отдаём вручную).
 	resizable atomic.Bool
@@ -1277,6 +1280,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		break // → DefWindowProc
 
 	case wmSize:
+		w.noteMinimized(wparam == sizeMinimized) // SIZE_MINIMIZED: размер клиента нулевой
 		newW := int(lparam & 0xFFFF)
 		newH := int((lparam >> 16) & 0xFFFF)
 		if newW > 0 && newH > 0 {

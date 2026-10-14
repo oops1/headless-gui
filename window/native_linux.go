@@ -112,6 +112,14 @@ type X11Window struct {
 	atomFsMonitors        uint32 // _NET_WM_FULLSCREEN_MONITORS (полный экран на выбранном мониторе)
 	fs                    x11Fullscreen
 
+	// Активация и свёрнутость (activate_x11_linux.go): атомы и состояние.
+	atomWMStateHidden uint32 // _NET_WM_STATE_HIDDEN (окно свёрнуто)
+	atomWMStateProp   uint32 // WM_STATE (ICCCM: Normal/Iconic)
+	atomWMChangeState uint32 // WM_CHANGE_STATE (просьба свернуть)
+	atomStartupBegin  uint32 // _NET_STARTUP_INFO_BEGIN
+	atomStartupInfo   uint32 // _NET_STARTUP_INFO
+	act               x11Activation
+
 	// disabled — окно заблокировано на время модального диалога (аналог
 	// Win32 EnableWindow(false)). У X11 нет системного отключения ввода,
 	// поэтому обработчик событий сам ДРОПАЕТ ввод (Key/Button/Motion) при
@@ -323,6 +331,11 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomWMStateFullscreen = w.x11InternAtom("_NET_WM_STATE_FULLSCREEN")
 	w.atomNetSupported = w.x11InternAtom("_NET_SUPPORTED")
 	w.atomFsMonitors = w.x11InternAtom("_NET_WM_FULLSCREEN_MONITORS")
+	w.atomWMStateHidden = w.x11InternAtom("_NET_WM_STATE_HIDDEN")
+	w.atomWMStateProp = w.x11InternAtom("WM_STATE")
+	w.atomWMChangeState = w.x11InternAtom("WM_CHANGE_STATE")
+	w.atomStartupBegin = w.x11InternAtom("_NET_STARTUP_INFO_BEGIN")
+	w.atomStartupInfo = w.x11InternAtom("_NET_STARTUP_INFO")
 	w.atomNetWMMoveResize = w.x11InternAtom("_NET_WM_MOVERESIZE")
 	w.atomUTF8String = w.x11InternAtom("UTF8_STRING")
 	w.clip = newX11Clipboard(w)
@@ -543,6 +556,8 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	// настоящее нажатие сошло бы за повтор. По той же причине — и до
 	// перетаскивания, которое забирает ввод себе (Esc).
 	repeat := w.keys.note(evType, buf[1])
+	// Время последнего ввода — метка для _NET_ACTIVE_WINDOW (Activate).
+	w.act.noteUserTime(evType, buf)
 	// Перетаскивание из этого окна идёт: ввод, статусы приёмника и запросы
 	// данных разбирает источник (x11_drag_linux.go).
 	if w.drag.active.Load() && w.dragHandleEvent(buf) {
@@ -1379,12 +1394,12 @@ func (w *X11Window) x11MoveWindow(wid uint32, x, y int) {
 
 func (w *X11Window) x11IconifyWindow() {
 	// WM_CHANGE_STATE client message
-	wmChangeState := w.x11InternAtom("WM_CHANGE_STATE")
+	wmChangeState := w.atomWMChangeState // интерн при Create: запрос-ответ посреди цикла событий небезопасен
 	buf := make([]byte, 32)
 	buf[0] = 33                                             // ClientMessage
 	buf[1] = 32                                             // format
 	binary.LittleEndian.PutUint16(buf[2:4], 8)              // length
-	binary.LittleEndian.PutUint32(buf[4:8], w.rootWin)      // window = root
+	binary.LittleEndian.PutUint32(buf[4:8], w.wid)          // window = окно клиента (ICCCM 4.1.4)
 	binary.LittleEndian.PutUint32(buf[8:12], wmChangeState) // type
 	binary.LittleEndian.PutUint32(buf[12:16], 3)            // IconicState
 
@@ -1692,29 +1707,11 @@ func (w *X11Window) x11SetInputFocus() {
 	w.x11Send(buf)
 }
 
-// x11NetActiveWindow просит WM активировать окно (EWMH _NET_ACTIVE_WINDOW).
+// x11NetActiveWindow просит WM активировать окно (EWMH _NET_ACTIVE_WINDOW) с
+// меткой времени последнего ввода в окне (activate_x11_linux.go): без метки
+// менеджеры вправе отказать.
 func (w *X11Window) x11NetActiveWindow() {
-	if w.atomNetActiveWindow == 0 {
-		return
-	}
-	buf := make([]byte, 32)
-	buf[0] = 33 // ClientMessage
-	buf[1] = 32 // format
-	binary.LittleEndian.PutUint16(buf[2:4], 8)
-	binary.LittleEndian.PutUint32(buf[4:8], w.wid)                  // window
-	binary.LittleEndian.PutUint32(buf[8:12], w.atomNetActiveWindow) // type
-	binary.LittleEndian.PutUint32(buf[12:16], 1)                    // data[0]: source = application
-	binary.LittleEndian.PutUint32(buf[16:20], 0)                    // data[1]: timestamp = 0
-	binary.LittleEndian.PutUint32(buf[20:24], 0)                    // data[2]: текущее активное окно
-
-	sendBuf := make([]byte, 44)
-	sendBuf[0] = 25 // SendEvent
-	sendBuf[1] = 0  // propagate = false
-	binary.LittleEndian.PutUint16(sendBuf[2:4], 11)
-	binary.LittleEndian.PutUint32(sendBuf[4:8], w.rootWin)
-	binary.LittleEndian.PutUint32(sendBuf[8:12], 0x00180000) // SubstructureRedirect|SubstructureNotify
-	copy(sendBuf[12:], buf)
-	w.x11Send(sendBuf)
+	w.x11NetActiveWindowAt(w.act.userTime.Load())
 }
 
 // x11NetWMStateAdd добавляет одно состояние _NET_WM_STATE отображённому окну

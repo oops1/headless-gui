@@ -330,6 +330,8 @@ type WaylandWindow struct {
 	gCursorShapeMgr  uint32 // имя глобала wp_cursor_shape_manager_v1
 	gToplevelIcon    uint32 // имя глобала xdg_toplevel_icon_manager_v1 (значок окна)
 	icon             wlIconState
+	gActivation      uint32 // имя глобала xdg_activation_v1 (вывод окна на передний план)
+	activation       wlActivation
 	cursorShapeMgrID uint32
 	cursorShapeDevID uint32
 
@@ -755,6 +757,10 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 	if w.popupEvent(obj, opcode, b) {
 		return
 	}
+	// Токен активации, который компоновщик выдал по нашей просьбе.
+	if w.activationEvent(obj, opcode, b) {
+		return
+	}
 
 	switch {
 	case obj == wlDisplayID && opcode == wlDisplayEvError:
@@ -805,6 +811,10 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			// Необязательное расширение: с ним курсор рисует компоновщик
 			// из системной темы, без него — своя картинка.
 			w.gCursorShapeMgr = name
+		case "xdg_activation_v1":
+			// Необязательное расширение: без него окно на передний план не
+			// вывести (Activate вернёт false).
+			w.gActivation = name
 		case "xdg_toplevel_icon_manager_v1":
 			// Необязательное расширение: без него значок окна не поставить
 			// (SetIcon вернёт ErrIconUnsupported).
