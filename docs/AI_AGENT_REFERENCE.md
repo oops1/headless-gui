@@ -8134,6 +8134,42 @@ Tests: `widget/datagrid/addrange_test.go` (one event, copy of the slice, empty
 batch, selection and cell cache kept, `Add` at the end on the fast path, sort,
 insertion in the middle).
 
+## v3.37: opaque parts of a popup menu — `PopupMenu.OverlayRects`
+
+Asked by WinLine: its shell puts the picture of a menu over OTHER programs'
+windows opaquely, into rectangles it gets from the shell. `OverlayBounds`
+returns one rectangle around the menu and all open cascades, so it took the
+empty space between a menu and its submenu, and the pixels outside the rounded
+corners — wallpaper showed through over Notepad or Chromium.
+
+```go
+for _, r := range menu.OverlayRects() { // nil when the menu is closed
+    addOpaque(r)                        // absolute logical coordinates, like OverlayBounds
+}
+```
+
+- One part list per open level — the menu itself and every open cascade,
+  recursively — of the opaque BODY only: no shadow, no pixel outside the
+  rounded corners. A corner is a staircase of rectangles that keeps one logical
+  pixel of margin inside the arc, which covers the anti-aliased edge and the
+  rounding of physical coordinates on HiDPI. Rows with the same inset are merged
+  (radius 8 gives about a dozen rectangles per level).
+- `OverlayBounds` is unchanged: the engine still uses it to move a menu into a
+  native popup window.
+- Safe from any goroutine, like `OverlayBounds`.
+- Interface `widget.OverlayRectsProvider` for a consumer that walks overlays
+  generically; only `PopupMenu` implements it so far (menu bar menus, context
+  menus and the window system menu are `PopupMenu`s).
+- If the theme gives the menu a translucent background (a material), the body
+  itself depends on what is drawn under it — the rectangles still say where the
+  menu is, not that its pixels ignore the backdrop.
+
+Tests: `engine/popuprects_test.go` renders a menu with an open cascade on two
+different backgrounds at scales 1, 1.5 and 2 with radii 8, 4 and 0: no pixel
+inside `OverlayRects` differs between the two frames, the rectangles cover at
+least 97% of the background-independent pixels, and `OverlayBounds` does catch
+background pixels (so the scene is meaningful).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

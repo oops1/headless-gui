@@ -987,6 +987,94 @@ func (m *PopupMenu) OverlayBounds() image.Rectangle {
 	return m.fullBounds()
 }
 
+// OverlayRects возвращает непрозрачные части меню: тело каждого открытого
+// уровня — самого меню и каскадных подменю, рекурсивно, — без тени и без
+// пикселей за скруглением (скруглённые углы приближены лесенкой
+// прямоугольников). Координаты те же, что у OverlayBounds; пусто, если меню
+// закрыто. Реализует widget.OverlayRectsProvider.
+//
+// OverlayBounds по-прежнему отдаёт охватывающий прямоугольник: по нему
+// движок выносит меню в нативное окно. А этот метод — для того, кто кладёт
+// картинку меню поверх чужих окон непрозрачно (WinLine): объединение уровней
+// захватывало пустое место между меню и подменю, и там проступали обои.
+func (m *PopupMenu) OverlayRects() []image.Rectangle {
+	if atomic.LoadInt32(&m.open) == 0 {
+		return nil
+	}
+	var out []image.Rectangle
+	for lvl := m; lvl != nil; lvl, _ = lvl.openChildOf() {
+		out = append(out, roundedBodyRects(lvl.popupRect(), lvl.CornerRadius)...)
+	}
+	return out
+}
+
+// roundedBodyRects разбивает прямоугольник со скруглёнными углами радиуса
+// radius на прямоугольники, ни один пиксель которых не лежит за дугой.
+//
+// Угол движок рисует сглаженной маской в квадрате radius×radius (у края дуги
+// пиксели полупрозрачны), а прямые полосы между углами — сплошь
+// (Canvas.FillRoundRect). Строка угла берётся с того столбца, где пиксель
+// целиком внутри круга радиуса radius-1: запас в логический пиксель
+// перекрывает и сглаживание, и округление физических координат на HiDPI.
+// Лучше оставить у края пару пикселей чужого окна, чем показать обои.
+// Строки с одинаковым отступом сливаются в один прямоугольник.
+func roundedBodyRects(r image.Rectangle, radius int) []image.Rectangle {
+	if r.Empty() {
+		return nil
+	}
+	w, h := r.Dx(), r.Dy()
+	if radius > w/2 {
+		radius = w / 2
+	}
+	if radius > h/2 {
+		radius = h / 2
+	}
+	if radius <= 0 {
+		return []image.Rectangle{r}
+	}
+	// inset[cy] — сколько пикселей отрезать слева и справа в строке cy угла.
+	lim := (radius - 1) * (radius - 1)
+	inset := make([]int, radius)
+	for cy := 0; cy < radius; cy++ {
+		dy := radius - cy
+		in := radius // по умолчанию — как прямая полоса между углами
+		for cx := 0; cx < radius; cx++ {
+			// Дальняя от центра точка пикселя (cx, cy) — его левый верхний угол.
+			if dx := radius - cx; dx*dx+dy*dy <= lim {
+				in = cx
+				break
+			}
+		}
+		inset[cy] = in
+	}
+	var out []image.Rectangle
+	band := func(y0, y1, in int) {
+		out = append(out, image.Rect(r.Min.X+in, y0, r.Max.X-in, y1))
+	}
+	// Верх: строки угла сверху вниз, одинаковые отступы — одним куском.
+	for cy := 0; cy < radius; {
+		end := cy + 1
+		for end < radius && inset[end] == inset[cy] {
+			end++
+		}
+		band(r.Min.Y+cy, r.Min.Y+end, inset[cy])
+		cy = end
+	}
+	if h-2*radius > 0 {
+		band(r.Min.Y+radius, r.Max.Y-radius, 0)
+	}
+	// Низ — зеркально.
+	for cy := radius - 1; cy >= 0; {
+		start := cy
+		for start > 0 && inset[start-1] == inset[cy] {
+			start--
+		}
+		band(r.Max.Y-cy-1, r.Max.Y-start, inset[cy])
+		cy = start - 1
+	}
+	return out
+}
+
 // DrawOverlay рисует popup-меню поверх всего UI (включая каскадные подменю).
 func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 	if atomic.LoadInt32(&m.open) == 0 {
