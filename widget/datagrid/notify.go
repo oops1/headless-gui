@@ -142,6 +142,21 @@ type CollectionChangedEvent struct {
 	Index    int         // индекс затронутого элемента
 	OldItem  interface{} // для Replace/Remove
 	NewItem  interface{} // для Add/Replace
+	// Count — сколько элементов добавлено подряд с Index (AddRange). Ноль
+	// означает один элемент: так приходят Add и Insert, как и раньше.
+	// Обработчик, который ведёт свою копию коллекции по событиям, обязан
+	// смотреть на Count (или на NewItems): NewItem у пачки — только первый.
+	Count int
+	// NewItems — добавленные элементы по порядку (у Add и Insert — nil).
+	NewItems []interface{}
+}
+
+// Added — сколько элементов добавлено событием CollectionAdd (не меньше 1).
+func (e CollectionChangedEvent) Added() int {
+	if e.Count > 0 {
+		return e.Count
+	}
+	return 1
 }
 
 // CollectionChangedHandler — обработчик изменения коллекции.
@@ -267,6 +282,37 @@ func (oc *ObservableCollection) Add(item interface{}) {
 		Action:  CollectionAdd,
 		Index:   idx,
 		NewItem: item,
+	})
+}
+
+// AddRange дописывает элементы в конец одной операцией и одним событием
+// CollectionAdd: Index — первый новый элемент, Count — их число, NewItems —
+// сами элементы (GG-93).
+//
+// Поштучный Add на каждый элемент шлёт своё событие, и сетка на каждом
+// перестраивала индекс строк целиком — страница из 500 строк обходилась в
+// 500 перестроений. SetItems со всей коллекцией шлёт Reset, а он снимает
+// выделение: старые строки встали бы под другие индексы. Здесь старые
+// индексы не сдвигаются, поэтому выделение остаётся на месте.
+//
+// Пустой срез — ничего не меняется, события нет. Срез копируется:
+// вызывающий вправе переиспользовать его сразу после возврата.
+func (oc *ObservableCollection) AddRange(items []interface{}) {
+	if len(items) == 0 {
+		return
+	}
+	added := make([]interface{}, len(items))
+	copy(added, items)
+	oc.mu.Lock()
+	idx := len(oc.items)
+	oc.items = append(oc.items, added...)
+	oc.mu.Unlock()
+	oc.notify(CollectionChangedEvent{
+		Action:   CollectionAdd,
+		Index:    idx,
+		NewItem:  added[0],
+		Count:    len(added),
+		NewItems: added,
 	})
 }
 

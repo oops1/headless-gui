@@ -680,6 +680,13 @@ func (dg *DataGrid) SetItemsSource(oc *ObservableCollection) {
 		// Подписка на изменения
 		dg.itemsSubID = oc.AddCollectionChanged(func(event CollectionChangedEvent) {
 			dg.mu.Lock()
+			// Строки дописаны в конец и сортировки нет: старые строки стоят
+			// где стояли — достраиваем индекс только для новых, выделение и
+			// кэш ячеек не трогаем (GG-93, AddRange и Add в конец).
+			if dg.appendRowsLocked(event) {
+				dg.mu.Unlock()
+				return
+			}
 			// Под прежними индексами после сброса коллекции стоят ДРУГИЕ
 			// элементы: подсветка оставалась на строке 5 и показывала уже не
 			// тот коммит. Удаление выделенной строки — то же самое (GG-81).
@@ -730,6 +737,44 @@ func (dg *DataGrid) ItemsSource() *ObservableCollection {
 	dg.mu.Lock()
 	defer dg.mu.Unlock()
 	return dg.itemsSource
+}
+
+// appendRowsLocked — быстрый путь для строк, дописанных в конец коллекции.
+//
+// Без сортировки строка сетки N — это элемент N коллекции, поэтому новые
+// элементы просто встают за последней строкой: индексы старых не меняются,
+// выделение и кэш ячеек (он по строке сетки) остаются верными. Полное
+// перестроение на каждом Add делало поштучное дописывание квадратичным, а
+// сброс кэша заставлял заново форматировать все видимые ячейки.
+//
+// false — путь не годится (вставка в середину, включена сортировка,
+// коллекция успела измениться ещё раз), вызывающий перестраивает как раньше.
+// Вызывать под dg.mu.
+func (dg *DataGrid) appendRowsLocked(event CollectionChangedEvent) bool {
+	if event.Action != CollectionAdd || dg.itemsSource == nil || dg.hasActiveSortLocked() {
+		return false
+	}
+	start := len(dg.sortedIdx)
+	end := start + event.Added()
+	if event.Index != start || dg.itemsSource.Count() != end {
+		return false
+	}
+	for i := start; i < end; i++ {
+		dg.sortedIdx = append(dg.sortedIdx, i)
+	}
+	dg.markFullDirty()
+	return true
+}
+
+// hasActiveSortLocked — включена ли сортировка по какой-нибудь колонке.
+// Вызывать под dg.mu.
+func (dg *DataGrid) hasActiveSortLocked() bool {
+	for _, c := range dg.columns {
+		if c.GetSortDirection() != SortNone {
+			return true
+		}
+	}
+	return false
 }
 
 // rebuildSortedIdx пересоздаёт индексный массив (без сортировки).

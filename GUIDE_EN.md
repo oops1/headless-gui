@@ -1122,6 +1122,7 @@ tw.Tree.SetItemTemplate(tmpl)
 // ObservableCollection
 coll := datagrid.NewObservableCollection()
 coll.Add(myDataObject)
+coll.AddRange(page)          // a batch in one event (v3.36): DataGrid keeps its selection
 tw.Tree.SetItemsSource(coll)
 ```
 
