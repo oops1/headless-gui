@@ -1112,6 +1112,7 @@ tw.Tree.SetItemTemplate(tmpl)
 // ObservableCollection
 coll := datagrid.NewObservableCollection()
 coll.Add(myDataObject)
+coll.AddRange(page)          // пачка строк одним событием (v3.36): выделение DataGrid не сбрасывается
 tw.Tree.SetItemsSource(coll)
 ```
 
