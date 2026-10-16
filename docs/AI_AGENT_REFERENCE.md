@@ -8191,6 +8191,54 @@ Tests: `engine/solidbands_test.go`, `window/wayland_popup_opaque_linux_test.go`
 (on the wire: a shadow pixel is in the input region but not in the opaque one,
 the menu bodies are opaque, the gap between levels is in neither).
 
+---
+
+## v3.37: transparent popup windows on X11 (`window` package)
+
+No public API: a defect fix. Popups that the engine lifts into their own OS windows
+(`Engine.SetPopupSink`: menus, cascaded submenus, dropdowns) on X11 used to be
+created with the root visual — 24 bits, no alpha. The overlay image carries a
+transparent/semi-transparent shadow and transparent points behind the rounded
+corners; a window without an alpha channel shows them **black** (a thick black
+frame around the menu body and black corners). Wayland popups were already
+`ARGB8888`; X11 now matches.
+
+- The server's setup reply is parsed past the screen header: the list of depths
+  and visuals is scanned for a **TrueColor visual of depth 32 with masks
+  R=`0xFF0000`, G=`0x00FF00`, B=`0x0000FF`** (`x11Screen.ArgbVisual`).
+- `X11Window.CreatePopup` with such a visual: `CreateColormap(AllocNone, root,
+  visual)`, then `CreateWindow` of depth 32 with that visual and the value mask
+  `BackPixel=0 | BorderPixel=0 | OverrideRedirect | EventMask | Colormap`
+  (values in ascending bit order; `BorderPixel` is mandatory when the visual
+  differs from the parent's, otherwise `BadMatch`). A round trip right after the
+  requests catches a server-side refusal and falls back to the old 24-bit window.
+  The colormap is freed in `Close`.
+- No 32-bit visual on the screen — the old behaviour (24 bits, root visual).
+  The main window is untouched (XRGB, its own corner mask `cornermask.go`).
+- Output into such a window — `PutImage` and `ShmPutImage` (MIT-SHM) with
+  **depth 32**. The overlay image is already **premultiplied** (the whole engine
+  back buffer is), which is what compositors expect from an ARGB window, so the
+  conversion is the usual R/B swap with alpha kept; the colour is **not**
+  multiplied by alpha a second time (that would darken semi-transparent edges).
+- Popup `Expose` is now answered from the last frame the popup was given (the host
+  has no repaint callback for popups): an exposed region of an ARGB window would
+  otherwise stay transparent, of a 24-bit one — filled with the background.
+- Without a compositing manager an ARGB window does not blend: transparent points
+  show as black as before. The engine cannot yet be told "alpha is not
+  supported" to cut the popup to the body without the shadow; the check would be
+  the owner of the `_NET_WM_CM_S<screen>` selection. Not done: XWayland sessions
+  blend regardless of that selection, so it cannot be used to *disable* the alpha
+  window.
+
+Tests: `window/x11argb_test.go` (visual list parsing incl. wrong class, masks,
+depth, truncated data; `CreateColormap`/`FreeColormap`/`CreateWindow` bytes and
+value order), `x11argb_linux_test.go` (setup reply parsing; `CreatePopup` against a
+fake X server: depth 32, mask, value order, request order, 24-bit fallback without
+a visual and after a server refusal; `PutImage`/`ShmPutImage` depth 32 and
+premultiplied bytes; `Expose`; colormap freed; live e2e on a real X server with
+`GetImage`: alpha is 0 outside the body, the shadow keeps its alpha). Every change
+was checked by mutation.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

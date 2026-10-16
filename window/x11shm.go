@@ -221,7 +221,7 @@ func (w *X11Window) x11ShmBlit(img *image.RGBA, dirty image.Rectangle) bool {
 		swapRBRow(shm.data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
 	}
 
-	req := x11ShmPutImageRequest(shm.major, w.wid, w.gcID,
+	req := x11ShmPutImageRequestDepth(shm.major, w.wid, w.gcID, w.imageDepth(),
 		shm.width, shm.height,
 		dirty.Min.X, dirty.Min.Y, dw, dh,
 		dirty.Min.X, dirty.Min.Y,
@@ -342,6 +342,13 @@ func x11ShmDetachRequest(major byte, shmseg uint32) []byte {
 // bpad(u8) shmseg(u32) offset(u32). depth/format зафиксированы под тот же
 // формат, что и у существующего x11PutImage (ZPixmap, depth=24).
 func x11ShmPutImageRequest(major byte, drawable, gc uint32, totalW, totalH, srcX, srcY, srcW, srcH, dstX, dstY int, sendEvent bool, shmseg, offset uint32) []byte {
+	return x11ShmPutImageRequestDepth(major, drawable, gc, 24, totalW, totalH, srcX, srcY, srcW, srcH, dstX, dstY, sendEvent, shmseg, offset)
+}
+
+// x11ShmPutImageRequestDepth — x11ShmPutImageRequest с явной глубиной данных:
+// 32 у окна-попапа с альфой (x11argb.go), 24 у остальных. Глубина обязана
+// совпасть с глубиной drawable, иначе сервер отвечает BadMatch.
+func x11ShmPutImageRequestDepth(major byte, drawable, gc uint32, depth byte, totalW, totalH, srcX, srcY, srcW, srcH, dstX, dstY int, sendEvent bool, shmseg, offset uint32) []byte {
 	buf := make([]byte, 40)
 	buf[0] = major
 	buf[1] = shmMinorPutImage
@@ -356,7 +363,7 @@ func x11ShmPutImageRequest(major byte, drawable, gc uint32, totalW, totalH, srcX
 	binary.LittleEndian.PutUint16(buf[22:24], uint16(srcH))
 	binary.LittleEndian.PutUint16(buf[24:26], uint16(int16(dstX)))
 	binary.LittleEndian.PutUint16(buf[26:28], uint16(int16(dstY)))
-	buf[28] = 24 // depth
+	buf[28] = depth
 	buf[29] = 2  // format = ZPixmap
 	if sendEvent {
 		buf[30] = 1

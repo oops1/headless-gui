@@ -64,6 +64,16 @@ type X11Window struct {
 	// вышел, PutImage навсегда.
 	shm *x11ShmState
 
+	// Окно-попап с альфой (x11argb_linux.go): argb — окно создано с 32-битным
+	// visual'ом и принимает кадр с премультиплицированной альфой (глубина
+	// PutImage/ShmPutImage — 32); colormap — его colormap, освобождается в
+	// Close. popup — окно создано CreatePopup; popupImg — последний выведенный
+	// кадр для Expose (у попапа нет колбэка перерисовки хоста).
+	argb     bool
+	colormap uint32
+	popup    bool
+	popupImg atomic.Pointer[image.RGBA]
+
 	// Раскладка клавиатуры: GetKeyboardMapping (core-протокол).
 	// keysyms — матрица keycode × symsPerCode; колонки 0-1 — группа 1,
 	// 2-3 — группа 2 (группа берётся из бит 13-14 поля state события).
@@ -240,6 +250,9 @@ type x11Screen struct {
 	HeightInPixels uint16
 	RootDepth      uint8
 	RootVisual     uint32
+	// ArgbVisual — TrueColor visual глубины 32 с масками ARGB (0 — на экране
+	// такого нет). Нужен окнам-попапам: см. x11argb.go.
+	ArgbVisual uint32
 }
 
 // NewNativeWindow выбирает бэкенд: Wayland при доступном композиторе
@@ -475,8 +488,8 @@ func (w *X11Window) CreatePopup(width, height int) error {
 	// до CreateWindow, событий на соединении ещё нет.
 	w.x11ShmInit()
 
-	// Значения в порядке возрастания бит маски: BackPixel(0x02),
-	// OverrideRedirect(0x200), EventMask(0x800).
+	// Значения 24-битного пути — в порядке возрастания бит маски:
+	// BackPixel(0x02), OverrideRedirect(0x200), EventMask(0x800).
 	eventMask := uint32(
 		0x00000001 | // KeyPress
 			0x00000002 | // KeyRelease
@@ -485,16 +498,21 @@ func (w *X11Window) CreatePopup(width, height int) error {
 			0x00000020 | // LeaveWindow
 			0x00000040 | // PointerMotion
 			0x00008000) // Exposure
-	values := []uint32{
-		w.screen.BlackPixel, // background
-		1,                   // override-redirect = true
-		eventMask,
-	}
-	valueMask := uint32(0x00000002 | 0x00000200 | 0x00000800) // BackPixel|OverrideRedirect|EventMask
+	w.popup = true
 
+	// Окно с альфа-каналом, если на экране есть 32-битный ARGB visual: иначе
+	// прозрачная тень и углы оверлея показываются чёрными (см. x11argb.go).
 	// Создаём в (0,0); реальную позицию выставит хост через SetPosition.
-	w.x11CreateWindow(w.wid, w.screen.Root, 0, 0,
-		uint16(width), uint16(height), 0, valueMask, values)
+	if !w.x11CreateArgbPopupWindow(width, height, eventMask) {
+		values := []uint32{
+			w.screen.BlackPixel, // background
+			1,                   // override-redirect = true
+			eventMask,
+		}
+		valueMask := uint32(0x00000002 | 0x00000200 | 0x00000800) // BackPixel|OverrideRedirect|EventMask
+		w.x11CreateWindow(w.wid, w.screen.Root, 0, 0,
+			uint16(width), uint16(height), 0, valueMask, values)
+	}
 	w.x11CreateGC(w.gcID, w.wid)
 
 	// Seed кэша позиции (override-redirect: MoveWindow задаёт корневые координаты).
@@ -679,13 +697,18 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	case 12: // Expose
 		// ОС просит восстановить область окна — блитим из кэша кадра.
 		// Формат события: x@8, y@10, width@12, height@14 (little-endian).
-		if w.onExpose != nil {
+		if w.onExpose != nil || w.popup {
 			ex := int(binary.LittleEndian.Uint16(buf[8:10]))
 			ey := int(binary.LittleEndian.Uint16(buf[10:12]))
 			ew := int(binary.LittleEndian.Uint16(buf[12:14]))
 			eh := int(binary.LittleEndian.Uint16(buf[14:16]))
 			if ew > 0 && eh > 0 {
-				w.onExpose(image.Rect(ex, ey, ex+ew, ey+eh))
+				r := image.Rect(ex, ey, ex+ew, ey+eh)
+				if w.onExpose != nil {
+					w.onExpose(r)
+				} else {
+					w.exposePopup(r)
+				}
 			}
 		}
 
@@ -812,6 +835,7 @@ func (w *X11Window) Close() {
 	// Освобождаем локальный маппинг SHM-сегмента (см. x11ShmClose): серверную
 	// половину X-сервер снимает сам при закрытии соединения.
 	w.x11ShmClose()
+	w.x11FreeArgbColormap()
 	if w.conn != nil {
 		w.conn.Close()
 	}
@@ -947,6 +971,11 @@ func (w *X11Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	}
 	dw := dirty.Dx()
 	dh := dirty.Dy()
+	if w.popup {
+		// Кадр попапа держим для Expose (см. exposePopup). Кадры оверлея
+		// движок не правит на месте — каждый рендер отдаёт новую картинку.
+		w.popupImg.Store(img)
+	}
 
 	w.blitMu.Lock()
 	defer w.blitMu.Unlock()
@@ -1078,6 +1107,9 @@ func (w *X11Window) x11Setup() error {
 	w.screen.HeightInPixels = binary.LittleEndian.Uint16(sd[22:24])
 	w.screen.RootDepth = sd[38]
 	w.screen.RootVisual = binary.LittleEndian.Uint32(sd[32:36])
+	// Список глубин идёт сразу за 40-байтовым заголовком экрана (sd[39] — их
+	// число): из него берём 32-битный ARGB visual для попапов (x11argb.go).
+	w.screen.ArgbVisual = x11FindArgbVisual(sd[40:], int(sd[39]))
 
 	w.rootWin = w.screen.Root
 	return nil
@@ -1093,13 +1125,20 @@ func (w *X11Window) x11GenID() uint32 {
 }
 
 func (w *X11Window) x11CreateWindow(wid, parent uint32, x, y int16, width, height uint16, borderWidth uint16, valueMask uint32, values []uint32) {
+	w.x11CreateWindowVisual(wid, parent, x, y, width, height, borderWidth,
+		w.screen.RootDepth, w.screen.RootVisual, valueMask, values)
+}
+
+// x11CreateWindowVisual — CreateWindow с явными глубиной и visual'ом (окно с
+// альфой: 32 бита и ARGB visual вместо корневых).
+func (w *X11Window) x11CreateWindowVisual(wid, parent uint32, x, y int16, width, height uint16, borderWidth uint16, depth uint8, visual uint32, valueMask uint32, values []uint32) {
 	// Opcode 1: CreateWindow.
 	// Фиксированная часть тела (после 4-байтового заголовка) — 28 байт:
 	// wid(4) parent(4) x(2) y(2) w(2) h(2) border(2) class(2) visual(4) mask(4).
 	bodyLen := 28 + len(values)*4
 	buf := make([]byte, 4+bodyLen)
 	buf[0] = 1                                                     // opcode
-	buf[1] = w.screen.RootDepth                                    // depth
+	buf[1] = depth                                                 // depth
 	binary.LittleEndian.PutUint16(buf[2:4], uint16((4+bodyLen)/4)) // length in 4-byte units
 	binary.LittleEndian.PutUint32(buf[4:8], wid)
 	binary.LittleEndian.PutUint32(buf[8:12], parent)
@@ -1109,7 +1148,7 @@ func (w *X11Window) x11CreateWindow(wid, parent uint32, x, y int16, width, heigh
 	binary.LittleEndian.PutUint16(buf[18:20], height)
 	binary.LittleEndian.PutUint16(buf[20:22], borderWidth)
 	binary.LittleEndian.PutUint16(buf[22:24], 1)                   // class = InputOutput
-	binary.LittleEndian.PutUint32(buf[24:28], w.screen.RootVisual) // visual
+	binary.LittleEndian.PutUint32(buf[24:28], visual)              // visual
 	binary.LittleEndian.PutUint32(buf[28:32], valueMask)
 	for i, v := range values {
 		binary.LittleEndian.PutUint32(buf[32+i*4:36+i*4], v)
@@ -1496,7 +1535,7 @@ func (w *X11Window) x11PutImage(drawable, gc uint32, dstX, dstY, width, height i
 		binary.LittleEndian.PutUint16(buf[16:18], uint16(dstX))      // dst-x
 		binary.LittleEndian.PutUint16(buf[18:20], uint16(dstY+yOff)) // dst-y
 		buf[20] = 0                                                  // left-pad
-		buf[21] = 24                                                 // depth
+		buf[21] = w.imageDepth()                                     // depth (24; 32 у окна с альфой)
 		buf[22], buf[23] = 0, 0                                      // padding (буфер переиспользуется)
 
 		srcOff := yOff * rowBytes
