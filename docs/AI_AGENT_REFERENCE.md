@@ -440,6 +440,8 @@ type Person struct {
 for _, p := range people {
     collection.Add(p)
 }
+// A page of rows at once (v3.36): one CollectionAdd event, selection kept.
+collection.AddRange(page) // page []any
 
 // Create DataGrid
 grid := widget.NewDataGridWidget()
@@ -8099,6 +8101,38 @@ refusal path with `FlashWindowEx` (the test session always has the foreground ri
 Not done: macOS (`Activate` = `false`).
 
 ---
+
+## v3.36: appending a batch to ObservableCollection (`widget/datagrid`)
+
+Answers Go.Git GG-93 (the journal loads history in pages of 500 rows).
+
+`ObservableCollection.AddRange(items []any)` appends in one operation and sends
+ONE `CollectionAdd`: `Index` is the first new item, `Count` the number added,
+`NewItems` the items in order (`NewItem` is the first one). An empty slice does
+nothing and sends no event; the slice is copied, so the caller may reuse it.
+
+`CollectionChangedEvent` gained `Count` and `NewItems`. `Add` and `Insert` still
+send `Count == 0` (meaning one item) and `NewItems == nil`; `Added()` returns
+the number of added items either way. **A handler that mirrors the collection
+from events must read `Count`/`NewItems`**: `NewItem` of a batch is only its
+first element. Every subscriber inside the engine (DataGrid, TreeView,
+CollectionView, XAML `ItemsControl`) handles batches.
+
+Why not the old ways: `SetItems(all)` copies the whole slice and sends `Reset`,
+which drops the selection (GG-81) — the old rows could now be other items.
+`Add` per item made `DataGrid` rebuild its row index and drop the cell cache on
+every item, so a 500-row page was 500 full rebuilds.
+
+`DataGrid` now takes a fast path for rows appended at the end when no column is
+sorted: it appends only the new row indices, keeps the selection, and keeps the
+cell cache (keyed by grid row, which does not move). This covers both
+`AddRange` and a plain `Add` at the end. Insertion in the middle, an active sort
+or a collection changed again in between take the full rebuild as before; with
+a sort, new rows land in sorted order.
+
+Tests: `widget/datagrid/addrange_test.go` (one event, copy of the slice, empty
+batch, selection and cell cache kept, `Add` at the end on the fast path, sort,
+insertion in the middle).
 
 ## End of Reference
 
