@@ -218,7 +218,11 @@ func (w *X11Window) x11ShmBlit(img *image.RGBA, dirty image.Rectangle) bool {
 		srcOff := (dirty.Min.Y+y)*srcStride + dirty.Min.X*4
 		dstOff := ((dirty.Min.Y+y)*stride + dirty.Min.X) * 4
 		// RGBA → BGRA построчным 32-битным swap'ом (см. pixconv.go).
-		swapRBRow(shm.data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
+		if w.argb {
+			swapRBRowPremul(shm.data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
+		} else {
+			swapRBRow(shm.data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
+		}
 	}
 
 	req := x11ShmPutImageRequestDepth(shm.major, w.wid, w.gcID, w.imageDepth(),

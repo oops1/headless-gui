@@ -1003,7 +1003,11 @@ func (w *X11Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	for y := 0; y < dh; y++ {
 		srcOff := (dirty.Min.Y+y)*stride + dirty.Min.X*4
 		dstOff := y * rowLen
-		swapRBRow(data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
+		if w.argb {
+			swapRBRowPremul(data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
+		} else {
+			swapRBRow(data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
+		}
 	}
 
 	w.x11PutImage(w.wid, w.gcID, dirty.Min.X, dirty.Min.Y, dw, dh, data)

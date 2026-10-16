@@ -45,13 +45,19 @@ func convRectBGRX(dst []byte, dstStride int, src []byte, srcStride int, r image.
 	}
 }
 
-// convRectBGRAPremul конвертирует RGBA→BGRA с умножением на альфу внутри r.
+// convRectBGRAPremul конвертирует RGBA→BGRA внутри r для буфера с альфой,
+// который компоновщик смешивает как premultiplied (Wayland ARGB8888, окно
+// X11 глубины 32).
 //
-// Для всплывающих окон Wayland (wl_shm формат ARGB8888). Альфа там нужна
-// по-настоящему: вынесенное каскадное меню — ступенька, и между её полосами
-// есть площадь, которую никто не закрашивает; в непрозрачном буфере она
-// была бы чёрным прямоугольником. Протокол требует цвет, УЖЕ умноженный на
-// альфу, иначе у скруглённых углов меню появляется светлый ореол.
+// Картинка движка УЖЕ premultiplied (image.RGBA по определению Go, весь back
+// холста): сглаженный край белого меню — (28,28,28,28). Прежняя версия
+// умножала цвет на альфу ещё раз и давала (3,3,3,28) — тёмную кайму по
+// скруглённым углам. Но и просто переставить каналы мало: точка, в которой
+// цвет больше альфы (straight-цвет, переданный как premultiplied, — светлый
+// ореол у углов, ради которого умножение когда-то и добавили), у компоновщика
+// становится пересветом. Поэтому каждый канал обрезается альфой: корректная
+// premultiplied-точка остаётся как есть, а straight-белый край (255,255,255,28)
+// становится ровно правильным (28,28,28,28).
 func convRectBGRAPremul(dst []byte, dstStride int, src []byte, srcStride int, r image.Rectangle) {
 	if r.Empty() || dstStride <= 0 || srcStride <= 0 {
 		return
@@ -72,11 +78,29 @@ func convRectBGRAPremul(dst []byte, dstStride int, src []byte, srcStride int, r 
 			case 0:
 				d[0], d[1], d[2], d[3] = 0, 0, 0, 0
 			default:
-				d[0] = byte(uint32(s[2]) * a / 255)
-				d[1] = byte(uint32(s[1]) * a / 255)
-				d[2] = byte(uint32(s[0]) * a / 255)
-				d[3] = byte(a)
+				d[0], d[1], d[2], d[3] = minByte(s[2], s[3]), minByte(s[1], s[3]), minByte(s[0], s[3]), s[3]
 			}
 		}
 	}
+}
+
+// swapRBRowPremul — строка RGBA → BGRA для буфера с альфой: перестановка и
+// обрезка канала альфой, как у convRectBGRAPremul.
+func swapRBRowPremul(dst, src []byte) {
+	n := len(src) &^ 3
+	for i := 0; i < n; i += 4 {
+		a := src[i+3]
+		if a == 255 {
+			dst[i], dst[i+1], dst[i+2], dst[i+3] = src[i+2], src[i+1], src[i], 255
+			continue
+		}
+		dst[i], dst[i+1], dst[i+2], dst[i+3] = minByte(src[i+2], a), minByte(src[i+1], a), minByte(src[i], a), a
+	}
+}
+
+func minByte(v, lim byte) byte {
+	if v > lim {
+		return lim
+	}
+	return v
 }

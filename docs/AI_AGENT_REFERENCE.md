@@ -8239,6 +8239,20 @@ premultiplied bytes; `Expose`; colormap freed; live e2e on a real X server with
 `GetImage`: alpha is 0 outside the body, the shadow keeps its alpha). Every change
 was checked by mutation.
 
+### v3.37: pixels of alpha buffers are passed premultiplied, once
+
+The engine's frames are premultiplied (`image.RGBA` by Go's definition, the
+whole canvas back buffer): an anti-aliased edge of a white menu is
+`(28,28,28,28)`. The Wayland popup buffer (ARGB8888) multiplied colour by alpha
+a second time and got `(3,3,3,28)` — a dark fringe along rounded corners. Both
+alpha buffers — the Wayland popup and the X11 depth-32 popup — now swap R/B and
+clamp each channel to alpha (`convRectBGRAPremul`, `swapRBRowPremul`): a valid
+premultiplied pixel passes unchanged, a pixel whose colour exceeds alpha (a
+straight colour handed in as premultiplied — the light halo the old
+multiplication was added against) is clamped, so a straight white edge
+`(255,255,255,28)` becomes the correct `(28,28,28,28)`. 24-bit X11 windows and
+XRGB Wayland windows ignore alpha and are unchanged.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
