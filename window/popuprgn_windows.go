@@ -73,18 +73,7 @@ func (w *Win32Window) applyOpaqueRegion(bands []image.Rectangle, full image.Rect
 	procSetWindowRgn.Call(uintptr(w.hwnd), total, 0)
 }
 
-// sameRects сравнивает два списка прямоугольников.
-func sameRects(a, b []image.Rectangle) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
+// sameRects — в x11shape.go (общая для всех платформ).
 
 // blitPopupRegion выкраивает окно по закрашенной части кадра и кладёт кадр.
 //

@@ -8253,6 +8253,27 @@ multiplication was added against) is clamped, so a straight white edge
 `(255,255,255,28)` becomes the correct `(28,28,28,28)`. 24-bit X11 windows and
 XRGB Wayland windows ignore alpha and are unchanged.
 
+### v3.37: X11 popup without a compositing manager — shaped to solid pixels
+
+A 32-bit ARGB popup is transparent only where a compositing manager blends
+alpha. Without one the server ignores alpha, and the menu's translucent shadow
+and the pixels outside its rounded corners show black — exactly like the
+24-bit window. At popup creation the X11 backend checks whether alpha is
+blended: the `XWAYLAND` extension (XWayland's compositor blends ARGB windows
+itself) or an owner of the EWMH selection `_NET_WM_CM_S0`. When alpha is not
+blended — or the window is 24-bit — and the server has the SHAPE extension, the
+popup window is shaped (`ShapeRectangles`, Bounding) to the SOLID pixels of each
+frame (`engine.SolidBands`): no shadow, no anti-aliased edge, no gap between
+cascade levels — nothing left to turn black. The same shape is not resent on
+every frame. Cost without a compositor: no soft shadow, stepped rounded
+corners. With a compositor nothing changes: the ARGB popup stays rectangular
+with its soft shadow. The check runs once, when the popup is created.
+
+Tests: `window/x11shape_test.go` (request bytes), `window/x11shape_linux_test.go`
+(fake server: no compositor → shape to solid pixels, shadow and gap cut out,
+no resend of the same shape; compositor or XWayland → no shape; 24-bit →
+always shaped).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

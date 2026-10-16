@@ -27,6 +27,11 @@ type argbFakeServer struct {
 
 	failArgb   bool
 	pendingErr int
+
+	// exts — расширения, которые сервер объявляет (имя → major-опкод);
+	// cmOwner — владелец выделения _NET_WM_CM_S0 (0 — композитора нет).
+	exts    map[string]byte
+	cmOwner uint32
 }
 
 func newArgbFakeServer(conn net.Conn) *argbFakeServer {
@@ -57,7 +62,18 @@ func (s *argbFakeServer) serve() {
 		reply := make([]byte, 32)
 		reply[0] = 1
 		switch req[0] {
-		case 98, 101: // QueryExtension (нет расширений), GetKeyboardMapping (пусто)
+		case 98: // QueryExtension: объявленные расширения
+			nameLen := int(binary.LittleEndian.Uint16(req[4:6]))
+			if 8+nameLen <= len(req) {
+				if major, ok := s.exts[string(req[8:8+nameLen])]; ok {
+					reply[8], reply[9] = 1, major
+				}
+			}
+		case 16: // InternAtom: любой атом — 77
+			binary.LittleEndian.PutUint32(reply[8:12], 77)
+		case 23: // GetSelectionOwner
+			binary.LittleEndian.PutUint32(reply[8:12], s.cmOwner)
+		case 101: // GetKeyboardMapping (пусто)
 		case 1: // CreateWindow
 			if s.failArgb && req[1] == 32 {
 				s.pendingErr++

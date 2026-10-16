@@ -73,6 +73,13 @@ type X11Window struct {
 	colormap uint32
 	popup    bool
 	popupImg atomic.Pointer[image.RGBA]
+	// Форма попапа (x11shape_linux.go): shapeMajor — опкод расширения SHAPE,
+	// если альфу смешивать некому и окно выкраивается по сплошным точкам
+	// кадра; 0 — форма не нужна или SHAPE нет. shapeLast — последняя
+	// отправленная форма (тот же набор не шлём повторно на каждом кадре).
+	shapeMajor byte
+	shapeLast  []image.Rectangle
+	shapeSent  bool
 
 	// Раскладка клавиатуры: GetKeyboardMapping (core-протокол).
 	// keysyms — матрица keycode × symsPerCode; колонки 0-1 — группа 1,
@@ -514,6 +521,9 @@ func (w *X11Window) CreatePopup(width, height int) error {
 			uint16(width), uint16(height), 0, valueMask, values)
 	}
 	w.x11CreateGC(w.gcID, w.wid)
+	// Без композитора альфу смешивать некому: тень и углы окна-попапа были
+	// бы чёрными — тогда окно выкраивается по сплошным точкам (SHAPE).
+	w.x11InitPopupShape()
 
 	// Seed кэша позиции (override-redirect: MoveWindow задаёт корневые координаты).
 	w.posMu.Lock()
