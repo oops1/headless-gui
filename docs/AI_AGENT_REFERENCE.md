@@ -8134,6 +8134,146 @@ Tests: `widget/datagrid/addrange_test.go` (one event, copy of the slice, empty
 batch, selection and cell cache kept, `Add` at the end on the fast path, sort,
 insertion in the middle).
 
+## v3.37: opaque parts of a popup menu — `PopupMenu.OverlayRects`
+
+Asked by WinLine: its shell puts the picture of a menu over OTHER programs'
+windows opaquely, into rectangles it gets from the shell. `OverlayBounds`
+returns one rectangle around the menu and all open cascades, so it took the
+empty space between a menu and its submenu, and the pixels outside the rounded
+corners — wallpaper showed through over Notepad or Chromium.
+
+```go
+for _, r := range menu.OverlayRects() { // nil when the menu is closed
+    addOpaque(r)                        // absolute logical coordinates, like OverlayBounds
+}
+```
+
+- One part list per open level — the menu itself and every open cascade,
+  recursively — of the opaque BODY only: no shadow, no pixel outside the
+  rounded corners. A corner is a staircase of rectangles that keeps one logical
+  pixel of margin inside the arc, which covers the anti-aliased edge and the
+  rounding of physical coordinates on HiDPI. Rows with the same inset are merged
+  (radius 8 gives about a dozen rectangles per level).
+- `OverlayBounds` is unchanged: the engine still uses it to move a menu into a
+  native popup window.
+- Safe from any goroutine, like `OverlayBounds`.
+- Interface `widget.OverlayRectsProvider` for a consumer that walks overlays
+  generically; only `PopupMenu` implements it so far (menu bar menus, context
+  menus and the window system menu are `PopupMenu`s).
+- If the theme gives the menu a translucent background (a material), the body
+  itself depends on what is drawn under it — the rectangles still say where the
+  menu is, not that its pixels ignore the backdrop.
+
+Tests: `engine/popuprects_test.go` renders a menu with an open cascade on two
+different backgrounds at scales 1, 1.5 and 2 with radii 8, 4 and 0: no pixel
+inside `OverlayRects` differs between the two frames, the rectangles cover at
+least 97% of the background-independent pixels, and `OverlayBounds` does catch
+background pixels (so the scene is meaningful).
+
+### v3.37: a hosted popup's shadow is no longer declared opaque on Wayland
+
+A menu moved into its own Wayland popup surface (`SetPopupSink`, Notepad's menu
+bar with a cascade open) wore a solid black frame where its shadow is. The
+popup host set the bands of `engine.OpaqueBands` — every pixel with non-zero
+alpha, the translucent shadow included — both as the input region and as
+`wl_surface.set_opaque_region`. A compositor that trusts the opaque region
+(mutter, WinLine) copies those pixels without blending.
+
+- New `engine.SolidBands(img)` — bands of pixels with alpha 255 only (no
+  shadow, no anti-aliased edge); unlike `OpaqueBands` it also answers for an
+  image without holes. `OpaqueBands` is unchanged and still drives the window
+  shape and the input region.
+- The Wayland popup sets the opaque region from `SolidBands` and the input
+  region from `OpaqueBands` as before (a click on the shadow still belongs to
+  the menu).
+
+Tests: `engine/solidbands_test.go`, `window/wayland_popup_opaque_linux_test.go`
+(on the wire: a shadow pixel is in the input region but not in the opaque one,
+the menu bodies are opaque, the gap between levels is in neither).
+
+---
+
+## v3.37: transparent popup windows on X11 (`window` package)
+
+No public API: a defect fix. Popups that the engine lifts into their own OS windows
+(`Engine.SetPopupSink`: menus, cascaded submenus, dropdowns) on X11 used to be
+created with the root visual — 24 bits, no alpha. The overlay image carries a
+transparent/semi-transparent shadow and transparent points behind the rounded
+corners; a window without an alpha channel shows them **black** (a thick black
+frame around the menu body and black corners). Wayland popups were already
+`ARGB8888`; X11 now matches.
+
+- The server's setup reply is parsed past the screen header: the list of depths
+  and visuals is scanned for a **TrueColor visual of depth 32 with masks
+  R=`0xFF0000`, G=`0x00FF00`, B=`0x0000FF`** (`x11Screen.ArgbVisual`).
+- `X11Window.CreatePopup` with such a visual: `CreateColormap(AllocNone, root,
+  visual)`, then `CreateWindow` of depth 32 with that visual and the value mask
+  `BackPixel=0 | BorderPixel=0 | OverrideRedirect | EventMask | Colormap`
+  (values in ascending bit order; `BorderPixel` is mandatory when the visual
+  differs from the parent's, otherwise `BadMatch`). A round trip right after the
+  requests catches a server-side refusal and falls back to the old 24-bit window.
+  The colormap is freed in `Close`.
+- No 32-bit visual on the screen — the old behaviour (24 bits, root visual).
+  The main window is untouched (XRGB, its own corner mask `cornermask.go`).
+- Output into such a window — `PutImage` and `ShmPutImage` (MIT-SHM) with
+  **depth 32**. The overlay image is already **premultiplied** (the whole engine
+  back buffer is), which is what compositors expect from an ARGB window, so the
+  conversion is the usual R/B swap with alpha kept; the colour is **not**
+  multiplied by alpha a second time (that would darken semi-transparent edges).
+- Popup `Expose` is now answered from the last frame the popup was given (the host
+  has no repaint callback for popups): an exposed region of an ARGB window would
+  otherwise stay transparent, of a 24-bit one — filled with the background.
+- Without a compositing manager an ARGB window does not blend: transparent points
+  show as black as before. The engine cannot yet be told "alpha is not
+  supported" to cut the popup to the body without the shadow; the check would be
+  the owner of the `_NET_WM_CM_S<screen>` selection. Not done: XWayland sessions
+  blend regardless of that selection, so it cannot be used to *disable* the alpha
+  window.
+
+Tests: `window/x11argb_test.go` (visual list parsing incl. wrong class, masks,
+depth, truncated data; `CreateColormap`/`FreeColormap`/`CreateWindow` bytes and
+value order), `x11argb_linux_test.go` (setup reply parsing; `CreatePopup` against a
+fake X server: depth 32, mask, value order, request order, 24-bit fallback without
+a visual and after a server refusal; `PutImage`/`ShmPutImage` depth 32 and
+premultiplied bytes; `Expose`; colormap freed; live e2e on a real X server with
+`GetImage`: alpha is 0 outside the body, the shadow keeps its alpha). Every change
+was checked by mutation.
+
+### v3.37: pixels of alpha buffers are passed premultiplied, once
+
+The engine's frames are premultiplied (`image.RGBA` by Go's definition, the
+whole canvas back buffer): an anti-aliased edge of a white menu is
+`(28,28,28,28)`. The Wayland popup buffer (ARGB8888) multiplied colour by alpha
+a second time and got `(3,3,3,28)` — a dark fringe along rounded corners. Both
+alpha buffers — the Wayland popup and the X11 depth-32 popup — now swap R/B and
+clamp each channel to alpha (`convRectBGRAPremul`, `swapRBRowPremul`): a valid
+premultiplied pixel passes unchanged, a pixel whose colour exceeds alpha (a
+straight colour handed in as premultiplied — the light halo the old
+multiplication was added against) is clamped, so a straight white edge
+`(255,255,255,28)` becomes the correct `(28,28,28,28)`. 24-bit X11 windows and
+XRGB Wayland windows ignore alpha and are unchanged.
+
+### v3.37: X11 popup without a compositing manager — shaped to solid pixels
+
+A 32-bit ARGB popup is transparent only where a compositing manager blends
+alpha. Without one the server ignores alpha, and the menu's translucent shadow
+and the pixels outside its rounded corners show black — exactly like the
+24-bit window. At popup creation the X11 backend checks whether alpha is
+blended: the `XWAYLAND` extension (XWayland's compositor blends ARGB windows
+itself) or an owner of the EWMH selection `_NET_WM_CM_S0`. When alpha is not
+blended — or the window is 24-bit — and the server has the SHAPE extension, the
+popup window is shaped (`ShapeRectangles`, Bounding) to the SOLID pixels of each
+frame (`engine.SolidBands`): no shadow, no anti-aliased edge, no gap between
+cascade levels — nothing left to turn black. The same shape is not resent on
+every frame. Cost without a compositor: no soft shadow, stepped rounded
+corners. With a compositor nothing changes: the ARGB popup stays rectangular
+with its soft shadow. The check runs once, when the popup is created.
+
+Tests: `window/x11shape_test.go` (request bytes), `window/x11shape_linux_test.go`
+(fake server: no compositor → shape to solid pixels, shadow and gap cut out,
+no resend of the same shape; compositor or XWayland → no shape; 24-bit →
+always shaped).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

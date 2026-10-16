@@ -28,6 +28,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/engine"
+
 	"golang.org/x/sys/unix"
 )
 
@@ -336,7 +338,7 @@ func (w *WaylandWindow) popupDraw(p *wlPopup, img *image.RGBA, bands []image.Rec
 	}
 	convRectBGRAPremul(p.data, p.stride, img.Pix, img.Stride, b)
 
-	w.popupSetRegions(p, bands)
+	w.popupSetRegions(p, bands, engine.SolidBands(img))
 	w.send(newWlMsg(p.surfaceID, wlSurfaceAttach).putUint(p.bufID).putInt(0).putInt(0), -1)
 	w.popupDamage(p)
 	w.send(newWlMsg(p.surfaceID, wlSurfaceCommit), -1)
@@ -382,16 +384,29 @@ func (w *WaylandWindow) popupWaitBuf(p *wlPopup) bool {
 //
 // Нет полос (сплошная картинка) — обе области возвращаются к значению по
 // умолчанию: вся поверхность.
-func (w *WaylandWindow) popupSetRegions(p *wlPopup, bands []image.Rectangle) {
+//
+// solid — точки с альфой 255 (engine.SolidBands). Непрозрачной областью
+// объявляются только они: полосы bands включают и полупрозрачную тень, а
+// компоновщик, поверивший непрозрачной области, копирует её без смешивания —
+// вокруг меню выходила сплошная чёрная рамка.
+func (w *WaylandWindow) popupSetRegions(p *wlPopup, bands, solid []image.Rectangle) {
 	if len(bands) == 0 {
 		w.send(newWlMsg(p.surfaceID, wlSurfaceSetInputRegion).putUint(0), -1)
 		w.send(newWlMsg(p.surfaceID, wlSurfaceSetOpaqueRegion).putUint(0), -1)
 		return
 	}
-	for _, op := range []int{wlSurfaceSetInputRegion, wlSurfaceSetOpaqueRegion} {
+	for _, reg := range []struct {
+		op    int
+		rects []image.Rectangle
+	}{{wlSurfaceSetInputRegion, bands}, {wlSurfaceSetOpaqueRegion, solid}} {
+		op := reg.op
+		if len(reg.rects) == 0 {
+			w.send(newWlMsg(p.surfaceID, uint16(op)).putUint(0), -1)
+			continue
+		}
 		rid := w.newID()
 		w.send(newWlMsg(w.compositorID, wlCompositorCreateRegion).putUint(rid), -1)
-		for _, r := range bands {
+		for _, r := range reg.rects {
 			// Область — в поверхностных единицах, полосы пришли в пикселях.
 			w.send(newWlMsg(rid, wlRegionAdd).
 				putInt(int32(w.toSurface(r.Min.X))).putInt(int32(w.toSurface(r.Min.Y))).

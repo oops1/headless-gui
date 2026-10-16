@@ -46,7 +46,31 @@ func OpaqueBands(img *image.RGBA) []image.Rectangle {
 	if !hasRealHole(img) {
 		return nil
 	}
+	return bandsOf(img, 1)
+}
 
+// SolidBands возвращает полосы точек с альфой 255 — то, что картинка
+// закрывает НАЦЕЛО, без тени и без сглаженных краёв.
+//
+// OpaqueBands отвечает на другой вопрос — «где закрашено хоть что-то» — и
+// годится для формы окна и области ввода. Непрозрачной областью поверхности
+// (wl_surface.set_opaque_region) их объявлять нельзя: компоновщик, который
+// ей верит (mutter, WinLine), копирует эти точки без смешивания, и
+// полупрозрачная тень меню превращалась в сплошную чёрную рамку вокруг меню
+// Блокнота (замечание WinLine после v3.35.1).
+//
+// В отличие от OpaqueBands, полосы есть и у картинки без дыр. nil — картинки
+// нет или в ней нет ни одной сплошной точки.
+func SolidBands(img *image.RGBA) []image.Rectangle {
+	if img == nil || img.Bounds().Empty() {
+		return nil
+	}
+	return bandsOf(img, 255)
+}
+
+// bandsOf собирает полосы точек с альфой не меньше minA.
+func bandsOf(img *image.RGBA, minA byte) []image.Rectangle {
+	b := img.Bounds()
 	var out []image.Rectangle
 	// prev — отрезки предыдущей строки и её номер: пока набор отрезков не
 	// меняется, полоса растёт вниз, а не превращается в строку на каждый ряд.
@@ -61,7 +85,7 @@ func OpaqueBands(img *image.RGBA) []image.Rectangle {
 	}
 
 	for y := b.Min.Y; y < b.Max.Y; y++ {
-		cur = rowSpans(cur[:0], img, y)
+		cur = rowSpansMin(cur[:0], img, y, minA)
 		if y == b.Min.Y {
 			prev = append(prev[:0], cur...)
 			prevY = y
@@ -121,11 +145,16 @@ type span struct{ x0, x1 int }
 
 // rowSpans собирает отрезки строки y с ненулевой альфой.
 func rowSpans(dst []span, img *image.RGBA, y int) []span {
+	return rowSpansMin(dst, img, y, 1)
+}
+
+// rowSpansMin собирает отрезки строки y с альфой не меньше minA.
+func rowSpansMin(dst []span, img *image.RGBA, y int, minA byte) []span {
 	b := img.Bounds()
 	off := img.PixOffset(b.Min.X, y) + 3 // +3 — байт альфы
 	start := -1
 	for x := b.Min.X; x < b.Max.X; x++ {
-		opaque := img.Pix[off] != 0
+		opaque := img.Pix[off] >= minA
 		off += 4
 		switch {
 		case opaque && start < 0:
