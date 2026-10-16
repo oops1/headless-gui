@@ -8170,6 +8170,27 @@ inside `OverlayRects` differs between the two frames, the rectangles cover at
 least 97% of the background-independent pixels, and `OverlayBounds` does catch
 background pixels (so the scene is meaningful).
 
+### v3.37: a hosted popup's shadow is no longer declared opaque on Wayland
+
+A menu moved into its own Wayland popup surface (`SetPopupSink`, Notepad's menu
+bar with a cascade open) wore a solid black frame where its shadow is. The
+popup host set the bands of `engine.OpaqueBands` — every pixel with non-zero
+alpha, the translucent shadow included — both as the input region and as
+`wl_surface.set_opaque_region`. A compositor that trusts the opaque region
+(mutter, WinLine) copies those pixels without blending.
+
+- New `engine.SolidBands(img)` — bands of pixels with alpha 255 only (no
+  shadow, no anti-aliased edge); unlike `OpaqueBands` it also answers for an
+  image without holes. `OpaqueBands` is unchanged and still drives the window
+  shape and the input region.
+- The Wayland popup sets the opaque region from `SolidBands` and the input
+  region from `OpaqueBands` as before (a click on the shadow still belongs to
+  the menu).
+
+Tests: `engine/solidbands_test.go`, `window/wayland_popup_opaque_linux_test.go`
+(on the wire: a shadow pixel is in the input region but not in the opaque one,
+the menu bodies are opaque, the gap between levels is in neither).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
