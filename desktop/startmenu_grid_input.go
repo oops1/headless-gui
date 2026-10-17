@@ -174,6 +174,16 @@ func (m *StartMenu) mouseMoveGrid(x, y int) {
 	m.g.mu.Lock()
 	dragging := m.g.drag.pending || m.g.drag.active
 	m.g.mu.Unlock()
+	// «Курсора над меню нет» (widget.CursorNowhere) — не точка: перенос
+	// плитки и бегунок его не видят, иначе скачок на 2^30 точек от места
+	// нажатия превращал щелчок по плитке в её перенос. Только наведение
+	// снимается, если ничего не ведут за мышью.
+	if widget.CursorIsNowhere(x, y) {
+		if !barDragging && !dragging {
+			m.setHover("")
+		}
+		return
+	}
 	if barDragging {
 		m.barMove(pt)
 		return
