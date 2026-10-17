@@ -439,3 +439,21 @@ func TestStartMenu11_TabOrder(t *testing.T) {
 		t.Errorf("Shift+Tab, Вправо, Enter: события %v, ждали power вторым", side)
 	}
 }
+
+// То же для сетки «Закреплено» Windows 11: щелчок через движок с дрожанием
+// руки запускает приложение, а не начинает перенос ячейки.
+func TestStartMenu11_ClickThroughEngineWithJitterLaunches(t *testing.T) {
+	testreset.Globals(t)
+	s := newWin11Scene(t, 1280, 800, false, 1)
+	s.open()
+	s.frame()
+	p := s.cell(1, 0) // «Word» = app1
+	s.eng.SendMouseMove(p.X, p.Y)
+	s.eng.SendMouseButton(p.X, p.Y, widget.MouseLeft, true)
+	s.eng.SendMouseMove(p.X, p.Y)
+	s.eng.SendMouseMove(p.X+1, p.Y)
+	s.eng.SendMouseButton(p.X+1, p.Y, widget.MouseLeft, false)
+	if got := launched(s); len(got) != 1 || got[0] != "app1" {
+		t.Fatalf("запущено %v, ждали [app1]", got)
+	}
+}

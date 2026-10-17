@@ -8274,6 +8274,29 @@ Tests: `window/x11shape_test.go` (request bytes), `window/x11shape_linux_test.go
 no resend of the same shape; compositor or XWayland → no shape; 24-bit →
 always shaped).
 
+## v3.37.1: a click on a Start tile no longer moves it
+
+Under an open overlay the engine delivers a mouse move in two steps: "cursor is
+nowhere" (`widget.CursorNowhere`) to the whole tree — so whatever the cursor
+left under the overlay drops its hover — then the real point to the overlay's
+owner. The owner got the "nowhere" too, right before the real point. The
+Windows 10 Start menu (and the Windows 11 pinned grid) took it for a jump of
+2^30 points from the press and started dragging the tile, so a click with the
+slightest hand tremor between press and release moved the tile instead of
+launching it.
+
+- The engine now skips the overlay owner's subtree when it broadcasts
+  "nowhere" (`broadcastMouseMoveSkip`): the owner and its children get only the
+  real point. Everything under the overlay still gets "nowhere". This applies to
+  every overlay with dragging, not only Start.
+- `StartMenu` itself ignores `widget.CursorIsNowhere` coordinates for tile and
+  cell dragging and for its scroll thumb; such a move only drops the hover.
+
+Tests: `engine/overlaymove_test.go`; in `desktop` a click through the engine
+with a move on the spot and a one-pixel tremor launches the tile / pinned app
+and leaves `TileGroups` unchanged (Windows 10 and 11), and a "nowhere" move
+between press and release does not start a drag.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

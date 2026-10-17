@@ -336,7 +336,13 @@ func (e *Engine) SendMouseMove(x, y int) {
 		// Сначала — всему дереву «курсора над вами нет». Без этого кнопка, с
 		// которой курсор ушёл под оверлей, осталась бы подсвеченной навсегда:
 		// она бы просто перестала получать события.
-		broadcastMouseMove(root, ox, oy, widget.CursorNowhere, widget.CursorNowhere)
+		//
+		// Кроме самого владельца оверлея и его поддерева: им следом приходит
+		// настоящая точка. «Курсора нет» перед ней владелец принимал за
+		// движение — меню «Пуск» Windows 10 видело скачок на 2^30 точек от
+		// нажатия и начинало перенос плитки, так что щелчок по плитке с
+		// малейшим дрожанием руки переставлял её вместо запуска.
+		broadcastMouseMoveSkip(root, ox, oy, widget.CursorNowhere, widget.CursorNowhere, ov)
 		// Затем — настоящая точка тому, кому она принадлежит, и его детям. Точки
 		// переводятся в кадр владельца оверлея: он может лежать в прокрутке.
 		broadcastMouseMoveFrame(ov, ox, oy, x, y, ovOff)
@@ -990,18 +996,27 @@ func overlayHitRect(w widget.Widget) image.Rectangle {
 // которых с экрана не видно, и подсвечивать их нельзя; а ушедшая с кнопки мышь
 // обязана снять с неё подсветку.
 func broadcastMouseMove(w widget.Widget, ox, oy, nx, ny int) {
-	broadcastMouseMoveAt(w, ox, oy, nx, ny, image.Point{}, 0)
+	broadcastMouseMoveAt(w, ox, oy, nx, ny, image.Point{}, 0, nil)
+}
+
+// broadcastMouseMoveSkip — broadcastMouseMove мимо поддерева skip.
+func broadcastMouseMoveSkip(w widget.Widget, ox, oy, nx, ny int, skip widget.Widget) {
+	broadcastMouseMoveAt(w, ox, oy, nx, ny, image.Point{}, 0, skip)
 }
 
 // broadcastMouseMoveFrame — broadcastMouseMove для поддерева, корень которого
 // (оверлей внутри прокрутки) лежит в кадре off.
 func broadcastMouseMoveFrame(w widget.Widget, ox, oy, nx, ny int, off image.Point) {
-	broadcastMouseMoveAt(w, ox+off.X, oy+off.Y, nx+off.X, ny+off.Y, off, 0)
+	broadcastMouseMoveAt(w, ox+off.X, oy+off.Y, nx+off.X, ny+off.Y, off, 0, nil)
 }
 
 // broadcastMouseMoveAt: обе точки — в кадре w, off — смещение этого кадра.
-func broadcastMouseMoveAt(w widget.Widget, ox, oy, nx, ny int, off image.Point, depth int) {
+// skip (если не nil) — поддерево, которое обходится стороной.
+func broadcastMouseMoveAt(w widget.Widget, ox, oy, nx, ny int, off image.Point, depth int, skip widget.Widget) {
 	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
+		return
+	}
+	if skip != nil && w == skip {
 		return
 	}
 	b := w.Bounds()
@@ -1030,7 +1045,7 @@ func broadcastMouseMoveAt(w widget.Widget, ox, oy, nx, ny int, off image.Point, 
 		coff = off.Add(sh)
 	}
 	for _, child := range children {
-		broadcastMouseMoveAt(child, cox, coy, cnx, cny, coff, depth+1)
+		broadcastMouseMoveAt(child, cox, coy, cnx, cny, coff, depth+1, skip)
 	}
 }
 
