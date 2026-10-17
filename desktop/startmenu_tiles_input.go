@@ -432,6 +432,16 @@ func (m *StartMenu) mouseMoveTiled(x, y int) {
 	dragging := v.drag.pending || v.drag.active
 	barDragging := v.bar.active
 	v.mu.Unlock()
+	// «Курсора над меню нет» (widget.CursorNowhere) — не точка: перенос
+	// плитки и бегунок его не видят, иначе скачок на 2^30 точек от места
+	// нажатия превращал щелчок по плитке в её перенос. Только наведение
+	// снимается, если ничего не ведут за мышью.
+	if widget.CursorIsNowhere(x, y) {
+		if !barDragging && !dragging {
+			m.setHover("")
+		}
+		return
+	}
 	if barDragging {
 		// Бегунок ведут за мышью, наведение на остальное не обновляется.
 		m.barMove(pt)
