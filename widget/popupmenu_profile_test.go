@@ -207,8 +207,10 @@ func TestBuiltinProfiles_DeclareMenuLook(t *testing.T) {
 	}
 
 	w10 := get(theme.ProfileWindows10, false)
-	if w10.Corner != 0 || w10.ItemHeight != 24 || w10.ItemInset != 1 || w10.ChevronRight != 0 ||
-		w10.Elevation == 0 {
+	// Тонкий шеврон подменю и мягкая тень (Elevation) — по замечанию WinLine
+	// после v3.32.0, п.3; значки перекрашивает только классика.
+	if w10.Corner != 0 || w10.ItemHeight != 24 || w10.ItemInset != 1 || w10.ChevronRight != 18 ||
+		w10.Elevation == 0 || w10.Shadow.A == 0 || w10.TintIcons {
 		t.Errorf("Windows 10: %+v", w10)
 	}
 	// Светлый режим оболочки красит разделитель по-своему.
@@ -217,8 +219,32 @@ func TestBuiltinProfiles_DeclareMenuLook(t *testing.T) {
 	}
 
 	w2k := get(theme.ProfileWindows2000, false)
-	if w2k.ItemHeight != 20 || w2k.SubMenuDelay != 400 || w2k.Corner != 0 {
+	// Значки пунктов классики перекрашиваются по состоянию сами (menu.icon.tint):
+	// чёрный значок на синей плашке иначе не виден. Остальные семейства цветные.
+	if w2k.ItemHeight != 20 || w2k.SubMenuDelay != 400 || w2k.Corner != 0 || !w2k.TintIcons ||
+		w11.TintIcons || w11d.TintIcons {
 		t.Errorf("Windows 2000: %+v", w2k)
+	}
+}
+
+// Рамка меню Windows 11: чёрная плёнка поверх заливки 249 даёт на снимке
+// Windows 229 (с альфой 15 было 234) — замечание WinLine после v3.32.0, п.4.
+func TestBuiltinProfiles_Windows11MenuBorderMatchesReference(t *testing.T) {
+	m := theme.NewManager()
+	if err := theme.RegisterBuiltinProfiles(m); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetTheme(theme.ProfileWindows11); err != nil {
+		t.Fatal(err)
+	}
+	ms := MenuStyleFromTheme(m.Active())
+	if ms.Background != theme.RGB(249, 249, 249) {
+		t.Fatalf("заливка меню %v, ждали 249", ms.Background)
+	}
+	// Наложение чёрной рамки с альфой a на серый 249.
+	got := (int(ms.Background.R)*(255-int(ms.Border.A)) + int(ms.Border.R)*int(ms.Border.A) + 127) / 255
+	if got != 229 {
+		t.Errorf("рамка меню (альфа %d) даёт %d на заливке 249, эталон Windows — 229", ms.Border.A, got)
 	}
 }
 

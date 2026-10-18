@@ -683,7 +683,10 @@ func Windows11Profile() *Profile {
 			Mode: BackdropBlur, Radius: 22, Tint: RGBA(249, 249, 249, 150),
 			Highlight: RGBA(255, 255, 255, 100)},
 		Text: C(text), Corner: N(8), Elevation: N(8), Shadow: C(RGBA(0, 0, 0, 70)),
-		Border: C(RGBA(0, 0, 0, 15)), BorderWidth: N(1),
+		// Рамка: чёрная плёнка альфа 20, а не 15. На заливке меню 249 альфа 15
+		// даёт 234, а на снимке Windows рамка 229 — 249·(255−20)/255 ≈ 229
+		// (по замечанию WinLine после v3.32.0, п.4).
+		Border: C(RGBA(0, 0, 0, 20)), BorderWidth: N(1),
 	})
 	declareWin11Menu(p)
 	p.SetStyle("window", "", StateNormal, StyleDelta{FillFrom: "surface", Corner: N(12)})
