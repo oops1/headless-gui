@@ -2801,6 +2801,45 @@ editor, a chart) hands its parts over through `widget.AccessChildrenProvider` �
 `AccessChildren() []AccessInfo`. That is how `DiffView` shows a screen reader
 its two text panes.
 
+**Actions on nodes (v3.38).** Invoke and focus from a screen reader on such a
+node used to act on the whole widget: "press" the left pane clicked the centre
+of the entire `DiffView`. An owner of nodes that can take an action implements
+the optional `widget.AccessActionHandler`:
+
+```go
+func (w *MyEditor) AccessChildren() []widget.AccessInfo {
+    return []widget.AccessInfo{
+        {Role: widget.RoleTextInput, Name: "Left", ID: "left",   Bounds: w.leftRect()},
+        {Role: widget.RoleTextInput, Name: "Right", ID: "right", Bounds: w.rightRect()},
+    }
+}
+
+// Called on the engine goroutine. true — the action was done.
+func (w *MyEditor) AccessAction(id string, a widget.AccessActionKind) bool {
+    switch a {
+    case widget.AccessInvoke, widget.AccessFocus, widget.AccessSelect:
+        w.activate(id)
+        return true
+    }
+    return false
+}
+```
+
+`ID` is stable for a node (an empty one is replaced by the number in the
+list). Actions: `AccessInvoke`, `AccessFocus`, `AccessSelect`, `AccessToggle`,
+`AccessExpand`, `AccessCollapse`. The owner's answer is final — there is no
+fallback click at the centre; an owner without the interface behaves as
+before. Before invoke, focus and select the engine itself moves input focus to
+the owner (not to overlay owners such as menus).
+
+**Dialog, menu, scrolling (v3.38).** `Dialog` (MessageBox, confirm and input
+dialogs) announces itself with `RoleDialog`: the name is the title, the
+description is `Dialog.Description` (MessageBox puts the message text there).
+An open popup menu and a menu bar appear in the tree as `RoleMenu` and
+`RoleMenuItem` with on-screen bounds; the highlighted item holds the focus. An
+element scrolled out of a `ScrollView` gets `StateOffscreen`, a partly visible
+one `AccessInfo.Visible` (the intersection with the window).
+
 **Text for a screen reader.** The content of a text field used to travel as
 one string — the element's "value", as on a slider. A screen reader needs
 more: it reads a document in pieces, follows the caret and announces the

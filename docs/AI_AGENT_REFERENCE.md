@@ -8577,6 +8577,148 @@ at registration; the first exotic glyph reads exactly the chain prefix up to its
 glyph found nowhere reads each file once; eager/lazy equality; DPI and sub-pixel at load;
 concurrent loading under `-race`; `readFileBounded` allocation).
 
+---
+
+## v3.38: accessibility — actions on nodes, dialog, radio buttons, scrolling, menus
+
+Asked by PixGo (E17). Additions only; the frames of existing themes are
+unchanged.
+
+### Actions on nodes — `widget.AccessActionHandler`
+
+Invoke and SetFocus from a screen reader on a node from `AccessChildren` acted
+on the OWNER widget (a synthetic click at its centre). Now the owner can take
+the action itself:
+
+```go
+type AccessActionHandler interface {
+    AccessAction(id string, action AccessActionKind) bool
+}
+// AccessInvoke, AccessFocus, AccessSelect, AccessToggle, AccessExpand, AccessCollapse
+```
+
+- `AccessInfo.ID` (new) is the node's identifier at its owner; an empty one is
+  replaced by the node's number in the list. `AccessNode.ActionID` carries it
+  to the bridge (`json:"-"`), `AccessNode.Widget` is still the owner.
+- `Engine.AccessAction(w, id, action) bool` runs the handler on the engine
+  goroutine (`callOnLoop`) and refuses a hidden/disabled owner. Before
+  `AccessInvoke/Focus/Select` it moves input focus to the owner if the owner is
+  `Focusable` and not an `OverlayDrawer` (a menu would be closed by it).
+- `Window.accessibilityNodeAction(node, kind)` is the single entry the bridges
+  use. A node with an `ActionID` whose owner implements the interface gets the
+  action from it, and the owner's answer is final (no fallback click). Anything
+  else behaves as before: Focus → focus the widget; Invoke/Select/Toggle →
+  synthetic click; Expand/Collapse → refused.
+- Bridges: UIA `Invoke`, `SetFocus`, `Toggle`, `SelectionItem.Select`,
+  `ExpandCollapse`; AT-SPI `Action.DoAction` (0 = click, 1 = "expand or contract"
+  for nodes with a sub-menu) and `Component.GrabFocus`. An owner's node has
+  the `Action` interface in AT-SPI.
+- Implemented by `DiffView` (ids `"0"`, `"1"` = side), `MergeView` (`"0".."3"` =
+  `MergeSide`; the hidden base pane refuses), `PopupMenu` and `MenuBar`
+  (below).
+
+### Dialog in the tree
+
+`Dialog` implements `Accessible`: `RoleDialog`, name = `Title`, description =
+`Dialog.Description` (new field; `MessageBox`, `NewConfirmDialog` and the input
+dialog fill it with the message), the close button `✕` is a named button.
+`StateModal` is added by the engine as before. UIA: control type Window and
+`IsDialog = true`; AT-SPI: role `dialog`.
+
+### Scrolled-out elements — `StateOffscreen`, `AccessInfo.Visible`
+
+`BuildAccessTree` tracks the window of every `ContentOffsetter` (ScrollView)
+above a node. `Bounds` stay the element's full screen bounds; a partly visible
+element gets `Visible` = the intersection (`json:"-"`, zero = not clipped), a
+fully hidden one gets `StateOffscreen`. Virtual nodes from `AccessChildren`
+are clipped the same way; a widget may preset `Visible`/`StateOffscreen` itself
+(a scrolled popup menu does). Menus are never clipped by a scroll window (they
+are overlays).
+
+- UIA: `IsOffscreen`, `BoundingRectangle` = the visible part (empty for a hidden
+  element). AT-SPI: `showing` is cleared (`visible` stays), `Contains` and
+  `GetAccessibleAtPoint` use the visible part.
+- Hit testing (`a11ySnapshot.hitTest`) uses the visible part.
+
+### Menus in the tree
+
+`PopupMenu` is `Accessible` + `AccessChildrenProvider` + `AccessActionHandler`:
+a closed menu is a `RoleMenu` node with `StateOffscreen` and no children; an
+open one covers itself and all open cascades (`StatePopup`) and lists the
+items as `RoleMenuItem`: name without the mnemonic mark, shortcut in
+`Description` (UIA `AcceleratorKey`), states `disabled`, `checkable`/`checked`,
+`haspopup`/`expanded`, `focused` for the highlighted item. Separators are
+skipped but keep their number. Item id = path of indices (`"2"`, `"4/1"` = item
+1 of the cascade opened from item 4). Actions: Invoke/Toggle run the item like
+Enter (cascade items open their sub-menu), Focus/Select highlight the item,
+Expand/Collapse open/close the cascade; a disabled item, a separator and a stale
+path are refused. A menu with scrolling marks the items outside its window
+`offscreen`.
+
+`MenuBar` is `Accessible` + provider + handler: top items (`"t0"`, `"t1"`, …,
+focused only while their menu is open) and, while a menu is open, its items
+(`"t1/0"`, …). Invoke on a top item toggles its menu (an item without a menu
+runs its `OnClick`).
+
+- The snapshot's focus (`UIA GetFocus`, `HasKeyboardFocus`, AT-SPI `focused`)
+  goes to a highlighted menu item, over the widget that still holds the engine
+  focus. Mere mouse hover over a closed menu bar does not take it.
+- Hit testing looks at nodes with `StatePopup` first (they stick out of the
+  owner and the window), so UIA `ElementProviderFromPoint` (which takes the
+  cursor position, see below) and AT-SPI `GetAccessibleAtPoint` return the
+  item under the cursor, not the widget under the menu. AT-SPI `GetLayer` of
+  such a node is POPUP.
+- UIA: control types Menu / MenuItem; a plain item has `Invoke`, a checkable
+  one `Toggle`, an item with a sub-menu `ExpandCollapse`. AT-SPI: roles `menu`,
+  `menu item`, `check menu item`; states `has popup`, `expandable`,
+  `collapsed`/`expanded`, `checkable`/`checked`.
+- Not in the tree (unchanged): the private context menus of `TextBox` and
+  `TextInput`, and the drop-down list of `Dropdown`.
+
+### Radio buttons — `SelectionItem` (UIA), `checked` (AT-SPI)
+
+- UIA: the radio button has the `SelectionItem` pattern (`IsSelected`,
+  `Select`, `AddToSelection`, `RemoveFromSelection` — refused for the selected
+  one, `SelectionContainer` = NULL, the engine does not publish groups) and no
+  longer `Invoke`. `IsSelected` is read from the live widget, not from the
+  150 ms snapshot. A change of the state raises the property that changed
+  (`IsSelected`, `ToggleState`, `ExpandCollapseState`, `IsOffscreen`,
+  `IsEnabled`), not `IsEnabled` for everything.
+- AT-SPI: a selected radio button is `checked` (and `checkable`), never
+  `selected` — that is what Orca reads; the `StateChanged` event is
+  `checked` too. List rows keep `selected`.
+
+### Shared focus ring
+
+`widget.DrawFocusRing(ctx, r, corner, base)` draws the two-tone ring that the
+taskbar already used (`desktop.PaintFocusRing`): an outer contour (2 px by
+default, colour = theme `FocusRing` or `base`, normally the text colour) and an
+inner 1 px contrast contour. Theme tokens `theme.KeyFocusRingWidth`
+(`focus.ring.width`) and `theme.KeyFocusRing` (`focus.ring`) — also
+`ThemeStyle.FocusRingWidth/FocusRing`, carried both ways by the flat-theme
+bridge; `desktop.KeyFocusRingWidth/KeyFocusRingColor` are now aliases of the
+same keys. `Button.FocusRing` (new, default false) switches a button to it;
+it is on for the buttons of `MessageBox`, the confirm, input, file and
+progress dialogs. Before, a focused dialog button got a 1 px border in the
+accent colour, which on an accent button (OK) was the colour of its fill.
+
+### Known limits
+
+- UIA `ElementProviderFromPoint` still uses the cursor position: `windows.NewCallback`
+  cannot receive the `double` arguments. For a popup lifted into its own OS
+  window (`SetPopupSink`) UIA asks the popup's window, not the main one, so the
+  items are in the main window's tree but not found under the cursor there.
+- The bridges are tested at the level of provider vtables (UIA) and the D-Bus
+  wire against the real AT-SPI bus (AT-SPI); not with a live Narrator/NVDA/Orca.
+- Scroll windows clip by the container's bounds, scroll bars included.
+- A radio button group is not published (no UIA `SelectionContainer`).
+
+Tests: `widget/accessibility_nodes_test.go`, `widget/focusring_test.go`,
+`engine/accessibility_action_test.go`, `engine/focusring_test.go`,
+`window/a11y_node_test.go` (all platforms), `window/a11y_nodes_windows_test.go`
+(UIA through the vtables), `window/a11y_nodes_linux_test.go`,
+`window/a11y_nodes_live_linux_test.go` (AT-SPI, the second on the real bus).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

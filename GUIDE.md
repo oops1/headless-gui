@@ -2784,6 +2784,44 @@ func (w *MyWidget) AccessInfo() widget.AccessInfo {
 отдаёт его части через `widget.AccessChildrenProvider` — `AccessChildren()
 []AccessInfo`. Так `DiffView` показывает скринридеру две текстовые панели.
 
+**Действия по узлам (v3.38).** Нажатие и фокус от скринридера на таком узле
+раньше действовали на виджет целиком: «нажать» левую панель кликало в центр
+всего `DiffView`. Владелец узлов, который умеет принять действие, реализует
+необязательный `widget.AccessActionHandler`:
+
+```go
+func (w *MyEditor) AccessChildren() []widget.AccessInfo {
+    return []widget.AccessInfo{
+        {Role: widget.RoleTextInput, Name: "Левая", ID: "left",  Bounds: w.leftRect()},
+        {Role: widget.RoleTextInput, Name: "Правая", ID: "right", Bounds: w.rightRect()},
+    }
+}
+
+// Вызывается на горутине движка. true — действие выполнено.
+func (w *MyEditor) AccessAction(id string, a widget.AccessActionKind) bool {
+    switch a {
+    case widget.AccessInvoke, widget.AccessFocus, widget.AccessSelect:
+        w.activate(id)
+        return true
+    }
+    return false
+}
+```
+
+`ID` стабилен для узла (пустой заменяется номером в списке). Действия:
+`AccessInvoke`, `AccessFocus`, `AccessSelect`, `AccessToggle`, `AccessExpand`,
+`AccessCollapse`. Ответ владельца окончателен — запасного клика в центр нет; у
+владельца без интерфейса всё по-прежнему. Перед нажатием, фокусом и выбором
+движок сам передаёт владельцу фокус ввода (меню-оверлеям — нет).
+
+**Диалог, меню, прокрутка (v3.38).** `Dialog` (MessageBox, диалоги
+подтверждения и ввода) объявляется ролью `RoleDialog`: имя — заголовок,
+описание — `Dialog.Description` (MessageBox кладёт туда текст сообщения).
+Открытое всплывающее меню и строка меню попадают в дерево как `RoleMenu` и
+`RoleMenuItem` с границами на экране; подсвеченный пункт — в фокусе.
+Элемент, прокрученный за край `ScrollView`, получает состояние
+`StateOffscreen`, а выступающий — `AccessInfo.Visible` (пересечение с окном).
+
 **Текст для скринридера.** Содержимое поля ввода уезжало одной строкой —
 «значением» элемента, как у ползунка. Скринридеру этого мало: он читает
 документ кусками, идёт за кареткой и озвучивает выделение. Текстовый виджет
