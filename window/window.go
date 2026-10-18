@@ -1427,8 +1427,17 @@ func (s *surface) framePump() {
 	db, hasDirtyBlit := s.native.(dirtyRectBlitter)
 	var lastBounds image.Rectangle // границы буфера на момент прошлого блита
 
+	// Единственный потребитель кадров: Data тайлов копируется в буфер окна
+	// сразу в applyFrame, поэтому буферы кадров можно возвращать движку
+	// (Frame.Release) — в 4K это 33 МБ на кадр, которые не надо выделять заново.
+	if rc, ok := s.eng.(interface{ SetFrameRecycling(bool) }); ok {
+		rc.SetFrameRecycling(true)
+	}
+
 	for frame := range frames {
-		if !s.applyFrame(frame) {
+		fits := s.applyFrame(frame)
+		frame.Release() // тайлы уже в буфере окна (или кадр не подошёл)
+		if !fits {
 			// Кадр снят под прежний размер холста: его тайлы — чужая
 			// раскладка, класть их в новый буфер нельзя. Следующий кадр
 			// нового размера движок отдаёт полным (engine/fullframe.go).

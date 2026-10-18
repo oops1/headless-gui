@@ -58,6 +58,12 @@ type Canvas struct {
 	hasBase    bool                  // активен ли базовый клип
 	scaleTmp   *image.RGBA           // переиспользуемый буфер для DrawImageScaled
 	rscr       *rectScratch          // рабочие буферы DrawImageRect (imagerect.go)
+	// recycle — класть данные тайлов в переработываемые буферы (output.Slab)
+	// вместо новых; slabs — буферы текущего кадра, их забирает takeSlabs.
+	// Воркеры diffTiles добавляют под slabMu.
+	recycle bool
+	slabMu  sync.Mutex
+	slabs   []*output.Slab
 	shaper     textShaper            // шейпинг сложного текста (RTL, лигатуры; см. shaper.go)
 	W, H       int                   // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
 	// marks — признак содержимого по тайлам за текущий кадр (regions.go).
@@ -1214,12 +1220,17 @@ func (c *Canvas) DrawVLine(x, y, length int, col color.RGBA) {
 
 // DrawImage рисует изображение в (x, y); логический размер = размеру
 // картинки в пикселях (при HiDPI изображение растягивается на scale).
+//
+// Источник, объявленный непрозрачным (widget.OpaqueImage или непрозрачный по
+// типу — YCbCr, Gray), кладётся композицией Src, а не Over — см. blitSrcRect.
 func (c *Canvas) DrawImage(src image.Image, x, y int) {
+	orig := src
+	src, opaque := widget.IsOpaqueImage(src)
 	if b := src.Bounds(); !b.Empty() {
 		c.markImage(c.sRect(image.Rect(x, y, x+b.Dx(), y+b.Dy())))
 	}
 	if c.scale != 1 {
-		c.DrawImageScaled(src, x, y, src.Bounds().Dx(), src.Bounds().Dy())
+		c.DrawImageScaled(orig, x, y, src.Bounds().Dx(), src.Bounds().Dy())
 		return
 	}
 	r := c.clampRect(image.Rect(x, y, x+src.Bounds().Dx(), y+src.Bounds().Dy()))
@@ -1227,7 +1238,7 @@ func (c *Canvas) DrawImage(src image.Image, x, y int) {
 		return
 	}
 	offset := src.Bounds().Min.Add(image.Pt(r.Min.X-x, r.Min.Y-y))
-	c.blitOver(r, src, offset)
+	c.blitImage(r, src, offset, opaque)
 }
 
 // blitOver копирует src в back операцией Over в физической области r
@@ -1254,8 +1265,19 @@ func (c *Canvas) DrawImage(src image.Image, x, y int) {
 // угловые зоны — по radius строк сверху и снизу. Без скругления путь прежний,
 // байт в байт.
 func (c *Canvas) blitOver(r image.Rectangle, src image.Image, offset image.Point) {
+	c.blitImage(r, src, offset, false)
+}
+
+// blitImage — blitOver с признаком непрозрачного источника: тогда прямоугольные
+// части идут композицией Src (blitSrcRect), угловые строки скруглённого клипа
+// тоже — они сужены по spanX и копируются теми же построчными пролётами.
+func (c *Canvas) blitImage(r image.Rectangle, src image.Image, offset image.Point, opaque bool) {
+	rect := c.blitOverRect
+	if opaque {
+		rect = c.blitSrcRect
+	}
 	if !c.round.active {
-		c.blitOverRect(r, src, offset)
+		rect(r, src, offset)
 		return
 	}
 	rd := &c.round
@@ -1266,7 +1288,7 @@ func (c *Canvas) blitOver(r image.Rectangle, src image.Image, offset image.Point
 		if !ok {
 			return
 		}
-		c.blitOverRect(image.Rect(x0, y, x1, y+1), src, offset.Add(image.Pt(x0-r.Min.X, y-r.Min.Y)))
+		rect(image.Rect(x0, y, x1, y+1), src, offset.Add(image.Pt(x0-r.Min.X, y-r.Min.Y)))
 	}
 	// Верхняя угловая зона (строки выше контура rd.rect отсекаются spanX).
 	for y := max(r.Min.Y, rd.rect.Min.Y); y < min(r.Max.Y, top); y++ {
@@ -1276,7 +1298,7 @@ func (c *Canvas) blitOver(r image.Rectangle, src image.Image, offset image.Point
 	if y0, y1 := max(r.Min.Y, top), min(r.Max.Y, bot); y0 < y1 {
 		x0, x1 := max(r.Min.X, rd.rect.Min.X), min(r.Max.X, rd.rect.Max.X)
 		if x0 < x1 {
-			c.blitOverRect(image.Rect(x0, y0, x1, y1), src, offset.Add(image.Pt(x0-r.Min.X, y0-r.Min.Y)))
+			rect(image.Rect(x0, y0, x1, y1), src, offset.Add(image.Pt(x0-r.Min.X, y0-r.Min.Y)))
 		}
 	}
 	// Нижняя угловая зона.
@@ -1347,7 +1369,12 @@ type scaledEntry struct {
 // DrawImageScaled рисует изображение масштабированным до (w × h) логических
 // пикселей в позицию (x, y).
 // Кэш — по идентичности источника; мутировали пиксели — InvalidateImageCache.
+//
+// Непрозрачный источник (widget.OpaqueImage, YCbCr, Gray) физического размера
+// ровно pw×ph кладётся без масштабирования и без кэша композицией Src
+// (blitSrcRect): так просмотрщик отдаёт движку собственный буфер окна.
 func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
+	src, opaque := widget.IsOpaqueImage(src)
 	if w > 0 && h > 0 {
 		c.markImage(c.sRect(image.Rect(x, y, x+w, y+h)))
 	}
@@ -1361,9 +1388,15 @@ func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
 	// Картинка уже нужного ФИЗИЧЕСКОГО размера (векторный значок, растеризованный
 	// под масштаб холста, — widget.DrawSVG) кладётся как есть: растяжение 1:1
 	// ничего не добавило бы, кроме копии в кэше и лишнего прохода по пикселям.
-	if rgba, ok := src.(*image.RGBA); ok && rgba.Bounds().Dx() == pw && rgba.Bounds().Dy() == ph {
-		c.blitOver(dstRect, rgba, rgba.Bounds().Min.Add(offset))
-		return
+	if sb := src.Bounds(); sb.Dx() == pw && sb.Dy() == ph {
+		if rgba, ok := src.(*image.RGBA); ok {
+			c.blitImage(dstRect, rgba, sb.Min.Add(offset), opaque)
+			return
+		}
+		if opaque && opaqueFastType(src) {
+			c.blitImage(dstRect, src, sb.Min.Add(offset), true)
+			return
+		}
 	}
 	tmp := c.scaledFor(src, pw, ph)
 	c.blitOver(dstRect, tmp, offset)
@@ -1465,6 +1498,7 @@ func (c *Canvas) InvalidateImageCache(src image.Image) {
 		}
 		return
 	}
+	src, _ = widget.IsOpaqueImage(src) // кэш ключуется по обёрнутому изображению
 	v := reflect.ValueOf(src)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return
@@ -1645,7 +1679,7 @@ func (c *Canvas) diffTileRows(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
 	}
 
 	// Проход 2: одна аллокация под все данные, извлечение и синхронизация.
-	slab := make([]byte, 0, total)
+	slab := c.newSlab(total)
 	for i := range tiles {
 		t := &tiles[i]
 		start := len(slab)

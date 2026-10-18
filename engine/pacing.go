@@ -105,6 +105,9 @@ func (e *Engine) takeFrameRequest() bool {
 // наложил бы на картинку, которой у него нет.
 func (e *Engine) deliver(frame output.Frame) {
 	if s := e.getFrameSink(); s != nil {
+		// Что сток сделает с Data, неизвестно: буферы кадра закреплены и в
+		// пул не вернутся (SetFrameRecycling).
+		frame.Pin()
 		s.Present(frame)
 	}
 	select {
@@ -112,6 +115,7 @@ func (e *Engine) deliver(frame output.Frame) {
 	default:
 		// Потребитель не успевает — кадр теряется, но не молча.
 		e.lostFrame.Store(true)
+		frame.Release() // никто его не увидит — буфер сразу в пул
 	}
 }
 

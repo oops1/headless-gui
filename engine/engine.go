@@ -195,7 +195,10 @@ type Engine struct {
 	// выброшен из переполненного канала, потребитель отстал (fullframe.go).
 	fullNext  atomic.Bool
 	lostFrame atomic.Bool
-	quit      chan struct{}
+	// recycleFrames — данные тайлов кадров берутся из пула и возвращаются по
+	// Frame.Release (SetFrameRecycling, fullframe.go).
+	recycleFrames atomic.Bool
+	quit          chan struct{}
 	done      chan struct{}
 
 	fps     int     // целевой FPS, 1–120
@@ -1748,6 +1751,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// Diff: при частичной перерисовке сравниваем только тайлы,
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
+	canvas.recycle = e.recycleFrames.Load()
 	switch {
 	case full:
 		tiles = canvas.allTiles()
@@ -1774,7 +1778,7 @@ func (e *Engine) renderFrame() output.Frame {
 		}
 	}
 
-	return output.Frame{
+	fr := output.Frame{
 		Seq:       seq,
 		Timestamp: time.Now(),
 		Tiles:     tiles,
@@ -1783,6 +1787,8 @@ func (e *Engine) renderFrame() output.Frame {
 		Width:     canvas.W,
 		Height:    canvas.H,
 	}
+	fr.AttachSlabs(canvas.takeSlabs()...)
+	return fr
 }
 
 // drawOverlays рекурсивно обходит дерево виджетов и вызывает DrawOverlay
