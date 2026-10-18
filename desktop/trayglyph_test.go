@@ -107,7 +107,7 @@ func TestTrayItems_FallBackToShapes(t *testing.T) {
 	}
 }
 
-// Иконка запрашивается в физическом размере: на 150 % квадрат 12 px — 18 px.
+// Иконка запрашивается в физическом размере: на 150 % квадрат 16 px — 24 px. Размер глифа — tray.icon.size (16), а не высота за вычетом PadY стиля (замечание WinLine после v3.32.0 п.1).
 func TestTrayGlyph_RequestedInPhysicalSize(t *testing.T) {
 	testreset.Globals(t)
 	tm := themeWithIcons(t, map[theme.Key]string{"tray.network.icon": "net"}, nil)
@@ -120,7 +120,7 @@ func TestTrayGlyph_RequestedInPhysicalSize(t *testing.T) {
 		k           float64
 		wantPhys    int
 		wantLogical int
-	}{{1, 12, 12}, {1.5, 18, 12}, {2, 24, 12}} {
+	}{{1, 16, 16}, {1.5, 24, 16}, {2, 32, 16}} {
 		ctx := &hiCtx{k: tc.k}
 		it.Draw(ctx)
 		if len(ctx.images) != 1 {
@@ -226,7 +226,7 @@ func TestTrayIcon_SVGRasterizedPhysical(t *testing.T) {
 	for _, tc := range []struct {
 		k    float64
 		phys int
-	}{{1, 12}, {1.25, 15}, {1.5, 18}, {2, 24}} {
+	}{{1, 16}, {1.25, 20}, {1.5, 24}, {2, 32}} {
 		ctx := &hiCtx{k: tc.k}
 		ic.Draw(ctx)
 		if len(ctx.images) != 1 {
@@ -264,8 +264,8 @@ func TestTrayIcon_ImageSourceGetsPhysicalSize(t *testing.T) {
 	})
 	ic.SetBounds(image.Rect(0, 0, 20, 16))
 	ic.Draw(&hiCtx{k: 1.5})
-	if len(asked) != 1 || asked[0] != 18 {
-		t.Errorf("источник спросили о размерах %v, ожидался [18]", asked)
+	if len(asked) != 1 || asked[0] != 24 {
+		t.Errorf("источник спросили о размерах %v, ожидался [24]", asked)
 	}
 }
 

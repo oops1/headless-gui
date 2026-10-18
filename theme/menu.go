@@ -101,17 +101,29 @@ func declareMenuGeometry(p *Profile, height, separator, padX, icon, inset float6
 
 // declareClassicMenu — меню Windows 2000: строка 20, плашка на всю ширину,
 // значок почти у края, подменю раскрывается через 400 мс (SPI_GETMENUSHOWDELAY).
+//
+// Значки пунктов одноцветные и следуют цвету текста пункта (menu.icon.tint):
+// чёрный значок на синей плашке Windows 2000 иначе не виден, и потребителю не
+// нужно ставить MenuItem.IconTint на каждый пункт (замечание WinLine после
+// v3.32.0, п.3). Перекрашиваются все значки меню; приложение, которому нужен
+// цветной значок, снимает флаг на лету (Manager.SetFlag).
 func declareClassicMenu(p *Profile) {
 	declareMenuGeometry(p, 20, 7, 10, 16, 0)
 	p.SetMetric(KeyMenuPadLeft, 4).
 		SetMetric(KeyMenuIconGap, 6).
-		SetMetric(KeyMenuSubmenuDelay, 400)
+		SetMetric(KeyMenuSubmenuDelay, 400).
+		SetFlag(FlagMenuIconTint, true)
 }
 
-// declareWin10Menu — меню Windows 10: прямые углы, плашка на всю ширину.
+// declareWin10Menu — меню Windows 10: прямые углы, плашка на всю ширину, тонкий
+// шеврон подменю как у Windows 11 (по замечанию WinLine после v3.32.0, п.3).
+//
+// Мягкая тень меню (Elevation 6, цвет Shadow) объявлена в самом профиле
+// Windows 10 рядом с заливкой и рамкой меню.
 func declareWin10Menu(p *Profile) {
 	declareMenuGeometry(p, 24, 8, 12, 16, 0)
-	p.SetMetric(KeyMenuWidthMin, 290)
+	p.SetMetric(KeyMenuWidthMin, 290).
+		SetMetric(KeyMenuChevronRight, 18)
 	amendStyle(p, "menu", "", StateNormal, func(d *StyleDelta) { d.Corner = N(0) })
 	amendStyle(p, "menu", "item", StateHover, func(d *StyleDelta) { d.Corner = N(0) })
 	amendStyle(p, "menu", "separator", StateNormal, func(d *StyleDelta) {

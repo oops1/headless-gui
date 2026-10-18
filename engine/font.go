@@ -601,8 +601,19 @@ func readFileBounded(path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	if st, err := f.Stat(); err == nil && st.Size() > limit {
-		return nil, fmt.Errorf("%s: файл шрифта слишком большой (%d байт > %d)", path, st.Size(), limit)
+	if st, err := f.Stat(); err == nil {
+		if st.Size() > limit {
+			return nil, fmt.Errorf("%s: файл шрифта слишком большой (%d байт > %d)", path, st.Size(), limit)
+		}
+		// Размер известен: один буфер точного размера. io.ReadAll растёт
+		// вдвое и на 22 МБ шрифтов давал 53 МБ выделений.
+		if n := st.Size(); n > 0 {
+			data := make([]byte, n)
+			if _, err := io.ReadFull(f, data); err != nil {
+				return nil, err
+			}
+			return data, nil
+		}
 	}
 	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {

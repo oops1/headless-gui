@@ -8297,6 +8297,428 @@ with a move on the spot and a one-pixel tremor launches the tile / pinned app
 and leaves `TileGroups` unchanged (Windows 10 and 11), and a "nowhere" move
 between press and release does not start a drag.
 
+## v3.37.2: `SetFocused` is called outside the focus lock
+
+The engine's focus manager held its lock while it called `SetFocused(false)` on
+the old widget and `SetFocused(true)` on the new one. A widget that moved focus
+(`Engine.SetFocus`) or asked for it (focused widget, `CaretRect`) from inside
+`SetFocused` took the same lock and waited for itself forever — PixGo 1.0.0's
+gallery address field hung that way (it finished editing on focus loss and
+called `SetFocus`), and so did the Wayland event loop
+(`textInputSendCaret` → `CaretRect`).
+
+Now only "who has focus" changes under the lock; notifications run after
+`Unlock`. If focus changes again during the notifications — from `SetFocused`
+itself or from another goroutine — the last value wins: the widget that was
+told `true` gets `false`, the latest target gets `true`, intermediate targets
+get nothing. Widgets that keep bouncing focus between each other from
+`SetFocused` are cut off after 16 rounds instead of hanging. Calling
+`SetFocus` and querying focus from `SetFocused` is therefore safe.
+
+Tests: `engine/focuslock_test.go` (focus moved from `SetFocused(false)`,
+focus queried from `SetFocused(true)`, ping-pong) — each hangs with the old
+implementation and fails on a timeout.
+
+---
+
+## v3.38: initial position and "maximized" before the window is shown (`window` package)
+
+Asked by PixGo (E18): it saves the window position and the maximized flag, but
+there was nothing to restore them with. `Win32Window.Create` put the window in
+the centre of the screen and showed it at once, and `Native()` appeared only
+after that; moving and `Maximize()` afterwards made a visible jump and the
+maximize animation on every start.
+
+```go
+win.SetInitialBounds(x, y, w, h) // before Run
+win.SetInitialMaximized(true)
+```
+
+Units: `x`, `y` — SCREEN coordinates of the top-left corner (as
+`Monitor.Bounds` and `NativeWindow.GetPosition`: physical desktop pixels, may be
+negative); `w`, `h` — LOGICAL pixels (as `SetMinSize` and the engine canvas), the
+window multiplies them by the scale. On Win32 the scale is the one of the monitor
+the rectangle (at the system scale) falls on (`initialScaleFor`: largest
+intersection, else the monitor under the top-left corner, else the system scale;
+`HEADLESS_GUI_SCALE` wins): `WM_DPICHANGED` is not sent at creation, so a window
+created on a 200% monitor with the primary's scale would be half the size to the
+eye. `w <= 0 || h <= 0` — the size is not set (the position still applies);
+the size from `SetInitialBounds` wins over the root `widget.Window` markup size
+and, in `FitScale`, only sets the first window size (the design size stays, the
+frame is fitted at once as on a resize).
+
+Applied once, in `bringUp` before `Create` (`initialPlaceBackend`, an optional
+backend interface like `fullscreenBackend`); after `Run` the setters change
+nothing, and `Native().SetPosition/SetSize` work as before. Together with
+`SetFullscreen` before `Run`: the window is created with the bounds, goes
+full screen after `Create`, and leaving it returns exactly the initial bounds
+and the "maximized" state. After a maximized start `IsMaximized` is `true`,
+and a root `widget.Window` gets `SetMaximized(true)` before the first frame.
+
+| Backend | Position / size | Maximized |
+| --- | --- | --- |
+| Win32 | straight into `CreateWindowEx` (the window has no frame: window rect == client rect) | created without `WS_VISIBLE`, the first show is `ShowWindow(SW_SHOWMAXIMIZED)`: the system takes the creation rectangle as the normal one, so "restore" returns it (no `SetWindowPlacement`: its `rcNormalPosition` is in workspace coordinates, shifted by the taskbar) |
+| X11 | `CreateWindow(x, y)`; `WM_NORMAL_HINTS` with `USPosition\|PPosition` (+ `USSize\|PSize` when the size is set), one property together with the minimum size | `_NET_WM_STATE` = `MAXIMIZED_VERT`,`MAXIMIZED_HORZ` as a property BEFORE `MapWindow` (EWMH initial state); `IsMaximized` is true at once, a manager that refuses rewrites the property and `PropertyNotify` returns false |
+| Wayland | `x`, `y` ignored (the compositor places the window), `w`, `h` — the initial size | `xdg_toplevel.set_maximized` before the first `commit`; the min==max size fixing is skipped (it would not let the compositor maximize); the normal size is remembered and used when a `configure` of 0x0 comes after unmaximize |
+| Cocoa | no-op (`SetPosition` is a stub there) | no-op |
+
+`Win32Window.clientSize` (the `clientSizer` interface) is new: a window shown
+maximized gets its size inside `Create` (`WM_SIZE` comes before the resize
+handler is attached), and `adoptCreatedSize` now sees it for Win32 too and brings
+the canvas to the real size; for an ordinary window the size matches and nothing
+happens.
+
+Tests: `window/initial_test.go` (order of calls to a fake backend, units and
+HiDPI, monitor scale, `FitScale`, once-only, `widget.Window` state, pure
+functions `win32InitialCreate`, `initialScaleFor`, `x11SizeHints`,
+`wlNormalSize`); `window/initial_windows_test.go` (live Win32 windows:
+`GetWindowRect` equals the requested one, created `IsZoomed`, restore returns the
+initial rectangle, with full screen on top, `SetPosition` after start);
+`window/initial_x11_linux_test.go` (`Create` against a fake X server: the
+`CreateWindow` position, `WM_NORMAL_HINTS` and `_NET_WM_STATE` come BEFORE
+`MapWindow`, the minimum size is not lost); `window/initial_wayland_linux_test.go`
+(`Create` against a fake compositor: `set_maximized` after `get_toplevel` and
+before the first `commit`, no fixed size, restore to the initial size, refusal).
+
+---
+
+## v3.38: shell remarks of WinLine after v3.32.0 and v3.37.1
+
+Seven small fixes; every one has a test.
+
+**Tray glyph size no longer depends on `PadY` or `tray.fill.strip`.**
+`trayInner` (tray.go) now always gives the glyph a box of `tray.icon.size`,
+centred in the item's bounds; the style's `PadX` still narrows it, `PadY` does
+not eat from it (Windows 2000 drew a 14 px glyph at 6 px, macOS at 4).
+`desktop.TrayIcon` uses `trayInner` too (it used its own `shrinkByPad`).
+`drawDiagonalStrike` now clips to the half-open box, so the strike corner
+(`Max.X, Max.Y`) no longer leaves the glyph. **Frames changed on purpose:** the
+frozen taskbar hashes of Windows 2000 (both variants) and macOS (both) in
+`taskbar_frozen_hashes_test.go` were updated; a pixel diff of the old and new
+frames shows only the tray glyphs and the notification bell changed; all
+Windows 10 frames are byte-identical.
+
+**`widget.NewIconSetFS(fsys fs.FS, dir string)`** — an `IconSet` that reads
+`IconRef.Source` SVG files from an `fs.FS` (for `go:embed`) under the
+subdirectory `dir` (`""` = root), with the same optical sizes (`Sizes` +
+`{size}`) as the disk set. Paths use `/` (a backslash is accepted); an absolute
+path or `..` out of `dir` is rejected like on disk (the icon gets the
+placeholder). `svg.ParseFS(fsys, name)` is the matching parser.
+
+```go
+//go:embed icons/*.svg
+var iconsFS embed.FS
+
+set := widget.NewIconSetFS(iconsFS, "icons")
+tm.SetIconResolver(set)
+ref := theme.IconRef{Source: "wifi_{size}.svg", Sizes: theme.IconSizes(16, 20, 24)}
+```
+
+**Menus of built-in profiles.** Windows 10 declares `menu.chevron.right` = 18
+(the thin chevron of Windows 11 instead of the solid triangle; its soft shadow
+— `Elevation` 6 and a `Shadow` colour — was already declared). Windows 2000
+(and Blue) declares the flag `menu.icon.tint`: item icons are repainted in the
+item's text colour per state, so a consumer no longer sets `MenuItem.IconTint`
+on every item; an app that needs colour icons clears the flag with
+`Manager.SetFlag`. The Windows 11 menu border is `RGBA(0,0,0,20)` instead of
+15: on the 249 fill it gives 229, the reference value (15 gave 234).
+
+**Submenu delay counts from the hover.** `menu.submenu.delay` used a plain
+`widget.Animate` timer whose clock starts at the first `StepAnimations` — in a
+headless test the first call only started the clock. The timer (internal
+`animateTimer`) now starts at the hover, so one
+`widget.StepAnimations(time.Now().Add(delay))` opens or closes the submenu, and
+a frame that comes late does not wait for the delay again. `Animate` itself is
+unchanged.
+
+**No sound device.** `desktop.VolState.NoDevice` (new field; the zero value
+means a device exists): the tray volume icon is drawn crossed out like `Muted`
+(theme icon keys `tray.volume.nodevice`, then `tray.volume.muted`), the tooltip
+is "Звук: нет устройства" / "Sound: no device" (`StrSoundNoDevice`) instead of
+"0%", and the quick-settings volume tile is not active. A `VolumeItem` created
+with a nil `SystemStatus` reports `NoDevice` too.
+
+**Caption buttons of `widget.Window` (not classic).** The glyph colour comes
+from the title bar instead of the hard-coded grey 180: the old grey stays where
+it has contrast ≥ 3:1 with the title background (so dark titles render as
+before), otherwise the title text colour is used (muted for an inactive window,
+as in `titleColors`), and black or white if even that is unreadable. A hovered
+minimize/maximize button gets a 15 % film — black on a light title bar, white
+on a dark one — drawn with `FillRectAlpha` (the old grey was written without
+blending and looked dirty on light titles); the hovered close button is red
+(232,17,35) with a white glyph as before. `Panel`'s decorative header uses the
+same glyph colour. The golden `window_win11_light.png` was updated on purpose:
+only the caption glyphs changed (grey → black active, dark grey inactive).
+
+Tests: `desktop/trayglyph_pady_test.go`, `widget/themeicons_fs_test.go`,
+`widget/popupmenu_profile_test.go`, `desktop/menu_profile_v338_test.go`,
+`tests/popupmenu_builtin_profiles_test.go`, `widget/popupmenu_delay_test.go`,
+`desktop/trayvolume_nodevice_test.go`, `widget/window_captioncolors_test.go`,
+`tests/window_captionglyph_test.go`.
+
+---
+
+## v3.38: opaque-buffer fast path, frame buffer recycling, lazy fallback fonts
+
+Three engine-side speedups requested by a viewer application that pans a
+3840x2160 picture (frame cost 33 ms before, 5.5 ms now) and wants a fast start.
+Nothing is removed or changed for existing callers: every new path is opt-in or
+gives the same bytes as before.
+
+### Opaque image: `widget.OpaqueImage` (E15)
+
+`DrawImage`, `DrawImageScaled` and `DrawImageRect` composite with `Over`: every
+pixel's alpha is read and blended with the canvas. A viewer's own window buffer is
+fully opaque, so that is wasted work (22 ms of a 4K frame, on one core). A source
+declared opaque is composited with `Src` instead: rows are copied (with the R/B swap
+for `FormatBGRX`), and areas of 256K pixels and more are split into horizontal bands
+over `GOMAXPROCS` goroutines. Under a rounded clip (`SetRoundClip`) the straight
+middle is one band-copy, the corner rows go span by span.
+
+How the engine learns that a source is opaque (it must not scan: `(*image.RGBA).Opaque`
+reads every pixel, as much as the copy itself):
+
+```go
+buf := image.NewRGBA(image.Rect(0, 0, w, h)) // every pixel has A == 255
+img := widget.OpaqueImage(buf)               // keep it next to the buffer, not per frame
+ctx.DrawImage(img, x, y)
+ctx.DrawImageScaled(img, x, y, w, h)         // 1:1 (physical size == source size)
+widget.DrawImageRect(ctx, img, sr, dr, f)    // 1:1 (sr size == dr size in physical pixels)
+```
+
+- `*image.YCbCr`, `*image.Gray`, `*image.Gray16` and `*image.CMYK` are opaque by type -
+  no wrapping needed. `*image.RGBA` / `*image.NRGBA` are fast-pathed once declared.
+- `widget.OpaqueImage(img)` returns `*widget.OpaqueSource` (an `image.Image`, with
+  `RGBA64At` and `SubImage`, so other contexts still draw it normally) or `img` itself
+  if it is opaque by type / already marked. `widget.OpaqueHinter` (`OpaqueHint() bool`)
+  lets your own image type declare it; `widget.IsOpaqueImage(img)` answers without
+  scanning and returns the unwrapped image.
+- The mark is a promise: all pixels have alpha 255. A broken promise makes translucent
+  places overwrite the background instead of letting it through.
+- The scaled-image cache is keyed by the wrapped image, so `InvalidateImageCache` works
+  with either the wrapper or the buffer.
+- Scaled (not 1:1) draws still go through the cache and `Over`; only the 1:1 case is
+  fast-pathed. `DrawImageRect` at 1:1 also skips the resampling for any `*image.RGBA`
+  (the kernels degenerate to identity - same bytes as before), declared opaque or not.
+
+Tests: `engine/blit_opaque_test.go` (byte-equal to `Over` for RGBA/NRGBA/YCbCr/Gray/
+sub-image, both pixel formats, clip, round clip, small and parallel sizes; the `Src`
+semantics are proven by a translucent source declared opaque), `widget/opaqueimage_test.go`.
+
+### Recycled frame buffers: `Engine.SetFrameRecycling`, `Frame.Release` (E15)
+
+The 33 MB allocated per full-window frame is the tile data slab (`DirtyTile.Data` are
+sub-slices of it). The `Frames()` contract is that the consumer owns `Data` for good,
+so the engine cannot reuse it on its own. Recycling is therefore explicit:
+
+```go
+eng.SetFrameRecycling(true)
+for fr := range eng.Frames() {
+    apply(fr)       // read fr.Tiles[i].Data
+    fr.Release()    // Data is invalid from here on; the buffer returns to the pool
+}
+```
+
+- Off by default: behaviour and lifetime of `Data` are exactly as before.
+- On: `Data` is valid until `Release`. Not calling `Release` is allowed - the buffer is
+  left to the garbage collector. `Release` is idempotent (also on copies of the frame)
+  and a no-op for frames not built by the engine.
+- Frames the engine drops from a full channel, or discards on resize, are returned by the
+  engine itself. Frames shown to a synchronous `FrameSink` are pinned and never returned
+  (what a sink keeps is unknown to the engine).
+- `window` turns recycling on by itself and releases a frame right after copying it into
+  the window buffer.
+- Pool: two size classes (up to 1 MB / larger, rounded to 256 KB), `sync.Pool`, so idle
+  memory is given back by the runtime. Public pieces: `output.GetSlab`, `output.Slab`,
+  `Frame.AttachSlabs`, `Frame.Pin`, `Frame.Release`.
+
+Measured (`BenchmarkPan4K_*` in `engine/pan_bench_test.go`, 3840x2160, one frame = a
+whole new picture, Intel Core Ultra 7 265K, Windows):
+
+| | ms/frame | allocated/frame |
+|---|---|---|
+| before (`Over`, no recycling) | 29.3 | 34.0 MB |
+| recycling only | 29.3 | 0.8 MB |
+| `OpaqueImage` only | 6.0 | 34.0 MB |
+| `OpaqueImage` + recycling | 5.5 | 0.8 MB |
+| `DrawImageScaled` 1:1, before / `OpaqueImage` + recycling | 31.8 / 5.5 | 34.0 / 2.6 MB |
+
+The remaining 5.5 ms is the frame diff and the tile copy, spread over the cores.
+
+### Lazy fallback fonts (E16)
+
+`engine.New` used to read every file of the fallback chain (on Windows Segoe UI Symbol,
+Nirmala, Segoe UI Emoji and others - about 22 MB, 21 ms, 53 MB allocated by a buffer that
+doubled while reading). Now `New` only registers the paths (a `stat` each: a missing file
+is not put in the chain, as before). A file is read and parsed when the chain is walked
+down to it: a rune absent from the primary font is looked up in chain order and the walk
+stops at the first font that has it, so fonts after that one are not touched; a rune that
+no font has loads each file once. Ordinary text never enters the chain.
+
+- The chain order is unchanged. Text frames are byte-equal to the eager version (tests
+  compare pixels, measured widths and rune positions of plain and shaped text, for three
+  chain orders).
+- The shaper (RTL, Indic, emoji) walks the chain the same lazy way (`chainFontmap`).
+  An emoji rune walks to the first coloured font that has it.
+- Thread safety: the frame goroutine and the application's measurer may both trigger a
+  load; a load is done once under the entry's mutex, the loaded font is read atomically.
+  DPI and sub-pixel mode (`setDPIAll`, `setTextSubpixel`) are applied to loaded fonts at
+  once and picked up by unloaded ones when they load.
+- `readFileBounded` (used for every font file) now reads a file of known size into one
+  exactly sized buffer instead of `io.ReadAll`.
+- `Engine.RegisterFallbackFont*` stay eager (the caller hands over data or wants the error).
+
+Measured (first `engine.New` of the process, 1280x800, cold file cache of fonts,
+`TestEngineNew_ColdReport` with `HG_REPORT_NEW=1`): 19 ms and 60.4 MB allocated (30.7 MB
+stay live) before; 1.5 ms and 7.9 MB (the two canvas buffers; 7.8 MB live) now.
+
+Tests: `engine/fallbackfont_test.go` (no file is read by `New`, by a frame of plain text or
+at registration; the first exotic glyph reads exactly the chain prefix up to its font; a
+glyph found nowhere reads each file once; eager/lazy equality; DPI and sub-pixel at load;
+concurrent loading under `-race`; `readFileBounded` allocation).
+
+---
+
+## v3.38: accessibility — actions on nodes, dialog, radio buttons, scrolling, menus
+
+Asked by PixGo (E17). Additions only; the frames of existing themes are
+unchanged.
+
+### Actions on nodes — `widget.AccessActionHandler`
+
+Invoke and SetFocus from a screen reader on a node from `AccessChildren` acted
+on the OWNER widget (a synthetic click at its centre). Now the owner can take
+the action itself:
+
+```go
+type AccessActionHandler interface {
+    AccessAction(id string, action AccessActionKind) bool
+}
+// AccessInvoke, AccessFocus, AccessSelect, AccessToggle, AccessExpand, AccessCollapse
+```
+
+- `AccessInfo.ID` (new) is the node's identifier at its owner; an empty one is
+  replaced by the node's number in the list. `AccessNode.ActionID` carries it
+  to the bridge (`json:"-"`), `AccessNode.Widget` is still the owner.
+- `Engine.AccessAction(w, id, action) bool` runs the handler on the engine
+  goroutine (`callOnLoop`) and refuses a hidden/disabled owner. Before
+  `AccessInvoke/Focus/Select` it moves input focus to the owner if the owner is
+  `Focusable` and not an `OverlayDrawer` (a menu would be closed by it).
+- `Window.accessibilityNodeAction(node, kind)` is the single entry the bridges
+  use. A node with an `ActionID` whose owner implements the interface gets the
+  action from it, and the owner's answer is final (no fallback click). Anything
+  else behaves as before: Focus → focus the widget; Invoke/Select/Toggle →
+  synthetic click; Expand/Collapse → refused.
+- Bridges: UIA `Invoke`, `SetFocus`, `Toggle`, `SelectionItem.Select`,
+  `ExpandCollapse`; AT-SPI `Action.DoAction` (0 = click, 1 = "expand or contract"
+  for nodes with a sub-menu) and `Component.GrabFocus`. An owner's node has
+  the `Action` interface in AT-SPI.
+- Implemented by `DiffView` (ids `"0"`, `"1"` = side), `MergeView` (`"0".."3"` =
+  `MergeSide`; the hidden base pane refuses), `PopupMenu` and `MenuBar`
+  (below).
+
+### Dialog in the tree
+
+`Dialog` implements `Accessible`: `RoleDialog`, name = `Title`, description =
+`Dialog.Description` (new field; `MessageBox`, `NewConfirmDialog` and the input
+dialog fill it with the message), the close button `✕` is a named button.
+`StateModal` is added by the engine as before. UIA: control type Window and
+`IsDialog = true`; AT-SPI: role `dialog`.
+
+### Scrolled-out elements — `StateOffscreen`, `AccessInfo.Visible`
+
+`BuildAccessTree` tracks the window of every `ContentOffsetter` (ScrollView)
+above a node. `Bounds` stay the element's full screen bounds; a partly visible
+element gets `Visible` = the intersection (`json:"-"`, zero = not clipped), a
+fully hidden one gets `StateOffscreen`. Virtual nodes from `AccessChildren`
+are clipped the same way; a widget may preset `Visible`/`StateOffscreen` itself
+(a scrolled popup menu does). Menus are never clipped by a scroll window (they
+are overlays).
+
+- UIA: `IsOffscreen`, `BoundingRectangle` = the visible part (empty for a hidden
+  element). AT-SPI: `showing` is cleared (`visible` stays), `Contains` and
+  `GetAccessibleAtPoint` use the visible part.
+- Hit testing (`a11ySnapshot.hitTest`) uses the visible part.
+
+### Menus in the tree
+
+`PopupMenu` is `Accessible` + `AccessChildrenProvider` + `AccessActionHandler`:
+a closed menu is a `RoleMenu` node with `StateOffscreen` and no children; an
+open one covers itself and all open cascades (`StatePopup`) and lists the
+items as `RoleMenuItem`: name without the mnemonic mark, shortcut in
+`Description` (UIA `AcceleratorKey`), states `disabled`, `checkable`/`checked`,
+`haspopup`/`expanded`, `focused` for the highlighted item. Separators are
+skipped but keep their number. Item id = path of indices (`"2"`, `"4/1"` = item
+1 of the cascade opened from item 4). Actions: Invoke/Toggle run the item like
+Enter (cascade items open their sub-menu), Focus/Select highlight the item,
+Expand/Collapse open/close the cascade; a disabled item, a separator and a stale
+path are refused. A menu with scrolling marks the items outside its window
+`offscreen`.
+
+`MenuBar` is `Accessible` + provider + handler: top items (`"t0"`, `"t1"`, …,
+focused only while their menu is open) and, while a menu is open, its items
+(`"t1/0"`, …). Invoke on a top item toggles its menu (an item without a menu
+runs its `OnClick`).
+
+- The snapshot's focus (`UIA GetFocus`, `HasKeyboardFocus`, AT-SPI `focused`)
+  goes to a highlighted menu item, over the widget that still holds the engine
+  focus. Mere mouse hover over a closed menu bar does not take it.
+- Hit testing looks at nodes with `StatePopup` first (they stick out of the
+  owner and the window), so UIA `ElementProviderFromPoint` (which takes the
+  cursor position, see below) and AT-SPI `GetAccessibleAtPoint` return the
+  item under the cursor, not the widget under the menu. AT-SPI `GetLayer` of
+  such a node is POPUP.
+- UIA: control types Menu / MenuItem; a plain item has `Invoke`, a checkable
+  one `Toggle`, an item with a sub-menu `ExpandCollapse`. AT-SPI: roles `menu`,
+  `menu item`, `check menu item`; states `has popup`, `expandable`,
+  `collapsed`/`expanded`, `checkable`/`checked`.
+- Not in the tree (unchanged): the private context menus of `TextBox` and
+  `TextInput`, and the drop-down list of `Dropdown`.
+
+### Radio buttons — `SelectionItem` (UIA), `checked` (AT-SPI)
+
+- UIA: the radio button has the `SelectionItem` pattern (`IsSelected`,
+  `Select`, `AddToSelection`, `RemoveFromSelection` — refused for the selected
+  one, `SelectionContainer` = NULL, the engine does not publish groups) and no
+  longer `Invoke`. `IsSelected` is read from the live widget, not from the
+  150 ms snapshot. A change of the state raises the property that changed
+  (`IsSelected`, `ToggleState`, `ExpandCollapseState`, `IsOffscreen`,
+  `IsEnabled`), not `IsEnabled` for everything.
+- AT-SPI: a selected radio button is `checked` (and `checkable`), never
+  `selected` — that is what Orca reads; the `StateChanged` event is
+  `checked` too. List rows keep `selected`.
+
+### Shared focus ring
+
+`widget.DrawFocusRing(ctx, r, corner, base)` draws the two-tone ring that the
+taskbar already used (`desktop.PaintFocusRing`): an outer contour (2 px by
+default, colour = theme `FocusRing` or `base`, normally the text colour) and an
+inner 1 px contrast contour. Theme tokens `theme.KeyFocusRingWidth`
+(`focus.ring.width`) and `theme.KeyFocusRing` (`focus.ring`) — also
+`ThemeStyle.FocusRingWidth/FocusRing`, carried both ways by the flat-theme
+bridge; `desktop.KeyFocusRingWidth/KeyFocusRingColor` are now aliases of the
+same keys. `Button.FocusRing` (new, default false) switches a button to it;
+it is on for the buttons of `MessageBox`, the confirm, input, file and
+progress dialogs. Before, a focused dialog button got a 1 px border in the
+accent colour, which on an accent button (OK) was the colour of its fill.
+
+### Known limits
+
+- UIA `ElementProviderFromPoint` still uses the cursor position: `windows.NewCallback`
+  cannot receive the `double` arguments. For a popup lifted into its own OS
+  window (`SetPopupSink`) UIA asks the popup's window, not the main one, so the
+  items are in the main window's tree but not found under the cursor there.
+- The bridges are tested at the level of provider vtables (UIA) and the D-Bus
+  wire against the real AT-SPI bus (AT-SPI); not with a live Narrator/NVDA/Orca.
+- Scroll windows clip by the container's bounds, scroll bars included.
+- A radio button group is not published (no UIA `SelectionContainer`).
+
+Tests: `widget/accessibility_nodes_test.go`, `widget/focusring_test.go`,
+`engine/accessibility_action_test.go`, `engine/focusring_test.go`,
+`window/a11y_node_test.go` (all platforms), `window/a11y_nodes_windows_test.go`
+(UIA through the vtables), `window/a11y_nodes_linux_test.go`,
+`window/a11y_nodes_live_linux_test.go` (AT-SPI, the second on the real bus).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

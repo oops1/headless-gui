@@ -48,6 +48,12 @@ type Button struct {
 	// одного окна значит переверстать все остальные.
 	FontSize float64
 
+	// FocusRing — рисовать фокус общей рамкой темы (DrawFocusRing) вместо
+	// однопиксельной рамки цвета акцента. Включена у кнопок диалогов движка:
+	// на акцентной кнопке рамка цвета акцента сливалась с заливкой, и фокус не
+	// был виден. Прочие кнопки по умолчанию рисуются как прежде.
+	FocusRing bool
+
 	// Padding — внутренние отступы (WPF Padding: Left,Top,Right,Bottom).
 	// (ToolTip унаследован из Base — единый для всех виджетов.)
 	Padding Margin
@@ -231,20 +237,26 @@ func (btn *Button) drawChrome(ctx DrawContext, b image.Rectangle, bg, border col
 		if cr == 0 {
 			cr = st.ControlCorner
 		}
+		// Общая рамка фокуса рисуется поверх обычной рамки кнопки, а не вместо
+		// неё: под контуром фокуса видна рамка кнопки, как у WinUI.
+		accentFocus := btn.IsFocused() && !btn.FocusRing
 		if cr > 0 {
 			ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, bg)
-			if btn.IsFocused() {
+			if accentFocus {
 				ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, btn.HighlightTop)
 			} else if border.A > 0 {
 				ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, border)
 			}
 		} else {
 			ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
-			if btn.IsFocused() {
+			if accentFocus {
 				ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), btn.HighlightTop)
 			} else {
 				ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), border)
 			}
+		}
+		if btn.FocusRing && btn.IsFocused() {
+			DrawFocusRing(ctx, b, cr, btn.TextColor)
 		}
 	}
 

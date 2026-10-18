@@ -12,32 +12,61 @@ import (
 // ─── Focus manager ───────────────────────────────────────────────────────────
 
 // focusManager хранит текущий виджет с фокусом и управляет передачей фокуса.
+//
+// SetFocused виджетов зовётся ВНЕ замка (pixgo E19). Виджет вправе внутри
+// SetFocused перевести фокус (SetFocus), спросить его (Focused, CaretRect) —
+// под замком это ждало само себя навсегда: так зависало поле адреса галереи
+// PixGo 1.0.0, по потере фокуса заканчивавшее правку и звавшее SetFocus, и
+// цикл событий Wayland (textInputSendCaret → CaretRect → get).
 type focusManager struct {
 	mu      sync.Mutex
 	focused widget.Widget // nil — нет фокуса
+	// believer — виджет, которому последним сказали SetFocused(true) и ещё
+	// не сказали false; notifying — уведомления уже раздаёт другой вызов set
+	// (выше по стеку или в другой горутине): новое значение он доведёт сам.
+	believer  widget.Widget
+	notifying bool
 }
 
+// focusNotifyRounds ограничивает круги уведомлений, если виджеты перекидывают
+// фокус друг другу из SetFocused без конца.
+const focusNotifyRounds = 16
+
 // set устанавливает фокус на w; снимает фокус с предыдущего (если реализует Focusable).
+//
+// Под замком меняется только «кто в фокусе». Уведомления идут после Unlock;
+// если за время уведомлений фокус сменился ещё раз, применяется последнее
+// значение: старый получает false, последний — true, промежуточные — ничего.
 func (fm *focusManager) set(w widget.Widget) {
 	fm.mu.Lock()
-	defer fm.mu.Unlock()
-
 	if fm.focused == w {
+		fm.mu.Unlock()
 		return
 	}
-	// Снимаем фокус со старого
-	if fm.focused != nil {
-		if f, ok := fm.focused.(widget.Focusable); ok {
+	fm.focused = w
+	if fm.notifying {
+		fm.mu.Unlock()
+		return
+	}
+	fm.notifying = true
+	for round := 0; round < focusNotifyRounds && fm.believer != fm.focused; round++ {
+		old := fm.believer
+		fm.believer = nil
+		fm.mu.Unlock()
+		if f, ok := old.(widget.Focusable); ok && old != nil {
 			f.SetFocused(false)
 		}
-	}
-	fm.focused = w
-	// Даём фокус новому
-	if w != nil {
-		if f, ok := w.(widget.Focusable); ok {
+		fm.mu.Lock()
+		target := fm.focused
+		fm.believer = target
+		fm.mu.Unlock()
+		if f, ok := target.(widget.Focusable); ok && target != nil {
 			f.SetFocused(true)
 		}
+		fm.mu.Lock()
 	}
+	fm.notifying = false
+	fm.mu.Unlock()
 }
 
 func (fm *focusManager) get() widget.Widget {

@@ -1054,7 +1054,10 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	// Кнопки управления
 	btnW := w.btnWidth()
 	btnH := th - 1
-	lineColor := color.RGBA{R: 180, G: 180, B: 180, A: 255}
+	// Цвет значков и подсветка кнопок выводятся из заголовка, а не зашиты: на
+	// светлом заголовке значки тёмные, на тёмном светлые (см. captionGlyphColor).
+	lineColor := captionGlyphColor(tc, tbg)
+	hoverBG := captionHoverPlate(tbg)
 
 	// Кнопки рисуются справа налево: ×, □, ─
 	bx := b.Max.X - btnW
@@ -1084,8 +1087,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	if nc >= 3 {
 		bx -= btnW
 		if w.hoverMax.Load() != 0 {
-			hoverBG := color.RGBA{R: 80, G: 80, B: 80, A: 100}
-			ctx.FillRect(bx, y, btnW, btnH, hoverBG)
+			ctx.FillRectAlpha(bx, y, btnW, btnH, hoverBG)
 		}
 		ry := y + btnH/2 - 5
 		ctx.DrawBorder(bx+btnW/2-5, ry, 11, 11, lineColor)
@@ -1094,8 +1096,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	// ─ (свернуть) — если 2+ кнопки
 	bx2 := b.Max.X - btnW*nc
 	if w.hoverMin.Load() != 0 {
-		hoverBG := color.RGBA{R: 80, G: 80, B: 80, A: 100}
-		ctx.FillRect(bx2, y, btnW, btnH, hoverBG)
+		ctx.FillRectAlpha(bx2, y, btnW, btnH, hoverBG)
 	}
 	my := y + btnH/2
 	ctx.DrawHLine(bx2+btnW/2-7, my, 14, lineColor)

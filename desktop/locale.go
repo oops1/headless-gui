@@ -59,6 +59,9 @@ const (
 	StrNetNamed     = "desktop.net.named" // %s — имя сети
 	StrSoundMuted   = "desktop.sound.muted"
 	StrSoundLevel   = "desktop.sound.level" // %d — процент
+	// StrSoundNoDevice — подсказка значка звука, когда звуковых устройств нет
+	// (VolState.NoDevice): вместо «Звук: 0%».
+	StrSoundNoDevice = "desktop.sound.noDevice"
 	StrPowerAC      = "desktop.power.ac"
 	StrPowerBattery = "desktop.power.battery" // %d — процент
 
@@ -139,6 +142,7 @@ func init() {
 		StrNetNamed:     "Сеть: %s, подключено",
 		StrSoundMuted:   "Звук: выключен",
 		StrSoundLevel:   "Звук: %d%%",
+		StrSoundNoDevice: "Звук: нет устройства",
 		StrPowerAC:      "Питание от сети",
 		StrPowerBattery: "Батарея: %d%%",
 
@@ -175,6 +179,7 @@ func init() {
 		StrNetNamed:     "Network: %s, connected",
 		StrSoundMuted:   "Sound: muted",
 		StrSoundLevel:   "Sound: %d%%",
+		StrSoundNoDevice: "Sound: no device",
 		StrPowerAC:      "Plugged in",
 		StrPowerBattery: "Battery: %d%%",
 

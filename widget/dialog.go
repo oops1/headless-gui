@@ -50,6 +50,10 @@ type Dialog struct {
 	Base
 
 	Title       string
+	// Description — описание диалога для скринридера (AccessInfo.Description).
+	// MessageBox кладёт сюда текст сообщения: диалог объявляется как «Ошибка,
+	// диалог. Файл не найден». Пусто — берётся подсказка (ToolTip).
+	Description string
 	Background  color.RGBA
 	BorderColor color.RGBA
 	TitleColor  color.RGBA
@@ -671,6 +675,7 @@ func NewConfirmDialog(title, message string, onResult func(ok bool)) *Dialog {
 		dlgH = 160
 	)
 	dlg := NewDialog(title, dlgW, dlgH)
+	dlg.Description = message
 
 	// Все координаты дочерних виджетов — относительно (0,0) диалога.
 	// ShowModal сдвинет их при центрировании.
@@ -678,9 +683,11 @@ func NewConfirmDialog(title, message string, onResult func(ok bool)) *Dialog {
 	lbl.SetBounds(image.Rect(16, dlg.TitleHeight+12, dlgW-16, dlg.TitleHeight+52))
 
 	okBtn := NewWin10AccentButton("  OK  ")
+	okBtn.FocusRing = true
 	okBtn.SetBounds(image.Rect(dlgW-200, dlgH-48, dlgW-110, dlgH-12))
 
 	cancelBtn := NewButton("  Отмена  ")
+	cancelBtn.FocusRing = true
 	cancelBtn.SetBounds(image.Rect(dlgW-100, dlgH-48, dlgW-10, dlgH-12))
 
 	okBtn.OnClick = func() {

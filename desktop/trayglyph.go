@@ -73,6 +73,10 @@ func networkIconKeys(net NetState) []theme.Key {
 
 // volumeIconKeys — ключи иконки звука.
 func volumeIconKeys(v VolState) []theme.Key {
+	if v.NoDevice {
+		// Своей иконки нет — берётся «выключено».
+		return []theme.Key{"tray.volume.nodevice", "tray.volume.muted"}
+	}
 	if v.Muted {
 		return []theme.Key{"tray.volume.muted"}
 	}

@@ -194,6 +194,10 @@ type X11Window struct {
 	minW, minH int
 	minWant    bool
 
+	// initial — положение и «развёрнуто» от приложения (initial.go); читает
+	// Create, задаётся до него.
+	initial initialPlacement
+
 	// atomNetWMIcon — _NET_WM_ICON (значок окна, см. icon_linux.go).
 	// Берётся лениво: значок задают не все, а InternAtom — это круговой
 	// обмен с сервером. pendingIcons хранит значок, заданный до создания
@@ -395,6 +399,11 @@ func (w *X11Window) Create(title string, width, height int) error {
 	// CreateWindow request
 	x := (int(w.screen.WidthInPixels) - width) / 2
 	y := (int(w.screen.HeightInPixels) - height) / 2
+	// Положение от приложения (SetInitialBounds) вместо центра экрана: окно
+	// рождается сразу на месте, без переноса после показа.
+	if w.initial.PosSet {
+		x, y = int(x11ClampInt16(w.initial.X)), int(x11ClampInt16(w.initial.Y))
+	}
 
 	// Seed кэша позиции: без WM окно останется ровно здесь, поэтому уже сейчас
 	// значение правдиво; под reparenting-WM его скорректирует synthetic
@@ -455,12 +464,18 @@ func (w *X11Window) Create(title string, width, height int) error {
 	// Минимальный размер, заданный до создания окна: WM читает
 	// WM_NORMAL_HINTS при показе окна, поэтому свойство ставится до
 	// MapWindow — иначе первый показ проходит без ограничения.
-	w.applyPendingMinSize()
+	// Тем же свойством WM_NORMAL_HINTS объявляются положение и размер,
+	// заданные приложением (USPosition|USSize): без них менеджер вправе
+	// поставить окно по-своему (initial_x11_linux.go).
+	w.applyInitialHints(x, y, width, height)
 
 	// Значок, заданный до создания окна: SetIcon мог прийти раньше Run.
 	// Свойство ставится ДО MapWindow — иначе WM успевает показать окно без
 	// значка и перерисовывает заголовок вторым шагом.
 	w.applyPendingIcon()
+
+	// «Развёрнуто» с самого начала: _NET_WM_STATE ДО MapWindow.
+	w.applyInitialState()
 
 	// Map (show) window
 	w.x11MapWindow(w.wid)

@@ -263,12 +263,14 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 	dlg.AddChild(fd.crumb)
 
 	upBtn := NewButton("↑")
+	upBtn.FocusRing = true
 	upBtn.SetBounds(image.Rect(dlgW-padX-104, crumbY, dlgW-padX-56, crumbY+30))
 	upBtn.SetToolTip(Tr("dlg.file.up"))
 	upBtn.OnClick = fd.goUp
 	dlg.AddChild(upBtn)
 
 	refBtn := NewButton("⟳")
+	refBtn.FocusRing = true
 	refBtn.SetBounds(image.Rect(dlgW-padX-48, crumbY, dlgW-padX, crumbY+30))
 	refBtn.SetToolTip(Tr("dlg.file.refresh"))
 	refBtn.OnClick = fd.reload

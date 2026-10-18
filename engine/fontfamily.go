@@ -397,8 +397,8 @@ func (c *Canvas) setTextSubpixel(on bool) {
 	for _, fc := range c.namedFonts.all() {
 		fc.SetSubpixel(on)
 	}
-	for _, fc := range c.fallbacks {
-		fc.SetSubpixel(on)
+	for _, fb := range c.fallbacks {
+		fb.apply(func(fc *FontCache) { fc.SetSubpixel(on) }) // незагруженные возьмут режим при загрузке
 	}
 	c.shaper.dropLayouts()
 	c.fontRev.Add(1)

@@ -440,7 +440,7 @@ func (q *QuickSettings) drawVolumeTile(ctx widget.DrawContext) {
 		return
 	}
 	vol := q.volumeState()
-	if vol.Muted {
+	if vol.Muted || vol.NoDevice {
 		drawDiagonal(ctx, inner, ink(s))
 		return
 	}
@@ -580,5 +580,8 @@ func (q *QuickSettings) powerState() PowerState {
 // netActive/volumeActive/powerActive решают, показывать ли плитку
 // «включённой» (стиль StateActive) или «выключенной» (StateNormal).
 func (q *QuickSettings) netActive() bool    { return q.networkState().Kind != NetNone }
-func (q *QuickSettings) volumeActive() bool { return !q.volumeState().Muted }
+func (q *QuickSettings) volumeActive() bool {
+	vol := q.volumeState()
+	return !vol.Muted && !vol.NoDevice
+}
 func (q *QuickSettings) powerActive() bool  { return q.powerState().OnAC }

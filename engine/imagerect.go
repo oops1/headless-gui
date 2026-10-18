@@ -356,6 +356,7 @@ func (c *Canvas) DrawImageRect(src image.Image, sr, dr image.Rectangle, f widget
 	if src == nil {
 		return
 	}
+	src, opaque := widget.IsOpaqueImage(src)
 	sr, dr = widget.ClampImageRect(src.Bounds(), sr, dr)
 	if sr.Empty() || dr.Empty() {
 		return
@@ -371,6 +372,17 @@ func (c *Canvas) DrawImageRect(src image.Image, sr, dr image.Rectangle, f widget
 	}
 	if vis.Empty() {
 		return
+	}
+	// Масштаб 1:1 — ядро любого фильтра вырождается в тождество, пересчитывать
+	// нечего: пиксели источника кладутся как есть (непрозрачный — композицией
+	// Src, параллельно по полосам; см. blit_opaque.go). Для *image.RGBA это
+	// побайтно то же, что дал бы пересчёт.
+	if sr.Dx() == pdr.Dx() && sr.Dy() == pdr.Dy() {
+		_, isRGBA := src.(*image.RGBA)
+		if isRGBA || (opaque && opaqueFastType(src)) {
+			c.blitImage(vis, src, sr.Min.Add(vis.Min.Sub(pdr.Min)), opaque)
+			return
+		}
 	}
 	if c.rscr == nil {
 		c.rscr = &rectScratch{}
