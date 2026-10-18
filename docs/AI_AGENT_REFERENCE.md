@@ -8319,6 +8319,67 @@ Tests: `engine/focuslock_test.go` (focus moved from `SetFocused(false)`,
 focus queried from `SetFocused(true)`, ping-pong) — each hangs with the old
 implementation and fails on a timeout.
 
+---
+
+## v3.38: initial position and "maximized" before the window is shown (`window` package)
+
+Asked by PixGo (E18): it saves the window position and the maximized flag, but
+there was nothing to restore them with. `Win32Window.Create` put the window in
+the centre of the screen and showed it at once, and `Native()` appeared only
+after that; moving and `Maximize()` afterwards made a visible jump and the
+maximize animation on every start.
+
+```go
+win.SetInitialBounds(x, y, w, h) // before Run
+win.SetInitialMaximized(true)
+```
+
+Units: `x`, `y` — SCREEN coordinates of the top-left corner (as
+`Monitor.Bounds` and `NativeWindow.GetPosition`: physical desktop pixels, may be
+negative); `w`, `h` — LOGICAL pixels (as `SetMinSize` and the engine canvas), the
+window multiplies them by the scale. On Win32 the scale is the one of the monitor
+the rectangle (at the system scale) falls on (`initialScaleFor`: largest
+intersection, else the monitor under the top-left corner, else the system scale;
+`HEADLESS_GUI_SCALE` wins): `WM_DPICHANGED` is not sent at creation, so a window
+created on a 200% monitor with the primary's scale would be half the size to the
+eye. `w <= 0 || h <= 0` — the size is not set (the position still applies);
+the size from `SetInitialBounds` wins over the root `widget.Window` markup size
+and, in `FitScale`, only sets the first window size (the design size stays, the
+frame is fitted at once as on a resize).
+
+Applied once, in `bringUp` before `Create` (`initialPlaceBackend`, an optional
+backend interface like `fullscreenBackend`); after `Run` the setters change
+nothing, and `Native().SetPosition/SetSize` work as before. Together with
+`SetFullscreen` before `Run`: the window is created with the bounds, goes
+full screen after `Create`, and leaving it returns exactly the initial bounds
+and the "maximized" state. After a maximized start `IsMaximized` is `true`,
+and a root `widget.Window` gets `SetMaximized(true)` before the first frame.
+
+| Backend | Position / size | Maximized |
+| --- | --- | --- |
+| Win32 | straight into `CreateWindowEx` (the window has no frame: window rect == client rect) | created without `WS_VISIBLE`, the first show is `ShowWindow(SW_SHOWMAXIMIZED)`: the system takes the creation rectangle as the normal one, so "restore" returns it (no `SetWindowPlacement`: its `rcNormalPosition` is in workspace coordinates, shifted by the taskbar) |
+| X11 | `CreateWindow(x, y)`; `WM_NORMAL_HINTS` with `USPosition\|PPosition` (+ `USSize\|PSize` when the size is set), one property together with the minimum size | `_NET_WM_STATE` = `MAXIMIZED_VERT`,`MAXIMIZED_HORZ` as a property BEFORE `MapWindow` (EWMH initial state); `IsMaximized` is true at once, a manager that refuses rewrites the property and `PropertyNotify` returns false |
+| Wayland | `x`, `y` ignored (the compositor places the window), `w`, `h` — the initial size | `xdg_toplevel.set_maximized` before the first `commit`; the min==max size fixing is skipped (it would not let the compositor maximize); the normal size is remembered and used when a `configure` of 0x0 comes after unmaximize |
+| Cocoa | no-op (`SetPosition` is a stub there) | no-op |
+
+`Win32Window.clientSize` (the `clientSizer` interface) is new: a window shown
+maximized gets its size inside `Create` (`WM_SIZE` comes before the resize
+handler is attached), and `adoptCreatedSize` now sees it for Win32 too and brings
+the canvas to the real size; for an ordinary window the size matches and nothing
+happens.
+
+Tests: `window/initial_test.go` (order of calls to a fake backend, units and
+HiDPI, monitor scale, `FitScale`, once-only, `widget.Window` state, pure
+functions `win32InitialCreate`, `initialScaleFor`, `x11SizeHints`,
+`wlNormalSize`); `window/initial_windows_test.go` (live Win32 windows:
+`GetWindowRect` equals the requested one, created `IsZoomed`, restore returns the
+initial rectangle, with full screen on top, `SetPosition` after start);
+`window/initial_x11_linux_test.go` (`Create` against a fake X server: the
+`CreateWindow` position, `WM_NORMAL_HINTS` and `_NET_WM_STATE` come BEFORE
+`MapWindow`, the minimum size is not lost); `window/initial_wayland_linux_test.go`
+(`Create` against a fake compositor: `set_maximized` after `get_toplevel` and
+before the first `commit`, no fixed size, restore to the initial size, refusal).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

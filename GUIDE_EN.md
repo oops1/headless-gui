@@ -3705,6 +3705,51 @@ Wayland the compositor's logical coordinates (`Scale` is buffer pixels per unit)
 Wayland has no work area (`Work == Bounds`) and the first output is the primary one.
 Details are in `docs/AI_AGENT_REFERENCE.md` ("v3.34").
 
+### Initial position and "maximized" before the window is shown (v3.38)
+
+An application that remembers the window position between launches must not move
+or maximize the window after it is shown: that is a jump and an animation on every
+start. Set the values before `Run`; they reach the window at the moment it is
+created:
+
+```go
+win := window.New(eng, "Title")
+win.SetInitialBounds(x, y, w, h) // where, and what size
+win.SetInitialMaximized(true)    // and maximized right away
+win.Run()
+```
+
+The units are those of the rest of the window API: `x`, `y` are screen coordinates
+of the top-left corner (as in `Monitor.Bounds` and `Native().GetPosition()`), `w`,
+`h` are **logical** pixels (like `SetMinSize` and the engine canvas): the window
+multiplies them by the scale. The scale is taken from the monitor the rectangle
+falls on (Win32), so a saved "800x600" stays the same to the eye on a second
+monitor with another DPI. A non-positive `w` or `h` means the size is not set, the
+position still applies. Where the window ends up is the application's decision:
+`window.Monitors()` and `MonitorForRect` tell whether a saved rectangle lies on any
+monitor.
+
+The values are applied once. A call after `Run` changes nothing: a running window is
+moved and resized the old way (`Native().SetPosition/SetSize`). It works together
+with `SetFullscreen` before `Run`: the window is created with these bounds first,
+and leaving full screen returns exactly them (and "maximized", if it was set).
+`IsMaximized` is `true` after a maximized start.
+
+- **Win32.** Position and size go straight into `CreateWindowEx`. A maximized window
+  is created hidden and shown by the very first `ShowWindow(SW_SHOWMAXIMIZED)`;
+  "restore" returns the given rectangle.
+- **X11.** The position goes into `CreateWindow`, `WM_NORMAL_HINTS` announces it and
+  the size (`USPosition|USSize`, `PPosition|PSize`) so that the manager does not
+  place the window its own way. For a maximized window
+  `_NET_WM_STATE_MAXIMIZED_VERT/HORZ` is set as a property before `MapWindow` (this
+  is how EWMH gives the initial state). The manager may refuse; `IsMaximized` shows it.
+- **Wayland.** The compositor picks the position: `x`, `y` are ignored, `w`, `h` are
+  the initial size. For a maximized window `xdg_toplevel.set_maximized` goes out
+  before the first `commit`; the size is not fixed. "Restore" returns the `w`x`h`
+  size even if the compositor, which never saw a normal window, sends 0x0.
+- **macOS.** A no-op: the size is honored anyway, and the position is not
+  implemented on this backend at all.
+
 ### Bringing the window to the front: one process, a second launch (v3.35)
 
 A viewer lives in one window: a second launch (double click on a file) passes the

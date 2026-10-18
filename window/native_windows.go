@@ -331,6 +331,10 @@ type Win32Window struct {
 	height int
 	title  string
 
+	// initial — положение и «развёрнуто» от приложения (initial.go); читает
+	// Create. Задаётся до создания окна.
+	initial initialPlacement
+
 	maximized bool
 
 	// fs — полный экран (fullscreen_windows.go). Пока он включён, maximized
@@ -565,7 +569,10 @@ func (w *Win32Window) Create(title string, width, height int) error {
 	// Borderless popup window с поддержкой resize и minimize/maximize.
 	style := uint32(wsPopup | wsVisible | wsMinimizebox | wsMaximizebox | wsThickframe | wsSysmenu | wsClipchildren)
 	exStyle := uint32(wsExAppwindow)
-	if err := w.createInternal(title, width, height, style, exStyle, swShow, true); err != nil {
+	// Развёрнутое окно создаётся скрытым и первым же показом разворачивается
+	// (initial.go): положение — в createInternal (место создания).
+	_, _, style, show := win32InitialCreate(w.initial, style, swShow, 0, 0)
+	if err := w.createInternal(title, width, height, style, exStyle, show, true); err != nil {
 		return err
 	}
 	// Разрешаем приём файлов, перетащенных из проводника (WM_DROPFILES).
@@ -654,6 +661,9 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 		screenH := getSystemMetrics(1) // SM_CYSCREEN
 		x = (screenW - width) / 2
 		y = (screenH - height) / 2
+		// Положение от приложения (SetInitialBounds) вместо центра экрана:
+		// окно рождается сразу на месте, без прыжка после показа.
+		x, y, _, _ = win32InitialCreate(w.initial, 0, 0, x, y)
 	}
 
 	hwnd, _, err := procCreateWindowExW.Call(

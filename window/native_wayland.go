@@ -350,6 +350,13 @@ type WaylandWindow struct {
 	minW, minH int
 	minWant    bool
 
+	// initial — «развёрнуто» от приложения (initial.go); читает Create.
+	// normW/normH — обычный размер окна, начавшего жизнь развёрнутым:
+	// компоновщик не знает его вовсе и при «восстановить» присылает 0×0
+	// («решай сам»); окно возвращается к нему, а не остаётся большим.
+	initial      initialPlacement
+	normW, normH int
+
 	// Callbacks (интерфейс NativeWindow)
 	onResize      func(w, h int)
 	onClose       func() bool
@@ -633,8 +640,17 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	// фиксируем размер: движок сам управляет разрешением (в поверхностных
 	// единицах — их и ждёт xdg-shell)
 	sw, sh := w.toSurface(width), w.toSurface(height)
-	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(int32(sw)).putInt(int32(sh)), -1)
-	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(int32(sw)).putInt(int32(sh)), -1)
+	if w.initial.Maximized {
+		// Окно, показанное развёрнутым: запрос уходит ДО первого commit, и
+		// компоновщик отвечает первым же configure с состоянием maximized.
+		// Размер не фиксируем: min == max не дал бы ему развернуть окно
+		// (Maximize делает то же самое через applySizeLimits(true)).
+		w.normW, w.normH = width, height
+		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaximized), -1)
+	} else {
+		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(int32(sw)).putInt(int32(sh)), -1)
+		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(int32(sw)).putInt(int32(sh)), -1)
+	}
 	// Минимум, заданный приложением до Create, — ПОСЛЕ фиксации: иначе строка
 	// выше затёрла бы его размером окна.
 	if w.minWant {
@@ -850,6 +866,7 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		if w.onActivate != nil {
 			w.onActivate(active)
 		}
+		nw, nh = w.restoreNormalSize(nw, nh, maximized, fullscreen)
 		// 0×0 — «решай сам»: размер не трогаем (так приходит configure при
 		// первом показе и при выходе из развёрнутого состояния).
 		if nw > 0 && nh > 0 && (nw != w.width || nh != w.height) {
