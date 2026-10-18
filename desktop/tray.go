@@ -653,7 +653,7 @@ func (v *VolumeItem) Draw(ctx widget.DrawContext) {
 	body := image.Rect(inner.Min.X, inner.Min.Y, inner.Min.X+bodyW, inner.Max.Y)
 	ctx.FillRect(body.Min.X, body.Min.Y, body.Dx(), body.Dy(), ink(s))
 
-	if vol.Muted {
+	if vol.Muted || vol.NoDevice {
 		// drawDiagonalStrike, не drawDiagonal: на 16px однопиксельная
 		// диагональ ещё видна, но на поднятом заказчиком KeyTrayIconSize
 		// (24, 32) тонет среди остальных фигур — Muted обязан читаться при
@@ -667,13 +667,17 @@ func (v *VolumeItem) Draw(ctx widget.DrawContext) {
 
 func (v *VolumeItem) volumeState() VolState {
 	if v.st == nil {
-		return VolState{}
+		// Источника показаний нет вовсе — звука для показа тоже: не «0%».
+		return VolState{NoDevice: true}
 	}
 	return v.st.Volume()
 }
 
 // volumeTooltip формирует текст подсказки звука.
 func volumeTooltip(vol VolState) string {
+	if vol.NoDevice {
+		return tr(StrSoundNoDevice)
+	}
 	if vol.Muted {
 		return tr(StrSoundMuted)
 	}

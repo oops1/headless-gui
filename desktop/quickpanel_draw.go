@@ -215,7 +215,7 @@ func (pn *qsPanel) drawMain(ctx widget.DrawContext, l *qsLayout, list []QuickAct
 		}
 		if !l.vol.row.Empty() {
 			pn.drawSlider(ctx, l, l.vol, u, qsZone{kind: qzVolIcon}, qsZone{kind: qzVol},
-				qsVolumeGlyph(u.vol.Level, u.vol.Muted), u.vol.Level, qsZone{kind: qzVolChevron}, l.volOff)
+				qsVolumeGlyph(u.vol.Level, u.vol.Muted || u.vol.NoDevice), u.vol.Level, qsZone{kind: qzVolChevron}, l.volOff)
 		}
 	}
 	pn.drawFooter(ctx, l, u, truePanel)
