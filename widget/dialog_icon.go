@@ -112,8 +112,12 @@ func (ic *DialogIcon) ApplyTheme(*Theme) {} // цвета значка сема�
 // accent=true — акцентная (primary) кнопка. Живое переобновление подписи при
 // смене языка обеспечивает вызывающий диалог (см. Dialog.bindLocale).
 func trBtn(key string, accent bool) *Button {
+	var btn *Button
 	if accent {
-		return NewWin10AccentButton(Tr(key))
+		btn = NewWin10AccentButton(Tr(key))
+	} else {
+		btn = NewButton(Tr(key))
 	}
-	return NewButton(Tr(key))
+	btn.FocusRing = true // фокус кнопки диалога — общая рамка темы, а не 1 px акцента
+	return btn
 }

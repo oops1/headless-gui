@@ -683,9 +683,11 @@ func NewConfirmDialog(title, message string, onResult func(ok bool)) *Dialog {
 	lbl.SetBounds(image.Rect(16, dlg.TitleHeight+12, dlgW-16, dlg.TitleHeight+52))
 
 	okBtn := NewWin10AccentButton("  OK  ")
+	okBtn.FocusRing = true
 	okBtn.SetBounds(image.Rect(dlgW-200, dlgH-48, dlgW-110, dlgH-12))
 
 	cancelBtn := NewButton("  Отмена  ")
+	cancelBtn.FocusRing = true
 	cancelBtn.SetBounds(image.Rect(dlgW-100, dlgH-48, dlgW-10, dlgH-12))
 
 	okBtn.OnClick = func() {

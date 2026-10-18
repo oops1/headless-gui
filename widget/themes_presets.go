@@ -83,6 +83,13 @@ type ThemeStyle struct {
 	CaptionButtonH  int
 	CaptionIconSize int
 
+	// FocusRingWidth и FocusRing — вид общей рамки фокуса (DrawFocusRing),
+	// объявленный профилем токенами theme.KeyFocusRingWidth и
+	// theme.KeyFocusRing. Нули — рамка прежняя: контур цвета текста элемента
+	// толщиной в две точки и внутренний контрастный.
+	FocusRingWidth int
+	FocusRing      color.RGBA
+
 	// Menu — вид контекстного меню, объявленный профилем (см. MenuStyle).
 	// Нулевое значение — меню прежнее. Цвета заливки, плашки и недоступного
 	// пункта здесь не повторяются: их несёт сама плоская тема.

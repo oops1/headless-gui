@@ -36,9 +36,9 @@ import (
 const (
 	// KeyFocusRingWidth — толщина наружного контура рамки в логических
 	// пикселях (внутренний контрастный контур всегда в один пиксель).
-	KeyFocusRingWidth theme.Key = "focus.ring.width"
+	KeyFocusRingWidth = theme.KeyFocusRingWidth
 	// KeyFocusRingColor — цвет наружного контура. Нет — цвет текста стиля.
-	KeyFocusRingColor theme.Key = "focus.ring"
+	KeyFocusRingColor = theme.KeyFocusRing
 )
 
 // defaultFocusRingWidth — толщина наружного контура, пока тема её не задала.
