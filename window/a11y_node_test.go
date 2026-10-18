@@ -248,27 +248,26 @@ func TestA11yHitTest_PopupLayerWins(t *testing.T) {
 }
 
 // Прокрученный за край элемент под курсором не лежит, частично видимый —
-// лежит только своей видимой частью.
+// лежит только своей видимой частью, даже если родитель точку содержит.
 func TestA11yHitTest_UsesVisibleRect(t *testing.T) {
 	vis := image.Rect(10, 80, 110, 100) // видимая часть: обрезана окном прокрутки
 	s := snapOf(
 		a11yNode{Info: inf(widget.RoleWindow, image.Rect(0, 0, 200, 200)), Parent: -1},
-		a11yNode{Info: inf(widget.RoleList, image.Rect(0, 0, 200, 100)), Parent: 0},
+		a11yNode{Info: inf(widget.RoleList, image.Rect(0, 0, 200, 200)), Parent: 0},
 		a11yNode{Info: widget.AccessInfo{Role: widget.RoleButton, Bounds: image.Rect(10, 80, 110, 130), Visible: vis}, Parent: 1},
 		a11yNode{Info: inf(widget.RoleButton, image.Rect(10, 150, 110, 180), widget.StateOffscreen), Parent: 1},
-		// Лежит ПОВЕРХ списка в полных границах, но выше окна не виден.
-		a11yNode{Info: inf(widget.RolePanel, image.Rect(0, 120, 200, 200)), Parent: 0},
 	)
 	if got := s.hitTest(50, 90); got != 2 {
 		t.Errorf("точка в видимой части: %d, ожидалась кнопка 2", got)
 	}
-	// Полные границы кнопки доходят до y=130, но список кончается на y=100: ниже
-	// окна прокрутки кнопка под курсором не лежит.
-	if got := s.hitTest(50, 110); got != 0 {
-		t.Errorf("точка в обрезанной части: %d, ожидалось окно 0", got)
+	// Полные границы кнопки доходят до y=130, но видна она только до y=100:
+	// ниже под курсором список, а не кнопка.
+	if got := s.hitTest(50, 110); got != 1 {
+		t.Errorf("точка в обрезанной части: %d, ожидался список 1", got)
 	}
-	if got := s.hitTest(50, 160); got != 4 {
-		t.Errorf("точка под скрытой кнопкой: %d, ожидалась панель 4, а не offscreen-кнопка 3", got)
+	// Целиком вне видимой области: под курсором список, а не offscreen-кнопка.
+	if got := s.hitTest(50, 160); got != 1 {
+		t.Errorf("точка под offscreen-кнопкой: %d, ожидался список 1", got)
 	}
 	if r := a11yVisibleRect(s.Nodes[3].Info); !r.Empty() {
 		t.Errorf("видимая часть offscreen-узла %v", r)
@@ -397,4 +396,23 @@ func showDialogForTest(t *testing.T, win *Window, dlg widget.ModalWidget) {
 		t.Fatal("движок окна не умеет ShowModal")
 	}
 	e.ShowModal(dlg)
+}
+
+// Устойчивый ключ узла владельца включает его идентификатор: пункт «2» остаётся
+// «2», даже если из списка исчез разделитель перед ним и его порядковый номер
+// среди детей сдвинулся.
+func TestA11yNodeKeys_IncludeActionID(t *testing.T) {
+	mk := func(id string) *a11ySnapshot {
+		return snapOf(
+			a11yNode{Info: inf(widget.RoleMenu, image.Rect(0, 0, 10, 10)), Parent: -1},
+			a11yNode{Info: inf(widget.RoleMenuItem, image.Rect(0, 0, 10, 5)), Parent: 0, Index: 0, ActionID: id},
+		)
+	}
+	a, b := a11yNodeKeys(mk("2")), a11yNodeKeys(mk("1"))
+	if a[1] == b[1] {
+		t.Errorf("узлы с разными идентификаторами получили один ключ %q", a[1])
+	}
+	if a[1] != a11yNodeKeys(mk("2"))[1] {
+		t.Error("ключ узла неустойчив")
+	}
 }

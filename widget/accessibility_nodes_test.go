@@ -586,6 +586,11 @@ func TestPopupMenu_AccessActionSubmenuItem(t *testing.T) {
 	if c, _ := m.openChildOf(); c == nil {
 		t.Fatal("подменю не раскрылось")
 	}
+	// Подменю открыто для пункта 4: путь через другой пункт устарел и в него
+	// не попадает, даже если такой индекс в подменю есть.
+	if m.AccessAction("2/1", AccessInvoke) || clicked != "" {
+		t.Errorf("путь через чужой пункт принят: clicked=%q", clicked)
+	}
 	if !m.AccessAction("4/1", AccessInvoke) {
 		t.Fatal("нажатие на пункт подменю отклонено")
 	}
@@ -724,6 +729,35 @@ func TestMenuBar_AccessTreeAndActions(t *testing.T) {
 	for _, bad := range []string{"", "x", "t", "t9", "t-1", "0"} {
 		if mb.AccessAction(bad, AccessInvoke) {
 			t.Errorf("идентификатор %q принят", bad)
+		}
+	}
+}
+
+// Меню рисуется оверлеем и окном прокрутки не обрезается: пункты меню, открытого
+// владельцем внутри прокрутки, лежат вне её окна — и не offscreen.
+func TestPopupMenu_NotClippedByScrollView(t *testing.T) {
+	w, h := getScreenBounds()
+	SetScreenBounds(1000, 800)
+	t.Cleanup(func() { SetScreenBounds(w, h) })
+
+	sv := NewScrollView()
+	sv.SetBounds(image.Rect(0, 0, 100, 60))
+	sv.ContentHeight = 200
+	m := NewPopupMenu()
+	m.SetItems([]MenuItem{{Text: "Раз"}, {Text: "Два"}})
+	m.SetBounds(image.Rect(0, 0, 10, 10))
+	sv.AddChild(m)
+	m.Show(300, 300) // далеко за окном прокрутки 100×60
+
+	tree := BuildAccessTree(sv, nil)
+	menu := accNodeByRole(tree, RoleMenu)
+	if menu == nil || accHas(menu, StateOffscreen) {
+		t.Fatalf("открытое меню спрятано окном прокрутки: %+v", menu)
+	}
+	for _, name := range []string{"Раз", "Два"} {
+		n := accNodeNamed(tree, name)
+		if n == nil || accHas(n, StateOffscreen) || !n.Visible.Empty() {
+			t.Errorf("пункт %q обрезан окном прокрутки: %+v", name, n)
 		}
 	}
 }
