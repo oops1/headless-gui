@@ -8380,6 +8380,82 @@ initial rectangle, with full screen on top, `SetPosition` after start);
 (`Create` against a fake compositor: `set_maximized` after `get_toplevel` and
 before the first `commit`, no fixed size, restore to the initial size, refusal).
 
+---
+
+## v3.38: shell remarks of WinLine after v3.32.0 and v3.37.1
+
+Seven small fixes; every one has a test.
+
+**Tray glyph size no longer depends on `PadY` or `tray.fill.strip`.**
+`trayInner` (tray.go) now always gives the glyph a box of `tray.icon.size`,
+centred in the item's bounds; the style's `PadX` still narrows it, `PadY` does
+not eat from it (Windows 2000 drew a 14 px glyph at 6 px, macOS at 4).
+`desktop.TrayIcon` uses `trayInner` too (it used its own `shrinkByPad`).
+`drawDiagonalStrike` now clips to the half-open box, so the strike corner
+(`Max.X, Max.Y`) no longer leaves the glyph. **Frames changed on purpose:** the
+frozen taskbar hashes of Windows 2000 (both variants) and macOS (both) in
+`taskbar_frozen_hashes_test.go` were updated; a pixel diff of the old and new
+frames shows only the tray glyphs and the notification bell changed; all
+Windows 10 frames are byte-identical.
+
+**`widget.NewIconSetFS(fsys fs.FS, dir string)`** — an `IconSet` that reads
+`IconRef.Source` SVG files from an `fs.FS` (for `go:embed`) under the
+subdirectory `dir` (`""` = root), with the same optical sizes (`Sizes` +
+`{size}`) as the disk set. Paths use `/` (a backslash is accepted); an absolute
+path or `..` out of `dir` is rejected like on disk (the icon gets the
+placeholder). `svg.ParseFS(fsys, name)` is the matching parser.
+
+```go
+//go:embed icons/*.svg
+var iconsFS embed.FS
+
+set := widget.NewIconSetFS(iconsFS, "icons")
+tm.SetIconResolver(set)
+ref := theme.IconRef{Source: "wifi_{size}.svg", Sizes: theme.IconSizes(16, 20, 24)}
+```
+
+**Menus of built-in profiles.** Windows 10 declares `menu.chevron.right` = 18
+(the thin chevron of Windows 11 instead of the solid triangle; its soft shadow
+— `Elevation` 6 and a `Shadow` colour — was already declared). Windows 2000
+(and Blue) declares the flag `menu.icon.tint`: item icons are repainted in the
+item's text colour per state, so a consumer no longer sets `MenuItem.IconTint`
+on every item; an app that needs colour icons clears the flag with
+`Manager.SetFlag`. The Windows 11 menu border is `RGBA(0,0,0,20)` instead of
+15: on the 249 fill it gives 229, the reference value (15 gave 234).
+
+**Submenu delay counts from the hover.** `menu.submenu.delay` used a plain
+`widget.Animate` timer whose clock starts at the first `StepAnimations` — in a
+headless test the first call only started the clock. The timer (internal
+`animateTimer`) now starts at the hover, so one
+`widget.StepAnimations(time.Now().Add(delay))` opens or closes the submenu, and
+a frame that comes late does not wait for the delay again. `Animate` itself is
+unchanged.
+
+**No sound device.** `desktop.VolState.NoDevice` (new field; the zero value
+means a device exists): the tray volume icon is drawn crossed out like `Muted`
+(theme icon keys `tray.volume.nodevice`, then `tray.volume.muted`), the tooltip
+is "Звук: нет устройства" / "Sound: no device" (`StrSoundNoDevice`) instead of
+"0%", and the quick-settings volume tile is not active. A `VolumeItem` created
+with a nil `SystemStatus` reports `NoDevice` too.
+
+**Caption buttons of `widget.Window` (not classic).** The glyph colour comes
+from the title bar instead of the hard-coded grey 180: the old grey stays where
+it has contrast ≥ 3:1 with the title background (so dark titles render as
+before), otherwise the title text colour is used (muted for an inactive window,
+as in `titleColors`), and black or white if even that is unreadable. A hovered
+minimize/maximize button gets a 15 % film — black on a light title bar, white
+on a dark one — drawn with `FillRectAlpha` (the old grey was written without
+blending and looked dirty on light titles); the hovered close button is red
+(232,17,35) with a white glyph as before. `Panel`'s decorative header uses the
+same glyph colour. The golden `window_win11_light.png` was updated on purpose:
+only the caption glyphs changed (grey → black active, dark grey inactive).
+
+Tests: `desktop/trayglyph_pady_test.go`, `widget/themeicons_fs_test.go`,
+`widget/popupmenu_profile_test.go`, `desktop/menu_profile_v338_test.go`,
+`tests/popupmenu_builtin_profiles_test.go`, `widget/popupmenu_delay_test.go`,
+`desktop/trayvolume_nodevice_test.go`, `widget/window_captioncolors_test.go`,
+`tests/window_captionglyph_test.go`.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

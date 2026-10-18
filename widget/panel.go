@@ -246,7 +246,7 @@ func (p *Panel) drawWinHeader(ctx DrawContext, b image.Rectangle, hh int, bg, tc
 	bx := x + w - btnW*3
 
 	// ─ (свернуть)
-	lineColor := color.RGBA{R: 180, G: 180, B: 180, A: 255}
+	lineColor := captionGlyphColor(tc, bg) // как у Window: на светлом заголовке значки тёмные
 	my := y + btnH/2
 	ctx.DrawHLine(bx+16, my, 14, lineColor)
 

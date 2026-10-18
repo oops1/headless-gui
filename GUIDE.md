@@ -4649,6 +4649,9 @@ tray.AddItem(desktop.NewTrayGroup(m, net, vol, power))   // одна кнопк�
 `theme.IconRef` — `Source: "wifi_{size}.svg"` и `Sizes: theme.IconSizes(16, 20, 24)`;
 `IconSet` берёт наименьший файл не меньше запрошенного (физического) размера,
 а для большего — наибольший (`IconRef.SourceFor`, `theme.OpticalSize`).
+Вшитый набор (`go:embed`) читается из `fs.FS`: `widget.NewIconSetFS(iconsFS, "icons")`
+— те же пути `Source` и те же оптические размеры, только вместо диска файловая система
+(v3.38).
 
 SVG растеризуется **в физическом размере** (логический × масштаб холста), а не
 растягивается: на 125–200 % значок остаётся чётким. Так делают `SVGIcon`,

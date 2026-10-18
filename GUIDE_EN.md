@@ -4678,6 +4678,9 @@ Optical icon sizes (Fluent draws 16/20/24 separately): `theme.IconRef` takes
 `Source: "wifi_{size}.svg"` and `Sizes: theme.IconSizes(16, 20, 24)`; `IconSet`
 picks the smallest file not below the requested (physical) size, the largest for
 a bigger one (`IconRef.SourceFor`, `theme.OpticalSize`).
+An embedded set (`go:embed`) is read from an `fs.FS`: `widget.NewIconSetFS(iconsFS,
+"icons")` — the same `Source` paths and optical sizes, with the file system instead
+of the disk (v3.38).
 
 SVG is rasterised **at physical size** (logical × canvas scale) instead of being
 stretched: on 125–200 % the icon stays sharp. `SVGIcon`, `desktop.TrayIcon` and
