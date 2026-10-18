@@ -8297,6 +8297,28 @@ with a move on the spot and a one-pixel tremor launches the tile / pinned app
 and leaves `TileGroups` unchanged (Windows 10 and 11), and a "nowhere" move
 between press and release does not start a drag.
 
+## v3.37.2: `SetFocused` is called outside the focus lock
+
+The engine's focus manager held its lock while it called `SetFocused(false)` on
+the old widget and `SetFocused(true)` on the new one. A widget that moved focus
+(`Engine.SetFocus`) or asked for it (focused widget, `CaretRect`) from inside
+`SetFocused` took the same lock and waited for itself forever — PixGo 1.0.0's
+gallery address field hung that way (it finished editing on focus loss and
+called `SetFocus`), and so did the Wayland event loop
+(`textInputSendCaret` → `CaretRect`).
+
+Now only "who has focus" changes under the lock; notifications run after
+`Unlock`. If focus changes again during the notifications — from `SetFocused`
+itself or from another goroutine — the last value wins: the widget that was
+told `true` gets `false`, the latest target gets `true`, intermediate targets
+get nothing. Widgets that keep bouncing focus between each other from
+`SetFocused` are cut off after 16 rounds instead of hanging. Calling
+`SetFocus` and querying focus from `SetFocused` is therefore safe.
+
+Tests: `engine/focuslock_test.go` (focus moved from `SetFocused(false)`,
+focus queried from `SetFocused(true)`, ping-pong) — each hangs with the old
+implementation and fails on a timeout.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
