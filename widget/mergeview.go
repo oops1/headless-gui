@@ -3,6 +3,7 @@ package widget
 import (
 	"image"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1515,6 +1516,7 @@ func (m *MergeView) AccessChildren() []AccessInfo {
 		}
 		info := AccessInfo{
 			Role:   RoleTextInput,
+			ID:     strconv.Itoa(i), // сторона: по нему приходит AccessAction
 			Name:   Trf(keys[i], name),
 			Value:  strings.Join(s.text.Lines, "\n"),
 			Bounds: r,
@@ -1533,4 +1535,27 @@ func (m *MergeView) AccessChildren() []AccessInfo {
 		out = append(out, info)
 	}
 	return out
+}
+
+// AccessAction — контракт AccessActionHandler: действие скринридера над одной
+// из панелей. Нажатие, фокус и выбор делают панель активной; фокус ввода самому
+// контролу передаёт движок. Скрытая панель базы действий не принимает.
+func (m *MergeView) AccessAction(id string, action AccessActionKind) bool {
+	side, err := strconv.Atoi(id)
+	if err != nil || side < int(MergeOurs) || side > int(MergeResult) {
+		return false
+	}
+	switch action {
+	case AccessInvoke, AccessFocus, AccessSelect:
+	default:
+		return false
+	}
+	m.mu.Lock()
+	hidden := MergeSide(side) == MergeBase && !m.showBase
+	m.mu.Unlock()
+	if hidden {
+		return false
+	}
+	m.SetActiveSide(MergeSide(side))
+	return true
 }

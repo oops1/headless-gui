@@ -185,6 +185,9 @@ func (mb *MessageBox) ShowSeverity(caption, message string, severity DialogSever
 	dlgH := titleH + padTop + msgH + 18 + btnH + btnPadBot
 
 	dlg := NewDialog(caption, dlgW, dlgH)
+	// Текст сообщения — описание диалога для скринридера: он объявит
+	// «Заголовок, диалог. Текст», а не только заголовок.
+	dlg.Description = message
 
 	// ── Значок severity ──────────────────────────────────────────────────
 	if severity != SeverityNone {

@@ -3,6 +3,7 @@ package widget
 import (
 	"image"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -146,6 +147,7 @@ func (d *DiffView) AccessChildren() []AccessInfo {
 		}
 		info := AccessInfo{
 			Role:   RoleTextInput,
+			ID:     strconv.Itoa(i), // сторона: по нему приходит AccessAction
 			Name:   Trf(key, name),
 			Value:  strings.Join(s.text.Lines, "\n"),
 			Bounds: image.Rect(x0, g.cy0, x1, g.cy1),
@@ -159,4 +161,22 @@ func (d *DiffView) AccessChildren() []AccessInfo {
 		out = append(out, info)
 	}
 	return out
+}
+
+// AccessAction — контракт AccessActionHandler: действие скринридера над одной
+// из панелей. Нажатие, фокус и выбор делают панель активной — туда пойдёт ввод
+// с клавиатуры; фокус ввода самому контролу передаёт движок. Раньше нажатие на
+// узел панели кликало в центр всего контрола, то есть в ту панель, на которую
+// выпадал центр, а не в названную скринридером.
+func (d *DiffView) AccessAction(id string, action AccessActionKind) bool {
+	side, err := strconv.Atoi(id)
+	if err != nil || side < int(DiffLeft) || side > int(DiffRight) {
+		return false
+	}
+	switch action {
+	case AccessInvoke, AccessFocus, AccessSelect:
+		d.SetActiveSide(DiffSide(side))
+		return true
+	}
+	return false
 }

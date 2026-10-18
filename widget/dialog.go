@@ -50,6 +50,10 @@ type Dialog struct {
 	Base
 
 	Title       string
+	// Description — описание диалога для скринридера (AccessInfo.Description).
+	// MessageBox кладёт сюда текст сообщения: диалог объявляется как «Ошибка,
+	// диалог. Файл не найден». Пусто — берётся подсказка (ToolTip).
+	Description string
 	Background  color.RGBA
 	BorderColor color.RGBA
 	TitleColor  color.RGBA
@@ -671,6 +675,7 @@ func NewConfirmDialog(title, message string, onResult func(ok bool)) *Dialog {
 		dlgH = 160
 	)
 	dlg := NewDialog(title, dlgW, dlgH)
+	dlg.Description = message
 
 	// Все координаты дочерних виджетов — относительно (0,0) диалога.
 	// ShowModal сдвинет их при центрировании.
