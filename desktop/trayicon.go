@@ -156,7 +156,7 @@ func (t *TrayIcon) Draw(ctx widget.DrawContext) {
 	s := t.style(st)
 	PaintStyle(ctx, b, s)
 
-	box := glyphSquare(shrinkByPad(b, s))
+	box := glyphSquare(trayInner(t.tm, b, s))
 	if box.Empty() {
 		return
 	}

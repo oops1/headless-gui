@@ -320,6 +320,10 @@ type Window struct {
 	// (fullscreen.go).
 	fs fullscreenState
 
+	// initial — положение, размер и «развёрнуто», заданные до Run
+	// (initial.go). Применяются при создании окна ОС один раз.
+	initial initialState
+
 	// act — активация окна: колбэк смены свёрнутости (activate.go).
 	act activateState
 
@@ -575,13 +579,17 @@ func (win *Window) tearDown() {
 	win.closeChildWindows()
 }
 
+// newNativeWindow создаёт бэкенд окна. Переменная, чтобы тесты могли подложить
+// подставной бэкенд и проверить порядок, в котором bringUp его настраивает.
+var newNativeWindow = NewNativeWindow
+
 // bringUp создаёт окно ОС и поднимает всё, что к нему прилагается: масштаб,
 // ввод, хосты попапов и модалок, трей, доступность, насос кадров.
 //
 // Отдельно от Run, потому что окон у процесса может быть несколько: второму
 // нужно то же самое, кроме блокирующего цикла событий (см. OpenWindow).
 func (win *Window) bringUp() error {
-	win.native = NewNativeWindow()
+	win.native = newNativeWindow()
 
 	// Значок, заданный до Run(): отдаём бэкенду ДО создания окна ОС, чтобы он
 	// выставил его в правильный момент (на X11 — до MapWindow).
@@ -601,7 +609,11 @@ func (win *Window) bringUp() error {
 	// бэкенд) и сообщаем движку ДО расчёта размеров окна.
 	win.scale = 1
 	if sa, ok := win.eng.(engineScaler); ok {
-		if k := detectScale(win.native); k != 1 {
+		k := detectScale(win.native)
+		// Окно, которое сразу встанет на другой монитор, живёт в его масштабе:
+		// WM_DPICHANGED при создании не приходит.
+		k = win.initialMonitorScale(k)
+		if k != 1 {
 			sa.SetScale(k)
 		}
 		win.scale = sa.Scale()
@@ -612,6 +624,14 @@ func (win *Window) bringUp() error {
 	// а widget.Window получает bounds = (0,0)-(w,h) нативного окна.
 	win.syncFromWidgetWindow()
 
+	// Начальный размер от приложения (SetInitialBounds) важнее разметки. В
+	// режиме FitScale дизайн-размер остаётся прежним, а окно создаётся нужного
+	// размера и подгоняется ниже, как при ресайзе.
+	fitInitial := win.fitMode == FitScale && win.initial.hasSize()
+	if !fitInitial {
+		win.applyInitialSize()
+	}
+
 	// ContentFit: фиксируем дизайн-размер (логический) до первого ресайза.
 	if win.fitMode == FitScale {
 		win.fitBaseW, win.fitBaseH = win.w, win.h
@@ -620,6 +640,10 @@ func (win *Window) bringUp() error {
 
 	// Создаём окно ФИЗИЧЕСКОГО размера (логический × scale).
 	pw, ph := win.physicalSize()
+	if fitInitial {
+		r := initialPhysicalRect(0, 0, win.initial.w, win.initial.h, win.scale)
+		pw, ph = r.Dx(), r.Dy()
+	}
 	win.mu.Lock()
 	win.current = image.NewRGBA(image.Rect(0, 0, pw, ph))
 	win.mu.Unlock()
@@ -656,8 +680,28 @@ func (win *Window) bringUp() error {
 	// XInput2 при создании окна (touch.go).
 	win.prepareTouch()
 
+	// Начальное положение и «развёрнуто» (SetInitialBounds/SetInitialMaximized):
+	// тоже до Create — окно должно появиться сразу там и таким, как просили.
+	win.applyInitialPlacement()
+	initMax := win.initial.maximized
+	win.initial = initialState{} // применяется один раз
+
 	if err := win.native.Create(win.title, pw, ph); err != nil {
 		return err
+	}
+	if fitInitial {
+		// Дизайн-размер прежний, окно — другого размера: подгоняем кадр так же,
+		// как при ресайзе.
+		win.post(func() { win.resizeTo(pw, ph) })
+	}
+	if initMax {
+		// Окно уже развёрнуто (или компоновщик отказал): виджетное окно должно
+		// показывать кнопку «восстановить» с первого кадра.
+		win.post(func() {
+			if ww, ok := win.eng.Root().(*widget.Window); ok && win.native != nil {
+				ww.SetMaximized(win.native.IsMaximized())
+			}
+		})
 	}
 	// Разрешаем ресайз за края (borderless: зоны рамки отдаёт бэкенд).
 	win.native.SetResizable(win.resizable)
@@ -1383,8 +1427,17 @@ func (s *surface) framePump() {
 	db, hasDirtyBlit := s.native.(dirtyRectBlitter)
 	var lastBounds image.Rectangle // границы буфера на момент прошлого блита
 
+	// Единственный потребитель кадров: Data тайлов копируется в буфер окна
+	// сразу в applyFrame, поэтому буферы кадров можно возвращать движку
+	// (Frame.Release) — в 4K это 33 МБ на кадр, которые не надо выделять заново.
+	if rc, ok := s.eng.(interface{ SetFrameRecycling(bool) }); ok {
+		rc.SetFrameRecycling(true)
+	}
+
 	for frame := range frames {
-		if !s.applyFrame(frame) {
+		fits := s.applyFrame(frame)
+		frame.Release() // тайлы уже в буфере окна (или кадр не подошёл)
+		if !fits {
 			// Кадр снят под прежний размер холста: его тайлы — чужая
 			// раскладка, класть их в новый буфер нельзя. Следующий кадр
 			// нового размера движок отдаёт полным (engine/fullframe.go).

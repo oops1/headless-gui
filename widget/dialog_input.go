@@ -85,6 +85,7 @@ func (mb *MessageBox) ShowInputWidth(title, label, initial string, validate func
 	dlgH := hintY + 22 + btnH + btnPad
 
 	dlg := NewDialog(title, dlgW, dlgH)
+	dlg.Description = label
 
 	lbl := newMutedLabel(label)
 	lbl.FontSize = 11

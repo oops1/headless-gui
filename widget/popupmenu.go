@@ -1442,8 +1442,10 @@ func (m *PopupMenu) switchChildLater(idx int, hasSub bool) {
 	if old != nil {
 		old.Stop()
 	}
-	// Анимация без покадрового колбэка — ровно таймер движка.
-	a := Animate(time.Duration(m.SubMenuDelay)*time.Millisecond, nil, nil)
+	// Таймер движка без покадрового колбэка; отсчёт идёт от момента наведения,
+	// а не от первого кадра после него (animateTimer): в тесте без кадров
+	// хватает одного StepAnimations(time.Now().Add(задержка)).
+	a := animateTimer(time.Duration(m.SubMenuDelay) * time.Millisecond)
 	a.OnDone = func() {
 		m.geoMu.Lock()
 		still := m.switchIdx == idx

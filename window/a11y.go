@@ -36,6 +36,25 @@ type a11yNode struct {
 	// AT-SPI). Через него мост выполняет действия скринридера: GrabFocus и
 	// DoAction (см. accessibilityActor).
 	Widget widget.Widget
+
+	// ActionID — идентификатор узла у владельца (widget.AccessInfo.ID), если
+	// узел получен из AccessChildren: Widget тогда указывает на владельца, а
+	// действие надо адресовать узлу (см. accessibilityNodeAction). Пуст у
+	// узлов самих виджетов.
+	ActionID string
+}
+
+// a11yVisibleRect — видимая часть границ узла: пусто у элемента целиком вне
+// области просмотра (прокрученного за край, закрытого), пересечение с окном
+// прокрутки у выступающего за него, иначе — все границы.
+func a11yVisibleRect(info widget.AccessInfo) image.Rectangle {
+	if a11yHasState(info.States, widget.StateOffscreen) {
+		return image.Rectangle{}
+	}
+	if !info.Visible.Empty() {
+		return info.Visible
+	}
+	return info.Bounds
 }
 
 // a11ySnapshot — плоский снимок семантического дерева.
@@ -53,12 +72,20 @@ func a11yFlatten(root *widget.AccessNode) *a11ySnapshot {
 	if root == nil {
 		return s
 	}
+	menuFocus := int32(-1)
 	var walk func(n *widget.AccessNode, parent, index int32) int32
 	walk = func(n *widget.AccessNode, parent, index int32) int32 {
 		id := int32(len(s.Nodes))
-		s.Nodes = append(s.Nodes, a11yNode{Info: n.AccessInfo, Parent: parent, Index: index, Widget: n.Widget})
+		s.Nodes = append(s.Nodes, a11yNode{Info: n.AccessInfo, Parent: parent, Index: index,
+			Widget: n.Widget, ActionID: n.ActionID})
 		if a11yHasState(n.States, widget.StateFocused) {
 			s.Focus = id
+			// Подсвеченный пункт открытого меню перебивает фокус виджетов: у
+			// меню фокус и есть эта плашка, а виджет под ним (поле, из которого
+			// вызвали меню) так и остаётся в фокусе движка.
+			if n.Role == widget.RoleMenuItem {
+				menuFocus = id
+			}
 		}
 		for i, c := range n.Children {
 			cid := walk(c, id, int32(i))
@@ -67,6 +94,9 @@ func a11yFlatten(root *widget.AccessNode) *a11ySnapshot {
 		return id
 	}
 	walk(root, -1, 0)
+	if menuFocus >= 0 {
+		s.Focus = menuFocus
+	}
 	return s
 }
 
@@ -94,11 +124,28 @@ func (s *a11ySnapshot) valid(id int32) bool { return s.node(id) != nil }
 // hitTest возвращает id самого глубокого узла, содержащего точку (логические
 // координаты окна). Среди перекрывающихся детей выигрывает ПОСЛЕДНИЙ — он
 // нарисован поверх. -1, если точка вне корня.
+//
+// Узел считается содержащим точку по ВИДИМОЙ части границ: элемент, прокрученный
+// за край окна прокрутки, под курсором не лежит, даже если его полные границы
+// перекрывают соседей.
+//
+// Открытое меню (узлы с состоянием popup) рисуется поверх всего и выступает за
+// границы владельца, поэтому проверяется раньше обычного спуска: пункт меню под
+// курсором — это то, на что человек указывает, а не панель, которую меню
+// закрывает.
 func (s *a11ySnapshot) hitTest(x, y int) int32 {
 	if s == nil || len(s.Nodes) == 0 {
 		return -1
 	}
 	p := image.Pt(x, y)
+	// Слой меню: последний в обходе — самый верхний (пункты идут после своего
+	// меню, поэтому пункт выигрывает у меню).
+	for i := len(s.Nodes) - 1; i >= 0; i-- {
+		n := &s.Nodes[i]
+		if a11yHasState(n.Info.States, widget.StatePopup) && p.In(a11yVisibleRect(n.Info)) {
+			return int32(i)
+		}
+	}
 	if !p.In(s.Nodes[a11yRootID].Info.Bounds) {
 		return -1
 	}
@@ -106,7 +153,7 @@ func (s *a11ySnapshot) hitTest(x, y int) int32 {
 	for {
 		next := int32(-1)
 		for _, cid := range s.Nodes[cur].Children {
-			if p.In(s.Nodes[cid].Info.Bounds) {
+			if p.In(a11yVisibleRect(s.Nodes[cid].Info)) {
 				next = cid // без break: поверх лежит последний подходящий
 			}
 		}
@@ -235,6 +282,11 @@ func a11yNodeKeys(s *a11ySnapshot) []string {
 			continue
 		}
 		keys[i] = keys[n.Parent] + "/" + strconv.Itoa(int(n.Index)) + ":" + string(n.Info.Role)
+		if n.ActionID != "" {
+			// Узел владельца — по его собственному идентификатору: пункт меню
+			// «3» остаётся тем же, пока меню не пересоберут.
+			keys[i] += "#" + n.ActionID
+		}
 	}
 	return keys
 }
@@ -335,6 +387,44 @@ func (win *Window) accessibilitySnapshot() *a11ySnapshot {
 type accessibilityActor interface {
 	FocusAccessible(w widget.Widget) bool
 	ActivateAccessible(w widget.Widget) bool
+}
+
+// accessibilityNodeActor — опциональная возможность движка доставить действие
+// узлу владельца (реализует *engine.Engine). Отдельный интерфейс по той же
+// причине, что и accessibilityActor.
+type accessibilityNodeActor interface {
+	AccessAction(w widget.Widget, id string, action widget.AccessActionKind) bool
+}
+
+// accessibilityNodeAction выполняет действие скринридера над узлом снимка.
+// Единственная точка входа для мостов: UIA (Invoke, SetFocus, Select) и AT-SPI
+// (DoAction, GrabFocus) вызывают её, а не accessibilityFocus/Activate.
+//
+// Узел из AccessChildren, чей владелец реализует widget.AccessActionHandler,
+// получает действие сам: обработчик владельца вызывается на горутине движка с
+// идентификатором узла. Его ответ окончательный — запасного клика в центр
+// владельца при отказе нет, он попал бы не в тот узел.
+//
+// Остальные узлы ведут себя по-старому: AccessFocus переводит фокус на виджет,
+// AccessInvoke, AccessSelect и AccessToggle «нажимают» его синтетическим
+// кликом; раскрытие и сворачивание без обработчика владельца не выполняются.
+func (win *Window) accessibilityNodeAction(node *a11yNode, kind widget.AccessActionKind) bool {
+	if node == nil || node.Widget == nil {
+		return false
+	}
+	if node.ActionID != "" {
+		if _, ok := node.Widget.(widget.AccessActionHandler); ok {
+			a, ok := win.eng.(accessibilityNodeActor)
+			return ok && a.AccessAction(node.Widget, node.ActionID, kind)
+		}
+	}
+	switch kind {
+	case widget.AccessFocus:
+		return win.accessibilityFocus(node.Widget)
+	case widget.AccessInvoke, widget.AccessSelect, widget.AccessToggle:
+		return win.accessibilityActivate(node.Widget)
+	}
+	return false
 }
 
 // accessibilityFocus просит движок сфокусировать виджет узла.

@@ -13,8 +13,12 @@ package widget
 
 import (
 	"image"
+	"fmt"
 	"image/color"
+	"io/fs"
 	"log"
+	pathpkg "path"
+	"strings"
 	"sync"
 
 	"github.com/oops1/headless-gui/v3/theme"
@@ -83,6 +87,7 @@ type cacheKey struct {
 // загрузки темы.
 type IconSet struct {
 	baseDir string
+	fsys    fs.FS // не nil — файлы IconRef.Source читаются из fsys (под baseDir), а не с диска
 
 	mu      sync.RWMutex
 	sources map[string]iconSource // имя → источник (Register/RegisterImage/BuiltinIcons)
@@ -101,6 +106,24 @@ type IconSet struct {
 // resolveXAMLResource) — см. widget/xaml_props.go.
 func NewIconSet(baseDir string) *IconSet {
 	return &IconSet{baseDir: baseDir}
+}
+
+// NewIconSetFS создаёт набор иконок, читающий SVG-файлы IconRef.Source из
+// файловой системы fsys — вшитого каталога (go:embed) или любой другой fs.FS —
+// вместо диска. Оптические размеры (IconRef.Sizes с «{size}» в Source) работают
+// так же, как у NewIconSet: файл выбирается по запрошенному размеру.
+//
+// dir — подкаталог fsys, от которого разрешаются пути Source («» — корень).
+// Пути пишутся через «/» (обратная косая тоже принимается); абсолютный путь и
+// выход за пределы dir («../…») отклоняются, как и у NewIconSet (SEC-8), —
+// иконка получает заглушку.
+//
+//	//go:embed icons/*.svg
+//	var iconsFS embed.FS
+//	set := widget.NewIconSetFS(iconsFS, "icons")
+//	ref := theme.IconRef{Source: "wifi_{size}.svg", Sizes: theme.IconSizes(16, 20, 24)}
+func NewIconSetFS(fsys fs.FS, dir string) *IconSet {
+	return &IconSet{baseDir: dir, fsys: fsys}
 }
 
 // ResolveIcon реализует theme.IconResolver. Никогда не возвращает nil: если
@@ -148,10 +171,40 @@ func (s *IconSet) resolveNamed(name string, size int) image.Image {
 	return img
 }
 
+// resolveIconPath приводит IconRef.Source к ключу источника: путь на диске под
+// baseDir либо (у набора из fs.FS) путь внутри fsys. Граница та же (SEC-8):
+// абсолютные пути и выходы через "../" отклоняются.
+func (s *IconSet) resolveIconPath(rawSrc string) (string, error) {
+	if s.fsys == nil {
+		return resolveXAMLResource(s.baseDir, rawSrc)
+	}
+	clean, err := resolveXAMLResourceFS(rawSrc)
+	if err != nil {
+		return "", err
+	}
+	full := clean
+	if dir := strings.Trim(strings.ReplaceAll(s.baseDir, `\`, "/"), "/"); dir != "" && dir != "." {
+		full = pathpkg.Join(dir, clean)
+	}
+	if !fs.ValidPath(full) {
+		return "", fmt.Errorf("%w: %q", ErrResourceOutsideBase, rawSrc)
+	}
+	return full, nil
+}
+
+// parseIconFile читает и разбирает SVG по ключу из resolveIconPath: с диска или
+// из fs.FS набора.
+func (s *IconSet) parseIconFile(path string) (*svgPkg.Document, error) {
+	if s.fsys != nil {
+		return svgPkg.ParseFS(s.fsys, path)
+	}
+	return svgPkg.ParseFile(path)
+}
+
 func (s *IconSet) resolveSourced(rawSrc string, size int) image.Image {
 	// Путь удерживается внутри baseDir тем же способом, что и ресурсы XAML
 	// (SEC-8) — абсолютные пути и выходы через "../" отклоняются.
-	path, err := resolveXAMLResource(s.baseDir, rawSrc)
+	path, err := s.resolveIconPath(rawSrc)
 	if err != nil {
 		return nil
 	}
@@ -165,7 +218,7 @@ func (s *IconSet) resolveSourced(rawSrc string, size int) image.Image {
 	src, ok := s.paths[path]
 	s.mu.RUnlock()
 	if !ok {
-		doc, perr := svgPkg.ParseFile(path)
+		doc, perr := s.parseIconFile(path)
 		if perr != nil {
 			return nil
 		}

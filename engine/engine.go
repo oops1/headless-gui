@@ -195,7 +195,10 @@ type Engine struct {
 	// выброшен из переполненного канала, потребитель отстал (fullframe.go).
 	fullNext  atomic.Bool
 	lostFrame atomic.Bool
-	quit      chan struct{}
+	// recycleFrames — данные тайлов кадров берутся из пула и возвращаются по
+	// Frame.Release (SetFrameRecycling, fullframe.go).
+	recycleFrames atomic.Bool
+	quit          chan struct{}
 	done      chan struct{}
 
 	fps     int     // целевой FPS, 1–120
@@ -393,10 +396,12 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// box-drawing, стрелки) как fallback к встроенному Go Regular (BUG-2).
 	// Сначала системные, затем наши из assets/fonts — на машине без единого
 	// системного шрифта иначе некому нарисовать эти символы вовсе.
+	//
+	// Файлы не читаются: путь регистрируется, а шрифт загружается при первом
+	// символе, которого нет в основном (fallbackfont.go) — около 22 МБ чтения и
+	// разбора на Windows в обычный старт не попадают.
 	for _, p := range append(systemFallbackFontPaths(), assetFallbackFontPaths()...) {
-		if data, err := readFontFile(p); err == nil {
-			e.canvas.AddFallbackFont(data)
-		}
+		e.canvas.addFallbackFontFile(p)
 	}
 	// Встроенные жирный/курсивный шрифты для FontWeight/FontStyle (P1).
 	e.canvas.RegisterFont(widget.BuiltinFontBold, gobold.TTF)
@@ -1253,6 +1258,50 @@ func (e *Engine) activateAccessibleNow(w widget.Widget) bool {
 	return true
 }
 
+// AccessAction доставляет действие скринридера КОНКРЕТНОМУ узлу владельца —
+// узлу из widget.AccessChildrenProvider, у которого нет собственного виджета.
+// w — владелец (AccessNode.Widget), id — AccessNode.ActionID, action — что
+// сделать (UIA Invoke / SetFocus / SelectionItem.Select, AT-SPI DoAction /
+// GrabFocus).
+//
+// Владелец обязан реализовывать widget.AccessActionHandler: без него
+// возвращается false, и решать, что делать дальше (прежнее нажатие в центр
+// владельца), предстоит мосту, — см. Window.accessibilityNodeAction.
+// Метод потокобезопасен: действие выполняется на горутине движка, а вызывают
+// его со своих потоков мосты доступности (D-Bus, COM-поток UIA). Над скрытым
+// или выключенным владельцем действий нет — как у FocusAccessible.
+//
+// Перед действием, которое выбирает узел (нажатие, фокус, выбор), фокус ввода
+// переходит на владельца, если он принимает фокус: панель «правый файл» в
+// сравнении становится активной вместе с тем, что клавиатура начинает писать
+// в неё. Владельцам-оверлеям (меню) фокус не передаётся: меню само не
+// принимает ввод от того, кто его не открывал, а перехват фокуса закрыл бы его.
+func (e *Engine) AccessAction(w widget.Widget, id string, action widget.AccessActionKind) bool {
+	ok := false
+	e.callOnLoop(func() { ok = e.accessActionNow(w, id, action) })
+	return ok
+}
+
+// accessActionNow — AccessAction на горутине движка.
+func (e *Engine) accessActionNow(w widget.Widget, id string, action widget.AccessActionKind) bool {
+	if !accessibleActionable(w) {
+		return false
+	}
+	h, ok := w.(widget.AccessActionHandler)
+	if !ok {
+		return false
+	}
+	switch action {
+	case widget.AccessInvoke, widget.AccessFocus, widget.AccessSelect:
+		if _, overlay := w.(widget.OverlayDrawer); !overlay {
+			if f, ok := w.(widget.Focusable); ok && !f.IsFocused() {
+				e.SetFocus(w)
+			}
+		}
+	}
+	return h.AccessAction(id, action)
+}
+
 // accessibleActionable — общая проверка для FocusAccessible/ActivateAccessible:
 // над скрытым или выключенным виджетом действия доступности не выполняются
 // (скринридер не должен уметь того, чего не может мышь).
@@ -1748,6 +1797,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// Diff: при частичной перерисовке сравниваем только тайлы,
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
+	canvas.recycle = e.recycleFrames.Load()
 	switch {
 	case full:
 		tiles = canvas.allTiles()
@@ -1774,7 +1824,7 @@ func (e *Engine) renderFrame() output.Frame {
 		}
 	}
 
-	return output.Frame{
+	fr := output.Frame{
 		Seq:       seq,
 		Timestamp: time.Now(),
 		Tiles:     tiles,
@@ -1783,6 +1833,8 @@ func (e *Engine) renderFrame() output.Frame {
 		Width:     canvas.W,
 		Height:    canvas.H,
 	}
+	fr.AttachSlabs(canvas.takeSlabs()...)
+	return fr
 }
 
 // drawOverlays рекурсивно обходит дерево виджетов и вызывает DrawOverlay

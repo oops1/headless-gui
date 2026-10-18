@@ -144,6 +144,9 @@ func ProfileFromTheme(t *Theme) *theme.Profile {
 	p.SetColor(keyBevelShadow, t.Style.BevelShadow)
 	p.SetColor(keyBevelDark, t.Style.BevelDark)
 	p.SetColor(keyStyleName, encodeName(t.Style.Name))
+	if t.Style.FocusRing.A > 0 {
+		p.SetColor(theme.KeyFocusRing, t.Style.FocusRing)
+	}
 	if t.Style.ScrollbarThin {
 		p.SetFlag(keyScrollbarThin, true)
 	}
@@ -163,6 +166,7 @@ func ProfileFromTheme(t *Theme) *theme.Profile {
 		theme.KeyWindowCaptionButtonW:  t.Style.CaptionButtonW,
 		theme.KeyWindowCaptionButtonH:  t.Style.CaptionButtonH,
 		theme.KeyWindowCaptionIconSize: t.Style.CaptionIconSize,
+		theme.KeyFocusRingWidth:        t.Style.FocusRingWidth,
 	} {
 		if v > 0 {
 			p.SetMetric(k, float64(v))
@@ -238,6 +242,9 @@ func Materialize(rt *theme.Theme) *Theme {
 		CaptionButtonW:  int(rt.MetricOr(theme.KeyWindowCaptionButtonW, 0)),
 		CaptionButtonH:  int(rt.MetricOr(theme.KeyWindowCaptionButtonH, 0)),
 		CaptionIconSize: int(rt.MetricOr(theme.KeyWindowCaptionIconSize, 0)),
+
+		FocusRingWidth: int(rt.MetricOr(theme.KeyFocusRingWidth, 0)),
+		FocusRing:      rt.ColorOr(theme.KeyFocusRing, color.RGBA{}),
 
 		Menu: menuStyleOf(rt, false),
 	}

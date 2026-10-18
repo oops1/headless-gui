@@ -167,6 +167,23 @@ func Animate(dur time.Duration, curve Easing, tick func(t float64)) *Animation {
 	return a
 }
 
+// animateTimer — таймер «позови OnDone через dur»: как Animate без покадрового
+// колбэка, но часы идут С МОМЕНТА ВЫЗОВА, а не с первого шага движка.
+//
+// У обычной анимации старт ленивый — на первом StepAnimations (часы
+// принадлежат движку). Для таймера, который отсчитывает паузу от события
+// пользователя (наведение на пункт меню), это лишний кадр ожидания: первый
+// шаг, пришедший позже события, заводил бы часы заново, а в тесте без кадров
+// (StepAnimations(now), где первый вызов лишь заводит часы) пауза не доходила
+// бы вовсе. Здесь старт — time.Now() на вызове; движок зовёт Step с тем же
+// time.Now(), так что в работе разницы нет, а тесту хватает одного шага
+// StepAnimations(time.Now().Add(dur)).
+func animateTimer(dur time.Duration) *Animation {
+	a := &Animation{duration: dur, started: true, start: time.Now()}
+	anim.add(a)
+	return a
+}
+
 // AnimateOwned — как Animate, но новая анимация с тем же (owner, tag)
 // ОСТАНАВЛИВАЕТ предыдущую (семантика CSS-transition: анимации не дерутся).
 // owner сравнивается по == (указатель виджета), tag — строка ("bounds", "fade").

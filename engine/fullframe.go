@@ -28,7 +28,8 @@ func (e *Engine) markCanvasReplaced() {
 	e.fullNext.Store(true)
 	for {
 		select {
-		case <-e.frames:
+		case fr := <-e.frames:
+			fr.Release() // кадр прежнего размера не увидит никто
 			continue
 		default:
 		}
@@ -76,7 +77,7 @@ func (c *Canvas) allTiles() []output.DirtyTile {
 			total += pw * ph * 4
 		}
 	}
-	slab := make([]byte, 0, total)
+	slab := c.newSlab(total)
 	for i := range tiles {
 		t := &tiles[i]
 		start := len(slab)
@@ -86,3 +87,48 @@ func (c *Canvas) allTiles() []output.DirtyTile {
 	}
 	return tiles
 }
+
+// newSlab даёт буфер длины 0 и ёмкости total под данные тайлов кадра. При
+// включённой переработке (Engine.SetFrameRecycling) он берётся из пула
+// output.GetSlab и записывается в c.slabs — кадр заберёт его через takeSlabs
+// и вернёт в пул по Frame.Release; иначе это обычная новая аллокация, как
+// было всегда. Память из пула не обнулена: appendTile переписывает каждый
+// байт, который попадает в Data.
+func (c *Canvas) newSlab(total int) []byte {
+	if !c.recycle {
+		return make([]byte, 0, total)
+	}
+	s := output.GetSlab(total)
+	c.slabMu.Lock()
+	c.slabs = append(c.slabs, s)
+	c.slabMu.Unlock()
+	return s.Bytes()
+}
+
+// takeSlabs отдаёт буферы, выданные newSlab с прошлого вызова.
+func (c *Canvas) takeSlabs() []*output.Slab {
+	c.slabMu.Lock()
+	s := c.slabs
+	c.slabs = nil
+	c.slabMu.Unlock()
+	return s
+}
+
+// SetFrameRecycling включает переработку буферов данных тайлов: вместо нового
+// слэба (в 4K при смене всего окна — 33 МБ на кадр) движок берёт буфер из пула,
+// а потребитель возвращает его вызовом Frame.Release. По умолчанию выключено —
+// Data кадра принадлежит потребителю навсегда, как раньше.
+//
+// Включая, потребитель принимает контракт: Data тайлов кадра действительна до
+// Frame.Release (после — читать нельзя); не вызывать Release допустимо, буфер
+// тогда достанется сборщику мусора. Кадры, которые движок сам выбрасывает из
+// переполненного канала, он возвращает в пул сам. Кадры, увиденные
+// синхронным стоком (SetFrameSink), в пул не возвращаются никогда: что сток
+// сделал с Data, движку неизвестно.
+//
+// Окно (window) включает переработку само и зовёт Release после наложения
+// кадра на свой буфер.
+func (e *Engine) SetFrameRecycling(on bool) { e.recycleFrames.Store(on) }
+
+// FrameRecycling сообщает, включена ли переработка буферов кадров.
+func (e *Engine) FrameRecycling() bool { return e.recycleFrames.Load() }

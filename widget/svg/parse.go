@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"io"
+	"io/fs"
 	"os"
 	"regexp"
 	"strings"
@@ -442,6 +443,28 @@ func ParseFile(path string) (*Document, error) {
 	}
 	if len(data) > MaxFileBytes {
 		return nil, fmt.Errorf("svg: %s: файл слишком большой (> %d байт)", path, MaxFileBytes)
+	}
+	return Parse(data)
+}
+
+// ParseFS читает и разбирает SVG-файл из файловой системы fsys (например,
+// embed.FS). name — путь в виде fs.ValidPath («icons/wifi_16.svg»). Лимит
+// размера — как у ParseFile.
+func ParseFS(fsys fs.FS, name string) (*Document, error) {
+	f, err := fsys.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if st, err := f.Stat(); err == nil && st.Size() > MaxFileBytes {
+		return nil, fmt.Errorf("svg: %s: файл слишком большой (%d байт > %d)", name, st.Size(), MaxFileBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > MaxFileBytes {
+		return nil, fmt.Errorf("svg: %s: файл слишком большой (> %d байт)", name, MaxFileBytes)
 	}
 	return Parse(data)
 }

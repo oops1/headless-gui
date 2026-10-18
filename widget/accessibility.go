@@ -20,6 +20,7 @@ package widget
 import (
 	"fmt"
 	"image"
+	"strconv"
 )
 
 // AccessRole — роль элемента в терминах accessibility (подмножество,
@@ -49,7 +50,15 @@ const (
 	RoleMenuBar    AccessRole = "menubar"
 	RoleSpinner    AccessRole = "spinner"
 	RoleImage      AccessRole = "image"
-	RoleUnknown    AccessRole = "unknown"
+	// RoleDialog — диалог (в том числе MessageBox): окно второго уровня со
+	// своим заголовком. Имя — заголовок, описание — текст сообщения.
+	RoleDialog AccessRole = "dialog"
+	// RoleMenu — меню (всплывающее или раскрытое из полосы меню); дети —
+	// RoleMenuItem.
+	RoleMenu AccessRole = "menu"
+	// RoleMenuItem — пункт меню.
+	RoleMenuItem AccessRole = "menuitem"
+	RoleUnknown  AccessRole = "unknown"
 )
 
 // Состояния элемента (строковые — для простой JSON-сериализации).
@@ -63,6 +72,21 @@ const (
 	StateInactive = "inactive" // окно без фокуса ОС
 	StatePassword = "password" // значение скрыто
 	StateReadOnly = "readonly" // значение видно, но не правится
+
+	// StateOffscreen — элемент целиком вне видимой области: прокручен за край
+	// контейнера или закрыт (меню, которое не показано). Bounds при этом
+	// остаются границами элемента в его кадре, а видимой части нет.
+	StateOffscreen = "offscreen"
+	// StateCheckable — пункт умеет быть отмеченным (флажок в меню): отметка
+	// есть и в снятом состоянии, отличить такой пункт от обычного можно только
+	// по этому признаку.
+	StateCheckable = "checkable"
+	// StateHasPopup — у пункта есть подменю.
+	StateHasPopup = "haspopup"
+	// StatePopup — элемент показан оверлеем поверх всего UI (открытое меню и
+	// его пункты). Такой элемент выходит за границы своего владельца, и поиск
+	// по точке обязан смотреть на него раньше, чем на то, что лежит под ним.
+	StatePopup = "popup"
 )
 
 // AccessInfo — семантическое описание одного элемента.
@@ -73,6 +97,20 @@ type AccessInfo struct {
 	Description string          `json:"description,omitempty"` // ToolTip
 	States      []string        `json:"states,omitempty"`
 	Bounds      image.Rectangle `json:"bounds"` // логические пиксели
+
+	// ID — устойчивый идентификатор УЗЛА внутри владельца: им владелец узлов
+	// (AccessChildrenProvider) опознаёт, КОМУ адресовано действие скринридера
+	// (см. AccessActionHandler). Осмыслен только у узлов из AccessChildren;
+	// пустой ID строитель дерева заполняет номером узла в списке. У узлов,
+	// которым соответствует настоящий виджет, не используется.
+	ID string `json:"id,omitempty"`
+
+	// Visible — видимая часть Bounds, когда элемент выступает за область
+	// прокрутки: пересечение границ с окном прокрутки. Пусто — элемент виден
+	// целиком (или ещё не обрезан). Целиком невидимый элемент помечается
+	// StateOffscreen, а не пустым Visible: нулевое значение должно означать
+	// «не обрезан». В JSON не входит.
+	Visible image.Rectangle `json:"-"`
 }
 
 // AccessNode — узел семантического дерева.
@@ -87,6 +125,12 @@ type AccessNode struct {
 	// снапшот остаётся чистым JSON-деревом для стриминговых сценариев,
 	// где виджета на стороне клиента всё равно нет.
 	Widget Widget `json:"-"`
+
+	// ActionID — идентификатор узла у владельца (AccessInfo.ID), если узел
+	// получен из AccessChildren; у узлов самих виджетов пуст. Платформенный
+	// мост по нему решает, куда адресовать действие: узлу владельца
+	// (AccessActionHandler) или самому виджету. В JSON не входит.
+	ActionID string `json:"-"`
 }
 
 // Accessible — опциональный интерфейс: кастомный виджет сам описывает
@@ -101,10 +145,73 @@ type Accessible interface {
 //
 // Дерево строится по Children(), а у виджета, рисующего всё сам, детей-виджетов
 // нет — и скринридер видел бы одну безымянную группу, не прочитав ни строчки.
-// Узлы указывают на сам виджет: действовать с ними (фокус, нажатие) можно только
-// через него.
+// Узлы указывают на сам виджет-владелец (AccessNode.Widget). Чтобы действие
+// скринридера (фокус, нажатие) достигло именно узла, владелец реализует ещё и
+// AccessActionHandler; без него действие уходит владельцу целиком — нажатие
+// синтетическим кликом в центр виджета.
 type AccessChildrenProvider interface {
 	AccessChildren() []AccessInfo
+}
+
+// AccessActionKind — действие, которое скринридер просит выполнить над
+// узлом: UIA Invoke / SetFocus / SelectionItem.Select / ExpandCollapse,
+// AT-SPI DoAction / GrabFocus.
+type AccessActionKind int
+
+const (
+	// AccessInvoke — «нажать»: кнопка, пункт меню, радиокнопка (UIA Invoke,
+	// AT-SPI Action click).
+	AccessInvoke AccessActionKind = iota + 1
+	// AccessFocus — перевести на узел фокус (UIA SetFocus, AT-SPI GrabFocus).
+	AccessFocus
+	// AccessSelect — выбрать узел (UIA SelectionItem.Select).
+	AccessSelect
+	// AccessToggle — переключить отметку узла (UIA Toggle).
+	AccessToggle
+	// AccessExpand и AccessCollapse — раскрыть и свернуть узел (UIA
+	// ExpandCollapse, AT-SPI expand or contract).
+	AccessExpand
+	AccessCollapse
+)
+
+// String — имя действия для журналов и сообщений тестов.
+func (k AccessActionKind) String() string {
+	switch k {
+	case AccessInvoke:
+		return "invoke"
+	case AccessFocus:
+		return "focus"
+	case AccessSelect:
+		return "select"
+	case AccessToggle:
+		return "toggle"
+	case AccessExpand:
+		return "expand"
+	case AccessCollapse:
+		return "collapse"
+	}
+	return "unknown"
+}
+
+// AccessActionHandler — необязательный интерфейс владельца узлов
+// (AccessChildrenProvider): доставляет действие скринридера КОНКРЕТНОМУ узлу.
+//
+// Без него Invoke и SetFocus на узле действовали бы на виджет-владельца: узел
+// «правая панель сравнения» нажимался бы кликом в центр всего DiffView, а пункт
+// меню — кликом в центр меню. id — AccessInfo.ID узла, action — что сделать.
+//
+// Вызывается на горутине движка (дерево виджетов принадлежит ей), поэтому
+// обработчик может менять состояние виджета без дополнительной синхронизации с
+// событиями ввода. Возвращает true, если действие выполнено; false — узел не
+// принимает такое действие или его уже нет (дерево перестроилось между
+// снимком и действием). Ответ окончательный: запасного клика в центр
+// владельца при отказе нет — он попал бы не в тот узел.
+//
+// Для самого владельца (его узел в дереве, не из AccessChildren) интерфейс не
+// зовётся: там прежнее поведение. Объявлять поддержку действий отдельным узлам
+// не нужно: у владельца без этого интерфейса узлы просто остаются «читаемыми».
+type AccessActionHandler interface {
+	AccessAction(id string, action AccessActionKind) bool
 }
 
 // BuildAccessTree строит семантический снапшот дерева виджетов.
@@ -116,34 +223,102 @@ type AccessChildrenProvider interface {
 // этим границам; с координатами содержимого они промахивались бы на величину
 // прокрутки (см. contentoffset.go).
 func BuildAccessTree(root Widget, focused Widget) *AccessNode {
-	return buildAccessTree(root, focused, image.Point{})
+	return buildAccessTree(root, focused, image.Point{}, accessClip{})
+}
+
+// accessClip — область, за которую элемент не виден: окно прокрутки над ним
+// (в экранных координатах). Пустое значение (set=false) — обрезки нет.
+type accessClip struct {
+	r   image.Rectangle
+	set bool
+}
+
+// with сужает область окном контейнера screen (его границы на экране).
+func (c accessClip) with(screen image.Rectangle) accessClip {
+	if !c.set {
+		return accessClip{r: screen, set: true}
+	}
+	return accessClip{r: c.r.Intersect(screen), set: true}
+}
+
+// applyAccessClip считает видимую часть элемента под обрезкой c: целиком
+// вне области — StateOffscreen, частично — Visible = пересечение. Элемент без
+// границ (закрытое меню) обрезке не подлежит. Уже заданные самим виджетом
+// Visible и StateOffscreen уважаются: виджет, у которого есть своя область
+// просмотра (длинное меню), знает о ней больше контейнера.
+func applyAccessClip(info *AccessInfo, c accessClip) {
+	if !c.set || info.Bounds.Empty() || accessHasState(info.States, StateOffscreen) {
+		return
+	}
+	base := info.Bounds
+	if !info.Visible.Empty() {
+		base = info.Visible
+	}
+	vis := base.Intersect(c.r)
+	if vis.Empty() {
+		info.Visible = image.Rectangle{}
+		info.States = append(append([]string(nil), info.States...), StateOffscreen)
+		return
+	}
+	if vis != info.Bounds {
+		info.Visible = vis
+	}
+}
+
+// accessHasState — есть ли состояние в списке.
+func accessHasState(states []string, want string) bool {
+	for _, s := range states {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 // buildAccessTree — BuildAccessTree с накопленным смещением off: сумма
 // ContentOffset контейнеров над root, то есть на сколько границы root лежат
-// правее и ниже его места на экране.
-func buildAccessTree(root Widget, focused Widget, off image.Point) *AccessNode {
+// правее и ниже его места на экране, и областью обрезки clip: окнами
+// прокрутки над root.
+func buildAccessTree(root Widget, focused Widget, off image.Point, clip accessClip) *AccessNode {
 	if root == nil || !IsWidgetVisible(root) {
 		return nil
 	}
 	node := &AccessNode{AccessInfo: accessInfoFor(root), Widget: root}
 	node.Bounds = node.Bounds.Sub(off)
+	if !node.Visible.Empty() {
+		node.Visible = node.Visible.Sub(off)
+	}
+	// Меню рисуется оверлеем поверх всего и окном прокрутки не обрезается.
+	if node.Role == RoleMenu {
+		clip = accessClip{}
+	}
+	applyAccessClip(&node.AccessInfo, clip)
 	if root == focused {
 		node.States = append(node.States, StateFocused)
 	}
 	if p, ok := root.(AccessChildrenProvider); ok {
-		for _, info := range p.AccessChildren() {
+		for i, info := range p.AccessChildren() {
 			info.Bounds = info.Bounds.Sub(off)
-			node.Children = append(node.Children, &AccessNode{AccessInfo: info, Widget: root})
+			if !info.Visible.Empty() {
+				info.Visible = info.Visible.Sub(off)
+			}
+			if info.ID == "" {
+				info.ID = strconv.Itoa(i)
+			}
+			applyAccessClip(&info, clip)
+			node.Children = append(node.Children, &AccessNode{AccessInfo: info, Widget: root, ActionID: info.ID})
 		}
 	}
-	// Дети контейнера со сдвигом живут в кадре, сдвинутом ещё и на его смещение.
+	// Дети контейнера со сдвигом живут в кадре, сдвинутом ещё и на его смещение,
+	// и видны только в его окне.
 	childOff := off
+	childClip := clip
 	if oc, ok := root.(ContentOffsetter); ok {
 		childOff = off.Add(oc.ContentOffset())
+		childClip = clip.with(root.Bounds().Sub(off))
 	}
 	for _, child := range root.Children() {
-		if cn := buildAccessTree(child, focused, childOff); cn != nil {
+		if cn := buildAccessTree(child, focused, childOff, childClip); cn != nil {
 			node.Children = append(node.Children, cn)
 		}
 	}

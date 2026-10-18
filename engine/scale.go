@@ -121,7 +121,7 @@ func (c *Canvas) setDPIAll(dpi float64) {
 		fc.SetDPI(dpi)
 	}
 	for _, fb := range c.fallbacks {
-		fb.SetDPI(dpi)
+		fb.apply(func(fc *FontCache) { fc.SetDPI(dpi) }) // незагруженные возьмут DPI при загрузке
 	}
 	c.shaper.dropLayouts()
 }

@@ -48,10 +48,23 @@
 // Тексту отданы паттерны Value (содержимое строкой) и Text (чтение кусками,
 // каретка, выделение — a11y_textpattern_windows.go).
 //
+// Радиокнопке отдан SelectionItem (IsSelected, Select), а не Invoke: клиент
+// спрашивает «выбрана ли», а нажатие выбирает пункт. Пункту меню — Invoke
+// (или Toggle, если он с отметкой) и ExpandCollapse, если у него подменю.
+// Узлам, которые рисует сам виджет-владелец (панели сравнения, пункты меню),
+// действия доставляются через widget.AccessActionHandler владельца
+// (accessibilityNodeAction), а не кликом в центр виджета.
+//
+// Прокрученный за край элемент отдаётся с IsOffscreen=true и пустой
+// BoundingRectangle, частично видимый — с пересечением границ и окна
+// прокрутки.
+//
 // Не поддержано пока: Value у Slider (значение отдаётся только свойством
-// ValueValue, менять его клиент не может), SelectionItem у радиокнопок (им отдан Invoke как приближение — нажатие выбирает пункт).
-// И поиск по точке (ElementProviderFromPoint) берёт позицию курсора, а не
-// переданные координаты — см. комментарий у этого метода.
+// ValueValue, менять его клиент не может). Поиск по точке
+// (ElementProviderFromPoint) берёт позицию курсора, а не переданные
+// координаты — см. комментарий у этого метода. Всплывающее меню, вынесенное
+// движком в отдельное окно ОС, UIA спрашивает у окна меню, а не у главного, и
+// его пункты в дереве главного окна видны, но под курсором не находятся.
 package window
 
 import (
@@ -93,6 +106,13 @@ const (
 	uiaPropFrameworkID        = 30024
 	uiaPropValueValue         = 30045
 
+	uiaPropAcceleratorKey = 30006
+	// Свойства паттернов: UIA запрашивает их у провайдера и для кэширования.
+	uiaPropExpandCollapseState = 30070
+	uiaPropSelectionItemIsSel  = 30079
+	uiaPropToggleState         = 30086
+	uiaPropIsDialog            = 30174
+
 	// Типы элементов управления (UIA_*ControlTypeId).
 	uiaCtrlButton      = 50000
 	uiaCtrlCheckBox    = 50002
@@ -100,7 +120,9 @@ const (
 	uiaCtrlEdit        = 50004
 	uiaCtrlImage       = 50006
 	uiaCtrlList        = 50008
+	uiaCtrlMenu        = 50009
 	uiaCtrlMenuBar     = 50010
+	uiaCtrlMenuItem    = 50011
 	uiaCtrlProgressBar = 50012
 	uiaCtrlRadioButton = 50013
 	uiaCtrlSlider      = 50015
@@ -114,9 +136,15 @@ const (
 	uiaCtrlPane        = 50033
 
 	// Паттерны управления (UIA_*PatternId).
-	uiaPatternInvoke = 10000
-	uiaPatternValue  = 10002
-	uiaPatternToggle = 10015
+	uiaPatternInvoke         = 10000
+	uiaPatternValue          = 10002
+	uiaPatternExpandCollapse = 10005
+	uiaPatternSelectionItem  = 10010
+	uiaPatternToggle         = 10015
+
+	// ExpandCollapseState.
+	uiaExpandCollapsed = 0
+	uiaExpanded        = 1
 
 	// ToggleState.
 	uiaToggleOff = 0
@@ -177,6 +205,13 @@ func uiaControlType(r widget.AccessRole) int32 {
 		return uiaCtrlSpinner
 	case widget.RoleImage:
 		return uiaCtrlImage
+	case widget.RoleDialog:
+		// Диалог в UIA — окно, отличаемое свойством IsDialog.
+		return uiaCtrlWindow
+	case widget.RoleMenu:
+		return uiaCtrlMenu
+	case widget.RoleMenuItem:
+		return uiaCtrlMenuItem
 	}
 	return uiaCtrlCustom
 }
@@ -189,7 +224,7 @@ func uiaFocusable(info widget.AccessInfo) bool {
 	switch info.Role {
 	case widget.RoleButton, widget.RoleCheckBox, widget.RoleRadioButton, widget.RoleSwitch,
 		widget.RoleSlider, widget.RoleTextInput, widget.RoleComboBox, widget.RoleList,
-		widget.RoleTabControl, widget.RoleSpinner:
+		widget.RoleTabControl, widget.RoleSpinner, widget.RoleMenuItem:
 		return true
 	}
 	return false
@@ -210,6 +245,8 @@ type uiaElement struct {
 	toggleVT   uintptr
 	valueVT    uintptr
 	textVT     uintptr
+	selItemVT  uintptr
+	expandVT   uintptr
 
 	// refs — счётчик ссылок COM. Атомарный: AddRef/Release приходят из
 	// потоков UIA, а не только из UI-потока окна.
@@ -257,6 +294,8 @@ func newUIAElement(b *uiaBridge, id int32) *uiaElement {
 	e.toggleVT = uiaToggleVTable()
 	e.valueVT = uiaValueVTable()
 	e.textVT = uiaTextVTable()
+	e.selItemVT = uiaSelItemVTable()
+	e.expandVT = uiaExpandVTable()
 	uiaObjMu.Lock()
 	uiaObjects[uintptr(unsafe.Pointer(&e.simpleVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.fragmentVT))] = e
@@ -265,6 +304,8 @@ func newUIAElement(b *uiaBridge, id int32) *uiaElement {
 	uiaObjects[uintptr(unsafe.Pointer(&e.toggleVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.valueVT))] = e
 	uiaObjects[uintptr(unsafe.Pointer(&e.textVT))] = e
+	uiaObjects[uintptr(unsafe.Pointer(&e.selItemVT))] = e
+	uiaObjects[uintptr(unsafe.Pointer(&e.expandVT))] = e
 	uiaObjMu.Unlock()
 	return e
 }
@@ -279,6 +320,8 @@ func (e *uiaElement) forget() {
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.toggleVT)))
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.valueVT)))
 	delete(uiaObjects, uintptr(unsafe.Pointer(&e.textVT)))
+	delete(uiaObjects, uintptr(unsafe.Pointer(&e.selItemVT)))
+	delete(uiaObjects, uintptr(unsafe.Pointer(&e.expandVT)))
 	uiaObjMu.Unlock()
 }
 
@@ -289,6 +332,8 @@ func (e *uiaElement) invokePtr() uintptr   { return uintptr(unsafe.Pointer(&e.in
 func (e *uiaElement) togglePtr() uintptr   { return uintptr(unsafe.Pointer(&e.toggleVT)) }
 func (e *uiaElement) valuePtr() uintptr    { return uintptr(unsafe.Pointer(&e.valueVT)) }
 func (e *uiaElement) textPtr() uintptr     { return uintptr(unsafe.Pointer(&e.textVT)) }
+func (e *uiaElement) selItemPtr() uintptr  { return uintptr(unsafe.Pointer(&e.selItemVT)) }
+func (e *uiaElement) expandPtr() uintptr   { return uintptr(unsafe.Pointer(&e.expandVT)) }
 
 // isRoot — корень фрагмента (окно): у него живёт FragmentRoot и хост-провайдер.
 func (e *uiaElement) isRoot() bool { return e.id == e.b.rootID() }
@@ -310,30 +355,57 @@ func (e *uiaElement) role() widget.AccessRole {
 	return widget.RoleUnknown
 }
 
+// info — семантика узла элемента (пустая, если узла уже нет).
+func (e *uiaElement) info() widget.AccessInfo {
+	if n := e.node(); n != nil {
+		return n.Info
+	}
+	return widget.AccessInfo{Role: widget.RoleUnknown}
+}
+
 // ─── Поддержка паттернов по роли ─────────────────────────────────────────────
 
-// uiaSupportsInvoke — роли, у которых «нажатие» не имеет состояния.
+// uiaSupportsInvoke — узлы, у которых «нажатие» не имеет состояния: кнопка и
+// пункт меню без отметки.
 //
 // Радиокнопке по спецификации положен SelectionItem, а не Invoke: клиент хочет
-// уметь спросить «выбрана ли» и «в какой группе». Группы движок не публикует,
-// поэтому отдаём Invoke как приближение — скринридер сможет хотя бы ВЫБРАТЬ
-// пункт (нажатие радиокнопки её и выбирает), а состояние он читает из
-// свойств. Флажок и переключатель сюда НЕ входят: у них Toggle.
-func uiaSupportsInvoke(r widget.AccessRole) bool {
-	switch r {
-	case widget.RoleButton, widget.RoleRadioButton:
+// уметь спросить «выбрана ли» (см. uiaSupportsSelectionItem). Флажок и
+// переключатель сюда НЕ входят: у них Toggle.
+func uiaSupportsInvoke(info widget.AccessInfo) bool {
+	switch info.Role {
+	case widget.RoleButton:
 		return true
+	case widget.RoleMenuItem:
+		return !a11yHasState(info.States, widget.StateCheckable)
 	}
 	return false
 }
 
-// uiaSupportsToggle — роли с двумя состояниями (Toggle вместо Invoke).
-func uiaSupportsToggle(r widget.AccessRole) bool {
-	switch r {
+// uiaSupportsToggle — узлы с двумя состояниями (Toggle вместо Invoke): флажок,
+// переключатель и пункт меню с отметкой.
+func uiaSupportsToggle(info widget.AccessInfo) bool {
+	switch info.Role {
 	case widget.RoleCheckBox, widget.RoleSwitch:
 		return true
+	case widget.RoleMenuItem:
+		return a11yHasState(info.States, widget.StateCheckable)
 	}
 	return false
+}
+
+// uiaSupportsSelectionItem — узлы, которые бывают «выбраны»: радиокнопка.
+// Контейнера выбора (группы радиокнопок) движок не публикует, поэтому
+// SelectionContainer отдаётся пустым — спецификация это допускает.
+func uiaSupportsSelectionItem(info widget.AccessInfo) bool {
+	return info.Role == widget.RoleRadioButton
+}
+
+// uiaSupportsExpandCollapse — узлы с раскрываемым содержимым: пункт меню с
+// подменю. Раскрываемую группу без подменю (Expander) этим паттерном не
+// объявляем: свёрнутое состояние у неё в дереве никак не помечено, а
+// раскрыть её программно движок не умеет.
+func uiaSupportsExpandCollapse(info widget.AccessInfo) bool {
+	return a11yHasState(info.States, widget.StateHasPopup)
 }
 
 // ─── Таблицы виртуальных методов ─────────────────────────────────────────────
@@ -342,6 +414,7 @@ var (
 	uiaVTOnce                             sync.Once
 	uiaVTSimple, uiaVTFragment, uiaVTRoot uintptr
 	uiaVTInvoke, uiaVTToggle, uiaVTValue  uintptr
+	uiaVTSelItem, uiaVTExpand             uintptr
 )
 
 func uiaInitVTables() {
@@ -380,6 +453,18 @@ func uiaInitVTables() {
 			windows.NewCallback(uiaGetValue),
 			windows.NewCallback(uiaGetValueIsReadOnly),
 		)
+		uiaVTSelItem = newVTable(qi, addRef, release,
+			windows.NewCallback(uiaSelect),
+			windows.NewCallback(uiaAddToSelection),
+			windows.NewCallback(uiaRemoveFromSelection),
+			windows.NewCallback(uiaGetIsSelected),
+			windows.NewCallback(uiaGetSelectionContainer),
+		)
+		uiaVTExpand = newVTable(qi, addRef, release,
+			windows.NewCallback(uiaExpand),
+			windows.NewCallback(uiaCollapse),
+			windows.NewCallback(uiaGetExpandCollapseState),
+		)
 	})
 }
 
@@ -389,6 +474,8 @@ func uiaRootVTable() uintptr     { uiaInitVTables(); return uiaVTRoot }
 func uiaInvokeVTable() uintptr   { uiaInitVTables(); return uiaVTInvoke }
 func uiaToggleVTable() uintptr   { uiaInitVTables(); return uiaVTToggle }
 func uiaValueVTable() uintptr    { uiaInitVTables(); return uiaVTValue }
+func uiaSelItemVTable() uintptr  { uiaInitVTables(); return uiaVTSelItem }
+func uiaExpandVTable() uintptr   { uiaInitVTables(); return uiaVTExpand }
 
 // ─── IUnknown ────────────────────────────────────────────────────────────────
 
@@ -419,19 +506,33 @@ func uiaQueryInterface(this uintptr, riid *comGUID, ppv *uintptr) uintptr {
 		// Отвечаем ТОЛЬКО если роль реально поддерживает паттерн: пустой
 		// IInvokeProvider на надписи заставил бы скринридер объявить её
 		// нажимаемой, а нажатие ничего бы не делало.
-		if !uiaSupportsInvoke(e.role()) {
+		if !uiaSupportsInvoke(e.info()) {
 			uiaLog("QI(%d, Invoke) → роль не поддерживает, E_NOINTERFACE", e.id)
 			return eNoInterface
 		}
 		uiaLog("QI(%d, Invoke)", e.id)
 		*ppv = e.invokePtr()
 	case riid.equals(&iidToggleProvider):
-		if !uiaSupportsToggle(e.role()) {
+		if !uiaSupportsToggle(e.info()) {
 			uiaLog("QI(%d, Toggle) → роль не поддерживает, E_NOINTERFACE", e.id)
 			return eNoInterface
 		}
 		uiaLog("QI(%d, Toggle)", e.id)
 		*ppv = e.togglePtr()
+	case riid.equals(&iidSelectionItemProvider):
+		if !uiaSupportsSelectionItem(e.info()) {
+			uiaLog("QI(%d, SelectionItem) → роль не поддерживает, E_NOINTERFACE", e.id)
+			return eNoInterface
+		}
+		uiaLog("QI(%d, SelectionItem)", e.id)
+		*ppv = e.selItemPtr()
+	case riid.equals(&iidExpandCollapseProvider):
+		if !uiaSupportsExpandCollapse(e.info()) {
+			uiaLog("QI(%d, ExpandCollapse) → не поддерживается, E_NOINTERFACE", e.id)
+			return eNoInterface
+		}
+		uiaLog("QI(%d, ExpandCollapse)", e.id)
+		*ppv = e.expandPtr()
 	case riid.equals(&iidValueProvider):
 		if !uiaSupportsValue(e.role()) {
 			uiaLog("QI(%d, Value) → роль не поддерживает, E_NOINTERFACE", e.id)
@@ -499,17 +600,28 @@ func uiaGetPatternProvider(this uintptr, patternID int32, out *uintptr) uintptr 
 	if e == nil {
 		return eFail
 	}
-	role := e.role()
+	info := e.info()
+	role := info.Role
 	switch patternID {
 	case uiaPatternInvoke:
-		if uiaSupportsInvoke(role) {
+		if uiaSupportsInvoke(info) {
 			e.refs.Add(1)
 			*out = e.invokePtr()
 		}
 	case uiaPatternToggle:
-		if uiaSupportsToggle(role) {
+		if uiaSupportsToggle(info) {
 			e.refs.Add(1)
 			*out = e.togglePtr()
+		}
+	case uiaPatternSelectionItem:
+		if uiaSupportsSelectionItem(info) {
+			e.refs.Add(1)
+			*out = e.selItemPtr()
+		}
+	case uiaPatternExpandCollapse:
+		if uiaSupportsExpandCollapse(info) {
+			e.refs.Add(1)
+			*out = e.expandPtr()
 		}
 	case uiaPatternValue:
 		if uiaSupportsValue(role) {
@@ -645,7 +757,9 @@ func uiaSetFocus(this uintptr) uintptr {
 		uiaLog("SetFocus(%d) → узла нет в снимке", e.id)
 		return sOK
 	}
-	if !e.b.win.accessibilityFocus(node.Widget) {
+	// Узел из AccessChildren получает фокус сам (AccessActionHandler владельца),
+	// а не его владелец целиком.
+	if !e.b.win.accessibilityNodeAction(node, widget.AccessFocus) {
 		uiaLog("SetFocus(%d) → отказ (виджет не принимает фокус)", e.id)
 		return sOK
 	}
@@ -717,13 +831,16 @@ func uiaGetFocus(this uintptr, out *uintptr) uintptr {
 
 // ─── Паттерны управления: IInvokeProvider и IToggleProvider ──────────────────
 
-// uiaActivateNode — общая часть Invoke и Toggle: «нажать» виджет узла.
+// uiaDoNode — общая часть паттернов управления: выполнить над узлом действие
+// kind (accessibilityNodeAction).
 //
-// Оба паттерна ведут в одно и то же — синтетический клик по центру виджета
-// (engine.ActivateAccessible). Разница между ними только в том, ЧТО клиент об
-// элементе думает: Invoke — действие без состояния, Toggle — переключение,
-// после которого клиент перечитает ToggleState.
-func uiaActivateNode(this uintptr, what string) uintptr {
+// Invoke, Toggle и SelectionItem.Select для обычного виджета ведут в одно и то
+// же — синтетический клик по центру (engine.ActivateAccessible). Разница
+// между ними только в том, ЧТО клиент об элементе думает: Invoke — действие
+// без состояния, Toggle — переключение, после которого клиент перечитает
+// ToggleState. Узел из AccessChildren получает действие от владельца
+// (widget.AccessActionHandler), а не кликом в центр владельца.
+func uiaDoNode(this uintptr, what string, kind widget.AccessActionKind) uintptr {
 	e := uiaLookup(this)
 	if e == nil {
 		return eFail
@@ -733,7 +850,7 @@ func uiaActivateNode(this uintptr, what string) uintptr {
 		uiaLog("%s(%d) → узла нет в снимке", what, e.id)
 		return uiaEElementNotAvailable
 	}
-	if !e.b.win.accessibilityActivate(node.Widget) {
+	if !e.b.win.accessibilityNodeAction(node, kind) {
 		uiaLog("%s(%d) → отказ (виджет выключен, скрыт или без границ)", what, e.id)
 		return uiaEElementNotEnabled
 	}
@@ -747,11 +864,123 @@ func uiaActivateNode(this uintptr, what string) uintptr {
 }
 
 // uiaInvoke — IInvokeProvider::Invoke.
-func uiaInvoke(this uintptr) uintptr { return uiaActivateNode(this, "Invoke") }
+func uiaInvoke(this uintptr) uintptr { return uiaDoNode(this, "Invoke", widget.AccessInvoke) }
 
 // uiaToggle — IToggleProvider::Toggle. Отдельного «установить в состояние X» в
 // паттерне нет: клиент переключает и перечитывает ToggleState.
-func uiaToggle(this uintptr) uintptr { return uiaActivateNode(this, "Toggle") }
+func uiaToggle(this uintptr) uintptr { return uiaDoNode(this, "Toggle", widget.AccessToggle) }
+
+// ─── ISelectionItemProvider: радиокнопка ────────────────────────────────────
+
+// uiaSelect — ISelectionItemProvider::Select: выбрать радиокнопку.
+func uiaSelect(this uintptr) uintptr { return uiaDoNode(this, "Select", widget.AccessSelect) }
+
+// uiaSelected — выбран ли узел. Спрашивается у самого виджета, если он умеет
+// отвечать (радиокнопка), а не берётся из снимка: снимок обновляется раз в
+// сто пятьдесят миллисекунд, а клиент, выбравший пункт, тут же спросит о нём
+// снова — и услышал бы прежний ответ.
+func uiaSelected(node *a11yNode) bool {
+	if s, ok := node.Widget.(interface{ IsSelected() bool }); ok && node.ActionID == "" {
+		return s.IsSelected()
+	}
+	return a11yHasState(node.Info.States, widget.StateSelected)
+}
+
+// uiaAddToSelection — ISelectionItemProvider::AddToSelection. Группа
+// радиокнопок выбирает ровно одну, поэтому «добавить» значит выбрать; уже
+// выбранную трогать незачем.
+func uiaAddToSelection(this uintptr) uintptr {
+	e := uiaLookup(this)
+	if e == nil {
+		return eFail
+	}
+	node := e.node()
+	if node == nil {
+		return uiaEElementNotAvailable
+	}
+	if uiaSelected(node) {
+		return sOK
+	}
+	return uiaDoNode(this, "AddToSelection", widget.AccessSelect)
+}
+
+// uiaRemoveFromSelection — ISelectionItemProvider::RemoveFromSelection.
+// Снять выбор с радиокнопки нельзя — он переходит только на другую; для
+// невыбранной это ничего не меняет.
+func uiaRemoveFromSelection(this uintptr) uintptr {
+	e := uiaLookup(this)
+	if e == nil {
+		return eFail
+	}
+	node := e.node()
+	if node == nil {
+		return uiaEElementNotAvailable
+	}
+	if uiaSelected(node) {
+		return uiaEInvalidOperation
+	}
+	return sOK
+}
+
+// uiaGetIsSelected — ISelectionItemProvider::get_IsSelected.
+func uiaGetIsSelected(this uintptr, out *int32) uintptr {
+	if out == nil {
+		return eInvalidArg
+	}
+	*out = 0
+	e := uiaLookup(this)
+	if e == nil {
+		return eFail
+	}
+	node := e.node()
+	if node == nil {
+		return uiaEElementNotAvailable
+	}
+	if uiaSelected(node) {
+		*out = 1 // здесь BOOL, а не VARIANT_BOOL: 1
+	}
+	uiaLog("IsSelected(%d) → %d", e.id, *out)
+	return sOK
+}
+
+// uiaGetSelectionContainer — ISelectionItemProvider::get_SelectionContainer.
+// Группы радиокнопок в дереве нет — контейнер пуст (допустимо спецификацией).
+func uiaGetSelectionContainer(this uintptr, out *uintptr) uintptr {
+	if out == nil {
+		return eInvalidArg
+	}
+	*out = 0
+	return sOK
+}
+
+// ─── IExpandCollapseProvider: пункт меню с подменю ──────────────────────────
+
+// uiaExpand — IExpandCollapseProvider::Expand: раскрыть подменю пункта.
+func uiaExpand(this uintptr) uintptr { return uiaDoNode(this, "Expand", widget.AccessExpand) }
+
+// uiaCollapse — IExpandCollapseProvider::Collapse: закрыть подменю пункта.
+func uiaCollapse(this uintptr) uintptr { return uiaDoNode(this, "Collapse", widget.AccessCollapse) }
+
+// uiaGetExpandCollapseState — get_ExpandCollapseState.
+func uiaGetExpandCollapseState(this uintptr, out *int32) uintptr {
+	if out == nil {
+		return eInvalidArg
+	}
+	*out = uiaExpandCollapsed
+	e := uiaLookup(this)
+	if e == nil {
+		return eFail
+	}
+	node := e.node()
+	if node == nil {
+		return uiaEElementNotAvailable
+	}
+	if a11yHasState(node.Info.States, widget.StateExpanded) {
+		*out = uiaExpanded
+	}
+	uiaLog("ExpandCollapseState(%d) → %d", e.id, *out)
+	return sOK
+}
 
 // uiaGetToggleState — IToggleProvider::get_ToggleState.
 // Третьего состояния (ToggleState_Indeterminate) движок не публикует.
@@ -1067,9 +1296,49 @@ func (b *uiaBridge) emitChanges(ch a11yChanges) {
 		raiseProp(idx, uiaPropValueValue, func(v *comVariant, n *a11yNode) { v.setString(n.Info.Value) })
 	}
 	for _, idx := range ch.StateChanged {
-		raiseProp(idx, uiaPropIsEnabled, func(v *comVariant, n *a11yNode) {
-			v.setBool(!a11yHasState(n.Info.States, widget.StateDisabled))
-		})
+		// Каждое изменившееся состояние поднимает своё свойство: клиенту,
+		// слушающему IsSelected радиокнопки, незачем будить его из-за
+		// IsEnabled, и наоборот.
+		prev, cur := prevV.Snap.node(idx), curV.Snap.node(idx)
+		if prev == nil || cur == nil {
+			continue
+		}
+		differs := func(state string) bool {
+			return a11yHasState(prev.Info.States, state) != a11yHasState(cur.Info.States, state)
+		}
+		if differs(widget.StateDisabled) {
+			raiseProp(idx, uiaPropIsEnabled, func(v *comVariant, n *a11yNode) {
+				v.setBool(!a11yHasState(n.Info.States, widget.StateDisabled))
+			})
+		}
+		if differs(widget.StateOffscreen) {
+			raiseProp(idx, uiaPropIsOffscreen, func(v *comVariant, n *a11yNode) {
+				v.setBool(a11yHasState(n.Info.States, widget.StateOffscreen))
+			})
+		}
+		if differs(widget.StateSelected) && uiaSupportsSelectionItem(cur.Info) {
+			raiseProp(idx, uiaPropSelectionItemIsSel, func(v *comVariant, n *a11yNode) {
+				v.setBool(a11yHasState(n.Info.States, widget.StateSelected))
+			})
+		}
+		if differs(widget.StateChecked) && uiaSupportsToggle(cur.Info) {
+			raiseProp(idx, uiaPropToggleState, func(v *comVariant, n *a11yNode) {
+				state := int32(uiaToggleOff)
+				if a11yHasState(n.Info.States, widget.StateChecked) {
+					state = uiaToggleOn
+				}
+				v.setI4(state)
+			})
+		}
+		if differs(widget.StateExpanded) && uiaSupportsExpandCollapse(cur.Info) {
+			raiseProp(idx, uiaPropExpandCollapseState, func(v *comVariant, n *a11yNode) {
+				state := int32(uiaExpandCollapsed)
+				if a11yHasState(n.Info.States, widget.StateExpanded) {
+					state = uiaExpanded
+				}
+				v.setI4(state)
+			})
+		}
 	}
 }
 
@@ -1099,7 +1368,35 @@ func (b *uiaBridge) fillProperty(id int32, prop int32, out *comVariant) {
 	case uiaPropFrameworkID:
 		out.setString("headless-gui")
 	case uiaPropHelpText:
-		out.setString(node.Info.Description)
+		// У пункта меню «описание» — сочетание клавиш: оно отдаётся как
+		// AcceleratorKey, а не как справка.
+		if node.Info.Role != widget.RoleMenuItem {
+			out.setString(node.Info.Description)
+		}
+	case uiaPropAcceleratorKey:
+		if node.Info.Role == widget.RoleMenuItem {
+			out.setString(node.Info.Description)
+		}
+	case uiaPropIsDialog:
+		out.setBool(node.Info.Role == widget.RoleDialog)
+	case uiaPropSelectionItemIsSel:
+		out.setBool(a11yHasState(node.Info.States, widget.StateSelected))
+	case uiaPropToggleState:
+		if uiaSupportsToggle(node.Info) {
+			state := int32(uiaToggleOff)
+			if a11yHasState(node.Info.States, widget.StateChecked) {
+				state = uiaToggleOn
+			}
+			out.setI4(state)
+		}
+	case uiaPropExpandCollapseState:
+		if uiaSupportsExpandCollapse(node.Info) {
+			state := int32(uiaExpandCollapsed)
+			if a11yHasState(node.Info.States, widget.StateExpanded) {
+				state = uiaExpanded
+			}
+			out.setI4(state)
+		}
 	case uiaPropIsEnabled:
 		out.setBool(!a11yHasState(node.Info.States, widget.StateDisabled))
 	case uiaPropHasKeyboardFocus:
@@ -1109,7 +1406,9 @@ func (b *uiaBridge) fillProperty(id int32, prop int32, out *comVariant) {
 	case uiaPropIsControlElement, uiaPropIsContentElement:
 		out.setBool(true)
 	case uiaPropIsOffscreen:
-		out.setBool(false)
+		// Прокручен за край окна прокрутки или закрыт (меню, которое не
+		// показано): на экране элемента нет.
+		out.setBool(a11yHasState(node.Info.States, widget.StateOffscreen))
 	case uiaPropIsPassword:
 		out.setBool(a11yHasState(node.Info.States, widget.StatePassword))
 	case uiaPropValueValue:
@@ -1185,7 +1484,13 @@ func (b *uiaBridge) boundsOf(id int32) uiaRect {
 	if scale <= 0 {
 		scale = 1
 	}
-	r := node.Info.Bounds
+	// Видимая часть: у элемента, прокрученного за край, границ на экране нет
+	// (пустой прямоугольник — вместе с IsOffscreen), у выступающего — его
+	// пересечение с окном прокрутки.
+	r := a11yVisibleRect(node.Info)
+	if r.Empty() {
+		return uiaRect{}
+	}
 	ox, oy := 0, 0
 	if b.win.native != nil {
 		ox, oy = b.win.native.GetPosition()

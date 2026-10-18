@@ -61,4 +61,8 @@ type Frame struct {
 	//
 	// Поля добавлены в v3.31.0.
 	Width, Height int
+
+	// slabs — переработываемые буферы, в которых лежат Data тайлов (slab.go);
+	// пусто, пока переработка не включена (Engine.SetFrameRecycling).
+	slabs []*Slab
 }

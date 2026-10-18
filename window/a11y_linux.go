@@ -73,6 +73,7 @@ const (
 const (
 	atspiRoleInvalid     = 0
 	atspiRoleCheckBox    = 7
+	atspiRoleCheckMenuIt = 8
 	atspiRoleComboBox    = 11
 	atspiRoleDesktopFrm  = 14
 	atspiRoleDialog      = 16
@@ -82,7 +83,9 @@ const (
 	atspiRoleImage       = 27
 	atspiRoleLabel       = 29
 	atspiRoleList        = 31
+	atspiRoleMenu        = 33
 	atspiRoleMenuBar     = 34
+	atspiRoleMenuItem    = 35
 	atspiRolePageTabList = 38
 	atspiRolePanel       = 39
 	atspiRoleProgressBar = 42
@@ -101,6 +104,7 @@ const (
 const (
 	atspiStateActive    = 1
 	atspiStateChecked   = 4
+	atspiStateCollapsed = 5
 	atspiStateEditable  = 7
 	atspiStateEnabled   = 8
 	atspiStateExpandble = 9
@@ -115,6 +119,13 @@ const (
 	atspiStateShowing   = 25
 	atspiStateVisible   = 30
 	atspiStateCheckable = 41
+	atspiStateHasPopup  = 42
+)
+
+// Слои компонента (ATSPI_LAYER_*).
+const (
+	atspiLayerWidget = 3
+	atspiLayerPopup  = 5
 )
 
 // atspiRoleOf переводит роль движка в роль AT-SPI.
@@ -159,6 +170,12 @@ func atspiRoleOf(r widget.AccessRole) uint32 {
 		return atspiRoleSpinButton
 	case widget.RoleImage:
 		return atspiRoleImage
+	case widget.RoleDialog:
+		return atspiRoleDialog
+	case widget.RoleMenu:
+		return atspiRoleMenu
+	case widget.RoleMenuItem:
+		return atspiRoleMenuItem
 	}
 	return atspiRoleUnknown
 }
@@ -199,6 +216,12 @@ func atspiRoleName(role uint32) string {
 		return "page tab list"
 	case atspiRoleMenuBar:
 		return "menu bar"
+	case atspiRoleMenu:
+		return "menu"
+	case atspiRoleMenuItem:
+		return "menu item"
+	case atspiRoleCheckMenuIt:
+		return "check menu item"
 	case atspiRoleSpinButton:
 		return "spin button"
 	case atspiRoleImage:
@@ -218,7 +241,11 @@ func atspiStateSet(info widget.AccessInfo, focused bool) []uint32 {
 	set := func(b uint) { bits[b/32] |= 1 << (b % 32) }
 
 	set(atspiStateVisible)
-	set(atspiStateShowing)
+	// Элемент вне видимой области (прокручен за край, меню закрыто) существует
+	// и виден «в принципе», но на экране его нет: showing снимается.
+	if !a11yHasState(info.States, widget.StateOffscreen) {
+		set(atspiStateShowing)
+	}
 	disabled := a11yHasState(info.States, widget.StateDisabled)
 	if !disabled {
 		set(atspiStateEnabled)
@@ -227,7 +254,7 @@ func atspiStateSet(info widget.AccessInfo, focused bool) []uint32 {
 	switch info.Role {
 	case widget.RoleButton, widget.RoleCheckBox, widget.RoleRadioButton, widget.RoleSwitch,
 		widget.RoleSlider, widget.RoleTextInput, widget.RoleComboBox, widget.RoleList,
-		widget.RoleTabControl, widget.RoleSpinner:
+		widget.RoleTabControl, widget.RoleSpinner, widget.RoleMenuItem:
 		if !disabled {
 			set(atspiStateFocusable)
 		}
@@ -237,6 +264,16 @@ func atspiStateSet(info widget.AccessInfo, focused bool) []uint32 {
 		set(atspiStateCheckable)
 	case widget.RoleTextInput:
 		set(atspiStateEditable)
+	}
+	if a11yHasState(info.States, widget.StateCheckable) {
+		set(atspiStateCheckable)
+	}
+	if a11yHasState(info.States, widget.StateHasPopup) {
+		set(atspiStateHasPopup)
+		set(atspiStateExpandble)
+		if !a11yHasState(info.States, widget.StateExpanded) {
+			set(atspiStateCollapsed)
+		}
 	}
 	if focused {
 		set(atspiStateFocused)
@@ -249,8 +286,15 @@ func atspiStateSet(info widget.AccessInfo, focused bool) []uint32 {
 		}
 	}
 	if a11yHasState(info.States, widget.StateSelected) {
-		set(atspiStateSelected)
-		set(atspiStateSelectbl)
+		if info.Role == widget.RoleRadioButton {
+			// Радиокнопка в AT-SPI «отмечена», а не «выбрана»: так её читает
+			// Orca («радиокнопка, отмечена»), так её отдают GTK и Qt. Состояние
+			// selected означало бы выбранную строку списка.
+			set(atspiStateChecked)
+		} else {
+			set(atspiStateSelected)
+			set(atspiStateSelectbl)
+		}
 	}
 	if a11yHasState(info.States, widget.StateExpanded) {
 		set(atspiStateExpanded)
@@ -539,7 +583,8 @@ func (b *atspiBridge) emitChanges(ch a11yChanges) {
 			if now == st.inverted {
 				on = 0
 			}
-			b.atspiEvent(id, ifaceEventObject, "StateChanged", st.detail, on, 0, emptyStr)
+			b.atspiEvent(id, ifaceEventObject, "StateChanged",
+				atspiStateDetail(st.widgetState, st.detail, newN.Info.Role), on, 0, emptyStr)
 		}
 	}
 }
@@ -609,6 +654,17 @@ var atspiStateEvents = []struct {
 	{widget.StateDisabled, "enabled", true},
 	{widget.StateDisabled, "sensitive", true},
 	{widget.StateInactive, "active", true},
+	{widget.StateOffscreen, "showing", true},
+}
+
+// atspiStateDetail — имя состояния AT-SPI для сигнала StateChanged по
+// изменившемуся состоянию движка. У радиокнопки «выбрана» значит «отмечена»
+// (см. atspiStateSet), поэтому и сообщается как checked.
+func atspiStateDetail(widgetState, detail string, role widget.AccessRole) string {
+	if widgetState == widget.StateSelected && role == widget.RoleRadioButton {
+		return "checked"
+	}
+	return detail
 }
 
 // ─── Пути объектов ───────────────────────────────────────────────────────────
@@ -858,7 +914,7 @@ func (b *atspiBridge) handleProps(msg *dbusMessage, v *a11yView, id int32, node 
 			// методом GetNActions (без этой ветки get_n_actions() возвращал 0,
 			// хотя сами действия работали).
 			if name == "NActions" {
-				return dbusVariant{Sig: "i", Val: int32(1)}, true
+				return dbusVariant{Sig: "i", Val: int32(len(atspiActions(node)))}, true
 			}
 		}
 		return dbusVariant{}, false
@@ -1002,7 +1058,7 @@ func (b *atspiBridge) handleComponent(msg *dbusMessage, v *a11yView, id int32, n
 		return &dbusReply{Sig: "ii", Body: []any{w, h}}
 	case "Contains":
 		lx, ly := b.pointToLogical(arg(0), arg(1), coordAt(2))
-		return &dbusReply{Sig: "b", Body: []any{image.Pt(lx, ly).In(node.Info.Bounds)}}
+		return &dbusReply{Sig: "b", Body: []any{image.Pt(lx, ly).In(a11yVisibleRect(node.Info))}}
 	case "GetAccessibleAtPoint":
 		lx, ly := b.pointToLogical(arg(0), arg(1), coordAt(2))
 		hit := v.Snap.hitTest(lx, ly)
@@ -1011,8 +1067,11 @@ func (b *atspiBridge) handleComponent(msg *dbusMessage, v *a11yView, id int32, n
 		}
 		return &dbusReply{Sig: "(so)", Body: []any{b.ref(v.id(hit))}}
 	case "GetLayer":
-		// ATSPI_LAYER_WIDGET = 3.
-		return &dbusReply{Sig: "u", Body: []any{uint32(3)}}
+		// Открытое меню лежит в слое POPUP, прочее — в слое WIDGET.
+		if a11yHasState(node.Info.States, widget.StatePopup) {
+			return &dbusReply{Sig: "u", Body: []any{uint32(atspiLayerPopup)}}
+		}
+		return &dbusReply{Sig: "u", Body: []any{uint32(atspiLayerWidget)}}
 	case "GetMDIZOrder":
 		return &dbusReply{Sig: "n", Body: []any{int16(0)}}
 	case "GetAlpha":
@@ -1021,7 +1080,9 @@ func (b *atspiBridge) handleComponent(msg *dbusMessage, v *a11yView, id int32, n
 		// Скринридер переводит фокус ввода на элемент (Orca: перемещение по
 		// дереву с «follow focus»). node.Widget == nil у синтетического узла
 		// приложения — там фокусировать нечего, честно отвечаем false.
-		return &dbusReply{Sig: "b", Body: []any{b.win.accessibilityFocus(node.Widget)}}
+		// Узел из AccessChildren получает фокус сам (widget.AccessActionHandler
+		// владельца), а не его владелец целиком.
+		return &dbusReply{Sig: "b", Body: []any{b.win.accessibilityNodeAction(node, widget.AccessFocus)}}
 	case "ScrollTo", "ScrollToPoint", "SetExtents", "SetPosition", "SetSize":
 		return &dbusReply{Sig: "b", Body: []any{false}}
 	}
@@ -1052,26 +1113,61 @@ func (b *atspiBridge) handleValue(msg *dbusMessage, node *a11yNode) *dbusReply {
 	return nil
 }
 
-// handleAction — org.a11y.atspi.Action: одно действие «click» у кнопок.
+// Номера и имена действий узла (Action.GetName). Нажатие есть у каждого узла,
+// второе действие — только у узла с подменю.
+const (
+	atspiActionClick  = 0
+	atspiActionExpand = 1
+)
+
+// atspiActions — имена действий узла в порядке номеров.
+func atspiActions(node *a11yNode) []string {
+	acts := []string{"click"}
+	if node != nil && (a11yHasState(node.Info.States, widget.StateHasPopup) ||
+		a11yHasState(node.Info.States, widget.StateExpanded)) {
+		acts = append(acts, "expand or contract")
+	}
+	return acts
+}
+
+// handleAction — org.a11y.atspi.Action: «click» у кнопок, флажков и пунктов
+// меню, «expand or contract» у пунктов с подменю.
 func (b *atspiBridge) handleAction(msg *dbusMessage, node *a11yNode) *dbusReply {
+	acts := atspiActions(node)
+	name := func() string {
+		if i := int(atspiActionIndex(msg)); i >= 0 && i < len(acts) {
+			return acts[i]
+		}
+		return ""
+	}
 	switch msg.Member {
 	case "GetNActions":
-		return &dbusReply{Sig: "i", Body: []any{int32(1)}}
+		return &dbusReply{Sig: "i", Body: []any{int32(len(acts))}}
 	case "GetName", "GetLocalizedName":
-		return &dbusReply{Sig: "s", Body: []any{"click"}}
+		return &dbusReply{Sig: "s", Body: []any{name()}}
 	case "GetDescription":
 		return &dbusReply{Sig: "s", Body: []any{""}}
 	case "GetKeyBinding":
 		return &dbusReply{Sig: "s", Body: []any{""}}
 	case "DoAction":
-		// Единственное действие — 0 («click»); всё остальное вне диапазона.
-		// Активация идёт синтетическим кликом через штатный путь ввода
+		// Нажатие идёт синтетическим кликом через штатный путь ввода
 		// (engine.ActivateAccessible), поэтому работает для любого
-		// кликабельного виджета без разбора типов.
-		if atspiActionIndex(msg) != 0 {
-			return &dbusReply{Sig: "b", Body: []any{false}}
+		// кликабельного виджета без разбора типов. Узел из AccessChildren,
+		// чей владелец принимает действия (widget.AccessActionHandler),
+		// получает его сам — а не владелец кликом в центр.
+		switch int(atspiActionIndex(msg)) {
+		case atspiActionClick:
+			return &dbusReply{Sig: "b", Body: []any{b.win.accessibilityNodeAction(node, widget.AccessInvoke)}}
+		case atspiActionExpand:
+			if len(acts) > atspiActionExpand {
+				kind := widget.AccessExpand
+				if a11yHasState(node.Info.States, widget.StateExpanded) {
+					kind = widget.AccessCollapse
+				}
+				return &dbusReply{Sig: "b", Body: []any{b.win.accessibilityNodeAction(node, kind)}}
+			}
 		}
-		return &dbusReply{Sig: "b", Body: []any{b.win.accessibilityActivate(node.Widget)}}
+		return &dbusReply{Sig: "b", Body: []any{false}}
 	}
 	return nil
 }
@@ -1109,6 +1205,9 @@ func (b *atspiBridge) roleOf(id int32, node *a11yNode) uint32 {
 	if node.Info.Role == widget.RoleTextInput && a11yHasState(node.Info.States, widget.StatePassword) {
 		return atspiRolePasswordTxt
 	}
+	if node.Info.Role == widget.RoleMenuItem && a11yHasState(node.Info.States, widget.StateCheckable) {
+		return atspiRoleCheckMenuIt
+	}
 	return atspiRoleOf(node.Info.Role)
 }
 
@@ -1129,7 +1228,8 @@ func (b *atspiBridge) interfacesOf(id int32, node *a11yNode) []string {
 	switch node.Info.Role {
 	case widget.RoleSlider, widget.RoleProgressBar, widget.RoleSpinner:
 		out = append(out, ifaceValue)
-	case widget.RoleButton, widget.RoleCheckBox, widget.RoleRadioButton, widget.RoleSwitch:
+	case widget.RoleButton, widget.RoleCheckBox, widget.RoleRadioButton, widget.RoleSwitch,
+		widget.RoleMenuItem:
 		out = append(out, ifaceAction)
 	case widget.RoleTextInput, widget.RoleDocument:
 		// Содержимое поля скринридер читает кусками — символами, словами и
@@ -1137,6 +1237,13 @@ func (b *atspiBridge) interfacesOf(id int32, node *a11yNode) []string {
 		// «значения» элемента ему мало.
 		if _, ok := atspiTextProvider(node); ok {
 			out = append(out, ifaceText)
+		}
+	}
+	// Узел владельца, принимающего действия (панель сравнения), нажимаем и
+	// фокусируем, как кнопку: у него тоже есть Action.
+	if node.ActionID != "" && node.Info.Role != widget.RoleButton && node.Info.Role != widget.RoleMenuItem {
+		if _, ok := node.Widget.(widget.AccessActionHandler); ok {
+			out = append(out, ifaceAction)
 		}
 	}
 	return out

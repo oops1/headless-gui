@@ -44,7 +44,7 @@ func TestLocale_EveryKeyHasBothTranslations(t *testing.T) {
 	testreset.Globals(t)
 	keys := []string{
 		StrStart, StrStartPinned, StrStartAllApps, StrNotifEmpty, StrNotifClearAll,
-		StrNetNone, StrNetConnected, StrNetNamed, StrSoundMuted, StrSoundLevel,
+		StrNetNone, StrNetConnected, StrNetNamed, StrSoundMuted, StrSoundLevel, StrSoundNoDevice,
 		StrPowerAC, StrPowerBattery, StrClockTimeFormat, StrClockDateFormat, StrCalLongDate,
 	}
 	for m := 1; m <= 12; m++ {

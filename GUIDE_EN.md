@@ -2801,6 +2801,45 @@ editor, a chart) hands its parts over through `widget.AccessChildrenProvider` �
 `AccessChildren() []AccessInfo`. That is how `DiffView` shows a screen reader
 its two text panes.
 
+**Actions on nodes (v3.38).** Invoke and focus from a screen reader on such a
+node used to act on the whole widget: "press" the left pane clicked the centre
+of the entire `DiffView`. An owner of nodes that can take an action implements
+the optional `widget.AccessActionHandler`:
+
+```go
+func (w *MyEditor) AccessChildren() []widget.AccessInfo {
+    return []widget.AccessInfo{
+        {Role: widget.RoleTextInput, Name: "Left", ID: "left",   Bounds: w.leftRect()},
+        {Role: widget.RoleTextInput, Name: "Right", ID: "right", Bounds: w.rightRect()},
+    }
+}
+
+// Called on the engine goroutine. true — the action was done.
+func (w *MyEditor) AccessAction(id string, a widget.AccessActionKind) bool {
+    switch a {
+    case widget.AccessInvoke, widget.AccessFocus, widget.AccessSelect:
+        w.activate(id)
+        return true
+    }
+    return false
+}
+```
+
+`ID` is stable for a node (an empty one is replaced by the number in the
+list). Actions: `AccessInvoke`, `AccessFocus`, `AccessSelect`, `AccessToggle`,
+`AccessExpand`, `AccessCollapse`. The owner's answer is final — there is no
+fallback click at the centre; an owner without the interface behaves as
+before. Before invoke, focus and select the engine itself moves input focus to
+the owner (not to overlay owners such as menus).
+
+**Dialog, menu, scrolling (v3.38).** `Dialog` (MessageBox, confirm and input
+dialogs) announces itself with `RoleDialog`: the name is the title, the
+description is `Dialog.Description` (MessageBox puts the message text there).
+An open popup menu and a menu bar appear in the tree as `RoleMenu` and
+`RoleMenuItem` with on-screen bounds; the highlighted item holds the focus. An
+element scrolled out of a `ScrollView` gets `StateOffscreen`, a partly visible
+one `AccessInfo.Visible` (the intersection with the window).
+
 **Text for a screen reader.** The content of a text field used to travel as
 one string — the element's "value", as on a slider. A screen reader needs
 more: it reads a document in pieces, follows the caret and announces the
@@ -3704,6 +3743,51 @@ Monitors: Win32 — `EnumDisplayMonitors` + `GetDpiForMonitor`; X11 — RandR 1.
 Wayland the compositor's logical coordinates (`Scale` is buffer pixels per unit).
 Wayland has no work area (`Work == Bounds`) and the first output is the primary one.
 Details are in `docs/AI_AGENT_REFERENCE.md` ("v3.34").
+
+### Initial position and "maximized" before the window is shown (v3.38)
+
+An application that remembers the window position between launches must not move
+or maximize the window after it is shown: that is a jump and an animation on every
+start. Set the values before `Run`; they reach the window at the moment it is
+created:
+
+```go
+win := window.New(eng, "Title")
+win.SetInitialBounds(x, y, w, h) // where, and what size
+win.SetInitialMaximized(true)    // and maximized right away
+win.Run()
+```
+
+The units are those of the rest of the window API: `x`, `y` are screen coordinates
+of the top-left corner (as in `Monitor.Bounds` and `Native().GetPosition()`), `w`,
+`h` are **logical** pixels (like `SetMinSize` and the engine canvas): the window
+multiplies them by the scale. The scale is taken from the monitor the rectangle
+falls on (Win32), so a saved "800x600" stays the same to the eye on a second
+monitor with another DPI. A non-positive `w` or `h` means the size is not set, the
+position still applies. Where the window ends up is the application's decision:
+`window.Monitors()` and `MonitorForRect` tell whether a saved rectangle lies on any
+monitor.
+
+The values are applied once. A call after `Run` changes nothing: a running window is
+moved and resized the old way (`Native().SetPosition/SetSize`). It works together
+with `SetFullscreen` before `Run`: the window is created with these bounds first,
+and leaving full screen returns exactly them (and "maximized", if it was set).
+`IsMaximized` is `true` after a maximized start.
+
+- **Win32.** Position and size go straight into `CreateWindowEx`. A maximized window
+  is created hidden and shown by the very first `ShowWindow(SW_SHOWMAXIMIZED)`;
+  "restore" returns the given rectangle.
+- **X11.** The position goes into `CreateWindow`, `WM_NORMAL_HINTS` announces it and
+  the size (`USPosition|USSize`, `PPosition|PSize`) so that the manager does not
+  place the window its own way. For a maximized window
+  `_NET_WM_STATE_MAXIMIZED_VERT/HORZ` is set as a property before `MapWindow` (this
+  is how EWMH gives the initial state). The manager may refuse; `IsMaximized` shows it.
+- **Wayland.** The compositor picks the position: `x`, `y` are ignored, `w`, `h` are
+  the initial size. For a maximized window `xdg_toplevel.set_maximized` goes out
+  before the first `commit`; the size is not fixed. "Restore" returns the `w`x`h`
+  size even if the compositor, which never saw a normal window, sends 0x0.
+- **macOS.** A no-op: the size is honored anyway, and the position is not
+  implemented on this backend at all.
 
 ### Bringing the window to the front: one process, a second launch (v3.35)
 
@@ -4633,6 +4717,9 @@ Optical icon sizes (Fluent draws 16/20/24 separately): `theme.IconRef` takes
 `Source: "wifi_{size}.svg"` and `Sizes: theme.IconSizes(16, 20, 24)`; `IconSet`
 picks the smallest file not below the requested (physical) size, the largest for
 a bigger one (`IconRef.SourceFor`, `theme.OpticalSize`).
+An embedded set (`go:embed`) is read from an `fs.FS`: `widget.NewIconSetFS(iconsFS,
+"icons")` — the same `Source` paths and optical sizes, with the file system instead
+of the disk (v3.38).
 
 SVG is rasterised **at physical size** (logical × canvas scale) instead of being
 stretched: on 125–200 % the icon stays sharp. `SVGIcon`, `desktop.TrayIcon` and
