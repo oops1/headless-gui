@@ -101,13 +101,21 @@ func stretchToStrip(tm *theme.Manager, it Item, sz image.Point, h int) image.Poi
 	return sz
 }
 
-// trayInner — область значка внутри границ b: обжатая отступами стиля и, если
-// границы выше значка (подсветка на всю полосу), сжатая до высоты значка и
-// поставленная по центру. Фигуры и глифы рисуются по ней, а подложка — по b.
+// trayInner — область значка внутри границ b: обжатая отступами стиля по
+// ширине, а по высоте — ровно размером значка (tray.icon.size), по центру b.
+//
+// Высота значка не зависит ни от PadY стиля, ни от флага tray.fill.strip: если
+// границы выше значка (подсветка на всю полосу), глиф сжимается до размера
+// значка, а если границы ровно по значку, PadY стиля больше не отъедает от него
+// (у Windows 2000 глиф 14 px раньше уменьшался до 6). Ниже границ b глиф не
+// выходит. Фигуры и глифы рисуются по этой области, а подложка — по b.
 func trayInner(tm *theme.Manager, b image.Rectangle, s *theme.Style) image.Rectangle {
 	inner := shrinkByPad(b, s)
-	if size := trayIconSize(tm); size > 0 && inner.Dy() > size {
-		top := inner.Min.Y + (inner.Dy()-size)/2
+	if size := trayIconSize(tm); size > 0 && inner.Dy() != size {
+		if size > b.Dy() {
+			size = b.Dy()
+		}
+		top := b.Min.Y + (b.Dy()-size)/2
 		inner = image.Rect(inner.Min.X, top, inner.Max.X, top+size)
 	}
 	return inner
@@ -295,10 +303,14 @@ func drawDiagonalOffset(ctx widget.DrawContext, r image.Rectangle, col color.RGB
 	for i := 0; i <= r.Dx(); i++ {
 		x := r.Min.X + i
 		y := r.Min.Y + i*r.Dy()/r.Dx() + off
-		if y < r.Min.Y || y > r.Max.Y {
+		if y < r.Min.Y || y >= r.Max.Y || x >= r.Max.X {
 			// Обрезка по границам значка: без неё утолщение у самых концов
 			// диагонали вылезало бы за r, а фигуры трея вылезать за
-			// границы значка не должны ни при одном размере.
+			// границы значка не должны ни при одном размере. Границы
+			// полуоткрытые, как у image.Rectangle: пиксель (Max.X, Max.Y)
+			// лежит уже вне r. Раньше это не бросалось в глаза — глиф стоял
+			// внутри PadY стиля; теперь он занимает всю высоту значка, и угол
+			// вылезал бы за границы значка.
 			continue
 		}
 		ctx.SetPixel(x, y, col)
@@ -318,7 +330,9 @@ func drawDiagonalStrike(ctx widget.DrawContext, r image.Rectangle, col color.RGB
 	if r.Dx() <= 0 || r.Dy() <= 0 {
 		return
 	}
-	drawDiagonal(ctx, r, col)
+	// Базовая линия — тот же проход, что drawDiagonal, но обрезанный по r
+	// (смещение 0): угол (Max.X, Max.Y) вне значка.
+	drawDiagonalOffset(ctx, r, col, 0)
 	thickness := r.Dy() / diagonalThicknessDiv
 	half := thickness / 2
 	for d := 1; d <= half; d++ {
