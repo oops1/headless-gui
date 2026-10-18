@@ -54,12 +54,13 @@ func (t svgTextBridge) Outline(spec svg.FontSpec, size float64, text string) ([]
 	for _, r := range text {
 		fc := primary
 		if r != ' ' && !fc.HasGlyph(r) {
-			for _, fb := range c.fallbacks {
-				if fb != nil && fb.ttf != nil && fb.HasGlyph(r) {
+			c.eachFallback(primary, func(fb *FontCache) bool {
+				if fb.ttf != nil && fb.HasGlyph(r) {
 					fc = fb
-					break
+					return true
 				}
-			}
+				return false
+			})
 		}
 		idx, err := fc.ttf.GlyphIndex(&buf, r)
 		if err != nil {

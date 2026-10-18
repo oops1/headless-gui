@@ -351,15 +351,18 @@ func TestFrameRecycling_DroppedFrameGoesBack(t *testing.T) {
 		eng.frames <- output.Frame{}
 	}
 	reused := false
+	k := 1 // картинки чередуются, чтобы каждый кадр отличался от прошлого
 	for i := 0; i < 20 && !reused; i++ {
-		iw.SetImage(bufs[(i+1)&1])
+		iw.SetImage(bufs[k&1])
+		k++
 		fr := eng.renderFrame()
 		first := &fr.Tiles[0].Data[0]
 		eng.deliver(fr) // канал полон — кадр выброшен и освобождён
 		if !eng.lostFrame.Load() {
 			t.Fatal("потеря кадра не запомнена")
 		}
-		iw.SetImage(bufs[i&1])
+		iw.SetImage(bufs[k&1])
+		k++
 		next := eng.renderFrame()
 		reused = &next.Tiles[0].Data[0] == first
 		next.Release()

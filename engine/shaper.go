@@ -113,9 +113,27 @@ func firstStrongRTL(runes []rune) bool {
 
 // chainFontmap реализует shaping.Fontmap поверх шрифтов движка: сперва
 // основной face, затем fallback-цепочка (те же шрифты, что в per-rune пути).
+//
+// Запасные шрифты загружаются лениво (fallbackfont.go): цепочка просматривается
+// по порядку и догружает файлы только до первого шрифта с нужной руной.
 type chainFontmap struct {
 	primary   *tsfont.Face
-	fallbacks []*tsfont.Face
+	fallbacks []*fallbackFont
+	ref       *FontCache // шрифт холста: DPI и субпиксели для загружаемых записей
+}
+
+// eachFace обходит face'ы запасной цепочки по порядку, пока fn не вернёт true.
+// Записи без шрифта или без typesetting-face пропускаются.
+func (cf *chainFontmap) eachFace(fn func(*tsfont.Face) bool) {
+	for _, fb := range cf.fallbacks {
+		fc := fb.get(cf.ref)
+		if fc == nil {
+			continue
+		}
+		if f := fc.shaperFace(); f != nil && fn(f) {
+			return
+		}
+	}
 }
 
 func (cf *chainFontmap) ResolveFace(r rune) *tsfont.Face {
@@ -128,25 +146,34 @@ func (cf *chainFontmap) ResolveFace(r rune) *tsfont.Face {
 		if _, ok := cf.primary.NominalGlyph(r); ok && faceHasColor(cf.primary) {
 			return cf.primary
 		}
-		for _, f := range cf.fallbacks {
-			if f == nil || !faceHasColor(f) {
-				continue
+		var colored *tsfont.Face
+		cf.eachFace(func(f *tsfont.Face) bool {
+			if !faceHasColor(f) {
+				return false
 			}
 			if _, ok := f.NominalGlyph(r); ok {
-				return f
+				colored = f
+				return true
 			}
+			return false
+		})
+		if colored != nil {
+			return colored
 		}
 	}
 	if _, ok := cf.primary.NominalGlyph(r); ok {
 		return cf.primary
 	}
-	for _, f := range cf.fallbacks {
-		if f == nil {
-			continue
-		}
+	var found *tsfont.Face
+	cf.eachFace(func(f *tsfont.Face) bool {
 		if _, ok := f.NominalGlyph(r); ok {
-			return f
+			found = f
+			return true
 		}
+		return false
+	})
+	if found != nil {
+		return found
 	}
 	return cf.primary // контракт Fontmap: всегда не-nil
 }
@@ -238,7 +265,7 @@ func (ts *textShaper) dropLayouts() {
 
 // layout возвращает кэшированный (или строит новый) layout строки.
 // Возвращает nil, если шейпинг недоступен (нет typesetting-face).
-func (ts *textShaper) layout(fc *FontCache, fallbacks []*FontCache, text string, sizePt float64) *shapedLayout {
+func (ts *textShaper) layout(fc *FontCache, fallbacks []*fallbackFont, text string, sizePt float64) *shapedLayout {
 	primary := fc.shaperFace()
 	if primary == nil {
 		return nil
@@ -251,12 +278,7 @@ func (ts *textShaper) layout(fc *FontCache, fallbacks []*FontCache, text string,
 		return l
 	}
 
-	fm := &chainFontmap{primary: primary}
-	for _, fb := range fallbacks {
-		if f := fb.shaperFace(); f != nil {
-			fm.fallbacks = append(fm.fallbacks, f)
-		}
-	}
+	fm := &chainFontmap{primary: primary, fallbacks: fallbacks, ref: fc}
 
 	runes := []rune(text)
 	sizePx := fixed.Int26_6(sizePt * fc.dpi / 72.0 * 64.0)

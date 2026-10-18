@@ -50,7 +50,7 @@ type Canvas struct {
 	fontCache  *FontCache            // кэш шрифта по умолчанию
 	namedFonts *fontTable            // именованные шрифты (FontFamily из XAML), под замком — fonttable.go
 	families   *fontFamilies         // таблица семейств: выбор шрифта по весу и наклону (fontfamily.go)
-	fallbacks  []*FontCache          // fallback-шрифты для отсутствующих глифов (BUG-2)
+	fallbacks  []*fallbackFont       // fallback-шрифты для отсутствующих глифов (BUG-2); файлы грузятся лениво (fallbackfont.go)
 	clip       image.Rectangle       // активная область отсечения
 	hasClip    bool                  // включено ли отсечение
 	round      roundClipState        // отсечение по скруглённому контуру (clipround.go)
@@ -190,7 +190,7 @@ func (c *Canvas) AddFallbackFont(ttfData []byte) bool {
 		return false
 	}
 	fc.subpixel = c.fontCache.Subpixel()
-	c.fallbacks = append(c.fallbacks, fc)
+	c.fallbacks = append(c.fallbacks, newReadyFallback(fc))
 	c.fontRev.Add(1)
 	return true
 }
@@ -203,10 +203,18 @@ func (c *Canvas) fcForRune(primary *FontCache, r rune) (*FontCache, bool) {
 	if primary.HasGlyph(r) {
 		return primary, true
 	}
-	for _, fb := range c.fallbacks {
+	// Цепочка идёт по порядку и догружает свои файлы по мере надобности
+	// (fallbackfont.go): шрифты после первого подходящего не трогаются.
+	var found *FontCache
+	c.eachFallback(primary, func(fb *FontCache) bool {
 		if fb.HasGlyph(r) {
-			return fb, true
+			found = fb
+			return true
 		}
+		return false
+	})
+	if found != nil {
+		return found, true
 	}
 	return primary, false
 }

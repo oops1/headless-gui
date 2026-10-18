@@ -396,10 +396,12 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// box-drawing, стрелки) как fallback к встроенному Go Regular (BUG-2).
 	// Сначала системные, затем наши из assets/fonts — на машине без единого
 	// системного шрифта иначе некому нарисовать эти символы вовсе.
+	//
+	// Файлы не читаются: путь регистрируется, а шрифт загружается при первом
+	// символе, которого нет в основном (fallbackfont.go) — около 22 МБ чтения и
+	// разбора на Windows в обычный старт не попадают.
 	for _, p := range append(systemFallbackFontPaths(), assetFallbackFontPaths()...) {
-		if data, err := readFontFile(p); err == nil {
-			e.canvas.AddFallbackFont(data)
-		}
+		e.canvas.addFallbackFontFile(p)
 	}
 	// Встроенные жирный/курсивный шрифты для FontWeight/FontStyle (P1).
 	e.canvas.RegisterFont(widget.BuiltinFontBold, gobold.TTF)

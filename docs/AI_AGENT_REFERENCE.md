@@ -8456,6 +8456,127 @@ Tests: `desktop/trayglyph_pady_test.go`, `widget/themeicons_fs_test.go`,
 `desktop/trayvolume_nodevice_test.go`, `widget/window_captioncolors_test.go`,
 `tests/window_captionglyph_test.go`.
 
+---
+
+## v3.38: opaque-buffer fast path, frame buffer recycling, lazy fallback fonts
+
+Three engine-side speedups requested by a viewer application that pans a
+3840x2160 picture (frame cost 33 ms before, 5.5 ms now) and wants a fast start.
+Nothing is removed or changed for existing callers: every new path is opt-in or
+gives the same bytes as before.
+
+### Opaque image: `widget.OpaqueImage` (E15)
+
+`DrawImage`, `DrawImageScaled` and `DrawImageRect` composite with `Over`: every
+pixel's alpha is read and blended with the canvas. A viewer's own window buffer is
+fully opaque, so that is wasted work (22 ms of a 4K frame, on one core). A source
+declared opaque is composited with `Src` instead: rows are copied (with the R/B swap
+for `FormatBGRX`), and areas of 256K pixels and more are split into horizontal bands
+over `GOMAXPROCS` goroutines. Under a rounded clip (`SetRoundClip`) the straight
+middle is one band-copy, the corner rows go span by span.
+
+How the engine learns that a source is opaque (it must not scan: `(*image.RGBA).Opaque`
+reads every pixel, as much as the copy itself):
+
+```go
+buf := image.NewRGBA(image.Rect(0, 0, w, h)) // every pixel has A == 255
+img := widget.OpaqueImage(buf)               // keep it next to the buffer, not per frame
+ctx.DrawImage(img, x, y)
+ctx.DrawImageScaled(img, x, y, w, h)         // 1:1 (physical size == source size)
+widget.DrawImageRect(ctx, img, sr, dr, f)    // 1:1 (sr size == dr size in physical pixels)
+```
+
+- `*image.YCbCr`, `*image.Gray`, `*image.Gray16` and `*image.CMYK` are opaque by type -
+  no wrapping needed. `*image.RGBA` / `*image.NRGBA` are fast-pathed once declared.
+- `widget.OpaqueImage(img)` returns `*widget.OpaqueSource` (an `image.Image`, with
+  `RGBA64At` and `SubImage`, so other contexts still draw it normally) or `img` itself
+  if it is opaque by type / already marked. `widget.OpaqueHinter` (`OpaqueHint() bool`)
+  lets your own image type declare it; `widget.IsOpaqueImage(img)` answers without
+  scanning and returns the unwrapped image.
+- The mark is a promise: all pixels have alpha 255. A broken promise makes translucent
+  places overwrite the background instead of letting it through.
+- The scaled-image cache is keyed by the wrapped image, so `InvalidateImageCache` works
+  with either the wrapper or the buffer.
+- Scaled (not 1:1) draws still go through the cache and `Over`; only the 1:1 case is
+  fast-pathed. `DrawImageRect` at 1:1 also skips the resampling for any `*image.RGBA`
+  (the kernels degenerate to identity - same bytes as before), declared opaque or not.
+
+Tests: `engine/blit_opaque_test.go` (byte-equal to `Over` for RGBA/NRGBA/YCbCr/Gray/
+sub-image, both pixel formats, clip, round clip, small and parallel sizes; the `Src`
+semantics are proven by a translucent source declared opaque), `widget/opaqueimage_test.go`.
+
+### Recycled frame buffers: `Engine.SetFrameRecycling`, `Frame.Release` (E15)
+
+The 33 MB allocated per full-window frame is the tile data slab (`DirtyTile.Data` are
+sub-slices of it). The `Frames()` contract is that the consumer owns `Data` for good,
+so the engine cannot reuse it on its own. Recycling is therefore explicit:
+
+```go
+eng.SetFrameRecycling(true)
+for fr := range eng.Frames() {
+    apply(fr)       // read fr.Tiles[i].Data
+    fr.Release()    // Data is invalid from here on; the buffer returns to the pool
+}
+```
+
+- Off by default: behaviour and lifetime of `Data` are exactly as before.
+- On: `Data` is valid until `Release`. Not calling `Release` is allowed - the buffer is
+  left to the garbage collector. `Release` is idempotent (also on copies of the frame)
+  and a no-op for frames not built by the engine.
+- Frames the engine drops from a full channel, or discards on resize, are returned by the
+  engine itself. Frames shown to a synchronous `FrameSink` are pinned and never returned
+  (what a sink keeps is unknown to the engine).
+- `window` turns recycling on by itself and releases a frame right after copying it into
+  the window buffer.
+- Pool: two size classes (up to 1 MB / larger, rounded to 256 KB), `sync.Pool`, so idle
+  memory is given back by the runtime. Public pieces: `output.GetSlab`, `output.Slab`,
+  `Frame.AttachSlabs`, `Frame.Pin`, `Frame.Release`.
+
+Measured (`BenchmarkPan4K_*` in `engine/pan_bench_test.go`, 3840x2160, one frame = a
+whole new picture, Intel Core Ultra 7 265K, Windows):
+
+| | ms/frame | allocated/frame |
+|---|---|---|
+| before (`Over`, no recycling) | 29.3 | 34.0 MB |
+| recycling only | 29.3 | 0.8 MB |
+| `OpaqueImage` only | 6.0 | 34.0 MB |
+| `OpaqueImage` + recycling | 5.5 | 0.8 MB |
+| `DrawImageScaled` 1:1, before / `OpaqueImage` + recycling | 31.8 / 5.5 | 34.0 / 2.6 MB |
+
+The remaining 5.5 ms is the frame diff and the tile copy, spread over the cores.
+
+### Lazy fallback fonts (E16)
+
+`engine.New` used to read every file of the fallback chain (on Windows Segoe UI Symbol,
+Nirmala, Segoe UI Emoji and others - about 22 MB, 21 ms, 53 MB allocated by a buffer that
+doubled while reading). Now `New` only registers the paths (a `stat` each: a missing file
+is not put in the chain, as before). A file is read and parsed when the chain is walked
+down to it: a rune absent from the primary font is looked up in chain order and the walk
+stops at the first font that has it, so fonts after that one are not touched; a rune that
+no font has loads each file once. Ordinary text never enters the chain.
+
+- The chain order is unchanged. Text frames are byte-equal to the eager version (tests
+  compare pixels, measured widths and rune positions of plain and shaped text, for three
+  chain orders).
+- The shaper (RTL, Indic, emoji) walks the chain the same lazy way (`chainFontmap`).
+  An emoji rune walks to the first coloured font that has it.
+- Thread safety: the frame goroutine and the application's measurer may both trigger a
+  load; a load is done once under the entry's mutex, the loaded font is read atomically.
+  DPI and sub-pixel mode (`setDPIAll`, `setTextSubpixel`) are applied to loaded fonts at
+  once and picked up by unloaded ones when they load.
+- `readFileBounded` (used for every font file) now reads a file of known size into one
+  exactly sized buffer instead of `io.ReadAll`.
+- `Engine.RegisterFallbackFont*` stay eager (the caller hands over data or wants the error).
+
+Measured (first `engine.New` of the process, 1280x800, cold file cache of fonts,
+`TestEngineNew_ColdReport` with `HG_REPORT_NEW=1`): 19 ms and 60.4 MB allocated (30.7 MB
+stay live) before; 1.5 ms and 7.9 MB (the two canvas buffers; 7.8 MB live) now.
+
+Tests: `engine/fallbackfont_test.go` (no file is read by `New`, by a frame of plain text or
+at registration; the first exotic glyph reads exactly the chain prefix up to its font; a
+glyph found nowhere reads each file once; eager/lazy equality; DPI and sub-pixel at load;
+concurrent loading under `-race`; `readFileBounded` allocation).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
