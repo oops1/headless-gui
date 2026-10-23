@@ -57,6 +57,14 @@ func x11BitmapCursorRequests(ids x11CursorIDs, c int) [][]byte {
 		}
 	}
 
+	return x11MonoCursorRequests(ids, w, h, src, mask, hotX, hotY)
+}
+
+// x11MonoCursorRequests собирает запросы курсора из двух 1-битных карт размера
+// w×h: src — точки рисунка (чёрные), mask — точки видимой части курсора.
+// Общая часть форм курсора (x11BitmapCursorRequests) и курсора-картинки без
+// RENDER (x11cursorimage.go).
+func x11MonoCursorRequests(ids x11CursorIDs, w, h int, src, mask [][2]int16, hotX, hotY int) [][]byte {
 	reqs := [][]byte{
 		x11CreatePixmapReq(ids.pixSrc, ids.drawable, w, h),
 		x11CreatePixmapReq(ids.pixMask, ids.drawable, w, h),

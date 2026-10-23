@@ -417,6 +417,7 @@ var (
 
 	_ ImageRectDrawer       = (*svOffsetCtx)(nil)
 	_ ImageCacheInvalidator = (*svOffsetCtx)(nil)
+	_ PixelBlitter          = (*svOffsetCtx)(nil)
 	_ AAShapes          = (*svOffsetCtxAA)(nil)
 )
 
@@ -484,10 +485,24 @@ func (o *svOffsetCtx) DrawImageRect(src image.Image, sr, dr image.Rectangle, f I
 	DrawImageRect(o.inner, src, sr, dr.Sub(image.Pt(o.dx, o.dy)), f)
 }
 
+// BlitPixels пробрасывает копирование чужого буфера пиксель в пиксель
+// (PixelBlitter) внутреннему контексту со сдвигом; без поддержки в нём —
+// запасной путь помощника.
+func (o *svOffsetCtx) BlitPixels(src *image.RGBA, sr image.Rectangle, x, y int, opaque bool) {
+	BlitPixels(o.inner, src, sr, x-o.dx, y-o.dy, opaque)
+}
+
 // InvalidateImageCache пробрасывает сброс кэша масштабирования внутреннему
 // контексту (ImageCacheInvalidator); без кэша в нём — ничего не делает.
 func (o *svOffsetCtx) InvalidateImageCache(src image.Image) {
 	InvalidateImageCache(o.inner, src)
+}
+
+// HasGlyph пробрасывает вопрос о глифе (GlyphCoverage); контекст без ответа
+// — «нет».
+func (o *svOffsetCtx) HasGlyph(r rune) bool {
+	has, _ := ContextHasGlyph(o.inner, r)
+	return has
 }
 
 func (o *svOffsetCtx) DrawText(text string, x, y int, col color.RGBA) {

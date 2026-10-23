@@ -17,6 +17,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -50,6 +51,7 @@ const (
 type wlOutputInfo struct {
 	global uint32 // имя глобала registry
 	id     uint32 // объект wl_output
+	ver    uint32 // версия, с которой он привязан
 	xdgID  uint32 // объект zxdg_output_v1 (0 — нет)
 
 	// wl_output.geometry / mode / scale / name / description.
@@ -75,6 +77,9 @@ type wlOutputInfo struct {
 type wlOutputs struct {
 	mu   sync.Mutex
 	list []*wlOutputInfo
+	// live — начальная привязка выводов сделана: объявленные после неё
+	// выводы привязываются сразу (wayland_monitor_change_linux.go).
+	live atomic.Bool
 }
 
 func (o *wlOutputs) add(global, id uint32) *wlOutputInfo {
@@ -122,30 +127,41 @@ func (w *WaylandWindow) bindOutputs() {
 	}
 	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
 
-	if w.gXdgOutMgr != 0 && w.xdgOutMgrID == 0 && len(names) > 0 {
+	for _, name := range names {
+		w.bindOneOutput(name)
+	}
+	// Дальше новые выводы привязываются по мере объявления (outputGlobalAdded).
+	w.outs.live.Store(true)
+}
+
+// bindOneOutput привязывает один wl_output (и его логическое описание, если
+// есть zxdg_output_manager_v1).
+func (w *WaylandWindow) bindOneOutput(name uint32) {
+	if w.gXdgOutMgr != 0 && w.xdgOutMgrID == 0 {
 		v := min(w.gXdgOutVer, xdgOutVersion)
 		w.xdgOutMgrID = w.bind(w.gXdgOutMgr, "zxdg_output_manager_v1", max(v, 1))
 	}
-	for _, name := range names {
-		// Масштаб приходит с версии 2, имя с 4: берём то, что есть, но не
-		// выше четвёртой — новее нам незачем.
-		v := min(w.gOutputs[name], wlOutputVersionName)
-		id := w.bind(name, "wl_output", v)
-		w.scale.mu.Lock()
-		if w.scale.outputs == nil {
-			w.scale.outputs = map[uint32]float64{}
-		}
-		w.scale.outputs[id] = 0 // масштаб придёт событием scale
-		w.scale.mu.Unlock()
+	// Масштаб приходит с версии 2, имя с 4: берём то, что есть, но не
+	// выше четвёртой — новее нам незачем.
+	v := min(w.gOutputs[name], wlOutputVersionName)
+	id := w.bind(name, "wl_output", v)
+	w.scale.mu.Lock()
+	if w.scale.outputs == nil {
+		w.scale.outputs = map[uint32]float64{}
+	}
+	w.scale.outputs[id] = 0 // масштаб придёт событием scale
+	w.scale.mu.Unlock()
 
-		info := w.outs.add(name, id)
-		if w.xdgOutMgrID != 0 {
-			xid := w.newID()
-			w.outs.mu.Lock()
-			info.xdgID = xid
-			w.outs.mu.Unlock()
-			w.send(newWlMsg(w.xdgOutMgrID, xdgOutMgrGetXdgOutput).putUint(xid).putUint(id), -1)
-		}
+	info := w.outs.add(name, id)
+	w.outs.mu.Lock()
+	info.ver = v
+	w.outs.mu.Unlock()
+	if w.xdgOutMgrID != 0 {
+		xid := w.newID()
+		w.outs.mu.Lock()
+		info.xdgID = xid
+		w.outs.mu.Unlock()
+		w.send(newWlMsg(w.xdgOutMgrID, xdgOutMgrGetXdgOutput).putUint(xid).putUint(id), -1)
 	}
 }
 
@@ -203,10 +219,12 @@ func (w *WaylandWindow) handleOutputEvent(obj uint32, opcode uint16, b []byte) {
 	if scale > 0 {
 		w.noteOutputScale(obj, scale) // масштаб поверхности (wayland_scale_linux.go)
 	}
+	w.noteMonitorsChanged() // монитор мог перенастроиться (wayland_monitor_change_linux.go)
 }
 
 // handleXdgOutputEvent разбирает событие zxdg_output_v1.
 func (w *WaylandWindow) handleXdgOutputEvent(obj uint32, opcode uint16, b []byte) {
+	defer w.noteMonitorsChanged()
 	w.outs.mu.Lock()
 	defer w.outs.mu.Unlock()
 	var info *wlOutputInfo

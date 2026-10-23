@@ -62,15 +62,45 @@ func (s *surface) onNative(fn func()) {
 // Курсор окну ОС отдаётся на его потоке и только при смене: иначе каждое
 // движение мыши стоило бы сообщения потоку окна.
 func (s *surface) deliverMove(x, y int) {
+	left := x == pointerOutside && y == pointerOutside
 	x, y = s.toContent(x, y)
 	s.eng.SendMouseMove(x, y)
+	if left {
+		// Указатель ушёл с окна (WM_MOUSELEAVE, LeaveNotify, wl_pointer.leave):
+		// после движения в точку вне окна, снимающего наведение, виджетам с
+		// widget.PointerLeaveHandler приходит и само событие ухода.
+		if pl, ok := s.eng.(pointerLeaver); ok {
+			pl.SendPointerLeave()
+		}
+	}
 	s.ptrX, s.ptrY, s.ptrKnown = x, y, true
 	s.syncCursor(x, y)
+}
+
+// pointerLeaver — движок умеет сообщить виджетам об уходе указателя с окна
+// (реализует *engine.Engine). Опциональный по той же причине, что modifierSink.
+type pointerLeaver interface {
+	SendPointerLeave()
 }
 
 // syncCursor отдаёт окну ОС форму курсора для точки (x, y) контента — только
 // если она изменилась. Горутина движка.
 func (s *surface) syncCursor(x, y int) {
+	// Курсор-картинка (Engine.SetCursorImage) сильнее любой формы и от точки
+	// не зависит; отдаётся ОС только при смене (по ключу содержимого).
+	if ci := cursorImageOf(s.eng); ci != nil {
+		if is, ok := s.native.(cursorImageSetter); ok {
+			if !s.imgSet || s.img != ci.Key {
+				s.img, s.imgSet = ci.Key, true
+				s.cursorSet = false // форма после картинки отдаётся заново
+				s.onNative(func() { is.SetCursorImage(ci) })
+			}
+			return
+		}
+	}
+	// Картинку сняли. Форма, отданная до неё, ОС уже не показана; «следующая
+	// форма дойдёт до ОС» обеспечил cursorSet=false при показе картинки.
+	s.imgSet = false
 	sc, ok := s.native.(interface{ SetCursor(c int) })
 	if !ok {
 		return

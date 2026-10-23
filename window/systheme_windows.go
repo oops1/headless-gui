@@ -10,6 +10,7 @@ package window
 // зависимостей это не добавляет.
 
 import (
+	"image/color"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -27,6 +28,13 @@ const (
 	// человек выбрал «Свой» режим: берёшь не тот — получаешь светлое окно на
 	// тёмной системе.
 	appsUseLightTheme = "AppsUseLightTheme"
+
+	// dwmKey — раздел DWM пользователя: там Windows хранит акцентный цвет.
+	// AccentColor — DWORD ABGR, выбранный в параметрах «Цвета»;
+	// ColorizationColor (ARGB) — запасной, его пишут и старые версии.
+	dwmKey               = `Software\Microsoft\Windows\DWM`
+	dwmAccentColor       = "AccentColor"
+	dwmColorizationColor = "ColorizationColor"
 
 	// settingChangeAreaMax — сколько знаков строки lParam читаем. Нужная нам
 	// строка («ImmersiveColorSet») втрое короче; предел нужен, чтобы чужое
@@ -51,6 +59,42 @@ func detectSystemTheme() SystemTheme {
 		return SystemThemeUnknown
 	}
 	return systemThemeFromAppsUseLight(v)
+}
+
+// detectSystemAccent читает акцентный цвет пользователя из реестра. Нет
+// раздела или значений (Windows до 8, Server Core) — ok=false.
+func detectSystemAccent() (color.RGBA, bool) {
+	k, err := registry.OpenKey(registry.CURRENT_USER, dwmKey, registry.QUERY_VALUE)
+	if err != nil {
+		return color.RGBA{}, false
+	}
+	defer k.Close()
+	if v, _, err := k.GetIntegerValue(dwmAccentColor); err == nil {
+		return accentFromDWMAccent(uint32(v)), true
+	}
+	if v, _, err := k.GetIntegerValue(dwmColorizationColor); err == nil {
+		return accentFromColorization(uint32(v)), true
+	}
+	return color.RGBA{}, false
+}
+
+// watchSystemAccent подписывается на смену акцентного цвета. Тот же
+// WM_SETTINGCHANGE "ImmersiveColorSet", что и у темы: Windows относит оба
+// параметра к одной группе, так что отдельного сообщения для акцента нет, а
+// значение перечитывается из реестра. Подписка независима от подписки на тему
+// (watchSystemTheme): у каждой своя ячейка окна.
+func watchSystemAccent(native NativeWindow, emit func(color.RGBA, bool)) (stop func()) {
+	w, ok := native.(*Win32Window)
+	if !ok {
+		return nil
+	}
+	fn := func(area string) {
+		if isImmersiveColorSet(area) {
+			emit(detectSystemAccent())
+		}
+	}
+	w.onAccentChange.Store(&fn)
+	return func() { w.onAccentChange.Store(nil) }
 }
 
 // watchSystemTheme подписывается на смену темы через WM_SETTINGCHANGE окна.
@@ -85,15 +129,21 @@ func watchSystemTheme(native NativeWindow, emit func(SystemTheme)) (stop func())
 // вовсе, и приложению, которому тема не нужна, незачем разыменовывать то, что
 // ему не принадлежит.
 func (w *Win32Window) handleSettingChange(lparam uintptr) {
-	fn := w.onSettingChange.Load()
-	if fn == nil || lparam == 0 {
+	fn, fa := w.onSettingChange.Load(), w.onAccentChange.Load()
+	if (fn == nil && fa == nil) || lparam == 0 {
 		return
 	}
 	// Указатель берём через адрес переменной, а не через unsafe.Pointer(lparam):
 	// это то же самое, но go vet не принимает прямое превращение числа в
 	// указатель, а память принадлежит системе, и vet в этом прав.
 	p := *(*unsafe.Pointer)(unsafe.Pointer(&lparam))
-	(*fn)(readUTF16Bounded(p, settingChangeAreaMax))
+	area := readUTF16Bounded(p, settingChangeAreaMax)
+	if fn != nil {
+		(*fn)(area)
+	}
+	if fa != nil {
+		(*fa)(area)
+	}
 }
 
 // readUTF16Bounded читает строку UTF-16 с нулём на конце, но не больше max

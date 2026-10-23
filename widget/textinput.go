@@ -3,6 +3,7 @@ package widget
 import (
 	"image"
 	"image/color"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -78,7 +79,7 @@ type TextInput struct {
 	isPassword   bool // true — режим пароля
 	showPassword bool // true — показать пароль (по нажатию глазика)
 	eyeHovered   bool // курсор над кнопкой-глазиком
-	MaskRune     rune // символ маски (по умолчанию '●')
+	MaskRune     rune // символ маски; 0 — '●', если он есть в шрифте по умолчанию, иначе '•' (см. passwordMask)
 
 	PaddingX int
 	PaddingY int
@@ -124,6 +125,11 @@ type TextInput struct {
 	OnEnter func()
 	// OnChange вызывается при каждом изменении текста.
 	OnChange func(text string)
+	// OnSecretChange — то же для поля пароля, но без текста: только число
+	// символов. Если задан, в режиме пароля OnChange не вызывается — каждый
+	// его вызов делал бы строку-копию пароля, которую затереть нечем
+	// (замечание WinLine после v3.38.0: окно контроля учётных записей).
+	OnSecretChange func(n int)
 }
 
 // textEdit — снимок состояния поля для Undo/Redo.
@@ -156,7 +162,9 @@ func NewTextInput(placeholder string) *TextInput {
 func NewPasswordInput(placeholder string) *TextInput {
 	ti := NewTextInput(placeholder)
 	ti.isPassword = true
-	ti.MaskRune = '●'
+	// Поле, которое собрал сборщик мусора, затирает свой буфер: иначе пароль
+	// лежал бы в памяти, пока её кто-нибудь не перезапишет.
+	runtime.SetFinalizer(ti, func(t *TextInput) { clear(t.runes[:cap(t.runes)]) })
 	return ti
 }
 
@@ -299,7 +307,7 @@ func (t *TextInput) deleteSel() bool {
 		return false
 	}
 	lo, hi := t.normSel()
-	t.runes = append(t.runes[:lo], t.runes[hi:]...)
+	t.cutRunes(lo, hi)
 	t.caretPos = lo
 	t.selStart = -1
 	return true
@@ -433,7 +441,12 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	t.mu.Lock()
 	changed := false
 	isUndoRedo := false
-	before := textEdit{text: string(t.runes), caret: t.caretPos}
+	// Снимок для Undo — только вне режима пароля: в нём это была бы строка-
+	// копия пароля на КАЖДОЕ нажатие клавиши, которую занулить нечем.
+	var before textEdit
+	if !t.isPassword {
+		before = textEdit{text: string(t.runes), caret: t.caretPos}
+	}
 	// Снимок визуального состояния — для авто-инвалидации при фактическом изменении.
 	caret0, sel0, sel1 := t.caretPos, t.selStart, t.selEnd
 
@@ -508,13 +521,13 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 			if t.caretPos > 0 {
 				start := t.wordLeft(t.caretPos)
 				if start < t.caretPos {
-					t.runes = append(t.runes[:start], t.runes[t.caretPos:]...)
+					t.cutRunes(start, t.caretPos)
 					t.caretPos = start
 					changed = true
 				}
 			}
 		} else if t.caretPos > 0 {
-			t.runes = append(t.runes[:t.caretPos-1], t.runes[t.caretPos:]...)
+			t.cutRunes(t.caretPos-1, t.caretPos)
 			t.caretPos--
 			changed = true
 		}
@@ -543,12 +556,12 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 			if t.caretPos < len(t.runes) {
 				end := t.wordRight(t.caretPos)
 				if end > t.caretPos {
-					t.runes = append(t.runes[:t.caretPos], t.runes[end:]...)
+					t.cutRunes(t.caretPos, end)
 					changed = true
 				}
 			}
 		} else if t.caretPos < len(t.runes) {
-			t.runes = append(t.runes[:t.caretPos], t.runes[t.caretPos+1:]...)
+			t.cutRunes(t.caretPos, t.caretPos+1)
 			changed = true
 		}
 
@@ -556,7 +569,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 		if t.AcceptsReturn {
 			// Многострочный режим: вставляем перевод строки
 			t.deleteSel()
-			t.runes = append(t.runes, 0) // расширяем
+			t.growRunes(1) // расширяем
 			copy(t.runes[t.caretPos+1:], t.runes[t.caretPos:])
 			t.runes[t.caretPos] = '\n'
 			t.caretPos++
@@ -604,7 +617,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 				copy(ins, t.runes[:t.caretPos])
 				ins[t.caretPos] = e.Rune
 				copy(ins[t.caretPos+1:], t.runes[t.caretPos:])
-				t.runes = ins
+				t.adoptRunes(ins)
 				t.caretPos++
 				changed = true
 			}
@@ -627,8 +640,10 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 
 	t.clampCaret()
 	visChanged := changed || t.caretPos != caret0 || t.selStart != sel0 || t.selEnd != sel1
-	text := string(t.runes)
-	onCh := t.OnChange
+	var notify func()
+	if changed {
+		notify = t.changeNotifyLocked()
+	}
 	fireEnter := t.fireEnter
 	t.fireEnter = false
 	onEnter := t.OnEnter
@@ -640,8 +655,8 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 
 	// Синхронный вызов вне t.mu: сохраняет порядок изменений (writeBack в
 	// модель идёт строго в порядке нажатий) и единую модель исполнения.
-	if changed && onCh != nil {
-		onCh(text)
+	if notify != nil {
+		notify()
 	}
 	if fireEnter && onEnter != nil {
 		onEnter()
@@ -823,7 +838,7 @@ func (t *TextInput) pasteFromClipboard() bool {
 	copy(ins, t.runes[:t.caretPos])
 	copy(ins[t.caretPos:], paste)
 	copy(ins[t.caretPos+n:], t.runes[t.caretPos:])
-	t.runes = ins
+	t.adoptRunes(ins)
 	t.caretPos += n
 	return true
 }
@@ -1012,17 +1027,16 @@ func (t *TextInput) showContextMenu(x, y int) {
 				copy(ins, t.runes[:t.caretPos])
 				copy(ins[t.caretPos:], paste)
 				copy(ins[t.caretPos+n:], t.runes[t.caretPos:])
-				t.runes = ins
+				t.adoptRunes(ins)
 				t.caretPos += n
 				t.clampCaret()
-				text := string(t.runes)
-				onCh := t.OnChange
+				notify := t.changeNotifyLocked()
 				t.mu.Unlock()
 				if hadSel || n > 0 {
 					t.Invalidate() // текст фактически изменился
 				}
-				if onCh != nil {
-					onCh(text) // синхронно — вне t.mu
+				if notify != nil {
+					notify() // синхронно — вне t.mu
 				}
 			},
 		},
@@ -1102,7 +1116,7 @@ func (t *TextInput) Draw(ctx DrawContext) {
 	eyeHov := t.eyeHovered
 	hasError := t.validationError != ""
 	if maskRune == 0 {
-		maskRune = '●'
+		maskRune = passwordMask(ctx)
 	}
 	// Отображаемая строка: маска (скрытый пароль) или сам текст.
 	//
@@ -1430,4 +1444,19 @@ func (t *TextInput) drawLeadingIcon(ctx DrawContext, b image.Rectangle) {
 	x := b.Min.X + t.PaddingX
 	y := b.Min.Y + (b.Dy()-sz)/2
 	ctx.DrawImageScaled(t.LeadingIcon, x, y, sz, sz)
+}
+
+// passwordMask — символ маски пароля по умолчанию.
+//
+// '●' (U+25CF) есть не в каждом шрифте: во встроенном Open Sans его нет. Тогда
+// он брался из шрифта-замены, и на ALT Workstation 11.2 в светлой теме точки
+// вышли невидимыми — поле оставалось белым, а каретка уезжала вправо
+// (замечание WinLine после v3.38.0). '•' (U+2022) есть почти везде и рисуется
+// основным шрифтом, то есть цветом текста. Контекст, который не умеет
+// ответить про глиф, получает '•' — он надёжнее.
+func passwordMask(ctx DrawContext) rune {
+	if has, known := ContextHasGlyph(ctx, '●'); known && has {
+		return '●'
+	}
+	return '•'
 }

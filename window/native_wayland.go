@@ -83,6 +83,10 @@ const (
 	wlPointerEvMotion = 2
 	wlPointerEvButton = 3
 	wlPointerEvAxis   = 4
+	// События, которых при привязанной версии 4 нет вовсе; разбор оставлен на
+	// случай, если композитор их пришлёт (версии 5 и 8 wl_pointer).
+	wlPointerEvAxisDiscrete = 8 // axis, discrete (int32) — версия 5
+	wlPointerEvAxisValue120 = 9 // axis, value120 (int32) — версия 8
 
 	// wlAxisPixelScale — множитель перевода wl_pointer.axis (уже в пикселях
 	// после ÷256) к шагу движка (~40 px/notch; дискретное колесо даёт ~10/notch).
@@ -206,6 +210,16 @@ type WaylandWindow struct {
 	// нажатия; им пользуется window.surface, если бэкенд умеет (см.
 	// keyRepeatSource).
 	onKeyDownRepeat func(vk int, repeat bool)
+	// onRawKey — приёмник клавиш со скан-кодом (rawKeySource): когда задан,
+	// остальные приёмники клавиш не вызываются, а клавиши вне таблицы VK не
+	// отбрасываются. onWheelRaw — приёмник сырого колеса (wheelRawSource).
+	onRawKey   func(k rawKey)
+	onWheelRaw func(x, y int, dx, dy float64, precise bool, legacy func())
+	// axisDiscrete/axisValue120 — целые щелчки по осям (0 — вертикаль, 1 —
+	// горизонталь), сообщённые композитором перед очередным axis (версии 5 и 8
+	// wl_pointer); при версии 4, которую бэкенд привязывает, не приходят.
+	axisDiscrete [2]int32
+	axisValue120 [2]int32
 
 	// wl_data_device_manager (Drag&Drop файлов из ОС).
 	gDataDevMgr    uint32 // имя глобала registry
@@ -322,6 +336,20 @@ type WaylandWindow struct {
 	popupShape     int
 	popupShapeSet  bool
 	ptrOverPopup   atomic.Bool
+	// Курсор-картинка (wayland_cursorimage_linux.go): картинка окна и над
+	// попапами, кэш буферов по ключу, буфер, прикреплённый к курсорной
+	// поверхности (его не вытесняем), её буферный масштаб. Всё под cursorMu.
+	// imgCreated — сколько буферов построено за жизнь окна (тесты).
+	cursorImg    *widget.CursorImage
+	popupImg     *widget.CursorImage
+	imgCursors   *cursorLRU[wlImgBuf]
+	curSurfBuf   uint32
+	curSurfScale int
+	imgCreated   int
+
+	// plock — захват указателя (wayland_pointerlock_linux.go).
+	plock wlPtrLock
+
 	cursorSurfID     uint32
 	cursorPoolID     uint32
 	cursorFD         int
@@ -399,6 +427,14 @@ type WaylandWindow struct {
 
 	// drag — перетаскивание, начатое самим окном (BeginDragFiles).
 	drag wlDragSource
+
+	// Захват клавиатуры (wayland_keygrab_linux.go): имя глобала
+	// zwp_keyboard_shortcuts_inhibit_manager_v1 и состояние запроса.
+	gShortcutsInhibit uint32
+	kgrab             wlKeyGrab
+
+	// Слежение за конфигурацией мониторов (wayland_monitor_change_linux.go).
+	monWatch wlMonitorWatch
 }
 
 // waylandSocketPath возвращает путь к сокету композитора или "".
@@ -777,6 +813,10 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 	if w.activationEvent(obj, opcode, b) {
 		return
 	}
+	// active/inactive нашего запроса на захват сочетаний клавиш.
+	if w.keyGrabEvent(obj, opcode) {
+		return
+	}
 
 	switch {
 	case obj == wlDisplayID && opcode == wlDisplayEvError:
@@ -814,6 +854,8 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 				w.gOutputs = map[uint32]uint32{}
 			}
 			w.gOutputs[name] = version
+			// Монитор подключили, пока окно работает.
+			w.outputGlobalAdded(name)
 		case "zxdg_output_manager_v1":
 			w.gXdgOutMgr = name
 			w.gXdgOutVer = version
@@ -827,15 +869,29 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			// Необязательное расширение: с ним курсор рисует компоновщик
 			// из системной темы, без него — своя картинка.
 			w.gCursorShapeMgr = name
+		case "zwp_pointer_constraints_v1":
+			// Необязательные расширения захвата указателя (SetPointerLock): без
+			// любого из двух он возвращает false.
+			w.plock.gConstraints = name
+		case "zwp_relative_pointer_manager_v1":
+			w.plock.gRelative = name
 		case "xdg_activation_v1":
 			// Необязательное расширение: без него окно на передний план не
 			// вывести (Activate вернёт false).
 			w.gActivation = name
+		case "zwp_keyboard_shortcuts_inhibit_manager_v1":
+			// Необязательное расширение: без него захват клавиатуры
+			// (SetKeyboardGrab) невозможен.
+			w.gShortcutsInhibit = name
 		case "xdg_toplevel_icon_manager_v1":
 			// Необязательное расширение: без него значок окна не поставить
 			// (SetIcon вернёт ErrIconUnsupported).
 			w.gToplevelIcon = name
 		}
+
+	case obj == w.registryID && opcode == wlRegistryEvGlobalRemove:
+		// Глобал исчез; нас интересуют мониторы (wayland_monitor_change_linux.go).
+		w.registryGlobalRemove(b)
 
 	case obj == w.wmBaseID && opcode == xdgWmBaseEvPing:
 		serial := binary.LittleEndian.Uint32(b[0:4])
@@ -927,6 +983,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 	case obj == w.pointerID:
 		w.handlePointer(opcode, b)
 
+	case w.isPtrLockObject(obj):
+		w.handlePtrLock(obj, opcode, b)
+
 	case obj == w.keyboardID:
 		w.handleKeyboard(opcode, b)
 
@@ -972,20 +1031,37 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			}
 		}
 
-	case (obj == w.bufID[0] || obj == w.bufID[1]) && opcode == wlBufferEvRelease:
-		w.mu.Lock()
-		if obj == w.bufID[0] {
-			w.bufBusy[0] = false
-		} else {
-			w.bufBusy[1] = false
-		}
-		ch := w.bufRelease
-		w.mu.Unlock()
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
+	case opcode == wlBufferEvRelease && w.releaseFrameBuffer(obj):
 	}
+}
+
+// releaseFrameBuffer отмечает кадровый буфер obj свободным (wl_buffer.release)
+// и будит того, кто ждёт свободный буфер. false — obj не кадровый буфер.
+//
+// Сверка obj с bufID — под тем же замком, под которым destroyPool эти
+// идентификаторы обнуляет: Close зовёт destroyPool из горутины приложения, пока
+// цикл событий ещё разбирает события (ловил -race).
+func (w *WaylandWindow) releaseFrameBuffer(obj uint32) bool {
+	w.mu.Lock()
+	i := -1
+	switch {
+	case obj != 0 && obj == w.bufID[0]:
+		i = 0
+	case obj != 0 && obj == w.bufID[1]:
+		i = 1
+	}
+	if i < 0 {
+		w.mu.Unlock()
+		return false
+	}
+	w.bufBusy[i] = false
+	ch := w.bufRelease
+	w.mu.Unlock()
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+	return true
 }
 
 // handlePointer — события мыши. Координаты enter/motion — fixed 24.8.
@@ -1092,23 +1168,58 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 			}
 			return
 		}
-		if w.onMouseWheelPixels != nil {
-			// Высокоточный путь: wl_fixed → пиксели (÷256), масштаб до «notch»
-			// в ~40 px под общий шаг движка.
-			amt := float64(val) / 256.0 * wlAxisPixelScale
-			if axis == 0 {
-				w.onMouseWheelPixels(w.ptrX, w.ptrY, 0, amt)
-			} else if axis == 1 {
-				w.onMouseWheelPixels(w.ptrX, w.ptrY, amt, 0)
+		ax := int(axis)
+		var disc, v120 int32
+		if ax == 0 || ax == 1 {
+			disc, v120 = w.axisDiscrete[ax], w.axisValue120[ax]
+			w.axisDiscrete[ax], w.axisValue120[ax] = 0, 0
+		}
+		legacy := func() {
+			if w.onMouseWheelPixels != nil {
+				// Высокоточный путь: wl_fixed → пиксели (÷256), масштаб до «notch»
+				// в ~40 px под общий шаг движка.
+				amt := float64(val) / 256.0 * wlAxisPixelScale
+				if axis == 0 {
+					w.onMouseWheelPixels(w.ptrX, w.ptrY, 0, amt)
+				} else if axis == 1 {
+					w.onMouseWheelPixels(w.ptrX, w.ptrY, amt, 0)
+				}
+			} else if axis == 0 && w.onMouseButton != nil {
+				// Фолбэк на тики.
+				id := 3 // wheel up
+				if val > 0 {
+					id = 4 // wheel down
+				}
+				w.onMouseButton(w.ptrX, w.ptrY, id, true)
+				w.onMouseButton(w.ptrX, w.ptrY, id, false)
 			}
-		} else if axis == 0 && w.onMouseButton != nil {
-			// Фолбэк на тики.
-			id := 3 // wheel up
-			if val > 0 {
-				id = 4 // wheel down
+		}
+		if w.onWheelRaw != nil && (axis == 0 || axis == 1) {
+			raw, precise := waylandAxisRaw(val, disc, v120)
+			if raw != 0 {
+				x, y := w.ptrX, w.ptrY
+				if axis == 0 {
+					w.onWheelRaw(x, y, 0, raw, precise, legacy)
+				} else {
+					w.onWheelRaw(x, y, raw, 0, precise, legacy)
+				}
 			}
-			w.onMouseButton(w.ptrX, w.ptrY, id, true)
-			w.onMouseButton(w.ptrX, w.ptrY, id, false)
+			return
+		}
+		legacy()
+	case wlPointerEvAxisDiscrete, wlPointerEvAxisValue120:
+		// axis(uint32), значение(int32): запоминаем до ближайшего axis.
+		if len(b) < 8 {
+			return
+		}
+		ax := binary.LittleEndian.Uint32(b[0:4])
+		n := int32(binary.LittleEndian.Uint32(b[4:8]))
+		if ax <= 1 {
+			if opcode == wlPointerEvAxisDiscrete {
+				w.axisDiscrete[ax] = n
+			} else {
+				w.axisValue120[ax] = n
+			}
 		}
 	}
 }
@@ -1162,7 +1273,9 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 		pressed := binary.LittleEndian.Uint32(b[12:16]) == 1
 		if !pressed {
 			w.repeat.stopKey(key)
-			if vk := w.vkForKey(key); vk != 0 && w.onKeyUp != nil {
+			if w.onRawKey != nil {
+				w.onRawKey(rawKey{VK: w.vkForKey(key), Scan: uint16(key)})
+			} else if vk := w.vkForKey(key); vk != 0 && w.onKeyUp != nil {
 				w.onKeyUp(vk)
 			}
 			return
@@ -1203,7 +1316,9 @@ func (w *WaylandWindow) vkForKey(key uint32) int {
 // repeat=true — это автоповтор, а не новое нажатие: приложению важно знать
 // разницу там, где нажатие что-то переключает.
 func (w *WaylandWindow) deliverKey(key uint32, repeat bool) {
-	if vk := w.vkForKey(key); vk != 0 {
+	if w.onRawKey != nil {
+		w.onRawKey(rawKey{VK: w.vkForKey(key), Scan: uint16(key), Pressed: true, Repeat: repeat})
+	} else if vk := w.vkForKey(key); vk != 0 {
 		if w.onKeyDownRepeat != nil {
 			w.onKeyDownRepeat(vk, repeat)
 		} else if w.onKeyDown != nil {
@@ -1536,10 +1651,35 @@ func (w *WaylandWindow) SetTitle(title string) {
 	}
 }
 
-func (w *WaylandWindow) SetSize(width, height int)  { w.width, w.height = width, height }
-func (w *WaylandWindow) GetSize() (int, int)        { return w.width, w.height }
-func (w *WaylandWindow) SetPosition(x, y int)    {} // Wayland: позицией владеет композитор
+// SetSize запоминает новый размер окна (пиксели буфера). У окна с запретом
+// ресайза размер зафиксирован парой set_min_size == set_max_size, и просто
+// выставить другой буфер композитору нельзя: фиксация переносится на новый
+// размер, и он ответит configure с ним же. Растяжимое, развёрнутое и
+// полноэкранное окно размер выбирает не клиент: для них запоминается только
+// размер кадра, а окном по-прежнему распоряжается компоновщик.
+func (w *WaylandWindow) SetSize(width, height int) {
+	w.mu.Lock()
+	w.width, w.height = width, height
+	w.mu.Unlock()
+	if w.toplevelID == 0 || w.resizable.Load() || w.maximized.Load() || w.fullscreen.Load() {
+		return
+	}
+	w.applySizeLimits(false)
+}
+
+func (w *WaylandWindow) GetSize() (int, int) { return w.width, w.height }
+
+// SetPosition на Wayland не делает ничего и сделать не может: клиент не знает
+// положения своего окна на экране и не вправе его задавать, протокол xdg-shell
+// координат окна верхнего уровня не содержит вовсе (окном распоряжается
+// компоновщик). Всё, что допускает протокол, — попросить компоновщика
+// потащить окно за указателем (BeginMove, xdg_toplevel.move) по нажатию
+// кнопки мыши.
+func (w *WaylandWindow) SetPosition(x, y int) {}
+
+// GetPosition на Wayland всегда (0, 0): положение окна клиенту неизвестно.
 func (w *WaylandWindow) GetPosition() (int, int) { return 0, 0 }
+
 // SetCornerRadius задаёт скругление углов окна (логические точки). Со
 // скруглением буфер окна — ARGB с прозрачными углами; пул пересоздаётся на
 // следующем кадре.
@@ -1697,17 +1837,31 @@ func (w *WaylandWindow) Restore() {
 func (w *WaylandWindow) IsMaximized() bool { return w.maximized.Load() }
 
 // Callbacks
-func (w *WaylandWindow) SetOnResize(fn func(w, h int))                           { w.onResize = fn }
-func (w *WaylandWindow) SetOnClose(fn func() bool)                               { w.onClose = fn }
-func (w *WaylandWindow) SetOnMouseMove(fn func(x, y int))                        { w.onMouseMove = fn }
-func (w *WaylandWindow) SetOnMouseButton(fn func(x, y, button int, pressed bool)) { w.onMouseButton = fn }
+func (w *WaylandWindow) SetOnResize(fn func(w, h int))    { w.onResize = fn }
+func (w *WaylandWindow) SetOnClose(fn func() bool)        { w.onClose = fn }
+func (w *WaylandWindow) SetOnMouseMove(fn func(x, y int)) { w.onMouseMove = fn }
+func (w *WaylandWindow) SetOnMouseButton(fn func(x, y, button int, pressed bool)) {
+	w.onMouseButton = fn
+}
 
 // SetOnMouseWheelPixels регистрирует колбэк точной пиксельной дельты колеса/
 // тачпада (wl_pointer.axis). Без него бэкенд шлёт тики через SetOnMouseButton.
-func (w *WaylandWindow) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) { w.onMouseWheelPixels = fn }
-func (w *WaylandWindow) SetOnKeyDown(fn func(vk int))                            { w.onKeyDown = fn }
-func (w *WaylandWindow) SetOnKeyUp(fn func(vk int))                              { w.onKeyUp = fn }
-func (w *WaylandWindow) SetOnChar(fn func(r rune))                               { w.onChar = fn }
+func (w *WaylandWindow) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) {
+	w.onMouseWheelPixels = fn
+}
+
+// SetOnRawKey подписывает приёмник клавиш со скан-кодом (evdev). Реализует
+// rawKeySource.
+func (w *WaylandWindow) SetOnRawKey(fn func(k rawKey)) { w.onRawKey = fn }
+
+// SetOnWheelRaw подписывает приёмник сырого колеса. Реализует wheelRawSource.
+func (w *WaylandWindow) SetOnWheelRaw(fn func(x, y int, dx, dy float64, precise bool, legacy func())) {
+	w.onWheelRaw = fn
+}
+
+func (w *WaylandWindow) SetOnKeyDown(fn func(vk int)) { w.onKeyDown = fn }
+func (w *WaylandWindow) SetOnKeyUp(fn func(vk int))   { w.onKeyUp = fn }
+func (w *WaylandWindow) SetOnChar(fn func(r rune))    { w.onChar = fn }
 
 // SetOnActivate — активность окна (state activated в configure).
 func (w *WaylandWindow) SetOnActivate(fn func(active bool)) { w.onActivate = fn }

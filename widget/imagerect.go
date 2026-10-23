@@ -60,6 +60,23 @@ type ImageRectDrawer interface {
 	DrawImageRect(src image.Image, sr, dr image.Rectangle, f ImageFilter)
 }
 
+// GlyphCoverage — опциональная возможность контекста сказать, есть ли глиф
+// руны в ШРИФТЕ ПО УМОЛЧАНИЮ (без шрифтов-замен). Реализуется engine.Canvas.
+// Нужна виджету, который выбирает символ (маска пароля): символ из
+// шрифта-замены может прийти цветным глифом и не следовать цвету текста.
+type GlyphCoverage interface {
+	HasGlyph(r rune) bool
+}
+
+// ContextHasGlyph спрашивает контекст про глиф руны в шрифте по умолчанию.
+// known=false — контекст ответить не умеет.
+func ContextHasGlyph(ctx DrawContext, r rune) (has, known bool) {
+	if gc, ok := ctx.(GlyphCoverage); ok {
+		return gc.HasGlyph(r), true
+	}
+	return false, false
+}
+
 // ImageCacheInvalidator — опциональная возможность контекста сбросить кэш
 // масштабированных изображений (реализуется engine.Canvas). Нужна после
 // того, как пиксели картинки переписаны на месте: кэш ключует источник по

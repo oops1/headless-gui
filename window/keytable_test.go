@@ -99,7 +99,7 @@ func TestVKToKeyCode_OemAndSystem(t *testing.T) {
 // число приложению бесполезно, а завтрашняя константа молча поменяла бы
 // смысл события.
 func TestVKToKeyCode_UnknownStaysUnknown(t *testing.T) {
-	for _, vk := range []int{0x00, 0x07, 0x0A, 0xFF, 0x5F, 0xE0} {
+	for _, vk := range []int{0x00, 0x07, 0x0A, 0xFF, 0x5E, 0xE0} {
 		if got := vkToKeyCode(vk); got != widget.KeyUnknown {
 			t.Errorf("vkToKeyCode(0x%02X) = %d, ждал KeyUnknown", vk, got)
 		}

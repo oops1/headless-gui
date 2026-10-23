@@ -8719,6 +8719,635 @@ Tests: `widget/accessibility_nodes_test.go`, `widget/focusring_test.go`,
 (UIA through the vtables), `window/a11y_nodes_linux_test.go`,
 `window/a11y_nodes_live_linux_test.go` (AT-SPI, the second on the real bus).
 
+## v3.38.1: Windows 10 — a large window no longer stays blank
+
+On Windows 10 a window larger than about 1024×1024 physical pixels stayed blank
+(clicks still went to it), reported by the RDP client on v3.38.0 on two
+Windows 10 22H2 machines. The Win32 frame buffer was a Go slice. The Go heap on
+windows/amd64 reserves memory in 4 MB arenas by separate
+`VirtualAlloc(MEM_RESERVE)` calls, so a buffer over 4 MB almost always spans two
+reservations — and on Windows 10 `StretchDIBits` / `SetDIBitsToDevice` with such
+a source copies no line and returns 0 with `ERROR_SUCCESS`. Windows 11 does not.
+
+- The frame buffer is allocated with one `VirtualAlloc(MEM_COMMIT|MEM_RESERVE)`
+  (`window/framebuf_windows.go`) and released on resize and in `WM_DESTROY`;
+  a late frame after destruction is a no-op.
+- The result of `StretchDIBits` is checked: on 0 the window asks for a repaint
+  (`InvalidateRect`), at most three times in a row.
+- The first `WM_PAINT`, which arrives inside `Create` before the window wires
+  its repaint (`SetOnExpose`), is no longer lost: wiring the repaint asks the
+  system to repaint again.
+
+Tests: `window/framebuf_windows_test.go` — the buffer lies in one reservation
+(`VirtualQuery`), a 1500×950 frame reaches a live window, a frame after
+`WM_DESTROY` does nothing, the early paint is re-requested. The blank-window
+failure itself only reproduces on Windows 10.
+
+## v3.39: password fields and menu icons (WinLine after v3.38.0)
+
+**Password field without left-behind copies.** A `TextInput` keeps its text in a
+`[]rune` buffer that can be wiped (`TakeSecret`, `WipeSecret` since earlier
+versions). Editing used to leave copies the application could not reach: every
+keystroke allocated a new array and dropped the old one, holding the start of
+the password, to the garbage collector; deleting shifted runes left and kept the
+array tail; every keystroke built an Undo snapshot string even in password mode;
+`OnChange` got a string copy on every change. In password mode now:
+
+- a replaced array is wiped, a shrunk tail is wiped, no Undo snapshot string is
+  built;
+- `OnSecretChange func(n int)` — when set, a password field reports changes by
+  length only and does not call `OnChange` (which would need a string);
+- `SecretBytes() []byte` — UTF-8 copy, the field keeps its text (the caller wipes
+  the copy); `TakeSecret()` reads and clears; `Clear()` = `WipeSecret()`;
+- a password field collected by the GC wipes its buffer (finalizer).
+`GetText()` still returns a string — do not call it on a password field.
+Revealing the password with the eye button renders it as a string, as before.
+
+**Password mask follows the font.** `NewPasswordInput` no longer pins
+`MaskRune` to '●' (U+25CF): with `MaskRune == 0` the mask is '●' when the
+default font has it and '•' (U+2022) otherwise. The built-in Open Sans lacks '●';
+taken from a fallback font it could come out as a colour glyph ignoring the text
+colour — invisible dots on ALT Workstation 11.2. New optional context interface
+`widget.GlyphCoverage{HasGlyph(r) bool}` (default font only, implemented by
+`engine.Canvas` and forwarded by the scroll and popup wrappers) and
+`widget.ContextHasGlyph(ctx, r)`. An explicit `MaskRune` is used as is.
+
+**`menu.icon.tint` tints only one-colour icons.** The Windows 2000 profile flag
+used to tint every menu icon, so colour icons (yellow folders, program pictures
+in the Start menu) came out as black silhouettes. Now the flag (`TintIcons`)
+tints an icon only when all its opaque pixels share one colour (a glyph,
+anti-aliased edges allowed); colour icons stay as they are, like in Windows
+2000. `MenuItem.IconTint` still tints any icon.
+
+---
+
+## v3.39: showing someone else's buffer without a copy — `widget.ExternalSurface` (E7)
+
+Requested by the RDP client: a session at 3840x2160 is a 33 MB buffer that changes
+in pieces. `ImageWidget` / `DrawImage` copy it into engine tiles and compare it with
+the previous frame; `ExternalSurface` does not own the buffer and does not keep a
+copy. The application hands over its `*image.RGBA`, says which parts changed, and the
+widget copies into the canvas only what the canvas repaints in this frame, straight
+from the application's memory. Nothing is removed or changed for existing callers.
+
+```go
+surf := widget.NewExternalSurface()
+surf.SetBounds(image.Rect(0, 0, 1920, 1080))     // logical bounds, like any widget
+surf.SetBuffer(session, true)                    // true: every pixel has A == 255
+root.AddChild(surf)
+
+// A decoder goroutine: write under the lock, announce after it.
+surf.Update(func(buf *image.RGBA) []image.Rectangle {
+    copy(buf.Pix[...], decoded)                  // the write itself
+    return []image.Rectangle{updated}            // areas, in buffer coordinates
+})
+```
+
+- **Pixels, HiDPI.** The buffer is in *physical* pixels: one buffer pixel is one
+  physical canvas pixel, no scaling at any scale (at scale 2 a 200x100 buffer fills
+  logical 100x50). Its top-left pixel (`buf.Rect.Min`) sits at the physical position of
+  the widget's top-left corner (edge rounding as for all canvas operations). A buffer
+  larger than the widget is cropped, a smaller one leaves the rest to
+  `SetBackground(color)` (black by default; keep it opaque). No buffer or an empty
+  one - the whole widget is the background.
+- **Channel order.** Bytes are `RGBA` as in any `*image.RGBA`. A buffer holding `BGRX`
+  bytes would show with red and blue swapped - convert in the application.
+- **Damage -> engine damage.** `InvalidateRects(rects)` / `InvalidateRect(r)` (areas of
+  the buffer, `buf.Rect` coordinates) convert to logical frame coordinates (outward
+  rounding at fractional scales, the scroll offset of a `ScrollView` is applied) and call
+  the engine's `InvalidateRect` per area. The engine diffs and ships only the tiles
+  those areas touch, not the whole widget. Areas outside the buffer or the widget are
+  dropped, empty ones ignored. The scale used is the one the last `Draw` saw (1 before
+  the first frame); a scale change repaints the frame in full anyway. `Base.Invalidate()`
+  stays: it invalidates the whole widget.
+- **What `Draw` copies.** The clip of the frame intersected with the widget, not "the
+  areas the application announced". The engine erases and redraws the union of ALL damage
+  of a frame (also foreign: a menu closed over the surface, a tooltip vanished), and the
+  surface has to restore its pixels there although the application never touched them.
+  With only the surface damaged, the clip equals the union of its areas, so exactly what
+  was announced is copied. The union is ONE bounding rectangle: far-apart areas cost the
+  bounding box (diff still goes per area) - merge them in the application.
+- **Synchronisation contract.** The buffer is read only inside `Draw`, on the engine's
+  goroutine, under the widget's lock. The application writes it under the same lock:
+  `Lock()` / `Unlock()` (the surface is a `sync.Locker`) or `Update(fn)`, which locks,
+  runs `fn`, unlocks and then announces the returned areas. Write first, announce after
+  (and outside the lock): announcing before the write lets a frame start in between and
+  the update is lost. Keep the lock short (a piece of the buffer: tenths of a
+  millisecond; a full 4K copy: several ms). The lock is not re-entrant: no `SetBuffer`,
+  `Swap`, `Update`, `Buffer` inside it, and nothing that waits for the engine's frame
+  lock (screenshots, `SetScale`, `SetResolution`).
+- **Double buffering.** `Swap(next, opaque, damage) (prev)` replaces the buffer and
+  returns the previous one; it waits for a running `Draw`, so after it returns the engine
+  never reads `prev` again and the application may write it without the lock. `next` must
+  hold the whole frame; `damage` is what changed against what is on screen (`nil`, or a
+  different buffer size / `opaque`, means everything). `SetBuffer(img, opaque)` is
+  `Swap` without the result. `Buffer()` returns the current buffer (read it under the
+  lock only).
+- **Opaque.** `opaque == true` copies rows (`Src`, bands over `GOMAXPROCS` for areas of
+  256K pixels and more, the R/B swap for `FormatBGRX`); `false` composites with `Over`.
+  A broken promise makes translucent places overwrite the background. An opaque buffer
+  with an opaque background makes the surface declare its bounds in `OpaqueRegion`, so the
+  traversal skips what lies wholly under it.
+- **Context.** `widget.PixelBlitter` (`BlitPixels(src, sr, x, y, opaque)`) is the optional
+  context capability behind it, like `ImageRectDrawer`: copies part `sr` of a buffer pixel
+  for pixel, the buffer pixel `src.Rect.Min` landing at the physical position of the
+  logical point `(x, y)`, under the clip (also a rounded one), no cache, no scaling.
+  `engine.Canvas`, the popup context and `OffsetContext` (scrolling) implement it; the
+  helper `widget.BlitPixels(ctx, ...)` falls back to `DrawImage` / `DrawImageScaled` for a
+  context without it. Usable by your own widgets too.
+
+Numbers (3840x2160, `go test -bench ExternalSurface4K ./engine/`, a frame of the whole
+engine including diff and tiles; Intel Core Ultra 7 265K, Windows 11):
+
+| Scenario | ms/frame | B/op |
+|---|---|---|
+| `ExternalSurface`, 10% of the area changes (the application also writes 3.3 MB) | 0.95 | 0.11 MB |
+| before: the application copies the 10% into an `ImageWidget`'s buffer, `OpaqueImage` + `InvalidateRect` | 1.2-1.3 | 0.10-0.19 MB |
+| `ExternalSurface`, 10% as 4 far-apart corners (bounding box = the whole buffer) | 4.6 | 0.4 MB |
+| `ExternalSurface`, `Swap` of the whole buffer | 5.5 | 1.8-2.7 MB |
+| `DrawImage(OpaqueImage)` of the whole buffer (v3.38, `Pan4K_OpaqueRecycle`) | 5.5 | 2.4-2.9 MB |
+
+Besides time, the surface needs no second 33 MB buffer (`ImageWidget` keeps its own
+copy that the application has to refill).
+
+Tests: `engine/externalsurface_test.go` (only the announced areas' tiles change in a
+frame, exact pixels against the buffer; offset bounds and a buffer with non-zero `Min`;
+areas outside; empty / nil / zero-size buffer; buffer smaller and larger than the widget,
+`Swap`; scale 2 and 1.25; foreign damage over the surface; `OpaqueRegion`; `Src` vs
+`Over`; a writer goroutine plus engine frames and a `Swap` goroutine under `-race`;
+`Canvas.BlitPixels` with clip, scale 2, `BGRX`; popup and scroll contexts),
+`widget/pixelblit_test.go` (the fallback of `widget.BlitPixels`), benchmarks in
+`engine/externalsurface_bench_test.go`.
+
+---
+
+## v3.39: scan codes, raw wheel, window activation (RDP-client requests E1, E6, E9)
+
+### E1 — `KeyEvent.ScanCode`, keys outside the VK table, modifiers as keys
+
+```go
+type KeyEvent struct {
+    Code     KeyCode
+    Rune     rune
+    Mod      KeyMod
+    Pressed  bool
+    Repeat   bool   // auto-repeat (Win32, Wayland, X11)
+    ScanCode uint16 // NEW: raw key code of the OS, 0 = not from an OS window
+    Extended bool   // NEW: E0-prefixed key (Windows only)
+}
+```
+
+`ScanCode` is **not normalised**, it is what the platform reports:
+
+| Platform | `ScanCode` | `Extended` |
+|---|---|---|
+| Windows | bits 16–23 of `lParam` of `WM_KEYDOWN/KEYUP/SYSKEYDOWN/SYSKEYUP` (set-1 hardware scan code) | bit 24 of `lParam` |
+| X11 | `keycode − 8` = evdev (`input-event-codes.h`) | always `false` |
+| Wayland | `key` of `wl_keyboard.key` = evdev | always `false` |
+| macOS | `keyCode` of `NSEvent` (`kVK_*`; note that 0 is the key "A") | always `false` |
+
+A client that needs set-1 scan codes (RDP) keeps its own `evdev → set 1` /
+`kVK → set 1` table: it depends on the protocol, not on the window. It comes
+with every key — named (`Code == KeyA`) and unnamed.
+
+What reaches the application now:
+
+- A key with no entry in the VK table is **no longer dropped**: it arrives with
+  `Code == KeyUnknown`, `Rune == 0` and the `ScanCode` filled (a text event has
+  `Rune != 0` and `ScanCode == 0`; the two never mix). A key with neither a
+  name nor a scan code (Windows `VK_PACKET` from `SendInput`) is still dropped.
+- **Modifiers are keys now**: `KeyShift`, `KeyControl` (either side; the side is
+  in `ScanCode` + `Extended`: Windows left Ctrl `0x1D`, right Ctrl `0x1D` +
+  `Extended`) and `KeyAltKey` (the physical Alt; AltGr is Ctrl then right Alt on
+  Windows, as the OS reports it). `KeyAlt` stays the *gesture* "Alt pressed and
+  released alone" and is delivered exactly as before, after the release of
+  `KeyAltKey`. `KeyWin` already existed. Only a backend that reports scan codes
+  produces these events; `KeyEvent.Mod` and `SetModifiers` work as before.
+- New `KeyCode` values, appended after the old ones (old values untouched, all
+  equal to the Windows VK): `KeyClear`, `KeyKana` (Kana and Hangul), `KeyJunja`,
+  `KeyFinal`, `KeyKanji` (Kanji and Hanja), `KeyConvert`, `KeyNonConvert`,
+  `KeyAccept`, `KeyModeChange`, `KeySleep`, `KeyBrowserBack` … `KeyBrowserHome`,
+  `KeyVolumeMute/Down/Up`, `KeyMediaNext/Prev/Stop/PlayPause`, `KeyLaunchMail`,
+  `KeyLaunchMedia`, `KeyLaunchApp1/2`, `KeyIMEProcess` (Windows IME took the
+  key — the character arrives as a text event), `KeyShift`, `KeyControl`,
+  `KeyAltKey`. `KeyMenu`, `KeyPrintScreen`, `KeyPause`, `KeyF13`…`KeyF24`
+  existed before; on X11/Wayland F13–F24, media, Kana/Hangul/Convert/NonConvert
+  and browser keys are now in the evdev table (`window/keytable.go`) and get a
+  `Code` too.
+- `Repeat` arrives together with `ScanCode` on Win32 (bit 30 of `lParam`),
+  Wayland (client-side repeat) and X11; macOS reports `isARepeat`.
+- Text input (`SetOnChar` → `Code: KeyUnknown, Rune`) is untouched.
+
+Internally: the optional `rawKeySource` interface (`SetOnRawKey(func(rawKey))`)
+of a native window; a backend that has it stops calling `SetOnKeyDown`,
+`SetOnKeyUp` and `SetOnKeyDownRepeat`. Custom `NativeWindow`s keep working on
+the old path and produce events without `ScanCode`.
+
+Tests: `window/rawkey_test.go` (lParam parsing, tables, the path
+backend → surface → engine, text input, repeat, Alt gesture),
+`window/rawkey_windows_test.go` (real `wndProc` messages),
+`window/rawkey_linux_test.go` (X11 and Wayland wire events),
+`engine/wheel_raw_test.go` (`SendKeyEvent` hands the event to the focused widget
+unchanged).
+
+### E6 — raw wheel: `widget.WheelEvent`
+
+```go
+// widget
+type WheelEvent struct {
+    X, Y           int     // logical point in the widget's frame
+    DeltaX, DeltaY float64 // units of widget.WheelNotch (120 per notch)
+    Precise        bool    // touchpad / free-spinning wheel: any value, frequent
+    Mod            KeyMod
+}
+type WheelEventHandler interface{ OnWheelEvent(e WheelEvent) bool }
+const WheelNotch = 120.0
+
+// engine
+func (e *Engine) SendMouseWheelRaw(xPhys, yPhys int, dx, dy float64, precise bool) bool
+```
+
+Signs follow the engine's pixel path: `DeltaY > 0` is **down**, `DeltaX > 0` is
+**right**. Windows and RDP count the vertical axis the other way round (up is
+positive), so for the RDP wheel field send `-DeltaY`; horizontal is the same
+(`MOUSE_HWHEEL`, right positive).
+
+Delivery: the widget that captured the mouse, then an open overlay under the
+cursor, then the hit-test path from the deepest widget to the root (inside the
+top modal window if there is one). The first `WheelEventHandler` that returns
+`true` stops it and `SendMouseWheelRaw` returns `true`. Deltas are **not**
+scaled by the HiDPI factor (they are not pixels); the point is.
+
+Next to the old path, not instead of it: `window.Run` first offers the raw
+event; **only if nobody takes it** the old path (`SendMouseWheelPixels` /
+`MouseWheelUp/Down` ticks) runs for the same wheel movement. So existing
+widgets keep getting pixels, and a widget that took the raw event does not get
+the tree scrolled a second time. Headless code can call `SendMouseWheelRaw`
+directly and ignore the result.
+
+| Platform | Source | `Precise` |
+|---|---|---|
+| Windows | `WM_MOUSEWHEEL` (`DeltaY = −delta`), `WM_MOUSEHWHEEL` (`DeltaX = delta`), `GET_WHEEL_DELTA_WPARAM` | `delta % 120 != 0` |
+| X11 | buttons 4/5 (vertical) and 6/7 (horizontal), ±120 per click | always `false` (no XInput2 smooth scroll in the backend) |
+| Wayland | `wl_pointer.axis`: `value / 10 * 120` (a notch is about 10 units); `axis_discrete` (v5) / `axis_value120` (v8) are parsed if the compositor sends them | `true` when no discrete / value120 came with the event — **the backend binds `wl_seat` version 4**, where they never come, so a mouse notch is `DeltaY = 120, Precise = true` |
+| macOS | not delivered (the wheel was not emitted before either) | — |
+
+On X11, with the raw receiver installed, a vertical click is passed as one
+press+release pair on the old path and the separate `ButtonRelease` of buttons
+4/5 is no longer forwarded (otherwise a widget that took the raw event would see
+a release without a press). Popup windows lifted out of the main window
+(`SetPopupSink`) keep the old path only.
+
+Tests: `engine/wheel_raw_test.go` (routing, bubbling, capture, HiDPI, the pixel
+path still works), `window/rawkey_test.go` (consumed / not consumed, conversion
+functions), `window/rawkey_windows_test.go` (real messages),
+`window/rawkey_linux_test.go` (X11 buttons, Wayland `axis` + discrete + value120).
+
+### E9 — pointer leave and window activation
+
+**Pointer leave.** Already there, now documented and completed:
+
+- Win32 `WM_MOUSELEAVE`/`WM_NCMOUSELEAVE` (`TrackMouseEvent`), X11 `LeaveNotify`,
+  Wayland `wl_pointer.leave` (also for a popup) make the window send a mouse
+  move to the point `(-1, -1)`; the engine delivers it as `OnMouseMove(-1, -1)`
+  to the widgets that contained the previous point (hover is cleared the same
+  way as on leaving across the edge).
+- **Fixed:** at HiDPI scale 2 the engine truncated `-1 / 2` to `0`, which is the
+  first point of the window, and the hover was not cleared. `toLogical` now
+  rounds down (non-negative coordinates are unchanged).
+- **New:** `widget.PointerLeaveHandler { OnPointerLeave() }` and
+  `Engine.SendPointerLeave()` — an event about leaving the **window**, distinct
+  from "the pointer moved off this widget" (a point outside a widget cannot tell
+  those apart, a captured drag is also outside). Called on the engine goroutine
+  for every visible widget that implements it, after the move to `(-1, -1)`.
+  `CursorNowhere` is still only for "an overlay covers you".
+
+**Window activation.**
+
+```go
+func (win *Window) SetOnActivate(fn func(active bool)) // before Run; nil disables
+func (win *Window) IsActive() bool
+```
+
+The callback runs on the engine goroutine and only on a **change** (Wayland
+reports the state on every `configure`; it is deduplicated). Sources: Win32
+`WM_ACTIVATE` (a move of the focus to another window of the same application —
+a menu popup, a dialog — is not a deactivation), X11 `FocusIn`/`FocusOut`
+(the event mask was fixed in v3.37), Wayland `activated` in
+`xdg_toplevel.configure`; macOS reports nothing. The first call is the first
+state the platform reports.
+
+**Stuck modifiers — now handled in the window.** The window keeps a list of the
+keys that are down. When it becomes inactive it releases all of them in the
+engine **before** the callback of the application: ordinary keys first, then
+modifiers, each as a normal `KeyEvent{Pressed: false}` with `ScanCode` and the
+`Mod` it was pressed with, then `Engine.SetModifiers(0)`. "Alt pressed and
+released alone" does not fire in that case. The release goes through the same
+path as a real one, so an RDP client sees key-ups for everything it had sent as
+key-downs and does not need its own timer. The real release of such a key goes
+to the other window and does not arrive; if it does arrive, it is delivered as
+usual (a key-up of a key already up is harmless). Touches in progress are
+cancelled and lifted popups are closed (as before).
+
+Order for the application at deactivation: key-ups (engine goroutine) →
+`SetModifiers(0)` → `Window.SetOnActivate(false)`; the capture of the mouse is
+not released by the engine — the application does that in its callback (and, for
+an RDP session, sends its own "synchronize keyboard state").
+
+Tests: `window/rawkey_test.go` (`TestReleaseHeldKeys_*`, `TestWindow_SetOnActivate`,
+`TestPointerLeave_*`), `engine/wheel_raw_test.go`
+(`TestSendPointerLeave_*`, `TestMouseMove_OutsidePointStaysOutsideOnHiDPI`),
+`window/rawkey_windows_test.go` (`WM_ACTIVATE`), `window/rawkey_linux_test.go`
+(X11 `FocusIn/Out`), existing `wayland_toplevel_linux_test.go`.
+
+Not verified on a live compositor / on a real keyboard: everything here is
+checked on wire events and on `wndProc` messages; the scan codes of macOS are
+not tested at all (compiled for darwin only).
+
+---
+
+## v3.39: keyboard grab, monitor changes, Wayland window methods, system language, accent colour (`window` package)
+
+Requested by the RDP client (tasks E3, E5, E10, E11, E12). Everything below is
+added API; nothing existing changed its signature or behaviour.
+
+### Keyboard grab — `(*Window).SetKeyboardGrab(on bool) bool`
+
+```go
+ok := win.SetKeyboardGrab(true) // Win, Alt+Tab, Alt+Esc, Ctrl+Esc, PrintScreen go to the app
+win.KeyboardGrabbed()           // is the grab in force right now
+win.SetKeyboardGrab(false)      // also done by closing the window
+```
+
+While the window has focus the system combinations reach the application as
+ordinary `KeyDown`/`KeyUp` events (the same path as every other key, so
+`Mod` and `Repeat` behave as usual). A request made before `Run` is remembered
+and applied when the window is created; the answer is then provisional ("can
+the platform do it at all"). The result `true` means "request accepted": on X11
+the grab is taken when the window gets focus, and on Wayland the compositor may
+still refuse — `KeyboardGrabbed()` shows the real state.
+
+| | Windows | X11 | Wayland | macOS |
+|---|---|---|---|---|
+| Mechanism | `WH_KEYBOARD_LL` hook (`window/keygrab_windows.go`), one per process, set on the window thread | `XGrabKeyboard` (`window/x11_keygrab_linux.go`) | `zwp_keyboard_shortcuts_inhibit_manager_v1.inhibit_shortcuts(surface, seat)` (`window/wayland_keygrab_linux.go`) | none, `false` |
+| Active when | `GetForegroundWindow` is the window | the window has focus (taken on `FocusIn`, released on `FocusOut`) | the compositor sends `active` (surface focused) | |
+| No support | hook refused → `false` | no connection → `false` | global missing → `false` | always `false` |
+
+What is taken on Windows: the Win keys and **every key pressed while Win is held**
+(Win+E, Win+D, Win+R...), Alt+Tab, Alt+Esc, Ctrl+Esc (so Ctrl+Shift+Esc too),
+PrintScreen, Alt+F4 and Alt+Space. Alt+F4 does not close the window while the grab
+is on — keep a way out of the grab in the application. Injected key events
+(`LLKHF_INJECTED`: `SendInput`, AutoHotkey, the on-screen keyboard) are never
+touched. A key release is swallowed exactly when its press was, even if the focus
+left in between, so the shell never sees a release without a press; turning the
+grab off "releases" the grabbed keys that are still down to the window. The
+decision logic is the pure `keyGrabFilter` (`window/keygrab.go`).
+
+**What cannot be grabbed, by anything:** Ctrl+Alt+Del (the Secure Attention
+Sequence is handled by Winlogon on its own desktop) and Win+L on Windows;
+Ctrl+Alt+F1...F12 and the screen locker on Linux (the X server or the kernel).
+The application offers its own command ("Send Ctrl+Alt+Del", Ctrl+Alt+End), as
+mstsc does. On GNOME/Wayland the compositor keeps an emergency shortcut (a long
+press of Super+Esc) and may ask the user for consent.
+
+X11 detail: the request is made by the event loop at its top level, not by the
+caller (a reply cannot be read from the middle of the event stream). The loop is
+woken by a `ClientMessage` the window sends to itself (`SendEvent` with an empty
+mask), which — unlike `GetInputFocus` — produces no reply that could be mistaken
+for the reply of `GrabKeyboard`. Focus events caused by the grab itself
+(`mode = Grab/Ungrab`) are not reported through `SetOnActivate`. Without a window
+manager (no focus events at all) the grab is taken at once. Windows opened with
+`OpenWindow` have their own connection and event loop and work the same way.
+
+### Monitor changes — `(*Window).SetOnMonitorsChanged(fn func([]Monitor))`
+
+```go
+win.SetOnMonitorsChanged(func(ms []window.Monitor) {
+    // the fresh list, in the order of window.Monitors(); engine goroutine
+})
+win.SetOnMonitorsChanged(nil) // unsubscribe
+```
+
+`Monitors()`, `MonitorOf`, `MonitorAt`, `MonitorForRect` and `SetFullscreenOn`
+are exported and documented since v3.34 (`window/monitor.go`,
+`window/fullscreen.go`); the work-area field of `Monitor` is called **`Work`**
+(it was never `WorkArea`) and stays so. The callback fires only for a real
+change — bounds, `Work`, `Scale`, name, primary or the number of monitors
+differ from the last list the application saw (`monitorListsEqual`) — about
+150 ms after the last system message (the platforms send bursts, and moving a
+window between monitors raises a DPI message although nothing changed). The
+first list is read when the subscription starts (on Linux a short extra
+connection). It can be set before `Run`; `OpenWindow` windows subscribe
+separately; closing the window unsubscribes.
+
+| | Source |
+|---|---|
+| Windows | `WM_DISPLAYCHANGE`, `WM_DPICHANGED`, `WM_SETTINGCHANGE` with `SPI_SETWORKAREA` (taskbar moved, hidden or resized) |
+| X11 | RandR `ScreenChangeNotify`, `CrtcChangeNotify`, `OutputChangeNotify` (`RRSelectInput` on the root, RandR 1.2+; plain `ScreenChangeNotify` below that) and `PropertyNotify` of `_NET_WORKAREA` — on a **separate connection**, because the window's own is read by its event loop |
+| Wayland | on the window's own connection: `wl_registry.global` of a new `wl_output` (bound on the fly) and `global_remove` (objects released — `wl_output.release` only from version 3, it is a protocol error earlier), `wl_output.geometry/mode/scale/done`, `zxdg_output_v1.logical_position/logical_size`. Wayland reports no work area (`Work == Bounds`), so a panel moving is invisible there |
+| macOS | none (`Monitors()` is empty there) |
+
+### Wayland: what the window methods can and cannot do (E10)
+
+Checked method by method against `xdg_shell`; the tests are
+`window/wayland_toplevel_linux_test.go` and `window/wayland_setsize_linux_test.go`.
+
+| Method | On Wayland |
+|---|---|
+| `SetPosition(x, y)` | **impossible by protocol**: a client neither knows nor sets the global coordinates of a toplevel. A no-op that sends nothing. `GetPosition()` is always `(0, 0)`. The only thing allowed is to ask the compositor to drag the window by the pointer (`BeginMove`, `xdg_toplevel.move`, needs the serial of a button press). `SetInitialBounds` ignores `x`, `y` for the same reason |
+| `Minimize()` | works: `xdg_toplevel.set_minimized`. There is no reverse request and no "is minimized" state: `IsMinimized()` is always `false`, `SetOnMinimizedChanged` is a no-op, a minimized window comes back only through `Activate` (`xdg_activation_v1`) or the user's panel |
+| `Maximize()` / `Restore()` / `IsMaximized()` | work: `set_maximized` / `unset_maximized`; the state is read from the `maximized` flag of `configure`. A window whose size is fixed (`min == max`) is unfixed first, otherwise the compositor could not maximize it, and fixed again on restore |
+| `SetResizable(v)` | works as `set_min_size` / `set_max_size`: `false` fixes `min == max == current size`, `true` removes the maximum and restores the application's minimum (`SetMinSize`). This is the only way Wayland has to forbid or allow stretching |
+| `SetSize(w, h)` | **new in v3.39.** It was only remembering the size. For a non-resizable, non-maximized, non-fullscreen window the fixation (`min == max`) now moves to the new size, so the compositor accepts a buffer of that size; for the others the compositor chooses the size and only the frame size is remembered |
+| `SetFullscreen` / `SetFullscreenOn` | `set_fullscreen(wl_output)`; refusal arrives as `configure` without `fullscreen` and is reported as `false` (v3.34) |
+| Drag source | `BeginDragFiles` / `BeginDragFilesImage` through `wl_data_source` + `start_drag` — done in v3.34 (`window/wayland_drag_linux.go`, tests with a fake compositor) |
+
+### System language — `window.SystemLanguages() []string`
+
+```go
+window.SystemLanguages() // ["ru-RU", "en-US"], most preferred first; nil — not set
+```
+
+BCP-47 tags (language lower case, script title case, region upper case:
+`ru-RU`, `sr-Latn-RS`, `es-419`), no duplicates. It lives in `window` next to the
+system theme (the `widget` package does not import `window`); the keyboard
+layout language (`widget.Locale`) and the interface language (`widget.Language`)
+are separate things.
+
+- **Windows:** `GetUserPreferredUILanguages(MUI_LANGUAGE_NAME)` — the "Preferred
+  languages" list in the order the user set; fallback `GetUserDefaultLocaleName`.
+- **Linux:** the gettext rules. The main locale is the first non-empty of
+  `LC_ALL`, `LC_MESSAGES`, `LANG`; if it is empty, `C`, `POSIX` or `C.UTF-8`
+  there is no language and `LANGUAGE` is ignored (as gettext does) — the answer is
+  `nil` and the application picks its own. Otherwise the `LANGUAGE` list
+  (colon separated, `ru:en_US:en`) comes first, then the main locale. The
+  encoding (`.UTF-8`) and modifiers (`@euro`) are dropped; `@latin` and
+  `@cyrillic` become the script.
+- **macOS:** the same environment variables (`NSLocale.preferredLanguages` is not
+  read — the Cocoa backend cannot be verified without a Mac); empty when started
+  from a `.app`.
+
+Pure functions `normalizeLanguageTag` and `systemLanguagesFromEnv` are covered
+by `window/syslang_test.go` on every platform.
+
+### System appearance: theme and accent colour (E12)
+
+`SetOnSystemThemeChanged` and `DetectSystemTheme` already existed (Windows:
+`WM_SETTINGCHANGE` "ImmersiveColorSet" re-reading `AppsUseLightTheme`; Linux, X11
+and Wayland alike: the `SettingChanged` signal of the Settings portal; macOS:
+`SystemThemeUnknown`, no watching — see `window/systheme_darwin.go`). v3.39 adds
+the accent colour:
+
+```go
+c, ok := window.DetectSystemAccent()      // color.RGBA (opaque), ok == false when unknown
+a := window.DetectSystemAppearance()      // SystemAppearance{Theme, Accent, HasAccent}
+win.SetOnSystemAppearanceChanged(func(a window.SystemAppearance) { /* engine goroutine */ })
+```
+
+- **Windows:** `HKCU\Software\Microsoft\Windows\DWM\AccentColor` — a DWORD in
+  **ABGR** order (red in the low byte), fallback `ColorizationColor` (ARGB). The
+  change arrives with the same `ImmersiveColorSet` as the theme (Windows puts both
+  in one group), so the value is re-read from the registry.
+- **Linux:** the portal key `org.freedesktop.appearance` / `accent-color`, a
+  structure of three doubles (r, g, b in [0, 1]); a colour outside [0, 1] means
+  "no accent" (GNOME's (-1, -1, -1)). Needs a portal 1.18+; older ones give
+  `ok == false`. The signal rule on the bus is the one the theme already used
+  (`arg0` = the namespace), so no extra subscription traffic.
+- **macOS:** `ok == false`, no watching.
+
+The callback receives the whole `SystemAppearance` and fires only when any field
+really changed from what the application was told last; "unknown" theme or
+accent never counts as a change and never overwrites the last known value. One
+platform subscription serves `SetOnSystemThemeChanged` and
+`SetOnSystemAppearanceChanged` together (on Windows each has its own cell in the
+window, so setting one does not clobber the other); it is taken when either is
+set and dropped when both are cleared or the window closes.
+
+### Tests
+
+`window/keygrab_test.go` (filter, window layer), `keygrab_windows_test.go` (a
+real hook installed and removed, events fed to its procedure with a
+`KBDLLHOOKSTRUCT` — a real keypress cannot be produced because `SendInput` is
+marked injected), `x11_keygrab_linux_test.go` (a fake X server on a socket pair),
+`wayland_keygrab_linux_test.go` (a fake compositor), `monitor_change_test.go`,
+`monitor_change_windows_test.go`, `x11_monitor_change_linux_test.go`,
+`wayland_monitor_change_linux_test.go`, `wayland_setsize_linux_test.go`,
+`syslang_test.go`, `syslang_env_test.go`, `syslang_windows_test.go`,
+`systheme_accent_test.go` (+ the Windows registry and the fake Settings portal
+on a real bus in `systheme_windows_test.go` / `systheme_linux_test.go`).
+
+Verified only on the wire, not on a live compositor or desktop: the Wayland
+`zwp_keyboard_shortcuts_inhibit_manager_v1` and the `wl_output` hot-plug paths
+(fake compositor); the X11 RandR events (the watcher connects to a real X server
+in the test, but a real monitor change cannot be provoked there); the hook
+delivering a real Win key press on Windows (the procedure is exercised, the OS
+delivery is not).
+
+---
+
+## v3.39: cursor from an image and pointer lock (RDP client E2, E4)
+
+Two additions for remote-desktop clients and games. Nothing public was removed or
+changed in signature; frames of existing themes are unchanged.
+
+### Cursor from an image — `Engine.SetCursorImage` (E2)
+
+```go
+eng.SetCursorImage(img *image.NRGBA, hotspotX, hotspotY int)   // any goroutine
+eng.ClearCursorOverride()                                      // or SetCursorImage(nil, 0, 0)
+ci, ok := eng.CursorImageOverride()                            // *widget.CursorImage
+```
+
+The pointer image (RDP: up to 384×384, 32 bpp with alpha) is shown above every
+widget and above popup windows, exactly like `SetCursorOverride` (v3.34): it is applied at
+once, without a mouse move, and menus / drop-down lists moved into their own OS windows
+show it too. The last call wins: `SetCursorOverride(shape)` replaces an image,
+`SetCursorImage` replaces a shape. `SetCursorImage(nil)` (or an empty / invalid image)
+drops an image but leaves a shape set by `SetCursorOverride`; `ClearCursorOverride` drops both.
+
+- The image is **copied** (`widget.NewCursorImage`): the application may reuse its
+  buffer. Straight (non-premultiplied) alpha. Sides up to `widget.MaxCursorImageSide`
+  (512); a hotspot outside the image is clamped to its edge.
+- **Cache.** The image gets a key — SHA-256 of size, hotspot and pixels
+  (`widget.CursorImageKey`, computed on the caller's buffer without a copy). The same
+  image set again is a no-op for the engine (no copy) and for the window; every window
+  keeps at most **16** ready system cursors (`cursorCacheSize`) by this key, evicts the
+  least recently used and frees the OS object (Win32 `DestroyCursor`, X11 `FreeCursor`,
+  Wayland `wl_buffer.destroy`). The cursor that is shown right now is never evicted.
+- `engine.CursorOverride()` reports an image as "set, arrow" for code that knows only
+  shapes; the image itself is in `CursorImageOverride()`.
+
+Per platform (`window/cursorimage*.go`, `x11cursorimage*.go`, `wayland_cursorimage_linux.go`):
+
+| | how the cursor is built |
+|---|---|
+| Win32 | `CreateIconIndirect`: 32-bit DIB with alpha + 1-bit mask. The DIB is read as **straight** alpha (checked with `DrawIconEx`: premultiplied bytes give a dark fringe) |
+| X11 | RENDER: depth-32 pixmap, `PutImage` (premultiplied BGRA, cut into requests ≤ 200 KB), `RenderCreatePicture` with the server's ARGB32 format, `RenderCreateCursor`. No RENDER, version < 0.5, no ARGB32 format or a refused first cursor → a 1-bit cursor by the alpha threshold (128; dark pixel black, light white), like the grab/grabbing hands |
+| Wayland | a `wl_shm` ARGB8888 buffer (one `memfd` per image, the pool destroyed at once) attached to the same cursor surface as the drawn shapes; `wl_surface.set_buffer_scale = round(window scale)` (compositor ≥ 4), the hotspot is divided by it. A fractional scale is rounded to the nearest integer (no `wp_viewport` for a cursor) |
+| macOS | not supported (the window falls back to the override arrow) |
+
+X11 builds the cursor in the event loop (it needs replies from the server): the call only
+records a request and wakes the loop with a harmless `SendEvent` to the window itself
+(`x11WakeRequest`); `SetCursor` called later withdraws a request not yet executed, so
+the last call wins. A cursor wider than the server's limit is the server's refusal, not ours.
+
+### Pointer lock — `Window.SetPointerLock` (E4)
+
+```go
+win.SetOnRelativeMotion(func(m widget.RelativeMotion) { /* m.DX, m.DY — device units */ })
+ok := win.SetPointerLock(true)    // false: no window yet / no mechanism / refused
+win.PointerLocked()               // is it in effect right now
+win.SetOnPointerLockChanged(func(active bool) { /* focus lost / returned, compositor unlocked */ })
+win.SetPointerLock(false)         // always true
+```
+
+The pointer is hidden and cannot leave the window; the application gets relative
+motion in device units **without OS acceleration** (what RDP `TS_FP_RELPOINTER_EVENT`
+needs). While the lock is in effect ordinary absolute moves (`OnMouseMove` of widgets) are
+not delivered; button presses and the wheel come as usual.
+
+**Why a callback and not a `RelativeMotionHandler` on the root.** The application that
+locks the pointer already holds the `Window` (it calls `SetPointerLock` on it) and
+forwards the motion over the network or into a game model; a root-widget interface would
+force it to make its own root and wait for the engine to route the event through the tree.
+The callback is one, can be replaced on the fly and is called on the engine goroutine, so
+it may touch widgets. Consecutive motions are summed into one call (`relMotionQueue`), as
+mouse moves are coalesced. `widget.RelativeMotion{DX, DY float64}` is the event type.
+
+`true` from `SetPointerLock(true)` means the request is accepted: the lock is in effect or
+will be as soon as the window is in focus (Wayland: as soon as the compositor grants the
+lock — the pointer must be over the window). The lock is **released when the window loses
+focus and restored when it returns**; `SetOnPointerLockChanged` reports both.
+
+| | motion | lock |
+|---|---|---|
+| Win32 | `RegisterRawInputDevices` (usage page 1, usage 2, no `RIDEV_INPUTSINK`) + `WM_INPUT` → `GetRawInputData` → `RAWMOUSE.lLastX/lLastY` (`MOUSE_MOVE_RELATIVE`; absolute devices are turned into a delta) | `ClipCursor`, cursor hidden through `WM_SETCURSOR`. The clip is **one pixel in the centre of the client area**, not the whole area: windows here are borderless and the resize zones lie at the edges of the client area, so a pointer pinned at an edge would start dragging the window size. Raw input does not depend on the clip. Follows `WM_SIZE`/`WM_MOVE`; released on `WM_ACTIVATE` (inactive) and `WM_DESTROY`. The call is marshalled to the window thread |
+| Wayland | `zwp_relative_pointer_v1.relative_motion`, the **unaccelerated** `dx_unaccel/dy_unaccel` | `zwp_pointer_constraints_v1.lock_pointer`, lifetime *persistent* (re-locked by the compositor when focus returns: `locked`/`unlocked` events); cursor hidden with `set_cursor(NULL)`. Missing either global → `false` |
+| X11 | XInput2 `XI_RawMotion` selected on the **root** window for all master devices; raw (unaccelerated) values of axes 0 and 1 | `XGrabPointer` (`confine_to` the window, an invisible cursor). The pointer is warped back to the centre when it strays more than a quarter of the window from it. `FocusOut` ungrabs, `FocusIn` grabs again. **Without XInput2** the fallback is warp-to-centre: the pointer is warped to the centre after every motion and the delta is the offset from the centre (coarser: motion is lost until the warp lands, no raw units). Popup menus of another connection do not receive pointer events during the grab |
+| macOS | not supported: `SetPointerLock(true)` returns `false` |
+
+### Verified
+
+- Pure functions and the wire: RAWINPUT parsing (64- and 32-bit headers, absolute flag,
+  non-mouse); `relative_motion`; XI raw event (`parseXIRawMotion`: transformed and raw
+  value sets, axis index by mask bits, truncated events); RENDER requests and replies;
+  Wayland `lock_pointer`, `get_relative_pointer`, `create_pool`/`create_buffer`, `set_cursor`,
+  `set_buffer_scale` messages; the LRU (order, eviction, "do not evict the shown one",
+  freeing); coalescing of motions; the suppression of absolute moves under the lock.
+- Win32 on a live window: cursor build with hotspot, alpha blend (`DrawIconEx`), cache and
+  destruction of evicted cursors (`GetIconInfo` fails), popups; Raw Input registration and
+  removal (`GetRegisteredRawInputDevices`), `ClipCursor` to the centre and back, focus loss and
+  restore, a call from another thread; with `HEADLESS_GUI_POINTERLOCK_E2E=1` a real
+  `SendInput` mouse move reaches the application as a `WM_INPUT` delta.
+- X11: a toy X server over a socket pair with the real event loop (RENDER negotiation and
+  fallbacks, cache, `FreeCursor`, lock handshake, focus loss/return, refusal, warp fallback);
+  live against XWayland (WSLg): RENDER cursor created and verified, `XISelectEvents` + `XGrabPointer`
+  accepted.
+- Wayland: wire tests; live against the WSLg compositor: the compositor declares
+  `zwp_pointer_constraints_v1` and `zwp_relative_pointer_manager_v1`, accepts the buffer,
+  surface, `set_cursor` and `lock_pointer`/`destroy` requests without a protocol error.
+  Not checked: a real `locked` event and real relative motion (no pointer over the test window).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

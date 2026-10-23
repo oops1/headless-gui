@@ -153,7 +153,9 @@ type PopupMenu struct {
 	// число — расстояние от правого края меню до его середины.
 	// ChevronSize — высота шеврона (0 — 8).
 	ChevronRight, ChevronSize int
-	// TintIcons — все значки меню одноцветные (см. MenuItem.IconTint).
+	// TintIcons — одноцветные значки меню (глифы) перекрашиваются в цвет текста
+	// пункта; цветные (папка, картинка программы) остаются как есть. Явный
+	// MenuItem.IconTint перекрашивает значок в любом случае.
 	TintIcons bool
 	// SubMenuMinWidth — наименьшая ширина подменю. 0 — как у родителя
 	// (MinWidth, прежнее поведение); отрицательное — без минимума.
@@ -1254,11 +1256,47 @@ func (m *PopupMenu) iconFor(item MenuItem, hovered bool, ink color.RGBA) image.I
 	if icon == nil {
 		return nil
 	}
-	if item.IconTint || m.TintIcons {
+	if item.IconTint || (m.TintIcons && iconIsMonochrome(icon)) {
 		return menuTintImage(icon, ink)
 	}
 	return icon
 }
+
+// iconIsMonochrome — все непрозрачные точки значка одного цвета (с допуском
+// на округление сглаженного края): это глиф, который можно перекрасить в цвет
+// текста. Цветной значок перекрашивать нельзя: жёлтые папки и картинки
+// программ в «Пуске» Windows 2000 выходили чёрными силуэтами (замечание
+// WinLine после v3.38.0).
+func iconIsMonochrome(img image.Image) bool {
+	b := img.Bounds()
+	var ref [3]int
+	seen := false
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, a := img.At(x, y).RGBA()
+			if a < 0x1000 { // почти прозрачная точка цвета не несёт
+				continue
+			}
+			// Цвет без предумножения, 0..255.
+			c := [3]int{int(r * 0xff / a), int(g * 0xff / a), int(bl * 0xff / a)}
+			if !seen {
+				ref, seen = c, true
+				continue
+			}
+			for i := range c {
+				if d := c[i] - ref[i]; d > monoTolerance || d < -monoTolerance {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// monoTolerance — насколько канал точки может отличаться от первой точки
+// значка, чтобы значок ещё считался одноцветным: сглаженный край после
+// снятия предумножения даёт ошибку округления в несколько единиц.
+const monoTolerance = 24
 
 // menuTintImage перекрашивает картинку в один цвет по её альфа-каналу.
 func menuTintImage(src image.Image, col color.RGBA) image.Image {

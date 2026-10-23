@@ -40,8 +40,9 @@ const (
 // сразу, если указатель уже в окне; иначе — при ближайшем enter.
 func (w *WaylandWindow) SetCursor(c int) {
 	w.cursorMu.Lock()
-	same := w.cursorSet && w.cursorShape == c
+	same := w.cursorSet && w.cursorShape == c && w.cursorImg == nil
 	w.cursorShape, w.cursorSet = c, true
+	w.cursorImg = nil // форма после картинки заменяет её
 	w.cursorMu.Unlock()
 	if same {
 		return
@@ -56,8 +57,9 @@ func (w *WaylandWindow) SetCursor(c int) {
 // попапе, остался бы невидимым до возврата в окно.
 func (w *WaylandWindow) SetPopupCursor(c int, set bool) {
 	w.cursorMu.Lock()
-	same := w.popupShapeSet == set && (!set || w.popupShape == c)
+	same := w.popupShapeSet == set && (!set || w.popupShape == c) && w.popupImg == nil
 	w.popupShape, w.popupShapeSet = c, set
+	w.popupImg = nil // форма после картинки заменяет её
 	w.cursorMu.Unlock()
 	if !same && w.ptrOverPopup.Load() {
 		w.applyCursor()
@@ -78,8 +80,21 @@ func (w *WaylandWindow) applyCursor() {
 		w.cursorShape, w.cursorSet = wlCursorArrow, true
 	}
 	shape := w.cursorShape
-	if w.popupShapeSet && w.ptrOverPopup.Load() {
-		shape = w.popupShape // над попапом действует принудительный курсор
+	img := w.cursorImg
+	if w.ptrOverPopup.Load() {
+		// Над попапом действует принудительный курсор движка: картинка или форма.
+		if w.popupImg != nil {
+			img = w.popupImg
+		} else if w.popupShapeSet {
+			shape, img = w.popupShape, nil
+		}
+	}
+	if w.plock.active.Load() {
+		w.hideCursor() // захват указателя: курсора нет
+		return
+	}
+	if img != nil && w.setCursorByImage(img) {
+		return
 	}
 	if shape == wlCursorNone {
 		w.hideCursor()
@@ -135,10 +150,8 @@ func (w *WaylandWindow) setCursorBySurface(c int) {
 	if !ok {
 		return
 	}
-	if w.cursorSurfID == 0 {
-		w.cursorSurfID = w.newID()
-		w.send(newWlMsg(w.compositorID, wlCompositorCreateSurface).putUint(w.cursorSurfID), -1)
-	}
+	w.ensureCursorSurface()
+	w.resetCursorSurfaceScale()
 	w.send(newWlMsg(w.cursorSurfID, wlSurfaceAttach).putUint(slot.bufID).putInt(0).putInt(0), -1)
 	w.send(newWlMsg(w.cursorSurfID, wlSurfaceDamage).
 		putInt(0).putInt(0).putInt(wlCursorSize).putInt(wlCursorSize), -1)
@@ -146,6 +159,7 @@ func (w *WaylandWindow) setCursorBySurface(c int) {
 	w.send(newWlMsg(w.pointerID, wlPointerSetCursor).
 		putUint(w.ptrEnterSerial.Load()).putUint(w.cursorSurfID).
 		putInt(int32(slot.hotX)).putInt(int32(slot.hotY)), -1)
+	w.curSurfBuf = 0 // к поверхности прикреплён буфер формы, не картинки
 }
 
 // wlCursorSlot — готовый буфер одной формы курсора.

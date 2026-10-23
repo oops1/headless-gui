@@ -1550,6 +1550,16 @@ OEM-клавиши (`KeyOemPlus`, `KeyOemMinus` и др.), `KeyF1…KeyF24`, н�
 затем отдельное текстовое событие с `Rune`. `KeyEvent.Repeat` отличает
 автоповтор удерживаемой клавиши от нового нажатия (Win32, Wayland и X11).
 
+**Сырой скан-код (v3.39).** `KeyEvent.ScanCode` и `Extended` — код физической
+клавиши от ОС «как есть»: Windows — биты 16–23 `lParam` и бит 24; X11 и Wayland —
+evdev (`keycode − 8`); macOS — `keyCode`. Единой таблицы нет: клиенту удалённого
+рабочего стола (RDP шлёт скан-коды набора 1) нужна своя таблица `evdev → набор 1`.
+Клавиша, которой нет в таблице VK, больше не пропадает: она приходит с
+`Code == KeyUnknown`, `Rune == 0` и заполненным `ScanCode`. Shift, Ctrl и Alt
+тоже приходят как клавиши (`KeyShift`, `KeyControl`, `KeyAltKey`; сторона — в
+`ScanCode` и `Extended`); жест `KeyAlt` остаётся прежним. Добавлены коды
+мультимедиа и браузера, Kana/Hangul/Convert/NonConvert, `KeyIMEProcess`.
+
 Модификаторы: `ModShift, ModCtrl, ModAlt, ModMeta`.
 
 **Alt и F10 — строка меню.** Alt сам по себе не событие, а модификатор:
@@ -2640,6 +2650,17 @@ view.Groups()   // []CollectionViewGroup{Name, Items}
   (слайд-шоу прячет курсор по таймеру бездействия; перетаскивание показывает
   «сжатую руку»). Форма действует и над меню и списками, вынесенными в
   отдельные окна ОС (Win32, X11, Wayland).
+- Курсор из картинки (указатель удалённого рабочего стола, до 384×384 с альфой):
+  `eng.SetCursorImage(img *image.NRGBA, hotX, hotY)`; сброс — `eng.ClearCursorOverride()`
+  или `SetCursorImage(nil, 0, 0)`. Действует поверх виджетов и над окнами-попапами; та же
+  картинка повторно берётся из кэша окна по хешу (16 записей, системные объекты
+  освобождаются).
+- Захват указателя и относительная мышь (игры, CAD, RDP):
+  `win.SetOnRelativeMotion(func(m widget.RelativeMotion){ ... })` и
+  `win.SetPointerLock(true)` — указатель прячется и не выходит из окна, приходят сдвиги
+  `m.DX, m.DY` в единицах устройства без ускорения ОС. `false` — захват невозможен
+  (macOS, Wayland без `zwp_pointer_constraints_v1`/`zwp_relative_pointer_manager_v1`).
+  Захват снимается при потере фокуса и возвращается с ним (`win.SetOnPointerLockChanged`).
 - Индикатор раскладки в окнах/диалогах — свойство `ShowLocaleIndicator`,
   контекстное меню переключения.
 
@@ -3759,6 +3780,80 @@ win.Run()
 - **macOS.** No-op: размер окно и так берёт, а положение на этом бэкенде не
   реализовано вовсе.
 
+### Захват клавиатуры, смена мониторов, язык и акцент системы (v3.39)
+
+Удалённый рабочий стол, виртуальная машина и игра хотят видеть все клавиши, знать
+о смене мониторов и следовать языку и оформлению ОС.
+
+```go
+// Win, Alt+Tab, Alt+Esc, Ctrl+Esc, PrintScreen — приложению, пока окно в фокусе.
+if !win.SetKeyboardGrab(true) { /* платформа не умеет: оставляем как есть */ }
+win.KeyboardGrabbed() // действует ли захват прямо сейчас (на Wayland решает композитор)
+win.SetKeyboardGrab(false)
+
+// Подключили монитор, сменили разрешение, масштаб, сдвинули панель задач:
+win.SetOnMonitorsChanged(func(ms []window.Monitor) { /* свежий список, горутина движка */ })
+
+window.SystemLanguages() // ["ru-RU", "en-US"] — языки ОС по убыванию предпочтения
+
+a := window.DetectSystemAppearance() // тема + акцентный цвет
+win.SetOnSystemAppearanceChanged(func(a window.SystemAppearance) {
+    // a.Theme, a.Accent (color.RGBA, непрозрачный), a.HasAccent
+})
+```
+
+**Захват клавиатуры.** Перехваченные клавиши приходят приложению обычными
+`KeyDown`/`KeyUp`. До `Run` запрос запоминается; закрытие окна отпускает клавиатуру.
+
+- **Win32.** Хук `WH_KEYBOARD_LL` на потоке окна, один на процесс. Работает только
+  пока активно ваше окно (`GetForegroundWindow`). Перехватываются клавиши Win и всё,
+  что нажато вместе с ними (Win+E, Win+D…), Alt+Tab, Alt+Esc, Ctrl+Esc
+  (и Ctrl+Shift+Esc), PrintScreen, Alt+F4 и Alt+Space — то есть Alt+F4 не закроет
+  окно, держите в приложении способ выйти из захвата. **Ctrl+Alt+Del и Win+L
+  перехватить нельзя ничем** (их обрабатывает Winlogon): для Ctrl+Alt+Del нужна
+  своя команда («Послать Ctrl+Alt+Del», как в mstsc). Синтетические нажатия
+  (`SendInput`, AutoHotkey, экранная клавиатура) хук не трогает.
+- **X11.** `XGrabKeyboard` на окно, пока у него фокус; потерял фокус — отпускается,
+  вернулся — берётся снова. Переключение виртуальных терминалов (Ctrl+Alt+F1…)
+  обрабатывает сервер, его не перехватить.
+- **Wayland.** `zwp_keyboard_shortcuts_inhibit_manager_v1.inhibit_shortcuts`. Если
+  композитор глобала не объявил, `SetKeyboardGrab(true)` вернёт `false`. Согласие
+  остаётся за композитором: он может спросить пользователя и оставить аварийное
+  сочетание (GNOME — долгое удержание Super+Esc).
+- **macOS.** Нет (`false`).
+
+**Смена мониторов.** Колбэк получает список в виде `Monitors()` и зовётся только при
+настоящей перемене (границы, `Work`, `Scale`, имя, основной) с задержкой около
+150 мс после последнего системного сообщения. Win32: `WM_DISPLAYCHANGE`,
+`WM_DPICHANGED`, `WM_SETTINGCHANGE(SPI_SETWORKAREA)`; X11: события RandR
+(`ScreenChangeNotify`, `Crtc/OutputChangeNotify`) и `_NET_WORKAREA`; Wayland:
+появление и исчезновение `wl_output`, `wl_output.done`, события `xdg_output`
+(рабочей области Wayland не сообщает). Поле рабочей области называется `Work`,
+не `WorkArea`. macOS: нет.
+
+**Язык системы.** Windows: `GetUserPreferredUILanguages` (список «Язык и регион»).
+Linux: `LANGUAGE` (через `:`), `LC_ALL`/`LC_MESSAGES`/`LANG` по правилам gettext
+(при локали `C`/`POSIX` список пуст). macOS: те же переменные среды. Записи в
+BCP-47: `ru-RU`, `en-US`, `sr-Latn-RS`. Пустой список — «язык не задан», тогда язык
+выбирает приложение. Язык раскладки клавиатуры (`widget.Locale`) и язык интерфейса
+(`widget.Language`) — другое.
+
+**Акцент.** `DetectSystemAccent()`/`DetectSystemAppearance()` и
+`SetOnSystemAppearanceChanged` дополняют тему акцентным цветом. Windows:
+`HKCU\Software\Microsoft\Windows\DWM\AccentColor` (ABGR), смена приходит тем же
+`ImmersiveColorSet`. Linux: ключ `accent-color` портала (портал 1.18+), смена —
+сигнал `SettingChanged`. Тема и акцент не определены → `HasAccent == false` и
+`SystemThemeUnknown`; такие ответы не считаются сменой. macOS: нет. Подписка на
+оформление независима от `SetOnSystemThemeChanged`.
+
+**Wayland и методы окна** (подробности — в `docs/AI_AGENT_REFERENCE.md`).
+Протокол xdg-shell не знает положения окна: `SetPosition` — no-op, `GetPosition` —
+всегда `(0, 0)`; всё, что можно, — попросить компоновщик потащить окно
+(`BeginMove`). `Minimize`, `Maximize`/`Restore` (`set_minimized`,
+`set_maximized`/`unset_maximized`) и `SetResizable` (пара `set_min_size`/`set_max_size`)
+работают; `IsMinimized` всегда `false`, развернуть свёрнутое окно можно только
+`Activate`. `SetSize` у окна с запретом ресайза переносит фиксацию на новый размер.
+
 ### Окно на передний план: один процесс, второй запуск (v3.35)
 
 Просмотрщик живёт одним окном: второй запуск (двойной щелчок по файлу) передаёт
@@ -4012,6 +4107,35 @@ eng.SendMouseWheelPixels(x, y, dx, dy)
 По платформам: Win32 (`WM_MOUSEWHEEL`) и Wayland (`wl_pointer.axis`) дают точные
 пиксели; X11 остаётся на тиках (кнопки 4/5), macOS-колесо пока не эмитится. В
 headless всё работает через `SendMouseWheelPixels`.
+
+**Сырая дельта (v3.39).** Виджет, которому нужна дельта оборудования, а не
+пиксели под шаг прокрутки (удалённый рабочий стол: ±120 на щелчок и
+горизонтальное колесо), реализует `widget.WheelEventHandler`:
+
+```go
+func (w *Remote) OnWheelEvent(e widget.WheelEvent) bool {
+    // e.DeltaX, e.DeltaY — в единицах widget.WheelNotch (120 на щелчок);
+    // DeltaY > 0 — вниз, DeltaX > 0 — вправо (в RDP вертикаль наоборот: -DeltaY);
+    // e.Precise — тачпад или свободное колесо, значение любое.
+    return true
+}
+```
+
+Окно сначала предлагает событие сырым обработчикам (`Engine.SendMouseWheelRaw`),
+и только если никто не принял — запускает прежний путь, так что остальные
+виджеты по-прежнему получают пиксели. Источники: Win32 (`WM_MOUSEWHEEL`,
+`WM_MOUSEHWHEEL`), X11 (кнопки 4–7, `Precise = false`), Wayland (`wl_pointer.axis`;
+`Precise = true`, пока композитор не сообщает discrete — а на привязанной
+версии 4 он не сообщает).
+
+### Уход указателя и активность окна (v3.39)
+
+Уход указателя с окна приходит как `OnMouseMove(-1, -1)` (на HiDPI тоже: раньше
+`-1` округлялось в `0`) и дополнительно как `OnPointerLeave()` у виджетов с
+`widget.PointerLeaveHandler`. Активность окна — `win.SetOnActivate(func(active
+bool))` и `win.IsActive()`; при потере фокуса окно само отпускает все зажатые
+клавиши (обычным `KeyEvent{Pressed: false}` со скан-кодом) и сбрасывает
+модификаторы движка — «залипшего Ctrl» не бывает, — и только потом зовёт колбэк.
 
 ### Drag & Drop файлов из ОС
 
