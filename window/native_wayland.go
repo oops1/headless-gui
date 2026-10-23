@@ -1031,20 +1031,37 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			}
 		}
 
-	case (obj == w.bufID[0] || obj == w.bufID[1]) && opcode == wlBufferEvRelease:
-		w.mu.Lock()
-		if obj == w.bufID[0] {
-			w.bufBusy[0] = false
-		} else {
-			w.bufBusy[1] = false
-		}
-		ch := w.bufRelease
-		w.mu.Unlock()
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
+	case opcode == wlBufferEvRelease && w.releaseFrameBuffer(obj):
 	}
+}
+
+// releaseFrameBuffer отмечает кадровый буфер obj свободным (wl_buffer.release)
+// и будит того, кто ждёт свободный буфер. false — obj не кадровый буфер.
+//
+// Сверка obj с bufID — под тем же замком, под которым destroyPool эти
+// идентификаторы обнуляет: Close зовёт destroyPool из горутины приложения, пока
+// цикл событий ещё разбирает события (ловил -race).
+func (w *WaylandWindow) releaseFrameBuffer(obj uint32) bool {
+	w.mu.Lock()
+	i := -1
+	switch {
+	case obj != 0 && obj == w.bufID[0]:
+		i = 0
+	case obj != 0 && obj == w.bufID[1]:
+		i = 1
+	}
+	if i < 0 {
+		w.mu.Unlock()
+		return false
+	}
+	w.bufBusy[i] = false
+	ch := w.bufRelease
+	w.mu.Unlock()
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+	return true
 }
 
 // handlePointer — события мыши. Координаты enter/motion — fixed 24.8.
