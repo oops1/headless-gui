@@ -1557,6 +1557,16 @@ the Latin layout, so `Ctrl+S` works in a Russian layout too. Order of events: a
 press with `Code`, then a separate text event with `Rune`. `KeyEvent.Repeat`
 tells auto-repeat of a held key from a new press (Win32, Wayland and X11).
 
+**Raw scan code (v3.39).** `KeyEvent.ScanCode` and `Extended` are the code of the
+physical key as the OS reports it: Windows — bits 16–23 of `lParam` and bit 24;
+X11 and Wayland — evdev (`keycode − 8`); macOS — `keyCode`. There is no common
+table: a remote-desktop client (RDP sends set-1 scan codes) keeps its own
+`evdev → set 1` table. A key missing from the VK table is no longer dropped: it
+arrives with `Code == KeyUnknown`, `Rune == 0` and `ScanCode` filled. Shift,
+Ctrl and Alt arrive as keys too (`KeyShift`, `KeyControl`, `KeyAltKey`; the side
+is in `ScanCode` and `Extended`); the `KeyAlt` gesture is unchanged. Media and
+browser keys, Kana/Hangul/Convert/NonConvert and `KeyIMEProcess` were added.
+
 Modifiers: `ModShift, ModCtrl, ModAlt, ModMeta`.
 
 **Alt and F10 — the menu bar.** Alt by itself is a modifier, not an event:
@@ -2655,6 +2665,18 @@ when the filter/sort/group changes.
   (a slide show hides the cursor on a timer; dragging shows the closed hand). The
   shape also applies over menus and lists moved into their own OS windows
   (Win32, X11, Wayland).
+- Cursor from an image (a remote-desktop pointer, up to 384×384 with alpha):
+  `eng.SetCursorImage(img *image.NRGBA, hotX, hotY)`; reset with `eng.ClearCursorOverride()`
+  or `SetCursorImage(nil, 0, 0)`. It applies above widgets and over popup windows; the
+  same image set again is taken from the window's cache by hash (16 entries, system
+  objects are freed).
+- Pointer lock and relative mouse (games, CAD, RDP):
+  `win.SetOnRelativeMotion(func(m widget.RelativeMotion){ ... })` and
+  `win.SetPointerLock(true)` — the pointer is hidden and cannot leave the window, the
+  application gets `m.DX, m.DY` in device units without OS acceleration. `false` — a lock
+  is impossible (macOS, Wayland without `zwp_pointer_constraints_v1` /
+  `zwp_relative_pointer_manager_v1`). The lock is released when focus is lost and comes
+  back with it (`win.SetOnPointerLockChanged`).
 - Keyboard-layout indicator in windows/dialogs — `ShowLocaleIndicator` property
   with a switch context menu.
 
@@ -3789,6 +3811,80 @@ and leaving full screen returns exactly them (and "maximized", if it was set).
 - **macOS.** A no-op: the size is honored anyway, and the position is not
   implemented on this backend at all.
 
+### Keyboard grab, monitor changes, system language and accent (v3.39)
+
+A remote desktop, a virtual machine or a game wants to see every key, to know about
+monitor changes and to follow the OS language and appearance.
+
+```go
+// Win, Alt+Tab, Alt+Esc, Ctrl+Esc, PrintScreen go to the app while the window has focus.
+if !win.SetKeyboardGrab(true) { /* the platform cannot: leave it as is */ }
+win.KeyboardGrabbed() // is the grab in force right now (on Wayland the compositor decides)
+win.SetKeyboardGrab(false)
+
+// A monitor was attached, resolution or scale changed, the taskbar moved:
+win.SetOnMonitorsChanged(func(ms []window.Monitor) { /* fresh list, engine goroutine */ })
+
+window.SystemLanguages() // ["ru-RU", "en-US"] — OS languages, most preferred first
+
+a := window.DetectSystemAppearance() // theme + accent colour
+win.SetOnSystemAppearanceChanged(func(a window.SystemAppearance) {
+    // a.Theme, a.Accent (color.RGBA, opaque), a.HasAccent
+})
+```
+
+**Keyboard grab.** Grabbed keys reach the app as ordinary `KeyDown`/`KeyUp`. A request
+made before `Run` is remembered; closing the window releases the keyboard.
+
+- **Win32.** A `WH_KEYBOARD_LL` hook on the window thread, one per process. It acts
+  only while your window is active (`GetForegroundWindow`). Grabbed: the Win keys and
+  everything pressed together with them (Win+E, Win+D...), Alt+Tab, Alt+Esc, Ctrl+Esc
+  (and Ctrl+Shift+Esc), PrintScreen, Alt+F4 and Alt+Space — so Alt+F4 does not close
+  the window; keep a way out of the grab in the app. **Ctrl+Alt+Del and Win+L cannot
+  be intercepted by anything** (Winlogon handles them): offer your own command for
+  Ctrl+Alt+Del ("Send Ctrl+Alt+Del", as mstsc does). Synthetic key presses
+  (`SendInput`, AutoHotkey, the on-screen keyboard) are left alone.
+- **X11.** `XGrabKeyboard` on the window while it has focus; lose focus — released,
+  get it back — taken again. Switching virtual terminals (Ctrl+Alt+F1...) is handled
+  by the server and cannot be grabbed.
+- **Wayland.** `zwp_keyboard_shortcuts_inhibit_manager_v1.inhibit_shortcuts`. If the
+  compositor does not announce the global, `SetKeyboardGrab(true)` returns `false`.
+  The consent stays with the compositor: it may ask the user and keep an emergency
+  shortcut (GNOME — a long press of Super+Esc).
+- **macOS.** None (`false`).
+
+**Monitor changes.** The callback gets the list in the shape of `Monitors()` and is
+called only for a real change (bounds, `Work`, `Scale`, name, primary), about 150 ms
+after the last system message. Win32: `WM_DISPLAYCHANGE`, `WM_DPICHANGED`,
+`WM_SETTINGCHANGE(SPI_SETWORKAREA)`; X11: RandR events (`ScreenChangeNotify`,
+`Crtc/OutputChangeNotify`) and `_NET_WORKAREA`; Wayland: `wl_output` globals coming
+and going, `wl_output.done`, `xdg_output` events (Wayland reports no work area). The
+work-area field is called `Work`, not `WorkArea`. macOS: none.
+
+**System language.** Windows: `GetUserPreferredUILanguages` (the "Language & region"
+list). Linux: `LANGUAGE` (colon separated), `LC_ALL`/`LC_MESSAGES`/`LANG` by the
+gettext rules (with the `C`/`POSIX` locale the list is empty). macOS: the same
+environment variables. Tags are BCP-47: `ru-RU`, `en-US`, `sr-Latn-RS`. An empty list
+means "no language set" — the app chooses. The keyboard layout language
+(`widget.Locale`) and the UI language (`widget.Language`) are different things.
+
+**Accent.** `DetectSystemAccent()`/`DetectSystemAppearance()` and
+`SetOnSystemAppearanceChanged` add the accent colour to the theme. Windows:
+`HKCU\Software\Microsoft\Windows\DWM\AccentColor` (ABGR), a change arrives with the
+same `ImmersiveColorSet`. Linux: the portal key `accent-color` (portal 1.18+), a
+change is the `SettingChanged` signal. Unknown theme or accent → `SystemThemeUnknown`
+and `HasAccent == false`; such answers are never counted as a change. macOS: none.
+The appearance subscription is independent of `SetOnSystemThemeChanged`.
+
+**Wayland and the window methods** (details in `docs/AI_AGENT_REFERENCE.md`). The
+xdg-shell protocol does not know the window position: `SetPosition` is a no-op,
+`GetPosition` is always `(0, 0)`; the most one can do is ask the compositor to drag
+the window (`BeginMove`). `Minimize`, `Maximize`/`Restore` (`set_minimized`,
+`set_maximized`/`unset_maximized`) and `SetResizable` (the `set_min_size`/`set_max_size`
+pair) work; `IsMinimized` is always `false`, and a minimized window can only be
+brought back with `Activate`. `SetSize` on a non-resizable window moves the fixation
+to the new size.
+
 ### Bringing the window to the front: one process, a second launch (v3.35)
 
 A viewer lives in one window: a second launch (double click on a file) passes the
@@ -4047,6 +4143,35 @@ takes the precise delta, the engine synthesizes equivalent ticks — the old
 By platform: Win32 (`WM_MOUSEWHEEL`) and Wayland (`wl_pointer.axis`) deliver exact
 pixels; X11 stays on ticks (buttons 4/5), and the macOS wheel is not emitted yet.
 Headless works through `SendMouseWheelPixels`.
+
+**Raw delta (v3.39).** A widget that needs the hardware delta instead of pixels
+for the scroll step (a remote desktop: ±120 per notch and the horizontal wheel)
+implements `widget.WheelEventHandler`:
+
+```go
+func (w *Remote) OnWheelEvent(e widget.WheelEvent) bool {
+    // e.DeltaX, e.DeltaY are in units of widget.WheelNotch (120 per notch);
+    // DeltaY > 0 is down, DeltaX > 0 is right (RDP counts vertical the other way: -DeltaY);
+    // e.Precise: touchpad or a free-spinning wheel, any value.
+    return true
+}
+```
+
+The window offers the event to the raw handlers first (`Engine.SendMouseWheelRaw`)
+and runs the old path only if nobody took it, so the other widgets still get
+pixels. Sources: Win32 (`WM_MOUSEWHEEL`, `WM_MOUSEHWHEEL`), X11 (buttons 4–7,
+`Precise = false`), Wayland (`wl_pointer.axis`; `Precise = true` while the
+compositor does not report discrete — and at the bound version 4 it does not).
+
+### Pointer leave and window activation (v3.39)
+
+The pointer leaving the window arrives as `OnMouseMove(-1, -1)` (on HiDPI too:
+`-1` used to be rounded to `0`) and additionally as `OnPointerLeave()` on widgets
+that implement `widget.PointerLeaveHandler`. Window activity is
+`win.SetOnActivate(func(active bool))` and `win.IsActive()`; when the focus is
+lost the window releases every held key itself (a normal `KeyEvent{Pressed:
+false}` with the scan code) and resets the engine modifiers — no stuck Ctrl —
+and only then calls the callback.
 
 ### File drag & drop from the OS
 

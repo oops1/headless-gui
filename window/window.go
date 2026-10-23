@@ -113,31 +113,40 @@ type activationNotifier interface {
 	SetOnActivate(fn func(active bool))
 }
 
-// setupActivation подключает активность нативного окна к widget.Window.
+// setupActivation подключает активность нативного окна к widget.Window, к
+// отпусканию зажатых клавиш при потере фокуса и к Window.SetOnActivate
+// (activation.go).
 func (win *Window) setupActivation() {
 	an, ok := win.native.(activationNotifier)
 	if !ok {
 		return
 	}
-	ww, ok := win.eng.Root().(*widget.Window)
-	if !ok {
-		return
-	}
 	an.SetOnActivate(func(active bool) {
+		// Окно потеряло ввод: отпускание зажатых клавиш уйдёт в чужое окно, и
+		// без этого Ctrl остался бы зажатым в движке. Делается на потоке
+		// бэкенда, до очереди движка: отпускания встанут в неё раньше
+		// всего, что поставит приложение в ответ на деактивацию.
+		if !active {
+			win.releaseHeldKeys()
+		}
 		// Заголовок и оверлеи — виджеты: на горутине движка.
 		win.post(func() {
-			ww.SetActive(active)
+			ww, _ := win.eng.Root().(*widget.Window)
+			if ww != nil {
+				ww.SetActive(active)
+			}
 			// Окно потеряло ввод: конца идущих касаний оно уже не увидит.
 			if !active {
 				win.cancelTouches()
 			}
 			// При деактивации носителя (клик в другое приложение) закрываем
 			// вынесенные popup-оверлеи — как системные меню. Только в hosted-режиме.
-			if !active && (win.popupHost != nil || win.childPopups != nil) {
+			if ww != nil && !active && (win.popupHost != nil || win.childPopups != nil) {
 				if c, ok := win.eng.(interface{ CloseAllOverlays() }); ok {
 					c.CloseAllOverlays()
 				}
 			}
+			win.notifyActivation(active)
 		})
 	})
 }
@@ -241,6 +250,12 @@ type surface struct {
 	// это жест открытия строки меню (см. widget.KeyAlt).
 	altTap atomic.Bool
 
+	// held — клавиши, нажатые и ещё не отпущенные, в порядке нажатия. Нужны,
+	// чтобы при потере окном активности отпустить их в движке: отпускание
+	// уйдёт в чужое окно, и без этого Ctrl остаётся «зажатым» (activation.go).
+	heldMu sync.Mutex
+	held   []rawKey
+
 	// in — очередь ввода к движку: склейка движений мыши (input_queue.go).
 	in inputQueue
 
@@ -248,6 +263,13 @@ type surface struct {
 	// горутина движка.
 	cursor    int
 	cursorSet bool
+	// img/imgSet — ключ курсора-картинки (Engine.SetCursorImage), последним
+	// отданный окну ОС. Только горутина движка.
+	img    [32]byte
+	imgSet bool
+
+	// lock — захват указателя и относительное движение (pointerlock.go).
+	lock pointerLockState
 
 	// ptrX, ptrY — последнее положение мыши в координатах контента; ptrKnown —
 	// была ли мышь в окне. Нужны, чтобы пересчитать курсор без движения мыши
@@ -310,6 +332,11 @@ type Window struct {
 
 	title string
 	w, h  int
+
+	// onActivate/activeNow — колбэк приложения о смене активности окна и
+	// последнее известное состояние (activation.go).
+	onActivate atomic.Pointer[func(active bool)]
+	activeNow  atomic.Int32
 
 	// minW/minH/minWant — минимальный размер окна в ЛОГИЧЕСКИХ пикселях
 	// (minsize.go). Заданный до Run(), применяется при создании окна.
@@ -412,6 +439,13 @@ type Window struct {
 	// sysTheme — подписка приложения на смену светлой/тёмной темы ОС
 	// (см. SetOnSystemThemeChanged в systheme.go).
 	sysTheme systemThemeState
+
+	// kg — просьба о захвате клавиатуры до Run (см. SetKeyboardGrab в keygrab.go).
+	kg keyGrabState
+
+	// mon — подписка приложения на смену конфигурации мониторов
+	// (см. SetOnMonitorsChanged в monitor_change.go).
+	mon monitorWatchState
 
 	// touchWant — явное решение приложения о касаниях (SetTouchEnabled, touch.go);
 	// nil — решает корень окна: он принимает касания, если сам TouchHandler.
@@ -568,6 +602,8 @@ func (win *Window) Run() error {
 // tearDown освобождает то, что подняла bringUp и что переживает закрытие
 // окна ОС.
 func (win *Window) tearDown() {
+	win.releaseKeyboardGrab()
+	win.stopMonitorWatch()
 	win.stopSystemThemeWatch()
 	win.stopAccessibility()
 	// Сносим все оторванные окна панелей: останавливаем их движки (реестр
@@ -778,6 +814,12 @@ func (win *Window) bringUp() error {
 
 	// Смена темы ОС: подписку поднимаем, если приложение задало колбэк до Run.
 	win.syncSystemThemeWatch()
+
+	// Смена конфигурации мониторов: подписку поднимаем, если колбэк задан до Run.
+	win.syncMonitorWatch()
+
+	// Захват клавиатуры, заказанный до Run.
+	win.setupKeyboardGrab()
 
 	// Синхронизация локали с раскладкой клавиатуры ОС (Windows/Linux).
 	win.setupLocaleSync()
@@ -1096,11 +1138,18 @@ func (win *Window) handleFitResize(newW, newH int) {
 // уже отпустить.
 func (s *surface) setupInput() {
 	s.setupCursorOverride()
+	s.hookPointerLock()
 
 	// ── Mouse move ───────────────────────────────────────────────────────────
 	// Движения склеиваются: пока предыдущее стоит в очереди, новое лишь
-	// обновляет его координаты (input_queue.go).
+	// обновляет его координаты (input_queue.go). Пока указатель захвачен
+	// (SetPointerLock), он стоит на месте и спрятан: настоящее движение идёт
+	// сдвигами, а абсолютные координаты ОС — лишь побочный эффект возврата
+	// указателя в центр.
 	s.native.SetOnMouseMove(func(x, y int) {
+		if s.lock.active.Load() {
+			return
+		}
 		s.in.move(s.onEngine, x, y, s.deliverMove)
 	})
 
@@ -1137,15 +1186,41 @@ func (s *surface) setupInput() {
 		})
 	}
 
+	// ── Сырое колесо (единицы 120 на щелчок, v3.39) ──────────────────────────
+	// Сначала событие предлагается виджетам, знающим widget.WheelEventHandler;
+	// принял кто-то — прежний путь (пиксели, тики) для этого движения колеса не
+	// запускается, иначе дерево прокрутилось бы дважды. Не принял никто —
+	// выполняется legacy, ровно то, что бэкенд делал бы без этого колбэка.
+	if rw, ok := s.native.(wheelRawSource); ok {
+		if we, ok := s.eng.(wheelRawEngine); ok {
+			rw.SetOnWheelRaw(func(x, y int, dx, dy float64, precise bool, legacy func()) {
+				s.post(func() {
+					cx, cy := s.toContent(x, y)
+					if we.SendMouseWheelRaw(cx, cy, dx, dy, precise) {
+						return
+					}
+					if legacy != nil {
+						legacy()
+					}
+				})
+			})
+		}
+	}
+
 	// ── Keys ─────────────────────────────────────────────────────────────────
-	// Повтор удерживаемой клавиши бэкенд отмечает отдельно, если умеет;
-	// иначе он приходит неотличимо от нового нажатия, как и раньше.
-	if kr, ok := s.native.(keyRepeatSource); ok {
+	// Бэкенд со скан-кодами (rawKeySource) отдаёт всё одним приёмником, в том
+	// числе клавиши вне таблицы VK. Повтор удерживаемой клавиши бэкенд
+	// отмечает отдельно, если умеет; иначе он приходит неотличимо от нового
+	// нажатия, как и раньше.
+	if rk, ok := s.native.(rawKeySource); ok {
+		rk.SetOnRawKey(s.rawKeyEvent)
+	} else if kr, ok := s.native.(keyRepeatSource); ok {
 		kr.SetOnKeyDownRepeat(func(vk int, repeat bool) { s.keyEventRepeat(vk, true, repeat) })
+		s.native.SetOnKeyUp(func(vk int) { s.keyEvent(vk, false) })
 	} else {
 		s.native.SetOnKeyDown(func(vk int) { s.keyEvent(vk, true) })
+		s.native.SetOnKeyUp(func(vk int) { s.keyEvent(vk, false) })
 	}
-	s.native.SetOnKeyUp(func(vk int) { s.keyEvent(vk, false) })
 
 	// ── Char (Unicode символ) ────────────────────────────────────────────────
 	s.native.SetOnChar(func(r rune) {
@@ -1183,8 +1258,38 @@ func (s *surface) keyEvent(vk int, pressed bool) {
 	s.keyEventRepeat(vk, pressed, false)
 }
 
-// keyEventRepeat — то же, но с пометкой «это автоповтор».
+// keyEventRepeat — то же, но с пометкой «это автоповтор». Бэкенд без
+// скан-кодов: событие приходит без ScanCode, клавиши вне таблицы VK он
+// отбрасывает сам.
 func (s *surface) keyEventRepeat(vk int, pressed, repeat bool) {
+	s.rawKeyEvent(rawKey{VK: vk, Pressed: pressed, Repeat: repeat})
+}
+
+// physicalKeyCode — код для события клавиши: именованные клавиши таблицы, а
+// сверх неё — сами модификаторы (Shift/Ctrl/Alt как нажатые клавиши, v3.39).
+func physicalKeyCode(vk int) widget.KeyCode {
+	switch vk {
+	case VK_SHIFT:
+		return widget.KeyShift
+	case VK_CONTROL:
+		return widget.KeyControl
+	case VK_ALT:
+		return widget.KeyAltKey
+	}
+	return vkToKeyCode(vk)
+}
+
+// rawKeyEvent — клавиша со скан-кодом (или без него) с насоса ОС.
+//
+// Событие уходит приложению, если у клавиши есть имя (код из таблицы) либо
+// скан-код: безымянная клавиша приходит с Code == KeyUnknown и ScanCode —
+// удалённому рабочему столу нужна любая. Клавиша без имени и без скан-кода
+// (бэкенд без rawKeySource, код вне таблицы) отбрасывается, как и раньше.
+// Модификаторы (Shift/Ctrl/Alt) доходят приложению как события только со
+// скан-кодом: старый путь без него их не порождал и не порождает.
+func (s *surface) rawKeyEvent(k rawKey) {
+	vk, pressed, repeat := k.VK, k.Pressed, k.Repeat
+	s.noteHeld(k)
 	switch vk {
 	case VK_SHIFT:
 		s.modShift.Store(pressed)
@@ -1202,7 +1307,7 @@ func (s *surface) keyEventRepeat(vk int, pressed, repeat bool) {
 		}
 	case VK_ALT:
 		s.modAlt.Store(pressed)
-		// Alt сам по себе — не клавиша, а модификатор, и своего события у
+		// Alt сам по себе — не клавиша, а модификатор, и жестового события у
 		// него нет. Кроме одного жеста: Alt нажали и отпустили, ничего
 		// между ними не нажав, — так в Windows открывают строку меню.
 		// Распознаём его здесь, а не в бэкендах: правило одно на все три,
@@ -1211,17 +1316,23 @@ func (s *surface) keyEventRepeat(vk int, pressed, repeat bool) {
 			if !repeat {
 				s.altTap.Store(true)
 			}
-			return // удержание Alt приложению не событие
+			s.postPhysicalKey(k)
+			return // удержание Alt приложению не жест
 		}
 		tap := s.altTap.Swap(false)
-		if !tap {
-			return
-		}
 		mod := s.currentMod()
 		s.post(func() {
 			s.sendModifiers(mod)
-			s.eng.SendKeyEvent(widget.KeyEvent{Code: widget.KeyAlt, Mod: mod, Pressed: true})
-			s.eng.SendKeyEvent(widget.KeyEvent{Code: widget.KeyAlt, Mod: mod, Pressed: false})
+			if k.Scan != 0 || k.Extended {
+				s.eng.SendKeyEvent(widget.KeyEvent{
+					Code: widget.KeyAltKey, Mod: mod, Pressed: false,
+					ScanCode: k.Scan, Extended: k.Extended,
+				})
+			}
+			if tap {
+				s.eng.SendKeyEvent(widget.KeyEvent{Code: widget.KeyAlt, Mod: mod, Pressed: true})
+				s.eng.SendKeyEvent(widget.KeyEvent{Code: widget.KeyAlt, Mod: mod, Pressed: false})
+			}
 		})
 		return
 	default:
@@ -1231,19 +1342,31 @@ func (s *surface) keyEventRepeat(vk int, pressed, repeat bool) {
 			s.altTap.Store(false)
 		}
 	}
+	s.postPhysicalKey(k)
+}
+
+// postPhysicalKey ставит в очередь движка событие клавиши (и состояние
+// модификаторов, снятое сейчас).
+func (s *surface) postPhysicalKey(k rawKey) {
 	mod := s.currentMod()
-	code := vkToKeyCode(vk)
+	code := physicalKeyCode(k.VK)
+	named := code != widget.KeyUnknown
+	if named && (k.VK == VK_SHIFT || k.VK == VK_CONTROL || k.VK == VK_ALT) && k.Scan == 0 && !k.Extended {
+		named = false // модификатор без скан-кода — как прежде, не событие
+	}
+	send := named || k.Scan != 0 || k.Extended
 	s.post(func() {
 		// Модификаторы нужны и событиям МЫШИ: Ctrl+Click и Shift+Click в
-		// таблице. Своего клавиатурного события у Ctrl нет (в KeyCode такой
-		// клавиши не существует), поэтому состояние отдаётся движку отдельно.
+		// таблице. Состояние отдаётся движку отдельно от события клавиши.
 		s.sendModifiers(mod)
-		if code != widget.KeyUnknown {
+		if send {
 			s.eng.SendKeyEvent(widget.KeyEvent{
-				Code:    code,
-				Mod:     mod,
-				Pressed: pressed,
-				Repeat:  repeat,
+				Code:     code,
+				Mod:      mod,
+				Pressed:  k.Pressed,
+				Repeat:   k.Repeat,
+				ScanCode: k.Scan,
+				Extended: k.Extended,
 			})
 		}
 	})
@@ -1561,8 +1684,13 @@ func vkToKeyCode(vk int) widget.KeyCode {
 		return widget.KeyCode(vk)
 	case vk >= VK_F1 && vk <= VK_F24:
 		return widget.KeyCode(vk)
+	case vk >= VK_BROWSER_BACK && vk <= VK_LAUNCH_APP2: // браузерные и мультимедийные
+		return widget.KeyCode(vk)
 	}
 	switch vk {
+	case VK_CLEAR, VK_KANA, VK_JUNJA, VK_FINAL, VK_KANJI, VK_CONVERT, VK_NONCONVERT,
+		VK_ACCEPT, VK_MODECHANGE, VK_SLEEP, VK_PROCESSKEY:
+		return widget.KeyCode(vk)
 	case VK_BACKSPACE, VK_TAB, VK_ENTER, VK_ESCAPE, VK_SPACE,
 		VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN,
 		VK_INSERT, VK_DELETE, VK_HOME, VK_END, VK_PRIOR, VK_NEXT,

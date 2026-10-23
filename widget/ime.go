@@ -204,7 +204,7 @@ func (t *TextInput) imeReplaceLocked(rs []rune, caret int) {
 			to = len(t.runes)
 		}
 		if from <= to {
-			t.runes = append(t.runes[:from], t.runes[to:]...)
+			t.cutRunes(from, to)
 			t.caretPos = from
 		}
 		t.ime.clear()
@@ -221,7 +221,7 @@ func (t *TextInput) imeReplaceLocked(rs []rune, caret int) {
 		ins = append(ins, t.runes[:start]...)
 		ins = append(ins, rs...)
 		ins = append(ins, t.runes[start:]...)
-		t.runes = ins
+		t.adoptRunes(ins)
 		t.ime.set(start, len(rs))
 		t.caretPos = start + len(rs)
 		if caret >= 0 && caret <= len(rs) {

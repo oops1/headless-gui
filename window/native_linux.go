@@ -112,6 +112,11 @@ type X11Window struct {
 	// (x11_keyrepeat_linux.go). Задан приёмник — onKeyDown не вызывается.
 	onKeyDownRepeat func(vk int, repeat bool)
 	keys            x11KeyState
+	// onRawKey — приёмник клавиш со скан-кодом (rawKeySource): когда задан,
+	// остальные приёмники клавиш не вызываются, а клавиши вне таблицы VK не
+	// отбрасываются. onWheelRaw — приёмник сырого колеса (wheelRawSource).
+	onRawKey   func(k rawKey)
+	onWheelRaw func(x, y int, dx, dy float64, precise bool, legacy func())
 
 	// Atom IDs для WM протоколов
 	atomWMProtocols     uint32
@@ -178,6 +183,10 @@ type X11Window struct {
 	clip *x11Clipboard
 	// cursors — формы курсора окна (x11_cursor_linux.go).
 	cursors x11Cursors
+	// curImg — курсоры-картинки (x11cursorimage_linux.go); под cursors.mu.
+	curImg x11CursorImages
+	// plock — захват указателя (x11pointerlock_linux.go).
+	plock x11PtrLock
 	// resizable — разрешено ли пользователю менять размер (SetResizable).
 	resizable atomic.Bool
 	// rootX/rootY — последняя известная позиция указателя в координатах
@@ -250,6 +259,9 @@ type X11Window struct {
 
 	// touch — касания через XInput 2.2 (x11touch_linux.go).
 	touch x11Touch
+
+	// kg — захват клавиатуры (x11_keygrab_linux.go).
+	kg x11KeyGrab
 }
 
 type x11Screen struct {
@@ -557,7 +569,17 @@ func (w *X11Window) RunEventLoop() error {
 	// пришедшая ровно сейчас, не потерялась (см. SetTouchEnabled).
 	w.touch.looping.Store(true)
 	defer w.touch.looping.Store(false)
+	w.kg.looping.Store(true)
+	defer w.kg.looping.Store(false)
+	// То же для курсора-картинки и захвата указателя: их просьбы исполняет цикл.
+	w.curImg.looping.Store(true)
+	defer w.curImg.looping.Store(false)
+	w.plock.looping.Store(true)
+	defer w.plock.looping.Store(false)
 	w.x11SyncTouch()
+	w.x11SyncKeyGrab()
+	w.x11SyncCursorImage()
+	w.x11SyncPointerLock()
 	for !w.closed.Load() {
 		if !w.readEvent(buf) {
 			if w.closed.Load() {
@@ -577,6 +599,9 @@ func (w *X11Window) RunEventLoop() error {
 		}
 		w.x11SyncWMState()
 		w.x11SyncTouch()
+		w.x11SyncKeyGrab()
+		w.x11SyncCursorImage()
+		w.x11SyncPointerLock()
 	}
 	return nil
 }
@@ -622,7 +647,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		keycode := buf[1]
 		state := binary.LittleEndian.Uint16(buf[28:30])
 		vk := w.x11VKForKey(keycode)
-		if vk != 0 {
+		if w.onRawKey != nil {
+			w.onRawKey(rawKey{VK: vk, Scan: x11ScanCode(keycode), Pressed: true, Repeat: repeat})
+		} else if vk != 0 {
 			if w.onKeyDownRepeat != nil {
 				w.onKeyDownRepeat(vk, repeat)
 			} else if w.onKeyDown != nil {
@@ -644,7 +671,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	case 3: // KeyRelease
 		keycode := buf[1]
 		vk := w.x11VKForKey(keycode)
-		if w.onKeyUp != nil && vk != 0 {
+		if w.onRawKey != nil {
+			w.onRawKey(rawKey{VK: vk, Scan: x11ScanCode(keycode)})
+		} else if w.onKeyUp != nil && vk != 0 {
 			w.onKeyUp(vk)
 		}
 
@@ -661,17 +690,38 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		// кнопками 4 и 5. Раньше они просто отбрасывались, и прокрутки
 		// вширь на X11 не было.
 		if raw := int(buf[1]); raw == 6 || raw == 7 {
-			if w.onMouseWheelPixels != nil {
-				dx := float64(x11WheelNotchPx)
-				if raw == 6 {
-					dx = -dx // 6 — влево
+			legacy := func() {
+				if w.onMouseWheelPixels != nil {
+					dx := float64(x11WheelNotchPx)
+					if raw == 6 {
+						dx = -dx // 6 — влево
+					}
+					w.onMouseWheelPixels(x, y, dx, 0)
 				}
-				w.onMouseWheelPixels(x, y, dx, 0)
+			}
+			if w.onWheelRaw != nil {
+				dx, dy, _ := x11WheelRaw(buf[1])
+				w.onWheelRaw(x, y, dx, dy, false, legacy)
+			} else {
+				legacy()
 			}
 			return
 		}
 		// 1=left, 2=middle, 3=right, 4/5=колесо, 8/9=боковые «назад»/«вперёд».
 		button, ok := x11ButtonID(int(buf[1]))
+		if w.onWheelRaw != nil && (buf[1] == 4 || buf[1] == 5) {
+			// Щелчок вертикального колеса: сначала сырое событие; если его
+			// никто не принял — тик кнопкой 3/4, нажатие и отпускание разом
+			// (отпускание кнопок 4/5 при этом не пересылается, см. ниже).
+			dx, dy, _ := x11WheelRaw(buf[1])
+			w.onWheelRaw(x, y, dx, dy, false, func() {
+				if ok && w.onMouseButton != nil {
+					w.onMouseButton(x, y, button, true)
+					w.onMouseButton(x, y, button, false)
+				}
+			})
+			return
+		}
 		if ok && w.onMouseButton != nil {
 			w.onMouseButton(x, y, button, true)
 		}
@@ -686,6 +736,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		if raw := int(buf[1]); raw == 6 || raw == 7 {
 			return // прокрутку отдали на нажатии; отпускание ничего не значит
 		}
+		if w.onWheelRaw != nil && (buf[1] == 4 || buf[1] == 5) {
+			return // тик целиком отдан на нажатии (пара нажатие+отпускание)
+		}
 		button, ok := x11ButtonID(int(buf[1]))
 		if ok && w.onMouseButton != nil {
 			w.onMouseButton(x, y, button, false)
@@ -697,6 +750,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		}
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
+		if w.x11LockMotion(x, y) {
+			return // захват указателя: движение идёт сдвигами
+		}
 		if w.onMouseMove != nil {
 			w.onMouseMove(x, y)
 		}
@@ -709,13 +765,22 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	case x11GenericEvent: // XInput 2: касания
 		w.handleGenericEvent(buf)
 
-	case 9: // FocusIn
-		if w.onActivate != nil {
+	case 9: // FocusIn: mode — buf[8]
+		// Захват указателя следует только за настоящей сменой фокуса: FocusIn/
+		// FocusOut с режимом Grab/Ungrab порождает сам XGrabKeyboard, и без этой
+		// проверки включение захвата клавиатуры тут же снимало бы захват мыши.
+		if !x11FocusByGrab(buf[8]) {
+			w.x11NotePointerFocus(true)
+		}
+		if own := w.x11NoteFocus(true, buf[8]); !own && w.onActivate != nil {
 			w.onActivate(true)
 		}
 
 	case 10: // FocusOut
-		if w.onActivate != nil {
+		if !x11FocusByGrab(buf[8]) {
+			w.x11NotePointerFocus(false)
+		}
+		if own := w.x11NoteFocus(false, buf[8]); !own && w.onActivate != nil {
 			w.onActivate(false)
 		}
 
@@ -1055,6 +1120,14 @@ func (w *X11Window) SetOnMouseButton(fn func(x, y, button int, pressed bool)) { 
 // менялась; сюда уходит только горизонталь (кнопки 6 и 7).
 func (w *X11Window) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) {
 	w.onMouseWheelPixels = fn
+}
+
+// SetOnRawKey подписывает приёмник клавиш со скан-кодом. Реализует rawKeySource.
+func (w *X11Window) SetOnRawKey(fn func(k rawKey)) { w.onRawKey = fn }
+
+// SetOnWheelRaw подписывает приёмник сырого колеса. Реализует wheelRawSource.
+func (w *X11Window) SetOnWheelRaw(fn func(x, y int, dx, dy float64, precise bool, legacy func())) {
+	w.onWheelRaw = fn
 }
 
 func (w *X11Window) SetOnKeyDown(fn func(vk int)) { w.onKeyDown = fn }
@@ -1737,6 +1810,14 @@ func (w *X11Window) StartEventPump() {
 // главного окна (RunEventLoop) при этом не затрагивается — у него своё conn.
 func (w *X11Window) eventPumpLoop() {
 	buf := make([]byte, 32)
+	w.kg.looping.Store(true)
+	defer w.kg.looping.Store(false)
+	w.x11SyncKeyGrab()
+	// Вторичное окно (попап) тоже показывает курсор-картинку: просьбу исполняет
+	// этот насос.
+	w.curImg.looping.Store(true)
+	defer w.curImg.looping.Store(false)
+	w.x11SyncCursorImage()
 	for !w.closed.Load() {
 		if !w.readEvent(buf) {
 			return
@@ -1749,6 +1830,8 @@ func (w *X11Window) eventPumpLoop() {
 			w.handleX11Event(full)
 		}
 		w.x11SyncWMState()
+		w.x11SyncKeyGrab()
+		w.x11SyncCursorImage()
 	}
 }
 

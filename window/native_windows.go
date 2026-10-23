@@ -380,10 +380,28 @@ type Win32Window struct {
 	mu         sync.Mutex
 	frameBuf   []byte // BGRA пиксели для StretchDIBits (top-down: строка 0 — верхняя)
 	bufW, bufH int    // размер кадра, лежащего в frameBuf (для растянутого блита)
+	// frameVA — frameBuf выделен VirtualAlloc, а не Go (framebuf_windows.go);
+	// frameDead — окно уничтожено, буфер освобождён. blitFails — сколько
+	// блитов подряд GDI не вывел; paintMiss — WM_PAINT пришёл, когда
+	// перерисовка ещё не была подключена (SetOnExpose).
+	frameVA   bool
+	frameDead bool
+	blitFails atomic.Int32
+	paintMiss atomic.Bool
 
 	cursorHandle uintptr         // текущий желаемый курсор (HCURSOR)
 	cursorCache  map[int]uintptr // кэш загруженных IDC-курсоров
 	cursorHidden bool            // курсор спрятан (CursorNone): WM_SETCURSOR ставит SetCursor(NULL)
+
+	// imgCursors — курсоры из картинок (Engine.SetCursorImage), по ключу
+	// содержимого, не более cursorCacheSize; imgCreated — сколько курсоров
+	// построено за жизнь окна (в тестах проверяется, что кэш работает).
+	// Только поток окна. См. cursorimage_windows.go.
+	imgCursors *cursorLRU[uintptr]
+	imgCreated int
+
+	// lock — захват указателя (SetPointerLock), см. pointerlock_windows.go.
+	lock win32PointerLock
 
 	// Уход указателя: запросы TrackMouseEvent на клиентскую и нерабочую
 	// область (pointerleave.go, mouse_windows.go). trackMouse — подмена
@@ -403,6 +421,16 @@ type Win32Window struct {
 	// (см. systheme_windows.go). Атомарно: подписку ставит и снимает
 	// горутина приложения, а читает поток цикла сообщений окна.
 	onSettingChange atomic.Pointer[func(area string)]
+	// onAccentChange — то же для акцентного цвета (watchSystemAccent).
+	onAccentChange atomic.Pointer[func(area string)]
+
+	// kbGrabbed — окно заказало захват клавиатуры (keygrab_windows.go).
+	// Атомарно: читает KeyboardGrabActive с любой горутины.
+	kbGrabbed atomic.Bool
+
+	// onMonitors — подписка на смену мониторов (monitor_change_windows.go).
+	// Атомарно по той же причине, что и onSettingChange.
+	onMonitors atomic.Pointer[func()]
 
 	// Callbacks
 	onResize           func(w, h int)
@@ -423,7 +451,12 @@ type Win32Window struct {
 	highSurrogate   rune
 	onKeyDownRepeat func(vk int, repeat bool)
 	onKeyUp         func(vk int)
-	onChar          func(r rune)
+	// onRawKey — приёмник клавиш со скан-кодом (rawKeySource): когда задан,
+	// onKeyDown/onKeyDownRepeat/onKeyUp не вызываются.
+	onRawKey func(k rawKey)
+	// onWheelRaw — приёмник сырого колеса (wheelRawSource).
+	onWheelRaw func(x, y int, dx, dy float64, precise bool, legacy func())
+	onChar     func(r rune)
 
 	// Редактор метода ввода (ime_windows.go): набираемое, готовый текст и
 	// место каретки для окна кандидатов.
@@ -617,6 +650,7 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 	w.title = title
 	w.width = width
 	w.height = height
+	w.frameDead = false
 	// Окно, которое просят создать меньше дефолтного минимума (320×240),
 	// иначе вырастет до него: Windows клампит размер по ptMinTrackSize уже
 	// при создании. Кадр остаётся прежним, и снизу/справа остаётся
@@ -921,9 +955,13 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	// Конвертируем RGBA → BGRA (Win32 DIB формат) — только строки/столбцы
 	// dirty-области. Переворота по Y нет: DIB объявлен top-down (BiHeight<0).
 	w.mu.Lock()
+	if w.frameDead {
+		w.mu.Unlock()
+		return
+	}
 	needed := width * height * 4
 	if len(w.frameBuf) < needed {
-		w.frameBuf = make([]byte, needed)
+		w.allocFrameBuf(needed)
 		dirty = b // новый буфер — заполняем целиком
 	}
 	convertFrameToBGRA(w.frameBuf, img, dirty, width)
@@ -973,7 +1011,7 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	// чужой кусок интерфейса на месте перерисованного виджета.
 	ySrc := height - dirty.Max.Y
 
-	procStretchDIBits.Call(
+	lines, _, _ := procStretchDIBits.Call(
 		hdc,
 		uintptr(dirty.Min.X), uintptr(dirty.Min.Y), uintptr(dw), uintptr(dh), // dst rect
 		uintptr(dirty.Min.X), uintptr(ySrc), uintptr(dw), uintptr(dh), // src rect
@@ -983,6 +1021,13 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 		uintptr(srccopy),
 	)
 	w.mu.Unlock()
+	// Кадр, который GDI не вывел, иначе считался бы показанным: интерфейс в
+	// покое новых кадров не шлёт, и окно оставалось бы пустым навсегда.
+	if lines == 0 {
+		w.blitFailed()
+	} else {
+		w.blitFails.Store(0)
+	}
 }
 
 // blitStretchedLocked растягивает кэшированный кадр (frameBuf, bufW×bufH) на
@@ -1046,7 +1091,16 @@ func (w *Win32Window) SetMinSize(width, height int) {
 }
 
 // SetOnExpose — колбэк перерисовки области по WM_PAINT (см. exposeNotifier).
-func (w *Win32Window) SetOnExpose(fn func(r image.Rectangle)) { w.onExpose = fn }
+//
+// WM_PAINT, пришедший раньше (первый показ внутри Create — до того, как окно
+// подключит перерисовку), BeginPaint уже провалидировал, и система больше не
+// попросила бы перерисовать окно: просим заново.
+func (w *Win32Window) SetOnExpose(fn func(r image.Rectangle)) {
+	w.onExpose = fn
+	if fn != nil && w.hwnd != 0 && w.paintMiss.Swap(false) {
+		procInvalidateRect.Call(uintptr(w.hwnd), 0, 0)
+	}
+}
 
 // SetOnDpiChanged — колбэк смены DPI монитора (см. dpiChangeNotifier).
 func (w *Win32Window) SetOnDpiChanged(fn func(scale float64)) { w.onDpiChanged = fn }
@@ -1152,7 +1206,15 @@ func (w *Win32Window) SetOnKeyDownRepeat(fn func(vk int, repeat bool)) {
 	w.onKeyDownRepeat = fn
 }
 func (w *Win32Window) SetOnKeyUp(fn func(vk int)) { w.onKeyUp = fn }
-func (w *Win32Window) SetOnChar(fn func(r rune))  { w.onChar = fn }
+
+// SetOnRawKey подписывает приёмник клавиш со скан-кодом. Реализует rawKeySource.
+func (w *Win32Window) SetOnRawKey(fn func(k rawKey)) { w.onRawKey = fn }
+
+// SetOnWheelRaw подписывает приёмник сырого колеса. Реализует wheelRawSource.
+func (w *Win32Window) SetOnWheelRaw(fn func(x, y int, dx, dy float64, precise bool, legacy func())) {
+	w.onWheelRaw = fn
+}
+func (w *Win32Window) SetOnChar(fn func(r rune)) { w.onChar = fn }
 
 // SetOnFilesDropped регистрирует колбэк Drag&Drop файлов из ОС (WM_DROPFILES).
 // Координаты — клиентские физические пиксели. Гарантирует включённый приём
@@ -1259,12 +1321,19 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmDestroy:
-		w.revokeDropTarget() // IDropTarget окна (dnd_windows.go)
+		kbGrab.release(w, false) // хук захвата клавиатуры не должен пережить окно
+		w.revokeDropTarget()     // IDropTarget окна (dnd_windows.go)
 		win32Mu.Lock()
 		delete(win32Windows, hwnd)
 		win32Mu.Unlock()
 		dropUICalls(hwnd) // WM_APP этому окну уже не придёт
 		w.destroyArtCursors()
+		w.destroyImageCursors()
+		w.lock.release(w) // не оставить курсор зажатым и сырой ввод — на мёртвое окно
+		w.mu.Lock()
+		w.frameDead = true
+		w.freeFrameBuf() // память VirtualAlloc сборщик мусора не вернёт
+		w.mu.Unlock()
 		// Вторичные окна модалок (noQuit) не завершают цикл сообщений — иначе
 		// закрытие диалога уронило бы всё приложение. Главное окно — завершает.
 		if !w.noQuit {
@@ -1313,6 +1382,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 				// сразу применяем размер к движку.
 				w.onResize(newW, newH)
 			}
+			w.lock.refit(w) // зажим указателя — в центр нового размера
 		}
 		return 0
 
@@ -1327,6 +1397,9 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			// растянуто на всю область (НИКОГДА не отдаём пустую отрисовку в Def).
 			w.blitCachedStretched()
 			return 0
+		}
+		if w.onExpose == nil {
+			w.paintMiss.Store(true) // перерисовку подключат позже — см. SetOnExpose
 		}
 		if w.onExpose != nil {
 			r := image.Rect(int(ps.RcPaint.Left), int(ps.RcPaint.Top),
@@ -1349,19 +1422,35 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		if !active && lparam != 0 && lookupWin32(lparam) != nil {
 			return 0
 		}
+		w.lock.onActivate(w, active) // захват указателя: снять при потере фокуса, вернуть при получении
 		if w.onActivate != nil {
 			w.onActivate(active)
 		}
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
 		return ret
 
+	case wmInput:
+		// Сырой ввод мыши (захват указателя). DefWindowProc обязателен: по
+		// документации система освобождает данные сообщения в нём.
+		w.lock.handleInput(lparam)
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+		return ret
+
+	case wmMove:
+		w.lock.refit(w) // зажим указателя следует за окном
+		break           // → DefWindowProc
+
 	case wmSettingchange:
 		// Сообщение приходит по любому поводу; нужное нам различает строка
 		// в lParam (см. systheme_windows.go). Дальше уходит в DefWindowProc —
 		// как и положено широковещательному сообщению.
 		w.handleSettingChange(lparam)
+		if monitorsChangedBySetting(wparam) {
+			w.noteMonitorsChanged() // SPI_SETWORKAREA: сдвинули панель задач
+		}
 
 	case wmDpichanged:
+		w.noteMonitorsChanged() // масштаб монитора мог измениться
 		// Окно перенесли на монитор с другим DPI. wparam: LOWORD = новый DPI;
 		// lparam → RECT с рекомендованным размером/позицией окна.
 		newDpi := wparam & 0xFFFF
@@ -1475,6 +1564,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		// Сменилось разрешение или состав мониторов: полноэкранное окно
 		// пересчитывает прямоугольник (иначе остаётся с прежним размером).
 		w.refitFullscreen()
+		w.noteMonitorsChanged()
 
 	case wmWindowposchanged:
 		// Окно перенесли (Win+Shift+стрелка) — на другом мониторе тот же
@@ -1605,9 +1695,20 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
 		delta := int16((wparam >> 16) & 0xFFFF)
-		if delta != 0 && w.onMouseWheelPixels != nil {
-			dx := float64(delta) / wheelDeltaWin * wheelNotchPx
-			w.onMouseWheelPixels(int(pt.X), int(pt.Y), dx, 0)
+		if delta != 0 {
+			x, y := int(pt.X), int(pt.Y)
+			legacy := func() {
+				if w.onMouseWheelPixels != nil {
+					dx := float64(delta) / wheelDeltaWin * wheelNotchPx
+					w.onMouseWheelPixels(x, y, dx, 0)
+				}
+			}
+			if w.onWheelRaw != nil {
+				dx, dy, precise := win32WheelRaw(delta, true)
+				w.onWheelRaw(x, y, dx, dy, precise, legacy)
+			} else {
+				legacy()
+			}
 		}
 		return 0
 
@@ -1621,23 +1722,32 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
 
 		delta := int16((wparam >> 16) & 0xFFFF)
-		if w.onMouseWheelPixels != nil {
-			// Высокоточный путь: delta кратна 120 (WHEEL_DELTA) для обычной мыши,
-			// но у прецизионных тачпадов приходит дробной. Один «notch» (120) =
-			// wheelNotchPx пикселей; знак: delta>0 = вверх ⇒ dy<0.
-			if delta != 0 {
-				dy := -float64(delta) / wheelDeltaWin * wheelNotchPx
-				w.onMouseWheelPixels(int(pt.X), int(pt.Y), 0, dy)
+		x, y := int(pt.X), int(pt.Y)
+		legacy := func() {
+			if w.onMouseWheelPixels != nil {
+				// Высокоточный путь: delta кратна 120 (WHEEL_DELTA) для обычной мыши,
+				// но у прецизионных тачпадов приходит дробной. Один «notch» (120) =
+				// wheelNotchPx пикселей; знак: delta>0 = вверх ⇒ dy<0.
+				if delta != 0 {
+					dy := -float64(delta) / wheelDeltaWin * wheelNotchPx
+					w.onMouseWheelPixels(x, y, 0, dy)
+				}
+			} else if w.onMouseButton != nil {
+				// Фолбэк на тики (например, в режиме popup-хоста).
+				if delta > 0 {
+					w.onMouseButton(x, y, 3, true)
+					w.onMouseButton(x, y, 3, false)
+				} else if delta < 0 {
+					w.onMouseButton(x, y, 4, true)
+					w.onMouseButton(x, y, 4, false)
+				}
 			}
-		} else if w.onMouseButton != nil {
-			// Фолбэк на тики (например, в режиме popup-хоста).
-			if delta > 0 {
-				w.onMouseButton(int(pt.X), int(pt.Y), 3, true)
-				w.onMouseButton(int(pt.X), int(pt.Y), 3, false)
-			} else if delta < 0 {
-				w.onMouseButton(int(pt.X), int(pt.Y), 4, true)
-				w.onMouseButton(int(pt.X), int(pt.Y), 4, false)
-			}
+		}
+		if w.onWheelRaw != nil && delta != 0 {
+			dx, dy, precise := win32WheelRaw(delta, false)
+			w.onWheelRaw(x, y, dx, dy, precise, legacy)
+		} else {
+			legacy()
 		}
 		return 0
 
@@ -1659,8 +1769,10 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	case wmKeydown, wmSyskeydown:
 		// Бит 30 lParam — «клавиша уже была нажата», то есть это автоповтор,
 		// а не новое нажатие (WM_KEYDOWN, previous key state).
-		repeat := lparam&(1<<30) != 0
-		if w.onKeyDownRepeat != nil {
+		scan, ext, repeat := win32KeyLParam(lparam)
+		if w.onRawKey != nil {
+			w.onRawKey(rawKey{VK: int(wparam), Scan: scan, Extended: ext, Pressed: true, Repeat: repeat})
+		} else if w.onKeyDownRepeat != nil {
 			w.onKeyDownRepeat(int(wparam), repeat)
 		} else if w.onKeyDown != nil {
 			w.onKeyDown(int(wparam))
@@ -1671,7 +1783,10 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return ret
 
 	case wmKeyup, wmSyskeyup:
-		if w.onKeyUp != nil {
+		if w.onRawKey != nil {
+			scan, ext, _ := win32KeyLParam(lparam)
+			w.onRawKey(rawKey{VK: int(wparam), Scan: scan, Extended: ext})
+		} else if w.onKeyUp != nil {
 			w.onKeyUp(int(wparam))
 		}
 		if umsg == wmSyskeyup {

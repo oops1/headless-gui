@@ -226,6 +226,41 @@ const (
 	VK_F13 = 0x7C
 	VK_F24 = 0x87
 
+	// Клавиши, дошедшие до приложения только в v3.39 (раньше их не было в
+	// таблицах бэкендов, и событие терялось).
+	VK_CLEAR      = 0x0C
+	VK_KANA       = 0x15 // Kana / Hangul
+	VK_JUNJA      = 0x17
+	VK_FINAL      = 0x18
+	VK_KANJI      = 0x19 // Kanji / Hanja
+	VK_CONVERT    = 0x1C
+	VK_NONCONVERT = 0x1D
+	VK_ACCEPT     = 0x1E
+	VK_MODECHANGE = 0x1F
+	VK_SLEEP      = 0x5F
+	VK_LMENU      = 0xA4
+	VK_PROCESSKEY = 0xE5 // клавиша ушла редактору ввода (IME)
+
+	// Браузерные и мультимедийные клавиши, подряд (0xA6..0xB7).
+	VK_BROWSER_BACK      = 0xA6
+	VK_BROWSER_FORWARD   = 0xA7
+	VK_BROWSER_REFRESH   = 0xA8
+	VK_BROWSER_STOP      = 0xA9
+	VK_BROWSER_SEARCH    = 0xAA
+	VK_BROWSER_FAVORITES = 0xAB
+	VK_BROWSER_HOME      = 0xAC
+	VK_VOLUME_MUTE       = 0xAD
+	VK_VOLUME_DOWN       = 0xAE
+	VK_VOLUME_UP         = 0xAF
+	VK_MEDIA_NEXT_TRACK  = 0xB0
+	VK_MEDIA_PREV_TRACK  = 0xB1
+	VK_MEDIA_STOP        = 0xB2
+	VK_MEDIA_PLAY_PAUSE  = 0xB3
+	VK_LAUNCH_MAIL       = 0xB4
+	VK_LAUNCH_MEDIA      = 0xB5
+	VK_LAUNCH_APP1       = 0xB6
+	VK_LAUNCH_APP2       = 0xB7
+
 	// OEM-клавиши: символ зависит от раскладки, код — нет.
 	VK_OEM_1      = 0xBA // ;:
 	VK_OEM_PLUS   = 0xBB // =+

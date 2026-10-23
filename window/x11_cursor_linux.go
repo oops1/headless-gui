@@ -59,6 +59,10 @@ func (w *X11Window) SetCursor(c int) {
 		return // та же форма — незачем беспокоить сервер
 	}
 	w.cursors.shown, w.cursors.known = c, true
+	// Форма, заданная после картинки, отзывает ещё не показанную картинку и
+	// делает показанную прежней (x11cursorimage_linux.go).
+	w.curImg.pending = nil
+	w.curImg.shown = 0
 	id := w.cursorResourceLocked(c)
 	w.cursors.mu.Unlock()
 	if id == 0 {

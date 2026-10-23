@@ -244,6 +244,9 @@ func (w *Win32Window) setCursorMessage(hit uintptr) (h uintptr, handled bool) {
 	if hit != htClient {
 		return 0, false
 	}
+	if w.lock.hide.Load() { // захват указателя: курсора нет
+		return 0, true
+	}
 	if w.cursorHidden {
 		return 0, true
 	}

@@ -3,6 +3,7 @@
 package window
 
 import (
+	"image/color"
 	"runtime"
 	"testing"
 	"unsafe"
@@ -112,5 +113,96 @@ func TestReadUTF16Bounded(t *testing.T) {
 	p, _ := windows.UTF16PtrFromString("Intl")
 	if s := readUTF16Bounded(unsafe.Pointer(p), settingChangeAreaMax); s != "Intl" {
 		t.Errorf("прочитано %q, ждал Intl", s)
+	}
+}
+
+// TestDetectSystemAccent_ReadsRegistry сверяет акцент с реестром, прочитанным
+// независимо: ловит перепутанный порядок байт (AccentColor — ABGR).
+func TestDetectSystemAccent_ReadsRegistry(t *testing.T) {
+	k, err := registry.OpenKey(registry.CURRENT_USER, `Software\Microsoft\Windows\DWM`, registry.QUERY_VALUE)
+	if err != nil {
+		t.Skipf("раздела DWM нет: %v", err)
+	}
+	defer k.Close()
+	v, _, err := k.GetIntegerValue("AccentColor")
+	if err != nil {
+		t.Skipf("значения AccentColor нет: %v", err)
+	}
+	want := color.RGBA{R: uint8(v & 0xFF), G: uint8(v >> 8 & 0xFF), B: uint8(v >> 16 & 0xFF), A: 255}
+	got, ok := DetectSystemAccent()
+	if !ok || got != want {
+		t.Errorf("DetectSystemAccent() = %v, %v при AccentColor=%#x, ждал %v", got, ok, v, want)
+	}
+}
+
+// Акцент приходит с тем же ImmersiveColorSet, что и тема, но подписки у них
+// независимые: у каждой своя ячейка окна, и обе получают одно сообщение.
+func TestWatchSystemAccent_IndependentFromTheme(t *testing.T) {
+	w := &Win32Window{}
+	var themes, accents int
+	stopT := watchSystemTheme(w, func(SystemTheme) { themes++ })
+	stopA := watchSystemAccent(w, func(color.RGBA, bool) { accents++ })
+	if stopT == nil || stopA == nil {
+		t.Fatal("подписки на Win32Window не подняты")
+	}
+
+	wmSettingchangeArea(t, w, "intl")
+	if themes != 0 || accents != 0 {
+		t.Fatalf("посторонняя область разбудила подписчиков: %d/%d", themes, accents)
+	}
+	wmSettingchangeArea(t, w, "ImmersiveColorSet")
+	if themes != 1 || accents != 1 {
+		t.Fatalf("ImmersiveColorSet: тема %d, акцент %d вызовов; ждал по 1", themes, accents)
+	}
+
+	// Снятие одной подписки вторую не трогает.
+	stopT()
+	wmSettingchangeArea(t, w, "ImmersiveColorSet")
+	if themes != 1 || accents != 2 {
+		t.Errorf("после снятия темы: тема %d, акцент %d; ждал 1 и 2", themes, accents)
+	}
+	stopA()
+	wmSettingchangeArea(t, w, "ImmersiveColorSet")
+	if accents != 2 {
+		t.Errorf("подписка на акцент снята, но вызов был: %d", accents)
+	}
+	if watchSystemAccent(nil, func(color.RGBA, bool) {}) != nil {
+		t.Error("не Win32Window принят за источник сообщений")
+	}
+}
+
+// Сквозная проверка: сообщение окна → реестр → общий слой окна → колбэк
+// приложения. Запомненное «прежнее» оформление искажается, чтобы значение из
+// реестра выглядело переменой.
+func TestWindowAppearanceWiredToWin32(t *testing.T) {
+	cur, hasAccent := detectSystemAccent()
+	if !hasAccent {
+		t.Skip("акцента в реестре нет")
+	}
+	w := &Win32Window{}
+	win, _ := appearanceTestWin()
+	win.native = w
+	got := make(chan SystemAppearance, 4)
+	win.SetOnSystemAppearanceChanged(func(a SystemAppearance) { got <- a })
+	if w.onSettingChange.Load() == nil || w.onAccentChange.Load() == nil {
+		t.Fatal("подписки на тему и акцент не подняты")
+	}
+
+	win.sysTheme.mu.Lock()
+	win.sysTheme.last.Accent = color.RGBA{R: cur.R ^ 0xFF, G: cur.G, B: cur.B, A: 255}
+	win.sysTheme.mu.Unlock()
+	wmSettingchangeArea(t, w, "ImmersiveColorSet")
+	select {
+	case a := <-got:
+		if !a.HasAccent || a.Accent != cur {
+			t.Errorf("приложение получило %+v, ждал акцент %v", a, cur)
+		}
+	default:
+		t.Fatal("колбэк оформления не вызван")
+	}
+
+	win.SetOnSystemAppearanceChanged(nil)
+	if w.onSettingChange.Load() != nil || w.onAccentChange.Load() != nil {
+		t.Error("колбэк снят, а подписки окна остались")
 	}
 }

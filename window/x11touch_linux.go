@@ -257,6 +257,9 @@ func (w *X11Window) x11CompleteEvent(pkt []byte) ([]byte, bool) {
 
 // handleGenericEvent — GenericEvent: касания XI2.
 func (w *X11Window) handleGenericEvent(buf []byte) {
+	if w.x11RawMotion(buf) { // сырое движение мыши при захвате указателя
+		return
+	}
 	if !w.touch.selected.Load() {
 		return
 	}
