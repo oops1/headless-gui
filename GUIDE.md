@@ -1550,6 +1550,16 @@ OEM-клавиши (`KeyOemPlus`, `KeyOemMinus` и др.), `KeyF1…KeyF24`, н�
 затем отдельное текстовое событие с `Rune`. `KeyEvent.Repeat` отличает
 автоповтор удерживаемой клавиши от нового нажатия (Win32, Wayland и X11).
 
+**Сырой скан-код (v3.39).** `KeyEvent.ScanCode` и `Extended` — код физической
+клавиши от ОС «как есть»: Windows — биты 16–23 `lParam` и бит 24; X11 и Wayland —
+evdev (`keycode − 8`); macOS — `keyCode`. Единой таблицы нет: клиенту удалённого
+рабочего стола (RDP шлёт скан-коды набора 1) нужна своя таблица `evdev → набор 1`.
+Клавиша, которой нет в таблице VK, больше не пропадает: она приходит с
+`Code == KeyUnknown`, `Rune == 0` и заполненным `ScanCode`. Shift, Ctrl и Alt
+тоже приходят как клавиши (`KeyShift`, `KeyControl`, `KeyAltKey`; сторона — в
+`ScanCode` и `Extended`); жест `KeyAlt` остаётся прежним. Добавлены коды
+мультимедиа и браузера, Kana/Hangul/Convert/NonConvert, `KeyIMEProcess`.
+
 Модификаторы: `ModShift, ModCtrl, ModAlt, ModMeta`.
 
 **Alt и F10 — строка меню.** Alt сам по себе не событие, а модификатор:
@@ -4012,6 +4022,35 @@ eng.SendMouseWheelPixels(x, y, dx, dy)
 По платформам: Win32 (`WM_MOUSEWHEEL`) и Wayland (`wl_pointer.axis`) дают точные
 пиксели; X11 остаётся на тиках (кнопки 4/5), macOS-колесо пока не эмитится. В
 headless всё работает через `SendMouseWheelPixels`.
+
+**Сырая дельта (v3.39).** Виджет, которому нужна дельта оборудования, а не
+пиксели под шаг прокрутки (удалённый рабочий стол: ±120 на щелчок и
+горизонтальное колесо), реализует `widget.WheelEventHandler`:
+
+```go
+func (w *Remote) OnWheelEvent(e widget.WheelEvent) bool {
+    // e.DeltaX, e.DeltaY — в единицах widget.WheelNotch (120 на щелчок);
+    // DeltaY > 0 — вниз, DeltaX > 0 — вправо (в RDP вертикаль наоборот: -DeltaY);
+    // e.Precise — тачпад или свободное колесо, значение любое.
+    return true
+}
+```
+
+Окно сначала предлагает событие сырым обработчикам (`Engine.SendMouseWheelRaw`),
+и только если никто не принял — запускает прежний путь, так что остальные
+виджеты по-прежнему получают пиксели. Источники: Win32 (`WM_MOUSEWHEEL`,
+`WM_MOUSEHWHEEL`), X11 (кнопки 4–7, `Precise = false`), Wayland (`wl_pointer.axis`;
+`Precise = true`, пока композитор не сообщает discrete — а на привязанной
+версии 4 он не сообщает).
+
+### Уход указателя и активность окна (v3.39)
+
+Уход указателя с окна приходит как `OnMouseMove(-1, -1)` (на HiDPI тоже: раньше
+`-1` округлялось в `0`) и дополнительно как `OnPointerLeave()` у виджетов с
+`widget.PointerLeaveHandler`. Активность окна — `win.SetOnActivate(func(active
+bool))` и `win.IsActive()`; при потере фокуса окно само отпускает все зажатые
+клавиши (обычным `KeyEvent{Pressed: false}` со скан-кодом) и сбрасывает
+модификаторы движка — «залипшего Ctrl» не бывает, — и только потом зовёт колбэк.
 
 ### Drag & Drop файлов из ОС
 

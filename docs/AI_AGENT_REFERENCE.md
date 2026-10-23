@@ -8879,6 +8879,191 @@ areas outside; empty / nil / zero-size buffer; buffer smaller and larger than th
 `widget/pixelblit_test.go` (the fallback of `widget.BlitPixels`), benchmarks in
 `engine/externalsurface_bench_test.go`.
 
+---
+
+## v3.39: scan codes, raw wheel, window activation (RDP-client requests E1, E6, E9)
+
+### E1 — `KeyEvent.ScanCode`, keys outside the VK table, modifiers as keys
+
+```go
+type KeyEvent struct {
+    Code     KeyCode
+    Rune     rune
+    Mod      KeyMod
+    Pressed  bool
+    Repeat   bool   // auto-repeat (Win32, Wayland, X11)
+    ScanCode uint16 // NEW: raw key code of the OS, 0 = not from an OS window
+    Extended bool   // NEW: E0-prefixed key (Windows only)
+}
+```
+
+`ScanCode` is **not normalised**, it is what the platform reports:
+
+| Platform | `ScanCode` | `Extended` |
+|---|---|---|
+| Windows | bits 16–23 of `lParam` of `WM_KEYDOWN/KEYUP/SYSKEYDOWN/SYSKEYUP` (set-1 hardware scan code) | bit 24 of `lParam` |
+| X11 | `keycode − 8` = evdev (`input-event-codes.h`) | always `false` |
+| Wayland | `key` of `wl_keyboard.key` = evdev | always `false` |
+| macOS | `keyCode` of `NSEvent` (`kVK_*`; note that 0 is the key "A") | always `false` |
+
+A client that needs set-1 scan codes (RDP) keeps its own `evdev → set 1` /
+`kVK → set 1` table: it depends on the protocol, not on the window. It comes
+with every key — named (`Code == KeyA`) and unnamed.
+
+What reaches the application now:
+
+- A key with no entry in the VK table is **no longer dropped**: it arrives with
+  `Code == KeyUnknown`, `Rune == 0` and the `ScanCode` filled (a text event has
+  `Rune != 0` and `ScanCode == 0`; the two never mix). A key with neither a
+  name nor a scan code (Windows `VK_PACKET` from `SendInput`) is still dropped.
+- **Modifiers are keys now**: `KeyShift`, `KeyControl` (either side; the side is
+  in `ScanCode` + `Extended`: Windows left Ctrl `0x1D`, right Ctrl `0x1D` +
+  `Extended`) and `KeyAltKey` (the physical Alt; AltGr is Ctrl then right Alt on
+  Windows, as the OS reports it). `KeyAlt` stays the *gesture* "Alt pressed and
+  released alone" and is delivered exactly as before, after the release of
+  `KeyAltKey`. `KeyWin` already existed. Only a backend that reports scan codes
+  produces these events; `KeyEvent.Mod` and `SetModifiers` work as before.
+- New `KeyCode` values, appended after the old ones (old values untouched, all
+  equal to the Windows VK): `KeyClear`, `KeyKana` (Kana and Hangul), `KeyJunja`,
+  `KeyFinal`, `KeyKanji` (Kanji and Hanja), `KeyConvert`, `KeyNonConvert`,
+  `KeyAccept`, `KeyModeChange`, `KeySleep`, `KeyBrowserBack` … `KeyBrowserHome`,
+  `KeyVolumeMute/Down/Up`, `KeyMediaNext/Prev/Stop/PlayPause`, `KeyLaunchMail`,
+  `KeyLaunchMedia`, `KeyLaunchApp1/2`, `KeyIMEProcess` (Windows IME took the
+  key — the character arrives as a text event), `KeyShift`, `KeyControl`,
+  `KeyAltKey`. `KeyMenu`, `KeyPrintScreen`, `KeyPause`, `KeyF13`…`KeyF24`
+  existed before; on X11/Wayland F13–F24, media, Kana/Hangul/Convert/NonConvert
+  and browser keys are now in the evdev table (`window/keytable.go`) and get a
+  `Code` too.
+- `Repeat` arrives together with `ScanCode` on Win32 (bit 30 of `lParam`),
+  Wayland (client-side repeat) and X11; macOS reports `isARepeat`.
+- Text input (`SetOnChar` → `Code: KeyUnknown, Rune`) is untouched.
+
+Internally: the optional `rawKeySource` interface (`SetOnRawKey(func(rawKey))`)
+of a native window; a backend that has it stops calling `SetOnKeyDown`,
+`SetOnKeyUp` and `SetOnKeyDownRepeat`. Custom `NativeWindow`s keep working on
+the old path and produce events without `ScanCode`.
+
+Tests: `window/rawkey_test.go` (lParam parsing, tables, the path
+backend → surface → engine, text input, repeat, Alt gesture),
+`window/rawkey_windows_test.go` (real `wndProc` messages),
+`window/rawkey_linux_test.go` (X11 and Wayland wire events),
+`engine/wheel_raw_test.go` (`SendKeyEvent` hands the event to the focused widget
+unchanged).
+
+### E6 — raw wheel: `widget.WheelEvent`
+
+```go
+// widget
+type WheelEvent struct {
+    X, Y           int     // logical point in the widget's frame
+    DeltaX, DeltaY float64 // units of widget.WheelNotch (120 per notch)
+    Precise        bool    // touchpad / free-spinning wheel: any value, frequent
+    Mod            KeyMod
+}
+type WheelEventHandler interface{ OnWheelEvent(e WheelEvent) bool }
+const WheelNotch = 120.0
+
+// engine
+func (e *Engine) SendMouseWheelRaw(xPhys, yPhys int, dx, dy float64, precise bool) bool
+```
+
+Signs follow the engine's pixel path: `DeltaY > 0` is **down**, `DeltaX > 0` is
+**right**. Windows and RDP count the vertical axis the other way round (up is
+positive), so for the RDP wheel field send `-DeltaY`; horizontal is the same
+(`MOUSE_HWHEEL`, right positive).
+
+Delivery: the widget that captured the mouse, then an open overlay under the
+cursor, then the hit-test path from the deepest widget to the root (inside the
+top modal window if there is one). The first `WheelEventHandler` that returns
+`true` stops it and `SendMouseWheelRaw` returns `true`. Deltas are **not**
+scaled by the HiDPI factor (they are not pixels); the point is.
+
+Next to the old path, not instead of it: `window.Run` first offers the raw
+event; **only if nobody takes it** the old path (`SendMouseWheelPixels` /
+`MouseWheelUp/Down` ticks) runs for the same wheel movement. So existing
+widgets keep getting pixels, and a widget that took the raw event does not get
+the tree scrolled a second time. Headless code can call `SendMouseWheelRaw`
+directly and ignore the result.
+
+| Platform | Source | `Precise` |
+|---|---|---|
+| Windows | `WM_MOUSEWHEEL` (`DeltaY = −delta`), `WM_MOUSEHWHEEL` (`DeltaX = delta`), `GET_WHEEL_DELTA_WPARAM` | `delta % 120 != 0` |
+| X11 | buttons 4/5 (vertical) and 6/7 (horizontal), ±120 per click | always `false` (no XInput2 smooth scroll in the backend) |
+| Wayland | `wl_pointer.axis`: `value / 10 * 120` (a notch is about 10 units); `axis_discrete` (v5) / `axis_value120` (v8) are parsed if the compositor sends them | `true` when no discrete / value120 came with the event — **the backend binds `wl_seat` version 4**, where they never come, so a mouse notch is `DeltaY = 120, Precise = true` |
+| macOS | not delivered (the wheel was not emitted before either) | — |
+
+On X11, with the raw receiver installed, a vertical click is passed as one
+press+release pair on the old path and the separate `ButtonRelease` of buttons
+4/5 is no longer forwarded (otherwise a widget that took the raw event would see
+a release without a press). Popup windows lifted out of the main window
+(`SetPopupSink`) keep the old path only.
+
+Tests: `engine/wheel_raw_test.go` (routing, bubbling, capture, HiDPI, the pixel
+path still works), `window/rawkey_test.go` (consumed / not consumed, conversion
+functions), `window/rawkey_windows_test.go` (real messages),
+`window/rawkey_linux_test.go` (X11 buttons, Wayland `axis` + discrete + value120).
+
+### E9 — pointer leave and window activation
+
+**Pointer leave.** Already there, now documented and completed:
+
+- Win32 `WM_MOUSELEAVE`/`WM_NCMOUSELEAVE` (`TrackMouseEvent`), X11 `LeaveNotify`,
+  Wayland `wl_pointer.leave` (also for a popup) make the window send a mouse
+  move to the point `(-1, -1)`; the engine delivers it as `OnMouseMove(-1, -1)`
+  to the widgets that contained the previous point (hover is cleared the same
+  way as on leaving across the edge).
+- **Fixed:** at HiDPI scale 2 the engine truncated `-1 / 2` to `0`, which is the
+  first point of the window, and the hover was not cleared. `toLogical` now
+  rounds down (non-negative coordinates are unchanged).
+- **New:** `widget.PointerLeaveHandler { OnPointerLeave() }` and
+  `Engine.SendPointerLeave()` — an event about leaving the **window**, distinct
+  from "the pointer moved off this widget" (a point outside a widget cannot tell
+  those apart, a captured drag is also outside). Called on the engine goroutine
+  for every visible widget that implements it, after the move to `(-1, -1)`.
+  `CursorNowhere` is still only for "an overlay covers you".
+
+**Window activation.**
+
+```go
+func (win *Window) SetOnActivate(fn func(active bool)) // before Run; nil disables
+func (win *Window) IsActive() bool
+```
+
+The callback runs on the engine goroutine and only on a **change** (Wayland
+reports the state on every `configure`; it is deduplicated). Sources: Win32
+`WM_ACTIVATE` (a move of the focus to another window of the same application —
+a menu popup, a dialog — is not a deactivation), X11 `FocusIn`/`FocusOut`
+(the event mask was fixed in v3.37), Wayland `activated` in
+`xdg_toplevel.configure`; macOS reports nothing. The first call is the first
+state the platform reports.
+
+**Stuck modifiers — now handled in the window.** The window keeps a list of the
+keys that are down. When it becomes inactive it releases all of them in the
+engine **before** the callback of the application: ordinary keys first, then
+modifiers, each as a normal `KeyEvent{Pressed: false}` with `ScanCode` and the
+`Mod` it was pressed with, then `Engine.SetModifiers(0)`. "Alt pressed and
+released alone" does not fire in that case. The release goes through the same
+path as a real one, so an RDP client sees key-ups for everything it had sent as
+key-downs and does not need its own timer. The real release of such a key goes
+to the other window and does not arrive; if it does arrive, it is delivered as
+usual (a key-up of a key already up is harmless). Touches in progress are
+cancelled and lifted popups are closed (as before).
+
+Order for the application at deactivation: key-ups (engine goroutine) →
+`SetModifiers(0)` → `Window.SetOnActivate(false)`; the capture of the mouse is
+not released by the engine — the application does that in its callback (and, for
+an RDP session, sends its own "synchronize keyboard state").
+
+Tests: `window/rawkey_test.go` (`TestReleaseHeldKeys_*`, `TestWindow_SetOnActivate`,
+`TestPointerLeave_*`), `engine/wheel_raw_test.go`
+(`TestSendPointerLeave_*`, `TestMouseMove_OutsidePointStaysOutsideOnHiDPI`),
+`window/rawkey_windows_test.go` (`WM_ACTIVATE`), `window/rawkey_linux_test.go`
+(X11 `FocusIn/Out`), existing `wayland_toplevel_linux_test.go`.
+
+Not verified on a live compositor / on a real keyboard: everything here is
+checked on wire events and on `wndProc` messages; the scan codes of macOS are
+not tested at all (compiled for darwin only).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

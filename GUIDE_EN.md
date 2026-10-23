@@ -1557,6 +1557,16 @@ the Latin layout, so `Ctrl+S` works in a Russian layout too. Order of events: a
 press with `Code`, then a separate text event with `Rune`. `KeyEvent.Repeat`
 tells auto-repeat of a held key from a new press (Win32, Wayland and X11).
 
+**Raw scan code (v3.39).** `KeyEvent.ScanCode` and `Extended` are the code of the
+physical key as the OS reports it: Windows — bits 16–23 of `lParam` and bit 24;
+X11 and Wayland — evdev (`keycode − 8`); macOS — `keyCode`. There is no common
+table: a remote-desktop client (RDP sends set-1 scan codes) keeps its own
+`evdev → set 1` table. A key missing from the VK table is no longer dropped: it
+arrives with `Code == KeyUnknown`, `Rune == 0` and `ScanCode` filled. Shift,
+Ctrl and Alt arrive as keys too (`KeyShift`, `KeyControl`, `KeyAltKey`; the side
+is in `ScanCode` and `Extended`); the `KeyAlt` gesture is unchanged. Media and
+browser keys, Kana/Hangul/Convert/NonConvert and `KeyIMEProcess` were added.
+
 Modifiers: `ModShift, ModCtrl, ModAlt, ModMeta`.
 
 **Alt and F10 — the menu bar.** Alt by itself is a modifier, not an event:
@@ -4047,6 +4057,35 @@ takes the precise delta, the engine synthesizes equivalent ticks — the old
 By platform: Win32 (`WM_MOUSEWHEEL`) and Wayland (`wl_pointer.axis`) deliver exact
 pixels; X11 stays on ticks (buttons 4/5), and the macOS wheel is not emitted yet.
 Headless works through `SendMouseWheelPixels`.
+
+**Raw delta (v3.39).** A widget that needs the hardware delta instead of pixels
+for the scroll step (a remote desktop: ±120 per notch and the horizontal wheel)
+implements `widget.WheelEventHandler`:
+
+```go
+func (w *Remote) OnWheelEvent(e widget.WheelEvent) bool {
+    // e.DeltaX, e.DeltaY are in units of widget.WheelNotch (120 per notch);
+    // DeltaY > 0 is down, DeltaX > 0 is right (RDP counts vertical the other way: -DeltaY);
+    // e.Precise: touchpad or a free-spinning wheel, any value.
+    return true
+}
+```
+
+The window offers the event to the raw handlers first (`Engine.SendMouseWheelRaw`)
+and runs the old path only if nobody took it, so the other widgets still get
+pixels. Sources: Win32 (`WM_MOUSEWHEEL`, `WM_MOUSEHWHEEL`), X11 (buttons 4–7,
+`Precise = false`), Wayland (`wl_pointer.axis`; `Precise = true` while the
+compositor does not report discrete — and at the bound version 4 it does not).
+
+### Pointer leave and window activation (v3.39)
+
+The pointer leaving the window arrives as `OnMouseMove(-1, -1)` (on HiDPI too:
+`-1` used to be rounded to `0`) and additionally as `OnPointerLeave()` on widgets
+that implement `widget.PointerLeaveHandler`. Window activity is
+`win.SetOnActivate(func(active bool))` and `win.IsActive()`; when the focus is
+lost the window releases every held key itself (a normal `KeyEvent{Pressed:
+false}` with the scan code) and resets the engine modifiers — no stuck Ctrl —
+and only then calls the callback.
 
 ### File drag & drop from the OS
 
