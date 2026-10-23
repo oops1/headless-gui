@@ -3,6 +3,7 @@ package engine
 
 import (
 	"image"
+	"math"
 	"sync"
 	"time"
 
@@ -259,12 +260,17 @@ func (e *Engine) tabCycle(root widget.Widget, reverse bool) {
 // toLogical переводит физические координаты события (пиксели окна/кадра)
 // в логические координаты виджетов (HiDPI). При Scale == 1 тождественно.
 // Lock-free (scaleBits) — события не конкурируют с мьютексом движка.
+//
+// Округление вниз, а не к нулю: точка «-1» (вне окна — так окно сообщает об
+// уходе указателя) на масштабе 2 при усечении к нулю превращалась в 0 — первую
+// точку окна, и наведение с уходом не снималось. Для неотрицательных координат
+// результат прежний.
 func (e *Engine) toLogical(x, y int) (int, int) {
 	k := e.Scale()
 	if k == 1 {
 		return x, y
 	}
-	return int(float64(x) / k), int(float64(y) / k)
+	return int(math.Floor(float64(x) / k)), int(math.Floor(float64(y) / k))
 }
 
 // CursorAt возвращает форму курсора для точки (x, y — физические пиксели):

@@ -62,6 +62,7 @@ type CocoaWindow struct {
 	onKeyDown     func(vk int)
 	onKeyUp       func(vk int)
 	onChar        func(r rune)
+	onRawKey      func(k rawKey) // клавиши со скан-кодом (rawKeySource): keyCode, kVK_*
 
 	// CALayer-путь: слой contentView. Пиксели кадра НЕ передаются Core
 	// Animation указателем на Go-память: они копируются в CFData (владелец —
@@ -99,6 +100,7 @@ var (
 	selLocationInWindow          objc.SEL
 	selButtonNumber              objc.SEL
 	selKeyCode                   objc.SEL
+	selIsARepeat                 objc.SEL
 	selCharacters                objc.SEL
 	selUTF8String                objc.SEL
 
@@ -148,6 +150,7 @@ func initCocoaSelectors() {
 	selLocationInWindow = objc.RegisterName("locationInWindow")
 	selButtonNumber = objc.RegisterName("buttonNumber")
 	selKeyCode = objc.RegisterName("keyCode")
+	selIsARepeat = objc.RegisterName("isARepeat")
 	selCharacters = objc.RegisterName("characters")
 	selUTF8String = objc.RegisterName("UTF8String")
 
@@ -432,7 +435,10 @@ func (w *CocoaWindow) handleKeyDown(event objc.ID) {
 	keyCode := int(objc.Send[uintptr](event, selKeyCode))
 
 	vk := cocoaKeyCodeToVK(keyCode)
-	if w.onKeyDown != nil && vk != 0 {
+	if w.onRawKey != nil {
+		repeat := objc.Send[bool](event, selIsARepeat)
+		w.onRawKey(rawKey{VK: vk, Scan: uint16(keyCode), Pressed: true, Repeat: repeat})
+	} else if w.onKeyDown != nil && vk != 0 {
 		w.onKeyDown(vk)
 	}
 
@@ -456,7 +462,9 @@ func (w *CocoaWindow) handleKeyDown(event objc.ID) {
 func (w *CocoaWindow) handleKeyUp(event objc.ID) {
 	keyCode := int(objc.Send[uintptr](event, selKeyCode))
 	vk := cocoaKeyCodeToVK(keyCode)
-	if w.onKeyUp != nil && vk != 0 {
+	if w.onRawKey != nil {
+		w.onRawKey(rawKey{VK: vk, Scan: uint16(keyCode)})
+	} else if w.onKeyUp != nil && vk != 0 {
 		w.onKeyUp(vk)
 	}
 }
@@ -710,6 +718,7 @@ func (w *CocoaWindow) SetOnMouseMove(fn func(x, y int))                         
 func (w *CocoaWindow) SetOnMouseButton(fn func(x, y, button int, pressed bool)) { w.onMouseButton = fn }
 func (w *CocoaWindow) SetOnKeyDown(fn func(vk int))                             { w.onKeyDown = fn }
 func (w *CocoaWindow) SetOnKeyUp(fn func(vk int))                               { w.onKeyUp = fn }
+func (w *CocoaWindow) SetOnRawKey(fn func(k rawKey))                            { w.onRawKey = fn }
 func (w *CocoaWindow) SetOnChar(fn func(r rune))                                { w.onChar = fn }
 
 // ─── Маппинг клавиш macOS → VK ─────────────────────────────────────────────

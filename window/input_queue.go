@@ -62,10 +62,25 @@ func (s *surface) onNative(fn func()) {
 // Курсор окну ОС отдаётся на его потоке и только при смене: иначе каждое
 // движение мыши стоило бы сообщения потоку окна.
 func (s *surface) deliverMove(x, y int) {
+	left := x == pointerOutside && y == pointerOutside
 	x, y = s.toContent(x, y)
 	s.eng.SendMouseMove(x, y)
+	if left {
+		// Указатель ушёл с окна (WM_MOUSELEAVE, LeaveNotify, wl_pointer.leave):
+		// после движения в точку вне окна, снимающего наведение, виджетам с
+		// widget.PointerLeaveHandler приходит и само событие ухода.
+		if pl, ok := s.eng.(pointerLeaver); ok {
+			pl.SendPointerLeave()
+		}
+	}
 	s.ptrX, s.ptrY, s.ptrKnown = x, y, true
 	s.syncCursor(x, y)
+}
+
+// pointerLeaver — движок умеет сообщить виджетам об уходе указателя с окна
+// (реализует *engine.Engine). Опциональный по той же причине, что modifierSink.
+type pointerLeaver interface {
+	SendPointerLeave()
 }
 
 // syncCursor отдаёт окну ОС форму курсора для точки (x, y) контента — только

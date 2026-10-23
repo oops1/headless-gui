@@ -431,7 +431,12 @@ type Win32Window struct {
 	highSurrogate   rune
 	onKeyDownRepeat func(vk int, repeat bool)
 	onKeyUp         func(vk int)
-	onChar          func(r rune)
+	// onRawKey — приёмник клавиш со скан-кодом (rawKeySource): когда задан,
+	// onKeyDown/onKeyDownRepeat/onKeyUp не вызываются.
+	onRawKey func(k rawKey)
+	// onWheelRaw — приёмник сырого колеса (wheelRawSource).
+	onWheelRaw func(x, y int, dx, dy float64, precise bool, legacy func())
+	onChar     func(r rune)
 
 	// Редактор метода ввода (ime_windows.go): набираемое, готовый текст и
 	// место каретки для окна кандидатов.
@@ -1181,7 +1186,15 @@ func (w *Win32Window) SetOnKeyDownRepeat(fn func(vk int, repeat bool)) {
 	w.onKeyDownRepeat = fn
 }
 func (w *Win32Window) SetOnKeyUp(fn func(vk int)) { w.onKeyUp = fn }
-func (w *Win32Window) SetOnChar(fn func(r rune))  { w.onChar = fn }
+
+// SetOnRawKey подписывает приёмник клавиш со скан-кодом. Реализует rawKeySource.
+func (w *Win32Window) SetOnRawKey(fn func(k rawKey)) { w.onRawKey = fn }
+
+// SetOnWheelRaw подписывает приёмник сырого колеса. Реализует wheelRawSource.
+func (w *Win32Window) SetOnWheelRaw(fn func(x, y int, dx, dy float64, precise bool, legacy func())) {
+	w.onWheelRaw = fn
+}
+func (w *Win32Window) SetOnChar(fn func(r rune)) { w.onChar = fn }
 
 // SetOnFilesDropped регистрирует колбэк Drag&Drop файлов из ОС (WM_DROPFILES).
 // Координаты — клиентские физические пиксели. Гарантирует включённый приём
@@ -1641,9 +1654,20 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
 		delta := int16((wparam >> 16) & 0xFFFF)
-		if delta != 0 && w.onMouseWheelPixels != nil {
-			dx := float64(delta) / wheelDeltaWin * wheelNotchPx
-			w.onMouseWheelPixels(int(pt.X), int(pt.Y), dx, 0)
+		if delta != 0 {
+			x, y := int(pt.X), int(pt.Y)
+			legacy := func() {
+				if w.onMouseWheelPixels != nil {
+					dx := float64(delta) / wheelDeltaWin * wheelNotchPx
+					w.onMouseWheelPixels(x, y, dx, 0)
+				}
+			}
+			if w.onWheelRaw != nil {
+				dx, dy, precise := win32WheelRaw(delta, true)
+				w.onWheelRaw(x, y, dx, dy, precise, legacy)
+			} else {
+				legacy()
+			}
 		}
 		return 0
 
@@ -1657,23 +1681,32 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
 
 		delta := int16((wparam >> 16) & 0xFFFF)
-		if w.onMouseWheelPixels != nil {
-			// Высокоточный путь: delta кратна 120 (WHEEL_DELTA) для обычной мыши,
-			// но у прецизионных тачпадов приходит дробной. Один «notch» (120) =
-			// wheelNotchPx пикселей; знак: delta>0 = вверх ⇒ dy<0.
-			if delta != 0 {
-				dy := -float64(delta) / wheelDeltaWin * wheelNotchPx
-				w.onMouseWheelPixels(int(pt.X), int(pt.Y), 0, dy)
+		x, y := int(pt.X), int(pt.Y)
+		legacy := func() {
+			if w.onMouseWheelPixels != nil {
+				// Высокоточный путь: delta кратна 120 (WHEEL_DELTA) для обычной мыши,
+				// но у прецизионных тачпадов приходит дробной. Один «notch» (120) =
+				// wheelNotchPx пикселей; знак: delta>0 = вверх ⇒ dy<0.
+				if delta != 0 {
+					dy := -float64(delta) / wheelDeltaWin * wheelNotchPx
+					w.onMouseWheelPixels(x, y, 0, dy)
+				}
+			} else if w.onMouseButton != nil {
+				// Фолбэк на тики (например, в режиме popup-хоста).
+				if delta > 0 {
+					w.onMouseButton(x, y, 3, true)
+					w.onMouseButton(x, y, 3, false)
+				} else if delta < 0 {
+					w.onMouseButton(x, y, 4, true)
+					w.onMouseButton(x, y, 4, false)
+				}
 			}
-		} else if w.onMouseButton != nil {
-			// Фолбэк на тики (например, в режиме popup-хоста).
-			if delta > 0 {
-				w.onMouseButton(int(pt.X), int(pt.Y), 3, true)
-				w.onMouseButton(int(pt.X), int(pt.Y), 3, false)
-			} else if delta < 0 {
-				w.onMouseButton(int(pt.X), int(pt.Y), 4, true)
-				w.onMouseButton(int(pt.X), int(pt.Y), 4, false)
-			}
+		}
+		if w.onWheelRaw != nil && delta != 0 {
+			dx, dy, precise := win32WheelRaw(delta, false)
+			w.onWheelRaw(x, y, dx, dy, precise, legacy)
+		} else {
+			legacy()
 		}
 		return 0
 
@@ -1695,8 +1728,10 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	case wmKeydown, wmSyskeydown:
 		// Бит 30 lParam — «клавиша уже была нажата», то есть это автоповтор,
 		// а не новое нажатие (WM_KEYDOWN, previous key state).
-		repeat := lparam&(1<<30) != 0
-		if w.onKeyDownRepeat != nil {
+		scan, ext, repeat := win32KeyLParam(lparam)
+		if w.onRawKey != nil {
+			w.onRawKey(rawKey{VK: int(wparam), Scan: scan, Extended: ext, Pressed: true, Repeat: repeat})
+		} else if w.onKeyDownRepeat != nil {
 			w.onKeyDownRepeat(int(wparam), repeat)
 		} else if w.onKeyDown != nil {
 			w.onKeyDown(int(wparam))
@@ -1707,7 +1742,10 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return ret
 
 	case wmKeyup, wmSyskeyup:
-		if w.onKeyUp != nil {
+		if w.onRawKey != nil {
+			scan, ext, _ := win32KeyLParam(lparam)
+			w.onRawKey(rawKey{VK: int(wparam), Scan: scan, Extended: ext})
+		} else if w.onKeyUp != nil {
 			w.onKeyUp(int(wparam))
 		}
 		if umsg == wmSyskeyup {

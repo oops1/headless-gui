@@ -84,6 +84,66 @@ type MouseClickHandler interface {
 	OnMouseButton(e MouseEvent) bool
 }
 
+// PointerLeaveHandler реализуется виджетами, которым нужно знать, что указатель
+// покинул ОКНО целиком (v3.39).
+//
+// Отличие от OnMouseMove: обычный уход за границу виджета и уход с окна —
+// одно и то же движение в точку вне виджета, и по одной точке их не различить
+// (мышь, захваченная при перетаскивании, тоже бывает снаружи). Здесь событие
+// одно и только про окно: Win32 WM_MOUSELEAVE, X11 LeaveNotify, Wayland
+// wl_pointer.leave. Прежний сигнал (движение в точку вне окна) приходит как и
+// раньше, этот — дополнительный.
+//
+// Зовётся на горутине движка, всем видимым виджетам дерева, которые его
+// реализуют, — не только тому, над которым был указатель. Нужен, например,
+// клиенту удалённого рабочего стола: отпустить захват и не считать курсор
+// «внутри» сессии.
+type PointerLeaveHandler interface {
+	OnPointerLeave()
+}
+
+// ─── Wheel ───────────────────────────────────────────────────────────────────
+
+// WheelNotch — сколько единиц WheelEvent.DeltaX/DeltaY приходится на один
+// щелчок колеса мыши (WHEEL_DELTA в Windows, MOUSE_WHEEL в RDP).
+const WheelNotch = 120.0
+
+// WheelEvent — сырое событие колеса или тачпада (v3.39).
+//
+// Существует рядом с прежним путём (OnMouseWheelPixels / тики кнопок), а не
+// вместо него: тот отдаёт ПИКСЕЛИ под шаг прокрутки движка, а удалённому
+// рабочему столу нужна дельта оборудования как есть. Виджет, реализующий
+// WheelEventHandler и принявший событие, останавливает всплытие — тогда
+// пиксельный путь для этого события не запускается вовсе.
+type WheelEvent struct {
+	// X, Y — точка под указателем в логических координатах кадра виджета.
+	X, Y int
+
+	// DeltaX, DeltaY — прокрутка в единицах WheelNotch (120 на щелчок).
+	// Знаки те же, что у пиксельного пути движка: DeltaY > 0 — вниз (к
+	// пользователю), DeltaX > 0 — вправо. (Windows и RDP считают вертикаль
+	// наоборот: «вверх» там положительно, то есть wheel = −DeltaY.)
+	//
+	// Обычная мышь даёт кратные 120 значения; тачпад и колесо с плавной
+	// прокруткой — дробные, и малые.
+	DeltaX, DeltaY float64
+
+	// Precise — дельта «высокоточная» (тачпад, свободно вращающееся колесо):
+	// произвольная, не обязательно кратна WheelNotch, и приходит часто.
+	// false — щелчки колеса: целое число по 120.
+	Precise bool
+
+	// Mod — модификаторы, зажатые в момент прокрутки.
+	Mod KeyMod
+}
+
+// WheelEventHandler реализуется виджетами, которым нужна сырая дельта колеса.
+// Возвращает true, если событие поглощено (всплытие и пиксельный путь
+// останавливаются).
+type WheelEventHandler interface {
+	OnWheelEvent(e WheelEvent) bool
+}
+
 // ─── Keyboard ────────────────────────────────────────────────────────────────
 
 // KeyCode — аппаратно-независимый код клавиши.
@@ -241,6 +301,60 @@ const (
 	KeyOemBackslash  KeyCode = 220 // \| — VK_OEM_5
 	KeyOemCloseBrace KeyCode = 221 // ]} — VK_OEM_6
 	KeyOemQuote      KeyCode = 222 // '" — VK_OEM_7
+
+	// ── Добавлено в v3.39 (значения прежних констант не менялись) ───────────
+	//
+	// Коды продолжают тот же ряд виртуальных кодов Windows. Они нужны, чтобы
+	// клавиша, которой раньше не было в перечислении, дошла до приложения
+	// именованным событием, а не пропала: удалённому рабочему столу важна
+	// каждая нажатая клавиша. Событие с кодом KeyUnknown и нулевой руной —
+	// клавиша без имени; её опознаёт KeyEvent.ScanCode.
+
+	// Модификаторы как клавиши. Раньше Shift/Ctrl/Alt жили только в
+	// KeyEvent.Mod, а сами нажатия до виджетов не доходили; клиенту удалённого
+	// рабочего стола нужны именно они — со стороной (левый/правый) в ScanCode
+	// и Extended. KeyAlt остаётся жестом «Alt нажали и отпустили»; удержание
+	// самой клавиши Alt приходит как KeyAltKey.
+	KeyShift   KeyCode = 16  // Shift (любой из двух)
+	KeyControl KeyCode = 17  // Ctrl (любой из двух)
+	KeyAltKey  KeyCode = 164 // физическая клавиша Alt: нажатие и отпускание (VK_LMENU)
+
+	KeyClear KeyCode = 12 // Clear (цифровая клавиатура без Num Lock на Windows)
+
+	// Восточноазиатские клавиши переключения ввода.
+	KeyKana       KeyCode = 21 // Kana / Hangul (VK_KANA = VK_HANGUL)
+	KeyJunja      KeyCode = 23
+	KeyFinal      KeyCode = 24
+	KeyKanji      KeyCode = 25 // Kanji / Hanja (VK_KANJI = VK_HANJA)
+	KeyConvert    KeyCode = 28 // Henkan
+	KeyNonConvert KeyCode = 29 // Muhenkan
+	KeyAccept     KeyCode = 30
+	KeyModeChange KeyCode = 31
+	KeySleep      KeyCode = 95
+
+	// Браузерные и мультимедийные клавиши (VK_BROWSER_* .. VK_LAUNCH_APP2).
+	KeyBrowserBack      KeyCode = 166
+	KeyBrowserForward   KeyCode = 167
+	KeyBrowserRefresh   KeyCode = 168
+	KeyBrowserStop      KeyCode = 169
+	KeyBrowserSearch    KeyCode = 170
+	KeyBrowserFavorites KeyCode = 171
+	KeyBrowserHome      KeyCode = 172
+	KeyVolumeMute       KeyCode = 173
+	KeyVolumeDown       KeyCode = 174
+	KeyVolumeUp         KeyCode = 175
+	KeyMediaNext        KeyCode = 176
+	KeyMediaPrev        KeyCode = 177
+	KeyMediaStop        KeyCode = 178
+	KeyMediaPlayPause   KeyCode = 179
+	KeyLaunchMail       KeyCode = 180
+	KeyLaunchMedia      KeyCode = 181
+	KeyLaunchApp1       KeyCode = 182
+	KeyLaunchApp2       KeyCode = 183
+
+	// KeyIMEProcess — клавиша ушла редактору ввода (VK_PROCESSKEY): символ,
+	// который из неё получится, придёт отдельным текстовым событием.
+	KeyIMEProcess KeyCode = 229
 )
 
 // KeyMod — битовая маска нажатых модификаторов.
@@ -269,6 +383,27 @@ type KeyEvent struct {
 	// повтор Enter — отправлять форму снова и снова. Для набора текста и
 	// движения каретки разницы нет: там повтор и есть то, чего ждут.
 	Repeat bool
+
+	// ScanCode — сырой код физической клавиши от операционной системы (v3.39).
+	// 0 — события пришли не от окна ОС (синтетические, тесты, символы набора).
+	//
+	// Значение НЕ приведено к единой таблице, оно зависит от платформы:
+	//   - Windows: биты 16–23 lParam (аппаратный скан-код набора 1; признак
+	//     «расширенной» клавиши — в Extended);
+	//   - X11: keycode − 8, то есть код evdev (Linux input-event-codes.h);
+	//   - Wayland: код из wl_keyboard.key, тоже evdev;
+	//   - macOS: keyCode события NSEvent (kVK_*).
+	// Клиенту, которому нужен скан-код набора 1 (RDP, VNC-подобные), таблицу
+	// «evdev/kVK → набор 1» держать у себя: она зависит от протокола, а не
+	// от окна. Приходит и у клавиш с именованным Code (скан-код — то, что
+	// физически нажато), и у клавиш без имени (Code == KeyUnknown, Rune == 0).
+	ScanCode uint16
+
+	// Extended — клавиша «расширенная» (префикс E0 набора 1): правые Ctrl/Alt,
+	// стрелки и блок навигации, Win, Apps, Num Enter, Num /. Заполняется на
+	// Windows (бит 24 lParam); на остальных платформах всегда false — там
+	// сторона и блок клавиши уже различимы по самому ScanCode.
+	Extended bool
 }
 
 // KeyHandler реализуется виджетами, принимающими ввод с клавиатуры.

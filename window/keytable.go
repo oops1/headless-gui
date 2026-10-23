@@ -33,8 +33,8 @@ func x11KeycodeToVK(keycode int) int {
 // написано «ы». Символ приходит отдельным событием (руна), и его даёт
 // раскладка — здесь он не участвует.
 //
-// Коды, которых нет в таблице, отбрасываются: безымянное число приложению
-// бесполезно, а завтрашняя константа молча поменяла бы смысл события.
+// Коды, которых нет в таблице, окну не помеха: с v3.39 они доходят до
+// приложения событием KeyUnknown со скан-кодом (evdev), а не отбрасываются.
 var x11VKTable = map[int]int{
 	9: VK_ESCAPE,
 	// Цифровой ряд: 10..18 — «1».. «9», 19 — «0».
@@ -75,4 +75,30 @@ var x11VKTable = map[int]int{
 	// стороне X11 и Wayland — Super_L и Super_R. Если раскладка вынесла Super
 	// на другую физическую клавишу, её находит keysymToVK (keysym.go).
 	133: VK_LWIN, 134: VK_RWIN,
+
+	// Редкие клавиши (v3.39): раньше их не было в таблице, и событие терялось
+	// молча. Коды evdev — в комментариях, keycode = evdev + 8.
+	//
+	// F13–F24 (evdev 183–194).
+	191: VK_F13, 192: VK_F13 + 1, 193: VK_F13 + 2, 194: VK_F13 + 3,
+	195: VK_F13 + 4, 196: VK_F13 + 5, 197: VK_F13 + 6, 198: VK_F13 + 7,
+	199: VK_F13 + 8, 200: VK_F13 + 9, 201: VK_F13 + 10, 202: VK_F24,
+	// Японская и корейская раскладки: ZENKAKUHANKAKU 85, HENKAN 92,
+	// KATAKANAHIRAGANA 93, MUHENKAN 94, HANGEUL 122, HANJA 123.
+	93: VK_KANJI, 100: VK_CONVERT, 101: VK_KANA, 102: VK_NONCONVERT,
+	130: VK_KANA, 131: VK_KANJI,
+	// Мультимедиа: MUTE 113, VOLUMEDOWN 114, VOLUMEUP 115, NEXTSONG 163,
+	// PLAYPAUSE 164, PREVIOUSSONG 165, STOPCD 166.
+	121: VK_VOLUME_MUTE, 122: VK_VOLUME_DOWN, 123: VK_VOLUME_UP,
+	171: VK_MEDIA_NEXT_TRACK, 172: VK_MEDIA_PLAY_PAUSE,
+	173: VK_MEDIA_PREV_TRACK, 174: VK_MEDIA_STOP,
+	// Запуск и браузер: MAIL 155, CALC 140, FILE 144, MEDIA 226, BACK 158,
+	// FORWARD 159, STOP 128, REFRESH 173, SEARCH 217, BOOKMARKS 156,
+	// HOMEPAGE 172, SLEEP 142.
+	163: VK_LAUNCH_MAIL, 148: VK_LAUNCH_APP2, 152: VK_LAUNCH_APP1,
+	234: VK_LAUNCH_MEDIA,
+	166: VK_BROWSER_BACK, 167: VK_BROWSER_FORWARD, 136: VK_BROWSER_STOP,
+	181: VK_BROWSER_REFRESH, 225: VK_BROWSER_SEARCH,
+	164: VK_BROWSER_FAVORITES, 180: VK_BROWSER_HOME,
+	150: VK_SLEEP,
 }
