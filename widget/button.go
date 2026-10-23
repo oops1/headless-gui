@@ -33,6 +33,12 @@ type Button struct {
 	HighlightTop  color.RGBA // 1-пиксельная акцентная линия сверху
 	ShowHighlight bool
 
+	// FlatWhenDisabled — выключенная кнопка не меняет фон, приглушаются только
+	// подпись и рамка. Для плоских кнопок, чей фон совпадает с фоном окна
+	// (калькулятор Windows 11): осветлённый фон давал на месте кнопки видимую
+	// плашку. Прозрачный фон остаётся прозрачным и без этого флага.
+	FlatWhenDisabled bool
+
 	// Icon — иконка кнопки (PNG/JPEG). Если не nil, рисуется рядом с текстом.
 	Icon     image.Image
 	IconPath string       // путь к файлу (заполняется из XAML атрибута Icon=)
@@ -205,7 +211,13 @@ func (btn *Button) stateColors(pressed bool) (bg, txt, border color.RGBA) {
 		bg = btn.HoverBG // классика Win2000 не подсвечивает hover
 	}
 	if !btn.IsEnabled() {
+		keep := bg
 		bg, txt, border = disabledLook(bg, txt, border)
+		// Прозрачный фон приглушать нечем: смешивание с белым или чёрным давало
+		// полупрозрачную плашку там, где кнопки не было видно.
+		if btn.FlatWhenDisabled || keep.A == 0 {
+			bg = keep
+		}
 	}
 	return bg, txt, border
 }
@@ -278,8 +290,8 @@ func (btn *Button) drawContent(ctx DrawContext, b image.Rectangle, txt color.RGB
 	hasIcon := btn.Icon != nil
 	hasText := btn.Text != "" && btn.IconPos != IconOnly
 
-	const textH = 13
 	sizePt := fontSizeOrDefault(btn.FontSize)
+	textH := buttonTextHeight(sizePt)
 	iconGap := 4 // зазор между иконкой и текстом
 
 	// Подпись усекается многоточием по доступной ширине.
@@ -517,4 +529,18 @@ func (btn *Button) ApplyTheme(t *Theme) {
 	btn.PressedBG = t.BtnPressedBG
 	btn.BorderColor = t.BtnBorder
 	btn.HighlightTop = t.Accent
+}
+
+// buttonTextHeight — высота строки подписи для вертикального центрирования.
+//
+// Раньше она была зашита: 13 px при любом FontSize, и подпись крупного или
+// мелкого шрифта съезжала по вертикали (замечание проекта calc на v3.39.0).
+// Для шрифта по умолчанию высота прежняя — 13, так что кадры кнопок без
+// своего FontSize не меняются; другой кегль масштабирует её пропорционально.
+func buttonTextHeight(sizePt float64) int {
+	def := DefaultFontSize()
+	if def <= 0 || sizePt == def {
+		return 13
+	}
+	return int(13*sizePt/def + 0.5)
 }
