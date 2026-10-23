@@ -8743,6 +8743,42 @@ Tests: `window/framebuf_windows_test.go` — the buffer lies in one reservation
 `WM_DESTROY` does nothing, the early paint is re-requested. The blank-window
 failure itself only reproduces on Windows 10.
 
+## v3.39: password fields and menu icons (WinLine after v3.38.0)
+
+**Password field without left-behind copies.** A `TextInput` keeps its text in a
+`[]rune` buffer that can be wiped (`TakeSecret`, `WipeSecret` since earlier
+versions). Editing used to leave copies the application could not reach: every
+keystroke allocated a new array and dropped the old one, holding the start of
+the password, to the garbage collector; deleting shifted runes left and kept the
+array tail; every keystroke built an Undo snapshot string even in password mode;
+`OnChange` got a string copy on every change. In password mode now:
+
+- a replaced array is wiped, a shrunk tail is wiped, no Undo snapshot string is
+  built;
+- `OnSecretChange func(n int)` — when set, a password field reports changes by
+  length only and does not call `OnChange` (which would need a string);
+- `SecretBytes() []byte` — UTF-8 copy, the field keeps its text (the caller wipes
+  the copy); `TakeSecret()` reads and clears; `Clear()` = `WipeSecret()`;
+- a password field collected by the GC wipes its buffer (finalizer).
+`GetText()` still returns a string — do not call it on a password field.
+Revealing the password with the eye button renders it as a string, as before.
+
+**Password mask follows the font.** `NewPasswordInput` no longer pins
+`MaskRune` to '●' (U+25CF): with `MaskRune == 0` the mask is '●' when the
+default font has it and '•' (U+2022) otherwise. The built-in Open Sans lacks '●';
+taken from a fallback font it could come out as a colour glyph ignoring the text
+colour — invisible dots on ALT Workstation 11.2. New optional context interface
+`widget.GlyphCoverage{HasGlyph(r) bool}` (default font only, implemented by
+`engine.Canvas` and forwarded by the scroll and popup wrappers) and
+`widget.ContextHasGlyph(ctx, r)`. An explicit `MaskRune` is used as is.
+
+**`menu.icon.tint` tints only one-colour icons.** The Windows 2000 profile flag
+used to tint every menu icon, so colour icons (yellow folders, program pictures
+in the Start menu) came out as black silhouettes. Now the flag (`TintIcons`)
+tints an icon only when all its opaque pixels share one colour (a glyph,
+anti-aliased edges allowed); colour icons stay as they are, like in Windows
+2000. `MenuItem.IconTint` still tints any icon.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

@@ -11,7 +11,9 @@
 // виджета зачищается тем же вызовом.
 package widget
 
-import "unicode/utf8"
+import (
+	"unicode/utf8"
+)
 
 // TakeSecret возвращает содержимое поля в UTF-8 и ОЧИЩАЕТ поле.
 //
@@ -69,4 +71,72 @@ func (t *TextInput) WipeSecret() {
 	if !empty {
 		t.Invalidate()
 	}
+}
+
+// SecretBytes возвращает содержимое поля в UTF-8 КОПИЕЙ, не очищая поле.
+// Строка не создаётся; занулить срез после использования — забота
+// вызывающего. Чтобы прочитать и сразу очистить — TakeSecret.
+func (t *TextInput) SecretBytes() []byte {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]byte, 0, len(t.runes)*utf8.UTFMax)
+	for _, r := range t.runes {
+		out = utf8.AppendRune(out, r)
+	}
+	return out
+}
+
+// Clear очищает поле, затирая буфер в памяти, — то же, что WipeSecret.
+func (t *TextInput) Clear() { t.WipeSecret() }
+
+// ─── Буфер без брошенных копий (режим пароля) ───────────────────────────────
+//
+// Буфер рун — единственное место, где пароль лежит в памяти, и его можно
+// затереть. Но правка текста раньше оставляла копии: каждое нажатие клавиши
+// заводило новый массив, а старый, с уже набранным началом пароля, уходил
+// сборщику мусора как есть; удаление сдвигало руны влево и оставляло хвост
+// массива нетронутым. В режиме пароля старые массивы и хвосты затираются.
+
+// cutRunes удаляет руны [a, b), затирая освободившийся хвост массива.
+// Вызывать под t.mu.
+func (t *TextInput) cutRunes(a, b int) {
+	old := len(t.runes)
+	t.runes = append(t.runes[:a], t.runes[b:]...)
+	if t.isPassword {
+		clear(t.runes[len(t.runes):old])
+	}
+}
+
+// adoptRunes заменяет буфер СВЕЖЕВЫДЕЛЕННЫМ срезом ins, затирая прежний
+// массив. ins не должен делить память с t.runes. Вызывать под t.mu.
+func (t *TextInput) adoptRunes(ins []rune) {
+	if t.isPassword {
+		clear(t.runes[:cap(t.runes)])
+	}
+	t.runes = ins
+}
+
+// growRunes дописывает n нулевых рун; если массив пришлось перевыделить,
+// прежний затирается. Вызывать под t.mu.
+func (t *TextInput) growRunes(n int) {
+	old := t.runes
+	t.runes = append(t.runes, make([]rune, n)...)
+	if t.isPassword && cap(old) < len(old)+n {
+		clear(old[:cap(old)])
+	}
+}
+
+// changeNotifyLocked готовит уведомление об изменении текста — вызывать его
+// после Unlock. В режиме пароля с OnSecretChange строка не создаётся вовсе:
+// уходит только число символов. Вызывать под t.mu; nil — уведомлять некого.
+func (t *TextInput) changeNotifyLocked() func() {
+	if t.isPassword && t.OnSecretChange != nil {
+		n, f := len(t.runes), t.OnSecretChange
+		return func() { f(n) }
+	}
+	if t.OnChange == nil {
+		return nil
+	}
+	text, f := string(t.runes), t.OnChange
+	return func() { f(text) }
 }
