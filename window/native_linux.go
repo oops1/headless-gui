@@ -130,6 +130,8 @@ type X11Window struct {
 
 	// Полный экран (x11_fullscreen_linux.go): атомы и состояние.
 	atomWMStateFullscreen uint32 // _NET_WM_STATE_FULLSCREEN
+	atomWMStateAbove      uint32 // _NET_WM_STATE_ABOVE (поверх всех окон)
+	above                 atomic.Bool
 	atomNetSupported      uint32 // _NET_SUPPORTED (что умеет оконный менеджер)
 	atomFsMonitors        uint32 // _NET_WM_FULLSCREEN_MONITORS (полный экран на выбранном мониторе)
 	fs                    x11Fullscreen
@@ -365,6 +367,7 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomNetWMStateModal = w.x11InternAtom("_NET_WM_STATE_MODAL")
 	w.atomNetActiveWindow = w.x11InternAtom("_NET_ACTIVE_WINDOW")
 	w.atomWMStateFullscreen = w.x11InternAtom("_NET_WM_STATE_FULLSCREEN")
+	w.atomWMStateAbove = w.x11InternAtom("_NET_WM_STATE_ABOVE")
 	w.atomNetSupported = w.x11InternAtom("_NET_SUPPORTED")
 	w.atomFsMonitors = w.x11InternAtom("_NET_WM_FULLSCREEN_MONITORS")
 	w.atomWMStateHidden = w.x11InternAtom("_NET_WM_STATE_HIDDEN")
@@ -1909,3 +1912,8 @@ const x11TopLevelEventMask = uint32(
 		0x00020000 | // StructureNotify (resize/close)
 		0x00200000 | // FocusChange — FocusIn/FocusOut
 		0x00400000) // PropertyChange — PropertyNotify по _NET_WM_STATE
+
+// RoundsCorners — X11 углы окна не скругляет (cornerRounder): окно
+// прямоугольное, и корпус widget.Window рисуется с прямыми углами, иначе за
+// скруглением был бы виден фон холста.
+func (w *X11Window) RoundsCorners() bool { return false }

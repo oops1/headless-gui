@@ -173,6 +173,10 @@ type Window struct {
 
 	// CornerRadius — радиус скругления углов (0 = острые).
 	CornerRadius int
+	// SquareCorners — ОС показывает окно с прямыми углами (Windows 10, X11):
+	// корпус рисуется прямоугольным, чтобы за скруглением не было видно фона
+	// холста. Ставит окно (пакет window), тема его не трогает.
+	SquareCorners bool
 
 	// Backdrop — материал фона окна (theme.MaterialMica и др., см.
 	// SetBackdrop). Нулевой — окно заливается Background, как всегда.
@@ -559,7 +563,7 @@ func (w *Window) OpaqueRegion() []image.Rectangle {
 	if w.Backdrop.Material != theme.MaterialDefault || w.Background.A < 255 {
 		return nil
 	}
-	return oneRegion(&w.opaqueBuf, opaqueRect(w.Bounds(), w.CornerRadius))
+	return oneRegion(&w.opaqueBuf, opaqueRect(w.Bounds(), w.corner()))
 }
 
 // borderW возвращает ширину рамки (0 для borderless).
@@ -841,7 +845,7 @@ func (w *Window) Draw(ctx DrawContext) {
 	x, y := b.Min.X, b.Min.Y
 	bw, bh := b.Dx(), b.Dy()
 	th := w.titleH()
-	cr := w.CornerRadius
+	cr := w.corner()
 
 	// ── Тень (токены стиля "window") ────────────────────────────────────────
 	w.drawShadow(ctx)
@@ -948,7 +952,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	// Эффективная высота: в классике заголовок ниже (effTitleH), в остальных
 	// темах совпадает с titleH() — геометрия текста/фона/бейджа считается от неё.
 	th := w.effTitleH()
-	cr := w.CornerRadius
+	cr := w.corner()
 
 	// Эффективные цвета заголовка (учёт активности окна: без фокуса ОС
 	// заголовок приглушается — Win2000 серый градиент, прочие темы dim).
@@ -1228,7 +1232,7 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 	b := w.Bounds()
 	x, y, bw := b.Min.X, b.Min.Y, b.Dx()
 	th := w.titleH()
-	cr := w.CornerRadius
+	cr := w.corner()
 
 	tbg, _, tc := w.titleColors()
 
@@ -1860,7 +1864,7 @@ func (w *Window) damageOutline(r image.Rectangle) {
 	// Толщина: две линии рамки плюс скругление, если оно есть — дуга уходит
 	// внутрь от края ровно на радиус.
 	t := outlineStripThickness
-	if cr := w.CornerRadius; cr > t {
+	if cr := w.corner(); cr > t {
 		t = cr
 	}
 	if t*2 >= r.Dy() || t*2 >= r.Dx() {
@@ -1895,7 +1899,7 @@ func (w *Window) drawDragOutline(ctx DrawContext) {
 			da.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), fill)
 		}
 	}
-	if cr := w.CornerRadius; cr > 0 {
+	if cr := w.corner(); cr > 0 {
 		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), cr, border)
 	} else {
 		ctx.DrawBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), border)
@@ -2108,4 +2112,15 @@ func brighten(c color.RGBA, delta uint8) color.RGBA {
 		return uint8(s)
 	}
 	return color.RGBA{R: add(c.R, delta), G: add(c.G, delta), B: add(c.B, delta), A: c.A}
+}
+
+// corner — радиус, которым корпус окна рисуется на самом деле: 0, если ОС
+// показывает окно с прямыми углами (SquareCorners) или окно развёрнуто —
+// развёрнутое окно не скругляет ни одна ОС, и скругление корпуса оставило бы
+// в углах экрана фон холста.
+func (w *Window) corner() int {
+	if w.SquareCorners || w.maximized {
+		return 0
+	}
+	return w.CornerRadius
 }

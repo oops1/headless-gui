@@ -233,6 +233,9 @@ func (w *X11Window) x11SyncWMState() {
 	hidden := x11StateHas(data, w.atomWMStateHidden)
 	w.setMinimizedFlags(&hidden, nil)
 	full := x11StateHas(data, w.atomWMStateFullscreen)
+	if w.atomWMStateAbove != 0 {
+		w.above.Store(x11StateHas(data, w.atomWMStateAbove))
+	}
 	if !full {
 		w.maximized = x11StateHas(data, w.atomWMStateMaxH) && x11StateHas(data, w.atomWMStateMaxV)
 	}

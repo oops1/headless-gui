@@ -62,6 +62,10 @@ type Dialog struct {
 	Shadow      color.RGBA // тень под диалогом (A=0 — без тени)
 	TitleHeight int
 	CornerRadius int // радиус скругления корпуса (по умолчанию dlgCorner)
+	// SquareCorners — диалог вынесен в окно ОС с прямыми углами (Windows 10,
+	// X11): корпус рисуется прямоугольным, иначе за скруглением виден фон.
+	// Ставит хост модальных окон (пакет window).
+	SquareCorners bool
 
 	// ShowLocaleIndicator — показывать индикатор текущей локали (напр. «EN»)
 	// в заголовке диалога. По умолчанию выключен (принятый дизайн — ✕).
@@ -389,7 +393,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 
 	// Современный вид (принятый дизайн): скругление, мягкая тень, ✕.
 	cr := d.CornerRadius
-	if cr < 0 {
+	if cr < 0 || d.SquareCorners {
 		cr = 0
 	}
 

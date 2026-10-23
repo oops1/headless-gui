@@ -9348,6 +9348,71 @@ focus and restored when it returns**; `SetOnPointerLockChanged` reports both.
   surface, `set_cursor` and `lock_pointer`/`destroy` requests without a protocol error.
   Not checked: a real `locked` event and real relative motion (no pointer over the test window).
 
+## v3.40: keys without focus, button caption height, flat disabled buttons
+
+Reported by the calc project (Windows 11 calculator) on v3.39.0.
+
+- **Keys without focus.** A left click gives focus to the widget under the
+  cursor if it is `Focusable`, otherwise clears focus; with no focus,
+  `SendKeyEvent` used to drop the key. New optional interface
+  `widget.UnfocusedKeyHandler{OnUnfocusedKey(ev KeyEvent) bool}` on the root
+  (or the top modal): with no focused widget the key goes there whole — rune,
+  scan code, release. Without the interface nothing changes. (`HandleInputBinding`
+  on the root still runs first for presses.)
+- **Button caption height.** `Button` centred its caption by a fixed 13 px
+  regardless of `FontSize`, so a larger or smaller caption sat off-centre. The
+  height now scales with the font size relative to the default; at the default
+  size it is still 13, so existing frames do not change.
+- **Disabled flat buttons.** A disabled button mixes its background 18 % toward
+  white or black. A transparent background now stays transparent (it used to
+  get a translucent plate), and `Button.FlatWhenDisabled` keeps the background
+  as is and dims only the caption and border — for flat buttons whose
+  background equals the window's.
+
+### v3.40: always on top — `Window.SetAlwaysOnTop`
+
+Asked for by the calculator ("Keep on top" of the Windows 11 calculator), later
+Explorer and WinLine.
+
+```go
+ok := win.SetAlwaysOnTop(true) // false — the window system cannot do it
+on := win.IsAlwaysOnTop()
+```
+
+- Win32: `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)` without activating;
+  `IsAlwaysOnTop` reads `WS_EX_TOPMOST`.
+- X11: `_NET_WM_STATE_ABOVE` through the `_NET_WM_STATE` ClientMessage (as
+  full screen); `true` means the request was sent — the window manager decides,
+  and `IsAlwaysOnTop` follows the state it writes to `_NET_WM_STATE`.
+- Wayland: xdg-shell has no such request — `false`. macOS: not implemented —
+  `false`.
+- Before `Run` the request is remembered and applied when the window is created
+  (`true` then means "remembered"; check `IsAlwaysOnTop` after start).
+
+Tests: `window/alwaysontop_test.go` (before/after Run, unsupported backend),
+`window/alwaysontop_windows_test.go` (live window, `WS_EX_TOPMOST` set and
+cleared), `window/alwaysontop_x11_linux_test.go` (ClientMessage bytes, no atom).
+
+## v3.41: Windows 10 window shadow and square corners where the OS does not round
+
+Reported by the RDP client on v3.39.0: on Windows 10 a frameless window cast no
+shadow and a light window merged with what is behind it.
+
+- **Shadow.** On Windows 10 DWM does not round corners, and the engine used to
+  cut a rounded region (`SetWindowRgn`) — DWM draws no shadow for a window with
+  a region, and none for a window without a non-client area either. Now Windows
+  10 keeps square corners (as every Windows 10 window has) and extends the DWM
+  frame 1 px into the client area (`DwmExtendFrameIntoClientArea`), which turns
+  the shadow on. Windows 11 is unchanged (DWM rounds, shadow kept).
+- **Square body where the OS does not round.** Without the region, a
+  `widget.Window` drawn with the theme's corner radius (8 on Windows 11 themes)
+  left the canvas background visible in the corners. New
+  `widget.Window.SquareCorners` (and `Dialog.SquareCorners` for dialogs moved
+  into their own OS window): the window layer asks the backend
+  (`RoundsCorners`) and sets it when the OS shows the window with square corners
+  — Windows 10, X11, a window with radius 0. A maximized `widget.Window` is drawn
+  square too: no OS rounds a maximized window. Headless rendering is unchanged.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
