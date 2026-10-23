@@ -490,6 +490,13 @@ func (o *svOffsetCtx) InvalidateImageCache(src image.Image) {
 	InvalidateImageCache(o.inner, src)
 }
 
+// HasGlyph пробрасывает вопрос о глифе (GlyphCoverage); контекст без ответа
+// — «нет».
+func (o *svOffsetCtx) HasGlyph(r rune) bool {
+	has, _ := ContextHasGlyph(o.inner, r)
+	return has
+}
+
 func (o *svOffsetCtx) DrawText(text string, x, y int, col color.RGBA) {
 	o.inner.DrawText(text, x-o.dx, y-o.dy, col)
 }

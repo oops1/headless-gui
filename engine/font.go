@@ -450,6 +450,10 @@ func (fc *FontCache) Kern(sizePt float64, a, b rune) fixed.Int26_6 {
 	return v
 }
 
+// HasGlyph сообщает, есть ли глиф руны r в шрифте по умолчанию холста — без
+// шрифтов-замен (widget.GlyphCoverage).
+func (c *Canvas) HasGlyph(r rune) bool { return c.fontCache.HasGlyph(r) }
+
 // HasGlyph сообщает, есть ли в шрифте глиф для руны r (cmap-проверка).
 // Результат кэшируется. Потокобезопасно. Для пробела всегда true.
 func (fc *FontCache) HasGlyph(r rune) bool {

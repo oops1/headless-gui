@@ -167,6 +167,9 @@ func (t *translatingContext) DrawImageRect(src image.Image, sr, dr image.Rectang
 	t.inner.DrawImageRect(src, sr, dr.Sub(image.Pt(t.dx, t.dy)), f)
 }
 
+// HasGlyph — есть ли глиф в шрифте по умолчанию (widget.GlyphCoverage).
+func (t *translatingContext) HasGlyph(r rune) bool { return t.inner.HasGlyph(r) }
+
 // InvalidateImageCache сбрасывает кэш масштабирования в канвасе попапа и, через
 // общий журнал движка, во всех остальных (widget.ImageCacheInvalidator).
 func (t *translatingContext) InvalidateImageCache(src image.Image) {
