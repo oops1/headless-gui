@@ -9064,6 +9064,185 @@ Not verified on a live compositor / on a real keyboard: everything here is
 checked on wire events and on `wndProc` messages; the scan codes of macOS are
 not tested at all (compiled for darwin only).
 
+---
+
+## v3.39: keyboard grab, monitor changes, Wayland window methods, system language, accent colour (`window` package)
+
+Requested by the RDP client (tasks E3, E5, E10, E11, E12). Everything below is
+added API; nothing existing changed its signature or behaviour.
+
+### Keyboard grab — `(*Window).SetKeyboardGrab(on bool) bool`
+
+```go
+ok := win.SetKeyboardGrab(true) // Win, Alt+Tab, Alt+Esc, Ctrl+Esc, PrintScreen go to the app
+win.KeyboardGrabbed()           // is the grab in force right now
+win.SetKeyboardGrab(false)      // also done by closing the window
+```
+
+While the window has focus the system combinations reach the application as
+ordinary `KeyDown`/`KeyUp` events (the same path as every other key, so
+`Mod` and `Repeat` behave as usual). A request made before `Run` is remembered
+and applied when the window is created; the answer is then provisional ("can
+the platform do it at all"). The result `true` means "request accepted": on X11
+the grab is taken when the window gets focus, and on Wayland the compositor may
+still refuse — `KeyboardGrabbed()` shows the real state.
+
+| | Windows | X11 | Wayland | macOS |
+|---|---|---|---|---|
+| Mechanism | `WH_KEYBOARD_LL` hook (`window/keygrab_windows.go`), one per process, set on the window thread | `XGrabKeyboard` (`window/x11_keygrab_linux.go`) | `zwp_keyboard_shortcuts_inhibit_manager_v1.inhibit_shortcuts(surface, seat)` (`window/wayland_keygrab_linux.go`) | none, `false` |
+| Active when | `GetForegroundWindow` is the window | the window has focus (taken on `FocusIn`, released on `FocusOut`) | the compositor sends `active` (surface focused) | |
+| No support | hook refused → `false` | no connection → `false` | global missing → `false` | always `false` |
+
+What is taken on Windows: the Win keys and **every key pressed while Win is held**
+(Win+E, Win+D, Win+R...), Alt+Tab, Alt+Esc, Ctrl+Esc (so Ctrl+Shift+Esc too),
+PrintScreen, Alt+F4 and Alt+Space. Alt+F4 does not close the window while the grab
+is on — keep a way out of the grab in the application. Injected key events
+(`LLKHF_INJECTED`: `SendInput`, AutoHotkey, the on-screen keyboard) are never
+touched. A key release is swallowed exactly when its press was, even if the focus
+left in between, so the shell never sees a release without a press; turning the
+grab off "releases" the grabbed keys that are still down to the window. The
+decision logic is the pure `keyGrabFilter` (`window/keygrab.go`).
+
+**What cannot be grabbed, by anything:** Ctrl+Alt+Del (the Secure Attention
+Sequence is handled by Winlogon on its own desktop) and Win+L on Windows;
+Ctrl+Alt+F1...F12 and the screen locker on Linux (the X server or the kernel).
+The application offers its own command ("Send Ctrl+Alt+Del", Ctrl+Alt+End), as
+mstsc does. On GNOME/Wayland the compositor keeps an emergency shortcut (a long
+press of Super+Esc) and may ask the user for consent.
+
+X11 detail: the request is made by the event loop at its top level, not by the
+caller (a reply cannot be read from the middle of the event stream). The loop is
+woken by a `ClientMessage` the window sends to itself (`SendEvent` with an empty
+mask), which — unlike `GetInputFocus` — produces no reply that could be mistaken
+for the reply of `GrabKeyboard`. Focus events caused by the grab itself
+(`mode = Grab/Ungrab`) are not reported through `SetOnActivate`. Without a window
+manager (no focus events at all) the grab is taken at once. Windows opened with
+`OpenWindow` have their own connection and event loop and work the same way.
+
+### Monitor changes — `(*Window).SetOnMonitorsChanged(fn func([]Monitor))`
+
+```go
+win.SetOnMonitorsChanged(func(ms []window.Monitor) {
+    // the fresh list, in the order of window.Monitors(); engine goroutine
+})
+win.SetOnMonitorsChanged(nil) // unsubscribe
+```
+
+`Monitors()`, `MonitorOf`, `MonitorAt`, `MonitorForRect` and `SetFullscreenOn`
+are exported and documented since v3.34 (`window/monitor.go`,
+`window/fullscreen.go`); the work-area field of `Monitor` is called **`Work`**
+(it was never `WorkArea`) and stays so. The callback fires only for a real
+change — bounds, `Work`, `Scale`, name, primary or the number of monitors
+differ from the last list the application saw (`monitorListsEqual`) — about
+150 ms after the last system message (the platforms send bursts, and moving a
+window between monitors raises a DPI message although nothing changed). The
+first list is read when the subscription starts (on Linux a short extra
+connection). It can be set before `Run`; `OpenWindow` windows subscribe
+separately; closing the window unsubscribes.
+
+| | Source |
+|---|---|
+| Windows | `WM_DISPLAYCHANGE`, `WM_DPICHANGED`, `WM_SETTINGCHANGE` with `SPI_SETWORKAREA` (taskbar moved, hidden or resized) |
+| X11 | RandR `ScreenChangeNotify`, `CrtcChangeNotify`, `OutputChangeNotify` (`RRSelectInput` on the root, RandR 1.2+; plain `ScreenChangeNotify` below that) and `PropertyNotify` of `_NET_WORKAREA` — on a **separate connection**, because the window's own is read by its event loop |
+| Wayland | on the window's own connection: `wl_registry.global` of a new `wl_output` (bound on the fly) and `global_remove` (objects released — `wl_output.release` only from version 3, it is a protocol error earlier), `wl_output.geometry/mode/scale/done`, `zxdg_output_v1.logical_position/logical_size`. Wayland reports no work area (`Work == Bounds`), so a panel moving is invisible there |
+| macOS | none (`Monitors()` is empty there) |
+
+### Wayland: what the window methods can and cannot do (E10)
+
+Checked method by method against `xdg_shell`; the tests are
+`window/wayland_toplevel_linux_test.go` and `window/wayland_setsize_linux_test.go`.
+
+| Method | On Wayland |
+|---|---|
+| `SetPosition(x, y)` | **impossible by protocol**: a client neither knows nor sets the global coordinates of a toplevel. A no-op that sends nothing. `GetPosition()` is always `(0, 0)`. The only thing allowed is to ask the compositor to drag the window by the pointer (`BeginMove`, `xdg_toplevel.move`, needs the serial of a button press). `SetInitialBounds` ignores `x`, `y` for the same reason |
+| `Minimize()` | works: `xdg_toplevel.set_minimized`. There is no reverse request and no "is minimized" state: `IsMinimized()` is always `false`, `SetOnMinimizedChanged` is a no-op, a minimized window comes back only through `Activate` (`xdg_activation_v1`) or the user's panel |
+| `Maximize()` / `Restore()` / `IsMaximized()` | work: `set_maximized` / `unset_maximized`; the state is read from the `maximized` flag of `configure`. A window whose size is fixed (`min == max`) is unfixed first, otherwise the compositor could not maximize it, and fixed again on restore |
+| `SetResizable(v)` | works as `set_min_size` / `set_max_size`: `false` fixes `min == max == current size`, `true` removes the maximum and restores the application's minimum (`SetMinSize`). This is the only way Wayland has to forbid or allow stretching |
+| `SetSize(w, h)` | **new in v3.39.** It was only remembering the size. For a non-resizable, non-maximized, non-fullscreen window the fixation (`min == max`) now moves to the new size, so the compositor accepts a buffer of that size; for the others the compositor chooses the size and only the frame size is remembered |
+| `SetFullscreen` / `SetFullscreenOn` | `set_fullscreen(wl_output)`; refusal arrives as `configure` without `fullscreen` and is reported as `false` (v3.34) |
+| Drag source | `BeginDragFiles` / `BeginDragFilesImage` through `wl_data_source` + `start_drag` — done in v3.34 (`window/wayland_drag_linux.go`, tests with a fake compositor) |
+
+### System language — `window.SystemLanguages() []string`
+
+```go
+window.SystemLanguages() // ["ru-RU", "en-US"], most preferred first; nil — not set
+```
+
+BCP-47 tags (language lower case, script title case, region upper case:
+`ru-RU`, `sr-Latn-RS`, `es-419`), no duplicates. It lives in `window` next to the
+system theme (the `widget` package does not import `window`); the keyboard
+layout language (`widget.Locale`) and the interface language (`widget.Language`)
+are separate things.
+
+- **Windows:** `GetUserPreferredUILanguages(MUI_LANGUAGE_NAME)` — the "Preferred
+  languages" list in the order the user set; fallback `GetUserDefaultLocaleName`.
+- **Linux:** the gettext rules. The main locale is the first non-empty of
+  `LC_ALL`, `LC_MESSAGES`, `LANG`; if it is empty, `C`, `POSIX` or `C.UTF-8`
+  there is no language and `LANGUAGE` is ignored (as gettext does) — the answer is
+  `nil` and the application picks its own. Otherwise the `LANGUAGE` list
+  (colon separated, `ru:en_US:en`) comes first, then the main locale. The
+  encoding (`.UTF-8`) and modifiers (`@euro`) are dropped; `@latin` and
+  `@cyrillic` become the script.
+- **macOS:** the same environment variables (`NSLocale.preferredLanguages` is not
+  read — the Cocoa backend cannot be verified without a Mac); empty when started
+  from a `.app`.
+
+Pure functions `normalizeLanguageTag` and `systemLanguagesFromEnv` are covered
+by `window/syslang_test.go` on every platform.
+
+### System appearance: theme and accent colour (E12)
+
+`SetOnSystemThemeChanged` and `DetectSystemTheme` already existed (Windows:
+`WM_SETTINGCHANGE` "ImmersiveColorSet" re-reading `AppsUseLightTheme`; Linux, X11
+and Wayland alike: the `SettingChanged` signal of the Settings portal; macOS:
+`SystemThemeUnknown`, no watching — see `window/systheme_darwin.go`). v3.39 adds
+the accent colour:
+
+```go
+c, ok := window.DetectSystemAccent()      // color.RGBA (opaque), ok == false when unknown
+a := window.DetectSystemAppearance()      // SystemAppearance{Theme, Accent, HasAccent}
+win.SetOnSystemAppearanceChanged(func(a window.SystemAppearance) { /* engine goroutine */ })
+```
+
+- **Windows:** `HKCU\Software\Microsoft\Windows\DWM\AccentColor` — a DWORD in
+  **ABGR** order (red in the low byte), fallback `ColorizationColor` (ARGB). The
+  change arrives with the same `ImmersiveColorSet` as the theme (Windows puts both
+  in one group), so the value is re-read from the registry.
+- **Linux:** the portal key `org.freedesktop.appearance` / `accent-color`, a
+  structure of three doubles (r, g, b in [0, 1]); a colour outside [0, 1] means
+  "no accent" (GNOME's (-1, -1, -1)). Needs a portal 1.18+; older ones give
+  `ok == false`. The signal rule on the bus is the one the theme already used
+  (`arg0` = the namespace), so no extra subscription traffic.
+- **macOS:** `ok == false`, no watching.
+
+The callback receives the whole `SystemAppearance` and fires only when any field
+really changed from what the application was told last; "unknown" theme or
+accent never counts as a change and never overwrites the last known value. One
+platform subscription serves `SetOnSystemThemeChanged` and
+`SetOnSystemAppearanceChanged` together (on Windows each has its own cell in the
+window, so setting one does not clobber the other); it is taken when either is
+set and dropped when both are cleared or the window closes.
+
+### Tests
+
+`window/keygrab_test.go` (filter, window layer), `keygrab_windows_test.go` (a
+real hook installed and removed, events fed to its procedure with a
+`KBDLLHOOKSTRUCT` — a real keypress cannot be produced because `SendInput` is
+marked injected), `x11_keygrab_linux_test.go` (a fake X server on a socket pair),
+`wayland_keygrab_linux_test.go` (a fake compositor), `monitor_change_test.go`,
+`monitor_change_windows_test.go`, `x11_monitor_change_linux_test.go`,
+`wayland_monitor_change_linux_test.go`, `wayland_setsize_linux_test.go`,
+`syslang_test.go`, `syslang_env_test.go`, `syslang_windows_test.go`,
+`systheme_accent_test.go` (+ the Windows registry and the fake Settings portal
+on a real bus in `systheme_windows_test.go` / `systheme_linux_test.go`).
+
+Verified only on the wire, not on a live compositor or desktop: the Wayland
+`zwp_keyboard_shortcuts_inhibit_manager_v1` and the `wl_output` hot-plug paths
+(fake compositor); the X11 RandR events (the watcher connects to a real X server
+in the test, but a real monitor change cannot be provoked there); the hook
+delivering a real Win key press on Windows (the procedure is exercised, the OS
+delivery is not).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

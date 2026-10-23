@@ -3799,6 +3799,80 @@ and leaving full screen returns exactly them (and "maximized", if it was set).
 - **macOS.** A no-op: the size is honored anyway, and the position is not
   implemented on this backend at all.
 
+### Keyboard grab, monitor changes, system language and accent (v3.39)
+
+A remote desktop, a virtual machine or a game wants to see every key, to know about
+monitor changes and to follow the OS language and appearance.
+
+```go
+// Win, Alt+Tab, Alt+Esc, Ctrl+Esc, PrintScreen go to the app while the window has focus.
+if !win.SetKeyboardGrab(true) { /* the platform cannot: leave it as is */ }
+win.KeyboardGrabbed() // is the grab in force right now (on Wayland the compositor decides)
+win.SetKeyboardGrab(false)
+
+// A monitor was attached, resolution or scale changed, the taskbar moved:
+win.SetOnMonitorsChanged(func(ms []window.Monitor) { /* fresh list, engine goroutine */ })
+
+window.SystemLanguages() // ["ru-RU", "en-US"] — OS languages, most preferred first
+
+a := window.DetectSystemAppearance() // theme + accent colour
+win.SetOnSystemAppearanceChanged(func(a window.SystemAppearance) {
+    // a.Theme, a.Accent (color.RGBA, opaque), a.HasAccent
+})
+```
+
+**Keyboard grab.** Grabbed keys reach the app as ordinary `KeyDown`/`KeyUp`. A request
+made before `Run` is remembered; closing the window releases the keyboard.
+
+- **Win32.** A `WH_KEYBOARD_LL` hook on the window thread, one per process. It acts
+  only while your window is active (`GetForegroundWindow`). Grabbed: the Win keys and
+  everything pressed together with them (Win+E, Win+D...), Alt+Tab, Alt+Esc, Ctrl+Esc
+  (and Ctrl+Shift+Esc), PrintScreen, Alt+F4 and Alt+Space — so Alt+F4 does not close
+  the window; keep a way out of the grab in the app. **Ctrl+Alt+Del and Win+L cannot
+  be intercepted by anything** (Winlogon handles them): offer your own command for
+  Ctrl+Alt+Del ("Send Ctrl+Alt+Del", as mstsc does). Synthetic key presses
+  (`SendInput`, AutoHotkey, the on-screen keyboard) are left alone.
+- **X11.** `XGrabKeyboard` on the window while it has focus; lose focus — released,
+  get it back — taken again. Switching virtual terminals (Ctrl+Alt+F1...) is handled
+  by the server and cannot be grabbed.
+- **Wayland.** `zwp_keyboard_shortcuts_inhibit_manager_v1.inhibit_shortcuts`. If the
+  compositor does not announce the global, `SetKeyboardGrab(true)` returns `false`.
+  The consent stays with the compositor: it may ask the user and keep an emergency
+  shortcut (GNOME — a long press of Super+Esc).
+- **macOS.** None (`false`).
+
+**Monitor changes.** The callback gets the list in the shape of `Monitors()` and is
+called only for a real change (bounds, `Work`, `Scale`, name, primary), about 150 ms
+after the last system message. Win32: `WM_DISPLAYCHANGE`, `WM_DPICHANGED`,
+`WM_SETTINGCHANGE(SPI_SETWORKAREA)`; X11: RandR events (`ScreenChangeNotify`,
+`Crtc/OutputChangeNotify`) and `_NET_WORKAREA`; Wayland: `wl_output` globals coming
+and going, `wl_output.done`, `xdg_output` events (Wayland reports no work area). The
+work-area field is called `Work`, not `WorkArea`. macOS: none.
+
+**System language.** Windows: `GetUserPreferredUILanguages` (the "Language & region"
+list). Linux: `LANGUAGE` (colon separated), `LC_ALL`/`LC_MESSAGES`/`LANG` by the
+gettext rules (with the `C`/`POSIX` locale the list is empty). macOS: the same
+environment variables. Tags are BCP-47: `ru-RU`, `en-US`, `sr-Latn-RS`. An empty list
+means "no language set" — the app chooses. The keyboard layout language
+(`widget.Locale`) and the UI language (`widget.Language`) are different things.
+
+**Accent.** `DetectSystemAccent()`/`DetectSystemAppearance()` and
+`SetOnSystemAppearanceChanged` add the accent colour to the theme. Windows:
+`HKCU\Software\Microsoft\Windows\DWM\AccentColor` (ABGR), a change arrives with the
+same `ImmersiveColorSet`. Linux: the portal key `accent-color` (portal 1.18+), a
+change is the `SettingChanged` signal. Unknown theme or accent → `SystemThemeUnknown`
+and `HasAccent == false`; such answers are never counted as a change. macOS: none.
+The appearance subscription is independent of `SetOnSystemThemeChanged`.
+
+**Wayland and the window methods** (details in `docs/AI_AGENT_REFERENCE.md`). The
+xdg-shell protocol does not know the window position: `SetPosition` is a no-op,
+`GetPosition` is always `(0, 0)`; the most one can do is ask the compositor to drag
+the window (`BeginMove`). `Minimize`, `Maximize`/`Restore` (`set_minimized`,
+`set_maximized`/`unset_maximized`) and `SetResizable` (the `set_min_size`/`set_max_size`
+pair) work; `IsMinimized` is always `false`, and a minimized window can only be
+brought back with `Activate`. `SetSize` on a non-resizable window moves the fixation
+to the new size.
+
 ### Bringing the window to the front: one process, a second launch (v3.35)
 
 A viewer lives in one window: a second launch (double click on a file) passes the

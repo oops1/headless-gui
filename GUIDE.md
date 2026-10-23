@@ -3769,6 +3769,80 @@ win.Run()
 - **macOS.** No-op: размер окно и так берёт, а положение на этом бэкенде не
   реализовано вовсе.
 
+### Захват клавиатуры, смена мониторов, язык и акцент системы (v3.39)
+
+Удалённый рабочий стол, виртуальная машина и игра хотят видеть все клавиши, знать
+о смене мониторов и следовать языку и оформлению ОС.
+
+```go
+// Win, Alt+Tab, Alt+Esc, Ctrl+Esc, PrintScreen — приложению, пока окно в фокусе.
+if !win.SetKeyboardGrab(true) { /* платформа не умеет: оставляем как есть */ }
+win.KeyboardGrabbed() // действует ли захват прямо сейчас (на Wayland решает композитор)
+win.SetKeyboardGrab(false)
+
+// Подключили монитор, сменили разрешение, масштаб, сдвинули панель задач:
+win.SetOnMonitorsChanged(func(ms []window.Monitor) { /* свежий список, горутина движка */ })
+
+window.SystemLanguages() // ["ru-RU", "en-US"] — языки ОС по убыванию предпочтения
+
+a := window.DetectSystemAppearance() // тема + акцентный цвет
+win.SetOnSystemAppearanceChanged(func(a window.SystemAppearance) {
+    // a.Theme, a.Accent (color.RGBA, непрозрачный), a.HasAccent
+})
+```
+
+**Захват клавиатуры.** Перехваченные клавиши приходят приложению обычными
+`KeyDown`/`KeyUp`. До `Run` запрос запоминается; закрытие окна отпускает клавиатуру.
+
+- **Win32.** Хук `WH_KEYBOARD_LL` на потоке окна, один на процесс. Работает только
+  пока активно ваше окно (`GetForegroundWindow`). Перехватываются клавиши Win и всё,
+  что нажато вместе с ними (Win+E, Win+D…), Alt+Tab, Alt+Esc, Ctrl+Esc
+  (и Ctrl+Shift+Esc), PrintScreen, Alt+F4 и Alt+Space — то есть Alt+F4 не закроет
+  окно, держите в приложении способ выйти из захвата. **Ctrl+Alt+Del и Win+L
+  перехватить нельзя ничем** (их обрабатывает Winlogon): для Ctrl+Alt+Del нужна
+  своя команда («Послать Ctrl+Alt+Del», как в mstsc). Синтетические нажатия
+  (`SendInput`, AutoHotkey, экранная клавиатура) хук не трогает.
+- **X11.** `XGrabKeyboard` на окно, пока у него фокус; потерял фокус — отпускается,
+  вернулся — берётся снова. Переключение виртуальных терминалов (Ctrl+Alt+F1…)
+  обрабатывает сервер, его не перехватить.
+- **Wayland.** `zwp_keyboard_shortcuts_inhibit_manager_v1.inhibit_shortcuts`. Если
+  композитор глобала не объявил, `SetKeyboardGrab(true)` вернёт `false`. Согласие
+  остаётся за композитором: он может спросить пользователя и оставить аварийное
+  сочетание (GNOME — долгое удержание Super+Esc).
+- **macOS.** Нет (`false`).
+
+**Смена мониторов.** Колбэк получает список в виде `Monitors()` и зовётся только при
+настоящей перемене (границы, `Work`, `Scale`, имя, основной) с задержкой около
+150 мс после последнего системного сообщения. Win32: `WM_DISPLAYCHANGE`,
+`WM_DPICHANGED`, `WM_SETTINGCHANGE(SPI_SETWORKAREA)`; X11: события RandR
+(`ScreenChangeNotify`, `Crtc/OutputChangeNotify`) и `_NET_WORKAREA`; Wayland:
+появление и исчезновение `wl_output`, `wl_output.done`, события `xdg_output`
+(рабочей области Wayland не сообщает). Поле рабочей области называется `Work`,
+не `WorkArea`. macOS: нет.
+
+**Язык системы.** Windows: `GetUserPreferredUILanguages` (список «Язык и регион»).
+Linux: `LANGUAGE` (через `:`), `LC_ALL`/`LC_MESSAGES`/`LANG` по правилам gettext
+(при локали `C`/`POSIX` список пуст). macOS: те же переменные среды. Записи в
+BCP-47: `ru-RU`, `en-US`, `sr-Latn-RS`. Пустой список — «язык не задан», тогда язык
+выбирает приложение. Язык раскладки клавиатуры (`widget.Locale`) и язык интерфейса
+(`widget.Language`) — другое.
+
+**Акцент.** `DetectSystemAccent()`/`DetectSystemAppearance()` и
+`SetOnSystemAppearanceChanged` дополняют тему акцентным цветом. Windows:
+`HKCU\Software\Microsoft\Windows\DWM\AccentColor` (ABGR), смена приходит тем же
+`ImmersiveColorSet`. Linux: ключ `accent-color` портала (портал 1.18+), смена —
+сигнал `SettingChanged`. Тема и акцент не определены → `HasAccent == false` и
+`SystemThemeUnknown`; такие ответы не считаются сменой. macOS: нет. Подписка на
+оформление независима от `SetOnSystemThemeChanged`.
+
+**Wayland и методы окна** (подробности — в `docs/AI_AGENT_REFERENCE.md`).
+Протокол xdg-shell не знает положения окна: `SetPosition` — no-op, `GetPosition` —
+всегда `(0, 0)`; всё, что можно, — попросить компоновщик потащить окно
+(`BeginMove`). `Minimize`, `Maximize`/`Restore` (`set_minimized`,
+`set_maximized`/`unset_maximized`) и `SetResizable` (пара `set_min_size`/`set_max_size`)
+работают; `IsMinimized` всегда `false`, развернуть свёрнутое окно можно только
+`Activate`. `SetSize` у окна с запретом ресайза переносит фиксацию на новый размер.
+
 ### Окно на передний план: один процесс, второй запуск (v3.35)
 
 Просмотрщик живёт одним окном: второй запуск (двойной щелчок по файлу) передаёт
