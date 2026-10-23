@@ -8719,6 +8719,30 @@ Tests: `widget/accessibility_nodes_test.go`, `widget/focusring_test.go`,
 (UIA through the vtables), `window/a11y_nodes_linux_test.go`,
 `window/a11y_nodes_live_linux_test.go` (AT-SPI, the second on the real bus).
 
+## v3.38.1: Windows 10 — a large window no longer stays blank
+
+On Windows 10 a window larger than about 1024×1024 physical pixels stayed blank
+(clicks still went to it), reported by the RDP client on v3.38.0 on two
+Windows 10 22H2 machines. The Win32 frame buffer was a Go slice. The Go heap on
+windows/amd64 reserves memory in 4 MB arenas by separate
+`VirtualAlloc(MEM_RESERVE)` calls, so a buffer over 4 MB almost always spans two
+reservations — and on Windows 10 `StretchDIBits` / `SetDIBitsToDevice` with such
+a source copies no line and returns 0 with `ERROR_SUCCESS`. Windows 11 does not.
+
+- The frame buffer is allocated with one `VirtualAlloc(MEM_COMMIT|MEM_RESERVE)`
+  (`window/framebuf_windows.go`) and released on resize and in `WM_DESTROY`;
+  a late frame after destruction is a no-op.
+- The result of `StretchDIBits` is checked: on 0 the window asks for a repaint
+  (`InvalidateRect`), at most three times in a row.
+- The first `WM_PAINT`, which arrives inside `Create` before the window wires
+  its repaint (`SetOnExpose`), is no longer lost: wiring the repaint asks the
+  system to repaint again.
+
+Tests: `window/framebuf_windows_test.go` — the buffer lies in one reservation
+(`VirtualQuery`), a 1500×950 frame reaches a live window, a frame after
+`WM_DESTROY` does nothing, the early paint is re-requested. The blank-window
+failure itself only reproduces on Windows 10.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

@@ -380,6 +380,14 @@ type Win32Window struct {
 	mu         sync.Mutex
 	frameBuf   []byte // BGRA пиксели для StretchDIBits (top-down: строка 0 — верхняя)
 	bufW, bufH int    // размер кадра, лежащего в frameBuf (для растянутого блита)
+	// frameVA — frameBuf выделен VirtualAlloc, а не Go (framebuf_windows.go);
+	// frameDead — окно уничтожено, буфер освобождён. blitFails — сколько
+	// блитов подряд GDI не вывел; paintMiss — WM_PAINT пришёл, когда
+	// перерисовка ещё не была подключена (SetOnExpose).
+	frameVA   bool
+	frameDead bool
+	blitFails atomic.Int32
+	paintMiss atomic.Bool
 
 	cursorHandle uintptr         // текущий желаемый курсор (HCURSOR)
 	cursorCache  map[int]uintptr // кэш загруженных IDC-курсоров
@@ -617,6 +625,7 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 	w.title = title
 	w.width = width
 	w.height = height
+	w.frameDead = false
 	// Окно, которое просят создать меньше дефолтного минимума (320×240),
 	// иначе вырастет до него: Windows клампит размер по ptMinTrackSize уже
 	// при создании. Кадр остаётся прежним, и снизу/справа остаётся
@@ -921,9 +930,13 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	// Конвертируем RGBA → BGRA (Win32 DIB формат) — только строки/столбцы
 	// dirty-области. Переворота по Y нет: DIB объявлен top-down (BiHeight<0).
 	w.mu.Lock()
+	if w.frameDead {
+		w.mu.Unlock()
+		return
+	}
 	needed := width * height * 4
 	if len(w.frameBuf) < needed {
-		w.frameBuf = make([]byte, needed)
+		w.allocFrameBuf(needed)
 		dirty = b // новый буфер — заполняем целиком
 	}
 	convertFrameToBGRA(w.frameBuf, img, dirty, width)
@@ -973,7 +986,7 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	// чужой кусок интерфейса на месте перерисованного виджета.
 	ySrc := height - dirty.Max.Y
 
-	procStretchDIBits.Call(
+	lines, _, _ := procStretchDIBits.Call(
 		hdc,
 		uintptr(dirty.Min.X), uintptr(dirty.Min.Y), uintptr(dw), uintptr(dh), // dst rect
 		uintptr(dirty.Min.X), uintptr(ySrc), uintptr(dw), uintptr(dh), // src rect
@@ -983,6 +996,13 @@ func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 		uintptr(srccopy),
 	)
 	w.mu.Unlock()
+	// Кадр, который GDI не вывел, иначе считался бы показанным: интерфейс в
+	// покое новых кадров не шлёт, и окно оставалось бы пустым навсегда.
+	if lines == 0 {
+		w.blitFailed()
+	} else {
+		w.blitFails.Store(0)
+	}
 }
 
 // blitStretchedLocked растягивает кэшированный кадр (frameBuf, bufW×bufH) на
@@ -1046,7 +1066,16 @@ func (w *Win32Window) SetMinSize(width, height int) {
 }
 
 // SetOnExpose — колбэк перерисовки области по WM_PAINT (см. exposeNotifier).
-func (w *Win32Window) SetOnExpose(fn func(r image.Rectangle)) { w.onExpose = fn }
+//
+// WM_PAINT, пришедший раньше (первый показ внутри Create — до того, как окно
+// подключит перерисовку), BeginPaint уже провалидировал, и система больше не
+// попросила бы перерисовать окно: просим заново.
+func (w *Win32Window) SetOnExpose(fn func(r image.Rectangle)) {
+	w.onExpose = fn
+	if fn != nil && w.hwnd != 0 && w.paintMiss.Swap(false) {
+		procInvalidateRect.Call(uintptr(w.hwnd), 0, 0)
+	}
+}
 
 // SetOnDpiChanged — колбэк смены DPI монитора (см. dpiChangeNotifier).
 func (w *Win32Window) SetOnDpiChanged(fn func(scale float64)) { w.onDpiChanged = fn }
@@ -1265,6 +1294,10 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		win32Mu.Unlock()
 		dropUICalls(hwnd) // WM_APP этому окну уже не придёт
 		w.destroyArtCursors()
+		w.mu.Lock()
+		w.frameDead = true
+		w.freeFrameBuf() // память VirtualAlloc сборщик мусора не вернёт
+		w.mu.Unlock()
 		// Вторичные окна модалок (noQuit) не завершают цикл сообщений — иначе
 		// закрытие диалога уронило бы всё приложение. Главное окно — завершает.
 		if !w.noQuit {
@@ -1327,6 +1360,9 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			// растянуто на всю область (НИКОГДА не отдаём пустую отрисовку в Def).
 			w.blitCachedStretched()
 			return 0
+		}
+		if w.onExpose == nil {
+			w.paintMiss.Store(true) // перерисовку подключат позже — см. SetOnExpose
 		}
 		if w.onExpose != nil {
 			r := image.Rect(int(ps.RcPaint.Left), int(ps.RcPaint.Top),
