@@ -3,6 +3,7 @@
 package window
 
 import (
+	"image/color"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -137,6 +138,120 @@ func TestWatchSystemTheme_FakePortal(t *testing.T) {
 	select {
 	case th := <-got:
 		t.Errorf("подписка снята, но пришло %v", th)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// startFakeAccentPortal делает тест порталом, отдающим accent-color; как и
+// startFakePortal, пропускается, если настоящий портал уже занял имя.
+func startFakeAccentPortal(t *testing.T, accent *atomic.Value) *dbusConn {
+	t.Helper()
+	daemon := dialTestBus(t)
+	daemon.setCallHandler(func(msg *dbusMessage) *dbusReply {
+		if msg.Path != portalObjPath || msg.Interface != portalSettingsIface {
+			return nil
+		}
+		if len(msg.Body) != 2 || msg.Body[0] != portalAppearanceNS || msg.Body[1] != portalAccentKey {
+			return &dbusReply{ErrName: "org.freedesktop.portal.Error.NotFound", ErrMsg: "нет такого ключа"}
+		}
+		v := accent.Load().(dbusVariant)
+		switch msg.Member {
+		case "ReadOne":
+			return &dbusReply{Sig: "v", Body: []any{v}}
+		case "Read":
+			return &dbusReply{Sig: "v", Body: []any{dbusVariant{Sig: "v", Val: v}}}
+		}
+		return nil
+	})
+	if err := daemon.requestName(portalBusName, 0x4 /*DO_NOT_QUEUE*/); err != nil {
+		t.Skipf("портал настроек уже запущен, подменять не будем: %v", err)
+	}
+	return daemon
+}
+
+// Чтение accent-color через настоящую шину: структура из трёх double
+// превращается в цвет, «нет акцента» — в ok=false.
+func TestDetectSystemAccent_FakePortal(t *testing.T) {
+	var accent atomic.Value
+	accent.Store(accentTestVal(0, 0.5, 1))
+	startFakeAccentPortal(t, &accent)
+	client := dialTestBus(t)
+
+	v, ok := readPortalAppearance(client, portalAccentKey)
+	if !ok {
+		t.Fatal("accent-color не прочитан")
+	}
+	if c, ok := accentFromPortalValue(v); !ok || c != (color.RGBA{R: 0, G: 128, B: 255, A: 255}) {
+		t.Errorf("accent-color → %v, %v", c, ok)
+	}
+	accent.Store(accentTestVal(-1, -1, -1))
+	v, _ = readPortalAppearance(client, portalAccentKey)
+	if _, ok := accentFromPortalValue(v); ok {
+		t.Error("сброшенный акцент (-1,-1,-1) принят за цвет")
+	}
+}
+
+// Сигнал SettingChanged по accent-color доходит до подписчика на акцент, не
+// будит подписчика на тему, а color-scheme не будит подписчика на акцент.
+func TestWatchSystemAccent_FakePortal(t *testing.T) {
+	var accent atomic.Value
+	accent.Store(accentTestVal(0, 0, 0))
+	daemon := startFakeAccentPortal(t, &accent)
+
+	type acc struct {
+		c  color.RGBA
+		ok bool
+	}
+	gotA := make(chan acc, 4)
+	gotT := make(chan SystemTheme, 4)
+	stopA := watchSystemAccent(nil, func(c color.RGBA, ok bool) { gotA <- acc{c, ok} })
+	if stopA == nil {
+		t.Skip("сессионной шины нет")
+	}
+	stopT := watchSystemTheme(nil, func(th SystemTheme) { gotT <- th })
+	defer stopT()
+
+	emit := func(key string, v any) {
+		t.Helper()
+		if err := daemon.emit(portalObjPath, portalSettingsIface, "SettingChanged", "ssv",
+			[]any{portalAppearanceNS, key, v}); err != nil {
+			t.Fatalf("emit: %v", err)
+		}
+	}
+	// Тему шлём первой: сигналы идут по порядку, и если бы она будила подписчика
+	// на акцент, мы увидели бы это раньше цвета.
+	emit(portalColorSchemeKey, dbusVariant{Sig: "u", Val: uint32(1)})
+	emit(portalAccentKey, accentTestVal(1, 0, 0))
+
+	select {
+	case a := <-gotA:
+		if !a.ok || a.c != (color.RGBA{R: 255, A: 255}) {
+			t.Errorf("подписчик на акцент получил %+v", a)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("сигнал accent-color не доехал до подписчика")
+	}
+	select {
+	case th := <-gotT:
+		if th != SystemThemeDark {
+			t.Errorf("подписчик на тему получил %v, ждал dark", th)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("сигнал color-scheme не доехал до подписчика на тему")
+	}
+	select {
+	case a := <-gotA:
+		t.Errorf("смена темы разбудила подписчика на акцент: %+v", a)
+	case th := <-gotT:
+		t.Errorf("смена акцента разбудила подписчика на тему: %v", th)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	stopA()
+	emit(portalAccentKey, accentTestVal(0, 1, 0))
+	select {
+	case a := <-gotA:
+		t.Errorf("подписка снята, но пришло %+v", a)
 	case <-time.After(300 * time.Millisecond):
 	}
 }

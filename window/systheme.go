@@ -14,6 +14,8 @@ package window
 // прочитали, проверяется на любой машине и идёт в общем прогоне тестов.
 
 import (
+	"image/color"
+	"math"
 	"strings"
 	"sync"
 )
@@ -60,6 +62,39 @@ func DetectSystemTheme() SystemTheme {
 	return detectSystemTheme()
 }
 
+// SystemAppearance — оформление, выбранное в ОС: тема и акцентный цвет.
+type SystemAppearance struct {
+	// Theme — светлая или тёмная тема приложений (см. DetectSystemTheme).
+	Theme SystemTheme
+	// Accent — акцентный цвет, выбранный пользователем (непрозрачный,
+	// A == 255). Осмыслен только при HasAccent.
+	Accent color.RGBA
+	// HasAccent — акцентный цвет удалось узнать. На Linux его нет у сред без
+	// портала или с порталом старше 1.18, а также когда пользователь акцент не
+	// выбирал; на macOS — всегда нет.
+	HasAccent bool
+}
+
+// DetectSystemAccent возвращает акцентный цвет, выбранный в ОС прямо сейчас.
+// ok=false — узнать не удалось (см. SystemAppearance.HasAccent).
+//
+// Windows: DWM\AccentColor в реестре пользователя (при его отсутствии —
+// DWM\ColorizationColor). Linux: ключ accent-color пространства
+// org.freedesktop.appearance портала рабочего стола. macOS: ok=false.
+//
+// Безопасно звать из любой горутины и до создания окна; на Linux первый вызов
+// может занять до нескольких секунд, если шина есть, а портал не отвечает.
+func DetectSystemAccent() (c color.RGBA, ok bool) {
+	return detectSystemAccent()
+}
+
+// DetectSystemAppearance возвращает тему и акцентный цвет одним вызовом.
+func DetectSystemAppearance() SystemAppearance {
+	a := SystemAppearance{Theme: detectSystemTheme()}
+	a.Accent, a.HasAccent = detectSystemAccent()
+	return a
+}
+
 // SetOnSystemThemeChanged подписывает приложение на смену темы ОС: человек
 // переключил тёмную тему в параметрах, пока программа открыта.
 //
@@ -88,12 +123,49 @@ func (win *Window) SetOnSystemThemeChanged(fn func(SystemTheme)) {
 	}
 }
 
-// systemThemeState — подписка окна на смену темы.
+// SetOnSystemAppearanceChanged подписывает приложение на смену оформления ОС:
+// светлой или тёмной темы И акцентного цвета. Нужен приложению, которое
+// следует за системой целиком («тема из системы»), а не только за режимом.
+//
+// Колбэк получает оформление целиком (SystemAppearance) и вызывается лишь при
+// настоящей перемене любого из его полей: Windows присылает несколько
+// сообщений на одно переключение, портал — сигнал на каждый ключ
+// пространства appearance. Тема «неизвестна» и акцент «неизвестен» не считаются
+// сменой: окно остаётся при том, что показывало (последнее известное значение
+// копится между событиями).
+//
+// Колбэк выполняется на горутине движка. Можно вызывать до Run и во время
+// работы; nil снимает подписку. Подписка независима от
+// SetOnSystemThemeChanged: можно задать любой из колбэков или оба, платформенное
+// наблюдение при этом одно.
+//
+//	Windows  WM_SETTINGCHANGE "ImmersiveColorSet" (тема и акцент приходят
+//	         одной группой), значения перечитываются из реестра;
+//	Linux    сигнал SettingChanged портала для color-scheme и accent-color
+//	         (X11 и Wayland одинаково);
+//	macOS    наблюдения нет.
+func (win *Window) SetOnSystemAppearanceChanged(fn func(SystemAppearance)) {
+	win.sysTheme.mu.Lock()
+	win.sysTheme.app = fn
+	running := win.native != nil
+	win.sysTheme.mu.Unlock()
+	if running {
+		win.syncSystemThemeWatch()
+	}
+}
+
+// systemThemeState — подписка окна на смену темы и оформления.
 type systemThemeState struct {
 	mu   sync.Mutex
 	fn   func(SystemTheme)
 	stop func() // снятие платформенной подписки; nil — её нет
 	edge themeEdge
+
+	// app — колбэк оформления (тема + акцент); cur — последнее известное
+	// оформление, last — то, о чём приложение уже уведомлено.
+	app  func(SystemAppearance)
+	cur  SystemAppearance
+	last SystemAppearance
 }
 
 // syncSystemThemeWatch приводит платформенную подписку в соответствие с тем,
@@ -105,7 +177,7 @@ type systemThemeState struct {
 func (win *Window) syncSystemThemeWatch() {
 	st := &win.sysTheme
 	st.mu.Lock()
-	hasFn, watching := st.fn != nil, st.stop != nil
+	hasFn, watching := st.fn != nil || st.app != nil, st.stop != nil
 	st.mu.Unlock()
 
 	switch {
@@ -113,23 +185,33 @@ func (win *Window) syncSystemThemeWatch() {
 		// Исходное значение читаем ДО подписки и вне замка: на Linux это
 		// вызов по шине. Без него первое же повторное сообщение с прежней
 		// темой сошло бы за смену.
-		cur := detectSystemTheme()
-		stop := watchSystemTheme(win.native, win.systemThemeEvent)
+		cur := DetectSystemAppearance()
+		stopTheme := watchSystemTheme(win.native, win.systemThemeEvent)
+		stopAccent := watchSystemAccent(win.native, win.systemAccentEvent)
 		st.mu.Lock()
-		if st.stop != nil || st.fn == nil {
+		if st.stop != nil || (st.fn == nil && st.app == nil) {
 			// Пока читали, подписку успели поднять или снять — вторая
 			// не нужна.
 			st.mu.Unlock()
-			if stop != nil {
-				stop()
+			if stopTheme != nil {
+				stopTheme()
+			}
+			if stopAccent != nil {
+				stopAccent()
 			}
 			return
 		}
-		st.edge.reset(cur)
-		if stop == nil {
-			stop = func() {} // платформа наблюдать не умеет: больше не пытаемся
+		st.edge.reset(cur.Theme)
+		st.cur, st.last = cur, cur
+		stop := func() {
+			if stopTheme != nil {
+				stopTheme()
+			}
+			if stopAccent != nil {
+				stopAccent()
+			}
 		}
-		st.stop = stop
+		st.stop = stop // платформа наблюдать не умеет — обе nil: больше не пытаемся
 		st.mu.Unlock()
 	case !hasFn && watching:
 		win.stopSystemThemeWatch()
@@ -157,14 +239,47 @@ func (win *Window) systemThemeEvent(t SystemTheme) {
 	st := &win.sysTheme
 	st.mu.Lock()
 	fn := st.fn
-	fire := fn != nil && st.edge.update(t)
-	st.mu.Unlock()
-	if !fire {
-		return
+	changed := st.edge.update(t)
+	fire := fn != nil && changed
+	if t != SystemThemeUnknown {
+		st.cur.Theme = t
 	}
-	// Колбэк приложения красит виджеты, то есть работает на горутине
-	// движка; поток окна ОС и читающая горутина D-Bus ждать его не должны.
-	win.post(func() { fn(t) })
+	app, appVal, fireApp := st.appearanceChangeLocked()
+	st.mu.Unlock()
+	// Колбэки приложения красят виджеты, то есть работают на горутине
+	// движка; поток окна ОС и читающая горутина D-Bus ждать их не должны.
+	if fire {
+		win.post(func() { fn(t) })
+	}
+	if fireApp {
+		win.post(func() { app(appVal) })
+	}
+}
+
+// systemAccentEvent принимает от платформы новый акцентный цвет. ok=false —
+// акцент узнать не удалось: он не считается сменой и последнее известное
+// значение не сбрасывает.
+func (win *Window) systemAccentEvent(c color.RGBA, ok bool) {
+	st := &win.sysTheme
+	st.mu.Lock()
+	if ok {
+		st.cur.Accent, st.cur.HasAccent = c, true
+	}
+	app, appVal, fireApp := st.appearanceChangeLocked()
+	st.mu.Unlock()
+	if fireApp {
+		win.post(func() { app(appVal) })
+	}
+}
+
+// appearanceChangeLocked сверяет текущее оформление с тем, о чём приложение
+// уже знает. Замок держит вызывающий.
+func (st *systemThemeState) appearanceChangeLocked() (fn func(SystemAppearance), a SystemAppearance, fire bool) {
+	if st.app == nil || st.cur == st.last {
+		return nil, SystemAppearance{}, false
+	}
+	st.last = st.cur
+	return st.app, st.cur, true
 }
 
 // themeEdge отсеивает повторы: платформы сообщают «что-то с темой», а не
@@ -229,6 +344,7 @@ const (
 	portalSettingsIface  = "org.freedesktop.portal.Settings"
 	portalAppearanceNS   = "org.freedesktop.appearance"
 	portalColorSchemeKey = "color-scheme"
+	portalAccentKey      = "accent-color"
 )
 
 // Значения ключа color-scheme.
@@ -318,4 +434,74 @@ func systemThemeFromGTKTheme(s string) SystemTheme {
 		return SystemThemeDark
 	}
 	return SystemThemeUnknown
+}
+
+// accentFromDWMAccent переводит значение DWM\AccentColor из реестра Windows в
+// цвет. Значение — DWORD в порядке байт ABGR (0xAABBGGRR), в отличие от
+// привычного ARGB: красный лежит в младшем байте. Альфа в нём почти всегда
+// 0xFF и ничего не значит: акцент непрозрачен.
+func accentFromDWMAccent(v uint32) color.RGBA {
+	return color.RGBA{R: uint8(v), G: uint8(v >> 8), B: uint8(v >> 16), A: 255}
+}
+
+// accentFromColorization переводит DWM\ColorizationColor (запасной источник
+// акцента на системах без AccentColor): DWORD в порядке 0xAARRGGBB.
+func accentFromColorization(v uint32) color.RGBA {
+	return color.RGBA{R: uint8(v >> 16), G: uint8(v >> 8), B: uint8(v), A: 255}
+}
+
+// accentFromPortalValue разбирает значение accent-color портала: структура из
+// трёх double (красный, зелёный, синий в [0, 1]). Снимает обёртки variant так
+// же, как systemThemeFromPortalValue.
+//
+// Портал сообщает «акцента нет» цветом вне диапазона [0, 1] (GNOME до выбора
+// акцента отдаёт (-1, -1, -1)): это ok=false, а не чёрный цвет.
+func accentFromPortalValue(v any) (color.RGBA, bool) {
+	for {
+		vr, ok := v.(dbusVariant)
+		if !ok {
+			break
+		}
+		v = vr.Val
+	}
+	var f []any
+	switch t := v.(type) {
+	case dbusStruct:
+		f = t.Fields
+	case *dbusStruct:
+		if t != nil {
+			f = t.Fields
+		}
+	case []any:
+		f = t
+	}
+	if len(f) != 3 {
+		return color.RGBA{}, false
+	}
+	var c [3]uint8
+	for i, e := range f {
+		x, ok := e.(float64)
+		if !ok || math.IsNaN(x) || x < 0 || x > 1 {
+			return color.RGBA{}, false
+		}
+		c[i] = uint8(math.Round(x * 255))
+	}
+	return color.RGBA{R: c[0], G: c[1], B: c[2], A: 255}, true
+}
+
+// accentFromPortalSignal разбирает сигнал SettingChanged(ssv) портала.
+// matched=false — сигнал не про accent-color, и будить приложение он не должен.
+// matched=true, ok=false — пользователь сбросил акцент или значение
+// непонятно: последнее известное значение при этом остаётся.
+func accentFromPortalSignal(msg *dbusMessage) (c color.RGBA, ok, matched bool) {
+	if msg == nil || msg.Interface != portalSettingsIface || msg.Member != "SettingChanged" || len(msg.Body) < 3 {
+		return color.RGBA{}, false, false
+	}
+	ns, _ := msg.Body[0].(string)
+	key, _ := msg.Body[1].(string)
+	if ns != portalAppearanceNS || key != portalAccentKey {
+		return color.RGBA{}, false, false
+	}
+	c, ok = accentFromPortalValue(msg.Body[2])
+	return c, ok, true
 }

@@ -411,6 +411,16 @@ type Win32Window struct {
 	// (см. systheme_windows.go). Атомарно: подписку ставит и снимает
 	// горутина приложения, а читает поток цикла сообщений окна.
 	onSettingChange atomic.Pointer[func(area string)]
+	// onAccentChange — то же для акцентного цвета (watchSystemAccent).
+	onAccentChange atomic.Pointer[func(area string)]
+
+	// kbGrabbed — окно заказало захват клавиатуры (keygrab_windows.go).
+	// Атомарно: читает KeyboardGrabActive с любой горутины.
+	kbGrabbed atomic.Bool
+
+	// onMonitors — подписка на смену мониторов (monitor_change_windows.go).
+	// Атомарно по той же причине, что и onSettingChange.
+	onMonitors atomic.Pointer[func()]
 
 	// Callbacks
 	onResize           func(w, h int)
@@ -1301,7 +1311,8 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 
 	case wmDestroy:
-		w.revokeDropTarget() // IDropTarget окна (dnd_windows.go)
+		kbGrab.release(w, false) // хук захвата клавиатуры не должен пережить окно
+		w.revokeDropTarget()     // IDropTarget окна (dnd_windows.go)
 		win32Mu.Lock()
 		delete(win32Windows, hwnd)
 		win32Mu.Unlock()
@@ -1409,8 +1420,12 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		// в lParam (см. systheme_windows.go). Дальше уходит в DefWindowProc —
 		// как и положено широковещательному сообщению.
 		w.handleSettingChange(lparam)
+		if monitorsChangedBySetting(wparam) {
+			w.noteMonitorsChanged() // SPI_SETWORKAREA: сдвинули панель задач
+		}
 
 	case wmDpichanged:
+		w.noteMonitorsChanged() // масштаб монитора мог измениться
 		// Окно перенесли на монитор с другим DPI. wparam: LOWORD = новый DPI;
 		// lparam → RECT с рекомендованным размером/позицией окна.
 		newDpi := wparam & 0xFFFF
@@ -1524,6 +1539,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		// Сменилось разрешение или состав мониторов: полноэкранное окно
 		// пересчитывает прямоугольник (иначе остаётся с прежним размером).
 		w.refitFullscreen()
+		w.noteMonitorsChanged()
 
 	case wmWindowposchanged:
 		// Окно перенесли (Win+Shift+стрелка) — на другом мониторе тот же

@@ -255,6 +255,9 @@ type X11Window struct {
 
 	// touch — касания через XInput 2.2 (x11touch_linux.go).
 	touch x11Touch
+
+	// kg — захват клавиатуры (x11_keygrab_linux.go).
+	kg x11KeyGrab
 }
 
 type x11Screen struct {
@@ -562,7 +565,10 @@ func (w *X11Window) RunEventLoop() error {
 	// пришедшая ровно сейчас, не потерялась (см. SetTouchEnabled).
 	w.touch.looping.Store(true)
 	defer w.touch.looping.Store(false)
+	w.kg.looping.Store(true)
+	defer w.kg.looping.Store(false)
 	w.x11SyncTouch()
+	w.x11SyncKeyGrab()
 	for !w.closed.Load() {
 		if !w.readEvent(buf) {
 			if w.closed.Load() {
@@ -582,6 +588,7 @@ func (w *X11Window) RunEventLoop() error {
 		}
 		w.x11SyncWMState()
 		w.x11SyncTouch()
+		w.x11SyncKeyGrab()
 	}
 	return nil
 }
@@ -742,13 +749,13 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	case x11GenericEvent: // XInput 2: касания
 		w.handleGenericEvent(buf)
 
-	case 9: // FocusIn
-		if w.onActivate != nil {
+	case 9: // FocusIn: mode — buf[8]
+		if own := w.x11NoteFocus(true, buf[8]); !own && w.onActivate != nil {
 			w.onActivate(true)
 		}
 
 	case 10: // FocusOut
-		if w.onActivate != nil {
+		if own := w.x11NoteFocus(false, buf[8]); !own && w.onActivate != nil {
 			w.onActivate(false)
 		}
 
@@ -1778,6 +1785,9 @@ func (w *X11Window) StartEventPump() {
 // главного окна (RunEventLoop) при этом не затрагивается — у него своё conn.
 func (w *X11Window) eventPumpLoop() {
 	buf := make([]byte, 32)
+	w.kg.looping.Store(true)
+	defer w.kg.looping.Store(false)
+	w.x11SyncKeyGrab()
 	for !w.closed.Load() {
 		if !w.readEvent(buf) {
 			return
@@ -1790,6 +1800,7 @@ func (w *X11Window) eventPumpLoop() {
 			w.handleX11Event(full)
 		}
 		w.x11SyncWMState()
+		w.x11SyncKeyGrab()
 	}
 }
 

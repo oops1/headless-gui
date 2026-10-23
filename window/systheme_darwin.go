@@ -2,6 +2,8 @@
 
 package window
 
+import "image/color"
+
 // systheme_darwin.go — тема ОС на macOS: пока не реализована.
 //
 // Это заглушка, а не «на macOS темы нет»: тема есть, и узнать её можно —
@@ -25,5 +27,13 @@ func detectSystemTheme() SystemTheme {
 // watchSystemTheme — наблюдения за темой на macOS нет (см. выше); nil означает
 // «платформа наблюдать не умеет».
 func watchSystemTheme(native NativeWindow, emit func(SystemTheme)) (stop func()) {
+	return nil
+}
+
+// detectSystemAccent — на macOS акцентный цвет не читается (см. выше): ok=false.
+func detectSystemAccent() (color.RGBA, bool) { return color.RGBA{}, false }
+
+// watchSystemAccent — наблюдения нет; nil означает «платформа наблюдать не умеет».
+func watchSystemAccent(native NativeWindow, emit func(color.RGBA, bool)) (stop func()) {
 	return nil
 }

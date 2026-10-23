@@ -19,6 +19,7 @@ package window
 // парсер ini-файла в движке ради этого заводить незачем.
 
 import (
+	"image/color"
 	"os"
 	"strings"
 	"sync"
@@ -56,7 +57,17 @@ func detectSystemTheme() SystemTheme {
 // сразу отвечаем Unknown: второй вызов тем же путём не дал бы иного, а
 // таймаут удвоился бы.
 func readPortalColorScheme(c *dbusConn) SystemTheme {
-	args := []any{portalAppearanceNS, portalColorSchemeKey}
+	v, ok := readPortalAppearance(c, portalColorSchemeKey)
+	if !ok {
+		return SystemThemeUnknown
+	}
+	return systemThemeFromPortalValue(v)
+}
+
+// readPortalAppearance читает ключ пространства appearance портала: сначала
+// ReadOne, при UnknownMethod — устаревший Read (см. readPortalColorScheme).
+func readPortalAppearance(c *dbusConn, key string) (any, bool) {
+	args := []any{portalAppearanceNS, key}
 	reply, err := c.callTimeout(portalBusName, portalObjPath, portalSettingsIface,
 		"ReadOne", "ss", args, portalCallTimeout)
 	if err != nil && strings.Contains(err.Error(), "UnknownMethod") {
@@ -64,9 +75,23 @@ func readPortalColorScheme(c *dbusConn) SystemTheme {
 			"Read", "ss", args, portalCallTimeout)
 	}
 	if err != nil || reply == nil || len(reply.Body) == 0 {
-		return SystemThemeUnknown
+		return nil, false
 	}
-	return systemThemeFromPortalValue(reply.Body[0])
+	return reply.Body[0], true
+}
+
+// detectSystemAccent читает accent-color портала (версия портала 1.18+; на
+// более старом ключа нет, и ответ ok=false).
+func detectSystemAccent() (color.RGBA, bool) {
+	c, err := dbusSession()
+	if err != nil {
+		return color.RGBA{}, false
+	}
+	v, ok := readPortalAppearance(c, portalAccentKey)
+	if !ok {
+		return color.RGBA{}, false
+	}
+	return accentFromPortalValue(v)
 }
 
 // portalThemeHub — единственная подписка процесса на сигнал портала с
@@ -82,9 +107,10 @@ type portalThemeHub struct {
 	attachMu sync.Mutex // сериализует подключение к шине; не берётся в обработчике
 	attached bool
 
-	mu   sync.Mutex
-	subs map[int]func(SystemTheme)
-	next int
+	mu      sync.Mutex
+	subs    map[int]func(SystemTheme)
+	accSubs map[int]func(color.RGBA, bool) // подписчики на акцентный цвет
+	next    int
 }
 
 var portalThemes portalThemeHub
@@ -129,6 +155,9 @@ func (h *portalThemeHub) attach(c *dbusConn) bool {
 		if t, ok := systemThemeFromPortalSignal(msg); ok {
 			h.dispatch(t)
 		}
+		if a, ok, matched := accentFromPortalSignal(msg); matched {
+			h.dispatchAccent(a, ok)
+		}
 	})
 	h.attached = true
 	return true
@@ -148,7 +177,47 @@ func (h *portalThemeHub) add(fn func(SystemTheme)) int {
 func (h *portalThemeHub) remove(id int) {
 	h.mu.Lock()
 	delete(h.subs, id)
+	delete(h.accSubs, id)
 	h.mu.Unlock()
+}
+
+func (h *portalThemeHub) addAccent(fn func(color.RGBA, bool)) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.accSubs == nil {
+		h.accSubs = map[int]func(color.RGBA, bool){}
+	}
+	h.next++
+	h.accSubs[h.next] = fn
+	return h.next
+}
+
+// dispatchAccent раздаёт акцентный цвет подписчикам (так же, как dispatch).
+func (h *portalThemeHub) dispatchAccent(c color.RGBA, ok bool) {
+	h.mu.Lock()
+	fns := make([]func(color.RGBA, bool), 0, len(h.accSubs))
+	for _, fn := range h.accSubs {
+		fns = append(fns, fn)
+	}
+	h.mu.Unlock()
+	for _, fn := range fns {
+		fn(c, ok)
+	}
+}
+
+// watchSystemAccent подписывается на сигнал SettingChanged портала для
+// accent-color — на том же правиле шины, что и тема (оно выбирает всё
+// пространство appearance). Без шины или портала возвращает nil.
+func watchSystemAccent(native NativeWindow, emit func(color.RGBA, bool)) (stop func()) {
+	c, err := dbusSession()
+	if err != nil {
+		return nil
+	}
+	if !portalThemes.attach(c) {
+		return nil
+	}
+	id := portalThemes.addAccent(emit)
+	return func() { portalThemes.remove(id) }
 }
 
 // dispatch раздаёт тему подписчикам из читающей горутины D-Bus.

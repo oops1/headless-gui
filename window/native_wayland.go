@@ -413,6 +413,14 @@ type WaylandWindow struct {
 
 	// drag — перетаскивание, начатое самим окном (BeginDragFiles).
 	drag wlDragSource
+
+	// Захват клавиатуры (wayland_keygrab_linux.go): имя глобала
+	// zwp_keyboard_shortcuts_inhibit_manager_v1 и состояние запроса.
+	gShortcutsInhibit uint32
+	kgrab             wlKeyGrab
+
+	// Слежение за конфигурацией мониторов (wayland_monitor_change_linux.go).
+	monWatch wlMonitorWatch
 }
 
 // waylandSocketPath возвращает путь к сокету композитора или "".
@@ -791,6 +799,10 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 	if w.activationEvent(obj, opcode, b) {
 		return
 	}
+	// active/inactive нашего запроса на захват сочетаний клавиш.
+	if w.keyGrabEvent(obj, opcode) {
+		return
+	}
 
 	switch {
 	case obj == wlDisplayID && opcode == wlDisplayEvError:
@@ -828,6 +840,8 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 				w.gOutputs = map[uint32]uint32{}
 			}
 			w.gOutputs[name] = version
+			// Монитор подключили, пока окно работает.
+			w.outputGlobalAdded(name)
 		case "zxdg_output_manager_v1":
 			w.gXdgOutMgr = name
 			w.gXdgOutVer = version
@@ -845,11 +859,19 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			// Необязательное расширение: без него окно на передний план не
 			// вывести (Activate вернёт false).
 			w.gActivation = name
+		case "zwp_keyboard_shortcuts_inhibit_manager_v1":
+			// Необязательное расширение: без него захват клавиатуры
+			// (SetKeyboardGrab) невозможен.
+			w.gShortcutsInhibit = name
 		case "xdg_toplevel_icon_manager_v1":
 			// Необязательное расширение: без него значок окна не поставить
 			// (SetIcon вернёт ErrIconUnsupported).
 			w.gToplevelIcon = name
 		}
+
+	case obj == w.registryID && opcode == wlRegistryEvGlobalRemove:
+		// Глобал исчез; нас интересуют мониторы (wayland_monitor_change_linux.go).
+		w.registryGlobalRemove(b)
 
 	case obj == w.wmBaseID && opcode == xdgWmBaseEvPing:
 		serial := binary.LittleEndian.Uint32(b[0:4])
@@ -1589,10 +1611,34 @@ func (w *WaylandWindow) SetTitle(title string) {
 	}
 }
 
-func (w *WaylandWindow) SetSize(width, height int) { w.width, w.height = width, height }
-func (w *WaylandWindow) GetSize() (int, int)       { return w.width, w.height }
-func (w *WaylandWindow) SetPosition(x, y int)      {} // Wayland: позицией владеет композитор
-func (w *WaylandWindow) GetPosition() (int, int)   { return 0, 0 }
+// SetSize запоминает новый размер окна (пиксели буфера). У окна с запретом
+// ресайза размер зафиксирован парой set_min_size == set_max_size, и просто
+// выставить другой буфер композитору нельзя: фиксация переносится на новый
+// размер, и он ответит configure с ним же. Растяжимое, развёрнутое и
+// полноэкранное окно размер выбирает не клиент: для них запоминается только
+// размер кадра, а окном по-прежнему распоряжается компоновщик.
+func (w *WaylandWindow) SetSize(width, height int) {
+	w.mu.Lock()
+	w.width, w.height = width, height
+	w.mu.Unlock()
+	if w.toplevelID == 0 || w.resizable.Load() || w.maximized.Load() || w.fullscreen.Load() {
+		return
+	}
+	w.applySizeLimits(false)
+}
+
+func (w *WaylandWindow) GetSize() (int, int) { return w.width, w.height }
+
+// SetPosition на Wayland не делает ничего и сделать не может: клиент не знает
+// положения своего окна на экране и не вправе его задавать, протокол xdg-shell
+// координат окна верхнего уровня не содержит вовсе (окном распоряжается
+// компоновщик). Всё, что допускает протокол, — попросить компоновщика
+// потащить окно за указателем (BeginMove, xdg_toplevel.move) по нажатию
+// кнопки мыши.
+func (w *WaylandWindow) SetPosition(x, y int) {}
+
+// GetPosition на Wayland всегда (0, 0): положение окна клиенту неизвестно.
+func (w *WaylandWindow) GetPosition() (int, int) { return 0, 0 }
 
 // SetCornerRadius задаёт скругление углов окна (логические точки). Со
 // скруглением буфер окна — ARGB с прозрачными углами; пул пересоздаётся на

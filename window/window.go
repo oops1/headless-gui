@@ -433,6 +433,13 @@ type Window struct {
 	// (см. SetOnSystemThemeChanged в systheme.go).
 	sysTheme systemThemeState
 
+	// kg — просьба о захвате клавиатуры до Run (см. SetKeyboardGrab в keygrab.go).
+	kg keyGrabState
+
+	// mon — подписка приложения на смену конфигурации мониторов
+	// (см. SetOnMonitorsChanged в monitor_change.go).
+	mon monitorWatchState
+
 	// touchWant — явное решение приложения о касаниях (SetTouchEnabled, touch.go);
 	// nil — решает корень окна: он принимает касания, если сам TouchHandler.
 	touchWant *bool
@@ -588,6 +595,8 @@ func (win *Window) Run() error {
 // tearDown освобождает то, что подняла bringUp и что переживает закрытие
 // окна ОС.
 func (win *Window) tearDown() {
+	win.releaseKeyboardGrab()
+	win.stopMonitorWatch()
 	win.stopSystemThemeWatch()
 	win.stopAccessibility()
 	// Сносим все оторванные окна панелей: останавливаем их движки (реестр
@@ -798,6 +807,12 @@ func (win *Window) bringUp() error {
 
 	// Смена темы ОС: подписку поднимаем, если приложение задало колбэк до Run.
 	win.syncSystemThemeWatch()
+
+	// Смена конфигурации мониторов: подписку поднимаем, если колбэк задан до Run.
+	win.syncMonitorWatch()
+
+	// Захват клавиатуры, заказанный до Run.
+	win.setupKeyboardGrab()
 
 	// Синхронизация локали с раскладкой клавиатуры ОС (Windows/Linux).
 	win.setupLocaleSync()
