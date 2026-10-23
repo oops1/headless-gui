@@ -41,6 +41,7 @@ var (
 const (
 	whKeyboardLL = 13 // WH_KEYBOARD_LL
 
+	llkhfExtended = 0x01 // LLKHF_EXTENDED: расширенная клавиша (E0-префикс)
 	llkhfAltdown  = 0x20 // LLKHF_ALTDOWN: Alt зажат
 	llkhfInjected = 0x10 // LLKHF_INJECTED: событие синтетическое
 
@@ -193,13 +194,21 @@ func (h *kbGrabHub) release(w *Win32Window, notify bool) {
 	h.mu.Unlock()
 	// Колбэки приложения — вне замка: из них можно снова звать SetKeyboardGrab.
 	for _, vk := range held {
-		w.deliverGrabbedKey(vk, true, false)
+		scan, ext := vkScanCode(vk)
+		w.deliverGrabbedKey(vk, scan, ext, true, false)
 	}
 }
 
 // deliverGrabbedKey отдаёт перехваченную клавишу окну тем же путём, что и
-// обычную из wndProc.
-func (w *Win32Window) deliverGrabbedKey(vk int, up, repeat bool) {
+// обычную из wndProc — со скан-кодом, если окно его принимает (rawKeySource).
+// Без этого как раз перехваченные Win и Alt+Tab приходили бы без скан-кода
+// (а RDP передаёт серверу именно его) и мимо учёта зажатых клавиш, который
+// отпускает их при потере окном фокуса.
+func (w *Win32Window) deliverGrabbedKey(vk int, scan uint16, ext, up, repeat bool) {
+	if w.onRawKey != nil {
+		w.onRawKey(rawKey{VK: vk, Scan: scan, Extended: ext, Pressed: !up, Repeat: repeat && !up})
+		return
+	}
 	switch {
 	case up:
 		if w.onKeyUp != nil {
@@ -266,7 +275,16 @@ func (h *kbGrabHub) handle(nCode, wparam, lparam uintptr) bool {
 		return false
 	}
 	if act.Deliver && target != nil {
-		target.deliverGrabbedKey(int(kb.VkCode), up, act.Repeat)
+		target.deliverGrabbedKey(int(kb.VkCode), uint16(kb.ScanCode), kb.Flags&llkhfExtended != 0, up, act.Repeat)
 	}
 	return true
+}
+
+var procMapVirtualKeyW = user32.NewProc("MapVirtualKeyW")
+
+// vkScanCode — скан-код клавиши по виртуальному коду (MAPVK_VK_TO_VSC_EX):
+// старший байт 0xE0 означает расширенную клавишу.
+func vkScanCode(vk int) (scan uint16, ext bool) {
+	r, _, _ := procMapVirtualKeyW.Call(uintptr(vk), 4) // MAPVK_VK_TO_VSC_EX
+	return uint16(r & 0xFF), r&0xFF00 == 0xE000
 }

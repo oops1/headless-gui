@@ -226,3 +226,31 @@ func TestWin32KeyboardGrab_ActiveRequiresForeground(t *testing.T) {
 		t.Error("KeyboardGrabActive false у активного окна с захватом")
 	}
 }
+
+// Окно, принимающее клавиши со скан-кодом (rawKeySource), получает
+// перехваченные Win и Alt+Tab тоже со скан-кодом: RDP передаёт серверу именно
+// его, и без этого как раз системные сочетания уходили бы без скан-кода и мимо
+// учёта зажатых клавиш. Отпускание зажатой при снятии захвата — со скан-кодом
+// из MapVirtualKey.
+func TestWin32KeyboardGrab_RawKeysCarryScanCode(t *testing.T) {
+	w := grabTestWindow(t)
+	if !w.SetKeyboardGrab(true) {
+		t.Skip("хук не ставится")
+	}
+	grabTestFG(t, uintptr(w.hwnd))
+	var got []rawKey
+	w.onRawKey = func(k rawKey) { got = append(got, k) }
+	w.onKeyDown = func(int) { t.Error("перехваченная клавиша пошла мимо rawKey") }
+
+	kb := kbdLLHookStruct{VkCode: VK_LWIN, ScanCode: 0x5B, Flags: llkhfExtended}
+	if !kbGrab.handle(0, wmKeydown, uintptr(unsafe.Pointer(&kb))) {
+		t.Fatal("нажатие Win не перехвачено")
+	}
+	if len(got) != 1 || got[0].VK != VK_LWIN || got[0].Scan != 0x5B || !got[0].Extended || !got[0].Pressed {
+		t.Fatalf("приёмник получил %+v, ждал Win со скан-кодом 0x5B, extended", got)
+	}
+	w.SetKeyboardGrab(false) // Win ещё зажата — отпускается со скан-кодом
+	if len(got) != 2 || got[1].Pressed || got[1].Scan == 0 {
+		t.Fatalf("отпускание при снятии захвата: %+v", got)
+	}
+}
