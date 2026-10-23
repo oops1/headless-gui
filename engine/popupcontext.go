@@ -158,7 +158,15 @@ var (
 
 	_ widget.ImageRectDrawer       = (*translatingContext)(nil)
 	_ widget.ImageCacheInvalidator = (*translatingContext)(nil)
+	_ widget.PixelBlitter          = (*translatingContext)(nil)
 )
+
+// BlitPixels кладёт часть чужого буфера в буфер попапа пиксель в пиксель
+// (widget.PixelBlitter): без пробрасывания внешняя поверхность внутри попапа
+// шла бы запасным путём через DrawImage.
+func (t *translatingContext) BlitPixels(src *image.RGBA, sr image.Rectangle, x, y int, opaque bool) {
+	t.inner.BlitPixels(src, sr, x-t.dx, y-t.dy, opaque)
+}
 
 // DrawImageRect рисует часть изображения с выбором фильтра в буфер попапа
 // (widget.ImageRectDrawer): без пробрасывания картинка внутри попапа шла бы

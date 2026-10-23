@@ -8779,6 +8779,106 @@ tints an icon only when all its opaque pixels share one colour (a glyph,
 anti-aliased edges allowed); colour icons stay as they are, like in Windows
 2000. `MenuItem.IconTint` still tints any icon.
 
+---
+
+## v3.39: showing someone else's buffer without a copy — `widget.ExternalSurface` (E7)
+
+Requested by the RDP client: a session at 3840x2160 is a 33 MB buffer that changes
+in pieces. `ImageWidget` / `DrawImage` copy it into engine tiles and compare it with
+the previous frame; `ExternalSurface` does not own the buffer and does not keep a
+copy. The application hands over its `*image.RGBA`, says which parts changed, and the
+widget copies into the canvas only what the canvas repaints in this frame, straight
+from the application's memory. Nothing is removed or changed for existing callers.
+
+```go
+surf := widget.NewExternalSurface()
+surf.SetBounds(image.Rect(0, 0, 1920, 1080))     // logical bounds, like any widget
+surf.SetBuffer(session, true)                    // true: every pixel has A == 255
+root.AddChild(surf)
+
+// A decoder goroutine: write under the lock, announce after it.
+surf.Update(func(buf *image.RGBA) []image.Rectangle {
+    copy(buf.Pix[...], decoded)                  // the write itself
+    return []image.Rectangle{updated}            // areas, in buffer coordinates
+})
+```
+
+- **Pixels, HiDPI.** The buffer is in *physical* pixels: one buffer pixel is one
+  physical canvas pixel, no scaling at any scale (at scale 2 a 200x100 buffer fills
+  logical 100x50). Its top-left pixel (`buf.Rect.Min`) sits at the physical position of
+  the widget's top-left corner (edge rounding as for all canvas operations). A buffer
+  larger than the widget is cropped, a smaller one leaves the rest to
+  `SetBackground(color)` (black by default; keep it opaque). No buffer or an empty
+  one - the whole widget is the background.
+- **Channel order.** Bytes are `RGBA` as in any `*image.RGBA`. A buffer holding `BGRX`
+  bytes would show with red and blue swapped - convert in the application.
+- **Damage -> engine damage.** `InvalidateRects(rects)` / `InvalidateRect(r)` (areas of
+  the buffer, `buf.Rect` coordinates) convert to logical frame coordinates (outward
+  rounding at fractional scales, the scroll offset of a `ScrollView` is applied) and call
+  the engine's `InvalidateRect` per area. The engine diffs and ships only the tiles
+  those areas touch, not the whole widget. Areas outside the buffer or the widget are
+  dropped, empty ones ignored. The scale used is the one the last `Draw` saw (1 before
+  the first frame); a scale change repaints the frame in full anyway. `Base.Invalidate()`
+  stays: it invalidates the whole widget.
+- **What `Draw` copies.** The clip of the frame intersected with the widget, not "the
+  areas the application announced". The engine erases and redraws the union of ALL damage
+  of a frame (also foreign: a menu closed over the surface, a tooltip vanished), and the
+  surface has to restore its pixels there although the application never touched them.
+  With only the surface damaged, the clip equals the union of its areas, so exactly what
+  was announced is copied. The union is ONE bounding rectangle: far-apart areas cost the
+  bounding box (diff still goes per area) - merge them in the application.
+- **Synchronisation contract.** The buffer is read only inside `Draw`, on the engine's
+  goroutine, under the widget's lock. The application writes it under the same lock:
+  `Lock()` / `Unlock()` (the surface is a `sync.Locker`) or `Update(fn)`, which locks,
+  runs `fn`, unlocks and then announces the returned areas. Write first, announce after
+  (and outside the lock): announcing before the write lets a frame start in between and
+  the update is lost. Keep the lock short (a piece of the buffer: tenths of a
+  millisecond; a full 4K copy: several ms). The lock is not re-entrant: no `SetBuffer`,
+  `Swap`, `Update`, `Buffer` inside it, and nothing that waits for the engine's frame
+  lock (screenshots, `SetScale`, `SetResolution`).
+- **Double buffering.** `Swap(next, opaque, damage) (prev)` replaces the buffer and
+  returns the previous one; it waits for a running `Draw`, so after it returns the engine
+  never reads `prev` again and the application may write it without the lock. `next` must
+  hold the whole frame; `damage` is what changed against what is on screen (`nil`, or a
+  different buffer size / `opaque`, means everything). `SetBuffer(img, opaque)` is
+  `Swap` without the result. `Buffer()` returns the current buffer (read it under the
+  lock only).
+- **Opaque.** `opaque == true` copies rows (`Src`, bands over `GOMAXPROCS` for areas of
+  256K pixels and more, the R/B swap for `FormatBGRX`); `false` composites with `Over`.
+  A broken promise makes translucent places overwrite the background. An opaque buffer
+  with an opaque background makes the surface declare its bounds in `OpaqueRegion`, so the
+  traversal skips what lies wholly under it.
+- **Context.** `widget.PixelBlitter` (`BlitPixels(src, sr, x, y, opaque)`) is the optional
+  context capability behind it, like `ImageRectDrawer`: copies part `sr` of a buffer pixel
+  for pixel, the buffer pixel `src.Rect.Min` landing at the physical position of the
+  logical point `(x, y)`, under the clip (also a rounded one), no cache, no scaling.
+  `engine.Canvas`, the popup context and `OffsetContext` (scrolling) implement it; the
+  helper `widget.BlitPixels(ctx, ...)` falls back to `DrawImage` / `DrawImageScaled` for a
+  context without it. Usable by your own widgets too.
+
+Numbers (3840x2160, `go test -bench ExternalSurface4K ./engine/`, a frame of the whole
+engine including diff and tiles; Intel Core Ultra 7 265K, Windows 11):
+
+| Scenario | ms/frame | B/op |
+|---|---|---|
+| `ExternalSurface`, 10% of the area changes (the application also writes 3.3 MB) | 0.95 | 0.11 MB |
+| before: the application copies the 10% into an `ImageWidget`'s buffer, `OpaqueImage` + `InvalidateRect` | 1.2-1.3 | 0.10-0.19 MB |
+| `ExternalSurface`, 10% as 4 far-apart corners (bounding box = the whole buffer) | 4.6 | 0.4 MB |
+| `ExternalSurface`, `Swap` of the whole buffer | 5.5 | 1.8-2.7 MB |
+| `DrawImage(OpaqueImage)` of the whole buffer (v3.38, `Pan4K_OpaqueRecycle`) | 5.5 | 2.4-2.9 MB |
+
+Besides time, the surface needs no second 33 MB buffer (`ImageWidget` keeps its own
+copy that the application has to refill).
+
+Tests: `engine/externalsurface_test.go` (only the announced areas' tiles change in a
+frame, exact pixels against the buffer; offset bounds and a buffer with non-zero `Min`;
+areas outside; empty / nil / zero-size buffer; buffer smaller and larger than the widget,
+`Swap`; scale 2 and 1.25; foreign damage over the surface; `OpaqueRegion`; `Src` vs
+`Over`; a writer goroutine plus engine frames and a `Swap` goroutine under `-race`;
+`Canvas.BlitPixels` with clip, scale 2, `BGRX`; popup and scroll contexts),
+`widget/pixelblit_test.go` (the fallback of `widget.BlitPixels`), benchmarks in
+`engine/externalsurface_bench_test.go`.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

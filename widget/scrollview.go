@@ -417,6 +417,7 @@ var (
 
 	_ ImageRectDrawer       = (*svOffsetCtx)(nil)
 	_ ImageCacheInvalidator = (*svOffsetCtx)(nil)
+	_ PixelBlitter          = (*svOffsetCtx)(nil)
 	_ AAShapes          = (*svOffsetCtxAA)(nil)
 )
 
@@ -482,6 +483,13 @@ func (o *svOffsetCtx) DrawImageScaled(src image.Image, x, y, w, h int) {
 // внутреннему контексту; без поддержки в нём — запасной путь помощника.
 func (o *svOffsetCtx) DrawImageRect(src image.Image, sr, dr image.Rectangle, f ImageFilter) {
 	DrawImageRect(o.inner, src, sr, dr.Sub(image.Pt(o.dx, o.dy)), f)
+}
+
+// BlitPixels пробрасывает копирование чужого буфера пиксель в пиксель
+// (PixelBlitter) внутреннему контексту со сдвигом; без поддержки в нём —
+// запасной путь помощника.
+func (o *svOffsetCtx) BlitPixels(src *image.RGBA, sr image.Rectangle, x, y int, opaque bool) {
+	BlitPixels(o.inner, src, sr, x-o.dx, y-o.dy, opaque)
 }
 
 // InvalidateImageCache пробрасывает сброс кэша масштабирования внутреннему
