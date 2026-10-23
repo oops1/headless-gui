@@ -200,6 +200,19 @@ func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
 
 	w := e.focus.get()
 	if w == nil {
+		// Фокуса нет — клавиша корню (или верхней модалке), если он её ждёт
+		// (widget.UnfocusedKeyHandler). Без него — как раньше, никому.
+		var host widget.Widget
+		if m := e.topModal(); m != nil {
+			host = m
+		} else {
+			e.mu.RLock()
+			host = e.root
+			e.mu.RUnlock()
+		}
+		if uk, ok := host.(widget.UnfocusedKeyHandler); ok {
+			uk.OnUnfocusedKey(ev)
+		}
 		return
 	}
 	if kh, ok := w.(widget.KeyHandler); ok {
