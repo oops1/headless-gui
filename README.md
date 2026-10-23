@@ -100,7 +100,7 @@ Run `go test ./engine/ -bench .` to reproduce.
 - **File drag & drop from the OS** — drop files from Explorer/Finder into the window (`SetOnFilesDropped` / `FileDropTarget`); Win32 + X11 + Wayland; enter/over/leave events for drop zones and `BeginDragFiles` / `BeginDragFilesImage` (with a drag icon) to drag files out of the window (v3.34)
 - **Touch and gestures** — opt-in `Window.SetTouchEnabled`; `widget.TouchEvent` / `TouchHandler` with capture by finger ID, `Engine.SendTouch`, and a platform-free `GestureRecognizer` (Tap, LongPress, Pan, Pinch, Swipe); pressure and contact area in `TouchEvent`; unclaimed long press ⇒ right click; Win32 `WM_POINTER`, Wayland `wl_touch`, X11 XInput 2.2 (can be enabled after the window is created)
 - **Color emoji** — COLR/CBDT/sbix color glyphs render automatically in the text path (COLRv1 gradients averaged; regional-flag ligatures a known gap)
-- **Tooltips & cursors** — `ToolTip` on every widget; per-widget mouse cursors; hidden/grab/crosshair/busy shapes and an application-wide `SetCursorOverride` (also over popup menus); side mouse buttons X1/X2
+- **Tooltips & cursors** — `ToolTip` on every widget; per-widget mouse cursors; hidden/grab/crosshair/busy shapes and an application-wide `SetCursorOverride` (also over popup menus), a cursor from an image (`SetCursorImage`, up to 384×384 with alpha) and pointer lock with relative mouse motion (`Window.SetPointerLock`); side mouse buttons X1/X2
 - **Free bundled fonts** — Roboto (default), Open Sans, Inter + system glyph fallback chain (no tofu)
 
 ## Widget List

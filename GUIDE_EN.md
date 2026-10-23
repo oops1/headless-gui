@@ -2665,6 +2665,18 @@ when the filter/sort/group changes.
   (a slide show hides the cursor on a timer; dragging shows the closed hand). The
   shape also applies over menus and lists moved into their own OS windows
   (Win32, X11, Wayland).
+- Cursor from an image (a remote-desktop pointer, up to 384×384 with alpha):
+  `eng.SetCursorImage(img *image.NRGBA, hotX, hotY)`; reset with `eng.ClearCursorOverride()`
+  or `SetCursorImage(nil, 0, 0)`. It applies above widgets and over popup windows; the
+  same image set again is taken from the window's cache by hash (16 entries, system
+  objects are freed).
+- Pointer lock and relative mouse (games, CAD, RDP):
+  `win.SetOnRelativeMotion(func(m widget.RelativeMotion){ ... })` and
+  `win.SetPointerLock(true)` — the pointer is hidden and cannot leave the window, the
+  application gets `m.DX, m.DY` in device units without OS acceleration. `false` — a lock
+  is impossible (macOS, Wayland without `zwp_pointer_constraints_v1` /
+  `zwp_relative_pointer_manager_v1`). The lock is released when focus is lost and comes
+  back with it (`win.SetOnPointerLockChanged`).
 - Keyboard-layout indicator in windows/dialogs — `ShowLocaleIndicator` property
   with a switch context menu.
 

@@ -263,6 +263,13 @@ type surface struct {
 	// горутина движка.
 	cursor    int
 	cursorSet bool
+	// img/imgSet — ключ курсора-картинки (Engine.SetCursorImage), последним
+	// отданный окну ОС. Только горутина движка.
+	img    [32]byte
+	imgSet bool
+
+	// lock — захват указателя и относительное движение (pointerlock.go).
+	lock pointerLockState
 
 	// ptrX, ptrY — последнее положение мыши в координатах контента; ptrKnown —
 	// была ли мышь в окне. Нужны, чтобы пересчитать курсор без движения мыши
@@ -1131,11 +1138,18 @@ func (win *Window) handleFitResize(newW, newH int) {
 // уже отпустить.
 func (s *surface) setupInput() {
 	s.setupCursorOverride()
+	s.hookPointerLock()
 
 	// ── Mouse move ───────────────────────────────────────────────────────────
 	// Движения склеиваются: пока предыдущее стоит в очереди, новое лишь
-	// обновляет его координаты (input_queue.go).
+	// обновляет его координаты (input_queue.go). Пока указатель захвачен
+	// (SetPointerLock), он стоит на месте и спрятан: настоящее движение идёт
+	// сдвигами, а абсолютные координаты ОС — лишь побочный эффект возврата
+	// указателя в центр.
 	s.native.SetOnMouseMove(func(x, y int) {
+		if s.lock.active.Load() {
+			return
+		}
 		s.in.move(s.onEngine, x, y, s.deliverMove)
 	})
 

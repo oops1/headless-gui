@@ -393,6 +393,16 @@ type Win32Window struct {
 	cursorCache  map[int]uintptr // кэш загруженных IDC-курсоров
 	cursorHidden bool            // курсор спрятан (CursorNone): WM_SETCURSOR ставит SetCursor(NULL)
 
+	// imgCursors — курсоры из картинок (Engine.SetCursorImage), по ключу
+	// содержимого, не более cursorCacheSize; imgCreated — сколько курсоров
+	// построено за жизнь окна (в тестах проверяется, что кэш работает).
+	// Только поток окна. См. cursorimage_windows.go.
+	imgCursors *cursorLRU[uintptr]
+	imgCreated int
+
+	// lock — захват указателя (SetPointerLock), см. pointerlock_windows.go.
+	lock win32PointerLock
+
 	// Уход указателя: запросы TrackMouseEvent на клиентскую и нерабочую
 	// область (pointerleave.go, mouse_windows.go). trackMouse — подмена
 	// системного вызова в тестах.
@@ -1318,6 +1328,8 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		win32Mu.Unlock()
 		dropUICalls(hwnd) // WM_APP этому окну уже не придёт
 		w.destroyArtCursors()
+		w.destroyImageCursors()
+		w.lock.release(w) // не оставить курсор зажатым и сырой ввод — на мёртвое окно
 		w.mu.Lock()
 		w.frameDead = true
 		w.freeFrameBuf() // память VirtualAlloc сборщик мусора не вернёт
@@ -1370,6 +1382,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 				// сразу применяем размер к движку.
 				w.onResize(newW, newH)
 			}
+			w.lock.refit(w) // зажим указателя — в центр нового размера
 		}
 		return 0
 
@@ -1409,11 +1422,23 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		if !active && lparam != 0 && lookupWin32(lparam) != nil {
 			return 0
 		}
+		w.lock.onActivate(w, active) // захват указателя: снять при потере фокуса, вернуть при получении
 		if w.onActivate != nil {
 			w.onActivate(active)
 		}
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
 		return ret
+
+	case wmInput:
+		// Сырой ввод мыши (захват указателя). DefWindowProc обязателен: по
+		// документации система освобождает данные сообщения в нём.
+		w.lock.handleInput(lparam)
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)
+		return ret
+
+	case wmMove:
+		w.lock.refit(w) // зажим указателя следует за окном
+		break           // → DefWindowProc
 
 	case wmSettingchange:
 		// Сообщение приходит по любому поводу; нужное нам различает строка

@@ -183,6 +183,10 @@ type X11Window struct {
 	clip *x11Clipboard
 	// cursors — формы курсора окна (x11_cursor_linux.go).
 	cursors x11Cursors
+	// curImg — курсоры-картинки (x11cursorimage_linux.go); под cursors.mu.
+	curImg x11CursorImages
+	// plock — захват указателя (x11pointerlock_linux.go).
+	plock x11PtrLock
 	// resizable — разрешено ли пользователю менять размер (SetResizable).
 	resizable atomic.Bool
 	// rootX/rootY — последняя известная позиция указателя в координатах
@@ -567,8 +571,15 @@ func (w *X11Window) RunEventLoop() error {
 	defer w.touch.looping.Store(false)
 	w.kg.looping.Store(true)
 	defer w.kg.looping.Store(false)
+	// То же для курсора-картинки и захвата указателя: их просьбы исполняет цикл.
+	w.curImg.looping.Store(true)
+	defer w.curImg.looping.Store(false)
+	w.plock.looping.Store(true)
+	defer w.plock.looping.Store(false)
 	w.x11SyncTouch()
 	w.x11SyncKeyGrab()
+	w.x11SyncCursorImage()
+	w.x11SyncPointerLock()
 	for !w.closed.Load() {
 		if !w.readEvent(buf) {
 			if w.closed.Load() {
@@ -589,6 +600,8 @@ func (w *X11Window) RunEventLoop() error {
 		w.x11SyncWMState()
 		w.x11SyncTouch()
 		w.x11SyncKeyGrab()
+		w.x11SyncCursorImage()
+		w.x11SyncPointerLock()
 	}
 	return nil
 }
@@ -737,6 +750,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		}
 		x := int(int16(binary.LittleEndian.Uint16(buf[24:26])))
 		y := int(int16(binary.LittleEndian.Uint16(buf[26:28])))
+		if w.x11LockMotion(x, y) {
+			return // захват указателя: движение идёт сдвигами
+		}
 		if w.onMouseMove != nil {
 			w.onMouseMove(x, y)
 		}
@@ -750,11 +766,20 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		w.handleGenericEvent(buf)
 
 	case 9: // FocusIn: mode — buf[8]
+		// Захват указателя следует только за настоящей сменой фокуса: FocusIn/
+		// FocusOut с режимом Grab/Ungrab порождает сам XGrabKeyboard, и без этой
+		// проверки включение захвата клавиатуры тут же снимало бы захват мыши.
+		if !x11FocusByGrab(buf[8]) {
+			w.x11NotePointerFocus(true)
+		}
 		if own := w.x11NoteFocus(true, buf[8]); !own && w.onActivate != nil {
 			w.onActivate(true)
 		}
 
 	case 10: // FocusOut
+		if !x11FocusByGrab(buf[8]) {
+			w.x11NotePointerFocus(false)
+		}
 		if own := w.x11NoteFocus(false, buf[8]); !own && w.onActivate != nil {
 			w.onActivate(false)
 		}
@@ -1788,6 +1813,11 @@ func (w *X11Window) eventPumpLoop() {
 	w.kg.looping.Store(true)
 	defer w.kg.looping.Store(false)
 	w.x11SyncKeyGrab()
+	// Вторичное окно (попап) тоже показывает курсор-картинку: просьбу исполняет
+	// этот насос.
+	w.curImg.looping.Store(true)
+	defer w.curImg.looping.Store(false)
+	w.x11SyncCursorImage()
 	for !w.closed.Load() {
 		if !w.readEvent(buf) {
 			return
@@ -1801,6 +1831,7 @@ func (w *X11Window) eventPumpLoop() {
 		}
 		w.x11SyncWMState()
 		w.x11SyncKeyGrab()
+		w.x11SyncCursorImage()
 	}
 }
 

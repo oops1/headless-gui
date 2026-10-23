@@ -53,6 +53,9 @@ type popupHost struct {
 	// получили окна-попапы (cursorOverrideSync). Под mu.
 	ovrCursor widget.Cursor
 	ovrSet    bool
+	// ovrImg — курсор-картинка движка (Engine.SetCursorImage), как её получили
+	// окна-попапы. Под mu.
+	ovrImg *widget.CursorImage
 }
 
 // cursorOverrideSource — движок знает принудительный курсор (реализует
@@ -244,11 +247,17 @@ func (h *popupHost) createPopup(id uintptr) {
 	}
 	hp.native = native
 	latest := hp.img // мог обновиться, пока окно поднималось
-	ovr, ovrSet := h.ovrCursor, h.ovrSet
+	ovr, ovrSet, ovrImg := h.ovrCursor, h.ovrSet, h.ovrImg
 	h.mu.Unlock()
 	blitPopup(native, latest)
 	// Принудительный курсор, заданный до открытия попапа (или пока он
 	// поднимался), действует и над ним. Мы на потоке окна.
+	if ovrImg != nil {
+		if ic, ok := native.(cursorImageSetter); ok {
+			ic.SetCursorImage(ovrImg)
+			return
+		}
+	}
 	if ovrSet {
 		if sc, ok := native.(popupCursorSetter); ok {
 			sc.SetCursor(int(ovr))
@@ -269,13 +278,14 @@ func (h *popupHost) syncCursorOverride() {
 		return
 	}
 	c, set := src.CursorOverride()
+	img := cursorImageOf(h.eng)
 
 	h.mu.Lock()
-	if h.ovrSet == set && (!set || h.ovrCursor == c) {
+	if h.ovrSet == set && (!set || h.ovrCursor == c) && sameCursorImage(h.ovrImg, img) {
 		h.mu.Unlock()
 		return // ничего не изменилось
 	}
-	h.ovrCursor, h.ovrSet = c, set
+	h.ovrCursor, h.ovrSet, h.ovrImg = c, set, img
 	natives := make([]NativeWindow, 0, len(h.windows))
 	for _, hp := range h.windows {
 		if hp.native != nil {
@@ -289,6 +299,14 @@ func (h *popupHost) syncCursorOverride() {
 		shape = int(c)
 	}
 	for _, n := range natives {
+		if img != nil {
+			// Курсор-картинка: тот же указатель, что над носителем. Окно без
+			// поддержки картинок показывает стрелку.
+			if ic, ok := n.(cursorImageSetter); ok {
+				h.invoker.InvokeOnUIThread(func() { ic.SetCursorImage(img) })
+				continue
+			}
+		}
 		sc, ok := n.(popupCursorSetter)
 		if !ok {
 			continue

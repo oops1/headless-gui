@@ -2650,6 +2650,17 @@ view.Groups()   // []CollectionViewGroup{Name, Items}
   (слайд-шоу прячет курсор по таймеру бездействия; перетаскивание показывает
   «сжатую руку»). Форма действует и над меню и списками, вынесенными в
   отдельные окна ОС (Win32, X11, Wayland).
+- Курсор из картинки (указатель удалённого рабочего стола, до 384×384 с альфой):
+  `eng.SetCursorImage(img *image.NRGBA, hotX, hotY)`; сброс — `eng.ClearCursorOverride()`
+  или `SetCursorImage(nil, 0, 0)`. Действует поверх виджетов и над окнами-попапами; та же
+  картинка повторно берётся из кэша окна по хешу (16 записей, системные объекты
+  освобождаются).
+- Захват указателя и относительная мышь (игры, CAD, RDP):
+  `win.SetOnRelativeMotion(func(m widget.RelativeMotion){ ... })` и
+  `win.SetPointerLock(true)` — указатель прячется и не выходит из окна, приходят сдвиги
+  `m.DX, m.DY` в единицах устройства без ускорения ОС. `false` — захват невозможен
+  (macOS, Wayland без `zwp_pointer_constraints_v1`/`zwp_relative_pointer_manager_v1`).
+  Захват снимается при потере фокуса и возвращается с ним (`win.SetOnPointerLockChanged`).
 - Индикатор раскладки в окнах/диалогах — свойство `ShowLocaleIndicator`,
   контекстное меню переключения.
 

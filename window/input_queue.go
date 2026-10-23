@@ -86,6 +86,21 @@ type pointerLeaver interface {
 // syncCursor отдаёт окну ОС форму курсора для точки (x, y) контента — только
 // если она изменилась. Горутина движка.
 func (s *surface) syncCursor(x, y int) {
+	// Курсор-картинка (Engine.SetCursorImage) сильнее любой формы и от точки
+	// не зависит; отдаётся ОС только при смене (по ключу содержимого).
+	if ci := cursorImageOf(s.eng); ci != nil {
+		if is, ok := s.native.(cursorImageSetter); ok {
+			if !s.imgSet || s.img != ci.Key {
+				s.img, s.imgSet = ci.Key, true
+				s.cursorSet = false // форма после картинки отдаётся заново
+				s.onNative(func() { is.SetCursorImage(ci) })
+			}
+			return
+		}
+	}
+	// Картинку сняли. Форма, отданная до неё, ОС уже не показана; «следующая
+	// форма дойдёт до ОС» обеспечил cursorSet=false при показе картинки.
+	s.imgSet = false
 	sc, ok := s.native.(interface{ SetCursor(c int) })
 	if !ok {
 		return

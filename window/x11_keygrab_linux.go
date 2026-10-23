@@ -29,8 +29,8 @@ import (
 const (
 	x11OpGrabKeyboard   = 31
 	x11OpUngrabKeyboard = 32
-
-	x11GrabSuccess = 0
+	// x11GrabSuccess (статус ответа GrabKeyboard) — общий с захватом
+	// указателя, см. x11pointerlock.go.
 
 	// Поле mode событий FocusIn/FocusOut. Захват, который берём мы сами,
 	// порождает пару событий с режимом Grab/Ungrab — это не смена фокуса
@@ -155,4 +155,10 @@ func (w *X11Window) x11SyncKeyGrab() {
 		w.x11Send(x11UngrabKeyboardRequest())
 		w.kg.held.Store(false)
 	}
+}
+
+// x11FocusByGrab — событие фокуса порождено захватом (XGrabKeyboard или
+// XUngrabKeyboard), а не настоящей сменой фокуса окна.
+func x11FocusByGrab(mode byte) bool {
+	return mode == x11FocusModeGrab || mode == x11FocusModeUngrab
 }

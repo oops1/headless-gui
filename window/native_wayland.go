@@ -336,6 +336,20 @@ type WaylandWindow struct {
 	popupShape     int
 	popupShapeSet  bool
 	ptrOverPopup   atomic.Bool
+	// Курсор-картинка (wayland_cursorimage_linux.go): картинка окна и над
+	// попапами, кэш буферов по ключу, буфер, прикреплённый к курсорной
+	// поверхности (его не вытесняем), её буферный масштаб. Всё под cursorMu.
+	// imgCreated — сколько буферов построено за жизнь окна (тесты).
+	cursorImg    *widget.CursorImage
+	popupImg     *widget.CursorImage
+	imgCursors   *cursorLRU[wlImgBuf]
+	curSurfBuf   uint32
+	curSurfScale int
+	imgCreated   int
+
+	// plock — захват указателя (wayland_pointerlock_linux.go).
+	plock wlPtrLock
+
 	cursorSurfID     uint32
 	cursorPoolID     uint32
 	cursorFD         int
@@ -855,6 +869,12 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			// Необязательное расширение: с ним курсор рисует компоновщик
 			// из системной темы, без него — своя картинка.
 			w.gCursorShapeMgr = name
+		case "zwp_pointer_constraints_v1":
+			// Необязательные расширения захвата указателя (SetPointerLock): без
+			// любого из двух он возвращает false.
+			w.plock.gConstraints = name
+		case "zwp_relative_pointer_manager_v1":
+			w.plock.gRelative = name
 		case "xdg_activation_v1":
 			// Необязательное расширение: без него окно на передний план не
 			// вывести (Activate вернёт false).
@@ -962,6 +982,9 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 
 	case obj == w.pointerID:
 		w.handlePointer(opcode, b)
+
+	case w.isPtrLockObject(obj):
+		w.handlePtrLock(obj, opcode, b)
 
 	case obj == w.keyboardID:
 		w.handleKeyboard(opcode, b)

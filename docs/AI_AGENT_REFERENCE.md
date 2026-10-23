@@ -9243,6 +9243,111 @@ in the test, but a real monitor change cannot be provoked there); the hook
 delivering a real Win key press on Windows (the procedure is exercised, the OS
 delivery is not).
 
+---
+
+## v3.39: cursor from an image and pointer lock (RDP client E2, E4)
+
+Two additions for remote-desktop clients and games. Nothing public was removed or
+changed in signature; frames of existing themes are unchanged.
+
+### Cursor from an image — `Engine.SetCursorImage` (E2)
+
+```go
+eng.SetCursorImage(img *image.NRGBA, hotspotX, hotspotY int)   // any goroutine
+eng.ClearCursorOverride()                                      // or SetCursorImage(nil, 0, 0)
+ci, ok := eng.CursorImageOverride()                            // *widget.CursorImage
+```
+
+The pointer image (RDP: up to 384×384, 32 bpp with alpha) is shown above every
+widget and above popup windows, exactly like `SetCursorOverride` (v3.34): it is applied at
+once, without a mouse move, and menus / drop-down lists moved into their own OS windows
+show it too. The last call wins: `SetCursorOverride(shape)` replaces an image,
+`SetCursorImage` replaces a shape. `SetCursorImage(nil)` (or an empty / invalid image)
+drops an image but leaves a shape set by `SetCursorOverride`; `ClearCursorOverride` drops both.
+
+- The image is **copied** (`widget.NewCursorImage`): the application may reuse its
+  buffer. Straight (non-premultiplied) alpha. Sides up to `widget.MaxCursorImageSide`
+  (512); a hotspot outside the image is clamped to its edge.
+- **Cache.** The image gets a key — SHA-256 of size, hotspot and pixels
+  (`widget.CursorImageKey`, computed on the caller's buffer without a copy). The same
+  image set again is a no-op for the engine (no copy) and for the window; every window
+  keeps at most **16** ready system cursors (`cursorCacheSize`) by this key, evicts the
+  least recently used and frees the OS object (Win32 `DestroyCursor`, X11 `FreeCursor`,
+  Wayland `wl_buffer.destroy`). The cursor that is shown right now is never evicted.
+- `engine.CursorOverride()` reports an image as "set, arrow" for code that knows only
+  shapes; the image itself is in `CursorImageOverride()`.
+
+Per platform (`window/cursorimage*.go`, `x11cursorimage*.go`, `wayland_cursorimage_linux.go`):
+
+| | how the cursor is built |
+|---|---|
+| Win32 | `CreateIconIndirect`: 32-bit DIB with alpha + 1-bit mask. The DIB is read as **straight** alpha (checked with `DrawIconEx`: premultiplied bytes give a dark fringe) |
+| X11 | RENDER: depth-32 pixmap, `PutImage` (premultiplied BGRA, cut into requests ≤ 200 KB), `RenderCreatePicture` with the server's ARGB32 format, `RenderCreateCursor`. No RENDER, version < 0.5, no ARGB32 format or a refused first cursor → a 1-bit cursor by the alpha threshold (128; dark pixel black, light white), like the grab/grabbing hands |
+| Wayland | a `wl_shm` ARGB8888 buffer (one `memfd` per image, the pool destroyed at once) attached to the same cursor surface as the drawn shapes; `wl_surface.set_buffer_scale = round(window scale)` (compositor ≥ 4), the hotspot is divided by it. A fractional scale is rounded to the nearest integer (no `wp_viewport` for a cursor) |
+| macOS | not supported (the window falls back to the override arrow) |
+
+X11 builds the cursor in the event loop (it needs replies from the server): the call only
+records a request and wakes the loop with a harmless `SendEvent` to the window itself
+(`x11WakeRequest`); `SetCursor` called later withdraws a request not yet executed, so
+the last call wins. A cursor wider than the server's limit is the server's refusal, not ours.
+
+### Pointer lock — `Window.SetPointerLock` (E4)
+
+```go
+win.SetOnRelativeMotion(func(m widget.RelativeMotion) { /* m.DX, m.DY — device units */ })
+ok := win.SetPointerLock(true)    // false: no window yet / no mechanism / refused
+win.PointerLocked()               // is it in effect right now
+win.SetOnPointerLockChanged(func(active bool) { /* focus lost / returned, compositor unlocked */ })
+win.SetPointerLock(false)         // always true
+```
+
+The pointer is hidden and cannot leave the window; the application gets relative
+motion in device units **without OS acceleration** (what RDP `TS_FP_RELPOINTER_EVENT`
+needs). While the lock is in effect ordinary absolute moves (`OnMouseMove` of widgets) are
+not delivered; button presses and the wheel come as usual.
+
+**Why a callback and not a `RelativeMotionHandler` on the root.** The application that
+locks the pointer already holds the `Window` (it calls `SetPointerLock` on it) and
+forwards the motion over the network or into a game model; a root-widget interface would
+force it to make its own root and wait for the engine to route the event through the tree.
+The callback is one, can be replaced on the fly and is called on the engine goroutine, so
+it may touch widgets. Consecutive motions are summed into one call (`relMotionQueue`), as
+mouse moves are coalesced. `widget.RelativeMotion{DX, DY float64}` is the event type.
+
+`true` from `SetPointerLock(true)` means the request is accepted: the lock is in effect or
+will be as soon as the window is in focus (Wayland: as soon as the compositor grants the
+lock — the pointer must be over the window). The lock is **released when the window loses
+focus and restored when it returns**; `SetOnPointerLockChanged` reports both.
+
+| | motion | lock |
+|---|---|---|
+| Win32 | `RegisterRawInputDevices` (usage page 1, usage 2, no `RIDEV_INPUTSINK`) + `WM_INPUT` → `GetRawInputData` → `RAWMOUSE.lLastX/lLastY` (`MOUSE_MOVE_RELATIVE`; absolute devices are turned into a delta) | `ClipCursor`, cursor hidden through `WM_SETCURSOR`. The clip is **one pixel in the centre of the client area**, not the whole area: windows here are borderless and the resize zones lie at the edges of the client area, so a pointer pinned at an edge would start dragging the window size. Raw input does not depend on the clip. Follows `WM_SIZE`/`WM_MOVE`; released on `WM_ACTIVATE` (inactive) and `WM_DESTROY`. The call is marshalled to the window thread |
+| Wayland | `zwp_relative_pointer_v1.relative_motion`, the **unaccelerated** `dx_unaccel/dy_unaccel` | `zwp_pointer_constraints_v1.lock_pointer`, lifetime *persistent* (re-locked by the compositor when focus returns: `locked`/`unlocked` events); cursor hidden with `set_cursor(NULL)`. Missing either global → `false` |
+| X11 | XInput2 `XI_RawMotion` selected on the **root** window for all master devices; raw (unaccelerated) values of axes 0 and 1 | `XGrabPointer` (`confine_to` the window, an invisible cursor). The pointer is warped back to the centre when it strays more than a quarter of the window from it. `FocusOut` ungrabs, `FocusIn` grabs again. **Without XInput2** the fallback is warp-to-centre: the pointer is warped to the centre after every motion and the delta is the offset from the centre (coarser: motion is lost until the warp lands, no raw units). Popup menus of another connection do not receive pointer events during the grab |
+| macOS | not supported: `SetPointerLock(true)` returns `false` |
+
+### Verified
+
+- Pure functions and the wire: RAWINPUT parsing (64- and 32-bit headers, absolute flag,
+  non-mouse); `relative_motion`; XI raw event (`parseXIRawMotion`: transformed and raw
+  value sets, axis index by mask bits, truncated events); RENDER requests and replies;
+  Wayland `lock_pointer`, `get_relative_pointer`, `create_pool`/`create_buffer`, `set_cursor`,
+  `set_buffer_scale` messages; the LRU (order, eviction, "do not evict the shown one",
+  freeing); coalescing of motions; the suppression of absolute moves under the lock.
+- Win32 on a live window: cursor build with hotspot, alpha blend (`DrawIconEx`), cache and
+  destruction of evicted cursors (`GetIconInfo` fails), popups; Raw Input registration and
+  removal (`GetRegisteredRawInputDevices`), `ClipCursor` to the centre and back, focus loss and
+  restore, a call from another thread; with `HEADLESS_GUI_POINTERLOCK_E2E=1` a real
+  `SendInput` mouse move reaches the application as a `WM_INPUT` delta.
+- X11: a toy X server over a socket pair with the real event loop (RENDER negotiation and
+  fallbacks, cache, `FreeCursor`, lock handshake, focus loss/return, refusal, warp fallback);
+  live against XWayland (WSLg): RENDER cursor created and verified, `XISelectEvents` + `XGrabPointer`
+  accepted.
+- Wayland: wire tests; live against the WSLg compositor: the compositor declares
+  `zwp_pointer_constraints_v1` and `zwp_relative_pointer_manager_v1`, accepts the buffer,
+  surface, `set_cursor` and `lock_pointer`/`destroy` requests without a protocol error.
+  Not checked: a real `locked` event and real relative motion (no pointer over the test window).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

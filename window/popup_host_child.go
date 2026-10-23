@@ -54,6 +54,13 @@ type childPopupCursor interface {
 	SetPopupCursor(c int, set bool)
 }
 
+// childPopupCursorImage — бэкенд умеет показывать над своими попапами
+// курсор-картинку (Engine.SetCursorImage). Следующий SetPopupCursor заменяет
+// её формой.
+type childPopupCursorImage interface {
+	SetPopupCursorImage(ci *widget.CursorImage)
+}
+
 // overlayCloser — движок умеет закрыть все вынесенные оверлеи (реализует
 // *engine.Engine).
 type overlayCloser interface {
@@ -79,6 +86,8 @@ type childPopups struct {
 	// получил бэкенд (syncCursorOverride). Под mu.
 	ovrCursor widget.Cursor
 	ovrSet    bool
+	// ovrImg — курсор-картинка движка, как её последний раз получил бэкенд.
+	ovrImg *widget.CursorImage
 }
 
 // childPopup — один показанный оверлей.
@@ -192,12 +201,19 @@ func (c *childPopups) syncCursorOverride() {
 		return
 	}
 	cur, set := src.CursorOverride()
+	img := cursorImageOf(c.eng)
 	c.mu.Lock()
-	same := c.ovrSet == set && (!set || c.ovrCursor == cur)
-	c.ovrCursor, c.ovrSet = cur, set
+	same := c.ovrSet == set && (!set || c.ovrCursor == cur) && sameCursorImage(c.ovrImg, img)
+	c.ovrCursor, c.ovrSet, c.ovrImg = cur, set, img
 	c.mu.Unlock()
 	if same {
 		return
+	}
+	if img != nil {
+		if ci, ok := c.be.(childPopupCursorImage); ok {
+			ci.SetPopupCursorImage(img)
+			return
+		}
 	}
 	cb.SetPopupCursor(int(cur), set)
 }
