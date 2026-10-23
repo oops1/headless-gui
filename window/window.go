@@ -581,6 +581,7 @@ func (win *Window) SetCornerRadius(r int) {
 	win.cornerRadius = r
 	if win.native != nil {
 		win.native.SetCornerRadius(r)
+		win.syncSquareCorners()
 	}
 }
 
@@ -780,6 +781,7 @@ func (win *Window) bringUp() error {
 	if win.cornerRadius > 0 {
 		win.native.SetCornerRadius(win.cornerRadius)
 	}
+	win.syncSquareCorners()
 
 	// Подключаем виджет-окно (drag, close, minimize, maximize)
 	win.setupWidgetWindow()

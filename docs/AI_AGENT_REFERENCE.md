@@ -9393,6 +9393,26 @@ Tests: `window/alwaysontop_test.go` (before/after Run, unsupported backend),
 `window/alwaysontop_windows_test.go` (live window, `WS_EX_TOPMOST` set and
 cleared), `window/alwaysontop_x11_linux_test.go` (ClientMessage bytes, no atom).
 
+## v3.41: Windows 10 window shadow and square corners where the OS does not round
+
+Reported by the RDP client on v3.39.0: on Windows 10 a frameless window cast no
+shadow and a light window merged with what is behind it.
+
+- **Shadow.** On Windows 10 DWM does not round corners, and the engine used to
+  cut a rounded region (`SetWindowRgn`) — DWM draws no shadow for a window with
+  a region, and none for a window without a non-client area either. Now Windows
+  10 keeps square corners (as every Windows 10 window has) and extends the DWM
+  frame 1 px into the client area (`DwmExtendFrameIntoClientArea`), which turns
+  the shadow on. Windows 11 is unchanged (DWM rounds, shadow kept).
+- **Square body where the OS does not round.** Without the region, a
+  `widget.Window` drawn with the theme's corner radius (8 on Windows 11 themes)
+  left the canvas background visible in the corners. New
+  `widget.Window.SquareCorners` (and `Dialog.SquareCorners` for dialogs moved
+  into their own OS window): the window layer asks the backend
+  (`RoundsCorners`) and sets it when the OS shows the window with square corners
+  — Windows 10, X11, a window with radius 0. A maximized `widget.Window` is drawn
+  square too: no OS rounds a maximized window. Headless rendering is unchanged.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
