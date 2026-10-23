@@ -1912,3 +1912,8 @@ const x11TopLevelEventMask = uint32(
 		0x00020000 | // StructureNotify (resize/close)
 		0x00200000 | // FocusChange — FocusIn/FocusOut
 		0x00400000) // PropertyChange — PropertyNotify по _NET_WM_STATE
+
+// RoundsCorners — X11 углы окна не скругляет (cornerRounder): окно
+// прямоугольное, и корпус widget.Window рисуется с прямыми углами, иначе за
+// скруглением был бы виден фон холста.
+func (w *X11Window) RoundsCorners() bool { return false }

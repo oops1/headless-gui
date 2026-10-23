@@ -246,6 +246,11 @@ func (h *dialogHost) create(hm *hostedModal) {
 	native.SetMinSize(minW, minH)
 	if dlg.CornerRadius > 0 {
 		native.SetCornerRadius(int(float64(dlg.CornerRadius)*scale + 0.5))
+		// ОС с прямыми углами окна (Windows 10, X11) — корпус диалога тоже
+		// прямой, иначе в углах окна виден фон за скруглением.
+		if cr, ok := native.(cornerRounder); ok && !cr.RoundsCorners() {
+			dlg.SquareCorners = true
+		}
 	}
 
 	// Owner + модальность.

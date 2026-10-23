@@ -280,6 +280,9 @@ var (
 	procCombineRgn            = gdi32.NewProc("CombineRgn")
 	procSetWindowRgn          = user32.NewProc("SetWindowRgn")
 	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
+	// DwmExtendFrameIntoClientArea — рамка DWM в клиентской области: без неё
+	// окно без неклиентской части тени не отбрасывает (applyCorners, Win10).
+	procDwmExtendFrameIntoClientArea = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
 	procSetCapture            = user32.NewProc("SetCapture")
 	procReleaseCapture        = user32.NewProc("ReleaseCapture")
 	procSetCursor             = user32.NewProc("SetCursor")
@@ -1177,15 +1180,32 @@ func (w *Win32Window) applyCorners() {
 		procSetWindowRgn.Call(uintptr(w.hwnd), 0, 1) // снимаем возможный старый регион
 		return
 	}
-	// Win10: фолбэк — чёткий round-rect регион.
-	d := uintptr(w.cornerRadius * 2)
-	rgn, _, _ := procCreateRoundRectRgn.Call(0, 0,
-		uintptr(w.width+1), uintptr(w.height+1), d, d)
-	if rgn == 0 {
-		return
+	// Win10: DWM углы не скругляет, а скруглённый регион (SetWindowRgn), как
+	// раньше, отнимал у окна системную тень: светлое окно сливалось с тем, что
+	// позади (отчёт RDP-клиента на v3.39.0). Углы остаются прямыми, как у всех
+	// окон Windows 10, — и корпус окна рисуется прямоугольным (RoundsCorners,
+	// widget.Window.SquareCorners), — а тень включает рамка DWM в 1 px снизу:
+	// у окна без неклиентской области DWM иначе её не рисует.
+	m := dwmMargins{Bottom: 1}
+	procDwmExtendFrameIntoClientArea.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&m)))
+	procSetWindowRgn.Call(uintptr(w.hwnd), 0, 1)
+}
+
+// dwmMargins — MARGINS для DwmExtendFrameIntoClientArea.
+type dwmMargins struct{ Left, Right, Top, Bottom int32 }
+
+// RoundsCorners — скруглены ли сейчас углы этого окна средствами ОС
+// (cornerRounder): только у окна со скруглением, не развёрнутого и не на весь
+// экран, и только на Windows 11 (DWMWA_WINDOW_CORNER_PREFERENCE). На Windows 10
+// и у окна с прямыми углами — нет: корпус тогда рисуется прямоугольным.
+func (w *Win32Window) RoundsCorners() bool {
+	if w.hwnd == 0 {
+		return true
 	}
-	// SetWindowRgn забирает владение регионом (удалять не нужно), bRedraw=TRUE.
-	procSetWindowRgn.Call(uintptr(w.hwnd), rgn, 1)
+	if w.cornerRadius <= 0 || w.maximized || w.fs.on.Load() {
+		return false
+	}
+	return w.setDwmCorner(true)
 }
 
 func (w *Win32Window) SetOnResize(fn func(w, h int))                            { w.onResize = fn }
