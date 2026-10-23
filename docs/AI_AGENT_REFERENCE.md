@@ -9369,6 +9369,30 @@ Reported by the calc project (Windows 11 calculator) on v3.39.0.
   as is and dims only the caption and border — for flat buttons whose
   background equals the window's.
 
+### v3.40: always on top — `Window.SetAlwaysOnTop`
+
+Asked for by the calculator ("Keep on top" of the Windows 11 calculator), later
+Explorer and WinLine.
+
+```go
+ok := win.SetAlwaysOnTop(true) // false — the window system cannot do it
+on := win.IsAlwaysOnTop()
+```
+
+- Win32: `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)` without activating;
+  `IsAlwaysOnTop` reads `WS_EX_TOPMOST`.
+- X11: `_NET_WM_STATE_ABOVE` through the `_NET_WM_STATE` ClientMessage (as
+  full screen); `true` means the request was sent — the window manager decides,
+  and `IsAlwaysOnTop` follows the state it writes to `_NET_WM_STATE`.
+- Wayland: xdg-shell has no such request — `false`. macOS: not implemented —
+  `false`.
+- Before `Run` the request is remembered and applied when the window is created
+  (`true` then means "remembered"; check `IsAlwaysOnTop` after start).
+
+Tests: `window/alwaysontop_test.go` (before/after Run, unsupported backend),
+`window/alwaysontop_windows_test.go` (live window, `WS_EX_TOPMOST` set and
+cleared), `window/alwaysontop_x11_linux_test.go` (ClientMessage bytes, no atom).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
