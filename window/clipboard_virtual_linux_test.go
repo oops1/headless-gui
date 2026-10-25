@@ -251,6 +251,9 @@ func TestWlClipboard_VirtualGetFilesOwned(t *testing.T) {
 	if !ok || cut || len(p) != 2 || p[0] != "/home/u/Загрузки/Отчёт.txt" {
 		t.Errorf("GetFiles = %v %v %v", p, cut, ok)
 	}
+	if got := c.w.clip.ClipboardFormats(); !got.Has(widget.ClipboardFormatFiles) {
+		t.Errorf("ClipboardFormats своих обещанных файлов = %v", got)
+	}
 	rc, err := c.w.clip.OpenVirtualFile(0)
 	if err != nil {
 		t.Fatal(err)
@@ -408,6 +411,9 @@ func TestX11Clipboard_VirtualGetFilesOwned(t *testing.T) {
 	p, cut, ok := c.GetFiles()
 	if !ok || cut || len(p) != 2 || p[1] != "/home/u/Загрузки/Папка" {
 		t.Errorf("GetFiles = %v %v %v", p, cut, ok)
+	}
+	if got := c.ClipboardFormats(); !got.Has(widget.ClipboardFormatFiles) {
+		t.Errorf("ClipboardFormats своих обещанных файлов = %v", got)
 	}
 	rc, err := c.OpenVirtualFile(0)
 	if err != nil {

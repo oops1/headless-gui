@@ -40,19 +40,19 @@ func TestFormatsFromMimes(t *testing.T) {
 
 // Свой буфер: у картинки текста нет, у файлов и HTML простой текст есть.
 func TestOwnedFormats(t *testing.T) {
-	if got := ownedFormats("t", "", nil, true); got != widget.ClipboardFormatImage {
+	if got := ownedFormats("t", "", false, true); got != widget.ClipboardFormatImage {
 		t.Errorf("картинка: %v", got)
 	}
-	if got := ownedFormats("a\nb", "", []string{"/a", "/b"}, false); got != widget.ClipboardFormatFiles|widget.ClipboardFormatText {
+	if got := ownedFormats("a\nb", "", true, false); got != widget.ClipboardFormatFiles|widget.ClipboardFormatText {
 		t.Errorf("файлы: %v", got)
 	}
-	if got := ownedFormats("x", "<b>x</b>", nil, false); got != widget.ClipboardFormatHTML|widget.ClipboardFormatText {
+	if got := ownedFormats("x", "<b>x</b>", false, false); got != widget.ClipboardFormatHTML|widget.ClipboardFormatText {
 		t.Errorf("HTML: %v", got)
 	}
-	if got := ownedFormats("x", "", nil, false); got != widget.ClipboardFormatText {
+	if got := ownedFormats("x", "", false, false); got != widget.ClipboardFormatText {
 		t.Errorf("текст: %v", got)
 	}
-	if got := ownedFormats("", "", nil, false); got != 0 {
+	if got := ownedFormats("", "", false, false); got != 0 {
 		t.Errorf("пусто: %v", got)
 	}
 }

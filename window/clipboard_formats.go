@@ -48,12 +48,12 @@ func isTextTarget(m string) bool {
 // ownedFormats — виды содержимого, которыми мы сами владеем в буфере. Так же,
 // как при выдаче: у картинки текста нет (иначе редактор вставил бы пустую
 // строку), у файлов и оформленного текста простой текст есть всегда.
-func ownedFormats(text, html string, files []string, img bool) widget.ClipboardFormatSet {
+func ownedFormats(text, html string, files, img bool) widget.ClipboardFormatSet {
 	var s widget.ClipboardFormatSet
 	switch {
 	case img:
 		return widget.ClipboardFormatImage
-	case len(files) > 0:
+	case files:
 		s |= widget.ClipboardFormatFiles | widget.ClipboardFormatText
 	case html != "":
 		s |= widget.ClipboardFormatHTML | widget.ClipboardFormatText

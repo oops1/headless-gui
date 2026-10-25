@@ -152,7 +152,7 @@ func (c *x11Clipboard) ClipboardFormats() widget.ClipboardFormatSet {
 	}
 	c.mu.Lock()
 	if c.owns {
-		s := ownedFormats(c.owned, c.ownedHTML, c.ownedFiles, c.ownedImg != nil)
+		s := ownedFormats(c.owned, c.ownedHTML, len(c.ownedFiles) > 0 || c.ownedVirt != nil, c.ownedImg != nil)
 		c.mu.Unlock()
 		c.fmts.invalidate() // чужой ответ, запомненный до нашего владения, не годится
 		return s

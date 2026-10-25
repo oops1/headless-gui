@@ -26,7 +26,7 @@ func (c *wlClipboard) ClipboardFormats() widget.ClipboardFormatSet {
 	if c.source != 0 {
 		// Чужой selection стирает наши поля раньше, чем компоновщик отменит
 		// источник (handleSelection): пустое — не наше, смотрим offer.
-		if s := ownedFormats(c.owned, c.ownedHTML, c.ownedFiles, c.ownedImg != nil); s != 0 {
+		if s := ownedFormats(c.owned, c.ownedHTML, len(c.ownedFiles) > 0 || c.ownedVirt != nil, c.ownedImg != nil); s != 0 {
 			return s
 		}
 	}

@@ -121,7 +121,7 @@ func (c *memoryClipboard) ClipboardFormats() ClipboardFormatSet {
 	if c.img != nil {
 		s |= ClipboardFormatImage
 	}
-	if len(c.files) > 0 {
+	if len(c.files) > 0 || c.virt != nil {
 		s |= ClipboardFormatFiles
 	}
 	return s

@@ -182,6 +182,9 @@ func TestClipboardVirtualFiles_Memory(t *testing.T) {
 	if ClipboardGetText() != "a.txt\nd" {
 		t.Errorf("текст-имена: %q", ClipboardGetText())
 	}
+	if !ClipboardHasFiles() {
+		t.Errorf("обещанные файлы не видны ClipboardHasFiles: %v", ClipboardFormats())
+	}
 	rc, err := ClipboardOpenVirtualFile(0)
 	if err != nil || opened != 1 {
 		t.Fatalf("вставка: %v, open вызван %d раз", err, opened)
