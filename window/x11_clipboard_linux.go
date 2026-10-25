@@ -59,6 +59,9 @@ type x11Clipboard struct {
 	// pending считает ответы, готовящиеся в горутинах (кодирование PNG); нужен
 	// тестам, чтобы дождаться их без пауз.
 	pending sync.WaitGroup
+	// fmts — память ответов «какие виды содержимого в буфере» и подписка на
+	// смену владельца (x11_clipboard_formats_linux.go).
+	fmts x11FormatsCache
 }
 
 func newX11Clipboard(w *X11Window) *x11Clipboard { return &x11Clipboard{w: w} }
@@ -392,6 +395,7 @@ func (c *x11Clipboard) handleClear(buf []byte) {
 	c.owns, c.owned, c.ownedHTML = false, "", ""
 	c.ownedFiles, c.ownedCut, c.ownedImg = nil, false, nil
 	c.mu.Unlock()
+	c.fmts.invalidate() // у буфера новый владелец: прежний ответ о видах не годится
 }
 
 // ─── Запросы протокола ──────────────────────────────────────────────────────

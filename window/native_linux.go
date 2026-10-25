@@ -579,10 +579,14 @@ func (w *X11Window) RunEventLoop() error {
 	defer w.curImg.looping.Store(false)
 	w.plock.looping.Store(true)
 	defer w.plock.looping.Store(false)
+	// И для подписки на смену владельца буфера обмена (ClipboardFormats).
+	w.clip.setFormatsLooping(true)
+	defer w.clip.setFormatsLooping(false)
 	w.x11SyncTouch()
 	w.x11SyncKeyGrab()
 	w.x11SyncCursorImage()
 	w.x11SyncPointerLock()
+	w.x11SyncClipboardWatch()
 	for !w.closed.Load() {
 		if !w.readEvent(buf) {
 			if w.closed.Load() {
@@ -605,6 +609,7 @@ func (w *X11Window) RunEventLoop() error {
 		w.x11SyncKeyGrab()
 		w.x11SyncCursorImage()
 		w.x11SyncPointerLock()
+		w.x11SyncClipboardWatch()
 	}
 	return nil
 }
@@ -620,6 +625,11 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	// диапазона, а w.shm нередко nil (SHM не инициализировался/недоступен).
 	if w.shm != nil && !w.shm.fallback && evType == w.shm.firstEvent {
 		w.x11ShmCompletion()
+		return
+	}
+	// XFixes SelectionNotify: у CLIPBOARD сменился владелец (подписка — по
+	// первому вопросу о видах содержимого, x11_clipboard_formats_linux.go).
+	if w.clip.handleFixesEvent(buf) {
 		return
 	}
 	// Таблица нажатых клавиш ведётся ДО отбрасывания ввода заблокированным

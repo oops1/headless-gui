@@ -9413,6 +9413,61 @@ shadow and a light window merged with what is behind it.
   — Windows 10, X11, a window with radius 0. A maximized `widget.Window` is drawn
   square too: no OS rounds a maximized window. Headless rendering is unchanged.
 
+## v3.42: what is in the clipboard, without reading it — `widget.ClipboardHasFiles` (RDP client E14)
+
+`ClipboardFiles`, `ClipboardImage` and `ClipboardHTML` READ data from the clipboard
+owner, and on X11/Wayland the owner is another process that may answer for
+seconds or minutes (a remote desktop delivers the file list when the files are
+downloaded; `ClipboardFiles` waits up to 10 minutes). An application that only
+needs to know "are there files?" at every clipboard change cannot call it.
+
+```go
+widget.ClipboardHasFiles() bool                       // = ClipboardFormats().Has(ClipboardFormatFiles)
+widget.ClipboardFormats() widget.ClipboardFormatSet   // Text | HTML | Image | Files flags
+set.Has(widget.ClipboardFormatFiles | widget.ClipboardFormatText)  // ALL listed kinds are present
+
+type ClipboardFormatsProvider interface {             // optional, like ClipboardFilesProvider
+    ClipboardFormats() ClipboardFormatSet
+}
+```
+
+Nothing is read and a foreign owner is never waited for beyond a short limit, so
+the call is safe on every clipboard change (still call it outside locks: on X11
+with a silent owner the first call takes up to 250 ms).
+
+| | how it answers | cost |
+|---|---|---|
+| Windows | `IsClipboardFormatAvailable`: `CF_UNICODETEXT`, `HTML Format`, `PNG`/`CF_DIBV5`/`CF_DIB`, `CF_HDROP` or `FileGroupDescriptorW` (promised files) — the clipboard is not opened | instant, works while another process holds the clipboard |
+| Wayland | the type list of the current `wl_data_offer` (already delivered by `offer` events) | instant |
+| X11 | one `TARGETS` request with a 250 ms limit; the answer is remembered until the owner changes | first call ≤ 250 ms, then instant |
+| own content (any) | from the engine's own copy | instant |
+| memory provider | from its fields | instant |
+
+X11 details. The owner change is reported by XFixes (`SelectSelectionInput`,
+requested lazily on the first question and negotiated by the window's event loop,
+because replies can only be read there). With XFixes the answer is valid until
+the next change event; without it (no extension, version < 2, no event loop) it
+lives 500 ms. A silent owner is remembered as "nothing" for 1 s so that polling
+does not pay 250 ms each time. If another request to the owner is already in
+flight (for example `ClipboardFiles` is waiting for a list) the call does not
+queue behind it: it returns the last known answer, or an empty set.
+
+Limits:
+- the answer is about ANNOUNCED types, not data: on X11/Wayland `text/uri-list`
+  counts as files although it could hold web links (reading filters those out);
+  on Windows `FileGroupDescriptorW` counts as files even when `ClipboardFiles`
+  cannot read promised files (it returns `CF_HDROP` lists only);
+- an owner that answers `TARGETS` with a refusal is reported as an empty set;
+- a custom `ClipboardProvider` without `ClipboardFormatsProvider` gives an empty
+  set — `ClipboardFiles` is deliberately not used as a fallback, it may block;
+- macOS: the provider (`pbcopy`/`pbpaste`) does not implement the extension, the
+  set is empty.
+
+Tests: pure functions (type names to kinds, `TARGETS` atoms to kinds, XFixes
+requests and events) run everywhere; the X11 owner, the cache, the silent and the
+busy owner and the XFixes negotiation run against a protocol-level fake server;
+Windows tests use the real clipboard (`HEADLESS_GUI_TEST_SYSCLIPBOARD=1` or CI).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
