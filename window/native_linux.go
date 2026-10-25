@@ -935,6 +935,9 @@ func (w *X11Window) x11ReloadKeyboardMapping() {
 
 func (w *X11Window) Close() {
 	w.closed.Store(true)
+	// Обещанные виртуальные файлы без окна отдавать некому: приложение узнаёт
+	// об этом через WithRelease и убирает своё.
+	w.clip.Cleanup()
 	// Освобождаем локальный маппинг SHM-сегмента (см. x11ShmClose): серверную
 	// половину X-сервер снимает сам при закрытии соединения.
 	w.x11ShmClose()

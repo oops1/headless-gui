@@ -4321,6 +4321,47 @@ without it gets the paths as text from `ClipboardSetFiles`, and
 `ClipboardFiles` honestly answers `ok == false`. `UseMemoryClipboard()`
 supports files.
 
+### Deferred files on the clipboard
+
+Since v3.42 files that are not on disk yet can be put on the clipboard: the
+names, sizes and times are announced when copying, and the contents are
+requested from the application only when someone pastes. A remote-desktop
+client therefore does not download server files on every copy inside the
+session.
+
+```go
+files := []widget.VirtualFile{
+    {Name: "Report", IsDir: true},
+    {Name: "Report/total.txt", Size: 1024, ModTime: t},
+}
+err := widget.ClipboardSetVirtualFiles(files,
+    func(i int) (io.ReadCloser, error) { return remote.Open(files[i].Name) }, // Windows
+    widget.WithMaterialize(func(i int) (string, error) { return download(files[i]) }), // X11, Wayland
+    widget.WithRelease(func() { os.RemoveAll(dir) }))
+```
+
+The engine holds the mechanism only and has **no policy**: no temporary folder,
+no downloading, no clean-up of files.
+
+- Windows: `open(i)` is called when Explorer starts reading the `FileContents`
+  stream of file `i` (`FileGroupDescriptorW` carries names, sizes, times).
+- X11 and Wayland: the paster needs real paths, so on a request for
+  `text/uri-list` / `x-special/gnome-copied-files` the engine calls
+  `WithMaterialize(i)` for each top-level entry (a name without `/`; a top-level
+  directory must be an explicit `IsDir` entry), and the application puts the
+  file on disk and returns the path. Without `WithMaterialize` files cannot be
+  offered on Linux and the call returns `ErrClipboardVirtualNoSource`. Some
+  clipboard managers request `text/uri-list` just to look at it — the callback
+  then runs without a paste.
+- `WithRelease` is called once when the promise is gone (the clipboard was
+  replaced, the window closed, `widget.ClipboardCleanup()`): the application
+  removes its files there.
+- macOS and a provider without the extension: `ErrClipboardVirtualUnsupported`.
+
+`widget.ClipboardVirtualFiles()` returns what we promised while it is on the
+clipboard; `widget.ClipboardOpenVirtualFile(i)` is a paste inside the program.
+Details are in `docs/AI_AGENT_REFERENCE.md`, section "v3.42".
+
 ### Image on the clipboard
 
 Since v3.34 a picture can be put on the clipboard ("Copy image") and read back:

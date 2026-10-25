@@ -4283,6 +4283,45 @@ go func() { // чтение может ждать — не на горутине
 него получает от `ClipboardSetFiles` пути текстом, а `ClipboardFiles` честно
 отвечает `ok == false`. `UseMemoryClipboard()` файлы умеет.
 
+### Отложенные файлы в буфере обмена
+
+С v3.42 в буфер можно положить файлы, которых на диске ещё нет: имена, размеры и
+время объявляются при копировании, а содержимое запрашивается у приложения,
+только когда кто-то вставляет. Так клиент удалённого рабочего стола не
+скачивает файлы сервера при каждом копировании внутри сеанса.
+
+```go
+files := []widget.VirtualFile{
+    {Name: "Отчёт", IsDir: true},
+    {Name: "Отчёт/итог.txt", Size: 1024, ModTime: t},
+}
+err := widget.ClipboardSetVirtualFiles(files,
+    func(i int) (io.ReadCloser, error) { return remote.Open(files[i].Name) }, // Windows
+    widget.WithMaterialize(func(i int) (string, error) { return download(files[i]) }), // X11, Wayland
+    widget.WithRelease(func() { os.RemoveAll(dir) }))
+```
+
+Движок держит только механизм, **политики у него нет**: ни временной папки, ни
+скачивания, ни очистки файлов.
+
+- Windows: `open(i)` зовётся, когда Проводник начинает читать поток
+  `FileContents` файла `i` (`FileGroupDescriptorW` даёт имена, размеры, время).
+- X11 и Wayland: вставляющему нужны настоящие пути, поэтому на запрос
+  `text/uri-list` / `x-special/gnome-copied-files` движок зовёт
+  `WithMaterialize(i)` для каждой записи верхнего уровня (имя без `/`; каталог
+  верхнего уровня должен быть явной записью `IsDir`), а приложение кладёт файл
+  на диск и возвращает путь. Без `WithMaterialize` на Linux файлов не
+  предложить, и вызов отвечает `ErrClipboardVirtualNoSource`. Некоторые менеджеры
+  буфера обмена запрашивают `text/uri-list` просто для просмотра — тогда колбэк
+  вызовется без вставки.
+- `WithRelease` вызывается один раз, когда обещание снято (буфер заменён, окно
+  закрыто, `widget.ClipboardCleanup()`): здесь приложение убирает свои файлы.
+- macOS и провайдер без расширения: `ErrClipboardVirtualUnsupported`.
+
+`widget.ClipboardVirtualFiles()` возвращает то, что мы обещали, пока оно в буфере;
+`widget.ClipboardOpenVirtualFile(i)` — вставка внутри программы. Подробности —
+в `docs/AI_AGENT_REFERENCE.md`, раздел «v3.42».
+
 ### Изображение в буфере обмена
 
 С v3.34 в буфер можно положить картинку («Копировать изображение») и прочитать

@@ -9546,6 +9546,122 @@ byte equality, mask hashes pinned for windows/linux),
 named fonts, shaper path, rotated text, HiDPI, LCD order and BGRX buffer, clip),
 `engine/textquality_bench_test.go` (glyph rasterization and line drawing).
 
+---
+
+## v3.42: deferred ("virtual") files on the clipboard (E13)
+
+The RDP client must put server-side files on the clipboard **without
+downloading them**: the names, sizes and times are announced when the user
+copies, the bytes are fetched only when someone pastes. `ClipboardSetFiles`
+takes ready paths only.
+
+The engine holds the **mechanism only**: it tells the system "these files
+exist" and calls an application callback at paste time. It keeps no policy: no
+temporary folder, no downloading, no clean-up of temporary files. Where the
+bytes come from, where they are put and when they are removed is the
+application's business.
+
+```go
+type VirtualFile struct {
+    Name    string    // relative path with "/" ("Report/total.txt")
+    Size    int64
+    ModTime time.Time // zero = unknown
+    IsDir   bool
+}
+
+err := widget.ClipboardSetVirtualFiles(files, open,            // open: Windows
+    widget.WithMaterialize(func(i int) (string, error) {...}), // materialize: X11/Wayland
+    widget.WithRelease(func() {...}))                          // the promise is gone
+
+files, ok := widget.ClipboardVirtualFiles()    // what we promised, while it is on the clipboard
+rc, err := widget.ClipboardOpenVirtualFile(i)  // a paste inside the program (calls open)
+widget.ClipboardCleanup()                      // withdraw the promise (call at exit)
+files, err := widget.NormalizeVirtualFiles(l)  // the validation the call does
+top, err := widget.VirtualTopLevel(files)      // indices of entries without "/" (what Linux asks paths for)
+
+type ClipboardVirtualFilesProvider interface { // optional, like ClipboardFilesProvider
+    SetVirtualFiles(files []VirtualFile, open func(int) (io.ReadCloser, error), opts VirtualFilesOptions) error
+    GetVirtualFiles() ([]VirtualFile, bool)
+    OpenVirtualFile(index int) (io.ReadCloser, error)
+}
+```
+
+| | Windows | X11 / Wayland |
+|---|---|---|
+| announced | `IDataObject` in `OleSetClipboard`: `FileGroupDescriptorW`, `FileContents`, `Preferred DropEffect` | targets / mime types `text/uri-list`, `x-special/gnome-copied-files` (+ relative names as text) |
+| app callback | `open(i)` — at the first read of the file's `IStream` | `WithMaterialize(i)` — when `text/uri-list` or the gnome type is requested |
+| needs | `open` (else `ErrClipboardVirtualNoSource`) | `WithMaterialize` (else `ErrClipboardVirtualNoSource`; the clipboard is not touched) |
+| macOS, a provider without the extension | `ErrClipboardVirtualUnsupported` (it matches `errors.ErrUnsupported`) | |
+
+**Names** are validated (`ErrVirtualFileName`): relative, non-empty components,
+no `.`/`..`, no backslash, NUL or control characters, valid UTF-8, no
+duplicates, no file used as a directory; a trailing `/` is dropped. Windows
+additionally rejects `<>:"|?*` and paths over 259 UTF-16 units. A directory
+needs `IsDir` entry when it is empty; on X11/Wayland **every top-level
+directory must be an explicit `IsDir` entry** (the application is asked for a
+path per top-level entry).
+
+**Windows.** The descriptor block is `FILEGROUPDESCRIPTORW` (592 bytes per
+entry; flags `FD_ATTRIBUTES | FD_WRITESTIME | FD_FILESIZE | FD_PROGRESSUI`,
+attributes `NORMAL`/`DIRECTORY`, `FILETIME` write time, 64-bit size, name with
+`\`). `FileContents` for `lindex` = file index is an own `IStream` that reads
+from the `io.ReadCloser` of `open(i)`: opened at the first `Read`, closed at the
+last `Release`; `Seek` backwards reopens, forwards skips; a `Read` block is
+filled completely unless the stream ends; `Stat`, `CopyTo`, `Clone` (not
+supported), `HGLOBAL` for files up to 16 MiB. `OleFlushClipboard` is not
+called — otherwise the system would ask for the contents at once. COM objects
+are built by hand (vtables of `syscall.NewCallback`, the registry by address),
+as in `window/dnd_windows.go`. OLE needs an STA thread with a message loop for
+the clipboard object, which the application cannot guarantee, so the clipboard
+has its own: a goroutine locked to an OS thread (`OleInitialize`, `GetMessage`).
+Consequence: while a chunk of a file is being read (`open`'s reader blocks), a
+replacement of the clipboard from another thread waits for that chunk.
+
+**X11 / Wayland.** There is no virtual-files protocol, and the paster needs real
+paths. The selection owner answers a request for `text/uri-list` or
+`x-special/gnome-copied-files` by calling `WithMaterialize(i)` for each top-level
+entry (a file: put it on disk and return the absolute path; a directory:
+return the directory with its contents; nested entries are not asked
+separately), then returns the paths. Calls are sequential, off the engine
+goroutine (Wayland: in the writer goroutine; X11: the `SelectionNotify` is sent
+from a goroutine), the result is remembered until the promise is withdrawn
+(the second format does not ask again), an error is not remembered and means
+a refusal (empty answer / property `None`). Limitations: some clipboard
+managers request `text/uri-list` just to look at the clipboard — the callback
+then runs without a paste; a paster may give up waiting (Qt: 5 s); the X11 list
+of paths must fit in one 128 KiB request. A paste inside the program
+(`ClipboardFiles`) returns the same paths.
+
+`WithRelease` fires once, in its own goroutine, when the promise is gone: the
+clipboard got other contents, another owner took the selection, the window was
+closed, `ClipboardCleanup` was called (Windows: when OLE releases the data
+object). That is where the application removes what it put on disk. Do not wait
+for other clipboard calls inside it.
+
+An example of the application side (an optional pattern, not engine code):
+
+```go
+dir, _ := os.MkdirTemp("", "myapp-clip-")
+widget.ClipboardSetVirtualFiles(files, remoteOpen, // remoteOpen: for Windows
+    widget.WithMaterialize(func(i int) (string, error) {
+        p := filepath.Join(dir, filepath.FromSlash(files[i].Name))
+        return p, download(files[i], p)   // a directory: create it with its children
+    }),
+    widget.WithRelease(func() { os.RemoveAll(dir) }))
+```
+
+Tests: `widget/clipboard_virtual_test.go` (names, `FILEGROUPDESCRIPTORW` byte by
+byte, `FILETIME`, the in-memory provider),
+`widget/clipboard_virtual_windows_test.go` (vtable layout, `QueryInterface`/
+`AddRef`/`Release`, `GetData`/`QueryGetData`, the enumerator, `IStream` read in
+parts / `Seek` / `Stat` / `CopyTo`; **live clipboard** — `OleGetClipboard` from
+another thread as Explorer does, `open` is called only on the first read;
+needs `HEADLESS_GUI_TEST_SYSCLIPBOARD=1` or CI), `window/clipboard_virtual_test.go`
+(the shared promise: top-level only, caching, single flight, errors),
+`window/clipboard_virtual_linux_test.go` (Wayland on a fake compositor, X11 on a
+fake server: types announced, callback only on request, release on every way
+out, window close).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

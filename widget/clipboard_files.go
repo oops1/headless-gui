@@ -62,9 +62,11 @@ func ClipboardFiles() (paths []string, cut bool, ok bool) {
 // SetFiles — реализация ClipboardFilesProvider в памяти.
 func (c *memoryClipboard) SetFiles(paths []string, cut bool) {
 	c.mu.Lock()
+	old := c.virt
 	c.text, c.html = strings.Join(paths, "\n"), ""
-	c.files, c.cut, c.img = append([]string(nil), paths...), cut, nil
+	c.files, c.cut, c.img, c.virt = append([]string(nil), paths...), cut, nil, nil
 	c.mu.Unlock()
+	old.drop()
 }
 
 // GetFiles — реализация ClipboardFilesProvider в памяти.
