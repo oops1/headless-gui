@@ -2927,8 +2927,6 @@ bridge. Keyboard navigation (Tab/Shift+Tab, Enter/Space) already works.
 
 ### Fonts
 
-Eight bundled free families### Fonts
-
 Eight bundled free families, each with its license file (full list, licenses
 and redistribution duties: `assets/fonts/README.md`):
 
@@ -3006,6 +3004,40 @@ not up as widths are: the ascent is the position of a line, not room to
 reserve. With no registered engine (tests without `engine.New`, a stopped
 engine) an approximation from the point size is returned, so that a layout does
 not divide by zero; a size of zero or less gives all zeros.
+
+---
+
+### Small text sharpness (v3.42)
+
+By default text is rasterized as before: grayscale antialiasing without
+hinting. At small sizes (12–14 px) stems then land on the pixel grid by
+chance, so the same letter is crisp in one place of a line and blurry in
+another. The `TextQuality` mode fixes that. It is **off by default** — frames
+of existing programs do not change — and has to be turned on explicitly, once
+at start-up:
+
+```go
+eng.SetTextQuality(engine.TextQuality{
+    Hinting:  true,                       // x-height, cap height, baseline on whole pixels
+    Contrast: engine.DefaultTextContrast, // 0…1: thin stems darker (0.3–0.4 if text looks heavy)
+})
+```
+
+- `Hinting` — light vertical autohinting, like FreeType's light mode: the
+  outline is stretched along Y only, so line widths (`MeasureText`), layout
+  and mock-ups stay the same. Horizontal bars (`e`, `H`) get a whole-pixel
+  thickness.
+- `Contrast` — boosts coverage of thin stems depending on the text colour's
+  luminance; light text on a dark background is not thickened.
+- `LCD` (+ `LCDOrder`: `LCDOrderRGB`/`LCDOrderBGR`) — subpixel antialiasing,
+  on opaque backgrounds only. In a remote session (RDP) it is useless and
+  compresses worse — `Hinting` and `Contrast` are enough there.
+
+The mode applies to every font of the canvas, survives `SetScale`/
+`SetResolution` and combines with `SetTextSubpixel`. The output is
+byte-identical on Windows, Linux and in CI. Short forms exist too:
+`SetTextHinting(bool)`, `SetTextContrast(float64)`. Re-record the program's
+golden snapshots after turning it on.
 
 ---
 
@@ -4362,6 +4394,33 @@ As with HTML, this is the optional `widget.ClipboardFilesProvider`
 without it gets the paths as text from `ClipboardSetFiles`, and
 `ClipboardFiles` honestly answers `ok == false`. `UseMemoryClipboard()`
 supports files.
+
+### What is on the clipboard, without reading it (v3.42)
+
+`ClipboardFiles` may wait for the clipboard owner — on Linux for minutes. To
+decide whether to offer "Paste files" there is no need to read the list:
+
+```go
+if widget.ClipboardHasFiles() { /* files (or deferred files) are on the clipboard */ }
+
+kinds := widget.ClipboardFormats() // ClipboardFormatText | HTML | Image | Files
+if kinds.Has(widget.ClipboardFormatImage) { /* ... */ }
+```
+
+Both calls answer at once and read no data:
+
+- Windows — `IsClipboardFormatAvailable`, the clipboard is not opened; files
+  not yet downloaded (`FileGroupDescriptorW`) count as files too.
+- Wayland — from the types of the current clipboard offer.
+- X11 — a single `TARGETS` question with a 250 ms deadline; the answer is
+  remembered until the owner changes (XFixes). If the owner is already busy
+  being read, no second question is sent — the last known answer is returned.
+- Our own data, deferred files included, is seen at once. macOS — empty set.
+
+The answer is about announced types, not data: on Linux an `https://` link in
+`text/uri-list` counts as "files" although `ClipboardFiles` filters it out. A
+custom clipboard provider answers if it implements
+`widget.ClipboardFormatsProvider`, otherwise the set is empty.
 
 ### Deferred files on the clipboard
 
