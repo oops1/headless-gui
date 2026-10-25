@@ -21,6 +21,7 @@ package engine
 
 import (
 	"image"
+	"math"
 	"sync"
 
 	"github.com/go-text/typesetting/di"
@@ -221,6 +222,7 @@ type maskKey struct {
 	face   *tsfont.Face
 	gid    tsfont.GID
 	sizePx fixed.Int26_6
+	hint   bool // маска с вертикальным автохинтингом (TextQuality.Hinting)
 }
 
 // glyphMask — растеризованная маска глифа с оффсетом от точки отрисовки.
@@ -254,6 +256,9 @@ type textShaper struct {
 	dynColorGlyphs map[dynColorKey]*colorGlyph
 	// faceColor — есть ли у face цветные глифы вообще (COLR/CBDT).
 	faceColor map[*tsfont.Face]bool
+	// vhints — отображения высот автохинтера по (face, размер) (texthint.go);
+	// nil-значение — зон у шрифта нет.
+	vhints map[hintKey]*vHint
 }
 
 // dropLayouts сбрасывает кэш раскладок: его ключ не учитывает DPI.
@@ -372,15 +377,19 @@ func reverseOutputs(outs []shaping.Output) {
 // ─── Растеризация глифа по GID ───────────────────────────────────────────────
 
 // glyphMaskFor возвращает альфа-маску глифа (кэшируется по face+GID+размеру).
-func (ts *textShaper) glyphMaskFor(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6) *glyphMask {
-	key := maskKey{face: face, gid: gid, sizePx: sizePx}
+func (ts *textShaper) glyphMaskFor(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, hint bool) *glyphMask {
+	key := maskKey{face: face, gid: gid, sizePx: sizePx, hint: hint}
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	if m, ok := ts.masks[key]; ok {
 		return m
 	}
 
-	m := rasterizeGlyph(face, gid, sizePx)
+	var vh *vHint
+	if hint {
+		vh = ts.vhintFor(face, sizePx)
+	}
+	m := rasterizeGlyph(face, gid, sizePx, vh)
 
 	if ts.masks == nil {
 		ts.masks = make(map[maskKey]*glyphMask)
@@ -394,7 +403,10 @@ func (ts *textShaper) glyphMaskFor(face *tsfont.Face, gid tsfont.GID, sizePx fix
 // rasterizeGlyph растеризует контур глифа в альфа-маску.
 // Координаты контура — в font units (ось Y вверх); масштаб sizePx/upem,
 // при отрисовке Y инвертируется (растровая ось — вниз).
-func rasterizeGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6) *glyphMask {
+//
+// vh != nil — вертикальный автохинтинг: Y-координата каждой точки контура
+// проходит через отображение зон (texthint.go), X не меняется.
+func rasterizeGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, vh *vHint) *glyphMask {
 	outline, ok := face.GlyphData(gid).(tsfont.GlyphOutline)
 	if !ok || len(outline.Segments) == 0 {
 		return &glyphMask{} // пробел/битмап-глиф — рисовать нечего
@@ -413,6 +425,54 @@ func rasterizeGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6) *gl
 	x1 := (ext.XBearing + ext.Width) * scale
 	y1 := -(ext.YBearing + ext.Height) * scale
 
+	// fy — Y точки контура в растровых пикселях (ось вниз). С хинтингом
+	// высота (26.6, ось вверх) проходит через отображение зон.
+	fy := func(y float32) float32 { return -y * scale }
+	if vh != nil {
+		// Штрихи этого глифа (перекладины, полки) — отображение на глиф.
+		fx := func(v float32) int { return int(math.Floor(float64(v*scale*64) + 0.5)) }
+		var sc hintScan
+		for _, seg := range outline.Segments {
+			switch seg.Op {
+			case ot.SegmentOpMoveTo:
+				sc.moveTo(fx(seg.Args[0].X), fx(seg.Args[0].Y))
+			case ot.SegmentOpLineTo:
+				sc.lineTo(fx(seg.Args[0].X), fx(seg.Args[0].Y))
+			case ot.SegmentOpQuadTo:
+				sc.curveTo(fx(seg.Args[1].X), fx(seg.Args[1].Y))
+			case ot.SegmentOpCubeTo:
+				sc.curveTo(fx(seg.Args[2].X), fx(seg.Args[2].Y))
+			}
+		}
+		vh = vh.withStems(&sc, int(sizePx))
+		fy = func(y float32) float32 {
+			return -float32(vh.apply(int(math.Floor(float64(y*scale*64)+0.5)))) / 64
+		}
+		// Размах по Y после выравнивания — по всем точкам контура.
+		y0, y1 = float32(math.MaxFloat32), -float32(math.MaxFloat32)
+		note := func(y float32) {
+			v := fy(y)
+			if v < y0 {
+				y0 = v
+			}
+			if v > y1 {
+				y1 = v
+			}
+		}
+		for _, seg := range outline.Segments {
+			n := 1
+			switch seg.Op {
+			case ot.SegmentOpQuadTo:
+				n = 2
+			case ot.SegmentOpCubeTo:
+				n = 3
+			}
+			for i := 0; i < n; i++ {
+				note(seg.Args[i].Y)
+			}
+		}
+	}
+
 	minX, minY := floorF32(x0), floorF32(y0)
 	w := ceilF32(x1) - minX + 1
 	h := ceilF32(y1) - minY + 1
@@ -430,19 +490,19 @@ func rasterizeGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6) *gl
 				r.ClosePath()
 			}
 			p := seg.Args[0]
-			r.MoveTo(p.X*scale-offX, -p.Y*scale-offY)
+			r.MoveTo(p.X*scale-offX, fy(p.Y)-offY)
 			started = true
 		case ot.SegmentOpLineTo:
 			p := seg.Args[0]
-			r.LineTo(p.X*scale-offX, -p.Y*scale-offY)
+			r.LineTo(p.X*scale-offX, fy(p.Y)-offY)
 		case ot.SegmentOpQuadTo:
 			c, p := seg.Args[0], seg.Args[1]
-			r.QuadTo(c.X*scale-offX, -c.Y*scale-offY, p.X*scale-offX, -p.Y*scale-offY)
+			r.QuadTo(c.X*scale-offX, fy(c.Y)-offY, p.X*scale-offX, fy(p.Y)-offY)
 		case ot.SegmentOpCubeTo:
 			c1, c2, p := seg.Args[0], seg.Args[1], seg.Args[2]
-			r.CubeTo(c1.X*scale-offX, -c1.Y*scale-offY,
-				c2.X*scale-offX, -c2.Y*scale-offY,
-				p.X*scale-offX, -p.Y*scale-offY)
+			r.CubeTo(c1.X*scale-offX, fy(c1.Y)-offY,
+				c2.X*scale-offX, fy(c2.Y)-offY,
+				p.X*scale-offX, fy(p.Y)-offY)
 		}
 	}
 	if started {

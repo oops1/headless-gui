@@ -24,6 +24,7 @@ import (
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
+	"golang.org/x/image/vector"
 )
 
 // DefaultDPI — DPI по умолчанию для рендеринга шрифтов.
@@ -68,6 +69,15 @@ type FontCache struct {
 	// По умолчанию выключено: шаг каждого глифа округляется до целого, как
 	// было всегда, и вид существующих тем не меняется.
 	subpixel bool
+	// quality — слой качества текста (textquality.go): хинтинг, контраст, LCD.
+	// По умолчанию нулевой — вид глифов прежний; рассылается всем шрифтам
+	// канваса, как и subpixel. Ширин не меняет.
+	quality TextQuality
+	// hints — вертикальные отображения автохинтера по размеру em (26.6);
+	// nil-значение — для шрифта зон не нашлось (texthint.go).
+	hints map[fixed.Int26_6]*vHint
+	// rast — растеризатор хинтованных глифов, переиспользуется под fc.mu.
+	rast *vector.Rasterizer
 	// famKey — ключ семейства, под которым шрифт записан в таблице семейств
 	// (fontfamily.go); "" — шрифт в таблицу не входит.
 	famKey string
@@ -102,6 +112,7 @@ const maxKernCacheEntries = 8192
 // Маска immutable после создания — читается без блокировки.
 type cachedGlyph struct {
 	mask    *image.Alpha  // плотная альфа-маска (nil для глифов без пикселей, напр. пробел)
+	lcd     *lcdMask      // покрытие по цветным каналам (TextQuality.LCD); тогда mask == nil
 	offX    int           // смещение маски от целочисленной позиции пера
 	offY    int           // смещение маски от базовой линии
 	advance fixed.Int26_6 // продвижение пера
@@ -276,6 +287,7 @@ func (fc *FontCache) SetDPI(dpi float64) {
 	fc.dpi = dpi
 	fc.cache = make(map[float64]font.Face) // очищаем кэш
 	fc.glyphs = nil                        // маски зависят от DPI
+	fc.hints = nil
 	fc.metrics = nil
 	fc.kern = nil // кернинг зависит от DPI/размера
 }
@@ -294,6 +306,28 @@ func (fc *FontCache) SetSubpixel(on bool) {
 	fc.glyphs = nil
 	fc.metrics = nil
 	fc.kern = nil
+}
+
+// SetQuality задаёт слой качества текста (TextQuality). Меняет только маски
+// глифов — шаг, кернинг и метрики те же, — поэтому сбрасывается лишь кэш масок
+// и зон хинтинга. Вызывать до отрисовки (под блокировкой кадра).
+func (fc *FontCache) SetQuality(q TextQuality) {
+	q = q.normalized()
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	if fc.quality == q {
+		return
+	}
+	fc.quality = q
+	fc.glyphs = nil
+	fc.hints = nil
+}
+
+// Quality возвращает действующий слой качества текста.
+func (fc *FontCache) Quality() TextQuality {
+	fc.mu.RLock()
+	defer fc.mu.RUnlock()
+	return fc.quality
 }
 
 // Subpixel сообщает, включено ли дробное позиционирование глифов.
@@ -399,6 +433,12 @@ func (fc *FontCache) GlyphAt(sizePt float64, r rune, phase int) cachedGlyph {
 	// маска, снятая в (0,0), корректна для любой целочисленной позиции. В
 	// подпиксельном режиме шаг дробный, и маска снимается для каждой из
 	// четвертей пикселя отдельно (phase).
+	if fc.quality.Hinting || fc.quality.LCD {
+		if hg, ok := fc.hintedGlyph(face, sizePt, r, phase, fc.quality); ok {
+			fc.glyphs[k] = hg
+			return hg
+		}
+	}
 	dot := fixed.Point26_6{X: fixed.Int26_6(phase * (64 / subpixelPhases))}
 	dr, maskImg, maskPt, adv, ok := face.Glyph(dot, r)
 	g := cachedGlyph{advance: adv, ok: ok}

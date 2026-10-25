@@ -861,6 +861,46 @@ func (e *Engine) SetTextSubpixel(on bool) {
 	e.Invalidate()
 }
 
+// SetTextQuality задаёт слой качества мелкого текста (см. TextQuality):
+// автохинтинг по вертикали, подъём контраста тонких штрихов и, по явной
+// просьбе, субпиксельное сглаживание LCD.
+//
+// По умолчанию всё выключено, и текст рисуется как прежде, побайтно. Ширины
+// строк, шаги глифов и кернинг от режима не зависят, поэтому раскладку и
+// измерения (MeasureText) перестраивать не нужно; сбрасываются только маски
+// глифов, окно перерисуется. Режим касается шрифтов движка целиком, в том числе
+// зарегистрированных позже. Не связан с SetTextSubpixel: их можно сочетать.
+func (e *Engine) SetTextQuality(q TextQuality) {
+	e.frameMu.Lock()
+	e.canvas.setTextQuality(q)
+	e.frameMu.Unlock()
+	e.Invalidate()
+}
+
+// TextQuality возвращает действующий слой качества текста (значения
+// приведены к допустимым: Contrast — к [0, 1] с шагом 1/64).
+func (e *Engine) TextQuality() TextQuality {
+	e.frameMu.Lock()
+	defer e.frameMu.Unlock()
+	return e.canvas.fontCache.Quality()
+}
+
+// SetTextHinting включает и выключает только автохинтинг по вертикали,
+// не трогая остальные поля TextQuality.
+func (e *Engine) SetTextHinting(on bool) {
+	q := e.TextQuality()
+	q.Hinting = on
+	e.SetTextQuality(q)
+}
+
+// SetTextContrast задаёт только подъём контраста тонких штрихов (0..1;
+// DefaultTextContrast — рекомендуемое значение), не трогая остальные поля.
+func (e *Engine) SetTextContrast(c float64) {
+	q := e.TextQuality()
+	q.Contrast = c
+	e.SetTextQuality(q)
+}
+
 // UseThemeTextSubpixel возвращает выбор подпиксельного текста теме: явное
 // SetTextSubpixel приложения снимается, и режим тут же становится таким,
 // каким его просит последний применённый профиль.
