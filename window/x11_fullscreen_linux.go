@@ -239,7 +239,12 @@ func (w *X11Window) x11SyncWMState() {
 	if !full {
 		w.maximized = x11StateHas(data, w.atomWMStateMaxH) && x11StateHas(data, w.atomWMStateMaxV)
 	}
-	if w.fs.on.Swap(full) != full {
+	changed := w.fs.on.Swap(full) != full
+	// Менеджер вернул окно в обычное состояние сам (двойной щелчок по
+	// заголовку, Esc): размер, заказанный SetSize за это время, применяется
+	// теперь. Состояние уже записано — SetSize больше не копит заказ.
+	w.x11ApplyRestoreSize()
+	if changed {
 		if fn := w.fs.onChange.Load(); fn != nil {
 			(*fn)(full)
 		}
