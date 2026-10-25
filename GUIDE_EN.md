@@ -3791,7 +3791,7 @@ position still applies. Where the window ends up is the application's decision:
 monitor.
 
 The values are applied once. A call after `Run` changes nothing: a running window is
-moved and resized the old way (`Native().SetPosition/SetSize`). It works together
+moved the old way (`Native().SetPosition`), and `Window.SetSize` resizes it (see "Window size from the program" below). It works together
 with `SetFullscreen` before `Run`: the window is created with these bounds first,
 and leaving full screen returns exactly them (and "maximized", if it was set).
 `IsMaximized` is `true` after a maximized start.
@@ -3810,6 +3810,48 @@ and leaving full screen returns exactly them (and "maximized", if it was set).
   size even if the compositor, which never saw a normal window, sends 0x0.
 - **macOS.** A no-op: the size is honored anyway, and the position is not
   implemented on this backend at all.
+
+### Window size from the program (v3.43)
+
+Since v3.43 a running window is resized with `Window.SetSize(w, h)`. The units are
+those of `SetMinSize` and `SetInitialBounds` — **logical** pixels (the window
+multiplies them by the scale); in `FitScale` mode they are window pixels.
+
+```go
+win.SetSize(520, 370)  // compact mode
+win.SetSize(1400, 860) // and back
+```
+
+The engine goes through the same path as a mouse resize (`onResize` -> canvas ->
+layout -> frame), **exactly once** per request. The size is already that: nothing
+happens. Before `Run` the call sets the initial size (the last call wins,
+`SetInitialBounds` included).
+
+- **Win32.** `MoveWindow` -> `WM_SIZE` -> `onResize` at once. For a maximized window
+  the normal rectangle changes: the window gets the ordered size on "restore".
+- **X11.** `ConfigureWindow` is a request: the window size changes only on the window
+  manager's `ConfigureNotify`, and that event drives `onResize`. Until the manager
+  answers, `Native().GetSize()` returns the old (actual) size; if the manager refuses,
+  stays silent or adjusts the size (minimum, increments), `GetSize` and the canvas
+  follow what the server reported. A repeated event with the same size gives no
+  second `onResize`.
+- **Wayland.** A floating window's size is the client's choice and the compositor need
+  not send `configure`, so the window reports `onResize` itself, the engine draws a
+  frame of the new size and the window commits the buffer. It does not depend on
+  `SetResizable`: a non-resizable window is pinned at the new size
+  (`set_min_size == set_max_size`) so that the compositor does not return the old one.
+  A `configure` with the same size does not call `onResize` again; if it names another
+  size, the engine gets it.
+- **A maximized, full-screen or edge-tiled (Wayland `tiled_*`) window** does not pick
+  its size: `SetSize` remembers the order, `GetSize` keeps returning the on-screen
+  size, and when the window returns to the normal state (`Restore`, leaving full
+  screen) it gets the ordered size, whether the compositor named no size or named the
+  previous one.
+- **macOS.** Not implemented: the Cocoa backend's `SetSize` only remembers the size.
+
+`Native().GetSize()` is in physical window pixels, `Window.SetSize` takes logical
+ones; multiply by the scale to compare. Details are in `docs/AI_AGENT_REFERENCE.md`,
+section "v3.43".
 
 ### Keyboard grab, monitor changes, system language and accent (v3.39)
 

@@ -9662,6 +9662,91 @@ needs `HEADLESS_GUI_TEST_SYSCLIPBOARD=1` or CI), `window/clipboard_virtual_test.
 fake server: types announced, callback only on request, release on every way
 out, window close).
 
+## v3.43: programmatic window size — `Window.SetSize` (RDP client Tandem)
+
+Reported by the RDP client on Tandem 1.5.1: the compact mode asks for a 520x370
+window through `Native().SetSize`. On Win32 `MoveWindow` raises `WM_SIZE` and the
+engine rebuilds, on Linux the window stayed 1400x860 while `GetSize` already
+answered 520x370 and the form was laid out at the old size.
+
+```go
+win.SetSize(520, 370)  // logical pixels (x scale); FitScale: window pixels
+win.SetSize(1400, 860) // and back
+```
+
+- **Contract.** The window changes size and the engine goes through the same path as
+  a mouse resize (`NativeWindow.SetOnResize` -> `Window.resizeTo` -> canvas, root
+  bounds, frame buffer, next frame), **exactly once** per request. The size is
+  already that (compared in physical pixels with `NativeWindow.GetSize`): nothing
+  happens. `width` or `height` <= 0 is ignored. Called from any goroutine (the
+  backend call goes through `onNative`). Before `Run` it sets the initial size
+  (`initialState.sizeSet`; the last of `SetSize` / `SetInitialBounds` wins; no
+  position is passed to the backend).
+- **Units.** Logical x `Window.scale`, rounded half up, like `SetMinSize` and
+  `SetInitialBounds`. `Native().GetSize()` stays in physical pixels (on Wayland — buffer
+  pixels).
+- **X11** (`window/x11_setsize_linux.go`). `X11Window.width/height` are written **only**
+  by `ConfigureNotify` (`x11NoteConfigureSize`); `SetSize` sends `ConfigureWindow`
+  and remembers the request (`x11SizeReq`: value and time, valid `x11SizeReqTTL` =
+  1 s) so that a quick `SetSize(a); SetSize(b)` is compared with the requested, not
+  with the not-yet-changed actual size. The event then takes the old resize branch:
+  `x11ShmResize` (the SHM segment follows the event, not the request), `onResize`.
+  A manager that refuses (a synchronous `ConfigureNotify` with the old size) or stays
+  silent leaves the window and `GetSize` as they were; one that adjusts the size
+  (minimum, increments) gives `onResize` the actual size once. A repeated event with
+  the same size gives no second `onResize`. No `GetGeometry`: a synchronous request
+  on the window connection is not allowed (the event loop reads it), and the last
+  size the server reported is by construction the actual one. A pop-up
+  (override-redirect, no `StructureNotify`) applies the size at once as before; a
+  window that is not on the server yet (`wid == 0`) only remembers it for `Create`.
+- **Wayland** (`WaylandWindow.SetSize`). A floating window (not maximized, not
+  full screen, not `tiled_*`) picks its own size under xdg-shell. `SetSize` stores
+  the size, sets `pendingResize`, calls `onResize(w, h)` itself (the engine redraws,
+  `BlitRGBADirty` sees a frame of another size, rebuilds the pool and commits the
+  buffer) — **independently of `resizable`**, the compositor need not send
+  `configure`. A non-resizable window is pinned at the new size
+  (`set_min_size == set_max_size`, `pinSize`) before the frame; a resizable one has
+  no limits sent. A later `configure` with the same size is not news (`nw != w.width`
+  is false): no second `onResize`; with another size (minimum, tiling) the engine
+  gets it.
+- **Maximized, full-screen, tiled windows.** The size of such a window is chosen by
+  the system, so `SetSize` does not change it; `GetSize` keeps the on-screen size and
+  the order is remembered and applied when the window returns to the normal state:
+  - Wayland: `WaylandWindow.restoreW/H` (+ `fs.saveW/H` for full screen, so that leaving
+    pins the non-resizable window at the ordered size); the first `configure`
+    without `maximized`/`fullscreen`/`tiled_*` replaces whatever size the compositor
+    named (0x0 "decide yourself" or the previous one) with the ordered one
+    (`takeRestoreSize`), `onResize` once; `Restore()` pins a non-resizable window at
+    the ordered size, not at the maximized one. `tiled_*` states are parsed
+    (`wlParseTiled`, `WaylandWindow.tiled`).
+  - X11: `x11SizeReq.restoreW/H`; `ConfigureWindow` goes out from `Restore()` and
+    from `x11SyncWMState` when the manager itself returned the window to the normal
+    state (`x11ApplyRestoreSize`).
+  - Win32: `setNormalSize` — `GetWindowPlacement`/`SetWindowPlacement` change
+    `rcNormalPosition` of a zoomed window; the window is still maximized, `Restore`
+    gives the ordered size. Full screen already remembered the order
+    (`fs.snap`).
+- **Win32.** Unchanged for a normal window: `MoveWindow` -> `WM_SIZE` -> `onResize`.
+  The pixels are physical (the window multiplied the logical size by the scale).
+- **macOS.** `CocoaWindow.SetSize` is still a stub (only remembers the size; the
+  backend has no resize notification either) — **not implemented**, not checked live.
+- **Compatibility.** `NativeWindow.SetSize` is unchanged. Code calling
+  `Native().SetSize` now also reaches the engine on X11 and Wayland (it did not
+  before); the DPI-change path of `Window` (`SetOnDpiChanged`) calls it too, so there
+  is one extra `onResize` with the same logical size after a scale change on those
+  backends, as on Win32.
+
+Tests: `window/setsize_test.go` (the common layer on a fake backend: units, once,
+the same size, before `Run`, `FitScale`), `window/x11_setsize_linux_test.go` (a fake X
+server: the exact `ConfigureWindow`, `ConfigureNotify` as the manager's answer,
+refusal, silence, adjusted size, quick round trip, pop-up, `wid == 0`, maximized /
+full screen / `Restore` / the manager's `_NET_WM_STATE`, the SHM segment),
+`window/wayland_setsize_apply_linux_test.go` (a fake compositor: round trip 1400x860
+<-> 520x370 for a non-resizable and a resizable window, limits in surface units on
+HiDPI, a committed buffer, `configure` with the same size, maximized / full screen /
+tiled / after `Restore`), `window/setsize_windows_test.go` (a live Win32 window:
+round trip, scale 2, maximized -> `Restore`).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
