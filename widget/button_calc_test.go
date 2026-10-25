@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// Подпись кнопки центрируется по высоте строки своего кегля, а не по
+// Подпись крупного кегля центрируется по высоте своей строки, а не по
 // зашитым 13 px (замечание проекта calc на v3.39.0). Для шрифта по умолчанию
-// высота прежняя — кадры кнопок без своего FontSize не меняются.
+// и мельче высота прежняя — 13 (GG-94: уменьшенная опускала мелкую подпись).
 func TestButtonTextHeight_FollowsFontSize(t *testing.T) {
 	def := DefaultFontSize()
 	if got := buttonTextHeight(def); got != 13 {
@@ -16,8 +16,10 @@ func TestButtonTextHeight_FollowsFontSize(t *testing.T) {
 	if got := buttonTextHeight(def * 2); got != 26 {
 		t.Errorf("вдвое крупнее: высота %d, ждали 26", got)
 	}
-	if got := buttonTextHeight(def / 2); got < 6 || got > 7 {
-		t.Errorf("вдвое мельче: высота %d, ждали 6–7", got)
+	for _, pt := range []float64{def / 2, 8, def - 0.5} {
+		if got := buttonTextHeight(pt); got != 13 {
+			t.Errorf("%.1f pt (мельче шрифта по умолчанию): высота %d, ждали прежние 13", pt, got)
+		}
 	}
 }
 

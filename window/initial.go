@@ -42,10 +42,12 @@ type initialState struct {
 	boundsSet  bool
 	x, y, w, h int
 	maximized  bool
+	// sizeSet — размер задан отдельно от положения: Window.SetSize до Run.
+	sizeSet bool
 }
 
 // hasSize — начальный размер задан (и положителен по обеим осям).
-func (s initialState) hasSize() bool { return s.boundsSet && s.w > 0 && s.h > 0 }
+func (s initialState) hasSize() bool { return (s.boundsSet || s.sizeSet) && s.w > 0 && s.h > 0 }
 
 // SetInitialBounds задаёт, где и какого размера появится окно. Вызывается до
 // Run; значения применяются один раз, при создании окна ОС, без видимого
@@ -311,7 +313,9 @@ var (
 // один Xft.dpi на всех, на Wayland положение выбирает компоновщик. Явное
 // HEADLESS_GUI_SCALE важнее.
 func (win *Window) initialMonitorScale(base float64) float64 {
-	if !initialPerMonitorScale || !win.initial.hasSize() {
+	// Монитор выбирается по положению: размер без положения (Window.SetSize
+	// до Run) его не определяет.
+	if !initialPerMonitorScale || !win.initial.boundsSet || !win.initial.hasSize() {
 		return base
 	}
 	if os.Getenv("HEADLESS_GUI_SCALE") != "" {

@@ -2927,8 +2927,6 @@ bridge. Keyboard navigation (Tab/Shift+Tab, Enter/Space) already works.
 
 ### Fonts
 
-Eight bundled free families### Fonts
-
 Eight bundled free families, each with its license file (full list, licenses
 and redistribution duties: `assets/fonts/README.md`):
 
@@ -3006,6 +3004,40 @@ not up as widths are: the ascent is the position of a line, not room to
 reserve. With no registered engine (tests without `engine.New`, a stopped
 engine) an approximation from the point size is returned, so that a layout does
 not divide by zero; a size of zero or less gives all zeros.
+
+---
+
+### Small text sharpness (v3.42)
+
+By default text is rasterized as before: grayscale antialiasing without
+hinting. At small sizes (12–14 px) stems then land on the pixel grid by
+chance, so the same letter is crisp in one place of a line and blurry in
+another. The `TextQuality` mode fixes that. It is **off by default** — frames
+of existing programs do not change — and has to be turned on explicitly, once
+at start-up:
+
+```go
+eng.SetTextQuality(engine.TextQuality{
+    Hinting:  true,                       // x-height, cap height, baseline on whole pixels
+    Contrast: engine.DefaultTextContrast, // 0…1: thin stems darker (0.3–0.4 if text looks heavy)
+})
+```
+
+- `Hinting` — light vertical autohinting, like FreeType's light mode: the
+  outline is stretched along Y only, so line widths (`MeasureText`), layout
+  and mock-ups stay the same. Horizontal bars (`e`, `H`) get a whole-pixel
+  thickness.
+- `Contrast` — boosts coverage of thin stems depending on the text colour's
+  luminance; light text on a dark background is not thickened.
+- `LCD` (+ `LCDOrder`: `LCDOrderRGB`/`LCDOrderBGR`) — subpixel antialiasing,
+  on opaque backgrounds only. In a remote session (RDP) it is useless and
+  compresses worse — `Hinting` and `Contrast` are enough there.
+
+The mode applies to every font of the canvas, survives `SetScale`/
+`SetResolution` and combines with `SetTextSubpixel`. The output is
+byte-identical on Windows, Linux and in CI. Short forms exist too:
+`SetTextHinting(bool)`, `SetTextContrast(float64)`. Re-record the program's
+golden snapshots after turning it on.
 
 ---
 
@@ -3791,7 +3823,7 @@ position still applies. Where the window ends up is the application's decision:
 monitor.
 
 The values are applied once. A call after `Run` changes nothing: a running window is
-moved and resized the old way (`Native().SetPosition/SetSize`). It works together
+moved the old way (`Native().SetPosition`), and `Window.SetSize` resizes it (see "Window size from the program" below). It works together
 with `SetFullscreen` before `Run`: the window is created with these bounds first,
 and leaving full screen returns exactly them (and "maximized", if it was set).
 `IsMaximized` is `true` after a maximized start.
@@ -3810,6 +3842,48 @@ and leaving full screen returns exactly them (and "maximized", if it was set).
   size even if the compositor, which never saw a normal window, sends 0x0.
 - **macOS.** A no-op: the size is honored anyway, and the position is not
   implemented on this backend at all.
+
+### Window size from the program (v3.43)
+
+Since v3.43 a running window is resized with `Window.SetSize(w, h)`. The units are
+those of `SetMinSize` and `SetInitialBounds` — **logical** pixels (the window
+multiplies them by the scale); in `FitScale` mode they are window pixels.
+
+```go
+win.SetSize(520, 370)  // compact mode
+win.SetSize(1400, 860) // and back
+```
+
+The engine goes through the same path as a mouse resize (`onResize` -> canvas ->
+layout -> frame), **exactly once** per request. The size is already that: nothing
+happens. Before `Run` the call sets the initial size (the last call wins,
+`SetInitialBounds` included).
+
+- **Win32.** `MoveWindow` -> `WM_SIZE` -> `onResize` at once. For a maximized window
+  the normal rectangle changes: the window gets the ordered size on "restore".
+- **X11.** `ConfigureWindow` is a request: the window size changes only on the window
+  manager's `ConfigureNotify`, and that event drives `onResize`. Until the manager
+  answers, `Native().GetSize()` returns the old (actual) size; if the manager refuses,
+  stays silent or adjusts the size (minimum, increments), `GetSize` and the canvas
+  follow what the server reported. A repeated event with the same size gives no
+  second `onResize`.
+- **Wayland.** A floating window's size is the client's choice and the compositor need
+  not send `configure`, so the window reports `onResize` itself, the engine draws a
+  frame of the new size and the window commits the buffer. It does not depend on
+  `SetResizable`: a non-resizable window is pinned at the new size
+  (`set_min_size == set_max_size`) so that the compositor does not return the old one.
+  A `configure` with the same size does not call `onResize` again; if it names another
+  size, the engine gets it.
+- **A maximized, full-screen or edge-tiled (Wayland `tiled_*`) window** does not pick
+  its size: `SetSize` remembers the order, `GetSize` keeps returning the on-screen
+  size, and when the window returns to the normal state (`Restore`, leaving full
+  screen) it gets the ordered size, whether the compositor named no size or named the
+  previous one.
+- **macOS.** Not implemented: the Cocoa backend's `SetSize` only remembers the size.
+
+`Native().GetSize()` is in physical window pixels, `Window.SetSize` takes logical
+ones; multiply by the scale to compare. Details are in `docs/AI_AGENT_REFERENCE.md`,
+section "v3.43".
 
 ### Keyboard grab, monitor changes, system language and accent (v3.39)
 
@@ -4320,6 +4394,33 @@ As with HTML, this is the optional `widget.ClipboardFilesProvider`
 without it gets the paths as text from `ClipboardSetFiles`, and
 `ClipboardFiles` honestly answers `ok == false`. `UseMemoryClipboard()`
 supports files.
+
+### What is on the clipboard, without reading it (v3.42)
+
+`ClipboardFiles` may wait for the clipboard owner — on Linux for minutes. To
+decide whether to offer "Paste files" there is no need to read the list:
+
+```go
+if widget.ClipboardHasFiles() { /* files (or deferred files) are on the clipboard */ }
+
+kinds := widget.ClipboardFormats() // ClipboardFormatText | HTML | Image | Files
+if kinds.Has(widget.ClipboardFormatImage) { /* ... */ }
+```
+
+Both calls answer at once and read no data:
+
+- Windows — `IsClipboardFormatAvailable`, the clipboard is not opened; files
+  not yet downloaded (`FileGroupDescriptorW`) count as files too.
+- Wayland — from the types of the current clipboard offer.
+- X11 — a single `TARGETS` question with a 250 ms deadline; the answer is
+  remembered until the owner changes (XFixes). If the owner is already busy
+  being read, no second question is sent — the last known answer is returned.
+- Our own data, deferred files included, is seen at once. macOS — empty set.
+
+The answer is about announced types, not data: on Linux an `https://` link in
+`text/uri-list` counts as "files" although `ClipboardFiles` filters it out. A
+custom clipboard provider answers if it implements
+`widget.ClipboardFormatsProvider`, otherwise the set is empty.
 
 ### Deferred files on the clipboard
 
