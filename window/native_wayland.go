@@ -283,6 +283,13 @@ type WaylandWindow struct {
 	// читает движок (кнопка «развернуть» спрашивает IsMaximized).
 	maximized  atomic.Bool
 	fullscreen atomic.Bool
+	// tiled — окно прилеплено к краю (tiled_* в configure): размер ему, как
+	// и развёрнутому, назначает компоновщик.
+	tiled atomic.Bool
+	// restoreW/restoreH — размер, заказанный SetSize, пока окно развёрнуто,
+	// на весь экран или прилеплено (под mu). Окно им не распоряжается — оно
+	// применяется при возврате к обычному состоянию (SetSize, setRestoreSize).
+	restoreW, restoreH int
 	// fs — запрос полного экрана и уведомление о нём (wayland_fullscreen_linux.go).
 	fs wlFullscreen
 
@@ -918,11 +925,14 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		active, maximized, fullscreen := wlParseStates(b[8:])
 		wlLog("toplevel.configure: %dx%d active=%v maximized=%v fullscreen=%v",
 			nw, nh, active, maximized, fullscreen)
+		tiled := wlParseTiled(b[8:])
 		w.noteToplevelStates(maximized, fullscreen)
+		w.tiled.Store(tiled)
 		if w.onActivate != nil {
 			w.onActivate(active)
 		}
 		nw, nh = w.restoreNormalSize(nw, nh, maximized, fullscreen)
+		nw, nh = w.takeRestoreSize(nw, nh, maximized || fullscreen || tiled)
 		// 0×0 — «решай сам»: размер не трогаем (так приходит configure при
 		// первом показе и при выходе из развёрнутого состояния).
 		if nw > 0 && nh > 0 && (nw != w.width || nh != w.height) {
@@ -1654,23 +1664,99 @@ func (w *WaylandWindow) SetTitle(title string) {
 	}
 }
 
-// SetSize запоминает новый размер окна (пиксели буфера). У окна с запретом
-// ресайза размер зафиксирован парой set_min_size == set_max_size, и просто
-// выставить другой буфер композитору нельзя: фиксация переносится на новый
-// размер, и он ответит configure с ним же. Растяжимое, развёрнутое и
-// полноэкранное окно размер выбирает не клиент: для них запоминается только
-// размер кадра, а окном по-прежнему распоряжается компоновщик.
+// SetSize меняет размер окна (пиксели буфера).
+//
+// По xdg-shell размер обычного (плавающего) окна выбирает клиент: он
+// коммитит буфер нужного размера, а компоновщик ничего присылать не обязан.
+// Поэтому окно не ждёт configure, а проводит новый размер тем же путём, каким
+// его проводит configure с другим размером: запоминает, сообщает onResize
+// (движок перестраивает холст и раскладку и рисует кадр нужного размера) и
+// ждёт этот кадр, чтобы закоммитить буфер. Так — независимо от resizable. У
+// окна с запретом ресайза размер зафиксирован парой set_min_size ==
+// set_max_size, и фиксация переносится на новый размер, чтобы компоновщик не
+// вернул старый. Размер совпал с текущим — ничего не происходит.
+//
+// Configure с этим же размером, если компоновщик его всё же пришлёт, повторного
+// onResize не вызывает: сверка идёт с уже запомненным размером. Назвал другой
+// (минимум, тайлинг) — onResize сработает ещё раз уже с ним.
+//
+// Развёрнутое, полноэкранное и прилепленное к краю окно размер не выбирает:
+// его назначает компоновщик, GetSize продолжает отвечать им. Заказанный размер
+// запоминается и применяется, когда окно вернётся к обычному состоянию
+// (takeRestoreSize); окно с запретом ресайза при этом фиксируется на нём же.
 func (w *WaylandWindow) SetSize(width, height int) {
-	w.mu.Lock()
-	w.width, w.height = width, height
-	w.mu.Unlock()
-	if w.toplevelID == 0 || w.resizable.Load() || w.maximized.Load() || w.fullscreen.Load() {
+	if width <= 0 || height <= 0 {
 		return
 	}
-	w.applySizeLimits(false)
+	if w.toplevelID == 0 {
+		// Окна ещё нет: Create получит размер аргументами, а здесь он лишь
+		// запоминается для GetSize.
+		w.mu.Lock()
+		w.width, w.height = width, height
+		w.mu.Unlock()
+		return
+	}
+	if w.maximized.Load() || w.fullscreen.Load() || w.tiled.Load() {
+		w.mu.Lock()
+		w.restoreW, w.restoreH = width, height
+		w.mu.Unlock()
+		// Выход из полного экрана фиксирует окно на запомненном до него
+		// размере (restoreFixedSize): им становится заказанный.
+		w.fs.saveW.Store(int32(width))
+		w.fs.saveH.Store(int32(height))
+		return
+	}
+	w.mu.Lock()
+	same := width == w.width && height == w.height
+	w.restoreW, w.restoreH = 0, 0
+	if !same {
+		w.width, w.height = width, height
+		// Кадра под новый размер ещё нет: пока он в пути, старый в окне
+		// нового размера не растягивается (ack_configure без рекоммита).
+		w.pendingResize = true
+	}
+	w.mu.Unlock()
+	if same {
+		return
+	}
+	if !w.resizable.Load() {
+		w.applySizeLimits(false)
+	}
+	if w.onResize != nil {
+		w.onResize(width, height)
+	}
 }
 
-func (w *WaylandWindow) GetSize() (int, int) { return w.width, w.height }
+// takeRestoreSize подменяет размер из configure размером, заказанным SetSize,
+// пока окно было развёрнуто, на весь экран или прилеплено. constrained —
+// последний configure всё ещё в таком состоянии: заказанное ждёт дальше. Окно
+// с запретом ресайза фиксируется на этом размере сразу, пока старые пределы не
+// вернули ему прежний (или развёрнутый) размер.
+func (w *WaylandWindow) takeRestoreSize(nw, nh int, constrained bool) (int, int) {
+	if constrained {
+		return nw, nh
+	}
+	w.mu.Lock()
+	rw, rh := w.restoreW, w.restoreH
+	w.restoreW, w.restoreH = 0, 0
+	w.mu.Unlock()
+	if rw <= 0 || rh <= 0 {
+		return nw, nh
+	}
+	if !w.resizable.Load() {
+		w.pinSize(rw, rh)
+	}
+	return rw, rh
+}
+
+// GetSize — размер окна в пикселях буфера: последний, назначенный компоновщиком
+// (configure) или выбранный самим окном (SetSize на обычном окне). Заказанный
+// развёрнутому окну размер сюда не попадает до возврата в обычное состояние.
+func (w *WaylandWindow) GetSize() (int, int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.width, w.height
+}
 
 // SetPosition на Wayland не делает ничего и сделать не может: клиент не знает
 // положения своего окна на экране и не вправе его задавать, протокол xdg-shell
@@ -2187,9 +2273,15 @@ func (w *WaylandWindow) applySizeLimits(resizable bool) {
 		return
 	}
 	if !resizable {
-		sw, sh := int32(w.toSurface(w.width)), int32(w.toSurface(w.height))
-		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(sw).putInt(sh), -1)
-		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(sw).putInt(sh), -1)
+		// Размер, заказанный SetSize развёрнутому окну, важнее текущего
+		// (развёрнутого): к нему окно и вернётся.
+		w.mu.Lock()
+		fw, fh := w.width, w.height
+		if w.restoreW > 0 && w.restoreH > 0 {
+			fw, fh = w.restoreW, w.restoreH
+		}
+		w.mu.Unlock()
+		w.pinSize(fw, fh)
 		return
 	}
 	mw, mh := int32(0), int32(0)
@@ -2198,6 +2290,14 @@ func (w *WaylandWindow) applySizeLimits(resizable bool) {
 	}
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(mw).putInt(mh), -1)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(0).putInt(0), -1)
+}
+
+// pinSize фиксирует окно на размере width×height (пиксели буфера):
+// set_min_size == set_max_size.
+func (w *WaylandWindow) pinSize(width, height int) {
+	sw, sh := int32(w.toSurface(width)), int32(w.toSurface(height))
+	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(sw).putInt(sh), -1)
+	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(sw).putInt(sh), -1)
 }
 
 // SetAppID задаёт идентификатор приложения (xdg_toplevel.app_id): по нему

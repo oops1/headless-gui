@@ -37,6 +37,11 @@ const (
 	xdgStateFullscreen = 2
 	xdgStateResizing   = 3
 	xdgStateActivated  = 4
+	// Прилепленное к краю (тайлинг, «половина экрана»): версия 2 протокола.
+	xdgStateTiledLeft   = 5
+	xdgStateTiledRight  = 6
+	xdgStateTiledTop    = 7
+	xdgStateTiledBottom = 8
 
 	// xdg_toplevel.resize_edge: top 1, bottom 2, left 4, right 8, углы — их
 	// комбинации (5, 6, 9, 10).
@@ -118,6 +123,26 @@ func wlParseStates(arr []byte) (active, maximized, fullscreen bool) {
 		}
 	}
 	return
+}
+
+// wlParseTiled — среди состояний xdg_toplevel.configure есть «прилеплено» к
+// какому-либо краю (tiled_left/right/top/bottom). Прилепленному окну размер
+// назначает компоновщик, как развёрнутому; разбор тот же, что у wlParseStates.
+func wlParseTiled(arr []byte) bool {
+	if len(arr) < 4 {
+		return false
+	}
+	n := int(binary.LittleEndian.Uint32(arr[0:4]))
+	if n > len(arr)-4 {
+		n = len(arr) - 4
+	}
+	for i := 0; i+4 <= n; i += 4 {
+		switch binary.LittleEndian.Uint32(arr[4+i : 8+i]) {
+		case xdgStateTiledLeft, xdgStateTiledRight, xdgStateTiledTop, xdgStateTiledBottom:
+			return true
+		}
+	}
+	return false
 }
 
 // ─── Края для xdg_toplevel.resize ────────────────────────────────────────────
