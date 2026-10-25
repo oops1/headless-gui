@@ -109,6 +109,15 @@ type Canvas struct {
 	// применённой записи журнала.
 	inv     *imageInvalidator
 	invSeen uint64
+
+	// plainText — холст промежуточного растра (повёрнутый текст): подъём
+	// контраста применяется один раз, к настоящему цвету, а не к белому, а
+	// LCD-сглаживание не имеет смысла (подпиксели повёрнутого растра лежат не
+	// вдоль строки монитора).
+	plainText bool
+	// lutRow — буфер строки маски после таблицы контраста (кадр рисуется одной
+	// горутиной; у каждого холста свой).
+	lutRow []uint8
 }
 
 // RegisterFont регистрирует именованный шрифт (TTF-данные) в реестре холста.
@@ -120,6 +129,7 @@ func (c *Canvas) RegisterFont(fontName string, ttfData []byte) {
 	fc := newFontCacheFromData(ttfData, c.fontCache.dpi)
 	if fc != nil {
 		fc.subpixel = c.fontCache.Subpixel()
+		fc.quality = c.fontCache.Quality()
 		c.namedFonts.set(fontName, fc)
 		c.registerFace(fontName, fc)
 		c.fontRev.Add(1)
@@ -190,6 +200,7 @@ func (c *Canvas) AddFallbackFont(ttfData []byte) bool {
 		return false
 	}
 	fc.subpixel = c.fontCache.Subpixel()
+	fc.quality = c.fontCache.Quality()
 	c.fallbacks = append(c.fallbacks, newReadyFallback(fc))
 	c.fontRev.Add(1)
 	return true
@@ -820,6 +831,7 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 	// Дробное позиционирование (Engine.SetTextSubpixel) включено на всех
 	// шрифтах разом, поэтому достаточно спросить основной.
 	sub := fc.Subpixel()
+	q := fc.Quality() // слой качества текста: контраст (хинтинг уже в масках)
 
 	// Быстрый путь: нет fallback-шрифтов — один шрифт, с кернингом
 	// (поведение прежнего font.Drawer.DrawString; отсутствующий глиф
@@ -838,7 +850,7 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 			if !g.ok {
 				continue
 			}
-			c.drawGlyphMask(g, gx+g.offX, baseline+g.offY, col)
+			c.drawGlyphMask(g, gx+g.offX, baseline+g.offY, col, q)
 			pen += g.advance
 			prev = r
 		}
@@ -855,7 +867,7 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 		chosen, found := c.fcForRune(fc, r)
 		g, gx := penGlyph(chosen, sub, sizePt, r, pen)
 		if found && g.ok {
-			c.drawGlyphMask(g, gx+g.offX, baseline+g.offY, col)
+			c.drawGlyphMask(g, gx+g.offX, baseline+g.offY, col, q)
 		}
 		// Отсутствующий глиф не рисуем (без .notdef-квадрата), но сохраняем
 		// интервал по ширине пробела, чтобы текст не «слипался».
@@ -870,11 +882,26 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 }
 
 // drawGlyphMask альфа-блендит маску глифа из per-rune кэша.
-func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
+func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA, q TextQuality) {
+	lut := c.textLUT(q, col)
+	if g.lcd != nil {
+		c.withMaskKind(output.RegionText, func() { c.drawLCDMask(g.lcd, gx, gy, col, lut) })
+		return
+	}
 	if g.mask == nil {
 		return
 	}
-	c.withMaskKind(output.RegionText, func() { c.drawAlphaMask(g.mask, gx, gy, col) })
+	c.withMaskKind(output.RegionText, func() { c.drawAlphaMaskLUT(g.mask, gx, gy, col, lut) })
+}
+
+// textLUT — таблица контраста слоя качества для цвета текста (nil — не нужна).
+// Холст промежуточного растра повёрнутого текста контраст не применяет: он
+// рисует белым, а кривая зависит от настоящего цвета (см. DrawTextRotated).
+func (c *Canvas) textLUT(q TextQuality, col color.RGBA) *[256]uint8 {
+	if c.plainText {
+		return nil
+	}
+	return contrastLUT(col, q.contrastSteps())
 }
 
 // drawAlphaMask альфа-блендит альфа-маску цветом col в back-буфер (Over,
@@ -889,6 +916,14 @@ func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA) {
 // передаётся ИСХОДНЫЙ col), двойного кодирования тут нет: единственная
 // точка входа цвета для альфа-масок — эта функция.
 func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
+	c.drawAlphaMaskLUT(alpha, gx, gy, col, nil)
+}
+
+// drawAlphaMaskLUT — drawAlphaMask с пересчётом покрытия таблицей lut (подъём
+// контраста текста, textquality.go); nil — покрытие как есть. Таблица
+// применяется к строке маски перед смешиванием, сама маска (кэш глифа) не
+// меняется.
+func (c *Canvas) drawAlphaMaskLUT(alpha *image.Alpha, gx, gy int, col color.RGBA, lut *[256]uint8) {
 	col = c.enc(col)
 	if b := alpha.Bounds(); !b.Empty() {
 		c.markKind(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
@@ -919,6 +954,16 @@ func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
 		rw := rx - lx
 		mo := (yy-gy)*mStride + (lx - gx)
 		mRow := mask[mo : mo+rw]
+		if lut != nil {
+			if cap(c.lutRow) < rw {
+				c.lutRow = make([]uint8, rw+64)
+			}
+			row := c.lutRow[:rw]
+			for i, a := range mRow {
+				row[i] = lut[a]
+			}
+			mRow = row
+		}
 		dOff := c.back.PixOffset(lx, yy)
 		pixsimd.BlendMaskRow(dst[dOff:dOff+rw*4], mRow, sr, sg, sb, sa)
 	}
@@ -1018,6 +1063,7 @@ func (c *Canvas) drawShapedText(fc *FontCache, text string, x, baseline int, siz
 		return false
 	}
 	sizePx := fixed.Int26_6(sizePt * fc.dpi / 72.0 * 64.0)
+	q := fc.Quality()
 	pen := fixed.I(x)
 	for _, g := range l.glyphs {
 		// GID 0 = .notdef: руна не покрыта ни одним шрифтом — не рисуем
@@ -1035,12 +1081,13 @@ func (c *Canvas) drawShapedText(fc *FontCache, text string, x, baseline int, siz
 			pen += g.adv
 			continue
 		}
-		m := c.shaper.glyphMaskFor(g.face, g.gid, sizePx)
+		m := c.shaper.glyphMaskFor(g.face, g.gid, sizePx, q.Hinting)
 		if m.mask != nil {
 			// Точка отрисовки: перо + XOffset; YOffset положителен вверх.
 			gx := (pen + g.xOff).Round() + m.offX
 			gy := baseline - g.yOff.Round() + m.offY
-			c.withMaskKind(output.RegionText, func() { c.drawAlphaMask(m.mask, gx, gy, col) })
+			lut := c.textLUT(q, col)
+			c.withMaskKind(output.RegionText, func() { c.drawAlphaMaskLUT(m.mask, gx, gy, col, lut) })
 		}
 		pen += g.adv
 	}

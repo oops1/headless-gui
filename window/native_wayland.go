@@ -1628,6 +1628,9 @@ func (w *WaylandWindow) clientSize() (int, int) {
 // ─── Управление окном ────────────────────────────────────────────────────────
 
 func (w *WaylandWindow) Close() {
+	// Обещанные виртуальные файлы без окна отдавать некому: приложение узнаёт
+	// об этом через WithRelease и убирает своё.
+	w.clip.Cleanup()
 	w.repeat.cancel()
 	w.closeAllPopups()
 	w.closeCursor()

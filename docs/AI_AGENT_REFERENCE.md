@@ -9413,6 +9413,255 @@ shadow and a light window merged with what is behind it.
   — Windows 10, X11, a window with radius 0. A maximized `widget.Window` is drawn
   square too: no OS rounds a maximized window. Headless rendering is unchanged.
 
+## v3.42: what is in the clipboard, without reading it — `widget.ClipboardHasFiles` (RDP client E14)
+
+`ClipboardFiles`, `ClipboardImage` and `ClipboardHTML` READ data from the clipboard
+owner, and on X11/Wayland the owner is another process that may answer for
+seconds or minutes (a remote desktop delivers the file list when the files are
+downloaded; `ClipboardFiles` waits up to 10 minutes). An application that only
+needs to know "are there files?" at every clipboard change cannot call it.
+
+```go
+widget.ClipboardHasFiles() bool                       // = ClipboardFormats().Has(ClipboardFormatFiles)
+widget.ClipboardFormats() widget.ClipboardFormatSet   // Text | HTML | Image | Files flags
+set.Has(widget.ClipboardFormatFiles | widget.ClipboardFormatText)  // ALL listed kinds are present
+
+type ClipboardFormatsProvider interface {             // optional, like ClipboardFilesProvider
+    ClipboardFormats() ClipboardFormatSet
+}
+```
+
+Nothing is read and a foreign owner is never waited for beyond a short limit, so
+the call is safe on every clipboard change (still call it outside locks: on X11
+with a silent owner the first call takes up to 250 ms).
+
+| | how it answers | cost |
+|---|---|---|
+| Windows | `IsClipboardFormatAvailable`: `CF_UNICODETEXT`, `HTML Format`, `PNG`/`CF_DIBV5`/`CF_DIB`, `CF_HDROP` or `FileGroupDescriptorW` (promised files) — the clipboard is not opened | instant, works while another process holds the clipboard |
+| Wayland | the type list of the current `wl_data_offer` (already delivered by `offer` events) | instant |
+| X11 | one `TARGETS` request with a 250 ms limit; the answer is remembered until the owner changes | first call ≤ 250 ms, then instant |
+| own content (any) | from the engine's own copy | instant |
+| memory provider | from its fields | instant |
+
+X11 details. The owner change is reported by XFixes (`SelectSelectionInput`,
+requested lazily on the first question and negotiated by the window's event loop,
+because replies can only be read there). With XFixes the answer is valid until
+the next change event; without it (no extension, version < 2, no event loop) it
+lives 500 ms. A silent owner is remembered as "nothing" for 1 s so that polling
+does not pay 250 ms each time. If another request to the owner is already in
+flight (for example `ClipboardFiles` is waiting for a list) the call does not
+queue behind it: it returns the last known answer, or an empty set.
+
+Limits:
+- the answer is about ANNOUNCED types, not data: on X11/Wayland `text/uri-list`
+  counts as files although it could hold web links (reading filters those out);
+  on Windows `FileGroupDescriptorW` counts as files even when `ClipboardFiles`
+  cannot read promised files (it returns `CF_HDROP` lists only);
+- an owner that answers `TARGETS` with a refusal is reported as an empty set;
+- a custom `ClipboardProvider` without `ClipboardFormatsProvider` gives an empty
+  set — `ClipboardFiles` is deliberately not used as a fallback, it may block;
+- macOS: the provider (`pbcopy`/`pbpaste`) does not implement the extension, the
+  set is empty.
+
+Tests: pure functions (type names to kinds, `TARGETS` atoms to kinds, XFixes
+requests and events) run everywhere; the X11 owner, the cache, the silent and the
+busy owner and the XFixes negotiation run against a protocol-level fake server;
+Windows tests use the real clipboard (`HEADLESS_GUI_TEST_SYSCLIPBOARD=1` or CI).
+
+---
+
+## v3.42: text quality layer (vertical hinting, contrast, LCD)
+
+Reported by the RDP client: small text (Open Sans 12-14 px) looks softer than
+Windows text. A vertical stem often lands on two pixels, the top of "o" is split
+over two rows, thin dark strokes come out lighter. The engine now has an opt-in
+quality layer on top of the `x/image/vector` rasterizer: no CGO, no system API,
+and the masks are byte-identical on windows/amd64 and linux/amd64.
+
+```go
+eng.SetTextQuality(engine.TextQuality{
+    Hinting:  true,                        // light autohinting, vertical only
+    Contrast: engine.DefaultTextContrast,  // 0..1, boosts thin strokes (0.5)
+    // LCD: true, LCDOrder: engine.LCDOrderRGB, // only on explicit request
+})
+eng.SetTextHinting(true)    // changes only the Hinting field
+eng.SetTextContrast(0.5)    // changes only the Contrast field
+q := eng.TextQuality()      // effective values (Contrast clamped to [0,1], step 1/64)
+```
+
+**Off by default**: the zero `TextQuality` draws text exactly as before (frames of
+existing scenes, golden and hash tests unchanged). The mode is independent of
+`SetTextSubpixel` (they can be combined). Changing it drops the glyph-mask
+caches and redraws; it applies to every font of the engine, including fonts
+registered later and lazily loaded fallbacks, and survives `SetScale` /
+`SetResolution`.
+
+**Measurement does not depend on the mode.** Advances, kerning, `MeasureText`
+and `MeasureRunes` come from the same face as before; only the glyph mask
+changes. No layout needs to be rebuilt after switching the mode.
+
+- **Hinting.** For every font and size the engine finds vertical zones from
+  reference glyphs: baseline, x-height (`x`, `o`; Cyrillic `х`, `о`), cap height
+  (`H`, `O`; `Н`, `О`), ascender top (`l`), descender bottom (`p`). The outline of a
+  glyph is stretched vertically, piecewise linearly, so that these heights land
+  on whole PHYSICAL pixels (HiDPI scale is already in the size). Round-letter
+  overshoot below half a pixel is merged into its zone, so `o`, `a`, `e`, `x`
+  share the same top and bottom pixel rows. Flat horizontal strokes (the bar of
+  `e` and `H`, shelves of `E`, `Z`) are snapped too: thickness to a whole
+  number of pixels (at least 1), position to the grid or to the zone they sit on.
+  Horizontal coordinates are not touched. The pen baseline is an integer pixel
+  as it always was. It works on `DrawText`, `DrawTextFont`, the shaper path
+  (RTL, combining marks), rotated text and the fallback chain. `<text>` inside
+  SVG is vector art scaled arbitrarily — it is not hinted.
+- **Contrast.** Glyph coverage goes through a table `a' = a + k*a*(1-a)`, where
+  `k` depends on the brightness of the text colour: full boost for dark text
+  (thin strokes do not get lighter), zero at brightness 75 %, and a slight
+  thinning for light text on a dark background (a separate curve). The table is
+  integer-only and independent of the background; it is applied per row at blit
+  time, the cached glyph mask is not modified. Rotated text applies it once, to
+  the real colour.
+- **LCD** (`TextQuality.LCD`, experimental, off by default). The glyph is
+  rasterized at 3x horizontal resolution, filtered with the FreeType default
+  filter (`0x08 0x4D 0x56 0x4D 0x08`) and the three channels are blended with the
+  background separately; `LCDOrder` selects RGB or BGR subpixels. It paints
+  coloured pixels only over an opaque background (alpha 255); on transparent
+  and translucent pixels, and for shaped and rotated text, the glyph is drawn
+  with plain grey coverage. Useless in a remote session (RDP) and compresses
+  worse; turn it on only when the application asked for it and knows the monitor.
+
+Measured on the client's strings ("oops-hp.local", "Подключение", "Tandem",
+"oops-hp · WinLine"), Open Sans Regular, text 20 and 99 on background 243, the
+client's formula (full pixel: fill >= 0.6): at 12 px full pixels grow from 25.4 %
+to 39.0 % and the mean fill from 0.422 to 0.517; at 14 px from 25.1 % to 37.3 %
+and from 0.431 to 0.516 (Windows GDI+ AntiAliasGridFit: 31 % and 0.46).
+
+Cost: a glyph mask is built once and cached; a cache miss costs about 1.5 us
+with hinting (0.8 us before), 2 us with LCD; drawing a line with the contrast
+table is about 8 % slower, LCD about 2x (scalar blend, no SIMD).
+
+Tests: `engine/textquality_test.go` (client acceptance numbers, rows of lowercase
+letters across sizes and across a line, measurement independence, off-mode
+byte equality, mask hashes pinned for windows/linux),
+`engine/textquality_paths_test.go` (contrast tables, engine API and inheritance,
+named fonts, shaper path, rotated text, HiDPI, LCD order and BGRX buffer, clip),
+`engine/textquality_bench_test.go` (glyph rasterization and line drawing).
+
+---
+
+## v3.42: deferred ("virtual") files on the clipboard (E13)
+
+The RDP client must put server-side files on the clipboard **without
+downloading them**: the names, sizes and times are announced when the user
+copies, the bytes are fetched only when someone pastes. `ClipboardSetFiles`
+takes ready paths only.
+
+The engine holds the **mechanism only**: it tells the system "these files
+exist" and calls an application callback at paste time. It keeps no policy: no
+temporary folder, no downloading, no clean-up of temporary files. Where the
+bytes come from, where they are put and when they are removed is the
+application's business.
+
+```go
+type VirtualFile struct {
+    Name    string    // relative path with "/" ("Report/total.txt")
+    Size    int64
+    ModTime time.Time // zero = unknown
+    IsDir   bool
+}
+
+err := widget.ClipboardSetVirtualFiles(files, open,            // open: Windows
+    widget.WithMaterialize(func(i int) (string, error) {...}), // materialize: X11/Wayland
+    widget.WithRelease(func() {...}))                          // the promise is gone
+
+files, ok := widget.ClipboardVirtualFiles()    // what we promised, while it is on the clipboard
+rc, err := widget.ClipboardOpenVirtualFile(i)  // a paste inside the program (calls open)
+widget.ClipboardCleanup()                      // withdraw the promise (call at exit)
+files, err := widget.NormalizeVirtualFiles(l)  // the validation the call does
+top, err := widget.VirtualTopLevel(files)      // indices of entries without "/" (what Linux asks paths for)
+
+type ClipboardVirtualFilesProvider interface { // optional, like ClipboardFilesProvider
+    SetVirtualFiles(files []VirtualFile, open func(int) (io.ReadCloser, error), opts VirtualFilesOptions) error
+    GetVirtualFiles() ([]VirtualFile, bool)
+    OpenVirtualFile(index int) (io.ReadCloser, error)
+}
+```
+
+| | Windows | X11 / Wayland |
+|---|---|---|
+| announced | `IDataObject` in `OleSetClipboard`: `FileGroupDescriptorW`, `FileContents`, `Preferred DropEffect` | targets / mime types `text/uri-list`, `x-special/gnome-copied-files` (+ relative names as text) |
+| app callback | `open(i)` — at the first read of the file's `IStream` | `WithMaterialize(i)` — when `text/uri-list` or the gnome type is requested |
+| needs | `open` (else `ErrClipboardVirtualNoSource`) | `WithMaterialize` (else `ErrClipboardVirtualNoSource`; the clipboard is not touched) |
+| macOS, a provider without the extension | `ErrClipboardVirtualUnsupported` (it matches `errors.ErrUnsupported`) | |
+
+**Names** are validated (`ErrVirtualFileName`): relative, non-empty components,
+no `.`/`..`, no backslash, NUL or control characters, valid UTF-8, no
+duplicates, no file used as a directory; a trailing `/` is dropped. Windows
+additionally rejects `<>:"|?*` and paths over 259 UTF-16 units. A directory
+needs `IsDir` entry when it is empty; on X11/Wayland **every top-level
+directory must be an explicit `IsDir` entry** (the application is asked for a
+path per top-level entry).
+
+**Windows.** The descriptor block is `FILEGROUPDESCRIPTORW` (592 bytes per
+entry; flags `FD_ATTRIBUTES | FD_WRITESTIME | FD_FILESIZE | FD_PROGRESSUI`,
+attributes `NORMAL`/`DIRECTORY`, `FILETIME` write time, 64-bit size, name with
+`\`). `FileContents` for `lindex` = file index is an own `IStream` that reads
+from the `io.ReadCloser` of `open(i)`: opened at the first `Read`, closed at the
+last `Release`; `Seek` backwards reopens, forwards skips; a `Read` block is
+filled completely unless the stream ends; `Stat`, `CopyTo`, `Clone` (not
+supported), `HGLOBAL` for files up to 16 MiB. `OleFlushClipboard` is not
+called — otherwise the system would ask for the contents at once. COM objects
+are built by hand (vtables of `syscall.NewCallback`, the registry by address),
+as in `window/dnd_windows.go`. OLE needs an STA thread with a message loop for
+the clipboard object, which the application cannot guarantee, so the clipboard
+has its own: a goroutine locked to an OS thread (`OleInitialize`, `GetMessage`).
+Consequence: while a chunk of a file is being read (`open`'s reader blocks), a
+replacement of the clipboard from another thread waits for that chunk.
+
+**X11 / Wayland.** There is no virtual-files protocol, and the paster needs real
+paths. The selection owner answers a request for `text/uri-list` or
+`x-special/gnome-copied-files` by calling `WithMaterialize(i)` for each top-level
+entry (a file: put it on disk and return the absolute path; a directory:
+return the directory with its contents; nested entries are not asked
+separately), then returns the paths. Calls are sequential, off the engine
+goroutine (Wayland: in the writer goroutine; X11: the `SelectionNotify` is sent
+from a goroutine), the result is remembered until the promise is withdrawn
+(the second format does not ask again), an error is not remembered and means
+a refusal (empty answer / property `None`). Limitations: some clipboard
+managers request `text/uri-list` just to look at the clipboard — the callback
+then runs without a paste; a paster may give up waiting (Qt: 5 s); the X11 list
+of paths must fit in one 128 KiB request. A paste inside the program
+(`ClipboardFiles`) returns the same paths.
+
+`WithRelease` fires once, in its own goroutine, when the promise is gone: the
+clipboard got other contents, another owner took the selection, the window was
+closed, `ClipboardCleanup` was called (Windows: when OLE releases the data
+object). That is where the application removes what it put on disk. Do not wait
+for other clipboard calls inside it.
+
+An example of the application side (an optional pattern, not engine code):
+
+```go
+dir, _ := os.MkdirTemp("", "myapp-clip-")
+widget.ClipboardSetVirtualFiles(files, remoteOpen, // remoteOpen: for Windows
+    widget.WithMaterialize(func(i int) (string, error) {
+        p := filepath.Join(dir, filepath.FromSlash(files[i].Name))
+        return p, download(files[i], p)   // a directory: create it with its children
+    }),
+    widget.WithRelease(func() { os.RemoveAll(dir) }))
+```
+
+Tests: `widget/clipboard_virtual_test.go` (names, `FILEGROUPDESCRIPTORW` byte by
+byte, `FILETIME`, the in-memory provider),
+`widget/clipboard_virtual_windows_test.go` (vtable layout, `QueryInterface`/
+`AddRef`/`Release`, `GetData`/`QueryGetData`, the enumerator, `IStream` read in
+parts / `Seek` / `Stat` / `CopyTo`; **live clipboard** — `OleGetClipboard` from
+another thread as Explorer does, `open` is called only on the first read;
+needs `HEADLESS_GUI_TEST_SYSCLIPBOARD=1` or CI), `window/clipboard_virtual_test.go`
+(the shared promise: top-level only, caching, single flight, errors),
+`window/clipboard_virtual_linux_test.go` (Wayland on a fake compositor, X11 on a
+fake server: types announced, callback only on request, release on every way
+out, window close).
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
