@@ -317,6 +317,10 @@ func TestTextQuality_OffIsLegacy(t *testing.T) {
 
 // Детерминизм: хэш масок (все режимы, несколько кеглей, фазы) зафиксирован и
 // одинаков на windows/amd64 и linux/amd64; прогон дважды даёт то же.
+//
+// v3.43.1: хэши режимов с хинтингом сдвинулись намеренно — знаки вне зон
+// («·», «.», «@» из набора) больше не растягиваются, а сдвигаются целиком
+// (TestTextHint_FloatingSignsKeepShape); маски букв набора не изменились.
 func TestTextQuality_MaskHash(t *testing.T) {
 	testreset.Globals(t)
 	sum := func(q TextQuality, sub bool) string {
@@ -349,9 +353,9 @@ func TestTextQuality_MaskHash(t *testing.T) {
 		want string
 	}{
 		{"выкл", TextQuality{}, false, "df8183d9d3efa9e2"},
-		{"хинтинг", TextQuality{Hinting: true}, false, "daa900ccf888fe78"},
-		{"хинтинг+subpixel", TextQuality{Hinting: true}, true, "48ee65ed48e4ef04"},
-		{"lcd rgb", TextQuality{Hinting: true, LCD: true}, false, "e2919139bee823a7"},
+		{"хинтинг", TextQuality{Hinting: true}, false, "bd66ca7c469c697f"},
+		{"хинтинг+subpixel", TextQuality{Hinting: true}, true, "4c2520ead3db99a9"},
+		{"lcd rgb", TextQuality{Hinting: true, LCD: true}, false, "a121546a0d5def02"},
 		{"lcd bgr", TextQuality{LCD: true, LCDOrder: LCDOrderBGR}, false, "30d41a494b94623d"},
 	}
 	for _, c := range cases {

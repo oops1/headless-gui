@@ -249,7 +249,8 @@ func (fc *FontCache) hintedGlyph(face font.Face, sizePt float64, r rune, phase i
 				sc.curveTo(int(sg.Args[2].X), -int(sg.Args[2].Y))
 			}
 		}
-		h = h.withStems(&sc, int(ppem))
+		gb := segs.Bounds() // sfnt: ось Y вниз
+		h = h.forGlyph(&sc, int(ppem), -int(gb.Min.Y), -int(gb.Max.Y))
 	}
 	xs := fixed.Int26_6(1)
 	if q.LCD {
@@ -429,6 +430,11 @@ type hintScan struct {
 	have       bool
 	area       int // удвоенная площадь по конечным точкам сегментов
 	lines      []hLine
+	// lo, hi — низ и верх текущего контура по конечным точкам сегментов;
+	// edges — эти высоты всех замкнутых контуров (края, которыми знак может
+	// стоять на зоне: см. floating).
+	lo, hi int
+	edges  []int
 }
 
 // hLine — отрезок контура на высоте y от x0 к x1 (направление обхода).
@@ -437,6 +443,7 @@ type hLine struct{ y, x0, x1 int }
 func (s *hintScan) moveTo(x, y int) {
 	s.closeContour()
 	s.cur, s.start, s.have = [2]int{x, y}, [2]int{x, y}, true
+	s.lo, s.hi = y, y
 }
 
 // seg учитывает отрезок cur → (x, y); line — прямой ли он (кривые на штрихи
@@ -450,6 +457,7 @@ func (s *hintScan) seg(x, y int, line bool) {
 		s.lines = append(s.lines, hLine{y: y, x0: s.cur[0], x1: x})
 	}
 	s.cur = [2]int{x, y}
+	s.lo, s.hi = min(s.lo, y), max(s.hi, y)
 }
 
 func (s *hintScan) lineTo(x, y int)  { s.seg(x, y, true) }
@@ -459,6 +467,9 @@ func (s *hintScan) curveTo(x, y int) { s.seg(x, y, false) }
 func (s *hintScan) closeContour() {
 	if s.have && s.cur != s.start {
 		s.seg(s.start[0], s.start[1], true)
+	}
+	if s.have {
+		s.edges = append(s.edges, s.lo, s.hi)
 	}
 	s.have = false
 }
@@ -541,6 +552,78 @@ func (h *vHint) withStems(s *hintScan, emPx int) *vHint {
 		}
 	}
 	return cur
+}
+
+// ── Знаки вне зон ───────────────────────────────────────────────────────────
+//
+// Маркер «•», точка «·», градус «°» не пересекают ни одной зоны: лежат целиком
+// между базовой линией и высотой строчных (или между строчными и заглавными),
+// разве что касаясь одной из них краем. Растяжение между зонами меняло их высоту на долю пикселя по-разному сверху
+// и снизу — круг становился овалом (отчёт RDP-клиента на v3.43.0: «•» в поле
+// пароля 4×5 вместо 4×4). Такой знак не растягивается, а сдвигается целиком
+// на целое число пикселей — туда, куда растяжение увело бы его середину, —
+// и его маска побайтно совпадает с маской без хинтинга, только сдвинута.
+// Так поступает и режим light у FreeType со знаками вне зон.
+
+// forGlyph — отображение для одного глифа с размахом [bot, top] (26.6, ось
+// вверх): общее h плюс узлы его горизонтальных штрихов (withStems), а знак без
+// штрихов, который стоит на зонах меньше чем двумя краями, только сдвигается
+// (floating).
+func (h *vHint) forGlyph(s *hintScan, emPx, top, bot int) *vHint {
+	if hs := h.withStems(s, emPx); hs != h {
+		return hs // у знака есть штрихи («-», «=», «+»): их выравнивание и даёт чёткость
+	}
+	if f := h.floating(s.edges, top, bot); f != nil {
+		return f
+	}
+	return h
+}
+
+// floating возвращает чистый сдвиг на целое число пикселей для знака, у
+// которого на зонах стоит не больше одного уровня краёв контуров (edges — низ
+// и верх каждого контура). Зона, проходящая через середину знака мимо его
+// краёв, его не касается: у «°» высота строчных пересекает кольцо, но ни
+// верх, ни низ колец на ней не лежат. Знак, стоящий на зонах двумя уровнями
+// («x», «o», «l», «i» — базовая линия и высота строчных или выносных), по-прежнему
+// растягивается: на этом держится выравнивание букв. nil — растягивать.
+//
+// Сдвиг: край на зоне ставится к её выровненной высоте (с точностью до
+// целого пикселя); край ни на одной зоне не стоит — середина знака идёт туда,
+// куда её увело бы растяжение.
+func (h *vHint) floating(edges []int, top, bot int) *vHint {
+	const attach = 16 // как у штрихов: ближе 1/4 px к узлу — «на зоне»
+	if top <= bot || len(edges) == 0 {
+		return nil
+	}
+	anchor, levels := 0, 0
+	seen := make([]int, 0, 4)
+	for _, e := range edges {
+		i := h.nodeNear(e, attach)
+		if i < 0 {
+			continue
+		}
+		dup := false
+		for _, v := range seen {
+			if d := v - e; d >= -2*attach && d <= 2*attach {
+				dup = true // тот же уровень (плоская и круглая зона рядом, внутренний контур)
+				break
+			}
+		}
+		if dup {
+			continue
+		}
+		seen = append(seen, e)
+		levels++
+		anchor = e
+		if levels > 1 {
+			return nil
+		}
+	}
+	if levels == 0 {
+		anchor = (top + bot) >> 1
+	}
+	shift := round26(h.apply(anchor) - anchor)
+	return &vHint{src: []int{0}, dst: []int{shift}} // один узел — apply только сдвигает
 }
 
 func overlapLen(a, b hLine) int {
