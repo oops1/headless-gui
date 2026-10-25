@@ -98,12 +98,10 @@ func TestX11ShmE2E(t *testing.T) {
 
 // TestX11ShmE2EResize проверяет пересоздание SHM-сегмента при ресайзе окна
 // (x11ShmResize из ConfigureNotify). Ресайз шлём НАПРЯМУЮ низкоуровневым
-// x11ConfigureWindow, а не публичным SetSize: SetSize пишет w.width/w.height
-// ДО отправки запроса, поэтому к моменту прихода своего же ConfigureNotify
-// условие "newW != w.width" в handleX11Event уже ложно и ветка ресайза (в т.ч.
-// onResize) не срабатывает — так эмулируется РЕАЛЬНЫЙ внешний ресайз (WM/
-// перетаскивание рамки пользователем), где w.width на момент события ещё
-// старый. Под голым Xvfb нет WM — ConfigureWindow применяется сразу же и
+// x11ConfigureWindow, эмулируя РЕАЛЬНЫЙ внешний ресайз (WM/перетаскивание рамки
+// пользователем). Публичный SetSize идёт тем же путём (размер пишет только
+// ConfigureNotify, см. x11_setsize_linux.go), но этот тест держит его ближе к
+// проводу. Под голым Xvfb нет WM — ConfigureWindow применяется сразу же и
 // возвращается тем же соединением как обычный (не synthetic) ConfigureNotify.
 func TestX11ShmE2EResize(t *testing.T) {
 	display := os.Getenv("DISPLAY")

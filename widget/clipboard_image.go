@@ -85,9 +85,11 @@ func (c *memoryClipboard) SetImage(img image.Image) error {
 	}
 	cp := clipimage.Clone(img)
 	c.mu.Lock()
-	c.text, c.html, c.files, c.cut = "", "", nil, false
+	old := c.virt
+	c.text, c.html, c.files, c.cut, c.virt = "", "", nil, false, nil
 	c.img = cp
 	c.mu.Unlock()
+	old.drop()
 	return nil
 }
 

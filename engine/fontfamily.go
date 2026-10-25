@@ -389,6 +389,21 @@ func penGlyph(fc *FontCache, subpixel bool, sizePt float64, r rune, pen fixed.In
 	return fc.GlyphAt(sizePt, r, int(q&3)), int(q >> 2)
 }
 
+// setTextQuality задаёт слой качества текста всем шрифтам канваса. Шрифты,
+// зарегистрированные позже, наследуют его от основного (RegisterFont,
+// AddFallbackFont, ленивые запасные). Шаг и кернинг не меняются, раскладки
+// шейпера остаются верными, но их маски хранятся в шрифтах — сбрасываются там.
+func (c *Canvas) setTextQuality(q TextQuality) {
+	c.fontCache.SetQuality(q)
+	for _, fc := range c.namedFonts.all() {
+		fc.SetQuality(q)
+	}
+	for _, fb := range c.fallbacks {
+		fb.apply(func(fc *FontCache) { fc.SetQuality(q) })
+	}
+	c.fontRev.Add(1)
+}
+
 // setTextSubpixel включает дробное позиционирование глифов у всех шрифтов
 // канваса: основного, именованных и запасных. Шрифты, зарегистрированные
 // позже, наследуют режим от основного (RegisterFont, AddFallbackFont).

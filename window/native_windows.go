@@ -785,6 +785,15 @@ func (w *Win32Window) SetSize(width, height int) {
 		w.fs.mu.Unlock()
 		return
 	}
+	if w.hwnd != 0 {
+		if z, _, _ := procIsZoomed.Call(uintptr(w.hwnd)); z != 0 && w.setNormalSize(width, height) {
+			// Развёрнутое окно занимает рабочую область, и MoveWindow для
+			// него не имеет смысла: заказанный размер получает нормальный
+			// прямоугольник — окно примет его при «восстановить». GetSize
+			// отвечает размером развёрнутого окна.
+			return
+		}
+	}
 	w.width = width
 	w.height = height
 	if w.hwnd != 0 {
@@ -797,6 +806,37 @@ func (w *Win32Window) SetSize(width, height int) {
 			1, // repaint
 		)
 	}
+}
+
+// windowPlacement — WINDOWPLACEMENT: состояние показа и нормальный
+// прямоугольник окна.
+type windowPlacement struct {
+	Length           uint32
+	Flags            uint32
+	ShowCmd          uint32
+	PtMinPosition    [2]int32
+	PtMaxPosition    [2]int32
+	RcNormalPosition rect
+}
+
+var (
+	procGetWindowPlacement = user32.NewProc("GetWindowPlacement")
+	procSetWindowPlacement = user32.NewProc("SetWindowPlacement")
+)
+
+// setNormalSize меняет размер НОРМАЛЬНОГО прямоугольника окна (того, в который
+// окно вернётся из развёрнутого состояния), не трогая сам показ. false —
+// система отказала, вызывающий поступает как с обычным окном.
+func (w *Win32Window) setNormalSize(width, height int) bool {
+	var wp windowPlacement
+	wp.Length = uint32(unsafe.Sizeof(wp))
+	if r, _, _ := procGetWindowPlacement.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&wp))); r == 0 {
+		return false
+	}
+	wp.RcNormalPosition.Right = wp.RcNormalPosition.Left + int32(width)
+	wp.RcNormalPosition.Bottom = wp.RcNormalPosition.Top + int32(height)
+	r, _, _ := procSetWindowPlacement.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&wp)))
+	return r != 0
 }
 
 func (w *Win32Window) GetSize() (int, int) {

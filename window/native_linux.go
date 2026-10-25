@@ -166,6 +166,10 @@ type X11Window struct {
 	posCached    bool
 	posSynthetic bool
 
+	// sz — программный запрос размера (SetSize, x11_setsize_linux.go): width/
+	// height пишет только ConfigureNotify, а запрос лишь помнится здесь.
+	sz x11SizeReq
+
 	// Атомы UTF-8 заголовка (EWMH) и Motif-хинтов — интернируются в Create,
 	// чтобы SetTitle/borderless работали и после первого показа.
 	atomUTF8String uint32
@@ -579,10 +583,14 @@ func (w *X11Window) RunEventLoop() error {
 	defer w.curImg.looping.Store(false)
 	w.plock.looping.Store(true)
 	defer w.plock.looping.Store(false)
+	// И для подписки на смену владельца буфера обмена (ClipboardFormats).
+	w.clip.setFormatsLooping(true)
+	defer w.clip.setFormatsLooping(false)
 	w.x11SyncTouch()
 	w.x11SyncKeyGrab()
 	w.x11SyncCursorImage()
 	w.x11SyncPointerLock()
+	w.x11SyncClipboardWatch()
 	for !w.closed.Load() {
 		if !w.readEvent(buf) {
 			if w.closed.Load() {
@@ -605,6 +613,7 @@ func (w *X11Window) RunEventLoop() error {
 		w.x11SyncKeyGrab()
 		w.x11SyncCursorImage()
 		w.x11SyncPointerLock()
+		w.x11SyncClipboardWatch()
 	}
 	return nil
 }
@@ -620,6 +629,11 @@ func (w *X11Window) handleX11Event(buf []byte) {
 	// диапазона, а w.shm нередко nil (SHM не инициализировался/недоступен).
 	if w.shm != nil && !w.shm.fallback && evType == w.shm.firstEvent {
 		w.x11ShmCompletion()
+		return
+	}
+	// XFixes SelectionNotify: у CLIPBOARD сменился владелец (подписка — по
+	// первому вопросу о видах содержимого, x11_clipboard_formats_linux.go).
+	if w.clip.handleFixesEvent(buf) {
 		return
 	}
 	// Таблица нажатых клавиш ведётся ДО отбрасывания ввода заблокированным
@@ -811,9 +825,9 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		w.updatePosFromConfigure(cx, cy, synthetic)
 		newW := int(binary.LittleEndian.Uint16(buf[20:22]))
 		newH := int(binary.LittleEndian.Uint16(buf[22:24]))
-		if newW != w.width || newH != w.height {
-			w.width = newW
-			w.height = newH
+		// Размер пишет только это событие (SetSize его не трогает), поэтому и
+		// программный ресайз проходит здесь же: SHM-сегмент, onResize.
+		if w.x11NoteConfigureSize(newW, newH) {
 			w.x11ShmResize(newW, newH)
 			if w.onResize != nil {
 				w.onResize(newW, newH)
@@ -925,6 +939,9 @@ func (w *X11Window) x11ReloadKeyboardMapping() {
 
 func (w *X11Window) Close() {
 	w.closed.Store(true)
+	// Обещанные виртуальные файлы без окна отдавать некому: приложение узнаёт
+	// об этом через WithRelease и убирает своё.
+	w.clip.Cleanup()
 	// Освобождаем локальный маппинг SHM-сегмента (см. x11ShmClose): серверную
 	// половину X-сервер снимает сам при закрытии соединения.
 	w.x11ShmClose()
@@ -941,22 +958,7 @@ func (w *X11Window) SetTitle(title string) {
 	}
 }
 
-func (w *X11Window) SetSize(width, height int) {
-	w.width = width
-	w.height = height
-	if w.wid != 0 {
-		w.x11ConfigureWindow(w.wid, width, height)
-		// Программный ресайз не проходит через ConfigureNotify-ветку (width/
-		// height уже записаны выше, и проверка «размер изменился» там не
-		// сработает), поэтому SHM-сегмент пересоздаём здесь сами — иначе блит
-		// тихо жил бы на PutImage-фолбэке до первого ресайза мышью.
-		w.x11ShmResize(width, height)
-	}
-}
-
-func (w *X11Window) GetSize() (int, int) {
-	return w.width, w.height
-}
+// SetSize и GetSize — в x11_setsize_linux.go.
 
 func (w *X11Window) SetPosition(x, y int) {
 	if w.wid != 0 {
@@ -1035,6 +1037,7 @@ func (w *X11Window) Restore() {
 	if w.wid != 0 {
 		w.x11ToggleMaximize(false)
 		w.maximized = false
+		w.x11ApplyRestoreSize() // размер, заказанный развёрнутому окну
 	}
 }
 

@@ -181,7 +181,7 @@ func renderCOLR(face *tsfont.Face, gc tsfont.GlyphColor, sizePx fixed.Int26_6, t
 		if col.A == 0 {
 			continue // полностью прозрачный слой
 		}
-		m := rasterizeGlyph(face, tsfont.GID(layer.GlyphID), sizePx)
+		m := rasterizeGlyph(face, tsfont.GID(layer.GlyphID), sizePx, nil)
 		if m.mask == nil {
 			continue
 		}

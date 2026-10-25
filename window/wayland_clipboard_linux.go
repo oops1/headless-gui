@@ -26,12 +26,17 @@ package window
 // клиента, скачиваются в момент вставки, и канал отдаёт данные, когда
 // скачивание закончено.
 //
+// Виртуальные файлы (SetVirtualFiles) — те же типы списка файлов, но пути берутся
+// у приложения в момент запроса (clipboard_virtual.go): отложенность «по
+// вставке» без своей папки и очистки.
+//
 // Вставка: компоновщик присылает selection с готовым wl_data_offer; просим у
 // него данные подходящего типа и читаем из канала. Чужой клиент может
 // отвечать медленно или не ответить вовсе, поэтому чтение идёт с коротким
 // тайм-аутом: буфер обмена не повод подвешивать интерфейс.
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -39,6 +44,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/internal/clipimage"
+	"github.com/oops1/headless-gui/v3/widget"
 )
 
 const (
@@ -106,6 +112,8 @@ type wlClipboard struct {
 	offerURIList, offerGnome bool
 	// ownedImg — изображение, которым мы владеем; nil — отдаём не картинку.
 	ownedImg *ownedImage
+	// ownedVirt — обещанные виртуальные файлы; nil — не отдаём.
+	ownedVirt *clipVirtual
 	// offerImage — читаемый тип изображения из объявленных offer'ом
 	// (image/png, а при его отсутствии image/bmp); пусто — картинки нет.
 	offerImage string
@@ -118,27 +126,98 @@ func newWlClipboard(w *WaylandWindow) *wlClipboard { return &wlClipboard{w: w} }
 //
 // Реализует widget.ClipboardProvider: окно регистрирует этот буфер глобально,
 // когда Wayland-соединение поднялось.
-func (c *wlClipboard) SetText(s string) { c.setSelection(s, "", nil, false, nil) }
+func (c *wlClipboard) SetText(s string) { c.setSelection(s, "", nil, false, nil, nil) }
 
 // SetHTML отдаёт в буфер оформленный текст вместе с простым: рядом с текстовыми
 // типами объявляется text/html.
 //
 // Реализует widget.ClipboardHTMLProvider.
-func (c *wlClipboard) SetHTML(html, plain string) { c.setSelection(plain, html, nil, false, nil) }
+func (c *wlClipboard) SetHTML(html, plain string) { c.setSelection(plain, html, nil, false, nil, nil) }
 
 // SetFiles отдаёт в буфер список файлов: text/uri-list и
 // x-special/gnome-copied-files рядом с путями простым текстом.
 //
 // Реализует widget.ClipboardFilesProvider.
 func (c *wlClipboard) SetFiles(paths []string, cut bool) {
-	c.setSelection(filesPlainText(paths), "", append([]string(nil), paths...), cut, nil)
+	c.setSelection(filesPlainText(paths), "", append([]string(nil), paths...), cut, nil, nil)
+}
+
+var _ widget.ClipboardVirtualFilesProvider = (*wlClipboard)(nil)
+
+// SetVirtualFiles отдаёт в буфер обещанные файлы: типы списка файлов объявлены,
+// а пути приложение даёт (opts.Materialize), когда их запросят.
+//
+// Реализует widget.ClipboardVirtualFilesProvider. Без Materialize файлов не
+// предложить — отказ, и буфер не меняется.
+func (c *wlClipboard) SetVirtualFiles(files []widget.VirtualFile, open func(int) (io.ReadCloser, error), opts widget.VirtualFilesOptions) error {
+	if c == nil || c.w == nil || c.w.dataDeviceID == 0 || c.w.dataDevMgrID == 0 {
+		return widget.ErrClipboardVirtualUnsupported
+	}
+	v, err := newClipVirtual(files, open, opts)
+	if err != nil {
+		return err
+	}
+	if c.w.inputSerial.Load() == 0 {
+		// Компоновщик принимает set_selection только с serial'ом недавнего ввода.
+		return fmt.Errorf("window: нет serial'а ввода для set_selection: %w", widget.ErrClipboardVirtualUnsupported)
+	}
+	c.setSelection(v.names(), "", nil, false, nil, v)
+	return nil
+}
+
+// GetVirtualFiles возвращает обещанные нами файлы, пока мы владеем буфером.
+func (c *wlClipboard) GetVirtualFiles() ([]widget.VirtualFile, bool) {
+	if c == nil {
+		return nil, false
+	}
+	c.mu.Lock()
+	v, src := c.ownedVirt, c.source
+	c.mu.Unlock()
+	if v == nil || src == 0 {
+		return nil, false
+	}
+	return append([]widget.VirtualFile(nil), v.files...), true
+}
+
+// OpenVirtualFile открывает содержимое нашего обещанного файла (open приложения).
+func (c *wlClipboard) OpenVirtualFile(index int) (io.ReadCloser, error) {
+	if c == nil {
+		return nil, widget.ErrVirtualFileNotFound
+	}
+	c.mu.Lock()
+	v := c.ownedVirt
+	c.mu.Unlock()
+	return v.openFile(index)
+}
+
+// Cleanup снимает обещание виртуальных файлов, если оно ещё в буфере: источник
+// уничтожается (компоновщик забывает selection), приложению сообщается через
+// WithRelease. Чужой selection и наши текст и файлы не трогает.
+func (c *wlClipboard) Cleanup() {
+	if c == nil || c.w == nil {
+		return
+	}
+	c.mu.Lock()
+	v, src := c.ownedVirt, c.source
+	if v != nil {
+		c.source, c.owned, c.ownedHTML = 0, "", ""
+		c.ownedFiles, c.ownedCut, c.ownedImg, c.ownedVirt = nil, false, nil, nil
+	}
+	c.mu.Unlock()
+	if v == nil {
+		return
+	}
+	if src != 0 {
+		c.w.send(newWlMsg(src, wlDataSourceDestroy), -1)
+	}
+	v.drop()
 }
 
 // setSelection объявляет источник: простой текст всегда, text/html — если есть
 // оформленная версия, типы списка файлов — если отдаём файлы, image/png — если
 // отдаём картинку (тогда текста нет вовсе: вставка в редактор пустой строки
 // вместо отказа сбивала бы с толку).
-func (c *wlClipboard) setSelection(s, html string, files []string, cut bool, img *ownedImage) {
+func (c *wlClipboard) setSelection(s, html string, files []string, cut bool, img *ownedImage, virt *clipVirtual) {
 	if c == nil || c.w == nil {
 		return
 	}
@@ -158,7 +237,10 @@ func (c *wlClipboard) setSelection(s, html string, files []string, cut bool, img
 	id := w.newID()
 	c.source, c.owned, c.ownedHTML = id, s, html
 	c.ownedFiles, c.ownedCut, c.ownedImg = files, cut, img
+	oldVirt := c.ownedVirt
+	c.ownedVirt = virt
 	c.mu.Unlock()
+	oldVirt.drop()
 
 	if old != 0 {
 		w.send(newWlMsg(old, wlDataSourceDestroy), -1)
@@ -168,7 +250,7 @@ func (c *wlClipboard) setSelection(s, html string, files []string, cut bool, img
 	if html != "" {
 		mimes = append(mimes, mimeTextHTML)
 	}
-	if len(files) > 0 {
+	if len(files) > 0 || virt != nil {
 		// Файлы — первыми: получатель, который перебирает типы по порядку,
 		// должен увидеть их раньше текста.
 		mimes = append([]string{mimeTextUriList, mimeGnomeCopiedFiles}, mimes...)
@@ -254,6 +336,7 @@ func (c *wlClipboard) GetFiles() ([]string, bool, bool) {
 	files, cut := c.ownedFiles, c.ownedCut
 	offer, uri, gnome := c.offer, c.offerURIList, c.offerGnome
 	src, ownImg := c.source, c.ownedImg != nil
+	virt := c.ownedVirt
 	c.mu.Unlock()
 
 	if src != 0 && ownImg {
@@ -261,6 +344,11 @@ func (c *wlClipboard) GetFiles() ([]string, bool, bool) {
 	}
 	if src != 0 && len(files) > 0 {
 		return append([]string(nil), files...), cut, true
+	}
+	if src != 0 && virt != nil {
+		// Вставка внутри программы: те же пути, что получил бы чужой вставляющий.
+		paths, err := virt.Paths()
+		return paths, false, err == nil && len(paths) > 0
 	}
 	if offer == 0 {
 		return nil, false, false
@@ -350,6 +438,7 @@ func (c *wlClipboard) receiveIdle(offer uint32, mime string, idle time.Duration,
 // handleSelection запоминает offer, присланный компоновщиком как содержимое
 // буфера обмена. id == 0 означает «буфер пуст».
 func (c *wlClipboard) handleSelection(id uint32) {
+	var dropVirt *clipVirtual
 	c.mu.Lock()
 	old := c.offer
 	c.offer, c.offerText, c.offerHTML = id, false, ""
@@ -366,9 +455,11 @@ func (c *wlClipboard) handleSelection(id uint32) {
 		if c.source != 0 {
 			c.owned, c.ownedHTML = "", ""
 			c.ownedFiles, c.ownedCut, c.ownedImg = nil, false, nil
+			dropVirt, c.ownedVirt = c.ownedVirt, nil
 		}
 	}
 	c.mu.Unlock()
+	dropVirt.drop()
 
 	if old != 0 && old != id {
 		c.w.send(newWlMsg(old, wlDataOfferDestroy), -1)
@@ -385,7 +476,10 @@ func (c *wlClipboard) handleSourceSend(source uint32, mime string, fd int) {
 	c.mu.Lock()
 	ours, text := c.source == source, c.owned
 	img := c.ownedImg
+	var virt *clipVirtual
 	switch {
+	case c.ownedVirt != nil && (mime == mimeTextUriList || mime == mimeGnomeCopiedFiles):
+		virt = c.ownedVirt
 	case isHTMLMime(mime) && c.ownedHTML != "":
 		text = c.ownedHTML
 	case mime == mimeTextUriList && len(c.ownedFiles) > 0:
@@ -418,6 +512,23 @@ func (c *wlClipboard) handleSourceSend(source uint32, mime string, fd int) {
 		}()
 		return
 	}
+	if virt != nil {
+		// Пути даёт приложение, и это может длиться долго (скачивание): в
+		// горутине, не в цикле событий. Отказ или ошибка — пустой ответ.
+		go func() {
+			defer f.Close()
+			paths, err := virt.Paths()
+			if err != nil || len(paths) == 0 {
+				return
+			}
+			if mime == mimeGnomeCopiedFiles {
+				io.WriteString(f, buildGnomeCopiedFiles(paths, false))
+			} else {
+				io.WriteString(f, buildURIList(paths))
+			}
+		}()
+		return
+	}
 	// Пишем в своей горутине: получатель читает не торопясь, а канал имеет
 	// размер буфера — запись блокируется, и цикл событий встал бы вместе с
 	// ней.
@@ -431,13 +542,16 @@ func (c *wlClipboard) handleSourceSend(source uint32, mime string, fd int) {
 func (c *wlClipboard) handleSourceCancelled(source uint32) {
 	c.mu.Lock()
 	ours := c.source == source
+	var virt *clipVirtual
 	if ours {
 		c.source, c.owned, c.ownedHTML = 0, "", ""
 		c.ownedFiles, c.ownedCut, c.ownedImg = nil, false, nil
+		virt, c.ownedVirt = c.ownedVirt, nil
 	}
 	c.mu.Unlock()
 	if ours {
 		c.w.send(newWlMsg(source, wlDataSourceDestroy), -1)
+		virt.drop()
 	}
 }
 

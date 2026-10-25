@@ -77,6 +77,7 @@ func (f *fallbackFont) get(ref *FontCache) *FontCache {
 	if data, err := fallbackFileReader(f.path); err == nil {
 		if fc = newFontCacheFromData(data, ref.currentDPI()); fc != nil {
 			fc.subpixel = ref.Subpixel()
+			fc.quality = ref.Quality()
 		}
 	}
 	f.fc.Store(fc)

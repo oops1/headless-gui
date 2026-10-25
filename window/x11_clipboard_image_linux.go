@@ -70,7 +70,7 @@ func (c *x11Clipboard) SetImage(img image.Image) error {
 	if c == nil || c.w == nil || c.w.wid == 0 || c.w.atomClipboard == 0 || c.w.atomImagePNG == 0 {
 		return widget.ErrClipboardImageUnsupported
 	}
-	c.setOwned("", "", nil, false, newOwnedImage(img))
+	c.setOwned("", "", nil, false, newOwnedImage(img), nil)
 	return nil
 }
 

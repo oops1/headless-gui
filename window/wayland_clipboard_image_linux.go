@@ -34,7 +34,7 @@ func (c *wlClipboard) SetImage(img image.Image) error {
 	if c == nil || c.w == nil || c.w.dataDeviceID == 0 || c.w.dataDevMgrID == 0 || c.w.inputSerial.Load() == 0 {
 		return widget.ErrClipboardImageUnsupported
 	}
-	c.setSelection("", "", nil, false, newOwnedImage(img))
+	c.setSelection("", "", nil, false, newOwnedImage(img), nil)
 	return nil
 }
 

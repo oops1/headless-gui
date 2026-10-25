@@ -105,6 +105,8 @@ type memoryClipboard struct {
 	cut   bool
 	// img — изображение (ClipboardSetImage); nil — в буфере не картинка.
 	img *image.NRGBA
+	// virt — обещанные виртуальные файлы (ClipboardSetVirtualFiles); nil — нет.
+	virt *memVirtual
 }
 
 func (c *memoryClipboard) GetText() string {
@@ -118,15 +120,19 @@ func (c *memoryClipboard) SetText(s string) {
 	c.text = s
 	// Новый простой текст вытесняет прежнее оформление и файлы: иначе GetHTML
 	// или GetFiles отдали бы содержимое предыдущего копирования.
-	c.html, c.files, c.cut, c.img = "", nil, false, nil
+	old := c.virt
+	c.html, c.files, c.cut, c.img, c.virt = "", nil, false, nil, nil
 	c.mu.Unlock()
+	old.drop()
 }
 
 // SetHTML — реализация ClipboardHTMLProvider в памяти.
 func (c *memoryClipboard) SetHTML(html, plain string) {
 	c.mu.Lock()
-	c.text, c.html, c.files, c.cut, c.img = plain, html, nil, false, nil
+	old := c.virt
+	c.text, c.html, c.files, c.cut, c.img, c.virt = plain, html, nil, false, nil, nil
 	c.mu.Unlock()
+	old.drop()
 }
 
 // GetHTML — реализация ClipboardHTMLProvider в памяти.
