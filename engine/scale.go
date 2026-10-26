@@ -83,7 +83,16 @@ func (c *Canvas) LogicalSize() (w, h int) { return c.logicalW, c.logicalH }
 // Используется SetResolution/SetScale: раньше пересоздание канваса теряло
 // зарегистрированные шрифты.
 func (c *Canvas) cloneForSize(w, h int, scale float64, bgSrc image.Image) *Canvas {
-	nc := newCanvasScaled(w, h, scale, c.fontCache)
+	return c.adopt(newCanvasScaled(w, h, scale, c.fontCache), bgSrc)
+}
+
+// cloneForPhys — cloneForSize с явным физическим размером (scalewithin.go).
+func (c *Canvas) cloneForPhys(pw, ph, w, h int, scale float64, bgSrc image.Image) *Canvas {
+	return c.adopt(newCanvasPhys(pw, ph, w, h, scale, c.fontCache), bgSrc)
+}
+
+// adopt переносит на новый холст nc реестры шрифтов, настройки и фон.
+func (c *Canvas) adopt(nc *Canvas, bgSrc image.Image) *Canvas {
 	nc.namedFonts = c.namedFonts
 	nc.families = c.families
 	nc.fallbacks = c.fallbacks

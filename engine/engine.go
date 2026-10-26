@@ -173,6 +173,9 @@ type Engine struct {
 	failure failureState
 	// surfaces — буферы SetSurfaces (surfaces.go).
 	surfaces surfaceSet
+	// scaleWithin — физический размер холста первичен, логический выводится
+	// из масштаба (scalewithin.go). Под e.mu.
+	scaleWithin bool
 	started  atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
 	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
 
@@ -608,6 +611,13 @@ func (e *Engine) SetScale(k float64) {
 	if k <= 0 {
 		k = 1
 	}
+	e.mu.RLock()
+	within := e.scaleWithin
+	e.mu.RUnlock()
+	if within {
+		e.SetScaleWithin(k)
+		return
+	}
 	e.frameMu.Lock() // буферы меняются — ждём конца кадра
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
@@ -640,8 +650,19 @@ func (e *Engine) SetResolution(width, height int) {
 	e.mu.Lock()
 	e.canvas = e.canvas.cloneForSize(width, height, e.canvas.scale, e.bgSrc)
 	e.surfaces.drop() // буферы прежнего размера новому холсту не подходят
-	root := e.root
+	e.scaleWithin = false // логический размер задан явно: обычный режим
 	e.mu.Unlock()
+	e.fitTreeToCanvas(width, height)
+}
+
+// fitTreeToCanvas — общий хвост смены холста (SetResolution, SetScaleWithin,
+// SetPhysicalResolution): полный кадр, корень и границы экрана по новому
+// логическому размеру, модальные окна внутри холста. Вне e.mu: SetBounds
+// корня заявляет damage и зовёт реестр, которому e.mu не нужен.
+func (e *Engine) fitTreeToCanvas(width, height int) {
+	e.mu.RLock()
+	root := e.root
+	e.mu.RUnlock()
 	e.markCanvasReplaced()
 	// ВАЖНО: SetBounds — вне e.mu. Изменение bounds триггерит авто-damage
 	// (notifyRectChanged → InvalidateRect); повторный захват e.mu на том же

@@ -260,6 +260,18 @@ func newCanvasScaled(w, h int, scale float64, fc *FontCache) *Canvas {
 	pw := int(math.Round(float64(w) * scale))
 	ph := int(math.Round(float64(h) * scale))
 	pw, ph = clampCanvasSize(pw, ph) // масштаб мог вывести за предел
+	return newCanvasPhys(pw, ph, w, h, scale, fc)
+}
+
+// newCanvasPhys создаёт холст с ЯВНЫМ физическим размером pw×ph и логическим
+// w×h при масштабе scale. Обычный путь (newCanvasScaled) выводит физический
+// размер из логического; режим «масштаб внутри кадра» (scalewithin.go)
+// наоборот держит физический и выводит логический, и округление между ними
+// не обязано сходиться в точности — поэтому оба размера задаются явно.
+func newCanvasPhys(pw, ph, w, h int, scale float64, fc *FontCache) *Canvas {
+	if scale <= 0 {
+		scale = 1
+	}
 	ts := output.TileSize
 	backBuf := image.NewRGBA(image.Rect(0, 0, pw, ph))
 	c := &Canvas{
