@@ -64,6 +64,11 @@ type Canvas struct {
 	recycle bool
 	slabMu  sync.Mutex
 	slabs   []*output.Slab
+	// diffWork, blitWork — переиспользуемые задания пула воркеров для
+	// параллельного диффа и блита (workpool.go). У каждого холста свои: холст
+	// рисует одна горутина, и два задания одного вида у него не идут сразу.
+	diffWork diffJob
+	blitWork blitJob
 	shaper     textShaper            // шейпинг сложного текста (RTL, лигатуры; см. shaper.go)
 	W, H       int                   // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
 	// marks — признак содержимого по тайлам за текущий кадр (regions.go).
@@ -1676,29 +1681,21 @@ func (c *Canvas) diffTiles(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
 		return c.diffTileRows(tx0, ty0, tx1, ty1)
 	}
 
-	results := make([][]output.DirtyTile, workers)
-	var wg sync.WaitGroup
+	// Полосы раздаёт постоянный пул (workpool.go), а не горутины на кадр.
 	chunk := (rows + workers - 1) / workers
-	for i := 0; i < workers; i++ {
-		r0 := ty0 + i*chunk
-		r1 := r0 + chunk - 1
-		if r1 > ty1 {
-			r1 = ty1
-		}
-		if r0 > r1 {
-			break
-		}
-		wg.Add(1)
-		go func(idx, a, b int) {
-			defer wg.Done()
-			results[idx] = c.diffTileRows(tx0, a, tx1, b)
-		}(i, r0, r1)
+	parts := (rows + chunk - 1) / chunk
+	j := &c.diffWork
+	j.c, j.tx0, j.tx1, j.ty0, j.ty1, j.chunk = c, tx0, tx1, ty0, ty1, chunk
+	if cap(j.results) < parts {
+		j.results = make([][]output.DirtyTile, parts)
 	}
-	wg.Wait()
+	j.results = j.results[:parts]
+	poolRun(j, &j.batch, parts)
 
 	var tiles []output.DirtyTile
-	for _, part := range results {
+	for i, part := range j.results {
 		tiles = append(tiles, part...)
+		j.results[i] = nil // не держать данные тайлов до следующего кадра
 	}
 	return tiles
 }

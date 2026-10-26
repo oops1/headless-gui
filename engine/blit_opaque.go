@@ -17,7 +17,6 @@ import (
 	"image"
 	stdraw "image/draw"
 	"runtime"
-	"sync"
 )
 
 const (
@@ -68,25 +67,13 @@ func (c *Canvas) blitSrcRect(r image.Rectangle, src image.Image, offset image.Po
 		c.blitSrcBand(r, src, offset)
 		return
 	}
-	// Полосы не пересекаются по строкам back — гонок нет. Последняя идёт в
-	// текущей горутине; число горутин ограничено ядрами и все ждут wg.
-	var wg sync.WaitGroup
+	// Полосы не пересекаются по строкам back — гонок нет. Раздаёт их
+	// постоянный пул (workpool.go); первую делает текущая горутина.
 	step := (h + bands - 1) / bands
-	for y := 0; y < h; y += step {
-		y1 := min(y+step, h)
-		band := image.Rect(r.Min.X, r.Min.Y+y, r.Max.X, r.Min.Y+y1)
-		off := offset.Add(image.Pt(0, y))
-		if y1 == h {
-			c.blitSrcBand(band, src, off)
-			break
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			c.blitSrcBand(band, src, off)
-		}()
-	}
-	wg.Wait()
+	j := &c.blitWork
+	j.c, j.r, j.src, j.offset, j.step = c, r, src, offset, step
+	poolRun(j, &j.batch, (h+step-1)/step)
+	j.src = nil // не держать картинку приложения до следующего блита
 }
 
 // blitSrcBand — одна полоса blitSrcRect, последовательно.

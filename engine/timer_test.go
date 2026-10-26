@@ -340,6 +340,9 @@ func TestTimer_NoGoroutineLeak(t *testing.T) {
 	testreset.Globals(t)
 	// Даём завершиться горутинам, оставшимся от предыдущих тестов.
 	time.Sleep(100 * time.Millisecond)
+	// Пул воркеров (workpool.go) один на процесс и живёт до его конца: если
+	// он стартует впервые посреди замера, его воркеры сойдут за утечку.
+	startWorkPool()
 	before := runtime.NumGoroutine()
 
 	for round := 0; round < 3; round++ {
