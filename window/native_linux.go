@@ -88,6 +88,10 @@ type X11Window struct {
 	symsPerCode int
 	keysyms     []uint32
 
+	// lk — клавиши-переключатели: очередь вопросов приложения и то, что цикл
+	// событий узнал о сервере (x11_lockkeys_linux.go).
+	lk x11LockState
+
 	// Диапазон клиентских ID из setup: каждый созданный объект обязан
 	// иметь id = ridBase | (n & ridMask), иначе сервер отвечает BadIDChoice.
 	ridBase, ridMask uint32
@@ -586,11 +590,17 @@ func (w *X11Window) RunEventLoop() error {
 	// И для подписки на смену владельца буфера обмена (ClipboardFormats).
 	w.clip.setFormatsLooping(true)
 	defer w.clip.setFormatsLooping(false)
+	// И для вопросов о клавишах-переключателях (LockKeys): ответ даёт цикл.
+	// Ждущих при выходе отпускаем: отвечать им больше некому.
+	w.lk.looping.Store(true)
+	defer w.lkFailAll()
+	defer w.lk.looping.Store(false)
 	w.x11SyncTouch()
 	w.x11SyncKeyGrab()
 	w.x11SyncCursorImage()
 	w.x11SyncPointerLock()
 	w.x11SyncClipboardWatch()
+	w.x11SyncLockKeys()
 	for !w.closed.Load() {
 		if !w.readEvent(buf) {
 			if w.closed.Load() {
@@ -614,6 +624,7 @@ func (w *X11Window) RunEventLoop() error {
 		w.x11SyncCursorImage()
 		w.x11SyncPointerLock()
 		w.x11SyncClipboardWatch()
+		w.x11SyncLockKeys()
 	}
 	return nil
 }
@@ -883,6 +894,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		// (setxkbmap на лету, динамический remap xdotool и т.п.) —
 		// перечитываем таблицу keysym'ов.
 		w.x11ReloadKeyboardMapping()
+		w.lk.invalidate() // индикаторы и модификаторы клавиш могли поменяться
 	}
 }
 
