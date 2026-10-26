@@ -1773,6 +1773,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// (backdropdamage.go).
 	if !damageAll {
 		damageRects = canvas.expandForBackdrops(damageRects)
+		damageRects = mergeOverlaps(damageRects)
 	}
 	// Полный кадр (fullframe.go): рисуется всё и отдаётся всё, без диффа.
 	full := e.takeFullFrame()
