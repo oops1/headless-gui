@@ -22,6 +22,8 @@ type tileMark struct {
 	// touched — тайл в этом кадре трогали. Нетронутый тайл не попадает в
 	// выдачу вовсе: его содержимое не менялось, и говорить о нём нечего.
 	touched bool
+	// video — номер окна программы при kind == RegionVideo (video.go).
+	video uint32
 }
 
 // initTileMarks заводит таблицу признаков под размер холста.
@@ -266,11 +268,15 @@ func (c *Canvas) regionsFor(tiles []output.DirtyTile) []output.Region {
 			})
 			continue
 		}
-		out = append(out, output.Region{
+		r := output.Region{
 			Rect:  image.Rect(t.X, t.Y, t.X+t.W, t.Y+t.H),
 			Kind:  m.kind,
 			Color: m.color,
-		})
+		}
+		if m.kind == output.RegionVideo {
+			r.VideoID = m.video
+		}
+		out = append(out, r)
 	}
 	return out
 }

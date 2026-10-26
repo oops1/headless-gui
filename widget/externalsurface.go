@@ -84,6 +84,10 @@ type ExternalSurface struct {
 	// ввод не принимается. focused — у поверхности фокус клавиатуры.
 	input   atomic.Pointer[SurfaceInput]
 	focused atomic.Bool
+
+	// content — непрозрачная область, вид содержимого и частота обновлений
+	// (externalsurface_content.go).
+	content surfaceContent
 }
 
 // surfaceMeta — неизменяемое описание буфера поверхности.
@@ -170,6 +174,7 @@ func (s *ExternalSurface) Swap(next *image.RGBA, opaque bool, damage []image.Rec
 	// порядок смешивания меняет всю картинку.
 	same := damage != nil && old.rect == m.rect && old.opaque == m.opaque && !m.rect.Empty()
 	if !same {
+		s.noteUpdate()
 		s.Invalidate()
 		return prev
 	}
@@ -225,6 +230,9 @@ func (s *ExternalSurface) InvalidateRect(r image.Rectangle) {
 // что виден последней отрисовкой (до первой — 1); при смене масштаба окна
 // движок перерисовывает кадр целиком.
 func (s *ExternalSurface) InvalidateRects(rects []image.Rectangle) {
+	if len(rects) > 0 {
+		s.noteUpdate()
+	}
 	m := s.loadMeta()
 	if m.rect.Empty() || len(rects) == 0 {
 		return
@@ -284,6 +292,11 @@ func logCeil(p int, k float64) int {
 // фон непрозрачен: тогда обход не рисует то, что целиком лежит под
 // поверхностью.
 func (s *ExternalSurface) OpaqueRegion() []image.Rectangle {
+	// Клиент объявил, что непрозрачно (SetOpaqueRegion): только это, даже у
+	// буфера с альфой — пиксели с A = 255 закрывают и при смешивании.
+	if rects, ok := s.opaqueRegionLocal(); ok {
+		return rects
+	}
 	m := s.loadMeta()
 	if !m.opaque || m.bg.A != 255 {
 		return nil

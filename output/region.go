@@ -32,6 +32,10 @@ const (
 	RegionImage
 	// RegionText — глифы.
 	RegionText
+	// RegionVideo — тайл целиком лежит в видимой части окна программы,
+	// показывающего видео (Region.VideoID, Frame.Videos). Добавлено в v4.0:
+	// потребитель, не знающий этого вида, поступает с ним как с RegionMixed.
+	RegionVideo
 )
 
 // String — имя вида для диагностики и тестов.
@@ -43,6 +47,8 @@ func (k RegionKind) String() string {
 		return "image"
 	case RegionText:
 		return "text"
+	case RegionVideo:
+		return "video"
 	default:
 		return "mixed"
 	}
@@ -63,4 +69,22 @@ type Region struct {
 	// обычный RGBA получит неверный оттенок ровно тогда, когда сам просил
 	// другой формат.
 	Color color.RGBA
+	// VideoID — номер окна программы (output.VideoRegion.ID) при Kind ==
+	// RegionVideo; ноль в остальных случаях. Отдельным полем, а не в Color:
+	// Color — байты буфера, и номер в них читался бы как оттенок.
+	VideoID uint32
+}
+
+// VideoRegion — окно программы, показывающее видео, в этом кадре — даже если
+// в этом кадре оно не обновлялось: потребителю видеокодека нужен весь список
+// фильмов на экране.
+type VideoRegion struct {
+	// ID — стабильный номер окна (тот же, что в Region.VideoID).
+	ID uint32
+	// Rect — где окно на экране, физические пиксели, обрезано холстом.
+	Rect image.Rectangle
+	// Cover — что лежит над окном: окна выше по Z, панель задач, открытые
+	// меню, затемнение модального окна. Физические пиксели, обрезано Rect.
+	// Полупрозрачное тоже закрывает: кодек видео его не нарисует.
+	Cover []image.Rectangle
 }

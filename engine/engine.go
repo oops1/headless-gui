@@ -187,6 +187,11 @@ type Engine struct {
 	// его поиска. Только поток-источник ввода, как lastMoveX.
 	pointerOwner widget.PointerOwner
 	ownerPath    []hitStep
+
+	// videoBuf, overBuf — рабочие буферы поиска видео (video.go). Только
+	// горутина кадра.
+	videoBuf []widget.VideoSurface
+	overBuf  []image.Rectangle
 	hasLastMove          bool
 
 	// Серия нажатий одной кнопкой — для MouseEvent.Clicks. Доступ оттуда же,
@@ -1852,6 +1857,10 @@ func (e *Engine) renderFrame() output.Frame {
 	e.drawTooltip(canvas, root)
 	e.endDrawContract()
 
+	// Окна программ с видео (video.go): после всей отрисовки, до диффа —
+	// метки тайлов нужны описанию кадра.
+	videos := e.collectVideos(canvas, root, modals)
+
 	// Переносы применяются к ПЕРЕДНЕМУ буферу до диффа: он приводится в то
 	// состояние, в котором окажется буфер потребителя после копирования, и
 	// дифф оставляет только настоящие расхождения. Без этого потребитель
@@ -1904,6 +1913,7 @@ func (e *Engine) renderFrame() output.Frame {
 		Tiles:     tiles,
 		Regions:   canvas.regionsFor(tiles),
 		Moves:     moves,
+		Videos:    videos,
 		Width:     canvas.W,
 		Height:    canvas.H,
 	}
