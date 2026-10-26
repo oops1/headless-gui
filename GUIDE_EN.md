@@ -4284,7 +4284,16 @@ ok := win.SetLockKeys(window.NumLock)
 - **Wayland.** The last `wl_keyboard.modifiers` (`mods_locked`); which bits are Caps and
   Num Lock comes from the compositor's keymap. Before the first `modifiers` and after the
   focus is lost `known == false`. Scroll Lock is usually not a modifier and is invisible;
-  so is Kana Lock. A client may not change the state: `SetLockKeys` is `false`.
+  so is Kana Lock. `SetLockKeys` (v3.44.1) works through `zwp_virtual_keyboard_manager_v1`
+  when the compositor advertises it: the window gets a virtual keyboard with the
+  compositor's keymap and is handed `modifiers` with the wanted bits in `mods_locked`; no
+  key is pressed, so the application receives no KeyDown/KeyUp. `true` — the next
+  `wl_keyboard.modifiers` showed what was asked (it waits at most 300 ms, so call it from
+  an application goroutine, not from a window event handler: from there the request goes
+  out but the answer is always `false`). `false` — no manager, the window has no keyboard
+  focus or the state is not known yet (no requests are made), Kana Lock or a Scroll Lock
+  without a modifier in the keymap was asked for (the rest is applied), or the compositor
+  did not apply the `modifiers` to the whole seat.
 - **macOS.** `known == false`, `SetLockKeys` is `false`.
 
 Inside `SetOnActivate(true)` the state may not have arrived yet on Wayland: the

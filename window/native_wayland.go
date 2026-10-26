@@ -37,6 +37,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/oops1/headless-gui/v3/internal/clipimage"
+	"github.com/oops1/headless-gui/v3/internal/goid"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -385,6 +386,12 @@ type WaylandWindow struct {
 	// lk — состояние клавиш-переключателей из modifiers
 	// (wayland_lockkeys_linux.go).
 	lk wlLockState
+	// gVirtualKeyboard — имя глобала zwp_virtual_keyboard_manager_v1 (0 — нет),
+	// vk — виртуальная клавиатура окна для SetLockKeys
+	// (wayland_lockkeys_set_linux.go). loopGID — горутина цикла событий.
+	gVirtualKeyboard atomic.Uint32
+	vk               wlVirtKbd
+	loopGID          atomic.Uint64
 
 	// minW/minH/minWant — минимальный размер, заданный до создания toplevel
 	// (см. SetMinSize): Create фиксирует размер, и отложенный минимум
@@ -785,6 +792,10 @@ func (w *WaylandWindow) dispatchOne() error {
 }
 
 func (w *WaylandWindow) RunEventLoop() error {
+	// SetLockKeys, позванный из обработчика события, ждать подтверждения не
+	// может: оно приходит в этот же цикл.
+	w.loopGID.Store(goid.Current())
+	defer w.loopGID.Store(0)
 	for !w.closed.Load() {
 		if err := w.dispatchOne(); err != nil {
 			if w.closed.Load() {
@@ -895,6 +906,10 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 			// Необязательное расширение: без него захват клавиатуры
 			// (SetKeyboardGrab) невозможен.
 			w.gShortcutsInhibit = name
+		case "zwp_virtual_keyboard_manager_v1":
+			// Необязательное расширение: с ним SetLockKeys меняет
+			// переключатели через виртуальную клавиатуру, без него — false.
+			w.gVirtualKeyboard.Store(name)
 		case "xdg_toplevel_icon_manager_v1":
 			// Необязательное расширение: без него значок окна не поставить
 			// (SetIcon вернёт ErrIconUnsupported).
@@ -1267,7 +1282,7 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 			os.WriteFile(dump, data, 0o644)
 		}
 		w.keymap = parseXkbKeymap(string(data))
-		w.lkNoteKeymap(string(data))
+		w.lkNoteKeymap(data)
 		if w.keymap == nil {
 			wlLog("keymap: разобрать не удалось — фолбэк на упрощённый ввод")
 		} else {
@@ -1282,7 +1297,7 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 		w.modShift = (depressed|latched)&xkbModShift != 0
 		w.modCaps = locked&xkbModLock != 0
 		w.kbGroup = int(binary.LittleEndian.Uint32(b[16:20]))
-		w.lkNoteModifiers(locked)
+		w.lkNoteModifiers(depressed, latched, locked, binary.LittleEndian.Uint32(b[16:20]))
 
 	case wlKeyboardEvKey:
 		// serial, time, key, state
@@ -1655,6 +1670,7 @@ func (w *WaylandWindow) Close() {
 	w.repeat.cancel()
 	w.closeAllPopups()
 	w.closeCursor()
+	w.closeVirtualKeyboard()
 	w.icon.mu.Lock()
 	w.closeIconMemory()
 	w.icon.mu.Unlock()

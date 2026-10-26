@@ -94,4 +94,26 @@ func TestWaylandLockKeysE2E(t *testing.T) {
 	if w.LockKeysSettled() != ok {
 		t.Errorf("LockKeysSettled=%v при известно=%v", w.LockKeysSettled(), ok)
 	}
+
+	// SetLockKeys через виртуальную клавиатуру — только если композитор её
+	// объявил и окно в фокусе (иначе false без запросов).
+	name := w.gVirtualKeyboard.Load()
+	t.Logf("zwp_virtual_keyboard_manager_v1 объявлен: %v", name != 0)
+	if name == 0 {
+		if w.SetLockKeys(CapsLock) {
+			t.Error("SetLockKeys ответил true без менеджера")
+		}
+		return
+	}
+	if !ok {
+		t.Skip("менеджер есть, но окно без фокуса клавиатуры: менять нечем")
+	}
+	t.Cleanup(func() { w.SetLockKeys(k) })
+	want := k ^ NumLock
+	got := w.SetLockKeys(want)
+	now, _ := w.LockKeys()
+	t.Logf("SetLockKeys(%v) = %v, после: %v", want, got, now)
+	if got && now != want {
+		t.Errorf("true, а состояние %v, ждал %v", now, want)
+	}
 }

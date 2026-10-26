@@ -9868,7 +9868,11 @@ are brought anyway.
   other keys are brought. The request has no reply, so its error is checked separately
   (`x11SyncCheck`: GetInputFocus) and then the state is read back, so `true` means "the
   server now shows what was asked".
-- **Wayland, macOS.** `false` (a Wayland client may not change the keyboard state).
+- **Wayland** (since v3.44.1 — see the section below). Through
+  `zwp_virtual_keyboard_manager_v1` when the compositor advertises it; without it, or
+  without keyboard focus, `false` and no requests. (v3.44.0 answered `false` always: a
+  Wayland client may not change the keyboard state through the core protocol.)
+- **macOS.** `false`.
 
 ### Compatibility
 
@@ -9899,6 +9903,101 @@ real Weston: `LockKeys` known after focus).
 Not verified live: Mutter, KWin and the WinLine compositor (only Weston in WSLg and
 protocol-level fakes); an X server other than XWayland (a native Xorg, Xvfb with
 non-standard indicator names); a Japanese keyboard for Kana Lock; macOS.
+
+## v3.44.1: `SetLockKeys` on Wayland — a virtual keyboard (RDP client Tandem 1.7.1)
+
+A fix of an existing method, no new public API. v3.44.0 answered `false` on Wayland
+(the core protocol lets a client read the toggle state but not change it), so a Caps Lock
+turned on by the server (Set Keyboard Indicators) never lit the user's lamp. Now
+`Window.SetLockKeys` uses `zwp_virtual_keyboard_manager_v1` (virtual-keyboard-unstable-v1)
+when the compositor advertises it (`window/wayland_lockkeys_set_linux.go`).
+
+- **The global** is bound lazily (version 1), like the other optional ones
+  (`gVirtualKeyboard`, an `atomic.Uint32` because a registry event may come later on the
+  event loop while `SetLockKeys` reads it elsewhere). No manager — `false`, no requests.
+- **Preconditions** (else `false` and **not one request**): the manager is advertised,
+  the window has a seat, the keyboard state is known (`wl_keyboard.modifiers` came for the
+  current focus: no focus, after `leave`, before the first `modifiers` — unknown) and the
+  compositor's keymap was received (`wl_keyboard.keymap`, xkb_v1). The keymap is needed
+  before any `modifiers` — otherwise the compositor raises `no_keymap`, a fatal error.
+- **The request**, once per window and then reused: `create_virtual_keyboard(seat, id)`;
+  `keymap(xkb_v1, fd, size)` — **the compositor's own keymap**, the copy saved while parsing
+  `wl_keyboard.keymap` (cut at the first NUL and NUL-terminated, since compositors parse
+  the file as a C string), through a new `memfd`, size with the trailing NUL; then
+  `modifiers(depressed, latched, locked', group)`: depressed, latched and group are those
+  of the last `wl_keyboard.modifiers` (they travel untouched), `locked'` is the last
+  `mods_locked` with the toggle bits set or cleared — Caps (index Lock), Num Lock (index
+  from `modifier_map`), Scroll Lock only if the keymap bound it to a modifier. Other
+  locked bits are left alone. The keymap is sent again only if the compositor sent a
+  *different* one. **No `key` request is ever sent**: Caps is "pressed" by a bit, not by a
+  key, so the compositor sends the windows no `wl_keyboard.key` and the application sees
+  no KeyDown/KeyUp (no loop "server asked for Caps -> client pressed Caps -> sent to the
+  server"). `Close` sends `destroy` of the virtual keyboard.
+- **Kana Lock** is never touched (it is not in `mods_locked`): if asked, the answer is
+  `false`, the rest is applied. The same for Scroll Lock when the keymap has no modifier
+  for it (as on X11). Nothing differs from what was asked (the bits are already such) —
+  `true`, no requests (and no virtual keyboard is created).
+- **The answer.** `true` — a `wl_keyboard.modifiers` arrived whose `mods_locked`, on the
+  affected bits, is what was asked, no later than 300 ms (`lkVirtTimeout`) after the
+  request. A `modifiers` that left the toggle bits as they were (the user pressed Shift)
+  does not end the wait. Focus lost (`leave`) or the window closed during the wait —
+  `false` at once. Otherwise `false` after 300 ms: a compositor that applies the virtual
+  keyboard's `modifiers` only to its own events leaves the seat unchanged, and "false" is
+  the honest answer (a compositor-side matter, outside the engine).
+- **Waiting and goroutines.** The confirmation arrives on the Wayland event loop, so the
+  call cannot wait there. The state is under `lk.mu`; a waiter takes a channel that
+  `lkNoteModifiers` / `lkNoteLeave` / `Close` close (a broadcast, `wlLockState.changed`),
+  re-checks the condition under the lock, and waits on that channel and a 300 ms timer.
+  Whole calls are serialized by `vk.callMu` (two callers must not confuse "the next
+  `modifiers`"); `Close` takes only `vk.mu` and does not wait for a caller. Requests go
+  through `send` (under `w.mu`), as everywhere in the package: the socket is written
+  from any goroutine, a message at a time. **A call from the event loop** (e.g. from a
+  `SetOnKeyDown` handler, which runs on it) is detected — `RunEventLoop` remembers its
+  goroutine id (`internal/goid`, as the engine does) — and then the request is sent but
+  nothing is awaited and the answer is `false`; that cannot deadlock (a wait there would
+  only burn the 300 ms). The normal caller is an application/RDP goroutine.
+- **Protocol errors — a risk, not removable.** An error on the virtual keyboard objects
+  (`unauthorized` at `create_virtual_keyboard`, `no_keymap`, a bad keymap) is sent by the
+  compositor as `wl_display.error` and **the connection is terminated**. The engine
+  handles `wl_display.error` as fatal: it prints the message and marks the window closed
+  (`handleEvent`), so the event loop ends and the window dies — there is no "survive and
+  retry". Therefore: `no_keymap` is excluded by the order of requests (keymap is never
+  skipped, the virtual keyboard is not used without it); nothing is created at all unless
+  the compositor itself advertised the manager. What the client cannot know in advance is
+  whether *this* client is authorized: the protocol lets a compositor answer
+  `create_virtual_keyboard` with `unauthorized` (a compositor that restricts the
+  interface normally just does not advertise the global to such clients, but nothing
+  obliges it to). The protocol offers no safe probe, so on a compositor that advertises
+  the manager yet refuses the client, the first `SetLockKeys` that has something to
+  change would close the window. The compositor owner decides: advertise the global only
+  to clients that may use it.
+- **Compatibility.** Only a behaviour of an existing method changes (`false` ->
+  `true`/`false` as above, only where the compositor offers the global). New
+  unexported identifiers only. The frame tests did not change.
+
+Tests (`window/wayland_lockkeys_set_linux_test.go`, a fake compositor over a socket
+pair, `lkvk*` helpers): the exact bytes of bind / `create_virtual_keyboard` / `keymap`
+(the fd content equals the compositor's keymap + NUL, size with the NUL) /
+`modifiers` and their order, no `key`, the application gets no keys, `true` after the
+compositor's `modifiers` and `LockKeys()` shows it, `false` after 300 ms of silence,
+a foreign `modifiers` does not end the wait, a second call reuses the keyboard (no new
+`keymap`, fresh depressed/latched/group), clearing the extra toggles with other bits kept,
+"already as asked" sends nothing, refusals send nothing (no manager, `leave`, no state,
+no keymap, no seat), Kana and a Scroll Lock without a modifier, masks from the keymap
+(Num Lock on Mod3, Scroll Lock on Mod5), the keymap is re-sent only when it changed,
+NUL-termination, `Close` -> `destroy` (and nothing without a keyboard), `Close` and
+`leave` wake a waiter, a call from the event loop (a direct one and from a key handler of
+a real `RunEventLoop`) does not wait, a race test (`-race`), the registry global.
+
+Mutations: 40 one-line breakages of the implementation (the order and content of the
+requests, each of depressed / latched / group / locked, the NUL, the waits and their
+wake-ups, the event-loop check, `Close`, every refusal, the masks) — all caught.
+
+Live: Weston in WSLg **does not advertise** `zwp_virtual_keyboard_manager_v1`
+(`TestWaylandLockKeysE2E` logs that and checks `false` without requests), so the real
+exchange with a compositor was **not** run. Verified on the wire against a fake only.
+Not verified: wlroots-based compositors, the WinLine compositor, and whether a given
+compositor applies a virtual keyboard's `modifiers` to the whole seat.
 
 ## End of Reference
 

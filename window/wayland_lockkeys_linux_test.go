@@ -57,8 +57,10 @@ func (c *wlTestConn) sendKeymap(t *testing.T, text string) {
 	if err != nil {
 		t.Skipf("memfd_create: %v", err)
 	}
-	f := os.NewFile(uintptr(fd), "keymap")
-	if _, err := f.WriteString(text); err != nil {
+	// Без os.NewFile: у него финализатор закрыл бы fd второй раз, уже после
+	// того, как handleKeyboard его закрыл, и номер к тому времени мог достаться
+	// чужому файлу.
+	if _, err := unix.Write(fd, []byte(text)); err != nil {
 		t.Fatalf("запись keymap: %v", err)
 	}
 	b := make([]byte, 8)
@@ -167,7 +169,8 @@ func TestWaylandLockKeys_LeaveForgets(t *testing.T) {
 	}
 }
 
-// Менять состояние клавиатуры клиент Wayland не вправе.
+// Без zwp_virtual_keyboard_manager_v1 менять состояние клавиатуры клиент
+// Wayland не вправе (с ним — wayland_lockkeys_set_linux_test.go).
 func TestWaylandLockKeys_SetNotSupported(t *testing.T) {
 	win := lkTestWindow(lkNewWlWindow(t).w, &rkEngine{})
 	if win.SetLockKeys(CapsLock) {
