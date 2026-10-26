@@ -31,7 +31,7 @@ const (
 // (остальные типы идут через stdraw.Draw в режиме Src, но тоже без Over).
 func opaqueFastType(src image.Image) bool {
 	switch src.(type) {
-	case *image.RGBA, *image.NRGBA, *image.YCbCr, *image.Gray:
+	case *image.RGBA, *image.NRGBA, *image.YCbCr, *image.Gray, bgraImage:
 		return true
 	}
 	return false
@@ -85,6 +85,11 @@ func (c *Canvas) blitSrcBand(r image.Rectangle, src image.Image, offset image.Po
 	switch s := src.(type) {
 	case *image.RGBA:
 		pix, stride, pixOff0 = s.Pix, s.Stride, s.PixOffset(offset.X, offset.Y)
+	case bgraImage:
+		// Байты уже в порядке холста BGRX; на холсте RGBA их надо
+		// переставить, как RGBA на холсте BGRX.
+		pix, stride, pixOff0 = s.Pix, s.Stride, s.PixOffset(offset.X, offset.Y)
+		bgrx = !bgrx
 	case *image.NRGBA:
 		// Непрозрачный NRGBA совпадает с premultiplied побайтно.
 		pix, stride, pixOff0 = s.Pix, s.Stride, s.PixOffset(offset.X, offset.Y)

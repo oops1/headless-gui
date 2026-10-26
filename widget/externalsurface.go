@@ -95,6 +95,7 @@ type surfaceMeta struct {
 	rect   image.Rectangle // границы буфера (пустой — буфера нет)
 	opaque bool            // все пиксели буфера непрозрачны
 	bg     color.RGBA      // чем закрашивать места без буфера
+	bgra   bool            // байты буфера в порядке B,G,R,A (SetBGRA)
 }
 
 // NewExternalSurface создаёт поверхность без буфера: пока его нет, виджет
@@ -133,6 +134,26 @@ func (s *ExternalSurface) SetBackground(c color.RGBA) {
 // Background возвращает цвет заливки мест без буфера.
 func (s *ExternalSurface) Background() color.RGBA { return s.loadMeta().bg }
 
+// SetBGRA говорит, что байты буфера лежат в порядке B,G,R,A: так их пишут
+// wl_shm (ARGB8888 и XRGB8888) и DIB Windows. На холсте FormatBGRX строки
+// такого буфера копируются как есть, без перестановки каналов на каждом
+// пикселе; на холсте RGBA каналы переставляются при копировании. Без вызова
+// буфер — RGBA, как у image.RGBA. Premultiplied и признак opaque — как
+// прежде.
+func (s *ExternalSurface) SetBGRA(on bool) {
+	s.metaMu.Lock()
+	old := s.loadMeta()
+	if old.bgra == on {
+		s.metaMu.Unlock()
+		return
+	}
+	n := *old
+	n.bgra = on
+	s.meta.Store(&n)
+	s.metaMu.Unlock()
+	s.Invalidate()
+}
+
 // SetBuffer отдаёт поверхности буфер приложения (nil снимает его). opaque —
 // обещание: ВСЕ пиксели имеют альфу 255; тогда область перезаписывается
 // копированием строк (композиция Src), иначе смешивается с тем, что под
@@ -166,6 +187,7 @@ func (s *ExternalSurface) Swap(next *image.RGBA, opaque bool, damage []image.Rec
 	s.metaMu.Lock()
 	old := s.loadMeta()
 	m.bg = old.bg
+	m.bgra = old.bgra
 	s.meta.Store(m)
 	s.metaMu.Unlock()
 	s.mu.Unlock()
@@ -360,6 +382,10 @@ func (s *ExternalSurface) drawBuffer(ctx DrawContext, b image.Rectangle, k float
 		}
 	}
 	if sw > 0 && sh > 0 {
-		BlitPixels(ctx, buf, sr, b.Min.X, b.Min.Y, m.opaque)
+		if m.bgra {
+			BlitPixelsBGRA(ctx, buf, sr, b.Min.X, b.Min.Y, m.opaque)
+		} else {
+			BlitPixels(ctx, buf, sr, b.Min.X, b.Min.Y, m.opaque)
+		}
 	}
 }

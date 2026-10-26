@@ -62,3 +62,35 @@ func BlitPixels(ctx DrawContext, src *image.RGBA, sr image.Rectangle, x, y int, 
 	h := max(1, int(math.Round(float64(sr.Dy())/k)))
 	ctx.DrawImageScaled(img, dx, dy, w, h)
 }
+
+// PixelBlitterBGRA — PixelBlitter для буфера, чьи байты лежат в порядке
+// B,G,R,A (см. ExternalSurface.SetBGRA). Реализует engine.Canvas.
+type PixelBlitterBGRA interface {
+	BlitPixelsBGRA(src *image.RGBA, sr image.Rectangle, x, y int, opaque bool)
+}
+
+// BlitPixelsBGRA — BlitPixels для буфера в порядке B,G,R,A. Контекст без
+// поддержки получает переставленную копию части sr и прежний путь.
+func BlitPixelsBGRA(ctx DrawContext, src *image.RGBA, sr image.Rectangle, x, y int, opaque bool) {
+	if src == nil {
+		return
+	}
+	sr = sr.Intersect(src.Rect)
+	if sr.Empty() {
+		return
+	}
+	if b, ok := ctx.(PixelBlitterBGRA); ok {
+		b.BlitPixelsBGRA(src, sr, x, y, opaque)
+		return
+	}
+	tmp := image.NewRGBA(src.Rect)
+	n := sr.Dx() * 4
+	for y := sr.Min.Y; y < sr.Max.Y; y++ {
+		so, do := src.PixOffset(sr.Min.X, y), tmp.PixOffset(sr.Min.X, y)
+		s, d := src.Pix[so:so+n], tmp.Pix[do:do+n]
+		for i := 0; i < n; i += 4 {
+			d[i], d[i+1], d[i+2], d[i+3] = s[i+2], s[i+1], s[i], s[i+3]
+		}
+	}
+	BlitPixels(ctx, tmp, sr, x, y, opaque)
+}
