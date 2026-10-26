@@ -10075,6 +10075,65 @@ widget.ClearAllBroken()                       // tests only
   closed by the engine; state changed before the panic is not rolled back; the OS event
   pump in `window` is not protected until stage 9.
 
+## v4.0 (unreleased, branch `feature/engine-architecture`): scene and external surfaces
+
+Decision record: `docs/adr/0002-scene.md`. The scene is the widget tree itself: a foreign
+window is a `widget.ExternalSurface` node, and its Z order is the child order.
+
+```go
+surf := widget.NewExternalSurface()
+surf.SetBuffer(img, opaque)                 // img *image.RGBA, RGBA pixels; Swap/Update as before
+surf.SetInput(widget.SurfaceInput{Move, Leave, Button, Wheel, Key, Touch, Focus, Cursor})
+surf.SetInput(widget.SurfaceInput{})        // no input again
+surf.SetOpaqueRegion(rects)                 // buffer coordinates; nil clears
+surf.SetContentHint(widget.ContentUnknown)  // ContentStatic, ContentVideo
+surf.SurfaceID()                            // stable number of the surface
+surf.ContentHint()
+
+widget.PointerOwnersActive()                // any PointerOwner registered in the process
+// widget.PointerOwner: PointerOver(x, y) and PointerOut(), implemented by ExternalSurface
+
+base.ChildIndex(w) int
+base.RaiseChild(w) bool / base.LowerChild(w) bool
+base.InsertChildAt(i, w)                    // Canvas versions keep the attached properties
+
+engine.VideoRate   // 12 updates per second: video threshold
+engine.VideoHold   // 5 s below VideoRate/2 before a surface stops being video
+eng.SetShadowCache(on bool) / eng.ShadowCache() bool
+
+// Frame
+Frame.Videos []output.VideoRegion   // ID, Rect (physical), Cover (physical)
+output.RegionVideo                  // Region.Kind for tiles fully inside a visible video window
+Region.VideoID uint32               // the window's ID, set when Kind == RegionVideo
+widget.VideoCandidates() int        // surfaces currently tracked (update recently or hinted)
+```
+
+- **Input routing.** A `SurfaceInput` callback receives coordinates in the surface's own
+  logical units. A left press over a surface with `Button` captures the mouse until release
+  (`CaptureRequester`). A surface with `Key` answers `AcceptsTab`, so Tab reaches its key
+  callback. `TabIndex()` is -1: the surface is outside the shell's Tab order.
+- **Pointer owner.** `Engine` routes motion to the topmost `PointerOwner` under the pointer
+  (hit test, not bounds). The previous owner gets `PointerOut` when the owner changes. While no
+  owner is registered the search is skipped. Capture owners get the motion wherever the pointer
+  is.
+- **Video detection.** Update stamps are kept in a ring of 64 per surface; a surface is video
+  while its count in the last second is at least `VideoRate` and stays video until its rate is
+  below half of `VideoRate` for `VideoHold`. `ContentStatic` and `ContentVideo` override the rate.
+  A surface that is not video and has been idle beyond `VideoHold` plus one second leaves the
+  registry; the next update brings it back.
+- **Cover.** `Cover` holds the siblings above each surface on its path to the root (their
+  `SubtreeRect` intersected with the surface), plus open overlays and the modal dimming (the whole
+  canvas when the dim colour is not transparent, otherwise the modal's subtree).
+- **Modal keys.** `SendKeyEvent` delivers keys only to a focused widget inside the top modal; the
+  focus owner outside it is kept, not cleared.
+- **Shadows.** `DrawShadow` blurs a silhouette once per (corner, radius, colour) and assembles
+  larger shadows from the template (9-slice). Up to 64 templates per canvas, least recently used
+  evicted. `SetShadowCache(false)` restores the direct blur.
+- **Moves.** `Window` announces a move with its `DrawMargin` included (`notifyMoved`).
+- **Not implemented yet.** `SetSurfaces`, `ReleaseSurface`, `Frame.Surface` (task 2.4);
+  a `ShadowCaster` interface (2.5 uses `DrawShadow` directly); the `core/scene` package
+  (stage 7); the WinLine session pilot (2.11). RAIL is outside the scene.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

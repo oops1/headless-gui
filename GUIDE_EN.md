@@ -5541,6 +5541,59 @@ place, and the program closes the window itself (`CloseModal`). It does not undo
 a widget made before the panic. The operating-system window (the event pump in `window`)
 is not protected yet: that is stage 9 of the plan.
 
+### Scene and external surfaces (v4.0, in progress)
+
+A window of another program can be shown on the engine's screen next to the engine's own
+windows: in the same widget tree, in one Z order, with the same input. The decision is in
+`docs/adr/0002-scene.md`.
+
+```go
+surf := widget.NewExternalSurface()          // the program's buffer, no copy into the engine cache
+surf.SetBounds(image.Rect(20, 20, 420, 300))
+surf.SetBuffer(buf, true)                    // a *image.RGBA buffer, RGBA pixels
+surf.SetInput(widget.SurfaceInput{          // input of the program's window, in its coordinates
+    Move:   func(x, y int) { /* the pointer is over the window */ },
+    Leave:  func() { /* the pointer has left */ },
+    Button: func(e widget.MouseEvent) bool { return true },
+    Key:    func(e widget.KeyEvent) { /* a key while the window has focus; Tab too */ },
+    Focus:  func(on bool) {},
+})
+surf.SetOpaqueRegion([]image.Rectangle{...}) // opaque parts of the buffer, nil clears it
+surf.SetContentHint(widget.ContentVideo)     // ContentUnknown, ContentStatic, ContentVideo
+root.AddChild(surf)
+
+panel.RaiseChild(surf)                       // raise above the siblings; LowerChild, InsertChildAt
+```
+
+- **Input.** Event coordinates are in the program window's units. A left press over the
+  window captures the mouse until release, even if the pointer moves onto the taskbar. A
+  window with `Key` takes Tab for itself and sits outside the shell's Tab order. `SetInput`
+  with a zero structure removes the input. Without `SetInput` the surface behaves as before.
+- **Pointer.** Motion goes only to the topmost window under the pointer. If another widget
+  lies over the window at the pointer (for example the taskbar), the window receives `Leave`
+  and no motion.
+- **Video.** A surface counts as video when it updates at least `engine.VideoRate` times per
+  second (12 by default); it stops when it updates slower than half the rate for longer than
+  `engine.VideoHold` (5 s). `SetContentHint` overrides the rate. The thresholds are package
+  variables of `engine`; set them before `Start`.
+- **Frame with video.** `Frame.Videos` lists the windows showing video: the number
+  (`SurfaceID()`), the rectangle on the canvas, and `Cover` — what lies over it: windows
+  above in Z order, open menus, the dimming of a modal window. Tiles of the visible part of
+  a video window appear in `Frame.Regions` as `RegionVideo`, with the number in
+  `Region.VideoID`.
+- **Modal window.** While it is open, keys go only to the widget inside it. Focus outside the
+  dialog is kept and returns after the dialog closes.
+- **Shadow.** A window's shadow is built from a pre-blurred template: once per combination of
+  corner, radius and colour, with no blur on every frame. `Engine.SetShadowCache(false)`
+  returns to the direct blur, for comparison.
+- **Window move.** A move is announced together with the shadow margin, so the shadow of a
+  dragged window moves as a copy, not as tiles.
+
+**Not there yet.** Several output buffers and `ReleaseSurface` (task 2.4); a separate
+`ShadowCaster` interface (the window draws its own shadow); the `core/scene` package
+(stage 7); moving the WinLine session onto the scene (task 2.11). RemoteApp windows (RAIL) are
+not part of the scene.
+
 ## Module Structure
 
 ```
