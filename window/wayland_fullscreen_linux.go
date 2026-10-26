@@ -149,13 +149,11 @@ func (w *WaylandWindow) restoreFixedSize() {
 	if w.resizable.Load() {
 		return
 	}
-	sw := int32(w.toSurface(int(w.fs.saveW.Load())))
-	sh := int32(w.toSurface(int(w.fs.saveH.Load())))
+	sw, sh := int(w.fs.saveW.Load()), int(w.fs.saveH.Load())
 	if sw <= 0 || sh <= 0 {
 		return
 	}
-	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(sw).putInt(sh), -1)
-	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(sw).putInt(sh), -1)
+	w.pinSize(sw, sh)
 }
 
 // noteToplevelStates применяет состояния из xdg_toplevel.configure.
