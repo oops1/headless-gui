@@ -90,6 +90,14 @@ func (r *wlRepeater) start(key uint32, fire func()) {
 			case <-stop:
 				return
 			case <-t.C:
+				// Остановка и тик могли быть готовы одновременно, а select
+				// выбирает случайно: без повторной проверки после отпускания
+				// клавиши иногда проскакивал лишний повтор.
+				select {
+				case <-stop:
+					return
+				default:
+				}
 				fire()
 			}
 		}

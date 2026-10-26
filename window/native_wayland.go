@@ -382,6 +382,9 @@ type WaylandWindow struct {
 	modShift bool
 	modCaps  bool
 	kbGroup  int
+	// lk — состояние клавиш-переключателей из modifiers
+	// (wayland_lockkeys_linux.go).
+	lk wlLockState
 
 	// minW/minH/minWant — минимальный размер, заданный до создания toplevel
 	// (см. SetMinSize): Create фиксирует размер, и отложенный минимум
@@ -1264,6 +1267,7 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 			os.WriteFile(dump, data, 0o644)
 		}
 		w.keymap = parseXkbKeymap(string(data))
+		w.lkNoteKeymap(string(data))
 		if w.keymap == nil {
 			wlLog("keymap: разобрать не удалось — фолбэк на упрощённый ввод")
 		} else {
@@ -1278,6 +1282,7 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 		w.modShift = (depressed|latched)&xkbModShift != 0
 		w.modCaps = locked&xkbModLock != 0
 		w.kbGroup = int(binary.LittleEndian.Uint32(b[16:20]))
+		w.lkNoteModifiers(locked)
 
 	case wlKeyboardEvKey:
 		// serial, time, key, state
@@ -1304,6 +1309,9 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 		// Фокус ушёл — отпускания мы уже не увидим, и повтор завис бы
 		// навсегда.
 		w.repeat.cancel()
+		// И состояние переключателей мы больше не видим: Caps Lock могут
+		// переключить в другом окне.
+		w.lkNoteLeave()
 
 	case wlKeyboardEvRepeatInfo:
 		// rate (кл/сек), delay (мс). rate == 0 — композитор выключил повтор.

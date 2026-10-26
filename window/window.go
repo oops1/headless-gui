@@ -121,6 +121,9 @@ func (win *Window) setupActivation() {
 	if !ok {
 		return
 	}
+	if st, ok := win.native.(lockKeysSettler); ok {
+		st.SetOnLockKeysSettled(win.lkSettled)
+	}
 	an.SetOnActivate(func(active bool) {
 		// Окно потеряло ввод: отпускание зажатых клавиш уйдёт в чужое окно, и
 		// без этого Ctrl остался бы зажатым в движке. Делается на потоке
@@ -148,6 +151,8 @@ func (win *Window) setupActivation() {
 			}
 			win.notifyActivation(active)
 		})
+		// То же вместе с состоянием клавиш-переключателей (lockkeys.go).
+		win.lkActivation(active)
 	})
 }
 
@@ -337,6 +342,14 @@ type Window struct {
 	// последнее известное состояние (activation.go).
 	onActivate atomic.Pointer[func(active bool)]
 	activeNow  atomic.Int32
+
+	// onActivateLocks/lkNow/lkWait — то же вместе с состоянием клавиш-
+	// переключателей (lockkeys.go): колбэк, последнее сообщённое ему
+	// состояние и признак «активация ждёт, пока придёт состояние».
+	onActivateLocks atomic.Pointer[func(active bool, locks LockKeys, known bool)]
+	lkNow           atomic.Int32
+	lkWait          atomic.Uint64 // номер ожидания состояния, 0 — не ждём
+	lkSeq           atomic.Uint64
 
 	// minW/minH/minWant — минимальный размер окна в ЛОГИЧЕСКИХ пикселях
 	// (minsize.go). Заданный до Run(), применяется при создании окна.
