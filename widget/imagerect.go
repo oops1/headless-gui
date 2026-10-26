@@ -1,6 +1,10 @@
 package widget
 
-import "image"
+import (
+	"image"
+
+	geom "github.com/oops1/headless-gui/v3/core/geom"
+)
 
 // Опциональные возможности контекста для изображений: частичная отрисовка с
 // выбором фильтра и сброс кэша масштабирования. Оба интерфейса — по образцу
@@ -8,33 +12,15 @@ import "image"
 // engine.Canvas, обёртки пробрасывают, а вызывающий пользуется помощниками
 // DrawImageRect и InvalidateImageCache, которые сами выбирают запасной путь.
 
-// ImageFilter — ядро передискретизации DrawImageRect.
-type ImageFilter uint8
+// ImageFilter — ядро передискретизации DrawImageRect. Тип и константы живут
+// в core/geom; здесь алиасы, чтобы код приложений не менялся.
+type ImageFilter = geom.ImageFilter
 
 const (
-	// FilterNearest — ближайший пиксель: без сглаживания, быстрее всех. Для
-	// увеличения «до пикселей» (просмотр картинки в масштабе 800 %) и пиксель-арта.
-	FilterNearest ImageFilter = iota
-	// FilterBilinear — билинейное ядро (как у DrawImageScaled). При уменьшении
-	// усредняет все накрытые пиксели источника, а не только соседние.
-	FilterBilinear
-	// FilterCatmullRom — бикубическое ядро Кэтмулла-Рома: чётче билинейного,
-	// заметно медленнее; даёт небольшой «звон» у резких границ.
-	FilterCatmullRom
+	FilterNearest    = geom.FilterNearest
+	FilterBilinear   = geom.FilterBilinear
+	FilterCatmullRom = geom.FilterCatmullRom
 )
-
-// String возвращает имя фильтра.
-func (f ImageFilter) String() string {
-	switch f {
-	case FilterNearest:
-		return "nearest"
-	case FilterBilinear:
-		return "bilinear"
-	case FilterCatmullRom:
-		return "catmullrom"
-	}
-	return "unknown"
-}
 
 // ImageRectDrawer — опциональная возможность контекста рисовать часть
 // изображения в прямоугольник с выбором фильтра, масштабируя только ту часть,
