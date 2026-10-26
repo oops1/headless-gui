@@ -135,6 +135,7 @@ func (e *Engine) setFocusInvalidating(w widget.Widget) {
 // инвалидирует старый/новый фокус точечно, командные хоткеи — полностью
 // (команда может изменить что угодно).
 func (e *Engine) SendKeyEvent(ev widget.KeyEvent) {
+	defer e.guardInput("SendKeyEvent")()
 	defer e.serveFocusRequests()()
 
 	// Tab-навигация: перехватываем Tab до доставки виджету — если только
@@ -334,6 +335,7 @@ func (e *Engine) CursorAt(x, y int) widget.Cursor {
 // SetBounds (авто-инвалидация old∪new). Кадры рендерятся только когда картинка
 // действительно меняется.
 func (e *Engine) SendMouseMove(x, y int) {
+	defer e.guardInput("SendMouseMove")()
 	x, y = e.toLogical(x, y)
 
 	// Если на экране висит подсказка — стираем её (движение мыши сбрасывает
@@ -405,6 +407,7 @@ func (e *Engine) SendMouseMove(x, y int) {
 // Иначе: проверяем, хочет ли какой-либо предок захватить мышь (WantsCapture),
 // затем передаём событие самому верхнему виджету под курсором.
 func (e *Engine) SendMouseButton(x, y int, btn widget.MouseButton, pressed bool) {
+	defer e.guardInput("SendMouseButton")()
 	defer e.serveFocusRequests()()
 	x, y = e.toLogical(x, y)
 
@@ -672,6 +675,7 @@ const wheelTickPixels = 40.0
 // колесо), синтезируем эквивалентные тики — старый тиковый путь остаётся
 // рабочим (headless-контракт). Инвалидация — только область получателя.
 func (e *Engine) SendMouseWheelPixels(xPhys, yPhys int, dx, dy float64) {
+	defer e.guardInput("SendMouseWheelPixels")()
 	x, y := e.toLogical(xPhys, yPhys)
 	if k := e.Scale(); k != 1 && k > 0 {
 		dx /= k
@@ -809,6 +813,7 @@ func wheelTicksFromPixels(dy float64) (steps int, btn widget.MouseButton, ok boo
 // paths — абсолютные пути к сброшенным файлам. Координаты, переданные виджету,
 // уже логические. Позволяет headless-тестам синтетически «сбрасывать» файлы.
 func (e *Engine) SendFilesDropped(x, y int, paths []string) {
+	defer e.guardInput("SendFilesDropped")()
 	if len(paths) == 0 {
 		return
 	}

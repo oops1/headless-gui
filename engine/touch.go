@@ -102,6 +102,7 @@ func (e *Engine) ownerOffset(o *touchOwner) image.Point {
 // Вход для бэкендов окна и для тестов: headless-приложение кормит этим движок
 // так же, как SendMouseButton.
 func (e *Engine) SendTouch(ev widget.TouchEvent) bool {
+	defer e.guardInput("SendTouch")()
 	defer e.serveFocusRequests()()
 
 	ev.X, ev.Y = e.toLogical(ev.X, ev.Y)

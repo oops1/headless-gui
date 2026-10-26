@@ -1,18 +1,23 @@
 package widget
 
-// drawtrace.go — какие виджеты рисуются прямо сейчас.
+// drawtrace.go — какие виджеты рисуются прямо сейчас, и медленный путь
+// отрисовки.
 //
 // Нужно движку для проверки контракта отрисовки (Engine.SetDrawContractCheck):
 // Draw не меняет состояние виджета, а значит, не зовёт Invalidate, SetBounds,
-// AddChild, Animate. Движок узнаёт о нарушении по уведомлению, пришедшему
-// посреди кадра, но само уведомление не говорит, от кого оно. Этот учёт
-// говорит: кто сейчас рисуется на этой горутине, от корня вглубь.
+// AddChild. Движок узнаёт о нарушении по уведомлению, пришедшему посреди
+// кадра, но само уведомление не говорит, от кого оно. Этот учёт говорит: кто
+// сейчас рисуется на этой горутине, от корня вглубь. Он же называет виджет,
+// чей Draw запаниковал (политика сбоев, docs/adr/0001).
 //
 // Учёт по горутинам, а не один на процесс: движков бывает несколько, и
-// рисуют они одновременно, каждый на своей горутине. Стоимость, пока учёт
-// выключен, — одна атомарная загрузка на ребёнка в drawChildren; включённый
-// стоит номера горутины и замка на каждый виджет, и включать его стоит только
-// для отладки.
+// рисуют они одновременно, каждый на своей горутине.
+//
+// Медленный путь — один счётчик на процесс (drawSlowPath): его поднимают и
+// включённый учёт, и сломанные виджеты (broken.go). Пока он нулевой, обход
+// детей стоит одну атомарную загрузку на ребёнка; ненулевой стоит номера
+// горутины и замка на каждый виджет, и включать учёт стоит только для
+// отладки.
 
 import (
 	"sync"
@@ -22,8 +27,12 @@ import (
 )
 
 var (
-	// drawTraceRefs — сколько потребителей включили учёт. Счётчик, а не флаг:
-	// движок, выключивший проверку у себя, не должен выключать её у соседа.
+	// drawSlowPath — сколько причин идти медленным путём: включения учёта
+	// плюс сломанные виджеты. Счётчик, а не флаг: движок, выключивший
+	// проверку у себя, не должен выключать её у соседа.
+	drawSlowPath atomic.Int32
+
+	// drawTraceRefs — сколько потребителей включили учёт рисующихся.
 	drawTraceRefs atomic.Int32
 
 	drawTraceMu     sync.Mutex
@@ -36,8 +45,14 @@ var (
 // делает.
 func EnableDrawTrace() (disable func()) {
 	drawTraceRefs.Add(1)
+	drawSlowPath.Add(1)
 	var once sync.Once
-	return func() { once.Do(func() { drawTraceRefs.Add(-1) }) }
+	return func() {
+		once.Do(func() {
+			drawTraceRefs.Add(-1)
+			drawSlowPath.Add(-1)
+		})
+	}
 }
 
 // drawTraceOn — включён ли учёт.
@@ -47,16 +62,17 @@ func drawTraceOn() bool { return drawTraceRefs.Load() > 0 }
 // общий на процесс, и забытое включение замедляет кадры всех движков.
 func DrawTraceUsers() int { return int(drawTraceRefs.Load()) }
 
-// DrawTraced рисует w, отмечая его рисующимся на время Draw. Пока учёт
-// выключен — то же, что w.Draw(ctx). Для контейнеров, которые обходят детей
-// своим циклом, а не через DrawChildren.
+// DrawTraced рисует w, отмечая его рисующимся на время Draw, а сломанный —
+// заменяет заглушкой. Пока учёт выключен и сломанных нет — то же, что
+// w.Draw(ctx). Для контейнеров, которые обходят детей своим циклом, а не
+// через DrawChildren.
 //
-// Обёртка короткая и встраивается: при выключенном учёте она компилируется в
-// тот же вызов, что и прежде. Ветка с учётом вынесена отдельно — функция с
-// defer не встраивается, и контекст, переданный через неё, уходил бы в кучу
-// на каждом кадре (тест попапов без аллокаций это ловит).
+// Обёртка короткая: при нулевом медленном пути она компилируется в тот же
+// вызов, что и прежде. Ветка с учётом вынесена отдельно — функция с defer не
+// встраивается, и контекст, переданный через неё, уходил бы в кучу на каждом
+// кадре (тест попапов без аллокаций это ловит).
 func DrawTraced(w Widget, ctx DrawContext) {
-	if drawTraceOn() {
+	if drawSlowPath.Load() > 0 {
 		drawTracedSlow(w, ctx)
 		return
 	}
@@ -64,15 +80,28 @@ func DrawTraced(w Widget, ctx DrawContext) {
 }
 
 func drawTracedSlow(w Widget, ctx DrawContext) {
+	if IsBroken(w) {
+		drawBrokenPlaceholder(w, ctx)
+		return
+	}
+	if !drawTraceOn() {
+		w.Draw(ctx)
+		return
+	}
+	// Снятие со стека — без defer, намеренно: при панике в Draw defer
+	// выполнился бы раньше, чем движок перехватит панику, и стек был бы уже
+	// пуст, когда движок спросит, кто упал. Паника оставляет стек как есть,
+	// движок читает его и сбрасывает (ResetDrawTrace).
 	id := pushDrawTrace(w)
-	defer popDrawTrace(id)
 	w.Draw(ctx)
+	popDrawTrace(id)
 }
 
 // DrawOverlayTraced рисует оверлей виджета w (выпадающий список, меню),
-// отмечая w рисующимся. Устроена как DrawTraced.
+// отмечая w рисующимся; у сломанного виджета оверлей не рисуется. Устроена
+// как DrawTraced.
 func DrawOverlayTraced(w Widget, od OverlayDrawer, ctx DrawContext) {
-	if drawTraceOn() {
+	if drawSlowPath.Load() > 0 {
 		drawOverlayTracedSlow(w, od, ctx)
 		return
 	}
@@ -80,9 +109,16 @@ func DrawOverlayTraced(w Widget, od OverlayDrawer, ctx DrawContext) {
 }
 
 func drawOverlayTracedSlow(w Widget, od OverlayDrawer, ctx DrawContext) {
+	if IsBroken(w) {
+		return
+	}
+	if !drawTraceOn() {
+		od.DrawOverlay(ctx)
+		return
+	}
 	id := pushDrawTrace(w)
-	defer popDrawTrace(id)
 	od.DrawOverlay(ctx)
+	popDrawTrace(id)
 }
 
 // DrawTracePath возвращает виджеты, рисующиеся сейчас на вызывающей горутине,
@@ -100,6 +136,19 @@ func DrawTracePath() []Widget {
 		return nil
 	}
 	return append([]Widget(nil), st...)
+}
+
+// ResetDrawTrace забывает стек рисующихся на вызывающей горутине. Движок зовёт
+// это после паники в Draw: раскрутка стека прошла мимо popDrawTrace, и без
+// сброса следующий кадр начинал бы с чужого хвоста.
+func ResetDrawTrace() {
+	if !drawTraceOn() {
+		return
+	}
+	id := goid.Current()
+	drawTraceMu.Lock()
+	delete(drawTraceStacks, id)
+	drawTraceMu.Unlock()
 }
 
 func pushDrawTrace(w Widget) uint64 {

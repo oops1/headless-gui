@@ -169,6 +169,8 @@ type Engine struct {
 	stats    engineStats
 	// contract — проверка контракта отрисовки (drawcontract.go).
 	contract drawContract
+	// failure — политика сбоев (failure.go).
+	failure failureState
 	started  atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
 	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
 
@@ -435,6 +437,8 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// Приёмники проверяют контракт отрисовки, если он включён
 	// (drawcontract.go), и делают то же, что Invalidate/InvalidateRect.
 	e.notifierHandle = widget.RegisterUINotifierWake(e.onWidgetInvalidate, e.onWidgetInvalidateRect, e.onWidgetAnimation)
+	// Политика сбоев (failure.go): изоляция, под go test — прежнее поведение.
+	e.failure.policy.Store(uint32(defaultFailurePolicy()))
 	e.moveHandle = widget.RegisterMoveSink(e.noteMove)
 	// Точный замер текста для компоновки до отрисовки (размеры диалогов).
 	//
@@ -1163,6 +1167,7 @@ func (e *Engine) Stop() {
 	// Учёт рисующихся виджетов общий на процесс: остановленный движок,
 	// включивший проверку контракта, не должен держать его включённым у всех.
 	e.SetDrawContractCheck(false)
+	e.releaseFailureTrace()
 	widget.UnregisterMoveSink(e.moveHandle)
 	widget.UnregisterTextMeasurer(e.measurerHandle)
 	svg.UnregisterTextRasterizer(e.svgTextHandle)
@@ -1271,6 +1276,7 @@ func (e *Engine) focusAccessibleNow(w widget.Widget) bool {
 //
 // Возвращает false, если виджет nil, скрыт, выключен или его границы пусты.
 func (e *Engine) ActivateAccessible(w widget.Widget) bool {
+	defer e.guardInput("ActivateAccessible")()
 	ok := false
 	e.callOnLoop(func() { ok = e.activateAccessibleNow(w) })
 	return ok
@@ -1326,6 +1332,7 @@ func (e *Engine) activateAccessibleNow(w widget.Widget) bool {
 // в неё. Владельцам-оверлеям (меню) фокус не передаётся: меню само не
 // принимает ввод от того, кто его не открывал, а перехват фокуса закрыл бы его.
 func (e *Engine) AccessAction(w widget.Widget, id string, action widget.AccessActionKind) bool {
+	defer e.guardInput("AccessAction")()
 	ok := false
 	e.callOnLoop(func() { ok = e.accessActionNow(w, id, action) })
 	return ok
@@ -1664,7 +1671,7 @@ func (e *Engine) loop() {
 			// damage от тиков попадёт в invGen ниже и кадр перерисуется
 			// частично. Вызывается в любом режиме — анимации живут и при
 			// SetRenderOnDemand(false).
-			widget.StepAnimationsFor(e, time.Now())
+			e.guardCall("Animation", func() { widget.StepAnimationsFor(e, time.Now()) })
 			// Внешний темп: кадры готовит RequestFrame. Анимации всё равно
 			// продвигаем — иначе начатая приложением анимация замерла бы до
 			// следующего запроса и шла бы рывками.
@@ -1706,6 +1713,9 @@ func (e *Engine) renderFrame() output.Frame {
 	// больше не блокируются.
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
+	// Граница кадра (failure.go): паника в Draw любого виджета ловится здесь,
+	// кадр не отдаётся (нулевой Frame), следующий — полный.
+	defer e.guard("Draw")()
 	e.stats.frames.Add(1)
 	drawStart := time.Now()
 

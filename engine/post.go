@@ -76,7 +76,8 @@ func (e *Engine) runPosted() {
 	for _, fn := range queue {
 		// До вызова: функция, упавшая посреди работы, из очереди уже ушла.
 		e.stats.postedRun.Add(1)
-		fn()
+		// Граница очереди (failure.go): упавшая функция не мешает остальным.
+		e.guardCall("Post", fn)
 	}
 }
 

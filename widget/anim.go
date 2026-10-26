@@ -368,7 +368,27 @@ func stepAnimations(key any, now time.Time) bool {
 	}
 	var completed []doneItem
 
+	// Тик — чужой код, и он вправе упасть. Признак «шагаю» снимается в фазе
+	// очистки ниже, до которой паника не доходит; без этого все последующие
+	// шаги этого ключа молча пропускались бы, и анимации движка, поймавшего
+	// панику, замерли бы навсегда. Сама упавшая анимация снимается: иначе она
+	// падала бы на каждом шаге первой и не давала дойти до остальных. Паника
+	// идёт дальше — ловит её движок.
+	var cur *Animation
+	defer func() {
+		if r := recover(); r != nil {
+			anim.mu.Lock()
+			delete(anim.stepping, key)
+			if cur != nil {
+				cur.stopped = true
+			}
+			anim.mu.Unlock()
+			panic(r)
+		}
+	}()
+
 	for i, a := range snapshot {
+		cur = a
 		// Могла быть снята из предыдущего тика этого же прохода.
 		anim.mu.Lock()
 		skip := a.stopped || a.done

@@ -56,6 +56,8 @@ type Stats struct {
 	PostedRun uint64
 	// PostQueue — сколько функций ждёт выполнения сейчас (Posted − PostedRun).
 	PostQueue uint64
+	// Panics — сколько паник поймано политикой сбоев (failure.go).
+	Panics uint64
 }
 
 // engineStats — счётчики, из которых собирается Stats. Пишет их горутина
@@ -65,6 +67,7 @@ type engineStats struct {
 	tiles, moves            atomic.Uint64
 	drawNs, diffNs, deliver atomic.Uint64
 	posted, postedRun       atomic.Uint64
+	panics                  atomic.Uint64
 }
 
 // Stats возвращает снимок счётчиков движка. Безопасен из любой горутины и не
@@ -89,6 +92,7 @@ func (e *Engine) Stats() Stats {
 		Posted:        posted,
 		PostedRun:     run,
 		PostQueue:     queue,
+		Panics:        s.panics.Load(),
 	}
 }
 

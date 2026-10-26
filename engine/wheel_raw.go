@@ -25,6 +25,7 @@ import "github.com/oops1/headless-gui/v3/widget"
 //
 // Дельты не масштабируются HiDPI-коэффициентом: это не пиксели.
 func (e *Engine) SendMouseWheelRaw(xPhys, yPhys int, dx, dy float64, precise bool) bool {
+	defer e.guardInput("SendMouseWheelRaw")()
 	if dx == 0 && dy == 0 {
 		return false
 	}

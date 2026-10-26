@@ -112,7 +112,8 @@ func (e *Engine) deliver(frame output.Frame) {
 		// Что сток сделает с Data, неизвестно: буферы кадра закреплены и в
 		// пул не вернутся (SetFrameRecycling).
 		frame.Pin()
-		s.Present(frame)
+		// Граница потребителя (failure.go): упавший сток не роняет цикл.
+		e.guardCall("FrameSink", func() { s.Present(frame) })
 	}
 	select {
 	case e.frames <- frame:

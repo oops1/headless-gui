@@ -15,6 +15,7 @@ import "github.com/oops1/headless-gui/v3/widget"
 // метод наведение не снимает — для этого окно присылает ещё и движение в точку
 // вне окна (SendMouseMove), которое идёт перед вызовом.
 func (e *Engine) SendPointerLeave() {
+	defer e.guardInput("SendPointerLeave")()
 	e.mu.RLock()
 	root := e.root
 	e.mu.RUnlock()

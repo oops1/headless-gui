@@ -36,6 +36,11 @@ func Reset() {
 	widget.StopAllAnimations()
 	widget.SetReduceMotion(false)
 
+	// Политика сбоев: сломанные виджеты и стек рисующихся общие на процесс;
+	// паника, которую тест проверял с FailurePropagate, оставляет стек.
+	widget.ClearAllBroken()
+	widget.ResetDrawTrace()
+
 	// Размер шрифта — до темы: ApplyGlobalTheme снимает только тот размер,
 	// который поставила тема, а явный SetDefaultFontSize ей не принадлежит.
 	widget.SetDefaultFontSize(0)

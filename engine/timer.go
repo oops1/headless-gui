@@ -171,13 +171,15 @@ func (t *Timer) fire() {
 	}
 	t.mu.Unlock()
 
+	// Граница таймера (failure.go): упавший fn не мешает ни очереди, ни
+	// следующему срабатыванию Every.
 	if t.every == 0 {
 		t.e.forgetTimer(t)
-		t.fn()
+		t.e.guardCall("Timer", t.fn)
 		return
 	}
 
-	t.fn()
+	t.e.guardCall("Timer", t.fn)
 	// Следующий запуск — только после fn (см. Every). Если fn остановил таймер
 	// или движок остановили, arm это увидит и ничего не заведёт.
 	t.arm(t.every)
