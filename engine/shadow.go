@@ -112,6 +112,11 @@ func (c *Canvas) DrawShadow(r image.Rectangle, corner int, blur, offsetX, offset
 		// и терять из-за неё гигабайты нельзя ни при каких размерах.
 		return
 	}
+	// Сборка из размытого шаблона (shadowcache.go): без размытия на кадре и
+	// без шва на краю частичной перерисовки.
+	if c.drawShadowFromTemplate(full, area, pw, ph, pCorner, pRadius, margin, col) {
+		return
+	}
 	tmp := image.NewRGBA(image.Rect(0, 0, area.Dx(), area.Dy()))
 
 	// Силуэт по-прежнему строится от ИСХОДНОГО прямоугольника, просто с

@@ -69,6 +69,11 @@ type Canvas struct {
 	// рисует одна горутина, и два задания одного вида у него не идут сразу.
 	diffWork diffJob
 	blitWork blitJob
+	// Шаблоны теней и рабочий буфер их сборки (shadowcache.go).
+	shadowCache    map[shadowKey]*shadowTemplate
+	shadowClock    uint64
+	shadowBuf      []byte
+	shadowCacheOff bool
 	shaper     textShaper            // шейпинг сложного текста (RTL, лигатуры; см. shaper.go)
 	W, H       int                   // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
 	// marks — признак содержимого по тайлам за текущий кадр (regions.go).
