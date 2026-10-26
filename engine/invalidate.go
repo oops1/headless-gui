@@ -176,6 +176,15 @@ func scaleRectF(r image.Rectangle, k float64) image.Rectangle {
 
 // consumeDamage атомарно забирает накопленные повреждения.
 // all==true — нужен полный diff (Invalidate или режим по умолчанию).
+// wholeFramePending — следующий кадр будет полным: заявлена полная
+// инвалидация или полный кадр (fullframe.go). Без сброса.
+func (e *Engine) wholeFramePending() bool {
+	e.damageMu.Lock()
+	all := e.damageAll
+	e.damageMu.Unlock()
+	return all || e.fullFramePending()
+}
+
 func (e *Engine) consumeDamage() (regions []image.Rectangle, all bool) {
 	e.damageMu.Lock()
 	regions, all = e.damage, e.damageAll

@@ -171,6 +171,8 @@ type Engine struct {
 	contract drawContract
 	// failure — политика сбоев (failure.go).
 	failure failureState
+	// surfaces — буферы SetSurfaces (surfaces.go).
+	surfaces surfaceSet
 	started  atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
 	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
 
@@ -615,6 +617,7 @@ func (e *Engine) SetScale(k float64) {
 	}
 	lw, lh := e.canvas.LogicalSize()
 	e.canvas = e.canvas.cloneForSize(lw, lh, k, e.bgSrc)
+	e.surfaces.drop() // буферы прежнего размера новому холсту не подходят
 	e.canvas.setDPIAll(e.userDPI * k)
 	e.scaleBits.Store(math.Float64bits(k))
 	e.mu.Unlock()
@@ -636,6 +639,7 @@ func (e *Engine) SetResolution(width, height int) {
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
 	e.canvas = e.canvas.cloneForSize(width, height, e.canvas.scale, e.bgSrc)
+	e.surfaces.drop() // буферы прежнего размера новому холсту не подходят
 	root := e.root
 	e.mu.Unlock()
 	e.markCanvasReplaced()
@@ -1734,6 +1738,14 @@ func (e *Engine) renderFrame() output.Frame {
 	root := e.root
 	e.mu.RUnlock()
 
+	// Буфер вывода (surfaces.go): свободный из набора, иначе кадр
+	// пропускается, а damage остаётся до следующего раза.
+	surface, haveSurface := e.acquireSurface(canvas, e.wholeFramePending())
+	if !haveSurface {
+		e.stats.skipped.Add(1)
+		return output.Frame{Seq: e.frameSeq.Load(), Timestamp: time.Now(), Width: canvas.W, Height: canvas.H}
+	}
+
 	damageRects, damageAll := e.consumeDamage()
 	// Повреждение, задевшее размытую подложку, расширяется на неё целиком:
 	// иначе размытие посчиталось бы по куску поверх прошлого кадра
@@ -1918,6 +1930,7 @@ func (e *Engine) renderFrame() output.Frame {
 		Height:    canvas.H,
 	}
 	fr.AttachSlabs(canvas.takeSlabs()...)
+	e.surfaceFrameDone(surface, &fr, full)
 	e.stats.diffNs.Add(sinceNanos(diffStart))
 	e.stats.tiles.Add(uint64(len(tiles)))
 	e.stats.moves.Add(uint64(len(moves)))

@@ -35,6 +35,7 @@ import "fmt"
 func (e *Engine) SetSurface(pix []byte, stride int, f PixelFormat) error {
 	if pix == nil {
 		e.frameMu.Lock() // буфер меняется — ждём конца текущего кадра
+		e.surfaces.drop()
 		e.canvas.useOwnBack()
 		e.frameMu.Unlock()
 		e.Invalidate()
@@ -68,6 +69,7 @@ func (e *Engine) SetSurface(pix []byte, stride int, f PixelFormat) error {
 			len(pix), w, h, stride, need)
 	}
 
+	e.surfaces.drop() // один буфер — без очереди и подтверждений
 	e.canvas.setExternalBack(pix, stride, f)
 	e.frameMu.Unlock()
 	e.Invalidate() // новый буфер не совпадает с front ни одним байтом — перерисовать всё
