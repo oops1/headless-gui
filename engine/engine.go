@@ -182,6 +182,11 @@ type Engine struct {
 	// Прежняя позиция курсора для адресного broadcastMouseMove. Доступ только
 	// из потока-источника ввода (SendMouseMove), синхронизация не нужна.
 	lastMoveX, lastMoveY int
+	// pointerOwner — верхний под указателем widget.PointerOwner, которому
+	// последним отдано движение (pointerowner.go); ownerPath — рабочий буфер
+	// его поиска. Только поток-источник ввода, как lastMoveX.
+	pointerOwner widget.PointerOwner
+	ownerPath    []hitStep
 	hasLastMove          bool
 
 	// Серия нажатий одной кнопкой — для MouseEvent.Clicks. Доступ оттуда же,

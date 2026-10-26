@@ -121,6 +121,58 @@ func (c *Canvas) RemoveChild(w Widget) bool {
 	return false
 }
 
+// RaiseChild поднимает ребёнка над соседями вместе с его attached-свойствами
+// (zorder.go): без этого свойства остались бы на прежнем индексе и достались
+// бы соседу.
+func (c *Canvas) RaiseChild(w Widget) bool {
+	return c.moveCanvasChild(w, len(c.children)-1)
+}
+
+// LowerChild опускает ребёнка под соседей вместе с его attached-свойствами.
+func (c *Canvas) LowerChild(w Widget) bool {
+	return c.moveCanvasChild(w, 0)
+}
+
+// InsertChildAt добавляет ребёнка на позицию i с пустыми attached-свойствами
+// и размером из его текущих Bounds, как AddChild.
+func (c *Canvas) InsertChildAt(i int, w Widget) {
+	wb := w.Bounds()
+	i = clampChildIndex(i, len(c.children))
+	c.syncChildInfos()
+	c.childInfos = append(c.childInfos, canvasChildInfo{})
+	copy(c.childInfos[i+1:], c.childInfos[i:])
+	c.childInfos[i] = canvasChildInfo{
+		Props:    CanvasAttached{Left: -1, Top: -1, Right: -1, Bottom: -1},
+		DesiredW: wb.Dx(),
+		DesiredH: wb.Dy(),
+	}
+	c.Base.InsertChildAt(i, w)
+}
+
+func (c *Canvas) moveCanvasChild(w Widget, to int) bool {
+	from := c.ChildIndex(w)
+	if from < 0 {
+		return false
+	}
+	c.syncChildInfos()
+	moveInSlice(c.childInfos, from, to)
+	return c.Base.moveChildTo(w, to)
+}
+
+// syncChildInfos выравнивает длину childInfos по детям: ребёнок, добавленный
+// в обход Canvas.AddChild (через Base), свойств не имел, и перестановка по
+// индексам сдвинула бы чужие.
+func (c *Canvas) syncChildInfos() {
+	for len(c.childInfos) < len(c.children) {
+		wb := c.children[len(c.childInfos)].Bounds()
+		c.childInfos = append(c.childInfos, canvasChildInfo{
+			Props:    CanvasAttached{Left: -1, Top: -1, Right: -1, Bottom: -1},
+			DesiredW: wb.Dx(),
+			DesiredH: wb.Dy(),
+		})
+	}
+}
+
 // ClearChildren удаляет всех потомков и их childInfos.
 func (c *Canvas) ClearChildren() {
 	c.childInfos = nil

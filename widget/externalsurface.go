@@ -79,6 +79,11 @@ type ExternalSurface struct {
 	// scaleBits — HiDPI-масштаб, виденный последним Draw (math.Float64bits);
 	// нужен переводу областей буфера в логические координаты кадра.
 	scaleBits atomic.Uint64
+
+	// input — колбэки ввода окна программы (externalsurface_input.go); nil —
+	// ввод не принимается. focused — у поверхности фокус клавиатуры.
+	input   atomic.Pointer[SurfaceInput]
+	focused atomic.Bool
 }
 
 // surfaceMeta — неизменяемое описание буфера поверхности.

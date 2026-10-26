@@ -361,12 +361,14 @@ func (e *Engine) SendMouseMove(x, y int) {
 			// координатах содержимого, а курсор — экранный.
 			deliverMove(mm, x, y, e.captureOffset(cap))
 		}
+		e.routePointerOwner(x, y, nil, cap, nil)
 		return
 	}
 
 	// Модальный виджет: ограничиваем broadcast
 	if m := e.topModal(); m != nil {
 		broadcastMouseMove(m, ox, oy, x, y)
+		e.routePointerOwner(x, y, m, nil, nil)
 		return
 	}
 
@@ -396,10 +398,12 @@ func (e *Engine) SendMouseMove(x, y int) {
 		// Затем — настоящая точка тому, кому она принадлежит, и его детям. Точки
 		// переводятся в кадр владельца оверлея: он может лежать в прокрутке.
 		broadcastMouseMoveFrame(ov, ox, oy, x, y, ovOff)
+		e.routePointerOwner(x, y, root, nil, ov)
 		return
 	}
 
 	broadcastMouseMove(root, ox, oy, x, y)
+	e.routePointerOwner(x, y, root, nil, nil)
 }
 
 // SendMouseButton уведомляет дерево о нажатии/отпускании кнопки мыши в (x, y).
@@ -925,12 +929,21 @@ func findCapturerAt(w widget.Widget, x, y int, ev widget.MouseEvent, off image.P
 	if sh := contentShift(w); sh != (image.Point{}) {
 		cx, cy, coff = x+sh.X, y+sh.Y, off.Add(sh)
 	}
-	// Рекурсивно проверяем потомков (в обратном Z-порядке)
+	// Потомки в обратном Z-порядке — но только по пути hit-теста: первый же
+	// ребёнок, накрывающий точку, и есть путь (как в appendHitPath), и соседи
+	// под ним щелчка не получают. Раньше поиск шёл дальше, к соседям ниже, и
+	// захват доставался виджету под непрозрачной панелью: щелчок по панели
+	// задач поверх окна программы уходил окну (ADR-0002, 2.2).
 	children := w.Children()
 	for i := len(children) - 1; i >= 0; i-- {
-		if found, foff := findCapturerAt(children[i], cx, cy, ev, coff, depth+1); found != nil {
+		child := children[i]
+		if !widget.IsWidgetVisible(child) || !image.Pt(cx, cy).In(child.Bounds()) {
+			continue
+		}
+		if found, foff := findCapturerAt(child, cx, cy, ev, coff, depth+1); found != nil {
 			return found, foff
 		}
+		break
 	}
 	// Проверяем сам виджет
 	if cr, ok := w.(widget.CaptureRequester); ok {
