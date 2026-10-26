@@ -94,3 +94,47 @@ func TestCloseChildWindows(t *testing.T) {
 	// Повторный вызов ничего не ломает: список уже пуст.
 	main.closeChildWindows()
 }
+
+// secondaryFake — подставной бэкенд, помнящий пометку «вторичное окно» и её
+// место относительно создания окна ОС.
+type secondaryFake struct {
+	initFake
+}
+
+func (f *secondaryFake) markSecondary() { f.log = append(f.log, "secondary") }
+
+// Окно из OpenWindow помечается вторичным до создания окна ОС: на Win32 иначе
+// его закрытие (WM_DESTROY → PostQuitMessage) завершило бы цикл сообщений
+// главного окна — и всё приложение (отчёт RDP-клиента на v3.43.1). Главное
+// окно пометки не получает.
+func TestOpenWindow_ChildIsSecondary(t *testing.T) {
+	var fakes []*secondaryFake
+	old := newNativeWindow
+	newNativeWindow = func() NativeWindow {
+		f := &secondaryFake{}
+		fakes = append(fakes, f)
+		return f
+	}
+	t.Cleanup(func() { newNativeWindow = old })
+
+	main := New(newStubEngine(), "главное")
+	if err := main.bringUp(); err != nil {
+		t.Fatalf("bringUp главного: %v", err)
+	}
+	child := New(newStubEngine(), "второе")
+	if err := main.OpenWindow(child); err != nil {
+		t.Fatalf("OpenWindow: %v", err)
+	}
+	if len(fakes) != 2 {
+		t.Fatalf("бэкендов %d, ждал 2", len(fakes))
+	}
+	for _, e := range fakes[0].log {
+		if e == "secondary" {
+			t.Error("главное окно помечено вторичным — его закрытие не завершило бы приложение")
+		}
+	}
+	log := fakes[1].log
+	if len(log) == 0 || log[0] != "secondary" {
+		t.Errorf("окно из OpenWindow: порядок %v, ждал пометку раньше create", log)
+	}
+}
