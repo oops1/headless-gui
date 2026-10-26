@@ -558,6 +558,11 @@ func (w *Win32Window) InvokeOnUIThread(fn func()) {
 	}
 }
 
+// markSecondary помечает окно вторичным (noQuit) без смены владельца: его
+// уничтожение не завершает цикл сообщений приложения (secondaryMarker). Звать
+// до Create.
+func (w *Win32Window) markSecondary() { w.noQuit = true }
+
 // SetOwner делает окно принадлежащим parent (Win32 GWLP_HWNDPARENT): оно всегда
 // поверх owner'а и сворачивается вместе с ним. Помечает окно как вторичное
 // (noQuit) — его закрытие не завершает цикл сообщений приложения.

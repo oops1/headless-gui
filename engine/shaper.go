@@ -444,7 +444,7 @@ func rasterizeGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, vh 
 				sc.curveTo(fx(seg.Args[2].X), fx(seg.Args[2].Y))
 			}
 		}
-		vh = vh.withStems(&sc, int(sizePx))
+		vh = vh.forGlyph(&sc, int(sizePx), fx(ext.YBearing), fx(ext.YBearing+ext.Height))
 		fy = func(y float32) float32 {
 			return -float32(vh.apply(int(math.Floor(float64(y*scale*64)+0.5)))) / 64
 		}

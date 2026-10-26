@@ -398,6 +398,9 @@ type Window struct {
 
 	// children — окна верхнего уровня, открытые из этого (multiwindow.go).
 	children childWindows
+	// secondary — окно открыто через OpenWindow: его закрытие не завершает
+	// цикл событий процесса (secondaryMarker).
+	secondary bool
 
 	// dockMgr — менеджер докинга, панели которого разрешено отрывать в отдельные
 	// нативные окна (EnableDockFloating). dockHost — установленный хост отрыва
@@ -629,6 +632,9 @@ var newNativeWindow = NewNativeWindow
 // нужно то же самое, кроме блокирующего цикла событий (см. OpenWindow).
 func (win *Window) bringUp() error {
 	win.native = newNativeWindow()
+	if m, ok := win.native.(secondaryMarker); ok && win.secondary {
+		m.markSecondary()
+	}
 
 	// Значок, заданный до Run(): отдаём бэкенду ДО создания окна ОС, чтобы он
 	// выставил его в правильный момент (на X11 — до MapWindow).
