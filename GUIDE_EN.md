@@ -5494,6 +5494,53 @@ eng.SetDrawContractCheck(true) // debugging: logs the widget that changes itself
   `widget.DrawOverlayTraced` for overlays. Without it the path in the log stops at the
   container.
 
+### Failure policy (v4.0, in progress)
+
+A panic in a widget's or a consumer's code no longer kills the process. The engine
+catches it at its own boundary, marks the culprit and carries on. The decision and its
+reasons are in `docs/adr/0001-failure-policy.md`.
+
+```go
+eng.SetFailurePolicy(engine.FailureIsolate)   // default outside go test
+eng.SetFailurePolicy(engine.FailurePropagate) // old behaviour: the panic goes on
+
+eng.SetOnPanic(func(info engine.PanicInfo) {  // called for every caught panic
+    log.Printf("%s: %v\n%s", info.Where, info.Value, info.Stack)
+})
+
+n := eng.Stats().Panics // how many panics the engine has caught
+widget.ClearBroken(w)   // clear the mark from a widget that has been fixed
+```
+
+| Boundary | What is caught | What happens after the panic |
+|---|---|---|
+| Frame drawing | `Draw` of any widget, overlays, modal windows, popup windows | the frame is not delivered; the next frame is full; the culprit is marked |
+| `Post` queue | each function on its own | the other queued functions still run |
+| Timers `After`, `Every` | the timer's function | `Every` keeps firing |
+| Animation ticks | a tick of `Animate`/`AnimateOwned` | the other animations of the engine keep running; the failed one is removed |
+| Input | handlers of `SendKeyEvent`, `SendMouseMove`, `SendMouseButton`, `SendMouseWheelPixels`, `SendMouseWheelRaw`, `SendTouch`, `SendFilesDropped`, `SendPointerLeave`, `ActivateAccessible`, `AccessAction` | mouse capture is released and the press consumer is forgotten; focus does not change |
+| Frame consumer | `FrameSink.Present` | the frame counts as delivered and goes to the `Frames()` channel |
+
+**A broken widget.** A panic in `Draw` with the contract check off does not name the
+culprit at once. The engine turns on the trace of drawing widgets and asks for a full
+frame. A second panic names the widget, marks it broken (`widget.MarkBroken`) and
+turns the trace off again. If `SetDrawContractCheck(true)` is already on, the culprit is
+named from the first panic.
+
+A broken widget is no longer drawn. A grey rectangle with a red border and a diagonal
+cross takes its place, and its overlays are not drawn. `widget.IsBroken(w)` tests the
+mark, `widget.BrokenWidgets()` lists broken widgets, and `widget.ClearBroken(w)` brings
+a widget back.
+
+**Under `go test`** the default policy is `FailurePropagate`, so tests see panics as
+before. A test that checks isolation sets `FailureIsolate` explicitly.
+
+**What the policy does not do.** It does not interrupt a hung widget: Go cannot stop a
+goroutine. It does not close a modal window whose `Draw` failed: a placeholder takes its
+place, and the program closes the window itself (`CloseModal`). It does not undo changes
+a widget made before the panic. The operating-system window (the event pump in `window`)
+is not protected yet: that is stage 9 of the plan.
+
 ## Module Structure
 
 ```

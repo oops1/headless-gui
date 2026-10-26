@@ -10038,6 +10038,43 @@ eng.DrawContractCheck()        // bool
   `child.Draw(ctx)`, and `widget.DrawOverlayTraced` for overlays. Without it the
   path in the message stops at the container. `DrawChildren` does this already.
 
+## v4.0 (unreleased, branch `feature/engine-architecture`): failure policy
+
+Decision record: `docs/adr/0001-failure-policy.md`. A panic in widget or consumer code no
+longer kills the process by default; the engine catches it at its own boundary.
+
+```go
+eng.SetFailurePolicy(engine.FailureIsolate)   // default outside go test
+eng.SetFailurePolicy(engine.FailurePropagate) // old behaviour: the panic goes on
+eng.FailurePolicy()                           // current policy
+eng.SetOnPanic(func(info engine.PanicInfo) {} ) // every caught panic
+eng.Stats().Panics                            // count of caught panics
+
+widget.MarkBroken(w) / widget.ClearBroken(w) / widget.IsBroken(w)
+widget.BrokenWidgets() []widget.Widget
+widget.ClearAllBroken()                       // tests only
+```
+
+- **Boundaries.** Frame drawing (`Draw`, overlays, modals, popup windows), the `Post`
+  queue (each function separately), timers (`After`, `Every`), animation ticks, input
+  handlers (`SendKeyEvent`, `SendMouseMove`, `SendMouseButton`, `SendMouseWheelPixels`,
+  `SendMouseWheelRaw`, `SendTouch`, `SendFilesDropped`, `SendPointerLeave`,
+  `ActivateAccessible`, `AccessAction`) and `FrameSink.Present`.
+- **Input panics** release mouse capture, forget the press consumer and cancel touches;
+  focus is not changed.
+- **Draw panics.** With the contract check off, the first panic turns the trace of drawing
+  widgets on and asks for a full frame; the second names the widget, marks it broken and
+  turns the trace off. With `SetDrawContractCheck(true)` the culprit is named at once. A
+  broken widget is replaced by a grey rectangle with a red border and a diagonal cross;
+  its overlays are not drawn.
+- **PanicInfo** fields: `Where` (boundary name), `Widget`, `Path`, `Value`, `Stack`.
+  Without `SetOnPanic` the engine logs once per boundary and widget; later panics there
+  only count in `Stats().Panics`.
+- **Under `go test`** the default is `FailurePropagate` (`testing.Testing()`).
+- **Not covered.** A hung widget is not interrupted; a modal whose `Draw` failed is not
+  closed by the engine; state changed before the panic is not rolled back; the OS event
+  pump in `window` is not protected until stage 9.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
