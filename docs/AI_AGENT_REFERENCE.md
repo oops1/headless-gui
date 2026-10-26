@@ -10024,19 +10024,19 @@ eng.DrawContractCheck()        // bool
   millisecond, so a single frame can read as zero; sums over many frames are right
   on average.
 - **Draw contract check.** While it is on, a widget that calls `Invalidate`,
-  `InvalidateRect`, `SetBounds`, `AddChild`, `RemoveChild` or starts an animation
-  from inside `Draw` (on the render goroutine) produces one log line per widget for
-  the engine's lifetime, with the widget type and its path from the root:
+  `InvalidateRect`, `SetBounds`, `AddChild` or `RemoveChild` from inside `Draw` (on
+  the render goroutine) produces one log line per widget for the engine's lifetime,
+  with the widget type and its path from the root:
   `engine: контракт Draw нарушен: Invalidate из Draw у *x.Y (Panel > Taskbar > Y)`.
-  Notifications from other goroutines are not violations.
+  Notifications from other goroutines are not violations. Starting an animation
+  from `Draw` is not one either: rule 2 of the contract (GUIDE, «Контракт
+  отрисовки») forbids a frame counter inside `Draw`, not `widget.Animate` called
+  lazily on first appearance or in response to the change that caused this `Draw`.
 - **Stop** turns the check off: the trace is shared by the whole process.
 - **Container authors.** A container that walks its children with its own loop,
   instead of `DrawChildren`, should call `widget.DrawTraced(child, ctx)` instead of
   `child.Draw(ctx)`, and `widget.DrawOverlayTraced` for overlays. Without it the
   path in the message stops at the container. `DrawChildren` does this already.
-- **Known findings.** The desktop components start a clock tick and a hover
-  transition from `Draw`; they are listed in `knownDrawContractFindings`
-  (`engine/drawcontract_test.go`) and will show in the log while the check is on.
 
 ## End of Reference
 

@@ -121,17 +121,18 @@ func TestDrawContract_StopReleasesTrace(t *testing.T) {
 	}
 }
 
-// Анимация, заведённая из Draw, — нарушение.
-func TestDrawContract_AnimateInDraw(t *testing.T) {
+// Анимация, заведённая из Draw, нарушением не считается (см. onWidgetAnimation):
+// часы заводят тик при первом показе, переход наведения стартует из Draw в
+// ответ на смену состояния, и оба сами заявляют свою область.
+func TestDrawContract_AnimateInDrawIsAllowed(t *testing.T) {
 	testreset.Globals(t)
 	sc := newContractScene(t, func(c *contractBreaker) {
 		widget.Animate(10*time.Millisecond, nil, nil)
 	})
 	sc.eng.SetDrawContractCheck(true)
 	sc.eng.RenderOnce()
-	recs := sc.got()
-	if len(recs) != 1 || !strings.Contains(recs[0], "Animate") {
-		t.Fatalf("ждали одну запись об Animate: %q", recs)
+	if recs := sc.got(); len(recs) != 0 {
+		t.Fatalf("старт анимации из Draw записан как нарушение: %q", recs)
 	}
 }
 
@@ -155,35 +156,9 @@ func TestDrawContract_OtherGoroutineIsFine(t *testing.T) {
 	}
 }
 
-// knownDrawContractFindings — нарушения в собственных компонентах движка,
-// найденные проверкой при её появлении (этап 0.3 работ к 4.0). Оба —
-// анимация, заведённая из Draw:
-//
-//   - ClockItem.ensureTick заводит секундный тик при первом Draw, чтобы
-//     анимация досталась горутине того движка, который часы рисует;
-//   - motion.style (все компоненты desktop) замечает в Draw смену состояния
-//     наведения и заводит переход цвета.
-//
-// С пропуском поддеревьев они не ломаются: смена наведения сама инвалидирует
-// ячейку, а часы рисуются в первом полном кадре. Убрать их — решение о
-// жизненном цикле анимаций (где их заводить, если не в Draw), а не правка в
-// одну строку; до него список держит тест строгим ко всему новому.
-var knownDrawContractFindings = []string{
-	"Animate из Draw у *desktop.ClockItem",
-	"Animate из Draw у *desktop.StartButton",
-}
-
-func isKnownDrawContractFinding(rec string) bool {
-	for _, k := range knownDrawContractFindings {
-		if strings.Contains(rec, k) {
-			return true
-		}
-	}
-	return false
-}
-
-// Сцена рабочего стола из бенчмарков контракт соблюдает: ни одной записи,
-// кроме известных (knownDrawContractFindings).
+// Сцена рабочего стола из бенчмарков контракт соблюдает: ни одной записи.
+// Часы и переходы наведения в desktop заводят анимации из Draw — это
+// допустимо (TestDrawContract_AnimateInDrawIsAllowed) и сюда не попадает.
 func TestDrawContract_DesktopSceneIsClean(t *testing.T) {
 	testreset.Globals(t)
 	for _, tc := range []struct {
@@ -216,16 +191,8 @@ func TestDrawContract_DesktopSceneIsClean(t *testing.T) {
 			eng.RenderOnce()
 			mu.Lock()
 			defer mu.Unlock()
-			var fresh []string
-			for _, r := range recs {
-				if isKnownDrawContractFinding(r) {
-					t.Logf("известное: %s", r)
-					continue
-				}
-				fresh = append(fresh, r)
-			}
-			if len(fresh) != 0 {
-				t.Fatalf("новые нарушения контракта в сцене (%d):\n%s", len(fresh), strings.Join(fresh, "\n"))
+			if len(recs) != 0 {
+				t.Fatalf("нарушения контракта в сцене (%d):\n%s", len(recs), strings.Join(recs, "\n"))
 			}
 		})
 	}

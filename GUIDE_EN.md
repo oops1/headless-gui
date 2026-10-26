@@ -2128,6 +2128,16 @@ moves the widget through setters (`SetBounds`, `SetValue`, and the rest)
 declares damage itself; a tick that writes a field directly must call
 `Invalidate()`, or the change reaches no frame at all.
 
+The rule does not forbid starting an animation from `Draw` — it forbids a
+counter that lives only while `Draw` is being called. `widget.Animate` from
+`Draw` is fine in two cases: lazily, on first appearance (the taskbar clock
+starts its one-second tick when it is first drawn), and in response to the
+change that caused this `Draw` (a colour transition on hover: the hover setter
+already declared the area, `Draw` noticed the state change and started the
+transition). In both cases the animation then ticks independently of drawing
+and declares its own area, and a widget that is not drawn needs no animation.
+`Engine.SetDrawContractCheck` does not report such a start as a violation.
+
 This is about idling. The engine used to prepare a frame on every tick while
 any animation was registered, and the taskbar's one-second clock kept a
 motionless desktop running at full rate. The frame was a FULL one, too: such
@@ -5474,17 +5484,15 @@ eng.SetDrawContractCheck(true) // debugging: logs the widget that changes itself
 - On Windows the clock steps by about half a millisecond: a single frame can read as
   zero, but sums over many frames are right.
 - Contract check: a widget that calls `Invalidate`, `InvalidateRect`, `SetBounds`,
-  `AddChild`, `RemoveChild` or starts an animation from inside `Draw` produces one log
-  line per widget for the engine's lifetime, with the widget type and its path from the
-  root. Notifications from other goroutines are not violations.
+  `AddChild` or `RemoveChild` from inside `Draw` produces one log line per widget for
+  the engine's lifetime, with the widget type and its path from the root. Notifications
+  from other goroutines and starting an animation from `Draw` (see rule 2 of the draw
+  contract) are not violations.
 - `Stop` turns the check off: the trace is shared by the whole process.
 - If you write a container that walks its children with its own loop instead of
   `DrawChildren`, call `widget.DrawTraced(child, ctx)` instead of `child.Draw(ctx)`, and
   `widget.DrawOverlayTraced` for overlays. Without it the path in the log stops at the
   container.
-- Known violations in the `desktop` components (a clock tick and a hover transition
-  started from `Draw`) are listed in `knownDrawContractFindings` in
-  `engine/drawcontract_test.go`; with the check on they appear in the log.
 
 ## Module Structure
 

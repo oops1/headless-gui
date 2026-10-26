@@ -107,9 +107,14 @@ func (e *Engine) onWidgetInvalidateRect(r image.Rectangle) {
 	e.InvalidateRect(r)
 }
 
-func (e *Engine) onWidgetAnimation() {
-	e.checkDrawContract("Animate", image.Rectangle{})
-}
+// onWidgetAnimation — приёмник «заведена анимация». Старт анимации из Draw
+// нарушением НЕ считается: правило 2 контракта запрещает анимацию счётчиком
+// внутри Draw, а не запуск widget.Animate оттуда. Анимация, заведённая в
+// ответ на изменение, которое и вызвало этот Draw (переход цвета при смене
+// наведения), или лениво при первом показе (тик часов), тикает независимо от
+// отрисовки и сама заявляет свою область; виджет, который не рисуют, в
+// анимации не нуждается. Решение этапа 0 работ к 4.0.
+func (e *Engine) onWidgetAnimation() {}
 
 // checkDrawContract записывает нарушение, если уведомление пришло из Draw.
 func (e *Engine) checkDrawContract(what string, r image.Rectangle) {
