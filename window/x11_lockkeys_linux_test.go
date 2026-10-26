@@ -44,6 +44,7 @@ type lkXServer struct {
 	modMap     []byte        // GetModifierMapping: 8 групп по perMod
 	perMod     int
 	latchErr   bool // LatchLockState отвергается ошибкой
+	handled    int  // сколько запросов уже обработано (для idle)
 }
 
 func lkDefaultModMap() ([]byte, int) {
@@ -130,10 +131,22 @@ func lkReply(extraWords int) []byte {
 	return r
 }
 
+// idle ждёт, пока сервер обработает всё, что получил: ответы на них уже
+// в пути, и менять состояние сервера раньше нельзя.
+func (s *lkXServer) idle(t *testing.T) {
+	t.Helper()
+	lkWaitUntil(t, "сервер обработал все запросы", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.handled == len(s.reqs)
+	})
+}
+
 func (s *lkXServer) handle(req []byte) {
 	le := binary.LittleEndian
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer func() { s.handled++ }()
 	switch {
 	case req[0] == 98: // QueryExtension
 		r := lkReply(0)
@@ -528,6 +541,16 @@ func TestX11LockKeysWire_SetRejectedByServer(t *testing.T) {
 	w, s := lkX11Window(t, func(s *lkXServer) { s.latchErr = true })
 	if w.SetLockKeys(CapsLock) {
 		t.Error("ошибка сервера, а SetLockKeys ответил true")
+	}
+	s.idle(t) // ответы на уже полученное в пути; состояние меняем после них
+	// Ошибка запроса без ответа проверяется отдельным GetInputFocus; читать
+	// состояние поверх неё нельзя: ошибка заняла бы место ответа, а сам ответ
+	// достался бы следующему запросу (если он уже стоит в очереди).
+	if n := len(s.requests(lkXkbMajor, xkbMinorGetIndicatorState)); n != 1 {
+		t.Errorf("после отвергнутого запроса состояние читали %d раз вместо одного", n)
+	}
+	if n := len(s.requests(43, 255)); n != 1 {
+		t.Errorf("GetInputFocus для проверки ошибки: %d, ждал 1", n)
 	}
 	s.mu.Lock()
 	s.latchErr = false
