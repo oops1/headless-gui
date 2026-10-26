@@ -1761,7 +1761,12 @@ func (e *Engine) renderFrame() output.Frame {
 
 	// Буфер вывода (surfaces.go): свободный из набора, иначе кадр
 	// пропускается, а damage остаётся до следующего раза.
-	surface, haveSurface := e.acquireSurface(canvas, e.wholeFramePending())
+	//
+	// Что кадр перерисует, в буфер из front не копируется: перерисовка всё
+	// равно положит туда фон и дерево целиком. Заявленное после этого места
+	// только расширит перерисовку, поэтому подсмотреть его здесь безопасно.
+	redraw, redrawAll := e.peekDamage()
+	surface, haveSurface := e.acquireSurface(canvas, e.wholeFramePending() || redrawAll, redraw)
 	if !haveSurface {
 		e.stats.skipped.Add(1)
 		return output.Frame{Seq: e.frameSeq.Load(), Timestamp: time.Now(), Width: canvas.W, Height: canvas.H}

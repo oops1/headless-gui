@@ -194,6 +194,14 @@ func (e *Engine) consumeDamage() (regions []image.Rectangle, all bool) {
 	return regions, all
 }
 
+// peekDamage — объединение заявленного на сейчас, не забирая его: что
+// перерисует ближайший кадр как минимум. all — весь кадр.
+func (e *Engine) peekDamage() (union image.Rectangle, all bool) {
+	e.damageMu.Lock()
+	defer e.damageMu.Unlock()
+	return unionRects(e.damage), e.damageAll
+}
+
 // unionRects — общий прямоугольник списка (пустой для пустого списка).
 func unionRects(rects []image.Rectangle) image.Rectangle {
 	var u image.Rectangle

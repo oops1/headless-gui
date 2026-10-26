@@ -180,8 +180,9 @@ func (e *Engine) Surfaces() int {
 // acquireSurface в начале кадра выбирает свободный буфер, делает его задним
 // и приводит к прошлому кадру. Возвращает номер буфера (с единицы) или 0,
 // когда набора нет; ok=false — все буферы у потребителя. skipCopy — кадр
-// будет полным, и копировать в буфер прошлый кадр незачем.
-func (e *Engine) acquireSurface(canvas *Canvas, skipCopy bool) (surface int, ok bool) {
+// будет полным, и копировать в буфер прошлый кадр незачем; redraw — что кадр
+// перерисует наверняка, это тоже не копируется.
+func (e *Engine) acquireSurface(canvas *Canvas, skipCopy bool, redraw image.Rectangle) (surface int, ok bool) {
 	s := &e.surfaces
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -208,7 +209,7 @@ func (e *Engine) acquireSurface(canvas *Canvas, skipCopy bool) (surface int, ok 
 	back := s.imgs[idx]
 	canvas.back, canvas.format = back, s.format
 	if !skipCopy {
-		copyFrontInto(canvas.front, back, &s.pending[idx])
+		copyFrontInto(canvas.front, back, &s.pending[idx], redraw)
 	}
 	s.pending[idx].reset()
 	return idx + 1, true
@@ -253,8 +254,12 @@ func (e *Engine) surfaceFrameDone(surface int, fr *output.Frame, full bool) {
 	}
 }
 
-// copyFrontInto копирует из front в buf области pending (или всё).
-func copyFrontInto(front, buf *image.RGBA, p *surfacePending) {
+// copyFrontInto копирует из front в buf области pending (или всё), кроме
+// skip: туда кадр положит своё.
+//
+// На перетаскивании окна это было всё окно на кадр: буфер догонял прошлый
+// кадр там, где окно стояло, и тот же кадр сразу рисовал там окно заново.
+func copyFrontInto(front, buf *image.RGBA, p *surfacePending, skip image.Rectangle) {
 	if front == nil || buf == nil {
 		return
 	}
@@ -263,17 +268,43 @@ func copyFrontInto(front, buf *image.RGBA, p *surfacePending) {
 	if p.all {
 		rects = []image.Rectangle{bounds}
 	}
-	for _, r := range rects {
-		r = r.Intersect(bounds)
-		if r.Empty() {
-			continue
+	for _, whole := range rects {
+		for _, r := range outsideOf(whole.Intersect(bounds), skip) {
+			copyRectWithin(front, buf, r)
 		}
-		n := r.Dx() * 4
-		for y := r.Min.Y; y < r.Max.Y; y++ {
-			so := front.PixOffset(r.Min.X, y)
-			do := buf.PixOffset(r.Min.X, y)
-			copy(buf.Pix[do:do+n], front.Pix[so:so+n])
+	}
+}
+
+// outsideOf — части r вне skip: до четырёх полос.
+func outsideOf(r, skip image.Rectangle) []image.Rectangle {
+	if r.Empty() {
+		return nil
+	}
+	c := r.Intersect(skip)
+	if c.Empty() {
+		return []image.Rectangle{r}
+	}
+	var out []image.Rectangle
+	for _, q := range [...]image.Rectangle{
+		image.Rect(r.Min.X, r.Min.Y, r.Max.X, c.Min.Y),
+		image.Rect(r.Min.X, c.Max.Y, r.Max.X, r.Max.Y),
+		image.Rect(r.Min.X, c.Min.Y, c.Min.X, c.Max.Y),
+		image.Rect(c.Max.X, c.Min.Y, r.Max.X, c.Max.Y),
+	} {
+		if !q.Empty() {
+			out = append(out, q)
 		}
+	}
+	return out
+}
+
+// copyRectWithin копирует область r из front в buf.
+func copyRectWithin(front, buf *image.RGBA, r image.Rectangle) {
+	n := r.Dx() * 4
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		so := front.PixOffset(r.Min.X, y)
+		do := buf.PixOffset(r.Min.X, y)
+		copy(buf.Pix[do:do+n], front.Pix[so:so+n])
 	}
 }
 
