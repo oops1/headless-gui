@@ -1832,6 +1832,12 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return ret
 
 	case wmKeydown, wmSyskeydown:
+		// Нажатие Caps/Num/Scroll Lock, которое мы сами послали через
+		// SendInput (SetLockKeys): приложению оно не нужно, оно его же и
+		// вызвало (lockkeys_windows.go).
+		if lkSyntheticKey(int(wparam)) {
+			return 0
+		}
 		// Бит 30 lParam — «клавиша уже была нажата», то есть это автоповтор,
 		// а не новое нажатие (WM_KEYDOWN, previous key state).
 		scan, ext, repeat := win32KeyLParam(lparam)
@@ -1848,6 +1854,9 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		return ret
 
 	case wmKeyup, wmSyskeyup:
+		if lkSyntheticKey(int(wparam)) {
+			return 0
+		}
 		if w.onRawKey != nil {
 			scan, ext, _ := win32KeyLParam(lparam)
 			w.onRawKey(rawKey{VK: int(wparam), Scan: scan, Extended: ext})

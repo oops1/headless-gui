@@ -9747,6 +9747,159 @@ HiDPI, a committed buffer, `configure` with the same size, maximized / full scre
 tiled / after `Restore`), `window/setsize_windows_test.go` (a live Win32 window:
 round trip, scale 2, maximized -> `Restore`).
 
+## v3.44: lock keys — `Window.LockKeys`, `SetLockKeys`, `SetOnActivateLocks` (RDP client Tandem 1.7.0)
+
+An RDP client tells the server which toggle keys are on (Synchronize, [MS-RDPBCGR]
+2.2.8.1.1.3.1.1.5) after connecting and every time the window gets focus back: while it
+was inactive the user could switch Caps Lock in another program. The server answers with
+Set Keyboard Indicators, and the client has to light the indicators on its own keyboard.
+
+```go
+locks, known := win.LockKeys()                 // window.LockKeys, bool
+locks.Has(window.CapsLock)                     // CapsLock, NumLock, ScrollLock, KanaLock
+locks.String()                                 // "caps|num", "-" for the empty set
+
+win.SetOnActivateLocks(func(active bool, locks window.LockKeys, known bool) {
+    if active && known { sendSynchronize(locks) } // the state belongs to THIS focus
+})
+ok := win.SetLockKeys(window.NumLock)          // exactly Num Lock on, the rest off
+```
+
+- **Type** (`window/lockkeys.go`). `window.LockKeys` is a bit set (`uint8`) with
+  `CapsLock`, `NumLock`, `ScrollLock`, `KanaLock`; `Has(f)` is true when **all** the given
+  flags are set (`Has(0)` is false), `Empty()`, `String()` — the pattern of
+  `widget.ClipboardFormatSet`. It lives in `window`, next to `Monitor` and
+  `SystemLanguages`: the callback is a `Window` method and nothing in `widget` needs it.
+- **`Window.LockKeys() (LockKeys, bool)`.** The second value `false` means the backend
+  does not know the state (before `Run`, macOS, Wayland without focus); the set is then
+  empty. A key that cannot be determined (Scroll Lock on Wayland, Kana Lock on a
+  non-Japanese keyboard) is simply never in the set while the answer stays "known".
+  Optional backend interface `lockKeysBackend`, like `keyboardGrabBackend`.
+- **Win32** (`window/lockkeys_windows.go`). `GetKeyState(VK_CAPITAL / VK_NUMLOCK /
+  VK_SCROLL / VK_KANA) & 1`. **The choice.** `GetKeyState` reports the state of the
+  thread's input queue (it follows the messages the thread has read), so the call is made
+  **on the window thread** (`onUIThread`, else `InvokeOnUIThread` with a 500 ms limit;
+  when the message loop does not answer in time it is read directly — toggle state is
+  session-wide, checked live). `GetAsyncKeyState` is not usable: its low bit means
+  "pressed since the last call", not "on". `GetKeyboardState` is the same `GetKeyState`
+  for 256 keys at once.
+- **X11** (`window/x11_lockkeys.go`, `x11_lockkeys_linux.go`). XKEYBOARD, in this order:
+  1) indicators — `XkbGetIndicatorState`, bit meaning from the indicator names
+  (`XkbGetNames(IndicatorNames)` + `InternAtom(only_if_exists)` for "Caps Lock", "Num
+  Lock", "Scroll Lock", "Kana"/"Kana Lock"); 2) no indicator with that name — locked
+  modifiers (`XkbGetState.lockedMods`) by the mask of the modifier the key sits on (Lock
+  for Caps Lock; Num Lock, Scroll Lock, Kana Lock — from `GetModifierMapping` and the
+  window's keysym table); 3) no XKB (`QueryExtension("XKEYBOARD")` absent or
+  `XkbUseExtension(1, 0)` refused) — core `QueryPointer.mask` by the same masks. The
+  rule of the package — **no request with a reply from a foreign goroutine on the window
+  connection** — is kept as for the keyboard grab: the question becomes a job in the
+  window's queue (`x11LockState.jobs`), the event loop is woken by a `SendEvent` to
+  itself, runs the job at its top level and hands the result to the waiting caller
+  (limit `x11LockTimeout` = 1 s; the loop is not running — answered at once with
+  `false`; the loop ends — waiters are released, `lkFailAll`). What was learned about
+  the server (extension, indicator bits, masks) is remembered until `MappingNotify`;
+  the state itself is not cached — every question costs one or two requests.
+- **Wayland** (`window/wayland_lockkeys_linux.go`, `lockkeys_xkb.go`). The last
+  `wl_keyboard.modifiers`, `mods_locked`. The bits are *indices* of the keymap's
+  modifiers; the real ones are always 0..7 (Shift, Lock, Control, Mod1..Mod5), and the
+  keymap says which key sits on which (`modifier_map Mod2 { <NMLK> };` with the key's
+  `Num_Lock` symbol, found by `lkParseKeymapMods`; the fallback without a keymap is Lock
+  for Caps Lock and Mod2 for Num Lock). Scroll Lock is a modifier only in a keymap that
+  maps it (rare) — otherwise never set. Kana Lock is not set. **Before the first
+  `modifiers` the state is unknown**, and it becomes unknown again at
+  `wl_keyboard.leave` (while unfocused Caps Lock may change and a client is not told).
+- **macOS.** Not implemented: `false` (there is no simple way without CGO that could be
+  verified here).
+
+### Activation together with the state (item 3 of the request)
+
+`SetOnActivate`'s signature is unchanged. **Chosen: a new
+`Window.SetOnActivateLocks(func(active bool, locks LockKeys, known bool))`**, called in
+the same cases as `SetOnActivate` (on the engine goroutine, only on a change, after the
+held keys are released), **but** for `active == true` the state is guaranteed to belong to
+the focus just received:
+
+- Win32 and X11 ask for the state when the notification is delivered (on the engine
+  goroutine, through `Window.LockKeys`, so an X11 round trip is not made on the event
+  loop).
+- Wayland. `xdg_toplevel.configure(activated)` and `wl_keyboard.enter` + `modifiers` are
+  different objects, and the compositor picks their order. The backend implements the
+  optional `lockKeysSettler` (`LockKeysSettled`, `SetOnLockKeysSettled`): if
+  `configure(activated)` came first, the callback **waits for the first `modifiers` of
+  the new focus**, but no longer than `lkSettleTimeout` = 300 ms (then it is called
+  with `known == false` — a keyboard-less seat must not swallow the notification). A
+  repeated `configure` with the same state (every resize) waits for the same event and
+  starts no second timer (a numbered wait, so a stale timer cannot fire a newer wait).
+  If a deactivation arrives in the meantime, the pending "active" is cancelled.
+- Why not "the state is fresh inside `SetOnActivate(true)`": that would make the existing
+  callback wait on Wayland (the window title, `IsActive`, and the existing tests depend
+  on its timing) or block the X11 loop. The old callback stays as it was; documented:
+  `LockKeys()` inside it may still be `unknown` on Wayland.
+- `active == false` carries what the backend knows at that moment (on Wayland after
+  `leave` — unknown); it is informational.
+
+### `Window.SetLockKeys(want LockKeys) bool`
+
+Brings the toggle keys to the **exact** set `want` (the others are turned off); `true` —
+every key that differed was switched. Bits outside the four flags are dropped.
+`false`: no window, a platform that cannot, or some key could not be switched; the rest
+are brought anyway.
+
+- **Win32.** `SendInput` — a press and a release of the key for **each differing flag
+  only**; Num Lock goes as an extended key (as the Microsoft sample does; `MapVirtualKey`
+  does not report it). Kana Lock only when `GetKeyboardType(0) == 7` (Japanese
+  keyboard), otherwise it is skipped and the answer is `false`. `true` means "the system
+  accepted all the events"; the state changes asynchronously (the queue), so `LockKeys`
+  right after may still show the old value (checked live: tens of ms at most).
+  *The injected press must not reach the application as a normal key* — an RDP client
+  would forward it to the server, which would toggle again and ask for it back. The
+  events carry the mark `dwExtraInfo = "LKSY"`; `wndProc` drops `WM_KEYDOWN/KEYUP/
+  SYSKEYDOWN/SYSKEYUP` of a toggle key whose `GetMessageExtraInfo` is the mark
+  (`lkSyntheticKey`; other keys with the mark and a real press without it are delivered).
+  Checked live: the control — an *unmarked* injected Scroll Lock does reach the
+  foreground window, the marked one does not. The `WH_KEYBOARD_LL` keyboard-grab hook
+  leaves `LLKHF_INJECTED` events alone (and toggle keys are not in its list), so the
+  grab is not affected. The press goes to whatever window is in the foreground: with the
+  application in the background a foreign program receives it (nothing happens there —
+  the system toggles the key itself).
+- **X11.** `XkbLatchLockState(affectModLocks, modLocks)` on the masks above — no key is
+  pressed. Needs XKB; without it `false` (unless the set is already what was asked).
+  A key with no modifier (Scroll Lock in most layouts) cannot be switched: `false`, the
+  other keys are brought. The request has no reply, so its error is checked separately
+  (`x11SyncCheck`: GetInputFocus) and then the state is read back, so `true` means "the
+  server now shows what was asked".
+- **Wayland, macOS.** `false` (a Wayland client may not change the keyboard state).
+
+### Compatibility
+
+Only additions: `window.LockKeys` and its constants, `Window.LockKeys`, `SetLockKeys`,
+`SetOnActivateLocks`; optional backend interfaces `lockKeysBackend`, `lockKeysSetter`,
+`lockKeysSettler`. `NativeWindow`, `SetOnActivate`, `widget` — untouched. Win32 `wndProc`
+gains one check for the four toggle keys; the frame tests did not change.
+
+Tests: `window/lockkeys_test.go` (the set, key choice, delegation, activation: at once,
+next to `SetOnActivate`, waiting for the state, state already there, timeout, cancelled
+by a deactivation), `window/lockkeys_xkb_test.go` (the real WSLg Weston keymap and
+synthetic ones: `modifier_map` by key and by symbol, other modifiers, `KP_Num_Lock`,
+virtual modifiers), `window/x11_lockkeys_test.go` (request layouts, replies, indicators
+by name, masks, `GetModifierMapping`), `window/x11_lockkeys_linux_test.go` (the event
+loop over a fake X server with XKB: indicators, fall-back to locked modifiers, core
+protocol, old XKB, negotiated once, `MappingNotify`, `LatchLockState` bytes, a rejected
+request, no loop, a silent server, waiters released), `window/wayland_lockkeys_linux_test.go`
+(a fake compositor: `modifiers`, keymap through a real memfd, `leave`, activation before
+and after `modifiers`, refocus after Caps Lock in another window, timeout),
+`window/lockkeys_windows_test.go` (INPUT layout, inputs, UI-thread read, stuck loop,
+differences only, Kana, dropping own synthetic keys, `GetMessageExtraInfo` round trip,
+**live** `GetKeyState` against `GetKeyboardState` and a **live** Scroll Lock round trip
+with restore in `t.Cleanup`; `HEADLESS_GUI_LOCKKEYS_LIVE=1` adds Caps/Num Lock and a
+foreground-window check that the marked keys do not arrive),
+`window/lockkeys_e2e_linux_test.go` (a real XWayland with XKB: Num Lock round trip; a
+real Weston: `LockKeys` known after focus).
+
+Not verified live: Mutter, KWin and the WinLine compositor (only Weston in WSLg and
+protocol-level fakes); an X server other than XWayland (a native Xorg, Xvfb with
+non-standard indicator names); a Japanese keyboard for Kana Lock; macOS.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:

@@ -4247,6 +4247,51 @@ lost the window releases every held key itself (a normal `KeyEvent{Pressed:
 false}` with the scan code) and resets the engine modifiers — no stuck Ctrl —
 and only then calls the callback.
 
+### Toggle keys: Caps Lock, Num Lock, Scroll Lock (v3.44)
+
+A remote desktop client tells the server which toggle keys are on for the user — after
+connecting and every time the window gets focus back (while it was inactive Caps Lock
+may have been switched in another program) — and the server asks, in return, to light
+the indicators.
+
+```go
+locks, known := win.LockKeys() // window.LockKeys; known == false — the state is unknown
+locks.Has(window.CapsLock)     // CapsLock, NumLock, ScrollLock, KanaLock
+locks.String()                 // "caps|num"; "-" — nothing is on
+
+// The state that belongs to exactly the focus just received (the callback runs on
+// the engine goroutine, only when the activity changes):
+win.SetOnActivateLocks(func(active bool, locks window.LockKeys, known bool) {
+    if active && known { sendSynchronize(locks) }
+})
+
+// A request from the server: exactly Num Lock on, the rest off.
+ok := win.SetLockKeys(window.NumLock)
+```
+
+- **Win32.** `GetKeyState(...) & 1` on the window thread. `SetLockKeys` is `SendInput`
+  with a press and release of the differing keys only. These presses do **not** reach the
+  application (the window recognizes its own by a mark in `dwExtraInfo` and drops them):
+  otherwise a remote desktop client would forward a Caps Lock press to the server as
+  well. The press goes to the window that is in the foreground. The state changes
+  asynchronously. Kana Lock only on a Japanese keyboard, otherwise `SetLockKeys` returns
+  `false`.
+- **X11.** The XKEYBOARD extension: the indicators "Caps Lock", "Num Lock", "Scroll
+  Lock", "Kana" by name; no indicator — the locked modifiers; no XKB — core
+  `QueryPointer`. `SetLockKeys` is `XkbLatchLockState`, nobody presses a key; without XKB
+  and for a key with no modifier (Scroll Lock in most layouts) it returns `false`. One
+  question costs a server round trip, the answer is given by the window's event loop.
+- **Wayland.** The last `wl_keyboard.modifiers` (`mods_locked`); which bits are Caps and
+  Num Lock comes from the compositor's keymap. Before the first `modifiers` and after the
+  focus is lost `known == false`. Scroll Lock is usually not a modifier and is invisible;
+  so is Kana Lock. A client may not change the state: `SetLockKeys` is `false`.
+- **macOS.** `known == false`, `SetLockKeys` is `false`.
+
+Inside `SetOnActivate(true)` the state may not have arrived yet on Wayland: the
+compositor itself chooses the order of "window is active" and "keyboard: focus and
+modifiers". So for synchronization use `SetOnActivateLocks`: with `active == true` it
+waits for the first `modifiers` of the new focus (at most 300 ms, then `known == false`).
+
 ### File drag & drop from the OS
 
 An app can accept files dragged from Explorer/Finder into the window.
