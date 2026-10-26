@@ -62,6 +62,8 @@ type Canvas struct {
 	// вместо новых; slabs — буферы текущего кадра, их забирает takeSlabs.
 	// Воркеры diffTiles добавляют под slabMu.
 	recycle bool
+	// noTileData — тайлы кадра без Data (Engine.SetFrameTileData).
+	noTileData bool
 	slabMu  sync.Mutex
 	slabs   []*output.Slab
 	// diffWork, blitWork — переиспользуемые задания пула воркеров для
@@ -1745,6 +1747,13 @@ func (c *Canvas) diffTileRows(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
 	}
 	if len(tiles) == 0 {
 		return nil
+	}
+
+	if c.noTileData {
+		for _, t := range tiles {
+			c.syncTile(t.X, t.Y, t.W, t.H)
+		}
+		return tiles
 	}
 
 	// Проход 2: одна аллокация под все данные, извлечение и синхронизация.

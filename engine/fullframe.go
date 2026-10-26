@@ -63,6 +63,9 @@ func (e *Engine) takeFullFrame() bool {
 // allTiles извлекает ВСЕ тайлы холста и синхронизирует front — полный кадр.
 // Устроено как diffTileRows, только без сравнения: одна аллокация на всё.
 func (c *Canvas) allTiles() []output.DirtyTile {
+	if c.noTileData {
+		return c.allTilesNoData()
+	}
 	ts := output.TileSize
 	tiles := make([]output.DirtyTile, 0, c.tilesX*c.tilesY)
 	total := 0
@@ -132,3 +135,31 @@ func (e *Engine) SetFrameRecycling(on bool) { e.recycleFrames.Store(on) }
 
 // FrameRecycling сообщает, включена ли переработка буферов кадров.
 func (e *Engine) FrameRecycling() bool { return e.recycleFrames.Load() }
+
+// SetFrameTileData задаёт, нести ли тайлам кадра свои байты (Data). По
+// умолчанию несут. Потребитель, которому движок рисует прямо в его буферы
+// (SetSurface, SetSurfaces), читает пиксели оттуда, и копия каждого
+// изменившегося тайла в кадр ему не нужна: без неё тайлы — только места
+// изменений, Data — nil.
+func (e *Engine) SetFrameTileData(on bool) { e.noTileData.Store(!on) }
+
+// FrameTileData сообщает, несут ли тайлы кадра свои байты.
+func (e *Engine) FrameTileData() bool { return !e.noTileData.Load() }
+
+// allTilesNoData — allTiles без байтов тайлов (SetFrameTileData(false)).
+func (c *Canvas) allTilesNoData() []output.DirtyTile {
+	ts := output.TileSize
+	tiles := make([]output.DirtyTile, 0, c.tilesX*c.tilesY)
+	for ty := 0; ty < c.tilesY; ty++ {
+		for tx := 0; tx < c.tilesX; tx++ {
+			px, py := tx*ts, ty*ts
+			pw, ph := min(ts, c.W-px), min(ts, c.H-py)
+			if pw <= 0 || ph <= 0 {
+				continue
+			}
+			tiles = append(tiles, output.DirtyTile{X: px, Y: py, W: pw, H: ph})
+			c.syncTile(px, py, pw, ph)
+		}
+	}
+	return tiles
+}

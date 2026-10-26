@@ -219,6 +219,8 @@ type Engine struct {
 	// recycleFrames — данные тайлов кадров берутся из пула и возвращаются по
 	// Frame.Release (SetFrameRecycling, fullframe.go).
 	recycleFrames atomic.Bool
+	// noTileData — кадр без байтов тайлов (SetFrameTileData).
+	noTileData atomic.Bool
 	quit          chan struct{}
 	done      chan struct{}
 
@@ -1920,6 +1922,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
 	canvas.recycle = e.recycleFrames.Load()
+	canvas.noTileData = e.noTileData.Load()
 	switch {
 	case full:
 		tiles = canvas.allTiles()
