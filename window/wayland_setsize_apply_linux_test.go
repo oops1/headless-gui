@@ -230,10 +230,15 @@ func TestWayland_SetSizeApply_MaximizedKeepsOrderForRestore(t *testing.T) {
 			if len(mins) != 1 || mins[0] != [2]uint32{520, 370} || len(maxs) != 1 || maxs[0] != [2]uint32{520, 370} {
 				t.Errorf("пределы: min %v max %v, ждал по 520x370", mins, maxs)
 			}
-			// Заказ потрачен: следующий configure ничего не подменяет.
+			// Заказ потрачен, окно зафиксировано на нём: чужой размер из
+			// следующего configure окно с запретом ресайза не принимает
+			// (floatingSize, v3.43.3).
 			c.w.handleEvent(c.w.toplevelID, xdgToplevelEvConfigure, wlConfigure(700, 500))
-			if len(*calls) != 3 || (*calls)[2] != [2]int{700, 500} {
-				t.Errorf("onResize: %v, ждал третьим 700x500 от компоновщика", *calls)
+			if len(*calls) != 2 {
+				t.Errorf("onResize: %v — окно с запретом ресайза приняло 700x500 от компоновщика", *calls)
+			}
+			if w, h := c.w.GetSize(); w != 520 || h != 370 {
+				t.Errorf("GetSize = %dx%d, ждал закреплённые 520x370", w, h)
 			}
 		})
 	}
