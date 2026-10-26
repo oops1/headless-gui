@@ -5453,6 +5453,39 @@ narrow interface — when the API changes, only that package needs editing.
 
 ---
 
+### Engine counters and the draw-contract check (v4.0, in progress)
+
+Two tools for those who tune the frame and look for the reason it is slow or why the
+window keeps holes in it.
+
+```go
+s := eng.Stats() // engine.Stats; safe from any goroutine, takes no locks
+// Numbers over an interval are the difference of two snapshots:
+// s.Frames, s.FramesSkipped, s.FramesLost, s.Tiles, s.Moves,
+// s.DrawNanos, s.DiffNanos, s.DeliverNanos, s.Posted, s.PostedRun, s.PostQueue
+
+eng.SetDrawContractCheck(true) // debugging: logs the widget that changes itself inside Draw
+```
+
+- Counters only grow from the engine's creation. `FramesLost` counts frames dropped
+  from the `Frames()` channel because the consumer was slow; a sink (`SetFrameSink`)
+  never loses a frame. `FramesSkipped` counts loop ticks that produced no frame
+  because nothing changed. `PostQueue` is how many functions from `Post` still wait.
+- On Windows the clock steps by about half a millisecond: a single frame can read as
+  zero, but sums over many frames are right.
+- Contract check: a widget that calls `Invalidate`, `InvalidateRect`, `SetBounds`,
+  `AddChild`, `RemoveChild` or starts an animation from inside `Draw` produces one log
+  line per widget for the engine's lifetime, with the widget type and its path from the
+  root. Notifications from other goroutines are not violations.
+- `Stop` turns the check off: the trace is shared by the whole process.
+- If you write a container that walks its children with its own loop instead of
+  `DrawChildren`, call `widget.DrawTraced(child, ctx)` instead of `child.Draw(ctx)`, and
+  `widget.DrawOverlayTraced` for overlays. Without it the path in the log stops at the
+  container.
+- Known violations in the `desktop` components (a clock tick and a hover transition
+  started from `Draw`) are listed in `knownDrawContractFindings` in
+  `engine/drawcontract_test.go`; with the check on they appear in the log.
+
 ## Module Structure
 
 ```

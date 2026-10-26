@@ -9999,6 +9999,45 @@ exchange with a compositor was **not** run. Verified on the wire against a fake 
 Not verified: wlroots-based compositors, the WinLine compositor, and whether a given
 compositor applies a virtual keyboard's `modifiers` to the whole seat.
 
+## v4.0 (unreleased, branch `feature/engine-architecture`): engine statistics and the draw contract check
+
+Stage 0 of the 4.0 plan. Additive only: nothing existing changed behaviour. The
+numbers this work is measured against are in `docs/BENCHMARKS.md`.
+
+```go
+s := eng.Stats()             // engine.Stats; safe from any goroutine, takes no locks
+s.Frames, s.FramesSkipped, s.FramesLost
+s.Tiles, s.Moves
+s.DrawNanos, s.DiffNanos, s.DeliverNanos
+s.Posted, s.PostedRun, s.PostQueue
+
+eng.SetDrawContractCheck(true) // debugging only: slows frames down
+eng.DrawContractCheck()        // bool
+```
+
+- **Counters** only grow from the engine's creation. A rate is the difference of
+  two snapshots. `FramesSkipped` counts loop ticks that produced no frame because
+  nothing changed; wake-ups by `Post` are not counted. `FramesLost` counts frames
+  dropped from the `Frames()` channel because the consumer was slow; a `FrameSink`
+  never loses a frame. `PostQueue = Posted − PostedRun`.
+- **Times** come from `time.Now`. On Windows the clock steps by about half a
+  millisecond, so a single frame can read as zero; sums over many frames are right
+  on average.
+- **Draw contract check.** While it is on, a widget that calls `Invalidate`,
+  `InvalidateRect`, `SetBounds`, `AddChild`, `RemoveChild` or starts an animation
+  from inside `Draw` (on the render goroutine) produces one log line per widget for
+  the engine's lifetime, with the widget type and its path from the root:
+  `engine: контракт Draw нарушен: Invalidate из Draw у *x.Y (Panel > Taskbar > Y)`.
+  Notifications from other goroutines are not violations.
+- **Stop** turns the check off: the trace is shared by the whole process.
+- **Container authors.** A container that walks its children with its own loop,
+  instead of `DrawChildren`, should call `widget.DrawTraced(child, ctx)` instead of
+  `child.Draw(ctx)`, and `widget.DrawOverlayTraced` for overlays. Without it the
+  path in the message stops at the container. `DrawChildren` does this already.
+- **Known findings.** The desktop components start a clock tick and a hover
+  transition from `Draw`; they are listed in `knownDrawContractFindings`
+  (`engine/drawcontract_test.go`) and will show in the log while the check is on.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
