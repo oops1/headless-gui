@@ -392,7 +392,7 @@ func (p *DockPane) Draw(ctx DrawContext) {
 		cr := p.contentRect()
 		save := ctx.Clip()
 		ctx.SetClip(cr.Intersect(save))
-		p.content.Draw(ctx)
+		DrawTraced(p.content, ctx)
 		ctx.SetClip(save)
 	}
 

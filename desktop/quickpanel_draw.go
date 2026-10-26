@@ -540,7 +540,7 @@ func (pn *qsPanel) drawDetails(ctx widget.DrawContext, l *qsLayout, u qsUI) {
 		}
 		prev := ctx.Clip()
 		ctx.SetClip(l.body.Intersect(prev))
-		c.Draw(ctx)
+		widget.DrawTraced(c, ctx)
 		ctx.SetClip(prev)
 	}
 	if u.ring && u.focus.kind == qzBack {

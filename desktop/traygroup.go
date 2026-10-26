@@ -163,7 +163,7 @@ func (g *TrayGroup) Draw(ctx widget.DrawContext) {
 	}
 	for _, it := range g.items {
 		if !it.Bounds().Empty() {
-			it.Draw(ctx)
+			widget.DrawTraced(it, ctx)
 		}
 	}
 }

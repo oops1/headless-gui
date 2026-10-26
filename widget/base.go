@@ -577,7 +577,9 @@ func (b *Base) drawChildren(ctx DrawContext) {
 		if SkipSubtree(ctx, child) {
 			continue
 		}
-		child.Draw(ctx)
+		// Через учёт рисующихся (drawtrace.go): пока он выключен, это просто
+		// child.Draw(ctx).
+		DrawTraced(child, ctx)
 	}
 }
 

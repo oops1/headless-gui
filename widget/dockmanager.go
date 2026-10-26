@@ -1567,7 +1567,7 @@ func (m *DockManager) Draw(ctx DrawContext) {
 		if child.Bounds().Empty() || !IsWidgetVisible(child) {
 			continue
 		}
-		child.Draw(ctx)
+		DrawTraced(child, ctx)
 	}
 
 	// Косметический выезд flyout: закрываем ещё не «раскрытую» часть фоном,

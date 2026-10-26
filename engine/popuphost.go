@@ -217,7 +217,11 @@ func renderOverlayInto(oc *Canvas, od widget.OverlayDrawer, r image.Rectangle) *
 // сдвиг на начало попапа.
 func renderOverlayShifted(oc *Canvas, od widget.OverlayDrawer, r image.Rectangle, off image.Point) *image.RGBA {
 	tc := &translatingContext{inner: oc, dx: r.Min.X, dy: r.Min.Y}
-	od.DrawOverlay(widget.OffsetContext(tc, off.X, off.Y))
+	if w, ok := od.(widget.Widget); ok {
+		widget.DrawOverlayTraced(w, od, widget.OffsetContext(tc, off.X, off.Y))
+	} else {
+		od.DrawOverlay(widget.OffsetContext(tc, off.X, off.Y))
+	}
 	// Копия развязывает владение с хостом: он блитит асинхронно, а канвас
 	// оверлея переиспользуется следующими кадрами.
 	out := image.NewRGBA(oc.back.Rect)

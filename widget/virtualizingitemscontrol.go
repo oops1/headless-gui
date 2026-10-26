@@ -298,7 +298,7 @@ func (v *VirtualizingItemsControl) Draw(ctx DrawContext) {
 	content := image.Rect(b.Min.X, b.Min.Y, b.Min.X+cw, b.Max.Y).Intersect(outer)
 	for _, child := range v.Children() {
 		ctx.SetClip(content)
-		child.Draw(ctx)
+		DrawTraced(child, ctx)
 	}
 	ctx.SetClip(outer)
 

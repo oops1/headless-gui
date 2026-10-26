@@ -167,6 +167,8 @@ type Engine struct {
 	frameSeq atomic.Uint64
 	// stats — счётчики для Engine.Stats (stats.go).
 	stats    engineStats
+	// contract — проверка контракта отрисовки (drawcontract.go).
+	contract drawContract
 	started  atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
 	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
 
@@ -430,7 +432,9 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// каждом тике, а тик заявляет только свою область. Полная инвалидация на
 	// старте каждой анимации — переход цвета кнопки, выезд меню — перерисовывала
 	// бы весь экран ради того, что меняется в одной его части.
-	e.notifierHandle = widget.RegisterUINotifierWake(e.Invalidate, e.InvalidateRect, func() {})
+	// Приёмники проверяют контракт отрисовки, если он включён
+	// (drawcontract.go), и делают то же, что Invalidate/InvalidateRect.
+	e.notifierHandle = widget.RegisterUINotifierWake(e.onWidgetInvalidate, e.onWidgetInvalidateRect, e.onWidgetAnimation)
 	e.moveHandle = widget.RegisterMoveSink(e.noteMove)
 	// Точный замер текста для компоновки до отрисовки (размеры диалогов).
 	//
@@ -1156,6 +1160,9 @@ func (e *Engine) Stop() {
 		return
 	}
 	widget.UnregisterUINotifier(e.notifierHandle)
+	// Учёт рисующихся виджетов общий на процесс: остановленный движок,
+	// включивший проверку контракта, не должен держать его включённым у всех.
+	e.SetDrawContractCheck(false)
 	widget.UnregisterMoveSink(e.moveHandle)
 	widget.UnregisterTextMeasurer(e.measurerHandle)
 	svg.UnregisterTextRasterizer(e.svgTextHandle)
@@ -1790,8 +1797,11 @@ func (e *Engine) renderFrame() output.Frame {
 	// Корневое дерево: рисуем root и его overlay-слой (popup/dropdown).
 	// Без этого вызова на канвасе остаётся только blitBackground —
 	// именно сюда «уехал» баг с чёрным экраном при последнем appendF.
+	// Отсюда и до диффа рисуют виджеты: уведомление от них на этой горутине —
+	// нарушение контракта отрисовки (drawcontract.go).
+	e.beginDrawContract()
 	if root != nil {
-		root.Draw(canvas)
+		widget.DrawTraced(root, canvas)
 		drawOverlays(root, canvas, hosted)
 	}
 
@@ -1812,7 +1822,7 @@ func (e *Engine) renderFrame() output.Frame {
 			canvas.FillRectAlpha(0, 0, lw, lh, dim)
 		}
 		// Отрисовка модального виджета
-		m.Draw(canvas)
+		widget.DrawTraced(m, canvas)
 		drawOverlays(m, canvas, hosted)
 	}
 
@@ -1825,6 +1835,7 @@ func (e *Engine) renderFrame() output.Frame {
 
 	// Всплывающая подсказка (поверх всего, включая модальные диалоги).
 	e.drawTooltip(canvas, root)
+	e.endDrawContract()
 
 	// Переносы применяются к ПЕРЕДНЕМУ буферу до диффа: он приводится в то
 	// состояние, в котором окажется буфер потребителя после копирования, и
@@ -1911,7 +1922,7 @@ func drawOverlaysAt(w widget.Widget, ctx widget.DrawContext, hosted bool, off im
 	}
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
 		if !hosted || !isHostedOverlay(w) {
-			od.DrawOverlay(widget.OffsetContext(ctx, off.X, off.Y))
+			widget.DrawOverlayTraced(w, od, widget.OffsetContext(ctx, off.X, off.Y))
 		}
 	}
 	children := w.Children()

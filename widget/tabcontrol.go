@@ -492,7 +492,7 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 	// Рисуем содержимое активной вкладки
 	if active >= 0 && active < len(tabs) && tabs[active].Content != nil {
 		restore := PushClip(ctx, cr)
-		tabs[active].Content.Draw(ctx)
+		DrawTraced(tabs[active].Content, ctx)
 		restore()
 	}
 

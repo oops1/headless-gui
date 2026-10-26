@@ -286,7 +286,7 @@ func (t *SystemTray) drawOverflow(ctx widget.DrawContext, r image.Rectangle) {
 			break // не влезло — лучше не показать, чем нарисовать поверх края
 		}
 		it.SetBounds(cellRect)
-		it.Draw(ctx)
+		widget.DrawTraced(it, ctx)
 		paintFocusOf(ctx, it, t.tm, t.style(ComponentTrayOverflow, theme.StateNormal), image.Rectangle{})
 	}
 }
