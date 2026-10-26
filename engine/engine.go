@@ -165,6 +165,8 @@ type Engine struct {
 	pendingMoves []widgetMove
 
 	frameSeq atomic.Uint64
+	// stats — счётчики для Engine.Stats (stats.go).
+	stats    engineStats
 	started  atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
 	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
 
@@ -1668,6 +1670,7 @@ func (e *Engine) loop() {
 				// изменений: иначе статичный интерфейс остался бы у
 				// потребителя неверным (fullframe.go).
 				if gen == lastGen && !e.animationNeeded(interval) && !e.fullFramePending() {
+					e.stats.skipped.Add(1)
 					continue // UI не менялся — пропускаем кадр целиком
 				}
 				lastGen = gen // снимаем ДО рендера: инвалидация во время кадра не потеряется
@@ -1696,6 +1699,8 @@ func (e *Engine) renderFrame() output.Frame {
 	// больше не блокируются.
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
+	e.stats.frames.Add(1)
+	drawStart := time.Now()
 
 	e.mu.RLock()
 	canvas := e.canvas
@@ -1834,6 +1839,9 @@ func (e *Engine) renderFrame() output.Frame {
 	// При полном кадре объявления просто отбрасываются: потребитель и так
 	// получает всё заново, а оставшись, они достались бы следующему кадру.
 
+	diffStart := time.Now()
+	e.stats.drawNs.Add(uint64(diffStart.Sub(drawStart)))
+
 	// Diff: при частичной перерисовке сравниваем только тайлы,
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
@@ -1874,6 +1882,9 @@ func (e *Engine) renderFrame() output.Frame {
 		Height:    canvas.H,
 	}
 	fr.AttachSlabs(canvas.takeSlabs()...)
+	e.stats.diffNs.Add(sinceNanos(diffStart))
+	e.stats.tiles.Add(uint64(len(tiles)))
+	e.stats.moves.Add(uint64(len(moves)))
 	return fr
 }
 

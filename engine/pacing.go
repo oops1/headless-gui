@@ -14,6 +14,8 @@
 package engine
 
 import (
+	"time"
+
 	"github.com/oops1/headless-gui/v3/output"
 )
 
@@ -104,6 +106,8 @@ func (e *Engine) takeFrameRequest() bool {
 // уйдёт полным (fullframe.go) — разности после потерянного кадра потребитель
 // наложил бы на картинку, которой у него нет.
 func (e *Engine) deliver(frame output.Frame) {
+	start := time.Now()
+	defer func() { e.stats.deliver.Add(sinceNanos(start)) }()
 	if s := e.getFrameSink(); s != nil {
 		// Что сток сделает с Data, неизвестно: буферы кадра закреплены и в
 		// пул не вернутся (SetFrameRecycling).
@@ -115,6 +119,7 @@ func (e *Engine) deliver(frame output.Frame) {
 	default:
 		// Потребитель не успевает — кадр теряется, но не молча.
 		e.lostFrame.Store(true)
+		e.stats.lost.Add(1)
 		frame.Release() // никто его не увидит — буфер сразу в пул
 	}
 }

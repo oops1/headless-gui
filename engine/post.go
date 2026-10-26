@@ -47,6 +47,7 @@ func (e *Engine) Post(fn func()) {
 	e.postMu.Lock()
 	e.posted = append(e.posted, fn)
 	e.postMu.Unlock()
+	e.stats.posted.Add(1)
 
 	// Будим цикл при ЛЮБОМ темпе — но НЕ инвалидируем: Post сам по себе не
 	// повод перерисовывать экран, а вот выполнить работу пора. При внешнем
@@ -73,6 +74,8 @@ func (e *Engine) runPosted() {
 	e.postMu.Unlock()
 
 	for _, fn := range queue {
+		// До вызова: функция, упавшая посреди работы, из очереди уже ушла.
+		e.stats.postedRun.Add(1)
 		fn()
 	}
 }
