@@ -4169,8 +4169,9 @@ the default and byte-for-byte what shipped before.
 `SetSurface` hands the engine the consumer's own memory as the back buffer,
 removing two copies of the frame. `stride` may exceed `w*4` (DIB alignment).
 The **front** buffer stays internal — the diff needs a private copy of the
-previous frame to compare against. Buffer rotation (`SetSurfaces` with
-per-buffer damage age, the equivalent of `EGL_buffer_age`) is not implemented.
+previous frame to compare against. Buffer rotation (several consumer buffers
+with per-buffer damage, the equivalent of `EGL_buffer_age`) is `SetSurfaces`
+in v4.0 — see "scene and external surfaces" at the end of this reference.
 
 `DirtyTile.Data` follows the chosen format: with `FormatBGRX` those bytes are
 BGRX, which is what the caller asked for.
@@ -10130,9 +10131,108 @@ widget.VideoCandidates() int        // surfaces currently tracked (update recent
   larger shadows from the template (9-slice). Up to 64 templates per canvas, least recently used
   evicted. `SetShadowCache(false)` restores the direct blur.
 - **Moves.** `Window` announces a move with its `DrawMargin` included (`notifyMoved`).
-- **Not implemented yet.** `SetSurfaces`, `ReleaseSurface`, `Frame.Surface` (task 2.4);
-  a `ShadowCaster` interface (2.5 uses `DrawShadow` directly); the `core/scene` package
-  (stage 7); the WinLine session pilot (2.11). RAIL is outside the scene.
+- **Output buffers.** `Engine.SetSurfaces(bufs [][]byte, stride int, f PixelFormat) error`
+  takes 2–4 consumer buffers of one size and format; the engine draws into a free one and
+  reports it in `Frame.Surface` (numbered from 1; 0 — own or single buffer).
+  `ReleaseSurface(n)` returns a buffer; `Surfaces()` reports the count. With no free buffer the
+  frame is skipped (`Stats.FramesSkipped`) and damage is kept; before drawing, the engine copies
+  from front into the buffer the areas changed while the consumer held it (up to 64 rects, then
+  their bounding box), except what this frame redraws anyway. A resolution or scale change drops
+  the set. One buffer — the old `SetSurface`.
+- **Frames without tile bytes.** `Engine.SetFrameTileData(false)` / `FrameTileData()`: tiles are
+  change locations with `Data == nil`; front is synchronized as before.
+- **BGRA buffers.** `ExternalSurface.SetBGRA(on)`: the buffer's bytes are B,G,R,A (`wl_shm`
+  ARGB8888, Windows DIB); on a `FormatBGRX` canvas its rows are copied as is.
+  `widget.BlitPixelsBGRA` / `PixelBlitterBGRA` for custom contexts.
+- **Overlapping damage** is merged before the diff (one area per overlapping group).
+- **Not implemented yet.** A `ShadowCaster` interface (2.5 uses `DrawShadow` directly); the
+  `core/scene` package (stage 7). The WinLine session runs on the scene behind a switch. RAIL is
+  outside the scene.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): UI scale at a fixed frame size
+
+```go
+eng.SetScaleWithin(k float64)              // keep physical W×H, logical = ⌈W/k⌉×⌈H/k⌉
+eng.SetPhysicalResolution(pw, ph int)      // change the frame size, keep the scale; turns the mode on
+eng.ScaleWithin() bool                     // the mode is on
+```
+
+- `SetScale(k)` keeps the logical size and grows the physical one (OS-window HiDPI).
+  `SetScaleWithin` is the opposite, for a frame size dictated from outside (remote desktop).
+- In the mode, `SetScale` also keeps the physical size; `SetResolution` (logical) leaves the mode.
+- k ≤ 0 means 1. The canvas is recreated: `SetSurface`/`SetSurfaces` buffers must be set again,
+  sized to `PhysicalSize()`.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): engine motion profile
+
+```go
+type MotionProfile = theme.MotionProfile  // MotionFull, MotionReduced, MotionOff, MotionRemote
+eng.SetMotionProfile(p MotionProfile)     // any goroutine, on the fly; unknown value → MotionFull
+eng.MotionProfile() MotionProfile
+const RemoteMotionSteps = 3               // states per transition under MotionRemote
+```
+
+- `MotionReduced` — like `theme.FlagMotionReduce` but per engine: `widget.MotionDur` and
+  `theme.Manager.GetAnimation` give reduced durations. `MotionOff` — functional animations are
+  zero too, and `stepAnimations` finishes any non-loop animation with a tick on its next step
+  (loops and tick-less timers run). `MotionRemote` — durations unchanged, progress quantized to
+  `RemoteMotionSteps` per phase, the same step is never ticked twice.
+- The profile is found by goroutine: `widget.BindAnimationLoop(e)` on the engine loop; input entry
+  points, `renderFrame` and the `Post` queue of a non-started engine bind the calling goroutine
+  while any engine has a non-Full profile. `widget.CurrentMotionProfile()`,
+  `theme.CallerMotionProfile()`; `theme.(*Theme|*Manager).ReducesMotion()` = theme flag OR profile
+  Reduced/Off (`MotionReduced()` stays the flag only).
+- `Animation.Clock` — a tick that measures time (scroll inertia, attention blink): never
+  quantized or finished early. Scroll wheel under `MotionOff`/`MotionRemote` scrolls at once.
+- `window` modal and dock hosts copy the parent engine's profile on creation.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): overlay and popup transitions
+
+```go
+eng.SetOverlayTransitions(on bool)        // off by default; OverlayTransitions()
+eng.SetPopupFade(on bool)                 // the popup host understands PopupFrame.Transition; PopupFade()
+
+type PopupFrame struct { ID uintptr; Rect image.Rectangle; Img *image.RGBA; Transition *PopupTransition }
+type PopupTransition struct {
+	Opacity float64     // 0…1, whole window
+	Offset  image.Point // logical points from Rect
+	Closing bool        // overlay already closed: keep the window while the ID is in frames, no input
+}
+```
+
+- Tokens: `theme.AnimMenuOpen` (`menu.open`), `theme.AnimMenuClose` (`menu.close`, falls back to
+  `menu.open`), metric `theme.KeyMenuOpenOffset` (`menu.open.offset`). The theme comes from the
+  engine's last `ApplyThemeProfile`/`SetThemeProfile`; without it there are no transitions.
+- In-canvas overlays (`OverlayDrawer` + `OverlayBoundsProvider`): a pair of snapshots of the
+  overlay area (plus `widget.DefaultOverlayMargin()` or `OverlayMarginer.OverlayMargin()`), taken
+  only from a fully redrawn area; a step blends them (mask = pixels the overlay touched, plus
+  `OverlayRects`/`OverlayBounds` as opaque). A step with no other damage is a frame that blends into
+  the buffer and diffs only that area — unless the transition is under a modal layer or overlaps
+  another overlay or the tooltip, then the step declares damage. The final frame is drawn directly.
+  Closing is detected when the owner is met with `HasOverlay() == false`; an owner gone from the
+  tree removes the overlay at once.
+- Opt-outs and hints: `widget.SelfAnimatedOverlay` (`desktop.Flyout`), `widget.OverlayMarginer`,
+  `widget.OverlayAnchorer` (`PopupMenu.OverlayAnchor()` = the `Show` point; a menu above it slides
+  up).
+- Hosted popups need both switches: `SetOverlayTransitions(true)` and `SetPopupFade(true)` (the
+  `window` package sets the latter for its popup hosts, so an application turns on only the
+  former). The same cached `Img` comes with `Transition` on every step; steps reach only
+  `renderPopups`. `window.popupHost` applies it with an idempotent `reconcile` (order-independent):
+  Win32 popups are `WS_EX_LAYERED` (`SetLayeredWindowAttributes`, alpha set before show); X11 with
+  a 32-bit visual and compositor blits a premultiplied copy × opacity; otherwise (and on Wayland,
+  `childPopups`) the window shows at once and a `Closing` popup is closed at once. Input over a
+  closing popup is forwarded at its current position.
+- Motion tokens of the built-in profiles (ms; closing and panels out-cubic; Windows 2000 declares
+  them all as 0): `menu.open` 200 out-back / 150 / 180; `menu.close` 120 / 100 / 150;
+  `submenu.open` 150 / 120 / 120; `start.open` 250 / 200 / 200; `flyout.open` 200 / 150 / 180 for
+  Windows 11 / Windows 10 / macOS. `desktop.StartMenu` uses `start.open` → `flyout.open` →
+  `menu.open`, other flyouts `flyout.open` → `menu.open` (`theme.Manager.GetAnimationFirst`).
+  `PopupMenu.SubMenuFade` / `SubMenuFadeCurve` come from `submenu.open` (`MenuStyle.SubMenuOpenMS`).
+- Soft shadows under `shadow.soft` (`shadow.color` token): Windows 11 popups blur 20 / offset 8,
+  window and dialog 32 / 12; Windows 10 8 / 4 and 16 / 6; macOS 16 / 6 and 28 / 10; Windows 2000
+  none.
+- **Not implemented yet.** Popup window transitions on Wayland (single popup buffer); a separate
+  engine-level transition for submenus; tooltips and modals by the same mechanism.
 
 ## End of Reference
 

@@ -2774,6 +2774,10 @@ the integer scale of the output the window is shown on; it may change on the
 fly. On macOS, and on top of any detection, the scale is set by the
 `HEADLESS_GUI_SCALE=1.5` environment variable.
 
+`SetScale` keeps the logical size and grows the physical one. When the frame size
+is set from outside (a remote desktop client) and the UI should be larger, see
+"UI scale at a fixed frame size" (v4.0).
+
 ### Composition input (IME)
 
 Chinese, Japanese and Korean are not typed letter by letter: a person types
@@ -3474,9 +3478,10 @@ open in **their own OS windows** rather than being drawn inside the main window:
   a regular one) forms a stack of windows.
 - **Dropdowns and menus** open in a small window at the target point and are
   **not clipped** by the main window's edge.
-- Works natively on **Windows (Win32)** and **Linux (X11)**. On **Wayland,
-  macOS and headless** it falls back to the previous behavior: everything is
-  drawn into the canvas (functionally identical, just within the window).
+- Works natively on **Windows (Win32)** and **Linux (X11)**; menus and dropdowns on
+  **Wayland** are `xdg_popup` child popups (since v3.28). Modal dialogs on Wayland, and
+  everything on **macOS and headless**, use the old fallback: drawn into the canvas
+  (functionally identical, just within the window).
 
 ```go
 dlg := widget.NewDialog("Settings", 1000, 700) // may be larger than the window
@@ -4874,7 +4879,9 @@ get zero or at most the metric `theme.KeyMotionReduceFunctionalMS`. A consumer
 classifies its own animation with `theme.RegisterAnimationKind(key,
 theme.AnimFunctional)`; widgets with their own durations wrap them in
 `widget.MotionDur(d)`. Timers (tooltip delays, the clock, the caret) are not
-touched.
+touched. The same mode for one engine instead of the whole process, plus two
+more — no motion and remote desktop — is set by `Engine.SetMotionProfile` (see
+"Engine motion profile", v4.0).
 
 **Different DPI on two monitors.** The engine has one scale per canvas:
 `Engine.SetScale(k)` grows the physical buffers, fonts and vector icons are
@@ -5589,10 +5596,143 @@ panel.RaiseChild(surf)                       // raise above the siblings; LowerC
 - **Window move.** A move is announced together with the shadow margin, so the shadow of a
   dragged window moves as a copy, not as tiles.
 
-**Not there yet.** Several output buffers and `ReleaseSurface` (task 2.4); a separate
-`ShadowCaster` interface (the window draws its own shadow); the `core/scene` package
-(stage 7); moving the WinLine session onto the scene (task 2.11). RemoteApp windows (RAIL) are
-not part of the scene.
+- **Your own output buffers.** `Engine.SetSurfaces(bufs, stride, format)` takes two to
+  four consumer buffers of one size: the engine draws the frame straight into a free one
+  and names it in `Frame.Surface` (from one; 0 means the engine's own or the only buffer).
+  A buffer handed to the consumer comes back with `ReleaseSurface(n)`; with none free the
+  frame is skipped (`Stats.FramesSkipped`) and the damage is kept. Before a frame the
+  engine copies into the buffer what changed while the consumer held it. A resolution or
+  scale change drops the set — set it again.
+- **Frames without tile bytes.** A consumer that reads pixels from its own buffers does not
+  need tile copies in the frame: `Engine.SetFrameTileData(false)` leaves `Frame.Tiles` as
+  change locations only (`Data == nil`).
+- **B,G,R,A buffers.** `ExternalSurface.SetBGRA(true)` — a `wl_shm` or DIB buffer goes onto
+  a `FormatBGRX` canvas without swapping channels.
+
+**Not there yet.** A separate `ShadowCaster` interface (the window draws its own shadow);
+the `core/scene` package (stage 7). The WinLine session runs on the scene behind a switch;
+the old path is not removed yet. RemoteApp windows (RAIL) are not part of the scene.
+
+### UI scale at a fixed frame size (v4.0, in progress)
+
+`SetScale(k)` keeps the logical canvas size and grows the physical one: a 1280×800
+window at 1.5 is drawn at 1920×1200 — that is how HiDPI works for an OS window. A
+remote desktop client needs the opposite: the frame size is set by the connection,
+and the user wants a larger UI.
+
+```go
+eng := engine.New(1920, 1080, 60)
+eng.SetScaleWithin(1.5)          // frame 1920×1080, scene 1280×720 logical points
+eng.SetPhysicalResolution(2560, 1440) // the client changed resolution — same scale
+eng.ScaleWithin()                // true: "scale within the frame" mode
+```
+
+- **Logical size** is ⌈W/k⌉×⌈H/k⌉, rounded up so the scene covers the whole frame.
+  `CanvasSize()` returns it, `PhysicalSize()` returns the frame size.
+- **The mode sticks.** `SetScale` in it also keeps the physical size;
+  `SetPhysicalResolution` changes the frame without touching the scale and turns the mode
+  on by itself; a plain `SetResolution` (logical size) leaves the mode.
+- **Everything else is as with `SetScale`.** Events arrive in physical pixels and are
+  divided by the scale, damage and frames are physical, `ExternalSurface` places its buffer
+  1:1. `SetSurfaces` buffers are sized to the physical size and must be set again after a
+  scale change.
+
+### Engine motion profile (v4.0, in progress)
+
+"Reduced motion" (`theme.FlagMotionReduce`) is a theme setting, which means it applies to
+the whole process. The motion profile belongs to one engine: a remote session and the
+local screen of one process live with different ones, and what decides is where the frame
+goes.
+
+```go
+eng.SetMotionProfile(engine.MotionRemote) // MotionFull, MotionReduced, MotionOff, MotionRemote
+eng.MotionProfile()
+```
+
+- **`MotionReduced`** — like the theme flag, but for this engine: decorative animations
+  are instant, functional ones are shortened.
+- **`MotionOff`** — no motion: functional animations are instant too, and a non-looping
+  animation, however it was started, is finished on its next step. Looping ones (activity
+  indicators) and timers keep running.
+- **`MotionRemote`** — durations as declared, but no more than `engine.RemoteMotionSteps`
+  (3) intermediate states: every animation frame goes over the network.
+- **The theme flag and the profile combine:** motion is reduced if either wants it. A
+  component that decides on its own asks `theme.Manager.ReducesMotion()`; `MotionReduced()`
+  is the theme flag only.
+- **How the engine knows its profile.** By goroutine: the loop, `Post`, animation ticks,
+  and — while any engine's profile is not `MotionFull` — a foreign goroutine while the
+  engine works on it (input, `RenderOnce`, `RenderFrameNow`). `widget.MotionDur`,
+  `Manager.GetAnimation` and `widget.CurrentMotionProfile()` see it.
+- **Clock animations.** An animation whose tick measures time rather than drives a
+  transition (scroll physics, blinking) is marked `a.Clock = true`: the profile neither
+  quantizes it nor finishes it early.
+- **Secondary windows** (modal dialog, floating panel) get the parent's profile when they
+  are created.
+
+For WinLine: the remote session is `MotionRemote`, a client without menu animations is
+`MotionOff`, the local screen is `MotionFull`.
+
+### Menu and popup transitions (v4.0, in progress)
+
+Menus, dropdown lists, colour pickers and date-picker calendars appear and disappear with a
+fade and a slide from their anchor. One call turns it on; duration and curve come from the
+theme applied with `ApplyThemeProfile` or `SetThemeProfile`.
+
+```go
+eng.ApplyThemeProfile(tm)          // a theme with menu.open, menu.close tokens
+eng.SetOverlayTransitions(true)    // off by default
+```
+
+- **How it works.** The engine snapshots the overlay area (with room for the shadow) before
+  and after `DrawOverlay` and blends the snapshots by progress. While nothing lies over the
+  transition (top layer, no overlap with the tooltip or other overlays), steps redraw
+  neither the tree nor `DrawOverlay`; otherwise a step redraws the area layer by layer. The
+  last frame is the overlay drawn directly, byte for byte. If the tree under the menu
+  changes mid-transition, the snapshots are refreshed.
+- **Disappearing.** The widget turns the overlay off at once, but on screen it still fades
+  out: in its own place in the drawing order, it no longer gets input, and video under it
+  does not land on top. Reopening mid-fade continues from the current value.
+- **The slide** is the metric `theme.KeyMenuOpenOffset` (`menu.open.offset`, 8 points in
+  Windows 11): a menu below its anchor slides in from above, one above it from below
+  (`widget.OverlayAnchorer`; `PopupMenu` reports its `Show` point).
+- **Motion profile.** `MotionReduced` and `MotionOff` — no transitions, `MotionRemote` —
+  three steps.
+- **OS popup windows** (`SetPopupSink`) transition by window opacity and position:
+  `PopupFrame.Transition` carries `Opacity`, `Offset` and `Closing`, and a host that
+  declares `Engine.SetPopupFade(true)` keeps the window of a disappearing menu until the
+  transition ends. `window.Window` and the dialog and panel hosts declare it themselves.
+  Win32 — whole-window opacity (a layered window); X11 with a compositor — a copy of the
+  frame with a multiplier; X11 without a compositor and Wayland — no transition: the window
+  appears and disappears at once.
+- **Your own overlay** only needs `OverlayBounds` (`widget.OverlayBoundsProvider`): without
+  it the overlay is drawn at once, with no transition. One that animates itself
+  (`desktop.Flyout`) opts out with `widget.SelfAnimatedOverlay`; a shadow reaching further
+  than usual past `OverlayBounds` is reported by `widget.OverlayMarginer`.
+- **Submenus** fade in by themselves (`PopupMenu.SubMenuFade` from the `submenu.open`
+  token): to the engine a cascade is one overlay.
+
+Motion and soft shadow tokens of the built-in profiles (shadows under the `shadow.soft`
+flag):
+
+| key | Windows 11 | Windows 10 | macOS | Windows 2000 |
+|---|---|---|---|---|
+| `menu.open` | 200 ms out-back | 150 ms out-cubic | 180 ms out-cubic | 0 |
+| `menu.close` | 120 ms | 100 ms | 150 ms | 0 |
+| `submenu.open` | 150 ms | 120 ms | 120 ms | 0 |
+| `start.open` | 250 ms | 200 ms | 200 ms | 0 |
+| `flyout.open` | 200 ms | 150 ms | 180 ms | 0 |
+| menu and panel shadow | blur 20, offset 8 | 8 and 4 | 16 and 6 | flat, no tokens |
+| window and dialog shadow | 32 and 12 | 16 and 6 | 28 and 10 | — |
+
+Closing and panel curves are out-cubic. An undeclared key takes a fallback: `menu.close` —
+`menu.open`; the Start menu — `start.open`, `flyout.open`, then `menu.open`; other panels —
+`flyout.open`, then `menu.open` (`theme.Manager.GetAnimationFirst`). All keys are
+decorative: "reduced motion" zeroes them.
+
+**Not there yet.** Popup window transitions on Wayland (a popup has one buffer, and a
+dropped frame would leave it half-transparent) and an X11 check on a test machine; a
+separate engine-level transition for submenus; tooltip and modal transitions by the same
+mechanism.
 
 ## Module Structure
 
