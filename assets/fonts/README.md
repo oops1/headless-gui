@@ -111,7 +111,7 @@ eng.RegisterFontFile("Roboto", "assets/fonts/Roboto-Regular.ttf")
   кириллица, греческий, псевдографика, стрелки, ✓ ✗ ⚠. Движок берёт
   `DejaVuSans.ttf` и `DejaVuSansMono.ttf` из этой папки ещё и как **fallback**
   к основному шрифту, если системных шрифтов на машине не нашлось
-  (см. `assetFallbackFontPaths` в `engine/font.go`). Оттого их имена менять нельзя.
+  (см. `AssetFallbackFontPaths` в `core/text/font.go`). Оттого их имена менять нельзя.
 
 Начертания Bold/Italic здесь — самостоятельные именованные шрифты: XAML
 `FontWeight`/`FontStyle` переключают только встроенные Go-шрифты, жирный

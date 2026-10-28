@@ -4835,7 +4835,7 @@ With neither (or a context that cannot do Mica) the layer is a plain
 `BackdropSpec.Fallback`, the theme colour. The blurred wallpaper is computed
 once per "wallpaper + radius"; afterwards a layer is a row copy and does not
 depend on the previous frame, so a partial redraw equals a full one
-(`engine/mica.go`, unlike acrylic, which needs `backdropdamage.go`).
+(`core/raster/mica.go`, unlike acrylic, which needs `backdropdamage.go`).
 
 The Windows 11 profile stays solid by default (Mica is expensive over remote
 desktop when windows move: a large smooth area changes on every move). The

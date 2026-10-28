@@ -35,7 +35,7 @@ Software renderer, fully on CPU (Intel Core Ultra 7 265K, single engine):
 | Text line, 40 glyphs (cached) | ~13 µs / shaped Arabic ~3 µs |
 | Full-HD tile diff (no changes, parallel) | ~110 µs |
 
-Run `go test ./engine/ -bench .` to reproduce.
+Run `go test ./engine/ ./core/raster/ -bench .` to reproduce.
 
 **AVX2 build (optional).** Built with `GOEXPERIMENT=simd` on Go 1.27+ (amd64), the hottest pixel loops — mask blending for text and AA shapes, translucent fills, channel swap on present, backdrop blur — run on AVX2: the full frame gets ~39 % cheaper, presenting a 1080p frame 2.9× faster, `BlurRGBA` 8.4× faster. Output is bit-identical to the scalar path, and the vector set is chosen at startup only if the CPU has AVX2 and passes a self-test; otherwise — or with `HEADLESS_GUI_NOSIMD=1` — the scalar path runs. Details: [GUIDE_EN.md](GUIDE_EN.md), "Vector kernels".
 
