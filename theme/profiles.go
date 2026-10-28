@@ -638,6 +638,8 @@ func Windows11Profile() *Profile {
 	p.Fonts["default"] = FontSpec{Size: 9}
 	p.Anims["hover"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}
 	p.Anims["menu.open"] = AnimSpec{Duration: 200 * time.Millisecond, Curve: "out-back"}
+	// Меню Windows 11 выезжает от точки привязки, а не только проявляется.
+	p.SetMetric(KeyMenuOpenOffset, 8)
 	p.Anims["window.open"] = AnimSpec{Duration: 250 * time.Millisecond, Curve: "out-cubic"}
 	p.Anims["taskbar.item"] = AnimSpec{Duration: 180 * time.Millisecond, Curve: "out-cubic"}
 

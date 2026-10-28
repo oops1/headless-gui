@@ -486,6 +486,12 @@ func (f *Flyout) OverlayBounds() image.Rectangle {
 // HasOverlay реализует widget.OverlayDrawer.
 func (f *Flyout) HasOverlay() bool { return f.visible() && !f.restRect().Empty() }
 
+// AnimatesOverlay реализует widget.SelfAnimatedOverlay: выезд и проявление
+// панель ведёт сама (flyoutmotion.go), переход движка к ней не применяется.
+func (f *Flyout) AnimatesOverlay() bool { return true }
+
+var _ widget.SelfAnimatedOverlay = (*Flyout)(nil)
+
 // DrawOverlay рисует подложку по стилю темы и отдаёт содержимому остальное.
 //
 // В покое — как всегда. Пока панель появляется или исчезает, она рисуется со

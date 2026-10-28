@@ -27,7 +27,7 @@ import (
 // Имена анимаций темы, которыми пользуются компоненты рабочего стола.
 const (
 	// AnimMenuOpen — появление и исчезновение всплывающей панели (Flyout).
-	AnimMenuOpen theme.Key = "menu.open"
+	AnimMenuOpen = theme.AnimMenuOpen
 	// AnimWindowOpen — появление окна.
 	AnimWindowOpen theme.Key = "window.open"
 	// AnimHover — переход цвета при наведении и нажатии.

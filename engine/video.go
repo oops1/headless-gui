@@ -42,6 +42,8 @@ func (e *Engine) collectVideos(canvas *Canvas, root widget.Widget, modals []widg
 	}
 	// Над всеми окнами лежат открытые меню и модальное окно.
 	e.overBuf = collectOverlayRects(root, image.Point{}, 0, e.overBuf[:0])
+	// Исчезающие оверлеи ещё видны (overlaytrans.go).
+	e.overBuf = e.ovtCovers(e.overBuf)
 	lw, lh := canvas.LogicalSize()
 	for _, m := range modals {
 		if !m.IsModal() {

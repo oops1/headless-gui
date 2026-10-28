@@ -221,6 +221,11 @@ type Engine struct {
 	recycleFrames atomic.Bool
 	// noTileData — кадр без байтов тайлов (SetFrameTileData).
 	noTileData atomic.Bool
+	// ovt — переходы оверлеев (overlaytrans.go); themeMgr — менеджер тем
+	// последнего ApplyThemeProfile/SetThemeProfile: из него переходы берут
+	// токен theme.AnimMenuOpen.
+	ovt      overlayTransitions
+	themeMgr atomic.Pointer[theme.Manager]
 	// motion — профиль движения (MotionProfile, motionprofile.go);
 	// motionCounted — движок учтён в motionEngines.
 	motion        atomic.Uint32
@@ -1090,6 +1095,7 @@ func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
 		return err
 	}
 	widget.SetReduceMotion(m.MotionReduced())
+	e.themeMgr.Store(m)
 	e.SetTheme(widget.Materialize(m.Active()))
 	return nil
 }
@@ -1797,6 +1803,34 @@ func (e *Engine) renderFrame() output.Frame {
 	if full {
 		damageAll = true
 	}
+
+	// Модальные виджеты кадра — снимок списка (затемнение и диалоги рисуются
+	// после дерева; переходам оверлеев нужен порядок слоёв уже здесь).
+	e.modMu.Lock()
+	modals := make([]widget.ModalWidget, len(e.modals))
+	copy(modals, e.modals)
+	e.modMu.Unlock()
+
+	// Переходы оверлеев (overlaytrans.go): область перехода, задетая
+	// повреждением, перерисовывается целиком; шаги без повреждения идут
+	// смешением снимков, без отрисовки дерева.
+	//
+	// Флаг читается раз на кадр: SetOverlayTransitions с другой горутины не
+	// должен застать кадр на полпути. Выключенные, но не снятые переходы
+	// снимаются здесь же (ovtPrepare).
+	var ovtSteps []image.Rectangle
+	var layers []widget.Widget
+	ovtOn := e.ovt.on.Load()
+	if ovtOn || len(e.ovt.list) > 0 {
+		layers = ovtLayers(root, modals)
+		damageRects, ovtSteps = e.ovtPrepare(canvas, damageRects, damageAll, layers, ovtOn)
+		if !damageAll {
+			damageRects = mergeOverlaps(damageRects)
+		}
+	}
+	if len(ovtSteps) > 0 && !damageAll && len(damageRects) == 0 && e.onDemand.Load() {
+		return e.renderStepFrame(canvas, root, modals, surface, ovtSteps, drawStart)
+	}
 	// Объединение нужно там, где область может быть только одна: клип
 	// канваса — прямоугольник, и попапы отбираются по одному прямоугольнику.
 	damage := unionRects(damageRects)
@@ -1846,6 +1880,11 @@ func (e *Engine) renderFrame() output.Frame {
 	if partial {
 		damage = damage.Intersect(image.Rect(0, 0, canvas.W, canvas.H))
 		if damage.Empty() {
+			if len(ovtSteps) > 0 {
+				// Повреждение целиком за краем холста, а шаги переходов —
+				// на нём: их нельзя потерять, последний шаг не повторится.
+				return e.renderStepFrame(canvas, root, modals, surface, ovtSteps, drawStart)
+			}
 			return output.Frame{Seq: e.frameSeq.Add(1), Timestamp: time.Now(), Width: canvas.W, Height: canvas.H}
 		}
 		// Сброс признаков — ДО блита фона: фон помечает тайлы, которые
@@ -1860,6 +1899,9 @@ func (e *Engine) renderFrame() output.Frame {
 		canvas.resetTileMarks(image.Rect(0, 0, canvas.W, canvas.H))
 		canvas.blitBackground()
 	}
+	if ovtOn {
+		e.ovtBeginFrame(!partial, damage, layers)
+	}
 
 	// Активен ли хост попапов: если да — оверлеи с OverlayBounds не рисуются
 	// в холст (они уходят в собственные окна-попапы, см. renderPopups ниже).
@@ -1873,15 +1915,10 @@ func (e *Engine) renderFrame() output.Frame {
 	e.beginDrawContract()
 	if root != nil {
 		widget.DrawTraced(root, canvas)
-		drawOverlays(root, canvas, hosted)
+		e.drawOverlayLayer(root, canvas, hosted, ovtOn)
 	}
 
 	// Модальные виджеты: затемнение + диалог поверх всего
-	e.modMu.Lock()
-	modals := make([]widget.ModalWidget, len(e.modals))
-	copy(modals, e.modals)
-	e.modMu.Unlock()
-
 	for _, m := range modals {
 		if !m.IsModal() {
 			continue
@@ -1894,7 +1931,10 @@ func (e *Engine) renderFrame() output.Frame {
 		}
 		// Отрисовка модального виджета
 		widget.DrawTraced(m, canvas)
-		drawOverlays(m, canvas, hosted)
+		e.drawOverlayLayer(m, canvas, hosted, ovtOn)
+	}
+	if ovtOn {
+		e.ovtEndFrame()
 	}
 
 	// Хостируемые popup-оверлеи: рендерим их в отдельные буферы и отдаём хосту
@@ -1937,7 +1977,9 @@ func (e *Engine) renderFrame() output.Frame {
 	case full:
 		tiles = canvas.allTiles()
 	case partial:
-		tiles = canvas.diffAndSyncInRects(damageRects)
+		// Шаги переходов вне повреждения смешаны в буфер без перерисовки —
+		// их области сравниваются тоже.
+		tiles = canvas.diffAndSyncInRects(append(damageRects[:len(damageRects):len(damageRects)], ovtSteps...))
 	default:
 		tiles = canvas.diffAndSync()
 	}
@@ -1946,18 +1988,7 @@ func (e *Engine) renderFrame() output.Frame {
 
 	seq := e.frameSeq.Add(1)
 
-	if e.saveDir != "" && len(tiles) > 0 && e.saveAllowed() {
-		// Снимаем копию front-буфера СЕЙЧАС, пока он актуален.
-		snap := e.acquireSnap(canvas.front.Rect)
-		copy(snap.Pix, canvas.front.Pix)
-		path := filepath.Join(e.saveDir, fmt.Sprintf("frame_%06d.png", seq))
-		// Отправка блокирующая (все кадры сохраняются), но не переживает Stop:
-		// иначе при остановке с полным буфером рендер и Stop ждали бы друг друга.
-		select {
-		case e.saveCh <- saveJob{path: path, seq: seq, snap: snap}:
-		case <-e.quit:
-		}
-	}
+	e.saveFrame(canvas, seq, tiles)
 
 	fr := output.Frame{
 		Seq:       seq,
@@ -1974,6 +2005,53 @@ func (e *Engine) renderFrame() output.Frame {
 	e.stats.diffNs.Add(sinceNanos(diffStart))
 	e.stats.tiles.Add(uint64(len(tiles)))
 	e.stats.moves.Add(uint64(len(moves)))
+	return fr
+}
+
+// saveFrame отдаёт кадр на запись в PNG (SetSaveFrames), если он что-то
+// изменил.
+func (e *Engine) saveFrame(canvas *Canvas, seq uint64, tiles []output.DirtyTile) {
+	if e.saveDir != "" && len(tiles) > 0 && e.saveAllowed() {
+		// Снимаем копию front-буфера СЕЙЧАС, пока он актуален.
+		snap := e.acquireSnap(canvas.front.Rect)
+		copy(snap.Pix, canvas.front.Pix)
+		path := filepath.Join(e.saveDir, fmt.Sprintf("frame_%06d.png", seq))
+		// Отправка блокирующая (все кадры сохраняются), но не переживает Stop:
+		// иначе при остановке с полным буфером рендер и Stop ждали бы друг друга.
+		select {
+		case e.saveCh <- saveJob{path: path, seq: seq, snap: snap}:
+		case <-e.quit:
+		}
+	}
+}
+
+// renderStepFrame — кадр, в котором изменились только шаги переходов
+// оверлеев (overlaytrans.go): дерево не рисуется, снимки смешиваются прямо в
+// буфер, и сравниваются только их области.
+func (e *Engine) renderStepFrame(canvas *Canvas, root widget.Widget, modals []widget.ModalWidget,
+	surface int, steps []image.Rectangle, drawStart time.Time) output.Frame {
+	e.ovtStepOnly(canvas)
+	videos := e.collectVideos(canvas, root, modals)
+	diffStart := time.Now()
+	e.stats.drawNs.Add(uint64(diffStart.Sub(drawStart)))
+	canvas.recycle = e.recycleFrames.Load()
+	canvas.noTileData = e.noTileData.Load()
+	tiles := canvas.diffAndSyncInRects(steps)
+	seq := e.frameSeq.Add(1)
+	e.saveFrame(canvas, seq, tiles)
+	fr := output.Frame{
+		Seq:       seq,
+		Timestamp: time.Now(),
+		Tiles:     tiles,
+		Regions:   canvas.regionsFor(tiles),
+		Videos:    videos,
+		Width:     canvas.W,
+		Height:    canvas.H,
+	}
+	fr.AttachSlabs(canvas.takeSlabs()...)
+	e.surfaceFrameDone(surface, &fr, false)
+	e.stats.diffNs.Add(sinceNanos(diffStart))
+	e.stats.tiles.Add(uint64(len(tiles)))
 	return fr
 }
 

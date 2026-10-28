@@ -85,6 +85,9 @@ type PopupMenu struct {
 	geoMu          sync.Mutex
 	popupX, popupY int
 	popupW, popupH int
+	// anchor — точка, запрошенная в Show, до вписывания в область: меню,
+	// вписанное выше неё, раскрылось вверх (OverlayAnchor).
+	anchor image.Point
 	// Прокрутка длинного меню (под geoMu): пикселей содержимого над видимой
 	// частью, высота содержимого, включена ли прокрутка.
 	scroll, contentH int
@@ -341,6 +344,7 @@ func (m *PopupMenu) IsOpen() bool {
 // Позиция корректируется так, чтобы меню целиком помещалось в канвасе
 // (сдвиг влево/вверх у правого/нижнего края — меню не обрезается границей окна).
 func (m *PopupMenu) Show(x, y int) {
+	anchor := image.Pt(x, y)
 	// Закрываем предыдущее корневое контекстное меню (одно меню за раз).
 	if m.parent == nil {
 		activePopupMu.Lock()
@@ -401,11 +405,21 @@ func (m *PopupMenu) Show(x, y int) {
 	m.popupY = y
 	m.popupW = w
 	m.popupH = h
+	m.anchor = anchor
 	m.scroll, m.contentH, m.scrollable, m.scrollDir = 0, contentH, scrollable, 0
 	m.geoMu.Unlock()
 	atomic.StoreInt32(&m.hoverIdx, -1)
 	atomic.StoreInt32(&m.open, 1)
 	notifyUIChanged() // появление overlay-меню (вне bounds виджета)
+}
+
+// OverlayAnchor реализует widget.OverlayAnchorer: точка, запрошенная в Show.
+// Переход появления (engine.SetOverlayTransitions) выводит из неё, вверх
+// или вниз выезжает меню.
+func (m *PopupMenu) OverlayAnchor() image.Point {
+	m.geoMu.Lock()
+	defer m.geoMu.Unlock()
+	return m.anchor
 }
 
 // ShowBelow открывает popup-меню прямо под указанным виджетом.
