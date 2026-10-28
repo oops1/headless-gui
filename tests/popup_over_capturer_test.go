@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -74,6 +75,7 @@ func newMenuOverView(t *testing.T, items ...string) (*engine.Engine, *greedyView
 // TestPopupOverCapturer_ItemReceivesClick — пункт меню, лежащего над
 // виджетом с заявкой на захват, срабатывает.
 func TestPopupOverCapturer_ItemReceivesClick(t *testing.T) {
+	testreset.Globals(t)
 	eng, view, menu, pt, clicked := newMenuOverView(t, "Открыть", "Закрыть")
 
 	eng.SendMouseButton(pt.X, pt.Y, widget.MouseLeft, true)
@@ -93,6 +95,7 @@ func TestPopupOverCapturer_ItemReceivesClick(t *testing.T) {
 // TestPopupOverCapturer_ClickOutsideStillCaptures — клик МИМО меню работает
 // по-прежнему: захват достаётся виджету под курсором, меню гаснет.
 func TestPopupOverCapturer_ClickOutsideStillCaptures(t *testing.T) {
+	testreset.Globals(t)
 	eng, view, menu, _, clicked := newMenuOverView(t, "Открыть", "Закрыть")
 
 	// Точка заведомо вне меню (меню открыто в 200,150).

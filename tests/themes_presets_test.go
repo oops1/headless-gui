@@ -6,10 +6,12 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 func TestThemes_RegistryNamesAndLookup(t *testing.T) {
+	testreset.Globals(t)
 	names := widget.ThemeNames()
 	want := []string{"Win10 Dark", "Win10 Light", "Win11 Dark", "Win11 Light", "Win2000", "Mac"}
 	if len(names) != len(want) {
@@ -33,6 +35,7 @@ func TestThemes_RegistryNamesAndLookup(t *testing.T) {
 }
 
 func TestThemes_StyleParameters(t *testing.T) {
+	testreset.Globals(t)
 	if st := widget.ThemeByName("Win2000").Style; !st.Classic3D || st.ControlCorner != 0 {
 		t.Fatalf("Win2000 style: %+v", st)
 	}
@@ -59,6 +62,7 @@ func TestThemes_StyleParameters(t *testing.T) {
 
 // Window.ApplyTheme переносит форму окна из темы: скругление + стиль заголовка.
 func TestThemes_WindowApplyShape(t *testing.T) {
+	testreset.Globals(t)
 	w := &widget.Window{Title: "x"}
 
 	w.ApplyTheme(widget.ThemeByName("Mac"))
@@ -77,6 +81,7 @@ func TestThemes_WindowApplyShape(t *testing.T) {
 
 // Переключение всех тем на живом движке: рендер не падает, пиксели меняются.
 func TestThemes_SwitchOnLiveEngine(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(200, 120, 30)
 	eng.SetTooltipsEnabled(false)
 
@@ -125,6 +130,7 @@ func TestThemes_SwitchOnLiveEngine(t *testing.T) {
 // TestThemeByName_Aliases — базовые «Dark»/«Light» доступны по имени
 // (алиасы Win10 Dark/Light), реестр отдаёт все пресеты.
 func TestThemeByName_Aliases(t *testing.T) {
+	testreset.Globals(t)
 	if th := widget.ThemeByName("Dark"); th == nil || th.Style.Name != "Win10 Dark" {
 		t.Errorf("ThemeByName(Dark) = %v", th)
 	}

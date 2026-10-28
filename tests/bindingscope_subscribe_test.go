@@ -3,6 +3,7 @@ package tests
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/datagrid"
 )
@@ -14,6 +15,7 @@ type subscribeModel struct {
 }
 
 func TestBindingScope_NoDuplicateSubscription(t *testing.T) {
+	testreset.Globals(t)
 	m := &subscribeModel{Value: 42}
 
 	const xaml = `<Canvas xmlns="clr">

@@ -3,6 +3,7 @@ package tests
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -14,6 +15,7 @@ import (
 // переводы не разъехались.
 
 func TestDialogLoc_OverrideByTheSameKey(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearStringAliases()
 	t.Cleanup(widget.ClearStringAliases)
 
@@ -32,6 +34,7 @@ func TestDialogLoc_OverrideByTheSameKey(t *testing.T) {
 }
 
 func TestDialogLoc_AliasToApplicationKey(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearStringAliases()
 	t.Cleanup(widget.ClearStringAliases)
 
@@ -61,6 +64,7 @@ func TestDialogLoc_AliasToApplicationKey(t *testing.T) {
 // Псевдоним на ключ, которого в таблице приложения нет, не ломает диалог:
 // берётся встроенный перевод.
 func TestDialogLoc_AliasToMissingKeyFallsBack(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearStringAliases()
 	t.Cleanup(widget.ClearStringAliases)
 	widget.SetLanguage("RU")
@@ -74,6 +78,7 @@ func TestDialogLoc_AliasToMissingKeyFallsBack(t *testing.T) {
 // Псевдоним старше собственного перевода ключа: оба заданы приложением, и
 // побеждает тот, что назван конкретнее.
 func TestDialogLoc_AliasBeatsDirectOverride(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearStringAliases()
 	t.Cleanup(widget.ClearStringAliases)
 
@@ -93,6 +98,7 @@ func TestDialogLoc_AliasBeatsDirectOverride(t *testing.T) {
 // Смена псевдонима будит подписчиков языка: открытый диалог обязан перечитать
 // надписи, иначе кнопка останется со старым текстом до смены языка.
 func TestDialogLoc_AliasNotifiesListeners(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearStringAliases()
 	t.Cleanup(widget.ClearStringAliases)
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -25,6 +26,7 @@ func (r *rootSpy) OnMouseButton(e widget.MouseEvent) bool {
 }
 
 func TestMouseButtonX1X2_Values(t *testing.T) {
+	testreset.Globals(t)
 	// Старые значения не сдвинулись, новые — в конце перечисления.
 	if widget.MouseLeft != 0 || widget.MouseRight != 1 || widget.MouseMiddle != 2 ||
 		widget.MouseWheelUp != 3 || widget.MouseWheelDown != 4 {
@@ -36,6 +38,7 @@ func TestMouseButtonX1X2_Values(t *testing.T) {
 }
 
 func TestMouseButtonX1X2_ReachRoot(t *testing.T) {
+	testreset.Globals(t)
 	root := &rootSpy{Panel: widget.NewPanel(color.RGBA{})}
 	root.SetBounds(image.Rect(0, 0, 300, 400))
 	eng := engine.New(300, 400, 30)
@@ -60,6 +63,7 @@ func TestMouseButtonX1X2_ReachRoot(t *testing.T) {
 }
 
 func TestMouseButtonX1X2_WidgetsIgnore(t *testing.T) {
+	testreset.Globals(t)
 	root := &rootSpy{Panel: widget.NewPanel(color.RGBA{})}
 	root.SetBounds(image.Rect(0, 0, 300, 400))
 

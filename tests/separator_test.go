@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -59,6 +60,7 @@ var sepBG = color.RGBA{R: 20, G: 20, B: 24, A: 255}
 
 // Горизонтальный разделитель рисует линию во всю отведённую ширину.
 func TestSeparator_HorizontalLine(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewSeparator()
 	img := sepScene(t, s, image.Rect(10, 40, 190, 46))
 
@@ -77,6 +79,7 @@ func TestSeparator_HorizontalLine(t *testing.T) {
 
 // Вертикальный — столбец.
 func TestSeparator_VerticalLine(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewVerticalSeparator()
 	img := sepScene(t, s, image.Rect(100, 10, 106, 90))
 
@@ -90,6 +93,7 @@ func TestSeparator_VerticalLine(t *testing.T) {
 
 // Толщина и отступ вдоль линии.
 func TestSeparator_ThicknessAndMargin(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewSeparator()
 	s.Thickness = 2
 	s.Margin = 20
@@ -109,6 +113,7 @@ func TestSeparator_ThicknessAndMargin(t *testing.T) {
 
 // Цвет берётся из темы и обновляется вместе с ней — ради этого виджет и нужен.
 func TestSeparator_FollowsTheme(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewSeparator()
 	dark := widget.Win11DarkTheme()
 	light := widget.Win11LightTheme()
@@ -129,6 +134,7 @@ func TestSeparator_FollowsTheme(t *testing.T) {
 
 // Разделитель сообщает раскладке свою толщину: контейнеру не нужно её угадывать.
 func TestSeparator_DesiredSize(t *testing.T) {
+	testreset.Globals(t)
 	h := widget.NewSeparator()
 	if _, dy := h.DesiredSize(); dy != 1 {
 		t.Errorf("горизонтальный просит высоту %d, ждали 1", dy)
@@ -142,6 +148,7 @@ func TestSeparator_DesiredSize(t *testing.T) {
 
 // Разметка: тег даёт разделитель, а не панель с зашитым цветом.
 func TestSeparator_FromXAML(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Width="300" Height="200"><Canvas>
 	  <Separator x:Name="h" Left="10" Top="50" Width="280"/>
 	  <Separator x:Name="v" Left="150" Top="80" Height="60" Orientation="Vertical"/>
@@ -172,6 +179,7 @@ func TestSeparator_FromXAML(t *testing.T) {
 // Disabled означает «этим нельзя пользоваться», и красить им пояснение —
 // подменять смысл: человек вправе решить, что параметр выключен.
 func TestTheme_SecondaryTextIsItsOwnColor(t *testing.T) {
+	testreset.Globals(t)
 	for _, th := range []*widget.Theme{widget.Win11DarkTheme(), widget.Win11LightTheme()} {
 		if th.SecondaryText.A == 0 {
 			t.Errorf("%s: цвет вторичного текста не задан", th.Style.Name)

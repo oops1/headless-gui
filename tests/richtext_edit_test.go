@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -38,6 +39,7 @@ func richPressKey(eng *engine.Engine, code widget.KeyCode, mod widget.KeyMod) {
 func richRunsOf(rt *widget.RichText, i int) []widget.RichRun { return rt.Paragraphs()[i].Runs }
 
 func TestRichEditEngine_TypeUndoRedo(t *testing.T) {
+	testreset.Globals(t)
 	eng, rt := editScene(t)
 	changes := 0
 	rt.OnChange = func() { changes++ }
@@ -72,6 +74,7 @@ func TestRichEditEngine_TypeUndoRedo(t *testing.T) {
 
 // Каретка редактора рисуется без ShowCaret и стоит там, где её просит IME.
 func TestRichEditEngine_CaretDrawnWithoutShowCaret(t *testing.T) {
+	testreset.Globals(t)
 	eng, rt := editScene(t, widget.RichParagraph{Runs: []widget.RichRun{{Text: "abc"}}})
 	if rt.ShowCaret {
 		t.Fatal("тест рассчитан на ShowCaret == false")
@@ -91,6 +94,7 @@ func TestRichEditEngine_CaretDrawnWithoutShowCaret(t *testing.T) {
 
 // Щелчок мышью даёт фокус и ставит каретку; набор идёт в это место.
 func TestRichEditEngine_ClickFocusesAndPlacesCaret(t *testing.T) {
+	testreset.Globals(t)
 	bounds := image.Rect(20, 20, 420, 140)
 	eng, rt := richEngine(t, bounds, widget.RichParagraph{Runs: []widget.RichRun{{Text: "hello"}}})
 	rt.Editable = true
@@ -109,6 +113,7 @@ func TestRichEditEngine_ClickFocusesAndPlacesCaret(t *testing.T) {
 }
 
 func TestRichEditEngine_EnterShiftEnterBackspace(t *testing.T) {
+	testreset.Globals(t)
 	eng, rt := editScene(t)
 	richTypeInto(eng, "ab")
 	richPressKey(eng, widget.KeyEnter, 0)
@@ -135,6 +140,7 @@ func TestRichEditEngine_EnterShiftEnterBackspace(t *testing.T) {
 // Выделение мышью (двойной щелчок по слову) и набор поверх него: замена и
 // дальнейший набор — одна отмена.
 func TestRichEditEngine_ReplaceSelectionByDoubleClick(t *testing.T) {
+	testreset.Globals(t)
 	eng, rt := editScene(t, widget.RichParagraph{Runs: []widget.RichRun{{Text: "hello brave world"}}})
 	// Слово «brave»: у шрифта движка ширина символов не известна заранее,
 	// поэтому берём точку по самому виджету — смещение 8 (середина слова).
@@ -161,6 +167,7 @@ func TestRichEditEngine_ReplaceSelectionByDoubleClick(t *testing.T) {
 // Ctrl+B без выделения — стиль набора, движение каретки его сбрасывает;
 // на выделении Ctrl+B меняет шрифт, а Ctrl+Z возвращает; жирный курсив.
 func TestRichEditEngine_BoldItalicHotkeys(t *testing.T) {
+	testreset.Globals(t)
 	eng, rt := editScene(t, widget.RichParagraph{Runs: []widget.RichRun{{Text: "abcdef"}}})
 	rt.SetCaretPosition(6)
 	richPressKey(eng, widget.KeyB, widget.ModCtrl)
@@ -235,6 +242,7 @@ func brightPixels(img *image.RGBA, r image.Rectangle) int {
 }
 
 func TestRichEditEngine_CutPasteAndWordHTML(t *testing.T) {
+	testreset.Globals(t)
 	eng, rt := editScene(t, widget.RichParagraph{Runs: []widget.RichRun{
 		{Text: "bold", Font: widget.BuiltinFontBold}, {Text: " tail"}}})
 	rt.Select(0, 4)
@@ -280,6 +288,7 @@ func TestRichEditEngine_CutPasteAndWordHTML(t *testing.T) {
 // Композиция IME доходит до редактора через движок: видна подчёркнутой,
 // заменяется следующей, коммит — одна запись отмены.
 func TestRichEditEngine_IME(t *testing.T) {
+	testreset.Globals(t)
 	eng, rt := editScene(t, widget.RichParagraph{Runs: []widget.RichRun{{Text: "ab"}}})
 	rt.SetCaretPosition(2)
 	changes := 0
@@ -331,6 +340,7 @@ func TestRichEditEngine_IME(t *testing.T) {
 // В режиме просмотра ввод не принимается ни клавишами, ни IME, а Tab уходит
 // обходу фокуса.
 func TestRichEditEngine_ViewModeRejectsInput(t *testing.T) {
+	testreset.Globals(t)
 	bounds := image.Rect(20, 20, 420, 140)
 	eng, rt := richEngine(t, bounds, widget.RichParagraph{Runs: []widget.RichRun{{Text: "view"}}})
 	eng.RenderOnce()
@@ -363,6 +373,7 @@ func TestRichEditEngine_ViewModeRejectsInput(t *testing.T) {
 // Tab: при AcceptTab идёт в текст, иначе уводит фокус; Ctrl+Tab — всегда
 // навигация.
 func TestRichEditEngine_AcceptTab(t *testing.T) {
+	testreset.Globals(t)
 	eng, rt := editScene(t, widget.RichParagraph{Runs: []widget.RichRun{{Text: "x"}}})
 	richPressKey(eng, widget.KeyTab, 0)
 	if rt.Text() != "x" {
@@ -383,6 +394,7 @@ func TestRichEditEngine_AcceptTab(t *testing.T) {
 // Правая кнопка открывает меню редактора; пункты работают с клавиатуры;
 // своё ContextMenu приложения важнее.
 func TestRichEditEngine_ContextMenu(t *testing.T) {
+	testreset.Globals(t)
 	eng, rt := editScene(t, widget.RichParagraph{Runs: []widget.RichRun{{Text: "hello"}}})
 	widget.ClipboardSetText("PASTED")
 	x, y := 60, 20+4+6
@@ -431,6 +443,7 @@ func TestRichEditEngine_ContextMenu(t *testing.T) {
 
 // Выгрузка и загрузка HTML целиком и событие изменения от команд панели.
 func TestRichEditEngine_HTMLAndPanelCommands(t *testing.T) {
+	testreset.Globals(t)
 	eng, rt := editScene(t)
 	changes := 0
 	rt.OnChange = func() { changes++ }

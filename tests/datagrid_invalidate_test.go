@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/datagrid"
 )
@@ -41,6 +42,7 @@ func clickRow(dg *widget.DataGridWidget, row, rowH, headerH int) {
 // строки инвалидирует НЕ БОЛЬШЕ высоты двух строк (прежде и ныне выделенной),
 // а не весь виджет — даже когда строки далеко друг от друга.
 func TestDataGridInvalidate_SelectionRowLevel(t *testing.T) {
+	testreset.Globals(t)
 	dg, rowH, headerH := buildGrid(t, 20)
 
 	// Устанавливаем начальное выделение (строка 2) ДО подмены нотификатора.
@@ -81,6 +83,7 @@ func TestDataGridInvalidate_SelectionRowLevel(t *testing.T) {
 // TestDataGridInvalidate_HoverRowLevel проверяет, что смена hover-строки
 // инвалидирует не больше двух строк (прежней и новой), а не весь виджет.
 func TestDataGridInvalidate_HoverRowLevel(t *testing.T) {
+	testreset.Globals(t)
 	dg, rowH, headerH := buildGrid(t, 20)
 
 	// Наводим на строку 3, затем сбрасываем накопитель.

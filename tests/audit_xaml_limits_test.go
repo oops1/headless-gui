@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
 	"github.com/oops1/headless-gui/v3/widget/treeview"
@@ -34,6 +35,7 @@ import (
 // через recover: процесс умирает целиком, поэтому «не паникует» здесь
 // означает «тест вообще дошёл до конца».
 func TestXAMLDeepNestingRejected(t *testing.T) {
+	testreset.Globals(t)
 	const depth = 10000
 	var b strings.Builder
 	b.WriteString(`<Canvas Width="100" Height="100">`)
@@ -57,6 +59,7 @@ func TestXAMLDeepNestingRejected(t *testing.T) {
 // TestXAMLShallowNestingStillWorks — предел не мешает нормальной вёрстке:
 // разумная вложенность (30 уровней) по-прежнему собирается.
 func TestXAMLShallowNestingStillWorks(t *testing.T) {
+	testreset.Globals(t)
 	const depth = 30
 	var b strings.Builder
 	b.WriteString(`<Canvas Width="200" Height="200">`)
@@ -90,6 +93,7 @@ type cycNode struct {
 // сам на себя (и пара узлов ссылается друг на друга), строится в конечное
 // дерево, а не уходит в бесконечную рекурсию.
 func TestTreeViewCyclicModelNoStackOverflow(t *testing.T) {
+	testreset.Globals(t)
 	self := &cycNode{Name: "self"}
 	self.Kids = []*cycNode{self} // прямой цикл
 
@@ -145,6 +149,7 @@ func countNodes(items []*treeview.TreeViewItem) int {
 // удерживаются внутри каталога разметки: «../secret.png» и абсолютный путь
 // не читаются, а соседний файл — читается.
 func TestXAMLResourceTraversalBlocked(t *testing.T) {
+	testreset.Globals(t)
 	base := t.TempDir()
 	uiDir := filepath.Join(base, "ui")
 	if err := os.MkdirAll(uiDir, 0o755); err != nil {
@@ -211,6 +216,7 @@ func TestXAMLResourceTraversalBlocked(t *testing.T) {
 // XAML-файла, как иконки кнопок и SVGIcon. Раньше путь уходил в SetSource как
 // есть и относительный резолвился от текущего каталога процесса.
 func TestXAMLImageResolvedFromBaseDir(t *testing.T) {
+	testreset.Globals(t)
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "img")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -246,6 +252,7 @@ func TestXAMLImageResolvedFromBaseDir(t *testing.T) {
 // Сам файл — несколько десятков байт, декодировать нечего: важно, что до
 // аллокации дело не доходит.
 func TestImageBombRejectedByHeader(t *testing.T) {
+	testreset.Globals(t)
 	dir := t.TempDir()
 	bomb := filepath.Join(dir, "bomb.png")
 	if err := os.WriteFile(bomb, pngHeaderOnly(40000, 40000), 0o644); err != nil {
@@ -286,6 +293,7 @@ func TestImageBombRejectedByHeader(t *testing.T) {
 
 // TestImageWithinLimitStillDecodes — обычная картинка проходит проверку.
 func TestImageWithinLimitStillDecodes(t *testing.T) {
+	testreset.Globals(t)
 	dir := t.TempDir()
 	ok := filepath.Join(dir, "ok.png")
 	writeTinyPNG(t, ok)
@@ -296,6 +304,7 @@ func TestImageWithinLimitStillDecodes(t *testing.T) {
 
 // TestMaxImagePixelsConfigurable — предел настраивается и восстанавливается.
 func TestMaxImagePixelsConfigurable(t *testing.T) {
+	testreset.Globals(t)
 	orig := widget.MaxImagePixels()
 	defer widget.SetMaxImagePixels(orig)
 
@@ -319,6 +328,7 @@ func TestMaxImagePixelsConfigurable(t *testing.T) {
 // TestEngineNewClampsSize — некорректные и неподъёмные размеры приводятся к
 // допустимым, без паники и без аллокации гигабайтов.
 func TestEngineNewClampsSize(t *testing.T) {
+	testreset.Globals(t)
 	cases := []struct{ w, h int }{
 		{-5, 0},
 		{0, 0},
@@ -355,6 +365,7 @@ func TestEngineNewClampsSize(t *testing.T) {
 
 // TestEngineSetResolutionClampsSize — SetResolution держит те же границы.
 func TestEngineSetResolutionClampsSize(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(320, 240, 10)
 
 	eng.SetResolution(-100, -100)
@@ -380,6 +391,7 @@ func TestEngineSetResolutionClampsSize(t *testing.T) {
 // TestTreeViewItemsSourceUnsubscribe — перебиндовка снимает подписку с
 // прежней коллекции, а не копит обработчики.
 func TestTreeViewItemsSourceUnsubscribe(t *testing.T) {
+	testreset.Globals(t)
 	tv := treeview.New()
 	tv.SetItemTemplate(&treeview.HierarchicalDataTemplate{HeaderPath: "Name"})
 
@@ -415,6 +427,7 @@ func TestTreeViewItemsSourceUnsubscribe(t *testing.T) {
 // TestTreeViewVisibleCacheCorrect — кэш инвалидируется на всех структурных
 // изменениях: раскрытие, добавление и удаление узлов видны сразу.
 func TestTreeViewVisibleCacheCorrect(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	tw.SetBounds(image.Rect(0, 0, 300, 200))
 
@@ -469,6 +482,7 @@ func TestTreeViewVisibleCacheCorrect(t *testing.T) {
 // пересобирает плоский список. Раньше каждый mousemove обходил всё дерево и
 // аллоцировал новый срез.
 func TestTreeViewVisibleCacheNoRealloc(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	tw.SetBounds(image.Rect(0, 0, 300, 200))
 

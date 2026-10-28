@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -26,6 +27,7 @@ func cursorImg(w, h int, c color.NRGBA) *image.NRGBA {
 }
 
 func TestCursorImage_SetAndOverride(t *testing.T) {
+	testreset.Globals(t)
 	eng := overrideEngineWithHandButton(t)
 
 	if _, ok := eng.CursorImageOverride(); ok {
@@ -52,6 +54,7 @@ func TestCursorImage_SetAndOverride(t *testing.T) {
 
 // Приложение вправе менять свою картинку после вызова: движок держит копию.
 func TestCursorImage_CopiesPixels(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(100, 100, 30)
 	src := cursorImg(8, 8, color.NRGBA{G: 100, A: 255})
 	eng.SetCursorImage(src, 0, 0)
@@ -64,6 +67,7 @@ func TestCursorImage_CopiesPixels(t *testing.T) {
 
 // Подкартинка с нулевым Min сдвинута: пиксели читаются с учётом границ.
 func TestCursorImage_SubImage(t *testing.T) {
+	testreset.Globals(t)
 	big := cursorImg(20, 20, color.NRGBA{A: 255})
 	big.SetNRGBA(5, 7, color.NRGBA{R: 9, G: 8, B: 7, A: 255})
 	sub := big.SubImage(image.Rect(5, 7, 15, 17)).(*image.NRGBA)
@@ -77,6 +81,7 @@ func TestCursorImage_SubImage(t *testing.T) {
 
 // Хеш: равное содержимое и горячая точка — равный ключ; иное — иной.
 func TestCursorImage_KeyByContent(t *testing.T) {
+	testreset.Globals(t)
 	a := widget.NewCursorImage(cursorImg(16, 16, color.NRGBA{R: 5, A: 255}), 1, 1)
 	b := widget.NewCursorImage(cursorImg(16, 16, color.NRGBA{R: 5, A: 255}), 1, 1)
 	c := widget.NewCursorImage(cursorImg(16, 16, color.NRGBA{R: 6, A: 255}), 1, 1)
@@ -95,6 +100,7 @@ func TestCursorImage_KeyByContent(t *testing.T) {
 // Ключ без копирования совпадает с ключом копии, в том числе у подкартинки со
 // смещённым Min; недопустимая картинка ключа не имеет.
 func TestCursorImage_KeyWithoutCopy(t *testing.T) {
+	testreset.Globals(t)
 	big := cursorImg(40, 40, color.NRGBA{R: 3, G: 4, B: 5, A: 200})
 	big.SetNRGBA(12, 9, color.NRGBA{R: 99, A: 255})
 	for _, img := range []*image.NRGBA{big, big.SubImage(image.Rect(10, 8, 30, 28)).(*image.NRGBA)} {
@@ -112,6 +118,7 @@ func TestCursorImage_KeyWithoutCopy(t *testing.T) {
 // Повторная установка той же картинки не копирует её: указатель удалённого
 // рабочего стола шлют на каждое обновление.
 func TestCursorImage_RepeatDoesNotCopy(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(100, 100, 30)
 	img := cursorImg(384, 384, color.NRGBA{R: 7, G: 8, B: 9, A: 255})
 	eng.SetCursorImage(img, 10, 10)
@@ -129,6 +136,7 @@ func TestCursorImage_RepeatDoesNotCopy(t *testing.T) {
 
 // Горячая точка за пределами прижимается; недопустимые картинки — nil.
 func TestCursorImage_HotspotClampAndInvalid(t *testing.T) {
+	testreset.Globals(t)
 	ci := widget.NewCursorImage(cursorImg(10, 10, color.NRGBA{A: 255}), -5, 99)
 	if ci.HotX != 0 || ci.HotY != 9 {
 		t.Errorf("горячая точка (%d,%d), ждал (0,9)", ci.HotX, ci.HotY)
@@ -150,6 +158,7 @@ func TestCursorImage_HotspotClampAndInvalid(t *testing.T) {
 // Уведомления окна: установка, смена, снятие — да; та же картинка и лишний
 // сброс — нет.
 func TestCursorImage_Notifies(t *testing.T) {
+	testreset.Globals(t)
 	eng := overrideEngineWithHandButton(t)
 	var n atomic.Int32
 	eng.SetOnCursorOverrideChanged(func() { n.Add(1) })
@@ -194,6 +203,7 @@ func TestCursorImage_Notifies(t *testing.T) {
 
 // Форма и картинка заменяют друг друга: действует последний вызов.
 func TestCursorImage_ShapeAndImageReplaceEachOther(t *testing.T) {
+	testreset.Globals(t)
 	eng := overrideEngineWithHandButton(t)
 	var n atomic.Int32
 	eng.SetOnCursorOverrideChanged(func() { n.Add(1) })
@@ -224,6 +234,7 @@ func TestCursorImage_ShapeAndImageReplaceEachOther(t *testing.T) {
 
 // Вызовы из разных горутин безопасны (гонки ловит -race).
 func TestCursorImage_Concurrent(t *testing.T) {
+	testreset.Globals(t)
 	eng := overrideEngineWithHandButton(t)
 	eng.SetOnCursorOverrideChanged(func() {})
 	var wg sync.WaitGroup

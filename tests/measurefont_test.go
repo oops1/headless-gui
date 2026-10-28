@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -27,6 +28,7 @@ func measuringEngine(t *testing.T) *engine.Engine {
 }
 
 func TestMeasureUITextFont_DiffersFromDefault(t *testing.T) {
+	testreset.Globals(t)
 	measuringEngine(t)
 
 	const text = "Репозиторий"
@@ -44,6 +46,7 @@ func TestMeasureUITextFont_DiffersFromDefault(t *testing.T) {
 
 // Пустое имя семейства — шрифт по умолчанию, то есть ровно MeasureUIText.
 func TestMeasureUITextFont_EmptyFamilyIsDefault(t *testing.T) {
+	testreset.Globals(t)
 	measuringEngine(t)
 
 	const text = "Репозиторий"
@@ -56,6 +59,7 @@ func TestMeasureUITextFont_EmptyFamilyIsDefault(t *testing.T) {
 // Незнакомое семейство не роняет раскладку: движок подменит его шрифтом по
 // умолчанию — так же, как делает при отрисовке.
 func TestMeasureUITextFont_UnknownFamilyFallsBack(t *testing.T) {
+	testreset.Globals(t)
 	measuringEngine(t)
 
 	if got := widget.MeasureUITextFont("текст", widget.DefaultFontSizePt, "нет-такого"); got <= 0 {
@@ -66,6 +70,7 @@ func TestMeasureUITextFont_UnknownFamilyFallsBack(t *testing.T) {
 // Повторный замер отвечает то же самое: у именованного шрифта свой кэш, и
 // ошибка в нём выдала бы чужую ширину.
 func TestMeasureUITextFont_CacheIsPerFamily(t *testing.T) {
+	testreset.Globals(t)
 	measuringEngine(t)
 
 	const text = "Ветка"
@@ -83,6 +88,7 @@ func TestMeasureUITextFont_CacheIsPerFamily(t *testing.T) {
 
 // Позиции символов именованным шрифтом — для каретки и выделения.
 func TestMeasureUIRunePositions_FollowsTheFamily(t *testing.T) {
+	testreset.Globals(t)
 	measuringEngine(t)
 
 	const text = "Ветка"

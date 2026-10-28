@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -16,6 +17,7 @@ import (
 // XAML: меню — ребёнок кнопки), открывается у курсора: Show получает точку в
 // кадре меню, а рисуется оно через тот же сдвиг, что и кнопка.
 func TestScrollViewCoords_AttachedContextMenu(t *testing.T) {
+	testreset.Globals(t)
 	env := newVScrollScene(t)
 	pm := widget.NewPopupMenu()
 	pm.SetItems([]widget.MenuItem{{Text: "Первый"}, {Text: "Второй"}, {Text: "Третий"}})
@@ -50,6 +52,7 @@ func TestScrollViewCoords_AttachedContextMenu(t *testing.T) {
 // Полоса прокрутки ВНУТРИ другой прокрутки: щелчок по треку и перетаскивание
 // ползунка идут в кадре внутренней прокрутки, а внешняя при этом стоит на месте.
 func TestScrollViewCoords_NestedScrollbar(t *testing.T) {
+	testreset.Globals(t)
 	env := newNestedScene(t)
 
 	// Внутренняя на экране в 0..100, полоса у правого края (x=270..280).
@@ -81,6 +84,7 @@ func TestScrollViewCoords_NestedScrollbar(t *testing.T) {
 // Base.AddChild, поэтому обязан сам объявить его своим ребёнком — иначе область
 // перерисовки кнопки на вкладке осталась бы в координатах содержимого.
 func TestScrollViewCoords_InvalidateInsideTab(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 20, G: 20, B: 20, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 300, 500))
@@ -121,6 +125,7 @@ func TestScrollViewCoords_InvalidateInsideTab(t *testing.T) {
 // Прокрутка не «съедает» перерисовку соседей: изменение вне прокрутки по-прежнему
 // перерисовывается ровно там, где оно произошло.
 func TestScrollViewCoords_InvalidateOutsideScrollUnchanged(t *testing.T) {
+	testreset.Globals(t)
 	env := newVScrollScene(t)
 	other := newSvKid("вне", image.Rect(10, 150, 200, 180)) // ниже прокрутки (0..100)
 	env.root.AddChild(other.btn)

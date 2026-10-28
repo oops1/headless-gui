@@ -5,12 +5,14 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // ─── IsEnabled (Base) ───────────────────────────────────────────────────────
 
 func TestBase_IsEnabled_DefaultTrue(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	if !btn.IsEnabled() {
 		t.Fatal("new widget should be enabled by default (WPF behaviour)")
@@ -18,6 +20,7 @@ func TestBase_IsEnabled_DefaultTrue(t *testing.T) {
 }
 
 func TestBase_SetEnabled_DisablesWidget(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetEnabled(false)
 	if btn.IsEnabled() {
@@ -32,6 +35,7 @@ func TestBase_SetEnabled_DisablesWidget(t *testing.T) {
 // ─── Button: disabled blocks input ──────────────────────────────────────────
 
 func TestButton_Disabled_IgnoresClick(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(0, 0, 100, 40))
 	clicked := false
@@ -47,6 +51,7 @@ func TestButton_Disabled_IgnoresClick(t *testing.T) {
 }
 
 func TestButton_Disabled_IgnoresHover(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(0, 0, 100, 40))
 	btn.SetEnabled(false)
@@ -58,6 +63,7 @@ func TestButton_Disabled_IgnoresHover(t *testing.T) {
 }
 
 func TestButton_Disabled_IgnoresKeyboard(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(0, 0, 100, 40))
 	btn.SetFocused(true)
@@ -74,6 +80,7 @@ func TestButton_Disabled_IgnoresKeyboard(t *testing.T) {
 // ─── CheckBox: disabled blocks toggle ───────────────────────────────────────
 
 func TestCheckBox_Disabled_IgnoresClick(t *testing.T) {
+	testreset.Globals(t)
 	cb := widget.NewCheckBox("Test")
 	cb.SetBounds(image.Rect(0, 0, 200, 30))
 	cb.SetEnabled(false)
@@ -88,6 +95,7 @@ func TestCheckBox_Disabled_IgnoresClick(t *testing.T) {
 // ─── Slider: disabled blocks drag ──────────────────────────────────────────
 
 func TestSlider_Disabled_IgnoresMouse(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewSlider()
 	s.SetBounds(image.Rect(0, 0, 200, 30))
 	s.SetValue(0.5)
@@ -102,6 +110,7 @@ func TestSlider_Disabled_IgnoresMouse(t *testing.T) {
 // ─── ToggleSwitch: disabled blocks toggle ───────────────────────────────────
 
 func TestToggleSwitch_Disabled_IgnoresClick(t *testing.T) {
+	testreset.Globals(t)
 	ts := widget.NewToggleSwitch("Test")
 	ts.SetBounds(image.Rect(0, 0, 200, 30))
 	ts.SetEnabled(false)
@@ -116,6 +125,7 @@ func TestToggleSwitch_Disabled_IgnoresClick(t *testing.T) {
 // ─── Dropdown: disabled blocks open ─────────────────────────────────────────
 
 func TestDropdown_Disabled_IgnoresClick(t *testing.T) {
+	testreset.Globals(t)
 	dd := widget.NewDropdown("A", "B", "C")
 	dd.SetBounds(image.Rect(0, 0, 200, 30))
 	dd.SetEnabled(false)
@@ -129,6 +139,7 @@ func TestDropdown_Disabled_IgnoresClick(t *testing.T) {
 // ─── TextInput: disabled blocks input ───────────────────────────────────────
 
 func TestTextInput_Disabled_IgnoresKeyboard(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("placeholder")
 	ti.SetBounds(image.Rect(0, 0, 200, 30))
 	ti.SetFocused(true)
@@ -150,6 +161,7 @@ type enabledWidget interface {
 }
 
 func TestAllWidgets_IsEnabled_Default(t *testing.T) {
+	testreset.Globals(t)
 	widgets := []struct {
 		name string
 		w    enabledWidget

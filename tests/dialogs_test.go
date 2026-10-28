@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -23,6 +24,7 @@ func newDialogEngine() *engine.Engine {
 
 // severity-пресеты дают правильную роль/иконку и локализованный заголовок.
 func TestDialog_MessageBoxSeverity(t *testing.T) {
+	testreset.Globals(t)
 	widget.SetLanguage("RU")
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
@@ -43,6 +45,7 @@ func TestDialog_MessageBoxSeverity(t *testing.T) {
 
 // Ctrl+C копирует содержимое в формате Windows MessageBox.
 func TestDialog_MessageBoxCtrlC(t *testing.T) {
+	testreset.Globals(t)
 	widget.SetLanguage("RU")
 	widget.UseMemoryClipboard()
 	eng := newDialogEngine()
@@ -69,6 +72,7 @@ func TestDialog_MessageBoxCtrlC(t *testing.T) {
 
 // Enter активирует кнопку по умолчанию (первая accent).
 func TestDialog_MessageBoxEnter(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
 	var result widget.MessageBoxResult = -1
@@ -82,6 +86,7 @@ func TestDialog_MessageBoxEnter(t *testing.T) {
 
 // Смена языка переводит кнопки и заголовок открытого диалога.
 func TestDialog_MessageBoxLiveLocale(t *testing.T) {
+	testreset.Globals(t)
 	widget.SetLanguage("RU")
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
@@ -105,6 +110,7 @@ func TestDialog_MessageBoxLiveLocale(t *testing.T) {
 
 // После закрытия подписки на язык сняты (не растут при повторных показах).
 func TestDialog_LocaleUnsubscribeOnClose(t *testing.T) {
+	testreset.Globals(t)
 	widget.SetLanguage("RU")
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
@@ -146,6 +152,7 @@ func findButton(w widget.Widget) *widget.Button {
 
 // InputDialog: подтверждение возвращает текст, отмена — ok=false.
 func TestDialog_Input(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
 
@@ -164,6 +171,7 @@ func TestDialog_Input(t *testing.T) {
 
 // Валидация блокирует подтверждение при ошибке.
 func TestDialog_InputValidation(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
 	confirmed := false
@@ -186,6 +194,7 @@ func TestDialog_InputValidation(t *testing.T) {
 
 // Escape отменяет InputDialog (ok=false).
 func TestDialog_InputEscapeCancels(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
 	var gotOK = true
@@ -199,6 +208,7 @@ func TestDialog_InputEscapeCancels(t *testing.T) {
 
 // ProgressDialog: сеттеры и Close работают, Close идемпотентен.
 func TestDialog_Progress(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
 	cancelled := false
@@ -232,6 +242,7 @@ func makeFileTree(t *testing.T) string {
 
 // Open: двойной клик по файлу → путь; фильтр скрывает несоответствующие.
 func TestDialog_FileOpen(t *testing.T) {
+	testreset.Globals(t)
 	dir := makeFileTree(t)
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
@@ -258,6 +269,7 @@ func TestDialog_FileOpen(t *testing.T) {
 
 // Save: возвращает путь с введённым именем в текущем каталоге.
 func TestDialog_FileSave(t *testing.T) {
+	testreset.Globals(t)
 	dir := makeFileTree(t)
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
@@ -276,6 +288,7 @@ func TestDialog_FileSave(t *testing.T) {
 
 // FolderPick: подтверждение возвращает текущий каталог, файлы скрыты.
 func TestDialog_FolderPick(t *testing.T) {
+	testreset.Globals(t)
 	dir := makeFileTree(t)
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
@@ -295,6 +308,7 @@ func TestDialog_FolderPick(t *testing.T) {
 
 // Кнопка ✕ в заголовке закрывает диалог с семантикой отмены (как Escape).
 func TestDialog_CloseButtonCancels(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
 	gotOK := true
@@ -314,6 +328,7 @@ func TestDialog_CloseButtonCancels(t *testing.T) {
 // Диалог таскается за заголовок: press на титлбаре + move сдвигает диалог
 // вместе с детьми; кнопка ✕ после перетаскивания работает по новой позиции.
 func TestDialog_DragByTitleBar(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
 	canceled := false
@@ -350,6 +365,7 @@ func TestDialog_DragByTitleBar(t *testing.T) {
 // перетаскивание за заголовок вызывает колбэк с дельтой и НЕ сдвигает bounds
 // самого диалога — двигается нативное окно, а виджет в своём холсте неподвижен.
 func TestDialog_OnDragMove_NativeMode(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
 	id := mb.ShowInput("", "name:", "abc", nil, nil)
@@ -382,6 +398,7 @@ func TestDialog_OnDragMove_NativeMode(t *testing.T) {
 // прижимается к левому/верхнему краю, а не центрируется в отрицательные
 // координаты: титлбар и ✕ должны оставаться видимыми и достижимыми.
 func TestShowModal_LargerThanCanvas_PinnedTopLeft(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine() // холст 600×400
 	dlg := widget.NewDialog("Огромный", 700, 500)
 	eng.ShowModal(dlg)
@@ -396,6 +413,7 @@ func TestShowModal_LargerThanCanvas_PinnedTopLeft(t *testing.T) {
 // прежний холст; при уменьшении разрешения он обязан быть вписан в новый
 // (раньше уезжал за край и обрезался). Дети сдвигаются вместе с ним.
 func TestSetResolution_ClampsOpenModal(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine() // холст 600×400
 	dlg := widget.NewDialog("Диалог", 300, 200)
 	btn := widget.NewButton("OK")

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -35,6 +36,7 @@ func hsEngineView() (*engine.Engine, *widget.ScrollView, *int) {
 // Щелчок по горизонтальной полосе не доходит до ребёнка под ней, а двигает
 // содержимое; ведение с зажатой кнопкой работает и за границей виджета.
 func TestScrollViewHScroll_BarClickAndDragViaEngine(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -76,6 +78,7 @@ func TestScrollViewHScroll_BarClickAndDragViaEngine(t *testing.T) {
 
 // Движок доставляет Shift+колесо через wheelPixelModHandler.
 func TestScrollViewHScroll_ShiftWheelViaEngine(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 

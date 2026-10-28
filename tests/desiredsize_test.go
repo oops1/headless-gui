@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -24,6 +25,7 @@ func sizedPanel(h int) *widget.Panel {
 
 // Панель складывает высоты детей, промежутки и отступы.
 func TestStackPanel_DesiredSize(t *testing.T) {
+	testreset.Globals(t)
 	sp := widget.NewStackPanel(widget.OrientationVertical)
 	sp.Spacing = 4
 	sp.Padding = 6
@@ -40,6 +42,7 @@ func TestStackPanel_DesiredSize(t *testing.T) {
 
 // Скрытый ребёнок не занимает ни своего места, ни промежутка после себя.
 func TestStackPanel_DesiredSizeSkipsHidden(t *testing.T) {
+	testreset.Globals(t)
 	sp := widget.NewStackPanel(widget.OrientationVertical)
 	sp.Spacing = 4
 	sp.SetBounds(image.Rect(0, 0, 200, 500))
@@ -61,6 +64,7 @@ func TestStackPanel_DesiredSizeSkipsHidden(t *testing.T) {
 
 // Свёрнутая раскрывашка просит высоту одного заголовка.
 func TestExpander_DesiredSizeFollowsState(t *testing.T) {
+	testreset.Globals(t)
 	ex := widget.NewExpander("Дополнительно")
 	ex.HeaderHeight = 30
 	ex.SetBounds(image.Rect(0, 0, 200, 200))
@@ -83,6 +87,7 @@ func TestExpander_DesiredSizeFollowsState(t *testing.T) {
 
 // Столбик пересчитывается после сворачивания: то, ради чего всё затевалось.
 func TestStackPanel_RelayoutAfterCollapse(t *testing.T) {
+	testreset.Globals(t)
 	sp := widget.NewStackPanel(widget.OrientationVertical)
 	sp.SetBounds(image.Rect(0, 0, 200, 500))
 
@@ -113,6 +118,7 @@ func TestStackPanel_RelayoutAfterCollapse(t *testing.T) {
 
 // Прокрутка сама считает высоту содержимого.
 func TestScrollView_FitContent(t *testing.T) {
+	testreset.Globals(t)
 	sv := widget.NewScrollView()
 	sv.SetBounds(image.Rect(0, 0, 200, 100))
 
@@ -140,6 +146,7 @@ func TestScrollView_FitContent(t *testing.T) {
 
 // Разделитель сообщает свою толщину — контейнеру не нужно её угадывать.
 func TestStackPanel_MeasuresSeparator(t *testing.T) {
+	testreset.Globals(t)
 	sp := widget.NewStackPanel(widget.OrientationVertical)
 	sp.SetBounds(image.Rect(0, 0, 200, 300))
 	sp.AddChild(sizedPanel(20))

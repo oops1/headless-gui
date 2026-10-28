@@ -10,6 +10,7 @@ package tests
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -44,6 +45,7 @@ func headers(w *widget.Window) []string {
 }
 
 func TestTitleTabs_MoveReorders(t *testing.T) {
+	testreset.Globals(t)
 	w := manyTabsWindow(t, 800, 4)
 	w.SetActiveTitleTab(1)
 
@@ -76,6 +78,7 @@ func TestTitleTabs_MoveReorders(t *testing.T) {
 // Перетаскивание меняет вкладки местами на лету: соседи расступаются до
 // того, как кнопку отпустили.
 func TestTitleTabs_DragReorders(t *testing.T) {
+	testreset.Globals(t)
 	w := manyTabsWindow(t, 800, 4)
 	first := w.TitleTabRect(0)
 	second := w.TitleTabRect(1)
@@ -100,6 +103,7 @@ func TestTitleTabs_DragReorders(t *testing.T) {
 // Короткое движение — не перетаскивание: дрожание руки при щелчке не должно
 // менять порядок вкладок.
 func TestTitleTabs_DragThreshold(t *testing.T) {
+	testreset.Globals(t)
 	w := manyTabsWindow(t, 800, 3)
 	before := headers(w)
 	r := w.TitleTabRect(0)
@@ -119,6 +123,7 @@ func TestTitleTabs_DragThreshold(t *testing.T) {
 // Когда вкладки не помещаются, полоса прокручивается: раньше лишние просто
 // не рисовались и становились недостижимыми.
 func TestTitleTabs_ScrollsWhenOverflowing(t *testing.T) {
+	testreset.Globals(t)
 	w := manyTabsWindow(t, 420, 10)
 
 	last := w.TitleTabCount() - 1
@@ -145,6 +150,7 @@ func TestTitleTabs_ScrollsWhenOverflowing(t *testing.T) {
 // Выбор вкладки показывает её целиком: её могли выбрать с клавиатуры, когда
 // она уехала за край.
 func TestTitleTabs_ScrollsToActive(t *testing.T) {
+	testreset.Globals(t)
 	w := manyTabsWindow(t, 420, 10)
 	last := w.TitleTabCount() - 1
 	if !w.TitleTabRect(last).Empty() {
@@ -163,6 +169,7 @@ func TestTitleTabs_ScrollsToActive(t *testing.T) {
 // Колесо над заголовком листает вкладки, над содержимым — нет: там оно
 // принадлежит содержимому.
 func TestTitleTabs_WheelScrollsOnlyTitleBar(t *testing.T) {
+	testreset.Globals(t)
 	w := manyTabsWindow(t, 420, 10)
 	if w.TitleTabRect(w.TitleTabCount()-1).Empty() == false {
 		t.Skip("вкладки уместились")
@@ -182,6 +189,7 @@ func TestTitleTabs_WheelScrollsOnlyTitleBar(t *testing.T) {
 // Прокрутка к вкладке — чистая арифметика: видимую не трогаем, иначе полоса
 // дёргалась бы на каждом кадре.
 func TestTitleTabs_ScrollMath(t *testing.T) {
+	testreset.Globals(t)
 	w := manyTabsWindow(t, 420, 6)
 	// Косвенная проверка через поведение: двойной вызов ScrollTitleTabs не
 	// уводит полосу дальше предела.

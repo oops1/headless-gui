@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -11,6 +12,7 @@ import (
 // не говорит, какие это строки — одинаковые строки встречаются много раз, — а
 // приложению, добавляющему в индекс выделенные строки, нужны номера.
 func TestDiffView_Selection(t *testing.T) {
+	testreset.Globals(t)
 	dv := widget.NewDiffView("", "")
 	dv.SetBounds(image.Rect(0, 0, 900, 500))
 	dv.SetText(widget.DiffLeft, "old", "", "l0\nl1\nl2\nl3\n")

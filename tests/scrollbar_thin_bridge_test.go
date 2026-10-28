@@ -3,12 +3,14 @@ package tests
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // Поля полосы прокрутки ThemeStyle переживают мост «тема → профиль → тема».
 func TestBridge_ScrollbarFieldsRoundTrip(t *testing.T) {
+	testreset.Globals(t)
 	src := widget.DarkTheme()
 	src.Style.ScrollbarThin = true
 	src.Style.ScrollbarWidth = 14
@@ -24,6 +26,7 @@ func TestBridge_ScrollbarFieldsRoundTrip(t *testing.T) {
 // Пресеты полос не объявляют: профиль, собранный из них, без токенов полосы,
 // то есть ScrollView под ними остаётся прежним (фиксированная полоса 10 px).
 func TestBridge_PresetsDeclareNoScrollbarTokens(t *testing.T) {
+	testreset.Globals(t)
 	for _, name := range widget.ThemeNames() {
 		p := widget.ProfileFromTheme(widget.ThemeByName(name))
 		for _, k := range []theme.Key{"scrollbar.thin", "scrollbar.width", "scrollbar.thin.width", "scrollbar.thin.hover.width"} {

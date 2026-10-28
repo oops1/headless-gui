@@ -3,10 +3,12 @@ package tests
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 func TestStrings_TrFallbackAndMissing(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearStrings()
 	widget.SetFallbackLocale("EN")
 	widget.RegisterStrings("EN", map[string]string{"Hi": "Hello", "Only": "EN-only"})
@@ -29,6 +31,7 @@ func TestStrings_TrFallbackAndMissing(t *testing.T) {
 
 // Язык интерфейса (Language) и раскладка клавиатуры (Locale) независимы.
 func TestStrings_LanguageIndependentFromKeyboardLocale(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearStrings()
 	widget.SetFallbackLanguage("EN")
 	widget.RegisterStrings("EN", map[string]string{"Hi": "Hello"})
@@ -58,6 +61,7 @@ func TestStrings_LanguageIndependentFromKeyboardLocale(t *testing.T) {
 }
 
 func TestStrings_LoadJSON(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearStrings()
 	if err := widget.LoadStringsJSON("DE", []byte(`{"Hi":"Hallo"}`)); err != nil {
 		t.Fatal(err)
@@ -68,6 +72,7 @@ func TestStrings_LoadJSON(t *testing.T) {
 }
 
 func TestStrings_RemoveLanguageListener(t *testing.T) {
+	testreset.Globals(t)
 	widget.SetLanguage("EN")
 	called := false
 	id := widget.AddLanguageListener(func(string) { called = true })
@@ -80,6 +85,7 @@ func TestStrings_RemoveLanguageListener(t *testing.T) {
 }
 
 func TestBindingScope_DisposeStopsLocUpdates(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearStrings()
 	widget.RegisterStrings("EN", map[string]string{"DisposeKey": "Hello"})
 	widget.RegisterStrings("RU", map[string]string{"DisposeKey": "Привет"})
@@ -108,6 +114,7 @@ func TestBindingScope_DisposeStopsLocUpdates(t *testing.T) {
 }
 
 func TestStrings_Trf(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearStrings()
 	widget.RegisterString("EN", "Count", "Items: %d")
 	widget.SetLanguage("EN")
@@ -117,6 +124,7 @@ func TestStrings_Trf(t *testing.T) {
 }
 
 func TestStrings_XAMLStaticAndDynamic(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearStrings()
 	widget.SetFallbackLocale("EN")
 	widget.RegisterStrings("EN", map[string]string{"Greeting": "Hello", "Btn": "Save"})

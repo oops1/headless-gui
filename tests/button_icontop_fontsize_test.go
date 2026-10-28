@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -47,6 +48,7 @@ func iconTopRow(t *testing.T, pt float64) int {
 // умолчанию), а не уезжает вниз. Крупная подпись по-прежнему поднимает блок
 // (calc): её строка выше.
 func TestButtonIconTop_SmallFontKeepsPlace(t *testing.T) {
+	testreset.Globals(t)
 	def := widget.DefaultFontSize()
 	base := iconTopRow(t, def)
 	for _, pt := range []float64{7, 8, 9} {

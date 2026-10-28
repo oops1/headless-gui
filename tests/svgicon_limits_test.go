@@ -4,12 +4,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/svg"
 )
 
 // SetSVG отвергает слишком глубокую разметку без паники.
 func TestSVGIcon_SetSVGDepthLimit(t *testing.T) {
+	testreset.Globals(t)
 	const n = 100000
 	var b strings.Builder
 	b.WriteString(`<svg viewBox="0 0 24 24">`)
@@ -29,6 +31,7 @@ func TestSVGIcon_SetSVGDepthLimit(t *testing.T) {
 
 // SetSVG отвергает данные больше лимита.
 func TestSVGIcon_SetSVGSizeLimit(t *testing.T) {
+	testreset.Globals(t)
 	data := make([]byte, svg.MaxFileBytes+1)
 	for i := range data {
 		data[i] = ' '

@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -17,6 +18,7 @@ import (
 // TestListView_SetItemsCopiesSlice — правка исходного массива после вызова не
 // меняет то, что показывает виджет.
 func TestListView_SetItemsCopiesSlice(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView()
 	lv.SetBounds(image.Rect(0, 0, 200, 100))
 
@@ -32,6 +34,7 @@ func TestListView_SetItemsCopiesSlice(t *testing.T) {
 // TestListView_SetItemsSameSliceInvalidates — тот же срез с изменённым
 // элементом перерисовку запрашивает.
 func TestListView_SetItemsSameSliceInvalidates(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView()
 	lv.SetBounds(image.Rect(0, 0, 200, 100))
 
@@ -56,6 +59,7 @@ func TestListView_SetItemsSameSliceInvalidates(t *testing.T) {
 // TestListView_AddItemKeepsCallerSlice — AddItem дописывает в СВОЙ массив, а не
 // в массив вызывающего (append в чужой срез с запасом писал бы в его память).
 func TestListView_AddItemKeepsCallerSlice(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView()
 	lv.SetBounds(image.Rect(0, 0, 200, 100))
 

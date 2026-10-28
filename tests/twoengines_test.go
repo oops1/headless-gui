@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -42,6 +43,7 @@ func buildScene2(w, h int) (*widget.Panel, *widget.Button) {
 
 // Выключатель пропуска — свой у каждого движка.
 func TestTwoEngines_CullingSwitchIsPerEngine(t *testing.T) {
+	testreset.Globals(t)
 	a := engine.New(400, 300, 60)
 	b := engine.New(400, 300, 60)
 
@@ -67,6 +69,7 @@ func TestTwoEngines_CullingSwitchIsPerEngine(t *testing.T) {
 // только тот, на чьём холсте оно лежит. Здесь холсты разного размера, и
 // перенос помещается лишь в больший.
 func TestTwoEngines_MoveGoesToTheRightOne(t *testing.T) {
+	testreset.Globals(t)
 	big, _ := buildScene2(800, 600)
 	engBig := engine.New(800, 600, 60)
 	engBig.SetRenderOnDemand(true)
@@ -111,6 +114,7 @@ func TestTwoEngines_MoveGoesToTheRightOne(t *testing.T) {
 // Тест ещё и под детектором гонок (`go test -race`), которому раньше было на
 // что ругаться: к переменным пакета ходили без всякой синхронизации.
 func TestTwoEngines_ConcurrentRendersStayApart(t *testing.T) {
+	testreset.Globals(t)
 	const rounds = 40
 
 	// solo — эталонная последовательность кадров сцены без соседей.
@@ -180,6 +184,7 @@ func TestTwoEngines_ConcurrentRendersStayApart(t *testing.T) {
 
 // Переносы двух движков не перемешиваются под нагрузкой.
 func TestTwoEngines_ConcurrentMovesStayApart(t *testing.T) {
+	testreset.Globals(t)
 	const rounds = 30
 
 	run := func(w, h int, wg *sync.WaitGroup) {
@@ -255,6 +260,7 @@ func snapshotRGBA(src *image.RGBA) *image.RGBA {
 // пиксели с места, где ничего не переезжало, и потребитель показал бы чужой
 // прямоугольник до следующего диффа.
 func TestTwoEngines_SameSizeDoNotStealEachOthersMoves(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 800, 600
 
 	build := func() (*widget.Panel, *widget.Window, *engine.Engine) {
@@ -303,6 +309,7 @@ func TestTwoEngines_SameSizeDoNotStealEachOthersMoves(t *testing.T) {
 // Объявление без виджета по-прежнему доходит: потребитель вправе звать
 // NotifyMove сам, и тогда отличить своё от чужого можно только по холсту.
 func TestTwoEngines_BareNotifyMoveStillReaches(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 24, G: 28, B: 36, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 600, 400))

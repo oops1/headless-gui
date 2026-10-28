@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
 )
@@ -51,6 +52,7 @@ func withinDeadline(t *testing.T, what string, d time.Duration, fn func()) {
 // TestPERF8_DrawDoesNotBlockInput — пока идёт кадр, мышь, клавиатура и
 // публичные геттеры продолжают работать.
 func TestPERF8_DrawDoesNotBlockInput(t *testing.T) {
+	testreset.Globals(t)
 	g, oc := newSecGrid(30)
 
 	ctx := &blockingCtx{
@@ -94,6 +96,7 @@ func TestPERF8_DrawDoesNotBlockInput(t *testing.T) {
 // TestPERF8_RefreshDoesNotBlockReaders — Items()/Count() доступны, пока
 // CollectionView пересчитывает представление.
 func TestPERF8_RefreshDoesNotBlockReaders(t *testing.T) {
+	testreset.Globals(t)
 	src := cvBenchSource(2000)
 	v := widget.NewCollectionView(src)
 
@@ -137,6 +140,7 @@ func TestPERF8_RefreshDoesNotBlockReaders(t *testing.T) {
 // TestPERF8_FilterMayCallView — предикат фильтра может дёргать само
 // представление: раньше это был гарантированный дедлок на v.mu.
 func TestPERF8_FilterMayCallView(t *testing.T) {
+	testreset.Globals(t)
 	src := cvBenchSource(200)
 	v := widget.NewCollectionView(src)
 
@@ -155,6 +159,7 @@ func TestPERF8_FilterMayCallView(t *testing.T) {
 // TestPERF8_ConcurrentRefreshAndReads — параллельные Refresh/чтения/мутации
 // не роняют представление и не рвут его согласованность (запускать с -race).
 func TestPERF8_ConcurrentRefreshAndReads(t *testing.T) {
+	testreset.Globals(t)
 	src := cvBenchSource(500)
 	v := widget.NewCollectionView(src)
 	v.SetSort(widget.SortDescription{Property: "Name"})
@@ -213,6 +218,7 @@ func TestPERF8_ConcurrentRefreshAndReads(t *testing.T) {
 // TestPERF8_GridDrawStillCorrectAfterUnlocking — кадр вне лока рисует ровно
 // то же, что и раньше: текст ячеек соответствует модели.
 func TestPERF8_GridDrawStillCorrectAfterUnlocking(t *testing.T) {
+	testreset.Globals(t)
 	g := dg.New()
 	g.RowHeight, g.HeaderHeight = 20, 20
 	col := dg.NewTextColumn("Name", "Name")

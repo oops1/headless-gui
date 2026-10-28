@@ -5,10 +5,12 @@ package tests
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 func TestKeyCodes_FunctionKeys(t *testing.T) {
+	testreset.Globals(t)
 	if widget.KeyF1 != 112 || widget.KeyF12 != 123 {
 		t.Fatalf("KeyF1=%d KeyF12=%d, ждали 112/123 (VK-совместимость)", widget.KeyF1, widget.KeyF12)
 	}

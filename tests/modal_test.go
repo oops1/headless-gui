@@ -5,12 +5,14 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // ─── Dialog ──────────────────────────────────────────────────────────────────
 
 func TestDialog_NewDialog_Defaults(t *testing.T) {
+	testreset.Globals(t)
 	dlg := widget.NewDialog("Заголовок", 400, 200)
 	if dlg.Title != "Заголовок" {
 		t.Fatalf("Title = %q", dlg.Title)
@@ -25,6 +27,7 @@ func TestDialog_NewDialog_Defaults(t *testing.T) {
 }
 
 func TestDialog_DimColor(t *testing.T) {
+	testreset.Globals(t)
 	dlg := widget.NewDialog("T", 300, 150)
 	dim := dlg.DimColor()
 	if dim.A == 0 {
@@ -33,6 +36,7 @@ func TestDialog_DimColor(t *testing.T) {
 }
 
 func TestDialog_SetModal(t *testing.T) {
+	testreset.Globals(t)
 	dlg := widget.NewDialog("T", 300, 150)
 	dlg.SetModal(false)
 	if dlg.IsModal() {
@@ -45,6 +49,7 @@ func TestDialog_SetModal(t *testing.T) {
 }
 
 func TestDialog_ContentBounds(t *testing.T) {
+	testreset.Globals(t)
 	dlg := widget.NewDialog("T", 400, 200)
 	cb := dlg.ContentBounds()
 	// ContentBounds должен быть меньше общих bounds и ниже заголовка
@@ -60,6 +65,7 @@ func TestDialog_ContentBounds(t *testing.T) {
 }
 
 func TestDialog_AddChildren(t *testing.T) {
+	testreset.Globals(t)
 	dlg := widget.NewDialog("T", 400, 200)
 	base := len(dlg.Children()) // служебные дети (кнопка ✕)
 	btn := widget.NewButton("OK")
@@ -70,6 +76,7 @@ func TestDialog_AddChildren(t *testing.T) {
 }
 
 func TestDialog_ApplyTheme(t *testing.T) {
+	testreset.Globals(t)
 	dlg := widget.NewDialog("T", 400, 200)
 	theme := widget.LightTheme()
 	dlg.ApplyTheme(theme)
@@ -84,6 +91,7 @@ func TestDialog_ApplyTheme(t *testing.T) {
 // ─── NewConfirmDialog ─────────────────────────────────────────────────────────
 
 func TestNewConfirmDialog_Structure(t *testing.T) {
+	testreset.Globals(t)
 	var result *bool
 	dlg := widget.NewConfirmDialog("Подтверждение", "Вы уверены?", func(ok bool) {
 		b := ok
@@ -101,6 +109,7 @@ func TestNewConfirmDialog_Structure(t *testing.T) {
 }
 
 func TestNewConfirmDialog_OKButton(t *testing.T) {
+	testreset.Globals(t)
 	resultCh := make(chan bool, 1)
 	dlg := widget.NewConfirmDialog("T", "M", func(ok bool) {
 		resultCh <- ok
@@ -133,6 +142,7 @@ func TestNewConfirmDialog_OKButton(t *testing.T) {
 }
 
 func TestNewConfirmDialog_CancelButton(t *testing.T) {
+	testreset.Globals(t)
 	resultCh := make(chan bool, 1)
 	dlg := widget.NewConfirmDialog("T", "M", func(ok bool) {
 		resultCh <- ok
@@ -181,6 +191,7 @@ func (m *mockModalShower) CloseModal(mw widget.ModalWidget) {
 // ─── MessageBox ──────────────────────────────────────────────────────────────
 
 func TestMessageBox_Show_CallsShowModal(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 	dlg := mb.Show("Ошибка", "Файл не найден")
@@ -197,6 +208,7 @@ func TestMessageBox_Show_CallsShowModal(t *testing.T) {
 }
 
 func TestMessageBox_Show_SingleOKButton(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 	dlg := mb.Show("T", "M")
@@ -208,6 +220,7 @@ func TestMessageBox_Show_SingleOKButton(t *testing.T) {
 }
 
 func TestMessageBox_ShowOKCancel_TwoButtons(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 	dlg := mb.ShowOKCancel("T", "M", nil)
@@ -219,6 +232,7 @@ func TestMessageBox_ShowOKCancel_TwoButtons(t *testing.T) {
 }
 
 func TestMessageBox_ShowYesNo_TwoButtons(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 	dlg := mb.ShowYesNo("T", "M", nil)
@@ -230,6 +244,7 @@ func TestMessageBox_ShowYesNo_TwoButtons(t *testing.T) {
 }
 
 func TestMessageBox_ShowYesNoCancel_ThreeButtons(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 	dlg := mb.ShowYesNoCancel("T", "M", nil)
@@ -241,6 +256,7 @@ func TestMessageBox_ShowYesNoCancel_ThreeButtons(t *testing.T) {
 }
 
 func TestMessageBox_ShowDialog_CallbackOnButtonClick(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 	resultCh := make(chan widget.MessageBoxResult, 1)
@@ -275,6 +291,7 @@ func TestMessageBox_ShowDialog_CallbackOnButtonClick(t *testing.T) {
 }
 
 func TestMessageBox_ShowDialog_OKResult(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 	resultCh := make(chan widget.MessageBoxResult, 1)
@@ -301,6 +318,7 @@ func TestMessageBox_ShowDialog_OKResult(t *testing.T) {
 }
 
 func TestMessageBox_ShowDialog_CancelResult(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 	resultCh := make(chan widget.MessageBoxResult, 1)
@@ -328,6 +346,7 @@ func TestMessageBox_ShowDialog_CancelResult(t *testing.T) {
 }
 
 func TestMessageBox_ShowDialog_NoCallback(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 
@@ -340,6 +359,7 @@ func TestMessageBox_ShowDialog_NoCallback(t *testing.T) {
 }
 
 func TestMessageBox_ShowDialog_MultilineMessage(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 
@@ -354,6 +374,7 @@ func TestMessageBox_ShowDialog_MultilineMessage(t *testing.T) {
 }
 
 func TestMessageBox_ShowDialog_LongMessage_Wraps(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 
@@ -369,6 +390,7 @@ func TestMessageBox_ShowDialog_LongMessage_Wraps(t *testing.T) {
 }
 
 func TestMessageBox_ShowDialog_DialogSize_Reasonable(t *testing.T) {
+	testreset.Globals(t)
 	ms := &mockModalShower{}
 	mb := widget.NewMessageBox(ms)
 
@@ -386,6 +408,7 @@ func TestMessageBox_ShowDialog_DialogSize_Reasonable(t *testing.T) {
 // ─── Engine ShowModal / CloseModal ───────────────────────────────────────────
 
 func TestEngine_ShowModal_CentersDialog(t *testing.T) {
+	testreset.Globals(t)
 	// Диалог не закрывается до конца теста — ShowModal запускает fade-in
 	// затемнения (AnimateOwned), поэтому явно подчищаем глобальный реестр
 	// анимаций, иначе "зависшая" анимация тикает в других тестах пакета
@@ -410,6 +433,7 @@ func TestEngine_ShowModal_CentersDialog(t *testing.T) {
 }
 
 func TestEngine_ShowModal_ChildrenShifted(t *testing.T) {
+	testreset.Globals(t)
 	// См. комментарий в TestEngine_ShowModal_CentersDialog — диалог не
 	// закрывается, подчищаем fade-анимацию из глобального реестра.
 	defer widget.StopAllAnimations()
@@ -434,6 +458,7 @@ func TestEngine_ShowModal_ChildrenShifted(t *testing.T) {
 }
 
 func TestEngine_CloseModal_SpecificDialog(t *testing.T) {
+	testreset.Globals(t)
 	// dlg2 остаётся открытым до конца теста — его fade-анимация не
 	// останавливается закрытием dlg1, подчищаем реестр явно (см. комментарий
 	// в TestEngine_ShowModal_CentersDialog).
@@ -466,6 +491,7 @@ func TestEngine_CloseModal_SpecificDialog(t *testing.T) {
 }
 
 func TestEngine_CloseModal_Nil_ClosesTop(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(400, 300, 20)
 
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
@@ -492,6 +518,7 @@ func TestEngine_CloseModal_Nil_ClosesTop(t *testing.T) {
 }
 
 func TestEngine_Modal_BlocksRootInput(t *testing.T) {
+	testreset.Globals(t)
 	// Диалог остаётся открытым — подчищаем fade-анимацию (см. комментарий в
 	// TestEngine_ShowModal_CentersDialog).
 	defer widget.StopAllAnimations()
@@ -520,6 +547,7 @@ func TestEngine_Modal_BlocksRootInput(t *testing.T) {
 }
 
 func TestEngine_Escape_ClosesTopModal(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(400, 300, 20)
 
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
@@ -546,6 +574,7 @@ func TestEngine_Escape_ClosesTopModal(t *testing.T) {
 }
 
 func TestEngine_TabCycle_WithinModal(t *testing.T) {
+	testreset.Globals(t)
 	// Диалог остаётся открытым — подчищаем fade-анимацию (см. комментарий в
 	// TestEngine_ShowModal_CentersDialog).
 	defer widget.StopAllAnimations()
@@ -590,6 +619,7 @@ func TestEngine_TabCycle_WithinModal(t *testing.T) {
 // ─── MessageBox с реальным Engine ───────────────────────────────────────────
 
 func TestEngine_MessageBox_ShowAndClose(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(400, 300, 20)
 	mb := widget.NewMessageBox(eng)
 

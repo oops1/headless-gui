@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -33,6 +34,7 @@ func closeButtonOf(d *widget.Dialog) image.Rectangle {
 
 // Кнопка ✕ переезжает в новый правый верхний угол.
 func TestDialogResize_CloseButtonFollowsWidth(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	d.SetResizable(true)
 	before := closeButtonOf(d)
@@ -50,6 +52,7 @@ func TestDialogResize_CloseButtonFollowsWidth(t *testing.T) {
 
 // Содержимое растягивается на всю область.
 func TestDialogResize_ContentFills(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	d.SetResizable(true)
 
@@ -73,6 +76,7 @@ func TestDialogResize_ContentFills(t *testing.T) {
 // абсолютными координатами, и растяжение каждого превратило бы MessageBox в
 // стопку виджетов друг поверх друга.
 func TestDialogResize_PlainChildrenAreNotStretched(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Вопрос", 400, 300)
 	btn := widget.NewButton("OK")
 	btn.SetBounds(image.Rect(300, 250, 380, 280))
@@ -91,6 +95,7 @@ func TestDialogResize_PlainChildrenAreNotStretched(t *testing.T) {
 
 // Минимум не даёт сжать диалог до неуправляемого состояния.
 func TestDialogResize_MinSize(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	d.SetResizable(true)
 
@@ -111,6 +116,7 @@ func TestDialogResize_MinSize(t *testing.T) {
 
 // Растяжимость по умолчанию выключена: диалог с вопросом тянуть незачем.
 func TestDialogResize_OffByDefault(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Вопрос", 400, 300)
 	if d.IsResizable() {
 		t.Error("новый диалог оказался растяжимым по умолчанию")
@@ -120,6 +126,7 @@ func TestDialogResize_OffByDefault(t *testing.T) {
 // Смена содержимого убирает прежнее из дерева — иначе старое осталось бы
 // висеть под новым, принимая щелчки.
 func TestDialogResize_SetContentReplaces(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	first := widget.NewStackPanel(widget.OrientationVertical)
 	second := widget.NewStackPanel(widget.OrientationVertical)
