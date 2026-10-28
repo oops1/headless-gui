@@ -83,6 +83,12 @@ func (e *Engine) RenderOnDemand() bool {
 // Invalidate помечает весь кадр как изменившийся: ближайший тик отрендерит его.
 // Дёшево (атомарный инкремент) — можно вызывать часто.
 func (e *Engine) Invalidate() {
+	// Сначала поколение записи (cmdpath.go), потом повреждение: кадр,
+	// заставший полное повреждение, обязан застать и новое поколение — иначе
+	// он воспроизвёл бы устаревшие списки как полный кадр.
+	if e.rec != nil {
+		e.rec.Invalidate()
+	}
 	e.damageMu.Lock()
 	e.damageAll = true
 	e.damageMu.Unlock()
@@ -111,6 +117,30 @@ func (e *Engine) InvalidateRect(r image.Rectangle) {
 	if r.Empty() {
 		return
 	}
+	// Ничейное повреждение (cmdpath.go): под областью могло измениться то, о
+	// чём ни один виджет не сообщил, — виджеты под ней перезаписываются.
+	e.damageMu.Lock()
+	e.force = addDamage(e.force, r)
+	e.damageMu.Unlock()
+	e.damageRect(r)
+}
+
+// damageRect — InvalidateRect без ничейного повреждения: для областей, под
+// которыми дерево виджетов не менялось (подсказка, переходы оверлеев) и для
+// уведомлений виджетов, уже помеченных устаревшими (widget/retain.go).
+func (e *Engine) damageRect(r image.Rectangle) {
+	if e.noteDamage(r) {
+		e.invGen.Add(1)
+	}
+}
+
+// noteDamage добавляет область к повреждению кадра, не объявляя UI
+// изменившимся (invGen): для кадра, который цикл и так готовит. false —
+// область пуста.
+func (e *Engine) noteDamage(r image.Rectangle) bool {
+	if r.Empty() {
+		return false
+	}
 	// Масштаб читается lock-free (scaleBits): InvalidateRect вызывается из
 	// сеттеров виджетов, в т.ч. когда движок уже держит e.mu.
 	if k := e.Scale(); k != 1 {
@@ -121,7 +151,7 @@ func (e *Engine) InvalidateRect(r image.Rectangle) {
 		e.damage = addDamage(e.damage, r)
 	}
 	e.damageMu.Unlock()
-	e.invGen.Add(1)
+	return true
 }
 
 // addDamage добавляет область к списку, поглощая вложенные.
@@ -224,6 +254,14 @@ func (e *Engine) RenderCount() uint64 {
 func (e *Engine) animationNeeded(frameInterval time.Duration) bool {
 	if f := e.focus.get(); f != nil {
 		if a, ok := f.(widget.Animated); ok && a.NeedsAnimation() {
+			// Кадр ради каретки — частичный, по области виджета: прежде он
+			// шёл полным (фон, обход всего дерева, все тайлы), на пути команд
+			// (cmdpath.go) перезаписывается и воспроизводится один виджет.
+			// Без invGen: кадр готовится сейчас, второй за ним не нужен.
+			if h, ok := f.(widget.ListHolder); ok {
+				h.MarkDirty()
+			}
+			e.noteDamage(e.screenBoundsOf(f))
 			return true
 		}
 	}

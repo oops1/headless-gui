@@ -67,11 +67,22 @@ func DrawTraceUsers() int { return int(drawTraceRefs.Load()) }
 // w.Draw(ctx). Для контейнеров, которые обходят детей своим циклом, а не
 // через DrawChildren.
 //
+// Под рекордером команд (retain.go) это единственная точка входа удержания:
+// Draw виджета с верным списком не зовётся вовсе.
+//
 // Обёртка короткая: при нулевом медленном пути она компилируется в тот же
 // вызов, что и прежде. Ветка с учётом вынесена отдельно — функция с defer не
 // встраивается, и контекст, переданный через неё, уходил бы в кучу на каждом
 // кадре (тест попапов без аллокаций это ловит).
 func DrawTraced(w Widget, ctx DrawContext) {
+	if r, off, ok := retainerOf(ctx); ok {
+		if h, ok := w.(ListHolder); ok {
+			if bp, ok := w.(baseProvider); ok {
+				drawRetained(w, h, bp.baseRef(), r, off, ctx)
+				return
+			}
+		}
+	}
 	if drawSlowPath.Load() > 0 {
 		drawTracedSlow(w, ctx)
 		return

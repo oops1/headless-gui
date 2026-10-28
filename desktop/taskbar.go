@@ -147,6 +147,9 @@ const (
 // NewTaskbar создаёт панель задач, оформляемую темами из tm.
 func NewTaskbar(tm *theme.Manager) *Taskbar {
 	t := &Taskbar{tm: tm}
+	// Рамка фокуса рисуется панелью поверх элементов (drawFocus): смена фокуса
+	// у элемента перезаписывает и её команды.
+	t.SetDirtyOnChildInvalidate(true)
 	langID := widget.AddLanguageListener(func(string) {
 		t.relayout()
 		t.Invalidate()

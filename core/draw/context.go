@@ -186,7 +186,8 @@ type DrawContext interface {
 
 	// ── Текст ────────────────────────────────────────────────────────────────
 
-	// DrawText выводит строку TTF-шрифтом «default» размером DefaultFontSizePt.
+	// DrawText выводит строку TTF-шрифтом «default» кеглем по умолчанию
+	// (DefaultFontSize — его задаёт тема или приложение).
 	DrawText(text string, x, y int, col color.RGBA)
 
 	// DrawTextSize выводит строку шрифтом «default» произвольного размера.

@@ -40,8 +40,9 @@ func (b *Base) InsertChildAt(i int, w Widget) {
 	copy(b.children[i+1:], b.children[i:])
 	b.children[i] = w
 	adoptChild(b, w)
+	b.markChildAdded(w)
 	bumpTreeGen()
-	notifyRectChanged(screenRect(b, SubtreeRect(w)))
+	notifyOwnedRectChanged(screenRect(b, SubtreeRect(w)))
 }
 
 // moveChildTo переставляет ребёнка w на позицию to.
@@ -56,7 +57,9 @@ func (b *Base) moveChildTo(w Widget, to int) bool {
 		// идёт по новому порядку: поколение поднимается, как при любой
 		// перестройке.
 		bumpTreeGen()
-		notifyRectChanged(screenRect(b, SubtreeRect(w)))
+		b.drawDirty.Store(true)
+		b.markUp()
+		notifyOwnedRectChanged(screenRect(b, SubtreeRect(w)))
 	}
 	return true
 }

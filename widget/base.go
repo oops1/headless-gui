@@ -5,6 +5,8 @@ import (
 	"image/color"
 	"sync"
 	"sync/atomic"
+
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 )
 
 // HorizontalAlignment — WPF HorizontalAlignment (позиционирование внутри родителя).
@@ -73,6 +75,17 @@ type Base struct {
 	// shifter заполнен у контейнеров, показывающих детей со сдвигом
 	// (ScrollView): по нему цепочка родителей берёт текущее смещение.
 	shifter atomic.Pointer[contentShifter]
+
+	// Удержание списка команд (retain.go): список, метки устаревания,
+	// список родителя, в котором виджет числится, и родитель по записи.
+	cmdList      atomic.Pointer[hgdraw.List]
+	refIn        atomic.Pointer[hgdraw.List]
+	recParent    atomic.Pointer[Base]
+	drawDirty    atomic.Bool
+	subtreeDirty atomic.Bool
+	treeDirty    atomic.Bool   // Invalidate: поддерево пометить на горутине кадра
+	opaqueSig    atomic.Uint64 // непрозрачная область при последней записи родителя
+	dirtyOnChild bool
 
 	// disabled=true → виджет отключён (WPF IsEnabled="False").
 	// По умолчанию false (т.е. виджет включён), что соответствует WPF IsEnabled=True.
@@ -147,9 +160,10 @@ func (b *Base) SetBounds(r image.Rectangle) {
 	union := b.bounds.Union(r)
 	b.bounds = r
 	b.boundsMu.Unlock()
+	b.markDirtyAndParent()
 	// Границы заданы в системе координат родителя, а перерисовывать надо место
 	// на экране: у ребёнка прокрутки это не одно и то же (см. contentoffset.go).
-	notifyRectChanged(screenRect(b.parent.Load(), union))
+	notifyOwnedRectChanged(screenRect(b.parent.Load(), union))
 }
 
 func (b *Base) Children() []Widget { return b.children }
@@ -158,16 +172,33 @@ func (b *Base) Children() []Widget { return b.children }
 func (b *Base) AddChild(w Widget) {
 	b.children = append(b.children, w)
 	adoptChild(b, w)
+	b.markChildAdded(w)
 	// Область ребёнка задана в координатах ДЕТЕЙ этого контейнера: если он сам
 	// сдвигает содержимое, сдвиг входит и в этот перевод (поэтому от b, а не от
 	// его родителя).
-	notifyRectChanged(screenRect(b, w.Bounds()))
+	notifyOwnedRectChanged(screenRect(b, w.Bounds()))
+}
+
+// markChildAdded — состав детей изменился: контейнер перезаписывается, а
+// новый ребёнок — тоже (его список мог быть записан под другим родителем).
+func (b *Base) markChildAdded(w Widget) {
+	if bp, ok := w.(baseProvider); ok {
+		bp.baseRef().drawDirty.Store(true)
+	}
+	b.drawDirty.Store(true)
+	b.markUp()
 }
 
 // Invalidate помечает область виджета изменившейся: движок перерисует её на
 // ближайшем кадре. Сеттеры виджетов вызывают его при фактическом изменении
 // визуального состояния; приложению он нужен после прямой мутации
 // экспортированных полей (btn.Text = ... → btn.Invalidate()).
+//
+// Перерисовывается всё в границах виджета, включая потомков: списки команд
+// (retain.go) устаревают у него и у всего поддерева — как и прежде, когда
+// заявленная область перерисовывала каждого, кто в неё попал. Приложение,
+// изменившее общее для поддерева состояние (модель, цвета) без сеттеров
+// потомков, по-прежнему обходится одним Invalidate контейнера.
 //
 // Виджет внутри прокрутки заявляет место, где он виден на экране, а не свои
 // координаты содержимого: иначе перерисовывалась бы чужая область, а то, что
@@ -176,15 +207,25 @@ func (b *Base) Invalidate() {
 	b.boundsMu.Lock()
 	r := b.bounds
 	b.boundsMu.Unlock()
-	notifyRectChanged(screenRect(b.parent.Load(), r))
+	b.markDirtyTree()
+	notifyOwnedRectChanged(screenRect(b.parent.Load(), r))
 }
 
 // invalidateRect — Invalidate для области, заданной не границами виджета, а им
 // самим (прямоугольник строки таблицы, свечение индикатора). r — в той же
 // системе координат, что и границы виджета.
 func (b *Base) invalidateRect(r image.Rectangle) {
-	notifyRectChanged(screenRect(b.parent.Load(), r))
+	b.markDirty()
+	notifyOwnedRectChanged(screenRect(b.parent.Load(), r))
 }
+
+// InvalidateArea заявляет изменившейся область r (в системе координат
+// виджета), которую виджет рисует сам за своими границами: оверлей, тень,
+// свечение. Виджет помечается устаревшим, как при Invalidate (потомки — нет);
+// область переводится на экран так же. В отличие от widget.InvalidateRect,
+// для движка это не ничейное повреждение: соседи под областью не
+// перезаписываются.
+func (b *Base) InvalidateArea(r image.Rectangle) { b.invalidateRect(r) }
 
 // RemoveChild удаляет дочерний виджет из контейнера (по указателю).
 // Возвращает true, если виджет был найден и удалён.
@@ -194,7 +235,9 @@ func (b *Base) RemoveChild(w Widget) bool {
 		if child == w {
 			b.children = append(b.children[:i], b.children[i+1:]...)
 			releaseChild(b, w)
-			notifyRectChanged(screenRect(b, w.Bounds()))
+			b.drawDirty.Store(true)
+			b.markUp()
+			notifyOwnedRectChanged(screenRect(b, w.Bounds()))
 			return true
 		}
 	}
@@ -236,6 +279,7 @@ func (b *Base) SetVisible(v bool) {
 		return
 	}
 	b.hidden = !v
+	b.markDirtyAndParent() // решает родитель: рисовать ли ребёнка
 	b.Invalidate()
 }
 
@@ -569,6 +613,7 @@ func (b *Base) drawChildren(ctx DrawContext) {
 			continue
 		}
 		if i < len(skip) && skip[i] {
+			noteSkipped(ctx, child, true)
 			continue
 		}
 		// Поддерево, не задевающее ни одной изменившейся области, не рисуем

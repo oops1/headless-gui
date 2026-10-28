@@ -58,6 +58,14 @@ type Stats struct {
 	PostQueue uint64
 	// Panics — сколько паник поймано политикой сбоев (failure.go).
 	Panics uint64
+	// Recorded — сколько команд рисования записало дерево виджетов (путь
+	// команд, cmdpath.go): Draw звался только у тех, чьи списки устарели.
+	Recorded uint64
+	// Retained — сколько команд верхнего уровня удержанных списков легло в
+	// кадр ссылкой вместо Draw (списки детей под ссылкой не пересчитываются;
+	// чистые дети удержанного контейнера сюда не входят — их не посещают).
+	// Нулевой Retained при ненулевом Recorded — удержание не работает.
+	Retained uint64
 }
 
 // engineStats — счётчики, из которых собирается Stats. Пишет их горутина
@@ -68,6 +76,7 @@ type engineStats struct {
 	drawNs, diffNs, deliver atomic.Uint64
 	posted, postedRun       atomic.Uint64
 	panics                  atomic.Uint64
+	recorded, retained      atomic.Uint64
 }
 
 // Stats возвращает снимок счётчиков движка. Безопасен из любой горутины и не
@@ -93,6 +102,8 @@ func (e *Engine) Stats() Stats {
 		PostedRun:     run,
 		PostQueue:     queue,
 		Panics:        s.panics.Load(),
+		Recorded:      s.recorded.Load(),
+		Retained:      s.retained.Load(),
 	}
 }
 

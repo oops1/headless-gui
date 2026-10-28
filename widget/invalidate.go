@@ -50,6 +50,11 @@ type uiReceiver struct {
 	// wake — «в UI появилась анимация»: разбудить цикл, не объявляя кадр
 	// изменившимся. nil — приёмник старого вида, ему достаётся full.
 	wake func()
+	// owned — точечная инвалидация от виджета, который уже помечен
+	// устаревшим (Base.Invalidate, SetBounds, состав детей): движку с
+	// удержанием списков команд не нужно считать её ничейным повреждением.
+	// nil — приёмнику достаётся rect.
+	owned func(image.Rectangle)
 }
 
 var (
@@ -85,10 +90,21 @@ func RegisterUINotifier(fnFull func(), fnRect func(image.Rectangle)) uint64 {
 // анимации на каждом тике, регистрируется с fnWake, не объявляющим кадр
 // изменившимся.
 func RegisterUINotifierWake(fnFull func(), fnRect func(image.Rectangle), fnWake func()) uint64 {
+	return RegisterUINotifierRetained(fnFull, fnRect, fnWake, nil)
+}
+
+// RegisterUINotifierRetained — RegisterUINotifierWake с четвёртым колбэком:
+// fnOwned получает точечные инвалидации от виджетов, уже помеченных
+// устаревшими (Base.Invalidate, SetBounds, AddChild и родственные), fnRect —
+// остальные: widget.InvalidateRect, прямые заявления областей. Движку с
+// удержанием списков команд (ADR-0004) вторые — «ничейное повреждение»:
+// виджет, чей охват его задевает, перезаписывается. Приёмник без fnOwned
+// получает всё в fnRect.
+func RegisterUINotifierRetained(fnFull func(), fnRect func(image.Rectangle), fnWake func(), fnOwned func(image.Rectangle)) uint64 {
 	uiNotifyMu.Lock()
 	uiHandleSeq++
 	h := uiHandleSeq
-	uiReceivers = append(uiReceivers, uiReceiver{handle: h, full: fnFull, rect: fnRect, wake: fnWake})
+	uiReceivers = append(uiReceivers, uiReceiver{handle: h, full: fnFull, rect: fnRect, wake: fnWake, owned: fnOwned})
 	uiNotifyMu.Unlock()
 	return h
 }
@@ -204,7 +220,13 @@ func InvalidateRect(r image.Rectangle) { notifyRectChanged(r) }
 // notifyRectChanged сообщает всем приёмникам об изменении конкретной области UI.
 // Приёмник без rect-колбэка получает полную инвалидацию (совместимость).
 // Пустой прямоугольник игнорируется.
-func notifyRectChanged(r image.Rectangle) {
+func notifyRectChanged(r image.Rectangle) { notifyRect(r, false) }
+
+// notifyOwnedRectChanged — notifyRectChanged от виджета, который уже пометил
+// себя устаревшим (см. RegisterUINotifierRetained).
+func notifyOwnedRectChanged(r image.Rectangle) { notifyRect(r, true) }
+
+func notifyRect(r image.Rectangle, owned bool) {
 	// Границы виджета могли поменяться — прямоугольники поддеревьев,
 	// посчитанные до этого, больше не годятся.
 	bumpTreeGen()
@@ -214,9 +236,12 @@ func notifyRectChanged(r image.Rectangle) {
 	uiNotifyMu.RLock()
 	defer uiNotifyMu.RUnlock()
 	for i := range uiReceivers {
-		if uiReceivers[i].rect != nil {
+		switch {
+		case owned && uiReceivers[i].owned != nil:
+			uiReceivers[i].owned(r)
+		case uiReceivers[i].rect != nil:
 			uiReceivers[i].rect(r)
-		} else if uiReceivers[i].full != nil {
+		case uiReceivers[i].full != nil:
 			uiReceivers[i].full()
 		}
 	}

@@ -318,16 +318,20 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 		shifted := child.Bounds().Add(image.Pt(-scrollX, -scrollY))
 		// Пропускаем невидимые элементы
 		if shifted.Max.Y < b.Min.Y || shifted.Min.Y > b.Max.Y {
+			noteSkipped(ctx, child, false)
 			continue
 		}
 		// По горизонтали отсекаем только когда прокрутка вбок включена: без неё
 		// дети правее области рисовались (и целиком терялись на клипе) всегда, и
 		// менять это поведение для тех, кто ContentWidth не задавал, незачем.
 		if hScrollable && (shifted.Max.X < b.Min.X || shifted.Min.X > b.Max.X) {
+			noteSkipped(ctx, child, false)
 			continue
 		}
 		ctx.SetClip(content)
-		child.Draw(childCtx)
+		// Через учёт рисующихся и удержание списков (drawtrace.go, retain.go):
+		// под рекордером ребёнок с верным списком не рисуется заново.
+		DrawTraced(child, childCtx)
 	}
 
 	ctx.SetClip(outer)

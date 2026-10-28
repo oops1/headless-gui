@@ -107,6 +107,13 @@ func (e *Engine) onWidgetInvalidateRect(r image.Rectangle) {
 	e.InvalidateRect(r)
 }
 
+// onWidgetInvalidateRectOwned — точечная инвалидация от виджета, который уже
+// пометил себя устаревшим (widget/retain.go): без ничейного повреждения.
+func (e *Engine) onWidgetInvalidateRectOwned(r image.Rectangle) {
+	e.checkDrawContract("Invalidate/SetBounds/AddChild", r)
+	e.damageRect(r)
+}
+
 // onWidgetAnimation — приёмник «заведена анимация». Старт анимации из Draw
 // нарушением НЕ считается: правило 2 контракта запрещает анимацию счётчиком
 // внутри Draw, а не запуск widget.Animate оттуда. Анимация, заведённая в

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
@@ -69,6 +70,21 @@ type Engine struct {
 	damageMu  sync.Mutex
 	damage    []image.Rectangle // области InvalidateRect с прошлого кадра
 	damageAll bool              // Invalidate() — полный diff
+	// force — ничейное повреждение кадра (cmdpath.go): логические области из
+	// InvalidateRect, widget.InvalidateRect, фокуса — виджет пути команд,
+	// чей охват их задевает, перезаписывается. Под damageMu.
+	force []image.Rectangle
+
+	// forceFrame — ничейное повреждение, забранное кадром (буфер
+	// переиспользуется: takeForce). Только горутина кадра.
+	forceFrame []image.Rectangle
+
+	// rec — рекордер команд пути Draw (cmdpath.go); cmdPath — включён ли он;
+	// replayer и replayDmg — воспроизводитель и буфер повреждения кадра.
+	rec       *hgdraw.Recorder
+	cmdPath   atomic.Bool
+	replayer  hgdraw.Replayer
+	replayDmg [1]image.Rectangle
 
 	// subpixelOwn — подпиксельный текст включила или выключила тема, а не
 	// приложение; subpixelPinned — приложение распорядилось само
@@ -339,6 +355,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	e := &Engine{
 		fontCache: fc,
 		canvas:    hgraster.NewCanvas(width, height, fc),
+		rec:       hgdraw.NewRecorder(),
 		frames:    make(chan output.Frame, 8),
 		// wake будит цикл кадров при внешнем темпе: без него RequestFrame
 		// ждал бы ближайшего тика, то есть темп остался бы тикерным.
@@ -361,6 +378,8 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// экспортированные поля виджетов требуют Invalidate()/Engine.Invalidate().
 	// Опт-аут (прежнее поведение «рендер каждый тик»): SetRenderOnDemand(false).
 	e.onDemand.Store(true)
+	// Путь команд (ADR-0004, cmdpath.go) — режим по умолчанию с 4.0.
+	e.cmdPath.Store(true)
 	// Запасная цепочка шрифтов (BUG-2; файлы читаются лениво) и встроенные
 	// жирный, курсив и моноширинный (P1).
 	e.canvas.AddDefaultFonts()
@@ -386,7 +405,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// бы весь экран ради того, что меняется в одной его части.
 	// Приёмники проверяют контракт отрисовки, если он включён
 	// (drawcontract.go), и делают то же, что Invalidate/InvalidateRect.
-	e.notifierHandle = widget.RegisterUINotifierWake(e.onWidgetInvalidate, e.onWidgetInvalidateRect, e.onWidgetAnimation)
+	e.notifierHandle = widget.RegisterUINotifierRetained(e.onWidgetInvalidate, e.onWidgetInvalidateRect, e.onWidgetAnimation, e.onWidgetInvalidateRectOwned)
 	// Политика сбоев (failure.go): изоляция, под go test — прежнее поведение.
 	e.failure.policy.Store(uint32(defaultFailurePolicy()))
 	e.moveHandle = widget.RegisterMoveSink(e.noteMove)
@@ -1816,6 +1835,28 @@ func (e *Engine) renderFrame() output.Frame {
 			}
 			return output.Frame{Seq: e.frameSeq.Add(1), Timestamp: time.Now(), Width: canvas.W, Height: canvas.H}
 		}
+	}
+	// Путь команд (ADR-0004, cmdpath.go): дерево пишется в рекордер ДО фона и
+	// сброса меток тайлов — запись пикселей не трогает, а паника в Draw
+	// оставляет холст нетронутым. Воспроизведение — ниже, на месте DrawTraced.
+	var rootList *hgdraw.List
+	var exitClip hgdraw.ClipState
+	// Ничейное повреждение забирается после всех ранних выходов (кадры
+	// шагов переходов, пустое повреждение): оно нужно только записи дерева,
+	// а забранное до выхода пропало бы. На прямом пути — просто дренируется.
+	force := e.takeForce()
+	cmdPath := root != nil && e.cmdPath.Load()
+	if cmdPath {
+		if !partial && !damageAll {
+			// Кадр без заявленного повреждения (RenderOnce, рендер каждый
+			// тик, появление подсказки) — как прежде, всё заново: приложение
+			// могло изменить то, о чём не сообщило ни одним Invalidate.
+			e.rec.Invalidate()
+		}
+		e.beginDrawContract()
+		rootList, exitClip = e.recordTree(canvas, root, force)
+	}
+	if partial {
 		// Сброс признаков — ДО блита фона: фон помечает тайлы, которые
 		// накрыл, и сброс после него стёр бы эту пометку. Тогда тайл, на
 		// котором кроме обоев ничего нет, снова уезжал бы к потребителю с
@@ -1843,7 +1884,11 @@ func (e *Engine) renderFrame() output.Frame {
 	// нарушение контракта отрисовки (drawcontract.go).
 	e.beginDrawContract()
 	if root != nil {
-		widget.DrawTraced(root, canvas)
+		if cmdPath {
+			e.replayTree(canvas, rootList, exitClip, partial, damage)
+		} else {
+			widget.DrawTraced(root, canvas)
+		}
 		e.drawOverlayLayer(root, canvas, hosted, ovtOn)
 	}
 

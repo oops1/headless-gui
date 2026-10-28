@@ -59,7 +59,7 @@ func (e *Engine) invalidateShownTooltip() {
 	e.ttShownAt = image.Rectangle{}
 	e.ttMu.Unlock()
 	if !r.Empty() {
-		e.InvalidateRect(r)
+		e.damageRect(r) // дерево под подсказкой не менялось
 	}
 }
 

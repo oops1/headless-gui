@@ -70,6 +70,9 @@ type FontCache struct {
 	kern map[kernKey]fixed.Int26_6
 	// adv — кэш шагов глифов по (размер, руна) для измерения без face.
 	adv map[advKey]advEntry
+	// maxAdv — наибольший шаг глифа по кеглю (оценка охвата строки без
+	// измерения, MaxAdvance).
+	maxAdv map[float64]fixed.Int26_6
 
 	// ── Шейпинг (go-text/typesetting) ────────────────────────────────────────
 	// shapeFace — личный typesetting-face вида над общим tsfont.Font; у него
@@ -326,6 +329,7 @@ func (fc *FontCache) SetDPI(dpi float64) {
 	fc.metrics = nil
 	fc.kern = nil // кернинг зависит от DPI/размера
 	fc.adv = nil
+	fc.maxAdv = nil
 }
 
 // SetSubpixel включает и выключает дробное позиционирование глифов. Меняет
@@ -344,6 +348,7 @@ func (fc *FontCache) SetSubpixel(on bool) {
 	fc.metrics = nil
 	fc.kern = nil
 	fc.adv = nil
+	fc.maxAdv = nil
 }
 
 // SetQuality задаёт слой качества текста (TextQuality). Меняет только маски
@@ -517,6 +522,32 @@ func (fc *FontCache) Advance(sizePt float64, r rune) (fixed.Int26_6, bool) {
 	}
 	fc.mu.Unlock()
 	return e.adv, e.ok
+}
+
+// MaxAdvance возвращает наибольший шаг глифа шрифта для размера sizePt (в
+// физических пикселях 26.6): верхняя оценка ширины строки — число рун × шаг
+// — без её измерения. Кэшируется; первый вызов на (шрифт, кегль, DPI)
+// обходит все глифы шрифта.
+func (fc *FontCache) MaxAdvance(sizePt float64) fixed.Int26_6 {
+	fc.mu.RLock()
+	if v, ok := fc.maxAdv[sizePt]; ok {
+		fc.mu.RUnlock()
+		return v
+	}
+	fk, _, gen := fc.paramsLocked()
+	fc.mu.RUnlock()
+
+	v := fc.font.shard(sizePt).maxAdvance(fk)
+
+	fc.mu.Lock()
+	if fc.gen == gen {
+		if fc.maxAdv == nil {
+			fc.maxAdv = make(map[float64]fixed.Int26_6)
+		}
+		fc.maxAdv[sizePt] = v
+	}
+	fc.mu.Unlock()
+	return v
 }
 
 // HasGlyph сообщает, есть ли в шрифте глиф для руны r (cmap-проверка).

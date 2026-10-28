@@ -102,7 +102,10 @@ func (f *protoFrame) prepareHalo() {
 // haloWorker выдаёт холст ореола заданного размера: ореол обрезается кадром
 // (размытие движка зажимает подложку краем кадра, холст ореола обязан
 // зажимать её там же), поэтому у краевых тайлов свои размеры.
-func (f *protoFrame) haloWorker(size image.Point) *protoWorker {
+//
+// Возвращает и канал пула: вернуть холст надо в него же, а читать карту пула
+// без замка нельзя — соседний тайл другого размера может её пополнять.
+func (f *protoFrame) haloWorker(size image.Point) (*protoWorker, chan *protoWorker) {
 	f.haloMu.Lock()
 	if f.haloPool == nil {
 		f.haloPool = make(map[image.Point]chan *protoWorker)
@@ -118,7 +121,7 @@ func (f *protoFrame) haloWorker(size image.Point) *protoWorker {
 		f.haloPool[size] = ch
 	}
 	f.haloMu.Unlock()
-	return <-ch
+	return <-ch, ch
 }
 
 // runHaloTile рисует тайл под размытием: все команды кадра в пределах ореола
@@ -127,8 +130,8 @@ func (f *protoFrame) haloWorker(size image.Point) *protoWorker {
 func (f *protoFrame) runHaloTile(i int, tile image.Rectangle) {
 	h := f.halo
 	halo := tile.Inset(-h).Intersect(image.Rect(0, 0, f.w, f.h))
-	w := f.haloWorker(halo.Size())
-	defer func() { f.haloPool[halo.Size()] <- w }()
+	w, pool := f.haloWorker(halo.Size())
+	defer func() { pool <- w }()
 	c, t := w.c, w.ctx
 	t.dx, t.dy = halo.Min.X, halo.Min.Y
 	c.ClearRoundClip()

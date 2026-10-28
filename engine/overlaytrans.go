@@ -446,7 +446,7 @@ func (e *Engine) ovtVisit(w widget.Widget, od widget.OverlayDrawer, canvas *Canv
 	if tr.rest != rest {
 		if tr.state == ovtOpening || tr.state == ovtClosing {
 			// Смешение лежало на прежнем месте — оно перерисуется.
-			e.InvalidateRect(tr.logicalRest())
+			e.damageRect(tr.logicalRest())
 		}
 		tr.setGeom(rest, restL, overlayHitRect(w).Sub(off))
 	}
@@ -490,7 +490,7 @@ func (e *Engine) ovtVisit(w widget.Widget, od widget.OverlayDrawer, canvas *Canv
 			// Место не перерисовывалось: снимок «под» взять неоткуда. Не
 			// рисуем — переход начнётся со следующего кадра, а показ целиком
 			// с последующим проявлением с нуля выглядел бы миганием.
-			e.InvalidateRect(restL)
+			e.damageRect(restL)
 			return
 		}
 		tr.slide = ovtSlideDir(w, bounds, slide)
@@ -507,7 +507,7 @@ func (e *Engine) ovtVisit(w widget.Widget, od widget.OverlayDrawer, canvas *Canv
 		if !redrawn {
 			e.ovtStop(tr)
 			tr.state, tr.have = ovtPending, false
-			e.InvalidateRect(restL)
+			e.damageRect(restL)
 			return
 		}
 		from := tr.val()
@@ -526,7 +526,7 @@ func (e *Engine) ovtVisit(w widget.Widget, od widget.OverlayDrawer, canvas *Canv
 			// Сдвинулся, не заявив места: показываем как есть, без перехода.
 			draw()
 			settle()
-			e.InvalidateRect(restL)
+			e.damageRect(restL)
 			return
 		}
 		if redrawn {
@@ -547,7 +547,7 @@ func (e *Engine) ovtVisit(w widget.Widget, od widget.OverlayDrawer, canvas *Canv
 			capture()
 		} else if !tr.have {
 			draw() // сдвинулся, не заявив места: как прежде
-			e.InvalidateRect(restL)
+			e.damageRect(restL)
 		}
 	}
 }
@@ -599,7 +599,7 @@ func (e *Engine) ovtLayerEnd(layer widget.Widget) {
 		e.ovtStop(tr)
 		tr.finished = true
 		if tr.state == ovtOpening || tr.state == ovtClosing {
-			e.InvalidateRect(tr.logicalRest())
+			e.damageRect(tr.logicalRest())
 		}
 	}
 }
@@ -655,7 +655,7 @@ func (e *Engine) ovtAnimate(tr *overlayTrans, from, to float64, dur time.Duratio
 	finish := func() {
 		tr.setVal(to)
 		tr.done.Store(true) // до заявки: кадр, забравший её, увидит и конец
-		e.InvalidateRect(restL)
+		e.damageRect(restL)
 	}
 	if d <= 0 {
 		finish()
@@ -697,7 +697,7 @@ func (e *Engine) ovtWake(tr *overlayTrans) {
 		e.invGen.Add(1)
 		return
 	}
-	e.InvalidateRect(tr.logicalRest())
+	e.damageRect(tr.logicalRest())
 }
 
 // setGeom запоминает место оверлея; снимки прежнего места недействительны.

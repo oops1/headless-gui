@@ -46,7 +46,9 @@ func (s *ThemeScope) SetTheme(t *Theme) {
 	for _, child := range s.Children() {
 		ApplyThemeTree(child, t)
 	}
-	s.Invalidate()
+	// Тема меняет то, по чему рисует каждый виджет области: устарели все их
+	// списки команд, не только область.
+	InvalidateSubtree(s)
 }
 
 // Theme возвращает тему области (nil — глобальная).

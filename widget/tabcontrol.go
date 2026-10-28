@@ -284,7 +284,7 @@ func (tc *TabControl) TabCount() int {
 
 // SetBounds устанавливает границы TabControl и обновляет bounds активного контента.
 func (tc *TabControl) SetBounds(r image.Rectangle) {
-	tc.bounds = r
+	tc.Base.SetBounds(r) // метки и область — как у любого виджета
 	tc.layoutContent()
 }
 
@@ -694,7 +694,25 @@ func (tc *TabControl) ApplyTheme(t *Theme) {
 	tc.mu.Unlock()
 	for _, c := range inactive {
 		ApplyThemeTree(c, t)
+		// Цвета сменились у виджетов, которых сейчас не видно: их списки
+		// команд устарели (retain.go), иначе вкладка показалась бы в старой
+		// теме. Область не заявляется — на экране её нет.
+		markSubtree(c, 0)
 	}
+}
+
+// ExtraChildren возвращает содержимое неактивных вкладок (retain.go):
+// пометка поддерева TabControl доходит и до него.
+func (tc *TabControl) ExtraChildren() []Widget {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	var out []Widget
+	for i := range tc.tabs {
+		if i != tc.active && tc.tabs[i].Content != nil {
+			out = append(out, tc.tabs[i].Content)
+		}
+	}
+	return out
 }
 
 // clampAdd добавляет v к a с ограничением до 255.

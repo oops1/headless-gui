@@ -80,7 +80,7 @@ func (g *Grid) Cols() int {
 
 // SetBounds задаёт bounds и пересчитывает layout.
 func (g *Grid) SetBounds(r image.Rectangle) {
-	g.bounds = r
+	g.Base.SetBounds(r) // метки и область — как у любого виджета
 	g.layout()
 }
 

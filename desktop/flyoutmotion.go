@@ -61,8 +61,8 @@ func (f *Flyout) Settle() {
 	} else {
 		f.setPresence(0)
 	}
-	widget.InvalidateRect(was)
-	widget.InvalidateRect(f.paintedRegion())
+	f.InvalidateArea(was)
+	f.InvalidateArea(f.paintedRegion())
 }
 
 // visible — панель показана: открыта или ещё уезжает.
@@ -106,7 +106,7 @@ func (f *Flyout) animateTo(to float64) {
 			v = 0
 		}
 		f.setPresence(v)
-		widget.InvalidateRect(f.paintedRegion())
+		f.InvalidateArea(f.paintedRegion())
 	})
 	f.amu.Lock()
 	f.anim = a

@@ -514,7 +514,8 @@ type shard struct {
 	adv     map[l2AdvKey]advEntry
 	kern    map[l2KernKey]fixed.Int26_6
 	metrics map[faceKey]VMetric
-	hints   map[fixed.Int26_6]*vHint // по ppem (кегль × DPI)
+	maxAdv  map[faceKey]fixed.Int26_6 // наибольший шаг глифа шрифта на кегле
+	hints   map[fixed.Int26_6]*vHint  // по ppem (кегль × DPI)
 	buf     sfnt.Buffer
 	rast    *vector.Rasterizer
 	bytes   int64 // учёт шарда — источник правды для хранилища
@@ -546,7 +547,7 @@ func (s *shard) clear() int64 {
 
 func (s *shard) clearLocked() int64 {
 	n := s.bytes
-	s.faces, s.glyphs, s.adv, s.kern, s.metrics, s.hints = nil, nil, nil, nil, nil, nil
+	s.faces, s.glyphs, s.adv, s.kern, s.metrics, s.hints, s.maxAdv = nil, nil, nil, nil, nil, nil, nil
 	s.bytes = 0
 	return n
 }
@@ -782,6 +783,52 @@ func (s *shard) metricsMiss(k faceKey) (VMetric, int64) {
 	s.metrics[k] = m
 	s.bytes += smallEntry
 	return m, s.bytes - before
+}
+
+// maxAdvance — наибольший шаг глифа шрифта на кегле шарда при параметрах k:
+// верхняя оценка ширины любой строки (число рун × шаг) без измерения.
+// Считается один раз обходом всех глифов (hmtx через GlyphAdvance), под
+// write-замком шарда.
+func (s *shard) maxAdvance(k faceKey) fixed.Int26_6 {
+	s.mu.RLock()
+	v, ok := s.maxAdv[k]
+	s.mu.RUnlock()
+	if ok {
+		s.hit()
+		return v
+	}
+	v, delta := s.maxAdvanceMiss(k)
+	s.miss()
+	s.font.charge(delta)
+	return v
+}
+
+func (s *shard) maxAdvanceMiss(k faceKey) (fixed.Int26_6, int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if v, ok := s.maxAdv[k]; ok {
+		return v, 0
+	}
+	before := s.bytes
+	ttf := s.font.ttf
+	ppem := ppemOf(s.sizePt, k.dpi)
+	hint := font.HintingFull
+	if k.subpixel {
+		hint = font.HintingNone
+	}
+	var v fixed.Int26_6
+	n := ttf.NumGlyphs()
+	for i := 0; i < n; i++ {
+		if a, err := ttf.GlyphAdvance(&s.buf, sfnt.GlyphIndex(i), ppem, hint); err == nil && a > v {
+			v = a
+		}
+	}
+	if s.maxAdv == nil {
+		s.maxAdv = make(map[faceKey]fixed.Int26_6)
+	}
+	s.maxAdv[k] = v
+	s.bytes += smallEntry
+	return v, s.bytes - before
 }
 
 // ─── Шард шейпера ───────────────────────────────────────────────────────────

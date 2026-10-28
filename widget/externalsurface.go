@@ -339,6 +339,12 @@ func (s *ExternalSurface) Draw(ctx DrawContext) {
 	s.drawChildren(ctx)
 }
 
+// DrawDirect реализует DirectDrawer: буфер блитится под замком из текущего
+// содержимого, и по контракту Swap/Lock движок не читает его после возврата
+// Draw — записать блит командой и воспроизвести позже нельзя. Поверхность
+// рисуется прямо в холст при воспроизведении списка родителя.
+func (s *ExternalSurface) DrawDirect() bool { return true }
+
 func (s *ExternalSurface) drawBuffer(ctx DrawContext, b image.Rectangle, k float64) {
 	// Часть кадра, которую вообще стоит трогать: за ней холст всё равно отсечёт.
 	if ctx.Clip().Intersect(b).Empty() {

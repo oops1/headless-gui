@@ -35,6 +35,7 @@ func MarkBroken(w Widget) {
 		drawSlowPath.Add(1)
 	}
 	brokenMu.Unlock()
+	markWidgetDirty(w) // на месте его списка — заглушка
 }
 
 // ClearBroken снимает пометку: виджет снова рисуется сам. Для программы,
@@ -46,6 +47,7 @@ func ClearBroken(w Widget) {
 		drawSlowPath.Add(-1)
 	}
 	brokenMu.Unlock()
+	markWidgetDirty(w) // заглушка уступает место самому виджету
 }
 
 // ClearAllBroken снимает все пометки. Для тестов: учёт общий на процесс.

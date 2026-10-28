@@ -391,11 +391,13 @@ func (f *Flyout) Invalidate() { f.invalidateOverlay(image.Rectangle{}) }
 // invalidateOverlay заявляет текущую область оверлея и, если задана, прежнюю.
 func (f *Flyout) invalidateOverlay(also image.Rectangle) {
 	f.Base.Invalidate() // значок мог измениться сам по себе
+	// Область оверлея — владельческая (InvalidateArea): дерево под панелью не
+	// менялось, перезаписывать соседей незачем.
 	if r := f.dirtyRect(); !r.Empty() && f.visible() {
-		widget.InvalidateRect(r)
+		f.InvalidateArea(r)
 	}
 	if !also.Empty() {
-		widget.InvalidateRect(also)
+		f.InvalidateArea(also)
 	}
 }
 
