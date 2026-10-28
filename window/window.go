@@ -197,6 +197,11 @@ func (win *Window) installPopupHost() {
 	}
 	win.popupHost = newPopupHost(win.native, inv, peng, win.scale, &win.in)
 	setter.SetPopupSink(win.popupHost.apply)
+	// Хост держит окна исчезающих оверлеев и прикладывает прозрачность
+	// (popup_fade.go); окно, которому нечем, показывается без перехода.
+	if pf, ok := win.eng.(interface{ SetPopupFade(bool) }); ok {
+		pf.SetPopupFade(true)
+	}
 	win.setPopupCursor(win.popupHost.syncCursorOverride)
 }
 

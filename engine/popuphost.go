@@ -15,6 +15,8 @@ import (
 	"hash/fnv"
 	"image"
 	"reflect"
+	"slices"
+	"sync/atomic"
 
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -24,13 +26,47 @@ type PopupFrame struct {
 	ID   uintptr         // стабильный ключ (указатель на виджет-оверлей)
 	Rect image.Rectangle // абсолютные ЛОГИЧЕСКИЕ координаты холста (могут выходить за холст)
 	Img  *image.RGBA     // отрендеренный контент (ФИЗИЧЕСКИЕ пиксели, Rect.Size()×scale)
+	// Transition — оверлей появляется или исчезает (SetOverlayTransitions
+	// при хосте, объявившем SetPopupFade). nil — в покое. Img на шагах
+	// перехода тот же: меняется только окно.
+	Transition *PopupTransition
 }
+
+// PopupTransition — шаг перехода окна-попапа.
+type PopupTransition struct {
+	// Opacity — непрозрачность окна целиком, 0…1. Img — в покое,
+	// непрозрачность прикладывает хост (прозрачность окна ОС или умножение
+	// копии кадра).
+	Opacity float64
+	// Offset — сдвиг окна от Rect в логических точках (выезд от точки
+	// привязки).
+	Offset image.Point
+	// Closing — оверлей уже закрыт: окно держится до конца перехода (пока
+	// ID в кадрах) и ввода не принимает. Хост, не умеющий прозрачности,
+	// закрывает его сразу.
+	Closing bool
+}
+
+// SetPopupFade сообщает, что хост попапов понимает PopupFrame.Transition:
+// держит окно исчезающего оверлея, пока его ID в кадрах, и прикладывает
+// непрозрачность и сдвиг. По умолчанию — нет: хостовые попапы появляются и
+// исчезают сразу, как прежде. Переходы включаются ещё и
+// SetOverlayTransitions — общим выключателем всех оверлеев.
+func (e *Engine) SetPopupFade(on bool) { e.popupFade.Store(on) }
+
+// PopupFade сообщает, объявил ли хост попапов переходы.
+func (e *Engine) PopupFade() bool { return e.popupFade.Load() }
 
 // popupSig — сигнатура одного попапа для детекта изменений (состав/Rect/контент).
 type popupSig struct {
 	id   uintptr
 	rect image.Rectangle
 	hash uint64
+	// Шаг перехода: непрозрачность (в тысячных), сдвиг, закрыт ли.
+	op      int
+	off     image.Point
+	closing bool
+	trans   bool
 }
 
 // popupItem — найденный в дереве хостируемый оверлей (до рендера).
@@ -52,6 +88,16 @@ type popupEntry struct {
 	img     *image.RGBA
 	hash    uint64
 	seen    uint64
+
+	// Переход (popuptrans.go): trans — идёт, closing — оверлей уже закрыт,
+	// slide — сдвиг при доле 0 (логический). Доля и признак конца пишет тик.
+	trans   bool
+	closing bool
+	self    bool // анимирует себя сам (widget.SelfAnimatedOverlay)
+	slide   image.Point
+	tv      atomic.Uint64
+	tdone   atomic.Bool
+	anim    *widget.Animation
 }
 
 // SetPopupSink регистрирует хост popup-оверлеев. sink вызывается из рендер-цикла
@@ -65,6 +111,9 @@ func (e *Engine) SetPopupSink(sink func(frames []PopupFrame)) {
 	e.popupMu.Lock()
 	e.popupSink = sink
 	e.lastPopupSig = nil
+	for _, ent := range e.popupCache {
+		ent.stopTrans()
+	}
 	e.popupCache = nil
 	e.popupMu.Unlock()
 	widget.SetPopupsHosted(sink != nil)
@@ -104,9 +153,11 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 	}
 	e.popupGen++
 	gen := e.popupGen
+	tr := e.popupTransSpec(canvas)
 	for _, it := range items {
 		ent := e.popupCache[it.id]
-		if ent == nil {
+		fresh := ent == nil
+		if fresh {
 			ent = &popupEntry{}
 			e.popupCache[it.id] = ent
 		}
@@ -117,22 +168,67 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 			ent.hash = hashRGBA(ent.img)
 			ent.rect = it.rect
 		}
-		sig = append(sig, popupSig{id: it.id, rect: it.rect, hash: ent.hash})
-	}
-	for id, ent := range e.popupCache {
-		if ent.seen != gen {
-			delete(e.popupCache, id)
+		// Панель, анимирующая себя сама (desktop.Flyout), перехода движка не
+		// получает ни при появлении, ни при исчезновении.
+		ent.self = isSelfAnimated(it.od)
+		itr := tr
+		if ent.self {
+			itr = popupTrans{}
 		}
+		e.popupOpenStep(ent, it, fresh, itr)
+		sig = append(sig, ent.sig(it.id))
 	}
+	// Закрытые оверлеи: исчезают переходом, пока он идёт, — с последней
+	// картинкой и на прежнем месте; без перехода уходят сразу. Переходом —
+	// только тот, чей владелец ещё в дереве и погасил оверлей сам: ушедший
+	// из дерева (или из закрытого модального окна) уносит его сразу, как в
+	// холсте. Порядок — по ID: кадры и подпись не должны зависеть от
+	// порядка обхода карты.
+	closing := e.popupClosingBu[:0]
+	var owners map[uintptr]bool
+	for id, ent := range e.popupCache {
+		if ent.seen == gen {
+			continue
+		}
+		if !ent.closing && tr.dur > 0 && !ent.self {
+			if owners == nil {
+				owners = e.popupOwners(root, modals)
+			}
+			if !owners[id] {
+				ent.stopTrans()
+				delete(e.popupCache, id)
+				continue
+			}
+		}
+		itr := tr
+		if ent.self {
+			itr = popupTrans{}
+		}
+		if e.popupCloseStep(ent, itr) {
+			ent.seen = gen
+			closing = append(closing, id)
+			continue
+		}
+		ent.stopTrans()
+		delete(e.popupCache, id)
+	}
+	slices.Sort(closing)
+	for _, id := range closing {
+		sig = append(sig, e.popupCache[id].sig(id))
+	}
+	e.popupClosingBu = closing
 	e.popupSigBu = sig
 
 	changed := !samePopupSig(e.lastPopupSig, sig)
 	var frames []PopupFrame
 	if changed {
 		e.lastPopupSig = append([]popupSig(nil), sig...)
-		frames = make([]PopupFrame, len(items))
-		for i, it := range items {
-			frames[i] = PopupFrame{ID: it.id, Rect: it.rect, Img: e.popupCache[it.id].img}
+		frames = make([]PopupFrame, 0, len(items)+len(closing))
+		for _, it := range items {
+			frames = append(frames, e.popupCache[it.id].frame(it.id))
+		}
+		for _, id := range closing {
+			frames = append(frames, e.popupCache[id].frame(id))
 		}
 	}
 	e.popupMu.Unlock()

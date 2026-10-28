@@ -24,12 +24,17 @@ import (
 // попапа ещё нет событий, запрос-ответ безопасен.
 func (w *X11Window) x11InitPopupShape() {
 	if w.argb && w.x11AlphaComposited() {
+		w.composited = true
 		return // альфу смешает композитор — окно остаётся прямоугольным
 	}
 	if major, ok := w.x11ExtensionMajor("SHAPE"); ok {
 		w.shapeMajor = major
 	}
 }
+
+// PopupPixelAlpha реализует popupPixelAlpha: альфу точек попапа смешивает
+// композитор — переход появления может идти копией кадра с множителем.
+func (w *X11Window) PopupPixelAlpha() bool { return w.popup && w.argb && w.composited }
 
 // x11AlphaComposited — смешивает ли кто-то альфу окон на этом экране.
 //

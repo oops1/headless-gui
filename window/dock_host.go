@@ -291,6 +291,7 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 		if inv, ok := native.(uiThreadInvoker); ok {
 			pph := newPopupHost(native, inv, eng, scale, &surf.in)
 			eng.SetPopupSink(pph.apply)
+			eng.SetPopupFade(true)
 			surf.setPopupCursor(pph.syncCursorOverride)
 			h.mu.Lock()
 			fp.popupHost = pph

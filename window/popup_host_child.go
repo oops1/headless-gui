@@ -137,6 +137,13 @@ func (c *childPopups) apply(frames []engine.PopupFrame) {
 	c.mu.Lock()
 	seen := make(map[uintptr]bool, len(frames))
 	for _, f := range frames {
+		if f.Transition != nil && f.Transition.Closing {
+			// Прозрачности у попапа здесь нет (один буфер на попап, и
+			// пропущенный последний шаг оставил бы его полупрозрачным):
+			// исчезающий оверлей уходит сразу, появляющийся показывается
+			// сразу — Opacity не прикладывается.
+			continue
+		}
 		seen[f.ID] = true
 		pw, ph := f.Img.Bounds().Dx(), f.Img.Bounds().Dy()
 		origin := image.Pt(

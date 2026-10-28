@@ -279,6 +279,8 @@ var (
 	procCreateRectRgn         = gdi32.NewProc("CreateRectRgn")
 	procCombineRgn            = gdi32.NewProc("CombineRgn")
 	procSetWindowRgn          = user32.NewProc("SetWindowRgn")
+	// Прозрачность окна-попапа целиком на переходах (popup_fade.go).
+	procSetLayeredWindowAttributes = user32.NewProc("SetLayeredWindowAttributes")
 	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 	// DwmExtendFrameIntoClientArea — рамка DWM в клиентской области: без неё
 	// окно без неклиентской части тени не отбрасывает (applyCorners, Win10).
@@ -379,6 +381,11 @@ type Win32Window struct {
 	// (WM_DESTROY не шлёт PostQuitMessage). Взводится для вторичных окон модалок
 	// (owned windows): их закрытие не должно ронять приложение.
 	noQuit bool
+
+	// popupAlpha — прозрачность слоистого окна-попапа (SetPopupAlpha); до
+	// первого вызова — непрозрачное. Пишет и читает поток окна.
+	popupAlpha    float64
+	popupAlphaSet bool
 
 	mu         sync.Mutex
 	frameBuf   []byte // BGRA пиксели для StretchDIBits (top-down: строка 0 — верхняя)
@@ -645,11 +652,41 @@ func (w *Win32Window) enableFileDrop() {
 // не активируется (WS_EX_NOACTIVATE), поверх носителя (WS_EX_TOPMOST), без
 // кнопки на панели задач (WS_EX_TOOLWINDOW). Позиция задаётся позже (SetPosition).
 // Помечается noQuit — уничтожение попапа не завершает цикл сообщений приложения.
+//
+// Окно слоистое (WS_EX_LAYERED): прозрачность целиком задаёт
+// SetLayeredWindowAttributes, а рисуется оно как прежде — StretchDIBits в
+// WM_PAINT и выкройка SetWindowRgn. Без атрибутов слоистое окно невидимо,
+// поэтому они ставятся до показа (createInternal).
 func (w *Win32Window) CreatePopup(width, height int) error {
 	w.noQuit = true
 	style := uint32(wsPopup)
-	exStyle := uint32(wsExNoactivate | wsExToolwindow | wsExTopmost)
+	exStyle := uint32(wsExNoactivate | wsExToolwindow | wsExTopmost | wsExLayered)
 	return w.createInternal("", width, height, style, exStyle, swShowNoActivate, false)
+}
+
+// SetPopupAlpha задаёт прозрачность окна-попапа целиком (0…1); реализует
+// popupAlphaSetter. До создания окна запоминается и ставится при создании.
+func (w *Win32Window) SetPopupAlpha(a float64) {
+	w.popupAlpha, w.popupAlphaSet = a, true
+	if w.hwnd != 0 {
+		w.applyLayeredAlpha()
+	}
+}
+
+// applyLayeredAlpha кладёт прозрачность в слоистое окно.
+func (w *Win32Window) applyLayeredAlpha() {
+	a := 255
+	if w.popupAlphaSet {
+		a = int(w.popupAlpha*255 + 0.5)
+		if a < 0 {
+			a = 0
+		}
+		if a > 255 {
+			a = 255
+		}
+	}
+	const lwaAlpha = 0x2
+	procSetLayeredWindowAttributes.Call(uintptr(w.hwnd), 0, uintptr(a), lwaAlpha)
 }
 
 func (w *Win32Window) createInternal(title string, width, height int, style, exStyle uint32, showCmd uintptr, centerOnScreen bool) error {
@@ -733,6 +770,11 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 
 	// Значок, заданный до создания окна: SetIcon мог прийти раньше Run.
 	w.applyPendingIcon()
+
+	// Слоистое окно (попап) без атрибутов невидимо — ставим до показа.
+	if exStyle&wsExLayered != 0 {
+		w.applyLayeredAlpha()
+	}
 
 	procShowWindow.Call(hwnd, showCmd)
 	procUpdateWindow.Call(hwnd)

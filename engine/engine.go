@@ -126,6 +126,12 @@ type Engine struct {
 	// Рабочие буферы renderPopups (только рендер-горутина, под frameMu).
 	popupItems []popupItem
 	popupSigBu []popupSig
+	// Переходы хостовых попапов (popuptrans.go): popupFade — хост их
+	// понимает (SetPopupFade); popupTicked — тик просит кадр под шаг;
+	// popupClosingBu — исчезающие попапы кадра (переиспользуемый буфер).
+	popupFade      atomic.Bool
+	popupTicked    atomic.Bool
+	popupClosingBu []uintptr
 
 	// notifierHandle — дескриптор регистрации этого движка в широковещательном
 	// реестре нотификаторов widget-пакета (RegisterUINotifier в New). Снимается
@@ -1828,8 +1834,11 @@ func (e *Engine) renderFrame() output.Frame {
 			damageRects = mergeOverlaps(damageRects)
 		}
 	}
-	if len(ovtSteps) > 0 && !damageAll && len(damageRects) == 0 && e.onDemand.Load() {
-		return e.renderStepFrame(canvas, root, modals, surface, ovtSteps, drawStart)
+	// Шаги переходов хостовых попапов (popuptrans.go): холст не меняется,
+	// кадр без повреждения доходит только до renderPopups.
+	popupSteps := e.popupTicked.Swap(false)
+	if (len(ovtSteps) > 0 || popupSteps) && !damageAll && len(damageRects) == 0 && e.onDemand.Load() {
+		return e.renderStepFrame(canvas, root, modals, surface, ovtSteps, popupSteps, image.Rectangle{}, drawStart)
 	}
 	// Объединение нужно там, где область может быть только одна: клип
 	// канваса — прямоугольник, и попапы отбираются по одному прямоугольнику.
@@ -1880,10 +1889,12 @@ func (e *Engine) renderFrame() output.Frame {
 	if partial {
 		damage = damage.Intersect(image.Rect(0, 0, canvas.W, canvas.H))
 		if damage.Empty() {
-			if len(ovtSteps) > 0 {
+			if len(ovtSteps) > 0 || popupSteps || e.getPopupSink() != nil {
 				// Повреждение целиком за краем холста, а шаги переходов —
 				// на нём: их нельзя потерять, последний шаг не повторится.
-				return e.renderStepFrame(canvas, root, modals, surface, ovtSteps, drawStart)
+				// Хостовые попапы живут и за краем: их повреждение тоже
+				// доходит до renderPopups.
+				return e.renderStepFrame(canvas, root, modals, surface, ovtSteps, popupSteps, popupDamage, drawStart)
 			}
 			return output.Frame{Seq: e.frameSeq.Add(1), Timestamp: time.Now(), Width: canvas.W, Height: canvas.H}
 		}
@@ -2029,8 +2040,15 @@ func (e *Engine) saveFrame(canvas *Canvas, seq uint64, tiles []output.DirtyTile)
 // оверлеев (overlaytrans.go): дерево не рисуется, снимки смешиваются прямо в
 // буфер, и сравниваются только их области.
 func (e *Engine) renderStepFrame(canvas *Canvas, root widget.Widget, modals []widget.ModalWidget,
-	surface int, steps []image.Rectangle, drawStart time.Time) output.Frame {
+	surface int, steps []image.Rectangle, popupSteps bool, popupDamage image.Rectangle, drawStart time.Time) output.Frame {
 	e.ovtStepOnly(canvas)
+	if (popupSteps || !popupDamage.Empty()) && e.getPopupSink() != nil {
+		// Холст не перерисовывается; попап — только если повреждение
+		// задело его, иначе хост получает тот же Img с новым шагом.
+		e.beginDrawContract()
+		e.renderPopups(canvas, root, modals, popupDamage, false)
+		e.endDrawContract()
+	}
 	videos := e.collectVideos(canvas, root, modals)
 	diffStart := time.Now()
 	e.stats.drawNs.Add(uint64(diffStart.Sub(drawStart)))

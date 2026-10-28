@@ -80,6 +80,10 @@ type X11Window struct {
 	shapeMajor byte
 	shapeLast  []image.Rectangle
 	shapeSent  bool
+	// composited — альфу окна-попапа с 32-битным visual'ом смешивает
+	// композитор (x11InitPopupShape): переходы попапа идут копией кадра с
+	// множителем (popup_fade.go).
+	composited bool
 
 	// Раскладка клавиатуры: GetKeyboardMapping (core-протокол).
 	// keysyms — матрица keycode × symsPerCode; колонки 0-1 — группа 1,

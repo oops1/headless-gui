@@ -2,6 +2,7 @@ package window
 
 import (
 	"image"
+	"math"
 	"sync"
 	"sync/atomic"
 
@@ -78,11 +79,50 @@ type hostedPopup struct {
 	w, h   int             // физический размер контента
 	closed bool
 
+	// Переход появления и исчезновения (engine.PopupTransition, задача 3.4).
+	// alpha — непрозрачность окна, offset — сдвиг от rect (логический),
+	// fade — как окно умеет прозрачность (до создания — догадка по носителю,
+	// после — по окну). gone — окно закрыто раньше конца исчезновения (без
+	// прозрачности), а ID ещё в кадрах. forceBlit — кадр в покое: кладётся
+	// всегда, как до переходов. Под замком хоста.
+	alpha     float64
+	offset    image.Point
+	fade      popupFadeKind
+	gone      bool
+	forceBlit bool
+
+	// outMu — вывод в окно (положение, прозрачность, картинка) по одному за
+	// раз; out — что в окне уже лежит. Задания вывода приводят окно к
+	// последнему состоянию (reconcile), и их порядок не важен: на X11
+	// InvokeOnUIThread — горутина на вызов, без порядка. Под замком хоста
+	// outMu не берётся; наоборот — можно.
+	outMu sync.Mutex
+	out   popupOut
+
 	// origin — физическое начало координат оверлея (x в старшем слове, y в
 	// младшем). Ввод попапа читает его на потоке окна, и ждать рендер он не
 	// должен: замок хоста держит горутина движка, а её нативный вызов может
 	// ждать разбора сообщений этим самым потоком (GG-80).
 	origin atomic.Uint64
+}
+
+// popupOut — что лежит в окне-попапе (под outMu).
+type popupOut struct {
+	placed bool
+	rect   image.Rectangle // где окно стоит (логический, со сдвигом)
+	w, h   int             // размер окна
+	alpha  float64         // прозрачность окна (popupFadeWindow) или заложенная в картинку (popupFadeCopy)
+	img    *image.RGBA     // кадр оверлея, по которому положена картинка
+}
+
+// effOffset — сдвиг, который окно применяет: у окна без прозрачности его нет
+// — непрозрачное меню, проезжающее путь, вместо показа сразу выглядело бы
+// рывками.
+func (hp *hostedPopup) effOffset() image.Point {
+	if hp.fade == popupFadeNone {
+		return image.Point{}
+	}
+	return hp.offset
 }
 
 // setOrigin запоминает начало координат оверлея в физических пикселях.
@@ -122,12 +162,6 @@ func newPopupHost(carrier NativeWindow, inv uiThreadInvoker, eng popupEngine, sc
 	}
 }
 
-// blitJob — окно и кадр, которые нужно положить в него после снятия замка.
-type blitJob struct {
-	native NativeWindow
-	img    *image.RGBA
-}
-
 // apply — engine.PopupSink. Создаёт/обновляет/закрывает окна-попапы по составу
 // frames. Вызывается из рендер-цикла движка (не UI-поток); нативные операции
 // создания и позиционирования маршалятся на UI-поток носителя.
@@ -138,11 +172,14 @@ type blitJob struct {
 // и ждёт, пока их разберёт поток окна. Если этот поток в тот же момент ждёт
 // замок хоста — в обработчике движения мыши над попапом, — оба ждут друг друга
 // навсегда: окно «не отвечает», Windows предлагает закрыть программу.
+//
+// Вывод — reconcile: окно приводится к последнему состоянию. Перенос и шаги
+// перехода — на UI-потоке, обычный новый кадр — сразу, на горутине движка.
 func (h *popupHost) apply(frames []engine.PopupFrame) {
 	var (
 		created []uintptr
-		moved   []uintptr
-		blits   []blitJob
+		onUI    []*hostedPopup
+		direct  []*hostedPopup
 		closed  []NativeWindow
 	)
 
@@ -152,30 +189,61 @@ func (h *popupHost) apply(frames []engine.PopupFrame) {
 		seen[f.ID] = true
 		pw := f.Img.Bounds().Dx()
 		ph := f.Img.Bounds().Dy()
+		alpha, offset, closing := 1.0, image.Point{}, false
+		if t := f.Transition; t != nil {
+			alpha, offset, closing = t.Opacity, t.Offset, t.Closing
+		}
 
 		hp := h.windows[f.ID]
+		if hp != nil && hp.gone && !closing {
+			// Окно закрыли раньше конца исчезновения, а оверлей открыт снова.
+			delete(h.windows, f.ID)
+			hp = nil
+		}
 		if hp == nil {
+			if closing {
+				continue // исчезающий оверлей, которого здесь не показывали
+			}
 			// Новый оверлей — окно создаётся на UI-потоке.
-			hp = &hostedPopup{rect: f.Rect, img: f.Img, w: pw, h: ph}
+			hp = &hostedPopup{rect: f.Rect, img: f.Img, w: pw, h: ph,
+				alpha: alpha, offset: offset, fade: h.fadeHint()}
 			hp.setOrigin(f.Rect, h.scale)
 			h.windows[f.ID] = hp
 			created = append(created, f.ID)
 			continue
 		}
-
-		move := hp.rect != f.Rect || hp.w != pw || hp.h != ph
-		hp.rect = f.Rect
-		hp.img = f.Img
-		hp.w = pw
-		hp.h = ph
-		hp.setOrigin(f.Rect, h.scale)
-		if hp.native == nil {
-			continue // окно ещё поднимается — createPopup возьмёт свежие rect/img
+		if hp.gone {
+			continue
 		}
-		if move {
-			moved = append(moved, f.ID)
+
+		prev := hp.rect.Add(hp.effOffset())
+		resized := hp.w != pw || hp.h != ph
+		hp.rect, hp.img, hp.w, hp.h = f.Rect, f.Img, pw, ph
+		hp.alpha, hp.offset = alpha, offset
+		if f.Transition == nil {
+			hp.forceBlit = true
+		}
+		move := resized || prev != hp.rect.Add(hp.effOffset())
+		// Исчезающий оверлей ввод не держит: события под ним уходят тому, что
+		// видно под ним, — в точке, где окно стоит сейчас, со сдвигом.
+		if closing {
+			hp.setOrigin(f.Rect.Add(hp.effOffset()), h.scale)
 		} else {
-			blits = append(blits, blitJob{hp.native, hp.img})
+			hp.setOrigin(f.Rect, h.scale)
+		}
+		if hp.native == nil {
+			continue // окно ещё поднимается — createPopup возьмёт свежее состояние
+		}
+		if closing && hp.fade == popupFadeNone {
+			// Исчезать нечем — окно уходит сразу, ID досматриваем до конца.
+			closed = append(closed, hp.native)
+			hp.native, hp.gone, hp.closed = nil, true, true
+			continue
+		}
+		if move || f.Transition != nil {
+			onUI = append(onUI, hp)
+		} else {
+			direct = append(direct, hp)
 		}
 	}
 
@@ -195,14 +263,72 @@ func (h *popupHost) apply(frames []engine.PopupFrame) {
 	for _, id := range created {
 		h.invoker.InvokeOnUIThread(func() { h.createPopup(id) })
 	}
-	for _, id := range moved {
-		h.invoker.InvokeOnUIThread(func() { h.repositionAndBlit(id) })
+	for _, hp := range onUI {
+		h.invoker.InvokeOnUIThread(func() { h.reconcile(hp, true) })
 	}
-	for _, j := range blits {
-		blitPopup(j.native, j.img)
+	for _, hp := range direct {
+		h.reconcile(hp, false)
 	}
 	for _, native := range closed {
 		h.invoker.InvokeOnUIThread(func() { native.Close() })
+	}
+}
+
+// fadeHint — как окна-попапы этого носителя умеют прозрачность, пока окно
+// ещё не создано: Win32 — прозрачностью окна (носитель того же рода); X11
+// узнаёт про композитор только при создании попапа.
+func (h *popupHost) fadeHint() popupFadeKind {
+	if _, ok := h.carrier.(popupAlphaSetter); ok {
+		return popupFadeWindow
+	}
+	return popupFadeNone
+}
+
+// reconcile приводит окно-попап к последнему состоянию: положение (place —
+// можно двигать окно: задание на UI-потоке), прозрачность, картинку. Делается
+// только недостающее, и задания можно выполнять в любом порядке — последнее
+// всегда кладёт итог.
+func (h *popupHost) reconcile(hp *hostedPopup, place bool) {
+	hp.outMu.Lock()
+	defer hp.outMu.Unlock()
+
+	h.mu.Lock()
+	native := hp.native
+	if native == nil || hp.closed {
+		h.mu.Unlock()
+		return
+	}
+	rest, off := hp.rect, hp.effOffset()
+	pw, ph := hp.w, hp.h
+	alpha, src, fade := hp.alpha, hp.img, hp.fade
+	force := hp.forceBlit
+	hp.forceBlit = false
+	carrier := h.carrier
+	h.mu.Unlock()
+
+	o := &hp.out
+	at := rest.Add(off)
+	if place && (!o.placed || o.rect != at || o.w != pw || o.h != ph) {
+		h.positionPopup(native, carrier, rest, off, pw, ph, !o.placed || o.w != pw || o.h != ph)
+		o.placed, o.rect, o.w, o.h = true, at, pw, ph
+	}
+	if fade == popupFadeWindow && o.alpha != alpha {
+		if as, ok := native.(popupAlphaSetter); ok {
+			as.SetPopupAlpha(alpha)
+		}
+		o.alpha = alpha
+	}
+	baked := fade == popupFadeCopy && o.alpha != alpha
+	if force || o.img != src || baked {
+		img := src
+		if fade == popupFadeCopy && alpha < 1 {
+			img = fadedCopy(src, alpha)
+		}
+		blitPopup(native, img)
+		o.img = src
+		if fade == popupFadeCopy {
+			o.alpha = alpha
+		}
 	}
 }
 
@@ -214,9 +340,8 @@ func (h *popupHost) createPopup(id uintptr) {
 		h.mu.Unlock()
 		return
 	}
-	rect := hp.rect
-	img := hp.img
 	pw, ph := hp.w, hp.h
+	alpha := hp.alpha
 	carrier := h.carrier
 	h.mu.Unlock()
 
@@ -225,14 +350,30 @@ func (h *popupHost) createPopup(id uintptr) {
 	if !ok {
 		return // бэкенд без поддержки окон-попапов (host не должен был ставиться)
 	}
+	// Прозрачность окна — до создания: окно, рождённое непрозрачным и
+	// погашенное следом, мигнуло бы целиком.
+	if as, ok := native.(popupAlphaSetter); ok {
+		as.SetPopupAlpha(alpha)
+	}
 	if err := pop.CreatePopup(pw, ph); err != nil {
 		return
 	}
+	fade := popupFadeOf(native)
 	if ow, ok := native.(ownedWindow); ok {
 		ow.SetOwner(carrier)
 	}
-	h.positionPopup(native, carrier, rect, pw, ph)
-	blitPopup(native, img)
+	h.mu.Lock()
+	hp.fade = fade
+	rest, off := hp.rect, hp.effOffset()
+	pw, ph = hp.w, hp.h
+	h.mu.Unlock()
+	hp.outMu.Lock()
+	h.positionPopup(native, carrier, rest, off, pw, ph, true)
+	hp.out = popupOut{placed: true, rect: rest.Add(off), w: pw, h: ph, alpha: 1}
+	if fade == popupFadeWindow {
+		hp.out.alpha = alpha
+	}
+	hp.outMu.Unlock()
 	h.setupPopupInput(native, hp)
 	// Вторичное окно с собственным соединением (X11) — запускаем его насос событий.
 	if ep, ok := native.(eventPumper); ok {
@@ -246,10 +387,11 @@ func (h *popupHost) createPopup(id uintptr) {
 		return
 	}
 	hp.native = native
-	latest := hp.img // мог обновиться, пока окно поднималось
+	hp.forceBlit = true
 	ovr, ovrSet, ovrImg := h.ovrCursor, h.ovrSet, h.ovrImg
 	h.mu.Unlock()
-	blitPopup(native, latest)
+	// Первая картинка и всё, что сменилось, пока окно поднималось.
+	h.reconcile(hp, true)
 	// Принудительный курсор, заданный до открытия попапа (или пока он
 	// поднимался), действует и над ним. Мы на потоке окна.
 	if ovrImg != nil {
@@ -341,25 +483,6 @@ func blitPopup(native NativeWindow, img *image.RGBA) {
 	native.BlitRGBA(img)
 }
 
-// repositionAndBlit переносит окно под новый Rect/размер и блитит контент.
-func (h *popupHost) repositionAndBlit(id uintptr) {
-	h.mu.Lock()
-	hp := h.windows[id]
-	if hp == nil || hp.closed || hp.native == nil {
-		h.mu.Unlock()
-		return
-	}
-	native := hp.native
-	carrier := h.carrier
-	rect := hp.rect
-	img := hp.img
-	pw, ph := hp.w, hp.h
-	h.mu.Unlock()
-
-	h.positionPopup(native, carrier, rect, pw, ph)
-	blitPopup(native, img)
-}
-
 // workAreaProvider — бэкенд умеет сообщить рабочую область монитора,
 // содержащего точку (экран минус таскбар). Реализуется Win32.
 type workAreaProvider interface {
@@ -372,10 +495,15 @@ type workAreaProvider interface {
 // иначе раскрывалось под таскбар, и нижние пункты («Выход») были недостижимы.
 // Сдвиг окна безопасен для проброса ввода: клики транслируются в ЛОКАЛЬНЫХ
 // координатах окна-попапа, которые не зависят от его экранной позиции.
-func (h *popupHost) positionPopup(native, carrier NativeWindow, rect image.Rectangle, pw, ph int) {
+//
+// rest — место в покое: по нему выбирается и вписывается рабочая область,
+// и лишь потом прибавляется сдвиг перехода off — выезд у края монитора не
+// перебрасывает окно на соседний. resize — размер сменился (SetSize на
+// каждом шаге перехода у X11 пересоздавал бы сегмент SHM).
+func (h *popupHost) positionPopup(native, carrier NativeWindow, rest image.Rectangle, off image.Point, pw, ph int, resize bool) {
 	cx, cy := carrier.GetPosition()
-	sx := int(float64(rect.Min.X)*h.scale + 0.5)
-	sy := int(float64(rect.Min.Y)*h.scale + 0.5)
+	sx := int(float64(rest.Min.X)*h.scale + 0.5)
+	sy := int(float64(rest.Min.Y)*h.scale + 0.5)
 	x, y := cx+sx, cy+sy
 	if wp, ok := native.(workAreaProvider); ok {
 		if wa := wp.WorkAreaAt(x, y); !wa.Empty() {
@@ -393,7 +521,13 @@ func (h *popupHost) positionPopup(native, carrier NativeWindow, rect image.Recta
 			}
 		}
 	}
-	native.SetSize(pw, ph)
+	// math.Round, а не +0.5: сдвиг вверх отрицательный, и усечение к нулю
+	// недодавало бы точку.
+	x += int(math.Round(float64(off.X) * h.scale))
+	y += int(math.Round(float64(off.Y) * h.scale))
+	if resize {
+		native.SetSize(pw, ph)
+	}
 	native.SetPosition(x, y)
 }
 
