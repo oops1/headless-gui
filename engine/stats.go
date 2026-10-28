@@ -72,6 +72,9 @@ type Stats struct {
 	// BlurHits, BlurMisses — попадания и промахи кэша размытой подложки:
 	// промах рисует слой ореолом и заполняет кэш.
 	BlurHits, BlurMisses uint64
+	// TilesSkipped — тайлы, которые хэш-дифф (hashdiff.go) не рисовал и не
+	// сравнивал: их команды не менялись с кадра, когда их рисовали.
+	TilesSkipped uint64
 }
 
 // engineStats — счётчики, из которых собирается Stats. Пишет их горутина
@@ -85,6 +88,7 @@ type engineStats struct {
 	recorded, retained      atomic.Uint64
 	tiledFrames             atomic.Uint64
 	blurHits, blurMisses    atomic.Uint64
+	tilesSkipped            atomic.Uint64
 }
 
 // Stats возвращает снимок счётчиков движка. Безопасен из любой горутины и не
@@ -115,6 +119,7 @@ func (e *Engine) Stats() Stats {
 		TiledFrames:   s.tiledFrames.Load(),
 		BlurHits:      s.blurHits.Load(),
 		BlurMisses:    s.blurMisses.Load(),
+		TilesSkipped:  s.tilesSkipped.Load(),
 	}
 }
 

@@ -95,6 +95,8 @@ type Cmd struct {
 	// Ext — редкие аргументы (картинки, точки, кривая, тень, вложенный
 	// список); nil у большинства команд.
 	Ext *CmdExt
+	// sum — хэш команды, посчитанный при записи (Sum).
+	sum uint64
 }
 
 // CmdExt — редкие аргументы команды.
@@ -208,6 +210,26 @@ func (l *List) buildRows(scale float64) {
 		}
 	}
 	l.rows = &rowIndex{scale: scale, bands: bands}
+}
+
+// eachInBands зовёт fn для индексов двух соседних полос по возрастанию:
+// порядок рисования сохраняется, повторов нет; false от fn обрывает обход.
+func eachInBands(a, b []int32, fn func(i int32) bool) bool {
+	for len(a) > 0 || len(b) > 0 {
+		var i int32
+		switch {
+		case len(b) == 0 || len(a) > 0 && a[0] < b[0]:
+			i, a = a[0], a[1:]
+		case len(a) == 0 || b[0] < a[0]:
+			i, b = b[0], b[1:]
+		default: // одна и та же команда в обеих полосах
+			i, a, b = a[0], a[1:], b[1:]
+		}
+		if !fn(i) {
+			return false
+		}
+	}
+	return true
 }
 
 // bandsFor возвращает команды списка, задевающие полосу (или две соседние —

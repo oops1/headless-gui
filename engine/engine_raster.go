@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"image"
 	"reflect"
+
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 )
 
 // InvalidateImageCache сбрасывает кэш масштабированных изображений
@@ -26,6 +28,9 @@ func (e *Engine) InvalidateImageCache(src image.Image) {
 		e.imgInv.Add(0, true)
 		return
 	}
+	// Обёртка непрозрачности (OpaqueImage) разворачивается, как у холста:
+	// кэш масштабирования и хэш-дифф ведут поколение внутренней картинки.
+	src, _ = hgdraw.IsOpaqueImage(src)
 	v := reflect.ValueOf(src)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return // такие источники в кэш не попадают

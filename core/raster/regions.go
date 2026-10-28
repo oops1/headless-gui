@@ -142,6 +142,15 @@ func (c *Canvas) withMaskKind(kind output.RegionKind, f func()) {
 //   - частичная заливка на чистом тайле — тоже «не знаю»: рядом осталось
 //     то, что лежало раньше.
 func (c *Canvas) markTiles(r image.Rectangle, kind output.RegionKind, col color.RGBA, opaque bool) {
+	if c.hasBase {
+		// Признак ставится тому, что кадр нарисует: за базовым клипом
+		// (повреждение частичного кадра, тайл последовательного пути по
+		// тайлам) заливка не ляжет, и её признак не должен затирать соседей.
+		r = r.Intersect(c.baseClip)
+		if r.Empty() {
+			return
+		}
+	}
 	if c.isWindow {
 		// Окно (window.go): один признак — центрального тайла кадра, правила те
 		// же, что для тайла сетки.
@@ -244,9 +253,11 @@ func (m *tileMark) apply(kind output.RegionKind, col color.RGBA, opaque, full bo
 	switch {
 	case m.kind == kind:
 		// Тот же вид второй раз: для заливки важен цвет, для
-		// остального вид не меняется.
+		// остального вид не меняется. Смешанный тайл цвета не несёт —
+		// иначе признак, удержанный с прошлого кадра (хэш-дифф), отличался
+		// бы от поставленного заново только прежним цветом.
 		if kind == output.RegionSolid && m.color != col {
-			m.kind = output.RegionMixed
+			m.kind, m.color = output.RegionMixed, color.RGBA{}
 		}
 	case m.kind == output.RegionSolid:
 		// Фон был, поверх легло содержимое — оно и есть признак.
@@ -255,9 +266,9 @@ func (m *tileMark) apply(kind output.RegionKind, col color.RGBA, opaque, full bo
 		// Заливка легла поверх картинки или текста, не закрыв тайл
 		// целиком: часть площади — содержимое, часть — заливка.
 		// Обещать потребителю что-то одно нельзя.
-		m.kind = output.RegionMixed
+		m.kind, m.color = output.RegionMixed, color.RGBA{}
 	default:
-		m.kind = output.RegionMixed
+		m.kind, m.color = output.RegionMixed, color.RGBA{}
 	}
 }
 

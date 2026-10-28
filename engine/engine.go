@@ -91,6 +91,13 @@ type Engine struct {
 	tiled atomic.Bool
 	tr    *tileRaster
 	bgGen atomic.Uint64
+	// hashDiff — хэш-дифф тайлов (hashdiff.go); plan — план текущего кадра
+	// (переиспользуется, без аллокаций на кадр).
+	hashDiff atomic.Bool
+	plan     framePlan
+	// overlayDrawn — в этом кадре поверх растра дерева рисовался оверлей в
+	// холсте (горутина кадра): его тайлы на следующем кадре принуждаются.
+	overlayDrawn bool
 
 	// subpixelOwn — подпиксельный текст включила или выключила тема, а не
 	// приложение; subpixelPinned — приложение распорядилось само
@@ -388,6 +395,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// по тайлам в пуле (ADR-0005, tileframe.go) — тоже, кроме движка вне
 	// экрана: его одиночные кадры не окупают набора воркеров.
 	e.cmdPath.Store(true)
+	e.hashDiff.Store(true)
 	e.tiled.Store(!offscreen)
 	// Запасная цепочка шрифтов (BUG-2; файлы читаются лениво) и встроенные
 	// жирный, курсив и моноширинный (P1).
@@ -1194,9 +1202,12 @@ func (e *Engine) Stop() {
 	if started {
 		<-e.done
 	}
-	// Цикл кадра остановлен (done) — воркеры тайлового растра и кэш размытия
-	// (tileframe.go) больше никто не читает.
+	// Цикл кадра остановлен (done); RenderOnce с другой горутины держит
+	// frameMu — воркеры тайлового растра, кэш размытия и таблицы хэшей
+	// (tileframe.go) освобождаются под ним.
+	e.frameMu.Lock()
 	e.tr = nil
+	e.frameMu.Unlock()
 	close(e.frames)
 	if e.saveCh != nil {
 		close(e.saveCh) // saveWorker дочитает оставшиеся задачи
@@ -1884,26 +1895,29 @@ func (e *Engine) renderFrame() output.Frame {
 		e.beginDrawContract()
 		rootList, exitClip = e.recordTree(canvas, root, force)
 	}
+	// Активен ли хост попапов: если да — оверлеи с OverlayBounds не рисуются
+	// в холст (они уходят в собственные окна-попапы, см. renderPopups ниже).
+	hosted := e.getPopupSink() != nil
+	// План кадра пути команд (hashdiff.go): ничейное повреждение, «всё
+	// заново» и то, что ляжет поверх растра дерева (модальные, оверлеи,
+	// подсказка, переходы, переносы), принуждают тайлы к растру.
+	var plan *framePlan
+	if cmdPath && rootList != nil {
+		plan = e.planFrame(canvas, root, modals, ovtOn, len(ovtSteps) > 0, full || damageAll, force)
+	}
 	if partial {
-		// Сброс признаков — ДО блита фона: фон помечает тайлы, которые
-		// накрыл, и сброс после него стёр бы эту пометку. Тогда тайл, на
-		// котором кроме обоев ничего нет, снова уезжал бы к потребителю с
-		// ответом «неизвестно что».
-		canvas.ResetTileMarks(damage)
-		canvas.BlitBackgroundIn(damage)
 		canvas.SetBaseClip(damage)
 		defer canvas.ClearBaseClip()
-	} else {
-		canvas.ResetTileMarks(image.Rect(0, 0, canvas.W, canvas.H))
-		canvas.BlitBackground()
+	}
+	if plan == nil {
+		// Прямой путь: фон на весь back или на повреждение, признаки тайлов
+		// сбрасываются до него. На пути команд фон кладёт растр
+		// (tileframe.go) — только под тайлы, которые рисуются.
+		e.blitBackgroundFrame(canvas, partial, damage)
 	}
 	if ovtOn {
 		e.ovtBeginFrame(!partial, damage, layers)
 	}
-
-	// Активен ли хост попапов: если да — оверлеи с OverlayBounds не рисуются
-	// в холст (они уходят в собственные окна-попапы, см. renderPopups ниже).
-	hosted := e.getPopupSink() != nil
 
 	// Корневое дерево: рисуем root и его overlay-слой (popup/dropdown).
 	// Без этого вызова на канвасе остаётся только blitBackground —
@@ -1911,9 +1925,21 @@ func (e *Engine) renderFrame() output.Frame {
 	// Отсюда и до диффа рисуют виджеты: уведомление от них на этой горутине —
 	// нарушение контракта отрисовки (drawcontract.go).
 	e.beginDrawContract()
+	var res rasterResult
 	if root != nil {
 		if cmdPath {
-			e.rasterTree(canvas, rootList, exitClip, partial, damage)
+			res = e.rasterTree(canvas, rootList, exitClip, partial, damage, plan)
+			// Чужие буферы вывода (surfaces.go): тайлы, пропущенные
+			// хэш-диффом внутри области перерисовки, в back ещё не
+			// скопированы, а буфер потребителя обязан быть полным. До
+			// оверлеев: они лягут поверх.
+			if res.hashed && surface != 0 {
+				for _, i := range res.skipped {
+					if tile := canvas.TileRect(i); tile.Overlaps(redraw) {
+						canvas.CopyFrontToBack(tile)
+					}
+				}
+			}
 		} else {
 			widget.DrawTraced(root, canvas)
 		}
@@ -1946,8 +1972,13 @@ func (e *Engine) renderFrame() output.Frame {
 		e.renderPopups(canvas, root, modals, popupDamage, !partial)
 	}
 
-	// Всплывающая подсказка (поверх всего, включая модальные диалоги).
-	e.drawTooltip(canvas, root)
+	// Всплывающая подсказка (поверх всего, включая модальные диалоги); на
+	// пути команд — по плану кадра, её тайлы уже принуждены к растру.
+	if plan != nil {
+		e.drawTooltipPlanned(canvas, plan.tooltip)
+	} else {
+		e.drawTooltip(canvas, root)
+	}
 	e.endDrawContract()
 
 	// Окна программ с видео (video.go): после всей отрисовки, до диффа —
@@ -1977,6 +2008,17 @@ func (e *Engine) renderFrame() output.Frame {
 	switch {
 	case full:
 		tiles = canvas.AllTiles()
+	case res.hashed && !e.overlayDrawn && len(res.rendered) < hashDiffSerialMax:
+		// Хэш-дифф (ADR-0006): тайлы, которые не рисовались, равны front —
+		// сравниваются только нарисованные (плашка подсказки — среди них:
+		// её тайлы принуждены).
+		tiles = canvas.DiffAndSyncTiles(res.rendered)
+	case res.hashed && partial:
+		// Оверлей в холсте лёг неизвестно куда, или нарисованных тайлов
+		// много (дешевле в пуле): дифф по объединению выбранного —
+		// пропущенные тайлы сравнятся равными, а нарисованный между далёкими
+		// областями не останется несинхронизированным с действительным хэшем.
+		tiles = canvas.DiffAndSyncInRects(append([]image.Rectangle{damage}, ovtSteps...))
 	case partial:
 		// Шаги переходов вне повреждения смешаны в буфер без перерисовки —
 		// их области сравниваются тоже.
@@ -1986,6 +2028,13 @@ func (e *Engine) renderFrame() output.Frame {
 	}
 
 	canvas.FinishBackdrops(partial, damageRects)
+	// Что легло поверх растра дерева (оверлеи, модальные, подсказка,
+	// переходы) — не функция команд: такие тайлы на следующем кадре
+	// принуждаются к растру (hashdiff.go).
+	if plan != nil {
+		e.tileRaster().noteOverlaid(plan.overlaidAll || e.overlayDrawn, plan.overlaid)
+	}
+	e.overlayDrawn = false
 
 	seq := e.frameSeq.Add(1)
 
@@ -2070,8 +2119,8 @@ func (e *Engine) renderStepFrame(canvas *Canvas, root widget.Widget, modals []wi
 // с непустым прямоугольником, выносятся в отдельные нативные окна-попапы и
 // здесь (в основном холсте) НЕ рисуются. Прочие оверлеи (например, меню выбора
 // локали widget.Window, не реализующее OverlayBoundsProvider) рисуются как прежде.
-func drawOverlays(w widget.Widget, ctx widget.DrawContext, hosted bool) {
-	drawOverlaysAt(w, ctx, hosted, image.Point{}, 0)
+func drawOverlays(w widget.Widget, ctx widget.DrawContext, hosted bool) bool {
+	return drawOverlaysAt(w, ctx, hosted, image.Point{}, 0)
 }
 
 // drawOverlaysAt: off — смещение кадра w (см. frames.go). Оверлей рисуется в
@@ -2079,23 +2128,31 @@ func drawOverlays(w widget.Widget, ctx widget.DrawContext, hosted bool) {
 // прокрутки идёт через widget.OffsetContext. Без этого меню, открытое у
 // прокрученного поля, рисовалось бы там, где поле стоит в содержимом, — вне
 // видимой части, а то и вне холста.
-func drawOverlaysAt(w widget.Widget, ctx widget.DrawContext, hosted bool, off image.Point, depth int) {
+//
+// Возвращает true, если хоть один оверлей нарисован в ctx (хэш-дифф,
+// hashdiff.go: такие пиксели — не функция команд дерева).
+func drawOverlaysAt(w widget.Widget, ctx widget.DrawContext, hosted bool, off image.Point, depth int) bool {
 	if tooDeep(depth) {
-		return
+		return false
 	}
+	drew := false
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
 		if !hosted || !isHostedOverlay(w) {
 			widget.DrawOverlayTraced(w, od, widget.OffsetContext(ctx, off.X, off.Y))
+			drew = true
 		}
 	}
 	children := w.Children()
 	if len(children) == 0 {
-		return
+		return drew
 	}
 	coff := off.Add(contentShift(w))
 	for _, child := range children {
-		drawOverlaysAt(child, ctx, hosted, coff, depth+1)
+		if drawOverlaysAt(child, ctx, hosted, coff, depth+1) {
+			drew = true
+		}
 	}
+	return drew
 }
 
 // isHostedOverlay сообщает, выносится ли активный overlay виджета w в отдельное

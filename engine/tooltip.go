@@ -67,6 +67,20 @@ func (e *Engine) invalidateShownTooltip() {
 // неподвижен над виджетом с непустым ToolTip. Вызывается из renderFrame
 // (под e.frameMu); canvas и root — снапшоты кадра.
 func (e *Engine) drawTooltip(c *Canvas, root widget.Widget) {
+	e.drawTooltipPlanned(c, e.tooltipPlan(c, root))
+}
+
+// tooltipPlan — подсказка кадра: текст и плашка (логическая), если она
+// показывается. На пути команд считается до растра дерева (hashdiff.go:
+// тайлы плашки принуждаются к растру) и рисуется после него тем же планом.
+type tooltipPlan struct {
+	text string
+	rect image.Rectangle
+	ok   bool
+}
+
+// tooltipPlan решает, показывается ли подсказка, и где.
+func (e *Engine) tooltipPlan(c *Canvas, root widget.Widget) tooltipPlan {
 	e.ttMu.Lock()
 	enabled := e.ttEnabled
 	hasMouse := e.ttHasMouse
@@ -76,7 +90,7 @@ func (e *Engine) drawTooltip(c *Canvas, root widget.Widget) {
 	e.ttMu.Unlock()
 
 	if !enabled || !hasMouse || elapsed < delay {
-		return
+		return tooltipPlan{}
 	}
 
 	// Корень hit-теста: верхний модальный диалог или корневой виджет.
@@ -84,14 +98,21 @@ func (e *Engine) drawTooltip(c *Canvas, root widget.Widget) {
 		root = m
 	}
 	if root == nil {
-		return
+		return tooltipPlan{}
 	}
 
 	tip := tooltipAt(root, mx, my)
 	if tip == "" {
-		return
+		return tooltipPlan{}
 	}
-	e.drawTooltipBox(c, tip, mx, my)
+	return tooltipPlan{text: tip, rect: e.tooltipRect(c, tip, mx, my), ok: true}
+}
+
+// drawTooltipPlanned рисует подсказку по плану кадра.
+func (e *Engine) drawTooltipPlanned(c *Canvas, p tooltipPlan) {
+	if p.ok {
+		e.drawTooltipBox(c, p.text, p.rect)
+	}
 }
 
 // tooltipMayAppear — true в МОМЕНТ появления подсказки: курсор остановился и
@@ -139,7 +160,9 @@ func tooltipAt(root widget.Widget, x, y int) string {
 }
 
 // drawTooltipBox рисует плашку подсказки рядом с курсором, не выходя за холст.
-func (e *Engine) drawTooltipBox(c *Canvas, text string, mx, my int) {
+// tooltipRect — плашка подсказки для текста у курсора (логические
+// координаты): справа-снизу от курсора, с прижатием к краям холста.
+func (e *Engine) tooltipRect(c *Canvas, text string, mx, my int) image.Rectangle {
 	const padX, padY = 8, 5
 	tw := c.MeasureText(text, widget.DefaultFontSize())
 	bw := tw + padX*2
@@ -160,6 +183,12 @@ func (e *Engine) drawTooltipBox(c *Canvas, text string, mx, my int) {
 	if y < 0 {
 		y = 0
 	}
+	return image.Rect(x, y, x+bw, y+bh)
+}
+
+func (e *Engine) drawTooltipBox(c *Canvas, text string, r image.Rectangle) {
+	const padX, padY = 8, 5
+	x, y, bw, bh := r.Min.X, r.Min.Y, r.Dx(), r.Dy()
 
 	bg := color.RGBA{R: 45, G: 45, B: 48, A: 240}
 	border := color.RGBA{R: 120, G: 120, B: 130, A: 255}
@@ -171,6 +200,6 @@ func (e *Engine) drawTooltipBox(c *Canvas, text string, mx, my int) {
 
 	// Запоминаем область плашки — SendMouseMove инвалидирует её для стирания.
 	e.ttMu.Lock()
-	e.ttShownAt = image.Rect(x, y, x+bw, y+bh)
+	e.ttShownAt = r
 	e.ttMu.Unlock()
 }

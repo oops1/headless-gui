@@ -1790,6 +1790,12 @@ func (c *Canvas) diffTileRows(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
 			}
 		}
 	}
+	return c.extractTiles(tiles, total)
+}
+
+// extractTiles — второй проход диффа: данные изменившихся тайлов в один слэб
+// и синхронизация front.
+func (c *Canvas) extractTiles(tiles []output.DirtyTile, total int) []output.DirtyTile {
 	if len(tiles) == 0 {
 		return nil
 	}
@@ -1811,6 +1817,45 @@ func (c *Canvas) diffTileRows(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
 		c.syncTile(t.X, t.Y, t.W, t.H)
 	}
 	return tiles
+}
+
+// DiffAndSyncTiles сравнивает и синхронизирует только тайлы с индексами idx
+// (ряд за рядом, см. TileGrid; по возрастанию): хэш-дифф (ADR-0006) отдаёт
+// нарисованные тайлы кадра, остальные не трогались и равны front.
+func (c *Canvas) DiffAndSyncTiles(idx []int) []output.DirtyTile {
+	ts := output.TileSize
+	n := c.tilesX * c.tilesY
+	var tiles []output.DirtyTile
+	total := 0
+	for _, i := range idx {
+		if i < 0 || i >= n {
+			continue
+		}
+		px, py := (i%c.tilesX)*ts, (i/c.tilesX)*ts
+		pw, ph := min(ts, c.W-px), min(ts, c.H-py)
+		if pw <= 0 || ph <= 0 || c.tilesEqual(px, py, pw, ph) {
+			continue
+		}
+		tiles = append(tiles, output.DirtyTile{X: px, Y: py, W: pw, H: ph})
+		total += pw * ph * 4
+	}
+	return c.extractTiles(tiles, total)
+}
+
+// CopyFrontToBack копирует область r из front в back: при чужих буферах
+// вывода (SetSurfaces) тайл, пропущенный хэш-диффом внутри области
+// перерисовки, иначе в back потребителя не попал бы.
+func (c *Canvas) CopyFrontToBack(r image.Rectangle) {
+	r = r.Intersect(c.back.Bounds()).Intersect(c.front.Bounds())
+	if r.Empty() {
+		return
+	}
+	n := r.Dx() * 4
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		s := c.front.PixOffset(r.Min.X, y)
+		d := c.back.PixOffset(r.Min.X, y)
+		copy(c.back.Pix[d:d+n], c.front.Pix[s:s+n])
+	}
 }
 
 func (c *Canvas) tilesEqual(x, y, w, h int) bool {

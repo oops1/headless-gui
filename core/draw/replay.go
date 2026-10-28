@@ -127,21 +127,7 @@ func (p *Replayer) list(l *List) {
 	// детей не целиком).
 	if l.rows != nil && len(p.o.Damage) == 1 {
 		if a, b, ok := l.bandsFor(p.o.Damage[0]); ok {
-			// Две соседние полосы сливаются по возрастанию индексов: порядок
-			// рисования сохраняется, повторов нет.
-			for len(a) > 0 || len(b) > 0 {
-				switch {
-				case len(b) == 0 || len(a) > 0 && a[0] < b[0]:
-					p.cmd(&l.Cmds[a[0]])
-					a = a[1:]
-				case len(a) == 0 || b[0] < a[0]:
-					p.cmd(&l.Cmds[b[0]])
-					b = b[1:]
-				default: // одна и та же команда в обеих полосах
-					p.cmd(&l.Cmds[a[0]])
-					a, b = a[1:], b[1:]
-				}
-			}
+			eachInBands(a, b, func(i int32) bool { p.cmd(&l.Cmds[i]); return true })
 			return
 		}
 	}

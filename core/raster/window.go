@@ -44,6 +44,7 @@ func NewWindowCanvas(src *Canvas) *Canvas {
 		logicalH:   src.logicalH,
 		format:     src.format,
 		formatOwn:  src.format,
+		bgImage:    src.bgImage,
 	}
 	c.fallbacks = make([]*hgtext.FallbackFont, len(src.fallbacks))
 	for i, fb := range src.fallbacks {
@@ -103,6 +104,7 @@ func (c *Canvas) Retarget(window image.Rectangle) {
 func (c *Canvas) SyncFrame(src *Canvas) {
 	c.frame = src.back.Bounds()
 	c.wallParent = src.wallOwner()
+	c.bgImage = src.bgImage
 	c.inv = src.inv
 	c.W, c.H = src.W, src.H
 	c.scale, c.logicalW, c.logicalH = src.scale, src.logicalW, src.logicalH
@@ -137,14 +139,11 @@ func (c *Canvas) view(fc *hgtext.FontCache) *hgtext.FontCache {
 	return v
 }
 
-// SetCenter задаёт центральный тайл окна (физические координаты кадра) и
-// исходный признак — признак этого тайла у холста движка после фона.
-func (c *Canvas) SetCenter(tile image.Rectangle, main *Canvas, tileIndex int) {
+// SetCenter задаёт центральный тайл окна (физические координаты кадра);
+// признак тайла начинается пустым — его ставят фон окна и команды.
+func (c *Canvas) SetCenter(tile image.Rectangle) {
 	c.center = tile
 	c.centerMark = tileMark{}
-	if tileIndex >= 0 && tileIndex < len(main.marks) {
-		c.centerMark = main.marks[tileIndex]
-	}
 }
 
 // StoreCenterMark записывает признак центрального тайла в холст движка.

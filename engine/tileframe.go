@@ -1,22 +1,26 @@
 package engine
 
 // tileframe.go — тайловая растеризация списка команд в пуле воркеров
-// (ADR-0005, задача 4а.2).
+// (ADR-0005, задача 4а.2); отбор тайлов хэш-диффом — hashdiff.go (ADR-0006).
 //
 // Кадр с путём команд (cmdpath.go) делится на тайлы 64×64 физических
-// пикселей — те же, что у диффа. Воркер берёт холст-окно (core/raster/
-// window.go): буфер размером с тайл в координатах кадра, префилл из back,
-// базовый клип повреждения, воспроизведение дерева с отсечкой по тайлу,
-// копирование строк обратно в back и перенос признака тайла. Дальше кадр
-// идёт как прежде: оверлеи, дифф back/front, регионы.
+// пикселей — те же, что у диффа. Из выбранных тайлов (все или задевающие
+// повреждение) хэш-дифф оставляет изменившиеся и принуждённые. Воркер берёт
+// холст-окно (core/raster/window.go): буфер размером с тайл в координатах
+// кадра, фон холста в области растра, базовый клип повреждения,
+// воспроизведение дерева с отсечкой по тайлу, копирование строк обратно в
+// back и перенос признака тайла. Дальше кадр идёт как прежде: оверлеи, дифф
+// нарисованных тайлов back/front, регионы.
 //
 // Размытая подложка (BlurBehind) читает кадр за пределами тайла. По решению
 // владельца — кэш с ореолом на промахе: слой, чьё содержимое под ним не
 // менялось (ключ — хэши команд под областью чтения), подменяется блитом
 // готового растра; слой-промах рисуется в окнах с запасом по периметру
 // (ореол), откуда размытие читает подложку, а растр кэша собирается из
-// центров ореолов по ходу кадра. Снимок back под ореолами снимает горутина
-// кадра до раздачи: воркеры соседних тайлов пишут в back параллельно.
+// центров ореолов по ходу кадра. Окно с ореолом в области растра кладёт фон
+// и рисует подложку само (в back под пропущенным соседом ничего не пишется),
+// вне её — частичный кадр — берёт прошлый back, который в этом кадре никто
+// не трогает.
 
 import (
 	"image"
@@ -34,8 +38,8 @@ import (
 )
 
 const (
-	// tiledMinTiles — с какого числа тайлов повреждения кадр идёт по тайлам;
-	// меньше — прямое воспроизведение в холст движка (раздача пула, префилл и
+	// tiledMinTiles — с какого числа рисуемых тайлов кадр идёт по тайлам;
+	// меньше — воспроизведение в холст движка (раздача пула, префилл и
 	// копирование на паре тайлов дороже самой работы).
 	tiledMinTiles = 5
 	// tiledBigImage — физическая площадь приёмника картинки, с которой она
@@ -79,7 +83,7 @@ type tileWorker struct {
 	// Текущий тайл: для Tap и Override.
 	tr   *tileRaster
 	tile image.Rectangle
-	vis  image.Rectangle // окно ∩ повреждение — что тайл на самом деле нарисовал
+	vis  image.Rectangle // окно ∩ область растра — что тайл на самом деле нарисовал
 	halo bool
 }
 
@@ -112,8 +116,8 @@ type scaledKey struct {
 	pw, ph int
 }
 
-// tileEnv — окружение холста, от которого зависят растры кэша размытия:
-// смена любого из полей делает их устаревшими.
+// tileEnv — окружение холста, от которого зависят растры кэша размытия и
+// хэши тайлов: смена любого из полей делает их устаревшими.
 type tileEnv struct {
 	canvas  *Canvas
 	format  PixelFormat
@@ -132,21 +136,34 @@ type tileRaster struct {
 	bytes   int
 	frameNo uint64
 	env     tileEnv
-	snapBuf []byte
 	// directMu — прямые виджеты рисуются по одному: их Draw не обязан быть
 	// готов к вызову из нескольких воркеров сразу (виджет, лежащий на
 	// нескольких тайлах, иначе рисовался бы параллельно).
 	directMu sync.Mutex
 
+	// Хэш-дифф (hashdiff.go): хэши тайлов на момент, когда их рисовали
+	// (prev, действительны по valid), хэши текущего кадра (cur), принуждение
+	// и пропуск на кадр — по индексу тайла.
+	prev, cur []uint64
+	valid     []bool
+	forced    []bool
+	skipMask  []bool
+
 	// На кадр.
 	canvas   *Canvas
 	root     *hgdraw.List
-	tiles    []int
-	haloH    []int
+	pool     bool // пул доступен: кэш размытия в деле (попадание/промах решены до выбора тайлов)
 	partial  bool
 	damage   image.Rectangle // физическое объединённое повреждение
+	region   image.Rectangle // область растра: кадр или повреждение ∩ кадр
+	regionL  image.Rectangle
+	selRect  image.Rectangle // выбранные тайлы одним прямоугольником сетки
+	selL     image.Rectangle
+	selected []int // выбранные тайлы: все или задевающие повреждение
+	tiles    []int // рисуемые: выбранные без пропущенных хэш-диффом
+	skipped  []int
+	haloH    []int
 	layers   []*blurLayer
-	snapshot *image.RGBA
 	scaled   map[scaledKey]*image.RGBA
 	hits     int
 	misses   int
@@ -163,83 +180,161 @@ func (e *Engine) tileRaster() *tileRaster {
 	return e.tr
 }
 
-// rasterTree растрит список кадра: по тайлам в пуле или, для мелких кадров и
-// одного процессора, прямо в холст движка (как 4а.1).
-func (e *Engine) rasterTree(canvas *Canvas, list *hgdraw.List, exit hgdraw.ClipState, partial bool, damage image.Rectangle) {
-	if list == nil || !e.tiled.Load() || runtime.GOMAXPROCS(0) == 1 {
-		e.replayTree(canvas, list, exit, partial, damage)
-		return
+// rasterResult — что растр оставил диффу: hashed — хэш-дифф пропустил часть
+// выбранных тайлов, сравнивать надо только rendered; skipped — пропущенные
+// (при чужих буферах вывода копируются из front). Срезы живут до следующего
+// кадра.
+type rasterResult struct {
+	hashed            bool
+	rendered, skipped []int
+}
+
+// rasterTree кладёт фон и растрит список кадра: по тайлам в пуле или, для
+// мелких кадров и одного процессора, прямо в холст движка (как 4а.1); с
+// хэш-диффом — только изменившиеся и принуждённые тайлы (ADR-0006).
+func (e *Engine) rasterTree(canvas *Canvas, list *hgdraw.List, exit hgdraw.ClipState, partial bool, damage image.Rectangle, plan *framePlan) rasterResult {
+	if list == nil {
+		return rasterResult{}
 	}
 	tr := e.tileRaster()
 	tr.frameNo++
 	tr.checkEnv(canvas)
-	tr.selectTiles(canvas, partial, damage)
-	if len(tr.tiles) < tiledMinTiles {
-		tr.sweep()
-		e.replayTree(canvas, list, exit, partial, damage)
-		return
+	tr.begin(canvas, list, partial, damage)
+	tr.findLayers()
+	pool := e.tiled.Load() && runtime.GOMAXPROCS(0) > 1
+	tr.pool = pool
+	if pool {
+		// До выбора тайлов: промах слоя, который кадр накроет целиком,
+		// принуждает его тайлы к растру (decide) — иначе запись, вымытая по
+		// TTL, не восстановилась бы, пока под слоем есть пропущенный тайл.
+		tr.lookupLayers()
 	}
-	tr.render(canvas, list, partial, damage)
-	// Клип на выходе — как после Draw корня на прямом пути: оверлеи и
-	// модальные слои рисуются в холст движка под ним.
-	e.replayer.Replay(canvas, tiledExitList, hgdraw.ReplayOpts{Exit: exit})
+	hashOn := e.hashDiff.Load() && plan != nil
+	if hashOn {
+		tr.hashTiles()
+		tr.decide(plan)
+	} else {
+		tr.unskip()
+		clear(tr.valid)
+	}
+	tiled := pool && len(tr.tiles) >= tiledMinTiles
+	if !tiled && len(tr.skipped) > 0 && tr.layersTouchRendered() {
+		// Рисуемый тайл задевает слой размытия. В пуле слой — попадание кэша
+		// или ореол, и пропуск остаётся (тик часов на панели со стеклом);
+		// последовательный путь выполняет слой в холсте движка, и тот
+		// читает соседние тайлы: им нужно то же содержимое, что на прямом
+		// пути, — рисуется всё выбранное.
+		if pool {
+			tiled = true
+		} else {
+			tr.unskip()
+		}
+	}
+	e.stats.tilesSkipped.Add(uint64(len(tr.skipped)))
+	switch {
+	case len(tr.tiles) == 0:
+		// Ничего не изменилось: ни фона, ни растра — и диффу нечего делать.
+		tr.sweep()
+	case tiled:
+		tr.render()
+		// Клип на выходе — как после Draw корня на прямом пути: оверлеи и
+		// модальные слои рисуются в холст движка под ним.
+		e.replayer.Replay(canvas, tiledExitList, hgdraw.ReplayOpts{Exit: exit})
+	case len(tr.skipped) == 0:
+		tr.sweep()
+		e.blitBackgroundFrame(canvas, partial, damage)
+		e.replayTree(canvas, list, exit, partial, damage)
+	default:
+		tr.sweep()
+		e.replayTiles(canvas, list, exit, partial, damage, tr.tiles)
+	}
+	res := rasterResult{hashed: len(tr.skipped) > 0, rendered: tr.tiles, skipped: tr.skipped}
+	if hashOn {
+		tr.finishHash(plan)
+	}
+	tr.reset()
+	return res
 }
 
-// checkEnv сбрасывает кэш размытия, если окружение холста сменилось: растры
-// сняты в формате back, на масштабе и с фоном/обоями/шрифтами того кадра.
+// checkEnv сбрасывает кэш размытия и хэши тайлов, если окружение холста
+// сменилось: растры и хэши сняты в формате back, на масштабе и с
+// фоном/обоями/шрифтами того кадра.
 func (tr *tileRaster) checkEnv(canvas *Canvas) {
 	env := tileEnv{canvas: canvas, format: canvas.Format(), scale: canvas.Scale(), fontRev: canvas.FontRev(), bgGen: tr.e.bgGen.Load()}
 	if env != tr.env {
 		tr.env = env
 		clear(tr.cache)
 		tr.bytes = 0
+		clear(tr.valid)
 	}
 }
 
-// selectTiles выбирает тайлы кадра: при частичном кадре — задевающие
-// повреждение, иначе все.
-func (tr *tileRaster) selectTiles(canvas *Canvas, partial bool, damage image.Rectangle) {
-	tr.tiles = tr.tiles[:0]
+// begin готовит состояние кадра: область растра, таблицы хэшей под сетку,
+// выбранные тайлы (при частичном кадре — задевающие повреждение, иначе все).
+func (tr *tileRaster) begin(canvas *Canvas, root *hgdraw.List, partial bool, damage image.Rectangle) {
+	e := tr.e
+	tr.canvas, tr.root, tr.partial, tr.damage = canvas, root, partial, damage
+	frame := canvas.Frame()
+	tr.region = frame
+	if partial {
+		tr.region = damage.Intersect(frame)
+	}
+	tr.regionL = e.logicalRect(tr.region)
 	cols, rows := canvas.TileGrid()
 	n := cols * rows
-	if !partial {
+	if len(tr.prev) != n {
+		tr.prev, tr.cur = make([]uint64, n), make([]uint64, n)
+		tr.valid, tr.forced, tr.skipMask = make([]bool, n), make([]bool, n), make([]bool, n)
+	}
+	tr.selected = tr.selected[:0]
+	ts := output.TileSize
+	switch {
+	case !partial:
 		for i := 0; i < n; i++ {
-			tr.tiles = append(tr.tiles, i)
+			tr.selected = append(tr.selected, i)
 		}
-		return
-	}
-	for i := 0; i < n; i++ {
-		if canvas.TileRect(i).Overlaps(damage) {
-			tr.tiles = append(tr.tiles, i)
+		tr.selRect = frame
+	case tr.region.Empty():
+		tr.selRect = image.Rectangle{}
+	default:
+		r := tr.region
+		tx0, ty0 := r.Min.X/ts, r.Min.Y/ts
+		tx1, ty1 := (r.Max.X-1)/ts, (r.Max.Y-1)/ts
+		if tx1 >= cols {
+			tx1 = cols - 1
 		}
+		if ty1 >= rows {
+			ty1 = rows - 1
+		}
+		for ty := ty0; ty <= ty1; ty++ {
+			for tx := tx0; tx <= tx1; tx++ {
+				tr.selected = append(tr.selected, ty*cols+tx)
+			}
+		}
+		tr.selRect = image.Rect(tx0*ts, ty0*ts, (tx1+1)*ts, (ty1+1)*ts).Intersect(frame)
 	}
+	tr.selL = e.logicalRect(tr.selRect)
+	tr.tiles, tr.skipped = tr.tiles[:0], tr.skipped[:0]
+	tr.reset()
 }
 
-// reset забывает состояние прошлого кадра (в том числе после паники в
-// Run, когда конец render не выполнился).
+// reset забывает слои и растры кадра (в том числе после паники в Run, когда
+// конец render не выполнился; begin следующего кадра зовёт его тоже).
 func (tr *tileRaster) reset() {
 	for i := range tr.layers {
 		tr.layers[i] = nil
 	}
 	tr.layers = tr.layers[:0]
-	tr.snapshot, tr.scaled = nil, nil
+	tr.scaled = nil
 	tr.hits, tr.misses = 0, 0
 }
 
-// render — кадр по тайлам.
-func (tr *tileRaster) render(canvas *Canvas, root *hgdraw.List, partial bool, damage image.Rectangle) {
-	tr.reset()
-	tr.canvas, tr.root, tr.partial, tr.damage = canvas, root, partial, damage
-	frame := canvas.Frame()
-	region := frame
-	if partial {
-		region = damage.Intersect(frame)
-	}
-	regionL := tr.e.logicalRect(region)
-
-	tr.findLayers(root, regionL)
-	tr.prescale(root, regionL)
-	tr.planHalos(frame)
+// render — кадр по тайлам в пуле.
+func (tr *tileRaster) render() {
+	canvas := tr.canvas
+	tr.allocRasters()
+	tr.prescale(tr.root, tr.regionL)
+	tr.planHalos()
 
 	n := len(tr.tiles)
 	for tr.made < cap(tr.workers) && tr.made < n {
@@ -255,7 +350,6 @@ func (tr *tileRaster) render(canvas *Canvas, root *hgdraw.List, partial bool, da
 	tr.e.stats.tiledFrames.Add(1)
 	tr.e.stats.blurHits.Add(uint64(tr.hits))
 	tr.e.stats.blurMisses.Add(uint64(tr.misses))
-	tr.reset()
 }
 
 // RunPart — один тайл (workpool.Task).
@@ -272,18 +366,22 @@ func (tr *tileRaster) RunPart(i int) {
 		window = tile.Inset(-h).Intersect(canvas.Frame())
 	}
 	w.c.Retarget(window)
-	if h > 0 {
-		w.c.PrefillFrom(tr.snapshot, window)
-	} else {
-		w.c.PrefillFrom(canvas.BackImage(), tile)
+	w.c.SetCenter(tile)
+	if h > 0 && tr.partial {
+		// Ореол вне области растра: прошлый back (в этом кадре там никто не
+		// пишет) — как подложка частичного кадра на прямом пути.
+		for _, part := range outsideOf(window, tr.region) {
+			w.c.PrefillFrom(canvas.BackImage(), part)
+		}
 	}
-	w.c.SetCenter(tile, canvas, idx)
-	vis := window
+	// Фон — своей частью окна, а не из back: под пропущенным соседом back
+	// хранит готовый кадр, а подложку ореола окно рисует от фона само.
+	vis := window.Intersect(tr.region)
+	w.c.BlitBackgroundIn(vis)
 	if tr.partial {
 		// Базовый клип — всё повреждение кадра, а не его часть в окне: от
 		// клипа зависит область слоя размытия и сетка его уменьшения, а они
 		// обязаны совпасть с прямым путём; запись и так зажата окном.
-		vis = window.Intersect(tr.damage)
 		w.c.SetBaseClip(tr.damage)
 	}
 	w.tile, w.vis, w.halo = tile, vis, h > 0
@@ -333,7 +431,7 @@ func (w *tileWorker) override(c *hgdraw.Cmd, ctx hgdraw.DrawContext) bool {
 }
 
 // tap снимает результат слоя-промаха из центра ореола в растр кэша: только
-// то, что тайл действительно нарисовал (центр ∩ повреждение ∩ слой), и
+// то, что тайл действительно нарисовал (центр ∩ область растра ∩ слой), и
 // считает накрытую площадь — растр записывается в кэш, когда накрыт весь.
 func (w *tileWorker) tap(c *hgdraw.Cmd) {
 	if !w.halo || c.Op != hgdraw.OpBlurBehind {
@@ -406,10 +504,12 @@ func haloFor(pradius int) int {
 	return (h + 3) &^ 3
 }
 
-// findLayers находит слои размытия в области кадра, считает их ключи и
-// решает попадание/промах.
-func (tr *tileRaster) findLayers(root *hgdraw.List, regionL image.Rectangle) {
-	canvas := tr.canvas
+// findLayers находит слои размытия в области растра, отмечает их области
+// подложки у холста и считает ключи содержимого; попадание или промах решает
+// lookupLayers — только на тайловом пути (последовательный путь кэш не
+// трогает, ключи нужны хэшам тайлов).
+func (tr *tileRaster) findLayers() {
+	canvas, root, regionL := tr.canvas, tr.root, tr.regionL
 	frame := canvas.Frame()
 	add := func(c *hgdraw.Cmd, owner hgdraw.ListHolder, inGroup bool) {
 		rectL := c.Rect()
@@ -429,9 +529,7 @@ func (tr *tileRaster) findLayers(root *hgdraw.List, regionL image.Rectangle) {
 			src: pr.Inset(-pradius).Intersect(frame)}
 		canvas.NoteBackdrop(rectL)
 		if !inGroup {
-			tr.keyFor(l, owner)
-		} else {
-			tr.misses++
+			tr.contentKey(l, owner)
 		}
 		tr.layers = append(tr.layers, l)
 	}
@@ -464,9 +562,11 @@ func eachBlurIn(l *hgdraw.List, rect image.Rectangle, fn func(*hgdraw.Cmd)) {
 	})
 }
 
-// keyFor считает идентичность слоя (холдер списка и хэш команды) и ключ
-// содержимого под ним; решает, попадание это или промах.
-func (tr *tileRaster) keyFor(l *blurLayer, owner hgdraw.ListHolder) {
+// contentKey считает идентичность слоя (холдер списка и хэш команды) и ключ
+// содержимого под ним: команды до слоя в области чтения с поколениями их
+// картинок; слой под прямым виджетом, блитом буфера или другим слоем — не
+// кэшируется (его результат зависит от того, чего ключ не видит).
+func (tr *tileRaster) contentKey(l *blurLayer, owner hgdraw.ListHolder) {
 	l.id = hgdraw.Mix(l.cmd.Hash(hgdraw.HashSeed), uint64(hgdraw.PointerOf(owner)))
 	srcL := tr.e.logicalRect(l.src)
 	key := hgdraw.HashSeed
@@ -474,6 +574,7 @@ func (tr *tileRaster) keyFor(l *blurLayer, owner hgdraw.ListHolder) {
 	var imgs []image.Image
 	inv := tr.e.imgInv
 	mixImage := func(img image.Image) {
+		img, _ = hgdraw.IsOpaqueImage(img) // поколение — у внутренней картинки
 		g, all := inv.Gen(hgdraw.PointerOf(img))
 		key = hgdraw.Mix(hgdraw.Mix(key, g), all)
 		imgs = append(imgs, img)
@@ -488,11 +589,17 @@ func (tr *tileRaster) keyFor(l *blurLayer, owner hgdraw.ListHolder) {
 			cacheable = false
 			return false
 		case hgdraw.OpBlurBehind:
-			// Нижний слой размытия: его результат под нами зависит и от того,
-			// что лежит за пределами нашей области чтения.
+			// Нижний слой размытия: его результат под нами зависит от того,
+			// что лежит за пределами нашей области чтения, — это описывает его
+			// собственный ключ (слои идут в порядке рисования, нижний уже
+			// посчитан); некэшируемый нижний делает некэшируемым и верхний.
 			if c.R > 0 {
-				cacheable = false
-				return false
+				ll := tr.layerOf(c)
+				if ll == nil || ll.inGroup || !ll.cacheable {
+					cacheable = false
+					return false
+				}
+				key = hgdraw.Mix(key, ll.key)
 			}
 		case hgdraw.OpOpacity:
 			if hasUnkeyable(c.Ext.Sub, srcL) {
@@ -501,40 +608,67 @@ func (tr *tileRaster) keyFor(l *blurLayer, owner hgdraw.ListHolder) {
 			}
 			eachImageIn(c.Ext.Sub, srcL, mixImage)
 		}
-		key = c.Hash(key)
+		if c.Op == hgdraw.OpOpacity {
+			key = c.Hash(key) // живой: списки детей внутри группы перезаписываются
+		} else {
+			key = hgdraw.Mix(key, c.Sum())
+		}
 		if e := c.Ext; e != nil && e.Img != nil {
 			mixImage(e.Img)
 		}
 		return true
 	})
 	l.cacheable, l.key, l.imgs = cacheable, key, imgs
-	if !cacheable {
+}
+
+// lookupLayers решает по слоям попадание или промах; попадание продлевает
+// запись (TTL считает кадры без слоя, а не без растра).
+func (tr *tileRaster) lookupLayers() {
+	for _, l := range tr.layers {
+		if l.inGroup || !l.cacheable {
+			tr.misses++
+			continue
+		}
+		if ent := tr.cache[l.id]; ent != nil && ent.key == l.key {
+			ent.last = tr.frameNo
+			l.hit = ent
+			tr.hits++
+			continue
+		}
 		tr.misses++
-		return
 	}
-	ent := tr.cache[l.id]
-	if ent != nil && ent.key == key {
-		ent.last = tr.frameNo
-		l.hit = ent
-		tr.hits++
-		return
+}
+
+// wantsRaster — промах слоя, растр которого кадр может собрать: слой в
+// повреждении целиком (decide принуждает его тайлы к растру).
+func (tr *tileRaster) wantsRaster(l *blurLayer) bool {
+	if l.inGroup || !l.cacheable || l.hit != nil {
+		return false
 	}
-	tr.misses++
-	if tr.partial && !l.pr.In(tr.damage) {
-		return // часть слоя не рисуется — растр не собрать
+	return !tr.partial || l.pr.In(tr.damage)
+}
+
+// allocRasters заводит растры промахов, которые кадр накроет целиком: без
+// пропущенных хэш-диффом тайлов под слоем (иначе растр не собрать — и не
+// стоит его выделять).
+func (tr *tileRaster) allocRasters() {
+	for _, l := range tr.layers {
+		if !tr.wantsRaster(l) || tr.anySkipped(l.pr) {
+			continue
+		}
+		if ent := tr.cache[l.id]; ent != nil && ent.raster.Rect == l.pr {
+			// Устаревшая запись того же размера: её растр переписывается на
+			// месте (запись снимается — ключ прежний, содержимое уже нет).
+			delete(tr.cache, l.id)
+			tr.bytes -= len(ent.raster.Pix)
+			l.raster = ent.raster
+			continue
+		}
+		if tr.bytes+l.pr.Dx()*l.pr.Dy()*4 > blurCacheBudget {
+			continue // не влезает в бюджет — только ореол
+		}
+		l.raster = image.NewRGBA(l.pr)
 	}
-	if ent != nil && ent.raster.Rect == l.pr {
-		// Устаревшая запись того же размера: её растр переписывается на
-		// месте (запись снимается — ключ прежний, содержимое уже нет).
-		delete(tr.cache, l.id)
-		tr.bytes -= len(ent.raster.Pix)
-		l.raster = ent.raster
-		return
-	}
-	if tr.bytes+l.pr.Dx()*l.pr.Dy()*4 > blurCacheBudget {
-		return // не влезает в бюджет — только ореол
-	}
-	l.raster = image.NewRGBA(l.pr)
 }
 
 // hasUnkeyable — в списке группы есть команда, которую ключ учесть не умеет.
@@ -573,11 +707,9 @@ func eachImageIn(l *hgdraw.List, rect image.Rectangle, fn func(image.Image)) {
 	})
 }
 
-// planHalos назначает тайлам запас ореола по слоям-промахам и снимает
-// копию back под ореолами.
-func (tr *tileRaster) planHalos(frame image.Rectangle) {
+// planHalos назначает рисуемым тайлам запас ореола по слоям-промахам.
+func (tr *tileRaster) planHalos() {
 	tr.haloH = tr.haloH[:0]
-	var union image.Rectangle
 	for _, idx := range tr.tiles {
 		tile := tr.canvas.TileRect(idx)
 		// Сверху вниз: верхний слой читает нижний, и нижнему нужен запас в
@@ -593,27 +725,7 @@ func (tr *tileRaster) planHalos(frame image.Rectangle) {
 			}
 		}
 		tr.haloH = append(tr.haloH, h)
-		if h > 0 {
-			union = union.Union(tile.Inset(-h).Intersect(frame))
-		}
 	}
-	tr.snapshot = nil
-	if union.Empty() {
-		return
-	}
-	need := union.Dx() * union.Dy() * 4
-	if cap(tr.snapBuf) < need {
-		tr.snapBuf = make([]byte, need)
-	}
-	snap := &image.RGBA{Pix: tr.snapBuf[:need], Stride: union.Dx() * 4, Rect: union}
-	back := tr.canvas.BackImage()
-	n := union.Dx() * 4
-	for y := union.Min.Y; y < union.Max.Y; y++ {
-		s := back.PixOffset(union.Min.X, y)
-		d := snap.PixOffset(union.Min.X, y)
-		copy(snap.Pix[d:d+n], back.Pix[s:s+n])
-	}
-	tr.snapshot = snap
 }
 
 // finishLayers записывает растры промахов, накрытые целиком, и чистит кэш.

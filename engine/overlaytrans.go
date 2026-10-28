@@ -348,7 +348,9 @@ func (e *Engine) ovtStepOnly(canvas *Canvas) {
 // идут через ovtVisit, а погашенные — через ovtVisitClosed.
 func (e *Engine) drawOverlayLayer(layer widget.Widget, canvas *Canvas, hosted, on bool) {
 	if !on {
-		drawOverlays(layer, canvas, hosted)
+		if drawOverlays(layer, canvas, hosted) {
+			e.overlayDrawn = true
+		}
 		return
 	}
 	t := &e.ovt
@@ -374,10 +376,12 @@ func (e *Engine) drawOverlaysT(w widget.Widget, canvas *Canvas, hosted bool, lay
 		switch {
 		case od.HasOverlay():
 			if !hosted || !isHostedOverlay(w) {
+				e.overlayDrawn = true
 				e.ovtVisit(w, od, canvas, layer, off)
 			}
 		case len(e.ovt.byKey) > 0:
 			if tr := e.ovt.byKey[widgetID(w)]; tr != nil {
+				e.overlayDrawn = true
 				e.ovtVisitClosed(tr, canvas)
 			}
 		}

@@ -49,7 +49,7 @@ func BenchmarkTiled_RasterStage(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			eng.rasterTree(canvas, list, exit, false, image.Rectangle{})
+			eng.rasterTree(canvas, list, exit, false, image.Rectangle{}, nil)
 		}
 	})
 }

@@ -453,6 +453,7 @@ func (r *Recorder) add(c Cmd, bbox image.Rectangle) {
 	}
 	c.Clip = r.clip
 	c.BBox = bbox
+	c.sum = c.Hash(HashSeed)
 	t.Cmds = append(t.Cmds, c)
 	t.BBox = t.BBox.Union(bbox)
 }

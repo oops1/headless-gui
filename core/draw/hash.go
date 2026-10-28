@@ -19,13 +19,12 @@ const (
 	hashPrime  = 1099511628211
 )
 
-// mix подмешивает v в h (FNV-1a по байтам 64-битного слова).
+// mix подмешивает слово v в h: умножение на нечётную константу и сдвиг (шаг
+// splitmix) — одно умножение на слово вместо восьми байтовых шагов FNV: хэш
+// считается на каждую записанную команду (Cmd.Sum) и на каждый тайл кадра.
 func mix(h, v uint64) uint64 {
-	for i := 0; i < 8; i++ {
-		h = (h ^ (v & 0xFF)) * hashPrime
-		v >>= 8
-	}
-	return h
+	h = (h ^ v) * 0x9E3779B97F4A7C15
+	return h ^ (h >> 29)
 }
 
 func mixInt(h uint64, v int) uint64       { return mix(h, uint64(int64(v))) }
@@ -111,6 +110,14 @@ func (c *Cmd) Hash(h uint64) uint64 {
 	return h
 }
 
+// Sum — хэш команды (Hash от HashSeed), посчитанный рекордером при записи:
+// хэш-дифф тайлов (ADR-0006) читает его на каждом кадре, а не считает
+// заново. У ссылок на списки детей (OpChild) и прямых виджетов (OpDirect)
+// не считается: их команды обходятся сами, прямые — без версии. У группы
+// прозрачности (OpOpacity) он отражает списки детей на момент записи —
+// хэш-дифф считает группу живым Hash.
+func (c *Cmd) Sum() uint64 { return c.sum }
+
 // Hash подмешивает все команды списка (и списки детей по ссылкам) в h.
 func (l *List) Hash(h uint64) uint64 {
 	if l == nil {
@@ -140,18 +147,24 @@ func VisitOverlappingOwner(root *List, rect image.Rectangle, fn func(c *Cmd, own
 	if root == nil || !root.BBox.Overlaps(rect) {
 		return true
 	}
-	for i := range root.Cmds {
-		c := &root.Cmds[i]
+	visit := func(c *Cmd) bool {
 		if c.Op == OpChild {
-			if c.Holder != nil && !VisitOverlappingOwner(c.Holder.CmdList(), rect, fn) {
-				return false
-			}
-			continue
+			return c.Holder == nil || VisitOverlappingOwner(c.Holder.CmdList(), rect, fn)
 		}
 		if !c.BBox.Overlaps(rect) {
-			continue
+			return true
 		}
-		if !fn(c, root.owner) {
+		return fn(c, root.owner)
+	}
+	// Большой список с областью в одной-двух полосах тайлов — только команды
+	// этих полос (как у Replayer): корень с тысячами детей не обходится целиком.
+	if root.rows != nil {
+		if a, b, ok := root.bandsFor(rect); ok {
+			return eachInBands(a, b, func(i int32) bool { return visit(&root.Cmds[i]) })
+		}
+	}
+	for i := range root.Cmds {
+		if !visit(&root.Cmds[i]) {
 			return false
 		}
 	}
