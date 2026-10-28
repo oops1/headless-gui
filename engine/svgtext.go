@@ -38,7 +38,7 @@ func (t svgTextBridge) Outline(spec svg.FontSpec, size float64, text string) ([]
 	}
 	c := t.e.canvas
 	primary := c.svgFont(spec)
-	if primary == nil || primary.ttf == nil {
+	if primary == nil || primary.TTF == nil {
 		return nil, 0, false
 	}
 	k := size / (svgOutlineEm * 64) // 26.6 при em = svgOutlineEm → единицы пользователя
@@ -55,27 +55,27 @@ func (t svgTextBridge) Outline(spec svg.FontSpec, size float64, text string) ([]
 		fc := primary
 		if r != ' ' && !fc.HasGlyph(r) {
 			c.eachFallback(primary, func(fb *FontCache) bool {
-				if fb.ttf != nil && fb.HasGlyph(r) {
+				if fb.TTF != nil && fb.HasGlyph(r) {
 					fc = fb
 					return true
 				}
 				return false
 			})
 		}
-		idx, err := fc.ttf.GlyphIndex(&buf, r)
+		idx, err := fc.TTF.GlyphIndex(&buf, r)
 		if err != nil {
 			continue
 		}
 		if prevFont == fc && prev != 0 && idx != 0 {
-			if kern, err := fc.ttf.Kern(&buf, prev, idx, ppem, font.HintingNone); err == nil {
+			if kern, err := fc.TTF.Kern(&buf, prev, idx, ppem, font.HintingNone); err == nil {
 				pen += float64(kern) * k
 			}
 		}
-		segs, err := fc.ttf.LoadGlyph(&buf, idx, ppem, nil)
+		segs, err := fc.TTF.LoadGlyph(&buf, idx, ppem, nil)
 		if err == nil {
 			contours = appendGlyphContours(contours, segs, pen, k)
 		}
-		if adv, err := fc.ttf.GlyphAdvance(&buf, idx, ppem, font.HintingNone); err == nil {
+		if adv, err := fc.TTF.GlyphAdvance(&buf, idx, ppem, font.HintingNone); err == nil {
 			pen += float64(adv) * k
 		}
 		prev, prevFont = idx, fc
@@ -96,24 +96,22 @@ func (c *Canvas) svgFont(spec svg.FontSpec) *FontCache {
 		if c.families == nil || c.svgGenericFamily(fam) {
 			continue
 		}
-		c.families.mu.RLock()
-		known := len(c.families.fam[familyKey(fam)]) > 0
-		c.families.mu.RUnlock()
+		known := c.families.HasFamily(fam)
 		if !known {
-			if fc, ok := c.namedFonts.get(fam); ok && fc != nil {
+			if fc, ok := c.namedFonts.Get(fam); ok && fc != nil {
 				return fc
 			}
 			continue
 		}
 		if name := c.resolveFace(fam, weight, spec.Italic); name != "" {
-			if fc, _ := c.namedFonts.get(name); fc != nil {
+			if fc, _ := c.namedFonts.Get(name); fc != nil {
 				return fc
 			}
 		}
 	}
 	if c.families != nil {
 		if name := c.resolveFace("", weight, spec.Italic); name != "" {
-			if fc, _ := c.namedFonts.get(name); fc != nil {
+			if fc, _ := c.namedFonts.Get(name); fc != nil {
 				return fc
 			}
 		}

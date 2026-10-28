@@ -1,4 +1,4 @@
-package engine
+package text
 
 import (
 	"image"
@@ -188,11 +188,11 @@ func (fc *FontCache) vhintLocked(ppem fixed.Int26_6, buf *sfnt.Buffer) *vHint {
 		return h
 	}
 	h := buildVHint(func(r rune) (int, int, bool) {
-		idx, err := fc.ttf.GlyphIndex(buf, r)
+		idx, err := fc.TTF.GlyphIndex(buf, r)
 		if err != nil || idx == 0 {
 			return 0, 0, false
 		}
-		segs, err := fc.ttf.LoadGlyph(buf, idx, ppem, nil)
+		segs, err := fc.TTF.LoadGlyph(buf, idx, ppem, nil)
 		if err != nil || len(segs) == 0 {
 			return 0, 0, false
 		}
@@ -212,29 +212,29 @@ func (fc *FontCache) vhintLocked(ppem fixed.Int26_6, buf *sfnt.Buffer) *vHint {
 // opentype.Face.Glyph (тот же face даёт шаг), поэтому на раскладку режим не
 // влияет. ok=false — не вышло (нет зон, глифа нет), вызывающий откатывается на
 // обычный путь. Под fc.mu.
-func (fc *FontCache) hintedGlyph(face font.Face, sizePt float64, r rune, phase int, q TextQuality) (cachedGlyph, bool) {
+func (fc *FontCache) hintedGlyph(face font.Face, sizePt float64, r rune, phase int, q TextQuality) (CachedGlyph, bool) {
 	buf := &fc.buf // под fc.mu; сегменты ниже живут до следующего обращения к нему
 	ppem := fc.ppem(sizePt)
 	var h *vHint
 	if q.Hinting {
 		h = fc.vhintLocked(ppem, buf)
 		if h == nil && !q.LCD {
-			return cachedGlyph{}, false
+			return CachedGlyph{}, false
 		}
 	}
-	idx, err := fc.ttf.GlyphIndex(buf, r)
+	idx, err := fc.TTF.GlyphIndex(buf, r)
 	if err != nil {
-		return cachedGlyph{}, false
+		return CachedGlyph{}, false
 	}
 	adv, ok := face.GlyphAdvance(r)
 	if !ok {
-		return cachedGlyph{}, false
+		return CachedGlyph{}, false
 	}
-	segs, err := fc.ttf.LoadGlyph(buf, idx, ppem, nil)
+	segs, err := fc.TTF.LoadGlyph(buf, idx, ppem, nil)
 	if err != nil {
-		return cachedGlyph{}, false
+		return CachedGlyph{}, false
 	}
-	dotX := fixed.Int26_6(phase * (64 / subpixelPhases))
+	dotX := fixed.Int26_6(phase * (64 / SubpixelPhases))
 	if h != nil {
 		var sc hintScan
 		for _, sg := range segs {
@@ -273,7 +273,7 @@ func (fc *FontCache) hintedGlyph(face font.Face, sizePt float64, r rune, phase i
 		}
 	}
 
-	g := cachedGlyph{advance: adv, ok: true}
+	g := CachedGlyph{Advance: adv, OK: true}
 	b := segs.Bounds()
 	if len(segs) == 0 {
 		return g, true
@@ -287,10 +287,10 @@ func (fc *FontCache) hintedGlyph(face font.Face, sizePt float64, r rune, phase i
 	if w <= 0 || hgt <= 0 {
 		return g, true
 	}
-	g.offX, g.offY = dr.Min.X, dr.Min.Y
+	g.OffX, g.OffY = dr.Min.X, dr.Min.Y
 	m := image.NewAlpha(image.Rect(0, 0, w, hgt))
 	fc.rasterSegs(m, segs, -fixed.Int26_6(dr.Min.X<<6), -fixed.Int26_6(dr.Min.Y<<6))
-	g.mask = m
+	g.Mask = m
 	return g, true
 }
 
@@ -325,18 +325,18 @@ func (fc *FontCache) rasterSegs(m *image.Alpha, segs sfnt.Segments, biasX, biasY
 // lcdFilter — веса фильтра FreeType FT_LCD_FILTER_DEFAULT (сумма 256).
 var lcdFilter = [5]int{0x08, 0x4D, 0x56, 0x4D, 0x08}
 
-// lcdMask — покрытие глифа по цветным каналам: три байта на пиксель в
+// LCDMask — покрытие глифа по цветным каналам: три байта на пиксель в
 // ЛОГИЧЕСКОМ порядке R, G, B (какой подпиксель слева — решает LCDOrder при
 // построении).
-type lcdMask struct {
-	w, h int
-	pix  []uint8
+type LCDMask struct {
+	W, H int
+	Pix  []uint8
 }
 
 // rasterLCD растеризует контур segs (X уже утроен) в тройном разрешении по
 // горизонтали и сворачивает фильтром FreeType в покрытие по каналам. Маска
 // шире глифа на пиксель с каждой стороны: фильтр растекается на два подпикселя.
-func (fc *FontCache) rasterLCD(g *cachedGlyph, segs sfnt.Segments, b fixed.Rectangle26_6, order LCDOrder) {
+func (fc *FontCache) rasterLCD(g *CachedGlyph, segs sfnt.Segments, b fixed.Rectangle26_6, order LCDOrder) {
 	minX3, maxX3 := b.Min.X.Floor(), b.Max.X.Ceil()
 	y0, y1 := b.Min.Y.Floor(), b.Max.Y.Ceil()
 	if maxX3 <= minX3 || y1 <= y0 {
@@ -348,7 +348,7 @@ func (fc *FontCache) rasterLCD(g *cachedGlyph, segs sfnt.Segments, b fixed.Recta
 	sub := image.NewAlpha(image.Rect(0, 0, wpx*3, hgt))
 	fc.rasterSegs(sub, segs, -fixed.Int26_6(x0*3<<6), -fixed.Int26_6(y0<<6))
 
-	lm := &lcdMask{w: wpx, h: hgt, pix: make([]uint8, wpx*hgt*3)}
+	lm := &LCDMask{W: wpx, H: hgt, Pix: make([]uint8, wpx*hgt*3)}
 	for y := 0; y < hgt; y++ {
 		row := sub.Pix[y*sub.Stride : y*sub.Stride+wpx*3]
 		for i := 0; i < wpx*3; i++ {
@@ -363,11 +363,11 @@ func (fc *FontCache) rasterLCD(g *cachedGlyph, segs sfnt.Segments, b fixed.Recta
 			if order == LCDOrderBGR {
 				ch = 2 - ch
 			}
-			lm.pix[(y*wpx+px)*3+ch] = v
+			lm.Pix[(y*wpx+px)*3+ch] = v
 		}
 	}
-	g.lcd = lm
-	g.offX, g.offY = x0, y0
+	g.LCD = lm
+	g.OffX, g.OffY = x0, y0
 }
 
 // floorDiv — деление с округлением вниз (d > 0).
@@ -388,7 +388,7 @@ type hintKey struct {
 // vhintFor возвращает отображение высот для typesetting-face (кэшируется).
 // Тот же автохинтер, что и у per-rune пути, но размах эталонных букв берётся
 // из экстентов typesetting. Под ts.mu.
-func (ts *textShaper) vhintFor(face *tsfont.Face, sizePx fixed.Int26_6) *vHint {
+func (ts *Shaper) vhintFor(face *tsfont.Face, sizePx fixed.Int26_6) *vHint {
 	k := hintKey{face, sizePx}
 	if h, ok := ts.vhints[k]; ok {
 		return h

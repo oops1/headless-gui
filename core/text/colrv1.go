@@ -13,7 +13,8 @@
 // заливкой). Формы и цвета эмодзи получаются корректными; тонкие переливы
 // градиентов — упрощены. Порядок остановок, режимы Extend и попиксельные
 // градиенты не реализованы (ограничение).
-package engine
+
+package text
 
 import (
 	"image"
@@ -92,7 +93,7 @@ const (
 // renderCOLRv1 обходит граф paint базового глифа и композитит слои в цветную
 // RGBA-маску. Второе значение — «динамический» (использует foreground-цвет
 // текста, палитра 0xFFFF).
-func renderCOLRv1(face *tsfont.Face, colr *tables.COLR1, paint tables.PaintTable, sizePx fixed.Int26_6, textCol color.RGBA) (*colorGlyph, bool) {
+func renderCOLRv1(face *tsfont.Face, colr *tables.COLR1, paint tables.PaintTable, sizePx fixed.Int26_6, textCol color.RGBA) (*ColorGlyph, bool) {
 	if colr == nil {
 		return nil, false
 	}
@@ -150,7 +151,7 @@ func renderCOLRv1(face *tsfont.Face, colr *tables.COLR1, paint tables.PaintTable
 		}
 		compositeMaskColor(dst, mask, l.box.offX-minX, l.box.offY-minY, l.col)
 	}
-	return &colorGlyph{img: dst, offX: minX, offY: minY}, w.dynamic
+	return &ColorGlyph{Img: dst, OffX: minX, OffY: minY}, w.dynamic
 }
 
 // colrPalette возвращает палитру по умолчанию (палитра 0) или nil.

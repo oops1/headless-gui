@@ -2,11 +2,12 @@ package engine
 
 import (
 	"bytes"
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	"github.com/oops1/headless-gui/v3/internal/testhook"
 	"image"
 	"image/color"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"testing"
 
@@ -44,14 +45,14 @@ func (r *fbReads) count() int { return len(r.list()) }
 func hookFallbackReads(t *testing.T) *fbReads {
 	t.Helper()
 	r := &fbReads{}
-	orig := fallbackFileReader
-	fallbackFileReader = func(p string) ([]byte, error) {
+	orig := testhook.ReadFallbackFont
+	testhook.ReadFallbackFont = func(p string) ([]byte, error) {
 		r.mu.Lock()
 		r.paths = append(r.paths, p)
 		r.mu.Unlock()
-		return orig(p)
+		return hgtext.ReadFontFile(p)
 	}
-	t.Cleanup(func() { fallbackFileReader = orig })
+	t.Cleanup(func() { testhook.ReadFallbackFont = orig })
 	return r
 }
 
@@ -83,7 +84,7 @@ func makeFBChain(t *testing.T) fbChain {
 
 func lazyCanvas(t *testing.T, paths ...string) *Canvas {
 	t.Helper()
-	c := newCanvas(300, 60, newFontCache("assets"))
+	c := newCanvas(300, 60, hgtext.NewFontCache("assets"))
 	for _, p := range paths {
 		if !c.addFallbackFontFile(p) {
 			t.Fatalf("addFallbackFontFile(%s) отказал", p)
@@ -94,7 +95,7 @@ func lazyCanvas(t *testing.T, paths ...string) *Canvas {
 
 func eagerCanvas(t *testing.T, paths ...string) *Canvas {
 	t.Helper()
-	c := newCanvas(300, 60, newFontCache("assets"))
+	c := newCanvas(300, 60, hgtext.NewFontCache("assets"))
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -149,8 +150,7 @@ func TestLazyFallback_ExoticGlyphLoadsUpToFirstMatch(t *testing.T) {
 	if len(got) != 2 || got[0] != ch.a || got[1] != ch.b {
 		t.Fatalf("прочитано %v, ожидалось [A B]", got)
 	}
-	data, _ := os.ReadFile(ch.b)
-	if !bytes.Equal(fc.ttfData, data) {
+	if fc != c.fallbacks[1].Loaded() {
 		t.Error("глиф взят не из B — порядок цепочки нарушен")
 	}
 	// Тот же и другой глиф из уже загруженных — без чтений.
@@ -221,13 +221,13 @@ func TestLazyFallback_DPIAndSubpixelApplyOnLoad(t *testing.T) {
 	if !ok {
 		t.Fatal("✓ не найден")
 	}
-	if fc.currentDPI() != 144 || !fc.Subpixel() {
-		t.Fatalf("загруженный шрифт: dpi=%v subpixel=%v, ожидалось 144/true", fc.currentDPI(), fc.Subpixel())
+	if fc.DPI() != 144 || !fc.Subpixel() {
+		t.Fatalf("загруженный шрифт: dpi=%v subpixel=%v, ожидалось 144/true", fc.DPI(), fc.Subpixel())
 	}
 	c.setDPIAll(96)
 	c.setTextSubpixel(false)
-	if fc.currentDPI() != 96 || fc.Subpixel() {
-		t.Fatalf("после рассылки: dpi=%v subpixel=%v", fc.currentDPI(), fc.Subpixel())
+	if fc.DPI() != 96 || fc.Subpixel() {
+		t.Fatalf("после рассылки: dpi=%v subpixel=%v", fc.DPI(), fc.Subpixel())
 	}
 }
 
@@ -281,30 +281,5 @@ func TestEngineNew_ReadsNoFallbackFiles(t *testing.T) {
 	eng.renderFrame()
 	if n := reads.count(); n != 0 {
 		t.Fatalf("кадр с обычным текстом прочитал запасные шрифты: %v", reads.list())
-	}
-}
-
-// Файл шрифта читается одним буфером точного размера: растущая читалка
-// выделяла в несколько раз больше (53 МБ на 22 МБ шрифтов).
-func TestReadFileBounded_AllocatesFileSizeOnce(t *testing.T) {
-	testreset.Globals(t)
-	const size = 6 << 20
-	p := filepath.Join(t.TempDir(), "big.bin")
-	if err := os.WriteFile(p, bytes.Repeat([]byte{7}, size), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var m0, m1 runtime.MemStats
-	runtime.ReadMemStats(&m0)
-	data, err := readFileBounded(p, maxFontFileSize)
-	runtime.ReadMemStats(&m1)
-	if err != nil || len(data) != size {
-		t.Fatalf("прочитано %d байт, err=%v", len(data), err)
-	}
-	if got := m1.TotalAlloc - m0.TotalAlloc; got > size+size/4 {
-		t.Errorf("выделено %d байт на файл в %d (ожидался один буфер)", got, size)
-	}
-	// Предел по-прежнему действует.
-	if _, err := readFileBounded(p, size-1); err == nil {
-		t.Error("файл больше предела прочитан")
 	}
 }

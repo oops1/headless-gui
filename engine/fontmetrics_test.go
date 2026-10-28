@@ -143,7 +143,7 @@ func TestFontMetrics_BaselineMatchesDrawText(t *testing.T) {
 				asc, _, _ := c.FontMetrics(fam, size)
 				// Логический подъём — округление физического, поэтому
 				// сверяем по физической базовой линии.
-				physAsc := c.fontFor(fam).vMetricsFull(size).ascent
+				physAsc := c.fontFor(fam).VMetricsFull(size).Ascent
 				want := c.sx(y) + physAsc - 1
 				if got := inkBottom(c); got != want {
 					t.Errorf("scale=%v fam=%q size=%v: низ глифа %d, ожидался %d (y+Ascent-1)",

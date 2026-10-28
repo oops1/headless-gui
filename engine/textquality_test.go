@@ -3,6 +3,7 @@ package engine
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"os"
@@ -22,7 +23,7 @@ func tqFont(t *testing.T, q TextQuality) *FontCache {
 	if err != nil {
 		t.Skipf("Open Sans недоступен: %v", err)
 	}
-	fc := newFontCacheFromData(data, DefaultDPI)
+	fc := hgtext.NewFontCacheFromData(data, DefaultDPI)
 	fc.SetQuality(q)
 	return fc
 }
@@ -119,20 +120,20 @@ func TestTextQuality_DarkTextNotLighter(t *testing.T) {
 
 // tqRows — первая и последняя строка маски глифа, где покрытие не ниже порога,
 // в координатах от базовой линии.
-func tqRows(g cachedGlyph, thr uint8) (top, bot int, ok bool) {
-	if g.mask == nil {
+func tqRows(g hgtext.CachedGlyph, thr uint8) (top, bot int, ok bool) {
+	if g.Mask == nil {
 		return 0, 0, false
 	}
-	w, h := g.mask.Rect.Dx(), g.mask.Rect.Dy()
+	w, h := g.Mask.Rect.Dx(), g.Mask.Rect.Dy()
 	top, bot = 1<<30, -1<<30
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			if g.mask.Pix[y*g.mask.Stride+x] >= thr {
-				if g.offY+y < top {
-					top = g.offY + y
+			if g.Mask.Pix[y*g.Mask.Stride+x] >= thr {
+				if g.OffY+y < top {
+					top = g.OffY + y
 				}
-				if g.offY+y > bot {
-					bot = g.offY + y
+				if g.OffY+y > bot {
+					bot = g.OffY + y
 				}
 			}
 		}
@@ -153,7 +154,7 @@ func tqLowercaseMismatches(t *testing.T, q TextQuality, sub bool) (bad, total in
 		if sub {
 			fc.SetSubpixel(true)
 			fc.SetQuality(q)
-			phases = subpixelPhases
+			phases = hgtext.SubpixelPhases
 		}
 		for _, r := range "oaecsxzvоахе" {
 			for ph := 0; ph < phases; ph++ {
@@ -278,7 +279,7 @@ func TestTextQuality_MeasureUnchanged(t *testing.T) {
 					}
 				}
 				for _, r := range "oaHl.-Пд" {
-					if a, b := base.Glyph(pt, r).advance, fc.Glyph(pt, r).advance; a != b {
+					if a, b := base.Glyph(pt, r).Advance, fc.Glyph(pt, r).Advance; a != b {
 						t.Errorf("sub=%v %+v %.1fpt %q: шаг %v, было %v", sub, q, pt, r, b, a)
 					}
 				}
@@ -303,14 +304,14 @@ func TestTextQuality_OffIsLegacy(t *testing.T) {
 	toggled.SetQuality(TextQuality{})
 	for _, r := range "oaеHl,Пg" {
 		a, b := legacy.Glyph(9, r), toggled.Glyph(9, r)
-		if a.offX != b.offX || a.offY != b.offY || a.advance != b.advance ||
-			string(a.mask.Pix) != string(b.mask.Pix) {
+		if a.OffX != b.OffX || a.OffY != b.OffY || a.Advance != b.Advance ||
+			string(a.Mask.Pix) != string(b.Mask.Pix) {
 			t.Errorf("%q: после вкл→выкл маска отличается от прежней", r)
 		}
 	}
 	// Хинтинг действительно меняет маску (тест различает режимы).
 	h := tqFont(t, TextQuality{Hinting: true})
-	if string(h.Glyph(9, 'e').mask.Pix) == string(legacy.Glyph(9, 'e').mask.Pix) {
+	if string(h.Glyph(9, 'e').Mask.Pix) == string(legacy.Glyph(9, 'e').Mask.Pix) {
 		t.Error("хинтинг не изменил маску «e»")
 	}
 }
@@ -330,16 +331,16 @@ func TestTextQuality_MaskHash(t *testing.T) {
 		h := sha256.New()
 		for _, pt := range []float64{7.5, 9, 10.5, 13.5} {
 			for _, r := range "oaеxHlgpgPЁ,.-·й@" {
-				for ph := 0; ph < subpixelPhases; ph++ {
+				for ph := 0; ph < hgtext.SubpixelPhases; ph++ {
 					g := fc.GlyphAt(pt, r, ph)
-					h.Write([]byte{byte(g.offX), byte(g.offY), byte(g.advance)})
-					if g.mask != nil {
-						h.Write([]byte{byte(g.mask.Rect.Dx()), byte(g.mask.Rect.Dy())})
-						h.Write(g.mask.Pix)
+					h.Write([]byte{byte(g.OffX), byte(g.OffY), byte(g.Advance)})
+					if g.Mask != nil {
+						h.Write([]byte{byte(g.Mask.Rect.Dx()), byte(g.Mask.Rect.Dy())})
+						h.Write(g.Mask.Pix)
 					}
-					if g.lcd != nil {
-						h.Write([]byte{byte(g.lcd.w), byte(g.lcd.h)})
-						h.Write(g.lcd.pix)
+					if g.LCD != nil {
+						h.Write([]byte{byte(g.LCD.W), byte(g.LCD.H)})
+						h.Write(g.LCD.Pix)
 					}
 				}
 			}

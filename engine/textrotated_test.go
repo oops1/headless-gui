@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 // rotatedTextCanvas — белый холст логического размера (w, h) с масштабом scale.
 func rotatedTextCanvas(w, h int, scale float64) *Canvas {
-	cv := newCanvasScaled(w, h, scale, newFontCache("assets"))
+	cv := newCanvasScaled(w, h, scale, hgtext.NewFontCache("assets"))
 	if scale != 1 {
 		cv.setDPIAll(DefaultDPI * scale)
 	}

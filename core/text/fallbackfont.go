@@ -1,4 +1,4 @@
-package engine
+package text
 
 // fallbackfont.go — ленивая загрузка шрифтов запасной цепочки (v3.38, E16).
 //
@@ -24,17 +24,24 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+
+	"github.com/oops1/headless-gui/v3/internal/testhook"
 )
 
-// fallbackFileReader читает файл запасного шрифта. Переменная — точка подмены
-// для тестов («после New ни один файл не прочитан»).
-var fallbackFileReader = readFontFile
+// readFallbackFile читает файл запасного шрифта. Тесты подменяют чтение через
+// testhook.ReadFallbackFont («после New ни один файл не прочитан»).
+func readFallbackFile(path string) ([]byte, error) {
+	if h := testhook.ReadFallbackFont; h != nil {
+		return h(path)
+	}
+	return ReadFontFile(path)
+}
 
-// fallbackFont — запись запасной цепочки: уже готовый шрифт (AddFallbackFont с
+// FallbackFont — запись запасной цепочки: уже готовый шрифт (AddFallbackFont с
 // данными) или путь к файлу, прочитываемому при первом обращении. Записи
 // общие у холстов-клонов (смена размера/масштаба), поэтому шрифт, загруженный
 // одним, виден всем.
-type fallbackFont struct {
+type FallbackFont struct {
 	path string // "" — запись создана из готовых данных
 
 	mu   sync.Mutex
@@ -42,25 +49,37 @@ type fallbackFont struct {
 	done atomic.Bool               // загрузку пытались (успешно или нет)
 }
 
-// newReadyFallback — запись с готовым шрифтом.
-func newReadyFallback(fc *FontCache) *fallbackFont {
-	f := &fallbackFont{}
+// NewReadyFallback — запись с готовым шрифтом.
+func NewReadyFallback(fc *FontCache) *FallbackFont {
+	f := &FallbackFont{}
 	f.fc.Store(fc)
 	f.done.Store(true)
 	return f
 }
 
+// NewFallbackFile — запись с ленивой загрузкой файла path, если это обычный
+// файл не больше MaxFontFileSize; иначе nil: такой файл в цепочку не попадает,
+// как раньше, когда он не прочитывался при New (от этого зависит быстрый путь
+// без запасных шрифтов).
+func NewFallbackFile(path string) *FallbackFont {
+	st, err := os.Stat(path)
+	if err != nil || !st.Mode().IsRegular() || st.Size() > MaxFontFileSize {
+		return nil
+	}
+	return newLazyFallback(path)
+}
+
 // newLazyFallback — запись с ленивой загрузкой файла path.
-func newLazyFallback(path string) *fallbackFont { return &fallbackFont{path: path} }
+func newLazyFallback(path string) *FallbackFont { return &FallbackFont{path: path} }
 
-// loaded возвращает шрифт, если он уже загружен (без загрузки): для рассылки
+// Loaded возвращает шрифт, если он уже загружен (без загрузки): для рассылки
 // настроек DPI и субпикселей — незагруженный возьмёт их при загрузке.
-func (f *fallbackFont) loaded() *FontCache { return f.fc.Load() }
+func (f *FallbackFont) Loaded() *FontCache { return f.fc.Load() }
 
-// get возвращает шрифт, загружая его при первом обращении; nil — файл не
+// Get возвращает шрифт, загружая его при первом обращении; nil — файл не
 // читается или не шрифт (запись молча пропускается, как раньше при New).
 // ref — шрифт холста, у которого берутся DPI и режим субпикселей.
-func (f *fallbackFont) get(ref *FontCache) *FontCache {
+func (f *FallbackFont) Get(ref *FontCache) *FontCache {
 	if fc := f.fc.Load(); fc != nil || f.done.Load() {
 		return f.fc.Load()
 	}
@@ -74,20 +93,17 @@ func (f *fallbackFont) get(ref *FontCache) *FontCache {
 	// как поменяла основной шрифт, — загрузка либо увидит уже новые значения,
 	// либо будет догнана рассылкой.
 	var fc *FontCache
-	if data, err := fallbackFileReader(f.path); err == nil {
-		if fc = newFontCacheFromData(data, ref.currentDPI()); fc != nil {
-			fc.subpixel = ref.Subpixel()
-			fc.quality = ref.Quality()
-		}
+	if data, err := readFallbackFile(f.path); err == nil {
+		fc = NewFontCacheLike(data, ref)
 	}
 	f.fc.Store(fc)
 	f.done.Store(true)
 	return fc
 }
 
-// apply применяет fn к загруженному шрифту под мьютексом записи (согласованно
+// Apply применяет fn к загруженному шрифту под мьютексом записи (согласованно
 // с get); незагруженная запись не трогается.
-func (f *fallbackFont) apply(fn func(*FontCache)) {
+func (f *FallbackFont) Apply(fn func(*FontCache)) {
 	f.mu.Lock()
 	if fc := f.fc.Load(); fc != nil {
 		fn(fc)
@@ -95,34 +111,11 @@ func (f *fallbackFont) apply(fn func(*FontCache)) {
 	f.mu.Unlock()
 }
 
-// currentDPI — DPI шрифта под его замком.
-func (fc *FontCache) currentDPI() float64 {
+// DPI — DPI шрифта под его замком.
+func (fc *FontCache) DPI() float64 {
 	fc.mu.RLock()
 	defer fc.mu.RUnlock()
 	return fc.dpi
 }
 
-// eachFallback обходит цепочку по порядку, загружая записи по мере надобности,
-// пока fn не вернёт true (найдено). ref — шрифт холста для настроек
-// загружаемых записей.
-func (c *Canvas) eachFallback(ref *FontCache, fn func(*FontCache) bool) {
-	for _, fb := range c.fallbacks {
-		if fc := fb.get(ref); fc != nil && fn(fc) {
-			return
-		}
-	}
-}
 
-// addFallbackFontFile добавляет в цепочку шрифт-файл, не читая его: файл
-// прочитается при первом обращении. Несуществующий, слишком большой файл или
-// не файл в цепочку не попадает — как раньше, когда такой файл не
-// прочитывался при New (от этого зависит быстрый путь без запасных шрифтов).
-func (c *Canvas) addFallbackFontFile(path string) bool {
-	st, err := os.Stat(path)
-	if err != nil || !st.Mode().IsRegular() || st.Size() > maxFontFileSize {
-		return false
-	}
-	c.fallbacks = append(c.fallbacks, newLazyFallback(path))
-	c.fontRev.Add(1)
-	return true
-}

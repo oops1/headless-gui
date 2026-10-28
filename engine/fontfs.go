@@ -15,6 +15,7 @@ package engine
 
 import (
 	"fmt"
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"io"
 	"io/fs"
 	"path"
@@ -122,17 +123,17 @@ func readFontFS(fsys fs.FS, name string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	if st, err := f.Stat(); err == nil && st.Size() > maxFontFileSize {
-		return nil, fmt.Errorf("%s: файл шрифта слишком большой (%d байт > %d)", name, st.Size(), maxFontFileSize)
+	if st, err := f.Stat(); err == nil && st.Size() > hgtext.MaxFontFileSize {
+		return nil, fmt.Errorf("%s: файл шрифта слишком большой (%d байт > %d)", name, st.Size(), hgtext.MaxFontFileSize)
 	}
 	// Читаем на байт больше границы: усечённый шрифт бесполезен, и отличить
 	// «ровно по границе» от «больше» иначе нечем.
-	data, err := io.ReadAll(io.LimitReader(f, maxFontFileSize+1))
+	data, err := io.ReadAll(io.LimitReader(f, hgtext.MaxFontFileSize+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > maxFontFileSize {
-		return nil, fmt.Errorf("%s: файл шрифта слишком большой (> %d байт)", name, maxFontFileSize)
+	if int64(len(data)) > hgtext.MaxFontFileSize {
+		return nil, fmt.Errorf("%s: файл шрифта слишком большой (> %d байт)", name, hgtext.MaxFontFileSize)
 	}
 	return data, nil
 }

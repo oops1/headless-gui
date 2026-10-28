@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	_ "image/jpeg" // декодер JPEG для SetBackgroundFile
 	"image/png"
@@ -404,7 +405,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 		fps = 20
 	}
 	width, height = clampCanvasSize(width, height)
-	fc := newFontCache("assets")
+	fc := hgtext.NewFontCache("assets")
 	e := &Engine{
 		fontCache: fc,
 		canvas:    newCanvas(width, height, fc),
@@ -438,7 +439,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// Файлы не читаются: путь регистрируется, а шрифт загружается при первом
 	// символе, которого нет в основном (fallbackfont.go) — около 22 МБ чтения и
 	// разбора на Windows в обычный старт не попадают.
-	for _, p := range append(systemFallbackFontPaths(), assetFallbackFontPaths()...) {
+	for _, p := range append(hgtext.SystemFallbackFontPaths(), hgtext.AssetFallbackFontPaths()...) {
 		e.canvas.addFallbackFontFile(p)
 	}
 	// Встроенные жирный/курсивный шрифты для FontWeight/FontStyle (P1).
@@ -829,9 +830,9 @@ func (e *Engine) RegisterFont(fontName string, ttfData []byte) {
 }
 
 // RegisterFontFile регистрирует именованный шрифт из TTF/OTF-файла.
-// Размер файла ограничен maxFontFileSize.
+// Размер файла ограничен 128 МБ (text.MaxFontFileSize).
 func (e *Engine) RegisterFontFile(fontName, path string) error {
-	data, err := readFileBounded(path, maxFontFileSize)
+	data, err := hgtext.LoadFontFile(path)
 	if err != nil {
 		return fmt.Errorf("RegisterFontFile %q: %w", path, err)
 	}
@@ -857,7 +858,7 @@ func (e *Engine) loadFontDirectory(dir string) {
 		if ext != ".ttf" && ext != ".otf" {
 			continue
 		}
-		data, err := readFontFile(filepath.Join(dir, name))
+		data, err := hgtext.ReadFontFile(filepath.Join(dir, name))
 		if err != nil {
 			continue
 		}
@@ -1028,9 +1029,9 @@ func (e *Engine) RegisterFallbackFont(ttfData []byte) bool {
 }
 
 // RegisterFallbackFontFile добавляет fallback-шрифт из TTF/OTF-файла.
-// Размер файла ограничен maxFontFileSize.
+// Размер файла ограничен 128 МБ (text.MaxFontFileSize).
 func (e *Engine) RegisterFallbackFontFile(path string) error {
-	data, err := readFileBounded(path, maxFontFileSize)
+	data, err := hgtext.LoadFontFile(path)
 	if err != nil {
 		return fmt.Errorf("RegisterFallbackFontFile %q: %w", path, err)
 	}

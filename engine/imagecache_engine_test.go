@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	stdraw "image/draw"
@@ -20,7 +21,7 @@ import (
 // (иначе тот получил бы чужой кадр из кэша по совпавшему ключу).
 func TestScaledCache_EntryKeepsSourceAlive(t *testing.T) {
 	testreset.Globals(t)
-	c := newCanvas(120, 120, newFontCache("assets"))
+	c := newCanvas(120, 120, hgtext.NewFontCache("assets"))
 	var freed atomic.Bool
 	func() {
 		ic := testIcon(0)
@@ -49,7 +50,7 @@ func TestScaledCache_EntryKeepsSourceAlive(t *testing.T) {
 // изображения записью первого — ровно то, что случилось бы при переезде адреса.
 func TestScaledCache_ForeignEntryNotReused(t *testing.T) {
 	testreset.Globals(t)
-	c := newCanvas(120, 120, newFontCache("assets"))
+	c := newCanvas(120, 120, hgtext.NewFontCache("assets"))
 	a, b := testIcon(0), testIcon(100)
 	ka, _ := scaledCacheKey(a, 24, 24)
 	kb, _ := scaledCacheKey(b, 24, 24)

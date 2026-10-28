@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/internal/testreset"
@@ -19,18 +20,18 @@ func TestTextHint_FloatingSignsKeepShape(t *testing.T) {
 		pt := float64(px) * 72 / 96
 		for _, r := range "•·°" {
 			a, b := plain.GlyphAt(pt, r, 0), hinted.GlyphAt(pt, r, 0)
-			if a.mask == nil || b.mask == nil {
+			if a.Mask == nil || b.Mask == nil {
 				t.Fatalf("%d px %q: пустая маска", px, r)
 			}
-			if a.mask.Rect.Size() != b.mask.Rect.Size() || a.offX != b.offX {
+			if a.Mask.Rect.Size() != b.Mask.Rect.Size() || a.OffX != b.OffX {
 				t.Errorf("%d px %q: рамка %v (x %d) → %v (x %d)", px, r,
-					a.mask.Rect.Size(), a.offX, b.mask.Rect.Size(), b.offX)
+					a.Mask.Rect.Size(), a.OffX, b.Mask.Rect.Size(), b.OffX)
 				continue
 			}
-			if !bytes.Equal(a.mask.Pix, b.mask.Pix) {
+			if !bytes.Equal(a.Mask.Pix, b.Mask.Pix) {
 				t.Errorf("%d px %q: форма знака изменилась", px, r)
 			}
-			if d := b.offY - a.offY; d < -2 || d > 2 {
+			if d := b.OffY - a.OffY; d < -2 || d > 2 {
 				t.Errorf("%d px %q: сдвиг на %d строк — больше, чем растяжение зон", px, r, d)
 			}
 		}
@@ -47,10 +48,10 @@ func TestTextHint_StemSignsStillSnap(t *testing.T) {
 	for px := 9; px <= 24; px++ {
 		pt := float64(px) * 72 / 96
 		a, b := plain.GlyphAt(pt, '-', 0), hinted.GlyphAt(pt, '-', 0)
-		if a.mask == nil || b.mask == nil {
+		if a.Mask == nil || b.Mask == nil {
 			t.Fatalf("%d px: пустая маска дефиса", px)
 		}
-		if !bytes.Equal(a.mask.Pix, b.mask.Pix) || a.mask.Rect.Size() != b.mask.Rect.Size() {
+		if !bytes.Equal(a.Mask.Pix, b.Mask.Pix) || a.Mask.Rect.Size() != b.Mask.Rect.Size() {
 			changed++
 		}
 	}
@@ -64,7 +65,7 @@ func TestTextHint_StemSignsStillSnap(t *testing.T) {
 func TestTextHint_FloatingSignsShaped(t *testing.T) {
 	testreset.Globals(t)
 	line := "é  •  é" // комбинируемый акцент — строка идёт через шейпер
-	if !needsShaping(line) {
+	if !hgtext.NeedsShaping(line) {
 		t.Fatal("строка не идёт через шейпер")
 	}
 	for _, sz := range []int{12, 14, 16, 21} {

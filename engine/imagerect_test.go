@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"math/rand"
@@ -322,7 +323,7 @@ func BenchmarkDrawImageRect_Zoom(b *testing.B) {
 	src := noiseRGBA(4000, 3000, 9, false)
 	for _, f := range []widget.ImageFilter{widget.FilterNearest, widget.FilterBilinear, widget.FilterCatmullRom} {
 		b.Run(f.String(), func(b *testing.B) {
-			c := newCanvas(1200, 800, newFontCache("assets"))
+			c := newCanvas(1200, 800, hgtext.NewFontCache("assets"))
 			dr := image.Rect(-8000, -6000, 8000, 6000) // зум ×4
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -335,7 +336,7 @@ func BenchmarkDrawImageRect_Zoom(b *testing.B) {
 
 func BenchmarkDrawImageRect_FitWindow(b *testing.B) {
 	src := noiseRGBA(4000, 3000, 10, false)
-	c := newCanvas(1200, 800, newFontCache("assets"))
+	c := newCanvas(1200, 800, hgtext.NewFontCache("assets"))
 	dr := image.Rect(0, 0, 1200, 800)
 	b.ReportAllocs()
 	b.ResetTimer()

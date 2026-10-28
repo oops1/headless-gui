@@ -17,7 +17,8 @@
 // Ключевое отличие от одноцветных масок: цветной глиф блиттится «как есть»
 // (premultiplied-over), цвет текста на него не влияет; кэш — отдельный от
 // масок, по (face, GID, размер) — плюс цвет для слоёв foreground.
-package engine
+
+package text
 
 import (
 	"bytes"
@@ -56,17 +57,17 @@ func glyphBudgetOK(w, h int) bool {
 	return w > 0 && h > 0 && w <= maxGlyphDim && h <= maxGlyphDim && w*h <= maxColorGlyphPixels
 }
 
-// colorGlyph — растеризованный цветной глиф эмодзи: RGBA-изображение
+// ColorGlyph — растеризованный цветной глиф эмодзи: RGBA-изображение
 // (premultiplied-alpha) и смещение левого-верхнего угла от точки отрисовки
 // (перо по X, базовая линия по Y). Immutable после создания.
-type colorGlyph struct {
-	img        *image.RGBA // nil — цветного глифа для этого GID нет
-	offX, offY int
+type ColorGlyph struct {
+	Img        *image.RGBA // nil — цветного глифа для этого GID нет
+	OffX, OffY int
 }
 
 // faceHasColorGlyphs сообщает, есть ли у шрифта цветные глифы (COLR или
 // растровые CBDT/sbix). Кэшируется по face. Вызывается под ts.mu.
-func (ts *textShaper) faceHasColorGlyphs(face *tsfont.Face) bool {
+func (ts *Shaper) faceHasColorGlyphs(face *tsfont.Face) bool {
 	if v, ok := ts.faceColor[face]; ok {
 		return v
 	}
@@ -84,10 +85,10 @@ type dynColorKey struct {
 	col color.RGBA
 }
 
-// colorGlyphFor возвращает цветной глиф (кэшируется по face+GID+размеру) или
+// ColorGlyphFor возвращает цветной глиф (кэшируется по face+GID+размеру) или
 // nil, если у глифа нет цветного представления. Глифы со слоями foreground
 // (палитра 0xFFFF) зависят от textCol и кэшируются отдельно, с учётом цвета.
-func (ts *textShaper) colorGlyphFor(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, textCol color.RGBA) *colorGlyph {
+func (ts *Shaper) ColorGlyphFor(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, textCol color.RGBA) *ColorGlyph {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	if !ts.faceHasColorGlyphs(face) {
@@ -104,17 +105,17 @@ func (ts *textShaper) colorGlyphFor(face *tsfont.Face, gid tsfont.GID, sizePx fi
 	cg, dynamic := renderColorGlyph(face, gid, sizePx, textCol)
 	if dynamic {
 		if ts.dynColorGlyphs == nil {
-			ts.dynColorGlyphs = make(map[dynColorKey]*colorGlyph)
+			ts.dynColorGlyphs = make(map[dynColorKey]*ColorGlyph)
 		} else if len(ts.dynColorGlyphs) >= maxDynColorGlyphs {
-			ts.dynColorGlyphs = make(map[dynColorKey]*colorGlyph, maxDynColorGlyphs/4)
+			ts.dynColorGlyphs = make(map[dynColorKey]*ColorGlyph, maxDynColorGlyphs/4)
 		}
 		ts.dynColorGlyphs[dynKey] = cg
 		return cg
 	}
 	if ts.colorGlyphs == nil {
-		ts.colorGlyphs = make(map[maskKey]*colorGlyph)
+		ts.colorGlyphs = make(map[maskKey]*ColorGlyph)
 	} else if len(ts.colorGlyphs) >= maxShapedMasks {
-		ts.colorGlyphs = make(map[maskKey]*colorGlyph, maxShapedMasks/4)
+		ts.colorGlyphs = make(map[maskKey]*ColorGlyph, maxShapedMasks/4)
 	}
 	ts.colorGlyphs[key] = cg
 	return cg
@@ -122,7 +123,7 @@ func (ts *textShaper) colorGlyphFor(face *tsfont.Face, gid tsfont.GID, sizePx fi
 
 // renderColorGlyph строит цветной глиф GID: сперва COLR, затем растровый
 // (CBDT/sbix). Второе значение — «динамический» (использует цвет текста).
-func renderColorGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, textCol color.RGBA) (*colorGlyph, bool) {
+func renderColorGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, textCol color.RGBA) (*ColorGlyph, bool) {
 	// Растровые страйки выбираются по ppem — выставляем под целевой кегль.
 	if len(face.BitmapSizes()) > 0 {
 		em := uint16((int(sizePx) + 32) / 64)
@@ -144,7 +145,7 @@ func renderColorGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, t
 
 // renderCOLR композитит цветной глиф COLR. COLRv0 — плоские слои
 // (PaintColrLayersResolved); всё остальное — граф COLRv1 (см. colrv1.go).
-func renderCOLR(face *tsfont.Face, gc tsfont.GlyphColor, sizePx fixed.Int26_6, textCol color.RGBA) (*colorGlyph, bool) {
+func renderCOLR(face *tsfont.Face, gc tsfont.GlyphColor, sizePx fixed.Int26_6, textCol color.RGBA) (*ColorGlyph, bool) {
 	layers, ok := gc.Paint.(tables.PaintColrLayersResolved)
 	if !ok {
 		// COLRv1: граф paint-таблиц (Segoe UI Emoji на Windows 11).
@@ -156,7 +157,7 @@ func renderCOLR(face *tsfont.Face, gc tsfont.GlyphColor, sizePx fixed.Int26_6, t
 	}
 
 	type layerRas struct {
-		m   *glyphMask
+		m   *GlyphMask
 		col color.RGBA // premultiplied
 	}
 	items := make([]layerRas, 0, len(layers))
@@ -182,26 +183,26 @@ func renderCOLR(face *tsfont.Face, gc tsfont.GlyphColor, sizePx fixed.Int26_6, t
 			continue // полностью прозрачный слой
 		}
 		m := rasterizeGlyph(face, tsfont.GID(layer.GlyphID), sizePx, nil)
-		if m.mask == nil {
+		if m.Mask == nil {
 			continue
 		}
-		w, h := m.mask.Rect.Dx(), m.mask.Rect.Dy()
+		w, h := m.Mask.Rect.Dx(), m.Mask.Rect.Dy()
 		pixels += w * h
 		if pixels > maxGlyphLayerPixels {
 			warnGlyphBudget(face)
 			return nil, dynamic
 		}
-		if m.offX < minX {
-			minX = m.offX
+		if m.OffX < minX {
+			minX = m.OffX
 		}
-		if m.offY < minY {
-			minY = m.offY
+		if m.OffY < minY {
+			minY = m.OffY
 		}
-		if m.offX+w > maxX {
-			maxX = m.offX + w
+		if m.OffX+w > maxX {
+			maxX = m.OffX + w
 		}
-		if m.offY+h > maxY {
-			maxY = m.offY + h
+		if m.OffY+h > maxY {
+			maxY = m.OffY + h
 		}
 		items = append(items, layerRas{m: m, col: col})
 	}
@@ -216,14 +217,14 @@ func renderCOLR(face *tsfont.Face, gc tsfont.GlyphColor, sizePx fixed.Int26_6, t
 	dst := image.NewRGBA(image.Rect(0, 0, maxX-minX, maxY-minY))
 	// Слои рисуются в порядке следования: первый — нижний.
 	for _, it := range items {
-		compositeMaskColor(dst, it.m.mask, it.m.offX-minX, it.m.offY-minY, it.col)
+		compositeMaskColor(dst, it.m.Mask, it.m.OffX-minX, it.m.OffY-minY, it.col)
 	}
-	return &colorGlyph{img: dst, offX: minX, offY: minY}, dynamic
+	return &ColorGlyph{Img: dst, OffX: minX, OffY: minY}, dynamic
 }
 
 // renderColorBitmap декодирует растровый PNG-глиф (CBDT/sbix) и масштабирует
 // под кегль. Размещение — из GlyphExtents (в font units, ppem уже выставлен).
-func renderColorBitmap(face *tsfont.Face, gid tsfont.GID, gb tsfont.GlyphBitmap, sizePx fixed.Int26_6) *colorGlyph {
+func renderColorBitmap(face *tsfont.Face, gid tsfont.GID, gb tsfont.GlyphBitmap, sizePx fixed.Int26_6) *ColorGlyph {
 	if gb.Format != tsfont.PNG || !glyphPNGSane(gb.Data) {
 		return nil // поддерживаем только PNG (Noto Color Emoji и пр.)
 	}
@@ -245,7 +246,7 @@ func renderColorBitmap(face *tsfont.Face, gid tsfont.GID, gb tsfont.GlyphBitmap,
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
 	draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Src, nil)
-	return &colorGlyph{img: dst, offX: floorF32(x0), offY: floorF32(y0)}
+	return &ColorGlyph{Img: dst, OffX: floorF32(x0), OffY: floorF32(y0)}
 }
 
 // glyphPNGSane проверяет размер данных и заголовок PNG до декодирования.

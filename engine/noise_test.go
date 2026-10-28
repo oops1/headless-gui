@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"testing"
@@ -11,7 +12,7 @@ import (
 // flatCanvas — холст, залитый одним серым: на нём шум виден как отклонение
 // от среднего.
 func flatCanvas(w, h int, v uint8) *Canvas {
-	c := newCanvas(w, h, newFontCache("assets"))
+	c := newCanvas(w, h, hgtext.NewFontCache("assets"))
 	c.blitBackground()
 	c.FillRect(0, 0, w, h, color.RGBA{R: v, G: v, B: v, A: 255})
 	return c
@@ -126,7 +127,7 @@ func TestDrawNoise_RespectsClips(t *testing.T) {
 // не выходит за альфу, а полностью прозрачные пиксели остаются прозрачными.
 func TestDrawNoise_KeepsPremultipliedInvariant(t *testing.T) {
 	testreset.Globals(t)
-	c := newCanvas(60, 20, newFontCache("assets"))
+	c := newCanvas(60, 20, hgtext.NewFontCache("assets"))
 	c.blitBackground()
 	for x := 0; x < 60; x++ {
 		for y := 0; y < 20; y++ {

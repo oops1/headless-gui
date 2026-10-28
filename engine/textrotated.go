@@ -43,7 +43,7 @@ func (c *Canvas) DrawTextRotated(text string, x, y int, sizePt float64, fontName
 	}
 
 	fc := c.fontFor(fontName)
-	ascent, descent := fc.vMetrics(sizePt)
+	ascent, descent := fc.VMetrics(sizePt)
 	tw := c.measureWithFallback(fc, text, sizePt)
 	const pad = rotatedTextPad
 	sw, sh := tw+2*pad, ascent+descent+2*pad // размер промежуточного растра

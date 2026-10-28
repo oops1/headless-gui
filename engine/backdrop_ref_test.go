@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"math/rand"
@@ -72,7 +73,7 @@ func legacyUpscale(c *Canvas, small *image.RGBA, src, dst image.Rectangle) {
 }
 
 func noiseCanvas(r *rand.Rand, w, h int) *Canvas {
-	c := newCanvas(w, h, newFontCache("assets"))
+	c := newCanvas(w, h, hgtext.NewFontCache("assets"))
 	r.Read(c.back.Pix)
 	return c
 }
@@ -83,7 +84,7 @@ func TestBackdropScaleMatchesLegacy(t *testing.T) {
 	const W, H = 157, 93
 	for iter := 0; iter < 300; iter++ {
 		a := noiseCanvas(r, W, H)
-		b := newCanvas(W, H, newFontCache("assets"))
+		b := newCanvas(W, H, hgtext.NewFontCache("assets"))
 		copy(b.back.Pix, a.back.Pix)
 
 		// Область слоя — где угодно, в том числе у самых краёв холста.

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"testing"
@@ -17,7 +18,7 @@ var shadowColor = color.RGBA{A: 120}
 // которая у непрозрачного фона и так уже 255. Белый фон делает затемнение
 // от тени измеримым по каналам R/G/B.
 func newWhiteTestCanvas(w, h int) *Canvas {
-	c := newCanvas(w, h, newFontCache("assets"))
+	c := newCanvas(w, h, hgtext.NewFontCache("assets"))
 	c.blitBackground()
 	c.FillRect(0, 0, w, h, color.RGBA{R: 255, G: 255, B: 255, A: 255})
 	return c

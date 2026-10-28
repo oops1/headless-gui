@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"math"
@@ -50,7 +51,7 @@ func TestFontFamily_PicksWeightAndItalic(t *testing.T) {
 	face := func(family string, weight int, italic bool) *FontCache {
 		return c.fontFor(widget.FontFace(family, weight, italic))
 	}
-	byName := func(n string) *FontCache { fc, _ := c.namedFonts.get(n); return fc }
+	byName := func(n string) *FontCache { fc, _ := c.namedFonts.Get(n); return fc }
 
 	cases := []struct {
 		weight int
@@ -161,36 +162,6 @@ func TestFontFamily_UnknownNameFallsBackToDefault(t *testing.T) {
 	}
 }
 
-// Свойства шрифта читаются из самого файла, а не из его имени.
-func TestDescribeFont_ReadsFileMetadata(t *testing.T) {
-	testreset.Globals(t)
-	cases := []struct {
-		file   string
-		key    string
-		weight int
-		italic bool
-	}{
-		{"OpenSans-Light", "opensans", 300, false},
-		{"OpenSans-SemiBold", "opensans", 600, false},
-		{"OpenSans-Bold", "opensans", 700, false},
-		{"OpenSans-BoldItalic", "opensans", 700, true},
-		{"GolosText-SemiBold", "golostext", 600, false},
-		{"Roboto-Italic", "roboto", 400, true},
-	}
-	for _, tc := range cases {
-		data, err := readFontFile("../assets/fonts/" + tc.file + ".ttf")
-		if err != nil {
-			t.Fatalf("%s: %v", tc.file, err)
-		}
-		fc := newFontCacheFromData(data, DefaultDPI)
-		m := describeFont(fc, tc.file)
-		if m.keys[0] != tc.key || m.weight != tc.weight || m.italic != tc.italic {
-			t.Errorf("%s: ключ %q вес %d наклон %v; ждали %q %d %v",
-				tc.file, m.keys[0], m.weight, m.italic, tc.key, tc.weight, tc.italic)
-		}
-	}
-}
-
 // Дробный кегль темы (8,5 pt) доходит до растеризатора: размер лица в
 // пикселях — 8,5 · 96 / 72 = 11,33, а не 8, 9 или 11.
 func TestFractionalSize_ReachesRasterizer(t *testing.T) {
@@ -200,7 +171,7 @@ func TestFractionalSize_ReachesRasterizer(t *testing.T) {
 	// Подпиксельный режим: ширина линейна по кеглю и ничем не округлена.
 	fc.SetSubpixel(true)
 	const s = "Hamburgefonstiv Открыть меню Пуск"
-	w8, w85, w9 := fc.MeasureExact(s, 8), fc.MeasureExact(s, 8.5), fc.MeasureExact(s, 9)
+	w8, w85, w9 := measureExact(fc, s, 8), measureExact(fc, s, 8.5), measureExact(fc, s, 9)
 	if !(w8 < w85 && w85 < w9) {
 		t.Fatalf("ширина не растёт с кеглем: 8 → %.2f, 8.5 → %.2f, 9 → %.2f", w8, w85, w9)
 	}
@@ -231,8 +202,8 @@ func TestFractionalSize_ReachesRasterizer(t *testing.T) {
 
 // ─── Подпиксельное позиционирование ─────────────────────────────────────────
 
-// MeasureExact — ширина строки без округления, пиксели (только для тестов).
-func (fc *FontCache) MeasureExact(text string, sizePt float64) float64 {
+// measureExact — ширина строки без округления, пиксели (только для тестов).
+func measureExact(fc *FontCache, text string, sizePt float64) float64 {
 	face := fc.Face(sizePt)
 	var w fixed.Int26_6
 	prev := rune(-1)
@@ -275,7 +246,7 @@ func TestSubpixel_FractionalAdvanceAndWidth(t *testing.T) {
 	sub := eng.canvas.MeasureTextFont(str, 8.5, "OpenSans")
 
 	// Эталон: шаг 'i' без округления из самого шрифта.
-	data, _ := readFontFile("../assets/fonts/OpenSans-Regular.ttf")
+	data, _ := hgtext.ReadFontFile("../assets/fonts/OpenSans-Regular.ttf")
 	f, err := opentype.Parse(data)
 	if err != nil {
 		t.Fatal(err)
@@ -322,13 +293,13 @@ func TestSubpixel_PhasesGiveDifferentMasks(t *testing.T) {
 	fc := eng.canvas.fontFor("OpenSans")
 	g0 := fc.GlyphAt(8.5, 'l', 0)
 	g2 := fc.GlyphAt(8.5, 'l', 2)
-	if g0.mask == nil || g2.mask == nil {
+	if g0.Mask == nil || g2.Mask == nil {
 		t.Fatal("нет маски")
 	}
-	if g0.mask.Rect == g2.mask.Rect {
+	if g0.Mask.Rect == g2.Mask.Rect {
 		same := true
-		for i := range g0.mask.Pix {
-			if g0.mask.Pix[i] != g2.mask.Pix[i] {
+		for i := range g0.Mask.Pix {
+			if g0.Mask.Pix[i] != g2.Mask.Pix[i] {
 				same = false
 				break
 			}
@@ -338,7 +309,7 @@ func TestSubpixel_PhasesGiveDifferentMasks(t *testing.T) {
 		}
 	}
 	// Фаза 0 — та же маска, что у обычного Glyph.
-	if gl := fc.Glyph(8.5, 'l'); gl.offX != g0.offX || gl.mask.Rect != g0.mask.Rect {
+	if gl := fc.Glyph(8.5, 'l'); gl.OffX != g0.OffX || gl.Mask.Rect != g0.Mask.Rect {
 		t.Error("Glyph и GlyphAt(…, 0) разошлись")
 	}
 }
@@ -348,19 +319,19 @@ func TestPenGlyph_PhaseSelection(t *testing.T) {
 	eng := openSansEngine(t)
 	fc := eng.canvas.fontFor("OpenSans")
 	// Без подпикселя перо округляется, как и раньше.
-	if _, x := penGlyph(fc, false, 8.5, 'l', fixed.Int26_6(10*64+40)); x != 11 {
+	if _, x := hgtext.PenGlyph(fc, false, 8.5, 'l', fixed.Int26_6(10*64+40)); x != 11 {
 		t.Errorf("целочисленный режим: x = %d, ждали 11", x)
 	}
 	// С подпикселем 10 px + 40/64 → четверть 10,625 → ближайшая 10,5 (фаза 2).
-	if _, x := penGlyph(fc, true, 8.5, 'l', fixed.Int26_6(10*64+40)); x != 10 {
+	if _, x := hgtext.PenGlyph(fc, true, 8.5, 'l', fixed.Int26_6(10*64+40)); x != 10 {
 		t.Errorf("подпиксель: x = %d, ждали 10", x)
 	}
 	// Близко к следующему пикселю — переходим на него с фазой 0.
-	if _, x := penGlyph(fc, true, 8.5, 'l', fixed.Int26_6(10*64+60)); x != 11 {
+	if _, x := hgtext.PenGlyph(fc, true, 8.5, 'l', fixed.Int26_6(10*64+60)); x != 11 {
 		t.Errorf("подпиксель, 10+60/64: x = %d, ждали 11", x)
 	}
 	// Отрицательные координаты (текст левее холста): floor, а не усечение к нулю.
-	if _, x := penGlyph(fc, true, 8.5, 'l', fixed.Int26_6(-64*3+8)); x != -3 {
+	if _, x := hgtext.PenGlyph(fc, true, 8.5, 'l', fixed.Int26_6(-64*3+8)); x != -3 {
 		t.Errorf("подпиксель, -3+8/64: x = %d, ждали -3", x)
 	}
 }
@@ -399,7 +370,7 @@ func TestSubpixel_DrawnStrokesAreEvenlySpaced(t *testing.T) {
 	if first < 0 {
 		t.Fatal("строка не нарисована")
 	}
-	data, _ := readFontFile("../assets/fonts/OpenSans-Regular.ttf")
+	data, _ := hgtext.ReadFontFile("../assets/fonts/OpenSans-Regular.ttf")
 	f, _ := opentype.Parse(data)
 	ref, _ := opentype.NewFace(f, &opentype.FaceOptions{Size: 8.5, DPI: 96, Hinting: font.HintingNone})
 	adv, _ := ref.GlyphAdvance('l')

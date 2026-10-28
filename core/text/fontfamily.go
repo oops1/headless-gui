@@ -11,10 +11,10 @@
 // себя весом 600 семейства «Golos Text»). Запрос приходит обычным именем
 // шрифта, поэтому интерфейс DrawContext не менялся: имя вида
 // widget.FontFace("Open Sans", 600, false) разбирается здесь же, в fontFor.
-package engine
+
+package text
 
 import (
-	"github.com/oops1/headless-gui/v3/core/text"
 	"encoding/binary"
 	"strings"
 	"sync"
@@ -32,9 +32,9 @@ type faceEntry struct {
 	italic bool
 }
 
-// fontFamilies — таблица семейств. Общая у канваса и его клонов (HiDPI,
+// FontFamilies — таблица семейств. Общая у канваса и его клонов (HiDPI,
 // попапы): шрифты они делят, поэтому и таблица должна быть одна.
-type fontFamilies struct {
+type FontFamilies struct {
 	mu  sync.RWMutex
 	fam map[string][]faceEntry // ключ семейства (familyKey) → начертания
 	// defKey — ключ семейства шрифта по умолчанию; "" — шрифт по умолчанию
@@ -45,8 +45,8 @@ type fontFamilies struct {
 	resolved map[string]string
 }
 
-func newFontFamilies() *fontFamilies {
-	return &fontFamilies{fam: map[string][]faceEntry{}, resolved: map[string]string{}}
+func NewFontFamilies() *FontFamilies {
+	return &FontFamilies{fam: map[string][]faceEntry{}, resolved: map[string]string{}}
 }
 
 // familyKey приводит название семейства к ключу: без регистра, пробелов,
@@ -66,7 +66,7 @@ func familyKey(s string) string {
 
 // add записывает начертание в семейство key; начертание с тем же весом и
 // наклоном заменяется (позднейшая регистрация побеждает, как и у имён).
-func (t *fontFamilies) add(key string, e faceEntry) {
+func (t *FontFamilies) add(key string, e faceEntry) {
 	if key == "" {
 		return
 	}
@@ -84,7 +84,7 @@ func (t *fontFamilies) add(key string, e faceEntry) {
 	t.resolved = map[string]string{}
 }
 
-func (t *fontFamilies) setDefault(key string) {
+func (t *FontFamilies) setDefault(key string) {
 	t.mu.Lock()
 	t.defKey = key
 	t.resolved = map[string]string{}
@@ -142,21 +142,6 @@ func pick(list []faceEntry, weight int, italic bool) (faceEntry, bool) {
 	return best, found
 }
 
-// registerFace записывает только что зарегистрированный шрифт в таблицу и
-// запоминает его ключ семейства в самом FontCache.
-//
-// Имена шрифтов, начинающиеся с «$», — встроенные служебные ($hg_bold и
-// прочие): они в семейства не входят, у них своя дорога (widget.Label).
-func (c *Canvas) registerFace(name string, fc *FontCache) {
-	if c.families == nil || fc == nil || strings.HasPrefix(name, "$") {
-		return
-	}
-	meta := describeFont(fc, name)
-	fc.famKey = meta.keys[0]
-	for _, k := range meta.keys {
-		c.families.add(k, faceEntry{name: name, weight: meta.weight, italic: meta.italic})
-	}
-}
 
 // fontMeta — то, что движок знает о шрифте из его собственных таблиц.
 type fontMeta struct {
@@ -175,10 +160,10 @@ func describeFont(fc *FontCache, regName string) fontMeta {
 	var m fontMeta
 	var buf sfnt.Buffer
 	name := func(id sfnt.NameID) string {
-		if fc.ttf == nil {
+		if fc.TTF == nil {
 			return ""
 		}
-		s, err := fc.ttf.Name(&buf, id)
+		s, err := fc.TTF.Name(&buf, id)
 		if err != nil {
 			return ""
 		}
@@ -301,16 +286,63 @@ func styleItalic(style string) bool {
 	return strings.Contains(s, "italic") || strings.Contains(s, "oblique")
 }
 
-// faceFor разбирает имя шрифта, которого нет в реестре буквально: либо
+
+
+// PenGlyph выбирает маску глифа для пера в позиции pen и возвращает её вместе
+// с целым пикселем, от которого отсчитывается offX. Без подпикселя перо
+// округляется, как и раньше.
+func PenGlyph(fc *FontCache, subpixel bool, sizePt float64, r rune, pen fixed.Int26_6) (CachedGlyph, int) {
+	if !subpixel {
+		return fc.Glyph(sizePt, r), pen.Round()
+	}
+	// Четверти пикселя с округлением к ближайшей; >> на отрицательных —
+	// арифметический, то есть floor, и &3 даёт верную долю и слева от нуля.
+	q := (pen + 8) >> 4
+	return fc.GlyphAt(sizePt, r, int(q&3)), int(q >> 2)
+}
+
+// Register записывает только что зарегистрированный шрифт name в таблицу и
+// запоминает его ключ семейства в самом FontCache.
+//
+// Имена шрифтов, начинающиеся с «$», — встроенные служебные ($hg_bold и
+// прочие): они в семейства не входят, у них своя дорога (widget.Label).
+func (t *FontFamilies) Register(name string, fc *FontCache) {
+	if t == nil || fc == nil || strings.HasPrefix(name, "$") {
+		return
+	}
+	meta := describeFont(fc, name)
+	fc.famKey = meta.keys[0]
+	for _, k := range meta.keys {
+		t.add(k, faceEntry{name: name, weight: meta.weight, italic: meta.italic})
+	}
+}
+
+// SetDefaultFace делает семейство шрифта fc семейством по умолчанию.
+func (t *FontFamilies) SetDefaultFace(fc *FontCache) {
+	if t != nil && fc != nil {
+		t.setDefault(fc.famKey)
+	}
+}
+
+// HasFamily сообщает, есть ли в таблице хотя бы одно начертание семейства family.
+func (t *FontFamilies) HasFamily(family string) bool {
+	if t == nil {
+		return false
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return len(t.fam[familyKey(family)]) > 0
+}
+
+// FaceFor разбирает имя шрифта, которого нет в реестре named буквально: либо
 // составное (widget.FontFace), либо просто название семейства («Open Sans» при
 // файле OpenSans-Regular.ttf). nil — подходящего нет, вызывающий берёт шрифт
 // по умолчанию.
-func (c *Canvas) faceFor(req string) *FontCache {
-	t := c.families
+func (t *FontFamilies) FaceFor(req string, named *FontTable) *FontCache {
 	if t == nil {
 		return nil
 	}
-	family, weight, italic, composite := text.ParseFontFace(req)
+	family, weight, italic, composite := ParseFontFace(req)
 	if !composite {
 		family, weight, italic = req, 400, false
 	}
@@ -319,26 +351,29 @@ func (c *Canvas) faceFor(req string) *FontCache {
 	name, hit := t.resolved[req]
 	t.mu.RUnlock()
 	if !hit {
-		name = c.resolveFace(family, weight, italic)
+		name = t.ResolveFace(family, weight, italic, named)
 		t.mu.Lock()
 		t.resolved[req] = name
 		t.mu.Unlock()
 	}
-	if name == "" || c.namedFonts == nil {
+	if name == "" || named == nil {
 		return nil
 	}
-	fc, _ := c.namedFonts.get(name)
+	fc, _ := named.Get(name)
 	return fc
 }
 
-// resolveFace подбирает имя шрифта в реестре под (семейство, вес, наклон).
+// ResolveFace подбирает имя шрифта в реестре named под (семейство, вес,
+// наклон).
 //
 // Пустое или неизвестное семейство означает «шрифт по умолчанию»: так
 // Bold:true в стиле без Family даёт жирное начертание того шрифта, которым
 // тема пишет остальное. Если у семейства по умолчанию жирного нет (встроенный
 // Go Regular), берётся встроенный Go Bold — как и у widget.Label.
-func (c *Canvas) resolveFace(family string, weight int, italic bool) string {
-	t := c.families
+func (t *FontFamilies) ResolveFace(family string, weight int, italic bool, named *FontTable) string {
+	if t == nil {
+		return ""
+	}
 	if weight <= 0 {
 		weight = 400
 	}
@@ -362,59 +397,16 @@ func (c *Canvas) resolveFace(family string, weight int, italic bool) string {
 	fb := ""
 	switch {
 	case bold && italic:
-		fb = text.BuiltinFontBoldItalic
+		fb = BuiltinFontBoldItalic
 	case bold:
-		fb = text.BuiltinFontBold
+		fb = BuiltinFontBold
 	case italic:
-		fb = text.BuiltinFontItalic
+		fb = BuiltinFontItalic
 	}
-	if c.namedFonts != nil {
-		if _, ok := c.namedFonts.get(fb); ok {
+	if named != nil {
+		if _, ok := named.Get(fb); ok {
 			return fb
 		}
 	}
 	return ""
-}
-
-// penGlyph выбирает маску глифа для пера в позиции pen и возвращает её вместе
-// с целым пикселем, от которого отсчитывается offX. Без подпикселя перо
-// округляется, как и раньше.
-func penGlyph(fc *FontCache, subpixel bool, sizePt float64, r rune, pen fixed.Int26_6) (cachedGlyph, int) {
-	if !subpixel {
-		return fc.Glyph(sizePt, r), pen.Round()
-	}
-	// Четверти пикселя с округлением к ближайшей; >> на отрицательных —
-	// арифметический, то есть floor, и &3 даёт верную долю и слева от нуля.
-	q := (pen + 8) >> 4
-	return fc.GlyphAt(sizePt, r, int(q&3)), int(q >> 2)
-}
-
-// setTextQuality задаёт слой качества текста всем шрифтам канваса. Шрифты,
-// зарегистрированные позже, наследуют его от основного (RegisterFont,
-// AddFallbackFont, ленивые запасные). Шаг и кернинг не меняются, раскладки
-// шейпера остаются верными, но их маски хранятся в шрифтах — сбрасываются там.
-func (c *Canvas) setTextQuality(q TextQuality) {
-	c.fontCache.SetQuality(q)
-	for _, fc := range c.namedFonts.all() {
-		fc.SetQuality(q)
-	}
-	for _, fb := range c.fallbacks {
-		fb.apply(func(fc *FontCache) { fc.SetQuality(q) })
-	}
-	c.fontRev.Add(1)
-}
-
-// setTextSubpixel включает дробное позиционирование глифов у всех шрифтов
-// канваса: основного, именованных и запасных. Шрифты, зарегистрированные
-// позже, наследуют режим от основного (RegisterFont, AddFallbackFont).
-func (c *Canvas) setTextSubpixel(on bool) {
-	c.fontCache.SetSubpixel(on)
-	for _, fc := range c.namedFonts.all() {
-		fc.SetSubpixel(on)
-	}
-	for _, fb := range c.fallbacks {
-		fb.apply(func(fc *FontCache) { fc.SetSubpixel(on) }) // незагруженные возьмут режим при загрузке
-	}
-	c.shaper.dropLayouts()
-	c.fontRev.Add(1)
 }

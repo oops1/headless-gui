@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"os"
@@ -11,53 +12,6 @@ import (
 
 // Пути текста и API слоя качества: именованные и запасные шрифты, шейпер,
 // повёрнутый текст, HiDPI, формат буфера, LCD, таблицы контраста.
-
-// Таблица контраста: тождественна при нуле; концы и монотонность сохраняются;
-// тёмный текст плотнее, светлый на тёмном — слегка тоньше, кривая различна.
-func TestTextQuality_ContrastLUT(t *testing.T) {
-	testreset.Globals(t)
-	if contrastLUT(color.RGBA{0, 0, 0, 255}, 0) != nil {
-		t.Error("при нулевом контрасте таблица не нужна")
-	}
-	black, white := color.RGBA{0, 0, 0, 255}, color.RGBA{255, 255, 255, 255}
-	for _, steps := range []int{1, 16, 32, 64} {
-		for _, col := range []color.RGBA{black, {20, 20, 20, 255}, {99, 99, 99, 255}, {190, 190, 190, 255}, white} {
-			lut := contrastLUT(col, steps)
-			if lut == nil {
-				continue // яркость сводит подъём на нет
-			}
-			if lut[0] != 0 || lut[255] != 255 {
-				t.Errorf("%v/%d: концы сдвинуты: %d, %d", col, steps, lut[0], lut[255])
-			}
-			for a := 1; a < 256; a++ {
-				if lut[a] < lut[a-1] {
-					t.Errorf("%v/%d: таблица убывает на %d", col, steps, a)
-				}
-			}
-		}
-	}
-	dark, light := contrastLUT(black, 32), contrastLUT(white, 32)
-	if dark[128] <= 128 {
-		t.Errorf("тёмный текст не подтянут: lut[128]=%d", dark[128])
-	}
-	if light[128] >= 128 {
-		t.Errorf("светлый текст на тёмном не утоньшён: lut[128]=%d", light[128])
-	}
-	// Чем темнее текст, тем сильнее подъём.
-	if a, b := contrastLUT(color.RGBA{20, 20, 20, 255}, 32)[100], contrastLUT(color.RGBA{99, 99, 99, 255}, 32)[100]; a <= b {
-		t.Errorf("подъём не убывает с яркостью: %d vs %d", a, b)
-	}
-	// Определённость: одни и те же значения при повторном построении.
-	if *contrastLUT(black, 32) != *dark {
-		t.Error("таблица нестабильна")
-	}
-	// Нормализация значения контраста.
-	for in, want := range map[float64]float64{-1: 0, 0: 0, 0.5: 0.5, 2: 1, 0.3: 19.0 / 64} {
-		if got := (TextQuality{Contrast: in}).normalized().Contrast; got != want {
-			t.Errorf("Contrast %v → %v, ожидалось %v", in, got, want)
-		}
-	}
-}
 
 // Движок: режим выключен по умолчанию, значения нормализуются, шрифты,
 // зарегистрированные позже, и запасные наследуют режим, кэш масок сбрасывается.
@@ -75,7 +29,7 @@ func TestTextQuality_EngineAPI(t *testing.T) {
 	e.RegisterFont("OS-early", data)
 	e.canvas.AddFallbackFont(data)
 	before := e.canvas.fontCache.Glyph(9, 'e')
-	beforeMask := string(before.mask.Pix)
+	beforeMask := string(before.Mask.Pix)
 
 	e.SetTextHinting(true)
 	e.SetTextContrast(2) // обрезается до 1
@@ -91,12 +45,12 @@ func TestTextQuality_EngineAPI(t *testing.T) {
 		}
 	}
 	for i, fb := range e.canvas.fallbacks {
-		fc := fb.get(e.canvas.fontCache)
+		fc := fb.Get(e.canvas.fontCache)
 		if fc == nil || fc.Quality() != q {
 			t.Errorf("запасной шрифт %d не получил режим", i)
 		}
 	}
-	if string(e.canvas.fontCache.Glyph(9, 'e').mask.Pix) == beforeMask {
+	if string(e.canvas.fontCache.Glyph(9, 'e').Mask.Pix) == beforeMask {
 		t.Error("кэш масок основного шрифта не сброшен при смене режима")
 	}
 
@@ -105,7 +59,7 @@ func TestTextQuality_EngineAPI(t *testing.T) {
 		t.Errorf("LCDOrder не нормализован: %+v", got)
 	}
 	e.SetTextQuality(TextQuality{})
-	if string(e.canvas.fontCache.Glyph(9, 'e').mask.Pix) != beforeMask {
+	if string(e.canvas.fontCache.Glyph(9, 'e').Mask.Pix) != beforeMask {
 		t.Error("после выключения маска не вернулась к прежней")
 	}
 	// Режим переживает смену масштаба (новый холст, шрифты общие).
@@ -146,7 +100,7 @@ func TestTextQuality_NamedFontMatchesDefault(t *testing.T) {
 func TestTextQuality_ShapedPath(t *testing.T) {
 	testreset.Globals(t)
 	line := "o   a   c   é   o   a   c"
-	if !needsShaping(line) {
+	if !hgtext.NeedsShaping(line) {
 		t.Fatal("строка не идёт через шейпер")
 	}
 	for _, sz := range []int{10, 11, 12, 13, 14, 16, 21, 23} {

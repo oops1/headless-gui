@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"testing"
@@ -9,7 +10,7 @@ import (
 )
 
 func solidCanvas(w, h int, c color.RGBA) *Canvas {
-	cv := newCanvas(w, h, newFontCache("assets"))
+	cv := newCanvas(w, h, hgtext.NewFontCache("assets"))
 	cv.blitBackground()
 	cv.FillRect(0, 0, w, h, c)
 	return cv

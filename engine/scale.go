@@ -126,11 +126,11 @@ func (c *Canvas) adopt(nc *Canvas, bgSrc image.Image) *Canvas {
 // и сбрасывает кэши глифов, метрик и раскладок шейпера.
 func (c *Canvas) setDPIAll(dpi float64) {
 	c.fontCache.SetDPI(dpi)
-	for _, fc := range c.namedFonts.all() {
+	for _, fc := range c.namedFonts.All() {
 		fc.SetDPI(dpi)
 	}
 	for _, fb := range c.fallbacks {
-		fb.apply(func(fc *FontCache) { fc.SetDPI(dpi) }) // незагруженные возьмут DPI при загрузке
+		fb.Apply(func(fc *FontCache) { fc.SetDPI(dpi) }) // незагруженные возьмут DPI при загрузке
 	}
-	c.shaper.dropLayouts()
+	c.shaper.DropLayouts()
 }

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image/color"
 	"testing"
 
@@ -22,12 +23,12 @@ func newShapingCanvas(t *testing.T, probe rune) *Canvas {
 func TestNeedsShaping(t *testing.T) {
 	testreset.Globals(t)
 	for _, s := range []string{"Hello", "Привет 123", "Ünïcödé", "καλημέρα"} {
-		if needsShaping(s) {
+		if hgtext.NeedsShaping(s) {
 			t.Errorf("needsShaping(%q) = true, want false", s)
 		}
 	}
 	for _, s := range []string{"שלום", "مرحبا", "नमस्ते", "สวัสดี", "abc‏def", "é"} {
-		if !needsShaping(s) {
+		if !hgtext.NeedsShaping(s) {
 			t.Errorf("needsShaping(%q) = false, want true", s)
 		}
 	}
@@ -38,16 +39,16 @@ func TestNeedsShaping(t *testing.T) {
 func TestShaping_ArabicLigature(t *testing.T) {
 	testreset.Globals(t)
 	c := newShapingCanvas(t, 'ل')
-	l := c.shaper.layout(c.fontCache, c.fallbacks, "لا", 14)
+	l := c.shaper.Layout(c.fontCache, c.fallbacks, "لا", 14)
 	if l == nil {
 		t.Fatal("layout == nil (шейпинг недоступен)")
 	}
-	if len(l.glyphs) >= 2 {
-		t.Errorf("лам-алеф: %d глифов, ожидалась лигатура (<2)", len(l.glyphs))
+	if len(l.Glyphs) >= 2 {
+		t.Errorf("лам-алеф: %d глифов, ожидалась лигатура (<2)", len(l.Glyphs))
 	}
 	wLam := c.measureWithFallback(c.fontCache, "ل", 14)
 	wAlef := c.measureWithFallback(c.fontCache, "ا", 14)
-	wLig := l.width.Round()
+	wLig := l.Width.Round()
 	if wLig <= 0 || wLig >= wLam+wAlef {
 		t.Errorf("ширина лигатуры %d, ожидалась в (0, %d)", wLig, wLam+wAlef)
 	}
@@ -57,16 +58,16 @@ func TestShaping_ArabicLigature(t *testing.T) {
 func TestShaping_RTLVisualOrder(t *testing.T) {
 	testreset.Globals(t)
 	c := newShapingCanvas(t, 'א')
-	l := c.shaper.layout(c.fontCache, c.fallbacks, "אב", 14)
+	l := c.shaper.Layout(c.fontCache, c.fallbacks, "אב", 14)
 	if l == nil {
 		t.Fatal("layout == nil")
 	}
-	if len(l.glyphs) != 2 {
-		t.Fatalf("ожидалось 2 глифа, got %d", len(l.glyphs))
+	if len(l.Glyphs) != 2 {
+		t.Fatalf("ожидалось 2 глифа, got %d", len(l.Glyphs))
 	}
-	if l.glyphs[0].cluster != 1 || l.glyphs[1].cluster != 0 {
+	if l.Glyphs[0].Cluster != 1 || l.Glyphs[1].Cluster != 0 {
 		t.Errorf("визуальный порядок кластеров %d,%d; ожидался 1,0 (RTL)",
-			l.glyphs[0].cluster, l.glyphs[1].cluster)
+			l.Glyphs[0].Cluster, l.Glyphs[1].Cluster)
 	}
 }
 
@@ -121,9 +122,7 @@ func TestShaping_SimpleTextBypasses(t *testing.T) {
 	eng := New(200, 50, 20)
 	c := eng.canvas
 	c.DrawTextSize("Привет World", 5, 5, 12, color.RGBA{A: 255, R: 200, G: 200, B: 200})
-	c.shaper.mu.Lock()
-	n := len(c.shaper.layouts)
-	c.shaper.mu.Unlock()
+	n, _ := c.shaper.CacheSizes()
 	if n != 0 {
 		t.Errorf("простой текст попал в шейпер: %d layout(ов) в кэше", n)
 	}
@@ -137,9 +136,7 @@ func TestShaping_LayoutCached(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		c.DrawTextSize("مرحبا", 10, 30, 14, col)
 	}
-	c.shaper.mu.Lock()
-	n := len(c.shaper.layouts)
-	c.shaper.mu.Unlock()
+	n, _ := c.shaper.CacheSizes()
 	if n != 1 {
 		t.Errorf("в кэше %d layout(ов), ожидался 1", n)
 	}
@@ -171,9 +168,7 @@ func BenchmarkShapeUncached(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		c.shaper.mu.Lock()
-		c.shaper.layouts = nil // сброс кэша — измеряем сам шейпинг
-		c.shaper.mu.Unlock()
-		c.shaper.layout(c.fontCache, c.fallbacks, "مرحبا بالعالم", 14)
+		c.shaper.DropLayouts() // сброс кэша — измеряем сам шейпинг
+		c.shaper.Layout(c.fontCache, c.fallbacks, "مرحبا بالعالم", 14)
 	}
 }

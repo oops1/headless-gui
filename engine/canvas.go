@@ -9,8 +9,9 @@
 package engine
 
 import (
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"bytes"
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	stdraw "image/draw"
@@ -48,17 +49,17 @@ type Canvas struct {
 	wallScaled *image.RGBA
 	mica       *micaCache
 	wallParent *Canvas
-	fontCache  *FontCache            // кэш шрифта по умолчанию
-	namedFonts *fontTable            // именованные шрифты (FontFamily из XAML), под замком — fonttable.go
-	families   *fontFamilies         // таблица семейств: выбор шрифта по весу и наклону (fontfamily.go)
-	fallbacks  []*fallbackFont       // fallback-шрифты для отсутствующих глифов (BUG-2); файлы грузятся лениво (fallbackfont.go)
-	clip       image.Rectangle       // активная область отсечения
-	hasClip    bool                  // включено ли отсечение
-	round      roundClipState        // отсечение по скруглённому контуру (clipround.go)
-	baseClip   image.Rectangle       // базовый клип кадра (damage-область частичной перерисовки)
-	hasBase    bool                  // активен ли базовый клип
-	scaleTmp   *image.RGBA           // переиспользуемый буфер для DrawImageScaled
-	rscr       *rectScratch          // рабочие буферы DrawImageRect (imagerect.go)
+	fontCache  *FontCache             // кэш шрифта по умолчанию
+	namedFonts *hgtext.FontTable      // именованные шрифты (FontFamily из XAML), под замком — core/text/fonttable.go
+	families   *hgtext.FontFamilies   // таблица семейств: выбор шрифта по весу и наклону (core/text/fontfamily.go)
+	fallbacks  []*hgtext.FallbackFont // fallback-шрифты для отсутствующих глифов (BUG-2); файлы грузятся лениво (core/text/fallbackfont.go)
+	clip       image.Rectangle        // активная область отсечения
+	hasClip    bool                   // включено ли отсечение
+	round      roundClipState         // отсечение по скруглённому контуру (clipround.go)
+	baseClip   image.Rectangle        // базовый клип кадра (damage-область частичной перерисовки)
+	hasBase    bool                   // активен ли базовый клип
+	scaleTmp   *image.RGBA            // переиспользуемый буфер для DrawImageScaled
+	rscr       *rectScratch           // рабочие буферы DrawImageRect (imagerect.go)
 	// recycle — класть данные тайлов в переработываемые буферы (output.Slab)
 	// вместо новых; slabs — буферы текущего кадра, их забирает takeSlabs.
 	// Воркеры diffTiles добавляют под slabMu.
@@ -77,8 +78,8 @@ type Canvas struct {
 	shadowClock    uint64
 	shadowBuf      []byte
 	shadowCacheOff bool
-	shaper     textShaper            // шейпинг сложного текста (RTL, лигатуры; см. shaper.go)
-	W, H       int                   // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
+	shaper         hgtext.Shaper // шейпинг сложного текста (RTL, лигатуры; см. core/text/shaper.go)
+	W, H           int           // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
 	// marks — признак содержимого по тайлам за текущий кадр (regions.go).
 	marks []tileMark
 	// maskKind — чем считается то, что рисуют маски альфы и цветные глифы
@@ -137,13 +138,11 @@ type Canvas struct {
 // fontName соответствует FontFamily в XAML.
 func (c *Canvas) RegisterFont(fontName string, ttfData []byte) {
 	if c.namedFonts == nil {
-		c.namedFonts = newFontTable()
+		c.namedFonts = hgtext.NewFontTable()
 	}
-	fc := newFontCacheFromData(ttfData, c.fontCache.dpi)
+	fc := hgtext.NewFontCacheLike(ttfData, c.fontCache)
 	if fc != nil {
-		fc.subpixel = c.fontCache.Subpixel()
-		fc.quality = c.fontCache.Quality()
-		c.namedFonts.set(fontName, fc)
+		c.namedFonts.Set(fontName, fc)
 		c.registerFace(fontName, fc)
 		c.fontRev.Add(1)
 	}
@@ -157,7 +156,7 @@ func (c *Canvas) RegisterFont(fontName string, ttfData []byte) {
 // их разбирает таблица семейств.
 func (c *Canvas) fontFor(fontName string) *FontCache {
 	if fontName != "" && c.namedFonts != nil {
-		if fc, ok := c.namedFonts.get(fontName); ok {
+		if fc, ok := c.namedFonts.Get(fontName); ok {
 			return fc
 		}
 		if fc := c.faceFor(fontName); fc != nil {
@@ -172,7 +171,7 @@ func (c *Canvas) hasFont(name string) bool {
 	if c.namedFonts == nil {
 		return false
 	}
-	_, ok := c.namedFonts.get(name)
+	_, ok := c.namedFonts.Get(name)
 	return ok
 }
 
@@ -186,11 +185,9 @@ func (c *Canvas) SetDefaultFont(name string) bool {
 	if c.namedFonts == nil {
 		return false
 	}
-	if fc, ok := c.namedFonts.get(name); ok && fc != nil {
+	if fc, ok := c.namedFonts.Get(name); ok && fc != nil {
 		c.fontCache = fc
-		if c.families != nil {
-			c.families.setDefault(fc.famKey)
-		}
+		c.families.SetDefaultFace(fc)
 		c.fontRev.Add(1)
 		return true
 	}
@@ -202,19 +199,17 @@ func (c *Canvas) fontNames() []string {
 	if c.namedFonts == nil {
 		return nil
 	}
-	return c.namedFonts.names()
+	return c.namedFonts.Names()
 }
 
 // AddFallbackFont добавляет fallback-шрифт из TTF/OTF-данных (BUG-2).
 // Используется для рун, отсутствующих в основном шрифте.
 func (c *Canvas) AddFallbackFont(ttfData []byte) bool {
-	fc := newFontCacheFromData(ttfData, c.fontCache.dpi)
+	fc := hgtext.NewFontCacheLike(ttfData, c.fontCache)
 	if fc == nil {
 		return false
 	}
-	fc.subpixel = c.fontCache.Subpixel()
-	fc.quality = c.fontCache.Quality()
-	c.fallbacks = append(c.fallbacks, newReadyFallback(fc))
+	c.fallbacks = append(c.fallbacks, hgtext.NewReadyFallback(fc))
 	c.fontRev.Add(1)
 	return true
 }
@@ -282,8 +277,8 @@ func newCanvasPhys(pw, ph, w, h int, scale float64, fc *FontCache) *Canvas {
 		back:       backBuf,
 		backOwn:    backBuf,
 		fontCache:  fc,
-		namedFonts: newFontTable(),
-		families:   newFontFamilies(),
+		namedFonts: hgtext.NewFontTable(),
+		families:   hgtext.NewFontFamilies(),
 		W:          pw,
 		H:          ph,
 		tilesX:     (pw + ts - 1) / ts,
@@ -824,7 +819,7 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 	// HiDPI: позиция (x, y) логическая → физическая; метрики шрифта уже
 	// физические (DPI = 96 × scale), поэтому дальше всё в физических px.
 	px, py := c.sx(x), c.sx(y)
-	ascent, descent := fc.vMetrics(sizePt)
+	ascent, descent := fc.VMetrics(sizePt)
 	baseline := py + ascent
 
 	// Вертикальный отсев: строка целиком вне клипа — не итерируем руны вовсе
@@ -839,7 +834,7 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 	// Сложный текст (RTL, арабский, индийские скрипты, комбинируемые знаки) —
 	// через шейпер (см. shaper.go). При недоступности шейпинга (шрифт не
 	// распарсился typesetting'ом) — деградация на per-rune путь ниже.
-	if needsShaping(text) && c.drawShapedText(fc, text, px, baseline, sizePt, col) {
+	if hgtext.NeedsShaping(text) && c.drawShapedText(fc, text, px, baseline, sizePt, col) {
 		return
 	}
 
@@ -871,12 +866,12 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 			if prev >= 0 {
 				pen += fc.Kern(sizePt, prev, r)
 			}
-			g, gx := penGlyph(fc, sub, sizePt, r, pen)
-			if !g.ok {
+			g, gx := hgtext.PenGlyph(fc, sub, sizePt, r, pen)
+			if !g.OK {
 				continue
 			}
-			c.drawGlyphMask(g, gx+g.offX, baseline+g.offY, col, q)
-			pen += g.advance
+			c.drawGlyphMask(g, gx+g.OffX, baseline+g.OffY, col, q)
+			pen += g.Advance
 			prev = r
 		}
 		return
@@ -890,16 +885,16 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 			break
 		}
 		chosen, found := c.fcForRune(fc, r)
-		g, gx := penGlyph(chosen, sub, sizePt, r, pen)
-		if found && g.ok {
-			c.drawGlyphMask(g, gx+g.offX, baseline+g.offY, col, q)
+		g, gx := hgtext.PenGlyph(chosen, sub, sizePt, r, pen)
+		if found && g.OK {
+			c.drawGlyphMask(g, gx+g.OffX, baseline+g.OffY, col, q)
 		}
 		// Отсутствующий глиф не рисуем (без .notdef-квадрата), но сохраняем
 		// интервал по ширине пробела, чтобы текст не «слипался».
-		adv := g.advance
-		if !found || !g.ok {
-			if sp := fc.Glyph(sizePt, ' '); sp.ok {
-				adv = sp.advance
+		adv := g.Advance
+		if !found || !g.OK {
+			if sp := fc.Glyph(sizePt, ' '); sp.OK {
+				adv = sp.Advance
 			}
 		}
 		pen += adv
@@ -907,16 +902,16 @@ func (c *Canvas) drawTextWithFont(fc *FontCache, text string, x, y int, sizePt f
 }
 
 // drawGlyphMask альфа-блендит маску глифа из per-rune кэша.
-func (c *Canvas) drawGlyphMask(g cachedGlyph, gx, gy int, col color.RGBA, q TextQuality) {
+func (c *Canvas) drawGlyphMask(g hgtext.CachedGlyph, gx, gy int, col color.RGBA, q TextQuality) {
 	lut := c.textLUT(q, col)
-	if g.lcd != nil {
-		c.withMaskKind(output.RegionText, func() { c.drawLCDMask(g.lcd, gx, gy, col, lut) })
+	if g.LCD != nil {
+		c.withMaskKind(output.RegionText, func() { c.drawLCDMask(g.LCD, gx, gy, col, lut) })
 		return
 	}
-	if g.mask == nil {
+	if g.Mask == nil {
 		return
 	}
-	c.withMaskKind(output.RegionText, func() { c.drawAlphaMaskLUT(g.mask, gx, gy, col, lut) })
+	c.withMaskKind(output.RegionText, func() { c.drawAlphaMaskLUT(g.Mask, gx, gy, col, lut) })
 }
 
 // textLUT — таблица контраста слоя качества для цвета текста (nil — не нужна).
@@ -926,7 +921,7 @@ func (c *Canvas) textLUT(q TextQuality, col color.RGBA) *[256]uint8 {
 	if c.plainText {
 		return nil
 	}
-	return contrastLUT(col, q.contrastSteps())
+	return hgtext.ContrastLUT(col, q.ContrastSteps())
 }
 
 // drawAlphaMask альфа-блендит альфа-маску цветом col в back-буфер (Over,
@@ -1064,9 +1059,9 @@ func (c *Canvas) runeAdvance(fc *FontCache, r rune, sizePt float64) fixed.Int26_
 // measureWithFallback измеряет ширину строки с учётом fallback-шрифтов.
 func (c *Canvas) measureWithFallback(fc *FontCache, text string, sizePt float64) int {
 	// Сложный текст: ширина после шейпинга (лигатуры меняют ширину строки).
-	if needsShaping(text) {
-		if l := c.shaper.layout(fc, c.fallbacks, text, sizePt); l != nil {
-			return l.width.Round()
+	if hgtext.NeedsShaping(text) {
+		if l := c.shaper.Layout(fc, c.fallbacks, text, sizePt); l != nil {
+			return l.Width.Round()
 		}
 	}
 	if len(c.fallbacks) == 0 {
@@ -1083,38 +1078,38 @@ func (c *Canvas) measureWithFallback(fc *FontCache, text string, sizePt float64)
 // маски растеризуются по GID и кэшируются. baseline — Y базовой линии.
 // false — шейпинг недоступен, вызывающий код рисует per-rune путём.
 func (c *Canvas) drawShapedText(fc *FontCache, text string, x, baseline int, sizePt float64, col color.RGBA) bool {
-	l := c.shaper.layout(fc, c.fallbacks, text, sizePt)
+	l := c.shaper.Layout(fc, c.fallbacks, text, sizePt)
 	if l == nil {
 		return false
 	}
-	sizePx := fixed.Int26_6(sizePt * fc.dpi / 72.0 * 64.0)
+	sizePx := fc.PixelSize(sizePt)
 	q := fc.Quality()
 	pen := fixed.I(x)
-	for _, g := range l.glyphs {
+	for _, g := range l.Glyphs {
 		// GID 0 = .notdef: руна не покрыта ни одним шрифтом — не рисуем
 		// «тофу»-квадрат (философия BUG-2), но перо продвигаем.
-		if g.gid == 0 {
-			pen += g.adv
+		if g.GID == 0 {
+			pen += g.Adv
 			continue
 		}
 		// Цветной эмодзи (COLR/CBDT): блиттится как RGBA, цветом текста НЕ
 		// красится. Для обычных глифов colorGlyphFor сразу вернёт nil.
-		if cg := c.shaper.colorGlyphFor(g.face, g.gid, sizePx, col); cg != nil && cg.img != nil {
-			gx := (pen + g.xOff).Round() + cg.offX
-			gy := baseline - g.yOff.Round() + cg.offY
-			c.withMaskKind(output.RegionText, func() { c.drawColorGlyph(cg.img, gx, gy) })
-			pen += g.adv
+		if cg := c.shaper.ColorGlyphFor(g.Face, g.GID, sizePx, col); cg != nil && cg.Img != nil {
+			gx := (pen + g.XOff).Round() + cg.OffX
+			gy := baseline - g.YOff.Round() + cg.OffY
+			c.withMaskKind(output.RegionText, func() { c.drawColorGlyph(cg.Img, gx, gy) })
+			pen += g.Adv
 			continue
 		}
-		m := c.shaper.glyphMaskFor(g.face, g.gid, sizePx, q.Hinting)
-		if m.mask != nil {
+		m := c.shaper.GlyphMaskFor(g.Face, g.GID, sizePx, q.Hinting)
+		if m.Mask != nil {
 			// Точка отрисовки: перо + XOffset; YOffset положителен вверх.
-			gx := (pen + g.xOff).Round() + m.offX
-			gy := baseline - g.yOff.Round() + m.offY
+			gx := (pen + g.XOff).Round() + m.OffX
+			gy := baseline - g.YOff.Round() + m.OffY
 			lut := c.textLUT(q, col)
-			c.withMaskKind(output.RegionText, func() { c.drawAlphaMaskLUT(m.mask, gx, gy, col, lut) })
+			c.withMaskKind(output.RegionText, func() { c.drawAlphaMaskLUT(m.Mask, gx, gy, col, lut) })
 		}
-		pen += g.adv
+		pen += g.Adv
 	}
 	return true
 }
@@ -1123,7 +1118,7 @@ func (c *Canvas) drawShapedText(fc *FontCache, text string, x, baseline int, siz
 // текста: advance каждого кластера распределяется поровну между его рунами.
 // Для RTL это ЛОГИЧЕСКИЕ позиции (для каретки TextInput), не визуальные.
 func (c *Canvas) shapedRunePositions(fc *FontCache, text string, sizePt float64) []int {
-	l := c.shaper.layout(fc, c.fallbacks, text, sizePt)
+	l := c.shaper.Layout(fc, c.fallbacks, text, sizePt)
 	if l == nil {
 		return nil
 	}
@@ -1131,8 +1126,8 @@ func (c *Canvas) shapedRunePositions(fc *FontCache, text string, sizePt float64)
 	n := len(runes)
 	// Суммарный advance по кластерам (cluster = индекс первой руны кластера).
 	clusterAdv := make(map[int]fixed.Int26_6, n)
-	for _, g := range l.glyphs {
-		clusterAdv[g.cluster] += g.adv
+	for _, g := range l.Glyphs {
+		clusterAdv[g.Cluster] += g.Adv
 	}
 	// Границы кластеров в логическом порядке.
 	starts := make([]int, 0, len(clusterAdv))
@@ -1189,12 +1184,12 @@ func (c *Canvas) MeasureTextFont(text string, sizePt float64, fontName string) i
 // ширину в toLogicalLen, нельзя: ширина — это «сколько места зарезервировать»,
 // а подъём — «где базовая линия», и завышенный подъём сдвинул бы текст.
 func (c *Canvas) FontMetrics(fontName string, sizePt float64) (ascent, descent, lineGap int) {
-	m := c.fontFor(fontName).vMetricsFull(sizePt)
+	m := c.fontFor(fontName).VMetricsFull(sizePt)
 	if c.scale == 1 {
-		return m.ascent, m.descent, m.lineGap
+		return m.Ascent, m.Descent, m.LineGap
 	}
 	toLogical := func(px int) int { return int(math.Round(float64(px) / c.scale)) }
-	return toLogical(m.ascent), toLogical(m.descent), toLogical(m.lineGap)
+	return toLogical(m.Ascent), toLogical(m.Descent), toLogical(m.LineGap)
 }
 
 // toLogicalLen переводит физическую длину в логическую (округление вверх:
@@ -1243,7 +1238,7 @@ func (c *Canvas) MeasureRunePositionsFont(text string, sizePt float64, fontName 
 }
 
 func (c *Canvas) measureRunePositionsPxFont(fc *FontCache, text string, sizePt float64) []int {
-	if needsShaping(text) {
+	if hgtext.NeedsShaping(text) {
 		if pos := c.shapedRunePositions(fc, text, sizePt); pos != nil {
 			return pos
 		}

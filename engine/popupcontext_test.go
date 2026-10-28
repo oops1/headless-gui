@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"testing"
@@ -37,7 +38,7 @@ func samePixels(t *testing.T, big, small *Canvas, rect, inner image.Rectangle) {
 // PaintStyle не найдёт ни тени, ни размытия, ни скругления.
 func TestTranslatingContext_ImplementsOptionalCapabilities(t *testing.T) {
 	testreset.Globals(t)
-	var ctx widget.DrawContext = &translatingContext{inner: newCanvas(10, 10, newFontCache("assets"))}
+	var ctx widget.DrawContext = &translatingContext{inner: newCanvas(10, 10, hgtext.NewFontCache("assets"))}
 	if _, ok := ctx.(widget.BackdropDrawer); !ok {
 		t.Error("контекст попапа не реализует BackdropDrawer")
 	}

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"testing"
@@ -10,7 +11,7 @@ import (
 
 // newTestCanvas — холст нужного размера с чёрным фоном.
 func newTestCanvas(w, h int) *Canvas {
-	c := newCanvas(w, h, newFontCache("assets"))
+	c := newCanvas(w, h, hgtext.NewFontCache("assets"))
 	c.blitBackground()
 	return c
 }
@@ -164,7 +165,7 @@ func TestRoundClip_ZeroRadiusIsRectangular(t *testing.T) {
 // пикселях: радиус и границы масштабируются вместе с остальным.
 func TestRoundClip_HiDPI(t *testing.T) {
 	testreset.Globals(t)
-	c := newCanvasScaled(60, 60, 2, newFontCache("assets"))
+	c := newCanvasScaled(60, 60, 2, hgtext.NewFontCache("assets"))
 	c.blitBackground()
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 

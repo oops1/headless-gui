@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"testing"
@@ -11,7 +12,7 @@ import (
 // checkerCanvas — холст в крупную шахматную клетку: на нём размытие видно
 // как усреднение соседних клеток.
 func checkerCanvas(w, h, cell int) *Canvas {
-	c := newCanvas(w, h, newFontCache("assets"))
+	c := newCanvas(w, h, hgtext.NewFontCache("assets"))
 	c.blitBackground()
 	black := color.RGBA{A: 255}
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}

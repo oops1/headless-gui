@@ -1,7 +1,6 @@
-package engine
+package text
 
 import (
-	"image"
 	"image/color"
 	"math"
 	"sync"
@@ -69,15 +68,15 @@ func (q TextQuality) normalized() TextQuality {
 	case q.Contrast > 1:
 		q.Contrast = 1
 	}
-	q.Contrast = float64(q.contrastSteps()) / contrastSteps
+	q.Contrast = float64(q.ContrastSteps()) / contrastSteps
 	if q.LCDOrder != LCDOrderBGR {
 		q.LCDOrder = LCDOrderRGB
 	}
 	return q
 }
 
-// contrastSteps — Contrast в целых 1/64.
-func (q TextQuality) contrastSteps() int {
+// ContrastSteps — Contrast в целых 1/64.
+func (q TextQuality) ContrastSteps() int {
 	return int(math.Round(q.Contrast * contrastSteps))
 }
 
@@ -111,11 +110,11 @@ type contrastKey struct{ luma, steps uint8 }
 
 var contrastLUTs sync.Map // contrastKey → *[256]uint8
 
-// contrastLUT возвращает таблицу пересчёта покрытия для цвета текста; nil —
+// ContrastLUT возвращает таблицу пересчёта покрытия для цвета текста; nil —
 // контраст выключен либо для этого цвета кривая тождественна. Чистая функция
 // от (яркость, контраст): одинакова на всех платформах побайтно, считается в
 // целых числах.
-func contrastLUT(col color.RGBA, steps int) *[256]uint8 {
+func ContrastLUT(col color.RGBA, steps int) *[256]uint8 {
 	if steps <= 0 {
 		return nil
 	}
@@ -147,72 +146,3 @@ func contrastLUT(col color.RGBA, steps int) *[256]uint8 {
 	return actual.(*[256]uint8)
 }
 
-// drawLCDMask смешивает цвет с фоном по каналам (субпиксельное сглаживание).
-// Канал смешивается по своему покрытию только там, где фон непрозрачен
-// (A=255): подпиксели имеют смысл лишь на известном фоне. На прозрачных и
-// полупрозрачных пикселях глиф рисуется обычным серым покрытием — средним по
-// каналам. Формулы смешивания те же, что у pixsimd.BlendMaskRow.
-func (c *Canvas) drawLCDMask(m *lcdMask, gx, gy int, col color.RGBA, lut *[256]uint8) {
-	col = c.enc(col)
-	c.markKind(image.Rect(gx, gy, gx+m.w, gy+m.h))
-	r := c.clampRect(image.Rect(gx, gy, gx+m.w, gy+m.h))
-	if r.Empty() {
-		return
-	}
-	const m16 = 0xFFFF
-	sc := [3]uint32{uint32(col.R) * 0x101, uint32(col.G) * 0x101, uint32(col.B) * 0x101}
-	sa := uint32(col.A) * 0x101
-	// Логический канал байта j буфера: у BGRX байты R и B переставлены (enc).
-	var logical [3]int
-	for j := range logical {
-		logical[j] = j
-		if c.format == FormatBGRX {
-			logical[j] = 2 - j
-		}
-	}
-	dst := c.back.Pix
-	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
-		lx, rx, ok := c.round.spanX(yy, r.Min.X, r.Max.X)
-		if !ok {
-			continue
-		}
-		src := m.pix[(yy-gy)*m.w*3:]
-		dOff := c.back.PixOffset(lx, yy)
-		for xx := lx; xx < rx; xx, dOff = xx+1, dOff+4 {
-			cov := src[(xx-gx)*3 : (xx-gx)*3+3 : (xx-gx)*3+3]
-			if cov[0]|cov[1]|cov[2] == 0 {
-				continue
-			}
-			c0, c1, c2 := uint32(cov[0]), uint32(cov[1]), uint32(cov[2])
-			if lut != nil {
-				c0, c1, c2 = uint32(lut[c0]), uint32(lut[c1]), uint32(lut[c2])
-			}
-			p := dst[dOff : dOff+4 : dOff+4]
-			if p[3] == 255 {
-				cs := [3]uint32{c0, c1, c2}
-				var avg uint32
-				for j := 0; j < 3; j++ {
-					ma := cs[logical[j]]
-					ma |= ma << 8
-					inv := m16 - sa*ma/m16
-					p[j] = uint8((uint32(p[j])*0x101*inv/m16 + sc[j]*ma/m16) >> 8)
-					avg += cs[j]
-				}
-				// Альфа пикселя — как у серого покрытия среднего значения.
-				ma := (avg + 1) / 3
-				ma |= ma << 8
-				inv := m16 - sa*ma/m16
-				p[3] = uint8((uint32(p[3])*0x101*inv/m16 + sa*ma/m16) >> 8)
-				continue
-			}
-			ma := (c0 + c1 + c2 + 1) / 3
-			ma |= ma << 8
-			a := sa * ma / m16
-			inv := m16 - a
-			for j := 0; j < 3; j++ {
-				p[j] = uint8((uint32(p[j])*0x101*inv/m16 + sc[j]*ma/m16) >> 8)
-			}
-			p[3] = uint8((uint32(p[3])*0x101*inv/m16 + sa*ma/m16) >> 8)
-		}
-	}
-}

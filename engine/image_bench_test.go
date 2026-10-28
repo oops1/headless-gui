@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"testing"
@@ -19,7 +20,7 @@ func benchIcon() *image.RGBA {
 
 // BenchmarkDrawImageScaled_Icon64to24: повторная отрисовка одной иконки.
 func BenchmarkDrawImageScaled_Icon64to24(b *testing.B) {
-	c := newCanvas(200, 200, newFontCache("assets"))
+	c := newCanvas(200, 200, hgtext.NewFontCache("assets"))
 	ic := benchIcon()
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -30,7 +31,7 @@ func BenchmarkDrawImageScaled_Icon64to24(b *testing.B) {
 
 // BenchmarkDrawImageScaled_MixedSizes: несколько иконок разных размеров.
 func BenchmarkDrawImageScaled_MixedSizes(b *testing.B) {
-	c := newCanvas(200, 200, newFontCache("assets"))
+	c := newCanvas(200, 200, hgtext.NewFontCache("assets"))
 	icons := []*image.RGBA{benchIcon(), benchIcon(), benchIcon(), benchIcon()}
 	sizes := []int{16, 24, 32, 48}
 	b.ReportAllocs()

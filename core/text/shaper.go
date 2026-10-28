@@ -17,7 +17,8 @@
 // Цветные эмодзи (COLRv0-слои и растровые CBDT/sbix PNG) рендерятся в цвете —
 // см. emoji.go; COLRv1 (граф paint, градиенты) пока не поддержан. Вертикальный
 // текст не поддержан.
-package engine
+
+package text
 
 import (
 	"image"
@@ -34,10 +35,10 @@ import (
 
 // ─── Детектор необходимости шейпинга ─────────────────────────────────────────
 
-// needsShaping сообщает, требует ли строка полного шейпинга.
+// NeedsShaping сообщает, требует ли строка полного шейпинга.
 // Консервативно: false → простой per-rune путь гарантированно корректен
 // (с точностью до кернинга, который он и так применяет).
-func needsShaping(s string) bool {
+func NeedsShaping(s string) bool {
 	for _, r := range s {
 		if runeNeedsShaping(r) {
 			return true
@@ -119,7 +120,7 @@ func firstStrongRTL(runes []rune) bool {
 // по порядку и догружает файлы только до первого шрифта с нужной руной.
 type chainFontmap struct {
 	primary   *tsfont.Face
-	fallbacks []*fallbackFont
+	fallbacks []*FallbackFont
 	ref       *FontCache // шрифт холста: DPI и субпиксели для загружаемых записей
 }
 
@@ -127,7 +128,7 @@ type chainFontmap struct {
 // Записи без шрифта или без typesetting-face пропускаются.
 func (cf *chainFontmap) eachFace(fn func(*tsfont.Face) bool) {
 	for _, fb := range cf.fallbacks {
-		fc := fb.get(cf.ref)
+		fc := fb.Get(cf.ref)
 		if fc == nil {
 			continue
 		}
@@ -195,21 +196,21 @@ func faceHasColor(f *tsfont.Face) bool {
 
 // ─── Кэшированный layout строки ──────────────────────────────────────────────
 
-// placedGlyph — один глиф готового layout'а: face+GID и геометрия
+// PlacedGlyph — один глиф готового layout'а: face+GID и геометрия
 // относительно текущей позиции пера (в fixed 26.6).
-type placedGlyph struct {
-	face       *tsfont.Face
-	gid        tsfont.GID
-	xOff, yOff fixed.Int26_6 // смещение точки отрисовки от пера
-	adv        fixed.Int26_6 // продвижение пера
-	cluster    int           // индекс первой руны кластера (логический)
+type PlacedGlyph struct {
+	Face       *tsfont.Face
+	GID        tsfont.GID
+	XOff, YOff fixed.Int26_6 // смещение точки отрисовки от пера
+	Adv        fixed.Int26_6 // продвижение пера
+	Cluster    int           // индекс первой руны кластера (логический)
 }
 
-// shapedLayout — результат шейпинга строки: глифы в видимом порядке
+// ShapedLayout — результат шейпинга строки: глифы в видимом порядке
 // (слева направо) и полная ширина.
-type shapedLayout struct {
-	glyphs []placedGlyph
-	width  fixed.Int26_6
+type ShapedLayout struct {
+	Glyphs []PlacedGlyph
+	Width  fixed.Int26_6
 }
 
 type layoutKey struct {
@@ -225,10 +226,10 @@ type maskKey struct {
 	hint   bool // маска с вертикальным автохинтингом (TextQuality.Hinting)
 }
 
-// glyphMask — растеризованная маска глифа с оффсетом от точки отрисовки.
-type glyphMask struct {
-	mask       *image.Alpha // nil — пустой глиф (пробел) или контур недоступен
-	offX, offY int
+// GlyphMask — растеризованная маска глифа с оффсетом от точки отрисовки.
+type GlyphMask struct {
+	Mask       *image.Alpha // nil — пустой глиф (пробел) или контур недоступен
+	OffX, OffY int
 }
 
 // Пределы кэшей: при переполнении кэш сбрасывается целиком (простая política,
@@ -239,21 +240,21 @@ const (
 	maxDynColorGlyphs = 256 // цветозависимые эмодзи: цвет текста меняется редко
 )
 
-// textShaper — состояние шейпинга одного Canvas. Все обращения — под mu
+// Shaper — состояние шейпинга одного Canvas. Все обращения — под mu
 // (Segmenter/HarfbuzzShaper/vector.Rasterizer не потокобезопасны).
-type textShaper struct {
+type Shaper struct {
 	mu      sync.Mutex
 	seg     shaping.Segmenter
 	hb      shaping.HarfbuzzShaper
-	layouts map[layoutKey]*shapedLayout
-	masks   map[maskKey]*glyphMask
+	layouts map[layoutKey]*ShapedLayout
+	masks   map[maskKey]*GlyphMask
 
 	// ── Цветные эмодзи (см. emoji.go) ────────────────────────────────────────
 	// colorGlyphs — кэш цветных RGBA-глифов по (face, GID, размер); nil-значение
 	// («цветного представления нет») тоже кэшируется.
-	colorGlyphs map[maskKey]*colorGlyph
+	colorGlyphs map[maskKey]*ColorGlyph
 	// dynColorGlyphs — глифы со слоями foreground, ключ включает цвет текста.
-	dynColorGlyphs map[dynColorKey]*colorGlyph
+	dynColorGlyphs map[dynColorKey]*ColorGlyph
 	// faceColor — есть ли у face цветные глифы вообще (COLR/CBDT).
 	faceColor map[*tsfont.Face]bool
 	// vhints — отображения высот автохинтера по (face, размер) (texthint.go);
@@ -261,16 +262,24 @@ type textShaper struct {
 	vhints map[hintKey]*vHint
 }
 
-// dropLayouts сбрасывает кэш раскладок: его ключ не учитывает DPI.
-func (ts *textShaper) dropLayouts() {
+// CacheSizes — число раскладок и цветных глифов в кэшах шейпера (для тестов и
+// диагностики).
+func (ts *Shaper) CacheSizes() (layouts, colorGlyphs int) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return len(ts.layouts), len(ts.colorGlyphs) + len(ts.dynColorGlyphs)
+}
+
+// DropLayouts сбрасывает кэш раскладок: его ключ не учитывает DPI.
+func (ts *Shaper) DropLayouts() {
 	ts.mu.Lock()
 	ts.layouts = nil
 	ts.mu.Unlock()
 }
 
-// layout возвращает кэшированный (или строит новый) layout строки.
+// Layout возвращает кэшированный (или строит новый) layout строки.
 // Возвращает nil, если шейпинг недоступен (нет typesetting-face).
-func (ts *textShaper) layout(fc *FontCache, fallbacks []*fallbackFont, text string, sizePt float64) *shapedLayout {
+func (ts *Shaper) Layout(fc *FontCache, fallbacks []*FallbackFont, text string, sizePt float64) *ShapedLayout {
 	primary := fc.shaperFace()
 	if primary == nil {
 		return nil
@@ -286,7 +295,7 @@ func (ts *textShaper) layout(fc *FontCache, fallbacks []*fallbackFont, text stri
 	fm := &chainFontmap{primary: primary, fallbacks: fallbacks, ref: fc}
 
 	runes := []rune(text)
-	sizePx := fixed.Int26_6(sizePt * fc.dpi / 72.0 * 64.0)
+	sizePx := fc.PixelSize(sizePt)
 	base := di.DirectionLTR
 	if firstStrongRTL(runes) {
 		base = di.DirectionRTL
@@ -307,25 +316,25 @@ func (ts *textShaper) layout(fc *FontCache, fallbacks []*fallbackFont, text stri
 	}
 	reorderRunsVisual(outs, base)
 
-	l := &shapedLayout{}
+	l := &ShapedLayout{}
 	for _, out := range outs {
 		for _, g := range out.Glyphs {
-			l.glyphs = append(l.glyphs, placedGlyph{
-				face:    out.Face,
-				gid:     g.GlyphID,
-				xOff:    g.XOffset,
-				yOff:    g.YOffset,
-				adv:     g.Advance,
-				cluster: g.ClusterIndex,
+			l.Glyphs = append(l.Glyphs, PlacedGlyph{
+				Face:    out.Face,
+				GID:     g.GlyphID,
+				XOff:    g.XOffset,
+				YOff:    g.YOffset,
+				Adv:     g.Advance,
+				Cluster: g.ClusterIndex,
 			})
 		}
-		l.width += out.Advance
+		l.Width += out.Advance
 	}
 
 	if ts.layouts == nil {
-		ts.layouts = make(map[layoutKey]*shapedLayout)
+		ts.layouts = make(map[layoutKey]*ShapedLayout)
 	} else if len(ts.layouts) >= maxShapedLayouts {
-		ts.layouts = make(map[layoutKey]*shapedLayout, maxShapedLayouts/4)
+		ts.layouts = make(map[layoutKey]*ShapedLayout, maxShapedLayouts/4)
 	}
 	ts.layouts[key] = l
 	return l
@@ -376,8 +385,8 @@ func reverseOutputs(outs []shaping.Output) {
 
 // ─── Растеризация глифа по GID ───────────────────────────────────────────────
 
-// glyphMaskFor возвращает альфа-маску глифа (кэшируется по face+GID+размеру).
-func (ts *textShaper) glyphMaskFor(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, hint bool) *glyphMask {
+// GlyphMaskFor возвращает альфа-маску глифа (кэшируется по face+GID+размеру).
+func (ts *Shaper) GlyphMaskFor(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, hint bool) *GlyphMask {
 	key := maskKey{face: face, gid: gid, sizePx: sizePx, hint: hint}
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
@@ -392,9 +401,9 @@ func (ts *textShaper) glyphMaskFor(face *tsfont.Face, gid tsfont.GID, sizePx fix
 	m := rasterizeGlyph(face, gid, sizePx, vh)
 
 	if ts.masks == nil {
-		ts.masks = make(map[maskKey]*glyphMask)
+		ts.masks = make(map[maskKey]*GlyphMask)
 	} else if len(ts.masks) >= maxShapedMasks {
-		ts.masks = make(map[maskKey]*glyphMask, maxShapedMasks/4)
+		ts.masks = make(map[maskKey]*GlyphMask, maxShapedMasks/4)
 	}
 	ts.masks[key] = m
 	return m
@@ -406,14 +415,14 @@ func (ts *textShaper) glyphMaskFor(face *tsfont.Face, gid tsfont.GID, sizePx fix
 //
 // vh != nil — вертикальный автохинтинг: Y-координата каждой точки контура
 // проходит через отображение зон (texthint.go), X не меняется.
-func rasterizeGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, vh *vHint) *glyphMask {
+func rasterizeGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, vh *vHint) *GlyphMask {
 	outline, ok := face.GlyphData(gid).(tsfont.GlyphOutline)
 	if !ok || len(outline.Segments) == 0 {
-		return &glyphMask{} // пробел/битмап-глиф — рисовать нечего
+		return &GlyphMask{} // пробел/битмап-глиф — рисовать нечего
 	}
 	ext, ok := face.GlyphExtents(gid)
 	if !ok || ext.Width == 0 || ext.Height == 0 {
-		return &glyphMask{}
+		return &GlyphMask{}
 	}
 
 	scale := float32(sizePx) / 64.0 / float32(face.Upem())
@@ -477,7 +486,7 @@ func rasterizeGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, vh 
 	w := ceilF32(x1) - minX + 1
 	h := ceilF32(y1) - minY + 1
 	if !glyphBudgetOK(w, h) {
-		return &glyphMask{}
+		return &GlyphMask{}
 	}
 
 	r := vector.NewRasterizer(w, h)
@@ -512,7 +521,7 @@ func rasterizeGlyph(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, vh 
 	mask := image.NewAlpha(image.Rect(0, 0, w, h))
 	r.Draw(mask, mask.Bounds(), image.Opaque, image.Point{})
 
-	return &glyphMask{mask: mask, offX: minX, offY: minY}
+	return &GlyphMask{Mask: mask, OffX: minX, OffY: minY}
 }
 
 func floorF32(v float32) int {

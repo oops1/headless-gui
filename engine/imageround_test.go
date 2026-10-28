@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
 	"testing"
@@ -20,7 +21,7 @@ func flatImage(w, h int, col color.RGBA) *image.RGBA {
 // imageRoundCanvas — холст с однотонным фоном нужного формата: нетронутые
 // углы на нём не спутать с залитыми.
 func imageRoundCanvas(w, h int, scale float64, f PixelFormat) *Canvas {
-	c := newCanvasScaled(w, h, scale, newFontCache("assets"))
+	c := newCanvasScaled(w, h, scale, hgtext.NewFontCache("assets"))
 	if f != FormatRGBA {
 		c.setOwnFormat(f)
 	}
@@ -181,7 +182,7 @@ func TestBlitOver_NoRoundUnchanged(t *testing.T) {
 
 // Бенчмарк скруглённого блита: накладная только на угловых строках.
 func BenchmarkDrawImage_RoundClip(b *testing.B) {
-	c := newCanvas(400, 300, newFontCache("assets"))
+	c := newCanvas(400, 300, hgtext.NewFontCache("assets"))
 	img := flatImage(300, 200, color.RGBA{R: 200, G: 100, B: 50, A: 255})
 	c.SetRoundClip(image.Rect(10, 10, 390, 290), 12)
 	b.ReportAllocs()
@@ -192,7 +193,7 @@ func BenchmarkDrawImage_RoundClip(b *testing.B) {
 }
 
 func BenchmarkDrawImage_NoRoundClip(b *testing.B) {
-	c := newCanvas(400, 300, newFontCache("assets"))
+	c := newCanvas(400, 300, hgtext.NewFontCache("assets"))
 	img := flatImage(300, 200, color.RGBA{R: 200, G: 100, B: 50, A: 255})
 	b.ReportAllocs()
 	b.ResetTimer()
