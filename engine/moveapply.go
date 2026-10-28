@@ -169,15 +169,23 @@ const maxPendingMoves = 64
 // одной проверки — большая перестройка. Цена невелика: поиск идёт только на
 // объявленный перенос (шаг перетаскивания, десятки раз в секунду), а дерево
 // экрана — сотни узлов.
+//
+// Глубина ограничена, как у остальных обходов (tooDeep): приёмник переносов
+// общий на процесс, и цикл в Children() дерева любого движка иначе валил
+// переполнением стека перетаскивание окна в другом.
 func widgetInTree(node, target widget.Widget) bool {
-	if node == nil {
+	return widgetInTreeAt(node, target, 0)
+}
+
+func widgetInTreeAt(node, target widget.Widget, depth int) bool {
+	if node == nil || tooDeep(depth) {
 		return false
 	}
 	if node == target {
 		return true
 	}
 	for _, child := range node.Children() {
-		if widgetInTree(child, target) {
+		if widgetInTreeAt(child, target, depth+1) {
 			return true
 		}
 	}

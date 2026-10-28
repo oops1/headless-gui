@@ -34,6 +34,10 @@ func TestTreeCycle_DoesNotHang(t *testing.T) {
 	w := &cyclicWidget{b: image.Rect(0, 0, 200, 200), overlay: true}
 
 	e := New(200, 200, 20)
+	// Без Stop приёмник переносов движка с циклическим деревом оставался
+	// подписан на весь процесс, и перетаскивание окна в следующем тесте
+	// обходило это дерево.
+	defer e.Stop()
 	e.SetTooltipsEnabled(false)
 	e.SetRoot(w)
 
@@ -52,6 +56,11 @@ func TestTreeCycle_DoesNotHang(t *testing.T) {
 		drawOverlays(w, e.canvas, false)
 		e.renderFrame()
 		e.SendMouseMove(5, 5)
+		// Объявление о переносе чужого виджета: поиск его в дереве.
+		if widgetInTree(w, &cyclicWidget{}) {
+			t.Error("чужой виджет найден в циклическом дереве")
+		}
+		e.noteMove(widget.MoveNotice{Widget: &cyclicWidget{}, Rect: image.Rect(0, 0, 10, 10)})
 	}()
 
 	select {
