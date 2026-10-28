@@ -5734,6 +5734,36 @@ dropped frame would leave it half-transparent) and an X11 check on a test machin
 separate engine-level transition for submenus; tooltip and modal transitions by the same
 mechanism.
 
+### Shared glyph cache of the process (v4.0, in progress)
+
+When several engines run in one process — one per monitor, hosted dialogs, a second
+desktop — each glyph is rasterised once per process, not once per engine. Nothing has to be
+called; the memory limit is one call:
+
+```go
+engine.SetGlyphCacheBudget(128 << 20) // bytes; 0 or less means the default, 64 MB
+```
+
+- Rasters are shared per font and size. Masks differ by DPI, subpixel text mode and text
+  quality level: two engines with the same settings get one mask, with different settings
+  each gets its own.
+- When the limit is exceeded, whole sizes of the least recently used fonts are evicted until
+  the cache is at half the limit. An evicted glyph is rasterised again the same way: the
+  frame does not change because of eviction.
+- `Stop` of an engine does not touch the shared cache: the rasters stay for the other engines
+  of the process.
+- The same font is parsed once per process: its contents are compared, not its address. The
+  first registration keeps the font bytes; registering the same bytes again does not keep a
+  second copy.
+- For several engines sharing a font, register the files with `RegisterFontDir`: its files
+  are read through the process file cache. `RegisterFontFile` and `RegisterFontFS` read the
+  file again on every call.
+- Rasterising a glyph that misses the shared cache costs about 15–25 % more than it did with a
+  per-engine cache: the cache has two levels now. Hits cost the same as before.
+- More than 256 different fonts in one process is rare: beyond that, fonts that drop out of
+  the accounting keep working, but the memory limit no longer applies to them.
+
+
 ## Module Structure
 
 ```
@@ -5763,6 +5793,29 @@ For local development use `replace`:
 replace github.com/oops1/headless-gui/v3 => ../GuiEngine
 replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
 ```
+
+### Engine packages `core/` (v4.0, in progress)
+
+Raster, text and the drawing context moved out of `engine` into separate packages. An
+application does not need to import them: the old names are kept.
+
+```
+core/draw          DrawContext and its optional capabilities (standard library and core/geom only)
+core/geom          geometry, image filters
+core/text          fonts, glyph cache, shaping, text quality level (no widget, no engine)
+core/raster        the engine's canvas Canvas: tiles, diff, shadows, blur, Mica, text (no widget, no engine)
+internal/workpool  the process worker pool, shared by raster and the engine
+```
+
+`widget` imports `core/draw`, `engine` imports `core/raster`; no `core/*` package imports
+`widget` or `engine`.
+
+The old names are aliases: `engine.Canvas`, `engine.FontCache`, `engine.TextQuality`,
+`engine.LCDOrder`, `engine.PixelFormat`, `engine.FormatRGBA`, `engine.FormatBGRX`,
+`engine.MaxCanvasSide`, `engine.BlurRGBA`, `engine.OpaqueBands` and others; `widget.DrawContext`
+is an alias of `draw.DrawContext`. Application and widget code does not change. `engine.Canvas`
+has more exported methods now — the ones the engine uses to work with its own canvas (`Back`,
+`SetPixelFormat`, `DefaultFont` and others). An application does not need them.
 
 ---
 

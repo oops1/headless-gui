@@ -3484,7 +3484,7 @@ API нет — работает само в общем текстовом пут
   **региональные флаги** (буквенные лигатуры) — известный пробел;
   **COLRv1-градиенты аппроксимируются средним** цветом (сплошная заливка).
 - **Headless/нативно:** одинаково (растеризация в буфер; окно не нужно,
-  см. `engine/emoji_test.go`).
+  см. `core/text/emoji_test.go`).
 - **Лицензии:** эмодзи-шрифт НЕ встроен в движок — глифы берутся из шрифта ОС
   во время работы (`systemFallbackFontPaths`: `seguiemj.ttf` на Windows и т.п.),
   как и прочие системные фолбэки. В строках — Unicode-кодпоинты, не артворк;
@@ -4472,7 +4472,7 @@ Painting is one function: `widget.PaintMaterial(ctx, rect, corner, spec) bool`
 `translatingContext`) and `widget.ShadowParamDrawer`. No `MicaDrawer`, or it
 returns false (no wallpaper) → solid `Fallback` (else `Tint`).
 
-*Mica = blurred WALLPAPER, not content.* `engine/mica.go`: wallpaper
+*Mica = blurred WALLPAPER, not content.* `core/raster/mica.go`: wallpaper
 (`Canvas.bgImage`, or `Engine.SetWallpaperSource(img)` which overrides it; nil
 clears) is box-averaged by 16, blurred (3 passes) once per (wallpaper, radius)
 and cached; a layer bilinearly stretches the small image into its rect
@@ -5895,7 +5895,7 @@ their own canvas, so the page is exact; measurement OUTSIDE `Draw` by widgets
 of an offscreen engine is answered by the process's measurer (the window), so a
 font known only to the job falls back to the default there.
 
-The named-font registry of a canvas is now under a lock (`engine/fonttable.go`)
+The named-font registry of a canvas is now under a lock (`core/text/fonttable.go`)
 and `fontRev` is atomic: `RegisterFont` from the application's goroutine while
 another goroutine measures or draws is no longer a data race (it was, under
 `-race`, in Notepad's PDF export).
@@ -9540,12 +9540,12 @@ Cost: a glyph mask is built once and cached; a cache miss costs about 1.5 us
 with hinting (0.8 us before), 2 us with LCD; drawing a line with the contrast
 table is about 8 % slower, LCD about 2x (scalar blend, no SIMD).
 
-Tests: `engine/textquality_test.go` (client acceptance numbers, rows of lowercase
+Tests: `core/raster/textquality_test.go` (client acceptance numbers, rows of lowercase
 letters across sizes and across a line, measurement independence, off-mode
 byte equality, mask hashes pinned for windows/linux),
-`engine/textquality_paths_test.go` (contrast tables, engine API and inheritance,
+`core/raster/textquality_paths_test.go` (contrast tables, engine API and inheritance,
 named fonts, shaper path, rotated text, HiDPI, LCD order and BGRX buffer, clip),
-`engine/textquality_bench_test.go` (glyph rasterization and line drawing).
+`core/raster/textquality_bench_test.go` (glyph rasterization and line drawing).
 
 ---
 
@@ -10233,6 +10233,53 @@ type PopupTransition struct {
   none.
 - **Not implemented yet.** Popup window transitions on Wayland (single popup buffer); a separate
   engine-level transition for submenus; tooltips and modals by the same mechanism.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): package layout and the shared glyph cache
+
+Stages 4.1 and 4.2 of the 4.0 plan. Behaviour is unchanged: frames are byte-identical and
+consumer code does not change.
+
+**Packages (4.1).** `core/draw` — `DrawContext` and its optional capabilities (standard
+library and `core/geom` only). `core/geom` — geometry, image filters. `core/text` — fonts, glyph
+cache, shaping, text quality (no `widget`, no `engine`). `core/raster` — the engine's canvas
+`Canvas`: tiles, diff, shadows, blur, Mica, canvas text (no `widget`, no `engine`).
+`internal/workpool` — the process worker pool shared by raster and the engine.
+`widget.DrawContext` is an alias of `draw.DrawContext`. In `engine` the old names are aliases:
+`Canvas = raster.Canvas`, `FontCache = text.FontCache`, `TextQuality`, `LCDOrder`,
+`PixelFormat`, the constants and wrappers. `engine.Canvas` has more exported methods — the
+accessors the engine uses for its own state (`Back`, `Front`, `SetPixelFormat`, `DefaultFont`,
+`SetFrameOptions` and others). Application code should not call them.
+
+**Shared glyph cache (4.2).** Two levels:
+
+- L1, per `FontCache` (one view per canvas): key — size, rune, subpixel phase. `SetDPI`,
+  `SetSubpixel` and `SetQuality` clear it.
+- L2, per process: fonts are interned by content, not by pointer. The first copy is kept;
+  a later registration with the same bytes is compared and dropped. Per font and size there is
+  a shard with masks keyed by DPI, subpixel mode and `TextQuality`. Shaper masks and colour
+  glyphs are kept per font and pixel size, keyed by glyph id and hinting.
+- Budget: `engine.SetGlyphCacheBudget(n int64)` (also `text.SetGlyphCacheBudget`); `n <= 0`
+  restores `engine.DefaultGlyphCacheBudget` (64 MiB). Above the budget, whole shards are
+  evicted least-recently-used first until the total is at most half the budget. Eviction does
+  not change output: a glyph evicted and drawn again is identical.
+- `Engine.Stop` does not touch the cache.
+- At most 256 fonts are in the index. Beyond that the least recently used font leaves the index;
+  its shards are no longer charged to the budget and are bounded only by per-shard record limits.
+- Measuring goes through the cache: `FontCache.Advance`, `Kern` and `VMetricsFull`. Do not call
+  `FontCache.Face` from application code: the `font.Face` it returns belongs to one view and is
+  not safe for concurrent use.
+- Registration paths: `RegisterFontDir` reads through the process file cache
+  (`text.ReadFontFile`); `RegisterFontFile` (`text.LoadFontFile`) and `RegisterFontFS` read the
+  file on every call. For several engines that share a font, prefer `RegisterFontDir`.
+- Cost: rasterising a glyph that misses L2 is about 15–25 % slower than with a per-engine cache
+  (microbenchmarks `GlyphRasterLegacy`, `GlyphRasterHinting`). Hits (`DrawText`,
+  `TextInputDrawCached`) are unchanged.
+- Diagnostics and tests: `text.GlyphCacheStatsNow()` returns fonts, shards, entries and bytes;
+  `text.ResetGlyphCache()` drops the entries and keeps the index.
+
+**Where the code lives now (4.1).** The Mica, font-table, shaper, emoji and text-quality code is in
+`core/raster` and `core/text`. Pointers to `engine/...` files in the sections above were updated; the
+entries themselves are unchanged.
 
 ## End of Reference
 
