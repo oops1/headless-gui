@@ -1,35 +1,13 @@
 package widget
 
 import (
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"image"
 	"math"
 )
 
-// PixelBlitter — опциональная возможность контекста положить часть чужого
-// *image.RGBA на холст КАК ЕСТЬ: пиксель в пиксель, без масштабирования и
-// без кэша (v3.39, E7). Реализует engine.Canvas; обёртки пробрасывают.
-//
-// В отличие от DrawImage (логический размер = размер картинки в пикселях, при
-// HiDPI растягивается на масштаб) здесь единица измерения буфера — ФИЗИЧЕСКИЙ
-// пиксель холста. Сессия удалённого рабочего стола идёт в физическом
-// разрешении, и растягивать её на 125–200 % значит мылить картинку.
-//
-//   - src — буфер приложения; sr — часть буфера (в координатах src, то есть
-//     относительно src.Rect), которую надо положить; часть за src.Rect
-//     отбрасывается;
-//   - (x, y) — ЛОГИЧЕСКАЯ точка, в физическую позицию которой попадает пиксель
-//     src.Rect.Min (округление по краям, как у остальных операций холста,
-//     поэтому буфер стыкуется с соседними виджетами без щелей);
-//   - opaque — все пиксели буфера имеют альфу 255 (см. OpaqueImage): тогда
-//     область перезаписывается композицией Src, параллельно по полосам;
-//     иначе — Over.
-//
-// Рисование подчиняется текущему клипу (в том числе скруглённому) и тратит
-// время пропорционально ВИДИМОЙ части sr. Буфер не копируется и не
-// запоминается: после возврата вызывающий снова им владеет.
-type PixelBlitter interface {
-	BlitPixels(src *image.RGBA, sr image.Rectangle, x, y int, opaque bool)
-}
+// PixelBlitter — см. draw.PixelBlitter (core/draw); алиас: тот же тип.
+type PixelBlitter = hgdraw.PixelBlitter
 
 // BlitPixels кладёт часть sr буфера src на холст пиксель в пиксель (см.
 // PixelBlitter). Контекст без поддержки получает запасной путь: вырезанная
@@ -63,11 +41,8 @@ func BlitPixels(ctx DrawContext, src *image.RGBA, sr image.Rectangle, x, y int, 
 	ctx.DrawImageScaled(img, dx, dy, w, h)
 }
 
-// PixelBlitterBGRA — PixelBlitter для буфера, чьи байты лежат в порядке
-// B,G,R,A (см. ExternalSurface.SetBGRA). Реализует engine.Canvas.
-type PixelBlitterBGRA interface {
-	BlitPixelsBGRA(src *image.RGBA, sr image.Rectangle, x, y int, opaque bool)
-}
+// PixelBlitterBGRA — см. draw.PixelBlitterBGRA (core/draw); алиас: тот же тип.
+type PixelBlitterBGRA = hgdraw.PixelBlitterBGRA
 
 // BlitPixelsBGRA — BlitPixels для буфера в порядке B,G,R,A. Контекст без
 // поддержки получает переставленную копию части sr и прежний путь.

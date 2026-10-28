@@ -8,8 +8,8 @@ package widget
 // той же функцией, а не своими литералами.
 
 import (
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"image"
-	"image/color"
 	"math"
 	"sync/atomic"
 	"time"
@@ -17,21 +17,11 @@ import (
 	"github.com/oops1/headless-gui/v3/theme"
 )
 
-// ShadowParamDrawer — опциональная возможность контекста рисовать мягкую тень
-// с явными радиусом размытия и смещением (токены тени профиля). Реализуется
-// engine.Canvas методом DrawShadow. Контекст с одним ShadowDrawer получает
-// близкое приближение через DrawSoftShadow.
-type ShadowParamDrawer interface {
-	DrawShadow(r image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA)
-}
+// ShadowParamDrawer — см. draw.ShadowParamDrawer (core/draw); алиас: тот же тип.
+type ShadowParamDrawer = hgdraw.ShadowParamDrawer
 
-// MicaDrawer — опциональная возможность контекста положить в область
-// размытые обои (материал Mica). Реализуется engine.Canvas методом MicaBehind.
-// Вернул false — обоев нет (фон движка не задан); слой тогда рисуют сплошным
-// цветом темы.
-type MicaDrawer interface {
-	MicaBehind(r image.Rectangle, radius int, tint color.RGBA) bool
-}
+// MicaDrawer — см. draw.MicaDrawer (core/draw); алиас: тот же тип.
+type MicaDrawer = hgdraw.MicaDrawer
 
 // DrawShadowSpec рисует тень sp под слоем r со скруглением corner. Единая
 // точка для всех, кто рисует тень по токенам стиля (theme.Style.ResolveShadow):

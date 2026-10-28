@@ -5,45 +5,18 @@
 package widget
 
 import (
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"image"
-	"image/color"
 )
 
-// DefaultFontSizePt — размер шрифта по умолчанию (в пунктах) для DrawText.
-// Должен совпадать с engine.DefaultFontSize.
-const DefaultFontSizePt = 10.0
+// DefaultFontSizePt — см. draw.DefaultFontSizePt (core/draw).
+const DefaultFontSizePt = hgdraw.DefaultFontSizePt
 
-// AAShapes — опциональные сглаженные (antialiased) примитивы рисования.
-// Реализуется engine.Canvas. Кастомные реализации DrawContext могут не
-// поддерживать интерфейс — код виджетов проверяет его type-assert'ом и
-// откатывается на ступенчатую отрисовку (Bresenham/scanline).
-type AAShapes interface {
-	// FillEllipseAA — залитый эллипс с центром (cx, cy) и полуосями rx, ry.
-	FillEllipseAA(cx, cy, rx, ry int, col color.RGBA)
-	// StrokeEllipseAA — контур эллипса толщиной thickness.
-	StrokeEllipseAA(cx, cy, rx, ry int, thickness float64, col color.RGBA)
-	// FillPolygonAA — залитый многоугольник.
-	FillPolygonAA(pts []image.Point, col color.RGBA)
-	// StrokePolylineAA — ломаная толщиной thickness (closed замыкает контур).
-	StrokePolylineAA(pts []image.Point, thickness float64, closed bool, col color.RGBA)
-	// DrawLineAA — отрезок толщиной thickness.
-	DrawLineAA(x1, y1, x2, y2 int, thickness float64, col color.RGBA)
-}
+// AAShapes — см. draw.AAShapes (core/draw); алиас: тот же тип.
+type AAShapes = hgdraw.AAShapes
 
-// Snapshotter — опциональный интерфейс DrawContext, умеющий скопировать
-// прямоугольную область уже отрисованного холста в самостоятельный *image.RGBA.
-// Реализуется engine.Canvas (по образцу AAShapes: код виджетов проверяет его
-// type-assert'ом и откатывается, если контекст интерфейс не поддерживает).
-//
-// Координаты r — ЛОГИЧЕСКИЕ; результат — в физических пикселях холста
-// (premultiplied RGBA), пригодных для обратного блита через DrawImage/
-// DrawImageScaled. Пустое пересечение r с холстом → nil.
-//
-// Используется DockManager.DrawOverlay для «призрака» перетаскиваемой панели
-// (снимок панели следует за курсором, как в Visual Studio).
-type Snapshotter interface {
-	Snapshot(r image.Rectangle) *image.RGBA
-}
+// Snapshotter — см. draw.Snapshotter (core/draw); алиас: тот же тип.
+type Snapshotter = hgdraw.Snapshotter
 
 // OverlayDrawer реализуется виджетами, которым нужно рисовать поверх всего дерева.
 // Например, раскрытый выпадающий список должен перекрывать соседние виджеты.
@@ -82,171 +55,23 @@ type OverlayRectsProvider interface {
 	OverlayRects() []image.Rectangle
 }
 
-// BackdropDrawer — опциональная возможность контекста размыть то, что уже
-// нарисовано под слоем (acrylic и mica Windows 11, материалы macOS).
-// Реализуется engine.Canvas методом BlurBehind; контекст без размытия
-// компонент обходит подкраской — стекло становится плёнкой, но отрисовка
-// не ломается.
-type BackdropDrawer interface {
-	BlurBehind(r image.Rectangle, radius int, tint color.RGBA)
-}
+// BackdropDrawer — см. draw.BackdropDrawer (core/draw); алиас: тот же тип.
+type BackdropDrawer = hgdraw.BackdropDrawer
 
-// NoiseDrawer — опциональная возможность контекста нанести на область слабый
-// зернистый шум (реализуется engine.Canvas методом DrawNoise). Это последний
-// штрих acrylic Windows 10: размытая подкрашенная подложка без зерна
-// выглядит гладким пластиком. amount — амплитуда в долях полной шкалы
-// яркости (0.02 — ±2 %). Шум детерминирован и привязан к пикселям кадра, а не
-// к области: соседние слои дают одно зерно, и оно не «плывёт» при сдвиге.
-// Контекст без шума компонент пропускает — зерно украшение, не раскладка.
-type NoiseDrawer interface {
-	DrawNoise(r image.Rectangle, amount float64)
-}
+// NoiseDrawer — см. draw.NoiseDrawer (core/draw); алиас: тот же тип.
+type NoiseDrawer = hgdraw.NoiseDrawer
 
-// RoundClipper — опциональная возможность контекста обрезать рисование по
-// скруглённому контуру, а не по охватывающему прямоугольнику.
-//
-// Нужна там, где слой заливается не фигурой, а областью: размытая подложка
-// берёт прямоугольник, и у скруглённого слоя за дугой оставались бы
-// необрезанные уголки размытия — на стекле это выглядит как оборванные углы.
-// Реализуется engine.Canvas; контекст без него рисует как раньше.
-//
-// SetRoundClip подменяет и прямоугольный клип (равносильно SetClip(r) плюс
-// скругление), а ClearRoundClip снимает только скругление. Прежний клип
-// вызывающий возвращает сам — иначе всё, что рисуется дальше, останется
-// обрезанным границами слоя:
-//
-//	prev := ctx.Clip()
-//	rc.SetRoundClip(r, radius)
-//	... // рисование слоя
-//	rc.ClearRoundClip()
-//	ctx.SetClip(prev)
-type RoundClipper interface {
-	SetRoundClip(r image.Rectangle, radius int)
-	ClearRoundClip()
-}
+// RoundClipper — см. draw.RoundClipper (core/draw); алиас: тот же тип.
+type RoundClipper = hgdraw.RoundClipper
 
-// ShadowDrawer — опциональная возможность контекста рисовать мягкую тень
-// (реализуется engine.Canvas методом DrawSoftShadow). Контекст без неё
-// компонент просто пропускает: тень — украшение, её отсутствие не должно
-// менять раскладку.
-type ShadowDrawer interface {
-	DrawSoftShadow(r image.Rectangle, corner int, elevation float64, col color.RGBA)
-}
+// ShadowDrawer — см. draw.ShadowDrawer (core/draw); алиас: тот же тип.
+type ShadowDrawer = hgdraw.ShadowDrawer
 
-// RotatedTextDrawer — опциональная возможность контекста рисовать строку,
-// повёрнутую на прямой угол: вертикальная надпись на боковой полосе меню
-// «Пуск», подпись вертикальной вкладки (реализуется engine.Canvas методом
-// DrawTextRotated).
-//
-// Строка рисуется так, будто DrawTextFont нарисовал её у точки (x, y) и весь
-// отрезок повернули вокруг этой точки, — поэтому точке не нужна высота строки:
-//
-//   - 90  — против часовой стрелки, читается снизу вверх. (x, y) — левый
-//     нижний угол надписи: она занимает x…x+высота_строки по горизонтали и
-//     y-ширина…y по вертикали, верх букв смотрит влево;
-//   - 270 — по часовой, читается сверху вниз. (x, y) — правый верхний угол:
-//     надпись занимает x-высота_строки…x и y…y+ширина, верх букв смотрит вправо;
-//   - 180 — вверх ногами, (x, y) — правый нижний угол; 0 — обычный DrawTextFont.
-//
-// Ширину строки даёт MeasureTextFont, высоту — FontMetrics/MeasureUIFontMetrics.
-// Глифы растрируются в физическом размере и поворачиваются без передискретизации
-// — на HiDPI краски букв остаются такими же чёткими, как у горизонтального
-// текста (растр, повёрнутый приложением и растянутый движком, был мягким).
-// Отсечение (SetClip, скруглённое) действует как обычно.
-//
-// Возвращает false, если угол не кратен 90°, а также если обёртка контекста не
-// может передать вызов дальше (контекст внутри неё поворота не умеет): тогда
-// ничего не нарисовано и вызывающий откатывается на своё рисование.
-type RotatedTextDrawer interface {
-	DrawTextRotated(text string, x, y int, sizePt float64, fontName string, angle int, col color.RGBA) bool
-}
+// RotatedTextDrawer — см. draw.RotatedTextDrawer (core/draw); алиас: тот же тип.
+type RotatedTextDrawer = hgdraw.RotatedTextDrawer
 
-// OpacityDrawer — опциональная возможность контекста: выполнить рисование как
-// слой с заданной прозрачностью (реализуется engine.Canvas методом
-// DrawWithOpacity).
-//
-// draw рисует тем же контекстом как обычно, а контекст после него смешивает
-// область r с тем, что в ней лежало до draw: alpha=1 — слой как нарисован,
-// alpha=0 — его нет. Это прозрачность слоя целиком, а не каждого примитива:
-// подложка со стеклом, тенью и текстом проявляется как одно целое.
-//
-// Контекст без этой возможности компонент обходит: слой появляется сразу, без
-// проявления, — раскладка от этого не меняется.
-type OpacityDrawer interface {
-	DrawWithOpacity(r image.Rectangle, alpha float64, draw func())
-}
+// OpacityDrawer — см. draw.OpacityDrawer (core/draw); алиас: тот же тип.
+type OpacityDrawer = hgdraw.OpacityDrawer
 
-// DrawContext — API рисования, предоставляемый движком каждому виджету.
-// Реализуется типом engine.Canvas.
-//
-// Все координаты — абсолютные пиксели холста.
-type DrawContext interface {
-	// ── Примитивы ────────────────────────────────────────────────────────────
-
-	// FillRect заливает прямоугольник (x, y, x+w, y+h) сплошным цветом.
-	FillRect(x, y, w, h int, col color.RGBA)
-
-	// FillRectAlpha заливает прямоугольник с альфа-смешиванием (Over).
-	FillRectAlpha(x, y, w, h int, col color.RGBA)
-
-	// FillRoundRect заливает прямоугольник со скруглёнными углами радиуса r.
-	FillRoundRect(x, y, w, h, r int, col color.RGBA)
-
-	// DrawBorder рисует 1-пиксельный контур прямоугольника.
-	DrawBorder(x, y, w, h int, col color.RGBA)
-
-	// DrawRoundBorder рисует 1-пиксельный контур со скруглёнными углами.
-	DrawRoundBorder(x, y, w, h, r int, col color.RGBA)
-
-	// SetPixel устанавливает цвет одного пикселя.
-	SetPixel(x, y int, col color.RGBA)
-
-	// DrawHLine рисует горизонтальную линию.
-	DrawHLine(x, y, length int, col color.RGBA)
-
-	// DrawVLine рисует вертикальную линию.
-	DrawVLine(x, y, length int, col color.RGBA)
-
-	// ── Изображения ──────────────────────────────────────────────────────────
-
-	// DrawImage рисует изображение в (x, y) в оригинальном размере.
-	DrawImage(src image.Image, x, y int)
-
-	// DrawImageScaled рисует изображение масштабированным до (w × h) в (x, y).
-	DrawImageScaled(src image.Image, x, y, w, h int)
-
-	// ── Текст ────────────────────────────────────────────────────────────────
-
-	// DrawText выводит строку TTF-шрифтом «default» размером DefaultFontSizePt.
-	DrawText(text string, x, y int, col color.RGBA)
-
-	// DrawTextSize выводит строку шрифтом «default» произвольного размера.
-	DrawTextSize(text string, x, y int, sizePt float64, col color.RGBA)
-
-	// DrawTextFont выводит строку именованным шрифтом (RegisterFont).
-	// fontName="" → шрифт по умолчанию.
-	DrawTextFont(text string, x, y int, sizePt float64, fontName string, col color.RGBA)
-
-	// MeasureText возвращает ширину строки в пикселях (шрифт default, sizePt).
-	MeasureText(text string, sizePt float64) int
-
-	// MeasureTextFont возвращает ширину строки именованным шрифтом.
-	MeasureTextFont(text string, sizePt float64, fontName string) int
-
-	// MeasureRunePositions возвращает накопленную ширину после каждого символа.
-	// Результат: len(text)+1 элементов; positions[0]==0, positions[n] — ширина text[:n].
-	MeasureRunePositions(text string, sizePt float64) []int
-
-	// ── Clip ─────────────────────────────────────────────────────────────────
-
-	// SetClip ограничивает все последующие операции рисования прямоугольником r.
-	SetClip(r image.Rectangle)
-
-	// ClearClip снимает ограничение области рисования.
-	ClearClip()
-
-	// Clip возвращает текущую область отсечения (или полные границы холста,
-	// если отсечение не задано). Позволяет виджету сохранить и восстановить
-	// внешнее отсечение при вложенном клиппинге (контейнеры в контейнерах).
-	Clip() image.Rectangle
-}
+// DrawContext — см. draw.DrawContext (core/draw); алиас: тот же тип.
+type DrawContext = hgdraw.DrawContext

@@ -1,6 +1,7 @@
 package widget
 
 import (
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"image"
 	"image/color"
 )
@@ -20,12 +21,8 @@ func opaquePanelRegion(buf *[1]image.Rectangle, b image.Rectangle, bg color.RGBA
 	return oneRegion(buf, opaqueRect(b, corner))
 }
 
-// DrawContextAlpha — расширение DrawContext для рисования с альфа-смешиванием.
-// Реализуется engine.Canvas через метод FillRectAlpha.
-type DrawContextAlpha interface {
-	DrawContext
-	FillRectAlpha(x, y, w, h int, col color.RGBA)
-}
+// DrawContextAlpha — см. draw.DrawContextAlpha (core/draw); алиас: тот же тип.
+type DrawContextAlpha = hgdraw.DrawContextAlpha
 
 // Panel — контейнер с фоновым цветом, опциональной рамкой и скруглением углов.
 type Panel struct {

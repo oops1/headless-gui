@@ -8,6 +8,7 @@
 package widget
 
 import (
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"image"
 	"image/color"
 	"math"
@@ -19,20 +20,8 @@ import (
 // core/geom; здесь алиас.
 type Point2F = geom.Point2F
 
-// PathShapes — опциональные сглаженные пути с дробными координатами.
-// Реализуется engine.Canvas (масштаб HiDPI холст учитывает сам).
-//
-// Ломаная обводится ОДНИМ контуром с круглыми сопряжениями во внутренних
-// вершинах — на изгибе нет ни щели, ни зубца. Концы у незамкнутого пути
-// прямые, как у DrawLineAA.
-type PathShapes interface {
-	// StrokeCubicAA — кубическая кривая Безье (x0,y0)…(x3,y3) толщиной thickness.
-	StrokeCubicAA(x0, y0, x1, y1, x2, y2, x3, y3, thickness float64, col color.RGBA)
-	// StrokePathAA — ломаная толщиной thickness (closed замыкает контур).
-	StrokePathAA(pts []Point2F, thickness float64, closed bool, col color.RGBA)
-	// FillPathAA — залитый многоугольник.
-	FillPathAA(pts []Point2F, col color.RGBA)
-}
+// PathShapes — см. draw.PathShapes (core/draw); алиас: тот же тип.
+type PathShapes = hgdraw.PathShapes
 
 // FlattenCubic раскладывает кубическую кривую Безье в ломаную.
 //

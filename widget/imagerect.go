@@ -1,6 +1,7 @@
 package widget
 
 import (
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"image"
 
 	geom "github.com/oops1/headless-gui/v3/core/geom"
@@ -22,37 +23,11 @@ const (
 	FilterCatmullRom = geom.FilterCatmullRom
 )
 
-// ImageRectDrawer — опциональная возможность контекста рисовать часть
-// изображения в прямоугольник с выбором фильтра, масштабируя только ту часть,
-// что попадает под текущий клип.
-//
-// В отличие от DrawImageScaled, которому нужен весь источник и весь целевой
-// размер (и кэш ради этого), DrawImageRect работает за время, пропорциональное
-// ВИДИМОЙ площади: картинка 12000×8000 на зуме 400 % в окне 1200×800 стоит
-// как 1200×800 пикселей, а не как 48000×32000.
-//
-//   - sr — прямоугольник в координатах источника (пиксели src); часть за
-//     src.Bounds() отбрасывается вместе с пропорциональной частью dr;
-//   - dr — прямоугольник назначения в ЛОГИЧЕСКИХ координатах контекста (как
-//     x, y, w, h у DrawImageScaled); он может быть сколь угодно больше окна
-//     и уходить за его края;
-//   - f — фильтр.
-//
-// Реализуется engine.Canvas. Результат не кэшируется. Вызывающему удобнее
-// помощник DrawImageRect: контексту без интерфейса он подставит
-// DrawImageScaled от вырезанной части (с билинейным ядром и без выигрыша в
-// скорости).
-type ImageRectDrawer interface {
-	DrawImageRect(src image.Image, sr, dr image.Rectangle, f ImageFilter)
-}
+// ImageRectDrawer — см. draw.ImageRectDrawer (core/draw); алиас: тот же тип.
+type ImageRectDrawer = hgdraw.ImageRectDrawer
 
-// GlyphCoverage — опциональная возможность контекста сказать, есть ли глиф
-// руны в ШРИФТЕ ПО УМОЛЧАНИЮ (без шрифтов-замен). Реализуется engine.Canvas.
-// Нужна виджету, который выбирает символ (маска пароля): символ из
-// шрифта-замены может прийти цветным глифом и не следовать цвету текста.
-type GlyphCoverage interface {
-	HasGlyph(r rune) bool
-}
+// GlyphCoverage — см. draw.GlyphCoverage (core/draw); алиас: тот же тип.
+type GlyphCoverage = hgdraw.GlyphCoverage
 
 // ContextHasGlyph спрашивает контекст про глиф руны в шрифте по умолчанию.
 // known=false — контекст ответить не умеет.
@@ -63,13 +38,8 @@ func ContextHasGlyph(ctx DrawContext, r rune) (has, known bool) {
 	return false, false
 }
 
-// ImageCacheInvalidator — опциональная возможность контекста сбросить кэш
-// масштабированных изображений (реализуется engine.Canvas). Нужна после
-// того, как пиксели картинки переписаны на месте: кэш ключует источник по
-// идентичности и содержимого не сравнивает.
-type ImageCacheInvalidator interface {
-	InvalidateImageCache(src image.Image)
-}
+// ImageCacheInvalidator — см. draw.ImageCacheInvalidator (core/draw); алиас: тот же тип.
+type ImageCacheInvalidator = hgdraw.ImageCacheInvalidator
 
 // DrawImageRect рисует часть sr изображения src в прямоугольник dr с
 // фильтром f (см. ImageRectDrawer). Контекст без поддержки получает

@@ -15,39 +15,17 @@
 package widget
 
 import (
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"image"
 	"sync"
 	"sync/atomic"
 )
 
-// CullScope — то, что контекст отрисовки знает о текущем кадре: какие области
-// перерисовываются и разрешён ли пропуск.
-//
-// Спрашивается у КОНТЕКСТА, а не у пакета. Раньше это были переменные на
-// процесс, и два движка в одном процессе (окно и вынесенный в своё окно
-// попап — обычное дело) перетирали их друг другу: движок мог пропустить
-// поддерево по чужому damage и отдать недорисованный кадр.
-//
-// Реализуется engine.Canvas. Контекст без этих методов ограничений не
-// ставит — обход идёт целиком, как до появления пропуска.
-type CullScope interface {
-	// DrawDamage — области кадра в ЛОГИЧЕСКИХ координатах. Пустой список
-	// означает «рисуем всё».
-	DrawDamage() []image.Rectangle
-	// SubtreeCullingEnabled — разрешён ли пропуск поддеревьев.
-	SubtreeCullingEnabled() bool
-}
+// CullScope — см. draw.CullScope (core/draw); алиас: тот же тип.
+type CullScope = hgdraw.CullScope
 
-// OcclusionScope — то, что контекст отрисовки знает о вычитании перекрытого
-// (occlusion.go). Отдельно от CullScope: у пропуска по damage и у вычитания
-// перекрытого разные условия и разные способы ошибиться, и выключать их
-// приходится порознь.
-//
-// Контекст без этого метода вычитание разрешает — так же, как это было до
-// появления выключателя.
-type OcclusionScope interface {
-	OcclusionEnabled() bool
-}
+// OcclusionScope — см. draw.OcclusionScope (core/draw); алиас: тот же тип.
+type OcclusionScope = hgdraw.OcclusionScope
 
 // occlusionAllowed спрашивает у контекста, вычитать ли перекрытое.
 func occlusionAllowed(ctx DrawContext) bool {
