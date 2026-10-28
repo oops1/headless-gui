@@ -11,6 +11,7 @@
 // (LoadUIFromXAMLFS). Здесь то же самое для шрифтов: каталог внутри fs.FS
 // регистрируется так же, как каталог на диске, и вся поставка укладывается в
 // один исполняемый файл.
+
 package engine
 
 import (
@@ -106,10 +107,10 @@ func (e *Engine) RegisterFontFS(fsys fs.FS, dir string) error {
 // своё «Roboto» после того, как приложение зарегистрировало собственное.
 func (e *Engine) registerFontBlob(stem string, data []byte) bool {
 	e.canvas.RegisterFont(stem, data)
-	if !e.canvas.hasFont(stem) {
+	if !e.canvas.HasFont(stem) {
 		return false
 	}
-	if fam := fontFamilyAlias(stem); fam != "" && fam != stem && !e.canvas.hasFont(fam) {
+	if fam := fontFamilyAlias(stem); fam != "" && fam != stem && !e.canvas.HasFont(fam) {
 		e.canvas.RegisterFont(fam, data)
 	}
 	return true

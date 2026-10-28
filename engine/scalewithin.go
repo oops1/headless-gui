@@ -19,6 +19,7 @@ package engine
 // выходит из режима.
 
 import (
+	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	"math"
 
 	"github.com/oops1/headless-gui/v3/widget"
@@ -36,14 +37,14 @@ func (e *Engine) SetScaleWithin(k float64) {
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
 	pw, ph := e.canvas.W, e.canvas.H
-	if e.scaleWithin && e.canvas.scale == k {
+	if e.scaleWithin && e.canvas.Scale() == k {
 		e.mu.Unlock()
 		return
 	}
 	lw, lh := logicalFor(pw, ph, k)
-	e.canvas = e.canvas.cloneForPhys(pw, ph, lw, lh, k, e.bgSrc)
+	e.canvas = e.canvas.CloneForPhys(pw, ph, lw, lh, k, e.bgSrc)
 	e.surfaces.drop()
-	e.canvas.setDPIAll(e.userDPI * k)
+	e.canvas.SetDPIAll(e.userDPI * k)
 	e.scaleBits.Store(math.Float64bits(k))
 	e.scaleWithin = true
 	e.mu.Unlock()
@@ -56,13 +57,13 @@ func (e *Engine) SetScaleWithin(k float64) {
 // которого размер кадра диктует клиент (смена разрешения по RDP), а масштаб —
 // пользователь. Включает режим «масштаб внутри кадра».
 func (e *Engine) SetPhysicalResolution(pw, ph int) {
-	pw, ph = clampCanvasSize(pw, ph)
+	pw, ph = hgraster.ClampCanvasSize(pw, ph)
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
-	k := e.canvas.scale
+	k := e.canvas.Scale()
 	lw, lh := logicalFor(pw, ph, k)
-	e.canvas = e.canvas.cloneForPhys(pw, ph, lw, lh, k, e.bgSrc)
+	e.canvas = e.canvas.CloneForPhys(pw, ph, lw, lh, k, e.bgSrc)
 	e.surfaces.drop()
 	e.scaleWithin = true
 	e.mu.Unlock()
@@ -83,5 +84,5 @@ func logicalFor(pw, ph int, k float64) (int, int) {
 	if k == 1 {
 		return pw, ph
 	}
-	return clampCanvasSize(int(math.Ceil(float64(pw)/k)), int(math.Ceil(float64(ph)/k)))
+	return hgraster.ClampCanvasSize(int(math.Ceil(float64(pw)/k)), int(math.Ceil(float64(ph)/k)))
 }

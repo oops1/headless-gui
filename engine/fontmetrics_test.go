@@ -112,7 +112,7 @@ func TestFontMetrics_DifferentFonts(t *testing.T) {
 func inkBottom(c *Canvas) int {
 	for y := c.H - 1; y >= 0; y-- {
 		for x := 0; x < c.W; x++ {
-			if c.back.Pix[c.back.PixOffset(x, y)+3] != 0 {
+			if c.Back().Pix[c.Back().PixOffset(x, y)+3] != 0 {
 				return y
 			}
 		}
@@ -134,8 +134,8 @@ func TestFontMetrics_BaselineMatchesDrawText(t *testing.T) {
 		c := e.canvas
 		for _, fam := range []string{"", "TestRoboto", widget.BuiltinFontMono} {
 			for _, size := range []float64{10, 14, 24} {
-				for i := range c.back.Pix {
-					c.back.Pix[i] = 0
+				for i := range c.Back().Pix {
+					c.Back().Pix[i] = 0
 				}
 				const y = 20
 				c.DrawTextFont("H", 10, y, size, fam, color.RGBA{R: 255, G: 255, B: 255, A: 255})
@@ -143,8 +143,8 @@ func TestFontMetrics_BaselineMatchesDrawText(t *testing.T) {
 				asc, _, _ := c.FontMetrics(fam, size)
 				// Логический подъём — округление физического, поэтому
 				// сверяем по физической базовой линии.
-				physAsc := c.fontFor(fam).VMetricsFull(size).Ascent
-				want := c.sx(y) + physAsc - 1
+				physAsc := c.FontFor(fam).VMetricsFull(size).Ascent
+				want := c.PhysX(y) + physAsc - 1
 				if got := inkBottom(c); got != want {
 					t.Errorf("scale=%v fam=%q size=%v: низ глифа %d, ожидался %d (y+Ascent-1)",
 						scale, fam, size, got, want)

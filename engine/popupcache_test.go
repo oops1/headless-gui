@@ -144,7 +144,7 @@ func TestPopupCache_PixelIdentity(t *testing.T) {
 	e.renderFrame()
 
 	r := dd.OverlayBounds()
-	want := e.canvas.renderOverlay(dd, r) // свежий канвас
+	want := renderOverlay(e.canvas, dd, r) // свежий канвас
 
 	e.popupMu.Lock()
 	ent := e.popupCache[widgetID(dd)]

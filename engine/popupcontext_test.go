@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
@@ -24,8 +25,8 @@ func samePixels(t *testing.T, big, small *Canvas, rect, inner image.Rectangle) {
 	t.Helper()
 	for y := inner.Min.Y; y < inner.Max.Y; y++ {
 		for x := inner.Min.X; x < inner.Max.X; x++ {
-			a := big.back.RGBAAt(x, y)
-			b := small.back.RGBAAt(x-rect.Min.X, y-rect.Min.Y)
+			a := big.Back().RGBAAt(x, y)
+			b := small.Back().RGBAAt(x-rect.Min.X, y-rect.Min.Y)
 			if a != b {
 				t.Fatalf("пиксель (%d,%d): холст=%v попап=%v", x, y, a, b)
 			}
@@ -38,7 +39,7 @@ func samePixels(t *testing.T, big, small *Canvas, rect, inner image.Rectangle) {
 // PaintStyle не найдёт ни тени, ни размытия, ни скругления.
 func TestTranslatingContext_ImplementsOptionalCapabilities(t *testing.T) {
 	testreset.Globals(t)
-	var ctx widget.DrawContext = &translatingContext{inner: newCanvas(10, 10, hgtext.NewFontCache("assets"))}
+	var ctx widget.DrawContext = &translatingContext{inner: hgraster.NewCanvas(10, 10, hgtext.NewFontCache("assets"))}
 	if _, ok := ctx.(widget.BackdropDrawer); !ok {
 		t.Error("контекст попапа не реализует BackdropDrawer")
 	}
@@ -68,7 +69,7 @@ func TestTranslatingContext_BlurBehindMatchesCanvas(t *testing.T) {
 	mixed := 0
 	for y := area.Min.Y + 12; y < area.Max.Y-12; y += 4 {
 		for x := area.Min.X + 12; x < area.Max.X-12; x += 4 {
-			if p := small.back.RGBAAt(x-rect.Min.X, y-rect.Min.Y); p.R > 20 && p.R < 235 {
+			if p := small.Back().RGBAAt(x-rect.Min.X, y-rect.Min.Y); p.R > 20 && p.R < 235 {
 				mixed++
 			}
 		}
@@ -94,7 +95,7 @@ func TestTranslatingContext_DrawSoftShadowMatchesCanvas(t *testing.T) {
 	// Тень заметна: под нижней кромкой тела (белая клетка шахматки) пиксель
 	// потемнел.
 	before := checkerCanvas(rect.Dx(), rect.Dy(), 10)
-	if before.back.RGBAAt(45, 85) == small.back.RGBAAt(45, 85) {
+	if before.Back().RGBAAt(45, 85) == small.Back().RGBAAt(45, 85) {
 		t.Error("тень не нарисована в буфере попапа")
 	}
 }
@@ -122,10 +123,10 @@ func TestTranslatingContext_RoundClipMatchesCanvas(t *testing.T) {
 	}
 
 	samePixels(t, big, small, rect, rect)
-	if small.back.RGBAAt(0, 0) == red {
+	if small.Back().RGBAAt(0, 0) == red {
 		t.Error("угол попапа залит: скругление не применилось")
 	}
-	if small.back.RGBAAt(rect.Dx()/2, rect.Dy()/2) != red {
+	if small.Back().RGBAAt(rect.Dx()/2, rect.Dy()/2) != red {
 		t.Error("центр попапа не залит")
 	}
 }

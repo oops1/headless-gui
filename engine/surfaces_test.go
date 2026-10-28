@@ -41,7 +41,7 @@ func newSurfacesScene(t *testing.T, n int, f PixelFormat) *surfacesScene {
 	return &surfacesScene{eng: eng, btn: btn, bufs: bufs}
 }
 
-func (sc *surfacesScene) front() []byte { return sc.eng.canvas.front.Pix }
+func (sc *surfacesScene) front() []byte { return sc.eng.canvas.Front().Pix }
 
 // Кадры чередуют буферы; перед рисованием буфер приводится к прошлому кадру,
 // так что после кадра он совпадает с front целиком, а не только в damage.
@@ -153,7 +153,7 @@ func TestSurfaces_DropAndErrors(t *testing.T) {
 	if err := eng.SetSurfaces([][]byte{one}, 300*4, FormatRGBA); err != nil || eng.Surfaces() != 0 {
 		t.Fatalf("один буфер: err %v, набор %d", err, eng.Surfaces())
 	}
-	if fr := eng.RenderFrameNow(); fr.Surface != 0 || eng.canvas.back.Pix == nil || &eng.canvas.back.Pix[0] != &one[0] {
+	if fr := eng.RenderFrameNow(); fr.Surface != 0 || eng.canvas.Back().Pix == nil || &eng.canvas.Back().Pix[0] != &one[0] {
 		t.Fatalf("один буфер: кадр Surface %d, задний буфер не тот", fr.Surface)
 	}
 

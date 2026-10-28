@@ -25,7 +25,7 @@ func (e *Engine) SetWallpaperSource(img image.Image) error {
 	}
 	e.frameMu.Lock() // источник читается при отрисовке — меняем между кадрами
 	e.mu.Lock()
-	e.canvas.setWallpaperSource(img)
+	e.canvas.SetWallpaperSource(img)
 	e.mu.Unlock()
 	e.frameMu.Unlock()
 	e.Invalidate()

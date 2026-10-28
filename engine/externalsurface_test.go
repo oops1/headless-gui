@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"bytes"
+	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	"image"
 	"image/color"
 	"sync"
@@ -75,7 +75,7 @@ func sameSet(a, b map[image.Point]bool) bool {
 }
 
 // backPixel — пиксель back-буфера холста (физические координаты).
-func (r *esRig) backPixel(x, y int) color.RGBA { return r.e.canvas.back.RGBAAt(x, y) }
+func (r *esRig) backPixel(x, y int) color.RGBA { return r.e.canvas.Back().RGBAAt(x, y) }
 
 // esNoise — непрозрачный буфер; seed меняет все пиксели.
 func esNoise(w, h, seed int) *image.RGBA { return opaqueNoise(w, h, seed) }
@@ -476,83 +476,14 @@ func TestExternalSurface_WriterAndFramesRace(t *testing.T) {
 	r.checkMatches(t, cur, image.Point{}, cur.Rect)
 }
 
-// BlitPixels на холсте: тот же результат, что DrawImage на масштабе 1, и
-// физический 1:1 на масштабе 2, где DrawImage растянул бы.
-func TestCanvasBlitPixels(t *testing.T) {
-	testreset.Globals(t)
-	src := esNoise(40, 30, 3)
-
-	a := newCanvas(100, 80, nil)
-	b := newCanvas(100, 80, nil)
-	a.BlitPixels(src, src.Rect, 10, 12, true)
-	b.DrawImage(widget.OpaqueImage(src), 10, 12)
-	if !bytes.Equal(a.back.Pix, b.back.Pix) {
-		t.Fatal("BlitPixels расходится с DrawImage на масштабе 1")
-	}
-
-	// Часть буфера и клип.
-	c := newCanvas(100, 80, nil)
-	c.SetClip(image.Rect(0, 0, 25, 100))
-	c.BlitPixels(src, image.Rect(5, 5, 35, 25), 10, 12, true)
-	for y := 0; y < 80; y++ {
-		for x := 0; x < 100; x++ {
-			got := c.back.RGBAAt(x, y)
-			in := x >= 15 && x < 25 && y >= 17 && y < 37 // sr.Min (5,5) → (10+5, 12+5)
-			if in && got != src.RGBAAt(x-10, y-12) {
-				t.Fatalf("(%d,%d): %v, ждали пиксель буфера", x, y, got)
-			}
-			if !in && got != (color.RGBA{}) {
-				t.Fatalf("(%d,%d) вне клипа или части: %v", x, y, got)
-			}
-		}
-	}
-
-	// Масштаб 2: пиксели 1:1, начало — физическая позиция логической точки.
-	d := newCanvasScaled(50, 40, 2, nil)
-	d.BlitPixels(src, src.Rect, 5, 6, true)
-	for y := 0; y < 30; y++ {
-		for x := 0; x < 40; x++ {
-			if got := d.back.RGBAAt(10+x, 12+y); got != src.RGBAAt(x, y) {
-				t.Fatalf("scale 2 (%d,%d): %v", x, y, got)
-			}
-		}
-	}
-	if d.back.RGBAAt(9, 12) != (color.RGBA{}) || d.back.RGBAAt(50, 12) != (color.RGBA{}) {
-		t.Fatal("scale 2: пиксели за пределами буфера")
-	}
-
-	// Порядок байт BGRX: R и B переставляются, как у остальных блитов.
-	e := newCanvas(20, 20, nil)
-	e.setOwnFormat(FormatBGRX)
-	px := image.NewRGBA(image.Rect(0, 0, 2, 2))
-	px.SetRGBA(0, 0, color.RGBA{R: 1, G: 2, B: 3, A: 255})
-	e.BlitPixels(px, px.Rect, 0, 0, true)
-	if o := e.back.Pix[:4]; o[0] != 3 || o[1] != 2 || o[2] != 1 {
-		t.Fatalf("BGRX: %v", o)
-	}
-
-	// Пустое/nil/вне холста — без паники и без записи.
-	e2 := newCanvas(20, 20, nil)
-	e2.BlitPixels(nil, image.Rect(0, 0, 5, 5), 0, 0, true)
-	e2.BlitPixels(px, image.Rectangle{}, 0, 0, true)
-	e2.BlitPixels(px, image.Rect(10, 10, 20, 20), 0, 0, true)
-	e2.BlitPixels(px, px.Rect, 500, 500, true)
-	e2.BlitPixels(px, px.Rect, -500, -500, false)
-	for _, v := range e2.back.Pix {
-		if v != 0 {
-			t.Fatal("запись при пустых/внешних аргументах")
-		}
-	}
-}
-
 // Внутри окна-попапа (translatingContext) координаты сдвигаются.
 func TestTranslatingContext_BlitPixels(t *testing.T) {
 	testreset.Globals(t)
 	src := esNoise(10, 10, 3)
-	oc := newCanvas(40, 40, nil)
+	oc := hgraster.NewCanvas(40, 40, nil)
 	tc := &translatingContext{inner: oc, dx: 100, dy: 200}
 	tc.BlitPixels(src, src.Rect, 105, 203, true)
-	if got := oc.back.RGBAAt(5, 3); got != src.RGBAAt(0, 0) {
+	if got := oc.Back().RGBAAt(5, 3); got != src.RGBAAt(0, 0) {
 		t.Fatalf("(5,3) = %v", got)
 	}
 	var _ widget.PixelBlitter = tc
@@ -561,7 +492,7 @@ func TestTranslatingContext_BlitPixels(t *testing.T) {
 // Внутри прокрутки поверхность рисуется со сдвигом.
 func TestExternalSurface_InsideScrollView(t *testing.T) {
 	testreset.Globals(t)
-	c := newCanvas(200, 150, nil)
+	c := hgraster.NewCanvas(200, 150, nil)
 	oc := widget.OffsetContext(c, 30, 20)
 	s := widget.NewExternalSurface()
 	s.SetBounds(image.Rect(50, 40, 90, 70))
@@ -569,13 +500,13 @@ func TestExternalSurface_InsideScrollView(t *testing.T) {
 	s.SetBuffer(buf, true)
 	s.Draw(oc)
 	// Экранная позиция = координаты содержимого − смещение.
-	if got := c.back.RGBAAt(20, 20); got != buf.RGBAAt(0, 0) {
+	if got := c.Back().RGBAAt(20, 20); got != buf.RGBAAt(0, 0) {
 		t.Fatalf("(20,20) = %v", got)
 	}
-	if got := c.back.RGBAAt(59, 49); got != buf.RGBAAt(39, 29) {
+	if got := c.Back().RGBAAt(59, 49); got != buf.RGBAAt(39, 29) {
 		t.Fatalf("(59,49) = %v", got)
 	}
-	if got := c.back.RGBAAt(60, 49); got != (color.RGBA{}) {
+	if got := c.Back().RGBAAt(60, 49); got != (color.RGBA{}) {
 		t.Fatalf("за правым краем: %v", got)
 	}
 }

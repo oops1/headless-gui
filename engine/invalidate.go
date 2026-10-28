@@ -27,6 +27,7 @@
 // пересекающими повреждённую область — отрисовка дерева остаётся полной.
 // Контракт: в on-demand режиме вызывающий обязан сообщать ВСЕ изменившиеся
 // области (или использовать Invalidate без прямоугольника).
+
 package engine
 
 import (
@@ -45,12 +46,12 @@ import (
 // «Контракт отрисовки»): одна строка возвращает прежнее поведение, пока
 // нарушения разбираются.
 func (e *Engine) SetSubtreeCulling(v bool) {
-	e.canvas.cullingOn.Store(v)
+	e.canvas.SetSubtreeCulling(v)
 	e.Invalidate()
 }
 
 // SubtreeCulling сообщает, включён ли пропуск поддеревьев.
-func (e *Engine) SubtreeCulling() bool { return e.canvas.cullingOn.Load() }
+func (e *Engine) SubtreeCulling() bool { return e.canvas.SubtreeCullingEnabled() }
 
 // SetOcclusionCulling включает или выключает вычитание перекрытого: поддерево,
 // целиком накрытое непрозрачным соседом, не рисуется (widget/occlusion.go).
@@ -60,12 +61,12 @@ func (e *Engine) SubtreeCulling() bool { return e.canvas.cullingOn.Load() }
 // объявлением остаётся дыра, и одна строка возвращает прежнее поведение, пока
 // объявление ищут.
 func (e *Engine) SetOcclusionCulling(v bool) {
-	e.canvas.occlusionOn.Store(v)
+	e.canvas.SetOcclusionCulling(v)
 	e.Invalidate()
 }
 
 // OcclusionCulling сообщает, включено ли вычитание перекрытого.
-func (e *Engine) OcclusionCulling() bool { return e.canvas.occlusionOn.Load() }
+func (e *Engine) OcclusionCulling() bool { return e.canvas.OcclusionEnabled() }
 
 // SetRenderOnDemand включает/выключает рендер по запросу.
 // Безопасно вызывать в любой момент; включение сразу инвалидирует кадр.

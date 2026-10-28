@@ -56,7 +56,7 @@ func (e *Engine) collectVideos(canvas *Canvas, root widget.Widget, modals []widg
 		}
 	}
 
-	k := canvas.scale
+	k := canvas.Scale()
 	canvasRect := image.Rect(0, 0, canvas.W, canvas.H)
 	out := make([]output.VideoRegion, 0, len(e.videoBuf))
 	for _, v := range e.videoBuf {
@@ -76,7 +76,7 @@ func (e *Engine) collectVideos(canvas *Canvas, root widget.Widget, modals []widg
 		for _, r := range e.overBuf {
 			add(r)
 		}
-		canvas.markVideo(rect, cover, v.ID)
+		canvas.MarkVideo(rect, cover, v.ID)
 		out = append(out, output.VideoRegion{ID: v.ID, Rect: rect, Cover: cover})
 	}
 	clear(e.videoBuf) // не держать покрытия до следующего кадра
@@ -128,25 +128,4 @@ func physRectOut(r image.Rectangle, k float64) image.Rectangle {
 		int(math.Floor(float64(r.Min.X)*k)), int(math.Floor(float64(r.Min.Y)*k)),
 		int(math.Ceil(float64(r.Max.X)*k)), int(math.Ceil(float64(r.Max.Y)*k)),
 	)
-}
-
-// markVideo помечает видео тайлы, целиком лежащие в r (физический) и не
-// задетые покрытием. Тайлы на краю окна или под чем-то остаются с тем, что
-// нарисовано.
-func (c *Canvas) markVideo(r image.Rectangle, cover []image.Rectangle, id uint32) {
-	tx0, ty0, tx1, ty1, ok := c.tileRange(r)
-	if !ok {
-		return
-	}
-	ts := output.TileSize
-	for ty := ty0; ty <= ty1; ty++ {
-		for tx := tx0; tx <= tx1; tx++ {
-			tile := image.Rect(tx*ts, ty*ts, min(tx*ts+ts, c.W), min(ty*ts+ts, c.H))
-			if !tile.In(r) || overlapsAny(cover, tile) {
-				continue
-			}
-			m := &c.marks[ty*c.tilesX+tx]
-			m.touched, m.kind, m.video = true, output.RegionVideo, id
-		}
-	}
 }

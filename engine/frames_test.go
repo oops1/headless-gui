@@ -218,12 +218,12 @@ func TestPopupItems_ScreenRectInScroll(t *testing.T) {
 
 	// Картинка попапа совпадает с тем, что холст рисует на этом месте.
 	c := e.canvas
-	c.blitBackground()
+	c.BlitBackground()
 	drawOverlays(root, c, false)
-	shifted := renderOverlayShifted(c.cloneForSize(want.Dx(), want.Dy(), c.scale, nil), dd, want, items[0].off)
+	shifted := renderOverlayShifted(c.CloneForSize(want.Dx(), want.Dy(), c.Scale(), nil), dd, want, items[0].off)
 	for y := 0; y < want.Dy(); y++ {
 		for x := 0; x < want.Dx(); x++ {
-			if in, out := c.back.RGBAAt(want.Min.X+x, want.Min.Y+y), shifted.RGBAAt(x, y); in != out {
+			if in, out := c.Back().RGBAAt(want.Min.X+x, want.Min.Y+y), shifted.RGBAAt(x, y); in != out {
 				t.Fatalf("пиксель (%d,%d): холст=%v попап=%v", x, y, in, out)
 			}
 		}

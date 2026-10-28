@@ -166,7 +166,7 @@ func (e *Engine) ovtSpec(canvas *Canvas) (time.Duration, widget.Easing, int) {
 	if a.Duration <= 0 {
 		return 0, nil, 0
 	}
-	off := canvas.sx(int(math.Round(m.GetMetric(theme.KeyMenuOpenOffset))))
+	off := canvas.PhysX(int(math.Round(m.GetMetric(theme.KeyMenuOpenOffset))))
 	return a.Duration, widget.EasingByName(a.Curve), off
 }
 
@@ -211,11 +211,11 @@ func (e *Engine) ovtPrepare(canvas *Canvas, rects []image.Rectangle, all bool, l
 	t := &e.ovt
 	t.settle = t.settleReq.Swap(false)
 	if len(t.list) == 0 {
-		t.canvas, t.format = canvas, canvas.format
+		t.canvas, t.format = canvas, canvas.Format()
 		t.dropReq.Store(false)
 		return rects, nil
 	}
-	if t.dropReq.Swap(false) || !on || t.canvas != canvas || t.format != canvas.format {
+	if t.dropReq.Swap(false) || !on || t.canvas != canvas || t.format != canvas.Format() {
 		// Переходы выключены, холст сменился (разрешение, масштаб) или
 		// сменился формат буфера: снимки недействительны.
 		for _, tr := range t.list {
@@ -225,7 +225,7 @@ func (e *Engine) ovtPrepare(canvas *Canvas, rects []image.Rectangle, all bool, l
 			}
 		}
 		t.list = t.list[:0]
-		t.canvas, t.format = canvas, canvas.format
+		t.canvas, t.format = canvas, canvas.Format()
 		t.settle = true
 		return rects, nil
 	}
@@ -246,7 +246,7 @@ func (e *Engine) ovtPrepare(canvas *Canvas, rects []image.Rectangle, all bool, l
 	t.list = kept
 
 	e.ttMu.Lock()
-	t.tt = canvas.sRect(e.ttShownAt)
+	t.tt = canvas.PhysRect(e.ttShownAt)
 	e.ttMu.Unlock()
 
 	for _, tr := range t.list {
@@ -271,7 +271,7 @@ func (e *Engine) ovtPrepare(canvas *Canvas, rects []image.Rectangle, all bool, l
 				}
 			}
 			// Полная ёмкость: расширение дописывает в свою копию, а не в rects.
-			for _, r := range canvas.expandForBackdrops(rects[:len(rects):len(rects)]) {
+			for _, r := range canvas.ExpandForBackdrops(rects[:len(rects):len(rects)]) {
 				if !r.Empty() && !coveredByOne(rects, r) {
 					rects = append(rects, r)
 					grew = true
@@ -396,7 +396,7 @@ func (e *Engine) drawOverlaysT(w widget.Widget, canvas *Canvas, hosted bool, lay
 func (e *Engine) ovtDrawOther(w widget.Widget, od widget.OverlayDrawer, canvas *Canvas, layer widget.Widget, off image.Point) {
 	widget.DrawOverlayTraced(w, od, widget.OffsetContext(canvas, off.X, off.Y))
 	r := overlayHitRect(w).Sub(off).Inset(-widget.DefaultOverlayMargin())
-	e.ovt.others = append(e.ovt.others, ovtOther{layer: layer, rect: canvas.sRect(r)})
+	e.ovt.others = append(e.ovt.others, ovtOther{layer: layer, rect: canvas.PhysRect(r)})
 }
 
 // ovtVisit — открытый оверлей в обходе слоя.
@@ -423,7 +423,7 @@ func (e *Engine) ovtVisit(w widget.Widget, od widget.OverlayDrawer, canvas *Canv
 		margin = om.OverlayMargin()
 	}
 	restL := screen.Inset(-margin)
-	rest := canvas.sRect(restL).Intersect(image.Rect(0, 0, canvas.W, canvas.H))
+	rest := canvas.PhysRect(restL).Intersect(image.Rect(0, 0, canvas.W, canvas.H))
 	if rest.Empty() {
 		draw()
 		return
@@ -452,9 +452,9 @@ func (e *Engine) ovtVisit(w widget.Widget, od widget.OverlayDrawer, canvas *Canv
 	}
 	dur, curve, slide := e.ovtSpec(canvas)
 	capture := func() {
-		tr.under = snapRect(canvas.back, rest, tr.under)
+		tr.under = snapRect(canvas.Back(), rest, tr.under)
 		draw()
-		tr.with = snapRect(canvas.back, rest, tr.with)
+		tr.with = snapRect(canvas.Back(), rest, tr.with)
 		tr.mask = buildMask(tr.under, tr.with, tr.mask)
 		// Непрозрачные части едут целиком, даже пиксель, совпавший с фоном.
 		if orp, ok := w.(widget.OverlayRectsProvider); ok {
@@ -566,7 +566,7 @@ func (e *Engine) ovtVisitClosed(tr *overlayTrans, canvas *Canvas) {
 			return
 		}
 		if redrawn {
-			tr.under = snapRect(canvas.back, tr.rest, tr.under)
+			tr.under = snapRect(canvas.Back(), tr.rest, tr.under)
 		}
 		tr.state = ovtClosing
 		e.ovtAnimate(tr, from, 0, dur, curve)
@@ -580,7 +580,7 @@ func (e *Engine) ovtVisitClosed(tr *overlayTrans, canvas *Canvas) {
 		return
 	}
 	if redrawn {
-		tr.under = snapRect(canvas.back, tr.rest, tr.under)
+		tr.under = snapRect(canvas.Back(), tr.rest, tr.under)
 		tr.composite(canvas, tr.val())
 		return
 	}
@@ -778,7 +778,7 @@ func buildMask(under, with []byte, mask []bool) []bool {
 func markOpaque(mask []bool, rest image.Rectangle, rects []image.Rectangle, off image.Point, c *Canvas) {
 	w := rest.Dx()
 	for _, r := range rects {
-		p := c.sRect(r.Sub(off)).Intersect(rest)
+		p := c.PhysRect(r.Sub(off)).Intersect(rest)
 		for y := p.Min.Y; y < p.Max.Y; y++ {
 			row := mask[(y-rest.Min.Y)*w:]
 			for x := p.Min.X; x < p.Max.X; x++ {
@@ -865,17 +865,17 @@ func (tr *overlayTrans) composite(c *Canvas, v float64) {
 		parts = min(runtime.GOMAXPROCS(0), h/16)
 	}
 	if parts <= 1 {
-		tr.compositeRows(c.back, 0, h, a256, sx, sy)
+		tr.compositeRows(c.Back(), 0, h, a256, sx, sy)
 	} else {
 		j := &tr.job
-		j.tr, j.back, j.a256, j.sx, j.sy = tr, c.back, a256, sx, sy
+		j.tr, j.back, j.a256, j.sx, j.sy = tr, c.Back(), a256, sx, sy
 		j.chunk = (h + parts - 1) / parts
 		poolRun(j, &j.batch, (h+j.chunk-1)/j.chunk)
 		j.back = nil
 	}
 	// Смесь — картинка: ни сплошной заливкой, ни текстом её не назвать.
 	// Конец перехода рисуется обычным путём, с настоящими признаками.
-	c.markImage(r)
+	c.MarkImage(r)
 }
 
 // compositeRows — composite для строк [y0, y1) области.

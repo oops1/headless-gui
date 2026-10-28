@@ -586,7 +586,7 @@ func TestOverlayTrans_StepInsideDamageUnionIsDiffed(t *testing.T) {
 	s.eng.InvalidateRect(image.Rect(0, 0, 4, 4))
 	s.eng.InvalidateRect(image.Rect(316, 236, 320, 240))
 	s.eng.RenderFrameNow()
-	if f, b := s.eng.canvas.front.RGBAAt(120, 100), s.eng.canvas.back.RGBAAt(120, 100); f != b {
+	if f, b := s.eng.canvas.Front().RGBAAt(120, 100), s.eng.canvas.Back().RGBAAt(120, 100); f != b {
 		t.Fatalf("шаг смешан в буфер, но не отдан: передний %v, задний %v", f, b)
 	}
 }
@@ -639,8 +639,9 @@ func TestOverlayTrans_FinalFrameMarks(t *testing.T) {
 	ovtFinishOpen(s)
 	s.eng.RenderOnce()
 	// Тайл (1,1) — 64…128 по обеим осям — целиком внутри меню 40…200 × 44…164.
-	i := 1*s.eng.canvas.tilesX + 1
-	if got, want := s.eng.canvas.marks[i].kind, ref.eng.canvas.marks[i].kind; got != want {
+	cols, _ := s.eng.canvas.TileGrid()
+	i := 1*cols + 1
+	if got, want := tileKind(s.eng.canvas, i), tileKind(ref.eng.canvas, i); got != want {
 		t.Fatalf("признак тайла меню %v, без переходов %v", got, want)
 	}
 }
@@ -677,7 +678,7 @@ func TestOverlayTrans_ReopenElsewhereClearsOld(t *testing.T) {
 			s.eng.RenderFrameNow()
 		}
 	}
-	if c := s.eng.canvas.front.RGBAAt(120, 100); c != ovtBG {
+	if c := s.eng.canvas.Front().RGBAAt(120, 100); c != ovtBG {
 		t.Fatalf("на прежнем месте меню остался призрак: %v", c)
 	}
 }
@@ -765,10 +766,11 @@ func TestOverlayTrans_PrepareExpandsBackdrops(t *testing.T) {
 	e := New(320, 240, 60)
 	defer e.Stop()
 	c := e.canvas
-	c.backdrops = []image.Rectangle{image.Rect(0, 200, 320, 240)} // «панель задач»
+	c.BlurBehind(image.Rect(0, 200, 320, 240), 8, color.RGBA{}) // «панель задач»
+	c.FinishBackdrops(false, nil)
 	tr := &overlayTrans{state: ovtStatic, layer: nil, rest: image.Rect(40, 60, 200, 210)}
 	e.ovt.list = []*overlayTrans{tr}
-	e.ovt.canvas, e.ovt.format = c, c.format
+	e.ovt.canvas, e.ovt.format = c, c.Format()
 	rects, _ := e.ovtPrepare(c, []image.Rectangle{image.Rect(50, 70, 60, 80)}, false, []widget.Widget{nil}, true)
 	if !coveredByOne(rects, tr.rest) {
 		t.Fatalf("область перехода не стала повреждением: %v", rects)

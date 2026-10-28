@@ -19,7 +19,7 @@ func TestWindowActive_VisualSample(t *testing.T) {
 	}
 	eng := New(560, 460, 20)
 	c := eng.canvas
-	c.blitBackground()
+	c.BlitBackground()
 
 	place := func(theme string, x, y int, active bool, title string) {
 		widget.ApplyGlobalTheme(widget.ThemeByName(theme))
@@ -35,6 +35,6 @@ func TestWindowActive_VisualSample(t *testing.T) {
 	place("Win11 Light", 20, 240, true, "Активное — Win11")
 	place("Win11 Light", 290, 240, false, "Неактивное — Win11")
 
-	savePNG(c.back, out)
+	savePNG(c.Back(), out)
 	t.Logf("сохранено: %s", out)
 }

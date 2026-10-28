@@ -133,7 +133,7 @@ func (e *Engine) SetSurfaces(bufs [][]byte, stride int, f PixelFormat) error {
 	s.mu.Unlock()
 	// До первого кадра холст рисует в собственный буфер; первый кадр в чужой
 	// — полный, как у SetSurface: его байты не совпадают с front.
-	e.canvas.useOwnBack()
+	e.canvas.UseOwnBack()
 	e.fullNext.Store(true)
 	e.Invalidate()
 	return nil
@@ -207,9 +207,9 @@ func (e *Engine) acquireSurface(canvas *Canvas, skipCopy bool, redraw image.Rect
 		return 0, false
 	}
 	back := s.imgs[idx]
-	canvas.back, canvas.format = back, s.format
+	canvas.AttachBack(back, s.format)
 	if !skipCopy {
-		copyFrontInto(canvas.front, back, &s.pending[idx], redraw)
+		copyFrontInto(canvas.Front(), back, &s.pending[idx], redraw)
 	}
 	s.pending[idx].reset()
 	return idx + 1, true

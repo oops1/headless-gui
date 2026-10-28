@@ -36,8 +36,8 @@ func bgraRig(t *testing.T, format PixelFormat, bgra bool, r, g, b, a byte) *esRi
 
 // backBytes — четыре байта back в точке, как они лежат.
 func (r *esRig) backBytes(x, y int) [4]byte {
-	o := r.e.canvas.back.PixOffset(x, y)
-	return [4]byte(r.e.canvas.back.Pix[o : o+4])
+	o := r.e.canvas.Back().PixOffset(x, y)
+	return [4]byte(r.e.canvas.Back().Pix[o : o+4])
 }
 
 func TestExternalSurfaceBGRAOnBGRXCanvasIsCopied(t *testing.T) {

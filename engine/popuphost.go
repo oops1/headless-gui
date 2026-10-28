@@ -9,6 +9,7 @@
 //
 // Без установленного sink (headless и бэкенды без поддержки окон-попапов)
 // поведение прежнее до пикселя: оверлеи рисуются в основной холст.
+
 package engine
 
 import (
@@ -162,7 +163,7 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 			e.popupCache[it.id] = ent
 		}
 		ent.seen = gen
-		if ent.img == nil || ent.rect != it.rect || dirtyAll || canvas.sRect(it.rect).Overlaps(damage) {
+		if ent.img == nil || ent.rect != it.rect || dirtyAll || canvas.PhysRect(it.rect).Overlaps(damage) {
 			oc := ent.overlayCanvas(canvas, it.rect)
 			ent.img = renderOverlayShifted(oc, it.od, it.rect, it.off)
 			ent.hash = hashRGBA(ent.img)
@@ -242,16 +243,19 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 // очищенный под новый рендер.
 func (ent *popupEntry) overlayCanvas(src *Canvas, r image.Rectangle) *Canvas {
 	oc := ent.canvas
-	if oc == nil || ent.src != src || ent.fontRev != src.fontRev.Load() ||
-		oc.logicalW != r.Dx() || oc.logicalH != r.Dy() || oc.scale != src.scale {
-		oc = src.cloneForSize(r.Dx(), r.Dy(), src.scale, nil)
-		oc.wallParent = src.wallOwner()
-		ent.canvas, ent.src, ent.fontRev = oc, src, src.fontRev.Load()
+	if oc != nil {
+		if lw, lh := oc.LogicalSize(); ent.src != src || ent.fontRev != src.FontRev() ||
+			lw != r.Dx() || lh != r.Dy() || oc.Scale() != src.Scale() {
+			oc = nil
+		}
+	}
+	if oc == nil {
+		oc = src.CloneForSize(r.Dx(), r.Dy(), src.Scale(), nil)
+		oc.InheritWallpaper(src)
+		ent.canvas, ent.src, ent.fontRev = oc, src, src.FontRev()
 		return oc
 	}
-	clear(oc.back.Pix)
-	oc.hasClip = false
-	oc.hasBase = false
+	oc.ResetForRedraw()
 	return oc
 }
 
@@ -295,9 +299,9 @@ func widgetID(w widget.Widget) uintptr {
 
 // renderOverlay рендерит оверлей od в отдельный буфер размером с r (логический),
 // в физическом масштабе движка. Возвращает ФИЗИЧЕСКИЙ RGBA.
-func (c *Canvas) renderOverlay(od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
-	oc := c.cloneForSize(r.Dx(), r.Dy(), c.scale, nil)
-	oc.wallParent = c.wallOwner()
+func renderOverlay(c *Canvas, od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
+	oc := c.CloneForSize(r.Dx(), r.Dy(), c.Scale(), nil)
+	oc.InheritWallpaper(c)
 	return renderOverlayInto(oc, od, r)
 }
 
@@ -320,8 +324,8 @@ func renderOverlayShifted(oc *Canvas, od widget.OverlayDrawer, r image.Rectangle
 	}
 	// Копия развязывает владение с хостом: он блитит асинхронно, а канвас
 	// оверлея переиспользуется следующими кадрами.
-	out := image.NewRGBA(oc.back.Rect)
-	copy(out.Pix, oc.back.Pix)
+	out := image.NewRGBA(oc.Back().Rect)
+	copy(out.Pix, oc.Back().Pix)
 	return out
 }
 

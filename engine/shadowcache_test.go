@@ -66,7 +66,7 @@ func TestShadowCache_MatchesDirectBlur(t *testing.T) {
 	for _, scale := range []float64{1, 1.5} {
 		eng := shadowScene(t, scale)
 		cached := eng.RenderOnce()
-		if len(eng.canvas.shadowCache) == 0 {
+		if eng.canvas.ShadowCacheLen() == 0 {
 			t.Fatalf("scale %v: шаблонный путь не сработал — тест ничего не сравнил", scale)
 		}
 		eng.SetShadowCache(false)
@@ -95,26 +95,6 @@ func TestShadowCache_PartialFrameHasNoSeam(t *testing.T) {
 	full := fresh.RenderOnce()
 	if d, at := maxDiff(partial, full); d > 1 {
 		t.Fatalf("частичный кадр расходится с полным: %d/255 в %v", d, at)
-	}
-}
-
-// Кэш ограничен и вытесняет давно не использованные шаблоны.
-func TestShadowCache_Bounded(t *testing.T) {
-	testreset.Globals(t)
-	eng := New(400, 300, 30)
-	defer eng.Stop()
-	c := eng.canvas
-	for i := 0; i < maxShadowTemplates+10; i++ {
-		col := color.RGBA{A: uint8(10 + i)}
-		c.DrawShadow(image.Rect(50, 50, 250, 200), 6, 12, 0, 6, col)
-	}
-	if n := len(c.shadowCache); n > maxShadowTemplates {
-		t.Fatalf("шаблонов %d, предел %d", n, maxShadowTemplates)
-	}
-	// Последний использованный — в кэше.
-	last := shadowKey{corner: 6, radius: 12, col: color.RGBA{A: uint8(10 + maxShadowTemplates + 9)}}
-	if _, ok := c.shadowCache[last]; !ok {
-		t.Fatal("последний шаблон вытеснен")
 	}
 }
 

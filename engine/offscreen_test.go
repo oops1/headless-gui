@@ -13,7 +13,7 @@ import (
 
 // byNameT — именованный шрифт холста по имени (nil, если его нет).
 func byNameT(c *Canvas, name string) *FontCache {
-	fc, _ := c.namedFonts.Get(name)
+	fc, _ := c.NamedFonts().Get(name)
 	return fc
 }
 

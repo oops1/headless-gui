@@ -49,9 +49,9 @@ func TestFontFamily_PicksWeightAndItalic(t *testing.T) {
 	eng := openSansEngine(t)
 	c := eng.canvas
 	face := func(family string, weight int, italic bool) *FontCache {
-		return c.fontFor(widget.FontFace(family, weight, italic))
+		return c.FontFor(widget.FontFace(family, weight, italic))
 	}
-	byName := func(n string) *FontCache { fc, _ := c.namedFonts.Get(n); return fc }
+	byName := func(n string) *FontCache { fc, _ := c.NamedFonts().Get(n); return fc }
 
 	cases := []struct {
 		weight int
@@ -95,11 +95,11 @@ func TestFontFamily_PicksWeightAndItalic(t *testing.T) {
 		t.Error("Light и SemiBold — один шрифт")
 	}
 	// Название семейства без веса — обычное начертание, не шрифт по умолчанию.
-	if c.fontFor("Open Sans") == c.fontCache {
+	if c.FontFor("Open Sans") == c.DefaultFont() {
 		t.Error(`"Open Sans" не найден по названию семейства`)
 	}
 	// Имя файла работает как раньше.
-	if c.fontFor("OpenSans-Bold") != byName("OpenSans-Bold") {
+	if c.FontFor("OpenSans-Bold") != byName("OpenSans-Bold") {
 		t.Error("имя файла перестало находить шрифт")
 	}
 }
@@ -112,18 +112,18 @@ func TestFontFamily_DefaultFamilyWeights(t *testing.T) {
 
 	// Встроенный Go Regular жирного начертания в семействе не имеет:
 	// берётся встроенный Go Bold — как у widget.Label{Bold: true}.
-	if c.fontFor(widget.FontFace("", 700, false)) != byNameT(c, widget.BuiltinFontBold) {
+	if c.FontFor(widget.FontFace("", 700, false)) != byNameT(c, widget.BuiltinFontBold) {
 		t.Error("bold без семейства при шрифте Go Regular — не встроенный жирный")
 	}
-	if c.fontFor(widget.FontFace("", 0, true)) != byNameT(c, widget.BuiltinFontItalic) {
+	if c.FontFor(widget.FontFace("", 0, true)) != byNameT(c, widget.BuiltinFontItalic) {
 		t.Error("курсив без семейства при шрифте Go Regular — не встроенный курсивный")
 	}
 	// Незнакомое семейство ведёт себя так же: нет шрифта — нет и спора.
-	if c.fontFor(widget.FontFace("Нет Такого", 700, false)) != byNameT(c, widget.BuiltinFontBold) {
+	if c.FontFor(widget.FontFace("Нет Такого", 700, false)) != byNameT(c, widget.BuiltinFontBold) {
 		t.Error("bold незнакомого семейства — не встроенный жирный")
 	}
 	// Лёгкий вес без семейства — просто шрифт по умолчанию.
-	if c.fontFor(widget.FontFace("", 300, false)) != c.fontCache {
+	if c.FontFor(widget.FontFace("", 300, false)) != c.DefaultFont() {
 		t.Error("Light без семейства — не шрифт по умолчанию")
 	}
 
@@ -134,13 +134,13 @@ func TestFontFamily_DefaultFamilyWeights(t *testing.T) {
 	if !eng.SetDefaultFont("OpenSans") {
 		t.Fatal("SetDefaultFont")
 	}
-	if c.fontFor(widget.FontFace("", 700, false)) != byNameT(c, "OpenSans-Bold") {
+	if c.FontFor(widget.FontFace("", 700, false)) != byNameT(c, "OpenSans-Bold") {
 		t.Error("bold при шрифте по умолчанию Open Sans — не OpenSans-Bold")
 	}
-	if c.fontFor(widget.FontFace("", 600, false)) != byNameT(c, "OpenSans-SemiBold") {
+	if c.FontFor(widget.FontFace("", 600, false)) != byNameT(c, "OpenSans-SemiBold") {
 		t.Error("SemiBold при шрифте по умолчанию Open Sans — не OpenSans-SemiBold")
 	}
-	if c.fontFor(widget.FontFace("", 700, true)) != byNameT(c, "OpenSans-BoldItalic") {
+	if c.FontFor(widget.FontFace("", 700, true)) != byNameT(c, "OpenSans-BoldItalic") {
 		t.Error("bold italic при шрифте по умолчанию Open Sans — не OpenSans-BoldItalic")
 	}
 }
@@ -151,13 +151,13 @@ func TestFontFamily_UnknownNameFallsBackToDefault(t *testing.T) {
 	testreset.Globals(t)
 	eng := openSansEngine(t)
 	c := eng.canvas
-	if c.fontFor("нет-такого") != c.fontCache {
+	if c.FontFor("нет-такого") != c.DefaultFont() {
 		t.Error("незнакомое имя — не шрифт по умолчанию")
 	}
-	if c.fontFor("$hg_face:мусор") != c.fontCache {
+	if c.FontFor("$hg_face:мусор") != c.DefaultFont() {
 		t.Error("битое составное имя — не шрифт по умолчанию")
 	}
-	if c.fontFor("") != c.fontCache {
+	if c.FontFor("") != c.DefaultFont() {
 		t.Error("пустое имя — не шрифт по умолчанию")
 	}
 }
@@ -167,7 +167,7 @@ func TestFontFamily_UnknownNameFallsBackToDefault(t *testing.T) {
 func TestFractionalSize_ReachesRasterizer(t *testing.T) {
 	testreset.Globals(t)
 	eng := openSansEngine(t)
-	fc := eng.canvas.fontFor("OpenSans")
+	fc := eng.canvas.FontFor("OpenSans")
 	// Подпиксельный режим: ширина линейна по кеглю и ничем не округлена.
 	fc.SetSubpixel(true)
 	const s = "Hamburgefonstiv Открыть меню Пуск"
@@ -226,7 +226,7 @@ func TestSubpixel_OffByDefault(t *testing.T) {
 	if eng.TextSubpixel() {
 		t.Fatal("подпиксельный текст включён по умолчанию")
 	}
-	fc := eng.canvas.fontFor("OpenSans")
+	fc := eng.canvas.FontFor("OpenSans")
 	adv, _ := fc.Face(8.5).GlyphAdvance('i')
 	if adv&63 != 0 {
 		t.Errorf("шаг глифа %v дробный при выключенном подпикселе", adv)
@@ -280,7 +280,7 @@ func TestSubpixel_AppliesToLaterFonts(t *testing.T) {
 	if err := hgfonts.Register(eng); err != nil {
 		t.Fatal(err)
 	}
-	if !eng.canvas.fontFor("OpenSans-Bold").Subpixel() {
+	if !eng.canvas.FontFor("OpenSans-Bold").Subpixel() {
 		t.Error("шрифт, добавленный после включения, остался с целым шагом")
 	}
 }
@@ -290,7 +290,7 @@ func TestSubpixel_PhasesGiveDifferentMasks(t *testing.T) {
 	testreset.Globals(t)
 	eng := openSansEngine(t)
 	eng.SetTextSubpixel(true)
-	fc := eng.canvas.fontFor("OpenSans")
+	fc := eng.canvas.FontFor("OpenSans")
 	g0 := fc.GlyphAt(8.5, 'l', 0)
 	g2 := fc.GlyphAt(8.5, 'l', 2)
 	if g0.Mask == nil || g2.Mask == nil {
@@ -317,7 +317,7 @@ func TestSubpixel_PhasesGiveDifferentMasks(t *testing.T) {
 func TestPenGlyph_PhaseSelection(t *testing.T) {
 	testreset.Globals(t)
 	eng := openSansEngine(t)
-	fc := eng.canvas.fontFor("OpenSans")
+	fc := eng.canvas.FontFor("OpenSans")
 	// Без подпикселя перо округляется, как и раньше.
 	if _, x := hgtext.PenGlyph(fc, false, 8.5, 'l', fixed.Int26_6(10*64+40)); x != 11 {
 		t.Errorf("целочисленный режим: x = %d, ждали 11", x)
@@ -349,7 +349,7 @@ func TestSubpixel_DrawnStrokesAreEvenlySpaced(t *testing.T) {
 		str += "l"
 	}
 	c.DrawTextFont(str, 2, 2, 8.5, "OpenSans", color.RGBA{0, 0, 0, 255})
-	img := c.back
+	img := c.Back()
 	colInk := make([]float64, img.Rect.Dx())
 	for y := 0; y < img.Rect.Dy(); y++ {
 		for x := 0; x < img.Rect.Dx(); x++ {
@@ -411,7 +411,7 @@ func TestSubpixel_SecondGlyphIsRenderedAtItsPhase(t *testing.T) {
 		eng := openSansEngine(t)
 		eng.SetTextSubpixel(on)
 		eng.canvas.DrawTextFont(text, 2, 2, 8.5, "OpenSans", color.RGBA{0, 0, 0, 255})
-		return eng.canvas.back
+		return eng.canvas.Back()
 	}
 	second := func(on bool) []int {
 		one, two := render(on, "l"), render(on, "ll")

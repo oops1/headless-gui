@@ -1,6 +1,7 @@
 package engine
 
 import (
+	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	"image/color"
@@ -12,11 +13,11 @@ import (
 
 // rotatedTextCanvas — белый холст логического размера (w, h) с масштабом scale.
 func rotatedTextCanvas(w, h int, scale float64) *Canvas {
-	cv := newCanvasScaled(w, h, scale, hgtext.NewFontCache("assets"))
+	cv := hgraster.NewCanvasScaled(w, h, scale, hgtext.NewFontCache("assets"))
 	if scale != 1 {
-		cv.setDPIAll(DefaultDPI * scale)
+		cv.SetDPIAll(DefaultDPI * scale)
 	}
-	cv.blitBackground()
+	cv.BlitBackground()
 	cv.FillRect(0, 0, w, h, color.RGBA{255, 255, 255, 255})
 	return cv
 }
@@ -37,7 +38,7 @@ func TestDrawTextRotated_IsExactPixelRotation(t *testing.T) {
 			if !r.DrawTextRotated(text, x, y, 12, "", angle, black) {
 				t.Fatalf("scale %v angle %d: false", scale, angle)
 			}
-			px, py := h.sx(x), h.sx(y)
+			px, py := h.PhysX(x), h.PhysX(y)
 			bad, ink := 0, 0
 			for hy := 0; hy < h.H; hy++ {
 				for hx := 0; hx < h.W; hx++ {
@@ -54,11 +55,11 @@ func TestDrawTextRotated_IsExactPixelRotation(t *testing.T) {
 					if rx < 0 || ry < 0 || rx >= r.W || ry >= r.H {
 						continue
 					}
-					want := h.back.RGBAAt(hx, hy)
+					want := h.Back().RGBAAt(hx, hy)
 					if want.R != 255 {
 						ink++
 					}
-					if got := r.back.RGBAAt(rx, ry); got != want {
+					if got := r.Back().RGBAAt(rx, ry); got != want {
 						bad++
 					}
 				}
@@ -82,7 +83,7 @@ func TestDrawTextRotated_Placement(t *testing.T) {
 		var b image.Rectangle
 		for y := 0; y < c.H; y++ {
 			for x := 0; x < c.W; x++ {
-				if c.back.RGBAAt(x, y).R != 255 {
+				if c.Back().RGBAAt(x, y).R != 255 {
 					b = b.Union(image.Rect(x, y, x+1, y+1))
 				}
 			}
@@ -120,7 +121,7 @@ func TestDrawTextRotated_ClipAndOddAngles(t *testing.T) {
 	c.ClearClip()
 	for y := 100; y < 200; y++ {
 		for x := 0; x < 120; x++ {
-			if c.back.RGBAAt(x, y).R != 255 {
+			if c.Back().RGBAAt(x, y).R != 255 {
 				t.Fatalf("пиксель (%d,%d) вне клипа закрашен", x, y)
 			}
 		}
@@ -131,7 +132,7 @@ func TestDrawTextRotated_ClipAndOddAngles(t *testing.T) {
 	min := uint8(255)
 	for y := 0; y < c.H; y++ {
 		for x := 0; x < c.W; x++ {
-			if v := c.back.RGBAAt(x, y).R; v < min {
+			if v := c.Back().RGBAAt(x, y).R; v < min {
 				min = v
 			}
 		}
@@ -155,7 +156,7 @@ func TestDrawTextRotated_WrappersForward(t *testing.T) {
 	if !ok || !rt.DrawTextRotated("Hello", 110, 170, 12, "", 90, black) {
 		t.Fatal("OffsetContext должен пробрасывать повёрнутый текст")
 	}
-	if string(direct.back.Pix) != string(off.back.Pix) {
+	if string(direct.Back().Pix) != string(off.Back().Pix) {
 		t.Error("через OffsetContext(30, 20) результат отличается от прямого")
 	}
 
@@ -165,7 +166,7 @@ func TestDrawTextRotated_WrappersForward(t *testing.T) {
 	if !tc.DrawTextRotated("Hello", 110, 170, 12, "", 90, black) {
 		t.Fatal("translatingContext не нарисовал")
 	}
-	if string(direct.back.Pix) != string(pop.back.Pix) {
+	if string(direct.Back().Pix) != string(pop.Back().Pix) {
 		t.Error("через translatingContext результат отличается от прямого")
 	}
 }

@@ -27,7 +27,7 @@ func realFont(t *testing.T) []byte {
 // незнакомому имени, и виджет с опечаткой в FontFamily рисуется молча.
 // Сравнение с заведомо несуществующим именем это различает.
 func registered(e *Engine, name string) bool {
-	return e.canvas.fontFor(name) != e.canvas.fontFor("нет-такого-шрифта-\x00")
+	return e.canvas.FontFor(name) != e.canvas.FontFor("нет-такого-шрифта-\x00")
 }
 
 func TestRegisterFontFS_RegistersFileAndFamily(t *testing.T) {
@@ -119,7 +119,7 @@ func TestRegisterFontFS_DoesNotStealTakenFamily(t *testing.T) {
 	// Своё «Roboto» приложения — это на самом деле Liberation, и подмену видно
 	// по метрикам: у него другая ширина строки.
 	eng.canvas.RegisterFont("Roboto", data)
-	own := eng.canvas.fontFor("Roboto")
+	own := eng.canvas.FontFor("Roboto")
 
 	robo, err := os.ReadFile(filepath.Join("..", "assets", "fonts", "Roboto-Regular.ttf"))
 	if err != nil {
@@ -130,7 +130,7 @@ func TestRegisterFontFS_DoesNotStealTakenFamily(t *testing.T) {
 		t.Fatalf("регистрация: %v", err)
 	}
 
-	if eng.canvas.fontFor("Roboto") != own {
+	if eng.canvas.FontFor("Roboto") != own {
 		t.Error("каталог перебил имя семейства, занятое приложением")
 	}
 	if !registered(eng, "Roboto-Regular") {

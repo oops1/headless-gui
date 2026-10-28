@@ -2,6 +2,7 @@
 // отдельный буфер. Все координаты оверлея задаются в абсолютных логических
 // координатах холста; обёртка вычитает (dx,dy) = Rect.Min, чтобы попасть в
 // локальную систему координат маленького канваса попапа.
+
 package engine
 
 import (
@@ -192,7 +193,7 @@ func (t *translatingContext) BlurBehind(r image.Rectangle, radius int, tint colo
 // MicaBehind кладёт размытые обои в r. Буфер попапа — окошко основного
 // холста, поэтому обои берутся у него со сдвигом (dx, dy).
 func (t *translatingContext) MicaBehind(r image.Rectangle, radius int, tint color.RGBA) bool {
-	return t.inner.micaAt(r.Sub(image.Pt(t.dx, t.dy)), image.Pt(t.dx, t.dy), radius, tint)
+	return t.inner.MicaAt(r.Sub(image.Pt(t.dx, t.dy)), image.Pt(t.dx, t.dy), radius, tint)
 }
 
 // DrawShadow рисует мягкую тень с явными размытием и смещением.

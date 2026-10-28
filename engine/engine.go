@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	_ "image/jpeg" // декодер JPEG для SetBackgroundFile
@@ -14,11 +15,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/image/font/gofont/gobold"
-	"golang.org/x/image/font/gofont/gobolditalic"
-	"golang.org/x/image/font/gofont/goitalic"
-	"golang.org/x/image/font/gofont/gomono"
 
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/theme"
@@ -43,8 +39,8 @@ import (
 type Engine struct {
 	canvas    *Canvas
 	fontCache *FontCache
-	imgInv    *imageInvalidator // журнал сбросов кэша изображений всех холстов движка (imagecache.go)
-	bgSrc     image.Image // исходный фон (до масштабирования); нужен при SetResolution
+	imgInv    *hgraster.ImageInvalidator // журнал сбросов кэша изображений всех холстов движка (imagecache.go)
+	bgSrc     image.Image                // исходный фон (до масштабирования); нужен при SetResolution
 	root      widget.Widget
 	mu        sync.RWMutex // защищает УКАЗАТЕЛИ root/canvas/bgSrc (короткие секции)
 
@@ -275,33 +271,6 @@ type saveJob struct {
 	snap *image.RGBA // снапшот front-буфера на момент рендера
 }
 
-// ─── Границы размера холста (SEC-10) ────────────────────────────────────────
-
-const (
-	// MinCanvasSide — минимальная сторона холста. Ноль и отрицательные
-	// значения давали image.NewRGBA с пустым прямоугольником и мусорную
-	// тайловую арифметику в newCanvas (tilesX/tilesY ≤ 0).
-	MinCanvasSide = 1
-
-	// MaxCanvasSide — максимальная сторона холста в логических пикселях.
-	// 16384 — верх того, что осмысленно рисовать программно; всё, что выше,
-	// это опечатка или подставленное снаружи число.
-	MaxCanvasSide = 16384
-
-	// MaxCanvasPixels — максимальная площадь холста (в ФИЗИЧЕСКИХ пикселях,
-	// то есть уже с учётом HiDPI-масштаба).
-	//
-	// Цена пикселя — 4 байта, а буфера два (front+back): 64 Мпикс это
-	// 2 × 256 МБ. Выше поднимать нельзя — предел в 256 Мпикс всё ещё давал
-	// на New(1<<20, 1<<20) два гигабайтных буфера, то есть ровно то, от чего
-	// защищаемся. Ниже — тоже нельзя: 64 Мпикс с запасом покрывает 8K
-	// (7680×4320 ≈ 33 Мпикс) и 4K при scale=2 (те же 33 Мпикс).
-	//
-	// Без этой границы New(1<<20, 1<<20) просил у рантайма терабайты и валил
-	// процесс на месте.
-	MaxCanvasPixels = 64 << 20
-)
-
 // maxTreeDepth — предел глубины обходов дерева виджетов.
 // Цикл в Children() иначе вешает обход намертво.
 const maxTreeDepth = 512
@@ -317,45 +286,6 @@ func tooDeep(depth int) bool {
 		log.Printf("engine: обход дерева виджетов прерван на глубине %d — вероятен цикл в Children()", maxTreeDepth)
 	})
 	return true
-}
-
-// clampCanvasSize приводит запрошенный размер холста к допустимому диапазону.
-// При изменении пишет в журнал: молча отдать не тот размер, что просили, —
-// худший из вариантов (приложение будет считать координаты по своему числу).
-func clampCanvasSize(width, height int) (int, int) {
-	w, h := width, height
-	if w < MinCanvasSide {
-		w = MinCanvasSide
-	}
-	if h < MinCanvasSide {
-		h = MinCanvasSide
-	}
-	if w > MaxCanvasSide {
-		w = MaxCanvasSide
-	}
-	if h > MaxCanvasSide {
-		h = MaxCanvasSide
-	}
-	// Площадь: ужимаем пропорционально, чтобы не ломать соотношение сторон.
-	for int64(w)*int64(h) > MaxCanvasPixels {
-		if w >= h {
-			w /= 2
-		} else {
-			h /= 2
-		}
-		if w < MinCanvasSide {
-			w = MinCanvasSide
-		}
-		if h < MinCanvasSide {
-			h = MinCanvasSide
-		}
-	}
-	if w != width || h != height {
-		log.Printf("engine: размер холста %dx%d вне допустимых границ — приведён к %dx%d "+
-			"(сторона %d…%d, площадь ≤ %d пикс.)",
-			width, height, w, h, MinCanvasSide, MaxCanvasSide, int64(MaxCanvasPixels))
-	}
-	return w, h
 }
 
 // New создаёт движок.
@@ -404,11 +334,11 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	if fps < 1 {
 		fps = 20
 	}
-	width, height = clampCanvasSize(width, height)
+	width, height = hgraster.ClampCanvasSize(width, height)
 	fc := hgtext.NewFontCache("assets")
 	e := &Engine{
 		fontCache: fc,
-		canvas:    newCanvas(width, height, fc),
+		canvas:    hgraster.NewCanvas(width, height, fc),
 		frames:    make(chan output.Frame, 8),
 		// wake будит цикл кадров при внешнем темпе: без него RequestFrame
 		// ждал бы ближайшего тика, то есть темп остался бы тикерным.
@@ -422,8 +352,8 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 		ttDelay:   600 * time.Millisecond,
 	}
 	e.scaleBits.Store(math.Float64bits(1))
-	e.imgInv = &imageInvalidator{}
-	e.canvas.inv = e.imgInv
+	e.imgInv = &hgraster.ImageInvalidator{}
+	e.canvas.SetImageInvalidator(e.imgInv)
 	// Рендер по запросу — режим по умолчанию (v3.5): виджеты самоинвалидируются
 	// (Base.Invalidate, авто-damage в SetBounds/сеттерах), события и слой данных
 	// инвалидируют через движок. Кадры рендерятся только при изменениях UI,
@@ -431,22 +361,9 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// экспортированные поля виджетов требуют Invalidate()/Engine.Invalidate().
 	// Опт-аут (прежнее поведение «рендер каждый тик»): SetRenderOnDemand(false).
 	e.onDemand.Store(true)
-	// Best-effort: подгружаем шрифты с широким покрытием символов (✓ ✗ ⚠,
-	// box-drawing, стрелки) как fallback к встроенному Go Regular (BUG-2).
-	// Сначала системные, затем наши из assets/fonts — на машине без единого
-	// системного шрифта иначе некому нарисовать эти символы вовсе.
-	//
-	// Файлы не читаются: путь регистрируется, а шрифт загружается при первом
-	// символе, которого нет в основном (fallbackfont.go) — около 22 МБ чтения и
-	// разбора на Windows в обычный старт не попадают.
-	for _, p := range append(hgtext.SystemFallbackFontPaths(), hgtext.AssetFallbackFontPaths()...) {
-		e.canvas.addFallbackFontFile(p)
-	}
-	// Встроенные жирный/курсивный шрифты для FontWeight/FontStyle (P1).
-	e.canvas.RegisterFont(widget.BuiltinFontBold, gobold.TTF)
-	e.canvas.RegisterFont(widget.BuiltinFontItalic, goitalic.TTF)
-	e.canvas.RegisterFont(widget.BuiltinFontBoldItalic, gobolditalic.TTF)
-	e.canvas.RegisterFont(widget.BuiltinFontMono, gomono.TTF)
+	// Запасная цепочка шрифтов (BUG-2; файлы читаются лениво) и встроенные
+	// жирный, курсив и моноширинный (P1).
+	e.canvas.AddDefaultFonts()
 	// Сообщаем виджетам размер канваса (для удержания popup-меню в пределах экрана).
 	if !offscreen {
 		widget.SetScreenBounds(width, height)
@@ -639,14 +556,14 @@ func (e *Engine) SetScale(k float64) {
 	e.frameMu.Lock() // буферы меняются — ждём конца кадра
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
-	if e.canvas.scale == k {
+	if e.canvas.Scale() == k {
 		e.mu.Unlock()
 		return
 	}
 	lw, lh := e.canvas.LogicalSize()
-	e.canvas = e.canvas.cloneForSize(lw, lh, k, e.bgSrc)
+	e.canvas = e.canvas.CloneForSize(lw, lh, k, e.bgSrc)
 	e.surfaces.drop() // буферы прежнего размера новому холсту не подходят
-	e.canvas.setDPIAll(e.userDPI * k)
+	e.canvas.SetDPIAll(e.userDPI * k)
 	e.scaleBits.Store(math.Float64bits(k))
 	e.mu.Unlock()
 	e.markCanvasReplaced()
@@ -662,12 +579,12 @@ func (e *Engine) SetScale(k float64) {
 func (e *Engine) SetResolution(width, height int) {
 	// Границы те же, что у New (SEC-10): смена разрешения — такой же
 	// вход для «числа снаружи», как и создание движка.
-	width, height = clampCanvasSize(width, height)
+	width, height = hgraster.ClampCanvasSize(width, height)
 	e.frameMu.Lock() // ждём конца текущего кадра — буферы меняются
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
-	e.canvas = e.canvas.cloneForSize(width, height, e.canvas.scale, e.bgSrc)
-	e.surfaces.drop() // буферы прежнего размера новому холсту не подходят
+	e.canvas = e.canvas.CloneForSize(width, height, e.canvas.Scale(), e.bgSrc)
+	e.surfaces.drop()     // буферы прежнего размера новому холсту не подходят
 	e.scaleWithin = false // логический размер задан явно: обычный режим
 	e.mu.Unlock()
 	e.fitTreeToCanvas(width, height)
@@ -727,7 +644,7 @@ func (e *Engine) SetBackgroundFile(path string) error {
 	e.frameMu.Lock() // фон читается blitBackground — меняем между кадрами
 	e.mu.Lock()
 	e.bgSrc = img
-	e.canvas.setBackground(img)
+	e.canvas.SetBackground(img)
 	e.mu.Unlock()
 	e.frameMu.Unlock()
 	e.Invalidate()
@@ -752,7 +669,7 @@ func (e *Engine) SetBackground(img image.Image) error {
 	e.frameMu.Lock() // фон читается blitBackground — меняем между кадрами
 	e.mu.Lock()
 	e.bgSrc = img
-	e.canvas.setBackground(img)
+	e.canvas.SetBackground(img)
 	e.mu.Unlock()
 	e.frameMu.Unlock()
 	e.Invalidate()
@@ -767,7 +684,7 @@ func (e *Engine) ClearBackground() {
 	e.frameMu.Lock()
 	e.mu.Lock()
 	e.bgSrc = nil
-	e.canvas.clearBackground()
+	e.canvas.ClearBackground()
 	e.mu.Unlock()
 	e.frameMu.Unlock()
 	e.Invalidate()
@@ -935,7 +852,7 @@ func (e *Engine) SetTextSubpixel(on bool) {
 // зарегистрированных позже. Не связан с SetTextSubpixel: их можно сочетать.
 func (e *Engine) SetTextQuality(q TextQuality) {
 	e.frameMu.Lock()
-	e.canvas.setTextQuality(q)
+	e.canvas.SetTextQuality(q)
 	e.frameMu.Unlock()
 	e.Invalidate()
 }
@@ -945,7 +862,7 @@ func (e *Engine) SetTextQuality(q TextQuality) {
 func (e *Engine) TextQuality() TextQuality {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
-	return e.canvas.fontCache.Quality()
+	return e.canvas.DefaultFont().Quality()
 }
 
 // SetTextHinting включает и выключает только автохинтинг по вертикали,
@@ -980,10 +897,10 @@ func (e *Engine) UseThemeTextSubpixel() {
 // изменился, сбрасывает замеры строк: ширины у режимов разные, и раскладка,
 // посчитанная по старым, перестала бы совпадать с отрисовкой. Под frameMu.
 func (e *Engine) setSubpixelLocked(on bool) {
-	if e.canvas.fontCache.Subpixel() == on {
+	if e.canvas.DefaultFont().Subpixel() == on {
 		return
 	}
-	e.canvas.setTextSubpixel(on)
+	e.canvas.SetTextSubpixel(on)
 	widget.BumpTextMetricsRev()
 }
 
@@ -1009,14 +926,14 @@ func (e *Engine) followThemeSubpixel(want bool) {
 func (e *Engine) TextSubpixel() bool {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
-	return e.canvas.fontCache.Subpixel()
+	return e.canvas.DefaultFont().Subpixel()
 }
 
 // AvailableFonts возвращает список зарегистрированных именованных шрифтов.
 func (e *Engine) AvailableFonts() []string {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
-	return e.canvas.fontNames()
+	return e.canvas.FontNames()
 }
 
 // RegisterFallbackFont добавляет fallback-шрифт (TTF/OTF-данные) для рун,
@@ -1048,7 +965,7 @@ func (e *Engine) SetDPI(dpi float64) {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
 	e.userDPI = dpi
-	e.canvas.setDPIAll(dpi * e.canvas.scale)
+	e.canvas.SetDPIAll(dpi * e.canvas.Scale())
 	widget.BumpTextMetricsRev() // ширины текста изменились — сброс кэшей переноса
 	e.Invalidate()
 }
@@ -1176,8 +1093,8 @@ func (e *Engine) RenderOnce() *image.RGBA {
 	}
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
-	out := image.NewRGBA(canvas.front.Rect)
-	copy(out.Pix, canvas.front.Pix)
+	out := image.NewRGBA(canvas.Front().Rect)
+	copy(out.Pix, canvas.Front().Pix)
 	return out
 }
 
@@ -1802,7 +1719,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// иначе размытие посчиталось бы по куску поверх прошлого кадра
 	// (backdropdamage.go).
 	if !damageAll {
-		damageRects = canvas.expandForBackdrops(damageRects)
+		damageRects = canvas.ExpandForBackdrops(damageRects)
 		damageRects = mergeOverlaps(damageRects)
 	}
 	// Полный кадр (fullframe.go): рисуется всё и отдаётся всё, без диффа.
@@ -1881,10 +1798,10 @@ func (e *Engine) renderFrame() output.Frame {
 		// пикселях, а границы виджетов живут в логических. При масштабе
 		// 1.25 сравнение одних с другими пропустило бы ровно то поддерево,
 		// которое и надо было нарисовать.
-		canvas.setDrawDamage(e.logicalDamage([]image.Rectangle{damage}))
-		defer canvas.clearDrawDamage()
+		canvas.SetDrawDamage(e.logicalDamage([]image.Rectangle{damage}))
+		defer canvas.ClearDrawDamage()
 	} else {
-		canvas.clearDrawDamage()
+		canvas.ClearDrawDamage()
 	}
 
 	if partial {
@@ -1903,13 +1820,13 @@ func (e *Engine) renderFrame() output.Frame {
 		// накрыл, и сброс после него стёр бы эту пометку. Тогда тайл, на
 		// котором кроме обоев ничего нет, снова уезжал бы к потребителю с
 		// ответом «неизвестно что».
-		canvas.resetTileMarks(damage)
-		canvas.blitBackgroundIn(damage)
-		canvas.setBaseClip(damage)
-		defer canvas.clearBaseClip()
+		canvas.ResetTileMarks(damage)
+		canvas.BlitBackgroundIn(damage)
+		canvas.SetBaseClip(damage)
+		defer canvas.ClearBaseClip()
 	} else {
-		canvas.resetTileMarks(image.Rect(0, 0, canvas.W, canvas.H))
-		canvas.blitBackground()
+		canvas.ResetTileMarks(image.Rect(0, 0, canvas.W, canvas.H))
+		canvas.BlitBackground()
 	}
 	if ovtOn {
 		e.ovtBeginFrame(!partial, damage, layers)
@@ -1972,7 +1889,7 @@ func (e *Engine) renderFrame() output.Frame {
 	var moves []output.MoveRegion
 	declared := e.takeMoves()
 	if partial && len(declared) > 0 {
-		moves = canvas.applyMovesToFront(declared)
+		moves = canvas.ApplyMovesToFront(declared)
 	}
 	// При полном кадре объявления просто отбрасываются: потребитель и так
 	// получает всё заново, а оставшись, они достались бы следующему кадру.
@@ -1983,20 +1900,19 @@ func (e *Engine) renderFrame() output.Frame {
 	// Diff: при частичной перерисовке сравниваем только тайлы,
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
-	canvas.recycle = e.recycleFrames.Load()
-	canvas.noTileData = e.noTileData.Load()
+	canvas.SetFrameOptions(e.recycleFrames.Load(), !e.noTileData.Load())
 	switch {
 	case full:
-		tiles = canvas.allTiles()
+		tiles = canvas.AllTiles()
 	case partial:
 		// Шаги переходов вне повреждения смешаны в буфер без перерисовки —
 		// их области сравниваются тоже.
-		tiles = canvas.diffAndSyncInRects(append(damageRects[:len(damageRects):len(damageRects)], ovtSteps...))
+		tiles = canvas.DiffAndSyncInRects(append(damageRects[:len(damageRects):len(damageRects)], ovtSteps...))
 	default:
-		tiles = canvas.diffAndSync()
+		tiles = canvas.DiffAndSync()
 	}
 
-	canvas.finishBackdrops(partial, damageRects)
+	canvas.FinishBackdrops(partial, damageRects)
 
 	seq := e.frameSeq.Add(1)
 
@@ -2006,13 +1922,13 @@ func (e *Engine) renderFrame() output.Frame {
 		Seq:       seq,
 		Timestamp: time.Now(),
 		Tiles:     tiles,
-		Regions:   canvas.regionsFor(tiles),
+		Regions:   canvas.RegionsFor(tiles),
 		Moves:     moves,
 		Videos:    videos,
 		Width:     canvas.W,
 		Height:    canvas.H,
 	}
-	fr.AttachSlabs(canvas.takeSlabs()...)
+	fr.AttachSlabs(canvas.TakeSlabs()...)
 	e.surfaceFrameDone(surface, &fr, full)
 	e.stats.diffNs.Add(sinceNanos(diffStart))
 	e.stats.tiles.Add(uint64(len(tiles)))
@@ -2025,8 +1941,8 @@ func (e *Engine) renderFrame() output.Frame {
 func (e *Engine) saveFrame(canvas *Canvas, seq uint64, tiles []output.DirtyTile) {
 	if e.saveDir != "" && len(tiles) > 0 && e.saveAllowed() {
 		// Снимаем копию front-буфера СЕЙЧАС, пока он актуален.
-		snap := e.acquireSnap(canvas.front.Rect)
-		copy(snap.Pix, canvas.front.Pix)
+		snap := e.acquireSnap(canvas.Front().Rect)
+		copy(snap.Pix, canvas.Front().Pix)
 		path := filepath.Join(e.saveDir, fmt.Sprintf("frame_%06d.png", seq))
 		// Отправка блокирующая (все кадры сохраняются), но не переживает Stop:
 		// иначе при остановке с полным буфером рендер и Stop ждали бы друг друга.
@@ -2053,21 +1969,20 @@ func (e *Engine) renderStepFrame(canvas *Canvas, root widget.Widget, modals []wi
 	videos := e.collectVideos(canvas, root, modals)
 	diffStart := time.Now()
 	e.stats.drawNs.Add(uint64(diffStart.Sub(drawStart)))
-	canvas.recycle = e.recycleFrames.Load()
-	canvas.noTileData = e.noTileData.Load()
-	tiles := canvas.diffAndSyncInRects(steps)
+	canvas.SetFrameOptions(e.recycleFrames.Load(), !e.noTileData.Load())
+	tiles := canvas.DiffAndSyncInRects(steps)
 	seq := e.frameSeq.Add(1)
 	e.saveFrame(canvas, seq, tiles)
 	fr := output.Frame{
 		Seq:       seq,
 		Timestamp: time.Now(),
 		Tiles:     tiles,
-		Regions:   canvas.regionsFor(tiles),
+		Regions:   canvas.RegionsFor(tiles),
 		Videos:    videos,
 		Width:     canvas.W,
 		Height:    canvas.H,
 	}
-	fr.AttachSlabs(canvas.takeSlabs()...)
+	fr.AttachSlabs(canvas.TakeSlabs()...)
 	e.surfaceFrameDone(surface, &fr, false)
 	e.stats.diffNs.Add(sinceNanos(diffStart))
 	e.stats.tiles.Add(uint64(len(tiles)))
