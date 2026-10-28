@@ -7,9 +7,12 @@ import (
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
+// Таблицы переводов здесь не очищаются (ClearStrings): она стирает и встроенные
+// переводы штатных диалогов и DatePicker, зарегистрированные в init, — вернуть
+// их тесту нечем, и тесты диалогов, идущие следом, видят ключи «dlg.*» вместо
+// текста. Ключи этих тестов свои («Hi», «Greeting», …), встроенных среди них нет.
 func TestStrings_TrFallbackAndMissing(t *testing.T) {
 	testreset.Globals(t)
-	widget.ClearStrings()
 	widget.SetFallbackLocale("EN")
 	widget.RegisterStrings("EN", map[string]string{"Hi": "Hello", "Only": "EN-only"})
 	widget.RegisterStrings("RU", map[string]string{"Hi": "Привет"})
@@ -32,7 +35,6 @@ func TestStrings_TrFallbackAndMissing(t *testing.T) {
 // Язык интерфейса (Language) и раскладка клавиатуры (Locale) независимы.
 func TestStrings_LanguageIndependentFromKeyboardLocale(t *testing.T) {
 	testreset.Globals(t)
-	widget.ClearStrings()
 	widget.SetFallbackLanguage("EN")
 	widget.RegisterStrings("EN", map[string]string{"Hi": "Hello"})
 	widget.RegisterStrings("RU", map[string]string{"Hi": "Привет"})
@@ -62,7 +64,6 @@ func TestStrings_LanguageIndependentFromKeyboardLocale(t *testing.T) {
 
 func TestStrings_LoadJSON(t *testing.T) {
 	testreset.Globals(t)
-	widget.ClearStrings()
 	if err := widget.LoadStringsJSON("DE", []byte(`{"Hi":"Hallo"}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,6 @@ func TestStrings_RemoveLanguageListener(t *testing.T) {
 
 func TestBindingScope_DisposeStopsLocUpdates(t *testing.T) {
 	testreset.Globals(t)
-	widget.ClearStrings()
 	widget.RegisterStrings("EN", map[string]string{"DisposeKey": "Hello"})
 	widget.RegisterStrings("RU", map[string]string{"DisposeKey": "Привет"})
 	widget.SetLanguage("EN")
@@ -115,7 +115,6 @@ func TestBindingScope_DisposeStopsLocUpdates(t *testing.T) {
 
 func TestStrings_Trf(t *testing.T) {
 	testreset.Globals(t)
-	widget.ClearStrings()
 	widget.RegisterString("EN", "Count", "Items: %d")
 	widget.SetLanguage("EN")
 	if got := widget.Trf("Count", 5); got != "Items: 5" {
@@ -125,7 +124,6 @@ func TestStrings_Trf(t *testing.T) {
 
 func TestStrings_XAMLStaticAndDynamic(t *testing.T) {
 	testreset.Globals(t)
-	widget.ClearStrings()
 	widget.SetFallbackLocale("EN")
 	widget.RegisterStrings("EN", map[string]string{"Greeting": "Hello", "Btn": "Save"})
 	widget.RegisterStrings("RU", map[string]string{"Greeting": "Привет", "Btn": "Сохранить"})
