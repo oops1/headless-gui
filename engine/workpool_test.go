@@ -16,7 +16,7 @@ type countTask struct {
 	panicAt int
 }
 
-func (t *countTask) runPart(i int) {
+func (t *countTask) RunPart(i int) {
 	t.done[i].Add(1)
 	if i == t.panicAt {
 		panic("часть упала")

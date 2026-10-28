@@ -839,7 +839,7 @@ type compositeJob struct {
 	batch  poolBatch
 }
 
-func (j *compositeJob) runPart(i int) {
+func (j *compositeJob) RunPart(i int) {
 	h := j.tr.rest.Dy()
 	j.tr.compositeRows(j.back, i*j.chunk, min((i+1)*j.chunk, h), j.a256, j.sx, j.sy)
 }
