@@ -193,24 +193,6 @@ func TestPopupFade_OutOfOrderJobsEndAtLatest(t *testing.T) {
 	}
 }
 
-// Попап-потомок (Wayland) прозрачности не прикладывает: исчезающий уходит
-// сразу.
-func TestChildPopups_ClosingGoesAtOnce(t *testing.T) {
-	be := &fakeChildHost{}
-	c := newChildPopups(be, &fakePopupEngine{}, 1, nil)
-	f := popupFrame(1, image.Rect(10, 10, 60, 40), 1)
-	f.Transition = &engine.PopupTransition{Opacity: 0.2}
-	c.apply([]engine.PopupFrame{f})
-	if len(be.opened) != 1 {
-		t.Fatalf("появляющийся попап не открыт сразу: %v", be.opened)
-	}
-	f.Transition = &engine.PopupTransition{Opacity: 0.6, Closing: true}
-	c.apply([]engine.PopupFrame{f})
-	if len(be.closed) != 1 {
-		t.Fatalf("исчезающий попап не закрыт сразу: %v", be.closed)
-	}
-}
-
 // Окно без прозрачности не проезжает путь перехода: непрозрачное меню
 // встаёт на место сразу.
 func TestPopupFade_NoFadeStaysPut(t *testing.T) {

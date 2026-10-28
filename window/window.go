@@ -184,6 +184,11 @@ func (win *Window) installPopupHost() {
 	if cph, ok := win.native.(childPopupHost); ok {
 		win.childPopups = newChildPopups(cph, peng, win.scale, &win.in)
 		setter.SetPopupSink(win.childPopups.apply)
+		// Хост держит исчезающие попапы и закладывает непрозрачность в копию
+		// кадра; кадр, не влезший в занятые буферы, бэкенд придерживает.
+		if pf, ok := win.eng.(interface{ SetPopupFade(bool) }); ok {
+			pf.SetPopupFade(true)
+		}
 		win.setPopupCursor(win.childPopups.syncCursorOverride)
 		return
 	}

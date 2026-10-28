@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"image"
 	"sync"
-	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
 
@@ -49,14 +48,12 @@ const (
 	xdgSurfaceDestroy = 0
 )
 
-// wlPopupWaitBuf — сколько ждать wl_buffer.release попапа, прежде чем
-// пропустить кадр. Тот же порядок, что у основного окна: подсветка пункта под
-// курсором не должна отставать, но и писать в буфер, из которого компоновщик
-// ещё читает, нельзя.
-const wlPopupWaitBuf = 32 * time.Millisecond
+// wlPopupBufs — сколько кадровых буферов у попапа. Два, как у окна: пока
+// компоновщик читает один, кадр пишется во второй.
+const wlPopupBufs = 2
 
-// wlPopup — одно всплывающее окно: поверхность, её xdg-обвязка и один
-// кадровый буфер.
+// wlPopup — одно всплывающее окно: поверхность, её xdg-обвязка и два
+// кадровых буфера.
 type wlPopup struct {
 	id uintptr // идентификатор оверлея движка
 
@@ -64,30 +61,38 @@ type wlPopup struct {
 	xdgSurfID uint32
 	popupID   uint32
 
-	// Буфер кадра: своя память, свой пул — размер попапа меняется отдельно
-	// от окна (раскрылось подменю).
+	// Буферы кадра: своя память, свой пул — размер попапа меняется отдельно
+	// от окна (раскрылось подменю). Буфер i лежит в пуле со смещения
+	// i × stride × h.
 	poolID     uint32
-	bufID      uint32
+	bufID      [wlPopupBufs]uint32
 	viewportID uint32 // область просмотра на HiDPI (0 — масштаб единица)
 	fd         int
 	data       []byte
 	w, h       int
 	stride     int
-	busy       bool
+	busy       [wlPopupBufs]bool // буфер у компоновщика: прикреплён, release ещё не пришёл
 
 	configured bool
 	closed     bool
 
-	// pending — кадр, пришедший до первого configure. Пока компоновщик не
-	// ответил на первый commit, прикреплять буфер нельзя.
+	// pending — последний кадр, ещё не положенный в буфер: пришёл до первого
+	// configure (прикреплять буфер до ответа на первый commit нельзя) или
+	// когда оба буфера были у компоновщика. Кладётся по configure или по
+	// wl_buffer.release; новый кадр заменяет придержанный — показывать имеет
+	// смысл только последний.
 	pending      *image.RGBA
 	pendingBands []image.Rectangle
+
+	// drawMu — вывод в буферы по одному за раз: кадр кладут и горутина
+	// движка, и цикл событий (по configure и release), и коммиты не должны
+	// обгонять друг друга. Под ним же popupDestroy снимает память: блит не
+	// пишет в уже снятое отображение.
+	drawMu sync.Mutex
 
 	// rect — место попапа в координатах окна-носителя (физические пиксели).
 	// По нему считается положение дочерних попапов.
 	rect image.Rectangle
-
-	release chan struct{}
 }
 
 // wlPopups — всплывающие окна одного окна-носителя.
@@ -127,7 +132,7 @@ func (w *WaylandWindow) OpenChildPopup(id uintptr, x, y, pw, ph int) error {
 		return fmt.Errorf("wayland: размер попапа %dx%d", pw, ph)
 	}
 
-	p := &wlPopup{id: id, rect: image.Rect(x, y, x+pw, y+ph), release: make(chan struct{}, 1)}
+	p := &wlPopup{id: id, rect: image.Rect(x, y, x+pw, y+ph)}
 	if err := w.popupSetupBuffer(p, pw, ph); err != nil {
 		return err
 	}
@@ -217,15 +222,15 @@ func (w *WaylandWindow) BlitChildPopup(id uintptr, img *image.RGBA, bands []imag
 		w.popups.mu.Unlock()
 		return
 	}
-	if !p.configured {
-		// Кадр до первого configure: придержим — покажем, как только
-		// компоновщик ответит.
-		p.pending, p.pendingBands = img, bands
-		w.popups.mu.Unlock()
-		return
-	}
+	// Кадр придерживается всегда, а кладёт его popupFlush: до первого
+	// configure — когда компоновщик ответит, при занятых буферах — когда
+	// один из них освободится.
+	p.pending, p.pendingBands = img, bands
+	ready := p.configured
 	w.popups.mu.Unlock()
-	w.popupDraw(p, img, bands)
+	if ready {
+		w.popupFlush(p)
+	}
 }
 
 // CloseChildPopup убирает попап и освобождает его ресурсы.
@@ -276,8 +281,10 @@ func (ps *wlPopups) put(p *wlPopup) {
 	ps.bySurf[p.surfaceID] = p
 	ps.byXdg[p.xdgSurfID] = p
 	ps.byPop[p.popupID] = p
-	if p.bufID != 0 {
-		ps.byBuf[p.bufID] = p
+	for _, b := range p.bufID {
+		if b != 0 {
+			ps.byBuf[b] = p
+		}
 	}
 }
 
@@ -286,7 +293,9 @@ func (ps *wlPopups) drop(p *wlPopup) {
 	delete(ps.bySurf, p.surfaceID)
 	delete(ps.byXdg, p.xdgSurfID)
 	delete(ps.byPop, p.popupID)
-	delete(ps.byBuf, p.bufID)
+	for _, b := range p.bufID {
+		delete(ps.byBuf, b)
+	}
 	if ps.root == p {
 		ps.root = nil
 	}
@@ -294,14 +303,15 @@ func (ps *wlPopups) drop(p *wlPopup) {
 
 // ─── Буфер и отрисовка ───────────────────────────────────────────────────────
 
-// popupSetupBuffer выделяет память под кадр попапа и регистрирует буфер.
+// popupSetupBuffer выделяет память под кадры попапа и регистрирует буферы.
 //
 // Формат с альфой, а не XRGB как у окна: вынесенное каскадное меню — это
 // ступенька, и между её полосами площадь, которую никто не закрашивает. В
 // непрозрачном буфере она была бы чёрным прямоугольником.
 func (w *WaylandWindow) popupSetupBuffer(p *wlPopup, pw, ph int) error {
 	stride := pw * 4
-	size := stride * ph
+	frame := stride * ph
+	size := frame * wlPopupBufs
 	fd, err := unix.MemfdCreate("headless-gui-popup", unix.MFD_CLOEXEC)
 	if err != nil {
 		return fmt.Errorf("wayland: memfd_create попапа: %w", err)
@@ -319,59 +329,62 @@ func (w *WaylandWindow) popupSetupBuffer(p *wlPopup, pw, ph int) error {
 
 	p.poolID = w.newID()
 	w.send(newWlMsg(w.shmID, wlShmCreatePool).putUint(p.poolID).putInt(int32(size)), fd)
-	p.bufID = w.newID()
-	w.send(newWlMsg(p.poolID, wlShmPoolCreateBuffer).
-		putUint(p.bufID).putInt(0).
-		putInt(int32(pw)).putInt(int32(ph)).putInt(int32(stride)).
-		putUint(wlShmFormatARGB8888), -1)
+	for i := range p.bufID {
+		p.bufID[i] = w.newID()
+		w.send(newWlMsg(p.poolID, wlShmPoolCreateBuffer).
+			putUint(p.bufID[i]).putInt(int32(i*frame)).
+			putInt(int32(pw)).putInt(int32(ph)).putInt(int32(stride)).
+			putUint(wlShmFormatARGB8888), -1)
+	}
 	return nil
 }
 
-// popupDraw переносит картинку в буфер попапа и показывает её.
-func (w *WaylandWindow) popupDraw(p *wlPopup, img *image.RGBA, bands []image.Rectangle) {
-	b := img.Bounds()
-	if b.Dx() != p.w || b.Dy() != p.h || p.data == nil {
-		return // размер сменился — хост пересоздаст попап (MoveChildPopup)
-	}
-	if !w.popupWaitBuf(p) {
-		return // компоновщик ещё читает прошлый кадр — пропускаем этот
-	}
-	convRectBGRAPremul(p.data, p.stride, img.Pix, img.Stride, b)
-
-	w.popupSetRegions(p, bands, engine.SolidBands(img))
-	w.send(newWlMsg(p.surfaceID, wlSurfaceAttach).putUint(p.bufID).putInt(0).putInt(0), -1)
-	w.popupDamage(p)
-	w.send(newWlMsg(p.surfaceID, wlSurfaceCommit), -1)
+// popupFlush кладёт придержанный кадр попапа в свободный буфер и показывает
+// его.
+//
+// Оба буфера у компоновщика — кадр остаётся ждать, его положит
+// wl_buffer.release. Ни ждать, ни пропускать нельзя: зовут и с горутины
+// движка, и из цикла событий, который release и разбирает, а хост шлёт кадры
+// только при изменениях — потерянный последний кадр (шаг перехода, подсветка
+// пункта) не повторился бы, и попап застыл бы на промежуточном.
+func (w *WaylandWindow) popupFlush(p *wlPopup) {
+	p.drawMu.Lock()
+	defer p.drawMu.Unlock()
 
 	w.popups.mu.Lock()
-	p.busy = true
-	w.popups.mu.Unlock()
-}
-
-// popupWaitBuf ждёт, пока компоновщик отпустит буфер попапа.
-func (w *WaylandWindow) popupWaitBuf(p *wlPopup) bool {
-	deadline := time.Now().Add(wlPopupWaitBuf)
-	for {
-		w.popups.mu.Lock()
-		busy, closed := p.busy, p.closed
+	img, bands := p.pending, p.pendingBands
+	if img == nil || p.closed || !p.configured || p.data == nil {
 		w.popups.mu.Unlock()
-		if closed {
-			return false
-		}
-		if !busy {
-			return true
-		}
-		left := time.Until(deadline)
-		if left <= 0 {
-			return false
-		}
-		t := time.NewTimer(left)
-		select {
-		case <-p.release:
-		case <-t.C:
-		}
-		t.Stop()
+		return
 	}
+	if b := img.Bounds(); b.Dx() != p.w || b.Dy() != p.h {
+		// Размер сменился — хост пересоздаст попап (MoveChildPopup).
+		p.pending, p.pendingBands = nil, nil
+		w.popups.mu.Unlock()
+		return
+	}
+	i := -1
+	for k, busy := range p.busy {
+		if !busy {
+			i = k
+			break
+		}
+	}
+	if i < 0 {
+		w.popups.mu.Unlock()
+		return // оба буфера у компоновщика — кадр положит release
+	}
+	p.pending, p.pendingBands = nil, nil
+	p.busy[i] = true
+	w.popups.mu.Unlock()
+
+	frame := p.stride * p.h
+	convRectBGRAPremul(p.data[i*frame:(i+1)*frame], p.stride, img.Pix, img.Stride, img.Bounds())
+
+	w.popupSetRegions(p, bands, engine.SolidBands(img))
+	w.send(newWlMsg(p.surfaceID, wlSurfaceAttach).putUint(p.bufID[i]).putInt(0).putInt(0), -1)
+	w.popupDamage(p)
+	w.send(newWlMsg(p.surfaceID, wlSurfaceCommit), -1)
 }
 
 // popupSetRegions задаёт попапу область ввода и непрозрачную область.
@@ -420,9 +433,13 @@ func (w *WaylandWindow) popupSetRegions(p *wlPopup, bands, solid []image.Rectang
 // popupDestroy уничтожает объекты попапа и освобождает его память.
 //
 // Порядок обратный созданию: сначала попап, потом xdg_surface, потом сама
-// поверхность — и только затем буфер с памятью, из которой компоновщик ещё
+// поверхность — и только затем буферы с памятью, из которой компоновщик ещё
 // мог читать.
 func (w *WaylandWindow) popupDestroy(p *wlPopup) {
+	// Блит, начатый до закрытия, дописывает кадр, и лишь потом снимается
+	// память, в которую он пишет.
+	p.drawMu.Lock()
+	defer p.drawMu.Unlock()
 	if p.popupID != 0 {
 		w.send(newWlMsg(p.popupID, xdgPopupDestroy), -1)
 	}
@@ -435,8 +452,10 @@ func (w *WaylandWindow) popupDestroy(p *wlPopup) {
 	if p.viewportID != 0 {
 		w.send(newWlMsg(p.viewportID, wlSurfaceDestroy), -1) // wp_viewport.destroy — тоже 0
 	}
-	if p.bufID != 0 {
-		w.send(newWlMsg(p.bufID, wlBufferDestroy), -1)
+	for _, b := range p.bufID {
+		if b != 0 {
+			w.send(newWlMsg(b, wlBufferDestroy), -1)
+		}
 	}
 	if p.poolID != 0 {
 		w.send(newWlMsg(p.poolID, wlShmPoolDestroy), -1)
@@ -471,12 +490,8 @@ func (w *WaylandWindow) popupEvent(obj uint32, opcode uint16, b []byte) bool {
 		w.send(newWlMsg(xdg.xdgSurfID, xdgSurfaceAckConfigure).putUint(serial), -1)
 		w.popups.mu.Lock()
 		xdg.configured = true
-		img, bands := xdg.pending, xdg.pendingBands
-		xdg.pending, xdg.pendingBands = nil, nil
 		w.popups.mu.Unlock()
-		if img != nil {
-			w.popupDraw(xdg, img, bands)
-		}
+		w.popupFlush(xdg) // кадр, пришедший до configure
 		return true
 
 	case pop != nil && opcode == xdgPopupEvConfigure:
@@ -504,13 +519,13 @@ func (w *WaylandWindow) popupEvent(obj uint32, opcode uint16, b []byte) bool {
 
 	case buf != nil && opcode == wlBufferEvRelease:
 		w.popups.mu.Lock()
-		buf.busy = false
-		ch := buf.release
-		w.popups.mu.Unlock()
-		select {
-		case ch <- struct{}{}:
-		default:
+		for i, id := range buf.bufID {
+			if id == obj {
+				buf.busy[i] = false
+			}
 		}
+		w.popups.mu.Unlock()
+		w.popupFlush(buf) // кадр, ждавший свободного буфера
 		return true
 	}
 	return false

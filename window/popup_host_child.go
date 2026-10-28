@@ -95,6 +95,16 @@ type childPopup struct {
 	rect   image.Rectangle // логические координаты в холсте носителя
 	w, h   int             // физический размер кадра
 	origin image.Point     // физическое начало координат (rect.Min × scale)
+
+	// Переход появления и исчезновения (engine.PopupTransition, задача 3.4).
+	// img и alpha — кадр движка и непрозрачность, по которым сделан
+	// последний отданный бэкенду кадр. closing — оверлей исчезает: попап
+	// держится, пока ID в кадрах. gone — попап убран раньше конца
+	// исчезновения (открылся другой), а ID ещё в кадрах.
+	img     *image.RGBA
+	alpha   float64
+	closing bool
+	gone    bool
 }
 
 // newChildPopups создаёт хост попапов-потомков.
@@ -121,13 +131,19 @@ func newChildPopups(be childPopupHost, eng popupEngine, scale float64, in *input
 }
 
 // apply — engine.PopupSink: привести состав попапов к составу кадра.
+//
+// Переходы: непрозрачность закладывается в копию кадра (fadedCopy — буфер
+// попапа с альфой точек, компоновщик смешивает её с тем, что под ним);
+// исчезающий оверлей держит попап, пока его ID в кадрах. Сдвиг (Offset) не
+// прикладывается: переставить xdg_popup можно, только пересоздав его
+// (MoveChildPopup), — на каждом шаге это мигание, а не выезд.
 func (c *childPopups) apply(frames []engine.PopupFrame) {
 	type job struct {
 		id      uintptr
 		x, y    int
 		w, h    int
 		img     *image.RGBA
-		bands   []image.Rectangle
+		alpha   float64
 		reopen  bool
 		created bool
 	}
@@ -136,35 +152,75 @@ func (c *childPopups) apply(frames []engine.PopupFrame) {
 
 	c.mu.Lock()
 	seen := make(map[uintptr]bool, len(frames))
+	fresh := false // открывается или пересоздаётся попап живого оверлея
 	for _, f := range frames {
-		if f.Transition != nil && f.Transition.Closing {
-			// Прозрачности у попапа здесь нет (один буфер на попап, и
-			// пропущенный последний шаг оставил бы его полупрозрачным):
-			// исчезающий оверлей уходит сразу, появляющийся показывается
-			// сразу — Opacity не прикладывается.
-			continue
+		alpha, closing := 1.0, false
+		if t := f.Transition; t != nil {
+			alpha, closing = t.Opacity, t.Closing
+		}
+		cp := c.open[f.ID]
+		if cp != nil && cp.gone && !closing {
+			// Попап убрали раньше конца исчезновения, а оверлей открыт снова.
+			delete(c.open, f.ID)
+			cp = nil
+		}
+		if cp == nil && closing {
+			continue // исчезающий оверлей, которого здесь не показывали
 		}
 		seen[f.ID] = true
+		if cp != nil && cp.gone {
+			continue
+		}
 		pw, ph := f.Img.Bounds().Dx(), f.Img.Bounds().Dy()
 		origin := image.Pt(
 			int(float64(f.Rect.Min.X)*c.scale+0.5),
 			int(float64(f.Rect.Min.Y)*c.scale+0.5),
 		)
-		cp := c.open[f.ID]
 		j := job{id: f.ID, x: origin.X, y: origin.Y, w: pw, h: ph,
-			img: f.Img, bands: engine.OpaqueBands(f.Img)}
+			img: f.Img, alpha: alpha}
 		if cp == nil {
 			j.created = true
-			c.open[f.ID] = &childPopup{rect: f.Rect, w: pw, h: ph, origin: origin}
+			cp = &childPopup{rect: f.Rect, w: pw, h: ph, origin: origin}
+			c.open[f.ID] = cp
 		} else {
 			j.reopen = cp.origin != origin || cp.w != pw || cp.h != ph
 			cp.rect, cp.w, cp.h, cp.origin = f.Rect, pw, ph, origin
 		}
-		jobs = append(jobs, j)
+		// Кадр — только если в попапе лежит не он: шаг перехода, сменивший
+		// один сдвиг, картинку не меняет.
+		blit := j.created || j.reopen || cp.img != f.Img || cp.alpha != alpha
+		cp.img, cp.alpha, cp.closing = f.Img, alpha, closing
+		if !closing && (j.created || j.reopen) {
+			fresh = true
+		}
+		if blit {
+			jobs = append(jobs, j)
+		}
 	}
-	for id := range c.open {
+	if fresh {
+		// xdg_popup уничтожаются только сверху вниз. Новый попап стал бы
+		// потомком исчезающего (тот держит захват ввода), и исчезающий, уйдя
+		// в конце перехода раньше потомка, разорвал бы соединение
+		// протокольной ошибкой. Поэтому исчезающие уходят сразу, до открытия.
+		for id, cp := range c.open {
+			if cp.closing && !cp.gone {
+				cp.gone = true
+				closed = append(closed, id)
+			}
+		}
+		kept := jobs[:0]
+		for _, j := range jobs {
+			if !c.open[j.id].gone {
+				kept = append(kept, j)
+			}
+		}
+		jobs = kept
+	}
+	for id, cp := range c.open {
 		if !seen[id] {
-			closed = append(closed, id)
+			if !cp.gone {
+				closed = append(closed, id)
+			}
 			delete(c.open, id)
 		}
 	}
@@ -187,7 +243,13 @@ func (c *childPopups) apply(frames []engine.PopupFrame) {
 		case j.reopen:
 			c.be.MoveChildPopup(j.id, j.x, j.y, j.w, j.h)
 		}
-		c.be.BlitChildPopup(j.id, j.img, j.bands)
+		// Область ввода — по кадру в покое: у погашенной копии альфа точек
+		// ниже, а ловить клики попап должен там же.
+		img := j.img
+		if j.alpha < 1 {
+			img = fadedCopy(j.img, j.alpha)
+		}
+		c.be.BlitChildPopup(j.id, img, engine.OpaqueBands(j.img))
 	}
 	if opened {
 		c.syncCursorOverride() // попап открылся под действующим принудительным курсором
@@ -229,8 +291,10 @@ func (c *childPopups) syncCursorOverride() {
 func (c *childPopups) closeAll() {
 	c.mu.Lock()
 	ids := make([]uintptr, 0, len(c.open))
-	for id := range c.open {
-		ids = append(ids, id)
+	for id, cp := range c.open {
+		if !cp.gone {
+			ids = append(ids, id)
+		}
 	}
 	c.open = map[uintptr]*childPopup{}
 	c.mu.Unlock()
@@ -244,11 +308,14 @@ func (c *childPopups) closeAll() {
 // Берётся место, куда движок САМ нарисовал оверлей, а не то, куда попап
 // поставил компоновщик: картинка одна и та же, и точка под курсором в ней
 // одна и та же, где бы окно ни стояло на экране.
+//
+// Исчезающий попап ввод пересылает, как popupHost: оверлей движок уже
+// закрыл, и событие уходит тому, что в этой точке холста под ним.
 func (c *childPopups) originOf(id uintptr) (image.Point, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cp := c.open[id]
-	if cp == nil {
+	if cp == nil || cp.gone {
 		return image.Point{}, false
 	}
 	return cp.origin, true
@@ -298,7 +365,10 @@ func (c *childPopups) onDone(id uintptr) {
 		return
 	}
 	c.mu.Lock()
-	_, known := c.open[id]
+	cp := c.open[id]
+	// Исчезающий оверлей движок уже закрыл: закрывать нечего, а живые
+	// оверлеи, открытые поверх, трогать нельзя.
+	known := cp != nil && !cp.closing && !cp.gone
 	c.mu.Unlock()
 	if !known {
 		return
