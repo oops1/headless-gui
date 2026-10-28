@@ -221,6 +221,10 @@ type Engine struct {
 	recycleFrames atomic.Bool
 	// noTileData — кадр без байтов тайлов (SetFrameTileData).
 	noTileData atomic.Bool
+	// motion — профиль движения (MotionProfile, motionprofile.go);
+	// motionCounted — движок учтён в motionEngines.
+	motion        atomic.Uint32
+	motionCounted atomic.Bool
 	quit          chan struct{}
 	done      chan struct{}
 
@@ -1206,6 +1210,7 @@ func (e *Engine) Stop() {
 	e.SetDrawContractCheck(false)
 	e.releaseFailureTrace()
 	widget.UnregisterMoveSink(e.moveHandle)
+	e.countMotion(false)
 	widget.UnregisterTextMeasurer(e.measurerHandle)
 	svg.UnregisterTextRasterizer(e.svgTextHandle)
 	close(e.quit)
@@ -1750,6 +1755,11 @@ func (e *Engine) renderFrame() output.Frame {
 	// больше не блокируются.
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
+	// Профиль движения (motionprofile.go): Draw заводит переходы, а кадр
+	// RenderOnce/RenderFrameNow идёт на горутине вызывающего.
+	if unbind := e.motionScope(); unbind != nil {
+		defer unbind()
+	}
 	// Граница кадра (failure.go): паника в Draw любого виджета ловится здесь,
 	// кадр не отдаётся (нулевой Frame), следующий — полный.
 	defer e.guard("Draw")()

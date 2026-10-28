@@ -128,10 +128,20 @@ func (e *Engine) guard(where string) func() {
 // упавший обработчик нажатия оставил бы мышь захваченной навсегда. Фокус не
 // трогается: он принадлежит программе.
 func (e *Engine) guardInput(where string) func() {
+	// Профиль движения (motionprofile.go) — и при FailurePropagate.
+	unbind := e.motionScope()
 	if e.FailurePolicy() == FailurePropagate {
+		if unbind != nil {
+			return unbind
+		}
 		return func() {}
 	}
 	return func() {
+		// Снимается последней: отмена касаний и захвата ниже тоже зовёт
+		// обработчики виджетов, и профиль им нужен тот же.
+		if unbind != nil {
+			defer unbind()
+		}
 		if r := recover(); r != nil {
 			e.caught(where, r)
 			e.ReleaseCapture()

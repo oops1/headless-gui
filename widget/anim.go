@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/internal/goid"
+	"github.com/oops1/headless-gui/v3/theme"
 )
 
 // Easing определён в widget/easing.go (другой файл пакета):
@@ -59,6 +60,12 @@ type Animation struct {
 	// reversed — текущее направление в цикле AutoReverse (true = фаза 1→0).
 	reversed bool
 
+	// lastQ — шаг квантования фазы (RemoteMotionSteps) последнего тика плюс
+	// один; 0 — в этой фазе тик ещё не звали. Ведётся в любом профиле: при
+	// переходе на MotionRemote посреди фазы тик не отдаёт шаг ниже уже
+	// пройденного. Пишет и читает только цикл, шагающий анимацию.
+	lastQ int
+
 	done    bool // завершилась штатно (был вызван/будет вызван OnDone)
 	stopped bool // снята через Stop (без OnDone)
 
@@ -71,6 +78,12 @@ type Animation struct {
 	OnDone      func() // вызывается по штатному завершению (не при Stop)
 	Loop        bool   // после завершения начинается заново
 	AutoReverse bool   // 0→1→0 считается ОДНИМ циклом
+	// Clock — тик меряет время, а не ведёт переход: интегрирует физику
+	// (инерция прокрутки) или считает периоды (мигание). Профиль движения
+	// такую анимацию не квантует (MotionRemote) и не доводит до конца
+	// (MotionOff): один тик в конце или три на всё время ломают её расчёт.
+	// Без движения ей обходиться — дело того, кто её заводит.
+	Clock bool
 }
 
 // animator — реестр активных анимаций процесса.
@@ -107,11 +120,22 @@ var (
 // StepAnimationsFor(key).
 //
 // Для движков; приложению звать не нужно.
+//
+// Объявления вкладываются: unbind возвращает горутине прежний ключ. Движок
+// объявляет и горутину, с которой ему шлют ввод (профиль движения,
+// motionprofile.go), а ввод может прийти и с его собственного цикла.
 func BindAnimationLoop(key any) (unbind func()) {
 	id := goid.Current()
+	prev, had := animLoops.Load(id)
 	animLoops.Store(id, key)
-	animLoopCount.Add(1)
+	if !had {
+		animLoopCount.Add(1)
+	}
 	return func() {
+		if had {
+			animLoops.Store(id, prev)
+			return
+		}
 		animLoops.Delete(id)
 		animLoopCount.Add(-1)
 	}
@@ -244,9 +268,14 @@ type animPhase struct {
 	duration time.Duration
 	curve    Easing
 	reversed bool
+	// quantize — фаза квантуется на RemoteMotionSteps (MotionRemote).
+	quantize bool
 }
 
-func (a animPhase) progress(now time.Time) (t float64, phaseDone bool) {
+// progress возвращает и q — номер шага квантования (из RemoteMotionSteps)
+// внутри фазы, в любом профиле; у завершённой фазы — RemoteMotionSteps.
+func (a animPhase) progress(now time.Time) (t float64, phaseDone bool, q int) {
+	q = RemoteMotionSteps
 	// Линейный прогресс по времени фазы.
 	var lin float64
 	if a.duration <= 0 {
@@ -261,6 +290,12 @@ func (a animPhase) progress(now time.Time) (t float64, phaseDone bool) {
 	if lin >= 1 {
 		lin = 1
 		phaseDone = true
+	} else {
+		q = int(lin * RemoteMotionSteps)
+		if a.quantize {
+			// Шаги — от начального состояния: 0, 1/n, …, (n−1)/n, затем ровно 1.
+			lin = float64(q) / RemoteMotionSteps
+		}
 	}
 	// Направление в AutoReverse-цикле: на обратной фазе прогресс идёт 1→0.
 	dir := lin
@@ -273,7 +308,7 @@ func (a animPhase) progress(now time.Time) (t float64, phaseDone bool) {
 	} else {
 		t = dir
 	}
-	return t, phaseDone
+	return t, phaseDone, q
 }
 
 // StepAnimations продвигает все активные анимации к моменту now и возвращает
@@ -348,6 +383,9 @@ func stepAnimations(key any, now time.Time) bool {
 	// перезапуск цикла ниже), и чтение без него — гонка, которую детектор
 	// ловит у потребителя, как только на экране появляются часы. Снимок
 	// примитивов стоит дешевле, чем блокировка вокруг чужого кода.
+	//
+	// Профиль движения цикла (motionprofile.go) читается раз на проход.
+	prof := loopMotionProfile(key)
 	phase := make([]animPhase, len(snapshot))
 	for i, a := range snapshot {
 		phase[i] = animPhase{
@@ -355,6 +393,7 @@ func stepAnimations(key any, now time.Time) bool {
 			duration: a.duration,
 			curve:    a.curve,
 			reversed: a.reversed,
+			quantize: prof == theme.MotionRemote && !a.Clock,
 		}
 	}
 	anim.mu.Unlock()
@@ -405,9 +444,28 @@ func stepAnimations(key any, now time.Time) bool {
 			continue
 		}
 
-		t, phaseDone := phase[i].progress(now)
+		t, phaseDone, q := phase[i].progress(now)
+
+		// MotionOff: переход сразу в конечное состояние, какой бы
+		// длительности его ни завели. Зациклённые — индикаторы работы — и
+		// таймеры (без тика) идут как шли.
+		if prof == theme.MotionOff && !loop && a.tick != nil && !a.Clock {
+			phaseDone = true
+			if a.AutoReverse && !a.reversed {
+				anim.mu.Lock()
+				a.reversed = true // прямая фаза пропускается: конец цикла — curve(0)
+				anim.mu.Unlock()
+			}
+		}
 
 		if !phaseDone {
+			// MotionRemote: шаг квантования, уже отданный (или пройденный до
+			// смены профиля), второй раз не отдаётся — тик не двигает виджет,
+			// и кадр остаётся пустым.
+			if phase[i].quantize && q+1 <= a.lastQ {
+				continue
+			}
+			a.lastQ = q + 1
 			a.step(t)
 			continue
 		}
@@ -421,6 +479,7 @@ func stepAnimations(key any, now time.Time) bool {
 			anim.mu.Lock()
 			a.reversed = true
 			a.start = now
+			a.lastQ = 0
 			anim.mu.Unlock()
 			continue
 		}
@@ -452,6 +511,7 @@ func stepAnimations(key any, now time.Time) bool {
 			anim.mu.Lock()
 			a.reversed = false
 			a.start = now
+			a.lastQ = 0
 			anim.mu.Unlock()
 			continue
 		}

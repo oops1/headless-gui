@@ -818,9 +818,10 @@ func (sv *ScrollView) wheelPixelsY(dy float64) bool {
 		return false
 	}
 
-	if currentStyle().Classic3D {
+	if currentStyle().Classic3D || noInertia() {
 		// Классика: без инерции, дельта применяется сразу (с субпиксельным
-		// накоплением, чтобы дробные дельты тачпада не терялись).
+		// накоплением, чтобы дробные дельты тачпада не терялись). Так же —
+		// у движка без движения или удалённого (noInertia).
 		sv.scrollFrac += dy
 		whole := math.Trunc(sv.scrollFrac)
 		sv.scrollFrac -= whole
@@ -859,6 +860,9 @@ func (sv *ScrollView) ensureInertia() {
 	sv.lastElapsed = 0
 	sv.mu.Unlock()
 	a := AnimateOwned(sv, "scroll-inertia", inertiaDuration, nil, sv.inertiaTick)
+	// Маховик интегрирует скорость по dt из прогресса: квантованный или
+	// доведённый разом до конца, он проехал бы в разы дальше жеста.
+	a.Clock = true
 	sv.mu.Lock()
 	sv.inertiaAnim = a
 	sv.mu.Unlock()

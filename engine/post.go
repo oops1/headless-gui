@@ -72,6 +72,14 @@ func (e *Engine) runPosted() {
 	queue := e.posted
 	e.posted = nil
 	e.postMu.Unlock()
+	if len(queue) == 0 {
+		return
+	}
+	// Профиль движения (motionprofile.go): очередь незапущенного движка
+	// разбирает горутина вызывающего (Flush, RenderOnce).
+	if unbind := e.motionScope(); unbind != nil {
+		defer unbind()
+	}
 
 	for _, fn := range queue {
 		// До вызова: функция, упавшая посреди работы, из очереди уже ушла.

@@ -195,6 +195,9 @@ func (h *dialogHost) create(hm *hostedModal) {
 	if scale != 1 {
 		eng.SetScale(scale)
 	}
+	// Профиль движения — у окна тот же, что у родителя: удалённый или
+	// «без движения» стол не должен анимировать свои диалоги.
+	inheritMotionProfile(eng, h.parent)
 	// Синхронизирует глобальный widget.SetScreenBounds(dw,dh) под диалог.
 	eng.SetResolution(dw, dh)
 

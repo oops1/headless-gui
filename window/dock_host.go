@@ -201,6 +201,9 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 	if scale != 1 {
 		eng.SetScale(scale)
 	}
+	// Профиль движения — у окна тот же, что у родителя: удалённый или
+	// «без движения» стол не должен анимировать свои диалоги.
+	inheritMotionProfile(eng, h.parent)
 	eng.SetResolution(dw, dh)
 	pw, ph := eng.PhysicalSize()
 

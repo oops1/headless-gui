@@ -157,9 +157,18 @@ func ReduceMotion() bool { return reduceMotion.Load() }
 // движения»: при включённом режиме — нуль (мгновенно), иначе d без изменений.
 // Своим анимациям виджета, не привязанным к токену темы, достаточно обернуть
 // в неё длительность.
+//
+// Режим включает SetReduceMotion или профиль движения MotionReduced/MotionOff
+// движка, на горутине которого идёт вызов (motionprofile.go).
 func MotionDur(d time.Duration) time.Duration {
 	if reduceMotion.Load() {
 		return 0
+	}
+	if d > 0 {
+		switch CurrentMotionProfile() {
+		case theme.MotionReduced, theme.MotionOff:
+			return 0
+		}
 	}
 	return d
 }
