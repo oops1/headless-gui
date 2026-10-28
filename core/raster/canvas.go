@@ -83,8 +83,11 @@ type Canvas struct {
 	shadowClock    uint64
 	shadowBuf      []byte
 	shadowCacheOff bool
-	shaper         hgtext.Shaper // шейпинг сложного текста (RTL, лигатуры; см. core/text/shaper.go)
-	W, H           int           // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
+	// shaper — шейпинг сложного текста (RTL, лигатуры; см. core/text/shaper.go).
+	// Один на холст и его клоны (CloneForSize, растр повёрнутого текста):
+	// личные typesetting-face шрифтов холста читаются только под его замком.
+	shaper *hgtext.Shaper
+	W, H   int // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
 	// marks — признак содержимого по тайлам за текущий кадр (regions.go).
 	marks []tileMark
 	// maskKind — чем считается то, что рисуют маски альфы и цветные глифы
@@ -284,6 +287,7 @@ func newCanvasPhys(pw, ph, w, h int, scale float64, fc *hgtext.FontCache) *Canva
 		fontCache:  fc,
 		namedFonts: hgtext.NewFontTable(),
 		families:   hgtext.NewFontFamilies(),
+		shaper:     &hgtext.Shaper{},
 		W:          pw,
 		H:          ph,
 		tilesX:     (pw + ts - 1) / ts,
@@ -1051,10 +1055,9 @@ func (c *Canvas) drawColorGlyph(img *image.RGBA, gx, gy int) {
 // Для непокрытых рун использует ширину пробела (соответствует drawTextWithFont).
 func (c *Canvas) runeAdvance(fc *hgtext.FontCache, r rune, sizePt float64) fixed.Int26_6 {
 	chosen, found := c.fcForRune(fc, r)
-	face := chosen.Face(sizePt)
-	a, ok := face.GlyphAdvance(r)
+	a, ok := chosen.Advance(sizePt, r)
 	if !ok || !found {
-		if sp, ok2 := fc.Face(sizePt).GlyphAdvance(' '); ok2 {
+		if sp, ok2 := fc.Advance(sizePt, ' '); ok2 {
 			return sp
 		}
 	}
@@ -1099,14 +1102,14 @@ func (c *Canvas) drawShapedText(fc *hgtext.FontCache, text string, x, baseline i
 		}
 		// Цветной эмодзи (COLR/CBDT): блиттится как RGBA, цветом текста НЕ
 		// красится. Для обычных глифов colorGlyphFor сразу вернёт nil.
-		if cg := c.shaper.ColorGlyphFor(g.Face, g.GID, sizePx, col); cg != nil && cg.Img != nil {
+		if cg := c.shaper.ColorGlyphFor(g, sizePx, col); cg != nil && cg.Img != nil {
 			gx := (pen + g.XOff).Round() + cg.OffX
 			gy := baseline - g.YOff.Round() + cg.OffY
 			c.withMaskKind(output.RegionText, func() { c.drawColorGlyph(cg.Img, gx, gy) })
 			pen += g.Adv
 			continue
 		}
-		m := c.shaper.GlyphMaskFor(g.Face, g.GID, sizePx, q.Hinting)
+		m := c.shaper.GlyphMaskFor(g, sizePx, q.Hinting)
 		if m.Mask != nil {
 			// Точка отрисовки: перо + XOffset; YOffset положителен вверх.
 			gx := (pen + g.XOff).Round() + m.OffX

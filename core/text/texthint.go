@@ -176,33 +176,36 @@ func buildVHint(ext glyphVExtent) *vHint {
 	return h
 }
 
-// ppem — размер em в пикселях в 26.6 — ровно так, как его считает
+// ppemOf — размер em в пикселях в 26.6 — ровно так, как его считает
 // opentype.NewFace (чтобы контуры и шаги глифов были одного масштаба).
-func (fc *FontCache) ppem(sizePt float64) fixed.Int26_6 {
-	return fixed.Int26_6(0.5 + (sizePt * fc.dpi * 64 / 72))
+func ppemOf(sizePt, dpi float64) fixed.Int26_6 {
+	return fixed.Int26_6(0.5 + (sizePt * dpi * 64 / 72))
 }
 
-// vhintLocked возвращает (и кэширует) отображение высот для кегля. Под fc.mu.
-func (fc *FontCache) vhintLocked(ppem fixed.Int26_6, buf *sfnt.Buffer) *vHint {
-	if h, ok := fc.hints[ppem]; ok {
+// vhintLocked возвращает (и кэширует) отображение высот для кегля шарда при
+// данном ppem. Под s.mu.Lock.
+func (s *shard) vhintLocked(ppem fixed.Int26_6, buf *sfnt.Buffer) *vHint {
+	if h, ok := s.hints[ppem]; ok {
 		return h
 	}
+	ttf := s.font.ttf
 	h := buildVHint(func(r rune) (int, int, bool) {
-		idx, err := fc.TTF.GlyphIndex(buf, r)
+		idx, err := ttf.GlyphIndex(buf, r)
 		if err != nil || idx == 0 {
 			return 0, 0, false
 		}
-		segs, err := fc.TTF.LoadGlyph(buf, idx, ppem, nil)
+		segs, err := ttf.LoadGlyph(buf, idx, ppem, nil)
 		if err != nil || len(segs) == 0 {
 			return 0, 0, false
 		}
 		b := segs.Bounds()
 		return -int(b.Min.Y), -int(b.Max.Y), true
 	})
-	if fc.hints == nil {
-		fc.hints = make(map[fixed.Int26_6]*vHint)
+	if s.hints == nil {
+		s.hints = make(map[fixed.Int26_6]*vHint)
 	}
-	fc.hints[ppem] = h
+	s.hints[ppem] = h
+	s.bytes += hintCost
 	return h
 }
 
@@ -211,18 +214,19 @@ func (fc *FontCache) vhintLocked(ppem fixed.Int26_6, buf *sfnt.Buffer) *vHint {
 // для LCD (q.LCD). Шаг и положение маски по горизонтали — как у
 // opentype.Face.Glyph (тот же face даёт шаг), поэтому на раскладку режим не
 // влияет. ok=false — не вышло (нет зон, глифа нет), вызывающий откатывается на
-// обычный путь. Под fc.mu.
-func (fc *FontCache) hintedGlyph(face font.Face, sizePt float64, r rune, phase int, q TextQuality) (CachedGlyph, bool) {
-	buf := &fc.buf // под fc.mu; сегменты ниже живут до следующего обращения к нему
-	ppem := fc.ppem(sizePt)
+// обычный путь. Под s.mu.Lock.
+func (s *shard) hintedGlyph(face font.Face, dpi float64, r rune, phase int, q TextQuality) (CachedGlyph, bool) {
+	buf := &s.buf // под s.mu; сегменты ниже живут до следующего обращения к нему
+	ppem := ppemOf(s.sizePt, dpi)
+	ttf := s.font.ttf
 	var h *vHint
 	if q.Hinting {
-		h = fc.vhintLocked(ppem, buf)
+		h = s.vhintLocked(ppem, buf)
 		if h == nil && !q.LCD {
 			return CachedGlyph{}, false
 		}
 	}
-	idx, err := fc.TTF.GlyphIndex(buf, r)
+	idx, err := ttf.GlyphIndex(buf, r)
 	if err != nil {
 		return CachedGlyph{}, false
 	}
@@ -230,7 +234,7 @@ func (fc *FontCache) hintedGlyph(face font.Face, sizePt float64, r rune, phase i
 	if !ok {
 		return CachedGlyph{}, false
 	}
-	segs, err := fc.TTF.LoadGlyph(buf, idx, ppem, nil)
+	segs, err := ttf.LoadGlyph(buf, idx, ppem, nil)
 	if err != nil {
 		return CachedGlyph{}, false
 	}
@@ -279,7 +283,7 @@ func (fc *FontCache) hintedGlyph(face font.Face, sizePt float64, r rune, phase i
 		return g, true
 	}
 	if q.LCD {
-		fc.rasterLCD(&g, segs, b, q.LCDOrder)
+		s.rasterLCD(&g, segs, b, q.LCDOrder)
 		return g, true
 	}
 	dr := image.Rect(b.Min.X.Floor(), b.Min.Y.Floor(), b.Max.X.Ceil(), b.Max.Y.Ceil())
@@ -289,17 +293,17 @@ func (fc *FontCache) hintedGlyph(face font.Face, sizePt float64, r rune, phase i
 	}
 	g.OffX, g.OffY = dr.Min.X, dr.Min.Y
 	m := image.NewAlpha(image.Rect(0, 0, w, hgt))
-	fc.rasterSegs(m, segs, -fixed.Int26_6(dr.Min.X<<6), -fixed.Int26_6(dr.Min.Y<<6))
+	s.rasterSegs(m, segs, -fixed.Int26_6(dr.Min.X<<6), -fixed.Int26_6(dr.Min.Y<<6))
 	g.Mask = m
 	return g, true
 }
 
 // rasterSegs рисует контур в маску m (покрытие, Src) со сдвигом (biasX, biasY).
-func (fc *FontCache) rasterSegs(m *image.Alpha, segs sfnt.Segments, biasX, biasY fixed.Int26_6) {
-	if fc.rast == nil {
-		fc.rast = vector.NewRasterizer(m.Rect.Dx(), m.Rect.Dy())
+func (s *shard) rasterSegs(m *image.Alpha, segs sfnt.Segments, biasX, biasY fixed.Int26_6) {
+	if s.rast == nil {
+		s.rast = vector.NewRasterizer(m.Rect.Dx(), m.Rect.Dy())
 	}
-	rast := fc.rast
+	rast := s.rast
 	rast.Reset(m.Rect.Dx(), m.Rect.Dy())
 	rast.DrawOp = draw.Src
 	for _, seg := range segs {
@@ -336,7 +340,7 @@ type LCDMask struct {
 // rasterLCD растеризует контур segs (X уже утроен) в тройном разрешении по
 // горизонтали и сворачивает фильтром FreeType в покрытие по каналам. Маска
 // шире глифа на пиксель с каждой стороны: фильтр растекается на два подпикселя.
-func (fc *FontCache) rasterLCD(g *CachedGlyph, segs sfnt.Segments, b fixed.Rectangle26_6, order LCDOrder) {
+func (s *shard) rasterLCD(g *CachedGlyph, segs sfnt.Segments, b fixed.Rectangle26_6, order LCDOrder) {
 	minX3, maxX3 := b.Min.X.Floor(), b.Max.X.Ceil()
 	y0, y1 := b.Min.Y.Floor(), b.Max.Y.Ceil()
 	if maxX3 <= minX3 || y1 <= y0 {
@@ -346,7 +350,7 @@ func (fc *FontCache) rasterLCD(g *CachedGlyph, segs sfnt.Segments, b fixed.Recta
 	x1 := -floorDiv(-(maxX3 + 2), 3)
 	wpx, hgt := x1-x0, y1-y0
 	sub := image.NewAlpha(image.Rect(0, 0, wpx*3, hgt))
-	fc.rasterSegs(sub, segs, -fixed.Int26_6(x0*3<<6), -fixed.Int26_6(y0<<6))
+	s.rasterSegs(sub, segs, -fixed.Int26_6(x0*3<<6), -fixed.Int26_6(y0<<6))
 
 	lm := &LCDMask{W: wpx, H: hgt, Pix: make([]uint8, wpx*hgt*3)}
 	for y := 0; y < hgt; y++ {
@@ -379,20 +383,15 @@ func floorDiv(n, d int) int {
 	return q
 }
 
-// hintKey — ключ отображения высот шейпера: шрифт и размер em в 26.6.
-type hintKey struct {
-	face   *tsfont.Face
-	sizePx fixed.Int26_6
-}
-
-// vhintFor возвращает отображение высот для typesetting-face (кэшируется).
-// Тот же автохинтер, что и у per-rune пути, но размах эталонных букв берётся
-// из экстентов typesetting. Под ts.mu.
-func (ts *Shaper) vhintFor(face *tsfont.Face, sizePx fixed.Int26_6) *vHint {
-	k := hintKey{face, sizePx}
-	if h, ok := ts.vhints[k]; ok {
-		return h
+// vhintLocked возвращает отображение высот шарда шейпера (кэшируется; одно на
+// шрифт и размер). Тот же автохинтер, что и у per-rune пути, но размах
+// эталонных букв берётся из экстентов typesetting. face — scratch-face
+// шрифта под fontData.shapeMu; сам шард — под s.mu.
+func (s *shapedShard) vhintLocked(face *tsfont.Face) *vHint {
+	if s.vhDone {
+		return s.vh
 	}
+	sizePx := s.sizePx
 	scale := float32(sizePx) / 64.0 / float32(face.Upem())
 	toFixed := func(v float32) int { return int(math.Floor(float64(v*scale*64) + 0.5)) }
 	h := buildVHint(func(r rune) (int, int, bool) {
@@ -406,10 +405,8 @@ func (ts *Shaper) vhintFor(face *tsfont.Face, sizePx fixed.Int26_6) *vHint {
 		}
 		return toFixed(ext.YBearing), toFixed(ext.YBearing + ext.Height), true
 	})
-	if ts.vhints == nil {
-		ts.vhints = make(map[hintKey]*vHint)
-	}
-	ts.vhints[k] = h
+	s.vh, s.vhDone = h, true
+	s.bytes += hintCost
 	return h
 }
 

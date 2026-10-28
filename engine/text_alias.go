@@ -28,3 +28,12 @@ const LCDOrderRGB = hgtext.LCDOrderRGB
 
 // TextQuality — см. text.TextQuality.
 type TextQuality = hgtext.TextQuality
+
+// DefaultGlyphCacheBudget — см. text.DefaultGlyphCacheBudget.
+const DefaultGlyphCacheBudget = hgtext.DefaultGlyphCacheBudget
+
+// SetGlyphCacheBudget задаёт бюджет общего на процесс кэша растров глифов в
+// байтах (ADR-0003): растры делят все движки процесса, превышение вытесняет
+// самые давно не нужные; n ≤ 0 — бюджет по умолчанию. См.
+// text.SetGlyphCacheBudget.
+func SetGlyphCacheBudget(n int64) { hgtext.SetGlyphCacheBudget(n) }

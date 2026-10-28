@@ -11,8 +11,9 @@
 // Кэшируется два уровня:
 //   - layout строки (строка+шрифт+размер → позиционированные глифы) —
 //     повторная отрисовка того же лейбла не шейпит заново;
-//   - альфа-маски глифов по (face, GID, размер) — контур растеризуется
-//     через golang.org/x/image/vector один раз.
+//   - альфа-маски глифов по (шрифт, GID, размер) — в общем кэше процесса
+//     (glyphstore.go): контур растеризуется один раз на процесс, а не на
+//     движок.
 //
 // Цветные эмодзи (COLRv0-слои и растровые CBDT/sbix PNG) рендерятся в цвете —
 // см. emoji.go; COLRv1 (граф paint, градиенты) пока не поддержан. Вертикальный
@@ -122,6 +123,27 @@ type chainFontmap struct {
 	primary   *tsfont.Face
 	fallbacks []*FallbackFont
 	ref       *FontCache // шрифт холста: DPI и субпиксели для загружаемых записей
+	// owners — общий шрифт каждого встреченного face: раскладка несёт его шард
+	// в PlacedGlyph, чтобы маски брались из кэша процесса без поиска.
+	owners map[*tsfont.Face]*fontData
+	shards map[*tsfont.Face]*shapedShard
+}
+
+// shardFor — шард кэша процесса для face размера sizePx (nil — face не из
+// цепочки).
+func (cf *chainFontmap) shardFor(face *tsfont.Face, sizePx fixed.Int26_6) *shapedShard {
+	if s, ok := cf.shards[face]; ok {
+		return s
+	}
+	var s *shapedShard
+	if f := cf.owners[face]; f != nil {
+		s = f.shapedShard(sizePx)
+	}
+	if cf.shards == nil {
+		cf.shards = make(map[*tsfont.Face]*shapedShard)
+	}
+	cf.shards[face] = s
+	return s
 }
 
 // eachFace обходит face'ы запасной цепочки по порядку, пока fn не вернёт true.
@@ -132,8 +154,11 @@ func (cf *chainFontmap) eachFace(fn func(*tsfont.Face) bool) {
 		if fc == nil {
 			continue
 		}
-		if f := fc.shaperFace(); f != nil && fn(f) {
-			return
+		if f := fc.shaperFace(); f != nil {
+			cf.owners[f] = fc.font
+			if fn(f) {
+				return
+			}
 		}
 	}
 }
@@ -204,6 +229,11 @@ type PlacedGlyph struct {
 	XOff, YOff fixed.Int26_6 // смещение точки отрисовки от пера
 	Adv        fixed.Int26_6 // продвижение пера
 	Cluster    int           // индекс первой руны кластера (логический)
+
+	// shard — шард кэша процесса (общий шрифт face, этот размер): маски и
+	// цветные глифы берутся из него без поиска; nil у глифа, собранного не
+	// раскладкой, — такой растеризуется без кэша.
+	shard *shapedShard
 }
 
 // ShapedLayout — результат шейпинга строки: глифы в видимом порядке
@@ -219,13 +249,6 @@ type layoutKey struct {
 	text string
 }
 
-type maskKey struct {
-	face   *tsfont.Face
-	gid    tsfont.GID
-	sizePx fixed.Int26_6
-	hint   bool // маска с вертикальным автохинтингом (TextQuality.Hinting)
-}
-
 // GlyphMask — растеризованная маска глифа с оффсетом от точки отрисовки.
 type GlyphMask struct {
 	Mask       *image.Alpha // nil — пустой глиф (пробел) или контур недоступен
@@ -233,41 +256,32 @@ type GlyphMask struct {
 }
 
 // Пределы кэшей: при переполнении кэш сбрасывается целиком (простая política,
-// как у кэша глифов FontCache).
+// как у кэша глифов FontCache). Маски и цветные глифы лежат в шардах кэша
+// процесса (glyphstore.go), пределы — на шард.
 const (
 	maxShapedLayouts  = 2048
 	maxShapedMasks    = 4096
 	maxDynColorGlyphs = 256 // цветозависимые эмодзи: цвет текста меняется редко
 )
 
-// Shaper — состояние шейпинга одного Canvas. Все обращения — под mu
-// (Segmenter/HarfbuzzShaper/vector.Rasterizer не потокобезопасны).
+// Shaper — состояние шейпинга одного Canvas и его клонов (один на линию
+// клонов: личные typesetting-face видов читаются только под его mu). Все
+// обращения — под mu (Segmenter/HarfbuzzShaper/face не потокобезопасны).
+// Маски и цветные глифы — в общем кэше процесса, под своими замками.
 type Shaper struct {
 	mu      sync.Mutex
 	seg     shaping.Segmenter
 	hb      shaping.HarfbuzzShaper
 	layouts map[layoutKey]*ShapedLayout
-	masks   map[maskKey]*GlyphMask
-
-	// ── Цветные эмодзи (см. emoji.go) ────────────────────────────────────────
-	// colorGlyphs — кэш цветных RGBA-глифов по (face, GID, размер); nil-значение
-	// («цветного представления нет») тоже кэшируется.
-	colorGlyphs map[maskKey]*ColorGlyph
-	// dynColorGlyphs — глифы со слоями foreground, ключ включает цвет текста.
-	dynColorGlyphs map[dynColorKey]*ColorGlyph
-	// faceColor — есть ли у face цветные глифы вообще (COLR/CBDT).
-	faceColor map[*tsfont.Face]bool
-	// vhints — отображения высот автохинтера по (face, размер) (texthint.go);
-	// nil-значение — зон у шрифта нет.
-	vhints map[hintKey]*vHint
 }
 
-// CacheSizes — число раскладок и цветных глифов в кэшах шейпера (для тестов и
-// диагностики).
+// CacheSizes — число раскладок шейпера и цветных глифов в общем кэше
+// процесса (для тестов и диагностики).
 func (ts *Shaper) CacheSizes() (layouts, colorGlyphs int) {
 	ts.mu.Lock()
-	defer ts.mu.Unlock()
-	return len(ts.layouts), len(ts.colorGlyphs) + len(ts.dynColorGlyphs)
+	layouts = len(ts.layouts)
+	ts.mu.Unlock()
+	return layouts, store.colorGlyphCount()
 }
 
 // DropLayouts сбрасывает кэш раскладок: его ключ не учитывает DPI.
@@ -292,7 +306,8 @@ func (ts *Shaper) Layout(fc *FontCache, fallbacks []*FallbackFont, text string, 
 		return l
 	}
 
-	fm := &chainFontmap{primary: primary, fallbacks: fallbacks, ref: fc}
+	fm := &chainFontmap{primary: primary, fallbacks: fallbacks, ref: fc,
+		owners: map[*tsfont.Face]*fontData{primary: fc.font}}
 
 	runes := []rune(text)
 	sizePx := fc.PixelSize(sizePt)
@@ -326,6 +341,7 @@ func (ts *Shaper) Layout(fc *FontCache, fallbacks []*FallbackFont, text string, 
 				YOff:    g.YOffset,
 				Adv:     g.Advance,
 				Cluster: g.ClusterIndex,
+				shard:   fm.shardFor(out.Face, sizePx),
 			})
 		}
 		l.Width += out.Advance
@@ -385,28 +401,17 @@ func reverseOutputs(outs []shaping.Output) {
 
 // ─── Растеризация глифа по GID ───────────────────────────────────────────────
 
-// GlyphMaskFor возвращает альфа-маску глифа (кэшируется по face+GID+размеру).
-func (ts *Shaper) GlyphMaskFor(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, hint bool) *GlyphMask {
-	key := maskKey{face: face, gid: gid, sizePx: sizePx, hint: hint}
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-	if m, ok := ts.masks[key]; ok {
-		return m
+// GlyphMaskFor возвращает альфа-маску глифа раскладки g размера sizePx
+// (кэшируется в общем кэше процесса по шрифту, GID и размеру). Глиф без
+// владельца (собранный не раскладкой) растеризуется без кэша и без хинтинга.
+func (ts *Shaper) GlyphMaskFor(g PlacedGlyph, sizePx fixed.Int26_6, hint bool) *GlyphMask {
+	if g.shard == nil {
+		if g.Face == nil {
+			return &GlyphMask{}
+		}
+		return rasterizeGlyph(g.Face, g.GID, sizePx, nil)
 	}
-
-	var vh *vHint
-	if hint {
-		vh = ts.vhintFor(face, sizePx)
-	}
-	m := rasterizeGlyph(face, gid, sizePx, vh)
-
-	if ts.masks == nil {
-		ts.masks = make(map[maskKey]*GlyphMask)
-	} else if len(ts.masks) >= maxShapedMasks {
-		ts.masks = make(map[maskKey]*GlyphMask, maxShapedMasks/4)
-	}
-	ts.masks[key] = m
-	return m
+	return g.shard.mask(g.GID, hint)
 }
 
 // rasterizeGlyph растеризует контур глифа в альфа-маску.

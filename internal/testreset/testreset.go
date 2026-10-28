@@ -17,6 +17,7 @@ import (
 	"image"
 	"testing"
 
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"github.com/oops1/headless-gui/v3/internal/testhook"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -61,4 +62,9 @@ func Reset() {
 	}
 	widget.SetFallbackLanguage("EN")
 	widget.SetLocale("EN")
+
+	// Общий кэш растров глифов: бюджет и записи (индекс шрифтов остаётся —
+	// шрифт неизменяем, а записи на результат не влияют, только на промахи).
+	hgtext.SetGlyphCacheBudget(hgtext.DefaultGlyphCacheBudget)
+	hgtext.ResetGlyphCache()
 }

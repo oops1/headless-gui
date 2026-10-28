@@ -16,7 +16,8 @@
 //
 // Ключевое отличие от одноцветных масок: цветной глиф блиттится «как есть»
 // (premultiplied-over), цвет текста на него не влияет; кэш — отдельный от
-// масок, по (face, GID, размер) — плюс цвет для слоёв foreground.
+// масок, по (шрифт, GID, размер) — плюс цвет для слоёв foreground — в общем
+// кэше процесса (glyphstore.go).
 
 package text
 
@@ -65,60 +66,26 @@ type ColorGlyph struct {
 	OffX, OffY int
 }
 
-// faceHasColorGlyphs сообщает, есть ли у шрифта цветные глифы (COLR или
-// растровые CBDT/sbix). Кэшируется по face. Вызывается под ts.mu.
-func (ts *Shaper) faceHasColorGlyphs(face *tsfont.Face) bool {
-	if v, ok := ts.faceColor[face]; ok {
-		return v
+// ColorGlyphFor возвращает цветной глиф раскладки g размера sizePx
+// (кэшируется в общем кэше процесса по шрифту, GID и размеру) или nil, если
+// у глифа нет цветного представления. Глифы со слоями foreground (палитра
+// 0xFFFF) зависят от textCol и кэшируются отдельно, с учётом цвета. Глиф без
+// владельца (собранный не раскладкой) рендерится без кэша.
+func (ts *Shaper) ColorGlyphFor(g PlacedGlyph, sizePx fixed.Int26_6, textCol color.RGBA) *ColorGlyph {
+	if g.shard == nil {
+		if !faceHasColor(g.Face) {
+			return nil
+		}
+		cg, _ := renderColorGlyph(g.Face, g.GID, sizePx, textCol)
+		return cg
 	}
-	has := faceHasColor(face)
-	if ts.faceColor == nil {
-		ts.faceColor = make(map[*tsfont.Face]bool)
-	}
-	ts.faceColor[face] = has
-	return has
-}
-
-// dynColorKey — ключ глифа, зависящего от цвета текста (палитра 0xFFFF).
-type dynColorKey struct {
-	maskKey
-	col color.RGBA
-}
-
-// ColorGlyphFor возвращает цветной глиф (кэшируется по face+GID+размеру) или
-// nil, если у глифа нет цветного представления. Глифы со слоями foreground
-// (палитра 0xFFFF) зависят от textCol и кэшируются отдельно, с учётом цвета.
-func (ts *Shaper) ColorGlyphFor(face *tsfont.Face, gid tsfont.GID, sizePx fixed.Int26_6, textCol color.RGBA) *ColorGlyph {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-	if !ts.faceHasColorGlyphs(face) {
+	// У шрифта без цветных глифов — сразу nil, без замков и записей: обычный
+	// текст шейпера не плодит пустых записей в кэше (у глифа раскладки
+	// typesetting уже разобран, признак достоверен).
+	if g.shard.font.colorState.Load() != colorYes {
 		return nil
 	}
-	key := maskKey{face: face, gid: gid, sizePx: sizePx}
-	if cg, ok := ts.colorGlyphs[key]; ok {
-		return cg
-	}
-	dynKey := dynColorKey{maskKey: key, col: textCol}
-	if cg, ok := ts.dynColorGlyphs[dynKey]; ok {
-		return cg
-	}
-	cg, dynamic := renderColorGlyph(face, gid, sizePx, textCol)
-	if dynamic {
-		if ts.dynColorGlyphs == nil {
-			ts.dynColorGlyphs = make(map[dynColorKey]*ColorGlyph)
-		} else if len(ts.dynColorGlyphs) >= maxDynColorGlyphs {
-			ts.dynColorGlyphs = make(map[dynColorKey]*ColorGlyph, maxDynColorGlyphs/4)
-		}
-		ts.dynColorGlyphs[dynKey] = cg
-		return cg
-	}
-	if ts.colorGlyphs == nil {
-		ts.colorGlyphs = make(map[maskKey]*ColorGlyph)
-	} else if len(ts.colorGlyphs) >= maxShapedMasks {
-		ts.colorGlyphs = make(map[maskKey]*ColorGlyph, maxShapedMasks/4)
-	}
-	ts.colorGlyphs[key] = cg
-	return cg
+	return g.shard.colorGlyph(g.GID, keyOfColor(textCol))
 }
 
 // renderColorGlyph строит цветной глиф GID: сперва COLR, затем растровый

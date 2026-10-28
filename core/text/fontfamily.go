@@ -185,7 +185,7 @@ func describeFont(fc *FontCache, regName string) fontMeta {
 		stemFam, stemStyle = regName[:i], regName[i+1:]
 	}
 
-	w, it, ok := readOS2(fc.ttfData)
+	w, it, ok := readOS2(fc.font.data)
 	if !ok {
 		w = 0
 	}

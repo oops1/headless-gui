@@ -132,18 +132,22 @@ func TestColrWalk_NormalLayersFit(t *testing.T) {
 func TestEmoji_DynColorCacheHit(t *testing.T) {
 	var ts Shaper
 	col := color.RGBA{R: 10, G: 20, B: 30, A: 255}
-	key := maskKey{gid: 7, sizePx: fixed.I(16)}
+	const gid, sizePx = tsfont.GID(7), fixed.Int26_6(16 << 6)
 	want := &ColorGlyph{Img: image.NewRGBA(image.Rect(0, 0, 2, 2)), OffX: 1, OffY: -3}
 
-	// face == nil: рендер здесь запаникует, значит попадание честное.
-	ts.faceColor = map[*tsfont.Face]bool{nil: true}
-	ts.dynColorGlyphs = map[dynColorKey]*ColorGlyph{{maskKey: key, col: col}: want}
+	// Шрифт без данных: рендер здесь дал бы nil (face не разобрался), значит
+	// попадание честное. Запись кладётся прямо в шард кэша процесса.
+	font := &fontData{store: newGlyphStore()}
+	font.colorState.Store(colorYes)
+	ss := font.shapedShard(sizePx)
+	ss.dyn = map[dynKey]*ColorGlyph{{gid: gid, col: keyOfColor(col)}: want}
+	g := PlacedGlyph{GID: gid, shard: ss}
 
-	if got := ts.ColorGlyphFor(nil, key.gid, key.sizePx, col); got != want {
+	if got := ts.ColorGlyphFor(g, sizePx, col); got != want {
 		t.Fatalf("colorGlyphFor вернул %v, ожидался кэшированный глиф", got)
 	}
 	allocs := testing.AllocsPerRun(50, func() {
-		ts.ColorGlyphFor(nil, key.gid, key.sizePx, col)
+		ts.ColorGlyphFor(g, sizePx, col)
 	})
 	if allocs != 0 {
 		t.Errorf("попадание в кэш выделило %v аллокаций, ожидалось 0", allocs)

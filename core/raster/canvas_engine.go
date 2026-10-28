@@ -86,7 +86,7 @@ func (c *Canvas) NamedFonts() *hgtext.FontTable { return c.namedFonts }
 func (c *Canvas) Fallbacks() []*hgtext.FallbackFont { return c.fallbacks }
 
 // Shaper — шейпер сложного текста холста.
-func (c *Canvas) Shaper() *hgtext.Shaper { return &c.shaper }
+func (c *Canvas) Shaper() *hgtext.Shaper { return c.shaper }
 
 // FontRev — ревизия шрифтов холста: растёт при регистрации шрифта и смене
 // настроек текста. По ней сбрасывается то, что от шрифтов зависит (клоны

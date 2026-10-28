@@ -98,6 +98,9 @@ func (c *Canvas) adopt(nc *Canvas, bgSrc image.Image) *Canvas {
 	nc.namedFonts = c.namedFonts
 	nc.families = c.families
 	nc.fallbacks = c.fallbacks
+	// Шейпер общий: личные typesetting-face общих шрифтов читаются под одним
+	// замком, иначе измеритель гонялся бы с кадром клона (ADR-0003).
+	nc.shaper = c.shaper
 	// Настройки движка переезжают вместе с холстом: смена разрешения не
 	// повод молча вернуть пропуск поддеревьев или порядок каналов к
 	// значениям по умолчанию.

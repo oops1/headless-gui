@@ -4,11 +4,15 @@
 // Встроенный шрифт: Go Regular (поддерживает Cyrillic, Latin, Greek и другие наборы).
 // Если файл assets/fonts/Go-Regular.ttf присутствует, используется он;
 // иначе — встроенный бинарный TTF из пакета gofont/goregular.
+//
+// FontCache — «вид» на общий шрифт процесса (glyphstore.go): настройки
+// одного холста (DPI, подпиксели, качество) и кэш первого уровня с прежним
+// ключом; растры при промахе берутся из общего кэша и делятся всеми
+// движками (ADR-0003).
 
 package text
 
 import (
-	"bytes"
 	"fmt"
 	"image"
 	"io"
@@ -25,7 +29,6 @@ import (
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
-	"golang.org/x/image/vector"
 )
 
 // DefaultDPI — DPI по умолчанию для рендеринга шрифтов.
@@ -37,34 +40,43 @@ const DefaultFontSize = 10.0
 
 // FontCache кэширует font.Face для разных размеров одного TTF-файла.
 // Потокобезопасен.
+//
+// Это вид на общий шрифт процесса: разобранный шрифт и растры глифов лежат
+// в общем кэше (glyphstore.go) и делятся всеми видами с тем же содержимым;
+// у вида — настройки холста и кэш первого уровня.
 type FontCache struct {
 	mu    sync.RWMutex
-	TTF   *opentype.Font
-	cache map[float64]font.Face
+	TTF   *opentype.Font // общий sfnt.Font: безопасен с отдельным sfnt.Buffer
+	font  *fontData
+	cache map[float64]font.Face // личные face для Face(); не для одновременного использования
 	dpi   float64
+	// gen растёт при каждой смене настроек: промах, посчитанный со старыми
+	// параметрами, не попадает в L1 после сброса.
+	gen uint64
 
 	// glyphPresent кэширует наличие глифа для руны (cmap-проверка),
 	// чтобы не дёргать sfnt на каждый символ при отрисовке/измерении.
 	glyphPresent map[rune]bool
 	buf          sfnt.Buffer // переиспользуемый буфер для GlyphIndex
 
-	// glyphs — кэш растеризованных глифов по (размер, руна): opentype.Face
-	// растеризует векторный контур при каждом обращении, поэтому маска
-	// сохраняется один раз и дальше блиттируется из кэша.
+	// Кэш первого уровня (L1) с ключом по (размер, руна, фаза): DPI,
+	// подпиксели и качество — состояние вида, их смена сбрасывает L1. Общий
+	// кэш (L2) ключует те же растры ещё и параметрами вида.
 	glyphs map[glyphKey]CachedGlyph
 	// metrics — кэш вертикальных метрик по размеру (Face.Metrics не бесплатен).
 	metrics map[float64]VMetric
 	// kern — кэш кернинга пар (размер + пара рун): Face.Kern дёргает sfnt на
 	// каждую пару, а UI многократно рисует одни и те же строки.
 	kern map[kernKey]fixed.Int26_6
+	// adv — кэш шагов глифов по (размер, руна) для измерения без face.
+	adv map[advKey]advEntry
 
 	// ── Шейпинг (go-text/typesetting) ────────────────────────────────────────
-	// ttfData — исходные байты шрифта: typesetting парсит их отдельно от
-	// x/image/opentype. shapeFace создаётся лениво — только когда встречается
-	// текст, требующий шейпинга (RTL, арабский, индийские скрипты...).
-	ttfData      []byte
+	// shapeFace — личный typesetting-face вида над общим tsfont.Font; у него
+	// свои кэши, поэтому он читается только под замком шейпера холста.
+	// Создаётся лениво — только когда встречается текст, требующий шейпинга.
 	shapeFace    *tsfont.Face
-	shapeFaceErr bool // парсинг не удался — не пытаться снова
+	shapeFaceErr bool // общий шрифт не разобрался typesetting'ом — не пытаться снова
 
 	// subpixel — позиционирование глифов по долям пикселя (SetSubpixel).
 	// По умолчанию выключено: шаг каждого глифа округляется до целого, как
@@ -74,11 +86,6 @@ type FontCache struct {
 	// По умолчанию нулевой — вид глифов прежний; рассылается всем шрифтам
 	// канваса, как и subpixel. Ширин не меняет.
 	quality TextQuality
-	// hints — вертикальные отображения автохинтера по размеру em (26.6);
-	// nil-значение — для шрифта зон не нашлось (texthint.go).
-	hints map[fixed.Int26_6]*vHint
-	// rast — растеризатор хинтованных глифов, переиспользуется под fc.mu.
-	rast *vector.Rasterizer
 	// famKey — ключ семейства, под которым шрифт записан в таблице семейств
 	// (fontfamily.go); "" — шрифт в таблицу не входит.
 	famKey string
@@ -103,6 +110,12 @@ type glyphKey struct {
 type kernKey struct {
 	size float64
 	a, b rune
+}
+
+// advKey — ключ кэша шагов: размер в пунктах + руна.
+type advKey struct {
+	size float64
+	r    rune
 }
 
 // maxKernCacheEntries — предел кэша кернинг-пар (см. maxGlyphCacheEntries):
@@ -160,16 +173,20 @@ func parseFontData(data []byte) (*opentype.Font, error) {
 // регистрировался как «ещё один Go Regular», ошибка «невалидный шрифт» в
 // RegisterFallbackFontFile была недостижима, а fallback-цепочка росла
 // бесполезными дубликатами.
+//
+// Шрифт с тем же содержимым разбирается один раз на процесс: вид получает
+// общий разобранный шрифт и общий кэш растров (glyphstore.go). Копия байт
+// после регистрации не удерживается.
 func NewFontCacheFromData(data []byte, dpi float64) *FontCache {
-	parsed, err := parseFontData(data)
-	if err != nil {
+	f := store.intern(data)
+	if f == nil {
 		return nil
 	}
 	return &FontCache{
-		TTF:     parsed,
-		cache:   make(map[float64]font.Face),
-		dpi:     dpi,
-		ttfData: data,
+		TTF:   f.ttf,
+		font:  f,
+		cache: make(map[float64]font.Face),
+		dpi:   dpi,
 	}
 }
 
@@ -190,9 +207,16 @@ func (fc *FontCache) PixelSize(sizePt float64) fixed.Int26_6 {
 	return fixed.Int26_6(sizePt * fc.dpi / 72.0 * 64.0)
 }
 
+// paramsLocked — снимок настроек вида и его поколение (нужны только на
+// промахе L1). Под fc.mu (любой режим).
+func (fc *FontCache) paramsLocked() (faceKey, TextQuality, uint64) {
+	return faceKey{dpi: fc.dpi, subpixel: fc.subpixel}, fc.quality, fc.gen
+}
+
 // shaperFace возвращает typesetting-face для шейпинга (лениво, кэшируется).
 // nil — шрифт не удалось распарсить; вызывающий код откатывается на простой
-// (per-rune) путь отрисовки.
+// (per-rune) путь отрисовки. Face личный у вида: его кэши не потокобезопасны,
+// поэтому все обращения к нему идут под замком шейпера холста.
 func (fc *FontCache) shaperFace() *tsfont.Face {
 	fc.mu.RLock()
 	f, failed := fc.shapeFace, fc.shapeFaceErr
@@ -201,28 +225,23 @@ func (fc *FontCache) shaperFace() *tsfont.Face {
 		return f
 	}
 
+	tsf := fc.font.typesetting()
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 	if fc.shapeFace != nil || fc.shapeFaceErr {
 		return fc.shapeFace
 	}
-	face, err := tsfont.ParseTTF(bytes.NewReader(fc.ttfData))
-	if err != nil {
-		// TTC-коллекция — первый шрифт (симметрично NewFontCacheFromData).
-		if faces, cerr := tsfont.ParseTTC(bytes.NewReader(fc.ttfData)); cerr == nil && len(faces) > 0 {
-			face, err = faces[0], nil
-		}
-	}
-	if err != nil {
+	if tsf == nil {
 		fc.shapeFaceErr = true
 		return nil
 	}
-	fc.shapeFace = face
-	return face
+	fc.shapeFace = tsfont.NewFace(tsf)
+	return fc.shapeFace
 }
 
 // Face возвращает font.Face для заданного размера (в пунктах).
-// Кэшируется. Потокобезопасно.
+// Кэшируется. Потокобезопасно само по себе, но полученный face — нет (как у
+// x/image): он личный у этого вида, внутренние пути движка им не пользуются.
 func (fc *FontCache) Face(sizePt float64) font.Face {
 	fc.mu.RLock()
 	if f, ok := fc.cache[sizePt]; ok {
@@ -259,16 +278,15 @@ func (fc *FontCache) Face(sizePt float64) font.Face {
 
 // Measure возвращает ширину строки text в пикселях для шрифта размером sizePt.
 func (fc *FontCache) Measure(text string, sizePt float64) int {
-	face := fc.Face(sizePt)
 	var w fixed.Int26_6
 	prev := rune(-1)
 	for _, r := range text {
 		if prev >= 0 {
-			w += face.Kern(prev, r)
+			w += fc.Kern(sizePt, prev, r)
 		}
-		a, ok := face.GlyphAdvance(r)
+		a, ok := fc.Advance(sizePt, r)
 		if !ok {
-			a, _ = face.GlyphAdvance('?')
+			a, _ = fc.Advance(sizePt, '?')
 		}
 		w += a
 		prev = r
@@ -280,17 +298,16 @@ func (fc *FontCache) Measure(text string, sizePt float64) int {
 // positions[i] — ширина первых i символов строки (в пикселях).
 // Длина результата: len([]rune(text))+1.
 func (fc *FontCache) MeasureRunes(text string, sizePt float64) []int {
-	face := fc.Face(sizePt)
 	runes := []rune(text)
 	pos := make([]int, len(runes)+1)
 	var w fixed.Int26_6
 	for i, r := range runes {
 		if i > 0 {
-			w += face.Kern(runes[i-1], r)
+			w += fc.Kern(sizePt, runes[i-1], r)
 		}
-		a, ok := face.GlyphAdvance(r)
+		a, ok := fc.Advance(sizePt, r)
 		if !ok {
-			a, _ = face.GlyphAdvance('?')
+			a, _ = fc.Advance(sizePt, '?')
 		}
 		w += a
 		pos[i+1] = w.Round()
@@ -303,11 +320,12 @@ func (fc *FontCache) SetDPI(dpi float64) {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 	fc.dpi = dpi
+	fc.gen++
 	fc.cache = make(map[float64]font.Face) // очищаем кэш
 	fc.glyphs = nil                        // маски зависят от DPI
-	fc.hints = nil
 	fc.metrics = nil
 	fc.kern = nil // кернинг зависит от DPI/размера
+	fc.adv = nil
 }
 
 // SetSubpixel включает и выключает дробное позиционирование глифов. Меняет
@@ -320,15 +338,17 @@ func (fc *FontCache) SetSubpixel(on bool) {
 		return
 	}
 	fc.subpixel = on
+	fc.gen++
 	fc.cache = make(map[float64]font.Face)
 	fc.glyphs = nil
 	fc.metrics = nil
 	fc.kern = nil
+	fc.adv = nil
 }
 
 // SetQuality задаёт слой качества текста (TextQuality). Меняет только маски
-// глифов — шаг, кернинг и метрики те же, — поэтому сбрасывается лишь кэш масок
-// и зон хинтинга. Вызывать до отрисовки (под блокировкой кадра).
+// глифов — шаг, кернинг и метрики те же, — поэтому сбрасывается лишь кэш масок.
+// Вызывать до отрисовки (под блокировкой кадра).
 func (fc *FontCache) SetQuality(q TextQuality) {
 	q = q.normalized()
 	fc.mu.Lock()
@@ -337,8 +357,8 @@ func (fc *FontCache) SetQuality(q TextQuality) {
 		return
 	}
 	fc.quality = q
+	fc.gen++
 	fc.glyphs = nil
-	fc.hints = nil
 }
 
 // Quality возвращает действующий слой качества текста.
@@ -380,28 +400,18 @@ func (fc *FontCache) VMetricsFull(sizePt float64) VMetric {
 		fc.mu.RUnlock()
 		return m
 	}
+	k, _, gen := fc.paramsLocked()
 	fc.mu.RUnlock()
 
-	face := fc.Face(sizePt)
-	met := face.Metrics()
-	m := VMetric{
-		Ascent:  met.Ascent.Round(),
-		Descent: met.Descent.Round(),
-	}
-	// Height у font.Metrics — шаг между строками, УЖЕ включающий зазор
-	// (ascent+descent+lineGap по hhea), поэтому зазор — это остаток. У части
-	// шрифтов округлённые части в сумме дают больше округлённого целого —
-	// остаток тогда отрицательный, а отрицательный «зазор» сжал бы строки,
-	// наезжая друг на друга; его обрезаем нулём.
-	if gap := met.Height.Round() - m.Ascent - m.Descent; gap > 0 {
-		m.LineGap = gap
-	}
+	m := fc.font.shard(sizePt).vmetrics(k)
 
 	fc.mu.Lock()
-	if fc.metrics == nil {
-		fc.metrics = make(map[float64]VMetric)
+	if fc.gen == gen {
+		if fc.metrics == nil {
+			fc.metrics = make(map[float64]VMetric)
+		}
+		fc.metrics[sizePt] = m
 	}
-	fc.metrics[sizePt] = m
 	fc.mu.Unlock()
 	return m
 }
@@ -421,6 +431,9 @@ const SubpixelPhases = 4
 // GlyphAt — Glyph для пера, сдвинутого на phase/SubpixelPhases пикселя вправо
 // от целочисленной позиции. Маска растеризуется с этим сдвигом, поэтому её
 // offX отсчитывается от того же целого пикселя, что и у phase == 0.
+//
+// Попадание в L1 — под RLock вида, как и раньше; промах идёт в общий кэш
+// процесса, где маску, возможно, уже растеризовал другой движок.
 func (fc *FontCache) GlyphAt(sizePt float64, r rune, phase int) CachedGlyph {
 	if phase < 0 || phase >= SubpixelPhases {
 		phase = 0
@@ -431,55 +444,21 @@ func (fc *FontCache) GlyphAt(sizePt float64, r rune, phase int) CachedGlyph {
 		fc.mu.RUnlock()
 		return g
 	}
+	fk, q, gen := fc.paramsLocked()
 	fc.mu.RUnlock()
 
-	face := fc.Face(sizePt)
+	g := fc.font.shard(sizePt).glyphAt(fk, q, r, phase)
 
 	fc.mu.Lock()
-	defer fc.mu.Unlock()
-	if g, ok := fc.glyphs[k]; ok {
-		return g
-	}
-	if fc.glyphs == nil {
-		fc.glyphs = make(map[glyphKey]CachedGlyph)
-	} else if len(fc.glyphs) >= maxGlyphCacheEntries {
-		fc.glyphs = make(map[glyphKey]CachedGlyph, maxGlyphCacheEntries/4)
-	}
-
-	// Растеризация в целочисленной позиции пера: при HintingFull advance
-	// квантуется до целых пикселей, поэтому дробная часть пера всегда 0 и
-	// маска, снятая в (0,0), корректна для любой целочисленной позиции. В
-	// подпиксельном режиме шаг дробный, и маска снимается для каждой из
-	// четвертей пикселя отдельно (phase).
-	if fc.quality.Hinting || fc.quality.LCD {
-		if hg, ok := fc.hintedGlyph(face, sizePt, r, phase, fc.quality); ok {
-			fc.glyphs[k] = hg
-			return hg
+	if fc.gen == gen {
+		if fc.glyphs == nil {
+			fc.glyphs = make(map[glyphKey]CachedGlyph)
+		} else if len(fc.glyphs) >= maxGlyphCacheEntries {
+			fc.glyphs = make(map[glyphKey]CachedGlyph, maxGlyphCacheEntries/4)
 		}
+		fc.glyphs[k] = g
 	}
-	dot := fixed.Point26_6{X: fixed.Int26_6(phase * (64 / SubpixelPhases))}
-	dr, maskImg, maskPt, adv, ok := face.Glyph(dot, r)
-	g := CachedGlyph{Advance: adv, OK: ok}
-	if ok && !dr.Empty() {
-		g.OffX, g.OffY = dr.Min.X, dr.Min.Y
-		w, h := dr.Dx(), dr.Dy()
-		m := image.NewAlpha(image.Rect(0, 0, w, h))
-		if src, isAlpha := maskImg.(*image.Alpha); isAlpha {
-			for y := 0; y < h; y++ {
-				so := src.PixOffset(maskPt.X, maskPt.Y+y)
-				copy(m.Pix[y*m.Stride:y*m.Stride+w], src.Pix[so:so+w])
-			}
-		} else {
-			for y := 0; y < h; y++ {
-				for x := 0; x < w; x++ {
-					_, _, _, a := maskImg.At(maskPt.X+x, maskPt.Y+y).RGBA()
-					m.Pix[y*m.Stride+x] = uint8(a >> 8)
-				}
-			}
-		}
-		g.Mask = m
-	}
-	fc.glyphs[k] = g
+	fc.mu.Unlock()
 	return g
 }
 
@@ -493,21 +472,52 @@ func (fc *FontCache) Kern(sizePt float64, a, b rune) fixed.Int26_6 {
 		fc.mu.RUnlock()
 		return v
 	}
+	fk, _, gen := fc.paramsLocked()
 	fc.mu.RUnlock()
 
-	v := fc.Face(sizePt).Kern(a, b)
+	v := fc.font.shard(sizePt).kerning(fk, a, b)
 
 	fc.mu.Lock()
-	if fc.kern == nil {
-		fc.kern = make(map[kernKey]fixed.Int26_6)
-	} else if len(fc.kern) >= maxKernCacheEntries {
-		fc.kern = make(map[kernKey]fixed.Int26_6, maxKernCacheEntries/4)
+	if fc.gen == gen {
+		if fc.kern == nil {
+			fc.kern = make(map[kernKey]fixed.Int26_6)
+		} else if len(fc.kern) >= maxKernCacheEntries {
+			fc.kern = make(map[kernKey]fixed.Int26_6, maxKernCacheEntries/4)
+		}
+		fc.kern[k] = v
 	}
-	fc.kern[k] = v
 	fc.mu.Unlock()
 	return v
 }
 
+// Advance возвращает шаг глифа руны r для размера sizePt и признак, что глиф
+// есть (как у font.Face.GlyphAdvance). Кэшируется; измерение идёт через него,
+// а не через face, поэтому меряющая горутина не делит face с кадром.
+func (fc *FontCache) Advance(sizePt float64, r rune) (fixed.Int26_6, bool) {
+	k := advKey{size: sizePt, r: r}
+	fc.mu.RLock()
+	if e, ok := fc.adv[k]; ok {
+		fc.mu.RUnlock()
+		return e.adv, e.ok
+	}
+	fk, _, gen := fc.paramsLocked()
+	fc.mu.RUnlock()
+
+	var e advEntry
+	e.adv, e.ok = fc.font.shard(sizePt).advance(fk, r)
+
+	fc.mu.Lock()
+	if fc.gen == gen {
+		if fc.adv == nil {
+			fc.adv = make(map[advKey]advEntry)
+		} else if len(fc.adv) >= maxKernCacheEntries {
+			fc.adv = make(map[advKey]advEntry, maxKernCacheEntries/4)
+		}
+		fc.adv[k] = e
+	}
+	fc.mu.Unlock()
+	return e.adv, e.ok
+}
 
 // HasGlyph сообщает, есть ли в шрифте глиф для руны r (cmap-проверка).
 // Результат кэшируется. Потокобезопасно. Для пробела всегда true.
@@ -613,7 +623,8 @@ func SystemFallbackFontPaths() []string {
 // профиле это десятки мегабайт os.ReadFile и лишние миллисекунды на КАЖДОЕ
 // открытие диалога. Шрифты в рантайме не меняются, поэтому содержимое файлов
 // кэшируется на процесс. Данные только читаются (sfnt/typesetting держат их
-// как read-only), так что общий срез безопасен.
+// как read-only), так что общий срез безопасен. Один и тот же срез у всех
+// движков — ещё и быстрый путь интернирования шрифта (glyphstore.go).
 
 var (
 	fontFileMu    sync.Mutex

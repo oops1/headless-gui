@@ -74,7 +74,8 @@ func (c *Canvas) DrawTextRotated(text string, x, y int, sizePt float64, fontName
 	tmp.namedFonts = c.namedFonts
 	tmp.families = c.families
 	tmp.fallbacks = c.fallbacks
-	tmp.plainText = true // контраст — ниже, по настоящему цвету
+	tmp.shaper = c.shaper // общие шрифты — общий шейпер (см. adopt)
+	tmp.plainText = true  // контраст — ниже, по настоящему цвету
 	tmp.DrawTextFont(text, pad, pad, sizePt, fontName, color.RGBA{255, 255, 255, 255})
 	src := tmp.back
 	// Холст tmp размером в сам растр: его размер мог быть зажат
