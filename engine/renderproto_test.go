@@ -26,6 +26,7 @@ import (
 	"math"
 	"reflect"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -571,6 +572,18 @@ type protoFrame struct {
 	rendered       atomic.Int32
 	tileDirty      []bool
 	parallel       bool
+
+	// Варианты размытия подложки (см. renderproto_blur_test.go).
+	mode       protoBlurMode
+	blurRect   image.Rectangle // объединение областей читающих команд кадра
+	halo       int             // запас ореола вокруг тайла под размытием
+	haloMu     sync.Mutex
+	haloPool   map[image.Point]chan *protoWorker // холсты ореола по размеру
+	haloSrc    *Canvas                           // образец для холстов ореола
+	blurCache  map[uint64]*image.RGBA
+	blurRegion *Canvas // холст области чтения для промаха кэша
+	blurHits   int
+	blurMisses int
 }
 
 // newProtoFrame строит стенд. ownFonts — у каждого воркера свой вид шрифта по
@@ -602,6 +615,7 @@ func newProtoFrame(src *Canvas, parallel, ownFonts bool) *protoFrame {
 		c.InheritWallpaper(src) // обои и их кэш — у холста движка, как у буфера попапа
 		f.workers <- &protoWorker{c: c, ctx: &translatingContext{inner: c}}
 	}
+	f.haloSrc = src
 	return f
 }
 
@@ -660,7 +674,15 @@ func (f *protoFrame) render(cmds []protoCmd) {
 	for i := range f.tileDirty {
 		f.tileDirty[i] = false
 	}
-	f.segmented = f.hasReads()
+	switch {
+	case f.mode == blurCache && f.hasReads():
+		// Кэш размытия: читающие команды заменяются блитом готового результата,
+		// дальше кадр идёт как без чтений (Р7 и Р8 действуют).
+		f.bin(f.resolveBlurCache(cmds))
+	case f.mode == blurHalo && f.hasReads():
+		f.prepareHalo()
+	}
+	f.segmented = f.hasReads() && f.mode == blurBarrier
 	if !f.segmented {
 		f.segStart, f.segEnd, f.seg = 0, len(f.cmds), 0
 		f.changed = f.changed[:0]
@@ -705,10 +727,16 @@ func (f *protoFrame) RunPart(i int) {
 		i = int(f.changed[i])
 	}
 	f.rendered.Add(1)
-	w := <-f.workers
-	defer func() { f.workers <- w }()
 	tx, ty := i%f.tilesX, i/f.tilesX
 	ox, oy := tx*f.ts, ty*f.ts
+	if f.mode == blurHalo && f.halo > 0 {
+		if tile := image.Rect(ox, oy, ox+f.ts, oy+f.ts); tile.Overlaps(f.blurRect) {
+			f.runHaloTile(i, tile.Intersect(image.Rect(0, 0, f.w, f.h)))
+			return
+		}
+	}
+	w := <-f.workers
+	defer func() { f.workers <- w }()
 	c, t := w.c, w.ctx
 	t.dx, t.dy = ox, oy
 	c.ClearRoundClip()
