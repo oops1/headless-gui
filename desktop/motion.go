@@ -50,6 +50,19 @@ func animation(tm *theme.Manager, key theme.Key) (time.Duration, widget.Easing) 
 	return a.Duration, widget.EasingByName(a.Curve)
 }
 
+// animationFirst — animation первого ключа, объявленного темой (цепочка
+// запасных). Ни одного — мгновенно.
+func animationFirst(tm *theme.Manager, keys ...theme.Key) (time.Duration, widget.Easing) {
+	if tm == nil {
+		return 0, nil
+	}
+	a := tm.GetAnimationFirst(keys...)
+	if a.Duration <= 0 {
+		return 0, nil
+	}
+	return a.Duration, widget.EasingByName(a.Curve)
+}
+
 // itemAnimation — анимация кнопки панели задач: свой токен, а если темы его не
 // заявили — общий токен наведения.
 func itemAnimation(tm *theme.Manager) (time.Duration, widget.Easing) {

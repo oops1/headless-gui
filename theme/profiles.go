@@ -139,7 +139,7 @@ func Windows2000Profile() *Profile {
 	p.Fonts["default"] = FontSpec{Size: 9}
 
 	// Анимаций нет — нулевая длительность и есть отказ от движения.
-	for _, k := range []Key{"window.open", "menu.open", "hover", "taskbar.item"} {
+	for _, k := range classicMotionKeys {
 		p.Anims[k] = AnimSpec{}
 	}
 
@@ -373,6 +373,7 @@ func Windows10Profile() *Profile {
 	p.Fonts["clock.large"] = FontSpec{Family: "Open Sans", Size: 28, Weight: WeightLight} // крупные часы календаря
 	p.Anims["hover"] = AnimSpec{Duration: 120 * time.Millisecond, Curve: "out-cubic"}
 	p.Anims["menu.open"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}
+	declareMotion(p, motionWin10)
 	p.Anims["window.open"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}
 
 	// Панель задач — акрил. Запасной непрозрачный цвет — прежний цвет панели:
@@ -541,6 +542,9 @@ func Windows10Profile() *Profile {
 	inheritTrayStyles(p)
 	declareWin10Tray(p)
 	addDialogStyles(p)
+	// Мягкие тени — только под флагом shadow.soft (profiles_motion.go); после
+	// всех частей компонентов.
+	declareSoftShadows(p, shadowWin10)
 	return p
 }
 
@@ -638,6 +642,7 @@ func Windows11Profile() *Profile {
 	p.Fonts["default"] = FontSpec{Size: 9}
 	p.Anims["hover"] = AnimSpec{Duration: 150 * time.Millisecond, Curve: "out-cubic"}
 	p.Anims["menu.open"] = AnimSpec{Duration: 200 * time.Millisecond, Curve: "out-back"}
+	declareMotion(p, motionWin11)
 	// Меню Windows 11 выезжает от точки привязки, а не только проявляется.
 	p.SetMetric(KeyMenuOpenOffset, 8)
 	p.Anims["window.open"] = AnimSpec{Duration: 250 * time.Millisecond, Curve: "out-cubic"}
@@ -896,6 +901,7 @@ func MacOSProfile() *Profile {
 	p.Fonts["default"] = FontSpec{Size: 9}
 	p.Anims["hover"] = AnimSpec{Duration: 120 * time.Millisecond, Curve: "out-cubic"}
 	p.Anims["menu.open"] = AnimSpec{Duration: 180 * time.Millisecond, Curve: "out-cubic"}
+	declareMotion(p, motionMacOS)
 	p.Anims["dock.magnify"] = AnimSpec{Duration: 120 * time.Millisecond, Curve: "out-quad"}
 
 	// Док рисует область приложений вместо полосы кнопок.
@@ -1029,6 +1035,9 @@ func MacOSProfile() *Profile {
 
 	inheritTrayStyles(p)
 	addDialogStyles(p)
+	// Мягкие тени — только под флагом shadow.soft (profiles_motion.go); после
+	// всех частей компонентов.
+	declareSoftShadows(p, shadowMacOS)
 	return p
 }
 
@@ -1036,6 +1045,8 @@ func MacOSProfile() *Profile {
 func MacOSDarkProfile() *Profile {
 	p := NewProfile(ProfileMacOSDark)
 	p.Parent = ProfileMacOS
+	// Тень плотнее на тёмном (мягкие тени — под флагом shadow.soft).
+	p.SetColor(KeyShadowColor, RGBA(0, 0, 0, 110))
 
 	surface := RGB(40, 40, 42)
 	text := RGB(255, 255, 255)

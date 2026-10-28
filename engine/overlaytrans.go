@@ -170,6 +170,20 @@ func (e *Engine) ovtSpec(canvas *Canvas) (time.Duration, widget.Easing, int) {
 	return a.Duration, widget.EasingByName(a.Curve), off
 }
 
+// ovtCloseSpec — длительность и кривая исчезновения: theme.AnimMenuClose, а
+// если профиль его не объявил — theme.AnimMenuOpen.
+func (e *Engine) ovtCloseSpec() (time.Duration, widget.Easing) {
+	m := e.themeMgr.Load()
+	if m == nil {
+		return 0, nil
+	}
+	a := m.GetAnimationFirst(theme.AnimMenuClose, theme.AnimMenuOpen)
+	if a.Duration <= 0 {
+		return 0, nil
+	}
+	return a.Duration, widget.EasingByName(a.Curve)
+}
+
 // ovtLayers — слои кадра: корень и открытые модальные окна, снизу вверх.
 func ovtLayers(root widget.Widget, modals []widget.ModalWidget) []widget.Widget {
 	layers := make([]widget.Widget, 0, 1+len(modals))
@@ -544,7 +558,7 @@ func (e *Engine) ovtVisitClosed(tr *overlayTrans, canvas *Canvas) {
 	tr.seen = e.ovt.gen
 	redrawn := e.ovtRedrawn(tr.rest)
 	if tr.state != ovtClosing {
-		dur, curve, _ := e.ovtSpec(canvas)
+		dur, curve := e.ovtCloseSpec()
 		from := tr.val()
 		if tr.state == ovtPending || !tr.have || dur <= 0 || from <= 0 {
 			e.ovtStop(tr)

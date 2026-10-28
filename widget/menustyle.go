@@ -2,6 +2,7 @@ package widget
 
 import (
 	"image/color"
+	"time"
 
 	"github.com/oops1/headless-gui/v3/theme"
 )
@@ -35,6 +36,10 @@ type MenuStyle struct {
 	ItemInset, SeparatorInset     int // ItemInset объявленный: не меньше 1
 	ChevronRight, ChevronSize     int
 	SubMenuDelay                  int // мс
+	// SubMenuOpen — проявление подменю (theme.AnimSubmenuOpen): длительность,
+	// мс, и кривая.
+	SubMenuOpenMS    int
+	SubMenuOpenCurve string
 
 	// TintIcons — значки рисуются цветом текста пункта.
 	TintIcons bool
@@ -133,6 +138,10 @@ func menuStyleOf(rt *theme.Theme, direct bool) MenuStyle {
 	px(theme.KeyMenuChevronRight, &ms.ChevronRight)
 	px(theme.KeyMenuChevronSize, &ms.ChevronSize)
 	px(theme.KeyMenuSubmenuDelay, &ms.SubMenuDelay)
+	if a, ok := rt.Anim(theme.AnimSubmenuOpen); ok && a.Duration > 0 {
+		ms.SubMenuOpenMS = int(a.Duration / time.Millisecond)
+		ms.SubMenuOpenCurve = a.Curve
+	}
 	if v, ok := rt.Metric(theme.KeyMenuItemInset); ok && v >= 0 {
 		ms.ItemInset = int(v + 0.5)
 		if ms.ItemInset < 1 {
@@ -274,6 +283,8 @@ func (m *PopupMenu) applyMenuStyle(ms MenuStyle, classic bool) {
 	m.ItemInset, m.SeparatorInset = ms.ItemInset, ms.SeparatorInset
 	m.ChevronRight, m.ChevronSize = ms.ChevronRight, ms.ChevronSize
 	m.SubMenuDelay = ms.SubMenuDelay
+	m.SubMenuFade = time.Duration(ms.SubMenuOpenMS) * time.Millisecond
+	m.SubMenuFadeCurve = EasingByName(ms.SubMenuOpenCurve)
 	m.CornerRadius, m.ItemCorner, m.Elevation = ms.Corner, ms.ItemCorner, ms.Elevation
 	m.TintIcons = ms.TintIcons
 

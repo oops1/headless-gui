@@ -777,3 +777,47 @@ func TestOverlayTrans_PrepareExpandsBackdrops(t *testing.T) {
 		t.Fatalf("подложка, задетая областью перехода, не расширена целиком: %v", rects)
 	}
 }
+
+// Исчезновение идёт по theme.AnimMenuClose, если профиль его объявил, иначе
+// по AnimMenuOpen.
+func TestOverlayTrans_CloseUsesMenuClose(t *testing.T) {
+	testreset.Globals(t)
+	defer widget.StopAllAnimations()
+	for _, tc := range []struct {
+		name   string
+		close  time.Duration
+		closed bool // к 40 мс исчезновение закончено
+	}{{"menu.close 40 мс", 40 * time.Millisecond, true}, {"без menu.close", 0, false}} {
+		m := ovtManagerClose(t, 100*time.Millisecond, tc.close)
+		closed, _ := ovtRefs(t, m)
+		s := newOvtScene(t, true, m, false)
+		ovtFinishOpen(s)
+		s.eng.RenderOnce()
+		s.setOpen(false)
+		s.eng.RenderOnce()
+		t0 := time.Now()
+		widget.StepAnimationsFor(s.eng, t0)
+		widget.StepAnimationsFor(s.eng, t0.Add(40*time.Millisecond))
+		if got := sameImage(s.eng.RenderOnce(), closed); got != tc.closed {
+			t.Errorf("%s: к 40 мс меню исчезло=%v, ждали %v", tc.name, got, tc.closed)
+		}
+	}
+}
+
+// ovtManagerClose — ovtManager с отдельным исчезновением (0 — не объявлено).
+func ovtManagerClose(t *testing.T, open, close time.Duration) *theme.Manager {
+	t.Helper()
+	m := theme.NewManager()
+	p := theme.NewProfile("ovt-close")
+	p.Anims[theme.AnimMenuOpen] = theme.AnimSpec{Duration: open, Curve: "linear"}
+	if close > 0 {
+		p.Anims[theme.AnimMenuClose] = theme.AnimSpec{Duration: close, Curve: "linear"}
+	}
+	if err := m.RegisterTheme(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetTheme("ovt-close"); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}

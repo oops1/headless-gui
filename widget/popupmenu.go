@@ -3,6 +3,7 @@ package widget
 import (
 	"image"
 	"image/color"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -166,6 +167,15 @@ type PopupMenu struct {
 	// SubMenuDelay — задержка раскрытия и закрытия подменю при наведении, мс.
 	// 0 — сразу. Нажатие и клавиши задержку не ждут.
 	SubMenuDelay int
+	// SubMenuFade — проявление подменю при раскрытии (тема:
+	// theme.AnimSubmenuOpen); 0 — сразу. Декоративное: «меньше движения» и
+	// профили MotionReduced/MotionOff его обнуляют (MotionDur).
+	SubMenuFade      time.Duration
+	SubMenuFadeCurve Easing
+	// fade — доля проявления этого меню как подменю (float64), fading —
+	// проявление идёт. Пишет тик анимации, читает отрисовка родителя.
+	fade   atomic.Uint64
+	fading atomic.Bool
 	// WorkArea — область (в координатах холста), за которую меню не выходит:
 	// экран без панели задач. Пусто — SetPopupWorkArea, а если и она пуста —
 	// весь холст. Подменю наследуют.
@@ -765,6 +775,7 @@ func (m *PopupMenu) openChild(idx int) {
 	child.ChevronRight, child.ChevronSize = m.ChevronRight, m.ChevronSize
 	child.TintIcons = m.TintIcons
 	child.SubMenuDelay = m.SubMenuDelay
+	child.SubMenuFade, child.SubMenuFadeCurve = m.SubMenuFade, m.SubMenuFadeCurve
 	child.WorkArea, child.MaxHeight = m.WorkArea, m.MaxHeight
 	child.SetItems(subItems)
 	child.OnSelect = m.OnSelect
@@ -783,6 +794,7 @@ func (m *PopupMenu) openChild(idx int) {
 		x = px - cw + 2
 	}
 	child.Show(x, itemY)
+	child.startFade()
 
 	m.geoMu.Lock()
 	m.child = child
@@ -1210,10 +1222,48 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 		m.drawScrollArrows(ctx, l)
 	}
 
-	// Рекурсивно рисуем дочернее подменю.
+	// Рекурсивно рисуем дочернее подменю; проявляющееся — с прозрачностью.
 	if openChild != nil {
+		if a, ok := openChild.fadeAlpha(); ok {
+			if od, ok := ctx.(OpacityDrawer); ok {
+				od.DrawWithOpacity(openChild.fadeRegion(), a, func() { openChild.DrawOverlay(ctx) })
+				return
+			}
+		}
 		openChild.DrawOverlay(ctx)
 	}
+}
+
+// startFade начинает проявление подменю (SubMenuFade).
+func (m *PopupMenu) startFade() {
+	d := MotionDur(m.SubMenuFade)
+	if d <= 0 {
+		return
+	}
+	m.fade.Store(0)
+	m.fading.Store(true)
+	region := m.fadeRegion()
+	AnimateOwned(m, "submenu.open", d, m.SubMenuFadeCurve, func(t float64) {
+		if t >= 1 {
+			m.fading.Store(false)
+		}
+		m.fade.Store(math.Float64bits(t))
+		InvalidateRect(region)
+	})
+}
+
+// fadeAlpha — доля проявления; ok=false — подменю в покое.
+func (m *PopupMenu) fadeAlpha() (float64, bool) {
+	if !m.fading.Load() {
+		return 1, false
+	}
+	a := math.Float64frombits(m.fade.Load())
+	return math.Max(0, math.Min(1, a)), true
+}
+
+// fadeRegion — что перерисовывает шаг проявления: подменю с тенью.
+func (m *PopupMenu) fadeRegion() image.Rectangle {
+	return m.OverlayBounds().Inset(-DefaultOverlayMargin())
 }
 
 // drawShadow рисует тень меню. Меню с Elevation (профиль объявил высоту)

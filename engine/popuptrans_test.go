@@ -243,3 +243,30 @@ func TestPopupTrans_OffCanvasDamageReachesPopup(t *testing.T) {
 		t.Fatalf("смена попапа за краем холста хосту не дошла: вызовов %d → %d", n, len(rec.calls))
 	}
 }
+
+// Хостовый попап исчезает по theme.AnimMenuClose.
+func TestPopupTrans_CloseUsesMenuClose(t *testing.T) {
+	testreset.Globals(t)
+	defer widget.StopAllAnimations()
+	m := ovtManagerClose(t, 100*time.Millisecond, 40*time.Millisecond)
+	s := newOvtScene(t, true, m, false)
+	rec := &popupRec{}
+	s.eng.SetPopupSink(rec.sink)
+	defer s.eng.SetPopupSink(nil)
+	s.eng.SetPopupFade(true)
+	s.setOpen(true)
+	s.eng.RenderFrameNow()
+	t0 := time.Now()
+	widget.StepAnimationsFor(s.eng, t0)
+	widget.StepAnimationsFor(s.eng, t0.Add(200*time.Millisecond))
+	s.eng.RenderFrameNow()
+	s.setOpen(false)
+	s.eng.RenderFrameNow()
+	t1 := time.Now()
+	widget.StepAnimationsFor(s.eng, t1)
+	widget.StepAnimationsFor(s.eng, t1.Add(40*time.Millisecond))
+	s.eng.RenderFrameNow()
+	if f := rec.last(); len(f) != 0 {
+		t.Fatalf("к 40 мс исчезновение по menu.close не закончилось: %+v", f)
+	}
+}

@@ -143,6 +143,9 @@ func NewStartMenu(tm *theme.Manager, cat AppCatalog) *StartMenu {
 		Flyout: NewFlyout(tm, ComponentStartMenu),
 		cat:    cat,
 	}
+	// «Пуск» выезжает по своему токену (start.open), без него — как прочие
+	// панели.
+	m.AnimKey = theme.AnimStartOpen
 	m.Content = m.drawContent
 	m.Size = m.size
 	m.v = newStartView(m)

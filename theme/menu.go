@@ -74,10 +74,26 @@ const (
 	KeyMenuOpenOffset Key = "menu.open.offset"
 )
 
-// AnimMenuOpen — появление и исчезновение всплывающего меню и панели:
-// длительность и кривая (AnimSpec). Декоративная: при «меньше движения» и
-// профилях движения MotionReduced/MotionOff — мгновенно.
-const AnimMenuOpen Key = "menu.open"
+// Анимации меню и панелей (AnimSpec: длительность и кривая). Все
+// декоративные: при «меньше движения» и профилях движения
+// MotionReduced/MotionOff — мгновенно. Таблица значений по профилям —
+// profiles_motion.go.
+const (
+	// AnimMenuOpen — появление всплывающего меню; и исчезновение, если
+	// профиль не объявил AnimMenuClose.
+	AnimMenuOpen Key = "menu.open"
+	// AnimMenuClose — исчезновение всплывающего меню; не объявлено — по
+	// AnimMenuOpen.
+	AnimMenuClose Key = "menu.close"
+	// AnimSubmenuOpen — проявление каскадного подменю (PopupMenu).
+	AnimSubmenuOpen Key = "submenu.open"
+	// AnimStartOpen — выезд и уход «Пуска»; не объявлено — по
+	// AnimFlyoutOpen, затем AnimMenuOpen.
+	AnimStartOpen Key = "start.open"
+	// AnimFlyoutOpen — выезд и уход всплывающих панелей (календарь, центр
+	// уведомлений, быстрые настройки); не объявлено — по AnimMenuOpen.
+	AnimFlyoutOpen Key = "flyout.open"
+)
 
 // FlagMenuIconTint — одноцветные значки пунктов (глифы) рисуются цветом текста
 // пункта в его текущем состоянии (обычный, под плашкой, недоступный):

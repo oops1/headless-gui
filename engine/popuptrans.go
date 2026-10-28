@@ -29,10 +29,14 @@ import (
 )
 
 // popupTrans — параметры переходов кадра; dur 0 — переходов нет.
+// closeDur/closeCurve — исчезновение (theme.AnimMenuClose или, без него,
+// то же, что появление).
 type popupTrans struct {
-	dur   time.Duration
-	curve widget.Easing
-	slide int // логические точки
+	dur        time.Duration
+	curve      widget.Easing
+	slide      int // логические точки
+	closeDur   time.Duration
+	closeCurve widget.Easing
 }
 
 // popupTransSpec — параметры переходов попапов для этого кадра.
@@ -48,10 +52,13 @@ func (e *Engine) popupTransSpec(canvas *Canvas) popupTrans {
 	if a.Duration <= 0 {
 		return popupTrans{}
 	}
+	c := m.GetAnimationFirst(theme.AnimMenuClose, theme.AnimMenuOpen)
 	return popupTrans{
-		dur:   a.Duration,
-		curve: widget.EasingByName(a.Curve),
-		slide: int(math.Round(m.GetMetric(theme.KeyMenuOpenOffset))),
+		dur:        a.Duration,
+		curve:      widget.EasingByName(a.Curve),
+		slide:      int(math.Round(m.GetMetric(theme.KeyMenuOpenOffset))),
+		closeDur:   c.Duration,
+		closeCurve: widget.EasingByName(c.Curve),
 	}
 }
 
@@ -93,11 +100,11 @@ func (e *Engine) popupCloseStep(ent *popupEntry, tr popupTrans) bool {
 	if ent.trans {
 		from = ent.val()
 	}
-	if tr.dur <= 0 || ent.img == nil || from <= 0 {
+	if tr.dur <= 0 || tr.closeDur <= 0 || ent.img == nil || from <= 0 {
 		return false
 	}
 	ent.closing = true
-	e.popupAnimate(ent, from, 0, tr)
+	e.popupAnimate(ent, from, 0, popupTrans{dur: tr.closeDur, curve: tr.closeCurve})
 	return true
 }
 

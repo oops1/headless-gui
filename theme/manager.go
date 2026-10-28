@@ -382,6 +382,24 @@ func (m *Manager) GetAnimation(k Key) AnimSpec {
 	return t.AnimReduced(k, a)
 }
 
+// GetAnimationFirst — GetAnimation первого из ключей, который активная тема
+// объявила: цепочка запасных («Пуск» — start.open, flyout.open, menu.open).
+// Ни одного — нулевая длительность.
+func (m *Manager) GetAnimationFirst(keys ...Key) AnimSpec {
+	m.mu.RLock()
+	t := m.active
+	m.mu.RUnlock()
+	if t == nil {
+		return AnimSpec{}
+	}
+	for _, k := range keys {
+		if a, ok := t.Anim(k); ok {
+			return t.AnimReduced(k, a)
+		}
+	}
+	return AnimSpec{}
+}
+
 // GetIcon возвращает иконку активной темы нужного размера. nil — иконки
 // нет либо разрешатель не задан; вызывающий обязан пережить nil (в
 // компонентах для этого есть заглушечный глиф).

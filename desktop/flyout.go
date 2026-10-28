@@ -178,7 +178,9 @@ type Flyout struct {
 	// 0 — взять метрику темы KeyFlyoutSlideDistance; отрицательное — до
 	// самого края экрана (боковая панель выезжает из-за края целиком).
 	SlideDistance int
-	// AnimKey — имя анимации темы, управляющей появлением. Пусто — AnimMenuOpen.
+	// AnimKey — имя анимации темы, управляющей появлением и уходом. Пусто —
+	// theme.AnimFlyoutOpen. Ключ, не объявленный темой, берёт запасной:
+	// flyout.open, затем menu.open (animKeys).
 	AnimKey theme.Key
 
 	open int32
