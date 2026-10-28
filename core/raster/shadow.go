@@ -118,19 +118,28 @@ func (c *Canvas) DrawShadow(r image.Rectangle, corner int, blur, offsetX, offset
 	if c.drawShadowFromTemplate(full, area, pw, ph, pCorner, pRadius, margin, col) {
 		return
 	}
-	tmp := image.NewRGBA(image.Rect(0, 0, area.Dx(), area.Dy()))
+	// Буфер — видимая область с запасом 2·R в каждую сторону (в пределах
+	// силуэта с полями): два прохода box-размытия радиуса R зависят от
+	// окрестности ±2R, поэтому внутри area результат равен размытию полного
+	// силуэта при любом клипе и любом окне холста — тень на стыке тайлов
+	// (ADR-0005) и на краю частичной перерисовки без шва.
+	ext := area.Inset(-2 * pRadius).Intersect(full)
+	if ext.Dx()*ext.Dy() > maxShadowArea {
+		return
+	}
+	tmp := image.NewRGBA(image.Rect(0, 0, ext.Dx(), ext.Dy()))
 
 	// Силуэт по-прежнему строится от ИСХОДНОГО прямоугольника, просто с
 	// отрицательным смещением, когда фигура уходит за видимую область:
 	// иначе скругление углов и затухание считались бы от обрезка и поехали
 	// бы. За границы буфера fillRectImg не пишет.
-	fillSilhouette(tmp, pr.Min.X+pOffsetX-area.Min.X, pr.Min.Y+pOffset-area.Min.Y, pw, ph, pCorner, col)
+	fillSilhouette(tmp, pr.Min.X+pOffsetX-ext.Min.X, pr.Min.Y+pOffset-ext.Min.Y, pw, ph, pCorner, col)
 	BlurRGBA(tmp, pRadius, 2)
 
 	// Левый верхний угол размытого буфера на холсте: буфер уже построен в
 	// координатах холста, вместе со сдвигом тени вниз.
-	gx := area.Min.X
-	gy := area.Min.Y
+	gx := ext.Min.X
+	gy := ext.Min.Y
 
 	// drawColorGlyph — существующий приватный композитор Over с учётом
 	// clip/hasClip и скруглённого round-отсечения (см. canvas.go); он не
@@ -147,7 +156,7 @@ const maxShadowArea = 4096 * 4096
 // отсечение канваса, а без него — весь кадр.
 func (c *Canvas) shadowClip() image.Rectangle {
 	if c.hasClip {
-		return c.clip
+		return c.clip.Intersect(c.back.Bounds())
 	}
 	return c.back.Bounds()
 }

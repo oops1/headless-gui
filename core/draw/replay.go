@@ -20,6 +20,13 @@ type ReplayOpts struct {
 	// чтобы работали учёт рисующихся, политика сбоев и заглушка сломанного;
 	// nil — Holder.Draw(ctx).
 	Direct func(h ListHolder, ctx DrawContext)
+	// Tap зовётся после каждой выполненной команды (кроме ссылок): кэш
+	// размытой подложки снимает результат слоя сразу после его команды.
+	Tap func(c *Cmd)
+	// Override, если задан, получает команду перед выполнением (клип уже
+	// поставлен) и возвращает true, когда выполнил её сам (слой размытия с
+	// попаданием кэша — блит готового растра).
+	Override func(c *Cmd, ctx DrawContext) bool
 	// Exit — клип, к которому привести контекст по окончании.
 	Exit ClipState
 }
@@ -115,6 +122,29 @@ func (p *Replayer) list(l *List) {
 	if l == nil || !p.hits(l.BBox) {
 		return
 	}
+	// Большой список с повреждением внутри одной полосы тайлов — только
+	// команды этой полосы (тайловый растр: тайл обходит корень с тысячами
+	// детей не целиком).
+	if l.rows != nil && len(p.o.Damage) == 1 {
+		if a, b, ok := l.bandsFor(p.o.Damage[0]); ok {
+			// Две соседние полосы сливаются по возрастанию индексов: порядок
+			// рисования сохраняется, повторов нет.
+			for len(a) > 0 || len(b) > 0 {
+				switch {
+				case len(b) == 0 || len(a) > 0 && a[0] < b[0]:
+					p.cmd(&l.Cmds[a[0]])
+					a = a[1:]
+				case len(a) == 0 || b[0] < a[0]:
+					p.cmd(&l.Cmds[b[0]])
+					b = b[1:]
+				default: // одна и та же команда в обеих полосах
+					p.cmd(&l.Cmds[a[0]])
+					a, b = a[1:], b[1:]
+				}
+			}
+			return
+		}
+	}
 	for i := range l.Cmds {
 		p.cmd(&l.Cmds[i])
 	}
@@ -149,6 +179,12 @@ func (p *Replayer) cmd(c *Cmd) {
 	}
 	p.applyClip(*c.Clip, c.Clip)
 	ctx := p.ctx
+	if p.o.Override != nil && p.o.Override(c, ctx) {
+		if p.o.Tap != nil {
+			p.o.Tap(c)
+		}
+		return
+	}
 	x, y, w, h, rad := int(c.X), int(c.Y), int(c.W), int(c.H), int(c.R)
 	switch c.Op {
 	case OpFillRect:
@@ -249,5 +285,8 @@ func (p *Replayer) cmd(c *Cmd) {
 		} else {
 			p.list(c.Ext.Sub)
 		}
+	}
+	if p.o.Tap != nil {
+		p.o.Tap(c)
 	}
 }

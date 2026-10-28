@@ -43,11 +43,19 @@ func readFallbackFile(path string) ([]byte, error) {
 // одним, виден всем.
 type FallbackFont struct {
 	path string // "" — запись создана из готовых данных
+	// parent — запись, у которой берётся загруженный шрифт (View): файл
+	// читается один раз на процесс, вид над ним — свой.
+	parent *FallbackFont
 
 	mu   sync.Mutex
 	fc   atomic.Pointer[FontCache] // nil — ещё не загружен или не удалось
 	done atomic.Bool               // загрузку пытались (успешно или нет)
 }
+
+// View — запись над той же цепочкой с личным видом шрифта (ADR-0005):
+// загрузка идёт через родительскую запись, вид создаётся при первом
+// обращении.
+func (f *FallbackFont) View() *FallbackFont { return &FallbackFont{path: f.path, parent: f} }
 
 // NewReadyFallback — запись с готовым шрифтом.
 func NewReadyFallback(fc *FontCache) *FallbackFont {
@@ -93,7 +101,11 @@ func (f *FallbackFont) Get(ref *FontCache) *FontCache {
 	// как поменяла основной шрифт, — загрузка либо увидит уже новые значения,
 	// либо будет догнана рассылкой.
 	var fc *FontCache
-	if data, err := readFallbackFile(f.path); err == nil {
+	if f.parent != nil {
+		if p := f.parent.Get(ref); p != nil {
+			fc = p.NewView()
+		}
+	} else if data, err := readFallbackFile(f.path); err == nil {
 		fc = NewFontCacheLike(data, ref)
 	}
 	f.fc.Store(fc)

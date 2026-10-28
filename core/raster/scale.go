@@ -130,6 +130,9 @@ func (c *Canvas) adopt(nc *Canvas, bgSrc image.Image) *Canvas {
 // SetDPIAll задаёт DPI всем шрифтам канваса (default, именованные, fallback)
 // и сбрасывает кэши глифов, метрик и раскладок шейпера.
 func (c *Canvas) SetDPIAll(dpi float64) {
+	// Ревизия шрифтов: личные виды воркеров тайлового растра (window.go)
+	// узнают о смене DPI только по ней.
+	c.fontRev.Add(1)
 	c.fontCache.SetDPI(dpi)
 	for _, fc := range c.namedFonts.All() {
 		fc.SetDPI(dpi)

@@ -19,6 +19,11 @@ func recycleEngine(t *testing.T, w, h int) (*Engine, *widget.ImageWidget, [2]*im
 	// Кадры готовит только тест: фоновый тикер не должен вклиниваться со своими
 	// кадрами в сток, канал и пул буферов.
 	eng.SetPacing(PacingExternal)
+	// Без тайлового растра: sync.Pool отдаёт возвращённый буфер только на том
+	// же P, а участие горутины кадра в пуле воркеров (часть 0, ожидание
+	// остальных) под -race гоняет её между P — реиспользование не наблюдалось
+	// бы, хотя буфер в пул возвращён. Сам пул буферов от пути растра не зависит.
+	eng.SetTiledRaster(false)
 	bufs := [2]*image.RGBA{opaqueNoise(w, h, 1), opaqueNoise(w, h, 9)}
 	iw := widget.NewImageWidget()
 	iw.Stretch = widget.ImageStretchNone

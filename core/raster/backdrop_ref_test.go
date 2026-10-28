@@ -92,7 +92,7 @@ func TestBackdropScaleMatchesLegacy(t *testing.T) {
 		pr := image.Rect(x0, y0, x0+1+r.Intn(W-x0), y0+1+r.Intn(H-y0))
 		src := pr.Inset(-r.Intn(12)).Intersect(a.back.Bounds())
 
-		sa, sb := legacyDownscale(a, src), func() *image.RGBA { s, _ := b.downscaleForBlur(src, 8); return s }()
+		sa, sb := legacyDownscale(a, src), func() *image.RGBA { s, _, _ := b.downscaleForBlur(src, 8); return s }()
 		if !bytes.Equal(sa.Pix, sb.Pix) {
 			t.Fatalf("итерация %d, src %v: уменьшение разошлось с прежним", iter, src)
 		}
@@ -114,7 +114,7 @@ func TestBackdropScaleMatchesLegacy(t *testing.T) {
 			b.SetRoundClip(rc, rad)
 		}
 		legacyUpscale(a, sa, src, pr)
-		b.upscaleInto(sb, src, pr)
+		b.upscaleInto(sb, src, pr, image.Point{})
 		if !bytes.Equal(a.back.Pix, b.back.Pix) {
 			t.Fatalf("итерация %d, pr %v, src %v: растяжение разошлось с прежним", iter, pr, src)
 		}

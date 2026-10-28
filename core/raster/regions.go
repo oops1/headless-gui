@@ -142,6 +142,18 @@ func (c *Canvas) withMaskKind(kind output.RegionKind, f func()) {
 //   - частичная заливка на чистом тайле — тоже «не знаю»: рядом осталось
 //     то, что лежало раньше.
 func (c *Canvas) markTiles(r image.Rectangle, kind output.RegionKind, col color.RGBA, opaque bool) {
+	if c.isWindow {
+		// Окно (window.go): один признак — центрального тайла кадра, правила те
+		// же, что для тайла сетки.
+		if r.Overlaps(c.center) {
+			full := c.center.In(r)
+			if full && c.round.active && c.round.clipsTile(c.center) {
+				full = false
+			}
+			c.centerMark.apply(kind, col, opaque, full)
+		}
+		return
+	}
 	if len(c.marks) == 0 {
 		return
 	}
@@ -204,43 +216,48 @@ func (c *Canvas) markTiles(r image.Rectangle, kind output.RegionKind, col color.
 					full = false
 				}
 			}
-
-			// Перекрытие: примитив накрыл тайл целиком и ничего не пропускает.
-			if full && opaque {
-				m.touched, m.kind, m.color = true, kind, col
-				continue
-			}
-			if !m.touched {
-				m.touched = true
-				if kind == output.RegionSolid {
-					// Заливка, не накрывшая тайл целиком: часть площади —
-					// прежнее содержимое.
-					m.kind = output.RegionMixed
-				} else {
-					m.kind, m.color = kind, col
-				}
-				continue
-			}
-
-			switch {
-			case m.kind == kind:
-				// Тот же вид второй раз: для заливки важен цвет, для
-				// остального вид не меняется.
-				if kind == output.RegionSolid && m.color != col {
-					m.kind = output.RegionMixed
-				}
-			case m.kind == output.RegionSolid:
-				// Фон был, поверх легло содержимое — оно и есть признак.
-				m.kind, m.color = kind, col
-			case kind == output.RegionSolid:
-				// Заливка легла поверх картинки или текста, не закрыв тайл
-				// целиком: часть площади — содержимое, часть — заливка.
-				// Обещать потребителю что-то одно нельзя.
-				m.kind = output.RegionMixed
-			default:
-				m.kind = output.RegionMixed
-			}
+			m.apply(kind, col, opaque, full)
 		}
+	}
+}
+
+// apply накладывает примитив вида kind на признак тайла: full — примитив
+// накрыл тайл целиком.
+func (m *tileMark) apply(kind output.RegionKind, col color.RGBA, opaque, full bool) {
+	// Перекрытие: примитив накрыл тайл целиком и ничего не пропускает.
+	if full && opaque {
+		m.touched, m.kind, m.color = true, kind, col
+		return
+	}
+	if !m.touched {
+		m.touched = true
+		if kind == output.RegionSolid {
+			// Заливка, не накрывшая тайл целиком: часть площади —
+			// прежнее содержимое.
+			m.kind = output.RegionMixed
+		} else {
+			m.kind, m.color = kind, col
+		}
+		return
+	}
+
+	switch {
+	case m.kind == kind:
+		// Тот же вид второй раз: для заливки важен цвет, для
+		// остального вид не меняется.
+		if kind == output.RegionSolid && m.color != col {
+			m.kind = output.RegionMixed
+		}
+	case m.kind == output.RegionSolid:
+		// Фон был, поверх легло содержимое — оно и есть признак.
+		m.kind, m.color = kind, col
+	case kind == output.RegionSolid:
+		// Заливка легла поверх картинки или текста, не закрыв тайл
+		// целиком: часть площади — содержимое, часть — заливка.
+		// Обещать потребителю что-то одно нельзя.
+		m.kind = output.RegionMixed
+	default:
+		m.kind = output.RegionMixed
 	}
 }
 

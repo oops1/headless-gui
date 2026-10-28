@@ -85,6 +85,12 @@ type Engine struct {
 	cmdPath   atomic.Bool
 	replayer  hgdraw.Replayer
 	replayDmg [1]image.Rectangle
+	// tiled — тайловый растр (tileframe.go); tr — его воркеры и кэш; bgGen
+	// растёт при смене фона, обоев и формата байтов — растры кэша размытия
+	// сняты с прежних.
+	tiled atomic.Bool
+	tr    *tileRaster
+	bgGen atomic.Uint64
 
 	// subpixelOwn — подпиксельный текст включила или выключила тема, а не
 	// приложение; subpixelPinned — приложение распорядилось само
@@ -378,8 +384,11 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// экспортированные поля виджетов требуют Invalidate()/Engine.Invalidate().
 	// Опт-аут (прежнее поведение «рендер каждый тик»): SetRenderOnDemand(false).
 	e.onDemand.Store(true)
-	// Путь команд (ADR-0004, cmdpath.go) — режим по умолчанию с 4.0.
+	// Путь команд (ADR-0004, cmdpath.go) — режим по умолчанию с 4.0; растр
+	// по тайлам в пуле (ADR-0005, tileframe.go) — тоже, кроме движка вне
+	// экрана: его одиночные кадры не окупают набора воркеров.
 	e.cmdPath.Store(true)
+	e.tiled.Store(!offscreen)
 	// Запасная цепочка шрифтов (BUG-2; файлы читаются лениво) и встроенные
 	// жирный, курсив и моноширинный (P1).
 	e.canvas.AddDefaultFonts()
@@ -679,6 +688,7 @@ func (e *Engine) SetBackgroundFile(path string) error {
 // когда пользователь взялся за окно. Изображение здесь не копируется — не
 // меняйте его после передачи.
 func (e *Engine) SetBackground(img image.Image) error {
+	e.bgGen.Add(1)
 	if img == nil {
 		return fmt.Errorf("engine: SetBackground: изображение nil (снять фон — ClearBackground)")
 	}
@@ -700,6 +710,7 @@ func (e *Engine) SetBackground(img image.Image) error {
 // Без него «просто тёмный рабочий стол» приходилось изображать растянутым
 // однопиксельным PNG — фон нельзя было ни задать из памяти, ни убрать.
 func (e *Engine) ClearBackground() {
+	e.bgGen.Add(1)
 	e.frameMu.Lock()
 	e.mu.Lock()
 	e.bgSrc = nil
@@ -1077,6 +1088,20 @@ func (e *Engine) RenderFrameNow() output.Frame {
 // logicalDamage переводит области кадра в логические координаты, расширяя
 // их наружу: при дробном масштабе округление внутрь отрезало бы от области
 // половину точки, а вместе с ней — поддерево на самом её краю.
+// logicalRect — logicalDamage для одного прямоугольника, без аллокаций.
+func (e *Engine) logicalRect(r image.Rectangle) image.Rectangle {
+	k := e.Scale()
+	if k == 1 {
+		return r
+	}
+	return image.Rect(
+		int(math.Floor(float64(r.Min.X)/k)),
+		int(math.Floor(float64(r.Min.Y)/k)),
+		int(math.Ceil(float64(r.Max.X)/k)),
+		int(math.Ceil(float64(r.Max.Y)/k)),
+	)
+}
+
 func (e *Engine) logicalDamage(rects []image.Rectangle) []image.Rectangle {
 	k := e.Scale()
 	if k == 1 || len(rects) == 0 {
@@ -1169,6 +1194,9 @@ func (e *Engine) Stop() {
 	if started {
 		<-e.done
 	}
+	// Цикл кадра остановлен (done) — воркеры тайлового растра и кэш размытия
+	// (tileframe.go) больше никто не читает.
+	e.tr = nil
 	close(e.frames)
 	if e.saveCh != nil {
 		close(e.saveCh) // saveWorker дочитает оставшиеся задачи
@@ -1885,7 +1913,7 @@ func (e *Engine) renderFrame() output.Frame {
 	e.beginDrawContract()
 	if root != nil {
 		if cmdPath {
-			e.replayTree(canvas, rootList, exitClip, partial, damage)
+			e.rasterTree(canvas, rootList, exitClip, partial, damage)
 		} else {
 			widget.DrawTraced(root, canvas)
 		}

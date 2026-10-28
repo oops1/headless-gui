@@ -45,6 +45,7 @@ func (e *Engine) InvalidateImageCache(src image.Image) {
 // Вызывать в любой момент; следующий кадр перерисуется целиком (Invalidate),
 // так как весь back-буфер теперь в другом порядке байт.
 func (e *Engine) SetPixelFormat(f PixelFormat) error {
+	e.bgGen.Add(1)
 	if f != FormatRGBA && f != FormatBGRX {
 		return fmt.Errorf("engine: SetPixelFormat: неизвестный формат %d", uint8(f))
 	}

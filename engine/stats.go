@@ -66,6 +66,12 @@ type Stats struct {
 	// чистые дети удержанного контейнера сюда не входят — их не посещают).
 	// Нулевой Retained при ненулевом Recorded — удержание не работает.
 	Retained uint64
+	// TiledFrames — сколько кадров растрилось по тайлам в пуле (tileframe.go);
+	// остальные кадры пути команд воспроизводились в холст движка напрямую.
+	TiledFrames uint64
+	// BlurHits, BlurMisses — попадания и промахи кэша размытой подложки:
+	// промах рисует слой ореолом и заполняет кэш.
+	BlurHits, BlurMisses uint64
 }
 
 // engineStats — счётчики, из которых собирается Stats. Пишет их горутина
@@ -77,6 +83,8 @@ type engineStats struct {
 	posted, postedRun       atomic.Uint64
 	panics                  atomic.Uint64
 	recorded, retained      atomic.Uint64
+	tiledFrames             atomic.Uint64
+	blurHits, blurMisses    atomic.Uint64
 }
 
 // Stats возвращает снимок счётчиков движка. Безопасен из любой горутины и не
@@ -104,6 +112,9 @@ func (e *Engine) Stats() Stats {
 		Panics:        s.panics.Load(),
 		Recorded:      s.recorded.Load(),
 		Retained:      s.retained.Load(),
+		TiledFrames:   s.tiledFrames.Load(),
+		BlurHits:      s.blurHits.Load(),
+		BlurMisses:    s.blurMisses.Load(),
 	}
 }
 

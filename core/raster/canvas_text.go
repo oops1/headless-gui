@@ -45,7 +45,9 @@ func (c *Canvas) registerFace(name string, fc *hgtext.FontCache) { c.families.Re
 // faceFor разбирает имя шрифта, которого нет в реестре буквально
 // (fontFamilies.faceFor). nil — подходящего нет, вызывающий берёт шрифт по
 // умолчанию.
-func (c *Canvas) faceFor(req string) *hgtext.FontCache { return c.families.FaceFor(req, c.namedFonts) }
+func (c *Canvas) faceFor(req string) *hgtext.FontCache {
+	return c.view(c.families.FaceFor(req, c.namedFonts))
+}
 
 // resolveFace подбирает имя шрифта в реестре под (семейство, вес, наклон)
 // (fontFamilies.resolveFace).

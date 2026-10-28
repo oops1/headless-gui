@@ -18,6 +18,7 @@ import (
 // Нет ни источника, ни фона — Mica нечего размывать, и слои рисуются сплошным
 // цветом темы (BackdropSpec.Fallback). Смена источника перерисовывает кадр.
 func (e *Engine) SetWallpaperSource(img image.Image) error {
+	e.bgGen.Add(1)
 	if img != nil {
 		if b := img.Bounds(); b.Empty() {
 			return fmt.Errorf("engine: SetWallpaperSource: изображение пустое %v", b)

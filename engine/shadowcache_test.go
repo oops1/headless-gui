@@ -65,6 +65,7 @@ func TestShadowCache_MatchesDirectBlur(t *testing.T) {
 	testreset.Globals(t)
 	for _, scale := range []float64{1, 1.5} {
 		eng := shadowScene(t, scale)
+		eng.SetTiledRaster(false) // шаблоны считаются на холсте движка, а не в окнах воркеров
 		cached := eng.RenderOnce()
 		if eng.canvas.ShadowCacheLen() == 0 {
 			t.Fatalf("scale %v: шаблонный путь не сработал — тест ничего не сравнил", scale)

@@ -39,11 +39,40 @@ type ImageInvalidator struct {
 	mu  sync.Mutex
 	seq atomic.Uint64 // номер последней записи
 	log []invRec
+	// gens — поколение по адресу картинки, allGen — общее (сброс nil): ключ
+	// кэша размытой подложки (ADR-0005) подмешивает их, чтобы содержимое,
+	// переписанное на месте, меняло ключ. Карта ограничена: переполнение
+	// поднимает общее поколение.
+	gens   map[uintptr]uint64
+	allGen uint64
+}
+
+// maxInvGens — сколько адресов картинок помнит карта поколений.
+const maxInvGens = 1024
+
+// Gen — поколение адреса ptr и общее поколение.
+func (j *ImageInvalidator) Gen(ptr uintptr) (gen, all uint64) {
+	j.mu.Lock()
+	gen, all = j.gens[ptr], j.allGen
+	j.mu.Unlock()
+	return gen, all
 }
 
 // Add дописывает сброс в журнал.
 func (j *ImageInvalidator) Add(ptr uintptr, all bool) {
 	j.mu.Lock()
+	if all {
+		j.allGen++
+	} else {
+		if j.gens == nil {
+			j.gens = make(map[uintptr]uint64)
+		}
+		if len(j.gens) >= maxInvGens {
+			clear(j.gens)
+			j.allGen++
+		}
+		j.gens[ptr]++
+	}
 	n := j.seq.Load() + 1
 	if len(j.log) >= maxInvLog {
 		copy(j.log, j.log[1:])

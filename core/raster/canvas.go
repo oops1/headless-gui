@@ -140,7 +140,33 @@ type Canvas struct {
 	// lutRow — буфер строки маски после таблицы контраста (кадр рисуется одной
 	// горутиной; у каждого холста свой).
 	lutRow []uint8
+
+	// Холст-окно (window.go): isWindow — буфер back лежит в координатах кадра
+	// с ненулевым началом, frame — границы кадра, center и centerMark —
+	// центральный тайл и его признак, views/viewsOf/viewRev — личные виды
+	// общих шрифтов холста движка и ревизия, с которой они сделаны.
+	isWindow   bool
+	frame      image.Rectangle
+	center     image.Rectangle
+	centerMark tileMark
+	views      map[*hgtext.FontCache]*hgtext.FontCache
+	viewsOf    *Canvas
+	viewRev    uint64
+	// noPool — холсту нельзя обращаться к пулу воркеров (сам рисует в
+	// задании пула: вложенный workpool.Run — взаимная блокировка).
+	noPool bool
+	// scaledOverride — готовые растры крупных картинок с горутины кадра;
+	// scaledBudget — бюджет пикселей кэша масштабирования (0 — умолчание).
+	scaledOverride func(src image.Image, pw, ph int) *image.RGBA
+	scaledBudget   int
+	// blurSmall, blurLine — переиспользуемые буферы размытия подложки
+	// (backdrop.go): уменьшенная картинка и строка растяжения.
+	blurSmall *image.RGBA
+	blurLine  []byte
 }
+
+// colorRGBA — синоним для сигнатур window.go.
+type colorRGBA = color.RGBA
 
 // RegisterFont регистрирует именованный шрифт (TTF-данные) в реестре холста.
 // fontName соответствует FontFamily в XAML.
@@ -165,10 +191,10 @@ func (c *Canvas) RegisterFont(fontName string, ttfData []byte) {
 func (c *Canvas) FontFor(fontName string) *hgtext.FontCache {
 	if fontName != "" && c.namedFonts != nil {
 		if fc, ok := c.namedFonts.Get(fontName); ok {
-			return fc
+			return c.view(fc)
 		}
 		if fc := c.faceFor(fontName); fc != nil {
-			return fc
+			return fc // faceFor уже отдаёт личный вид
 		}
 	}
 	return c.fontCache
@@ -301,6 +327,7 @@ func newCanvasPhys(pw, ph, w, h int, scale float64, fc *hgtext.FontCache) *Canva
 	// (Engine.SetSubtreeCulling).
 	c.cullingOn.Store(true)
 	c.occlusionOn.Store(true)
+	c.mica = &micaCache{levels: map[int]*micaLevel{}}
 	c.initTileMarks()
 	return c
 }
@@ -487,7 +514,9 @@ func (c *Canvas) SetClip(r image.Rectangle) {
 		c.hasClip = true
 		return
 	}
-	c.clip = pr.Intersect(c.back.Bounds())
+	// Клип — в координатах кадра (у окна кадр шире буфера; запись зажимает
+	// clampRect).
+	c.clip = pr.Intersect(c.Frame())
 	// Пустое пересечение — «не рисовать ничего», как и в ветке частичной
 	// перерисовки выше. Прежде оно выключало отсечение вовсе: виджет, сужавший
 	// клип до своей части и оказавшийся за краем родителя, рисовал по всему
@@ -511,7 +540,7 @@ func (c *Canvas) ClearClip() {
 // SetClip/ClearClip виджетов) ограничивается прямоугольником r.
 // Используется движком для частичной перерисовки по damage-области.
 func (c *Canvas) SetBaseClip(r image.Rectangle) {
-	c.baseClip = r.Intersect(c.back.Bounds())
+	c.baseClip = r.Intersect(c.Frame())
 	c.hasBase = true
 	c.clip = c.baseClip
 	c.hasClip = true
@@ -529,13 +558,13 @@ func (c *Canvas) Clip() image.Rectangle {
 	if c.hasClip {
 		return c.unRect(c.clip)
 	}
-	return image.Rect(0, 0, c.logicalW, c.logicalH)
+	return image.Rect(0, 0, c.logicalW, c.logicalH) // у окна — тоже кадр
 }
 
 // clampRect пересекает r с текущей областью отсечения (или bounds холста).
 func (c *Canvas) clampRect(r image.Rectangle) image.Rectangle {
 	if c.hasClip {
-		return r.Intersect(c.clip)
+		r = r.Intersect(c.clip)
 	}
 	return r.Intersect(c.back.Bounds())
 }
@@ -773,7 +802,7 @@ func (c *Canvas) blendPixelPx(x, y int, col color.RGBA) {
 	if !c.round.contains(x, y) {
 		return
 	}
-	if x < 0 || x >= c.W || y < 0 || y >= c.H {
+	if !image.Pt(x, y).In(c.back.Rect) {
 		return
 	}
 	// Один пиксель — тот же путь, что у заливки с alpha-смешиванием:
@@ -1286,7 +1315,7 @@ func (c *Canvas) setPixelPx(x, y int, col color.RGBA) {
 	if !c.round.contains(x, y) {
 		return
 	}
-	if x >= 0 && x < c.W && y >= 0 && y < c.H {
+	if image.Pt(x, y).In(c.back.Rect) {
 		c.back.SetRGBA(x, y, col)
 	}
 }
@@ -1487,6 +1516,11 @@ func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
 
 // scaledFor возвращает src, масштабированный до pw×ph физических пикселей.
 func (c *Canvas) scaledFor(src image.Image, pw, ph int) *image.RGBA {
+	if c.scaledOverride != nil {
+		if img := c.scaledOverride(src, pw, ph); img != nil {
+			return img
+		}
+	}
 	need := image.Rect(0, 0, pw, ph)
 	key, cacheable := scaledCacheKey(src, pw, ph)
 	if cacheable {
@@ -1529,13 +1563,17 @@ func scaledCacheKey(src image.Image, w, h int) (scaledKey, bool) {
 
 // putScaled кладёт запись в кэш, вытесняя давние при переполнении.
 func (c *Canvas) putScaled(key scaledKey, src image.Image, img *image.RGBA, pixels int) {
-	if pixels > maxScaledPixels {
-		return
+	budget := c.scaledBudget
+	if budget <= 0 {
+		budget = maxScaledPixels
+	}
+	if pixels > budget {
+		return // крупнее бюджета холста (у окна воркера он — доля общего)
 	}
 	if c.scaledCache == nil {
 		c.scaledCache = make(map[scaledKey]*scaledEntry, maxScaledEntries)
 	}
-	for len(c.scaledCache) >= maxScaledEntries || c.scaledPixels+pixels > maxScaledPixels {
+	for len(c.scaledCache) >= maxScaledEntries || c.scaledPixels+pixels > budget {
 		if !c.evictScaled() {
 			break
 		}
@@ -1687,6 +1725,9 @@ func (c *Canvas) diffTiles(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
 	}
 	if tx1 >= c.tilesX {
 		tx1 = c.tilesX - 1
+	}
+	if c.noPool {
+		return c.diffTileRows(tx0, ty0, tx1, ty1) // из окна воркера — без пула
 	}
 	if ty0 > ty1 || tx0 > tx1 {
 		return nil

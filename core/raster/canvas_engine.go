@@ -72,7 +72,7 @@ func (c *Canvas) SetPixelFormat(f PixelFormat, bg image.Image) bool {
 	if c.wallImg != nil {
 		c.SetWallpaperSource(c.wallImg) // и обои Mica
 	}
-	c.mica = nil // размытые обои закодированы в прежнем порядке
+	c.resetMica() // размытые обои закодированы в прежнем порядке
 	return true
 }
 

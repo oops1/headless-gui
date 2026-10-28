@@ -162,7 +162,17 @@ func (e *Engine) guardCall(where string, fn func()) {
 func (e *Engine) caught(where string, r any) {
 	e.stats.panics.Add(1)
 	info := PanicInfo{Where: where, Value: r, Stack: debug.Stack()}
-	if where == "Draw" {
+	if dp, ok := r.(*directPanic); ok {
+		// Паника прямого виджета в воркере тайлового растра (tileframe.go):
+		// виновник и стек сняты там, где она случилась.
+		r = dp.value
+		info.Value, info.Stack, info.Widget = dp.value, dp.stack, dp.w
+		e.endDrawContract()
+		widget.MarkBroken(dp.w)
+		widget.ResetDrawTrace()
+		e.fullNext.Store(true)
+		e.Invalidate()
+	} else if where == "Draw" {
 		info.Widget, info.Path = e.identifyDrawPanic()
 	}
 	e.failure.mu.Lock()

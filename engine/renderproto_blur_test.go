@@ -45,7 +45,7 @@ var protoBlurModeNames = [...]string{"барьер", "ореол", "кэш ра�
 // haloFor — запас ореола для радиуса размытия: два прохода box-blur радиусом
 // radius/4 на уменьшенной в 4 раза подложке плюс неполные блоки по краям;
 // кратен 4, чтобы сетка уменьшения в холсте ореола совпала с сеткой движка.
-func haloFor(radius int) int {
+func protoHaloFor(radius int) int {
 	const k = 4
 	sr := radius / k
 	if sr < 1 {
@@ -71,7 +71,7 @@ func (f *protoFrame) prepareHalo() {
 			r = r.Intersect(c.round)
 		}
 		f.blurRect = f.blurRect.Union(r)
-		if hh := haloFor(c.r); hh > h {
+		if hh := protoHaloFor(c.r); hh > h {
 			h = hh
 		}
 	}

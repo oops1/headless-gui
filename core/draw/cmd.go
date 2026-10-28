@@ -111,10 +111,12 @@ type CmdExt struct {
 	Sub    *List // OpOpacity
 }
 
-// rect — прямоугольник команды из X, Y, W, H.
-func (c *Cmd) rect() image.Rectangle {
+// Rect — прямоугольник команды из X, Y, W, H (логический).
+func (c *Cmd) Rect() image.Rectangle {
 	return image.Rect(int(c.X), int(c.Y), int(c.X+c.W), int(c.Y+c.H))
 }
+
+func (c *Cmd) rect() image.Rectangle { return c.Rect() }
 
 // Env — окружение записи списка: клип и сдвиг контекста в точке, где
 // контейнер позвал Draw ребёнка. Список воспроизводится без Draw только в
@@ -145,6 +147,89 @@ type List struct {
 	// команды после ссылки под ним (виджет вправе снять отсечение — GUIDE,
 	// «Вложенное отсечение»), и удержанный список обязан оставлять тот же.
 	exit ClipState
+	// rows — индекс команд большого списка по полосам тайлов (rowIndex):
+	// тайл обходит только свою полосу, а не все команды корня.
+	rows *rowIndex
+	// owner — холдер, чей это список (идентичность слоя размытия в кэше:
+	// переживает перезапись списка).
+	owner ListHolder
+}
+
+// Owner — холдер списка (nil у списка без холдера).
+func (l *List) Owner() ListHolder {
+	if l == nil {
+		return nil
+	}
+	return l.owner
+}
+
+// rowIndexMin — с какого числа команд список получает индекс по полосам.
+const rowIndexMin = 256
+
+// rowIndex — команды списка по полосам высотой в тайл (физические 64 px):
+// bands[i] — возрастающие индексы команд, чей охват задевает полосу i.
+type rowIndex struct {
+	scale float64
+	bands [][]int32
+}
+
+// buildRows строит индекс по полосам для масштаба scale (логический охват
+// команды переводится в физические полосы с округлением наружу).
+func (l *List) buildRows(scale float64) {
+	if len(l.Cmds) < rowIndexMin {
+		l.rows = nil
+		return
+	}
+	const ts = 64
+	band := func(y int) int {
+		py := float64(y) * scale
+		if py < 0 {
+			py = 0
+		}
+		return int(py) / ts
+	}
+	n := band(l.BBox.Max.Y-1) + 1
+	if n < 1 || n > 4096 {
+		l.rows = nil
+		return
+	}
+	bands := make([][]int32, n)
+	for i := range l.Cmds {
+		b := l.Cmds[i].BBox
+		if b.Empty() {
+			continue
+		}
+		r0, r1 := band(b.Min.Y), band(b.Max.Y-1)
+		if r1 >= n {
+			r1 = n - 1
+		}
+		for r := r0; r <= r1; r++ {
+			bands[r] = append(bands[r], int32(i))
+		}
+	}
+	l.rows = &rowIndex{scale: scale, bands: bands}
+}
+
+// bandsFor возвращает команды списка, задевающие полосу (или две соседние —
+// логическое повреждение тайла на дробном масштабе округлено наружу и
+// задевает соседку), которым принадлежит логический прямоугольник r;
+// ok=false — индекса нет или r шире двух полос (тогда обходится весь список).
+func (l *List) bandsFor(r image.Rectangle) (a, b []int32, ok bool) {
+	ri := l.rows
+	if ri == nil {
+		return nil, nil, false
+	}
+	const ts = 64
+	y0 := int(float64(r.Min.Y)*ri.scale) / ts
+	y1 := int(float64(r.Max.Y-1)*ri.scale) / ts
+	if y0 < 0 || y1 < y0 || y1-y0 > 1 || y0 >= len(ri.bands) {
+		return nil, nil, false
+	}
+	a = ri.bands[y0]
+	if y1 > y0 && y1 < len(ri.bands) {
+		b = ri.bands[y1]
+	}
+	return a, b, true
 }
 
 // Exit — клип на выходе из Draw виджета (для тестов).

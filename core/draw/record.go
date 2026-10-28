@@ -294,6 +294,10 @@ func (r *Recorder) EndRecord(h ListHolder) {
 	l := t.list
 	l.exit = *r.clip
 	r.frames = r.frames[:len(r.frames)-1]
+	if len(l.Cmds) >= rowIndexMin {
+		l.buildRows(r.m.Scale())
+	}
+	l.owner = h
 	h.SetCmdList(l)
 	r.Recorded += uint64(len(l.Cmds))
 	r.rerecorded++
@@ -315,7 +319,7 @@ func (r *Recorder) Direct(h ListHolder, bounds image.Rectangle, off image.Point)
 		return
 	}
 	// Корень дерева — прямой виджет: список из одной команды.
-	l := &List{env: Env{Clip: *r.clip, Off: off}, gen: r.gen.Load(), rec: r, BBox: b, Cmds: []Cmd{c}}
+	l := &List{env: Env{Clip: *r.clip, Off: off}, gen: r.gen.Load(), rec: r, BBox: b, Cmds: []Cmd{c}, owner: h}
 	r.root = l
 	h.NoteRef(nil)
 }

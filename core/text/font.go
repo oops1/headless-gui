@@ -205,6 +205,40 @@ func NewFontCacheLike(data []byte, ref *FontCache) *FontCache {
 	return fc
 }
 
+// NewView — новый вид того же шрифта: личный L1 над тем же общим кэшем
+// (ADR-0003) с теми же DPI, подпикселем и качеством на момент вызова.
+// Воркеру тайлового растра (ADR-0005) нужен свой вид: замок одного вида
+// между воркерами съедает параллелизм. Настройки вида дальше живут порознь —
+// их смену у холста движок встречает пересозданием воркеров.
+func (fc *FontCache) NewView() *FontCache {
+	fc.mu.RLock()
+	v := &FontCache{
+		TTF:      fc.TTF,
+		font:     fc.font,
+		cache:    make(map[float64]font.Face),
+		dpi:      fc.dpi,
+		subpixel: fc.subpixel,
+		quality:  fc.quality,
+		famKey:   fc.famKey,
+	}
+	fc.mu.RUnlock()
+	return v
+}
+
+// SameParams сообщает, совпадают ли настройки вида (DPI, подпиксель,
+// качество) и шрифт с ref: воркер сверяет личный вид с видом холста движка.
+func (fc *FontCache) SameParams(ref *FontCache) bool {
+	if fc == nil || ref == nil {
+		return fc == ref
+	}
+	fc.mu.RLock()
+	dpi, sub, q, f := fc.dpi, fc.subpixel, fc.quality, fc.font
+	fc.mu.RUnlock()
+	ref.mu.RLock()
+	defer ref.mu.RUnlock()
+	return f == ref.font && dpi == ref.dpi && sub == ref.subpixel && q == ref.quality
+}
+
 // PixelSize переводит кегль sizePt (pt) в пиксели 26.6 при DPI шрифта.
 func (fc *FontCache) PixelSize(sizePt float64) fixed.Int26_6 {
 	return fixed.Int26_6(sizePt * fc.dpi / 72.0 * 64.0)

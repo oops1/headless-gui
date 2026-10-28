@@ -84,7 +84,7 @@ func (c *Canvas) InheritWallpaper(src *Canvas) { c.wallParent = src.wallOwner() 
 // SetBackground).
 func (c *Canvas) SetWallpaperSource(src image.Image) {
 	c.wallImg = src
-	c.mica = nil
+	c.resetMica()
 	if src == nil {
 		c.wallScaled = nil
 		return
@@ -106,10 +106,12 @@ func (c *Canvas) micaFor(pradius int) *micaLevel {
 	if src == nil {
 		return nil
 	}
-	if c.mica == nil {
-		c.mica = &micaCache{levels: map[int]*micaLevel{}}
-	}
+	// Кэш создаётся в конструкторе: воркеры тайлового растра берут только
+	// его замок (ADR-0005), ленивое создание из двух горутин было бы гонкой.
 	mc := c.mica
+	if mc == nil {
+		return nil
+	}
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	if lv := mc.levels[pradius]; lv != nil && lv.source == src {
@@ -121,6 +123,18 @@ func (c *Canvas) micaFor(pradius int) *micaLevel {
 	lv := &micaLevel{small: blurWallpaper(src, pradius), source: src}
 	mc.levels[pradius] = lv
 	return lv
+}
+
+// resetMica забывает размытые уровни обоев (смена обоев или формата байтов)
+// под замком кэша.
+func (c *Canvas) resetMica() {
+	if c.mica == nil {
+		c.mica = &micaCache{levels: map[int]*micaLevel{}}
+		return
+	}
+	c.mica.mu.Lock()
+	clear(c.mica.levels)
+	c.mica.mu.Unlock()
 }
 
 // blurWallpaper уменьшает обои в micaDownscale раз усреднением по блокам и

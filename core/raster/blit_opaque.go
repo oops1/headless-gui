@@ -61,7 +61,9 @@ func (c *Canvas) blitSrcRect(r image.Rectangle, src image.Image, offset image.Po
 	}
 	h := r.Dy()
 	bands := 1
-	if r.Dx()*h >= opaqueParallelMin {
+	// Холст, который сам рисует в задании пула (окно тайла), пул не зовёт:
+	// вложенный workpool.Run — взаимная блокировка.
+	if r.Dx()*h >= opaqueParallelMin && !c.noPool {
 		bands = min(runtime.GOMAXPROCS(0), h/opaqueBandRows)
 	}
 	if bands <= 1 {

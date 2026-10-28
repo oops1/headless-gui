@@ -47,7 +47,15 @@ func (c *Canvas) BlurBehind(r image.Rectangle, radius int, tint color.RGBA) {
 		}
 		return
 	}
-	pr := c.clampRect(c.PhysRect(r))
+	// Область слоя и область чтения — в координатах КАДРА (у окна кадр шире
+	// буфера): от них зависит сетка уменьшения, и в тайле-ореоле она обязана
+	// совпасть с сеткой полного кадра. Читается и пишется только то, что
+	// лежит в буфере; у ореола недостающие края — в запасе (ADR-0005).
+	pr := c.PhysRect(r)
+	if c.hasClip {
+		pr = pr.Intersect(c.clip)
+	}
+	pr = pr.Intersect(c.Frame())
 	if pr.Empty() {
 		return
 	}
@@ -60,19 +68,25 @@ func (c *Canvas) BlurBehind(r image.Rectangle, radius int, tint color.RGBA) {
 	// запаса вдоль границы слоя пошла бы кайма от зажима координат.
 	margin := pradius
 	// Область слоя целиком, без отсечения, — для расширения следующего
-	// частичного кадра (backdropdamage.go).
-	c.noteBackdrop(c.PhysRect(r))
-	src := pr.Inset(-margin).Intersect(c.back.Bounds())
+	// частичного кадра (backdropdamage.go). Окно её не ведёт: за кадр отвечает
+	// холст движка.
+	if !c.isWindow {
+		c.noteBackdrop(c.PhysRect(r))
+	}
+	src := pr.Inset(-margin).Intersect(c.Frame())
 	if src.Empty() {
 		return
 	}
 
-	small, sradius := c.downscaleForBlur(src, pradius)
+	small, sradius, origin := c.downscaleForBlur(src, pradius)
+	if small == nil {
+		return
+	}
 	BlurRGBA(small, sradius, 2)
 
 	// Возвращаем размытое обратно, растягивая; за пределы отсечения не
 	// выходим — этим занимается fillRectPx, через который идёт запись.
-	c.upscaleInto(small, src, pr)
+	c.upscaleInto(small, src, pr, origin)
 
 	if tint.A > 0 {
 		c.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), tint)
@@ -92,28 +106,61 @@ func (c *Canvas) BlurBehind(r image.Rectangle, radius int, tint color.RGBA) {
 // полного блока — на константу k·k, то есть сдвиг; прежде на каждый
 // уменьшенный пиксель приходилось четыре деления на переменную. Неполные
 // блоки у края — прежним циклом.
-func (c *Canvas) downscaleForBlur(src image.Rectangle, radius int) (*image.RGBA, int) {
+//
+// Возвращает уменьшенную картинку, радиус размытия в её масштабе и начало
+// картинки в блоках сетки от src.Min. Сетка блоков всегда от src.Min (у
+// холста-окна — в координатах кадра), но считаются и размываются только
+// блоки, нужные буферу: доступная часть src с запасом 2·sr+1 блоков на два
+// прохода размытия. У обычного холста это все блоки; у окна тайла под
+// полноэкранным слоем — его окрестность, а не весь слой на каждый тайл.
+func (c *Canvas) downscaleForBlur(src image.Rectangle, radius int) (*image.RGBA, int, image.Point) {
 	const k = backdropDownscale
-	sw, sh := (src.Dx()+k-1)/k, (src.Dy()+k-1)/k
-	if sw < 1 {
-		sw = 1
+	sradius := radius / k
+	if sradius < 1 {
+		sradius = 1
 	}
-	if sh < 1 {
-		sh = 1
+	// Читать можно только то, что лежит в буфере: у окна область чтения
+	// обрезается им (блоки у края окна — неполные, они в запасе ореола).
+	avail := src.Intersect(c.back.Bounds())
+	if avail.Empty() {
+		return nil, sradius, image.Point{}
 	}
-	small := image.NewRGBA(image.Rect(0, 0, sw, sh))
+	want := avail.Inset(-(2*sradius + 1) * k).Intersect(src)
+	bx0, by0 := (want.Min.X-src.Min.X)/k, (want.Min.Y-src.Min.Y)/k
+	bx1, by1 := (want.Max.X-1-src.Min.X)/k, (want.Max.Y-1-src.Min.Y)/k
+	sw, sh := bx1-bx0+1, by1-by0+1
+	small := c.blurSmall
+	if small == nil || cap(small.Pix) < sw*sh*4 {
+		small = image.NewRGBA(image.Rect(0, 0, sw, sh))
+		c.blurSmall = small
+	} else {
+		small.Pix = small.Pix[:sw*sh*4]
+		small.Stride = sw * 4
+		small.Rect = image.Rect(0, 0, sw, sh)
+	}
 
 	for y := 0; y < sh; y++ {
-		y0 := src.Min.Y + y*k
-		rows := min(k, src.Max.Y-y0)
+		y0 := src.Min.Y + (by0+y)*k
+		rows := min(k, avail.Max.Y-y0)
+		ry := y0
+		if ry < avail.Min.Y {
+			rows -= avail.Min.Y - ry
+			ry = avail.Min.Y
+		}
 		out := small.Pix[small.PixOffset(0, y):]
 		for x := 0; x < sw; x++ {
-			x0 := src.Min.X + x*k
-			cols := min(k, src.Max.X-x0)
-			if rows <= 0 || cols <= 0 {
-				continue
+			x0 := src.Min.X + (bx0+x)*k
+			cols := min(k, avail.Max.X-x0)
+			rx := x0
+			if rx < avail.Min.X {
+				cols -= avail.Min.X - rx
+				rx = avail.Min.X
 			}
 			o := out[x*4 : x*4+4 : x*4+4]
+			if rows <= 0 || cols <= 0 {
+				o[0], o[1], o[2], o[3] = 0, 0, 0, 0
+				continue
+			}
 			if rows == k && cols == k {
 				const lanes = 0x00FF00FF00FF00FF
 				var ev, od uint64
@@ -136,7 +183,7 @@ func (c *Canvas) downscaleForBlur(src image.Rectangle, radius int) (*image.RGBA,
 			// усредняются все четыре одинаково и без разделения на альфу.
 			var sr, sg, sb, sa uint32
 			for dy := 0; dy < rows; dy++ {
-				off := c.back.PixOffset(x0, y0+dy)
+				off := c.back.PixOffset(rx, ry+dy)
 				row := c.back.Pix[off : off+cols*4 : off+cols*4]
 				for i := 0; i+3 < len(row); i += 4 {
 					sr += uint32(row[i])
@@ -150,11 +197,7 @@ func (c *Canvas) downscaleForBlur(src image.Rectangle, radius int) (*image.RGBA,
 		}
 	}
 
-	sradius := radius / k
-	if sradius < 1 {
-		sradius = 1
-	}
-	return small, sradius
+	return small, sradius, image.Pt(bx0, by0)
 }
 
 // upscaleInto возвращает уменьшенную картинку обратно в кадр, растягивая её
@@ -169,7 +212,7 @@ func (c *Canvas) downscaleForBlur(src image.Rectangle, radius int) (*image.RGBA,
 //
 // Запись — Src, а не Over: подложка ЗАМЕНЯЕТ то, что под ней, размытой
 // версией того же самого. Смешивание удвоило бы яркость.
-func (c *Canvas) upscaleInto(small *image.RGBA, src, dst image.Rectangle) {
+func (c *Canvas) upscaleInto(small *image.RGBA, src, dst image.Rectangle, origin image.Point) {
 	const k = backdropDownscale
 	area := c.clampRect(dst.Intersect(src))
 	if area.Empty() {
@@ -179,18 +222,21 @@ func (c *Canvas) upscaleInto(small *image.RGBA, src, dst image.Rectangle) {
 	// ней нет, а кодеку изображений она по душе.
 	c.MarkImage(area)
 
-	line := make([]byte, area.Dx()*4)
+	if cap(c.blurLine) < area.Dx()*4 {
+		c.blurLine = make([]byte, area.Dx()*4+256)
+	}
+	line := c.blurLine[:area.Dx()*4]
 	lineY := -1
 	for y := area.Min.Y; y < area.Max.Y; y++ {
 		x0, x1, ok := c.round.spanX(y, area.Min.X, area.Max.X)
 		if !ok {
 			continue
 		}
-		if sy := (y - src.Min.Y) / k; sy != lineY {
+		if sy := (y-src.Min.Y)/k - origin.Y; sy != lineY {
 			lineY = sy
 			srow := small.Pix[small.PixOffset(0, sy):]
 			for x := area.Min.X; x < area.Max.X; x++ {
-				sx := (x - src.Min.X) / k
+				sx := (x-src.Min.X)/k - origin.X
 				d := line[(x-area.Min.X)*4 : (x-area.Min.X)*4+4 : (x-area.Min.X)*4+4]
 				p := srow[sx*4 : sx*4+4 : sx*4+4]
 				d[0], d[1], d[2], d[3] = p[0], p[1], p[2], p[3]
