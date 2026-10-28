@@ -1,6 +1,7 @@
 package widget
 
 import (
+	"github.com/oops1/headless-gui/v3/core/text"
 	"image/color"
 	"strings"
 	"sync"
@@ -52,15 +53,14 @@ type Label struct {
 	wrapRev   uint64
 }
 
-// Встроенные имена шрифтов для жирного/курсива (регистрируются движком из gofont).
+// Встроенные имена шрифтов для жирного/курсива (регистрируются движком из
+// gofont); см. text.BuiltinFont*.
 const (
-	BuiltinFontBold       = "$hg_bold"
-	BuiltinFontItalic     = "$hg_italic"
-	BuiltinFontBoldItalic = "$hg_bolditalic"
-	// BuiltinFontMono — моноширинный Go Mono: для кода (DiffView), где колонки
-	// обязаны стоять ровно. Без него контрол, которому приложение не дало
-	// своего шрифта, выравнивал бы код пропорциональным.
-	BuiltinFontMono = "$hg_mono"
+	BuiltinFontBold       = text.BuiltinFontBold
+	BuiltinFontItalic     = text.BuiltinFontItalic
+	BuiltinFontBoldItalic = text.BuiltinFontBoldItalic
+	// BuiltinFontMono — моноширинный Go Mono: для кода (DiffView).
+	BuiltinFontMono = text.BuiltinFontMono
 )
 
 // effectiveFont выбирает шрифт: явный FontName важнее; иначе встроенный

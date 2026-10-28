@@ -9,6 +9,7 @@
 package engine
 
 import (
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"bytes"
 	"image"
 	"image/color"
@@ -796,7 +797,7 @@ func (c *Canvas) DrawBorder(x, y, w, h int, col color.RGBA) {
 // DrawText рисует строку TTF-шрифтом (Go Regular) размером widget.DefaultFontSize()
 // (DefaultFontSize, пока приложение или тема не назначили другой).
 func (c *Canvas) DrawText(text string, x, y int, col color.RGBA) {
-	c.DrawTextSize(text, x, y, widget.DefaultFontSize(), col)
+	c.DrawTextSize(text, x, y, hgdraw.DefaultFontSize(), col)
 }
 
 // DrawTextSize рисует строку шрифтом по умолчанию произвольного размера (в пунктах).

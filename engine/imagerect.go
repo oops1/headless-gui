@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"github.com/oops1/headless-gui/v3/core/geom"
 	"image"
 	"image/color"
 	"math"
@@ -357,7 +358,7 @@ func (c *Canvas) DrawImageRect(src image.Image, sr, dr image.Rectangle, f widget
 		return
 	}
 	src, opaque := widget.IsOpaqueImage(src)
-	sr, dr = widget.ClampImageRect(src.Bounds(), sr, dr)
+	sr, dr = geom.ClampImageRect(src.Bounds(), sr, dr)
 	if sr.Empty() || dr.Empty() {
 		return
 	}

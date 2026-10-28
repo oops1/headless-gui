@@ -14,6 +14,7 @@
 package engine
 
 import (
+	"github.com/oops1/headless-gui/v3/core/text"
 	"encoding/binary"
 	"strings"
 	"sync"
@@ -21,7 +22,6 @@ import (
 	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
 
-	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // faceEntry — одно начертание семейства: под каким именем оно лежит в
@@ -310,7 +310,7 @@ func (c *Canvas) faceFor(req string) *FontCache {
 	if t == nil {
 		return nil
 	}
-	family, weight, italic, composite := widget.ParseFontFace(req)
+	family, weight, italic, composite := text.ParseFontFace(req)
 	if !composite {
 		family, weight, italic = req, 400, false
 	}
@@ -362,11 +362,11 @@ func (c *Canvas) resolveFace(family string, weight int, italic bool) string {
 	fb := ""
 	switch {
 	case bold && italic:
-		fb = widget.BuiltinFontBoldItalic
+		fb = text.BuiltinFontBoldItalic
 	case bold:
-		fb = widget.BuiltinFontBold
+		fb = text.BuiltinFontBold
 	case italic:
-		fb = widget.BuiltinFontItalic
+		fb = text.BuiltinFontItalic
 	}
 	if c.namedFonts != nil {
 		if _, ok := c.namedFonts.get(fb); ok {

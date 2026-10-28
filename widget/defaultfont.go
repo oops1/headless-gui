@@ -15,28 +15,20 @@
 package widget
 
 import (
-	"math"
 	"sync/atomic"
+
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 )
 
-var (
-	// defaultFontBits — текущий размер (биты float64); 0 — не задан, то есть
-	// DefaultFontSizePt. Читается из Draw и из измерений без замков.
-	defaultFontBits atomic.Uint64
-	// defaultFontFromTheme — размер поставила тема, а не приложение. Только
-	// такой размер тема вправе снять при смене на профиль без флага: явный
-	// SetDefaultFontSize приложения ей не принадлежит.
-	defaultFontFromTheme atomic.Bool
-)
+// defaultFontFromTheme — размер поставила тема, а не приложение. Только такой
+// размер тема вправе снять при смене на профиль без флага: явный
+// SetDefaultFontSize приложения ей не принадлежит. Сам размер хранит core/draw
+// (его читает и холст движка).
+var defaultFontFromTheme atomic.Bool
 
 // DefaultFontSize возвращает размер шрифта (pt) для виджетов, которым свой не
 // задан: DefaultFontSizePt, пока приложение или тема не назначили другой.
-func DefaultFontSize() float64 {
-	if b := defaultFontBits.Load(); b != 0 {
-		return math.Float64frombits(b)
-	}
-	return DefaultFontSizePt
-}
+func DefaultFontSize() float64 { return hgdraw.DefaultFontSize() }
 
 // SetDefaultFontSize назначает размер шрифта по умолчанию (pt). Ноль и
 // отрицательное значения возвращают DefaultFontSizePt.
@@ -51,13 +43,7 @@ func SetDefaultFontSize(pt float64) {
 	storeDefaultFont(pt)
 }
 
-func storeDefaultFont(pt float64) {
-	if pt <= 0 || math.IsNaN(pt) || math.IsInf(pt, 0) {
-		defaultFontBits.Store(0)
-		return
-	}
-	defaultFontBits.Store(math.Float64bits(pt))
-}
+func storeDefaultFont(pt float64) { hgdraw.StoreDefaultFontSize(pt) }
 
 // applyThemeFontSize — размер, о котором просит тема (ThemeStyle.DefaultFontSize).
 //
@@ -66,7 +52,7 @@ func storeDefaultFont(pt float64) {
 // размер, назначенный приложением.
 func applyThemeFontSize(pt float64) {
 	if pt > 0 {
-		if !defaultFontFromTheme.Load() && defaultFontBits.Load() != 0 {
+		if !defaultFontFromTheme.Load() && hgdraw.DefaultFontSizeSet() {
 			return // явный выбор приложения главнее темы
 		}
 		storeDefaultFont(pt)
@@ -74,6 +60,6 @@ func applyThemeFontSize(pt float64) {
 		return
 	}
 	if defaultFontFromTheme.Swap(false) {
-		defaultFontBits.Store(0)
+		hgdraw.StoreDefaultFontSize(0)
 	}
 }

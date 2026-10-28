@@ -8,6 +8,7 @@
 package engine
 
 import (
+	"github.com/oops1/headless-gui/v3/core/geom"
 	"image"
 	"image/color"
 	"math"
@@ -134,7 +135,7 @@ func (c *Canvas) StrokePathAA(pts []widget.Point2F, thickness float64, closed bo
 // widget.PathShapes: кривая раскладывается той же функцией, что и в откате для
 // контекста без PathShapes, — на разных контекстах она выглядит одинаково.
 func (c *Canvas) StrokeCubicAA(x0, y0, x1, y1, x2, y2, x3, y3, thickness float64, col color.RGBA) {
-	c.StrokePathAA(widget.FlattenCubic(x0, y0, x1, y1, x2, y2, x3, y3), thickness, false, col)
+	c.StrokePathAA(geom.FlattenCubic(x0, y0, x1, y1, x2, y2, x3, y3), thickness, false, col)
 }
 
 // FillPathAA заливает многоугольник с дробными координатами. Реализует

@@ -68,34 +68,10 @@ func InvalidateImageCache(ctx DrawContext, src image.Image) {
 	}
 }
 
-// ClampImageRect обрезает sr по границам источника bounds и уменьшает dr
-// пропорционально, чтобы оставшаяся часть картинки не растянулась. Любой из
-// результатов пуст — рисовать нечего.
+// ClampImageRect обрезает sr по границам источника и уменьшает dr
+// пропорционально; см. geom.ClampImageRect.
 func ClampImageRect(bounds, sr, dr image.Rectangle) (image.Rectangle, image.Rectangle) {
-	if sr.Empty() || dr.Empty() {
-		return image.Rectangle{}, image.Rectangle{}
-	}
-	c := sr.Intersect(bounds)
-	if c.Empty() {
-		return image.Rectangle{}, image.Rectangle{}
-	}
-	if c == sr {
-		return sr, dr
-	}
-	sw, sh := int64(sr.Dx()), int64(sr.Dy())
-	dw, dh := int64(dr.Dx()), int64(dr.Dy())
-	// Доля источника, отрезанная с каждой стороны, переводится в пиксели dr с
-	// округлением к ближайшему.
-	scaleTo := func(n, d, s int64) int {
-		return int((n*d + s/2) / s)
-	}
-	out := image.Rect(
-		dr.Min.X+scaleTo(int64(c.Min.X-sr.Min.X), dw, sw),
-		dr.Min.Y+scaleTo(int64(c.Min.Y-sr.Min.Y), dh, sh),
-		dr.Max.X-scaleTo(int64(sr.Max.X-c.Max.X), dw, sw),
-		dr.Max.Y-scaleTo(int64(sr.Max.Y-c.Max.Y), dh, sh),
-	)
-	return c, out
+	return geom.ClampImageRect(bounds, sr, dr)
 }
 
 // cropImage возвращает src, суженный до r: SubImage, если источник его умеет
