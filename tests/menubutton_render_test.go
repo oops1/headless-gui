@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -13,6 +14,7 @@ import (
 // значок в заголовке панели перекрашен в цвет заголовка.
 
 func TestMenuButton_EngineClickSelectsItem(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(300, 200, 20)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.ShowHeader = false
@@ -46,6 +48,7 @@ func TestMenuButton_EngineClickSelectsItem(t *testing.T) {
 }
 
 func TestDockPaneTitleButtons_EngineTintAndTooltip(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(300, 200, 20)
 	p := widget.NewDockPane("branches", "Ветки", nil)
 	p.TitleBG = color.RGBA{R: 30, G: 30, B: 30, A: 255}

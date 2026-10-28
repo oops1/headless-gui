@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -27,6 +28,7 @@ const svgFolder = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
 // ─── Парсинг/загрузка ────────────────────────────────────────────────────────
 
 func TestSVGIcon_SetSVG(t *testing.T) {
+	testreset.Globals(t)
 	ic := widget.NewSVGIcon()
 	if err := ic.SetSVG([]byte(svgMenu)); err != nil {
 		t.Fatalf("SetSVG error: %v", err)
@@ -44,6 +46,7 @@ func TestSVGIcon_SetSVG(t *testing.T) {
 }
 
 func TestSVGIcon_AllIconsParse(t *testing.T) {
+	testreset.Globals(t)
 	for name, src := range map[string]string{"menu": svgMenu, "close": svgClose, "folder": svgFolder} {
 		ic := widget.NewSVGIcon()
 		if err := ic.SetSVG([]byte(src)); err != nil {
@@ -57,6 +60,7 @@ func TestSVGIcon_AllIconsParse(t *testing.T) {
 }
 
 func TestSVGIcon_BadXML(t *testing.T) {
+	testreset.Globals(t)
 	ic := widget.NewSVGIcon()
 	if err := ic.SetSVG([]byte("<svg><path d=")); err == nil {
 		t.Error("ожидалась ошибка разбора битого XML")
@@ -69,6 +73,7 @@ func TestSVGIcon_BadXML(t *testing.T) {
 // ─── Темизация и перекраска ──────────────────────────────────────────────────
 
 func TestSVGIcon_ApplyThemeUsesLabelText(t *testing.T) {
+	testreset.Globals(t)
 	ic := widget.NewSVGIcon()
 	dark := widget.DarkTheme()
 	ic.ApplyTheme(dark)
@@ -83,6 +88,7 @@ func TestSVGIcon_ApplyThemeUsesLabelText(t *testing.T) {
 }
 
 func TestSVGIcon_ExplicitColorNotOverriddenByTheme(t *testing.T) {
+	testreset.Globals(t)
 	ic := widget.NewSVGIcon()
 	red := color.RGBA{255, 0, 0, 255}
 	ic.SetColor(red)
@@ -93,6 +99,7 @@ func TestSVGIcon_ExplicitColorNotOverriddenByTheme(t *testing.T) {
 }
 
 func TestSVGIcon_TintFlag(t *testing.T) {
+	testreset.Globals(t)
 	ic := widget.NewSVGIcon()
 	if ic.Tint() {
 		t.Error("Tint по умолчанию должен быть false")
@@ -143,6 +150,7 @@ func readFirstFrame(t *testing.T, eng *engine.Engine, w, h int) *image.RGBA {
 // TestSVGIcon_RenderTinted: зелёная (tint) иконка-круг на чёрном фоне —
 // центр bounds становится зелёным.
 func TestSVGIcon_RenderTinted(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 128, 128
 	eng := engine.New(w, h, 30)
 	eng.SetTooltipsEnabled(false)

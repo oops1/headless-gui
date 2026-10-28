@@ -3,11 +3,16 @@ package tests
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
+// Таблицы переводов здесь не очищаются (ClearStrings): она стирает и встроенные
+// переводы штатных диалогов и DatePicker, зарегистрированные в init, — вернуть
+// их тесту нечем, и тесты диалогов, идущие следом, видят ключи «dlg.*» вместо
+// текста. Ключи этих тестов свои («Hi», «Greeting», …), встроенных среди них нет.
 func TestStrings_TrFallbackAndMissing(t *testing.T) {
-	widget.ClearStrings()
+	testreset.Globals(t)
 	widget.SetFallbackLocale("EN")
 	widget.RegisterStrings("EN", map[string]string{"Hi": "Hello", "Only": "EN-only"})
 	widget.RegisterStrings("RU", map[string]string{"Hi": "Привет"})
@@ -29,7 +34,7 @@ func TestStrings_TrFallbackAndMissing(t *testing.T) {
 
 // Язык интерфейса (Language) и раскладка клавиатуры (Locale) независимы.
 func TestStrings_LanguageIndependentFromKeyboardLocale(t *testing.T) {
-	widget.ClearStrings()
+	testreset.Globals(t)
 	widget.SetFallbackLanguage("EN")
 	widget.RegisterStrings("EN", map[string]string{"Hi": "Hello"})
 	widget.RegisterStrings("RU", map[string]string{"Hi": "Привет"})
@@ -58,7 +63,7 @@ func TestStrings_LanguageIndependentFromKeyboardLocale(t *testing.T) {
 }
 
 func TestStrings_LoadJSON(t *testing.T) {
-	widget.ClearStrings()
+	testreset.Globals(t)
 	if err := widget.LoadStringsJSON("DE", []byte(`{"Hi":"Hallo"}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +73,7 @@ func TestStrings_LoadJSON(t *testing.T) {
 }
 
 func TestStrings_RemoveLanguageListener(t *testing.T) {
+	testreset.Globals(t)
 	widget.SetLanguage("EN")
 	called := false
 	id := widget.AddLanguageListener(func(string) { called = true })
@@ -80,7 +86,7 @@ func TestStrings_RemoveLanguageListener(t *testing.T) {
 }
 
 func TestBindingScope_DisposeStopsLocUpdates(t *testing.T) {
-	widget.ClearStrings()
+	testreset.Globals(t)
 	widget.RegisterStrings("EN", map[string]string{"DisposeKey": "Hello"})
 	widget.RegisterStrings("RU", map[string]string{"DisposeKey": "Привет"})
 	widget.SetLanguage("EN")
@@ -108,7 +114,7 @@ func TestBindingScope_DisposeStopsLocUpdates(t *testing.T) {
 }
 
 func TestStrings_Trf(t *testing.T) {
-	widget.ClearStrings()
+	testreset.Globals(t)
 	widget.RegisterString("EN", "Count", "Items: %d")
 	widget.SetLanguage("EN")
 	if got := widget.Trf("Count", 5); got != "Items: 5" {
@@ -117,7 +123,7 @@ func TestStrings_Trf(t *testing.T) {
 }
 
 func TestStrings_XAMLStaticAndDynamic(t *testing.T) {
-	widget.ClearStrings()
+	testreset.Globals(t)
 	widget.SetFallbackLocale("EN")
 	widget.RegisterStrings("EN", map[string]string{"Greeting": "Hello", "Btn": "Save"})
 	widget.RegisterStrings("RU", map[string]string{"Greeting": "Привет", "Btn": "Сохранить"})

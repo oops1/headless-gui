@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -24,6 +25,7 @@ import (
 // свои отрисовки.
 
 func TestOcclusion_CoveredWidgetIsNotDrawn(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 20, G: 24, B: 30, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 400, 300))
@@ -59,6 +61,7 @@ func TestOcclusion_CoveredWidgetIsNotDrawn(t *testing.T) {
 
 // Картинка от пропуска не меняется — ни с прозрачностью, ни без неё.
 func TestOcclusion_FrameIsIdenticalWithAndWithout(t *testing.T) {
+	testreset.Globals(t)
 	// build собирает одну и ту же сцену; opaque=false делает верхнюю панель
 	// полупрозрачной, и тогда пропускать нижнюю нельзя — она видна насквозь.
 	build := func(opaque bool) *image.RGBA {
@@ -112,6 +115,7 @@ func TestOcclusion_FrameIsIdenticalWithAndWithout(t *testing.T) {
 
 // Полупрозрачная панель не закрывает ничего: под ней видно нижнюю.
 func TestOcclusion_TranslucentCoversNothing(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 20, G: 24, B: 30, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 400, 300))
@@ -139,6 +143,7 @@ func TestOcclusion_TranslucentCoversNothing(t *testing.T) {
 
 // Скруглённое окно не закрывает своих углов.
 func TestOcclusion_RoundedWindowLeavesItsCorners(t *testing.T) {
+	testreset.Globals(t)
 	const cr = 12
 
 	win := widget.NewWindow("Окно", 200, 150)
@@ -168,6 +173,7 @@ func TestOcclusion_RoundedWindowLeavesItsCorners(t *testing.T) {
 
 // Полупрозрачное окно не закрывает ничего.
 func TestOcclusion_TranslucentWindowDeclaresNothing(t *testing.T) {
+	testreset.Globals(t)
 	win := widget.NewWindow("Стекло", 200, 150)
 	win.SetBounds(image.Rect(50, 50, 250, 200))
 	win.Background = color.RGBA{R: 60, G: 60, B: 70, A: 200}

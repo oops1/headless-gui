@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -71,6 +72,7 @@ func noCaretFor(t *testing.T, eng frameRenderer, area image.Rectangle, what stri
 }
 
 func TestRichTextEngine_CaretDrawnOnlyInFocus(t *testing.T) {
+	testreset.Globals(t)
 	bounds := image.Rect(20, 20, 420, 120)
 	eng, rt := richEngine(t, bounds,
 		widget.RichParagraph{Runs: []widget.RichRun{{Text: "hello caret"}}},
@@ -122,6 +124,7 @@ func TestRichTextEngine_CaretDrawnOnlyInFocus(t *testing.T) {
 // В режиме просмотра (ShowCaret == false) каретка не рисуется даже в фокусе,
 // хотя по тексту ходит.
 func TestRichTextEngine_ViewModeDrawsNoCaret(t *testing.T) {
+	testreset.Globals(t)
 	bounds := image.Rect(20, 20, 420, 120)
 	eng, rt := richEngine(t, bounds, widget.RichParagraph{Runs: []widget.RichRun{{Text: "hello caret"}}})
 	rt.CaretColor = richCaretRed

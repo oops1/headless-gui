@@ -6,11 +6,13 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // TestTabControl_TabToolTip — GetToolTip отдаёт подсказку вкладки под курсором.
 func TestTabControl_TabToolTip(t *testing.T) {
+	testreset.Globals(t)
 	tc := widget.NewTabControl()
 	tc.SetBounds(image.Rect(0, 0, 400, 200))
 	tc.AddTab("aa", nil)
@@ -40,6 +42,7 @@ func TestTabControl_TabToolTip(t *testing.T) {
 // TestTabControl_SeparatorShiftsHitTest — разделитель занимает место в полосе
 // и сдвигает хит-тест последующих вкладок.
 func TestTabControl_SeparatorShiftsHitTest(t *testing.T) {
+	testreset.Globals(t)
 	tc := widget.NewTabControl()
 	tc.SetBounds(image.Rect(0, 0, 400, 200))
 	tc.AddTab("aa", nil)

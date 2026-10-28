@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -59,6 +60,7 @@ func mvRelease(mv *widget.MergeView, x, y int) {
 // Щелчок по полосе ниже ползунка переносит туда видимую область, и мышь
 // контрол забирает себе — иначе протяжку получил бы кто-то другой.
 func TestMergeView_RulerClickScrolls(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeLongView(t)
 	e := widget.MouseEvent{X: mvRulerX, Y: 500, Button: widget.MouseLeft, Pressed: true}
 	if !mv.WantsCapture(e) {
@@ -74,6 +76,7 @@ func TestMergeView_RulerClickScrolls(t *testing.T) {
 // Ползунок тащится без скачка: нажатие на нём не двигает панели, протяжка
 // двигает, а возврат мыши на место возвращает и прокрутку.
 func TestMergeView_RulerThumbDrag(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeLongView(t)
 	mv.SetScroll(0)
 
@@ -102,6 +105,7 @@ func TestMergeView_RulerThumbDrag(t *testing.T) {
 
 // Щелчок по отметке конфликта на полосе — переход к этому конфликту.
 func TestMergeView_RulerMarkGoesToConflict(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeLongView(t)
 	found := false
 	for y := 60; y < 580 && !found; y++ {
@@ -121,6 +125,7 @@ func TestMergeView_RulerMarkGoesToConflict(t *testing.T) {
 // Прокрутка снаружи: SetScroll ограничивается краями, ScrollToLine ставит строку
 // в видимую область.
 func TestMergeView_ScrollAPI(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeLongView(t)
 	mv.SetScroll(-50)
 	if got := mv.Scroll(); got != 0 {
@@ -146,6 +151,7 @@ func TestMergeView_ScrollAPI(t *testing.T) {
 // GG-60: итог готовыми блоками кончается переводом строки; вид записи задаётся
 // и переживает SetChunks; пустое слияние — пустой файл.
 func TestMergeView_ResultEOL(t *testing.T) {
+	testreset.Globals(t)
 	mv := widget.NewMergeView("", "")
 	mv.SetChunks([]widget.MergeChunk{{Merged: []string{"one"}}})
 	if got := mv.Result(); got != "one\n" {
@@ -179,6 +185,7 @@ func TestMergeView_ResultEOL(t *testing.T) {
 
 // GG-60: длина маркеров как conflict-marker-size у git.
 func TestMergeView_MarkerSize(t *testing.T) {
+	testreset.Globals(t)
 	mv := widget.NewMergeView("", "")
 	mv.SetTexts(mvBase, mvOurs, mvTheirs)
 	if got := mv.MarkerSize(); got != 7 {
@@ -203,6 +210,7 @@ func TestMergeView_MarkerSize(t *testing.T) {
 // нерешённых конфликтов: правка руками остаётся. Раньше итог пересобирался
 // целиком и правка пропадала — в демо это случалось при каждой смене языка.
 func TestMergeView_FormatKeepsManualEdits(t *testing.T) {
+	testreset.Globals(t)
 	mv := widget.NewMergeView("", "")
 	mv.SetTexts(mvBase, mvOurs, mvTheirs)
 	mv.SetCaret(0, len("package ui"))

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
 )
@@ -92,6 +93,7 @@ func (nopCtx) FillPolygonAA(pts []image.Point, c color.RGBA)                {}
 // TestSEC4_OnRowActivated_NoDeadlock — обработчик двойного клика зовёт
 // SelectedItem()/ScrollBy() и не вешает поток.
 func TestSEC4_OnRowActivated_NoDeadlock(t *testing.T) {
+	testreset.Globals(t)
 	g, _ := newSecGrid(5)
 	var seen interface{}
 	g.OnRowActivated = func(row int, item interface{}) {
@@ -109,6 +111,7 @@ func TestSEC4_OnRowActivated_NoDeadlock(t *testing.T) {
 // TestSEC4_OnRowActivated_EnterKey_NoDeadlock — тот же обработчик по Enter:
 // раньше он вызывался прямо из-под dg.mu в OnKeyEvent.
 func TestSEC4_OnRowActivated_EnterKey_NoDeadlock(t *testing.T) {
+	testreset.Globals(t)
 	g, _ := newSecGrid(5)
 	fired := 0
 	g.OnRowActivated = func(row int, item interface{}) {
@@ -128,6 +131,7 @@ func TestSEC4_OnRowActivated_EnterKey_NoDeadlock(t *testing.T) {
 // TestSEC4_OnSorting_NoDeadlock — обработчик сортировки зовёт публичные
 // методы грида; при Handled=false грид всё равно должен отсортировать данные.
 func TestSEC4_OnSorting_NoDeadlock(t *testing.T) {
+	testreset.Globals(t)
 	g, _ := newSecGrid(5)
 	fired := 0
 	g.OnSorting = func(e *dg.SortingEvent) {
@@ -148,6 +152,7 @@ func TestSEC4_OnSorting_NoDeadlock(t *testing.T) {
 // штатную сортировку (семантика не должна была измениться от переноса
 // колбэка за пределы лока).
 func TestSEC4_OnSorting_HandledSkipsSort(t *testing.T) {
+	testreset.Globals(t)
 	g, oc := newSecGrid(3)
 	oc.Set(0, &secRow{Name: "c", Age: 0})
 	oc.Set(1, &secRow{Name: "a", Age: 1})
@@ -166,6 +171,7 @@ func TestSEC4_OnSorting_HandledSkipsSort(t *testing.T) {
 // TestSEC4_OnCellEditEnding_NoDeadlock — обработчик завершения правки зовёт
 // публичные методы и может отменить запись.
 func TestSEC4_OnCellEditEnding_NoDeadlock(t *testing.T) {
+	testreset.Globals(t)
 	g, oc := newSecGrid(3)
 	fired := 0
 	g.OnCellEditEnding = func(e *dg.CellEditEndingEvent) {
@@ -190,6 +196,7 @@ func TestSEC4_OnCellEditEnding_NoDeadlock(t *testing.T) {
 
 // TestSEC4_OnCellEditEnding_CancelKeepsModel — Cancel=true не пишет в модель.
 func TestSEC4_OnCellEditEnding_CancelKeepsModel(t *testing.T) {
+	testreset.Globals(t)
 	g, oc := newSecGrid(3)
 	g.OnCellEditEnding = func(e *dg.CellEditEndingEvent) { e.Cancel = true }
 
@@ -207,6 +214,7 @@ func TestSEC4_OnCellEditEnding_CancelKeepsModel(t *testing.T) {
 
 // TestSEC4_OnSelectionChanged_NoDeadlock — регресс на уже починенный путь.
 func TestSEC4_OnSelectionChanged_NoDeadlock(t *testing.T) {
+	testreset.Globals(t)
 	g, _ := newSecGrid(5)
 	g.OnSelectionChanged = func(e dg.SelectionChangedEvent) {
 		_ = g.SelectedItem()
@@ -223,6 +231,7 @@ func TestSEC4_OnSelectionChanged_NoDeadlock(t *testing.T) {
 // фоновой горутины, дальше клик/коммит/отрисовка. Раньше здесь была паника
 // на dg.sortedIdx[dg.editingRow].
 func TestSEC5_EditThenClearCollection(t *testing.T) {
+	testreset.Globals(t)
 	g, oc := newSecGrid(5)
 
 	g.OnMouseDoubleClick(10, 20+25) // правка строки 1
@@ -243,6 +252,7 @@ func TestSEC5_EditThenClearCollection(t *testing.T) {
 // TestSEC5_EditThenRemoveRows — коллекция сжалась, редактируемая строка
 // исчезла: правка отменяется БЕЗ коммита, паники нет.
 func TestSEC5_EditThenRemoveRows(t *testing.T) {
+	testreset.Globals(t)
 	g, oc := newSecGrid(5)
 
 	g.OnMouseDoubleClick(10, 20+4*20+5) // правка последней строки (4)
@@ -277,6 +287,7 @@ func TestSEC5_EditThenRemoveRows(t *testing.T) {
 // TestSEC5_SetColumnsDuringEdit — смена набора колонок посреди правки:
 // editingCol обязан быть сброшен, иначе dg.columns[editingCol] за границей.
 func TestSEC5_SetColumnsDuringEdit(t *testing.T) {
+	testreset.Globals(t)
 	g, _ := newSecGrid(4)
 
 	g.OnMouseDoubleClick(150, 20+25) // правка второй колонки
@@ -301,6 +312,7 @@ func TestSEC5_SetColumnsDuringEdit(t *testing.T) {
 // затем модель под редактором меняется: срез рун по старой позиции не должен
 // ронять кадр.
 func TestSEC5_DrawEditCell_CursorClamp(t *testing.T) {
+	testreset.Globals(t)
 	g, oc := newSecGrid(3)
 	oc.Set(0, &secRow{Name: "очень длинное значение ячейки", Age: 0})
 
@@ -325,6 +337,7 @@ func TestSEC5_DrawEditCell_CursorClamp(t *testing.T) {
 // только UI-поток, а фоновая горутина меняет лишь состав коллекции, где
 // синхронизацию обеспечивает сама ObservableCollection.
 func TestSEC5_ConcurrentMutationWhileDrawing(t *testing.T) {
+	testreset.Globals(t)
 	g, oc := newSecGrid(50)
 
 	stop := make(chan struct{})
@@ -379,6 +392,7 @@ func TestSEC5_ConcurrentMutationWhileDrawing(t *testing.T) {
 // TestSEC11_DataGridUnsubscribesOldSource — N перебиндовок не оставляют живых
 // обработчиков на брошенных коллекциях.
 func TestSEC11_DataGridUnsubscribesOldSource(t *testing.T) {
+	testreset.Globals(t)
 	g, first := newSecGrid(3)
 	if n := first.HandlerCount(); n != 1 {
 		t.Fatalf("после SetItemsSource у источника %d подписчиков, ожидался 1", n)
@@ -407,6 +421,7 @@ func TestSEC11_DataGridUnsubscribesOldSource(t *testing.T) {
 
 // TestSEC11_CollectionViewUnsubscribesOldSource — то же для CollectionView.
 func TestSEC11_CollectionViewUnsubscribesOldSource(t *testing.T) {
+	testreset.Globals(t)
 	first := sampleOC()
 	v := widget.NewCollectionView(first)
 	if n := first.HandlerCount(); n != 1 {
@@ -435,6 +450,7 @@ func TestSEC11_CollectionViewUnsubscribesOldSource(t *testing.T) {
 // TestSEC11_OldSourceNoLongerDrivesGrid — брошенная коллекция больше не
 // перестраивает грид: после перебиндовки её изменения не меняют число строк.
 func TestSEC11_OldSourceNoLongerDrivesGrid(t *testing.T) {
+	testreset.Globals(t)
 	g, old := newSecGrid(3)
 
 	fresh := dg.NewObservableCollection()

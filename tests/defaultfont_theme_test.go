@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -37,6 +38,7 @@ func labelWidth(text string) int {
 }
 
 func TestDefaultFont_NoProfileStaysTenPoints(t *testing.T) {
+	testreset.Globals(t)
 	resetDefaultFont(t)
 	if got := widget.DefaultFontSize(); got != widget.DefaultFontSizePt {
 		t.Fatalf("без профиля кегль %v, ждали %v", got, widget.DefaultFontSizePt)
@@ -44,6 +46,7 @@ func TestDefaultFont_NoProfileStaysTenPoints(t *testing.T) {
 }
 
 func TestDefaultFont_Windows10ProfileFollowsFontsDefault(t *testing.T) {
+	testreset.Globals(t)
 	resetDefaultFont(t)
 	eng := engine.New(200, 100, 30)
 	m := fontTestManager(t)
@@ -75,6 +78,7 @@ func TestDefaultFont_Windows10ProfileFollowsFontsDefault(t *testing.T) {
 // Windows 11, Windows 2000 и macOS объявляют Fonts[default] = 9 pt, но флага
 // не ставят: применение профиля не должно менять раскладку каждого окна.
 func TestDefaultFont_OtherProfilesDoNotChange(t *testing.T) {
+	testreset.Globals(t)
 	resetDefaultFont(t)
 	eng := engine.New(200, 100, 30)
 	m := fontTestManager(t)
@@ -94,6 +98,7 @@ func TestDefaultFont_OtherProfilesDoNotChange(t *testing.T) {
 // Флаг можно включить на лету любому профилю: Manager.SetFlag и
 // ApplyThemeProfile.
 func TestDefaultFont_FlagOnTheFly(t *testing.T) {
+	testreset.Globals(t)
 	resetDefaultFont(t)
 	eng := engine.New(200, 100, 30)
 	m := fontTestManager(t)
@@ -118,6 +123,7 @@ func TestDefaultFont_FlagOnTheFly(t *testing.T) {
 
 // Размер, назначенный приложением явно, тема не трогает.
 func TestDefaultFont_ExplicitWinsOverTheme(t *testing.T) {
+	testreset.Globals(t)
 	resetDefaultFont(t)
 	eng := engine.New(200, 100, 30)
 	m := fontTestManager(t)
@@ -138,6 +144,7 @@ func TestDefaultFont_ExplicitWinsOverTheme(t *testing.T) {
 
 // Мост туда и обратно сохраняет просьбу о кегле.
 func TestDefaultFont_BridgeRoundTrip(t *testing.T) {
+	testreset.Globals(t)
 	src := widget.DarkTheme()
 	src.Style.DefaultFontSize = 8.5
 	got := roundTrip(t, src)

@@ -14,7 +14,15 @@ import (
 // всякого дефекта. Такие тесты ловят патологию — кадр в разы дороже, чем
 // должен быть, — а не колебания чужого железа, поэтому под CI порог
 // умножается (по умолчанию на 4; HG_PERF_SLACK задаёт множитель явно).
+//
+// Детектор гонок (-race) замедляет код в разы сам по себе — кадр анимации
+// боковой панели «Пуска» под ним шёл дольше 50 мс без всякого дефекта, — и
+// тот же замер говорит уже о цене инструментирования. Под -race порог
+// умножается ещё на raceSlack: патологию «в разы дороже» тест ловит и там.
 func perfBudget(base time.Duration) time.Duration {
+	if raceEnabled {
+		base *= raceSlack
+	}
 	if s := os.Getenv("HG_PERF_SLACK"); s != "" {
 		if k, err := strconv.ParseFloat(s, 64); err == nil && k > 0 {
 			return time.Duration(float64(base) * k)
@@ -25,6 +33,9 @@ func perfBudget(base time.Duration) time.Duration {
 	}
 	return base
 }
+
+// raceSlack — во сколько раз под -race ослаблен порог perfBudget.
+const raceSlack = 10
 
 // bestOf повторяет замер n раз и возвращает лучший.
 //

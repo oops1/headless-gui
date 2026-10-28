@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -34,6 +35,7 @@ func newBroadcastEngine(w, h int, text string) (*engine.Engine, *widget.Label) {
 // Изменение виджета в дереве A рождает кадр движка A; движок B продолжает
 // работать (реагирует на собственную инвалидацию).
 func TestBroadcast_InvalidateReachesOwnEngine(t *testing.T) {
+	testreset.Globals(t)
 	engA, lblA := newBroadcastEngine(320, 200, "A")
 	engB, _ := newBroadcastEngine(320, 200, "B")
 	// Порядок создания: B создан ПОСЛЕ A. В прежней схеме «последний выигрывает»
@@ -73,6 +75,7 @@ func TestBroadcast_InvalidateReachesOwnEngine(t *testing.T) {
 // TestBroadcast_StopUnregisters: Stop снимает регистрацию движка в реестре
 // нотификаторов — размер реестра возвращается к исходному (нет утечки).
 func TestBroadcast_StopUnregisters(t *testing.T) {
+	testreset.Globals(t)
 	n0 := widget.UINotifierCount()
 
 	eng, _ := newBroadcastEngine(200, 120, "x")
@@ -132,6 +135,7 @@ func (h *fakeSecondEngineHost) CloseModal(m widget.ModalWidget) bool {
 // уведомления и рендерить кадры; второй движок тоже рендерит свои изменения;
 // после закрытия диалога реестр без утечки.
 func TestBroadcast_HostedDialogParentKeepsRendering(t *testing.T) {
+	testreset.Globals(t)
 	n0 := widget.UINotifierCount()
 
 	parent, parentLbl := newBroadcastEngine(400, 300, "parent")

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -58,6 +59,7 @@ func xorInv(bg color.RGBA) color.RGBA {
 // ─── Курсор resize-зон ──────────────────────────────────────────────────────
 
 func TestWindowCursor_ResizeEdges(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Cur", 400, 300)
 	w.SetBounds(image.Rect(100, 100, 500, 400))
 
@@ -85,6 +87,7 @@ func TestWindowCursor_ResizeEdges(t *testing.T) {
 
 // TestWindowCursor_NoResize — при ResizeModeNoResize resize-курсоров нет.
 func TestWindowCursor_NoResize(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Fixed", 400, 300)
 	w.Resize = widget.ResizeModeNoResize
 	w.SetBounds(image.Rect(100, 100, 500, 400))
@@ -95,6 +98,7 @@ func TestWindowCursor_NoResize(t *testing.T) {
 
 // TestWindowCursor_ViaEngine — интеграция через engine.CursorAt.
 func TestWindowCursor_ViaEngine(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Cur", 400, 300)
 	w.SetBounds(image.Rect(0, 0, 400, 300))
 
@@ -112,6 +116,7 @@ func TestWindowCursor_ViaEngine(t *testing.T) {
 // ─── Механика resize ────────────────────────────────────────────────────────
 
 func TestWindowResize_RightEdge_Grows(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("R", 400, 300)
 	w.SetBounds(image.Rect(100, 100, 500, 400))
 
@@ -132,6 +137,7 @@ func TestWindowResize_RightEdge_Grows(t *testing.T) {
 }
 
 func TestWindowResize_CornerNW(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("R", 400, 300)
 	w.SetBounds(image.Rect(100, 100, 500, 400))
 
@@ -149,6 +155,7 @@ func TestWindowResize_CornerNW(t *testing.T) {
 }
 
 func TestWindowResize_MinSize(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("R", 400, 300)
 	w.SetBounds(image.Rect(100, 100, 500, 400))
 
@@ -166,6 +173,7 @@ func TestWindowResize_MinSize(t *testing.T) {
 }
 
 func TestWindowResize_NoResizeMode(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Fixed", 400, 300)
 	w.Resize = widget.ResizeModeNoResize
 	w.SetBounds(image.Rect(100, 100, 500, 400))
@@ -183,6 +191,7 @@ func TestWindowResize_NoResizeMode(t *testing.T) {
 // TestWindowResize_CustomMinSize — публичные MinWidth/MinHeight ограничивают
 // виджетный edge-resize вместо захардкоженных 120×80.
 func TestWindowResize_CustomMinSize(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("R", 400, 300)
 	w.MinWidth = 250
 	w.MinHeight = 200
@@ -205,6 +214,7 @@ func TestWindowResize_CustomMinSize(t *testing.T) {
 // TestWindowResize_MinSizeDefault — при MinWidth/MinHeight=0 действует прежний
 // дефолт 120×80.
 func TestWindowResize_MinSizeDefault(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("R", 400, 300)
 	w.SetBounds(image.Rect(100, 100, 500, 400))
 
@@ -219,6 +229,7 @@ func TestWindowResize_MinSizeDefault(t *testing.T) {
 
 // TestXAMLWindow_MinSize — атрибуты MinWidth/MinHeight парсятся в поля Window.
 func TestXAMLWindow_MinSize(t *testing.T) {
+	testreset.Globals(t)
 	xaml := []byte(`<Window Title="T" Width="800" Height="600" MinWidth="640" MinHeight="480"><Canvas/></Window>`)
 	root, _, err := widget.LoadUIFromXAML(xaml)
 	if err != nil {
@@ -238,6 +249,7 @@ func TestXAMLWindow_MinSize(t *testing.T) {
 
 // TestXAMLWindow_MinSize_Absent — без атрибутов MinWidth/MinHeight поля = 0.
 func TestXAMLWindow_MinSize_Absent(t *testing.T) {
+	testreset.Globals(t)
 	xaml := []byte(`<Window Title="T" Width="800" Height="600"><Canvas/></Window>`)
 	root, _, err := widget.LoadUIFromXAML(xaml)
 	if err != nil {
@@ -254,6 +266,7 @@ func TestXAMLWindow_MinSize_Absent(t *testing.T) {
 // SetNativeHosted (его выставляет window.Window), а не наличие OnDragMove:
 // приложение вправе забрать перемещение, не теряя изменение размера.
 func TestWindowResize_NativeGuard(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Native", 400, 300)
 	w.SetNativeHosted(true)            // как это делает window.Window
 	w.OnDragMove = func(dx, dy int) {} // ОС переносит окно
@@ -289,6 +302,7 @@ func renderWindowBorderPixel(t *testing.T, w *widget.Window, canvasW, canvasH in
 }
 
 func TestWindowXorBorder_MainWindow_NonClassic(t *testing.T) {
+	testreset.Globals(t)
 	widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Light"))
 	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
 
@@ -306,6 +320,7 @@ func TestWindowXorBorder_MainWindow_NonClassic(t *testing.T) {
 }
 
 func TestWindowXorBorder_NotMainWindow(t *testing.T) {
+	testreset.Globals(t)
 	widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Light"))
 	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
 
@@ -323,6 +338,7 @@ func TestWindowXorBorder_NotMainWindow(t *testing.T) {
 }
 
 func TestWindowXorBorder_Classic_NotDrawn(t *testing.T) {
+	testreset.Globals(t)
 	widget.ApplyGlobalTheme(widget.ThemeByName("Win2000"))
 	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
 

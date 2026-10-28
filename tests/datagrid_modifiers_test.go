@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/datagrid"
 )
@@ -62,6 +63,7 @@ func click(eng *engine.Engine, x, y int, mod widget.KeyMod) {
 }
 
 func TestDataGrid_CtrlClickAddsRow(t *testing.T) {
+	testreset.Globals(t)
 	eng, w := modGrid(t)
 
 	click(eng, 40, rowY(w, 0), widget.ModNone)
@@ -83,6 +85,7 @@ func TestDataGrid_CtrlClickAddsRow(t *testing.T) {
 }
 
 func TestDataGrid_ShiftClickSelectsRange(t *testing.T) {
+	testreset.Globals(t)
 	eng, w := modGrid(t)
 
 	click(eng, 40, rowY(w, 1), widget.ModNone)
@@ -95,6 +98,7 @@ func TestDataGrid_ShiftClickSelectsRange(t *testing.T) {
 
 // Без модификаторов поведение прежнее: щелчок оставляет одну строку.
 func TestDataGrid_PlainClickKeepsOneRow(t *testing.T) {
+	testreset.Globals(t)
 	eng, w := modGrid(t)
 
 	click(eng, 40, rowY(w, 0), widget.ModNone)
@@ -108,6 +112,7 @@ func TestDataGrid_PlainClickKeepsOneRow(t *testing.T) {
 // Модификаторы доезжают до виджета в самом событии, а не «где-то в движке»:
 // виджет, лежащий под курсором, обязан увидеть их в MouseEvent.Mod.
 func TestMouseEvent_CarriesModifiers(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(widget.Theme{}.WindowBG)
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 200, 200))

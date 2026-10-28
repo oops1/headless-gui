@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -14,6 +15,7 @@ import (
 // dp.SetBounds → AddChild(top26) → AddChild(fill); top должен резервировать
 // свои 26px, а не всю панель.
 func TestDockPanel_SetBoundsBeforeAddChild(t *testing.T) {
+	testreset.Globals(t)
 	dp := widget.NewDockPanel()
 	dp.SetBounds(image.Rect(0, 0, 290, 100))
 

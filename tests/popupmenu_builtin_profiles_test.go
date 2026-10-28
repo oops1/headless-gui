@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -29,6 +30,7 @@ func pmBuiltin(t *testing.T, name string, items ...widget.MenuItem) *widget.Popu
 }
 
 func TestBuiltinMenu_Windows10ThinChevronAndSoftShadow(t *testing.T) {
+	testreset.Globals(t)
 	m := pmBuiltin(t, theme.ProfileWindows10, widget.MenuItem{Text: "Создать", SubItems: []widget.MenuItem{{Text: "Папку"}}})
 	img := pmRender(t, m, -1)
 	r := m.Bounds()
@@ -68,6 +70,7 @@ func TestBuiltinMenu_Windows10ThinChevronAndSoftShadow(t *testing.T) {
 }
 
 func TestBuiltinMenu_Windows2000TintsIconsWithoutItemFlag(t *testing.T) {
+	testreset.Globals(t)
 	icon := image.NewRGBA(image.Rect(0, 0, 16, 16))
 	for i := 0; i < len(icon.Pix); i += 4 {
 		icon.Pix[i+3] = 255 // сплошной чёрный квадрат; IconTint на пункте НЕ ставится

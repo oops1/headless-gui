@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/datagrid"
 )
@@ -48,6 +49,7 @@ const valXAML = `<Canvas xmlns="clr">
 </Canvas>`
 
 func TestValidation_InitialInvalid(t *testing.T) {
+	testreset.Globals(t)
 	m := &vForm{Name: ""}
 	_, reg, scope, err := widget.LoadUIFromXAMLBindings([]byte(valXAML), m)
 	if err != nil {
@@ -66,6 +68,7 @@ func TestValidation_InitialInvalid(t *testing.T) {
 }
 
 func TestValidation_ClearsWhenValid(t *testing.T) {
+	testreset.Globals(t)
 	m := &vForm{Name: ""}
 	_, reg, scope, err := widget.LoadUIFromXAMLBindings([]byte(valXAML), m)
 	if err != nil {
@@ -90,6 +93,7 @@ func TestValidation_ClearsWhenValid(t *testing.T) {
 // строго в порядке нажатий — раньше go-горутины OnChange могли завершаться
 // не по порядку и модель оседала как "Jo" вместо "John".
 func TestValidation_InstantTypingOrdered(t *testing.T) {
+	testreset.Globals(t)
 	m := &vForm{Name: ""}
 	_, reg, _, err := widget.LoadUIFromXAMLBindings([]byte(valXAML), m)
 	if err != nil {
@@ -108,6 +112,7 @@ func TestValidation_InstantTypingOrdered(t *testing.T) {
 }
 
 func TestValidation_ReappearsWhenInvalid(t *testing.T) {
+	testreset.Globals(t)
 	m := &vForm{Name: "John"}
 	_, reg, _, err := widget.LoadUIFromXAMLBindings([]byte(valXAML), m)
 	if err != nil {

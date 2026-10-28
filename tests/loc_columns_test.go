@@ -3,6 +3,7 @@ package tests
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -35,6 +36,7 @@ func headersOf(t *testing.T, w *widget.DataGridWidget) []string {
 }
 
 func TestLocColumns_FollowLanguageSwitch(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearLocalizedItems()
 	t.Cleanup(widget.ClearLocalizedItems)
 
@@ -79,6 +81,7 @@ func TestLocColumns_FollowLanguageSwitch(t *testing.T) {
 
 // Ключ без перевода показывается как есть — так же, как везде в {Loc}.
 func TestLocColumns_UnknownKeyShowsItself(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearLocalizedItems()
 	t.Cleanup(widget.ClearLocalizedItems)
 	widget.SetLanguage("ru")

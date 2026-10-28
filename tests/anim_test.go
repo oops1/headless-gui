@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -17,6 +18,7 @@ func linear(t float64) float64 { return t }
 // TestAnim_DeterministicProgress: с руками заданными моментами времени
 // прогресс точный, последний тик ровно 1.0, OnDone один раз.
 func TestAnim_DeterministicProgress(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -70,6 +72,7 @@ func TestAnim_DeterministicProgress(t *testing.T) {
 
 // TestAnim_NilCurveLinear: nil-кривая = линейная.
 func TestAnim_NilCurveLinear(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -90,6 +93,7 @@ func TestAnim_NilCurveLinear(t *testing.T) {
 // TestAnim_OwnedReplaces: AnimateOwned заменяет предыдущую с тем же (owner,tag)
 // и НЕ трогает чужие.
 func TestAnim_OwnedReplaces(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -131,6 +135,7 @@ func TestAnim_OwnedReplaces(t *testing.T) {
 
 // TestAnim_StopFromTick: Stop из собственного тика.
 func TestAnim_StopFromTick(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -161,6 +166,7 @@ func TestAnim_StopFromTick(t *testing.T) {
 // TestAnim_ChainFromTick: запуск новой анимации из тика — новая живёт и НЕ
 // получает шаг в том же Step.
 func TestAnim_ChainFromTick(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -186,6 +192,7 @@ func TestAnim_ChainFromTick(t *testing.T) {
 
 // TestAnim_ChainFromOnDone: OnDone запускает новую анимацию — цепочка живёт.
 func TestAnim_ChainFromOnDone(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -210,6 +217,7 @@ func TestAnim_ChainFromOnDone(t *testing.T) {
 // TestAnim_Loop: Loop перезапускает анимацию, прогресс корректен, OnDone не
 // вызывается.
 func TestAnim_Loop(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -246,6 +254,7 @@ func TestAnim_Loop(t *testing.T) {
 // TestAnim_AutoReverse: 0→1→0 считается одним циклом; без Loop завершается
 // после обратной фазы.
 func TestAnim_AutoReverse(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -294,6 +303,7 @@ func TestAnim_AutoReverse(t *testing.T) {
 
 // TestAnim_AutoReverseLoop: AutoReverse+Loop — несколько полных циклов.
 func TestAnim_AutoReverseLoop(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -319,6 +329,7 @@ func TestAnim_AutoReverseLoop(t *testing.T) {
 
 // TestAnim_RaceSmoke: параллельные Animate/Step под -race.
 func TestAnim_RaceSmoke(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -372,6 +383,7 @@ func TestAnim_RaceSmoke(t *testing.T) {
 // TestAnim_EngineIntegration: engine.New + ProgressBar, Animate двигает
 // SetValue; RenderCount растёт, пока анимация идёт, и останавливается после.
 func TestAnim_EngineIntegration(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 

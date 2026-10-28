@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/treeview"
 )
@@ -13,6 +14,7 @@ import (
 // ─── TreeViewItem unit ─────────────────────────────────────────────────────
 
 func TestTreeViewItem_Basics(t *testing.T) {
+	testreset.Globals(t)
 	root := treeview.NewItem("Root")
 	if root.Text != "Root" {
 		t.Fatalf("Text = %q, want Root", root.Text)
@@ -32,6 +34,7 @@ func TestTreeViewItem_Basics(t *testing.T) {
 }
 
 func TestTreeViewItem_Compat(t *testing.T) {
+	testreset.Globals(t)
 	// Проверяем обратную совместимость через widget.NewTreeNode
 	root := widget.NewTreeNode("Root")
 	child := widget.NewTreeNode("Child")
@@ -45,6 +48,7 @@ func TestTreeViewItem_Compat(t *testing.T) {
 }
 
 func TestTreeViewItem_DisplayText(t *testing.T) {
+	testreset.Globals(t)
 	item := treeview.NewItem("text")
 	if item.DisplayText() != "text" {
 		t.Fatalf("DisplayText = %q, want text", item.DisplayText())
@@ -56,6 +60,7 @@ func TestTreeViewItem_DisplayText(t *testing.T) {
 }
 
 func TestTreeViewItem_Depth(t *testing.T) {
+	testreset.Globals(t)
 	root := treeview.NewItem("Root")
 	child := treeview.NewItem("Child")
 	grandchild := treeview.NewItem("Grandchild")
@@ -74,6 +79,7 @@ func TestTreeViewItem_Depth(t *testing.T) {
 }
 
 func TestTreeViewItem_Parent(t *testing.T) {
+	testreset.Globals(t)
 	root := treeview.NewItem("Root")
 	child := treeview.NewItem("Child")
 	root.AddChild(child)
@@ -87,6 +93,7 @@ func TestTreeViewItem_Parent(t *testing.T) {
 }
 
 func TestTreeViewItem_RemoveChild(t *testing.T) {
+	testreset.Globals(t)
 	root := treeview.NewItem("Root")
 	child1 := treeview.NewItem("C1")
 	child2 := treeview.NewItem("C2")
@@ -103,6 +110,7 @@ func TestTreeViewItem_RemoveChild(t *testing.T) {
 }
 
 func TestTreeViewItem_ClearChildren(t *testing.T) {
+	testreset.Globals(t)
 	root := treeview.NewItem("Root")
 	root.AddChild(treeview.NewItem("A"))
 	root.AddChild(treeview.NewItem("B"))
@@ -115,6 +123,7 @@ func TestTreeViewItem_ClearChildren(t *testing.T) {
 // ─── TreeView unit ─────────────────────────────────────────────────────────
 
 func TestTreeView_NewDefaults(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	if tw.Tree.ItemHeight != 0 {
 		t.Fatalf("ItemHeight = %d, want 0 (default)", tw.Tree.ItemHeight)
@@ -125,6 +134,7 @@ func TestTreeView_NewDefaults(t *testing.T) {
 }
 
 func TestTreeView_AddRoot(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	tw.AddRoot(treeview.NewItem("A"))
 	tw.AddRoot(treeview.NewItem("B"))
@@ -135,6 +145,7 @@ func TestTreeView_AddRoot(t *testing.T) {
 }
 
 func TestTreeView_ClearRoots(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	tw.AddRoot(treeview.NewItem("A"))
 	tw.AddRoot(treeview.NewItem("B"))
@@ -146,6 +157,7 @@ func TestTreeView_ClearRoots(t *testing.T) {
 }
 
 func TestTreeView_ClickSelect(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	tw.SetBounds(image.Rect(0, 0, 300, 200))
 
@@ -173,6 +185,7 @@ func TestTreeView_ClickSelect(t *testing.T) {
 }
 
 func TestTreeView_ExpandCollapse(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	tw.SetBounds(image.Rect(0, 0, 300, 200))
 
@@ -200,6 +213,7 @@ func TestTreeView_ExpandCollapse(t *testing.T) {
 }
 
 func TestTreeView_MouseMove_Hover(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	tw.SetBounds(image.Rect(0, 0, 300, 200))
 	tw.AddRoot(treeview.NewItem("A"))
@@ -215,6 +229,7 @@ func TestTreeView_MouseMove_Hover(t *testing.T) {
 }
 
 func TestTreeView_DrawNoPanic(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	tw.SetBounds(image.Rect(0, 0, 300, 200))
 
@@ -232,6 +247,7 @@ func TestTreeView_DrawNoPanic(t *testing.T) {
 }
 
 func TestTreeView_ApplyTheme(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	light := widget.LightTheme()
 	tw.ApplyTheme(light)
@@ -242,6 +258,7 @@ func TestTreeView_ApplyTheme(t *testing.T) {
 }
 
 func TestTreeView_Keyboard(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	tw.SetBounds(image.Rect(0, 0, 300, 200))
 
@@ -287,6 +304,7 @@ func TestTreeView_Keyboard(t *testing.T) {
 }
 
 func TestTreeView_KeyboardExpandCollapse(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	tw.SetBounds(image.Rect(0, 0, 300, 200))
 
@@ -311,6 +329,7 @@ func TestTreeView_KeyboardExpandCollapse(t *testing.T) {
 }
 
 func TestTreeView_ScrollBy(t *testing.T) {
+	testreset.Globals(t)
 	tw := widget.NewTreeViewWidget()
 	tw.SetBounds(image.Rect(0, 0, 300, 44)) // 2 rows visible at 22px each
 
@@ -325,6 +344,7 @@ func TestTreeView_ScrollBy(t *testing.T) {
 // ─── TreeView XAML ──────────────────────────────────────────────────────────
 
 func TestTreeView_XAML_Basic(t *testing.T) {
+	testreset.Globals(t)
 	xaml := []byte(`
 <Panel Width="600" Height="400" Background="Transparent">
     <TreeView Name="tree" Background="#252526" Foreground="#CCCCCC"
@@ -380,6 +400,7 @@ func TestTreeView_XAML_Basic(t *testing.T) {
 }
 
 func TestTreeView_XAML_Colors(t *testing.T) {
+	testreset.Globals(t)
 	xaml := []byte(`
 <Panel Width="400" Height="300" Background="Transparent">
     <TreeView Name="tree" Background="#FF0000" Foreground="#00FF00"
@@ -405,6 +426,7 @@ func TestTreeView_XAML_Colors(t *testing.T) {
 // ─── DataGrid XAML ──────────────────────────────────────────────────────────
 
 func TestDataGrid_XAML_AsListView(t *testing.T) {
+	testreset.Globals(t)
 	xaml := []byte(`
 <Panel Width="600" Height="400" Background="Transparent">
     <DataGrid Name="dg" Background="#1E1E1E"
@@ -440,6 +462,7 @@ func TestDataGrid_XAML_AsListView(t *testing.T) {
 // ─── SmartGit XAML full load ────────────────────────────────────────────────
 
 func TestSmartGit_XAML_Loads(t *testing.T) {
+	testreset.Globals(t)
 	root, _, err := widget.LoadUIFromXAMLFile("../assets/ui/smartgit.xaml")
 	if err != nil {
 		t.Fatalf("LoadUIFromXAMLFile: %v", err)

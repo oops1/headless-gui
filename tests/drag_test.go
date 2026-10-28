@@ -4,12 +4,14 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // ─── ShiftWidget ─────────────────────────────────────────────────────────────
 
 func TestShiftWidget_SimpleMove(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(10, 20, 110, 50))
 
@@ -25,6 +27,7 @@ func TestShiftWidget_SimpleMove(t *testing.T) {
 }
 
 func TestShiftWidget_RecursiveChildren(t *testing.T) {
+	testreset.Globals(t)
 	panel := widget.NewPanel(widget.DarkTheme().PanelBG)
 	panel.SetBounds(image.Rect(0, 0, 300, 200))
 
@@ -51,6 +54,7 @@ func TestShiftWidget_RecursiveChildren(t *testing.T) {
 }
 
 func TestShiftWidget_DeepNesting(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
 	root.SetBounds(image.Rect(0, 0, 400, 300))
 
@@ -77,6 +81,7 @@ func TestShiftWidget_DeepNesting(t *testing.T) {
 }
 
 func TestShiftWidget_ZeroDelta(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(10, 10, 100, 40))
 	original := btn.Bounds()
@@ -89,6 +94,7 @@ func TestShiftWidget_ZeroDelta(t *testing.T) {
 }
 
 func TestShiftWidget_NegativeDelta(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(100, 100, 200, 150))
 
@@ -103,6 +109,7 @@ func TestShiftWidget_NegativeDelta(t *testing.T) {
 // ─── ShiftWidget с BaseBoundsProvider (Dropdown) ────────────────────────────
 
 func TestShiftWidget_Dropdown_UseBaseBounds(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B", "C")
 	d.SetBounds(image.Rect(100, 100, 300, 130))
 
@@ -127,6 +134,7 @@ func TestShiftWidget_Dropdown_UseBaseBounds(t *testing.T) {
 }
 
 func TestShiftWidget_OpenDropdown_SizeNotInflated(t *testing.T) {
+	testreset.Globals(t)
 	// Проблема которую мы фиксировали: без BaseBoundsProvider каждый ShiftWidget
 	// раздувал бы bounds дропдауна из-за открытого списка.
 	d := widget.NewDropdown("A", "B", "C")
@@ -151,6 +159,7 @@ func TestShiftWidget_OpenDropdown_SizeNotInflated(t *testing.T) {
 // ─── DismissAll ──────────────────────────────────────────────────────────────
 
 func TestDismissAll_SingleDropdown(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B")
 	d.SetOpen(true)
 
@@ -161,6 +170,7 @@ func TestDismissAll_SingleDropdown(t *testing.T) {
 }
 
 func TestDismissAll_ClosedDropdown_NoEffect(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B")
 	d.SetOpen(false)
 
@@ -171,6 +181,7 @@ func TestDismissAll_ClosedDropdown_NoEffect(t *testing.T) {
 }
 
 func TestDismissAll_Recursive(t *testing.T) {
+	testreset.Globals(t)
 	panel := widget.NewPanel(widget.DarkTheme().PanelBG)
 
 	drop1 := widget.NewDropdown("A", "B")
@@ -195,6 +206,7 @@ func TestDismissAll_Recursive(t *testing.T) {
 }
 
 func TestDismissAll_NonDismissable_NoPanic(t *testing.T) {
+	testreset.Globals(t)
 	// Кнопка не Dismissable — не должна паниковать
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(0, 0, 100, 30))
@@ -208,6 +220,7 @@ func TestDismissAll_NonDismissable_NoPanic(t *testing.T) {
 // ─── Panel.DismissAll при drag ─────────────────────────────────────────────
 
 func TestPanel_OnMouseButton_DismissesDropdownOnDrag(t *testing.T) {
+	testreset.Globals(t)
 	panel := widget.NewWin10Panel()
 	panel.SetBounds(image.Rect(0, 0, 300, 200))
 	panel.Drag.Enabled = true
@@ -234,6 +247,7 @@ func TestPanel_OnMouseButton_DismissesDropdownOnDrag(t *testing.T) {
 // ─── Dropdown Dismiss interface ───────────────────────────────────────────
 
 func TestDropdown_Dismiss_ClosesAndResetsHover(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B", "C")
 	d.SetBounds(image.Rect(0, 0, 200, 30))
 	d.SetOpen(true)
@@ -251,6 +265,7 @@ func TestDropdown_Dismiss_ClosesAndResetsHover(t *testing.T) {
 // ─── Dropdown BaseBounds ──────────────────────────────────────────────────
 
 func TestDropdown_BaseBounds_AlwaysReturnsHeaderBounds(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B", "C")
 	r := image.Rect(50, 100, 250, 130)
 	d.SetBounds(r)
@@ -280,6 +295,7 @@ func TestDropdown_BaseBounds_AlwaysReturnsHeaderBounds(t *testing.T) {
 // ─── CollectFocusables с Dropdown ────────────────────────────────────────
 
 func TestCollectFocusables_IncludesDropdown(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
 	d := widget.NewDropdown("A", "B")
 	d.SetBounds(image.Rect(0, 0, 200, 30))
@@ -295,6 +311,7 @@ func TestCollectFocusables_IncludesDropdown(t *testing.T) {
 }
 
 func TestCollectFocusables_IncludesAllFocusableTypes(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
 
 	btn := widget.NewButton("B")

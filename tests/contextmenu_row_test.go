@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/datagrid"
 	"github.com/oops1/headless-gui/v3/widget/treeview"
@@ -51,6 +52,7 @@ func rightClick(eng *engine.Engine, x, y int) {
 
 // Колбэк получает ИМЕННО ту строку, по которой щёлкнули.
 func TestRowContextMenu_GetsTheClickedRow(t *testing.T) {
+	testreset.Globals(t)
 	eng, w := ctxGridScene(t)
 
 	var gotRow int = -99
@@ -71,6 +73,7 @@ func TestRowContextMenu_GetsTheClickedRow(t *testing.T) {
 
 // Щелчок мимо строк даёт row == -1 и nil-элемент: приложение решает само.
 func TestRowContextMenu_MissIsReported(t *testing.T) {
+	testreset.Globals(t)
 	eng, w := ctxGridScene(t)
 
 	gotRow := -99
@@ -89,6 +92,7 @@ func TestRowContextMenu_MissIsReported(t *testing.T) {
 // Пустой список означает «меню здесь нет»: пустая рамка на экране — это не
 // «меню без пунктов», а ошибка, которую пользователь не исправит.
 func TestRowContextMenu_EmptyMeansNoMenu(t *testing.T) {
+	testreset.Globals(t)
 	eng, w := ctxGridScene(t)
 	w.RowContextMenu = func(interface{}, int) []widget.MenuItem { return nil }
 
@@ -107,6 +111,7 @@ func TestRowContextMenu_EmptyMeansNoMenu(t *testing.T) {
 // Выделение правым щелчком НЕ меняется: движок не вправе менять выбор
 // пользователя за его спиной.
 func TestRowContextMenu_DoesNotChangeSelection(t *testing.T) {
+	testreset.Globals(t)
 	eng, w := ctxGridScene(t)
 	w.RowContextMenu = func(interface{}, int) []widget.MenuItem {
 		return []widget.MenuItem{{Text: "Открыть"}}
@@ -122,6 +127,7 @@ func TestRowContextMenu_DoesNotChangeSelection(t *testing.T) {
 
 // Меню действительно показывается: на экране появляются пиксели поверх таблицы.
 func TestRowContextMenu_IsShown(t *testing.T) {
+	testreset.Globals(t)
 	eng, w := ctxGridScene(t)
 	w.RowContextMenu = func(item interface{}, row int) []widget.MenuItem {
 		return []widget.MenuItem{{Text: "Открыть"}, {Separator: true}, {Text: "Удалить"}}
@@ -145,6 +151,7 @@ func TestRowContextMenu_IsShown(t *testing.T) {
 
 // Дерево: колбэк получает узел под курсором.
 func TestNodeContextMenu_GetsTheClickedNode(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(widget.Theme{}.WindowBG)
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 300, 200))
@@ -186,6 +193,7 @@ func TestNodeContextMenu_GetsTheClickedNode(t *testing.T) {
 
 // Щелчок по пункту меню выполняет действие и не доходит до строки под меню.
 func TestRowContextMenu_ClickRunsTheItem(t *testing.T) {
+	testreset.Globals(t)
 	eng, w := ctxGridScene(t)
 
 	fired := ""

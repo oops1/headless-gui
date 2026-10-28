@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -30,6 +31,7 @@ func writeFile(t *testing.T, path, data string) {
 // конце переживают правку — иначе сохранение из сравнения портило бы файл
 // целиком, а не одну строку.
 func TestDiffView_FilesAndEvents(t *testing.T) {
+	testreset.Globals(t)
 	dir := t.TempDir()
 	lp, rp := filepath.Join(dir, "a.txt"), filepath.Join(dir, "b.txt")
 	writeFile(t, lp, "one\r\ntwo\r\nthree\r\n")
@@ -106,6 +108,7 @@ func TestDiffView_FilesAndEvents(t *testing.T) {
 // Двоичный файл не загружается, а ошибка приходит в OnError на языке
 // интерфейса.
 func TestDiffView_BinaryFileRejected(t *testing.T) {
+	testreset.Globals(t)
 	p := filepath.Join(t.TempDir(), "bin.dat")
 	writeFile(t, p, "MZ\x00\x01\x02")
 	dv := widget.NewDiffView("", "")
@@ -140,6 +143,7 @@ func diffScene(t *testing.T, dv *widget.DiffView) *engine.Engine {
 // горутины кадра. Движок здесь не запущен, поэтому очередь разбирает
 // RenderFrameNow: событие обязано ждать его, а не прийти само.
 func TestDiffView_WatchPostsToEngine(t *testing.T) {
+	testreset.Globals(t)
 	if testing.Short() {
 		t.Skip("опрос файлов раз в секунду")
 	}
@@ -217,6 +221,7 @@ func dvKey(code widget.KeyCode, mod widget.KeyMod) widget.KeyEvent {
 // Правка с клавиатуры через движок: набор, автоотступ, Tab внутрь текста
 // (TabAcceptor), слово назад, буфер обмена, отмена и повтор.
 func TestDiffView_KeyboardEditing(t *testing.T) {
+	testreset.Globals(t)
 	dv := widget.NewDiffView("", "")
 	dv.SetText(widget.DiffLeft, "L", "", "alpha beta\n\tgamma\n")
 	dv.SetText(widget.DiffRight, "R", "", "alpha beta\n\tgamma\n")
@@ -272,6 +277,7 @@ func TestDiffView_KeyboardEditing(t *testing.T) {
 // Копирование переносит строки с переводом строки файла: CRLF-файл отдаёт в
 // буфер обмена CRLF, иначе вставка в Блокнот склеила бы строки.
 func TestDiffView_CopyUsesFileEOL(t *testing.T) {
+	testreset.Globals(t)
 	dv := widget.NewDiffView("", "")
 	dv.SetText(widget.DiffLeft, "L", "", "a\r\nb\r\nc\r\n")
 	dv.SetCaret(widget.DiffLeft, 0, 0)
@@ -287,6 +293,7 @@ func TestDiffView_CopyUsesFileEOL(t *testing.T) {
 // Сторона только для чтения: правки не проходят, Tab снова уходит обходу
 // фокуса, а перенос всего файла в другую сторону отменяем.
 func TestDiffView_ReadOnlyAndCopyAll(t *testing.T) {
+	testreset.Globals(t)
 	dv := widget.NewDiffView("", "")
 	dv.SetText(widget.DiffLeft, "L", "", "one\ntwo\n")
 	dv.SetText(widget.DiffRight, "R", "", "one\nTWO\nthree\n")
@@ -322,6 +329,7 @@ func TestDiffView_ReadOnlyAndCopyAll(t *testing.T) {
 
 // Перенос одного блока и навигация по отличиям.
 func TestDiffView_BlockCopyAndNavigation(t *testing.T) {
+	testreset.Globals(t)
 	dv := widget.NewDiffView("", "")
 	dv.SetBounds(image.Rect(0, 0, 900, 500))
 	dv.SetText(widget.DiffLeft, "L", "", "a\nb\nc\nd\ne\nf\n")
@@ -364,6 +372,7 @@ type diffVM struct {
 }
 
 func TestDiffView_XAML(t *testing.T) {
+	testreset.Globals(t)
 	dir := t.TempDir()
 	ui := filepath.Join(dir, "ui")
 	if err := os.MkdirAll(ui, 0o755); err != nil {
@@ -420,6 +429,7 @@ func TestDiffView_XAML(t *testing.T) {
 
 // Разметка из fs.FS кладёт содержимое без пути на диске.
 func TestDiffView_XAMLFromFS(t *testing.T) {
+	testreset.Globals(t)
 	fsys := fstest.MapFS{
 		"a.txt": {Data: []byte("1\n2\n")},
 		"b.txt": {Data: []byte("1\n3\n")},
@@ -442,6 +452,7 @@ func TestDiffView_XAMLFromFS(t *testing.T) {
 // Доступность: скринридер видит две текстовые панели с содержимым, а не одну
 // безымянную группу.
 func TestDiffView_AccessibilityChildren(t *testing.T) {
+	testreset.Globals(t)
 	dv := widget.NewDiffView("", "")
 	dv.SetBounds(image.Rect(0, 0, 900, 500))
 	dv.SetText(widget.DiffLeft, "old.go", "", "package a\n")
@@ -478,6 +489,7 @@ func TestDiffView_AccessibilityChildren(t *testing.T) {
 
 // Два файла из проводника раскладываются по сторонам.
 func TestDiffView_DropTwoFiles(t *testing.T) {
+	testreset.Globals(t)
 	dir := t.TempDir()
 	a, b := filepath.Join(dir, "a.txt"), filepath.Join(dir, "b.txt")
 	writeFile(t, a, "1\n")

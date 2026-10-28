@@ -3,6 +3,7 @@ package tests
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/datagrid"
 )
@@ -15,6 +16,7 @@ type expanderModel struct {
 }
 
 func TestExpander_HeaderAndIsExpandedBinding(t *testing.T) {
+	testreset.Globals(t)
 	m := &expanderModel{Title: "Секция", Open: true}
 
 	const xaml = `<Canvas xmlns="clr">
@@ -51,6 +53,7 @@ func TestExpander_HeaderAndIsExpandedBinding(t *testing.T) {
 }
 
 func TestExpander_ElementNameBinding(t *testing.T) {
+	testreset.Globals(t)
 	const xaml = `<Canvas xmlns="clr">
 		<Expander Name="ex" IsExpanded="False"/>
 		<TextBlock Name="tb" Text="{Binding IsExpanded, ElementName=ex}"/>

@@ -5,6 +5,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -37,6 +38,7 @@ func wcagContrast(a, b color.RGBA) float64 {
 // не ниже 4,5:1 — порог WCAG AA для обычного текста) и отличаются от полос:
 // ради этого пункт и заводился.
 func TestTheme_DiffTextColorsReadable(t *testing.T) {
+	testreset.Globals(t)
 	for _, name := range widget.ThemeNames() {
 		th := widget.ThemeByName(name)
 		if th == nil {
@@ -70,6 +72,7 @@ func TestTheme_DiffTextColorsReadable(t *testing.T) {
 // Поля проходят мост тем туда и обратно: тема, превращённая в профиль и
 // обратно, сохраняет цвета текста.
 func TestTheme_DiffTextColorsRoundTrip(t *testing.T) {
+	testreset.Globals(t)
 	th := widget.ThemeByName("Win11 Light")
 	want := color.RGBA{R: 0x12, G: 0x34, B: 0x56, A: 255}
 	th.DiffAddText = want

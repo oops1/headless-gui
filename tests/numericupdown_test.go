@@ -4,11 +4,13 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/datagrid"
 )
 
 func TestNumericUpDown_StepClamp(t *testing.T) {
+	testreset.Globals(t)
 	n := widget.NewNumericUpDown()
 	n.Min, n.Max, n.Step = 0, 5, 2
 	n.SetValue(0)
@@ -33,6 +35,7 @@ func TestNumericUpDown_StepClamp(t *testing.T) {
 }
 
 func TestNumericUpDown_TypeAndCommit(t *testing.T) {
+	testreset.Globals(t)
 	n := widget.NewNumericUpDown()
 	n.Min, n.Max = 0, 1000
 	n.SetValue(0)
@@ -49,6 +52,7 @@ func TestNumericUpDown_TypeAndCommit(t *testing.T) {
 }
 
 func TestNumericUpDown_OnChange(t *testing.T) {
+	testreset.Globals(t)
 	n := widget.NewNumericUpDown()
 	n.Min, n.Max, n.Step = 0, 10, 1
 	got := -1.0
@@ -63,6 +67,7 @@ func TestNumericUpDown_OnChange(t *testing.T) {
 var _ widget.CursorProvider = (*widget.NumericUpDown)(nil)
 
 func TestNumericUpDown_CursorProvider(t *testing.T) {
+	testreset.Globals(t)
 	n := widget.NewNumericUpDown()
 	n.SetBounds(image.Rect(0, 0, 100, 24))
 	// Над спиннером (последние nudSpinnerWidth=18 пикселей) — Arrow.
@@ -82,6 +87,7 @@ type nudBindingModel struct {
 }
 
 func TestNumericUpDown_Binding(t *testing.T) {
+	testreset.Globals(t)
 	m := &nudBindingModel{Qty: 42}
 
 	const xaml = `<Canvas xmlns="clr">
@@ -115,6 +121,7 @@ func TestNumericUpDown_Binding(t *testing.T) {
 }
 
 func TestNumericUpDown_XAML(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Canvas xmlns="clr">
 		<NumericUpDown Minimum="0" Maximum="100" Increment="5" Value="20" Decimals="0"/>
 	</Canvas>`

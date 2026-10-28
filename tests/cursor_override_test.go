@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -13,6 +14,7 @@ import (
 // виджетов, без ожидания движения мыши.
 
 func TestCursorValues_AppendedAtEnd(t *testing.T) {
+	testreset.Globals(t)
 	// Старые значения не изменились, новые — в конце перечисления.
 	old := []widget.Cursor{
 		widget.CursorArrow, widget.CursorIBeam, widget.CursorHand, widget.CursorSizeWE,
@@ -36,6 +38,7 @@ func TestCursorValues_AppendedAtEnd(t *testing.T) {
 
 // XAML: Cursor="..." знает новые формы.
 func TestCursor_XAMLNewShapes(t *testing.T) {
+	testreset.Globals(t)
 	cases := map[string]widget.Cursor{
 		"None": widget.CursorNone, "Grab": widget.CursorGrab, "Grabbing": widget.CursorGrabbing,
 		"SizeAll": widget.CursorSizeAll, "Cross": widget.CursorCrosshair,
@@ -66,6 +69,7 @@ func overrideEngineWithHandButton(t *testing.T) *engine.Engine {
 }
 
 func TestCursorOverride_BeatsWidgetWithoutMouseMove(t *testing.T) {
+	testreset.Globals(t)
 	eng := overrideEngineWithHandButton(t)
 
 	if got := eng.CursorAt(50, 50); got != widget.CursorHand {
@@ -106,6 +110,7 @@ func TestCursorOverride_BeatsWidgetWithoutMouseMove(t *testing.T) {
 // Окно подписывается на смену override: уведомление приходит при установке,
 // смене и снятии, но не на повторную ту же форму и не на лишний Clear.
 func TestCursorOverride_Notifies(t *testing.T) {
+	testreset.Globals(t)
 	eng := overrideEngineWithHandButton(t)
 	var n atomic.Int32
 	eng.SetOnCursorOverrideChanged(func() { n.Add(1) })
@@ -143,6 +148,7 @@ func TestCursorOverride_Notifies(t *testing.T) {
 
 // Override ставят с любой горутины (таймер бездействия), читает горутина движка.
 func TestCursorOverride_ConcurrentUse(t *testing.T) {
+	testreset.Globals(t)
 	eng := overrideEngineWithHandButton(t)
 	done := make(chan struct{})
 	go func() {

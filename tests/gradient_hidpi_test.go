@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -14,6 +15,7 @@ import (
 // монотонного логического градиента нет двух подряд одинаковых физических
 // строк (иначе — бандинг, ради которого и делался фикс gradient.go).
 func TestGradientHiDPI_NoBandingVertical(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(80, 100, 30)
 	eng.SetScale(1.5)
 	pw, ph := eng.PhysicalSize() // 120 x 150
@@ -59,6 +61,7 @@ func TestGradientHiDPI_NoBandingVertical(t *testing.T) {
 // TestGradientHiDPI_NoBandingHorizontal — то же для горизонтального градиента
 // (соседние физические столбцы не должны совпадать).
 func TestGradientHiDPI_NoBandingHorizontal(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(100, 60, 30)
 	eng.SetScale(1.5)
 	pw, ph := eng.PhysicalSize() // 150 x 90
@@ -96,6 +99,7 @@ func TestGradientHiDPI_NoBandingHorizontal(t *testing.T) {
 // построчно. Проверяем, что на scale=1 путь тождественный (нет паники, есть
 // монотонность), поскольку golden-сцены на scale=1 меняться не должны.
 func TestGradientScale1_Unchanged(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(40, 40, 30)
 	pw, ph := eng.PhysicalSize()
 	if pw != 40 || ph != 40 {

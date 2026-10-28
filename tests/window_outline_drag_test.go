@@ -8,12 +8,14 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // TestWindow_OutlineDrag_MovesOnce — окно на канвасе: во время drag bounds
 // не меняются, контур едет за мышью, при отпускании окно встаёт на его место.
 func TestWindow_OutlineDrag_MovesOnce(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("win", 300, 200)
 	w.SetBounds(image.Rect(100, 50, 400, 250))
 	w.OutlineDrag = true
@@ -47,6 +49,7 @@ func TestWindow_OutlineDrag_MovesOnce(t *testing.T) {
 // TestWindow_OutlineDrag_NativeCallsDragMoveOnce — нативный режим: OnDragMove
 // зовётся ровно один раз, с итоговым смещением.
 func TestWindow_OutlineDrag_NativeCallsDragMoveOnce(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("win", 300, 200)
 	w.SetBounds(image.Rect(0, 0, 300, 200))
 	w.OutlineDrag = true
@@ -67,6 +70,7 @@ func TestWindow_OutlineDrag_NativeCallsDragMoveOnce(t *testing.T) {
 
 // TestWindow_OutlineDrag_Off — без флага поведение прежнее: окно едет сразу.
 func TestWindow_OutlineDrag_Off(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("win", 300, 200)
 	w.SetBounds(image.Rect(100, 50, 400, 250))
 	start := w.Bounds()
@@ -85,6 +89,7 @@ func TestWindow_OutlineDrag_Off(t *testing.T) {
 
 // TestWindow_OutlineDrag_XAML — атрибуты OutlineDrag/OutlineDragFill.
 func TestWindow_OutlineDrag_XAML(t *testing.T) {
+	testreset.Globals(t)
 	const xaml = `<Window Title="w" Width="400" Height="300"
 		OutlineDrag="True" OutlineDragFill="#20303030"/>`
 	root, _, err := widget.LoadUIFromXAML([]byte(xaml))
@@ -118,6 +123,7 @@ func (c *countingCtx) FillRectAlpha(x, y, w, h int, col color.RGBA) { c.filledPi
 // заливается: заливка перекрашивает каждый пиксель под окном и по сети
 // обходится дороже, чем перемещение самого окна.
 func TestWindow_OutlineDrag_BorderOnlyByDefault(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("win", 300, 200)
 	w.SetBounds(image.Rect(0, 0, 300, 200))
 	w.OutlineDrag = true
@@ -146,6 +152,7 @@ func TestWindow_OutlineDrag_BorderOnlyByDefault(t *testing.T) {
 // Полная инвалидация скрыла бы от него, что окно просто переехало, — а по
 // этому RDP-оболочка решает, можно ли обойтись командой копирования.
 func TestWindow_OutlineDrag_DamageStaysLocal(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("win", 300, 200)
 	w.SetBounds(image.Rect(100, 100, 400, 300))
 	w.OutlineDrag = true

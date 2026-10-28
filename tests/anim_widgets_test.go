@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -48,6 +49,7 @@ func newAnimEngine(w, h int) *engine.Engine {
 // каноническое состояние — ручка не должна "зависнуть" в позиции по
 // умолчанию, ожидая несуществующих тиков (инвариант (а) задачи).
 func TestAnimToggleSwitch_NoEngine_InstantCanonical(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -76,6 +78,7 @@ func TestAnimToggleSwitch_NoEngine_InstantCanonical(t *testing.T) {
 // визуальная позиция ручки обязана совпасть с канонической (checked=true→1,
 // false→0). Ждём завершения через AnimationsActive() с коротким поллингом.
 func TestAnimToggleSwitch_WithEngine_SettlesToCanonical(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -113,6 +116,7 @@ func TestAnimToggleSwitch_WithEngine_SettlesToCanonical(t *testing.T) {
 // промежуточном положении — AnimateOwned(ts,"knob",...) должен остановить
 // предыдущую анимацию и не "тянуть" стрелку к устаревшей цели.
 func TestAnimToggleSwitch_FastDoubleClick_NoStuckMidway(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -152,6 +156,7 @@ func TestAnimToggleSwitch_FastDoubleClick_NoStuckMidway(t *testing.T) {
 // TestAnimProgressBar_SetValue_StillInstant: SetValue остаётся мгновенным
 // (обратная совместимость) — не создаёт анимацию и не требует тиков движка.
 func TestAnimProgressBar_SetValue_StillInstant(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -169,6 +174,7 @@ func TestAnimProgressBar_SetValue_StillInstant(t *testing.T) {
 // TestAnimProgressBar_AnimateValue_ReachesTarget: AnimateValue плавно доходит
 // до newValue за отведённое время (с работающим движком).
 func TestAnimProgressBar_AnimateValue_ReachesTarget(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -197,6 +203,7 @@ func TestAnimProgressBar_AnimateValue_ReachesTarget(t *testing.T) {
 // TestAnimDialog_ShowModal_FadeReachesTarget: после показа модального диалога
 // и завершения fade-in DimColor().A равен целевому (Dim.A из темы).
 func TestAnimDialog_ShowModal_FadeReachesTarget(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -227,6 +234,7 @@ func TestAnimDialog_ShowModal_FadeReachesTarget(t *testing.T) {
 // Escape ПОСРЕДИ fade-анимации не должно паниковать и не должно оставлять
 // "мусорных" тиков, продолжающих дёргать уже закрытый диалог.
 func TestAnimDialog_EscapeDuringFade_NoPanicNoRace(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 

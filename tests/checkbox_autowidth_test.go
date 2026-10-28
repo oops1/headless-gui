@@ -5,6 +5,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -14,6 +15,7 @@ import (
 // Флажок у правого края с длинной подписью не налезает ни на соседний флажок,
 // ни на подпись слева; короткий остаётся прежних 80 точек.
 func TestCheckBox_AutoWidthInDockPanel(t *testing.T) {
+	testreset.Globals(t)
 	root, reg, err := widget.LoadUIFromXAMLFS([]byte(`<DockPanel Width="800" Height="28">
   <CheckBox x:Name="rx" DockPanel.Dock="Right" Content="регулярное выражение"/>
   <CheckBox x:Name="yes" DockPanel.Dock="Right" Content="Да"/>
