@@ -10,7 +10,7 @@
 // мышью, не порождает НИ ОДНОГО клавиатурного события. Состояние знает только
 // бэкенд окна — он и сообщает его сюда.
 
-package engine
+package input
 
 import "github.com/oops1/headless-gui/v3/widget"
 
@@ -30,11 +30,11 @@ import "github.com/oops1/headless-gui/v3/widget"
 // SendMouseWheelPixels пришлось бы менять сигнатуры — все три, — и всякое
 // приложение, собранное с прежней версией, перестало бы компилироваться ради
 // параметра, который в большинстве вызовов равен нулю.
-func (e *Engine) SetModifiers(mod widget.KeyMod) {
-	e.mouseMod.Store(int32(mod))
+func (d *Dispatcher) SetModifiers(mod widget.KeyMod) {
+	d.mouseMod.Store(int32(mod))
 }
 
 // Modifiers возвращает модификаторы, которыми движок помечает события мыши.
-func (e *Engine) Modifiers() widget.KeyMod {
-	return widget.KeyMod(e.mouseMod.Load())
+func (d *Dispatcher) Modifiers() widget.KeyMod {
+	return widget.KeyMod(d.mouseMod.Load())
 }

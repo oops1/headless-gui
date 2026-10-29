@@ -19,6 +19,7 @@ import (
 	"slices"
 	"sync/atomic"
 
+	"github.com/oops1/headless-gui/v3/core/input"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -336,7 +337,7 @@ func collectPopupsAt(out []popupItem, w widget.Widget, off image.Point, depth in
 	if len(children) == 0 {
 		return out
 	}
-	coff := off.Add(contentShift(w))
+	coff := off.Add(input.ContentShift(w))
 	for _, child := range children {
 		out = collectPopupsAt(out, child, coff, depth+1)
 	}
@@ -420,13 +421,13 @@ func (e *Engine) CloseAllOverlays() {
 	if root != nil {
 		// keep=nil и точка вне любого экрана: закрыть ВСЕ, включая панели,
 		// которые считают своей площадь соседки по группе.
-		dismissOutside(root, nil, widget.CursorNowhere, widget.CursorNowhere)
+		input.DismissOutside(root, nil, widget.CursorNowhere, widget.CursorNowhere)
 	}
 	e.modMu.Lock()
 	modals := make([]widget.ModalWidget, len(e.modals))
 	copy(modals, e.modals)
 	e.modMu.Unlock()
 	for _, m := range modals {
-		dismissOutside(m, nil, widget.CursorNowhere, widget.CursorNowhere)
+		input.DismissOutside(m, nil, widget.CursorNowhere, widget.CursorNowhere)
 	}
 }

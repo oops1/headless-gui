@@ -12,7 +12,7 @@
 // SetCursorImage — то же, но форма не из набора widget.Cursor, а картинка
 // (указатель удалённого рабочего стола: до 384×384, с альфой).
 
-package engine
+package input
 
 import (
 	"image"
@@ -48,8 +48,8 @@ type cursorOverride struct {
 // в том числе открытый уже после вызова. Снятая — возвращает попапам стрелку.
 //
 // Заменяет и курсор-картинку (SetCursorImage): действует последний вызов.
-func (e *Engine) SetCursorOverride(c widget.Cursor) {
-	o := &e.cursorOvr
+func (d *Dispatcher) SetCursorOverride(c widget.Cursor) {
+	o := &d.cursorOvr
 	o.mu.Lock()
 	changed := !o.set || o.c != c || o.img != nil
 	o.c, o.set, o.img = c, true, nil
@@ -76,11 +76,11 @@ func (e *Engine) SetCursorOverride(c widget.Cursor) {
 // как nil: снимает курсор-картинку, но не принудительную форму SetCursorOverride.
 // Ограничение не зависит от платформы: курсор WinLine RDP — до 32×32, но
 // картинки крупнее допустимы, если система их показывает.
-func (e *Engine) SetCursorImage(img *image.NRGBA, hotspotX, hotspotY int) {
+func (d *Dispatcher) SetCursorImage(img *image.NRGBA, hotspotX, hotspotY int) {
 	// Ключ считается по буферу приложения без копии: повторная установка той же
 	// картинки (указатель шлют на каждое обновление) не выделяет память.
 	key, valid := widget.CursorImageKey(img, hotspotX, hotspotY)
-	o := &e.cursorOvr
+	o := &d.cursorOvr
 	o.mu.Lock()
 	var changed bool
 	switch {
@@ -107,8 +107,8 @@ func (e *Engine) SetCursorImage(img *image.NRGBA, hotspotX, hotspotY int) {
 // ClearCursorOverride снимает принудительный курсор (форму и картинку): форму
 // снова определяет виджет под мышью. Окно возвращает её сразу, по последнему
 // положению мыши.
-func (e *Engine) ClearCursorOverride() {
-	o := &e.cursorOvr
+func (d *Dispatcher) ClearCursorOverride() {
+	o := &d.cursorOvr
 	o.mu.Lock()
 	changed := o.set
 	o.c, o.set, o.img = widget.CursorArrow, false, nil
@@ -122,8 +122,8 @@ func (e *Engine) ClearCursorOverride() {
 // CursorOverride возвращает принудительную форму курсора и признак, что она
 // задана. Курсор-картинка (SetCursorImage) виден здесь как «задан, стрелка»;
 // сама картинка — в CursorImageOverride.
-func (e *Engine) CursorOverride() (widget.Cursor, bool) {
-	o := &e.cursorOvr
+func (d *Dispatcher) CursorOverride() (widget.Cursor, bool) {
+	o := &d.cursorOvr
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.c, o.set
@@ -131,8 +131,8 @@ func (e *Engine) CursorOverride() (widget.Cursor, bool) {
 
 // CursorImageOverride возвращает курсор-картинку, заданную SetCursorImage.
 // Значение неизменяемое, его можно хранить и читать с любой горутины.
-func (e *Engine) CursorImageOverride() (*widget.CursorImage, bool) {
-	o := &e.cursorOvr
+func (d *Dispatcher) CursorImageOverride() (*widget.CursorImage, bool) {
+	o := &d.cursorOvr
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.img, o.img != nil
@@ -143,8 +143,8 @@ func (e *Engine) CursorImageOverride() (*widget.CursorImage, bool) {
 // (window.Run): по уведомлению оно заново спрашивает CursorAt и отдаёт форму
 // ОС. fn зовётся на горутине того, кто менял override, вне замков движка; nil
 // снимает уведомление.
-func (e *Engine) SetOnCursorOverrideChanged(fn func()) {
-	o := &e.cursorOvr
+func (d *Dispatcher) SetOnCursorOverrideChanged(fn func()) {
+	o := &d.cursorOvr
 	o.mu.Lock()
 	o.onChange = fn
 	o.mu.Unlock()

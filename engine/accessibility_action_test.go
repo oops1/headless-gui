@@ -120,7 +120,7 @@ func TestAccessAction_FocusesOwner(t *testing.T) {
 		if !eng.AccessAction(o, "L", act) {
 			t.Fatalf("%v отвергнуто", act)
 		}
-		if !o.focused || eng.focus.get() != widget.Widget(o) {
+		if !o.focused || eng.in.Focused() != widget.Widget(o) {
 			t.Errorf("%v: фокус на владельце не получен", act)
 		}
 	}

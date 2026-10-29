@@ -63,7 +63,7 @@ func TestFocus_SetFocusFromSetFocusedDoesNotDeadlock(t *testing.T) {
 	}
 	e.SetFocus(a)
 	withinFocusDeadline(t, func() { e.SetFocus(b) })
-	if got := e.focus.get(); got != c {
+	if got := e.in.Focused(); got != c {
 		t.Fatalf("фокус у %v, ждали c", got)
 	}
 	if b.focused || !c.focused || a.focused {
@@ -90,7 +90,7 @@ func TestFocus_QueryFromSetFocusedDoesNotDeadlock(t *testing.T) {
 	var seen widget.Widget
 	p.onFocus = func(f bool) {
 		if f {
-			seen = e.focus.get()
+			seen = e.in.Focused()
 		}
 	}
 	withinFocusDeadline(t, func() { e.SetFocus(p) })

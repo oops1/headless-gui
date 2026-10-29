@@ -1,4 +1,4 @@
-package engine
+package input
 
 // touch.go — доставка касаний виджетам (widget.TouchEvent, widget.TouchHandler).
 //
@@ -73,9 +73,9 @@ func deliverTouch(th widget.TouchHandler, ev widget.TouchEvent, off image.Point)
 }
 
 // ownerOffset — смещение кадра владельца касания прямо сейчас.
-func (e *Engine) ownerOffset(o *touchOwner) image.Point {
+func (d *Dispatcher) ownerOffset(o *touchOwner) image.Point {
 	if !o.chainOK {
-		for _, r := range e.treeRoots() {
+		for _, r := range d.treeRoots() {
 			if c, found := offsetChainIn(r, o.w, nil, 0); found {
 				o.chain = c
 				break
@@ -101,12 +101,12 @@ func (e *Engine) ownerOffset(o *touchOwner) image.Point {
 //
 // Вход для бэкендов окна и для тестов: headless-приложение кормит этим движок
 // так же, как SendMouseButton.
-func (e *Engine) SendTouch(ev widget.TouchEvent) bool {
-	defer e.guardInput("SendTouch")()
-	defer e.serveFocusRequests()()
+func (d *Dispatcher) SendTouch(ev widget.TouchEvent) bool {
+	defer d.host.GuardInput("SendTouch")()
+	defer d.serveFocusRequests()()
 
-	ev.X, ev.Y = e.toLogical(ev.X, ev.Y)
-	if k := e.Scale(); k != 1 && k > 0 {
+	ev.X, ev.Y = d.toLogical(ev.X, ev.Y)
+	if k := d.host.Scale(); k != 1 && k > 0 {
 		// Оси контакта — те же пиксели окна, что и точка: виджету тоже логические.
 		ev.Major /= k
 		ev.Minor /= k
@@ -115,41 +115,39 @@ func (e *Engine) SendTouch(ev widget.TouchEvent) bool {
 		ev.Time = time.Since(touchEpoch) + 1
 	}
 	if ev.Phase == widget.TouchBegan {
-		return e.touchBegan(ev)
+		return d.touchBegan(ev)
 	}
-	return e.touchFollow(ev)
+	return d.touchFollow(ev)
 }
 
 // touchBegan подбирает владельца новому касанию.
-func (e *Engine) touchBegan(ev widget.TouchEvent) bool {
+func (d *Dispatcher) touchBegan(ev widget.TouchEvent) bool {
 	// Тот же ID без отрыва: ОС потеряла конец прежнего касания. Старому владельцу
 	// сообщаем об отмене — иначе он остался бы с зажатым жестом навсегда.
-	e.touch.mu.Lock()
-	old := e.touch.owners[ev.ID]
-	delete(e.touch.owners, ev.ID)
-	e.touch.mu.Unlock()
+	d.touch.mu.Lock()
+	old := d.touch.owners[ev.ID]
+	delete(d.touch.owners, ev.ID)
+	d.touch.mu.Unlock()
 	if old != nil {
 		if th, ok := old.w.(widget.TouchHandler); ok {
 			c := ev
 			c.Phase = widget.TouchCancelled
-			deliverTouch(th, c, e.ownerOffset(old))
+			deliverTouch(th, c, d.ownerOffset(old))
 		}
 	}
 
 	var dispatchRoot widget.Widget
-	if m := e.topModal(); m != nil {
+	if m := d.host.TopModal(); m != nil {
 		dispatchRoot = m
 	} else {
-		e.mu.RLock()
-		dispatchRoot = e.root
-		e.mu.RUnlock()
+		dispatchRoot = d.host.Root()
 	}
 	if dispatchRoot == nil {
 		return false
 	}
 
 	x, y := ev.X, ev.Y
-	path := hitPath(dispatchRoot, x, y)
+	path := HitPath(dispatchRoot, x, y)
 
 	// Оверлей, на который пришлась точка, старше дерева (см. SendMouseButton).
 	overlayW, overlayOff := findOverlayStep(dispatchRoot, x, y)
@@ -162,7 +160,7 @@ func (e *Engine) touchBegan(ev widget.TouchEvent) bool {
 		keep[overlayW] = struct{}{}
 	}
 	if len(path) > 0 || overlayW != nil {
-		dismissOutside(dispatchRoot, keep, x, y)
+		DismissOutside(dispatchRoot, keep, x, y)
 	}
 
 	var owner widget.Widget
@@ -173,12 +171,12 @@ func (e *Engine) touchBegan(ev widget.TouchEvent) bool {
 		}
 	} else {
 		for i := len(path) - 1; i >= 0; i-- {
-			th, ok := path[i].w.(widget.TouchHandler)
+			th, ok := path[i].W.(widget.TouchHandler)
 			if !ok {
 				continue
 			}
-			if deliverTouch(th, ev, path[i].off) {
-				owner = path[i].w
+			if deliverTouch(th, ev, path[i].Off) {
+				owner = path[i].W
 				break
 			}
 		}
@@ -188,31 +186,31 @@ func (e *Engine) touchBegan(ev widget.TouchEvent) bool {
 	}
 
 	if _, ok := owner.(widget.Focusable); ok {
-		e.focus.set(owner)
+		d.focus.set(owner)
 	}
-	e.touch.mu.Lock()
-	if e.touch.owners == nil {
-		e.touch.owners = make(map[int]*touchOwner)
+	d.touch.mu.Lock()
+	if d.touch.owners == nil {
+		d.touch.owners = make(map[int]*touchOwner)
 	}
-	e.touch.owners[ev.ID] = &touchOwner{w: owner, x: ev.X, y: ev.Y}
-	e.touch.mu.Unlock()
+	d.touch.owners[ev.ID] = &touchOwner{w: owner, x: ev.X, y: ev.Y}
+	d.touch.mu.Unlock()
 
 	// Касание, как и клик, может открыть оверлей или сменить фокус.
-	e.Invalidate()
+	d.host.Invalidate()
 	return true
 }
 
 // touchFollow доставляет Moved / Ended / Cancelled владельцу касания.
-func (e *Engine) touchFollow(ev widget.TouchEvent) bool {
-	e.touch.mu.Lock()
-	o := e.touch.owners[ev.ID]
+func (d *Dispatcher) touchFollow(ev widget.TouchEvent) bool {
+	d.touch.mu.Lock()
+	o := d.touch.owners[ev.ID]
 	if o != nil {
 		o.x, o.y = ev.X, ev.Y
 		if ev.Phase.Terminal() {
-			delete(e.touch.owners, ev.ID)
+			delete(d.touch.owners, ev.ID)
 		}
 	}
-	e.touch.mu.Unlock()
+	d.touch.mu.Unlock()
 	if o == nil {
 		return false
 	}
@@ -220,33 +218,33 @@ func (e *Engine) touchFollow(ev widget.TouchEvent) bool {
 	if !ok {
 		return false
 	}
-	off := e.ownerOffset(o)
+	off := d.ownerOffset(o)
 	deliverTouch(th, ev, off)
-	e.invalidateWidget(o.w, off)
+	d.invalidateWidget(o.w, off)
 	return true
 }
 
 // CancelTouches отменяет все активные касания: каждому владельцу уходит
 // TouchCancelled в точке, где касание было в последний раз. Зовут, когда ввод у
 // окна отобрали — потеря фокуса, системный жест, — и конец касаний не придёт.
-func (e *Engine) CancelTouches() {
-	e.touch.mu.Lock()
-	owners := e.touch.owners
-	e.touch.owners = nil
-	e.touch.mu.Unlock()
+func (d *Dispatcher) CancelTouches() {
+	d.touch.mu.Lock()
+	owners := d.touch.owners
+	d.touch.owners = nil
+	d.touch.mu.Unlock()
 	for id, o := range owners {
 		th, ok := o.w.(widget.TouchHandler)
 		if !ok {
 			continue
 		}
 		deliverTouch(th, widget.TouchEvent{ID: id, X: o.x, Y: o.y, Phase: widget.TouchCancelled,
-			Time: time.Since(touchEpoch) + 1}, e.ownerOffset(o))
+			Time: time.Since(touchEpoch) + 1}, d.ownerOffset(o))
 	}
 }
 
 // TouchActive — сколько касаний сейчас принадлежат виджетам.
-func (e *Engine) TouchActive() int {
-	e.touch.mu.Lock()
-	defer e.touch.mu.Unlock()
-	return len(e.touch.owners)
+func (d *Dispatcher) TouchActive() int {
+	d.touch.mu.Lock()
+	defer d.touch.mu.Unlock()
+	return len(d.touch.owners)
 }

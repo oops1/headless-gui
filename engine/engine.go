@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	"github.com/oops1/headless-gui/v3/core/input"
 	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
@@ -42,11 +43,15 @@ import (
 // lockorder_test.go).
 type Engine struct {
 	// Состояние разнесено по областям (state.go, ADR-0011): сцена, цикл,
-	// ввод, оверлеи. Встраивание сохраняет имена полей (e.canvas, e.frameMu).
+	// оверлеи — встроенные структуры (имена полей сохранены: e.canvas,
+	// e.frameMu); ввод — пакет core/input (input.go).
 	sceneState
 	loopState
-	inputState
 	overlayState
+
+	// in — ввод: доставка событий, фокус, захват, касания, курсор
+	// (core/input). Создаётся в конструкторе, не меняется.
+	in *input.Dispatcher
 }
 
 type saveJob struct {
@@ -136,6 +141,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	e.userDPI = DefaultDPI
 	e.ttEnabled = true
 	e.ttDelay = 600 * time.Millisecond
+	e.in = input.New(inputHost{e})
 	e.scaleBits.Store(math.Float64bits(1))
 	e.canvasRef.Store(e.canvas)
 	e.imgInv = &hgraster.ImageInvalidator{}
@@ -1026,7 +1032,7 @@ func (e *Engine) accessibilityTreeNow() *widget.AccessNode {
 	e.mu.RLock()
 	root := e.root
 	e.mu.RUnlock()
-	focused := e.focus.get()
+	focused := e.in.Focused()
 
 	tree := widget.BuildAccessTree(root, focused)
 	if tree == nil {
@@ -1114,7 +1120,7 @@ func (e *Engine) activateAccessibleNow(w widget.Widget) bool {
 	}
 	// Границы — в кадре виджета; щелчок идёт по экрану. Для кнопки внутри
 	// прокрутки это разные точки (см. frames.go).
-	b = b.Sub(e.frameOffsetOf(w))
+	b = b.Sub(e.in.FrameOffsetOf(w))
 	// Центр — в ЛОГИЧЕСКИХ координатах (в них живут Bounds), а SendMouse*
 	// принимают ФИЗИЧЕСКИЕ и сами делят на Scale() внутри toLogical.
 	k := e.Scale()
@@ -2008,7 +2014,7 @@ func drawOverlaysAt(w widget.Widget, ctx widget.DrawContext, hosted bool, off im
 	if len(children) == 0 {
 		return drew
 	}
-	coff := off.Add(contentShift(w))
+	coff := off.Add(input.ContentShift(w))
 	for _, child := range children {
 		if drawOverlaysAt(child, ctx, hosted, coff, depth+1) {
 			drew = true

@@ -149,7 +149,7 @@ func TestSceneInput_DragKeepsCapture(t *testing.T) {
 	if fmt.Sprint(sc.log.events) != fmt.Sprint(want) {
 		t.Fatalf("события: %q, ждали %q", sc.log.events, want)
 	}
-	if sc.eng.getCaptured() != nil {
+	if sc.eng.in.Captured() != nil {
 		t.Fatal("захват не снят после отпускания")
 	}
 }

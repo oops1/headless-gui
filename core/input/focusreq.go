@@ -1,4 +1,4 @@
-package engine
+package input
 
 // focusreq.go — фокус по просьбе виджета (internal/focusreq).
 //
@@ -23,26 +23,26 @@ type focusLoan struct {
 
 // serveFocusRequests объявляет движок исполнителем просьб на время
 // доставки события.
-func (e *Engine) serveFocusRequests() (restore func()) {
-	return focusreq.Serve(focusServer{e})
+func (d *Dispatcher) serveFocusRequests() (restore func()) {
+	return focusreq.Serve(focusServer{d})
 }
 
-type focusServer struct{ e *Engine }
+type focusServer struct{ d *Dispatcher }
 
 func (s focusServer) RequestFocus(v any) {
 	w, ok := v.(widget.Widget)
 	if !ok || w == nil {
 		return
 	}
-	e := s.e
-	cur := e.focus.get()
+	d := s.d
+	cur := d.focus.get()
 	if cur == w {
 		return
 	}
-	e.loan.mu.Lock()
-	e.loan.by, e.loan.from = w, cur
-	e.loan.mu.Unlock()
-	e.setFocusInvalidating(w)
+	d.loan.mu.Lock()
+	d.loan.by, d.loan.from = w, cur
+	d.loan.mu.Unlock()
+	d.setFocusInvalidating(w)
 }
 
 func (s focusServer) ReturnFocus(v any) {
@@ -50,19 +50,19 @@ func (s focusServer) ReturnFocus(v any) {
 	if !ok || w == nil {
 		return
 	}
-	e := s.e
-	e.loan.mu.Lock()
-	if e.loan.by != w {
-		e.loan.mu.Unlock()
+	d := s.d
+	d.loan.mu.Lock()
+	if d.loan.by != w {
+		d.loan.mu.Unlock()
 		return
 	}
-	from := e.loan.from
-	e.loan.by, e.loan.from = nil, nil
-	e.loan.mu.Unlock()
+	from := d.loan.from
+	d.loan.by, d.loan.from = nil, nil
+	d.loan.mu.Unlock()
 	// Фокус успели передать дальше (щелчок по другому виджету) — его не
 	// трогаем: возвращать есть смысл, только пока он у взявшего.
-	if e.focus.get() == w {
-		e.setFocusInvalidating(from)
+	if d.focus.get() == w {
+		d.setFocusInvalidating(from)
 	}
 }
 
@@ -78,30 +78,30 @@ func (s focusServer) ReturnFocus(v any) {
 // начале следующего прохода цикла, в порядке вызовов относительно
 // ReturnFocus. Фокус при этом, как и у SetFocus, инвалидирует области старого
 // и нового владельца. nil и w, уже владеющий фокусом, ничего не меняют.
-func (e *Engine) RequestFocus(w widget.Widget) {
+func (d *Dispatcher) RequestFocus(w widget.Widget) {
 	if w == nil {
 		return
 	}
-	e.onLoop(func() { focusServer{e}.RequestFocus(w) })
+	d.onLoop(func() { focusServer{d}.RequestFocus(w) })
 }
 
 // ReturnFocus возвращает фокус тому, у кого его забрал RequestFocus для w, —
 // когда программно открытая панель закрылась. Если фокус успели передать
 // дальше (щелчок по другому виджету), его не трогает. Потокобезопасно так же,
 // как RequestFocus.
-func (e *Engine) ReturnFocus(w widget.Widget) {
+func (d *Dispatcher) ReturnFocus(w widget.Widget) {
 	if w == nil {
 		return
 	}
-	e.onLoop(func() { focusServer{e}.ReturnFocus(w) })
+	d.onLoop(func() { focusServer{d}.ReturnFocus(w) })
 }
 
 // onLoop выполняет fn на горутине кадра, не блокируя вызывающего: на самой
 // горутине кадра и у незапущенного движка — тут же, иначе через Post.
-func (e *Engine) onLoop(fn func()) {
-	if !e.loopRunning() || e.loopGID.Load() == curGoroutineID() {
+func (d *Dispatcher) onLoop(fn func()) {
+	if d.host.InLoop() {
 		fn()
 		return
 	}
-	e.Post(fn)
+	d.host.Post(fn)
 }

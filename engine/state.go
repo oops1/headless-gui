@@ -2,13 +2,13 @@ package engine
 
 // state.go — состояние движка по областям (ADR-0011, задача 7.1).
 //
-// Поля Engine разнесены по четырём встроенным структурам: сцена (холст,
-// дерево, сборка кадра), цикл (горутина кадров, очередь Post, таймеры, темп
-// и доставка), ввод (фокус, захват, касания, курсор) и оверлеи (модальные
-// окна, хостовые попапы, подсказка, переходы). Встраивание сохраняет имена:
-// e.canvas, e.frameMu, e.focus читаются как прежде, а область поля видна по
-// структуре, в которой оно объявлено. Этапы 7.2–7.4 выносят области в пакеты
-// core/input, core/loop и core/overlay; здесь закреплён их состав и порядок
+// Поля Engine разнесены по областям: сцена (холст, дерево, сборка кадра),
+// цикл (горутина кадров, очередь Post, таймеры, темп и доставка), оверлеи
+// (модальные окна, хостовые попапы, подсказка, переходы) — встроенные
+// структуры ниже; встраивание сохраняет имена: e.canvas, e.frameMu читаются
+// как прежде. Ввод (фокус, захват, касания, курсор) вынесен в core/input
+// (7.2): поле e.in, адаптер — input.go. Этапы 7.3–7.4 так же выносят цикл и
+// оверлеи в core/loop и core/overlay; здесь закреплён их состав и порядок
 // замков.
 //
 // Порядок замков (подробно — ADR-0011, проверка — lockorder_test.go):
@@ -224,55 +224,6 @@ type loopState struct {
 	saveCount atomic.Int64
 	saveOnce  sync.Once // лог о достижении предела — один раз
 	snapPool  sync.Pool // пул снапшотов front-буфера для SaveFrames
-}
-
-// inputState — ввод: фокус, захват мыши, касания, серия нажатий, владелец
-// указателя, принудительный курсор. Будущий core/input.
-type inputState struct {
-	focus focusManager // текущий виджет с фокусом; свой замок
-	loan  focusLoan    // фокус, взятый виджетом по просьбе (focusreq.go); свой замок
-
-	captured widget.Widget // виджет, захвативший мышь (drag)
-	capMu    sync.Mutex
-	// capChain — контейнеры со сдвигом содержимого над захватившим мышь
-	// виджетом (см. captureOffset); capChainOK — цепочка уже найдена. Под capMu.
-	capChain   []widget.ContentOffsetter
-	capChainOK bool
-
-	// pressConsumer — виджет, поглотивший последний press ЛКМ.
-	// При release: если этот виджет больше не под курсором
-	// (удалён/закрыт), событие проглатывается, чтобы не пролетело
-	// на виджет, оказавшийся под курсором после закрытия.
-	pressConsumer widget.Widget
-
-	// touch — владельцы активных касаний по ID (см. touch.go); свой замок.
-	touch touchState
-
-	// mouseMod — модификаторы клавиатуры, которыми помечаются события мыши
-	// (см. modifiers.go). Атомарные: пишет поток окна, читает диспетчеризация.
-	mouseMod atomic.Int32
-
-	// Прежняя позиция курсора для адресного broadcastMouseMove. Доступ только
-	// из потока-источника ввода (SendMouseMove), синхронизация не нужна.
-	lastMoveX, lastMoveY int
-	hasLastMove          bool
-	// pointerOwner — верхний под указателем widget.PointerOwner, которому
-	// последним отдано движение (pointerowner.go); ownerPath — рабочий буфер
-	// его поиска. Только поток-источник ввода, как lastMoveX.
-	pointerOwner widget.PointerOwner
-	ownerPath    []hitStep
-
-	// Серия нажатий одной кнопкой — для MouseEvent.Clicks. Доступ оттуда же,
-	// из потока-источника ввода (SendMouseButton).
-	clickBtn      widget.MouseButton
-	clickAt       time.Time
-	clickX        int
-	clickY        int
-	clickN        int
-	dblClickDelay time.Duration // 0 — значение по умолчанию (defaultDoubleClick)
-
-	// cursorOvr — принудительный курсор поверх курсора виджетов (cursoroverride.go); свой замок.
-	cursorOvr cursorOverride
 }
 
 // overlayState — слои поверх дерева: модальные окна в холсте и их хост,

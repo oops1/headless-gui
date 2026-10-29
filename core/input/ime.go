@@ -1,4 +1,4 @@
-package engine
+package input
 
 // ime.go — незавершённый ввод (композиция) от системы к фокусному виджету.
 //
@@ -23,31 +23,31 @@ import (
 //
 // Пустой текст означает «набранное убрать»: так система сообщает об отмене
 // последнего слога.
-func (e *Engine) SendComposition(text string, caret int) {
-	e.imePost(func(c widget.IMEComposer) { c.IMESetComposition(text, caret) })
+func (d *Dispatcher) SendComposition(text string, caret int) {
+	d.imePost(func(c widget.IMEComposer) { c.IMESetComposition(text, caret) })
 }
 
 // CommitComposition завершает ввод: текст становится содержимым поля.
-func (e *Engine) CommitComposition(text string) {
-	e.imePost(func(c widget.IMEComposer) { c.IMECommit(text) })
+func (d *Dispatcher) CommitComposition(text string) {
+	d.imePost(func(c widget.IMEComposer) { c.IMECommit(text) })
 }
 
 // CancelComposition отменяет ввод: набранное убирается без следа.
-func (e *Engine) CancelComposition() {
-	e.imePost(func(c widget.IMEComposer) { c.IMECancel() })
+func (d *Dispatcher) CancelComposition() {
+	d.imePost(func(c widget.IMEComposer) { c.IMECancel() })
 }
 
 // imePost выполняет действие над фокусным виджетом на горутине движка:
 // события IME приходят из насоса сообщений ОС, а дерево виджетов принадлежит
 // движку.
-func (e *Engine) imePost(fn func(widget.IMEComposer)) {
-	e.Post(func() {
-		c, ok := e.focus.get().(widget.IMEComposer)
+func (d *Dispatcher) imePost(fn func(widget.IMEComposer)) {
+	d.host.Post(func() {
+		c, ok := d.focus.get().(widget.IMEComposer)
 		if !ok {
 			return
 		}
 		fn(c)
-		e.Invalidate()
+		d.host.Invalidate()
 	})
 }
 
@@ -56,8 +56,8 @@ func (e *Engine) imePost(fn func(widget.IMEComposer)) {
 // По нему окно решает, включать ли ввод вообще: над кнопкой или списком
 // редактор метода ввода не нужен, и держать его включённым — значит
 // показывать человеку окно кандидатов там, где печатать некуда.
-func (e *Engine) IMEActive() bool {
-	_, ok := e.focus.get().(widget.IMEComposer)
+func (d *Dispatcher) IMEActive() bool {
+	_, ok := d.focus.get().(widget.IMEComposer)
 	return ok
 }
 
@@ -67,8 +67,8 @@ func (e *Engine) IMEActive() bool {
 // Физические, а не логические: координаты уходят прямо в системный вызов
 // (окно кандидатов на Windows, прямоугольник курсора на Wayland), а система
 // считает в пикселях экрана.
-func (e *Engine) CaretRect() (image.Rectangle, bool) {
-	c, ok := e.focus.get().(widget.IMEComposer)
+func (d *Dispatcher) CaretRect() (image.Rectangle, bool) {
+	c, ok := d.focus.get().(widget.IMEComposer)
 	if !ok {
 		return image.Rectangle{}, false
 	}
@@ -80,9 +80,9 @@ func (e *Engine) CaretRect() (image.Rectangle, bool) {
 	// у поля внутри прокрутки без этого окно встало бы на величину прокрутки
 	// мимо набираемого слова (см. frames.go).
 	if w, ok := c.(widget.Widget); ok {
-		r = r.Sub(e.frameOffsetOf(w))
+		r = r.Sub(d.frameOffsetOf(w))
 	}
-	k := e.Scale()
+	k := d.host.Scale()
 	if k == 1 {
 		return r, true
 	}

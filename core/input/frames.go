@@ -1,4 +1,4 @@
-package engine
+package input
 
 // frames.go — перевод координат на границе «экран ↔ содержимое прокрутки».
 //
@@ -9,7 +9,7 @@ package engine
 // виджет, — в его кадре. Движок обязан переводить на каждой границе, и все эти
 // границы собраны здесь и в events.go:
 //
-//   - хит-тест строит путь с кадром каждого шага (hitPath);
+//   - хит-тест строит путь с кадром каждого шага (HitPath);
 //   - событие мыши уходит виджету с координатами ЕГО кадра (deliverButton);
 //   - обход «всех виджетов» (движение мыши, закрытие оверлеев, поиск оверлея и
 //     захватчика) несёт кадр вместе с рекурсией;
@@ -32,31 +32,31 @@ import (
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
-// hitStep — шаг пути hit-теста: виджет и смещение его кадра. off — сумма
+// HitStep — шаг пути hit-теста: виджет и смещение его кадра. Off — сумма
 // ContentOffset контейнеров НАД виджетом: точка экрана (x, y) в системе
-// координат его Bounds() — (x+off.X, y+off.Y).
-type hitStep struct {
-	w   widget.Widget
-	off image.Point
+// координат его Bounds() — (x+Off.X, y+Off.Y).
+type HitStep struct {
+	W   widget.Widget
+	Off image.Point
 }
 
-// contentShift — на сколько контейнер сдвигает своих детей; нулевой у всех
+// ContentShift — на сколько контейнер сдвигает своих детей; нулевой у всех
 // остальных виджетов.
-func contentShift(w widget.Widget) image.Point {
+func ContentShift(w widget.Widget) image.Point {
 	if oc, ok := w.(widget.ContentOffsetter); ok {
 		return oc.ContentOffset()
 	}
 	return image.Point{}
 }
 
-// hitPath возвращает путь от корня до самого глубокого виджета под экранной
+// HitPath возвращает путь от корня до самого глубокого виджета под экранной
 // точкой (x, y): [root, ..., parent, hit], у каждого шага — кадр виджета.
 // Пустой срез (nil) — точка вне дерева.
 //
 // Точка переводится в кадр детей при спуске через каждый контейнер со сдвигом.
 // Родитель проверяется по точке в СВОЁМ кадре, поэтому ребёнок прокрутки
 // попадает под щелчок только внутри самой прокрутки — как он и виден.
-func hitPath(w widget.Widget, x, y int) []hitStep {
+func HitPath(w widget.Widget, x, y int) []HitStep {
 	return appendHitPath(nil, w, x, y, image.Point{}, 0)
 }
 
@@ -64,7 +64,7 @@ func hitPath(w widget.Widget, x, y int) []hitStep {
 // off — смещение этого кадра. Устройство накопителя — как у прежнего
 // appendHitTestPath (PERF-14): один рост среза сверху вниз, nil возвращается
 // только до append.
-func appendHitPath(dst []hitStep, w widget.Widget, x, y int, off image.Point, depth int) []hitStep {
+func appendHitPath(dst []HitStep, w widget.Widget, x, y int, off image.Point, depth int) []HitStep {
 	if tooDeep(depth) || !widget.IsWidgetVisible(w) {
 		return nil
 	}
@@ -72,9 +72,9 @@ func appendHitPath(dst []hitStep, w widget.Widget, x, y int, off image.Point, de
 		return nil
 	}
 	n := len(dst)
-	dst = append(dst, hitStep{w: w, off: off})
+	dst = append(dst, HitStep{W: w, Off: off})
 	cx, cy, coff := x, y, off
-	if sh := contentShift(w); sh != (image.Point{}) {
+	if sh := ContentShift(w); sh != (image.Point{}) {
 		cx, cy, coff = x+sh.X, y+sh.Y, off.Add(sh)
 	}
 	// Проверяем детей в обратном Z-порядке
@@ -88,24 +88,24 @@ func appendHitPath(dst []hitStep, w widget.Widget, x, y int, off image.Point, de
 }
 
 // hitTestPath — путь hit-теста одними виджетами, без кадров. Для того, кому
-// нужен только состав пути; движок сам ходит по hitPath.
+// нужен только состав пути; движок сам ходит по HitPath.
 func hitTestPath(w widget.Widget, x, y int) []widget.Widget {
-	steps := hitPath(w, x, y)
+	steps := HitPath(w, x, y)
 	if steps == nil {
 		return nil
 	}
 	out := make([]widget.Widget, len(steps))
 	for i, st := range steps {
-		out[i] = st.w
+		out[i] = st.W
 	}
 	return out
 }
 
-// pathSet — множество виджетов пути (для dismissOutside).
-func pathSet(path []hitStep) map[widget.Widget]struct{} {
+// pathSet — множество виджетов пути (для DismissOutside).
+func pathSet(path []HitStep) map[widget.Widget]struct{} {
 	set := make(map[widget.Widget]struct{}, len(path))
 	for _, st := range path {
-		set[st.w] = struct{}{}
+		set[st.W] = struct{}{}
 	}
 	return set
 }
@@ -171,7 +171,7 @@ func frameOffsetIn(root, target widget.Widget, off image.Point, depth int) (imag
 	if root == target {
 		return off, true
 	}
-	coff := off.Add(contentShift(root))
+	coff := off.Add(ContentShift(root))
 	for _, c := range root.Children() {
 		if p, ok := frameOffsetIn(c, target, coff, depth+1); ok {
 			return p, true
@@ -181,19 +181,15 @@ func frameOffsetIn(root, target widget.Widget, off image.Point, depth int) (imag
 }
 
 // treeRoots — корни, в которых может лежать виджет: дерево и открытые модалки.
-func (e *Engine) treeRoots() []widget.Widget {
-	e.mu.RLock()
-	root := e.root
-	e.mu.RUnlock()
+func (d *Dispatcher) treeRoots() []widget.Widget {
+	root := d.host.Root()
 	roots := make([]widget.Widget, 0, 2)
 	if root != nil {
 		roots = append(roots, root)
 	}
-	e.modMu.Lock()
-	for _, m := range e.modals {
+	for _, m := range d.host.Modals() {
 		roots = append(roots, m)
 	}
-	e.modMu.Unlock()
 	return roots
 }
 
@@ -204,11 +200,11 @@ func (e *Engine) treeRoots() []widget.Widget {
 //
 // Обходит дерево, поэтому годится для редких событий — смена фокуса, каретка
 // IME, синтетический клик скринридера, — а не для каждого движения мыши.
-func (e *Engine) frameOffsetOf(w widget.Widget) image.Point {
+func (d *Dispatcher) frameOffsetOf(w widget.Widget) image.Point {
 	if w == nil {
 		return image.Point{}
 	}
-	for _, r := range e.treeRoots() {
+	for _, r := range d.treeRoots() {
 		if off, ok := frameOffsetIn(r, w, image.Point{}, 0); ok {
 			return off
 		}
@@ -217,8 +213,8 @@ func (e *Engine) frameOffsetOf(w widget.Widget) image.Point {
 }
 
 // screenBoundsOf — границы виджета в экранных координатах (для инвалидации).
-func (e *Engine) screenBoundsOf(w widget.Widget) image.Rectangle {
-	return w.Bounds().Sub(e.frameOffsetOf(w))
+func (d *Dispatcher) screenBoundsOf(w widget.Widget) image.Rectangle {
+	return w.Bounds().Sub(d.frameOffsetOf(w))
 }
 
 // ─── Захват мыши ─────────────────────────────────────────────────────────────
@@ -257,26 +253,26 @@ func offsetChainIn(root, target widget.Widget, chain []widget.ContentOffsetter, 
 // своём обработчике, где обходить дерево нельзя — они могут держать свои замки;
 // поэтому SetCapture цепочку только сбрасывает, а ищется она здесь, при
 // следующем событии.
-func (e *Engine) captureOffset(cap widget.Widget) image.Point {
-	e.capMu.Lock()
-	if e.captured != cap {
-		e.capMu.Unlock()
+func (d *Dispatcher) captureOffset(cap widget.Widget) image.Point {
+	d.capMu.Lock()
+	if d.captured != cap {
+		d.capMu.Unlock()
 		return image.Point{}
 	}
-	ok, chain := e.capChainOK, e.capChain
-	e.capMu.Unlock()
+	ok, chain := d.capChainOK, d.capChain
+	d.capMu.Unlock()
 	if !ok {
-		for _, r := range e.treeRoots() {
+		for _, r := range d.treeRoots() {
 			if c, found := offsetChainIn(r, cap, nil, 0); found {
 				chain = c
 				break
 			}
 		}
-		e.capMu.Lock()
-		if e.captured == cap {
-			e.capChain, e.capChainOK = chain, true
+		d.capMu.Lock()
+		if d.captured == cap {
+			d.capChain, d.capChainOK = chain, true
 		}
-		e.capMu.Unlock()
+		d.capMu.Unlock()
 	}
 	var off image.Point
 	for _, oc := range chain {

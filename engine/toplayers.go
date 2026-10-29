@@ -21,6 +21,7 @@ import (
 	"image"
 
 	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	"github.com/oops1/headless-gui/v3/core/input"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -152,7 +153,7 @@ func (e *Engine) topWalk(w widget.Widget, rec *hgdraw.Recorder, canvas *Canvas, 
 	if len(children) == 0 {
 		return
 	}
-	coff := off.Add(contentShift(w))
+	coff := off.Add(input.ContentShift(w))
 	for _, child := range children {
 		e.topWalk(child, rec, canvas, hosted, on, layer, coff, depth+1)
 	}
@@ -173,7 +174,7 @@ func (e *Engine) topOverlay(w widget.Widget, od widget.OverlayDrawer, rec *hgdra
 		}
 		// Оверлей мимо присмотра: записывается; его место — как у ovtDrawOther
 		// (переходу, который он накрывает, шагать без перерисовки нельзя).
-		r := overlayHitRect(w).Sub(off).Inset(-widget.DefaultOverlayMargin())
+		r := input.OverlayHitRect(w).Sub(off).Inset(-widget.DefaultOverlayMargin())
 		e.ovt.others = append(e.ovt.others, ovtOther{layer: layer, rect: canvas.PhysRect(r)})
 	}
 	widget.DrawOverlayTraced(w, od, widget.OffsetContext(rec, off.X, off.Y))

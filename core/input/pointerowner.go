@@ -1,4 +1,4 @@
-package engine
+package input
 
 // pointerowner.go — движение указателя для виджетов, которым нужен только
 // верхний под указателем (widget.PointerOwner: окно чужой программы).
@@ -21,8 +21,8 @@ import (
 // routePointerOwner отдаёт движение (x, y — логические экранные координаты)
 // владельцу указателя. captured — виджет, держащий захват мыши (nil — нет);
 // overlay — оверлей под указателем (nil — нет), он лежит выше всех окон.
-func (e *Engine) routePointerOwner(x, y int, dispRoot widget.Widget, captured, overlay widget.Widget) {
-	if e.pointerOwner == nil && !widget.PointerOwnersActive() {
+func (d *Dispatcher) routePointerOwner(x, y int, dispRoot widget.Widget, captured, overlay widget.Widget) {
+	if d.pointerOwner == nil && !widget.PointerOwnersActive() {
 		return
 	}
 	var owner widget.PointerOwner
@@ -32,25 +32,25 @@ func (e *Engine) routePointerOwner(x, y int, dispRoot widget.Widget, captured, o
 		// Захват: движение получает захвативший, где бы ни был указатель —
 		// как неявный захват у Wayland при нажатой кнопке.
 		if po, ok := captured.(widget.PointerOwner); ok {
-			owner, off = po, e.captureOffset(captured)
+			owner, off = po, d.captureOffset(captured)
 		}
 	case overlay != nil || dispRoot == nil:
 		// Над открытым меню или вне дерева окна программы нет.
 	default:
-		e.ownerPath = appendHitPath(e.ownerPath[:0], dispRoot, x, y, image.Point{}, 0)
-		for i := len(e.ownerPath) - 1; i >= 0; i-- {
-			if po, ok := e.ownerPath[i].w.(widget.PointerOwner); ok {
-				owner, off = po, e.ownerPath[i].off
+		d.ownerPath = appendHitPath(d.ownerPath[:0], dispRoot, x, y, image.Point{}, 0)
+		for i := len(d.ownerPath) - 1; i >= 0; i-- {
+			if po, ok := d.ownerPath[i].W.(widget.PointerOwner); ok {
+				owner, off = po, d.ownerPath[i].Off
 				break
 			}
 		}
-		clear(e.ownerPath) // не держать виджеты до следующего движения
+		clear(d.ownerPath) // не держать виджеты до следующего движения
 	}
-	if owner != e.pointerOwner {
-		if prev := e.pointerOwner; prev != nil {
+	if owner != d.pointerOwner {
+		if prev := d.pointerOwner; prev != nil {
 			prev.PointerOut()
 		}
-		e.pointerOwner = owner
+		d.pointerOwner = owner
 	}
 	if owner != nil {
 		prev := widget.SetEventFrame(off)
@@ -60,9 +60,9 @@ func (e *Engine) routePointerOwner(x, y int, dispRoot widget.Widget, captured, o
 }
 
 // pointerOwnerLeft — указатель ушёл с окна: владелец его теряет.
-func (e *Engine) pointerOwnerLeft() {
-	if prev := e.pointerOwner; prev != nil {
-		e.pointerOwner = nil
+func (d *Dispatcher) pointerOwnerLeft() {
+	if prev := d.pointerOwner; prev != nil {
+		d.pointerOwner = nil
 		prev.PointerOut()
 	}
 }

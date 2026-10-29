@@ -144,9 +144,7 @@ func (e *Engine) guardInput(where string) func() {
 		}
 		if r := recover(); r != nil {
 			e.caught(where, r)
-			e.ReleaseCapture()
-			e.pressConsumer = nil
-			e.CancelTouches()
+			e.in.AbortGestures()
 		}
 	}
 }

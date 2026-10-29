@@ -12,6 +12,7 @@ import (
 	"image/color"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/core/input"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -136,16 +137,16 @@ func (e *Engine) tooltipMayAppear(frameInterval time.Duration) bool {
 // панели), отвечает через ToolTipAt(x, y); пустой ответ — спросить его общую
 // подсказку.
 func tooltipAt(root widget.Widget, x, y int) string {
-	path := hitPath(root, x, y)
+	path := input.HitPath(root, x, y)
 	for i := len(path) - 1; i >= 0; i-- {
-		if tp, ok := path[i].w.(interface{ ToolTipAt(x, y int) string }); ok {
+		if tp, ok := path[i].W.(interface{ ToolTipAt(x, y int) string }); ok {
 			// Точка — в кадре виджета (ребёнок прокрутки судит в координатах
 			// содержимого).
-			if s := tp.ToolTipAt(x+path[i].off.X, y+path[i].off.Y); s != "" {
+			if s := tp.ToolTipAt(x+path[i].Off.X, y+path[i].Off.Y); s != "" {
 				return s
 			}
 		}
-		if tp, ok := path[i].w.(interface{ GetToolTip() string }); ok {
+		if tp, ok := path[i].W.(interface{ GetToolTip() string }); ok {
 			if s := tp.GetToolTip(); s != "" {
 				return s
 			}

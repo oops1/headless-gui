@@ -49,6 +49,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/core/input"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -392,7 +393,7 @@ func (e *Engine) drawOverlaysT(w widget.Widget, canvas *Canvas, hosted bool, lay
 	if len(children) == 0 {
 		return
 	}
-	coff := off.Add(contentShift(w))
+	coff := off.Add(input.ContentShift(w))
 	for _, child := range children {
 		e.drawOverlaysT(child, canvas, hosted, layer, coff, depth+1)
 	}
@@ -401,7 +402,7 @@ func (e *Engine) drawOverlaysT(w widget.Widget, canvas *Canvas, hosted bool, lay
 // ovtDrawOther рисует оверлей мимо присмотра и запоминает его место.
 func (e *Engine) ovtDrawOther(w widget.Widget, od widget.OverlayDrawer, canvas *Canvas, layer widget.Widget, off image.Point) {
 	widget.DrawOverlayTraced(w, od, widget.OffsetContext(canvas, off.X, off.Y))
-	r := overlayHitRect(w).Sub(off).Inset(-widget.DefaultOverlayMargin())
+	r := input.OverlayHitRect(w).Sub(off).Inset(-widget.DefaultOverlayMargin())
 	e.ovt.others = append(e.ovt.others, ovtOther{layer: layer, rect: canvas.PhysRect(r)})
 }
 
@@ -454,7 +455,7 @@ func (e *Engine) ovtVisit(w widget.Widget, od widget.OverlayDrawer, canvas *Canv
 			// Смешение лежало на прежнем месте — оно перерисуется.
 			e.damageRect(tr.logicalRest())
 		}
-		tr.setGeom(rest, restL, overlayHitRect(w).Sub(off))
+		tr.setGeom(rest, restL, input.OverlayHitRect(w).Sub(off))
 	}
 	dur, curve, slide := e.ovtSpec(canvas)
 	capture := func() {

@@ -56,7 +56,7 @@ func (e *Engine) takeForce() []image.Rectangle {
 func (e *Engine) recordFrame(canvas *Canvas, root widget.Widget, modals []widget.ModalWidget, hosted, ovtOn bool, force []image.Rectangle) (list *hgdraw.List, exit hgdraw.ClipState) {
 	// Кадр ради анимации виджета с фокусом (мигающая каретка): его команды
 	// зависят от времени, а не от меток — перезаписать.
-	if f := e.focus.get(); f != nil {
+	if f := e.in.Focused(); f != nil {
 		if a, ok := f.(widget.Animated); ok && a.NeedsAnimation() {
 			if h, ok := f.(widget.ListHolder); ok {
 				h.MarkDirty()

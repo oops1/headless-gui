@@ -575,7 +575,10 @@ func TestCmdPath_AnimatedFocusFrameIsPartial(t *testing.T) {
 	anim := &cmdAnimated{labels[1]}
 	root.AddChild(anim)
 	eng.RenderOnce()
-	eng.focus.set(anim)
+	// Повреждение от самой смены фокуса снимаем: проверяется только кадр ради
+	// анимации каретки.
+	eng.SetFocus(anim)
+	eng.consumeDamage()
 	if !eng.animationNeeded(time.Second / 60) {
 		t.Fatal("анимация фокусного виджета не замечена")
 	}

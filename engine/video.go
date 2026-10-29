@@ -14,6 +14,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/core/input"
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -91,7 +92,7 @@ func collectOverlayRects(w widget.Widget, off image.Point, depth int, dst []imag
 		return dst
 	}
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
-		if r := overlayHitRect(w).Sub(off); !r.Empty() {
+		if r := input.OverlayHitRect(w).Sub(off); !r.Empty() {
 			dst = append(dst, r)
 		}
 	}
@@ -99,7 +100,7 @@ func collectOverlayRects(w widget.Widget, off image.Point, depth int, dst []imag
 	if len(children) == 0 {
 		return dst
 	}
-	coff := off.Add(contentShift(w))
+	coff := off.Add(input.ContentShift(w))
 	for _, c := range children {
 		dst = collectOverlayRects(c, coff, depth+1, dst)
 	}

@@ -273,7 +273,7 @@ func TestFailure_InputPanicIsolated(t *testing.T) {
 	eng.SetCapture(btn)
 	eng.SendMouseButton(160, 35, widget.MouseLeft, true)
 	eng.SendMouseButton(160, 35, widget.MouseLeft, false)
-	if eng.getCaptured() != nil {
+	if eng.in.Captured() != nil {
 		t.Fatal("захват мыши остался после паники")
 	}
 	infos := sc.infos()

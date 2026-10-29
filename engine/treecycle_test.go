@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/core/input"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -44,14 +45,9 @@ func TestTreeCycle_DoesNotHang(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if p := hitTestPath(w, 5, 5); len(p) > maxTreeDepth {
-			t.Errorf("путь hit-test длиннее предела: %d", len(p))
-		}
-		hitTest(w, 5, 5)
-		findOverlayAt(w, 5, 5)
-		findCapturer(w, 5, 5, widget.MouseEvent{})
-		dismissOutside(w, nil, 5, 5)
-		broadcastMouseMove(w, 0, 0, 5, 5)
+		// Обходы ввода (hit-тест, захватчик, оверлей, рассылка движения) —
+		// core/input/treecycle_test.go.
+		input.DismissOutside(w, nil, 5, 5)
 		injectCaptureManager(w, e)
 		drawOverlays(w, e.canvas, false)
 		e.renderFrame()

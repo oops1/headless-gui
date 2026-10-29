@@ -252,7 +252,7 @@ func (e *Engine) RenderCount() uint64 {
 // мигающая каретка у виджета с фокусом, активная анимация (widget.Animate)
 // или «дозревающий» tooltip.
 func (e *Engine) animationNeeded(frameInterval time.Duration) bool {
-	if f := e.focus.get(); f != nil {
+	if f := e.in.Focused(); f != nil {
 		if a, ok := f.(widget.Animated); ok && a.NeedsAnimation() {
 			// Кадр ради каретки — частичный, по области виджета: прежде он
 			// шёл полным (фон, обход всего дерева, все тайлы), на пути команд
@@ -261,7 +261,7 @@ func (e *Engine) animationNeeded(frameInterval time.Duration) bool {
 			if h, ok := f.(widget.ListHolder); ok {
 				h.MarkDirty()
 			}
-			e.noteDamage(e.screenBoundsOf(f))
+			e.noteDamage(e.in.ScreenBoundsOf(f))
 			return true
 		}
 	}

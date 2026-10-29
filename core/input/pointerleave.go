@@ -1,4 +1,4 @@
-package engine
+package input
 
 // pointerleave.go — указатель покинул окно (v3.39).
 //
@@ -14,21 +14,19 @@ import "github.com/oops1/headless-gui/v3/widget"
 // реализует widget.PointerLeaveHandler, приходит OnPointerLeave. Сам по себе
 // метод наведение не снимает — для этого окно присылает ещё и движение в точку
 // вне окна (SendMouseMove), которое идёт перед вызовом.
-func (e *Engine) SendPointerLeave() {
-	defer e.guardInput("SendPointerLeave")()
+func (d *Dispatcher) SendPointerLeave() {
+	defer d.host.GuardInput("SendPointerLeave")()
 	// Владелец указателя (окно программы) рассылкой ниже не охвачен — у него
 	// свой путь (pointerowner.go).
-	e.pointerOwnerLeft()
-	e.mu.RLock()
-	root := e.root
-	e.mu.RUnlock()
+	d.pointerOwnerLeft()
+	root := d.host.Root()
 	// Модальное окно может лежать и в дереве корня, и отдельно от него:
 	// обработчик зовётся один раз в любом случае.
 	seen := map[widget.Widget]bool{}
 	if root != nil {
 		notifyPointerLeave(root, 0, seen)
 	}
-	if m := e.topModal(); m != nil {
+	if m := d.host.TopModal(); m != nil {
 		notifyPointerLeave(m, 0, seen)
 	}
 }
