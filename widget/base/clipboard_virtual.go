@@ -23,7 +23,7 @@ package base
 //     вставляющему нужны настоящие пути (text/uri-list,
 //     x-special/gnome-copied-files). Поэтому в ответ на запрос этих форматов
 //     владелец зовёт WithMaterialize приложения и отдаёт пути, которые оно
-//     вернуло (window/clipboard_virtual.go). Без WithMaterialize этих форматов
+//     вернуло (window/core/clipboard_virtual.go). Без WithMaterialize этих форматов
 //     на Linux нет, и ClipboardSetVirtualFiles отвечает отказом;
 //   - macOS и провайдеры приложения без расширения: ErrClipboardVirtualUnsupported.
 

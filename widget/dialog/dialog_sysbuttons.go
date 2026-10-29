@@ -7,7 +7,7 @@
 //
 // Сворачивает и разворачивает НЕ виджет: он рисуется в холсте своего окна и о
 // нём ничего не знает. Кнопки зовут хуки, которые ставит нативный хост
-// (window/modal_host.go) — там есть и Minimize, и Maximize, и Restore.
+// (window/core/modal_host.go) — там есть и Minimize, и Maximize, и Restore.
 package dialog
 
 import (

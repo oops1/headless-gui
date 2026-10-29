@@ -5,7 +5,7 @@ package clipboard
 // clipboard_linux.go — запасной буфер обмена Linux через xclip/xsel.
 //
 // Основной путь — нативный: под Wayland это wl_data_device
-// (window/wayland_clipboard_linux.go), и окно подменяет провайдер сразу,
+// (window/core/wayland_clipboard_linux.go), и окно подменяет провайдер сразу,
 // как только соединение поднялось. Эти утилиты остаются для X11-сессий без
 // нативного владельца и как запас там, где окна ещё нет.
 //

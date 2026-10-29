@@ -30,7 +30,7 @@ func TestOwnerReview_NativeFloatingDockPaneNotifiesHostEngine(t *testing.T) {
 	dm.AddPane(pane, widget.DockLeft)
 	a.eng.renderFrame()
 
-	// Хост отрыва (window/dock_host.go): панель — корень вторичного движка.
+	// Хост отрыва (window/core/dock_host.go): панель — корень вторичного движка.
 	pane.OnFloatNative = func(p *widget.DockPane) {
 		p.SetBounds(image.Rect(0, 0, 200, 150))
 		b.eng.SetRoot(p)
