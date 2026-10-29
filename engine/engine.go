@@ -4,6 +4,7 @@ import (
 	"fmt"
 	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"github.com/oops1/headless-gui/v3/core/input"
+	"github.com/oops1/headless-gui/v3/core/loop"
 	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
@@ -46,12 +47,16 @@ type Engine struct {
 	// оверлеи — встроенные структуры (имена полей сохранены: e.canvas,
 	// e.frameMu); ввод — пакет core/input (input.go).
 	sceneState
-	loopState
+	frameState
 	overlayState
 
 	// in — ввод: доставка событий, фокус, захват, касания, курсор
 	// (core/input). Создаётся в конструкторе, не меняется.
 	in *input.Dispatcher
+	// lp — цикл кадров: горутина цикла, темп и доставка кадров, повреждение
+	// и рендер по запросу, очередь Post, таймеры (core/loop, loop.go).
+	// Создаётся в конструкторе, не меняется.
+	lp *loop.Loop
 }
 
 type saveJob struct {
@@ -130,13 +135,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	e.fontCache = fc
 	e.canvas = hgraster.NewCanvas(width, height, fc)
 	e.rec = hgdraw.NewRecorder()
-	e.frames = make(chan output.Frame, 8)
-	// wake будит цикл кадров при внешнем темпе: без него RequestFrame
-	// ждал бы ближайшего тика, то есть темп остался бы тикерным.
-	e.wake = make(chan struct{}, 1)
-	e.quit = make(chan struct{})
-	e.done = make(chan struct{})
-	e.fps = fps
+	e.lp = loop.New(loopHost{e}, fps)
 	e.offscreen = offscreen
 	e.userDPI = DefaultDPI
 	e.ttEnabled = true
@@ -152,7 +151,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// причём частично — в пределах damage-области. Прямые записи в
 	// экспортированные поля виджетов требуют Invalidate()/Engine.Invalidate().
 	// Опт-аут (прежнее поведение «рендер каждый тик»): SetRenderOnDemand(false).
-	e.onDemand.Store(true)
+	// Включён в loop.New.
 	// Путь команд (ADR-0004, cmdpath.go) — режим по умолчанию с 4.0; растр
 	// по тайлам в пуле (ADR-0005, tileframe.go) — тоже, кроме движка вне
 	// экрана: его одиночные кадры не окупают набора воркеров.
@@ -326,7 +325,7 @@ func (e *Engine) Root() widget.Widget {
 // Тайлы — в ФИЗИЧЕСКИХ пикселях (логические × Scale).
 // Канал закрывается после Stop().
 func (e *Engine) Frames() <-chan output.Frame {
-	return e.frames
+	return e.lp.Frames()
 }
 
 // CanvasSize возвращает ЛОГИЧЕСКИЙ размер холста (в нём живут виджеты).
@@ -945,20 +944,20 @@ func (e *Engine) RenderOnce() *image.RGBA {
 // он и только он. По флагам Start/Stop, а не по loopGID: сразу после Start
 // горутина цикла может ещё не успеть записать свой номер, а очередь уже его.
 func (e *Engine) loopRunning() bool {
-	return e.started.Load() && !e.stopped.Load()
+	return e.lp.Running()
 }
 
 // Start запускает цикл рендеринга в отдельной горутине.
 // Вызывать не более одного раза.
 func (e *Engine) Start() {
-	if e.stopped.Load() || !e.started.CompareAndSwap(false, true) {
+	if !e.lp.MarkStarted() {
 		return // повторный Start или Start после Stop — no-op
 	}
 	e.Invalidate() // гарантируем рендер первого кадра в любом режиме
 	if e.saveDir != "" {
 		go e.saveWorker()
 	}
-	go e.loop()
+	e.lp.Run()
 }
 
 // Stop останавливает цикл рендеринга и ждёт его завершения.
@@ -974,7 +973,7 @@ func (e *Engine) Start() {
 // Stop без Start тоже безопасен (снимает регистрацию, закрывает каналы) —
 // раньше он навсегда зависал на ожидании цикла, который никто не запускал.
 func (e *Engine) Stop() {
-	if !e.stopped.CompareAndSwap(false, true) {
+	if !e.lp.MarkStopped() {
 		return
 	}
 	widget.UnregisterUINotifier(e.notifierHandle)
@@ -990,20 +989,17 @@ func (e *Engine) Stop() {
 	e.countMotion(false)
 	widget.UnregisterTextMeasurer(e.measurerHandle)
 	svg.UnregisterTextRasterizer(e.svgTextHandle)
-	close(e.quit)
-	// Таймеры гасим до ожидания цикла: stopped уже выставлен, новые не заведутся.
-	e.stopTimers()
-	started := e.started.Load()
-	if started {
-		<-e.done
-	}
+	// Цикл: quit закрывается, таймеры гаснут до ожидания цикла (stopped уже
+	// выставлен, новые не заведутся), горутина цикла дожидается выхода.
+	e.lp.Halt()
+	started := e.lp.Started()
 	// Цикл кадра остановлен (done); RenderOnce с другой горутины держит
 	// frameMu — воркеры тайлового растра, кэш размытия и таблицы хэшей
 	// (tileframe.go) освобождаются под ним.
 	e.frameMu.Lock()
 	e.tr = nil
 	e.frameMu.Unlock()
-	close(e.frames)
+	e.lp.CloseFrames()
 	if e.saveCh != nil {
 		close(e.saveCh) // saveWorker дочитает оставшиеся задачи
 		if started {
@@ -1428,115 +1424,6 @@ func savePNG(img *image.RGBA, path string) {
 	_ = png.Encode(f, img)
 }
 
-func (e *Engine) loop() {
-	defer close(e.done)
-	e.loopGID.Store(curGoroutineID())
-	defer e.loopGID.Store(0)
-	// Анимации, заведённые на горутине цикла, шагает только этот движок: у
-	// вторичного движка диалога свои обработчики и своя горутина (GG-68).
-	defer widget.BindAnimationLoop(e)()
-
-	interval := e.frameInterval()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	// lastGen — поколение инвалидации, отрендеренное последним кадром
-	// (on-demand). Сентинел гарантирует рендер первого кадра.
-	lastGen := ^uint64(0)
-	// lastFrameAt — когда рисовался последний кадр: кадр по пробуждению не
-	// должен идти чаще темпа кадров.
-	var lastFrameAt time.Time
-
-	for {
-		select {
-		case <-e.wake:
-			// Отложенные вызовы разбираем ПЕРВЫМИ: они меняют дерево, и их
-			// изменения должны попасть в тот же кадр, а не в следующий.
-			e.runPosted()
-			if e.pacingIsExternal() {
-				// Внешний темп: кадр — только по запросу стока. Анимации
-				// продвигаются в тикере, здесь — только кадр.
-				if !e.takeFrameRequest() {
-					continue
-				}
-				frame := e.renderFrame()
-				lastFrameAt = time.Now()
-				if len(frame.Tiles) == 0 && len(frame.Moves) == 0 {
-					continue
-				}
-				e.deliver(frame)
-				continue
-			}
-			// Тикерный темп: через очередь приходит ввод окна, и его результат
-			// должен появиться сразу, а не на следующем тике. Но не чаще темпа
-			// кадров — мышь шлёт сотни событий в секунду, и кадр на каждое был
-			// бы работой впустую; не нарисованное здесь нарисует тикер.
-			if !e.onDemand.Load() || time.Since(lastFrameAt) < interval {
-				continue
-			}
-			gen := e.invGen.Load()
-			if gen == lastGen && !e.fullFramePending() {
-				continue
-			}
-			lastGen = gen
-			frame := e.renderFrame()
-			lastFrameAt = time.Now()
-			if len(frame.Tiles) == 0 && len(frame.Moves) == 0 {
-				continue
-			}
-			e.deliver(frame)
-
-		case <-ticker.C:
-			// Потолок частоты (SetMaxFPS) мог смениться с прошлого тика.
-			if iv := e.frameInterval(); iv != interval {
-				interval = iv
-				ticker.Reset(iv)
-			}
-			// Отложенные вызовы — раньше всего: они меняют дерево, а решение
-			// о пропуске кадра принимается по заявленному damage, и damage от
-			// них обязан успеть.
-			e.runPosted()
-			// Продвигаем анимации ДО решения о пропуске кадра: тики зовут
-			// сеттеры виджетов, те самоинвалидируются (авто-damage), поэтому
-			// damage от тиков попадёт в invGen ниже и кадр перерисуется
-			// частично. Вызывается в любом режиме — анимации живут и при
-			// SetRenderOnDemand(false).
-			e.guardCall("Animation", func() { widget.StepAnimationsFor(e, time.Now()) })
-			// Внешний темп: кадры готовит RequestFrame. Анимации всё равно
-			// продвигаем — иначе начатая приложением анимация замерла бы до
-			// следующего запроса и шла бы рывками.
-			if e.pacingIsExternal() {
-				continue
-			}
-			if e.onDemand.Load() {
-				gen := e.invGen.Load()
-				// Полный кадр после потери или смены размера рисуется и без
-				// изменений: иначе статичный интерфейс остался бы у
-				// потребителя неверным (fullframe.go).
-				if gen == lastGen && !e.animationNeeded(interval) && !e.fullFramePending() {
-					e.stats.skipped.Add(1)
-					continue // UI не менялся — пропускаем кадр целиком
-				}
-				lastGen = gen // снимаем ДО рендера: инвалидация во время кадра не потеряется
-			}
-			frame := e.renderFrame()
-			lastFrameAt = time.Now()
-			// Кадр из ОДНИХ переносов — полноценный кадр: окно переехало,
-			// пикселей не изменилось, и потребителю есть что выполнить.
-			// Проверка только по тайлам отбрасывала его молча.
-			if len(frame.Tiles) == 0 && len(frame.Moves) == 0 {
-				continue
-			}
-			// Один путь выдачи на оба темпа: сток и канал получают кадр
-			// в одном месте, иначе сток молча оставался бы пустым при
-			// тикерном темпе — ровно это и показал тест.
-			e.deliver(frame)
-		case <-e.quit:
-			return
-		}
-	}
-}
-
 func (e *Engine) renderFrame() output.Frame {
 	// frameMu гарантирует целостность канваса на время кадра; e.mu берётся
 	// лишь на мгновение — снять указатели. SetRoot/Root/события рендером
@@ -1613,7 +1500,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// Шаги переходов хостовых попапов (popuptrans.go): холст не меняется,
 	// кадр без повреждения доходит только до renderPopups.
 	popupSteps := e.popupTicked.Swap(false)
-	if (len(ovtSteps) > 0 || popupSteps) && !damageAll && len(damageRects) == 0 && e.onDemand.Load() {
+	if (len(ovtSteps) > 0 || popupSteps) && !damageAll && len(damageRects) == 0 && e.lp.RenderOnDemand() {
 		return e.renderStepFrame(canvas, root, modals, surface, ovtSteps, popupSteps, image.Rectangle{}, drawStart)
 	}
 	// Объединение нужно там, где область может быть только одна: клип
@@ -1632,7 +1519,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// Рисовать по объединению не жалко (пиксели остаются те же, тайлы от
 	// этого не меняются), а вот сравнивать по нему — значит отправить
 	// потребителю всё, что лежит между далёкими областями.
-	partial := e.onDemand.Load() && !damageAll && !damage.Empty()
+	partial := e.lp.RenderOnDemand() && !damageAll && !damage.Empty()
 
 	// Пропуск поддеревьев: обходу нужно знать, что именно перерисовывается.
 	// Полный кадр ограничений не ставит — иначе первый же кадр после
@@ -1920,7 +1807,7 @@ func (e *Engine) saveFrame(canvas *Canvas, seq uint64, tiles []output.DirtyTile)
 		// иначе при остановке с полным буфером рендер и Stop ждали бы друг друга.
 		select {
 		case e.saveCh <- saveJob{path: path, seq: seq, snap: snap}:
-		case <-e.quit:
+		case <-e.lp.Quit():
 		}
 	}
 }

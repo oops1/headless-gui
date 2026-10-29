@@ -43,7 +43,7 @@ func TestOwnerReview_NativeFloatingDockPaneNotifiesHostEngine(t *testing.T) {
 	if got := widget.OwnerOf(inner); got != widget.Owner(treeOwner{b.eng}) {
 		t.Errorf("владелец содержимого плавающей панели: %v, ждали движок её окна B", got)
 	}
-	gb := b.eng.invGen.Load()
+	gb := b.eng.lp.Gen()
 	inner.SetText("правка в плавающей панели")
 	if d, w := pending(b.eng, gb); !d || !w {
 		t.Fatalf("B (окно панели) не получил правку содержимого панели (damage=%v, wake=%v): уведомление ушло в A", d, w)
@@ -77,7 +77,7 @@ func TestOwnerReview_RootWithStaleRecParentNotifiesOldEngine(t *testing.T) {
 	if got := widget.OwnerOf(inner); got != widget.Owner(treeOwner{b.eng}) {
 		t.Errorf("владелец перенесённого поддерева: %v, ждали B", got)
 	}
-	ga, gb := a.eng.invGen.Load(), b.eng.invGen.Load()
+	ga, gb := a.eng.lp.Gen(), b.eng.lp.Gen()
 	inner.SetText("после переноса")
 	if d, w := pending(b.eng, gb); !d || !w {
 		t.Fatalf("B не получил правку своего корня (damage=%v, wake=%v)", d, w)
@@ -103,7 +103,7 @@ func TestOwnerReview_ModalWithStaleRecParentNotifiesOldEngine(t *testing.T) {
 	b.eng.renderFrame()
 	a.eng.consumeDamage()
 	b.eng.consumeDamage()
-	gb := b.eng.invGen.Load()
+	gb := b.eng.lp.Gen()
 	m.Invalidate()
 	if d, w := pending(b.eng, gb); !d || !w {
 		t.Fatalf("B не получил Invalidate своего модального (damage=%v, wake=%v)", d, w)
@@ -134,7 +134,7 @@ func TestOwnerReview_RemovedTabContentKeepsParent(t *testing.T) {
 	b.eng.renderFrame()
 	a.eng.consumeDamage()
 	b.eng.consumeDamage()
-	gb := b.eng.invGen.Load()
+	gb := b.eng.lp.Gen()
 	inner.SetText("в своём окне")
 	if d, w := pending(b.eng, gb); !d || !w {
 		t.Fatalf("B не получил правку содержимого снятой вкладки (damage=%v, wake=%v)", d, w)
@@ -158,7 +158,7 @@ func TestOwnerReview_StopOfOldEngineRestoresBroadcast(t *testing.T) {
 	b.eng.renderFrame()
 	a.eng.Stop()
 	b.eng.consumeDamage()
-	gb := b.eng.invGen.Load()
+	gb := b.eng.lp.Gen()
 	inner.SetText("после Stop A")
 	if d, w := pending(b.eng, gb); !d || !w {
 		t.Fatalf("после Stop A дерево B не достучалось до B (damage=%v, wake=%v)", d, w)

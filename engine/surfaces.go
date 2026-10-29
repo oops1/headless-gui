@@ -163,11 +163,8 @@ func (e *Engine) ReleaseSurface(i int) {
 	}
 	// Тикерный темп: damage ждёт с прошлого раза, но поколение не менялось
 	// — цикл решил бы, что рисовать нечего.
-	e.invGen.Add(1)
-	select {
-	case e.wake <- struct{}{}:
-	default:
-	}
+	e.lp.BumpGen()
+	e.lp.Wake()
 }
 
 // Surfaces сообщает, сколько буферов задано SetSurfaces (0 — набора нет).

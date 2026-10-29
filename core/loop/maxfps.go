@@ -1,4 +1,4 @@
-package engine
+package loop
 
 import "time"
 
@@ -12,17 +12,17 @@ import "time"
 //
 // Можно вызывать в любой момент и с любой горутины; цикл кадров подхватывает
 // новое значение на ближайшем тике. Шаг анимаций идёт в том же темпе.
-func (e *Engine) SetMaxFPS(fps int) {
+func (l *Loop) SetMaxFPS(fps int) {
 	if fps < 0 {
 		fps = 0
 	}
-	e.maxFPS.Store(int32(fps))
+	l.maxFPS.Store(int32(fps))
 }
 
-// frameInterval — период кадра с учётом потолка SetMaxFPS.
-func (e *Engine) frameInterval() time.Duration {
-	fps := e.fps
-	if c := int(e.maxFPS.Load()); c > 0 && c < fps {
+// FrameInterval — период кадра с учётом потолка SetMaxFPS.
+func (l *Loop) FrameInterval() time.Duration {
+	fps := l.fps
+	if c := int(l.maxFPS.Load()); c > 0 && c < fps {
 		fps = c
 	}
 	return time.Duration(float64(time.Second) / float64(fps))

@@ -675,12 +675,12 @@ func TestOverlayTrans_ReopenElsewhereClearsOld(t *testing.T) {
 	s.eng.InvalidateRect(image.Rect(250, 190, 320, 240))
 	// Кадры — как у цикла: только когда что-то заявлено. Кадр без
 	// повреждения рисуется полным путём и починил бы что угодно.
-	gen := s.eng.invGen.Load()
+	gen := s.eng.lp.Gen()
 	s.eng.RenderFrameNow()
 	t1 := time.Now()
 	for ms := 0; ms <= 200; ms += 20 {
 		widget.StepAnimationsFor(s.eng, t1.Add(time.Duration(ms)*time.Millisecond))
-		if g := s.eng.invGen.Load(); g != gen {
+		if g := s.eng.lp.Gen(); g != gen {
 			gen = g
 			s.eng.RenderFrameNow()
 		}

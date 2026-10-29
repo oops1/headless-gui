@@ -42,13 +42,13 @@ func newOwnerScene(t *testing.T) ownerScene {
 // поколение изменений с gen.
 func pending(e *Engine, gen uint64) (damaged bool, woke bool) {
 	rects, all := e.consumeDamage()
-	return all || len(rects) > 0, e.invGen.Load() != gen
+	return all || len(rects) > 0, e.lp.Gen() != gen
 }
 
 func TestOwner_InvalidateReachesOnlyOwnEngine(t *testing.T) {
 	testreset.Globals(t)
 	a, b := newOwnerScene(t), newOwnerScene(t)
-	ga, gb := a.eng.invGen.Load(), b.eng.invGen.Load()
+	ga, gb := a.eng.lp.Gen(), b.eng.lp.Gen()
 
 	a.label.SetText("правка в A")
 	if d, w := pending(a.eng, ga); !d || !w {
@@ -58,7 +58,7 @@ func TestOwner_InvalidateReachesOnlyOwnEngine(t *testing.T) {
 		t.Fatalf("B разбужен правкой в A (damage=%v, wake=%v)", d, w)
 	}
 
-	gb = b.eng.invGen.Load()
+	gb = b.eng.lp.Gen()
 	a.label.SetBounds(image.Rect(30, 30, 210, 54))
 	a.root.AddChild(widget.NewLabel("ещё", color.RGBA{A: 255}))
 	a.root.Invalidate()
@@ -83,7 +83,7 @@ func TestOwner_OverlayWidgetInvalidatesOwnEngine(t *testing.T) {
 	a.eng.renderFrame()
 	a.eng.consumeDamage()
 	b.eng.consumeDamage()
-	gb := b.eng.invGen.Load()
+	gb := b.eng.lp.Gen()
 	dd.SetOpen(true)
 	if d, w := pending(b.eng, gb); d || w {
 		t.Fatalf("B разбужен раскрытием списка в A (damage=%v, wake=%v)", d, w)
@@ -97,7 +97,7 @@ func TestOwner_OverlayWidgetInvalidatesOwnEngine(t *testing.T) {
 func TestOwner_GlobalInvalidateRectReachesAll(t *testing.T) {
 	testreset.Globals(t)
 	a, b := newOwnerScene(t), newOwnerScene(t)
-	ga, gb := a.eng.invGen.Load(), b.eng.invGen.Load()
+	ga, gb := a.eng.lp.Gen(), b.eng.lp.Gen()
 	widget.InvalidateRect(image.Rect(10, 10, 50, 50))
 	if d, w := pending(a.eng, ga); !d || !w {
 		t.Fatal("A не получил widget.InvalidateRect")
@@ -119,7 +119,7 @@ func TestOwner_TreeWithoutOwnerBroadcasts(t *testing.T) {
 	if widget.OwnerOf(l) != nil {
 		t.Fatal("у дерева без SetRoot нашёлся владелец")
 	}
-	ga, gb := a.eng.invGen.Load(), b.eng.invGen.Load()
+	ga, gb := a.eng.lp.Gen(), b.eng.lp.Gen()
 	l.SetText("правка сироты")
 	if d, w := pending(a.eng, ga); !d || !w {
 		t.Fatal("A не получил уведомление дерева без владельца")
@@ -142,7 +142,7 @@ func TestOwner_ModalBelongsToItsEngine(t *testing.T) {
 	if widget.OwnerOf(m) != widget.Owner(treeOwner{a.eng}) {
 		t.Fatal("модальное не привязано к движку A")
 	}
-	gb := b.eng.invGen.Load()
+	gb := b.eng.lp.Gen()
 	m.Invalidate()
 	if d, w := pending(b.eng, gb); d || w {
 		t.Fatal("B разбужен модальным окном A")
@@ -206,7 +206,7 @@ func TestOwner_ReparentedSubtreeFollowsNewTop(t *testing.T) {
 	a.root.AddChild(pane)
 	a.eng.consumeDamage()
 	b.eng.consumeDamage()
-	gb := b.eng.invGen.Load()
+	gb := b.eng.lp.Gen()
 	inner.SetText("после возврата")
 	if d, w := pending(b.eng, gb); d || w {
 		t.Fatal("B разбужен виджетом панели, вернувшейся в A")
@@ -223,7 +223,7 @@ func TestOwner_AnimationWakeIsAddressed(t *testing.T) {
 	testreset.Globals(t)
 	defer widget.StopAllAnimations()
 	a, b := newOwnerScene(t), newOwnerScene(t)
-	gb := b.eng.invGen.Load()
+	gb := b.eng.lp.Gen()
 	widget.AnimateOwned(a.label, "test", 0, nil, func(float64) {})
 	if d, w := pending(b.eng, gb); d || w {
 		t.Fatal("B разбужен анимацией виджета A")

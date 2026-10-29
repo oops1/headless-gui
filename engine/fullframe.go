@@ -24,38 +24,23 @@ package engine
 // Вызывается под frameMu: рендер в этот момент не идёт и в канал не пишет.
 func (e *Engine) markCanvasReplaced() {
 	e.fullNext.Store(true)
-	for {
-		select {
-		case fr := <-e.frames:
-			fr.Release() // кадр прежнего размера не увидит никто
-			continue
-		default:
-		}
-		return
-	}
+	e.lp.DrainFrames() // кадр прежнего размера не увидит никто
 }
-
-// frameRoom — есть ли место в канале кадров.
-func (e *Engine) frameRoom() bool { return len(e.frames) < cap(e.frames) }
 
 // fullFramePending — нужен полный кадр, и его есть куда отдать. Тикер рисует
 // кадр по этому признаку даже без изменений в интерфейсе: иначе после потери
 // статичный интерфейс так и остался бы у потребителя неверным.
 func (e *Engine) fullFramePending() bool {
-	return e.fullNext.Load() || (e.lostFrame.Load() && e.frameRoom())
+	return e.fullNext.Load() || e.lp.LostPending()
 }
 
 // takeFullFrame решает, будет ли этот кадр полным, и снимает признак.
 func (e *Engine) takeFullFrame() bool {
 	if e.fullNext.Swap(false) {
-		e.lostFrame.Store(false)
+		e.lp.ClearLost()
 		return true
 	}
-	if e.lostFrame.Load() && e.frameRoom() {
-		e.lostFrame.Store(false)
-		return true
-	}
-	return false
+	return e.lp.TakeLost()
 }
 
 // SetFrameRecycling включает переработку буферов данных тайлов: вместо нового

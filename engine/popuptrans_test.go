@@ -36,7 +36,7 @@ func newPopupTransScene(t *testing.T, fade bool, offset float64) (*ovtScene, *po
 
 // renderLikeLoop рисует кадр, только если цикл тоже нарисовал бы его.
 func renderLikeLoop(e *Engine, gen *uint64) {
-	if g := e.invGen.Load(); g != *gen {
+	if g := e.lp.Gen(); g != *gen {
 		*gen = g
 		e.RenderFrameNow()
 	}
@@ -47,7 +47,7 @@ func TestPopupTrans_OpenClose(t *testing.T) {
 	defer widget.StopAllAnimations()
 	s, rec := newPopupTransScene(t, true, 10)
 	s.setOpen(true)
-	gen := s.eng.invGen.Load()
+	gen := s.eng.lp.Gen()
 	s.eng.RenderFrameNow()
 	f := rec.last()
 	if len(f) != 1 || f[0].Transition == nil || f[0].Transition.Opacity != 0 || f[0].Transition.Closing {
@@ -83,7 +83,7 @@ func TestPopupTrans_OpenClose(t *testing.T) {
 	// Исчезновение: ID в кадрах с Closing до конца, потом пропадает.
 	s.setOpen(false)
 	s.eng.RenderFrameNow()
-	gen = s.eng.invGen.Load()
+	gen = s.eng.lp.Gen()
 	f = rec.last()
 	if len(f) != 1 || f[0].Transition == nil || !f[0].Transition.Closing || f[0].Img != img {
 		t.Fatalf("кадр закрытия хосту: %+v", f)

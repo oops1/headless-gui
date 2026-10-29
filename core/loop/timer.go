@@ -11,7 +11,7 @@
 // Здесь обе беды закрыты в движке: таймер принадлежит движку, исполняется на
 // его горутине и гаснет вместе с ним.
 
-package engine
+package loop
 
 import (
 	"sync"
@@ -26,7 +26,7 @@ const minEvery = time.Millisecond
 // Timer — ручка отложенного или повторяющегося вызова, созданного After или
 // Every. Все методы безопасны из любой горутины.
 type Timer struct {
-	e     *Engine
+	l     *Loop
 	fn    func()
 	every time.Duration // 0 — разовый вызов
 
@@ -55,8 +55,8 @@ type Timer struct {
 // Ловушка та же, что у Post: без Start() очередь разбирают лишь RenderOnce,
 // RenderFrameNow и Flush, поэтому у незапущенного движка fn выполнится в тот
 // момент, когда приложение само попросит кадр.
-func (e *Engine) After(d time.Duration, fn func()) *Timer {
-	return e.newTimer(d, 0, fn)
+func (l *Loop) After(d time.Duration, fn func()) *Timer {
+	return l.newTimer(d, 0, fn)
 }
 
 // Every повторяет fn на горутине движка каждые d, пока таймер не остановят
@@ -72,16 +72,16 @@ func (e *Engine) After(d time.Duration, fn func()) *Timer {
 // fn может остановить собственный таймер: после возврата следующий запуск не
 // планируется. Период меньше миллисекунды округляется вверх до миллисекунды.
 // Остальное — как у After.
-func (e *Engine) Every(d time.Duration, fn func()) *Timer {
+func (l *Loop) Every(d time.Duration, fn func()) *Timer {
 	if d < minEvery {
 		d = minEvery
 	}
-	return e.newTimer(d, d, fn)
+	return l.newTimer(d, d, fn)
 }
 
 // newTimer заводит таймер и записывает его в реестр движка.
-func (e *Engine) newTimer(first, every time.Duration, fn func()) *Timer {
-	t := &Timer{e: e, fn: fn, every: every}
+func (l *Loop) newTimer(first, every time.Duration, fn func()) *Timer {
+	t := &Timer{l: l, fn: fn, every: every}
 	if fn == nil {
 		t.stopped = true
 		return t
@@ -92,17 +92,17 @@ func (e *Engine) newTimer(first, every time.Duration, fn func()) *Timer {
 	// Поэтому таймер, созданный одновременно со Stop, либо видит остановку и не
 	// заводится, либо попадает в реестр до обхода и будет погашен. Без этого
 	// оставалась щель, в которой таймер переживал движок.
-	e.timersMu.Lock()
-	if e.stopped.Load() {
-		e.timersMu.Unlock()
+	l.timersMu.Lock()
+	if l.stopped.Load() {
+		l.timersMu.Unlock()
 		t.stopped = true
 		return t
 	}
-	if e.timers == nil {
-		e.timers = make(map[*Timer]struct{})
+	if l.timers == nil {
+		l.timers = make(map[*Timer]struct{})
 	}
-	e.timers[t] = struct{}{}
-	e.timersMu.Unlock()
+	l.timers[t] = struct{}{}
+	l.timersMu.Unlock()
 
 	t.arm(first)
 	return t
@@ -118,7 +118,7 @@ func (t *Timer) Stop() {
 	t.mu.Lock()
 	t.stopLocked()
 	t.mu.Unlock()
-	t.e.forgetTimer(t)
+	t.l.forgetTimer(t)
 }
 
 // Stopped сообщает, что таймер больше не сработает: его остановили, остановили
@@ -152,7 +152,7 @@ func (t *Timer) arm(d time.Duration) {
 	// Сам системный таймер не исполняет fn: его обратный вызов идёт на
 	// служебной горутине рантайма, где дерево виджетов трогать нельзя. Он
 	// только передаёт работу движку.
-	t.tm = time.AfterFunc(d, func() { t.e.Post(t.fire) })
+	t.tm = time.AfterFunc(d, func() { t.l.Post(t.fire) })
 }
 
 // fire выполняется на горутине движка (из очереди Post).
@@ -174,35 +174,35 @@ func (t *Timer) fire() {
 	// Граница таймера (failure.go): упавший fn не мешает ни очереди, ни
 	// следующему срабатыванию Every.
 	if t.every == 0 {
-		t.e.forgetTimer(t)
-		t.e.guardCall("Timer", t.fn)
+		t.l.forgetTimer(t)
+		t.l.host.GuardCall("Timer", t.fn)
 		return
 	}
 
-	t.e.guardCall("Timer", t.fn)
+	t.l.host.GuardCall("Timer", t.fn)
 	// Следующий запуск — только после fn (см. Every). Если fn остановил таймер
 	// или движок остановили, arm это увидит и ничего не заведёт.
 	t.arm(t.every)
 }
 
 // forgetTimer убирает таймер из реестра движка.
-func (e *Engine) forgetTimer(t *Timer) {
-	e.timersMu.Lock()
-	delete(e.timers, t)
-	e.timersMu.Unlock()
+func (l *Loop) forgetTimer(t *Timer) {
+	l.timersMu.Lock()
+	delete(l.timers, t)
+	l.timersMu.Unlock()
 }
 
 // stopTimers гасит все таймеры движка; зовётся из Stop после того, как stopped
 // выставлен. Таймеры останавливаются ВНЕ замка реестра: Timer.Stop сам берёт
 // замок реестра, и держать его здесь значило бы взаимную блокировку.
-func (e *Engine) stopTimers() {
-	e.timersMu.Lock()
-	all := make([]*Timer, 0, len(e.timers))
-	for t := range e.timers {
+func (l *Loop) stopTimers() {
+	l.timersMu.Lock()
+	all := make([]*Timer, 0, len(l.timers))
+	for t := range l.timers {
 		all = append(all, t)
 	}
-	e.timers = nil
-	e.timersMu.Unlock()
+	l.timers = nil
+	l.timersMu.Unlock()
 
 	for _, t := range all {
 		t.mu.Lock()

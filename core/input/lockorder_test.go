@@ -17,7 +17,7 @@ func TestLockOrder_InputLocksAreLeaves(t *testing.T) {
 	lockcheck.Run(t, lockcheck.Config{
 		Dir:      ".",
 		Receiver: "Dispatcher",
-		Opaque:   map[string]string{"host": "engine"},
+		Opaque:   map[string]lockcheck.Ref{"host": {Name: "engine"}},
 		MinFuncs: 60,
 	})
 }

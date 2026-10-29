@@ -142,7 +142,7 @@ func (e *Engine) popupAnimate(ent *popupEntry, from, to float64, tr popupTrans) 
 // только до renderPopups.
 func (e *Engine) popupWake() {
 	e.popupTicked.Store(true)
-	e.invGen.Add(1)
+	e.lp.BumpGen()
 }
 
 // stopAnim снимает анимацию перехода (под popupMu).

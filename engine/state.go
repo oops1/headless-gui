@@ -3,13 +3,13 @@ package engine
 // state.go — состояние движка по областям (ADR-0011, задача 7.1).
 //
 // Поля Engine разнесены по областям: сцена (холст, дерево, сборка кадра),
-// цикл (горутина кадров, очередь Post, таймеры, темп и доставка), оверлеи
-// (модальные окна, хостовые попапы, подсказка, переходы) — встроенные
-// структуры ниже; встраивание сохраняет имена: e.canvas, e.frameMu читаются
-// как прежде. Ввод (фокус, захват, касания, курсор) вынесен в core/input
-// (7.2): поле e.in, адаптер — input.go. Этапы 7.3–7.4 так же выносят цикл и
-// оверлеи в core/loop и core/overlay; здесь закреплён их состав и порядок
-// замков.
+// производство кадра и политика (номер кадра, статистика, сбои, профиль
+// движения, запись), оверлеи (модальные окна, хостовые попапы, подсказка,
+// переходы) — встроенные структуры ниже; встраивание сохраняет имена:
+// e.canvas, e.frameMu читаются как прежде. Ввод вынесен в core/input (7.2,
+// поле e.in, адаптер — input.go), цикл кадров — в core/loop (7.3, поле e.lp,
+// адаптер — loop.go). Этап 7.4 так же выносит оверлеи в core/overlay; здесь
+// закреплён их состав и порядок замков.
 //
 // Порядок замков (подробно — ADR-0011, проверка — lockorder_test.go):
 //
@@ -38,7 +38,6 @@ import (
 
 	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	hgraster "github.com/oops1/headless-gui/v3/core/raster"
-	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -144,50 +143,22 @@ type sceneState struct {
 	contract drawContract
 }
 
-// loopState — цикл кадров: горутина, темп и доставка, рендер по запросу и
-// повреждение, очередь Post, таймеры, статистика, политика сбоев, профиль
-// движения, запись кадров. Будущий core/loop.
-type loopState struct {
-	fps    int          // целевой FPS, 1–120
-	maxFPS atomic.Int32 // потолок частоты кадров поверх fps; 0 — не задан (maxfps.go)
-
-	started atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
-	stopped atomic.Bool // Stop уже выполнен (идемпотентность)
-	quit    chan struct{}
-	done    chan struct{}
-
-	// pacing, frameWanted, wake, sink — внешний темп и сток кадров
-	// (pacing.go). При PacingExternal кадр готовится только по RequestFrame.
-	pacing      atomic.Uint32
-	frameWanted atomic.Bool
-	wake        chan struct{}
-	loopGID     atomic.Uint64 // горутина цикла кадров; 0 — цикл не идёт (см. Flush)
-	sinkMu      sync.RWMutex
-	sink        FrameSink
-
-	frames   chan output.Frame
+// frameState — производство кадра и политика движка: номер кадра и признак
+// полного кадра, данные тайлов, буфер ничейного повреждения кадра,
+// регистрация в реестре уведомлений, статистика, политика сбоев, профиль
+// движения, запись кадров в PNG. Сам цикл (горутина, темп, доставка,
+// повреждение, Post, таймеры) — core/loop (7.3), поле e.lp.
+type frameState struct {
 	frameSeq atomic.Uint64
-	// fullNext — следующий кадр полный (холст пересоздан); lostFrame — кадр
-	// выброшен из переполненного канала, потребитель отстал (fullframe.go).
-	fullNext  atomic.Bool
-	lostFrame atomic.Bool
+	// fullNext — следующий кадр полный (холст пересоздан, fullframe.go);
+	// потерю кадра потребителем помнит цикл (loop.LostPending).
+	fullNext atomic.Bool
 	// recycleFrames — данные тайлов кадров берутся из пула и возвращаются по
 	// Frame.Release (SetFrameRecycling, fullframe.go).
 	recycleFrames atomic.Bool
 	// noTileData — кадр без байтов тайлов (SetFrameTileData).
 	noTileData atomic.Bool
 
-	// ── Рендер по запросу (см. invalidate.go) ───────────────────────────────
-	onDemand atomic.Bool
-	invGen   atomic.Uint64
-
-	damageMu  sync.Mutex
-	damage    []image.Rectangle // области InvalidateRect с прошлого кадра
-	damageAll bool              // Invalidate() — полный diff
-	// force — ничейное повреждение кадра (cmdpath.go): логические области из
-	// InvalidateRect, widget.InvalidateRect, фокуса — виджет пути команд,
-	// чей охват их задевает, перезаписывается. Под damageMu.
-	force []image.Rectangle
 	// forceFrame — ничейное повреждение, забранное кадром (буфер
 	// переиспользуется: takeForce). Только горутина кадра.
 	forceFrame []image.Rectangle
@@ -197,18 +168,7 @@ type loopState struct {
 	// попапов не накапливались в реестре.
 	notifierHandle uint64
 
-	// postMu защищает posted: ставят в очередь из любых горутин, разбирает
-	// горутина кадра (см. post.go).
-	postMu sync.Mutex
-	// posted — вызовы, ожидающие выполнения в горутине кадра.
-	posted []func()
-
-	// timersMu защищает timers — таймеры After/Every, живые у этого движка. Stop
-	// гасит их все (см. timer.go).
-	timersMu sync.Mutex
-	timers   map[*Timer]struct{}
-
-	// stats — счётчики для Engine.Stats (stats.go).
+	// stats — счётчики для Engine.Stats (stats.go); счётчики цикла — у e.lp.
 	stats engineStats
 	// failure — политика сбоев (failure.go); свой замок.
 	failure failureState

@@ -57,8 +57,8 @@ func (e *Engine) SetMotionProfile(p MotionProfile) {
 		p = MotionFull
 	}
 	e.motion.Store(uint32(p))
-	e.countMotion(p != MotionFull && !e.stopped.Load())
-	if e.stopped.Load() {
+	e.countMotion(p != MotionFull && !e.lp.Stopped())
+	if e.lp.Stopped() {
 		e.countMotion(false) // Stop успел между проверкой и учётом
 	}
 }

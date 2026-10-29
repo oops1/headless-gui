@@ -139,9 +139,8 @@ func TestCmdPath_ForceSurvivesStepFrame(t *testing.T) {
 	// Только ничейное повреждение (без damage) и кадр шагов попапов: он
 	// выходит до записи дерева — повреждение обязано дожить до следующего.
 	bl.on = true
-	eng.damageMu.Lock()
-	eng.force = addDamage(eng.force, bl.Bounds())
-	eng.damageMu.Unlock()
+	eng.InvalidateRect(bl.Bounds())
+	eng.consumeDamage() // damage снят, ничейное повреждение осталось
 	eng.popupTicked.Store(true)
 	eng.renderFrame()
 	eng.damageRect(bl.Bounds())

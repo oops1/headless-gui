@@ -40,10 +40,7 @@ func (e *Engine) CommandPath() bool { return e.cmdPath.Load() }
 // виджет уже сейчас, а её damage дойдёт следующим кадром — наоборот список
 // остался бы устаревшим под уже забранным damage.
 func (e *Engine) takeForce() []image.Rectangle {
-	e.damageMu.Lock()
-	e.forceFrame = append(e.forceFrame[:0], e.force...)
-	e.force = e.force[:0]
-	e.damageMu.Unlock()
+	e.forceFrame = e.lp.TakeForce(e.forceFrame)
 	return e.forceFrame
 }
 

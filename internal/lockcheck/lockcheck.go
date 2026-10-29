@@ -14,9 +14,13 @@
 //
 // Граница пакетов. Вызов через поле, ведущее в другой пакет (Config.Opaque:
 // e.in.X() у движка, d.host.X() у ввода), считается захватом
-// «псевдозамка» с именем из Opaque: тот пакет берёт свои замки, и под
-// листовым замком звать его нельзя, а под корнем — можно. Так правило
-// переживает вынос областей в отдельные пакеты (7.2–7.4).
+// «псевдозамка» с именем Ref.Name: тот пакет берёт свои замки, и под
+// листовым замком звать его нельзя, а под корнем — можно. Если у Ref задан
+// каталог пакета, метод сверяется с его моделью: псевдозамок ставится, только
+// если метод там (транзитивно) берёт замок или сам уходит через границу —
+// атомарный счётчик (loop.BumpGen) под листовым замком звать можно. Без
+// каталога любой вызов считается захватом. Так правило переживает вынос
+// областей в отдельные пакеты (7.2–7.4).
 //
 // Что проверка не видит (сознательно, чтобы не давать ложных тревог): тела
 // функций-литералов (они выполняются не там, где написаны: AfterFunc, Post,
@@ -46,10 +50,23 @@ type Config struct {
 	// Receiver — тип, чьи поля называются без префикса типа («Engine»,
 	// «Dispatcher»).
 	Receiver string
-	// Opaque — поля, ведущие в другой пакет: имя поля → имя псевдозамка.
-	Opaque map[string]string
+	// Opaque — поля, ведущие в другой пакет: имя поля → пакет за ним.
+	Opaque map[string]Ref
 	// MinFuncs — сколько функций должно найтись, иначе пакет не прочитан.
 	MinFuncs int
+}
+
+// Ref — пакет за полем Config.Opaque.
+type Ref struct {
+	// Name — имя псевдозамка в отчёте («input», «loop», «engine»).
+	Name string
+	// Dir — каталог пакета; пусто — модель не строится, любой вызов через
+	// поле — захват.
+	Dir string
+	// Receiver — тип за полем (его методы ищутся как Receiver.Метод).
+	Receiver string
+	// Opaque — поля того пакета, ведущие дальше (обычно обратно, Host).
+	Opaque map[string]Ref
 }
 
 type lockFunc struct {
@@ -63,6 +80,7 @@ type lockFunc struct {
 
 type lockModel struct {
 	cfg    Config
+	ext    map[string]*lockModel // модели пакетов за полями Opaque (по имени поля)
 	fset   *token.FileSet
 	funcs  map[string]*lockFunc
 	fields map[string][]string // имя поля структуры → типы (у разных структур)
@@ -78,7 +96,12 @@ func load(t testing.TB, cfg Config) *lockModel {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := &lockModel{cfg: cfg, fset: fset, funcs: map[string]*lockFunc{}, fields: map[string][]string{}, memo: map[string]map[string]bool{}}
+	m := &lockModel{cfg: cfg, ext: map[string]*lockModel{}, fset: fset, funcs: map[string]*lockFunc{}, fields: map[string][]string{}, memo: map[string]map[string]bool{}}
+	for field, ref := range cfg.Opaque {
+		if ref.Dir != "" {
+			m.ext[field] = load(t, Config{Dir: ref.Dir, Receiver: ref.Receiver, Opaque: ref.Opaque})
+		}
+	}
 	for _, pkg := range pkgs {
 		for _, f := range pkg.Files {
 			for _, d := range f.Decls {
@@ -196,7 +219,8 @@ func (m *lockModel) lockOp(call *ast.CallExpr, lf *lockFunc) (lock, op string) {
 }
 
 // opaque — псевдозамок вызова через поле другого пакета (Config.Opaque):
-// e.in.SendKeyEvent() → «input». Пусто — вызов не через такое поле.
+// e.in.SendKeyEvent() → «input». Пусто — вызов не через такое поле или
+// метод по модели того пакета замков не берёт.
 func (m *lockModel) opaque(call *ast.CallExpr) string {
 	if len(m.cfg.Opaque) == 0 {
 		return ""
@@ -207,9 +231,22 @@ func (m *lockModel) opaque(call *ast.CallExpr) string {
 	}
 	p := selectorPath(sel.X)
 	for i := 1; i < len(p); i++ {
-		if name, ok := m.cfg.Opaque[p[i]]; ok {
-			return name
+		ref, ok := m.cfg.Opaque[p[i]]
+		if !ok {
+			continue
 		}
+		ext := m.ext[p[i]]
+		if ext == nil || i != len(p)-1 {
+			return ref.Name // модели нет или вызов глубже поля — считаем захватом
+		}
+		key := ref.Receiver + "." + sel.Sel.Name
+		if _, known := ext.funcs[key]; !known {
+			return ref.Name // метод не найден (встроенный, алиас) — захват
+		}
+		if len(ext.transitive(key, map[string]bool{})) > 0 {
+			return ref.Name
+		}
+		return ""
 	}
 	return ""
 }

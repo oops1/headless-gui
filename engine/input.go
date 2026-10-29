@@ -55,7 +55,7 @@ func (h inputHost) Post(fn func()) { h.e.Post(fn) }
 
 // InLoop — горутина кадра или цикл не запущен: выполнять сразу.
 func (h inputHost) InLoop() bool {
-	return !h.e.loopRunning() || h.e.loopGID.Load() == curGoroutineID()
+	return h.e.lp.InLoop()
 }
 
 // GuardInput — граница сбоев доставки события (failure.go).

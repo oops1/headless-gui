@@ -89,11 +89,13 @@ type Stats struct {
 // engineStats — счётчики, из которых собирается Stats. Пишет их горутина
 // кадра (и Post — из любой горутины), читает Stats — откуда угодно.
 type engineStats struct {
-	frames, skipped, lost   atomic.Uint64
-	tiles, moves            atomic.Uint64
-	drawNs, diffNs, deliver atomic.Uint64
-	posted, postedRun       atomic.Uint64
-	panics                  atomic.Uint64
+	// Счётчики цикла (Post, пропуски тиков, потери, доставка) — у e.lp
+	// (loop.Counters); skipped здесь — кадры, которые renderFrame начал и не
+	// стал рисовать.
+	frames, skipped      atomic.Uint64
+	tiles, moves         atomic.Uint64
+	drawNs, diffNs       atomic.Uint64
+	panics               atomic.Uint64
 	recorded, retained      atomic.Uint64
 	tiledFrames             atomic.Uint64
 	blurHits, blurMisses    atomic.Uint64
@@ -107,20 +109,21 @@ type engineStats struct {
 // может сочетать числа до и после него — для разности за секунду это неважно.
 func (e *Engine) Stats() Stats {
 	s := &e.stats
-	posted, run := s.posted.Load(), s.postedRun.Load()
+	lc := e.lp.Counters()
+	posted, run := lc.Posted, lc.PostedRun
 	var queue uint64
 	if posted > run {
 		queue = posted - run
 	}
 	return Stats{
 		Frames:        s.frames.Load(),
-		FramesSkipped: s.skipped.Load(),
-		FramesLost:    s.lost.Load(),
+		FramesSkipped: s.skipped.Load() + lc.Skipped,
+		FramesLost:    lc.Lost,
 		Tiles:         s.tiles.Load(),
 		Moves:         s.moves.Load(),
 		DrawNanos:     s.drawNs.Load(),
 		DiffNanos:     s.diffNs.Load(),
-		DeliverNanos:  s.deliver.Load(),
+		DeliverNanos:  lc.DeliverNanos,
 		Posted:        posted,
 		PostedRun:     run,
 		PostQueue:     queue,

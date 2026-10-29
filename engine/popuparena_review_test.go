@@ -284,7 +284,7 @@ func TestPopupArenaReview_FadeBytes(t *testing.T) {
 	defer widget.StopAllAnimations()
 	s, rec := newPopupTransScene(t, true, 10)
 	s.setOpen(true)
-	gen := s.eng.invGen.Load()
+	gen := s.eng.lp.Gen()
 	s.eng.RenderFrameNow()
 	t0 := time.Now()
 	for ms := 0; ms <= 120; ms += 20 {
@@ -294,7 +294,7 @@ func TestPopupArenaReview_FadeBytes(t *testing.T) {
 	open := s.eng.Stats().PopupBytes
 	s.setOpen(false)
 	s.eng.RenderFrameNow()
-	gen = s.eng.invGen.Load()
+	gen = s.eng.lp.Gen()
 	t.Logf("открыт %d, в начале исчезновения %d, заготовка %v", open, s.eng.Stats().PopupBytes, s.eng.popupArena.c != nil)
 	t1 := time.Now()
 	for ms := 0; ms <= 120; ms += 20 {

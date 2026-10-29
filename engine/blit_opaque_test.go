@@ -163,8 +163,8 @@ func TestFrameRecycling_DroppedFrameGoesBack(t *testing.T) {
 	testreset.Globals(t)
 	eng, iw, bufs := recycleEngine(t, 256, 192)
 	eng.SetFrameRecycling(true)
-	for len(eng.frames) < cap(eng.frames) { // заполняем канал
-		eng.frames <- output.Frame{}
+	for len(eng.Frames()) < cap(eng.Frames()) { // заполняем канал
+		eng.deliver(output.Frame{})
 	}
 	reused := false
 	k := 1 // картинки чередуются, чтобы каждый кадр отличался от прошлого
@@ -173,8 +173,9 @@ func TestFrameRecycling_DroppedFrameGoesBack(t *testing.T) {
 		k++
 		fr := eng.renderFrame()
 		first := &fr.Tiles[0].Data[0]
+		lost := eng.Stats().FramesLost
 		eng.deliver(fr) // канал полон — кадр выброшен и освобождён
-		if !eng.lostFrame.Load() {
+		if eng.Stats().FramesLost == lost {
 			t.Fatal("потеря кадра не запомнена")
 		}
 		iw.SetImage(bufs[k&1])

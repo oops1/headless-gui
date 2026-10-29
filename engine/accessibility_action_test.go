@@ -34,7 +34,7 @@ func (o *actionOwner) AccessChildren() []widget.AccessInfo {
 
 func (o *actionOwner) AccessAction(id string, action widget.AccessActionKind) bool {
 	o.calls = append(o.calls, id+":"+action.String())
-	o.onLoop = o.eng.loopRunning() && o.eng.loopGID.Load() == curGoroutineID()
+	o.onLoop = o.eng.loopRunning() && o.eng.lp.GoroutineID() == curGoroutineID()
 	return o.reply
 }
 

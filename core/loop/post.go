@@ -15,7 +15,9 @@
 // из фоновой горутины. Post даёт обратный путь — из фоновой горутины в
 // горутину кадра — и позволяет держать такие вещи по одну сторону.
 
-package engine
+package loop
+
+import "github.com/oops1/headless-gui/v3/internal/goid"
 
 // Post ставит fn в очередь на выполнение в горутине кадра.
 //
@@ -41,14 +43,14 @@ package engine
 // RenderOnce и RenderFrameNow, то есть она всё равно опустошается, но в тот
 // момент, когда приложение само просит кадр. Движок, который не запущен и
 // кадров не рисует, накопленное не выполнит.
-func (e *Engine) Post(fn func()) {
+func (l *Loop) Post(fn func()) {
 	if fn == nil {
 		return
 	}
-	e.postMu.Lock()
-	e.posted = append(e.posted, fn)
-	e.postMu.Unlock()
-	e.stats.posted.Add(1)
+	l.postMu.Lock()
+	l.posted = append(l.posted, fn)
+	l.postMu.Unlock()
+	l.cnt.posted.Add(1)
 
 	// Будим цикл при ЛЮБОМ темпе — но НЕ инвалидируем: Post сам по себе не
 	// повод перерисовывать экран, а вот выполнить работу пора. При внешнем
@@ -56,41 +58,41 @@ func (e *Engine) Post(fn func()) {
 	// ближайшего тика; а через Post окно передаёт движку ввод, и нажатие
 	// отзывалось бы с задержкой в кадр.
 	select {
-	case e.wake <- struct{}{}:
+	case l.wake <- struct{}{}:
 	default: // цикл уже разбужен — второго сигнала не нужно
 	}
 }
 
-// runPosted выполняет накопленные вызовы.
+// RunPosted выполняет накопленные вызовы.
 //
 // Список забирается целиком и обрабатывается ВНЕ замка: fn вправе позвать
 // Post снова (обработчик, который планирует следующий шаг), и держать замок на
 // это время значило бы взаимную блокировку. Постановка из fn попадёт в
 // следующий проход, а не в текущий, — иначе цикл, планирующий сам себя,
 // никогда не дошёл бы до отрисовки.
-func (e *Engine) runPosted() {
-	e.postMu.Lock()
-	queue := e.posted
-	e.posted = nil
-	e.postMu.Unlock()
+func (l *Loop) RunPosted() {
+	l.postMu.Lock()
+	queue := l.posted
+	l.posted = nil
+	l.postMu.Unlock()
 	if len(queue) == 0 {
 		return
 	}
 	// Профиль движения (motionprofile.go): очередь незапущенного движка
 	// разбирает горутина вызывающего (Flush, RenderOnce).
-	if unbind := e.motionScope(); unbind != nil {
+	if unbind := l.host.MotionScope(); unbind != nil {
 		defer unbind()
 	}
 
 	for _, fn := range queue {
 		// До вызова: функция, упавшая посреди работы, из очереди уже ушла.
-		e.stats.postedRun.Add(1)
+		l.cnt.postedRun.Add(1)
 		// Граница очереди (failure.go): упавшая функция не мешает остальным.
-		e.guardCall("Post", fn)
+		l.host.GuardCall("Post", fn)
 	}
 }
 
-// callOnLoop выполняет fn на горутине движка и ждёт его завершения.
+// CallOnLoop выполняет fn на горутине движка и ждёт его завершения.
 //
 // Для вызовов, которые приходят в движок со СВОИХ горутин и трогают дерево
 // виджетов: мост доступности зовёт движок из COM и D-Bus. Выполнять такое там
@@ -101,19 +103,19 @@ func (e *Engine) runPosted() {
 // сразу на вызывающей горутине: ждать некого, а изнутри цикла ждать самого
 // себя — значит повиснуть. Если движок остановили, пока вызов стоял в очереди,
 // fn не выполнится.
-func (e *Engine) callOnLoop(fn func()) {
-	if !e.loopRunning() || e.loopGID.Load() == curGoroutineID() {
+func (l *Loop) CallOnLoop(fn func()) {
+	if !l.Running() || l.loopGID.Load() == goid.Current() {
 		fn()
 		return
 	}
 	done := make(chan struct{})
-	e.Post(func() {
+	l.Post(func() {
 		defer close(done)
 		fn()
 	})
 	select {
 	case <-done:
-	case <-e.quit:
+	case <-l.quit:
 	}
 }
 
@@ -138,26 +140,26 @@ const flushRounds = 64
 // Из самой горутины движка (обработчик, функция из Post) Flush сразу
 // возвращается: ждать завершения очереди, в которой стоишь сам, значит
 // повиснуть. После Stop ожидание прерывается.
-func (e *Engine) Flush() {
-	if !e.started.Load() || e.stopped.Load() {
+func (l *Loop) Flush() {
+	if !l.started.Load() || l.stopped.Load() {
 		for i := 0; i < flushRounds; i++ {
-			e.postMu.Lock()
-			n := len(e.posted)
-			e.postMu.Unlock()
+			l.postMu.Lock()
+			n := len(l.posted)
+			l.postMu.Unlock()
 			if n == 0 {
 				return
 			}
-			e.runPosted()
+			l.RunPosted()
 		}
 		return
 	}
-	if e.loopGID.Load() == curGoroutineID() {
+	if l.loopGID.Load() == goid.Current() {
 		return
 	}
 	done := make(chan struct{})
-	e.Post(func() { close(done) })
+	l.Post(func() { close(done) })
 	select {
 	case <-done:
-	case <-e.quit:
+	case <-l.quit:
 	}
 }

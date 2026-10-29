@@ -12,7 +12,7 @@
 // потребитель зовёт RequestFrame там же, где мутирует сцену, и обе работы
 // оказываются на одной горутине по построению.
 
-package engine
+package loop
 
 import (
 	"time"
@@ -47,26 +47,26 @@ type FrameSink interface {
 // При PacingExternal внутренний тикер кадры не запускает — но продолжает
 // продвигать анимации: иначе анимация, начатая приложением, замерла бы до
 // следующего RequestFrame и дёргалась бы рывками.
-func (e *Engine) SetPacing(p Pacing) {
-	e.pacing.Store(uint32(p))
-	e.Invalidate()
+func (l *Loop) SetPacing(p Pacing) {
+	l.pacing.Store(uint32(p))
+	l.Invalidate()
 }
 
 // Pacing сообщает текущий режим темпа.
-func (e *Engine) Pacing() Pacing { return Pacing(e.pacing.Load()) }
+func (l *Loop) Pacing() Pacing { return Pacing(l.pacing.Load()) }
 
 // SetFrameSink задаёт сток кадров (nil — снять).
-func (e *Engine) SetFrameSink(s FrameSink) {
-	e.sinkMu.Lock()
-	e.sink = s
-	e.sinkMu.Unlock()
+func (l *Loop) SetFrameSink(s FrameSink) {
+	l.sinkMu.Lock()
+	l.sink = s
+	l.sinkMu.Unlock()
 }
 
 // getFrameSink возвращает текущий сток.
-func (e *Engine) getFrameSink() FrameSink {
-	e.sinkMu.RLock()
-	defer e.sinkMu.RUnlock()
-	return e.sink
+func (l *Loop) getFrameSink() FrameSink {
+	l.sinkMu.RLock()
+	defer l.sinkMu.RUnlock()
+	return l.sink
 }
 
 // RequestFrame просит подготовить кадр: сток готов его принять.
@@ -78,55 +78,55 @@ func (e *Engine) getFrameSink() FrameSink {
 // Вызов не блокирует: он лишь поднимает флаг, а кадр готовит горутина
 // рендера. Несколько вызовов подряд дают один кадр — сток всё равно не
 // успеет принять больше.
-func (e *Engine) RequestFrame() {
-	e.frameWanted.Store(true)
-	if !e.pacingIsExternal() {
+func (l *Loop) RequestFrame() {
+	l.frameWanted.Store(true)
+	if !l.pacingIsExternal() {
 		// Тикерный темп: кадры готовит тикер, и он их пропускает, пока UI не
 		// менялся. Без инвалидации запрос просто исчезал бы — приложение,
 		// написанное под внешний темп, при переключении режима переставало
 		// получать кадры вовсе.
-		e.Invalidate()
+		l.Invalidate()
 		return
 	}
 	select {
-	case e.wake <- struct{}{}:
+	case l.wake <- struct{}{}:
 	default: // сигнал уже в очереди — второго не нужно
 	}
 }
 
 // takeFrameRequest забирает запрос кадра, если он был.
-func (e *Engine) takeFrameRequest() bool {
-	return e.frameWanted.Swap(false)
+func (l *Loop) takeFrameRequest() bool {
+	return l.frameWanted.Swap(false)
 }
 
-// deliver отдаёт кадр стоку и в канал.
+// Deliver отдаёт кадр стоку и в канал.
 //
 // Сток первым: он синхронный и не теряет кадров, а канал — очередь с
 // ограниченной глубиной, из которой при переполнении кадр выбрасывается.
 // Выброс запоминается: следующий кадр, для которого в канале найдётся место,
 // уйдёт полным (fullframe.go) — разности после потерянного кадра потребитель
 // наложил бы на картинку, которой у него нет.
-func (e *Engine) deliver(frame output.Frame) {
+func (l *Loop) Deliver(frame output.Frame) {
 	start := time.Now()
-	defer func() { e.stats.deliver.Add(sinceNanos(start)) }()
-	if s := e.getFrameSink(); s != nil {
+	defer func() { l.cnt.deliverNs.Add(sinceNanos(start)) }()
+	if s := l.getFrameSink(); s != nil {
 		// Что сток сделает с Data, неизвестно: буферы кадра закреплены и в
 		// пул не вернутся (SetFrameRecycling).
 		frame.Pin()
 		// Граница потребителя (failure.go): упавший сток не роняет цикл.
-		e.guardCall("FrameSink", func() { s.Present(frame) })
+		l.host.GuardCall("FrameSink", func() { s.Present(frame) })
 	}
 	select {
-	case e.frames <- frame:
+	case l.frames <- frame:
 	default:
 		// Потребитель не успевает — кадр теряется, но не молча.
-		e.lostFrame.Store(true)
-		e.stats.lost.Add(1)
+		l.lostFrame.Store(true)
+		l.cnt.lost.Add(1)
 		frame.Release() // никто его не увидит — буфер сразу в пул
 	}
 }
 
 // pacingIsExternal — короткая проверка режима из горутины рендера.
-func (e *Engine) pacingIsExternal() bool {
-	return Pacing(e.pacing.Load()) == PacingExternal
+func (l *Loop) pacingIsExternal() bool {
+	return Pacing(l.pacing.Load()) == PacingExternal
 }

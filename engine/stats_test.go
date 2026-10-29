@@ -80,7 +80,7 @@ func TestStats_DeliverTime(t *testing.T) {
 func TestStats_FrameLost(t *testing.T) {
 	testreset.Globals(t)
 	eng := newStatsEngine(t)
-	n := cap(eng.frames)
+	n := cap(eng.Frames())
 	for i := 0; i < n; i++ {
 		eng.deliver(output.Frame{})
 	}

@@ -701,7 +701,7 @@ func (e *Engine) ovtStop(tr *overlayTrans) {
 // смешением снимков, иначе — повреждением области (кадр нарисует слои).
 func (e *Engine) ovtWake(tr *overlayTrans) {
 	if tr.direct.Load() {
-		e.invGen.Add(1)
+		e.lp.BumpGen()
 		return
 	}
 	e.damageRect(tr.logicalRest())

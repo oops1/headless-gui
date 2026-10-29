@@ -149,7 +149,7 @@ func TestPost_InputAndPostShareOneGoroutine(t *testing.T) {
 		if n != 200 {
 			t.Fatalf("выполнено %d из 200", n)
 		}
-		if loop := e.loopGID.Load(); gid != loop {
+		if loop := e.lp.GoroutineID(); gid != loop {
 			t.Fatalf("работа шла на горутине %d, а цикл — %d", gid, loop)
 		}
 	}

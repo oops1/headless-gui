@@ -44,7 +44,7 @@ func (o treeOwner) OwnerMeasurers() *widget.MeasureSet { return o.e.measureSet }
 // ключа её заберёт работающий цикл, как прежде (движок, которому кадры
 // заказывают RenderOnce, анимации не шагает).
 func (o treeOwner) OwnerLoopKey() any {
-	if !o.e.started.Load() || o.e.stopped.Load() {
+	if !o.e.lp.Started() || o.e.lp.Stopped() {
 		return nil
 	}
 	return o.e
