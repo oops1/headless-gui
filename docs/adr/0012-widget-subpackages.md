@@ -1,8 +1,9 @@
 # ADR-0012. `widget` → подпакеты: ядро вниз, `widget` — фасад
 
 Статус: принято 2026-10-29, задача 8.1 (этап 8), ветка
-`feature/engine-architecture`. Реализация — 8.2–8.8 по порядку из раздела
-«План». Основание — план этапа 8 и обзор (`docs/ARCHITECTURE_REVIEW_RU.md`,
+`feature/engine-architecture`. Реализовано: 8.2a–8.7 по порядку из раздела
+«План» (как именно — в строках таблицы), замер — 8.9, документация (GUIDE,
+README, справка для ИИ) — 8.10. Основание — план этапа 8 и обзор (`docs/ARCHITECTURE_REVIEW_RU.md`,
 §4.3: `widget/xaml`, `widget/richtext`, `widget/text`, `widget/dialog`,
 `widget/dock`, `widget/chrome`, `platform/clipboard`).
 

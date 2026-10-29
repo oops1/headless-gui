@@ -1749,6 +1749,27 @@ root, named, err := widget.LoadUIFromXAMLFS(data, sub)
 на диске: абсолютный путь или выход за пределы корня отклоняются. Шрифты
 укладываются в сборку тем же приёмом — `eng.RegisterFontFS` (см. «Шрифты»).
 
+### Свои теги
+
+Тег приложения регистрируется функцией-строителем; она получает атрибуты элемента:
+
+```go
+widget.RegisterXAMLWidget("Gauge", func(a widget.XAMLAttrs) (widget.Widget, error) {
+	g := NewGauge()
+	g.Max, _ = strconv.Atoi(a.Attr("Max"))
+	return g, nil
+})
+```
+
+Пакеты виджетов (и программы на `widget/xaml` без фасада) регистрируют теги в реестре
+`xaml.Default()`: `Register(builder, tags...)` — простой строитель, загрузчик сам
+применит границы, Width/Height, общие свойства и имя и построит детей элемента;
+`RegisterComplete` — строитель-контейнер, который всё это делает сам, а детей строит
+через `Loader.BuildChild`.
+Строитель получает узел `*xaml.Element` (`Attr`, `Name`, `Bounds`, `Children`, `Text`)
+и `*xaml.Loader` (`BaseDir`, `Image`, `Offset`, `BuildChild`, `BuildPopupMenu`,
+`SetName`). Теги реестра проверяются раньше тегов `RegisterXAMLWidget`.
+
 ### Координаты
 
 Координаты дочерних элементов **относительные** (стандарт WPF Canvas):
@@ -5950,6 +5971,77 @@ internal/lockcheck статическая проверка порядка зам
 или уходит дальше. Вызовы через интерфейсы и литералы функций проверка не видит, их
 правило держится на ревью. Новый код в этих пакетах обязан
 соблюдать правило: короткая листовая секция без вызовов наружу.
+
+### Пакеты виджетов `widget/*` (v4.0, в разработке)
+
+`widget` разбит на пакеты (ADR-0012). Программам менять ничего не нужно: `widget` —
+тот же API, только теперь это фасад: для каждого имени пакетов ниже в нём алиас типа,
+обёртка функции с той же документацией, константа или переменная.
+
+```
+widget/base          ядро: Widget, Base, DrawContext, события, темы, раскладки,
+                     контролы, доступность, переносимая часть буфера обмена
+widget/xaml          загрузка разметки: парсер, свойства, привязка данных, ресурсы
+                     и стили, шаблоны, реестр тегов
+widget/text          TextInput (и поле пароля), TextBox, композиция IME
+widget/richtext      RichText
+widget/chrome        Window
+widget/dock          DockPanel, DockManager, DockPane; Border в разметке
+widget/dialog        Dialog, MessageBox, ввод строки, прогресс, файловый диалог
+platform/clipboard   системный буфер обмена по ОС (Windows, macOS, Linux)
+widget               фасад над всеми ними; JSON-загрузчик (LoadUIFromJSON)
+```
+
+Зависимости идут в одну сторону: всё → `widget/base`; `text`, `richtext`, `chrome`,
+`dock` → `xaml` (только чтобы зарегистрировать свои теги); `dialog` → `text`;
+`platform/clipboard` → `base`; фасад → все. Ядро не может импортировать пакет над
+собой: это был бы цикл импорта, и порядок держит компилятор.
+
+Тонкая сборка — без фасада, только нужные пакеты. Теги XAML пакеты виджетов
+регистрируют явно (фасад делает это сам при первом `LoadUIFromXAML*`), системный буфер
+обмена подключает `platform/clipboard`:
+
+```go
+import (
+	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v3/widget/text"
+	"github.com/oops1/headless-gui/v3/widget/xaml"
+
+	_ "github.com/oops1/headless-gui/v3/platform/clipboard"
+)
+
+func main() {
+	text.RegisterXAML(xaml.Default()) // <TextBox>, <TextInput>, <PasswordBox>
+	root, named, err := xaml.LoadUIFromXAML(data)
+	// ...
+	_ = base.CurrentTheme()
+}
+```
+
+Программа, которая XAML не грузит, парсера в бинаре не держит (тест
+`widget/noxaml_test.go`); программа на одном `widget/base` на ~3 % меньше программы на
+фасаде (замер — в ADR-0012).
+
+Что видно снаружи:
+
+- имена типов в рефлексии и трассах — по пакету, где тип живёт: `*base.Button`,
+  `*text.TextInput`, `*chrome.Window`;
+- переменные фасада (`Err*`, `Ease*`) — копии: `errors.Is` работает, а присваивание
+  `widget.EaseOutCubic = f` меняет только копию;
+- ветки ядра по конкретному типу заменены интерфейсами-возможностями — `TextEditor`,
+  `DefaultSizer`, `AccessDescriber`, `ChildLayouter`, `BackgroundColorer`: тип
+  приложения, встраивающий такой виджет (`struct{ *widget.TextInput }`), теперь тоже их
+  проходит;
+- свой провайдер буфера обмена ставьте вызовом `SetClipboardProvider` во время работы:
+  в `init` пакета на одном `widget/base` его может перекрыть системный.
+
+Для разработчиков движка. Фасад генерирует `internal/facadegen`
+(`go run ./internal/facadegen/cmd/facadegen`); тест фасада проверяет свежесть, полноту,
+тождество типов и снимок открытого API (`widget/testdata/api.txt`). Служебные имена,
+которые `base` экспортирует только для соседних пакетов, помечены директивой
+`//facadegen:skip` и в фасад не попадают. Внутренним тестам подпакетов
+неэкспортированное состояние `base` (измеритель текста, таблицы переводов, экран)
+отдаёт `internal/testhook`.
 
 ---
 

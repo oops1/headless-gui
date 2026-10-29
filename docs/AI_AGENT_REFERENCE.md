@@ -65,8 +65,8 @@ README_RU.md, GUIDE.md / GUIDE_EN.md; roadmap: TODO.md.
 - **Translucent colors — the premultiplied trap:** Go's `color.RGBA` is
   alpha-premultiplied. A color with channels above alpha (e.g.
   `{0,120,215,90}`) overflows during Over blending and turns magenta on
-  light backgrounds. Build such colors via `premulAlpha(base, alpha)`
-  (widget/textbox.go). Also: `FillRoundRect` with A<255 takes a legacy
+  light backgrounds. Build such colors via `base.PremulAlpha(c, alpha)`
+  (widget/base/textutil.go; skip-marked, not in the facade). Also: `FillRoundRect` with A<255 takes a legacy
   Src path (does NOT blend) — use `FillRectAlpha` for real blending.
 - **Modal dialogs:** `engine.ShowModal` centers the dialog and shifts its
   children; Enter/Escape/Ctrl+C flow through
@@ -3234,7 +3234,7 @@ type wheelPixelHandler interface {
 
 ### SplitPanel — контейнер двух панелей с разделителем
 
-`widget/splitpanel.go`. Держит ДВУХ детей (первые два `AddChild` → First/Second),
+`widget/base/splitpanel.go`. Держит ДВУХ детей (первые два `AddChild` → First/Second),
 раскладывает по обе стороны перетаскиваемой полосы. Позиция — доля `0..1`, так что
 ресайз сохраняет соотношение.
 
@@ -3287,7 +3287,7 @@ XAML (первые два дочерних элемента — панели):
 
 ### SVG-иконки — пакет `widget/svg` + виджет `SVGIcon`
 
-`widget/svgicon.go` рендерит темизируемую векторную иконку, растеризуя документ
+`widget/base/svgicon.go` рендерит темизируемую векторную иконку, растеризуя документ
 под размер bounds с сохранением пропорций (центрирование).
 
 ```go
@@ -3504,7 +3504,7 @@ API нет — работает само в общем текстовом пут
 
 ### Docking (DockManager/DockPane)
 
-`widget/dockmanager.go` + `widget/dockpane.go`. A Visual Studio Toolbox-style
+`widget/dock/dockmanager.go` + `widget/dock/dockpane.go`. A Visual Studio Toolbox-style
 docking zone: a central document area (`Center`) surrounded by up to 4
 dockable sides (Left/Top/Bottom/Right), each holding a stack of `DockPane`
 panels. `DockManager` owns layout, resize-by-dragging-the-gutter, tabbed
@@ -3823,7 +3823,7 @@ Style keys in JSON are `"component.part:state"`; colors are `#RGB`, `#RRGGBB`,
 
 ### Bridge to the old presets
 
-`widget/theme_bridge.go` + `widget/theme_bindings.go`: one binding table walked
+`widget/base/theme_bridge.go` + `widget/base/theme_bindings.go`: one binding table walked
 in both directions, so they cannot drift.
 
 ```go
@@ -4538,7 +4538,7 @@ window) per monitor; the bar-per-monitor logic and the scale per monitor are the
 consumer's.
 
 Tests: `theme/materials_test.go`, `engine/mica_test.go`,
-`engine/window_shadow_test.go`, `widget/backdrop_material_test.go`,
+`engine/window_shadow_test.go`, `widget/base/backdrop_material_test.go`,
 `desktop/reducemotion_test.go`, `desktop/materials_visual_test.go`
 (`MAT_OUT=dir` writes Solid/Mica/MicaAlt/soft-shadow PNGs).
 
@@ -4674,7 +4674,7 @@ left); indeterminate progress; badge on the Start button; the clock plate is not
 
 ### Physical-size SVG, tray icons from the theme set, thin scrollbar — v3.31
 
-- `widget/physical.go`: `ContextScale(ctx)` (1 for contexts without `Scale()`),
+- `widget/base/physical.go`: `ContextScale(ctx)` (1 for contexts without `Scale()`),
   `PhysicalRect(ctx, r)` (edge-rounded like `Canvas.sRect`), `DrawSVG(ctx, doc,
   rect, current, tint)` rasterises at physical size and hands the engine an image
   of exactly the receiver's physical size. `Canvas.DrawImageScaled` blits an
@@ -4714,7 +4714,7 @@ left); indeterminate progress; badge on the Start button; the clock plate is not
   physical side. Strings (`ShowDesktop`, `NotificationCenter`,
   `NoNewNotifications`, `NewNotificationsCount`) are `widget.Tr` keys registered
   for EN/RU in `traystrings.go`.
-- `widget/scrollbar_thin.go`: `ScrollbarThin` is an overlay (`reserve()==0`),
+- `widget/base/scrollbar_thin.go`: `ScrollbarThin` is an overlay (`reserve()==0`),
   hidden at rest (`alpha`), shown by `thinPoke()` on mouse move / any scroll,
   hidden by a single pause timer that re-arms itself for the remainder instead of
   being recreated per event. `animateQuiet` is `AnimateOwned` without the full
@@ -6097,7 +6097,7 @@ files.
 The gnome format is read first when offered — it is the only one carrying
 `cut`, with the same URIs. URIs are percent-encoded like `g_filename_to_uri`.
 Pure helpers: `window/clipboard_files.go` (uri-list, gnome format),
-`widget/clipboard_files.go` (DROPFILES, DropEffect). macOS has no provider —
+`widget/base/clipboard_files.go` (DROPFILES, DropEffect). macOS has no provider —
 the text fallback applies. Verified on Windows in both directions against
 Windows PowerShell `Get-Clipboard -Format FileDropList` / `Set-Clipboard
 -Path`; Wayland and X11 on the wire (fake compositor and X server).
@@ -6572,7 +6572,7 @@ system-wide value in the protocol itself — it lives in desktop settings
 
 `Clicks == 0` means the event did not come from the engine (a direct
 `OnMouseButton` call from a test or an application with its own dispatch): the
-widget then counts the series itself through `clicksOf` (`widget/clicks.go`),
+widget then counts the series itself through `ClicksOf` (`widget/base/clicks.go`, skip-marked),
 exactly as before. First use: a triple click selects the line in `TextBox` and
 the whole field in `TextInput`.
 
@@ -6907,7 +6907,7 @@ with paragraphs joined by `\n`. A vertical scrollbar appears when the content
 is taller than the widget; wheel/PgUp/PgDn/Home/End scroll. Mouse: drag, double
 click = word, triple click = paragraph; Ctrl+C/Ctrl+A. Hand cursor over links
 (`CursorProvider`). Role `RoleDocument`. Layout is pure
-(`widget/richtext_layout.go`, testable with a fake measurer). Not done:
+(`widget/richtext/richtext_layout.go`, testable with a fake measurer). Not done:
 bullets/tables/images, per-run baseline shift, virtualization of very
 long documents (layout is recomputed whole when width or content changes).
 
@@ -7051,7 +7051,7 @@ window now has an 18 px bar, 16×14 buttons, frame 5, content starts at
 `frame + 18`. The locale badge (`ShowLocaleIndicator`) is one pixel taller on bars
 under 20 px (`bar-3`, was `bar-4`) so its text no longer touches the bottom border.
 
-**Window icon and system menu** (`widget/window_icon.go`).
+**Window icon and system menu** (`widget/chrome/window_icon.go`).
 
 ```go
 win.SetIcon(img)                 // image.Image, scaled to the metric size; nil removes
@@ -7083,7 +7083,7 @@ a host that can move a window by the OS (Wayland) — elsewhere they stay grey a
 the window is dragged by its caption. The default list is rebuilt on every open;
 a list you set is yours (its `Disabled` flags are not recomputed).
 
-**Who owns a press on the title bar** (the unobvious part, `widget/titlebar_hit.go`).
+**Who owns a press on the title bar** (the unobvious part, `widget/chrome/titlebar_hit.go`).
 `Window.WantsCapture` answers true to every left press in the bar — the window
 drags itself by it — and the engine looks for a capturer from the DEEPEST child up
 to the root. A child lying over the bar therefore gets the press only if its own
@@ -7261,7 +7261,7 @@ RGBA and BGRX, opaque and translucent, partial overlap, unchanged frame without 
 invalidation of main and popup canvases, journal overflow, concurrency, popup wrapper),
 `core/raster/imagerect_test.go` (full-scale reference for 3 filters × 6 source types × 6
 geometries, ×1000 destination, work proportional to the clip, `sr` clamp, round clip and
-BGRX, agreement with `DrawImageScaled` at scales 1, 1.5, 2), `widget/imagerect_test.go`
+BGRX, agreement with `DrawImageScaled` at scales 1, 1.5, 2), `widget/base/imagerect_test.go`
 (fallback, `ClampImageRect`, ScrollView wrapper), `engine/maxfps_test.go`,
 `window/maxfps_test.go`, `window/x11_keyrepeat_linux_test.go`.
 
@@ -7526,7 +7526,7 @@ images (copy in, copy out; text/HTML/files and the image displace each other).
   dropped after 30 s. Receiving collects chunks on `PropertyNotify`. Text
   paste from an `INCR` owner works too now (it used to return the 4-byte size).
 - Pure helpers: `internal/dib` (DIB/BMP), `internal/clipimage` (type choice,
-  PNG, clone), `window/clipboard_image.go` (lazy PNG), `widget/clipboard_image.go`.
+  PNG, clone), `window/clipboard_image.go` (lazy PNG), `widget/base/clipboard_image.go`.
 - WinLine note: `cliprdr` carries only text and files, so an image does not reach
   the RDP client until WinLine adds `CF_DIB` there; `image/png` works for ordinary desktops.
 - Limitations: no `image/bmp` is offered (only read); macOS has no provider.
@@ -7896,7 +7896,7 @@ Touch is a separate kind of input, not "a mouse with a finger": there are severa
 fingers, each with its own history. Everything below is **additive**; an app that
 knows nothing about touch behaves exactly as before.
 
-### Widget API (`widget/touch.go`, `widget/gesture.go`)
+### Widget API (`widget/base/touch.go`, `widget/base/gesture.go`)
 
 ```go
 type TouchPhase int // TouchBegan, TouchMoved, TouchEnded, TouchCancelled
@@ -7998,7 +7998,7 @@ v.OnGesture = func(g widget.Gesture) { switch g := g.(type) { case widget.Pinch:
 ⇒ no swipe), `SwipeAxisRatio` 1.5 (≈34° from the axis). Pure logic, no platform.
 Events without `Time` cannot give tap duration or swipe speed.
 
-Tests: `widget/gesture_test.go` (synthetic sequences), `engine/touch_test.go` (capture by
+Tests: `widget/base/gesture_test.go` (synthetic sequences), `engine/touch_test.go` (capture by
 ID, two fingers, bubbling, overlay, modal, HiDPI + scroll frame, pinch through the engine),
 `window/touch_test.go` (opt-in, mouse emulation, long press ⇒ right button with an injected clock), `window/touch_windows_test.go`
 (struct layout, phases, pressure/contact by `TouchMask`, live `InjectTouchInput` with `HEADLESS_GUI_TOUCH_E2E=1` — checks pressure 32/1024 and a 4×4 contact arrive),
@@ -8451,10 +8451,10 @@ blending and looked dirty on light titles); the hovered close button is red
 same glyph colour. The golden `window_win11_light.png` was updated on purpose:
 only the caption glyphs changed (grey → black active, dark grey inactive).
 
-Tests: `desktop/trayglyph_pady_test.go`, `widget/themeicons_fs_test.go`,
-`widget/popupmenu_profile_test.go`, `desktop/menu_profile_v338_test.go`,
-`tests/popupmenu_builtin_profiles_test.go`, `widget/popupmenu_delay_test.go`,
-`desktop/trayvolume_nodevice_test.go`, `widget/window_captioncolors_test.go`,
+Tests: `desktop/trayglyph_pady_test.go`, `widget/base/themeicons_fs_test.go`,
+`widget/base/popupmenu_profile_test.go`, `desktop/menu_profile_v338_test.go`,
+`tests/popupmenu_builtin_profiles_test.go`, `widget/base/popupmenu_delay_test.go`,
+`desktop/trayvolume_nodevice_test.go`, `widget/chrome/window_captioncolors_test.go`,
 `tests/window_captionglyph_test.go`.
 
 ---
@@ -8504,7 +8504,7 @@ widget.DrawImageRect(ctx, img, sr, dr, f)    // 1:1 (sr size == dr size in physi
 
 Tests: `engine/blit_opaque_test.go` (byte-equal to `Over` for RGBA/NRGBA/YCbCr/Gray/
 sub-image, both pixel formats, clip, round clip, small and parallel sizes; the `Src`
-semantics are proven by a translucent source declared opaque), `widget/opaqueimage_test.go`.
+semantics are proven by a translucent source declared opaque), `widget/base/opaqueimage_test.go`.
 
 ### Recycled frame buffers: `Engine.SetFrameRecycling`, `Frame.Release` (E15)
 
@@ -8714,7 +8714,7 @@ accent colour, which on an accent button (OK) was the colour of its fill.
 - Scroll windows clip by the container's bounds, scroll bars included.
 - A radio button group is not published (no UIA `SelectionContainer`).
 
-Tests: `widget/accessibility_nodes_test.go`, `widget/focusring_test.go`,
+Tests: `widget/base/accessibility_nodes_test.go`, `widget/base/focusring_test.go`,
 `engine/accessibility_action_test.go`, `engine/focusring_test.go`,
 `window/a11y_node_test.go` (all platforms), `window/a11y_nodes_windows_test.go`
 (UIA through the vtables), `window/a11y_nodes_linux_test.go`,
@@ -8877,7 +8877,7 @@ areas outside; empty / nil / zero-size buffer; buffer smaller and larger than th
 `Swap`; scale 2 and 1.25; foreign damage over the surface; `OpaqueRegion`; `Src` vs
 `Over`; a writer goroutine plus engine frames and a `Swap` goroutine under `-race`;
 `Canvas.BlitPixels` with clip, scale 2, `BGRX`; popup and scroll contexts),
-`widget/pixelblit_test.go` (the fallback of `widget.BlitPixels`), benchmarks in
+`widget/base/pixelblit_test.go` (the fallback of `widget.BlitPixels`), benchmarks in
 `engine/externalsurface_bench_test.go`.
 
 ---
@@ -9651,9 +9651,9 @@ widget.ClipboardSetVirtualFiles(files, remoteOpen, // remoteOpen: for Windows
     widget.WithRelease(func() { os.RemoveAll(dir) }))
 ```
 
-Tests: `widget/clipboard_virtual_test.go` (names, `FILEGROUPDESCRIPTORW` byte by
+Tests: `widget/base/clipboard_virtual_test.go` (names, `FILEGROUPDESCRIPTORW` byte by
 byte, `FILETIME`, the in-memory provider),
-`widget/clipboard_virtual_windows_test.go` (vtable layout, `QueryInterface`/
+`platform/clipboard/clipboard_virtual_windows_test.go` (vtable layout, `QueryInterface`/
 `AddRef`/`Release`, `GetData`/`QueryGetData`, the enumerator, `IStream` read in
 parts / `Seek` / `Stat` / `CopyTo`; **live clipboard** — `OleGetClipboard` from
 another thread as Explorer does, `open` is called only on the first read;
@@ -10433,3 +10433,45 @@ Where the engine's parts live now (ADR-0011):
   moved parts through the fields above and through the package functions and types
   (`input.DismissOutside`, `input.ContentShift`, `input.OverlayHitRect`, `overlay.WidgetID`,
   `overlay.Translating`, `overlay.CollectPopups`), not through the old file names.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): widget packages
+
+Where widget code lives now (ADR-0012):
+
+- `widget` is a generated facade (`widget/*_gen.go`, `go run ./internal/facadegen/cmd/facadegen`):
+  type aliases, function wrappers with copied docs, consts and vars for every exported name of
+  `widget/base`, `widget/xaml`, `widget/text`, `widget/richtext`, `widget/chrome`,
+  `widget/dock`, `widget/dialog`. Handwritten facade files: `doc.go`, `loader.go` (JSON
+  loader, `UINode`), `xaml_register.go` (`registerXAML`, called first by every
+  `LoadUIFromXAML*` wrapper), `clipboard.go` (blank import of `platform/clipboard`).
+  Edit code in the subpackages, then regenerate; `widget/facade_test.go` fails on a stale
+  facade, a missing name, a type mismatch or an API change against `widget/testdata/api.txt`.
+- `widget/base` — the core (Widget, Base, DrawContext, events, themes, layouts, controls,
+  accessibility, portable clipboard). It imports no widget package above it.
+  Capability interfaces replace type switches on subpackage types: `TextEditor`,
+  `DefaultSizer`, `AccessDescriber`, `ChildLayouter`, `BackgroundColorer`, plus
+  `InputBindingList()` on `Canvas` and `Window`; `IMEComposer` (older) moved to `base`
+  too, since `RichText` implements it.
+- Names `base` exports only for sibling packages carry `//facadegen:skip` (e.g.
+  `NotifyUIChanged`, `ActiveTheme`, `MixRGBA`, `ResizeEdge`, `TitleNavButton`,
+  `SetBoundsQuiet`); the facade does not export them.
+- `widget/xaml` — parser, properties, binding, resources, templates, the tag registry:
+  `xaml.Default()`, `Registry.Register` / `RegisterComplete`, `Builder func(*Element,
+  *Loader) (base.Widget, error)`, `Loader` (`BaseDir`, `Image`, `Offset`, `BuildChild`,
+  `BuildPopupMenu`, `SetName`). Widget packages register their tags with
+  `RegisterXAML(r *xaml.Registry)`: `text` (textbox, textinput, input, richtextbox,
+  passwordbox), `richtext` (richtext; `RichText.OwnsMarkupChildren`), `chrome` (window,
+  complete), `dock` (dockpanel, border, dockmanager — complete). `dialog` has no tags.
+- Internal tests of `widget/xaml` cannot import `chrome` or `dock` (import cycle): tests that
+  need `<Window>` or dock tags are in the external package `xaml_test`
+  (`chrome_ext_test.go` registers them; internals via `export_test.go`). Subpackage tests
+  reach unexported `base` state through `internal/testhook` (`SaveTextMeasurer`,
+  `SaveStrings`, `LanguageListeners`, `ScreenBounds`).
+- `platform/clipboard` — OS clipboard implementations; its `init` calls
+  `base.SetClipboardProvider`. Imported by the facade.
+- The core cannot import a package above it: that would be an import cycle, so the compiler
+  enforces the order. `widget/base/depmap_test.go` (`internal/depmap`) maps file groups
+  inside `base`; only the portable clipboard group is left, its baseline is empty.
+- Behaviour visible from outside: `%T` gives `*base.Button`, `*text.TextInput`,
+  `*chrome.Window`; facade variables are copies; application types embedding a widget pass
+  the capability-interface branches.
