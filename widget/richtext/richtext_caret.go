@@ -1,4 +1,4 @@
-package base
+package richtext
 
 // richtext_caret.go — каретка RichText: положение, геометрия, мигание и
 // навигация с клавиатуры.
@@ -21,6 +21,8 @@ import (
 	"image"
 	"sort"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // richNowMs — часы для мигания; в тестах подменяются, чтобы фазу можно было
@@ -121,10 +123,10 @@ func (d *richDoc) caretWordLeft(off int) int {
 	}
 	start := d.paraStart[pi]
 	i := off
-	for i > start && !IsWordRune(d.runes[i-1]) {
+	for i > start && !base.IsWordRune(d.runes[i-1]) {
 		i--
 	}
-	for i > start && IsWordRune(d.runes[i-1]) {
+	for i > start && base.IsWordRune(d.runes[i-1]) {
 		i--
 	}
 	return i
@@ -148,10 +150,10 @@ func (d *richDoc) caretWordRight(off int) int {
 		return next
 	}
 	i := off
-	for i < end && IsWordRune(d.runes[i]) {
+	for i < end && base.IsWordRune(d.runes[i]) {
 		i++
 	}
-	for i < end && !IsWordRune(d.runes[i]) {
+	for i < end && !base.IsWordRune(d.runes[i]) {
 		i++
 	}
 	if i >= end {
@@ -163,7 +165,7 @@ func (d *richDoc) caretWordRight(off int) int {
 // ─── Состояние каретки ──────────────────────────────────────────────────────
 
 // caretLocked — каретка, зажатая в документ.
-func (t *RichText) caretLocked() int { return clampInt(t.selCaret, 0, len(t.doc.runes)) }
+func (t *RichText) caretLocked() int { return base.ClampInt(t.selCaret, 0, len(t.doc.runes)) }
 
 // caretJumpedLocked — каретка «прыгнула» не клавишами навигации (щелчок,
 // программная установка): признак стыка строк и желаемый X больше не про неё,
@@ -200,7 +202,7 @@ func (t *RichText) placeCaretLocked(pos int, eol, extend, keepX bool) {
 	} else {
 		t.selAnchor = -1
 	}
-	t.selCaret = clampInt(pos, 0, len(t.doc.runes))
+	t.selCaret = base.ClampInt(pos, 0, len(t.doc.runes))
 	t.caretEOL = eol
 	if !keepX {
 		t.wantXOk = false
@@ -239,7 +241,7 @@ func (t *RichText) caretRectLocked() image.Rectangle {
 	if !ok {
 		// Документ без абзацев: каретка стоит там, где встанет первая строка,
 		// высотой в шрифт виджета.
-		fm := t.measurer.FontMetrics(fontSizeOrDefault(t.FontSize), t.FontName)
+		fm := t.measurer.FontMetrics(base.FontSizeOrDefault(t.FontSize), t.FontName)
 		cx, cy, ch = 0, 0, fm.Ascent+fm.Descent
 	}
 	x := b.Min.X + t.PaddingX + cx
@@ -305,7 +307,7 @@ func (t *RichText) caretPhaseNow() bool {
 	if ms < 0 {
 		ms = 0
 	}
-	return CaretPhaseAt(ms)
+	return base.CaretPhaseAt(ms)
 }
 
 // NeedsAnimation — «нужен ли движку кадр ради мигающей каретки». Устроено как
@@ -331,7 +333,7 @@ func (t *RichText) NeedsAnimation() bool {
 	r := t.caretRectLocked().Intersect(t.Base.Bounds())
 	t.mu.Unlock()
 	if !r.Empty() {
-		t.invalidateRect(r)
+		t.InvalidateArea(r)
 	}
 	return false
 }
@@ -352,7 +354,7 @@ func (t *RichText) NeedsAnimation() bool {
 // В режиме просмотра (ни ShowCaret, ни Editable) простые ↑/↓/PgUp/PgDn/Home/End
 // без модификаторов листают текст, как до появления каретки; с Shift или Ctrl
 // они всегда двигают каретку.
-func (t *RichText) navigateLocked(code KeyCode, ctrl, shift bool) bool {
+func (t *RichText) navigateLocked(code base.KeyCode, ctrl, shift bool) bool {
 	lay := t.lay
 	line := t.wheelStepLocked() / 3
 	page := t.Base.Bounds().Dy() - line
@@ -366,7 +368,7 @@ func (t *RichText) navigateLocked(code KeyCode, ctrl, shift bool) bool {
 	hasSel := lo != hi
 
 	switch code {
-	case KeyLeft:
+	case base.KeyLeft:
 		pos := caret - 1
 		switch {
 		case ctrl:
@@ -375,7 +377,7 @@ func (t *RichText) navigateLocked(code KeyCode, ctrl, shift bool) bool {
 			pos = lo
 		}
 		t.placeCaretLocked(pos, false, shift, false)
-	case KeyRight:
+	case base.KeyRight:
 		pos := caret + 1
 		switch {
 		case ctrl:
@@ -385,9 +387,9 @@ func (t *RichText) navigateLocked(code KeyCode, ctrl, shift bool) bool {
 		}
 		t.placeCaretLocked(pos, false, shift, false)
 
-	case KeyUp, KeyDown:
+	case base.KeyUp, base.KeyDown:
 		dir := 1
-		if code == KeyUp {
+		if code == base.KeyUp {
 			dir = -1
 		}
 		if scrollOnly {
@@ -395,9 +397,9 @@ func (t *RichText) navigateLocked(code KeyCode, ctrl, shift bool) bool {
 			return true
 		}
 		t.verticalLocked(dir, 0, shift)
-	case KeyPageUp, KeyPageDown:
+	case base.KeyPageUp, base.KeyPageDown:
 		dir := 1
-		if code == KeyPageUp {
+		if code == base.KeyPageUp {
 			dir = -1
 		}
 		if scrollOnly {
@@ -409,17 +411,17 @@ func (t *RichText) navigateLocked(code KeyCode, ctrl, shift bool) bool {
 		t.setScrollLocked(t.scrollY + dir*page)
 		t.verticalLocked(dir, dir*page, shift)
 
-	case KeyHome, KeyEnd:
+	case base.KeyHome, base.KeyEnd:
 		if scrollOnly {
 			target := 0
-			if code == KeyEnd {
+			if code == base.KeyEnd {
 				target = 1 << 30
 			}
 			t.setScrollLocked(target)
 			return true
 		}
 		switch {
-		case ctrl && code == KeyHome:
+		case ctrl && code == base.KeyHome:
 			t.placeCaretLocked(0, false, shift, false)
 		case ctrl:
 			t.placeCaretLocked(len(t.doc.runes), false, shift, false)
@@ -429,7 +431,7 @@ func (t *RichText) navigateLocked(code KeyCode, ctrl, shift bool) bool {
 				return true
 			}
 			ln := &lay.Lines[li]
-			if code == KeyHome {
+			if code == base.KeyHome {
 				t.placeCaretLocked(ln.Start, false, shift, false)
 			} else {
 				// Конец мягко перенесённой строки — это же смещение, что и

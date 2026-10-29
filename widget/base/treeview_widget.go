@@ -91,7 +91,7 @@ type TreeViewWidget struct {
 
 	// nodeMenu — меню, отданное движку из ContextMenuAt: рисует его виджет,
 	// которому оно принадлежит (см. contextmenuat.go).
-	nodeMenu rowMenuHost
+	nodeMenu RowMenuHost
 }
 
 // ContextMenuAt собирает меню для узла под точкой (ContextMenuProvider).
@@ -102,7 +102,7 @@ func (w *TreeViewWidget) ContextMenuAt(x, y int) *PopupMenu {
 	if !image.Pt(x, y).In(w.Bounds()) {
 		return nil
 	}
-	return w.nodeMenu.build(w, x, y, w.NodeContextMenu(w.Tree.ItemAtY(y)))
+	return w.nodeMenu.Build(w, x, y, w.NodeContextMenu(w.Tree.ItemAtY(y)))
 }
 
 // NewTreeViewWidget создаёт виджет TreeView.
@@ -129,16 +129,16 @@ func (w *TreeViewWidget) Draw(ctx DrawContext) {
 // ─── Overlay (контекстное меню узла) ───────────────────────────────────────
 
 // HasOverlay реализует OverlayDrawer.
-func (w *TreeViewWidget) HasOverlay() bool { return w.nodeMenu.open() }
+func (w *TreeViewWidget) HasOverlay() bool { return w.nodeMenu.Open() }
 
 // DrawOverlay рисует контекстное меню узла поверх всего UI.
-func (w *TreeViewWidget) DrawOverlay(ctx DrawContext) { w.nodeMenu.drawOverlay(ctx) }
+func (w *TreeViewWidget) DrawOverlay(ctx DrawContext) { w.nodeMenu.DrawOverlay(ctx) }
 
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
-func (w *TreeViewWidget) OverlayBounds() image.Rectangle { return w.nodeMenu.overlayBounds() }
+func (w *TreeViewWidget) OverlayBounds() image.Rectangle { return w.nodeMenu.OverlayBounds() }
 
 // Dismiss закрывает контекстное меню узла. Реализует Dismissable.
-func (w *TreeViewWidget) Dismiss() { w.nodeMenu.dismiss() }
+func (w *TreeViewWidget) Dismiss() { w.nodeMenu.Dismiss() }
 
 // applyDirty забирает у ядра накопленный damage и транслирует его в точечную
 // инвалидацию: full → весь виджет, иначе — только изменившиеся строки.
@@ -163,7 +163,7 @@ func (w *TreeViewWidget) OnMouseButton(e MouseEvent) bool {
 
 	// Открытое меню узла старше самого дерева: щелчок по пункту не должен
 	// доходить до узлов под ним.
-	if w.nodeMenu.routeMouse(e) {
+	if w.nodeMenu.RouteMouse(e) {
 		return true
 	}
 
@@ -205,7 +205,7 @@ func (w *TreeViewWidget) OnMouseMove(x, y int) {
 	if !w.IsEnabled() {
 		return
 	}
-	if w.nodeMenu.routeMove(x, y) {
+	if w.nodeMenu.RouteMove(x, y) {
 		return // курсор над меню — подсветку узлов не трогаем
 	}
 	w.Tree.OnMouseMove(x, y)
@@ -220,7 +220,7 @@ func (w *TreeViewWidget) OnKeyEvent(e KeyEvent) {
 	if !w.IsEnabled() {
 		return
 	}
-	if w.nodeMenu.routeKey(e) {
+	if w.nodeMenu.RouteKey(e) {
 		return
 	}
 

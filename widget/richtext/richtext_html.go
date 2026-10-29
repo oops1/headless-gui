@@ -1,4 +1,4 @@
-package base
+package richtext
 
 // richtext_html.go — выделение как HTML для буфера обмена.
 //
@@ -18,6 +18,8 @@ import (
 	"image/color"
 	"strconv"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // richSelectionHTML — HTML-фрагмент для диапазона [lo, hi) в рунах документа.
@@ -119,9 +121,9 @@ func richPiecesHTML(pieces []richHTMLPiece) string {
 func richParagraphOpen(p RichParagraph) string {
 	var st []string
 	switch p.Align {
-	case TextAlignCenter:
+	case base.TextAlignCenter:
 		st = append(st, "text-align:center")
-	case TextAlignRight:
+	case base.TextAlignRight:
 		st = append(st, "text-align:right")
 	}
 	st = append(st,
@@ -181,13 +183,13 @@ func richRunCSS(r RichRun) string {
 	bold, italic, family := false, false, ""
 	switch r.Font {
 	case "":
-	case BuiltinFontBold:
+	case base.BuiltinFontBold:
 		bold = true
-	case BuiltinFontItalic:
+	case base.BuiltinFontItalic:
 		italic = true
-	case BuiltinFontBoldItalic:
+	case base.BuiltinFontBoldItalic:
 		bold, italic = true, true
-	case BuiltinFontMono:
+	case base.BuiltinFontMono:
 		family = "'Courier New',monospace"
 	default:
 		// Имя шрифта — произвольная строка из приложения: в CSS попадает

@@ -123,7 +123,7 @@ func planChoices(choices []FileDialogChoice, avail int) choicePlan {
 	var p choicePlan
 	var row []choiceSlot
 	used := 0
-	sz := fontSizeOrDefault(0)
+	sz := FontSizeOrDefault(0)
 	for _, c := range choices {
 		// Подпись рисуется кеглем 11, как остальные подписи диалога; +4 — её
 		// внутренние отступы (PaddingX Label равен 2 с каждой стороны).

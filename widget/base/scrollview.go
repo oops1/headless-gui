@@ -346,7 +346,7 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 		}
 		if st := currentStyle(); st.Classic3D {
 			// Классика: кнопки ▲/▼ на концах + выпуклый ползунок.
-			drawClassicScrollbar(ctx, vbar, thumb, st, sv.ThumbColor, win10.LabelText)
+			DrawClassicScrollbar(ctx, vbar, thumb, st, sv.ThumbColor, win10.LabelText)
 		} else {
 			ctx.FillRoundRect(thumb.Min.X+1, thumb.Min.Y+1, thumb.Dx()-2, thumb.Dy()-2, 3, tc)
 		}
@@ -677,7 +677,7 @@ func (sv *ScrollView) OnMouseButton(e MouseEvent) bool {
 		inCorner := sv.needsHScrollbar() && e.Y >= vb.Max.Y
 		if e.X >= trackX && e.X <= b.Max.X && !inCorner && sv.needsScrollbar() && sv.interactive() {
 			if !sv.isThin() && currentStyle().Classic3D {
-				btn := classicSBBtnH(sv.scrollbarWidth)
+				btn := ClassicSBBtnH(sv.scrollbarWidth)
 				const arrowStep = 40
 				if e.Y < vb.Min.Y+btn {
 					if sv.setScrollYLocked(sv.scrollY - arrowStep) {

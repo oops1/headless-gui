@@ -290,7 +290,7 @@ func (btn *Button) drawContent(ctx DrawContext, b image.Rectangle, txt color.RGB
 	hasIcon := btn.Icon != nil
 	hasText := btn.Text != "" && btn.IconPos != IconOnly
 
-	sizePt := fontSizeOrDefault(btn.FontSize)
+	sizePt := FontSizeOrDefault(btn.FontSize)
 	textH := buttonTextHeight(sizePt)
 	iconGap := 4 // зазор между иконкой и текстом
 

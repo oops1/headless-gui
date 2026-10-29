@@ -1,4 +1,4 @@
-package base
+package richtext
 
 // richtext_ime.go — незавершённый ввод (IME) в RichText: реализация
 // IMEComposer по образцу TextBox (см. ime.go).

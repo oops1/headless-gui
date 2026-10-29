@@ -49,7 +49,7 @@ type ToolBar struct {
 	// overflowed — элементы, не поместившиеся в последней раскладке.
 	overflowed []Widget
 	chevron    image.Rectangle
-	menu       rowMenuHost
+	menu       RowMenuHost
 }
 
 // NewToolBar создаёт пустую панель инструментов.
@@ -200,7 +200,7 @@ func buttonContentWidth(btn *Button, h int) int {
 		gap = 4
 	}
 	// Своим кеглем кнопки: подпись, заданная FontSize, шире общей.
-	return icon + gap + MeasureTextFor(btn, btn.Text, fontSizeOrDefault(btn.FontSize)) + 14
+	return icon + gap + MeasureTextFor(btn, btn.Text, FontSizeOrDefault(btn.FontSize)) + 14
 }
 
 // xamlSizeOf возвращает размер, заданный в разметке (0, если не задан).
@@ -363,23 +363,23 @@ func (tb *ToolBar) Draw(ctx DrawContext) {
 // ─── Overlay (меню переполнения) ───────────────────────────────────────────
 
 // HasOverlay реализует OverlayDrawer.
-func (tb *ToolBar) HasOverlay() bool { return tb.menu.open() }
+func (tb *ToolBar) HasOverlay() bool { return tb.menu.Open() }
 
 // DrawOverlay рисует меню переполнения поверх всего UI.
-func (tb *ToolBar) DrawOverlay(ctx DrawContext) { tb.menu.drawOverlay(ctx) }
+func (tb *ToolBar) DrawOverlay(ctx DrawContext) { tb.menu.DrawOverlay(ctx) }
 
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
-func (tb *ToolBar) OverlayBounds() image.Rectangle { return tb.menu.overlayBounds() }
+func (tb *ToolBar) OverlayBounds() image.Rectangle { return tb.menu.OverlayBounds() }
 
 // Dismiss закрывает меню переполнения. Реализует Dismissable.
-func (tb *ToolBar) Dismiss() { tb.menu.dismiss() }
+func (tb *ToolBar) Dismiss() { tb.menu.Dismiss() }
 
 // OnMouseButton открывает меню переполнения по щелчку на шевроне.
 func (tb *ToolBar) OnMouseButton(e MouseEvent) bool {
 	if !tb.IsEnabled() {
 		return false
 	}
-	if tb.menu.routeMouse(e) {
+	if tb.menu.RouteMouse(e) {
 		return true
 	}
 	if e.Button != MouseLeft || !e.Pressed || tb.chevron.Empty() {
@@ -388,14 +388,14 @@ func (tb *ToolBar) OnMouseButton(e MouseEvent) bool {
 	if !image.Pt(e.X, e.Y).In(tb.chevron) {
 		return false
 	}
-	if m := tb.menu.build(tb, e.X, e.Y, tb.overflowItems()); m != nil {
+	if m := tb.menu.Build(tb, e.X, e.Y, tb.overflowItems()); m != nil {
 		m.Show(tb.chevron.Min.X, tb.chevron.Max.Y)
 	}
 	return true
 }
 
 // OnMouseMove ведёт подсветку пунктов открытого меню.
-func (tb *ToolBar) OnMouseMove(x, y int) { tb.menu.routeMove(x, y) }
+func (tb *ToolBar) OnMouseMove(x, y int) { tb.menu.RouteMove(x, y) }
 
 // overflowItems превращает спрятанные элементы в пункты меню.
 //

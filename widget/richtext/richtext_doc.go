@@ -1,4 +1,4 @@
-package base
+package richtext
 
 // richtext_doc.go — редактируемая модель форматированного текста: документ из
 // абзацев, правки по смещениям в рунах и история отмены.
@@ -771,18 +771,18 @@ func (d *RichDocument) ApplyStyle(from, to int, fn func(*RichRun)) {
 	pb, _, b := d.locate(to)
 
 	region := richCloneParas(d.paras[pa : pb+1])
-	base := a - offa // абсолютное начало абзаца pa
+	paraStart := a - offa // абсолютное начало абзаца pa
 	for i := pa; i <= pb; i++ {
 		p := &region[i-pa]
 		n := richParaLen(*p)
-		s := max(a-base, 0)
-		e := min(b-base, n)
+		s := max(a-paraStart, 0)
+		e := min(b-paraStart, n)
 		switch {
 		case n == 0:
 			// Пустой абзац стилизуется, если выделение захватывает его
 			// конец (разделитель после него), либо это пустой диапазон,
 			// либо абзац последний и выделение доходит до конца документа.
-			touched := a <= base && (b > base || (b == base && (a == b || i == len(d.paras)-1)))
+			touched := a <= paraStart && (b > paraStart || (b == paraStart && (a == b || i == len(d.paras)-1)))
 			if touched {
 				if len(p.Runs) == 0 {
 					p.Runs = []RichRun{{}}
@@ -801,7 +801,7 @@ func (d *RichDocument) ApplyStyle(from, to int, fn func(*RichRun)) {
 			}
 			p.Runs = richTidyRuns(append(append(l, m...), r...))
 		}
-		base += n + 1
+		paraStart += n + 1
 	}
 	if richParasEqual(region, d.paras[pa:pb+1]) {
 		return

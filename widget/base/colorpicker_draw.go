@@ -106,7 +106,7 @@ func (p *ColorPicker) Draw(ctx DrawContext) {
 	defer p.mu.Unlock()
 	pal := &p.pal
 	st := currentStyle()
-	size := fontSizeOrDefault(p.FontSize)
+	size := FontSizeOrDefault(p.FontSize)
 
 	border := pal.border
 	switch {
@@ -207,7 +207,7 @@ func (p *ColorPicker) DrawOverlay(ctx DrawContext) {
 	}
 	pal := &p.pal
 	st := currentStyle()
-	size := fontSizeOrDefault(p.FontSize)
+	size := FontSizeOrDefault(p.FontSize)
 	rows := cpRows(len(p.palette))
 	drop := cpDropRect(p.Base.Bounds(), rows)
 

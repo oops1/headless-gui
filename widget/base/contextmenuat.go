@@ -21,7 +21,7 @@ type ContextMenuProvider interface {
 	ContextMenuAt(x, y int) *PopupMenu
 }
 
-// rowMenuHost — общее поведение виджета, который отдаёт собранное меню движку.
+// RowMenuHost — общее поведение виджета, который отдаёт собранное меню движку.
 //
 // Меню, отданное из ContextMenuAt, показывает движок, а рисует его тот виджет,
 // которому оно принадлежит: оверлеи собираются обходом дерева, и меню, ни за
@@ -29,7 +29,11 @@ type ContextMenuProvider interface {
 // реализовать весь контракт оверлея — отрисовку, границы, гашение и разбор
 // ввода. Всё это одинаково у таблицы и у дерева, поэтому лежит здесь, а не
 // дважды в двух файлах.
-type rowMenuHost struct {
+//
+// Служебный: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+type RowMenuHost struct {
 	menu *PopupMenu
 	// openedAt — точка, в которой меню открыли, и признак «отпускание этой же
 	// кнопки ещё не пришло». См. routeMouse.
@@ -37,12 +41,12 @@ type rowMenuHost struct {
 	armed    bool
 }
 
-// build собирает меню из пунктов и запоминает его. (x, y) — точка, в которой
+// Build собирает меню из пунктов и запоминает его. (x, y) — точка, в которой
 // меню открывают.
 //
 // Пустой список даёт nil, а не пустое меню: пустая рамка на экране — это не
 // «меню без пунктов», это ошибка, которую пользователь не может исправить.
-func (h *rowMenuHost) build(host Widget, x, y int, items []MenuItem) *PopupMenu {
+func (h *RowMenuHost) Build(host Widget, x, y int, items []MenuItem) *PopupMenu {
 	if len(items) == 0 {
 		return nil
 	}
@@ -55,28 +59,28 @@ func (h *rowMenuHost) build(host Widget, x, y int, items []MenuItem) *PopupMenu 
 	return m
 }
 
-func (h *rowMenuHost) open() bool { return h.menu != nil && h.menu.IsOpen() }
+func (h *RowMenuHost) Open() bool { return h.menu != nil && h.menu.IsOpen() }
 
-func (h *rowMenuHost) drawOverlay(ctx DrawContext) {
-	if h.open() {
+func (h *RowMenuHost) DrawOverlay(ctx DrawContext) {
+	if h.Open() {
 		h.menu.DrawOverlay(ctx)
 	}
 }
 
-func (h *rowMenuHost) overlayBounds() image.Rectangle {
-	if h.open() {
+func (h *RowMenuHost) OverlayBounds() image.Rectangle {
+	if h.Open() {
 		return h.menu.OverlayBounds()
 	}
 	return image.Rectangle{}
 }
 
-func (h *rowMenuHost) dismiss() {
-	if h.open() {
+func (h *RowMenuHost) Dismiss() {
+	if h.Open() {
 		h.menu.Close()
 	}
 }
 
-// routeMouse отдаёт событие открытому меню.
+// RouteMouse отдаёт событие открытому меню.
 //
 // Возвращает «событие разобрано меню, дальше не идти».
 //
@@ -88,8 +92,8 @@ func (h *rowMenuHost) dismiss() {
 //
 // Щелчок мимо меню гасит его и НЕ поглощается — клик должен отработать как
 // обычный.
-func (h *rowMenuHost) routeMouse(e MouseEvent) bool {
-	if !h.open() {
+func (h *RowMenuHost) RouteMouse(e MouseEvent) bool {
+	if !h.Open() {
 		return false
 	}
 	pt := image.Pt(e.X, e.Y)
@@ -118,18 +122,18 @@ func nearPoint(a, b image.Point) bool {
 	return dx <= 3 && dy <= 3
 }
 
-// routeMove ведёт подсветку пунктов; сообщает, что курсор над меню.
-func (h *rowMenuHost) routeMove(x, y int) bool {
-	if !h.open() {
+// RouteMove ведёт подсветку пунктов; сообщает, что курсор над меню.
+func (h *RowMenuHost) RouteMove(x, y int) bool {
+	if !h.Open() {
 		return false
 	}
 	h.menu.OnMouseMove(x, y)
 	return image.Pt(x, y).In(h.menu.Bounds())
 }
 
-// routeKey отдаёт клавишу открытому меню (стрелки, Enter, Escape).
-func (h *rowMenuHost) routeKey(e KeyEvent) bool {
-	if !h.open() {
+// RouteKey отдаёт клавишу открытому меню (стрелки, Enter, Escape).
+func (h *RowMenuHost) RouteKey(e KeyEvent) bool {
+	if !h.Open() {
 		return false
 	}
 	h.menu.OnKeyEvent(e)

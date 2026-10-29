@@ -1,4 +1,4 @@
-package base
+package richtext
 
 // richtext_input.go — ввод RichText: выделение мышью, копирование, ссылки,
 // прокрутка, курсор, клавиатура и семантика для скринридера. Правка текста
@@ -7,6 +7,8 @@ package base
 import (
 	"image"
 	"math"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // ─── Выделение ──────────────────────────────────────────────────────────────
@@ -44,7 +46,7 @@ func (t *RichText) SelectedText() string {
 // from == to снимает выделение.
 func (t *RichText) Select(from, to int) {
 	t.mu.Lock()
-	from, to = AccessClampPair(from, to, len(t.doc.runes))
+	from, to = base.AccessClampPair(from, to, len(t.doc.runes))
 	if from == to {
 		t.selAnchor, t.selCaret = -1, from
 	} else {
@@ -80,7 +82,7 @@ func (t *RichText) Copy() bool {
 	html := richSelectionHTML(t.parasLocked(), t.doc, lo, hi)
 	t.mu.Unlock()
 	// В буфер — вне замка: платформенный буфер может ходить в ОС долго.
-	SetClipboardHTML(html, plain)
+	base.SetClipboardHTML(html, plain)
 	return true
 }
 
@@ -117,12 +119,12 @@ func (t *RichText) IsFocused() bool {
 // ─── Мышь ───────────────────────────────────────────────────────────────────
 
 // SetCaptureManager инжектится движком: протяжка выделения за границы виджета.
-func (t *RichText) SetCaptureManager(cm CaptureManager) { t.capMgr = cm }
+func (t *RichText) SetCaptureManager(cm base.CaptureManager) { t.capMgr = cm }
 
 // WantsCapture — захватываем мышь на нажатие левой кнопки в границах: без
 // захвата протяжка обрывалась бы, стоило курсору выйти за край.
-func (t *RichText) WantsCapture(e MouseEvent) bool {
-	return e.Button == MouseLeft && e.Pressed && image.Pt(e.X, e.Y).In(t.Base.Bounds())
+func (t *RichText) WantsCapture(e base.MouseEvent) bool {
+	return e.Button == base.MouseLeft && e.Pressed && image.Pt(e.X, e.Y).In(t.Base.Bounds())
 }
 
 // contentPointLocked — точка в координатах содержимого (от левого верха
@@ -148,7 +150,7 @@ func (t *RichText) linkAtLocked(x, y int) string {
 
 // wheelStepLocked — шаг колеса: три строки.
 func (t *RichText) wheelStepLocked() int {
-	lh := int(fontSizeOrDefault(t.FontSize)*1.5 + 0.5)
+	lh := int(base.FontSizeOrDefault(t.FontSize)*1.5 + 0.5)
 	if t.lay != nil && len(t.lay.Lines) > 0 {
 		lh = t.lay.Lines[0].Height
 	}
@@ -156,13 +158,13 @@ func (t *RichText) wheelStepLocked() int {
 }
 
 // OnMouseButton обрабатывает кнопки и колесо.
-func (t *RichText) OnMouseButton(e MouseEvent) bool {
+func (t *RichText) OnMouseButton(e base.MouseEvent) bool {
 	if !t.IsEnabled() {
 		return false
 	}
 	// Открытое меню старше текста: щелчок по пункту не должен доходить до
 	// текста под ним (и ставить туда каретку).
-	if t.menu.routeMouse(e) {
+	if t.menu.RouteMouse(e) {
 		return true
 	}
 	b := t.Base.Bounds()
@@ -170,7 +172,7 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 
 	// Колесо: листаем, если есть куда; иначе событие уходит родителю — иначе
 	// RichText внутри прокручиваемой страницы «съедал» бы колесо.
-	if e.Button == MouseWheelUp || e.Button == MouseWheelDown {
+	if e.Button == base.MouseWheelUp || e.Button == base.MouseWheelDown {
 		if !inside {
 			return false
 		}
@@ -185,7 +187,7 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 			return true
 		}
 		step := t.wheelStepLocked()
-		if e.Button == MouseWheelUp {
+		if e.Button == base.MouseWheelUp {
 			step = -step
 		}
 		changed := t.setScrollLocked(t.scrollY + step)
@@ -195,7 +197,7 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 		}
 		return true
 	}
-	if e.Button != MouseLeft {
+	if e.Button != base.MouseLeft {
 		return false
 	}
 
@@ -226,7 +228,7 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 
 	cx, cy := t.contentPointLocked(e.X, e.Y)
 	off, eol := t.lay.hitCaret(t.measurer, cx, cy)
-	n := ClicksOf(e, &t.clicks)
+	n := base.ClicksOf(e, &t.clicks)
 	t.pressLink = ""
 	switch {
 	case n == 2:
@@ -238,7 +240,7 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 		t.setSelLocked(t.doc.paraStart[pi], t.doc.paraEnd(pi))
 		t.dragging = false
 	default:
-		if e.Mod&ModShift != 0 {
+		if e.Mod&base.ModShift != 0 {
 			// Shift+щелчок: якорь остаётся, каретка переезжает под курсор.
 			// Без выделения якорем служит прежняя каретка. Ссылка при этом
 			// не открывается: так человек расширяет выделение, а не нажимает.
@@ -253,7 +255,7 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 			// щелчок по ссылке ставит в неё каретку, а открывает её только
 			// Ctrl+щелчок (как в Word): иначе поправить слово внутри ссылки
 			// было бы нельзя — каждый щелчок уводил бы в браузер.
-			if !t.Editable || e.Mod&ModCtrl != 0 {
+			if !t.Editable || e.Mod&base.ModCtrl != 0 {
 				t.pressLink = t.linkAtLocked(e.X, e.Y)
 			}
 		}
@@ -279,7 +281,7 @@ func (t *RichText) setSelLocked(lo, hi int) {
 
 // mouseRelease — отпускание левой кнопки: конец протяжки и, возможно, щелчок
 // по ссылке.
-func (t *RichText) mouseRelease(e MouseEvent) bool {
+func (t *RichText) mouseRelease(e base.MouseEvent) bool {
 	t.mu.Lock()
 	wasActive := t.dragging || t.barDrag
 	t.dragging, t.barDrag = false, false
@@ -310,8 +312,8 @@ func (t *RichText) mouseRelease(e MouseEvent) bool {
 // серединой под курсор, и перетаскивание продолжается; на кнопках ▲▼
 // классической темы — шаг. true — прокрутка сместилась.
 func (t *RichText) barPressLocked(y int, work, thumb image.Rectangle) bool {
-	if currentStyle().Classic3D {
-		btn := classicSBBtnH(richBarW)
+	if base.CurrentThemeStyle().Classic3D {
+		btn := base.ClassicSBBtnH(richBarW)
 		track := t.Base.Bounds()
 		const arrowStep = 40
 		if y < track.Min.Y+btn {
@@ -339,14 +341,14 @@ func (t *RichText) barPressLocked(y int, work, thumb image.Rectangle) bool {
 func (t *RichText) barDragToLocked(y int) bool {
 	_, work, _ := t.barGeomLocked()
 	b := t.Base.Bounds()
-	v := HBarScrollForThumbX(transposeRect(work), y-t.barGrab, float64(t.maxScrollLocked()),
+	v := base.HBarScrollForThumbX(transposeRect(work), y-t.barGrab, float64(t.maxScrollLocked()),
 		float64(b.Dy()), float64(t.lay.Height+2*t.PaddingY))
 	return t.setScrollLocked(int(math.Round(v)))
 }
 
 // OnMouseMove — протяжка выделения, перетаскивание ползунка, подсветка.
 func (t *RichText) OnMouseMove(x, y int) {
-	if t.menu.routeMove(x, y) {
+	if t.menu.RouteMove(x, y) {
 		return // курсор над меню — подсветку полосы и протяжку не трогаем
 	}
 	t.mu.Lock()
@@ -421,21 +423,21 @@ func (t *RichText) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
 // Cursor — рука над ссылкой, стрелка над полосой, I-образный над текстом
 // (текст можно выделять). В редакторе ссылка открывается только по
 // Ctrl+щелчку, поэтому руки над ней нет: обычный щелчок ставит каретку.
-func (t *RichText) Cursor(x, y int) Cursor {
+func (t *RichText) Cursor(x, y int) base.Cursor {
 	if !t.IsEnabled() {
-		return CursorArrow
+		return base.CursorArrow
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.layoutLocked()
 	b := t.Base.Bounds()
 	if t.barOn && x >= b.Max.X-richBarW {
-		return CursorArrow
+		return base.CursorArrow
 	}
 	if !t.Editable && t.linkAtLocked(x, y) != "" {
-		return CursorHand
+		return base.CursorHand
 	}
-	return CursorIBeam
+	return base.CursorIBeam
 }
 
 // ─── Клавиатура ─────────────────────────────────────────────────────────────
@@ -446,7 +448,7 @@ func (t *RichText) Cursor(x, y int) Cursor {
 // каретка прокручивается в видимую область. У редактора (Editable) сначала
 // разбираются клавиши правки (editKey): ввод, Enter, Backspace/Delete, отмена,
 // буфер обмена, Ctrl+B/I/U.
-func (t *RichText) OnKeyEvent(e KeyEvent) {
+func (t *RichText) OnKeyEvent(e base.KeyEvent) {
 	if !t.IsEnabled() || !e.Pressed {
 		return
 	}
@@ -454,7 +456,7 @@ func (t *RichText) OnKeyEvent(e KeyEvent) {
 	// пункт меню зовёт методы виджета и OnChange, а чужой код под замком
 	// звать нельзя; меню меняет только поток событий, замок нужен лишь тому,
 	// кто его читает из потока кадра.
-	if t.menu.routeKey(e) {
+	if t.menu.RouteKey(e) {
 		return
 	}
 	// Любая клавиша принимает композицию IME как текст: платформы, у которых
@@ -463,18 +465,18 @@ func (t *RichText) OnKeyEvent(e KeyEvent) {
 	if t.editKey(e) {
 		return
 	}
-	ctrl := e.Mod&ModCtrl != 0
-	shift := e.Mod&ModShift != 0
+	ctrl := e.Mod&base.ModCtrl != 0
+	shift := e.Mod&base.ModShift != 0
 	switch {
-	case ctrl && (e.Code == KeyC || e.Code == KeyInsert):
+	case ctrl && (e.Code == base.KeyC || e.Code == base.KeyInsert):
 		t.Copy()
 		return
-	case ctrl && e.Code == KeyA:
+	case ctrl && e.Code == base.KeyA:
 		t.SelectAll()
 		return
 	}
 	// Alt+стрелка — «назад/вперёд» и прочие команды приложения, не навигация.
-	if e.Mod&ModAlt != 0 {
+	if e.Mod&base.ModAlt != 0 {
 		return
 	}
 
@@ -494,18 +496,18 @@ func (t *RichText) OnKeyEvent(e KeyEvent) {
 
 // AccessInfo — роль «документ»: скринридер читает такой текст по строкам и
 // абзацам и объявляет его документом, а не надписью.
-func (t *RichText) AccessInfo() AccessInfo {
-	info := AccessInfo{
-		Role:        RoleDocument,
+func (t *RichText) AccessInfo() base.AccessInfo {
+	info := base.AccessInfo{
+		Role:        base.RoleDocument,
 		Bounds:      t.Base.Bounds(),
 		Description: t.GetToolTip(),
 		Value:       t.Text(),
 	}
 	if !t.isEditable() {
-		info.States = []string{StateReadOnly}
+		info.States = []string{base.StateReadOnly}
 	}
 	if !t.IsEnabled() {
-		info.States = append(info.States, StateDisabled)
+		info.States = append(info.States, base.StateDisabled)
 	}
 	return info
 }

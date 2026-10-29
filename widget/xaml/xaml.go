@@ -328,10 +328,6 @@ func buildXAMLWidgetAt(el Element, reg map[string]base.Widget, parentOff image.P
 	case "mergeview":
 		w = buildXAMLMergeView(el, baseDir)
 
-	// ── RichText — форматированный текст (абзацы из ранов) ──────────────────
-	case "richtext":
-		w = buildXAMLRichText(el)
-
 	// ── TreeViewItem вне TreeView — игнорируем ──────────────────────────────
 	case "treeviewitem":
 		return nil, nil
@@ -505,8 +501,9 @@ func buildXAMLWidgetAt(el Element, reg map[string]base.Widget, parentOff image.P
 		return buildXAMLMenuBar(el, reg, parentOff, baseDir)
 
 	default:
-		// Теги пакетов виджетов вне xaml (ввод текста — widget/text):
-		// реестр Default(), заполненный их RegisterXAML.
+		// Теги пакетов виджетов вне xaml (ввод текста — widget/text,
+		// RichText — widget/richtext): реестр Default(), заполненный их
+		// RegisterXAML.
 		if b, ok := Default().Lookup(tag); ok {
 			cw, err := b(&el, &Loader{baseDir: baseDir})
 			if err != nil {
@@ -572,9 +569,10 @@ func buildXAMLWidgetAt(el Element, reg map[string]base.Widget, parentOff image.P
 	// Дочерние виджеты (пропускаем <Item>, <TabItem> — уже обработаны)
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
-		// Абзацы RichText разобраны в buildXAMLRichText: это не виджеты. Теги-
-		// свойства (RichText.ContextMenu) идут обычным путём.
-		if _, ok := w.(*base.RichText); ok && !strings.Contains(childTag, ".") {
+		// Дети виджета — не виджеты (абзацы RichText разобраны его
+		// строителем): кто бы его ни построил — реестр или пользовательский
+		// тег. Теги-свойства (RichText.ContextMenu) идут обычным путём.
+		if oc, ok := w.(markupChildrenOwner); ok && oc.OwnsMarkupChildren() && !strings.Contains(childTag, ".") {
 			continue
 		}
 		if childTag == "item" || childTag == "comboboxitem" || childTag == "listboxitem" ||
@@ -789,7 +787,7 @@ func buildXAMLButton(el Element, baseDir string) base.Widget {
 
 	// ── Padding ────────────────────────────────────────────────────────────
 	if pad := el.Attr("Padding"); pad != "" {
-		btn.Padding = parseMargin(pad)
+		btn.Padding = ParseMargin(pad)
 	}
 
 	// ── CornerRadius ───────────────────────────────────────────────────────
@@ -1294,4 +1292,11 @@ func buildXAMLSVGIcon(el Element, baseDir string) base.Widget {
 		ic.SetTint(true)
 	}
 	return ic
+}
+
+// markupChildrenOwner — виджет, у которого дети элемента разметки — его
+// содержимое, а не виджеты (RichText: абзацы и раны). Загрузчик строит из них
+// только теги-свойства (X.ContextMenu).
+type markupChildrenOwner interface {
+	OwnsMarkupChildren() bool
 }

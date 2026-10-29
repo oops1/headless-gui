@@ -228,14 +228,18 @@ func drawArrowTri(ctx DrawContext, cx, cy int, up bool, col color.RGBA) {
 	}
 }
 
-// classicSBBtnH — высота кнопки-стрелки классического скроллбара
+// ClassicSBBtnH — высота кнопки-стрелки классического скроллбара
 // (квадратная: равна ширине полосы).
-func classicSBBtnH(trackW int) int { return trackW }
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ClassicSBBtnH(trackW int) int { return trackW }
 
 // classicSBInset возвращает «рабочую» область классического скроллбара —
 // полосу между кнопками ▲ и ▼.
 func classicSBInset(track image.Rectangle) image.Rectangle {
-	btn := classicSBBtnH(track.Dx())
+	btn := ClassicSBBtnH(track.Dx())
 	in := image.Rect(track.Min.X, track.Min.Y+btn, track.Max.X, track.Max.Y-btn)
 	if in.Dy() < 0 {
 		in.Max.Y = in.Min.Y
@@ -243,12 +247,16 @@ func classicSBInset(track image.Rectangle) image.Rectangle {
 	return in
 }
 
-// sbWorkArea возвращает верх и высоту «рабочей» зоны вертикального скроллбара:
+// SBWorkArea возвращает верх и высоту «рабочей» зоны вертикального скроллбара:
 // в классике — полоса между кнопками ▲/▼, иначе — вся высота виджета.
-func sbWorkArea(b image.Rectangle, sbw int) (top, h int) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func SBWorkArea(b image.Rectangle, sbw int) (top, h int) {
 	top, h = b.Min.Y, b.Dy()
 	if currentStyle().Classic3D {
-		btn := classicSBBtnH(sbw)
+		btn := ClassicSBBtnH(sbw)
 		top += btn
 		h -= 2 * btn
 		if h < 8 {
@@ -258,10 +266,14 @@ func sbWorkArea(b image.Rectangle, sbw int) (top, h int) {
 	return top, h
 }
 
-// drawClassicScrollbar рисует классический вертикальный скроллбар Win2000:
+// DrawClassicScrollbar рисует классический вертикальный скроллбар Win2000:
 // кнопки ▲/▼ на концах и выпуклый прямоугольный ползунок thumb.
-func drawClassicScrollbar(ctx DrawContext, track, thumb image.Rectangle, st ThemeStyle, face, arrowCol color.RGBA) {
-	btn := classicSBBtnH(track.Dx())
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func DrawClassicScrollbar(ctx DrawContext, track, thumb image.Rectangle, st ThemeStyle, face, arrowCol color.RGBA) {
+	btn := ClassicSBBtnH(track.Dx())
 	top := image.Rect(track.Min.X, track.Min.Y, track.Max.X, track.Min.Y+btn)
 	bot := image.Rect(track.Min.X, track.Max.Y-btn, track.Max.X, track.Max.Y)
 

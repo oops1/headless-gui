@@ -193,13 +193,13 @@ func (tc *TabControl) activateTab(idx int) {
 // ─── Overlay (меню переполнения) ───────────────────────────────────────────
 
 // HasOverlay реализует OverlayDrawer.
-func (tc *TabControl) HasOverlay() bool { return tc.menu.open() }
+func (tc *TabControl) HasOverlay() bool { return tc.menu.Open() }
 
 // DrawOverlay рисует меню переполнения поверх всего UI.
-func (tc *TabControl) DrawOverlay(ctx DrawContext) { tc.menu.drawOverlay(ctx) }
+func (tc *TabControl) DrawOverlay(ctx DrawContext) { tc.menu.DrawOverlay(ctx) }
 
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
-func (tc *TabControl) OverlayBounds() image.Rectangle { return tc.menu.overlayBounds() }
+func (tc *TabControl) OverlayBounds() image.Rectangle { return tc.menu.OverlayBounds() }
 
 // Dismiss закрывает меню переполнения. Реализует Dismissable.
-func (tc *TabControl) Dismiss() { tc.menu.dismiss() }
+func (tc *TabControl) Dismiss() { tc.menu.Dismiss() }

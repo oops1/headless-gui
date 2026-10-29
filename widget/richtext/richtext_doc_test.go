@@ -1,4 +1,4 @@
-package base
+package richtext
 
 import (
 	"fmt"
@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // Тесты модели правок RichDocument: без виджета и окна. Ожидаемые значения
@@ -19,8 +21,8 @@ import (
 // содержимое и оформление одним взглядом.
 
 var (
-	rdBold   = RichRun{Font: BuiltinFontBold}
-	rdItalic = RichRun{Font: BuiltinFontItalic}
+	rdBold   = RichRun{Font: base.BuiltinFontBold}
+	rdItalic = RichRun{Font: base.BuiltinFontItalic}
 	rdRed    = RichRun{Color: color.RGBA{255, 0, 0, 255}}
 )
 
@@ -37,13 +39,13 @@ func rdSty(r RichRun) string {
 	var t []string
 	switch r.Font {
 	case "":
-	case BuiltinFontBold:
+	case base.BuiltinFontBold:
 		t = append(t, "b")
-	case BuiltinFontItalic:
+	case base.BuiltinFontItalic:
 		t = append(t, "i")
-	case BuiltinFontBoldItalic:
+	case base.BuiltinFontBoldItalic:
 		t = append(t, "bi")
-	case BuiltinFontMono:
+	case base.BuiltinFontMono:
 		t = append(t, "m")
 	default:
 		t = append(t, r.Font)
@@ -78,9 +80,9 @@ func rdDumpParas(paras []RichParagraph) string {
 		var parts []string
 		var tags []string
 		switch p.Align {
-		case TextAlignCenter:
+		case base.TextAlignCenter:
 			tags = append(tags, "c")
-		case TextAlignRight:
+		case base.TextAlignRight:
 			tags = append(tags, "r")
 		}
 		if p.Indent != 0 {
@@ -256,7 +258,7 @@ func TestRichDoc_InsertSameStyleMerges(t *testing.T) {
 
 func TestRichDoc_InsertIgnoresStyleText(t *testing.T) {
 	d := NewRichDocument([]RichParagraph{rdP(rdTxt("ab", RichRun{}))})
-	d.Insert(1, "X", RichRun{Text: "ЧУЖОЙ", Font: BuiltinFontBold})
+	d.Insert(1, "X", RichRun{Text: "ЧУЖОЙ", Font: base.BuiltinFontBold})
 	rdWant(t, d, `-"a" b"X" -"b"`)
 }
 
@@ -276,7 +278,7 @@ func TestRichDoc_InsertIntoEmptyParagraphKeepsRemembered(t *testing.T) {
 func TestRichDoc_InsertNewlines(t *testing.T) {
 	d := NewRichDocument([]RichParagraph{{
 		Runs:  []RichRun{rdTxt("Hello", rdBold), rdTxt("World", RichRun{})},
-		Align: TextAlignCenter, Indent: 20, SpaceBefore: 1, SpaceAfter: 2,
+		Align: base.TextAlignCenter, Indent: 20, SpaceBefore: 1, SpaceAfter: 2,
 	}})
 	end := d.Insert(3, "A\nB\n", rdItalic)
 	// Все новые абзацы унаследовали выравнивание и отступы; хвост исходного
@@ -357,10 +359,10 @@ func TestRichDoc_OffsetsAreRunes(t *testing.T) {
 
 func TestRichDoc_InsertParagraphsFragment(t *testing.T) {
 	d := NewRichDocument([]RichParagraph{
-		{Runs: []RichRun{rdTxt("abcd", RichRun{})}, Align: TextAlignRight},
+		{Runs: []RichRun{rdTxt("abcd", RichRun{})}, Align: base.TextAlignRight},
 	})
 	frag := []RichParagraph{
-		{Runs: []RichRun{rdTxt("X", rdBold)}, Align: TextAlignCenter},
+		{Runs: []RichRun{rdTxt("X", rdBold)}, Align: base.TextAlignCenter},
 		{Runs: []RichRun{rdTxt("Y", rdItalic)}, Indent: 8},
 		{Runs: []RichRun{rdTxt("Z", rdRed)}, Indent: 16},
 	}
@@ -409,8 +411,8 @@ func TestRichDoc_DeleteAcrossRuns(t *testing.T) {
 
 func TestRichDoc_DeleteAcrossParagraphs(t *testing.T) {
 	d := NewRichDocument([]RichParagraph{
-		{Runs: []RichRun{rdTxt("Hello", rdBold)}, Align: TextAlignCenter, Indent: 5},
-		{Runs: []RichRun{rdTxt("middle", RichRun{})}, Align: TextAlignRight},
+		{Runs: []RichRun{rdTxt("Hello", rdBold)}, Align: base.TextAlignCenter, Indent: 5},
+		{Runs: []RichRun{rdTxt("middle", RichRun{})}, Align: base.TextAlignRight},
 		{Runs: []RichRun{rdTxt("World", rdItalic)}, Indent: 9},
 	})
 	d.Delete(3, 15) // "lo¶middle¶Wo"
@@ -423,8 +425,8 @@ func TestRichDoc_DeleteAcrossParagraphs(t *testing.T) {
 
 func TestRichDoc_DeleteNewlineOnly(t *testing.T) {
 	d := NewRichDocument([]RichParagraph{
-		{Runs: []RichRun{rdTxt("ab", rdBold)}, Align: TextAlignCenter},
-		{Runs: []RichRun{rdTxt("cd", rdBold)}, Align: TextAlignRight},
+		{Runs: []RichRun{rdTxt("ab", rdBold)}, Align: base.TextAlignCenter},
+		{Runs: []RichRun{rdTxt("cd", rdBold)}, Align: base.TextAlignRight},
 	})
 	d.Delete(2, 3)
 	rdWant(t, d, `[c] b"abcd"`) // оформление первого, раны слиты
@@ -489,7 +491,7 @@ func TestRichDoc_DeleteEmptyRangeNoop(t *testing.T) {
 // ---------------------------------------------------------------------------
 // ApplyStyle
 
-func rdMakeBold(r *RichRun) { r.Font = BuiltinFontBold }
+func rdMakeBold(r *RichRun) { r.Font = base.BuiltinFontBold }
 
 func TestRichDoc_ApplyStylePartOfRun(t *testing.T) {
 	d := NewRichDocument([]RichParagraph{rdP(rdTxt("Hello World", RichRun{}))})
@@ -636,7 +638,7 @@ func TestRichDoc_SetParagraphFormat(t *testing.T) {
 	mk := func() *RichDocument {
 		return NewRichDocumentFromText("aaa\nbbb\nccc")
 	}
-	center := func(p *RichParagraph) { p.Align = TextAlignCenter; p.Indent = 10 }
+	center := func(p *RichParagraph) { p.Align = base.TextAlignCenter; p.Indent = 10 }
 
 	d := mk()
 	d.SetParagraphFormat(5, 5, center) // каретка в «bbb»
@@ -675,20 +677,20 @@ func TestRichDoc_SetParagraphFormat(t *testing.T) {
 
 func TestRichDoc_ParagraphFormatAt(t *testing.T) {
 	d := NewRichDocument([]RichParagraph{
-		{Runs: []RichRun{rdTxt("ab", RichRun{})}, Align: TextAlignRight, Indent: 4},
+		{Runs: []RichRun{rdTxt("ab", RichRun{})}, Align: base.TextAlignRight, Indent: 4},
 		rdP(rdTxt("cd", RichRun{})),
 	})
-	if p := d.ParagraphFormatAt(1); p.Align != TextAlignRight || p.Indent != 4 || p.Runs != nil {
+	if p := d.ParagraphFormatAt(1); p.Align != base.TextAlignRight || p.Indent != 4 || p.Runs != nil {
 		t.Errorf("%+v", p)
 	}
-	if p := d.ParagraphFormatAt(4); p.Align != TextAlignLeft || p.Indent != 0 {
+	if p := d.ParagraphFormatAt(4); p.Align != base.TextAlignLeft || p.Indent != 0 {
 		t.Errorf("%+v", p)
 	}
 }
 
 func TestRichDoc_Fragment(t *testing.T) {
 	d := NewRichDocument([]RichParagraph{
-		{Runs: []RichRun{rdTxt("Hello", rdBold)}, Align: TextAlignCenter},
+		{Runs: []RichRun{rdTxt("Hello", rdBold)}, Align: base.TextAlignCenter},
 		rdP(rdTxt("mid", RichRun{})),
 		{Runs: []RichRun{rdTxt("World", rdItalic)}, Indent: 3},
 	})
@@ -714,9 +716,9 @@ func TestRichDoc_Fragment(t *testing.T) {
 // Undo / redo
 
 func TestRichDoc_UndoRedoEachOperation(t *testing.T) {
-	base := func() *RichDocument {
+	mkDoc := func() *RichDocument {
 		return NewRichDocument([]RichParagraph{
-			{Runs: []RichRun{rdTxt("Hello", rdBold), rdTxt("World", RichRun{})}, Align: TextAlignCenter},
+			{Runs: []RichRun{rdTxt("Hello", rdBold), rdTxt("World", RichRun{})}, Align: base.TextAlignCenter},
 			{Runs: []RichRun{rdTxt("second", rdItalic)}, Indent: 7},
 			rdP(),
 		})
@@ -740,12 +742,12 @@ func TestRichDoc_UndoRedoEachOperation(t *testing.T) {
 		{"ApplyStyle", func(d *RichDocument) { d.ApplyStyle(3, 14, rdMakeBold) }},
 		{"ApplyStyle пустой абзац", func(d *RichDocument) { d.ApplyStyle(d.Len(), d.Len(), func(r *RichRun) { r.Size = 20 }) }},
 		{"SetParagraphFormat", func(d *RichDocument) {
-			d.SetParagraphFormat(2, 14, func(p *RichParagraph) { p.Align = TextAlignRight; p.Indent = 99 })
+			d.SetParagraphFormat(2, 14, func(p *RichParagraph) { p.Align = base.TextAlignRight; p.Indent = 99 })
 		}},
 		{"Replace", func(d *RichDocument) { d.Replace(3, 14, "заменили\nтут", rdRed) }},
 	}
 	for _, op := range ops {
-		d := base()
+		d := mkDoc()
 		orig := d.Paragraphs()
 		op.do(d)
 		after := d.Paragraphs()
@@ -1179,7 +1181,7 @@ func rdRandText(rng *rand.Rand, maxLen int) string {
 
 var rdStyles = []RichRun{
 	{}, rdBold, rdItalic, rdRed,
-	{Font: BuiltinFontBold, Size: 14},
+	{Font: base.BuiltinFontBold, Size: 14},
 	{Underline: true},
 	{Link: "https://e.x", Color: color.RGBA{0, 0, 255, 255}},
 }
@@ -1188,7 +1190,7 @@ func rdRandDoc(rng *rand.Rand) *RichDocument {
 	n := 1 + rng.Intn(4)
 	var paras []RichParagraph
 	for i := 0; i < n; i++ {
-		p := RichParagraph{Align: TextAlign(rng.Intn(3)), Indent: rng.Intn(3) * 8, SpaceAfter: rng.Intn(2)}
+		p := RichParagraph{Align: base.TextAlign(rng.Intn(3)), Indent: rng.Intn(3) * 8, SpaceAfter: rng.Intn(2)}
 		for k := rng.Intn(4); k > 0; k-- {
 			text := rdRandText(rng, 6)
 			text = strings.ReplaceAll(text, "\n", "·") // абзацы — структурой, не символом
@@ -1201,7 +1203,7 @@ func rdRandDoc(rng *rand.Rand) *RichDocument {
 
 // rdFns — детерминированные правки оформления: нужны и документу, и модели.
 var rdFns = []func(*RichRun){
-	func(r *RichRun) { r.Font = BuiltinFontBold },
+	func(r *RichRun) { r.Font = base.BuiltinFontBold },
 	func(r *RichRun) { r.Underline = !r.Underline },
 	func(r *RichRun) { r.Color = color.RGBA{0, 255, 0, 255} },
 	func(r *RichRun) { *r = RichRun{Text: r.Text} },
@@ -1266,7 +1268,7 @@ func rdRandOp(rng *rand.Rand, d *RichDocument, model *[]rdCell, typing bool) str
 		return fmt.Sprintf("ApplyStyle(%d,%d,fn%d)", a, b, fi)
 	case 7:
 		a, b := pos(), pos()
-		al, ind := TextAlign(rng.Intn(3)), rng.Intn(5)
+		al, ind := base.TextAlign(rng.Intn(3)), rng.Intn(5)
 		d.SetParagraphFormat(a, b, func(p *RichParagraph) { p.Align, p.Indent = al, ind })
 		return fmt.Sprintf("SetParagraphFormat(%d,%d)", a, b)
 	case 8:

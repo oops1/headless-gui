@@ -1,9 +1,11 @@
-package base
+package richtext
 
 import (
 	"math/rand"
 	"strings"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // fakeRichMeasurer — измеритель с предсказуемыми числами: ширина руны —
@@ -19,9 +21,9 @@ func (fakeRichMeasurer) TextWidth(text string, size float64, font string) int {
 	return w
 }
 
-func (fakeRichMeasurer) FontMetrics(size float64, font string) FontMetrics {
+func (fakeRichMeasurer) FontMetrics(size float64, font string) base.FontMetrics {
 	a, d := int(size*0.8), int(size*0.2)
-	return FontMetrics{Ascent: a, Descent: d, Height: a + d}
+	return base.FontMetrics{Ascent: a, Descent: d, Height: a + d}
 }
 
 func layoutOf(width int, paras ...RichParagraph) *richLayout {
@@ -312,16 +314,16 @@ func TestRichLayout_AlignAndIndent(t *testing.T) {
 	text := RichRun{Text: "abcd  "} // 4 символа + два висящих пробела
 	cases := []struct {
 		name   string
-		align  TextAlign
+		align  base.TextAlign
 		indent int
 		wantX  int
 	}{
-		{"слева", TextAlignLeft, 0, 0},
-		{"слева с отступом", TextAlignLeft, 12, 12},
-		{"по центру", TextAlignCenter, 0, (100 - 20) / 2},
-		{"вправо", TextAlignRight, 0, 100 - 20},
-		{"вправо с отступом", TextAlignRight, 10, 10 + (90 - 20)},
-		{"по центру с отступом", TextAlignCenter, 10, 10 + (90-20)/2},
+		{"слева", base.TextAlignLeft, 0, 0},
+		{"слева с отступом", base.TextAlignLeft, 12, 12},
+		{"по центру", base.TextAlignCenter, 0, (100 - 20) / 2},
+		{"вправо", base.TextAlignRight, 0, 100 - 20},
+		{"вправо с отступом", base.TextAlignRight, 10, 10 + (90 - 20)},
+		{"по центру с отступом", base.TextAlignCenter, 10, 10 + (90-20)/2},
 	}
 	for _, c := range cases {
 		l := layoutOf(100, RichParagraph{Runs: []RichRun{text}, Align: c.align, Indent: c.indent})
@@ -339,7 +341,7 @@ func TestRichLayout_AlignAndIndent(t *testing.T) {
 
 	// Каждая строка выравнивается по-своему: у короткой больше сдвиг.
 	// 7 символов = 35 px не влезают в 30 px: "aaaa " (20 px) и "bb" (10 px).
-	l := layoutOf(30, RichParagraph{Runs: []RichRun{{Text: "aaaa bb"}}, Align: TextAlignRight})
+	l := layoutOf(30, RichParagraph{Runs: []RichRun{{Text: "aaaa bb"}}, Align: base.TextAlignRight})
 	if len(l.Lines) != 2 {
 		t.Fatalf("строк %d, ждали 2", len(l.Lines))
 	}
@@ -381,7 +383,7 @@ func TestRichLayout_RandomInvariants(t *testing.T) {
 					Font: fonts[rnd.Intn(len(fonts))]})
 			}
 			paras = append(paras, RichParagraph{Runs: runs, Indent: rnd.Intn(20),
-				Align: TextAlign(rnd.Intn(3)), SpaceBefore: rnd.Intn(5)})
+				Align: base.TextAlign(rnd.Intn(3)), SpaceBefore: rnd.Intn(5)})
 		}
 		width := 30 + rnd.Intn(200)
 		l := layoutOf(width, paras...)

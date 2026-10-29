@@ -411,7 +411,7 @@ func (lv *ListView) thumbRect() image.Rectangle {
 	}
 	ch := lv.contentHeight()
 	trackX := b.Max.X - lv.scrollbarWidth
-	top, workH := sbWorkArea(b, lv.scrollbarWidth) // в классике — между кнопками ▲▼
+	top, workH := SBWorkArea(b, lv.scrollbarWidth) // в классике — между кнопками ▲▼
 	ratio := float64(b.Dy()) / float64(ch)
 	thumbH := int(ratio * float64(workH))
 	if thumbH < 20 {
@@ -526,7 +526,7 @@ func (lv *ListView) Draw(ctx DrawContext) {
 		}
 		if st := currentStyle(); st.Classic3D {
 			track := image.Rect(trackX, b.Min.Y, b.Max.X, b.Max.Y)
-			drawClassicScrollbar(ctx, track, tr, st, lv.ThumbColor, win10.LabelText)
+			DrawClassicScrollbar(ctx, track, tr, st, lv.ThumbColor, win10.LabelText)
 		} else {
 			ctx.FillRoundRect(tr.Min.X+1, tr.Min.Y+1, tr.Dx()-2, tr.Dy()-2, 3, tc)
 		}
@@ -599,7 +599,7 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 			if e.X >= trackX {
 				if currentStyle().Classic3D {
 					// Кнопки ▲/▼ классического скроллбара — шаг на строку.
-					btn := classicSBBtnH(lv.scrollbarWidth)
+					btn := ClassicSBBtnH(lv.scrollbarWidth)
 					if e.Y < b.Min.Y+btn {
 						old := lv.scrollY
 						lv.scrollY -= lv.ItemHeight
@@ -623,7 +623,7 @@ func (lv *ListView) OnMouseButton(e MouseEvent) bool {
 						return true
 					}
 				}
-				top, workH := sbWorkArea(b, lv.scrollbarWidth)
+				top, workH := SBWorkArea(b, lv.scrollbarWidth)
 				ratio := float64(e.Y-top) / float64(workH)
 				old := lv.scrollY
 				lv.scrollY = int(ratio * float64(lv.contentHeight()))
@@ -774,7 +774,7 @@ func (lv *ListView) OnMouseMove(x, y int) {
 
 	if lv.dragging {
 		dy := y - lv.dragStartY
-		_, workH := sbWorkArea(lv.bounds, lv.scrollbarWidth)
+		_, workH := SBWorkArea(lv.bounds, lv.scrollbarWidth)
 		tr := lv.thumbRect()
 		thumbH := tr.Dy()
 		trackUsable := workH - thumbH

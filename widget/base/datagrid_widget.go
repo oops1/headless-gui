@@ -132,7 +132,7 @@ type DataGridWidget struct {
 
 	// rowMenu — меню, отданное движку из ContextMenuAt: рисует его виджет,
 	// которому оно принадлежит (см. contextmenuat.go).
-	rowMenu rowMenuHost
+	rowMenu RowMenuHost
 
 	// Для обработки двойного клика
 	lastClickTime int64 // ms
@@ -164,16 +164,16 @@ func (w *DataGridWidget) Draw(ctx DrawContext) {
 // ─── Overlay (контекстное меню строки) ─────────────────────────────────────
 
 // HasOverlay реализует OverlayDrawer.
-func (w *DataGridWidget) HasOverlay() bool { return w.rowMenu.open() }
+func (w *DataGridWidget) HasOverlay() bool { return w.rowMenu.Open() }
 
 // DrawOverlay рисует контекстное меню строки поверх всего UI.
-func (w *DataGridWidget) DrawOverlay(ctx DrawContext) { w.rowMenu.drawOverlay(ctx) }
+func (w *DataGridWidget) DrawOverlay(ctx DrawContext) { w.rowMenu.DrawOverlay(ctx) }
 
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
-func (w *DataGridWidget) OverlayBounds() image.Rectangle { return w.rowMenu.overlayBounds() }
+func (w *DataGridWidget) OverlayBounds() image.Rectangle { return w.rowMenu.OverlayBounds() }
 
 // Dismiss закрывает контекстное меню строки. Реализует Dismissable.
-func (w *DataGridWidget) Dismiss() { w.rowMenu.dismiss() }
+func (w *DataGridWidget) Dismiss() { w.rowMenu.Dismiss() }
 
 // applyDirty забирает у ядра накопленный damage и транслирует его в точечную
 // инвалидацию: full → весь виджет, иначе — только изменившиеся строки
@@ -200,7 +200,7 @@ func (w *DataGridWidget) OnMouseButton(e MouseEvent) bool {
 
 	// Открытое меню строки старше самой таблицы: щелчок по пункту не должен
 	// доходить до строк под ним.
-	if w.rowMenu.routeMouse(e) {
+	if w.rowMenu.RouteMouse(e) {
 		return true
 	}
 
@@ -250,7 +250,7 @@ func (w *DataGridWidget) OnMouseMove(x, y int) {
 	if !w.IsEnabled() {
 		return
 	}
-	if w.rowMenu.routeMove(x, y) {
+	if w.rowMenu.RouteMove(x, y) {
 		return // курсор над меню — подсветку строк не трогаем
 	}
 	w.Grid.OnMouseMove(x, y)
@@ -292,7 +292,7 @@ func (w *DataGridWidget) ContextMenuAt(x, y int) *PopupMenu {
 	if row >= 0 {
 		item = w.Grid.ItemAtRow(row)
 	}
-	return w.rowMenu.build(w, x, y, w.RowContextMenu(item, row))
+	return w.rowMenu.Build(w, x, y, w.RowContextMenu(item, row))
 }
 
 // ─── Keyboard handling ─────────────────────────────────────────────────────
@@ -302,7 +302,7 @@ func (w *DataGridWidget) OnKeyEvent(e KeyEvent) {
 	if !w.IsEnabled() {
 		return
 	}
-	if w.rowMenu.routeKey(e) {
+	if w.rowMenu.RouteKey(e) {
 		return
 	}
 

@@ -40,7 +40,7 @@ func cursorImageGeometry(img *image.NRGBA, hotX, hotY int) (w, h, hx, hy int, ok
 	if w <= 0 || h <= 0 || w > MaxCursorImageSide || h > MaxCursorImageSide {
 		return 0, 0, 0, 0, false
 	}
-	return w, h, clampInt(hotX, 0, w-1), clampInt(hotY, 0, h-1), true
+	return w, h, ClampInt(hotX, 0, w-1), ClampInt(hotY, 0, h-1), true
 }
 
 // cursorKey — хеш картинки: размер, горячая точка и пиксели построчно.

@@ -1,9 +1,9 @@
 package base
 
 // depmap_test.go — карта зависимостей пакета по будущим подпакетам
-// (ADR-0012, этап 8). XAML с 8.2b и ввод текста с 8.3 — отдельные пакеты
-// widget/xaml и widget/text: их рёбра проверяет компилятор (они → base,
-// обратного импорта нет). Группы — по
+// (ADR-0012, этап 8). XAML с 8.2b, ввод текста с 8.3 и RichText с 8.4 —
+// отдельные пакеты widget/xaml, widget/text, widget/richtext: их рёбра
+// проверяет компилятор (они → base, обратного импорта нет). Группы — по
 // именам файлов; порядок — целевой граф пакетов: всё → base (core);
 // richtext → text; dialog → chrome, text;
 // text, richtext, dialog, dock, chrome → xaml (регистрация строителей);
@@ -22,17 +22,14 @@ import (
 func TestDepMap_SubpackageOrder(t *testing.T) {
 	re := regexp.MustCompile
 	allowed := map[string]map[string]bool{
-		"richtext": {"text": true, "xaml": true},
-		"dialog":   {"chrome": true, "text": true, "xaml": true},
-		"dock":     {"xaml": true},
-		"chrome":   {"xaml": true},
-		"text":     {"xaml": true},
+		"dialog": {"chrome": true, "text": true, "xaml": true},
+		"dock":   {"xaml": true},
+		"chrome": {"xaml": true},
 	}
 	depmap.Run(t, depmap.Config{
 		Dir:  ".",
 		Path: "widget/base",
 		Groups: []depmap.Group{
-			{Name: "richtext", Match: re(`^richtext`)},
 			{Name: "dialog", Match: re(`^dialog|^messagebox`)},
 			{Name: "dock", Match: re(`^dock`)},
 			{Name: "chrome", Match: re(`^window|^titlebar`)},
@@ -53,7 +50,6 @@ func TestDepMap_SubpackageOrder(t *testing.T) {
 			"core → chrome",
 			"core → dialog",
 			"core → dock",
-			"core → richtext",
 			"dock → chrome",
 			"dock → dialog",
 		},

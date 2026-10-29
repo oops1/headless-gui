@@ -1,4 +1,4 @@
-package base
+package richtext
 
 import (
 	"image"
@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // Тесты каретки RichText без окна. Измеритель подменён (см. newRT): руна —
@@ -24,12 +26,12 @@ func newCRT(w, h int, paras ...RichParagraph) *RichText {
 }
 
 // rtKey — нажатие клавиши с модификаторами.
-func rtKey(rt *RichText, code KeyCode, mods ...KeyMod) {
-	var m KeyMod
+func rtKey(rt *RichText, code base.KeyCode, mods ...base.KeyMod) {
+	var m base.KeyMod
 	for _, x := range mods {
 		m |= x
 	}
-	rt.OnKeyEvent(KeyEvent{Code: code, Mod: m, Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Code: code, Mod: m, Pressed: true})
 }
 
 // rtCaretAt проверяет положение каретки: смещение и (x, y верха строки)
@@ -56,20 +58,20 @@ func rtSel(t *testing.T, rt *RichText, want string) {
 
 func TestRichCaret_LeftRightCharAndCollapse(t *testing.T) {
 	rt := newCRT(200, 100, plainPara("hello"))
-	rtKey(rt, KeyRight)
-	rtKey(rt, KeyRight)
+	rtKey(rt, base.KeyRight)
+	rtKey(rt, base.KeyRight)
 	rtCaretAt(t, rt, 2, 4+10, 4)
-	rtKey(rt, KeyLeft)
+	rtKey(rt, base.KeyLeft)
 	rtCaretAt(t, rt, 1, 4+5, 4)
 
 	// Края: за начало и за конец не уходим.
-	rtKey(rt, KeyLeft)
-	rtKey(rt, KeyLeft)
+	rtKey(rt, base.KeyLeft)
+	rtKey(rt, base.KeyLeft)
 	if rt.CaretPosition() != 0 {
 		t.Errorf("каретка ушла левее начала: %d", rt.CaretPosition())
 	}
 	rt.SetCaretPosition(5)
-	rtKey(rt, KeyRight)
+	rtKey(rt, base.KeyRight)
 	if rt.CaretPosition() != 5 {
 		t.Errorf("каретка ушла правее конца: %d", rt.CaretPosition())
 	}
@@ -77,43 +79,43 @@ func TestRichCaret_LeftRightCharAndCollapse(t *testing.T) {
 	// Выделение [1,3): ← схлопывает в левый край, → — в правый, а не шагает
 	// на единицу от активного конца.
 	rt.Select(1, 3)
-	rtKey(rt, KeyLeft)
+	rtKey(rt, base.KeyLeft)
 	rtCaretAt(t, rt, 1, 4+5, 4)
 	rtSel(t, rt, "")
 	rt.Select(1, 3)
-	rtKey(rt, KeyRight)
+	rtKey(rt, base.KeyRight)
 	rtCaretAt(t, rt, 3, 4+15, 4)
 	rtSel(t, rt, "")
 	// Каретка слева (выделили справа налево) — всё равно в края.
 	rt.Select(1, 3)
-	rtKey(rt, KeyRight, ModShift) // caret 4, anchor 1
+	rtKey(rt, base.KeyRight, base.ModShift) // caret 4, anchor 1
 	rtSel(t, rt, "ell")
-	rtKey(rt, KeyLeft)
+	rtKey(rt, base.KeyLeft)
 	rtCaretAt(t, rt, 1, 4+5, 4)
 }
 
 func TestRichCaret_ShiftExtendsFromAnchor(t *testing.T) {
 	rt := newCRT(200, 100, plainPara("hello world"))
 	rt.SetCaretPosition(2)
-	rtKey(rt, KeyRight, ModShift)
-	rtKey(rt, KeyRight, ModShift)
+	rtKey(rt, base.KeyRight, base.ModShift)
+	rtKey(rt, base.KeyRight, base.ModShift)
 	rtSel(t, rt, "ll")
 	if rt.CaretPosition() != 4 {
 		t.Errorf("каретка %d, ждали 4 (активный конец)", rt.CaretPosition())
 	}
 	// Назад через якорь: выделение сжимается, пересекает якорь и растёт влево.
-	rtKey(rt, KeyLeft, ModShift)
-	rtKey(rt, KeyLeft, ModShift)
+	rtKey(rt, base.KeyLeft, base.ModShift)
+	rtKey(rt, base.KeyLeft, base.ModShift)
 	rtSel(t, rt, "")
-	rtKey(rt, KeyLeft, ModShift)
+	rtKey(rt, base.KeyLeft, base.ModShift)
 	rtSel(t, rt, "e")
 	if rt.CaretPosition() != 1 {
 		t.Errorf("каретка %d, ждали 1", rt.CaretPosition())
 	}
 	// Без Shift выделение пропадает, и якорь забыт: следующее расширение — от
 	// новой каретки.
-	rtKey(rt, KeyRight)
-	rtKey(rt, KeyRight, ModShift)
+	rtKey(rt, base.KeyRight)
+	rtKey(rt, base.KeyRight, base.ModShift)
 	rtSel(t, rt, rt.Text()[2:3])
 }
 
@@ -122,23 +124,23 @@ func TestRichCaret_ShiftExtendsFromAnchor(t *testing.T) {
 func TestRichCaret_CtrlWords(t *testing.T) {
 	rt := newCRT(300, 100, plainPara("hello big world"), plainPara("x y"))
 	for _, want := range []int{6, 10, 16, 18, 19} { // big, world, 2-й абзац, y, конец
-		rtKey(rt, KeyRight, ModCtrl)
+		rtKey(rt, base.KeyRight, base.ModCtrl)
 		if got := rt.CaretPosition(); got != want {
 			t.Fatalf("Ctrl+→: каретка %d, ждали %d", got, want)
 		}
 	}
 	for _, want := range []int{18, 16, 10, 6, 0} {
-		rtKey(rt, KeyLeft, ModCtrl)
+		rtKey(rt, base.KeyLeft, base.ModCtrl)
 		if got := rt.CaretPosition(); got != want {
 			t.Fatalf("Ctrl+←: каретка %d, ждали %d", got, want)
 		}
 	}
 	// С Shift — выделяет слово; границы те же, что у двойного щелчка.
-	rtKey(rt, KeyRight, ModCtrl, ModShift) // 0..6 = "hello "
+	rtKey(rt, base.KeyRight, base.ModCtrl, base.ModShift) // 0..6 = "hello "
 	rtSel(t, rt, "hello ")
 	lo, hi := rt.doc.wordBounds(7) // «big»
 	rt.SetCaretPosition(lo)
-	rtKey(rt, KeyRight, ModCtrl, ModShift)
+	rtKey(rt, base.KeyRight, base.ModCtrl, base.ModShift)
 	if rt.CaretPosition() != hi+1 { // слово + следующий за ним пробел
 		t.Errorf("Ctrl+Shift+→ от начала слова: каретка %d, граница слова %d", rt.CaretPosition(), hi)
 	}
@@ -147,15 +149,15 @@ func TestRichCaret_CtrlWords(t *testing.T) {
 func TestRichCaret_CtrlWordsEmptyParagraphAndPunct(t *testing.T) {
 	rt := newCRT(300, 100, plainPara("a, b"), plainPara(""), plainPara("c"))
 	// a(0) ,(1) пробел(2) b(3) | пустой абзац 5 | c 6
-	rtKey(rt, KeyRight, ModCtrl)
+	rtKey(rt, base.KeyRight, base.ModCtrl)
 	rtCaretAt(t, rt, 3, 4+15, 4) // знаки и пробел — «не слово», пропускаются вместе
-	rtKey(rt, KeyRight, ModCtrl)
+	rtKey(rt, base.KeyRight, base.ModCtrl)
 	rtCaretAt(t, rt, 5, 4, 14) // в пустом абзаце слов нет — встаём в него
-	rtKey(rt, KeyRight, ModCtrl)
+	rtKey(rt, base.KeyRight, base.ModCtrl)
 	rtCaretAt(t, rt, 6, 4, 24)
-	rtKey(rt, KeyLeft, ModCtrl)
+	rtKey(rt, base.KeyLeft, base.ModCtrl)
 	rtCaretAt(t, rt, 5, 4, 14)
-	rtKey(rt, KeyLeft, ModCtrl)
+	rtKey(rt, base.KeyLeft, base.ModCtrl)
 	rtCaretAt(t, rt, 3, 4+15, 4)
 }
 
@@ -166,40 +168,40 @@ func TestRichCaret_UpDownDesiredX(t *testing.T) {
 		plainPara("abcdefghij"), plainPara("ab"), plainPara("abcdefghij"))
 	rt.ShowCaret = true
 	rt.SetCaretPosition(6) // x = 4+30
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
 	// Короткая строка: каретка в её конце.
 	rtCaretAt(t, rt, 13, 4+10, 14)
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
 	// Длинная: X восстановлен — тот же столбец 6, а не 2.
 	rtCaretAt(t, rt, 14+6, 4+30, 24)
-	rtKey(rt, KeyUp)
-	rtKey(rt, KeyUp)
+	rtKey(rt, base.KeyUp)
+	rtKey(rt, base.KeyUp)
 	rtCaretAt(t, rt, 6, 4+30, 4)
 
 	// Горизонтальное движение «желаемый X» сбрасывает.
-	rtKey(rt, KeyDown)
-	rtKey(rt, KeyLeft) // 12: x = 4+5
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
+	rtKey(rt, base.KeyLeft) // 12: x = 4+5
+	rtKey(rt, base.KeyDown)
 	rtCaretAt(t, rt, 14+1, 4+5, 24)
 
 	// Край: ↑ на первой строке — в начало, ↓ на последней — в конец.
-	rtKey(rt, KeyUp)
-	rtKey(rt, KeyUp)
-	rtKey(rt, KeyUp)
+	rtKey(rt, base.KeyUp)
+	rtKey(rt, base.KeyUp)
+	rtKey(rt, base.KeyUp)
 	rtCaretAt(t, rt, 0, 4, 4)
 	rt.SetCaretPosition(14 + 3)
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
 	rtCaretAt(t, rt, 24, 4+50, 24)
 }
 
 func TestRichCaret_ShiftUpDownSelectsLines(t *testing.T) {
 	rt := newCRT(300, 100, plainPara("abcd"), plainPara("efgh"))
 	rt.SetCaretPosition(2)
-	rtKey(rt, KeyDown, ModShift)
+	rtKey(rt, base.KeyDown, base.ModShift)
 	rtSel(t, rt, "cd\nef")
-	rtKey(rt, KeyUp, ModShift)
+	rtKey(rt, base.KeyUp, base.ModShift)
 	rtSel(t, rt, "")
-	rtKey(rt, KeyUp, ModShift)
+	rtKey(rt, base.KeyUp, base.ModShift)
 	if rt.CaretPosition() != 0 {
 		t.Errorf("Shift+↑ с первой строки: каретка %d, ждали 0", rt.CaretPosition())
 	}
@@ -209,18 +211,18 @@ func TestRichCaret_ShiftUpDownSelectsLines(t *testing.T) {
 // В режиме просмотра простые ↑/↓ листают, как раньше; Shift+↓ выделяет.
 func TestRichCaret_ViewModeKeepsScrollKeys(t *testing.T) {
 	rt := newRT(100, 60, manyParas(30)...)
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
 	if rt.ScrollY() != 10 || rt.CaretPosition() != 0 {
 		t.Errorf("↓ в режиме просмотра: прокрутка %d, каретка %d", rt.ScrollY(), rt.CaretPosition())
 	}
-	rtKey(rt, KeyDown, ModShift)
+	rtKey(rt, base.KeyDown, base.ModShift)
 	if rt.SelectedText() == "" {
 		t.Error("Shift+↓ в режиме просмотра не выделил")
 	}
 	// → двигает каретку и в режиме просмотра (доступность).
 	rt.ClearSelection()
 	rt.SetCaretPosition(0)
-	rtKey(rt, KeyRight)
+	rtKey(rt, base.KeyRight)
 	if rt.CaretPosition() != 1 {
 		t.Errorf("→ в режиме просмотра: каретка %d", rt.CaretPosition())
 	}
@@ -239,52 +241,52 @@ func TestRichCaret_HomeEndVisualLine(t *testing.T) {
 		t.Fatalf("раскладка не та, что ждали: %+v", lay.Lines)
 	}
 	rt.SetCaretPosition(3)
-	rtKey(rt, KeyEnd)
+	rtKey(rt, base.KeyEnd)
 	// Конец первой строки — то же смещение, что начало второй; каретка
 	// остаётся на первой строке.
 	rtCaretAt(t, rt, 10, 4+50, 4)
-	rtKey(rt, KeyEnd)
+	rtKey(rt, base.KeyEnd)
 	rtCaretAt(t, rt, 10, 4+50, 4)
-	rtKey(rt, KeyHome)
+	rtKey(rt, base.KeyHome)
 	rtCaretAt(t, rt, 0, 4, 4)
 
 	// Вторая строка: Home — её начало (то же смещение 10, но на второй строке).
 	rt.SetCaretPosition(12)
 	rtCaretAt(t, rt, 12, 4+10, 14)
-	rtKey(rt, KeyHome)
+	rtKey(rt, base.KeyHome)
 	rtCaretAt(t, rt, 10, 4, 14)
-	rtKey(rt, KeyEnd)
+	rtKey(rt, base.KeyEnd)
 	rtCaretAt(t, rt, 14, 4+20, 14)
 
 	// Шаг вправо с «конца первой строки» уходит на вторую.
 	rt.SetCaretPosition(3)
-	rtKey(rt, KeyEnd)
-	rtKey(rt, KeyRight)
+	rtKey(rt, base.KeyEnd)
+	rtKey(rt, base.KeyRight)
 	rtCaretAt(t, rt, 11, 4+5, 14)
 	// Шаг влево со второй строки — внутрь первой.
-	rtKey(rt, KeyHome)
-	rtKey(rt, KeyLeft)
+	rtKey(rt, base.KeyHome)
+	rtKey(rt, base.KeyLeft)
 	rtCaretAt(t, rt, 9, 4+45, 4)
 
 	// Shift+End выделяет до конца визуальной строки, а не абзаца.
 	rt.SetCaretPosition(5)
-	rtKey(rt, KeyEnd, ModShift)
+	rtKey(rt, base.KeyEnd, base.ModShift)
 	rtSel(t, rt, "bbbb ")
 	rt.SetCaretPosition(12)
-	rtKey(rt, KeyHome, ModShift)
+	rtKey(rt, base.KeyHome, base.ModShift)
 	rtSel(t, rt, "cc")
 }
 
 func TestRichCaret_CtrlHomeEnd(t *testing.T) {
 	rt := newCRT(58, 100, plainPara("aaaa bbbb cccc"), plainPara("dd"))
 	rt.SetCaretPosition(3)
-	rtKey(rt, KeyEnd, ModCtrl)
+	rtKey(rt, base.KeyEnd, base.ModCtrl)
 	rtCaretAt(t, rt, 17, 4+10, 24)
-	rtKey(rt, KeyHome, ModCtrl)
+	rtKey(rt, base.KeyHome, base.ModCtrl)
 	rtCaretAt(t, rt, 0, 4, 4)
-	rtKey(rt, KeyEnd, ModCtrl, ModShift)
+	rtKey(rt, base.KeyEnd, base.ModCtrl, base.ModShift)
 	rtSel(t, rt, rt.Text())
-	rtKey(rt, KeyHome, ModCtrl, ModShift)
+	rtKey(rt, base.KeyHome, base.ModCtrl, base.ModShift)
 	rtSel(t, rt, "")
 }
 
@@ -292,19 +294,19 @@ func TestRichCaret_CtrlHomeEnd(t *testing.T) {
 func TestRichCaret_VerticalThroughWrap(t *testing.T) {
 	rt := newCRT(58, 100, plainPara("aaaa bbbb cccc"), plainPara("xyz"))
 	rt.SetCaretPosition(2) // x = 14
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
 	rtCaretAt(t, rt, 12, 4+10, 14)
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
 	rtCaretAt(t, rt, 15+2, 4+10, 24)
-	rtKey(rt, KeyUp)
-	rtKey(rt, KeyUp)
+	rtKey(rt, base.KeyUp)
+	rtKey(rt, base.KeyUp)
 	rtCaretAt(t, rt, 2, 4+10, 4)
 
 	// Узкая строка выше: «xyz|» (x = 15) → на «cccc» в столбец 3 → на первую.
 	rt.SetCaretPosition(18)
-	rtKey(rt, KeyUp)
+	rtKey(rt, base.KeyUp)
 	rtCaretAt(t, rt, 13, 4+15, 14)
-	rtKey(rt, KeyUp)
+	rtKey(rt, base.KeyUp)
 	rtCaretAt(t, rt, 3, 4+15, 4)
 }
 
@@ -313,13 +315,13 @@ func TestRichCaret_VerticalThroughWrap(t *testing.T) {
 func TestRichCaret_DesiredXPastWrappedLineEnd(t *testing.T) {
 	rt := newCRT(58, 100, plainPara("aaaa bbbb cccc"), plainPara("0123456789"))
 	rt.SetCaretPosition(15 + 10) // конец второго абзаца, x = 4+50
-	rtKey(rt, KeyUp)
+	rtKey(rt, base.KeyUp)
 	rtCaretAt(t, rt, 14, 4+20, 14)
-	rtKey(rt, KeyUp)
+	rtKey(rt, base.KeyUp)
 	rtCaretAt(t, rt, 10, 4+50, 4) // конец первой строки, не начало второй
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
 	rtCaretAt(t, rt, 14, 4+20, 14)
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
 	rtCaretAt(t, rt, 25, 4+50, 24)
 }
 
@@ -329,45 +331,45 @@ func TestRichCaret_ParagraphBoundaries(t *testing.T) {
 	rt := newCRT(200, 100, plainPara("ab"), plainPara("cd"))
 	rt.SetCaretPosition(2)
 	rtCaretAt(t, rt, 2, 4+10, 4)
-	rtKey(rt, KeyRight)
+	rtKey(rt, base.KeyRight)
 	rtCaretAt(t, rt, 3, 4, 14) // начало второго абзаца
-	rtKey(rt, KeyLeft)
+	rtKey(rt, base.KeyLeft)
 	rtCaretAt(t, rt, 2, 4+10, 4)
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
 	rtCaretAt(t, rt, 5, 4+10, 14)
-	rtKey(rt, KeyHome)
+	rtKey(rt, base.KeyHome)
 	rtCaretAt(t, rt, 3, 4, 14)
-	rtKey(rt, KeyLeft, ModShift)
+	rtKey(rt, base.KeyLeft, base.ModShift)
 	rtSel(t, rt, "\n")
 }
 
 func TestRichCaret_EmptyParagraph(t *testing.T) {
 	rt := newCRT(200, 100, plainPara("a"), plainPara(""), plainPara("b"))
 	rt.SetCaretPosition(1)
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
 	rtCaretAt(t, rt, 2, 4, 14)
 	if h := rt.IMECaretRect().Dy(); h != 10 {
 		t.Errorf("высота каретки в пустом абзаце %d, ждали 10 (шрифт виджета)", h)
 	}
-	rtKey(rt, KeyDown)
+	rtKey(rt, base.KeyDown)
 	rtCaretAt(t, rt, 4, 4+5, 24)
-	rtKey(rt, KeyUp)
+	rtKey(rt, base.KeyUp)
 	rtCaretAt(t, rt, 2, 4, 14)
-	rtKey(rt, KeyRight)
+	rtKey(rt, base.KeyRight)
 	rtCaretAt(t, rt, 3, 4, 24)
-	rtKey(rt, KeyLeft)
-	rtKey(rt, KeyLeft)
+	rtKey(rt, base.KeyLeft)
+	rtKey(rt, base.KeyLeft)
 	rtCaretAt(t, rt, 1, 4+5, 4)
 	// Shift+→ через пустой абзац захватывает оба разделителя.
-	rtKey(rt, KeyRight, ModShift)
-	rtKey(rt, KeyRight, ModShift)
+	rtKey(rt, base.KeyRight, base.ModShift)
+	rtKey(rt, base.KeyRight, base.ModShift)
 	rtSel(t, rt, "\n\n")
 
 	// Пустой документ и документ из одного пустого абзаца: каретка стоит.
 	empty := newCRT(200, 100)
-	rtKey(empty, KeyRight)
-	rtKey(empty, KeyDown, ModShift)
-	rtKey(empty, KeyEnd)
+	rtKey(empty, base.KeyRight)
+	rtKey(empty, base.KeyDown, base.ModShift)
+	rtKey(empty, base.KeyEnd)
 	if empty.CaretPosition() != 0 {
 		t.Errorf("каретка в пустом документе %d", empty.CaretPosition())
 	}
@@ -398,7 +400,7 @@ func TestRichCaret_MixedSizeRuns(t *testing.T) {
 	// Стрелками тоже проходим границу рана без скачков по смещению.
 	rt.SetCaretPosition(0)
 	for want := 1; want <= 4; want++ {
-		rtKey(rt, KeyRight)
+		rtKey(rt, base.KeyRight)
 		if rt.CaretPosition() != want {
 			t.Fatalf("→: %d, ждали %d", rt.CaretPosition(), want)
 		}
@@ -412,22 +414,22 @@ func TestRichCaret_CyrillicAndEmojiOffsetsInRunes(t *testing.T) {
 	if got := len([]rune(rt.Text())); got != 12 {
 		t.Fatalf("в тексте %d рун, ждали 12", got)
 	}
-	rtKey(rt, KeyRight, ModCtrl) // «привет » → начало эмодзи
+	rtKey(rt, base.KeyRight, base.ModCtrl) // «привет » → начало эмодзи
 	rtCaretAt(t, rt, 7, 4+35, 4)
-	rtKey(rt, KeyRight, ModShift)
+	rtKey(rt, base.KeyRight, base.ModShift)
 	rtSel(t, rt, "😀") // одна руна — не разрезается пополам
 	if rt.CaretPosition() != 8 {
 		t.Errorf("каретка %d, ждали 8 (руны, не байты)", rt.CaretPosition())
 	}
-	rtKey(rt, KeyRight)
-	rtKey(rt, KeyRight)
+	rtKey(rt, base.KeyRight)
+	rtKey(rt, base.KeyRight)
 	rtCaretAt(t, rt, 9, 4+45, 4)
-	rtKey(rt, KeyEnd)
+	rtKey(rt, base.KeyEnd)
 	rtCaretAt(t, rt, 12, 4+60, 4)
-	rtKey(rt, KeyLeft, ModCtrl)
+	rtKey(rt, base.KeyLeft, base.ModCtrl)
 	rtCaretAt(t, rt, 9, 4+45, 4) // «мир»
-	rtKey(rt, KeyLeft)
-	rtKey(rt, KeyLeft, ModShift)
+	rtKey(rt, base.KeyLeft)
+	rtKey(rt, base.KeyLeft, base.ModShift)
 	rtSel(t, rt, "😀")
 
 	// Программная установка и скринридер — тоже в рунах.
@@ -448,7 +450,7 @@ func TestRichCaret_ClickPlacesAndShiftClickExtends(t *testing.T) {
 	rtSel(t, rt, "")
 
 	// Shift+щелчок: якорь — прежняя каретка.
-	e := MouseEvent{X: 4 + 25, Y: 8, Button: MouseLeft, Pressed: true, Clicks: 1, Mod: ModShift}
+	e := base.MouseEvent{X: 4 + 25, Y: 8, Button: base.MouseLeft, Pressed: true, Clicks: 1, Mod: base.ModShift}
 	rt.OnMouseButton(e)
 	e.Pressed = false
 	rt.OnMouseButton(e)
@@ -457,7 +459,7 @@ func TestRichCaret_ClickPlacesAndShiftClickExtends(t *testing.T) {
 		t.Errorf("каретка %d, ждали 5", rt.CaretPosition())
 	}
 	// Ещё один Shift+щелчок левее якоря: выделение переворачивается.
-	e = MouseEvent{X: 4, Y: 8, Button: MouseLeft, Pressed: true, Clicks: 1, Mod: ModShift}
+	e = base.MouseEvent{X: 4, Y: 8, Button: base.MouseLeft, Pressed: true, Clicks: 1, Mod: base.ModShift}
 	rt.OnMouseButton(e)
 	e.Pressed = false
 	rt.OnMouseButton(e)
@@ -486,7 +488,7 @@ func TestRichCaret_ShiftClickDoesNotFollowLink(t *testing.T) {
 	var got []string
 	rt.OnLinkClick = func(u string) { got = append(got, u) }
 	rt.SetCaretPosition(4)
-	e := MouseEvent{X: 4 + 25, Y: 8, Button: MouseLeft, Pressed: true, Clicks: 1, Mod: ModShift}
+	e := base.MouseEvent{X: 4 + 25, Y: 8, Button: base.MouseLeft, Pressed: true, Clicks: 1, Mod: base.ModShift}
 	rt.OnMouseButton(e)
 	e.Pressed = false
 	rt.OnMouseButton(e)
@@ -512,14 +514,14 @@ func TestRichCaret_ScrollsToCaret(t *testing.T) {
 	rt.ShowCaret = true
 	// В пределах видимой области (5 строк, одна из них — отступ) не листаем.
 	for i := 0; i < 4; i++ {
-		rtKey(rt, KeyDown)
+		rtKey(rt, base.KeyDown)
 	}
 	if rt.ScrollY() != 0 {
 		t.Errorf("прокрутка %d, ждали 0 пока каретка на виду", rt.ScrollY())
 	}
 	// Дальше — каретка упирается в низ и текст едет вместе с ней.
 	for i := 0; i < 10; i++ {
-		rtKey(rt, KeyDown)
+		rtKey(rt, base.KeyDown)
 	}
 	r := rt.IMECaretRect()
 	if r.Min.Y < 0 || r.Max.Y > 60 {
@@ -529,17 +531,17 @@ func TestRichCaret_ScrollsToCaret(t *testing.T) {
 		t.Error("текст не поехал за кареткой")
 	}
 	// Ctrl+End — в самый низ, Ctrl+Home — в самый верх.
-	rtKey(rt, KeyEnd, ModCtrl)
+	rtKey(rt, base.KeyEnd, base.ModCtrl)
 	if got := rt.ScrollY(); got != 308-60 {
 		t.Errorf("Ctrl+End: прокрутка %d, ждали %d", got, 308-60)
 	}
-	rtKey(rt, KeyHome, ModCtrl)
+	rtKey(rt, base.KeyHome, base.ModCtrl)
 	if rt.ScrollY() != 0 {
 		t.Errorf("Ctrl+Home: прокрутка %d", rt.ScrollY())
 	}
 	// Колесо увело каретку за экран; любое движение возвращает её.
 	rt.SetScrollY(200)
-	rtKey(rt, KeyRight)
+	rtKey(rt, base.KeyRight)
 	if r := rt.IMECaretRect(); r.Min.Y < 0 || r.Max.Y > 60 {
 		t.Errorf("после → каретка вне экрана: %v", r)
 	}
@@ -554,7 +556,7 @@ func TestRichCaret_PageUpDown(t *testing.T) {
 	rt := newCRT(100, 60, manyParas(30)...)
 	rt.ShowCaret = true
 	// Высота страницы — 60 минус строка = 50 px = 5 строк.
-	rtKey(rt, KeyPageDown)
+	rtKey(rt, base.KeyPageDown)
 	if got := rt.CaretPosition(); got != 5*7 { // «line a\n» — 7 рун на строку
 		t.Errorf("PgDn: каретка %d, ждали %d (5 строк)", got, 5*7)
 	}
@@ -565,23 +567,23 @@ func TestRichCaret_PageUpDown(t *testing.T) {
 	if r.Min.Y != 4 {
 		t.Errorf("каретка осталась на той же высоте экрана? y=%d, ждали 4", r.Min.Y)
 	}
-	rtKey(rt, KeyPageUp)
+	rtKey(rt, base.KeyPageUp)
 	if rt.CaretPosition() != 0 || rt.ScrollY() != 0 {
 		t.Errorf("PgUp: каретка %d, прокрутка %d", rt.CaretPosition(), rt.ScrollY())
 	}
 	// PgUp с первой страницы — в начало документа, PgDn с последней — в конец.
-	rtKey(rt, KeyPageUp)
+	rtKey(rt, base.KeyPageUp)
 	if rt.CaretPosition() != 0 {
 		t.Errorf("PgUp у начала: %d", rt.CaretPosition())
 	}
-	rtKey(rt, KeyEnd, ModCtrl)
-	rtKey(rt, KeyPageDown)
+	rtKey(rt, base.KeyEnd, base.ModCtrl)
+	rtKey(rt, base.KeyPageDown)
 	if got := len([]rune(rt.Text())); rt.CaretPosition() != got {
 		t.Errorf("PgDn у конца: %d, ждали %d", rt.CaretPosition(), got)
 	}
 	// Shift+PgDn выделяет страницу.
-	rtKey(rt, KeyHome, ModCtrl)
-	rtKey(rt, KeyPageDown, ModShift)
+	rtKey(rt, base.KeyHome, base.ModCtrl)
+	rtKey(rt, base.KeyPageDown, base.ModShift)
 	if n := strings.Count(rt.SelectedText(), "\n"); n != 5 {
 		t.Errorf("Shift+PgDn: в выделении %d переводов строки, ждали 5", n)
 	}
@@ -591,12 +593,12 @@ func TestRichCaret_PageUpDown(t *testing.T) {
 // положение каретки.
 func TestRichCaret_CtrlA(t *testing.T) {
 	rt := newCRT(200, 100, plainPara("abc"), plainPara("de"))
-	rtKey(rt, KeyA, ModCtrl)
+	rtKey(rt, base.KeyA, base.ModCtrl)
 	rtSel(t, rt, "abc\nde")
 	if rt.CaretPosition() != 6 {
 		t.Errorf("после Ctrl+A каретка %d, ждали 6", rt.CaretPosition())
 	}
-	rtKey(rt, KeyRight)
+	rtKey(rt, base.KeyRight)
 	rtCaretAt(t, rt, 6, 4+10, 14) // схлопнулась в правый край
 }
 
@@ -613,7 +615,7 @@ func TestRichCaret_Access(t *testing.T) {
 	if a, b := rt.AccessSelection(); a != 4 || b != 4 {
 		t.Errorf("выделение (%d,%d) при отсутствии выделения", a, b)
 	}
-	rtKey(rt, KeyRight, ModShift)
+	rtKey(rt, base.KeyRight, base.ModShift)
 	if a, b := rt.AccessSelection(); a != 4 || b != 5 || rt.AccessCaret() != 5 {
 		t.Errorf("выделение (%d,%d), каретка %d", a, b, rt.AccessCaret())
 	}
@@ -684,17 +686,17 @@ func TestRichCaret_DrawOnlyWhenShownAndFocused(t *testing.T) {
 		t.Fatalf("каретка нарисована как %v, ждали [(14,4)-(15,14)]", r)
 	}
 	// Тёмная фаза мигания — черты нет, светлая — есть.
-	*now += caretBlinkHalfPeriodMs
+	*now += base.CaretBlinkHalfPeriodMs
 	if r := draw(); len(r) != 0 {
 		t.Errorf("в тёмной фазе нарисована каретка: %v", r)
 	}
-	*now += caretBlinkHalfPeriodMs
+	*now += base.CaretBlinkHalfPeriodMs
 	if r := draw(); len(r) != 1 {
 		t.Errorf("в светлой фазе каретки нет: %v", r)
 	}
 	// Движение каретки начинает мигание заново: сразу видна.
-	*now += caretBlinkHalfPeriodMs
-	rtKey(rt, KeyRight)
+	*now += base.CaretBlinkHalfPeriodMs
+	rtKey(rt, base.KeyRight)
 	if r := draw(); len(r) != 1 || r[0].Min.X != 19 {
 		t.Errorf("после движения каретка не видна сразу: %v", r)
 	}
@@ -711,9 +713,9 @@ func TestRichCaret_BlinkNeedsAnimationInvalidatesOnlyCaretRect(t *testing.T) {
 	var mu sync.Mutex
 	var rects []image.Rectangle
 	var fulls int
-	h := RegisterUINotifier(func() { mu.Lock(); fulls++; mu.Unlock() },
+	h := base.RegisterUINotifier(func() { mu.Lock(); fulls++; mu.Unlock() },
 		func(r image.Rectangle) { mu.Lock(); rects = append(rects, r); mu.Unlock() })
-	defer UnregisterUINotifier(h)
+	defer base.UnregisterUINotifier(h)
 	reset := func() { mu.Lock(); rects, fulls = nil, 0; mu.Unlock() }
 
 	rt.Draw(&rtRec{}) // нарисована светлая фаза
@@ -727,7 +729,7 @@ func TestRichCaret_BlinkNeedsAnimationInvalidatesOnlyCaretRect(t *testing.T) {
 	if n != 0 {
 		t.Error("фаза не менялась, а виджет инвалидирован")
 	}
-	*now += caretBlinkHalfPeriodMs // фаза сменилась
+	*now += base.CaretBlinkHalfPeriodMs // фаза сменилась
 	rt.NeedsAnimation()
 	mu.Lock()
 	got := append([]image.Rectangle(nil), rects...)
@@ -747,7 +749,7 @@ func TestRichCaret_BlinkNeedsAnimationInvalidatesOnlyCaretRect(t *testing.T) {
 	}
 	// Без фокуса и без ShowCaret — всегда false и ничего не инвалидирует.
 	rt.SetFocused(false)
-	*now += caretBlinkHalfPeriodMs
+	*now += base.CaretBlinkHalfPeriodMs
 	reset()
 	rt.NeedsAnimation()
 	rt.ShowCaret = false
@@ -816,10 +818,10 @@ func TestRichCaret_Race(t *testing.T) {
 	}
 	run(func(i int) { rt.Draw(&rtRec{}); rt.NeedsAnimation() })
 	run(func(i int) {
-		rtKey(rt, KeyDown)
-		rtKey(rt, KeyRight, ModShift)
-		rtKey(rt, KeyPageUp)
-		rtKey(rt, KeyHome, ModCtrl)
+		rtKey(rt, base.KeyDown)
+		rtKey(rt, base.KeyRight, base.ModShift)
+		rtKey(rt, base.KeyPageUp)
+		rtKey(rt, base.KeyHome, base.ModCtrl)
 	})
 	run(func(i int) { _ = rt.IMECaretRect(); _ = rt.AccessCaret(); rt.SetCaretPosition(i % 50) })
 	run(func(i int) { rtClick(rt, 10, 10+i%40, 1) })

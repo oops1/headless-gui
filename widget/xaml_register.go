@@ -8,6 +8,7 @@ package widget
 import (
 	"sync"
 
+	"github.com/oops1/headless-gui/v3/widget/richtext"
 	"github.com/oops1/headless-gui/v3/widget/text"
 	"github.com/oops1/headless-gui/v3/widget/xaml"
 )
@@ -19,5 +20,6 @@ var xamlOnce sync.Once
 func registerXAML() {
 	xamlOnce.Do(func() {
 		text.RegisterXAML(xaml.Default())
+		richtext.RegisterXAML(xaml.Default())
 	})
 }

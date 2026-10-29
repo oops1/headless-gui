@@ -180,8 +180,12 @@ func parseXAMLEl(d *xml.Decoder, start xml.StartElement, el *Element, depth int)
 
 // ─── Margin ────────────────────────────────────────────────────────────────
 
-// parseMargin разбирает WPF Margin: "5", "5,10", "1,2,3,4".
-func parseMargin(s string) base.Margin {
+// ParseMargin разбирает WPF Margin: "5", "5,10", "1,2,3,4".
+//
+// Служебное: для пакетов виджетов (их XAML-строителей), в фасад не входит.
+//
+//facadegen:skip
+func ParseMargin(s string) base.Margin {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return base.Margin{}

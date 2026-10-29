@@ -229,12 +229,12 @@ func (sv *ScrollView) reserve() int {
 }
 
 // workArea — верх и высота рабочей зоны вертикальной полосы: у тонкой — вся
-// высота (кнопок ▲▼ классики нет), у обычной — как у sbWorkArea. Под sv.mu.
+// высота (кнопок ▲▼ классики нет), у обычной — как у SBWorkArea. Под sv.mu.
 func (sv *ScrollView) workArea(vb image.Rectangle) (top, h int) {
 	if sv.isThin() {
 		return vb.Min.Y, vb.Dy()
 	}
-	return sbWorkArea(vb, sv.scrollbarWidth)
+	return SBWorkArea(vb, sv.scrollbarWidth)
 }
 
 // interactive — полоса может ловить мышь: обычная — всегда, тонкая — пока видна.

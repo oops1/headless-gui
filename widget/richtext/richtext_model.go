@@ -1,4 +1,4 @@
-package base
+package richtext
 
 // richtext_model.go — модель форматированного текста: раны и абзацы.
 //
@@ -13,6 +13,8 @@ package base
 import (
 	"image/color"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // RichRun — кусок текста с единым оформлением.
@@ -53,11 +55,11 @@ func richFontFlags(font string) (bold, italic, known bool) {
 	switch font {
 	case "":
 		return false, false, true
-	case BuiltinFontBold:
+	case base.BuiltinFontBold:
 		return true, false, true
-	case BuiltinFontItalic:
+	case base.BuiltinFontItalic:
 		return false, true, true
-	case BuiltinFontBoldItalic:
+	case base.BuiltinFontBoldItalic:
 		return true, true, true
 	}
 	return false, false, false
@@ -70,11 +72,11 @@ func richFontFlags(font string) (bold, italic, known bool) {
 func richFontFromFlags(bold, italic bool) string {
 	switch {
 	case bold && italic:
-		return BuiltinFontBoldItalic
+		return base.BuiltinFontBoldItalic
 	case bold:
-		return BuiltinFontBold
+		return base.BuiltinFontBold
 	case italic:
-		return BuiltinFontItalic
+		return base.BuiltinFontItalic
 	}
 	return ""
 }
@@ -96,7 +98,7 @@ func (r RichRun) IsItalic() bool {
 type RichParagraph struct {
 	Runs []RichRun
 	// Align — выравнивание строк абзаца в ширине виджета.
-	Align TextAlign
+	Align base.TextAlign
 	// Indent — отступ слева в пикселях, для всех строк абзаца (список, цитата).
 	Indent int
 	// SpaceBefore и SpaceAfter — пустое место над и под абзацем, пиксели.
@@ -210,13 +212,13 @@ func (d *richDoc) wordBounds(off int) (int, int) {
 	if off >= d.paraEnd(pi) {
 		off = d.paraEnd(pi) - 1
 	}
-	cls := IsWordRune(d.runes[off])
+	cls := base.IsWordRune(d.runes[off])
 	lo, hi := off, off+1
 	end := d.paraEnd(pi)
-	for lo > d.paraStart[pi] && IsWordRune(d.runes[lo-1]) == cls {
+	for lo > d.paraStart[pi] && base.IsWordRune(d.runes[lo-1]) == cls {
 		lo--
 	}
-	for hi < end && IsWordRune(d.runes[hi]) == cls {
+	for hi < end && base.IsWordRune(d.runes[hi]) == cls {
 		hi++
 	}
 	return lo, hi

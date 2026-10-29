@@ -54,7 +54,7 @@ type TabControl struct {
 	active   int // индекс активной вкладки
 	hoverIdx int // индекс вкладки под курсором
 	capMgr   CaptureManager // для инжекции в контент всех вкладок
-	menu     rowMenuHost    // меню не поместившихся вкладок (шеврон)
+	menu     RowMenuHost    // меню не поместившихся вкладок (шеврон)
 
 	OnTabChange func(index int, header string)
 }
@@ -551,7 +551,7 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 	}
 	// Открытое меню переполнения разбирает щелчки первым — в том числе мимо
 	// себя (тогда оно гасится).
-	if tc.menu.routeMouse(e) {
+	if tc.menu.RouteMouse(e) {
 		return true
 	}
 	if e.Button != MouseLeft || e.Pressed {
@@ -592,7 +592,7 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 
 	// Щелчок по шеврону — меню из не поместившихся вкладок.
 	if clicked < 0 && !chevron.Empty() && image.Pt(e.X, e.Y).In(chevron) {
-		if m := tc.menu.build(tc, e.X, e.Y, tc.overflowTabItems(hidden)); m != nil {
+		if m := tc.menu.Build(tc, e.X, e.Y, tc.overflowTabItems(hidden)); m != nil {
 			m.Show(chevron.Min.X, chevron.Max.Y)
 		}
 		return true
@@ -614,7 +614,7 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 
 // OnMouseMove обрабатывает hover по вкладкам.
 func (tc *TabControl) OnMouseMove(x, y int) {
-	if tc.menu.routeMove(x, y) {
+	if tc.menu.RouteMove(x, y) {
 		return
 	}
 	b := tc.bounds

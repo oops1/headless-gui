@@ -49,7 +49,7 @@ func applyMargin(w base.Widget, el Element) {
 	if ms == "" {
 		return
 	}
-	m := parseMargin(ms)
+	m := ParseMargin(ms)
 	type marginSetter interface {
 		SetMargin(m base.Margin)
 	}

@@ -112,7 +112,7 @@ func (p *DatePicker) Draw(ctx DrawContext) {
 	defer p.mu.Unlock()
 	pal := &p.pal
 	st := currentStyle()
-	size := fontSizeOrDefault(p.FontSize)
+	size := FontSizeOrDefault(p.FontSize)
 
 	border := pal.border
 	switch {
@@ -212,7 +212,7 @@ func (p *DatePicker) DrawOverlay(ctx DrawContext) {
 	}
 	pal := &p.pal
 	st := currentStyle()
-	size := fontSizeOrDefault(p.FontSize)
+	size := FontSizeOrDefault(p.FontSize)
 	today := calendar.DateOnly(p.now())
 	first := p.firstDayLocked()
 	l := dpLayoutFor(p.Base.Bounds(), p.view, first)

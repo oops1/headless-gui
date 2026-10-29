@@ -1,4 +1,4 @@
-package base
+package richtext
 
 // richtext_layout.go — раскладка форматированного текста: чистая функция без
 // окна, движка и замков.
@@ -20,6 +20,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // richMeasurer — всё, что раскладке нужно знать о шрифтах.
@@ -28,20 +30,20 @@ type richMeasurer interface {
 	// умолчанию) и кеглем sizePt.
 	TextWidth(text string, sizePt float64, font string) int
 	// FontMetrics — вертикальные метрики шрифта (подъём, спуск, зазор).
-	FontMetrics(sizePt float64, font string) FontMetrics
+	FontMetrics(sizePt float64, font string) base.FontMetrics
 }
 
 // richUIMeasurer — настоящий измеритель: тот же путь, которым движок потом
 // рисует, поэтому раскладка и отрисовка не расходятся. w — виджет, чьё
 // дерево меряем (владелец дерева, owner_services.go); nil — глобальный путь.
-type richUIMeasurer struct{ w Widget }
+type richUIMeasurer struct{ w base.Widget }
 
 func (m richUIMeasurer) TextWidth(text string, sizePt float64, font string) int {
-	return MeasureTextFontFor(m.w, text, sizePt, font)
+	return base.MeasureTextFontFor(m.w, text, sizePt, font)
 }
 
-func (m richUIMeasurer) FontMetrics(sizePt float64, font string) FontMetrics {
-	return FontMetricsFor(m.w, sizePt, font)
+func (m richUIMeasurer) FontMetrics(sizePt float64, font string) base.FontMetrics {
+	return base.FontMetricsFor(m.w, sizePt, font)
 }
 
 // richLayoutOpts — параметры раскладки.
@@ -149,20 +151,20 @@ func (p richPiece) n() int { return p.to - p.from }
 // layoutRich раскладывает абзацы по строкам шириной opt.Width.
 func layoutRich(paras []RichParagraph, opt richLayoutOpts) *richLayout {
 	lay := &richLayout{Width: opt.Width, LineGap: opt.LineGap, ParaStart: make([]int, len(paras))}
-	b := &richBuilder{opt: opt, mcache: map[richMKey]FontMetrics{}}
+	b := &richBuilder{opt: opt, mcache: map[richMKey]base.FontMetrics{}}
 	if b.opt.Size <= 0 {
-		b.opt.Size = DefaultFontSize()
+		b.opt.Size = base.DefaultFontSize()
 	}
-	y, base := 0, 0
+	y, baseOff := 0, 0
 	for pi, p := range paras {
 		if pi > 0 {
-			base++ // разделитель абзацев занимает одну позицию
+			baseOff++ // разделитель абзацев занимает одну позицию
 		}
-		lay.ParaStart[pi] = base
+		lay.ParaStart[pi] = baseOff
 		if p.SpaceBefore > 0 {
 			y += p.SpaceBefore
 		}
-		lines, n := b.paragraph(pi, p, base)
+		lines, n := b.paragraph(pi, p, baseOff)
 		for i := range lines {
 			lines[i].Y = y
 			y += lines[i].Height
@@ -171,10 +173,10 @@ func layoutRich(paras []RichParagraph, opt richLayoutOpts) *richLayout {
 		if p.SpaceAfter > 0 {
 			y += p.SpaceAfter
 		}
-		base += n
+		baseOff += n
 	}
 	lay.Height = y
-	lay.TextLen = base
+	lay.TextLen = baseOff
 	return lay
 }
 
@@ -188,10 +190,10 @@ type richMKey struct {
 // richBuilder — состояние одной раскладки.
 type richBuilder struct {
 	opt    richLayoutOpts
-	mcache map[richMKey]FontMetrics
+	mcache map[richMKey]base.FontMetrics
 }
 
-func (b *richBuilder) metrics(size float64, font string) FontMetrics {
+func (b *richBuilder) metrics(size float64, font string) base.FontMetrics {
 	k := richMKey{size, font}
 	if m, ok := b.mcache[k]; ok {
 		return m
@@ -277,10 +279,10 @@ func (st *richParaState) finish(hard bool, nextStart int) {
 	st.lineStart = nextStart
 }
 
-// paragraph раскладывает один абзац; base — смещение его начала в документе.
+// paragraph раскладывает один абзац; baseOff — смещение его начала в документе.
 // Возвращает строки (Y ещё не проставлен) и длину абзаца в рунах.
-func (b *richBuilder) paragraph(pi int, p RichParagraph, base int) ([]richLine, int) {
-	st := &richParaState{b: b, pi: pi, p: p, base: base, lastRun: -1}
+func (b *richBuilder) paragraph(pi int, p RichParagraph, baseOff int) ([]richLine, int) {
+	st := &richParaState{b: b, pi: pi, p: p, base: baseOff, lastRun: -1}
 	if st.indent = p.Indent; st.indent < 0 {
 		st.indent = 0
 	}
@@ -411,7 +413,7 @@ func (b *richBuilder) split(pc richPiece, k int, font string, size float64) (ric
 // buildLine собирает строку из уложенных кусков: склеивает соседние куски
 // одного рана в сегменты, считает метрики, хвостовые пробелы и выравнивание.
 func (b *richBuilder) buildLine(st *richParaState, hard bool) richLine {
-	p, placed, base := st.p, st.placed, st.base
+	p, placed, baseOff := st.p, st.placed, st.base
 	lineStart, lastRun, indent, avail := st.lineStart, st.lastRun, st.indent, st.avail
 
 	ln := richLine{Para: st.pi, HardEnd: hard}
@@ -441,7 +443,7 @@ func (b *richBuilder) buildLine(st *richParaState, hard bool) richLine {
 	for i, a := range accs {
 		s := a.seg
 		s.Run.Font, s.Run.Size = b.runFace(s.Run)
-		s.Start = base + a.localS
+		s.Start = baseOff + a.localS
 		s.End = s.Start + a.runes
 		s.Adv = m.TextWidth(s.Run.Text, s.Run.Size, s.Run.Font)
 		s.W = s.Adv
@@ -467,7 +469,7 @@ func (b *richBuilder) buildLine(st *richParaState, hard bool) richLine {
 		maxAsc, maxDesc = fm.Ascent, fm.Descent
 	}
 
-	ln.Start = base + lineStart
+	ln.Start = baseOff + lineStart
 	ln.End = ln.Start
 	if n := len(segs); n > 0 {
 		ln.End = segs[n-1].End
@@ -497,9 +499,9 @@ func (b *richBuilder) buildLine(st *richParaState, hard bool) richLine {
 	ln.Width = x
 
 	x0 := indent
-	if b.opt.Width > 0 && p.Align != TextAlignLeft {
+	if b.opt.Width > 0 && p.Align != base.TextAlignLeft {
 		if free := avail - ln.Width; free > 0 {
-			if p.Align == TextAlignCenter {
+			if p.Align == base.TextAlignCenter {
 				x0 += free / 2
 			} else {
 				x0 += free

@@ -1,6 +1,6 @@
-package xaml
+package richtext
 
-// richtext.go — тег <RichText> в разметке, по образцу FlowDocument из WPF:
+// xaml.go — тег <RichText> в разметке, по образцу FlowDocument из WPF:
 //
 //	<RichText x:Name="help" Foreground="#DDD" FontSize="10" Padding="8,6">
 //	    <Paragraph FontSize="20" FontWeight="Bold" Margin="0,0,0,6">Справка</Paragraph>
@@ -32,22 +32,41 @@ import (
 	"strings"
 
 	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v3/widget/xaml"
 )
 
 // xrStyle — оформление, наследуемое вложенными элементами (как в WPF).
 // Жирность и курсив хранятся флагами, а не именем шрифта: имя выбирается в
 // конце, когда известно, не задал ли элемент свой FontFamily.
 type xrStyle struct {
-	run          base.RichRun
+	run          RichRun
 	bold, italic bool
 }
 
+// RegisterXAML регистрирует тег <RichText> в реестре XAML r. Фасад widget
+// зовёт её при первой загрузке разметки; программа на widget/base и
+// widget/xaml зовёт сама: richtext.RegisterXAML(xaml.Default()). В фасад не
+// входит: фасад регистрирует теги сам.
+//
+//facadegen:skip
+func RegisterXAML(r *xaml.Registry) {
+	r.Register(func(el *xaml.Element, _ *xaml.Loader) (base.Widget, error) {
+		return buildXAMLRichText(*el), nil
+	}, "richtext")
+}
+
+// OwnsMarkupChildren сообщает загрузчику XAML, что дети элемента <RichText> —
+// абзацы и раны (их разбирает строитель), а не виджеты: загрузчик строит из
+// них только теги-свойства (<RichText.ContextMenu>). Так и для RichText,
+// построенного пользовательским тегом (RegisterXAMLWidget).
+func (t *RichText) OwnsMarkupChildren() bool { return true }
+
 // buildXAMLRichText строит RichText из элемента разметки.
-func buildXAMLRichText(el Element) base.Widget {
-	t := base.NewRichText()
-	ApplyColor(&t.Background, el, "Background")
-	ApplyColor(&t.TextColor, el, "Foreground")
-	ApplyColor(&t.LinkColor, el, "LinkForeground")
+func buildXAMLRichText(el xaml.Element) base.Widget {
+	t := NewRichText()
+	xaml.ApplyColor(&t.Background, el, "Background")
+	xaml.ApplyColor(&t.TextColor, el, "Foreground")
+	xaml.ApplyColor(&t.LinkColor, el, "LinkForeground")
 	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			t.FontSize = v
@@ -57,10 +76,10 @@ func buildXAMLRichText(el Element) base.Widget {
 		t.FontName = ff
 	}
 	if v := el.Attr("LineSpacing"); v != "" {
-		t.LineSpacing = ParseInt(v)
+		t.LineSpacing = xaml.ParseInt(v)
 	}
 	if v := el.Attr("Padding"); v != "" {
-		m := parseMargin(v)
+		m := xaml.ParseMargin(v)
 		t.PaddingX, t.PaddingY = m.Left, m.Top
 	}
 	// Правка включается IsReadOnly="False" или Editable="True". По умолчанию
@@ -76,7 +95,7 @@ func buildXAMLRichText(el Element) base.Widget {
 		t.AcceptTab = true
 	}
 
-	var paras []base.RichParagraph
+	var paras []RichParagraph
 	for _, ch := range el.Children {
 		if !strings.EqualFold(ch.Tag, "Paragraph") {
 			continue
@@ -94,8 +113,8 @@ func buildXAMLRichText(el Element) base.Widget {
 }
 
 // xrParagraph разбирает <Paragraph>.
-func xrParagraph(el Element) base.RichParagraph {
-	var p base.RichParagraph
+func xrParagraph(el xaml.Element) RichParagraph {
+	var p RichParagraph
 	switch strings.ToLower(el.Attr("TextAlignment", "HorizontalContentAlignment")) {
 	case "center":
 		p.Align = base.TextAlignCenter
@@ -104,17 +123,17 @@ func xrParagraph(el Element) base.RichParagraph {
 	}
 	// Margin абзаца WPF → отступ слева и места до и после.
 	if v := el.Attr("Margin"); v != "" {
-		m := parseMargin(v)
+		m := xaml.ParseMargin(v)
 		p.Indent, p.SpaceBefore, p.SpaceAfter = m.Left, m.Top, m.Bottom
 	}
 	if v := el.Attr("Indent"); v != "" {
-		p.Indent = ParseInt(v)
+		p.Indent = xaml.ParseInt(v)
 	}
 	if v := el.Attr("SpaceBefore"); v != "" {
-		p.SpaceBefore = ParseInt(v)
+		p.SpaceBefore = xaml.ParseInt(v)
 	}
 	if v := el.Attr("SpaceAfter"); v != "" {
-		p.SpaceAfter = ParseInt(v)
+		p.SpaceAfter = xaml.ParseInt(v)
 	}
 
 	baseStyle := xrStyle{}
@@ -130,7 +149,7 @@ func xrParagraph(el Element) base.RichParagraph {
 }
 
 // xrApply накладывает атрибуты оформления элемента на st.
-func xrApply(st *xrStyle, el Element) {
+func xrApply(st *xrStyle, el xaml.Element) {
 	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			st.run.Size = v
@@ -151,8 +170,8 @@ func xrApply(st *xrStyle, el Element) {
 	case "normal":
 		st.italic = false
 	}
-	ApplyColor(&st.run.Color, el, "Foreground")
-	ApplyColor(&st.run.BG, el, "Background")
+	xaml.ApplyColor(&st.run.Color, el, "Foreground")
+	xaml.ApplyColor(&st.run.BG, el, "Background")
 	td := strings.ToLower(el.Attr("TextDecorations"))
 	if strings.Contains(td, "underline") {
 		st.run.Underline = true
@@ -165,7 +184,7 @@ func xrApply(st *xrStyle, el Element) {
 // xrRun собирает RichRun: шрифт по флагам жирности и курсива, если элемент не
 // назвал свой — синтетического «утолщения» в движке нет, а встроенные
 // начертания есть.
-func xrRun(st xrStyle, text string) base.RichRun {
+func xrRun(st xrStyle, text string) RichRun {
 	r := st.run
 	r.Text = text
 	if r.Font == "" {
@@ -186,7 +205,7 @@ func xrRun(st xrStyle, text string) base.RichRun {
 const maxXRichDepth = 32
 
 // xrInline разбирает вложенный элемент абзаца и дописывает раны в out.
-func xrInline(el Element, baseStyle xrStyle, out []base.RichRun, depth int) []base.RichRun {
+func xrInline(el xaml.Element, baseStyle xrStyle, out []RichRun, depth int) []RichRun {
 	if depth > maxXRichDepth {
 		return out
 	}

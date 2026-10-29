@@ -159,7 +159,7 @@ type DockPane struct {
 	// titleTint — их значки, перекрашенные в цвет заголовка (по индексу).
 	titleTint []dockTintedIcon
 	// menu — меню кнопки заголовка; menuFor — индекс кнопки, чьё оно.
-	menu    rowMenuHost
+	menu    RowMenuHost
 	menuFor int
 	// skipActivate — отпускание над кнопкой ничего не делает: нажатие по ней
 	// закрыло её же меню или кнопка выключена.
@@ -278,7 +278,7 @@ func (p *DockPane) Show() {
 // (dismissOutside), поэтому клик по центру/другой панели сворачивает flyout —
 // как клик мимо dropdown. Для не-flyout панелей — no-op.
 func (p *DockPane) Dismiss() {
-	p.menu.dismiss() // меню кнопки заголовка — как любой выпадающий список
+	p.menu.Dismiss() // меню кнопки заголовка — как любой выпадающий список
 	if p.mgr != nil && p.mgr.flyoutPane == p {
 		p.mgr.closeFlyout()
 	}
@@ -550,10 +550,10 @@ func (p *DockPane) Cursor(x, y int) Cursor {
 func (p *DockPane) OnMouseButton(e MouseEvent) bool {
 	// Открытое меню кнопки заголовка разбирает событие первым.
 	menuFor := -1
-	if p.menu.open() {
+	if p.menu.Open() {
 		menuFor = p.menuFor
 	}
-	if p.menu.routeMouse(e) {
+	if p.menu.RouteMouse(e) {
 		return true
 	}
 	if e.Button != MouseLeft {
@@ -713,7 +713,7 @@ func (p *DockPane) OnMouseMove(x, y int) {
 		return
 	}
 	// Курсор над открытым меню кнопки заголовка — подсветка его пунктов.
-	if p.menu.routeMove(x, y) {
+	if p.menu.RouteMove(x, y) {
 		return
 	}
 	// hover кнопок.

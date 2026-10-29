@@ -1,4 +1,4 @@
-package base
+package richtext
 
 import (
 	"image/color"
@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // Тесты разбора HTML в абзацы (вставка из буфера обмена). Дамп — тот же, что в
@@ -265,19 +267,19 @@ func TestRichHTML_Colors(t *testing.T) {
 
 func TestRichHTML_ParagraphFormatsOfHeadings(t *testing.T) {
 	ps := RichParagraphsFromHTML(`<h1 style="text-align:center;margin-bottom:6px">Заголовок</h1>`)
-	if len(ps) != 1 || ps[0].Align != TextAlignCenter || ps[0].SpaceAfter != 6 {
+	if len(ps) != 1 || ps[0].Align != base.TextAlignCenter || ps[0].SpaceAfter != 6 {
 		t.Fatalf("%+v", ps)
 	}
 	r := ps[0].Runs[0]
-	if r.Font != BuiltinFontBold || r.Size != 24 {
+	if r.Font != base.BuiltinFontBold || r.Size != 24 {
 		t.Errorf("заголовок: %+v", r)
 	}
 }
 
 func TestRichHTML_CFHTMLFragmentRoundTrip(t *testing.T) {
 	// Фрагмент из буфера Windows: рамка документа и маркеры.
-	frag := BuildCFHTML(`<p>Привет <b>мир</b></p>`)
-	html, ok := ParseCFHTML(frag)
+	frag := base.BuildCFHTML(`<p>Привет <b>мир</b></p>`)
+	html, ok := base.ParseCFHTML(frag)
 	if !ok {
 		t.Fatal("фрагмент не разобран")
 	}
@@ -398,8 +400,8 @@ func TestRichHTML_RoundTrip(t *testing.T) {
 		"простой": {rdP(rdTxt("Hello", RichRun{}))},
 		"стили": {rdP(
 			rdTxt("plain ", RichRun{}), rdTxt("bold", rdBold), rdTxt(" ", RichRun{}),
-			rdTxt("italic", rdItalic), rdTxt("bi", RichRun{Font: BuiltinFontBoldItalic}),
-			rdTxt("mono", RichRun{Font: BuiltinFontMono}))},
+			rdTxt("italic", rdItalic), rdTxt("bi", RichRun{Font: base.BuiltinFontBoldItalic}),
+			rdTxt("mono", RichRun{Font: base.BuiltinFontMono}))},
 		"цвет, фон, кегль": {rdP(
 			rdTxt("a", RichRun{Color: color.RGBA{10, 20, 30, 255}}),
 			rdTxt("b", RichRun{BG: color.RGBA{255, 255, 0, 255}, Size: 14.5}),
@@ -408,15 +410,15 @@ func TestRichHTML_RoundTrip(t *testing.T) {
 			rdTxt("u", RichRun{Underline: true}), rdTxt("s", RichRun{Strike: true}),
 			rdTxt("us", RichRun{Underline: true, Strike: true}))},
 		"всё сразу": {rdP(rdTxt("x", RichRun{
-			Font: BuiltinFontBoldItalic, Size: 18, Color: color.RGBA{1, 2, 3, 255},
+			Font: base.BuiltinFontBoldItalic, Size: 18, Color: color.RGBA{1, 2, 3, 255},
 			BG: color.RGBA{250, 251, 252, 255}, Underline: true, Strike: true, Link: "https://a.b/c?d=1&e=2",
 		}))},
 		"ссылка": {rdP(
 			rdTxt("см. ", RichRun{}), rdTxt("сайт", RichRun{Link: "https://example.com"}), rdTxt(".", RichRun{}))},
-		"ссылка жирная": {rdP(rdTxt("x", RichRun{Link: "http://a", Font: BuiltinFontBold}))},
+		"ссылка жирная": {rdP(rdTxt("x", RichRun{Link: "http://a", Font: base.BuiltinFontBold}))},
 		"выравнивание и отступы": {
-			{Runs: []RichRun{rdTxt("a", RichRun{})}, Align: TextAlignCenter, Indent: 20, SpaceBefore: 3, SpaceAfter: 4},
-			{Runs: []RichRun{rdTxt("b", RichRun{})}, Align: TextAlignRight},
+			{Runs: []RichRun{rdTxt("a", RichRun{})}, Align: base.TextAlignCenter, Indent: 20, SpaceBefore: 3, SpaceAfter: 4},
+			{Runs: []RichRun{rdTxt("b", RichRun{})}, Align: base.TextAlignRight},
 			{Runs: []RichRun{rdTxt("c", RichRun{})}},
 		},
 		"пустые абзацы": {
@@ -438,7 +440,7 @@ func TestRichHTML_RoundTrip(t *testing.T) {
 			rdP(rdTxt(" ", RichRun{})),
 		},
 		"много абзацев разного вида": {
-			{Runs: []RichRun{rdTxt("Заголовок", RichRun{Font: BuiltinFontBold, Size: 20})}, Align: TextAlignCenter, SpaceAfter: 8},
+			{Runs: []RichRun{rdTxt("Заголовок", RichRun{Font: base.BuiltinFontBold, Size: 20})}, Align: base.TextAlignCenter, SpaceAfter: 8},
 			{Runs: []RichRun{rdTxt("Текст с ", RichRun{}), rdTxt("ссылкой", RichRun{Link: "https://x.y"}), rdTxt(" и ", RichRun{}), rdTxt("цветом", RichRun{Color: color.RGBA{200, 0, 0, 255}})}, Indent: 12},
 			rdP(),
 			{Runs: []RichRun{rdTxt("• пункт", RichRun{})}, Indent: 24},
@@ -452,7 +454,7 @@ func TestRichHTML_RoundTrip(t *testing.T) {
 func TestRichHTML_RoundTripPartialSelection(t *testing.T) {
 	// Выгрузка части документа и разбор: совпадает с фрагментом.
 	d := NewRichDocument([]RichParagraph{
-		{Runs: []RichRun{rdTxt("Hello ", rdBold), rdTxt("World", RichRun{})}, Align: TextAlignCenter},
+		{Runs: []RichRun{rdTxt("Hello ", rdBold), rdTxt("World", RichRun{})}, Align: base.TextAlignCenter},
 		rdP(rdTxt("мир ", rdItalic), rdTxt("😀!", RichRun{Underline: true})),
 	})
 	paras := d.Paragraphs()

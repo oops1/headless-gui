@@ -50,7 +50,7 @@ type dockTintedIcon struct {
 // штатных, в порядке списка; последняя — ближе всех к штатным. nil убирает
 // кнопки.
 func (p *DockPane) SetTitleButtons(btns []DockPaneButton) {
-	p.menu.dismiss()
+	p.menu.Dismiss()
 	p.titleBtns = append([]DockPaneButton(nil), btns...)
 	p.titleTint = nil
 	if p.hoverBtn >= dockBtnCustom {
@@ -74,8 +74,8 @@ func (p *DockPane) SetTitleButtonHidden(i int, hidden bool) {
 		return
 	}
 	p.titleBtns[i].Hidden = hidden
-	if hidden && p.menu.open() && p.menuFor == i {
-		p.menu.dismiss()
+	if hidden && p.menu.Open() && p.menuFor == i {
+		p.menu.Dismiss()
 	}
 	p.Invalidate()
 }
@@ -86,8 +86,8 @@ func (p *DockPane) SetTitleButtonDisabled(i int, disabled bool) {
 		return
 	}
 	p.titleBtns[i].Disabled = disabled
-	if disabled && p.menu.open() && p.menuFor == i {
-		p.menu.dismiss()
+	if disabled && p.menu.Open() && p.menuFor == i {
+		p.menu.Dismiss()
 	}
 	p.Invalidate()
 }
@@ -158,7 +158,7 @@ func (p *DockPane) drawTitleButtons(ctx DrawContext) {
 	if len(p.titleTint) != len(p.titleBtns) {
 		p.titleTint = make([]dockTintedIcon, len(p.titleBtns))
 	}
-	open := p.menu.open()
+	open := p.menu.Open()
 	for i, r := range rects {
 		if r.Empty() {
 			continue
@@ -243,7 +243,7 @@ func (p *DockPane) activateTitleButton(i int, at image.Point) {
 		return
 	}
 	r := p.titleButtonRects()[i]
-	m := p.menu.build(p, at.X, at.Y, append([]MenuItem(nil), items...))
+	m := p.menu.Build(p, at.X, at.Y, append([]MenuItem(nil), items...))
 	if m == nil {
 		return
 	}
@@ -255,13 +255,13 @@ func (p *DockPane) activateTitleButton(i int, at image.Point) {
 }
 
 // HasOverlay реализует OverlayDrawer: открыто меню кнопки заголовка.
-func (p *DockPane) HasOverlay() bool { return p.menu.open() }
+func (p *DockPane) HasOverlay() bool { return p.menu.Open() }
 
 // DrawOverlay рисует меню кнопки заголовка поверх UI.
-func (p *DockPane) DrawOverlay(ctx DrawContext) { p.menu.drawOverlay(ctx) }
+func (p *DockPane) DrawOverlay(ctx DrawContext) { p.menu.DrawOverlay(ctx) }
 
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
-func (p *DockPane) OverlayBounds() image.Rectangle { return p.menu.overlayBounds() }
+func (p *DockPane) OverlayBounds() image.Rectangle { return p.menu.OverlayBounds() }
 
 // ToolTipAt — подсказка кнопки приложения под точкой.
 func (p *DockPane) ToolTipAt(x, y int) string {

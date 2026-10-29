@@ -1,4 +1,4 @@
-package base
+package richtext
 
 // richtext_edit.go — RichText как редактор: ввод, удаление, отмена, оформление
 // выделения, буфер обмена, выгрузка и загрузка HTML, контекстное меню.
@@ -17,6 +17,8 @@ package base
 import (
 	"image"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // richTabSpaces — сколько пробелов вставляет Tab при AcceptTab.
@@ -64,7 +66,7 @@ func (t *RichText) contentChangedLocked() {
 	t.noParas = false
 	t.syncDocLocked()
 	n := len(t.doc.runes)
-	t.selCaret = clampInt(t.selCaret, 0, n)
+	t.selCaret = base.ClampInt(t.selCaret, 0, n)
 	if t.selAnchor > n {
 		t.selAnchor = n
 	}
@@ -182,10 +184,10 @@ func (t *RichText) SetSelectionStyle(fn func(*RichRun)) {
 	t.edit(func() {
 		lo, hi := t.selOrCaretLocked()
 		if lo == hi {
-			base := t.styleForLocked(lo, hi)
-			fn(&base)
-			base.Text = ""
-			t.pendStyle, t.pendOn = base, true
+			baseStyle := t.styleForLocked(lo, hi)
+			fn(&baseStyle)
+			baseStyle.Text = ""
+			t.pendStyle, t.pendOn = baseStyle, true
 			return
 		}
 		t.rdoc.ApplyStyle(lo, hi, fn)
@@ -212,10 +214,10 @@ func (t *RichText) SetParagraphFormat(fn func(*RichParagraph)) {
 func (t *RichText) toggleLocked(get func(RichRun) bool, set func(*RichRun, bool)) {
 	lo, hi := t.selOrCaretLocked()
 	if lo == hi {
-		base := t.styleForLocked(lo, hi)
-		set(&base, !get(base))
-		base.Text = ""
-		t.pendStyle, t.pendOn = base, true
+		baseStyle := t.styleForLocked(lo, hi)
+		set(&baseStyle, !get(baseStyle))
+		baseStyle.Text = ""
+		t.pendStyle, t.pendOn = baseStyle, true
 		return
 	}
 	all, any := true, false
@@ -379,7 +381,7 @@ func (t *RichText) undoRedo(redo bool) bool {
 		t.noParas = false
 		t.syncDocLocked()
 		n := len(t.doc.runes)
-		a, c := clampInt(sel.Anchor, 0, n), clampInt(sel.Caret, 0, n)
+		a, c := base.ClampInt(sel.Anchor, 0, n), base.ClampInt(sel.Caret, 0, n)
 		t.setCaretEditLocked(c)
 		if a != c {
 			t.selAnchor = a
@@ -417,7 +419,7 @@ func (t *RichText) Cut() bool {
 	html := richSelectionHTML(t.parasLocked(), t.doc, lo, hi)
 	t.mu.Unlock()
 	// В буфер — вне замка: платформенный буфер может ходить в ОС долго.
-	SetClipboardHTML(html, plain)
+	base.SetClipboardHTML(html, plain)
 	return t.edit(func() {
 		// Выделение могло измениться, пока буфер заполнялся: вырезаем только
 		// то, что действительно скопировано.
@@ -440,13 +442,13 @@ func (t *RichText) Paste() bool {
 	}
 	// Буфер читается вне замка: он может ходить в ОС долго.
 	var paras []RichParagraph
-	if html, ok := ClipboardHTML(); ok {
+	if html, ok := base.ClipboardHTML(); ok {
 		paras = RichParagraphsFromHTML(html)
 	}
 	plain := ""
 	if len(paras) == 0 {
 		// HTML нет или в нём ни одного символа — берём простой текст.
-		if plain = richNormalizeText(ClipboardGetText()); plain == "" {
+		if plain = richNormalizeText(base.ClipboardGetText()); plain == "" {
 			return false
 		}
 	}
@@ -522,43 +524,43 @@ func richPrintable(r rune) bool {
 // десять раз в секунду. Приложение, которому эти сочетания нужны для своего,
 // перехватывает их раньше через InputBindings — движок отдаёт им дорогу до
 // фокусного виджета.
-func (t *RichText) editKey(e KeyEvent) bool {
+func (t *RichText) editKey(e base.KeyEvent) bool {
 	if !t.isEditable() {
 		return false
 	}
-	ctrl := e.Mod&ModCtrl != 0
-	shift := e.Mod&ModShift != 0
-	alt := e.Mod&ModAlt != 0
+	ctrl := e.Mod&base.ModCtrl != 0
+	shift := e.Mod&base.ModShift != 0
+	alt := e.Mod&base.ModAlt != 0
 
 	if ctrl && !alt {
 		switch e.Code {
-		case KeyZ:
+		case base.KeyZ:
 			if shift {
 				t.Redo()
 			} else {
 				t.Undo()
 			}
-		case KeyY:
+		case base.KeyY:
 			t.Redo()
-		case KeyX:
+		case base.KeyX:
 			t.Cut()
-		case KeyV:
+		case base.KeyV:
 			t.Paste()
-		case KeyB:
+		case base.KeyB:
 			if !e.Repeat {
 				t.ToggleBold()
 			}
-		case KeyI:
+		case base.KeyI:
 			if !e.Repeat {
 				t.ToggleItalic()
 			}
-		case KeyU:
+		case base.KeyU:
 			if !e.Repeat {
 				t.ToggleUnderline()
 			}
-		case KeyBackspace:
+		case base.KeyBackspace:
 			t.backspace(true)
-		case KeyDelete:
+		case base.KeyDelete:
 			t.deleteForward(true)
 		default:
 			// Ctrl+C, Ctrl+A, Ctrl+Insert, Ctrl+стрелки — общий путь. Прочие
@@ -569,22 +571,22 @@ func (t *RichText) editKey(e KeyEvent) bool {
 	}
 
 	switch e.Code {
-	case KeyBackspace:
+	case base.KeyBackspace:
 		t.backspace(false)
-	case KeyDelete:
+	case base.KeyDelete:
 		if shift {
 			t.Cut()
 		} else {
 			t.deleteForward(false)
 		}
-	case KeyInsert:
+	case base.KeyInsert:
 		if !shift {
 			return false
 		}
 		t.Paste()
-	case KeyEnter:
+	case base.KeyEnter:
 		t.enter(shift)
-	case KeyTab:
+	case base.KeyTab:
 		if !t.AcceptsTab() || shift {
 			return false
 		}
@@ -611,7 +613,7 @@ func (t *RichText) editKey(e KeyEvent) bool {
 // Правый щелчок вне выделения переносит каретку под курсор — иначе «Вставить»
 // вставило бы туда, где каретка осталась от прошлого щелчка, а не туда, куда
 // указал человек. Внутри выделения оно сохраняется: по нему и хотят вырезать.
-func (t *RichText) ContextMenuAt(x, y int) *PopupMenu {
+func (t *RichText) ContextMenuAt(x, y int) *base.PopupMenu {
 	t.mu.Lock()
 	b := t.Base.Bounds()
 	if !t.Editable || t.Base.ContextMenu != nil || !image.Pt(x, y).In(b) {
@@ -638,12 +640,12 @@ func (t *RichText) ContextMenuAt(x, y int) *PopupMenu {
 	if moved {
 		t.Invalidate()
 	}
-	_, hasHTML := ClipboardHTML()
-	hasClip := hasHTML || ClipboardGetText() != ""
+	_, hasHTML := base.ClipboardHTML()
+	hasClip := hasHTML || base.ClipboardGetText() != ""
 
 	t.menuMu.Lock()
 	defer t.menuMu.Unlock()
-	return t.menu.build(t, x, y, []MenuItem{
+	return t.menu.Build(t, x, y, []base.MenuItem{
 		{Text: "Cut", Disabled: !hasSel, OnClick: func() { t.Cut() }},
 		{Text: "Copy", Disabled: !hasSel, OnClick: func() { t.Copy() }},
 		{Text: "Paste", Disabled: !hasClip, OnClick: func() { t.Paste() }},
@@ -662,26 +664,26 @@ func (t *RichText) ContextMenuAt(x, y int) *PopupMenu {
 func (t *RichText) HasOverlay() bool {
 	t.menuMu.Lock()
 	defer t.menuMu.Unlock()
-	return t.menu.open()
+	return t.menu.Open()
 }
 
 // DrawOverlay рисует открытое меню поверх всего UI.
-func (t *RichText) DrawOverlay(ctx DrawContext) {
+func (t *RichText) DrawOverlay(ctx base.DrawContext) {
 	t.menuMu.Lock()
 	defer t.menuMu.Unlock()
-	t.menu.drawOverlay(ctx)
+	t.menu.DrawOverlay(ctx)
 }
 
 // OverlayBounds — прямоугольник открытого меню (для выноса в окно ОС).
 func (t *RichText) OverlayBounds() image.Rectangle {
 	t.menuMu.Lock()
 	defer t.menuMu.Unlock()
-	return t.menu.overlayBounds()
+	return t.menu.OverlayBounds()
 }
 
 // Dismiss закрывает меню. Реализует Dismissable.
 func (t *RichText) Dismiss() {
 	t.menuMu.Lock()
 	defer t.menuMu.Unlock()
-	t.menu.dismiss()
+	t.menu.Dismiss()
 }

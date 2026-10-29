@@ -1,10 +1,12 @@
-package base
+package richtext
 
 import (
 	"image"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // Тесты редактора RichText без окна (измеритель — предсказуемый, как в
@@ -13,7 +15,7 @@ import (
 
 // edRT — редактор с абзацами paras.
 func edRT(paras ...RichParagraph) *RichText {
-	UseMemoryClipboard()
+	base.UseMemoryClipboard()
 	rt := newRT(300, 120, paras...)
 	rt.Editable = true
 	return rt
@@ -22,27 +24,27 @@ func edRT(paras ...RichParagraph) *RichText {
 // edType набирает s клавишами: у печатной клавиши Rune заполнен, Code не важен.
 func edType(rt *RichText, s string) {
 	for _, r := range s {
-		rt.OnKeyEvent(KeyEvent{Rune: r, Pressed: true})
+		rt.OnKeyEvent(base.KeyEvent{Rune: r, Pressed: true})
 	}
 }
 
-func edKey(rt *RichText, code KeyCode, mod KeyMod) {
-	rt.OnKeyEvent(KeyEvent{Code: code, Mod: mod, Pressed: true})
+func edKey(rt *RichText, code base.KeyCode, mod base.KeyMod) {
+	rt.OnKeyEvent(base.KeyEvent{Code: code, Mod: mod, Pressed: true})
 }
 
 // edRuns — раны абзаца i.
 func edRuns(rt *RichText, i int) []RichRun { return rt.Paragraphs()[i].Runs }
 
-func boldRun(text string) RichRun   { return RichRun{Text: text, Font: BuiltinFontBold} }
-func italicRun(text string) RichRun { return RichRun{Text: text, Font: BuiltinFontItalic} }
+func boldRun(text string) RichRun   { return RichRun{Text: text, Font: base.BuiltinFontBold} }
+func italicRun(text string) RichRun { return RichRun{Text: text, Font: base.BuiltinFontItalic} }
 
 // ─── Режим просмотра ────────────────────────────────────────────────────────
 
 // Без Editable виджет ничего не принимает: ни символы, ни Enter, ни Backspace,
 // ни Ctrl+B/V/X/Z — и OnChange молчит.
 func TestRichEdit_ViewModeIgnoresInput(t *testing.T) {
-	UseMemoryClipboard()
-	SetClipboardHTML("<p>pasted</p>", "pasted")
+	base.UseMemoryClipboard()
+	base.SetClipboardHTML("<p>pasted</p>", "pasted")
 	rt := newRT(300, 120, plainPara("hello"))
 	calls := 0
 	rt.OnChange = func() { calls++ }
@@ -50,13 +52,13 @@ func TestRichEdit_ViewModeIgnoresInput(t *testing.T) {
 
 	edType(rt, "xyz")
 	for _, k := range []struct {
-		c KeyCode
-		m KeyMod
+		c base.KeyCode
+		m base.KeyMod
 	}{
-		{KeyEnter, 0}, {KeyEnter, ModShift}, {KeyBackspace, 0}, {KeyDelete, 0},
-		{KeyBackspace, ModCtrl}, {KeyB, ModCtrl}, {KeyI, ModCtrl}, {KeyU, ModCtrl},
-		{KeyV, ModCtrl}, {KeyX, ModCtrl}, {KeyZ, ModCtrl}, {KeyY, ModCtrl},
-		{KeyInsert, ModShift}, {KeyDelete, ModShift}, {KeyTab, 0},
+		{base.KeyEnter, 0}, {base.KeyEnter, base.ModShift}, {base.KeyBackspace, 0}, {base.KeyDelete, 0},
+		{base.KeyBackspace, base.ModCtrl}, {base.KeyB, base.ModCtrl}, {base.KeyI, base.ModCtrl}, {base.KeyU, base.ModCtrl},
+		{base.KeyV, base.ModCtrl}, {base.KeyX, base.ModCtrl}, {base.KeyZ, base.ModCtrl}, {base.KeyY, base.ModCtrl},
+		{base.KeyInsert, base.ModShift}, {base.KeyDelete, base.ModShift}, {base.KeyTab, 0},
 	} {
 		edKey(rt, k.c, k.m)
 	}
@@ -72,7 +74,7 @@ func TestRichEdit_ViewModeIgnoresInput(t *testing.T) {
 	// Команды панели тоже не действуют, а чтение работает.
 	rt.ToggleBold()
 	rt.SetSelectionStyle(func(r *RichRun) { r.Size = 30 })
-	rt.SetParagraphFormat(func(p *RichParagraph) { p.Align = TextAlignRight })
+	rt.SetParagraphFormat(func(p *RichParagraph) { p.Align = base.TextAlignRight })
 	if rt.Undo() || rt.Cut() || rt.Paste() {
 		t.Error("команда правки сработала в просмотре")
 	}
@@ -87,7 +89,7 @@ func TestRichEdit_ViewModeIgnoresInput(t *testing.T) {
 	}
 	// Стрелки вниз/вверх в просмотре по-прежнему листают, а не двигают каретку.
 	rt.SetCaretPosition(2)
-	edKey(rt, KeyDown, 0)
+	edKey(rt, base.KeyDown, 0)
 	if rt.CaretPosition() != 2 {
 		t.Errorf("↓ в просмотре сдвинула каретку: %d", rt.CaretPosition())
 	}
@@ -103,15 +105,15 @@ func TestRichEdit_CaretAlwaysShown(t *testing.T) {
 	if !shown || rt.ShowCaret {
 		t.Errorf("каретка у редактора: shown=%v ShowCaret=%v", shown, rt.ShowCaret)
 	}
-	edKey(rt, KeyDown, 0)
+	edKey(rt, base.KeyDown, 0)
 	if rt.CaretPosition() != 4 {
 		t.Errorf("↓ в редакторе: каретка %d, ждали 4", rt.CaretPosition())
 	}
-	edKey(rt, KeyHome, 0)
+	edKey(rt, base.KeyHome, 0)
 	if rt.CaretPosition() != 4 {
 		t.Errorf("Home: каретка %d", rt.CaretPosition())
 	}
-	edKey(rt, KeyUp, 0)
+	edKey(rt, base.KeyUp, 0)
 	if rt.CaretPosition() != 0 {
 		t.Errorf("↑: каретка %d, ждали 0", rt.CaretPosition())
 	}
@@ -130,17 +132,17 @@ func TestRichEdit_TypeUndoRedo(t *testing.T) {
 	if n := len(rt.Paragraphs()); n != 1 {
 		t.Fatalf("абзацев %d: набор в пустом виджете обязан создать абзац", n)
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "" || rt.CanUndo() || !rt.CanRedo() {
 		t.Fatalf("после Ctrl+Z: %q undo=%v redo=%v — слово должно уйти одним шагом",
 			rt.Text(), rt.CanUndo(), rt.CanRedo())
 	}
-	edKey(rt, KeyY, ModCtrl)
+	edKey(rt, base.KeyY, base.ModCtrl)
 	if rt.Text() != "hello" || rt.CaretPosition() != 5 {
 		t.Fatalf("после Ctrl+Y %q, каретка %d", rt.Text(), rt.CaretPosition())
 	}
-	edKey(rt, KeyZ, ModCtrl)
-	edKey(rt, KeyZ, ModCtrl|ModShift)
+	edKey(rt, base.KeyZ, base.ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl|base.ModShift)
 	if rt.Text() != "hello" {
 		t.Fatalf("после Ctrl+Shift+Z %q", rt.Text())
 	}
@@ -151,10 +153,10 @@ func TestRichEdit_TypeUndoRedo(t *testing.T) {
 func TestRichEdit_CaretMoveAndFocusBreakUndoGroup(t *testing.T) {
 	rt := edRT()
 	edType(rt, "ab")
-	edKey(rt, KeyLeft, 0)
-	edKey(rt, KeyRight, 0) // снова в конце: без разрыва «c» прилипло бы к «ab»
+	edKey(rt, base.KeyLeft, 0)
+	edKey(rt, base.KeyRight, 0) // снова в конце: без разрыва «c» прилипло бы к «ab»
 	edType(rt, "c")
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "ab" {
 		t.Fatalf("после движения каретки Ctrl+Z убрал не только «c»: %q", rt.Text())
 	}
@@ -165,7 +167,7 @@ func TestRichEdit_CaretMoveAndFocusBreakUndoGroup(t *testing.T) {
 	rt.SetFocused(false)
 	rt.SetFocused(true)
 	edType(rt, "c")
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "ab" {
 		t.Fatalf("после потери фокуса Ctrl+Z убрал не только «c»: %q", rt.Text())
 	}
@@ -177,7 +179,7 @@ func TestRichEdit_CaretMoveAndFocusBreakUndoGroup(t *testing.T) {
 	rtRelease(rt, 4, 8, 1)
 	rt.SetCaretPosition(3)
 	edType(rt, "b")
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "xya" {
 		t.Fatalf("после щелчка Ctrl+Z убрал не только «b»: %q", rt.Text())
 	}
@@ -185,20 +187,20 @@ func TestRichEdit_CaretMoveAndFocusBreakUndoGroup(t *testing.T) {
 
 // Enter — новый абзац, Shift+Enter — мягкий перевод строки внутри абзаца.
 func TestRichEdit_EnterAndSoftBreak(t *testing.T) {
-	rt := edRT(RichParagraph{Runs: []RichRun{{Text: "abcd"}}, Align: TextAlignCenter})
+	rt := edRT(RichParagraph{Runs: []RichRun{{Text: "abcd"}}, Align: base.TextAlignCenter})
 	rt.SetCaretPosition(2)
-	edKey(rt, KeyEnter, 0)
+	edKey(rt, base.KeyEnter, 0)
 	ps := rt.Paragraphs()
 	if len(ps) != 2 || ps[0].Runs[0].Text != "ab" || ps[1].Runs[0].Text != "cd" {
 		t.Fatalf("Enter: %+v", ps)
 	}
-	if ps[1].Align != TextAlignCenter {
+	if ps[1].Align != base.TextAlignCenter {
 		t.Error("новый абзац потерял выравнивание")
 	}
 	if rt.CaretPosition() != 3 {
 		t.Errorf("каретка после Enter %d, ждали 3", rt.CaretPosition())
 	}
-	edKey(rt, KeyEnter, ModShift)
+	edKey(rt, base.KeyEnter, base.ModShift)
 	ps = rt.Paragraphs()
 	if len(ps) != 2 {
 		t.Fatalf("Shift+Enter разбил абзац: %d абзацев", len(ps))
@@ -206,8 +208,8 @@ func TestRichEdit_EnterAndSoftBreak(t *testing.T) {
 	if ps[1].Runs[0].Text != "\ncd" || rt.Text() != "ab\n\ncd" {
 		t.Errorf("мягкий перевод: %q / %q", ps[1].Runs[0].Text, rt.Text())
 	}
-	edKey(rt, KeyZ, ModCtrl)
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "abcd" || len(rt.Paragraphs()) != 1 {
 		t.Errorf("после двух отмен %q", rt.Text())
 	}
@@ -218,25 +220,25 @@ func TestRichEdit_EnterAndSoftBreak(t *testing.T) {
 func TestRichEdit_BackspaceAtParagraphBoundary(t *testing.T) {
 	rt := edRT(plainPara("ab"), plainPara("cd"))
 	rt.SetCaretPosition(3)
-	edKey(rt, KeyBackspace, 0)
+	edKey(rt, base.KeyBackspace, 0)
 	if rt.Text() != "abcd" || len(rt.Paragraphs()) != 1 || rt.CaretPosition() != 2 {
 		t.Fatalf("Backspace на границе: %q абзацев %d каретка %d",
 			rt.Text(), len(rt.Paragraphs()), rt.CaretPosition())
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "ab\ncd" || len(rt.Paragraphs()) != 2 {
 		t.Fatalf("отмена слияния: %q", rt.Text())
 	}
 	rt.SetCaretPosition(2)
-	edKey(rt, KeyDelete, 0)
+	edKey(rt, base.KeyDelete, 0)
 	if rt.Text() != "abcd" || len(rt.Paragraphs()) != 1 {
 		t.Fatalf("Delete на границе: %q", rt.Text())
 	}
 	// В начале документа Backspace, в конце Delete — ничего.
 	rt.SetCaretPosition(0)
-	edKey(rt, KeyBackspace, 0)
+	edKey(rt, base.KeyBackspace, 0)
 	rt.SetCaretPosition(4)
-	edKey(rt, KeyDelete, 0)
+	edKey(rt, base.KeyDelete, 0)
 	if rt.Text() != "abcd" {
 		t.Errorf("края документа: %q", rt.Text())
 	}
@@ -247,24 +249,24 @@ func TestRichEdit_BackspaceAtParagraphBoundary(t *testing.T) {
 func TestRichEdit_WordDelete(t *testing.T) {
 	rt := edRT(plainPara("one two three"))
 	rt.SetCaretPosition(7) // после «two»
-	edKey(rt, KeyBackspace, ModCtrl)
+	edKey(rt, base.KeyBackspace, base.ModCtrl)
 	if rt.Text() != "one  three" || rt.CaretPosition() != 4 {
 		t.Fatalf("Ctrl+Backspace: %q каретка %d", rt.Text(), rt.CaretPosition())
 	}
-	edKey(rt, KeyDelete, ModCtrl)
+	edKey(rt, base.KeyDelete, base.ModCtrl)
 	if rt.Text() != "one three" {
 		t.Fatalf("Ctrl+Delete: %q", rt.Text())
 	}
 
 	rt = edRT(plainPara("one two"), plainPara("three"))
 	rt.SetCaretPosition(8) // начало второго абзаца
-	edKey(rt, KeyBackspace, ModCtrl)
+	edKey(rt, base.KeyBackspace, base.ModCtrl)
 	if rt.Text() != "one twothree" {
 		t.Fatalf("Ctrl+Backspace в начале абзаца: %q", rt.Text())
 	}
 	rt = edRT(plainPara("one two"), plainPara("three"))
 	rt.SetCaretPosition(4) // перед «two»
-	edKey(rt, KeyDelete, ModCtrl)
+	edKey(rt, base.KeyDelete, base.ModCtrl)
 	if rt.Text() != "one \nthree" {
 		t.Fatalf("Ctrl+Delete у последнего слова слил абзацы: %q", rt.Text())
 	}
@@ -283,7 +285,7 @@ func TestRichEdit_ReplaceSelection(t *testing.T) {
 	if rt.Text() != "hello Xyz" {
 		t.Fatalf("набор после замены: %q", rt.Text())
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "hello world" {
 		t.Fatalf("Ctrl+Z после замены: %q — замена и набор должны отменяться вместе", rt.Text())
 	}
@@ -292,7 +294,7 @@ func TestRichEdit_ReplaceSelection(t *testing.T) {
 	}
 	// Backspace по выделению тоже удаляет его целиком.
 	rt.Select(0, 6)
-	edKey(rt, KeyBackspace, 0)
+	edKey(rt, base.KeyBackspace, 0)
 	if rt.Text() != "world" {
 		t.Errorf("Backspace по выделению: %q", rt.Text())
 	}
@@ -304,7 +306,7 @@ func TestRichEdit_ReplaceKeepsStyle(t *testing.T) {
 	rt.Select(3, 7)
 	edType(rt, "Q")
 	runs := edRuns(rt, 0)
-	if len(runs) != 3 || runs[1].Text != "Q" || runs[1].Font != BuiltinFontBold {
+	if len(runs) != 3 || runs[1].Text != "Q" || runs[1].Font != base.BuiltinFontBold {
 		t.Fatalf("замена жирного слова: %+v", runs)
 	}
 }
@@ -315,7 +317,7 @@ func TestRichEdit_Tab(t *testing.T) {
 	if rt.AcceptsTab() {
 		t.Error("без AcceptTab редактор забирает Tab")
 	}
-	edKey(rt, KeyTab, 0)
+	edKey(rt, base.KeyTab, 0)
 	if rt.Text() != "x" {
 		t.Errorf("Tab без AcceptTab изменил текст: %q", rt.Text())
 	}
@@ -323,11 +325,11 @@ func TestRichEdit_Tab(t *testing.T) {
 	if !rt.AcceptsTab() {
 		t.Error("с AcceptTab редактор не забирает Tab")
 	}
-	edKey(rt, KeyTab, 0)
+	edKey(rt, base.KeyTab, 0)
 	if rt.Text() != "    x" {
 		t.Errorf("Tab: %q", rt.Text())
 	}
-	edKey(rt, KeyTab, ModShift)
+	edKey(rt, base.KeyTab, base.ModShift)
 	if rt.Text() != "    x" {
 		t.Errorf("Shift+Tab изменил текст: %q", rt.Text())
 	}
@@ -340,12 +342,12 @@ func TestRichEdit_Tab(t *testing.T) {
 // Alt без Ctrl не печатает, Ctrl+Alt (AltGr) печатает, управляющие — нет.
 func TestRichEdit_PrintableRules(t *testing.T) {
 	rt := edRT()
-	rt.OnKeyEvent(KeyEvent{Rune: 'a', Mod: ModAlt, Pressed: true})
-	rt.OnKeyEvent(KeyEvent{Rune: '@', Mod: ModCtrl | ModAlt, Pressed: true})
-	rt.OnKeyEvent(KeyEvent{Rune: 0x7f, Pressed: true})
-	rt.OnKeyEvent(KeyEvent{Rune: 'b', Mod: ModCtrl, Pressed: true})
-	rt.OnKeyEvent(KeyEvent{Rune: 'я', Pressed: true})
-	rt.OnKeyEvent(KeyEvent{Rune: 'c', Pressed: false})
+	rt.OnKeyEvent(base.KeyEvent{Rune: 'a', Mod: base.ModAlt, Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Rune: '@', Mod: base.ModCtrl | base.ModAlt, Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Rune: 0x7f, Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Rune: 'b', Mod: base.ModCtrl, Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Rune: 'я', Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Rune: 'c', Pressed: false})
 	if rt.Text() != "@я" {
 		t.Errorf("набрано %q, ждали «@я»", rt.Text())
 	}
@@ -358,7 +360,7 @@ func TestRichEdit_PrintableRules(t *testing.T) {
 func TestRichEdit_PendingStyleAndReset(t *testing.T) {
 	rt := edRT(plainPara("abc"))
 	rt.SetCaretPosition(3)
-	edKey(rt, KeyB, ModCtrl)
+	edKey(rt, base.KeyB, base.ModCtrl)
 	if !rt.SelectionStyle().IsBold() {
 		t.Fatal("панель не видит стиль набора: кнопка «Ж» не нажалась")
 	}
@@ -367,11 +369,11 @@ func TestRichEdit_PendingStyleAndReset(t *testing.T) {
 	}
 	edType(rt, "de")
 	runs := edRuns(rt, 0)
-	if len(runs) != 2 || runs[1].Text != "de" || runs[1].Font != BuiltinFontBold {
+	if len(runs) != 2 || runs[1].Text != "de" || runs[1].Font != base.BuiltinFontBold {
 		t.Fatalf("набор жирным: %+v", runs)
 	}
 	// Второе нажатие выключает стиль набора.
-	edKey(rt, KeyB, ModCtrl)
+	edKey(rt, base.KeyB, base.ModCtrl)
 	edType(rt, "f")
 	runs = edRuns(rt, 0)
 	if len(runs) != 3 || runs[2].Text != "f" || runs[2].Font != "" {
@@ -380,8 +382,8 @@ func TestRichEdit_PendingStyleAndReset(t *testing.T) {
 
 	rt = edRT(plainPara("abc"))
 	rt.SetCaretPosition(1)
-	edKey(rt, KeyB, ModCtrl)
-	edKey(rt, KeyRight, 0)
+	edKey(rt, base.KeyB, base.ModCtrl)
+	edKey(rt, base.KeyRight, 0)
 	if rt.SelectionStyle().IsBold() {
 		t.Error("движение каретки не сбросило стиль набора")
 	}
@@ -392,12 +394,12 @@ func TestRichEdit_PendingStyleAndReset(t *testing.T) {
 
 	// Щелчок и программная установка каретки тоже сбрасывают.
 	rt = edRT(plainPara("abc"))
-	edKey(rt, KeyI, ModCtrl)
+	edKey(rt, base.KeyI, base.ModCtrl)
 	rt.SetCaretPosition(2)
 	if rt.SelectionStyle().IsItalic() {
 		t.Error("SetCaretPosition не сбросил стиль набора")
 	}
-	edKey(rt, KeyI, ModCtrl)
+	edKey(rt, base.KeyI, base.ModCtrl)
 	rtPress(rt, 4, 8, 1)
 	rtRelease(rt, 4, 8, 1)
 	if rt.SelectionStyle().IsItalic() {
@@ -409,17 +411,17 @@ func TestRichEdit_PendingStyleAndReset(t *testing.T) {
 // абзаце оформление несёт сам документ.
 func TestRichEdit_PendingStyleSurvivesTypingAndEnter(t *testing.T) {
 	rt := edRT()
-	edKey(rt, KeyB, ModCtrl)
+	edKey(rt, base.KeyB, base.ModCtrl)
 	edType(rt, "ab")
-	edKey(rt, KeyBackspace, 0)
+	edKey(rt, base.KeyBackspace, 0)
 	edType(rt, "c")
-	if runs := edRuns(rt, 0); len(runs) != 1 || runs[0].Text != "ac" || runs[0].Font != BuiltinFontBold {
+	if runs := edRuns(rt, 0); len(runs) != 1 || runs[0].Text != "ac" || runs[0].Font != base.BuiltinFontBold {
 		t.Fatalf("набор с Backspace: %+v", runs)
 	}
-	edKey(rt, KeyEnter, 0)
+	edKey(rt, base.KeyEnter, 0)
 	edType(rt, "z")
 	ps := rt.Paragraphs()
-	if len(ps) != 2 || ps[1].Runs[0].Font != BuiltinFontBold {
+	if len(ps) != 2 || ps[1].Runs[0].Font != base.BuiltinFontBold {
 		t.Fatalf("новый абзац после Enter потерял жирный: %+v", ps)
 	}
 }
@@ -429,7 +431,7 @@ func TestRichEdit_PendingStyleSurvivesTypingAndEnter(t *testing.T) {
 func TestRichEdit_ToggleBoldOnSelectionAndUndo(t *testing.T) {
 	rt := edRT(plainPara("abcdef"))
 	rt.Select(0, 3)
-	edKey(rt, KeyB, ModCtrl)
+	edKey(rt, base.KeyB, base.ModCtrl)
 	runs := edRuns(rt, 0)
 	if len(runs) != 2 || runs[0].Text != "abc" || !runs[0].IsBold() || runs[1].IsBold() {
 		t.Fatalf("жирное выделение: %+v", runs)
@@ -437,15 +439,15 @@ func TestRichEdit_ToggleBoldOnSelectionAndUndo(t *testing.T) {
 	if rt.SelectedText() != "abc" {
 		t.Errorf("выделение потерялось: %q", rt.SelectedText())
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if runs := edRuns(rt, 0); len(runs) != 1 || runs[0].Font != "" {
 		t.Fatalf("отмена: %+v", runs)
 	}
-	edKey(rt, KeyY, ModCtrl)
+	edKey(rt, base.KeyY, base.ModCtrl)
 	if !edRuns(rt, 0)[0].IsBold() {
 		t.Fatalf("возврат: %+v", edRuns(rt, 0))
 	}
-	edKey(rt, KeyB, ModCtrl)
+	edKey(rt, base.KeyB, base.ModCtrl)
 	if runs := edRuns(rt, 0); len(runs) != 1 || runs[0].Font != "" {
 		t.Fatalf("повторное Ctrl+B не сняло жирный: %+v", runs)
 	}
@@ -471,7 +473,7 @@ func TestRichEdit_BoldItalicCombination(t *testing.T) {
 	rt.SelectAll()
 	rt.ToggleBold()
 	r := edRuns(rt, 0)[0]
-	if r.Font != BuiltinFontBoldItalic {
+	if r.Font != base.BuiltinFontBoldItalic {
 		t.Fatalf("жирность у курсива: шрифт %q, ждали жирный курсив", r.Font)
 	}
 	st := rt.SelectionStyle()
@@ -479,7 +481,7 @@ func TestRichEdit_BoldItalicCombination(t *testing.T) {
 		t.Fatalf("SelectionStyle жирного курсива: %+v", st)
 	}
 	rt.ToggleItalic()
-	if r := edRuns(rt, 0)[0]; r.Font != BuiltinFontBold {
+	if r := edRuns(rt, 0)[0]; r.Font != base.BuiltinFontBold {
 		t.Fatalf("снятие курсива: шрифт %q", r.Font)
 	}
 	rt.ToggleBold()
@@ -488,10 +490,10 @@ func TestRichEdit_BoldItalicCombination(t *testing.T) {
 	}
 	// Стиль набора комбинируется так же.
 	rt = edRT()
-	edKey(rt, KeyI, ModCtrl)
-	edKey(rt, KeyB, ModCtrl)
+	edKey(rt, base.KeyI, base.ModCtrl)
+	edKey(rt, base.KeyB, base.ModCtrl)
 	edType(rt, "w")
-	if r := edRuns(rt, 0)[0]; r.Font != BuiltinFontBoldItalic {
+	if r := edRuns(rt, 0)[0]; r.Font != base.BuiltinFontBoldItalic {
 		t.Fatalf("набор жирным курсивом: %q", r.Font)
 	}
 }
@@ -509,7 +511,7 @@ func TestRichEdit_ToggleBoldKeepsForeignFont(t *testing.T) {
 func TestRichEdit_UnderlineStrikeAndHotkeys(t *testing.T) {
 	rt := edRT(plainPara("abc"))
 	rt.SelectAll()
-	edKey(rt, KeyU, ModCtrl)
+	edKey(rt, base.KeyU, base.ModCtrl)
 	if !edRuns(rt, 0)[0].Underline {
 		t.Fatal("Ctrl+U не подчеркнул")
 	}
@@ -523,7 +525,7 @@ func TestRichEdit_UnderlineStrikeAndHotkeys(t *testing.T) {
 		t.Fatalf("ToggleUnderline: %+v", r)
 	}
 	// Автоповтор удерживаемой Ctrl+B не мигает жирным.
-	rt.OnKeyEvent(KeyEvent{Code: KeyB, Mod: ModCtrl, Pressed: true, Repeat: true})
+	rt.OnKeyEvent(base.KeyEvent{Code: base.KeyB, Mod: base.ModCtrl, Pressed: true, Repeat: true})
 	if edRuns(rt, 0)[0].IsBold() {
 		t.Error("автоповтор Ctrl+B переключил жирный")
 	}
@@ -560,15 +562,15 @@ func TestRichEdit_SetSelectionStyle(t *testing.T) {
 func TestRichEdit_ParagraphFormat(t *testing.T) {
 	rt := edRT(plainPara("a"), plainPara("b"), plainPara("c"))
 	rt.Select(0, 3) // абзацы «a» и «b»
-	rt.SetParagraphFormat(func(p *RichParagraph) { p.Align = TextAlignCenter; p.Indent = 12 })
+	rt.SetParagraphFormat(func(p *RichParagraph) { p.Align = base.TextAlignCenter; p.Indent = 12 })
 	ps := rt.Paragraphs()
-	if ps[0].Align != TextAlignCenter || ps[1].Align != TextAlignCenter || ps[2].Align != 0 || ps[0].Indent != 12 {
+	if ps[0].Align != base.TextAlignCenter || ps[1].Align != base.TextAlignCenter || ps[2].Align != 0 || ps[0].Indent != 12 {
 		t.Fatalf("формат абзацев: %+v", ps)
 	}
-	if got := rt.SelectionParagraphFormat(); got.Align != TextAlignCenter || got.Indent != 12 || got.Runs != nil {
+	if got := rt.SelectionParagraphFormat(); got.Align != base.TextAlignCenter || got.Indent != 12 || got.Runs != nil {
 		t.Errorf("SelectionParagraphFormat: %+v", got)
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Paragraphs()[0].Align != 0 {
 		t.Error("отмена формата абзацев не сработала")
 	}
@@ -604,18 +606,18 @@ func TestRichEdit_TypingNearLink(t *testing.T) {
 func TestRichEdit_CutPasteOneUndo(t *testing.T) {
 	rt := edRT(RichParagraph{Runs: []RichRun{boldRun("hello"), {Text: " world"}}})
 	rt.Select(0, 5)
-	edKey(rt, KeyX, ModCtrl)
+	edKey(rt, base.KeyX, base.ModCtrl)
 	if rt.Text() != " world" || rt.CaretPosition() != 0 {
 		t.Fatalf("после Ctrl+X %q каретка %d", rt.Text(), rt.CaretPosition())
 	}
-	if ClipboardGetText() != "hello" {
-		t.Fatalf("в буфере %q", ClipboardGetText())
+	if base.ClipboardGetText() != "hello" {
+		t.Fatalf("в буфере %q", base.ClipboardGetText())
 	}
-	if _, ok := ClipboardHTML(); !ok {
+	if _, ok := base.ClipboardHTML(); !ok {
 		t.Error("вырезание не положило HTML")
 	}
 	rt.SetCaretPosition(6)
-	edKey(rt, KeyV, ModCtrl)
+	edKey(rt, base.KeyV, base.ModCtrl)
 	runs := edRuns(rt, 0)
 	if rt.Text() != " worldhello" || runs[len(runs)-1].Text != "hello" || !runs[len(runs)-1].IsBold() {
 		t.Fatalf("вставка вернула не жирное: %q %+v", rt.Text(), runs)
@@ -623,19 +625,19 @@ func TestRichEdit_CutPasteOneUndo(t *testing.T) {
 	if rt.CaretPosition() != 11 {
 		t.Errorf("каретка после вставки %d", rt.CaretPosition())
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != " world" {
 		t.Fatalf("отмена вставки: %q", rt.Text())
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "hello world" {
 		t.Fatalf("отмена вырезания: %q — одна запись на вырезание", rt.Text())
 	}
 	// Shift+Delete и Shift+Insert — то же, что Ctrl+X и Ctrl+V.
 	rt.Select(0, 5)
-	edKey(rt, KeyDelete, ModShift)
+	edKey(rt, base.KeyDelete, base.ModShift)
 	rt.SetCaretPosition(len([]rune(rt.Text())))
-	edKey(rt, KeyInsert, ModShift)
+	edKey(rt, base.KeyInsert, base.ModShift)
 	if rt.Text() != " worldhello" {
 		t.Fatalf("Shift+Delete / Shift+Insert: %q", rt.Text())
 	}
@@ -649,13 +651,13 @@ func TestRichEdit_CutPasteOneUndo(t *testing.T) {
 // Вставка поверх выделения заменяет его одной записью отмены.
 func TestRichEdit_PasteReplacesSelection(t *testing.T) {
 	rt := edRT(plainPara("hello world"))
-	SetClipboardHTML("<p>big</p>", "big")
+	base.SetClipboardHTML("<p>big</p>", "big")
 	rt.Select(6, 11)
-	edKey(rt, KeyV, ModCtrl)
+	edKey(rt, base.KeyV, base.ModCtrl)
 	if rt.Text() != "hello big" {
 		t.Fatalf("вставка поверх выделения: %q", rt.Text())
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "hello world" {
 		t.Fatalf("одна отмена должна вернуть и удалённое: %q", rt.Text())
 	}
@@ -668,8 +670,8 @@ func TestRichEdit_PasteWordHTML(t *testing.T) {
 		`<!--StartFragment--><p class=MsoNormal>Plain <b>bold</b> and ` +
 		`<a href="https://example.com/doc">the link</a><o:p></o:p></p>` +
 		`<p class=MsoNormal align=center>Second</p><!--EndFragment--></body></html>`
-	SetClipboardHTML(word, "Plain bold and the link\nSecond")
-	edKey(rt, KeyV, ModCtrl)
+	base.SetClipboardHTML(word, "Plain bold and the link\nSecond")
+	edKey(rt, base.KeyV, base.ModCtrl)
 	ps := rt.Paragraphs()
 	if len(ps) != 2 {
 		t.Fatalf("абзацев %d: %+v", len(ps), ps)
@@ -686,10 +688,10 @@ func TestRichEdit_PasteWordHTML(t *testing.T) {
 	if !bold || !link {
 		t.Errorf("оформление не доехало: жирный=%v ссылка=%v %+v", bold, link, ps[0].Runs)
 	}
-	if ps[1].Align != TextAlignCenter || ps[1].Runs[0].Text != "Second" {
+	if ps[1].Align != base.TextAlignCenter || ps[1].Runs[0].Text != "Second" {
 		t.Errorf("второй абзац: %+v", ps[1])
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "" {
 		t.Errorf("вставка не отменилась одной записью: %q", rt.Text())
 	}
@@ -699,15 +701,15 @@ func TestRichEdit_PasteWordHTML(t *testing.T) {
 func TestRichEdit_PastePlainTextUsesCaretStyle(t *testing.T) {
 	rt := edRT(RichParagraph{Runs: []RichRun{boldRun("ab")}})
 	rt.SetCaretPosition(2)
-	ClipboardSetText("x\r\ny")
-	edKey(rt, KeyV, ModCtrl)
+	base.ClipboardSetText("x\r\ny")
+	edKey(rt, base.KeyV, base.ModCtrl)
 	ps := rt.Paragraphs()
 	if len(ps) != 2 || ps[0].Runs[0].Text != "abx" || ps[1].Runs[0].Text != "y" ||
 		!ps[0].Runs[0].IsBold() || !ps[1].Runs[0].IsBold() {
 		t.Fatalf("простая вставка: %+v", ps)
 	}
 	// Пустой буфер ничего не делает.
-	ClipboardSetText("")
+	base.ClipboardSetText("")
 	if rt.Paste() {
 		t.Error("пустой буфер что-то вставил")
 	}
@@ -718,7 +720,7 @@ func TestRichEdit_PastePlainTextUsesCaretStyle(t *testing.T) {
 func TestRichEdit_HTMLRoundTrip(t *testing.T) {
 	rt := edRT()
 	rt.SetParagraphs([]RichParagraph{
-		{Runs: []RichRun{{Text: "Title "}, boldRun("bold"), {Text: "x", Link: "https://a.b"}}, Align: TextAlignCenter},
+		{Runs: []RichRun{{Text: "Title "}, boldRun("bold"), {Text: "x", Link: "https://a.b"}}, Align: base.TextAlignCenter},
 		{},
 		{Runs: []RichRun{{Text: "tail", Underline: true}}},
 		{},
@@ -733,7 +735,7 @@ func TestRichEdit_HTMLRoundTrip(t *testing.T) {
 	if len(a) != len(b) {
 		t.Fatalf("абзацев %d и %d\n%s", len(a), len(b), html)
 	}
-	if b[0].Align != TextAlignCenter || !b[0].Runs[1].IsBold() || b[0].Runs[2].Link != "https://a.b" ||
+	if b[0].Align != base.TextAlignCenter || !b[0].Runs[1].IsBold() || b[0].Runs[2].Link != "https://a.b" ||
 		!b[2].Runs[0].Underline {
 		t.Errorf("оформление после круга: %+v", b)
 	}
@@ -762,13 +764,13 @@ func TestRichEdit_OnChange(t *testing.T) {
 		}
 	}
 	rt.SetCaretPosition(5)
-	edKey(rt, KeyLeft, 0)
+	edKey(rt, base.KeyLeft, 0)
 	want(0, "движение")
 	edType(rt, "ab")
 	want(2, "ввод двух символов")
-	edKey(rt, KeyBackspace, 0)
+	edKey(rt, base.KeyBackspace, 0)
 	want(3, "Backspace")
-	edKey(rt, KeyEnter, 0)
+	edKey(rt, base.KeyEnter, 0)
 	want(4, "Enter")
 	rt.SelectAll()
 	rt.ToggleBold()
@@ -778,17 +780,17 @@ func TestRichEdit_OnChange(t *testing.T) {
 	rt.SetCaretPosition(0)
 	rt.ToggleBold()
 	want(6, "жирный без выделения (стиль набора) — текст не менялся")
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	want(7, "отмена")
-	edKey(rt, KeyY, ModCtrl)
+	edKey(rt, base.KeyY, base.ModCtrl)
 	want(8, "возврат")
 	rt.SetCaretPosition(0)
 	rt.Select(0, 2)
 	rt.Copy()
 	want(8, "копирование")
-	edKey(rt, KeyX, ModCtrl)
+	edKey(rt, base.KeyX, base.ModCtrl)
 	want(9, "вырезание")
-	edKey(rt, KeyV, ModCtrl)
+	edKey(rt, base.KeyV, base.ModCtrl)
 	want(10, "вставка")
 	rt.SetSelectionStyle(func(r *RichRun) {})
 	want(10, "стиль без видимых изменений")
@@ -799,7 +801,7 @@ func TestRichEdit_OnChange(t *testing.T) {
 	rt.AppendParagraph(plainPara("p"))
 	rt.Clear()
 	want(10, "программная замена содержимого")
-	if edKey(rt, KeyZ, ModCtrl); calls != 10 {
+	if edKey(rt, base.KeyZ, base.ModCtrl); calls != 10 {
 		t.Errorf("пустая отмена вызвала OnChange: %d", calls)
 	}
 }
@@ -842,14 +844,14 @@ func TestRichEdit_IMECompositionCommitOneUndo(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("OnChange на коммите: %d, ждали 1", calls)
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "ab" {
 		t.Fatalf("отмена коммита: %q", rt.Text())
 	}
 	if rt.CanUndo() {
 		t.Fatal("в истории больше одной записи на весь ввод")
 	}
-	edKey(rt, KeyY, ModCtrl)
+	edKey(rt, base.KeyY, base.ModCtrl)
 	if rt.Text() != "ab日本" {
 		t.Fatalf("возврат коммита: %q", rt.Text())
 	}
@@ -866,7 +868,7 @@ func TestRichEdit_IMEKeepsSurroundingHistory(t *testing.T) {
 		t.Fatalf("текст %q", rt.Text())
 	}
 	for _, want := range []string{"x亜", "x", ""} {
-		edKey(rt, KeyZ, ModCtrl)
+		edKey(rt, base.KeyZ, base.ModCtrl)
 		if rt.Text() != want {
 			t.Fatalf("после отмены %q, ждали %q", rt.Text(), want)
 		}
@@ -881,7 +883,7 @@ func TestRichEdit_IMEKeepsSurroundingHistory(t *testing.T) {
 func TestRichEdit_IMEOverSelectionAndCancel(t *testing.T) {
 	rt := edRT(plainPara("abc"))
 	edType(rt, "q") // запись в истории
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if !rt.CanRedo() {
 		t.Fatal("нет возврата для проверки")
 	}
@@ -907,7 +909,7 @@ func TestRichEdit_IMEOverSelectionAndCancel(t *testing.T) {
 	if rt.Text() != "日c" {
 		t.Fatalf("коммит поверх выделения: %q", rt.Text())
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "abc" || rt.CanUndo() {
 		t.Fatalf("одна отмена должна вернуть выделенное: %q undo=%v", rt.Text(), rt.CanUndo())
 	}
@@ -943,7 +945,7 @@ func TestRichEdit_IMECommitWithoutCompositionAndViewMode(t *testing.T) {
 	}
 }
 
-func isIMEComposer(w any) bool { _, ok := w.(IMEComposer); return ok }
+func isIMEComposer(w any) bool { _, ok := w.(base.IMEComposer); return ok }
 
 // Клавиша, щелчок и потеря фокуса принимают композицию как текст — она не
 // остаётся висеть подчёркнутой в документе, а история получает одну запись.
@@ -952,7 +954,7 @@ func TestRichEdit_IMEFinishedByOtherInput(t *testing.T) {
 	rt.SetFocused(true)
 	rt.SetCaretPosition(2)
 	rt.IMESetComposition("に", 1)
-	edKey(rt, KeyEnter, 0)
+	edKey(rt, base.KeyEnter, 0)
 	if rt.Text() != "abに\n" {
 		t.Fatalf("Enter поверх композиции: %q", rt.Text())
 	}
@@ -978,7 +980,7 @@ func TestRichEdit_IMEFinishedByOtherInput(t *testing.T) {
 	if runs := edRuns(rt, 0); rt.Text() != "abに" || len(runs) != 1 || runs[0].Underline {
 		t.Fatalf("потеря фокуса во время композиции: %q %+v", rt.Text(), runs)
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "ab" {
 		t.Errorf("отмена принятой при потере фокуса композиции: %q", rt.Text())
 	}
@@ -1007,11 +1009,11 @@ func TestRichEdit_AppendAndHistory(t *testing.T) {
 	if rt.CanRedo() {
 		t.Error("допись создала возврат")
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "a\ntail" {
 		t.Fatalf("отмена после AppendParagraph: %q", rt.Text())
 	}
-	edKey(rt, KeyY, ModCtrl)
+	edKey(rt, base.KeyY, base.ModCtrl)
 	if rt.Text() != "ab\ntail" {
 		t.Fatalf("возврат после AppendParagraph: %q", rt.Text())
 	}
@@ -1067,7 +1069,7 @@ func TestRichEdit_ScrollsToCaret(t *testing.T) {
 	rt.SetBounds(image.Rect(0, 0, 300, 60))
 	for i := 0; i < 12; i++ {
 		edType(rt, "line")
-		edKey(rt, KeyEnter, 0)
+		edKey(rt, base.KeyEnter, 0)
 	}
 	if rt.ScrollY() == 0 {
 		t.Fatal("текст ушёл за нижний край, а прокрутки нет")
@@ -1089,15 +1091,15 @@ func TestRichEdit_Accessibility(t *testing.T) {
 		t.Error("редактор объявлен только для чтения")
 	}
 	for _, s := range rt.AccessInfo().States {
-		if s == StateReadOnly {
+		if s == base.StateReadOnly {
 			t.Error("у редактора состояние «только чтение»")
 		}
 	}
-	var setter AccessTextSetter = rt
+	var setter base.AccessTextSetter = rt
 	if !setter.AccessSetText("new\ntext") || rt.Text() != "new\ntext" || calls != 1 {
 		t.Fatalf("AccessSetText: %q calls=%d", rt.Text(), calls)
 	}
-	edKey(rt, KeyZ, ModCtrl)
+	edKey(rt, base.KeyZ, base.ModCtrl)
 	if rt.Text() != "old" {
 		t.Errorf("отмена AccessSetText: %q", rt.Text())
 	}
@@ -1130,7 +1132,7 @@ func TestRichEdit_ContextMenu(t *testing.T) {
 		t.Errorf("щелчок внутри выделения снял его: %q", rt.SelectedText())
 	}
 	// Своё меню приложения важнее.
-	rt.SetContextMenu(NewPopupMenu())
+	rt.SetContextMenu(base.NewPopupMenu())
 	if m := rt.ContextMenuAt(10, 8); m != nil {
 		t.Error("встроенное меню перебило меню приложения")
 	}
@@ -1204,10 +1206,10 @@ func TestRichEdit_ConcurrentUse(t *testing.T) {
 	run(func(i int) { rt.Draw(&rtRec{}) })
 	run(func(i int) {
 		edType(rt, "ab")
-		edKey(rt, KeyEnter, 0)
-		edKey(rt, KeyBackspace, 0)
-		edKey(rt, KeyZ, ModCtrl)
-		edKey(rt, KeyY, ModCtrl)
+		edKey(rt, base.KeyEnter, 0)
+		edKey(rt, base.KeyBackspace, 0)
+		edKey(rt, base.KeyZ, base.ModCtrl)
+		edKey(rt, base.KeyY, base.ModCtrl)
 		// Меню открывает и разбирает ввод поток событий — тот же, что клавиши;
 		// из потока кадра его только рисуют.
 		rt.ContextMenuAt(20, 20)

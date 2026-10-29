@@ -1,4 +1,4 @@
-package xaml
+package richtext
 
 import (
 	"image"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v3/widget/xaml"
 )
 
 const richXAML = `<Canvas Width="400" Height="300">
@@ -24,12 +25,12 @@ const richXAML = `<Canvas Width="400" Height="300">
 </Canvas>`
 
 func TestRichText_XAML(t *testing.T) {
-	root, reg, err := LoadUIFromXAML([]byte(richXAML))
+	root, reg, err := xaml.LoadUIFromXAML([]byte(richXAML))
 	if err != nil {
 		t.Fatalf("разбор разметки: %v", err)
 	}
-	defer ReleaseXAML(root)
-	rt, ok := reg["doc"].(*base.RichText)
+	defer xaml.ReleaseXAML(root)
+	rt, ok := reg["doc"].(*RichText)
 	if !ok {
 		t.Fatalf("doc — %T, ждали *RichText", reg["doc"])
 	}
@@ -64,7 +65,7 @@ func TestRichText_XAML(t *testing.T) {
 	if p.Align != base.TextAlignCenter {
 		t.Errorf("выравнивание %v", p.Align)
 	}
-	want := []base.RichRun{
+	want := []RichRun{
 		{Text: "plain, "},
 		{Text: "red", Color: color.RGBA{R: 255, A: 255}, Font: base.BuiltinFontItalic},
 		{Text: " bold-run", Font: base.BuiltinFontBold},
@@ -89,7 +90,7 @@ func TestRichText_XAML(t *testing.T) {
 }
 
 func TestRichText_XAMLPlainTextAndInheritance(t *testing.T) {
-	root, reg, err := LoadUIFromXAML([]byte(`<Canvas Width="100" Height="100">
+	root, reg, err := xaml.LoadUIFromXAML([]byte(`<Canvas Width="100" Height="100">
 	  <RichText x:Name="a" Text="one" Width="100" Height="50"/>
 	  <RichText x:Name="b" Width="100" Height="50">
 	    <Paragraph FontWeight="Bold" Foreground="#00FF00">
@@ -102,11 +103,11 @@ func TestRichText_XAMLPlainTextAndInheritance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ReleaseXAML(root)
-	if got := reg["a"].(*base.RichText).Text(); got != "one" {
+	defer xaml.ReleaseXAML(root)
+	if got := reg["a"].(*RichText).Text(); got != "one" {
 		t.Errorf("Text=%q", got)
 	}
-	runs := reg["b"].(*base.RichText).Paragraphs()[0].Runs
+	runs := reg["b"].(*RichText).Paragraphs()[0].Runs
 	if len(runs) != 3 {
 		t.Fatalf("ранов %d", len(runs))
 	}
@@ -120,5 +121,38 @@ func TestRichText_XAMLPlainTextAndInheritance(t *testing.T) {
 	// Явный FontFamily важнее жирности абзаца: начертание не синтезируется.
 	if runs[2].Font != "Mono" {
 		t.Errorf("вложенный Span: шрифт %q", runs[2].Font)
+	}
+}
+
+func init() {
+	// Тег <RichText> — в реестре по умолчанию для тестов пакета (как его
+	// регистрирует фасад widget).
+	RegisterXAML(xaml.Default())
+}
+
+// Дети <RichText> — абзацы, но тег-свойство <RichText.ContextMenu> загрузчик
+// строит; RichText из пользовательского тега (RegisterXAMLWidget) тоже не
+// превращает абзацы в «неизвестные элементы» (OwnsMarkupChildren).
+func TestRichText_XAMLChildrenOwnership(t *testing.T) {
+	_, reg, err := xaml.LoadUIFromXAML([]byte(`<RichText x:Name="doc">
+  <RichText.ContextMenu>
+    <ContextMenu><MenuItem Header="hi"/></ContextMenu>
+  </RichText.ContextMenu>
+  <Paragraph><Run Text="text"/></Paragraph>
+</RichText>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, ok := reg["doc"].(*RichText)
+	if !ok || doc.ContextMenu == nil || len(doc.ContextMenu.Items()) != 1 {
+		t.Fatalf("<RichText.ContextMenu> не построен: %T", reg["doc"])
+	}
+
+	xaml.RegisterXAMLWidget("TestHelpText", func(xaml.XAMLAttrs) (base.Widget, error) {
+		return NewRichText(), nil
+	})
+	t.Cleanup(func() { xaml.UnregisterXAMLWidget("TestHelpText") })
+	if _, _, err := xaml.LoadUIFromXAML([]byte(`<TestHelpText><Paragraph><Run Text="hi"/></Paragraph></TestHelpText>`)); err != nil {
+		t.Fatalf("RichText из пользовательского тега: %v", err)
 	}
 }

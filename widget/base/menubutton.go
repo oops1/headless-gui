@@ -38,7 +38,7 @@ type MenuButton struct {
 	menuDisabled   bool // стрелка (у простой кнопки — вся кнопка) недоступна
 	mainPressed    bool // основная часть нажата и ждёт отпускания
 
-	menu rowMenuHost
+	menu RowMenuHost
 }
 
 // NewMenuButton создаёт кнопку, целиком открывающую меню.
@@ -77,7 +77,7 @@ func (mb *MenuButton) SetMenuEnabled(v bool) {
 	}
 	mb.menuDisabled = !v
 	if !v {
-		mb.menu.dismiss()
+		mb.menu.Dismiss()
 	}
 	mb.Invalidate()
 }
@@ -91,17 +91,17 @@ func (mb *MenuButton) OpenMenu() bool { return mb.openMenu(image.Point{}, false)
 
 // CloseMenu закрывает меню.
 func (mb *MenuButton) CloseMenu() {
-	if mb.menu.open() {
-		mb.menu.dismiss()
+	if mb.menu.Open() {
+		mb.menu.Dismiss()
 		mb.Invalidate()
 	}
 }
 
 // IsMenuOpen сообщает, открыто ли меню.
-func (mb *MenuButton) IsMenuOpen() bool { return mb.menu.open() }
+func (mb *MenuButton) IsMenuOpen() bool { return mb.menu.Open() }
 
 // openMenu собирает и показывает меню. at — точка нажатия: отпускание в ней же
-// меню не гасит (см. rowMenuHost.routeMouse).
+// меню не гасит (см. RowMenuHost.RouteMouse).
 func (mb *MenuButton) openMenu(at image.Point, byMouse bool) bool {
 	if !mb.IsEnabled() || mb.menuDisabled {
 		return false
@@ -109,7 +109,7 @@ func (mb *MenuButton) openMenu(at image.Point, byMouse bool) bool {
 	if mb.OnOpening != nil {
 		mb.OnOpening()
 	}
-	m := mb.menu.build(mb, at.X, at.Y, append([]MenuItem(nil), mb.Items...))
+	m := mb.menu.Build(mb, at.X, at.Y, append([]MenuItem(nil), mb.Items...))
 	if m == nil {
 		return false
 	}
@@ -145,7 +145,7 @@ func (mb *MenuButton) Draw(ctx DrawContext) {
 	if b.Empty() {
 		return
 	}
-	open := mb.menu.open()
+	open := mb.menu.Open()
 	main, arrow := mb.parts()
 
 	if !mb.Split {
@@ -250,8 +250,8 @@ func (mb *MenuButton) OnMouseButton(e MouseEvent) bool {
 	if !mb.IsEnabled() {
 		return false
 	}
-	wasOpen := mb.menu.open()
-	if mb.menu.routeMouse(e) {
+	wasOpen := mb.menu.Open()
+	if mb.menu.RouteMouse(e) {
 		return true
 	}
 	if e.Button != MouseLeft {
@@ -292,7 +292,7 @@ func (mb *MenuButton) OnMouseButton(e MouseEvent) bool {
 
 // OnMouseMove ведёт подсветку пунктов открытого меню и наведение на кнопку.
 func (mb *MenuButton) OnMouseMove(x, y int) {
-	if mb.menu.routeMove(x, y) {
+	if mb.menu.RouteMove(x, y) {
 		return
 	}
 	mb.Button.OnMouseMove(x, y)
@@ -301,7 +301,7 @@ func (mb *MenuButton) OnMouseMove(x, y int) {
 // OnKeyEvent: открытому меню — навигация по пунктам; ↓ открывает меню; Enter
 // и Space выполняют действие разделённой кнопки или открывают меню простой.
 func (mb *MenuButton) OnKeyEvent(e KeyEvent) {
-	if mb.menu.routeKey(e) {
+	if mb.menu.RouteKey(e) {
 		mb.Invalidate()
 		return
 	}
@@ -323,18 +323,18 @@ func (mb *MenuButton) OnKeyEvent(e KeyEvent) {
 // ─── Overlay ────────────────────────────────────────────────────────────────
 
 // HasOverlay реализует OverlayDrawer.
-func (mb *MenuButton) HasOverlay() bool { return mb.menu.open() }
+func (mb *MenuButton) HasOverlay() bool { return mb.menu.Open() }
 
 // DrawOverlay рисует открытое меню поверх UI.
-func (mb *MenuButton) DrawOverlay(ctx DrawContext) { mb.menu.drawOverlay(ctx) }
+func (mb *MenuButton) DrawOverlay(ctx DrawContext) { mb.menu.DrawOverlay(ctx) }
 
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
-func (mb *MenuButton) OverlayBounds() image.Rectangle { return mb.menu.overlayBounds() }
+func (mb *MenuButton) OverlayBounds() image.Rectangle { return mb.menu.OverlayBounds() }
 
 // Dismiss закрывает меню. Реализует Dismissable.
 func (mb *MenuButton) Dismiss() {
-	if mb.menu.open() {
-		mb.menu.dismiss()
+	if mb.menu.Open() {
+		mb.menu.Dismiss()
 		mb.Invalidate()
 	}
 }

@@ -1,4 +1,4 @@
-package base
+package richtext
 
 import (
 	"image"
@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // Тесты виджета RichText без окна: измеритель подменён предсказуемым (5 px на
@@ -24,7 +26,7 @@ func newRT(w, h int, paras ...RichParagraph) *RichText {
 
 // rtRec — контекст, записывающий примитивы с координатами и цветом.
 type rtRec struct {
-	DrawContext
+	base.DrawContext
 	texts []rtText
 	rects []rtRect
 	clip  image.Rectangle
@@ -80,16 +82,16 @@ func (c *rtRec) textOf(s string) *rtText {
 }
 
 func rtClick(rt *RichText, x, y, clicks int) {
-	rt.OnMouseButton(MouseEvent{X: x, Y: y, Button: MouseLeft, Pressed: true, Clicks: clicks})
-	rt.OnMouseButton(MouseEvent{X: x, Y: y, Button: MouseLeft, Pressed: false, Clicks: clicks})
+	rt.OnMouseButton(base.MouseEvent{X: x, Y: y, Button: base.MouseLeft, Pressed: true, Clicks: clicks})
+	rt.OnMouseButton(base.MouseEvent{X: x, Y: y, Button: base.MouseLeft, Pressed: false, Clicks: clicks})
 }
 
 func rtPress(rt *RichText, x, y, clicks int) {
-	rt.OnMouseButton(MouseEvent{X: x, Y: y, Button: MouseLeft, Pressed: true, Clicks: clicks})
+	rt.OnMouseButton(base.MouseEvent{X: x, Y: y, Button: base.MouseLeft, Pressed: true, Clicks: clicks})
 }
 
 func rtRelease(rt *RichText, x, y, clicks int) {
-	rt.OnMouseButton(MouseEvent{X: x, Y: y, Button: MouseLeft, Pressed: false, Clicks: clicks})
+	rt.OnMouseButton(base.MouseEvent{X: x, Y: y, Button: base.MouseLeft, Pressed: false, Clicks: clicks})
 }
 
 func plainPara(text string) RichParagraph { return RichParagraph{Runs: []RichRun{{Text: text}}} }
@@ -162,25 +164,25 @@ func TestRichText_SelectionAcrossParagraphs(t *testing.T) {
 // ─── Копирование ────────────────────────────────────────────────────────────
 
 func TestRichText_CopyPutsPlainAndHTML(t *testing.T) {
-	UseMemoryClipboard()
+	base.UseMemoryClipboard()
 	red := color.RGBA{R: 255, A: 255}
 	rt := newRT(400, 200,
 		RichParagraph{Runs: []RichRun{
 			{Text: "Hello "},
-			{Text: "bold", Font: BuiltinFontBold, Color: red},
+			{Text: "bold", Font: base.BuiltinFontBold, Color: red},
 			{Text: " "},
 			{Text: "link", Link: "http://x/?a=1&b=2"},
 		}},
 		RichParagraph{Runs: []RichRun{{Text: "second", Size: 20, Strike: true}},
-			Align: TextAlignCenter, Indent: 6},
+			Align: base.TextAlignCenter, Indent: 6},
 	)
 	rt.SelectAll()
-	rt.OnKeyEvent(KeyEvent{Code: KeyC, Mod: ModCtrl, Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Code: base.KeyC, Mod: base.ModCtrl, Pressed: true})
 
-	if got := ClipboardGetText(); got != "Hello bold link\nsecond" {
+	if got := base.ClipboardGetText(); got != "Hello bold link\nsecond" {
 		t.Errorf("простой текст %q", got)
 	}
-	html, ok := ClipboardHTML()
+	html, ok := base.ClipboardHTML()
 	if !ok {
 		t.Fatal("HTML в буфер не попал")
 	}
@@ -205,18 +207,18 @@ func TestRichText_CopyPutsPlainAndHTML(t *testing.T) {
 }
 
 func TestRichText_CopyPartialAndEscaping(t *testing.T) {
-	UseMemoryClipboard()
+	base.UseMemoryClipboard()
 	rt := newRT(400, 200, RichParagraph{Runs: []RichRun{
-		{Text: "ab<c>"}, {Text: "&d\ne", Font: BuiltinFontItalic},
+		{Text: "ab<c>"}, {Text: "&d\ne", Font: base.BuiltinFontItalic},
 	}})
 	rt.Select(1, 7) // "b<c>&d"
 	if !rt.Copy() {
 		t.Fatal("Copy вернул false при непустом выделении")
 	}
-	if got := ClipboardGetText(); got != "b<c>&d" {
+	if got := base.ClipboardGetText(); got != "b<c>&d" {
 		t.Errorf("простой текст %q", got)
 	}
-	html, _ := ClipboardHTML()
+	html, _ := base.ClipboardHTML()
 	if !strings.Contains(html, "b&lt;c&gt;") || !strings.Contains(html, "&amp;d") {
 		t.Errorf("разметка не экранирована:\n%s", html)
 	}
@@ -230,27 +232,27 @@ func TestRichText_CopyPartialAndEscaping(t *testing.T) {
 	// Переводы строки внутри рана — <br>.
 	rt.Select(5, 9)
 	rt.Copy()
-	if html, _ = ClipboardHTML(); !strings.Contains(html, "<br>") {
+	if html, _ = base.ClipboardHTML(); !strings.Contains(html, "<br>") {
 		t.Errorf("перевод строки не стал <br>:\n%s", html)
 	}
 }
 
 func TestRichText_CopyWithoutSelectionKeepsClipboard(t *testing.T) {
-	UseMemoryClipboard()
-	ClipboardSetText("prior")
+	base.UseMemoryClipboard()
+	base.ClipboardSetText("prior")
 	rt := newRT(200, 100, plainPara("text"))
 	if rt.Copy() {
 		t.Error("Copy без выделения вернул true")
 	}
-	rt.OnKeyEvent(KeyEvent{Code: KeyC, Mod: ModCtrl, Pressed: true})
-	if got := ClipboardGetText(); got != "prior" {
+	rt.OnKeyEvent(base.KeyEvent{Code: base.KeyC, Mod: base.ModCtrl, Pressed: true})
+	if got := base.ClipboardGetText(); got != "prior" {
 		t.Errorf("буфер затёрт: %q", got)
 	}
 }
 
 // Ссылка с исполняемой схемой в HTML не выгружается.
 func TestRichText_CopyDropsDangerousLinks(t *testing.T) {
-	UseMemoryClipboard()
+	base.UseMemoryClipboard()
 	rt := newRT(300, 100, RichParagraph{Runs: []RichRun{
 		{Text: "x", Link: "java\tscript:alert(1)"},
 		{Text: "y", Link: "  JavaScript:alert(1)"},
@@ -259,7 +261,7 @@ func TestRichText_CopyDropsDangerousLinks(t *testing.T) {
 	}})
 	rt.SelectAll()
 	rt.Copy()
-	html, _ := ClipboardHTML()
+	html, _ := base.ClipboardHTML()
 	if strings.Contains(strings.ToLower(html), "script") || strings.Contains(html, "data:") {
 		t.Errorf("опасная ссылка попала в буфер:\n%s", html)
 	}
@@ -270,11 +272,11 @@ func TestRichText_CopyDropsDangerousLinks(t *testing.T) {
 
 func TestRichText_CtrlAAndKeysNeedPress(t *testing.T) {
 	rt := newRT(200, 100, plainPara("abc"))
-	rt.OnKeyEvent(KeyEvent{Code: KeyA, Mod: ModCtrl, Pressed: false})
+	rt.OnKeyEvent(base.KeyEvent{Code: base.KeyA, Mod: base.ModCtrl, Pressed: false})
 	if rt.SelectedText() != "" {
 		t.Error("отпускание клавиши выделило текст")
 	}
-	rt.OnKeyEvent(KeyEvent{Code: KeyA, Mod: ModCtrl, Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Code: base.KeyA, Mod: base.ModCtrl, Pressed: true})
 	if rt.SelectedText() != "abc" {
 		t.Error("Ctrl+A не выделил всё")
 	}
@@ -343,18 +345,18 @@ func TestRichText_CursorOverLinkIsHand(t *testing.T) {
 	rt := newRT(300, 100, RichParagraph{Runs: []RichRun{
 		{Text: "see "}, {Text: "here", Link: "u://1"},
 	}})
-	if c := rt.Cursor(4+30, 8); c != CursorHand {
+	if c := rt.Cursor(4+30, 8); c != base.CursorHand {
 		t.Errorf("над ссылкой курсор %v, ждали руку", c)
 	}
-	if c := rt.Cursor(4+5, 8); c != CursorIBeam {
+	if c := rt.Cursor(4+5, 8); c != base.CursorIBeam {
 		t.Errorf("над текстом курсор %v, ждали I-образный", c)
 	}
 	// Под строкой ссылки нет: рядом с буквами рука не нужна.
-	if c := rt.Cursor(4+30, 80); c != CursorIBeam {
+	if c := rt.Cursor(4+30, 80); c != base.CursorIBeam {
 		t.Errorf("под текстом курсор %v", c)
 	}
 	rt.SetEnabled(false)
-	if c := rt.Cursor(4+30, 8); c != CursorArrow {
+	if c := rt.Cursor(4+30, 8); c != base.CursorArrow {
 		t.Errorf("у отключённого виджета курсор %v", c)
 	}
 }
@@ -387,12 +389,12 @@ func TestRichText_ScrollbarAppearsAndWheelScrolls(t *testing.T) {
 		t.Errorf("ширина раскладки %d, ждали %d (без полосы)", w, 100-8-richBarW)
 	}
 
-	rt.OnMouseButton(MouseEvent{X: 20, Y: 20, Button: MouseWheelDown, Pressed: true})
+	rt.OnMouseButton(base.MouseEvent{X: 20, Y: 20, Button: base.MouseWheelDown, Pressed: true})
 	if got := rt.ScrollY(); got != 30 {
 		t.Errorf("после тика колеса прокрутка %d, ждали 30 (три строки)", got)
 	}
-	rt.OnMouseButton(MouseEvent{X: 20, Y: 20, Button: MouseWheelUp, Pressed: true})
-	rt.OnMouseButton(MouseEvent{X: 20, Y: 20, Button: MouseWheelUp, Pressed: true})
+	rt.OnMouseButton(base.MouseEvent{X: 20, Y: 20, Button: base.MouseWheelUp, Pressed: true})
+	rt.OnMouseButton(base.MouseEvent{X: 20, Y: 20, Button: base.MouseWheelUp, Pressed: true})
 	if got := rt.ScrollY(); got != 0 {
 		t.Errorf("вверх за предел: %d, ждали 0", got)
 	}
@@ -402,7 +404,7 @@ func TestRichText_ScrollbarAppearsAndWheelScrolls(t *testing.T) {
 	}
 
 	// Колесо вне виджета не принимается.
-	if rt.OnMouseButton(MouseEvent{X: 500, Y: 20, Button: MouseWheelDown, Pressed: true}) {
+	if rt.OnMouseButton(base.MouseEvent{X: 500, Y: 20, Button: base.MouseWheelDown, Pressed: true}) {
 		t.Error("колесо вне виджета поглощено")
 	}
 }
@@ -410,7 +412,7 @@ func TestRichText_ScrollbarAppearsAndWheelScrolls(t *testing.T) {
 // Нечего прокручивать — колесо уходит родителю.
 func TestRichText_WheelBubblesWhenContentFits(t *testing.T) {
 	rt := newRT(200, 200, plainPara("short"))
-	if rt.OnMouseButton(MouseEvent{X: 20, Y: 20, Button: MouseWheelDown, Pressed: true}) {
+	if rt.OnMouseButton(base.MouseEvent{X: 20, Y: 20, Button: base.MouseWheelDown, Pressed: true}) {
 		t.Error("колесо поглощено, хотя прокручивать нечего")
 	}
 	if rt.OnMouseWheelPixels(20, 20, 0, 10) {
@@ -483,19 +485,19 @@ func TestRichText_ThumbDragAndTrackClick(t *testing.T) {
 
 func TestRichText_KeyboardScroll(t *testing.T) {
 	rt := newRT(100, 60, manyParas(30)...)
-	rt.OnKeyEvent(KeyEvent{Code: KeyDown, Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Code: base.KeyDown, Pressed: true})
 	if got := rt.ScrollY(); got != 10 {
 		t.Errorf("Down: %d, ждали 10", got)
 	}
-	rt.OnKeyEvent(KeyEvent{Code: KeyPageDown, Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Code: base.KeyPageDown, Pressed: true})
 	if got := rt.ScrollY(); got != 10+50 {
 		t.Errorf("PgDn: %d, ждали 60 (высота минус строка)", got)
 	}
-	rt.OnKeyEvent(KeyEvent{Code: KeyEnd, Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Code: base.KeyEnd, Pressed: true})
 	if got := rt.ScrollY(); got != 308-60 {
 		t.Errorf("End: %d", got)
 	}
-	rt.OnKeyEvent(KeyEvent{Code: KeyHome, Pressed: true})
+	rt.OnKeyEvent(base.KeyEvent{Code: base.KeyHome, Pressed: true})
 	if got := rt.ScrollY(); got != 0 {
 		t.Errorf("Home: %d", got)
 	}
@@ -733,7 +735,7 @@ func TestRichText_DrawSelection(t *testing.T) {
 func TestRichText_AppendAndText(t *testing.T) {
 	rt := newRT(200, 100)
 	rt.AppendRun(RichRun{Text: "Hello "})
-	rt.AppendRun(RichRun{Text: "world", Font: BuiltinFontBold})
+	rt.AppendRun(RichRun{Text: "world", Font: base.BuiltinFontBold})
 	rt.AppendParagraph(RichParagraph{Runs: []RichRun{{Text: "second\r\nline"}}})
 	if got := rt.Text(); got != "Hello world\nsecond\nline" {
 		t.Errorf("текст %q", got)
@@ -844,7 +846,7 @@ func TestRichText_LayoutCache(t *testing.T) {
 
 func TestRichText_Accessibility(t *testing.T) {
 	rt := newRT(200, 100, plainPara("one"), plainPara("two"))
-	tp, ok := AccessTextOf(rt)
+	tp, ok := base.AccessTextOf(rt)
 	if !ok {
 		t.Fatal("RichText не отдаёт AccessTextProvider")
 	}
@@ -862,22 +864,22 @@ func TestRichText_Accessibility(t *testing.T) {
 		t.Errorf("выделение %d..%d, ждали 2..5", a, b)
 	}
 
-	node := BuildAccessTree(rt, nil)
-	if node.Role != RoleDocument {
+	node := base.BuildAccessTree(rt, nil)
+	if node.Role != base.RoleDocument {
 		t.Errorf("роль %q, ждали документ", node.Role)
 	}
 	hasRO := false
 	for _, s := range node.States {
-		hasRO = hasRO || s == StateReadOnly
+		hasRO = hasRO || s == base.StateReadOnly
 	}
 	if !hasRO {
 		t.Errorf("нет состояния «только чтение»: %v", node.States)
 	}
 	rt.SetEnabled(false)
-	node = BuildAccessTree(rt, nil)
+	node = base.BuildAccessTree(rt, nil)
 	dis := false
 	for _, s := range node.States {
-		dis = dis || s == StateDisabled
+		dis = dis || s == base.StateDisabled
 	}
 	if !dis {
 		t.Errorf("выключенный виджет без состояния disabled: %v", node.States)
@@ -889,7 +891,7 @@ func TestRichText_Accessibility(t *testing.T) {
 // Отрисовка, события мыши, копирование и дописывание идут из разных горутин —
 // под -race это должно быть тихо.
 func TestRichText_ConcurrentUse(t *testing.T) {
-	UseMemoryClipboard()
+	base.UseMemoryClipboard()
 	rt := newRT(160, 80, manyParas(10)...)
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
@@ -915,8 +917,8 @@ func TestRichText_ConcurrentUse(t *testing.T) {
 	})
 	run(func(i int) { rt.SelectAll(); rt.Copy(); _ = rt.SelectedText() })
 	run(func(i int) {
-		rt.OnMouseButton(MouseEvent{X: 20, Y: 20, Button: MouseWheelDown, Pressed: true})
-		rt.OnKeyEvent(KeyEvent{Code: KeyHome, Pressed: true})
+		rt.OnMouseButton(base.MouseEvent{X: 20, Y: 20, Button: base.MouseWheelDown, Pressed: true})
+		rt.OnKeyEvent(base.KeyEvent{Code: base.KeyHome, Pressed: true})
 		_ = rt.Cursor(30, 30)
 	})
 	run(func(i int) { rt.SetBounds(image.Rect(0, 0, 120+i%80, 80)) })

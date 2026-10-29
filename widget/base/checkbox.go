@@ -96,7 +96,7 @@ func checkBoxContentWidth(cb *CheckBox) int {
 	if cb.Text == "" {
 		return boxSize
 	}
-	return boxSize + textPad + MeasureTextFor(cb, cb.Text, fontSizeOrDefault(cb.FontSize)) + focusPad
+	return boxSize + textPad + MeasureTextFor(cb, cb.Text, FontSizeOrDefault(cb.FontSize)) + focusPad
 }
 
 // Draw рисует CheckBox: квадратик 16×16 слева + текст справа.
@@ -163,7 +163,7 @@ func (cb *CheckBox) Draw(ctx DrawContext) {
 	const textPad = 6
 	textX := boxX + boxSize + textPad
 	textY := b.Min.Y + (b.Dy()-13)/2
-	sizePt := fontSizeOrDefault(cb.FontSize)
+	sizePt := FontSizeOrDefault(cb.FontSize)
 	ctx.DrawTextSize(cb.Text, textX, textY, sizePt, cb.TextColor)
 
 	// Классика Win2000: пунктирная рамка фокуса вокруг текста метки.

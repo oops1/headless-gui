@@ -23,8 +23,12 @@ func PremulAlpha(c color.RGBA, a uint8) color.RGBA {
 	}
 }
 
-// caretBlinkHalfPeriodMs — полупериод мигания каретки (мс, стиль Windows).
-const caretBlinkHalfPeriodMs = 530
+// CaretBlinkHalfPeriodMs — полупериод мигания каретки (мс, стиль Windows).
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+const CaretBlinkHalfPeriodMs = 530
 
 // CaretPhaseAt возвращает фазу мигания каретки (true — каретка видима)
 // для момента времени ms (Unix-миллисекунды).
@@ -32,7 +36,7 @@ const caretBlinkHalfPeriodMs = 530
 // Служебная: для подпакетов widget, в фасад не входит.
 //
 //facadegen:skip
-func CaretPhaseAt(ms int64) bool { return (ms/caretBlinkHalfPeriodMs)%2 == 0 }
+func CaretPhaseAt(ms int64) bool { return (ms/CaretBlinkHalfPeriodMs)%2 == 0 }
 
 // IsWordRune — true для букв/цифр/подчёркивания (символы одного «слова»).
 //
@@ -51,4 +55,17 @@ func IsWordRune(r rune) bool {
 	}
 	// Не-ASCII (кириллица и т.п.) считаем частью слова, пробелы — нет.
 	return r > 127 && r != ' '
+}
+
+// ClampInt — служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ClampInt(v, lo, hi int) int {
+	if v > hi {
+		v = hi
+	}
+	if v < lo {
+		v = lo
+	}
+	return v
 }

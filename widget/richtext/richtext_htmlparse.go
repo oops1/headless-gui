@@ -1,4 +1,4 @@
-package base
+package richtext
 
 // richtext_htmlparse.go — разбор HTML в абзацы и раны: вставка из буфера обмена.
 //
@@ -28,6 +28,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // Пределы разбора: вложенность и размер определяет чужой документ, а стек
@@ -65,13 +67,13 @@ func (s rhStyle) font() RichRun {
 	r.Text = ""
 	switch {
 	case s.mono:
-		r.Font = BuiltinFontMono
+		r.Font = base.BuiltinFontMono
 	case s.bold && s.italic:
-		r.Font = BuiltinFontBoldItalic
+		r.Font = base.BuiltinFontBoldItalic
 	case s.bold:
-		r.Font = BuiltinFontBold
+		r.Font = base.BuiltinFontBold
 	case s.italic:
-		r.Font = BuiltinFontItalic
+		r.Font = base.BuiltinFontItalic
 	}
 	return r
 }
@@ -82,7 +84,7 @@ type rhFrame struct {
 	name          string
 	st            rhStyle
 	block         bool
-	align         TextAlign
+	align         base.TextAlign
 	indent        int
 	before, after int
 }
@@ -433,7 +435,7 @@ func (p *rhParser) startTag(name string, attrs map[string]string, selfClose bool
 	case "blockquote", "dd":
 		baseIndent += 32
 	case "center":
-		f.align = TextAlignCenter
+		f.align = base.TextAlignCenter
 	case "li":
 		p.pendingBullet, p.bulletStyle = true, f.st
 	case "font":
@@ -686,7 +688,7 @@ func (p *rhParser) flush() {
 
 // rhBlockProps — свойства блока, найденные в style.
 type rhBlockProps struct {
-	align         TextAlign
+	align         base.TextAlign
 	alignSet      bool
 	left          int // margin-left + padding-left, пиксели
 	before, after int
@@ -852,14 +854,14 @@ func rhPx(px float64) int {
 }
 
 // rhParseAlign разбирает выравнивание. justify в модели нет — это левое.
-func rhParseAlign(v string) (TextAlign, bool) {
+func rhParseAlign(v string) (base.TextAlign, bool) {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "left", "start", "justify":
-		return TextAlignLeft, true
+		return base.TextAlignLeft, true
 	case "center":
-		return TextAlignCenter, true
+		return base.TextAlignCenter, true
 	case "right", "end":
-		return TextAlignRight, true
+		return base.TextAlignRight, true
 	}
 	return 0, false
 }
@@ -924,15 +926,15 @@ func rhParseFontSize(v string, parent float64) (float64, bool) {
 	if pt, ok := rhFontSizeWords[lv]; ok {
 		return pt, true
 	}
-	base := parent
-	if base <= 0 {
-		base = 12
+	inherited := parent
+	if inherited <= 0 {
+		inherited = 12
 	}
 	switch lv {
 	case "smaller":
-		return base * 0.83, true
+		return inherited * 0.83, true
 	case "larger":
-		return base * 1.2, true
+		return inherited * 1.2, true
 	}
 	n, unit, ok := rhSplitNumber(lv)
 	if !ok || n <= 0 {
@@ -953,11 +955,11 @@ func rhParseFontSize(v string, parent float64) (float64, bool) {
 	case "mm":
 		pt = n * 72 / 25.4
 	case "em":
-		pt = n * base
+		pt = n * inherited
 	case "rem":
 		pt = n * 12
 	case "%":
-		pt = n / 100 * base
+		pt = n / 100 * inherited
 	default:
 		return 0, false
 	}

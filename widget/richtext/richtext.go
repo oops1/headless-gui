@@ -1,4 +1,4 @@
-package base
+package richtext
 
 // richtext.go — виджет RichText: показ и правка форматированного текста.
 //
@@ -28,6 +28,8 @@ import (
 	"image/color"
 	"strings"
 	"sync"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 const (
@@ -49,7 +51,7 @@ const (
 // Если содержимое выше виджета, справа появляется полоса прокрутки; колесо,
 // PgUp/PgDn, стрелки и Home/End листают текст (в редакторе — двигают каретку).
 type RichText struct {
-	Base
+	base.Base
 
 	mu sync.Mutex
 
@@ -108,8 +110,8 @@ type RichText struct {
 	barDrag, barHover bool
 	barGrab           int
 
-	capMgr  CaptureManager
-	clicks  ClickSeries
+	capMgr  base.CaptureManager
+	clicks  base.ClickSeries
 	focused bool
 
 	// Редактор (richtext_edit.go, richtext_ime.go).
@@ -128,7 +130,7 @@ type RichText struct {
 	// menuMu защищает подмену и чтение меню потоком кадра (HasOverlay,
 	// DrawOverlay); ввод в меню идёт из потока событий без него — см.
 	// OnKeyEvent.
-	menu   rowMenuHost
+	menu   base.RowMenuHost
 	menuMu sync.Mutex
 
 	// Оформление. Нулевая альфа цвета — «взять из темы» не умеет: цвета
@@ -203,7 +205,7 @@ type RichText struct {
 // richLayoutKey — то, для чего посчитана раскладка. Совпадение ключа значит,
 // что кэш годится; любая из частей изменилась — считаем заново.
 type richLayoutKey struct {
-	ms         *MeasureSet // измеритель владельца дерева (owner_services.go)
+	ms         *base.MeasureSet // измеритель владельца дерева (owner_services.go)
 	w, h       int // размер виджета
 	rev        uint64
 	noParas    bool   // «абзацев нет» (см. RichText.noParas)
@@ -228,12 +230,12 @@ func NewRichText() *RichText {
 		LinkUnderline: true,
 	}
 	t.measurer = richUIMeasurer{w: t}
-	t.applyColors(&win10)
+	t.applyColors(base.ActiveTheme())
 	return t
 }
 
 // applyColors берёт цвета из темы.
-func (t *RichText) applyColors(th *Theme) {
+func (t *RichText) applyColors(th *base.Theme) {
 	t.TextColor = th.LabelText
 	t.LinkColor = th.Accent
 	t.FocusBorder = th.InputFocus
@@ -241,12 +243,12 @@ func (t *RichText) applyColors(th *Theme) {
 	if th.TextSelectionBG.A != 0 {
 		t.SelColor = th.TextSelectionBG
 	} else {
-		t.SelColor = PremulAlpha(th.Accent, 110)
+		t.SelColor = base.PremulAlpha(th.Accent, 110)
 	}
 }
 
 // ApplyTheme обновляет цвета по теме.
-func (t *RichText) ApplyTheme(th *Theme) {
+func (t *RichText) ApplyTheme(th *base.Theme) {
 	t.applyColors(th)
 }
 
@@ -415,15 +417,15 @@ func (t *RichText) AppendRun(r RichRun) {
 func (t *RichText) layoutLocked() *richLayout {
 	b := t.Base.Bounds()
 	key := richLayoutKey{
-		ms: MeasureSetOf(t),
-		w:  b.Dx(), h: b.Dy(), rev: t.rdoc.rev, noParas: t.noParas, metricsRev: TextMetricsRev(),
+		ms: base.MeasureSetOf(t),
+		w:  b.Dx(), h: b.Dy(), rev: t.rdoc.rev, noParas: t.noParas, metricsRev: base.TextMetricsRev(),
 		font: t.FontName, size: t.FontSize, gap: t.LineSpacing,
 		padX: t.PaddingX, padY: t.PaddingY,
 	}
 	if t.lay == nil || key != t.layKey {
 		opts := richLayoutOpts{
 			Width: b.Dx() - 2*t.PaddingX,
-			Font:  t.FontName, Size: fontSizeOrDefault(t.FontSize),
+			Font:  t.FontName, Size: base.FontSizeOrDefault(t.FontSize),
 			LineGap: t.LineSpacing, M: t.measurer,
 		}
 		lay := layoutRich(t.parasLocked(), opts)
@@ -438,18 +440,8 @@ func (t *RichText) layoutLocked() *richLayout {
 		}
 		t.lay, t.layKey, t.barOn = lay, key, bar
 	}
-	t.scrollY = clampInt(t.scrollY, 0, t.maxScrollLocked())
+	t.scrollY = base.ClampInt(t.scrollY, 0, t.maxScrollLocked())
 	return t.lay
-}
-
-func clampInt(v, lo, hi int) int {
-	if v > hi {
-		v = hi
-	}
-	if v < lo {
-		v = lo
-	}
-	return v
 }
 
 // maxScrollLocked — наибольшее смещение. Раскладка уже должна быть построена.
@@ -466,7 +458,7 @@ func (t *RichText) maxScrollLocked() int {
 // setScrollLocked ставит прокрутку с зажимом; true — сместилась.
 func (t *RichText) setScrollLocked(y int) bool {
 	t.layoutLocked()
-	y = clampInt(y, 0, t.maxScrollLocked())
+	y = base.ClampInt(y, 0, t.maxScrollLocked())
 	if y == t.scrollY {
 		return false
 	}
@@ -513,7 +505,7 @@ func (t *RichText) barGeomLocked() (track, work, thumb image.Rectangle) {
 	}
 	b := t.Base.Bounds()
 	track = image.Rect(b.Max.X-richBarW, b.Min.Y, b.Max.X, b.Max.Y)
-	top, h := sbWorkArea(track, richBarW)
+	top, h := base.SBWorkArea(track, richBarW)
 	work = image.Rect(track.Min.X, top, track.Max.X, top+h)
 	thumb = richVThumb(work, t.scrollY, t.maxScrollLocked(), b.Dy(), t.lay.Height+2*t.PaddingY)
 	return
@@ -530,14 +522,14 @@ func transposeRect(r image.Rectangle) image.Rectangle {
 
 // richVThumb — ползунок на рабочей зоне work.
 func richVThumb(work image.Rectangle, scroll, maxScroll, viewH, contentH int) image.Rectangle {
-	return transposeRect(HBarThumb(transposeRect(work), float64(scroll), float64(maxScroll),
+	return transposeRect(base.HBarThumb(transposeRect(work), float64(scroll), float64(maxScroll),
 		float64(viewH), float64(contentH)))
 }
 
 // ─── Отрисовка ──────────────────────────────────────────────────────────────
 
 // Draw рисует только видимые строки.
-func (t *RichText) Draw(ctx DrawContext) {
+func (t *RichText) Draw(ctx base.DrawContext) {
 	b := t.Base.Bounds()
 	if b.Empty() {
 		return
@@ -570,7 +562,7 @@ func (t *RichText) Draw(ctx DrawContext) {
 	if barOn {
 		clip.Max.X -= richBarW
 	}
-	restore := PushClip(ctx, clip)
+	restore := base.PushClip(ctx, clip)
 
 	originX := b.Min.X + t.PaddingX
 	originY := b.Min.Y + t.PaddingY - scrollY
@@ -593,12 +585,12 @@ func (t *RichText) Draw(ctx DrawContext) {
 	if focused {
 		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.FocusBorder)
 	}
-	t.drawChildren(ctx)
-	t.drawDisabledOverlay(ctx)
+	t.DrawChildren(ctx)
+	t.DrawDisabledOverlay(ctx)
 }
 
 // fillColor заливает прямоугольник с учётом прозрачности цвета.
-func fillColor(ctx DrawContext, x, y, w, h int, c color.RGBA) {
+func fillColor(ctx base.DrawContext, x, y, w, h int, c color.RGBA) {
 	if w <= 0 || h <= 0 || c.A == 0 {
 		return
 	}
@@ -612,7 +604,7 @@ func fillColor(ctx DrawContext, x, y, w, h int, c color.RGBA) {
 // drawLine рисует одну строку: фон ранов, выделение, буквы, линии.
 // Порядок слоёв — как у редактора: выделение под буквами, но над фоном рана,
 // иначе подсветка найденного скрывала бы выделение.
-func (t *RichText) drawLine(ctx DrawContext, m richMeasurer, lay *richLayout, ln *richLine,
+func (t *RichText) drawLine(ctx base.DrawContext, m richMeasurer, lay *richLayout, ln *richLine,
 	originX, ly, selLo, selHi int) {
 
 	// Фон ранов — полосой высотой в сам ран (подъём+спуск), а не во всю
@@ -651,17 +643,17 @@ func (t *RichText) drawLine(ctx DrawContext, m richMeasurer, lay *richLayout, ln
 			}
 		}
 		sx := originX + s.X
-		base := ly + ln.Baseline
-		ctx.DrawTextFont(s.Run.Text, sx, base-s.Ascent, s.Run.Size, s.Run.Font, col)
+		baseline := ly + ln.Baseline
+		ctx.DrawTextFont(s.Run.Text, sx, baseline-s.Ascent, s.Run.Size, s.Run.Font, col)
 
 		underline := s.Run.Underline || (s.Run.Link != "" && t.LinkUnderline)
 		if (underline || s.Run.Strike) && s.W > 0 {
 			ul, strike, thick := richDecoration(s.Ascent, s.Descent)
 			if underline {
-				ctx.FillRect(sx, base+ul, s.W, thick, col)
+				ctx.FillRect(sx, baseline+ul, s.W, thick, col)
 			}
 			if s.Run.Strike {
-				ctx.FillRect(sx, base+strike, s.W, thick, col)
+				ctx.FillRect(sx, baseline+strike, s.W, thick, col)
 			}
 		}
 	}
@@ -669,17 +661,17 @@ func (t *RichText) drawLine(ctx DrawContext, m richMeasurer, lay *richLayout, ln
 
 // drawBar рисует полосу прокрутки: в классической теме — с кнопками ▲▼, в
 // остальных — тонкий ползунок поверх содержимого.
-func (t *RichText) drawBar(ctx DrawContext, track, thumb image.Rectangle, active bool) {
+func (t *RichText) drawBar(ctx base.DrawContext, track, thumb image.Rectangle, active bool) {
 	if thumb.Empty() {
 		return
 	}
-	thumbCol := win10.ScrollThumbBG
+	thumbCol := base.ActiveTheme().ScrollThumbBG
 	if active {
-		thumbCol = win10.Accent
+		thumbCol = base.ActiveTheme().Accent
 	}
-	if st := currentStyle(); st.Classic3D {
-		ctx.FillRect(track.Min.X, track.Min.Y, track.Dx(), track.Dy(), win10.ScrollTrackBG)
-		drawClassicScrollbar(ctx, track, thumb, st, win10.ScrollThumbBG, win10.LabelText)
+	if st := base.CurrentThemeStyle(); st.Classic3D {
+		ctx.FillRect(track.Min.X, track.Min.Y, track.Dx(), track.Dy(), base.ActiveTheme().ScrollTrackBG)
+		base.DrawClassicScrollbar(ctx, track, thumb, st, base.ActiveTheme().ScrollThumbBG, base.ActiveTheme().LabelText)
 		return
 	}
 	ctx.FillRoundRect(thumb.Min.X+2, thumb.Min.Y+1, thumb.Dx()-4, thumb.Dy()-2, 3, thumbCol)

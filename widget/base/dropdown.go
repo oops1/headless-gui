@@ -218,7 +218,7 @@ func (d *Dropdown) Draw(ctx DrawContext) {
 	textY := b.Min.Y + (b.Dy()-13)/2
 	textLeft := b.Min.X + d.PaddingX
 	textMaxW := (b.Max.X - 20) - textLeft // 20px под стрелку и зазор
-	sizePt := fontSizeOrDefault(d.FontSize)
+	sizePt := FontSizeOrDefault(d.FontSize)
 	ctx.DrawTextSize(ellipsizeText(ctx, selText, textMaxW, sizePt), textLeft, textY, sizePt, d.TextColor)
 
 	// Стрелка ▼
@@ -309,7 +309,7 @@ func (d *Dropdown) drawOpenList(ctx DrawContext) {
 		}
 		// Текст — вертикально по центру, обрезается многоточием по ширине списка.
 		itemMaxW := listW - 2*d.PaddingX
-		itemSize := fontSizeOrDefault(d.FontSize)
+		itemSize := FontSizeOrDefault(d.FontSize)
 		ctx.DrawTextSize(ellipsizeText(ctx, item, itemMaxW, itemSize),
 			b.Min.X+d.PaddingX, iy+(itemH-13)/2, itemSize, textCol)
 	}
