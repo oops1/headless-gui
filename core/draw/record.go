@@ -108,7 +108,18 @@ var (
 	_ CullScope             = (*Recorder)(nil)
 	_ OcclusionScope        = (*Recorder)(nil)
 	_ Snapshotter           = (*Recorder)(nil)
+	_ OffscreenRenderer     = (*Recorder)(nil)
 )
+
+// RenderOffscreen — см. OffscreenRenderer: картинку рисует измеритель
+// (холст движка), в кадр ничего не записывается. nil — измеритель не умеет.
+func (r *Recorder) RenderOffscreen(rc image.Rectangle, draw func(ctx DrawContext)) *image.RGBA {
+	or, ok := r.m.(OffscreenRenderer)
+	if !ok {
+		return nil
+	}
+	return or.RenderOffscreen(rc, draw)
+}
 
 // SnapshotRenderer — измеритель, умеющий отрисовать область кадра
 // воспроизведением записанных команд (ADR-0007): так рекордер отвечает на

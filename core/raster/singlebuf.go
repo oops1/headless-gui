@@ -507,6 +507,44 @@ func (c *Canvas) extractFront(tiles []output.DirtyTile, total int) []output.Dirt
 	return tiles
 }
 
+// RenderOffscreen — draw в отдельную картинку области r (логическая) на
+// прозрачном фоне (hgdraw.OffscreenRenderer): своё окно переводится на
+// область, очищается в прозрачный и отдаётся draw; кадр не трогается.
+// Картинка — всегда RGBA с альфой: формат кадра (FormatBGRX у чужой памяти)
+// окну не передаётся, иначе каналы были бы переставлены, а прозрачность
+// потеряна. Область, не помещающаяся в кадр целиком, и холст-окно — nil.
+func (c *Canvas) RenderOffscreen(r image.Rectangle, draw func(ctx hgdraw.DrawContext)) *image.RGBA {
+	full := c.PhysRect(r)
+	pr := full.Intersect(c.Frame())
+	if pr.Empty() || pr != full || c.isWindow || draw == nil {
+		return nil
+	}
+	w := c.offWin
+	if w == nil {
+		w = NewWindowCanvas(c)
+		c.offWin = w
+	}
+	w.SyncFrame(c)
+	if w.format != FormatRGBA {
+		w.setOwnFormat(FormatRGBA)
+		w.scaledCache, w.scaledPixels = nil, 0
+	}
+	w.Retarget(pr)
+	w.SetCenter(pr)
+	n := pr.Dx() * 4
+	for y := pr.Min.Y; y < pr.Max.Y; y++ {
+		s := w.back.PixOffset(pr.Min.X, y)
+		clear(w.back.Pix[s : s+n])
+	}
+	draw(w)
+	dst := image.NewRGBA(image.Rect(0, 0, pr.Dx(), pr.Dy()))
+	for y := 0; y < pr.Dy(); y++ {
+		s := w.back.PixOffset(pr.Min.X, pr.Min.Y+y)
+		copy(dst.Pix[y*dst.Stride:y*dst.Stride+n], w.back.Pix[s:s+n])
+	}
+	return dst
+}
+
 // RenderSnapshot отрисовывает область r (логическая) текущего кадра в окно
 // холста воспроизведением draw и возвращает копию (физические пиксели от
 // (0,0), premultiplied): Snapshot рекордера команд (ADR-0007) — панель под

@@ -18,6 +18,10 @@ type AAShapes = hgdraw.AAShapes
 // Snapshotter — см. draw.Snapshotter (core/draw); алиас: тот же тип.
 type Snapshotter = hgdraw.Snapshotter
 
+// OffscreenRenderer — см. draw.OffscreenRenderer (core/draw); алиас: тот же
+// тип.
+type OffscreenRenderer = hgdraw.OffscreenRenderer
+
 // OverlayDrawer реализуется виджетами, которым нужно рисовать поверх всего дерева.
 // Например, раскрытый выпадающий список должен перекрывать соседние виджеты.
 //

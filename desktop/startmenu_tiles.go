@@ -919,7 +919,9 @@ func (m *StartMenu) tileRectAbs(id TileID) image.Rectangle {
 	}
 	l := m.layoutTiles(g)
 	m.v.mu.Lock()
-	scroll := m.v.tileScroll
+	// Прокрутка зажата так же, как в отрисовке (drawTiles): после смены
+	// плиток на меньший набор сырая прокрутка указывала бы мимо плитки.
+	scroll := clampScroll(m.v.tileScroll, l.height+m.dragExtraLocked(), tilesViewHeight(g))
 	m.v.mu.Unlock()
 	for _, t := range l.tiles {
 		if t.id == id {

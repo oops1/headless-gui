@@ -188,6 +188,9 @@ type Canvas struct {
 	flushWork                      flushJob
 	// snapWin — окно для снимков рекордера (RenderSnapshot).
 	snapWin *Canvas
+	// offWin — окно для картинок вне кадра (RenderOffscreen): всегда
+	// FormatRGBA с альфой, каким бы ни был формат кадра.
+	offWin *Canvas
 }
 
 // colorRGBA — синоним для сигнатур window.go.

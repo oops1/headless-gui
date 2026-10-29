@@ -21,8 +21,9 @@ type translatingContext struct {
 }
 
 var (
-	_ widget.DrawContext = (*translatingContext)(nil)
-	_ widget.AAShapes    = (*translatingContext)(nil)
+	_ widget.DrawContext       = (*translatingContext)(nil)
+	_ widget.AAShapes          = (*translatingContext)(nil)
+	_ widget.OffscreenRenderer = (*translatingContext)(nil)
 )
 
 // ─── widget.DrawContext ──────────────────────────────────────────────────────
@@ -219,6 +220,24 @@ func (t *translatingContext) ClearRoundClip() { t.inner.ClearRoundClip() }
 // отдельном окне прозрачность слоя означает смесь с прозрачным буфером окна.
 func (t *translatingContext) DrawWithOpacity(r image.Rectangle, alpha float64, draw func()) {
 	t.inner.DrawWithOpacity(r.Sub(image.Pt(t.dx, t.dy)), alpha, draw)
+}
+
+// RenderOffscreen рисует draw в картинку вне буфера попапа
+// (widget.OffscreenRenderer): область сдвигается в систему буфера, а draw
+// получает контекст картинки с тем же сдвигом — рисует в абсолютных
+// координатах, как и весь оверлей. Без этого хостовый оверлей («Пуск» в окне
+// ОС) не строил бы кэши перехода живой плитки (ADR-0010).
+func (t *translatingContext) RenderOffscreen(r image.Rectangle, draw func(ctx widget.DrawContext)) *image.RGBA {
+	if draw == nil {
+		return nil
+	}
+	return t.inner.RenderOffscreen(r.Sub(image.Pt(t.dx, t.dy)), func(c widget.DrawContext) {
+		inner, ok := c.(*Canvas)
+		if !ok {
+			return
+		}
+		draw(&translatingContext{inner: inner, dx: t.dx, dy: t.dy})
+	})
 }
 
 // shift возвращает копию точек, сдвинутых на -(dx,dy).

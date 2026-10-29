@@ -483,6 +483,19 @@ func (o *svOffsetCtx) DrawImageScaled(src image.Image, x, y, w, h int) {
 	o.inner.DrawImageScaled(src, x-o.dx, y-o.dy, w, h)
 }
 
+// RenderOffscreen пробрасывает рисование вне кадра (OffscreenRenderer):
+// область сдвигается, а draw получает контекст картинки с тем же сдвигом.
+// Внутренний контекст без возможности — nil, вызывающий рисует без кэша.
+func (o *svOffsetCtx) RenderOffscreen(r image.Rectangle, draw func(ctx DrawContext)) *image.RGBA {
+	or, ok := o.inner.(OffscreenRenderer)
+	if !ok || draw == nil {
+		return nil
+	}
+	return or.RenderOffscreen(r.Sub(image.Pt(o.dx, o.dy)), func(c DrawContext) {
+		draw(OffsetContext(c, o.dx, o.dy))
+	})
+}
+
 // DrawImageRect пробрасывает частичную отрисовку изображения (ImageRectDrawer)
 // внутреннему контексту; без поддержки в нём — запасной путь помощника.
 func (o *svOffsetCtx) DrawImageRect(src image.Image, sr, dr image.Rectangle, f ImageFilter) {

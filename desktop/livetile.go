@@ -6,9 +6,13 @@
 package desktop
 
 import (
+	"image"
+	"math"
+	"reflect"
 	"sync"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -89,6 +93,9 @@ type liveState struct {
 
 	timer *time.Timer
 	tick  uint64
+
+	// trans — идущий переход между состояниями (6.2); nil — покой.
+	trans *tileTrans
 }
 
 // liveContent — что показывать на плитке t: последнее состояние источника,
@@ -166,6 +173,11 @@ func (m *StartMenu) liveAttach() {
 				st.stopTimer()
 			}
 			st.cfg = cfg
+			// Тема или плитки сменились: кэши перехода нарисованы прежним
+			// стилем — перерисуются в ближайшем кадре.
+			if st.trans != nil {
+				st.trans.fromImg, st.trans.toImg = nil, nil
+			}
 			if n := cfg.queueLen(); len(st.queue) > n {
 				st.queue = append([]TileContent(nil), st.queue[len(st.queue)-n:]...)
 				st.idx = len(st.queue) - 1
@@ -228,9 +240,10 @@ func (m *StartMenu) liveAttach() {
 }
 
 // drop снимает подписку плитки (под ls.mu) и отдаёт отписку, которую надо
-// позвать вне замка.
+// позвать вне замка. Идущий переход обрывается: плитка показывает новое.
 func (st *liveState) drop() func() {
 	st.stopTimer()
+	st.stopTrans()
 	if !st.subscribed {
 		return nil
 	}
@@ -294,6 +307,7 @@ func (m *StartMenu) liveApply(id TileID, st *liveState, sub uint64, c TileConten
 		ls.mu.Unlock()
 		return
 	}
+	first := st.fresh
 	if st.fresh {
 		st.queue, st.idx, st.fresh = nil, 0, false
 	}
@@ -302,12 +316,21 @@ func (m *StartMenu) liveApply(id TileID, st *liveState, sub uint64, c TileConten
 		st.queue = append([]TileContent(nil), st.queue[len(st.queue)-n:]...)
 	}
 	st.idx = len(st.queue) - 1
+	prev, had := st.shown, st.has
 	st.shown, st.has = c, true
 	st.stopTimer()
 	if len(st.queue) > 1 {
 		m.scheduleLocked(id, st)
 	}
 	ls.mu.Unlock()
+	// Первое состояние новой подписки (повторное открытие меню) и повтор того
+	// же содержимого — без перехода: плитка не должна «прокручиваться» на
+	// месте.
+	if had && !first && !sameTileContent(prev, c) {
+		m.beginTransition(id, st, sub, prev, c)
+	} else if had {
+		m.cancelTransition(id, st)
+	}
 	m.invalidateTile(id)
 }
 
@@ -320,9 +343,14 @@ func (m *StartMenu) liveAdvance(id TileID, st *liveState, sub, tick uint64) {
 		return
 	}
 	st.idx = (st.idx + 1) % len(st.queue)
+	prev := st.shown
 	st.shown, st.has = st.queue[st.idx], true
+	next := st.shown
 	m.scheduleLocked(id, st)
 	ls.mu.Unlock()
+	if !sameTileContent(prev, next) {
+		m.beginTransition(id, st, sub, prev, next)
+	}
 	m.invalidateTile(id)
 }
 
@@ -348,4 +376,196 @@ func (m *StartMenu) invalidateTile(id TileID) {
 	if r := m.tileRectAbs(id); !r.Empty() {
 		m.InvalidateArea(r)
 	}
+}
+
+// ─── Переход между состояниями (6.2) ────────────────────────────────────────
+
+// AnimTileCycle — переход живой плитки между состояниями: длительность и
+// кривая. Не объявлено темой — по AnimFlyoutOpen. Декоративная анимация: при
+// «меньше движения» и профилях MotionReduced/MotionOff — мгновенно; под
+// MotionRemote — тоже мгновенно (переход по сети не стоит кадров).
+const AnimTileCycle theme.Key = "tile.cycle"
+
+// KeyTileCycleKind — вид перехода живой плитки: 0 — сдвиг (новое въезжает
+// снизу и выталкивает прежнее вверх, по умолчанию), 1 — переворот вокруг
+// горизонтальной оси.
+const KeyTileCycleKind theme.Key = "tile.cycle.kind"
+
+// tileTrans — переход плитки: два кэша растра (прежнее и новое содержимое,
+// нарисованные вне кадра на прозрачном фоне) и доля пройденного. Кадр
+// перехода только компонует кэши: содержимое плитки (текст, значок) заново
+// не рисуется, остальное меню не трогается — заявлен прямоугольник плитки.
+type tileTrans struct {
+	from, to TileContent
+	flip     bool
+	k        float64
+	anim     *widget.Animation
+
+	// Кэши растра и для чего они нарисованы: логический размер плитки и
+	// состояние (наведение меняет подложку).
+	fromImg, toImg *image.RGBA
+	size           image.Point
+	state          theme.State
+}
+
+// stopTrans обрывает переход (под ls.mu).
+func (st *liveState) stopTrans() {
+	if st.trans != nil {
+		if a := st.trans.anim; a != nil {
+			a.Stop()
+		}
+		st.trans = nil
+	}
+}
+
+// beginTransition заводит переход плитки id от prev к next. Мгновенно —
+// длительность темы нулевая (в том числе «меньше движения», MotionOff),
+// профиль движения MotionRemote или вид меню без плиток: тогда идущий переход
+// обрывается и плитка сразу показывает next.
+func (m *StartMenu) beginTransition(id TileID, st *liveState, sub uint64, prev, next TileContent) {
+	ls := &m.v.live
+	dur, curve := animationFirst(m.tm, AnimTileCycle, theme.AnimFlyoutOpen)
+	if dur <= 0 || widget.CurrentMotionProfile() == theme.MotionRemote || !m.tiled() {
+		m.cancelTransition(id, st)
+		return
+	}
+	tr := &tileTrans{from: prev, to: next, flip: m.metricInt(KeyTileCycleKind) == 1}
+	ls.mu.Lock()
+	if !ls.live(id, st, sub) {
+		ls.mu.Unlock()
+		return
+	}
+	st.stopTrans()
+	st.trans = tr
+	ls.mu.Unlock()
+
+	a := widget.AnimateOwned(m, "livetile:"+string(id), dur, curve, func(k float64) {
+		ls.mu.Lock()
+		if st.trans != tr {
+			ls.mu.Unlock()
+			return
+		}
+		tr.k = k
+		if k >= 1 {
+			st.trans = nil
+		}
+		ls.mu.Unlock()
+		m.invalidateTile(id)
+	})
+	ls.mu.Lock()
+	if st.trans == tr {
+		tr.anim = a
+	} else {
+		a.Stop()
+	}
+	ls.mu.Unlock()
+}
+
+// cancelTransition обрывает идущий переход плитки: она сразу показывает
+// новое.
+func (m *StartMenu) cancelTransition(id TileID, st *liveState) {
+	ls := &m.v.live
+	ls.mu.Lock()
+	if ls.tiles[id] == st {
+		st.stopTrans()
+	}
+	ls.mu.Unlock()
+}
+
+// sameTileContent — одинаково ли выглядят состояния: повтор источника
+// (опрос без перемен) перехода не заводит. Значки сравниваются по
+// идентичности (картинка с несравнимым типом — разные), IconAt — по коду
+// функции.
+func sameTileContent(a, b TileContent) (same bool) {
+	defer func() {
+		if recover() != nil {
+			same = false
+		}
+	}()
+	if a.Title != b.Title || a.Subtitle != b.Subtitle || a.Badge != b.Badge || a.Background != b.Background {
+		return false
+	}
+	if a.Icon != b.Icon {
+		return false
+	}
+	if (a.IconAt == nil) != (b.IconAt == nil) {
+		return false
+	}
+	if a.IconAt != nil && reflect.ValueOf(a.IconAt).Pointer() != reflect.ValueOf(b.IconAt).Pointer() {
+		return false
+	}
+	return true
+}
+
+// drawTileTransition рисует плитку t посреди перехода композицией двух кэшей
+// и сообщает, нарисовал ли. Нет перехода или контекст не умеет рисовать вне
+// кадра (OffscreenRenderer) — false: плитка рисуется обычным путём, сразу с
+// новым содержимым.
+func (m *StartMenu) drawTileTransition(ctx widget.DrawContext, rect image.Rectangle, t Tile, st theme.State, key string) bool {
+	if t.Live.Source == nil {
+		return false
+	}
+	ls := &m.v.live
+	ls.mu.Lock()
+	s := ls.tiles[t.ID]
+	var tr *tileTrans
+	if s != nil {
+		tr = s.trans
+	}
+	if tr == nil {
+		ls.mu.Unlock()
+		return false
+	}
+	k, flip := tr.k, tr.flip
+	from, to := tr.from, tr.to
+	fi, ti := tr.fromImg, tr.toImg
+	fresh := fi != nil && ti != nil && tr.size == rect.Size() && tr.state == st
+	ls.mu.Unlock()
+
+	if !fresh {
+		or, ok := ctx.(widget.OffscreenRenderer)
+		if !ok {
+			return false
+		}
+		paint := func(c TileContent) *image.RGBA {
+			tc := t
+			tc.Content = c
+			return or.RenderOffscreen(rect, func(oc widget.DrawContext) { m.paintTile(oc, rect, tc, st, key) })
+		}
+		fi, ti = paint(from), paint(to)
+		if fi == nil || ti == nil {
+			return false
+		}
+		ls.mu.Lock()
+		// Пока идёт переход цвета наведения, стиль меняется каждый кадр:
+		// картинки годятся только на этот кадр.
+		if s.trans == tr && !m.fade.animating(key) {
+			tr.fromImg, tr.toImg, tr.size, tr.state = fi, ti, rect.Size(), st
+		}
+		ls.mu.Unlock()
+	}
+
+	prevClip := ctx.Clip()
+	ctx.SetClip(rect.Intersect(prevClip))
+	defer ctx.SetClip(prevClip)
+	h := rect.Dy()
+	if !flip {
+		off := int(math.Round(k * float64(h)))
+		if off < h {
+			widget.DrawImageRect(ctx, fi, fi.Bounds(), rect.Sub(image.Pt(0, off)), widget.FilterNearest)
+		}
+		if off > 0 {
+			widget.DrawImageRect(ctx, ti, ti.Bounds(), rect.Add(image.Pt(0, h-off)), widget.FilterNearest)
+		}
+		return true
+	}
+	img, scale := fi, 1-2*k
+	if k >= 0.5 {
+		img, scale = ti, 2*k-1
+	}
+	if hh := int(math.Round(scale * float64(h))); hh > 0 {
+		y := rect.Min.Y + (h-hh)/2
+		widget.DrawImageRect(ctx, img, img.Bounds(), image.Rect(rect.Min.X, y, rect.Max.X, y+hh), widget.FilterBilinear)
+	}
+	return true
 }

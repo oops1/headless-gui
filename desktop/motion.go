@@ -196,6 +196,15 @@ func (m *motion) style(tm *theme.Manager, item bool, id any, r image.Rectangle, 
 	return cur
 }
 
+// animating сообщает, идёт ли переход цвета ячейки id: картинка с её стилем
+// устареет в следующем кадре (кэш растра живой плитки её не хранит).
+func (m *motion) animating(id any) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.cells[id]
+	return c != nil && c.live
+}
+
 // current — стиль на текущий момент перехода.
 func (c *motionCell) current() *theme.Style {
 	if !c.live || c.k >= 1 {
