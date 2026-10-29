@@ -1,7 +1,7 @@
 // props.go — применение XAML attached-свойств к виджетам.
 //
 // Содержит: applyGridAttachedProps, applyMargin, applyAlignment,
-// applyIsEnabled, applyDockAttachedProp, loadImageFile.
+// ApplyIsEnabled, applyDockAttachedProp, loadImageFile.
 package xaml
 
 import (
@@ -96,9 +96,13 @@ func applyAlignment(w base.Widget, el Element) {
 
 // ─── ToolTip ──────────────────────────────────────────────────────────────
 
-// applyToolTip читает ToolTip из XAML-атрибутов и устанавливает в Base.
+// ApplyToolTip читает ToolTip из XAML-атрибутов и устанавливает в Base.
 // Поддерживает простой синтаксис ToolTip="текст".
-func applyToolTip(w base.Widget, el Element) {
+//
+// Служебное: для пакетов виджетов (их XAML-строителей), в фасад не входит.
+//
+//facadegen:skip
+func ApplyToolTip(w base.Widget, el Element) {
 	tip := el.Attr("ToolTip", "ToolTipService.ToolTip")
 	if tip == "" {
 		return
@@ -113,9 +117,13 @@ func applyToolTip(w base.Widget, el Element) {
 
 // ─── Visibility ─────────────────────────────────────────────────────────────
 
-// applyVisibility читает Visibility из XAML-атрибутов (WPF):
+// ApplyVisibility читает Visibility из XAML-атрибутов (WPF):
 // "Visible" (default), "Collapsed", "Hidden" → скрытие виджета.
-func applyVisibility(w base.Widget, el Element) {
+//
+// Служебное: для пакетов виджетов (их XAML-строителей), в фасад не входит.
+//
+//facadegen:skip
+func ApplyVisibility(w base.Widget, el Element) {
 	v := el.Attr("Visibility")
 	if v == "" {
 		return
@@ -138,7 +146,8 @@ func applyVisibility(w base.Widget, el Element) {
 // ─── ShowLocaleIndicator ────────────────────────────────────────────────────
 
 // applyLocaleIndicator читает ShowLocaleIndicator из XAML-атрибутов и
-// устанавливает соответствующее поле у Window/Dialog/Panel.
+// устанавливает соответствующее поле у Dialog/Panel (у Window — его строитель,
+// widget/chrome).
 func applyLocaleIndicator(w base.Widget, el Element) {
 	v := el.Attr("ShowLocaleIndicator", "ShowLocale")
 	if v == "" {
@@ -146,8 +155,6 @@ func applyLocaleIndicator(w base.Widget, el Element) {
 	}
 	on := strings.EqualFold(v, "true") || v == "1"
 	switch t := w.(type) {
-	case *base.Window:
-		t.ShowLocaleIndicator = on
 	case *base.Dialog:
 		t.ShowLocaleIndicator = on
 	case *base.Panel:
@@ -180,9 +187,9 @@ func applyCommonProps(w base.Widget, el Element) {
 	applyDockAttachedProp(w, el)
 	applyMargin(w, el)
 	applyAlignment(w, el)
-	applyIsEnabled(w, el)
-	applyToolTip(w, el)
-	applyVisibility(w, el)
+	ApplyIsEnabled(w, el)
+	ApplyToolTip(w, el)
+	ApplyVisibility(w, el)
 	applyLocaleIndicator(w, el)
 	applyTabIndex(w, el)
 	applyCursor(w, el)
@@ -226,9 +233,13 @@ func applyCursor(w base.Widget, el Element) {
 
 // ─── IsEnabled ──────────────────────────────────────────────────────────────
 
-// applyIsEnabled читает IsEnabled из XAML-атрибутов и устанавливает в Base.
+// ApplyIsEnabled читает IsEnabled из XAML-атрибутов и устанавливает в Base.
 // WPF по умолчанию IsEnabled=True, поэтому false нужно задавать явно.
-func applyIsEnabled(w base.Widget, el Element) {
+//
+// Служебное: для пакетов виджетов (их XAML-строителей), в фасад не входит.
+//
+//facadegen:skip
+func ApplyIsEnabled(w base.Widget, el Element) {
 	type enabledSetter interface {
 		SetEnabled(v bool)
 	}

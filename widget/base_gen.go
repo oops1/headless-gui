@@ -413,6 +413,12 @@ func DrawBevel(ctx DrawContext, r image.Rectangle, light, shadow, dark color.RGB
 	base.DrawBevel(ctx, r, light, shadow, dark, sunken)
 }
 
+// ── bgcolor.go ──
+
+// BackgroundColorer — виджет со своим фоном: BackgroundColor отдаёт цвет и
+// задан ли он (прозрачный — нет, виден фон родителя).
+type BackgroundColorer = base.BackgroundColorer
+
 // ── bgrole.go ──
 
 // BackgroundRole — откуда контейнер берёт фон при смене темы.
@@ -497,6 +503,10 @@ func NewCanvas() *Canvas { return base.NewCanvas() }
 // вкладки список рисовался сдвинутым, а ближайшая перерисовка окна (скролл)
 // «чинила» его следующим updateVisible.
 func HasOwnLayout(w Widget) bool { return base.HasOwnLayout(w) }
+
+// ChildLayouter — контейнер вне ядра, чей SetBounds сам перекладывает детей
+// (как контейнеры из списка HasOwnLayout): снаружи его детей не сдвигают.
+type ChildLayouter = base.ChildLayouter
 
 // ── checkbox.go ──
 
@@ -3720,16 +3730,27 @@ type ThemeScope = base.ThemeScope
 // NewThemeScope создаёт область с темой t (nil — глобальная тема).
 func NewThemeScope(t *Theme) *ThemeScope { return base.NewThemeScope(t) }
 
-// ── titlebar_hit.go ──
+// ── titlestyle.go ──
 
-// TitleBarPressOwner — виджет-потомок окна, лежащий поверх его заголовка, у
-// которого нажатие на себя забирает он сам, а не перетаскивание окна.
-//
-// Достаточно реализовать этот интерфейс: захват мыши (WantsCapture) не нужен —
-// нажатие доходит до виджета обычным путём, как до любого виджета окна. Захват
-// по-прежнему нужен тому, кому после нажатия нужна мышь целиком (ползунок,
-// выделение текста, release-семантика кнопки).
-type TitleBarPressOwner = base.TitleBarPressOwner
+// WindowTitleStyle определяет визуальный стиль кнопок и текста заголовка.
+type WindowTitleStyle = base.WindowTitleStyle
+
+const (
+	// WindowTitleAuto — автоматический выбор стиля по текущей ОС:
+	// macOS → Mac-стиль, Windows/Linux → Windows-стиль.
+	// Это значение по умолчанию (zero value).
+	WindowTitleAuto = base.WindowTitleAuto
+	// WindowTitleWin — Windows: текст слева, кнопки ─ □ × справа.
+	WindowTitleWin = base.WindowTitleWin
+	// WindowTitleMac — macOS: traffic lights ● ● ● слева, текст по центру.
+	WindowTitleMac = base.WindowTitleMac
+)
+
+// DetectedOS возвращает строковое имя текущей ОС ("windows", "darwin", "linux").
+func DetectedOS() string { return base.DetectedOS() }
+
+// DetectedTitleStyle возвращает стиль заголовка, соответствующий текущей ОС.
+func DetectedTitleStyle() WindowTitleStyle { return base.DetectedTitleStyle() }
 
 // ── toggleswitch.go ──
 
@@ -3863,101 +3884,6 @@ func NewVirtualizingItemsControl() *VirtualizingItemsControl {
 // затем рекурсивно его потомки. Каждый виджет сам отвечает за рендеринг
 // дочерних элементов.
 type Widget = base.Widget
-
-// ── window.go ──
-
-// WindowStyle определяет стиль обрамления окна (WPF WindowStyle).
-type WindowStyle = base.WindowStyle
-
-const (
-	// WindowStyleSingleBorder — стандартное окно с рамкой и заголовком.
-	WindowStyleSingleBorder = base.WindowStyleSingleBorder
-	// WindowStyleNone — окно без обрамления и заголовка (borderless).
-	WindowStyleNone = base.WindowStyleNone
-	// WindowStyleToolWindow — компактное окно-утилита с уменьшённым заголовком.
-	WindowStyleToolWindow = base.WindowStyleToolWindow
-)
-
-// WindowTitleStyle определяет визуальный стиль кнопок и текста заголовка.
-type WindowTitleStyle = base.WindowTitleStyle
-
-const (
-	// WindowTitleAuto — автоматический выбор стиля по текущей ОС:
-	// macOS → Mac-стиль, Windows/Linux → Windows-стиль.
-	// Это значение по умолчанию (zero value).
-	WindowTitleAuto = base.WindowTitleAuto
-	// WindowTitleWin — Windows: текст слева, кнопки ─ □ × справа.
-	WindowTitleWin = base.WindowTitleWin
-	// WindowTitleMac — macOS: traffic lights ● ● ● слева, текст по центру.
-	WindowTitleMac = base.WindowTitleMac
-)
-
-// ResizeMode определяет режим изменения размера окна (WPF ResizeMode).
-type ResizeMode = base.ResizeMode
-
-const (
-	// ResizeModeCanResize — окно можно изменять и сворачивать.
-	ResizeModeCanResize = base.ResizeModeCanResize
-	// ResizeModeNoResize — размер фиксирован, кнопки min/max скрыты.
-	ResizeModeNoResize = base.ResizeModeNoResize
-	// ResizeModeCanMinimize — только сворачивание (maximize отключён).
-	ResizeModeCanMinimize = base.ResizeModeCanMinimize
-)
-
-// OutlineDragStyle — из чего состоит контур перетаскивания (OutlineDrag).
-type OutlineDragStyle = base.OutlineDragStyle
-
-const (
-	// OutlineDragBorder — только рамка (по умолчанию): за кадр меняются
-	// несколько тонких полос пикселей, дёшево по трафику.
-	OutlineDragBorder = base.OutlineDragBorder
-	// OutlineDragFilled — рамка плюс полупрозрачная заливка: меняется каждый
-	// пиксель под контуром. Заметно дороже, см. Window.OutlineDragStyle.
-	OutlineDragFilled = base.OutlineDragFilled
-)
-
-// Window — корневой виджет, представляющий независимое окно приложения.
-//
-// В отличие от Panel/Canvas (рабочий стол с панелями-окнами внутри),
-// Window представляет одно окно ОС с собственным chrome.
-// При использовании с Ebiten-бэкэндом (window.Window) определяет заголовок,
-// размер и стиль нативного окна.
-//
-// Дочерние виджеты размещаются в клиентской области (ContentBounds) —
-// под заголовком, внутри рамки.
-type Window = base.Window
-
-// NewWindow создаёт окно с заданным заголовком и размером.
-// TitleStyle по умолчанию = WindowTitleAuto (определяется по текущей ОС).
-func NewWindow(title string, width, height int) *Window { return base.NewWindow(title, width, height) }
-
-// DetectedOS возвращает строковое имя текущей ОС ("windows", "darwin", "linux").
-func DetectedOS() string { return base.DetectedOS() }
-
-// DetectedTitleStyle возвращает стиль заголовка, соответствующий текущей ОС.
-func DetectedTitleStyle() WindowTitleStyle { return base.DetectedTitleStyle() }
-
-// Биты краёв окна для OnNativeResize. Хост получает их вместо внутреннего
-// winEdge: значения устойчивы и не зависят от порядка констант выше.
-const (
-	NativeEdgeTop    = base.NativeEdgeTop
-	NativeEdgeBottom = base.NativeEdgeBottom
-	NativeEdgeLeft   = base.NativeEdgeLeft
-	NativeEdgeRight  = base.NativeEdgeRight
-)
-
-// ── window_tabs.go ──
-
-// TitleTabPart — что находится под точкой в полосе вкладок заголовка.
-type TitleTabPart = base.TitleTabPart
-
-const (
-	TitleTabPartNone  = base.TitleTabPartNone  // ничего (свободное место / вне полосы)
-	TitleTabPartTab   = base.TitleTabPartTab   // карточка вкладки
-	TitleTabPartClose = base.TitleTabPartClose // «×» вкладки
-	TitleTabPartPlus  = base.TitleTabPartPlus  // кнопка «+»
-	TitleTabPartMenu  = base.TitleTabPartMenu  // кнопка «v» (меню)
-)
 
 // ── wrappanel.go ──
 

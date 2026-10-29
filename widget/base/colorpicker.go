@@ -349,15 +349,15 @@ func cpPaletteFrom(t *Theme) cpPalette {
 	p.accent.A = 255
 	p.focus = or(t.InputFocus, p.accent)
 	p.text = or(t.InputText, dvRGB(0x1F1F1F))
-	p.sel = or(t.TextSelectionBG, mixRGBA(p.bg, p.accent, 0.3))
+	p.sel = or(t.TextSelectionBG, MixRGBA(p.bg, p.accent, 0.3))
 	// Ошибка набора — тем же красным, что текст удалённого в сравнении: тема
 	// уже подобрала его читаемым на поле ввода.
 	p.err = or(t.DiffDelText, dvRGB(0xCF222E))
 	p.dropBG = or(t.DropBG, p.bg)
 	p.dropBorder = or(t.DropBorder, p.border)
 	p.dropText = or(t.DropText, p.text)
-	p.muted = or(t.SecondaryText, mixRGBA(p.dropText, p.dropBG, 0.45))
-	p.hoverBG = or(t.MenuHoverBG, or(t.ListItemHover, mixRGBA(p.dropBG, p.accent, 0.15)))
+	p.muted = or(t.SecondaryText, MixRGBA(p.dropText, p.dropBG, 0.45))
+	p.hoverBG = or(t.MenuHoverBG, or(t.ListItemHover, MixRGBA(p.dropBG, p.accent, 0.15)))
 	p.glyph = or(t.DropArrow, p.muted)
 	return p
 }

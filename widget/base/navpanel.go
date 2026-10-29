@@ -281,7 +281,7 @@ func (n *NavPanel) Draw(ctx DrawContext) {
 			continue
 		}
 		textX := iconX + iconSz + 10
-		text := ellipsizeText(ctx, it.Text, r.Max.X-8-textX, size)
+		text := EllipsizeText(ctx, it.Text, r.Max.X-8-textX, size)
 		ctx.DrawTextSize(text, textX, r.Min.Y+(r.Dy()-14)/2, size, fg)
 	}
 }
@@ -331,3 +331,11 @@ func (n *NavPanel) SetTopInset(px int) {
 	n.TopInset = px
 	n.Invalidate()
 }
+
+// SetNavPanelOnLayout задаёт обработчик раскладки панели навигации (хозяин —
+// окно или диалог — перекладывает себя вслед за ней).
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func SetNavPanelOnLayout(p *NavPanel, f func()) { p.setOnLayout(f) }

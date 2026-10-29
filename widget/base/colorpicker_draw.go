@@ -143,7 +143,7 @@ func (p *ColorPicker) Draw(ctx DrawContext) {
 	if p.invalid {
 		col = pal.err
 	}
-	shown := ellipsizeText(ctx, text, maxW, size)
+	shown := EllipsizeText(ctx, text, maxW, size)
 	if p.focused && p.selectAll && text != "" {
 		w := min(ctx.MeasureText(shown, size), maxW)
 		ctx.FillRectAlpha(textX-1, b.Min.Y+4, w+2, b.Dy()-8, PremulAlpha(pal.sel, 200))
@@ -213,7 +213,7 @@ func (p *ColorPicker) DrawOverlay(ctx DrawContext) {
 
 	if st.Classic3D {
 		ctx.FillRect(drop.Min.X, drop.Min.Y, drop.Dx(), drop.Dy(), pal.dropBG)
-		drawBevelRaised(ctx, drop.Min.X, drop.Min.Y, drop.Dx(), drop.Dy(), st)
+		DrawBevelRaised(ctx, drop.Min.X, drop.Min.Y, drop.Dx(), drop.Dy(), st)
 	} else {
 		if sd, ok := ctx.(ShadowDrawer); ok {
 			sd.DrawSoftShadow(drop, 6, 2, color.RGBA{A: 40})

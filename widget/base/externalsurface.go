@@ -323,7 +323,7 @@ func (s *ExternalSurface) OpaqueRegion() []image.Rectangle {
 	if !m.opaque || m.bg.A != 255 {
 		return nil
 	}
-	return oneRegion(&s.opBuf, s.Bounds())
+	return OneRegion(&s.opBuf, s.Bounds())
 }
 
 // Draw копирует в холст то, что холст перерисовывает в этом кадре (клип ∩

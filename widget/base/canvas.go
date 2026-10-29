@@ -67,7 +67,7 @@ type Canvas struct {
 // HandleInputBinding выполняет команду горячей клавиши (KeyBinding).
 // Возвращает true, если клавиша обработана.
 func (c *Canvas) HandleInputBinding(code KeyCode, mod KeyMod) bool {
-	cmd, param, ok := matchInputBinding(c.InputBindings, code, mod)
+	cmd, param, ok := MatchInputBinding(c.InputBindings, code, mod)
 	if ok && cmd.CanExecute(param) {
 		cmd.Execute(param)
 		return true
@@ -410,7 +410,7 @@ func shiftDescendants(w Widget, dx, dy int) {
 // вкладки список рисовался сдвинутым, а ближайшая перерисовка окна (скролл)
 // «чинила» его следующим updateVisible.
 func HasOwnLayout(w Widget) bool {
-	switch w.(type) {
+	switch v := w.(type) {
 	// Dialog в этом списке с тех пор, как научился менять размер: его
 	// SetBounds сам двигает детей и переставляет кнопку ✕, и повторный сдвиг
 	// снаружи задваивал бы смещение при перетаскивании за заголовок.
@@ -419,10 +419,19 @@ func HasOwnLayout(w Widget) bool {
 	// переезда контейнера. В витрине это было видно так: панель «только
 	// значки» оставалась пустой коробкой, а её кнопки рисовались поверх
 	// соседнего заголовка — на столько, на сколько вкладка сместилась в окне.
-	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager, *VirtualizingItemsControl, *Panel, *Dialog, *ToolBar, *DockPane:
+	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager, *VirtualizingItemsControl, *Panel, *Dialog, *ToolBar, *DockPane:
 		return true
+	case ChildLayouter:
+		// Контейнеры вне ядра (окно — widget/chrome) отвечают сами.
+		return v.LaysOutChildren()
 	}
 	return false
+}
+
+// ChildLayouter — контейнер вне ядра, чей SetBounds сам перекладывает детей
+// (как контейнеры из списка HasOwnLayout): снаружи его детей не сдвигают.
+type ChildLayouter interface {
+	LaysOutChildren() bool
 }
 
 // Draw рисует фон Canvas и все дочерние виджеты.
@@ -459,3 +468,7 @@ func (c *Canvas) ApplyTheme(t *Theme) {
 		c.UseAlpha = t.WindowBG.A < 255
 	}
 }
+
+// InputBindingList — привязки клавиш холста (поле InputBindings): по ним
+// загрузчик XAML связывает CommandPath с командами DataContext.
+func (c *Canvas) InputBindingList() []InputBinding { return c.InputBindings }

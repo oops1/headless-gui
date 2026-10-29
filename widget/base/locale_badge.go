@@ -9,13 +9,17 @@ import (
 // localeBadgeHeight — высота плашки-индикатора локали.
 const localeBadgeHeight = 16
 
-// drawLocaleBadge рисует небольшую плашку с текущей локалью (напр. «EN»),
+// DrawLocaleBadge рисует небольшую плашку с текущей локалью (напр. «EN»),
 // выровненную по правому краю rightX, вертикально по центру полосы высотой
 // barH, начинающейся с координаты top. fg — базовый цвет рамки/текста.
 //
 // Возвращает прямоугольник плашки (пустой, если локаль пустая) — вызывающий код
 // использует его для hit-теста клика (открытие контекстного меню выбора локали).
-func drawLocaleBadge(ctx DrawContext, rightX, top, barH int, fg color.RGBA) image.Rectangle {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func DrawLocaleBadge(ctx DrawContext, rightX, top, barH int, fg color.RGBA) image.Rectangle {
 	label := Locale()
 	if label == "" {
 		return image.Rectangle{}
@@ -51,10 +55,14 @@ func drawLocaleBadge(ctx DrawContext, rightX, top, barH int, fg color.RGBA) imag
 	return image.Rect(bx, by, bx+badgeW, by+badgeH)
 }
 
-// drawLocaleMenu рисует выпадающий список выбора локали под плашкой badge.
+// DrawLocaleMenu рисует выпадающий список выбора локали под плашкой badge.
 // highlight — индекс подсвеченного пункта (-1 = нет). cur — текущая локаль.
 // Возвращает прямоугольники пунктов (для hit-теста).
-func drawLocaleMenu(ctx DrawContext, badge image.Rectangle, items []string, cur string) []image.Rectangle {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func DrawLocaleMenu(ctx DrawContext, badge image.Rectangle, items []string, cur string) []image.Rectangle {
 	if badge.Empty() || len(items) == 0 {
 		return nil
 	}

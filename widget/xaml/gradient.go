@@ -77,7 +77,7 @@ func parseGradient(s string) *base.LinearGradient {
 		if at >= 0 {
 			colStr, offStr = p[:at], p[at+1:]
 		}
-		col, err := parseXAMLColor(colStr)
+		col, err := ParseColor(colStr)
 		if err != nil {
 			continue
 		}

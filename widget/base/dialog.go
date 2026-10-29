@@ -161,7 +161,7 @@ type Dialog struct {
 	// titleBarContent стоит в свободной части полосы, navBtn сворачивает
 	// боковую область приложения, pad/padSet заменяют константу dlgPad.
 	titleBarContent Widget
-	navBtn          *titleNavBtn
+	navBtn          *TitleNavButton
 	navPanel        Widget
 	pad             int
 	padSet          bool
@@ -371,7 +371,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 	if d.navBtn != nil {
 		// Иконка кнопки живёт в полосе заголовка и следует её цвету, а не
 		// палитре кнопок: тему полосы задаёт TitleColor.
-		d.navBtn.fg = d.TitleColor
+		d.navBtn.FG = d.TitleColor
 	}
 
 	if st.Classic3D {
@@ -381,7 +381,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 			fillTitleBar(ctx, image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+d.TitleHeight), d.TitleBG)
 			d.drawTitleCaption(ctx)
 			if d.ShowLocaleIndicator {
-				drawLocaleBadge(ctx, b.Max.X-8, b.Min.Y, d.TitleHeight, d.TitleColor)
+				DrawLocaleBadge(ctx, b.Max.X-8, b.Min.Y, d.TitleHeight, d.TitleColor)
 			}
 			ctx.DrawHLine(b.Min.X, b.Min.Y+d.TitleHeight, b.Dx(), d.BorderColor)
 		}
@@ -417,7 +417,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 		ctx.FillRect(b.Min.X, b.Min.Y+d.TitleHeight-cr, b.Dx(), cr, d.TitleBG)
 		d.drawTitleCaption(ctx)
 		if d.ShowLocaleIndicator {
-			drawLocaleBadge(ctx, b.Max.X-dlgCloseSize-12, b.Min.Y, d.TitleHeight, d.TitleColor)
+			DrawLocaleBadge(ctx, b.Max.X-dlgCloseSize-12, b.Min.Y, d.TitleHeight, d.TitleColor)
 		}
 	}
 	ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, d.BorderColor)
@@ -425,7 +425,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 	// Дети обрезаются по скруглённому корпусу: содержимое без отступа
 	// (SetContentPadding) и боковая панель, поднятая под верх, заливаются
 	// прямоугольником и срезали бы углы окна.
-	drawRoundClipped(ctx, b, cr, func() { d.drawChildren(ctx) })
+	DrawRoundClipped(ctx, b, cr, func() { d.drawChildren(ctx) })
 	d.drawTitleCaptionOverNav(ctx)
 }
 
@@ -438,7 +438,7 @@ func (d *Dialog) Draw(ctx DrawContext) {
 func (d *Dialog) drawTitleCaption(ctx DrawContext) {
 	b := d.bounds
 	if currentStyle().Classic3D {
-		drawTitleText(ctx, d.Title, d.titleTextX(), b.Min.Y+(d.TitleHeight-13)/2, d.TitleColor)
+		DrawTitleText(ctx, d.Title, d.titleTextX(), b.Min.Y+(d.TitleHeight-13)/2, d.TitleColor)
 		return
 	}
 	ctx.DrawTextFont(d.Title, d.titleTextX(), b.Min.Y+(d.TitleHeight-14)/2, 11,
@@ -609,7 +609,7 @@ func (cb *dialogCloseBtn) Draw(ctx DrawContext) {
 	if st.Classic3D {
 		// Классика: маленькая выпуклая кнопка «лица» с чёрным ✕.
 		ctx.FillRect(b.Min.X, b.Min.Y+2, b.Dx()-2, b.Dy()-4, win10.BtnBG)
-		drawBevelRaised(ctx, b.Min.X, b.Min.Y+2, b.Dx()-2, b.Dy()-4, st)
+		DrawBevelRaised(ctx, b.Min.X, b.Min.Y+2, b.Dx()-2, b.Dy()-4, st)
 		fg = win10.BtnText
 		tw := ctx.MeasureText("x", 10)
 		ctx.DrawTextFont("x", b.Min.X+(b.Dx()-2-tw)/2, b.Min.Y+(b.Dy()-13)/2, 10, BuiltinFontBold, fg)

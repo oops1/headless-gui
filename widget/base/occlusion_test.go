@@ -111,21 +111,21 @@ func TestOccluders_ListIsBounded(t *testing.T) {
 func TestOpaqueRect_RoundedLosesOnlyTheCorners(t *testing.T) {
 	b := image.Rect(10, 20, 210, 170)
 
-	if got := opaqueRect(b, 0); got != b {
+	if got := OpaqueRect(b, 0); got != b {
 		t.Errorf("без скругления объявлено %v вместо %v", got, b)
 	}
 
-	got := opaqueRect(b, 12)
+	got := OpaqueRect(b, 12)
 	if want := image.Rect(10, 32, 210, 158); got != want {
 		t.Errorf("со скруглением 12 объявлено %v, ждали %v", got, want)
 	}
 
 	// Скругление больше половины высоты не оставляет ничего — и это верно:
 	// такая фигура почти круг, ручаться за прямоугольник в ней нельзя.
-	if got := opaqueRect(image.Rect(0, 0, 100, 20), 15); !got.Empty() {
+	if got := OpaqueRect(image.Rect(0, 0, 100, 20), 15); !got.Empty() {
 		t.Errorf("при скруглении больше половины высоты объявлено %v", got)
 	}
-	if got := opaqueRect(image.Rectangle{}, 0); !got.Empty() {
+	if got := OpaqueRect(image.Rectangle{}, 0); !got.Empty() {
 		t.Errorf("пустая область объявила %v", got)
 	}
 }
@@ -146,7 +146,7 @@ func TestOpaqueRect_TooRoundToPromiseAnything(t *testing.T) {
 		{"скругление ровно в половину высоты", image.Rect(0, 0, 100, 20), 10},
 		{"скругление шире фигуры", image.Rect(0, 0, 20, 100), 15},
 	} {
-		if got := opaqueRect(tc.b, tc.cr); !got.Empty() {
+		if got := OpaqueRect(tc.b, tc.cr); !got.Empty() {
 			t.Errorf("%s: объявлено %v, ждали пустоту", tc.name, got)
 		}
 	}

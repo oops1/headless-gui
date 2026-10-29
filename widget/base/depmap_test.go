@@ -1,9 +1,10 @@
 package base
 
 // depmap_test.go — карта зависимостей пакета по будущим подпакетам
-// (ADR-0012, этап 8). XAML с 8.2b, ввод текста с 8.3 и RichText с 8.4 —
-// отдельные пакеты widget/xaml, widget/text, widget/richtext: их рёбра
-// проверяет компилятор (они → base, обратного импорта нет). Группы — по
+// (ADR-0012, этап 8). XAML с 8.2b, ввод текста с 8.3, RichText с 8.4 и
+// окно с 8.5 — отдельные пакеты widget/xaml, widget/text, widget/richtext,
+// widget/chrome: их рёбра проверяет компилятор (они → base, обратного
+// импорта нет). Группы — по
 // именам файлов; порядок — целевой граф пакетов: всё → base (core);
 // richtext → text; dialog → chrome, text;
 // text, richtext, dialog, dock, chrome → xaml (регистрация строителей);
@@ -24,7 +25,6 @@ func TestDepMap_SubpackageOrder(t *testing.T) {
 	allowed := map[string]map[string]bool{
 		"dialog": {"chrome": true, "text": true, "xaml": true},
 		"dock":   {"xaml": true},
-		"chrome": {"xaml": true},
 	}
 	depmap.Run(t, depmap.Config{
 		Dir:  ".",
@@ -32,7 +32,6 @@ func TestDepMap_SubpackageOrder(t *testing.T) {
 		Groups: []depmap.Group{
 			{Name: "dialog", Match: re(`^dialog|^messagebox`)},
 			{Name: "dock", Match: re(`^dock`)},
-			{Name: "chrome", Match: re(`^window|^titlebar`)},
 			{Name: "clipboard", Match: re(`^clipboard`)},
 		},
 		Default: "core",
@@ -45,12 +44,8 @@ func TestDepMap_SubpackageOrder(t *testing.T) {
 		// Сегодняшние обратные рёбра (см. ADR-0012, таблица разрыва). Каждый
 		// шаг этапа 8 убирает свои строки.
 		Baseline: []string{
-			"chrome → dialog",
-			"chrome → dock",
-			"core → chrome",
 			"core → dialog",
 			"core → dock",
-			"dock → chrome",
 			"dock → dialog",
 		},
 		Top: 6,

@@ -1,4 +1,4 @@
-package base
+package chrome
 
 // window_material.go — материал фона и мягкая тень окна по токенам темы.
 //
@@ -11,6 +11,7 @@ import (
 	"image"
 
 	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // SetBackdrop задаёт материал фона окна: theme.BackdropSpec с Material
@@ -67,21 +68,21 @@ func (w *Window) shadowExtent() int {
 func (w *Window) DrawMargin() int { return w.shadowExtent() }
 
 // drawShadow рисует тень под окном (до фона).
-func (w *Window) drawShadow(ctx DrawContext) {
+func (w *Window) drawShadow(ctx base.DrawContext) {
 	if sp, ok := w.shadowSpec(); ok {
-		DrawShadowSpec(ctx, w.Bounds(), w.CornerRadius, sp)
+		base.DrawShadowSpec(ctx, w.Bounds(), w.CornerRadius, sp)
 	}
 }
 
 // drawBackdrop рисует материал фона вместо заливки Background. false —
 // материал не назван, фон рисует вызывающий.
-func (w *Window) drawBackdrop(ctx DrawContext) bool {
+func (w *Window) drawBackdrop(ctx base.DrawContext) bool {
 	if w.Backdrop.Material == theme.MaterialDefault {
 		return false
 	}
 	r, cr := w.Bounds(), w.CornerRadius
 	if cr > 0 {
-		if rc, ok := ctx.(RoundClipper); ok {
+		if rc, ok := ctx.(base.RoundClipper); ok {
 			prev := ctx.Clip()
 			rc.SetRoundClip(r, cr)
 			defer func() {
@@ -90,7 +91,7 @@ func (w *Window) drawBackdrop(ctx DrawContext) bool {
 			}()
 		}
 	}
-	return PaintMaterial(ctx, r, cr, w.Backdrop)
+	return base.PaintMaterial(ctx, r, cr, w.Backdrop)
 }
 
 // invalidateShadowZone перерисовывает кольцо тени вокруг окна — старое (оно
@@ -101,7 +102,7 @@ func (w *Window) invalidateShadowZone(oldExtent int) {
 		w.Invalidate()
 		return
 	}
-	w.Base.invalidateRect(w.Bounds().Inset(-ext))
+	w.Base.InvalidateArea(w.Bounds().Inset(-ext))
 }
 
 // invalidateMoved перерисовывает тень при смене положения и размера: пока
@@ -111,5 +112,5 @@ func (w *Window) invalidateMoved(old image.Rectangle) {
 	if ext <= 0 {
 		return
 	}
-	w.Base.invalidateRect(old.Union(w.Bounds()).Inset(-ext))
+	w.Base.InvalidateArea(old.Union(w.Bounds()).Inset(-ext))
 }

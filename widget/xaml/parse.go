@@ -213,9 +213,13 @@ func ParseMargin(s string) base.Margin {
 
 // ─── Цвета ─────────────────────────────────────────────────────────────────
 
-// parseXAMLColor разбирает строку цвета: "#RRGGBB", "#RRGGBBAA" или именованный цвет.
+// ParseColor разбирает строку цвета: "#RRGGBB", "#RRGGBBAA" или именованный цвет.
 // Для hex-значений использует ParseRGBAHex из loader.go.
-func parseXAMLColor(s string) (color.RGBA, error) {
+//
+// Служебное: для пакетов виджетов (их XAML-строителей), в фасад не входит.
+//
+//facadegen:skip
+func ParseColor(s string) (color.RGBA, error) {
 	s = strings.TrimSpace(s)
 	switch strings.ToLower(s) {
 	case "transparent":
@@ -277,7 +281,7 @@ func parseXAMLColor(s string) (color.RGBA, error) {
 //facadegen:skip
 func ApplyColor(dst *color.RGBA, el Element, names ...string) {
 	if s := el.Attr(names...); s != "" {
-		if c, err := parseXAMLColor(s); err == nil {
+		if c, err := ParseColor(s); err == nil {
 			*dst = c
 		}
 	}

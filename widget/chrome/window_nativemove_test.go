@@ -1,8 +1,10 @@
-package base
+package chrome
 
 import (
 	"image"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // Под Wayland окно не знает своей позиции и задать её не может: перемещение и
@@ -21,7 +23,7 @@ func nativeWin() *Window {
 }
 
 func pressWin(w *Window, x, y int) bool {
-	return w.OnMouseButton(MouseEvent{Button: MouseLeft, Pressed: true, X: x, Y: y})
+	return w.OnMouseButton(base.MouseEvent{Button: base.MouseLeft, Pressed: true, X: x, Y: y})
 }
 
 func TestWindow_NativeMove_TitleDragAsksHost(t *testing.T) {
@@ -104,15 +106,15 @@ func TestWindow_NativeResize_CursorOverEdge(t *testing.T) {
 
 	// Без хука край в нативном режиме выключен: размер ведёт ОС своими
 	// средствами, и курсор ресайза там показывать нечего (прежнее поведение).
-	if got := w.Cursor(1, 150); got != CursorArrow {
+	if got := w.Cursor(1, 150); got != base.CursorArrow {
 		t.Errorf("без хука курсор у края %v, ждал стрелку", got)
 	}
 
 	w.OnNativeResize = func(edges int) bool { return true }
-	if got := w.Cursor(1, 150); got != CursorSizeWE {
+	if got := w.Cursor(1, 150); got != base.CursorSizeWE {
 		t.Errorf("курсор у левого края %v, ждал CursorSizeWE", got)
 	}
-	if got := w.Cursor(399, 299); got != CursorSizeNWSE {
+	if got := w.Cursor(399, 299); got != base.CursorSizeNWSE {
 		t.Errorf("курсор в правом нижнем углу %v, ждал CursorSizeNWSE", got)
 	}
 }
@@ -138,16 +140,16 @@ func TestWindow_NativeResize_RefusalDoesNotResizeWidget(t *testing.T) {
 func TestWindow_NativeEdgeBits(t *testing.T) {
 	// Биты для хоста не зависят от порядка внутренних констант.
 	cases := []struct {
-		e    winEdge
+		e    base.ResizeEdge
 		want int
 	}{
-		{edgeNone, 0},
-		{edgeN, NativeEdgeTop},
-		{edgeS, NativeEdgeBottom},
-		{edgeW, NativeEdgeLeft},
-		{edgeE, NativeEdgeRight},
-		{edgeN | edgeW, NativeEdgeTop | NativeEdgeLeft},
-		{edgeS | edgeE, NativeEdgeBottom | NativeEdgeRight},
+		{base.EdgeNone, 0},
+		{base.EdgeN, NativeEdgeTop},
+		{base.EdgeS, NativeEdgeBottom},
+		{base.EdgeW, NativeEdgeLeft},
+		{base.EdgeE, NativeEdgeRight},
+		{base.EdgeN | base.EdgeW, NativeEdgeTop | NativeEdgeLeft},
+		{base.EdgeS | base.EdgeE, NativeEdgeBottom | NativeEdgeRight},
 	}
 	for _, c := range cases {
 		if got := nativeEdgeBits(c.e); got != c.want {

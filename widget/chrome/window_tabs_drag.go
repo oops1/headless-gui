@@ -1,4 +1,4 @@
-package base
+package chrome
 
 // window_tabs_drag.go — прокрутка полосы вкладок заголовка и перестановка
 // вкладок перетаскиванием.
@@ -14,7 +14,11 @@ package base
 // на лету, как в Windows Terminal: пока тащат, соседи расступаются, и
 // отпускание ничего больше не двигает.
 
-import "image"
+import (
+	"image"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
+)
 
 // titleTabDragThreshold — на сколько точек нужно увести мышь, чтобы нажатие
 // стало перетаскиванием. Без порога любой щелчок по вкладке дрожанием руки
@@ -42,7 +46,7 @@ func (w *Window) MoveTitleTab(from, to int) bool {
 	}
 	tab := tt.tabs[from]
 	tt.tabs = append(tt.tabs[:from], tt.tabs[from+1:]...)
-	rest := make([]TabItem, len(tt.tabs[to:]))
+	rest := make([]base.TabItem, len(tt.tabs[to:]))
 	copy(rest, tt.tabs[to:])
 	tt.tabs = append(append(tt.tabs[:to], tab), rest...)
 

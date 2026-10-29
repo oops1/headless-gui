@@ -1160,11 +1160,11 @@ func setWidgetProperty(w base.Widget, prop, val string) {
 			ts.SetToolTip(val)
 		}
 	case "foreground":
-		if c, err := parseXAMLColor(val); err == nil {
+		if c, err := ParseColor(val); err == nil {
 			setWidgetForeground(w, c)
 		}
 	case "background":
-		if c, err := parseXAMLColor(val); err == nil {
+		if c, err := ParseColor(val); err == nil {
 			setWidgetBackground(w, c)
 		}
 	case "selectedindex":

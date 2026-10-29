@@ -18,7 +18,7 @@ func opaquePanelRegion(buf *[1]image.Rectangle, b image.Rectangle, bg color.RGBA
 	if useAlpha || grad != nil || img != nil || bg.A < 255 {
 		return nil
 	}
-	return oneRegion(buf, opaqueRect(b, corner))
+	return OneRegion(buf, OpaqueRect(b, corner))
 }
 
 // DrawContextAlpha — см. draw.DrawContextAlpha (core/draw); алиас: тот же тип.
@@ -39,7 +39,7 @@ type Panel struct {
 	// вместо сплошного Background.
 	Gradient *LinearGradient
 
-	// opaqueBuf — буфер под ответ OpaqueRegion (см. oneRegion).
+	// opaqueBuf — буфер под ответ OpaqueRegion (см. OneRegion).
 	opaqueBuf [1]image.Rectangle
 
 	// ── Заголовок (title bar) ───────────────────────────────────────────────
@@ -230,11 +230,11 @@ func (p *Panel) drawWinHeader(ctx DrawContext, b image.Rectangle, hh int, bg, tc
 	// Текст: вертикально по центру заголовка, отступ 12px слева
 	// (в классике — жирный, как в Win2000).
 	textY := y + (hh-13)/2
-	drawTitleText(ctx, p.Caption, x+12, textY, tc)
+	DrawTitleText(ctx, p.Caption, x+12, textY, tc)
 
 	// Индикатор локали — слева от декоративных кнопок управления (3×46px).
 	if p.ShowLocaleIndicator {
-		drawLocaleBadge(ctx, x+w-46*3-8, y, hh, tc)
+		DrawLocaleBadge(ctx, x+w-46*3-8, y, hh, tc)
 	}
 
 	// Кнопки управления окном (декоративные): ─ □ ×
@@ -243,7 +243,7 @@ func (p *Panel) drawWinHeader(ctx DrawContext, b image.Rectangle, hh int, bg, tc
 	bx := x + w - btnW*3
 
 	// ─ (свернуть)
-	lineColor := captionGlyphColor(tc, bg) // как у Window: на светлом заголовке значки тёмные
+	lineColor := CaptionGlyphColor(tc, bg) // как у Window: на светлом заголовке значки тёмные
 	my := y + btnH/2
 	ctx.DrawHLine(bx+16, my, 14, lineColor)
 
@@ -307,7 +307,7 @@ func (p *Panel) drawMacHeader(ctx DrawContext, b image.Rectangle, hh int, bg, tc
 
 	// Индикатор локали — в правом верхнем углу (traffic lights слева в Mac-стиле).
 	if p.ShowLocaleIndicator {
-		drawLocaleBadge(ctx, x+w-8, y, hh, tc)
+		DrawLocaleBadge(ctx, x+w-8, y, hh, tc)
 	}
 }
 

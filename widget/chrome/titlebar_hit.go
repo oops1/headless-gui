@@ -13,9 +13,13 @@
 // (SetTitleBarContent) — окно знает само. Для остального здесь два явных
 // способа сказать «эта точка заголовка — не перетаскивание», не требуя от
 // виджета захвата мыши.
-package base
+package chrome
 
-import "image"
+import (
+	"image"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
+)
 
 // TitleBarPressOwner — виджет-потомок окна, лежащий поверх его заголовка, у
 // которого нажатие на себя забирает он сам, а не перетаскивание окна.
@@ -60,12 +64,12 @@ func (w *Window) titleBarOwnedByApp(pt image.Point) bool {
 
 // ownsTitleBarPress ищет среди потомков видимый виджет, который владеет
 // нажатием в точке pt.
-func ownsTitleBarPress(children []Widget, pt image.Point, depth int) bool {
+func ownsTitleBarPress(children []base.Widget, pt image.Point, depth int) bool {
 	if depth > 16 {
 		return false
 	}
 	for _, c := range children {
-		if c == nil || !IsWidgetVisible(c) || !pt.In(c.Bounds()) {
+		if c == nil || !base.IsWidgetVisible(c) || !pt.In(c.Bounds()) {
 			continue
 		}
 		if o, ok := c.(TitleBarPressOwner); ok && o.OwnsTitleBarPress(pt) {

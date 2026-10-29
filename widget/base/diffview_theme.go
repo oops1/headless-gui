@@ -36,20 +36,20 @@ func dvPaletteFrom(t *Theme) dvPalette {
 	gray := dvRGB(0x808080)
 	p.card = dvOr(t.InputBG, dvOr(t.PanelBG, dvRGB(0xFFFFFF)))
 	p.card.A = 255
-	p.bg = dvOr(t.WindowBG, mixRGBA(p.card, gray, 0.08))
+	p.bg = dvOr(t.WindowBG, MixRGBA(p.card, gray, 0.08))
 	if p.bg == p.card {
-		p.bg = mixRGBA(p.card, gray, 0.08)
+		p.bg = MixRGBA(p.card, gray, 0.08)
 	}
 	dark := luminance(p.card) < 128
-	p.cardEdge = dvOr(t.Border, mixRGBA(p.card, gray, 0.3))
+	p.cardEdge = dvOr(t.Border, MixRGBA(p.card, gray, 0.3))
 	p.text = dvOr(t.InputText, dvOr(t.LabelText, dvRGB(0x1F2328)))
-	p.muted = dvOr(t.SecondaryText, mixRGBA(p.text, p.card, 0.45))
-	p.num = mixRGBA(p.muted, p.card, 0.25)
+	p.muted = dvOr(t.SecondaryText, MixRGBA(p.text, p.card, 0.45))
+	p.num = MixRGBA(p.muted, p.card, 0.25)
 	p.accent = dvOr(t.Accent, dvRGB(0x7C5CFA))
 	p.accent.A = 255
 	p.caret = dvOr(t.InputCaret, p.text)
-	p.track = dvOr(t.ScrollTrackBG, mixRGBA(p.card, p.text, 0.08))
-	p.thumb = dvOr(t.ScrollThumbBG, mixRGBA(p.card, p.text, 0.3))
+	p.track = dvOr(t.ScrollTrackBG, MixRGBA(p.card, p.text, 0.08))
+	p.thumb = dvOr(t.ScrollThumbBG, MixRGBA(p.card, p.text, 0.3))
 
 	red, green := dvRGB(0xE5484D), dvRGB(0x2F9E62)
 	if dark {
@@ -57,7 +57,7 @@ func dvPaletteFrom(t *Theme) dvPalette {
 	}
 	black := dvRGB(0)
 	p.del, p.add = red, green
-	p.delHover, p.addHover = mixRGBA(red, black, 0.18), mixRGBA(green, black, 0.18)
+	p.delHover, p.addHover = MixRGBA(red, black, 0.18), MixRGBA(green, black, 0.18)
 
 	// Полосы строк и выделение — из темы; без них — теми же формулами, по
 	// которым их заполняют пресеты (withCodeColors).

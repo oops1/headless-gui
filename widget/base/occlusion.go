@@ -102,13 +102,17 @@ func (o *occluders) Occluded(w Widget) bool {
 	return o.covers(SubtreeRect(w))
 }
 
-// oneRegion отдаёт одноэлементный список, не выделяя памяти под него.
+// OneRegion отдаёт одноэлементный список, не выделяя памяти под него.
 //
 // Буфер принадлежит виджету и живёт между кадрами: OpaqueRegion зовут на
 // каждый кадр для каждого рисуемого виджета, и свежий срез там — аллокация
 // ровно в том месте, экономию которого мы и меряем. Отдать срез по буферу
 // безопасно: обход читает его тут же и не держит.
-func oneRegion(buf *[1]image.Rectangle, r image.Rectangle) []image.Rectangle {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func OneRegion(buf *[1]image.Rectangle, r image.Rectangle) []image.Rectangle {
 	if r.Empty() {
 		return nil
 	}
@@ -116,7 +120,7 @@ func oneRegion(buf *[1]image.Rectangle, r image.Rectangle) []image.Rectangle {
 	return buf[:]
 }
 
-// opaqueRect возвращает площадь, которую сплошная заливка прямоугольника b
+// OpaqueRect возвращает площадь, которую сплошная заливка прямоугольника b
 // со скруглением cr закрывает НАВЕРНЯКА.
 //
 // Скруглённый прямоугольник не накрывает своих углов, зато на любой строке
@@ -124,7 +128,11 @@ func oneRegion(buf *[1]image.Rectangle, r image.Rectangle) []image.Rectangle {
 // объявляем — она и есть та часть, за которую можно ручаться. Отрезать по cr
 // со всех четырёх сторон было бы вернее математически и хуже по делу: у окна
 // 720×440 со скруглением 8 полоса теряет 3%, а квадрат — 4%.
-func opaqueRect(b image.Rectangle, cr int) image.Rectangle {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func OpaqueRect(b image.Rectangle, cr int) image.Rectangle {
 	if b.Empty() {
 		return image.Rectangle{}
 	}

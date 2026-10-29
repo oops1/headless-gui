@@ -1,8 +1,10 @@
-package base
+package chrome
 
 import (
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // TestXorBorderColor_Inversion — чистая функция: побитовое НЕ каждого канала,
@@ -36,7 +38,7 @@ func TestXorBorderBase_Fallback(t *testing.T) {
 	}
 
 	w.Background = color.RGBA{} // A == 0
-	if got := w.xorBorderBase(); got != win10.WindowBG {
-		t.Fatalf("нулевой фон: base = %v, want WindowBG %v", got, win10.WindowBG)
+	if got := w.xorBorderBase(); got != base.ActiveTheme().WindowBG {
+		t.Fatalf("нулевой фон: base = %v, want WindowBG %v", got, base.ActiveTheme().WindowBG)
 	}
 }

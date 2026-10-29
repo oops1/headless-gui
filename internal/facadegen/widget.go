@@ -36,5 +36,5 @@ func Widget(root string) []Facade {
 		}
 		return ""
 	}
-	return []Facade{pkg("base", "base"), x, pkg("text", "text"), pkg("richtext", "richtext")}
+	return []Facade{pkg("base", "base"), x, pkg("text", "text"), pkg("richtext", "richtext"), pkg("chrome", "chrome")}
 }

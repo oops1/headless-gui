@@ -673,6 +673,7 @@ type Animated
 type Animation
 type ArrowStyle
 type BackdropDrawer
+type BackgroundColorer
 type BackgroundRole
 type Base
 type BaseBoundsProvider
@@ -686,6 +687,7 @@ type CaptureAware
 type CaptureManager
 type CaptureRequester
 type CheckBox
+type ChildLayouter
 type ClipboardFilesProvider
 type ClipboardFormatSet
 type ClipboardFormatsProvider

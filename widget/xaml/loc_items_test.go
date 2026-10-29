@@ -1,9 +1,10 @@
-package xaml
+package xaml_test
 
 import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v3/widget/xaml"
 )
 
 // locItemsXAML — разметка со всеми видами «свёрнутых» строк: заголовки
@@ -36,13 +37,13 @@ const locItemsXAML = `<Window Title="T" Width="400" Height="300">
 // и подсказка поля. Раньше они оставались на языке загрузки — из-за чего
 // приложение выглядело переведённым лишь наполовину.
 func TestLocalizedFoldedItems(t *testing.T) {
-	useFakeField(t)
-	saveStrings(t)
+	xaml.UseFakeField(t)
+	xaml.SaveStrings(t)
 	base.ClearStrings()
-	ClearLocalizedItems()
+	xaml.ClearLocalizedItems()
 	t.Cleanup(func() {
 		base.ClearStrings()
-		ClearLocalizedItems()
+		xaml.ClearLocalizedItems()
 		base.SetLanguage("EN")
 	})
 
@@ -61,7 +62,7 @@ func TestLocalizedFoldedItems(t *testing.T) {
 	base.SetFallbackLanguage("EN")
 	base.SetLanguage("EN")
 
-	_, reg, scope, err := LoadUIFromXAMLBindings([]byte(locItemsXAML), nil)
+	_, reg, scope, err := xaml.LoadUIFromXAMLBindings([]byte(locItemsXAML), nil)
 	if err != nil {
 		t.Fatalf("загрузка разметки: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestLocalizedFoldedItems(t *testing.T) {
 	tabs, _ := reg["tabs"].(*base.TabControl)
 	menu, _ := reg["menu"].(*base.MenuBar)
 	combo, _ := reg["combo"].(*base.Dropdown)
-	edit, _ := reg["edit"].(*fakeField) // поле ввода — заглушка useFakeField
+	edit, _ := reg["edit"].(*xaml.FakeField) // поле ввода — заглушка useFakeField
 	if tabs == nil || menu == nil || combo == nil || edit == nil {
 		t.Fatalf("виджеты не найдены: tabs=%v menu=%v combo=%v edit=%v", tabs, menu, combo, edit)
 	}
@@ -88,8 +89,8 @@ func TestLocalizedFoldedItems(t *testing.T) {
 	if got := combo.Items()[0]; got != "Administrator" {
 		t.Errorf("элемент списка 0 = %q, want Administrator", got)
 	}
-	if edit.placeholder != "Enter a name" {
-		t.Errorf("подсказка = %q", edit.placeholder)
+	if edit.Placeholder != "Enter a name" {
+		t.Errorf("подсказка = %q", edit.Placeholder)
 	}
 
 	// ── Переключаем язык ─────────────────────────────────────────────────────
@@ -122,8 +123,8 @@ func TestLocalizedFoldedItems(t *testing.T) {
 	if got := combo.Items()[1]; got != "Гость" {
 		t.Errorf("элемент списка 1 после смены языка = %q", got)
 	}
-	if edit.placeholder != "Введите имя" {
-		t.Errorf("подсказка после смены языка = %q", edit.placeholder)
+	if edit.Placeholder != "Введите имя" {
+		t.Errorf("подсказка после смены языка = %q", edit.Placeholder)
 	}
 
 	// Обычное свойство виджета продолжает работать как раньше.

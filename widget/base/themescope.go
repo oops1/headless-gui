@@ -82,7 +82,7 @@ func (s *ThemeScope) Draw(ctx DrawContext) {
 		s.DrawChildren(ctx)
 		return
 	}
-	defer pushThemeStyle(s.theme.Style)()
+	defer PushThemeStyle(s.theme.Style)()
 	s.DrawChildren(ctx)
 }
 

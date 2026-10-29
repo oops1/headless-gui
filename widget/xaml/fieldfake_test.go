@@ -13,34 +13,34 @@ import (
 	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
-type fakeField struct {
+type FakeField struct {
 	base.Base
 	text        string
-	placeholder string
+	Placeholder string
 	textColor   color.RGBA
 	background  color.RGBA
 	onChange    func(string)
 }
 
-func (f *fakeField) Draw(ctx base.DrawContext)        { f.DrawChildren(ctx) }
-func (f *fakeField) ApplyTheme(*base.Theme)           {}
-func (f *fakeField) GetText() string                  { return f.text }
-func (f *fakeField) SetText(s string)                 { f.text = s }
-func (f *fakeField) SetPlaceholder(s string)          { f.placeholder = s }
-func (f *fakeField) SetTextColor(c color.RGBA)        { f.textColor = c }
-func (f *fakeField) SetBackgroundColor(c color.RGBA)  { f.background = c }
-func (f *fakeField) OnTextChanged() func(string)      { return f.onChange }
-func (f *fakeField) SetOnTextChanged(fn func(string)) { f.onChange = fn }
+func (f *FakeField) Draw(ctx base.DrawContext)        { f.DrawChildren(ctx) }
+func (f *FakeField) ApplyTheme(*base.Theme)           {}
+func (f *FakeField) GetText() string                  { return f.text }
+func (f *FakeField) SetText(s string)                 { f.text = s }
+func (f *FakeField) SetPlaceholder(s string)          { f.Placeholder = s }
+func (f *FakeField) SetTextColor(c color.RGBA)        { f.textColor = c }
+func (f *FakeField) SetBackgroundColor(c color.RGBA)  { f.background = c }
+func (f *FakeField) OnTextChanged() func(string)      { return f.onChange }
+func (f *FakeField) SetOnTextChanged(fn func(string)) { f.onChange = fn }
 
 var fieldTags = []string{"textbox", "textinput", "input", "richtextbox", "passwordbox"}
 
-// useFakeField регистрирует заглушку на теги ввода текста на время теста.
-func useFakeField(t *testing.T) {
+// UseFakeField регистрирует заглушку на теги ввода текста на время теста.
+func UseFakeField(t *testing.T) {
 	t.Helper()
 	Default().Register(func(el *Element, _ *Loader) (base.Widget, error) {
-		return &fakeField{
+		return &FakeField{
 			text:        el.Attr("Text"),
-			placeholder: el.Attr("Tag", "Placeholder", "PlaceholderText", "Hint"),
+			Placeholder: el.Attr("Tag", "Placeholder", "PlaceholderText", "Hint"),
 		}, nil
 	}, fieldTags...)
 	t.Cleanup(func() { Default().Unregister(fieldTags...) })

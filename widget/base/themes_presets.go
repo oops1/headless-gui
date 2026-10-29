@@ -123,11 +123,15 @@ func CurrentThemeStyle() ThemeStyle { return currentStyle() }
 // другой горутины некому: currentStyle зовётся только из Draw.
 var drawStyle *ThemeStyle
 
-// pushThemeStyle подменяет стиль отрисовки и возвращает функцию возврата.
+// PushThemeStyle подменяет стиль отрисовки и возвращает функцию возврата.
 //
 // Возврат к ПРЕЖНЕМУ значению, а не к nil: области темы вкладываются друг в
 // друга, и внутренняя не должна сбрасывать внешнюю.
-func pushThemeStyle(st ThemeStyle) func() {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func PushThemeStyle(st ThemeStyle) func() {
 	prev := drawStyle
 	drawStyle = &st
 	return func() { drawStyle = prev }
@@ -135,9 +139,13 @@ func pushThemeStyle(st ThemeStyle) func() {
 
 // ─── Отрисовка bevel (Classic3D) ─────────────────────────────────────────────
 
-// drawBevelRaised рисует выпуклую 2-пиксельную рамку Win2000 (кнопка).
+// DrawBevelRaised рисует выпуклую 2-пиксельную рамку Win2000 (кнопка).
 // Обёртка над DrawBevel: реализация рамки одна на движок (см. bevel.go).
-func drawBevelRaised(ctx DrawContext, x, y, w, h int, st ThemeStyle) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func DrawBevelRaised(ctx DrawContext, x, y, w, h int, st ThemeStyle) {
 	DrawBevel(ctx, image.Rect(x, y, x+w, y+h),
 		st.BevelLight, st.BevelShadow, st.BevelDark, false)
 }
@@ -175,12 +183,16 @@ func DrawBevelSunken(ctx DrawContext, x, y, w, h int, st ThemeStyle) {
 // fillTitleBar заливает полосу заголовка: горизонтальный градиент
 // TitleBG→TitleBG2 (классика Win2000: navy→голубой) либо сплошной цвет.
 func fillTitleBar(ctx DrawContext, r image.Rectangle, bg color.RGBA) {
-	fillTitleBarColors(ctx, r, bg, win10.TitleBG2)
+	FillTitleBarColors(ctx, r, bg, win10.TitleBG2)
 }
 
-// fillTitleBarColors — как fillTitleBar, но с явным вторым цветом градиента
+// FillTitleBarColors — как fillTitleBar, но с явным вторым цветом градиента
 // (для неактивного окна: серый градиент Win2000).
-func fillTitleBarColors(ctx DrawContext, r image.Rectangle, bg, bg2 color.RGBA) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func FillTitleBarColors(ctx DrawContext, r image.Rectangle, bg, bg2 color.RGBA) {
 	if bg2.A > 0 {
 		drawLinearGradient(ctx, r, &LinearGradient{
 			Horizontal: true,
@@ -191,8 +203,12 @@ func fillTitleBarColors(ctx DrawContext, r image.Rectangle, bg, bg2 color.RGBA) 
 	ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), bg)
 }
 
-// drawTitleText выводит текст заголовка: в классике — жирным (как Win2000).
-func drawTitleText(ctx DrawContext, text string, x, y int, col color.RGBA) {
+// DrawTitleText выводит текст заголовка: в классике — жирным (как Win2000).
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func DrawTitleText(ctx DrawContext, text string, x, y int, col color.RGBA) {
 	if win10.Style.Classic3D {
 		ctx.DrawTextFont(text, x, y, DefaultFontSize(), BuiltinFontBold, col)
 		return
@@ -279,14 +295,14 @@ func DrawClassicScrollbar(ctx DrawContext, track, thumb image.Rectangle, st Them
 
 	for _, r := range []image.Rectangle{top, bot} {
 		ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), face)
-		drawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+		DrawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
 	}
 	drawArrowTri(ctx, top.Min.X+top.Dx()/2, top.Min.Y+top.Dy()/2, true, arrowCol)
 	drawArrowTri(ctx, bot.Min.X+bot.Dx()/2, bot.Min.Y+bot.Dy()/2, false, arrowCol)
 
 	if !thumb.Empty() {
 		ctx.FillRect(thumb.Min.X, thumb.Min.Y, thumb.Dx(), thumb.Dy(), face)
-		drawBevelRaised(ctx, thumb.Min.X, thumb.Min.Y, thumb.Dx(), thumb.Dy(), st)
+		DrawBevelRaised(ctx, thumb.Min.X, thumb.Min.Y, thumb.Dx(), thumb.Dy(), st)
 	}
 }
 
@@ -619,12 +635,12 @@ func withCodeColors(t *Theme) *Theme {
 	}
 	opaque := func(c color.RGBA) color.RGBA { c.A = 255; return c }
 	card = opaque(card)
-	t.DiffDelBG = mixRGBA(card, red, band)
-	t.DiffDelStrong = mixRGBA(card, red, strong)
+	t.DiffDelBG = MixRGBA(card, red, band)
+	t.DiffDelStrong = MixRGBA(card, red, strong)
 	// Зелёный на светлом фоне читается слабее красного той же доли — полоса
 	// добавленной строки на пару процентов плотнее.
-	t.DiffAddBG = mixRGBA(card, green, band+0.02)
-	t.DiffAddStrong = mixRGBA(card, green, strong)
+	t.DiffAddBG = MixRGBA(card, green, band+0.02)
+	t.DiffAddStrong = MixRGBA(card, green, strong)
 	// Цвета текста — насыщенные, доведённые до читаемости на фоне поля ввода.
 	// Фиксированная пара значений на тёмной теме с серым полем опускалась бы
 	// ниже порога контраста.
@@ -640,7 +656,7 @@ func withCodeColors(t *Theme) *Theme {
 	if accent.A == 0 {
 		accent = color.RGBA{R: 0x00, G: 0x78, B: 0xD7, A: 255}
 	}
-	t.TextSelectionBG = mixRGBA(card, opaque(accent), sel)
+	t.TextSelectionBG = MixRGBA(card, opaque(accent), sel)
 
 	if dark {
 		t.SyntaxKeyword = color.RGBA{R: 0x56, G: 0x9C, B: 0xD6, A: 255}

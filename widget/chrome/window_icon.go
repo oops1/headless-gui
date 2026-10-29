@@ -10,11 +10,12 @@
 // Значок — такой же ребёнок полосы заголовка, как кнопка сворачивания: его
 // геометрию считает окно, подпись сдвигается за него сама, а нажатие на него
 // не тащит окно (см. titleBarChildHit).
-package base
+package chrome
 
 import (
 	"image"
 
+	"github.com/oops1/headless-gui/v3/widget/base"
 	"github.com/oops1/headless-gui/v3/widget/svg"
 )
 
@@ -35,7 +36,7 @@ const (
 )
 
 func init() {
-	RegisterStrings("EN", map[string]string{
+	base.RegisterStrings("EN", map[string]string{
 		"win.sys.restore":  "Restore",
 		"win.sys.move":     "Move",
 		"win.sys.size":     "Size",
@@ -43,7 +44,7 @@ func init() {
 		"win.sys.maximize": "Maximize",
 		"win.sys.close":    "Close",
 	})
-	RegisterStrings("RU", map[string]string{
+	base.RegisterStrings("RU", map[string]string{
 		"win.sys.restore":  "Восстановить",
 		"win.sys.move":     "Переместить",
 		"win.sys.size":     "Размер",
@@ -55,7 +56,7 @@ func init() {
 
 // windowIcon — виджет значка окна в полосе заголовка.
 type windowIcon struct {
-	Base
+	base.Base
 	owner *Window
 	img   image.Image
 	doc   *svg.Document
@@ -87,7 +88,7 @@ func (w *Window) SetIcon(img image.Image) {
 // физическом размере значка, поэтому на HiDPI остаётся чёткой. currentColor в
 // SVG — цвет подписи заголовка. При ошибке разбора прежний значок остаётся.
 func (w *Window) SetIconSVG(data []byte) error {
-	doc, err := svg.ParseWith(data, svg.ParseOptions{Text: TextRasterizerFor(w)})
+	doc, err := svg.ParseWith(data, svg.ParseOptions{Text: base.TextRasterizerFor(w)})
 	if err != nil {
 		return err
 	}
@@ -104,7 +105,7 @@ func (w *Window) HasIcon() bool { return w.icon != nil }
 // IconBounds — прямоугольник значка в абсолютных координатах. Пустой, если
 // значка нет или он не показан (mac-раскладка, окно без заголовка).
 func (w *Window) IconBounds() image.Rectangle {
-	if w.icon == nil || !IsWidgetVisible(w.icon) {
+	if w.icon == nil || !base.IsWidgetVisible(w.icon) {
 		return image.Rectangle{}
 	}
 	return w.icon.Bounds()
@@ -136,8 +137,8 @@ func (w *Window) removeIcon() {
 }
 
 // isIconWidget сообщает, что c — значок окна.
-func (w *Window) isIconWidget(c Widget) bool {
-	return w.icon != nil && Widget(w.icon) == c
+func (w *Window) isIconWidget(c base.Widget) bool {
+	return w.icon != nil && base.Widget(w.icon) == c
 }
 
 // iconSize — сторона значка в полосе высотой barH.
@@ -189,8 +190,8 @@ func (w *Window) titleTextLeft(tb image.Rectangle) int {
 		}
 		x = r.Max.X + gap
 	}
-	if w.navBtn != nil && !w.navBtn.bounds.Empty() {
-		x = w.navBtn.bounds.Max.X + titleBarGap
+	if w.navBtn != nil && !w.navBtn.Base.Bounds().Empty() {
+		x = w.navBtn.Base.Bounds().Max.X + base.TitleBarGap
 	}
 	return x
 }
@@ -218,7 +219,7 @@ func (w *Window) iconClaims(pt image.Point) bool {
 
 // ─── Отрисовка и ввод значка ────────────────────────────────────────────────
 
-func (ic *windowIcon) Draw(ctx DrawContext) {
+func (ic *windowIcon) Draw(ctx base.DrawContext) {
 	b := ic.Bounds()
 	if b.Empty() {
 		return
@@ -226,7 +227,7 @@ func (ic *windowIcon) Draw(ctx DrawContext) {
 	switch {
 	case ic.doc != nil:
 		_, _, tc := ic.owner.titleColors()
-		DrawSVG(ctx, ic.doc, b, tc, false)
+		base.DrawSVG(ctx, ic.doc, b, tc, false)
 	case ic.img != nil:
 		if ib := ic.img.Bounds(); ib.Dx() == b.Dx() && ib.Dy() == b.Dy() {
 			ctx.DrawImage(ic.img, b.Min.X, b.Min.Y)
@@ -241,8 +242,8 @@ func (ic *windowIcon) Draw(ctx DrawContext) {
 // Меню открывается на нажатии, а не на отпускании, как в Windows. Нажатие,
 // которое только что погасило это же меню, его заново не открывает: движок
 // гасит открытые меню до доставки события (PopupMenu.DismissedByPress).
-func (ic *windowIcon) OnMouseButton(e MouseEvent) bool {
-	if e.Button != MouseLeft || !e.Pressed || !ic.owner.iconClaims(image.Pt(e.X, e.Y)) {
+func (ic *windowIcon) OnMouseButton(e base.MouseEvent) bool {
+	if e.Button != base.MouseLeft || !e.Pressed || !ic.owner.iconClaims(image.Pt(e.X, e.Y)) {
 		return false
 	}
 	if e.Clicks >= 2 {
@@ -287,7 +288,7 @@ func (w *Window) IsMaximized() bool { return w.maximized }
 // Можно вызывать до SetIcon.
 // Заданный список приложение ведёт само — доступность пунктов не
 // пересчитывается.
-func (w *Window) SetSystemMenu(items []MenuItem) {
+func (w *Window) SetSystemMenu(items []base.MenuItem) {
 	w.sysCustom = items != nil
 	w.sysItems = items
 	if len(items) == 0 && w.sysMenu != nil {
@@ -308,7 +309,7 @@ func (w *Window) SetSystemMenu(items []MenuItem) {
 //
 // Пункт без обработчика отображается недоступным, как в Windows: пункты не
 // пропадают, чтобы меню не прыгало от окна к окну.
-func (w *Window) SystemMenuItems() []MenuItem {
+func (w *Window) SystemMenuItems() []base.MenuItem {
 	maxed := w.IsMaximized()
 	canMin := w.btnCount() >= 2 && w.OnMinimize != nil
 	canMax := w.btnCount() >= 3 && w.OnMaximize != nil
@@ -316,26 +317,26 @@ func (w *Window) SystemMenuItems() []MenuItem {
 	canSize := !maxed && w.Resize == ResizeModeCanResize && w.Style != WindowStyleNone &&
 		w.OnNativeResize != nil
 
-	return []MenuItem{
-		{Text: Tr("win.sys.restore"), Disabled: !(maxed && canMax), OnClick: w.toggleMaximize},
-		{Text: Tr("win.sys.move"), Disabled: !canMove, OnClick: func() {
+	return []base.MenuItem{
+		{Text: base.Tr("win.sys.restore"), Disabled: !(maxed && canMax), OnClick: w.toggleMaximize},
+		{Text: base.Tr("win.sys.move"), Disabled: !canMove, OnClick: func() {
 			if w.OnNativeMove != nil {
 				w.OnNativeMove()
 			}
 		}},
-		{Text: Tr("win.sys.size"), Disabled: !canSize, OnClick: func() {
+		{Text: base.Tr("win.sys.size"), Disabled: !canSize, OnClick: func() {
 			if w.OnNativeResize != nil {
 				w.OnNativeResize(NativeEdgeBottom | NativeEdgeRight)
 			}
 		}},
-		{Text: Tr("win.sys.minimize"), Disabled: !canMin, OnClick: func() {
+		{Text: base.Tr("win.sys.minimize"), Disabled: !canMin, OnClick: func() {
 			if w.OnMinimize != nil {
 				w.OnMinimize()
 			}
 		}},
-		{Text: Tr("win.sys.maximize"), Disabled: maxed || !canMax, OnClick: w.toggleMaximize},
+		{Text: base.Tr("win.sys.maximize"), Disabled: maxed || !canMax, OnClick: w.toggleMaximize},
 		{Separator: true},
-		{Text: Tr("win.sys.close"), Shortcut: "Alt+F4", Disabled: w.OnClose == nil, OnClick: w.closeFromIcon},
+		{Text: base.Tr("win.sys.close"), Shortcut: "Alt+F4", Disabled: w.OnClose == nil, OnClick: w.closeFromIcon},
 	}
 }
 
@@ -355,12 +356,12 @@ func (w *Window) hasSystemMenu() bool {
 
 // SystemMenu возвращает popup-меню значка (nil — значка нет или меню убрано).
 // Пункты в нём собираются при каждом открытии.
-func (w *Window) SystemMenu() *PopupMenu {
+func (w *Window) SystemMenu() *base.PopupMenu {
 	if !w.hasSystemMenu() {
 		return nil
 	}
 	if w.sysMenu == nil {
-		w.sysMenu = NewPopupMenu()
+		w.sysMenu = base.NewPopupMenu()
 		w.AddChild(w.sysMenu)
 	}
 	return w.sysMenu

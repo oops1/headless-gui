@@ -14,18 +14,20 @@
 //
 // Содержимым вкладки управляет окно: Content активной вкладки — обычный
 // ребёнок Window с bounds = ContentBounds() (ресайз работает штатно).
-package base
+package chrome
 
 import (
 	"image"
 	"image/color"
 	"sync"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // titleTabsState — состояние режима вкладок в заголовке.
 type titleTabsState struct {
 	mu     sync.Mutex
-	tabs   []TabItem
+	tabs   []base.TabItem
 	active int
 
 	// hover-состояние (обновляется в OnMouseMove, читается в Draw).
@@ -41,7 +43,7 @@ type titleTabsState struct {
 	hoverMenu  bool
 
 	// menu — выпадающее меню кнопки «v» (профили/команды, как в Terminal).
-	menu *PopupMenu
+	menu *base.PopupMenu
 
 	// Прокрутка полосы при переполнении (window_tabs_drag.go): сдвиг и его
 	// предел, посчитанный при последней отрисовке.
@@ -76,25 +78,12 @@ const (
 
 // titleTabContentBG возвращает эффективный фон содержимого вкладки — им
 // заливается корешок, чтобы срастись с панелью без шва. Контент-контейнеры
-// с собственным полем Background (Panel/Canvas/Grid/DockPanel) отдают его;
-// иначе — фон клиентской области окна.
-func (w *Window) titleTabContentBG(content Widget) color.RGBA {
-	switch v := content.(type) {
-	case *Panel:
-		if v.Background.A > 0 {
-			return v.Background
-		}
-	case *Canvas:
-		if v.Background.A > 0 {
-			return v.Background
-		}
-	case *Grid:
-		if v.Background.A > 0 {
-			return v.Background
-		}
-	case *DockPanel:
-		if v.Background.A > 0 {
-			return v.Background
+// со своим фоном (BackgroundColorer: Panel, Canvas, Grid, DockPanel) отдают
+// его; иначе — фон клиентской области окна.
+func (w *Window) titleTabContentBG(content base.Widget) color.RGBA {
+	if bc, ok := content.(base.BackgroundColorer); ok {
+		if c, ok := bc.BackgroundColor(); ok {
+			return c
 		}
 	}
 	return w.Background
@@ -127,17 +116,17 @@ func (w *Window) titleTabsActive() bool {
 
 // AddTitleTab добавляет вкладку в заголовок и возвращает её индекс.
 // Первая добавленная вкладка становится активной. Требует EnableTitleTabs.
-func (w *Window) AddTitleTab(header string, content Widget) int {
+func (w *Window) AddTitleTab(header string, content base.Widget) int {
 	w.EnableTitleTabs()
 	tt := w.titleTabs
 	tt.mu.Lock()
-	tt.tabs = append(tt.tabs, TabItem{Header: header, Content: content})
+	tt.tabs = append(tt.tabs, base.TabItem{Header: header, Content: content})
 	idx := len(tt.tabs) - 1
 	first := tt.active < 0
 	tt.mu.Unlock()
 
 	if content != nil && w.capMgr != nil {
-		injectCaptureManagerTree(content, w.capMgr)
+		base.InjectCaptureManagerTree(content, w.capMgr)
 	}
 	if first {
 		w.SetActiveTitleTab(idx)
@@ -152,7 +141,7 @@ func (w *Window) AddTitleTab(header string, content Widget) int {
 // дерево окна (Window.SetBounds его не растягивает — PopupMenu
 // позиционируется собственным Show) и открывается кликом по шеврону
 // под полосой заголовка. nil — убрать кнопку.
-func (w *Window) SetTitleTabsMenu(pm *PopupMenu) {
+func (w *Window) SetTitleTabsMenu(pm *base.PopupMenu) {
 	w.EnableTitleTabs()
 	tt := w.titleTabs
 	tt.mu.Lock()
@@ -169,7 +158,7 @@ func (w *Window) SetTitleTabsMenu(pm *PopupMenu) {
 }
 
 // TitleTabsMenu возвращает прикреплённое меню кнопки «v» (nil — нет).
-func (w *Window) TitleTabsMenu() *PopupMenu {
+func (w *Window) TitleTabsMenu() *base.PopupMenu {
 	if w.titleTabs == nil {
 		return nil
 	}
@@ -218,7 +207,7 @@ func (w *Window) SetActiveTitleTab(idx int) {
 		return
 	}
 	prev := tt.active
-	var prevContent, newContent Widget
+	var prevContent, newContent base.Widget
 	if prev >= 0 && prev < len(tt.tabs) {
 		prevContent = tt.tabs[prev].Content
 	}
@@ -233,7 +222,7 @@ func (w *Window) SetActiveTitleTab(idx int) {
 	}
 	if newContent != nil && (changed || prev < 0) {
 		if w.capMgr != nil {
-			injectCaptureManagerTree(newContent, w.capMgr)
+			base.InjectCaptureManagerTree(newContent, w.capMgr)
 		}
 		newContent.SetBounds(w.ContentBounds())
 		w.AddChild(newContent)
@@ -472,12 +461,12 @@ func (w *Window) TitleTabHitTest(x, y int) (TitleTabPart, int) {
 // drawTitleTabs рисует полосу вкладок в заголовке между left и right
 // (границы уже учитывают кнопки окна/бейдж локали/traffic lights).
 // Вызывается из drawWinTitleBar / drawMacTitleBar вместо текста Title.
-func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
+func (w *Window) drawTitleTabs(ctx base.DrawContext, left, right, y, th int) {
 	tt := w.titleTabs
-	st := currentStyle()
+	st := base.CurrentThemeStyle()
 
 	tt.mu.Lock()
-	tabs := make([]TabItem, len(tt.tabs))
+	tabs := make([]base.TabItem, len(tt.tabs))
 	copy(tabs, tt.tabs)
 	active := tt.active
 	hoverIdx := tt.hoverIdx
@@ -512,7 +501,7 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 	widths := make([]int, len(tabs))
 	total := 0
 	for i, tab := range tabs {
-		tw := ctx.MeasureText(tab.Header, DefaultFontSize()) + titleTabPadH*2 +
+		tw := ctx.MeasureText(tab.Header, base.DefaultFontSize()) + titleTabPadH*2 +
 			titleTabCloseW + titleTabCloseGap
 		if tab.Icon != nil {
 			tw += titleTabIconW + titleTabIconGap
@@ -560,7 +549,7 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 	// самого низа заголовка (скругление только сверху), визуальная полоса
 	// контента корешка (текст, иконка, «×») центрируется выше, в band
 	// y+5…y+th-5. Классика — компактные bevel-ярлыки внутри градиента.
-	modernFlush := !st.Classic3D && w.resolvedTitleStyle() != WindowTitleMac
+	modernFlush := !st.Classic3D && w.resolvedTitleStyle() != base.WindowTitleMac
 	tabTop, tabBot := y+5, y+th-5
 	if modernFlush {
 		tabTop = y + 8 // корешок ниже верха полосы, как в Terminal
@@ -580,7 +569,7 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 
 	// Полоса не вылезает за отведённое место: при прокрутке крайние вкладки
 	// обрезаются краем, а не рисуются поверх кнопок окна.
-	restoreBand := PushClip(ctx, image.Rect(left, tabTop, right, tabBot))
+	restoreBand := base.PushClip(ctx, image.Rect(left, tabTop, right, tabBot))
 
 	x := left - scrollX
 	for i, tab := range tabs {
@@ -609,7 +598,7 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 		switch {
 		case st.Classic3D:
 			w.drawClassicTitleTab(ctx, r, tab, i == active, closeRects[i], hoverClose == i)
-		case w.resolvedTitleStyle() == WindowTitleMac:
+		case w.resolvedTitleStyle() == base.WindowTitleMac:
 			w.drawMacTitleTab(ctx, r, tab, i == active, i == hoverIdx, tc, closeRects[i], hoverClose == i)
 		default:
 			w.drawModernTitleTab(ctx, r, tab, i == active, i == hoverIdx, tc, closeRects[i], hoverClose == i)
@@ -671,16 +660,16 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 			// Классика: общий блок не рисуем, hover — выпуклый bevel.
 			glyph = color.RGBA{A: 255}
 			if hoverNew && !plusRect.Empty() {
-				drawBevelRaised(ctx, plusRect.Min.X, plusRect.Min.Y, plusRect.Dx(), plusRect.Dy(), st)
+				base.DrawBevelRaised(ctx, plusRect.Min.X, plusRect.Min.Y, plusRect.Dx(), plusRect.Dy(), st)
 			}
 			if hoverMenu && !menuRect.Empty() {
-				drawBevelRaised(ctx, menuRect.Min.X, menuRect.Min.Y, menuRect.Dx(), menuRect.Dy(), st)
+				base.DrawBevelRaised(ctx, menuRect.Min.X, menuRect.Min.Y, menuRect.Dx(), menuRect.Dy(), st)
 			}
 		} else {
 			block := plusRect.Union(menuRect)
 			ctx.FillRoundRect(block.Min.X, block.Min.Y, block.Dx(), block.Dy(), 4,
-				mixRGBA(tbg, tc, 0.06))
-			hl := mixRGBA(tbg, tc, 0.14)
+				base.MixRGBA(tbg, tc, 0.06))
+			hl := base.MixRGBA(tbg, tc, 0.14)
 			if hoverNew && !plusRect.Empty() {
 				ctx.FillRoundRect(plusRect.Min.X+1, plusRect.Min.Y+1, plusRect.Dx()-2, plusRect.Dy()-2, 3, hl)
 			}
@@ -716,12 +705,12 @@ func (w *Window) drawTitleTabs(ctx DrawContext, left, right, y, th int) {
 // наведённая — лёгкая подсветка. Цвета выводятся из цветов заголовка, а не
 // из TabControl: там «активный» фон совпадает с фоном окна и на полосе
 // заголовка был бы невидим.
-func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabItem,
+func (w *Window) drawModernTitleTab(ctx base.DrawContext, r image.Rectangle, tab base.TabItem,
 	active, hover bool, tc color.RGBA, closeR image.Rectangle, hoverClose bool) {
 
 	tbg, _, _ := w.titleColors()
-	cardBorder := mixRGBA(tbg, tc, 0.25)
-	hoverBG := mixRGBA(tbg, tc, 0.05)
+	cardBorder := base.MixRGBA(tbg, tc, 0.25)
+	hoverBG := base.MixRGBA(tbg, tc, 0.05)
 
 	// Видимая полоса контента корешка: низ r уходит под клиентскую область,
 	// текст/иконка/«×» центрируются по band.
@@ -737,7 +726,7 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 		bg := w.titleTabContentBG(tab.Content)
 		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 8, bg)
 		ctx.FillRect(r.Min.X, r.Max.Y-8, r.Dx(), 8, bg)
-		restore := PushClip(ctx, r)
+		restore := base.PushClip(ctx, r)
 		ctx.DrawRoundBorder(r.Min.X, r.Min.Y, r.Dx(), r.Dy()+8, 8, cardBorder)
 		restore()
 	case hover:
@@ -746,7 +735,7 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 
 	textCol := tc
 	if !active {
-		textCol = mixRGBA(tc, tbg, 0.4) // неактивная — приглушённый текст
+		textCol = base.MixRGBA(tc, tbg, 0.4) // неактивная — приглушённый текст
 	}
 	bandH := bandBot - r.Min.Y
 	textX := r.Min.X + titleTabPadH
@@ -760,7 +749,7 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 		maxW = closeR.Min.X - textX - 4
 	}
 	if maxW > 0 {
-		txt := ellipsizeText(ctx, tab.Header, maxW, DefaultFontSize())
+		txt := base.EllipsizeText(ctx, tab.Header, maxW, base.DefaultFontSize())
 		ctx.DrawText(txt, textX, r.Min.Y+(bandH-13)/2, textCol)
 	}
 	w.drawTabClose(ctx, closeR, hoverClose, textCol, false)
@@ -768,12 +757,12 @@ func (w *Window) drawModernTitleTab(ctx DrawContext, r image.Rectangle, tab TabI
 
 // drawClassicTitleTab — bevel-ярлык Win2000 на градиенте заголовка:
 // неактивный выпуклый, активный «вдавлен».
-func (w *Window) drawClassicTitleTab(ctx DrawContext, r image.Rectangle, tab TabItem,
+func (w *Window) drawClassicTitleTab(ctx base.DrawContext, r image.Rectangle, tab base.TabItem,
 	active bool, closeR image.Rectangle, hoverClose bool) {
 
-	st := currentStyle()
+	st := base.CurrentThemeStyle()
 	top := r.Min.Y
-	face := win10.BtnBG
+	face := base.ActiveTheme().BtnBG
 	if active {
 		// Активный ярлык срастается с клиентской областью: лицо — фон
 		// содержимого вкладки, нижней грани нет (низ вровень с низом
@@ -804,19 +793,19 @@ func (w *Window) drawClassicTitleTab(ctx DrawContext, r image.Rectangle, tab Tab
 		maxW = closeR.Min.X - textX - 4
 	}
 	if maxW > 0 {
-		txt := ellipsizeText(ctx, tab.Header, maxW, DefaultFontSize())
-		ctx.DrawText(txt, textX, top+(bandH-13)/2, win10.BtnText)
+		txt := base.EllipsizeText(ctx, tab.Header, maxW, base.DefaultFontSize())
+		ctx.DrawText(txt, textX, top+(bandH-13)/2, base.ActiveTheme().BtnText)
 	}
-	w.drawTabClose(ctx, closeR, hoverClose, win10.BtnText, true)
+	w.drawTabClose(ctx, closeR, hoverClose, base.ActiveTheme().BtnText, true)
 }
 
 // drawMacTitleTab — вкладка в Mac-стиле: скруглённая пилюля, текст по центру.
-func (w *Window) drawMacTitleTab(ctx DrawContext, r image.Rectangle, tab TabItem,
+func (w *Window) drawMacTitleTab(ctx base.DrawContext, r image.Rectangle, tab base.TabItem,
 	active, hover bool, tc color.RGBA, closeR image.Rectangle, hoverClose bool) {
 
 	switch {
 	case active:
-		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, mixRGBA(w.Background, tc, 0.12))
+		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, base.MixRGBA(w.Background, tc, 0.12))
 	case hover:
 		ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 6, color.RGBA{R: 128, G: 128, B: 128, A: 50})
 	}
@@ -829,7 +818,7 @@ func (w *Window) drawMacTitleTab(ctx DrawContext, r image.Rectangle, tab TabItem
 		maxW -= titleTabCloseW
 	}
 	if maxW > 0 {
-		txt := ellipsizeText(ctx, tab.Header, maxW, 10)
+		txt := base.EllipsizeText(ctx, tab.Header, maxW, 10)
 		txtW := ctx.MeasureText(txt, 10)
 		tx := r.Min.X + (r.Dx()-iconW-txtW)/2 + iconW
 		if tx < r.Min.X+titleTabPadH+iconW {
@@ -845,7 +834,7 @@ func (w *Window) drawMacTitleTab(ctx DrawContext, r image.Rectangle, tab TabItem
 }
 
 // drawTabClose рисует «×» вкладки (если rect не пуст).
-func (w *Window) drawTabClose(ctx DrawContext, r image.Rectangle, hover bool,
+func (w *Window) drawTabClose(ctx base.DrawContext, r image.Rectangle, hover bool,
 	col color.RGBA, classic bool) {
 
 	if r.Empty() {
@@ -853,7 +842,7 @@ func (w *Window) drawTabClose(ctx DrawContext, r image.Rectangle, hover bool,
 	}
 	if hover {
 		if classic {
-			ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), win10.BtnHoverBG)
+			ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), base.ActiveTheme().BtnHoverBG)
 		} else {
 			ctx.FillRoundRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 3,
 				color.RGBA{R: 128, G: 128, B: 128, A: 90})

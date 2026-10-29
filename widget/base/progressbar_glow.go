@@ -66,7 +66,7 @@ func (pb *ProgressBar) glowColors() (tail, head color.RGBA) {
 		tail = color.RGBA{R: f.R / 3, G: chanAdd(f.G, 70), B: chanScale(f.B, 0.75), A: 255}
 	}
 	if head.A == 0 {
-		head = brighten(pb.FillColor, 90)
+		head = Brighten(pb.FillColor, 90)
 		head.A = 255
 	}
 	return tail, head
@@ -95,7 +95,7 @@ func (pb *ProgressBar) drawGlow(ctx DrawContext, b image.Rectangle, v float64) {
 	// ── Дорожка: приглушённая заливка и тонкая рамка-пилюля ──────────────
 	ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), h, rad, pb.Background)
 	if pb.ShowBorder {
-		ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), h, rad, mixRGBA(pb.BorderColor, tail, 0.35))
+		ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), h, rad, MixRGBA(pb.BorderColor, tail, 0.35))
 	}
 
 	// ── Положение головы ─────────────────────────────────────────────────
@@ -241,9 +241,9 @@ func (pb *ProgressBar) drawGlow(ctx DrawContext, b image.Rectangle, v float64) {
 	// Лучи короткие: это лёгкий блик, а не «звезда во всё окно».
 	drawStarRays(da, headX, cy, int(float64(h)*1.4*pulse), int(float64(h)*0.65*pulse),
 		hot, 0.5*pulse*haloK)
-	fillCircle(ctx, headX, cy, core, head)
-	fillCircle(ctx, headX, cy, core*2/3, lerpRGBA(head, hot, 0.55))
-	fillCircle(ctx, headX, cy, core/3, hot)
+	FillCircle(ctx, headX, cy, core, head)
+	FillCircle(ctx, headX, cy, core*2/3, lerpRGBA(head, hot, 0.55))
+	FillCircle(ctx, headX, cy, core/3, hot)
 }
 
 // drawGlowHalo рисует радиальный ореол: для каждой клетки эллипса берётся
@@ -412,7 +412,7 @@ func premul(c color.RGBA, a float64) color.RGBA {
 
 // lerpRGBA смешивает цвета по t ∈ [0,1] (0 — a, 1 — b).
 func lerpRGBA(a, b color.RGBA, t float64) color.RGBA {
-	return mixRGBA(a, b, t)
+	return MixRGBA(a, b, t)
 }
 
 // chanAdd / chanScale — арифметика канала без переполнения.

@@ -61,10 +61,14 @@ func locMarkupKey(v string) (string, bool) {
 	return key, true
 }
 
-// locItemText возвращает текст для отображения: если значение — {Loc Ключ},
+// LocItemText возвращает текст для отображения: если значение — {Loc Ключ},
 // то перевод, иначе саму строку. Второе значение — ключ (пустой, если строка
 // не локализуемая).
-func locItemText(v string) (text, key string) {
+//
+// Служебное: для пакетов виджетов (их XAML-строителей), в фасад не входит.
+//
+//facadegen:skip
+func LocItemText(v string) (text, key string) {
 	if k, ok := locMarkupKey(v); ok {
 		return base.Tr(k), k
 	}
@@ -111,12 +115,16 @@ func currentLocOwner() *locOwner {
 	return v.(*locOwner)
 }
 
-// registerLocItem запоминает, как обновить строку при смене языка. Пустой ключ
+// RegisterLocItem запоминает, как обновить строку при смене языка. Пустой ключ
 // игнорируется, поэтому вызывающий код может звать функцию безусловно.
 //
 // Строка, зарегистрированная при загрузке разметки, принадлежит этой загрузке:
 // её переводит и снимает BindingScope дерева. Ничью переводит общий слушатель.
-func registerLocItem(key string, apply func(text string)) {
+//
+// Служебное: для пакетов виджетов (их XAML-строителей), в фасад не входит.
+//
+//facadegen:skip
+func RegisterLocItem(key string, apply func(text string)) {
 	if key == "" || apply == nil {
 		return
 	}
@@ -175,7 +183,7 @@ func registerLocItemList(keys []string, set func(i int, text string)) {
 			continue
 		}
 		i := i
-		registerLocItem(k, func(s string) { set(i, s) })
+		RegisterLocItem(k, func(s string) { set(i, s) })
 	}
 }
 

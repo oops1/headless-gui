@@ -23,7 +23,7 @@
 //
 // canvas.go: в switch функции HasOwnLayout добавить *DockManager, т.е. строка
 //
-//	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *Window, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager:
+//	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager:
 //
 // (DockManager сам перекладывает детей в SetBounds — иначе вложение в
 // Canvas/Grid задвоит сдвиг). DockPane трогать в HasOwnLayout НЕ нужно: он
@@ -304,7 +304,7 @@ func (m *DockManager) SetCenter(w Widget) {
 		adoptChild(&m.Base, w) // родитель нужен переводу области перерисовки (см. contentoffset.go)
 	}
 	if w != nil && m.capMgr != nil {
-		injectCaptureManagerTree(w, m.capMgr)
+		InjectCaptureManagerTree(w, m.capMgr)
 	}
 	m.layout()
 	m.Invalidate()
@@ -344,7 +344,7 @@ func (m *DockManager) AddPane(p *DockPane, side DockSide) {
 		m.panes = append(m.panes, p)
 	}
 	if m.capMgr != nil {
-		injectCaptureManagerTree(p, m.capMgr)
+		InjectCaptureManagerTree(p, m.capMgr)
 	}
 	m.removeFromSides(p)
 	m.removeFromFloating(p)
@@ -1313,10 +1313,10 @@ func (m *DockManager) tabAt(x, y int) (DockSide, *DockPane) {
 func (m *DockManager) SetCaptureManager(cm CaptureManager) {
 	m.capMgr = cm
 	if m.center != nil {
-		injectCaptureManagerTree(m.center, cm)
+		InjectCaptureManagerTree(m.center, cm)
 	}
 	for _, p := range m.panes {
-		injectCaptureManagerTree(p, cm)
+		InjectCaptureManagerTree(p, cm)
 	}
 }
 

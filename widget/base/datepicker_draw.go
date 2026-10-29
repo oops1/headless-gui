@@ -147,7 +147,7 @@ func (p *DatePicker) Draw(ctx DrawContext) {
 			text = Tr("date.placeholder")
 		}
 	}
-	shown := ellipsizeText(ctx, text, maxW, size)
+	shown := EllipsizeText(ctx, text, maxW, size)
 	if p.focused && p.selectAll && p.textLocked() != "" {
 		w := min(ctx.MeasureText(shown, size), maxW)
 		ctx.FillRectAlpha(textX-1, b.Min.Y+4, w+2, b.Dy()-8, PremulAlpha(pal.sel, 200))

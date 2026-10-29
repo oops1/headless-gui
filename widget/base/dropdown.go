@@ -219,7 +219,7 @@ func (d *Dropdown) Draw(ctx DrawContext) {
 	textLeft := b.Min.X + d.PaddingX
 	textMaxW := (b.Max.X - 20) - textLeft // 20px под стрелку и зазор
 	sizePt := FontSizeOrDefault(d.FontSize)
-	ctx.DrawTextSize(ellipsizeText(ctx, selText, textMaxW, sizePt), textLeft, textY, sizePt, d.TextColor)
+	ctx.DrawTextSize(EllipsizeText(ctx, selText, textMaxW, sizePt), textLeft, textY, sizePt, d.TextColor)
 
 	// Стрелка ▼
 	arrowX := b.Max.X - 16
@@ -230,7 +230,7 @@ func (d *Dropdown) Draw(ctx DrawContext) {
 		// образа Win9x, шеврону в ней не место при любом ArrowStyle.
 		btnX := b.Max.X - 19
 		ctx.FillRect(btnX, b.Min.Y+2, 17, b.Dy()-4, win10.BtnBG)
-		drawBevelRaised(ctx, btnX, b.Min.Y+2, 17, b.Dy()-4, st)
+		DrawBevelRaised(ctx, btnX, b.Min.Y+2, 17, b.Dy()-4, st)
 		drawArrowDown(ctx, arrowX+1, arrowY, d.ArrowColor)
 	case d.arrowStyle(st) == ArrowChevron:
 		drawChevronDown(ctx, b.Max.X-14, b.Min.Y+b.Dy()/2, d.ArrowColor)
@@ -310,7 +310,7 @@ func (d *Dropdown) drawOpenList(ctx DrawContext) {
 		// Текст — вертикально по центру, обрезается многоточием по ширине списка.
 		itemMaxW := listW - 2*d.PaddingX
 		itemSize := FontSizeOrDefault(d.FontSize)
-		ctx.DrawTextSize(ellipsizeText(ctx, item, itemMaxW, itemSize),
+		ctx.DrawTextSize(EllipsizeText(ctx, item, itemMaxW, itemSize),
 			b.Min.X+d.PaddingX, iy+(itemH-13)/2, itemSize, textCol)
 	}
 

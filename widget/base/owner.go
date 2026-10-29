@@ -115,3 +115,19 @@ func (rcv *uiReceiver) skipFor(to Owner) bool {
 }
 
 var _ = atomic.Pointer[ownerRef]{}
+
+// NotifyWidgetChanged — виджет b мог изменить что угодно (оверлей вне
+// границ): будит движок его дерева.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func NotifyWidgetChanged(b *Base) { b.notifyChanged() }
+
+// NotifyWidgetRect — ничейная экранная область r виджета b (контур
+// перетаскивания окна).
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func NotifyWidgetRect(b *Base, r image.Rectangle) { b.notifyRect(r) }

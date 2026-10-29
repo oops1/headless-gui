@@ -246,3 +246,6 @@ func (dp *DockPanel) ApplyTheme(t *Theme) {
 		dp.UseAlpha = c.A < 255
 	}
 }
+
+// BackgroundColor — фон панели докинга (BackgroundColorer).
+func (d *DockPanel) BackgroundColor() (color.RGBA, bool) { return d.Background, d.Background.A > 0 }

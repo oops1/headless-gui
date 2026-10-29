@@ -11,9 +11,9 @@ import (
 	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
-// saveStrings запоминает таблицы переводов и возвращает их после теста.
+// SaveStrings запоминает таблицы переводов и возвращает их после теста.
 // Звать перед ClearStrings.
-func saveStrings(t *testing.T) {
+func SaveStrings(t *testing.T) {
 	t.Helper()
 	t.Cleanup(testhook.SaveStrings())
 }
@@ -49,12 +49,12 @@ func useTestMeasure(t testing.TB) {
 	t.Cleanup(restore)
 }
 
-// languageListenerCount — число подписчиков смены языка.
-func languageListenerCount() int { return testhook.LanguageListeners() }
+// LanguageListenerCount — число подписчиков смены языка.
+func LanguageListenerCount() int { return testhook.LanguageListeners() }
 
-// checkBoxAutoWidth — ширина флажка по содержимому, как её считает CheckBox:
+// CheckBoxAutoWidth — ширина флажка по содержимому, как её считает CheckBox:
 // квадрат 16, зазор 6, подпись, поле фокуса 4.
-func checkBoxAutoWidth(cb *base.CheckBox) int {
+func CheckBoxAutoWidth(cb *base.CheckBox) int {
 	const boxSize, textPad, focusPad = 16, 6, 4
 	if cb.Text == "" {
 		return boxSize

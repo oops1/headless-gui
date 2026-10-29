@@ -147,9 +147,9 @@ type DockPane struct {
 	dragLastX int
 	dragLastY int
 
-	// Ресайз плавающей панели за кромки (переиспользует winEdge из window.go).
+	// Ресайз плавающей панели за кромки (переиспользует ResizeEdge из window.go).
 	resizing     bool
-	resizeDir    winEdge
+	resizeDir    ResizeEdge
 	resizeStart  image.Rectangle
 	resizeStartX int
 	resizeStartY int
@@ -199,7 +199,7 @@ func (p *DockPane) SetContent(w Widget) {
 		p.Base.AddChild(w)
 	}
 	if cm := p.capMgr; cm != nil && w != nil {
-		injectCaptureManagerTree(w, cm)
+		InjectCaptureManagerTree(w, cm)
 	}
 	p.layoutContent()
 	p.Invalidate()
@@ -379,7 +379,7 @@ func (p *DockPane) Draw(ctx DrawContext) {
 	if maxW := p.titleTextLimit() - 4 - textX; maxW <= 0 {
 		title = ""
 	} else {
-		title = ellipsizeText(ctx, title, maxW, DefaultFontSize())
+		title = EllipsizeText(ctx, title, maxW, DefaultFontSize())
 	}
 	ctx.DrawText(title, textX, textY, ttext)
 
@@ -398,7 +398,7 @@ func (p *DockPane) Draw(ctx DrawContext) {
 
 	// Рамка панели (в классике — bevel, иначе 1px).
 	if st.Classic3D {
-		drawBevelRaised(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		DrawBevelRaised(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 	} else {
 		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), p.BorderColor)
 	}
@@ -465,36 +465,36 @@ func (p *DockPane) drawButtons(ctx DrawContext) {
 func (p *DockPane) SetCaptureManager(cm CaptureManager) {
 	p.capMgr = cm
 	if p.content != nil {
-		injectCaptureManagerTree(p.content, cm)
+		InjectCaptureManagerTree(p.content, cm)
 	}
 }
 
 // floatingResizeEdgeAt возвращает край(а) плавающей панели под точкой для
-// ресайза (полоса winResizeBorder). edgeNone для не-floating или вне зоны.
-func (p *DockPane) floatingResizeEdgeAt(x, y int) winEdge {
+// ресайза (полоса ResizeBorder). EdgeNone для не-floating или вне зоны.
+func (p *DockPane) floatingResizeEdgeAt(x, y int) ResizeEdge {
 	if p.state != PaneFloating || p.OnDragMove != nil {
 		// В нативном ОС-окне (OnDragMove задан) ресайз — задача рамки окна ОС,
 		// виджетный ресайз краёв отключаем (иначе он менял бы bounds внутри
 		// фиксированного холста вторичного движка).
-		return edgeNone
+		return EdgeNone
 	}
 	b := p.bounds
 	if !image.Pt(x, y).In(b) {
-		return edgeNone
+		return EdgeNone
 	}
-	m := winResizeBorder
-	var e winEdge
+	m := ResizeBorder
+	var e ResizeEdge
 	if x < b.Min.X+m {
-		e |= edgeW
+		e |= EdgeW
 	}
 	if x >= b.Max.X-m {
-		e |= edgeE
+		e |= EdgeE
 	}
 	if y < b.Min.Y+m {
-		e |= edgeN
+		e |= EdgeN
 	}
 	if y >= b.Max.Y-m {
-		e |= edgeS
+		e |= EdgeS
 	}
 	return e
 }
@@ -524,7 +524,7 @@ func (p *DockPane) WantsCapture(e MouseEvent) bool {
 	if pt.In(closeR) || pt.In(floatR) || pt.In(pinR) || p.titleButtonAt(pt) >= 0 {
 		return true
 	}
-	if p.floatingResizeEdgeAt(e.X, e.Y) != edgeNone {
+	if p.floatingResizeEdgeAt(e.X, e.Y) != EdgeNone {
 		return true
 	}
 	return p.titleDragHit(e.X, e.Y)
@@ -533,13 +533,13 @@ func (p *DockPane) WantsCapture(e MouseEvent) bool {
 // Cursor возвращает resize-курсор над кромками плавающей панели.
 func (p *DockPane) Cursor(x, y int) Cursor {
 	switch p.floatingResizeEdgeAt(x, y) {
-	case edgeN, edgeS:
+	case EdgeN, EdgeS:
 		return CursorSizeNS
-	case edgeW, edgeE:
+	case EdgeW, EdgeE:
 		return CursorSizeWE
-	case edgeN | edgeW, edgeS | edgeE:
+	case EdgeN | EdgeW, EdgeS | EdgeE:
 		return CursorSizeNWSE
-	case edgeN | edgeE, edgeS | edgeW:
+	case EdgeN | EdgeE, EdgeS | EdgeW:
 		return CursorSizeNESW
 	}
 	return CursorArrow
@@ -588,7 +588,7 @@ func (p *DockPane) OnMouseButton(e MouseEvent) bool {
 			return true
 		}
 		// Ресайз плавающей панели за кромку.
-		if dir := p.floatingResizeEdgeAt(e.X, e.Y); dir != edgeNone {
+		if dir := p.floatingResizeEdgeAt(e.X, e.Y); dir != EdgeNone {
 			p.resizing = true
 			p.resizeDir = dir
 			p.resizeStart = p.bounds
@@ -624,7 +624,7 @@ func (p *DockPane) OnMouseButton(e MouseEvent) bool {
 	// release
 	if p.resizing {
 		p.resizing = false
-		p.resizeDir = edgeNone
+		p.resizeDir = EdgeNone
 		if p.capMgr != nil {
 			p.capMgr.ReleaseCapture()
 		}
@@ -745,28 +745,28 @@ func (p *DockPane) applyFloatingResize(x, y int) {
 	nx0, ny0, nx1, ny1 := b.Min.X, b.Min.Y, b.Max.X, b.Max.Y
 	dx := x - p.resizeStartX
 	dy := y - p.resizeStartY
-	if p.resizeDir&edgeW != 0 {
+	if p.resizeDir&EdgeW != 0 {
 		nx0 = b.Min.X + dx
 	}
-	if p.resizeDir&edgeE != 0 {
+	if p.resizeDir&EdgeE != 0 {
 		nx1 = b.Max.X + dx
 	}
-	if p.resizeDir&edgeN != 0 {
+	if p.resizeDir&EdgeN != 0 {
 		ny0 = b.Min.Y + dy
 	}
-	if p.resizeDir&edgeS != 0 {
+	if p.resizeDir&EdgeS != 0 {
 		ny1 = b.Max.Y + dy
 	}
 	const minW, minH = 120, 60
 	if nx1-nx0 < minW {
-		if p.resizeDir&edgeW != 0 {
+		if p.resizeDir&EdgeW != 0 {
 			nx0 = nx1 - minW
 		} else {
 			nx1 = nx0 + minW
 		}
 	}
 	if ny1-ny0 < minH {
-		if p.resizeDir&edgeN != 0 {
+		if p.resizeDir&EdgeN != 0 {
 			ny0 = ny1 - minH
 		} else {
 			ny1 = ny0 + minH

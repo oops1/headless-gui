@@ -1,8 +1,10 @@
-package base
+package chrome
 
 import (
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // Цвет значков кнопок заголовка: прежний серый, пока он читается; иначе цвет
@@ -15,14 +17,14 @@ func TestCaptionGlyphColor(t *testing.T) {
 		text, bg color.RGBA
 		want     color.RGBA
 	}{
-		{"тёмный заголовок — прежний серый", white, color.RGBA{R: 32, G: 32, B: 32, A: 255}, captionGlyphLegacy},
+		{"тёмный заголовок — прежний серый", white, color.RGBA{R: 32, G: 32, B: 32, A: 255}, base.CaptionGlyphLegacy},
 		{"светлый акцент — цвет текста", black, orange, black},
 		{"светлый заголовок, серый текст", color.RGBA{R: 120, G: 120, B: 120, A: 255}, color.RGBA{R: 243, G: 243, B: 243, A: 255}, color.RGBA{R: 120, G: 120, B: 120, A: 255}},
 		// Текст сам не читается на своём фоне: чёрный/белый, что контрастнее.
 		{"светлый текст на светлом", color.RGBA{R: 240, G: 240, B: 240, A: 255}, color.RGBA{R: 250, G: 250, B: 250, A: 255}, black},
 		{"тёмно-синий текст на синем", color.RGBA{G: 60, B: 150, A: 255}, color.RGBA{G: 100, B: 200, A: 255}, white},
 	} {
-		if got := captionGlyphColor(tc.text, tc.bg); got != tc.want {
+		if got := base.CaptionGlyphColor(tc.text, tc.bg); got != tc.want {
 			t.Errorf("%s: значок %v, ждали %v", tc.name, got, tc.want)
 		}
 	}

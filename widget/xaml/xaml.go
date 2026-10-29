@@ -145,15 +145,12 @@ func resolveWindowInputCommands(root base.Widget, ctx interface{}) {
 	if ctx == nil {
 		return
 	}
-	var bindings []base.InputBinding
-	switch t := root.(type) {
-	case *base.Window:
-		bindings = t.InputBindings
-	case *base.Canvas:
-		bindings = t.InputBindings
-	default:
+	// Window (widget/chrome) и Canvas: привязки клавиш корня.
+	h, ok := root.(interface{ InputBindingList() []base.InputBinding })
+	if !ok {
 		return
 	}
+	bindings := h.InputBindingList()
 	for i := range bindings {
 		p := bindings[i].CommandPath
 		if p == "" {
@@ -285,10 +282,6 @@ func buildXAMLWidgetAt(el Element, reg map[string]base.Widget, parentOff image.P
 	// ── Grid ────────────────────────────────────────────────────────────────
 	case "grid":
 		return buildXAMLGrid(el, reg, parentOff, baseDir, depth)
-
-	// ── Window — корневой элемент нативного окна ────────────────────────────
-	case "window":
-		return buildXAMLWindow(el, reg, parentOff, baseDir, depth)
 
 	// ── StackPanel — контейнер с автораскладкой ─────────────────────────────
 	case "stackpanel":
@@ -502,10 +495,14 @@ func buildXAMLWidgetAt(el Element, reg map[string]base.Widget, parentOff image.P
 
 	default:
 		// Теги пакетов виджетов вне xaml (ввод текста — widget/text,
-		// RichText — widget/richtext): реестр Default(), заполненный их
-		// RegisterXAML.
-		if b, ok := Default().Lookup(tag); ok {
-			cw, err := b(&el, &Loader{baseDir: baseDir})
+		// RichText — widget/richtext, окно — widget/chrome): реестр
+		// Default(), заполненный их RegisterXAML.
+		if e, ok := Default().lookup(tag); ok {
+			l := &Loader{baseDir: baseDir, reg: reg, off: parentOff, depth: depth}
+			if e.complete {
+				return e.b(&el, l)
+			}
+			cw, err := e.b(&el, l)
 			if err != nil {
 				return nil, fmt.Errorf("xaml: <%s>: %w", el.Tag, err)
 			}
@@ -669,7 +666,7 @@ func buildXAMLLabel(el Element) base.Widget {
 
 	var lbl *base.Label
 	if fg != "" {
-		if c, err := parseXAMLColor(fg); err == nil {
+		if c, err := ParseColor(fg); err == nil {
 			lbl = base.NewLabel(text, c)
 		}
 	}
@@ -678,7 +675,7 @@ func buildXAMLLabel(el Element) base.Widget {
 	}
 
 	if bg != "" {
-		if c, err := parseXAMLColor(bg); err == nil && c.A > 0 {
+		if c, err := ParseColor(bg); err == nil && c.A > 0 {
 			lbl.HasBG = true
 			lbl.Background = c
 		}
@@ -813,7 +810,7 @@ func buildXAMLButton(el Element, baseDir string) base.Widget {
 	}
 	// Foreground из вложенного TextBlock (если не задан на самой кнопке)
 	if bc.Foreground != "" && el.Attr("Foreground") == "" {
-		if c, err := parseXAMLColor(bc.Foreground); err == nil {
+		if c, err := ParseColor(bc.Foreground); err == nil {
 			btn.TextColor = c
 		}
 	}
@@ -891,7 +888,7 @@ func buildXAMLDropdown(el Element) base.Widget {
 	if raw := el.Attr("Items", "ItemsSource"); raw != "" {
 		for _, item := range strings.Split(raw, ",") {
 			if s := strings.TrimSpace(item); s != "" {
-				text, key := locItemText(s)
+				text, key := LocItemText(s)
 				items = append(items, text)
 				keys = append(keys, key)
 			}
@@ -905,7 +902,7 @@ func buildXAMLDropdown(el Element) base.Widget {
 				v = strings.TrimSpace(child.Text)
 			}
 			if v != "" {
-				text, key := locItemText(v)
+				text, key := LocItemText(v)
 				items = append(items, text)
 				keys = append(keys, key)
 			}
@@ -988,7 +985,7 @@ func buildXAMLSeparator(el Element) base.Widget {
 	}
 
 	if bg := el.Attr("Background", "Fill", "Stroke"); bg != "" {
-		if parsed, err := parseXAMLColor(bg); err == nil {
+		if parsed, err := ParseColor(bg); err == nil {
 			s.Color = parsed
 		}
 	}
@@ -1158,7 +1155,7 @@ func buildXAMLListView(el Element) base.Widget {
 	// смену языка делает сборщик (см. loc_items.go).
 	var keys []string
 	add := func(raw string) {
-		text, key := locItemText(raw)
+		text, key := LocItemText(raw)
 		items = append(items, text)
 		keys = append(keys, key)
 	}

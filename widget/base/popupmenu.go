@@ -1174,7 +1174,7 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 
 	// Рамка: классика — выпуклый 3D-бордюр (как меню Win2000), иначе плоская.
 	if st := currentStyle(); st.Classic3D {
-		drawBevelRaised(ctx, px, py, pw, ph, st)
+		DrawBevelRaised(ctx, px, py, pw, ph, st)
 	} else if corner > 0 {
 		ctx.DrawRoundBorder(px, py, pw, ph, corner, m.BorderColor)
 	} else {

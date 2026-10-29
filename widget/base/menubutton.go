@@ -184,7 +184,7 @@ func (mb *MenuButton) Draw(ctx DrawContext) {
 		div = st.BevelDark
 	}
 	if div.A == 0 {
-		div = mixRGBA(txt, bg, 0.6)
+		div = MixRGBA(txt, bg, 0.6)
 	}
 	ctx.DrawVLine(arrow.Min.X, b.Min.Y+4, b.Dy()-8, div)
 	mb.drawArrow(ctx, arrow, arrowTxt)

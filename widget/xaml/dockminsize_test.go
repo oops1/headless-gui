@@ -1,15 +1,16 @@
-package xaml
+package xaml_test
 
 import (
 	"image"
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v3/widget/xaml"
 )
 
 // Разметка: <DockPane MinSize="…">.
 func TestDockMinSize_XAML(t *testing.T) {
-	_, reg, err := LoadUIFromXAML([]byte(`<Window Title="T" Width="1000" Height="700">
+	_, reg, err := xaml.LoadUIFromXAML([]byte(`<Window Title="T" Width="1000" Height="700">
   <DockManager Name="dm" Left="0" Top="0" Width="1000" Height="700">
     <DockPane Id="commit" Title="Коммит" Side="Right" Size="120" MinSize="300">
       <Label Text="вкладки"/>

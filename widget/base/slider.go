@@ -143,7 +143,7 @@ func (s *Slider) Draw(ctx DrawContext) {
 		tw, th := 11, s.ThumbRadius*2+4
 		tx, ty := cx-tw/2, cy-th/2
 		ctx.FillRect(tx, ty, tw, th, s.ThumbColor)
-		drawBevelRaised(ctx, tx, ty, tw, th, st)
+		DrawBevelRaised(ctx, tx, ty, tw, th, st)
 	} else {
 		// Дорожка (фон)
 		ctx.FillRoundRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), 2, s.TrackBG)

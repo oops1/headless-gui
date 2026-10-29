@@ -8,7 +8,7 @@ import (
 
 // Рамка Windows 2000 рисуется одинаково, откуда бы её ни попросили.
 //
-// Реализаций было две — DrawBevel для панели задач и drawBevelRaised/Sunken
+// Реализаций было две — DrawBevel для панели задач и DrawBevelRaised/Sunken
 // для виджетов, — и они разошлись: панель рисовала внутреннюю грань с обеих
 // сторон, кнопки с одной. Рядом на экране это видно: у кнопки «Пуск» рамка
 // выходила толще, чем у кнопки в окне.
@@ -63,7 +63,7 @@ func TestBevel_WidgetAndThemePathsAgree(t *testing.T) {
 		draw   func(ctx DrawContext)
 	}{
 		{"выпуклая", false, func(ctx DrawContext) {
-			drawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+			DrawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
 		}},
 		{"утопленная", true, func(ctx DrawContext) {
 			DrawBevelSunken(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)

@@ -200,10 +200,10 @@ func (n *NumericUpDown) Draw(ctx DrawContext) {
 		face := win10.PanelBG
 		// Верхняя кнопка ▲.
 		ctx.FillRect(spinX, b.Min.Y+1, bw-1, midY-b.Min.Y-1, face)
-		drawBevelRaised(ctx, spinX, b.Min.Y+1, bw-1, midY-b.Min.Y-1, st)
+		DrawBevelRaised(ctx, spinX, b.Min.Y+1, bw-1, midY-b.Min.Y-1, st)
 		// Нижняя кнопка ▼.
 		ctx.FillRect(spinX, midY, bw-1, b.Max.Y-midY-1, face)
-		drawBevelRaised(ctx, spinX, midY, bw-1, b.Max.Y-midY-1, st)
+		DrawBevelRaised(ctx, spinX, midY, bw-1, b.Max.Y-midY-1, st)
 		glyph := color.RGBA{R: 0, G: 0, B: 0, A: 255}
 		n.drawTriangle(ctx, cx-1, upCy, true, glyph)
 		n.drawTriangle(ctx, cx-1, downCy, false, glyph)

@@ -50,8 +50,12 @@ type InputBinding struct {
 	CommandPath string // путь {Binding} к команде (резолвится после загрузки)
 }
 
-// matchInputBinding ищет InputBinding по коду клавиши и модификаторам.
-func matchInputBinding(bindings []InputBinding, code KeyCode, mod KeyMod) (ICommand, interface{}, bool) {
+// MatchInputBinding ищет InputBinding по коду клавиши и модификаторам.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func MatchInputBinding(bindings []InputBinding, code KeyCode, mod KeyMod) (ICommand, interface{}, bool) {
 	for _, b := range bindings {
 		if b.Key == code && b.Mods == mod && b.Command != nil {
 			return b.Command, b.Param, true

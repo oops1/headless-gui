@@ -1,4 +1,4 @@
-package base
+package chrome
 
 // window_tabs_scroll.go — куда прокрутить полосу вкладок, чтобы активная
 // была видна целиком.

@@ -1,9 +1,11 @@
-package xaml
+package xaml_test
 
 import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v3/widget/chrome"
+	"github.com/oops1/headless-gui/v3/widget/xaml"
 )
 
 func TestXAML_MenuItemChecked(t *testing.T) {
@@ -18,7 +20,7 @@ func TestXAML_MenuItemChecked(t *testing.T) {
   </Menu>
 </Window>`
 
-	_, reg, err := LoadUIFromXAML([]byte(src))
+	_, reg, err := xaml.LoadUIFromXAML([]byte(src))
 	if err != nil {
 		t.Fatalf("разбор XAML: %v", err)
 	}
@@ -56,11 +58,11 @@ func TestXAML_KeyBindingUnderstandsFunctionKeys(t *testing.T) {
   <StackPanel/>
 </Window>`
 
-	root, _, err := LoadUIFromXAML([]byte(src))
+	root, _, err := xaml.LoadUIFromXAML([]byte(src))
 	if err != nil {
 		t.Fatalf("разбор XAML: %v", err)
 	}
-	win, ok := root.(*base.Window)
+	win, ok := root.(*chrome.Window)
 	if !ok {
 		t.Fatalf("корень разметки — %T, ждали окно", root)
 	}

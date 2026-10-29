@@ -205,7 +205,7 @@ func (btn *Button) stateColors(pressed bool) (bg, txt, border color.RGBA) {
 		// подменяется им: подмена стёрла бы само состояние.
 		bg = btn.PressedBG
 		if btn.IsHovered() && btn.HoverBG.A > 0 && !st.Classic3D {
-			bg = mixRGBA(btn.PressedBG, btn.HoverBG, 0.35)
+			bg = MixRGBA(btn.PressedBG, btn.HoverBG, 0.35)
 		}
 	case btn.IsHovered() && btn.HoverBG.A > 0 && !st.Classic3D:
 		bg = btn.HoverBG // классика Win2000 не подсвечивает hover
@@ -237,7 +237,7 @@ func (btn *Button) drawChrome(ctx DrawContext, b image.Rectangle, bg, border col
 		if pressed || btn.IsChecked() {
 			DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		} else {
-			drawBevelRaised(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+			DrawBevelRaised(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		}
 		if btn.IsFocused() {
 			// Пунктирная рамка фокуса (классика Win2000).
@@ -307,7 +307,7 @@ func (btn *Button) drawContent(ctx DrawContext, b image.Rectangle, txt color.RGB
 		if hasIcon && btn.IconPos == IconLeft {
 			avail -= iconSz + iconGap
 		}
-		label = ellipsizeText(ctx, label, avail, sizePt)
+		label = EllipsizeText(ctx, label, avail, sizePt)
 		textW = ctx.MeasureText(label, sizePt)
 	}
 
@@ -378,10 +378,10 @@ func disabledLook(bg, text, border color.RGBA) (color.RGBA, color.RGBA, color.RG
 	if luminance(bg) >= 128 {
 		ground = color.RGBA{R: 255, G: 255, B: 255, A: 255}
 	}
-	bg = mixRGBA(bg, ground, 0.18)
-	text = mixRGBA(text, bg, 0.55)
+	bg = MixRGBA(bg, ground, 0.18)
+	text = MixRGBA(text, bg, 0.55)
 	if border.A > 0 {
-		border = mixRGBA(border, bg, 0.5)
+		border = MixRGBA(border, bg, 0.5)
 	}
 	return bg, text, border
 }

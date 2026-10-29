@@ -1,14 +1,15 @@
-package xaml
+package xaml_test
 
 import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v3/widget/xaml"
 )
 
 // Разметка: <Stretch/> и <ToolBarStretch/>.
 func TestStretch_XAML(t *testing.T) {
-	_, reg, err := LoadUIFromXAML([]byte(`<Window Title="T" Width="600" Height="120">
+	_, reg, err := xaml.LoadUIFromXAML([]byte(`<Window Title="T" Width="600" Height="120">
   <ToolBar Name="tb" Left="0" Top="0" Width="600" Height="40">
     <Button Name="first" Content="Pull"/>
     <ToolBarStretch/>

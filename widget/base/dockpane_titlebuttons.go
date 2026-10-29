@@ -170,7 +170,7 @@ func (p *DockPane) drawTitleButtons(ctx DrawContext) {
 		}
 		c := col
 		if b.Disabled {
-			c = mixRGBA(col, bg, 0.55)
+			c = MixRGBA(col, bg, 0.55)
 		}
 		if b.Icon == nil {
 			cx, cy := r.Min.X+r.Dx()/2, r.Min.Y+r.Dy()/2

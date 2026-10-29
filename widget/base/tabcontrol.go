@@ -104,7 +104,7 @@ func (tc *TabControl) AddTab(header string, content Widget) {
 	tc.mu.Unlock()
 	// Если CaptureManager уже инжектирован — раздаём его новому контенту.
 	if cm != nil && content != nil {
-		injectCaptureManagerTree(content, cm)
+		InjectCaptureManagerTree(content, cm)
 	}
 	tc.Invalidate() // в полосе появился новый заголовок
 }
@@ -504,7 +504,7 @@ func (tc *TabControl) Draw(ctx DrawContext) {
 		// Классика: страница — выпуклая 3D-панель. Рисуем ПОСЛЕ контента
 		// (фон контент-канвы иначе затирает грань), активный ярлык — самым
 		// последним: он «прорезает» верхнюю грань страницы и сливается с ней.
-		drawBevelRaised(ctx, cr.Min.X, cr.Min.Y, cr.Dx(), cr.Dy(), st)
+		DrawBevelRaised(ctx, cr.Min.X, cr.Min.Y, cr.Dx(), cr.Dy(), st)
 
 		if !activeRect.Empty() {
 			ar := activeRect
@@ -660,18 +660,22 @@ func (tc *TabControl) SetCaptureManager(cm CaptureManager) {
 	tc.mu.Unlock()
 	for _, tab := range tabs {
 		if tab.Content != nil {
-			injectCaptureManagerTree(tab.Content, cm)
+			InjectCaptureManagerTree(tab.Content, cm)
 		}
 	}
 }
 
-// injectCaptureManagerTree рекурсивно раздаёт CaptureManager по дереву.
-func injectCaptureManagerTree(w Widget, cm CaptureManager) {
+// InjectCaptureManagerTree рекурсивно раздаёт CaptureManager по дереву.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func InjectCaptureManagerTree(w Widget, cm CaptureManager) {
 	if ca, ok := w.(CaptureAware); ok {
 		ca.SetCaptureManager(cm)
 	}
 	for _, child := range w.Children() {
-		injectCaptureManagerTree(child, cm)
+		InjectCaptureManagerTree(child, cm)
 	}
 }
 

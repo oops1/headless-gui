@@ -351,12 +351,6 @@ func accessInfoFor(w Widget) AccessInfo {
 	}
 
 	switch t := w.(type) {
-	case *Window:
-		info.Role = RoleWindow
-		info.Name = t.Title
-		if !t.IsActive() {
-			info.States = append(info.States, StateInactive)
-		}
 	case *Button:
 		info.Role = RoleButton
 		info.Name = t.Text
@@ -391,6 +385,7 @@ func accessInfoFor(w Widget) AccessInfo {
 		info.Role = RoleSpinner
 		info.Value = fmt.Sprintf("%g", t.Value())
 	case AccessDescriber:
+		// Виджеты вне ядра: поля ввода (widget/text), окно (widget/chrome).
 		t.DescribeAccess(&info)
 	case *Label:
 		info.Role = RoleLabel

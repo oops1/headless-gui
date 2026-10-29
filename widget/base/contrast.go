@@ -15,8 +15,12 @@ import (
 // wcagMinContrast — порог WCAG AA для обычного текста.
 const wcagMinContrast = 4.5
 
-// wcagLuminance — относительная яркость цвета по WCAG 2, от 0 до 1.
-func wcagLuminance(c color.RGBA) float64 {
+// WCAGLuminance — относительная яркость цвета по WCAG 2, от 0 до 1.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func WCAGLuminance(c color.RGBA) float64 {
 	lin := func(v uint8) float64 {
 		s := float64(v) / 255
 		if s <= 0.03928 {
@@ -29,7 +33,7 @@ func wcagLuminance(c color.RGBA) float64 {
 
 // wcagContrast — контраст двух цветов, от 1 до 21.
 func wcagContrast(a, b color.RGBA) float64 {
-	la, lb := wcagLuminance(a), wcagLuminance(b)
+	la, lb := WCAGLuminance(a), WCAGLuminance(b)
 	if la < lb {
 		la, lb = lb, la
 	}
@@ -44,11 +48,11 @@ func wcagContrast(a, b color.RGBA) float64 {
 func readableOn(c, bg color.RGBA) color.RGBA {
 	c.A, bg.A = 255, 255
 	target := color.RGBA{A: 255}
-	if wcagLuminance(bg) < 0.18 {
+	if WCAGLuminance(bg) < 0.18 {
 		target = color.RGBA{R: 255, G: 255, B: 255, A: 255}
 	}
 	for i := 0; i < 40 && wcagContrast(c, bg) < wcagMinContrast; i++ {
-		c = mixRGBA(c, target, 0.06)
+		c = MixRGBA(c, target, 0.06)
 	}
 	return c
 }

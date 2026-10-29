@@ -1,4 +1,4 @@
-// Package base — виджет Window: корневой элемент для режима нативного окна.
+// Package chrome — виджет Window: корневой элемент для режима нативного окна.
 //
 // Window отличается от Canvas/Panel архитектурно:
 //   - Canvas — виртуальный рабочий стол (headless/RDP): единый буфер, внутри Panel'ы-окна
@@ -14,7 +14,7 @@
 //	        ResizeMode="CanResize" Background="#1E1E2E">
 //	    <Grid>...</Grid>
 //	</Window>
-package base
+package chrome
 
 import (
 	"image"
@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 
 	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // ─── Перечисления (совместимы с WPF) ────────────────────────────────────────
@@ -37,20 +38,6 @@ const (
 	WindowStyleNone
 	// WindowStyleToolWindow — компактное окно-утилита с уменьшённым заголовком.
 	WindowStyleToolWindow
-)
-
-// WindowTitleStyle определяет визуальный стиль кнопок и текста заголовка.
-type WindowTitleStyle int
-
-const (
-	// WindowTitleAuto — автоматический выбор стиля по текущей ОС:
-	// macOS → Mac-стиль, Windows/Linux → Windows-стиль.
-	// Это значение по умолчанию (zero value).
-	WindowTitleAuto WindowTitleStyle = iota
-	// WindowTitleWin — Windows: текст слева, кнопки ─ □ × справа.
-	WindowTitleWin
-	// WindowTitleMac — macOS: traffic lights ● ● ● слева, текст по центру.
-	WindowTitleMac
 )
 
 // ResizeMode определяет режим изменения размера окна (WPF ResizeMode).
@@ -89,7 +76,7 @@ const (
 // Дочерние виджеты размещаются в клиентской области (ContentBounds) —
 // под заголовком, внутри рамки.
 type Window struct {
-	Base
+	base.Base
 
 	// Title — текст заголовка окна.
 	Title string
@@ -100,9 +87,9 @@ type Window struct {
 
 	// titleBarContent/navBtn — начинка штатной полосы заголовка (titlebar.go):
 	// виджет приложения в её свободной части и кнопка сворачивания слева.
-	titleBarContent Widget
-	navBtn          *titleNavBtn
-	navPanel        Widget
+	titleBarContent base.Widget
+	navBtn          *base.TitleNavButton
+	navPanel        base.Widget
 
 	// icon — значок окна в заголовке и системное меню по нему
 	// (window_icon.go). nil — значка нет, заголовок прежний.
@@ -110,8 +97,8 @@ type Window struct {
 	// sysMenu — popup-меню значка (создаётся при первом открытии), sysItems —
 	// пункты, заданные приложением (SetSystemMenu), sysCustom отличает
 	// «задан пустой» от «не задан». maximized — состояние от хоста.
-	sysMenu   *PopupMenu
-	sysItems  []MenuItem
+	sysMenu   *base.PopupMenu
+	sysItems  []base.MenuItem
 	sysCustom bool
 	maximized bool
 
@@ -127,7 +114,7 @@ type Window struct {
 	Style WindowStyle
 
 	// TitleStyle — визуальный стиль заголовка (Win или Mac).
-	TitleStyle WindowTitleStyle
+	TitleStyle base.WindowTitleStyle
 
 	// ownStyle — стиль темы, которой окно принадлежит. nil означает «как у
 	// всех» — берётся общий стиль.
@@ -139,16 +126,16 @@ type Window struct {
 	// когда подмена стиля области темы (ThemeScope) уже снята. Окно в области
 	// с темой Windows 2000 ловило мышь по границам заголовка Windows 11 —
 	// промах в восемь точек по вертикали.
-	ownStyle *ThemeStyle
+	ownStyle *base.ThemeStyle
 
-	// opaqueBuf — буфер под ответ OpaqueRegion (см. oneRegion).
+	// opaqueBuf — буфер под ответ OpaqueRegion (см. OneRegion).
 	opaqueBuf [1]image.Rectangle
 
 	// Resize — режим изменения размера окна.
 	Resize ResizeMode
 
 	// MinWidth / MinHeight — минимальный размер окна в ЛОГИЧЕСКИХ пикселях.
-	// 0 → дефолт: для виджетного edge-resize — winMinW×winMinH (120×80),
+	// 0 → дефолт: для виджетного edge-resize — WindowMinW×WindowMinH (120×80),
 	// для нативного окна — движок ОС (Win32: 320×240). Задаётся из XAML
 	// (атрибуты MinWidth/MinHeight) или программно.
 	MinWidth  int
@@ -214,7 +201,7 @@ type Window struct {
 	inactive bool
 
 	// InputBindings — горячие клавиши окна (WPF Window.InputBindings).
-	InputBindings []InputBinding
+	InputBindings []base.InputBinding
 
 	// ── Декларации трея (XAML <Window TrayIcon=… TrayTooltip=…> + <TrayMenu>) ──
 	//
@@ -233,7 +220,7 @@ type Window struct {
 	// ПОЛЕМ, а не ребёнком дерева (PopupMenu прямым ребёнком Window опасен —
 	// см. Window.SetBounds, где *PopupMenu пропускается); window.attachTrayMenu
 	// сам добавит его в дерево корректно.
-	TrayMenu *PopupMenu
+	TrayMenu *base.PopupMenu
 
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
@@ -335,7 +322,7 @@ type Window struct {
 
 	// ── Resize перетаскиванием краёв (для «виртуальных» окон на канвасе) ─────
 	resizing     bool            // идёт ли изменение размера за край
-	resizeDir    winEdge         // направление(я) активного ресайза (битовая маска)
+	resizeDir    base.ResizeEdge // направление(я) активного ресайза (битовая маска)
 	resizeStart  image.Rectangle // bounds окна на момент начала ресайза
 	resizeStartX int             // координаты мыши на момент начала ресайза
 	resizeStartY int
@@ -346,7 +333,7 @@ type Window struct {
 	armedBtn titleButton
 
 	// capMgr — CaptureManager для корректного освобождения захвата мыши.
-	capMgr CaptureManager
+	capMgr base.CaptureManager
 
 	// ── Внутреннее состояние ─────────────────────────────────────────────────
 
@@ -367,11 +354,11 @@ func NewWindow(title string, width, height int) *Window {
 	w := &Window{
 		Title:               title,
 		Style:               WindowStyleSingleBorder,
-		TitleStyle:          WindowTitleAuto, // авто-определение по ОС
+		TitleStyle:          base.WindowTitleAuto, // авто-определение по ОС
 		Resize:              ResizeModeCanResize,
-		Background:          win10.WindowBG,
-		BorderColor:         win10.Border,
-		FrameColor:          win10.WindowFrame,
+		Background:          base.ActiveTheme().WindowBG,
+		BorderColor:         base.ActiveTheme().Border,
+		FrameColor:          base.ActiveTheme().WindowFrame,
 		ShowLocaleIndicator: true,
 		MainWindow:          true,
 	}
@@ -393,24 +380,14 @@ func (w *Window) SetTitle(s string) {
 // Win2000 — исконно виндовый хром: traffic lights в ней не существуют, поэтому
 // Auto в классике всегда Windows-стиль независимо от ОС (иначе на darwin
 // hit-тест и отрисовка кнопок уходили в мак-ветку внутри 3D-рамки).
-func (w *Window) resolvedTitleStyle() WindowTitleStyle {
-	if w.TitleStyle == WindowTitleAuto {
+func (w *Window) resolvedTitleStyle() base.WindowTitleStyle {
+	if w.TitleStyle == base.WindowTitleAuto {
 		if w.style().Classic3D {
-			return WindowTitleWin
+			return base.WindowTitleWin
 		}
-		return detectedTitleStyle()
+		return base.DetectedTitleStyle()
 	}
 	return w.TitleStyle
-}
-
-// DetectedOS возвращает строковое имя текущей ОС ("windows", "darwin", "linux").
-func DetectedOS() string {
-	return detectedOS()
-}
-
-// DetectedTitleStyle возвращает стиль заголовка, соответствующий текущей ОС.
-func DetectedTitleStyle() WindowTitleStyle {
-	return detectedTitleStyle()
 }
 
 // SetBounds обновляет bounds окна и перестраивает дочерние виджеты
@@ -429,7 +406,7 @@ func (w *Window) SetBounds(r image.Rectangle) {
 		// собственным Show() — растягивать его нельзя: закрытое меню размером
 		// с клиентскую область становилось верхним в Z невидимым поглотителем
 		// ВСЕГО ввода после любой перекладки (смена темы, ресайз окна).
-		if _, ok := child.(*PopupMenu); ok {
+		if _, ok := child.(*base.PopupMenu); ok {
 			continue
 		}
 		// Начинка полосы заголовка живёт в полосе, а не в клиентской области:
@@ -464,26 +441,26 @@ func (w *Window) IsActive() bool { return !w.inactive }
 // для неактивного окна — явные Inactive-токены темы либо автоматическое
 // приглушение (смешивание с серым/фоном).
 func (w *Window) titleColors() (bg, bg2, text color.RGBA) {
-	bg = w.resolveColor(w.TitleBG, win10.TitleBG)
-	bg2 = win10.TitleBG2
-	text = w.resolveColor(w.TitleColor, win10.TitleText)
+	bg = w.resolveColor(w.TitleBG, base.ActiveTheme().TitleBG)
+	bg2 = base.ActiveTheme().TitleBG2
+	text = w.resolveColor(w.TitleColor, base.ActiveTheme().TitleText)
 	if !w.inactive {
 		return bg, bg2, text
 	}
-	if t := win10.TitleBGInactive; t.A > 0 {
+	if t := base.ActiveTheme().TitleBGInactive; t.A > 0 {
 		bg = t
 	} else {
 		bg = dimColor(bg)
 	}
-	if t := win10.TitleBG2Inactive; t.A > 0 {
+	if t := base.ActiveTheme().TitleBG2Inactive; t.A > 0 {
 		bg2 = t
 	} else if bg2.A > 0 {
 		bg2 = dimColor(bg2)
 	}
-	if t := win10.TitleTextInactive; t.A > 0 {
+	if t := base.ActiveTheme().TitleTextInactive; t.A > 0 {
 		text = t
 	} else {
-		text = mixRGBA(text, bg, 0.45)
+		text = base.MixRGBA(text, bg, 0.45)
 	}
 	return bg, bg2, text
 }
@@ -491,13 +468,7 @@ func (w *Window) titleColors() (bg, bg2, text color.RGBA) {
 // dimColor приглушает цвет: снижает насыщенность и тянет к серому.
 func dimColor(c color.RGBA) color.RGBA {
 	gray := uint8((uint32(c.R)*299 + uint32(c.G)*587 + uint32(c.B)*114) / 1000)
-	return mixRGBA(c, color.RGBA{R: gray, G: gray, B: gray, A: c.A}, 0.6)
-}
-
-// mixRGBA линейно смешивает a→b на долю t (0 = a, 1 = b).
-func mixRGBA(a, b color.RGBA, t float64) color.RGBA {
-	lerp := func(x, y uint8) uint8 { return uint8(float64(x) + (float64(y)-float64(x))*t) }
-	return color.RGBA{R: lerp(a.R, b.R), G: lerp(a.G, b.G), B: lerp(a.B, b.B), A: a.A}
+	return base.MixRGBA(c, color.RGBA{R: gray, G: gray, B: gray, A: c.A}, 0.6)
 }
 
 // ─── Geometry ───────────────────────────────────────────────────────────────
@@ -545,11 +516,11 @@ func (w *Window) effTitleH() int {
 // style возвращает стиль темы этого окна: свой, если тема окну назначалась,
 // иначе общий. В отличие от currentStyle() отвечает одинаково и во время
 // отрисовки, и при обработке ввода.
-func (w *Window) style() ThemeStyle {
+func (w *Window) style() base.ThemeStyle {
 	if w.ownStyle != nil {
 		return *w.ownStyle
 	}
-	return currentStyle()
+	return base.CurrentThemeStyle()
 }
 
 // OpaqueRegion реализует OpaqueRegioner: что окно закрывает непрозрачно.
@@ -563,7 +534,7 @@ func (w *Window) OpaqueRegion() []image.Rectangle {
 	if w.Backdrop.Material != theme.MaterialDefault || w.Background.A < 255 {
 		return nil
 	}
-	return oneRegion(&w.opaqueBuf, opaqueRect(w.Bounds(), w.corner()))
+	return base.OneRegion(&w.opaqueBuf, base.OpaqueRect(w.Bounds(), w.corner()))
 }
 
 // borderW возвращает ширину рамки (0 для borderless).
@@ -632,19 +603,8 @@ const (
 
 // ─── Resize перетаскиванием краёв ───────────────────────────────────────────
 
-// winEdge — битовая маска задействованных краёв при ресайзе (8 направлений).
-type winEdge int
-
-const (
-	edgeNone winEdge = 0
-	edgeN    winEdge = 1 << iota // верхний край
-	edgeS                        // нижний край
-	edgeW                        // левый край
-	edgeE                        // правый край
-)
-
 // Биты краёв окна для OnNativeResize. Хост получает их вместо внутреннего
-// winEdge: значения устойчивы и не зависят от порядка констант выше.
+// ResizeEdge: значения устойчивы и не зависят от порядка констант выше.
 const (
 	NativeEdgeTop    = 1
 	NativeEdgeBottom = 2
@@ -653,28 +613,22 @@ const (
 )
 
 // nativeEdgeBits переводит внутреннюю маску краёв в биты NativeEdge*.
-func nativeEdgeBits(e winEdge) int {
+func nativeEdgeBits(e base.ResizeEdge) int {
 	bits := 0
-	if e&edgeN != 0 {
+	if e&base.EdgeN != 0 {
 		bits |= NativeEdgeTop
 	}
-	if e&edgeS != 0 {
+	if e&base.EdgeS != 0 {
 		bits |= NativeEdgeBottom
 	}
-	if e&edgeW != 0 {
+	if e&base.EdgeW != 0 {
 		bits |= NativeEdgeLeft
 	}
-	if e&edgeE != 0 {
+	if e&base.EdgeE != 0 {
 		bits |= NativeEdgeRight
 	}
 	return bits
 }
-
-const (
-	winResizeBorder = 6   // ширина полосы-захвата вдоль каждого края, px
-	winMinW         = 120 // минимальная ширина окна при ресайзе, px
-	winMinH         = 80  // минимальная высота окна при ресайзе, px
-)
 
 // titleButton — «взведённая» кнопка заголовка (release-семантика).
 type titleButton int
@@ -773,7 +727,7 @@ func (w *Window) CloseBtnRect() image.Rectangle {
 	if w.btnCount() == 0 {
 		return image.Rectangle{}
 	}
-	if w.resolvedTitleStyle() == WindowTitleMac {
+	if w.resolvedTitleStyle() == base.WindowTitleMac {
 		b := w.Bounds()
 		th := w.titleH()
 		cx := b.Min.X + macStartX
@@ -796,7 +750,7 @@ func (w *Window) MinBtnRect() image.Rectangle {
 	if w.btnCount() < 2 {
 		return image.Rectangle{}
 	}
-	if w.resolvedTitleStyle() == WindowTitleMac {
+	if w.resolvedTitleStyle() == base.WindowTitleMac {
 		b := w.Bounds()
 		th := w.titleH()
 		cx := b.Min.X + macStartX + macSpacing
@@ -820,7 +774,7 @@ func (w *Window) MaxBtnRect() image.Rectangle {
 	if w.btnCount() < 3 {
 		return image.Rectangle{}
 	}
-	if w.resolvedTitleStyle() == WindowTitleMac {
+	if w.resolvedTitleStyle() == base.WindowTitleMac {
 		b := w.Bounds()
 		th := w.titleH()
 		cx := b.Min.X + macStartX + macSpacing*2
@@ -840,7 +794,7 @@ func (w *Window) MaxBtnRect() image.Rectangle {
 
 // ─── Draw ───────────────────────────────────────────────────────────────────
 
-func (w *Window) Draw(ctx DrawContext) {
+func (w *Window) Draw(ctx base.DrawContext) {
 	b := w.Bounds()
 	x, y := b.Min.X, b.Min.Y
 	bw, bh := b.Dx(), b.Dy()
@@ -862,9 +816,9 @@ func (w *Window) Draw(ctx DrawContext) {
 	// ── Заголовок ───────────────────────────────────────────────────────────
 	if th > 0 {
 		switch w.resolvedTitleStyle() {
-		case WindowTitleWin:
+		case base.WindowTitleWin:
 			w.drawWinTitleBar(ctx)
-		case WindowTitleMac:
+		case base.WindowTitleMac:
 			w.drawMacTitleBar(ctx)
 		}
 	}
@@ -872,7 +826,7 @@ func (w *Window) Draw(ctx DrawContext) {
 	// ── Дочерние виджеты ────────────────────────────────────────────────────
 	// Обрезаем по скруглённому корпусу: боковая панель и содержимое во всю
 	// клиентскую область заливаются прямоугольником и срезали бы углы окна.
-	drawRoundClipped(ctx, b, cr, func() { w.drawChildren(ctx) })
+	base.DrawRoundClipped(ctx, b, cr, func() { w.DrawChildren(ctx) })
 
 	// Боковая панель поднята под верхний край и закрыла подпись — возвращаем
 	// её поверх (см. navhost.go).
@@ -894,10 +848,10 @@ func (w *Window) Draw(ctx DrawContext) {
 			// (заголовок и контент уже вписаны внутрь неё).
 			w.drawClassicFrame(ctx, st)
 		} else {
-			bc := w.resolveColor(w.BorderColor, win10.Border)
+			bc := w.resolveColor(w.BorderColor, base.ActiveTheme().Border)
 			if w.inactive {
 				// Рамка неактивного окна светлее (как в Win11).
-				bc = mixRGBA(bc, w.Background, 0.5)
+				bc = base.MixRGBA(bc, w.Background, 0.5)
 			}
 			// edge — наружный контур. Разделитель под заголовком ниже берёт bc:
 			// он внутренний, акцентом его Windows не красит.
@@ -943,7 +897,7 @@ func (w *Window) Draw(ctx DrawContext) {
 
 // ─── Windows-стиль заголовка ────────────────────────────────────────────────
 
-func (w *Window) drawWinTitleBar(ctx DrawContext) {
+func (w *Window) drawWinTitleBar(ctx base.DrawContext) {
 	b := w.Bounds()
 	// Полоса заголовка: в классике смещена внутрь толстой 3D-рамки, в прочих
 	// темах совпадает с верхом окна (геометрия идентична прежней).
@@ -966,7 +920,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 		ctx.FillRect(x+1, y+th, bw-2, cr, w.Background)
 	} else {
 		// Классика Win2000 — градиент navy→голубой (серый у неактивного).
-		fillTitleBarColors(ctx, image.Rect(x, y, x+bw, y+th), tbg, tbg2)
+		base.FillTitleBarColors(ctx, image.Rect(x, y, x+bw, y+th), tbg, tbg2)
 	}
 
 	// Индикатор локали — рисуем ДО заголовка, чтобы обрезать заголовок
@@ -985,7 +939,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 		} else if nc0 > 0 {
 			rightX = b.Max.X - w.btnWidth()*nc0 - 8
 		}
-		badgeRect := drawLocaleBadge(ctx, rightX, y, th, tc)
+		badgeRect := base.DrawLocaleBadge(ctx, rightX, y, th, tc)
 		w.setLocaleBadgeRect(badgeRect)
 		if !badgeRect.Empty() {
 			badgeLeft, haveBadge = badgeRect.Min.X, true
@@ -1018,7 +972,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	// Начинка приложения стоит правее подписи — подпись обрезаем по её левому
 	// краю: иначе длинный заголовок наехал бы на чужой виджет.
 	if w.titleBarContent != nil {
-		if cl := w.titleContentLeft() - titleBarGap; cl < titleRight {
+		if cl := w.titleContentLeft() - base.TitleBarGap; cl < titleRight {
 			titleRight = cl
 		}
 	}
@@ -1026,7 +980,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	textX := w.titleTextLeft(tb)
 	textY := y + (th-13)/2
 	if w.navBtn != nil {
-		w.navBtn.fg = tc
+		w.navBtn.FG = tc
 	}
 	if w.titleTabsActive() {
 		// Режим вкладок: полосу заголовка занимают вкладки, текст Title
@@ -1038,9 +992,9 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 		if titleMaxW := titleRight - textX; titleMaxW <= 0 {
 			title = ""
 		} else {
-			title = ellipsizeText(ctx, title, titleMaxW, DefaultFontSize())
+			title = base.EllipsizeText(ctx, title, titleMaxW, base.DefaultFontSize())
 		}
-		drawTitleText(ctx, title, textX, textY, tc)
+		base.DrawTitleText(ctx, title, textX, textY, tc)
 	}
 
 	nc := w.btnCount()
@@ -1059,8 +1013,8 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 	btnW := w.btnWidth()
 	btnH := th - 1
 	// Цвет значков и подсветка кнопок выводятся из заголовка, а не зашиты: на
-	// светлом заголовке значки тёмные, на тёмном светлые (см. captionGlyphColor).
-	lineColor := captionGlyphColor(tc, tbg)
+	// светлом заголовке значки тёмные, на тёмном светлые (см. CaptionGlyphColor).
+	lineColor := base.CaptionGlyphColor(tc, tbg)
 	hoverBG := captionHoverPlate(tbg)
 
 	// Кнопки рисуются справа налево: ×, □, ─
@@ -1112,7 +1066,7 @@ func (w *Window) drawWinTitleBar(ctx DrawContext) {
 //   - 3px полоса «лица» (BtnBG) — визуальный resize-frame (уже залита фоном окна);
 //   - внутренняя 1px утопленная кромка: BevelShadow сверху/слева, BevelLight
 //     снизу/справа — лёгкое углубление к клиентской области.
-func (w *Window) drawClassicFrame(ctx DrawContext, st ThemeStyle) {
+func (w *Window) drawClassicFrame(ctx base.DrawContext, st base.ThemeStyle) {
 	b := w.Bounds()
 	x, y, ww, hh := b.Min.X, b.Min.Y, b.Dx(), b.Dy()
 
@@ -1136,9 +1090,9 @@ func (w *Window) drawClassicFrame(ctx DrawContext, st ThemeStyle) {
 // выпуклые bevel-кнопки цвета «лица» с чёрными пиксельными глифами. Взведённая
 // кнопка (armedBtn при зажатой ЛКМ) рисуется ВДАВЛЕННОЙ (bevel sunken + глиф
 // смещён на 1px вправо-вниз).
-func (w *Window) drawClassicTitleButtons(ctx DrawContext, st ThemeStyle) {
-	face := w.resolveColor(win10.BtnBG, win10.PanelBG) // «лицо» Win2000 (#D4D0C8)
-	glyph := win10.BtnText                             // чёрный глиф
+func (w *Window) drawClassicTitleButtons(ctx base.DrawContext, st base.ThemeStyle) {
+	face := w.resolveColor(base.ActiveTheme().BtnBG, base.ActiveTheme().PanelBG) // «лицо» Win2000 (#D4D0C8)
+	glyph := base.ActiveTheme().BtnText                                          // чёрный глиф
 	closeR, maxR, minR := w.classicTitleBtnRects()
 
 	// draw рисует одну bevel-кнопку и её глиф. kind задаёт тип глифа;
@@ -1150,9 +1104,9 @@ func (w *Window) drawClassicTitleButtons(ctx DrawContext, st ThemeStyle) {
 		ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), face)
 		pressed := w.armedBtn == kind
 		if pressed {
-			DrawBevelSunken(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+			base.DrawBevelSunken(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
 		} else {
-			drawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+			base.DrawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
 		}
 		cx := r.Min.X + r.Dx()/2
 		cy := r.Min.Y + r.Dy()/2
@@ -1178,7 +1132,7 @@ func (w *Window) drawClassicTitleButtons(ctx DrawContext, st ThemeStyle) {
 // drawGlyphClose рисует крест ✕ толщиной 2px, вписанный в кнопку стороной side,
 // с центром (cx, cy). Глиф компактный (~8×8 при кнопке 18px, ≈45% стороны) —
 // по пропорциям референсной кнопки Win2000, где крест НЕ занимает всю кнопку.
-func drawGlyphClose(ctx DrawContext, cx, cy, side int, col color.RGBA) {
+func drawGlyphClose(ctx base.DrawContext, cx, cy, side int, col color.RGBA) {
 	h := side * 7 / 32 // половина диагонали ≈3px при side=18 → крест ~8×8
 	if h < 3 {
 		h = 3
@@ -1193,7 +1147,7 @@ func drawGlyphClose(ctx DrawContext, cx, cy, side int, col color.RGBA) {
 
 // drawGlyphMax рисует значок развёртывания □ — квадрат-рамку 1px (~9×9 при
 // кнопке 18px) с утолщённой (2px) верхней гранью, как строка заголовка окна.
-func drawGlyphMax(ctx DrawContext, cx, cy, side int, col color.RGBA) {
+func drawGlyphMax(ctx base.DrawContext, cx, cy, side int, col color.RGBA) {
 	gw := side / 2 // ≈9px при side=18
 	if gw < 8 {
 		gw = 8
@@ -1207,7 +1161,7 @@ func drawGlyphMax(ctx DrawContext, cx, cy, side int, col color.RGBA) {
 
 // drawGlyphMin рисует значок сворачивания ─ — короткую горизонтальную полоску
 // 2px толщиной (~8px ширины при кнопке 18px) у нижней трети кнопки.
-func drawGlyphMin(ctx DrawContext, cx, cy, side int, col color.RGBA) {
+func drawGlyphMin(ctx base.DrawContext, cx, cy, side int, col color.RGBA) {
 	bw := side * 8 / 18 // ≈8px при side=18
 	if bw < 6 {
 		bw = 6
@@ -1228,7 +1182,7 @@ func (w *Window) closeBtnBG() color.RGBA {
 
 // ─── macOS-стиль заголовка ──────────────────────────────────────────────────
 
-func (w *Window) drawMacTitleBar(ctx DrawContext) {
+func (w *Window) drawMacTitleBar(ctx base.DrawContext) {
 	b := w.Bounds()
 	x, y, bw := b.Min.X, b.Min.Y, b.Dx()
 	th := w.titleH()
@@ -1278,16 +1232,16 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 			col = color.RGBA{R: 178, G: 178, B: 178, A: 255}
 		} else if lt.hoverFn() != 0 {
 			// Чуть ярче при hover
-			col = brighten(col, 30)
+			col = base.Brighten(col, 30)
 		}
-		fillCircle(ctx, ccx, cy, macCircleR, col)
+		base.FillCircle(ctx, ccx, cy, macCircleR, col)
 	}
 
 	// Индикатор локали — рисуем ДО заголовка (traffic lights слева в Mac-стиле,
 	// бейдж — в правом верхнем углу): нужен левый край бейджа для обрезки.
 	badgeLeft, haveBadge := 0, false
 	if w.ShowLocaleIndicator {
-		badgeRect := drawLocaleBadge(ctx, b.Max.X-8, y, th, tc)
+		badgeRect := base.DrawLocaleBadge(ctx, b.Max.X-8, y, th, tc)
 		w.setLocaleBadgeRect(badgeRect)
 		if !badgeRect.Empty() {
 			badgeLeft, haveBadge = badgeRect.Min.X, true
@@ -1305,7 +1259,7 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 		rightLimit = badgeLeft - 8
 	}
 	if w.navBtn != nil {
-		w.navBtn.fg = tc
+		w.navBtn.FG = tc
 	}
 	if w.titleTabsActive() {
 		// Режим вкладок: после traffic lights — полоса вкладок.
@@ -1319,7 +1273,7 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 	if maxW := rightLimit - leftLimit; maxW <= 0 {
 		title = ""
 	} else {
-		title = ellipsizeText(ctx, title, maxW, 10)
+		title = base.EllipsizeText(ctx, title, maxW, 10)
 		textW := ctx.MeasureText(title, 10)
 		textX := x + (bw-textW)/2
 		if textX < leftLimit {
@@ -1344,8 +1298,8 @@ func (w *Window) drawMacTitleBar(ctx DrawContext) {
 // просит захват. Исключения, где нажатие остаётся виджету без захвата, —
 // titleBarChildHit: штатные органы полосы, TitleBarPressOwner и
 // SetTitleBarHitTest (titlebar_hit.go).
-func (w *Window) WantsCapture(e MouseEvent) bool {
-	if e.Button != MouseLeft {
+func (w *Window) WantsCapture(e base.MouseEvent) bool {
+	if e.Button != base.MouseLeft {
 		return false
 	}
 	pt := image.Pt(e.X, e.Y)
@@ -1369,7 +1323,7 @@ func (w *Window) WantsCapture(e MouseEvent) bool {
 		return true
 	}
 	// Полоса ресайза по краю окна (приоритетнее drag заголовка в верхней зоне).
-	if w.resizeEdgeAt(e.X, e.Y) != edgeNone {
+	if w.resizeEdgeAt(e.X, e.Y) != base.EdgeNone {
 		return true
 	}
 	// Клик по вкладке/«×»/«+» в полосе заголовка обрабатывается на нажатии
@@ -1424,94 +1378,94 @@ func (w *Window) SetNativeHosted(v bool) { w.nativeHosted = v }
 func (w *Window) IsNativeHosted() bool { return w.nativeHosted }
 
 // resizeEdgeAt возвращает край(а) окна под точкой (x, y) для ресайза —
-// полоса шириной winResizeBorder вдоль каждой границы bounds, включая углы
-// (комбинация двух краёв). edgeNone — точка вне зоны ресайза или ресайз
+// полоса шириной ResizeBorder вдоль каждой границы bounds, включая углы
+// (комбинация двух краёв). EdgeNone — точка вне зоны ресайза или ресайз
 // запрещён.
-func (w *Window) resizeEdgeAt(x, y int) winEdge {
+func (w *Window) resizeEdgeAt(x, y int) base.ResizeEdge {
 	if !w.edgeResizeEnabled() {
-		return edgeNone
+		return base.EdgeNone
 	}
 	b := w.Bounds()
 	if !image.Pt(x, y).In(b) {
-		return edgeNone
+		return base.EdgeNone
 	}
 	// Ширина полосы-захвата: в классике совпадает с толщиной 3D-рамки
-	// (frameW), в прочих темах — winResizeBorder.
-	m := winResizeBorder
+	// (frameW), в прочих темах — ResizeBorder.
+	m := base.ResizeBorder
 	if w.style().Classic3D {
 		m = w.frameW()
 	}
-	var e winEdge
+	var e base.ResizeEdge
 	if x < b.Min.X+m {
-		e |= edgeW
+		e |= base.EdgeW
 	}
 	if x >= b.Max.X-m {
-		e |= edgeE
+		e |= base.EdgeE
 	}
 	if y < b.Min.Y+m {
-		e |= edgeN
+		e |= base.EdgeN
 	}
 	if y >= b.Max.Y-m {
-		e |= edgeS
+		e |= base.EdgeS
 	}
 	return e
 }
 
 // Cursor реализует CursorProvider: над полосой ресайза возвращает
 // соответствующий resize-курсор, иначе обычную стрелку.
-func (w *Window) Cursor(x, y int) Cursor {
+func (w *Window) Cursor(x, y int) base.Cursor {
 	switch w.resizeEdgeAt(x, y) {
-	case edgeN, edgeS:
-		return CursorSizeNS
-	case edgeW, edgeE:
-		return CursorSizeWE
-	case edgeN | edgeW, edgeS | edgeE:
-		return CursorSizeNWSE
-	case edgeN | edgeE, edgeS | edgeW:
-		return CursorSizeNESW
+	case base.EdgeN, base.EdgeS:
+		return base.CursorSizeNS
+	case base.EdgeW, base.EdgeE:
+		return base.CursorSizeWE
+	case base.EdgeN | base.EdgeW, base.EdgeS | base.EdgeE:
+		return base.CursorSizeNWSE
+	case base.EdgeN | base.EdgeE, base.EdgeS | base.EdgeW:
+		return base.CursorSizeNESW
 	}
-	return CursorArrow
+	return base.CursorArrow
 }
 
 // applyResize пересчитывает bounds окна по стартовому прямоугольнику и текущей
-// дельте мыши, уважая минимальный размер (winMinW×winMinH). Опорный прямоуголь-
+// дельте мыши, уважая минимальный размер (WindowMinW×WindowMinH). Опорный прямоуголь-
 // ник фиксирован (resizeStart) — накопления ошибки нет.
 func (w *Window) applyResize(x, y int) {
 	b := w.resizeStart
 	nx0, ny0, nx1, ny1 := b.Min.X, b.Min.Y, b.Max.X, b.Max.Y
 	dx := x - w.resizeStartX
 	dy := y - w.resizeStartY
-	if w.resizeDir&edgeW != 0 {
+	if w.resizeDir&base.EdgeW != 0 {
 		nx0 = b.Min.X + dx
 	}
-	if w.resizeDir&edgeE != 0 {
+	if w.resizeDir&base.EdgeE != 0 {
 		nx1 = b.Max.X + dx
 	}
-	if w.resizeDir&edgeN != 0 {
+	if w.resizeDir&base.EdgeN != 0 {
 		ny0 = b.Min.Y + dy
 	}
-	if w.resizeDir&edgeS != 0 {
+	if w.resizeDir&base.EdgeS != 0 {
 		ny1 = b.Max.Y + dy
 	}
-	// Минимальный размер: публичные MinWidth/MinHeight (0 → дефолт winMinW×winMinH).
+	// Минимальный размер: публичные MinWidth/MinHeight (0 → дефолт WindowMinW×WindowMinH).
 	minW := w.MinWidth
 	if minW <= 0 {
-		minW = winMinW
+		minW = base.WindowMinW
 	}
 	minH := w.MinHeight
 	if minH <= 0 {
-		minH = winMinH
+		minH = base.WindowMinH
 	}
 	// Не даём схлопнуть окно, тянем «неподвижный» край.
 	if nx1-nx0 < minW {
-		if w.resizeDir&edgeW != 0 {
+		if w.resizeDir&base.EdgeW != 0 {
 			nx0 = nx1 - minW
 		} else {
 			nx1 = nx0 + minW
 		}
 	}
 	if ny1-ny0 < minH {
-		if w.resizeDir&edgeN != 0 {
+		if w.resizeDir&base.EdgeN != 0 {
 			ny0 = ny1 - minH
 		} else {
 			ny1 = ny0 + minH
@@ -1525,7 +1479,7 @@ func (w *Window) applyResize(x, y int) {
 }
 
 // SetCaptureManager сохраняет CaptureManager для освобождения захвата при отпускании.
-func (w *Window) SetCaptureManager(cm CaptureManager) {
+func (w *Window) SetCaptureManager(cm base.CaptureManager) {
 	w.capMgr = cm
 }
 
@@ -1633,13 +1587,13 @@ func (w *Window) titleBarRect() image.Rectangle {
 }
 
 // OnMouseButton обрабатывает клик по кнопкам заголовка и начало drag.
-func (w *Window) OnMouseButton(e MouseEvent) bool {
+func (w *Window) OnMouseButton(e base.MouseEvent) bool {
 	// Контекстное меню выбора локали (правый клик по заголовку / клик по плашке).
 	if consumed, handled := w.handleLocaleMouse(e); handled {
 		return consumed
 	}
 
-	if e.Button != MouseLeft {
+	if e.Button != base.MouseLeft {
 		return false
 	}
 	pt := image.Pt(e.X, e.Y)
@@ -1653,7 +1607,7 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 		}
 		if w.resizing {
 			w.resizing = false
-			w.resizeDir = edgeNone
+			w.resizeDir = base.EdgeNone
 			if w.capMgr != nil {
 				w.capMgr.ReleaseCapture()
 			}
@@ -1680,7 +1634,7 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 				// Гасим контур ровно там, где он был; полная инвалидация
 				// скрыла бы от хоста, что окно просто переехало, — а по этому
 				// он решает, можно ли обойтись командой копирования.
-				w.notifyRect(dest.Union(from))
+				base.NotifyWidgetRect(&w.Base, dest.Union(from))
 			}
 			if w.capMgr != nil {
 				w.capMgr.ReleaseCapture()
@@ -1755,8 +1709,8 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 
 	// Нажатие в полосу ресайза по краю — начинаем изменение размера
 	// (проверяется до drag заголовка: верхняя 6px-зона — resize, ниже — drag).
-	if dir := w.resizeEdgeAt(e.X, e.Y); dir != edgeNone {
-		DismissAll(w) // закрываем dropdown/popup перед resize
+	if dir := w.resizeEdgeAt(e.X, e.Y); dir != base.EdgeNone {
+		base.DismissAll(w) // закрываем dropdown/popup перед resize
 		// Размер меняет система — своего ресайза не начинаем: нажатие
 		// забирает себе оконный менеджер, и отпускания мы можем не увидеть.
 		//
@@ -1777,7 +1731,7 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 
 	// Нажатие на заголовок или на объявленную область — начинаем drag
 	if (pt.In(w.titleBarRect()) && !w.titleBarChildHit(pt)) || w.dragAreaHit(pt) {
-		DismissAll(w) // закрываем dropdown/popup перед drag
+		base.DismissAll(w) // закрываем dropdown/popup перед drag
 		// Перемещение средствами ОС: одна просьба на нажатие вместо потока
 		// дельт (см. OnNativeMove).
 		if w.nativeHosted && w.OnNativeMove != nil {
@@ -1812,7 +1766,7 @@ func (w *Window) setLocaleBadgeRect(r image.Rectangle) {
 
 // localeMenuList возвращает список локалей для меню (из ОС или дефолт).
 func localeMenuList() []string {
-	items := AvailableLocales()
+	items := base.AvailableLocales()
 	if len(items) == 0 {
 		items = []string{"EN", "RU"}
 	}
@@ -1831,7 +1785,7 @@ func (w *Window) HasOverlay() bool {
 
 // DrawOverlay рисует контур перетаскивания и выпадающий список выбора
 // локали поверх всего окна.
-func (w *Window) DrawOverlay(ctx DrawContext) {
+func (w *Window) DrawOverlay(ctx base.DrawContext) {
 	w.drawDragOutline(ctx)
 
 	w.localeMu.Lock()
@@ -1841,7 +1795,7 @@ func (w *Window) DrawOverlay(ctx DrawContext) {
 	if !open || badge.Empty() {
 		return
 	}
-	rects := drawLocaleMenu(ctx, badge, localeMenuList(), Locale())
+	rects := base.DrawLocaleMenu(ctx, badge, localeMenuList(), base.Locale())
 	w.localeMu.Lock()
 	w.localeItemRects = rects
 	w.localeMu.Unlock()
@@ -1857,7 +1811,7 @@ func (w *Window) damageOutline(r image.Rectangle) {
 		return
 	}
 	if w.OutlineDragStyle == OutlineDragFilled {
-		w.notifyRect(r)
+		base.NotifyWidgetRect(&w.Base, r)
 		return
 	}
 
@@ -1869,14 +1823,14 @@ func (w *Window) damageOutline(r image.Rectangle) {
 	}
 	if t*2 >= r.Dy() || t*2 >= r.Dx() {
 		// Контур тоньше собственных полос — дробить нечего.
-		w.notifyRect(r)
+		base.NotifyWidgetRect(&w.Base, r)
 		return
 	}
 
-	w.notifyRect(image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+t))     // верх
-	w.notifyRect(image.Rect(r.Min.X, r.Max.Y-t, r.Max.X, r.Max.Y))     // низ
-	w.notifyRect(image.Rect(r.Min.X, r.Min.Y+t, r.Min.X+t, r.Max.Y-t)) // лево
-	w.notifyRect(image.Rect(r.Max.X-t, r.Min.Y+t, r.Max.X, r.Max.Y-t)) // право
+	base.NotifyWidgetRect(&w.Base, image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+t))     // верх
+	base.NotifyWidgetRect(&w.Base, image.Rect(r.Min.X, r.Max.Y-t, r.Max.X, r.Max.Y))     // низ
+	base.NotifyWidgetRect(&w.Base, image.Rect(r.Min.X, r.Min.Y+t, r.Min.X+t, r.Max.Y-t)) // лево
+	base.NotifyWidgetRect(&w.Base, image.Rect(r.Max.X-t, r.Min.Y+t, r.Max.X, r.Max.Y-t)) // право
 }
 
 // outlineStripThickness — толщина полосы контура: две линии рамки и точка
@@ -1886,7 +1840,7 @@ const outlineStripThickness = 3
 // drawDragOutline рисует контур окна при OutlineDrag: полупрозрачная заливка
 // в тон хрома плюс сплошная рамка. Пока контур виден, само окно стоит на
 // месте — оно переедет при отпускании кнопки.
-func (w *Window) drawDragOutline(ctx DrawContext) {
+func (w *Window) drawDragOutline(ctx base.DrawContext) {
 	r := w.outlineRect
 	if r.Empty() {
 		return
@@ -1895,7 +1849,7 @@ func (w *Window) drawDragOutline(ctx DrawContext) {
 	// Заливка — только по явному запросу: она перекрашивает каждый пиксель
 	// под контуром, и по сети это дороже, чем двигать само окно.
 	if w.OutlineDragStyle == OutlineDragFilled && fill.A > 0 {
-		if da, ok := ctx.(DrawContextAlpha); ok {
+		if da, ok := ctx.(base.DrawContextAlpha); ok {
 			da.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), fill)
 		}
 	}
@@ -1912,12 +1866,12 @@ func (w *Window) drawDragOutline(ctx DrawContext) {
 // Заливка берётся из поля окна, иначе из темы, иначе считается от цвета рамки;
 // рисуется она только при OutlineDragFilled (см. drawDragOutline).
 func (w *Window) outlineColors() (fill, border color.RGBA) {
-	border = w.resolveColor(w.BorderColor, win10.Border)
+	border = w.resolveColor(w.BorderColor, base.ActiveTheme().Border)
 	switch {
 	case w.OutlineDragFill.A > 0:
 		fill = w.OutlineDragFill
-	case win10.OutlineDragFill.A > 0:
-		fill = win10.OutlineDragFill
+	case base.ActiveTheme().OutlineDragFill.A > 0:
+		fill = base.ActiveTheme().OutlineDragFill
 	default:
 		// Полупрозрачный тон рамки: straight-цвет × alpha (FillRectAlpha
 		// ждёт alpha-premultiplied — см. Canvas.FillRectAlpha).
@@ -1939,14 +1893,14 @@ func (w *Window) Dismiss() {
 	w.localeMenuOpen = false
 	w.localeMu.Unlock()
 	if wasOpen {
-		w.notifyChanged() // закрытие overlay-меню локали
+		base.NotifyWidgetChanged(&w.Base) // закрытие overlay-меню локали
 	}
 }
 
 // handleLocaleMouse обрабатывает клики, связанные с меню локали.
 // Возвращает (consumed, handled): handled=true означает, что клик относится
 // к меню локали и дальнейшая обработка в OnMouseButton не нужна.
-func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
+func (w *Window) handleLocaleMouse(e base.MouseEvent) (consumed bool, handled bool) {
 	if !w.ShowLocaleIndicator || !e.Pressed {
 		return false, false
 	}
@@ -1966,9 +1920,9 @@ func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
 				w.localeMu.Lock()
 				w.localeMenuOpen = false
 				w.localeMu.Unlock()
-				w.notifyChanged() // закрытие overlay-меню локали
+				base.NotifyWidgetChanged(&w.Base) // закрытие overlay-меню локали
 				if i < len(items) {
-					RequestLocale(items[i])
+					base.RequestLocale(items[i])
 				}
 				return true, true
 			}
@@ -1977,19 +1931,19 @@ func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
 		w.localeMu.Lock()
 		w.localeMenuOpen = false
 		w.localeMu.Unlock()
-		w.notifyChanged() // закрытие overlay-меню локали
+		base.NotifyWidgetChanged(&w.Base) // закрытие overlay-меню локали
 		return true, true
 	}
 
 	// Открытие: правый клик по заголовку (контекстное меню) или клик по плашке.
 	inBadge := !badge.Empty() && pt.In(badge)
-	openReq := (e.Button == MouseRight && pt.In(w.titleBarRect())) ||
-		(e.Button == MouseLeft && inBadge)
+	openReq := (e.Button == base.MouseRight && pt.In(w.titleBarRect())) ||
+		(e.Button == base.MouseLeft && inBadge)
 	if openReq {
 		w.localeMu.Lock()
 		w.localeMenuOpen = true
 		w.localeMu.Unlock()
-		w.notifyChanged() // открытие overlay-меню локали
+		base.NotifyWidgetChanged(&w.Base) // открытие overlay-меню локали
 		return true, true
 	}
 	return false, false
@@ -1997,8 +1951,8 @@ func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
 
 // HandleInputBinding выполняет команду, привязанную к горячей клавише (KeyBinding).
 // Возвращает true, если клавиша обработана.
-func (w *Window) HandleInputBinding(code KeyCode, mod KeyMod) bool {
-	cmd, param, ok := matchInputBinding(w.InputBindings, code, mod)
+func (w *Window) HandleInputBinding(code base.KeyCode, mod base.KeyMod) bool {
+	cmd, param, ok := base.MatchInputBinding(w.InputBindings, code, mod)
 	if ok && cmd.CanExecute(param) {
 		cmd.Execute(param)
 		return true
@@ -2009,7 +1963,7 @@ func (w *Window) HandleInputBinding(code KeyCode, mod KeyMod) bool {
 // ─── Themeable ──────────────────────────────────────────────────────────────
 
 // ApplyTheme обновляет цвета и форму Window из темы.
-func (w *Window) ApplyTheme(t *Theme) {
+func (w *Window) ApplyTheme(t *base.Theme) {
 	// Запоминаем стиль: от него зависит геометрия, а её спрашивают и вне
 	// отрисовки — см. Window.ownStyle.
 	st := t.Style
@@ -2029,9 +1983,9 @@ func (w *Window) ApplyTheme(t *Theme) {
 	// заголовка (Mac → traffic-lights, остальные → Windows-стиль).
 	w.CornerRadius = t.Style.WindowCorner
 	if t.Style.MacTitleBar {
-		w.TitleStyle = WindowTitleMac
+		w.TitleStyle = base.WindowTitleMac
 	} else {
-		w.TitleStyle = WindowTitleWin
+		w.TitleStyle = base.WindowTitleWin
 	}
 
 	// Клиентская область зависит от стиля темы: классика Win2000 — толстая
@@ -2055,7 +2009,7 @@ func (w *Window) SetFrameColor(c color.RGBA) {
 	w.FrameColor = c
 	w.frameExplicit = c.A > 0
 	if !w.frameExplicit {
-		w.FrameColor = win10.WindowFrame
+		w.FrameColor = base.ActiveTheme().WindowFrame
 	}
 	w.Invalidate()
 }
@@ -2069,7 +2023,7 @@ func (w *Window) frameColor() (color.RGBA, bool) {
 		return color.RGBA{}, false
 	}
 	if w.inactive {
-		c = mixRGBA(c, w.Background, 0.5)
+		c = base.MixRGBA(c, w.Background, 0.5)
 	}
 	return c, true
 }
@@ -2092,26 +2046,9 @@ func xorBorderColor(bg color.RGBA) color.RGBA {
 // Если фон окна полупрозрачный/нулевой (A == 0) — фолбэк на WindowBG темы.
 func (w *Window) xorBorderBase() color.RGBA {
 	if w.Background.A == 0 {
-		return win10.WindowBG
+		return base.ActiveTheme().WindowBG
 	}
 	return w.Background
-}
-
-// fillCircle рисует закрашенный круг (для traffic lights).
-func fillCircle(ctx DrawContext, cx, cy, r int, col color.RGBA) {
-	ctx.FillRoundRect(cx-r, cy-r, r*2, r*2, r, col)
-}
-
-// brighten увеличивает яркость каждого канала на delta (без переполнения).
-func brighten(c color.RGBA, delta uint8) color.RGBA {
-	add := func(v, d uint8) uint8 {
-		s := uint16(v) + uint16(d)
-		if s > 255 {
-			return 255
-		}
-		return uint8(s)
-	}
-	return color.RGBA{R: add(c.R, delta), G: add(c.G, delta), B: add(c.B, delta), A: c.A}
 }
 
 // corner — радиус, которым корпус окна рисуется на самом деле: 0, если ОС
@@ -2135,5 +2072,5 @@ func (w *Window) notifyMoved(from, to image.Rectangle) {
 	if m := w.DrawMargin(); m > 0 {
 		from, to = from.Inset(-m), to.Inset(-m)
 	}
-	NotifyWidgetMove(w, from, to)
+	base.NotifyWidgetMove(w, from, to)
 }

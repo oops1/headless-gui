@@ -15,7 +15,7 @@ import (
 //	             ValueChangedCommand="{Binding Accent}"/>
 //	<Swatch Color="#C42B1C" Width="18" Height="18" CornerRadius="3"/>
 //
-// Цвет — тем же синтаксисом, что и остальные цвета разметки (parseXAMLColor):
+// Цвет — тем же синтаксисом, что и остальные цвета разметки (ParseColor):
 // «#RRGGBB», «#AARRGGBB» и имена. Своя палитра перечисляется через запятую:
 // цвета редактора темы у каждого приложения свои, а набор по умолчанию —
 // общий.
@@ -23,7 +23,7 @@ import (
 func buildXAMLColorPicker(el Element) base.Widget {
 	p := base.NewColorPicker()
 	if v := el.Attr("Value", "Color", "SelectedColor"); v != "" {
-		if c, err := parseXAMLColor(v); err == nil {
+		if c, err := ParseColor(v); err == nil {
 			p.SetValue(c)
 		}
 	}
@@ -43,12 +43,12 @@ func buildXAMLColorPicker(el Element) base.Widget {
 func buildXAMLSwatch(el Element) base.Widget {
 	s := base.NewSwatch(color.RGBA{A: 255})
 	if v := el.Attr("Color", "Value", "Fill", "Background"); v != "" {
-		if c, err := parseXAMLColor(v); err == nil {
+		if c, err := ParseColor(v); err == nil {
 			s.Color = c
 		}
 	}
 	if v := el.Attr("BorderBrush", "Border"); v != "" {
-		if c, err := parseXAMLColor(v); err == nil {
+		if c, err := ParseColor(v); err == nil {
 			s.Border = c
 		}
 	}
@@ -71,7 +71,7 @@ func parseXAMLColorList(s string) []color.RGBA {
 		if part == "" {
 			continue
 		}
-		if c, err := parseXAMLColor(part); err == nil {
+		if c, err := ParseColor(part); err == nil {
 			out = append(out, c)
 		}
 	}
