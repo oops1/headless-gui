@@ -28,6 +28,7 @@ import (
 	"sync"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 
 	"golang.org/x/sys/unix"
 )
@@ -109,13 +110,13 @@ type wlPopups struct {
 	// протокольной ошибкой, а это разрыв соединения.
 	root *wlPopup
 
-	handlers childPopupHandlers
+	handlers native.ChildPopupHandlers
 }
 
 // ─── Интерфейс childPopupHost ────────────────────────────────────────────────
 
 // SetChildPopupHandlers подключает приёмники ввода попапов.
-func (w *WaylandWindow) SetChildPopupHandlers(h childPopupHandlers) {
+func (w *WaylandWindow) SetChildPopupHandlers(h native.ChildPopupHandlers) {
 	w.popups.mu.Lock()
 	w.popups.handlers = h
 	w.popups.mu.Unlock()
@@ -379,7 +380,7 @@ func (w *WaylandWindow) popupFlush(p *wlPopup) {
 	w.popups.mu.Unlock()
 
 	frame := p.stride * p.h
-	convRectBGRAPremul(p.data[i*frame:(i+1)*frame], p.stride, img.Pix, img.Stride, img.Bounds())
+	native.ConvRectBGRAPremul(p.data[i*frame:(i+1)*frame], p.stride, img.Pix, img.Stride, img.Bounds())
 
 	w.popupSetRegions(p, bands, engine.SolidBands(img))
 	w.send(newWlMsg(p.surfaceID, wlSurfaceAttach).putUint(p.bufID[i]).putInt(0).putInt(0), -1)
@@ -539,7 +540,7 @@ func (w *WaylandWindow) popupForSurface(surf uint32) *wlPopup {
 }
 
 // popupHandlers — снимок приёмников ввода попапов.
-func (w *WaylandWindow) popupHandlers() childPopupHandlers {
+func (w *WaylandWindow) popupHandlers() native.ChildPopupHandlers {
 	w.popups.mu.Lock()
 	defer w.popups.mu.Unlock()
 	return w.popups.handlers

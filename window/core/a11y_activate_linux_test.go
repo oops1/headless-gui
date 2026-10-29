@@ -6,6 +6,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -48,7 +49,7 @@ func TestATSPIGrabFocus(t *testing.T) {
 		t.Fatal("узел кнопки не найден")
 	}
 
-	rep := b.handleComponent(&dbusMessage{Interface: ifaceComponent, Member: "GrabFocus"}, v, id, node)
+	rep := b.handleComponent(&dbus.Message{Interface: ifaceComponent, Member: "GrabFocus"}, v, id, node)
 	if rep == nil || rep.Sig != "b" {
 		t.Fatalf("GrabFocus вернул %#v", rep)
 	}
@@ -61,7 +62,7 @@ func TestATSPIGrabFocus(t *testing.T) {
 
 	// Синтетический узел приложения виджета не имеет — действий нет.
 	app := b.appNode(v)
-	rep = b.handleComponent(&dbusMessage{Interface: ifaceComponent, Member: "GrabFocus"}, v, atspiAppID, app)
+	rep = b.handleComponent(&dbus.Message{Interface: ifaceComponent, Member: "GrabFocus"}, v, atspiAppID, app)
 	if ok, _ := rep.Body[0].(bool); ok {
 		t.Error("GrabFocus по узлу приложения должен возвращать false")
 	}
@@ -77,7 +78,7 @@ func TestATSPIDoAction(t *testing.T) {
 	}
 
 	call := func(idx int32) bool {
-		rep := b.handleAction(&dbusMessage{
+		rep := b.handleAction(&dbus.Message{
 			Interface: ifaceAction, Member: "DoAction", Body: []any{idx}}, node)
 		if rep == nil || rep.Sig != "b" {
 			t.Fatalf("DoAction(%d) вернул %#v", idx, rep)
@@ -100,7 +101,7 @@ func TestATSPIDoAction(t *testing.T) {
 	}
 
 	// Узел без виджета (приложение) нажать нельзя.
-	rep := b.handleAction(&dbusMessage{
+	rep := b.handleAction(&dbus.Message{
 		Interface: ifaceAction, Member: "DoAction", Body: []any{int32(0)}}, b.appNode(v))
 	if ok, _ := rep.Body[0].(bool); ok {
 		t.Error("DoAction по узлу приложения должен возвращать false")

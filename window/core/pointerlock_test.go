@@ -23,31 +23,6 @@ func plRawMouse(ptrSize int, typ uint32, flags uint16, x, y int32) []byte {
 	return b
 }
 
-func TestParseRawMouse(t *testing.T) {
-	for _, ptr := range []int{8, 4} {
-		x, y, abs, ok := parseRawMouse(plRawMouse(ptr, rimTypeMouse, 0, 7, -3), ptr)
-		if !ok || x != 7 || y != -3 || abs {
-			t.Errorf("указатель %d: (%d,%d) abs=%v ok=%v, ждал (7,-3) относительное", ptr, x, y, abs, ok)
-		}
-		x, y, abs, ok = parseRawMouse(plRawMouse(ptr, rimTypeMouse, mouseMoveAbs, 30000, 65535), ptr)
-		if !ok || x != 30000 || y != 65535 || !abs {
-			t.Errorf("указатель %d: абсолютное (%d,%d) abs=%v ok=%v", ptr, x, y, abs, ok)
-		}
-	}
-	// Не мышь (RIM_TYPEKEYBOARD = 1) и обрезанный буфер отвергаются.
-	if _, _, _, ok := parseRawMouse(plRawMouse(8, 1, 0, 1, 1), 8); ok {
-		t.Error("клавиатурный RAWINPUT принят как мышь")
-	}
-	if _, _, _, ok := parseRawMouse(plRawMouse(8, rimTypeMouse, 0, 1, 1)[:30], 8); ok {
-		t.Error("обрезанный буфер принят")
-	}
-	// Заголовок другого размера читает другие байты: проверка, что ptrSize учтён.
-	b := plRawMouse(8, rimTypeMouse, 0, 5, 6)
-	if x, _, _, ok := parseRawMouse(b, 4); ok && x == 5 {
-		t.Error("размер заголовка не учитывается")
-	}
-}
-
 func TestRelMotionQueue_CoalescesIntoOneDelivery(t *testing.T) {
 	var q relMotionQueue
 	var runs []func()

@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // Живая проверка против настоящего X-сервера (Xvfb, WSLg/XWayland через
@@ -54,7 +56,7 @@ func TestX11CursorImageE2E(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		w.SetCursorImage(x11ciImage(32, 32, color.NRGBA{R: uint8(i * 10), G: 100, B: 200, A: 255}, 1, 1))
 	}
-	w.SetCursor(wlCursorIBeam)
+	w.SetCursor(pointer.CursorIBeam)
 	w.SetCursorImage(x11ciImage(48, 48, color.NRGBA{R: 255, G: 40, B: 40, A: 180}, 2, 3)) // из кэша
 	time.Sleep(300 * time.Millisecond)
 	if w.closed.Load() {

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -15,7 +16,7 @@ import (
 // Дочернее окно принадлежит owner'у (всегда поверх него, сворачивается вместе
 // с ним), а owner на время модалки отключается (SetEnabled(false)).
 type ownedWindow interface {
-	SetOwner(parent NativeWindow)
+	SetOwner(parent native.NativeWindow)
 	SetEnabled(v bool)
 }
 
@@ -78,12 +79,12 @@ type dialogHost struct {
 
 // hostedModal — одна модалка, показанная в собственном окне.
 type hostedModal struct {
-	dlg    *widget.Dialog
-	owner  NativeWindow // окно, отключаемое на время этой модалки
+	dlg   *widget.Dialog
+	owner native.NativeWindow // окно, отключаемое на время этой модалки
 
 	// Заполняются в create() (на UI-потоке).
 	eng       *engine.Engine
-	native    NativeWindow
+	native    native.NativeWindow
 	surf      *surface
 	popupHost *popupHost // хост popup-оверлеев диалога (nil без поддержки)
 
@@ -102,7 +103,7 @@ func (h *dialogHost) ShowModal(m widget.ModalWidget) bool {
 	}
 
 	h.mu.Lock()
-	var owner NativeWindow
+	var owner native.NativeWindow
 	if n := len(h.stack); n > 0 {
 		owner = h.stack[n-1].native
 		if owner == nil {
@@ -218,7 +219,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 	// объект-сценарий (диалог показывается только здесь, у хоста).
 	dlg.Dim = color.RGBA{}
 
-	native := newNativeWindow() // хук: тесты подставляют окно ОС
+	nw := newNativeWindow() // хук: тесты подставляют окно ОС
 	// Минимум объявляем ДО Create: иначе окно, меньшее дефолтного минимума
 	// платформы, будет создано увеличенным (см. fitMinTrack в native_windows).
 	//
@@ -232,40 +233,40 @@ func (h *dialogHost) create(hm *hostedModal) {
 		minW = int(float64(mw)*scale + 0.5)
 		minH = int(float64(mh)*scale + 0.5)
 	}
-	native.SetMinSize(minW, minH)
+	nw.SetMinSize(minW, minH)
 	surf := &surface{
 		eng:     eng,
-		native:  native,
+		native:  nw,
 		scale:   scale,
 		current: image.NewRGBA(image.Rect(0, 0, pw, ph)),
 	}
 
-	if err := native.Create(dlg.Title, pw, ph); err != nil {
+	if err := nw.Create(dlg.Title, pw, ph); err != nil {
 		h.mu.Lock()
 		h.removeLocked(hm)
 		h.mu.Unlock()
 		go eng.Stop()
 		return
 	}
-	native.SetResizable(dlg.IsResizable())
-	native.SetMinSize(minW, minH)
+	nw.SetResizable(dlg.IsResizable())
+	nw.SetMinSize(minW, minH)
 	if dlg.CornerRadius > 0 {
-		native.SetCornerRadius(int(float64(dlg.CornerRadius)*scale + 0.5))
+		nw.SetCornerRadius(int(float64(dlg.CornerRadius)*scale + 0.5))
 		// ОС с прямыми углами окна (Windows 10, X11) — корпус диалога тоже
 		// прямой, иначе в углах окна виден фон за скруглением.
-		if cr, ok := native.(cornerRounder); ok && !cr.RoundsCorners() {
+		if cr, ok := nw.(cornerRounder); ok && !cr.RoundsCorners() {
 			dlg.SquareCorners = true
 		}
 	}
 
 	// Owner + модальность.
-	if ow, ok := native.(ownedWindow); ok {
+	if ow, ok := nw.(ownedWindow); ok {
 		ow.SetOwner(hm.owner)
 	}
 	if ow, ok := hm.owner.(ownedWindow); ok {
 		ow.SetEnabled(false)
 	}
-	h.centerOn(native, hm.owner, pw, ph)
+	h.centerOn(nw, hm.owner, pw, ph)
 
 	// Drag за заголовок диалога → перемещение нативного окна (лог → физ).
 	dlg.OnDragMove = func(dx, dy int) {
@@ -273,8 +274,8 @@ func (h *dialogHost) create(hm *hostedModal) {
 			dx = int(float64(dx)*scale + 0.5)
 			dy = int(float64(dy)*scale + 0.5)
 		}
-		x, y := native.GetPosition()
-		native.SetPosition(x+dx, y+dy)
+		x, y := nw.GetPosition()
+		nw.SetPosition(x+dx, y+dy)
 	}
 
 	// Штатные кнопки окна диалога (widget.Dialog.SetWindowButtons): свернуть и
@@ -285,19 +286,19 @@ func (h *dialogHost) create(hm *hostedModal) {
 	// асинхронно — состояние окна тут же после вызова было бы прежним, и
 	// кнопка нарисовала бы не тот глиф.
 	onUI := func(fn func()) { fn() }
-	if inv, ok := native.(uiThreadInvoker); ok {
+	if inv, ok := nw.(uiThreadInvoker); ok {
 		onUI = inv.InvokeOnUIThread
 	}
-	dlg.OnMinimize = func() { onUI(func() { native.Minimize() }) }
+	dlg.OnMinimize = func() { onUI(func() { nw.Minimize() }) }
 	dlg.OnMaximizeRestore = func() {
 		onUI(func() {
-			if native.IsMaximized() {
-				native.Restore()
+			if nw.IsMaximized() {
+				nw.Restore()
 			} else {
-				native.Maximize()
+				nw.Maximize()
 			}
 			// Глиф кнопки — виджет: меняется на горутине движка диалога.
-			maximized := native.IsMaximized()
+			maximized := nw.IsMaximized()
 			eng.Post(func() {
 				dlg.SetMaximized(maximized)
 				eng.Invalidate()
@@ -310,7 +311,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 	// Только у растяжимого: у обычного окно и так не тянется, а лишний
 	// обработчик означал бы лишнюю ветку в разборе событий каждого диалога.
 	if dlg.IsResizable() {
-		native.SetOnResize(func(newW, newH int) {
+		nw.SetOnResize(func(newW, newH int) {
 			if newW <= 0 || newH <= 0 {
 				return
 			}
@@ -336,7 +337,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 	eng.SetOnModalClosed(func(widget.ModalWidget) { h.teardown(hm) })
 	// Закрытие нативного окна ОС (Alt+F4 / ✕ рамки) — как отмена диалога.
 	// Отмена — обработчик диалога, поэтому выполняется на горутине его движка.
-	native.SetOnClose(func() bool {
+	nw.SetOnClose(func() bool {
 		surf.post(func() {
 			dlg.OnCancel()
 			h.teardown(hm)
@@ -349,7 +350,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 	// корректно закрыть окно. Флаг created взводим ПОСЛЕДНИМ — только тогда окно
 	// «живо» и CloseModal вправе закрывать его через eng.CloseModal.
 	h.mu.Lock()
-	hm.eng, hm.native, hm.surf = eng, native, surf
+	hm.eng, hm.native, hm.surf = eng, nw, surf
 	h.mu.Unlock()
 
 	// Показ диалога как модалки во вторичном движке (центрирует/клэмпит по его
@@ -364,9 +365,9 @@ func (h *dialogHost) create(hm *hostedModal) {
 
 	// Хост popup-оверлеев для движка диалога: dropdown'ы/меню внутри диалога
 	// открываются в собственных окнах ОС, спозиционированных от окна диалога.
-	if _, ok := native.(popupWindow); ok {
-		if inv, ok := native.(uiThreadInvoker); ok {
-			ph := newPopupHost(native, inv, eng, scale, &surf.in)
+	if _, ok := nw.(popupWindow); ok {
+		if inv, ok := nw.(uiThreadInvoker); ok {
+			ph := newPopupHost(nw, inv, eng, scale, &surf.in)
 			eng.SetPopupSink(ph.apply)
 			eng.SetPopupFade(true)
 			surf.setPopupCursor(ph.syncCursorOverride)
@@ -374,7 +375,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 			hm.popupHost = ph
 			h.mu.Unlock()
 			// Деактивация окна диалога (клик в другое приложение) закрывает попапы.
-			if an, ok := native.(activationNotifier); ok {
+			if an, ok := nw.(activationNotifier); ok {
 				an.SetOnActivate(func(active bool) {
 					if !active {
 						surf.post(eng.CloseAllOverlays)
@@ -387,7 +388,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 	// Вторичное окно с собственным соединением (X11) само не обслуживается
 	// общим циклом сообщений — запускаем его насос событий. Win32 не реализует
 	// eventPumper (одна очередь на все окна): для него это no-op, путь неизменен.
-	if ep, ok := native.(eventPumper); ok {
+	if ep, ok := nw.(eventPumper); ok {
 		ep.StartEventPump()
 	}
 
@@ -424,7 +425,7 @@ func (h *dialogHost) teardown(hm *hostedModal) {
 		rw, rh = h.parent.w, h.parent.h
 	}
 	owner := hm.owner
-	native := hm.native
+	nw := hm.native
 	eng := hm.eng
 	ph := hm.popupHost
 	h.mu.Unlock()
@@ -453,8 +454,8 @@ func (h *dialogHost) teardown(hm *hostedModal) {
 		if fg, ok := owner.(foregrounder); ok {
 			fg.SetForeground()
 		}
-		if native != nil {
-			native.Close()
+		if nw != nil {
+			nw.Close()
 		}
 	})
 
@@ -490,7 +491,7 @@ func (h *dialogHost) removeLocked(hm *hostedModal) {
 }
 
 // centerOn ставит окно child по центру owner'а (физические координаты экрана).
-func (h *dialogHost) centerOn(child, owner NativeWindow, pw, ph int) {
+func (h *dialogHost) centerOn(child, owner native.NativeWindow, pw, ph int) {
 	ox, oy := owner.GetPosition()
 	ow, oh := owner.GetSize()
 	child.SetPosition(ox+(ow-pw)/2, oy+(oh-ph)/2)

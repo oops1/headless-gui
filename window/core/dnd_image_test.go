@@ -5,6 +5,8 @@ import (
 	"image/color"
 	"reflect"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Значок перетаскивания: общий слой окна (BeginDragFilesImage) без ОС.
@@ -18,7 +20,7 @@ type imgNative struct {
 	supprt bool
 }
 
-func (f *imgNative) BeginDragFilesImage(paths []string, effect DragEffect, img *image.RGBA, hot image.Point, done func(DragEffect)) bool {
+func (f *imgNative) BeginDragFilesImage(paths []string, effect native.DragEffect, img *image.RGBA, hot image.Point, done func(native.DragEffect)) bool {
 	f.imgs = append(f.imgs, img)
 	f.hots = append(f.hots, hot)
 	f.paths = append(f.paths, paths)
@@ -36,12 +38,12 @@ func imgWindow() (*Window, *imgNative) {
 
 func TestBeginDragFilesImage_PassesImage(t *testing.T) {
 	win, fn := imgWindow()
-	var got []DragEffect
-	win.SetOnDragFinished(func(e DragEffect) { got = append(got, e) })
+	var got []native.DragEffect
+	win.SetOnDragFinished(func(e native.DragEffect) { got = append(got, e) })
 
 	src := image.NewNRGBA(image.Rect(5, 7, 5+40, 7+30)) // начало не в нуле
 	src.SetNRGBA(5, 7, color.NRGBA{R: 255, A: 128})
-	if !win.BeginDragFilesImage([]string{"a.png"}, DragEffectCopy, src, image.Pt(12, 9)) {
+	if !win.BeginDragFilesImage([]string{"a.png"}, native.DragEffectCopy, src, image.Pt(12, 9)) {
 		t.Fatal("BeginDragFilesImage отказал")
 	}
 	if len(fn.imgs) != 1 {
@@ -62,8 +64,8 @@ func TestBeginDragFilesImage_PassesImage(t *testing.T) {
 		t.Error("значок передан, но ещё и вызван BeginDragFiles")
 	}
 	// Окончание тем же SetOnDragFinished.
-	fn.done(DragEffectCopy)
-	if !reflect.DeepEqual(got, []DragEffect{DragEffectCopy}) {
+	fn.done(native.DragEffectCopy)
+	if !reflect.DeepEqual(got, []native.DragEffect{native.DragEffectCopy}) {
 		t.Errorf("SetOnDragFinished получил %v", got)
 	}
 }
@@ -71,13 +73,13 @@ func TestBeginDragFilesImage_PassesImage(t *testing.T) {
 // Без картинки — прежнее перетаскивание: бэкенд со значком не трогается.
 func TestBeginDragFilesImage_NilFallsBack(t *testing.T) {
 	win, fn := imgWindow()
-	if !win.BeginDragFilesImage([]string{"a"}, DragEffectCopy, nil, image.Point{}) {
+	if !win.BeginDragFilesImage([]string{"a"}, native.DragEffectCopy, nil, image.Point{}) {
 		t.Fatal("отказ без картинки")
 	}
 	if len(fn.imgs) != 0 || len(fn.began) != 1 {
 		t.Errorf("значков %d, обычных запусков %d; ждал 0 и 1", len(fn.imgs), len(fn.began))
 	}
-	if !win.BeginDragFilesImage([]string{"a"}, DragEffectCopy, image.NewRGBA(image.Rectangle{}), image.Point{}) {
+	if !win.BeginDragFilesImage([]string{"a"}, native.DragEffectCopy, image.NewRGBA(image.Rectangle{}), image.Point{}) {
 		t.Fatal("отказ с пустой картинкой")
 	}
 	if len(fn.imgs) != 0 || len(fn.began) != 2 {
@@ -88,10 +90,10 @@ func TestBeginDragFilesImage_NilFallsBack(t *testing.T) {
 // Бэкенд без значка (X11): перетаскивание всё равно начинается.
 func TestBeginDragFilesImage_BackendWithoutImage(t *testing.T) {
 	win, fn, _ := dragWindow(1)
-	if !win.BeginDragFilesImage([]string{"a"}, DragEffectMove, image.NewRGBA(image.Rect(0, 0, 8, 8)), image.Pt(1, 1)) {
+	if !win.BeginDragFilesImage([]string{"a"}, native.DragEffectMove, image.NewRGBA(image.Rect(0, 0, 8, 8)), image.Pt(1, 1)) {
 		t.Fatal("перетаскивание не началось на бэкенде без значка")
 	}
-	if len(fn.began) != 1 || fn.effects[0] != DragEffectMove {
+	if len(fn.began) != 1 || fn.effects[0] != native.DragEffectMove {
 		t.Errorf("бэкенд получил %v %v", fn.began, fn.effects)
 	}
 	if win.DragImageSupported() {
@@ -102,16 +104,16 @@ func TestBeginDragFilesImage_BackendWithoutImage(t *testing.T) {
 func TestBeginDragFilesImage_Refusals(t *testing.T) {
 	win, fn := imgWindow()
 	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
-	if win.BeginDragFilesImage(nil, DragEffectCopy, img, image.Point{}) ||
+	if win.BeginDragFilesImage(nil, native.DragEffectCopy, img, image.Point{}) ||
 		win.BeginDragFilesImage([]string{"a"}, 0, img, image.Point{}) {
 		t.Error("пустой список / маска приняты")
 	}
 	fn.refuse = true
-	if win.BeginDragFilesImage([]string{"a"}, DragEffectCopy, img, image.Point{}) {
+	if win.BeginDragFilesImage([]string{"a"}, native.DragEffectCopy, img, image.Point{}) {
 		t.Error("отказ бэкенда не дошёл до вызывающего")
 	}
 	bare := &Window{surface: surface{eng: &immediateEngine{}, native: &inputNative{}, scale: 1}}
-	if bare.BeginDragFilesImage([]string{"a"}, DragEffectCopy, img, image.Point{}) || bare.DragImageSupported() {
+	if bare.BeginDragFilesImage([]string{"a"}, native.DragEffectCopy, img, image.Point{}) || bare.DragImageSupported() {
 		t.Error("бэкенд без перетаскивания принял значок")
 	}
 }

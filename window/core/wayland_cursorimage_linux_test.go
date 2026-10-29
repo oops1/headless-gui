@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -125,11 +126,11 @@ func TestWayland_CursorImage_Cached(t *testing.T) {
 	}
 }
 
-// Кэш ограничен: сверх cursorCacheSize давний буфер уничтожается.
+// Кэш ограничен: сверх pointer.CursorCacheSize давний буфер уничтожается.
 func TestWayland_CursorImage_LRUDestroysOldBuffer(t *testing.T) {
 	c := wlciWindow(t)
 	var first uint32
-	for i := 0; i < cursorCacheSize+1; i++ {
+	for i := 0; i < pointer.CursorCacheSize+1; i++ {
 		c.w.SetCursorImage(wlciImage(8, 8, color.NRGBA{R: uint8(i + 1), A: 255}, 0, 0))
 		msgs := splitWlMsgs(t, wlciRead(t, c))
 		if i == 0 {
@@ -139,7 +140,7 @@ func TestWayland_CursorImage_LRUDestroysOldBuffer(t *testing.T) {
 			}
 			first = att.args[0]
 		}
-		if i < cursorCacheSize {
+		if i < pointer.CursorCacheSize {
 			if _, ok := findWlMsg(msgs, first, wlBufferDestroy); ok {
 				t.Fatalf("буфер уничтожен слишком рано, шаг %d", i)
 			}
@@ -147,8 +148,8 @@ func TestWayland_CursorImage_LRUDestroysOldBuffer(t *testing.T) {
 			t.Errorf("давний буфер %d не уничтожен при переполнении кэша: %v", first, msgs)
 		}
 	}
-	if n := c.w.imgCursors.len(); n != cursorCacheSize {
-		t.Errorf("в кэше %d буферов, ждал %d", n, cursorCacheSize)
+	if n := c.w.imgCursors.Len(); n != pointer.CursorCacheSize {
+		t.Errorf("в кэше %d буферов, ждал %d", n, pointer.CursorCacheSize)
 	}
 }
 
@@ -174,7 +175,7 @@ func TestWayland_CursorImage_Scale(t *testing.T) {
 	}
 	c.w.scale.current = 2
 	// Форма вместо картинки: масштаб поверхности снова 1, картинки нет.
-	c.w.SetCursor(wlCursorIBeam)
+	c.w.SetCursor(pointer.CursorIBeam)
 	msgs = splitWlMsgs(t, wlciRead(t, c))
 	bs, ok = findWlMsg(msgs, surf, wlSurfaceSetBufferScale)
 	if !ok || bs.args[0] != 1 {
@@ -227,7 +228,7 @@ func TestWayland_CursorImage_OverPopup(t *testing.T) {
 	if !ok || sc.args[1] == 0 || sc.args[2] != 2 {
 		t.Fatalf("над попапом картинка не показана: %v", msgs)
 	}
-	c.w.SetPopupCursor(wlCursorNone, true) // форма вместо картинки
+	c.w.SetPopupCursor(pointer.CursorNone, true) // форма вместо картинки
 	msgs = splitWlMsgs(t, wlciRead(t, c))
 	sc, ok = findWlMsg(msgs, c.w.pointerID, wlPointerSetCursor)
 	if !ok || sc.args[1] != 0 {

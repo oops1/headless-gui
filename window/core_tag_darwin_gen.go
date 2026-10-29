@@ -7,6 +7,7 @@
 package window
 
 import (
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/window/core"
 )
 
@@ -14,4 +15,4 @@ import (
 
 type CocoaWindow = core.CocoaWindow
 
-func NewNativeWindow() NativeWindow { return core.NewNativeWindow() }
+func NewNativeWindow() native.NativeWindow { return core.NewNativeWindow() }

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -103,7 +104,7 @@ func TestWlClipboard_VirtualOffersAndIsLazy(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := c.read(t)
-	for _, mime := range []string{mimeTextUriList, mimeGnomeCopiedFiles, mimeTextUTF8} {
+	for _, mime := range []string{native.MimeTextURIList, native.MimeGnomeCopiedFiles, mimeTextUTF8} {
 		if !bytes.Contains(raw, []byte(mime+"\x00")) {
 			t.Errorf("%s не объявлен", mime)
 		}
@@ -116,13 +117,13 @@ func TestWlClipboard_VirtualOffersAndIsLazy(t *testing.T) {
 	}
 
 	// Запросили файлы — тогда и только тогда приложение даёт пути.
-	if got := wlVirtSend(t, c, mimeTextUriList); got != virtWantURIs {
+	if got := wlVirtSend(t, c, native.MimeTextURIList); got != virtWantURIs {
 		t.Errorf("text/uri-list: %q", got)
 	}
 	if app.calls.Load() != 2 { // верхний уровень: файл и папка, вложенное не спрашивают
 		t.Errorf("Materialize вызван %d раз, ждал 2", app.calls.Load())
 	}
-	if got := wlVirtSend(t, c, mimeGnomeCopiedFiles); got != virtWantGnome {
+	if got := wlVirtSend(t, c, native.MimeGnomeCopiedFiles); got != virtWantGnome {
 		t.Errorf("gnome-copied-files: %q", got)
 	}
 	if app.calls.Load() != 2 {
@@ -137,11 +138,11 @@ func TestWlClipboard_VirtualFailureGivesEmptyAnswer(t *testing.T) {
 	app := newVirtApp()
 	app.fail.Store(true)
 	c.w.clip.SetVirtualFiles(app.files, nil, app.opts())
-	if got := wlVirtSend(t, c, mimeTextUriList); got != "" {
+	if got := wlVirtSend(t, c, native.MimeTextURIList); got != "" {
 		t.Errorf("при отказе отдано %q", got)
 	}
 	app.fail.Store(false)
-	if got := wlVirtSend(t, c, mimeTextUriList); got != virtWantURIs {
+	if got := wlVirtSend(t, c, native.MimeTextURIList); got != virtWantURIs {
 		t.Errorf("повторная вставка после отказа: %q", got)
 	}
 }

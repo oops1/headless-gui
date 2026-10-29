@@ -19,6 +19,8 @@ package core
 
 import (
 	"sync/atomic"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // wlFullscreen — служебное состояние запроса полного экрана.
@@ -54,7 +56,7 @@ func (w *WaylandWindow) SetFullscreen(on bool) bool {
 // выводом — протокол разрешает переносить так, без выхода из режима.
 // Композитор вправе выбрать другой вывод; где окно оказалось на самом деле,
 // видно из MonitorOf. false — вывода нет среди известных (отключён).
-func (w *WaylandWindow) SetFullscreenOn(m Monitor) bool {
+func (w *WaylandWindow) SetFullscreenOn(m native.Monitor) bool {
 	out, ok := w.outputObjectFor(m)
 	if !ok {
 		return false
@@ -63,9 +65,9 @@ func (w *WaylandWindow) SetFullscreenOn(m Monitor) bool {
 }
 
 // outputObjectFor находит объект wl_output этого соединения для монитора m.
-func (w *WaylandWindow) outputObjectFor(m Monitor) (uint32, bool) {
+func (w *WaylandWindow) outputObjectFor(m native.Monitor) (uint32, bool) {
 	w.outs.mu.Lock()
-	var list []Monitor
+	var list []native.Monitor
 	var objs []uint32
 	for _, i := range w.outs.list {
 		if mon, ok := i.monitor(); ok {
@@ -74,12 +76,12 @@ func (w *WaylandWindow) outputObjectFor(m Monitor) (uint32, bool) {
 		}
 	}
 	w.outs.mu.Unlock()
-	cur, ok := matchMonitor(list, m)
+	cur, ok := native.MatchMonitor(list, m)
 	if !ok {
 		return 0, false
 	}
 	for i, c := range list {
-		if c.id == cur.id {
+		if native.MonitorKey(c) == native.MonitorKey(cur) {
 			return objs[i], true
 		}
 	}

@@ -6,6 +6,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
 )
 
 // Живая проверка против настоящего сервера. Без DISPLAY / WAYLAND_DISPLAY
@@ -37,7 +39,7 @@ func TestX11LockKeysE2E(t *testing.T) {
 	}
 	t.Cleanup(func() { w.SetLockKeys(orig) })
 
-	want := orig ^ NumLock
+	want := orig ^ keyboard.NumLock
 	if !w.SetLockKeys(want) {
 		// XWayland под чужим компоновщиком (WSLg) переключателями не всегда
 		// распоряжается сам: пока фокус у компоновщика, он возвращает своё
@@ -100,7 +102,7 @@ func TestWaylandLockKeysE2E(t *testing.T) {
 	name := w.gVirtualKeyboard.Load()
 	t.Logf("zwp_virtual_keyboard_manager_v1 объявлен: %v", name != 0)
 	if name == 0 {
-		if w.SetLockKeys(CapsLock) {
+		if w.SetLockKeys(keyboard.CapsLock) {
 			t.Error("SetLockKeys ответил true без менеджера")
 		}
 		return
@@ -109,7 +111,7 @@ func TestWaylandLockKeysE2E(t *testing.T) {
 		t.Skip("менеджер есть, но окно без фокуса клавиатуры: менять нечем")
 	}
 	t.Cleanup(func() { w.SetLockKeys(k) })
-	want := k ^ NumLock
+	want := k ^ keyboard.NumLock
 	got := w.SetLockKeys(want)
 	now, _ := w.LockKeys()
 	t.Logf("SetLockKeys(%v) = %v, после: %v", want, got, now)

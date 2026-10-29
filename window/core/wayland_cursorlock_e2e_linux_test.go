@@ -6,6 +6,8 @@ import (
 	"image/color"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // Живая проверка против настоящего композитора (Weston/WSLg и т. п. через
@@ -32,7 +34,7 @@ func TestWaylandCursorImageE2E(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		w.SetCursorImage(wlciImage(48, 48, color.NRGBA{R: uint8(60 * i), G: 100, B: 200, A: 220}, 3, 3))
 	}
-	w.SetCursor(wlCursorIBeam)
+	w.SetCursor(pointer.CursorIBeam)
 	w.SetCursorImage(wlciImage(48, 48, color.NRGBA{R: 1, A: 255}, 0, 0))
 	// Любая ошибка протокола закрывает окно (цикл событий ставит closed).
 	time.Sleep(300 * time.Millisecond)

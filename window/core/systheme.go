@@ -9,7 +9,7 @@ package core
 // «читаем реестр / портал» — с одними и теми же ошибками в каждой. Здесь
 // единственная.
 //
-// Файл без платформенного суффикса намеренно, как xftdpi.go: чтение реестра,
+// Файл без платформенного суффикса намеренно, как platform/native/xftdpi.go: чтение реестра,
 // D-Bus и сообщения окна живут в systheme_<ОС>.go, а разбор того, что они
 // прочитали, проверяется на любой машине и идёт в общем прогоне тестов.
 
@@ -18,6 +18,8 @@ import (
 	"math"
 	"strings"
 	"sync"
+
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 )
 
 // SystemTheme — тема оформления, выбранная в ОС.
@@ -360,7 +362,7 @@ const (
 // контраст, свои ключи GNOME, — и шина доставляет их все, раз правило
 // подписки одно на пространство. ok=false — сигнал не про цветовую схему, и
 // будить приложение он не должен.
-func systemThemeFromPortalSignal(msg *dbusMessage) (t SystemTheme, ok bool) {
+func systemThemeFromPortalSignal(msg *dbus.Message) (t SystemTheme, ok bool) {
 	if msg == nil || msg.Interface != portalSettingsIface || msg.Member != "SettingChanged" || len(msg.Body) < 3 {
 		return SystemThemeUnknown, false
 	}
@@ -385,7 +387,7 @@ func systemThemeFromPortalSignal(msg *dbusMessage) (t SystemTheme, ok bool) {
 // приложение.
 func systemThemeFromPortalValue(v any) SystemTheme {
 	for {
-		vr, ok := v.(dbusVariant)
+		vr, ok := v.(dbus.Variant)
 		if !ok {
 			break
 		}
@@ -394,7 +396,7 @@ func systemThemeFromPortalValue(v any) SystemTheme {
 	if v == nil {
 		return SystemThemeUnknown
 	}
-	n, err := dbusToUint(v)
+	n, err := dbus.ToUint(v)
 	if err != nil {
 		return SystemThemeUnknown
 	}
@@ -458,7 +460,7 @@ func accentFromColorization(v uint32) color.RGBA {
 // акцента отдаёт (-1, -1, -1)): это ok=false, а не чёрный цвет.
 func accentFromPortalValue(v any) (color.RGBA, bool) {
 	for {
-		vr, ok := v.(dbusVariant)
+		vr, ok := v.(dbus.Variant)
 		if !ok {
 			break
 		}
@@ -466,9 +468,9 @@ func accentFromPortalValue(v any) (color.RGBA, bool) {
 	}
 	var f []any
 	switch t := v.(type) {
-	case dbusStruct:
+	case dbus.Struct:
 		f = t.Fields
-	case *dbusStruct:
+	case *dbus.Struct:
 		if t != nil {
 			f = t.Fields
 		}
@@ -493,7 +495,7 @@ func accentFromPortalValue(v any) (color.RGBA, bool) {
 // matched=false — сигнал не про accent-color, и будить приложение он не должен.
 // matched=true, ok=false — пользователь сбросил акцент или значение
 // непонятно: последнее известное значение при этом остаётся.
-func accentFromPortalSignal(msg *dbusMessage) (c color.RGBA, ok, matched bool) {
+func accentFromPortalSignal(msg *dbus.Message) (c color.RGBA, ok, matched bool) {
 	if msg == nil || msg.Interface != portalSettingsIface || msg.Member != "SettingChanged" || len(msg.Body) < 3 {
 		return color.RGBA{}, false, false
 	}

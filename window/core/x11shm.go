@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // ─── MIT-SHM: блит через разделяемую память вместо PutImage по сокету ──────
@@ -217,11 +219,11 @@ func (w *X11Window) x11ShmBlit(img *image.RGBA, dirty image.Rectangle) bool {
 	for y := 0; y < dh; y++ {
 		srcOff := (dirty.Min.Y+y)*srcStride + dirty.Min.X*4
 		dstOff := ((dirty.Min.Y+y)*stride + dirty.Min.X) * 4
-		// RGBA → BGRA построчным 32-битным swap'ом (см. pixconv.go).
+		// RGBA → BGRA построчным 32-битным swap'ом (см. platform/native/pixconv.go).
 		if w.argb {
-			swapRBRowPremul(shm.data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
+			native.SwapRBRowPremul(shm.data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
 		} else {
-			swapRBRow(shm.data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
+			native.SwapRBRow(shm.data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
 		}
 	}
 

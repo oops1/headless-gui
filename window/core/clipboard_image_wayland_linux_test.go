@@ -130,13 +130,13 @@ func TestWlClipboard_ImageServedLazilyAsPNG(t *testing.T) {
 		t.Fatal(err)
 	}
 	own := c.w.clip.ownedImg
-	if own == nil || own.png != nil {
+	if own == nil || own.Encoded() {
 		t.Fatal("PNG закодирован до первого запроса")
 	}
 	src.SetNRGBA(0, 0, color.NRGBA{1, 1, 1, 255}) // правка оригинала после копирования
 
 	got := requestMime(t, c, "image/png")
-	if own.png == nil {
+	if !own.Encoded() {
 		t.Error("после запроса PNG не запомнен")
 	}
 	img, err := clipimage.DecodePNG(got)

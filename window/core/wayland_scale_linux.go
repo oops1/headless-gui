@@ -27,6 +27,8 @@ import (
 	"math"
 	"image"
 	"sync"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 const (
@@ -186,7 +188,7 @@ func (w *WaylandWindow) recomputeScale() {
 	if k <= 0 {
 		k = 1
 	}
-	k = clampScale(k)
+	k = native.ClampScale(k)
 	if k == w.scale.current || (w.scale.current == 0 && k == 1) {
 		w.scale.current = k
 		w.scale.mu.Unlock()

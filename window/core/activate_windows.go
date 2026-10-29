@@ -131,7 +131,7 @@ func (w *Win32Window) noteMinimized(minimized bool) {
 // Activate разворачивает окно (если оно свёрнуто или скрыто), поднимает над
 // остальными и передаёт ему фокус. true — окно стало активным; false — система
 // отказала в праве на передний план, окно развёрнуто, но осталось под другими
-// и мигает в панели задач. Реализует activateBackend.
+// и мигает в панели задач. Реализует native.ActivateBackend.
 //
 // Выполняется на вызывающей горутине: ShowWindow и SetForegroundWindow к чужому
 // потоку обращаются через очередь сообщений окна, а право на передний план
@@ -156,5 +156,5 @@ func (w *Win32Window) Activate() bool {
 }
 
 // ActivateWithToken на Win32 токен не нужен: право на передний план выдаёт
-// AllowForeground, а не строка. Реализует activateBackend.
+// AllowForeground, а не строка. Реализует native.ActivateBackend.
 func (w *Win32Window) ActivateWithToken(string) bool { return w.Activate() }

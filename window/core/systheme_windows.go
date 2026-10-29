@@ -15,6 +15,8 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 const (
@@ -83,8 +85,8 @@ func detectSystemAccent() (color.RGBA, bool) {
 // параметра к одной группе, так что отдельного сообщения для акцента нет, а
 // значение перечитывается из реестра. Подписка независима от подписки на тему
 // (watchSystemTheme): у каждой своя ячейка окна.
-func watchSystemAccent(native NativeWindow, emit func(color.RGBA, bool)) (stop func()) {
-	w, ok := native.(*Win32Window)
+func watchSystemAccent(nw native.NativeWindow, emit func(color.RGBA, bool)) (stop func()) {
+	w, ok := nw.(*Win32Window)
 	if !ok {
 		return nil
 	}
@@ -107,8 +109,8 @@ func watchSystemAccent(native NativeWindow, emit func(color.RGBA, bool)) (stop f
 // Своя подписка на реестр (RegNotifyChangeKeyValue) не нужна и была бы
 // хуже: ей потребовалась бы отдельная горутина и событие, тогда как окно и так
 // получает сообщение в своём цикле.
-func watchSystemTheme(native NativeWindow, emit func(SystemTheme)) (stop func()) {
-	w, ok := native.(*Win32Window)
+func watchSystemTheme(nw native.NativeWindow, emit func(SystemTheme)) (stop func()) {
+	w, ok := nw.(*Win32Window)
 	if !ok {
 		return nil
 	}

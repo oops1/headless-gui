@@ -13,8 +13,8 @@ import (
 // Кадр оверлея — картинка движка: цвет в ней УЖЕ умножен на альфу (весь back
 // холста premultiplied, см. core/raster/canvas.go), а прозрачные точки — нули.
 // Композитор ждёт от окна ARGB ровно это: перестановка R и B с обрезкой
-// канала альфой (swapRBRowPremul — то же, что у Wayland-попапа,
-// convRectBGRAPremul). Повторное умножение на альфу затемнило бы
+// канала альфой (native.SwapRBRowPremul — то же, что у Wayland-попапа,
+// native.ConvRectBGRAPremul). Повторное умножение на альфу затемнило бы
 // полупрозрачные края, а точка с цветом больше альфы дала бы пересвет.
 
 // x11CreateArgbPopupWindow создаёт override-redirect попап с глубиной 32 и ARGB

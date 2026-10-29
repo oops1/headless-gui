@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 )
 
 // Имя и путь самого портала общие с чтением темы (systheme.go):
@@ -67,7 +69,7 @@ type openBackend struct {
 // экспортированный дескриптор xdg-foreign), а пустая строка допустима и
 // означает «без родителя». Параметры пустые: "ask" и прочее решает система.
 func portalOpenURIArgs(uri string) (string, []any) {
-	return "ssa{sv}", []any{"", uri, map[string]dbusVariant{}}
+	return "ssa{sv}", []any{"", uri, map[string]dbus.Variant{}}
 }
 
 // showItemsArgs — сигнатура и аргументы FileManager1.ShowItems(uris,

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
 )
 
 // Клавиши-переключатели X11 на проводе: окно крутит настоящий цикл событий над
@@ -304,11 +306,11 @@ func TestX11LockKeysWire_ReadsIndicatorsByName(t *testing.T) {
 		t.Fatalf("всё выключено: %v, %v", got, ok)
 	}
 	s.setLocked(x11Mod2Mask)
-	if got, ok := w.LockKeys(); !ok || got != NumLock {
+	if got, ok := w.LockKeys(); !ok || got != keyboard.NumLock {
 		t.Errorf("Num: %v, %v", got, ok)
 	}
 	s.setLocked(x11LockMask | x11Mod2Mask)
-	if got, ok := w.LockKeys(); !ok || got != NumLock|CapsLock {
+	if got, ok := w.LockKeys(); !ok || got != keyboard.NumLock|keyboard.CapsLock {
 		t.Errorf("Num и Caps: %v, %v", got, ok)
 	}
 	// Для чтения хватает индикаторов: состояние модификаторов не запрашивалось.
@@ -326,7 +328,7 @@ func TestX11LockKeysWire_ScrollAndKanaIndicators(t *testing.T) {
 		s.indicators = append(lkDefaultIndicators(), lkIndicator{"Kana", x11Mod2Mask << 1})
 	})
 	s.setLocked(x11Mod2Mask << 1)
-	if got, ok := w.LockKeys(); !ok || got != KanaLock {
+	if got, ok := w.LockKeys(); !ok || got != keyboard.KanaLock {
 		t.Errorf("Kana: %v, %v", got, ok)
 	}
 }
@@ -389,11 +391,11 @@ func TestX11LockKeysWire_FallsBackToLockedMods(t *testing.T) {
 		s.indicators = []lkIndicator{{"Something Else", 1}} // Caps/Num/Scroll индикаторов нет
 	})
 	s.setLocked(x11LockMask)
-	if got, ok := w.LockKeys(); !ok || got != CapsLock {
+	if got, ok := w.LockKeys(); !ok || got != keyboard.CapsLock {
 		t.Errorf("Caps по Lock: %v, %v", got, ok)
 	}
 	s.setLocked(x11Mod2Mask)
-	if got, ok := w.LockKeys(); !ok || got != NumLock {
+	if got, ok := w.LockKeys(); !ok || got != keyboard.NumLock {
 		t.Errorf("Num по Mod2: %v, %v", got, ok)
 	}
 	// Раскладка с Num_Lock на Mod3 (код 77 переехал в третью группу).
@@ -402,7 +404,7 @@ func TestX11LockKeysWire_FallsBackToLockedMods(t *testing.T) {
 		s.modMap = []byte{50, 62, 66, 0, 37, 105, 64, 108, 0, 0, 77, 0, 133, 134, 203, 92}
 	})
 	s2.setLocked(1 << 5)
-	if got, ok := w2.LockKeys(); !ok || got != NumLock {
+	if got, ok := w2.LockKeys(); !ok || got != keyboard.NumLock {
 		t.Errorf("Num по Mod3: %v, %v", got, ok)
 	}
 	s2.setLocked(x11Mod2Mask) // Mod2 теперь ничей
@@ -420,7 +422,7 @@ func TestX11LockKeysWire_CoreProtocolFallback(t *testing.T) {
 		t.Errorf("пусто: %v, %v", got, ok)
 	}
 	s.setLocked(x11LockMask | x11Mod2Mask)
-	if got, ok := w.LockKeys(); !ok || got != CapsLock|NumLock {
+	if got, ok := w.LockKeys(); !ok || got != keyboard.CapsLock|keyboard.NumLock {
 		t.Errorf("Caps и Num: %v, %v", got, ok)
 	}
 	if n := len(s.requests(38, 255)); n != 2 {
@@ -430,13 +432,13 @@ func TestX11LockKeysWire_CoreProtocolFallback(t *testing.T) {
 		t.Errorf("QueryPointer спросил окно %d, ждал корневое 5", binary.LittleEndian.Uint32(q[4:8]))
 	}
 	// Менять нечем.
-	if w.SetLockKeys(ScrollLock) {
+	if w.SetLockKeys(keyboard.ScrollLock) {
 		t.Error("без XKB SetLockKeys выставил Scroll Lock")
 	}
 	if len(s.requests(lkXkbMajor, xkbMinorLatchLockState)) != 0 {
 		t.Error("без XKB ушёл LatchLockState")
 	}
-	if !w.SetLockKeys(CapsLock | NumLock) {
+	if !w.SetLockKeys(keyboard.CapsLock | keyboard.NumLock) {
 		t.Error("без XKB совпадающий набор признан неудачей")
 	}
 }
@@ -445,7 +447,7 @@ func TestX11LockKeysWire_CoreProtocolFallback(t *testing.T) {
 func TestX11LockKeysWire_OldXkbIsIgnored(t *testing.T) {
 	w, s := lkX11Window(t, func(s *lkXServer) { s.xkbOld = true })
 	s.setLocked(x11LockMask)
-	if got, ok := w.LockKeys(); !ok || got != CapsLock {
+	if got, ok := w.LockKeys(); !ok || got != keyboard.CapsLock {
 		t.Errorf("LockKeys = %v, %v", got, ok)
 	}
 	if len(s.requests(lkXkbMajor, xkbMinorGetIndicatorState)) != 0 {
@@ -457,7 +459,7 @@ func TestX11LockKeysWire_OldXkbIsIgnored(t *testing.T) {
 func TestX11LockKeysWire_SetNumLockLeavesCaps(t *testing.T) {
 	w, s := lkX11Window(t, nil)
 	s.setLocked(x11LockMask) // Caps включён, Num выключен
-	if !w.SetLockKeys(CapsLock | NumLock) {
+	if !w.SetLockKeys(keyboard.CapsLock | keyboard.NumLock) {
 		t.Fatal("SetLockKeys отказал")
 	}
 	reqs := s.requests(lkXkbMajor, xkbMinorLatchLockState)
@@ -470,7 +472,7 @@ func TestX11LockKeysWire_SetNumLockLeavesCaps(t *testing.T) {
 	if got := s.lockedNow(); got != x11LockMask|x11Mod2Mask {
 		t.Errorf("зафиксировано %#x, ждал Lock+Mod2", got)
 	}
-	if got, _ := w.LockKeys(); got != CapsLock|NumLock {
+	if got, _ := w.LockKeys(); got != keyboard.CapsLock|keyboard.NumLock {
 		t.Errorf("LockKeys после: %v", got)
 	}
 }
@@ -479,7 +481,7 @@ func TestX11LockKeysWire_SetNumLockLeavesCaps(t *testing.T) {
 func TestX11LockKeysWire_SetOffAndMany(t *testing.T) {
 	w, s := lkX11Window(t, nil)
 	s.setLocked(x11LockMask | x11Mod2Mask)
-	if !w.SetLockKeys(NumLock) {
+	if !w.SetLockKeys(keyboard.NumLock) {
 		t.Fatal("выключить Caps не вышло")
 	}
 	if got := s.lockedNow(); got != x11Mod2Mask {
@@ -490,7 +492,7 @@ func TestX11LockKeysWire_SetOffAndMany(t *testing.T) {
 		t.Errorf("affect=%#x locks=%#x, ждал выключение Lock", r[6], r[7])
 	}
 	// Сразу все: Caps включить, Num выключить.
-	if !w.SetLockKeys(CapsLock) {
+	if !w.SetLockKeys(keyboard.CapsLock) {
 		t.Fatal("поменять местами не вышло")
 	}
 	if got := s.lockedNow(); got != x11LockMask {
@@ -498,7 +500,7 @@ func TestX11LockKeysWire_SetOffAndMany(t *testing.T) {
 	}
 	// Уже как просили — запросов нет.
 	n := len(s.requests(lkXkbMajor, xkbMinorLatchLockState))
-	if !w.SetLockKeys(CapsLock) {
+	if !w.SetLockKeys(keyboard.CapsLock) {
 		t.Error("совпадающий набор признан неудачей")
 	}
 	if len(s.requests(lkXkbMajor, xkbMinorLatchLockState)) != n {
@@ -510,7 +512,7 @@ func TestX11LockKeysWire_SetOffAndMany(t *testing.T) {
 // приведено.
 func TestX11LockKeysWire_SetScrollWithoutModifier(t *testing.T) {
 	w, s := lkX11Window(t, nil)
-	if w.SetLockKeys(ScrollLock | NumLock) {
+	if w.SetLockKeys(keyboard.ScrollLock | keyboard.NumLock) {
 		t.Error("Scroll Lock без модификатора признан выставленным")
 	}
 	if got := s.lockedNow(); got != x11Mod2Mask {
@@ -524,13 +526,13 @@ func TestX11LockKeysWire_SetScrollOnMod3(t *testing.T) {
 		s.modMap = []byte{50, 62, 66, 0, 37, 105, 64, 108, 77, 0, 78, 0, 133, 134, 203, 92}
 		s.indicators = []lkIndicator{{"Scroll Lock", 1 << 5}}
 	})
-	if !w.SetLockKeys(ScrollLock) {
+	if !w.SetLockKeys(keyboard.ScrollLock) {
 		t.Fatal("SetLockKeys(Scroll) отказал")
 	}
 	if got := s.lockedNow(); got != 1<<5 {
 		t.Errorf("зафиксировано %#x, ждал Mod3", got)
 	}
-	if got, _ := w.LockKeys(); got != ScrollLock {
+	if got, _ := w.LockKeys(); got != keyboard.ScrollLock {
 		t.Errorf("LockKeys = %v", got)
 	}
 }
@@ -539,7 +541,7 @@ func TestX11LockKeysWire_SetScrollOnMod3(t *testing.T) {
 // сбит чужой ошибкой.
 func TestX11LockKeysWire_SetRejectedByServer(t *testing.T) {
 	w, s := lkX11Window(t, func(s *lkXServer) { s.latchErr = true })
-	if w.SetLockKeys(CapsLock) {
+	if w.SetLockKeys(keyboard.CapsLock) {
 		t.Error("ошибка сервера, а SetLockKeys ответил true")
 	}
 	s.idle(t) // ответы на уже полученное в пути; состояние меняем после них
@@ -556,7 +558,7 @@ func TestX11LockKeysWire_SetRejectedByServer(t *testing.T) {
 	s.latchErr = false
 	s.mu.Unlock()
 	s.setLocked(x11Mod2Mask)
-	if got, ok := w.LockKeys(); !ok || got != NumLock {
+	if got, ok := w.LockKeys(); !ok || got != keyboard.NumLock {
 		t.Errorf("после ошибки LockKeys = %v, %v", got, ok)
 	}
 }
@@ -568,7 +570,7 @@ func TestX11LockKeysWire_NoLoop(t *testing.T) {
 	if k, ok := w.LockKeys(); ok || k != 0 {
 		t.Errorf("LockKeys без цикла = %v, %v", k, ok)
 	}
-	if w.SetLockKeys(CapsLock) {
+	if w.SetLockKeys(keyboard.CapsLock) {
 		t.Error("SetLockKeys без цикла ответил true")
 	}
 	if time.Since(start) > 500*time.Millisecond {

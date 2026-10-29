@@ -19,7 +19,7 @@ package core
 //     (lockKeysSettler); первое modifiers нового фокуса и есть этот момент.
 //
 // Биты mods_locked — индексы модификаторов keymap'а; какой из них Caps, Num и
-// Scroll Lock, берётся из keymap композитора (lockkeys_xkb.go). Scroll Lock на
+// Scroll Lock, берётся из keymap композитора (platform/keyboard/lockkeys_xkb.go). Scroll Lock на
 // Wayland почти всегда не привязан к модификатору и остаётся невидимым.
 //
 // Менять состояние клавиатуры клиент Wayland в основном протоколе не вправе;
@@ -30,15 +30,17 @@ package core
 import (
 	"bytes"
 	"sync"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
 )
 
 // wlLockState — последнее состояние переключателей, присланное композитором.
 type wlLockState struct {
-	mu     sync.Mutex
-	mods    lkWlMods // где в mods_locked Caps, Num, Scroll
-	modsSet bool     // keymap композитора уже разобран; нет — штатные Lock и Mod2
-	locked  uint32   // последнее mods_locked
-	known   bool     // modifiers пришло для текущего фокуса
+	mu      sync.Mutex
+	mods    keyboard.WlLockMods // где в mods_locked Caps, Num, Scroll
+	modsSet bool                // keymap композитора уже разобран; нет — штатные Lock и Mod2
+	locked  uint32              // последнее mods_locked
+	known   bool                // modifiers пришло для текущего фокуса
 
 	// Остальное содержимое последнего modifiers: SetLockKeys отдаёт его
 	// виртуальной клавиатуре нетронутым, меняя только биты переключателей.
@@ -59,7 +61,7 @@ type wlLockState struct {
 // (nil-раскладка) — штатные Lock и Mod2. Копия сохраняется для виртуальной
 // клавиатуры (SetLockKeys).
 func (w *WaylandWindow) lkNoteKeymap(raw []byte) {
-	m := lkParseKeymapMods(string(raw))
+	m := keyboard.ParseKeymapLockMods(string(raw))
 	// Композитор присылает размер вместе с завершающим нулём; на всякий случай
 	// текст обрезается по первый NUL и завершается своим: композиторы разбирают
 	// файл как C-строку и без нуля читали бы за его концом.
@@ -107,7 +109,7 @@ func (s *wlLockState) wakeLocked() {
 
 // LockKeys — состояние переключателей по последнему wl_keyboard.modifiers
 // (lockKeysBackend).
-func (w *WaylandWindow) LockKeys() (LockKeys, bool) {
+func (w *WaylandWindow) LockKeys() (keyboard.LockKeys, bool) {
 	w.lk.mu.Lock()
 	defer w.lk.mu.Unlock()
 	if !w.lk.known {
@@ -115,9 +117,9 @@ func (w *WaylandWindow) LockKeys() (LockKeys, bool) {
 	}
 	mods := w.lk.mods
 	if !w.lk.modsSet {
-		mods = lkWlDefaultMods
+		mods = keyboard.WlDefaultLockMods
 	}
-	return lkFromWlLocked(w.lk.locked, mods), true
+	return keyboard.LocksFromWlLocked(w.lk.locked, mods), true
 }
 
 // LockKeysSettled — состояние для текущего фокуса получено (lockKeysSettler).

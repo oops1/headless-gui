@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Мониторы на Wayland: события wl_output / zxdg_output_v1 и полный опрос по
@@ -283,7 +285,7 @@ func TestWaylandMonitors_QueryTimeout(t *testing.T) {
 	old := wlQueryTimeout
 	wlQueryTimeout = 200 * time.Millisecond
 	defer func() { wlQueryTimeout = old }()
-	done := make(chan []Monitor, 1)
+	done := make(chan []native.Monitor, 1)
 	go func() { done <- w.queryMonitors() }()
 	select {
 	case list := <-done:

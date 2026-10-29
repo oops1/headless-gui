@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -40,7 +41,7 @@ func TestNotifyUrgencyAndIcon(t *testing.T) {
 // Без демона (CI, tty-сессия) — пропуск.
 func TestNotifyAgainstRealDaemon(t *testing.T) {
 	c := dialTestBus(t)
-	if !c.nameHasOwner(notifyBusName) {
+	if !c.NameHasOwner(notifyBusName) {
 		t.Skip("демон уведомлений не запущен")
 	}
 	n := &linuxNotifier{}
@@ -49,7 +50,7 @@ func TestNotifyAgainstRealDaemon(t *testing.T) {
 		t.Fatalf("showBalloon: %v", err)
 	}
 	// Возможности демона читаются и кэшируются без ошибок.
-	if _, err := dbusSession(); err != nil {
+	if _, err := dbus.Session(); err != nil {
 		t.Fatalf("сессионная шина: %v", err)
 	}
 }
@@ -71,16 +72,16 @@ func TestNotifyAgainstFakeDaemon(t *testing.T) {
 	}
 	calls := make(chan notifyCall, 4)
 
-	daemon.setCallHandler(func(msg *dbusMessage) *dbusReply {
+	daemon.SetCallHandler(func(msg *dbus.Message) *dbus.Reply {
 		if msg.Path != notifyObjPath || msg.Interface != notifyInterface {
 			return nil
 		}
 		switch msg.Member {
 		case "GetCapabilities":
-			return &dbusReply{Sig: "as", Body: []any{[]string{"actions", "body"}}}
+			return &dbus.Reply{Sig: "as", Body: []any{[]string{"actions", "body"}}}
 		case "Notify":
 			if len(msg.Body) != 8 {
-				return &dbusReply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "8 аргументов"}
+				return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "8 аргументов"}
 			}
 			c := notifyCall{}
 			c.app, _ = msg.Body[0].(string)
@@ -91,13 +92,13 @@ func TestNotifyAgainstFakeDaemon(t *testing.T) {
 			c.hints, _ = msg.Body[6].(map[string]any)
 			c.timeout, _ = msg.Body[7].(int32)
 			calls <- c
-			return &dbusReply{Sig: "u", Body: []any{uint32(4242)}}
+			return &dbus.Reply{Sig: "u", Body: []any{uint32(4242)}}
 		case "CloseNotification":
-			return &dbusReply{}
+			return &dbus.Reply{}
 		}
 		return nil
 	})
-	if err := daemon.requestName(notifyBusName, 0x4 /*DO_NOT_QUEUE*/); err != nil {
+	if err := daemon.RequestName(notifyBusName, 0x4 /*DO_NOT_QUEUE*/); err != nil {
 		t.Skipf("демон уведомлений уже запущен, подменять не будем: %v", err)
 	}
 
@@ -127,19 +128,19 @@ func TestNotifyAgainstFakeDaemon(t *testing.T) {
 	if len(got.actions) != 2 || got.actions[0] != "default" || got.actions[1] != widget.Tr("dlg.open") {
 		t.Errorf("actions = %v", got.actions)
 	}
-	if v, ok := got.hints["urgency"].(dbusVariant); !ok || v.Val != byte(2) {
+	if v, ok := got.hints["urgency"].(dbus.Variant); !ok || v.Val != byte(2) {
 		t.Errorf("urgency = %#v", got.hints["urgency"])
 	}
-	if v, ok := got.hints["desktop-entry"].(dbusVariant); !ok || v.Val != notifyAppName() {
+	if v, ok := got.hints["desktop-entry"].(dbus.Variant); !ok || v.Val != notifyAppName() {
 		t.Errorf("desktop-entry = %#v", got.hints["desktop-entry"])
 	}
 
 	// Чужое уведомление не должно дёргать наш колбэк.
-	if err := daemon.emit(notifyObjPath, notifyInterface, "ActionInvoked", "us", []any{uint32(1), "default"}); err != nil {
+	if err := daemon.Emit(notifyObjPath, notifyInterface, "ActionInvoked", "us", []any{uint32(1), "default"}); err != nil {
 		t.Fatalf("emit чужого: %v", err)
 	}
 	// Наше — должно.
-	if err := daemon.emit(notifyObjPath, notifyInterface, "ActionInvoked", "us", []any{uint32(4242), "default"}); err != nil {
+	if err := daemon.Emit(notifyObjPath, notifyInterface, "ActionInvoked", "us", []any{uint32(4242), "default"}); err != nil {
 		t.Fatalf("emit нашего: %v", err)
 	}
 	select {
@@ -154,11 +155,11 @@ func TestNotifyAgainstFakeDaemon(t *testing.T) {
 	}
 
 	// После NotificationClosed id забывается и повторный ActionInvoked молчит.
-	if err := daemon.emit(notifyObjPath, notifyInterface, "NotificationClosed", "uu", []any{uint32(4242), uint32(2)}); err != nil {
+	if err := daemon.Emit(notifyObjPath, notifyInterface, "NotificationClosed", "uu", []any{uint32(4242), uint32(2)}); err != nil {
 		t.Fatalf("emit closed: %v", err)
 	}
 	time.Sleep(200 * time.Millisecond)
-	if err := daemon.emit(notifyObjPath, notifyInterface, "ActionInvoked", "us", []any{uint32(4242), "default"}); err != nil {
+	if err := daemon.Emit(notifyObjPath, notifyInterface, "ActionInvoked", "us", []any{uint32(4242), "default"}); err != nil {
 		t.Fatalf("emit после закрытия: %v", err)
 	}
 	select {

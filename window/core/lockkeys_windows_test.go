@@ -11,6 +11,9 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Клавиши-переключатели на Win32: раскладка INPUT, выбор клавиш, отсев
@@ -73,19 +76,19 @@ func TestLockKeysWin32_InputLayout(t *testing.T) {
 func TestLockKeysWin32_BuildInputs(t *testing.T) {
 	scan := func(vk int) (uint16, bool) {
 		switch vk {
-		case VK_NUMLOCK:
+		case native.VK_NUMLOCK:
 			return 0x45, true
-		case VK_CAPITAL:
+		case native.VK_CAPITAL:
 			return 0x3A, false
 		}
 		return 0, false
 	}
-	in := lkBuildInputs([]int{VK_CAPITAL, VK_NUMLOCK}, scan)
+	in := lkBuildInputs([]int{native.VK_CAPITAL, native.VK_NUMLOCK}, scan)
 	want := []lkInput{
-		{typ: 1, ki: lkKeybdInput{vk: VK_CAPITAL, scan: 0x3A, extra: lkExtraInfo}},
-		{typ: 1, ki: lkKeybdInput{vk: VK_CAPITAL, scan: 0x3A, flags: keyeventfKeyUp, extra: lkExtraInfo}},
-		{typ: 1, ki: lkKeybdInput{vk: VK_NUMLOCK, scan: 0x45, flags: keyeventfExtendedKey, extra: lkExtraInfo}},
-		{typ: 1, ki: lkKeybdInput{vk: VK_NUMLOCK, scan: 0x45, flags: keyeventfExtendedKey | keyeventfKeyUp, extra: lkExtraInfo}},
+		{typ: 1, ki: lkKeybdInput{vk: native.VK_CAPITAL, scan: 0x3A, extra: lkExtraInfo}},
+		{typ: 1, ki: lkKeybdInput{vk: native.VK_CAPITAL, scan: 0x3A, flags: keyeventfKeyUp, extra: lkExtraInfo}},
+		{typ: 1, ki: lkKeybdInput{vk: native.VK_NUMLOCK, scan: 0x45, flags: keyeventfExtendedKey, extra: lkExtraInfo}},
+		{typ: 1, ki: lkKeybdInput{vk: native.VK_NUMLOCK, scan: 0x45, flags: keyeventfExtendedKey | keyeventfKeyUp, extra: lkExtraInfo}},
 	}
 	if !reflect.DeepEqual(in, want) {
 		t.Errorf("события:\n  %+v\nждал:\n  %+v", in, want)
@@ -98,29 +101,29 @@ func TestLockKeysWin32_BuildInputs(t *testing.T) {
 // Num Lock — расширенная клавиша: с обычным скан-кодом система приняла бы её
 // за Pause. Проверяем на настоящей таблице раскладки.
 func TestLockKeysWin32_NumLockIsExtended(t *testing.T) {
-	scan, ext := lkScanCode(VK_NUMLOCK)
+	scan, ext := lkScanCode(native.VK_NUMLOCK)
 	if scan == 0 {
 		t.Skip("система не знает скан-код Num Lock (нет клавиатуры?)")
 	}
 	if !ext {
 		t.Errorf("Num Lock без признака расширенной клавиши: скан %#x", scan)
 	}
-	if _, ext := lkScanCode(VK_CAPITAL); ext {
+	if _, ext := lkScanCode(native.VK_CAPITAL); ext {
 		t.Error("Caps Lock признан расширенной клавишей")
 	}
 }
 
 // Окно на потоке теста: чтение прямое, значения берутся из GetKeyState.
 func TestLockKeysWin32_ReadsToggleState(t *testing.T) {
-	f := &lkFakeKeys{state: map[int]bool{VK_CAPITAL: true, VK_SCROLL: true}, accept: -1}
+	f := &lkFakeKeys{state: map[int]bool{native.VK_CAPITAL: true, native.VK_SCROLL: true}, accept: -1}
 	lkInstallFake(t, f)
 	w := newFsWindow(t)
 	got, ok := w.LockKeys()
-	if !ok || got != CapsLock|ScrollLock {
+	if !ok || got != keyboard.CapsLock|keyboard.ScrollLock {
 		t.Errorf("LockKeys = %v, %v; ждал caps|scroll", got, ok)
 	}
-	f.state[VK_NUMLOCK], f.state[VK_CAPITAL] = true, false
-	if got, _ := w.LockKeys(); got != NumLock|ScrollLock {
+	f.state[native.VK_NUMLOCK], f.state[native.VK_CAPITAL] = true, false
+	if got, _ := w.LockKeys(); got != keyboard.NumLock|keyboard.ScrollLock {
 		t.Errorf("после смены LockKeys = %v", got)
 	}
 	var none Win32Window
@@ -135,7 +138,7 @@ func TestLockKeysWin32_ReadsOnUIThread(t *testing.T) {
 	var readOn []uint32
 	lkInstallFake(t, f)
 	lkKeyState = func(vk int) bool {
-		if vk == VK_NUMLOCK {
+		if vk == native.VK_NUMLOCK {
 			readOn = append(readOn, procCurrentThreadID())
 			return true
 		}
@@ -145,7 +148,7 @@ func TestLockKeysWin32_ReadsOnUIThread(t *testing.T) {
 	uiThread := procCurrentThreadID()
 
 	type res struct {
-		k  LockKeys
+		k  keyboard.LockKeys
 		ok bool
 	}
 	done := make(chan res, 1)
@@ -158,7 +161,7 @@ func TestLockKeysWin32_ReadsOnUIThread(t *testing.T) {
 		fsPumpMessages()
 		select {
 		case r := <-done:
-			if !r.ok || r.k != NumLock {
+			if !r.ok || r.k != keyboard.NumLock {
 				t.Errorf("LockKeys = %v, %v", r.k, r.ok)
 			}
 			if len(readOn) != 1 || readOn[0] != uiThread {
@@ -181,21 +184,21 @@ func procCurrentThreadID() uint32 {
 // Поток окна не крутит цикл сообщений: вопрос не виснет, а по сроку читается
 // прямым вызовом.
 func TestLockKeysWin32_StuckUIThreadFallsBack(t *testing.T) {
-	f := &lkFakeKeys{state: map[int]bool{VK_SCROLL: true}, accept: -1}
+	f := &lkFakeKeys{state: map[int]bool{native.VK_SCROLL: true}, accept: -1}
 	lkInstallFake(t, f)
 	old := lkUITimeout
 	lkUITimeout = 30 * time.Millisecond
 	t.Cleanup(func() { lkUITimeout = old })
 	w := newFsWindow(t)
 
-	done := make(chan LockKeys, 1)
+	done := make(chan keyboard.LockKeys, 1)
 	go func() {
 		k, _ := w.LockKeys()
 		done <- k
 	}()
 	select {
 	case k := <-done:
-		if k != ScrollLock {
+		if k != keyboard.ScrollLock {
 			t.Errorf("по сроку LockKeys = %v", k)
 		}
 	case <-time.After(3 * time.Second):
@@ -205,11 +208,11 @@ func TestLockKeysWin32_StuckUIThreadFallsBack(t *testing.T) {
 
 // Нажимаются только отличающиеся клавиши; остальные состояния не трогаются.
 func TestLockKeysWin32_SetSendsOnlyDifferences(t *testing.T) {
-	f := &lkFakeKeys{state: map[int]bool{VK_CAPITAL: true}, accept: -1}
+	f := &lkFakeKeys{state: map[int]bool{native.VK_CAPITAL: true}, accept: -1}
 	lkInstallFake(t, f)
 	w := newFsWindow(t)
 
-	if !w.SetLockKeys(CapsLock | NumLock) {
+	if !w.SetLockKeys(keyboard.CapsLock | keyboard.NumLock) {
 		t.Fatal("SetLockKeys отказал")
 	}
 	var vks []int
@@ -221,13 +224,13 @@ func TestLockKeysWin32_SetSendsOnlyDifferences(t *testing.T) {
 			vks = append(vks, int(in.ki.vk))
 		}
 	}
-	if !reflect.DeepEqual(vks, []int{VK_NUMLOCK}) || len(f.sent) != 2 {
+	if !reflect.DeepEqual(vks, []int{native.VK_NUMLOCK}) || len(f.sent) != 2 {
 		t.Errorf("нажато %v (%d событий), ждал только Num Lock", vks, len(f.sent))
 	}
 
 	// Уже как просили: ничего не отправляется, ответ — успех.
 	f.sent = nil
-	if !w.SetLockKeys(CapsLock) || len(f.sent) != 0 {
+	if !w.SetLockKeys(keyboard.CapsLock) || len(f.sent) != 0 {
 		t.Errorf("совпадающий набор: отправлено %d событий", len(f.sent))
 	}
 
@@ -249,7 +252,7 @@ func TestLockKeysWin32_KanaOnlyOnJapaneseKeyboard(t *testing.T) {
 	lkInstallFake(t, f)
 	w := newFsWindow(t)
 
-	if w.SetLockKeys(KanaLock | NumLock) {
+	if w.SetLockKeys(keyboard.KanaLock | keyboard.NumLock) {
 		t.Error("Kana на обычной клавиатуре признана выставленной")
 	}
 	var vks []int
@@ -258,15 +261,15 @@ func TestLockKeysWin32_KanaOnlyOnJapaneseKeyboard(t *testing.T) {
 			vks = append(vks, int(in.ki.vk))
 		}
 	}
-	if !reflect.DeepEqual(vks, []int{VK_NUMLOCK}) {
+	if !reflect.DeepEqual(vks, []int{native.VK_NUMLOCK}) {
 		t.Errorf("нажато %v, ждал только Num Lock", vks)
 	}
 
 	f.sent, f.japanese = nil, true
-	if !w.SetLockKeys(KanaLock) {
+	if !w.SetLockKeys(keyboard.KanaLock) {
 		t.Error("на японской клавиатуре Kana не выставилась")
 	}
-	if len(f.sent) != 2 || f.sent[0].ki.vk != VK_KANA {
+	if len(f.sent) != 2 || f.sent[0].ki.vk != native.VK_KANA {
 		t.Errorf("отправлено %+v", f.sent)
 	}
 }
@@ -276,14 +279,14 @@ func TestLockKeysWin32_KanaOnlyOnJapaneseKeyboard(t *testing.T) {
 // Чужие (настоящие или с другой меткой) доходят как всегда.
 func TestLockKeysWin32_SyntheticKeysNotDelivered(t *testing.T) {
 	w := fakeWin32(t)
-	var got []rawKey
-	w.SetOnRawKey(func(k rawKey) { got = append(got, k) })
+	var got []keyboard.RawKey
+	w.SetOnRawKey(func(k keyboard.RawKey) { got = append(got, k) })
 	extra := uintptr(0)
 	old := lkMessageExtra
 	lkMessageExtra = func() uintptr { return extra }
 	t.Cleanup(func() { lkMessageExtra = old })
 
-	for _, vk := range []uintptr{VK_CAPITAL, VK_NUMLOCK, VK_SCROLL, VK_KANA} {
+	for _, vk := range []uintptr{native.VK_CAPITAL, native.VK_NUMLOCK, native.VK_SCROLL, native.VK_KANA} {
 		extra = lkExtraInfo
 		wndProc(fakeHwnd, wmKeydown, vk, 0x003A0001)
 		wndProc(fakeHwnd, wmKeyup, vk, 0xC03A0001)
@@ -297,18 +300,18 @@ func TestLockKeysWin32_SyntheticKeysNotDelivered(t *testing.T) {
 	// Настоящее нажатие Caps Lock (метки нет) и чужая подстановка с другой
 	// меткой — как обычно.
 	extra = 0
-	wndProc(fakeHwnd, wmKeydown, VK_CAPITAL, 0x003A0001)
-	wndProc(fakeHwnd, wmKeyup, VK_CAPITAL, 0xC03A0001)
+	wndProc(fakeHwnd, wmKeydown, native.VK_CAPITAL, 0x003A0001)
+	wndProc(fakeHwnd, wmKeyup, native.VK_CAPITAL, 0xC03A0001)
 	extra = 0x1234
-	wndProc(fakeHwnd, wmKeydown, VK_NUMLOCK, 0x01450001)
+	wndProc(fakeHwnd, wmKeydown, native.VK_NUMLOCK, 0x01450001)
 	// Метка на обычной клавише — не наша забота: отсев касается только переключателей.
 	extra = lkExtraInfo
-	wndProc(fakeHwnd, wmKeydown, VK_A, 0x001E0001)
+	wndProc(fakeHwnd, wmKeydown, native.VK_A, 0x001E0001)
 	if len(got) != 4 {
 		t.Fatalf("дошло %d событий, ждал 4: %+v", len(got), got)
 	}
-	if got[0].VK != VK_CAPITAL || !got[0].Pressed || got[1].VK != VK_CAPITAL || got[1].Pressed ||
-		got[2].VK != VK_NUMLOCK || got[3].VK != VK_A {
+	if got[0].VK != native.VK_CAPITAL || !got[0].Pressed || got[1].VK != native.VK_CAPITAL || got[1].Pressed ||
+		got[2].VK != native.VK_NUMLOCK || got[3].VK != native.VK_A {
 		t.Errorf("не те события: %+v", got)
 	}
 }
@@ -323,17 +326,17 @@ func TestLockKeysWin32_MessageExtraInfoRoundTrip(t *testing.T) {
 	if got := lkMessageExtra(); got != lkExtraInfo {
 		t.Errorf("GetMessageExtraInfo = %#x, ждал %#x", got, uintptr(lkExtraInfo))
 	}
-	if !lkSyntheticKey(VK_CAPITAL) || lkSyntheticKey(VK_A) {
+	if !lkSyntheticKey(native.VK_CAPITAL) || lkSyntheticKey(native.VK_A) {
 		t.Error("lkSyntheticKey не различает клавиши при метке в очереди")
 	}
 }
 
 // sysToggleState — состояние переключателей по GetKeyboardState: другой путь к
 // тому же, что и GetKeyState, но через массив из 256 байт.
-func sysToggleState() LockKeys {
+func sysToggleState() keyboard.LockKeys {
 	var keys [256]byte
 	procGetKeyboardState.Call(uintptr(unsafe.Pointer(&keys[0])))
-	return lkFromToggles(func(vk int) bool { return keys[vk]&1 != 0 })
+	return keyboard.LocksFromToggles(func(vk int) bool { return keys[vk]&1 != 0 })
 }
 
 // Живое сравнение с тем, что говорит сама система.
@@ -352,7 +355,7 @@ func TestLockKeysWin32_LiveMatchesSystem(t *testing.T) {
 // lkLiveToggle переключает клавишу через SetLockKeys и убеждается, что система
 // это увидела; исходное состояние возвращается в Cleanup, что бы ни случилось
 // (пользователю нельзя оставить включённый Caps Lock).
-func lkLiveToggle(t *testing.T, w *Win32Window, flag LockKeys) {
+func lkLiveToggle(t *testing.T, w *Win32Window, flag keyboard.LockKeys) {
 	t.Helper()
 	orig, _ := w.LockKeys()
 	t.Cleanup(func() {
@@ -377,7 +380,7 @@ func lkLiveToggle(t *testing.T, w *Win32Window, flag LockKeys) {
 
 // lkWaitState ждёт, пока флаг примет значение on: SendInput применяется
 // асинхронно.
-func lkWaitState(t *testing.T, w *Win32Window, flag LockKeys, on bool) {
+func lkWaitState(t *testing.T, w *Win32Window, flag keyboard.LockKeys, on bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -396,7 +399,7 @@ func lkWaitState(t *testing.T, w *Win32Window, flag LockKeys, on bool) {
 // состояние возвращается в Cleanup.
 func TestLockKeysWin32_LiveSetScrollLock(t *testing.T) {
 	w := newFsWindow(t)
-	lkLiveToggle(t, w, ScrollLock)
+	lkLiveToggle(t, w, keyboard.ScrollLock)
 }
 
 // Caps Lock и Num Lock мигают индикаторами клавиатуры пользователя, поэтому
@@ -408,8 +411,8 @@ func TestLockKeysWin32_LiveSetCapsNum(t *testing.T) {
 		t.Skip("включается HEADLESS_GUI_LOCKKEYS_LIVE=1: на миг переключает Caps Lock и Num Lock пользователя")
 	}
 	w := newFsWindow(t)
-	lkLiveToggle(t, w, NumLock)
-	lkLiveToggle(t, w, CapsLock)
+	lkLiveToggle(t, w, keyboard.NumLock)
+	lkLiveToggle(t, w, keyboard.CapsLock)
 }
 
 // Сквозная проверка с окном на переднем плане: настоящий SendInput доходит до
@@ -424,8 +427,8 @@ func TestLockKeysWin32_LiveForegroundFilter(t *testing.T) {
 		t.Skip("включается HEADLESS_GUI_LOCKKEYS_LIVE=1: на миг переключает Scroll Lock пользователя")
 	}
 	w := newFsWindow(t)
-	var got []rawKey
-	w.SetOnRawKey(func(k rawKey) { got = append(got, k) })
+	var got []keyboard.RawKey
+	w.SetOnRawKey(func(k keyboard.RawKey) { got = append(got, k) })
 	w.Activate()
 	fsPumpMessages()
 	if fg, _, _ := procGetForegroundWindow.Call(); fg != uintptr(w.hwnd) {
@@ -434,14 +437,14 @@ func TestLockKeysWin32_LiveForegroundFilter(t *testing.T) {
 
 	orig, _ := w.LockKeys()
 	t.Cleanup(func() {
-		if cur, _ := w.LockKeys(); cur&ScrollLock != orig&ScrollLock {
-			w.SetLockKeys(cur ^ ScrollLock)
-			lkWaitState(t, w, ScrollLock, orig&ScrollLock != 0)
+		if cur, _ := w.LockKeys(); cur&keyboard.ScrollLock != orig&keyboard.ScrollLock {
+			w.SetLockKeys(cur ^ keyboard.ScrollLock)
+			lkWaitState(t, w, keyboard.ScrollLock, orig&keyboard.ScrollLock != 0)
 		}
 	})
 
 	// Контроль: две пары нажатий без метки (переключение туда и обратно).
-	plain := lkBuildInputs([]int{VK_SCROLL, VK_SCROLL}, lkScanCode)
+	plain := lkBuildInputs([]int{native.VK_SCROLL, native.VK_SCROLL}, lkScanCode)
 	for i := range plain {
 		plain[i].ki.extra = 0
 	}
@@ -459,11 +462,11 @@ func TestLockKeysWin32_LiveForegroundFilter(t *testing.T) {
 
 	// Свои нажатия: состояние меняется, приложению ничего не приходит.
 	got = nil
-	want := orig ^ ScrollLock
+	want := orig ^ keyboard.ScrollLock
 	if !w.SetLockKeys(want) {
 		t.Fatal("SetLockKeys отказал")
 	}
-	lkWaitState(t, w, ScrollLock, want&ScrollLock != 0)
+	lkWaitState(t, w, keyboard.ScrollLock, want&keyboard.ScrollLock != 0)
 	for end := time.Now().Add(200 * time.Millisecond); time.Now().Before(end); {
 		fsPumpMessages()
 		time.Sleep(5 * time.Millisecond)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -34,13 +35,13 @@ func newATSPILiveBridge(t *testing.T, root widget.Widget) (*atspiBridge, *engine
 }
 
 // dialAT открывает клиента шины доступности.
-func dialAT(t *testing.T) *dbusConn {
+func dialAT(t *testing.T) *dbus.Conn {
 	t.Helper()
 	addr, err := atspiBusAddress()
 	if err != nil {
 		t.Skipf("нет шины доступности: %v", err)
 	}
-	cl, err := dbusDial(addr)
+	cl, err := dbus.Dial(addr)
 	if err != nil {
 		t.Fatalf("клиент шины доступности: %v", err)
 	}
@@ -58,9 +59,9 @@ func TestATSPILive_NodeActionsOnWire(t *testing.T) {
 	b, _ := newATSPILiveBridge(t, root)
 	cl := dialAT(t)
 
-	call := func(path, iface, member, sig string, args ...any) *dbusMessage {
+	call := func(path, iface, member, sig string, args ...any) *dbus.Message {
 		t.Helper()
-		reply, err := cl.call(b.appName, path, iface, member, sig, args)
+		reply, err := cl.Call(b.appName, path, iface, member, sig, args)
 		if err != nil {
 			t.Fatalf("%s %s.%s: %v", path, iface, member, err)
 		}
@@ -76,7 +77,7 @@ func TestATSPILive_NodeActionsOnWire(t *testing.T) {
 	if !hasAction {
 		t.Fatal("узел владельца не объявил интерфейс Action")
 	}
-	if n := call(right, ifaceProps, "Get", "ss", ifaceAction, "NActions").Body[0].(dbusVariant).Val; n != int32(1) {
+	if n := call(right, ifaceProps, "Get", "ss", ifaceAction, "NActions").Body[0].(dbus.Variant).Val; n != int32(1) {
 		t.Errorf("NActions = %v", n)
 	}
 
@@ -116,7 +117,7 @@ func TestATSPILive_RadioCheckedStateAndEvent(t *testing.T) {
 		on           int32
 	}
 	events := make(chan ev, 32)
-	cl.onSignal(func(msg *dbusMessage) {
+	cl.OnSignal(func(msg *dbus.Message) {
 		if msg.Interface != ifaceEventObject || msg.Member != "StateChanged" || msg.Sender != b.appName {
 			return
 		}
@@ -128,13 +129,13 @@ func TestATSPILive_RadioCheckedStateAndEvent(t *testing.T) {
 		default:
 		}
 	})
-	if err := cl.addMatch("type='signal',interface='" + ifaceEventObject + "'"); err != nil {
+	if err := cl.AddMatch("type='signal',interface='" + ifaceEventObject + "'"); err != nil {
 		t.Fatalf("AddMatch: %v", err)
 	}
 
 	state := func(name string) []uint32 {
 		t.Helper()
-		reply, err := cl.call(b.appName, atspiPath(idOfNamed(t, b, name)), ifaceAccessible, "GetState", "", nil)
+		reply, err := cl.Call(b.appName, atspiPath(idOfNamed(t, b, name)), ifaceAccessible, "GetState", "", nil)
 		if err != nil {
 			t.Fatalf("GetState %q: %v", name, err)
 		}

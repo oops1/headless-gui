@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Значок окна на Wayland (xdg-toplevel-icon-v1). Компоновщик подменён парой
@@ -78,8 +80,8 @@ func iconPicture(side int) *image.NRGBA {
 // Без глобала — прежняя ошибка, и в сокет ничего не уходит.
 func TestWayland_SetIcon_NoGlobalUnsupported(t *testing.T) {
 	c := newWlTestWindow(t)
-	err := c.w.setIcon([]image.Image{iconPicture(16)})
-	if !errors.Is(err, ErrIconUnsupported) {
+	err := c.w.SetIcon([]image.Image{iconPicture(16)})
+	if !errors.Is(err, native.ErrIconUnsupported) {
 		t.Fatalf("ждал ErrIconUnsupported, получил %v", err)
 	}
 	c.peer.SetReadDeadline(time.Now().Add(80 * time.Millisecond))
@@ -95,7 +97,7 @@ func TestWayland_SetIcon_Wire(t *testing.T) {
 	c := newWlIconWindow(t)
 	wide := image.NewNRGBA(image.Rect(0, 0, 20, 10)) // неквадратный: вписывается в 20×20
 	wide.SetNRGBA(0, 0, color.NRGBA{255, 255, 255, 255})
-	if err := c.w.setIcon([]image.Image{iconPicture(16), wide}); err != nil {
+	if err := c.w.SetIcon([]image.Image{iconPicture(16), wide}); err != nil {
 		t.Fatal(err)
 	}
 	raw, fds := readWithFDs(t, c)
@@ -224,7 +226,7 @@ func absDiff(a, b byte) byte {
 // Пустой список снимает значок: set_icon с пустым объектом, без пула.
 func TestWayland_SetIcon_EmptyClears(t *testing.T) {
 	c := newWlIconWindow(t)
-	if err := c.w.setIcon(nil); err != nil {
+	if err := c.w.SetIcon(nil); err != nil {
 		t.Fatal(err)
 	}
 	raw, fds := readWithFDs(t, c)
@@ -243,7 +245,7 @@ func TestWayland_SetIcon_EmptyClears(t *testing.T) {
 // Смена значка освобождает буферы и пул прежнего; менеджер привязывается один раз.
 func TestWayland_SetIcon_ReplaceReleasesOld(t *testing.T) {
 	c := newWlIconWindow(t)
-	if err := c.w.setIcon([]image.Image{iconPicture(16)}); err != nil {
+	if err := c.w.SetIcon([]image.Image{iconPicture(16)}); err != nil {
 		t.Fatal(err)
 	}
 	raw, fds := readWithFDs(t, c)
@@ -259,7 +261,7 @@ func TestWayland_SetIcon_ReplaceReleasesOld(t *testing.T) {
 		}
 	}
 
-	if err := c.w.setIcon([]image.Image{iconPicture(24)}); err != nil {
+	if err := c.w.SetIcon([]image.Image{iconPicture(24)}); err != nil {
 		t.Fatal(err)
 	}
 	raw, fds = readWithFDs(t, c)
@@ -283,7 +285,7 @@ func TestWayland_SetIcon_PendingBeforeCreate(t *testing.T) {
 	c := newWlIconWindow(t)
 	toplevel := c.w.toplevelID
 	c.w.toplevelID = 0
-	if err := c.w.setIcon([]image.Image{iconPicture(16)}); err != nil {
+	if err := c.w.SetIcon([]image.Image{iconPicture(16)}); err != nil {
 		t.Fatalf("до Create ждал nil, получил %v", err)
 	}
 	c.peer.SetReadDeadline(time.Now().Add(80 * time.Millisecond))
@@ -319,7 +321,7 @@ func TestWayland_SetIcon_PendingWithoutGlobalIsDropped(t *testing.T) {
 	c := newWlTestWindow(t)
 	toplevel := c.w.toplevelID
 	c.w.toplevelID = 0
-	if err := c.w.setIcon([]image.Image{iconPicture(16)}); err != nil {
+	if err := c.w.SetIcon([]image.Image{iconPicture(16)}); err != nil {
 		t.Fatal(err)
 	}
 	c.w.toplevelID = toplevel

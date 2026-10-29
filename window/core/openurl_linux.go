@@ -2,7 +2,7 @@
 
 // openurl_linux.go — открытие ссылок и файлов на Linux. Основной путь —
 // портал xdg-desktop-portal (org.freedesktop.portal.OpenURI) через собственный
-// клиент D-Bus (dbus_conn_linux.go): так работают и обычная сессия, и
+// клиент D-Bus (platform/dbus/dbus_conn_linux.go): так работают и обычная сессия, и
 // песочницы, а внешних утилит не нужно. Показ файла — FileManager1.ShowItems.
 // xdg-open — запасной путь, когда портала на шине нет, подробности в
 // openurl_portal.go.
@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 )
 
 // openCallTimeout — сколько ждём ответ портала или файлового менеджера.
@@ -27,12 +29,12 @@ const openCallTimeout = 10 * time.Second
 func linuxOpenBackend() openBackend {
 	return openBackend{
 		call: func(dest, path, iface, member, sig string, args []any) error {
-			c, err := dbusSession()
+			c, err := dbus.Session()
 			if err != nil {
 				// Не просто err: dbusServiceAbsent должен узнать «шины нет».
 				return fmt.Errorf("%w: %v", errOpenNoBus, err)
 			}
-			_, err = c.callTimeout(dest, path, iface, member, sig, args, openCallTimeout)
+			_, err = c.CallTimeout(dest, path, iface, member, sig, args, openCallTimeout)
 			return err
 		},
 		lookPath: exec.LookPath,

@@ -16,6 +16,7 @@ import (
 	"image"
 
 	"github.com/oops1/headless-gui/v3/internal/clipimage"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -34,7 +35,7 @@ func (c *wlClipboard) SetImage(img image.Image) error {
 	if c == nil || c.w == nil || c.w.dataDeviceID == 0 || c.w.dataDevMgrID == 0 || c.w.inputSerial.Load() == 0 {
 		return widget.ErrClipboardImageUnsupported
 	}
-	c.setSelection("", "", nil, false, newOwnedImage(img), nil)
+	c.setSelection("", "", nil, false, native.NewOwnedImage(img), nil)
 	return nil
 }
 
@@ -57,7 +58,7 @@ func (c *wlClipboard) GetImage() (image.Image, bool) {
 	if offer == 0 || mime == "" {
 		return nil, false
 	}
-	data := c.receiveIdle(offer, mime, clipboardReadTimeout, maxClipboardImageBytes)
+	data := c.receiveIdle(offer, mime, clipboardReadTimeout, native.MaxClipboardImageBytes)
 	if len(data) == 0 {
 		return nil, false
 	}

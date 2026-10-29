@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Window.SetSize (setsize.go): общий слой над бэкендом. Платформенные
@@ -48,7 +49,7 @@ func szBringUp(t *testing.T, scale string, f *szFake, setup func(win *Window)) *
 	t.Helper()
 	t.Setenv("HEADLESS_GUI_SCALE", scale)
 	old := newNativeWindow
-	newNativeWindow = func() NativeWindow { return f }
+	newNativeWindow = func() native.NativeWindow { return f }
 	t.Cleanup(func() { newNativeWindow = old })
 
 	win := New(syncEngine{engine.New(800, 600, 30)}, "setsize")

@@ -20,11 +20,12 @@ package core
 // Формат ARGB32 (глубина 32, прямой, альфа в старших 8 битах) сервер называет
 // сам: его идентификатор берут из QueryPictFormats. Нет RENDER, нет такого
 // формата или версия ниже 0.5 — курсор строится 1-битным по порогу альфы
-// (cursorMonoPoints), как «рука» и невидимый курсор в x11cursorbitmap.go.
+// (pointer.CursorMonoPoints), как «рука» и невидимый курсор в x11cursorbitmap.go.
 
 import (
 	"encoding/binary"
 
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -212,7 +213,7 @@ func x11RenderCursorRequests(ids x11RenderCursorIDs, major byte, argb uint32, ci
 		x11CreatePixmapDepthReq(ids.pixmap, ids.drawable, 32, ci.W, ci.H),
 		x11CreateGCReq(ids.gc, ids.pixmap, 0),
 	}
-	reqs = append(reqs, x11PutImageRequests(ids.pixmap, ids.gc, ci.W, ci.H, 32, cursorPremulBGRA(ci))...)
+	reqs = append(reqs, x11PutImageRequests(ids.pixmap, ids.gc, ci.W, ci.H, 32, pointer.CursorPremulBGRA(ci))...)
 	reqs = append(reqs,
 		x11RenderCreatePictureRequest(major, ids.picture, ids.pixmap, argb),
 		x11RenderCreateCursorRequest(major, ids.cursor, ids.picture, ci.HotX, ci.HotY),
@@ -227,6 +228,6 @@ func x11RenderCursorRequests(ids x11RenderCursorIDs, major byte, argb uint32, ci
 // запасной путь без RENDER: пиксель виден при альфе не меньше порога, тёмный
 // рисуется чёрным, светлый — белым.
 func x11MonoImageCursorRequests(ids x11CursorIDs, ci *widget.CursorImage) [][]byte {
-	src, mask := cursorMonoPoints(ci, x11MonoAlphaThreshold)
+	src, mask := pointer.CursorMonoPoints(ci, x11MonoAlphaThreshold)
 	return x11MonoCursorRequests(ids, ci.W, ci.H, src, mask, ci.HotX, ci.HotY)
 }

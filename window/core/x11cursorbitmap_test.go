@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // Невидимый курсор и руки на X11 строятся из 1-битных карт запросами ядра
@@ -36,7 +36,7 @@ func checkLengths(t *testing.T, reqs [][]byte) {
 }
 
 func TestX11BitmapCursor_NoneIsInvisible(t *testing.T) {
-	reqs := x11BitmapCursorRequests(testCursorIDs, wlCursorNone)
+	reqs := x11BitmapCursorRequests(testCursorIDs, pointer.CursorNone)
 	checkLengths(t, reqs)
 
 	want := []byte{
@@ -76,7 +76,7 @@ func TestX11BitmapCursor_NoneIsInvisible(t *testing.T) {
 }
 
 func TestX11BitmapCursor_HandsDrawn(t *testing.T) {
-	for _, c := range []int{wlCursorGrab, wlCursorGrabbing} {
+	for _, c := range []int{pointer.CursorGrab, pointer.CursorGrabbing} {
 		reqs := x11BitmapCursorRequests(testCursorIDs, c)
 		checkLengths(t, reqs)
 		var srcPts, maskPts int
@@ -102,7 +102,7 @@ func TestX11BitmapCursor_HandsDrawn(t *testing.T) {
 		// Горячая точка внутри картинки.
 		cc := reqs[len(reqs)-5]
 		hx, hy := binary.LittleEndian.Uint16(cc[28:30]), binary.LittleEndian.Uint16(cc[30:32])
-		if hx >= wlCursorSize || hy >= wlCursorSize {
+		if hx >= pointer.CursorSize || hy >= pointer.CursorSize {
 			t.Errorf("форма %d: горячая точка (%d,%d) вне картинки", c, hx, hy)
 		}
 	}
@@ -110,8 +110,8 @@ func TestX11BitmapCursor_HandsDrawn(t *testing.T) {
 
 // Рука раскрытая и сжатая — разные картинки.
 func TestX11BitmapCursor_GrabDiffersFromGrabbing(t *testing.T) {
-	a := x11BitmapCursorRequests(testCursorIDs, wlCursorGrab)
-	b := x11BitmapCursorRequests(testCursorIDs, wlCursorGrabbing)
+	a := x11BitmapCursorRequests(testCursorIDs, pointer.CursorGrab)
+	b := x11BitmapCursorRequests(testCursorIDs, pointer.CursorGrabbing)
 	same := len(a) == len(b)
 	if same {
 		for i := range a {
@@ -123,68 +123,5 @@ func TestX11BitmapCursor_GrabDiffersFromGrabbing(t *testing.T) {
 	}
 	if same {
 		t.Error("Grab и Grabbing нарисованы одинаково")
-	}
-}
-
-// Нарисованные курсоры не больше 32×32: крупнее указатель не пройдёт через RDP
-// (WinLine). Это же проверка, что у каждой новой формы есть картинка.
-func TestCursorArt_FitsRDPLimit(t *testing.T) {
-	if wlCursorSize > 32 {
-		t.Fatalf("wlCursorSize = %d, предел 32", wlCursorSize)
-	}
-	for _, c := range []int{
-		wlCursorArrow, wlCursorIBeam, wlCursorHand, wlCursorSizeWE, wlCursorSizeNS,
-		wlCursorSizeNWSE, wlCursorSizeNESW, wlCursorGrab, wlCursorGrabbing,
-		wlCursorSizeAll, wlCursorCrosshair, wlCursorWait,
-	} {
-		art := wlCursorShapes[c]
-		if art.rows == nil {
-			t.Errorf("форма %d: картинки нет", c)
-			continue
-		}
-		if len(art.rows) > 32 {
-			t.Errorf("форма %d: %d строк > 32", c, len(art.rows))
-		}
-		opaque := 0
-		for y, row := range art.rows {
-			if len(row) > 32 {
-				t.Errorf("форма %d: строка %d шире 32", c, y)
-			}
-			for x := 0; x < len(row); x++ {
-				if row[x] == 'X' || row[x] == 'o' {
-					opaque++
-				}
-			}
-		}
-		if opaque == 0 {
-			t.Errorf("форма %d: картинка пуста", c)
-		}
-		if art.hotX < 0 || art.hotX >= wlCursorSize || art.hotY < 0 || art.hotY >= wlCursorSize {
-			t.Errorf("форма %d: горячая точка (%d,%d) вне картинки", c, art.hotX, art.hotY)
-		}
-	}
-}
-
-// Коды форм окна совпадают с числовыми значениями widget.Cursor: SetCursor
-// принимает число, а старые значения менять нельзя.
-func TestCursorCodes_MatchWidget(t *testing.T) {
-	want := map[string]int{
-		"Arrow": wlCursorArrow, "IBeam": wlCursorIBeam, "Hand": wlCursorHand,
-		"SizeWE": wlCursorSizeWE, "SizeNS": wlCursorSizeNS,
-		"SizeNWSE": wlCursorSizeNWSE, "SizeNESW": wlCursorSizeNESW,
-		"None": wlCursorNone, "Grab": wlCursorGrab, "Grabbing": wlCursorGrabbing,
-		"SizeAll": wlCursorSizeAll, "Crosshair": wlCursorCrosshair, "Wait": wlCursorWait,
-	}
-	got := map[string]int{
-		"Arrow": int(widget.CursorArrow), "IBeam": int(widget.CursorIBeam), "Hand": int(widget.CursorHand),
-		"SizeWE": int(widget.CursorSizeWE), "SizeNS": int(widget.CursorSizeNS),
-		"SizeNWSE": int(widget.CursorSizeNWSE), "SizeNESW": int(widget.CursorSizeNESW),
-		"None": int(widget.CursorNone), "Grab": int(widget.CursorGrab), "Grabbing": int(widget.CursorGrabbing),
-		"SizeAll": int(widget.CursorSizeAll), "Crosshair": int(widget.CursorCrosshair), "Wait": int(widget.CursorWait),
-	}
-	for k, v := range want {
-		if got[k] != v {
-			t.Errorf("%s: код окна %d, widget.Cursor %d", k, v, got[k])
-		}
 	}
 }

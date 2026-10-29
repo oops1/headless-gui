@@ -45,7 +45,7 @@ jobs:
       # хватает одной.
       - name: Test (shuffle)
         if: matrix.os == 'ubuntu-latest'
-        run: go test -shuffle=on ./desktop/ ./engine/ ./widget/ ./widget/base/ ./widget/xaml/ ./widget/text/ ./widget/richtext/ ./widget/chrome/ ./widget/dock/ ./widget/dialog/ ./platform/clipboard/ ./theme/ ./tests/
+        run: go test -shuffle=on ./desktop/ ./engine/ ./widget/ ./widget/base/ ./widget/xaml/ ./widget/text/ ./widget/richtext/ ./widget/chrome/ ./widget/dock/ ./widget/dialog/ ./platform/... ./theme/ ./tests/
 
       # Пиксельные эталоны при расхождении сохраняют полученный кадр во
       # временную директорию — выгружаем для разбора.

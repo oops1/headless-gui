@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -18,14 +19,14 @@ import (
 // каким размером его создали.
 type initFake struct {
 	log       []string
-	placement initialPlacement
+	placement native.InitialPlacement
 	placed    int
 	createW   int
 	createH   int
 	maximized bool
 }
 
-func (f *initFake) setInitialPlacement(p initialPlacement) {
+func (f *initFake) setInitialPlacement(p native.InitialPlacement) {
 	f.log = append(f.log, "placement")
 	f.placement, f.placed = p, f.placed+1
 }
@@ -77,7 +78,7 @@ func initBringUpOn(t *testing.T, scale string, eng EngineAPI, setup func(win *Wi
 	t.Setenv("HEADLESS_GUI_SCALE", scale)
 	f := &initFake{}
 	old := newNativeWindow
-	newNativeWindow = func() NativeWindow { return f }
+	newNativeWindow = func() native.NativeWindow { return f }
 	t.Cleanup(func() { newNativeWindow = old })
 
 	win := New(eng, "initial")
@@ -98,7 +99,7 @@ func TestInitialBounds_ReachBackendBeforeCreate(t *testing.T) {
 	if len(f.log) < 2 || f.log[0] != "placement" || f.log[1] != "create" {
 		t.Fatalf("порядок вызовов %v, ждал placement перед create", f.log)
 	}
-	if want := (initialPlacement{PosSet: true, X: 120, Y: 80, SizeSet: true}); f.placement != want {
+	if want := (native.InitialPlacement{PosSet: true, X: 120, Y: 80, SizeSet: true}); f.placement != want {
 		t.Errorf("бэкенд получил %+v, ждал %+v", f.placement, want)
 	}
 	if f.createW != 640 || f.createH != 480 {
@@ -130,7 +131,7 @@ func TestInitialBounds_SizeIsLogical(t *testing.T) {
 func TestInitialMaximized_Only(t *testing.T) {
 	win, f := initBringUp(t, "1", func(win *Window) { win.SetInitialMaximized(true) })
 
-	if want := (initialPlacement{Maximized: true}); f.placement != want {
+	if want := (native.InitialPlacement{Maximized: true}); f.placement != want {
 		t.Errorf("бэкенд получил %+v, ждал %+v", f.placement, want)
 	}
 	if f.createW != 800 || f.createH != 600 {
@@ -146,7 +147,7 @@ func TestInitialBoundsAndMaximized(t *testing.T) {
 		win.SetInitialBounds(-1500, 40, 700, 500)
 		win.SetInitialMaximized(true)
 	})
-	want := initialPlacement{PosSet: true, X: -1500, Y: 40, SizeSet: true, Maximized: true}
+	want := native.InitialPlacement{PosSet: true, X: -1500, Y: 40, SizeSet: true, Maximized: true}
 	if f.placement != want {
 		t.Errorf("бэкенд получил %+v, ждал %+v", f.placement, want)
 	}
@@ -158,7 +159,7 @@ func TestInitialBoundsAndMaximized(t *testing.T) {
 // Нулевой размер не затирает размер окна: положение применяется, размер нет.
 func TestInitialBounds_PositionOnly(t *testing.T) {
 	_, f := initBringUp(t, "1", func(win *Window) { win.SetInitialBounds(30, 40, 0, 0) })
-	if want := (initialPlacement{PosSet: true, X: 30, Y: 40}); f.placement != want {
+	if want := (native.InitialPlacement{PosSet: true, X: 30, Y: 40}); f.placement != want {
 		t.Errorf("бэкенд получил %+v, ждал %+v", f.placement, want)
 	}
 	if f.createW != 800 || f.createH != 600 {
@@ -272,8 +273,8 @@ func TestInitialBounds_BeatsEngineCanvas(t *testing.T) {
 func initMonitors(t *testing.T) {
 	t.Helper()
 	oldList, oldOn := initialMonitorList, initialPerMonitorScale
-	initialMonitorList = func() []Monitor {
-		return []Monitor{
+	initialMonitorList = func() []native.Monitor {
+		return []native.Monitor{
 			{Bounds: image.Rect(0, 0, 1920, 1080), Scale: 1, Primary: true},
 			{Bounds: image.Rect(1920, 0, 5760, 2160), Scale: 2},
 		}
@@ -327,40 +328,8 @@ func TestInitialBounds_NoSizeNoMonitorScale(t *testing.T) {
 
 // ── Чистые функции ───────────────────────────────────────────────────────────
 
-func TestWin32InitialCreate(t *testing.T) {
-	const style = 0x90000000 | 0x10000 // WS_POPUP|WS_VISIBLE|…
-	const swShow = 5
-
-	// Ничего не просили: центр, стиль и показ прежние.
-	x, y, st, cmd := win32InitialCreate(initialPlacement{}, style, swShow, 560, 240)
-	if x != 560 || y != 240 || st != style || cmd != swShow {
-		t.Errorf("без заказа: %d,%d %#x %d", x, y, st, cmd)
-	}
-
-	// Положение вместо центра; отрицательные координаты второго монитора допустимы.
-	x, y, st, cmd = win32InitialCreate(initialPlacement{PosSet: true, X: -1800, Y: 120}, style, swShow, 560, 240)
-	if x != -1800 || y != 120 || st != style || cmd != swShow {
-		t.Errorf("с положением: %d,%d %#x %d", x, y, st, cmd)
-	}
-
-	// Развёрнутое окно создаётся скрытым и первым показом разворачивается.
-	x, y, st, cmd = win32InitialCreate(initialPlacement{Maximized: true}, style, swShow, 560, 240)
-	if st&initWsVisible != 0 {
-		t.Errorf("развёрнутое окно создаётся видимым: %#x", st)
-	}
-	if st != style&^initWsVisible {
-		t.Errorf("кроме WS_VISIBLE стиль меняться не должен: %#x → %#x", style, st)
-	}
-	if cmd != 3 {
-		t.Errorf("команда показа %d, ждал SW_SHOWMAXIMIZED (3)", cmd)
-	}
-	if x != 560 || y != 240 {
-		t.Errorf("без заказа положения центр съехал: %d,%d", x, y)
-	}
-}
-
 func TestInitialScaleFor(t *testing.T) {
-	list := []Monitor{
+	list := []native.Monitor{
 		{Bounds: image.Rect(0, 0, 1920, 1080), Scale: 1, Primary: true},
 		{Bounds: image.Rect(1920, 0, 5760, 2160), Scale: 2},
 	}
@@ -377,7 +346,7 @@ func TestInitialScaleFor(t *testing.T) {
 		t.Errorf("вне мониторов %v, ждал базовый 1.25", k)
 	}
 	// Монитор без масштаба не обнуляет интерфейс.
-	if k := initialScaleFor([]Monitor{{Bounds: image.Rect(0, 0, 100, 100)}}, image.Rect(0, 0, 50, 50), 1.5); k != 1.5 {
+	if k := initialScaleFor([]native.Monitor{{Bounds: image.Rect(0, 0, 100, 100)}}, image.Rect(0, 0, 50, 50), 1.5); k != 1.5 {
 		t.Errorf("монитор без масштаба: %v, ждал базовый 1.5", k)
 	}
 }
@@ -396,7 +365,7 @@ func TestInitialState_Placement(t *testing.T) {
 		t.Error("пустое состояние заказывает положение")
 	}
 	p, ok := (initialState{boundsSet: true, x: 1, y: 2, w: 3, h: 4}).placement()
-	if !ok || p != (initialPlacement{PosSet: true, X: 1, Y: 2, SizeSet: true}) {
+	if !ok || p != (native.InitialPlacement{PosSet: true, X: 1, Y: 2, SizeSet: true}) {
 		t.Errorf("%+v %v", p, ok)
 	}
 	// Размер не положителен — не задан.
@@ -408,74 +377,5 @@ func TestInitialState_Placement(t *testing.T) {
 	p, ok = (initialState{boundsSet: true}).placement()
 	if !ok || !p.PosSet {
 		t.Error("положение (0,0) потеряно")
-	}
-}
-
-func TestX11SizeHints(t *testing.T) {
-	le := func(b []byte, off int) uint32 {
-		return uint32(b[off]) | uint32(b[off+1])<<8 | uint32(b[off+2])<<16 | uint32(b[off+3])<<24
-	}
-	// Положение и размер: USPosition|PPosition|USSize|PSize и значения в полях.
-	b := x11SizeHints(0, 0, initialPlacement{PosSet: true, SizeSet: true}, -40, 25, 640, 480)
-	if len(b) != 72 {
-		t.Fatalf("длина %d, ждал 72", len(b))
-	}
-	if got, want := le(b, 0), uint32(x11USPosition|x11PPosition|x11USSize|x11PSize); got != want {
-		t.Errorf("флаги %#x, ждал %#x", got, want)
-	}
-	if int32(le(b, 4)) != -40 || le(b, 8) != 25 || le(b, 12) != 640 || le(b, 16) != 480 {
-		t.Errorf("поля x,y,w,h: %d %d %d %d", int32(le(b, 4)), le(b, 8), le(b, 12), le(b, 16))
-	}
-	if le(b, 20) != 0 || le(b, 24) != 0 {
-		t.Error("минимум появился без заказа")
-	}
-
-	// Только положение: размер не объявляется.
-	b = x11SizeHints(0, 0, initialPlacement{PosSet: true}, 5, 6, 640, 480)
-	if got := le(b, 0); got != x11USPosition|x11PPosition {
-		t.Errorf("флаги только положения %#x", got)
-	}
-	if le(b, 12) != 0 || le(b, 16) != 0 {
-		t.Error("размер записан без SizeSet")
-	}
-
-	// Минимальный размер сосуществует с положением.
-	b = x11SizeHints(320, 200, initialPlacement{PosSet: true, SizeSet: true}, 1, 2, 640, 480)
-	if got, want := le(b, 0), uint32(x11PMinSize|x11USPosition|x11PPosition|x11USSize|x11PSize); got != want {
-		t.Errorf("флаги %#x, ждал %#x", got, want)
-	}
-	if le(b, 20) != 320 || le(b, 24) != 200 {
-		t.Errorf("минимум %d×%d, ждал 320×200", le(b, 20), le(b, 24))
-	}
-
-	// Согласованность с прежней сборкой одного минимума (флаги — отдельно).
-	if string(x11SizeHints(320, 200, initialPlacement{}, 0, 0, 0, 0)[4:]) != string(x11NormalHintsMinSizeBytes(320, 200)[4:]) {
-		t.Error("без заказа положения поля должны совпадать с прежним минимумом")
-	}
-	if got := le(x11SizeHints(320, 200, initialPlacement{}, 0, 0, 0, 0), 0); got != x11PMinSize {
-		t.Errorf("флаги одного минимума %#x", got)
-	}
-}
-
-func TestWlNormalSize(t *testing.T) {
-	// Окно начало развёрнутым, теперь восстановлено, компоновщик размера не назвал.
-	if w, h, used := wlNormalSize(0, 0, false, false, 800, 600); w != 800 || h != 600 || !used {
-		t.Errorf("0×0 после восстановления: %d×%d used=%v, ждал 800×600 true", w, h, used)
-	}
-	// Всё ещё развёрнуто — запомненный размер не трогаем.
-	if w, h, used := wlNormalSize(1920, 1080, true, false, 800, 600); w != 1920 || h != 1080 || used {
-		t.Errorf("развёрнутое: %d×%d used=%v", w, h, used)
-	}
-	// Полный экран — тоже.
-	if w, h, used := wlNormalSize(0, 0, false, true, 800, 600); w != 0 || h != 0 || used {
-		t.Errorf("полный экран: %d×%d used=%v", w, h, used)
-	}
-	// Компоновщик назвал размер сам — он важнее, запомненный больше не нужен.
-	if w, h, used := wlNormalSize(900, 700, false, false, 800, 600); w != 900 || h != 700 || !used {
-		t.Errorf("размер от компоновщика: %d×%d used=%v", w, h, used)
-	}
-	// Окно не начинало развёрнутым — ничего не меняется.
-	if w, h, used := wlNormalSize(0, 0, false, false, 0, 0); w != 0 || h != 0 || used {
-		t.Errorf("без запомненного: %d×%d used=%v", w, h, used)
 	}
 }

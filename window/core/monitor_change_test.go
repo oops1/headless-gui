@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -48,15 +49,15 @@ func (m *monTestSpy) fire() {
 // monTestList подменяет источник списка мониторов и дебаунс на время теста.
 type monTestList struct {
 	mu   sync.Mutex
-	list []Monitor
+	list []native.Monitor
 	n    int
 }
 
-func (l *monTestList) get() []Monitor {
+func (l *monTestList) get() []native.Monitor {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.n++
-	return append([]Monitor(nil), l.list...)
+	return append([]native.Monitor(nil), l.list...)
 }
 
 func (l *monTestList) reads() int {
@@ -65,13 +66,13 @@ func (l *monTestList) reads() int {
 	return l.n
 }
 
-func (l *monTestList) set(list ...Monitor) {
+func (l *monTestList) set(list ...native.Monitor) {
 	l.mu.Lock()
 	l.list = list
 	l.mu.Unlock()
 }
 
-func monTestUseList(t *testing.T, first ...Monitor) *monTestList {
+func monTestUseList(t *testing.T, first ...native.Monitor) *monTestList {
 	t.Helper()
 	l := &monTestList{list: first}
 	oldFn, oldDeb := monitorListFunc, monitorChangeDebounce
@@ -90,18 +91,18 @@ func monTestWindow(t *testing.T) (*Window, *monTestSpy) {
 }
 
 var (
-	monTestA  = Monitor{Name: "A", Bounds: image.Rect(0, 0, 1920, 1080), Work: image.Rect(0, 0, 1920, 1040), Scale: 1, Primary: true, id: 1}
-	monTestB  = Monitor{Name: "B", Bounds: image.Rect(1920, 0, 3840, 1080), Work: image.Rect(1920, 0, 3840, 1080), Scale: 1, id: 2}
-	monTestA2 = Monitor{Name: "A", Bounds: image.Rect(0, 0, 2560, 1440), Work: image.Rect(0, 0, 2560, 1400), Scale: 1, Primary: true, id: 1}
+	monTestA  = native.MonitorWithKey(native.Monitor{Name: "A", Bounds: image.Rect(0, 0, 1920, 1080), Work: image.Rect(0, 0, 1920, 1040), Scale: 1, Primary: true}, 1)
+	monTestB  = native.MonitorWithKey(native.Monitor{Name: "B", Bounds: image.Rect(1920, 0, 3840, 1080), Work: image.Rect(1920, 0, 3840, 1080), Scale: 1}, 2)
+	monTestA2 = native.MonitorWithKey(native.Monitor{Name: "A", Bounds: image.Rect(0, 0, 2560, 1440), Work: image.Rect(0, 0, 2560, 1400), Scale: 1, Primary: true}, 1)
 )
 
 // monTestFn — колбэк приложения, кладущий списки в канал.
-func monTestFn() (func([]Monitor), chan []Monitor) {
-	ch := make(chan []Monitor, 8)
-	return func(l []Monitor) { ch <- l }, ch
+func monTestFn() (func([]native.Monitor), chan []native.Monitor) {
+	ch := make(chan []native.Monitor, 8)
+	return func(l []native.Monitor) { ch <- l }, ch
 }
 
-func monTestExpect(t *testing.T, ch chan []Monitor, want int) []Monitor {
+func monTestExpect(t *testing.T, ch chan []native.Monitor, want int) []native.Monitor {
 	t.Helper()
 	select {
 	case l := <-ch:
@@ -115,7 +116,7 @@ func monTestExpect(t *testing.T, ch chan []Monitor, want int) []Monitor {
 	return nil
 }
 
-func monTestExpectNone(t *testing.T, ch chan []Monitor) {
+func monTestExpectNone(t *testing.T, ch chan []native.Monitor) {
 	t.Helper()
 	select {
 	case l := <-ch:
@@ -281,21 +282,21 @@ func TestMonitorsChanged_RunsOnEngineGoroutine(t *testing.T) {
 }
 
 func TestMonitorListsEqual(t *testing.T) {
-	if !monitorListsEqual([]Monitor{monTestA, monTestB}, []Monitor{monTestA, monTestB}) {
+	if !monitorListsEqual([]native.Monitor{monTestA, monTestB}, []native.Monitor{monTestA, monTestB}) {
 		t.Error("одинаковые списки признаны разными")
 	}
 	if !monitorListsEqual(nil, nil) {
 		t.Error("пустые списки признаны разными")
 	}
-	cases := map[string][]Monitor{
+	cases := map[string][]native.Monitor{
 		"меньше": {monTestA},
 		"границы": {monTestA2, monTestB},
-		"имя":     {{Name: "Z", Bounds: monTestA.Bounds, Work: monTestA.Work, Scale: 1, Primary: true, id: 1}, monTestB},
-		"масштаб": {{Name: "A", Bounds: monTestA.Bounds, Work: monTestA.Work, Scale: 2, Primary: true, id: 1}, monTestB},
-		"главный": {{Name: "A", Bounds: monTestA.Bounds, Work: monTestA.Work, Scale: 1, Primary: false, id: 1}, monTestB},
+		"имя":     {native.MonitorWithKey(native.Monitor{Name: "Z", Bounds: monTestA.Bounds, Work: monTestA.Work, Scale: 1, Primary: true}, 1), monTestB},
+		"масштаб": {native.MonitorWithKey(native.Monitor{Name: "A", Bounds: monTestA.Bounds, Work: monTestA.Work, Scale: 2, Primary: true}, 1), monTestB},
+		"главный": {native.MonitorWithKey(native.Monitor{Name: "A", Bounds: monTestA.Bounds, Work: monTestA.Work, Scale: 1, Primary: false}, 1), monTestB},
 	}
 	for name, other := range cases {
-		if monitorListsEqual([]Monitor{monTestA, monTestB}, other) {
+		if monitorListsEqual([]native.Monitor{monTestA, monTestB}, other) {
 			t.Errorf("%s: разные списки признаны одинаковыми", name)
 		}
 	}

@@ -7,7 +7,11 @@
 // оконному менеджеру X11 ни о чём не говорят.
 package core
 
-import "image"
+import (
+	"image"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 // atomCardinal — предопределённый атом CARDINAL (X11 protocol, §Atoms).
 // Предопределённый, поэтому InternAtom не нужен.
@@ -15,15 +19,15 @@ const atomCardinal = 6
 
 // Проверка на этапе сборки: Window.SetIcon находит бэкенд по интерфейсу, и
 // опечатка в имени метода превратилась бы в молчаливый ErrIconUnsupported.
-var _ iconSetter = (*X11Window)(nil)
+var _ native.IconSetter = (*X11Window)(nil)
 
-// setIcon выставляет _NET_WM_ICON.
+// SetIcon выставляет _NET_WM_ICON.
 //
 // Формат свойства (EWMH): подряд идут значки, каждый — ширина, высота и
 // width×height точек ARGB, по 32 бита на число. Несколько размеров в одном
 // свойстве — это норма, оконный менеджер выбирает подходящий под место сам:
 // один для заголовка, другой для панели задач, третий для Alt+Tab.
-func (w *X11Window) setIcon(icons []image.Image) error {
+func (w *X11Window) SetIcon(icons []image.Image) error {
 	if w.wid == 0 {
 		w.pendingIcons = icons
 		return nil
@@ -32,9 +36,9 @@ func (w *X11Window) setIcon(icons []image.Image) error {
 		w.atomNetWMIcon = w.x11InternAtom("_NET_WM_ICON")
 	}
 	if w.atomNetWMIcon == 0 {
-		return ErrIconUnsupported
+		return native.ErrIconUnsupported
 	}
-	w.x11ChangeProperty(w.wid, w.atomNetWMIcon, atomCardinal, 32, netWMIconData(icons))
+	w.x11ChangeProperty(w.wid, w.atomNetWMIcon, atomCardinal, 32, native.NetWMIconData(icons))
 	return nil
 }
 
@@ -45,5 +49,5 @@ func (w *X11Window) applyPendingIcon() {
 	}
 	icons := w.pendingIcons
 	w.pendingIcons = nil
-	_ = w.setIcon(icons)
+	_ = w.SetIcon(icons)
 }

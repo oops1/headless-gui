@@ -3,6 +3,8 @@ package core
 import (
 	"image"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Полный экран (E1): общий слой окна без платформы. Платформенные части
@@ -103,11 +105,11 @@ func TestFullscreen_BeforeRunAndCallback(t *testing.T) {
 // fsOnSpy — fsSpy, умеющий выбирать монитор.
 type fsOnSpy struct {
 	fsSpy
-	onCalls []Monitor
+	onCalls []native.Monitor
 	accept  bool
 }
 
-func (f *fsOnSpy) SetFullscreenOn(m Monitor) bool {
+func (f *fsOnSpy) SetFullscreenOn(m native.Monitor) bool {
 	f.onCalls = append(f.onCalls, m)
 	return f.accept
 }
@@ -116,7 +118,7 @@ func (f *fsOnSpy) SetFullscreenOn(m Monitor) bool {
 // приложения; нулевой Monitor и бэкенд без выбора монитора отвергаются.
 func TestFullscreenOn_DelegatesToBackend(t *testing.T) {
 	win, _, _, _ := closeTestWindow(t)
-	mon := Monitor{Name: "HDMI-1", Bounds: image.Rect(1920, 0, 3840, 1080), id: 7}
+	mon := native.MonitorWithKey(native.Monitor{Name: "HDMI-1", Bounds: image.Rect(1920, 0, 3840, 1080)}, 7)
 
 	win.native = &fsSpy{supported: true} // выбора монитора нет
 	if win.SetFullscreenOn(mon) {
@@ -125,7 +127,7 @@ func TestFullscreenOn_DelegatesToBackend(t *testing.T) {
 
 	spy := &fsOnSpy{fsSpy: fsSpy{supported: true}, accept: true}
 	win.native = spy
-	if win.SetFullscreenOn(Monitor{}) {
+	if win.SetFullscreenOn(native.Monitor{}) {
 		t.Error("нулевой Monitor принят")
 	}
 	if len(spy.onCalls) != 0 {
@@ -147,7 +149,7 @@ func TestFullscreenOn_DelegatesToBackend(t *testing.T) {
 // а если монитор к тому времени исчез — обычный полный экран. SetFullscreen
 // после SetFullscreenOn забывает монитор.
 func TestFullscreenOn_BeforeRun(t *testing.T) {
-	mon := Monitor{Name: "DP-2", Bounds: image.Rect(0, 0, 2560, 1440), id: 3}
+	mon := native.MonitorWithKey(native.Monitor{Name: "DP-2", Bounds: image.Rect(0, 0, 2560, 1440)}, 3)
 
 	win, _, _, _ := closeTestWindow(t)
 	win.native = nil
@@ -188,32 +190,6 @@ func TestFullscreenOn_BeforeRun(t *testing.T) {
 	}
 }
 
-// matchMonitor: ключ сильнее имени, имя сильнее границ; чужой монитор не
-// находится; результат — запись списка со свежими границами.
-func TestMatchMonitor(t *testing.T) {
-	a := Monitor{Name: "A", Bounds: image.Rect(0, 0, 1920, 1080), id: 1}
-	b := Monitor{Name: "B", Bounds: image.Rect(1920, 0, 3840, 1080), id: 2}
-	list := []Monitor{a, b}
-
-	if m, ok := matchMonitor(list, Monitor{id: 2, Name: "A"}); !ok || m.id != 2 {
-		t.Errorf("по ключу: %+v %v", m, ok)
-	}
-	// Ключ устарел (монитор переподключили), имя то же, границы сменились.
-	moved := Monitor{id: 99, Name: "B", Bounds: image.Rect(0, 0, 10, 10)}
-	if m, ok := matchMonitor(list, moved); !ok || m.id != 2 || m.Bounds != b.Bounds {
-		t.Errorf("по имени: %+v %v", m, ok)
-	}
-	if m, ok := matchMonitor(list, Monitor{Bounds: a.Bounds}); !ok || m.id != 1 {
-		t.Errorf("по границам: %+v %v", m, ok)
-	}
-	if _, ok := matchMonitor(list, Monitor{id: 5, Name: "C", Bounds: image.Rect(5000, 0, 6000, 800)}); ok {
-		t.Error("отключённый монитор нашёлся")
-	}
-	if _, ok := matchMonitor(list, Monitor{}); ok {
-		t.Error("пустой Monitor нашёлся")
-	}
-}
-
 // Кнопка □ полноэкранного окна возвращает его, а не разворачивает: так вело
 // себя окно, когда Wayland считал полный экран «развёрнутым».
 func TestFullscreen_MaximizeButtonLeavesFullscreen(t *testing.T) {
@@ -230,9 +206,9 @@ func TestFullscreen_MaximizeButtonLeavesFullscreen(t *testing.T) {
 
 // Мониторы: выбор по прямоугольнику, упорядочивание, точка.
 func TestMonitorHelpers(t *testing.T) {
-	left := Monitor{Bounds: image.Rect(0, 0, 1920, 1080), Work: image.Rect(0, 0, 1920, 1040), Scale: 1}
-	right := Monitor{Bounds: image.Rect(1920, 0, 3840, 1080), Scale: 1.5, Primary: true}
-	list := sortMonitors([]Monitor{left, right})
+	left := native.Monitor{Bounds: image.Rect(0, 0, 1920, 1080), Work: image.Rect(0, 0, 1920, 1040), Scale: 1}
+	right := native.Monitor{Bounds: image.Rect(1920, 0, 3840, 1080), Scale: 1.5, Primary: true}
+	list := sortMonitors([]native.Monitor{left, right})
 	if !list[0].Primary || list[1].Bounds != left.Bounds {
 		t.Errorf("порядок: основной первым, got %v", list)
 	}

@@ -21,39 +21,17 @@ package core
 // Бэкенды: Win32 — Raw Input (WM_INPUT) и ClipCursor; Wayland —
 // zwp_pointer_constraints_v1.lock_pointer с zwp_relative_pointer_v1; X11 —
 // XInput2 XI_RawMotion на корневом окне и XGrabPointer. Бэкенд без поддержки
-// (macOS) просто не реализует pointerLocker, и SetPointerLock возвращает false.
+// (macOS) просто не реализует native.PointerLocker, и SetPointerLock возвращает false.
 //
 // Файл без платформенного суффикса: слияние сдвигов — чистая логика.
 
 import (
-	"encoding/binary"
 	"sync"
 	"sync/atomic"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
-
-// Значения Raw Input (winuser.h), нужные разбору RAWINPUT.
-const (
-	rimTypeMouse = 0    // RIM_TYPEMOUSE
-	mouseMoveAbs = 0x01 // MOUSE_MOVE_ABSOLUTE
-)
-
-// pointerLocker — нативное окно умеет захват указателя.
-type pointerLocker interface {
-	// SetPointerLock включает и выключает захват. true при включении —
-	// запрос принят: захват действует или начнёт действовать, как только окно
-	// получит фокус (Wayland — указатель); false — механизма нет или система
-	// отказала. Выключение всегда успешно.
-	SetPointerLock(on bool) bool
-	// SetOnRelativeMotion — приёмник сдвигов (единицы устройства, дробные).
-	// Зовётся с потока бэкенда, часто (сотни раз в секунду).
-	SetOnRelativeMotion(fn func(dx, dy float64))
-	// SetOnPointerLockChanged — захват начал или перестал действовать:
-	// окно потеряло фокус (Win32, X11), компоновщик снял блокировку
-	// (Wayland); вернулся фокус — захват восстановлен.
-	SetOnPointerLockChanged(fn func(active bool))
-}
 
 // relMotionQueue склеивает сдвиги мыши, стоящие в очереди движка: мышь шлёт
 // их по 1000 в секунду, а движку и приложению хватает суммы. Пока сброс в
@@ -105,7 +83,7 @@ type pointerLockState struct {
 // hookPointerLock подключает приём сдвигов и смену состояния захвата от
 // бэкенда к поверхности. Зовётся из setupInput один раз.
 func (s *surface) hookPointerLock() {
-	pl, ok := s.native.(pointerLocker)
+	pl, ok := s.native.(native.PointerLocker)
 	if !ok {
 		return
 	}
@@ -143,7 +121,7 @@ func (s *surface) deliverRelative(dx, dy float64) {
 // действует, обычные движения мыши (OnMouseMove виджетов) не приходят, нажатия
 // кнопок и колесо — как всегда, в центре окна. Можно звать с любой горутины.
 func (win *Window) SetPointerLock(on bool) bool {
-	pl, ok := win.native.(pointerLocker)
+	pl, ok := win.native.(native.PointerLocker)
 	if !ok {
 		return !on
 	}
@@ -182,25 +160,4 @@ func (win *Window) SetOnPointerLockChanged(fn func(active bool)) {
 		return
 	}
 	win.lock.changed.Store(&fn)
-}
-
-// parseRawMouse разбирает RAWINPUT мыши: lLastX, lLastY и признак «абсолютное
-// положение» (MOUSE_MOVE_ABSOLUTE). ptrSize — размер указателя (8 или 4):
-// заголовок RAWINPUTHEADER содержит два слова размером с указатель. ok=false —
-// это не мышь или буфер короче структуры.
-//
-// Раскладка RAWMOUSE после заголовка: usFlags (2) + 2 байта выравнивания,
-// ulButtons (4), ulRawButtons (4), lLastX (4), lLastY (4), ulExtraInformation (4).
-func parseRawMouse(buf []byte, ptrSize int) (x, y int32, absolute, ok bool) {
-	hdr := 8 + 2*ptrSize
-	if len(buf) < hdr+24 {
-		return 0, 0, false, false
-	}
-	if binary.LittleEndian.Uint32(buf[0:4]) != rimTypeMouse {
-		return 0, 0, false, false
-	}
-	flags := binary.LittleEndian.Uint16(buf[hdr : hdr+2])
-	x = int32(binary.LittleEndian.Uint32(buf[hdr+12 : hdr+16]))
-	y = int32(binary.LittleEndian.Uint32(buf[hdr+16 : hdr+20]))
-	return x, y, flags&mouseMoveAbs != 0, true
 }

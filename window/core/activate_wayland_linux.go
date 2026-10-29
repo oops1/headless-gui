@@ -25,7 +25,11 @@ package core
 // Компоновщик без глобала (WinLine) получает false: поднять окно нечем.
 // Признака свёрнутости у xdg_toplevel нет, поэтому IsMinimized всегда false.
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 // Запросы и события xdg_activation_v1 / xdg_activation_token_v1.
 const (
@@ -41,7 +45,7 @@ const (
 	xdgActTokenEvDone = 0 // done(token)
 )
 
-var _ activateBackend = (*WaylandWindow)(nil)
+var _ native.ActivateBackend = (*WaylandWindow)(nil)
 
 // wlActivation — привязка менеджера и токены, которые ждут ответа.
 type wlActivation struct {
@@ -67,7 +71,7 @@ func (w *WaylandWindow) activationManager() (uint32, bool) {
 // активирует окно (ответ придёт в цикле событий). true — запрос отправлен;
 // false — компоновщик не объявил xdg_activation_v1. Без свежего ввода токен
 // выдаётся без serial'а, и компоновщик обычно лишь подсвечивает окно.
-// Реализует activateBackend.
+// Реализует native.ActivateBackend.
 func (w *WaylandWindow) Activate() bool {
 	mgr, ok := w.activationManager()
 	if !ok {
@@ -97,7 +101,7 @@ func (w *WaylandWindow) Activate() bool {
 // ActivateWithToken активирует окно токеном запустившего процесса
 // (xdg_activation_v1.activate). Пустой токен — как Activate. true — запрос
 // отправлен, решение за компоновщиком; false — нет глобала. Реализует
-// activateBackend.
+// native.ActivateBackend.
 func (w *WaylandWindow) ActivateWithToken(token string) bool {
 	if token == "" {
 		return w.Activate()

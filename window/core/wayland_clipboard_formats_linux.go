@@ -10,7 +10,11 @@ package core
 // offerURIList/offerGnome, offerImage). Так что ответ — чтение этих полей под
 // замком: ни канала, ни ожидания владельца.
 
-import "github.com/oops1/headless-gui/v3/widget"
+import (
+	"github.com/oops1/headless-gui/v3/widget"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 var _ widget.ClipboardFormatsProvider = (*wlClipboard)(nil)
 
@@ -26,7 +30,7 @@ func (c *wlClipboard) ClipboardFormats() widget.ClipboardFormatSet {
 	if c.source != 0 {
 		// Чужой selection стирает наши поля раньше, чем компоновщик отменит
 		// источник (handleSelection): пустое — не наше, смотрим offer.
-		if s := ownedFormats(c.owned, c.ownedHTML, len(c.ownedFiles) > 0 || c.ownedVirt != nil, c.ownedImg != nil); s != 0 {
+		if s := native.OwnedFormats(c.owned, c.ownedHTML, len(c.ownedFiles) > 0 || c.ownedVirt != nil, c.ownedImg != nil); s != 0 {
 			return s
 		}
 	}

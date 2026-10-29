@@ -41,19 +41,25 @@ func Widget(root string) []Facade {
 }
 
 // Window — файлы фасада window (ADR-0013) относительно корня модуля root:
-// ядро window/core; каждый шаг этапа 9 добавляет свой пакет.
+// ядро window/core и открытые имена слоя ниже бэкендов — platform/native
+// (NativeWindow, VK_*, Monitor, HitArea, DragEffect, ErrIconUnsupported) и
+// platform/keyboard (LockKeys). platform/pointer и platform/dbus открытых имён
+// window не дают.
 func Window(root string) []Facade {
 	const mod = "github.com/oops1/headless-gui/v3/"
-	return []Facade{{
-		Config: Config{
-			Dir:        filepath.Join(root, "window", "core"),
-			ImportPath: mod + "window/core",
-			Alias:      "core",
-			Package:    "window",
-			Tool:       "internal/facadegen (go run ./internal/facadegen/cmd/facadegen)",
-		},
-		Out: filepath.Join(root, "window", "core_gen.go"),
-	}}
+	pkg := func(dir, alias string) Facade {
+		return Facade{
+			Config: Config{
+				Dir:        filepath.Join(root, filepath.FromSlash(dir)),
+				ImportPath: mod + dir,
+				Alias:      alias,
+				Package:    "window",
+				Tool:       "internal/facadegen (go run ./internal/facadegen/cmd/facadegen)",
+			},
+			Out: filepath.Join(root, "window", alias+"_gen.go"),
+		}
+	}
+	return []Facade{pkg("window/core", "core"), pkg("platform/native", "native"), pkg("platform/keyboard", "keyboard")}
 }
 
 // All — все фасады модуля.

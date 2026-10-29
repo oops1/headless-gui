@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -95,8 +98,8 @@ func (e *rkEngine) SendPointerLeave() { e.add("leave") }
 
 // rkNative — окно ОС со всеми необязательными способностями этой темы.
 type rkNative struct {
-	NativeWindow
-	onRaw      func(k rawKey)
+	native.NativeWindow
+	onRaw      func(k keyboard.RawKey)
 	onWheelRaw func(x, y int, dx, dy float64, precise bool, legacy func())
 	onPixels   func(x, y int, dx, dy float64)
 	onMove     func(x, y int)
@@ -104,7 +107,7 @@ type rkNative struct {
 	onActivate func(active bool)
 }
 
-func (f *rkNative) SetOnRawKey(fn func(k rawKey)) { f.onRaw = fn }
+func (f *rkNative) SetOnRawKey(fn func(k keyboard.RawKey)) { f.onRaw = fn }
 func (f *rkNative) SetOnWheelRaw(fn func(x, y int, dx, dy float64, precise bool, legacy func())) {
 	f.onWheelRaw = fn
 }
@@ -128,69 +131,22 @@ func rkSurface(t *testing.T) (*surface, *rkNative, *rkEngine) {
 
 // ─── Чистые функции ─────────────────────────────────────────────────────────
 
-func TestWin32KeyLParam(t *testing.T) {
-	cases := []struct {
-		name     string
-		lparam   uintptr
-		scan     uint16
-		ext      bool
-		prevDown bool
-	}{
-		// «A»: скан-код 0x1E в битах 16–23, повтор 1 (бит 0).
-		{"A", 0x001E0001, 0x1E, false, false},
-		// Стрелка вправо: расширенная (бит 24), скан 0x4D.
-		{"Right", 0x014D0001, 0x4D, true, false},
-		// Автоповтор: бит 30.
-		{"A repeat", 0x401E0001, 0x1E, false, true},
-		// Отпускание: бит 30 и бит 31 (transition), скан-код не искажается.
-		{"A up", 0xC01E0001, 0x1E, false, true},
-		// Правый Ctrl: 0x1D расширенный; левый — тот же скан без E0.
-		{"RCtrl", 0x011D0001, 0x1D, true, false},
-		{"LCtrl", 0x001D0001, 0x1D, false, false},
-		// Верхние биты слова (контекст Alt, бит 29) не попадают в скан-код.
-		{"Alt context", 0x20380001, 0x38, false, false},
-	}
-	for _, c := range cases {
-		scan, ext, prev := win32KeyLParam(c.lparam)
-		if scan != c.scan || ext != c.ext || prev != c.prevDown {
-			t.Errorf("%s: (%#x, %v, %v), ждал (%#x, %v, %v)", c.name, scan, ext, prev, c.scan, c.ext, c.prevDown)
-		}
-	}
-}
-
-func TestX11ScanCode(t *testing.T) {
-	cases := map[byte]uint16{
-		8:   0,   // меньше невозможно: 8 — evdev 0
-		9:   1,   // Esc
-		38:  30,  // A (evdev KEY_A = 30)
-		133: 125, // Super_L
-		255: 247,
-		0:   0, // протокол такого не присылает
-		7:   0,
-	}
-	for kc, want := range cases {
-		if got := x11ScanCode(kc); got != want {
-			t.Errorf("x11ScanCode(%d) = %d, ждал %d", kc, got, want)
-		}
-	}
-}
-
 func TestVKToKeyCode_NewKeys(t *testing.T) {
 	cases := map[int]widget.KeyCode{
-		VK_BROWSER_BACK:     widget.KeyBrowserBack,
-		VK_BROWSER_HOME:     widget.KeyBrowserHome,
-		VK_VOLUME_MUTE:      widget.KeyVolumeMute,
-		VK_VOLUME_UP:        widget.KeyVolumeUp,
-		VK_MEDIA_PLAY_PAUSE: widget.KeyMediaPlayPause,
-		VK_LAUNCH_MAIL:      widget.KeyLaunchMail,
-		VK_LAUNCH_APP2:      widget.KeyLaunchApp2,
-		VK_KANA:             widget.KeyKana,
-		VK_KANJI:            widget.KeyKanji,
-		VK_CONVERT:          widget.KeyConvert,
-		VK_NONCONVERT:       widget.KeyNonConvert,
-		VK_SLEEP:            widget.KeySleep,
-		VK_CLEAR:            widget.KeyClear,
-		VK_PROCESSKEY:       widget.KeyIMEProcess,
+		native.VK_BROWSER_BACK:     widget.KeyBrowserBack,
+		native.VK_BROWSER_HOME:     widget.KeyBrowserHome,
+		native.VK_VOLUME_MUTE:      widget.KeyVolumeMute,
+		native.VK_VOLUME_UP:        widget.KeyVolumeUp,
+		native.VK_MEDIA_PLAY_PAUSE: widget.KeyMediaPlayPause,
+		native.VK_LAUNCH_MAIL:      widget.KeyLaunchMail,
+		native.VK_LAUNCH_APP2:      widget.KeyLaunchApp2,
+		native.VK_KANA:             widget.KeyKana,
+		native.VK_KANJI:            widget.KeyKanji,
+		native.VK_CONVERT:          widget.KeyConvert,
+		native.VK_NONCONVERT:       widget.KeyNonConvert,
+		native.VK_SLEEP:            widget.KeySleep,
+		native.VK_CLEAR:            widget.KeyClear,
+		native.VK_PROCESSKEY:       widget.KeyIMEProcess,
 	}
 	for vk, want := range cases {
 		if got := vkToKeyCode(vk); got != want {
@@ -209,96 +165,30 @@ func TestVKToKeyCode_NewKeys(t *testing.T) {
 func TestX11KeycodeToVK_RareKeys(t *testing.T) {
 	// keycode = evdev + 8.
 	cases := map[int]int{
-		183 + 8: VK_F13,
-		194 + 8: VK_F24,
-		113 + 8: VK_VOLUME_MUTE,
-		115 + 8: VK_VOLUME_UP,
-		164 + 8: VK_MEDIA_PLAY_PAUSE, // KEY_PLAYPAUSE
-		163 + 8: VK_MEDIA_NEXT_TRACK,
-		165 + 8: VK_MEDIA_PREV_TRACK,
-		92 + 8:  VK_CONVERT,    // KEY_HENKAN
-		94 + 8:  VK_NONCONVERT, // KEY_MUHENKAN
-		93 + 8:  VK_KANA,       // KEY_KATAKANAHIRAGANA
-		122 + 8: VK_KANA,       // KEY_HANGEUL
-		123 + 8: VK_KANJI,      // KEY_HANJA
-		158 + 8: VK_BROWSER_BACK,
-		155 + 8: VK_LAUNCH_MAIL,
-		142 + 8: VK_SLEEP,
+		183 + 8: native.VK_F13,
+		194 + 8: native.VK_F24,
+		113 + 8: native.VK_VOLUME_MUTE,
+		115 + 8: native.VK_VOLUME_UP,
+		164 + 8: native.VK_MEDIA_PLAY_PAUSE, // KEY_PLAYPAUSE
+		163 + 8: native.VK_MEDIA_NEXT_TRACK,
+		165 + 8: native.VK_MEDIA_PREV_TRACK,
+		92 + 8:  native.VK_CONVERT,    // KEY_HENKAN
+		94 + 8:  native.VK_NONCONVERT, // KEY_MUHENKAN
+		93 + 8:  native.VK_KANA,       // KEY_KATAKANAHIRAGANA
+		122 + 8: native.VK_KANA,       // KEY_HANGEUL
+		123 + 8: native.VK_KANJI,      // KEY_HANJA
+		158 + 8: native.VK_BROWSER_BACK,
+		155 + 8: native.VK_LAUNCH_MAIL,
+		142 + 8: native.VK_SLEEP,
 	}
 	for kc, want := range cases {
-		if got := x11KeycodeToVK(kc); got != want {
+		if got := keyboard.X11KeycodeToVK(kc); got != want {
 			t.Errorf("keycode %d: %#x, ждал %#x", kc, got, want)
 		}
 	}
 	// Сквозной путь до widget.KeyCode.
-	if got := vkToKeyCode(x11KeycodeToVK(186 + 8)); got != widget.KeyF16 {
+	if got := vkToKeyCode(keyboard.X11KeycodeToVK(186 + 8)); got != widget.KeyF16 {
 		t.Errorf("evdev 186 дошёл как %d, ждал KeyF16", got)
-	}
-}
-
-func TestWin32WheelRaw(t *testing.T) {
-	cases := []struct {
-		delta   int16
-		horiz   bool
-		dx, dy  float64
-		precise bool
-	}{
-		{120, false, 0, -120, false}, // щелчок вверх: вверх — отрицательно в движке
-		{-120, false, 0, 120, false}, // вниз
-		{-240, false, 0, 240, false}, // два щелчка разом
-		{30, false, 0, -30, true},    // тачпад: не кратно 120
-		{-7, false, 0, 7, true},      //
-		{120, true, 120, 0, false},   // горизонталь: вправо — положительно
-		{-120, true, -120, 0, false}, // влево
-		{-45, true, -45, 0, true},    // тачпад по горизонтали
-	}
-	for _, c := range cases {
-		dx, dy, p := win32WheelRaw(c.delta, c.horiz)
-		if dx != c.dx || dy != c.dy || p != c.precise {
-			t.Errorf("delta=%d horiz=%v: (%v,%v,%v), ждал (%v,%v,%v)", c.delta, c.horiz, dx, dy, p, c.dx, c.dy, c.precise)
-		}
-	}
-}
-
-func TestX11WheelRaw(t *testing.T) {
-	cases := map[byte][2]float64{4: {0, -120}, 5: {0, 120}, 6: {-120, 0}, 7: {120, 0}}
-	for b, want := range cases {
-		dx, dy, ok := x11WheelRaw(b)
-		if !ok || dx != want[0] || dy != want[1] {
-			t.Errorf("кнопка %d: (%v,%v,%v), ждал %v", b, dx, dy, ok, want)
-		}
-	}
-	for _, b := range []byte{1, 2, 3, 8, 9} {
-		if _, _, ok := x11WheelRaw(b); ok {
-			t.Errorf("кнопка %d принята за колесо", b)
-		}
-	}
-}
-
-func TestWaylandAxisRaw(t *testing.T) {
-	fixed := func(px float64) int32 { return int32(px * 256) }
-	cases := []struct {
-		name        string
-		value, d, v int32
-		raw         float64
-		precise     bool
-	}{
-		// Без discrete (версия 4): ≈10 единиц на щелчок → 120; Precise.
-		{"щелчок без discrete", fixed(10), 0, 0, 120, true},
-		{"вверх", fixed(-10), 0, 0, -120, true},
-		{"тачпад", fixed(2.5), 0, 0, 30, true},
-		// С discrete (версия 5): число щелчков решает, дельта — кратная 120.
-		{"discrete", fixed(10), 1, 0, 120, false},
-		{"два discrete", fixed(20), -2, 0, -240, false},
-		// С value120 (версия 8): значение берётся как есть, оно точнее.
-		{"value120", fixed(10), 0, 60, 60, false},
-		{"value120 приоритетнее discrete", fixed(10), 1, -120, -120, false},
-	}
-	for _, c := range cases {
-		raw, p := waylandAxisRaw(c.value, c.d, c.v)
-		if raw != c.raw || p != c.precise {
-			t.Errorf("%s: (%v,%v), ждал (%v,%v)", c.name, raw, p, c.raw, c.precise)
-		}
 	}
 }
 
@@ -315,9 +205,9 @@ func rkRun(s *surface, eng *rkEngine, fn func()) []widget.KeyEvent {
 func TestRawKey_ScanCodeAndExtendedReachEngine(t *testing.T) {
 	s, fn, eng := rkSurface(t)
 	got := rkRun(s, eng, func() {
-		fn.onRaw(rawKey{VK: VK_A, Scan: 0x1E, Pressed: true})
-		fn.onRaw(rawKey{VK: VK_RIGHT, Scan: 0x4D, Extended: true, Pressed: true, Repeat: true})
-		fn.onRaw(rawKey{VK: VK_RIGHT, Scan: 0x4D, Extended: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_A, Scan: 0x1E, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_RIGHT, Scan: 0x4D, Extended: true, Pressed: true, Repeat: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_RIGHT, Scan: 0x4D, Extended: true})
 	})
 	want := []widget.KeyEvent{
 		{Code: widget.KeyA, Pressed: true, ScanCode: 0x1E},
@@ -333,11 +223,11 @@ func TestRawKey_ScanCodeAndExtendedReachEngine(t *testing.T) {
 func TestRawKey_UnnamedKeyReachesEngine(t *testing.T) {
 	s, fn, eng := rkSurface(t)
 	got := rkRun(s, eng, func() {
-		fn.onRaw(rawKey{VK: 0, Scan: 0x7E, Pressed: true})
-		fn.onRaw(rawKey{VK: 0, Scan: 0x7E})
+		fn.onRaw(keyboard.RawKey{VK: 0, Scan: 0x7E, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: 0, Scan: 0x7E})
 		// Безымянная и без скан-кода (например, VK_PACKET от SendInput) —
 		// по-прежнему не событие.
-		fn.onRaw(rawKey{VK: 0xE7, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: 0xE7, Pressed: true})
 	})
 	want := []widget.KeyEvent{
 		{Code: widget.KeyUnknown, Pressed: true, ScanCode: 0x7E},
@@ -357,10 +247,10 @@ func TestRawKey_UnnamedKeyReachesEngine(t *testing.T) {
 // ScanCode пуст, модификаторы событием не ходят.
 func TestRawKey_LegacyPathUnchanged(t *testing.T) {
 	s, rec := newAltSurface()
-	s.keyEvent(0xE7, true)     // нет в таблице
-	s.keyEvent(VK_SHIFT, true) // модификатор без скан-кода
-	s.keyEvent(VK_CONTROL, true)
-	s.keyEventRepeat(VK_A, true, true)
+	s.keyEvent(0xE7, true)            // нет в таблице
+	s.keyEvent(native.VK_SHIFT, true) // модификатор без скан-кода
+	s.keyEvent(native.VK_CONTROL, true)
+	s.keyEventRepeat(native.VK_A, true, true)
 	want := []widget.KeyEvent{
 		{Code: widget.KeyA, Mod: widget.ModShift | widget.ModCtrl, Pressed: true, Repeat: true},
 	}
@@ -374,10 +264,10 @@ func TestRawKey_LegacyPathUnchanged(t *testing.T) {
 func TestRawKey_ModifiersAreKeys(t *testing.T) {
 	s, fn, eng := rkSurface(t)
 	got := rkRun(s, eng, func() {
-		fn.onRaw(rawKey{VK: VK_SHIFT, Scan: 0x2A, Pressed: true})
-		fn.onRaw(rawKey{VK: VK_CONTROL, Scan: 0x1D, Extended: true, Pressed: true}) // правый Ctrl
-		fn.onRaw(rawKey{VK: VK_A, Scan: 0x1E, Pressed: true})
-		fn.onRaw(rawKey{VK: VK_CONTROL, Scan: 0x1D, Extended: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_SHIFT, Scan: 0x2A, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_CONTROL, Scan: 0x1D, Extended: true, Pressed: true}) // правый Ctrl
+		fn.onRaw(keyboard.RawKey{VK: native.VK_A, Scan: 0x1E, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_CONTROL, Scan: 0x1D, Extended: true})
 	})
 	want := []widget.KeyEvent{
 		{Code: widget.KeyShift, Mod: widget.ModShift, Pressed: true, ScanCode: 0x2A},
@@ -395,8 +285,8 @@ func TestRawKey_ModifiersAreKeys(t *testing.T) {
 func TestRawKey_AltKeyAndTapGesture(t *testing.T) {
 	s, fn, eng := rkSurface(t)
 	got := rkRun(s, eng, func() {
-		fn.onRaw(rawKey{VK: VK_ALT, Scan: 0x38, Pressed: true})
-		fn.onRaw(rawKey{VK: VK_ALT, Scan: 0x38})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_ALT, Scan: 0x38, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_ALT, Scan: 0x38})
 	})
 	want := []widget.KeyEvent{
 		{Code: widget.KeyAltKey, Mod: widget.ModAlt, Pressed: true, ScanCode: 0x38},
@@ -410,10 +300,10 @@ func TestRawKey_AltKeyAndTapGesture(t *testing.T) {
 
 	// Alt+F — сочетание: жеста нет, но клавиши Alt пришли.
 	got = rkRun(s, eng, func() {
-		fn.onRaw(rawKey{VK: VK_ALT, Scan: 0x38, Pressed: true})
-		fn.onRaw(rawKey{VK: VK_F, Scan: 0x21, Pressed: true})
-		fn.onRaw(rawKey{VK: VK_F, Scan: 0x21})
-		fn.onRaw(rawKey{VK: VK_ALT, Scan: 0x38})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_ALT, Scan: 0x38, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_F, Scan: 0x21, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_F, Scan: 0x21})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_ALT, Scan: 0x38})
 	})
 	for _, k := range got {
 		if k.Code == widget.KeyAlt {
@@ -429,7 +319,7 @@ func TestRawKey_AltKeyAndTapGesture(t *testing.T) {
 func TestRawKey_TextInputUnbroken(t *testing.T) {
 	s, fn, eng := rkSurface(t)
 	got := rkRun(s, eng, func() {
-		fn.onRaw(rawKey{VK: VK_S, Scan: 0x1F, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_S, Scan: 0x1F, Pressed: true})
 		fn.onChar('ы')
 		fn.onChar('\x01') // управляющий символ
 	})
@@ -447,9 +337,9 @@ func TestRawKey_TextInputUnbroken(t *testing.T) {
 func TestRawKey_RepeatKeepsScan(t *testing.T) {
 	s, fn, eng := rkSurface(t)
 	got := rkRun(s, eng, func() {
-		fn.onRaw(rawKey{VK: VK_Z, Scan: 0x2C, Pressed: true})
-		fn.onRaw(rawKey{VK: VK_Z, Scan: 0x2C, Pressed: true, Repeat: true})
-		fn.onRaw(rawKey{VK: VK_Z, Scan: 0x2C, Pressed: true, Repeat: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_Z, Scan: 0x2C, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_Z, Scan: 0x2C, Pressed: true, Repeat: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_Z, Scan: 0x2C, Pressed: true, Repeat: true})
 	})
 	if len(got) != 3 || got[0].Repeat || !got[1].Repeat || !got[2].Repeat {
 		t.Fatalf("пометки повтора: %+v", got)
@@ -472,11 +362,11 @@ func TestRawKey_RepeatKeepsScan(t *testing.T) {
 func TestReleaseHeldKeys_OnDeactivate(t *testing.T) {
 	s, fn, eng := rkSurface(t)
 	rkRun(s, eng, func() {
-		fn.onRaw(rawKey{VK: VK_CONTROL, Scan: 0x1D, Pressed: true})
-		fn.onRaw(rawKey{VK: VK_SHIFT, Scan: 0x2A, Pressed: true})
-		fn.onRaw(rawKey{VK: VK_ALT, Scan: 0x38, Pressed: true})
-		fn.onRaw(rawKey{VK: VK_A, Scan: 0x1E, Pressed: true})
-		fn.onRaw(rawKey{VK: 0, Scan: 0x7E, Pressed: true}) // безымянная тоже зажата
+		fn.onRaw(keyboard.RawKey{VK: native.VK_CONTROL, Scan: 0x1D, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_SHIFT, Scan: 0x2A, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_ALT, Scan: 0x38, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_A, Scan: 0x1E, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: 0, Scan: 0x7E, Pressed: true}) // безымянная тоже зажата
 	})
 
 	s.releaseHeldKeys()
@@ -518,7 +408,7 @@ func TestReleaseHeldKeys_OnDeactivate(t *testing.T) {
 func TestReleaseHeldKeys_NoAltTapGesture(t *testing.T) {
 	s, fn, eng := rkSurface(t)
 	rkRun(s, eng, func() {
-		fn.onRaw(rawKey{VK: VK_ALT, Scan: 0x38, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_ALT, Scan: 0x38, Pressed: true})
 	})
 	s.releaseHeldKeys()
 	eng.run()
@@ -549,8 +439,8 @@ func TestReleaseHeldKeys_StrayModifiersCleared(t *testing.T) {
 func TestReleaseHeldKeys_ReleasedKeyNotRepeated(t *testing.T) {
 	s, fn, eng := rkSurface(t)
 	rkRun(s, eng, func() {
-		fn.onRaw(rawKey{VK: VK_CONTROL, Scan: 0x1D, Pressed: true})
-		fn.onRaw(rawKey{VK: VK_CONTROL, Scan: 0x1D})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_CONTROL, Scan: 0x1D, Pressed: true})
+		fn.onRaw(keyboard.RawKey{VK: native.VK_CONTROL, Scan: 0x1D})
 	})
 	s.releaseHeldKeys()
 	eng.run()
@@ -586,7 +476,7 @@ func TestWindow_SetOnActivate(t *testing.T) {
 		t.Error("IsActive == false после активации")
 	}
 
-	fn.onRaw(rawKey{VK: VK_CONTROL, Scan: 0x1D, Pressed: true})
+	fn.onRaw(keyboard.RawKey{VK: native.VK_CONTROL, Scan: 0x1D, Pressed: true})
 	eng.run()
 	eng.takenKeys()
 	seq = nil
@@ -673,7 +563,7 @@ func TestPointerLeave_ReachesEngineAfterMove(t *testing.T) {
 	eng.run()
 	eng.taken()
 
-	fn.onMove(pointerOutside, pointerOutside)
+	fn.onMove(pointer.Outside, pointer.Outside)
 	eng.run()
 	if got, want := eng.taken(), []string{"move -1,-1", "leave"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("до движка дошло %q, ждал %q", got, want)

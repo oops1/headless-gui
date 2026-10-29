@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -22,7 +23,7 @@ type fakeChildHost struct {
 	bands   [][]image.Rectangle // области ввода блитов, по порядку
 	closed  []uintptr
 	calls   []string // все вызовы по порядку: "open 1", "blit 1", "close 1"
-	h       childPopupHandlers
+	h       native.ChildPopupHandlers
 }
 
 func (f *fakeChildHost) OpenChildPopup(id uintptr, x, y, w, h int) error {
@@ -48,7 +49,7 @@ func (f *fakeChildHost) CloseChildPopup(id uintptr) {
 	f.calls = append(f.calls, fmt.Sprintf("close %d", id))
 }
 
-func (f *fakeChildHost) SetChildPopupHandlers(h childPopupHandlers) { f.h = h }
+func (f *fakeChildHost) SetChildPopupHandlers(h native.ChildPopupHandlers) { f.h = h }
 
 func popupCall(id uintptr, x, y, w, h int) string {
 	return fmt.Sprintf("%d:%d,%d %dx%d", int(id), x, y, w, h)

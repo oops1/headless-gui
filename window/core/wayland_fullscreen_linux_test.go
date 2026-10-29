@@ -199,7 +199,7 @@ func TestWayland_Fullscreen_KeepsMaximizedValue(t *testing.T) {
 	}
 }
 
-// Полноэкранное окно не скругляется (cornermask.go), обычное — скругляется.
+// Полноэкранное окно не скругляется (platform/native/cornermask.go), обычное — скругляется.
 func TestWayland_Fullscreen_NoRoundedCorners(t *testing.T) {
 	c := newWlTestWindow(t)
 	c.w.SetCornerRadius(8)

@@ -3,13 +3,17 @@ package core
 // initial_windows.go — начальное положение и «развёрнуто» на Win32 (initial.go).
 //
 // Само решение (стиль, команда показа, место) принимает чистая функция
-// win32InitialCreate, а Create и createInternal ей пользуются.
+// native.Win32InitialCreate, а Create и createInternal ей пользуются.
 
-import "unsafe"
+import (
+	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 // setInitialPlacement запоминает положение и «развёрнуто» до Create.
 // Реализует initialPlaceBackend.
-func (w *Win32Window) setInitialPlacement(p initialPlacement) { w.initial = p }
+func (w *Win32Window) setInitialPlacement(p native.InitialPlacement) { w.initial = p }
 
 // clientSize — размер клиентской области, каким его назначила система.
 // Реализует clientSizer: окно, показанное развёрнутым, получает свой размер

@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"image"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // XdndProxy на стороне источника (спецификация XDND): окно под курсором может
@@ -159,7 +161,7 @@ func TestX11_DragSource_MessagesViaProxy(t *testing.T) {
 	}
 
 	w, f := newX11DragWindow(t)
-	got := startDrag(t, w, f, DragEffectCopy, 50, 5)
+	got := startDrag(t, w, f, native.DragEffectCopy, 50, 5)
 	w.drag.proxyOf = func(win uint32) uint32 {
 		if win == 50 {
 			return 99
@@ -188,7 +190,7 @@ func TestX11_DragSource_MessagesViaProxy(t *testing.T) {
 
 	// Отмена Esc: XdndLeave посреднику.
 	w2, f2 := newX11DragWindow(t)
-	startDrag(t, w2, f2, DragEffectCopy, 50, 5)
+	startDrag(t, w2, f2, native.DragEffectCopy, 50, 5)
 	w2.drag.proxyOf = w.drag.proxyOf
 	w2.handleX11Event(motion(300, 200, 0))
 	w2.dragCancel()
@@ -199,7 +201,7 @@ func TestX11_DragSource_MessagesViaProxy(t *testing.T) {
 	// Смена окна: Leave старому — его посреднику, Enter новому — без посредника.
 	w3, f3 := newX11DragWindow(t)
 	cur := uint32(50)
-	startDrag(t, w3, f3, DragEffectCopy, 50, 5)
+	startDrag(t, w3, f3, native.DragEffectCopy, 50, 5)
 	w3.drag.find = func(rx, ry int) (uint32, int) { return cur, 5 }
 	w3.drag.proxyOf = w.drag.proxyOf
 	w3.handleX11Event(motion(1, 1, 0))
@@ -225,7 +227,7 @@ func TestX11_NoDragImage(t *testing.T) {
 		t.Error("DragImageSupported true на X11")
 	}
 	w.btnDown.Store(1)
-	if !win.BeginDragFilesImage([]string{"/tmp/a"}, DragEffectCopy, image.NewRGBA(image.Rect(0, 0, 8, 8)), image.Pt(1, 1)) {
+	if !win.BeginDragFilesImage([]string{"/tmp/a"}, native.DragEffectCopy, image.NewRGBA(image.Rect(0, 0, 8, 8)), image.Pt(1, 1)) {
 		t.Fatal("BeginDragFilesImage на X11 не начал перетаскивание без значка")
 	}
 	if f.find(clientMsg(tAtomBegin, 1)) == nil {
@@ -236,7 +238,7 @@ func TestX11_NoDragImage(t *testing.T) {
 // Окно без XdndProxy: поведение прежнее — получатель и window совпадают.
 func TestX11_DragSource_NoProxyUnchanged(t *testing.T) {
 	w, f := newX11DragWindow(t)
-	startDrag(t, w, f, DragEffectCopy, 50, 5)
+	startDrag(t, w, f, native.DragEffectCopy, 50, 5)
 	w.handleX11Event(motion(300, 200, 0))
 	enter := f.find(clientMsg(tAtomEnter, 50))
 	if enter == nil || binary.LittleEndian.Uint32(enter[16:20]) != 50 {

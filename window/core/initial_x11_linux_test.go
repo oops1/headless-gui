@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Начальное положение и «развёрнуто» на X11, на проводе (initial_x11_linux.go).
@@ -78,7 +80,7 @@ func (s *initX11Server) atom(name string) uint32 {
 
 // createInitX11 создаёт окно с заказанным началом и возвращает запросы,
 // пришедшие до MapWindow включительно.
-func createInitX11(t *testing.T, p initialPlacement, minW, minH, width, height int) (*X11Window, *initX11Server, []x11Request) {
+func createInitX11(t *testing.T, p native.InitialPlacement, minW, minH, width, height int) (*X11Window, *initX11Server, []x11Request) {
 	t.Helper()
 	client, server := x11Pair(t)
 	srv := newInitX11Server()
@@ -138,7 +140,7 @@ func propWords(r x11Request) []uint32 {
 // менеджеру — до MapWindow.
 func TestX11Initial_PositionAndHintsBeforeMap(t *testing.T) {
 	_, _, reqs := createInitX11(t,
-		initialPlacement{PosSet: true, X: 210, Y: 120, SizeSet: true}, 0, 0, 640, 480)
+		native.InitialPlacement{PosSet: true, X: 210, Y: 120, SizeSet: true}, 0, 0, 640, 480)
 
 	ci := indexOfReq(reqs, func(r x11Request) bool { return r.major == xOpCreateWindow })
 	mi := indexOfReq(reqs, func(r x11Request) bool { return r.major == xOpMapWindow })
@@ -167,7 +169,7 @@ func TestX11Initial_PositionAndHintsBeforeMap(t *testing.T) {
 	if len(words) != 18 {
 		t.Fatalf("WM_SIZE_HINTS из %d слов, ждал 18", len(words))
 	}
-	if want := uint32(x11USPosition | x11PPosition | x11USSize | x11PSize); words[0] != want {
+	if want := uint32(native.X11USPosition | native.X11PPosition | native.X11USSize | native.X11PSize); words[0] != want {
 		t.Errorf("флаги %#x, ждал USPosition|PPosition|USSize|PSize %#x", words[0], want)
 	}
 	if int32(words[1]) != 210 || int32(words[2]) != 120 || words[3] != 640 || words[4] != 480 {
@@ -177,7 +179,7 @@ func TestX11Initial_PositionAndHintsBeforeMap(t *testing.T) {
 
 // Отрицательные координаты (монитор левее основного) доходят как есть.
 func TestX11Initial_NegativePosition(t *testing.T) {
-	w, _, reqs := createInitX11(t, initialPlacement{PosSet: true, X: -1600, Y: -200, SizeSet: true}, 0, 0, 640, 480)
+	w, _, reqs := createInitX11(t, native.InitialPlacement{PosSet: true, X: -1600, Y: -200, SizeSet: true}, 0, 0, 640, 480)
 	ci := indexOfReq(reqs, func(r x11Request) bool { return r.major == xOpCreateWindow })
 	cw := reqs[ci].raw
 	if x, y := int16(binary.LittleEndian.Uint16(cw[12:14])), int16(binary.LittleEndian.Uint16(cw[14:16])); x != -1600 || y != -200 {
@@ -192,7 +194,7 @@ func TestX11Initial_NegativePosition(t *testing.T) {
 // Развёрнуто: _NET_WM_STATE со значениями MAXIMIZED_VERT/HORZ ставится
 // свойством ДО MapWindow, а не ClientMessage'ем после.
 func TestX11Initial_MaximizedStatePropertyBeforeMap(t *testing.T) {
-	w, srv, reqs := createInitX11(t, initialPlacement{Maximized: true}, 0, 0, 640, 480)
+	w, srv, reqs := createInitX11(t, native.InitialPlacement{Maximized: true}, 0, 0, 640, 480)
 
 	state, maxH, maxV := srv.atom("_NET_WM_STATE"), srv.atom("_NET_WM_STATE_MAXIMIZED_HORZ"), srv.atom("_NET_WM_STATE_MAXIMIZED_VERT")
 	if state == 0 || maxH == 0 || maxV == 0 {
@@ -237,7 +239,7 @@ func TestX11Initial_MaximizedStatePropertyBeforeMap(t *testing.T) {
 // Границы вместе с «развёрнуто»: и подсказки положения, и состояние — до показа.
 func TestX11Initial_BoundsAndMaximized(t *testing.T) {
 	_, srv, reqs := createInitX11(t,
-		initialPlacement{PosSet: true, X: 50, Y: 60, SizeSet: true, Maximized: true}, 0, 0, 700, 500)
+		native.InitialPlacement{PosSet: true, X: 50, Y: 60, SizeSet: true, Maximized: true}, 0, 0, 700, 500)
 	mi := indexOfReq(reqs, func(r x11Request) bool { return r.major == xOpMapWindow })
 	hi := indexOfReq(reqs, func(r x11Request) bool { return isChangeProp(r, xAtomWMNormalHints) })
 	si := indexOfReq(reqs, func(r x11Request) bool { return isChangeProp(r, srv.atom("_NET_WM_STATE")) })
@@ -250,7 +252,7 @@ func TestX11Initial_BoundsAndMaximized(t *testing.T) {
 // минимум, и положение одним свойством (оно заменяется целиком).
 func TestX11Initial_HintsKeepMinSize(t *testing.T) {
 	_, _, reqs := createInitX11(t,
-		initialPlacement{PosSet: true, X: 5, Y: 6, SizeSet: true}, 320, 200, 640, 480)
+		native.InitialPlacement{PosSet: true, X: 5, Y: 6, SizeSet: true}, 320, 200, 640, 480)
 
 	n := 0
 	var words []uint32
@@ -263,10 +265,10 @@ func TestX11Initial_HintsKeepMinSize(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("WM_NORMAL_HINTS выставлен %d раз, ждал один (второй затёр бы первый)", n)
 	}
-	if words[0]&x11PMinSize == 0 || words[5] != 320 || words[6] != 200 {
+	if words[0]&native.X11PMinSize == 0 || words[5] != 320 || words[6] != 200 {
 		t.Errorf("минимум потерян: флаги %#x, min %d×%d", words[0], words[5], words[6])
 	}
-	if words[0]&x11USPosition == 0 {
+	if words[0]&native.X11USPosition == 0 {
 		t.Errorf("положение потеряно: флаги %#x", words[0])
 	}
 }
@@ -274,7 +276,7 @@ func TestX11Initial_HintsKeepMinSize(t *testing.T) {
 // Ничего не заказано: окно по центру, свойства те же, что раньше (без минимума
 // WM_NORMAL_HINTS не пишется вовсе).
 func TestX11Initial_NothingRequestedKeepsOldBehaviour(t *testing.T) {
-	w, srv, reqs := createInitX11(t, initialPlacement{}, 0, 0, 640, 480)
+	w, srv, reqs := createInitX11(t, native.InitialPlacement{}, 0, 0, 640, 480)
 	ci := indexOfReq(reqs, func(r x11Request) bool { return r.major == xOpCreateWindow })
 	cw := reqs[ci].raw
 	if x, y := int16(binary.LittleEndian.Uint16(cw[12:14])), int16(binary.LittleEndian.Uint16(cw[14:16])); x != (1920-640)/2 || y != (1080-480)/2 {
@@ -293,25 +295,25 @@ func TestX11Initial_NothingRequestedKeepsOldBehaviour(t *testing.T) {
 
 // Минимум без положения — прежний путь: WM_NORMAL_HINTS только с PMinSize.
 func TestX11Initial_MinSizeOnlyUnchanged(t *testing.T) {
-	_, _, reqs := createInitX11(t, initialPlacement{}, 320, 200, 640, 480)
+	_, _, reqs := createInitX11(t, native.InitialPlacement{}, 320, 200, 640, 480)
 	i := indexOfReq(reqs, func(r x11Request) bool { return isChangeProp(r, xAtomWMNormalHints) })
 	if i < 0 {
 		t.Fatal("минимум не выставлен")
 	}
 	words := propWords(reqs[i])
-	if words[0] != x11PMinSize {
+	if words[0] != native.X11PMinSize {
 		t.Errorf("флаги %#x, ждал один PMinSize", words[0])
 	}
 }
 
 // Только положение (размер у движка): объявляется USPosition|PPosition, но не USSize.
 func TestX11Initial_PositionWithoutSize(t *testing.T) {
-	_, _, reqs := createInitX11(t, initialPlacement{PosSet: true, X: 11, Y: 22}, 0, 0, 640, 480)
+	_, _, reqs := createInitX11(t, native.InitialPlacement{PosSet: true, X: 11, Y: 22}, 0, 0, 640, 480)
 	i := indexOfReq(reqs, func(r x11Request) bool { return isChangeProp(r, xAtomWMNormalHints) })
 	if i < 0 {
 		t.Fatal("подсказки не выставлены")
 	}
-	if got := propWords(reqs[i])[0]; got != x11USPosition|x11PPosition {
+	if got := propWords(reqs[i])[0]; got != native.X11USPosition|native.X11PPosition {
 		t.Errorf("флаги %#x, ждал USPosition|PPosition", got)
 	}
 }

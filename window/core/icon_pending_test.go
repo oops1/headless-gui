@@ -4,6 +4,8 @@ import (
 	"errors"
 	"image"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Значок, заданный до Run — запрос GG-38.
@@ -16,19 +18,19 @@ import (
 
 // fakeIconBackend — бэкенд, умеющий значок, но не окно.
 type fakeIconBackend struct {
-	NativeWindow
+	native.NativeWindow
 	got []image.Image
 	n   int
 }
 
-func (f *fakeIconBackend) setIcon(icons []image.Image) error {
+func (f *fakeIconBackend) SetIcon(icons []image.Image) error {
 	f.got = icons
 	f.n++
 	return nil
 }
 
 // deafBackend — бэкенд без поддержки значка.
-type deafBackend struct{ NativeWindow }
+type deafBackend struct{ native.NativeWindow }
 
 func icon16() image.Image { return image.NewRGBA(image.Rect(0, 0, 16, 16)) }
 
@@ -83,7 +85,7 @@ func TestSetIcon_UnsupportedBackendReportsError(t *testing.T) {
 	win := &Window{}
 	win.native = &deafBackend{}
 
-	if err := win.SetIcon(icon16()); !errors.Is(err, ErrIconUnsupported) {
+	if err := win.SetIcon(icon16()); !errors.Is(err, native.ErrIconUnsupported) {
 		t.Errorf("бэкенд без поддержки вернул %v", err)
 	}
 }

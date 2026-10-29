@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -51,7 +52,7 @@ func (n *linuxNotifier) setBalloonClickHandler(fn func()) {
 // showBalloon показывает уведомление. infoFlag — severity в кодировке tray.go
 // (0 none, 1 info, 2 warning, 3 error): выбирает значок и «срочность».
 func (n *linuxNotifier) showBalloon(title, text string, infoFlag uint32) error {
-	c, err := dbusSession()
+	c, err := dbus.Session()
 	if err != nil {
 		return fmt.Errorf("window: уведомления недоступны: %w", err)
 	}
@@ -66,11 +67,11 @@ func (n *linuxNotifier) showBalloon(title, text string, infoFlag uint32) error {
 		actions = []string{"default", widget.Tr("dlg.open")}
 	}
 
-	hints := map[string]dbusVariant{
+	hints := map[string]dbus.Variant{
 		"urgency":       {Sig: "y", Val: notifyUrgency(infoFlag)},
 		"desktop-entry": {Sig: "s", Val: notifyAppName()},
 	}
-	reply, err := c.call(notifyBusName, notifyObjPath, notifyInterface, "Notify",
+	reply, err := c.Call(notifyBusName, notifyObjPath, notifyInterface, "Notify",
 		"susssasa{sv}i", []any{
 			notifyAppName(),      // app_name
 			uint32(0),            // replaces_id: 0 — новое уведомление
@@ -102,7 +103,7 @@ func (n *linuxNotifier) showBalloon(title, text string, infoFlag uint32) error {
 
 // ensureSubscribed единожды подписывается на сигналы демона: ActionInvoked
 // (щелчок по уведомлению/кнопке) и NotificationClosed (снято/просрочено).
-func (n *linuxNotifier) ensureSubscribed(c *dbusConn) {
+func (n *linuxNotifier) ensureSubscribed(c *dbus.Conn) {
 	n.mu.Lock()
 	if n.subscribed {
 		n.mu.Unlock()
@@ -111,10 +112,10 @@ func (n *linuxNotifier) ensureSubscribed(c *dbusConn) {
 	n.subscribed = true
 	n.mu.Unlock()
 
-	if err := c.addMatch("type='signal',interface='" + notifyInterface + "'"); err != nil {
+	if err := c.AddMatch("type='signal',interface='" + notifyInterface + "'"); err != nil {
 		return
 	}
-	c.onSignal(func(msg *dbusMessage) {
+	c.OnSignal(func(msg *dbus.Message) {
 		if msg.Interface != notifyInterface || len(msg.Body) == 0 {
 			return
 		}
@@ -141,7 +142,7 @@ func (n *linuxNotifier) ensureSubscribed(c *dbusConn) {
 
 // capability сообщает, объявляет ли демон указанную возможность
 // ("actions", "body-markup", …). Список читается один раз и кэшируется.
-func (n *linuxNotifier) capability(c *dbusConn, name string) bool {
+func (n *linuxNotifier) capability(c *dbus.Conn, name string) bool {
 	n.mu.Lock()
 	if n.caps != nil {
 		ok := n.caps[name]
@@ -151,7 +152,7 @@ func (n *linuxNotifier) capability(c *dbusConn, name string) bool {
 	n.mu.Unlock()
 
 	caps := map[string]bool{}
-	reply, err := c.call(notifyBusName, notifyObjPath, notifyInterface, "GetCapabilities", "", nil)
+	reply, err := c.Call(notifyBusName, notifyObjPath, notifyInterface, "GetCapabilities", "", nil)
 	if err == nil && len(reply.Body) > 0 {
 		if list, ok := reply.Body[0].([]string); ok {
 			for _, s := range list {

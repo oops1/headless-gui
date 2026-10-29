@@ -16,7 +16,11 @@ package core
 // полупрозрачное окно было бы невидимым) переход вырождается: окно
 // показывается сразу, исчезающее закрывается сразу.
 
-import "image"
+import (
+	"image"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 // popupFadeKind — как окно-попап умеет прозрачность.
 type popupFadeKind uint8
@@ -40,11 +44,11 @@ type popupPixelAlpha interface {
 }
 
 // popupFadeOf — как созданное окно умеет прозрачность.
-func popupFadeOf(native NativeWindow) popupFadeKind {
-	if _, ok := native.(popupAlphaSetter); ok {
+func popupFadeOf(nw native.NativeWindow) popupFadeKind {
+	if _, ok := nw.(popupAlphaSetter); ok {
 		return popupFadeWindow
 	}
-	if pa, ok := native.(popupPixelAlpha); ok && pa.PopupPixelAlpha() {
+	if pa, ok := nw.(popupPixelAlpha); ok && pa.PopupPixelAlpha() {
 		return popupFadeCopy
 	}
 	return popupFadeNone

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -161,41 +162,41 @@ func TestATSPICacheItems(t *testing.T) {
 	win.title = "Кэш"
 	v := b.ids.assign(a11yFlatten(buildTestAccessTree("abc")))
 
-	rep := b.handleCache(&dbusMessage{Path: atspiCachePath, Interface: ifaceCache, Member: "GetItems"}, v)
+	rep := b.handleCache(&dbus.Message{Path: atspiCachePath, Interface: ifaceCache, Member: "GetItems"}, v)
 	if rep == nil || rep.Sig != atspiCacheItemsSig {
 		t.Fatalf("GetItems вернул %#v", rep)
 	}
-	arr, ok := rep.Body[0].(dbusArray)
+	arr, ok := rep.Body[0].(dbus.Array)
 	if !ok || len(arr.Items) != len(v.Snap.Nodes)+1 {
 		t.Fatalf("записей кэша %d, want %d", len(arr.Items), len(v.Snap.Nodes)+1)
 	}
 	// Кодируемость записей — гарантия, что сигнатура и типы совпали.
-	e := dbusEnc{}
-	if err := e.encodeAs(atspiCacheItemsSig, arr); err != nil {
+	e := dbus.Encoder{}
+	if err := e.EncodeAs(atspiCacheItemsSig, arr); err != nil {
 		t.Fatalf("запись кэша не кодируется: %v", err)
 	}
 
-	app := arr.Items[0].(dbusStruct)
+	app := arr.Items[0].(dbus.Struct)
 	if app.Fields[3] != int32(-1) || app.Fields[4] != int32(1) {
 		t.Errorf("приложение: индекс %v, детей %v", app.Fields[3], app.Fields[4])
 	}
 	if app.Fields[6] != "Кэш" || app.Fields[7] != uint32(atspiRoleApplication) {
 		t.Errorf("приложение: имя %v, роль %v", app.Fields[6], app.Fields[7])
 	}
-	frame := arr.Items[1].(dbusStruct)
+	frame := arr.Items[1].(dbus.Struct)
 	if frame.Fields[7] != uint32(atspiRoleFrame) || frame.Fields[3] != int32(0) {
 		t.Errorf("окно: роль %v, индекс %v", frame.Fields[7], frame.Fields[3])
 	}
-	btn := arr.Items[2].(dbusStruct)
+	btn := arr.Items[2].(dbus.Struct)
 	if btn.Fields[6] != "Да" || btn.Fields[7] != uint32(atspiRolePushButton) {
 		t.Errorf("кнопка: имя %v, роль %v", btn.Fields[6], btn.Fields[7])
 	}
 	// Родитель кнопки — окно, а приложение у всех одно.
-	parent := btn.Fields[2].(dbusStruct)
-	if string(parent.Fields[1].(dbusObjectPath)) != atspiPath(v.id(0)) {
+	parent := btn.Fields[2].(dbus.Struct)
+	if string(parent.Fields[1].(dbus.ObjectPath)) != atspiPath(v.id(0)) {
 		t.Errorf("родитель кнопки = %v", parent.Fields[1])
 	}
-	if string(btn.Fields[1].(dbusStruct).Fields[1].(dbusObjectPath)) != atspiRootPath {
+	if string(btn.Fields[1].(dbus.Struct).Fields[1].(dbus.ObjectPath)) != atspiRootPath {
 		t.Errorf("приложение в записи кнопки = %v", btn.Fields[1])
 	}
 }
@@ -248,15 +249,15 @@ func TestATSPIBridgeLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cl, err := dbusDial(addr)
+	cl, err := dbus.Dial(addr)
 	if err != nil {
 		t.Fatalf("клиент шины доступности: %v", err)
 	}
 	defer cl.Close()
 
-	call := func(path, iface, member, sig string, args []any) *dbusMessage {
+	call := func(path, iface, member, sig string, args []any) *dbus.Message {
 		t.Helper()
-		reply, err := cl.call(b.appName, path, iface, member, sig, args)
+		reply, err := cl.Call(b.appName, path, iface, member, sig, args)
 		if err != nil {
 			t.Fatalf("%s %s.%s: %v", path, iface, member, err)
 		}
@@ -265,7 +266,7 @@ func TestATSPIBridgeLive(t *testing.T) {
 	getProp := func(path, iface, name string) any {
 		t.Helper()
 		reply := call(path, ifaceProps, "Get", "ss", []any{iface, name})
-		v, ok := reply.Body[0].(dbusVariant)
+		v, ok := reply.Body[0].(dbus.Variant)
 		if !ok {
 			t.Fatalf("свойство %s.%s: %#v", iface, name, reply.Body[0])
 		}
@@ -286,7 +287,7 @@ func TestATSPIBridgeLive(t *testing.T) {
 		t.Errorf("ToolkitName = %v", got)
 	}
 	// Родитель приложения — рабочий стол реестра.
-	parent, ok := getProp(atspiRootPath, ifaceAccessible, "Parent").(dbusStruct)
+	parent, ok := getProp(atspiRootPath, ifaceAccessible, "Parent").(dbus.Struct)
 	if !ok || parent.Fields[0] != atspiRegistryName {
 		t.Errorf("родитель приложения = %#v", parent)
 	}
@@ -302,8 +303,8 @@ func TestATSPIBridgeLive(t *testing.T) {
 	}
 
 	// ── Кнопка ───────────────────────────────────────────────────────────────
-	btnRef := children[0].(dbusStruct)
-	btnPath := string(btnRef.Fields[1].(dbusObjectPath))
+	btnRef := children[0].(dbus.Struct)
+	btnPath := string(btnRef.Fields[1].(dbus.ObjectPath))
 	if got := call(btnPath, ifaceAccessible, "GetRole", "", nil).Body[0]; got != uint32(atspiRolePushButton) {
 		t.Errorf("роль кнопки = %v", got)
 	}
@@ -322,14 +323,14 @@ func TestATSPIBridgeLive(t *testing.T) {
 		t.Errorf("кнопка без интерфейса Action: %v", ifaces)
 	}
 	// Геометрия: логические координаты × scale (=1) + позиция окна (native нет → 0).
-	ext := call(btnPath, ifaceComponent, "GetExtents", "u", []any{uint32(atspiCoordWindow)}).Body[0].(dbusStruct)
+	ext := call(btnPath, ifaceComponent, "GetExtents", "u", []any{uint32(atspiCoordWindow)}).Body[0].(dbus.Struct)
 	if ext.Fields[0] != int32(10) || ext.Fields[1] != int32(10) ||
 		ext.Fields[2] != int32(110) || ext.Fields[3] != int32(30) {
 		t.Errorf("границы кнопки = %v, want 10,10,110,30", ext.Fields)
 	}
 
 	// ── Чекбокс: состояние checked ───────────────────────────────────────────
-	cbPath := string(children[1].(dbusStruct).Fields[1].(dbusObjectPath))
+	cbPath := string(children[1].(dbus.Struct).Fields[1].(dbus.ObjectPath))
 	states := call(cbPath, ifaceAccessible, "GetState", "", nil).Body[0].([]any)
 	set := make([]uint32, 0, len(states))
 	for _, s := range states {
@@ -340,7 +341,7 @@ func TestATSPIBridgeLive(t *testing.T) {
 	}
 
 	// ── Поле ввода: значение и фокус ─────────────────────────────────────────
-	tiPath := string(children[2].(dbusStruct).Fields[1].(dbusObjectPath))
+	tiPath := string(children[2].(dbus.Struct).Fields[1].(dbus.ObjectPath))
 	states = call(tiPath, ifaceAccessible, "GetState", "", nil).Body[0].([]any)
 	set = set[:0]
 	for _, s := range states {
@@ -352,13 +353,13 @@ func TestATSPIBridgeLive(t *testing.T) {
 
 	// ── Поиск узла по точке ──────────────────────────────────────────────────
 	hit := call(winPath, ifaceComponent, "GetAccessibleAtPoint", "iiu",
-		[]any{int32(20), int32(20), uint32(atspiCoordWindow)}).Body[0].(dbusStruct)
-	if string(hit.Fields[1].(dbusObjectPath)) != btnPath {
+		[]any{int32(20), int32(20), uint32(atspiCoordWindow)}).Body[0].(dbus.Struct)
+	if string(hit.Fields[1].(dbus.ObjectPath)) != btnPath {
 		t.Errorf("точка (20,20) попала в %v, ожидалась кнопка %s", hit.Fields[1], btnPath)
 	}
 	miss := call(winPath, ifaceComponent, "GetAccessibleAtPoint", "iiu",
-		[]any{int32(390), int32(290), uint32(atspiCoordWindow)}).Body[0].(dbusStruct)
-	if string(miss.Fields[1].(dbusObjectPath)) != winPath {
+		[]any{int32(390), int32(290), uint32(atspiCoordWindow)}).Body[0].(dbus.Struct)
+	if string(miss.Fields[1].(dbus.ObjectPath)) != winPath {
 		t.Errorf("точка в пустом месте окна должна дать само окно, а дала %v", miss.Fields[1])
 	}
 
@@ -369,7 +370,7 @@ func TestATSPIBridgeLive(t *testing.T) {
 	}
 	var sawButton bool
 	for _, it := range items {
-		st := it.(dbusStruct)
+		st := it.(dbus.Struct)
 		if st.Fields[6] == "Сохранить" && st.Fields[7] == uint32(atspiRolePushButton) {
 			sawButton = true
 		}
@@ -379,7 +380,7 @@ func TestATSPIBridgeLive(t *testing.T) {
 	}
 
 	// ── Несуществующий объект — ошибка, а не тишина ──────────────────────────
-	if _, err := cl.call(b.appName, atspiPathPrefix+"9999", ifaceAccessible, "GetRole", "", nil); err == nil {
+	if _, err := cl.Call(b.appName, atspiPathPrefix+"9999", ifaceAccessible, "GetRole", "", nil); err == nil {
 		t.Error("запрос несуществующего узла должен возвращать ошибку")
 	}
 }
@@ -417,7 +418,7 @@ func TestATSPIFocusEvent(t *testing.T) {
 	b, eng, ti := newATSPITestBridge(t)
 
 	addr, _ := atspiBusAddress()
-	cl, err := dbusDial(addr)
+	cl, err := dbus.Dial(addr)
 	if err != nil {
 		t.Fatalf("клиент: %v", err)
 	}
@@ -429,7 +430,7 @@ func TestATSPIFocusEvent(t *testing.T) {
 		d1     int32
 	}
 	events := make(chan ev, 16)
-	cl.onSignal(func(msg *dbusMessage) {
+	cl.OnSignal(func(msg *dbus.Message) {
 		if msg.Interface != ifaceEventObject || msg.Member != "StateChanged" || msg.Sender != b.appName {
 			return
 		}
@@ -441,7 +442,7 @@ func TestATSPIFocusEvent(t *testing.T) {
 		default:
 		}
 	})
-	if err := cl.addMatch("type='signal',interface='" + ifaceEventObject + "'"); err != nil {
+	if err := cl.AddMatch("type='signal',interface='" + ifaceEventObject + "'"); err != nil {
 		t.Fatalf("AddMatch: %v", err)
 	}
 

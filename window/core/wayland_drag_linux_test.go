@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // v3.34: перетаскивание файлов на Wayland — события приёмника и источник.
@@ -80,7 +82,7 @@ func TestWayland_DragTargetEnterMotionLeave(t *testing.T) {
 	if !ok {
 		t.Fatalf("accept не отправлен: %+v", msgs)
 	}
-	if serial, mime := wlAcceptMime(t, acc); serial != 9 || mime != mimeTextUriList {
+	if serial, mime := wlAcceptMime(t, acc); serial != 9 || mime != native.MimeTextURIList {
 		t.Errorf("accept(serial=%d, %q), ждал (9, text/uri-list)", serial, mime)
 	}
 	if _, ok := findWlMsg(msgs, offer, wlDataOfferSetActions); !ok {
@@ -152,7 +154,7 @@ func TestWayland_DragTargetAcceptsWithoutCallbacks(t *testing.T) {
 	if !ok {
 		t.Fatal("accept не отправлен")
 	}
-	if _, mime := wlAcceptMime(t, acc); mime != mimeTextUriList {
+	if _, mime := wlAcceptMime(t, acc); mime != native.MimeTextURIList {
 		t.Errorf("accept %q", mime)
 	}
 }
@@ -254,8 +256,8 @@ func TestWayland_BeginDragFiles_Wire(t *testing.T) {
 			released = true
 		}
 	})
-	var got []DragEffect
-	if !c.w.BeginDragFiles([]string{"/tmp/a b.png"}, DragEffectCopy|DragEffectMove|DragEffectLink, func(e DragEffect) { got = append(got, e) }) {
+	var got []native.DragEffect
+	if !c.w.BeginDragFiles([]string{"/tmp/a b.png"}, native.DragEffectCopy|native.DragEffectMove|native.DragEffectLink, func(e native.DragEffect) { got = append(got, e) }) {
 		t.Fatal("BeginDragFiles отказал")
 	}
 	msgs := splitWlMsgs(t, c.read(t))
@@ -302,27 +304,27 @@ func TestWayland_BeginDragFiles_Wire(t *testing.T) {
 	}
 
 	// Одно перетаскивание за раз.
-	if c.w.BeginDragFiles([]string{"/tmp/x"}, DragEffectCopy, func(DragEffect) {}) {
+	if c.w.BeginDragFiles([]string{"/tmp/x"}, native.DragEffectCopy, func(native.DragEffect) {}) {
 		t.Error("второе перетаскивание принято, пока идёт первое")
 	}
 }
 
 func TestWayland_BeginDragFiles_Refusals(t *testing.T) {
-	noop := func(DragEffect) {}
+	noop := func(native.DragEffect) {}
 	files := []string{"/tmp/a"}
 	cases := []struct {
 		name string
 		mut  func(w *WaylandWindow)
-		eff  DragEffect
+		eff  native.DragEffect
 		path []string
 	}{
-		{"нет serial'а нажатия", func(w *WaylandWindow) { w.ptrButtonSerial.Store(0) }, DragEffectCopy, files},
-		{"кнопка не зажата", func(w *WaylandWindow) { w.ptrButtons.Store(0) }, DragEffectCopy, files},
-		{"нет wl_data_device", func(w *WaylandWindow) { w.dataDeviceID = 0 }, DragEffectCopy, files},
-		{"менеджер старше v3", func(w *WaylandWindow) { w.dataDevVersion = 2 }, DragEffectCopy, files},
-		{"указатель на попапе", func(w *WaylandWindow) { w.ptrOnPopup = true }, DragEffectCopy, files},
-		{"только ссылка: в протоколе её нет", func(w *WaylandWindow) {}, DragEffectLink, files},
-		{"пустой список", func(w *WaylandWindow) {}, DragEffectCopy, nil},
+		{"нет serial'а нажатия", func(w *WaylandWindow) { w.ptrButtonSerial.Store(0) }, native.DragEffectCopy, files},
+		{"кнопка не зажата", func(w *WaylandWindow) { w.ptrButtons.Store(0) }, native.DragEffectCopy, files},
+		{"нет wl_data_device", func(w *WaylandWindow) { w.dataDeviceID = 0 }, native.DragEffectCopy, files},
+		{"менеджер старше v3", func(w *WaylandWindow) { w.dataDevVersion = 2 }, native.DragEffectCopy, files},
+		{"указатель на попапе", func(w *WaylandWindow) { w.ptrOnPopup = true }, native.DragEffectCopy, files},
+		{"только ссылка: в протоколе её нет", func(w *WaylandWindow) {}, native.DragEffectLink, files},
+		{"пустой список", func(w *WaylandWindow) {}, native.DragEffectCopy, nil},
 	}
 	for _, tc := range cases {
 		c := dragSourceSetup(t)
@@ -340,12 +342,12 @@ func TestWayland_BeginDragFiles_Refusals(t *testing.T) {
 // Данные отдаются лениво, при send, и именно запрошенным типом.
 func TestWayland_DragSourceSendWritesURIList(t *testing.T) {
 	c := dragSourceSetup(t)
-	c.w.BeginDragFiles([]string{"/tmp/a b.png", "/tmp/ф.jpg"}, DragEffectCopy, func(DragEffect) {})
+	c.w.BeginDragFiles([]string{"/tmp/a b.png", "/tmp/ф.jpg"}, native.DragEffectCopy, func(native.DragEffect) {})
 	c.read(t)
 	src := c.w.drag.id
 
 	r, wr, _ := os.Pipe()
-	c.w.dragHandleSend(mimeTextUriList, int(wr.Fd()))
+	c.w.dragHandleSend(native.MimeTextURIList, int(wr.Fd()))
 	// dragHandleSend забрал fd как свой — файл wr закрывает он.
 	data := make(chan string, 1)
 	go func() { b, _ := io.ReadAll(r); data <- string(b) }()
@@ -379,10 +381,10 @@ func TestWayland_DragSourceFinishAndCancel(t *testing.T) {
 		binary.LittleEndian.PutUint32(b, a)
 		return b
 	}
-	run := func(t *testing.T, events func(c *wlTestConn, src uint32)) (DragEffect, int, *wlTestConn, uint32) {
+	run := func(t *testing.T, events func(c *wlTestConn, src uint32)) (native.DragEffect, int, *wlTestConn, uint32) {
 		c := dragSourceSetup(t)
-		calls, last := 0, DragEffect(99)
-		c.w.BeginDragFiles([]string{"/tmp/a"}, DragEffectCopy|DragEffectMove, func(e DragEffect) { calls++; last = e })
+		calls, last := 0, native.DragEffect(99)
+		c.w.BeginDragFiles([]string{"/tmp/a"}, native.DragEffectCopy|native.DragEffectMove, func(e native.DragEffect) { calls++; last = e })
 		c.read(t)
 		src := c.w.drag.id
 		events(c, src)
@@ -395,7 +397,7 @@ func TestWayland_DragSourceFinishAndCancel(t *testing.T) {
 			c.w.handleEvent(src, wlDataSourceEvAction, actionBody(wlDndActionCopy))
 			c.w.handleEvent(src, wlDataSourceEvDndFinished, nil)
 		})
-		if got != DragEffectCopy || calls != 1 {
+		if got != native.DragEffectCopy || calls != 1 {
 			t.Errorf("done(%v) × %d, ждал copy × 1", got, calls)
 		}
 		if _, ok := findWlMsg(splitWlMsgs(t, c.read(t)), src, wlDataSourceDestroy); !ok {
@@ -410,7 +412,7 @@ func TestWayland_DragSourceFinishAndCancel(t *testing.T) {
 			c.w.handleEvent(src, wlDataSourceEvAction, actionBody(wlDndActionMove))
 			c.w.handleEvent(src, wlDataSourceEvDndFinished, nil)
 		})
-		if got != DragEffectMove {
+		if got != native.DragEffectMove {
 			t.Errorf("done(%v), ждал move", got)
 		}
 	})
@@ -432,7 +434,7 @@ func TestWayland_DragSourceFinishAndCancel(t *testing.T) {
 		})
 		c.read(t)
 		c.w.ptrButtons.Store(1) // новое нажатие: прежнее компоновщик забрал себе
-		if !c.w.BeginDragFiles([]string{"/tmp/b"}, DragEffectCopy, func(DragEffect) {}) {
+		if !c.w.BeginDragFiles([]string{"/tmp/b"}, native.DragEffectCopy, func(native.DragEffect) {}) {
 			t.Error("новое перетаскивание не началось после конца прежнего")
 		}
 	})

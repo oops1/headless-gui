@@ -5,15 +5,17 @@ package core
 import (
 	"encoding/binary"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // X11: новые формы курсора и боковые кнопки мыши — на проводе.
 
 func TestX11CursorGlyph_NewShapes(t *testing.T) {
 	cases := map[int]int{
-		wlCursorSizeAll:   xcFleur,
-		wlCursorCrosshair: xcCrosshair,
-		wlCursorWait:      xcWatch,
+		pointer.CursorSizeAll:   xcFleur,
+		pointer.CursorCrosshair: xcCrosshair,
+		pointer.CursorWait:      xcWatch,
 	}
 	for shape, want := range cases {
 		got, ok := x11CursorGlyph(shape)
@@ -22,7 +24,7 @@ func TestX11CursorGlyph_NewShapes(t *testing.T) {
 		}
 	}
 	// Эти формы глифом не рисуются: невидимая и две руки.
-	for _, shape := range []int{wlCursorNone, wlCursorGrab, wlCursorGrabbing} {
+	for _, shape := range []int{pointer.CursorNone, pointer.CursorGrab, pointer.CursorGrabbing} {
 		if _, ok := x11CursorGlyph(shape); ok {
 			t.Errorf("форма %d получила глиф шрифта, а должна строиться из карт", shape)
 		}
@@ -44,7 +46,7 @@ func x11CursorTestWindow(t *testing.T) (*X11Window, *x11Captured) {
 // CursorNone на X11: прозрачный курсор из карты 1×1 вешается на окно.
 func TestX11SetCursor_NoneWire(t *testing.T) {
 	w, capt := x11CursorTestWindow(t)
-	w.SetCursor(wlCursorNone)
+	w.SetCursor(pointer.CursorNone)
 	reqs := capt.requests(t, w)
 
 	var ops []byte
@@ -82,11 +84,11 @@ func TestX11SetCursor_GrabResourcesReused(t *testing.T) {
 	w, _ := x11CursorTestWindow(t)
 	w.cursors.mu.Lock()
 	defer w.cursors.mu.Unlock()
-	a := w.cursorResourceLocked(wlCursorGrab)
-	b := w.cursorResourceLocked(wlCursorGrabbing)
-	a2 := w.cursorResourceLocked(wlCursorGrab)
-	n := w.cursorResourceLocked(wlCursorNone)
-	n2 := w.cursorResourceLocked(wlCursorNone)
+	a := w.cursorResourceLocked(pointer.CursorGrab)
+	b := w.cursorResourceLocked(pointer.CursorGrabbing)
+	a2 := w.cursorResourceLocked(pointer.CursorGrab)
+	n := w.cursorResourceLocked(pointer.CursorNone)
+	n2 := w.cursorResourceLocked(pointer.CursorNone)
 	if a == 0 || b == 0 || n == 0 {
 		t.Fatalf("ресурсы не созданы: %d %d %d", a, b, n)
 	}
@@ -101,7 +103,7 @@ func TestX11SetCursor_GrabResourcesReused(t *testing.T) {
 // Новые формы-глифы создаются из шрифта «cursor», как прежние.
 func TestX11SetCursor_GlyphForms(t *testing.T) {
 	w, capt := x11CursorTestWindow(t)
-	w.SetCursor(wlCursorCrosshair)
+	w.SetCursor(pointer.CursorCrosshair)
 	reqs := capt.requests(t, w)
 	var glyph int
 	for _, r := range reqs {

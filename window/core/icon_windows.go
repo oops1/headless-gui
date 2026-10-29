@@ -7,6 +7,8 @@ import (
 	"image"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 const (
@@ -19,9 +21,9 @@ var procSendMessageW = user32.NewProc("SendMessageW")
 
 // Проверка на этапе сборки: Window.SetIcon находит бэкенд по интерфейсу, и
 // опечатка в имени метода превратилась бы в молчаливый ErrIconUnsupported.
-var _ iconSetter = (*Win32Window)(nil)
+var _ native.IconSetter = (*Win32Window)(nil)
 
-// setIcon ставит окну значок сообщением WM_SETICON.
+// SetIcon ставит окну значок сообщением WM_SETICON.
 //
 // Значков два: маленький (16×16, заголовок и панель задач) и большой (32×32,
 // Alt+Tab). Windows масштабирует недостающий сама, но делает это грубо, и
@@ -30,7 +32,7 @@ var _ iconSetter = (*Win32Window)(nil)
 // Прежние значки удаляются ПОСЛЕ установки новых: WM_SETICON возвращает
 // предыдущий хэндл, и удалить его раньше — значит на мгновение оставить окно с
 // уничтоженным объектом GDI.
-func (w *Win32Window) setIcon(icons []image.Image) error {
+func (w *Win32Window) SetIcon(icons []image.Image) error {
 	if w.hwnd == 0 {
 		// Окна ещё нет — запоминаем, поставим при создании.
 		w.pendingIcons = icons
@@ -42,8 +44,8 @@ func (w *Win32Window) setIcon(icons []image.Image) error {
 		return nil
 	}
 
-	small := rgbaToHICON(iconToRGBA(pickIcon(icons, 16)))
-	big := rgbaToHICON(iconToRGBA(pickIcon(icons, 32)))
+	small := rgbaToHICON(native.IconToRGBA(native.PickIcon(icons, 16)))
+	big := rgbaToHICON(native.IconToRGBA(native.PickIcon(icons, 32)))
 	w.applyIcon(iconSmallIdx, small)
 	w.applyIcon(iconBigIdx, big)
 	return nil
@@ -68,5 +70,5 @@ func (w *Win32Window) applyPendingIcon() {
 	}
 	icons := w.pendingIcons
 	w.pendingIcons = nil
-	_ = w.setIcon(icons)
+	_ = w.SetIcon(icons)
 }

@@ -6,13 +6,15 @@ import (
 	"image"
 	"runtime"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Начальное положение и «развёрнуто» на настоящем окне Win32 (initial.go).
 // Окно создаётся в этом же потоке, поэтому wndProc отрабатывает синхронно и
 // цикл сообщений не нужен.
 
-func newInitialWin32(t *testing.T, p initialPlacement, w, h int) *Win32Window {
+func newInitialWin32(t *testing.T, p native.InitialPlacement, w, h int) *Win32Window {
 	t.Helper()
 	runtime.LockOSThread()
 	t.Cleanup(runtime.UnlockOSThread)
@@ -38,7 +40,7 @@ func isVisible(w *Win32Window) bool {
 
 // Положение задано — окно рождается ровно там, а не по центру экрана.
 func TestWin32Initial_PositionAtCreate(t *testing.T) {
-	w := newInitialWin32(t, initialPlacement{PosSet: true, X: 137, Y: 91, SizeSet: true}, 500, 350)
+	w := newInitialWin32(t, native.InitialPlacement{PosSet: true, X: 137, Y: 91, SizeSet: true}, 500, 350)
 
 	if got, want := w.windowRect(), image.Rect(137, 91, 137+500, 91+350); got != want {
 		t.Errorf("прямоугольник окна %v, ждал %v", got, want)
@@ -56,7 +58,7 @@ func TestWin32Initial_PositionAtCreate(t *testing.T) {
 
 // Положение не задано — окно по центру экрана, как и раньше.
 func TestWin32Initial_DefaultStillCentered(t *testing.T) {
-	w := newInitialWin32(t, initialPlacement{}, 500, 350)
+	w := newInitialWin32(t, native.InitialPlacement{}, 500, 350)
 	sw, sh := getSystemMetrics(0), getSystemMetrics(1)
 	want := image.Rect((sw-500)/2, (sh-350)/2, (sw-500)/2+500, (sh-350)/2+350)
 	if got := w.windowRect(); got != want {
@@ -67,7 +69,7 @@ func TestWin32Initial_DefaultStillCentered(t *testing.T) {
 // Отрицательные координаты (монитор левее и выше основного) доходят как есть.
 func TestWin32Initial_NegativePositionOnVirtualDesktop(t *testing.T) {
 	mons := platformMonitors()
-	var left *Monitor
+	var left *native.Monitor
 	for i := range mons {
 		if mons[i].Bounds.Min.X < 0 {
 			left = &mons[i]
@@ -77,7 +79,7 @@ func TestWin32Initial_NegativePositionOnVirtualDesktop(t *testing.T) {
 		t.Skip("нет монитора с отрицательными координатами")
 	}
 	x, y := left.Bounds.Min.X+50, left.Bounds.Min.Y+50
-	w := newInitialWin32(t, initialPlacement{PosSet: true, X: x, Y: y, SizeSet: true}, 400, 300)
+	w := newInitialWin32(t, native.InitialPlacement{PosSet: true, X: x, Y: y, SizeSet: true}, 400, 300)
 	if gx, gy := w.GetPosition(); gx != x || gy != y {
 		t.Errorf("положение %d,%d, ждал %d,%d", gx, gy, x, y)
 	}
@@ -86,7 +88,7 @@ func TestWin32Initial_NegativePositionOnVirtualDesktop(t *testing.T) {
 // Развёрнуто: окно сразу IsZoomed (сразу после Create, без единого сообщения
 // из цикла), IsMaximized отвечает true, клиентская область больше заказанной.
 func TestWin32Initial_MaximizedAtCreate(t *testing.T) {
-	w := newInitialWin32(t, initialPlacement{Maximized: true}, 500, 350)
+	w := newInitialWin32(t, native.InitialPlacement{Maximized: true}, 500, 350)
 
 	if !isZoomed(w) {
 		t.Fatal("IsZoomed ложно: окно создано не развёрнутым")
@@ -110,7 +112,7 @@ func TestWin32Initial_MaximizedAtCreate(t *testing.T) {
 // Главное: развёрнутое окно с границами. «Восстановить» возвращает именно их,
 // а не центр экрана и не заказанный размер без положения.
 func TestWin32Initial_RestoreReturnsInitialBounds(t *testing.T) {
-	w := newInitialWin32(t, initialPlacement{PosSet: true, X: 210, Y: 160, SizeSet: true, Maximized: true}, 620, 410)
+	w := newInitialWin32(t, native.InitialPlacement{PosSet: true, X: 210, Y: 160, SizeSet: true, Maximized: true}, 620, 410)
 
 	if !isZoomed(w) {
 		t.Fatal("окно создано не развёрнутым")
@@ -132,7 +134,7 @@ func TestWin32Initial_RestoreReturnsInitialBounds(t *testing.T) {
 // Развёрнутое окно без положения: «восстановить» вернёт заказанный размер по
 // центру, как у обычного окна.
 func TestWin32Initial_MaximizedOnlyRestoresToCentered(t *testing.T) {
-	w := newInitialWin32(t, initialPlacement{Maximized: true}, 500, 350)
+	w := newInitialWin32(t, native.InitialPlacement{Maximized: true}, 500, 350)
 	w.Restore()
 	sw, sh := getSystemMetrics(0), getSystemMetrics(1)
 	want := image.Rect((sw-500)/2, (sh-350)/2, (sw-500)/2+500, (sh-350)/2+350)
@@ -144,7 +146,7 @@ func TestWin32Initial_MaximizedOnlyRestoresToCentered(t *testing.T) {
 // Полный экран поверх начального «развёрнуто»: выход из него возвращает
 // развёрнутое окно, а «восстановить» после него — начальные границы.
 func TestWin32Initial_FullscreenKeepsInitialBounds(t *testing.T) {
-	w := newInitialWin32(t, initialPlacement{PosSet: true, X: 180, Y: 120, SizeSet: true, Maximized: true}, 600, 400)
+	w := newInitialWin32(t, native.InitialPlacement{PosSet: true, X: 180, Y: 120, SizeSet: true, Maximized: true}, 600, 400)
 
 	w.applyFullscreen(true)
 	if !w.IsFullscreen() {
@@ -165,7 +167,7 @@ func TestWin32Initial_FullscreenKeepsInitialBounds(t *testing.T) {
 
 // После старта SetPosition/SetSize работают как раньше.
 func TestWin32Initial_SetPositionAfterCreateStillWorks(t *testing.T) {
-	w := newInitialWin32(t, initialPlacement{PosSet: true, X: 100, Y: 100, SizeSet: true}, 500, 350)
+	w := newInitialWin32(t, native.InitialPlacement{PosSet: true, X: 100, Y: 100, SizeSet: true}, 500, 350)
 	w.SetPosition(300, 200)
 	w.SetSize(450, 300)
 	if got, want := w.windowRect(), image.Rect(300, 200, 750, 500); got != want {
@@ -176,7 +178,7 @@ func TestWin32Initial_SetPositionAfterCreateStillWorks(t *testing.T) {
 // Окно без заказа клиентскую область отдаёт как есть: сверка размера после
 // Create ничего не меняет для обычных окон.
 func TestWin32Initial_ClientSizeOfPlainWindow(t *testing.T) {
-	w := newInitialWin32(t, initialPlacement{}, 640, 480)
+	w := newInitialWin32(t, native.InitialPlacement{}, 640, 480)
 	if cw, ch := w.clientSize(); cw != 640 || ch != 480 {
 		t.Errorf("клиентская область %dx%d, ждал 640x480", cw, ch)
 	}
@@ -184,7 +186,7 @@ func TestWin32Initial_ClientSizeOfPlainWindow(t *testing.T) {
 
 // Свёрнутое окно размера не сообщает: сверка не должна принять нулевой клиент.
 func TestWin32Initial_ClientSizeOfMinimizedIsZero(t *testing.T) {
-	w := newInitialWin32(t, initialPlacement{}, 640, 480)
+	w := newInitialWin32(t, native.InitialPlacement{}, 640, 480)
 	w.Minimize()
 	if cw, ch := w.clientSize(); cw != 0 || ch != 0 {
 		t.Errorf("у свёрнутого окна клиентская область %dx%d, ждал 0x0", cw, ch)

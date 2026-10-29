@@ -19,6 +19,8 @@ package core
 import (
 	"runtime"
 	"sync"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // fullscreenBackend — бэкенд умеет переключать окно в полный экран.
@@ -50,7 +52,7 @@ type fullscreenOnBackend interface {
 	// SetFullscreenOn просит полный экран на мониторе m. Если окно уже в
 	// полном экране — переносит его на m. false — монитор не найден среди
 	// текущих (отключён) или оконная система выбор монитора не поддерживает.
-	SetFullscreenOn(m Monitor) bool
+	SetFullscreenOn(m native.Monitor) bool
 }
 
 // fullscreenState — то, что окно помнит о полном экране само: колбэк
@@ -60,7 +62,7 @@ type fullscreenState struct {
 	onChange func(bool)
 	pre      bool // запрошенное до Run состояние
 	preSet   bool
-	preMon   *Monitor // монитор запроса до Run (SetFullscreenOn); nil — любой
+	preMon   *native.Monitor // монитор запроса до Run (SetFullscreenOn); nil — любой
 }
 
 // SetFullscreen переводит окно в полный экран (on) или возвращает обратно.
@@ -112,8 +114,8 @@ func (win *Window) SetFullscreen(on bool) bool {
 // выбора монитора не умеет (macOS). До Run запрос запоминается, и ответ
 // предварительный — «умеет ли платформа вообще»; если монитор к тому времени
 // исчез, окно встанет в обычный полный экран.
-func (win *Window) SetFullscreenOn(m Monitor) bool {
-	if m.id == 0 && m.Name == "" && m.Bounds.Empty() {
+func (win *Window) SetFullscreenOn(m native.Monitor) bool {
+	if native.MonitorKey(m) == 0 && m.Name == "" && m.Bounds.Empty() {
 		return false
 	}
 	if win.native == nil {

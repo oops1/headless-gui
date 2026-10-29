@@ -9,7 +9,11 @@ package core
 // Файл без платформенного суффикса: запросы собираются чистой функцией, и
 // тесты идут в общем прогоне.
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
+)
 
 // x11CursorIDs — идентификаторы ресурсов, нужных на время сборки курсора.
 type x11CursorIDs struct {
@@ -33,14 +37,14 @@ const (
 
 // x11BitmapCursorRequests собирает запросы, создающие курсор формы c из
 // 1-битных карт. CursorNone — карта 1×1 с нулевой маской, то есть невидимый
-// курсор; нарисованные формы берут рисунок из wlCursorImage: чёрный пиксель —
+// курсор; нарисованные формы берут рисунок из pointer.CursorImage: чёрный пиксель —
 // контур (fore), белый — заливка (back), прозрачный — вне маски.
 func x11BitmapCursorRequests(ids x11CursorIDs, c int) [][]byte {
 	w, h := 1, 1
 	var src, mask [][2]int16
 	hotX, hotY := 0, 0
-	if c != wlCursorNone {
-		pic, hx, hy := wlCursorImage(c)
+	if c != pointer.CursorNone {
+		pic, hx, hy := pointer.CursorImage(c)
 		b := pic.Bounds()
 		w, h, hotX, hotY = b.Dx(), b.Dy(), hx, hy
 		for y := 0; y < h; y++ {

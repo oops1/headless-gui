@@ -4,11 +4,12 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 type squareNative struct {
-	NativeWindow
+	native.NativeWindow
 	rounds bool
 }
 

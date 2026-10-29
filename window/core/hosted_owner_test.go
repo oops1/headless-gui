@@ -17,6 +17,7 @@ import (
 
 	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -28,12 +29,12 @@ type hostFake struct {
 	enabled atomic.Bool
 }
 
-func (f *hostFake) SetOwner(NativeWindow)      {}
-func (f *hostFake) SetEnabled(v bool)          { f.enabled.Store(v) }
-func (f *hostFake) InvokeOnUIThread(fn func()) { fn() }
-func (f *hostFake) Close()                     { f.closed.Store(true) }
-func (f *hostFake) GetSize() (int, int)        { return 800, 600 }
-func (f *hostFake) GetPosition() (int, int)    { return 0, 0 }
+func (f *hostFake) SetOwner(native.NativeWindow) {}
+func (f *hostFake) SetEnabled(v bool)            { f.enabled.Store(v) }
+func (f *hostFake) InvokeOnUIThread(fn func())   { fn() }
+func (f *hostFake) Close()                       { f.closed.Store(true) }
+func (f *hostFake) GetSize() (int, int)          { return 800, 600 }
+func (f *hostFake) GetPosition() (int, int)      { return 0, 0 }
 
 // hostedRig — главное окно с настоящим движком и подменёнными окнами ОС.
 type hostedRig struct {
@@ -61,7 +62,7 @@ func newHostedRig(t *testing.T, extra func(root *widget.Panel)) *hostedRig {
 	t.Helper()
 	r := &hostedRig{}
 	old := newNativeWindow
-	newNativeWindow = func() NativeWindow {
+	newNativeWindow = func() native.NativeWindow {
 		f := &hostFake{}
 		r.mu.Lock()
 		r.fakes = append(r.fakes, f)

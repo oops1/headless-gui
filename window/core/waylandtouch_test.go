@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -54,8 +55,8 @@ func newSinkRig(scale float64) *sinkRig {
 			return 0, false
 		},
 		onTouch: func(ev widget.TouchEvent) { r.touches = append(r.touches, ev) },
-		popup: func() childPopupHandlers {
-			return childPopupHandlers{
+		popup: func() native.ChildPopupHandlers {
+			return native.ChildPopupHandlers{
 				Move: func(id uintptr, x, y int) { r.popup = append(r.popup, fmt.Sprintf("move %d %d,%d", id, x, y)) },
 				Button: func(id uintptr, x, y, b int, p bool) {
 					r.popup = append(r.popup, fmt.Sprintf("button %d %d,%d b%d down=%v", id, x, y, b, p))

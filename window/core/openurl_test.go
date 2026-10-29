@@ -8,6 +8,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // TestCheckOpenURL — какие ссылки пропускаются, какие нет. Главный случай —
@@ -215,8 +218,8 @@ func TestPathToFileURL(t *testing.T) {
 			t.Errorf("pathToFileURL(%q) = %q, want %q", in, got, want)
 		}
 		// Обратное преобразование движка (dnd.go) обязано вернуть исходный путь.
-		if back, ok := fileURIToPath(pathToFileURL(in)); !ok {
-			t.Errorf("fileURIToPath(%q) не распознал ссылку", pathToFileURL(in))
+		if back, ok := native.FileURIToPath(pathToFileURL(in)); !ok {
+			t.Errorf("native.FileURIToPath(%q) не распознал ссылку", pathToFileURL(in))
 		} else if strings.HasPrefix(in, "/") && back != in {
 			t.Errorf("круг путь→ссылка→путь: %q → %q", in, back)
 		}
@@ -314,13 +317,13 @@ func TestPortalArgsMarshal(t *testing.T) {
 		"ShowItems": func() (string, []any) { return showItemsArgs("file:///tmp/a%20b") },
 	} {
 		sig, args := build()
-		m := &dbusMessage{Type: dbusTypeMethodCall, Serial: 1, Path: "/x", Interface: "a.b", Member: name,
+		m := &dbus.Message{Type: dbus.TypeMethodCall, Serial: 1, Path: "/x", Interface: "a.b", Member: name,
 			Destination: "a.b", Sig: sig, Body: args}
-		raw, err := m.marshal()
+		raw, err := m.Marshal()
 		if err != nil {
 			t.Fatalf("%s: marshal: %v", name, err)
 		}
-		back, err := dbusUnmarshal(raw)
+		back, err := dbus.Unmarshal(raw)
 		if err != nil {
 			t.Fatalf("%s: unmarshal: %v", name, err)
 		}

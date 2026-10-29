@@ -38,94 +38,10 @@ package core
 // (wayland_lockkeys_set_linux.go), иначе там false.
 
 import (
-	"strings"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
 )
-
-// LockKeys — набор включённых клавиш-переключателей.
-type LockKeys uint8
-
-const (
-	// CapsLock — включён Caps Lock.
-	CapsLock LockKeys = 1 << iota
-	// NumLock — включён Num Lock.
-	NumLock
-	// ScrollLock — включён Scroll Lock.
-	ScrollLock
-	// KanaLock — включён Kana Lock (японская клавиатура).
-	KanaLock
-)
-
-// lkAll — все известные клавиши-переключатели.
-const lkAll = CapsLock | NumLock | ScrollLock | KanaLock
-
-// Has сообщает, что в наборе включены ВСЕ перечисленные клавиши.
-func (k LockKeys) Has(f LockKeys) bool { return f != 0 && k&f == f }
-
-// Empty — ни один переключатель не включён.
-func (k LockKeys) Empty() bool { return k&lkAll == 0 }
-
-// String — для логов и сообщений: «caps|num», «-» для пустого набора.
-func (k LockKeys) String() string {
-	var parts []string
-	for _, n := range []struct {
-		f    LockKeys
-		name string
-	}{
-		{CapsLock, "caps"}, {NumLock, "num"}, {ScrollLock, "scroll"}, {KanaLock, "kana"},
-	} {
-		if k&n.f != 0 {
-			parts = append(parts, n.name)
-		}
-	}
-	if len(parts) == 0 {
-		return "-"
-	}
-	return strings.Join(parts, "|")
-}
-
-// lkKeyTable — соответствие флагов клавишам Windows (VK_*): по ним читается
-// состояние и ими же переключается на Win32.
-var lkKeyTable = [...]struct {
-	flag LockKeys
-	vk   int
-}{
-	{CapsLock, VK_CAPITAL}, {NumLock, VK_NUMLOCK}, {ScrollLock, VK_SCROLL}, {KanaLock, VK_KANA},
-}
-
-// lkFromToggles собирает набор из состояния каждой клавиши: on(vk) — включена
-// ли клавиша-переключатель с этим кодом.
-func lkFromToggles(on func(vk int) bool) LockKeys {
-	var k LockKeys
-	for _, e := range lkKeyTable {
-		if on(e.vk) {
-			k |= e.flag
-		}
-	}
-	return k
-}
-
-// lkToggleKeys — клавиши, которые нужно нажать, чтобы из набора cur получить
-// want: по одной на каждый отличающийся флаг, в порядке Caps, Num, Scroll, Kana.
-func lkToggleKeys(cur, want LockKeys) []int {
-	var vks []int
-	for _, e := range lkKeyTable {
-		if (cur^want)&e.flag != 0 {
-			vks = append(vks, e.vk)
-		}
-	}
-	return vks
-}
-
-// lkIsLockVK — код клавиши-переключателя.
-func lkIsLockVK(vk int) bool {
-	for _, e := range lkKeyTable {
-		if e.vk == vk {
-			return true
-		}
-	}
-	return false
-}
 
 // lockKeysBackend — бэкенд знает состояние клавиш-переключателей. Отдельный
 // интерфейс по той же причине, что и остальные необязательные способности:
@@ -133,14 +49,14 @@ func lkIsLockVK(vk int) bool {
 type lockKeysBackend interface {
 	// LockKeys — состояние переключателей; false — бэкенд его не знает.
 	// Звать можно из любой горутины, кроме потока событий самого бэкенда.
-	LockKeys() (LockKeys, bool)
+	LockKeys() (keyboard.LockKeys, bool)
 }
 
 // lockKeysSetter — бэкенд умеет переключать клавиши-переключатели.
 type lockKeysSetter interface {
 	// SetLockKeys приводит переключатели к набору want. true — всё, что
 	// отличалось от want, переключено (или запрос принят системой).
-	SetLockKeys(want LockKeys) bool
+	SetLockKeys(want keyboard.LockKeys) bool
 }
 
 // lockKeysSettler — необязательная способность бэкенда, у которого состояние
@@ -176,10 +92,10 @@ var lkSettleTimeout = 300 * time.Millisecond
 // SetOnActivateLocks.
 //
 // Потокобезопасно. На X11 один вызов стоит обращения к серверу (миллисекунды).
-func (win *Window) LockKeys() (LockKeys, bool) {
+func (win *Window) LockKeys() (keyboard.LockKeys, bool) {
 	if lb, ok := win.native.(lockKeysBackend); ok {
 		if k, known := lb.LockKeys(); known {
-			return k & lkAll, true
+			return k & keyboard.AllLocks, true
 		}
 	}
 	return 0, false
@@ -216,9 +132,9 @@ func (win *Window) LockKeys() (LockKeys, bool) {
 //	       событиям самой виртуальной клавиатуры — тогда честный ответ false.
 //
 // Потокобезопасно.
-func (win *Window) SetLockKeys(want LockKeys) bool {
+func (win *Window) SetLockKeys(want keyboard.LockKeys) bool {
 	if lb, ok := win.native.(lockKeysSetter); ok {
-		return lb.SetLockKeys(want & lkAll)
+		return lb.SetLockKeys(want & keyboard.AllLocks)
 	}
 	return false
 }
@@ -244,7 +160,7 @@ func (win *Window) SetLockKeys(want LockKeys) bool {
 //     нужно, это сведения «как было».
 //
 // nil отключает колбэк. Вызывать до Run().
-func (win *Window) SetOnActivateLocks(fn func(active bool, locks LockKeys, known bool)) {
+func (win *Window) SetOnActivateLocks(fn func(active bool, locks keyboard.LockKeys, known bool)) {
 	if fn == nil {
 		win.onActivateLocks.Store(nil)
 		return

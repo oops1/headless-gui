@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"testing"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Полный экран Win32 на настоящем окне: окно создаётся в этом же потоке, поэтому
@@ -30,7 +32,7 @@ func TestWin32Fullscreen_EnterLeave(t *testing.T) {
 	w.SetPosition(120, 90)
 	before := w.windowRect()
 	styleBefore := w.windowStyle()
-	if styleBefore&fsStyleThickFrame == 0 {
+	if styleBefore&native.FullscreenThickFrame == 0 {
 		t.Fatalf("окно создано без WS_THICKFRAME: %#x", styleBefore)
 	}
 
@@ -49,7 +51,7 @@ func TestWin32Fullscreen_EnterLeave(t *testing.T) {
 	if got := w.windowRect(); got != mon.Bounds {
 		t.Errorf("прямоугольник окна %v, ждал rcMonitor %v", got, mon.Bounds)
 	}
-	if w.windowStyle()&fsStyleThickFrame != 0 {
+	if w.windowStyle()&native.FullscreenThickFrame != 0 {
 		t.Error("WS_THICKFRAME не снят на время полного экрана")
 	}
 	if w.IsMaximized() {
@@ -149,7 +151,7 @@ func TestWin32Fullscreen_OnMonitor(t *testing.T) {
 	w.SetOnFullscreenChanged(func(on bool) { seen = append(seen, on) })
 
 	for _, m := range list {
-		cur, ok := matchMonitor(platformMonitors(), m)
+		cur, ok := native.MatchMonitor(platformMonitors(), m)
 		if !ok {
 			t.Fatalf("монитор %+v не найден в текущем списке", m)
 		}
@@ -160,7 +162,7 @@ func TestWin32Fullscreen_OnMonitor(t *testing.T) {
 		if got := w.windowRect(); got != m.Bounds {
 			t.Errorf("монитор %q: окно %v, ждал rcMonitor %v", m.Name, got, m.Bounds)
 		}
-		if got, ok := w.monitorOfWindow(); !ok || got.id != m.id {
+		if got, ok := w.monitorOfWindow(); !ok || native.MonitorKey(got) != native.MonitorKey(m) {
 			t.Errorf("монитор %q: окно сообщает монитор %+v", m.Name, got)
 		}
 	}
@@ -190,10 +192,10 @@ func TestWin32Fullscreen_OnMonitor(t *testing.T) {
 	w.applyFullscreen(false)
 
 	// Вход прямо на нужный монитор (SetFullscreenOn → поток окна).
-	if w.SetFullscreenOn(Monitor{id: 0xDEAD, Name: "нет такого", Bounds: image.Rect(90000, 0, 91000, 800)}) {
+	if w.SetFullscreenOn(native.MonitorWithKey(native.Monitor{Name: "нет такого", Bounds: image.Rect(90000, 0, 91000, 800)}, 0xDEAD)) {
 		t.Error("несуществующий монитор принят")
 	}
-	if w.SetFullscreenOn(Monitor{}) {
+	if w.SetFullscreenOn(native.Monitor{}) {
 		t.Error("нулевой Monitor принят")
 	}
 }

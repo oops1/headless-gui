@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // Win32: захват указателя на живом окне — регистрация Raw Input, зажим курсора
@@ -161,19 +163,19 @@ func TestWin32PointerLock_HandleRaw(t *testing.T) {
 	w.SetOnRelativeMotion(func(dx, dy float64) { got = append(got, [2]float64{dx, dy}) })
 	ptr := int(unsafe.Sizeof(uintptr(0)))
 
-	w.lock.handleRaw(plRawMouse(ptr, rimTypeMouse, 0, 5, 6)) // захвата нет
+	w.lock.handleRaw(plRawMouse(ptr, pointer.RIMTypeMouse, 0, 5, 6)) // захвата нет
 	if len(got) != 0 {
 		t.Fatalf("сдвиг доставлен без захвата: %v", got)
 	}
 	w.SetPointerLock(true)
-	w.lock.handleRaw(plRawMouse(ptr, rimTypeMouse, 0, 5, -6))
-	w.lock.handleRaw(plRawMouse(ptr, rimTypeMouse, 0, 0, 0)) // нажатие без движения
+	w.lock.handleRaw(plRawMouse(ptr, pointer.RIMTypeMouse, 0, 5, -6))
+	w.lock.handleRaw(plRawMouse(ptr, pointer.RIMTypeMouse, 0, 0, 0)) // нажатие без движения
 	if len(got) != 1 || got[0] != [2]float64{5, -6} {
 		t.Fatalf("доставлено %v, ждал [[5 -6]]", got)
 	}
 	// Абсолютное: первое положение сдвига не даёт, второе — разность.
-	w.lock.handleRaw(plRawMouse(ptr, rimTypeMouse, mouseMoveAbs, 1000, 1000))
-	w.lock.handleRaw(plRawMouse(ptr, rimTypeMouse, mouseMoveAbs, 1000+6553, 1000))
+	w.lock.handleRaw(plRawMouse(ptr, pointer.RIMTypeMouse, pointer.MouseMoveAbsolute, 1000, 1000))
+	w.lock.handleRaw(plRawMouse(ptr, pointer.RIMTypeMouse, pointer.MouseMoveAbsolute, 1000+6553, 1000))
 	if len(got) != 2 || got[1][0] <= 0 || got[1][1] != 0 {
 		t.Errorf("абсолютное положение дало %v", got)
 	}

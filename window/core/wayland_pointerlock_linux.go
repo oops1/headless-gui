@@ -28,6 +28,8 @@ import (
 	"encoding/binary"
 	"sync"
 	"sync/atomic"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Протокол zwp_pointer_constraints_v1 и zwp_relative_pointer_v1.
@@ -68,7 +70,7 @@ type wlPtrLock struct {
 	onChanged atomic.Pointer[func(active bool)]
 }
 
-// SetOnRelativeMotion реализует pointerLocker.
+// SetOnRelativeMotion реализует native.PointerLocker.
 func (w *WaylandWindow) SetOnRelativeMotion(fn func(dx, dy float64)) {
 	if fn == nil {
 		w.plock.onMotion.Store(nil)
@@ -77,7 +79,7 @@ func (w *WaylandWindow) SetOnRelativeMotion(fn func(dx, dy float64)) {
 	w.plock.onMotion.Store(&fn)
 }
 
-// SetOnPointerLockChanged реализует pointerLocker.
+// SetOnPointerLockChanged реализует native.PointerLocker.
 func (w *WaylandWindow) SetOnPointerLockChanged(fn func(active bool)) {
 	if fn == nil {
 		w.plock.onChanged.Store(nil)
@@ -86,7 +88,7 @@ func (w *WaylandWindow) SetOnPointerLockChanged(fn func(active bool)) {
 	w.plock.onChanged.Store(&fn)
 }
 
-// SetPointerLock реализует pointerLocker. true — запрос отправлен компоновщику;
+// SetPointerLock реализует native.PointerLocker. true — запрос отправлен компоновщику;
 // захват начнётся, когда он ответит locked (событие приходит в цикл событий).
 func (w *WaylandWindow) SetPointerLock(on bool) bool {
 	l := &w.plock
@@ -135,16 +137,16 @@ func (w *WaylandWindow) unlockPointer() {
 
 // wlGetRelativePointerMsg — zwp_relative_pointer_manager_v1.get_relative_pointer:
 // new_id id, wl_pointer pointer.
-func wlGetRelativePointerMsg(mgr, id, pointer uint32) *wlMsg {
-	return newWlMsg(mgr, zwpRelMgrGetRelative).putUint(id).putUint(pointer)
+func wlGetRelativePointerMsg(mgr, id, ptr uint32) *wlMsg {
+	return newWlMsg(mgr, zwpRelMgrGetRelative).putUint(id).putUint(ptr)
 }
 
 // wlLockPointerMsg — zwp_pointer_constraints_v1.lock_pointer: new_id id,
 // wl_surface surface, wl_pointer pointer, wl_region region (NULL — вся
 // поверхность), uint lifetime (persistent: захват восстанавливается с фокусом).
-func wlLockPointerMsg(constraints, id, surface, pointer uint32) *wlMsg {
+func wlLockPointerMsg(constraints, id, surface, ptr uint32) *wlMsg {
 	return newWlMsg(constraints, zwpConstraintsLockPointer).
-		putUint(id).putUint(surface).putUint(pointer).putUint(0).putUint(zwpLifetimePersistent)
+		putUint(id).putUint(surface).putUint(ptr).putUint(0).putUint(zwpLifetimePersistent)
 }
 
 // parseRelativeMotion разбирает zwp_relative_pointer_v1.relative_motion:
@@ -202,4 +204,4 @@ func (w *WaylandWindow) notePtrLockActive(active bool) {
 	}
 }
 
-var _ pointerLocker = (*WaylandWindow)(nil)
+var _ native.PointerLocker = (*WaylandWindow)(nil)

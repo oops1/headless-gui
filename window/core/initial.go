@@ -33,6 +33,8 @@ import (
 	"image"
 	"os"
 	"runtime"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // initialState — начальные значения окна, заданные приложением до Run.
@@ -97,36 +99,21 @@ func (win *Window) SetInitialMaximized(v bool) {
 	win.initial.maximized = v
 }
 
-// initialPlacement — то, что бэкенд обязан знать до Create, чтобы окно сразу
-// появилось где надо. Размер бэкенд получает аргументами Create; здесь только
-// то, чего у Create нет.
-type initialPlacement struct {
-	// PosSet — окно создаётся в точке (X, Y), экранные координаты. Без него
-	// бэкенд выбирает место сам (по центру экрана).
-	PosSet bool
-	X, Y   int
-	// SizeSet — размер в Create задан приложением, а не выбран движком: X11 в
-	// этом случае объявляет его менеджеру (USSize).
-	SizeSet bool
-	// Maximized — показать развёрнутым.
-	Maximized bool
-}
-
 // initialPlaceBackend — бэкенд принимает начальное положение до Create.
 // Отдельный интерфейс по той же причине, что fullscreenBackend: сигнатуру
 // NativeWindow менять нельзя. Бэкенд без него (Cocoa) просто создаёт окно как
 // раньше.
 type initialPlaceBackend interface {
-	setInitialPlacement(p initialPlacement)
+	setInitialPlacement(p native.InitialPlacement)
 }
 
-// placement собирает initialPlacement из заданного приложением. ok=false —
+// placement собирает native.InitialPlacement из заданного приложением. ok=false —
 // приложение ничего не просило.
-func (s initialState) placement() (initialPlacement, bool) {
+func (s initialState) placement() (native.InitialPlacement, bool) {
 	if !s.boundsSet && !s.maximized {
-		return initialPlacement{}, false
+		return native.InitialPlacement{}, false
 	}
-	return initialPlacement{
+	return native.InitialPlacement{
 		PosSet:    s.boundsSet,
 		X:         s.x,
 		Y:         s.y,
@@ -168,7 +155,7 @@ func (win *Window) applyInitialSize() {
 // на мониторе с другим DPI, иначе получило бы масштаб основного: Windows при
 // создании WM_DPICHANGED не шлёт, и интерфейс выглядел бы вдвое мельче или
 // крупнее до первого переноса. r считается на масштабе base.
-func initialScaleFor(list []Monitor, r image.Rectangle, base float64) float64 {
+func initialScaleFor(list []native.Monitor, r image.Rectangle, base float64) float64 {
 	m, ok := MonitorForRect(list, r)
 	if !ok {
 		m, ok = monitorAt(list, r.Min.X, r.Min.Y)
@@ -186,115 +173,6 @@ func initialPhysicalRect(x, y, w, h int, k float64) image.Rectangle {
 		k = 1
 	}
 	return image.Rect(x, y, x+int(float64(w)*k+0.5), y+int(float64(h)*k+0.5))
-}
-
-// Константы Win32, нужные чистой арифметике ниже (сами константы бэкенда живут
-// в native_windows.go под платформенным тегом).
-const (
-	initWsVisible = 0x10000000 // WS_VISIBLE
-	initSwShowMax = 3          // SW_SHOWMAXIMIZED
-)
-
-// win32InitialCreate решает, с каким стилем и командой показа создавать
-// главное окно Win32, и где.
-//
-//   - Развёрнутое окно создаётся БЕЗ WS_VISIBLE: иначе CreateWindowEx показал
-//     бы его обычным (на своём прямоугольнике), и разворачивание шло бы на
-//     глазах. Первый показ — ShowWindow(SW_SHOWMAXIMIZED) на скрытом окне:
-//     система берёт прямоугольник создания как нормальный, и «восстановить»
-//     вернёт его.
-//   - Положение: заданное приложением или (cx, cy) — по центру.
-//
-// show — команда показа, заданная вызывающим (SW_SHOW для обычного окна).
-func win32InitialCreate(p initialPlacement, style uint32, show uintptr, cx, cy int) (x, y int, st uint32, cmd uintptr) {
-	x, y, st, cmd = cx, cy, style, show
-	if p.PosSet {
-		x, y = p.X, p.Y
-	}
-	if p.Maximized {
-		st &^= initWsVisible
-		cmd = initSwShowMax
-	}
-	return
-}
-
-// wlNormalSize решает, какой размер принять из xdg_toplevel.configure окну,
-// начавшему жизнь развёрнутым. nw×nh — размер из события (0×0 — «решай
-// сам»), normW×normH — размер, с которым окно создавалось (0 — окно не
-// начинало развёрнутым или размер уже использован).
-//
-// Компоновщик не видел обычного окна, а потому на «восстановить» присылает
-// 0×0, и окно осталось бы размером с экран. Когда окно не развёрнуто и не
-// на весь экран, а компоновщик размера не назвал, берём запомненный. used —
-// запомненное значение пошло в дело (или стало ненужным): очистить.
-func wlNormalSize(nw, nh int, maximized, fullscreen bool, normW, normH int) (w, h int, used bool) {
-	if normW <= 0 || normH <= 0 || maximized || fullscreen {
-		return nw, nh, false
-	}
-	if nw == 0 && nh == 0 {
-		return normW, normH, true
-	}
-	return nw, nh, true // компоновщик назвал размер сам — запомненный не нужен
-}
-
-// Флаги ICCCM для WM_NORMAL_HINTS (XSizeHints.flags).
-const (
-	x11USPosition = 1 << 0 // положение назначил пользователь/приложение
-	x11USSize     = 1 << 1 // размер назначил пользователь/приложение
-	x11PPosition  = 1 << 2 // положение назначила программа
-	x11PSize      = 1 << 3 // размер назначила программа
-	x11PMinSize   = 1 << 4
-)
-
-// x11SizeHints собирает тело WM_NORMAL_HINTS (WM_SIZE_HINTS, 18×CARD32, раскладка
-// — в x11NormalHintsMinSize) с минимальным размером и начальным положением.
-//
-// Положение и размер объявляются менеджеру флагами USPosition|PPosition и
-// USSize|PSize: без них ICCCM разрешает менеджеру разместить окно по-своему
-// (каскад, центр), и заданное в CreateWindow положение пропадает. В полях
-// x, y, width, height (смещения 4..19, устаревшие, но менеджеры их читают)
-// повторяются значения из CreateWindow. Чистая функция: раскладка проверяется
-// тестом на любой платформе.
-func x11SizeHints(minW, minH int, p initialPlacement, x, y, width, height int) []byte {
-	buf := x11NormalHintsMinSizeBytes(minW, minH)
-	flags := uint32(0)
-	if minW > 0 || minH > 0 {
-		flags |= x11PMinSize
-	}
-	if p.PosSet {
-		flags |= x11USPosition | x11PPosition
-		putLE32(buf[4:8], uint32(int32(x)))
-		putLE32(buf[8:12], uint32(int32(y)))
-	}
-	if p.SizeSet {
-		flags |= x11USSize | x11PSize
-		putLE32(buf[12:16], uint32(int32(width)))
-		putLE32(buf[16:20], uint32(int32(height)))
-	}
-	putLE32(buf[0:4], flags)
-	return buf
-}
-
-// x11NormalHintsMinSizeBytes — тело свойства с одним минимальным размером
-// (флаги и поля положения нулевые): основа x11SizeHints. Живёт здесь, а не в
-// minsize_linux.go, чтобы чистая арифметика проверялась и вне Linux.
-func x11NormalHintsMinSizeBytes(minW, minH int) []byte {
-	buf := make([]byte, 18*4)
-	if minW < 0 {
-		minW = 0
-	}
-	if minH < 0 {
-		minH = 0
-	}
-	if minW > 0 || minH > 0 {
-		putLE32(buf[20:24], uint32(minW))
-		putLE32(buf[24:28], uint32(minH))
-	}
-	return buf
-}
-
-func putLE32(b []byte, v uint32) {
-	b[0], b[1], b[2], b[3] = byte(v), byte(v>>8), byte(v>>16), byte(v>>24)
 }
 
 // initialPerMonitorScale — у каждого монитора платформы свой масштаб, и окно

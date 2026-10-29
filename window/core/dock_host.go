@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -50,7 +51,7 @@ type floatingPane struct {
 
 	// Заполняются в create() (на UI-потоке).
 	eng       *engine.Engine
-	native    NativeWindow
+	native    native.NativeWindow
 	surf      *surface
 	popupHost *popupHost
 
@@ -210,15 +211,15 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 	// Панель — корень вторичного движка (её титлбар = титлбар окна).
 	p.SetBounds(image.Rect(0, 0, dw, dh))
 
-	native := newNativeWindow() // хук: тесты подставляют окно ОС
+	nw := newNativeWindow() // хук: тесты подставляют окно ОС
 	surf := &surface{
 		eng:     eng,
-		native:  native,
+		native:  nw,
 		scale:   scale,
 		current: image.NewRGBA(image.Rect(0, 0, pw, ph)),
 	}
 
-	if err := native.Create(p.Title, pw, ph); err != nil {
+	if err := nw.Create(p.Title, pw, ph); err != nil {
 		// Окно не поднялось — снимаем регистрацию, останавливаем движок и
 		// возвращаем панель в док (на её последнюю сторону).
 		h.mu.Lock()
@@ -229,20 +230,20 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 		p.Dock(p.Side())
 		return
 	}
-	native.SetResizable(false)
-	native.SetMinSize(pw, ph)
+	nw.SetResizable(false)
+	nw.SetMinSize(pw, ph)
 
 	// Owner БЕЗ модальности: панель поверх главного окна и сворачивается с ним,
 	// но НЕ блокирует его (SetEnabled(false) не вызываем).
-	if ow, ok := native.(ownedWindow); ok {
+	if ow, ok := nw.(ownedWindow); ok {
 		ow.SetOwner(h.parent.native)
 	}
-	h.positionNear(native, b, scale)
+	h.positionNear(nw, b, scale)
 
 	// Сохраняем ресурсы в fp ДО подключения ввода/закрытия: teardown (который
 	// может сработать сразу от ввода dock/✕) должен видеть native/eng.
 	h.mu.Lock()
-	fp.eng, fp.native, fp.surf = eng, native, surf
+	fp.eng, fp.native, fp.surf = eng, nw, surf
 	h.mu.Unlock()
 
 	// Drag за титлбар панели → перемещение нативного окна (лог → физ).
@@ -251,8 +252,8 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 			dx = int(float64(dx)*scale + 0.5)
 			dy = int(float64(dy)*scale + 0.5)
 		}
-		x, y := native.GetPosition()
-		native.SetPosition(x+dx, y+dy)
+		x, y := nw.GetPosition()
+		nw.SetPosition(x+dx, y+dy)
 	}
 
 	// Перехват выхода из плавающего состояния (кнопка dock → Dock, кнопка ✕ →
@@ -270,7 +271,7 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 
 	// Закрытие окна ОС (Alt+F4 / ✕ рамки) — как закрытие панели.
 	// Закрытие панели трогает дерево менеджера — на горутине движка панели.
-	native.SetOnClose(func() bool {
+	nw.SetOnClose(func() bool {
 		eng.Post(p.Close) // → mgr.closePane → OnStateChanged → teardown (снесёт окно)
 		return false
 	})
@@ -287,16 +288,16 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 
 	// Хост popup-оверлеев вторичного движка: dropdown'ы/меню внутри панели
 	// открываются в собственных окнах ОС, спозиционированных от окна панели.
-	if _, ok := native.(popupWindow); ok {
-		if inv, ok := native.(uiThreadInvoker); ok {
-			pph := newPopupHost(native, inv, eng, scale, &surf.in)
+	if _, ok := nw.(popupWindow); ok {
+		if inv, ok := nw.(uiThreadInvoker); ok {
+			pph := newPopupHost(nw, inv, eng, scale, &surf.in)
 			eng.SetPopupSink(pph.apply)
 			eng.SetPopupFade(true)
 			surf.setPopupCursor(pph.syncCursorOverride)
 			h.mu.Lock()
 			fp.popupHost = pph
 			h.mu.Unlock()
-			if an, ok := native.(activationNotifier); ok {
+			if an, ok := nw.(activationNotifier); ok {
 				an.SetOnActivate(func(active bool) {
 					if !active {
 						surf.post(eng.CloseAllOverlays)
@@ -308,7 +309,7 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 
 	// Вторичное окно с собственным соединением (X11) — запускаем его насос
 	// событий. Win32 не реализует eventPumper (одна очередь на все окна) — no-op.
-	if ep, ok := native.(eventPumper); ok {
+	if ep, ok := nw.(eventPumper); ok {
 		ep.StartEventPump()
 	}
 }
@@ -328,7 +329,7 @@ func (h *dockFloatHost) teardown(fp *floatingPane) {
 	delete(h.floats, fp.pane)
 	p := fp.pane
 	eng := fp.eng
-	native := fp.native
+	nw := fp.native
 	pph := fp.popupHost
 	userOnState := fp.userOnState
 	h.mu.Unlock()
@@ -359,8 +360,8 @@ func (h *dockFloatHost) teardown(fp *floatingPane) {
 
 	// Нативные операции — на UI-потоке.
 	h.invoker().InvokeOnUIThread(func() {
-		if native != nil {
-			native.Close()
+		if nw != nil {
+			nw.Close()
 		}
 		if fg, ok := h.parent.native.(foregrounder); ok {
 			fg.SetForeground()
@@ -385,11 +386,11 @@ func (h *dockFloatHost) teardownAll() {
 
 // positionNear ставит окно панели туда, где она была в главном окне: клиентский
 // угол главного окна + позиция панели (лог × scale).
-func (h *dockFloatHost) positionNear(native NativeWindow, paneBounds image.Rectangle, scale float64) {
+func (h *dockFloatHost) positionNear(nw native.NativeWindow, paneBounds image.Rectangle, scale float64) {
 	px, py := h.parent.native.GetPosition()
 	x := px + int(float64(paneBounds.Min.X)*scale+0.5)
 	y := py + int(float64(paneBounds.Min.Y)*scale+0.5)
-	native.SetPosition(x, y)
+	nw.SetPosition(x, y)
 }
 
 // invoker возвращает маршалер UI-потока главного окна.

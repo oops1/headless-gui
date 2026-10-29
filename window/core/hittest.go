@@ -1,5 +1,7 @@
 package core
 
+import "github.com/oops1/headless-gui/v3/platform/native"
+
 // hittest.go — какие области окна приложение считает заголовком и кнопками.
 //
 // Окна движка создаются без рамки: полосу заголовка и кнопки рисует само
@@ -13,24 +15,6 @@ package core
 // Сказать об этом можно единственным способом: отвечать системе, что лежит
 // под курсором. Приложение знает это точно — оно эти кнопки и нарисовало.
 
-// HitArea — что находится в точке окна.
-type HitArea int
-
-const (
-	// HitClient — обычное содержимое: событие идёт приложению, как и раньше.
-	HitClient HitArea = iota
-	// HitCaption — полоса заголовка: система сама тащит окно (с прилипанием
-	// к краям и раскладками) и разворачивает его по двойному щелчку.
-	HitCaption
-	// HitMinButton — кнопка «свернуть».
-	HitMinButton
-	// HitMaxButton — кнопка «развернуть»: наведение на неё показывает макеты
-	// привязки Windows 11.
-	HitMaxButton
-	// HitCloseButton — кнопка «закрыть».
-	HitCloseButton
-)
-
 // hitTester — необязательная способность нативного окна: спрашивать у
 // приложения, что под курсором.
 //
@@ -38,7 +22,7 @@ const (
 // окно ведёт себя как прежде — это и требуется: макеты привязки есть только
 // у Windows.
 type hitTester interface {
-	SetHitTest(fn func(x, y int) HitArea)
+	SetHitTest(fn func(x, y int) native.HitArea)
 }
 
 // SetHitTest сообщает окну, как узнать, что лежит под точкой: полоса
@@ -51,7 +35,7 @@ type hitTester interface {
 //
 // nil снимает колбэк, и окно возвращается к прежнему поведению. Бэкенды, где
 // этого понятия нет, вызов игнорируют.
-func (win *Window) SetHitTest(fn func(x, y int) HitArea) *Window {
+func (win *Window) SetHitTest(fn func(x, y int) native.HitArea) *Window {
 	win.hitTest = fn
 	if win.native != nil {
 		win.applyHitTest()
@@ -72,7 +56,7 @@ func (win *Window) applyHitTest() {
 		ht.SetHitTest(nil)
 		return
 	}
-	ht.SetHitTest(func(x, y int) HitArea {
+	ht.SetHitTest(func(x, y int) native.HitArea {
 		if k := win.scale; k > 0 && k != 1 {
 			x = int(float64(x)/k + 0.5)
 			y = int(float64(y)/k + 0.5)

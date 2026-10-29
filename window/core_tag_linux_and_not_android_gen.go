@@ -7,8 +7,16 @@
 package window
 
 import (
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/window/core"
 )
+
+// ── backend_linux.go ──
+
+// NewNativeWindow выбирает бэкенд: Wayland при доступном композиторе
+// (WAYLAND_DISPLAY + живой сокет), иначе X11 (в т.ч. XWayland).
+// HEADLESS_GUI_X11=1 — принудительный X11.
+func NewNativeWindow() native.NativeWindow { return core.NewNativeWindow() }
 
 // ── native_linux.go ──
 
@@ -16,11 +24,6 @@ import (
 // Чистый Go без CGO и внешних зависимостей.
 // Общается с X-сервером напрямую через Unix socket.
 type X11Window = core.X11Window
-
-// NewNativeWindow выбирает бэкенд: Wayland при доступном композиторе
-// (WAYLAND_DISPLAY + живой сокет), иначе X11 (в т.ч. XWayland).
-// HEADLESS_GUI_X11=1 — принудительный X11.
-func NewNativeWindow() NativeWindow { return core.NewNativeWindow() }
 
 // ── native_wayland.go ──
 

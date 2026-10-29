@@ -8,7 +8,7 @@ package core
 // заголовка и рамки). На время полного экрана снимается WS_THICKFRAME, иначе
 // система зажала бы окно максимальным размером отслеживания (размер основного
 // экрана). Положение, размер, стиль и «был развёрнут» запоминаются и
-// возвращаются при выходе (арифметика — в fullscreen_rect.go).
+// возвращаются при выходе (арифметика — в platform/native/fullscreen_rect.go).
 
 import (
 	"image"
@@ -17,6 +17,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 var (
@@ -50,7 +52,7 @@ type fullscreenWin32 struct {
 	// mu охраняет snap: SetSize/SetPosition во время полного экрана пишут в
 	// него с горутины приложения, выход читает на потоке окна.
 	mu   sync.Mutex
-	snap fsSnapshot
+	snap native.FullscreenSnapshot
 	// refitting — идёт перестановка под монитор: вложенное WM_WINDOWPOSCHANGED
 	// от неё не должно запускать новую. Только поток окна.
 	refitting bool
@@ -72,11 +74,11 @@ func (w *Win32Window) SetFullscreen(on bool) bool {
 // HMONITOR/имя/границы сверяются с текущим списком мониторов, окно ставится на
 // rcMonitor найденного. Окно, уже стоящее в полном экране, переезжает на него
 // без выхода из режима и без уведомлений: состояние не меняется.
-func (w *Win32Window) SetFullscreenOn(m Monitor) bool {
+func (w *Win32Window) SetFullscreenOn(m native.Monitor) bool {
 	if w.hwnd == 0 {
 		return false
 	}
-	cur, ok := matchMonitor(platformMonitors(), m)
+	cur, ok := native.MatchMonitor(platformMonitors(), m)
 	if !ok || cur.Bounds.Empty() {
 		return false
 	}
@@ -179,7 +181,7 @@ func (w *Win32Window) enterFullscreen(monitor image.Rectangle) {
 		// берётся уже после этого.
 		procShowWindow.Call(uintptr(w.hwnd), uintptr(swRestore))
 	}
-	snap := fsSnapshot{Rect: w.windowRect(), Style: w.windowStyle(), Maximized: zoomed != 0}
+	snap := native.FullscreenSnapshot{Rect: w.windowRect(), Style: w.windowStyle(), Maximized: zoomed != 0}
 	w.fs.mu.Lock()
 	w.fs.snap = snap
 	w.fs.mu.Unlock()
@@ -187,7 +189,7 @@ func (w *Win32Window) enterFullscreen(monitor image.Rectangle) {
 	if monitor.Empty() {
 		monitor = w.monitorRectOfWindow()
 	}
-	style, target := fsEnterPlan(snap.Style, monitor)
+	style, target := native.FullscreenEnterPlan(snap.Style, monitor)
 	// Флаг — до первого же сообщения от SetWindowPos: WM_SIZE не должен
 	// записать «не развёрнуто» поверх запомненного значения.
 	w.maximized = snap.Maximized
@@ -206,7 +208,7 @@ func (w *Win32Window) leaveFullscreen() {
 	snap := w.fs.snap
 	w.fs.mu.Unlock()
 
-	style, target := fsLeavePlan(w.windowStyle(), snap, win32MonitorRects())
+	style, target := native.FullscreenLeavePlan(w.windowStyle(), snap, win32MonitorRects())
 	w.fs.on.Store(false)
 	w.setWindowStyle(style)
 	w.fs.refitting = true
@@ -223,7 +225,7 @@ func (w *Win32Window) refitFullscreen() {
 	if w.hwnd == 0 || !w.fs.on.Load() || w.fs.refitting {
 		return
 	}
-	target, ok := fsRefit(w.windowRect(), w.monitorRectOfWindow())
+	target, ok := native.FullscreenRefit(w.windowRect(), w.monitorRectOfWindow())
 	if !ok {
 		return
 	}
@@ -241,23 +243,22 @@ type monitorInfoEx struct {
 }
 
 // win32MonitorFromHandle описывает монитор по HMONITOR.
-func win32MonitorFromHandle(hmon uintptr) (Monitor, bool) {
+func win32MonitorFromHandle(hmon uintptr) (native.Monitor, bool) {
 	if hmon == 0 {
-		return Monitor{}, false
+		return native.Monitor{}, false
 	}
 	var mi monitorInfoEx
 	mi.CbSize = uint32(unsafe.Sizeof(mi))
 	if ret, _, _ := procGetMonitorInfoW.Call(hmon, uintptr(unsafe.Pointer(&mi))); ret == 0 {
-		return Monitor{}, false
+		return native.Monitor{}, false
 	}
-	m := Monitor{
+	m := native.MonitorWithKey(native.Monitor{
 		Name:    windows.UTF16ToString(mi.SzDevice[:]),
 		Bounds:  image.Rect(int(mi.RcMonitor.Left), int(mi.RcMonitor.Top), int(mi.RcMonitor.Right), int(mi.RcMonitor.Bottom)),
 		Work:    image.Rect(int(mi.RcWork.Left), int(mi.RcWork.Top), int(mi.RcWork.Right), int(mi.RcWork.Bottom)),
 		Scale:   1,
 		Primary: mi.DwFlags&monitorInfoFPrimary != 0,
-		id:      uint64(hmon),
-	}
+	}, uint64(hmon))
 	// GetDpiForMonitor — Windows 8.1+; без неё (или при ошибке) масштаб 1.
 	if procGetDpiForMonitor.Find() == nil {
 		var dx, dy uint32
@@ -281,14 +282,14 @@ var (
 )
 
 // platformMonitors — все мониторы (EnumDisplayMonitors).
-func platformMonitors() []Monitor {
+func platformMonitors() []native.Monitor {
 	monEnumMu.Lock()
 	monEnumOut = monEnumOut[:0]
 	procEnumDisplayMonitors.Call(0, 0, monEnumProc, 0)
 	handles := append([]uintptr(nil), monEnumOut...)
 	monEnumMu.Unlock()
 
-	var out []Monitor
+	var out []native.Monitor
 	for _, h := range handles {
 		if m, ok := win32MonitorFromHandle(h); ok {
 			out = append(out, m)
@@ -307,9 +308,9 @@ func win32MonitorRects() []image.Rectangle {
 }
 
 // monitorOfWindow — монитор окна (MonitorFromWindow). Реализует monitorSource.
-func (w *Win32Window) monitorOfWindow() (Monitor, bool) {
+func (w *Win32Window) monitorOfWindow() (native.Monitor, bool) {
 	if w.hwnd == 0 {
-		return Monitor{}, false
+		return native.Monitor{}, false
 	}
 	hmon, _, _ := procMonitorFromWindow.Call(uintptr(w.hwnd), monitorDefaultToNearest)
 	return win32MonitorFromHandle(hmon)

@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Полный экран и мониторы X11 на проводе: окно разговаривает с настоящим
@@ -368,7 +370,7 @@ func fakeRandr(present bool, major, minor uint32, monitors ...[]byte) func(x11Re
 	}
 }
 
-func fsX11Monitors(t *testing.T, handler func(x11Request) []byte) []Monitor {
+func fsX11Monitors(t *testing.T, handler func(x11Request) []byte) []native.Monitor {
 	t.Helper()
 	t.Setenv("GDK_SCALE", "") // масштаб из окружения разработчика тесту не нужен
 	client, server := x11Pair(t)

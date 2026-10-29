@@ -33,24 +33,10 @@ package core
 
 import (
 	"os"
-	"strings"
 	"sync"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
-
-// activateBackend — бэкенд умеет выводить окно на передний план.
-//
-// Отдельный интерфейс (а не метод NativeWindow): сигнатуру NativeWindow менять
-// нельзя, а бэкенд без способности просто не отвечает на Activate.
-type activateBackend interface {
-	// Activate выводит окно на передний план (разворачивая свёрнутое).
-	// Смысл true зависит от платформы и описан у Window.Activate.
-	Activate() bool
-
-	// ActivateWithToken то же, но с токеном активации от запустившего
-	// процесса (Wayland: xdg_activation_v1; X11: стартовый идентификатор;
-	// Win32: токен не нужен, равно Activate).
-	ActivateWithToken(token string) bool
-}
 
 // minimizedBackend — бэкенд знает, свёрнуто ли окно.
 type minimizedBackend interface {
@@ -97,7 +83,7 @@ type activateState struct {
 // Потокобезопасно: можно звать из любой горутины, в том числе из обработчика
 // сообщения от второго процесса.
 func (win *Window) Activate() bool {
-	if ab, ok := win.native.(activateBackend); ok {
+	if ab, ok := win.native.(native.ActivateBackend); ok {
 		return ab.Activate()
 	}
 	return false
@@ -120,7 +106,7 @@ func (win *Window) Activate() bool {
 // Токен одноразовый и чужой: он адресован процессу, которого запустили, и
 // после использования недействителен.
 func (win *Window) ActivateWithToken(token string) bool {
-	if ab, ok := win.native.(activateBackend); ok {
+	if ab, ok := win.native.(native.ActivateBackend); ok {
 		return ab.ActivateWithToken(token)
 	}
 	return false
@@ -216,32 +202,4 @@ func takeActivationToken(getenv func(string) string, unsetenv func(string) error
 		return first
 	}
 	return second
-}
-
-// startupIDTime разбирает из идентификатора запуска (DESKTOP_STARTUP_ID,
-// startup-notification) метку времени пользовательского действия: идентификатор
-// имеет вид "<имя>_TIME<число>", число — время сервера X11 в миллисекундах
-// (CurrentTime, 0, не годится: менеджеру нужно настоящее). ok=false — части
-// «_TIME» нет, число не разбирается или равно нулю.
-func startupIDTime(id string) (t uint32, ok bool) {
-	i := strings.LastIndex(id, "_TIME")
-	if i < 0 {
-		return 0, false
-	}
-	digits := id[i+len("_TIME"):]
-	end := 0
-	for end < len(digits) && digits[end] >= '0' && digits[end] <= '9' {
-		end++
-	}
-	if end == 0 || end > 10 {
-		return 0, false
-	}
-	var v uint64
-	for _, c := range digits[:end] {
-		v = v*10 + uint64(c-'0')
-	}
-	if v == 0 || v > 0xFFFFFFFF {
-		return 0, false
-	}
-	return uint32(v), true
 }

@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -37,8 +38,8 @@ func TestAccentFromColorization(t *testing.T) {
 	}
 }
 
-func accentTestVal(r, g, b float64) dbusVariant {
-	return dbusVariant{Sig: "(ddd)", Val: dbusStruct{Fields: []any{r, g, b}}}
+func accentTestVal(r, g, b float64) dbus.Variant {
+	return dbus.Variant{Sig: "(ddd)", Val: dbus.Struct{Fields: []any{r, g, b}}}
 }
 
 func TestAccentFromPortalValue(t *testing.T) {
@@ -52,14 +53,14 @@ func TestAccentFromPortalValue(t *testing.T) {
 		{"чёрный — это цвет", accentTestVal(0, 0, 0), color.RGBA{A: 255}, true},
 		{"белый", accentTestVal(1, 1, 1), color.RGBA{R: 255, G: 255, B: 255, A: 255}, true},
 		// Старый Read: variant в variant.
-		{"в двух variant", dbusVariant{Sig: "v", Val: accentTestVal(1, 0, 0)}, color.RGBA{R: 255, A: 255}, true},
-		{"структура без обёртки", dbusStruct{Fields: []any{0.0, 1.0, 0.0}}, color.RGBA{G: 255, A: 255}, true},
+		{"в двух variant", dbus.Variant{Sig: "v", Val: accentTestVal(1, 0, 0)}, color.RGBA{R: 255, A: 255}, true},
+		{"структура без обёртки", dbus.Struct{Fields: []any{0.0, 1.0, 0.0}}, color.RGBA{G: 255, A: 255}, true},
 		{"срез", []any{0.0, 0.0, 1.0}, color.RGBA{B: 255, A: 255}, true},
 		// Портал сообщает «акцента нет» цветом вне [0, 1].
 		{"нет акцента (-1,-1,-1)", accentTestVal(-1, -1, -1), color.RGBA{}, false},
 		{"больше единицы", accentTestVal(0.5, 2, 0.5), color.RGBA{}, false},
-		{"два поля", dbusVariant{Val: dbusStruct{Fields: []any{0.1, 0.2}}}, color.RGBA{}, false},
-		{"целые вместо double", dbusStruct{Fields: []any{1, 0, 0}}, color.RGBA{}, false},
+		{"два поля", dbus.Variant{Val: dbus.Struct{Fields: []any{0.1, 0.2}}}, color.RGBA{}, false},
+		{"целые вместо double", dbus.Struct{Fields: []any{1, 0, 0}}, color.RGBA{}, false},
 		{"строка", "blue", color.RGBA{}, false},
 		{"nil", nil, color.RGBA{}, false},
 	}
@@ -72,9 +73,9 @@ func TestAccentFromPortalValue(t *testing.T) {
 }
 
 func TestAccentFromPortalSignal(t *testing.T) {
-	sig := func(ns, key string, val any) *dbusMessage {
-		return &dbusMessage{
-			Type: dbusTypeSignal, Path: portalObjPath,
+	sig := func(ns, key string, val any) *dbus.Message {
+		return &dbus.Message{
+			Type: dbus.TypeSignal, Path: portalObjPath,
 			Interface: portalSettingsIface, Member: "SettingChanged",
 			Sig:  "ssv",
 			Body: []any{ns, key, val},

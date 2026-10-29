@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // recycleFakeNative — окно ОС, считающее блиты.
 type recycleFakeNative struct {
-	NativeWindow
+	native.NativeWindow
 	blits atomic.Int32
 }
 

@@ -15,6 +15,8 @@ package core
 import (
 	"encoding/binary"
 	"image"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Минорные опкоды RandR.
@@ -24,7 +26,7 @@ const (
 )
 
 // x11PlatformMonitors — мониторы X11 по новому соединению.
-func x11PlatformMonitors() []Monitor {
+func x11PlatformMonitors() []native.Monitor {
 	w := &X11Window{}
 	if err := w.connect(); err != nil {
 		return nil
@@ -34,30 +36,29 @@ func x11PlatformMonitors() []Monitor {
 }
 
 // x11Monitors опрашивает мониторы по соединению w (событий на нём нет).
-func (w *X11Window) x11Monitors() []Monitor {
+func (w *X11Window) x11Monitors() []native.Monitor {
 	scale := w.DetectScale()
 	if scale <= 0 {
 		scale = 1
 	}
-	var out []Monitor
+	var out []native.Monitor
 	if major, ok := w.x11ExtensionMajor("RANDR"); ok && w.x11RandrAtLeast15(major) {
 		if reply, ok := w.x11Call(x11RRGetMonitorsRequest(major, w.rootWin)); ok {
 			for i, rm := range parseRRMonitors(reply) {
-				out = append(out, Monitor{
+				out = append(out, native.MonitorWithKey(native.Monitor{
 					Name:    w.x11AtomName(rm.name),
 					Bounds:  rm.bounds,
 					Work:    rm.bounds,
 					Scale:   scale,
 					Primary: rm.primary,
-					id:      uint64(i + 1), // индекс для _NET_WM_FULLSCREEN_MONITORS — id-1
-				})
+				}, uint64(i+1))) // ключ — индекс для _NET_WM_FULLSCREEN_MONITORS плюс один
 			}
 		}
 	}
 	if len(out) == 0 {
 		// Без RandR 1.5: весь экран сервера — один монитор.
 		r := image.Rect(0, 0, int(w.screen.WidthInPixels), int(w.screen.HeightInPixels))
-		out = []Monitor{{Bounds: r, Work: r, Scale: scale, Primary: true, id: 1}}
+		out = []native.Monitor{native.MonitorWithKey(native.Monitor{Bounds: r, Work: r, Scale: scale, Primary: true}, 1)}
 	}
 	if !hasPrimaryMonitor(out) {
 		out[0].Primary = true
@@ -76,7 +77,7 @@ func (w *X11Window) x11Monitors() []Monitor {
 	return out
 }
 
-func hasPrimaryMonitor(list []Monitor) bool {
+func hasPrimaryMonitor(list []native.Monitor) bool {
 	for _, m := range list {
 		if m.Primary {
 			return true

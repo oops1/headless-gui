@@ -30,6 +30,9 @@ package core
 import (
 	"time"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 var (
@@ -97,17 +100,17 @@ var (
 )
 
 // lkReadNow читает состояние переключателей на текущем потоке.
-func lkReadNow() LockKeys { return lkFromToggles(lkKeyState) }
+func lkReadNow() keyboard.LockKeys { return keyboard.LocksFromToggles(lkKeyState) }
 
 // LockKeys — состояние клавиш-переключателей (lockKeysBackend).
-func (w *Win32Window) LockKeys() (LockKeys, bool) {
+func (w *Win32Window) LockKeys() (keyboard.LockKeys, bool) {
 	if w.hwnd == 0 {
 		return 0, false
 	}
 	if w.onUIThread() {
 		return lkReadNow(), true
 	}
-	res := make(chan LockKeys, 1)
+	res := make(chan keyboard.LockKeys, 1)
 	w.InvokeOnUIThread(func() { res <- lkReadNow() })
 	select {
 	case k := <-res:
@@ -140,7 +143,7 @@ func lkBuildInputs(vks []int, scan func(vk int) (uint16, bool)) []lkInput {
 // сообщает; без признака на части клавиатур она читалась бы как Pause.
 func lkScanCode(vk int) (uint16, bool) {
 	scan, ext := vkScanCode(vk)
-	if vk == VK_NUMLOCK {
+	if vk == native.VK_NUMLOCK {
 		ext = true
 	}
 	return scan, ext
@@ -148,20 +151,20 @@ func lkScanCode(vk int) (uint16, bool) {
 
 // SetLockKeys приводит переключатели к want нажатием отличающихся клавиш
 // (lockKeysSetter).
-func (w *Win32Window) SetLockKeys(want LockKeys) bool {
+func (w *Win32Window) SetLockKeys(want keyboard.LockKeys) bool {
 	cur, ok := w.LockKeys()
 	if !ok {
 		return false
 	}
 	diff := cur ^ want
 	complete := true
-	if diff&KanaLock != 0 && lkKeyboardType() != lkKeyboardJapanese {
+	if diff&keyboard.KanaLock != 0 && lkKeyboardType() != lkKeyboardJapanese {
 		// Kana Lock переключается только клавишей японской клавиатуры;
 		// нажатие VK_KANA на другой не делает ничего.
-		want = want&^KanaLock | cur&KanaLock
+		want = want&^keyboard.KanaLock | cur&keyboard.KanaLock
 		complete = false
 	}
-	vks := lkToggleKeys(cur, want)
+	vks := keyboard.LockToggleKeys(cur, want)
 	if len(vks) == 0 {
 		return complete
 	}
@@ -173,5 +176,5 @@ func (w *Win32Window) SetLockKeys(want LockKeys) bool {
 // послали через SendInput (SetLockKeys): разбираемое сообщение несёт нашу метку
 // в dwExtraInfo. Вызывать только из обработчика сообщения клавиши в wndProc.
 func lkSyntheticKey(vk int) bool {
-	return lkIsLockVK(vk) && lkMessageExtra() == lkExtraInfo
+	return keyboard.IsLockVK(vk) && lkMessageExtra() == lkExtraInfo
 }

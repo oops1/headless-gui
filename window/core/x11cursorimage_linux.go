@@ -20,6 +20,7 @@ package core
 import (
 	"sync/atomic"
 
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -32,15 +33,15 @@ const (
 
 // x11CursorImages — курсоры-картинки окна. Всё под w.cursors.mu, кроме looping.
 type x11CursorImages struct {
-	pending  *widget.CursorImage // просьба, ещё не исполненная
-	cache    *cursorLRU[uint32]  // готовые курсоры по ключу картинки
-	shown    uint32              // курсор, повешенный на окно сейчас (0 — нет)
-	shownKey [32]byte            // ключ картинки показанного курсора
-	render   int                 // x11RenderUnknown / OK / None
-	major    byte                // код расширения RENDER
-	argb     uint32              // формат ARGB32 сервера
-	verified bool                // первый курсор RENDER прошёл проверку сервером
-	created  int                 // сколько курсоров построено (тесты)
+	pending  *widget.CursorImage        // просьба, ещё не исполненная
+	cache    *pointer.CursorLRU[uint32] // готовые курсоры по ключу картинки
+	shown    uint32                     // курсор, повешенный на окно сейчас (0 — нет)
+	shownKey [32]byte                   // ключ картинки показанного курсора
+	render   int                        // x11RenderUnknown / OK / None
+	major    byte                       // код расширения RENDER
+	argb     uint32                     // формат ARGB32 сервера
+	verified bool                       // первый курсор RENDER прошёл проверку сервером
+	created  int                        // сколько курсоров построено (тесты)
 
 	// looping — цикл событий читает соединение и его можно будить.
 	looping atomic.Bool
@@ -92,11 +93,11 @@ func (w *X11Window) x11SyncCursorImage() {
 func (w *X11Window) cursorImageLocked(ci *widget.CursorImage) uint32 {
 	im := &w.curImg
 	if im.cache == nil {
-		im.cache = newCursorLRU[uint32](cursorCacheSize,
+		im.cache = pointer.NewCursorLRU[uint32](pointer.CursorCacheSize,
 			func(id uint32) { w.x11Send(x11FreeCursorRequest(id)) },
 			func(id uint32) bool { return id == im.shown })
 	}
-	if id, ok := im.cache.get(ci.Key); ok {
+	if id, ok := im.cache.Get(ci.Key); ok {
 		return id
 	}
 	if im.render == x11RenderUnknown {
@@ -129,7 +130,7 @@ func (w *X11Window) cursorImageLocked(ci *widget.CursorImage) uint32 {
 		}
 	}
 	im.created++
-	im.cache.put(ci.Key, id)
+	im.cache.Put(ci.Key, id)
 	return id
 }
 

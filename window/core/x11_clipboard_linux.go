@@ -23,7 +23,7 @@ package core
 // x-special/gnome-copied-files, как у GTK и Qt.
 //
 // Виртуальные файлы (SetVirtualFiles) — те же цели, но пути берутся у
-// приложения в момент запроса (clipboard_virtual.go) и ответ уходит из
+// приложения в момент запроса (platform/native/clipboard_virtual.go) и ответ уходит из
 // горутины: приложение вправе скачивать файлы, а цикл событий этого ждать не
 // должен.
 //
@@ -38,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -62,9 +63,9 @@ type x11Clipboard struct {
 	owns       bool     // владеем ли мы буфером
 	wait       *x11Wait // ждёт ответа на ConvertSelection; nil — не ждём
 	// ownedImg — наша картинка; nil — отдаём не изображение.
-	ownedImg *ownedImage
+	ownedImg *native.OwnedImage
 	// ownedVirt — обещанные виртуальные файлы; nil — не отдаём.
-	ownedVirt *clipVirtual
+	ownedVirt *native.ClipVirtual
 	// incrSends — передачи INCR, которые мы ведём получателям (x11_clipboard_image_linux.go).
 	incrSends map[x11IncrKey]*x11IncrSend
 	// pending считает ответы, готовящиеся в горутинах (кодирование PNG); нужен
@@ -91,7 +92,7 @@ func (c *x11Clipboard) SetHTML(html, plain string) { c.setOwned(plain, html, nil
 //
 // Реализует widget.ClipboardFilesProvider.
 func (c *x11Clipboard) SetFiles(paths []string, cut bool) {
-	c.setOwned(filesPlainText(paths), "", append([]string(nil), paths...), cut, nil, nil)
+	c.setOwned(native.FilesPlainText(paths), "", append([]string(nil), paths...), cut, nil, nil)
 }
 
 var _ widget.ClipboardVirtualFilesProvider = (*x11Clipboard)(nil)
@@ -106,14 +107,14 @@ func (c *x11Clipboard) SetVirtualFiles(files []widget.VirtualFile, open func(int
 	if c == nil || c.w == nil || c.w.wid == 0 || c.w.atomClipboard == 0 {
 		return widget.ErrClipboardVirtualUnsupported
 	}
-	v, err := newClipVirtual(files, open, opts)
+	v, err := native.NewClipVirtual(files, open, opts)
 	if err != nil {
 		return err
 	}
 	if c.w.atomTextUriList == 0 && c.w.atomGnomeCopied == 0 {
 		return fmt.Errorf("window: сервер не дал атомов списка файлов: %w", widget.ErrClipboardVirtualUnsupported)
 	}
-	c.setOwned(v.names(), "", nil, false, nil, v)
+	c.setOwned(v.Names(), "", nil, false, nil, v)
 	return nil
 }
 
@@ -128,7 +129,7 @@ func (c *x11Clipboard) GetVirtualFiles() ([]widget.VirtualFile, bool) {
 	if v == nil || !owns {
 		return nil, false
 	}
-	return append([]widget.VirtualFile(nil), v.files...), true
+	return append([]widget.VirtualFile(nil), v.Files...), true
 }
 
 // OpenVirtualFile открывает содержимое нашего обещанного файла (open приложения).
@@ -139,7 +140,7 @@ func (c *x11Clipboard) OpenVirtualFile(index int) (io.ReadCloser, error) {
 	c.mu.Lock()
 	v := c.ownedVirt
 	c.mu.Unlock()
-	return v.openFile(index)
+	return v.OpenFile(index)
 }
 
 // Cleanup снимает обещание виртуальных файлов, если оно ещё в буфере: владение
@@ -162,13 +163,13 @@ func (c *x11Clipboard) Cleanup() {
 	if c.w.wid != 0 && c.w.atomClipboard != 0 {
 		c.w.x11SetSelectionOwner(c.w.atomClipboard, 0)
 	}
-	v.drop()
+	v.Drop()
 }
 
 // setOwned запоминает содержимое и становится владельцем CLIPBOARD. Прежнее
 // оформление затирается всегда: иначе после SetText проситель text/html
 // получил бы разметку от прошлого копирования.
-func (c *x11Clipboard) setOwned(text, html string, files []string, cut bool, img *ownedImage, virt *clipVirtual) {
+func (c *x11Clipboard) setOwned(text, html string, files []string, cut bool, img *native.OwnedImage, virt *native.ClipVirtual) {
 	if c == nil || c.w == nil || c.w.wid == 0 || c.w.atomClipboard == 0 {
 		return
 	}
@@ -178,7 +179,7 @@ func (c *x11Clipboard) setOwned(text, html string, files []string, cut bool, img
 	old := c.ownedVirt
 	c.ownedVirt = virt
 	c.mu.Unlock()
-	old.drop()
+	old.Drop()
 	c.w.x11SetSelectionOwner(c.w.atomClipboard, c.w.wid)
 }
 
@@ -217,7 +218,7 @@ func (c *x11Clipboard) GetHTML() (string, bool) {
 	if raw == "" {
 		return "", false
 	}
-	html := clipboardHTMLToString([]byte(raw))
+	html := native.ClipboardHTMLToString([]byte(raw))
 	return html, html != ""
 }
 
@@ -247,12 +248,12 @@ func (c *x11Clipboard) GetFiles() ([]string, bool, bool) {
 	}
 	c.mu.Unlock()
 	if a := c.w.atomGnomeCopied; a != 0 {
-		if p, cut, ok := parseGnomeCopiedFiles(c.convertTimeout(a, x11ClipboardFilesTimeout)); ok {
+		if p, cut, ok := native.ParseGnomeCopiedFiles(c.convertTimeout(a, x11ClipboardFilesTimeout)); ok {
 			return p, cut, true
 		}
 	}
 	if a := c.w.atomTextUriList; a != 0 {
-		if p, ok := parseClipboardURIList(c.convertTimeout(a, x11ClipboardFilesTimeout)); ok {
+		if p, ok := native.ParseClipboardURIList(c.convertTimeout(a, x11ClipboardFilesTimeout)); ok {
 			return p, false, true
 		}
 	}
@@ -268,7 +269,7 @@ func (c *x11Clipboard) convert(target uint32) string {
 
 // convertTimeout — convert с заданным сроком ожидания.
 func (c *x11Clipboard) convertTimeout(target uint32, timeout time.Duration) string {
-	return string(c.convertBytes(target, timeout, maxClipboardBytes))
+	return string(c.convertBytes(target, timeout, native.MaxClipboardBytes))
 }
 
 // x11Wait — ожидание ответа на ConvertSelection.
@@ -470,10 +471,10 @@ func (c *x11Clipboard) handleRequest(buf []byte) {
 		c.w.x11ChangeProperty(requestor, property, target, 8, []byte(html))
 		ok = true
 	case len(files) > 0 && uriList != 0 && target == uriList:
-		c.w.x11ChangeProperty(requestor, property, target, 8, []byte(buildURIList(files)))
+		c.w.x11ChangeProperty(requestor, property, target, 8, []byte(native.BuildURIList(files)))
 		ok = true
 	case len(files) > 0 && gnome != 0 && target == gnome:
-		c.w.x11ChangeProperty(requestor, property, target, 8, []byte(buildGnomeCopiedFiles(files, cut)))
+		c.w.x11ChangeProperty(requestor, property, target, 8, []byte(native.BuildGnomeCopiedFiles(files, cut)))
 		ok = true
 	}
 	if !ok {
@@ -485,18 +486,18 @@ func (c *x11Clipboard) handleRequest(buf []byte) {
 // serveVirtual отвечает на запрос списка файлов у виртуальных файлов: просит
 // пути у приложения и отдаёт их в нужном формате. Отказ приложения (или тело,
 // которое не влезает в один запрос) — свойство None. Зовётся из горутины.
-func (c *x11Clipboard) serveVirtual(v *clipVirtual, gnome bool, requestor, property, timestamp, selection, target uint32) {
+func (c *x11Clipboard) serveVirtual(v *native.ClipVirtual, gnome bool, requestor, property, timestamp, selection, target uint32) {
 	w := c.w
 	paths, err := v.Paths()
 	if err != nil || len(paths) == 0 {
 		w.x11SendSelectionNotify(requestor, timestamp, selection, target, 0)
 		return
 	}
-	body := buildURIList(paths)
+	body := native.BuildURIList(paths)
 	if gnome {
-		body = buildGnomeCopiedFiles(paths, false)
+		body = native.BuildGnomeCopiedFiles(paths, false)
 	}
-	if len(body) > x11IncrChunk {
+	if len(body) > native.X11IncrChunk {
 		// Для INCR список путей слишком мал, а ChangeProperty больше запроса не
 		// сделать: честный отказ лучше обрыва соединения.
 		w.x11SendSelectionNotify(requestor, timestamp, selection, target, 0)
@@ -522,7 +523,7 @@ func (c *x11Clipboard) handleClear(buf []byte) {
 	c.ownedVirt = nil
 	c.mu.Unlock()
 	c.fmts.invalidate() // у буфера новый владелец: прежний ответ о видах не годится
-	virt.drop()
+	virt.Drop()
 }
 
 // ─── Запросы протокола ──────────────────────────────────────────────────────

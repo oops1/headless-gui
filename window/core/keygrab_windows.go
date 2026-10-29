@@ -10,7 +10,7 @@ package core
 //
 // Что важно знать про WH_KEYBOARD_LL:
 //   - он глобальный: вызывается для клавиш ЛЮБОГО приложения, поэтому фильтр
-//     (keyGrabFilter) пропускает всё, пока активно не наше окно;
+//     (keyboard.GrabFilter) пропускает всё, пока активно не наше окно;
 //   - вызывается на потоке, который его поставил, из его же цикла сообщений —
 //     то есть на потоке окна, где живёт и wndProc: колбэки приложения идут
 //     оттуда же, что и для обычных клавиш;
@@ -28,6 +28,9 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 var (
@@ -66,7 +69,7 @@ type kbGrabHub struct {
 	hook   uintptr                  // HHOOK; 0 — не стоит
 	wins   map[uintptr]*Win32Window // hwnd → окно с захватом
 	owner  *Win32Window             // окно, получившее последнюю перехваченную клавишу
-	filter keyGrabFilter
+	filter keyboard.GrabFilter
 }
 
 var kbGrab kbGrabHub
@@ -156,7 +159,7 @@ func (h *kbGrabHub) set(w *Win32Window, on bool) bool {
 			return false
 		}
 		h.hook = hk
-		h.filter.reset()
+		h.filter.Reset()
 	}
 	if h.wins == nil {
 		h.wins = map[uintptr]*Win32Window{}
@@ -182,14 +185,14 @@ func (h *kbGrabHub) release(w *Win32Window, notify bool) {
 	w.kbGrabbed.Store(false)
 	if h.owner == w {
 		if notify {
-			held = h.filter.held()
+			held = h.filter.Held()
 		}
 		h.owner = nil
 	}
 	if len(h.wins) == 0 && h.hook != 0 {
 		procUnhookWindowsHookEx.Call(h.hook)
 		h.hook = 0
-		h.filter.reset()
+		h.filter.Reset()
 	}
 	h.mu.Unlock()
 	// Колбэки приложения — вне замка: из них можно снова звать SetKeyboardGrab.
@@ -206,7 +209,7 @@ func (h *kbGrabHub) release(w *Win32Window, notify bool) {
 // отпускает их при потере окном фокуса.
 func (w *Win32Window) deliverGrabbedKey(vk int, scan uint16, ext, up, repeat bool) {
 	if w.onRawKey != nil {
-		w.onRawKey(rawKey{VK: vk, Scan: scan, Extended: ext, Pressed: !up, Repeat: repeat && !up})
+		w.onRawKey(keyboard.RawKey{VK: vk, Scan: scan, Extended: ext, Pressed: !up, Repeat: repeat && !up})
 		return
 	}
 	switch {
@@ -260,8 +263,8 @@ func (h *kbGrabHub) handle(nCode, wparam, lparam uintptr) bool {
 	fg := kbForegroundWindow()
 	h.mu.Lock()
 	w := h.wins[fg]
-	act := h.filter.event(int(kb.VkCode), up, kb.Flags&llkhfAltdown != 0,
-		kbAsyncKeyDown(VK_CONTROL), w != nil)
+	act := h.filter.Event(int(kb.VkCode), up, kb.Flags&llkhfAltdown != 0,
+		kbAsyncKeyDown(native.VK_CONTROL), w != nil)
 	target := w
 	if target == nil {
 		target = h.owner // отпускание перехваченной клавиши после ухода фокуса

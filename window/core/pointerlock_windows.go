@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 const (
@@ -79,7 +81,7 @@ type win32PointerLock struct {
 	onChanged atomic.Pointer[func(active bool)]
 }
 
-// SetOnRelativeMotion реализует pointerLocker.
+// SetOnRelativeMotion реализует native.PointerLocker.
 func (w *Win32Window) SetOnRelativeMotion(fn func(dx, dy float64)) {
 	if fn == nil {
 		w.lock.onMotion.Store(nil)
@@ -88,7 +90,7 @@ func (w *Win32Window) SetOnRelativeMotion(fn func(dx, dy float64)) {
 	w.lock.onMotion.Store(&fn)
 }
 
-// SetOnPointerLockChanged реализует pointerLocker.
+// SetOnPointerLockChanged реализует native.PointerLocker.
 func (w *Win32Window) SetOnPointerLockChanged(fn func(active bool)) {
 	if fn == nil {
 		w.lock.onChanged.Store(nil)
@@ -97,7 +99,7 @@ func (w *Win32Window) SetOnPointerLockChanged(fn func(active bool)) {
 	w.lock.onChanged.Store(&fn)
 }
 
-// SetPointerLock реализует pointerLocker. Работа идёт на потоке окна: курсор,
+// SetPointerLock реализует native.PointerLocker. Работа идёт на потоке окна: курсор,
 // зажим и сырой ввод привязаны к нему; вызывающий ждёт результата.
 func (w *Win32Window) SetPointerLock(on bool) bool {
 	if w.hwnd == 0 {
@@ -274,7 +276,7 @@ func (l *win32PointerLock) handleRaw(buf []byte) {
 	if !l.engaged {
 		return
 	}
-	x, y, abs, ok := parseRawMouse(buf, int(unsafe.Sizeof(uintptr(0))))
+	x, y, abs, ok := pointer.ParseRawMouse(buf, int(unsafe.Sizeof(uintptr(0))))
 	if !ok {
 		return
 	}

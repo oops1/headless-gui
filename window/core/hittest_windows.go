@@ -2,6 +2,8 @@
 
 package core
 
+import "github.com/oops1/headless-gui/v3/platform/native"
+
 // hittest_windows.go — ответы системе о зонах окна (Aero Snap и Snap Layouts).
 //
 // Окно borderless: заголовок и кнопки рисует приложение, система о них не
@@ -15,7 +17,7 @@ package core
 // предлагает макеты. Без колбэка всё как прежде.
 
 // SetHitTest подключает колбэк зон окна. Реализует hitTester.
-func (w *Win32Window) SetHitTest(fn func(x, y int) HitArea) {
+func (w *Win32Window) SetHitTest(fn func(x, y int) native.HitArea) {
 	w.hitTestMu.Lock()
 	w.hitTest = fn
 	w.hitTestMu.Unlock()
@@ -35,13 +37,13 @@ func (w *Win32Window) hitAreaAt(x, y int) (uintptr, bool) {
 		return 0, false
 	}
 	switch fn(x, y) {
-	case HitCaption:
+	case native.HitCaption:
 		return htCaption, true
-	case HitMinButton:
+	case native.HitMinButton:
 		return htMinButton, true
-	case HitMaxButton:
+	case native.HitMaxButton:
 		return htMaxButton, true
-	case HitCloseButton:
+	case native.HitCloseButton:
 		return htClose, true
 	}
 	return 0, false
@@ -49,14 +51,14 @@ func (w *Win32Window) hitAreaAt(x, y int) (uintptr, bool) {
 
 // ncButtonArea — что под курсором в событиях нерабочей области (кнопки
 // заголовка): система шлёт их отдельными сообщениями WM_NC*.
-func ncButtonArea(wparam uintptr) (HitArea, bool) {
+func ncButtonArea(wparam uintptr) (native.HitArea, bool) {
 	switch wparam {
 	case htMinButton:
-		return HitMinButton, true
+		return native.HitMinButton, true
 	case htMaxButton:
-		return HitMaxButton, true
+		return native.HitMaxButton, true
 	case htClose:
-		return HitCloseButton, true
+		return native.HitCloseButton, true
 	}
-	return HitClient, false
+	return native.HitClient, false
 }

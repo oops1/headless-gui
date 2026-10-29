@@ -13,6 +13,9 @@ import (
 	"unsafe"
 
 	"github.com/oops1/headless-gui/v3/internal/clipimage"
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -123,7 +126,7 @@ type X11Window struct {
 	// onRawKey — приёмник клавиш со скан-кодом (rawKeySource): когда задан,
 	// остальные приёмники клавиш не вызываются, а клавиши вне таблицы VK не
 	// отбрасываются. onWheelRaw — приёмник сырого колеса (wheelRawSource).
-	onRawKey   func(k rawKey)
+	onRawKey   func(k keyboard.RawKey)
 	onWheelRaw func(x, y int, dx, dy float64, precise bool, legacy func())
 
 	// Atom IDs для WM протоколов
@@ -219,7 +222,7 @@ type X11Window struct {
 
 	// initial — положение и «развёрнуто» от приложения (initial.go); читает
 	// Create, задаётся до него.
-	initial initialPlacement
+	initial native.InitialPlacement
 
 	// atomNetWMIcon — _NET_WM_ICON (значок окна, см. icon_linux.go).
 	// Берётся лениво: значок задают не все, а InternAtom — это круговой
@@ -290,18 +293,6 @@ type x11Screen struct {
 	// ArgbVisual — TrueColor visual глубины 32 с масками ARGB (0 — на экране
 	// такого нет). Нужен окнам-попапам: см. x11argb.go.
 	ArgbVisual uint32
-}
-
-// NewNativeWindow выбирает бэкенд: Wayland при доступном композиторе
-// (WAYLAND_DISPLAY + живой сокет), иначе X11 (в т.ч. XWayland).
-// HEADLESS_GUI_X11=1 — принудительный X11.
-func NewNativeWindow() NativeWindow {
-	if os.Getenv("HEADLESS_GUI_X11") != "1" {
-		if ww := newWaylandWindow(); ww != nil {
-			return ww
-		}
-	}
-	return &X11Window{}
 }
 
 // connect подключается к X-серверу (Unix socket из DISPLAY) и выполняет
@@ -394,8 +385,8 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomClipProp = w.x11InternAtom("HEADLESS_GUI_CLIPBOARD")
 	w.atomTargets = w.x11InternAtom("TARGETS")
 	w.atomText = w.x11InternAtom("TEXT")
-	w.atomTextHTML = w.x11InternAtom(mimeTextHTML)
-	w.atomGnomeCopied = w.x11InternAtom(mimeGnomeCopiedFiles)
+	w.atomTextHTML = w.x11InternAtom(native.MimeTextHTML)
+	w.atomGnomeCopied = w.x11InternAtom(native.MimeGnomeCopiedFiles)
 	w.atomImagePNG = w.x11InternAtom(clipimage.MimePNG)
 	w.atomImageBMP = w.x11InternAtom(clipimage.MimeBMP)
 	w.atomIncr = w.x11InternAtom("INCR")
@@ -680,7 +671,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		state := binary.LittleEndian.Uint16(buf[28:30])
 		vk := w.x11VKForKey(keycode)
 		if w.onRawKey != nil {
-			w.onRawKey(rawKey{VK: vk, Scan: x11ScanCode(keycode), Pressed: true, Repeat: repeat})
+			w.onRawKey(keyboard.RawKey{VK: vk, Scan: keyboard.X11ScanCode(keycode), Pressed: true, Repeat: repeat})
 		} else if vk != 0 {
 			if w.onKeyDownRepeat != nil {
 				w.onKeyDownRepeat(vk, repeat)
@@ -694,7 +685,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 			if r := w.x11RuneForKey(keycode, state); r >= 32 {
 				w.onChar(r)
 			} else if w.keysyms == nil {
-				if r := x11KeycodeToRune(int(keycode), state&1 != 0); r != 0 {
+				if r := keyboard.X11KeycodeToRune(int(keycode), state&1 != 0); r != 0 {
 					w.onChar(r)
 				}
 			}
@@ -704,7 +695,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		keycode := buf[1]
 		vk := w.x11VKForKey(keycode)
 		if w.onRawKey != nil {
-			w.onRawKey(rawKey{VK: vk, Scan: x11ScanCode(keycode)})
+			w.onRawKey(keyboard.RawKey{VK: vk, Scan: keyboard.X11ScanCode(keycode)})
 		} else if w.onKeyUp != nil && vk != 0 {
 			w.onKeyUp(vk)
 		}
@@ -732,7 +723,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 				}
 			}
 			if w.onWheelRaw != nil {
-				dx, dy, _ := x11WheelRaw(buf[1])
+				dx, dy, _ := pointer.X11WheelRaw(buf[1])
 				w.onWheelRaw(x, y, dx, dy, false, legacy)
 			} else {
 				legacy()
@@ -740,12 +731,12 @@ func (w *X11Window) handleX11Event(buf []byte) {
 			return
 		}
 		// 1=left, 2=middle, 3=right, 4/5=колесо, 8/9=боковые «назад»/«вперёд».
-		button, ok := x11ButtonID(int(buf[1]))
+		button, ok := pointer.X11ButtonID(int(buf[1]))
 		if w.onWheelRaw != nil && (buf[1] == 4 || buf[1] == 5) {
 			// Щелчок вертикального колеса: сначала сырое событие; если его
 			// никто не принял — тик кнопкой 3/4, нажатие и отпускание разом
 			// (отпускание кнопок 4/5 при этом не пересылается, см. ниже).
-			dx, dy, _ := x11WheelRaw(buf[1])
+			dx, dy, _ := pointer.X11WheelRaw(buf[1])
 			w.onWheelRaw(x, y, dx, dy, false, func() {
 				if ok && w.onMouseButton != nil {
 					w.onMouseButton(x, y, button, true)
@@ -771,7 +762,7 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		if w.onWheelRaw != nil && (buf[1] == 4 || buf[1] == 5) {
 			return // тик целиком отдан на нажатии (пара нажатие+отпускание)
 		}
-		button, ok := x11ButtonID(int(buf[1]))
+		button, ok := pointer.X11ButtonID(int(buf[1]))
 		if ok && w.onMouseButton != nil {
 			w.onMouseButton(x, y, button, false)
 		}
@@ -790,8 +781,8 @@ func (w *X11Window) handleX11Event(buf []byte) {
 		}
 
 	case 8: // LeaveNotify: detail — buf[1], mode — buf[30]
-		if x11PointerLeft(buf[1], buf[30]) && w.onMouseMove != nil {
-			w.onMouseMove(pointerOutside, pointerOutside)
+		if pointer.X11PointerLeft(buf[1], buf[30]) && w.onMouseMove != nil {
+			w.onMouseMove(pointer.Outside, pointer.Outside)
 		}
 
 	case x11GenericEvent: // XInput 2: касания
@@ -1116,9 +1107,9 @@ func (w *X11Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 		srcOff := (dirty.Min.Y+y)*stride + dirty.Min.X*4
 		dstOff := y * rowLen
 		if w.argb {
-			swapRBRowPremul(data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
+			native.SwapRBRowPremul(data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
 		} else {
-			swapRBRow(data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
+			native.SwapRBRow(data[dstOff:dstOff+rowLen], src[srcOff:srcOff+rowLen])
 		}
 	}
 
@@ -1145,7 +1136,7 @@ func (w *X11Window) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64)) {
 }
 
 // SetOnRawKey подписывает приёмник клавиш со скан-кодом. Реализует rawKeySource.
-func (w *X11Window) SetOnRawKey(fn func(k rawKey)) { w.onRawKey = fn }
+func (w *X11Window) SetOnRawKey(fn func(k keyboard.RawKey)) { w.onRawKey = fn }
 
 // SetOnWheelRaw подписывает приёмник сырого колеса. Реализует wheelRawSource.
 func (w *X11Window) SetOnWheelRaw(fn func(x, y int, dx, dy float64, precise bool, legacy func())) {
@@ -1342,7 +1333,7 @@ func (w *X11Window) effectiveAppID() string {
 	if w.appID != "" {
 		return w.appID
 	}
-	return defaultAppID(os.Args[0])
+	return native.DefaultAppID(os.Args[0])
 }
 
 // x11SetClass пишет WM_CLASS (атом 67, тип STRING): две строки подряд, каждая
@@ -1440,10 +1431,10 @@ func (w *X11Window) readFull(buf []byte) bool {
 }
 
 // x11VKForKey — виртуальный код клавиши. Сначала по физическому месту
-// (x11KeycodeToVK), затем по таблице keysym сервера: так находится клавиша
+// (keyboard.X11KeycodeToVK), затем по таблице keysym сервера: так находится клавиша
 // Windows (Super_L/Super_R), переставленная на нестандартное место.
 func (w *X11Window) x11VKForKey(keycode byte) int {
-	if vk := x11KeycodeToVK(int(keycode)); vk != 0 {
+	if vk := keyboard.X11KeycodeToVK(int(keycode)); vk != 0 {
 		return vk
 	}
 	if w.keysyms == nil || keycode < w.minKeycode {
@@ -1455,7 +1446,7 @@ func (w *X11Window) x11VKForKey(keycode byte) int {
 	}
 	// Super может стоять в любой из колонок первых двух групп.
 	for _, sym := range w.keysyms[row : row+w.symsPerCode] {
-		if vk := keysymToVK(sym); vk != 0 {
+		if vk := keyboard.KeysymToVK(sym); vk != 0 {
 			return vk
 		}
 	}
@@ -1489,14 +1480,14 @@ func (w *X11Window) x11RuneForKey(keycode byte, state uint16) rune {
 	if sym == 0 { // NoSymbol на уровне Shift — базовый symbol
 		sym = w.keysyms[row+col]
 	}
-	r := keysymToRune(sym)
+	r := keyboard.KeysymToRune(sym)
 	// CapsLock: инверсия регистра для букв.
-	if caps && isLetterRune(r) {
+	if caps && keyboard.IsLetterRune(r) {
 		alt := w.keysyms[row+col]
 		if level == 0 {
 			alt = w.keysyms[row+col+1]
 		}
-		if ar := keysymToRune(alt); isLetterRune(ar) {
+		if ar := keyboard.KeysymToRune(alt); keyboard.IsLetterRune(ar) {
 			r = ar
 		}
 	}
@@ -1678,31 +1669,6 @@ func (w *X11Window) x11PutImage(drawable, gc uint32, dstX, dstY, width, height i
 // вертикального колеса на других платформах.
 const x11WheelNotchPx = 40.0
 
-func x11KeycodeToRune(keycode int, shift bool) rune {
-	// Упрощённый маппинг для ASCII (полная реализация через XKB/xkbcommon)
-	if keycode >= 10 && keycode <= 19 {
-		// Number row: keycode 10='1', 19='0'
-		if keycode == 19 {
-			return '0'
-		}
-		return rune('1' + keycode - 10)
-	}
-	// Letters a-z: keycodes 38-58 (evdev)
-	letters := "asdfghjkl;'qwertyuiop[]\\zxcvbnm,./"
-	idx := keycode - 38
-	if idx >= 0 && idx < len(letters) {
-		r := rune(letters[idx])
-		if shift && r >= 'a' && r <= 'z' {
-			r -= 32
-		}
-		return r
-	}
-	if keycode == 65 {
-		return ' '
-	}
-	return 0
-}
-
 func uint32ToBytes(v uint32) []byte {
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, v)
@@ -1722,14 +1688,14 @@ var _ = unsafe.Sizeof(0)
 // PMinSize) большинство WM таких ограничений не накладывают вовсе, поэтому
 // окно раньше можно было сжать сколь угодно мелко (GG-18).
 //
-// Байты структуры собирает x11NormalHintsMinSize (minsize_linux.go) — чистая
+// Байты структуры собирает native.X11NormalHintsMinSize (platform/native/minsize_linux.go) — чистая
 // функция без обращения к сети, покрытая отдельными тестами. Единицы — те же
-// физические пиксели, что принимает интерфейс SetMinSize (native.go): у X11
+// физические пиксели, что принимает интерфейс SetMinSize (platform/native/native.go): у X11
 // нет понятия "логической" поверхности отдельно от окна, конвертации не
 // требуется (в отличие от Wayland, см. WaylandWindow.SetMinSize).
 //
 // width/height ≤ 0 по каждой оси независимо — «минимума нет» (см. комментарий
-// x11NormalHintsMinSize): WM_NORMAL_HINTS переустанавливается ЦЕЛИКОМ через
+// native.X11NormalHintsMinSize): WM_NORMAL_HINTS переустанавливается ЦЕЛИКОМ через
 // ChangeProperty(mode=Replace), так что повторный вызов с нулями снимает
 // прежний минимум, а не оставляет его висеть.
 func (w *X11Window) SetMinSize(width, height int) {
@@ -1739,7 +1705,7 @@ func (w *X11Window) SetMinSize(width, height int) {
 		w.minW, w.minH, w.minWant = width, height, true
 		return
 	}
-	data := x11NormalHintsMinSize(width, height)
+	data := native.X11NormalHintsMinSize(width, height)
 	w.x11ChangeProperty(w.wid, 40 /*WM_NORMAL_HINTS*/, 41 /*WM_SIZE_HINTS*/, 32, data)
 }
 
@@ -1783,7 +1749,7 @@ func (w *X11Window) InvokeOnUIThread(fn func()) {
 // Аналог Win32 noQuit здесь не нужен: у вторичного окна СВОЙ насос событий
 // (StartEventPump), а не общий RunEventLoop, поэтому его закрытие никогда не
 // завершает цикл событий главного окна и не роняет приложение.
-func (w *X11Window) SetOwner(parent NativeWindow) {
+func (w *X11Window) SetOwner(parent native.NativeWindow) {
 	px, ok := parent.(*X11Window)
 	if !ok || w.wid == 0 || px.wid == 0 {
 		return
@@ -1925,7 +1891,7 @@ const x11TopLevelEventMask = uint32(
 		0x00000002 | // KeyRelease
 		0x00000004 | // ButtonPress
 		0x00000008 | // ButtonRelease
-		0x00000020 | // LeaveWindow — снять наведение (pointerleave.go)
+		0x00000020 | // LeaveWindow — снять наведение (platform/pointer/pointerleave.go)
 		0x00000040 | // PointerMotion
 		0x00008000 | // Exposure
 		0x00020000 | // StructureNotify (resize/close)

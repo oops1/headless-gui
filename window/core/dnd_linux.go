@@ -2,7 +2,11 @@
 
 package core
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 // XDND (X Drag-and-Drop, протокол v5) — приём файлов, перетащенных из ОС в
 // окно. Реализовано поверх сырых Xlib-запросов бэкенда (native_linux.go):
@@ -127,7 +131,7 @@ func (w *X11Window) handleSelectionNotify(buf []byte) {
 	accepted := false
 	if selection == w.atomXdndSelection && property != 0 {
 		_, _, data := w.x11GetProperty(w.wid, property, true) // читаем и удаляем
-		paths := parseURIList(string(data))
+		paths := native.ParseURIList(string(data))
 		if len(paths) > 0 && w.onFilesDropped != nil {
 			lx, ly := w.dndLocalPos()
 			w.onFilesDropped(paths, lx, ly)
@@ -230,7 +234,7 @@ func (w *X11Window) x11ConvertSelection(selection, target, property, time uint32
 
 // propertyTooBig — заявленная длина свойства (в 4-байтовых словах) вне лимита.
 func propertyTooBig(words int) bool {
-	return words < 0 || words > maxDnDBytes/4
+	return words < 0 || words > native.MaxDnDBytes/4
 }
 
 // x11Discard дочитывает и выбрасывает n байт тела ответа.

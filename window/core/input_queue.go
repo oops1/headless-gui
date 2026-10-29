@@ -11,7 +11,11 @@
 // ни обработчика.
 package core
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
+)
 
 // onEngine выполняет fn на горутине движка.
 //
@@ -62,7 +66,7 @@ func (s *surface) onNative(fn func()) {
 // Курсор окну ОС отдаётся на его потоке и только при смене: иначе каждое
 // движение мыши стоило бы сообщения потоку окна.
 func (s *surface) deliverMove(x, y int) {
-	left := x == pointerOutside && y == pointerOutside
+	left := x == pointer.Outside && y == pointer.Outside
 	x, y = s.toContent(x, y)
 	s.eng.SendMouseMove(x, y)
 	if left {
@@ -123,7 +127,7 @@ func (s *surface) syncCursor(x, y int) {
 func (s *surface) refreshCursor() {
 	x, y := s.ptrX, s.ptrY
 	if !s.ptrKnown {
-		x, y = pointerOutside, pointerOutside
+		x, y = pointer.Outside, pointer.Outside
 	}
 	s.syncCursor(x, y)
 	if fn := s.popupCursor.Load(); fn != nil {

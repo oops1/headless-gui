@@ -45,6 +45,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // ─── Импорты и константы ─────────────────────────────────────────────────────
@@ -469,7 +471,7 @@ func dndTargetAnswer(o *dndComObj, enter bool, keys uint32, pt, pdwEffect uintpt
 		return
 	}
 	eff := ptrAt[uint32](pdwEffect)
-	allowed := DragEffect(*eff) & dragEffectAll
+	allowed := native.DragEffect(*eff) & native.DragEffectAll
 	w := o.win
 	if !o.hasFiles || w == nil || allowed == 0 {
 		*eff = 0
@@ -483,7 +485,7 @@ func dndTargetAnswer(o *dndComObj, enter bool, keys uint32, pt, pdwEffect uintpt
 		*eff = 0
 		return
 	}
-	*eff = uint32(dragEffectForKeys(allowed,
+	*eff = uint32(native.DragEffectForKeys(allowed,
 		keys&mkControl != 0, keys&mkShift != 0, keys&mkAlt != 0))
 }
 
@@ -541,8 +543,8 @@ func dndTargetDrop(this, dataObj, keys, pt, pdwEffect uintptr) uintptr {
 		return sOK
 	}
 	if eff != nil {
-		allowed := DragEffect(*eff) & dragEffectAll
-		*eff = uint32(dragEffectForKeys(allowed,
+		allowed := native.DragEffect(*eff) & native.DragEffectAll
+		*eff = uint32(native.DragEffectForKeys(allowed,
 			keys&mkControl != 0, keys&mkShift != 0, keys&mkAlt != 0))
 	}
 	if w.onFilesDropped != nil {
@@ -826,22 +828,22 @@ func physicalButtons() (mk uint32, held []int) {
 
 // BeginDragFiles начинает перетаскивание файлов (fileDragSource): DoDragDrop
 // на потоке окна. Кнопка мыши должна быть зажата прямо сейчас.
-func (w *Win32Window) BeginDragFiles(paths []string, effect DragEffect, done func(DragEffect)) bool {
+func (w *Win32Window) BeginDragFiles(paths []string, effect native.DragEffect, done func(native.DragEffect)) bool {
 	return w.beginDrag(paths, effect, nil, image.Point{}, done)
 }
 
 // BeginDragFilesImage — BeginDragFiles со значком (fileDragImageSource): img
 // уходит оболочке через IDragSourceHelper. Без помощника (его нет в системе)
 // перетаскивание идёт без значка.
-func (w *Win32Window) BeginDragFilesImage(paths []string, effect DragEffect, img *image.RGBA, hotspot image.Point, done func(DragEffect)) bool {
+func (w *Win32Window) BeginDragFilesImage(paths []string, effect native.DragEffect, img *image.RGBA, hotspot image.Point, done func(native.DragEffect)) bool {
 	return w.beginDrag(paths, effect, img, hotspot, done)
 }
 
 // dragImageSupported — значок рисует оболочка, когда поднят OLE.
 func (w *Win32Window) dragImageSupported() bool { return w.oleReady }
 
-func (w *Win32Window) beginDrag(paths []string, effect DragEffect, img *image.RGBA, hot image.Point, done func(DragEffect)) bool {
-	if w.hwnd == 0 || !w.oleReady || len(paths) == 0 || effect&dragEffectAll == 0 {
+func (w *Win32Window) beginDrag(paths []string, effect native.DragEffect, img *image.RGBA, hot image.Point, done func(native.DragEffect)) bool {
+	if w.hwnd == 0 || !w.oleReady || len(paths) == 0 || effect&native.DragEffectAll == 0 {
 		return false
 	}
 	mask, held := physicalButtons()
@@ -870,12 +872,12 @@ func (w *Win32Window) beginDrag(paths []string, effect DragEffect, img *image.RG
 // runDragDrop выполняет DoDragDrop с объектами списка файлов; возвращает
 // выбранное приёмником действие (0 — отмена или ошибка). Блокирует до конца
 // перетаскивания; только на потоке с OLE.
-func runDragDrop(block []byte, effect DragEffect, mask uint32) DragEffect {
+func runDragDrop(block []byte, effect native.DragEffect, mask uint32) native.DragEffect {
 	return runDragDropImage(block, effect, mask, nil, image.Point{})
 }
 
 // runDragDropImage — runDragDrop со значком (img == nil — без него).
-func runDragDropImage(block []byte, effect DragEffect, mask uint32, img *image.RGBA, hot image.Point) DragEffect {
+func runDragDropImage(block []byte, effect native.DragEffect, mask uint32, img *image.RGBA, hot image.Point) native.DragEffect {
 	dndInitVTables()
 	data := newDndObj(dndKindData, dndVTData)
 	data.hdrop = block
@@ -888,10 +890,10 @@ func runDragDropImage(block []byte, effect DragEffect, mask uint32, img *image.R
 	defer dndRelease(src.ptr())
 
 	var final uint32
-	hr, _, _ := procDoDragDrop.Call(data.ptr(), src.ptr(), uintptr(effect&dragEffectAll),
+	hr, _, _ := procDoDragDrop.Call(data.ptr(), src.ptr(), uintptr(effect&native.DragEffectAll),
 		uintptr(unsafe.Pointer(&final)))
 	if uint32(hr) != dragdropSDrop {
 		return 0
 	}
-	return DragEffect(final) & dragEffectAll
+	return native.DragEffect(final) & native.DragEffectAll
 }

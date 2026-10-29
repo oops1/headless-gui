@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -17,7 +18,7 @@ import (
 
 // fakeCloseNative — окно ОС, запоминающее заголовок, закрытие и колбэки.
 type fakeCloseNative struct {
-	NativeWindow
+	native.NativeWindow
 	mu      sync.Mutex
 	title   string
 	closed  int

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Значок перетаскивания на Wayland, на проводе: shm-буфер с картинкой, поверхность,
@@ -62,8 +64,8 @@ func TestWayland_DragImage_Wire(t *testing.T) {
 	if !c.w.dragImageSupported() {
 		t.Fatal("dragImageSupported false при полном наборе глобалов")
 	}
-	var got []DragEffect
-	if !c.w.BeginDragFilesImage([]string{"/tmp/a"}, DragEffectCopy, wlDragTestImage(), image.Pt(3, 1), func(e DragEffect) { got = append(got, e) }) {
+	var got []native.DragEffect
+	if !c.w.BeginDragFilesImage([]string{"/tmp/a"}, native.DragEffectCopy, wlDragTestImage(), image.Pt(3, 1), func(e native.DragEffect) { got = append(got, e) }) {
 		t.Fatal("BeginDragFilesImage отказал")
 	}
 	data, fds := wlDrainFDs(t, c.peer)
@@ -158,7 +160,7 @@ func TestWayland_DragImage_Wire(t *testing.T) {
 func TestWayland_DragImage_HiDPI(t *testing.T) {
 	c := wlImageSetup(t)
 	c.w.scale.current = 2
-	c.w.BeginDragFilesImage([]string{"/tmp/a"}, DragEffectCopy, wlDragTestImage(), image.Pt(3, 1), func(DragEffect) {})
+	c.w.BeginDragFilesImage([]string{"/tmp/a"}, native.DragEffectCopy, wlDragTestImage(), image.Pt(3, 1), func(native.DragEffect) {})
 	data, fds := wlDrainFDs(t, c.peer)
 	for _, fd := range fds {
 		unix.Close(fd)
@@ -179,7 +181,7 @@ func TestWayland_DragImage_HiDPI(t *testing.T) {
 func TestWayland_DragImage_Absent(t *testing.T) {
 	// Картинки нет.
 	c := wlImageSetup(t)
-	c.w.BeginDragFiles([]string{"/tmp/a"}, DragEffectCopy, func(DragEffect) {})
+	c.w.BeginDragFiles([]string{"/tmp/a"}, native.DragEffectCopy, func(native.DragEffect) {})
 	data, fds := wlDrainFDs(t, c.peer)
 	if len(fds) != 0 {
 		t.Errorf("без значка передано fd: %d", len(fds))
@@ -198,7 +200,7 @@ func TestWayland_DragImage_Absent(t *testing.T) {
 	if c.w.dragImageSupported() {
 		t.Error("dragImageSupported true без wl_shm")
 	}
-	if !c.w.BeginDragFilesImage([]string{"/tmp/a"}, DragEffectCopy, wlDragTestImage(), image.Pt(0, 0), func(DragEffect) {}) {
+	if !c.w.BeginDragFilesImage([]string{"/tmp/a"}, native.DragEffectCopy, wlDragTestImage(), image.Pt(0, 0), func(native.DragEffect) {}) {
 		t.Fatal("без wl_shm перетаскивание не началось")
 	}
 	data, _ = wlDrainFDs(t, c.peer)

@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Оформленный текст (text/html) в буфере обмена Wayland и X11. Настоящий
@@ -28,7 +30,7 @@ func TestWlClipboard_SetHTMLOffersTextHTML(t *testing.T) {
 
 	c.w.clip.SetHTML("<b>x</b>", "x")
 	raw := c.read(t)
-	if !bytes.Contains(raw, []byte(mimeTextHTML+"\x00")) {
+	if !bytes.Contains(raw, []byte(native.MimeTextHTML+"\x00")) {
 		t.Error("text/html не объявлен при SetHTML")
 	}
 	if !bytes.Contains(raw, []byte(mimeTextUTF8)) {
@@ -36,7 +38,7 @@ func TestWlClipboard_SetHTMLOffersTextHTML(t *testing.T) {
 	}
 
 	c.w.clip.SetText("x")
-	if bytes.Contains(c.read(t), []byte(mimeTextHTML)) {
+	if bytes.Contains(c.read(t), []byte(native.MimeTextHTML)) {
 		t.Error("text/html объявлен для простого текста")
 	}
 }
@@ -51,7 +53,7 @@ func TestWlClipboard_SourceSendPicksByMime(t *testing.T) {
 	src := c.w.clip.source
 
 	for _, tc := range []struct{ mime, want string }{
-		{mimeTextHTML, "<b>Привет</b>"},
+		{native.MimeTextHTML, "<b>Привет</b>"},
 		{"text/html;charset=utf-8", "<b>Привет</b>"},
 		{mimeTextUTF8, "Привет"},
 		{mimeUTF8Str, "Привет"},
@@ -120,7 +122,7 @@ func TestWlClipboard_GetHTMLForeignRoundTrip(t *testing.T) {
 	c := newWlTestWindow(t)
 	c.w.offerSet(50, false)
 	c.w.offerSetText(50)
-	c.w.offerSetHTML(50, mimeTextHTML)
+	c.w.offerSetHTML(50, native.MimeTextHTML)
 	c.w.clip.handleSelection(50)
 
 	html := "<p>Привет, мир</p>"
@@ -155,8 +157,8 @@ func TestWlClipboard_GetHTMLForeignRoundTrip(t *testing.T) {
 
 	got, ok := c.w.clip.GetHTML()
 	wg.Wait()
-	if asked != mimeTextHTML {
-		t.Errorf("запрошен тип %q, ждал %q", asked, mimeTextHTML)
+	if asked != native.MimeTextHTML {
+		t.Errorf("запрошен тип %q, ждал %q", asked, native.MimeTextHTML)
 	}
 	if !ok || got != html {
 		t.Errorf("GetHTML = %q, %v, ждал %q", got, ok, html)
@@ -169,8 +171,8 @@ func TestOfferHTMLMimeTracking(t *testing.T) {
 	if got := c.w.offerHTMLMime(60); got != "text/html;charset=utf-8" {
 		t.Errorf("тип = %q", got)
 	}
-	c.w.offerSetHTML(60, mimeTextHTML) // голый вариант вытесняет
-	if got := c.w.offerHTMLMime(60); got != mimeTextHTML {
+	c.w.offerSetHTML(60, native.MimeTextHTML) // голый вариант вытесняет
+	if got := c.w.offerHTMLMime(60); got != native.MimeTextHTML {
 		t.Errorf("тип = %q, ждал голый text/html", got)
 	}
 	c.w.offerDelete(60)

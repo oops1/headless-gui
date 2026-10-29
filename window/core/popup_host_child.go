@@ -18,20 +18,9 @@ import (
 	"sync"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
-
-// childPopupHandlers — приёмники ввода попапов. Координаты локальные для
-// попапа и физические, как и всюду на границе с бэкендом.
-type childPopupHandlers struct {
-	Move   func(id uintptr, x, y int)
-	Button func(id uintptr, x, y, button int, pressed bool)
-	Wheel  func(id uintptr, x, y int, dx, dy float64)
-	// Done — попап закрыл не движок, а система: щелчок снаружи при захвате
-	// ввода. Оверлей в дереве виджетов надо убрать, иначе он останется
-	// открытым без окна.
-	Done func(id uintptr)
-}
 
 // childPopupHost — бэкенд, показывающий попапы сам (Wayland).
 //
@@ -42,7 +31,7 @@ type childPopupHost interface {
 	MoveChildPopup(id uintptr, x, y, w, h int)
 	BlitChildPopup(id uintptr, img *image.RGBA, bands []image.Rectangle)
 	CloseChildPopup(id uintptr)
-	SetChildPopupHandlers(h childPopupHandlers)
+	SetChildPopupHandlers(h native.ChildPopupHandlers)
 }
 
 // childPopupCursor — бэкенд умеет выбирать форму курсора над своими попапами.
@@ -121,7 +110,7 @@ func newChildPopups(be childPopupHost, eng popupEngine, scale float64, in *input
 	}
 	c := &childPopups{be: be, eng: eng, scale: scale, in: in, run: run,
 		open: map[uintptr]*childPopup{}}
-	be.SetChildPopupHandlers(childPopupHandlers{
+	be.SetChildPopupHandlers(native.ChildPopupHandlers{
 		Move:   c.onMove,
 		Button: c.onButton,
 		Wheel:  c.onWheel,

@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 // Окно borderless: заголовок и кнопки рисует приложение, система о них не
 // знает. Пока она не знала, окно не прилипало к краям экрана и не
@@ -10,11 +14,11 @@ import "testing"
 
 // hitStub — нативное окно, принимающее колбэк зон.
 type hitStub struct {
-	NativeWindow
-	fn func(x, y int) HitArea
+	native.NativeWindow
+	fn func(x, y int) native.HitArea
 }
 
-func (h *hitStub) SetHitTest(fn func(x, y int) HitArea) { h.fn = fn }
+func (h *hitStub) SetHitTest(fn func(x, y int) native.HitArea) { h.fn = fn }
 
 func TestWindow_SetHitTest(t *testing.T) {
 	st := &hitStub{}
@@ -22,19 +26,19 @@ func TestWindow_SetHitTest(t *testing.T) {
 	win.scale = 1
 	win.native = st
 
-	win.SetHitTest(func(x, y int) HitArea {
+	win.SetHitTest(func(x, y int) native.HitArea {
 		if y < 32 {
-			return HitCaption
+			return native.HitCaption
 		}
-		return HitClient
+		return native.HitClient
 	})
 	if st.fn == nil {
 		t.Fatal("колбэк не дошёл до бэкенда")
 	}
-	if got := st.fn(100, 10); got != HitCaption {
+	if got := st.fn(100, 10); got != native.HitCaption {
 		t.Errorf("в полосе заголовка %v, ждал HitCaption", got)
 	}
-	if got := st.fn(100, 100); got != HitClient {
+	if got := st.fn(100, 100); got != native.HitClient {
 		t.Errorf("в содержимом %v, ждал HitClient", got)
 	}
 }
@@ -49,9 +53,9 @@ func TestWindow_HitTestScaled(t *testing.T) {
 	win.native = st
 
 	var seen []int
-	win.SetHitTest(func(x, y int) HitArea {
+	win.SetHitTest(func(x, y int) native.HitArea {
 		seen = append(seen, x, y)
-		return HitClient
+		return native.HitClient
 	})
 	st.fn(200, 60) // физические пиксели от системы
 
@@ -67,7 +71,7 @@ func TestWindow_HitTestCleared(t *testing.T) {
 	win.scale = 1
 	win.native = st
 
-	win.SetHitTest(func(x, y int) HitArea { return HitCaption })
+	win.SetHitTest(func(x, y int) native.HitArea { return native.HitCaption })
 	win.SetHitTest(nil)
 	if st.fn != nil {
 		t.Error("колбэк остался после сброса")
@@ -80,5 +84,5 @@ func TestWindow_HitTestUnsupportedBackend(t *testing.T) {
 	win := &Window{}
 	win.scale = 1
 	win.native = &plainStub{}
-	win.SetHitTest(func(x, y int) HitArea { return HitCaption })
+	win.SetHitTest(func(x, y int) native.HitArea { return native.HitCaption })
 }

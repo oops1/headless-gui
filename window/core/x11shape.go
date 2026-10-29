@@ -49,17 +49,3 @@ func x11GetSelectionOwnerRequest(selection uint32) []byte {
 	binary.LittleEndian.PutUint32(buf[4:8], selection)
 	return buf
 }
-
-// sameRects — одинаковые наборы прямоугольников в одном порядке (общая:
-// ею пользуются и форма окна-попапа Win32, и X11).
-func sameRects(a, b []image.Rectangle) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}

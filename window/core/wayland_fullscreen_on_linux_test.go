@@ -5,6 +5,8 @@ package core
 import (
 	"image"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Полный экран на выбранном мониторе Wayland, на проводе: set_fullscreen
@@ -30,7 +32,7 @@ func TestWayland_SetFullscreenOn_ChoosesOutput(t *testing.T) {
 
 	// Монитор «со стороны»: ключ — имя глобала (одинаково у любого
 	// подключения), объект wl_output в нём не известен.
-	right := Monitor{Name: "HDMI-A-1", Bounds: image.Rect(1920, 0, 3840, 1080), id: 9}
+	right := native.MonitorWithKey(native.Monitor{Name: "HDMI-A-1", Bounds: image.Rect(1920, 0, 3840, 1080)}, 9)
 	if !c.w.SetFullscreenOn(right) {
 		t.Fatal("SetFullscreenOn вернул false при известном выводе")
 	}
@@ -48,11 +50,11 @@ func TestWayland_SetFullscreenOn_ChoosesOutput(t *testing.T) {
 	// Сопоставление по имени, когда ключ устарел, и по границам без имени.
 	for _, tc := range []struct {
 		name string
-		m    Monitor
+		m    native.Monitor
 		want uint32
 	}{
-		{"по имени", Monitor{Name: "eDP-1", id: 77}, 30},
-		{"по границам", Monitor{Bounds: image.Rect(1920, 0, 3840, 1080)}, 40},
+		{"по имени", native.MonitorWithKey(native.Monitor{Name: "eDP-1"}, 77), 30},
+		{"по границам", native.Monitor{Bounds: image.Rect(1920, 0, 3840, 1080)}, 40},
 	} {
 		c2 := newWlTestWindow(t)
 		wlTwoOutputs(c2)
@@ -79,7 +81,7 @@ func TestWayland_SetFullscreenOn_WhileFullscreen(t *testing.T) {
 	c.drain(t)
 	saved := c.w.fs.saveW.Load()
 
-	if !c.w.SetFullscreenOn(Monitor{id: 9}) {
+	if !c.w.SetFullscreenOn(native.MonitorWithKey(native.Monitor{}, 9)) {
 		t.Fatal("перенос отклонён")
 	}
 	msgs := splitWlMsgs(t, c.read(t))
@@ -104,10 +106,10 @@ func TestWayland_SetFullscreenOn_WhileFullscreen(t *testing.T) {
 func TestWayland_SetFullscreenOn_UnknownOutput(t *testing.T) {
 	c := newWlTestWindow(t)
 	wlTwoOutputs(c)
-	if c.w.SetFullscreenOn(Monitor{id: 123, Name: "VGA-1", Bounds: image.Rect(9000, 0, 9800, 600)}) {
+	if c.w.SetFullscreenOn(native.MonitorWithKey(native.Monitor{Name: "VGA-1", Bounds: image.Rect(9000, 0, 9800, 600)}, 123)) {
 		t.Error("неизвестный вывод принят")
 	}
-	if c.w.SetFullscreenOn(Monitor{}) {
+	if c.w.SetFullscreenOn(native.Monitor{}) {
 		t.Error("нулевой Monitor принят")
 	}
 	if c.w.fs.pending.Load() {
@@ -120,7 +122,7 @@ func TestWaylandMonitors_KeyIsGlobalName(t *testing.T) {
 	c := newWlTestWindow(t)
 	wlTwoOutputs(c)
 	list := c.w.monitors()
-	if len(list) != 2 || list[0].id != 5 || list[1].id != 9 {
+	if len(list) != 2 || native.MonitorKey(list[0]) != 5 || native.MonitorKey(list[1]) != 9 {
 		t.Errorf("ключи %+v, ждал глобалы 5 и 9", list)
 	}
 }

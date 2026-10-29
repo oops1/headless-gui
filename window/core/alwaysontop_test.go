@@ -1,9 +1,13 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 type aotNative struct {
-	NativeWindow
+	native.NativeWindow
 	on    bool
 	calls []bool
 }
@@ -33,7 +37,7 @@ func TestAlwaysOnTop_BeforeRunAndAfter(t *testing.T) {
 		t.Fatal("после SetAlwaysOnTop(false) окно поверх всех")
 	}
 	plain := &Window{}
-	plain.native = struct{ NativeWindow }{}
+	plain.native = struct{ native.NativeWindow }{}
 	if plain.SetAlwaysOnTop(true) || plain.IsAlwaysOnTop() {
 		t.Error("бэкенд без поддержки ответил true")
 	}

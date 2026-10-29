@@ -3,6 +3,7 @@ package core
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -13,7 +14,7 @@ import (
 
 // moverStub — нативное окно, умеющее системное перемещение.
 type moverStub struct {
-	NativeWindow
+	native.NativeWindow
 	moved   int
 	resized []int
 	answer  bool
@@ -30,7 +31,7 @@ func (m *moverStub) BeginResize(edges int) bool {
 }
 
 // plainStub — бэкенд без этой способности (Win32, X11, macOS).
-type plainStub struct{ NativeWindow }
+type plainStub struct{ native.NativeWindow }
 
 func TestWindow_BeginMove(t *testing.T) {
 	mv := &moverStub{answer: true}

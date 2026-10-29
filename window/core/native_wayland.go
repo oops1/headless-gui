@@ -20,7 +20,7 @@ package core
 // activated в xdg_toplevel.configure.
 //
 // Клавиатура: keymap не парсится (xkb), коды linux evdev транслируются как
-// evdev+8 через общий x11KeycodeToVK — раскладко-независимые VK_* совпадают
+// evdev+8 через общий keyboard.X11KeycodeToVK — раскладко-независимые VK_* совпадают
 // с X11-бэкендом.
 
 import (
@@ -38,6 +38,9 @@ import (
 
 	"github.com/oops1/headless-gui/v3/internal/clipimage"
 	"github.com/oops1/headless-gui/v3/internal/goid"
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -214,7 +217,7 @@ type WaylandWindow struct {
 	// onRawKey — приёмник клавиш со скан-кодом (rawKeySource): когда задан,
 	// остальные приёмники клавиш не вызываются, а клавиши вне таблицы VK не
 	// отбрасываются. onWheelRaw — приёмник сырого колеса (wheelRawSource).
-	onRawKey   func(k rawKey)
+	onRawKey   func(k keyboard.RawKey)
 	onWheelRaw func(x, y int, dx, dy float64, precise bool, legacy func())
 	// axisDiscrete/axisValue120 — целые щелчки по осям (0 — вертикаль, 1 —
 	// горизонталь), сообщённые композитором перед очередным axis (версии 5 и 8
@@ -304,7 +307,7 @@ type WaylandWindow struct {
 	pendingResize bool
 
 	// cornerR — скругление углов окна в логических точках (SetCornerRadius);
-	// не ноль — буфер ARGB с прозрачными углами (cornermask.go).
+	// не ноль — буфер ARGB с прозрачными углами (platform/native/cornermask.go).
 	cornerR atomic.Int32
 	// poolARGB — пул создан в формате ARGB8888. Пишется в setupPool.
 	poolARGB bool
@@ -354,7 +357,7 @@ type WaylandWindow struct {
 	// imgCreated — сколько буферов построено за жизнь окна (тесты).
 	cursorImg    *widget.CursorImage
 	popupImg     *widget.CursorImage
-	imgCursors   *cursorLRU[wlImgBuf]
+	imgCursors   *pointer.CursorLRU[wlImgBuf]
 	curSurfBuf   uint32
 	curSurfScale int
 	imgCreated   int
@@ -379,7 +382,7 @@ type WaylandWindow struct {
 
 	// Клавиатура: распарсенный xkb-keymap и состояние модификаторов
 	// (событие modifiers несёт и группу — активную раскладку).
-	keymap   *xkbKeymap
+	keymap   *keyboard.XkbKeymap
 	modShift bool
 	modCaps  bool
 	kbGroup  int
@@ -403,7 +406,7 @@ type WaylandWindow struct {
 	// normW/normH — обычный размер окна, начавшего жизнь развёрнутым:
 	// компоновщик не знает его вовсе и при «восстановить» присылает 0×0
 	// («решай сам»); окно возвращается к нему, а не остаётся большим.
-	initial      initialPlacement
+	initial      native.InitialPlacement
 	normW, normH int
 
 	// Callbacks (интерфейс NativeWindow)
@@ -710,7 +713,7 @@ func (w *WaylandWindow) Create(title string, width, height int) error {
 	// выше затёрла бы его размером окна.
 	if w.minWant {
 		w.minWant = false
-		mw, mh := wlMinSizeArgs(w.minW, w.minH, w.scaleFactor())
+		mw, mh := native.WlMinSizeArgs(w.minW, w.minH, w.scaleFactor())
 		w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(mw).putInt(mh), -1)
 	}
 	w.send(newWlMsg(w.surfaceID, wlSurfaceCommit), -1)
@@ -1045,16 +1048,16 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		// wl_data_offer.offer(mime): фиксируем, что предложено.
 		if opcode == wlDataOfferEvOffer {
 			mime, _ := wlString(b, 0)
-			if mime == mimeTextUriList {
+			if mime == native.MimeTextURIList {
 				w.offerSet(obj, true)
 			}
 			if isTextMime(mime) {
 				w.offerSetText(obj)
 			}
-			if isHTMLMime(mime) {
+			if native.IsHTMLMime(mime) {
 				w.offerSetHTML(obj, mime)
 			}
-			if mime == mimeGnomeCopiedFiles {
+			if mime == native.MimeGnomeCopiedFiles {
 				w.offerSetGnomeFiles(obj)
 			}
 			if clipimage.IsPNGMime(mime) || clipimage.IsBMPMime(mime) {
@@ -1123,13 +1126,13 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		// навсегда остался бы с «нажатой» кнопкой и захватом мыши.
 		w.releaseHeldButtons()
 		// И снимаем наведение — движением за пределы той поверхности, с
-		// которой ушли (pointerleave.go).
+		// которой ушли (platform/pointer/pointerleave.go).
 		if onPopup {
 			if h := w.popupHandlers(); h.Move != nil {
-				h.Move(w.ptrPopupID, pointerOutside, pointerOutside)
+				h.Move(w.ptrPopupID, pointer.Outside, pointer.Outside)
 			}
 		} else if w.onMouseMove != nil {
-			w.onMouseMove(pointerOutside, pointerOutside)
+			w.onMouseMove(pointer.Outside, pointer.Outside)
 		}
 	case wlPointerEvMotion:
 		// time, x(fixed), y(fixed)
@@ -1149,7 +1152,7 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 		serial := binary.LittleEndian.Uint32(b[0:4])
 		btn := binary.LittleEndian.Uint32(b[8:12])
 		pressed := binary.LittleEndian.Uint32(b[12:16]) == 1
-		id, known := wlButtonID(btn)
+		id, known := pointer.WlButtonID(btn)
 		if !known {
 			id = -1
 		}
@@ -1226,7 +1229,7 @@ func (w *WaylandWindow) handlePointer(opcode uint16, b []byte) {
 			}
 		}
 		if w.onWheelRaw != nil && (axis == 0 || axis == 1) {
-			raw, precise := waylandAxisRaw(val, disc, v120)
+			raw, precise := pointer.WaylandAxisRaw(val, disc, v120)
 			if raw != 0 {
 				x, y := w.ptrX, w.ptrY
 				if axis == 0 {
@@ -1281,12 +1284,12 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 		if dump := os.Getenv("HEADLESS_GUI_WL_KEYMAP_DUMP"); dump != "" {
 			os.WriteFile(dump, data, 0o644)
 		}
-		w.keymap = parseXkbKeymap(string(data))
+		w.keymap = keyboard.ParseXkbKeymap(string(data))
 		w.lkNoteKeymap(data)
 		if w.keymap == nil {
 			wlLog("keymap: разобрать не удалось — фолбэк на упрощённый ввод")
 		} else {
-			wlLog("keymap: %d клавиш", len(w.keymap.keys))
+			wlLog("keymap: %d клавиш", len(w.keymap.Keys))
 		}
 
 	case wlKeyboardEvModifiers:
@@ -1307,7 +1310,7 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 		if !pressed {
 			w.repeat.stopKey(key)
 			if w.onRawKey != nil {
-				w.onRawKey(rawKey{VK: w.vkForKey(key), Scan: uint16(key)})
+				w.onRawKey(keyboard.RawKey{VK: w.vkForKey(key), Scan: uint16(key)})
 			} else if vk := w.vkForKey(key); vk != 0 && w.onKeyUp != nil {
 				w.onKeyUp(vk)
 			}
@@ -1316,7 +1319,7 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 		w.deliverKey(key, false)
 		// Повтор ведёт клиент: композитор между нажатием и отпусканием
 		// молчит. Модификаторы не повторяем — повторять нечего.
-		if vk := w.vkForKey(key); !isModifierVK(vk) {
+		if vk := w.vkForKey(key); !keyboard.IsModifierVK(vk) {
 			w.repeat.start(key, func() { w.deliverKey(key, true) })
 		}
 
@@ -1338,13 +1341,13 @@ func (w *WaylandWindow) handleKeyboard(opcode uint16, b []byte) {
 }
 
 // vkForKey — виртуальный код клавиши по evdev-коду из события wl_keyboard.key.
-// Сначала по физическому месту (x11KeycodeToVK), затем по keymap композитора:
+// Сначала по физическому месту (keyboard.X11KeycodeToVK), затем по keymap композитора:
 // так находится клавиша Windows, переставленная на нестандартное место.
 func (w *WaylandWindow) vkForKey(key uint32) int {
-	if vk := x11KeycodeToVK(int(key) + 8); vk != 0 {
+	if vk := keyboard.X11KeycodeToVK(int(key) + 8); vk != 0 {
 		return vk
 	}
-	return w.keymap.vkFor(key + 8)
+	return w.keymap.VKFor(key + 8)
 }
 
 // deliverKey отдаёт нажатие приложению: сначала код клавиши, затем символ.
@@ -1353,7 +1356,7 @@ func (w *WaylandWindow) vkForKey(key uint32) int {
 // разницу там, где нажатие что-то переключает.
 func (w *WaylandWindow) deliverKey(key uint32, repeat bool) {
 	if w.onRawKey != nil {
-		w.onRawKey(rawKey{VK: w.vkForKey(key), Scan: uint16(key), Pressed: true, Repeat: repeat})
+		w.onRawKey(keyboard.RawKey{VK: w.vkForKey(key), Scan: uint16(key), Pressed: true, Repeat: repeat})
 	} else if vk := w.vkForKey(key); vk != 0 {
 		if w.onKeyDownRepeat != nil {
 			w.onKeyDownRepeat(vk, repeat)
@@ -1366,12 +1369,12 @@ func (w *WaylandWindow) deliverKey(key uint32, repeat bool) {
 	}
 	// Полноценный ввод по keymap (руна с учётом раскладки/Shift/Caps);
 	// фолбэк — упрощённый маппинг, как раньше.
-	if r := w.keymap.runeFor(key+8, w.kbGroup, w.modShift, w.modCaps); r >= 32 {
+	if r := w.keymap.RuneFor(key+8, w.kbGroup, w.modShift, w.modCaps); r >= 32 {
 		w.onChar(r)
 		return
 	}
 	if w.keymap == nil {
-		if r := x11KeycodeToRune(int(key)+8, w.modShift); r != 0 {
+		if r := keyboard.X11KeycodeToRune(int(key)+8, w.modShift); r != 0 {
 			w.onChar(r)
 		}
 	}
@@ -1386,7 +1389,7 @@ func (w *WaylandWindow) SetOnKeyDownRepeat(fn func(vk int, repeat bool)) {
 // ─── SHM-пул и блит ─────────────────────────────────────────────────────────
 
 // setupPool создаёт memfd-пул на два буфера width×height: XRGB8888, а у окна
-// со скруглением — ARGB8888 (прозрачные углы, cornermask.go).
+// со скруглением — ARGB8888 (прозрачные углы, platform/native/cornermask.go).
 func (w *WaylandWindow) setupPool(width, height int) error {
 	format := uint32(wlShmFormatXRGB8888)
 	argb := w.wantARGB()
@@ -1613,9 +1616,9 @@ func (w *WaylandWindow) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	w.mu.Unlock()
 
 	base := idx * w.stride * w.poolH
-	convRectBGRX(w.shmData[base:], w.stride, img.Pix, img.Stride, area)
+	native.ConvRectBGRX(w.shmData[base:], w.stride, img.Pix, img.Stride, area)
 	if w.poolARGB {
-		applyCornerMask(w.shmData[base:], w.stride, w.poolW, w.poolH, w.maskRadius(), area)
+		native.ApplyCornerMask(w.shmData[base:], w.stride, w.poolW, w.poolH, w.maskRadius(), area)
 	}
 	w.attachAndCommit(area)
 }
@@ -1936,7 +1939,7 @@ func (w *WaylandWindow) releaseHeldButtons() {
 	if held == 0 || w.onMouseButton == nil {
 		return
 	}
-	for id := 0; id <= buttonCodeX2; id++ {
+	for id := 0; id <= pointer.ButtonX2; id++ {
 		if held&(1<<uint(id)) != 0 {
 			w.onMouseButton(w.ptrX, w.ptrY, id, false)
 		}
@@ -2003,7 +2006,7 @@ func (w *WaylandWindow) SetOnMouseWheelPixels(fn func(x, y int, dx, dy float64))
 
 // SetOnRawKey подписывает приёмник клавиш со скан-кодом (evdev). Реализует
 // rawKeySource.
-func (w *WaylandWindow) SetOnRawKey(fn func(k rawKey)) { w.onRawKey = fn }
+func (w *WaylandWindow) SetOnRawKey(fn func(k keyboard.RawKey)) { w.onRawKey = fn }
 
 // SetOnWheelRaw подписывает приёмник сырого колеса. Реализует wheelRawSource.
 func (w *WaylandWindow) SetOnWheelRaw(fn func(x, y int, dx, dy float64, precise bool, legacy func())) {
@@ -2084,7 +2087,7 @@ func (w *WaylandWindow) offerSetHTML(id uint32, mime string) {
 	if w.htmlOffers == nil {
 		w.htmlOffers = map[uint32]string{}
 	}
-	if old, ok := w.htmlOffers[id]; !ok || mime == mimeTextHTML || old == "" {
+	if old, ok := w.htmlOffers[id]; !ok || mime == native.MimeTextHTML || old == "" {
 		w.htmlOffers[id] = mime
 	}
 }
@@ -2236,7 +2239,7 @@ func (w *WaylandWindow) dndAnswer() {
 		return
 	}
 	w.send(newWlMsg(w.dndOffer, wlDataOfferAccept).
-		putUint(w.dndSerial).putString(mimeTextUriList), -1)
+		putUint(w.dndSerial).putString(native.MimeTextURIList), -1)
 	if w.dataDevVersion >= 3 && !w.dndActions {
 		w.dndActions = true
 		w.send(newWlMsg(w.dndOffer, wlDataOfferSetActions).
@@ -2287,13 +2290,13 @@ func (w *WaylandWindow) dndReceive() {
 		return
 	}
 	// receive(mime, fd): компонент пишет данные в write-конец, мы читаем read-конец.
-	w.send(newWlMsg(offer, wlDataOfferReceive).putString(mimeTextUriList), int(wr.Fd()))
+	w.send(newWlMsg(offer, wlDataOfferReceive).putString(native.MimeTextURIList), int(wr.Fd()))
 	wr.Close() // наш write-конец не нужен — EOF придёт при закрытии компонентом
 	x, y := w.dndX, w.dndY
 	go func() {
 		defer r.Close()
-		data, _ := io.ReadAll(io.LimitReader(r, maxDnDBytes))
-		paths := parseURIList(string(data))
+		data, _ := io.ReadAll(io.LimitReader(r, native.MaxDnDBytes))
+		paths := native.ParseURIList(string(data))
 		if len(paths) > 0 && w.onFilesDropped != nil {
 			w.onFilesDropped(paths, x, y)
 		}
@@ -2354,7 +2357,7 @@ func (w *WaylandWindow) applySizeLimits(resizable bool) {
 	}
 	mw, mh := int32(0), int32(0)
 	if w.minW > 0 || w.minH > 0 {
-		mw, mh = wlMinSizeArgs(w.minW, w.minH, w.scaleFactor())
+		mw, mh = native.WlMinSizeArgs(w.minW, w.minH, w.scaleFactor())
 	}
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(mw).putInt(mh), -1)
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMaxSize).putInt(0).putInt(0), -1)
@@ -2390,7 +2393,7 @@ func (w *WaylandWindow) effectiveAppID() string {
 	if w.appID != "" {
 		return w.appID
 	}
-	return defaultAppID(os.Args[0])
+	return native.DefaultAppID(os.Args[0])
 }
 
 // SetMinSize задаёт минимальный размер окна через xdg_toplevel.set_min_size
@@ -2401,10 +2404,10 @@ func (w *WaylandWindow) effectiveAppID() string {
 // (GG-18).
 //
 // Перевод физических пикселей (контракт SetMinSize) в surface-local координаты
-// протокола делает wlMinSizeArgs (minsize_linux.go, чистая функция с тестами).
+// протокола делает native.WlMinSizeArgs (platform/native/minsize_linux.go, чистая функция с тестами).
 // Scale передаём как 1: этот бэкенд не отслеживает буферный масштаб поверхности
 // (ни wl_surface.set_buffer_scale, ни wp_fractional_scale не реализованы —
-// см. подробный комментарий у wlMinSizeArgs), так что physical == logical,
+// см. подробный комментарий у native.WlMinSizeArgs), так что physical == logical,
 // как и у уже существующих вызовов set_min_size/set_max_size в Create.
 func (w *WaylandWindow) SetMinSize(width, height int) {
 	// Toplevel ещё нет — запоминаем: Create сам зафиксирует размер и следом
@@ -2414,6 +2417,6 @@ func (w *WaylandWindow) SetMinSize(width, height int) {
 		return
 	}
 	w.minW, w.minH = width, height
-	mw, mh := wlMinSizeArgs(width, height, w.scaleFactor())
+	mw, mh := native.WlMinSizeArgs(width, height, w.scaleFactor())
 	w.send(newWlMsg(w.toplevelID, xdgToplevelSetMinSize).putInt(mw).putInt(mh), -1)
 }

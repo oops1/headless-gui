@@ -9,6 +9,9 @@ import (
 	"image/draw"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // Меню и выпадающие списки на Wayland рисовались ВНУТРИ окна и обрезались его
@@ -173,7 +176,7 @@ func TestWaylandPopup_PointerRoutedToPopup(t *testing.T) {
 	var gotID uintptr
 	var gotX, gotY int
 	var clicked bool
-	c.w.SetChildPopupHandlers(childPopupHandlers{
+	c.w.SetChildPopupHandlers(native.ChildPopupHandlers{
 		Move:   func(id uintptr, x, y int) { gotID, gotX, gotY = id, x, y },
 		Button: func(id uintptr, x, y, b int, pressed bool) { clicked = pressed },
 	})
@@ -182,7 +185,7 @@ func TestWaylandPopup_PointerRoutedToPopup(t *testing.T) {
 	enter := append(wlU32(1, p.surfaceID), wlFixed(12, 20)...)
 	c.w.handlePointer(wlPointerEvEnter, enter)
 	c.w.handlePointer(wlPointerEvMotion, append(wlU32(0), wlFixed(30, 42)...))
-	c.w.handlePointer(wlPointerEvButton, wlU32(2, 0, btnLeft, 1))
+	c.w.handlePointer(wlPointerEvButton, wlU32(2, 0, pointer.WlBtnLeft, 1))
 
 	if gotID != 1 || gotX != 30 || gotY != 42 {
 		t.Errorf("движение дошло как id=%d %d,%d; ждал id=1 30,42", gotID, gotX, gotY)
@@ -213,7 +216,7 @@ func TestWaylandPopup_DoneReported(t *testing.T) {
 	c.drain(t)
 
 	var done uintptr
-	c.w.SetChildPopupHandlers(childPopupHandlers{Done: func(id uintptr) { done = id }})
+	c.w.SetChildPopupHandlers(native.ChildPopupHandlers{Done: func(id uintptr) { done = id }})
 	c.w.handleEvent(p.popupID, xdgPopupEvPopupDone, nil)
 
 	if done != 7 {

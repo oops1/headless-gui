@@ -30,6 +30,8 @@ import (
 
 	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -213,13 +215,13 @@ func (win *Window) installPopupHost() {
 
 // detectScale возвращает HiDPI-масштаб: env HEADLESS_GUI_SCALE имеет
 // приоритет (ручное управление на X11/macOS), иначе — от бэкенда.
-func detectScale(native NativeWindow) float64 {
+func detectScale(nw native.NativeWindow) float64 {
 	if v := os.Getenv("HEADLESS_GUI_SCALE"); v != "" {
 		if k, err := strconv.ParseFloat(v, 64); err == nil && k >= 0.5 && k <= 4 {
 			return k
 		}
 	}
-	if sd, ok := native.(scaleDetector); ok {
+	if sd, ok := nw.(scaleDetector); ok {
 		if k := sd.DetectScale(); k > 0 {
 			return k
 		}
@@ -244,7 +246,7 @@ func (win *Window) physicalSize() (int, int) {
 // Window; surface её не касается.
 type surface struct {
 	eng    EngineAPI
-	native NativeWindow
+	native native.NativeWindow
 
 	// HiDPI: масштаб монитора (1.0 без HiDPI). Логический размер живёт у
 	// владельца; нативное окно и буфер кадра — физические (логические × scale).
@@ -270,7 +272,7 @@ type surface struct {
 	// чтобы при потере окном активности отпустить их в движке: отпускание
 	// уйдёт в чужое окно, и без этого Ctrl остаётся «зажатым» (activation.go).
 	heldMu sync.Mutex
-	held   []rawKey
+	held   []keyboard.RawKey
 
 	// in — очередь ввода к движку: склейка движений мыши (input_queue.go).
 	in inputQueue
@@ -357,7 +359,7 @@ type Window struct {
 	// onActivateLocks/lkNow/lkWait — то же вместе с состоянием клавиш-
 	// переключателей (lockkeys.go): колбэк, последнее сообщённое ему
 	// состояние и признак «активация ждёт, пока придёт состояние».
-	onActivateLocks atomic.Pointer[func(active bool, locks LockKeys, known bool)]
+	onActivateLocks atomic.Pointer[func(active bool, locks keyboard.LockKeys, known bool)]
 	lkNow           atomic.Int32
 	lkWait          atomic.Uint64 // номер ожидания состояния, 0 — не ждём
 	lkSeq           atomic.Uint64
@@ -401,7 +403,7 @@ type Window struct {
 
 	// hitTest — что лежит под точкой окна (см. SetHitTest): полоса
 	// заголовка, кнопки управления или содержимое.
-	hitTest func(x, y int) HitArea
+	hitTest func(x, y int) native.HitArea
 
 	// appID — как программа называет себя среде рабочего стола: по нему
 	// панель задач ищет значок и .desktop-файл (см. SetAppID). Пусто —
@@ -1305,18 +1307,18 @@ func (s *surface) keyEvent(vk int, pressed bool) {
 // скан-кодов: событие приходит без ScanCode, клавиши вне таблицы VK он
 // отбрасывает сам.
 func (s *surface) keyEventRepeat(vk int, pressed, repeat bool) {
-	s.rawKeyEvent(rawKey{VK: vk, Pressed: pressed, Repeat: repeat})
+	s.rawKeyEvent(keyboard.RawKey{VK: vk, Pressed: pressed, Repeat: repeat})
 }
 
 // physicalKeyCode — код для события клавиши: именованные клавиши таблицы, а
 // сверх неё — сами модификаторы (Shift/Ctrl/Alt как нажатые клавиши, v3.39).
 func physicalKeyCode(vk int) widget.KeyCode {
 	switch vk {
-	case VK_SHIFT:
+	case native.VK_SHIFT:
 		return widget.KeyShift
-	case VK_CONTROL:
+	case native.VK_CONTROL:
 		return widget.KeyControl
-	case VK_ALT:
+	case native.VK_ALT:
 		return widget.KeyAltKey
 	}
 	return vkToKeyCode(vk)
@@ -1330,15 +1332,15 @@ func physicalKeyCode(vk int) widget.KeyCode {
 // (бэкенд без rawKeySource, код вне таблицы) отбрасывается, как и раньше.
 // Модификаторы (Shift/Ctrl/Alt) доходят приложению как события только со
 // скан-кодом: старый путь без него их не порождал и не порождает.
-func (s *surface) rawKeyEvent(k rawKey) {
+func (s *surface) rawKeyEvent(k keyboard.RawKey) {
 	vk, pressed, repeat := k.VK, k.Pressed, k.Repeat
 	s.noteHeld(k)
 	switch vk {
-	case VK_SHIFT:
+	case native.VK_SHIFT:
 		s.modShift.Store(pressed)
-	case VK_CONTROL:
+	case native.VK_CONTROL:
 		s.modCtrl.Store(pressed)
-	case VK_LWIN, VK_RWIN:
+	case native.VK_LWIN, native.VK_RWIN:
 		// Win — модификатор (ModMeta) и одновременно клавиша (KeyWin): оболочке
 		// одиночное нажатие открывает «Пуск», а сочетания Win+X идут с
 		// ModMeta. Состояние держим по обеим клавишам сразу: отпускание
@@ -1348,7 +1350,7 @@ func (s *surface) rawKeyEvent(k rawKey) {
 		if pressed {
 			s.altTap.Store(false)
 		}
-	case VK_ALT:
+	case native.VK_ALT:
 		s.modAlt.Store(pressed)
 		// Alt сам по себе — не клавиша, а модификатор, и жестового события у
 		// него нет. Кроме одного жеста: Alt нажали и отпустили, ничего
@@ -1390,11 +1392,11 @@ func (s *surface) rawKeyEvent(k rawKey) {
 
 // postPhysicalKey ставит в очередь движка событие клавиши (и состояние
 // модификаторов, снятое сейчас).
-func (s *surface) postPhysicalKey(k rawKey) {
+func (s *surface) postPhysicalKey(k keyboard.RawKey) {
 	mod := s.currentMod()
 	code := physicalKeyCode(k.VK)
 	named := code != widget.KeyUnknown
-	if named && (k.VK == VK_SHIFT || k.VK == VK_CONTROL || k.VK == VK_ALT) && k.Scan == 0 && !k.Extended {
+	if named && (k.VK == native.VK_SHIFT || k.VK == native.VK_CONTROL || k.VK == native.VK_ALT) && k.Scan == 0 && !k.Extended {
 		named = false // модификатор без скан-кода — как прежде, не событие
 	}
 	send := named || k.Scan != 0 || k.Extended
@@ -1719,29 +1721,29 @@ func vkToKeyCode(vk int) widget.KeyCode {
 	// которых константы нет, пришли бы приложению безымянными числами, и
 	// завтрашнее добавление константы молча поменяло бы смысл события.
 	switch {
-	case vk >= VK_A && vk <= VK_Z: // буквы A–Z
+	case vk >= native.VK_A && vk <= native.VK_Z: // буквы A–Z
 		return widget.KeyCode(vk)
-	case vk >= VK_0 && vk <= VK_9: // цифровой ряд
+	case vk >= native.VK_0 && vk <= native.VK_9: // цифровой ряд
 		return widget.KeyCode(vk)
-	case vk >= VK_NUMPAD0 && vk <= VK_DIVIDE: // цифровая клавиатура
+	case vk >= native.VK_NUMPAD0 && vk <= native.VK_DIVIDE: // цифровая клавиатура
 		return widget.KeyCode(vk)
-	case vk >= VK_F1 && vk <= VK_F24:
+	case vk >= native.VK_F1 && vk <= native.VK_F24:
 		return widget.KeyCode(vk)
-	case vk >= VK_BROWSER_BACK && vk <= VK_LAUNCH_APP2: // браузерные и мультимедийные
+	case vk >= native.VK_BROWSER_BACK && vk <= native.VK_LAUNCH_APP2: // браузерные и мультимедийные
 		return widget.KeyCode(vk)
 	}
 	switch vk {
-	case VK_CLEAR, VK_KANA, VK_JUNJA, VK_FINAL, VK_KANJI, VK_CONVERT, VK_NONCONVERT,
-		VK_ACCEPT, VK_MODECHANGE, VK_SLEEP, VK_PROCESSKEY:
+	case native.VK_CLEAR, native.VK_KANA, native.VK_JUNJA, native.VK_FINAL, native.VK_KANJI, native.VK_CONVERT, native.VK_NONCONVERT,
+		native.VK_ACCEPT, native.VK_MODECHANGE, native.VK_SLEEP, native.VK_PROCESSKEY:
 		return widget.KeyCode(vk)
-	case VK_BACKSPACE, VK_TAB, VK_ENTER, VK_ESCAPE, VK_SPACE,
-		VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN,
-		VK_INSERT, VK_DELETE, VK_HOME, VK_END, VK_PRIOR, VK_NEXT,
-		VK_PAUSE, VK_CAPITAL, VK_SNAPSHOT, VK_APPS, VK_NUMLOCK, VK_SCROLL,
-		VK_OEM_1, VK_OEM_PLUS, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD,
-		VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7:
+	case native.VK_BACKSPACE, native.VK_TAB, native.VK_ENTER, native.VK_ESCAPE, native.VK_SPACE,
+		native.VK_LEFT, native.VK_UP, native.VK_RIGHT, native.VK_DOWN,
+		native.VK_INSERT, native.VK_DELETE, native.VK_HOME, native.VK_END, native.VK_PRIOR, native.VK_NEXT,
+		native.VK_PAUSE, native.VK_CAPITAL, native.VK_SNAPSHOT, native.VK_APPS, native.VK_NUMLOCK, native.VK_SCROLL,
+		native.VK_OEM_1, native.VK_OEM_PLUS, native.VK_OEM_COMMA, native.VK_OEM_MINUS, native.VK_OEM_PERIOD,
+		native.VK_OEM_2, native.VK_OEM_3, native.VK_OEM_4, native.VK_OEM_5, native.VK_OEM_6, native.VK_OEM_7:
 		return widget.KeyCode(vk)
-	case VK_LWIN, VK_RWIN:
+	case native.VK_LWIN, native.VK_RWIN:
 		// Обе клавиши Windows — одна KeyWin (0x5B): приложению важно, что
 		// нажали «Win», а не с какой стороны.
 		return widget.KeyWin
@@ -1761,6 +1763,6 @@ func (win *Window) FullFrameSnapshot() *image.RGBA {
 }
 
 // Native возвращает нативное окно для прямого доступа (опционально).
-func (win *Window) Native() NativeWindow {
+func (win *Window) Native() native.NativeWindow {
 	return win.native
 }

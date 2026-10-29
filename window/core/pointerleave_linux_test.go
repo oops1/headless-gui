@@ -5,6 +5,9 @@ package core
 import (
 	"encoding/binary"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 func wlLeaveBody(surface uint32) []byte {
@@ -22,7 +25,7 @@ func TestWayland_PointerLeaveMovesOutside(t *testing.T) {
 	var got [][2]int
 	c.w.SetOnMouseMove(func(x, y int) { got = append(got, [2]int{x, y}) })
 	c.w.handleEvent(c.w.pointerID, wlPointerEvLeave, wlLeaveBody(c.w.surfaceID))
-	if len(got) != 1 || got[0] != [2]int{pointerOutside, pointerOutside} {
+	if len(got) != 1 || got[0] != [2]int{pointer.Outside, pointer.Outside} {
 		t.Errorf("движения после leave: %v", got)
 	}
 }
@@ -32,8 +35,8 @@ func TestWayland_PointerLeavePopup(t *testing.T) {
 	c := newWlTestWindow(t)
 	var main, popup int
 	c.w.SetOnMouseMove(func(x, y int) { main++ })
-	c.w.SetChildPopupHandlers(childPopupHandlers{Move: func(id uintptr, x, y int) {
-		if id == 7 && x == pointerOutside && y == pointerOutside {
+	c.w.SetChildPopupHandlers(native.ChildPopupHandlers{Move: func(id uintptr, x, y int) {
+		if id == 7 && x == pointer.Outside && y == pointer.Outside {
 			popup++
 		}
 	}})
@@ -54,7 +57,7 @@ func TestX11_LeaveNotifyMovesOutside(t *testing.T) {
 	w.handleX11Event(ev)
 	ev[1] = 2 // NotifyInferior
 	w.handleX11Event(ev)
-	if len(got) != 1 || got[0] != [2]int{pointerOutside, pointerOutside} {
+	if len(got) != 1 || got[0] != [2]int{pointer.Outside, pointer.Outside} {
 		t.Errorf("движения после LeaveNotify: %v", got)
 	}
 }

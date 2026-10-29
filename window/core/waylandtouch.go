@@ -37,6 +37,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -150,7 +152,7 @@ type wlTouchSink struct {
 	// onTouch — приёмник касаний окна.
 	onTouch func(ev widget.TouchEvent)
 	// popup — приёмники мыши попапов.
-	popup func() childPopupHandlers
+	popup func() native.ChildPopupHandlers
 	// serial запоминает serial ввода (нужен xdg_popup.grab и буферу обмена).
 	serial func(uint32)
 
@@ -336,8 +338,8 @@ func (t *wlTouchSink) cancelAll() {
 			if t.hasPopupPrimary && t.popupPrimary == id {
 				if h := t.popup(); h.Move != nil && h.Button != nil {
 					// Кнопка отпускается вне попапа: пункт меню не сработает.
-					h.Move(p.popupID, pointerOutside, pointerOutside)
-					h.Button(p.popupID, pointerOutside, pointerOutside, 0, false)
+					h.Move(p.popupID, pointer.Outside, pointer.Outside)
+					h.Button(p.popupID, pointer.Outside, pointer.Outside, 0, false)
 				}
 			}
 			continue

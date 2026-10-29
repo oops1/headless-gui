@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -44,8 +45,8 @@ func textBoxNode(t *testing.T, text string) (*a11yNode, *widget.TextBox) {
 }
 
 // callText — вызов метода org.a11y.atspi.Text у узла.
-func callText(b *atspiBridge, node *a11yNode, member string, args ...any) *dbusReply {
-	return b.handleText(&dbusMessage{Interface: ifaceText, Member: member, Body: args}, node)
+func callText(b *atspiBridge, node *a11yNode, member string, args ...any) *dbus.Reply {
+	return b.handleText(&dbus.Message{Interface: ifaceText, Member: member, Body: args}, node)
 }
 
 func TestATSPIText_ReadsContent(t *testing.T) {

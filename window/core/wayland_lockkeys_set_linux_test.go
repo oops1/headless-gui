@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/internal/goid"
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
 )
 
 // SetLockKeys на Wayland через zwp_virtual_keyboard_v1. Композитор подменён
@@ -55,7 +56,7 @@ func lkvkWindow(t *testing.T, locked uint32) (*Window, *wlTestConn, *rkEngine) {
 }
 
 // lkvkCall зовёт SetLockKeys на отдельной горутине (она ждёт подтверждения).
-func lkvkCall(win *Window, want LockKeys) <-chan bool {
+func lkvkCall(win *Window, want keyboard.LockKeys) <-chan bool {
 	ch := make(chan bool, 1)
 	go func() { ch <- win.SetLockKeys(want) }()
 	return ch
@@ -169,7 +170,7 @@ func lkvkModifiers(t *testing.T, msgs []wlWireMsg) wlWireMsg {
 func TestLkvkSetCapsLock(t *testing.T) {
 	lkvkTimeout(t, 5*time.Second)
 	win, c, eng := lkvkWindow(t, 0x40) // зафиксирован Mod4: чужой бит должен уцелеть
-	ch := lkvkCall(win, CapsLock)
+	ch := lkvkCall(win, keyboard.CapsLock)
 
 	msgs, fds := lkvkRead(t, c)
 	// Привязка менеджера: wl_registry.bind(name, "zwp_virtual_keyboard_manager_v1", 1, id).
@@ -228,7 +229,7 @@ func TestLkvkSetCapsLock(t *testing.T) {
 	if d := time.Since(replied); d > time.Second {
 		t.Errorf("ответ через %v после modifiers: ожидание не разбужено", d)
 	}
-	if k, ok := win.LockKeys(); !ok || k != CapsLock {
+	if k, ok := win.LockKeys(); !ok || k != keyboard.CapsLock {
 		t.Errorf("LockKeys = %v, %v; ждал caps", k, ok)
 	}
 	eng.run()
@@ -243,7 +244,7 @@ func TestLkvkNoConfirmationIsFalse(t *testing.T) {
 	lkvkTimeout(t, 60*time.Millisecond)
 	win, c, _ := lkvkWindow(t, 0)
 	start := time.Now()
-	ch := lkvkCall(win, CapsLock)
+	ch := lkvkCall(win, keyboard.CapsLock)
 	if lkvkResult(t, ch) {
 		t.Error("SetLockKeys ответил true без modifiers")
 	}
@@ -266,7 +267,7 @@ func TestLkvkDefaultTimeout(t *testing.T) {
 func TestLkvkUnrelatedModifiersKeepWaiting(t *testing.T) {
 	lkvkTimeout(t, 5*time.Second)
 	win, c, _ := lkvkWindow(t, 0)
-	ch := lkvkCall(win, CapsLock)
+	ch := lkvkCall(win, keyboard.CapsLock)
 	lkvkRead(t, c)
 	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(1|4, 4, 0, 1))
 	select {
@@ -285,7 +286,7 @@ func TestLkvkUnrelatedModifiersKeepWaiting(t *testing.T) {
 func TestLkvkSecondCallReusesKeyboard(t *testing.T) {
 	lkvkTimeout(t, 5*time.Second)
 	win, c, _ := lkvkWindow(t, 0)
-	ch := lkvkCall(win, CapsLock)
+	ch := lkvkCall(win, keyboard.CapsLock)
 	lkvkRead(t, c)
 	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(1, 4, 2, 1))
 	if !lkvkResult(t, ch) {
@@ -294,7 +295,7 @@ func TestLkvkSecondCallReusesKeyboard(t *testing.T) {
 
 	// Пока окно было в работе, пользователь нажал Alt (depressed=8), сменил группу.
 	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(8, 0, 2, 0))
-	ch = lkvkCall(win, CapsLock|NumLock)
+	ch = lkvkCall(win, keyboard.CapsLock|keyboard.NumLock)
 	msgs, fds := lkvkRead(t, c)
 	if len(fds) != 0 || lkvkIndex(msgs, lkvkKbdID, 0) >= 0 {
 		t.Errorf("повторный вызов отдал раскладку заново: %+v, fd %d", msgs, len(fds))
@@ -315,7 +316,7 @@ func TestLkvkSecondCallReusesKeyboard(t *testing.T) {
 func TestLkvkClearsOthers(t *testing.T) {
 	lkvkTimeout(t, 5*time.Second)
 	win, c, _ := lkvkWindow(t, 2|0x10|0x40) // Caps, Num, и чужой Mod4
-	ch := lkvkCall(win, NumLock)
+	ch := lkvkCall(win, keyboard.NumLock)
 	msgs, _ := lkvkRead(t, c)
 	if mod := lkvkModifiers(t, msgs); mod.args[2] != 0x10|0x40 {
 		t.Errorf("locked = %#x, ждал 0x50 (Caps погашен, Num и Mod4 на месте)", mod.args[2])
@@ -329,7 +330,7 @@ func TestLkvkClearsOthers(t *testing.T) {
 // Уже как просили: запросов нет, ответ true.
 func TestLkvkAlreadyEqualSendsNothing(t *testing.T) {
 	win, c, _ := lkvkWindow(t, 2)
-	if !win.SetLockKeys(CapsLock) {
+	if !win.SetLockKeys(keyboard.CapsLock) {
 		t.Error("false, хотя Caps Lock уже включён")
 	}
 	lkvkSilent(t, c)
@@ -341,7 +342,7 @@ func TestLkvkRefusals(t *testing.T) {
 	t.Run("без менеджера", func(t *testing.T) {
 		win, c, _ := lkvkWindow(t, 0)
 		c.w.gVirtualKeyboard.Store(0)
-		if win.SetLockKeys(CapsLock) {
+		if win.SetLockKeys(keyboard.CapsLock) {
 			t.Error("true без zwp_virtual_keyboard_manager_v1")
 		}
 		lkvkSilent(t, c)
@@ -349,7 +350,7 @@ func TestLkvkRefusals(t *testing.T) {
 	t.Run("без менеджера и состояние уже нужное", func(t *testing.T) {
 		win, c, _ := lkvkWindow(t, 2)
 		c.w.gVirtualKeyboard.Store(0)
-		if win.SetLockKeys(CapsLock) {
+		if win.SetLockKeys(keyboard.CapsLock) {
 			t.Error("true без менеджера")
 		}
 		lkvkSilent(t, c)
@@ -357,7 +358,7 @@ func TestLkvkRefusals(t *testing.T) {
 	t.Run("после leave", func(t *testing.T) {
 		win, c, _ := lkvkWindow(t, 0)
 		c.kbd(wlKeyboardEvLeave, lkWlLeaveBody(11))
-		if win.SetLockKeys(CapsLock) {
+		if win.SetLockKeys(keyboard.CapsLock) {
 			t.Error("true для окна вне фокуса")
 		}
 		lkvkSilent(t, c)
@@ -367,7 +368,7 @@ func TestLkvkRefusals(t *testing.T) {
 		c.w.gVirtualKeyboard.Store(lkvkMgrName)
 		c.sendKeymap(t, lkvkKeymap)
 		win := lkTestWindow(c.w, &rkEngine{})
-		if win.SetLockKeys(CapsLock) {
+		if win.SetLockKeys(keyboard.CapsLock) {
 			t.Error("true при неизвестном состоянии")
 		}
 		lkvkSilent(t, c)
@@ -378,7 +379,7 @@ func TestLkvkRefusals(t *testing.T) {
 		c.sendKeymap(t, lkvkKeymap)
 		c.kbd(wlKeyboardEvEnter, lkWlEnterBody(11))
 		win := lkTestWindow(c.w, &rkEngine{})
-		if win.SetLockKeys(CapsLock) {
+		if win.SetLockKeys(keyboard.CapsLock) {
 			t.Error("true при неизвестном состоянии")
 		}
 		lkvkSilent(t, c)
@@ -389,7 +390,7 @@ func TestLkvkRefusals(t *testing.T) {
 		c.kbd(wlKeyboardEvEnter, lkWlEnterBody(11))
 		c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 0, 0))
 		win := lkTestWindow(c.w, &rkEngine{})
-		if win.SetLockKeys(CapsLock) {
+		if win.SetLockKeys(keyboard.CapsLock) {
 			t.Error("true без раскладки (no_keymap — фатальная ошибка)")
 		}
 		lkvkSilent(t, c)
@@ -397,7 +398,7 @@ func TestLkvkRefusals(t *testing.T) {
 	t.Run("нет seat", func(t *testing.T) {
 		win, c, _ := lkvkWindow(t, 0)
 		c.w.seatID = 0
-		if win.SetLockKeys(CapsLock) {
+		if win.SetLockKeys(keyboard.CapsLock) {
 			t.Error("true без seat")
 		}
 		lkvkSilent(t, c)
@@ -409,7 +410,7 @@ func TestLkvkRefusals(t *testing.T) {
 func TestLkvkKanaIsPartial(t *testing.T) {
 	lkvkTimeout(t, 5*time.Second)
 	win, c, _ := lkvkWindow(t, 0)
-	ch := lkvkCall(win, CapsLock|KanaLock)
+	ch := lkvkCall(win, keyboard.CapsLock|keyboard.KanaLock)
 	msgs, _ := lkvkRead(t, c)
 	if mod := lkvkModifiers(t, msgs); mod.args[2] != 2 {
 		t.Errorf("locked = %#x, ждал 2: остальное применяется", mod.args[2])
@@ -420,7 +421,7 @@ func TestLkvkKanaIsPartial(t *testing.T) {
 	}
 
 	win2, c2, _ := lkvkWindow(t, 0)
-	if win2.SetLockKeys(KanaLock) {
+	if win2.SetLockKeys(keyboard.KanaLock) {
 		t.Error("только Kana: true")
 	}
 	lkvkSilent(t, c2)
@@ -434,7 +435,7 @@ func TestLkvkScrollLock(t *testing.T) {
 		c.sendKeymap(t, keymapWith(
 			"	key <SCLK> { [ Scroll_Lock ] };\n", "modifier_map Mod5 { <SCLK> };"))
 		c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(1, 4, 0, 1))
-		ch := lkvkCall(win, ScrollLock)
+		ch := lkvkCall(win, keyboard.ScrollLock)
 		msgs, _ := lkvkRead(t, c)
 		if mod := lkvkModifiers(t, msgs); mod.args[2] != 0x80 {
 			t.Errorf("locked = %#x, ждал 0x80 (Mod5)", mod.args[2])
@@ -446,7 +447,7 @@ func TestLkvkScrollLock(t *testing.T) {
 	})
 	t.Run("не привязан", func(t *testing.T) {
 		win, c, _ := lkvkWindow(t, 0)
-		ch := lkvkCall(win, ScrollLock|CapsLock)
+		ch := lkvkCall(win, keyboard.ScrollLock|keyboard.CapsLock)
 		msgs, _ := lkvkRead(t, c)
 		if mod := lkvkModifiers(t, msgs); mod.args[2] != 2 {
 			t.Errorf("locked = %#x, ждал 2: Caps применяется, Scroll нечем", mod.args[2])
@@ -465,7 +466,7 @@ func TestLkvkMasksFromKeymap(t *testing.T) {
 	c.sendKeymap(t, keymapWith(
 		"	key <CAPS> { [ Caps_Lock ] };\n	key <NMLK> { [ Num_Lock ] };\n",
 		"modifier_map Lock { <CAPS> };\nmodifier_map Mod3 { <NMLK> };"))
-	ch := lkvkCall(win, NumLock)
+	ch := lkvkCall(win, keyboard.NumLock)
 	msgs, _ := lkvkRead(t, c)
 	if mod := lkvkModifiers(t, msgs); mod.args[2] != 1<<5 {
 		t.Errorf("locked = %#x, ждал Mod3 (0x20)", mod.args[2])
@@ -481,12 +482,12 @@ func TestLkvkMasksFromKeymap(t *testing.T) {
 func TestLkvkKeymapResentOnlyOnChange(t *testing.T) {
 	lkvkTimeout(t, 40*time.Millisecond)
 	win, c, _ := lkvkWindow(t, 0)
-	lkvkCall(win, CapsLock)
+	lkvkCall(win, keyboard.CapsLock)
 	lkvkRead(t, c)
 	time.Sleep(60 * time.Millisecond)
 
 	c.sendKeymap(t, lkvkKeymap) // та же
-	ch := lkvkCall(win, CapsLock)
+	ch := lkvkCall(win, keyboard.CapsLock)
 	msgs, fds := lkvkRead(t, c)
 	lkvkResult(t, ch)
 	if len(fds) != 0 || lkvkIndex(msgs, lkvkKbdID, 0) >= 0 {
@@ -495,7 +496,7 @@ func TestLkvkKeymapResentOnlyOnChange(t *testing.T) {
 
 	other := keymapWith("	key <CAPS> { [ Caps_Lock ] };\n", "modifier_map Lock { <CAPS> };")
 	c.sendKeymap(t, other)
-	ch = lkvkCall(win, CapsLock)
+	ch = lkvkCall(win, keyboard.CapsLock)
 	msgs, fds = lkvkRead(t, c)
 	lkvkResult(t, ch)
 	if len(fds) != 1 || lkvkIndex(msgs, lkvkKbdID, 0) < 0 {
@@ -524,7 +525,7 @@ func TestLkvkKeymapIsNulTerminated(t *testing.T) {
 			lkvkTimeout(t, 30*time.Millisecond)
 			win, c, _ := lkvkWindow(t, 0)
 			c.sendKeymap(t, tc.sent)
-			ch := lkvkCall(win, CapsLock)
+			ch := lkvkCall(win, keyboard.CapsLock)
 			msgs, fds := lkvkRead(t, c)
 			lkvkResult(t, ch)
 			km, ok := findWlMsg(msgs, lkvkKbdID, 0)
@@ -545,14 +546,14 @@ func TestLkvkKeymapIsNulTerminated(t *testing.T) {
 func TestLkvkCloseDestroys(t *testing.T) {
 	lkvkTimeout(t, 30*time.Millisecond)
 	win, c, _ := lkvkWindow(t, 0)
-	lkvkResult(t, lkvkCall(win, CapsLock))
+	lkvkResult(t, lkvkCall(win, keyboard.CapsLock))
 	lkvkRead(t, c)
 	c.w.Close()
 	msgs, _ := lkvkRead(t, c)
 	if m, ok := findWlMsg(msgs, lkvkKbdID, 3); !ok || len(m.args) != 0 {
 		t.Errorf("destroy не отправлен: %+v", msgs)
 	}
-	if win.SetLockKeys(NumLock) {
+	if win.SetLockKeys(keyboard.NumLock) {
 		t.Error("SetLockKeys после Close ответил true")
 	}
 }
@@ -574,7 +575,7 @@ func TestLkvkCloseWithoutKeyboardSendsNoDestroy(t *testing.T) {
 func TestLkvkCloseWakesWaiter(t *testing.T) {
 	lkvkTimeout(t, 10*time.Second)
 	win, c, _ := lkvkWindow(t, 0)
-	ch := lkvkCall(win, CapsLock)
+	ch := lkvkCall(win, keyboard.CapsLock)
 	lkvkRead(t, c)
 	start := time.Now()
 	c.w.Close()
@@ -590,7 +591,7 @@ func TestLkvkCloseWakesWaiter(t *testing.T) {
 func TestLkvkLeaveAbortsWait(t *testing.T) {
 	lkvkTimeout(t, 10*time.Second)
 	win, c, _ := lkvkWindow(t, 0)
-	ch := lkvkCall(win, CapsLock)
+	ch := lkvkCall(win, keyboard.CapsLock)
 	lkvkRead(t, c)
 	start := time.Now()
 	c.kbd(wlKeyboardEvLeave, lkWlLeaveBody(11))
@@ -609,7 +610,7 @@ func TestLkvkFromEventLoopDoesNotWait(t *testing.T) {
 	win, c, _ := lkvkWindow(t, 0)
 	c.w.loopGID.Store(goid.Current())
 	start := time.Now()
-	if win.SetLockKeys(CapsLock) {
+	if win.SetLockKeys(keyboard.CapsLock) {
 		t.Error("true без ожидания подтверждения")
 	}
 	if d := time.Since(start); d > 2*time.Second {
@@ -648,7 +649,7 @@ func TestLkvkConcurrent(t *testing.T) {
 	for g := 0; g < 4; g++ {
 		go func(g int) {
 			for i := 0; i < 5; i++ {
-				win.SetLockKeys(LockKeys(1 << (uint(g+i) % 2)))
+				win.SetLockKeys(keyboard.LockKeys(1 << (uint(g+i) % 2)))
 			}
 			done <- struct{}{}
 		}(g)
@@ -666,24 +667,24 @@ func TestLkvkConcurrent(t *testing.T) {
 
 // Биты переключателей по раскладке.
 func TestLkvkMasks(t *testing.T) {
-	std := lkWlDefaultMods
-	scr := lkWlMods{caps: 2, num: 0x10, scroll: 0x80}
+	std := keyboard.WlDefaultLockMods
+	scr := keyboard.WlLockMods{Caps: 2, Num: 0x10, Scroll: 0x80}
 	for _, tc := range []struct {
 		name        string
-		m           lkWlMods
-		want        LockKeys
+		m           keyboard.WlLockMods
+		want        keyboard.LockKeys
 		affect, set uint32
 		partial     bool
 	}{
 		{"ничего", std, 0, 0x12, 0, false},
-		{"caps", std, CapsLock, 0x12, 2, false},
-		{"num", std, NumLock, 0x12, 0x10, false},
-		{"caps и num", std, CapsLock | NumLock, 0x12, 0x12, false},
-		{"scroll без модификатора", std, ScrollLock, 0x12, 0, true},
-		{"scroll привязан", scr, ScrollLock, 0x92, 0x80, false},
-		{"kana", std, KanaLock, 0x12, 0, true},
-		{"caps и kana", std, CapsLock | KanaLock, 0x12, 2, true},
-		{"caps без модификатора", lkWlMods{num: 0x10}, CapsLock, 0x10, 0, true},
+		{"caps", std, keyboard.CapsLock, 0x12, 2, false},
+		{"num", std, keyboard.NumLock, 0x12, 0x10, false},
+		{"caps и num", std, keyboard.CapsLock | keyboard.NumLock, 0x12, 0x12, false},
+		{"scroll без модификатора", std, keyboard.ScrollLock, 0x12, 0, true},
+		{"scroll привязан", scr, keyboard.ScrollLock, 0x92, 0x80, false},
+		{"kana", std, keyboard.KanaLock, 0x12, 0, true},
+		{"caps и kana", std, keyboard.CapsLock | keyboard.KanaLock, 0x12, 2, true},
+		{"caps без модификатора", keyboard.WlLockMods{Num: 0x10}, keyboard.CapsLock, 0x10, 0, true},
 	} {
 		affect, set, partial := lkVirtMasks(tc.m, tc.want)
 		if affect != tc.affect || set != tc.set || partial != tc.partial {
@@ -700,9 +701,9 @@ func TestLkvkRunEventLoopHandlerDoesNotWait(t *testing.T) {
 	win, c, _ := lkvkWindow(t, 0)
 	res := make(chan bool, 1)
 	var once sync.Once
-	c.w.onRawKey = func(k rawKey) {
+	c.w.onRawKey = func(k keyboard.RawKey) {
 		if k.Pressed {
-			once.Do(func() { res <- win.SetLockKeys(CapsLock) })
+			once.Do(func() { res <- win.SetLockKeys(keyboard.CapsLock) })
 		}
 	}
 	go c.w.RunEventLoop()

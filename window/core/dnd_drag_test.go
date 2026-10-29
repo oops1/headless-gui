@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // v3.34: события приёмника перетаскивания и окно-источник. Общая часть —
@@ -24,15 +26,15 @@ func (e *asyncEngine) Post(fn func()) { go fn() }
 
 // dragNative — окно ОС, умеющее приёмник и источник перетаскивания.
 type dragNative struct {
-	NativeWindow
+	native.NativeWindow
 	enter func(x, y int)
 	over  func(x, y int) bool
 	leave func()
 
 	mu       sync.Mutex
 	began    [][]string
-	effects  []DragEffect
-	done     func(DragEffect)
+	effects  []native.DragEffect
+	done     func(native.DragEffect)
 	refuse   bool // BeginDragFiles вернёт false
 	finished int
 }
@@ -40,7 +42,7 @@ type dragNative struct {
 func (f *dragNative) SetOnDragEnter(fn func(x, y int))     { f.enter = fn }
 func (f *dragNative) SetOnDragOver(fn func(x, y int) bool) { f.over = fn }
 func (f *dragNative) SetOnDragLeave(fn func())             { f.leave = fn }
-func (f *dragNative) BeginDragFiles(paths []string, effect DragEffect, done func(DragEffect)) bool {
+func (f *dragNative) BeginDragFiles(paths []string, effect native.DragEffect, done func(native.DragEffect)) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.refuse {
@@ -58,66 +60,6 @@ func dragWindow(scale float64) (*Window, *dragNative, *immediateEngine) {
 	win := &Window{surface: surface{eng: eng, native: fn, scale: scale}}
 	win.setupFilesDrop()
 	return win, fn, eng
-}
-
-func TestDragEffect_String(t *testing.T) {
-	cases := map[DragEffect]string{
-		0:                                   "none",
-		DragEffectCopy:                      "copy",
-		DragEffectCopy | DragEffectMove:     "copy|move",
-		DragEffectMove | DragEffectLink:     "move|link",
-		DragEffectCopy | DragEffectMove | 4: "copy|move|link",
-		8:                                   "none", // неизвестные биты не считаются
-	}
-	for e, want := range cases {
-		if got := e.String(); got != want {
-			t.Errorf("DragEffect(%d).String() = %q, ждал %q", uint32(e), got, want)
-		}
-	}
-}
-
-func TestPickDragEffect(t *testing.T) {
-	const c, m, l = DragEffectCopy, DragEffectMove, DragEffectLink
-	cases := []struct {
-		allowed, prefer, want DragEffect
-	}{
-		{c | m | l, 0, c},     // без пожеланий — копирование
-		{m | l, 0, m},         // копирования нет — перемещение
-		{l, 0, l},             // только ссылка
-		{c | m, m, m},         // пожелание допустимо — берём его
-		{c, m, c},             // пожелание недопустимо — то, что можно
-		{c | m | l, l | m, m}, // из нескольких пожеланий — по старшинству
-		{0, c, 0},             // нечего выбирать
-	}
-	for _, tc := range cases {
-		if got := pickDragEffect(tc.allowed, tc.prefer); got != tc.want {
-			t.Errorf("pickDragEffect(%v, %v) = %v, ждал %v", tc.allowed, tc.prefer, got, tc.want)
-		}
-	}
-}
-
-func TestDragEffectForKeys(t *testing.T) {
-	const all = DragEffectCopy | DragEffectMove | DragEffectLink
-	cases := []struct {
-		name             string
-		allowed          DragEffect
-		ctrl, shift, alt bool
-		want             DragEffect
-	}{
-		{"без клавиш", all, false, false, false, DragEffectCopy},
-		{"Ctrl", all, true, false, false, DragEffectCopy},
-		{"Shift", all, false, true, false, DragEffectMove},
-		{"Ctrl+Shift", all, true, true, false, DragEffectLink},
-		{"Alt", all, false, false, true, DragEffectLink},
-		{"Shift, но перемещать нельзя", DragEffectCopy, false, true, false, DragEffectCopy},
-		{"только перемещение", DragEffectMove, false, false, false, DragEffectMove},
-		{"ничего не разрешено", 0, true, false, false, 0},
-	}
-	for _, tc := range cases {
-		if got := dragEffectForKeys(tc.allowed, tc.ctrl, tc.shift, tc.alt); got != tc.want {
-			t.Errorf("%s: %v, ждал %v", tc.name, got, tc.want)
-		}
-	}
 }
 
 func TestNormalizeDragPaths(t *testing.T) {
@@ -224,32 +166,32 @@ func TestDragEvents_SlowOverUsesLastAnswer(t *testing.T) {
 
 func TestBeginDragFiles_PassesToBackend(t *testing.T) {
 	win, fn, _ := dragWindow(1)
-	var got []DragEffect
-	win.SetOnDragFinished(func(e DragEffect) { got = append(got, e) })
+	var got []native.DragEffect
+	win.SetOnDragFinished(func(e native.DragEffect) { got = append(got, e) })
 
-	if !win.BeginDragFiles([]string{"x.png"}, DragEffectCopy|DragEffectMove) {
+	if !win.BeginDragFiles([]string{"x.png"}, native.DragEffectCopy|native.DragEffectMove) {
 		t.Fatal("BeginDragFiles отказал")
 	}
 	abs, _ := filepath.Abs("x.png")
 	if !reflect.DeepEqual(fn.began, [][]string{{abs}}) {
 		t.Errorf("бэкенд получил %q, ждал абсолютный путь", fn.began)
 	}
-	if fn.effects[0] != DragEffectCopy|DragEffectMove {
+	if fn.effects[0] != native.DragEffectCopy|native.DragEffectMove {
 		t.Errorf("маска действий: %v", fn.effects[0])
 	}
-	fn.done(DragEffectMove | 8) // посторонние биты отсекаются
+	fn.done(native.DragEffectMove | 8) // посторонние биты отсекаются
 	fn.done(0)
-	if !reflect.DeepEqual(got, []DragEffect{DragEffectMove, 0}) {
+	if !reflect.DeepEqual(got, []native.DragEffect{native.DragEffectMove, 0}) {
 		t.Errorf("SetOnDragFinished получил %v", got)
 	}
 }
 
 func TestBeginDragFiles_Refusals(t *testing.T) {
 	win, fn, _ := dragWindow(1)
-	if win.BeginDragFiles(nil, DragEffectCopy) {
+	if win.BeginDragFiles(nil, native.DragEffectCopy) {
 		t.Error("пустой список принят")
 	}
-	if win.BeginDragFiles([]string{""}, DragEffectCopy) {
+	if win.BeginDragFiles([]string{""}, native.DragEffectCopy) {
 		t.Error("список из пустых путей принят")
 	}
 	if win.BeginDragFiles([]string{"a"}, 0) {
@@ -259,12 +201,12 @@ func TestBeginDragFiles_Refusals(t *testing.T) {
 		t.Error("маска из неизвестных битов принята")
 	}
 	fn.refuse = true
-	if win.BeginDragFiles([]string{"a"}, DragEffectCopy) {
+	if win.BeginDragFiles([]string{"a"}, native.DragEffectCopy) {
 		t.Error("отказ бэкенда не дошёл до вызывающего")
 	}
 	// Бэкенд без поддержки.
 	bare := &Window{surface: surface{eng: &immediateEngine{}, native: &inputNative{}, scale: 1}}
-	if bare.BeginDragFiles([]string{"a"}, DragEffectCopy) {
+	if bare.BeginDragFiles([]string{"a"}, native.DragEffectCopy) {
 		t.Error("бэкенд без перетаскивания вернул true")
 	}
 	bare.setupFilesDrop() // не падает на бэкенде без интерфейсов

@@ -30,8 +30,8 @@
 //   - Wayland не даёт скрыть окно (нет аналога UnmapWindow), HideToTray там
 //     no-op; на X11 — честный UnmapWindow.
 //
-// Соединение с шиной у трея ОТДЕЛЬНОЕ (свой dbusDial): обработчик входящих
-// вызовов на соединении ровно один, а общее (dbusSession) уже занято
+// Соединение с шиной у трея ОТДЕЛЬНОЕ (свой dbus.Dial): обработчик входящих
+// вызовов на соединении ровно один, а общее (dbus.Session) уже занято
 // уведомлениями и может понадобиться мосту AT-SPI.
 package core
 
@@ -47,6 +47,7 @@ import (
 
 	xdraw "golang.org/x/image/draw"
 
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -93,10 +94,10 @@ var sniItemSeq atomic.Uint32
 type linuxTray struct {
 	trayMu sync.Mutex
 
-	conn   *dbusConn // отдельное соединение с шиной (nil — трея нет)
-	name   string    // занятое имя org.kde.StatusNotifierItem-<pid>-<n>
-	active bool      // иконка зарегистрирована у Watcher
-	status string    // Active / Passive
+	conn   *dbus.Conn // отдельное соединение с шиной (nil — трея нет)
+	name   string     // занятое имя org.kde.StatusNotifierItem-<pid>-<n>
+	active bool       // иконка зарегистрирована у Watcher
+	status string     // Active / Passive
 
 	iconW, iconH int32  // размер пиксельной иконки
 	iconARGB     []byte // пиксели ARGB32 (сетевой порядок байт)
@@ -129,31 +130,31 @@ func (t *linuxTray) setTrayIcon(icon image.Image, tooltip string) error {
 	if !active {
 		return t.register()
 	}
-	_ = c.emit(sniItemPath, sniItemIface, "NewIcon", "", nil)
-	_ = c.emit(sniItemPath, sniItemIface, "NewTitle", "", nil)
-	_ = c.emit(sniItemPath, sniItemIface, "NewToolTip", "", nil)
+	_ = c.Emit(sniItemPath, sniItemIface, "NewIcon", "", nil)
+	_ = c.Emit(sniItemPath, sniItemIface, "NewTitle", "", nil)
+	_ = c.Emit(sniItemPath, sniItemIface, "NewToolTip", "", nil)
 	return nil
 }
 
 // register подключается к шине, экспортирует /StatusNotifierItem и /MenuBar и
 // просит Watcher взять иконку. Ошибка — трея в системе нет.
 func (t *linuxTray) register() error {
-	c, err := dbusDial(dbusSessionAddress())
+	c, err := dbus.Dial(dbus.SessionAddress())
 	if err != nil {
 		return fmt.Errorf("window: трей недоступен: %w", err)
 	}
-	if !c.nameHasOwner(sniWatcherName) {
+	if !c.NameHasOwner(sniWatcherName) {
 		c.Close()
 		return errNoTrayWatcher
 	}
 	name := fmt.Sprintf("org.kde.StatusNotifierItem-%d-%d", os.Getpid(), sniItemSeq.Add(1))
-	if err := c.requestName(name, 0x4 /*DO_NOT_QUEUE*/); err != nil {
+	if err := c.RequestName(name, 0x4 /*DO_NOT_QUEUE*/); err != nil {
 		c.Close()
 		return fmt.Errorf("window: имя иконки трея: %w", err)
 	}
 	// Обработчик ставим ДО регистрации: панель читает свойства сразу.
-	c.setCallHandler(t.handleCall)
-	if _, err := c.call(sniWatcherName, sniWatcherPath, sniWatcherIface,
+	c.SetCallHandler(t.handleCall)
+	if _, err := c.Call(sniWatcherName, sniWatcherPath, sniWatcherIface,
 		"RegisterStatusNotifierItem", "s", []any{name}); err != nil {
 		c.Close()
 		return fmt.Errorf("window: RegisterStatusNotifierItem: %w", err)
@@ -177,8 +178,8 @@ func (t *linuxTray) removeTrayIcon() {
 	if !active || c == nil {
 		return
 	}
-	_ = c.emit(sniItemPath, sniItemIface, "NewStatus", "s", []any{"Passive"})
-	_, _ = c.call("org.freedesktop.DBus", "/org/freedesktop/DBus",
+	_ = c.Emit(sniItemPath, sniItemIface, "NewStatus", "s", []any{"Passive"})
+	_, _ = c.Call("org.freedesktop.DBus", "/org/freedesktop/DBus",
 		"org.freedesktop.DBus", "ReleaseName", "s", []any{name})
 	c.Close()
 }
@@ -208,8 +209,8 @@ func (t *linuxTray) setTrayMenuNative(menu *widget.PopupMenu) bool {
 
 	if c != nil {
 		// Панель перечитает дерево (LayoutUpdated) и путь к меню (NewMenu).
-		_ = c.emit(dbusmenuPath, dbusmenuIface, "LayoutUpdated", "ui", []any{rev, int32(0)})
-		_ = c.emit(sniItemPath, sniItemIface, "NewMenu", "", nil)
+		_ = c.Emit(dbusmenuPath, dbusmenuIface, "LayoutUpdated", "ui", []any{rev, int32(0)})
+		_ = c.Emit(sniItemPath, sniItemIface, "NewMenu", "", nil)
 	}
 	return true
 }
@@ -217,7 +218,7 @@ func (t *linuxTray) setTrayMenuNative(menu *widget.PopupMenu) bool {
 // ─── Входящие вызовы ─────────────────────────────────────────────────────────
 
 // handleCall — мультиплексор входящих вызовов соединения трея по пути объекта.
-func (t *linuxTray) handleCall(msg *dbusMessage) *dbusReply {
+func (t *linuxTray) handleCall(msg *dbus.Message) *dbus.Reply {
 	switch msg.Path {
 	case sniItemPath:
 		return t.handleItem(msg)
@@ -228,11 +229,11 @@ func (t *linuxTray) handleCall(msg *dbusMessage) *dbusReply {
 }
 
 // handleItem — org.kde.StatusNotifierItem и его свойства.
-func (t *linuxTray) handleItem(msg *dbusMessage) *dbusReply {
+func (t *linuxTray) handleItem(msg *dbus.Message) *dbus.Reply {
 	switch msg.Interface {
 	case ifaceIntrospect:
 		if msg.Member == "Introspect" {
-			return &dbusReply{Sig: "s", Body: []any{sniItemIntrospectXML}}
+			return &dbus.Reply{Sig: "s", Body: []any{sniItemIntrospectXML}}
 		}
 	case ifaceProps:
 		return dbusPropsReply(msg, sniItemIface, sniItemPropNames, t.itemProp)
@@ -240,16 +241,16 @@ func (t *linuxTray) handleItem(msg *dbusMessage) *dbusReply {
 		switch msg.Member {
 		case "Activate": // левый клик
 			t.dispatchClick(0)
-			return &dbusReply{}
+			return &dbus.Reply{}
 		case "SecondaryActivate": // средняя кнопка
 			t.dispatchClick(2)
-			return &dbusReply{}
+			return &dbus.Reply{}
 		case "ContextMenu":
 			// Правый клик: меню показывает панель через dbusmenu, нам делать
 			// нечего. Отвечаем пустым ответом, иначе панель ждёт таймаут.
-			return &dbusReply{}
+			return &dbus.Reply{}
 		case "Scroll":
-			return &dbusReply{}
+			return &dbus.Reply{}
 		}
 	}
 	return nil
@@ -264,59 +265,59 @@ var sniItemPropNames = []string{
 }
 
 // itemProp отдаёт значение свойства иконки.
-func (t *linuxTray) itemProp(name string) (dbusVariant, bool) {
+func (t *linuxTray) itemProp(name string) (dbus.Variant, bool) {
 	t.trayMu.Lock()
 	defer t.trayMu.Unlock()
 
-	empty := dbusArray{ElemSig: "(iiay)"}
+	empty := dbus.Array{ElemSig: "(iiay)"}
 	switch name {
 	case "Category":
-		return dbusVariant{Sig: "s", Val: "ApplicationStatus"}, true
+		return dbus.Variant{Sig: "s", Val: "ApplicationStatus"}, true
 	case "Id":
-		return dbusVariant{Sig: "s", Val: notifyAppName()}, true
+		return dbus.Variant{Sig: "s", Val: notifyAppName()}, true
 	case "Title":
-		return dbusVariant{Sig: "s", Val: t.tooltip}, true
+		return dbus.Variant{Sig: "s", Val: t.tooltip}, true
 	case "Status":
 		st := t.status
 		if st == "" {
 			st = "Active"
 		}
-		return dbusVariant{Sig: "s", Val: st}, true
+		return dbus.Variant{Sig: "s", Val: st}, true
 	case "WindowId":
 		// В XML KStatusNotifierItem это INT32; мы окна не отдаём — 0.
-		return dbusVariant{Sig: "i", Val: int32(0)}, true
+		return dbus.Variant{Sig: "i", Val: int32(0)}, true
 	case "IconName", "OverlayIconName", "AttentionIconName", "AttentionMovieName":
 		// Иконку отдаём пикселями, именами из темы не пользуемся.
-		return dbusVariant{Sig: "s", Val: ""}, true
+		return dbus.Variant{Sig: "s", Val: ""}, true
 	case "IconPixmap":
-		return dbusVariant{Sig: "a(iiay)", Val: t.pixmapLocked()}, true
+		return dbus.Variant{Sig: "a(iiay)", Val: t.pixmapLocked()}, true
 	case "OverlayIconPixmap", "AttentionIconPixmap":
-		return dbusVariant{Sig: "a(iiay)", Val: empty}, true
+		return dbus.Variant{Sig: "a(iiay)", Val: empty}, true
 	case "ToolTip":
 		// (значок из темы, пиксели значка, заголовок, текст) — панели показывают
 		// заголовок, поэтому подсказка живёт именно там.
-		return dbusVariant{Sig: "(sa(iiay)ss)", Val: dbusStruct{
+		return dbus.Variant{Sig: "(sa(iiay)ss)", Val: dbus.Struct{
 			Fields: []any{"", empty, t.tooltip, ""},
 		}}, true
 	case "ItemIsMenu":
 		// false — левый клик приходит нам как Activate, а не открывает меню.
-		return dbusVariant{Sig: "b", Val: false}, true
+		return dbus.Variant{Sig: "b", Val: false}, true
 	case "Menu":
 		if t.menu == nil {
-			return dbusVariant{Sig: "o", Val: dbusObjectPath("/")}, true
+			return dbus.Variant{Sig: "o", Val: dbus.ObjectPath("/")}, true
 		}
-		return dbusVariant{Sig: "o", Val: dbusObjectPath(dbusmenuPath)}, true
+		return dbus.Variant{Sig: "o", Val: dbus.ObjectPath(dbusmenuPath)}, true
 	}
-	return dbusVariant{}, false
+	return dbus.Variant{}, false
 }
 
 // pixmapLocked собирает a(iiay) с текущей иконкой. Вызывать под trayMu.
-func (t *linuxTray) pixmapLocked() dbusArray {
-	out := dbusArray{ElemSig: "(iiay)"}
+func (t *linuxTray) pixmapLocked() dbus.Array {
+	out := dbus.Array{ElemSig: "(iiay)"}
 	if t.iconW <= 0 || t.iconH <= 0 || len(t.iconARGB) == 0 {
 		return out
 	}
-	out.Items = append(out.Items, dbusStruct{Fields: []any{t.iconW, t.iconH, t.iconARGB}})
+	out.Items = append(out.Items, dbus.Struct{Fields: []any{t.iconW, t.iconH, t.iconARGB}})
 	return out
 }
 
@@ -334,11 +335,11 @@ func (t *linuxTray) dispatchClick(button int) {
 // ─── com.canonical.dbusmenu ──────────────────────────────────────────────────
 
 // handleMenu — меню трея: раскладка, свойства и события пунктов.
-func (t *linuxTray) handleMenu(msg *dbusMessage) *dbusReply {
+func (t *linuxTray) handleMenu(msg *dbus.Message) *dbus.Reply {
 	switch msg.Interface {
 	case ifaceIntrospect:
 		if msg.Member == "Introspect" {
-			return &dbusReply{Sig: "s", Body: []any{dbusmenuIntrospectXML}}
+			return &dbus.Reply{Sig: "s", Body: []any{dbusmenuIntrospectXML}}
 		}
 	case ifaceProps:
 		return dbusPropsReply(msg, dbusmenuIface, dbusmenuPropNames, dbusmenuProp)
@@ -351,22 +352,22 @@ func (t *linuxTray) handleMenu(msg *dbusMessage) *dbusReply {
 // dbusmenuPropNames / dbusmenuProp — свойства самого меню (не пунктов).
 var dbusmenuPropNames = []string{"Version", "TextDirection", "Status", "IconThemePath"}
 
-func dbusmenuProp(name string) (dbusVariant, bool) {
+func dbusmenuProp(name string) (dbus.Variant, bool) {
 	switch name {
 	case "Version":
-		return dbusVariant{Sig: "u", Val: uint32(3)}, true
+		return dbus.Variant{Sig: "u", Val: uint32(3)}, true
 	case "TextDirection":
-		return dbusVariant{Sig: "s", Val: "ltr"}, true
+		return dbus.Variant{Sig: "s", Val: "ltr"}, true
 	case "Status":
-		return dbusVariant{Sig: "s", Val: "normal"}, true
+		return dbus.Variant{Sig: "s", Val: "normal"}, true
 	case "IconThemePath":
-		return dbusVariant{Sig: "as", Val: []string{}}, true
+		return dbus.Variant{Sig: "as", Val: []string{}}, true
 	}
-	return dbusVariant{}, false
+	return dbus.Variant{}, false
 }
 
 // handleMenuMember разбирает методы com.canonical.dbusmenu.
-func (t *linuxTray) handleMenuMember(msg *dbusMessage) *dbusReply {
+func (t *linuxTray) handleMenuMember(msg *dbus.Message) *dbus.Reply {
 	t.trayMu.Lock()
 	menu, rev := t.menu, t.revision
 	t.trayMu.Unlock()
@@ -392,10 +393,10 @@ func (t *linuxTray) handleMenuMember(msg *dbusMessage) *dbusReply {
 		}
 		node, ok := byID[parent]
 		if !ok {
-			return &dbusReply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs",
+			return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs",
 				ErrMsg: fmt.Sprintf("нет пункта меню %d", parent)}
 		}
-		return &dbusReply{Sig: "u" + dbusmenuNodeSig,
+		return &dbus.Reply{Sig: "u" + dbusmenuNodeSig,
 			Body: []any{rev, dbusmenuLayout(node, depth, names)}}
 
 	case "GetGroupProperties":
@@ -407,9 +408,9 @@ func (t *linuxTray) handleMenuMember(msg *dbusMessage) *dbusReply {
 		if len(msg.Body) > 1 {
 			names, _ = msg.Body[1].([]string)
 		}
-		out := dbusArray{ElemSig: "(ia{sv})"}
+		out := dbus.Array{ElemSig: "(ia{sv})"}
 		add := func(e *dbusmenuEntry) {
-			out.Items = append(out.Items, dbusStruct{
+			out.Items = append(out.Items, dbus.Struct{
 				Fields: []any{e.id, dbusmenuFilter(e.props(), names)}})
 		}
 		if len(ids) == 0 {
@@ -423,41 +424,41 @@ func (t *linuxTray) handleMenuMember(msg *dbusMessage) *dbusReply {
 				}
 			}
 		}
-		return &dbusReply{Sig: "a(ia{sv})", Body: []any{out}}
+		return &dbus.Reply{Sig: "a(ia{sv})", Body: []any{out}}
 
 	case "GetProperty":
 		if len(msg.Body) < 2 {
-			return &dbusReply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "GetProperty(id, name)"}
+			return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "GetProperty(id, name)"}
 		}
 		id, _ := msg.Body[0].(int32)
 		name, _ := msg.Body[1].(string)
 		e, ok := byID[id]
 		if !ok {
-			return &dbusReply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "нет пункта меню"}
+			return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "нет пункта меню"}
 		}
 		v, ok := e.props()[name]
 		if !ok {
-			return &dbusReply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "нет свойства " + name}
+			return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "нет свойства " + name}
 		}
-		return &dbusReply{Sig: "v", Body: []any{v}}
+		return &dbus.Reply{Sig: "v", Body: []any{v}}
 
 	case "Event":
 		if len(msg.Body) < 2 {
-			return &dbusReply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "Event(id, eventId, data, timestamp)"}
+			return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "Event(id, eventId, data, timestamp)"}
 		}
 		id, _ := msg.Body[0].(int32)
 		ev, _ := msg.Body[1].(string)
 		if ev == "clicked" {
 			t.activateItem(menu, byID[id])
 		}
-		return &dbusReply{}
+		return &dbus.Reply{}
 
 	case "AboutToShow":
 		// Дерево строим на каждый GetLayout — обновлять панели нечего.
-		return &dbusReply{Sig: "b", Body: []any{false}}
+		return &dbus.Reply{Sig: "b", Body: []any{false}}
 
 	case "AboutToShowGroup":
-		return &dbusReply{Sig: "aiai", Body: []any{[]int32{}, []int32{}}}
+		return &dbus.Reply{Sig: "aiai", Body: []any{[]int32{}, []int32{}}}
 	}
 	return nil
 }
@@ -546,22 +547,22 @@ func dbusmenuEach(e *dbusmenuEntry, fn func(*dbusmenuEntry)) {
 }
 
 // props собирает a{sv} пункта в терминах dbusmenu.
-func (e *dbusmenuEntry) props() map[string]dbusVariant {
-	p := map[string]dbusVariant{}
+func (e *dbusmenuEntry) props() map[string]dbus.Variant {
+	p := map[string]dbus.Variant{}
 	if e.id == 0 {
-		p["children-display"] = dbusVariant{Sig: "s", Val: "submenu"}
+		p["children-display"] = dbus.Variant{Sig: "s", Val: "submenu"}
 		return p
 	}
 	if e.item.Separator {
-		p["type"] = dbusVariant{Sig: "s", Val: "separator"}
-		p["visible"] = dbusVariant{Sig: "b", Val: true}
+		p["type"] = dbus.Variant{Sig: "s", Val: "separator"}
+		p["visible"] = dbus.Variant{Sig: "b", Val: true}
 		return p
 	}
-	p["label"] = dbusVariant{Sig: "s", Val: dbusmenuLabel(e.item.Text)}
-	p["enabled"] = dbusVariant{Sig: "b", Val: !e.item.Disabled}
-	p["visible"] = dbusVariant{Sig: "b", Val: true}
+	p["label"] = dbus.Variant{Sig: "s", Val: dbusmenuLabel(e.item.Text)}
+	p["enabled"] = dbus.Variant{Sig: "b", Val: !e.item.Disabled}
+	p["visible"] = dbus.Variant{Sig: "b", Val: true}
 	if len(e.kids) > 0 {
-		p["children-display"] = dbusVariant{Sig: "s", Val: "submenu"}
+		p["children-display"] = dbus.Variant{Sig: "s", Val: "submenu"}
 	}
 	return p
 }
@@ -571,11 +572,11 @@ func (e *dbusmenuEntry) props() map[string]dbusVariant {
 func dbusmenuLabel(s string) string { return strings.ReplaceAll(s, "_", "__") }
 
 // dbusmenuFilter оставляет только запрошенные свойства (пустой список — все).
-func dbusmenuFilter(p map[string]dbusVariant, names []string) map[string]dbusVariant {
+func dbusmenuFilter(p map[string]dbus.Variant, names []string) map[string]dbus.Variant {
 	if len(names) == 0 {
 		return p
 	}
-	out := map[string]dbusVariant{}
+	out := map[string]dbus.Variant{}
 	for _, n := range names {
 		if v, ok := p[n]; ok {
 			out[n] = v
@@ -586,8 +587,8 @@ func dbusmenuFilter(p map[string]dbusVariant, names []string) map[string]dbusVar
 
 // dbusmenuLayout сериализует узел в (ia{sv}av). depth: -1 — все уровни,
 // 0 — без детей, n — не глубже n уровней (как требует спецификация GetLayout).
-func dbusmenuLayout(e *dbusmenuEntry, depth int32, names []string) dbusStruct {
-	children := dbusArray{ElemSig: "v"}
+func dbusmenuLayout(e *dbusmenuEntry, depth int32, names []string) dbus.Struct {
+	children := dbus.Array{ElemSig: "v"}
 	if depth != 0 {
 		sub := depth
 		if sub > 0 {
@@ -595,37 +596,37 @@ func dbusmenuLayout(e *dbusmenuEntry, depth int32, names []string) dbusStruct {
 		}
 		for _, k := range e.kids {
 			children.Items = append(children.Items,
-				dbusVariant{Sig: dbusmenuNodeSig, Val: dbusmenuLayout(k, sub, names)})
+				dbus.Variant{Sig: dbusmenuNodeSig, Val: dbusmenuLayout(k, sub, names)})
 		}
 	}
-	return dbusStruct{Fields: []any{e.id, dbusmenuFilter(e.props(), names), children}}
+	return dbus.Struct{Fields: []any{e.id, dbusmenuFilter(e.props(), names), children}}
 }
 
 // ─── org.freedesktop.DBus.Properties ─────────────────────────────────────────
 
 // dbusPropsReply отвечает на Get/GetAll/Set для одного интерфейса: get отдаёт
 // значение свойства, names — состав GetAll.
-func dbusPropsReply(msg *dbusMessage, iface string, names []string,
-	get func(string) (dbusVariant, bool)) *dbusReply {
+func dbusPropsReply(msg *dbus.Message, iface string, names []string,
+	get func(string) (dbus.Variant, bool)) *dbus.Reply {
 
 	switch msg.Member {
 	case "Get":
 		if len(msg.Body) < 2 {
-			return &dbusReply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "Get(iface, name)"}
+			return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "Get(iface, name)"}
 		}
 		want, _ := msg.Body[0].(string)
 		name, _ := msg.Body[1].(string)
 		// Пустой интерфейс шлют нестрогие клиенты — отвечаем как за свой.
 		if want != "" && want != iface {
-			return &dbusReply{ErrName: "org.freedesktop.DBus.Error.UnknownInterface", ErrMsg: want}
+			return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.UnknownInterface", ErrMsg: want}
 		}
 		if v, ok := get(name); ok {
-			return &dbusReply{Sig: "v", Body: []any{v}}
+			return &dbus.Reply{Sig: "v", Body: []any{v}}
 		}
-		return &dbusReply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs",
+		return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs",
 			ErrMsg: "нет свойства " + iface + "." + name}
 	case "GetAll":
-		all := map[string]dbusVariant{}
+		all := map[string]dbus.Variant{}
 		var want string
 		if len(msg.Body) > 0 {
 			want, _ = msg.Body[0].(string)
@@ -637,9 +638,9 @@ func dbusPropsReply(msg *dbusMessage, iface string, names []string,
 				}
 			}
 		}
-		return &dbusReply{Sig: "a{sv}", Body: []any{all}}
+		return &dbus.Reply{Sig: "a{sv}", Body: []any{all}}
 	case "Set":
-		return &dbusReply{ErrName: "org.freedesktop.DBus.Error.PropertyReadOnly", ErrMsg: "только чтение"}
+		return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.PropertyReadOnly", ErrMsg: "только чтение"}
 	}
 	return nil
 }

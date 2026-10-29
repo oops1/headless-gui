@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -51,7 +52,7 @@ func TestWlClipboard_FormatsFromOffer(t *testing.T) {
 	}
 
 	c.w.offerSetText(62)
-	c.w.offerSetHTML(62, mimeTextHTML)
+	c.w.offerSetHTML(62, native.MimeTextHTML)
 	c.w.clip.handleSelection(62)
 	if got := c.w.clip.ClipboardFormats(); got != fmtsText|fmtsHTML {
 		t.Errorf("текст и HTML: %v", got)

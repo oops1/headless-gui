@@ -3,6 +3,7 @@ package core
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -65,9 +66,9 @@ func TestSystemThemeFromPortalValue(t *testing.T) {
 		{"нет предпочтения", uint32(0), SystemThemeUnknown},
 		{"значение из будущего", uint32(3), SystemThemeUnknown},
 		// ReadOne: один variant.
-		{"в variant", dbusVariant{Sig: "u", Val: uint32(1)}, SystemThemeDark},
+		{"в variant", dbus.Variant{Sig: "u", Val: uint32(1)}, SystemThemeDark},
 		// Старый Read: variant в variant.
-		{"в двух variant", dbusVariant{Sig: "v", Val: dbusVariant{Sig: "u", Val: uint32(2)}}, SystemThemeLight},
+		{"в двух variant", dbus.Variant{Sig: "v", Val: dbus.Variant{Sig: "u", Val: uint32(2)}}, SystemThemeLight},
 		// Реализации портала, отдающие другой целый тип, встречаются; значение
 		// от этого не меняется.
 		{"int32", int32(1), SystemThemeDark},
@@ -75,7 +76,7 @@ func TestSystemThemeFromPortalValue(t *testing.T) {
 		{"отрицательное", int32(-1), SystemThemeUnknown},
 		{"строка", "dark", SystemThemeUnknown},
 		{"nil", nil, SystemThemeUnknown},
-		{"пустой variant", dbusVariant{}, SystemThemeUnknown},
+		{"пустой variant", dbus.Variant{}, SystemThemeUnknown},
 	}
 	for _, c := range cases {
 		if got := systemThemeFromPortalValue(c.v); got != c.want {
@@ -127,15 +128,15 @@ func TestIsImmersiveColorSet(t *testing.T) {
 }
 
 func TestSystemThemeFromPortalSignal(t *testing.T) {
-	sig := func(ns, key string, val any) *dbusMessage {
-		return &dbusMessage{
-			Type: dbusTypeSignal, Path: portalObjPath,
+	sig := func(ns, key string, val any) *dbus.Message {
+		return &dbus.Message{
+			Type: dbus.TypeSignal, Path: portalObjPath,
 			Interface: portalSettingsIface, Member: "SettingChanged",
 			Sig:  "ssv",
 			Body: []any{ns, key, val},
 		}
 	}
-	dark := dbusVariant{Sig: "u", Val: uint32(1)}
+	dark := dbus.Variant{Sig: "u", Val: uint32(1)}
 
 	if th, ok := systemThemeFromPortalSignal(sig(portalAppearanceNS, portalColorSchemeKey, dark)); !ok || th != SystemThemeDark {
 		t.Errorf("сигнал color-scheme → %v, %v; ждал dark, true", th, ok)

@@ -7,6 +7,7 @@
 package window
 
 import (
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/window/core"
 )
 
@@ -32,4 +33,4 @@ func AllowForeground(pid int) bool { return core.AllowForeground(pid) }
 // Чистый Go, без CGO. Работает через golang.org/x/sys/windows.
 type Win32Window = core.Win32Window
 
-func NewNativeWindow() NativeWindow { return core.NewNativeWindow() }
+func NewNativeWindow() native.NativeWindow { return core.NewNativeWindow() }

@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 )
 
 // GTK_THEME важнее портала и не требует шины вовсе: ответ приходит до того,
@@ -28,30 +30,30 @@ func TestDetectSystemTheme_GTKThemeEnv(t *testing.T) {
 //
 // mode: 0 — портал старый, знает только Read (на ReadOne — UnknownMethod);
 // иначе — знает ReadOne. scheme — отдаваемый color-scheme.
-func startFakePortal(t *testing.T, mode, scheme *atomic.Int32) *dbusConn {
+func startFakePortal(t *testing.T, mode, scheme *atomic.Int32) *dbus.Conn {
 	t.Helper()
 	daemon := dialTestBus(t)
-	daemon.setCallHandler(func(msg *dbusMessage) *dbusReply {
+	daemon.SetCallHandler(func(msg *dbus.Message) *dbus.Reply {
 		if msg.Path != portalObjPath || msg.Interface != portalSettingsIface {
 			return nil
 		}
 		if len(msg.Body) != 2 || msg.Body[0] != portalAppearanceNS || msg.Body[1] != portalColorSchemeKey {
-			return &dbusReply{ErrName: "org.freedesktop.portal.Error.NotFound", ErrMsg: "нет такого ключа"}
+			return &dbus.Reply{ErrName: "org.freedesktop.portal.Error.NotFound", ErrMsg: "нет такого ключа"}
 		}
-		val := dbusVariant{Sig: "u", Val: uint32(scheme.Load())}
+		val := dbus.Variant{Sig: "u", Val: uint32(scheme.Load())}
 		switch msg.Member {
 		case "ReadOne":
 			if mode.Load() == 0 {
-				return &dbusReply{ErrName: "org.freedesktop.DBus.Error.UnknownMethod", ErrMsg: "нет ReadOne"}
+				return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.UnknownMethod", ErrMsg: "нет ReadOne"}
 			}
-			return &dbusReply{Sig: "v", Body: []any{val}}
+			return &dbus.Reply{Sig: "v", Body: []any{val}}
 		case "Read":
 			// Старый метод: variant в variant.
-			return &dbusReply{Sig: "v", Body: []any{dbusVariant{Sig: "v", Val: val}}}
+			return &dbus.Reply{Sig: "v", Body: []any{dbus.Variant{Sig: "v", Val: val}}}
 		}
 		return nil
 	})
-	if err := daemon.requestName(portalBusName, 0x4 /*DO_NOT_QUEUE*/); err != nil {
+	if err := daemon.RequestName(portalBusName, 0x4 /*DO_NOT_QUEUE*/); err != nil {
 		t.Skipf("портал настроек уже запущен, подменять не будем: %v", err)
 	}
 	return daemon
@@ -85,7 +87,7 @@ func TestReadPortalColorScheme_FakePortal(t *testing.T) {
 // не ошибка и не зависание.
 func TestReadPortalColorScheme_NoPortal(t *testing.T) {
 	client := dialTestBus(t)
-	if client.nameHasOwner(portalBusName) {
+	if client.NameHasOwner(portalBusName) {
 		t.Skip("портал в системе есть, проверять его отсутствие нечем")
 	}
 	start := time.Now()
@@ -111,8 +113,8 @@ func TestWatchSystemTheme_FakePortal(t *testing.T) {
 
 	emit := func(key string, v uint32) {
 		t.Helper()
-		err := daemon.emit(portalObjPath, portalSettingsIface, "SettingChanged", "ssv",
-			[]any{portalAppearanceNS, key, dbusVariant{Sig: "u", Val: v}})
+		err := daemon.Emit(portalObjPath, portalSettingsIface, "SettingChanged", "ssv",
+			[]any{portalAppearanceNS, key, dbus.Variant{Sig: "u", Val: v}})
 		if err != nil {
 			t.Fatalf("emit: %v", err)
 		}
@@ -144,26 +146,26 @@ func TestWatchSystemTheme_FakePortal(t *testing.T) {
 
 // startFakeAccentPortal делает тест порталом, отдающим accent-color; как и
 // startFakePortal, пропускается, если настоящий портал уже занял имя.
-func startFakeAccentPortal(t *testing.T, accent *atomic.Value) *dbusConn {
+func startFakeAccentPortal(t *testing.T, accent *atomic.Value) *dbus.Conn {
 	t.Helper()
 	daemon := dialTestBus(t)
-	daemon.setCallHandler(func(msg *dbusMessage) *dbusReply {
+	daemon.SetCallHandler(func(msg *dbus.Message) *dbus.Reply {
 		if msg.Path != portalObjPath || msg.Interface != portalSettingsIface {
 			return nil
 		}
 		if len(msg.Body) != 2 || msg.Body[0] != portalAppearanceNS || msg.Body[1] != portalAccentKey {
-			return &dbusReply{ErrName: "org.freedesktop.portal.Error.NotFound", ErrMsg: "нет такого ключа"}
+			return &dbus.Reply{ErrName: "org.freedesktop.portal.Error.NotFound", ErrMsg: "нет такого ключа"}
 		}
-		v := accent.Load().(dbusVariant)
+		v := accent.Load().(dbus.Variant)
 		switch msg.Member {
 		case "ReadOne":
-			return &dbusReply{Sig: "v", Body: []any{v}}
+			return &dbus.Reply{Sig: "v", Body: []any{v}}
 		case "Read":
-			return &dbusReply{Sig: "v", Body: []any{dbusVariant{Sig: "v", Val: v}}}
+			return &dbus.Reply{Sig: "v", Body: []any{dbus.Variant{Sig: "v", Val: v}}}
 		}
 		return nil
 	})
-	if err := daemon.requestName(portalBusName, 0x4 /*DO_NOT_QUEUE*/); err != nil {
+	if err := daemon.RequestName(portalBusName, 0x4 /*DO_NOT_QUEUE*/); err != nil {
 		t.Skipf("портал настроек уже запущен, подменять не будем: %v", err)
 	}
 	return daemon
@@ -213,14 +215,14 @@ func TestWatchSystemAccent_FakePortal(t *testing.T) {
 
 	emit := func(key string, v any) {
 		t.Helper()
-		if err := daemon.emit(portalObjPath, portalSettingsIface, "SettingChanged", "ssv",
+		if err := daemon.Emit(portalObjPath, portalSettingsIface, "SettingChanged", "ssv",
 			[]any{portalAppearanceNS, key, v}); err != nil {
 			t.Fatalf("emit: %v", err)
 		}
 	}
 	// Тему шлём первой: сигналы идут по порядку, и если бы она будила подписчика
 	// на акцент, мы увидели бы это раньше цвета.
-	emit(portalColorSchemeKey, dbusVariant{Sig: "u", Val: uint32(1)})
+	emit(portalColorSchemeKey, dbus.Variant{Sig: "u", Val: uint32(1)})
 	emit(portalAccentKey, accentTestVal(1, 0, 0))
 
 	select {

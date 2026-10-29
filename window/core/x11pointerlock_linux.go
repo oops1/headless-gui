@@ -20,6 +20,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // x11LockReq — просьба SetPointerLock, ждущая цикла событий.
@@ -50,7 +53,7 @@ type x11PtrLock struct {
 	onChanged atomic.Pointer[func(active bool)]
 }
 
-// SetOnRelativeMotion реализует pointerLocker.
+// SetOnRelativeMotion реализует native.PointerLocker.
 func (w *X11Window) SetOnRelativeMotion(fn func(dx, dy float64)) {
 	if fn == nil {
 		w.plock.onMotion.Store(nil)
@@ -59,7 +62,7 @@ func (w *X11Window) SetOnRelativeMotion(fn func(dx, dy float64)) {
 	w.plock.onMotion.Store(&fn)
 }
 
-// SetOnPointerLockChanged реализует pointerLocker.
+// SetOnPointerLockChanged реализует native.PointerLocker.
 func (w *X11Window) SetOnPointerLockChanged(fn func(active bool)) {
 	if fn == nil {
 		w.plock.onChanged.Store(nil)
@@ -68,7 +71,7 @@ func (w *X11Window) SetOnPointerLockChanged(fn func(active bool)) {
 	w.plock.onChanged.Store(&fn)
 }
 
-// SetPointerLock реализует pointerLocker. Ждёт, пока цикл событий исполнит
+// SetPointerLock реализует native.PointerLocker. Ждёт, пока цикл событий исполнит
 // просьбу; без запущенного цикла (до RunEventLoop) включить захват нельзя.
 func (w *X11Window) SetPointerLock(on bool) bool {
 	l := &w.plock
@@ -182,7 +185,7 @@ func (w *X11Window) x11EngageLock() bool {
 		return true
 	}
 	w.cursors.mu.Lock()
-	blank := w.cursorResourceLocked(wlCursorNone)
+	blank := w.cursorResourceLocked(pointer.CursorNone)
 	w.cursors.mu.Unlock()
 	reply, ok := w.x11Reply(x11GrabPointerRequest(w.wid, w.wid, blank))
 	if !ok {
@@ -267,4 +270,4 @@ func (w *X11Window) x11RawMotion(buf []byte) bool {
 	return true
 }
 
-var _ pointerLocker = (*X11Window)(nil)
+var _ native.PointerLocker = (*X11Window)(nil)

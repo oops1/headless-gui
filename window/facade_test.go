@@ -16,13 +16,14 @@ func TestFacade_UpToDate(t *testing.T) {
 	facadegen.VerifyUpToDate(t, facadegen.Window(".."))
 }
 
-// Фасад полон: каждое экспортированное имя window/core (по всем ОС)
+// Фасад полон: каждое экспортированное имя window/core, platform/native и
+// platform/keyboard без //facadegen:skip (по всем ОС)
 // объявлено в window тем же видом, лишних имён нет.
 func TestFacade_Complete(t *testing.T) {
 	facadegen.VerifyComplete(t, facadegen.Window(".."), ".", 150)
 }
 
-// Фасад тождествен window/core по типам (под текущей ОС).
+// Фасад тождествен исходным пакетам по типам (под текущей ОС).
 func TestFacade_TypesIdentical(t *testing.T) {
 	if testing.Short() {
 		t.Skip("проверка типов из исходников")

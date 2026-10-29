@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/window/core"
 )
 
@@ -29,70 +30,7 @@ import (
 // пустая строка. На Windows и macOS токенов нет: всегда пустая строка.
 func TakeActivationToken() string { return core.TakeActivationToken() }
 
-// ── dnd_drag.go ──
-
-// DragEffect — что можно сделать с перетаскиваемыми файлами. Битовая маска:
-// источник объявляет допустимые действия, приёмник выбирает одно из них.
-// Значения совпадают с DROPEFFECT_* Windows.
-type DragEffect = core.DragEffect
-
-const (
-	// DragEffectCopy — скопировать файлы.
-	DragEffectCopy = core.DragEffectCopy
-	// DragEffectMove — переместить файлы.
-	DragEffectMove = core.DragEffectMove
-	// DragEffectLink — создать ссылку на файлы.
-	DragEffectLink = core.DragEffectLink
-)
-
-// ── hittest.go ──
-
-// HitArea — что находится в точке окна.
-type HitArea = core.HitArea
-
-const (
-	// HitClient — обычное содержимое: событие идёт приложению, как и раньше.
-	HitClient = core.HitClient
-	// HitCaption — полоса заголовка: система сама тащит окно (с прилипанием
-	// к краям и раскладками) и разворачивает его по двойному щелчку.
-	HitCaption = core.HitCaption
-	// HitMinButton — кнопка «свернуть».
-	HitMinButton = core.HitMinButton
-	// HitMaxButton — кнопка «развернуть»: наведение на неё показывает макеты
-	// привязки Windows 11.
-	HitMaxButton = core.HitMaxButton
-	// HitCloseButton — кнопка «закрыть».
-	HitCloseButton = core.HitCloseButton
-)
-
-// ── icon.go ──
-
-// ErrIconUnsupported возвращается, когда бэкенд не умеет менять значок окна.
-//
-// Отдельная ошибка, а не молчание: приложение, у которого значка не видно,
-// должно узнать причину здесь, а не искать её в настройках рабочего стола.
-var ErrIconUnsupported = core.ErrIconUnsupported
-
-// ── lockkeys.go ──
-
-// LockKeys — набор включённых клавиш-переключателей.
-type LockKeys = core.LockKeys
-
-const (
-	// CapsLock — включён Caps Lock.
-	CapsLock = core.CapsLock
-	// NumLock — включён Num Lock.
-	NumLock = core.NumLock
-	// ScrollLock — включён Scroll Lock.
-	ScrollLock = core.ScrollLock
-	// KanaLock — включён Kana Lock (японская клавиатура).
-	KanaLock = core.KanaLock
-)
-
 // ── monitor.go ──
-
-// Monitor — один монитор рабочего стола.
-type Monitor = core.Monitor
 
 // Monitors возвращает мониторы рабочего стола: основной первым, остальные в
 // порядке слева направо, сверху вниз. Пусто, если узнать нельзя (нет сессии
@@ -100,175 +38,21 @@ type Monitor = core.Monitor
 //
 // Можно звать из любой горутины и без окна. На X11 и Wayland это короткое
 // отдельное подключение к серверу: вызывать на каждый кадр не стоит.
-func Monitors() []Monitor { return core.Monitors() }
+func Monitors() []native.Monitor { return core.Monitors() }
 
 // MonitorOf возвращает монитор, на котором находится окно (с наибольшей долей
 // площади). ok=false — окна нет, оно ещё не создано или монитор не определить.
-func MonitorOf(win *Window) (Monitor, bool) { return core.MonitorOf(win) }
+func MonitorOf(win *Window) (native.Monitor, bool) { return core.MonitorOf(win) }
 
 // MonitorAt возвращает монитор, содержащий точку (x, y) рабочего стола.
-func MonitorAt(x, y int) (Monitor, bool) { return core.MonitorAt(x, y) }
+func MonitorAt(x, y int) (native.Monitor, bool) { return core.MonitorAt(x, y) }
 
 // MonitorForRect возвращает из списка монитор, на который попадает наибольшая
 // часть прямоугольника r. ok=false — r не пересекает ни один монитор: сохранённое
 // положение окна «ушло» за отключённый экран и его нужно вернуть на видимое место.
-func MonitorForRect(list []Monitor, r image.Rectangle) (Monitor, bool) {
+func MonitorForRect(list []native.Monitor, r image.Rectangle) (native.Monitor, bool) {
 	return core.MonitorForRect(list, r)
 }
-
-// ── native.go ──
-
-// NativeWindow — минимальный интерфейс нативного окна ОС.
-//
-// Все реализации гарантируют:
-//   - Borderless-окно (без нативного chrome)
-//   - Обработку мыши и клавиатуры через callback'и
-//   - Отрисовку RGBA-буфера в клиентскую область окна
-type NativeWindow = core.NativeWindow
-
-// VK_* — платформенно-независимые коды клавиш.
-// Каждая реализация (Win32/X11/Cocoa) маппит свои коды в эти.
-const (
-	VK_BACKSPACE = core.VK_BACKSPACE
-	VK_TAB       = core.VK_TAB
-	VK_ENTER     = core.VK_ENTER
-	VK_ESCAPE    = core.VK_ESCAPE
-	VK_SPACE     = core.VK_SPACE
-	VK_LEFT      = core.VK_LEFT
-	VK_UP        = core.VK_UP
-	VK_RIGHT     = core.VK_RIGHT
-	VK_DOWN      = core.VK_DOWN
-	VK_INSERT    = core.VK_INSERT
-	VK_DELETE    = core.VK_DELETE
-	VK_HOME      = core.VK_HOME
-	VK_END       = core.VK_END
-	VK_PRIOR     = core.VK_PRIOR // Page Up
-	VK_NEXT      = core.VK_NEXT  // Page Down
-	// Буквенные клавиши (для Ctrl+C и т.д.)
-	VK_A = core.VK_A
-	VK_C = core.VK_C
-	VK_V = core.VK_V
-	VK_X = core.VK_X
-	VK_Y = core.VK_Y
-	VK_Z = core.VK_Z
-	// Функциональные клавиши F1–F12
-	VK_F1  = core.VK_F1
-	VK_F2  = core.VK_F2
-	VK_F3  = core.VK_F3
-	VK_F4  = core.VK_F4
-	VK_F5  = core.VK_F5
-	VK_F6  = core.VK_F6
-	VK_F7  = core.VK_F7
-	VK_F8  = core.VK_F8
-	VK_F9  = core.VK_F9
-	VK_F10 = core.VK_F10
-	VK_F11 = core.VK_F11
-	VK_F12 = core.VK_F12
-	// Модификаторы
-	VK_SHIFT   = core.VK_SHIFT
-	VK_CONTROL = core.VK_CONTROL
-	VK_ALT     = core.VK_ALT
-	// Буквы и цифры целиком: отображение клавиш идёт диапазонами, и
-	// перечислять их по одной незачем — нужны только границы.
-	VK_0 = core.VK_0
-	VK_9 = core.VK_9
-	// Буквы целиком: таблицы раскладок перечисляют клавиши поимённо, и
-	// писать там 0x42 вместо VK_B значит заставлять читателя считать в уме.
-	VK_B = core.VK_B
-	VK_D = core.VK_D
-	VK_E = core.VK_E
-	VK_F = core.VK_F
-	VK_G = core.VK_G
-	VK_H = core.VK_H
-	VK_I = core.VK_I
-	VK_J = core.VK_J
-	VK_K = core.VK_K
-	VK_L = core.VK_L
-	VK_M = core.VK_M
-	VK_N = core.VK_N
-	VK_O = core.VK_O
-	VK_P = core.VK_P
-	VK_Q = core.VK_Q
-	VK_R = core.VK_R
-	VK_S = core.VK_S
-	VK_T = core.VK_T
-	VK_U = core.VK_U
-	VK_W = core.VK_W
-	// Клавиша контекстного меню и переключатели.
-	VK_APPS     = core.VK_APPS
-	VK_LWIN     = core.VK_LWIN // левая клавиша Windows (Super_L)
-	VK_RWIN     = core.VK_RWIN // правая клавиша Windows (Super_R)
-	VK_PAUSE    = core.VK_PAUSE
-	VK_CAPITAL  = core.VK_CAPITAL  // Caps Lock
-	VK_SNAPSHOT = core.VK_SNAPSHOT // Print Screen
-	VK_NUMLOCK  = core.VK_NUMLOCK
-	VK_SCROLL   = core.VK_SCROLL
-	// Цифровая клавиатура.
-	VK_NUMPAD0   = core.VK_NUMPAD0
-	VK_NUMPAD1   = core.VK_NUMPAD1
-	VK_NUMPAD2   = core.VK_NUMPAD2
-	VK_NUMPAD3   = core.VK_NUMPAD3
-	VK_NUMPAD4   = core.VK_NUMPAD4
-	VK_NUMPAD5   = core.VK_NUMPAD5
-	VK_NUMPAD6   = core.VK_NUMPAD6
-	VK_NUMPAD7   = core.VK_NUMPAD7
-	VK_NUMPAD8   = core.VK_NUMPAD8
-	VK_NUMPAD9   = core.VK_NUMPAD9
-	VK_MULTIPLY  = core.VK_MULTIPLY
-	VK_ADD       = core.VK_ADD
-	VK_SEPARATOR = core.VK_SEPARATOR
-	VK_SUBTRACT  = core.VK_SUBTRACT
-	VK_DECIMAL   = core.VK_DECIMAL
-	VK_DIVIDE    = core.VK_DIVIDE
-	// Остальные функциональные клавиши ряда (F13–F24).
-	VK_F13 = core.VK_F13
-	VK_F24 = core.VK_F24
-	// Клавиши, дошедшие до приложения только в v3.39 (раньше их не было в
-	// таблицах бэкендов, и событие терялось).
-	VK_CLEAR      = core.VK_CLEAR
-	VK_KANA       = core.VK_KANA // Kana / Hangul
-	VK_JUNJA      = core.VK_JUNJA
-	VK_FINAL      = core.VK_FINAL
-	VK_KANJI      = core.VK_KANJI // Kanji / Hanja
-	VK_CONVERT    = core.VK_CONVERT
-	VK_NONCONVERT = core.VK_NONCONVERT
-	VK_ACCEPT     = core.VK_ACCEPT
-	VK_MODECHANGE = core.VK_MODECHANGE
-	VK_SLEEP      = core.VK_SLEEP
-	VK_LMENU      = core.VK_LMENU
-	VK_PROCESSKEY = core.VK_PROCESSKEY // клавиша ушла редактору ввода (IME)
-	// Браузерные и мультимедийные клавиши, подряд (0xA6..0xB7).
-	VK_BROWSER_BACK      = core.VK_BROWSER_BACK
-	VK_BROWSER_FORWARD   = core.VK_BROWSER_FORWARD
-	VK_BROWSER_REFRESH   = core.VK_BROWSER_REFRESH
-	VK_BROWSER_STOP      = core.VK_BROWSER_STOP
-	VK_BROWSER_SEARCH    = core.VK_BROWSER_SEARCH
-	VK_BROWSER_FAVORITES = core.VK_BROWSER_FAVORITES
-	VK_BROWSER_HOME      = core.VK_BROWSER_HOME
-	VK_VOLUME_MUTE       = core.VK_VOLUME_MUTE
-	VK_VOLUME_DOWN       = core.VK_VOLUME_DOWN
-	VK_VOLUME_UP         = core.VK_VOLUME_UP
-	VK_MEDIA_NEXT_TRACK  = core.VK_MEDIA_NEXT_TRACK
-	VK_MEDIA_PREV_TRACK  = core.VK_MEDIA_PREV_TRACK
-	VK_MEDIA_STOP        = core.VK_MEDIA_STOP
-	VK_MEDIA_PLAY_PAUSE  = core.VK_MEDIA_PLAY_PAUSE
-	VK_LAUNCH_MAIL       = core.VK_LAUNCH_MAIL
-	VK_LAUNCH_MEDIA      = core.VK_LAUNCH_MEDIA
-	VK_LAUNCH_APP1       = core.VK_LAUNCH_APP1
-	VK_LAUNCH_APP2       = core.VK_LAUNCH_APP2
-	// OEM-клавиши: символ зависит от раскладки, код — нет.
-	VK_OEM_1      = core.VK_OEM_1      // ;:
-	VK_OEM_PLUS   = core.VK_OEM_PLUS   // =+
-	VK_OEM_COMMA  = core.VK_OEM_COMMA  // ,<
-	VK_OEM_MINUS  = core.VK_OEM_MINUS  // -_
-	VK_OEM_PERIOD = core.VK_OEM_PERIOD // .>
-	VK_OEM_2      = core.VK_OEM_2      // /?
-	VK_OEM_3      = core.VK_OEM_3      // `~
-	VK_OEM_4      = core.VK_OEM_4      // [{
-	VK_OEM_5      = core.VK_OEM_5      // \|
-	VK_OEM_6      = core.VK_OEM_6      // ]}
-	VK_OEM_7      = core.VK_OEM_7      // '"
-)
 
 // ── openurl.go ──
 

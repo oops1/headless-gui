@@ -26,6 +26,8 @@ import (
 	"sync"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Запросы xdg_toplevel_icon_manager_v1 и xdg_toplevel_icon_v1, wl_buffer.
@@ -40,7 +42,7 @@ const (
 	wlIconMaxSide = 1024
 )
 
-var _ iconSetter = (*WaylandWindow)(nil)
+var _ native.IconSetter = (*WaylandWindow)(nil)
 
 // wlIconState — то, что держит значок окна: объекты протокола и память пула.
 type wlIconState struct {
@@ -57,11 +59,11 @@ type wlIconState struct {
 	data   []byte
 }
 
-// setIcon ставит значок окна через xdg-toplevel-icon-v1.
+// SetIcon ставит значок окна через xdg-toplevel-icon-v1.
 //
 // До создания окна значок только запоминается (nil): глобалы компоновщика
 // становятся известны в Create. Без глобала — ErrIconUnsupported.
-func (w *WaylandWindow) setIcon(icons []image.Image) error {
+func (w *WaylandWindow) SetIcon(icons []image.Image) error {
 	w.icon.mu.Lock()
 	defer w.icon.mu.Unlock()
 	if w.toplevelID == 0 {
@@ -85,7 +87,7 @@ func (w *WaylandWindow) applyPendingWlIcon() {
 
 func (w *WaylandWindow) setIconLocked(icons []image.Image) error {
 	if w.gToplevelIcon == 0 {
-		return ErrIconUnsupported
+		return native.ErrIconUnsupported
 	}
 	if w.icon.mgrID == 0 {
 		w.icon.mgrID = w.bind(w.gToplevelIcon, "xdg_toplevel_icon_manager_v1", 1)
@@ -100,7 +102,7 @@ func (w *WaylandWindow) setIconLocked(icons []image.Image) error {
 
 	sides, pix := wlIconPixels(icons)
 	if len(sides) == 0 {
-		return ErrIconUnsupported
+		return native.ErrIconUnsupported
 	}
 	total := len(pix)
 	fd, err := unix.MemfdCreate("headless-gui-icon", unix.MFD_CLOEXEC)

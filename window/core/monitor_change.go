@@ -32,6 +32,8 @@ package core
 import (
 	"sync"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // monitorChangeSource — бэкенд сообщает, что с мониторами что-то случилось.
@@ -53,9 +55,9 @@ var monitorListFunc = Monitors
 // monitorWatchState — подписка окна на смену мониторов.
 type monitorWatchState struct {
 	mu    sync.Mutex
-	fn    func([]Monitor)
+	fn    func([]native.Monitor)
 	stop  func() // снятие платформенной подписки; nil — её нет
-	last  []Monitor
+	last  []native.Monitor
 	timer *time.Timer
 	gen   uint64 // растёт при каждой подписке и отписке: старый таймер выдыхается
 }
@@ -82,7 +84,7 @@ type monitorWatchState struct {
 //
 // Поле Monitor.Work — это рабочая область (Bounds без панелей); Monitors()
 // возвращает её именно под этим именем, и оно не менялось.
-func (win *Window) SetOnMonitorsChanged(fn func([]Monitor)) {
+func (win *Window) SetOnMonitorsChanged(fn func([]native.Monitor)) {
 	win.mon.mu.Lock()
 	win.mon.fn = fn
 	running := win.native != nil
@@ -173,7 +175,7 @@ func (win *Window) monitorsEvent() {
 
 // monitorsRefresh перечитывает мониторы и, если они изменились, будит
 // приложение. gen отсекает таймер, пережившего отписку.
-func (win *Window) monitorsRefresh(gen uint64, read func() []Monitor) {
+func (win *Window) monitorsRefresh(gen uint64, read func() []native.Monitor) {
 	list := read()
 	st := &win.mon
 	st.mu.Lock()
@@ -191,19 +193,19 @@ func (win *Window) monitorsRefresh(gen uint64, read func() []Monitor) {
 		return
 	}
 	// Колбэк приложения красит виджеты, то есть работает на горутине движка.
-	win.post(func() { fn(append([]Monitor(nil), list...)) })
+	win.post(func() { fn(append([]native.Monitor(nil), list...)) })
 }
 
 // monitorListsEqual — два списка описывают одну и ту же конфигурацию. Порядок
 // записей у Monitors() устойчив (sortMonitors), так что сравниваем по месту.
-func monitorListsEqual(a, b []Monitor) bool {
+func monitorListsEqual(a, b []native.Monitor) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
 		x, y := a[i], b[i]
 		if x.Name != y.Name || x.Bounds != y.Bounds || x.Work != y.Work ||
-			x.Scale != y.Scale || x.Primary != y.Primary || x.id != y.id {
+			x.Scale != y.Scale || x.Primary != y.Primary || native.MonitorKey(x) != native.MonitorKey(y) {
 			return false
 		}
 	}

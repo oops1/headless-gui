@@ -4,6 +4,8 @@ package core
 
 import (
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // Wayland: скрытие курсора, новые формы и боковые кнопки — на проводе.
@@ -18,7 +20,7 @@ func wlCursorTestWindow(t *testing.T) *wlTestConn {
 // CursorNone: wl_pointer.set_cursor(serial, NULL, 0, 0).
 func TestWayland_CursorNoneHides(t *testing.T) {
 	c := wlCursorTestWindow(t)
-	c.w.SetCursor(wlCursorNone)
+	c.w.SetCursor(pointer.CursorNone)
 	msgs := splitWlMsgs(t, c.read(t))
 	m, ok := findWlMsg(msgs, c.w.pointerID, wlPointerSetCursor)
 	if !ok {
@@ -34,7 +36,7 @@ func TestWayland_CursorNoneHides(t *testing.T) {
 func TestWayland_CursorNoneHidesEvenWithCursorShape(t *testing.T) {
 	c := wlCursorTestWindow(t)
 	c.w.gCursorShapeMgr = 30
-	c.w.SetCursor(wlCursorNone)
+	c.w.SetCursor(pointer.CursorNone)
 	msgs := splitWlMsgs(t, c.read(t))
 	m, ok := findWlMsg(msgs, c.w.pointerID, wlPointerSetCursor)
 	if !ok || m.args[1] != 0 {
@@ -49,7 +51,7 @@ func TestWayland_CursorNoneHidesEvenWithCursorShape(t *testing.T) {
 // применится на enter.
 func TestWayland_CursorNoneAppliedOnEnter(t *testing.T) {
 	c := newWlTestWindow(t) // enter-serial ещё нет
-	c.w.SetCursor(wlCursorNone)
+	c.w.SetCursor(pointer.CursorNone)
 	c.w.ptrEnterSerial.Store(5)
 	c.w.applyCursor()
 	msgs := splitWlMsgs(t, c.read(t))
@@ -76,11 +78,11 @@ func TestWayland_NewShapesViaCursorShape(t *testing.T) {
 		c     int
 		shape uint32
 	}{
-		{wlCursorGrab, 16},
-		{wlCursorGrabbing, 17},
-		{wlCursorSizeAll, 33}, // all-scroll
-		{wlCursorCrosshair, 8},
-		{wlCursorWait, 6},
+		{pointer.CursorGrab, 16},
+		{pointer.CursorGrabbing, 17},
+		{pointer.CursorSizeAll, 33}, // all-scroll
+		{pointer.CursorCrosshair, 8},
+		{pointer.CursorWait, 6},
 	}
 	for _, tc := range cases {
 		c := wlCursorTestWindow(t)
@@ -100,8 +102,8 @@ func TestWayland_NewShapesViaCursorShape(t *testing.T) {
 // Без cursor-shape новые формы показываются своими картинками (не больше
 // 32×32), скрытие — тем же set_cursor.
 func TestWayland_NewShapesOwnSurface(t *testing.T) {
-	for _, shape := range []int{wlCursorGrab, wlCursorGrabbing, wlCursorSizeAll, wlCursorCrosshair, wlCursorWait} {
-		pix, w, h, hx, hy := wlCursorPixels(shape)
+	for _, shape := range []int{pointer.CursorGrab, pointer.CursorGrabbing, pointer.CursorSizeAll, pointer.CursorCrosshair, pointer.CursorWait} {
+		pix, w, h, hx, hy := pointer.CursorPixels(shape)
 		if w > 32 || h > 32 || len(pix) != w*h*4 {
 			t.Errorf("форма %d: картинка %dx%d, %d байт", shape, w, h, len(pix))
 		}
@@ -120,8 +122,8 @@ func TestWayland_NewShapesOwnSurface(t *testing.T) {
 		}
 	}
 	// Пул рассчитан на все формы: слот последней формы укладывается в память.
-	if wlCursorCount != 13 {
-		t.Errorf("wlCursorCount = %d, ждал 13", wlCursorCount)
+	if pointer.CursorCount != 13 {
+		t.Errorf("pointer.CursorCount = %d, ждал 13", pointer.CursorCount)
 	}
 }
 
@@ -134,14 +136,14 @@ func TestWayland_SideButtons(t *testing.T) {
 	mk := func(button, state uint32) []byte {
 		return wlU32(1, 0, button, state)
 	}
-	c.w.handlePointer(wlPointerEvButton, mk(wlBtnSide, 1))
-	c.w.handlePointer(wlPointerEvButton, mk(wlBtnSide, 0))
-	c.w.handlePointer(wlPointerEvButton, mk(wlBtnExtra, 1))
-	c.w.handlePointer(wlPointerEvButton, mk(wlBtnExtra, 0))
-	c.w.handlePointer(wlPointerEvButton, mk(wlBtnBack, 1))
-	c.w.handlePointer(wlPointerEvButton, mk(wlBtnBack, 0))
-	c.w.handlePointer(wlPointerEvButton, mk(wlBtnForward, 1))
-	c.w.handlePointer(wlPointerEvButton, mk(wlBtnForward, 0))
+	c.w.handlePointer(wlPointerEvButton, mk(pointer.WlBtnSide, 1))
+	c.w.handlePointer(wlPointerEvButton, mk(pointer.WlBtnSide, 0))
+	c.w.handlePointer(wlPointerEvButton, mk(pointer.WlBtnExtra, 1))
+	c.w.handlePointer(wlPointerEvButton, mk(pointer.WlBtnExtra, 0))
+	c.w.handlePointer(wlPointerEvButton, mk(pointer.WlBtnBack, 1))
+	c.w.handlePointer(wlPointerEvButton, mk(pointer.WlBtnBack, 0))
+	c.w.handlePointer(wlPointerEvButton, mk(pointer.WlBtnForward, 1))
+	c.w.handlePointer(wlPointerEvButton, mk(pointer.WlBtnForward, 0))
 	c.w.handlePointer(wlPointerEvButton, mk(0x117, 1)) // BTN_TASK — не знаем
 	want := []mouseCallLinux{
 		{12, 34, 5, true}, {12, 34, 5, false},
@@ -167,7 +169,7 @@ func TestWayland_LeaveReleasesSideButton(t *testing.T) {
 	c := newWlTestWindow(t)
 	var got []mouseCallLinux
 	c.w.onMouseButton = func(x, y, b int, p bool) { got = append(got, mouseCallLinux{x, y, b, p}) }
-	c.w.handlePointer(wlPointerEvButton, wlU32(1, 0, wlBtnExtra, 1))
+	c.w.handlePointer(wlPointerEvButton, wlU32(1, 0, pointer.WlBtnExtra, 1))
 	c.w.handlePointer(wlPointerEvLeave, make([]byte, 8))
 	if len(got) != 2 || got[1].b != 6 || got[1].p {
 		t.Fatalf("события %v: ждал нажатие и отпускание X2 при уходе", got)

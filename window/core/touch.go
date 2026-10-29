@@ -26,6 +26,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -246,8 +247,8 @@ func (s *surface) emulateMouse(ev widget.TouchEvent) {
 // ссылке.
 func (s *surface) releaseEmulatedMouse() {
 	s.emu = touchEmu{}
-	s.eng.SendMouseMove(pointerOutside, pointerOutside)
-	s.eng.SendMouseButton(pointerOutside, pointerOutside, widget.MouseLeft, false)
+	s.eng.SendMouseMove(pointer.Outside, pointer.Outside)
+	s.eng.SendMouseButton(pointer.Outside, pointer.Outside, widget.MouseLeft, false)
 }
 
 // cancelTouches отменяет все касания: владельцам-виджетам уходит Cancelled, а

@@ -16,6 +16,7 @@ import (
 
 	"github.com/oops1/headless-gui/v3/engine"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -29,12 +30,12 @@ type revFake struct {
 	allowPP bool
 }
 
-func (f *revFake) SetOwner(w NativeWindow) { f.owner.Store(ownerBox{w}) }
-func (f *revFake) BlitRGBA(*image.RGBA)    { f.blits.Add(1) }
+func (f *revFake) SetOwner(w native.NativeWindow) { f.owner.Store(ownerBox{w}) }
+func (f *revFake) BlitRGBA(*image.RGBA)           { f.blits.Add(1) }
 
-type ownerBox struct{ w NativeWindow }
+type ownerBox struct{ w native.NativeWindow }
 
-func (f *revFake) ownerWin() NativeWindow {
+func (f *revFake) ownerWin() native.NativeWindow {
 	if v, ok := f.owner.Load().(ownerBox); ok {
 		return v.w
 	}
@@ -76,7 +77,7 @@ func newRevRig(t *testing.T, popups bool, extra func(root *widget.Panel)) *revRi
 	t.Helper()
 	r := &revRig{}
 	old := newNativeWindow
-	newNativeWindow = func() NativeWindow {
+	newNativeWindow = func() native.NativeWindow {
 		r.mu.Lock()
 		f := &revFake{id: len(r.fakes)}
 		r.fakes = append(r.fakes, f)
@@ -250,7 +251,7 @@ func TestHostedReview_HostedDialog_Nested(t *testing.T) {
 	}
 	f1 := r.fake(1)
 	f2 := r.fake(2)
-	if f2.ownerWin() != NativeWindow(f1) {
+	if f2.ownerWin() != native.NativeWindow(f1) {
 		t.Errorf("owner второго окна %v, ждали окно первого", f2.ownerWin())
 	}
 	if f1.enabled.Load() {

@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Буфер обмена на Linux работал только через xclip/xsel: подпроцесс, которого
@@ -144,7 +146,7 @@ func TestIsTextMime(t *testing.T) {
 			t.Errorf("тип %q не признан текстом", m)
 		}
 	}
-	for _, m := range []string{mimeTextUriList, "image/png", ""} {
+	for _, m := range []string{native.MimeTextURIList, "image/png", ""} {
 		if isTextMime(m) {
 			t.Errorf("тип %q признан текстом", m)
 		}

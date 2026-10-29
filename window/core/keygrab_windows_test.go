@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Хук WH_KEYBOARD_LL на настоящем окне. Настоящие нажатия в тесте не
@@ -118,39 +121,39 @@ func TestWin32KeyboardGrab_DeliversToWindow(t *testing.T) {
 	w.onKeyDownRepeat = func(vk int, rep bool) { got = append(got, ev{vk, true, rep}) }
 	w.onKeyUp = func(vk int) { got = append(got, ev{vk, false, false}) }
 
-	if !grabTestFeedKey(VK_LWIN, wmKeydown, 0) {
+	if !grabTestFeedKey(native.VK_LWIN, wmKeydown, 0) {
 		t.Error("нажатие Win не перехвачено")
 	}
-	if !grabTestFeedKey(VK_LWIN, wmKeydown, 0) { // автоповтор
+	if !grabTestFeedKey(native.VK_LWIN, wmKeydown, 0) { // автоповтор
 		t.Error("автоповтор Win не перехвачен")
 	}
-	if !grabTestFeedKey(VK_E, wmKeydown, 0) { // Win+E
+	if !grabTestFeedKey(native.VK_E, wmKeydown, 0) { // Win+E
 		t.Error("Win+E не перехвачено")
 	}
-	grabTestFeedKey(VK_E, wmKeyup, 0)
-	if !grabTestFeedKey(VK_LWIN, wmKeyup, 0) {
+	grabTestFeedKey(native.VK_E, wmKeyup, 0)
+	if !grabTestFeedKey(native.VK_LWIN, wmKeyup, 0) {
 		t.Error("отпускание Win не перехвачено")
 	}
-	if !grabTestFeedKey(VK_TAB, wmSyskeydown, llkhfAltdown) { // Alt+Tab
+	if !grabTestFeedKey(native.VK_TAB, wmSyskeydown, llkhfAltdown) { // Alt+Tab
 		t.Error("Alt+Tab не перехвачен")
 	}
-	grabTestFeedKey(VK_TAB, wmSyskeyup, llkhfAltdown)
-	if !grabTestFeedKey(VK_SNAPSHOT, wmKeydown, 0) { // PrintScreen: система без хука шлёт окну только отпускание
+	grabTestFeedKey(native.VK_TAB, wmSyskeyup, llkhfAltdown)
+	if !grabTestFeedKey(native.VK_SNAPSHOT, wmKeydown, 0) { // PrintScreen: система без хука шлёт окну только отпускание
 		t.Error("нажатие PrintScreen не перехвачено")
 	}
-	if !grabTestFeedKey(VK_SNAPSHOT, wmKeyup, 0) {
+	if !grabTestFeedKey(native.VK_SNAPSHOT, wmKeyup, 0) {
 		t.Error("отпускание PrintScreen не перехвачено")
 	}
 	// Обычная клавиша системе и приложению как раньше.
-	if grabTestFeedKey(VK_A, wmKeydown, 0) {
+	if grabTestFeedKey(native.VK_A, wmKeydown, 0) {
 		t.Error("обычная клавиша A перехвачена")
 	}
 
 	want := []ev{
-		{VK_LWIN, true, false}, {VK_LWIN, true, true}, {VK_E, true, false},
-		{VK_E, false, false}, {VK_LWIN, false, false},
-		{VK_TAB, true, false}, {VK_TAB, false, false},
-		{VK_SNAPSHOT, true, false}, {VK_SNAPSHOT, false, false},
+		{native.VK_LWIN, true, false}, {native.VK_LWIN, true, true}, {native.VK_E, true, false},
+		{native.VK_E, false, false}, {native.VK_LWIN, false, false},
+		{native.VK_TAB, true, false}, {native.VK_TAB, false, false},
+		{native.VK_SNAPSHOT, true, false}, {native.VK_SNAPSHOT, false, false},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("окно получило %d событий, ждал %d: %+v", len(got), len(want), got)
@@ -173,18 +176,18 @@ func TestWin32KeyboardGrab_OnlyWhenForeground(t *testing.T) {
 	w.onKeyDown = func(int) { called = true }
 
 	grabTestFG(t, uintptr(w.hwnd)+1000) // активно чужое окно
-	if grabTestFeedKey(VK_LWIN, wmKeydown, 0) {
+	if grabTestFeedKey(native.VK_LWIN, wmKeydown, 0) {
 		t.Error("Win перехвачена при чужом активном окне")
 	}
 	grabTestFG(t, uintptr(w.hwnd))
-	if grabTestFeedKey(VK_LWIN, wmKeydown, llkhfInjected) {
+	if grabTestFeedKey(native.VK_LWIN, wmKeydown, llkhfInjected) {
 		t.Error("синтетическое нажатие Win перехвачено")
 	}
 	if called {
 		t.Error("окно получило клавишу, которую система не отдавала")
 	}
 	// Отрицательный nCode — обязательный пропуск по контракту хука.
-	kb := kbdLLHookStruct{VkCode: VK_LWIN}
+	kb := kbdLLHookStruct{VkCode: native.VK_LWIN}
 	if kbGrab.handle(^uintptr(0), wmKeydown, uintptr(unsafe.Pointer(&kb))) {
 		t.Error("nCode < 0 обработан")
 	}
@@ -201,10 +204,10 @@ func TestWin32KeyboardGrab_ReleaseSendsKeyUps(t *testing.T) {
 	var ups []int
 	w.onKeyDown = func(int) {}
 	w.onKeyUp = func(vk int) { ups = append(ups, vk) }
-	grabTestFeedKey(VK_LWIN, wmKeydown, 0)
+	grabTestFeedKey(native.VK_LWIN, wmKeydown, 0)
 
 	w.SetKeyboardGrab(false)
-	if len(ups) != 1 || ups[0] != VK_LWIN {
+	if len(ups) != 1 || ups[0] != native.VK_LWIN {
 		t.Errorf("при выключении окно получило отпускания %v, ждал [Win]", ups)
 	}
 }
@@ -238,15 +241,15 @@ func TestWin32KeyboardGrab_RawKeysCarryScanCode(t *testing.T) {
 		t.Skip("хук не ставится")
 	}
 	grabTestFG(t, uintptr(w.hwnd))
-	var got []rawKey
-	w.onRawKey = func(k rawKey) { got = append(got, k) }
-	w.onKeyDown = func(int) { t.Error("перехваченная клавиша пошла мимо rawKey") }
+	var got []keyboard.RawKey
+	w.onRawKey = func(k keyboard.RawKey) { got = append(got, k) }
+	w.onKeyDown = func(int) { t.Error("перехваченная клавиша пошла мимо keyboard.RawKey") }
 
-	kb := kbdLLHookStruct{VkCode: VK_LWIN, ScanCode: 0x5B, Flags: llkhfExtended}
+	kb := kbdLLHookStruct{VkCode: native.VK_LWIN, ScanCode: 0x5B, Flags: llkhfExtended}
 	if !kbGrab.handle(0, wmKeydown, uintptr(unsafe.Pointer(&kb))) {
 		t.Fatal("нажатие Win не перехвачено")
 	}
-	if len(got) != 1 || got[0].VK != VK_LWIN || got[0].Scan != 0x5B || !got[0].Extended || !got[0].Pressed {
+	if len(got) != 1 || got[0].VK != native.VK_LWIN || got[0].Scan != 0x5B || !got[0].Extended || !got[0].Pressed {
 		t.Fatalf("приёмник получил %+v, ждал Win со скан-кодом 0x5B, extended", got)
 	}
 	w.SetKeyboardGrab(false) // Win ещё зажата — отпускается со скан-кодом

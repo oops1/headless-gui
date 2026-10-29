@@ -15,6 +15,8 @@ package core
 import (
 	"encoding/binary"
 	"sync/atomic"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 const (
@@ -145,18 +147,18 @@ var x11MonitorList = x11PlatformMonitors
 //     монитор, где оно лежит. Окно, уже стоящее в полном экране, сначала из
 //     него выходит (REMOVE), переносится и входит снова: приложение увидит
 //     false и сразу true. После выхода окно останется на новом мониторе.
-func (w *X11Window) SetFullscreenOn(m Monitor) bool {
+func (w *X11Window) SetFullscreenOn(m native.Monitor) bool {
 	if w.wid == 0 || w.atomNetWMState == 0 || w.atomWMStateFullscreen == 0 || w.fs.unsupported {
 		return false
 	}
-	cur, ok := matchMonitor(x11MonitorList(), m)
-	if !ok || cur.Bounds.Empty() || cur.id == 0 {
+	cur, ok := native.MatchMonitor(x11MonitorList(), m)
+	if !ok || cur.Bounds.Empty() || native.MonitorKey(cur) == 0 {
 		return false
 	}
 	on := w.fs.on.Load()
 	switch {
 	case w.fs.monitorsSupported && w.atomFsMonitors != 0:
-		w.x11Send(x11FullscreenMonitorsMessage(w.rootWin, w.wid, w.atomFsMonitors, uint32(cur.id-1)))
+		w.x11Send(x11FullscreenMonitorsMessage(w.rootWin, w.wid, w.atomFsMonitors, uint32(native.MonitorKey(cur)-1)))
 	case on:
 		w.x11Send(x11NetWMStateMessage(w.rootWin, w.wid, w.atomNetWMState, netWMStateRemove, w.atomWMStateFullscreen))
 		w.SetPosition(cur.Bounds.Min.X, cur.Bounds.Min.Y)

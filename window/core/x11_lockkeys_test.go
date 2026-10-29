@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"reflect"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
 )
 
 // Клавиши-переключатели X11: раскладка запросов XKB и ядерного протокола,
@@ -196,29 +198,29 @@ func TestX11LockKeys_Resolve(t *testing.T) {
 		indicator: [4]uint32{1 << 0, 1 << 1, 1 << 2, 0},
 		mods:      [4]uint8{x11LockMask, x11Mod2Mask, 0, 0}}
 	// Индикаторы читаются по битам, модификаторы не нужны.
-	if got := xkbInd.resolve(0b011, 0, 0); got != CapsLock|NumLock {
+	if got := xkbInd.resolve(0b011, 0, 0); got != keyboard.CapsLock|keyboard.NumLock {
 		t.Errorf("индикаторы: %v", got)
 	}
 	// Индикатор важнее модификатора: зафиксированные биты игнорируются.
 	if got := xkbInd.resolve(0, x11LockMask|x11Mod2Mask, 0xFFFF); got != 0 {
 		t.Errorf("индикаторы пусты, а набор %v", got)
 	}
-	if got := xkbInd.resolve(0b100, 0, 0); got != ScrollLock {
+	if got := xkbInd.resolve(0b100, 0, 0); got != keyboard.ScrollLock {
 		t.Errorf("Scroll Lock по индикатору: %v", got)
 	}
 
 	// Индикаторов с нужными именами нет — зафиксированные модификаторы.
 	xkbMods := x11LockMap{xkb: true, mods: [4]uint8{x11LockMask, x11Mod2Mask, 1 << 5, 0}}
-	if got := xkbMods.resolve(0xFFFF, 0x02, 0xFFFF); got != CapsLock {
+	if got := xkbMods.resolve(0xFFFF, 0x02, 0xFFFF); got != keyboard.CapsLock {
 		t.Errorf("locked=Lock: %v", got)
 	}
-	if got := xkbMods.resolve(0, 0x12|1<<5, 0); got != CapsLock|NumLock|ScrollLock {
+	if got := xkbMods.resolve(0, 0x12|1<<5, 0); got != keyboard.CapsLock|keyboard.NumLock|keyboard.ScrollLock {
 		t.Errorf("locked=Lock+Mod2+Mod3: %v", got)
 	}
 
 	// Без XKB — маска QueryPointer, зафиксированные биты ядерной маски.
 	core := x11LockMap{mods: [4]uint8{x11LockMask, x11Mod2Mask, 0, 0}}
-	if got := core.resolve(0xFFFF, 0xFF, 0x0012); got != CapsLock|NumLock {
+	if got := core.resolve(0xFFFF, 0xFF, 0x0012); got != keyboard.CapsLock|keyboard.NumLock {
 		t.Errorf("ядерная маска: %v", got)
 	}
 	// Нажатый Shift (бит 0) и Control (бит 2) переключателями не считаются.

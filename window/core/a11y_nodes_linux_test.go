@@ -6,6 +6,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -23,8 +24,8 @@ func newATSPIBridgeFor(root widget.Widget) (*atspiBridge, *Window) {
 
 // atspiCallNode вызывает метод интерфейса на узле по его устойчивому id —
 // через handleCall, как это делает клиент.
-func atspiCallNode(b *atspiBridge, id int32, iface, member string, body ...any) *dbusReply {
-	return b.handleCall(&dbusMessage{Path: atspiPath(id), Interface: iface, Member: member, Body: body})
+func atspiCallNode(b *atspiBridge, id int32, iface, member string, body ...any) *dbus.Reply {
+	return b.handleCall(&dbus.Message{Path: atspiPath(id), Interface: iface, Member: member, Body: body})
 }
 
 // idOfNamed возвращает устойчивый id узла с заданным именем в текущем виде.
@@ -41,7 +42,7 @@ func idOfNamed(t *testing.T, b *atspiBridge, name string) int32 {
 	return -1
 }
 
-func boolReply(t *testing.T, rep *dbusReply) bool {
+func boolReply(t *testing.T, rep *dbus.Reply) bool {
 	t.Helper()
 	if rep == nil || rep.Sig != "b" || len(rep.Body) != 1 {
 		t.Fatalf("ожидался ответ b, получен %#v", rep)
@@ -221,7 +222,7 @@ func TestATSPIMenu_ActionsOnItems(t *testing.T) {
 
 	// Число действий: у пункта с подменю два.
 	nact := func(id int32) int32 {
-		return atspiCallNode(b, id, ifaceProps, "Get", ifaceAction, "NActions").Body[0].(dbusVariant).Val.(int32)
+		return atspiCallNode(b, id, ifaceProps, "Get", ifaceAction, "NActions").Body[0].(dbus.Variant).Val.(int32)
 	}
 	if nact(open) != 1 || nact(more) != 2 {
 		t.Errorf("NActions: %d и %d, ожидалось 1 и 2", nact(open), nact(more))
@@ -294,8 +295,8 @@ func TestATSPIComponent_PointInPopupAndVisible(t *testing.T) {
 	c := node.Info.Bounds
 	rep := atspiCallNode(b, 0, ifaceComponent, "GetAccessibleAtPoint",
 		int32(c.Min.X+c.Dx()/2), int32(c.Min.Y+c.Dy()/2), uint32(atspiCoordWindow))
-	ref := rep.Body[0].(dbusStruct)
-	if got := string(ref.Fields[1].(dbusObjectPath)); got != atspiPath(second) {
+	ref := rep.Body[0].(dbus.Struct)
+	if got := string(ref.Fields[1].(dbus.ObjectPath)); got != atspiPath(second) {
 		t.Errorf("под курсором %s, ожидался пункт меню %s", got, atspiPath(second))
 	}
 

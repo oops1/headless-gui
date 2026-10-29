@@ -16,6 +16,8 @@ package core
 import (
 	"encoding/binary"
 	"sync"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // Номера глифов в шрифте «cursor» (X11 cursorfont.h). Каждому курсору там
@@ -79,7 +81,7 @@ func (w *X11Window) cursorResourceLocked(c int) uint32 {
 	}
 	// Формы без глифа в шрифте «cursor»: невидимая (CursorNone) и нарисованные
 	// (рука раскрытая и сжатая) — из 1-битных карт через ядро протокола.
-	if c == wlCursorNone || x11ArtCursor(c) {
+	if c == pointer.CursorNone || x11ArtCursor(c) {
 		id := w.x11GenID()
 		for _, req := range x11BitmapCursorRequests(w.x11CursorIDs(id, w.wid), c) {
 			w.x11Send(req)
@@ -127,25 +129,25 @@ func (cs *x11Cursors) remember(c int, id uint32) {
 // же самое по смыслу: курсор угла окна.
 func x11CursorGlyph(c int) (int, bool) {
 	switch c {
-	case wlCursorArrow:
+	case pointer.CursorArrow:
 		return xcLeftPtr, true
-	case wlCursorIBeam:
+	case pointer.CursorIBeam:
 		return xcXterm, true
-	case wlCursorHand:
+	case pointer.CursorHand:
 		return xcHand2, true
-	case wlCursorSizeWE:
+	case pointer.CursorSizeWE:
 		return xcSbHDoubleArrow, true
-	case wlCursorSizeNS:
+	case pointer.CursorSizeNS:
 		return xcSbVDoubleArrow, true
-	case wlCursorSizeNWSE:
+	case pointer.CursorSizeNWSE:
 		return xcTopLeftCorner, true
-	case wlCursorSizeNESW:
+	case pointer.CursorSizeNESW:
 		return xcTopRightCorner, true
-	case wlCursorSizeAll:
+	case pointer.CursorSizeAll:
 		return xcFleur, true
-	case wlCursorCrosshair:
+	case pointer.CursorCrosshair:
 		return xcCrosshair, true
-	case wlCursorWait:
+	case pointer.CursorWait:
 		return xcWatch, true
 	}
 	return 0, false
@@ -154,7 +156,7 @@ func x11CursorGlyph(c int) (int, bool) {
 // x11ArtCursor — форма рисуется своей картинкой: в шрифте «cursor» нет ни
 // раскрытой, ни сжатой руки.
 func x11ArtCursor(c int) bool {
-	return c == wlCursorGrab || c == wlCursorGrabbing
+	return c == pointer.CursorGrab || c == pointer.CursorGrabbing
 }
 
 // ─── Запросы протокола ──────────────────────────────────────────────────────

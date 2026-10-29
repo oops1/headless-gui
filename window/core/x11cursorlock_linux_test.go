@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -293,7 +294,7 @@ func TestX11CursorImage_Cache(t *testing.T) {
 // Кэш ограничен: давний курсор освобождается на сервере.
 func TestX11CursorImage_LRUFreesCursors(t *testing.T) {
 	w, s := xlfWindow(t, nil)
-	for i := 0; i < cursorCacheSize+1; i++ {
+	for i := 0; i < pointer.CursorCacheSize+1; i++ {
 		w.SetCursorImage(xlfImage(uint8(i + 1)))
 		n := i + 1
 		xlfWait(t, "показ", func() bool { return s.count(setCursorAttr) == n })
@@ -384,7 +385,7 @@ func TestX11CursorImage_ShapeCancelsPendingImage(t *testing.T) {
 	w := &X11Window{conn: cli, wid: 0x400001, ridBase: 0x600000, ridMask: 0x1FFFFF}
 
 	w.SetCursorImage(xlfImage(7)) // цикл не идёт: просьба ждёт
-	w.SetCursor(wlCursorIBeam)
+	w.SetCursor(pointer.CursorIBeam)
 	w.x11SyncCursorImage() // цикл «пришёл» позже формы
 	if s.count(isRender(renderMinorCreateCursor)) != 0 || s.count(isOp(98)) != 0 {
 		t.Error("отозванная картинка всё же построена")

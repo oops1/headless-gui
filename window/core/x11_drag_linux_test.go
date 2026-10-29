@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // v3.34: перетаскивание файлов на X11 — приёмник (события) и источник XDND.
@@ -288,12 +290,12 @@ func buttonEv(op byte, btn byte) []byte {
 }
 
 // startDrag доводит источник до состояния «ведём»: кнопка зажата, захват взят.
-func startDrag(t *testing.T, w *X11Window, f *x11Fake, effect DragEffect, win uint32, ver int) *[]DragEffect {
+func startDrag(t *testing.T, w *X11Window, f *x11Fake, effect native.DragEffect, win uint32, ver int) *[]native.DragEffect {
 	t.Helper()
-	got := new([]DragEffect)
+	got := new([]native.DragEffect)
 	w.btnDown.Store(1)
 	w.drag.find = func(rx, ry int) (uint32, int) { return win, ver }
-	if !w.BeginDragFiles([]string{"/tmp/a b.png", "/tmp/ф.jpg"}, effect, func(e DragEffect) { *got = append(*got, e) }) {
+	if !w.BeginDragFiles([]string{"/tmp/a b.png", "/tmp/ф.jpg"}, effect, func(e native.DragEffect) { *got = append(*got, e) }) {
 		t.Fatal("BeginDragFiles отказал при зажатой кнопке")
 	}
 	if f.find(clientMsg(tAtomBegin, 1)) == nil {
@@ -308,19 +310,19 @@ func startDrag(t *testing.T, w *X11Window, f *x11Fake, effect DragEffect, win ui
 
 func TestX11_BeginDragFiles_Refusals(t *testing.T) {
 	w, _ := newX11DragWindow(t)
-	noop := func(DragEffect) {}
-	if w.BeginDragFiles([]string{"/a"}, DragEffectCopy, noop) {
+	noop := func(native.DragEffect) {}
+	if w.BeginDragFiles([]string{"/a"}, native.DragEffectCopy, noop) {
 		t.Error("принято без зажатой кнопки")
 	}
 	w.btnDown.Store(1)
-	if w.BeginDragFiles(nil, DragEffectCopy, noop) || w.BeginDragFiles([]string{"/a"}, 0, noop) ||
-		w.BeginDragFiles([]string{"/a"}, DragEffectCopy, nil) {
+	if w.BeginDragFiles(nil, native.DragEffectCopy, noop) || w.BeginDragFiles([]string{"/a"}, 0, noop) ||
+		w.BeginDragFiles([]string{"/a"}, native.DragEffectCopy, nil) {
 		t.Error("принят пустой список / пустая маска / нет done")
 	}
-	if !w.BeginDragFiles([]string{"/a"}, DragEffectCopy, noop) {
+	if !w.BeginDragFiles([]string{"/a"}, native.DragEffectCopy, noop) {
 		t.Fatal("корректный запрос отвергнут")
 	}
-	if w.BeginDragFiles([]string{"/b"}, DragEffectCopy, noop) {
+	if w.BeginDragFiles([]string{"/b"}, native.DragEffectCopy, noop) {
 		t.Error("второе перетаскивание принято, пока идёт первое")
 	}
 }
@@ -333,7 +335,7 @@ func TestX11_DragSource_FullDrop(t *testing.T) {
 			released = true
 		}
 	})
-	got := startDrag(t, w, f, DragEffectCopy|DragEffectMove, 50, 5)
+	got := startDrag(t, w, f, native.DragEffectCopy|native.DragEffectMove, 50, 5)
 
 	if r := f.find(opcode(22)); r == nil || binary.LittleEndian.Uint32(r[8:12]) != tAtomSel || binary.LittleEndian.Uint32(r[4:8]) != 1 {
 		t.Error("окно не объявлено владельцем XdndSelection")
@@ -427,7 +429,7 @@ func TestX11_DragSource_FullDrop(t *testing.T) {
 
 	// XdndFinished v5: принято, действие «переместить».
 	w.handleX11Event(cm(tAtomFinished, [5]uint32{50, 1, tAtomMove}))
-	if len(*got) != 1 || (*got)[0] != DragEffectMove {
+	if len(*got) != 1 || (*got)[0] != native.DragEffectMove {
 		t.Errorf("done: %v, ждал [move]", *got)
 	}
 	if w.drag.active.Load() {
@@ -447,7 +449,7 @@ func TestX11_DragSource_FullDrop(t *testing.T) {
 func TestX11_DragSource_RejectedAndEsc(t *testing.T) {
 	// Приёмник отказал в XdndStatus: при отпускании — Leave, а не Drop.
 	w, f := newX11DragWindow(t)
-	got := startDrag(t, w, f, DragEffectCopy, 50, 5)
+	got := startDrag(t, w, f, native.DragEffectCopy, 50, 5)
 	w.handleX11Event(motion(10, 10, 0))
 	w.handleX11Event(cm(tAtomStatus, [5]uint32{50, 0, 0, 0, 0}))
 	w.handleX11Event(buttonEv(5, 1))
@@ -463,7 +465,7 @@ func TestX11_DragSource_RejectedAndEsc(t *testing.T) {
 
 	// Esc отменяет: Leave и итог 0. Код 9 — Escape.
 	w, f = newX11DragWindow(t)
-	got = startDrag(t, w, f, DragEffectCopy, 50, 5)
+	got = startDrag(t, w, f, native.DragEffectCopy, 50, 5)
 	w.handleX11Event(motion(10, 10, 0))
 	esc := make([]byte, 32)
 	esc[0], esc[1] = 2, 9
@@ -479,7 +481,7 @@ func TestX11_DragSource_RejectedAndEsc(t *testing.T) {
 func TestX11_DragSource_TargetChangeAndNoTarget(t *testing.T) {
 	w, f := newX11DragWindow(t)
 	cur := uint32(50)
-	got := startDrag(t, w, f, DragEffectCopy, 50, 5)
+	got := startDrag(t, w, f, native.DragEffectCopy, 50, 5)
 	w.drag.find = func(rx, ry int) (uint32, int) { return cur, 5 }
 	w.handleX11Event(motion(1, 1, 0))
 	cur = 60
@@ -501,9 +503,9 @@ func TestX11_DragSource_TargetChangeAndNoTarget(t *testing.T) {
 func TestX11_DragSource_GrabRefused(t *testing.T) {
 	w, f := newX11DragWindow(t)
 	f.grabStatus = 1 // AlreadyGrabbed
-	var got []DragEffect
+	var got []native.DragEffect
 	w.btnDown.Store(1)
-	w.BeginDragFiles([]string{"/a"}, DragEffectCopy, func(e DragEffect) { got = append(got, e) })
+	w.BeginDragFiles([]string{"/a"}, native.DragEffectCopy, func(e native.DragEffect) { got = append(got, e) })
 	w.handleX11Event(cm(tAtomBegin, [5]uint32{}))
 	if len(got) != 1 || got[0] != 0 || w.drag.active.Load() {
 		t.Errorf("захват отклонён: done=%v active=%v", got, w.drag.active.Load())
@@ -513,7 +515,7 @@ func TestX11_DragSource_GrabRefused(t *testing.T) {
 	f.grabStatus = 0
 	f.mu.Unlock()
 	w.btnDown.Store(1)
-	if !w.BeginDragFiles([]string{"/a"}, DragEffectCopy, func(DragEffect) {}) {
+	if !w.BeginDragFiles([]string{"/a"}, native.DragEffectCopy, func(native.DragEffect) {}) {
 		t.Error("новое перетаскивание не началось после отказа")
 	}
 }
@@ -526,10 +528,10 @@ func TestX11_DragSource_FinishTimeout(t *testing.T) {
 
 	w, f := newX11DragWindow(t)
 	var mu sync.Mutex
-	var got []DragEffect
+	var got []native.DragEffect
 	w.btnDown.Store(1)
 	w.drag.find = func(rx, ry int) (uint32, int) { return 50, 5 }
-	w.BeginDragFiles([]string{"/a"}, DragEffectCopy, func(e DragEffect) { mu.Lock(); got = append(got, e); mu.Unlock() })
+	w.BeginDragFiles([]string{"/a"}, native.DragEffectCopy, func(e native.DragEffect) { mu.Lock(); got = append(got, e); mu.Unlock() })
 	w.handleX11Event(cm(tAtomBegin, [5]uint32{}))
 	w.handleX11Event(motion(1, 1, 0))
 	w.handleX11Event(cm(tAtomStatus, [5]uint32{50, 1, 0, 0, tAtomCopy}))
@@ -548,7 +550,7 @@ func TestX11_DragSource_FinishTimeout(t *testing.T) {
 // Приёмник XDND старше v2 XdndFinished не шлёт: итог — согласованное действие.
 func TestX11_DragSource_OldTargetNoFinished(t *testing.T) {
 	w, f := newX11DragWindow(t)
-	got := startDrag(t, w, f, DragEffectCopy|DragEffectMove, 50, 5)
+	got := startDrag(t, w, f, native.DragEffectCopy|native.DragEffectMove, 50, 5)
 	w.drag.find = func(rx, ry int) (uint32, int) { return 50, 1 } // целевая версия 1
 	w.handleX11Event(motion(1, 1, 0))
 	w.drag.mu.Lock()
@@ -559,7 +561,7 @@ func TestX11_DragSource_OldTargetNoFinished(t *testing.T) {
 	if f.find(clientMsg(tAtomDrop, 50)) == nil {
 		t.Fatal("Drop не отправлен")
 	}
-	if len(*got) != 1 || (*got)[0] != DragEffectMove {
+	if len(*got) != 1 || (*got)[0] != native.DragEffectMove {
 		t.Errorf("done: %v, ждал [move]", *got)
 	}
 }
@@ -568,14 +570,14 @@ func TestX11_DragSource_OldTargetNoFinished(t *testing.T) {
 // решает, можно ли начинать.
 func TestX11_ButtonEventsFeedDragGate(t *testing.T) {
 	w, _ := newX11DragWindow(t)
-	noop := func(DragEffect) {}
+	noop := func(native.DragEffect) {}
 	w.handleX11Event(buttonEv(4, 1)) // ButtonPress, левая
-	if !w.BeginDragFiles([]string{"/a"}, DragEffectCopy, noop) {
+	if !w.BeginDragFiles([]string{"/a"}, native.DragEffectCopy, noop) {
 		t.Fatal("после нажатия кнопки перетаскивание не принято")
 	}
 	w.dragFinish(0)
 	w.handleX11Event(buttonEv(5, 1)) // ButtonRelease
-	if w.BeginDragFiles([]string{"/a"}, DragEffectCopy, noop) {
+	if w.BeginDragFiles([]string{"/a"}, native.DragEffectCopy, noop) {
 		t.Error("перетаскивание принято после отпускания кнопки")
 	}
 }

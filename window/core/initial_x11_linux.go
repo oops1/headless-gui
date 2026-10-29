@@ -9,11 +9,15 @@ package core
 // ним, где поставить окно и в каком состоянии. После показа то же самое было
 // бы переносом и разворачиванием на глазах.
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 // setInitialPlacement запоминает положение и «развёрнуто» до Create.
 // Реализует initialPlaceBackend.
-func (w *X11Window) setInitialPlacement(p initialPlacement) { w.initial = p }
+func (w *X11Window) setInitialPlacement(p native.InitialPlacement) { w.initial = p }
 
 // x11ClampInt16 вписывает координату в INT16 запроса CreateWindow.
 func x11ClampInt16(v int) int16 {
@@ -51,7 +55,7 @@ func (w *X11Window) applyInitialHints(x, y, width, height int) {
 		w.minWant = false
 	}
 	w.x11ChangeProperty(w.wid, 40 /*WM_NORMAL_HINTS*/, 41 /*WM_SIZE_HINTS*/, 32,
-		x11SizeHints(minW, minH, p, x, y, width, height))
+		native.X11SizeHints(minW, minH, p, x, y, width, height))
 }
 
 // applyInitialState ставит окну начальное состояние «развёрнуто»: свойство

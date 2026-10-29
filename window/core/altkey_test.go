@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -39,11 +40,11 @@ func newAltSurface() (*surface, *altRecorder) {
 func TestAltTap_OpensMenu(t *testing.T) {
 	s, rec := newAltSurface()
 
-	s.keyEvent(VK_ALT, true)
+	s.keyEvent(native.VK_ALT, true)
 	if len(rec.keys) != 0 {
 		t.Fatalf("удержание Alt само по себе дало событие: %+v", rec.keys)
 	}
-	s.keyEvent(VK_ALT, false)
+	s.keyEvent(native.VK_ALT, false)
 
 	if len(rec.keys) != 2 {
 		t.Fatalf("событий %d, ждал нажатие и отпускание KeyAlt: %+v", len(rec.keys), rec.keys)
@@ -60,10 +61,10 @@ func TestAltTap_OpensMenu(t *testing.T) {
 func TestAltTap_NotAfterCombination(t *testing.T) {
 	s, rec := newAltSurface()
 
-	s.keyEvent(VK_ALT, true)
-	s.keyEvent(VK_F, true) // Alt+F
-	s.keyEvent(VK_F, false)
-	s.keyEvent(VK_ALT, false)
+	s.keyEvent(native.VK_ALT, true)
+	s.keyEvent(native.VK_F, true) // Alt+F
+	s.keyEvent(native.VK_F, false)
+	s.keyEvent(native.VK_ALT, false)
 
 	for _, e := range rec.keys {
 		if e.Code == widget.KeyAlt {
@@ -90,10 +91,10 @@ func TestAltTap_NotAfterCombination(t *testing.T) {
 func TestAltTap_SurvivesAutoRepeat(t *testing.T) {
 	s, rec := newAltSurface()
 
-	s.keyEventRepeat(VK_ALT, true, false)
-	s.keyEventRepeat(VK_ALT, true, true) // автоповтор
-	s.keyEventRepeat(VK_ALT, true, true)
-	s.keyEvent(VK_ALT, false)
+	s.keyEventRepeat(native.VK_ALT, true, false)
+	s.keyEventRepeat(native.VK_ALT, true, true) // автоповтор
+	s.keyEventRepeat(native.VK_ALT, true, true)
+	s.keyEvent(native.VK_ALT, false)
 
 	alts := 0
 	for _, e := range rec.keys {
@@ -111,8 +112,8 @@ func TestAltTap_Repeatable(t *testing.T) {
 	s, rec := newAltSurface()
 
 	for i := 0; i < 2; i++ {
-		s.keyEvent(VK_ALT, true)
-		s.keyEvent(VK_ALT, false)
+		s.keyEvent(native.VK_ALT, true)
+		s.keyEvent(native.VK_ALT, false)
 	}
 	alts := 0
 	for _, e := range rec.keys {
@@ -130,7 +131,7 @@ func TestAltTap_Repeatable(t *testing.T) {
 func TestF10_ReachesApplication(t *testing.T) {
 	s, rec := newAltSurface()
 
-	s.keyEvent(VK_F10, true)
+	s.keyEvent(native.VK_F10, true)
 	if len(rec.keys) == 0 || rec.keys[0].Code != widget.KeyF10 {
 		t.Fatalf("F10 не дошла: %+v", rec.keys)
 	}

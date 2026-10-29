@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -242,7 +243,7 @@ func TestX11MonoImageCursorRequests(t *testing.T) {
 // Прежний набор форм не изменился после выноса общей части.
 func TestX11BitmapCursorRequests_Unchanged(t *testing.T) {
 	ids := x11CursorIDs{cursor: 9, drawable: 1, pixSrc: 2, pixMask: 3, gc0: 4, gc1: 5}
-	none := x11BitmapCursorRequests(ids, wlCursorNone)
+	none := x11BitmapCursorRequests(ids, pointer.CursorNone)
 	if len(none) != 11 || none[0][0] != x11OpCreatePixmap || none[6][0] != x11OpCreateCursor {
 		t.Errorf("невидимый курсор: %d запросов, [6]=%d", len(none), none[6][0])
 	}

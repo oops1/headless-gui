@@ -6,12 +6,13 @@ package core
 //
 // HCURSOR строится CreateIconIndirect: цветной 32-битный DIB с альфой плюс
 // 1-битная маска (rgbaToHandle). Готовые курсоры лежат в кэше окна по ключу содержимого
-// (cursorLRU, до cursorCacheSize штук); вытесненный уничтожается DestroyCursor,
+// (pointer.CursorLRU, до pointer.CursorCacheSize штук); вытесненный уничтожается DestroyCursor,
 // кроме того, что выбран прямо сейчас.
 
 import (
 	"image"
 
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -23,7 +24,7 @@ func (w *Win32Window) SetCursorImage(ci *widget.CursorImage) {
 	}
 	h := w.imageCursor(ci)
 	if h == 0 {
-		w.SetCursor(wlCursorArrow) // построить не вышло: системная стрелка
+		w.SetCursor(pointer.CursorArrow) // построить не вышло: системная стрелка
 		return
 	}
 	if w.cursorHandle == h && !w.cursorHidden {
@@ -39,7 +40,7 @@ func (w *Win32Window) SetCursorImage(ci *widget.CursorImage) {
 // отказала. Только поток окна.
 func (w *Win32Window) imageCursor(ci *widget.CursorImage) uintptr {
 	if w.imgCursors == nil {
-		w.imgCursors = newCursorLRU[uintptr](cursorCacheSize,
+		w.imgCursors = pointer.NewCursorLRU[uintptr](pointer.CursorCacheSize,
 			func(h uintptr) {
 				if h != 0 {
 					procDestroyCursor.Call(h)
@@ -47,7 +48,7 @@ func (w *Win32Window) imageCursor(ci *widget.CursorImage) uintptr {
 			},
 			func(h uintptr) bool { return h == w.cursorHandle })
 	}
-	if h, ok := w.imgCursors.get(ci.Key); ok {
+	if h, ok := w.imgCursors.Get(ci.Key); ok {
 		return h
 	}
 	// Цветной DIB значка система читает как ПРЯМУЮ альфу (проверено
@@ -59,13 +60,13 @@ func (w *Win32Window) imageCursor(ci *widget.CursorImage) uintptr {
 		return 0
 	}
 	w.imgCreated++
-	w.imgCursors.put(ci.Key, h)
+	w.imgCursors.Put(ci.Key, h)
 	return h
 }
 
 // destroyImageCursors освобождает курсоры-картинки окна.
 func (w *Win32Window) destroyImageCursors() {
 	if w.imgCursors != nil {
-		w.imgCursors.clear()
+		w.imgCursors.Clear()
 	}
 }

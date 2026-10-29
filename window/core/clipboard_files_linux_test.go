@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Список файлов в буфере обмена Wayland. Компоновщик подменён парой сокетов.
@@ -28,14 +30,14 @@ func TestWlClipboard_SetFilesOffersFileTypes(t *testing.T) {
 	c := newWlFilesClipboard(t)
 	c.w.clip.SetFiles([]string{"/tmp/a"}, false)
 	raw := c.read(t)
-	for _, mime := range []string{mimeTextUriList, mimeGnomeCopiedFiles, mimeTextUTF8} {
+	for _, mime := range []string{native.MimeTextURIList, native.MimeGnomeCopiedFiles, mimeTextUTF8} {
 		if !bytes.Contains(raw, []byte(mime+"\x00")) {
 			t.Errorf("%s не объявлен при SetFiles", mime)
 		}
 	}
 	c.w.clip.SetText("x")
 	raw = c.read(t)
-	if bytes.Contains(raw, []byte(mimeTextUriList)) || bytes.Contains(raw, []byte(mimeGnomeCopiedFiles)) {
+	if bytes.Contains(raw, []byte(native.MimeTextURIList)) || bytes.Contains(raw, []byte(native.MimeGnomeCopiedFiles)) {
 		t.Error("типы файлов объявлены для простого текста")
 	}
 }
@@ -46,8 +48,8 @@ func TestWlClipboard_SourceSendFiles(t *testing.T) {
 	c.w.clip.SetFiles([]string{"/home/u/Отчёт.txt", "/tmp/b"}, true)
 	src := c.w.clip.source
 	for _, tc := range []struct{ mime, want string }{
-		{mimeTextUriList, "file:///home/u/%D0%9E%D1%82%D1%87%D1%91%D1%82.txt\r\nfile:///tmp/b\r\n"},
-		{mimeGnomeCopiedFiles, "cut\nfile:///home/u/%D0%9E%D1%82%D1%87%D1%91%D1%82.txt\nfile:///tmp/b"},
+		{native.MimeTextURIList, "file:///home/u/%D0%9E%D1%82%D1%87%D1%91%D1%82.txt\r\nfile:///tmp/b\r\n"},
+		{native.MimeGnomeCopiedFiles, "cut\nfile:///home/u/%D0%9E%D1%82%D1%87%D1%91%D1%82.txt\nfile:///tmp/b"},
 		{mimeTextUTF8, "/home/u/Отчёт.txt\n/tmp/b"},
 	} {
 		r, wr, err := os.Pipe()
@@ -145,8 +147,8 @@ func TestWlClipboard_GetFilesForeignWaitsForSlowOwner(t *testing.T) {
 	if !ok || !cut || !reflect.DeepEqual(p, []string{"/home/u/a b", "/srv/c"}) {
 		t.Errorf("GetFiles = %v %v %v", p, cut, ok)
 	}
-	if len(*asked) != 1 || (*asked)[0] != mimeGnomeCopiedFiles {
-		t.Errorf("запрошено %v, ждали один %s", *asked, mimeGnomeCopiedFiles)
+	if len(*asked) != 1 || (*asked)[0] != native.MimeGnomeCopiedFiles {
+		t.Errorf("запрошено %v, ждали один %s", *asked, native.MimeGnomeCopiedFiles)
 	}
 }
 

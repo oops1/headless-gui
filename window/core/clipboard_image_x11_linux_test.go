@@ -16,6 +16,7 @@ import (
 
 	"github.com/oops1/headless-gui/v3/internal/clipimage"
 	"github.com/oops1/headless-gui/v3/internal/dib"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -159,7 +160,7 @@ func TestX11Clipboard_ImageServedSmall(t *testing.T) {
 	if err := c.SetImage(src); err != nil {
 		t.Fatal(err)
 	}
-	if c.ownedImg.png != nil {
+	if c.ownedImg.Encoded() {
 		t.Fatal("PNG закодирован до запроса")
 	}
 	src.SetNRGBA(0, 0, color.NRGBA{1, 2, 3, 255}) // правка после копирования
@@ -262,7 +263,7 @@ func TestX11Clipboard_ImageServedByINCR(t *testing.T) {
 		if typ != atomPNGT || format != 8 {
 			t.Fatalf("кусок #%d: тип %d формат %d", i, typ, format)
 		}
-		if len(chunk) > x11IncrChunk {
+		if len(chunk) > native.X11IncrChunk {
 			t.Fatalf("кусок #%d больше предела: %d", i, len(chunk))
 		}
 		if len(chunk) == 0 {
@@ -276,7 +277,7 @@ func TestX11Clipboard_ImageServedByINCR(t *testing.T) {
 	if len(got) != total {
 		t.Errorf("собрано %d байт, обещано %d", len(got), total)
 	}
-	if total <= x11IncrChunk {
+	if total <= native.X11IncrChunk {
 		t.Errorf("картинка не большая: %d", total)
 	}
 	img, err := clipimage.DecodePNG(got)

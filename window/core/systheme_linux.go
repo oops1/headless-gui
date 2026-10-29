@@ -24,6 +24,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // portalCallTimeout — сколько ждём портал. Меньше общего таймаута шины:
@@ -41,7 +44,7 @@ func detectSystemTheme() SystemTheme {
 	if t := systemThemeFromGTKTheme(os.Getenv("GTK_THEME")); t != SystemThemeUnknown {
 		return t
 	}
-	c, err := dbusSession()
+	c, err := dbus.Session()
 	if err != nil {
 		return SystemThemeUnknown
 	}
@@ -56,7 +59,7 @@ func detectSystemTheme() SystemTheme {
 // (UnknownMethod), а на любую другую ошибку — нет портала, нет ключа, таймаут —
 // сразу отвечаем Unknown: второй вызов тем же путём не дал бы иного, а
 // таймаут удвоился бы.
-func readPortalColorScheme(c *dbusConn) SystemTheme {
+func readPortalColorScheme(c *dbus.Conn) SystemTheme {
 	v, ok := readPortalAppearance(c, portalColorSchemeKey)
 	if !ok {
 		return SystemThemeUnknown
@@ -66,12 +69,12 @@ func readPortalColorScheme(c *dbusConn) SystemTheme {
 
 // readPortalAppearance читает ключ пространства appearance портала: сначала
 // ReadOne, при UnknownMethod — устаревший Read (см. readPortalColorScheme).
-func readPortalAppearance(c *dbusConn, key string) (any, bool) {
+func readPortalAppearance(c *dbus.Conn, key string) (any, bool) {
 	args := []any{portalAppearanceNS, key}
-	reply, err := c.callTimeout(portalBusName, portalObjPath, portalSettingsIface,
+	reply, err := c.CallTimeout(portalBusName, portalObjPath, portalSettingsIface,
 		"ReadOne", "ss", args, portalCallTimeout)
 	if err != nil && strings.Contains(err.Error(), "UnknownMethod") {
-		reply, err = c.callTimeout(portalBusName, portalObjPath, portalSettingsIface,
+		reply, err = c.CallTimeout(portalBusName, portalObjPath, portalSettingsIface,
 			"Read", "ss", args, portalCallTimeout)
 	}
 	if err != nil || reply == nil || len(reply.Body) == 0 {
@@ -83,7 +86,7 @@ func readPortalAppearance(c *dbusConn, key string) (any, bool) {
 // detectSystemAccent читает accent-color портала (версия портала 1.18+; на
 // более старом ключа нет, и ответ ok=false).
 func detectSystemAccent() (color.RGBA, bool) {
-	c, err := dbusSession()
+	c, err := dbus.Session()
 	if err != nil {
 		return color.RGBA{}, false
 	}
@@ -97,8 +100,8 @@ func detectSystemAccent() (color.RGBA, bool) {
 // portalThemeHub — единственная подписка процесса на сигнал портала с
 // раздачей всем окнам.
 //
-// Соединение с сессионной шиной одно на процесс (dbusSession), а снять
-// обработчик сигнала с него нельзя: у onSignal нет обратной операции.
+// Соединение с сессионной шиной одно на процесс (dbus.Session), а снять
+// обработчик сигнала с него нельзя: у OnSignal нет обратной операции.
 // Подпиши каждое окно напрямую — закрытое окно оставило бы на шине
 // обработчик, который до конца работы программы звал бы колбэк в мёртвый
 // движок. Поэтому на шине висит один обработчик, а окна приходят и уходят в
@@ -122,8 +125,8 @@ var portalThemes portalThemeHub
 // наблюдение на Linux есть, в отличие от macOS. Без шины или портала подписка
 // ничего не даёт, и возвращается nil: это не ошибка, тема просто не
 // меняется на глазах.
-func watchSystemTheme(native NativeWindow, emit func(SystemTheme)) (stop func()) {
-	c, err := dbusSession()
+func watchSystemTheme(nw native.NativeWindow, emit func(SystemTheme)) (stop func()) {
+	c, err := dbus.Session()
 	if err != nil {
 		return nil
 	}
@@ -135,7 +138,7 @@ func watchSystemTheme(native NativeWindow, emit func(SystemTheme)) (stop func())
 }
 
 // attach единожды вешает на шину правило и обработчик.
-func (h *portalThemeHub) attach(c *dbusConn) bool {
+func (h *portalThemeHub) attach(c *dbus.Conn) bool {
 	h.attachMu.Lock()
 	defer h.attachMu.Unlock()
 	if h.attached {
@@ -148,10 +151,10 @@ func (h *portalThemeHub) attach(c *dbusConn) bool {
 	// ждал бы этот замок, а ответ — обработчик.
 	rule := "type='signal',sender='" + portalBusName + "',interface='" + portalSettingsIface +
 		"',member='SettingChanged',path='" + portalObjPath + "',arg0='" + portalAppearanceNS + "'"
-	if err := c.addMatch(rule); err != nil {
+	if err := c.AddMatch(rule); err != nil {
 		return false
 	}
-	c.onSignal(func(msg *dbusMessage) {
+	c.OnSignal(func(msg *dbus.Message) {
 		if t, ok := systemThemeFromPortalSignal(msg); ok {
 			h.dispatch(t)
 		}
@@ -208,8 +211,8 @@ func (h *portalThemeHub) dispatchAccent(c color.RGBA, ok bool) {
 // watchSystemAccent подписывается на сигнал SettingChanged портала для
 // accent-color — на том же правиле шины, что и тема (оно выбирает всё
 // пространство appearance). Без шины или портала возвращает nil.
-func watchSystemAccent(native NativeWindow, emit func(color.RGBA, bool)) (stop func()) {
-	c, err := dbusSession()
+func watchSystemAccent(nw native.NativeWindow, emit func(color.RGBA, bool)) (stop func()) {
+	c, err := dbus.Session()
 	if err != nil {
 		return nil
 	}

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Сквозная проверка с НАСТОЯЩИМ X-сервером (если он есть; иначе пропуск): два
@@ -37,11 +39,11 @@ func TestX11E2E_DragBetweenWindows(t *testing.T) {
 	b.SetOnDragLeave(func() { note("leave") })
 	b.SetOnFilesDropped(func(p []string, x, y int) { dropped <- p })
 
-	done := make(chan DragEffect, 1)
+	done := make(chan native.DragEffect, 1)
 	files := []string{"/tmp/один файл.png", "/tmp/b.jpg"}
 	a.drag.find = func(rx, ry int) (uint32, int) { return b.wid, 5 }
 	a.btnDown.Store(1)
-	if !a.BeginDragFiles(files, DragEffectCopy|DragEffectMove, func(e DragEffect) { done <- e }) {
+	if !a.BeginDragFiles(files, native.DragEffectCopy|native.DragEffectMove, func(e native.DragEffect) { done <- e }) {
 		t.Fatal("BeginDragFiles отказал")
 	}
 	deadline := time.Now().Add(3 * time.Second)
@@ -68,7 +70,7 @@ func TestX11E2E_DragBetweenWindows(t *testing.T) {
 
 	select {
 	case e := <-done:
-		if e != DragEffectCopy {
+		if e != native.DragEffectCopy {
 			t.Errorf("итог %v, ждал copy", e)
 		}
 	case <-time.After(5 * time.Second):

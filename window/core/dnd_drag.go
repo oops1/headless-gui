@@ -9,6 +9,8 @@ import (
 	"time"
 
 	xdraw "golang.org/x/image/draw"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // dnd_drag.go — перетаскивание файлов, общая часть для всех бэкендов (v3.34):
@@ -19,43 +21,6 @@ import (
 // приёмника — дополнение к нему, а не замена. Бэкенд, не умеющий
 // перетаскивания (macOS), просто не реализует интерфейсы ниже, и вызовы
 // становятся no-op.
-
-// DragEffect — что можно сделать с перетаскиваемыми файлами. Битовая маска:
-// источник объявляет допустимые действия, приёмник выбирает одно из них.
-// Значения совпадают с DROPEFFECT_* Windows.
-type DragEffect uint32
-
-const (
-	// DragEffectCopy — скопировать файлы.
-	DragEffectCopy DragEffect = 1
-	// DragEffectMove — переместить файлы.
-	DragEffectMove DragEffect = 2
-	// DragEffectLink — создать ссылку на файлы.
-	DragEffectLink DragEffect = 4
-
-	// dragEffectAll — все известные биты.
-	dragEffectAll = DragEffectCopy | DragEffectMove | DragEffectLink
-)
-
-// String — читаемое имя маски для журналов и тестов: «copy|move», «none».
-func (e DragEffect) String() string {
-	if e&dragEffectAll == 0 {
-		return "none"
-	}
-	s := ""
-	add := func(bit DragEffect, name string) {
-		if e&bit != 0 {
-			if s != "" {
-				s += "|"
-			}
-			s += name
-		}
-	}
-	add(DragEffectCopy, "copy")
-	add(DragEffectMove, "move")
-	add(DragEffectLink, "link")
-	return s
-}
 
 // dragTargetEvents — необязательная возможность нативного бэкенда сообщать о
 // перетаскивании НАД окном (приёмник): вход, движение и выход. Реализуется
@@ -87,7 +52,7 @@ type dragTargetEvents interface {
 // false — начать нельзя (нет нажатой кнопки мыши, нет поддержки у сервера);
 // done при этом не вызывается.
 type fileDragSource interface {
-	BeginDragFiles(paths []string, effect DragEffect, done func(effect DragEffect)) bool
+	BeginDragFiles(paths []string, effect native.DragEffect, done func(effect native.DragEffect)) bool
 }
 
 // fileDragImageSource — необязательная возможность бэкенда показать значок
@@ -95,7 +60,7 @@ type fileDragSource interface {
 // RGBA с началом в (0,0) и размером не больше dragImageMaxSide, hotspot —
 // точка картинки под курсором. Остальное — как у BeginDragFiles.
 type fileDragImageSource interface {
-	BeginDragFilesImage(paths []string, effect DragEffect, img *image.RGBA, hotspot image.Point, done func(effect DragEffect)) bool
+	BeginDragFilesImage(paths []string, effect native.DragEffect, img *image.RGBA, hotspot image.Point, done func(effect native.DragEffect)) bool
 }
 
 // dragImageMaxSide — наибольшая сторона значка перетаскивания в пикселях.
@@ -114,7 +79,7 @@ type dragState struct {
 	enter    func(x, y int)
 	over     func(x, y int) bool
 	leave    func()
-	finished func(effect DragEffect)
+	finished func(effect native.DragEffect)
 
 	// last — последний ответ приложения на over. Сбрасывается в true на входе:
 	// пока приложение не ответило, считаем, что принимаем.
@@ -164,7 +129,7 @@ func (win *Window) SetOnDragLeave(fn func()) {
 // DragEffectMove или DragEffectLink); 0 — перетаскивание отменено или
 // отклонено. Для Move удалять исходные файлы должно приложение (когда
 // effect == DragEffectMove): ОС их не трогает. Вызывается на горутине движка.
-func (win *Window) SetOnDragFinished(fn func(effect DragEffect)) {
+func (win *Window) SetOnDragFinished(fn func(effect native.DragEffect)) {
 	win.drag.mu.Lock()
 	win.drag.finished = fn
 	win.drag.mu.Unlock()
@@ -184,7 +149,7 @@ func (win *Window) SetOnDragFinished(fn func(effect DragEffect)) {
 // Win32: DoDragDrop (модальный цикл ОС на потоке окна, данные — CF_HDROP);
 // X11: XDND-источник (захват указателя, XdndEnter/Position/Drop);
 // Wayland: wl_data_device.start_drag с источником text/uri-list.
-func (win *Window) BeginDragFiles(paths []string, effect DragEffect) bool {
+func (win *Window) BeginDragFiles(paths []string, effect native.DragEffect) bool {
 	return win.beginDragFiles(paths, effect, nil, image.Point{})
 }
 
@@ -204,7 +169,7 @@ func (win *Window) BeginDragFiles(paths []string, effect DragEffect) bool {
 // курсором окна.
 //
 // Возврат и SetOnDragFinished — как у BeginDragFiles.
-func (win *Window) BeginDragFilesImage(paths []string, effect DragEffect, img image.Image, hotspot image.Point) bool {
+func (win *Window) BeginDragFilesImage(paths []string, effect native.DragEffect, img image.Image, hotspot image.Point) bool {
 	return win.beginDragFiles(paths, effect, img, hotspot)
 }
 
@@ -219,23 +184,23 @@ func (win *Window) DragImageSupported() bool {
 	return ok
 }
 
-func (win *Window) beginDragFiles(paths []string, effect DragEffect, img image.Image, hotspot image.Point) bool {
+func (win *Window) beginDragFiles(paths []string, effect native.DragEffect, img image.Image, hotspot image.Point) bool {
 	src, ok := win.native.(fileDragSource)
 	if !ok {
 		return false
 	}
 	paths = normalizeDragPaths(paths)
-	effect &= dragEffectAll
+	effect &= native.DragEffectAll
 	if len(paths) == 0 || effect == 0 {
 		return false
 	}
-	done := func(res DragEffect) {
+	done := func(res native.DragEffect) {
 		win.post(func() {
 			win.drag.mu.Lock()
 			fn := win.drag.finished
 			win.drag.mu.Unlock()
 			if fn != nil {
-				fn(res & dragEffectAll)
+				fn(res & native.DragEffectAll)
 			}
 		})
 	}
@@ -293,44 +258,6 @@ func normalizeDragPaths(paths []string) []string {
 		out = append(out, p)
 	}
 	return out
-}
-
-// pickDragEffect выбирает действие из допустимых источником (allowed) с учётом
-// пожеланий приёмника (prefer, может быть 0). Предпочтение выигрывает, если оно
-// допустимо; иначе по убыванию «безопасности»: copy, move, link. 0 — выбрать
-// нечего.
-func pickDragEffect(allowed, prefer DragEffect) DragEffect {
-	allowed &= dragEffectAll
-	if p := prefer & allowed; p != 0 {
-		for _, e := range []DragEffect{DragEffectCopy, DragEffectMove, DragEffectLink} {
-			if p&e != 0 {
-				return e
-			}
-		}
-	}
-	for _, e := range []DragEffect{DragEffectCopy, DragEffectMove, DragEffectLink} {
-		if allowed&e != 0 {
-			return e
-		}
-	}
-	return 0
-}
-
-// dragEffectForKeys — действие по зажатым модификаторам, как в Проводнике
-// Windows: Ctrl — копировать, Shift — переместить, Ctrl+Shift (или Alt) —
-// ссылка; без клавиш — копировать, а если копирование недопустимо, то
-// первое допустимое. Чистая функция: проверяется без ОС.
-func dragEffectForKeys(allowed DragEffect, ctrl, shift, alt bool) DragEffect {
-	var prefer DragEffect
-	switch {
-	case ctrl && shift, alt:
-		prefer = DragEffectLink
-	case ctrl:
-		prefer = DragEffectCopy
-	case shift:
-		prefer = DragEffectMove
-	}
-	return pickDragEffect(allowed, prefer)
 }
 
 // dragLogical переводит физические координаты клиентской области (так их

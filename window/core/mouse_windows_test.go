@@ -4,6 +4,9 @@ package core
 
 import (
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // fakeHwnd — номер окна, под которым тест регистрирует Win32Window без
@@ -106,7 +109,7 @@ func TestWin32_MouseMoveArmsLeaveOnce(t *testing.T) {
 	if ret := wndProc(fakeHwnd, wmMouseleave, 0, 0); ret != 0 {
 		t.Errorf("WM_MOUSELEAVE вернул %d", ret)
 	}
-	if len(moves) != 1 || moves[0] != [2]int{pointerOutside, pointerOutside} {
+	if len(moves) != 1 || moves[0] != [2]int{pointer.Outside, pointer.Outside} {
 		t.Fatalf("после WM_MOUSELEAVE движения: %v, ждал (−1,−1)", moves)
 	}
 
@@ -138,14 +141,14 @@ func TestWin32_MouseLeftOntoTitleButton(t *testing.T) {
 	w.onMouseMove = func(x, y int) { moves = append(moves, [2]int{x, y}) }
 	// Окно на экране (100,100)–(300,200); кнопка «закрыть» — в правом верхнем
 	// углу, полоса заголовка выше 30 px.
-	w.SetHitTest(func(x, y int) HitArea {
+	w.SetHitTest(func(x, y int) native.HitArea {
 		switch {
 		case y < 30 && x >= 160:
-			return HitCloseButton
+			return native.HitCloseButton
 		case y < 30:
-			return HitCaption
+			return native.HitCaption
 		}
-		return HitClient
+		return native.HitClient
 	})
 	wr := rect{Left: 100, Top: 100, Right: 300, Bottom: 200}
 
@@ -164,7 +167,7 @@ func TestWin32_MouseLeftOntoTitleButton(t *testing.T) {
 	for _, c := range cases {
 		moves = nil
 		w.mouseLeft(c.sx, c.sy, c.havePos, wr)
-		got := len(moves) == 1 && moves[0] == [2]int{pointerOutside, pointerOutside}
+		got := len(moves) == 1 && moves[0] == [2]int{pointer.Outside, pointer.Outside}
 		if got != c.wantLeave {
 			t.Errorf("%s: уход сообщён=%v, ждал %v (движения %v)", c.name, got, c.wantLeave, moves)
 		}
@@ -193,7 +196,7 @@ func TestWin32_NcButtonTracking(t *testing.T) {
 	}
 	moves = nil
 	wndProc(fakeHwnd, wmNcmouseleave, 0, 0)
-	if len(moves) != 1 || moves[0] != [2]int{pointerOutside, pointerOutside} {
+	if len(moves) != 1 || moves[0] != [2]int{pointer.Outside, pointer.Outside} {
 		t.Fatalf("после WM_NCMOUSELEAVE: %v", moves)
 	}
 	wndProc(fakeHwnd, wmNcmousemove, htMaxButton, mkLParam(5, 6))
@@ -207,20 +210,20 @@ func TestWin32CursorSpec(t *testing.T) {
 		c    int
 		want win32CursorSpec
 	}{
-		{wlCursorArrow, win32CursorSpec{idc: idcArrow}},
-		{wlCursorIBeam, win32CursorSpec{idc: idcIBeam}},
-		{wlCursorHand, win32CursorSpec{idc: idcHand}},
-		{wlCursorSizeWE, win32CursorSpec{idc: idcSizeWE}},
-		{wlCursorSizeNS, win32CursorSpec{idc: idcSizeNS}},
-		{wlCursorSizeNWSE, win32CursorSpec{idc: idcSizeNWSE}},
-		{wlCursorSizeNESW, win32CursorSpec{idc: idcSizeNESW}},
-		{wlCursorNone, win32CursorSpec{hidden: true}},
-		{wlCursorGrab, win32CursorSpec{art: true}},
-		{wlCursorGrabbing, win32CursorSpec{art: true}},
-		{wlCursorSizeAll, win32CursorSpec{idc: 32646}},   // IDC_SIZEALL
-		{wlCursorCrosshair, win32CursorSpec{idc: 32515}}, // IDC_CROSS
-		{wlCursorWait, win32CursorSpec{idc: 32514}},      // IDC_WAIT
-		{999, win32CursorSpec{idc: idcArrow}},            // незнакомая — стрелка
+		{pointer.CursorArrow, win32CursorSpec{idc: idcArrow}},
+		{pointer.CursorIBeam, win32CursorSpec{idc: idcIBeam}},
+		{pointer.CursorHand, win32CursorSpec{idc: idcHand}},
+		{pointer.CursorSizeWE, win32CursorSpec{idc: idcSizeWE}},
+		{pointer.CursorSizeNS, win32CursorSpec{idc: idcSizeNS}},
+		{pointer.CursorSizeNWSE, win32CursorSpec{idc: idcSizeNWSE}},
+		{pointer.CursorSizeNESW, win32CursorSpec{idc: idcSizeNESW}},
+		{pointer.CursorNone, win32CursorSpec{hidden: true}},
+		{pointer.CursorGrab, win32CursorSpec{art: true}},
+		{pointer.CursorGrabbing, win32CursorSpec{art: true}},
+		{pointer.CursorSizeAll, win32CursorSpec{idc: 32646}},   // IDC_SIZEALL
+		{pointer.CursorCrosshair, win32CursorSpec{idc: 32515}}, // IDC_CROSS
+		{pointer.CursorWait, win32CursorSpec{idc: 32514}},      // IDC_WAIT
+		{999, win32CursorSpec{idc: idcArrow}},                  // незнакомая — стрелка
 	}
 	for _, c := range cases {
 		if got := win32CursorSpecFor(c.c); got != c.want {
@@ -233,7 +236,7 @@ func TestWin32CursorSpec(t *testing.T) {
 // не уходит в DefWindowProc (тот вернул бы класс-курсор «стрелка»).
 func TestWin32_HiddenCursorMessage(t *testing.T) {
 	w := &Win32Window{}
-	w.SetCursor(wlCursorNone) // hwnd == 0: системный SetCursor не зовётся
+	w.SetCursor(pointer.CursorNone) // hwnd == 0: системный SetCursor не зовётся
 	if !w.cursorHidden {
 		t.Fatal("SetCursor(None) не спрятал курсор")
 	}
@@ -247,7 +250,7 @@ func TestWin32_HiddenCursorMessage(t *testing.T) {
 	}
 
 	// Вернули форму — курсор снова виден.
-	w.SetCursor(wlCursorCrosshair)
+	w.SetCursor(pointer.CursorCrosshair)
 	if w.cursorHidden {
 		t.Fatal("курсор остался спрятанным после смены формы")
 	}
@@ -268,15 +271,15 @@ func TestWin32_CursorUnsetLeavesToSystem(t *testing.T) {
 // Рисованные руки создаются настоящими HCURSOR, кэшируются и освобождаются.
 func TestWin32_ArtCursors(t *testing.T) {
 	w := &Win32Window{}
-	grab, hidden := w.cursorFor(wlCursorGrab)
-	grabbing, _ := w.cursorFor(wlCursorGrabbing)
+	grab, hidden := w.cursorFor(pointer.CursorGrab)
+	grabbing, _ := w.cursorFor(pointer.CursorGrabbing)
 	if hidden || grab == 0 || grabbing == 0 {
 		t.Fatalf("курсоры не созданы: grab=%x grabbing=%x hidden=%v", grab, grabbing, hidden)
 	}
 	if grab == grabbing {
 		t.Error("раскрытая и сжатая рука — один и тот же HCURSOR")
 	}
-	if again, _ := w.cursorFor(wlCursorGrab); again != grab {
+	if again, _ := w.cursorFor(pointer.CursorGrab); again != grab {
 		t.Error("курсор формы не кэшируется")
 	}
 	w.destroyArtCursors()
@@ -284,7 +287,7 @@ func TestWin32_ArtCursors(t *testing.T) {
 		t.Errorf("после destroyArtCursors в кэше осталось %v", w.cursorCache)
 	}
 	// Остальные новые формы — системные курсоры.
-	for _, c := range []int{wlCursorSizeAll, wlCursorCrosshair, wlCursorWait} {
+	for _, c := range []int{pointer.CursorSizeAll, pointer.CursorCrosshair, pointer.CursorWait} {
 		if h, _ := w.cursorFor(c); h == 0 {
 			t.Errorf("форма %d: системный курсор не загружен", c)
 		}

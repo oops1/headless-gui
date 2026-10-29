@@ -25,6 +25,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
 )
 
 // x11LockTimeout — сколько приложение ждёт ответ цикла событий.
@@ -32,15 +34,15 @@ const x11LockTimeout = time.Second
 
 // x11LockJob — вопрос или просьба приложения.
 type x11LockJob struct {
-	set  bool     // выставить want, а не прочитать
-	want LockKeys // для set
+	set  bool              // выставить want, а не прочитать
+	want keyboard.LockKeys // для set
 	done chan x11LockResult
 }
 
 // x11LockResult — итог задания.
 type x11LockResult struct {
-	keys LockKeys // для чтения: состояние
-	ok   bool     // для чтения: удалось узнать; для set: удалось выставить
+	keys keyboard.LockKeys // для чтения: состояние
+	ok   bool              // для чтения: удалось узнать; для set: удалось выставить
 }
 
 // x11LockState — очередь заданий окна и то, что цикл событий узнал о сервере.
@@ -86,7 +88,7 @@ func (w *X11Window) lkAsk(job *x11LockJob) (x11LockResult, bool) {
 }
 
 // LockKeys — состояние переключателей (lockKeysBackend).
-func (w *X11Window) LockKeys() (LockKeys, bool) {
+func (w *X11Window) LockKeys() (keyboard.LockKeys, bool) {
 	r, ok := w.lkAsk(&x11LockJob{})
 	if !ok || !r.ok {
 		return 0, false
@@ -96,7 +98,7 @@ func (w *X11Window) LockKeys() (LockKeys, bool) {
 
 // SetLockKeys приводит переключатели к want (lockKeysSetter). Нужен XKB:
 // зафиксированные модификаторы ядерным протоколом не поменять.
-func (w *X11Window) SetLockKeys(want LockKeys) bool {
+func (w *X11Window) SetLockKeys(want keyboard.LockKeys) bool {
 	r, ok := w.lkAsk(&x11LockJob{set: true, want: want})
 	return ok && r.ok
 }
@@ -207,12 +209,12 @@ func (w *X11Window) lkKeysymsOf(code byte) []uint32 {
 }
 
 // lkReadState читает состояние переключателей теми запросами, что нужны.
-func (w *X11Window) lkReadState() (LockKeys, bool) {
+func (w *X11Window) lkReadState() (keyboard.LockKeys, bool) {
 	s := &w.lk
 	var (
 		indicators uint32
 		locked     uint8
-		pointer    uint16
+		ptr        uint16
 	)
 	if s.m.xkb {
 		if s.m.needsIndicators() {
@@ -238,23 +240,23 @@ func (w *X11Window) lkReadState() (LockKeys, bool) {
 		if !ok {
 			return 0, false
 		}
-		if pointer, ok = parseQueryPointerMask(reply); !ok {
+		if ptr, ok = parseQueryPointerMask(reply); !ok {
 			return 0, false
 		}
 	}
-	return s.m.resolve(indicators, locked, pointer), true
+	return s.m.resolve(indicators, locked, ptr), true
 }
 
 // lkApply приводит переключатели от cur к want и проверяет итог. true — все
 // отличавшиеся клавиши теперь как просили.
-func (w *X11Window) lkApply(cur, want LockKeys) bool {
+func (w *X11Window) lkApply(cur, want keyboard.LockKeys) bool {
 	s := &w.lk
 	if !s.m.xkb {
 		return cur == want // менять нечем; совпало — и хорошо
 	}
 	var affect, locks uint8
 	complete := true
-	handled := LockKeys(0)
+	handled := keyboard.LockKeys(0)
 	for i, f := range x11LockFlags {
 		if (cur^want)&f == 0 {
 			continue

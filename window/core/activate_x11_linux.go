@@ -30,6 +30,8 @@ import (
 	"encoding/binary"
 	"strings"
 	"sync/atomic"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // x11Activation — состояние активации и свёрнутости окна.
@@ -143,18 +145,18 @@ func (w *X11Window) x11NetActiveWindowAt(ts uint32) {
 // (MapWindow, ICCCM 4.1.4: возврат из Iconic в Normal делает сам клиент), затем
 // просит менеджера активировать (_NET_ACTIVE_WINDOW, метка — время последнего
 // ввода в окне), поднимает окно и переносит фокус. true — запрос отправлен;
-// решение за менеджером. Реализует activateBackend.
+// решение за менеджером. Реализует native.ActivateBackend.
 func (w *X11Window) Activate() bool { return w.activateAt(w.act.userTime.Load()) }
 
 // ActivateWithToken то же с токеном — стартовым идентификатором запуска
 // (DESKTOP_STARTUP_ID): метка времени берётся из его части «_TIME<мс>»
 // (если нет — как у Activate), а запускающему сообщается о конце запуска.
-// Реализует activateBackend.
+// Реализует native.ActivateBackend.
 func (w *X11Window) ActivateWithToken(token string) bool {
 	if token == "" {
 		return w.Activate()
 	}
-	ts, ok := startupIDTime(token)
+	ts, ok := native.StartupIDTime(token)
 	if !ok {
 		ts = w.act.userTime.Load()
 	}

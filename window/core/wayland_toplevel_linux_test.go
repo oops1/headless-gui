@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // Тесты разговаривают с окном через НАСТОЯЩИЙ unix-сокет: на другом его конце
@@ -282,7 +285,7 @@ func TestWayland_SetAppID(t *testing.T) {
 
 	// Не задан — имя исполняемого файла, а не общее «headless-gui».
 	c2 := newWlTestWindow(t)
-	if got, want := c2.w.effectiveAppID(), defaultAppID(os.Args[0]); got != want {
+	if got, want := c2.w.effectiveAppID(), native.DefaultAppID(os.Args[0]); got != want {
 		t.Errorf("по умолчанию app_id = %q, ждал %q", got, want)
 	}
 }
@@ -379,11 +382,11 @@ func TestWayland_ButtonSerialRemembered(t *testing.T) {
 		binary.LittleEndian.PutUint32(b[12:16], state)
 		return b
 	}
-	c.w.handlePointer(wlPointerEvButton, mk(100, btnLeft, 1))
+	c.w.handlePointer(wlPointerEvButton, mk(100, pointer.WlBtnLeft, 1))
 	if got := c.w.ptrButtonSerial.Load(); got != 100 {
 		t.Errorf("serial нажатия %d, ждал 100", got)
 	}
-	c.w.handlePointer(wlPointerEvButton, mk(101, btnLeft, 0))
+	c.w.handlePointer(wlPointerEvButton, mk(101, pointer.WlBtnLeft, 0))
 	if got := c.w.ptrButtonSerial.Load(); got != 100 {
 		t.Errorf("serial после отпускания %d, ждал прежние 100", got)
 	}

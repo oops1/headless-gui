@@ -49,6 +49,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/oops1/headless-gui/v3/internal/goid"
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
 )
 
 // Запросы virtual-keyboard-unstable-v1 и формат keymap.
@@ -96,11 +97,11 @@ type wlVkPlan struct {
 // модификаторы не сделать: Kana Lock (его в mods_locked нет вовсе) и клавишу,
 // не привязанную к модификатору раскладки (Scroll Lock почти везде). Клавиша
 // без модификатора, которую просят выключить, не ошибка: она и так «выключена».
-func lkVirtMasks(m lkWlMods, want LockKeys) (affect, set uint32, partial bool) {
+func lkVirtMasks(m keyboard.WlLockMods, want keyboard.LockKeys) (affect, set uint32, partial bool) {
 	for _, k := range [...]struct {
-		flag LockKeys
+		flag keyboard.LockKeys
 		mask uint32
-	}{{CapsLock, m.caps}, {NumLock, m.num}, {ScrollLock, m.scroll}} {
+	}{{keyboard.CapsLock, m.Caps}, {keyboard.NumLock, m.Num}, {keyboard.ScrollLock, m.Scroll}} {
 		if k.mask == 0 {
 			if want&k.flag != 0 {
 				partial = true
@@ -112,7 +113,7 @@ func lkVirtMasks(m lkWlMods, want LockKeys) (affect, set uint32, partial bool) {
 			set |= k.mask
 		}
 	}
-	if want&KanaLock != 0 {
+	if want&keyboard.KanaLock != 0 {
 		partial = true
 	}
 	return affect, set, partial
@@ -121,7 +122,7 @@ func lkVirtMasks(m lkWlMods, want LockKeys) (affect, set uint32, partial bool) {
 // lkVirtPlan снимает состояние для запроса. false — менять нечем: окно не в
 // фокусе клавиатуры или состояние ещё неизвестно (нет modifiers для текущего
 // фокуса), либо композитор не присылал keymap, которую нужно отдать.
-func (w *WaylandWindow) lkVirtPlan(want LockKeys) (wlVkPlan, bool) {
+func (w *WaylandWindow) lkVirtPlan(want keyboard.LockKeys) (wlVkPlan, bool) {
 	w.lk.mu.Lock()
 	defer w.lk.mu.Unlock()
 	if !w.lk.known || w.lk.keymapRaw == nil {
@@ -129,7 +130,7 @@ func (w *WaylandWindow) lkVirtPlan(want LockKeys) (wlVkPlan, bool) {
 	}
 	m := w.lk.mods
 	if !w.lk.modsSet {
-		m = lkWlDefaultMods
+		m = keyboard.WlDefaultLockMods
 	}
 	p := wlVkPlan{
 		keymap:    w.lk.keymapRaw,
@@ -156,7 +157,7 @@ func (w *WaylandWindow) lkVirtPlan(want LockKeys) (wlVkPlan, bool) {
 // из обработчиков событий окна: подтверждение приходит в цикл событий, и ждать
 // его оттуда нельзя. Позванный из цикла событий, вызов запрос отправляет, но
 // не ждёт и отвечает false.
-func (w *WaylandWindow) SetLockKeys(want LockKeys) bool {
+func (w *WaylandWindow) SetLockKeys(want keyboard.LockKeys) bool {
 	name := w.gVirtualKeyboard.Load()
 	if name == 0 || w.seatID == 0 || w.vk.dead.Load() || w.closed.Load() {
 		return false

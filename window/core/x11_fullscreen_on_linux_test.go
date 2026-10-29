@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Полный экран на выбранном мониторе X11 (SetFullscreenOn), на проводе: что
@@ -56,10 +58,10 @@ func fsOnWindow(t *testing.T, monitorsSupported bool) (*X11Window, *fsOnLog) {
 	go serveFakeX(server, func(r x11Request) []byte { log.add(r); return nil })
 
 	old := x11MonitorList
-	x11MonitorList = func() []Monitor {
-		return []Monitor{
-			{Name: "HDMI-1", Bounds: image.Rect(0, 0, 1920, 1080), Primary: true, id: 1},
-			{Name: "DP-1", Bounds: image.Rect(1920, 0, 3840, 1080), id: 2},
+	x11MonitorList = func() []native.Monitor {
+		return []native.Monitor{
+			native.MonitorWithKey(native.Monitor{Name: "HDMI-1", Bounds: image.Rect(0, 0, 1920, 1080), Primary: true}, 1),
+			native.MonitorWithKey(native.Monitor{Name: "DP-1", Bounds: image.Rect(1920, 0, 3840, 1080)}, 2),
 		}
 	}
 	t.Cleanup(func() { x11MonitorList = old })
@@ -92,7 +94,7 @@ func fsOnConfigure(t *testing.T, r x11Request) (x, y int) {
 // четыре края), затем ADD fullscreen; окно с места не двигается.
 func TestX11_FullscreenOn_WithMonitorsHint(t *testing.T) {
 	w, log := fsOnWindow(t, true)
-	if !w.SetFullscreenOn(Monitor{Name: "DP-1", id: 2}) {
+	if !w.SetFullscreenOn(native.MonitorWithKey(native.Monitor{Name: "DP-1"}, 2)) {
 		t.Fatal("SetFullscreenOn вернул false")
 	}
 	reqs := log.wait(t, 2)
@@ -122,7 +124,7 @@ func TestX11_FullscreenOn_WithMonitorsHint(t *testing.T) {
 // Менеджер без подсказки: окно переносится на угол монитора, затем ADD.
 func TestX11_FullscreenOn_MovesWithoutHint(t *testing.T) {
 	w, log := fsOnWindow(t, false)
-	if !w.SetFullscreenOn(Monitor{Bounds: image.Rect(1920, 0, 3840, 1080)}) { // по границам
+	if !w.SetFullscreenOn(native.Monitor{Bounds: image.Rect(1920, 0, 3840, 1080)}) { // по границам
 		t.Fatal("SetFullscreenOn вернул false")
 	}
 	reqs := log.wait(t, 2)
@@ -139,7 +141,7 @@ func TestX11_FullscreenOn_MovesWithoutHint(t *testing.T) {
 func TestX11_FullscreenOn_WhileFullscreen(t *testing.T) {
 	w, log := fsOnWindow(t, true)
 	w.fs.on.Store(true)
-	if !w.SetFullscreenOn(Monitor{id: 1}) {
+	if !w.SetFullscreenOn(native.MonitorWithKey(native.Monitor{}, 1)) {
 		t.Fatal("SetFullscreenOn вернул false")
 	}
 	reqs := log.wait(t, 1)
@@ -149,7 +151,7 @@ func TestX11_FullscreenOn_WhileFullscreen(t *testing.T) {
 
 	w, log = fsOnWindow(t, false)
 	w.fs.on.Store(true)
-	if !w.SetFullscreenOn(Monitor{Name: "DP-1"}) {
+	if !w.SetFullscreenOn(native.Monitor{Name: "DP-1"}) {
 		t.Fatal("SetFullscreenOn вернул false")
 	}
 	reqs = log.wait(t, 3)
@@ -168,14 +170,14 @@ func TestX11_FullscreenOn_WhileFullscreen(t *testing.T) {
 // ни одного байта серверу.
 func TestX11_FullscreenOn_Refusals(t *testing.T) {
 	w, log := fsOnWindow(t, true)
-	if w.SetFullscreenOn(Monitor{id: 9, Name: "VGA-1", Bounds: image.Rect(5000, 0, 6000, 800)}) {
+	if w.SetFullscreenOn(native.MonitorWithKey(native.Monitor{Name: "VGA-1", Bounds: image.Rect(5000, 0, 6000, 800)}, 9)) {
 		t.Error("отключённый монитор принят")
 	}
-	if w.SetFullscreenOn(Monitor{}) {
+	if w.SetFullscreenOn(native.Monitor{}) {
 		t.Error("нулевой Monitor принят")
 	}
 	w.fs.unsupported = true
-	if w.SetFullscreenOn(Monitor{id: 1}) {
+	if w.SetFullscreenOn(native.MonitorWithKey(native.Monitor{}, 1)) {
 		t.Error("менеджер без полного экрана, а SetFullscreenOn вернул true")
 	}
 	log.wait(t, 0)
@@ -234,11 +236,11 @@ func TestX11Monitors_Keys(t *testing.T) {
 		rrMonitorRecord(500, false, 1920, 0, 1280, 1024, 0),
 		rrMonitorRecord(501, true, 0, 0, 1920, 1080, 0),
 	))
-	if len(got) != 2 || got[0].id != 1 || got[1].id != 2 {
+	if len(got) != 2 || native.MonitorKey(got[0]) != 1 || native.MonitorKey(got[1]) != 2 {
 		t.Fatalf("ключи %+v, ждал 1 и 2 в порядке ответа сервера", got)
 	}
 	sorted := sortMonitors(got)
-	if !sorted[0].Primary || sorted[0].id != 2 {
+	if !sorted[0].Primary || native.MonitorKey(sorted[0]) != 2 {
 		t.Errorf("основной монитор после сортировки потерял ключ: %+v", sorted[0])
 	}
 }

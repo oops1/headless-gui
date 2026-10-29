@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -154,7 +155,7 @@ func TestWaylandTouch_PopupSurface(t *testing.T) {
 	tid := c.w.touch.id.Load()
 
 	var moves, clicks int
-	c.w.SetChildPopupHandlers(childPopupHandlers{
+	c.w.SetChildPopupHandlers(native.ChildPopupHandlers{
 		Move:   func(id uintptr, x, y int) { moves++ },
 		Button: func(id uintptr, x, y, b int, pressed bool) { clicks++ },
 	})

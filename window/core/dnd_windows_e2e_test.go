@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Сквозная проверка с НАСТОЯЩИМ OLE: два окна в одном процессе, настоящее
@@ -72,7 +74,7 @@ func dndE2EDrag(t *testing.T, withImage bool) {
 		mu       sync.Mutex
 		log      []string
 		dropped  [][]string
-		finished = make(chan DragEffect, 1)
+		finished = make(chan native.DragEffect, 1)
 		ready    = make(chan struct{})
 		loopDone = make(chan struct{})
 		a, b     *Win32Window
@@ -137,16 +139,16 @@ func dndE2EDrag(t *testing.T, withImage bool) {
 	time.Sleep(150 * time.Millisecond)
 	sendMouse(miLeftDown)
 	time.Sleep(100 * time.Millisecond)
-	done := func(e DragEffect) { finished <- e }
+	done := func(e native.DragEffect) { finished <- e }
 	began := false
 	if withImage {
 		img := image.NewRGBA(image.Rect(0, 0, 96, 64))
 		for i := 0; i < len(img.Pix); i += 4 {
 			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = 220, 90, 30, 200
 		}
-		began = a.BeginDragFilesImage(files, DragEffectCopy|DragEffectMove, img, image.Pt(8, 8), done)
+		began = a.BeginDragFilesImage(files, native.DragEffectCopy|native.DragEffectMove, img, image.Pt(8, 8), done)
 	} else {
-		began = a.BeginDragFiles(files, DragEffectCopy|DragEffectMove, done)
+		began = a.BeginDragFiles(files, native.DragEffectCopy|native.DragEffectMove, done)
 	}
 	if !began {
 		sendMouse(miLeftUp)
@@ -171,7 +173,7 @@ func dndE2EDrag(t *testing.T, withImage bool) {
 	}
 	select {
 	case eff := <-finished:
-		if eff != DragEffectCopy {
+		if eff != native.DragEffectCopy {
 			t.Errorf("итоговое действие %v, ждал copy", eff)
 		}
 	case <-time.After(5 * time.Second):

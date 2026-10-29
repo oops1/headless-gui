@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -316,7 +317,7 @@ func init() { newA11yBridge = func(win *Window) a11yBridge { return &atspiBridge
 // atspiBridge — состояние моста для одного окна.
 type atspiBridge struct {
 	win  *Window
-	conn *dbusConn
+	conn *dbus.Conn
 
 	mu      sync.RWMutex
 	view    *a11yView
@@ -342,17 +343,17 @@ func (b *atspiBridge) start() error {
 	if err != nil {
 		return err
 	}
-	conn, err := dbusDial(addr)
+	conn, err := dbus.Dial(addr)
 	if err != nil {
 		return fmt.Errorf("a11y: шина доступности: %w", err)
 	}
 	b.conn = conn
-	b.appName = conn.unique
-	conn.setCallHandler(b.handleCall)
+	b.appName = conn.Unique
+	conn.SetCallHandler(b.handleCall)
 
 	// Регистрация в реестре: наш корень «вставляется» в рабочий стол.
-	reply, err := conn.call(atspiRegistryName, atspiRootPath, ifaceSocket, "Embed",
-		"(so)", []any{dbusStruct{Fields: []any{b.appName, dbusObjectPath(atspiRootPath)}}})
+	reply, err := conn.Call(atspiRegistryName, atspiRootPath, ifaceSocket, "Embed",
+		"(so)", []any{dbus.Struct{Fields: []any{b.appName, dbus.ObjectPath(atspiRootPath)}}})
 	if err != nil {
 		conn.Close()
 		b.conn = nil
@@ -380,8 +381,8 @@ func (b *atspiBridge) stop() {
 		if b.conn != nil {
 			// Вежливо выписываемся из реестра — иначе Orca будет держать
 			// «мёртвое» приложение до таймаута.
-			_ = b.conn.callNoReply(atspiRegistryName, atspiRootPath, ifaceSocket, "Unembed",
-				"(so)", []any{dbusStruct{Fields: []any{b.appName, dbusObjectPath(atspiRootPath)}}})
+			_ = b.conn.CallNoReply(atspiRegistryName, atspiRootPath, ifaceSocket, "Unembed",
+				"(so)", []any{dbus.Struct{Fields: []any{b.appName, dbus.ObjectPath(atspiRootPath)}}})
 			b.conn.Close()
 		}
 	})
@@ -402,17 +403,17 @@ func (b *atspiBridge) enabled() bool {
 	if b.win.a11yForce != nil {
 		return *b.win.a11yForce
 	}
-	c, err := dbusSession()
+	c, err := dbus.Session()
 	if err != nil {
 		return false
 	}
 	get := func(prop string) bool {
-		reply, err := c.call("org.a11y.Bus", "/org/a11y/bus", ifaceProps, "Get", "ss",
+		reply, err := c.Call("org.a11y.Bus", "/org/a11y/bus", ifaceProps, "Get", "ss",
 			[]any{"org.a11y.Status", prop})
 		if err != nil || len(reply.Body) == 0 {
 			return false
 		}
-		v, ok := reply.Body[0].(dbusVariant)
+		v, ok := reply.Body[0].(dbus.Variant)
 		if !ok {
 			return false
 		}
@@ -424,11 +425,11 @@ func (b *atspiBridge) enabled() bool {
 
 // atspiBusAddress спрашивает у сессионной шины адрес шины доступности.
 func atspiBusAddress() (string, error) {
-	c, err := dbusSession()
+	c, err := dbus.Session()
 	if err != nil {
 		return "", err
 	}
-	reply, err := c.call("org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress", "", nil)
+	reply, err := c.Call("org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress", "", nil)
 	if err != nil {
 		return "", fmt.Errorf("a11y: org.a11y.Bus.GetAddress: %w", err)
 	}
@@ -510,11 +511,11 @@ func (b *atspiBridge) eventLoop() {
 // "siiv(so)": подробность, два целочисленных параметра, произвольные данные и
 // ссылка на ПРИЛОЖЕНИЕ-отправитель. Путь сигнала — объект, с которым событие
 // произошло; интерфейс — org.a11y.atspi.Event.<Категория>.
-func (b *atspiBridge) atspiEvent(id int32, iface, member, detail string, d1, d2 int32, data dbusVariant) {
+func (b *atspiBridge) atspiEvent(id int32, iface, member, detail string, d1, d2 int32, data dbus.Variant) {
 	if b.conn == nil {
 		return
 	}
-	_ = b.conn.emit(atspiPath(id), iface, member, "siiv(so)",
+	_ = b.conn.Emit(atspiPath(id), iface, member, "siiv(so)",
 		[]any{detail, d1, d2, data, b.ref(atspiAppID)})
 }
 
@@ -531,7 +532,7 @@ func (b *atspiBridge) emitChanges(ch a11yChanges) {
 	if prevV != nil {
 		prev = prevV.Snap
 	}
-	emptyStr := dbusVariant{Sig: "s", Val: ""}
+	emptyStr := dbus.Variant{Sig: "s", Val: ""}
 
 	if ch.FocusLost >= 0 && prevV != nil {
 		b.atspiEvent(prevV.id(ch.FocusLost), ifaceEventObject, "StateChanged", "focused", 0, 0, emptyStr)
@@ -553,7 +554,7 @@ func (b *atspiBridge) emitChanges(ch a11yChanges) {
 		}
 		id := curV.id(idx)
 		b.atspiEvent(id, ifaceEventObject, "PropertyChange", "accessible-name", 0, 0,
-			dbusVariant{Sig: "s", Val: b.nameOf(id, n)})
+			dbus.Variant{Sig: "s", Val: b.nameOf(id, n)})
 	}
 	for _, idx := range ch.ValueChanged {
 		n := cur.node(idx)
@@ -562,7 +563,7 @@ func (b *atspiBridge) emitChanges(ch a11yChanges) {
 		}
 		val, _, _, _ := atspiValueOf(n)
 		b.atspiEvent(curV.id(idx), ifaceEventObject, "PropertyChange", "accessible-value", 0, 0,
-			dbusVariant{Sig: "d", Val: val})
+			dbus.Variant{Sig: "d", Val: val})
 	}
 	if prev == nil {
 		return
@@ -594,7 +595,7 @@ func (b *atspiBridge) emitChanges(ch a11yChanges) {
 // устойчивым идентификаторам «исчез» означает именно исчез, а не «сдвинулся
 // индекс», поэтому кэш клиента не разъезжается с реальностью.
 func (b *atspiBridge) emitStructural(prevV, curV *a11yView) {
-	emptyStr := dbusVariant{Sig: "s", Val: ""}
+	emptyStr := dbus.Variant{Sig: "s", Val: ""}
 	if prevV != nil {
 		for id, idx := range prevV.Index {
 			if _, alive := curV.Index[id]; alive {
@@ -607,12 +608,12 @@ func (b *atspiBridge) emitStructural(prevV, curV *a11yView) {
 			}
 			b.atspiEvent(id, ifaceEventObject, "StateChanged", "defunct", 1, 0, emptyStr)
 			if b.conn != nil {
-				_ = b.conn.emit(atspiCachePath, ifaceCache, "RemoveAccessible", "(so)",
+				_ = b.conn.Emit(atspiCachePath, ifaceCache, "RemoveAccessible", "(so)",
 					[]any{b.ref(id)})
 			}
 			if parent >= 0 {
 				b.atspiEvent(parent, ifaceEventObject, "ChildrenChanged", "remove", 0, 0,
-					dbusVariant{Sig: "(so)", Val: b.ref(id)})
+					dbus.Variant{Sig: "(so)", Val: b.ref(id)})
 			}
 		}
 	}
@@ -623,7 +624,7 @@ func (b *atspiBridge) emitStructural(prevV, curV *a11yView) {
 			}
 		}
 		if b.conn != nil {
-			_ = b.conn.emit(atspiCachePath, ifaceCache, "AddAccessible", atspiCacheItemSig,
+			_ = b.conn.Emit(atspiCachePath, ifaceCache, "AddAccessible", atspiCacheItemSig,
 				[]any{b.cacheItem(curV, id)})
 		}
 		node := curV.Snap.node(idx)
@@ -635,7 +636,7 @@ func (b *atspiBridge) emitStructural(prevV, curV *a11yView) {
 			parent = atspiAppID
 		}
 		b.atspiEvent(parent, ifaceEventObject, "ChildrenChanged", "add", node.Index, 0,
-			dbusVariant{Sig: "(so)", Val: b.ref(id)})
+			dbus.Variant{Sig: "(so)", Val: b.ref(id)})
 	}
 }
 
@@ -699,13 +700,13 @@ func atspiParsePath(path string) (int32, bool) {
 }
 
 // ref собирает ссылку AT-SPI (имя на шине, путь объекта).
-func (b *atspiBridge) ref(id int32) dbusStruct {
-	return dbusStruct{Fields: []any{b.appName, dbusObjectPath(atspiPath(id))}}
+func (b *atspiBridge) ref(id int32) dbus.Struct {
+	return dbus.Struct{Fields: []any{b.appName, dbus.ObjectPath(atspiPath(id))}}
 }
 
 // nullRef — «пустая» ссылка (нет родителя/объекта).
-func (b *atspiBridge) nullRef() dbusStruct {
-	return dbusStruct{Fields: []any{b.appName, dbusObjectPath(atspiNullPath)}}
+func (b *atspiBridge) nullRef() dbus.Struct {
+	return dbus.Struct{Fields: []any{b.appName, dbus.ObjectPath(atspiNullPath)}}
 }
 
 // ─── Геометрия ───────────────────────────────────────────────────────────────
@@ -759,7 +760,7 @@ func (b *atspiBridge) appNode(v *a11yView) *a11yNode {
 }
 
 // handleCall — точка входа всех вызовов от клиентов доступности.
-func (b *atspiBridge) handleCall(msg *dbusMessage) *dbusReply {
+func (b *atspiBridge) handleCall(msg *dbus.Message) *dbus.Reply {
 	v := b.current()
 	if msg.Path == atspiCachePath {
 		return b.handleCache(msg, v)
@@ -774,14 +775,14 @@ func (b *atspiBridge) handleCall(msg *dbusMessage) *dbusReply {
 	if id == atspiAppID {
 		node = b.appNode(v)
 	} else if node = v.node(id); node == nil {
-		return &dbusReply{ErrName: "org.freedesktop.DBus.Error.UnknownObject",
+		return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.UnknownObject",
 			ErrMsg: "нет объекта " + msg.Path}
 	}
 
 	switch msg.Interface {
 	case ifaceIntrospect:
 		if msg.Member == "Introspect" {
-			return &dbusReply{Sig: "s", Body: []any{atspiIntrospectXML(id == atspiAppID)}}
+			return &dbus.Reply{Sig: "s", Body: []any{atspiIntrospectXML(id == atspiAppID)}}
 		}
 	case ifaceProps:
 		return b.handleProps(msg, v, id, node)
@@ -804,25 +805,25 @@ func (b *atspiBridge) handleCall(msg *dbusMessage) *dbusReply {
 // handleCache — org.a11y.atspi.Cache: клиент забирает ВСЁ дерево одним
 // вызовом вместо сотен точечных запросов. Именно так libatspi (а значит Orca)
 // наполняет свой кэш при подключении к приложению.
-func (b *atspiBridge) handleCache(msg *dbusMessage, v *a11yView) *dbusReply {
+func (b *atspiBridge) handleCache(msg *dbus.Message, v *a11yView) *dbus.Reply {
 	switch {
 	case msg.Interface == ifaceIntrospect && msg.Member == "Introspect":
-		return &dbusReply{Sig: "s", Body: []any{atspiCacheXML}}
+		return &dbus.Reply{Sig: "s", Body: []any{atspiCacheXML}}
 	case msg.Interface == ifaceCache && msg.Member == "GetItems":
 		items := make([]any, 0, len(v.Snap.Nodes)+1)
 		items = append(items, b.cacheItem(v, atspiAppID))
 		for i := range v.Snap.Nodes {
 			items = append(items, b.cacheItem(v, v.id(int32(i))))
 		}
-		return &dbusReply{Sig: atspiCacheItemsSig,
-			Body: []any{dbusArray{ElemSig: atspiCacheItemSig, Items: items}}}
+		return &dbus.Reply{Sig: atspiCacheItemsSig,
+			Body: []any{dbus.Array{ElemSig: atspiCacheItemSig, Items: items}}}
 	}
 	return nil
 }
 
 // cacheItem собирает запись кэша: ссылка, приложение, родитель, индекс в
 // родителе, число детей, интерфейсы, имя, роль, описание, состояния.
-func (b *atspiBridge) cacheItem(v *a11yView, id int32) dbusStruct {
+func (b *atspiBridge) cacheItem(v *a11yView, id int32) dbus.Struct {
 	var node *a11yNode
 	if id == atspiAppID {
 		node = b.appNode(v)
@@ -830,7 +831,7 @@ func (b *atspiBridge) cacheItem(v *a11yView, id int32) dbusStruct {
 		node = v.node(id)
 	}
 	if node == nil {
-		return dbusStruct{}
+		return dbus.Struct{}
 	}
 	index := node.Index
 	switch id {
@@ -840,7 +841,7 @@ func (b *atspiBridge) cacheItem(v *a11yView, id int32) dbusStruct {
 		index = 0 // окно — первый ребёнок приложения
 	}
 	focused := id != atspiAppID && v.id(v.Snap.Focus) == id
-	return dbusStruct{Fields: []any{
+	return dbus.Struct{Fields: []any{
 		b.ref(id),
 		b.ref(atspiAppID),
 		b.parentRef(id, node),
@@ -855,82 +856,82 @@ func (b *atspiBridge) cacheItem(v *a11yView, id int32) dbusStruct {
 }
 
 // handleProps — org.freedesktop.DBus.Properties для наших интерфейсов.
-func (b *atspiBridge) handleProps(msg *dbusMessage, v *a11yView, id int32, node *a11yNode) *dbusReply {
-	prop := func(iface, name string) (dbusVariant, bool) {
+func (b *atspiBridge) handleProps(msg *dbus.Message, v *a11yView, id int32, node *a11yNode) *dbus.Reply {
+	prop := func(iface, name string) (dbus.Variant, bool) {
 		switch iface {
 		case ifaceAccessible:
 			switch name {
 			case "Name":
-				return dbusVariant{Sig: "s", Val: b.nameOf(id, node)}, true
+				return dbus.Variant{Sig: "s", Val: b.nameOf(id, node)}, true
 			case "Description":
-				return dbusVariant{Sig: "s", Val: node.Info.Description}, true
+				return dbus.Variant{Sig: "s", Val: node.Info.Description}, true
 			case "Parent":
-				return dbusVariant{Sig: "(so)", Val: b.parentRef(id, node)}, true
+				return dbus.Variant{Sig: "(so)", Val: b.parentRef(id, node)}, true
 			case "ChildCount":
-				return dbusVariant{Sig: "i", Val: int32(len(node.Children))}, true
+				return dbus.Variant{Sig: "i", Val: int32(len(node.Children))}, true
 			case "Locale":
-				return dbusVariant{Sig: "s", Val: atspiLocale()}, true
+				return dbus.Variant{Sig: "s", Val: atspiLocale()}, true
 			case "AccessibleId":
 				if id == atspiAppID {
-					return dbusVariant{Sig: "s", Val: "root"}, true
+					return dbus.Variant{Sig: "s", Val: "root"}, true
 				}
-				return dbusVariant{Sig: "s", Val: strconv.Itoa(int(id))}, true
+				return dbus.Variant{Sig: "s", Val: strconv.Itoa(int(id))}, true
 			case "HelpText":
-				return dbusVariant{Sig: "s", Val: node.Info.Description}, true
+				return dbus.Variant{Sig: "s", Val: node.Info.Description}, true
 			}
 		case ifaceApplication:
 			switch name {
 			case "ToolkitName":
-				return dbusVariant{Sig: "s", Val: "headless-gui"}, true
+				return dbus.Variant{Sig: "s", Val: "headless-gui"}, true
 			case "Version":
-				return dbusVariant{Sig: "s", Val: "3"}, true
+				return dbus.Variant{Sig: "s", Val: "3"}, true
 			case "AtspiVersion":
-				return dbusVariant{Sig: "s", Val: "2.1"}, true
+				return dbus.Variant{Sig: "s", Val: "2.1"}, true
 			case "Id":
-				return dbusVariant{Sig: "i", Val: b.appIDValue()}, true
+				return dbus.Variant{Sig: "i", Val: b.appIDValue()}, true
 			}
 		case ifaceValue:
 			cur, min, max, step := atspiValueOf(node)
 			switch name {
 			case "CurrentValue":
-				return dbusVariant{Sig: "d", Val: cur}, true
+				return dbus.Variant{Sig: "d", Val: cur}, true
 			case "MinimumValue":
-				return dbusVariant{Sig: "d", Val: min}, true
+				return dbus.Variant{Sig: "d", Val: min}, true
 			case "MaximumValue":
-				return dbusVariant{Sig: "d", Val: max}, true
+				return dbus.Variant{Sig: "d", Val: max}, true
 			case "MinimumIncrement":
-				return dbusVariant{Sig: "d", Val: step}, true
+				return dbus.Variant{Sig: "d", Val: step}, true
 			}
 		case ifaceText:
 			text, caret, _, _ := atspiTextOf(node)
 			switch name {
 			case "CharacterCount":
-				return dbusVariant{Sig: "i", Val: int32(widget.AccessRuneLen(text))}, true
+				return dbus.Variant{Sig: "i", Val: int32(widget.AccessRuneLen(text))}, true
 			case "CaretOffset":
-				return dbusVariant{Sig: "i", Val: int32(caret)}, true
+				return dbus.Variant{Sig: "i", Val: int32(caret)}, true
 			}
 		case ifaceAction:
 			// Свежий libatspi берёт число действий СВОЙСТВОМ NActions, а не
 			// методом GetNActions (без этой ветки get_n_actions() возвращал 0,
 			// хотя сами действия работали).
 			if name == "NActions" {
-				return dbusVariant{Sig: "i", Val: int32(len(atspiActions(node)))}, true
+				return dbus.Variant{Sig: "i", Val: int32(len(atspiActions(node)))}, true
 			}
 		}
-		return dbusVariant{}, false
+		return dbus.Variant{}, false
 	}
 
 	switch msg.Member {
 	case "Get":
 		if len(msg.Body) < 2 {
-			return &dbusReply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "Get(iface, name)"}
+			return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "Get(iface, name)"}
 		}
 		iface, _ := msg.Body[0].(string)
 		name, _ := msg.Body[1].(string)
 		if val, ok := prop(iface, name); ok {
-			return &dbusReply{Sig: "v", Body: []any{val}}
+			return &dbus.Reply{Sig: "v", Body: []any{val}}
 		}
-		return &dbusReply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs",
+		return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs",
 			ErrMsg: "нет свойства " + iface + "." + name}
 	case "GetAll":
 		iface, _ := msg.Body[0].(string)
@@ -945,20 +946,20 @@ func (b *atspiBridge) handleProps(msg *dbusMessage, v *a11yView, id int32, node 
 		case ifaceText:
 			names = []string{"CharacterCount", "CaretOffset"}
 		}
-		all := map[string]dbusVariant{}
+		all := map[string]dbus.Variant{}
 		for _, n := range names {
 			if val, ok := prop(iface, n); ok {
 				all[n] = val
 			}
 		}
-		return &dbusReply{Sig: "a{sv}", Body: []any{all}}
+		return &dbus.Reply{Sig: "a{sv}", Body: []any{all}}
 	case "Set":
 		// Реестр присваивает приложению номер: Application.Id — единственное
 		// свойство, которое нам действительно пишут.
 		if len(msg.Body) >= 3 {
 			if iface, _ := msg.Body[0].(string); iface == ifaceApplication {
 				if name, _ := msg.Body[1].(string); name == "Id" {
-					if v, ok := msg.Body[2].(dbusVariant); ok {
+					if v, ok := msg.Body[2].(dbus.Variant); ok {
 						if n, ok := v.Val.(int32); ok {
 							b.mu.Lock()
 							b.appID = n
@@ -968,7 +969,7 @@ func (b *atspiBridge) handleProps(msg *dbusMessage, v *a11yView, id int32, node 
 				}
 			}
 		}
-		return &dbusReply{}
+		return &dbus.Reply{}
 	}
 	_ = v
 	return nil
@@ -984,51 +985,51 @@ func (b *atspiBridge) childID(v *a11yView, id int32, child int32) int32 {
 }
 
 // handleAccessible — org.a11y.atspi.Accessible.
-func (b *atspiBridge) handleAccessible(msg *dbusMessage, v *a11yView, id int32, node *a11yNode) *dbusReply {
+func (b *atspiBridge) handleAccessible(msg *dbus.Message, v *a11yView, id int32, node *a11yNode) *dbus.Reply {
 	snap := v.Snap
 	switch msg.Member {
 	case "GetChildAtIndex":
 		idx, _ := msg.Body[0].(int32)
 		if idx < 0 || int(idx) >= len(node.Children) {
-			return &dbusReply{Sig: "(so)", Body: []any{b.nullRef()}}
+			return &dbus.Reply{Sig: "(so)", Body: []any{b.nullRef()}}
 		}
-		return &dbusReply{Sig: "(so)", Body: []any{b.ref(b.childID(v, id, node.Children[idx]))}}
+		return &dbus.Reply{Sig: "(so)", Body: []any{b.ref(b.childID(v, id, node.Children[idx]))}}
 	case "GetChildren":
 		items := make([]any, 0, len(node.Children))
 		for _, c := range node.Children {
 			items = append(items, b.ref(b.childID(v, id, c)))
 		}
-		return &dbusReply{Sig: "a(so)", Body: []any{dbusArray{ElemSig: "(so)", Items: items}}}
+		return &dbus.Reply{Sig: "a(so)", Body: []any{dbus.Array{ElemSig: "(so)", Items: items}}}
 	case "GetIndexInParent":
 		if id == atspiAppID {
-			return &dbusReply{Sig: "i", Body: []any{int32(-1)}}
+			return &dbus.Reply{Sig: "i", Body: []any{int32(-1)}}
 		}
 		if id == a11yRootID {
-			return &dbusReply{Sig: "i", Body: []any{int32(0)}} // окно — первый ребёнок приложения
+			return &dbus.Reply{Sig: "i", Body: []any{int32(0)}} // окно — первый ребёнок приложения
 		}
-		return &dbusReply{Sig: "i", Body: []any{node.Index}}
+		return &dbus.Reply{Sig: "i", Body: []any{node.Index}}
 	case "GetRelationSet":
-		return &dbusReply{Sig: "a(ua(so))", Body: []any{dbusArray{ElemSig: "(ua(so))"}}}
+		return &dbus.Reply{Sig: "a(ua(so))", Body: []any{dbus.Array{ElemSig: "(ua(so))"}}}
 	case "GetRole":
-		return &dbusReply{Sig: "u", Body: []any{b.roleOf(id, node)}}
+		return &dbus.Reply{Sig: "u", Body: []any{b.roleOf(id, node)}}
 	case "GetRoleName", "GetLocalizedRoleName":
-		return &dbusReply{Sig: "s", Body: []any{atspiRoleName(b.roleOf(id, node))}}
+		return &dbus.Reply{Sig: "s", Body: []any{atspiRoleName(b.roleOf(id, node))}}
 	case "GetState":
 		states := atspiStateSet(node.Info, snap.Focus == id)
-		return &dbusReply{Sig: "au", Body: []any{states}}
+		return &dbus.Reply{Sig: "au", Body: []any{states}}
 	case "GetAttributes":
 		attrs := map[string]string{"toolkit": "headless-gui"}
-		return &dbusReply{Sig: "a{ss}", Body: []any{attrs}}
+		return &dbus.Reply{Sig: "a{ss}", Body: []any{attrs}}
 	case "GetApplication":
-		return &dbusReply{Sig: "(so)", Body: []any{b.ref(atspiAppID)}}
+		return &dbus.Reply{Sig: "(so)", Body: []any{b.ref(atspiAppID)}}
 	case "GetInterfaces":
-		return &dbusReply{Sig: "as", Body: []any{b.interfacesOf(id, node)}}
+		return &dbus.Reply{Sig: "as", Body: []any{b.interfacesOf(id, node)}}
 	}
 	return nil
 }
 
 // handleComponent — org.a11y.atspi.Component (геометрия и попадание точкой).
-func (b *atspiBridge) handleComponent(msg *dbusMessage, v *a11yView, id int32, node *a11yNode) *dbusReply {
+func (b *atspiBridge) handleComponent(msg *dbus.Message, v *a11yView, id int32, node *a11yNode) *dbus.Reply {
 	arg := func(i int) int32 {
 		if i < len(msg.Body) {
 			if v, ok := msg.Body[i].(int32); ok {
@@ -1049,66 +1050,66 @@ func (b *atspiBridge) handleComponent(msg *dbusMessage, v *a11yView, id int32, n
 	switch msg.Member {
 	case "GetExtents":
 		x, y, w, h := b.extents(node.Info.Bounds, coordAt(0))
-		return &dbusReply{Sig: "(iiii)", Body: []any{dbusStruct{Fields: []any{x, y, w, h}}}}
+		return &dbus.Reply{Sig: "(iiii)", Body: []any{dbus.Struct{Fields: []any{x, y, w, h}}}}
 	case "GetPosition":
 		x, y, _, _ := b.extents(node.Info.Bounds, coordAt(0))
-		return &dbusReply{Sig: "ii", Body: []any{x, y}}
+		return &dbus.Reply{Sig: "ii", Body: []any{x, y}}
 	case "GetSize":
 		_, _, w, h := b.extents(node.Info.Bounds, atspiCoordWindow)
-		return &dbusReply{Sig: "ii", Body: []any{w, h}}
+		return &dbus.Reply{Sig: "ii", Body: []any{w, h}}
 	case "Contains":
 		lx, ly := b.pointToLogical(arg(0), arg(1), coordAt(2))
-		return &dbusReply{Sig: "b", Body: []any{image.Pt(lx, ly).In(a11yVisibleRect(node.Info))}}
+		return &dbus.Reply{Sig: "b", Body: []any{image.Pt(lx, ly).In(a11yVisibleRect(node.Info))}}
 	case "GetAccessibleAtPoint":
 		lx, ly := b.pointToLogical(arg(0), arg(1), coordAt(2))
 		hit := v.Snap.hitTest(lx, ly)
 		if hit < 0 {
-			return &dbusReply{Sig: "(so)", Body: []any{b.nullRef()}}
+			return &dbus.Reply{Sig: "(so)", Body: []any{b.nullRef()}}
 		}
-		return &dbusReply{Sig: "(so)", Body: []any{b.ref(v.id(hit))}}
+		return &dbus.Reply{Sig: "(so)", Body: []any{b.ref(v.id(hit))}}
 	case "GetLayer":
 		// Открытое меню лежит в слое POPUP, прочее — в слое WIDGET.
 		if a11yHasState(node.Info.States, widget.StatePopup) {
-			return &dbusReply{Sig: "u", Body: []any{uint32(atspiLayerPopup)}}
+			return &dbus.Reply{Sig: "u", Body: []any{uint32(atspiLayerPopup)}}
 		}
-		return &dbusReply{Sig: "u", Body: []any{uint32(atspiLayerWidget)}}
+		return &dbus.Reply{Sig: "u", Body: []any{uint32(atspiLayerWidget)}}
 	case "GetMDIZOrder":
-		return &dbusReply{Sig: "n", Body: []any{int16(0)}}
+		return &dbus.Reply{Sig: "n", Body: []any{int16(0)}}
 	case "GetAlpha":
-		return &dbusReply{Sig: "d", Body: []any{1.0}}
+		return &dbus.Reply{Sig: "d", Body: []any{1.0}}
 	case "GrabFocus":
 		// Скринридер переводит фокус ввода на элемент (Orca: перемещение по
 		// дереву с «follow focus»). node.Widget == nil у синтетического узла
 		// приложения — там фокусировать нечего, честно отвечаем false.
 		// Узел из AccessChildren получает фокус сам (widget.AccessActionHandler
 		// владельца), а не его владелец целиком.
-		return &dbusReply{Sig: "b", Body: []any{b.win.accessibilityNodeAction(node, widget.AccessFocus)}}
+		return &dbus.Reply{Sig: "b", Body: []any{b.win.accessibilityNodeAction(node, widget.AccessFocus)}}
 	case "ScrollTo", "ScrollToPoint", "SetExtents", "SetPosition", "SetSize":
-		return &dbusReply{Sig: "b", Body: []any{false}}
+		return &dbus.Reply{Sig: "b", Body: []any{false}}
 	}
 	return nil
 }
 
 // handleApplication — org.a11y.atspi.Application.
-func (b *atspiBridge) handleApplication(msg *dbusMessage) *dbusReply {
+func (b *atspiBridge) handleApplication(msg *dbus.Message) *dbus.Reply {
 	switch msg.Member {
 	case "GetLocale":
-		return &dbusReply{Sig: "s", Body: []any{atspiLocale()}}
+		return &dbus.Reply{Sig: "s", Body: []any{atspiLocale()}}
 	case "RegisterEventListener", "DeregisterEventListener":
 		// Устаревшие методы: события мы шлём безусловно.
-		return &dbusReply{}
+		return &dbus.Reply{}
 	}
 	return nil
 }
 
 // handleValue — org.a11y.atspi.Value (слайдер, прогресс, спиннер).
-func (b *atspiBridge) handleValue(msg *dbusMessage, node *a11yNode) *dbusReply {
+func (b *atspiBridge) handleValue(msg *dbus.Message, node *a11yNode) *dbus.Reply {
 	switch msg.Member {
 	case "SetCurrentValue":
-		return &dbusReply{Sig: "b", Body: []any{false}}
+		return &dbus.Reply{Sig: "b", Body: []any{false}}
 	case "GetCurrentValue":
 		cur, _, _, _ := atspiValueOf(node)
-		return &dbusReply{Sig: "d", Body: []any{cur}}
+		return &dbus.Reply{Sig: "d", Body: []any{cur}}
 	}
 	return nil
 }
@@ -1132,7 +1133,7 @@ func atspiActions(node *a11yNode) []string {
 
 // handleAction — org.a11y.atspi.Action: «click» у кнопок, флажков и пунктов
 // меню, «expand or contract» у пунктов с подменю.
-func (b *atspiBridge) handleAction(msg *dbusMessage, node *a11yNode) *dbusReply {
+func (b *atspiBridge) handleAction(msg *dbus.Message, node *a11yNode) *dbus.Reply {
 	acts := atspiActions(node)
 	name := func() string {
 		if i := int(atspiActionIndex(msg)); i >= 0 && i < len(acts) {
@@ -1142,13 +1143,13 @@ func (b *atspiBridge) handleAction(msg *dbusMessage, node *a11yNode) *dbusReply 
 	}
 	switch msg.Member {
 	case "GetNActions":
-		return &dbusReply{Sig: "i", Body: []any{int32(len(acts))}}
+		return &dbus.Reply{Sig: "i", Body: []any{int32(len(acts))}}
 	case "GetName", "GetLocalizedName":
-		return &dbusReply{Sig: "s", Body: []any{name()}}
+		return &dbus.Reply{Sig: "s", Body: []any{name()}}
 	case "GetDescription":
-		return &dbusReply{Sig: "s", Body: []any{""}}
+		return &dbus.Reply{Sig: "s", Body: []any{""}}
 	case "GetKeyBinding":
-		return &dbusReply{Sig: "s", Body: []any{""}}
+		return &dbus.Reply{Sig: "s", Body: []any{""}}
 	case "DoAction":
 		// Нажатие идёт синтетическим кликом через штатный путь ввода
 		// (engine.ActivateAccessible), поэтому работает для любого
@@ -1157,24 +1158,24 @@ func (b *atspiBridge) handleAction(msg *dbusMessage, node *a11yNode) *dbusReply 
 		// получает его сам — а не владелец кликом в центр.
 		switch int(atspiActionIndex(msg)) {
 		case atspiActionClick:
-			return &dbusReply{Sig: "b", Body: []any{b.win.accessibilityNodeAction(node, widget.AccessInvoke)}}
+			return &dbus.Reply{Sig: "b", Body: []any{b.win.accessibilityNodeAction(node, widget.AccessInvoke)}}
 		case atspiActionExpand:
 			if len(acts) > atspiActionExpand {
 				kind := widget.AccessExpand
 				if a11yHasState(node.Info.States, widget.StateExpanded) {
 					kind = widget.AccessCollapse
 				}
-				return &dbusReply{Sig: "b", Body: []any{b.win.accessibilityNodeAction(node, kind)}}
+				return &dbus.Reply{Sig: "b", Body: []any{b.win.accessibilityNodeAction(node, kind)}}
 			}
 		}
-		return &dbusReply{Sig: "b", Body: []any{false}}
+		return &dbus.Reply{Sig: "b", Body: []any{false}}
 	}
 	return nil
 }
 
 // atspiActionIndex достаёт номер действия из тела вызова Action (первый
 // аргумент типа i). Отсутствует или другого типа — считаем 0 («click»).
-func atspiActionIndex(msg *dbusMessage) int32 {
+func atspiActionIndex(msg *dbus.Message) int32 {
 	if len(msg.Body) > 0 {
 		if v, ok := msg.Body[0].(int32); ok {
 			return v
@@ -1187,10 +1188,10 @@ func atspiActionIndex(msg *dbusMessage) int32 {
 
 // parentRef — ссылка на родителя: у приложения это рабочий стол реестра,
 // у окна — приложение, у прочих — узел-родитель снимка.
-func (b *atspiBridge) parentRef(id int32, node *a11yNode) dbusStruct {
+func (b *atspiBridge) parentRef(id int32, node *a11yNode) dbus.Struct {
 	switch {
 	case id == atspiAppID:
-		return dbusStruct{Fields: []any{atspiRegistryName, dbusObjectPath(atspiRootPath)}}
+		return dbus.Struct{Fields: []any{atspiRegistryName, dbus.ObjectPath(atspiRootPath)}}
 	case id == a11yRootID || node.Parent < 0:
 		return b.ref(atspiAppID)
 	}
@@ -1382,7 +1383,7 @@ func atspiTextOf(node *a11yNode) (text string, caret, selFrom, selTo int) {
 }
 
 // handleText — org.a11y.atspi.Text.
-func (b *atspiBridge) handleText(msg *dbusMessage, node *a11yNode) *dbusReply {
+func (b *atspiBridge) handleText(msg *dbus.Message, node *a11yNode) *dbus.Reply {
 	text, caret, selFrom, selTo := atspiTextOf(node)
 	n := widget.AccessRuneLen(text)
 
@@ -1392,58 +1393,58 @@ func (b *atspiBridge) handleText(msg *dbusMessage, node *a11yNode) *dbusReply {
 		if to < 0 {
 			to = int32(n) // -1 означает «до конца», так его шлёт libatspi
 		}
-		return &dbusReply{Sig: "s", Body: []any{widget.AccessSubstring(text, int(from), int(to))}}
+		return &dbus.Reply{Sig: "s", Body: []any{widget.AccessSubstring(text, int(from), int(to))}}
 
 	case "GetCharacterCount":
-		return &dbusReply{Sig: "i", Body: []any{int32(n)}}
+		return &dbus.Reply{Sig: "i", Body: []any{int32(n)}}
 
 	case "GetCaretOffset":
-		return &dbusReply{Sig: "i", Body: []any{int32(caret)}}
+		return &dbus.Reply{Sig: "i", Body: []any{int32(caret)}}
 
 	case "SetCaretOffset":
-		return &dbusReply{Sig: "b", Body: []any{b.setCaret(node, int(atspiIntArg(msg, 0)))}}
+		return &dbus.Reply{Sig: "b", Body: []any{b.setCaret(node, int(atspiIntArg(msg, 0)))}}
 
 	case "GetStringAtOffset":
 		s, from, to := a11yTextSlice(text, int(atspiIntArg(msg, 0)),
 			a11yGranularity(atspiUintArg(msg, 1)))
-		return &dbusReply{Sig: "sii", Body: []any{s, int32(from), int32(to)}}
+		return &dbus.Reply{Sig: "sii", Body: []any{s, int32(from), int32(to)}}
 
 	case "GetTextAtOffset":
 		// Старый вид запроса: вид границы вместо зернистости.
 		s, from, to := a11yTextSlice(text, int(atspiIntArg(msg, 0)),
 			a11yTextBoundaryToGran(atspiUintArg(msg, 1)))
-		return &dbusReply{Sig: "sii", Body: []any{s, int32(from), int32(to)}}
+		return &dbus.Reply{Sig: "sii", Body: []any{s, int32(from), int32(to)}}
 
 	case "GetCharacterAtOffset":
 		rs := []rune(text)
 		off := int(atspiIntArg(msg, 0))
 		if off < 0 || off >= len(rs) {
-			return &dbusReply{Sig: "i", Body: []any{int32(0)}}
+			return &dbus.Reply{Sig: "i", Body: []any{int32(0)}}
 		}
-		return &dbusReply{Sig: "i", Body: []any{int32(rs[off])}}
+		return &dbus.Reply{Sig: "i", Body: []any{int32(rs[off])}}
 
 	case "GetNSelections":
 		cnt := int32(0)
 		if selFrom != selTo {
 			cnt = 1
 		}
-		return &dbusReply{Sig: "i", Body: []any{cnt}}
+		return &dbus.Reply{Sig: "i", Body: []any{cnt}}
 
 	case "GetSelection":
 		if selFrom == selTo || atspiIntArg(msg, 0) != 0 {
-			return &dbusReply{Sig: "ii", Body: []any{int32(0), int32(0)}}
+			return &dbus.Reply{Sig: "ii", Body: []any{int32(0), int32(0)}}
 		}
-		return &dbusReply{Sig: "ii", Body: []any{int32(selFrom), int32(selTo)}}
+		return &dbus.Reply{Sig: "ii", Body: []any{int32(selFrom), int32(selTo)}}
 
 	case "GetAttributes", "GetAttributeRun":
 		// Оформления текста движок не публикует: весь текст одного вида.
 		// Возвращаем пустой набор на весь документ — так отвечает и GTK для
 		// неоформленного текста.
-		return &dbusReply{Sig: "a{ss}ii",
-			Body: []any{dbusArray{ElemSig: "{ss}"}, int32(0), int32(n)}}
+		return &dbus.Reply{Sig: "a{ss}ii",
+			Body: []any{dbus.Array{ElemSig: "{ss}"}, int32(0), int32(n)}}
 
 	case "GetDefaultAttributes", "GetDefaultAttributeSet":
-		return &dbusReply{Sig: "a{ss}", Body: []any{dbusArray{ElemSig: "{ss}"}}}
+		return &dbus.Reply{Sig: "a{ss}", Body: []any{dbus.Array{ElemSig: "{ss}"}}}
 	}
 	return nil
 }
@@ -1466,7 +1467,7 @@ func (b *atspiBridge) setCaret(node *a11yNode, pos int) bool {
 }
 
 // atspiIntArg — целый аргумент вызова по номеру (отсутствует — ноль).
-func atspiIntArg(msg *dbusMessage, i int) int32 {
+func atspiIntArg(msg *dbus.Message, i int) int32 {
 	if len(msg.Body) > i {
 		if v, ok := msg.Body[i].(int32); ok {
 			return v
@@ -1476,7 +1477,7 @@ func atspiIntArg(msg *dbusMessage, i int) int32 {
 }
 
 // atspiUintArg — беззнаковый аргумент вызова по номеру.
-func atspiUintArg(msg *dbusMessage, i int) uint32 {
+func atspiUintArg(msg *dbus.Message, i int) uint32 {
 	if len(msg.Body) > i {
 		switch v := msg.Body[i].(type) {
 		case uint32:

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
 )
 
 // Клавиши-переключатели на Wayland: состояние из wl_keyboard.modifiers, индексы
@@ -91,17 +93,17 @@ func TestWaylandLockKeys_DefaultMods(t *testing.T) {
 	c := lkNewWlWindow(t)
 	c.kbd(wlKeyboardEvEnter, lkWlEnterBody(11))
 	for _, tc := range []struct {
-		name                         string
-		depressed, latched, locked   uint32
-		want                         LockKeys
+		name                       string
+		depressed, latched, locked uint32
+		want                       keyboard.LockKeys
 	}{
 		{"ничего", 0, 0, 0, 0},
-		{"Caps", 0, 0, xkbModLock, CapsLock},
-		{"Num", 0, 0, 1 << xkbModIdxMod2, NumLock},
-		{"оба", 0, 0, xkbModLock | 1<<xkbModIdxMod2, CapsLock | NumLock},
+		{"Caps", 0, 0, xkbModLock, keyboard.CapsLock},
+		{"Num", 0, 0, 1 << keyboard.XkbModIdxMod2, keyboard.NumLock},
+		{"оба", 0, 0, xkbModLock | 1<<keyboard.XkbModIdxMod2, keyboard.CapsLock | keyboard.NumLock},
 		{"зажатый Shift и Ctrl — не переключатели", 1 | 4, 0, 0, 0},
-		{"зафиксирован только Mod4", 0, 0, 1 << xkbModIdxMod4, 0},
-		{"Caps вместе с нажатым Shift", 1, 0, xkbModLock, CapsLock},
+		{"зафиксирован только Mod4", 0, 0, 1 << keyboard.XkbModIdxMod4, 0},
+		{"Caps вместе с нажатым Shift", 1, 0, xkbModLock, keyboard.CapsLock},
 		{"Caps защёлкнут (latched), а не зафиксирован", 0, xkbModLock, 0, 0},
 	} {
 		c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(tc.depressed, tc.latched, tc.locked, 0))
@@ -121,16 +123,16 @@ func TestWaylandLockKeys_MasksFromKeymap(t *testing.T) {
 		"modifier_map Lock { <CAPS> };\nmodifier_map Mod3 { <NMLK> };\nmodifier_map Mod5 { <SCLK> };"))
 	c.kbd(wlKeyboardEvEnter, lkWlEnterBody(11))
 
-	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 1<<xkbModIdxMod3, 0))
-	if got, _ := c.w.LockKeys(); got != NumLock {
+	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 1<<keyboard.XkbModIdxMod3, 0))
+	if got, _ := c.w.LockKeys(); got != keyboard.NumLock {
 		t.Errorf("Mod3: %v, ждал num", got)
 	}
-	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 1<<xkbModIdxMod2, 0))
+	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 1<<keyboard.XkbModIdxMod2, 0))
 	if got, _ := c.w.LockKeys(); got != 0 {
 		t.Errorf("Mod2 при Num на Mod3: %v, ждал пусто", got)
 	}
-	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 1<<xkbModIdxMod5|xkbModLock, 0))
-	if got, _ := c.w.LockKeys(); got != ScrollLock|CapsLock {
+	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 1<<keyboard.XkbModIdxMod5|xkbModLock, 0))
+	if got, _ := c.w.LockKeys(); got != keyboard.ScrollLock|keyboard.CapsLock {
 		t.Errorf("Mod5+Lock: %v, ждал caps|scroll", got)
 	}
 }
@@ -144,7 +146,7 @@ func TestWaylandLockKeys_RealKeymap(t *testing.T) {
 	c := lkNewWlWindow(t)
 	c.sendKeymap(t, string(data))
 	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 2|0x10, 0))
-	if got, ok := c.w.LockKeys(); !ok || got != CapsLock|NumLock {
+	if got, ok := c.w.LockKeys(); !ok || got != keyboard.CapsLock|keyboard.NumLock {
 		t.Errorf("LockKeys = %v, %v", got, ok)
 	}
 }
@@ -155,7 +157,7 @@ func TestWaylandLockKeys_LeaveForgets(t *testing.T) {
 	c := lkNewWlWindow(t)
 	c.kbd(wlKeyboardEvEnter, lkWlEnterBody(11))
 	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, xkbModLock, 0))
-	if got, ok := c.w.LockKeys(); !ok || got != CapsLock {
+	if got, ok := c.w.LockKeys(); !ok || got != keyboard.CapsLock {
 		t.Fatalf("LockKeys = %v, %v", got, ok)
 	}
 	c.kbd(wlKeyboardEvLeave, lkWlLeaveBody(11))
@@ -163,8 +165,8 @@ func TestWaylandLockKeys_LeaveForgets(t *testing.T) {
 		t.Errorf("после leave LockKeys = %v, %v", k, ok)
 	}
 	c.kbd(wlKeyboardEvEnter, lkWlEnterBody(11))
-	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 1<<xkbModIdxMod2, 0))
-	if got, ok := c.w.LockKeys(); !ok || got != NumLock {
+	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 1<<keyboard.XkbModIdxMod2, 0))
+	if got, ok := c.w.LockKeys(); !ok || got != keyboard.NumLock {
 		t.Errorf("после возврата LockKeys = %v, %v; ждал num", got, ok)
 	}
 }
@@ -173,7 +175,7 @@ func TestWaylandLockKeys_LeaveForgets(t *testing.T) {
 // Wayland не вправе (с ним — wayland_lockkeys_set_linux_test.go).
 func TestWaylandLockKeys_SetNotSupported(t *testing.T) {
 	win := lkTestWindow(lkNewWlWindow(t).w, &rkEngine{})
-	if win.SetLockKeys(CapsLock) {
+	if win.SetLockKeys(keyboard.CapsLock) {
 		t.Error("SetLockKeys на Wayland ответил true")
 	}
 }
@@ -212,7 +214,7 @@ func lkWaylandWindow(t *testing.T) (*Window, *wlTestConn, *rkEngine, *lkWlCollec
 	eng := &rkEngine{}
 	win := lkTestWindow(c.w, eng)
 	col := &lkWlCollector{}
-	win.SetOnActivateLocks(func(active bool, locks LockKeys, known bool) {
+	win.SetOnActivateLocks(func(active bool, locks keyboard.LockKeys, known bool) {
 		col.got = append(col.got, lkActCall{active, locks, known})
 	})
 	return win, c, eng, col
@@ -228,9 +230,9 @@ func TestWaylandLockKeys_ActivateBeforeModifiers(t *testing.T) {
 		t.Fatalf("колбэк вызван до modifiers: %v", col.got)
 	}
 	c.kbd(wlKeyboardEvEnter, lkWlEnterBody(11))
-	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, xkbModLock|1<<xkbModIdxMod2, 0))
+	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, xkbModLock|1<<keyboard.XkbModIdxMod2, 0))
 	eng.run()
-	if want := []lkActCall{{true, CapsLock | NumLock, true}}; !reflect.DeepEqual(col.got, want) {
+	if want := []lkActCall{{true, keyboard.CapsLock | keyboard.NumLock, true}}; !reflect.DeepEqual(col.got, want) {
 		t.Errorf("%v, ждал %v", col.got, want)
 	}
 }
@@ -239,10 +241,10 @@ func TestWaylandLockKeys_ActivateBeforeModifiers(t *testing.T) {
 func TestWaylandLockKeys_ActivateAfterModifiers(t *testing.T) {
 	_, c, eng, col := lkWaylandWindow(t)
 	c.kbd(wlKeyboardEvEnter, lkWlEnterBody(11))
-	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 1<<xkbModIdxMod2, 0))
+	c.kbd(wlKeyboardEvModifiers, lkWlModifiersBody(0, 0, 1<<keyboard.XkbModIdxMod2, 0))
 	c.w.handleEvent(c.w.toplevelID, xdgToplevelEvConfigure, lkWlActivated())
 	eng.run()
-	if want := []lkActCall{{true, NumLock, true}}; !reflect.DeepEqual(col.got, want) {
+	if want := []lkActCall{{true, keyboard.NumLock, true}}; !reflect.DeepEqual(col.got, want) {
 		t.Errorf("%v, ждал %v", col.got, want)
 	}
 	// Повторные configure того же состояния (при каждом ресайзе) не множат вызовы.
@@ -277,7 +279,7 @@ func TestWaylandLockKeys_RefocusCarriesNewState(t *testing.T) {
 	if col.got[1].active || col.got[1].known {
 		t.Errorf("при потере фокуса: %v (состояние должно быть неизвестно)", col.got[1])
 	}
-	if want := (lkActCall{true, CapsLock, true}); col.got[2] != want {
+	if want := (lkActCall{true, keyboard.CapsLock, true}); col.got[2] != want {
 		t.Errorf("при возврате: %v, ждал %v", col.got[2], want)
 	}
 }

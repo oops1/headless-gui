@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -80,7 +81,7 @@ func (e *queueEngine) CursorAt(x, y int) widget.Cursor {
 
 // inputNative — окно ОС, отдающее колбэки тесту и копящее вызовы потока окна.
 type inputNative struct {
-	NativeWindow
+	native.NativeWindow
 	onMove   func(x, y int)
 	onButton func(x, y, b int, p bool)
 	onDown   func(vk int)
@@ -122,7 +123,7 @@ func TestInput_RunsFromEngineQueue(t *testing.T) {
 	_, fn, eng := inputSurface(t)
 
 	fn.onButton(10, 20, 0, true)
-	fn.onDown(VK_ENTER)
+	fn.onDown(native.VK_ENTER)
 	fn.onChar('ж')
 	wantLog(t, eng) // насос ничего не выполнил сам
 
@@ -185,10 +186,10 @@ func TestInput_MoveClickMoveKeepsOrder(t *testing.T) {
 func TestInput_ModifiersCapturedAtEvent(t *testing.T) {
 	_, fn, eng := inputSurface(t)
 
-	fn.onDown(VK_CONTROL)
-	fn.onDown(VK_A)
-	fn.onUp(VK_A)
-	fn.onUp(VK_CONTROL)
+	fn.onDown(native.VK_CONTROL)
+	fn.onDown(native.VK_A)
+	fn.onUp(native.VK_A)
+	fn.onUp(native.VK_CONTROL)
 	eng.run()
 
 	ctrl := widget.ModCtrl

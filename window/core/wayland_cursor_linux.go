@@ -11,7 +11,7 @@ package core
 //     из системной темы. Дёшево и выглядит как везде, но расширение есть не у
 //     всех (объявляется глобалом registry).
 //  2. wl_pointer.set_cursor с собственной поверхностью — работает всюду, где
-//     есть wl_pointer версии 1. Картинки рисует waylandcursor.go.
+//     есть wl_pointer версии 1. Картинки рисует platform/pointer (cursors.go).
 //
 // Слот на каждую форму создаётся один раз и больше не переписывается:
 // компоновщик читает буфер курсора асинхронно, и правка «на месте» меняла бы
@@ -21,6 +21,8 @@ import (
 	"fmt"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 const (
@@ -77,7 +79,7 @@ func (w *WaylandWindow) applyCursor() {
 	w.cursorMu.Lock()
 	defer w.cursorMu.Unlock()
 	if !w.cursorSet {
-		w.cursorShape, w.cursorSet = wlCursorArrow, true
+		w.cursorShape, w.cursorSet = pointer.CursorArrow, true
 	}
 	shape := w.cursorShape
 	img := w.cursorImg
@@ -96,7 +98,7 @@ func (w *WaylandWindow) applyCursor() {
 	if img != nil && w.setCursorByImage(img) {
 		return
 	}
-	if shape == wlCursorNone {
+	if shape == pointer.CursorNone {
 		w.hideCursor()
 		return
 	}
@@ -128,7 +130,7 @@ func (w *WaylandWindow) setCursorByShape(c int) bool {
 	if w.gCursorShapeMgr == 0 {
 		return false
 	}
-	shape := wlCursorShape(c)
+	shape := pointer.WlCursorShape(c)
 	if shape == 0 {
 		return false
 	}
@@ -154,7 +156,7 @@ func (w *WaylandWindow) setCursorBySurface(c int) {
 	w.resetCursorSurfaceScale()
 	w.send(newWlMsg(w.cursorSurfID, wlSurfaceAttach).putUint(slot.bufID).putInt(0).putInt(0), -1)
 	w.send(newWlMsg(w.cursorSurfID, wlSurfaceDamage).
-		putInt(0).putInt(0).putInt(wlCursorSize).putInt(wlCursorSize), -1)
+		putInt(0).putInt(0).putInt(pointer.CursorSize).putInt(pointer.CursorSize), -1)
 	w.send(newWlMsg(w.cursorSurfID, wlSurfaceCommit), -1)
 	w.send(newWlMsg(w.pointerID, wlPointerSetCursor).
 		putUint(w.ptrEnterSerial.Load()).putUint(w.cursorSurfID).
@@ -171,8 +173,8 @@ type wlCursorSlot struct {
 
 // cursorSlot возвращает буфер формы, создавая его при первом обращении.
 func (w *WaylandWindow) cursorSlot(c int) (wlCursorSlot, bool) {
-	if c < 0 || c >= wlCursorCount {
-		c = wlCursorArrow
+	if c < 0 || c >= pointer.CursorCount {
+		c = pointer.CursorArrow
 	}
 	if slot, ok := w.cursorSlots[c]; ok {
 		return slot, true
@@ -181,7 +183,7 @@ func (w *WaylandWindow) cursorSlot(c int) (wlCursorSlot, bool) {
 		wlLog("курсор: %v", err)
 		return wlCursorSlot{}, false
 	}
-	pix, cw, ch, hx, hy := wlCursorPixels(c)
+	pix, cw, ch, hx, hy := pointer.CursorPixels(c)
 	stride := cw * 4
 	off := c * stride * ch
 	if off+len(pix) > len(w.cursorData) {
@@ -209,7 +211,7 @@ func (w *WaylandWindow) setupCursorPool() error {
 	if w.shmID == 0 || w.compositorID == 0 {
 		return fmt.Errorf("нет wl_shm/wl_compositor")
 	}
-	size := wlCursorSize * wlCursorSize * 4 * wlCursorCount
+	size := pointer.CursorSize * pointer.CursorSize * 4 * pointer.CursorCount
 	fd, err := unix.MemfdCreate("headless-gui-cursor", unix.MFD_CLOEXEC)
 	if err != nil {
 		return fmt.Errorf("memfd_create: %w", err)
@@ -224,7 +226,7 @@ func (w *WaylandWindow) setupCursorPool() error {
 		return fmt.Errorf("mmap: %w", err)
 	}
 	w.cursorFD, w.cursorData = fd, data
-	w.cursorSlots = make(map[int]wlCursorSlot, wlCursorCount)
+	w.cursorSlots = make(map[int]wlCursorSlot, pointer.CursorCount)
 	w.cursorPoolID = w.newID()
 	w.send(newWlMsg(w.shmID, wlShmCreatePool).putUint(w.cursorPoolID).putInt(int32(size)), fd)
 	return nil

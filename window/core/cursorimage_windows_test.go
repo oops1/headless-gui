@@ -8,6 +8,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -100,17 +101,17 @@ func TestWin32CursorImage_CachedByKey(t *testing.T) {
 	}
 }
 
-// Кэш ограничен: сверх cursorCacheSize давние курсоры уничтожаются, а
+// Кэш ограничен: сверх pointer.CursorCacheSize давние курсоры уничтожаются, а
 // показываемый сейчас остаётся.
 func TestWin32CursorImage_LRUEvictsAndDestroys(t *testing.T) {
 	w := newFsWindow(t)
 	var handles []uintptr
-	for i := 0; i < cursorCacheSize+4; i++ {
+	for i := 0; i < pointer.CursorCacheSize+4; i++ {
 		w.SetCursorImage(ciwImage(24, 24, color.NRGBA{R: uint8(i), G: uint8(i * 7), B: 1, A: 255}))
 		handles = append(handles, w.cursorHandle)
 	}
-	if n := w.imgCursors.len(); n != cursorCacheSize {
-		t.Fatalf("в кэше %d курсоров, ждал %d", n, cursorCacheSize)
+	if n := w.imgCursors.Len(); n != pointer.CursorCacheSize {
+		t.Fatalf("в кэше %d курсоров, ждал %d", n, pointer.CursorCacheSize)
 	}
 	for i, h := range handles {
 		_, alive := ciwInfo(h)
@@ -127,7 +128,7 @@ func TestWin32CursorImage_ShapeReplacesImage(t *testing.T) {
 	w := newFsWindow(t)
 	w.SetCursorImage(ciwImage(32, 32, color.NRGBA{B: 255, A: 255}))
 	img := w.cursorHandle
-	w.SetCursor(wlCursorIBeam)
+	w.SetCursor(pointer.CursorIBeam)
 	if w.cursorHandle == img || w.cursorHandle == 0 {
 		t.Fatalf("форма не заменила картинку: %#x", w.cursorHandle)
 	}
@@ -146,7 +147,7 @@ func TestWin32CursorImage_DestroyedWithWindow(t *testing.T) {
 	if _, alive := ciwInfo(h); alive {
 		t.Error("курсор жив после destroyImageCursors")
 	}
-	if w.imgCursors.len() != 0 {
+	if w.imgCursors.Len() != 0 {
 		t.Error("кэш не пуст")
 	}
 }

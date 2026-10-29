@@ -25,6 +25,8 @@ package core
 import (
 	"encoding/binary"
 	"math/bits"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
 )
 
 // Значения протокола.
@@ -56,7 +58,7 @@ const (
 )
 
 // x11LockFlags — порядок флагов в таблицах x11LockMap.
-var x11LockFlags = [4]LockKeys{CapsLock, NumLock, ScrollLock, KanaLock}
+var x11LockFlags = [4]keyboard.LockKeys{keyboard.CapsLock, keyboard.NumLock, keyboard.ScrollLock, keyboard.KanaLock}
 
 // x11LockIndicatorNames — как индикатор клавиши называется в XKB. Первое имя в
 // списке — основное, остальные — встречающиеся в раскладках варианты.
@@ -100,8 +102,8 @@ func (m x11LockMap) needsMods() bool {
 // resolve собирает набор переключателей. indicators — XkbGetIndicatorState,
 // locked — lockedMods из XkbGetState, pointer — mask из QueryPointer; ненужные
 // источники передаются нулями.
-func (m x11LockMap) resolve(indicators uint32, locked uint8, pointer uint16) LockKeys {
-	var k LockKeys
+func (m x11LockMap) resolve(indicators uint32, locked uint8, ptr uint16) keyboard.LockKeys {
+	var k keyboard.LockKeys
 	for i, f := range x11LockFlags {
 		on := false
 		switch {
@@ -110,7 +112,7 @@ func (m x11LockMap) resolve(indicators uint32, locked uint8, pointer uint16) Loc
 		case m.xkb && m.mods[i] != 0:
 			on = locked&m.mods[i] != 0
 		case !m.xkb && m.mods[i] != 0:
-			on = pointer&uint16(m.mods[i]) != 0
+			on = ptr&uint16(m.mods[i]) != 0
 		}
 		if on {
 			k |= f

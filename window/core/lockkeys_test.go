@@ -6,6 +6,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Клавиши-переключатели (v3.44): набор флагов, выбор клавиш для нажатия и
@@ -13,131 +16,26 @@ import (
 // здесь на заглушках бэкенда; разбор Win32, X11 и Wayland — в платформенных
 // файлах lockkeys_*_test.go.
 
-func TestLockKeys_SetOps(t *testing.T) {
-	k := CapsLock | ScrollLock
-	if !k.Has(CapsLock) || !k.Has(ScrollLock) || !k.Has(CapsLock|ScrollLock) {
-		t.Errorf("Has не видит своих флагов: %v", k)
-	}
-	if k.Has(NumLock) || k.Has(CapsLock|NumLock) {
-		t.Errorf("Has видит чужой флаг: %v", k)
-	}
-	if k.Has(0) {
-		t.Error("Has(0) должно быть false: пустой набор ничего не доказывает")
-	}
-	if k.Empty() || !LockKeys(0).Empty() {
-		t.Error("Empty ошибается")
-	}
-	// Лишние биты вне известных флагов набор не заполняют.
-	if !LockKeys(0x80).Empty() {
-		t.Error("неизвестный бит сделал набор непустым")
-	}
-}
-
-func TestLockKeys_String(t *testing.T) {
-	for _, tc := range []struct {
-		k    LockKeys
-		want string
-	}{
-		{0, "-"},
-		{CapsLock, "caps"},
-		{NumLock | CapsLock, "caps|num"},
-		{ScrollLock, "scroll"},
-		{CapsLock | NumLock | ScrollLock | KanaLock, "caps|num|scroll|kana"},
-		{KanaLock, "kana"},
-	} {
-		if got := tc.k.String(); got != tc.want {
-			t.Errorf("String(%d) = %q, ждал %q", tc.k, got, tc.want)
-		}
-	}
-}
-
-// Флаги независимы и умещаются в байт: приложение вправе хранить набор как
-// число и сравнивать с ==.
-func TestLockKeys_FlagValuesDistinct(t *testing.T) {
-	seen := LockKeys(0)
-	for _, f := range []LockKeys{CapsLock, NumLock, ScrollLock, KanaLock} {
-		if f == 0 || seen&f != 0 || f&(f-1) != 0 {
-			t.Fatalf("флаг %d пересекается с другими или не одиночный бит", f)
-		}
-		seen |= f
-	}
-	if seen != lkAll {
-		t.Errorf("lkAll = %d, а флаги вместе дают %d", lkAll, seen)
-	}
-}
-
-func TestLockKeys_FromToggles(t *testing.T) {
-	on := map[int]bool{VK_CAPITAL: true, VK_SCROLL: true}
-	got := lkFromToggles(func(vk int) bool { return on[vk] })
-	if got != CapsLock|ScrollLock {
-		t.Errorf("lkFromToggles = %v, ждал caps|scroll", got)
-	}
-	if lkFromToggles(func(int) bool { return false }) != 0 {
-		t.Error("ничего не включено, а набор не пуст")
-	}
-	if lkFromToggles(func(vk int) bool { return vk == VK_KANA }) != KanaLock {
-		t.Error("VK_KANA не стал KanaLock")
-	}
-	if lkFromToggles(func(vk int) bool { return vk == VK_NUMLOCK }) != NumLock {
-		t.Error("VK_NUMLOCK не стал NumLock")
-	}
-}
-
-// Нажимаются только клавиши отличающихся флагов, в порядке Caps, Num, Scroll,
-// Kana; совпадающие не трогаются.
-func TestLockKeys_ToggleKeys(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		cur, want LockKeys
-		vks       []int
-	}{
-		{"одинаково", CapsLock | NumLock, CapsLock | NumLock, nil},
-		{"включить Num", 0, NumLock, []int{VK_NUMLOCK}},
-		{"Num не трогает Caps", CapsLock, CapsLock | NumLock, []int{VK_NUMLOCK}},
-		{"выключить Caps", CapsLock | NumLock, NumLock, []int{VK_CAPITAL}},
-		{"заменить Caps на Scroll", CapsLock, ScrollLock, []int{VK_CAPITAL, VK_SCROLL}},
-		{"все", 0, CapsLock | NumLock | ScrollLock | KanaLock, []int{VK_CAPITAL, VK_NUMLOCK, VK_SCROLL, VK_KANA}},
-		{"все выключить", CapsLock | NumLock | ScrollLock | KanaLock, 0, []int{VK_CAPITAL, VK_NUMLOCK, VK_SCROLL, VK_KANA}},
-	} {
-		if got := lkToggleKeys(tc.cur, tc.want); !reflect.DeepEqual(got, tc.vks) {
-			t.Errorf("%s: нажать %v, ждал %v", tc.name, got, tc.vks)
-		}
-	}
-}
-
-func TestLockKeys_IsLockVK(t *testing.T) {
-	for _, vk := range []int{VK_CAPITAL, VK_NUMLOCK, VK_SCROLL, VK_KANA} {
-		if !lkIsLockVK(vk) {
-			t.Errorf("vk %#x не признан переключателем", vk)
-		}
-	}
-	for _, vk := range []int{VK_A, VK_SHIFT, VK_CONTROL, VK_PAUSE, 0} {
-		if lkIsLockVK(vk) {
-			t.Errorf("vk %#x признан переключателем", vk)
-		}
-	}
-}
-
 // lkNative — окно ОС с состоянием переключателей и (необязательно) ожиданием
 // состояния после фокуса, как на Wayland.
 type lkNative struct {
 	rkNative
 	mu        sync.Mutex
-	locks     LockKeys
+	locks     keyboard.LockKeys
 	known     bool
-	asked     []LockKeys
+	asked     []keyboard.LockKeys
 	setResult bool
 	settled   bool
 	onSettled func()
 }
 
-func (n *lkNative) LockKeys() (LockKeys, bool) {
+func (n *lkNative) LockKeys() (keyboard.LockKeys, bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.locks, n.known
 }
 
-func (n *lkNative) SetLockKeys(want LockKeys) bool {
+func (n *lkNative) SetLockKeys(want keyboard.LockKeys) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.asked = append(n.asked, want)
@@ -161,7 +59,7 @@ func (n *lkSettleNative) SetOnLockKeysSettled(fn func()) {
 }
 
 // settle — состояние пришло: как на Wayland при первом modifiers после enter.
-func (n *lkSettleNative) settle(locks LockKeys) {
+func (n *lkSettleNative) settle(locks keyboard.LockKeys) {
 	n.mu.Lock()
 	n.locks, n.known, n.settled = locks, true, true
 	fn := n.onSettled
@@ -171,9 +69,9 @@ func (n *lkSettleNative) settle(locks LockKeys) {
 	}
 }
 
-func lkTestWindow(native NativeWindow, eng *rkEngine) *Window {
+func lkTestWindow(nw native.NativeWindow, eng *rkEngine) *Window {
 	win := &Window{}
-	win.surface = surface{eng: eng, native: native, scale: 1}
+	win.surface = surface{eng: eng, native: nw, scale: 1}
 	win.setupInput()
 	win.setupActivation()
 	return win
@@ -185,32 +83,32 @@ func TestLockKeys_UnsupportedBackend(t *testing.T) {
 	if k, ok := win.LockKeys(); ok || k != 0 {
 		t.Errorf("LockKeys без поддержки = %v, %v", k, ok)
 	}
-	if win.SetLockKeys(NumLock) {
+	if win.SetLockKeys(keyboard.NumLock) {
 		t.Error("SetLockKeys без поддержки ответил true")
 	}
 	before := &Window{}
 	if k, ok := before.LockKeys(); ok || k != 0 {
 		t.Errorf("до Run LockKeys = %v, %v", k, ok)
 	}
-	if before.SetLockKeys(CapsLock) {
+	if before.SetLockKeys(keyboard.CapsLock) {
 		t.Error("до Run SetLockKeys ответил true")
 	}
 }
 
 func TestLockKeys_DelegatesToBackend(t *testing.T) {
-	n := &lkNative{locks: CapsLock | NumLock, known: true, setResult: true}
+	n := &lkNative{locks: keyboard.CapsLock | keyboard.NumLock, known: true, setResult: true}
 	win := lkTestWindow(n, &rkEngine{})
-	if k, ok := win.LockKeys(); !ok || k != CapsLock|NumLock {
+	if k, ok := win.LockKeys(); !ok || k != keyboard.CapsLock|keyboard.NumLock {
 		t.Errorf("LockKeys = %v, %v", k, ok)
 	}
-	if !win.SetLockKeys(NumLock) {
+	if !win.SetLockKeys(keyboard.NumLock) {
 		t.Error("ответ бэкенда true потерян")
 	}
 	// Лишние биты до бэкенда не доходят.
-	if !win.SetLockKeys(NumLock | LockKeys(0x80)) {
+	if !win.SetLockKeys(keyboard.NumLock | keyboard.LockKeys(0x80)) {
 		t.Error("второй вызов")
 	}
-	if want := []LockKeys{NumLock, NumLock}; !reflect.DeepEqual(n.asked, want) {
+	if want := []keyboard.LockKeys{keyboard.NumLock, keyboard.NumLock}; !reflect.DeepEqual(n.asked, want) {
 		t.Errorf("бэкенд получил %v, ждал %v", n.asked, want)
 	}
 	n.setResult = false
@@ -225,14 +123,14 @@ func TestLockKeys_DelegatesToBackend(t *testing.T) {
 
 type lkActCall struct {
 	active bool
-	locks  LockKeys
+	locks  keyboard.LockKeys
 	known  bool
 }
 
 func lkCollect(win *Window) *[]lkActCall {
 	var got []lkActCall
 	var mu sync.Mutex
-	win.SetOnActivateLocks(func(active bool, locks LockKeys, known bool) {
+	win.SetOnActivateLocks(func(active bool, locks keyboard.LockKeys, known bool) {
 		mu.Lock()
 		got = append(got, lkActCall{active, locks, known})
 		mu.Unlock()
@@ -244,7 +142,7 @@ func lkCollect(win *Window) *[]lkActCall {
 // активацией, только при смене, на горутине движка.
 func TestLockKeys_ActivateLocksImmediate(t *testing.T) {
 	eng := &rkEngine{}
-	n := &lkNative{locks: CapsLock, known: true}
+	n := &lkNative{locks: keyboard.CapsLock, known: true}
 	win := lkTestWindow(n, eng)
 	got := lkCollect(win)
 
@@ -254,18 +152,18 @@ func TestLockKeys_ActivateLocksImmediate(t *testing.T) {
 		t.Fatalf("колбэк вызван до очереди движка: %v", *got)
 	}
 	eng.run()
-	if want := []lkActCall{{true, CapsLock, true}}; !reflect.DeepEqual(*got, want) {
+	if want := []lkActCall{{true, keyboard.CapsLock, true}}; !reflect.DeepEqual(*got, want) {
 		t.Fatalf("активация: %v, ждал %v", *got, want)
 	}
 
 	// Состояние изменилось, пока окно было в фоне: возврат фокуса несёт новое.
 	n.onActivate(false)
 	n.mu.Lock()
-	n.locks = NumLock | CapsLock
+	n.locks = keyboard.NumLock | keyboard.CapsLock
 	n.mu.Unlock()
 	n.onActivate(true)
 	eng.run()
-	if len(*got) != 3 || (*got)[1].active || (*got)[2] != (lkActCall{true, CapsLock | NumLock, true}) {
+	if len(*got) != 3 || (*got)[1].active || (*got)[2] != (lkActCall{true, keyboard.CapsLock | keyboard.NumLock, true}) {
 		t.Errorf("возврат фокуса: %v", *got)
 	}
 
@@ -286,11 +184,11 @@ func TestLockKeys_ActivateLocksImmediate(t *testing.T) {
 // Оба колбэка работают вместе: оба получают активацию.
 func TestLockKeys_ActivateLocksBesideOnActivate(t *testing.T) {
 	eng := &rkEngine{}
-	n := &lkNative{locks: NumLock, known: true}
+	n := &lkNative{locks: keyboard.NumLock, known: true}
 	win := lkTestWindow(n, eng)
 	var seq []string
 	win.SetOnActivate(func(a bool) { seq = append(seq, fmt.Sprint("plain ", a)) })
-	win.SetOnActivateLocks(func(a bool, l LockKeys, k bool) { seq = append(seq, fmt.Sprint("locks ", a, " ", l, " ", k)) })
+	win.SetOnActivateLocks(func(a bool, l keyboard.LockKeys, k bool) { seq = append(seq, fmt.Sprint("locks ", a, " ", l, " ", k)) })
 	n.onActivate(true)
 	eng.run()
 	if want := []string{"plain true", "locks true num true"}; !reflect.DeepEqual(seq, want) {
@@ -312,12 +210,12 @@ func TestLockKeys_ActivateLocksWaitsForState(t *testing.T) {
 	if len(*got) != 0 {
 		t.Fatalf("колбэк вызван до прихода состояния: %v", *got)
 	}
-	n.settle(CapsLock | NumLock)
+	n.settle(keyboard.CapsLock | keyboard.NumLock)
 	eng.run()
-	if want := []lkActCall{{true, CapsLock | NumLock, true}}; !reflect.DeepEqual(*got, want) {
+	if want := []lkActCall{{true, keyboard.CapsLock | keyboard.NumLock, true}}; !reflect.DeepEqual(*got, want) {
 		t.Fatalf("после прихода состояния: %v, ждал %v", *got, want)
 	}
-	n.settle(CapsLock) // modifiers при каждом изменении: нового колбэка нет
+	n.settle(keyboard.CapsLock) // modifiers при каждом изменении: нового колбэка нет
 	eng.run()
 	if len(*got) != 1 {
 		t.Errorf("изменение состояния при фокусе вызвало колбэк: %v", *got)
@@ -328,12 +226,12 @@ func TestLockKeys_ActivateLocksWaitsForState(t *testing.T) {
 func TestLockKeys_ActivateLocksStateAlreadyThere(t *testing.T) {
 	eng := &rkEngine{}
 	n := &lkSettleNative{}
-	n.settled, n.locks, n.known = true, ScrollLock, true
+	n.settled, n.locks, n.known = true, keyboard.ScrollLock, true
 	win := lkTestWindow(n, eng)
 	got := lkCollect(win)
 	n.onActivate(true)
 	eng.run()
-	if want := []lkActCall{{true, ScrollLock, true}}; !reflect.DeepEqual(*got, want) {
+	if want := []lkActCall{{true, keyboard.ScrollLock, true}}; !reflect.DeepEqual(*got, want) {
 		t.Errorf("%v, ждал %v", *got, want)
 	}
 }
@@ -361,7 +259,7 @@ func TestLockKeys_ActivateLocksTimeout(t *testing.T) {
 		t.Fatalf("по сроку: %v, ждал %v", *got, want)
 	}
 	// Состояние, пришедшее после срока, колбэк не повторяет.
-	n.settle(CapsLock)
+	n.settle(keyboard.CapsLock)
 	eng.run()
 	if len(*got) != 1 {
 		t.Errorf("повтор после срока: %v", *got)
@@ -376,7 +274,7 @@ func TestLockKeys_ActivateLocksCanceledByDeactivation(t *testing.T) {
 	got := lkCollect(win)
 	n.onActivate(true)
 	n.onActivate(false)
-	n.settle(CapsLock)
+	n.settle(keyboard.CapsLock)
 	eng.run()
 	for _, c := range *got {
 		if c.active {
@@ -388,10 +286,10 @@ func TestLockKeys_ActivateLocksCanceledByDeactivation(t *testing.T) {
 	n.settled = false
 	n.mu.Unlock()
 	n.onActivate(true)
-	n.settle(NumLock)
+	n.settle(keyboard.NumLock)
 	eng.run()
 	last := (*got)[len(*got)-1]
-	if last != (lkActCall{true, NumLock, true}) {
+	if last != (lkActCall{true, keyboard.NumLock, true}) {
 		t.Errorf("повторная активация: %v", *got)
 	}
 }

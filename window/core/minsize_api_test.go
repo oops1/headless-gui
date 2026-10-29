@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 // Минимальный размер окна из приложения — вторая половина GG-18.
 //
@@ -11,7 +15,7 @@ import "testing"
 
 // minSpy — бэкенд, запоминающий последний присланный минимум.
 type minSpy struct {
-	NativeWindow
+	native.NativeWindow
 	w, h int
 	n    int
 }

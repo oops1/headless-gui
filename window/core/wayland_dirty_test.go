@@ -6,6 +6,8 @@ import (
 	"image"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // TestWlDirtyTrackerDoubleBuffer проверяет, что буфер, пропустивший кадр,
@@ -122,8 +124,8 @@ func TestPropertyTooBig(t *testing.T) {
 	}{
 		{0, false},
 		{1, false},
-		{maxDnDBytes / 4, false},
-		{maxDnDBytes/4 + 1, true},
+		{native.MaxDnDBytes / 4, false},
+		{native.MaxDnDBytes/4 + 1, true},
 		{1 << 28, true}, // 0x1FFFFFFF-класс: сотни МБ
 		{-1, true},
 	}

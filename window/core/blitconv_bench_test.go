@@ -6,6 +6,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // blitconv_bench_test.go — бенчмарки конвертации кадра RGBA→BGRA (PERF-2).
@@ -59,7 +61,7 @@ func convertRowsFlip(dst []byte, img *image.RGBA, dirty image.Rectangle, width, 
 	for y := dirty.Min.Y; y < dirty.Max.Y; y++ {
 		s := src[y*stride+x0 : y*stride+x1]
 		d0 := (height-1-y)*width*4 + x0
-		swapRBRow(dst[d0:d0+len(s)], s)
+		native.SwapRBRow(dst[d0:d0+len(s)], s)
 	}
 }
 

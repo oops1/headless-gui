@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -152,7 +153,7 @@ func (c *x11Clipboard) ClipboardFormats() widget.ClipboardFormatSet {
 	}
 	c.mu.Lock()
 	if c.owns {
-		s := ownedFormats(c.owned, c.ownedHTML, len(c.ownedFiles) > 0 || c.ownedVirt != nil, c.ownedImg != nil)
+		s := native.OwnedFormats(c.owned, c.ownedHTML, len(c.ownedFiles) > 0 || c.ownedVirt != nil, c.ownedImg != nil)
 		c.mu.Unlock()
 		c.fmts.invalidate() // чужой ответ, запомненный до нашего владения, не годится
 		return s

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // v3.39 на Win32: lParam клавиш разбирается в скан-код, расширенный бит и
@@ -14,26 +17,26 @@ import (
 
 func TestWin32_KeyMessagesCarryScanCode(t *testing.T) {
 	w := fakeWin32(t)
-	var got []rawKey
-	w.SetOnRawKey(func(k rawKey) { got = append(got, k) })
+	var got []keyboard.RawKey
+	w.SetOnRawKey(func(k keyboard.RawKey) { got = append(got, k) })
 
 	// «A»: скан 0x1E; затем автоповтор; затем отпускание.
-	wndProc(fakeHwnd, wmKeydown, VK_A, 0x001E0001)
-	wndProc(fakeHwnd, wmKeydown, VK_A, 0x401E0001)
-	wndProc(fakeHwnd, wmKeyup, VK_A, 0xC01E0001)
+	wndProc(fakeHwnd, wmKeydown, native.VK_A, 0x001E0001)
+	wndProc(fakeHwnd, wmKeydown, native.VK_A, 0x401E0001)
+	wndProc(fakeHwnd, wmKeyup, native.VK_A, 0xC01E0001)
 	// Стрелка вправо — расширенная; системное нажатие (Alt зажат) идёт тем же путём.
-	wndProc(fakeHwnd, wmSyskeydown, VK_RIGHT, 0x214D0001)
-	wndProc(fakeHwnd, wmSyskeyup, VK_RIGHT, 0xE14D0001)
+	wndProc(fakeHwnd, wmSyskeydown, native.VK_RIGHT, 0x214D0001)
+	wndProc(fakeHwnd, wmSyskeyup, native.VK_RIGHT, 0xE14D0001)
 	// Мультимедийная клавиша: скан-код приходит, и тоже расширенный.
-	wndProc(fakeHwnd, wmKeydown, VK_VOLUME_UP, 0x01300001)
+	wndProc(fakeHwnd, wmKeydown, native.VK_VOLUME_UP, 0x01300001)
 
-	want := []rawKey{
-		{VK: VK_A, Scan: 0x1E, Pressed: true},
-		{VK: VK_A, Scan: 0x1E, Pressed: true, Repeat: true},
-		{VK: VK_A, Scan: 0x1E},
-		{VK: VK_RIGHT, Scan: 0x4D, Extended: true, Pressed: true},
-		{VK: VK_RIGHT, Scan: 0x4D, Extended: true},
-		{VK: VK_VOLUME_UP, Scan: 0x30, Extended: true, Pressed: true},
+	want := []keyboard.RawKey{
+		{VK: native.VK_A, Scan: 0x1E, Pressed: true},
+		{VK: native.VK_A, Scan: 0x1E, Pressed: true, Repeat: true},
+		{VK: native.VK_A, Scan: 0x1E},
+		{VK: native.VK_RIGHT, Scan: 0x4D, Extended: true, Pressed: true},
+		{VK: native.VK_RIGHT, Scan: 0x4D, Extended: true},
+		{VK: native.VK_VOLUME_UP, Scan: 0x30, Extended: true, Pressed: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("до приложения дошло:\n  %+v\nждал:\n  %+v", got, want)
@@ -46,8 +49,8 @@ func TestWin32_KeyMessagesLegacyReceivers(t *testing.T) {
 	var got []string
 	w.SetOnKeyDownRepeat(func(vk int, repeat bool) { got = append(got, fmt.Sprint("down ", vk, repeat)) })
 	w.SetOnKeyUp(func(vk int) { got = append(got, fmt.Sprint("up ", vk)) })
-	wndProc(fakeHwnd, wmKeydown, VK_A, 0x401E0001)
-	wndProc(fakeHwnd, wmKeyup, VK_A, 0xC01E0001)
+	wndProc(fakeHwnd, wmKeydown, native.VK_A, 0x401E0001)
+	wndProc(fakeHwnd, wmKeyup, native.VK_A, 0xC01E0001)
 	want := []string{"down 65 true", "up 65"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("получено %q, ждал %q", got, want)

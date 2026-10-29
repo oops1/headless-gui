@@ -6,6 +6,9 @@ import (
 	"encoding/binary"
 	"reflect"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // v3.39 на X11 и Wayland: скан-код (evdev) у каждой клавиши, в том числе у тех,
@@ -26,8 +29,8 @@ func x11ButtonEv(typ, button byte, x, y int) []byte {
 
 func TestX11_RawKeyCarriesEvdevScanCode(t *testing.T) {
 	w := &X11Window{}
-	var got []rawKey
-	w.SetOnRawKey(func(k rawKey) { got = append(got, k) })
+	var got []keyboard.RawKey
+	w.SetOnRawKey(func(k keyboard.RawKey) { got = append(got, k) })
 
 	w.handleX11Event(x11KeyEv(2, x11KeyA, 100)) // нажатие «A»
 	w.handleX11Event(x11KeyEv(2, x11KeyA, 200)) // тот же код без отпускания — автоповтор
@@ -37,14 +40,14 @@ func TestX11_RawKeyCarriesEvdevScanCode(t *testing.T) {
 	w.handleX11Event(x11KeyEv(2, 194+8, 600))   // F24: в таблице появилась в v3.39
 	w.handleX11Event(x11KeyEv(2, 126+8+0, 700)) // evdev 126 — правая Win
 
-	want := []rawKey{
-		{VK: VK_A, Scan: 30, Pressed: true},
-		{VK: VK_A, Scan: 30, Pressed: true, Repeat: true},
-		{VK: VK_A, Scan: 30},
+	want := []keyboard.RawKey{
+		{VK: native.VK_A, Scan: 30, Pressed: true},
+		{VK: native.VK_A, Scan: 30, Pressed: true, Repeat: true},
+		{VK: native.VK_A, Scan: 30},
 		{VK: 0, Scan: 134, Pressed: true},
 		{VK: 0, Scan: 134},
-		{VK: VK_F24, Scan: 194, Pressed: true},
-		{VK: VK_RWIN, Scan: 126, Pressed: true},
+		{VK: native.VK_F24, Scan: 194, Pressed: true},
+		{VK: native.VK_RWIN, Scan: 126, Pressed: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("до окна дошло:\n  %+v\nждал:\n  %+v", got, want)
@@ -148,8 +151,8 @@ func TestWayland_RawKeyCarriesEvdevScanCode(t *testing.T) {
 	c := newWlTestWindow(t)
 	c.w.keyboardID = 21
 	c.w.repeat.setInfo(0, 0) // повтор композитора выключен: проверяем только прямое событие
-	var got []rawKey
-	c.w.SetOnRawKey(func(k rawKey) { got = append(got, k) })
+	var got []keyboard.RawKey
+	c.w.SetOnRawKey(func(k keyboard.RawKey) { got = append(got, k) })
 
 	c.w.handleEvent(c.w.keyboardID, wlKeyboardEvKey, wlKeyBody(31, true))   // «S»
 	c.w.handleEvent(c.w.keyboardID, wlKeyboardEvKey, wlKeyBody(31, false))  //
@@ -158,13 +161,13 @@ func TestWayland_RawKeyCarriesEvdevScanCode(t *testing.T) {
 	c.w.handleEvent(c.w.keyboardID, wlKeyboardEvKey, wlKeyBody(114, true))  // KEY_VOLUMEDOWN
 	c.w.handleEvent(c.w.keyboardID, wlKeyboardEvKey, wlKeyBody(114, false))
 
-	want := []rawKey{
-		{VK: VK_S, Scan: 31, Pressed: true},
-		{VK: VK_S, Scan: 31},
+	want := []keyboard.RawKey{
+		{VK: native.VK_S, Scan: 31, Pressed: true},
+		{VK: native.VK_S, Scan: 31},
 		{VK: 0, Scan: 117, Pressed: true},
 		{VK: 0, Scan: 117},
-		{VK: VK_VOLUME_DOWN, Scan: 114, Pressed: true},
-		{VK: VK_VOLUME_DOWN, Scan: 114},
+		{VK: native.VK_VOLUME_DOWN, Scan: 114, Pressed: true},
+		{VK: native.VK_VOLUME_DOWN, Scan: 114},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("до окна дошло:\n  %+v\nждал:\n  %+v", got, want)
@@ -174,13 +177,13 @@ func TestWayland_RawKeyCarriesEvdevScanCode(t *testing.T) {
 // Повтор, который ведёт клиент, тоже несёт скан-код и пометку Repeat.
 func TestWayland_RawKeyRepeatKeepsScan(t *testing.T) {
 	c := newWlTestWindow(t)
-	var got []rawKey
-	c.w.SetOnRawKey(func(k rawKey) { got = append(got, k) })
+	var got []keyboard.RawKey
+	c.w.SetOnRawKey(func(k keyboard.RawKey) { got = append(got, k) })
 	c.w.deliverKey(31, false)
 	c.w.deliverKey(31, true)
-	want := []rawKey{
-		{VK: VK_S, Scan: 31, Pressed: true},
-		{VK: VK_S, Scan: 31, Pressed: true, Repeat: true},
+	want := []keyboard.RawKey{
+		{VK: native.VK_S, Scan: 31, Pressed: true},
+		{VK: native.VK_S, Scan: 31, Pressed: true, Repeat: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("до окна дошло:\n  %+v\nждал:\n  %+v", got, want)
@@ -294,8 +297,8 @@ func TestX11_FocusEventsReachOnActivate(t *testing.T) {
 	w := &X11Window{}
 	var got []bool
 	w.SetOnActivate(func(a bool) { got = append(got, a) })
-	var keys []rawKey
-	w.SetOnRawKey(func(k rawKey) { keys = append(keys, k) })
+	var keys []keyboard.RawKey
+	w.SetOnRawKey(func(k keyboard.RawKey) { keys = append(keys, k) })
 
 	w.handleX11Event(x11KeyEv(2, x11KeyA, 100)) // «A» зажата
 	focusEv := func(typ byte) []byte {

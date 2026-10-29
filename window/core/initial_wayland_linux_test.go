@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Начальное «развёрнуто» и размер на Wayland, на проводе (initial_wayland_linux.go).
@@ -161,7 +163,7 @@ func (s *initWlServer) snapshot() []initWlMsg {
 
 // createInitWayland создаёт окно против поддельного компоновщика, который на
 // первый commit отвечает configure(cfgW×cfgH, states).
-func createInitWayland(t *testing.T, p initialPlacement, minW, minH, width, height int, cfgW, cfgH int32, states ...uint32) (*WaylandWindow, []initWlMsg) {
+func createInitWayland(t *testing.T, p native.InitialPlacement, minW, minH, width, height int, cfgW, cfgH int32, states ...uint32) (*WaylandWindow, []initWlMsg) {
 	t.Helper()
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
@@ -225,7 +227,7 @@ const wlStateMaximized, wlStateActivated = xdgStateMaximized, xdgStateActivated
 
 // Развёрнуто: set_maximized уходит после get_toplevel и ДО первого commit.
 func TestWaylandInitial_SetMaximizedBeforeFirstCommit(t *testing.T) {
-	w, msgs := createInitWayland(t, initialPlacement{Maximized: true}, 0, 0, 800, 600,
+	w, msgs := createInitWayland(t, native.InitialPlacement{Maximized: true}, 0, 0, 800, 600,
 		1920, 1080, wlStateMaximized, wlStateActivated)
 
 	top := wlIndex(msgs, "xdg_surface", xdgSurfaceGetToplevel)
@@ -262,7 +264,7 @@ func TestWaylandInitial_SetMaximizedBeforeFirstCommit(t *testing.T) {
 // Окно, начавшее жизнь развёрнутым, при «восстановить» возвращается к размеру
 // создания, даже если компоновщик присылает 0×0.
 func TestWaylandInitial_RestoreReturnsToInitialSize(t *testing.T) {
-	w, _ := createInitWayland(t, initialPlacement{Maximized: true, SizeSet: true}, 0, 0, 900, 650,
+	w, _ := createInitWayland(t, native.InitialPlacement{Maximized: true, SizeSet: true}, 0, 0, 900, 650,
 		1920, 1080, wlStateMaximized)
 
 	w.handleEvent(w.toplevelID, xdgToplevelEvConfigure, toplevelConfigure(0, 0))
@@ -282,7 +284,7 @@ func TestWaylandInitial_RestoreReturnsToInitialSize(t *testing.T) {
 
 // Компоновщик отказал в разворачивании: окно обычное и честно об этом сообщает.
 func TestWaylandInitial_RefusedMaximize(t *testing.T) {
-	w, _ := createInitWayland(t, initialPlacement{Maximized: true}, 0, 0, 800, 600, 800, 600, wlStateActivated)
+	w, _ := createInitWayland(t, native.InitialPlacement{Maximized: true}, 0, 0, 800, 600, 800, 600, wlStateActivated)
 	if w.IsMaximized() {
 		t.Error("IsMaximized true, хотя компоновщик не дал состояния maximized")
 	}
@@ -291,7 +293,7 @@ func TestWaylandInitial_RefusedMaximize(t *testing.T) {
 // Положение игнорируется (его выбирает компоновщик), а размер — начальный:
 // окно фиксируется на нём, как и раньше.
 func TestWaylandInitial_PositionIgnoredSizeUsed(t *testing.T) {
-	w, msgs := createInitWayland(t, initialPlacement{PosSet: true, X: 300, Y: 200, SizeSet: true}, 0, 0, 640, 480, 0, 0)
+	w, msgs := createInitWayland(t, native.InitialPlacement{PosSet: true, X: 300, Y: 200, SizeSet: true}, 0, 0, 640, 480, 0, 0)
 
 	if i := wlIndex(msgs, "xdg_toplevel", xdgToplevelSetMaximized); i >= 0 {
 		t.Error("set_maximized отправлен без заказа")
@@ -313,7 +315,7 @@ func TestWaylandInitial_PositionIgnoredSizeUsed(t *testing.T) {
 
 // Без заказа Wayland ведёт себя как раньше: set_maximized не уходит.
 func TestWaylandInitial_NothingRequested(t *testing.T) {
-	_, msgs := createInitWayland(t, initialPlacement{}, 0, 0, 800, 600, 0, 0)
+	_, msgs := createInitWayland(t, native.InitialPlacement{}, 0, 0, 800, 600, 0, 0)
 	if wlIndex(msgs, "xdg_toplevel", xdgToplevelSetMaximized) >= 0 {
 		t.Error("set_maximized отправлен без заказа")
 	}
@@ -324,7 +326,7 @@ func TestWaylandInitial_NothingRequested(t *testing.T) {
 
 // Минимум, заданный приложением, развёрнутое окно не теряет.
 func TestWaylandInitial_MaximizedKeepsMinSize(t *testing.T) {
-	_, msgs := createInitWayland(t, initialPlacement{Maximized: true}, 400, 300, 800, 600,
+	_, msgs := createInitWayland(t, native.InitialPlacement{Maximized: true}, 400, 300, 800, 600,
 		1920, 1080, wlStateMaximized)
 	last := -1
 	for i, m := range msgs {

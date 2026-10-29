@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -34,7 +35,7 @@ func (e *stubEngine) Stop()                                                  { e
 
 // closableStub — нативное окно, помнящее, что его закрыли.
 type closableStub struct {
-	NativeWindow
+	native.NativeWindow
 	closed atomic.Bool
 }
 
@@ -74,8 +75,8 @@ func TestCloseChildWindows(t *testing.T) {
 
 	eng := newStubEngine()
 	child := New(eng, "второе")
-	native := &closableStub{}
-	child.native = native
+	nw := &closableStub{}
+	child.native = nw
 	child.current = image.NewRGBA(image.Rect(0, 0, 1, 1))
 
 	main.children.mu.Lock()
@@ -84,7 +85,7 @@ func TestCloseChildWindows(t *testing.T) {
 
 	main.closeChildWindows()
 
-	if !native.closed.Load() {
+	if !nw.closed.Load() {
 		t.Error("окно ОС не закрыто")
 	}
 	if !eng.stopped.Load() {
@@ -110,7 +111,7 @@ func (f *secondaryFake) markSecondary() { f.log = append(f.log, "secondary") }
 func TestOpenWindow_ChildIsSecondary(t *testing.T) {
 	var fakes []*secondaryFake
 	old := newNativeWindow
-	newNativeWindow = func() NativeWindow {
+	newNativeWindow = func() native.NativeWindow {
 		f := &secondaryFake{}
 		fakes = append(fakes, f)
 		return f

@@ -14,7 +14,7 @@ package core
 //  1. подписываемся на PropertyNotify окна-просителя;
 //  2. кладём в его свойство тип INCR с оценкой размера и отвечаем SelectionNotify;
 //  3. проситель удаляет свойство — на каждое удаление кладём следующий кусок
-//     (x11IncrChunk байт); пустой кусок означает конец.
+//     (native.X11IncrChunk байт); пустой кусок означает конец.
 //
 // Вставка: сначала TARGETS — какие цели предложил владелец; берём image/png, а
 // при его отсутствии image/bmp. Большие данные владелец вправе отдать тоже по
@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/internal/clipimage"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -53,7 +54,7 @@ func (s *x11IncrSend) next() []byte {
 	if s.off >= len(s.data) {
 		return nil
 	}
-	end := min(s.off+x11IncrChunk, len(s.data))
+	end := min(s.off+native.X11IncrChunk, len(s.data))
 	chunk := s.data[s.off:end]
 	s.off = end
 	return chunk
@@ -70,7 +71,7 @@ func (c *x11Clipboard) SetImage(img image.Image) error {
 	if c == nil || c.w == nil || c.w.wid == 0 || c.w.atomClipboard == 0 || c.w.atomImagePNG == 0 {
 		return widget.ErrClipboardImageUnsupported
 	}
-	c.setOwned("", "", nil, false, newOwnedImage(img), nil)
+	c.setOwned("", "", nil, false, native.NewOwnedImage(img), nil)
 	return nil
 }
 
@@ -120,7 +121,7 @@ func (c *x11Clipboard) fetchImage() (mime string, data []byte) {
 		return "", nil
 	}
 	get := func(atom uint32) []byte {
-		return c.convertBytes(atom, x11ClipboardTimeout, maxClipboardImageBytes)
+		return c.convertBytes(atom, x11ClipboardTimeout, native.MaxClipboardImageBytes)
 	}
 	raw, answered := c.convertAnswer(w.atomTargets, x11ClipboardTimeout, 1<<20)
 	if !answered {
@@ -160,14 +161,14 @@ func (c *x11Clipboard) fetchImage() (mime string, data []byte) {
 
 // serveImage отвечает на запрос image/png: кодирует PNG (один раз за владение)
 // и отдаёт его целиком или по INCR. Зовётся из горутины, не из цикла событий.
-func (c *x11Clipboard) serveImage(img *ownedImage, requestor, property, timestamp, selection, target uint32) {
+func (c *x11Clipboard) serveImage(img *native.OwnedImage, requestor, property, timestamp, selection, target uint32) {
 	w := c.w
 	data, err := img.PNG()
 	if err != nil || len(data) == 0 {
 		w.x11SendSelectionNotify(requestor, timestamp, selection, target, 0)
 		return
 	}
-	if len(data) <= x11IncrChunk {
+	if len(data) <= native.X11IncrChunk {
 		w.x11ChangeProperty(requestor, property, target, 8, data)
 		w.x11SendSelectionNotify(requestor, timestamp, selection, target, property)
 		return

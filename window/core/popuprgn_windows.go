@@ -13,7 +13,11 @@
 // полосам, и за их пределами окна просто нет — чернеть нечему.
 package core
 
-import "image"
+import (
+	"image"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 // applyOpaqueRegion выкраивает окно по полосам bands.
 //
@@ -32,7 +36,7 @@ func (w *Win32Window) applyOpaqueRegion(bands []image.Rectangle, full image.Rect
 	if len(bands) == 1 && bands[0] == full {
 		bands = nil // выкраивать нечего: закрашено всё
 	}
-	if sameRects(w.popupBands, bands) {
+	if native.SameRects(w.popupBands, bands) {
 		return
 	}
 	w.popupBands = append(w.popupBands[:0], bands...)
@@ -73,7 +77,7 @@ func (w *Win32Window) applyOpaqueRegion(bands []image.Rectangle, full image.Rect
 	procSetWindowRgn.Call(uintptr(w.hwnd), total, 0)
 }
 
-// sameRects — в x11shape.go (общая для всех платформ).
+// native.SameRects — в x11shape.go (общая для всех платформ).
 
 // blitPopupRegion выкраивает окно по закрашенной части кадра и кладёт кадр.
 //

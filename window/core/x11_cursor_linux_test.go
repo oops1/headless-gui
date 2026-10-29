@@ -2,7 +2,11 @@
 
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
+)
 
 // Курсор над полем ввода, над краем окна и над ссылкой должен выглядеть
 // по-разному — по этому человек и понимает, что здесь можно делать. На X11
@@ -10,13 +14,13 @@ import "testing"
 
 func TestX11CursorGlyph_AllShapesMapped(t *testing.T) {
 	cases := map[int]int{
-		wlCursorArrow:    xcLeftPtr,
-		wlCursorIBeam:    xcXterm,
-		wlCursorHand:     xcHand2,
-		wlCursorSizeWE:   xcSbHDoubleArrow,
-		wlCursorSizeNS:   xcSbVDoubleArrow,
-		wlCursorSizeNWSE: xcTopLeftCorner,
-		wlCursorSizeNESW: xcTopRightCorner,
+		pointer.CursorArrow:    xcLeftPtr,
+		pointer.CursorIBeam:    xcXterm,
+		pointer.CursorHand:     xcHand2,
+		pointer.CursorSizeWE:   xcSbHDoubleArrow,
+		pointer.CursorSizeNS:   xcSbVDoubleArrow,
+		pointer.CursorSizeNWSE: xcTopLeftCorner,
+		pointer.CursorSizeNESW: xcTopRightCorner,
 	}
 	for shape, want := range cases {
 		got, ok := x11CursorGlyph(shape)
@@ -43,7 +47,7 @@ func TestX11CursorGlyph_AllShapesMapped(t *testing.T) {
 // Незнакомая форма — не повод рисовать случайный глиф: окно оставит прежний
 // курсор.
 func TestX11CursorGlyph_UnknownShape(t *testing.T) {
-	if _, ok := x11CursorGlyph(wlCursorCount + 3); ok {
+	if _, ok := x11CursorGlyph(pointer.CursorCount + 3); ok {
 		t.Error("незнакомая форма получила глиф")
 	}
 }
@@ -57,9 +61,9 @@ func TestX11Cursors_ResourceReused(t *testing.T) {
 
 	w.cursors.mu.Lock()
 	defer w.cursors.mu.Unlock()
-	first := w.cursorResourceLocked(wlCursorIBeam)
-	again := w.cursorResourceLocked(wlCursorIBeam)
-	other := w.cursorResourceLocked(wlCursorHand)
+	first := w.cursorResourceLocked(pointer.CursorIBeam)
+	again := w.cursorResourceLocked(pointer.CursorIBeam)
+	other := w.cursorResourceLocked(pointer.CursorHand)
 
 	if first == 0 {
 		t.Fatal("ресурс курсора не создан")

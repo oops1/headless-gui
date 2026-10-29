@@ -30,6 +30,10 @@ import (
 
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // ─── Cocoa типы ─────────────────────────────────────────────────────────────
@@ -62,7 +66,7 @@ type CocoaWindow struct {
 	onKeyDown     func(vk int)
 	onKeyUp       func(vk int)
 	onChar        func(r rune)
-	onRawKey      func(k rawKey) // клавиши со скан-кодом (rawKeySource): keyCode, kVK_*
+	onRawKey      func(k keyboard.RawKey) // клавиши со скан-кодом (rawKeySource): keyCode, kVK_*
 
 	// CALayer-путь: слой contentView. Пиксели кадра НЕ передаются Core
 	// Animation указателем на Go-память: они копируются в CFData (владелец —
@@ -276,7 +280,7 @@ func goString(ptr uintptr) string {
 	return string(buf)
 }
 
-func NewNativeWindow() NativeWindow {
+func NewNativeWindow() native.NativeWindow {
 	return &CocoaWindow{}
 }
 
@@ -400,7 +404,7 @@ func (w *CocoaWindow) handleCocoaEvent(event objc.ID, evType int) {
 		w.handleMouseMove(event)
 	case 25, 26: // NSOtherMouseDown/Up
 		// Средняя кнопка — номер 2, боковые «назад/вперёд» — 3 и 4.
-		if id, ok := cocoaOtherButton(int(objc.Send[uintptr](event, selButtonNumber))); ok {
+		if id, ok := pointer.CocoaOtherButton(int(objc.Send[uintptr](event, selButtonNumber))); ok {
 			w.handleMouseButton(event, id, evType == 25)
 		}
 	case 10: // NSKeyDown
@@ -437,7 +441,7 @@ func (w *CocoaWindow) handleKeyDown(event objc.ID) {
 	vk := cocoaKeyCodeToVK(keyCode)
 	if w.onRawKey != nil {
 		repeat := objc.Send[bool](event, selIsARepeat)
-		w.onRawKey(rawKey{VK: vk, Scan: uint16(keyCode), Pressed: true, Repeat: repeat})
+		w.onRawKey(keyboard.RawKey{VK: vk, Scan: uint16(keyCode), Pressed: true, Repeat: repeat})
 	} else if w.onKeyDown != nil && vk != 0 {
 		w.onKeyDown(vk)
 	}
@@ -463,7 +467,7 @@ func (w *CocoaWindow) handleKeyUp(event objc.ID) {
 	keyCode := int(objc.Send[uintptr](event, selKeyCode))
 	vk := cocoaKeyCodeToVK(keyCode)
 	if w.onRawKey != nil {
-		w.onRawKey(rawKey{VK: vk, Scan: uint16(keyCode)})
+		w.onRawKey(keyboard.RawKey{VK: vk, Scan: uint16(keyCode)})
 	} else if w.onKeyUp != nil && vk != 0 {
 		w.onKeyUp(vk)
 	}
@@ -718,7 +722,7 @@ func (w *CocoaWindow) SetOnMouseMove(fn func(x, y int))                         
 func (w *CocoaWindow) SetOnMouseButton(fn func(x, y, button int, pressed bool)) { w.onMouseButton = fn }
 func (w *CocoaWindow) SetOnKeyDown(fn func(vk int))                             { w.onKeyDown = fn }
 func (w *CocoaWindow) SetOnKeyUp(fn func(vk int))                               { w.onKeyUp = fn }
-func (w *CocoaWindow) SetOnRawKey(fn func(k rawKey))                            { w.onRawKey = fn }
+func (w *CocoaWindow) SetOnRawKey(fn func(k keyboard.RawKey))                   { w.onRawKey = fn }
 func (w *CocoaWindow) SetOnChar(fn func(r rune))                                { w.onChar = fn }
 
 // ─── Маппинг клавиш macOS → VK ─────────────────────────────────────────────
@@ -726,75 +730,75 @@ func (w *CocoaWindow) SetOnChar(fn func(r rune))                                
 func cocoaKeyCodeToVK(keyCode int) int {
 	switch keyCode {
 	case 51:
-		return VK_BACKSPACE
+		return native.VK_BACKSPACE
 	case 48:
-		return VK_TAB
+		return native.VK_TAB
 	case 36:
-		return VK_ENTER
+		return native.VK_ENTER
 	case 53:
-		return VK_ESCAPE
+		return native.VK_ESCAPE
 	case 49:
-		return VK_SPACE
+		return native.VK_SPACE
 	case 123:
-		return VK_LEFT
+		return native.VK_LEFT
 	case 126:
-		return VK_UP
+		return native.VK_UP
 	case 124:
-		return VK_RIGHT
+		return native.VK_RIGHT
 	case 125:
-		return VK_DOWN
+		return native.VK_DOWN
 	case 117:
-		return VK_DELETE
+		return native.VK_DELETE
 	case 114: // Mac-клавиатуры не имеют Insert; клавиша Help — best-effort маппинг
-		return VK_INSERT
+		return native.VK_INSERT
 	case 115:
-		return VK_HOME
+		return native.VK_HOME
 	case 119:
-		return VK_END
+		return native.VK_END
 	case 116:
-		return VK_PRIOR // Page Up
+		return native.VK_PRIOR // Page Up
 	case 121:
-		return VK_NEXT // Page Down
+		return native.VK_NEXT // Page Down
 	case 122:
-		return VK_F1
+		return native.VK_F1
 	case 120:
-		return VK_F2
+		return native.VK_F2
 	case 99:
-		return VK_F3
+		return native.VK_F3
 	case 118:
-		return VK_F4
+		return native.VK_F4
 	case 96:
-		return VK_F5
+		return native.VK_F5
 	case 97:
-		return VK_F6
+		return native.VK_F6
 	case 98:
-		return VK_F7
+		return native.VK_F7
 	case 100:
-		return VK_F8
+		return native.VK_F8
 	case 101:
-		return VK_F9
+		return native.VK_F9
 	case 109:
-		return VK_F10
+		return native.VK_F10
 	case 103:
-		return VK_F11
+		return native.VK_F11
 	case 111:
-		return VK_F12
+		return native.VK_F12
 	case 0:
-		return VK_A
+		return native.VK_A
 	case 8:
-		return VK_C
+		return native.VK_C
 	case 9:
-		return VK_V
+		return native.VK_V
 	case 7:
-		return VK_X
+		return native.VK_X
 	case 6:
-		return VK_Z
+		return native.VK_Z
 	case 56, 60:
-		return VK_SHIFT
+		return native.VK_SHIFT
 	case 59, 62:
-		return VK_CONTROL
+		return native.VK_CONTROL
 	case 58, 61:
-		return VK_ALT
+		return native.VK_ALT
 	}
 	return 0
 }

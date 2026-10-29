@@ -5,6 +5,8 @@ package core
 import (
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // wlpcDrain вычитывает всё, что окно успело отправить; пустой результат — не ошибка.
@@ -35,7 +37,7 @@ func TestWayland_PopupCursorOverride(t *testing.T) {
 
 	// Курсор в окне: форма окна — рука.
 	c.w.handlePointer(wlPointerEvEnter, append(wlU32(40, c.w.surfaceID), wlFixed(5, 5)...))
-	c.w.SetCursor(wlCursorHand)
+	c.w.SetCursor(pointer.CursorHand)
 	wlpcDrain(c)
 
 	// Указатель перешёл на попап: форма окна (рука) остаётся.
@@ -43,14 +45,14 @@ func TestWayland_PopupCursorOverride(t *testing.T) {
 	wlpcDrain(c)
 
 	// Приложение спрятало курсор: над попапом он тоже пропадает.
-	c.w.SetPopupCursor(wlCursorNone, true)
+	c.w.SetPopupCursor(pointer.CursorNone, true)
 	m, ok := findWlMsg(splitWlMsgs(t, c.read(t)), c.w.pointerID, wlPointerSetCursor)
 	if !ok || len(m.args) != 4 || m.args[0] != 41 || m.args[1] != 0 {
 		t.Fatalf("курсор над попапом не спрятан set_cursor(41, NULL): %+v %v", m, ok)
 	}
 
 	// Повторное значение компоновщика не беспокоит.
-	c.w.SetPopupCursor(wlCursorNone, true)
+	c.w.SetPopupCursor(pointer.CursorNone, true)
 	if msgs := splitWlMsgs(t, wlpcDrain(c)); len(msgs) != 0 {
 		t.Errorf("повторный SetPopupCursor отправил %v", msgs)
 	}
@@ -74,7 +76,7 @@ func TestWayland_PopupCursorOverride(t *testing.T) {
 	// форму окна задаёт surface.SetCursor.
 	c.w.handlePointer(wlPointerEvEnter, append(wlU32(44, c.w.surfaceID), wlFixed(5, 5)...))
 	wlpcDrain(c)
-	c.w.SetPopupCursor(wlCursorNone, true)
+	c.w.SetPopupCursor(pointer.CursorNone, true)
 	if msgs := splitWlMsgs(t, wlpcDrain(c)); len(msgs) != 0 {
 		t.Errorf("SetPopupCursor при указателе в окне отправил %v", msgs)
 	}

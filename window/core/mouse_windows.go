@@ -7,6 +7,9 @@ package core
 
 import (
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 const (
@@ -17,7 +20,7 @@ const (
 	wmXbuttondblclk = 0x020D
 
 	// WM_MOUSELEAVE — указатель покинул клиентскую область (приходит только
-	// после TrackMouseEvent(TME_LEAVE), см. pointerleave.go).
+	// после TrackMouseEvent(TME_LEAVE), см. platform/pointer/pointerleave.go).
 	wmMouseleave = 0x02A3
 
 	tmeLeave     = 0x00000002 // TME_LEAVE
@@ -63,8 +66,8 @@ func (w *Win32Window) requestTrack(hwnd uintptr, flags uint32) bool {
 // clientMouseMove — WM_MOUSEMOVE: первое движение после входа взводит запрос на
 // уход указателя, затем движение уходит приложению.
 func (w *Win32Window) clientMouseMove(hwnd uintptr, x, y int) {
-	if w.leave.needArm() {
-		w.leave.armedOK(w.requestTrack(hwnd, tmeLeave))
+	if w.leave.NeedArm() {
+		w.leave.ArmedOK(w.requestTrack(hwnd, tmeLeave))
 	}
 	if w.onMouseMove != nil {
 		w.onMouseMove(x, y)
@@ -75,8 +78,8 @@ func (w *Win32Window) clientMouseMove(hwnd uintptr, x, y int) {
 // приложением: подсветку ведёт приложение, а об уходе с кнопки система скажет
 // только тому, кто попросил (WM_NCMOUSELEAVE).
 func (w *Win32Window) ncButtonMouseMove(hwnd uintptr, x, y int) {
-	if w.ncLeave.needArm() {
-		w.ncLeave.armedOK(w.requestTrack(hwnd, tmeLeave|tmeNonclient))
+	if w.ncLeave.NeedArm() {
+		w.ncLeave.ArmedOK(w.requestTrack(hwnd, tmeLeave|tmeNonclient))
 	}
 	if w.onMouseMove != nil {
 		w.onMouseMove(x, y)
@@ -86,16 +89,16 @@ func (w *Win32Window) ncButtonMouseMove(hwnd uintptr, x, y int) {
 // ncMouseLeft — WM_NCMOUSELEAVE: указатель ушёл с кнопки заголовка. Запрос
 // одноразовый, снимаем отметку и уводим мышь за окно.
 func (w *Win32Window) ncMouseLeft() {
-	w.ncLeave.left()
+	w.ncLeave.Left()
 	if w.onMouseMove != nil {
-		w.onMouseMove(pointerOutside, pointerOutside)
+		w.onMouseMove(pointer.Outside, pointer.Outside)
 	}
 }
 
 // handleMouseLeave — WM_MOUSELEAVE: берёт положение указателя и размеры окна у
 // системы и решает, настоящий ли это уход.
 func (w *Win32Window) handleMouseLeave(hwnd uintptr) {
-	w.leave.left()
+	w.leave.Left()
 	var pt point
 	have, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 	var wr rect
@@ -110,30 +113,30 @@ func (w *Win32Window) handleMouseLeave(hwnd uintptr) {
 // положение указателя на экране, wr — прямоугольник окна.
 //
 // Переход на кнопку заголовка, которую нарисовало приложение, уходом не
-// считается: см. mouseLeaveReal.
+// считается: см. pointer.MouseLeaveReal.
 func (w *Win32Window) mouseLeft(sx, sy int, havePos bool, wr rect) {
 	inside := havePos && sx >= int(wr.Left) && sx < int(wr.Right) &&
 		sy >= int(wr.Top) && sy < int(wr.Bottom)
-	under := HitClient
+	under := native.HitClient
 	if inside {
 		under = w.hitAreaKind(sx-int(wr.Left), sy-int(wr.Top))
 	}
-	if !mouseLeaveReal(under, inside) {
+	if !pointer.MouseLeaveReal(under, inside) {
 		return
 	}
 	if w.onMouseMove != nil {
-		w.onMouseMove(pointerOutside, pointerOutside)
+		w.onMouseMove(pointer.Outside, pointer.Outside)
 	}
 }
 
 // hitAreaKind спрашивает приложение, что лежит в точке окна (физические
 // пиксели). Без колбэка — обычное содержимое.
-func (w *Win32Window) hitAreaKind(x, y int) HitArea {
+func (w *Win32Window) hitAreaKind(x, y int) native.HitArea {
 	w.hitTestMu.Lock()
 	fn := w.hitTest
 	w.hitTestMu.Unlock()
 	if fn == nil {
-		return HitClient
+		return native.HitClient
 	}
 	return fn(x, y)
 }
@@ -147,7 +150,7 @@ func (w *Win32Window) hitAreaKind(x, y int) HitArea {
 //
 // Захват мыши не берём: боковые кнопки не начинают перетаскивание.
 func (w *Win32Window) handleXButton(umsg uint32, wparam, lparam uintptr) bool {
-	id, ok := xButtonFromWParam(wparam)
+	id, ok := pointer.XButtonFromWParam(wparam)
 	if !ok {
 		return false
 	}
@@ -165,7 +168,7 @@ func (w *Win32Window) handleXButton(umsg uint32, wparam, lparam uintptr) bool {
 type win32CursorSpec struct {
 	idc    int  // стандартный курсор IDC_*
 	hidden bool // курсор спрятан
-	art    bool // нарисованный курсор (wlCursorPixels): среди IDC_* аналога нет
+	art    bool // нарисованный курсор (pointer.CursorPixels): среди IDC_* аналога нет
 }
 
 // win32CursorSpecFor переводит форму widget.Cursor в способ её показа.
@@ -176,27 +179,27 @@ type win32CursorSpec struct {
 // пользователя.
 func win32CursorSpecFor(c int) win32CursorSpec {
 	switch c {
-	case wlCursorNone:
+	case pointer.CursorNone:
 		return win32CursorSpec{hidden: true}
-	case wlCursorGrab, wlCursorGrabbing:
+	case pointer.CursorGrab, pointer.CursorGrabbing:
 		return win32CursorSpec{art: true}
-	case wlCursorIBeam:
+	case pointer.CursorIBeam:
 		return win32CursorSpec{idc: idcIBeam}
-	case wlCursorHand:
+	case pointer.CursorHand:
 		return win32CursorSpec{idc: idcHand}
-	case wlCursorSizeWE:
+	case pointer.CursorSizeWE:
 		return win32CursorSpec{idc: idcSizeWE}
-	case wlCursorSizeNS:
+	case pointer.CursorSizeNS:
 		return win32CursorSpec{idc: idcSizeNS}
-	case wlCursorSizeNWSE:
+	case pointer.CursorSizeNWSE:
 		return win32CursorSpec{idc: idcSizeNWSE}
-	case wlCursorSizeNESW:
+	case pointer.CursorSizeNESW:
 		return win32CursorSpec{idc: idcSizeNESW}
-	case wlCursorSizeAll:
+	case pointer.CursorSizeAll:
 		return win32CursorSpec{idc: idcSizeAll}
-	case wlCursorCrosshair:
+	case pointer.CursorCrosshair:
 		return win32CursorSpec{idc: idcCross}
-	case wlCursorWait:
+	case pointer.CursorWait:
 		return win32CursorSpec{idc: idcWait}
 	}
 	return win32CursorSpec{idc: idcArrow}
@@ -220,11 +223,11 @@ func (w *Win32Window) cursorFor(c int) (h uintptr, hidden bool) {
 		return h, false
 	}
 	if spec.art {
-		img, hx, hy := wlCursorImage(c)
+		img, hx, hy := pointer.CursorImage(c)
 		h = uintptr(rgbaToHandle(img, false, uint32(hx), uint32(hy)))
 		if h == 0 { // не вышло нарисовать — ближайший системный
 			idc := idcHand
-			if c == wlCursorGrabbing {
+			if c == pointer.CursorGrabbing {
 				idc = idcSizeAll
 			}
 			h, _, _ = procLoadCursorW.Call(0, uintptr(idc))

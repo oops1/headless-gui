@@ -1,5 +1,11 @@
 package core
 
+import (
+	"github.com/oops1/headless-gui/v3/platform/native"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+)
+
 // activation.go — активность окна наружу и отпускание зажатых клавиш (v3.39).
 //
 // Окно, потерявшее фокус, больше не видит клавиатуру: Alt+Tab, клик в другое
@@ -16,7 +22,7 @@ package core
 
 // noteHeld ведёт список зажатых клавиш: нажатие добавляет, отпускание убирает.
 // Автоповтор нового пункта не заводит.
-func (s *surface) noteHeld(k rawKey) {
+func (s *surface) noteHeld(k keyboard.RawKey) {
 	s.heldMu.Lock()
 	defer s.heldMu.Unlock()
 	idx := -1
@@ -36,7 +42,7 @@ func (s *surface) noteHeld(k rawKey) {
 
 // sameKey — одна и та же физическая клавиша: по скан-коду, а если его нет —
 // по виртуальному коду.
-func sameKey(a, b rawKey) bool {
+func sameKey(a, b keyboard.RawKey) bool {
 	if a.Scan != 0 || b.Scan != 0 {
 		return a.Scan == b.Scan && a.Extended == b.Extended
 	}
@@ -79,7 +85,7 @@ func (s *surface) releaseHeldKeys() {
 // isHeldModifier — клавиша-модификатор (их отпускают после остальных).
 func isHeldModifier(vk int) bool {
 	switch vk {
-	case VK_SHIFT, VK_CONTROL, VK_ALT, VK_LWIN, VK_RWIN:
+	case native.VK_SHIFT, native.VK_CONTROL, native.VK_ALT, native.VK_LWIN, native.VK_RWIN:
 		return true
 	}
 	return false

@@ -41,6 +41,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Фазы перетаскивания.
@@ -75,8 +77,8 @@ type x11Drag struct {
 	mu     sync.Mutex
 	phase  int
 	body   string // text/uri-list
-	effect DragEffect
-	done   func(DragEffect)
+	effect native.DragEffect
+	done   func(native.DragEffect)
 	button byte // кнопка X (1..3), с которой начали
 	grab   bool // указатель захвачен нами
 
@@ -84,9 +86,9 @@ type x11Drag struct {
 	proxy         uint32 // его XdndProxy (кому слать сообщения); 0 — прокси нет
 	targetVer     int
 	sentEnter     bool
-	accepted      bool       // последний XdndStatus: приёмник принимает
-	action        DragEffect // действие из последнего XdndStatus
-	statusPending bool       // XdndPosition отправлен, XdndStatus ещё нет
+	accepted      bool              // последний XdndStatus: приёмник принимает
+	action        native.DragEffect // действие из последнего XdndStatus
+	statusPending bool              // XdndPosition отправлен, XdndStatus ещё нет
 	posSentAt     time.Time
 	queued        bool // позиция ждёт XdndStatus
 	queuedPos     x11DragPos
@@ -129,8 +131,8 @@ func (w *X11Window) noteButton(btn byte, down bool) {
 // BeginDragFiles начинает перетаскивание файлов (fileDragSource). Кнопка мыши
 // должна быть зажата. Возврат true означает «запрос принят»: захват указателя
 // происходит позже, в насосе событий, и его неудача придёт как done(0).
-func (w *X11Window) BeginDragFiles(paths []string, effect DragEffect, done func(DragEffect)) bool {
-	if w.wid == 0 || w.conn == nil || done == nil || len(paths) == 0 || effect&dragEffectAll == 0 ||
+func (w *X11Window) BeginDragFiles(paths []string, effect native.DragEffect, done func(native.DragEffect)) bool {
+	if w.wid == 0 || w.conn == nil || done == nil || len(paths) == 0 || effect&native.DragEffectAll == 0 ||
 		w.atomXdndSelection == 0 || w.atomTextUriList == 0 || w.atomDragBegin == 0 {
 		return false
 	}
@@ -150,7 +152,7 @@ func (w *X11Window) BeginDragFiles(paths []string, effect DragEffect, done func(
 		return false // одно перетаскивание за раз
 	}
 	d.phase = dragPending
-	d.body, d.effect, d.done, d.button = buildURIList(paths), effect&dragEffectAll, done, button
+	d.body, d.effect, d.done, d.button = native.BuildURIList(paths), effect&native.DragEffectAll, done, button
 	d.target, d.sentEnter, d.accepted, d.statusPending, d.queued = 0, false, false, false, false
 	d.busy, d.havePos, d.grab = false, false, false
 	d.proxy, d.proxies = 0, nil
@@ -237,7 +239,7 @@ func (w *X11Window) dragHandleEvent(buf []byte) bool {
 		w.noteButton(buf[1], true)
 		return true
 	case 2: // KeyPress: Esc отменяет
-		if w.x11VKForKey(buf[1]) == VK_ESCAPE {
+		if w.x11VKForKey(buf[1]) == native.VK_ESCAPE {
 			w.dragCancel()
 		}
 		return true
@@ -457,7 +459,7 @@ func (w *X11Window) dragUngrab() {
 // dragFinish заканчивает перетаскивание: захваты и владение снимаются, кнопка
 // мыши в движке отпускается (отпускание забрал захват), done получает итог.
 // Повторный вызов — no-op.
-func (w *X11Window) dragFinish(effect DragEffect) {
+func (w *X11Window) dragFinish(effect native.DragEffect) {
 	d := &w.drag
 	d.mu.Lock()
 	if d.phase == dragNone {
@@ -545,7 +547,7 @@ func (w *X11Window) sendXdndPosition(dest, proxy uint32, p x11DragPos) {
 	d.mu.Lock()
 	allowed := d.effect
 	d.mu.Unlock()
-	eff := dragEffectForKeys(allowed, p.state&4 != 0, p.state&1 != 0, p.state&8 != 0)
+	eff := native.DragEffectForKeys(allowed, p.state&4 != 0, p.state&1 != 0, p.state&8 != 0)
 	var data [5]uint32
 	data[0] = w.wid
 	data[2] = uint32(p.x&0xFFFF)<<16 | uint32(p.y&0xFFFF)
@@ -633,27 +635,27 @@ func (w *X11Window) x11WindowProp(win, prop uint32) uint32 {
 const x11AtomWindow = 33
 
 // dndEffectAtom — атом действия XDND для DragEffect.
-func (w *X11Window) dndEffectAtom(e DragEffect) uint32 {
+func (w *X11Window) dndEffectAtom(e native.DragEffect) uint32 {
 	switch e {
-	case DragEffectMove:
+	case native.DragEffectMove:
 		return w.atomXdndActionMove
-	case DragEffectLink:
+	case native.DragEffectLink:
 		return w.atomXdndActionLink
 	}
 	return w.atomXdndActionCopy
 }
 
 // dndActionEffect — обратный перевод атома действия.
-func (w *X11Window) dndActionEffect(a uint32) DragEffect {
+func (w *X11Window) dndActionEffect(a uint32) native.DragEffect {
 	switch {
 	case a == 0:
 		return 0
 	case a == w.atomXdndActionCopy:
-		return DragEffectCopy
+		return native.DragEffectCopy
 	case a == w.atomXdndActionMove:
-		return DragEffectMove
+		return native.DragEffectMove
 	case a == w.atomXdndActionLink:
-		return DragEffectLink
+		return native.DragEffectLink
 	}
 	return 0
 }
@@ -684,7 +686,7 @@ func (w *X11Window) x11RoundTrip(req []byte) []byte {
 			if extra == 0 {
 				return hdr
 			}
-			if extra > maxDnDBytes {
+			if extra > native.MaxDnDBytes {
 				w.x11Discard(extra)
 				return nil
 			}

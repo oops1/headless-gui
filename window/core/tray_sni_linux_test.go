@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -106,23 +107,23 @@ func testTrayMenu(clicks chan<- string) *widget.PopupMenu {
 }
 
 // layoutKids разбирает детей узла (ia{sv}av), пришедших как массив вариантов.
-func layoutKids(t *testing.T, node dbusStruct) []dbusStruct {
+func layoutKids(t *testing.T, node dbus.Struct) []dbus.Struct {
 	t.Helper()
 	raw, ok := node.Fields[2].([]any)
 	if !ok {
-		if arr, isArr := node.Fields[2].(dbusArray); isArr {
+		if arr, isArr := node.Fields[2].(dbus.Array); isArr {
 			for _, it := range arr.Items {
 				raw = append(raw, it)
 			}
 		}
 	}
-	out := make([]dbusStruct, 0, len(raw))
+	out := make([]dbus.Struct, 0, len(raw))
 	for _, v := range raw {
-		vr, ok := v.(dbusVariant)
+		vr, ok := v.(dbus.Variant)
 		if !ok {
 			t.Fatalf("ребёнок не variant: %#v", v)
 		}
-		st, ok := vr.Val.(dbusStruct)
+		st, ok := vr.Val.(dbus.Struct)
 		if !ok {
 			t.Fatalf("вариант ребёнка не (ia{sv}av): %#v", vr.Val)
 		}
@@ -132,11 +133,11 @@ func layoutKids(t *testing.T, node dbusStruct) []dbusStruct {
 }
 
 // layoutProps достаёт свойства узла (у собранного НАМИ дерева это
-// map[string]dbusVariant, у раскодированного с шины — map[string]any).
-func layoutProps(t *testing.T, node dbusStruct) map[string]any {
+// map[string]dbus.Variant, у раскодированного с шины — map[string]any).
+func layoutProps(t *testing.T, node dbus.Struct) map[string]any {
 	t.Helper()
 	switch p := node.Fields[1].(type) {
-	case map[string]dbusVariant:
+	case map[string]dbus.Variant:
 		out := map[string]any{}
 		for k, v := range p {
 			out[k] = v.Val
@@ -145,7 +146,7 @@ func layoutProps(t *testing.T, node dbusStruct) map[string]any {
 	case map[string]any:
 		out := map[string]any{}
 		for k, v := range p {
-			if vr, ok := v.(dbusVariant); ok {
+			if vr, ok := v.(dbus.Variant); ok {
 				out[k] = vr.Val
 			} else {
 				out[k] = v
@@ -266,11 +267,11 @@ func TestDBusMenuEventClicked(t *testing.T) {
 	menu.OnSelect = func(idx int, text string) { selects <- text }
 
 	tray := &linuxTray{menu: menu}
-	click := func(id int32) *dbusReply {
-		return tray.handleCall(&dbusMessage{
+	click := func(id int32) *dbus.Reply {
+		return tray.handleCall(&dbus.Message{
 			Path: dbusmenuPath, Interface: dbusmenuIface, Member: "Event",
 			Sig:  "isvu",
-			Body: []any{id, "clicked", dbusVariant{Sig: "s", Val: ""}, uint32(0)},
+			Body: []any{id, "clicked", dbus.Variant{Sig: "s", Val: ""}, uint32(0)},
 		})
 	}
 	waitClick := func(what string) {
@@ -326,7 +327,7 @@ func TestDBusMenuGetLayoutHandler(t *testing.T) {
 	menu := testTrayMenu(make(chan string, 8))
 	tray := &linuxTray{menu: menu, revision: 7}
 
-	rep := tray.handleCall(&dbusMessage{
+	rep := tray.handleCall(&dbus.Message{
 		Path: dbusmenuPath, Interface: dbusmenuIface, Member: "GetLayout",
 		Sig: "iias", Body: []any{int32(0), int32(-1), []string{}},
 	})
@@ -339,24 +340,24 @@ func TestDBusMenuGetLayoutHandler(t *testing.T) {
 	if rev, _ := rep.Body[0].(uint32); rev != 7 {
 		t.Errorf("ревизия %v, want 7", rep.Body[0])
 	}
-	if k := layoutKids(t, rep.Body[1].(dbusStruct)); len(k) != 5 {
+	if k := layoutKids(t, rep.Body[1].(dbus.Struct)); len(k) != 5 {
 		t.Errorf("детей в ответе %d", len(k))
 	}
 
 	// Поддерево по id пункта с подменю.
-	rep = tray.handleCall(&dbusMessage{
+	rep = tray.handleCall(&dbus.Message{
 		Path: dbusmenuPath, Interface: dbusmenuIface, Member: "GetLayout",
 		Sig: "iias", Body: []any{int32(4), int32(-1), []string{}},
 	})
 	if rep == nil || rep.ErrName != "" {
 		t.Fatalf("GetLayout(4) вернул %#v", rep)
 	}
-	if k := layoutKids(t, rep.Body[1].(dbusStruct)); len(k) != 2 {
+	if k := layoutKids(t, rep.Body[1].(dbus.Struct)); len(k) != 2 {
 		t.Errorf("детей у подменю %d, want 2", len(k))
 	}
 
 	// Неизвестный parentId — ошибка, а не паника.
-	rep = tray.handleCall(&dbusMessage{
+	rep = tray.handleCall(&dbus.Message{
 		Path: dbusmenuPath, Interface: dbusmenuIface, Member: "GetLayout",
 		Sig: "iias", Body: []any{int32(4242), int32(-1), []string{}},
 	})
@@ -365,20 +366,20 @@ func TestDBusMenuGetLayoutHandler(t *testing.T) {
 	}
 
 	// GetGroupProperties: пустой список ids — все узлы.
-	rep = tray.handleCall(&dbusMessage{
+	rep = tray.handleCall(&dbus.Message{
 		Path: dbusmenuPath, Interface: dbusmenuIface, Member: "GetGroupProperties",
 		Sig: "aias", Body: []any{[]any{}, []string{}},
 	})
 	if rep == nil || rep.ErrName != "" {
 		t.Fatalf("GetGroupProperties вернул %#v", rep)
 	}
-	arr, ok := rep.Body[0].(dbusArray)
+	arr, ok := rep.Body[0].(dbus.Array)
 	if !ok || len(arr.Items) != 8 {
 		t.Errorf("GetGroupProperties отдал %#v", rep.Body[0])
 	}
 
 	// AboutToShow не просит перечитать дерево.
-	rep = tray.handleCall(&dbusMessage{
+	rep = tray.handleCall(&dbus.Message{
 		Path: dbusmenuPath, Interface: dbusmenuIface, Member: "AboutToShow",
 		Sig: "i", Body: []any{int32(0)},
 	})
@@ -387,14 +388,14 @@ func TestDBusMenuGetLayoutHandler(t *testing.T) {
 	}
 
 	// Свойства самого меню.
-	rep = tray.handleCall(&dbusMessage{
+	rep = tray.handleCall(&dbus.Message{
 		Path: dbusmenuPath, Interface: ifaceProps, Member: "Get",
 		Sig: "ss", Body: []any{dbusmenuIface, "Version"},
 	})
 	if rep == nil || rep.ErrName != "" {
 		t.Fatalf("Get Version вернул %#v", rep)
 	}
-	if v, _ := rep.Body[0].(dbusVariant); v.Val != uint32(3) {
+	if v, _ := rep.Body[0].(dbus.Variant); v.Val != uint32(3) {
 		t.Errorf("Version = %#v", rep.Body[0])
 	}
 }
@@ -410,7 +411,7 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 	de := dialTestBus(t)
 
 	registered := make(chan string, 4)
-	watcher.setCallHandler(func(msg *dbusMessage) *dbusReply {
+	watcher.SetCallHandler(func(msg *dbus.Message) *dbus.Reply {
 		if msg.Path != sniWatcherPath {
 			return nil
 		}
@@ -418,13 +419,13 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 		case msg.Interface == sniWatcherIface && msg.Member == "RegisterStatusNotifierItem":
 			s, _ := msg.Body[0].(string)
 			registered <- s
-			return &dbusReply{}
+			return &dbus.Reply{}
 		case msg.Interface == ifaceProps && msg.Member == "Get":
-			return &dbusReply{Sig: "v", Body: []any{dbusVariant{Sig: "b", Val: true}}}
+			return &dbus.Reply{Sig: "v", Body: []any{dbus.Variant{Sig: "b", Val: true}}}
 		}
 		return nil
 	})
-	if err := watcher.requestName(sniWatcherName, 0x4 /*DO_NOT_QUEUE*/); err != nil {
+	if err := watcher.RequestName(sniWatcherName, 0x4 /*DO_NOT_QUEUE*/); err != nil {
 		t.Skipf("настоящий трей уже держит %s, подменять не будем: %v", sniWatcherName, err)
 	}
 
@@ -464,7 +465,7 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 	}
 
 	// ── «Панель» читает свойства иконки ──────────────────────────────────────
-	rep, err := de.call(itemName, sniItemPath, ifaceProps, "GetAll", "s", []any{sniItemIface})
+	rep, err := de.Call(itemName, sniItemPath, ifaceProps, "GetAll", "s", []any{sniItemIface})
 	if err != nil {
 		t.Fatalf("Properties.GetAll: %v", err)
 	}
@@ -473,7 +474,7 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 		t.Fatalf("GetAll вернул %#v", rep.Body[0])
 	}
 	strProp := func(name string) string {
-		v, _ := props[name].(dbusVariant)
+		v, _ := props[name].(dbus.Variant)
 		s, _ := v.Val.(string)
 		return s
 	}
@@ -486,20 +487,20 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 	if got := strProp("Title"); got != "headless-gui трей" {
 		t.Errorf("Title = %q", got)
 	}
-	if v, _ := props["ItemIsMenu"].(dbusVariant); v.Val != false {
+	if v, _ := props["ItemIsMenu"].(dbus.Variant); v.Val != false {
 		t.Errorf("ItemIsMenu = %#v", props["ItemIsMenu"])
 	}
-	if v, _ := props["Menu"].(dbusVariant); v.Val != dbusObjectPath(dbusmenuPath) {
+	if v, _ := props["Menu"].(dbus.Variant); v.Val != dbus.ObjectPath(dbusmenuPath) {
 		t.Errorf("Menu = %#v, want %s", props["Menu"], dbusmenuPath)
 	}
 
 	// IconPixmap: одна картинка 8×8, первые байты — ARGB непрозрачного синего.
-	pixVar, _ := props["IconPixmap"].(dbusVariant)
+	pixVar, _ := props["IconPixmap"].(dbus.Variant)
 	pixArr, ok := pixVar.Val.([]any)
 	if !ok || len(pixArr) != 1 {
 		t.Fatalf("IconPixmap = %#v", pixVar.Val)
 	}
-	pix, ok := pixArr[0].(dbusStruct)
+	pix, ok := pixArr[0].(dbus.Struct)
 	if !ok || len(pix.Fields) != 3 {
 		t.Fatalf("элемент IconPixmap = %#v", pixArr[0])
 	}
@@ -515,23 +516,23 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 	}
 
 	// ToolTip читается точечным Get.
-	rep, err = de.call(itemName, sniItemPath, ifaceProps, "Get", "ss", []any{sniItemIface, "ToolTip"})
+	rep, err = de.Call(itemName, sniItemPath, ifaceProps, "Get", "ss", []any{sniItemIface, "ToolTip"})
 	if err != nil {
 		t.Fatalf("Get ToolTip: %v", err)
 	}
-	tip, _ := rep.Body[0].(dbusVariant)
-	tipSt, ok := tip.Val.(dbusStruct)
+	tip, _ := rep.Body[0].(dbus.Variant)
+	tipSt, ok := tip.Val.(dbus.Struct)
 	if !ok || len(tipSt.Fields) != 4 || tipSt.Fields[2] != "headless-gui трей" {
 		t.Errorf("ToolTip = %#v", tip.Val)
 	}
 
 	// ── «Панель» забирает меню ───────────────────────────────────────────────
-	rep, err = de.call(itemName, dbusmenuPath, dbusmenuIface, "GetLayout", "iias",
+	rep, err = de.Call(itemName, dbusmenuPath, dbusmenuIface, "GetLayout", "iias",
 		[]any{int32(0), int32(-1), []string{}})
 	if err != nil {
 		t.Fatalf("GetLayout: %v", err)
 	}
-	root, ok := rep.Body[1].(dbusStruct)
+	root, ok := rep.Body[1].(dbus.Struct)
 	if !ok {
 		t.Fatalf("layout = %#v", rep.Body[1])
 	}
@@ -555,8 +556,8 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 	subID, _ := subKids[0].Fields[0].(int32)
 
 	// ── Клик по пункту подменю ───────────────────────────────────────────────
-	if _, err := de.call(itemName, dbusmenuPath, dbusmenuIface, "Event", "isvu",
-		[]any{subID, "clicked", dbusVariant{Sig: "s", Val: ""}, uint32(0)}); err != nil {
+	if _, err := de.Call(itemName, dbusmenuPath, dbusmenuIface, "Event", "isvu",
+		[]any{subID, "clicked", dbus.Variant{Sig: "s", Val: ""}, uint32(0)}); err != nil {
 		t.Fatalf("Event: %v", err)
 	}
 	select {
@@ -577,7 +578,7 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 	}
 
 	// ── Клик по самой иконке ─────────────────────────────────────────────────
-	if _, err := de.call(itemName, sniItemPath, sniItemIface, "Activate", "ii",
+	if _, err := de.Call(itemName, sniItemPath, sniItemIface, "Activate", "ii",
 		[]any{int32(10), int32(20)}); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
@@ -589,7 +590,7 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("Activate не доехал до колбэка клика")
 	}
-	if _, err := de.call(itemName, sniItemPath, sniItemIface, "SecondaryActivate", "ii",
+	if _, err := de.Call(itemName, sniItemPath, sniItemIface, "SecondaryActivate", "ii",
 		[]any{int32(0), int32(0)}); err != nil {
 		t.Fatalf("SecondaryActivate: %v", err)
 	}
@@ -602,18 +603,18 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 		t.Fatal("SecondaryActivate не доехал")
 	}
 	// ContextMenu и Scroll обязаны отвечать, а не молчать в таймаут.
-	if _, err := de.call(itemName, sniItemPath, sniItemIface, "ContextMenu", "ii",
+	if _, err := de.Call(itemName, sniItemPath, sniItemIface, "ContextMenu", "ii",
 		[]any{int32(0), int32(0)}); err != nil {
 		t.Errorf("ContextMenu: %v", err)
 	}
-	if _, err := de.call(itemName, sniItemPath, sniItemIface, "Scroll", "is",
+	if _, err := de.Call(itemName, sniItemPath, sniItemIface, "Scroll", "is",
 		[]any{int32(120), "vertical"}); err != nil {
 		t.Errorf("Scroll: %v", err)
 	}
 
 	// ── Смена меню шлёт LayoutUpdated ────────────────────────────────────────
 	updates := make(chan uint32, 4)
-	de.onSignal(func(msg *dbusMessage) {
+	de.OnSignal(func(msg *dbus.Message) {
 		if msg.Interface == dbusmenuIface && msg.Member == "LayoutUpdated" && len(msg.Body) > 0 {
 			rev, _ := msg.Body[0].(uint32)
 			select {
@@ -622,7 +623,7 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 			}
 		}
 	})
-	if err := de.addMatch("type='signal',interface='" + dbusmenuIface + "'"); err != nil {
+	if err := de.AddMatch("type='signal',interface='" + dbusmenuIface + "'"); err != nil {
 		t.Fatalf("AddMatch: %v", err)
 	}
 	menu.SetItems([]widget.MenuItem{{Text: "Только выход", OnClick: func() { clicks <- "Только выход" }}})
@@ -632,18 +633,18 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("LayoutUpdated после смены меню не пришёл")
 	}
-	rep, err = de.call(itemName, dbusmenuPath, dbusmenuIface, "GetLayout", "iias",
+	rep, err = de.Call(itemName, dbusmenuPath, dbusmenuIface, "GetLayout", "iias",
 		[]any{int32(0), int32(-1), []string{}})
 	if err != nil {
 		t.Fatalf("GetLayout после смены: %v", err)
 	}
-	if k := layoutKids(t, rep.Body[1].(dbusStruct)); len(k) != 1 {
+	if k := layoutKids(t, rep.Body[1].(dbus.Struct)); len(k) != 1 {
 		t.Errorf("после смены меню пунктов %d, want 1", len(k))
 	}
 
 	// ── Снятие иконки: имя освобождается ─────────────────────────────────────
 	tray.removeTrayIcon()
-	if de.nameHasOwner(itemName) {
+	if de.NameHasOwner(itemName) {
 		t.Errorf("после removeTrayIcon имя %s всё ещё занято", itemName)
 	}
 }
@@ -652,7 +653,7 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 // а не молчит и не паникует. Если трей в системе есть — проверять нечего.
 func TestTrayWithoutWatcher(t *testing.T) {
 	c := dialTestBus(t)
-	if c.nameHasOwner(sniWatcherName) {
+	if c.NameHasOwner(sniWatcherName) {
 		t.Skip("в системе работает настоящий StatusNotifierWatcher")
 	}
 	tray := &linuxTray{}

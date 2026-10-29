@@ -2,7 +2,11 @@
 
 package core
 
-import "image/color"
+import (
+	"image/color"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 // systheme_darwin.go — тема ОС на macOS: пока не реализована.
 //
@@ -26,7 +30,7 @@ func detectSystemTheme() SystemTheme {
 
 // watchSystemTheme — наблюдения за темой на macOS нет (см. выше); nil означает
 // «платформа наблюдать не умеет».
-func watchSystemTheme(native NativeWindow, emit func(SystemTheme)) (stop func()) {
+func watchSystemTheme(nw native.NativeWindow, emit func(SystemTheme)) (stop func()) {
 	return nil
 }
 
@@ -34,6 +38,6 @@ func watchSystemTheme(native NativeWindow, emit func(SystemTheme)) (stop func())
 func detectSystemAccent() (color.RGBA, bool) { return color.RGBA{}, false }
 
 // watchSystemAccent — наблюдения нет; nil означает «платформа наблюдать не умеет».
-func watchSystemAccent(native NativeWindow, emit func(color.RGBA, bool)) (stop func()) {
+func watchSystemAccent(nw native.NativeWindow, emit func(color.RGBA, bool)) (stop func()) {
 	return nil
 }

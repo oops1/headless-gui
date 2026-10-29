@@ -43,6 +43,8 @@ import (
 	"sync"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 const (
@@ -61,12 +63,12 @@ const (
 
 // wlDragSource — перетаскивание, начатое окном. Нулевое значение — перетаскивания нет.
 type wlDragSource struct {
-	mu       sync.Mutex
-	id       uint32 // wl_data_source; 0 — перетаскивания нет
-	body     string // text/uri-list
-	done     func(DragEffect)
-	action   DragEffect // действие, о котором сообщил компоновщик
-	dropped  bool       // кнопку отпустили над приёмником (dnd_drop_performed)
+	mu      sync.Mutex
+	id      uint32 // wl_data_source; 0 — перетаскивания нет
+	body    string // text/uri-list
+	done    func(native.DragEffect)
+	action  native.DragEffect // действие, о котором сообщил компоновщик
+	dropped bool              // кнопку отпустили над приёмником (dnd_drop_performed)
 
 	// Значок: поверхность и буфер (0 — значка нет). Освобождаются в dragFinish.
 	iconSurf, iconBuf uint32
@@ -81,24 +83,24 @@ func (d *wlDragSource) is(id uint32) bool {
 
 // wlActionsFor переводит допустимые действия в маску wl_data_device_manager.
 // Link в протоколе нет: он отбрасывается.
-func wlActionsFor(effect DragEffect) uint32 {
+func wlActionsFor(effect native.DragEffect) uint32 {
 	var m uint32
-	if effect&DragEffectCopy != 0 {
+	if effect&native.DragEffectCopy != 0 {
 		m |= wlDndActionCopy
 	}
-	if effect&DragEffectMove != 0 {
+	if effect&native.DragEffectMove != 0 {
 		m |= wlDndActionMove
 	}
 	return m
 }
 
 // wlEffectFromAction — обратный перевод итогового действия компоновщика.
-func wlEffectFromAction(a uint32) DragEffect {
+func wlEffectFromAction(a uint32) native.DragEffect {
 	switch a {
 	case wlDndActionCopy:
-		return DragEffectCopy
+		return native.DragEffectCopy
 	case wlDndActionMove:
-		return DragEffectMove
+		return native.DragEffectMove
 	}
 	return 0
 }
@@ -106,12 +108,12 @@ func wlEffectFromAction(a uint32) DragEffect {
 // BeginDragFiles начинает перетаскивание файлов (fileDragSource):
 // wl_data_device.start_drag. Нужны: wl_data_device, зажатая кнопка мыши и её
 // serial; фокус указателя — на самом окне, не на попапе.
-func (w *WaylandWindow) BeginDragFiles(paths []string, effect DragEffect, done func(DragEffect)) bool {
+func (w *WaylandWindow) BeginDragFiles(paths []string, effect native.DragEffect, done func(native.DragEffect)) bool {
 	return w.beginDrag(paths, effect, nil, image.Point{}, done)
 }
 
 // BeginDragFilesImage — BeginDragFiles со значком (fileDragImageSource).
-func (w *WaylandWindow) BeginDragFilesImage(paths []string, effect DragEffect, img *image.RGBA, hotspot image.Point, done func(DragEffect)) bool {
+func (w *WaylandWindow) BeginDragFilesImage(paths []string, effect native.DragEffect, img *image.RGBA, hotspot image.Point, done func(native.DragEffect)) bool {
 	return w.beginDrag(paths, effect, img, hotspot, done)
 }
 
@@ -121,7 +123,7 @@ func (w *WaylandWindow) dragImageSupported() bool {
 		w.shmID != 0 && w.compositorID != 0
 }
 
-func (w *WaylandWindow) beginDrag(paths []string, effect DragEffect, img *image.RGBA, hot image.Point, done func(DragEffect)) bool {
+func (w *WaylandWindow) beginDrag(paths []string, effect native.DragEffect, img *image.RGBA, hot image.Point, done func(native.DragEffect)) bool {
 	actions := wlActionsFor(effect)
 	serial := w.ptrButtonSerial.Load()
 	if len(paths) == 0 || actions == 0 || done == nil {
@@ -138,12 +140,12 @@ func (w *WaylandWindow) beginDrag(paths []string, effect DragEffect, img *image.
 		return false // одно перетаскивание за раз
 	}
 	id := w.newID()
-	d.id, d.body, d.done = id, buildURIList(paths), done
+	d.id, d.body, d.done = id, native.BuildURIList(paths), done
 	d.action, d.dropped = 0, false
 	d.mu.Unlock()
 
 	w.send(newWlMsg(w.dataDevMgrID, wlDataDevMgrCreateDataSource).putUint(id), -1)
-	w.send(newWlMsg(id, wlDataSourceOffer).putString(mimeTextUriList), -1)
+	w.send(newWlMsg(id, wlDataSourceOffer).putString(native.MimeTextURIList), -1)
 	w.send(newWlMsg(id, wlDataSourceSetActions).putUint(actions), -1)
 
 	// Значок: поверхность с буфером; без него (или если не вышло) — NULL.
@@ -209,7 +211,7 @@ func (w *WaylandWindow) dragHandleSend(mime string, fd int) {
 		return
 	}
 	f := os.NewFile(uintptr(fd), "wl-drag-send")
-	if mime != mimeTextUriList || id == 0 {
+	if mime != native.MimeTextURIList || id == 0 {
 		f.Close()
 		return
 	}
@@ -221,7 +223,7 @@ func (w *WaylandWindow) dragHandleSend(mime string, fd int) {
 
 // dragFinish заканчивает перетаскивание: источник уничтожается, приложению
 // сообщается итог (0 — отмена). Повторный вызов — no-op.
-func (w *WaylandWindow) dragFinish(src uint32, effect DragEffect) {
+func (w *WaylandWindow) dragFinish(src uint32, effect native.DragEffect) {
 	d := &w.drag
 	d.mu.Lock()
 	if d.id == 0 || d.id != src {

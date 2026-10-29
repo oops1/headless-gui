@@ -15,7 +15,7 @@ package core
 // каждая картинка получает свой wl_buffer: память отдаётся компоновщику пулом,
 // который тут же уничтожается (отображение живёт, пока жив буфер), и своё
 // отображение снимается. Готовые буферы лежат в кэше по ключу картинки, не более
-// cursorCacheSize; вытесненный — wl_buffer.destroy, кроме того, что прикреплён к
+// pointer.CursorCacheSize; вытесненный — wl_buffer.destroy, кроме того, что прикреплён к
 // курсорной поверхности сейчас.
 //
 // Масштаб. Пиксели курсора — физические. На масштабе окна k курсорная
@@ -29,6 +29,7 @@ package core
 import (
 	"golang.org/x/sys/unix"
 
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -87,8 +88,8 @@ func (w *WaylandWindow) setCursorByImage(ci *widget.CursorImage) bool {
 	w.send(newWlMsg(w.cursorSurfID, wlSurfaceCommit), -1)
 	w.send(newWlMsg(w.pointerID, wlPointerSetCursor).
 		putUint(w.ptrEnterSerial.Load()).putUint(w.cursorSurfID).
-		putInt(int32(cursorScaledHotspot(ci.HotX, scale))).
-		putInt(int32(cursorScaledHotspot(ci.HotY, scale))), -1)
+		putInt(int32(pointer.CursorScaledHotspot(ci.HotX, scale))).
+		putInt(int32(pointer.CursorScaledHotspot(ci.HotY, scale))), -1)
 	w.curSurfBuf = buf.bufID
 	return true
 }
@@ -108,11 +109,11 @@ func (w *WaylandWindow) cursorBufferScale() int {
 // imageBuffer возвращает буфер картинки: из кэша либо новый. Под w.cursorMu.
 func (w *WaylandWindow) imageBuffer(ci *widget.CursorImage) (wlImgBuf, bool) {
 	if w.imgCursors == nil {
-		w.imgCursors = newCursorLRU[wlImgBuf](cursorCacheSize,
+		w.imgCursors = pointer.NewCursorLRU[wlImgBuf](pointer.CursorCacheSize,
 			func(b wlImgBuf) { w.send(newWlMsg(b.bufID, wlBufferDestroy), -1) },
 			func(b wlImgBuf) bool { return b.bufID == w.curSurfBuf })
 	}
-	if b, ok := w.imgCursors.get(ci.Key); ok {
+	if b, ok := w.imgCursors.Get(ci.Key); ok {
 		return b, true
 	}
 	if w.shmID == 0 || w.compositorID == 0 {
@@ -130,7 +131,7 @@ func (w *WaylandWindow) imageBuffer(ci *widget.CursorImage) (wlImgBuf, bool) {
 		wlLog("курсор-картинка: ftruncate: %v", err)
 		return wlImgBuf{}, false
 	}
-	if _, err := unix.Write(fd, cursorPremulBGRA(ci)); err != nil {
+	if _, err := unix.Write(fd, pointer.CursorPremulBGRA(ci)); err != nil {
 		wlLog("курсор-картинка: write: %v", err)
 		return wlImgBuf{}, false
 	}
@@ -144,7 +145,7 @@ func (w *WaylandWindow) imageBuffer(ci *widget.CursorImage) (wlImgBuf, bool) {
 	w.send(newWlMsg(poolID, wlShmPoolDestroy), -1)
 
 	b := wlImgBuf{bufID: bufID}
-	w.imgCursors.put(ci.Key, b)
+	w.imgCursors.Put(ci.Key, b)
 	w.imgCreated++
 	return b, true
 }

@@ -19,6 +19,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 const (
@@ -281,7 +283,7 @@ func wlReadString(b []byte, off int) (string, int, bool) {
 // Границы — логические (в тех единицах, в которых компоновщик раскладывает окна):
 // из xdg_output, а без него — положение из geometry и размер режима, делённый
 // на масштаб (с учётом поворота). Масштаб — целый масштаб wl_output.
-func (i *wlOutputInfo) monitor() (Monitor, bool) {
+func (i *wlOutputInfo) monitor() (native.Monitor, bool) {
 	scale := max(i.scale, 1)
 	var b image.Rectangle
 	switch {
@@ -299,7 +301,7 @@ func (i *wlOutputInfo) monitor() (Monitor, bool) {
 		b = image.Rect(int(i.x), int(i.y), int(i.x+w/scale), int(i.y+h/scale))
 	}
 	if b.Empty() {
-		return Monitor{}, false
+		return native.Monitor{}, false
 	}
 	name := i.xdgName
 	if name == "" {
@@ -311,7 +313,7 @@ func (i *wlOutputInfo) monitor() (Monitor, bool) {
 	if name == "" {
 		name = trimJoin(i.make, i.model)
 	}
-	return Monitor{Name: name, Bounds: b, Work: b, Scale: float64(scale), id: uint64(i.global)}, true
+	return native.MonitorWithKey(native.Monitor{Name: name, Bounds: b, Work: b, Scale: float64(scale)}, uint64(i.global)), true
 }
 
 func trimJoin(a, b string) string {
@@ -326,10 +328,10 @@ func trimJoin(a, b string) string {
 
 // monitors возвращает известные мониторы. Главным считается первый (в порядке
 // глобалов): у wl_output понятия «основной» нет.
-func (w *WaylandWindow) monitors() []Monitor {
+func (w *WaylandWindow) monitors() []native.Monitor {
 	w.outs.mu.Lock()
 	defer w.outs.mu.Unlock()
-	var out []Monitor
+	var out []native.Monitor
 	for _, i := range w.outs.list {
 		if m, ok := i.monitor(); ok {
 			m.Primary = len(out) == 0
@@ -341,7 +343,7 @@ func (w *WaylandWindow) monitors() []Monitor {
 
 // monitorOfWindow — монитор, на который компоновщик вывел окно
 // (wl_surface.enter). Реализует monitorSource.
-func (w *WaylandWindow) monitorOfWindow() (Monitor, bool) {
+func (w *WaylandWindow) monitorOfWindow() (native.Monitor, bool) {
 	w.scale.mu.Lock()
 	entered := w.scale.entered
 	w.scale.mu.Unlock()
@@ -364,7 +366,7 @@ func (w *WaylandWindow) monitorOfWindow() (Monitor, bool) {
 		m.Primary = true
 		return m, ok
 	}
-	return Monitor{}, false
+	return native.Monitor{}, false
 }
 
 // wlQueryTimeout — сколько ждать композитор при опросе мониторов (переменная —
@@ -373,7 +375,7 @@ var wlQueryTimeout = 2 * time.Second
 
 // queryMonitors опрашивает мониторы по отдельному подключению (окна нет) и
 // закрывает его. Реализует window.Monitors на Wayland.
-func (w *WaylandWindow) queryMonitors() []Monitor {
+func (w *WaylandWindow) queryMonitors() []native.Monitor {
 	defer func() {
 		w.repeat.cancel()
 		w.conn.Close()

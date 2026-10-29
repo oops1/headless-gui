@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -18,7 +19,7 @@ import (
 // popupFakeNative — окно ОС попапа: запоминает колбэки ввода, вызовы потока
 // окна и умеет выкройку (как Win32).
 type popupFakeNative struct {
-	NativeWindow
+	native.NativeWindow
 	onMove   func(x, y int)
 	onButton func(x, y, b int, p bool)
 	invoked  []func()

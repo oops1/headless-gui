@@ -13,6 +13,10 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/pointer"
 )
 
 // ─── Win32 API константы ────────────────────────────────────────────────────
@@ -338,7 +342,7 @@ type Win32Window struct {
 
 	// initial — положение и «развёрнуто» от приложения (initial.go); читает
 	// Create. Задаётся до создания окна.
-	initial initialPlacement
+	initial native.InitialPlacement
 
 	maximized bool
 
@@ -404,20 +408,20 @@ type Win32Window struct {
 	cursorHidden bool            // курсор спрятан (CursorNone): WM_SETCURSOR ставит SetCursor(NULL)
 
 	// imgCursors — курсоры из картинок (Engine.SetCursorImage), по ключу
-	// содержимого, не более cursorCacheSize; imgCreated — сколько курсоров
+	// содержимого, не более pointer.CursorCacheSize; imgCreated — сколько курсоров
 	// построено за жизнь окна (в тестах проверяется, что кэш работает).
 	// Только поток окна. См. cursorimage_windows.go.
-	imgCursors *cursorLRU[uintptr]
+	imgCursors *pointer.CursorLRU[uintptr]
 	imgCreated int
 
 	// lock — захват указателя (SetPointerLock), см. pointerlock_windows.go.
 	lock win32PointerLock
 
 	// Уход указателя: запросы TrackMouseEvent на клиентскую и нерабочую
-	// область (pointerleave.go, mouse_windows.go). trackMouse — подмена
+	// область (platform/pointer/pointerleave.go, mouse_windows.go). trackMouse — подмена
 	// системного вызова в тестах.
-	leave      leaveTracker
-	ncLeave    leaveTracker
+	leave      pointer.LeaveTracker
+	ncLeave    pointer.LeaveTracker
 	trackMouse func(hwnd uintptr, flags uint32) bool
 
 	// Трей/уведомления (Shell_NotifyIcon) — см. tray_windows.go.
@@ -455,7 +459,7 @@ type Win32Window struct {
 	// hitTest — зоны окна для системы (hittest_windows.go). Колбэк зовётся
 	// из насоса сообщений, а ставится с горутины приложения — отсюда замок.
 	hitTestMu sync.Mutex
-	hitTest   func(x, y int) HitArea
+	hitTest   func(x, y int) native.HitArea
 	// highSurrogate — первая половина суррогатной пары UTF-16, ждущая
 	// второго WM_CHAR.
 	highSurrogate   rune
@@ -463,7 +467,7 @@ type Win32Window struct {
 	onKeyUp         func(vk int)
 	// onRawKey — приёмник клавиш со скан-кодом (rawKeySource): когда задан,
 	// onKeyDown/onKeyDownRepeat/onKeyUp не вызываются.
-	onRawKey func(k rawKey)
+	onRawKey func(k keyboard.RawKey)
 	// onWheelRaw — приёмник сырого колеса (wheelRawSource).
 	onWheelRaw func(x, y int, dx, dy float64, precise bool, legacy func())
 	onChar     func(r rune)
@@ -573,7 +577,7 @@ func (w *Win32Window) markSecondary() { w.noQuit = true }
 // SetOwner делает окно принадлежащим parent (Win32 GWLP_HWNDPARENT): оно всегда
 // поверх owner'а и сворачивается вместе с ним. Помечает окно как вторичное
 // (noQuit) — его закрытие не завершает цикл сообщений приложения.
-func (w *Win32Window) SetOwner(parent NativeWindow) {
+func (w *Win32Window) SetOwner(parent native.NativeWindow) {
 	w.noQuit = true
 	if w.hwnd == 0 {
 		return
@@ -605,7 +609,7 @@ func (w *Win32Window) SetForeground() {
 	}
 }
 
-func NewNativeWindow() NativeWindow {
+func NewNativeWindow() native.NativeWindow {
 	return &Win32Window{}
 }
 
@@ -619,7 +623,7 @@ func (w *Win32Window) Create(title string, width, height int) error {
 	exStyle := uint32(wsExAppwindow)
 	// Развёрнутое окно создаётся скрытым и первым же показом разворачивается
 	// (initial.go): положение — в createInternal (место создания).
-	_, _, style, show := win32InitialCreate(w.initial, style, swShow, 0, 0)
+	_, _, style, show := native.Win32InitialCreate(w.initial, style, swShow, 0, 0)
 	if err := w.createInternal(title, width, height, style, exStyle, show, true); err != nil {
 		return err
 	}
@@ -742,7 +746,7 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 		y = (screenH - height) / 2
 		// Положение от приложения (SetInitialBounds) вместо центра экрана:
 		// окно рождается сразу на месте, без прыжка после показа.
-		x, y, _, _ = win32InitialCreate(w.initial, 0, 0, x, y)
+		x, y, _, _ = native.Win32InitialCreate(w.initial, 0, 0, x, y)
 	}
 
 	hwnd, _, err := procCreateWindowExW.Call(
@@ -1023,7 +1027,7 @@ func convertFrameToBGRA(dst []byte, img *image.RGBA, dirty image.Rectangle, widt
 	for y := dirty.Min.Y; y < dirty.Max.Y; y++ {
 		s := y*stride + x0
 		d := y*width*4 + x0
-		swapRBRow(dst[d:d+rowLen], src[s:s+rowLen])
+		native.SwapRBRow(dst[d:d+rowLen], src[s:s+rowLen])
 	}
 }
 
@@ -1315,7 +1319,7 @@ func (w *Win32Window) SetOnKeyDownRepeat(fn func(vk int, repeat bool)) {
 func (w *Win32Window) SetOnKeyUp(fn func(vk int)) { w.onKeyUp = fn }
 
 // SetOnRawKey подписывает приёмник клавиш со скан-кодом. Реализует rawKeySource.
-func (w *Win32Window) SetOnRawKey(fn func(k rawKey)) { w.onRawKey = fn }
+func (w *Win32Window) SetOnRawKey(fn func(k keyboard.RawKey)) { w.onRawKey = fn }
 
 // SetOnWheelRaw подписывает приёмник сырого колеса. Реализует wheelRawSource.
 func (w *Win32Window) SetOnWheelRaw(fn func(x, y int, dx, dy float64, precise bool, legacy func())) {
@@ -1663,7 +1667,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 	case wmMouseleave:
 		// Указатель покинул клиентскую область (TrackMouseEvent, см.
 		// clientMouseMove): тот же путь, что LeaveNotify на X11. Переход на
-		// кнопку заголовка уходом не считается — mouseLeaveReal.
+		// кнопку заголовка уходом не считается — pointer.MouseLeaveReal.
 		w.handleMouseLeave(hwnd)
 		return 0
 
@@ -1811,7 +1815,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 				}
 			}
 			if w.onWheelRaw != nil {
-				dx, dy, precise := win32WheelRaw(delta, true)
+				dx, dy, precise := pointer.Win32WheelRaw(delta, true)
 				w.onWheelRaw(x, y, dx, dy, precise, legacy)
 			} else {
 				legacy()
@@ -1851,7 +1855,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			}
 		}
 		if w.onWheelRaw != nil && delta != 0 {
-			dx, dy, precise := win32WheelRaw(delta, false)
+			dx, dy, precise := pointer.Win32WheelRaw(delta, false)
 			w.onWheelRaw(x, y, dx, dy, precise, legacy)
 		} else {
 			legacy()
@@ -1882,9 +1886,9 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		// Бит 30 lParam — «клавиша уже была нажата», то есть это автоповтор,
 		// а не новое нажатие (WM_KEYDOWN, previous key state).
-		scan, ext, repeat := win32KeyLParam(lparam)
+		scan, ext, repeat := keyboard.Win32KeyLParam(lparam)
 		if w.onRawKey != nil {
-			w.onRawKey(rawKey{VK: int(wparam), Scan: scan, Extended: ext, Pressed: true, Repeat: repeat})
+			w.onRawKey(keyboard.RawKey{VK: int(wparam), Scan: scan, Extended: ext, Pressed: true, Repeat: repeat})
 		} else if w.onKeyDownRepeat != nil {
 			w.onKeyDownRepeat(int(wparam), repeat)
 		} else if w.onKeyDown != nil {
@@ -1900,8 +1904,8 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			return 0
 		}
 		if w.onRawKey != nil {
-			scan, ext, _ := win32KeyLParam(lparam)
-			w.onRawKey(rawKey{VK: int(wparam), Scan: scan, Extended: ext})
+			scan, ext, _ := keyboard.Win32KeyLParam(lparam)
+			w.onRawKey(keyboard.RawKey{VK: int(wparam), Scan: scan, Extended: ext})
 		} else if w.onKeyUp != nil {
 			w.onKeyUp(int(wparam))
 		}
@@ -1914,8 +1918,8 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 
 	case wmSyscommand:
 		// Вход в меню окна по F10 или одиночному Alt забирал бы клавиатуру у
-		// приложения, которое само рисует строку меню (syskeymenu.go).
-		if swallowKeyboardMenu(wparam, lparam) {
+		// приложения, которое само рисует строку меню (platform/keyboard/syskeymenu.go).
+		if keyboard.SwallowKeyboardMenu(wparam, lparam) {
 			return 0
 		}
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(umsg), wparam, lparam)

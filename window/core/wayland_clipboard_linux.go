@@ -27,7 +27,7 @@ package core
 // скачивание закончено.
 //
 // Виртуальные файлы (SetVirtualFiles) — те же типы списка файлов, но пути берутся
-// у приложения в момент запроса (clipboard_virtual.go): отложенность «по
+// у приложения в момент запроса (platform/native/clipboard_virtual.go): отложенность «по
 // вставке» без своей папки и очистки.
 //
 // Вставка: компоновщик присылает selection с готовым wl_data_offer; просим у
@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/internal/clipimage"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -78,10 +79,6 @@ const (
 	// когда файлы скачаны, а это секунды и минуты. Предел всё же есть —
 	// владелец, который не закрыл канал вовсе, не должен держать вызов вечно.
 	clipboardFilesTimeout = 10 * time.Minute
-
-	// maxClipboardBytes — предел на вставку: буфер обмена приходит извне, и
-	// доверять его размеру нельзя.
-	maxClipboardBytes = 16 << 20
 )
 
 // wlClipboard — буфер обмена одного Wayland-соединения.
@@ -111,9 +108,9 @@ type wlClipboard struct {
 	// offerURIList / offerGnome — offer предлагает список файлов этими типами.
 	offerURIList, offerGnome bool
 	// ownedImg — изображение, которым мы владеем; nil — отдаём не картинку.
-	ownedImg *ownedImage
+	ownedImg *native.OwnedImage
 	// ownedVirt — обещанные виртуальные файлы; nil — не отдаём.
-	ownedVirt *clipVirtual
+	ownedVirt *native.ClipVirtual
 	// offerImage — читаемый тип изображения из объявленных offer'ом
 	// (image/png, а при его отсутствии image/bmp); пусто — картинки нет.
 	offerImage string
@@ -139,7 +136,7 @@ func (c *wlClipboard) SetHTML(html, plain string) { c.setSelection(plain, html, 
 //
 // Реализует widget.ClipboardFilesProvider.
 func (c *wlClipboard) SetFiles(paths []string, cut bool) {
-	c.setSelection(filesPlainText(paths), "", append([]string(nil), paths...), cut, nil, nil)
+	c.setSelection(native.FilesPlainText(paths), "", append([]string(nil), paths...), cut, nil, nil)
 }
 
 var _ widget.ClipboardVirtualFilesProvider = (*wlClipboard)(nil)
@@ -153,7 +150,7 @@ func (c *wlClipboard) SetVirtualFiles(files []widget.VirtualFile, open func(int)
 	if c == nil || c.w == nil || c.w.dataDeviceID == 0 || c.w.dataDevMgrID == 0 {
 		return widget.ErrClipboardVirtualUnsupported
 	}
-	v, err := newClipVirtual(files, open, opts)
+	v, err := native.NewClipVirtual(files, open, opts)
 	if err != nil {
 		return err
 	}
@@ -161,7 +158,7 @@ func (c *wlClipboard) SetVirtualFiles(files []widget.VirtualFile, open func(int)
 		// Компоновщик принимает set_selection только с serial'ом недавнего ввода.
 		return fmt.Errorf("window: нет serial'а ввода для set_selection: %w", widget.ErrClipboardVirtualUnsupported)
 	}
-	c.setSelection(v.names(), "", nil, false, nil, v)
+	c.setSelection(v.Names(), "", nil, false, nil, v)
 	return nil
 }
 
@@ -176,7 +173,7 @@ func (c *wlClipboard) GetVirtualFiles() ([]widget.VirtualFile, bool) {
 	if v == nil || src == 0 {
 		return nil, false
 	}
-	return append([]widget.VirtualFile(nil), v.files...), true
+	return append([]widget.VirtualFile(nil), v.Files...), true
 }
 
 // OpenVirtualFile открывает содержимое нашего обещанного файла (open приложения).
@@ -187,7 +184,7 @@ func (c *wlClipboard) OpenVirtualFile(index int) (io.ReadCloser, error) {
 	c.mu.Lock()
 	v := c.ownedVirt
 	c.mu.Unlock()
-	return v.openFile(index)
+	return v.OpenFile(index)
 }
 
 // Cleanup снимает обещание виртуальных файлов, если оно ещё в буфере: источник
@@ -210,14 +207,14 @@ func (c *wlClipboard) Cleanup() {
 	if src != 0 {
 		c.w.send(newWlMsg(src, wlDataSourceDestroy), -1)
 	}
-	v.drop()
+	v.Drop()
 }
 
 // setSelection объявляет источник: простой текст всегда, text/html — если есть
 // оформленная версия, типы списка файлов — если отдаём файлы, image/png — если
 // отдаём картинку (тогда текста нет вовсе: вставка в редактор пустой строки
 // вместо отказа сбивала бы с толку).
-func (c *wlClipboard) setSelection(s, html string, files []string, cut bool, img *ownedImage, virt *clipVirtual) {
+func (c *wlClipboard) setSelection(s, html string, files []string, cut bool, img *native.OwnedImage, virt *native.ClipVirtual) {
 	if c == nil || c.w == nil {
 		return
 	}
@@ -240,7 +237,7 @@ func (c *wlClipboard) setSelection(s, html string, files []string, cut bool, img
 	oldVirt := c.ownedVirt
 	c.ownedVirt = virt
 	c.mu.Unlock()
-	oldVirt.drop()
+	oldVirt.Drop()
 
 	if old != 0 {
 		w.send(newWlMsg(old, wlDataSourceDestroy), -1)
@@ -248,12 +245,12 @@ func (c *wlClipboard) setSelection(s, html string, files []string, cut bool, img
 	w.send(newWlMsg(w.dataDevMgrID, wlDataDevMgrCreateDataSource).putUint(id), -1)
 	mimes := []string{mimeTextUTF8, mimeTextPlain, mimeUTF8Str, mimeTextStr}
 	if html != "" {
-		mimes = append(mimes, mimeTextHTML)
+		mimes = append(mimes, native.MimeTextHTML)
 	}
 	if len(files) > 0 || virt != nil {
 		// Файлы — первыми: получатель, который перебирает типы по порядку,
 		// должен увидеть их раньше текста.
-		mimes = append([]string{mimeTextUriList, mimeGnomeCopiedFiles}, mimes...)
+		mimes = append([]string{native.MimeTextURIList, native.MimeGnomeCopiedFiles}, mimes...)
 	}
 	if img != nil {
 		mimes = []string{clipimage.MimePNG}
@@ -318,7 +315,7 @@ func (c *wlClipboard) GetHTML() (string, bool) {
 	if len(data) == 0 {
 		return "", false
 	}
-	html = clipboardHTMLToString(data)
+	html = native.ClipboardHTMLToString(data)
 	return html, html != ""
 }
 
@@ -354,14 +351,14 @@ func (c *wlClipboard) GetFiles() ([]string, bool, bool) {
 		return nil, false, false
 	}
 	if gnome {
-		data := c.receiveTimeout(offer, mimeGnomeCopiedFiles, clipboardFilesTimeout)
-		if p, cut, ok := parseGnomeCopiedFiles(string(data)); ok {
+		data := c.receiveTimeout(offer, native.MimeGnomeCopiedFiles, clipboardFilesTimeout)
+		if p, cut, ok := native.ParseGnomeCopiedFiles(string(data)); ok {
 			return p, cut, true
 		}
 	}
 	if uri {
-		data := c.receiveTimeout(offer, mimeTextUriList, clipboardFilesTimeout)
-		if p, ok := parseClipboardURIList(string(data)); ok {
+		data := c.receiveTimeout(offer, native.MimeTextURIList, clipboardFilesTimeout)
+		if p, ok := native.ParseClipboardURIList(string(data)); ok {
 			return p, false, true
 		}
 	}
@@ -387,7 +384,7 @@ func (c *wlClipboard) receiveTimeout(offer uint32, mime string, timeout time.Dur
 	done := make(chan []byte, 1)
 	go func() {
 		defer r.Close()
-		data, _ := io.ReadAll(io.LimitReader(r, maxClipboardBytes))
+		data, _ := io.ReadAll(io.LimitReader(r, native.MaxClipboardBytes))
 		done <- data
 	}()
 	select {
@@ -438,7 +435,7 @@ func (c *wlClipboard) receiveIdle(offer uint32, mime string, idle time.Duration,
 // handleSelection запоминает offer, присланный компоновщиком как содержимое
 // буфера обмена. id == 0 означает «буфер пуст».
 func (c *wlClipboard) handleSelection(id uint32) {
-	var dropVirt *clipVirtual
+	var dropVirt *native.ClipVirtual
 	c.mu.Lock()
 	old := c.offer
 	c.offer, c.offerText, c.offerHTML = id, false, ""
@@ -459,7 +456,7 @@ func (c *wlClipboard) handleSelection(id uint32) {
 		}
 	}
 	c.mu.Unlock()
-	dropVirt.drop()
+	dropVirt.Drop()
 
 	if old != 0 && old != id {
 		c.w.send(newWlMsg(old, wlDataOfferDestroy), -1)
@@ -476,16 +473,16 @@ func (c *wlClipboard) handleSourceSend(source uint32, mime string, fd int) {
 	c.mu.Lock()
 	ours, text := c.source == source, c.owned
 	img := c.ownedImg
-	var virt *clipVirtual
+	var virt *native.ClipVirtual
 	switch {
-	case c.ownedVirt != nil && (mime == mimeTextUriList || mime == mimeGnomeCopiedFiles):
+	case c.ownedVirt != nil && (mime == native.MimeTextURIList || mime == native.MimeGnomeCopiedFiles):
 		virt = c.ownedVirt
-	case isHTMLMime(mime) && c.ownedHTML != "":
+	case native.IsHTMLMime(mime) && c.ownedHTML != "":
 		text = c.ownedHTML
-	case mime == mimeTextUriList && len(c.ownedFiles) > 0:
-		text = buildURIList(c.ownedFiles)
-	case mime == mimeGnomeCopiedFiles && len(c.ownedFiles) > 0:
-		text = buildGnomeCopiedFiles(c.ownedFiles, c.ownedCut)
+	case mime == native.MimeTextURIList && len(c.ownedFiles) > 0:
+		text = native.BuildURIList(c.ownedFiles)
+	case mime == native.MimeGnomeCopiedFiles && len(c.ownedFiles) > 0:
+		text = native.BuildGnomeCopiedFiles(c.ownedFiles, c.ownedCut)
 	}
 	c.mu.Unlock()
 	if fd < 0 {
@@ -521,10 +518,10 @@ func (c *wlClipboard) handleSourceSend(source uint32, mime string, fd int) {
 			if err != nil || len(paths) == 0 {
 				return
 			}
-			if mime == mimeGnomeCopiedFiles {
-				io.WriteString(f, buildGnomeCopiedFiles(paths, false))
+			if mime == native.MimeGnomeCopiedFiles {
+				io.WriteString(f, native.BuildGnomeCopiedFiles(paths, false))
 			} else {
-				io.WriteString(f, buildURIList(paths))
+				io.WriteString(f, native.BuildURIList(paths))
 			}
 		}()
 		return
@@ -542,7 +539,7 @@ func (c *wlClipboard) handleSourceSend(source uint32, mime string, fd int) {
 func (c *wlClipboard) handleSourceCancelled(source uint32) {
 	c.mu.Lock()
 	ours := c.source == source
-	var virt *clipVirtual
+	var virt *native.ClipVirtual
 	if ours {
 		c.source, c.owned, c.ownedHTML = 0, "", ""
 		c.ownedFiles, c.ownedCut, c.ownedImg = nil, false, nil
@@ -551,7 +548,7 @@ func (c *wlClipboard) handleSourceCancelled(source uint32) {
 	c.mu.Unlock()
 	if ours {
 		c.w.send(newWlMsg(source, wlDataSourceDestroy), -1)
-		virt.drop()
+		virt.Drop()
 	}
 }
 

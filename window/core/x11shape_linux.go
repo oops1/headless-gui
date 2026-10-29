@@ -17,6 +17,7 @@ import (
 	"image"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // x11InitPopupShape решает при создании попапа, нужна ли ему форма, и узнаёт
@@ -67,7 +68,7 @@ func (w *X11Window) blitPopupRegion(img *image.RGBA, _ []image.Rectangle) {
 				solid[i] = solid[i].Sub(o)
 			}
 		}
-		if !w.shapeSent || !sameRects(solid, w.shapeLast) {
+		if !w.shapeSent || !native.SameRects(solid, w.shapeLast) {
 			w.x11Send(x11ShapeRectanglesRequest(w.shapeMajor, w.wid, solid))
 			w.shapeLast, w.shapeSent = solid, true
 		}

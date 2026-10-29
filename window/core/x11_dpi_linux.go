@@ -2,6 +2,8 @@
 
 package core
 
+import "github.com/oops1/headless-gui/v3/platform/native"
+
 // x11_dpi_linux.go — HiDPI на X11: масштаб интерфейса из настроек рабочего
 // стола.
 //
@@ -31,12 +33,12 @@ func (w *X11Window) DetectScale() float64 {
 		return 0
 	}
 	_, _, data := w.x11GetProperty(w.rootWin, atomResourceManager, false)
-	if k, ok := xftScaleFromResources(string(data)); ok {
+	if k, ok := native.XftScaleFromResources(string(data)); ok {
 		return k
 	}
 	// Запасной путь: GDK_SCALE задают там, где базы ресурсов нет вовсе
 	// (голый startx, кадровый буфер). Значение целое — так его и трактуем.
-	if v := envGDKScale(); v > 0 {
+	if v := native.EnvGDKScale(); v > 0 {
 		return v
 	}
 	return 0
