@@ -177,7 +177,7 @@ func describeDrawPath(path []widget.Widget) (key any, who, trail string) {
 	return trail, who, trail
 }
 
-// widgetTypeName — короткое имя типа: «Label», а не «*widget.Label».
+// widgetTypeName — короткое имя типа: «Label», а не «*base.Label».
 func widgetTypeName(w widget.Widget) string {
 	t := reflect.TypeOf(w)
 	for t.Kind() == reflect.Pointer {

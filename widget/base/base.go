@@ -1,0 +1,669 @@
+package base
+
+import (
+	"image"
+	"image/color"
+	"sync"
+	"sync/atomic"
+
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+)
+
+// HorizontalAlignment — WPF HorizontalAlignment (позиционирование внутри родителя).
+type HorizontalAlignment int
+
+const (
+	HAlignStretch HorizontalAlignment = iota // растянуть (default)
+	HAlignLeft                               // прижать к левому краю
+	HAlignCenter                             // по центру
+	HAlignRight                              // прижать к правому краю
+)
+
+// VerticalAlignment — WPF VerticalAlignment (позиционирование внутри родителя).
+type VerticalAlignment int
+
+const (
+	VAlignStretch VerticalAlignment = iota // растянуть (default)
+	VAlignTop                              // прижать к верхнему краю
+	VAlignCenter                           // по центру
+	VAlignBottom                           // прижать к нижнему краю
+)
+
+// DockSide определяет сторону прикрепления в DockPanel (WPF DockPanel.Dock).
+type DockSide int
+
+const (
+	DockLeft DockSide = iota // 0 — по умолчанию (WPF standard: DockPanel.Dock default = Left)
+	DockTop
+	DockBottom
+	DockRight
+	DockFill // последний элемент заполняет оставшееся пространство
+)
+
+// Margin — отступы виджета (WPF Thickness: Left, Top, Right, Bottom).
+type Margin struct {
+	Left, Top, Right, Bottom int
+}
+
+// Base — общие поля и тривиальные реализации интерфейса Widget.
+// Встраивается во все конкретные виджеты.
+type Base struct {
+	// boundsMu защищает bounds: Invalidate/Bounds можно звать из рабочих
+	// горутин (виджет, перерисовывающийся из фонового потока), пока
+	// layout-проход меняет bounds через SetBounds.
+	boundsMu sync.Mutex
+	bounds   image.Rectangle
+	children []Widget
+
+	// subtree — кэш охватывающего прямоугольника поддерева (culling.go).
+	// Живёт здесь, чтобы им обладал каждый виджет движка: Base встроен во
+	// все.
+	subtree subtreeInfo
+
+	// skipBuf — переиспользуемая пометка «этого ребёнка закрыли, не рисуем»
+	// (см. drawChildren). Живёт на контейнере, чтобы не аллоцировать срез на
+	// каждый кадр.
+	skipBuf []bool
+
+	// parent — контейнер, в который виджет добавили через AddChild (nil — корень
+	// или добавлен не через Base). Нужен ровно для одного: узнать, лежит ли
+	// виджет внутри контейнера со сдвигом содержимого (ScrollView) и перевести
+	// заявленную им область перерисовки в экранные координаты. Подробности и
+	// границы применимости — в contentoffset.go.
+	parent atomic.Pointer[Base]
+
+	// owner — владелец дерева (owner.go): привязан у корня движком
+	// (BindOwner), читается подъёмом по родителям при каждом уведомлении.
+	owner atomic.Pointer[ownerRef]
+
+	// shifter заполнен у контейнеров, показывающих детей со сдвигом
+	// (ScrollView): по нему цепочка родителей берёт текущее смещение.
+	shifter atomic.Pointer[contentShifter]
+
+	// Удержание списка команд (retain.go): список, метки устаревания,
+	// список родителя, в котором виджет числится, и родитель по записи.
+	cmdList      atomic.Pointer[hgdraw.List]
+	refIn        atomic.Pointer[hgdraw.List]
+	recParent    atomic.Pointer[Base]
+	drawDirty    atomic.Bool
+	subtreeDirty atomic.Bool
+	treeDirty    atomic.Bool   // Invalidate: поддерево пометить на горутине кадра
+	opaqueSig    atomic.Uint64 // непрозрачная область при последней записи родителя
+	dirtyOnChild bool
+
+	// disabled=true → виджет отключён (WPF IsEnabled="False").
+	// По умолчанию false (т.е. виджет включён), что соответствует WPF IsEnabled=True.
+	disabled bool
+
+	// hidden=true → виджет скрыт (WPF Visibility="Collapsed"/"Hidden").
+	// Хранится инвертированно, чтобы zero value (false) означал «видим» —
+	// все виджеты по умолчанию видимы, как в WPF.
+	hidden bool
+
+	// ToolTip — всплывающая подсказка (WPF ToolTip). Пустая строка = нет подсказки.
+	// Единый источник для всех виджетов; движок рисует её при наведении курсора.
+	ToolTip string
+
+	// ContextMenu — контекстное меню (WPF ContextMenu), показывается движком
+	// по правому клику над виджетом. nil = нет меню.
+	ContextMenu *PopupMenu
+
+	// Grid layout (attached properties, как в WPF).
+	GridRow     int // Grid.Row     (0-based)
+	GridColumn  int // Grid.Column  (0-based)
+	GridRowSpan int // Grid.RowSpan (по умолчанию 1)
+	GridColSpan int // Grid.ColumnSpan (по умолчанию 1)
+
+	// DockPanel attached property.
+	Dock DockSide
+
+	// Margin — внешние отступы (WPF Margin).
+	WidgetMargin Margin
+
+	// HorizontalAlignment — WPF HorizontalAlignment (Left, Center, Right, Stretch).
+	HAlign HorizontalAlignment
+	// VerticalAlignment — WPF VerticalAlignment (Top, Center, Bottom, Stretch).
+	VAlign VerticalAlignment
+
+	// hAlignSet/vAlignSet — было ли выравнивание задано явно (через XAML/код).
+	// Нужно, чтобы отличить явный Stretch от значения по умолчанию: Canvas
+	// растягивает потомка только при ЯВНОМ HorizontalAlignment="Stretch" (BUG-6).
+	hAlignSet bool
+	vAlignSet bool
+
+	// TabIndexValue — порядок обхода Tab (WPF TabIndex). 0 по умолчанию.
+	// Отрицательное значение исключает виджет из Tab-навигации.
+	TabIndexValue int
+
+	// XAMLWidth / XAMLHeight — явно заданные Width/Height из XAML.
+	// Используются applyAlignmentRect когда bounds ещё не установлены контейнером.
+	XAMLWidth  int
+	XAMLHeight int
+
+	// cursorOverride — принудительная форма курсора (задаётся через XAML Cursor= или SetCursor).
+	cursorOverride    Cursor
+	hasCursorOverride bool
+}
+
+func (b *Base) Bounds() image.Rectangle {
+	b.boundsMu.Lock()
+	defer b.boundsMu.Unlock()
+	return b.bounds
+}
+
+// SetBounds задаёт границы виджета. Если границы фактически изменились —
+// инвалидируется объединение старой и новой области (перемещение/ресайз
+// перерисовываются точечно). Повторный вызов с теми же границами — no-op,
+// поэтому layout-проходы контейнеров не порождают лишних уведомлений.
+func (b *Base) SetBounds(r image.Rectangle) {
+	b.boundsMu.Lock()
+	if r == b.bounds {
+		b.boundsMu.Unlock()
+		return
+	}
+	union := b.bounds.Union(r)
+	b.bounds = r
+	b.boundsMu.Unlock()
+	b.markDirtyAndParent()
+	// Границы заданы в системе координат родителя, а перерисовывать надо место
+	// на экране: у ребёнка прокрутки это не одно и то же (см. contentoffset.go).
+	b.notifyOwnedRect(screenRect(b.parent.Load(), union))
+}
+
+func (b *Base) Children() []Widget { return b.children }
+
+// AddChild добавляет дочерний виджет и инвалидирует его область.
+func (b *Base) AddChild(w Widget) {
+	b.children = append(b.children, w)
+	adoptChild(b, w)
+	b.markChildAdded(w)
+	// Область ребёнка задана в координатах ДЕТЕЙ этого контейнера: если он сам
+	// сдвигает содержимое, сдвиг входит и в этот перевод (поэтому от b, а не от
+	// его родителя).
+	b.notifyOwnedRect(screenRect(b, w.Bounds()))
+}
+
+// markChildAdded — состав детей изменился: контейнер перезаписывается, а
+// новый ребёнок — тоже (его список мог быть записан под другим родителем).
+func (b *Base) markChildAdded(w Widget) {
+	if bp, ok := w.(baseProvider); ok {
+		bp.baseRef().drawDirty.Store(true)
+	}
+	b.drawDirty.Store(true)
+	b.markUp()
+}
+
+// Invalidate помечает область виджета изменившейся: движок перерисует её на
+// ближайшем кадре. Сеттеры виджетов вызывают его при фактическом изменении
+// визуального состояния; приложению он нужен после прямой мутации
+// экспортированных полей (btn.Text = ... → btn.Invalidate()).
+//
+// Перерисовывается всё в границах виджета, включая потомков: списки команд
+// (retain.go) устаревают у него и у всего поддерева — как и прежде, когда
+// заявленная область перерисовывала каждого, кто в неё попал. Приложение,
+// изменившее общее для поддерева состояние (модель, цвета) без сеттеров
+// потомков, по-прежнему обходится одним Invalidate контейнера.
+//
+// Виджет внутри прокрутки заявляет место, где он виден на экране, а не свои
+// координаты содержимого: иначе перерисовывалась бы чужая область, а то, что
+// изменилось, оставалось бы на экране старым.
+func (b *Base) Invalidate() {
+	b.boundsMu.Lock()
+	r := b.bounds
+	b.boundsMu.Unlock()
+	b.markDirtyTree()
+	b.notifyOwnedRect(screenRect(b.parent.Load(), r))
+}
+
+// invalidateRect — Invalidate для области, заданной не границами виджета, а им
+// самим (прямоугольник строки таблицы, свечение индикатора). r — в той же
+// системе координат, что и границы виджета.
+func (b *Base) invalidateRect(r image.Rectangle) {
+	b.markDirty()
+	b.notifyOwnedRect(screenRect(b.parent.Load(), r))
+}
+
+// InvalidateArea заявляет изменившейся область r (в системе координат
+// виджета), которую виджет рисует сам за своими границами: оверлей, тень,
+// свечение. Виджет помечается устаревшим, как при Invalidate (потомки — нет);
+// область переводится на экран так же. В отличие от widget.InvalidateRect,
+// для движка это не ничейное повреждение: соседи под областью не
+// перезаписываются.
+func (b *Base) InvalidateArea(r image.Rectangle) { b.invalidateRect(r) }
+
+// RemoveChild удаляет дочерний виджет из контейнера (по указателю).
+// Возвращает true, если виджет был найден и удалён.
+// Используется, например, при закрытии Panel-«окна» внутри Canvas.
+func (b *Base) RemoveChild(w Widget) bool {
+	for i, child := range b.children {
+		if child == w {
+			b.children = append(b.children[:i], b.children[i+1:]...)
+			releaseChild(b, w)
+			b.drawDirty.Store(true)
+			b.markUp()
+			b.notifyOwnedRect(screenRect(b, w.Bounds()))
+			return true
+		}
+	}
+	return false
+}
+
+// ClearChildren удаляет всех потомков (используется при перестроении ItemsControl).
+func (b *Base) ClearChildren() {
+	for _, child := range b.children {
+		releaseChild(b, child)
+	}
+	b.children = nil
+	b.Invalidate()
+}
+
+// IsEnabled возвращает true, если виджет включён (WPF IsEnabled).
+// По умолчанию все виджеты включены.
+func (b *Base) IsEnabled() bool { return !b.disabled }
+
+// SetEnabled включает/выключает виджет (WPF IsEnabled).
+func (b *Base) SetEnabled(v bool) {
+	if b.disabled == !v {
+		return
+	}
+	b.disabled = !v
+	b.Invalidate()
+}
+
+// ── Visibility (WPF Visibility) ─────────────────────────────────────────────
+
+// IsVisible возвращает true, если виджет видим (по умолчанию true).
+// Скрытые виджеты не рисуются и не участвуют в hit-тесте.
+func (b *Base) IsVisible() bool { return !b.hidden }
+
+// SetVisible показывает (true) или скрывает (false) виджет.
+// Аналог WPF Visibility: true ↔ Visible, false ↔ Collapsed.
+func (b *Base) SetVisible(v bool) {
+	if b.hidden == !v {
+		return
+	}
+	b.hidden = !v
+	b.markDirtyAndParent() // решает родитель: рисовать ли ребёнка
+	b.Invalidate()
+}
+
+// ── ToolTip (WPF ToolTip) ───────────────────────────────────────────────────
+
+// GetToolTip возвращает текст всплывающей подсказки (пустая строка = нет).
+func (b *Base) GetToolTip() string { return b.ToolTip }
+
+// SetToolTip задаёт текст всплывающей подсказки.
+func (b *Base) SetToolTip(s string) { b.ToolTip = s }
+
+// GetContextMenu возвращает контекстное меню виджета (или nil).
+func (b *Base) GetContextMenu() *PopupMenu { return b.ContextMenu }
+
+// SetContextMenu задаёт контекстное меню (показывается по правому клику).
+func (b *Base) SetContextMenu(m *PopupMenu) { b.ContextMenu = m }
+
+// ── Grid attached properties ────────────────────────────────────────────────
+
+func (b *Base) SetGridProps(row, col, rowSpan, colSpan int) {
+	b.GridRow = row
+	b.GridColumn = col
+	b.GridRowSpan = rowSpan
+	b.GridColSpan = colSpan
+}
+
+func (b *Base) GetGridRow() int    { return b.GridRow }
+func (b *Base) GetGridColumn() int { return b.GridColumn }
+func (b *Base) GetGridRowSpan() int {
+	if b.GridRowSpan < 1 {
+		return 1
+	}
+	return b.GridRowSpan
+}
+func (b *Base) GetGridColSpan() int {
+	if b.GridColSpan < 1 {
+		return 1
+	}
+	return b.GridColSpan
+}
+
+// ── DockPanel attached property ─────────────────────────────────────────────
+
+func (b *Base) GetDock() DockSide  { return b.Dock }
+func (b *Base) SetDock(d DockSide) { b.Dock = d }
+
+// ── Margin ──────────────────────────────────────────────────────────────────
+
+func (b *Base) GetMargin() Margin  { return b.WidgetMargin }
+func (b *Base) SetMargin(m Margin) { b.WidgetMargin = m }
+
+// ── Alignment ───────────────────────────────────────────────────────────────
+
+func (b *Base) GetHAlign() HorizontalAlignment  { return b.HAlign }
+func (b *Base) SetHAlign(a HorizontalAlignment) { b.HAlign = a; b.hAlignSet = true }
+func (b *Base) GetVAlign() VerticalAlignment    { return b.VAlign }
+func (b *Base) SetVAlign(a VerticalAlignment)   { b.VAlign = a; b.vAlignSet = true }
+
+// HAlignExplicit / VAlignExplicit сообщают, было ли выравнивание задано явно.
+func (b *Base) HAlignExplicit() bool { return b.hAlignSet }
+func (b *Base) VAlignExplicit() bool { return b.vAlignSet }
+
+// TabIndex возвращает порядок Tab-навигации (WPF TabIndex).
+func (b *Base) TabIndex() int { return b.TabIndexValue }
+
+// SetTabIndex задаёт порядок Tab-навигации (отрицательный — исключить из обхода).
+func (b *Base) SetTabIndex(i int) { b.TabIndexValue = i }
+
+// GetXAMLSize возвращает явно заданные Width/Height из XAML.
+func (b *Base) GetXAMLSize() (int, int) { return b.XAMLWidth, b.XAMLHeight }
+
+// SetXAMLSize сохраняет явные Width/Height из XAML.
+func (b *Base) SetXAMLSize(w, h int) { b.XAMLWidth = w; b.XAMLHeight = h }
+
+// SetCursor задаёт принудительную форму курсора над виджетом (XAML Cursor).
+func (b *Base) SetCursor(c Cursor) { b.cursorOverride, b.hasCursorOverride = c, true }
+
+// CursorOverride возвращает принудительный курсор и признак, что он задан.
+func (b *Base) CursorOverride() (Cursor, bool) { return b.cursorOverride, b.hasCursorOverride }
+
+// applyAlignmentRect корректирует прямоугольник r на основе
+// HorizontalAlignment / VerticalAlignment виджета и его текущего размера.
+// Если alignment = Stretch — возвращает r без изменений.
+// Если alignment = Left/Center/Right — использует текущий Dx() виджета как ширину.
+func applyAlignmentRect(w Widget, r image.Rectangle) image.Rectangle {
+	type alignGetter interface {
+		GetHAlign() HorizontalAlignment
+		GetVAlign() VerticalAlignment
+	}
+	ag, ok := w.(alignGetter)
+	if !ok {
+		return r
+	}
+
+	ha := ag.GetHAlign()
+	va := ag.GetVAlign()
+
+	// Текущий размер виджета: сначала пробуем XAMLWidth/XAMLHeight,
+	// затем текущие bounds, затем desiredWidth/desiredHeight.
+	type xamlSizeGetter interface {
+		GetXAMLSize() (int, int)
+	}
+	wb := w.Bounds()
+	ww := wb.Dx()
+	wh := wb.Dy()
+	if xsg, ok2 := w.(xamlSizeGetter); ok2 {
+		xw, xh := xsg.GetXAMLSize()
+		if xw > 0 {
+			ww = xw
+		}
+		if xh > 0 {
+			wh = xh
+		}
+	}
+
+	// Горизонтальное выравнивание
+	switch ha {
+	case HAlignLeft:
+		if ww > 0 && ww < r.Dx() {
+			r.Max.X = r.Min.X + ww
+		}
+	case HAlignCenter:
+		if ww > 0 && ww < r.Dx() {
+			cx := r.Min.X + (r.Dx()-ww)/2
+			r.Min.X = cx
+			r.Max.X = cx + ww
+		}
+	case HAlignRight:
+		if ww > 0 && ww < r.Dx() {
+			r.Min.X = r.Max.X - ww
+		}
+	}
+
+	// Вертикальное выравнивание
+	switch va {
+	case VAlignTop:
+		if wh > 0 && wh < r.Dy() {
+			r.Max.Y = r.Min.Y + wh
+		}
+	case VAlignCenter:
+		if wh > 0 && wh < r.Dy() {
+			cy := r.Min.Y + (r.Dy()-wh)/2
+			r.Min.Y = cy
+			r.Max.Y = cy + wh
+		}
+	case VAlignBottom:
+		if wh > 0 && wh < r.Dy() {
+			r.Min.Y = r.Max.Y - wh
+		}
+	}
+
+	return r
+}
+
+// ── Desired size (Auto-измерение) ───────────────────────────────────────────
+
+// desiredHeight возвращает желаемую высоту виджета для Auto-измерения в Grid/DockPanel.
+// Для Label — высота текста + padding. Для контейнеров — максимум из детей.
+// Если не можем определить — возвращаем дефолт 26px.
+func desiredHeight(w Widget) int {
+	// Если явно задан Height в XAML — используем его.
+	type xamlSizeGetter interface {
+		GetXAMLSize() (int, int)
+	}
+	if xsg, ok := w.(xamlSizeGetter); ok {
+		_, xh := xsg.GetXAMLSize()
+		if xh > 0 {
+			return xh
+		}
+	}
+
+	switch v := w.(type) {
+	case *Label:
+		fs := v.FontSize
+		if fs <= 0 {
+			fs = DefaultFontSize()
+		}
+		return int(fs*1.5+0.5) + v.PaddingY*2
+	case *Button, *MenuButton:
+		return 32
+	case *TextInput:
+		return 26
+	case *MenuBar:
+		return 28
+	case *StackPanel:
+		// StackPanel: максимальная высота ребёнка + margin + padding (для горизонтального)
+		pad := v.Padding
+		type marginGetter interface {
+			GetMargin() Margin
+		}
+		children := w.Children()
+		if len(children) > 0 {
+			maxH := 0
+			for _, ch := range children {
+				h := ch.Bounds().Dy()
+				if h <= 0 {
+					h = desiredHeight(ch)
+				}
+				if mg, ok := ch.(marginGetter); ok {
+					m := mg.GetMargin()
+					h += m.Top + m.Bottom
+				}
+				if h > maxH {
+					maxH = h
+				}
+			}
+			if maxH > 0 {
+				return maxH + pad*2
+			}
+		}
+		return 30 + pad*2
+	default:
+		// Для контейнеров — максимальная высота среди детей + их margin.
+		children := w.Children()
+		if len(children) > 0 {
+			type marginGetter interface {
+				GetMargin() Margin
+			}
+			maxH := 0
+			for _, ch := range children {
+				h := ch.Bounds().Dy()
+				if h <= 0 {
+					h = desiredHeight(ch)
+				}
+				// Учитываем margin дочернего элемента.
+				if mg, ok := ch.(marginGetter); ok {
+					m := mg.GetMargin()
+					h += m.Top + m.Bottom
+				}
+				if h > maxH {
+					maxH = h
+				}
+			}
+			if maxH > 0 {
+				return maxH
+			}
+		}
+		return 26
+	}
+}
+
+// desiredWidth возвращает желаемую ширину виджета для Auto-измерения.
+// Для Label/TextBlock — ширина текста (приблизительно), для остальных — дефолт.
+func desiredWidth(w Widget) int {
+	// Если явно задан Width в XAML — используем его.
+	type xamlSizeGetter interface {
+		GetXAMLSize() (int, int)
+	}
+	if xsg, ok := w.(xamlSizeGetter); ok {
+		xw, _ := xsg.GetXAMLSize()
+		if xw > 0 {
+			return xw
+		}
+	}
+
+	switch v := w.(type) {
+	case *Label:
+		// Примерная ширина: длина текста * средняя ширина символа + padding
+		text := v.Text()
+		charW := 7 // средняя ширина символа при дефолтном шрифте
+		return len(text)*charW + v.PaddingX*2
+	case *Button:
+		// По содержимому — как WPF меряет кнопку по Content, — но не уже прежних
+		// 80: кнопка растёт под длинную подпись, а раскладки, где короткой
+		// кнопке 80 хватало, не меняются. Кнопку уже задают Width в разметке или
+		// ToolBar, который меряет кнопки впритык той же функцией.
+		return max(80, buttonContentWidth(v, desiredHeight(v)))
+	case *MenuButton:
+		// Та же ширина по содержимому плюс зона стрелки (GG-78).
+		return max(80, buttonContentWidth(v.Button, desiredHeight(v))+menuButtonArrowW)
+	case *CheckBox:
+		// Как кнопка: по содержимому, не уже прежних 80 (GG-69 — пара к GG-66).
+		return max(80, checkBoxContentWidth(v))
+	case *RadioButton:
+		// Та же беда и то же лечение, что у флажка: подпись шире 80 ложилась
+		// на соседа.
+		return max(80, radioButtonContentWidth(v))
+	case *TextInput:
+		return 120
+	default:
+		return 80
+	}
+}
+
+// drawChildren рендерит всех потомков в тот же контекст.
+// Вызывается конкретными виджетами в конце своего Draw.
+// Скрытые потомки (SetVisible(false) / Visibility=Collapsed) пропускаются.
+func (b *Base) drawChildren(ctx DrawContext) {
+	// Сначала проход СВЕРХУ ВНИЗ — от того, что рисуется последним и лежит
+	// поверх всех. Он копит закрытую площадь и помечает детей, которых
+	// закроют целиком: рисовать их незачем, поверх ляжет непрозрачное.
+	// Рисуем потом в обычном порядке — от этого прохода зависит только
+	// признак «пропустить», а не что за чем ложится.
+	skip := b.skipBuf[:0]
+	if len(b.children) > 1 && occlusionAllowed(ctx) {
+		// Буфер переиспользуется между кадрами: контейнер рисуется в одной
+		// горутине (виджет живёт в одном дереве, дерево — в одном движке), а
+		// свежий срез на каждый кадр каждого контейнера — аллокация на ровном
+		// месте.
+		if cap(skip) < len(b.children) {
+			skip = make([]bool, len(b.children))
+		} else {
+			skip = skip[:len(b.children)]
+			for i := range skip {
+				skip[i] = false
+			}
+		}
+		b.skipBuf = skip
+
+		var occ occluders
+		for i := len(b.children) - 1; i >= 0; i-- {
+			child := b.children[i]
+			if child.Bounds().Empty() || !IsWidgetVisible(child) {
+				continue
+			}
+			if occ.Occluded(child) {
+				skip[i] = true
+				continue
+			}
+			// Закрытую площадь копит только тот, кого рисуют: пропущенный
+			// ничего не нарисует и закрыть собой не может.
+			occ.add(child)
+		}
+	}
+
+	for i, child := range b.children {
+		if child.Bounds().Empty() {
+			continue
+		}
+		if !IsWidgetVisible(child) {
+			continue
+		}
+		if i < len(skip) && skip[i] {
+			noteSkipped(ctx, child, true)
+			continue
+		}
+		// Поддерево, не задевающее ни одной изменившейся области, не рисуем
+		// вовсе: ножницы холста всё равно отбросили бы эти пиксели, а обход
+		// и вызовы Draw стоили бы как при полной перерисовке.
+		if SkipSubtree(ctx, child) {
+			continue
+		}
+		// Через учёт рисующихся (drawtrace.go): пока он выключен, это просто
+		// child.Draw(ctx).
+		DrawTraced(child, ctx)
+	}
+}
+
+// subtreeCache отдаёт кэш прямоугольника поддерева. Приватный метод: его
+// промоутят все виджеты движка, и только они, — чужая реализация Widget
+// кэша не имеет и просто не пропускается.
+func (b *Base) subtreeCache() *subtreeInfo { return &b.subtree }
+
+// IsWidgetVisible возвращает false, если виджет реализует IsVisible() и скрыт.
+// Виджеты без этого метода считаются видимыми.
+func IsWidgetVisible(w Widget) bool {
+	if v, ok := w.(interface{ IsVisible() bool }); ok {
+		return v.IsVisible()
+	}
+	return true
+}
+
+// DrawChildren рендерит всех потомков в тот же контекст.
+// Экспортированная версия для использования во внешних виджетах.
+func (b *Base) DrawChildren(ctx DrawContext) {
+	b.drawChildren(ctx)
+}
+
+// drawDisabledOverlay рисует полупрозрачный серый оверлей поверх виджета,
+// визуально показывая что он отключён (аналог WPF IsEnabled=False).
+func (b *Base) drawDisabledOverlay(ctx DrawContext) {
+	if b.disabled {
+		r := b.bounds
+		ctx.FillRectAlpha(r.Min.X, r.Min.Y, r.Dx(), r.Dy(),
+			color.RGBA{R: 30, G: 30, B: 30, A: 140})
+	}
+}
+
+// DrawDisabledOverlay рисует полупрозрачный серый оверлей если виджет отключён.
+// Экспортированная версия для использования во внешних виджетах.
+func (b *Base) DrawDisabledOverlay(ctx DrawContext) {
+	b.drawDisabledOverlay(ctx)
+}
