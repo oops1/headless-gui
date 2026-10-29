@@ -171,6 +171,7 @@ func (m *StartMenu) tileKeyFor(g startGeo) tileKey {
 // drawTile рисует одну плитку: подложка по стилю, значок, название, подзаголовок
 // и метка.
 func (m *StartMenu) drawTile(ctx widget.DrawContext, rect image.Rectangle, t Tile, st theme.State, key string) {
+	t.Content = m.liveContent(t)
 	s := m.fade.Style(m.tm, key, rect, st, func(st theme.State) *theme.Style { return m.tpart("tile", st) })
 	ink := s.Text
 	if bg := t.Content.Background; bg.A > 0 {

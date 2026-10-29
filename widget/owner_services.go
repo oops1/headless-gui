@@ -33,6 +33,29 @@ type OwnerTextRasterizer interface {
 	OwnerTextRasterizer() svg.TextRasterizer
 }
 
+// OwnerPoster — владелец, который выполняет функцию в потоке интерфейса своего
+// дерева (движок — Engine.Post).
+type OwnerPoster interface {
+	OwnerPost(fn func())
+}
+
+// PostFor ставит fn в поток интерфейса движка дерева w (Engine.Post): так
+// виджет, которому состояние приходит с чужой горутины (таймер, источник
+// данных), меняет себя там же, где идут ввод и раскладка. Возвращает false и
+// fn не вызывает, если у дерева w нет такого владельца (виджет вне дерева
+// движка) — тогда решает вызывающий.
+func PostFor(w Widget, fn func()) bool {
+	if fn == nil || w == nil {
+		return false
+	}
+	p, ok := OwnerOf(w).(OwnerPoster)
+	if !ok {
+		return false
+	}
+	p.OwnerPost(fn)
+	return true
+}
+
 // MeasureSet — набор измерителей владельца с собственной памятью замеров
 // (ключ — семейство, кегль, текст; сброс по ревизии метрик текста и при
 // переполнении). Создаётся владельцем один раз (NewMeasureSet).

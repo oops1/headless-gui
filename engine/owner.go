@@ -30,7 +30,11 @@ var (
 	_ widget.OwnerMeasurer       = treeOwner{}
 	_ widget.OwnerAnimationLoop  = treeOwner{}
 	_ widget.OwnerTextRasterizer = treeOwner{}
+	_ widget.OwnerPoster         = treeOwner{}
 )
+
+// OwnerPost — Post движка: поток интерфейса дерева (widget.PostFor).
+func (o treeOwner) OwnerPost(fn func()) { o.e.Post(fn) }
 
 // OwnerMeasurers — измерители движка.
 func (o treeOwner) OwnerMeasurers() *widget.MeasureSet { return o.e.measureSet }

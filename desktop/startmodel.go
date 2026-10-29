@@ -85,6 +85,9 @@ type Tile struct {
 	App     AppID
 	Size    TileSize
 	Content TileContent
+	// Live — живое содержимое (ADR-0010): пока меню открыто, плитка
+	// показывает состояния источника, а до первого — Content.
+	Live LiveTile
 }
 
 // TileGroup — именованная группа плиток.

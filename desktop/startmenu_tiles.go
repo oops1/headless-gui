@@ -234,6 +234,8 @@ type startView struct {
 
 	// Подписки на время открытости.
 	unsubs []func()
+	// Живые плитки (livetile.go): свой замок, Draw читает показанное.
+	live liveSet
 
 	focused atomic.Bool
 	popup   *widget.PopupMenu
@@ -565,6 +567,9 @@ func (m *StartMenu) SetTileGroups(groups []TileGroup) {
 	v.groups = cloneGroups(groups)
 	v.tilesRev++
 	v.mu.Unlock()
+	if m.IsOpen() {
+		m.liveAttach()
+	}
 	m.Invalidate()
 }
 
