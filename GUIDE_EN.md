@@ -5943,26 +5943,43 @@ replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
 
 ### Engine packages `core/` (v4.0, in progress)
 
-Raster, text and the drawing context moved out of `engine` into separate packages. An
-application does not need to import them: the old names are kept.
+Raster, text, the drawing context, input, the frame loop and overlays moved out of `engine`
+into separate packages. An application does not need to import them: the old names are kept.
 
 ```
-core/draw          DrawContext and its optional capabilities (standard library and core/geom only)
+core/draw          DrawContext and its optional capabilities (from module packages: only core/geom)
 core/geom          geometry, image filters
 core/text          fonts, glyph cache, shaping, text quality level (no widget, no engine)
 core/raster        the engine's canvas Canvas: tiles, diff, shadows, blur, Mica, text (no widget, no engine)
+core/input         the engine's input: mouse, keyboard, touch, focus, capture, IME, cursor (widgets, no engine)
+core/loop          the frame loop: goroutine, pacing, damage, Post, timers (no widget, no engine)
+core/overlay       host popups, modals outside the canvas, tooltip (widgets, no engine)
 internal/workpool  the process worker pool, shared by raster and the engine
+internal/lockcheck static check of the lock order (tests only)
 ```
 
-`widget` imports `core/draw`, `engine` imports `core/raster`; no `core/*` package imports
-`widget` or `engine`.
+`widget` imports `core/draw`; `engine` imports `core/raster`, `core/input`, `core/loop` and
+`core/overlay`. `core/input` and `core/overlay` see widgets but not `engine`: the engine hands
+itself to them through `Host` interfaces (the root, modal windows, scale, invalidation, the
+`Post` queue and more). `core/loop` sees neither widgets nor the engine.
 
 The old names are aliases: `engine.Canvas`, `engine.FontCache`, `engine.TextQuality`,
 `engine.LCDOrder`, `engine.PixelFormat`, `engine.FormatRGBA`, `engine.FormatBGRX`,
 `engine.MaxCanvasSide`, `engine.BlurRGBA`, `engine.OpaqueBands` and others; `widget.DrawContext`
-is an alias of `draw.DrawContext`. Application and widget code does not change. `engine.Canvas`
+is an alias of `draw.DrawContext`; `engine.Timer`, `engine.Pacing`, `engine.FrameSink` are
+aliases of the loop types; `engine.PopupFrame`, `engine.PopupTransition`, `engine.ModalHost`
+are aliases of the overlay types. Application and widget code does not change. `engine.Canvas`
 has more exported methods now — the ones the engine uses to work with its own canvas (`Back`,
 `SetPixelFormat`, `DefaultFont` and others). An application does not need them.
+
+Lock order (ADR-0011): the engine's `frameMu` is the only lock under which other locks are
+taken; every other lock is a leaf: nothing else is taken under it, not even `frameMu`, and no
+widget or application code is called under it. `internal/lockcheck` checks the lock order in the
+tests of `engine`, `core/input`, `core/loop` and `core/overlay`: a call through a field into
+another package counts as taking that package's locks if, by that package's model, the method
+takes a lock or passes the call on. Calls through interfaces and function literals are not seen
+by the check; for them the rule rests on review. New code in these packages must keep the rule:
+a short leaf section with no calls out.
 
 ---
 

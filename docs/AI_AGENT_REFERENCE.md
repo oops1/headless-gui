@@ -4451,7 +4451,7 @@ they do not exist for other themes, existing flat panels are untouched):
 Parts already drop the inherited border/shadow/elevation (`flat`). A presenter
 asks `GetStyle("startmenu", "row", state)` and never branches on a theme name.
 
-Tests: `theme/accent_test.go`, `desktop/accent_test.go`, `engine/noise_test.go`.
+Tests: `theme/accent_test.go`, `desktop/accent_test.go`, `core/raster/noise_test.go`.
 `TestGolden_Windows10Acrylic` writes dark and light bar PNGs when `GOLDEN_OUT`
 is set.
 
@@ -4679,7 +4679,7 @@ left); indeterminate progress; badge on the Start button; the clock plate is not
   rect, current, tint)` rasterises at physical size and hands the engine an image
   of exactly the receiver's physical size. `Canvas.DrawImageScaled` blits an
   `*image.RGBA` of that size as is (no resample, no cache copy);
-  `engine/popupcontext.go` forwards `Scale()` so popups see the scale too.
+  `core/overlay/popupcontext.go` forwards `Scale()` so popups see the scale too.
   `SVGIcon.Draw` uses it when the scale is not 1 (scale 1 path unchanged).
 - `desktop/trayglyph.go`: network/volume/power ask `tm.GetIcon(key, physicalSide)`
   with keys from most specific to general (`tray.network.wifi.N`, `tray.volume.N`,
@@ -5819,7 +5819,7 @@ type ContentOffsetter interface {
 ```
 
 `ScrollView` implements it. Hit testing builds a path with a frame per step
-(`engine/frames.go`); presses, moves, wheel, file drops, cursor, tooltips, the
+(`core/input/frames.go`); presses, moves, wheel, file drops, cursor, tooltips, the
 mouse-capture owner and `ContextMenuAt` receive the point in their widget's
 frame; `Base` remembers its parent (set in `AddChild`, also by
 `TabControl.AddTab` and `DockManager`) and translates repaint areas up the
@@ -6560,7 +6560,7 @@ looked like an ordinary first one.
 
 `MouseEvent.Clicks` now carries the number of the press in the series: 1, 2, 3
 and on. The engine counts it once for the whole tree (`countClick` in
-`engine/events.go`); a series is broken by another button, a cursor farther than
+`core/input/events.go`); a series is broken by another button, a cursor farther than
 four points, or a pause longer than the interval. A release carries the number
 of its own press, so a release handler sees the same series as the press.
 
@@ -7255,11 +7255,11 @@ of 60. `n <= 0` removes the cap.
 - The statement that `KeyEvent.Repeat` marks a repeat "on every platform" was false for X11
   (the field was always false there); it is true since this version.
 
-Tests: `engine/imageround_test.go` (round clip: every drawing path, scales 1 and 2,
+Tests: `core/raster/imageround_test.go` (round clip: every drawing path, scales 1 and 2,
 RGBA and BGRX, opaque and translucent, partial overlap, unchanged frame without rounding),
 `engine/imagecache_engine_test.go` (finalizer-based retention test, forged key, engine
 invalidation of main and popup canvases, journal overflow, concurrency, popup wrapper),
-`engine/imagerect_test.go` (full-scale reference for 3 filters × 6 source types × 6
+`core/raster/imagerect_test.go` (full-scale reference for 3 filters × 6 source types × 6
 geometries, ×1000 destination, work proportional to the clip, `sr` clamp, round clip and
 BGRX, agreement with `DrawImageScaled` at scales 1, 1.5, 2), `widget/imagerect_test.go`
 (fallback, `ClampImageRect`, ScrollView wrapper), `engine/maxfps_test.go`,
@@ -8188,7 +8188,7 @@ alpha, the translucent shadow included — both as the input region and as
   region from `OpaqueBands` as before (a click on the shadow still belongs to
   the menu).
 
-Tests: `engine/solidbands_test.go`, `window/wayland_popup_opaque_linux_test.go`
+Tests: `core/raster/solidbands_test.go`, `window/wayland_popup_opaque_linux_test.go`
 (on the wire: a shadow pixel is in the input region but not in the opaque one,
 the menu bodies are opaque, the gap between levels is in neither).
 
@@ -10401,3 +10401,35 @@ Rules that follow from the design:
   (`widget.OwnerPoster`); `core/draw.OffscreenRenderer` (alias `widget.OffscreenRenderer`)
   draws into a separate picture outside the frame. `Canvas.RenderOffscreen` implements
   it.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): input, frame loop and overlays as packages
+
+Where the engine's parts live now (ADR-0011):
+
+- `core/input` — `input.Dispatcher`, reached through `Engine.in`. It holds focus, mouse
+  capture, touches, IME, the cursor override and hit testing. Its dependencies come through
+  `input.Host` (root, modal windows, scale, invalidation, `Post`, `InLoop`, failure guard,
+  tooltip, capture manager). The engine's public input methods (`SendMouseMove`,
+  `SendKeyEvent`, `SetFocus`, `SendTouch`, IME, cursor) are wrappers over it.
+- `core/loop` — `loop.Loop`, reached through `Engine.lp`: the frame goroutine, pacing and
+  frame sink, damage and render on demand, the `Post` queue, `Flush`, timers. Dependencies
+  come through `loop.Host` (`RenderFrame`, `StepAnimations`, `BindLoop`, `AnimationNeeded`
+  (frame needed without invalidation), `FullFramePending`, `GuardCall`, `MotionScope`,
+  `Scale`, and `OnInvalidateAll`, the hook before a full invalidation that bumps the
+  command-recording generation). `Timer`, `Pacing`, `FrameSink` are aliases.
+- `core/overlay` — `overlay.Manager`, reached through `Engine.ov`: host popups with the
+  arena and transitions, the native modal host and its close subscribers, the tooltip,
+  and the `Translating` context that draws a popup into its own buffer. Dependencies come
+  through `overlay.Host`. `PopupFrame`,
+  `PopupTransition`, `ModalHost` are aliases. Modal windows inside the canvas, overlay
+  transitions inside the canvas, the deferred layers of a frame and `CloseAllOverlays` stay
+  in `engine`.
+- Lock order: `frameMu` of the engine is the root; every other lock is a leaf in its package.
+  `internal/lockcheck` checks this in the tests; a call through a field into another package
+  (`e.in.X()`, `e.lp.X()`, `e.ov.X()`, `m.host.X()`) counts as taking that package's locks,
+  resolved against the other package's model where one is given. Calls through interfaces
+  and function literals are not seen by the check.
+- Stable public API: nothing a consumer imports changed. Code inside `engine` reaches the
+  moved parts through the fields above and through the package functions and types
+  (`input.DismissOutside`, `input.ContentShift`, `input.OverlayHitRect`, `overlay.WidgetID`,
+  `overlay.Translating`, `overlay.CollectPopups`), not through the old file names.
