@@ -210,7 +210,7 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 	// Панель — корень вторичного движка (её титлбар = титлбар окна).
 	p.SetBounds(image.Rect(0, 0, dw, dh))
 
-	native := NewNativeWindow()
+	native := newNativeWindow() // хук: тесты подставляют окно ОС
 	surf := &surface{
 		eng:     eng,
 		native:  native,

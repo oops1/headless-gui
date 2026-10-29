@@ -430,6 +430,9 @@ type Window struct {
 	// (nil на бэкендах без поддержки owner-окон / UI-маршалинга → in-canvas floating).
 	dockMgr  *widget.DockManager
 	dockHost *dockFloatHost
+	// modalHost — установленный хост нативных модалок (installModalHost):
+	// tearDown сносит открытые в нём диалоги вместе с их движками.
+	modalHost *dialogHost
 
 	// ── Трей и уведомления (Windows, Linux) ──────────────────────────────────
 	// Сеттеры трея вызываются до Run() (native ещё nil), поэтому желаемое
@@ -640,6 +643,11 @@ func (win *Window) tearDown() {
 	// owner'ом.
 	if win.dockHost != nil {
 		win.dockHost.teardownAll()
+	}
+	// Хостовые диалоги — тоже: их движки иначе жили бы дальше (цикл, насос
+	// кадров, регистрации в реестрах процесса).
+	if win.modalHost != nil {
+		win.modalHost.teardownAll()
 	}
 	win.closeChildWindows()
 }

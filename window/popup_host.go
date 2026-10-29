@@ -345,7 +345,7 @@ func (h *popupHost) createPopup(id uintptr) {
 	carrier := h.carrier
 	h.mu.Unlock()
 
-	native := NewNativeWindow()
+	native := newNativeWindow() // хук: тесты подставляют окно ОС
 	pop, ok := native.(popupWindow)
 	if !ok {
 		return // бэкенд без поддержки окон-попапов (host не должен был ставиться)

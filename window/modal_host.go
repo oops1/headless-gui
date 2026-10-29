@@ -58,7 +58,9 @@ func (win *Window) installModalHost() {
 	if !ok {
 		return
 	}
-	setter.SetModalHost(&dialogHost{parent: win})
+	h := &dialogHost{parent: win}
+	win.modalHost = h
+	setter.SetModalHost(h)
 }
 
 // ── dialogHost ───────────────────────────────────────────────────────────────
@@ -216,7 +218,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 	// объект-сценарий (диалог показывается только здесь, у хоста).
 	dlg.Dim = color.RGBA{}
 
-	native := NewNativeWindow()
+	native := newNativeWindow() // хук: тесты подставляют окно ОС
 	// Минимум объявляем ДО Create: иначе окно, меньшее дефолтного минимума
 	// платформы, будет создано увеличенным (см. fitMinTrack в native_windows).
 	//
@@ -463,6 +465,17 @@ func (h *dialogHost) teardown(hm *hostedModal) {
 		NotifyModalClosed(m widget.ModalWidget)
 	}); ok {
 		h.parent.post(func() { n.NotifyModalClosed(hm.dlg) })
+	}
+}
+
+// teardownAll сносит все открытые модалки сверху вниз (закрытие главного
+// окна): движки останавливаются, окна ОС закрываются.
+func (h *dialogHost) teardownAll() {
+	h.mu.Lock()
+	stack := append([]*hostedModal(nil), h.stack...)
+	h.mu.Unlock()
+	for i := len(stack) - 1; i >= 0; i-- {
+		h.teardown(stack[i])
 	}
 }
 

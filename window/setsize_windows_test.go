@@ -31,6 +31,9 @@ func szWin32Window(t *testing.T, scale string, cw, ch int) (*Window, *Win32Windo
 	}
 	nw.noQuit = true
 	t.Cleanup(func() { procDestroyWindow.Call(uintptr(nw.hwnd)) })
+	// Опрос раскладки (localePoll) живёт, пока окно не закрыто: без этого он
+	// пережил бы тест и менял глобальную локаль в соседних.
+	t.Cleanup(func() { win.closeRequested.Store(true) })
 	fsPumpMessages()
 
 	count := new(int)
