@@ -243,7 +243,11 @@ func CollectVideoSurfaces(root Widget, now time.Time, rate int, hold time.Durati
 		if idle {
 			delete(videoReg, s) // удаление при обходе map разрешено
 		}
-		if !on || !IsWidgetVisible(s) {
+		// Чужую поверхность (другое окно, другой движок процесса) отсекаем
+		// до screenCover: тот копит покрытия в срез ещё до того, как поймёт,
+		// что поверхность не в этом дереве, и каждый кадр движка без видео
+		// платил аллокацией за видео соседа, пока оно в реестре.
+		if !on || !IsWidgetVisible(s) || !underRoot(&s.Base, rootBase) {
 			continue
 		}
 		rect, cover, inTree := s.screenCover(rootBase)
@@ -253,6 +257,16 @@ func CollectVideoSurfaces(root Widget, now time.Time, rate int, hold time.Durati
 		dst = append(dst, VideoSurface{ID: s.SurfaceID(), Rect: rect, Cover: cover})
 	}
 	return dst
+}
+
+// underRoot — приводит ли подъём от node по родителям к rootBase; тот же
+// путь и предел глубины, что в screenCover, но без аллокаций.
+func underRoot(node, rootBase *Base) bool {
+	parent := node.parent.Load()
+	for depth := 0; parent != nil && depth < maxScreenRectDepth; depth++ {
+		node, parent = parent, parent.parent.Load()
+	}
+	return node == rootBase
 }
 
 // screenCover поднимается от поверхности к корню: на каждом уровне соседи
