@@ -93,6 +93,14 @@ const (
 	// AnimFlyoutOpen — выезд и уход всплывающих панелей (календарь, центр
 	// уведомлений, быстрые настройки); не объявлено — по AnimMenuOpen.
 	AnimFlyoutOpen Key = "flyout.open"
+	// AnimTileCycle — переход живой плитки меню «Пуск» от одного состояния
+	// источника к другому (ADR-0010). Декоративная: при «меньше движения» и
+	// профилях MotionReduced/MotionOff — мгновенно. Не объявлено — по
+	// AnimFlyoutOpen.
+	AnimTileCycle Key = "tile.cycle"
+	// KeyTileCycleKind — вид перехода живой плитки: 0 — сдвиг (новое въезжает
+	// снизу), 1 — переворот вокруг горизонтальной оси. Не объявлено — 0.
+	KeyTileCycleKind Key = "tile.cycle.kind"
 )
 
 // FlagMenuIconTint — одноцветные значки пунктов (глифы) рисуются цветом текста

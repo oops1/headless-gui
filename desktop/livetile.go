@@ -384,12 +384,12 @@ func (m *StartMenu) invalidateTile(id TileID) {
 // кривая. Не объявлено темой — по AnimFlyoutOpen. Декоративная анимация: при
 // «меньше движения» и профилях MotionReduced/MotionOff — мгновенно; под
 // MotionRemote — тоже мгновенно (переход по сети не стоит кадров).
-const AnimTileCycle theme.Key = "tile.cycle"
+const AnimTileCycle = theme.AnimTileCycle
 
 // KeyTileCycleKind — вид перехода живой плитки: 0 — сдвиг (новое въезжает
 // снизу и выталкивает прежнее вверх, по умолчанию), 1 — переворот вокруг
 // горизонтальной оси.
-const KeyTileCycleKind theme.Key = "tile.cycle.kind"
+const KeyTileCycleKind = theme.KeyTileCycleKind
 
 // tileTrans — переход плитки: два кэша растра (прежнее и новое содержимое,
 // нарисованные вне кадра на прозрачном фоне) и доля пройденного. Кадр

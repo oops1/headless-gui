@@ -10379,3 +10379,25 @@ Rules that follow from the design:
 - Popup arena: all open popups of a host (`SetPopupSink`) render into one scratch
   canvas of the engine. `Stats().PopupBytes` is the arena buffers plus the images of
   open and fading popups; zero when no popup is open.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): live tiles of the Start menu
+
+- `desktop.TileSource` (`Subscribe(fn func(TileContent)) (unsubscribe func())`),
+  `desktop.TileSourceFunc`, `desktop.LiveTile{Source, Queue, Period}`, the field
+  `Tile.Live`, `StartMenu.Post func(func())`, `desktop.DefaultTileCycle` (6 s).
+- Subscriptions exist only while a tiled Start menu is open. A closed menu makes no
+  source calls and wakes no frames.
+- The transition token `tile.cycle` is `theme.AnimTileCycle` (Windows 10: 300 ms,
+  `out-cubic`; Windows 11 and macOS 250 ms; Windows 2000 zero). The kind metric is
+  `theme.KeyTileCycleKind` (0 slide, 1 flip). In `desktop` they are `AnimTileCycle`
+  and `KeyTileCycleKind`. The token is decorative: instant under reduced motion and
+  `MotionOff`; `MotionRemote` makes it instant through a separate check in
+  `desktop.beginTransition`.
+- Rules that follow from the design: a repeat of the same content, and the first
+  state of a new subscription, start no transition.
+- `desktop.NewFakeTileSource(initial...)` with `Set` and `Current`: a fake source.
+  Its deliveries carry version numbers, so an out-of-order delivery is dropped.
+- `widget.PostFor(w, fn)` runs `fn` on the thread of the engine of the tree of `w`
+  (`widget.OwnerPoster`); `core/draw.OffscreenRenderer` (alias `widget.OffscreenRenderer`)
+  draws into a separate picture outside the frame. `Canvas.RenderOffscreen` implements
+  it.

@@ -1,6 +1,6 @@
 # ADR-0010. Живые плитки
 
-Статус: принято 2026-10-29, реализуется в 6.1–6.4 (6.1 и 6.2 сделаны), ветка
+Статус: принято 2026-10-29, реализовано в 6.1–6.4, ветка
 `feature/engine-architecture` (этап 6). Основание — план этапа 6 и
 `docs/ARCHITECTURE_REVIEW_RU.md` §5.3: «`TileSource` — интерфейс потребителя,
 `LiveTile` держит очередь состояний и перебирает их по `tile.cycle`;
@@ -123,10 +123,12 @@ type Tile struct { …; Live LiveTile }
 `TestLiveTileTrans_UpdateCostsAtMostNineTiles`, бенчмарки
 `BenchmarkLiveTileTransitionFrame` и `BenchmarkLiveTileInstantUpdate`).
 
-## Что дальше
+## Статус этапа
 
-- 6.3 — фейковые источники и golden меню с живыми плитками.
-- 6.4 — токен `tile.cycle` (период по умолчанию из темы), документация.
+Этап 6 закрыт: 6.1 — источник и очередь, 6.2 — переход через кэш растра,
+6.3 — фейковый источник и golden меню, 6.4 — токен `tile.cycle` в профилях
+Windows 10, Windows 11 и macOS (Windows 2000 — мгновенно), метрика
+`tile.cycle.kind`, документация.
 
 ## Последствия
 

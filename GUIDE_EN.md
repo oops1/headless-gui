@@ -5877,6 +5877,40 @@ popup memory is the largest open popup plus the images of all open ones.
 `Stats().PopupBytes` reports it; with no popups open it is zero.
 
 
+## Live tiles of the Start menu (v4.0, in progress)
+
+A Windows 10 tile can show live content: a clock, mail, weather. A source
+implements `desktop.TileSource`, and the tile receives it in the `Live` field:
+
+```go
+clock := desktop.NewFakeTileSource(desktop.TileContent{Title: "15:09"}) // in an application: your own source
+menu.Post = eng.Post // updates from the source's goroutine go to the engine's thread
+menu.SetTileGroups([]desktop.TileGroup{{ID: "work", Tiles: []desktop.Tile{{
+    ID: "clock", Size: desktop.TileMedium,
+    Content: desktop.TileContent{Title: "Clock"},                // until the first state
+    Live:    desktop.LiveTile{Source: clock},                    // Queue and Period are optional
+}}}})
+```
+
+- A source hands states to the function passed to `Subscribe` and returns an
+  unsubscribe function. It usually sends the current state at once, on subscription.
+- A subscription lives only while the menu with tiles is open: a closed menu
+  does not call the source and does not wake frames.
+- The state queue keeps the last `Queue` states (default 5) and cycles through
+  them every `Period` (default 6 s). A new state is shown at once.
+- The transition between states is set by the theme token `tile.cycle`
+  (Windows 10: 300 ms, `out-cubic`). The transition style is the metric
+  `tile.cycle.kind`: 0 is a slide, 1 is a flip. The transition is composed of
+  two raster images, so a transition frame redraws only the tile.
+- The transition is instant under reduced motion, the `MotionOff` and
+  `MotionRemote` profiles, a zero duration, and a layout without tiles. A repeat
+  of the same content and the first state of a new subscription start no
+  transition.
+- For demonstrations and tests there is `desktop.NewFakeTileSource(initial…)`
+  with `Set` and `Current`.
+
+The model is described in `docs/adr/0010-live-tiles.md`.
+
 ## Module Structure
 
 ```

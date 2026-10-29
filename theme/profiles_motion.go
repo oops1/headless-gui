@@ -6,7 +6,8 @@ package theme
 // Источник — задания WinLine (ENGINE_WIN11_SHELL_TASK §7 «Тени», §8 «Меньше
 // движения») и исходные ТЗ оболочек: чисел там нет, есть диапазоны — Windows
 // 11 «короткие системные анимации 100–250 мс», «Пуск» — «fade + slight
-// vertical movement», Windows 10 — 100–200 мс, «Пуск» снизу, центр
+// vertical movement», Windows 10 — 100–200 мс (переход живой плитки — 300 мс,
+// см. motionWin10), «Пуск» снизу, центр
 // уведомлений справа; Windows 2000 — без движения. Значения ниже выбраны в
 // этих диапазонах и согласованы с тем, что профили уже объявляли
 // (menu.open: 200 мс out-back, 150 и 180 мс out-cubic). Закрытие короче
@@ -18,6 +19,7 @@ package theme
 //	submenu.open  150 out-cubic    120 out-cubic    120 out-cubic    0
 //	start.open    250 out-cubic    200 out-cubic    200 out-cubic    0
 //	flyout.open   200 out-cubic    150 out-cubic    180 out-cubic    0
+//	tile.cycle    250 out-cubic    300 out-cubic    250 out-cubic    0
 //
 //	тень (shadow.soft)  всплывающие: blur/offY   окно и диалог: blur/offY   цвет
 //	Windows 11          20 / 8                   32 / 12                    0,0,0,77 (тёмная 115)
@@ -35,7 +37,7 @@ import (
 
 // motionTokens — длительности и кривые семейства профилей.
 type motionTokens struct {
-	menuClose, submenuOpen, startOpen, flyoutOpen AnimSpec
+	menuClose, submenuOpen, startOpen, flyoutOpen, tileCycle AnimSpec
 }
 
 func anim(ms int, curve string) AnimSpec {
@@ -46,14 +48,19 @@ var (
 	motionWin11 = motionTokens{
 		menuClose: anim(120, "out-cubic"), submenuOpen: anim(150, "out-cubic"),
 		startOpen: anim(250, "out-cubic"), flyoutOpen: anim(200, "out-cubic"),
+		tileCycle: anim(250, "out-cubic"),
 	}
+	// Windows 10: переход живой плитки — 300 мс, дольше выезда, чтобы смену
+	// состояния было видно глазом, но не мешать чтению плитки.
 	motionWin10 = motionTokens{
 		menuClose: anim(100, "out-cubic"), submenuOpen: anim(120, "out-cubic"),
 		startOpen: anim(200, "out-cubic"), flyoutOpen: anim(150, "out-cubic"),
+		tileCycle: anim(300, "out-cubic"),
 	}
 	motionMacOS = motionTokens{
 		menuClose: anim(150, "out-cubic"), submenuOpen: anim(120, "out-cubic"),
 		startOpen: anim(200, "out-cubic"), flyoutOpen: anim(180, "out-cubic"),
+		tileCycle: anim(250, "out-cubic"),
 	}
 )
 
@@ -63,13 +70,14 @@ func declareMotion(p *Profile, m motionTokens) {
 	p.Anims[AnimSubmenuOpen] = m.submenuOpen
 	p.Anims[AnimStartOpen] = m.startOpen
 	p.Anims[AnimFlyoutOpen] = m.flyoutOpen
+	p.Anims[AnimTileCycle] = m.tileCycle
 }
 
 // classicMotionKeys — анимации, которые классический профиль объявляет
 // нулевыми: отказ от движения, а не «не объявлено» (необъявленное ключи с
 // запасом взяли бы menu.open).
 var classicMotionKeys = []Key{
-	"window.open", AnimMenuOpen, AnimMenuClose, AnimSubmenuOpen, AnimStartOpen, AnimFlyoutOpen,
+	"window.open", AnimMenuOpen, AnimMenuClose, AnimSubmenuOpen, AnimStartOpen, AnimFlyoutOpen, AnimTileCycle,
 	"hover", "taskbar.item",
 }
 
