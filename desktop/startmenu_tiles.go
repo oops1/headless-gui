@@ -950,8 +950,12 @@ type fadeBar struct {
 	alpha float64
 	last  time.Time
 	timer *time.Timer
-	live  bool
-	anim  *widget.Animation
+	// timerGen — поколение таймера паузы: срабатывание старого таймера,
+	// которое ждало замка, пока pin или hide его останавливали (Stop уже
+	// не успел), узнаёт себя устаревшим и ничего не делает.
+	timerGen uint64
+	live     bool
+	anim     *widget.Animation
 	// pinned — полоса удерживается на виду (бегунок тянут или над дорожкой
 	// курсор): затухание не стартует, пока флаг не снят.
 	pinned bool
@@ -980,7 +984,9 @@ func (f *fadeBar) poke(inval func()) {
 	prev := f.anim
 	f.anim = nil
 	if f.timer == nil {
-		f.timer = time.AfterFunc(thinBarHold, func() { f.expire(inval) })
+		f.timerGen++
+		gen := f.timerGen
+		f.timer = time.AfterFunc(thinBarHold, func() { f.expire(gen, inval) })
 	}
 	f.mu.Unlock()
 	if prev != nil {
@@ -993,10 +999,15 @@ func (f *fadeBar) poke(inval func()) {
 	}
 }
 
-// expire зовётся по таймеру: если пауза не истекла (был свежий poke), заводит
-// таймер на остаток, иначе запускает затухание.
-func (f *fadeBar) expire(inval func()) {
+// expire зовётся по таймеру поколения gen: если пауза не истекла (был свежий
+// poke), заводит таймер на остаток, иначе запускает затухание. Таймер чужого
+// поколения или уже снятый (pin, hide) — устаревшее срабатывание: выходим.
+func (f *fadeBar) expire(gen uint64, inval func()) {
 	f.mu.Lock()
+	if f.timer == nil || gen != f.timerGen {
+		f.mu.Unlock()
+		return
+	}
 	if f.pinned {
 		f.timer = nil
 		f.mu.Unlock()
