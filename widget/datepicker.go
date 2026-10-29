@@ -146,7 +146,7 @@ func (p *DatePicker) change(fn func()) {
 	p.mu.Unlock()
 
 	if open || wasOpen {
-		notifyUIChanged() // календарь лежит вне границ поля
+		p.notifyChanged() // календарь лежит вне границ поля
 	} else {
 		p.Invalidate()
 	}
@@ -219,7 +219,7 @@ func (p *DatePicker) SetFirstDayOfWeek(d time.Weekday) {
 	p.mu.Lock()
 	p.firstDay, p.firstSet = d, true
 	p.mu.Unlock()
-	notifyUIChanged()
+	p.notifyChanged()
 }
 
 // FirstDayOfWeek возвращает действующий первый день недели.

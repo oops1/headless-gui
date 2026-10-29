@@ -71,7 +71,7 @@ func (d *Dropdown) SetItems(items []string) {
 	atomic.StoreInt32(&d.chosen, 0)
 	atomic.StoreInt32(&d.hoverIdx, -1)
 	if atomic.SwapInt32(&d.open, 0) == 1 {
-		notifyUIChanged() // список был раскрыт в overlay — обновляем весь кадр
+		d.notifyChanged() // список был раскрыт в overlay — обновляем весь кадр
 	} else {
 		d.Invalidate()
 	}
@@ -102,7 +102,7 @@ func (d *Dropdown) SetSelected(idx int) {
 // пункта рисуется в overlay — тогда инвалидируется весь кадр.
 func (d *Dropdown) invalidateSelection() {
 	if atomic.LoadInt32(&d.open) == 1 {
-		notifyUIChanged()
+		d.notifyChanged()
 	} else {
 		d.Invalidate()
 	}
@@ -145,7 +145,7 @@ func (d *Dropdown) IsOpen() bool {
 // инвалидируется весь кадр.
 func (d *Dropdown) SetOpen(v bool) {
 	if atomic.SwapInt32(&d.open, b2i(v)) != b2i(v) {
-		notifyUIChanged()
+		d.notifyChanged()
 	}
 }
 
@@ -171,10 +171,10 @@ func (d *Dropdown) OnMouseMove(x, y int) {
 			}
 		}
 		if atomic.SwapInt32(&d.hoverIdx, hov) != hov {
-			notifyUIChanged() // пункты раскрытого списка — в overlay
+			d.notifyChanged() // пункты раскрытого списка — в overlay
 		}
 	} else if atomic.SwapInt32(&d.hoverIdx, -1) != -1 {
-		notifyUIChanged()
+		d.notifyChanged()
 	}
 }
 
@@ -429,7 +429,7 @@ func (d *Dropdown) OnKeyEvent(e KeyEvent) {
 		} else {
 			atomic.StoreInt32(&d.open, 1)
 		}
-		notifyUIChanged()
+		d.notifyChanged()
 
 	case KeyUp:
 		idx := int(atomic.LoadInt32(&d.selIdx))
@@ -455,7 +455,7 @@ func (d *Dropdown) OnKeyEvent(e KeyEvent) {
 	case KeyEscape:
 		if isOpen {
 			atomic.StoreInt32(&d.open, 0)
-			notifyUIChanged() // закрытие overlay-списка
+			d.notifyChanged() // закрытие overlay-списка
 		}
 	}
 }
@@ -485,7 +485,7 @@ func (d *Dropdown) Dismiss() {
 	wasOpen := atomic.SwapInt32(&d.open, 0) == 1
 	hovReset := atomic.SwapInt32(&d.hoverIdx, -1) != -1
 	if wasOpen || hovReset {
-		notifyUIChanged() // закрытие overlay-списка
+		d.notifyChanged() // закрытие overlay-списка
 	}
 }
 
@@ -516,7 +516,7 @@ func (d *Dropdown) OnMouseButton(e MouseEvent) bool {
 
 	if atomic.LoadInt32(&d.open) == 0 {
 		atomic.StoreInt32(&d.open, 1)
-		notifyUIChanged() // раскрытие overlay-списка
+		d.notifyChanged() // раскрытие overlay-списка
 		return true
 	}
 
@@ -533,7 +533,7 @@ func (d *Dropdown) OnMouseButton(e MouseEvent) bool {
 			prev := int(atomic.SwapInt32(&d.selIdx, int32(i)))
 			atomic.StoreInt32(&d.chosen, 1)
 			atomic.StoreInt32(&d.open, 0)
-			notifyUIChanged() // закрытие списка + возможная смена заголовка
+			d.notifyChanged() // закрытие списка + возможная смена заголовка
 			if prev != i && d.OnChange != nil {
 				d.mu.RLock()
 				text := ""
@@ -548,6 +548,6 @@ func (d *Dropdown) OnMouseButton(e MouseEvent) bool {
 	}
 
 	atomic.StoreInt32(&d.open, 0)
-	notifyUIChanged() // закрытие overlay-списка (клик мимо пунктов)
+	d.notifyChanged() // закрытие overlay-списка (клик мимо пунктов)
 	return true
 }

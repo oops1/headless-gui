@@ -296,6 +296,9 @@ func horizontalSide(s DockSide) bool { return s == DockLeft || s == DockRight }
 
 // SetCenter задаёт документную область (единственный виджет центра).
 func (m *DockManager) SetCenter(w Widget) {
+	if prev := m.center; prev != nil && prev != w {
+		releaseChild(&m.Base, prev)
+	}
 	m.center = w
 	if w != nil {
 		adoptChild(&m.Base, w) // родитель нужен переводу области перерисовки (см. contentoffset.go)
@@ -467,6 +470,7 @@ func (m *DockManager) dockPane(p *DockPane, side DockSide) {
 	if m.flyoutPane == p {
 		m.closeFlyout()
 	}
+	adoptChild(&m.Base, p) // вернулась из нативного окна — снова ребёнок менеджера
 	p.state = PaneDocked
 	p.side = side
 	m.sides[int(side)] = append(m.sides[int(side)], p)
@@ -488,6 +492,10 @@ func (m *DockManager) floatPane(p *DockPane, b image.Rectangle) {
 		p.state = PaneFloating
 		m.layout()
 		m.Invalidate()
+		// Панель уходит в своё окно (корень другого движка): пока она там,
+		// она не ребёнок менеджера — иначе её уведомления шли бы движку
+		// главного окна (owner.go). dockPane/pinPane/showPane усыновляют снова.
+		releaseChild(&m.Base, p)
 		p.OnFloatNative(p)
 		m.fireStateChanged(p)
 		return
@@ -517,6 +525,7 @@ func (m *DockManager) floatPane(p *DockPane, b image.Rectangle) {
 
 // pinPane возвращает p из auto-hide в пришвартованное состояние.
 func (m *DockManager) pinPane(p *DockPane) {
+	adoptChild(&m.Base, p) // панель в менеджере — его ребёнок (owner.go)
 	if p.state != PaneAutoHidden {
 		return
 	}
@@ -573,6 +582,7 @@ func (m *DockManager) closePane(p *DockPane) {
 
 // showPane возвращает закрытую панель на её последнюю сторону.
 func (m *DockManager) showPane(p *DockPane) {
+	adoptChild(&m.Base, p) // панель в менеджере — его ребёнок (owner.go)
 	if p.state != PaneClosed {
 		return
 	}
@@ -1123,7 +1133,7 @@ func (m *DockManager) openFlyout(p *DockPane) {
 	m.flyoutReveal = 0
 	m.flyoutAnim = AnimateOwned(m, "flyout", MotionDur(dockFlyoutMs*time.Millisecond), EaseOutCubic, func(t float64) {
 		m.flyoutReveal = t
-		notifyUIChanged()
+		m.notifyChanged()
 	})
 }
 
@@ -1164,7 +1174,7 @@ func (m *DockManager) beginPaneDrag(p *DockPane, x, y int) {
 	// сбрасываем кэш, чтобы новый drag не переиспользовал старый призрак.
 	m.ghostImg = nil
 	m.ghostPane = nil
-	notifyUIChanged()
+	m.notifyChanged()
 }
 
 func (m *DockManager) updatePaneDrag(p *DockPane, x, y int) {
@@ -1183,7 +1193,7 @@ func (m *DockManager) updatePaneDrag(p *DockPane, x, y int) {
 		p.floatBounds = nb
 		setDockChildBounds(p, nb)
 	}
-	notifyUIChanged()
+	m.notifyChanged()
 }
 
 func (m *DockManager) endPaneDrag(p *DockPane, x, y int, moved bool) {
@@ -1510,7 +1520,7 @@ func (m *DockManager) applyGutterResize(x, y int) {
 	if sz != m.sizes[int(s)] {
 		m.sizes[int(s)] = sz
 		m.layout()
-		notifyUIChanged()
+		m.notifyChanged()
 	}
 }
 
@@ -1980,6 +1990,7 @@ func (m *DockManager) RestoreLayout(data []byte) error {
 		// что и отрыв мышью. Только ставшая: у той, что плавала и до
 		// восстановления, окно уже есть, и второй вызов создал бы дубль.
 		if c.pane.state == PaneFloating && c.from != PaneFloating && c.pane.OnFloatNative != nil {
+			releaseChild(&m.Base, c.pane) // как в floatPane
 			c.pane.OnFloatNative(c.pane)
 		}
 		m.fireStateChanged(c.pane)

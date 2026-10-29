@@ -42,7 +42,7 @@ func (b *Base) InsertChildAt(i int, w Widget) {
 	adoptChild(b, w)
 	b.markChildAdded(w)
 	bumpTreeGen()
-	notifyOwnedRectChanged(screenRect(b, SubtreeRect(w)))
+	b.notifyOwnedRect(screenRect(b, SubtreeRect(w)))
 }
 
 // moveChildTo переставляет ребёнка w на позицию to.
@@ -59,7 +59,7 @@ func (b *Base) moveChildTo(w Widget, to int) bool {
 		bumpTreeGen()
 		b.drawDirty.Store(true)
 		b.markUp()
-		notifyOwnedRectChanged(screenRect(b, SubtreeRect(w)))
+		b.notifyOwnedRect(screenRect(b, SubtreeRect(w)))
 	}
 	return true
 }

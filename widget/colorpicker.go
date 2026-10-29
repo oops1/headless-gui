@@ -209,7 +209,7 @@ func (p *ColorPicker) SetDropDownOpen(v bool) {
 	if changed {
 		// Палитра лежит ВНЕ границ поля: пометить к перерисовке одно поле
 		// мало — там, где палитра появилась или исчезла, кадр не обновится.
-		notifyUIChanged()
+		p.notifyChanged()
 	}
 }
 

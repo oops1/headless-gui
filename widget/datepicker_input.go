@@ -198,7 +198,7 @@ func (p *DatePicker) OnMouseMove(x, y int) {
 	p.hoverAt, p.hover = hit, hover
 	p.mu.Unlock()
 	if changed {
-		notifyUIChanged()
+		p.notifyChanged()
 	}
 }
 

@@ -129,7 +129,7 @@ func (mb *MenuBar) SetMenuText(idx int, text string) {
 	}
 	mb.mu.Unlock()
 	if changed {
-		notifyUIChanged()
+		mb.notifyChanged()
 	}
 }
 
@@ -147,7 +147,7 @@ func (mb *MenuBar) SetSubItemText(top, sub int, text string) {
 	}
 	mb.mu.Unlock()
 	if changed {
-		notifyUIChanged()
+		mb.notifyChanged()
 	}
 }
 
@@ -624,7 +624,7 @@ func (mb *MenuBar) SetItemText(text string, path ...int) {
 	}
 	mb.mu.Unlock()
 	if changed {
-		notifyUIChanged()
+		mb.notifyChanged()
 	}
 }
 
@@ -640,7 +640,7 @@ func (mb *MenuBar) SetItemChecked(checked bool, path ...int) {
 	}
 	mb.mu.Unlock()
 	if changed {
-		notifyUIChanged()
+		mb.notifyChanged()
 	}
 }
 
@@ -666,7 +666,7 @@ func (mb *MenuBar) SetMenus(items ...MenuBarItem) {
 	mb.recalcRects()
 	mb.mu.Unlock()
 	mb.closeIfOpen()
-	notifyUIChanged()
+	mb.notifyChanged()
 }
 
 // InsertMenu вставляет пункт полосы перед позицией idx. Индекс за пределами
@@ -685,7 +685,7 @@ func (mb *MenuBar) InsertMenu(idx int, item MenuBarItem) {
 	mb.recalcRects()
 	mb.mu.Unlock()
 	mb.closeIfOpen()
-	notifyUIChanged()
+	mb.notifyChanged()
 }
 
 // RemoveMenu удаляет пункт полосы. Несуществующий индекс — не событие.
@@ -699,7 +699,7 @@ func (mb *MenuBar) RemoveMenu(idx int) {
 	mb.recalcRects()
 	mb.mu.Unlock()
 	mb.closeIfOpen()
-	notifyUIChanged()
+	mb.notifyChanged()
 }
 
 // ClearMenus убирает все пункты.
@@ -709,7 +709,7 @@ func (mb *MenuBar) ClearMenus() {
 	mb.recalcRects()
 	mb.mu.Unlock()
 	mb.closeIfOpen()
-	notifyUIChanged()
+	mb.notifyChanged()
 }
 
 // SetMenuItems заменяет подменю пункта верхнего уровня.
@@ -726,7 +726,7 @@ func (mb *MenuBar) SetMenuItems(top int, items ...MenuItem) {
 	mb.items[top].Items = append([]MenuItem(nil), items...)
 	mb.mu.Unlock()
 	mb.closeIfOpen()
-	notifyUIChanged()
+	mb.notifyChanged()
 }
 
 // closeIfOpen закрывает раскрытое подменю после правки состава.

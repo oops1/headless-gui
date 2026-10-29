@@ -77,7 +77,11 @@ func adoptChild(parent *Base, child Widget) {
 // контейнером (за время удаления его мог усыновить другой).
 func releaseChild(parent *Base, child Widget) {
 	if bp, ok := child.(baseProvider); ok {
-		bp.baseRef().parent.CompareAndSwap(parent, nil)
+		b := bp.baseRef()
+		b.parent.CompareAndSwap(parent, nil)
+		// И родитель по записи (retain.go): снятый ребёнок, ставший корнем
+		// другого движка, не должен числиться за прежним деревом (owner.go).
+		b.recParent.CompareAndSwap(parent, nil)
 	}
 }
 

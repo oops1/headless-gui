@@ -1680,7 +1680,7 @@ func (w *Window) OnMouseButton(e MouseEvent) bool {
 				// Гасим контур ровно там, где он был; полная инвалидация
 				// скрыла бы от хоста, что окно просто переехало, — а по этому
 				// он решает, можно ли обойтись командой копирования.
-				notifyRectChanged(dest.Union(from))
+				w.notifyRect(dest.Union(from))
 			}
 			if w.capMgr != nil {
 				w.capMgr.ReleaseCapture()
@@ -1857,7 +1857,7 @@ func (w *Window) damageOutline(r image.Rectangle) {
 		return
 	}
 	if w.OutlineDragStyle == OutlineDragFilled {
-		notifyRectChanged(r)
+		w.notifyRect(r)
 		return
 	}
 
@@ -1869,14 +1869,14 @@ func (w *Window) damageOutline(r image.Rectangle) {
 	}
 	if t*2 >= r.Dy() || t*2 >= r.Dx() {
 		// Контур тоньше собственных полос — дробить нечего.
-		notifyRectChanged(r)
+		w.notifyRect(r)
 		return
 	}
 
-	notifyRectChanged(image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+t))     // верх
-	notifyRectChanged(image.Rect(r.Min.X, r.Max.Y-t, r.Max.X, r.Max.Y))     // низ
-	notifyRectChanged(image.Rect(r.Min.X, r.Min.Y+t, r.Min.X+t, r.Max.Y-t)) // лево
-	notifyRectChanged(image.Rect(r.Max.X-t, r.Min.Y+t, r.Max.X, r.Max.Y-t)) // право
+	w.notifyRect(image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+t))     // верх
+	w.notifyRect(image.Rect(r.Min.X, r.Max.Y-t, r.Max.X, r.Max.Y))     // низ
+	w.notifyRect(image.Rect(r.Min.X, r.Min.Y+t, r.Min.X+t, r.Max.Y-t)) // лево
+	w.notifyRect(image.Rect(r.Max.X-t, r.Min.Y+t, r.Max.X, r.Max.Y-t)) // право
 }
 
 // outlineStripThickness — толщина полосы контура: две линии рамки и точка
@@ -1939,7 +1939,7 @@ func (w *Window) Dismiss() {
 	w.localeMenuOpen = false
 	w.localeMu.Unlock()
 	if wasOpen {
-		notifyUIChanged() // закрытие overlay-меню локали
+		w.notifyChanged() // закрытие overlay-меню локали
 	}
 }
 
@@ -1966,7 +1966,7 @@ func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
 				w.localeMu.Lock()
 				w.localeMenuOpen = false
 				w.localeMu.Unlock()
-				notifyUIChanged() // закрытие overlay-меню локали
+				w.notifyChanged() // закрытие overlay-меню локали
 				if i < len(items) {
 					RequestLocale(items[i])
 				}
@@ -1977,7 +1977,7 @@ func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
 		w.localeMu.Lock()
 		w.localeMenuOpen = false
 		w.localeMu.Unlock()
-		notifyUIChanged() // закрытие overlay-меню локали
+		w.notifyChanged() // закрытие overlay-меню локали
 		return true, true
 	}
 
@@ -1989,7 +1989,7 @@ func (w *Window) handleLocaleMouse(e MouseEvent) (consumed bool, handled bool) {
 		w.localeMu.Lock()
 		w.localeMenuOpen = true
 		w.localeMu.Unlock()
-		notifyUIChanged() // открытие overlay-меню локали
+		w.notifyChanged() // открытие overlay-меню локали
 		return true, true
 	}
 	return false, false

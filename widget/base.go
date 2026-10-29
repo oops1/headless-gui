@@ -72,6 +72,10 @@ type Base struct {
 	// границы применимости — в contentoffset.go.
 	parent atomic.Pointer[Base]
 
+	// owner — владелец дерева (owner.go): привязан у корня движком
+	// (BindOwner), читается подъёмом по родителям при каждом уведомлении.
+	owner atomic.Pointer[ownerRef]
+
 	// shifter заполнен у контейнеров, показывающих детей со сдвигом
 	// (ScrollView): по нему цепочка родителей берёт текущее смещение.
 	shifter atomic.Pointer[contentShifter]
@@ -163,7 +167,7 @@ func (b *Base) SetBounds(r image.Rectangle) {
 	b.markDirtyAndParent()
 	// Границы заданы в системе координат родителя, а перерисовывать надо место
 	// на экране: у ребёнка прокрутки это не одно и то же (см. contentoffset.go).
-	notifyOwnedRectChanged(screenRect(b.parent.Load(), union))
+	b.notifyOwnedRect(screenRect(b.parent.Load(), union))
 }
 
 func (b *Base) Children() []Widget { return b.children }
@@ -176,7 +180,7 @@ func (b *Base) AddChild(w Widget) {
 	// Область ребёнка задана в координатах ДЕТЕЙ этого контейнера: если он сам
 	// сдвигает содержимое, сдвиг входит и в этот перевод (поэтому от b, а не от
 	// его родителя).
-	notifyOwnedRectChanged(screenRect(b, w.Bounds()))
+	b.notifyOwnedRect(screenRect(b, w.Bounds()))
 }
 
 // markChildAdded — состав детей изменился: контейнер перезаписывается, а
@@ -208,7 +212,7 @@ func (b *Base) Invalidate() {
 	r := b.bounds
 	b.boundsMu.Unlock()
 	b.markDirtyTree()
-	notifyOwnedRectChanged(screenRect(b.parent.Load(), r))
+	b.notifyOwnedRect(screenRect(b.parent.Load(), r))
 }
 
 // invalidateRect — Invalidate для области, заданной не границами виджета, а им
@@ -216,7 +220,7 @@ func (b *Base) Invalidate() {
 // системе координат, что и границы виджета.
 func (b *Base) invalidateRect(r image.Rectangle) {
 	b.markDirty()
-	notifyOwnedRectChanged(screenRect(b.parent.Load(), r))
+	b.notifyOwnedRect(screenRect(b.parent.Load(), r))
 }
 
 // InvalidateArea заявляет изменившейся область r (в системе координат
@@ -237,7 +241,7 @@ func (b *Base) RemoveChild(w Widget) bool {
 			releaseChild(b, w)
 			b.drawDirty.Store(true)
 			b.markUp()
-			notifyOwnedRectChanged(screenRect(b, w.Bounds()))
+			b.notifyOwnedRect(screenRect(b, w.Bounds()))
 			return true
 		}
 	}

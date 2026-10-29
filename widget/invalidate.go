@@ -55,6 +55,10 @@ type uiReceiver struct {
 	// удержанием списков команд не нужно считать её ничейным повреждением.
 	// nil — приёмнику достаётся rect.
 	owned func(image.Rectangle)
+	// owner — приёмник есть движок, владеющий деревьями (owner.go): при
+	// адресной рассылке дереву другого владельца он пропускается. nil —
+	// наблюдатель, получает всё.
+	owner Owner
 }
 
 var (
@@ -101,10 +105,20 @@ func RegisterUINotifierWake(fnFull func(), fnRect func(image.Rectangle), fnWake 
 // виджет, чей охват его задевает, перезаписывается. Приёмник без fnOwned
 // получает всё в fnRect.
 func RegisterUINotifierRetained(fnFull func(), fnRect func(image.Rectangle), fnWake func(), fnOwned func(image.Rectangle)) uint64 {
+	return RegisterUINotifierFor(nil, fnFull, fnRect, fnWake, fnOwned)
+}
+
+// RegisterUINotifierFor — RegisterUINotifierRetained для приёмника-движка,
+// владеющего деревьями (ADR-0008): уведомления дерева, привязанного к
+// другому владельцу (BindOwner), до него не доходят; уведомления своих
+// деревьев, деревьев без владельца и источников без виджета (InvalidateRect,
+// слой данных) — доходят, как прежде. Приёмник с owner == nil — наблюдатель:
+// получает всё.
+func RegisterUINotifierFor(owner Owner, fnFull func(), fnRect func(image.Rectangle), fnWake func(), fnOwned func(image.Rectangle)) uint64 {
 	uiNotifyMu.Lock()
 	uiHandleSeq++
 	h := uiHandleSeq
-	uiReceivers = append(uiReceivers, uiReceiver{handle: h, full: fnFull, rect: fnRect, wake: fnWake, owned: fnOwned})
+	uiReceivers = append(uiReceivers, uiReceiver{handle: h, full: fnFull, rect: fnRect, wake: fnWake, owned: fnOwned, owner: owner})
 	uiNotifyMu.Unlock()
 	return h
 }
@@ -173,10 +187,17 @@ func BumpTextMetricsRev() { textMetricsRev.Add(1) }
 
 // notifyUIChanged сообщает всем приёмникам, что содержимое UI могло измениться.
 // Дёшево и потокобезопасно; no-op, если приёмников нет.
-func notifyUIChanged() {
+func notifyUIChanged() { notifyUIChangedTo(nil) }
+
+// notifyUIChangedTo — notifyUIChanged дерева владельца to (nil — всем):
+// чужие движки пропускаются (owner.go).
+func notifyUIChangedTo(to Owner) {
 	uiNotifyMu.RLock()
 	defer uiNotifyMu.RUnlock()
 	for i := range uiReceivers {
+		if uiReceivers[i].skipFor(to) {
+			continue
+		}
 		if uiReceivers[i].full != nil {
 			uiReceivers[i].full()
 		}
@@ -189,10 +210,16 @@ func notifyUIChanged() {
 // notifyAnimationAdded сообщает приёмникам, что заведена анимация: будит их, не
 // заявляя изменений (см. RegisterUINotifierWake). Приёмникам без wake и внешнему
 // слоту SetUIChangeNotifier достаётся прежняя полная инвалидация.
-func notifyAnimationAdded() {
+func notifyAnimationAdded() { notifyAnimationAddedTo(nil) }
+
+// notifyAnimationAddedTo — notifyAnimationAdded дереву владельца to (nil — всем).
+func notifyAnimationAddedTo(to Owner) {
 	uiNotifyMu.RLock()
 	defer uiNotifyMu.RUnlock()
 	for i := range uiReceivers {
+		if uiReceivers[i].skipFor(to) {
+			continue
+		}
 		switch {
 		case uiReceivers[i].wake != nil:
 			uiReceivers[i].wake()
@@ -226,7 +253,11 @@ func notifyRectChanged(r image.Rectangle) { notifyRect(r, false) }
 // себя устаревшим (см. RegisterUINotifierRetained).
 func notifyOwnedRectChanged(r image.Rectangle) { notifyRect(r, true) }
 
-func notifyRect(r image.Rectangle, owned bool) {
+func notifyRect(r image.Rectangle, owned bool) { notifyRectTo(r, owned, nil) }
+
+// notifyRectTo — notifyRect дереву владельца to (nil — всем): чужие движки
+// пропускаются (owner.go).
+func notifyRectTo(r image.Rectangle, owned bool, to Owner) {
 	// Границы виджета могли поменяться — прямоугольники поддеревьев,
 	// посчитанные до этого, больше не годятся.
 	bumpTreeGen()
@@ -236,6 +267,9 @@ func notifyRect(r image.Rectangle, owned bool) {
 	uiNotifyMu.RLock()
 	defer uiNotifyMu.RUnlock()
 	for i := range uiReceivers {
+		if uiReceivers[i].skipFor(to) {
+			continue
+		}
 		switch {
 		case owned && uiReceivers[i].owned != nil:
 			uiReceivers[i].owned(r)

@@ -776,7 +776,7 @@ func (p *DockPane) applyFloatingResize(x, y int) {
 	if nb != p.bounds {
 		p.floatBounds = nb
 		p.SetBounds(nb)
-		notifyUIChanged()
+		p.notifyChanged()
 	}
 }
 

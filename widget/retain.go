@@ -164,7 +164,7 @@ func InvalidateSubtree(w Widget) {
 	if bp, ok := w.(baseProvider); ok {
 		b := bp.baseRef()
 		b.markUp()
-		notifyOwnedRectChanged(screenRect(b.parent.Load(), r))
+		b.notifyOwnedRect(screenRect(b.parent.Load(), r))
 		return
 	}
 	notifyRectChanged(r)

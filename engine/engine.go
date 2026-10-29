@@ -428,7 +428,9 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// бы весь экран ради того, что меняется в одной его части.
 	// Приёмники проверяют контракт отрисовки, если он включён
 	// (drawcontract.go), и делают то же, что Invalidate/InvalidateRect.
-	e.notifierHandle = widget.RegisterUINotifierRetained(e.onWidgetInvalidate, e.onWidgetInvalidateRect, e.onWidgetAnimation, e.onWidgetInvalidateRectOwned)
+	// Приёмник-владелец (ADR-0008, owner.go): уведомления деревьев, привязанных
+	// к другим движкам, сюда не приходят.
+	e.notifierHandle = widget.RegisterUINotifierFor(treeOwner{e}, e.onWidgetInvalidate, e.onWidgetInvalidateRect, e.onWidgetAnimation, e.onWidgetInvalidateRectOwned)
 	// Политика сбоев (failure.go): изоляция, под go test — прежнее поведение.
 	e.failure.policy.Store(uint32(defaultFailurePolicy()))
 	e.moveHandle = widget.RegisterMoveSink(e.noteMove)
@@ -503,8 +505,12 @@ func (e *Engine) SetRoot(w widget.Widget) {
 	}
 	injectCaptureManager(w, e)
 	e.mu.Lock()
+	prev := e.root
 	e.root = w
 	e.mu.Unlock()
+	// Дерево принадлежит этому движку (ADR-0008, owner.go): его уведомления
+	// идут сюда адресно.
+	e.bindRoot(prev, w)
 	e.Invalidate()
 }
 
@@ -518,8 +524,10 @@ func (e *Engine) SetRootFullCanvas(w widget.Widget) {
 	w.SetBounds(image.Rect(0, 0, cw, ch))
 	injectCaptureManager(w, e)
 	e.mu.Lock()
+	prev := e.root
 	e.root = w
 	e.mu.Unlock()
+	e.bindRoot(prev, w)
 	e.Invalidate()
 }
 
@@ -1193,6 +1201,7 @@ func (e *Engine) Stop() {
 		return
 	}
 	widget.UnregisterUINotifier(e.notifierHandle)
+	e.unbindAll() // корень и модальные снова уведомляют широковещанием (ADR-0008)
 	// Учёт рисующихся виджетов общий на процесс: остановленный движок,
 	// включивший проверку контракта, не должен держать его включённым у всех.
 	e.SetDrawContractCheck(false)
@@ -1478,6 +1487,8 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 	e.modMu.Lock()
 	e.modals = append(e.modals, m)
 	e.modMu.Unlock()
+	// Модальное окно — отдельный корень этого движка (ADR-0008).
+	widget.BindOwner(m, treeOwner{e})
 	e.Invalidate()
 }
 
@@ -1591,6 +1602,7 @@ func (e *Engine) CloseModal(m widget.ModalWidget) {
 			sm.SetModal(false)
 		}
 		e.fireOnModalClosed(closed)
+		widget.BindOwner(closed, nil)
 	}
 	e.Invalidate()
 }

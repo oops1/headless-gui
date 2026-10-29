@@ -286,7 +286,7 @@ func (d *Dialog) DimColor() color.RGBA {
 // частичная перерисовка клипует FillRectAlpha по damage-области.
 func (d *Dialog) setDimAlpha(a uint8) {
 	d.dimAlpha.Store(uint32(a))
-	notifyUIChanged()
+	d.notifyChanged()
 }
 
 // SetModal управляет модальным состоянием (вызывается движком).
@@ -580,7 +580,7 @@ func (d *Dialog) OnMouseMove(x, y int) {
 	}
 	d.dragLastX, d.dragLastY = x, y
 	ShiftWidget(d, dx, dy)
-	notifyUIChanged()
+	d.notifyChanged()
 }
 
 // ─── Кнопка ✕ в заголовке ───────────────────────────────────────────────────

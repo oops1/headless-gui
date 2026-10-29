@@ -229,6 +229,7 @@ func (tc *TabControl) RemoveTab(idx int) {
 		tc.mu.Unlock()
 		return
 	}
+	releaseChild(&tc.Base, tc.tabs[idx].Content)
 	tc.tabs = append(tc.tabs[:idx], tc.tabs[idx+1:]...)
 	if tc.active >= len(tc.tabs) {
 		tc.active = len(tc.tabs) - 1
@@ -245,6 +246,9 @@ func (tc *TabControl) RemoveTab(idx int) {
 func (tc *TabControl) ClearTabs() {
 	tc.mu.Lock()
 	changed := len(tc.tabs) > 0
+	for _, tab := range tc.tabs {
+		releaseChild(&tc.Base, tab.Content)
+	}
 	tc.tabs = nil
 	tc.active = 0
 	tc.mu.Unlock()

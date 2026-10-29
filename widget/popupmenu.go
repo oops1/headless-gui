@@ -332,7 +332,7 @@ func (m *PopupMenu) SetItemText(idx int, text string) {
 	}
 	m.mu.Unlock()
 	if changed {
-		notifyUIChanged()
+		m.notifyChanged()
 	}
 }
 
@@ -420,7 +420,7 @@ func (m *PopupMenu) Show(x, y int) {
 	m.geoMu.Unlock()
 	atomic.StoreInt32(&m.hoverIdx, -1)
 	atomic.StoreInt32(&m.open, 1)
-	notifyUIChanged() // появление overlay-меню (вне bounds виджета)
+	m.notifyChanged() // появление overlay-меню (вне bounds виджета)
 }
 
 // OverlayAnchor реализует widget.OverlayAnchorer: точка, запрошенная в Show.
@@ -458,7 +458,7 @@ func (m *PopupMenu) Close() {
 		activePopupMu.Unlock()
 	}
 	if wasOpen {
-		notifyUIChanged() // исчезновение overlay-меню
+		m.notifyChanged() // исчезновение overlay-меню
 	}
 }
 
@@ -466,7 +466,7 @@ func (m *PopupMenu) Close() {
 // bounds виджета — при фактическом изменении инвалидируется весь кадр.
 func (m *PopupMenu) setHoverIdx(idx int) {
 	if atomic.SwapInt32(&m.hoverIdx, int32(idx)) != int32(idx) {
-		notifyUIChanged()
+		m.notifyChanged()
 	}
 }
 
@@ -618,7 +618,7 @@ func (m *PopupMenu) scrollBy(dy int) bool {
 	m.geoMu.Lock()
 	m.scroll = n
 	m.geoMu.Unlock()
-	notifyUIChanged()
+	m.notifyChanged()
 	return true
 }
 
@@ -1995,7 +1995,7 @@ func (m *PopupMenu) SetItemChecked(idx int, checked bool) {
 	m.mu.Unlock()
 	if changed {
 		m.Invalidate()
-		notifyUIChanged()
+		m.notifyChanged()
 	}
 }
 

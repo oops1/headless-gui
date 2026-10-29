@@ -27,7 +27,7 @@ func (p *ColorPicker) change(fn func()) {
 	p.mu.Unlock()
 
 	if open || wasOpen {
-		notifyUIChanged() // палитра лежит вне границ поля
+		p.notifyChanged() // палитра лежит вне границ поля
 	} else {
 		p.Invalidate()
 	}
@@ -358,7 +358,7 @@ func (p *ColorPicker) OnMouseMove(x, y int) {
 		return
 	}
 	if changed {
-		notifyUIChanged()
+		p.notifyChanged()
 	}
 }
 
