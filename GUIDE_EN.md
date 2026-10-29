@@ -5829,6 +5829,54 @@ eng.SetSingleBuffer(false) // two copies of the frame instead of one
   bytes of the frame buffers (about W·H·4 with one buffer).
 
 
+### Tree owner, measuring services and the popup arena (v4.0, in progress)
+
+A widget tree belongs to the engine it was handed to: `SetRoot`, and
+`ShowModal` (a modal dialog inside the canvas). A widget change wakes only that
+engine, not every engine of the process: two windows, each with its own engine,
+do not redraw each other.
+
+```go
+eng.SetRoot(root)  // the root and its children belong to eng
+eng.ShowModal(dlg) // a modal dialog inside the canvas belongs to eng too
+eng.Stop()         // ownership is released; animations of its loop finish without OnDone
+```
+
+- A subtree handed to another engine moves to it; the previous root is
+  detached.
+- A tree not yet handed to an engine notifies every engine, as before. A widget
+  not yet inserted into a tree also notifies every engine: insert it into the
+  tree first, then configure it.
+- `widget.InvalidateRect` still wakes every engine: it is an unclaimed area
+  with no addressee. Declare your own areas with `InvalidateArea`.
+- The root layout uses the fonts of its engine: windows with different DPI get
+  their own scale.
+
+Owner services that widgets of the tree use:
+
+- `widget.MeasureTextFor(w, text, pt)`, `MeasureTextFontFor`,
+  `MeasureRunePositionsFor` and `FontMetricsFor` measure with the fonts, DPI
+  and scale of the engine of the tree of widget `w`. Measure your own widgets
+  with them rather than `MeasureUIText`, or a window with another DPI gets
+  foreign widths. Outside a tree (before `SetRoot`) they answer with the most
+  recently created engine, as `MeasureUIText` does.
+- A menu that is not a child of the tree (a custom context menu) is attached to
+  a host widget: `menu.SetHost(w)`. The menu then measures its labels and
+  reports changes to the host's engine.
+- An animation of a widget (`widget.AnimateOwned(w, …)`) is stepped by the loop
+  of the engine of its tree. An engine that is not running and produces frames
+  only through `RenderOnce` does not step its animations: a running loop picks
+  them up, if there is one.
+- `<text>` in an SVG icon of a tree is drawn with the fonts of the tree's engine
+  if the icon is already in the tree. An icon parsed before insertion is drawn
+  with the global fonts.
+
+The popup arena. Open menus and lists in OS windows (`SetPopupSink`) are drawn
+into one shared canvas of the engine, not into a separate canvas per menu. The
+popup memory is the largest open popup plus the images of all open ones.
+`Stats().PopupBytes` reports it; with no popups open it is zero.
+
+
 ## Module Structure
 
 ```

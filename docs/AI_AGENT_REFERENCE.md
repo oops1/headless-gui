@@ -10342,3 +10342,40 @@ widget.InvalidateRect(r)          // unclaimed area: every widget under it is re
 - An image rewritten in place is shown only after `eng.InvalidateImageCache(img)`
   (`nil` — the whole cache) or `widget.InvalidateImageCache(ctx, img)` from `Draw`.
   A `BlitPixels` buffer is re-read in every frame where it is drawn.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): tree owner, measuring services, popup arena
+
+Each widget tree belongs to the engine it was handed to (`SetRoot`, and
+`ShowModal` for a modal dialog inside the canvas). A widget change wakes only that
+engine; `Stop` releases the ownership and finishes the animations of its loop
+without `OnDone`.
+
+```go
+eng.SetRoot(root)  // root and children belong to eng; a subtree moved here leaves its previous owner
+eng.ShowModal(dlg) // in-canvas modal belongs to eng
+eng.Stop()         // ownership released; loop animations finish without OnDone
+```
+
+Rules that follow from the design:
+
+- A tree not yet handed to an engine, and a widget not yet inserted into a tree,
+  notify every engine (broadcast), as before.
+- `widget.InvalidateRect` still broadcasts (unclaimed area); declare own areas with
+  `Base.InvalidateArea`, use `MarkDirty` for changes made without setters.
+- The root layout measures with the fonts, DPI and scale of its engine.
+- Services for widgets of a tree (`widget` package): `MeasureTextFor(w, text, pt)`,
+  `MeasureTextFontFor`, `MeasureRunePositionsFor`, `FontMetricsFor`. Without an
+  owner they fall back to the global measurer (`MeasureUIText` and friends).
+- `PopupMenu.SetHost(w)`: a menu that is not a child of the tree measures and
+  reports changes through the host widget's engine.
+- `widget.AnimateOwned(w, …)`: stepped by the loop of the engine of w's tree. An
+  engine that is not running (only `RenderOnce`) does not step its animations.
+- `widget.TextRasterizerFor(w)` and SVG icons in a tree: `<text>` uses the fonts of
+  the tree's engine when the icon is already in it.
+- Advanced types for code that implements its own services: `widget.Owner` (a
+  comparable key with the marker method `TreeOwner()`), `widget.BindOwner`,
+  `widget.OwnerOf`, `widget.RegisterUINotifierFor`, `widget.RegisterMoveSinkFor`,
+  `widget.StopAnimationsFor`, `widget.NewMeasureSet`.
+- Popup arena: all open popups of a host (`SetPopupSink`) render into one scratch
+  canvas of the engine. `Stats().PopupBytes` is the arena buffers plus the images of
+  open and fading popups; zero when no popup is open.
