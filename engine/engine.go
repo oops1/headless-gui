@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/oops1/headless-gui/v3/output"
@@ -37,276 +36,17 @@ import (
 // Поток рендеринга и поток потребителя разделены: рендер-горутина
 // складывает готовые кадры в буферизованный канал (глубина 8).
 // Если потребитель отстаёт, излишние кадры пропускаются.
+//
+// Замки: frameMu — корень, под ним берутся остальные; все прочие замки
+// листовые и друг под другом не берутся (state.go, ADR-0011,
+// lockorder_test.go).
 type Engine struct {
-	canvas    *Canvas
-	fontCache *FontCache
-	imgInv    *hgraster.ImageInvalidator // журнал сбросов кэша изображений всех холстов движка (imagecache.go)
-	bgSrc     image.Image                // исходный фон (до масштабирования); нужен при SetResolution
-	root      widget.Widget
-	mu        sync.RWMutex // защищает УКАЗАТЕЛИ root/canvas/bgSrc (короткие секции)
-
-	// frameMu сериализует кадр (draw+diff) со структурными операциями над
-	// канвасом/шрифтами (SetResolution, RegisterFont*, SetTheme и т.п.).
-	// В отличие от прежней схемы, e.mu больше НЕ удерживается на весь кадр —
-	// SetRoot/Root и события не блокируются рендером.
-	// Порядок захвата: frameMu → e.mu (никогда наоборот).
-	frameMu sync.Mutex
-
-	// ── Рендер по запросу (см. invalidate.go) ───────────────────────────────
-	onDemand atomic.Bool
-	invGen   atomic.Uint64
-	// mouseMod — модификаторы клавиатуры, которыми помечаются события мыши
-	// (см. modifiers.go). Атомарные: пишет поток окна, читает диспетчеризация.
-	mouseMod atomic.Int32
-	// pacing, frameWanted, wake, sink — внешний темп и сток кадров
-	// (pacing.go). При PacingExternal кадр готовится только по RequestFrame.
-	pacing      atomic.Uint32
-	frameWanted atomic.Bool
-	wake        chan struct{}
-	loopGID     atomic.Uint64 // горутина цикла кадров; 0 — цикл не идёт (см. Flush)
-	sinkMu      sync.RWMutex
-	sink        FrameSink
-
-	damageMu  sync.Mutex
-	damage    []image.Rectangle // области InvalidateRect с прошлого кадра
-	damageAll bool              // Invalidate() — полный diff
-	// force — ничейное повреждение кадра (cmdpath.go): логические области из
-	// InvalidateRect, widget.InvalidateRect, фокуса — виджет пути команд,
-	// чей охват их задевает, перезаписывается. Под damageMu.
-	force []image.Rectangle
-
-	// forceFrame — ничейное повреждение, забранное кадром (буфер
-	// переиспользуется: takeForce). Только горутина кадра.
-	forceFrame []image.Rectangle
-
-	// rec — рекордер команд пути Draw (cmdpath.go); cmdPath — включён ли он;
-	// replayer и replayDmg — воспроизводитель и буфер повреждения кадра.
-	rec       *hgdraw.Recorder
-	cmdPath   atomic.Bool
-	replayer  hgdraw.Replayer
-	replayDmg [1]image.Rectangle
-	// tiled — тайловый растр (tileframe.go); tr — его воркеры и кэш; bgGen
-	// растёт при смене фона, обоев и формата байтов — растры кэша размытия
-	// сняты с прежних.
-	tiled atomic.Bool
-	tr    *tileRaster
-	bgGen atomic.Uint64
-	// hashDiff — хэш-дифф тайлов (hashdiff.go); plan — план текущего кадра
-	// (переиспользуется, без аллокаций на кадр).
-	hashDiff atomic.Bool
-	plan     framePlan
-	// single — один буфер кадра (ADR-0007, toplayers.go, singlebuf.go холста);
-	// post, postRect, postMode, postTooltip — слои, отложенные до конца растра
-	// (переходы оверлеев), их место и признак, что обход уже откладывает.
-	single      atomic.Bool
-	post        []postItem
-	postRect    image.Rectangle
-	postMode    bool
-	postTooltip tooltipPlan
-
-	// subpixelOwn — подпиксельный текст включила или выключила тема, а не
-	// приложение; subpixelPinned — приложение распорядилось само
-	// (SetTextSubpixel), и тема режим больше не трогает; subpixelWant — что
-	// просил последний применённый профиль. Под frameMu.
-	subpixelOwn, subpixelPinned, subpixelWant bool
-
-	focus    focusManager  // текущий виджет с фокусом
-	loan     focusLoan     // фокус, взятый виджетом по просьбе (focusreq.go)
-	captured widget.Widget // виджет, захвативший мышь (drag)
-	capMu    sync.Mutex
-	// capChain — контейнеры со сдвигом содержимого над захватившим мышь
-	// виджетом (см. captureOffset); capChainOK — цепочка уже найдена. Под capMu.
-	capChain   []widget.ContentOffsetter
-	capChainOK bool
-
-	// pressConsumer — виджет, поглотивший последний press ЛКМ.
-	// При release: если этот виджет больше не под курсором
-	// (удалён/закрыт), событие проглатывается, чтобы не пролетело
-	// на виджет, оказавшийся под курсором после закрытия.
-	pressConsumer widget.Widget
-
-	// touch — владельцы активных касаний по ID (см. touch.go).
-	touch touchState
-
-	modals []widget.ModalWidget // стек модальных виджетов (последний = верхний)
-	modMu  sync.Mutex
-
-	// modalHost — опциональный хост нативных модалок (window.dialogHost на
-	// Win32). Если установлен и принимает модалку, она живёт в собственном
-	// нативном окне ОС, а не в холсте движка. onModalClosed — колбэк,
-	// вызываемый в конце CloseModal (см. modalhost.go). hostMu защищает оба.
-	modalHost     ModalHost
-	onModalClosed func(widget.ModalWidget)
-	// modalClosedSubs — подписчики AddOnModalClosed. Слот onModalClosed занят
-	// хостом нативных окон, и приложению его не хватало: второй подписчик
-	// молча вытеснял первого (GG-82).
-	modalClosedSubs []modalClosedSub
-	modalSubNextID  int
-	hostMu          sync.Mutex
-
-	// popupSink — опциональный хост popup-оверлеев (window.popupHost). Если
-	// задан, открытые оверлеи (dropdown/меню) выносятся в собственные нативные
-	// окна ОС, а не рисуются в холст. lastPopupSig — сигнатура последнего
-	// набора попапов, отданного sink (для вызова sink только при изменениях).
-	popupSink    func([]PopupFrame)
-	lastPopupSig []popupSig
-	popupCache   map[uintptr]*popupEntry // кэш картинки на оверлей
-	// popupArena — общий холст-заготовка хостовых попапов (ADR-0009); только
-	// горутина кадра, под frameMu.
-	popupArena popupArena
-	popupGen     uint64                  // поколение для отсева исчезнувших попапов
-	popupMu      sync.Mutex
-
-	// Рабочие буферы renderPopups (только рендер-горутина, под frameMu).
-	popupItems []popupItem
-	popupSigBu []popupSig
-	// Переходы хостовых попапов (popuptrans.go): popupFade — хост их
-	// понимает (SetPopupFade); popupTicked — тик просит кадр под шаг;
-	// popupClosingBu — исчезающие попапы кадра (переиспользуемый буфер).
-	popupFade      atomic.Bool
-	popupTicked    atomic.Bool
-	popupClosingBu []uintptr
-
-	// notifierHandle — дескриптор регистрации этого движка в широковещательном
-	// реестре нотификаторов widget-пакета (RegisterUINotifier в New). Снимается
-	// в Stop (UnregisterUINotifier), чтобы короткоживущие движки диалогов/
-	// попапов не накапливались в реестре.
-	notifierHandle uint64
-
-	// measurerHandle — дескриптор регистрации измерителя текста
-	// (widget.RegisterTextMeasurer в New, снимается в Stop).
-	measurerHandle uint64
-	// measureSet — измерители этого движка для его деревьев (ADR-0008, 5.2):
-	// виджет с владельцем меряет текст шрифтами и масштабом своего движка.
-	measureSet *widget.MeasureSet
-	// canvasRef — текущий холст для измерителей (горутины приложения): e.canvas
-	// меняют SetScale/SetResolution под e.mu, а измеритель зовут и из кода,
-	// который этот замок держит (раскладка корня).
-	canvasRef atomic.Pointer[Canvas]
-
-	// svgTextHandle — дескриптор регистрации растеризатора <text> для
-	// widget/svg (svg.RegisterTextRasterizer в New, снимается в Stop).
-	svgTextHandle uint64
-
-	// moveHandle — дескриптор регистрации приёмника объявлений о переносе
-	// (widget.RegisterMoveSink в New, снимается в Stop).
-	moveHandle uint64
-
-	// offscreen — движок создан NewOffscreen и не занимает служб, общих для
-	// процесса: измерителя текста, растеризатора <text> в SVG и границ экрана
-	// для всплывающих меню.
-	offscreen bool
-	// postMu защищает posted: ставят в очередь из любых горутин, разбирает
-	// горутина кадра (см. post.go).
-	postMu sync.Mutex
-	// posted — вызовы, ожидающие выполнения в горутине кадра.
-	posted []func()
-
-	// moveMu защищает pendingMoves: объявления приходят из горутины, где
-	// двигают виджет (обработка ввода), а забирает их горутина кадра.
-	moveMu sync.Mutex
-	// pendingMoves — объявления, накопленные с прошлого кадра. Список свой у
-	// каждого движка: раньше он был один на процесс, и перенос окна в одном
-	// движке уносило в кадр другого — тот копировал у себя пиксели,
-	// которых там нет.
-	pendingMoves []widgetMove
-
-	frameSeq atomic.Uint64
-	// stats — счётчики для Engine.Stats (stats.go).
-	stats    engineStats
-	// contract — проверка контракта отрисовки (drawcontract.go).
-	contract drawContract
-	// failure — политика сбоев (failure.go).
-	failure failureState
-	// surfaces — буферы SetSurfaces (surfaces.go).
-	surfaces surfaceSet
-	// scaleWithin — физический размер холста первичен, логический выводится
-	// из масштаба (scalewithin.go). Под e.mu.
-	scaleWithin bool
-	started  atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
-	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
-
-	// timersMu защищает timers — таймеры After/Every, живые у этого движка. Stop
-	// гасит их все (см. timer.go).
-	timersMu sync.Mutex
-	timers   map[*Timer]struct{}
-
-	// Прежняя позиция курсора для адресного broadcastMouseMove. Доступ только
-	// из потока-источника ввода (SendMouseMove), синхронизация не нужна.
-	lastMoveX, lastMoveY int
-	// pointerOwner — верхний под указателем widget.PointerOwner, которому
-	// последним отдано движение (pointerowner.go); ownerPath — рабочий буфер
-	// его поиска. Только поток-источник ввода, как lastMoveX.
-	pointerOwner widget.PointerOwner
-	ownerPath    []hitStep
-
-	// videoBuf, overBuf — рабочие буферы поиска видео (video.go). Только
-	// горутина кадра.
-	videoBuf []widget.VideoSurface
-	overBuf  []image.Rectangle
-	hasLastMove          bool
-
-	// Серия нажатий одной кнопкой — для MouseEvent.Clicks. Доступ оттуда же,
-	// из потока-источника ввода (SendMouseButton).
-	clickBtn      widget.MouseButton
-	clickAt       time.Time
-	clickX        int
-	clickY        int
-	clickN        int
-	dblClickDelay time.Duration // 0 — значение по умолчанию (defaultDoubleClick)
-
-	// cursorOvr — принудительный курсор поверх курсора виджетов (cursoroverride.go).
-	cursorOvr cursorOverride
-
-	frames chan output.Frame
-	// fullNext — следующий кадр полный (холст пересоздан); lostFrame — кадр
-	// выброшен из переполненного канала, потребитель отстал (fullframe.go).
-	fullNext  atomic.Bool
-	lostFrame atomic.Bool
-	// recycleFrames — данные тайлов кадров берутся из пула и возвращаются по
-	// Frame.Release (SetFrameRecycling, fullframe.go).
-	recycleFrames atomic.Bool
-	// noTileData — кадр без байтов тайлов (SetFrameTileData).
-	noTileData atomic.Bool
-	// ovt — переходы оверлеев (overlaytrans.go); themeMgr — менеджер тем
-	// последнего ApplyThemeProfile/SetThemeProfile: из него переходы берут
-	// токен theme.AnimMenuOpen.
-	ovt      overlayTransitions
-	themeMgr atomic.Pointer[theme.Manager]
-	// motion — профиль движения (MotionProfile, motionprofile.go);
-	// motionCounted — движок учтён в motionEngines.
-	motion        atomic.Uint32
-	motionCounted atomic.Bool
-	quit          chan struct{}
-	done      chan struct{}
-
-	fps     int     // целевой FPS, 1–120
-	maxFPS  atomic.Int32 // потолок частоты кадров поверх fps; 0 — не задан (maxfps.go)
-	userDPI float64 // пользовательский DPI шрифтов (без учёта HiDPI-масштаба)
-
-	// scaleBits — текущий HiDPI-масштаб (math.Float64bits) для lock-free
-	// чтения из InvalidateRect/toLogical: они вызываются из сеттеров
-	// виджетов, в т.ч. когда движок уже держит e.mu (например, root.SetBounds
-	// из SetResolution) — брать e.mu там нельзя (RWMutex нереентерабелен).
-	scaleBits atomic.Uint64
-	saveDir   string        // если не пусто — сохранять PNG в эту директорию
-	saveCh    chan saveJob  // канал для асинхронного сохранения
-	saveDone  chan struct{} // закрывается, когда saveWorker завершил запись всех PNG
-
-	saveLimit atomic.Int64 // предел числа сохраняемых кадров (0 — без предела)
-	saveCount atomic.Int64
-	saveOnce  sync.Once // лог о достижении предела — один раз
-	snapPool  sync.Pool // пул снапшотов front-буфера для SaveFrames
-
-	// ── Tooltip ─────────────────────────────────────────────────────────────
-	ttMu       sync.Mutex
-	ttEnabled  bool          // показывать всплывающие подсказки
-	ttDelay    time.Duration // задержка появления после остановки курсора
-	ttMouseX   int
-	ttMouseY   int
-	ttLastMove time.Time
-	ttHasMouse bool            // курсор хотя бы раз входил на холст
-	ttShownAt  image.Rectangle // область показанной подсказки (пустая — не показана)
+	// Состояние разнесено по областям (state.go, ADR-0011): сцена, цикл,
+	// ввод, оверлеи. Встраивание сохраняет имена полей (e.canvas, e.frameMu).
+	sceneState
+	loopState
+	inputState
+	overlayState
 }
 
 type saveJob struct {
@@ -381,22 +121,21 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	}
 	width, height = hgraster.ClampCanvasSize(width, height)
 	fc := hgtext.NewFontCache("assets")
-	e := &Engine{
-		fontCache: fc,
-		canvas:    hgraster.NewCanvas(width, height, fc),
-		rec:       hgdraw.NewRecorder(),
-		frames:    make(chan output.Frame, 8),
-		// wake будит цикл кадров при внешнем темпе: без него RequestFrame
-		// ждал бы ближайшего тика, то есть темп остался бы тикерным.
-		wake:      make(chan struct{}, 1),
-		quit:      make(chan struct{}),
-		done:      make(chan struct{}),
-		fps:       fps,
-		offscreen: offscreen,
-		userDPI:   DefaultDPI,
-		ttEnabled: true,
-		ttDelay:   600 * time.Millisecond,
-	}
+	e := &Engine{}
+	e.fontCache = fc
+	e.canvas = hgraster.NewCanvas(width, height, fc)
+	e.rec = hgdraw.NewRecorder()
+	e.frames = make(chan output.Frame, 8)
+	// wake будит цикл кадров при внешнем темпе: без него RequestFrame
+	// ждал бы ближайшего тика, то есть темп остался бы тикерным.
+	e.wake = make(chan struct{}, 1)
+	e.quit = make(chan struct{})
+	e.done = make(chan struct{})
+	e.fps = fps
+	e.offscreen = offscreen
+	e.userDPI = DefaultDPI
+	e.ttEnabled = true
+	e.ttDelay = 600 * time.Millisecond
 	e.scaleBits.Store(math.Float64bits(1))
 	e.canvasRef.Store(e.canvas)
 	e.imgInv = &hgraster.ImageInvalidator{}
@@ -630,10 +369,13 @@ func (e *Engine) SetScale(k float64) {
 	lw, lh := e.canvas.LogicalSize()
 	e.canvas = e.canvas.CloneForSize(lw, lh, k, e.bgSrc)
 	e.canvasRef.Store(e.canvas)
-	e.surfaces.drop() // буферы прежнего размера новому холсту не подходят
 	e.canvas.SetDPIAll(e.userDPI * k)
 	e.scaleBits.Store(math.Float64bits(k))
 	e.mu.Unlock()
+	// буферы прежнего размера новому холсту не подходят. Вне e.mu: у
+	// набора свой замок, а под e.mu других замков не берут (ADR-0011); кадр
+	// не идёт — frameMu удерживается.
+	e.surfaces.drop()
 	e.markCanvasReplaced()
 	widget.BumpTextMetricsRev() // ширины текста изменились — сброс кэшей переноса
 	e.Invalidate()
@@ -653,9 +395,12 @@ func (e *Engine) SetResolution(width, height int) {
 	e.mu.Lock()
 	e.canvas = e.canvas.CloneForSize(width, height, e.canvas.Scale(), e.bgSrc)
 	e.canvasRef.Store(e.canvas)
-	e.surfaces.drop()     // буферы прежнего размера новому холсту не подходят
 	e.scaleWithin = false // логический размер задан явно: обычный режим
 	e.mu.Unlock()
+	// буферы прежнего размера новому холсту не подходят. Вне e.mu: у
+	// набора свой замок, а под e.mu других замков не берут (ADR-0011); кадр
+	// не идёт — frameMu удерживается.
+	e.surfaces.drop()
 	e.fitTreeToCanvas(width, height)
 }
 

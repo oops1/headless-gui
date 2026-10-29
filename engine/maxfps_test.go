@@ -9,7 +9,8 @@ import (
 
 func TestFrameInterval_MaxFPSIsCapOnly(t *testing.T) {
 	testreset.Globals(t)
-	e := &Engine{fps: 20}
+	e := &Engine{}
+	e.fps = 20
 	if got, want := e.frameInterval(), 50*time.Millisecond; got != want {
 		t.Fatalf("без потолка: %v, ожидалось %v", got, want)
 	}

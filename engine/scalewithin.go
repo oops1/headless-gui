@@ -44,11 +44,11 @@ func (e *Engine) SetScaleWithin(k float64) {
 	lw, lh := logicalFor(pw, ph, k)
 	e.canvas = e.canvas.CloneForPhys(pw, ph, lw, lh, k, e.bgSrc)
 	e.canvasRef.Store(e.canvas)
-	e.surfaces.drop()
 	e.canvas.SetDPIAll(e.userDPI * k)
 	e.scaleBits.Store(math.Float64bits(k))
 	e.scaleWithin = true
 	e.mu.Unlock()
+	e.surfaces.drop() // вне e.mu: у набора свой замок (ADR-0011); frameMu удерживается
 	widget.BumpTextMetricsRev() // ширины текста изменились — сброс кэшей переноса
 	e.fitTreeToCanvas(lw, lh)
 }
@@ -66,9 +66,9 @@ func (e *Engine) SetPhysicalResolution(pw, ph int) {
 	lw, lh := logicalFor(pw, ph, k)
 	e.canvas = e.canvas.CloneForPhys(pw, ph, lw, lh, k, e.bgSrc)
 	e.canvasRef.Store(e.canvas)
-	e.surfaces.drop()
 	e.scaleWithin = true
 	e.mu.Unlock()
+	e.surfaces.drop() // вне e.mu: у набора свой замок (ADR-0011); frameMu удерживается
 	e.fitTreeToCanvas(lw, lh)
 }
 
