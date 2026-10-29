@@ -1,8 +1,10 @@
-package base
+package text
 
 import (
 	"image"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // TestAccessTreeHidesPassword — пароль не попадает в семантику.
@@ -12,7 +14,7 @@ func TestAccessTreeHidesPassword(t *testing.T) {
 	ti.SetPasswordMode(true)
 	ti.SetText("hunter2")
 
-	n := BuildAccessTree(ti, nil)
+	n := base.BuildAccessTree(ti, nil)
 	if n == nil {
 		t.Fatal("узел не построен")
 	}
@@ -21,7 +23,7 @@ func TestAccessTreeHidesPassword(t *testing.T) {
 	}
 	found := false
 	for _, s := range n.States {
-		if s == StatePassword {
+		if s == base.StatePassword {
 			found = true
 		}
 	}
@@ -30,7 +32,7 @@ func TestAccessTreeHidesPassword(t *testing.T) {
 	}
 
 	ti.SetPasswordMode(false)
-	n = BuildAccessTree(ti, nil)
+	n = base.BuildAccessTree(ti, nil)
 	if n.Value != "hunter2" {
 		t.Errorf("обычный режим: Value=%q", n.Value)
 	}

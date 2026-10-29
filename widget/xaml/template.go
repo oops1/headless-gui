@@ -13,7 +13,7 @@ import (
 
 // expandControlTemplate раскрывает ControlTemplate для ContentControl.
 // Возвращает true, если шаблон найден и применён (el заменён деревом шаблона).
-func (env *xamlEnv) expandControlTemplate(el *xElement) bool {
+func (env *xamlEnv) expandControlTemplate(el *Element) bool {
 	tmpl := env.findTemplate(el)
 	if tmpl == nil {
 		return false
@@ -25,8 +25,8 @@ func (env *xamlEnv) expandControlTemplate(el *xElement) bool {
 
 	// Свойства templated parent (для TemplateBinding) и содержимое.
 	parent := el.attrs
-	contentText := el.attr("Content")
-	var content []xElement
+	contentText := el.Attr("Content")
+	var content []Element
 	for i := range el.Children {
 		c := el.Children[i]
 		if strings.Contains(c.Tag, ".") {
@@ -61,8 +61,8 @@ func (env *xamlEnv) expandControlTemplate(el *xElement) bool {
 
 // findTemplate ищет ControlTemplate: Template="{StaticResource key}" или
 // <X.Template><ControlTemplate>.
-func (env *xamlEnv) findTemplate(el *xElement) *xElement {
-	if t := el.attr("Template"); t != "" {
+func (env *xamlEnv) findTemplate(el *Element) *Element {
+	if t := el.Attr("Template"); t != "" {
 		if key := extractKey(t); key != "" {
 			if tmpl, ok := env.templates[key]; ok {
 				return tmpl
@@ -84,7 +84,7 @@ func (env *xamlEnv) findTemplate(el *xElement) *xElement {
 }
 
 // firstElementChild возвращает первый дочерний элемент-виджет (не property).
-func firstElementChild(el *xElement) *xElement {
+func firstElementChild(el *Element) *Element {
 	for i := range el.Children {
 		if !strings.Contains(el.Children[i].Tag, ".") {
 			return &el.Children[i]
@@ -95,20 +95,20 @@ func firstElementChild(el *xElement) *xElement {
 
 // applyTemplateNode рекурсивно резолвит TemplateBinding в атрибутах и заменяет
 // ContentPresenter содержимым контрола.
-func applyTemplateNode(node *xElement, parent map[string]string, content []xElement, contentText string) {
+func applyTemplateNode(node *Element, parent map[string]string, content []Element, contentText string) {
 	for k, v := range node.attrs {
 		if nv, ok := resolveTemplateBinding(v, parent); ok {
 			node.attrs[k] = nv
 		}
 	}
-	var kids []xElement
+	var kids []Element
 	for i := range node.Children {
 		ch := node.Children[i]
 		if strings.EqualFold(ch.Tag, "ContentPresenter") {
 			if len(content) > 0 {
 				kids = append(kids, content...)
 			} else if contentText != "" {
-				kids = append(kids, xElement{Tag: "TextBlock", attrs: map[string]string{"Text": contentText}})
+				kids = append(kids, Element{Tag: "TextBlock", attrs: map[string]string{"Text": contentText}})
 			}
 			continue
 		}

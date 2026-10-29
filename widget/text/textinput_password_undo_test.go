@@ -1,10 +1,14 @@
-package base
+package text
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
+)
 
 func typeInput(ti *TextInput, s string) {
 	for _, r := range s {
-		ti.OnKeyEvent(KeyEvent{Rune: r, Pressed: true})
+		ti.OnKeyEvent(base.KeyEvent{Rune: r, Pressed: true})
 	}
 }
 
@@ -21,7 +25,7 @@ func TestTextInput_PasswordModeWipesUndo(t *testing.T) {
 		t.Fatalf("undo=%d redo=%d, ожидались пустые", len(ti.undoStack), len(ti.redoStack))
 	}
 
-	ti.OnKeyEvent(KeyEvent{Code: KeyZ, Mod: ModCtrl, Pressed: true})
+	ti.OnKeyEvent(base.KeyEvent{Code: base.KeyZ, Mod: base.ModCtrl, Pressed: true})
 	if got := ti.GetText(); got != "secret" {
 		t.Fatalf("Ctrl+Z достал прежний текст: %q", got)
 	}
@@ -31,7 +35,7 @@ func TestTextInput_PasswordModeWipesUndo(t *testing.T) {
 func TestTextInput_UndoStillWorks(t *testing.T) {
 	ti := NewTextInput("")
 	typeInput(ti, "abc")
-	ti.OnKeyEvent(KeyEvent{Code: KeyZ, Mod: ModCtrl, Pressed: true})
+	ti.OnKeyEvent(base.KeyEvent{Code: base.KeyZ, Mod: base.ModCtrl, Pressed: true})
 	if got := ti.GetText(); got != "ab" {
 		t.Fatalf("после Ctrl+Z: %q, want \"ab\"", got)
 	}
@@ -43,7 +47,7 @@ func TestTextInput_NoUndoInPasswordMode(t *testing.T) {
 	typeInput(ti, "old")
 	ti.SetPasswordMode(true)
 	typeInput(ti, "X")
-	ti.OnKeyEvent(KeyEvent{Code: KeyZ, Mod: ModCtrl, Pressed: true})
+	ti.OnKeyEvent(base.KeyEvent{Code: base.KeyZ, Mod: base.ModCtrl, Pressed: true})
 	if got := ti.GetText(); got != "oldX" {
 		t.Fatalf("после Ctrl+Z: %q, want \"oldX\"", got)
 	}

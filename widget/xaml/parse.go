@@ -1,6 +1,6 @@
 // parse.go — XAML XML-парсер и утилиты разбора.
 //
-// Содержит: xElement (внутреннее дерево), парсинг XML → xElement,
+// Содержит: Element (внутреннее дерево), парсинг XML → Element,
 // парсинг цветов, Margin и вспомогательные функции.
 package xaml
 
@@ -21,7 +21,7 @@ import (
 
 // maxXAMLDepth — предельная глубина вложенности XAML-элементов.
 //
-// Разбор XML в xElement, пред-обработка ресурсов и построение виджетов —
+// Разбор XML в Element, пред-обработка ресурсов и построение виджетов —
 // рекурсивные обходы. Файл вида «<a><a><a>…» глубиной в сотни тысяч уровней
 // исчерпывал стек горутины и ронял процесс целиком: переполнение стека в Go
 // не восстанавливается через recover, это фатальная ошибка рантайма.
@@ -36,16 +36,20 @@ var ErrXAMLTooDeep = errors.New("xaml: превышена предельная �
 
 // ─── Внутреннее дерево XAML ─────────────────────────────────────────────────
 
-// xElement — узел XAML-дерева. Хранит имя тега, атрибуты, потомков и текст.
-type xElement struct {
+// Element — узел XAML-дерева. Хранит имя тега, атрибуты, потомков и текст.
+//
+// Служебное: для пакетов виджетов (их XAML-строителей), в фасад не входит.
+//
+//facadegen:skip
+type Element struct {
 	Tag      string
 	attrs    map[string]string
-	Children []xElement
+	Children []Element
 	Text     string // текст между тегами (напр. <Item>Текст</Item>)
 }
 
-// attr возвращает значение первого найденного атрибута из списка.
-func (e *xElement) attr(names ...string) string {
+// Attr возвращает значение первого найденного атрибута из списка.
+func (e *Element) Attr(names ...string) string {
 	for _, n := range names {
 		if v, ok := e.attrs[n]; ok {
 			return v
@@ -54,23 +58,23 @@ func (e *xElement) attr(names ...string) string {
 	return ""
 }
 
-// name возвращает идентификатор элемента (Name или x:Name).
-func (e *xElement) name() string {
-	return e.attr("Name", "x:Name")
+// Name возвращает идентификатор элемента (Name или x:Name).
+func (e *Element) Name() string {
+	return e.Attr("Name", "x:Name")
 }
 
-// bounds вычисляет image.Rectangle из атрибутов позиции/размера.
+// Bounds вычисляет image.Rectangle из атрибутов позиции/размера.
 // Поддерживает Left/Top/Right/Bottom и Left/Top/Width/Height.
-func (e *xElement) bounds() image.Rectangle {
-	left := xatoi(e.attr("Left", "X", "Canvas.Left"))
-	top := xatoi(e.attr("Top", "Y", "Canvas.Top"))
-	right := xatoi(e.attr("Right", "Canvas.Right"))
-	bottom := xatoi(e.attr("Bottom", "Canvas.Bottom"))
+func (e *Element) Bounds() image.Rectangle {
+	left := ParseInt(e.Attr("Left", "X", "Canvas.Left"))
+	top := ParseInt(e.Attr("Top", "Y", "Canvas.Top"))
+	right := ParseInt(e.Attr("Right", "Canvas.Right"))
+	bottom := ParseInt(e.Attr("Bottom", "Canvas.Bottom"))
 
-	if w := xatoi(e.attr("Width")); w > 0 && right == 0 {
+	if w := ParseInt(e.Attr("Width")); w > 0 && right == 0 {
 		right = left + w
 	}
-	if h := xatoi(e.attr("Height")); h > 0 && bottom == 0 {
+	if h := ParseInt(e.Attr("Height")); h > 0 && bottom == 0 {
 		bottom = top + h
 	}
 	// Без Width/Right (Height/Bottom) размер по этой оси неизвестен — его
@@ -89,7 +93,13 @@ func (e *xElement) bounds() image.Rectangle {
 	return image.Rect(left, top, right, bottom)
 }
 
-func xatoi(s string) int {
+// ParseInt — целое из атрибута разметки (пробелы по краям отбрасываются);
+// пусто или не число — 0.
+//
+// Служебное: для пакетов виджетов (их XAML-строителей), в фасад не входит.
+//
+//facadegen:skip
+func ParseInt(s string) int {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0
@@ -103,16 +113,16 @@ func xatoiOrNeg1(s string) int {
 	if s == "" {
 		return -1
 	}
-	v := xatoi(s)
+	v := ParseInt(s)
 	if v == 0 && s != "0" {
 		return -1
 	}
 	return v
 }
 
-// ─── Парсер XML → xElement ──────────────────────────────────────────────────
+// ─── Парсер XML → Element ──────────────────────────────────────────────────
 
-func parseXAML(data []byte) (*xElement, error) {
+func parseXAML(data []byte) (*Element, error) {
 	d := xml.NewDecoder(bytes.NewReader(data))
 	d.Strict = false
 	for {
@@ -121,7 +131,7 @@ func parseXAML(data []byte) (*xElement, error) {
 			return nil, fmt.Errorf("xaml: scan: %w", err)
 		}
 		if start, ok := tok.(xml.StartElement); ok {
-			var root xElement
+			var root Element
 			if err := parseXAMLEl(d, start, &root, 0); err != nil {
 				return nil, err
 			}
@@ -133,7 +143,7 @@ func parseXAML(data []byte) (*xElement, error) {
 // parseXAMLEl разбирает один элемент и его потомков. depth — текущая глубина
 // вложенности (0 у корня); превышение maxXAMLDepth прерывает разбор ошибкой,
 // не давая рекурсии исчерпать стек (SEC-7).
-func parseXAMLEl(d *xml.Decoder, start xml.StartElement, el *xElement, depth int) error {
+func parseXAMLEl(d *xml.Decoder, start xml.StartElement, el *Element, depth int) error {
 	if depth > maxXAMLDepth {
 		return fmt.Errorf("%w (%d): <%s>", ErrXAMLTooDeep, maxXAMLDepth, start.Name.Local)
 	}
@@ -153,7 +163,7 @@ func parseXAMLEl(d *xml.Decoder, start xml.StartElement, el *xElement, depth int
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
-			var child xElement
+			var child Element
 			if err := parseXAMLEl(d, t, &child, depth+1); err != nil {
 				return err
 			}
@@ -179,18 +189,18 @@ func parseMargin(s string) base.Margin {
 	parts := strings.Split(s, ",")
 	switch len(parts) {
 	case 1:
-		v := xatoi(parts[0])
+		v := ParseInt(parts[0])
 		return base.Margin{Left: v, Top: v, Right: v, Bottom: v}
 	case 2:
-		h := xatoi(parts[0])
-		v := xatoi(parts[1])
+		h := ParseInt(parts[0])
+		v := ParseInt(parts[1])
 		return base.Margin{Left: h, Top: v, Right: h, Bottom: v}
 	case 4:
 		return base.Margin{
-			Left:   xatoi(parts[0]),
-			Top:    xatoi(parts[1]),
-			Right:  xatoi(parts[2]),
-			Bottom: xatoi(parts[3]),
+			Left:   ParseInt(parts[0]),
+			Top:    ParseInt(parts[1]),
+			Right:  ParseInt(parts[2]),
+			Bottom: ParseInt(parts[3]),
 		}
 	default:
 		return base.Margin{}
@@ -255,10 +265,14 @@ func parseXAMLColor(s string) (color.RGBA, error) {
 	}
 }
 
-// applyColor парсит XAML-атрибут цвета и записывает в dst.
+// ApplyColor парсит XAML-атрибут цвета и записывает в dst.
 // Если атрибут не найден или не парсится — dst не меняется.
-func applyColor(dst *color.RGBA, el xElement, names ...string) {
-	if s := el.attr(names...); s != "" {
+//
+// Служебное: для пакетов виджетов (их XAML-строителей), в фасад не входит.
+//
+//facadegen:skip
+func ApplyColor(dst *color.RGBA, el Element, names ...string) {
+	if s := el.Attr(names...); s != "" {
 		if c, err := parseXAMLColor(s); err == nil {
 			*dst = c
 		}

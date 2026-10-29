@@ -21,12 +21,12 @@ import (
 // applyXAMLSizeAttr сохраняет явные XAML Width/Height (для alignment).
 // Спец-билдеры контейнеров не проходят общий путь buildXAMLWidgetAt,
 // где это делается автоматически.
-func applyXAMLSizeAttr(w base.Widget, el xElement) {
+func applyXAMLSizeAttr(w base.Widget, el Element) {
 	type xamlSizeSetter interface {
 		SetXAMLSize(w, h int)
 	}
 	if xss, ok := w.(xamlSizeSetter); ok {
-		if xw, xh := xatoi(el.attr("Width")), xatoi(el.attr("Height")); xw > 0 || xh > 0 {
+		if xw, xh := ParseInt(el.Attr("Width")), ParseInt(el.Attr("Height")); xw > 0 || xh > 0 {
 			xss.SetXAMLSize(xw, xh)
 		}
 	}
@@ -36,11 +36,11 @@ func applyXAMLSizeAttr(w base.Widget, el xElement) {
 
 // buildXAMLGrid создаёт Grid из XAML-элемента, парсит RowDefinitions/ColumnDefinitions,
 // создаёт потомков и вызывает layout.
-func buildXAMLGrid(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLGrid(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	g := base.NewGrid()
 
 	// Фон
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" {
 		if strings.EqualFold(bgStr, "transparent") {
 			g.UseAlpha = true
 		} else if c, err := parseXAMLColor(bgStr); err == nil {
@@ -52,7 +52,7 @@ func buildXAMLGrid(el xElement, reg map[string]base.Widget, parentOff image.Poin
 	}
 
 	// ShowGridLines
-	if strings.EqualFold(el.attr("ShowGridLines"), "true") {
+	if strings.EqualFold(el.Attr("ShowGridLines"), "true") {
 		g.ShowGridLines = true
 	}
 
@@ -76,7 +76,7 @@ func buildXAMLGrid(el xElement, reg map[string]base.Widget, parentOff image.Poin
 	}
 
 	// Bounds
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	g.SetBounds(absBounds) // вызовет layout() — но дети ещё не добавлены
 
 	// Attached properties — важно для вложенных Grid'ов внутри родительского Grid.
@@ -84,7 +84,7 @@ func buildXAMLGrid(el xElement, reg map[string]base.Widget, parentOff image.Poin
 	applyXAMLSizeAttr(g, el)
 
 	// Регистрация по имени
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = g
 	}
 
@@ -138,8 +138,8 @@ func buildXAMLGrid(el xElement, reg map[string]base.Widget, parentOff image.Poin
 //	"*"          → GridSizeStar, Value=1
 //	"2*"         → GridSizeStar, Value=2
 //	"100"        → GridSizePixel, Value=100
-func parseGridDef(el xElement, sizeAttr string) base.GridDefinition {
-	raw := strings.TrimSpace(el.attr(sizeAttr))
+func parseGridDef(el Element, sizeAttr string) base.GridDefinition {
+	raw := strings.TrimSpace(el.Attr(sizeAttr))
 	d := base.GridDefinition{Mode: base.GridSizeStar, Value: 1} // default = 1*
 
 	if raw == "" || raw == "*" {
@@ -169,8 +169,8 @@ func parseGridDef(el xElement, sizeAttr string) base.GridDefinition {
 	}
 
 	// Min/Max
-	d.Min = xatoi(el.attr("MinHeight", "MinWidth"))
-	d.Max = xatoi(el.attr("MaxHeight", "MaxWidth"))
+	d.Min = ParseInt(el.Attr("MinHeight", "MinWidth"))
+	d.Max = ParseInt(el.Attr("MaxHeight", "MaxWidth"))
 
 	return d
 }
@@ -197,15 +197,15 @@ func parseGridDef(el xElement, sizeAttr string) base.GridDefinition {
 //	TitleForeground  — цвет текста заголовка
 //
 // Дочерние виджеты размещаются в клиентской области (ContentBounds).
-func buildXAMLWindow(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
-	b := el.bounds()
+func buildXAMLWindow(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+	b := el.Bounds()
 	if b.Empty() {
 		b = image.Rect(0, 0, 800, 600) // default
 	}
-	win := base.NewWindow(el.attr("Title", "Caption"), b.Dx(), b.Dy())
+	win := base.NewWindow(el.Attr("Title", "Caption"), b.Dx(), b.Dy())
 
 	// WindowStyle: SingleBorderWindow (default) | None | ToolWindow
-	switch strings.ToLower(el.attr("WindowStyle")) {
+	switch strings.ToLower(el.Attr("WindowStyle")) {
 	case "none":
 		win.Style = base.WindowStyleNone
 	case "toolwindow":
@@ -215,7 +215,7 @@ func buildXAMLWindow(el xElement, reg map[string]base.Widget, parentOff image.Po
 	}
 
 	// TitleStyle: Auto (default, по ОС) | Win | Mac
-	switch strings.ToLower(el.attr("TitleStyle")) {
+	switch strings.ToLower(el.Attr("TitleStyle")) {
 	case "win", "windows":
 		win.TitleStyle = base.WindowTitleWin
 	case "mac", "macos":
@@ -225,7 +225,7 @@ func buildXAMLWindow(el xElement, reg map[string]base.Widget, parentOff image.Po
 	}
 
 	// ResizeMode: CanResize (default) | NoResize | CanMinimize
-	switch strings.ToLower(el.attr("ResizeMode")) {
+	switch strings.ToLower(el.Attr("ResizeMode")) {
 	case "noresize":
 		win.Resize = base.ResizeModeNoResize
 	case "canminimize":
@@ -235,50 +235,50 @@ func buildXAMLWindow(el xElement, reg map[string]base.Widget, parentOff image.Po
 	}
 
 	// MinWidth / MinHeight — минимальный размер окна (логические пиксели).
-	if mw := xatoi(el.attr("MinWidth")); mw > 0 {
+	if mw := ParseInt(el.Attr("MinWidth")); mw > 0 {
 		win.MinWidth = mw
 	}
-	if mh := xatoi(el.attr("MinHeight")); mh > 0 {
+	if mh := ParseInt(el.Attr("MinHeight")); mh > 0 {
 		win.MinHeight = mh
 	}
 
 	// MainWindow: True (default) | False. У главного окна рисуется XOR-рамка;
 	// вложенные окна (MainWindow="False") её не получают.
-	if mw := el.attr("MainWindow"); mw != "" {
+	if mw := el.Attr("MainWindow"); mw != "" {
 		win.MainWindow = strings.EqualFold(mw, "true") || mw == "1"
 	}
 
 	// Background
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			win.Background = c
 		}
 	}
 
 	// BorderBrush
-	if bc := el.attr("BorderBrush"); bc != "" {
+	if bc := el.Attr("BorderBrush"); bc != "" {
 		if c, err := parseXAMLColor(bc); err == nil {
 			win.BorderColor = c
 		}
 	}
 
 	// CornerRadius
-	if cr := xatoi(el.attr("CornerRadius")); cr > 0 {
+	if cr := ParseInt(el.Attr("CornerRadius")); cr > 0 {
 		win.CornerRadius = cr
 	}
 
 	// TitleBarHeight
-	if h := xatoi(el.attr("TitleBarHeight")); h > 0 {
+	if h := ParseInt(el.Attr("TitleBarHeight")); h > 0 {
 		win.TitleBarHeight = h
 	}
 
 	// TitleBackground / TitleForeground
-	if tbg := el.attr("TitleBackground"); tbg != "" {
+	if tbg := el.Attr("TitleBackground"); tbg != "" {
 		if c, err := parseXAMLColor(tbg); err == nil {
 			win.TitleBG = c
 		}
 	}
-	if tfc := el.attr("TitleForeground"); tfc != "" {
+	if tfc := el.Attr("TitleForeground"); tfc != "" {
 		if c, err := parseXAMLColor(tfc); err == nil {
 			win.TitleColor = c
 		}
@@ -286,35 +286,35 @@ func buildXAMLWindow(el xElement, reg map[string]base.Widget, parentOff image.Po
 
 	// OutlineDrag="True" — таскать за заголовок контур, а не само окно
 	// (аналог «не показывать содержимое окна при перетаскивании»).
-	if od := el.attr("OutlineDrag"); strings.EqualFold(od, "true") || od == "1" {
+	if od := el.Attr("OutlineDrag"); strings.EqualFold(od, "true") || od == "1" {
 		win.OutlineDrag = true
 	}
-	if ofc := el.attr("OutlineDragFill"); ofc != "" {
+	if ofc := el.Attr("OutlineDragFill"); ofc != "" {
 		if c, err := parseXAMLColor(ofc); err == nil {
 			win.OutlineDragFill = c
 		}
 	}
 	// OutlineDragStyle: Border (по умолчанию) | Filled.
-	if strings.EqualFold(el.attr("OutlineDragStyle"), "filled") {
+	if strings.EqualFold(el.Attr("OutlineDragStyle"), "filled") {
 		win.OutlineDragStyle = base.OutlineDragFilled
 	}
 
 	// TitleTabs="True" — вкладки в заголовке окна (стиль Windows 11 Terminal).
 	// Вкладки задаются дочерними <TabItem>, меню шеврона — <TitleTabsMenu>.
-	if ttv := el.attr("TitleTabs"); strings.EqualFold(ttv, "true") || ttv == "1" {
+	if ttv := el.Attr("TitleTabs"); strings.EqualFold(ttv, "true") || ttv == "1" {
 		win.EnableTitleTabs()
 	}
 
 	// ── Трей: иконка + подсказка (декларация; window.Window подхватит в Run) ──
 	// TrayIcon — путь относительно baseDir (.png/.jpg декодируется, .svg
 	// растеризуется 32×32). Ошибка загрузки — log.Printf и пропуск.
-	if ti := el.attr("TrayIcon"); ti != "" {
+	if ti := el.Attr("TrayIcon"); ti != "" {
 		if img := loadTrayIcon(ti, baseDir); img != nil {
 			win.TrayIconImage = img
 		}
 	}
 	// TrayTooltip — по умолчанию = Title.
-	if tt := el.attr("TrayTooltip"); tt != "" {
+	if tt := el.Attr("TrayTooltip"); tt != "" {
 		win.TrayTooltip = tt
 	} else {
 		win.TrayTooltip = win.Title
@@ -330,7 +330,7 @@ func buildXAMLWindow(el xElement, reg map[string]base.Widget, parentOff image.Po
 	win.InputBindings = parseInputBindings(el)
 
 	// Регистрация по имени
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = win
 	}
 
@@ -357,7 +357,7 @@ func buildXAMLWindow(el xElement, reg map[string]base.Widget, parentOff image.Po
 
 		// ── <TabItem> — вкладка заголовка (режим TitleTabs) ──────────────────
 		if childTag == "tabitem" && win.TitleTabsEnabled() {
-			header := child.attr("Header", "Text")
+			header := child.Attr("Header", "Text")
 			if header == "" {
 				header = child.Text
 			}
@@ -378,12 +378,12 @@ func buildXAMLWindow(el xElement, reg map[string]base.Widget, parentOff image.Po
 			text, key := locItemText(header)
 			idx := win.AddTitleTab(text, content)
 			registerLocItem(key, func(s string) { win.SetTitleTabHeader(idx, s) })
-			if ic := child.attr("Icon"); ic != "" && baseDir != "" {
+			if ic := child.Attr("Icon"); ic != "" && baseDir != "" {
 				if img := loadTrayIcon(ic, baseDir); img != nil {
 					win.SetTitleTabIcon(idx, img)
 				}
 			}
-			if tip := child.attr("ToolTip", "Tooltip"); tip != "" {
+			if tip := child.Attr("ToolTip", "Tooltip"); tip != "" {
 				tipText, tipKey := locItemText(tip)
 				win.SetTitleTabToolTip(idx, tipText)
 				registerLocItem(tipKey, func(s string) { win.SetTitleTabToolTip(idx, s) })
@@ -455,7 +455,7 @@ func buildXAMLWindow(el xElement, reg map[string]base.Widget, parentOff image.Po
 
 // parseInputBindings разбирает <Window.InputBindings><KeyBinding .../>.
 // Command может быть {Binding Path} (резолвится после загрузки) или пусто.
-func parseInputBindings(el xElement) []base.InputBinding {
+func parseInputBindings(el Element) []base.InputBinding {
 	var out []base.InputBinding
 	for i := range el.Children {
 		c := &el.Children[i]
@@ -468,16 +468,16 @@ func parseInputBindings(el xElement) []base.InputBinding {
 				continue
 			}
 			ib := base.InputBinding{
-				Key:  base.ParseKeyName(kb.attr("Key", "Gesture")),
-				Mods: base.ParseModifiers(kb.attr("Modifiers")),
+				Key:  base.ParseKeyName(kb.Attr("Key", "Gesture")),
+				Mods: base.ParseModifiers(kb.Attr("Modifiers")),
 			}
 			// Gesture="Ctrl+S" — комбинированная запись.
-			if g := kb.attr("Gesture"); g != "" && strings.Contains(g, "+") {
+			if g := kb.Attr("Gesture"); g != "" && strings.Contains(g, "+") {
 				parts := strings.Split(g, "+")
 				ib.Key = base.ParseKeyName(parts[len(parts)-1])
 				ib.Mods = base.ParseModifiers(g)
 			}
-			cmd := kb.attr("Command")
+			cmd := kb.Attr("Command")
 			if strings.HasPrefix(strings.TrimSpace(cmd), "{Binding") {
 				ib.CommandPath = parseBindingPath(cmd)
 			}
@@ -532,10 +532,10 @@ func loadTrayIcon(src, baseDir string) image.Image {
 
 // ─── buildXAMLPanel ────────────────────────────────────────────────────────
 
-func buildXAMLPanel(el xElement, baseDir string) base.Widget {
-	style := strings.ToLower(el.attr("Tag", "Style"))
-	bgStr := el.attr("Background", "Fill", "Color")
-	cr := xatoi(el.attr("CornerRadius"))
+func buildXAMLPanel(el Element, baseDir string) base.Widget {
+	style := strings.ToLower(el.Attr("Tag", "Style"))
+	bgStr := el.Attr("Background", "Fill", "Color")
+	cr := ParseInt(el.Attr("CornerRadius"))
 
 	var p *base.Panel
 
@@ -558,13 +558,13 @@ func buildXAMLPanel(el xElement, baseDir string) base.Widget {
 			p = base.NewPanel(c)
 			p.UseAlpha = c.A < 255
 			p.CornerRadius = cr
-			if bc := el.attr("BorderBrush"); bc != "" {
+			if bc := el.Attr("BorderBrush"); bc != "" {
 				if bc2, err := parseXAMLColor(bc); err == nil {
 					p.BorderColor = bc2
 					p.ShowBorder = true
 				}
 			}
-			if el.attr("BorderThickness") != "" {
+			if el.Attr("BorderThickness") != "" {
 				p.ShowBorder = true
 			}
 		} else {
@@ -575,36 +575,36 @@ func buildXAMLPanel(el xElement, baseDir string) base.Widget {
 	}
 
 	// ── Градиентный фон (LinearGradientBrush через property-element) ─────────
-	if g := el.attr("__gradient"); g != "" {
+	if g := el.Attr("__gradient"); g != "" {
 		if grad := parseGradient(g); grad != nil {
 			p.Gradient = grad
 		}
 	}
 
 	// ── Заголовок окна ──────────────────────────────────────────────────────
-	if caption := el.attr("Caption", "Title"); caption != "" {
+	if caption := el.Attr("Caption", "Title"); caption != "" {
 		p.Caption = caption
 	}
 	// ShowHeader: по умолчанию true (задано в конструкторе).
 	// XAML может явно выключить: ShowHeader="False".
-	if sh := el.attr("ShowHeader"); sh != "" {
+	if sh := el.Attr("ShowHeader"); sh != "" {
 		p.ShowHeader = strings.EqualFold(sh, "true") || sh == "1"
 	}
 	// TitleStyle: Auto (default) | Win | Mac
 	// Также поддерживается legacy-атрибут MacStyle="True"
-	switch strings.ToLower(el.attr("TitleStyle")) {
+	switch strings.ToLower(el.Attr("TitleStyle")) {
 	case "win", "windows":
 		p.TitleStyle = base.WindowTitleWin
 	case "mac", "macos":
 		p.TitleStyle = base.WindowTitleMac
 	default:
 		// Fallback: legacy-атрибут MacStyle
-		if ms := el.attr("MacStyle"); ms != "" {
+		if ms := el.Attr("MacStyle"); ms != "" {
 			p.MacStyle = strings.EqualFold(ms, "true") || ms == "1"
 		}
 	}
 	// HeaderHeight
-	if hh := xatoi(el.attr("HeaderHeight")); hh > 0 {
+	if hh := ParseInt(el.Attr("HeaderHeight")); hh > 0 {
 		p.HeaderHeight = hh
 	}
 
@@ -612,7 +612,7 @@ func buildXAMLPanel(el xElement, baseDir string) base.Widget {
 	// или из fs.FS (LoadUIFromXAMLFS, GG-7). Путь удерживается внутри
 	// источника (SEC-8); при загрузке из строки (baseDir == "") фон, как и
 	// раньше, не подхватывается.
-	if bgImg := el.attr("BackgroundImage"); bgImg != "" && baseDir != "" {
+	if bgImg := el.Attr("BackgroundImage"); bgImg != "" && baseDir != "" {
 		if img, err := decodeXAMLImageRGBA(baseDir, bgImg); err == nil {
 			p.BackgroundImage = img
 		}
@@ -626,11 +626,11 @@ func buildXAMLPanel(el xElement, baseDir string) base.Widget {
 // buildXAMLCanvas строит Canvas виджет из XAML-элемента.
 // Canvas размещает дочерние виджеты по абсолютным координатам (Canvas.Left, Canvas.Top, и т.д.).
 // Это полноценный аналог WPF Canvas, в отличие от Panel — Canvas сам управляет layout.
-func buildXAMLCanvas(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLCanvas(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	cv := base.NewCanvas()
 
 	// Background
-	if bgStr := el.attr("Background", "Fill", "Color"); bgStr != "" {
+	if bgStr := el.Attr("Background", "Fill", "Color"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			cv.Background = c
 			cv.UseAlpha = c.A < 255
@@ -638,12 +638,12 @@ func buildXAMLCanvas(el xElement, reg map[string]base.Widget, parentOff image.Po
 	}
 
 	// ClipToBounds (WPF default = false)
-	if clip := el.attr("ClipToBounds"); clip != "" {
+	if clip := el.Attr("ClipToBounds"); clip != "" {
 		cv.ClipToBounds = strings.EqualFold(clip, "true") || clip == "1"
 	}
 
 	// Bounds Canvas — абсолютные координаты
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	cv.SetBounds(absBounds)
 
 	// Attached properties: Grid.Row/Column, DockPanel.Dock, Margin, ToolTip, …
@@ -652,7 +652,7 @@ func buildXAMLCanvas(el xElement, reg map[string]base.Widget, parentOff image.Po
 	cv.InputBindings = parseInputBindings(el)
 
 	// Регистрация по имени
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = cv
 	}
 
@@ -691,40 +691,40 @@ func buildXAMLCanvas(el xElement, reg map[string]base.Widget, parentOff image.Po
 // Важно: дочерний виджет строится с parentOff=image.Point{} (нулевое смещение),
 // потому что Canvas сам управляет позиционированием. buildXAMLWidget прибавит
 // атрибуты Left/Top к parentOff, но нам нужно только Width/Height.
-func addCanvasChild(cv *base.Canvas, child xElement, reg map[string]base.Widget, canvasOff image.Point, baseDir string, depth int) error {
+func addCanvasChild(cv *base.Canvas, child Element, reg map[string]base.Widget, canvasOff image.Point, baseDir string, depth int) error {
 	// ── Извлекаем Canvas attached properties ────────────────────────────────
 	props := base.CanvasAttached{
-		Left:   xatoiOrNeg1(child.attr("Canvas.Left")),
-		Top:    xatoiOrNeg1(child.attr("Canvas.Top")),
-		Right:  xatoiOrNeg1(child.attr("Canvas.Right")),
-		Bottom: xatoiOrNeg1(child.attr("Canvas.Bottom")),
+		Left:   xatoiOrNeg1(child.Attr("Canvas.Left")),
+		Top:    xatoiOrNeg1(child.Attr("Canvas.Top")),
+		Right:  xatoiOrNeg1(child.Attr("Canvas.Right")),
+		Bottom: xatoiOrNeg1(child.Attr("Canvas.Bottom")),
 	}
 
 	// Если Canvas.Left/Top не указаны, пробуем Left/Top/X/Y (упрощённый синтаксис)
 	if props.Left < 0 {
-		if v := child.attr("Left", "X"); v != "" {
-			props.Left = xatoi(v)
+		if v := child.Attr("Left", "X"); v != "" {
+			props.Left = ParseInt(v)
 		}
 	}
 	if props.Top < 0 {
-		if v := child.attr("Top", "Y"); v != "" {
-			props.Top = xatoi(v)
+		if v := child.Attr("Top", "Y"); v != "" {
+			props.Top = ParseInt(v)
 		}
 	}
 	if props.Right < 0 {
-		if v := child.attr("Right"); v != "" {
-			props.Right = xatoi(v)
+		if v := child.Attr("Right"); v != "" {
+			props.Right = ParseInt(v)
 		}
 	}
 	if props.Bottom < 0 {
-		if v := child.attr("Bottom"); v != "" {
-			props.Bottom = xatoi(v)
+		if v := child.Attr("Bottom"); v != "" {
+			props.Bottom = ParseInt(v)
 		}
 	}
 
 	// ── Желаемый размер из XAML атрибутов ───────────────────────────────────
-	desiredW := xatoi(child.attr("Width"))
-	desiredH := xatoi(child.attr("Height"))
+	desiredW := ParseInt(child.Attr("Width"))
+	desiredH := ParseInt(child.Attr("Height"))
 
 	// ── Строим дочерний виджет ──────────────────────────────────────────────
 	// Передаём canvasOff как parentOff — buildXAMLWidget использует его
@@ -774,9 +774,9 @@ func addCanvasChild(cv *base.Canvas, child xElement, reg map[string]base.Widget,
 
 // ─── buildXAMLTabControl ────────────────────────────────────────────────────
 
-func buildXAMLTabControl(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLTabControl(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	tc := base.NewTabControl()
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	tc.SetBounds(absBounds)
 	// Общие свойства (включая Grid.Row/Column — без этого TabControl как прямой
 	// потомок Grid игнорировал ячейку и рисовался от верха окна; см. BUG-1).
@@ -784,7 +784,7 @@ func buildXAMLTabControl(el xElement, reg map[string]base.Widget, parentOff imag
 	applyXAMLSizeAttr(tc, el)
 
 	// Регистрация по имени
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = tc
 	}
 
@@ -795,7 +795,7 @@ func buildXAMLTabControl(el xElement, reg map[string]base.Widget, parentOff imag
 	for _, child := range el.Children {
 		childTag := strings.ToLower(child.Tag)
 		if childTag == "tabitem" {
-			header := child.attr("Header", "Content", "Text")
+			header := child.Attr("Header", "Content", "Text")
 			if header == "" {
 				header = child.Text
 			}
@@ -823,12 +823,12 @@ func buildXAMLTabControl(el xElement, reg map[string]base.Widget, parentOff imag
 			idx := tc.TabCount()
 			tc.AddTab(text, content)
 			registerLocItem(key, func(s string) { tc.SetTabHeader(idx, s) })
-			if tip := child.attr("ToolTip", "Tooltip"); tip != "" {
+			if tip := child.Attr("ToolTip", "Tooltip"); tip != "" {
 				tipText, tipKey := locItemText(tip)
 				tc.SetTabToolTip(idx, tipText)
 				registerLocItem(tipKey, func(s string) { tc.SetTabToolTip(idx, s) })
 			}
-			if sep := child.attr("SeparatorBefore"); strings.EqualFold(sep, "true") || sep == "1" {
+			if sep := child.Attr("SeparatorBefore"); strings.EqualFold(sep, "true") || sep == "1" {
 				tc.SetTabSeparator(idx, true)
 			}
 		} else if !strings.Contains(childTag, ".") {
@@ -843,7 +843,7 @@ func buildXAMLTabControl(el xElement, reg map[string]base.Widget, parentOff imag
 		}
 	}
 
-	if sel := el.attr("SelectedIndex", "Selected"); sel != "" {
+	if sel := el.Attr("SelectedIndex", "Selected"); sel != "" {
 		if idx, err := strconv.Atoi(sel); err == nil {
 			tc.SetActive(idx)
 		}
@@ -854,31 +854,31 @@ func buildXAMLTabControl(el xElement, reg map[string]base.Widget, parentOff imag
 
 // ─── MenuBar ────────────────────────────────────────────────────────────────
 
-func buildXAMLMenuBar(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string) (base.Widget, error) {
+func buildXAMLMenuBar(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string) (base.Widget, error) {
 	mb := base.NewMenuBar()
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	mb.SetBounds(absBounds)
 
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = mb
 	}
 
 	// Foreground
-	if fgStr := el.attr("Foreground"); fgStr != "" {
+	if fgStr := el.Attr("Foreground"); fgStr != "" {
 		if c, err := parseXAMLColor(fgStr); err == nil {
 			mb.TextColor = c
 		}
 	}
 
 	// Background
-	if bgStr := el.attr("Background"); bgStr != "" {
+	if bgStr := el.Attr("Background"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			mb.Background = c
 		}
 	}
 
 	// Мнемоники — по требованию: в подписях бывают настоящие подчёркивания.
-	if strings.EqualFold(el.attr("UseMnemonics"), "True") {
+	if strings.EqualFold(el.Attr("UseMnemonics"), "True") {
 		mb.UseMnemonics = true
 	}
 
@@ -892,7 +892,7 @@ func buildXAMLMenuBar(el xElement, reg map[string]base.Widget, parentOff image.P
 			continue
 		}
 
-		header := child.attr("Header", "Text", "Content")
+		header := child.Attr("Header", "Text", "Content")
 		if header == "" {
 			header = child.Text
 		}
@@ -916,7 +916,7 @@ func buildXAMLMenuBar(el xElement, reg map[string]base.Widget, parentOff image.P
 // parseMenuItems рекурсивно собирает MenuItem из дочерних <MenuItem>.
 // Второй результат — ключи перевода надписей (по индексам items): пункты меню
 // не являются виджетами, поэтому {Loc …} для них разворачивает вызывающий код.
-func parseMenuItems(parent xElement, baseDir string) ([]base.MenuItem, []string) {
+func parseMenuItems(parent Element, baseDir string) ([]base.MenuItem, []string) {
 	var items []base.MenuItem
 	var keys []string // ключ перевода для каждого пункта («» — не локализуемый)
 	for _, sub := range parent.Children {
@@ -925,33 +925,33 @@ func parseMenuItems(parent xElement, baseDir string) ([]base.MenuItem, []string)
 			continue
 		}
 
-		sep := strings.EqualFold(sub.attr("Separator"), "True")
+		sep := strings.EqualFold(sub.Attr("Separator"), "True")
 		if sep {
 			items = append(items, base.MenuItem{Separator: true})
 			keys = append(keys, "")
 			continue
 		}
 
-		raw := sub.attr("Header", "Text", "Content")
+		raw := sub.Attr("Header", "Text", "Content")
 		if raw == "" {
 			raw = sub.Text
 		}
 		text, key := locItemText(raw)
 
-		disabled := strings.EqualFold(sub.attr("IsEnabled"), "False") ||
-			strings.EqualFold(sub.attr("Disabled"), "True")
+		disabled := strings.EqualFold(sub.Attr("IsEnabled"), "False") ||
+			strings.EqualFold(sub.Attr("Disabled"), "True")
 
 		item := base.MenuItem{
 			Text:      text,
 			Disabled:  disabled,
 			Checkable: menuItemCheckable(sub),
-			Checked:   strings.EqualFold(sub.attr("IsChecked"), "True"),
+			Checked:   strings.EqualFold(sub.Attr("IsChecked"), "True"),
 			// InputGestureText — имя этого атрибута в WPF; Shortcut принят
 			// как более понятный синоним.
-			Shortcut: sub.attr("InputGestureText", "Shortcut"),
+			Shortcut: sub.Attr("InputGestureText", "Shortcut"),
 			// GroupName — имя WPF: пункты одной группы в одном подменю ведут
 			// себя как переключатель.
-			RadioGroup: sub.attr("GroupName"),
+			RadioGroup: sub.Attr("GroupName"),
 		}
 		applyMenuItemIcon(&item, sub, baseDir)
 
@@ -970,17 +970,17 @@ func parseMenuItems(parent xElement, baseDir string) ([]base.MenuItem, []string)
 
 // ─── PopupMenu ──────────────────────────────────────────────────────────────
 
-func buildXAMLPopupMenu(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string) (base.Widget, error) {
+func buildXAMLPopupMenu(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string) (base.Widget, error) {
 	pm := base.NewPopupMenu()
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	pm.SetBounds(absBounds)
 	applyCommonProps(pm, el)
 
-	if strings.EqualFold(el.attr("UseMnemonics"), "True") {
+	if strings.EqualFold(el.Attr("UseMnemonics"), "True") {
 		pm.UseMnemonics = true
 	}
 
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = pm
 	}
 
@@ -1001,13 +1001,13 @@ func buildXAMLPopupMenu(el xElement, reg map[string]base.Widget, parentOff image
 			continue
 		}
 
-		sep := strings.EqualFold(child.attr("Separator"), "True")
+		sep := strings.EqualFold(child.Attr("Separator"), "True")
 		if sep {
 			items = append(items, base.MenuItem{Separator: true})
 			continue
 		}
 
-		raw := child.attr("Header", "Text", "Content")
+		raw := child.Attr("Header", "Text", "Content")
 		if raw == "" {
 			raw = child.Text
 		}
@@ -1015,16 +1015,16 @@ func buildXAMLPopupMenu(el xElement, reg map[string]base.Widget, parentOff image
 		// здесь и запоминаем, как обновить надпись при смене языка.
 		text, locKey := locItemText(raw)
 
-		disabled := strings.EqualFold(child.attr("IsEnabled"), "False") ||
-			strings.EqualFold(child.attr("Disabled"), "True")
+		disabled := strings.EqualFold(child.Attr("IsEnabled"), "False") ||
+			strings.EqualFold(child.Attr("Disabled"), "True")
 
 		item := base.MenuItem{
 			Text:       text,
 			Disabled:   disabled,
 			Checkable:  menuItemCheckable(child),
-			Checked:    strings.EqualFold(child.attr("IsChecked"), "True"),
-			RadioGroup: child.attr("GroupName"),
-			Shortcut:   child.attr("InputGestureText", "Shortcut"),
+			Checked:    strings.EqualFold(child.Attr("IsChecked"), "True"),
+			RadioGroup: child.Attr("GroupName"),
+			Shortcut:   child.Attr("InputGestureText", "Shortcut"),
 		}
 		applyMenuItemIcon(&item, child, baseDir)
 		idx := len(items)
@@ -1043,11 +1043,11 @@ func buildXAMLPopupMenu(el xElement, reg map[string]base.Widget, parentOff image
 
 // buildXAMLDockPanel строит DockPanel из XAML-элемента <DockPanel>.
 // Последний дочерний элемент заполняет оставшееся пространство (LastChildFill).
-func buildXAMLDockPanel(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLDockPanel(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	dp := base.NewDockPanel()
 
 	// Background: цвет, "transparent" или роль темы "{Theme WindowBG}".
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" {
 		if role, ok := base.ParseBackgroundRole(bgStr); ok {
 			dp.SetBackgroundRole(role)
 		} else if strings.EqualFold(bgStr, "transparent") {
@@ -1061,19 +1061,19 @@ func buildXAMLDockPanel(el xElement, reg map[string]base.Widget, parentOff image
 	// LastChildFill — WPF-атрибут: выключает растяжение последнего ребёнка.
 	// Без него строку, где ВСЕ дети докованы, собрать нельзя: последний
 	// забирает остаток, и его собственный Dock не действует.
-	if v := el.attr("LastChildFill"); v != "" {
+	if v := el.Attr("LastChildFill"); v != "" {
 		dp.LastChildFill = !strings.EqualFold(v, "false") && v != "0"
 	}
 
 	// Bounds
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	dp.SetBounds(absBounds)
 
 	// Attached properties
 	applyCommonProps(dp, el)
 
 	// Регистрация
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = dp
 	}
 
@@ -1100,11 +1100,11 @@ func buildXAMLDockPanel(el xElement, reg map[string]base.Widget, parentOff image
 // buildXAMLBorder строит Border — контейнер с фоном/рамкой и одним потомком.
 // В WPF Border.Child заполняет всю область Border.
 // Реализуем через DockPanel (последний ребёнок заполняет оставшееся пространство).
-func buildXAMLBorder(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLBorder(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	dp := base.NewDockPanel()
 
 	// Background: цвет, "transparent" или роль темы "{Theme WindowBG}".
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" {
 		if role, ok := base.ParseBackgroundRole(bgStr); ok {
 			dp.SetBackgroundRole(role)
 		} else if strings.EqualFold(bgStr, "transparent") {
@@ -1118,14 +1118,14 @@ func buildXAMLBorder(el xElement, reg map[string]base.Widget, parentOff image.Po
 	}
 
 	// Bounds
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	dp.SetBounds(absBounds)
 
 	// Attached properties
 	applyCommonProps(dp, el)
 
 	// Регистрация
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = dp
 	}
 
@@ -1170,11 +1170,11 @@ var xamlDockPaneAutoSeq int
 // xamlDockPaneID возвращает Id панели: явный Id/Name, иначе слаг от Title,
 // иначе "paneN" (автогенерация — на случай, если XAML не задал ни того ни
 // другого).
-func xamlDockPaneID(el xElement) string {
-	if id := el.attr("Id", "Name", "x:Name"); id != "" {
+func xamlDockPaneID(el Element) string {
+	if id := el.Attr("Id", "Name", "x:Name"); id != "" {
 		return id
 	}
-	if title := el.attr("Title"); title != "" {
+	if title := el.Attr("Title"); title != "" {
 		return xamlSlugify(title)
 	}
 	xamlDockPaneAutoSeq++
@@ -1224,9 +1224,9 @@ func xamlDockSide(s string) base.DockSide {
 // buildXAMLDockPane строит DockPane из <DockPane> внутри <DockManager>.
 // Возвращает панель и её запрошенные Side/Size/State — сам DockManager
 // решает, что с ними делать (AddPane/SetSideSize/Unpin·Float·Close).
-func buildXAMLDockPane(el xElement, reg map[string]base.Widget, baseDir string, depth int) (pane *base.DockPane, side base.DockSide, size int, state string, err error) {
+func buildXAMLDockPane(el Element, reg map[string]base.Widget, baseDir string, depth int) (pane *base.DockPane, side base.DockSide, size int, state string, err error) {
 	id := xamlDockPaneID(el)
-	title := el.attr("Title")
+	title := el.Attr("Title")
 	if title == "" {
 		title = id
 	}
@@ -1248,14 +1248,14 @@ func buildXAMLDockPane(el xElement, reg map[string]base.Widget, baseDir string, 
 	}
 
 	pane = base.NewDockPane(id, title, content)
-	if v := xatoi(el.attr("MinSize")); v > 0 {
+	if v := ParseInt(el.Attr("MinSize")); v > 0 {
 		pane.MinSize = v // минимум стороны, пока панель на ней (GG-79)
 	}
-	side = xamlDockSide(el.attr("Side"))
-	size = xatoi(el.attr("Size"))
-	state = strings.ToLower(strings.TrimSpace(el.attr("State")))
+	side = xamlDockSide(el.Attr("Side"))
+	size = ParseInt(el.Attr("Size"))
+	state = strings.ToLower(strings.TrimSpace(el.Attr("State")))
 
-	if name := el.attr("Name", "x:Name"); name != "" {
+	if name := el.Attr("Name", "x:Name"); name != "" {
 		reg[name] = pane
 	} else {
 		reg[id] = pane
@@ -1265,10 +1265,10 @@ func buildXAMLDockPane(el xElement, reg map[string]base.Widget, baseDir string, 
 }
 
 // buildXAMLDockManager строит DockManager из <DockManager> (см. схему выше).
-func buildXAMLDockManager(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLDockManager(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	dm := base.NewDockManager()
 
-	if bgStr := el.attr("Background"); bgStr != "" {
+	if bgStr := el.Attr("Background"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			dm.Background = c
 		}
@@ -1276,15 +1276,15 @@ func buildXAMLDockManager(el xElement, reg map[string]base.Widget, parentOff ima
 
 	// NativeFloating="True" — декларация нативного отрыва панелей (window.Window
 	// подхватит поле в Run → EnableDockFloating). В headless — без эффекта.
-	if strings.EqualFold(el.attr("NativeFloating"), "true") {
+	if strings.EqualFold(el.Attr("NativeFloating"), "true") {
 		dm.NativeFloating = true
 	}
 
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	dm.SetBounds(absBounds)
 	applyCommonProps(dm, el)
 
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = dm
 	}
 
@@ -1354,13 +1354,13 @@ func buildXAMLDockManager(el xElement, reg map[string]base.Widget, parentOff ima
 
 // buildXAMLStatusBar строит StatusBar как горизонтальный StackPanel.
 // WPF StatusBar — набор StatusBarItem. Мы упрощаем: строим StackPanel Horizontal.
-func buildXAMLStatusBar(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLStatusBar(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	sp := base.NewStackPanel(base.OrientationHorizontal)
 	sp.Spacing = 10
 	sp.Padding = 6
 
 	// Background
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			sp.Background = c
 			sp.UseAlpha = c.A < 255
@@ -1370,14 +1370,14 @@ func buildXAMLStatusBar(el xElement, reg map[string]base.Widget, parentOff image
 	}
 
 	// Bounds
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	sp.SetBounds(absBounds)
 
 	// Attached properties
 	applyCommonProps(sp, el)
 
 	// Регистрация
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = sp
 	}
 
@@ -1411,12 +1411,12 @@ func buildXAMLStatusBar(el xElement, reg map[string]base.Widget, parentOff image
 //
 //	Background — цвет фона (#RRGGBB / имя)
 //	Orientation — Horizontal (default) | Vertical
-func buildXAMLToolBarTray(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLToolBarTray(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	sp := base.NewStackPanel(base.OrientationHorizontal)
 	sp.Spacing = 0
 	sp.Padding = 0
 
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			sp.Background = c
 			sp.UseAlpha = c.A < 255
@@ -1426,13 +1426,13 @@ func buildXAMLToolBarTray(el xElement, reg map[string]base.Widget, parentOff ima
 	}
 
 	// Bounds
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	sp.SetBounds(absBounds)
 
 	// Attached properties
 	applyCommonProps(sp, el)
 
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = sp
 	}
 
@@ -1467,10 +1467,10 @@ func buildXAMLToolBarTray(el xElement, reg map[string]base.Widget, parentOff ima
 //	Background — цвет фона
 //	Band       — номер полосы (игнорируется, layout упрощён)
 //	BandIndex  — позиция в полосе (игнорируется)
-func buildXAMLToolBar(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLToolBar(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	tb := base.NewToolBar()
 
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			tb.Background = c
 			tb.UseAlpha = c.A < 255
@@ -1478,16 +1478,16 @@ func buildXAMLToolBar(el xElement, reg map[string]base.Widget, parentOff image.P
 	}
 	// Иначе фон остаётся прозрачным: ToolBar наследует его от ToolBarTray.
 
-	if v := el.attr("IconsOnly"); v != "" {
+	if v := el.Attr("IconsOnly"); v != "" {
 		tb.IconsOnly = strings.EqualFold(v, "true") || v == "1"
 	}
-	if v := el.attr("Overflow"); v != "" {
+	if v := el.Attr("Overflow"); v != "" {
 		tb.Overflow = !strings.EqualFold(v, "false") && v != "0"
 	}
 
 	applyCommonProps(tb, el)
 
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = tb
 	}
 
@@ -1516,7 +1516,7 @@ func buildXAMLToolBar(el xElement, reg map[string]base.Widget, parentOff image.P
 
 	// Границы — ПОСЛЕ детей: раскладка панели считает переполнение по ним, и
 	// на пустой панели считать было бы нечего.
-	tb.SetBounds(el.bounds().Add(parentOff))
+	tb.SetBounds(el.Bounds().Add(parentOff))
 
 	return tb, nil
 }
@@ -1532,16 +1532,16 @@ func buildXAMLToolBar(el xElement, reg map[string]base.Widget, parentOff image.P
 //	Spacing      — расстояние между элементами (px)
 //	Padding      — внутренний отступ (px)
 //	Margin       — внешний отступ (игнорируется в текущей реализации)
-func buildXAMLStackPanel(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLStackPanel(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	orient := base.OrientationVertical
-	if strings.EqualFold(el.attr("Orientation"), "horizontal") {
+	if strings.EqualFold(el.Attr("Orientation"), "horizontal") {
 		orient = base.OrientationHorizontal
 	}
 
 	sp := base.NewStackPanel(orient)
 
 	// Background: цвет, "transparent" или роль темы "{Theme PanelBG}".
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" {
 		if role, ok := base.ParseBackgroundRole(bgStr); ok {
 			sp.SetBackgroundRole(role)
 		} else if strings.EqualFold(bgStr, "transparent") {
@@ -1555,21 +1555,21 @@ func buildXAMLStackPanel(el xElement, reg map[string]base.Widget, parentOff imag
 	}
 
 	// Spacing
-	if s := xatoi(el.attr("Spacing")); s > 0 {
+	if s := ParseInt(el.Attr("Spacing")); s > 0 {
 		sp.Spacing = s
 	}
 
 	// Padding
-	if p := xatoi(el.attr("Padding")); p > 0 {
+	if p := ParseInt(el.Attr("Padding")); p > 0 {
 		sp.Padding = p
 	}
 
 	// Bounds
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	sp.SetBounds(absBounds) // вызовет layout(), но дети ещё не добавлены
 
 	// Регистрация по имени
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = sp
 	}
 
@@ -1601,19 +1601,19 @@ func buildXAMLStackPanel(el xElement, reg map[string]base.Widget, parentOff imag
 // ─── buildXAMLGroupBox ──────────────────────────────────────────────────────
 
 // buildXAMLGroupBox строит GroupBox (Header + один контент).
-func buildXAMLGroupBox(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
-	header := el.attr("Header", "Title")
+func buildXAMLGroupBox(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+	header := el.Attr("Header", "Title")
 	gb := base.NewGroupBox(header)
-	if bgStr := el.attr("Background"); bgStr != "" && !strings.EqualFold(bgStr, "transparent") {
+	if bgStr := el.Attr("Background"); bgStr != "" && !strings.EqualFold(bgStr, "transparent") {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			gb.Background = c
 		}
 	}
-	applyColor(&gb.BorderColor, el, "BorderBrush")
-	applyColor(&gb.HeaderColor, el, "Foreground")
-	gb.SetBounds(el.bounds().Add(parentOff))
+	ApplyColor(&gb.BorderColor, el, "BorderBrush")
+	ApplyColor(&gb.HeaderColor, el, "Foreground")
+	gb.SetBounds(el.Bounds().Add(parentOff))
 	applyCommonProps(gb, el)
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = gb
 	}
 	contentOff := gb.ContentBounds().Min
@@ -1642,17 +1642,17 @@ func buildXAMLGroupBox(el xElement, reg map[string]base.Widget, parentOff image.
 // ─── buildXAMLExpander ──────────────────────────────────────────────────────
 
 // buildXAMLExpander строит Expander (Header, IsExpanded + контент).
-func buildXAMLExpander(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
-	header := el.attr("Header", "Title")
+func buildXAMLExpander(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+	header := el.Attr("Header", "Title")
 	ex := base.NewExpander(header)
-	if strings.EqualFold(el.attr("IsExpanded"), "true") {
+	if strings.EqualFold(el.Attr("IsExpanded"), "true") {
 		ex.IsExpanded = true
 	}
-	applyColor(&ex.HeaderBG, el, "Background")
-	applyColor(&ex.TextColor, el, "Foreground")
-	ex.SetBounds(el.bounds().Add(parentOff))
+	ApplyColor(&ex.HeaderBG, el, "Background")
+	ApplyColor(&ex.TextColor, el, "Foreground")
+	ex.SetBounds(el.Bounds().Add(parentOff))
 	applyCommonProps(ex, el)
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = ex
 	}
 	contentOff := image.Pt(0, 0)
@@ -1679,31 +1679,31 @@ func buildXAMLExpander(el xElement, reg map[string]base.Widget, parentOff image.
 // ─── buildXAMLWrapPanel ─────────────────────────────────────────────────────
 
 // buildXAMLWrapPanel строит WrapPanel из XAML (Orientation, Background, Spacing).
-func buildXAMLWrapPanel(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLWrapPanel(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	orient := base.OrientationHorizontal
-	if strings.EqualFold(el.attr("Orientation"), "vertical") {
+	if strings.EqualFold(el.Attr("Orientation"), "vertical") {
 		orient = base.OrientationVertical
 	}
 	wp := base.NewWrapPanel(orient)
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" && !strings.EqualFold(bgStr, "transparent") {
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" && !strings.EqualFold(bgStr, "transparent") {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			wp.Background = c
 			wp.UseAlpha = c.A < 255
 		}
 	}
-	if s := xatoi(el.attr("Spacing", "ItemSpacing")); s > 0 {
+	if s := ParseInt(el.Attr("Spacing", "ItemSpacing")); s > 0 {
 		wp.Spacing = s
 		wp.LineSpacing = s
 	}
-	if s := xatoi(el.attr("LineSpacing")); s > 0 {
+	if s := ParseInt(el.Attr("LineSpacing")); s > 0 {
 		wp.LineSpacing = s
 	}
-	if p := xatoi(el.attr("Padding")); p > 0 {
+	if p := ParseInt(el.Attr("Padding")); p > 0 {
 		wp.Padding = p
 	}
-	wp.SetBounds(el.bounds().Add(parentOff))
+	wp.SetBounds(el.Bounds().Add(parentOff))
 	applyCommonProps(wp, el)
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = wp
 	}
 	for _, child := range el.Children {
@@ -1724,22 +1724,22 @@ func buildXAMLWrapPanel(el xElement, reg map[string]base.Widget, parentOff image
 // ─── buildXAMLUniformGrid ───────────────────────────────────────────────────
 
 // buildXAMLUniformGrid строит UniformGrid из XAML (Rows, Columns, Background).
-func buildXAMLUniformGrid(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLUniformGrid(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	ug := base.NewUniformGrid()
-	ug.Rows = xatoi(el.attr("Rows"))
-	ug.Columns = xatoi(el.attr("Columns"))
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" && !strings.EqualFold(bgStr, "transparent") {
+	ug.Rows = ParseInt(el.Attr("Rows"))
+	ug.Columns = ParseInt(el.Attr("Columns"))
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" && !strings.EqualFold(bgStr, "transparent") {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			ug.Background = c
 			ug.UseAlpha = c.A < 255
 		}
 	}
-	if s := xatoi(el.attr("Spacing")); s > 0 {
+	if s := ParseInt(el.Attr("Spacing")); s > 0 {
 		ug.Spacing = s
 	}
-	ug.SetBounds(el.bounds().Add(parentOff))
+	ug.SetBounds(el.Bounds().Add(parentOff))
 	applyCommonProps(ug, el)
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = ug
 	}
 	for _, child := range el.Children {
@@ -1774,59 +1774,59 @@ func buildXAMLUniformGrid(el xElement, reg map[string]base.Widget, parentOff ima
 //
 //	<TreeViewItem>       — статические узлы дерева
 //	<TreeView.ItemTemplate> — HierarchicalDataTemplate для data binding
-func buildXAMLTreeView(el xElement, reg map[string]base.Widget, parentOff image.Point) (base.Widget, error) {
+func buildXAMLTreeView(el Element, reg map[string]base.Widget, parentOff image.Point) (base.Widget, error) {
 	tw := base.NewTreeViewWidget()
 
 	// Background
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			tw.Tree.Theme.Background = c
 		}
 	}
 
 	// Foreground
-	if fgStr := el.attr("Foreground"); fgStr != "" {
+	if fgStr := el.Attr("Foreground"); fgStr != "" {
 		if c, err := parseXAMLColor(fgStr); err == nil {
 			tw.Tree.Theme.Foreground = c
 		}
 	}
 
 	// ItemHeight
-	if ih := xatoi(el.attr("ItemHeight")); ih > 0 {
+	if ih := ParseInt(el.Attr("ItemHeight")); ih > 0 {
 		tw.Tree.ItemHeight = ih
 	}
 
 	// IndentSize
-	if is := xatoi(el.attr("IndentSize")); is > 0 {
+	if is := ParseInt(el.Attr("IndentSize")); is > 0 {
 		tw.Tree.IndentSize = is
 	}
 
 	// SelectionMode="Extended" — выбор набора узлов (GG-86).
-	if sm := el.attr("SelectionMode"); sm != "" {
+	if sm := el.Attr("SelectionMode"); sm != "" {
 		if strings.EqualFold(sm, "extended") || strings.EqualFold(sm, "multiple") {
 			tw.Tree.SelectionMode = tvPkg.SelectionExtended
 		}
 	}
 
 	// IsReadOnly
-	if strings.EqualFold(el.attr("IsReadOnly"), "true") {
+	if strings.EqualFold(el.Attr("IsReadOnly"), "true") {
 		tw.Tree.IsReadOnly = true
 	}
 
 	// ShowIndentGuides
-	if strings.EqualFold(el.attr("ShowIndentGuides"), "true") {
+	if strings.EqualFold(el.Attr("ShowIndentGuides"), "true") {
 		tw.Tree.ShowIndentGuides = true
 	}
 
 	// Bounds
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	tw.SetBounds(absBounds)
 
 	// Attached properties
 	applyCommonProps(tw, el)
 
 	// Регистрация по имени
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = tw
 	}
 
@@ -1854,38 +1854,38 @@ func buildXAMLTreeView(el xElement, reg map[string]base.Widget, parentOff image.
 }
 
 // parseTreeViewItemNew рекурсивно строит TreeViewItem из <TreeViewItem>.
-func parseTreeViewItemNew(el xElement) *tvPkg.TreeViewItem {
-	header := el.attr("Header", "Text", "Content")
+func parseTreeViewItemNew(el Element) *tvPkg.TreeViewItem {
+	header := el.Attr("Header", "Text", "Content")
 	if header == "" {
 		header = el.Text
 	}
 	item := tvPkg.NewItem(header)
 
 	// IsExpanded
-	if strings.EqualFold(el.attr("IsExpanded"), "true") {
+	if strings.EqualFold(el.Attr("IsExpanded"), "true") {
 		item.Expanded = true
 	}
 
 	// IsEnabled
-	if strings.EqualFold(el.attr("IsEnabled"), "false") {
+	if strings.EqualFold(el.Attr("IsEnabled"), "false") {
 		item.IsEnabled = false
 	}
 
 	// Detail — приписка за текстом узла своим цветом (счётчик, размер).
-	if d := el.attr("Detail"); d != "" {
+	if d := el.Attr("Detail"); d != "" {
 		item.Detail = d
 	}
-	if c := el.attr("DetailColor"); c != "" {
+	if c := el.Attr("DetailColor"); c != "" {
 		if col, err := parseXAMLColor(c); err == nil {
 			item.DetailColor = col
 		}
 	}
-	if c := el.attr("Foreground"); c != "" {
+	if c := el.Attr("Foreground"); c != "" {
 		if col, err := parseXAMLColor(c); err == nil {
 			item.Foreground = col
 		}
 	}
-	if strings.EqualFold(el.attr("FontWeight"), "Bold") {
+	if strings.EqualFold(el.Attr("FontWeight"), "Bold") {
 		item.Bold = true
 	}
 
@@ -1900,11 +1900,11 @@ func parseTreeViewItemNew(el xElement) *tvPkg.TreeViewItem {
 }
 
 // parseHierarchicalDataTemplate парсит <HierarchicalDataTemplate> из XAML.
-func parseHierarchicalDataTemplate(el xElement) *tvPkg.HierarchicalDataTemplate {
+func parseHierarchicalDataTemplate(el Element) *tvPkg.HierarchicalDataTemplate {
 	tmpl := &tvPkg.HierarchicalDataTemplate{}
 
 	// ItemsSource="{Binding Children}"
-	if is := el.attr("ItemsSource"); is != "" {
+	if is := el.Attr("ItemsSource"); is != "" {
 		tmpl.ItemsSourcePath = parseBindingPath(is)
 	}
 
@@ -1921,11 +1921,11 @@ func parseHierarchicalDataTemplate(el xElement) *tvPkg.HierarchicalDataTemplate 
 				innerTag := strings.ToLower(inner.Tag)
 				switch innerTag {
 				case "image":
-					if src := inner.attr("Source"); src != "" {
+					if src := inner.Attr("Source"); src != "" {
 						tmpl.IconPath = parseBindingPath(src)
 					}
 				case "textblock":
-					if txt := inner.attr("Text"); txt != "" {
+					if txt := inner.Attr("Text"); txt != "" {
 						tmpl.HeaderPath = parseBindingPath(txt)
 					}
 				}
@@ -1933,7 +1933,7 @@ func parseHierarchicalDataTemplate(el xElement) *tvPkg.HierarchicalDataTemplate 
 
 		case childTag == "textblock":
 			// Прямой TextBlock как содержимое шаблона
-			if txt := child.attr("Text"); txt != "" {
+			if txt := child.Attr("Text"); txt != "" {
 				tmpl.HeaderPath = parseBindingPath(txt)
 			}
 		}
@@ -1962,48 +1962,48 @@ func parseHierarchicalDataTemplate(el xElement) *tvPkg.HierarchicalDataTemplate 
 //	<DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" />
 //	<DataGridCheckBoxColumn Header="Active" Binding="{Binding IsActive}" Width="60" />
 //	<DataGridTemplateColumn Header="Actions" Width="100" />
-func buildXAMLDataGrid(el xElement) base.Widget {
+func buildXAMLDataGrid(el Element) base.Widget {
 	dg := base.NewDataGridWidget()
 
 	// ── Свойства ────────────────────────────────────────────────────────
 
 	// AutoGenerateColumns
-	if strings.EqualFold(el.attr("AutoGenerateColumns"), "true") {
+	if strings.EqualFold(el.Attr("AutoGenerateColumns"), "true") {
 		dg.Grid.AutoGenerateColumns = true
 	}
 
 	// IsReadOnly
-	if strings.EqualFold(el.attr("IsReadOnly"), "true") {
+	if strings.EqualFold(el.Attr("IsReadOnly"), "true") {
 		dg.Grid.IsReadOnly = true
 	}
 
 	// CanUserSortColumns (по умолчанию true)
-	if strings.EqualFold(el.attr("CanUserSortColumns"), "false") {
+	if strings.EqualFold(el.Attr("CanUserSortColumns"), "false") {
 		dg.Grid.CanUserSortColumns = false
 	}
 
 	// CanUserResizeColumns (по умолчанию true)
-	if strings.EqualFold(el.attr("CanUserResizeColumns"), "false") {
+	if strings.EqualFold(el.Attr("CanUserResizeColumns"), "false") {
 		dg.Grid.CanUserResizeColumns = false
 	}
 
 	// SelectionMode
-	if strings.EqualFold(el.attr("SelectionMode"), "extended") {
+	if strings.EqualFold(el.Attr("SelectionMode"), "extended") {
 		dg.Grid.SelectionMode = dgridPkg.SelectionExtended
 	}
 
 	// RowHeight
-	if rh := xatoi(el.attr("RowHeight")); rh > 0 {
+	if rh := ParseInt(el.Attr("RowHeight")); rh > 0 {
 		dg.Grid.RowHeight = rh
 	}
 
 	// HeaderHeight
-	if hh := xatoi(el.attr("HeaderHeight")); hh > 0 {
+	if hh := ParseInt(el.Attr("HeaderHeight")); hh > 0 {
 		dg.Grid.HeaderHeight = hh
 	}
 
 	// Background
-	if bgStr := el.attr("Background", "Fill"); bgStr != "" {
+	if bgStr := el.Attr("Background", "Fill"); bgStr != "" {
 		if c, err := parseXAMLColor(bgStr); err == nil {
 			dg.Grid.Background = c
 		}
@@ -2055,18 +2055,18 @@ func registerColumnHeaderLoc(col dgridPkg.Column, key string) {
 //
 // Второе значение — ключ {Loc …} заголовка (пустой, если заголовок обычный):
 // подписаться на смену языка должен вызывающий, у которого есть таблица.
-func parseDataGridColumn(el xElement) (dgridPkg.Column, string) {
+func parseDataGridColumn(el Element) (dgridPkg.Column, string) {
 	tag := strings.ToLower(el.Tag)
-	header, headerLocKey := locItemText(el.attr("Header", "Text"))
+	header, headerLocKey := locItemText(el.Attr("Header", "Text"))
 
 	// Binding path: разбираем "{Binding PropertyName}"
-	bindingPath := parseBindingPath(el.attr("Binding"))
+	bindingPath := parseBindingPath(el.Attr("Binding"))
 	if bindingPath == "" {
-		bindingPath = el.attr("SortMemberPath")
+		bindingPath = el.Attr("SortMemberPath")
 	}
 
 	// Width: "Auto", "*", "2*", "150"
-	width := parseColumnWidth(el.attr("Width"))
+	width := parseColumnWidth(el.Attr("Width"))
 
 	// IsReadOnly: tri-state.
 	//   - атрибут отсутствует → колонка НАСЛЕДУЕТ значение DataGrid.IsReadOnly
@@ -2075,7 +2075,7 @@ func parseDataGridColumn(el xElement) (dgridPkg.Column, string) {
 	//
 	// applyReadOnly выставляет SetReadOnly(...) только если атрибут
 	// действительно присутствует в XAML, и пропускает в противном случае.
-	roAttr := el.attr("IsReadOnly")
+	roAttr := el.Attr("IsReadOnly")
 	applyReadOnly := func(setROFn func(bool)) {
 		if roAttr == "" {
 			return
@@ -2084,7 +2084,7 @@ func parseDataGridColumn(el xElement) (dgridPkg.Column, string) {
 	}
 
 	// SortMemberPath
-	sortPath := el.attr("SortMemberPath")
+	sortPath := el.Attr("SortMemberPath")
 	if sortPath == "" {
 		sortPath = bindingPath
 	}
@@ -2172,12 +2172,12 @@ func parseColumnWidth(s string) dgridPkg.ColumnWidth {
 	}
 	if strings.HasSuffix(s, "*") {
 		numStr := strings.TrimSuffix(s, "*")
-		if n := xatoi(numStr); n > 0 {
+		if n := ParseInt(numStr); n > 0 {
 			return dgridPkg.StarWidth(float64(n))
 		}
 		return dgridPkg.StarWidth(1)
 	}
-	if n := xatoi(s); n > 0 {
+	if n := ParseInt(s); n > 0 {
 		return dgridPkg.PixelWidth(float64(n))
 	}
 	return dgridPkg.StarWidth(1)
@@ -2189,10 +2189,10 @@ func parseColumnWidth(s string) dgridPkg.ColumnWidth {
 // делает пункт переключателем: разметка, которая ставит отметку, но забыла
 // объявить пункт отмечаемым, иначе показывала бы отметку в никуда. Имя группы
 // значит то же самое — переключатель без отметки всё равно переключатель.
-func menuItemCheckable(el xElement) bool {
-	return strings.EqualFold(el.attr("IsCheckable"), "True") ||
-		strings.EqualFold(el.attr("IsChecked"), "True") ||
-		el.attr("GroupName") != ""
+func menuItemCheckable(el Element) bool {
+	return strings.EqualFold(el.Attr("IsCheckable"), "True") ||
+		strings.EqualFold(el.Attr("IsChecked"), "True") ||
+		el.Attr("GroupName") != ""
 }
 
 // applyMenuItemIcon читает значок пункта меню из разметки: Icon="icons/copy.png".
@@ -2200,8 +2200,8 @@ func menuItemCheckable(el xElement) bool {
 // Путь ограничен каталогом XAML-файла или fs.FS (SEC-8, GG-7) — тем же
 // механизмом, что у Button.Icon. Не прочитался — пункт остаётся без значка:
 // меню без картинки понятнее, чем меню, не открывшееся из-за неё.
-func applyMenuItemIcon(item *base.MenuItem, el xElement, baseDir string) {
-	src := el.attr("Icon", "IconSource")
+func applyMenuItemIcon(item *base.MenuItem, el Element, baseDir string) {
+	src := el.Attr("Icon", "IconSource")
 	if src == "" {
 		return
 	}
@@ -2209,7 +2209,7 @@ func applyMenuItemIcon(item *base.MenuItem, el xElement, baseDir string) {
 		item.Icon = img
 		item.IconPath = src
 	}
-	if sz := xatoi(el.attr("IconSize")); sz > 0 {
+	if sz := ParseInt(el.Attr("IconSize")); sz > 0 {
 		item.IconSize = sz
 	}
 }

@@ -211,7 +211,7 @@ func (l *Label) drawLine(ctx DrawContext, text string, x, y int, sizePt float64,
 func (l *Label) wrappedLines(ctx DrawContext, text string, sizePt float64, font string, maxW int) []string {
 	rev := TextMetricsRev()
 	l.mu.RLock()
-	ms := measureSetOf(l) // перенос посчитан измерителем этого движка
+	ms := MeasureSetOf(l) // перенос посчитан измерителем этого движка
 	hit := l.wrapCache != nil && l.wrapText == text && l.wrapSize == sizePt &&
 		l.wrapFont == font && l.wrapW == maxW && l.wrapRev == rev && l.wrapMS == ms
 	lines := l.wrapCache

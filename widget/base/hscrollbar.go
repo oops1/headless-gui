@@ -16,18 +16,26 @@ import (
 // Геометрия вынесена сюда отдельными функциями: она одна на оба виджета и
 // проверяется тестами без отрисовки.
 
+// Размеры полосы. HBarHeight и HBarInsetX — служебные: для подпакетов
+// widget, в фасад не входят.
 const (
-	dvHBarH      = 10 // высота полосы вместе с полями
-	dvHBarMinW   = 24 // ползунок короче этого не ужимается — за него не схватиться
-	dvHBarInsetX = 4  // запас хита слева и справа от трека
+	//facadegen:skip
+	HBarHeight = 10 // высота полосы вместе с полями
+	dvHBarMinW = 24 // ползунок короче этого не ужимается — за него не схватиться
+	//facadegen:skip
+	HBarInsetX = 4 // запас хита слева и справа от трека
 )
 
-// hbarThumb — ползунок на треке track: его ширина пропорциональна тому, какая
+// HBarThumb — ползунок на треке track: его ширина пропорциональна тому, какая
 // доля содержимого видна, а положение — текущему смещению.
 //
 // Пустой прямоугольник означает «полоса не нужна»: содержимое помещается
 // целиком. Так же отвечает и трек нулевой ширины — рисовать в нём нечего.
-func hbarThumb(track image.Rectangle, scroll, maxScroll, viewW, contentW float64) image.Rectangle {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func HBarThumb(track image.Rectangle, scroll, maxScroll, viewW, contentW float64) image.Rectangle {
 	if track.Dx() <= 0 || maxScroll <= 0 || contentW <= 0 || viewW <= 0 {
 		return image.Rectangle{}
 	}
@@ -42,10 +50,14 @@ func hbarThumb(track image.Rectangle, scroll, maxScroll, viewW, contentW float64
 	return image.Rect(x, track.Min.Y, x+w, track.Max.Y)
 }
 
-// hbarScrollAt — смещение, при котором ползунок встанет серединой в точку x.
+// HBarScrollAt — смещение, при котором ползунок встанет серединой в точку x.
 // Нужен для щелчка мимо ползунка: содержимое прыгает туда, куда ткнули.
-func hbarScrollAt(track image.Rectangle, x int, maxScroll, viewW, contentW float64) float64 {
-	th := hbarThumb(track, 0, maxScroll, viewW, contentW)
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func HBarScrollAt(track image.Rectangle, x int, maxScroll, viewW, contentW float64) float64 {
+	th := HBarThumb(track, 0, maxScroll, viewW, contentW)
 	if th.Empty() {
 		return 0
 	}
@@ -57,11 +69,15 @@ func hbarScrollAt(track image.Rectangle, x int, maxScroll, viewW, contentW float
 	return math.Max(0, math.Min(v, maxScroll))
 }
 
-// hbarScrollForThumbX — смещение, при котором ЛЕВЫЙ край ползунка стоит в x.
+// HBarScrollForThumbX — смещение, при котором ЛЕВЫЙ край ползунка стоит в x.
 // Нужен для перетаскивания: содержимое едет ровно на столько, на сколько
 // протянули ползунок, без скачка под курсор.
-func hbarScrollForThumbX(track image.Rectangle, x int, maxScroll, viewW, contentW float64) float64 {
-	th := hbarThumb(track, 0, maxScroll, viewW, contentW)
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func HBarScrollForThumbX(track image.Rectangle, x int, maxScroll, viewW, contentW float64) float64 {
+	th := HBarThumb(track, 0, maxScroll, viewW, contentW)
 	if th.Empty() {
 		return 0
 	}
@@ -85,8 +101,12 @@ func clamp01(v float64) float64 {
 	return v
 }
 
-// drawHBar рисует трек и ползунок в том же оформлении, что полоса-обзор.
-func drawHBar(ctx DrawContext, track, thumb image.Rectangle, trackCol, thumbCol color.RGBA) {
+// DrawHBar рисует трек и ползунок в том же оформлении, что полоса-обзор.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func DrawHBar(ctx DrawContext, track, thumb image.Rectangle, trackCol, thumbCol color.RGBA) {
 	if track.Dx() <= 0 || track.Dy() <= 0 || thumb.Empty() {
 		return
 	}

@@ -20,16 +20,24 @@ const (
 	seriesSlack = 4
 )
 
-// clickSeries — запасной счётчик нажатий на стороне виджета.
-type clickSeries struct {
+// ClickSeries — запасной счётчик нажатий на стороне виджета.
+//
+// Служебный: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+type ClickSeries struct {
 	atMs int64
 	x, y int
 	n    int
 }
 
-// clicksOf — номер нажатия в серии: из события, если его заполнил движок,
+// ClicksOf — номер нажатия в серии: из события, если его заполнил движок,
 // иначе посчитанный на месте. Зовётся только для нажатия (e.Pressed).
-func clicksOf(e MouseEvent, c *clickSeries) int {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ClicksOf(e MouseEvent, c *ClickSeries) int {
 	if e.Clicks > 0 {
 		return e.Clicks
 	}

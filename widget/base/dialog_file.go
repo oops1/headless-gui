@@ -160,7 +160,7 @@ type FileDialog struct {
 	crumb   *crumbBar
 	places  *placeList // nil в компактном Save
 	table   *fileTable // nil в компактном Save
-	nameIn  *TextInput // nil в FolderPick
+	nameIn  TextEditor // nil в FolderPick
 	warnLbl *Label
 	warnIco *DialogIcon
 }
@@ -298,7 +298,7 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 		nameLbl.SetBounds(image.Rect(padX, nameY+7, padX+42, nameY+25))
 		dlg.AddChild(nameLbl)
 
-		fd.nameIn = NewTextInput("")
+		fd.nameIn = newTextInputField("")
 		fd.nameIn.SetBounds(image.Rect(padX+44, nameY, padX+44+330, nameY+30))
 		dlg.AddChild(fd.nameIn)
 
@@ -359,9 +359,9 @@ func (fd *FileDialog) buildSaveCompact(mb *MessageBox, title string) {
 	// Фильтру нужно больше места под длинные подписи вида
 	// «Изображения (.png, .jpg, .jpeg)» — даём ему ~200px, остальное имени.
 	const filterW = 200
-	fd.nameIn = NewTextInput("")
+	fd.nameIn = newTextInputField("")
 	fd.nameIn.SetText(fd.opts.InitialName)
-	fd.nameIn.OnChange = func(string) { fd.updateWarning() }
+	fd.nameIn.SetOnTextChanged(func(string) { fd.updateWarning() })
 	fd.nameIn.SetBounds(image.Rect(padX, nameY, dlgW-padX-filterW-10, nameY+30))
 	dlg.AddChild(fd.nameIn)
 

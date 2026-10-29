@@ -43,36 +43,36 @@ type xrStyle struct {
 }
 
 // buildXAMLRichText строит RichText из элемента разметки.
-func buildXAMLRichText(el xElement) base.Widget {
+func buildXAMLRichText(el Element) base.Widget {
 	t := base.NewRichText()
-	applyColor(&t.Background, el, "Background")
-	applyColor(&t.TextColor, el, "Foreground")
-	applyColor(&t.LinkColor, el, "LinkForeground")
-	if fs := el.attr("FontSize"); fs != "" {
+	ApplyColor(&t.Background, el, "Background")
+	ApplyColor(&t.TextColor, el, "Foreground")
+	ApplyColor(&t.LinkColor, el, "LinkForeground")
+	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			t.FontSize = v
 		}
 	}
-	if ff := el.attr("FontFamily"); ff != "" {
+	if ff := el.Attr("FontFamily"); ff != "" {
 		t.FontName = ff
 	}
-	if v := el.attr("LineSpacing"); v != "" {
-		t.LineSpacing = xatoi(v)
+	if v := el.Attr("LineSpacing"); v != "" {
+		t.LineSpacing = ParseInt(v)
 	}
-	if v := el.attr("Padding"); v != "" {
+	if v := el.Attr("Padding"); v != "" {
 		m := parseMargin(v)
 		t.PaddingX, t.PaddingY = m.Left, m.Top
 	}
 	// Правка включается IsReadOnly="False" или Editable="True". По умолчанию
 	// виджет — просмотр, поэтому одного IsReadOnly="True" достаточно лишь для
 	// ясности; если заданы оба атрибута, решает Editable: он прямее.
-	if v := el.attr("IsReadOnly", "ReadOnly"); v != "" {
+	if v := el.Attr("IsReadOnly", "ReadOnly"); v != "" {
 		t.Editable = strings.EqualFold(v, "false")
 	}
-	if v := el.attr("Editable"); v != "" {
+	if v := el.Attr("Editable"); v != "" {
 		t.Editable = strings.EqualFold(v, "true")
 	}
-	if strings.EqualFold(el.attr("AcceptsTab"), "true") {
+	if strings.EqualFold(el.Attr("AcceptsTab"), "true") {
 		t.AcceptTab = true
 	}
 
@@ -85,7 +85,7 @@ func buildXAMLRichText(el xElement) base.Widget {
 	}
 	if len(paras) > 0 {
 		t.SetParagraphs(paras)
-	} else if text := el.attr("Text"); text != "" {
+	} else if text := el.Attr("Text"); text != "" {
 		t.SetText(text)
 	} else if el.Text != "" {
 		t.SetText(el.Text)
@@ -94,27 +94,27 @@ func buildXAMLRichText(el xElement) base.Widget {
 }
 
 // xrParagraph разбирает <Paragraph>.
-func xrParagraph(el xElement) base.RichParagraph {
+func xrParagraph(el Element) base.RichParagraph {
 	var p base.RichParagraph
-	switch strings.ToLower(el.attr("TextAlignment", "HorizontalContentAlignment")) {
+	switch strings.ToLower(el.Attr("TextAlignment", "HorizontalContentAlignment")) {
 	case "center":
 		p.Align = base.TextAlignCenter
 	case "right":
 		p.Align = base.TextAlignRight
 	}
 	// Margin абзаца WPF → отступ слева и места до и после.
-	if v := el.attr("Margin"); v != "" {
+	if v := el.Attr("Margin"); v != "" {
 		m := parseMargin(v)
 		p.Indent, p.SpaceBefore, p.SpaceAfter = m.Left, m.Top, m.Bottom
 	}
-	if v := el.attr("Indent"); v != "" {
-		p.Indent = xatoi(v)
+	if v := el.Attr("Indent"); v != "" {
+		p.Indent = ParseInt(v)
 	}
-	if v := el.attr("SpaceBefore"); v != "" {
-		p.SpaceBefore = xatoi(v)
+	if v := el.Attr("SpaceBefore"); v != "" {
+		p.SpaceBefore = ParseInt(v)
 	}
-	if v := el.attr("SpaceAfter"); v != "" {
-		p.SpaceAfter = xatoi(v)
+	if v := el.Attr("SpaceAfter"); v != "" {
+		p.SpaceAfter = ParseInt(v)
 	}
 
 	baseStyle := xrStyle{}
@@ -130,30 +130,30 @@ func xrParagraph(el xElement) base.RichParagraph {
 }
 
 // xrApply накладывает атрибуты оформления элемента на st.
-func xrApply(st *xrStyle, el xElement) {
-	if fs := el.attr("FontSize"); fs != "" {
+func xrApply(st *xrStyle, el Element) {
+	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			st.run.Size = v
 		}
 	}
-	if ff := el.attr("FontFamily"); ff != "" {
+	if ff := el.Attr("FontFamily"); ff != "" {
 		st.run.Font = ff
 	}
-	switch strings.ToLower(el.attr("FontWeight")) {
+	switch strings.ToLower(el.Attr("FontWeight")) {
 	case "bold", "semibold", "black", "heavy", "extrabold", "ultrabold":
 		st.bold = true
 	case "normal", "regular", "light", "thin":
 		st.bold = false
 	}
-	switch strings.ToLower(el.attr("FontStyle")) {
+	switch strings.ToLower(el.Attr("FontStyle")) {
 	case "italic", "oblique":
 		st.italic = true
 	case "normal":
 		st.italic = false
 	}
-	applyColor(&st.run.Color, el, "Foreground")
-	applyColor(&st.run.BG, el, "Background")
-	td := strings.ToLower(el.attr("TextDecorations"))
+	ApplyColor(&st.run.Color, el, "Foreground")
+	ApplyColor(&st.run.BG, el, "Background")
+	td := strings.ToLower(el.Attr("TextDecorations"))
 	if strings.Contains(td, "underline") {
 		st.run.Underline = true
 	}
@@ -186,7 +186,7 @@ func xrRun(st xrStyle, text string) base.RichRun {
 const maxXRichDepth = 32
 
 // xrInline разбирает вложенный элемент абзаца и дописывает раны в out.
-func xrInline(el xElement, baseStyle xrStyle, out []base.RichRun, depth int) []base.RichRun {
+func xrInline(el Element, baseStyle xrStyle, out []base.RichRun, depth int) []base.RichRun {
 	if depth > maxXRichDepth {
 		return out
 	}
@@ -204,13 +204,13 @@ func xrInline(el xElement, baseStyle xrStyle, out []base.RichRun, depth int) []b
 	case "underline":
 		st.run.Underline = true
 	case "hyperlink":
-		st.run.Link = el.attr("NavigateUri", "Uri", "Link")
+		st.run.Link = el.Attr("NavigateUri", "Uri", "Link")
 	default:
 		return out // неизвестный вложенный тег игнорируется
 	}
 	xrApply(&st, el)
 
-	text := el.attr("Text")
+	text := el.Attr("Text")
 	if text == "" {
 		text = el.Text
 	}

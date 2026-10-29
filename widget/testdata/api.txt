@@ -661,6 +661,7 @@ type AccessActionHandler
 type AccessActionKind
 type AccessCaretSetter
 type AccessChildrenProvider
+type AccessDescriber
 type AccessInfo
 type AccessNode
 type AccessRole
@@ -705,6 +706,7 @@ type CursorProvider
 type DataErrorInfo
 type DataGridWidget
 type DatePicker
+type DefaultSizer
 type DesiredSizer
 type Dialog
 type DialogIcon
@@ -882,6 +884,7 @@ type TabItem
 type Tap
 type TextAlign
 type TextBox
+type TextEditor
 type TextInput
 type Theme
 type ThemeScope

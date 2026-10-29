@@ -1,4 +1,4 @@
-package base
+package text
 
 import (
 	"image"
@@ -244,13 +244,13 @@ func TestSplitStylePieces_RandomMatchesReference(t *testing.T) {
 }
 
 func TestMergeStyle(t *testing.T) {
-	base := Style{Color: color.RGBA{R: 9, A: 255}, Face: "mono"}
-	got := mergeStyle(base, Style{BG: stBG.BG})
-	if got.Color != base.Color || got.Face != "mono" || got.BG != stBG.BG {
+	baseStyle := Style{Color: color.RGBA{R: 9, A: 255}, Face: "mono"}
+	got := mergeStyle(baseStyle, Style{BG: stBG.BG})
+	if got.Color != baseStyle.Color || got.Face != "mono" || got.BG != stBG.BG {
 		t.Errorf("пустые поля поверх не должны затирать: %+v", got)
 	}
-	got = mergeStyle(base, Style{Face: "bold"})
-	if got.Face != "bold" || got.Color != base.Color {
+	got = mergeStyle(baseStyle, Style{Face: "bold"})
+	if got.Face != "bold" || got.Color != baseStyle.Color {
 		t.Errorf("гарнитура поверх: %+v", got)
 	}
 }

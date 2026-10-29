@@ -44,6 +44,7 @@ func setupLocRelease(t *testing.T) {
 
 // ReleaseXAML снимает и слушатель языка, и свёрнутые строки дерева.
 func TestReleaseXAML_UnsubscribesTree(t *testing.T) {
+	useFakeField(t) // <TextBox> в разметке
 	setupLocRelease(t)
 	listeners, items, scopes := locListenerCount(), locItemCount(), xamlScopeCount()
 
@@ -73,6 +74,7 @@ func TestReleaseXAML_UnsubscribesTree(t *testing.T) {
 // Dispose одного дерева снимает только его строки: второе дерево продолжает
 // переводиться, освобождённое — нет.
 func TestBindingScopeDispose_OnlyOwnItems(t *testing.T) {
+	useFakeField(t) // <TextBox> в разметке
 	setupLocRelease(t)
 
 	_, reg1, scope1, err := LoadUIFromXAMLBindings([]byte(locItemsXAML), nil)

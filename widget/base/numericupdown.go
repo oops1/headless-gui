@@ -193,7 +193,7 @@ func (n *NumericUpDown) Draw(ctx DrawContext) {
 	if st.Classic3D {
 		// Классика Win2000: утопленное поле + две выпуклые bevel-кнопки ▲▼.
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), n.FieldBG)
-		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		ctx.DrawText(txt, b.Min.X+6, textY, n.TextColor)
 
 		bw := nudSpinnerWidth

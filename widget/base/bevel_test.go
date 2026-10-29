@@ -66,7 +66,7 @@ func TestBevel_WidgetAndThemePathsAgree(t *testing.T) {
 			drawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
 		}},
 		{"утопленная", true, func(ctx DrawContext) {
-			drawBevelSunken(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+			DrawBevelSunken(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
 		}},
 	} {
 		viaWidget := &lineRec{}

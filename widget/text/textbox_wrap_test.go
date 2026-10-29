@@ -1,64 +1,13 @@
-package base
+package text
 
 import (
 	"image"
 	"math/rand"
 	"strings"
-	"sync/atomic"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
-
-// runeW — ширина руны в тестовом измерителе (неравномерная, как у шрифта).
-func runeW(r rune) int {
-	switch {
-	case r == ' ':
-		return 4
-	case r == 'i' || r == 'l':
-		return 3
-	case r >= 'а' && r <= 'я':
-		return 8
-	default:
-		return 5 + int(r)%4
-	}
-}
-
-// useTestMeasurer ставит детерминированный измеритель на время теста.
-func useTestMeasurer(t testing.TB) {
-	t.Helper()
-	prev := uiTextMeasurer.Load()
-	measurersMu.Lock()
-	prevBase := baseMeasurer
-	measurersMu.Unlock()
-	SetTextMeasurer(func(text string, sizePt float64) int {
-		w := 0
-		for _, r := range text {
-			w += runeW(r)
-		}
-		return int(float64(w) * sizePt / 14)
-	})
-	t.Cleanup(func() {
-		// SetTextMeasurer запоминает измеритель в baseMeasurer и публикует его в
-		// uiTextMeasurer. Вернуть надо оба: иначе тестовый измеритель остаётся
-		// действующим для всех следующих тестов, рассчитанных на эвристику ширины
-		// (меню, обёртки, флажки) — зависимость от порядка запуска.
-		measurersMu.Lock()
-		baseMeasurer = prevBase
-		measurersMu.Unlock()
-		if prev != nil {
-			uiTextMeasurer.Store(prev)
-		} else {
-			// В atomic.Value nil не положить; до первой публикации он пуст, и
-			// MeasureUIText считает эвристикой — вернём его в то же состояние.
-			uiTextMeasurer = atomic.Value{}
-		}
-		BumpTextMetricsRev()
-	})
-}
-
-// rawMeasure — зарегистрированный измеритель без мемоизации.
-func rawMeasure(text string, sizePt float64) int {
-	return uiTextMeasurer.Load().(textMeasurer)(text, sizePt)
-}
 
 // refWrapParagraph — прежний посимвольный перенос, эталон для сравнения.
 func refWrapParagraph(runes []rune, start, end, maxW int, fs float64, measure func(string, float64) int) []tbLine {
@@ -117,7 +66,7 @@ func refColAtX(runes []rune, ln tbLine, x int, fs float64) int {
 	length := ln.end - ln.start
 	prev := 0
 	for c := 1; c <= length; c++ {
-		w := MeasureUIText(string(runes[ln.start:ln.start+c]), fs)
+		w := base.MeasureUIText(string(runes[ln.start:ln.start+c]), fs)
 		if x < (prev+w)/2 {
 			return c - 1
 		}
@@ -157,7 +106,7 @@ func TestTextBox_WrapMatchesReference(t *testing.T) {
 		tb := newWrapBox(maxW)
 		tb.SetText(text)
 		got := tb.LineCount()
-		want := refLayout(text, maxW, tb.fontSize(), MeasureUIText)
+		want := refLayout(text, maxW, tb.fontSize(), base.MeasureUIText)
 		if got != len(want) {
 			t.Fatalf("случай %d: строк %d, эталон %d (maxW=%d)", tc, got, len(want), maxW)
 		}
@@ -197,14 +146,14 @@ func TestTextBox_RelayoutOnMetricsRev(t *testing.T) {
 	tb.SetText(strings.Repeat("слово ", 20))
 	n1 := tb.LineCount()
 
-	SetTextMeasurer(func(text string, sizePt float64) int {
+	base.SetTextMeasurer(func(text string, sizePt float64) int {
 		w := 0
 		for range text {
 			w += 30
 		}
 		return w
 	})
-	BumpTextMetricsRev()
+	base.BumpTextMetricsRev()
 	if n2 := tb.LineCount(); n2 <= n1 {
 		t.Fatalf("после смены метрик строк %d, было %d — раскладка не пересчитана", n2, n1)
 	}
@@ -238,7 +187,7 @@ func BenchmarkTextBoxLayout2000Cold(b *testing.B) {
 	useTestMeasurer(b)
 	text := strings.TrimSpace(strings.Repeat("слово тест ", 200))
 	benchLayout(b, text, 400, func(tb *TextBox) {
-		BumpTextMetricsRev()
+		base.BumpTextMetricsRev()
 		tb.mu.Lock()
 		tb.dirty = true
 		tb.mu.Unlock()

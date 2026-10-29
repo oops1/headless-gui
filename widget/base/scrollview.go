@@ -352,14 +352,14 @@ func (sv *ScrollView) Draw(ctx DrawContext) {
 		}
 	}
 
-	// Горизонтальная полоса — тем же drawHBar, что и в сравнении/слиянии.
+	// Горизонтальная полоса — тем же DrawHBar, что и в сравнении/слиянии.
 	if horiz && !thin {
 		ctx.FillRect(hstrip.Min.X, hstrip.Min.Y, hstrip.Dx(), hstrip.Dy(), sv.TrackColor)
 		tc := sv.ThumbColor
 		if hActive {
 			tc = sv.ThumbHoverBG
 		}
-		drawHBar(ctx, htrack, hthumb, sv.TrackColor, tc)
+		DrawHBar(ctx, htrack, hthumb, sv.TrackColor, tc)
 	}
 
 	// Угол, где полосы сходятся. Вертикальная кончается над горизонтальной, а

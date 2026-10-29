@@ -9,8 +9,8 @@ import (
 //
 // Содержимое шире области раньше просто обрезалось: добраться до его правой
 // части было нечем. Полоса и её геометрия уже были в сравнении/слиянии
-// (hscrollbar.go), поэтому здесь используются те же hbarThumb, hbarScrollAt,
-// hbarScrollForThumbX и drawHBar — вторая копия арифметики разошлась бы с
+// (hscrollbar.go), поэтому здесь используются те же HBarThumb, HBarScrollAt,
+// HBarScrollForThumbX и DrawHBar — вторая копия арифметики разошлась бы с
 // первой при первой же правке.
 //
 // Всё включается полем ContentWidth. Пока оно нулевое, ни один метод этого
@@ -171,7 +171,7 @@ func (sv *ScrollView) hbarStrip() image.Rectangle {
 }
 
 // hbarTrack — трек, по которому ходит ползунок: полоса с небольшими полями,
-// чтобы скруглённые концы drawHBar не липли к краям виджета и вертикальной
+// чтобы скруглённые концы DrawHBar не липли к краям виджета и вертикальной
 // полосе. Хит-тест при этом идёт по всей hbarStrip: тонкая (6 px) линия трека
 // слишком мелка, чтобы по ней попадать мышью.
 func (sv *ScrollView) hbarTrack() image.Rectangle {
@@ -191,7 +191,7 @@ func (sv *ScrollView) hbarThumbLocked() image.Rectangle {
 	if track.Empty() {
 		return image.Rectangle{}
 	}
-	return hbarThumb(track, float64(sv.scrollXLocked()), float64(sv.maxScrollX()),
+	return HBarThumb(track, float64(sv.scrollXLocked()), float64(sv.maxScrollX()),
 		float64(sv.contentWidth()), float64(sv.ContentWidth))
 }
 
@@ -224,7 +224,7 @@ func (sv *ScrollView) hbarPressLocked(e MouseEvent) bool {
 	if th := sv.hbarThumbLocked(); !th.Empty() && e.X >= th.Min.X && e.X < th.Max.X {
 		sv.hdragGrab = e.X - th.Min.X
 	} else {
-		v := hbarScrollAt(sv.hbarTrack(), e.X, float64(sv.maxScrollX()),
+		v := HBarScrollAt(sv.hbarTrack(), e.X, float64(sv.maxScrollX()),
 			float64(sv.contentWidth()), float64(sv.ContentWidth))
 		sv.setScrollXLocked(int(math.Round(v)))
 		sv.hdragGrab = sv.hbarThumbLocked().Dx() / 2
@@ -236,7 +236,7 @@ func (sv *ScrollView) hbarPressLocked(e MouseEvent) bool {
 // hbarDragToLocked ведёт ползунок за курсором (под sv.mu); true — смещение
 // изменилось.
 func (sv *ScrollView) hbarDragToLocked(x int) bool {
-	v := hbarScrollForThumbX(sv.hbarTrack(), x-sv.hdragGrab, float64(sv.maxScrollX()),
+	v := HBarScrollForThumbX(sv.hbarTrack(), x-sv.hdragGrab, float64(sv.maxScrollX()),
 		float64(sv.contentWidth()), float64(sv.ContentWidth))
 	return sv.setScrollXLocked(int(math.Round(v)))
 }

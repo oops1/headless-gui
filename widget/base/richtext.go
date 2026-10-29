@@ -109,7 +109,7 @@ type RichText struct {
 	barGrab           int
 
 	capMgr  CaptureManager
-	clicks  clickSeries
+	clicks  ClickSeries
 	focused bool
 
 	// Редактор (richtext_edit.go, richtext_ime.go).
@@ -241,7 +241,7 @@ func (t *RichText) applyColors(th *Theme) {
 	if th.TextSelectionBG.A != 0 {
 		t.SelColor = th.TextSelectionBG
 	} else {
-		t.SelColor = premulAlpha(th.Accent, 110)
+		t.SelColor = PremulAlpha(th.Accent, 110)
 	}
 }
 
@@ -415,7 +415,7 @@ func (t *RichText) AppendRun(r RichRun) {
 func (t *RichText) layoutLocked() *richLayout {
 	b := t.Base.Bounds()
 	key := richLayoutKey{
-		ms: measureSetOf(t),
+		ms: MeasureSetOf(t),
 		w:  b.Dx(), h: b.Dy(), rev: t.rdoc.rev, noParas: t.noParas, metricsRev: TextMetricsRev(),
 		font: t.FontName, size: t.FontSize, gap: t.LineSpacing,
 		padX: t.PaddingX, padY: t.PaddingY,
@@ -520,7 +520,7 @@ func (t *RichText) barGeomLocked() (track, work, thumb image.Rectangle) {
 }
 
 // Вертикальная полоса считается теми же функциями, что горизонтальная в
-// сравнении файлов и редакторе (hbarThumb и др.): математика одна — трек,
+// сравнении файлов и редакторе (HBarThumb и др.): математика одна — трек,
 // доля видимого, положение. Чтобы не копировать её, прямоугольники
 // транспонируются (X↔Y) на входе и на выходе.
 
@@ -530,7 +530,7 @@ func transposeRect(r image.Rectangle) image.Rectangle {
 
 // richVThumb — ползунок на рабочей зоне work.
 func richVThumb(work image.Rectangle, scroll, maxScroll, viewH, contentH int) image.Rectangle {
-	return transposeRect(hbarThumb(transposeRect(work), float64(scroll), float64(maxScroll),
+	return transposeRect(HBarThumb(transposeRect(work), float64(scroll), float64(maxScroll),
 		float64(viewH), float64(contentH)))
 }
 

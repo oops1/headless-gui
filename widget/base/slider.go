@@ -134,7 +134,7 @@ func (s *Slider) Draw(ctx DrawContext) {
 	if st.Classic3D {
 		// Классика Win2000: утопленный жёлоб + прямоугольный выпуклый ползунок.
 		ctx.FillRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), s.TrackBG)
-		drawBevelSunken(ctx, tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), st)
+		DrawBevelSunken(ctx, tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), st)
 		fillW := int(math.Round(s.ratio() * float64(tr.Dx())))
 		if fillW > 4 {
 			ctx.FillRect(tr.Min.X+2, tr.Min.Y+2, fillW-4, tr.Dy()-4, s.FillColor)

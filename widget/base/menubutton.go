@@ -194,7 +194,7 @@ func (mb *MenuButton) Draw(ctx DrawContext) {
 func (mb *MenuButton) drawPressedPart(ctx DrawContext, r image.Rectangle) {
 	st := currentStyle()
 	if st.Classic3D {
-		drawBevelSunken(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+		DrawBevelSunken(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
 		return
 	}
 	in := r.Inset(1)

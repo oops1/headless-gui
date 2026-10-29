@@ -147,7 +147,7 @@ type elemBindingTarget struct {
 // перестроения при изменении ObservableCollection).
 type pendingItems struct {
 	name       string
-	template   xElement
+	template   Element
 	sourcePath string
 	env        *xamlEnv
 }
@@ -155,7 +155,7 @@ type pendingItems struct {
 // itemsTarget — связанный ItemsControl (panel = развёрнутый StackPanel).
 type itemsTarget struct {
 	panel      base.Widget
-	template   xElement
+	template   Element
 	sourcePath string
 	env        *xamlEnv
 	reg        map[string]base.Widget
@@ -179,7 +179,7 @@ type locTarget struct {
 // pendingVirtual — VirtualizingItemsControl, ожидающий резолва имени → виджета.
 type pendingVirtual struct {
 	name       string
-	template   xElement
+	template   Element
 	sourcePath string
 	env        *xamlEnv
 }
@@ -187,7 +187,7 @@ type pendingVirtual struct {
 // virtualTarget — связанный VirtualizingItemsControl с шаблоном строки.
 type virtualTarget struct {
 	vic        *base.VirtualizingItemsControl
-	template   xElement
+	template   Element
 	sourcePath string
 	env        *xamlEnv
 	reg        map[string]base.Widget
@@ -934,10 +934,8 @@ func (s *BindingScope) wireTwoWay() {
 		switch strings.ToLower(t.prop) {
 		case "text":
 			switch ti := t.w.(type) {
-			case *base.TextInput:
-				ti.OnChange = func(v string) { s.writeBack(spec, v, tw) }
-			case *base.TextBox:
-				ti.OnChange = func(v string) { s.writeBack(spec, v, tw) }
+			case base.TextEditor:
+				ti.SetOnTextChanged(func(v string) { s.writeBack(spec, v, tw) })
 			}
 		case "ischecked", "checked":
 			switch cw := t.w.(type) {
@@ -975,22 +973,14 @@ func (s *BindingScope) wireElementSources() {
 // уже установленный OnChange (цепочка вызовов).
 func hookSourceChange(w base.Widget, cb func()) {
 	switch t := w.(type) {
-	case *base.TextInput:
-		prev := t.OnChange
-		t.OnChange = func(v string) {
+	case base.TextEditor:
+		prev := t.OnTextChanged()
+		t.SetOnTextChanged(func(v string) {
 			if prev != nil {
 				prev(v)
 			}
 			cb()
-		}
-	case *base.TextBox:
-		prev := t.OnChange
-		t.OnChange = func(v string) {
-			if prev != nil {
-				prev(v)
-			}
-			cb()
-		}
+		})
 	case *base.Slider:
 		prev := t.OnChange
 		t.OnChange = func(v float64) {
@@ -1057,9 +1047,7 @@ func getWidgetProperty(w base.Widget, prop string) (interface{}, bool) {
 		switch t := w.(type) {
 		case *base.Label:
 			return t.Text(), true
-		case *base.TextInput:
-			return t.GetText(), true
-		case *base.TextBox:
+		case base.TextEditor:
 			return t.GetText(), true
 		case *base.Button:
 			return t.Text, true
@@ -1122,10 +1110,8 @@ func setWidgetProperty(w base.Widget, prop, val string) {
 		// Подсказка в пустом поле — такой же пользовательский текст, как и
 		// всё остальное: её тоже нужно уметь переустановить (смена языка).
 		switch t := w.(type) {
-		case *base.TextInput:
-			t.Placeholder = val
-		case *base.TextBox:
-			t.Placeholder = val
+		case base.TextEditor:
+			t.SetPlaceholder(val)
 		}
 		base.NotifyUIChanged()
 	case "ischecked", "checked":
@@ -1212,9 +1198,7 @@ func setWidgetText(w base.Widget, s string) {
 		t.SetText(s)
 	case *base.MenuButton:
 		t.SetText(s)
-	case *base.TextInput:
-		t.SetText(s)
-	case *base.TextBox:
+	case base.TextEditor:
 		t.SetText(s)
 	case *base.CheckBox:
 		t.SetText(s)
@@ -1233,10 +1217,8 @@ func setWidgetForeground(w base.Widget, c color.RGBA) {
 		t.TextColor = c
 	case *base.MenuButton:
 		t.TextColor = c
-	case *base.TextInput:
-		t.TextColor = c
-	case *base.TextBox:
-		t.TextColor = c
+	case base.TextEditor:
+		t.SetTextColor(c)
 	case *base.CheckBox:
 		t.TextColor = c
 	case *base.RadioButton:
@@ -1253,10 +1235,8 @@ func setWidgetBackground(w base.Widget, c color.RGBA) {
 	case *base.Panel:
 		t.Background = c
 		t.UseAlpha = c.A < 255
-	case *base.TextInput:
-		t.Background = c
-	case *base.TextBox:
-		t.Background = c
+	case base.TextEditor:
+		t.SetBackgroundColor(c)
 	case *base.Grid:
 		t.Background = c
 		t.UseAlpha = c.A < 255

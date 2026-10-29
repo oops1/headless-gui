@@ -22,22 +22,22 @@ import (
 // (SEC-8). Разметка из fs.FS кладёт содержимое как текст: путей на диске у
 // вкомпилированных файлов нет.
 
-func buildXAMLMergeView(el xElement, baseDir string) base.Widget {
-	m := base.NewMergeView(el.attr("FontFamily"), el.attr("HeaderFontFamily"))
-	if fs := el.attr("FontSize"); fs != "" {
+func buildXAMLMergeView(el Element, baseDir string) base.Widget {
+	m := base.NewMergeView(el.Attr("FontFamily"), el.Attr("HeaderFontFamily"))
+	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			m.SetFont("", "", v)
 		}
 	}
 	flag := func(name string, set func(bool)) {
-		if v := el.attr(name); v != "" {
+		if v := el.Attr(name); v != "" {
 			set(parseXAMLBool(v))
 		}
 	}
 	flag("ShowBase", m.SetShowBase)
 	flag("SyntaxHighlight", m.SetSyntaxHighlight)
 	flag("ReadOnly", m.SetReadOnly)
-	if v := el.attr("ConflictStyle"); v != "" {
+	if v := el.Attr("ConflictStyle"); v != "" {
 		if strings.EqualFold(v, "diff3") {
 			m.SetStyle(base.MergeStyleDiff3)
 		} else {
@@ -46,11 +46,11 @@ func buildXAMLMergeView(el xElement, baseDir string) base.Widget {
 	}
 
 	// MarkerSize — длина маркеров конфликта, как conflict-marker-size у git.
-	if v := el.attr("MarkerSize"); v != "" {
-		m.SetMarkerSize(xatoi(v))
+	if v := el.Attr("MarkerSize"); v != "" {
+		m.SetMarkerSize(ParseInt(v))
 	}
 
-	baseFile, ours, theirs := el.attr("BaseFile"), el.attr("OursFile"), el.attr("TheirsFile")
+	baseFile, ours, theirs := el.Attr("BaseFile"), el.Attr("OursFile"), el.Attr("TheirsFile")
 	if baseFile != "" && ours != "" && theirs != "" {
 		b, okB := readXAMLText(baseDir, baseFile)
 		o, okO := readXAMLText(baseDir, ours)

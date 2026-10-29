@@ -18,19 +18,19 @@ import (
 //
 // Атрибуты — как у Button; Split="True" делает разделённой и <MenuButton>,
 // IsActionEnabled/IsMenuEnabled="False" выключают части.
-func buildXAMLMenuButton(el xElement, tag, baseDir string) base.Widget {
+func buildXAMLMenuButton(el Element, tag, baseDir string) base.Widget {
 	btn, _ := buildXAMLButton(el, baseDir).(*base.Button)
 	if btn == nil {
 		return nil
 	}
 	mb := &base.MenuButton{Button: btn}
-	mb.Split = tag == "splitbutton" || strings.EqualFold(el.attr("Split"), "true")
+	mb.Split = tag == "splitbutton" || strings.EqualFold(el.Attr("Split"), "true")
 	// Новая кнопка включена целиком; сеттеры зовутся только для выключения
 	// (они инвалидируют кнопку, а без владельца это уходит всем движкам).
-	if strings.EqualFold(el.attr("IsActionEnabled"), "false") {
+	if strings.EqualFold(el.Attr("IsActionEnabled"), "false") {
 		mb.SetActionEnabled(false)
 	}
-	if strings.EqualFold(el.attr("IsMenuEnabled"), "false") {
+	if strings.EqualFold(el.Attr("IsMenuEnabled"), "false") {
 		mb.SetMenuEnabled(false)
 	}
 	items, keys := parseMenuItems(el, baseDir)

@@ -23,15 +23,15 @@ import (
 // файла — сохранять его приложение будет через SaveAs, путей на диске у
 // вкомпилированных файлов нет.
 
-func buildXAMLDiffView(el xElement, baseDir string) base.Widget {
-	d := base.NewDiffView(el.attr("FontFamily"), el.attr("HeaderFontFamily"))
-	if fs := el.attr("FontSize"); fs != "" {
+func buildXAMLDiffView(el Element, baseDir string) base.Widget {
+	d := base.NewDiffView(el.Attr("FontFamily"), el.Attr("HeaderFontFamily"))
+	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			d.SetFont("", "", v)
 		}
 	}
 	flag := func(name string, set func(bool)) {
-		if v := el.attr(name); v != "" {
+		if v := el.Attr(name); v != "" {
 			set(parseXAMLBool(v))
 		}
 	}
@@ -42,11 +42,11 @@ func buildXAMLDiffView(el xElement, baseDir string) base.Widget {
 	flag("ShowReadOnlyMark", d.SetShowReadOnlyMark)
 	flag("ReadOnlyLeft", func(v bool) { d.SetReadOnly(base.DiffLeft, v) })
 	flag("ReadOnlyRight", func(v bool) { d.SetReadOnly(base.DiffRight, v) })
-	if v := el.attr("ContextLines"); v != "" {
-		d.SetContextLines(xatoi(v))
+	if v := el.Attr("ContextLines"); v != "" {
+		d.SetContextLines(ParseInt(v))
 	}
 	for side, attr := range map[base.DiffSide]string{base.DiffLeft: "LeftFile", base.DiffRight: "RightFile"} {
-		if src := el.attr(attr); src != "" {
+		if src := el.Attr(attr); src != "" {
 			loadDiffXAMLFile(d, side, baseDir, src)
 		}
 	}

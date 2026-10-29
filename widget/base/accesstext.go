@@ -62,118 +62,6 @@ type AccessSelectionSetter interface {
 	AccessSetSelection(from, to int) bool
 }
 
-// ─── TextInput (одна строка) ────────────────────────────────────────────────
-
-// AccessText — содержимое поля. У поля пароля скринридеру отдаётся пустая
-// строка: роль уже сказала, что это пароль, а читать его вслух нельзя.
-func (t *TextInput) AccessText() string {
-	if t.IsPasswordMode() {
-		return ""
-	}
-	return t.GetText()
-}
-
-func (t *TextInput) AccessCaret() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.caretPos
-}
-
-func (t *TextInput) AccessSelection() (int, int) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if !t.selActive() {
-		return t.caretPos, t.caretPos
-	}
-	return t.normSel()
-}
-
-func (t *TextInput) AccessReadOnly() bool { return !t.IsEnabled() }
-
-func (t *TextInput) AccessSetCaret(pos int) bool {
-	t.mu.Lock()
-	if pos < 0 {
-		pos = 0
-	}
-	if pos > len(t.runes) {
-		pos = len(t.runes)
-	}
-	t.caretPos = pos
-	t.selStart, t.selEnd = -1, -1
-	t.mu.Unlock()
-	t.Invalidate()
-	return true
-}
-
-func (t *TextInput) AccessSetSelection(from, to int) bool {
-	t.mu.Lock()
-	n := len(t.runes)
-	from, to = accessClampPair(from, to, n)
-	t.caretPos = to
-	if from == to {
-		t.selStart, t.selEnd = -1, -1
-	} else {
-		t.selStart, t.selEnd = from, to
-	}
-	t.mu.Unlock()
-	t.Invalidate()
-	return true
-}
-
-func (t *TextInput) AccessSetText(s string) bool {
-	if !t.IsEnabled() {
-		return false
-	}
-	t.SetText(s)
-	return true
-}
-
-// ─── TextBox (много строк) ──────────────────────────────────────────────────
-
-func (t *TextBox) AccessText() string { return t.GetText() }
-
-func (t *TextBox) AccessCaret() int { return t.CaretPosition() }
-
-func (t *TextBox) AccessSelection() (int, int) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if !t.selActive() {
-		return t.caret, t.caret
-	}
-	return t.normSel()
-}
-
-func (t *TextBox) AccessReadOnly() bool { return t.ReadOnly || !t.IsEnabled() }
-
-func (t *TextBox) AccessSetCaret(pos int) bool {
-	t.SetCaretPosition(pos)
-	return true
-}
-
-func (t *TextBox) AccessSetSelection(from, to int) bool {
-	t.mu.Lock()
-	from, to = accessClampPair(from, to, len(t.runes))
-	t.caret = to
-	t.selAnchor = from
-	if from == to {
-		t.selAnchor = -1
-	}
-	t.desiredX = -1
-	t.ensureLayout()
-	t.ensureCaretVisible()
-	t.mu.Unlock()
-	t.Invalidate()
-	return true
-}
-
-func (t *TextBox) AccessSetText(s string) bool {
-	if t.AccessReadOnly() {
-		return false
-	}
-	t.SetText(s)
-	return true
-}
-
 // ─── Общее ──────────────────────────────────────────────────────────────────
 
 // AccessTextOf возвращает текстовую семантику виджета, если он её отдаёт.
@@ -182,11 +70,15 @@ func AccessTextOf(w Widget) (AccessTextProvider, bool) {
 	return tp, ok
 }
 
-// accessClampPair усекает границы выделения до длины текста n и упорядочивает
+// AccessClampPair усекает границы выделения до длины текста n и упорядочивает
 // их. Границы приходят от скринридера, который вправе промахнуться за конец
 // текста (он держит диапазон, пока пользователь печатает), а выход за массив
 // рун без усечения — паника в горутине движка.
-func accessClampPair(from, to, n int) (int, int) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func AccessClampPair(from, to, n int) (int, int) {
 	if from < 0 {
 		from = 0
 	}

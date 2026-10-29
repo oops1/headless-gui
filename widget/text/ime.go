@@ -1,4 +1,4 @@
-package base
+package text
 
 // ime.go — незавершённый ввод (композиция) в текстовых полях.
 //
@@ -17,25 +17,9 @@ package base
 // строк считается с учётом набираемого. Отдельно помнится лишь ДИАПАЗОН —
 // чтобы заменить его следующей композицией и подчеркнуть при отрисовке.
 
-import "image"
-
-// IMEComposer — виджет, принимающий незавершённый ввод.
-//
-// Смещения и длины — в рунах. Пустая композиция означает «ничего не
-// набрано»: так система сообщает, что прежнюю надо убрать.
-type IMEComposer interface {
-	// IMESetComposition показывает промежуточный текст; caret — позиция
-	// курсора ВНУТРИ него (в рунах).
-	IMESetComposition(text string, caret int)
-	// IMECommit завершает ввод: текст становится содержимым поля.
-	IMECommit(text string)
-	// IMECancel отменяет ввод: набранное убирается без следа.
-	IMECancel()
-	// IMECaretRect — место каретки в координатах холста (логические
-	// пиксели). По нему система ставит окно кандидатов, иначе оно появится
-	// в углу экрана, далеко от набираемого слова.
-	IMECaretRect() image.Rectangle
-}
+import (
+	"image"
+)
 
 // imeState — диапазон композиции внутри текста поля.
 type imeState struct {
@@ -155,7 +139,7 @@ func (t *TextBox) IMECaretRect() image.Rectangle {
 	t.ensureLayout()
 	li, cx := t.caretPoint()
 	lh := t.lineHeight()
-	b := t.bounds
+	b := t.Base.Bounds()
 	x := b.Min.X + t.PaddingX + cx - t.scrollX
 	y := b.Min.Y + t.PaddingY + li*lh - t.scrollY
 	return image.Rect(x, y, x+1, y+lh)

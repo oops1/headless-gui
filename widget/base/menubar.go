@@ -207,7 +207,7 @@ func (mb *MenuBar) setActiveIdx(idx int) {
 // Меряет измеритель движка дерева строки (owner_services.go); строка, собранная
 // до вставки в дерево, пересчитывается при первом обращении (ensureRects).
 func (mb *MenuBar) recalcRects() {
-	mb.rectsMS, mb.rectsRev = measureSetOf(mb), TextMetricsRev()
+	mb.rectsMS, mb.rectsRev = MeasureSetOf(mb), TextMetricsRev()
 	b := mb.bounds
 	rects := make([]image.Rectangle, len(mb.items))
 	x := b.Min.X
@@ -290,7 +290,7 @@ func (mb *MenuBar) Draw(ctx DrawContext) {
 			// Классика Win2000: hover — выпуклая рамка, открытое меню —
 			// утопленная; фон не меняется, текст остаётся чёрным.
 			if i == active {
-				drawBevelSunken(ctx, r.Min.X, r.Min.Y+1, r.Dx(), r.Dy()-2, st)
+				DrawBevelSunken(ctx, r.Min.X, r.Min.Y+1, r.Dx(), r.Dy()-2, st)
 			} else if i == hover {
 				ctx.DrawHLine(r.Min.X, r.Min.Y+1, r.Dx(), st.BevelLight)
 				ctx.DrawVLine(r.Min.X, r.Min.Y+1, r.Dy()-2, st.BevelLight)
@@ -320,7 +320,7 @@ func (mb *MenuBar) Draw(ctx DrawContext) {
 // ensureRects пересчитывает прямоугольники пунктов, если они посчитаны другим
 // измерителем или до смены метрик текста.
 func (mb *MenuBar) ensureRects() {
-	ms, rev := measureSetOf(mb), TextMetricsRev()
+	ms, rev := MeasureSetOf(mb), TextMetricsRev()
 	mb.mu.Lock()
 	if mb.rectsMS != ms || mb.rectsRev != rev {
 		mb.recalcRects()

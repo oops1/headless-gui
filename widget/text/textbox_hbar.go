@@ -1,6 +1,10 @@
-package base
+package text
 
-import "image"
+import (
+	"image"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
+)
 
 // textbox_hbar.go — геометрия горизонтальной полосы прокрутки редактора.
 //
@@ -13,7 +17,7 @@ import "image"
 
 // tbHBarH — высота полосы вместе с полями. Столько же отнимается у текста снизу,
 // пока полоса показана.
-const tbHBarH = dvHBarH
+const tbHBarH = base.HBarHeight
 
 // tbCaretRoom — запас справа от самой длинной строки: каретка в её конце
 // должна быть видна, а не прижата к срезу (ensureCaretVisible оставляет те же
@@ -61,5 +65,5 @@ func tbHBarTrack(b image.Rectangle, padX, viewW int) image.Rectangle {
 // мышью без запаса трудно.
 func tbHBarHit(b image.Rectangle, padX, viewW int) image.Rectangle {
 	tr := tbHBarTrack(b, padX, viewW)
-	return image.Rect(tr.Min.X-dvHBarInsetX, b.Max.Y-tbHBarH, tr.Max.X+dvHBarInsetX, b.Max.Y)
+	return image.Rect(tr.Min.X-base.HBarInsetX, b.Max.Y-tbHBarH, tr.Max.X+base.HBarInsetX, b.Max.Y)
 }

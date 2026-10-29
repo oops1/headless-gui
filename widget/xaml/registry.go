@@ -14,7 +14,7 @@ import (
 
 // XAMLAttrs предоставляет доступ к атрибутам XAML-элемента.
 // Передаётся в XAMLWidgetBuilder, чтобы внешние пакеты могли
-// читать атрибуты без доступа к внутреннему типу xElement.
+// читать атрибуты без зависимости от узла разметки xaml.Element.
 type XAMLAttrs interface {
 	// Attr возвращает значение первого найденного атрибута из списка имён.
 	// Если ни один атрибут не найден — возвращает "".
@@ -78,19 +78,19 @@ func lookupCustomXAML(tag string) (XAMLWidgetBuilder, bool) {
 	return b, ok
 }
 
-// ─── xElement → XAMLAttrs адаптер ──────────────────────────────────────────
+// ─── Element → XAMLAttrs адаптер ──────────────────────────────────────────
 
-// xElementAttrs оборачивает xElement в интерфейс XAMLAttrs.
+// xElementAttrs оборачивает Element в интерфейс XAMLAttrs.
 type xElementAttrs struct {
-	el *xElement
+	el *Element
 }
 
-func newXAMLAttrs(el *xElement) XAMLAttrs {
+func newXAMLAttrs(el *Element) XAMLAttrs {
 	return &xElementAttrs{el: el}
 }
 
 func (a *xElementAttrs) Attr(names ...string) string {
-	return a.el.attr(names...)
+	return a.el.Attr(names...)
 }
 
 func (a *xElementAttrs) Tag() string {
@@ -107,7 +107,7 @@ func (a *xElementAttrs) ChildCount() int {
 
 func (a *xElementAttrs) ChildAttrs(index int) XAMLAttrs {
 	if index < 0 || index >= len(a.el.Children) {
-		return &xElementAttrs{el: &xElement{}}
+		return &xElementAttrs{el: &Element{}}
 	}
 	return &xElementAttrs{el: &a.el.Children[index]}
 }

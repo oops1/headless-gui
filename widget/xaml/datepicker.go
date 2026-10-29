@@ -21,28 +21,28 @@ import (
 // DateFormat принимает шаблон в духе .NET (dd, d, MM, M, yyyy, yy) или готовую
 // раскладку time.Format.
 
-func buildXAMLDatePicker(el xElement) base.Widget {
+func buildXAMLDatePicker(el Element) base.Widget {
 	p := base.NewDatePicker()
-	if v := el.attr("DateFormat", "SelectedDateFormat"); v != "" {
+	if v := el.Attr("DateFormat", "SelectedDateFormat"); v != "" {
 		p.SetFormat(dotnetDateLayout(v))
 	}
-	if v := el.attr("FirstDayOfWeek"); v != "" {
+	if v := el.Attr("FirstDayOfWeek"); v != "" {
 		if d, ok := parseXAMLWeekday(v); ok {
 			p.SetFirstDayOfWeek(d)
 		}
 	}
-	start, _ := parseXAMLDate(el.attr("DisplayDateStart"))
-	end, _ := parseXAMLDate(el.attr("DisplayDateEnd"))
+	start, _ := parseXAMLDate(el.Attr("DisplayDateStart"))
+	end, _ := parseXAMLDate(el.Attr("DisplayDateEnd"))
 	if !start.IsZero() || !end.IsZero() {
 		p.SetDisplayDateRange(start, end)
 	}
-	if d, ok := parseXAMLDate(el.attr("SelectedDate")); ok {
+	if d, ok := parseXAMLDate(el.Attr("SelectedDate")); ok {
 		p.SetSelectedDate(d)
 	}
-	if v := el.attr("Placeholder", "Watermark"); v != "" {
+	if v := el.Attr("Placeholder", "Watermark"); v != "" {
 		p.Placeholder = v
 	}
-	if fs := el.attr("FontSize"); fs != "" {
+	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			p.FontSize = v
 		}

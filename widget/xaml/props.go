@@ -14,7 +14,7 @@ import (
 
 // applyGridAttachedProps читает Grid.Row, Grid.Column и т.д. из XAML-атрибутов
 // и устанавливает их в Base виджета.
-func applyGridAttachedProps(w base.Widget, el xElement) {
+func applyGridAttachedProps(w base.Widget, el Element) {
 	type gridSetter interface {
 		GetGridRow() int // наличие этого метода означает, что Base встроен
 	}
@@ -29,10 +29,10 @@ func applyGridAttachedProps(w base.Widget, el xElement) {
 		return
 	}
 
-	row := xatoi(el.attr("Grid.Row"))
-	col := xatoi(el.attr("Grid.Column"))
-	rowSpan := xatoi(el.attr("Grid.RowSpan"))
-	colSpan := xatoi(el.attr("Grid.ColumnSpan"))
+	row := ParseInt(el.Attr("Grid.Row"))
+	col := ParseInt(el.Attr("Grid.Column"))
+	rowSpan := ParseInt(el.Attr("Grid.RowSpan"))
+	colSpan := ParseInt(el.Attr("Grid.ColumnSpan"))
 
 	// Нужно добраться до Base. Используем сеттер-интерфейс.
 	type gridPropsSetter interface {
@@ -44,8 +44,8 @@ func applyGridAttachedProps(w base.Widget, el xElement) {
 }
 
 // applyMargin читает Margin из XAML-атрибутов и устанавливает в Base.
-func applyMargin(w base.Widget, el xElement) {
-	ms := el.attr("Margin")
+func applyMargin(w base.Widget, el Element) {
+	ms := el.Attr("Margin")
 	if ms == "" {
 		return
 	}
@@ -59,7 +59,7 @@ func applyMargin(w base.Widget, el xElement) {
 }
 
 // applyAlignment читает HorizontalAlignment и VerticalAlignment из XAML-атрибутов.
-func applyAlignment(w base.Widget, el xElement) {
+func applyAlignment(w base.Widget, el Element) {
 	type alignSetter interface {
 		SetHAlign(a base.HorizontalAlignment)
 		SetVAlign(a base.VerticalAlignment)
@@ -68,7 +68,7 @@ func applyAlignment(w base.Widget, el xElement) {
 	if !ok {
 		return
 	}
-	if ha := el.attr("HorizontalAlignment"); ha != "" {
+	if ha := el.Attr("HorizontalAlignment"); ha != "" {
 		switch strings.ToLower(ha) {
 		case "left":
 			as.SetHAlign(base.HAlignLeft)
@@ -80,7 +80,7 @@ func applyAlignment(w base.Widget, el xElement) {
 			as.SetHAlign(base.HAlignStretch)
 		}
 	}
-	if va := el.attr("VerticalAlignment"); va != "" {
+	if va := el.Attr("VerticalAlignment"); va != "" {
 		switch strings.ToLower(va) {
 		case "top":
 			as.SetVAlign(base.VAlignTop)
@@ -98,8 +98,8 @@ func applyAlignment(w base.Widget, el xElement) {
 
 // applyToolTip читает ToolTip из XAML-атрибутов и устанавливает в Base.
 // Поддерживает простой синтаксис ToolTip="текст".
-func applyToolTip(w base.Widget, el xElement) {
-	tip := el.attr("ToolTip", "ToolTipService.ToolTip")
+func applyToolTip(w base.Widget, el Element) {
+	tip := el.Attr("ToolTip", "ToolTipService.ToolTip")
 	if tip == "" {
 		return
 	}
@@ -115,8 +115,8 @@ func applyToolTip(w base.Widget, el xElement) {
 
 // applyVisibility читает Visibility из XAML-атрибутов (WPF):
 // "Visible" (default), "Collapsed", "Hidden" → скрытие виджета.
-func applyVisibility(w base.Widget, el xElement) {
-	v := el.attr("Visibility")
+func applyVisibility(w base.Widget, el Element) {
+	v := el.Attr("Visibility")
 	if v == "" {
 		return
 	}
@@ -139,8 +139,8 @@ func applyVisibility(w base.Widget, el xElement) {
 
 // applyLocaleIndicator читает ShowLocaleIndicator из XAML-атрибутов и
 // устанавливает соответствующее поле у Window/Dialog/Panel.
-func applyLocaleIndicator(w base.Widget, el xElement) {
-	v := el.attr("ShowLocaleIndicator", "ShowLocale")
+func applyLocaleIndicator(w base.Widget, el Element) {
+	v := el.Attr("ShowLocaleIndicator", "ShowLocale")
 	if v == "" {
 		return
 	}
@@ -158,14 +158,14 @@ func applyLocaleIndicator(w base.Widget, el xElement) {
 // ─── TabIndex ───────────────────────────────────────────────────────────────
 
 // applyTabIndex читает TabIndex из XAML и задаёт порядок Tab-навигации.
-func applyTabIndex(w base.Widget, el xElement) {
-	v := el.attr("TabIndex")
+func applyTabIndex(w base.Widget, el Element) {
+	v := el.Attr("TabIndex")
 	if v == "" {
 		return
 	}
 	type tabSetter interface{ SetTabIndex(int) }
 	if ts, ok := w.(tabSetter); ok {
-		ts.SetTabIndex(xatoi(v))
+		ts.SetTabIndex(ParseInt(v))
 	}
 }
 
@@ -175,7 +175,7 @@ func applyTabIndex(w base.Widget, el xElement) {
 // Grid.*, DockPanel.Dock, Margin, Alignment, IsEnabled, ToolTip, Visibility,
 // ShowLocaleIndicator, Cursor. Используется как контейнерами, так и листовыми
 // виджетами, чтобы поведение было единообразным (см. BUG-1).
-func applyCommonProps(w base.Widget, el xElement) {
+func applyCommonProps(w base.Widget, el Element) {
 	applyGridAttachedProps(w, el)
 	applyDockAttachedProp(w, el)
 	applyMargin(w, el)
@@ -189,8 +189,8 @@ func applyCommonProps(w base.Widget, el xElement) {
 }
 
 // applyCursor читает XAML-атрибут Cursor= и задаёт принудительный курсор виджету.
-func applyCursor(w base.Widget, el xElement) {
-	cs := strings.ToLower(strings.TrimSpace(el.attr("Cursor")))
+func applyCursor(w base.Widget, el Element) {
+	cs := strings.ToLower(strings.TrimSpace(el.Attr("Cursor")))
 	if cs == "" {
 		return
 	}
@@ -228,7 +228,7 @@ func applyCursor(w base.Widget, el xElement) {
 
 // applyIsEnabled читает IsEnabled из XAML-атрибутов и устанавливает в Base.
 // WPF по умолчанию IsEnabled=True, поэтому false нужно задавать явно.
-func applyIsEnabled(w base.Widget, el xElement) {
+func applyIsEnabled(w base.Widget, el Element) {
 	type enabledSetter interface {
 		SetEnabled(v bool)
 	}
@@ -236,7 +236,7 @@ func applyIsEnabled(w base.Widget, el xElement) {
 	if !ok {
 		return
 	}
-	if v := el.attr("IsEnabled"); strings.EqualFold(v, "False") {
+	if v := el.Attr("IsEnabled"); strings.EqualFold(v, "False") {
 		es.SetEnabled(false)
 	}
 }
@@ -244,8 +244,8 @@ func applyIsEnabled(w base.Widget, el xElement) {
 // ─── DockPanel.Dock attached property ───────────────────────────────────────
 
 // applyDockAttachedProp читает DockPanel.Dock из XAML-атрибутов и устанавливает в Base.
-func applyDockAttachedProp(w base.Widget, el xElement) {
-	dock := el.attr("DockPanel.Dock")
+func applyDockAttachedProp(w base.Widget, el Element) {
+	dock := el.Attr("DockPanel.Dock")
 	if dock == "" {
 		return
 	}

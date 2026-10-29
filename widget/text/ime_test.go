@@ -1,4 +1,4 @@
-package base
+package text
 
 import (
 	"image"

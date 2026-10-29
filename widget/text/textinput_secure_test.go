@@ -1,10 +1,14 @@
-package base
+package text
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
+)
 
 func secTypeRunes(t *TextInput, s string) {
 	for _, r := range s {
-		t.OnKeyEvent(KeyEvent{Rune: r, Pressed: true})
+		t.OnKeyEvent(base.KeyEvent{Rune: r, Pressed: true})
 	}
 }
 
@@ -40,7 +44,7 @@ func TestPassword_TypingWipesOldBuffers(t *testing.T) {
 func TestPassword_DeleteWipesTail(t *testing.T) {
 	p := NewPasswordInput("")
 	secTypeRunes(p, "abcd")
-	p.OnKeyEvent(KeyEvent{Code: KeyBackspace, Pressed: true})
+	p.OnKeyEvent(base.KeyEvent{Code: base.KeyBackspace, Pressed: true})
 	if string(p.runes) != "abc" {
 		t.Fatalf("поле содержит %q", string(p.runes))
 	}

@@ -124,7 +124,7 @@ func (p *DatePicker) Draw(ctx DrawContext) {
 	switch {
 	case st.Classic3D:
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), pal.bg)
-		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		if p.invalid {
 			ctx.DrawBorder(b.Min.X+2, b.Min.Y+2, b.Dx()-4, b.Dy()-4, pal.err)
 		}
@@ -150,7 +150,7 @@ func (p *DatePicker) Draw(ctx DrawContext) {
 	shown := ellipsizeText(ctx, text, maxW, size)
 	if p.focused && p.selectAll && p.textLocked() != "" {
 		w := min(ctx.MeasureText(shown, size), maxW)
-		ctx.FillRectAlpha(textX-1, b.Min.Y+4, w+2, b.Dy()-8, premulAlpha(pal.sel, 200))
+		ctx.FillRectAlpha(textX-1, b.Min.Y+4, w+2, b.Dy()-8, PremulAlpha(pal.sel, 200))
 	}
 	ctx.DrawTextSize(shown, textX, textY, size, col)
 	if p.focused && p.editing && !p.selectAll {

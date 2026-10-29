@@ -63,47 +63,6 @@ func TestOwnerServicesReview_MenuBarPopupMeasuresWithOwner(t *testing.T) {
 	}
 }
 
-// Поле ввода, перенесённое в дерево другого владельца, держит перенос строк,
-// посчитанный прежним (ключ раскладки — только ревизия и шрифт).
-func TestOwnerServicesReview_TextBoxLayoutStaleAfterOwnerChange(t *testing.T) {
-	useTestMeasurer(t)
-	oa, ob := newZZOwner(5), newZZOwner(15)
-	ra, rb := zzRoot(oa), zzRoot(ob)
-	tb := NewTextBox("")
-	tb.Wrap = true
-	tb.SetBounds(image.Rect(0, 0, 300, 200))
-	tb.SetText("один два три четыре пять шесть семь восемь девять десять")
-	ra.AddChild(tb)
-	tb.mu.Lock()
-	tb.ensureLayout()
-	nA := len(tb.lines)
-	tb.mu.Unlock()
-
-	ra.RemoveChild(tb)
-	rb.AddChild(tb)
-	if OwnerOf(tb) != Owner(ob) {
-		t.Fatal("поле не перешло к B")
-	}
-	tb.mu.Lock()
-	tb.ensureLayout()
-	nB := len(tb.lines)
-	tb.mu.Unlock()
-
-	fresh := NewTextBox("")
-	fresh.Wrap = true
-	fresh.SetBounds(image.Rect(0, 0, 300, 200))
-	fresh.SetText("один два три четыре пять шесть семь восемь девять десять")
-	rb.AddChild(fresh)
-	fresh.mu.Lock()
-	fresh.ensureLayout()
-	nFresh := len(fresh.lines)
-	fresh.mu.Unlock()
-	t.Logf("строк: в A %d, после переноса в B %d, свежее в B %d", nA, nB, nFresh)
-	if nB != nFresh {
-		t.Errorf("после переноса в B раскладка осталась от A: %d строк, свежая — %d", nB, nFresh)
-	}
-}
-
 // Контрольная: раскладка строки меню и вкладок действительно идёт владельцем.
 func TestOwnerServicesReview_MenuBarRectsUseOwner(t *testing.T) {
 	useTestMeasurer(t)

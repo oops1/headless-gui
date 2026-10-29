@@ -927,7 +927,7 @@ func (d *DiffView) geom() dvGeom {
 	// Полоса прокрутки отнимает высоту у кода — но только когда она нужна:
 	// у файла из коротких строк низ панели не должен пустовать.
 	if d.needHBarLocked(g) {
-		g.cy1 -= dvHBarH
+		g.cy1 -= HBarHeight
 	}
 	return g
 }
@@ -951,7 +951,7 @@ func (d *DiffView) hbarTrack(g dvGeom) image.Rectangle {
 		return image.Rectangle{}
 	}
 	y := g.cy1 + 2
-	return image.Rect(g.lx0, y, g.rulerX-6, y+dvHBarH-4)
+	return image.Rect(g.lx0, y, g.rulerX-6, y+HBarHeight-4)
 }
 
 // hbarThumbLocked — ползунок горизонтальной полосы.
@@ -961,7 +961,7 @@ func (d *DiffView) hbarThumbLocked(g dvGeom) image.Rectangle {
 		return image.Rectangle{}
 	}
 	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
-	return hbarThumb(tr, d.hscroll, d.maxHScrollLocked(), float64(codeR-codeX), d.contentWLocked())
+	return HBarThumb(tr, d.hscroll, d.maxHScrollLocked(), float64(codeR-codeX), d.contentWLocked())
 }
 
 // setHScrollLocked задаёт смещение вбок, зажимая его в допустимые пределы.
@@ -985,7 +985,7 @@ func (d *DiffView) hbarPressLocked(x int) {
 		return
 	}
 	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
-	d.setHScrollLocked(hbarScrollAt(d.hbarTrack(g), x, d.maxHScrollLocked(),
+	d.setHScrollLocked(HBarScrollAt(d.hbarTrack(g), x, d.maxHScrollLocked(),
 		float64(codeR-codeX), d.contentWLocked()))
 }
 
@@ -993,7 +993,7 @@ func (d *DiffView) hbarPressLocked(x int) {
 func (d *DiffView) hbarDragToLocked(x int) bool {
 	g := d.geom()
 	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
-	return d.setHScrollLocked(hbarScrollForThumbX(d.hbarTrack(g), x-d.hbarGrab,
+	return d.setHScrollLocked(HBarScrollForThumbX(d.hbarTrack(g), x-d.hbarGrab,
 		d.maxHScrollLocked(), float64(codeR-codeX), d.contentWLocked()))
 }
 

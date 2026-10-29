@@ -101,7 +101,7 @@ func (l *richLayout) hitCaret(m richMeasurer, x, y int) (off int, eol bool) {
 // ─── Слова для навигации ────────────────────────────────────────────────────
 
 // caretWordLeft — начало слова левее off. Классы символов те же, что у
-// двойного щелчка (isWordRune): буквы и цифры — слово, остальное — «не слово».
+// двойного щелчка (IsWordRune): буквы и цифры — слово, остальное — «не слово».
 // Через границу абзаца идём как через слово: с начала абзаца — на начало
 // последнего слова предыдущего.
 func (d *richDoc) caretWordLeft(off int) int {
@@ -121,10 +121,10 @@ func (d *richDoc) caretWordLeft(off int) int {
 	}
 	start := d.paraStart[pi]
 	i := off
-	for i > start && !isWordRune(d.runes[i-1]) {
+	for i > start && !IsWordRune(d.runes[i-1]) {
 		i--
 	}
-	for i > start && isWordRune(d.runes[i-1]) {
+	for i > start && IsWordRune(d.runes[i-1]) {
 		i--
 	}
 	return i
@@ -148,10 +148,10 @@ func (d *richDoc) caretWordRight(off int) int {
 		return next
 	}
 	i := off
-	for i < end && isWordRune(d.runes[i]) {
+	for i < end && IsWordRune(d.runes[i]) {
 		i++
 	}
-	for i < end && !isWordRune(d.runes[i]) {
+	for i < end && !IsWordRune(d.runes[i]) {
 		i++
 	}
 	if i >= end {
@@ -305,7 +305,7 @@ func (t *RichText) caretPhaseNow() bool {
 	if ms < 0 {
 		ms = 0
 	}
-	return caretPhaseAt(ms)
+	return CaretPhaseAt(ms)
 }
 
 // NeedsAnimation — «нужен ли движку кадр ради мигающей каретки». Устроено как

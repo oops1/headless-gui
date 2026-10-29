@@ -161,9 +161,13 @@ func drawSunkenRing(ctx DrawContext, cx, cy, r int, dark, light color.RGBA) {
 	}
 }
 
-// drawBevelSunken рисует утопленную 2-пиксельную рамку Win2000
+// DrawBevelSunken рисует утопленную 2-пиксельную рамку Win2000
 // (поле ввода, нажатая кнопка): грани инвертированы.
-func drawBevelSunken(ctx DrawContext, x, y, w, h int, st ThemeStyle) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func DrawBevelSunken(ctx DrawContext, x, y, w, h int, st ThemeStyle) {
 	DrawBevel(ctx, image.Rect(x, y, x+w, y+h),
 		st.BevelLight, st.BevelShadow, st.BevelDark, true)
 }

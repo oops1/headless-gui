@@ -113,7 +113,7 @@ func (cb *CheckBox) Draw(ctx DrawContext) {
 	if st.Classic3D {
 		// Классика Win2000: белый утопленный квадратик, тёмная галочка.
 		ctx.FillRect(boxX, boxY, boxSize, boxSize, cb.BoxBG)
-		drawBevelSunken(ctx, boxX, boxY, boxSize, boxSize, st)
+		DrawBevelSunken(ctx, boxX, boxY, boxSize, boxSize, st)
 	} else {
 		// Фон квадратика
 		bg := cb.BoxBG

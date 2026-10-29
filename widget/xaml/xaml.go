@@ -2,7 +2,7 @@
 //
 // Публичный API: LoadUIFromXAMLFile, LoadUIFromXAML, LoadUIFromXAMLWithBase.
 // Внутренний диспетчер: buildXAMLWidget — маршрутизирует по тегу XAML-элемента.
-// Построители простых виджетов: Label, Button, TextInput, Dropdown, ProgressBar,
+// Построители простых виджетов: Label, Button, Dropdown, ProgressBar,
 // Separator, CheckBox, RadioButton, Slider, ToggleSwitch, ScrollView, ListView, Image.
 //
 // Контейнеры (Grid, Window, Canvas, DockPanel и др.) — в containers.go.
@@ -251,7 +251,7 @@ func readXAMLResourceBytes(baseDir, src string, maxBytes int64) ([]byte, error) 
 // Для корневого элемента parentOff = image.Point{}.
 //
 // Это точка входа с глубины 0: рекурсия идёт через buildXAMLWidgetAt.
-func buildXAMLWidget(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string) (base.Widget, error) {
+func buildXAMLWidget(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string) (base.Widget, error) {
 	return buildXAMLWidgetAt(el, reg, parentOff, baseDir, 0)
 }
 
@@ -260,7 +260,7 @@ func buildXAMLWidget(el xElement, reg map[string]base.Widget, parentOff image.Po
 // ошибкой, не давая рекурсии исчерпать стек (SEC-7). Парсер держит ту же
 // границу, так что здесь это вторая линия обороны — на случай деревьев,
 // собранных в обход parseXAML (клоны DataTemplate/ItemsControl).
-func buildXAMLWidgetAt(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLWidgetAt(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	if depth > maxXAMLDepth {
 		return nil, fmt.Errorf("%w (%d): <%s>", ErrXAMLTooDeep, maxXAMLDepth, el.Tag)
 	}
@@ -360,7 +360,7 @@ func buildXAMLWidgetAt(el xElement, reg map[string]base.Widget, parentOff image.
 	// ── GridSplitter — перетаскиваемый разделитель ячеек Grid ───────────────
 	case "gridsplitter":
 		s := base.NewGridSplitter()
-		applyColor(&s.Background, el, "Background")
+		ApplyColor(&s.Background, el, "Background")
 		w = s
 
 	// ── SplitPanel — две панели с перетаскиваемым разделителем ──────────────
@@ -417,18 +417,6 @@ func buildXAMLWidgetAt(el xElement, reg map[string]base.Widget, parentOff image.
 	// ── Распорка: забирает остаток места в StackPanel и ToolBar (GG-84) ─────
 	case "stretch", "toolbarstretch", "spacer":
 		w = buildXAMLStretch(el)
-
-	// ── Ввод текста ──────────────────────────────────────────────────────────
-	case "textbox", "textinput", "input", "richtextbox":
-		// Многострочный (AcceptsReturn / TextWrapping="Wrap") → TextBox-редактор.
-		if xamlWantsMultiline(el) {
-			w = buildXAMLTextBox(el)
-		} else {
-			w = buildXAMLTextInput(el, false, baseDir)
-		}
-
-	case "passwordbox":
-		w = buildXAMLTextInput(el, true, baseDir)
 
 	// ── Выпадающий список ────────────────────────────────────────────────────
 	case "combobox", "dropdown":
@@ -517,6 +505,19 @@ func buildXAMLWidgetAt(el xElement, reg map[string]base.Widget, parentOff image.
 		return buildXAMLMenuBar(el, reg, parentOff, baseDir)
 
 	default:
+		// Теги пакетов виджетов вне xaml (ввод текста — widget/text):
+		// реестр Default(), заполненный их RegisterXAML.
+		if b, ok := Default().Lookup(tag); ok {
+			cw, err := b(&el, &Loader{baseDir: baseDir})
+			if err != nil {
+				return nil, fmt.Errorf("xaml: <%s>: %w", el.Tag, err)
+			}
+			if cw == nil {
+				return nil, nil
+			}
+			w = cw
+			break
+		}
 		// Проверяем реестр пользовательских виджетов.
 		if builder, ok := lookupCustomXAML(tag); ok {
 			cw, err := builder(newXAMLAttrs(&el))
@@ -535,7 +536,7 @@ func buildXAMLWidgetAt(el xElement, reg map[string]base.Widget, parentOff image.
 	// Прибавляем parentOff чтобы получить абсолютные экранные координаты.
 	// Если el.bounds() пуст (нет координат в XAML) — не затираем bounds,
 	// которые виджет мог установить сам (напр. Separator с дефолтным размером).
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	if !absBounds.Empty() {
 		w.SetBounds(absBounds)
 	}
@@ -545,8 +546,8 @@ func buildXAMLWidgetAt(el xElement, reg map[string]base.Widget, parentOff image.
 		SetXAMLSize(w, h int)
 	}
 	if xss, ok := w.(xamlSizeSetter); ok {
-		xw := xatoi(el.attr("Width"))
-		xh := xatoi(el.attr("Height"))
+		xw := ParseInt(el.Attr("Width"))
+		xh := ParseInt(el.Attr("Height"))
 		if xw > 0 || xh > 0 {
 			xss.SetXAMLSize(xw, xh)
 		}
@@ -557,7 +558,7 @@ func buildXAMLWidgetAt(el xElement, reg map[string]base.Widget, parentOff image.
 	applyCommonProps(w, el)
 
 	// Регистрация по имени
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = w
 	}
 
@@ -638,9 +639,9 @@ func buildXAMLWidgetAt(el xElement, reg map[string]base.Widget, parentOff image.
 // кнопок и SVGIcon), абсолютный читал что угодно. Теперь путь проходит через
 // decodeXAMLImage — тот же резолв и та же граница, что у всех ресурсов
 // разметки (SEC-8), плюс умеет читать из fs.FS (LoadUIFromXAMLFS, GG-7).
-func buildXAMLImage(el xElement, baseDir string) base.Widget {
+func buildXAMLImage(el Element, baseDir string) base.Widget {
 	iw := base.NewImageWidget()
-	if src := el.attr("Source"); src != "" {
+	if src := el.Attr("Source"); src != "" {
 		if img, err := decodeXAMLImage(baseDir, src); err == nil {
 			iw.SetImage(img)
 		} else {
@@ -648,7 +649,7 @@ func buildXAMLImage(el xElement, baseDir string) base.Widget {
 		}
 		iw.Source = src
 	}
-	switch strings.ToLower(el.attr("Stretch")) {
+	switch strings.ToLower(el.Attr("Stretch")) {
 	case "uniform", "uniformtofill":
 		iw.Stretch = base.ImageStretchUniform
 	case "none":
@@ -659,14 +660,14 @@ func buildXAMLImage(el xElement, baseDir string) base.Widget {
 	return iw
 }
 
-func buildXAMLLabel(el xElement) base.Widget {
-	text := el.attr("Text", "Content")
+func buildXAMLLabel(el Element) base.Widget {
+	text := el.Attr("Text", "Content")
 	if text == "" {
 		text = el.Text
 	}
 
-	fg := el.attr("Foreground", "TextColor", "Fill")
-	bg := el.attr("Background")
+	fg := el.Attr("Foreground", "TextColor", "Fill")
+	bg := el.Attr("Background")
 
 	var lbl *base.Label
 	if fg != "" {
@@ -686,56 +687,56 @@ func buildXAMLLabel(el xElement) base.Widget {
 	}
 
 	// TextWrapping="Wrap" или TextWrapping="WrapWithOverflow"
-	wrap := strings.ToLower(el.attr("TextWrapping"))
+	wrap := strings.ToLower(el.Attr("TextWrapping"))
 	if wrap == "wrap" || wrap == "wrapwithoverflow" {
 		lbl.WrapText = true
 	}
 
 	// FontSize
-	if fs := el.attr("FontSize"); fs != "" {
+	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			lbl.FontSize = v
 		}
 	}
 
 	// FontFamily — именованный шрифт (зарегистрированный через RegisterFont)
-	if ff := el.attr("FontFamily"); ff != "" {
+	if ff := el.Attr("FontFamily"); ff != "" {
 		lbl.FontName = ff
 	}
 
 	// FontWeight / FontStyle / TextDecorations (P1)
-	if fw := strings.ToLower(el.attr("FontWeight")); fw == "bold" || fw == "semibold" || fw == "black" || fw == "heavy" {
+	if fw := strings.ToLower(el.Attr("FontWeight")); fw == "bold" || fw == "semibold" || fw == "black" || fw == "heavy" {
 		lbl.Bold = true
 	}
-	if fs := strings.ToLower(el.attr("FontStyle")); fs == "italic" || fs == "oblique" {
+	if fs := strings.ToLower(el.Attr("FontStyle")); fs == "italic" || fs == "oblique" {
 		lbl.Italic = true
 	}
-	if td := strings.ToLower(el.attr("TextDecorations")); strings.Contains(td, "underline") {
+	if td := strings.ToLower(el.Attr("TextDecorations")); strings.Contains(td, "underline") {
 		lbl.Underline = true
 	}
 
 	// Padding
-	if pad := el.attr("Padding"); pad != "" {
+	if pad := el.Attr("Padding"); pad != "" {
 		parts := strings.Split(pad, ",")
 		switch len(parts) {
 		case 1:
-			v := xatoi(strings.TrimSpace(parts[0]))
+			v := ParseInt(strings.TrimSpace(parts[0]))
 			lbl.PaddingX = v
 			lbl.PaddingY = v
 		case 2:
-			lbl.PaddingX = xatoi(strings.TrimSpace(parts[0]))
-			lbl.PaddingY = xatoi(strings.TrimSpace(parts[1]))
+			lbl.PaddingX = ParseInt(strings.TrimSpace(parts[0]))
+			lbl.PaddingY = ParseInt(strings.TrimSpace(parts[1]))
 		case 4:
-			lbl.PaddingX = xatoi(strings.TrimSpace(parts[0]))
-			lbl.PaddingY = xatoi(strings.TrimSpace(parts[1]))
+			lbl.PaddingX = ParseInt(strings.TrimSpace(parts[0]))
+			lbl.PaddingY = ParseInt(strings.TrimSpace(parts[1]))
 		}
 	}
 
 	return lbl
 }
 
-func buildXAMLButton(el xElement, baseDir string) base.Widget {
-	text := el.attr("Content", "Text")
+func buildXAMLButton(el Element, baseDir string) base.Widget {
+	text := el.Attr("Content", "Text")
 	if text == "" {
 		text = el.Text
 	}
@@ -748,11 +749,11 @@ func buildXAMLButton(el xElement, baseDir string) base.Widget {
 		text = bc.Text
 	}
 	// Иконка из атрибута имеет приоритет
-	iconSrc := el.attr("Icon", "IconSource")
+	iconSrc := el.Attr("Icon", "IconSource")
 	if iconSrc == "" {
 		iconSrc = bc.IconSrc
 	}
-	style := strings.ToLower(el.attr("Tag", "Style"))
+	style := strings.ToLower(el.Attr("Tag", "Style"))
 	var btn *base.Button
 	if style == "accent" || style == "primary" {
 		btn = base.NewWin10AccentButton(text)
@@ -760,21 +761,21 @@ func buildXAMLButton(el xElement, baseDir string) base.Widget {
 		btn = base.NewButton(text)
 	}
 
-	applyColor(&btn.Background, el, "Background")
-	applyColor(&btn.TextColor, el, "Foreground")
-	applyColor(&btn.HoverBG, el, "HoverBG", "HoverBackground")
-	applyColor(&btn.PressedBG, el, "PressedBG", "PressedBackground")
-	applyColor(&btn.BorderColor, el, "BorderBrush")
+	ApplyColor(&btn.Background, el, "Background")
+	ApplyColor(&btn.TextColor, el, "Foreground")
+	ApplyColor(&btn.HoverBG, el, "HoverBG", "HoverBackground")
+	ApplyColor(&btn.PressedBG, el, "PressedBG", "PressedBackground")
+	ApplyColor(&btn.BorderColor, el, "BorderBrush")
 
 	// FontSize — свой кегль виджета (0 = общий размер).
-	if fs := el.attr("FontSize"); fs != "" {
+	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			btn.FontSize = v
 		}
 	}
 
 	// ── ToolTip ────────────────────────────────────────────────────────────
-	if tip := el.attr("ToolTip"); tip != "" {
+	if tip := el.Attr("ToolTip"); tip != "" {
 		btn.ToolTip = tip
 	}
 
@@ -782,17 +783,17 @@ func buildXAMLButton(el xElement, baseDir string) base.Widget {
 	// Читается и у обычной кнопки: <Button IsChecked="True"> означает
 	// «нарисуй выбранным», а поведение переключателя даёт сам тег
 	// <ToggleButton>.
-	if strings.EqualFold(el.attr("IsChecked", "Checked"), "true") {
+	if strings.EqualFold(el.Attr("IsChecked", "Checked"), "true") {
 		btn.SetChecked(true)
 	}
 
 	// ── Padding ────────────────────────────────────────────────────────────
-	if pad := el.attr("Padding"); pad != "" {
+	if pad := el.Attr("Padding"); pad != "" {
 		btn.Padding = parseMargin(pad)
 	}
 
 	// ── CornerRadius ───────────────────────────────────────────────────────
-	if cr := xatoi(el.attr("CornerRadius")); cr > 0 {
+	if cr := ParseInt(el.Attr("CornerRadius")); cr > 0 {
 		btn.CornerRadius = cr
 	}
 
@@ -813,19 +814,19 @@ func buildXAMLButton(el xElement, baseDir string) base.Widget {
 		btn.IconSize = bc.IconH
 	}
 	// Foreground из вложенного TextBlock (если не задан на самой кнопке)
-	if bc.Foreground != "" && el.attr("Foreground") == "" {
+	if bc.Foreground != "" && el.Attr("Foreground") == "" {
 		if c, err := parseXAMLColor(bc.Foreground); err == nil {
 			btn.TextColor = c
 		}
 	}
 
-	switch strings.ToLower(el.attr("IconPosition", "IconPos")) {
+	switch strings.ToLower(el.Attr("IconPosition", "IconPos")) {
 	case "top":
 		btn.IconPos = base.IconTop
 	case "only", "icononly":
 		btn.IconPos = base.IconOnly
 	}
-	if sz := xatoi(el.attr("IconSize")); sz > 0 {
+	if sz := ParseInt(el.Attr("IconSize")); sz > 0 {
 		btn.IconSize = sz
 	}
 
@@ -844,13 +845,13 @@ type buttonContent struct {
 // extractButtonContent рекурсивно обходит дочерние элементы Button,
 // извлекая текст из TextBlock и путь к иконке из Image.
 // Поддерживает WPF Content Model: <Button> → <StackPanel> → <Image> + <TextBlock>.
-func extractButtonContent(el xElement) buttonContent {
+func extractButtonContent(el Element) buttonContent {
 	var bc buttonContent
 	extractButtonContentRec(el, &bc)
 	return bc
 }
 
-func extractButtonContentRec(el xElement, bc *buttonContent) {
+func extractButtonContentRec(el Element, bc *buttonContent) {
 	for _, child := range el.Children {
 		tag := strings.ToLower(child.Tag)
 		if strings.Contains(tag, ".") {
@@ -859,26 +860,26 @@ func extractButtonContentRec(el xElement, bc *buttonContent) {
 		switch tag {
 		case "textblock", "label", "run":
 			if bc.Text == "" {
-				if t := child.attr("Text", "Content"); t != "" {
+				if t := child.Attr("Text", "Content"); t != "" {
 					bc.Text = t
 				} else if child.Text != "" {
 					bc.Text = child.Text
 				}
 			}
 			if bc.Foreground == "" {
-				bc.Foreground = child.attr("Foreground")
+				bc.Foreground = child.Attr("Foreground")
 			}
 		case "image":
 			if bc.IconSrc == "" {
-				if src := child.attr("Source", "Src"); src != "" {
+				if src := child.Attr("Source", "Src"); src != "" {
 					bc.IconSrc = src
 				}
 			}
 			if bc.IconW == 0 {
-				bc.IconW = xatoi(child.attr("Width"))
+				bc.IconW = ParseInt(child.Attr("Width"))
 			}
 			if bc.IconH == 0 {
-				bc.IconH = xatoi(child.attr("Height"))
+				bc.IconH = ParseInt(child.Attr("Height"))
 			}
 		case "stackpanel", "wrappanel", "dockpanel", "grid":
 			extractButtonContentRec(child, bc)
@@ -886,107 +887,10 @@ func extractButtonContentRec(el xElement, bc *buttonContent) {
 	}
 }
 
-func buildXAMLTextInput(el xElement, isPassword bool, baseDir string) base.Widget {
-	placeholder := el.attr("Tag", "Placeholder", "PlaceholderText", "Hint")
-	if isPassword && placeholder == "" {
-		placeholder = "Пароль"
-	}
-	var ti *base.TextInput
-	if isPassword {
-		ti = base.NewPasswordInput(placeholder)
-	} else {
-		ti = base.NewTextInput(placeholder)
-	}
-
-	if text := el.attr("Text"); text != "" {
-		ti.SetText(text)
-	}
-	if strings.EqualFold(el.attr("Focused", "IsFocused", "Focus"), "true") {
-		ti.SetFocused(true)
-	}
-	applyColor(&ti.TextColor, el, "Foreground")
-	applyColor(&ti.Background, el, "Background")
-
-	if ff := el.attr("FontFamily"); ff != "" {
-		ti.FontName = ff
-	}
-	if fs := el.attr("FontSize"); fs != "" {
-		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
-			ti.FontSize = v
-		}
-	}
-	if strings.EqualFold(el.attr("AcceptsReturn"), "true") {
-		ti.AcceptsReturn = true
-	}
-	if wrap := strings.ToLower(el.attr("TextWrapping")); wrap == "wrap" || wrap == "wrapwithoverflow" {
-		ti.AcceptsReturn = true
-	}
-	if ml := el.attr("MaxLength"); ml != "" {
-		if v, err := strconv.Atoi(strings.TrimSpace(ml)); err == nil && v > 0 {
-			ti.MaxLength = v
-		}
-	}
-
-	// Значок в начале поля (лупа у строки поиска). Путь ограничен каталогом
-	// разметки или fs.FS — тем же OpenResource, что и у прочих ресурсов.
-	if src := el.attr("Icon", "IconSource", "LeadingIcon"); src != "" {
-		if img, err := decodeXAMLImage(baseDir, src); err == nil {
-			ti.LeadingIcon = img
-		}
-	}
-	if sz := xatoi(el.attr("IconSize")); sz > 0 {
-		ti.LeadingIconSize = sz
-	}
-
-	return ti
-}
-
-// xamlWantsMultiline — тег текстового поля описывает многострочный редактор.
-func xamlWantsMultiline(el xElement) bool {
-	if strings.EqualFold(el.attr("AcceptsReturn"), "true") {
-		return true
-	}
-	wrap := strings.ToLower(el.attr("TextWrapping"))
-	return wrap == "wrap" || wrap == "wrapwithoverflow"
-}
-
-// buildXAMLTextBox создаёт многострочный TextBox из XAML-элемента.
-func buildXAMLTextBox(el xElement) base.Widget {
-	tb := base.NewTextBox(el.attr("Tag", "Placeholder", "PlaceholderText", "Hint"))
-
-	wrap := strings.ToLower(el.attr("TextWrapping"))
-	tb.Wrap = wrap == "" || wrap == "wrap" || wrap == "wrapwithoverflow"
-	if strings.EqualFold(el.attr("IsReadOnly", "ReadOnly"), "true") {
-		tb.ReadOnly = true
-	}
-	if text := el.attr("Text"); text != "" {
-		tb.SetText(text)
-	}
-	if strings.EqualFold(el.attr("Focused", "IsFocused", "Focus"), "true") {
-		tb.SetFocused(true)
-	}
-	applyColor(&tb.TextColor, el, "Foreground")
-	applyColor(&tb.Background, el, "Background")
-	if fs := el.attr("FontSize"); fs != "" {
-		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
-			tb.FontSize = v
-		}
-	}
-	// FontFamily — именованный шрифт (RegisterFont); для кода — моноширинный.
-	if ff := el.attr("FontFamily"); ff != "" {
-		tb.FontName = ff
-	}
-	// AcceptsTab — Tab вставляет табуляцию, а не переводит фокус.
-	if strings.EqualFold(el.attr("AcceptsTab"), "true") {
-		tb.AcceptTab = true
-	}
-	return tb
-}
-
-func buildXAMLDropdown(el xElement) base.Widget {
+func buildXAMLDropdown(el Element) base.Widget {
 	var items []string
 	var keys []string // ключи {Loc …} по индексам items (пустая строка — нет)
-	if raw := el.attr("Items", "ItemsSource"); raw != "" {
+	if raw := el.Attr("Items", "ItemsSource"); raw != "" {
 		for _, item := range strings.Split(raw, ",") {
 			if s := strings.TrimSpace(item); s != "" {
 				text, key := locItemText(s)
@@ -998,7 +902,7 @@ func buildXAMLDropdown(el xElement) base.Widget {
 	for _, child := range el.Children {
 		t := strings.ToLower(child.Tag)
 		if t == "item" || t == "comboboxitem" || t == "listboxitem" {
-			v := child.attr("Content", "Value")
+			v := child.Attr("Content", "Value")
 			if v == "" {
 				v = strings.TrimSpace(child.Text)
 			}
@@ -1020,19 +924,19 @@ func buildXAMLDropdown(el xElement) base.Widget {
 			dd.SetItems(cur)
 		}
 	})
-	if sel := el.attr("SelectedIndex", "Selected"); sel != "" {
+	if sel := el.Attr("SelectedIndex", "Selected"); sel != "" {
 		if idx, err := strconv.Atoi(sel); err == nil {
 			dd.SetSelected(idx)
 		}
 	}
 	// FontSize — свой кегль виджета (0 = общий размер).
-	if fs := el.attr("FontSize"); fs != "" {
+	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			dd.FontSize = v
 		}
 	}
 	// ArrowStyle="Chevron" | "Triangle" | "Auto" — вид стрелки раскрытия.
-	switch strings.ToLower(el.attr("ArrowStyle")) {
+	switch strings.ToLower(el.Attr("ArrowStyle")) {
 	case "chevron":
 		dd.ArrowStyle = base.ArrowChevron
 	case "triangle":
@@ -1042,23 +946,23 @@ func buildXAMLDropdown(el xElement) base.Widget {
 	return dd
 }
 
-func buildXAMLProgressBar(el xElement) base.Widget {
+func buildXAMLProgressBar(el Element) base.Widget {
 	pb := base.NewProgressBar()
-	applyColor(&pb.FillColor, el, "Foreground", "Fill")
-	if val := el.attr("Value"); val != "" {
+	ApplyColor(&pb.FillColor, el, "Foreground", "Fill")
+	if val := el.Attr("Value"); val != "" {
 		if v, err := strconv.ParseFloat(val, 64); err == nil {
 			pb.SetValue(v)
 		}
 	}
 	// Style: Bar (по умолчанию) | Glow — светящаяся голова со следом.
-	if strings.EqualFold(el.attr("Style"), "glow") {
+	if strings.EqualFold(el.Attr("Style"), "glow") {
 		pb.Style = base.ProgressStyleGlow
 	}
-	if ind := el.attr("Indeterminate"); strings.EqualFold(ind, "true") || ind == "1" {
+	if ind := el.Attr("Indeterminate"); strings.EqualFold(ind, "true") || ind == "1" {
 		pb.SetIndeterminate(true)
 	}
-	applyColor(&pb.GlowTail, el, "GlowTail")
-	applyColor(&pb.GlowHead, el, "GlowHead")
+	ApplyColor(&pb.GlowTail, el, "GlowTail")
+	ApplyColor(&pb.GlowHead, el, "GlowHead")
 	return pb
 }
 
@@ -1071,29 +975,29 @@ func buildXAMLProgressBar(el xElement) base.Widget {
 // Ориентация выводится из размеров, как это делает WPF: заданная ширина без
 // высоты означает горизонтальную линию, высота без ширины — вертикальную.
 // Явный атрибут Orientation сильнее.
-func buildXAMLSeparator(el xElement) base.Widget {
+func buildXAMLSeparator(el Element) base.Widget {
 	s := base.NewSeparator()
 
-	w := xatoi(el.attr("Width"))
-	h := xatoi(el.attr("Height"))
+	w := ParseInt(el.Attr("Width"))
+	h := ParseInt(el.Attr("Height"))
 	switch {
-	case strings.EqualFold(el.attr("Orientation"), "vertical"):
+	case strings.EqualFold(el.Attr("Orientation"), "vertical"):
 		s.Orientation = base.SeparatorVertical
-	case strings.EqualFold(el.attr("Orientation"), "horizontal"):
+	case strings.EqualFold(el.Attr("Orientation"), "horizontal"):
 		s.Orientation = base.SeparatorHorizontal
 	case h > 0 && w <= 0:
 		s.Orientation = base.SeparatorVertical
 	}
 
-	if bg := el.attr("Background", "Fill", "Stroke"); bg != "" {
+	if bg := el.Attr("Background", "Fill", "Stroke"); bg != "" {
 		if parsed, err := parseXAMLColor(bg); err == nil {
 			s.Color = parsed
 		}
 	}
-	if t := xatoi(el.attr("Thickness")); t > 0 {
+	if t := ParseInt(el.Attr("Thickness")); t > 0 {
 		s.Thickness = t
 	}
-	if m := xatoi(el.attr("Margin")); m > 0 {
+	if m := ParseInt(el.Attr("Margin")); m > 0 {
 		s.Margin = m
 	}
 
@@ -1120,17 +1024,17 @@ func buildXAMLSeparator(el xElement) base.Widget {
 	return s
 }
 
-func buildXAMLCheckBox(el xElement) base.Widget {
-	text := el.attr("Content", "Text")
+func buildXAMLCheckBox(el Element) base.Widget {
+	text := el.Attr("Content", "Text")
 	if text == "" {
 		text = el.Text
 	}
 	cb := base.NewCheckBox(text)
-	if strings.EqualFold(el.attr("IsChecked", "Checked"), "true") {
+	if strings.EqualFold(el.Attr("IsChecked", "Checked"), "true") {
 		cb.SetChecked(true)
 	}
 	// FontSize — свой кегль виджета (0 = общий размер).
-	if fs := el.attr("FontSize"); fs != "" {
+	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			cb.FontSize = v
 		}
@@ -1139,32 +1043,32 @@ func buildXAMLCheckBox(el xElement) base.Widget {
 	return cb
 }
 
-func buildXAMLRadioButton(el xElement) base.Widget {
-	text := el.attr("Content", "Text")
+func buildXAMLRadioButton(el Element) base.Widget {
+	text := el.Attr("Content", "Text")
 	if text == "" {
 		text = el.Text
 	}
-	group := el.attr("GroupName", "Group")
+	group := el.Attr("GroupName", "Group")
 	rb := base.NewRadioButton(text, group)
-	if strings.EqualFold(el.attr("IsChecked", "Checked", "Selected"), "true") {
+	if strings.EqualFold(el.Attr("IsChecked", "Checked", "Selected"), "true") {
 		rb.SetSelected(true)
 	}
 	return rb
 }
 
-func buildXAMLSlider(el xElement) base.Widget {
+func buildXAMLSlider(el Element) base.Widget {
 	s := base.NewSlider()
-	if min := el.attr("Minimum", "Min"); min != "" {
+	if min := el.Attr("Minimum", "Min"); min != "" {
 		if v, err := strconv.ParseFloat(min, 64); err == nil {
 			s.Min = v
 		}
 	}
-	if max := el.attr("Maximum", "Max"); max != "" {
+	if max := el.Attr("Maximum", "Max"); max != "" {
 		if v, err := strconv.ParseFloat(max, 64); err == nil {
 			s.Max = v
 		}
 	}
-	if val := el.attr("Value"); val != "" {
+	if val := el.Attr("Value"); val != "" {
 		if v, err := strconv.ParseFloat(val, 64); err == nil {
 			s.SetValue(v)
 		}
@@ -1172,55 +1076,55 @@ func buildXAMLSlider(el xElement) base.Widget {
 	return s
 }
 
-func buildXAMLVirtualizingItemsControl(el xElement) base.Widget {
+func buildXAMLVirtualizingItemsControl(el Element) base.Widget {
 	v := base.NewVirtualizingItemsControl()
-	if ih := el.attr("ItemHeight"); ih != "" {
-		if n := xatoi(ih); n > 0 {
+	if ih := el.Attr("ItemHeight"); ih != "" {
+		if n := ParseInt(ih); n > 0 {
 			v.ItemHeight = n
 		}
 	}
-	if bf := el.attr("Buffer"); bf != "" {
-		if n := xatoi(bf); n >= 0 {
+	if bf := el.Attr("Buffer"); bf != "" {
+		if n := ParseInt(bf); n >= 0 {
 			v.Buffer = n
 		}
 	}
-	if strings.EqualFold(el.attr("ShowBorder"), "false") {
+	if strings.EqualFold(el.Attr("ShowBorder"), "false") {
 		v.ShowBorder = false
 	}
-	applyColor(&v.Background, el, "Background")
+	ApplyColor(&v.Background, el, "Background")
 	return v
 }
 
-func buildXAMLNumericUpDown(el xElement) base.Widget {
+func buildXAMLNumericUpDown(el Element) base.Widget {
 	n := base.NewNumericUpDown()
-	if min := el.attr("Minimum", "Min"); min != "" {
+	if min := el.Attr("Minimum", "Min"); min != "" {
 		if v, err := strconv.ParseFloat(min, 64); err == nil {
 			n.Min = v
 		}
 	}
-	if max := el.attr("Maximum", "Max"); max != "" {
+	if max := el.Attr("Maximum", "Max"); max != "" {
 		if v, err := strconv.ParseFloat(max, 64); err == nil {
 			n.Max = v
 		}
 	}
-	if inc := el.attr("Increment", "Step"); inc != "" {
+	if inc := el.Attr("Increment", "Step"); inc != "" {
 		if v, err := strconv.ParseFloat(inc, 64); err == nil {
 			n.Step = v
 		}
 	}
 	// Decimals напрямую, либо вывод из FormatString вида "F2".
-	if d := el.attr("Decimals", "DecimalPlaces"); d != "" {
+	if d := el.Attr("Decimals", "DecimalPlaces"); d != "" {
 		if v, err := strconv.Atoi(strings.TrimSpace(d)); err == nil && v >= 0 {
 			n.Decimals = v
 		}
-	} else if fs := el.attr("FormatString", "StringFormat"); len(fs) >= 2 {
+	} else if fs := el.Attr("FormatString", "StringFormat"); len(fs) >= 2 {
 		if c := fs[0]; c == 'F' || c == 'f' || c == 'N' || c == 'n' {
 			if v, err := strconv.Atoi(fs[1:]); err == nil && v >= 0 {
 				n.Decimals = v
 			}
 		}
 	}
-	if val := el.attr("Value"); val != "" {
+	if val := el.Attr("Value"); val != "" {
 		if v, err := strconv.ParseFloat(val, 64); err == nil {
 			n.SetValue(v)
 		}
@@ -1228,28 +1132,28 @@ func buildXAMLNumericUpDown(el xElement) base.Widget {
 	return n
 }
 
-func buildXAMLToggleSwitch(el xElement) base.Widget {
-	text := el.attr("Content", "Text", "Header")
+func buildXAMLToggleSwitch(el Element) base.Widget {
+	text := el.Attr("Content", "Text", "Header")
 	if text == "" {
 		text = el.Text
 	}
 	ts := base.NewToggleSwitch(text)
-	if strings.EqualFold(el.attr("IsOn", "IsChecked", "Checked"), "true") {
+	if strings.EqualFold(el.Attr("IsOn", "IsChecked", "Checked"), "true") {
 		ts.SetOn(true)
 	}
 	return ts
 }
 
-func buildXAMLScrollView(el xElement) base.Widget {
+func buildXAMLScrollView(el Element) base.Widget {
 	sv := base.NewScrollView()
-	if ch := el.attr("ContentHeight"); ch != "" {
-		sv.ContentHeight = xatoi(ch)
+	if ch := el.Attr("ContentHeight"); ch != "" {
+		sv.ContentHeight = ParseInt(ch)
 	}
-	applyColor(&sv.Background, el, "Background")
+	ApplyColor(&sv.Background, el, "Background")
 	return sv
 }
 
-func buildXAMLListView(el xElement) base.Widget {
+func buildXAMLListView(el Element) base.Widget {
 	var items []string
 	// keys[i] — ключ {Loc …} для i-й строки (пустой, если строка не
 	// локализуемая): строки списка не виджеты, поэтому перевод и подписку на
@@ -1260,7 +1164,7 @@ func buildXAMLListView(el xElement) base.Widget {
 		items = append(items, text)
 		keys = append(keys, key)
 	}
-	if raw := el.attr("Items", "ItemsSource"); raw != "" {
+	if raw := el.Attr("Items", "ItemsSource"); raw != "" {
 		for _, item := range strings.Split(raw, ",") {
 			if s := strings.TrimSpace(item); s != "" {
 				add(s)
@@ -1271,7 +1175,7 @@ func buildXAMLListView(el xElement) base.Widget {
 		t := strings.ToLower(child.Tag)
 		switch {
 		case t == "item" || t == "listviewitem" || t == "listboxitem":
-			v := child.attr("Content", "Value")
+			v := child.Attr("Content", "Value")
 			if v == "" {
 				v = strings.TrimSpace(child.Text)
 			}
@@ -1280,7 +1184,7 @@ func buildXAMLListView(el xElement) base.Widget {
 			}
 		case t == "textblock" || t == "label" || t == "run":
 			// WPF: <ListView><TextBlock>text</TextBlock></ListView>
-			v := child.attr("Text")
+			v := child.Attr("Text")
 			if v == "" {
 				v = strings.TrimSpace(child.Text)
 			}
@@ -1298,18 +1202,18 @@ func buildXAMLListView(el xElement) base.Widget {
 		}
 	})
 
-	applyColor(&lv.Background, el, "Background")
+	ApplyColor(&lv.Background, el, "Background")
 
-	if sel := el.attr("SelectedIndex", "Selected"); sel != "" {
+	if sel := el.Attr("SelectedIndex", "Selected"); sel != "" {
 		if idx, err := strconv.Atoi(sel); err == nil {
 			lv.SetSelectedQuiet(idx) // начальное выделение — не выбор пользователя
 		}
 	}
-	if strings.EqualFold(el.attr("Reorderable"), "true") {
+	if strings.EqualFold(el.Attr("Reorderable"), "true") {
 		lv.Reorderable = true // строки переставляются перетаскиванием (GG-85)
 	}
-	if ih := el.attr("ItemHeight"); ih != "" {
-		if v := xatoi(ih); v > 0 {
+	if ih := el.Attr("ItemHeight"); ih != "" {
+		if v := ParseInt(ih); v > 0 {
 			lv.ItemHeight = v
 		}
 	}
@@ -1318,34 +1222,34 @@ func buildXAMLListView(el xElement) base.Widget {
 
 // buildXAMLSplitPanel строит SplitPanel: две панели с перетаскиваемым
 // разделителем. Первый дочерний элемент — First, второй — Second.
-func buildXAMLSplitPanel(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+func buildXAMLSplitPanel(el Element, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	orient := base.OrientationHorizontal
-	if strings.EqualFold(el.attr("Orientation"), "vertical") {
+	if strings.EqualFold(el.Attr("Orientation"), "vertical") {
 		orient = base.OrientationVertical
 	}
 	sp := base.NewSplitPanel(orient)
 
-	if fs := el.attr("Position"); fs != "" {
+	if fs := el.Attr("Position"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v >= 0 && v <= 1 {
 			sp.Position = v
 		}
 	}
-	if v := xatoi(el.attr("SplitterSize")); v > 0 {
+	if v := ParseInt(el.Attr("SplitterSize")); v > 0 {
 		sp.SplitterSize = v
 	}
-	if v := xatoi(el.attr("MinFirst")); v > 0 {
+	if v := ParseInt(el.Attr("MinFirst")); v > 0 {
 		sp.MinFirst = v
 	}
-	if v := xatoi(el.attr("MinSecond")); v > 0 {
+	if v := ParseInt(el.Attr("MinSecond")); v > 0 {
 		sp.MinSecond = v
 	}
-	applyColor(&sp.Background, el, "Background")
-	applyColor(&sp.HoverColor, el, "HoverColor")
+	ApplyColor(&sp.Background, el, "Background")
+	ApplyColor(&sp.HoverColor, el, "HoverColor")
 
-	absBounds := el.bounds().Add(parentOff)
+	absBounds := el.Bounds().Add(parentOff)
 	sp.SetBounds(absBounds)
 	applyCommonProps(sp, el)
-	if id := el.name(); id != "" {
+	if id := el.Name(); id != "" {
 		reg[id] = sp
 	}
 
@@ -1368,9 +1272,9 @@ func buildXAMLSplitPanel(el xElement, reg map[string]base.Widget, parentOff imag
 
 // buildXAMLSVGIcon строит темизируемую векторную иконку из .svg-файла.
 // Без явного Color иконка перекрашивается под цвет текста темы.
-func buildXAMLSVGIcon(el xElement, baseDir string) base.Widget {
+func buildXAMLSVGIcon(el Element, baseDir string) base.Widget {
 	ic := base.NewSVGIcon()
-	if src := el.attr("Source"); src != "" {
+	if src := el.Attr("Source"); src != "" {
 		// Граница по baseDir/fs.FS — SEC-8, GG-7 (см. readXAMLResourceBytes).
 		// Читаем байты сами (а не ic.SetSVGFile) — SetSVGFile умеет только диск.
 		data, err := readXAMLResourceBytes(baseDir, src, svgPkg.MaxFileBytes)
@@ -1382,11 +1286,11 @@ func buildXAMLSVGIcon(el xElement, baseDir string) base.Widget {
 		}
 	}
 	var c color.RGBA
-	applyColor(&c, el, "Color", "Foreground", "Fill")
+	ApplyColor(&c, el, "Color", "Foreground", "Fill")
 	if c.A > 0 {
 		ic.SetColor(c)
 	}
-	if strings.EqualFold(el.attr("Tint"), "true") {
+	if strings.EqualFold(el.Attr("Tint"), "true") {
 		ic.SetTint(true)
 	}
 	return ic

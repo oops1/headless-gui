@@ -44,7 +44,7 @@ func (t *RichText) SelectedText() string {
 // from == to снимает выделение.
 func (t *RichText) Select(from, to int) {
 	t.mu.Lock()
-	from, to = accessClampPair(from, to, len(t.doc.runes))
+	from, to = AccessClampPair(from, to, len(t.doc.runes))
 	if from == to {
 		t.selAnchor, t.selCaret = -1, from
 	} else {
@@ -226,7 +226,7 @@ func (t *RichText) OnMouseButton(e MouseEvent) bool {
 
 	cx, cy := t.contentPointLocked(e.X, e.Y)
 	off, eol := t.lay.hitCaret(t.measurer, cx, cy)
-	n := clicksOf(e, &t.clicks)
+	n := ClicksOf(e, &t.clicks)
 	t.pressLink = ""
 	switch {
 	case n == 2:
@@ -339,7 +339,7 @@ func (t *RichText) barPressLocked(y int, work, thumb image.Rectangle) bool {
 func (t *RichText) barDragToLocked(y int) bool {
 	_, work, _ := t.barGeomLocked()
 	b := t.Base.Bounds()
-	v := hbarScrollForThumbX(transposeRect(work), y-t.barGrab, float64(t.maxScrollLocked()),
+	v := HBarScrollForThumbX(transposeRect(work), y-t.barGrab, float64(t.maxScrollLocked()),
 		float64(b.Dy()), float64(t.lay.Height+2*t.PaddingY))
 	return t.setScrollLocked(int(math.Round(v)))
 }

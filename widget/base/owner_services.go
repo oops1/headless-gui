@@ -157,8 +157,12 @@ func (s *MeasureSet) fontMetrics(sizePt float64, family string) FontMetrics {
 	return FontMetrics{Ascent: a, Descent: d, LineGap: g, Height: a + d + g}
 }
 
-// measureSetOf — набор измерителей владельца дерева w; nil — глобальный путь.
-func measureSetOf(w Widget) *MeasureSet {
+// MeasureSetOf — набор измерителей владельца дерева w; nil — глобальный путь.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func MeasureSetOf(w Widget) *MeasureSet {
 	if w == nil {
 		return nil
 	}
@@ -171,7 +175,7 @@ func measureSetOf(w Widget) *MeasureSet {
 // MeasureTextFor — ширина строки шрифтом по умолчанию так, как её нарисует
 // движок дерева виджета w; дерево без владельца — MeasureUIText.
 func MeasureTextFor(w Widget, text string, sizePt float64) int {
-	if s := measureSetOf(w); s != nil {
+	if s := MeasureSetOf(w); s != nil {
 		return s.width(text, sizePt, "")
 	}
 	return MeasureUIText(text, sizePt)
@@ -179,7 +183,7 @@ func MeasureTextFor(w Widget, text string, sizePt float64) int {
 
 // MeasureTextFontFor — MeasureUITextFont для дерева виджета w.
 func MeasureTextFontFor(w Widget, text string, sizePt float64, family string) int {
-	if s := measureSetOf(w); s != nil {
+	if s := MeasureSetOf(w); s != nil {
 		return s.width(text, sizePt, family)
 	}
 	return MeasureUITextFont(text, sizePt, family)
@@ -187,7 +191,7 @@ func MeasureTextFontFor(w Widget, text string, sizePt float64, family string) in
 
 // MeasureRunePositionsFor — MeasureUIRunePositions для дерева виджета w.
 func MeasureRunePositionsFor(w Widget, text string, sizePt float64, family string) []int {
-	if s := measureSetOf(w); s != nil {
+	if s := MeasureSetOf(w); s != nil {
 		if s.m.RunePositions == nil {
 			return nil
 		}
@@ -198,15 +202,19 @@ func MeasureRunePositionsFor(w Widget, text string, sizePt float64, family strin
 
 // FontMetricsFor — MeasureUIFontMetrics для дерева виджета w.
 func FontMetricsFor(w Widget, sizePt float64, family string) FontMetrics {
-	if s := measureSetOf(w); s != nil {
+	if s := MeasureSetOf(w); s != nil {
 		return s.fontMetrics(sizePt, family)
 	}
 	return MeasureUIFontMetrics(sizePt, family)
 }
 
-// measureBytesFor — measureUIBytes для дерева виджета w.
-func measureBytesFor(w Widget, b []byte, sizePt float64) int {
-	if s := measureSetOf(w); s != nil {
+// MeasureBytesFor — measureUIBytes для дерева виджета w.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func MeasureBytesFor(w Widget, b []byte, sizePt float64) int {
+	if s := MeasureSetOf(w); s != nil {
 		return s.widthBytes(b, sizePt)
 	}
 	return measureUIBytes(b, sizePt)

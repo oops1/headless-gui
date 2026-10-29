@@ -1,4 +1,7 @@
-// Package base — загрузчик UI из JSON-конфигурации.
+package widget
+
+// loader.go — загрузчик UI из JSON-конфигурации (с 8.3 — в фасаде, ADR-0012:
+// он строит виджеты всех пакетов, поэтому живёт выше них).
 //
 // Формат JSON:
 //
@@ -16,7 +19,6 @@
 //	  "focused": true,        // для textinput
 //	  "children": [...]       // вложенные виджеты
 //	}
-package base
 
 import (
 	"encoding/json"
@@ -26,6 +28,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v3/widget/text"
 )
 
 // UINode описывает один виджет в JSON-конфигурации.
@@ -47,7 +52,7 @@ type UINode struct {
 
 // LoadUIFromFile читает JSON-файл и строит дерево виджетов.
 // Возвращает корневой виджет и map[id]Widget для именованных виджетов.
-func LoadUIFromFile(path string) (Widget, map[string]Widget, error) {
+func LoadUIFromFile(path string) (base.Widget, map[string]base.Widget, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("loader: read %q: %w", path, err)
@@ -56,12 +61,12 @@ func LoadUIFromFile(path string) (Widget, map[string]Widget, error) {
 }
 
 // LoadUIFromJSON разбирает JSON и строит дерево виджетов.
-func LoadUIFromJSON(data []byte) (Widget, map[string]Widget, error) {
+func LoadUIFromJSON(data []byte) (base.Widget, map[string]base.Widget, error) {
 	var root UINode
 	if err := json.Unmarshal(data, &root); err != nil {
 		return nil, nil, fmt.Errorf("loader: parse JSON: %w", err)
 	}
-	registry := make(map[string]Widget)
+	registry := make(map[string]base.Widget)
 	w, err := buildWidget(root, registry)
 	if err != nil {
 		return nil, nil, err
@@ -70,8 +75,8 @@ func LoadUIFromJSON(data []byte) (Widget, map[string]Widget, error) {
 }
 
 // buildWidget рекурсивно строит виджет из UINode.
-func buildWidget(n UINode, reg map[string]Widget) (Widget, error) {
-	var w Widget
+func buildWidget(n UINode, reg map[string]base.Widget) (base.Widget, error) {
+	var w base.Widget
 	var err error
 
 	switch strings.ToLower(n.Type) {
@@ -127,43 +132,43 @@ func buildWidget(n UINode, reg map[string]Widget) (Widget, error) {
 
 // ─── Построители виджетов ────────────────────────────────────────────────────
 
-func buildPanel(n UINode) Widget {
+func buildPanel(n UINode) base.Widget {
 	switch strings.ToLower(n.Style) {
 	case "win10":
-		p := NewWin10Panel()
+		p := base.NewWin10Panel()
 		if n.BgColor != "" {
-			if c, err := ParseRGBAHex(n.BgColor); err == nil {
+			if c, err := base.ParseRGBAHex(n.BgColor); err == nil {
 				p.Background = c
 			}
 		}
 		return p
 	case "transparent":
-		p := NewPanel(color.RGBA{}) // A=0: FillRect пропустит рисование
+		p := base.NewPanel(color.RGBA{}) // A=0: FillRect пропустит рисование
 		p.UseAlpha = true           // Over-режим — фон не затирается
 		return p
 	default:
 		bg := color.RGBA{R: 43, G: 43, B: 43, A: 220}
 		if n.BgColor != "" {
-			if c, err := ParseRGBAHex(n.BgColor); err == nil {
+			if c, err := base.ParseRGBAHex(n.BgColor); err == nil {
 				bg = c
 			}
 		}
-		return NewPanel(bg)
+		return base.NewPanel(bg)
 	}
 }
 
-func buildLabel(n UINode) Widget {
-	var lbl *Label
+func buildLabel(n UINode) base.Widget {
+	var lbl *base.Label
 	if n.TextColor != "" {
-		if c, err := ParseRGBAHex(n.TextColor); err == nil {
-			lbl = NewLabel(n.Text, c)
+		if c, err := base.ParseRGBAHex(n.TextColor); err == nil {
+			lbl = base.NewLabel(n.Text, c)
 		}
 	}
 	if lbl == nil {
-		lbl = NewWin10Label(n.Text)
+		lbl = base.NewWin10Label(n.Text)
 	}
 	if n.BgColor != "" {
-		if c, err := ParseRGBAHex(n.BgColor); err == nil {
+		if c, err := base.ParseRGBAHex(n.BgColor); err == nil {
 			lbl.HasBG = true
 			lbl.Background = c
 		}
@@ -171,25 +176,25 @@ func buildLabel(n UINode) Widget {
 	return lbl
 }
 
-func buildButton(n UINode) Widget {
+func buildButton(n UINode) base.Widget {
 	text := n.Text
 	if text == "" {
 		text = n.ID
 	}
 	switch strings.ToLower(n.Style) {
 	case "accent":
-		return NewWin10AccentButton(text)
+		return base.NewWin10AccentButton(text)
 	default:
-		return NewButton(text)
+		return base.NewButton(text)
 	}
 }
 
-func buildTextInput(n UINode) Widget {
+func buildTextInput(n UINode) base.Widget {
 	ph := n.Placeholder
 	if ph == "" {
 		ph = n.Text
 	}
-	ti := NewTextInput(ph)
+	ti := text.NewTextInput(ph)
 	if n.Text != "" && n.Placeholder == "" {
 		ti.SetText(n.Text)
 	}
@@ -197,30 +202,30 @@ func buildTextInput(n UINode) Widget {
 		ti.SetFocused(true)
 	}
 	if n.TextColor != "" {
-		if c, err := ParseRGBAHex(n.TextColor); err == nil {
+		if c, err := base.ParseRGBAHex(n.TextColor); err == nil {
 			ti.TextColor = c
 		}
 	}
 	if n.BgColor != "" {
-		if c, err := ParseRGBAHex(n.BgColor); err == nil {
+		if c, err := base.ParseRGBAHex(n.BgColor); err == nil {
 			ti.Background = c
 		}
 	}
 	return ti
 }
 
-func buildDropdown(n UINode) Widget {
-	dd := NewDropdown(n.Items...)
+func buildDropdown(n UINode) base.Widget {
+	dd := base.NewDropdown(n.Items...)
 	if n.Selected >= 0 && n.Selected < len(n.Items) {
 		dd.SetSelected(n.Selected)
 	}
 	return dd
 }
 
-func buildProgressBar(n UINode) Widget {
-	pb := NewProgressBar()
+func buildProgressBar(n UINode) base.Widget {
+	pb := base.NewProgressBar()
 	if n.BgColor != "" {
-		if c, err := ParseRGBAHex(n.BgColor); err == nil {
+		if c, err := base.ParseRGBAHex(n.BgColor); err == nil {
 			pb.FillColor = c
 		}
 	}
@@ -229,30 +234,30 @@ func buildProgressBar(n UINode) Widget {
 
 // ─── Новые виджеты (JSON) ────────────────────────────────────────────────────
 
-func buildCheckBoxJSON(n UINode) Widget {
-	cb := NewCheckBox(n.Text)
+func buildCheckBoxJSON(n UINode) base.Widget {
+	cb := base.NewCheckBox(n.Text)
 	if n.Props["checked"] == "true" {
 		cb.SetChecked(true)
 	}
 	if n.TextColor != "" {
-		if c, err := ParseRGBAHex(n.TextColor); err == nil {
+		if c, err := base.ParseRGBAHex(n.TextColor); err == nil {
 			cb.TextColor = c
 		}
 	}
 	return cb
 }
 
-func buildRadioButtonJSON(n UINode) Widget {
+func buildRadioButtonJSON(n UINode) base.Widget {
 	group := n.Props["group"]
-	rb := NewRadioButton(n.Text, group)
+	rb := base.NewRadioButton(n.Text, group)
 	if n.Props["selected"] == "true" || n.Props["checked"] == "true" {
 		rb.SetSelected(true)
 	}
 	return rb
 }
 
-func buildSliderJSON(n UINode) Widget {
-	s := NewSlider()
+func buildSliderJSON(n UINode) base.Widget {
+	s := base.NewSlider()
 	if min, ok := n.Props["min"]; ok {
 		if v, err := strconv.ParseFloat(min, 64); err == nil {
 			s.Min = v
@@ -271,31 +276,31 @@ func buildSliderJSON(n UINode) Widget {
 	return s
 }
 
-func buildToggleSwitchJSON(n UINode) Widget {
-	ts := NewToggleSwitch(n.Text)
+func buildToggleSwitchJSON(n UINode) base.Widget {
+	ts := base.NewToggleSwitch(n.Text)
 	if n.Props["on"] == "true" || n.Props["checked"] == "true" {
 		ts.SetOn(true)
 	}
 	return ts
 }
 
-func buildScrollViewJSON(n UINode) Widget {
-	sv := NewScrollView()
+func buildScrollViewJSON(n UINode) base.Widget {
+	sv := base.NewScrollView()
 	if ch, ok := n.Props["contentHeight"]; ok {
 		if v, err := strconv.Atoi(ch); err == nil {
 			sv.ContentHeight = v
 		}
 	}
 	if n.BgColor != "" {
-		if c, err := ParseRGBAHex(n.BgColor); err == nil {
+		if c, err := base.ParseRGBAHex(n.BgColor); err == nil {
 			sv.Background = c
 		}
 	}
 	return sv
 }
 
-func buildListViewJSON(n UINode) Widget {
-	lv := NewListView(n.Items...)
+func buildListViewJSON(n UINode) base.Widget {
+	lv := base.NewListView(n.Items...)
 	if n.Selected >= 0 && n.Selected < len(n.Items) {
 		lv.SetSelectedQuiet(n.Selected) // начальное выделение — не выбор пользователя
 	}
@@ -307,8 +312,8 @@ func buildListViewJSON(n UINode) Widget {
 	return lv
 }
 
-func buildTabControlJSON(n UINode) Widget {
-	tc := NewTabControl()
+func buildTabControlJSON(n UINode) base.Widget {
+	tc := base.NewTabControl()
 	if sel := n.Selected; sel >= 0 {
 		tc.SetActive(sel)
 	}
@@ -317,37 +322,3 @@ func buildTabControlJSON(n UINode) Widget {
 
 // ─── Парсинг цвета ────────────────────────────────────────────────────────────
 
-// ParseRGBAHex разбирает строку "#RRGGBB" или "#RRGGBBAA" в color.RGBA.
-//
-// Служебная: для подпакетов widget, в фасад не входит.
-//
-//facadegen:skip
-func ParseRGBAHex(s string) (color.RGBA, error) {
-	s = strings.TrimPrefix(s, "#")
-	switch len(s) {
-	case 6:
-		v, err := strconv.ParseUint(s, 16, 32)
-		if err != nil {
-			return color.RGBA{}, err
-		}
-		return color.RGBA{
-			R: uint8(v >> 16),
-			G: uint8(v >> 8),
-			B: uint8(v),
-			A: 255,
-		}, nil
-	case 8:
-		v, err := strconv.ParseUint(s, 16, 32)
-		if err != nil {
-			return color.RGBA{}, err
-		}
-		return color.RGBA{
-			R: uint8(v >> 24),
-			G: uint8(v >> 16),
-			B: uint8(v >> 8),
-			A: uint8(v),
-		}, nil
-	default:
-		return color.RGBA{}, fmt.Errorf("invalid color %q", s)
-	}
-}

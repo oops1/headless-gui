@@ -62,7 +62,7 @@ var ErrXAMLTooDeep = xaml.ErrXAMLTooDeep
 
 // XAMLAttrs предоставляет доступ к атрибутам XAML-элемента.
 // Передаётся в XAMLWidgetBuilder, чтобы внешние пакеты могли
-// читать атрибуты без доступа к внутреннему типу xElement.
+// читать атрибуты без зависимости от узла разметки xaml.Element.
 type XAMLAttrs = xaml.XAMLAttrs
 
 // XAMLWidgetBuilder — функция-конструктор пользовательского XAML-виджета.
@@ -92,18 +92,21 @@ func UnregisterXAMLWidget(tag string) { xaml.UnregisterXAMLWidget(tag) }
 // LoadUIFromXAMLFile читает XAML-файл и строит дерево виджетов.
 // Возвращает корневой виджет и map[name]Widget для именованных элементов.
 func LoadUIFromXAMLFile(path string) (base.Widget, map[string]base.Widget, error) {
+	registerXAML()
 	return xaml.LoadUIFromXAMLFile(path)
 }
 
 // LoadUIFromXAML разбирает XAML и строит дерево виджетов.
 // Ресурсы (изображения) не могут загружаться — baseDir пустой.
 func LoadUIFromXAML(data []byte) (base.Widget, map[string]base.Widget, error) {
+	registerXAML()
 	return xaml.LoadUIFromXAML(data)
 }
 
 // LoadUIFromXAMLWithBase разбирает XAML и строит дерево виджетов.
 // baseDir используется для загрузки ресурсов (BackgroundImage и пр.).
 func LoadUIFromXAMLWithBase(data []byte, baseDir string) (base.Widget, map[string]base.Widget, error) {
+	registerXAML()
 	return xaml.LoadUIFromXAMLWithBase(data, baseDir)
 }
 
@@ -117,6 +120,7 @@ func LoadUIFromXAMLWithBase(data []byte, baseDir string) (base.Widget, map[strin
 // той же политике SEC-8, что и baseDir на диске — абсолютный путь или выход
 // за пределы корня отклоняется с ErrResourceOutsideBase (см. OpenResource).
 func LoadUIFromXAMLFS(data []byte, fsys fs.FS) (base.Widget, map[string]base.Widget, error) {
+	registerXAML()
 	return xaml.LoadUIFromXAMLFS(data, fsys)
 }
 
@@ -126,21 +130,25 @@ func LoadUIFromXAMLFS(data []byte, fsys fs.FS) (base.Widget, map[string]base.Wid
 // Возвращаемый BindingScope удерживается подписками, поэтому привязки работают
 // даже если scope не сохранён вызывающим кодом.
 func LoadUIFromXAMLWithContext(data []byte, dataContext interface{}) (base.Widget, map[string]base.Widget, error) {
+	registerXAML()
 	return xaml.LoadUIFromXAMLWithContext(data, dataContext)
 }
 
 // LoadUIFromXAMLBindings — как LoadUIFromXAMLWithContext, но возвращает BindingScope
 // для ручного управления (SetDataContext / Refresh).
 func LoadUIFromXAMLBindings(data []byte, dataContext interface{}) (base.Widget, map[string]base.Widget, *BindingScope, error) {
+	registerXAML()
 	return xaml.LoadUIFromXAMLBindings(data, dataContext)
 }
 
 // LoadUIFromXAMLFileWithContext — как LoadUIFromXAMLFile, но с DataContext для {Binding}.
 func LoadUIFromXAMLFileWithContext(path string, dataContext interface{}) (base.Widget, map[string]base.Widget, error) {
+	registerXAML()
 	return xaml.LoadUIFromXAMLFileWithContext(path, dataContext)
 }
 
 // LoadUIFromXAMLFileBindings — как LoadUIFromXAMLFileWithContext, но с BindingScope.
 func LoadUIFromXAMLFileBindings(path string, dataContext interface{}) (base.Widget, map[string]base.Widget, *BindingScope, error) {
+	registerXAML()
 	return xaml.LoadUIFromXAMLFileBindings(path, dataContext)
 }

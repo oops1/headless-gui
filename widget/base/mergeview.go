@@ -1053,7 +1053,7 @@ func (m *MergeView) geom() mvGeom {
 	// Полоса прокрутки отнимает высоту у итога — но только когда самая
 	// длинная строка не помещается по ширине.
 	if m.needHBarLocked(g) {
-		g.ry1 -= dvHBarH
+		g.ry1 -= HBarHeight
 	}
 	return g
 }
@@ -1116,7 +1116,7 @@ func (m *MergeView) hbarTrackLocked(g mvGeom) image.Rectangle {
 		return image.Rectangle{}
 	}
 	y := g.ry1 + 2
-	return image.Rect(g.px[0][0], y, g.rulerX-6, y+dvHBarH-4)
+	return image.Rect(g.px[0][0], y, g.rulerX-6, y+HBarHeight-4)
 }
 
 // hbarThumbLocked — ползунок полосы.
@@ -1125,7 +1125,7 @@ func (m *MergeView) hbarThumbLocked(g mvGeom) image.Rectangle {
 	if tr.Empty() {
 		return image.Rectangle{}
 	}
-	return hbarThumb(tr, m.hscroll, m.maxHScrollLocked(), m.codeViewWLocked(g), m.contentWLocked())
+	return HBarThumb(tr, m.hscroll, m.maxHScrollLocked(), m.codeViewWLocked(g), m.contentWLocked())
 }
 
 // setHScrollLocked задаёт смещение вбок, зажимая его в допустимые пределы.
@@ -1148,14 +1148,14 @@ func (m *MergeView) hbarPressLocked(x int) {
 		m.hbarGrab = x - th.Min.X
 		return
 	}
-	m.setHScrollLocked(hbarScrollAt(m.hbarTrackLocked(g), x, m.maxHScrollLocked(),
+	m.setHScrollLocked(HBarScrollAt(m.hbarTrackLocked(g), x, m.maxHScrollLocked(),
 		m.codeViewWLocked(g), m.contentWLocked()))
 }
 
 // hbarDragToLocked ведёт ползунок за курсором.
 func (m *MergeView) hbarDragToLocked(x int) bool {
 	g := m.geom()
-	return m.setHScrollLocked(hbarScrollForThumbX(m.hbarTrackLocked(g), x-m.hbarGrab,
+	return m.setHScrollLocked(HBarScrollForThumbX(m.hbarTrackLocked(g), x-m.hbarGrab,
 		m.maxHScrollLocked(), m.codeViewWLocked(g), m.contentWLocked()))
 }
 

@@ -94,7 +94,7 @@ func (cb *crumbBar) Draw(ctx DrawContext) {
 	st := currentStyle()
 	if st.Classic3D {
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), win10.InputBG)
-		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 	} else {
 		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), 4, win10.InputBG)
 		ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), 4, win10.InputBorder)
@@ -216,7 +216,7 @@ func (pl *placeList) Draw(ctx DrawContext) {
 	st := currentStyle()
 	if st.Classic3D {
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), win10.InputBG)
-		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 	} else {
 		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), 6, win10.InputBG)
 	}
@@ -350,7 +350,7 @@ func (ft *fileTable) Draw(ctx DrawContext) {
 	st := currentStyle()
 	if st.Classic3D {
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), win10.InputBG)
-		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 	} else {
 		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), 6, win10.InputBG)
 	}

@@ -173,7 +173,7 @@ widget (фасад)   → все выше                  алиасы, обё�
 | core → chrome, dock, dialog | `canvas.go` (и копия списка в `dockmanager.go`) перечисляет контейнеры, чей `SetBounds` сам двигает детей | интерфейс-возможность в `base`: `ChildLayouter` (`LaysOutChildren() bool`); контейнеры реализуют; `Canvas` спрашивает интерфейс | `base` + каждый контейнер |
 | core → text | `accesstext.go`: методы `TextInput`/`TextBox` читают их неэкспортированные поля | интерфейс `AccessTextProvider` и помощники (`AccessTextOf`, `AccessRuneLen`, `AccessSubstring`) остаются в `base`; методы уезжают с типами | `text` |
 | core → chrome, text, dock | `accessibility.go` выбирает роль и значение по конкретному типу (`Window`, `TextBox`, `TextInput`, `DockPanel`) | интерфейс-возможность `AccessDescriber` в `base` (роль, имя, значение, состояния); виджеты подпакетов реализуют его, как уже делают `dialog_access.go`, `menubar_access.go`, `popupmenu_access.go` | `base` + подпакеты |
-| core → text | `base.go` подбирает размер по умолчанию по типу (`case *TextInput`) | `TextInput` отвечает через существующий механизм `DesiredSize` (`desiredsize.go`); ветка по типу уходит | `text` |
+| core → text | `base.go` подбирает размер по умолчанию по типу (`case *TextInput`) | интерфейс `DefaultSizer` (`DefaultSize() (w, h int)`) в `base`, `TextInput` его реализует; не `DesiredSize`: `DesiredOf` ставит его выше размера из разметки, и поле с `Width` в XAML сжалось бы до 120 (с 8.3) | `base`, `text` |
 | core → text | `loader.go` (JSON-загрузчик) строит `TextInput` | загрузчик — верхний уровень, остаётся в фасаде | `widget` |
 | core → dock | `bgrole.go` объявляет метод `DockPanel.SetBackgroundRole` | метод уезжает с типом; `BackgroundRole` и `themeBackground` остаются | `dock` |
 | chrome → dock | `window_tabs.go` смотрит `Background` у `Panel`, `Canvas`, `Grid`, `DockPanel` по типу | интерфейс `BackgroundColorer` (`BackgroundColor() (color.RGBA, bool)`; имя не совпадает с полем `Background`) в `base`; четыре типа реализуют | `base`, `dock` |
@@ -189,7 +189,19 @@ widget (фасад)   → все выше                  алиасы, обё�
 `ClipboardProvider` (уже есть), `AccessTextProvider` (уже есть), плюс
 экспортированный `ResizeEdge`. Имена уточняются при реализации; правило
 одно — у интерфейса, который реализуют из другого пакета, все методы
-экспортированы.
+экспортированы. С 8.3 есть ещё `TextEditor` (поле ввода для привязки XAML,
+диалогов и загрузчиков: текст, подсказка, цвета, обработчик изменения),
+`DefaultSizer` и `AccessDescriber`, а `IMEComposer` переехал в `base`
+(его реализует и `RichText`). Ветки по интерфейсу стоят на месте прежних веток по
+типу; разница одна — тип приложения, встраивающий поле (`struct{
+*widget.TextInput }`), теперь тоже их проходит: авторазмер 120×26, роль
+доступности, двусторонняя привязка XAML. В репозитории таких типов нет.
+
+Переходное (8.3–8.6): диалоги ядра (ввод строки, имя файла) строят своё
+поле через `base.SetTextInputFactory`, которую задаёт `widget/text` при
+загрузке. Это единственное `init`-связывание этапа; оно уходит на 8.6, когда
+`dialog` импортирует `text` напрямую. Тесты ядра ставят свою заглушку
+поля.
 
 ### 4. Реестр XAML и регистрация
 
@@ -222,10 +234,10 @@ error)`. Логика контейнера живёт в строителе, в 
 |---|---|---|
 | 8.2a | `widget/base`: перенос всего кода и тестов; `internal/facadegen`; фасад `widget`; тест полноты фасада | `go test ./...`; showcase, webshowcase, desktopdemo и Tandem без правок; `go vet`; матрица |
 | 8.2b | `widget/xaml`: парсер, реестр, загрузчик, биндинг, строители всех виджетов (и тех, что пока в `base`); не-XAML помощники в `base/resources.go` | то же; тест: программа без XAML не содержит парсера (`go tool nm`) |
-| 8.3 | `widget/text`: `TextBox`, `TextInput`, `ime.go`; `accesstext` методы с типами; `DesiredSize` вместо ветки по типу; помощники в `base/textutil.go`; реестр §4 (`xaml.Registry`, `Element`, `Loader`, `Builder`) — первый строитель вне `xaml`; `text.RegisterXAML`; `LoadUIFromXAML*` в фасаде с регистрацией по первому вызову | то же; `depmap`: `core → text` и `xaml → text` исчезли |
+| 8.3 | `widget/text`: `TextBox`, `TextInput`, `ime.go`; `accesstext` методы с типами; `DefaultSizer` вместо ветки по типу; помощники в `base/textutil.go`; реестр §4 (`xaml.Registry`, `Element`, `Loader`, `Builder`) — первый строитель вне `xaml`; `text.RegisterXAML`; `LoadUIFromXAML*` в фасаде с регистрацией по первому вызову (генератор: `Config.Prelude`); JSON-загрузчик — в фасаде | то же; `depmap`: `core → text` и `xaml → text` исчезли |
 | 8.4 | `widget/richtext` (после `text`); `richtext.RegisterXAML` | `core → richtext`, `xaml → richtext` исчезли |
 | 8.5 | `widget/chrome`: `Window`; `ResizeEdge`, `WindowTitleStyle`, цветовые помощники в `base`; `TitleNavButton`; методы `Window` из `dialog_chrome.go`; `BackgroundColorer`; `NavTitleHost` и `NavHost` в фасаде; `chrome.RegisterXAML` | `core → chrome`, `xaml → chrome`, `chrome → dialog`, `chrome → dock` исчезли |
-| 8.6 | `widget/dialog` (после `chrome`, `text`) и `widget/dock`; `ChildLayouter`, `AccessDescriber`; `dialog.RegisterXAML`, `dock.RegisterXAML` | оставшиеся обратные рёбра исчезли; база `depmap` пуста |
+| 8.6 | `widget/dialog` (после `chrome`, `text`) и `widget/dock`; `ChildLayouter`, `AccessDescriber`; `dialog.RegisterXAML`, `dock.RegisterXAML`; убрать `base.SetTextInputFactory` (диалог → `text` напрямую) | оставшиеся обратные рёбра исчезли; база `depmap` пуста |
 | 8.7 | `platform/clipboard`; `ClipboardProvider` в `base`; импорт из `window` и фасада | буфер обмена в showcase и tests без правок |
 | 8.8 | не отдельная задача: фасад генерируется на каждом шаге; остаётся проверка `go vet` и `Deprecated`-пометок нет — старые имена не устаревают, они фасад | |
 

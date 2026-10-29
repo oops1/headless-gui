@@ -20,3 +20,12 @@ func CurrentTheme() *Theme {
 	t := win10
 	return &t
 }
+
+// ActiveTheme — сама текущая тема (не копия, в отличие от CurrentTheme):
+// для конструкторов и отрисовки виджетов подпакетов, которые читают её поля
+// так же, как виджеты ядра.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ActiveTheme() *Theme { return &win10 }

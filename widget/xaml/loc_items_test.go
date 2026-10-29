@@ -36,6 +36,7 @@ const locItemsXAML = `<Window Title="T" Width="400" Height="300">
 // и подсказка поля. Раньше они оставались на языке загрузки — из-за чего
 // приложение выглядело переведённым лишь наполовину.
 func TestLocalizedFoldedItems(t *testing.T) {
+	useFakeField(t)
 	saveStrings(t)
 	base.ClearStrings()
 	ClearLocalizedItems()
@@ -69,7 +70,7 @@ func TestLocalizedFoldedItems(t *testing.T) {
 	tabs, _ := reg["tabs"].(*base.TabControl)
 	menu, _ := reg["menu"].(*base.MenuBar)
 	combo, _ := reg["combo"].(*base.Dropdown)
-	edit, _ := reg["edit"].(*base.TextInput) // <TextBox> без AcceptsReturn — однострочное поле
+	edit, _ := reg["edit"].(*fakeField) // поле ввода — заглушка useFakeField
 	if tabs == nil || menu == nil || combo == nil || edit == nil {
 		t.Fatalf("виджеты не найдены: tabs=%v menu=%v combo=%v edit=%v", tabs, menu, combo, edit)
 	}
@@ -87,8 +88,8 @@ func TestLocalizedFoldedItems(t *testing.T) {
 	if got := combo.Items()[0]; got != "Administrator" {
 		t.Errorf("элемент списка 0 = %q, want Administrator", got)
 	}
-	if edit.Placeholder != "Enter a name" {
-		t.Errorf("подсказка = %q", edit.Placeholder)
+	if edit.placeholder != "Enter a name" {
+		t.Errorf("подсказка = %q", edit.placeholder)
 	}
 
 	// ── Переключаем язык ─────────────────────────────────────────────────────
@@ -121,8 +122,8 @@ func TestLocalizedFoldedItems(t *testing.T) {
 	if got := combo.Items()[1]; got != "Гость" {
 		t.Errorf("элемент списка 1 после смены языка = %q", got)
 	}
-	if edit.Placeholder != "Введите имя" {
-		t.Errorf("подсказка после смены языка = %q", edit.Placeholder)
+	if edit.placeholder != "Введите имя" {
+		t.Errorf("подсказка после смены языка = %q", edit.placeholder)
 	}
 
 	// Обычное свойство виджета продолжает работать как раньше.

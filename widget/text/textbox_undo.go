@@ -1,6 +1,8 @@
-package base
+package text
 
-import "slices"
+import (
+	"slices"
+)
 
 // textbox_undo.go — отмена и возврат правок многострочного редактора.
 //

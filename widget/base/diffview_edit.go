@@ -596,7 +596,7 @@ func (d *DiffView) OnMouseButton(e MouseEvent) bool {
 		d.Invalidate()
 		return true
 	}
-	if tr := d.hbarTrack(g); !tr.Empty() && image.Pt(e.X, e.Y).In(tr.Inset(-dvHBarInsetX)) {
+	if tr := d.hbarTrack(g); !tr.Empty() && image.Pt(e.X, e.Y).In(tr.Inset(-HBarInsetX)) {
 		d.hbarPressLocked(e.X)
 		d.mu.Unlock()
 		d.Invalidate()

@@ -1,4 +1,4 @@
-package base
+package text
 
 import (
 	"image/color"
@@ -62,19 +62,19 @@ type Styler interface {
 	LineSpans(line int, text string) []Span
 }
 
-// mergeStyle накладывает over на base: заданные поля over побеждают, остальные
-// остаются от base.
-func mergeStyle(base, over Style) Style {
+// mergeStyle накладывает over на under: заданные поля over побеждают, остальные
+// остаются от under.
+func mergeStyle(under, over Style) Style {
 	if over.Color.A != 0 {
-		base.Color = over.Color
+		under.Color = over.Color
 	}
 	if over.BG.A != 0 {
-		base.BG = over.BG
+		under.BG = over.BG
 	}
 	if over.Face != "" {
-		base.Face = over.Face
+		under.Face = over.Face
 	}
-	return base
+	return under
 }
 
 // tbPiece — кусок видимой строки с единым оформлением: руны [From, To) строки.

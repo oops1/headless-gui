@@ -1,6 +1,8 @@
-package base
+package text
 
-import "strings"
+import (
+	"strings"
+)
 
 // textbox_tabs.go — табстопы многострочного редактора.
 //

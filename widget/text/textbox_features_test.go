@@ -1,4 +1,4 @@
-package base
+package text
 
 import (
 	"image"
@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // Возможности редактора, из-за которых его считали негодным для кода: шрифт,
@@ -39,7 +41,7 @@ type tbRecLine struct {
 // tbRecCtx — контекст отрисовки, записывающий то, что рисует редактор. Замеры
 // отдаёт тем же измерителем, что раскладка, — как настоящий холст.
 type tbRecCtx struct {
-	DrawContext
+	base.DrawContext
 	texts []tbRecText
 	fills []tbRecFill
 	lines []tbRecLine
@@ -74,9 +76,9 @@ func (c *tbRecCtx) DrawTextSize(s string, x, y int, sz float64, col color.RGBA) 
 func (c *tbRecCtx) DrawTextFont(s string, x, y int, sz float64, font string, col color.RGBA) {
 	c.texts = append(c.texts, tbRecText{s: s, x: x, y: y, font: font, col: col})
 }
-func (c *tbRecCtx) MeasureText(s string, sz float64) int { return MeasureUIText(s, sz) }
+func (c *tbRecCtx) MeasureText(s string, sz float64) int { return base.MeasureUIText(s, sz) }
 func (c *tbRecCtx) MeasureTextFont(s string, sz float64, font string) int {
-	return MeasureUITextFont(s, sz, font)
+	return base.MeasureUITextFont(s, sz, font)
 }
 
 // textsOf — только строки выведенного текста.
@@ -102,7 +104,7 @@ func baseTestWidth(text string, sizePt float64) int {
 func useFontMeasurers(t testing.TB) {
 	t.Helper()
 	useTestMeasurer(t)
-	h := RegisterMeasurers(Measurers{
+	h := base.RegisterMeasurers(base.Measurers{
 		Text: baseTestWidth,
 		TextFont: func(text string, sizePt float64, family string) int {
 			if family == "mono" {
@@ -111,7 +113,7 @@ func useFontMeasurers(t testing.TB) {
 			return baseTestWidth(text, sizePt)
 		},
 	})
-	t.Cleanup(func() { UnregisterTextMeasurer(h) })
+	t.Cleanup(func() { base.UnregisterTextMeasurer(h) })
 }
 
 func newTestTB(t testing.TB, w, h int) *TextBox {
@@ -126,17 +128,17 @@ func newTBHere(w, h int) *TextBox {
 	return tb
 }
 
-func key(tb *TextBox, code KeyCode, mod KeyMod) {
-	tb.OnKeyEvent(KeyEvent{Code: code, Mod: mod, Pressed: true})
+func key(tb *TextBox, code base.KeyCode, mod base.KeyMod) {
+	tb.OnKeyEvent(base.KeyEvent{Code: code, Mod: mod, Pressed: true})
 }
 
 func typeRunes(tb *TextBox, s string) {
 	for _, r := range s {
 		if r == '\n' {
-			key(tb, KeyEnter, 0)
+			key(tb, base.KeyEnter, 0)
 			continue
 		}
-		tb.OnKeyEvent(KeyEvent{Rune: r, Pressed: true})
+		tb.OnKeyEvent(base.KeyEvent{Rune: r, Pressed: true})
 	}
 }
 
@@ -144,7 +146,7 @@ func typeRunes(tb *TextBox, s string) {
 func caretX(tb *TextBox, pos int) int {
 	tb.SetCaretPosition(pos)
 	r := tb.IMECaretRect()
-	return r.Min.X - tb.bounds.Min.X - tb.PaddingX
+	return r.Min.X - tb.Base.Bounds().Min.X - tb.PaddingX
 }
 
 func draw(tb *TextBox) *tbRecCtx {
@@ -256,22 +258,22 @@ func TestTextBox_WrapToggleRelayouts(t *testing.T) {
 // ─── Tab ─────────────────────────────────────────────────────────────────────
 
 func TestTextBox_ImplementsTabAcceptor(t *testing.T) {
-	var _ TabAcceptor = (*TextBox)(nil)
+	var _ base.TabAcceptor = (*TextBox)(nil)
 	tb := newTestTB(t, 200, 100)
-	tab := KeyEvent{Code: KeyTab, Pressed: true}
+	tab := base.KeyEvent{Code: base.KeyTab, Pressed: true}
 
-	if WantsTab(tb, tab) {
+	if base.WantsTab(tb, tab) {
 		t.Error("по умолчанию Tab должен уходить в смену фокуса — как у приложений, собранных раньше")
 	}
 	tb.AcceptTab = true
-	if !WantsTab(tb, tab) {
+	if !base.WantsTab(tb, tab) {
 		t.Error("с AcceptTab Tab должен доставляться редактору")
 	}
-	if WantsTab(tb, KeyEvent{Code: KeyTab, Mod: ModCtrl, Pressed: true}) {
+	if base.WantsTab(tb, base.KeyEvent{Code: base.KeyTab, Mod: base.ModCtrl, Pressed: true}) {
 		t.Error("Ctrl+Tab остаётся навигацией: иначе из редактора не выйти с клавиатуры")
 	}
 	tb.ReadOnly = true
-	if WantsTab(tb, tab) {
+	if base.WantsTab(tb, tab) {
 		t.Error("в режиме чтения вставлять некуда — Tab снова должен уходить фокусу")
 	}
 }
@@ -280,14 +282,14 @@ func TestTextBox_TabInsertsTab(t *testing.T) {
 	tb := newTestTB(t, 200, 100)
 
 	// Без AcceptTab событие ничего не вставляет (как и раньше).
-	key(tb, KeyTab, 0)
+	key(tb, base.KeyTab, 0)
 	if got := tb.GetText(); got != "" {
 		t.Fatalf("без AcceptTab вставилось %q", got)
 	}
 
 	tb.AcceptTab = true
 	typeRunes(tb, "a")
-	key(tb, KeyTab, 0)
+	key(tb, base.KeyTab, 0)
 	typeRunes(tb, "b")
 	if got := tb.GetText(); got != "a\tb" {
 		t.Fatalf("текст %q, ждали a<TAB>b", got)
@@ -297,25 +299,25 @@ func TestTextBox_TabInsertsTab(t *testing.T) {
 	}
 
 	// Ctrl+Tab и Shift+Tab текст не меняют.
-	key(tb, KeyTab, ModCtrl)
-	key(tb, KeyTab, ModShift)
+	key(tb, base.KeyTab, base.ModCtrl)
+	key(tb, base.KeyTab, base.ModShift)
 	if got := tb.GetText(); got != "a\tb" {
 		t.Errorf("Ctrl/Shift+Tab изменили текст: %q", got)
 	}
 
 	// Tab заменяет выделение и отменяется как обычная правка.
-	key(tb, KeyA, ModCtrl)
-	key(tb, KeyTab, 0)
+	key(tb, base.KeyA, base.ModCtrl)
+	key(tb, base.KeyTab, 0)
 	if got := tb.GetText(); got != "\t" {
 		t.Fatalf("Tab поверх выделения: %q", got)
 	}
-	key(tb, KeyZ, ModCtrl)
+	key(tb, base.KeyZ, base.ModCtrl)
 	if got := tb.GetText(); got != "a\tb" {
 		t.Errorf("Ctrl+Z после Tab: %q", got)
 	}
 
 	tb.ReadOnly = true
-	key(tb, KeyTab, 0)
+	key(tb, base.KeyTab, 0)
 	if got := tb.GetText(); got != "a\tb" {
 		t.Errorf("в режиме чтения вставилась табуляция: %q", got)
 	}
@@ -330,13 +332,13 @@ func TestTextBox_TabStopsInLayout(t *testing.T) {
 	tb.TabSize = 8
 	tb.SetText("a\tb\t\tc")
 
-	sp := MeasureUIText(" ", tb.fontSize())
+	sp := base.MeasureUIText(" ", tb.fontSize())
 	tab := 8 * sp
-	aW := MeasureUIText("a", tb.fontSize())
+	aW := base.MeasureUIText("a", tb.fontSize())
 	if aW >= tab {
 		t.Fatalf("тест непригоден: 'a' (%d) не уже табстопа (%d)", aW, tab)
 	}
-	bW := MeasureUIText("b", tb.fontSize())
+	bW := base.MeasureUIText("b", tb.fontSize())
 
 	if got := caretX(tb, 2); got != tab {
 		t.Errorf("после 'a'+Tab каретка на %d, ждали табстоп %d", got, tab)
@@ -358,13 +360,13 @@ func TestTextBox_TabStopsHitTest(t *testing.T) {
 	tb.Wrap = false
 	tb.TabSize = 8
 	tb.SetText("\tx")
-	tab := 8 * MeasureUIText(" ", tb.fontSize())
+	tab := 8 * base.MeasureUIText(" ", tb.fontSize())
 
 	// Середина табуляции делит её между «до» и «после».
 	click := func(dx int) int {
 		tb.mu.Lock()
 		defer tb.mu.Unlock()
-		return tb.charIndexAtPoint(tb.bounds.Min.X+tb.PaddingX+dx, tb.bounds.Min.Y+tb.PaddingY+2)
+		return tb.charIndexAtPoint(tb.Base.Bounds().Min.X+tb.PaddingX+dx, tb.Base.Bounds().Min.Y+tb.PaddingY+2)
 	}
 	if got := click(tab/2 - 2); got != 0 {
 		t.Errorf("щелчок в левой половине табуляции дал колонку %d, ждали 0", got)
@@ -382,7 +384,7 @@ func TestTextBox_TabStopsDraw(t *testing.T) {
 	tb.Wrap = false
 	tb.TabSize = 8
 	tb.SetText("a\tb")
-	tab := 8 * MeasureUIText(" ", tb.fontSize())
+	tab := 8 * base.MeasureUIText(" ", tb.fontSize())
 
 	rec := draw(tb)
 	got := rec.textsOf()
@@ -407,7 +409,7 @@ func TestTextBox_TabLegacyWithoutTabSize(t *testing.T) {
 	if got := rec.textsOf(); len(got) != 1 || got[0] != "a\tb" {
 		t.Fatalf("выведено %q, ждали прежнюю одну строку", got)
 	}
-	if got, want := caretX(tb, 2), MeasureUIText("a\t", tb.fontSize()); got != want {
+	if got, want := caretX(tb, 2), base.MeasureUIText("a\t", tb.fontSize()); got != want {
 		t.Errorf("каретка %d, прежний замер %d", got, want)
 	}
 }
@@ -419,7 +421,7 @@ func TestTextBox_AcceptTabImpliesDefaultTabSize(t *testing.T) {
 	tb.Wrap = false
 	tb.AcceptTab = true
 	tb.SetText("\tx")
-	if got, want := caretX(tb, 1), 4*MeasureUIText(" ", tb.fontSize()); got != want {
+	if got, want := caretX(tb, 1), 4*base.MeasureUIText(" ", tb.fontSize()); got != want {
 		t.Errorf("табуляция шириной %d, ждали 4 пробела = %d", got, want)
 	}
 }
@@ -495,8 +497,8 @@ func TestTextBox_StylerColorsAndBackground(t *testing.T) {
 		t.Fatal("фон диапазона не нарисован")
 	}
 	// Фон — ровно под 'de': от конца 'abc' до конца 'abcde'.
-	x0 := tb.PaddingX + MeasureUIText("abc", tb.fontSize())
-	x1 := tb.PaddingX + MeasureUIText("abcde", tb.fontSize())
+	x0 := tb.PaddingX + base.MeasureUIText("abc", tb.fontSize())
+	x1 := tb.PaddingX + base.MeasureUIText("abcde", tb.fontSize())
 	if bgFill.x != x0 || bgFill.x+bgFill.w != x1 {
 		t.Errorf("фон [%d,%d), ждали [%d,%d)", bgFill.x, bgFill.x+bgFill.w, x0, x1)
 	}
@@ -723,7 +725,7 @@ func maxScrollXOf(tb *TextBox) int {
 
 func TestTextBox_HBarShownOnlyWhenOverflowing(t *testing.T) {
 	tb := newHBarTB(t)
-	linesNoBar := func(tb *TextBox) int { return (tb.bounds.Dy() - 2*tb.PaddingY) / tb.lineHeight() }
+	linesNoBar := func(tb *TextBox) int { return (tb.Base.Bounds().Dy() - 2*tb.PaddingY) / tb.lineHeight() }
 
 	tb.mu.Lock()
 	tb.ensureLayout()
@@ -732,7 +734,7 @@ func TestTextBox_HBarShownOnlyWhenOverflowing(t *testing.T) {
 	if !shown {
 		t.Fatal("длинная строка без переноса, а полосы нет")
 	}
-	if want := (tb.bounds.Dy() - 2*tb.PaddingY - tbHBarH) / tb.lineHeight(); vis != want {
+	if want := (tb.Base.Bounds().Dy() - 2*tb.PaddingY - tbHBarH) / tb.lineHeight(); vis != want {
 		t.Errorf("видимых строк %d, ждали %d (полоса отнимает высоту)", vis, want)
 	}
 	if thumbOf(tb).Empty() {
@@ -785,7 +787,7 @@ func TestTextBox_HBarDrawn(t *testing.T) {
 }
 
 func mouse(tb *TextBox, x, y int, pressed bool) {
-	tb.OnMouseButton(MouseEvent{X: x, Y: y, Button: MouseLeft, Pressed: pressed})
+	tb.OnMouseButton(base.MouseEvent{X: x, Y: y, Button: base.MouseLeft, Pressed: pressed})
 }
 
 // Щелчок мимо ползунка — прыжок; перетаскивание ползунка — плавный сдвиг, и
@@ -875,7 +877,7 @@ func TestTextBox_HorizontalWheel(t *testing.T) {
 	tb.mu.Lock()
 	tb.scrollX = 0
 	tb.mu.Unlock()
-	if !tb.OnMouseWheelPixelsMod(50, 50, 0, 25, ModShift) {
+	if !tb.OnMouseWheelPixelsMod(50, 50, 0, 25, base.ModShift) {
 		t.Fatal("Shift+колесо не принято")
 	}
 	if got := scrollXOf(tb); got != 25 {
@@ -886,7 +888,7 @@ func TestTextBox_HorizontalWheel(t *testing.T) {
 	tb.mu.Lock()
 	tb.scrollX = 0
 	tb.mu.Unlock()
-	tb.OnMouseButton(MouseEvent{X: 50, Y: 50, Button: MouseWheelDown, Pressed: true, Mod: ModShift})
+	tb.OnMouseButton(base.MouseEvent{X: 50, Y: 50, Button: base.MouseWheelDown, Pressed: true, Mod: base.ModShift})
 	if got := scrollXOf(tb); got <= 0 {
 		t.Errorf("тиковое Shift+колесо не сдвинуло текст (scrollX=%d)", got)
 	}
@@ -920,8 +922,8 @@ func TestTextBox_ScrollXClamped(t *testing.T) {
 		t.Errorf("каретка в конце длинной строки: scrollX=%d, ждали %d", got, max)
 	}
 	// Удалили длинную строку — смещение вернулось.
-	key(tb, KeyA, ModCtrl)
-	key(tb, KeyDelete, 0)
+	key(tb, base.KeyA, base.ModCtrl)
+	key(tb, base.KeyDelete, 0)
 	if got := scrollXOf(tb); got != 0 {
 		t.Errorf("после удаления текста scrollX=%d", got)
 	}
@@ -931,10 +933,10 @@ func TestTextBox_ScrollXClamped(t *testing.T) {
 func TestTextBox_CursorOverHBar(t *testing.T) {
 	tb := newHBarTB(t)
 	th := thumbOf(tb)
-	if got := tb.Cursor(th.Min.X+1, th.Min.Y+1); got != CursorArrow {
+	if got := tb.Cursor(th.Min.X+1, th.Min.Y+1); got != base.CursorArrow {
 		t.Errorf("над полосой курсор %v", got)
 	}
-	if got := tb.Cursor(50, 20); got != CursorIBeam {
+	if got := tb.Cursor(50, 20); got != base.CursorIBeam {
 		t.Errorf("над текстом курсор %v", got)
 	}
 }
@@ -1042,8 +1044,8 @@ func TestTextBox_UndoStoresEditsNotSnapshots(t *testing.T) {
 	tb.SetText(strings.Repeat("x", 400000))
 	tb.SetCaretPosition(1000)
 	typeRunes(tb, strings.Repeat("a", 50))
-	key(tb, KeyBackspace, 0)
-	key(tb, KeyDelete, 0)
+	key(tb, base.KeyBackspace, 0)
+	key(tb, base.KeyDelete, 0)
 
 	total := 0
 	tb.mu.Lock()
@@ -1074,7 +1076,7 @@ func TestTextBox_UndoDepthLimited(t *testing.T) {
 		t.Fatalf("глубина истории %d, ждали %d", n, tbUndoDepth)
 	}
 	for i := 0; i < 300; i++ {
-		key(tb, KeyZ, ModCtrl)
+		key(tb, base.KeyZ, base.ModCtrl)
 	}
 	if got := len(tb.GetText()); got != 50 {
 		t.Errorf("после отмены всей истории осталось %d знаков, ждали 50 (250-200)", got)
@@ -1087,14 +1089,14 @@ func TestTextBox_SetTextResetsHistory(t *testing.T) {
 	tb := newTestTB(t, 300, 100)
 	typeRunes(tb, "hello")
 	tb.SetText("совсем другой текст")
-	key(tb, KeyZ, ModCtrl)
+	key(tb, base.KeyZ, base.ModCtrl)
 	if got := tb.GetText(); got != "совсем другой текст" {
 		t.Errorf("Ctrl+Z после SetText испортил текст: %q", got)
 	}
 	// Тот же текст историю не трогает (так делают привязки на каждое изменение).
 	typeRunes(tb, "!")
 	tb.SetText(tb.GetText())
-	key(tb, KeyZ, ModCtrl)
+	key(tb, base.KeyZ, base.ModCtrl)
 	if got := tb.GetText(); got != "совсем другой текст" {
 		t.Errorf("SetText тем же текстом сбросил историю: %q", got)
 	}
@@ -1122,33 +1124,33 @@ func TestTextBox_UndoRedoMatchesSnapshotModel(t *testing.T) {
 			isUndo, isRedo := false, false
 			switch op {
 			case 0, 1, 2:
-				tb.OnKeyEvent(KeyEvent{Rune: rune("abc de"[rnd.Intn(6)]), Pressed: true})
+				tb.OnKeyEvent(base.KeyEvent{Rune: rune("abc de"[rnd.Intn(6)]), Pressed: true})
 				isEdit = true
 			case 3:
-				key(tb, KeyEnter, 0)
+				key(tb, base.KeyEnter, 0)
 				isEdit = true
 			case 4:
-				key(tb, KeyBackspace, 0)
+				key(tb, base.KeyBackspace, 0)
 			case 5:
-				key(tb, KeyDelete, 0)
+				key(tb, base.KeyDelete, 0)
 			case 6:
-				key(tb, KeyBackspace, ModCtrl)
+				key(tb, base.KeyBackspace, base.ModCtrl)
 			case 7:
-				key(tb, KeyDelete, ModCtrl)
+				key(tb, base.KeyDelete, base.ModCtrl)
 			case 8:
-				key(tb, KeyLeft, KeyMod(rnd.Intn(2))*ModShift)
+				key(tb, base.KeyLeft, base.KeyMod(rnd.Intn(2))*base.ModShift)
 			case 9:
-				key(tb, KeyRight, KeyMod(rnd.Intn(2))*ModShift)
+				key(tb, base.KeyRight, base.KeyMod(rnd.Intn(2))*base.ModShift)
 			case 10:
 				tb.InsertAtCaret("xyz\nq")
 				isEdit = true
 			case 11:
-				key(tb, KeyA, ModCtrl)
+				key(tb, base.KeyA, base.ModCtrl)
 			case 12:
-				key(tb, KeyZ, ModCtrl)
+				key(tb, base.KeyZ, base.ModCtrl)
 				isUndo = true
 			case 13:
-				key(tb, KeyY, ModCtrl)
+				key(tb, base.KeyY, base.ModCtrl)
 				isRedo = true
 			}
 			after := now()
@@ -1203,16 +1205,16 @@ func TestTextBox_IMECommitIsUndoable(t *testing.T) {
 	if n != 3 {
 		t.Errorf("записей %d: ждали 3 (два знака и один IME-ввод)", n)
 	}
-	key(tb, KeyZ, ModCtrl)
+	key(tb, base.KeyZ, base.ModCtrl)
 	if got := tb.GetText(); got != "ab" {
 		t.Errorf("после отмены ввода IME: %q", got)
 	}
-	key(tb, KeyY, ModCtrl)
+	key(tb, base.KeyY, base.ModCtrl)
 	if got := tb.GetText(); got != "ab你" {
 		t.Errorf("после возврата: %q", got)
 	}
-	key(tb, KeyZ, ModCtrl)
-	key(tb, KeyZ, ModCtrl)
+	key(tb, base.KeyZ, base.ModCtrl)
+	key(tb, base.KeyZ, base.ModCtrl)
 	if got := tb.GetText(); got != "a" {
 		t.Errorf("отмена прежних правок после IME: %q", got)
 	}
@@ -1250,12 +1252,12 @@ func TestTextBox_ConcurrentDrawEditStyle(t *testing.T) {
 	}
 	run(func(int) { draw(tb) })
 	run(func(i int) {
-		tb.OnKeyEvent(KeyEvent{Rune: 'q', Pressed: true})
+		tb.OnKeyEvent(base.KeyEvent{Rune: 'q', Pressed: true})
 		if i%7 == 0 {
-			key(tb, KeyTab, 0)
+			key(tb, base.KeyTab, 0)
 		}
 		if i%5 == 0 {
-			key(tb, KeyZ, ModCtrl)
+			key(tb, base.KeyZ, base.ModCtrl)
 		}
 	})
 	run(func(i int) {

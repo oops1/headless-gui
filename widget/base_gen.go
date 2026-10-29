@@ -157,6 +157,12 @@ func BuildAccessTree(root Widget, focused Widget) *AccessNode {
 	return base.BuildAccessTree(root, focused)
 }
 
+// AccessDescriber — виджет вне ядра сам дописывает к общей семантике
+// (границы, доступность, фокус, подсказка) роль, имя, значение и состояния —
+// то, что для виджетов ядра делают ветки accessInfoFor. Полную семантику
+// вместо общей задаёт Accessible.
+type AccessDescriber = base.AccessDescriber
+
 // ── accesstext.go ──
 
 // AccessTextProvider — виджет, чьё содержимое читается как ТЕКСТ.
@@ -380,6 +386,11 @@ type Margin = base.Margin
 // Base — общие поля и тривиальные реализации интерфейса Widget.
 // Встраивается во все конкретные виджеты.
 type Base = base.Base
+
+// DefaultSizer — размер виджета по умолчанию для авторазмера в Grid,
+// DockPanel и WrapPanel, когда разметка его не задала: виджет вне ядра
+// отвечает сам, вместо ветки по типу в desiredWidth и desiredHeight.
+type DefaultSizer = base.DefaultSizer
 
 // IsWidgetVisible возвращает false, если виджет реализует IsVisible() и скрыт.
 // Виджеты без этого метода считаются видимыми.
@@ -2338,7 +2349,7 @@ const (
 // NewImageWidget создаёт пустой виджет. Загрузите изображение через SetSource или SetImage.
 func NewImageWidget() *ImageWidget { return base.NewImageWidget() }
 
-// ── ime.go ──
+// ── imecomposer.go ──
 
 // IMEComposer — виджет, принимающий незавершённый ввод.
 //
@@ -2490,18 +2501,6 @@ func NewListView(items ...string) *ListView { return base.NewListView(items...) 
 // в тестах пакета tests/ для проверки поведения SetItems/AddItem
 // и AutoScrollToBottom.
 func ListViewScrollY(lv *ListView) int { return base.ListViewScrollY(lv) }
-
-// ── loader.go ──
-
-// UINode описывает один виджет в JSON-конфигурации.
-type UINode = base.UINode
-
-// LoadUIFromFile читает JSON-файл и строит дерево виджетов.
-// Возвращает корневой виджет и map[id]Widget для именованных виджетов.
-func LoadUIFromFile(path string) (Widget, map[string]Widget, error) { return base.LoadUIFromFile(path) }
-
-// LoadUIFromJSON разбирает JSON и строит дерево виджетов.
-func LoadUIFromJSON(data []byte) (Widget, map[string]Widget, error) { return base.LoadUIFromJSON(data) }
 
 // ── localization.go ──
 
@@ -3620,77 +3619,11 @@ type TabControl = base.TabControl
 // NewTabControl создаёт TabControl с заданными вкладками.
 func NewTabControl(tabs ...TabItem) *TabControl { return base.NewTabControl(tabs...) }
 
-// ── textbox.go ──
+// ── textfield.go ──
 
-// TextBox — многострочный текстовый редактор (WPF TextBox c
-// AcceptsReturn="True"). Дополняет однострочный TextInput.
-//
-// Поддерживает:
-//   - Перенос по словам (Wrap = TextWrapping="Wrap") либо горизонтальный скролл
-//     с полосой прокрутки (колесо с Shift, горизонтальное колесо, перетаскивание)
-//   - Вертикальный скролл: колесо мыши, PgUp/PgDn, тонкий индикатор
-//   - Именованный шрифт (FontName), в том числе моноширинный для кода
-//   - Табуляция: приём Tab как символа (AcceptTab) и табстопы (TabSize)
-//   - Стили на диапазонах: подсветка синтаксиса, поиска, ошибок (SetStyler)
-//   - Каретка, выделение мышью (drag), Shift+навигация, двойной клик — слово
-//   - Стрелки, Ctrl+стрелки (по словам), Home/End, Ctrl+Home/End (документ)
-//   - Ctrl+A/C/X/V, Ctrl+Z / Ctrl+Y (undo/redo)
-//   - Enter — перевод строки; OnChange при каждом изменении
-//   - Контекстное меню (Cut/Copy/Paste/Select All)
-//   - Темизация (ApplyTheme), headless-ввод через engine.SendKeyEvent
-//
-// Компоновка текста (разбиение на строки) считается через MeasureTextFor —
-// измерителем движка дерева поля (ADR-0008); работает и вне Draw
-// (клавиатура/мышь), и в headless-режиме.
-type TextBox = base.TextBox
-
-// NewTextBox создаёт многострочный редактор с переносом по словам.
-func NewTextBox(placeholder string) *TextBox { return base.NewTextBox(placeholder) }
-
-// ── textbox_style.go ──
-
-// Style — оформление куска текста. Нулевое поле означает «как у виджета»:
-// так приложению не нужно знать цвет темы, чтобы подсветить одно слово.
-type Style = base.Style
-
-// Span — стиль на диапазоне рун [From, To) внутри текста строки.
-type Span = base.Span
-
-// Styler отдаёт стили строк приложению. Реализует приложение.
-//
-// LineSpans вызывается из потока отрисовки без блокировок виджета — внутри
-// можно звать методы TextBox (GetText и т.п.). Метод должен быть быстрым: он
-// стоит на пути кадра. Результат кэшируется до правки текста либо до
-// InvalidateStyles, поэтому он обязан зависеть только от (line, text) и от
-// состояния самого приложения, о смене которого оно сообщает InvalidateStyles.
-type Styler = base.Styler
-
-// ── textinput.go ──
-
-// TextInput — однострочное текстовое поле в стиле Windows 10 Dark.
-//
-// Поддерживает:
-//   - Ввод Unicode-символов (включая кириллицу)
-//   - Backspace (удалить слева) / Delete (удалить справа)
-//   - Стрелки влево/вправо, Home, End
-//   - Shift+стрелки / Shift+Home / Shift+End — выделение текста
-//   - Ctrl+A — выделить всё
-//   - Ctrl+C / Ctrl+X — копирование/вырезание (внутренний буфер)
-//   - Ctrl+V — вставка из внутреннего буфера
-//   - Мигающий курсор (~530 мс, стиль Windows)
-//   - Клик мышью позиционирует курсор
-//   - Горизонтальный скролл при переполнении поля
-//   - OnEnter — callback при нажатии Enter
-//   - OnChange — callback при каждом изменении текста
-type TextInput = base.TextInput
-
-// NewTextInput создаёт текстовое поле в стиле Windows 10 Dark.
-func NewTextInput(placeholder string) *TextInput { return base.NewTextInput(placeholder) }
-
-// NewPasswordInput создаёт текстовое поле в режиме пароля.
-// Текст маскируется символом ●, копирование заблокировано.
-// Кнопка-глазик справа позволяет показать/скрыть пароль.
-func NewPasswordInput(placeholder string) *TextInput { return base.NewPasswordInput(placeholder) }
+// TextEditor — поле ввода текста (TextInput, TextBox или поле стороннего
+// пакета): то, что привязка данных, диалоги и загрузчики делают с полем.
+type TextEditor = base.TextEditor
 
 // ── theme.go ──
 

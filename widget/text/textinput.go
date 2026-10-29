@@ -1,4 +1,4 @@
-package base
+package text
 
 import (
 	"image"
@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // TextInput — однострочное текстовое поле в стиле Windows 10 Dark.
@@ -24,20 +26,20 @@ import (
 //   - OnEnter — callback при нажатии Enter
 //   - OnChange — callback при каждом изменении текста
 type TextInput struct {
-	Base
+	base.Base
 
 	mu       sync.Mutex
-	runes    []rune         // содержимое как []rune
-	caretPos int            // позиция вставки (индекс в runes)
-	ime      imeState       // диапазон незавершённого ввода (ime.go)
-	selStart int            // начало выделения (-1 = нет)
-	selEnd   int            // конец выделения
-	scrollX  int            // горизонтальный сдвиг, пикселей
-	dragging bool           // true — идёт выделение мышью (зажата ЛКМ)
-	capMgr   CaptureManager // инжектится движком через SetCaptureManager
+	runes    []rune              // содержимое как []rune
+	caretPos int                 // позиция вставки (индекс в runes)
+	ime      imeState            // диапазон незавершённого ввода (ime.go)
+	selStart int                 // начало выделения (-1 = нет)
+	selEnd   int                 // конец выделения
+	scrollX  int                 // горизонтальный сдвиг, пикселей
+	dragging bool                // true — идёт выделение мышью (зажата ЛКМ)
+	capMgr   base.CaptureManager // инжектится движком через SetCaptureManager
 
 	// Контекстное меню (правый клик).
-	contextMenu *PopupMenu
+	contextMenu *base.PopupMenu
 
 	// Позиции символов от последнего Draw: positions[i] = X-сдвиг i-го символа от начала текста.
 	// Обновляется в Draw(), используется в OnMouseButton().
@@ -112,7 +114,7 @@ type TextInput struct {
 	redoStack []textEdit
 
 	// Для детекции двойного клика (выделение слова).
-	clicks clickSeries // номер нажатия в серии, если движок его не прислал
+	clicks base.ClickSeries // номер нажатия в серии, если движок его не прислал
 
 	// Состояние ошибки валидации (WPF Validation.HasError). "" = нет ошибки.
 	validationError string
@@ -142,14 +144,14 @@ type textEdit struct {
 func NewTextInput(placeholder string) *TextInput {
 	return &TextInput{
 		Placeholder: placeholder,
-		Background:  win10.InputBG,
-		BorderColor: win10.InputBorder,
-		FocusBorder: win10.InputFocus,
+		Background:  base.ActiveTheme().InputBG,
+		BorderColor: base.ActiveTheme().InputBorder,
+		FocusBorder: base.ActiveTheme().InputFocus,
 		ErrorBorder: color.RGBA{R: 232, G: 17, B: 35, A: 255}, // #E81123 Win10 error red
-		TextColor:   win10.InputText,
-		PlaceColor:  win10.InputPlaceholder,
-		CaretColor:  win10.InputCaret,
-		SelColor:    premulAlpha(win10.Accent, 110),
+		TextColor:   base.ActiveTheme().InputText,
+		PlaceColor:  base.ActiveTheme().InputPlaceholder,
+		CaretColor:  base.ActiveTheme().InputCaret,
+		SelColor:    base.PremulAlpha(base.ActiveTheme().Accent, 110),
 		PaddingX:    6,
 		PaddingY:    4,
 		selStart:    -1,
@@ -263,11 +265,11 @@ func (t *TextInput) GetText() string {
 }
 
 // Cursor возвращает текстовый курсор (I-beam) над полем ввода (CursorProvider).
-func (t *TextInput) Cursor(x, y int) Cursor {
+func (t *TextInput) Cursor(x, y int) base.Cursor {
 	if t.IsEnabled() {
-		return CursorIBeam
+		return base.CursorIBeam
 	}
-	return CursorArrow
+	return base.CursorArrow
 }
 
 // ─── Focusable ───────────────────────────────────────────────────────────────
@@ -363,13 +365,6 @@ func runesEqualString(rs []rune, s string) bool {
 	return i == len(rs)
 }
 
-// caretBlinkHalfPeriodMs — полупериод мигания каретки (мс, стиль Windows).
-const caretBlinkHalfPeriodMs = 530
-
-// caretPhaseAt возвращает фазу мигания каретки (true — каретка видима)
-// для момента времени ms (Unix-миллисекунды).
-func caretPhaseAt(ms int64) bool { return (ms/caretBlinkHalfPeriodMs)%2 == 0 }
-
 // NeedsAnimation — «нужен ли движку кадр ради мигающей каретки».
 //
 // PERF-11: раньше здесь возвращалось просто IsFocused(), и движок в on-demand
@@ -385,7 +380,7 @@ func caretPhaseAt(ms int64) bool { return (ms/caretBlinkHalfPeriodMs)%2 == 0 }
 // ровно то, от чего мы уходим. Задержка — один тик (≤ 1/FPS) на полупериод
 // 530 мс, визуально незаметна.
 func (t *TextInput) NeedsAnimation() bool {
-	phase := caretPhaseAt(time.Now().UnixMilli())
+	phase := base.CaretPhaseAt(time.Now().UnixMilli())
 	t.mu.Lock()
 	if !t.focused || (t.caretPhaseKnown && t.caretPhase == phase) {
 		t.mu.Unlock()
@@ -424,7 +419,7 @@ func (t *TextInput) ValidationError() string {
 
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
-func (t *TextInput) OnKeyEvent(e KeyEvent) {
+func (t *TextInput) OnKeyEvent(e base.KeyEvent) {
 	if !t.IsEnabled() || !e.Pressed {
 		return
 	}
@@ -435,8 +430,8 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 		return
 	}
 
-	ctrl := e.Mod&ModCtrl != 0
-	shift := e.Mod&ModShift != 0
+	ctrl := e.Mod&base.ModCtrl != 0
+	shift := e.Mod&base.ModShift != 0
 
 	t.mu.Lock()
 	changed := false
@@ -451,7 +446,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	caret0, sel0, sel1 := t.caretPos, t.selStart, t.selEnd
 
 	switch e.Code {
-	case KeyLeft:
+	case base.KeyLeft:
 		if shift {
 			if t.selStart < 0 {
 				t.selStart = t.caretPos
@@ -470,7 +465,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 			t.selStart = -1
 		}
 
-	case KeyRight:
+	case base.KeyRight:
 		if shift {
 			if t.selStart < 0 {
 				t.selStart = t.caretPos
@@ -489,7 +484,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 			t.selStart = -1
 		}
 
-	case KeyHome:
+	case base.KeyHome:
 		if shift {
 			if t.selStart < 0 {
 				t.selStart = t.caretPos
@@ -501,7 +496,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 			t.selStart = -1
 		}
 
-	case KeyEnd:
+	case base.KeyEnd:
 		if shift {
 			if t.selStart < 0 {
 				t.selStart = t.caretPos
@@ -513,7 +508,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 			t.selStart = -1
 		}
 
-	case KeyBackspace:
+	case base.KeyBackspace:
 		if t.deleteSel() {
 			changed = true
 		} else if ctrl {
@@ -532,7 +527,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 			changed = true
 		}
 
-	case KeyInsert:
+	case base.KeyInsert:
 		if ctrl {
 			// Ctrl+Insert = копировать (как Ctrl+C); в password-режиме запрещено.
 			t.copySelection()
@@ -543,7 +538,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 			}
 		}
 
-	case KeyDelete:
+	case base.KeyDelete:
 		if shift {
 			// Shift+Delete = вырезать (как Ctrl+X) — приоритетнее обычного Delete.
 			if t.cutSelection() {
@@ -565,7 +560,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 			changed = true
 		}
 
-	case KeyEnter:
+	case base.KeyEnter:
 		if t.AcceptsReturn {
 			// Многострочный режим: вставляем перевод строки
 			t.deleteSel()
@@ -581,7 +576,7 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 	default:
 		if ctrl {
 			switch e.Code {
-			case KeyZ:
+			case base.KeyZ:
 				if shift {
 					t.redo()
 				} else {
@@ -589,23 +584,23 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 				}
 				isUndoRedo = true
 				changed = true
-			case KeyY:
+			case base.KeyY:
 				t.redo()
 				isUndoRedo = true
 				changed = true
-			case KeyA:
+			case base.KeyA:
 				t.selStart = 0
 				t.selEnd = len(t.runes)
 				t.caretPos = len(t.runes)
-			case KeyC:
+			case base.KeyC:
 				// В режиме пароля копирование запрещено (см. copySelection).
 				t.copySelection()
-			case KeyX:
+			case base.KeyX:
 				// В режиме пароля вырезание запрещено (см. cutSelection).
 				if t.cutSelection() {
 					changed = true
 				}
-			case KeyV:
+			case base.KeyV:
 				if t.pasteFromClipboard() {
 					changed = true
 				}
@@ -666,14 +661,14 @@ func (t *TextInput) OnKeyEvent(e KeyEvent) {
 // ─── Mouse Capture (drag-выделение текста) ──────────────────────────────────
 
 // SetCaptureManager инжектит менеджер захвата мыши (вызывается движком при SetRoot).
-func (t *TextInput) SetCaptureManager(cm CaptureManager) {
+func (t *TextInput) SetCaptureManager(cm base.CaptureManager) {
 	t.capMgr = cm
 }
 
 // WantsCapture возвращает true для ЛКМ внутри текстового поля —
 // захватываем мышь, чтобы mouseUp и mouseMove приходили сюда даже за пределами bounds.
-func (t *TextInput) WantsCapture(e MouseEvent) bool {
-	if e.Button != MouseLeft || !e.Pressed {
+func (t *TextInput) WantsCapture(e base.MouseEvent) bool {
+	if e.Button != base.MouseLeft || !e.Pressed {
 		return false
 	}
 	// Не захватываем, если клик по глазику (isPassword — под t.mu, SEC-18).
@@ -703,7 +698,7 @@ func (t *TextInput) leadingZone() int {
 	}
 	sz := t.LeadingIconSize
 	if sz <= 0 {
-		sz = t.bounds.Dy() - 10
+		sz = t.Base.Bounds().Dy() - 10
 	}
 	if sz < 12 {
 		sz = 12
@@ -714,7 +709,7 @@ func (t *TextInput) leadingZone() int {
 // charIndexAtX возвращает индекс символа (позицию каретки) для абсолютной X-координаты.
 // Вызывать под t.mu.Lock().
 func (t *TextInput) charIndexAtX(absX int) int {
-	b := t.bounds
+	b := t.Base.Bounds()
 	textX := b.Min.X + t.PaddingX + t.leadingZone() - t.scrollX
 	relX := absX - textX
 
@@ -746,13 +741,13 @@ func (t *TextInput) wordBoundsAt(idx int) (int, int) {
 	if idx < 0 {
 		idx = 0
 	}
-	cls := isWordRune(t.runes[idx])
+	cls := base.IsWordRune(t.runes[idx])
 	lo := idx
-	for lo > 0 && isWordRune(t.runes[lo-1]) == cls {
+	for lo > 0 && base.IsWordRune(t.runes[lo-1]) == cls {
 		lo--
 	}
 	hi := idx + 1
-	for hi < n && isWordRune(t.runes[hi]) == cls {
+	for hi < n && base.IsWordRune(t.runes[hi]) == cls {
 		hi++
 	}
 	return lo, hi
@@ -765,10 +760,10 @@ func (t *TextInput) wordLeft(idx int) int {
 		return 0
 	}
 	i := idx - 1
-	for i > 0 && !isWordRune(t.runes[i]) {
+	for i > 0 && !base.IsWordRune(t.runes[i]) {
 		i--
 	}
-	for i > 0 && isWordRune(t.runes[i-1]) {
+	for i > 0 && base.IsWordRune(t.runes[i-1]) {
 		i--
 	}
 	return i
@@ -779,10 +774,10 @@ func (t *TextInput) wordLeft(idx int) int {
 func (t *TextInput) wordRight(idx int) int {
 	n := len(t.runes)
 	i := idx
-	for i < n && isWordRune(t.runes[i]) {
+	for i < n && base.IsWordRune(t.runes[i]) {
 		i++
 	}
-	for i < n && !isWordRune(t.runes[i]) {
+	for i < n && !base.IsWordRune(t.runes[i]) {
 		i++
 	}
 	return i
@@ -795,7 +790,7 @@ func (t *TextInput) copySelection() {
 		return
 	}
 	lo, hi := t.normSel()
-	ClipboardSetText(string(t.runes[lo:hi]))
+	base.ClipboardSetText(string(t.runes[lo:hi]))
 }
 
 // cutSelection копирует выделение в буфер обмена и удаляет его. В password-
@@ -806,7 +801,7 @@ func (t *TextInput) cutSelection() bool {
 		return false
 	}
 	lo, hi := t.normSel()
-	ClipboardSetText(string(t.runes[lo:hi]))
+	base.ClipboardSetText(string(t.runes[lo:hi]))
 	t.deleteSel()
 	return true
 }
@@ -815,7 +810,7 @@ func (t *TextInput) cutSelection() bool {
 // (с учётом выделения и MaxLength). Возвращает true, если текст фактически
 // вставлен. Вызывать под t.mu.Lock().
 func (t *TextInput) pasteFromClipboard() bool {
-	clipText := ClipboardGetText()
+	clipText := base.ClipboardGetText()
 	if len(clipText) == 0 {
 		return false
 	}
@@ -843,24 +838,9 @@ func (t *TextInput) pasteFromClipboard() bool {
 	return true
 }
 
-// isWordRune — true для букв/цифр/подчёркивания (символы одного «слова»).
-func isWordRune(r rune) bool {
-	if r == '_' {
-		return true
-	}
-	if r >= '0' && r <= '9' {
-		return true
-	}
-	if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
-		return true
-	}
-	// Не-ASCII (кириллица и т.п.) считаем частью слова, пробелы — нет.
-	return r > 127 && r != ' '
-}
-
 // ─── MouseClickHandler ───────────────────────────────────────────────────────
 
-func (t *TextInput) OnMouseButton(e MouseEvent) bool {
+func (t *TextInput) OnMouseButton(e base.MouseEvent) bool {
 	if !t.IsEnabled() {
 		return false
 	}
@@ -869,7 +849,7 @@ func (t *TextInput) OnMouseButton(e MouseEvent) bool {
 	if t.contextMenu != nil && t.contextMenu.IsOpen() {
 		// Поглощаем отпускание правой кнопки — это та же кнопка,
 		// которой открыли меню; без этого popup закроется мгновенно.
-		if e.Button == MouseRight && !e.Pressed {
+		if e.Button == base.MouseRight && !e.Pressed {
 			return true
 		}
 		pr := t.contextMenu.Bounds()
@@ -882,12 +862,12 @@ func (t *TextInput) OnMouseButton(e MouseEvent) bool {
 	}
 
 	// Правый клик — контекстное меню.
-	if e.Button == MouseRight && e.Pressed {
+	if e.Button == base.MouseRight && e.Pressed {
 		t.showContextMenu(e.X, e.Y)
 		return true
 	}
 
-	if e.Button != MouseLeft {
+	if e.Button != base.MouseLeft {
 		return false
 	}
 
@@ -903,7 +883,7 @@ func (t *TextInput) OnMouseButton(e MouseEvent) bool {
 		}
 	}()
 
-	b := t.bounds
+	b := t.Base.Bounds()
 
 	if e.Pressed {
 		// ── MouseDown (ЛКМ) ──
@@ -918,7 +898,7 @@ func (t *TextInput) OnMouseButton(e MouseEvent) bool {
 
 		// Двойной щелчок выделяет слово, тройной — всё поле: строка здесь
 		// одна, и «выделить строку» означает выделить её целиком.
-		switch n := clicksOf(e, &t.clicks); {
+		switch n := base.ClicksOf(e, &t.clicks); {
 		case n == 2:
 			lo, hi := t.wordBoundsAt(idx)
 			t.selStart = lo
@@ -961,14 +941,14 @@ func (t *TextInput) showContextMenu(x, y int) {
 	isPwd := t.isPassword
 	t.mu.Unlock()
 
-	clipText := ClipboardGetText()
+	clipText := base.ClipboardGetText()
 	hasClip := len(clipText) > 0
 
-	menu := NewPopupMenu()
+	menu := base.NewPopupMenu()
 	menu.SetHost(t)
 
 	// Cut
-	menu.SetItems([]MenuItem{
+	menu.SetItems([]base.MenuItem{
 		{
 			Text:     "Cut",
 			Disabled: !hasSel || isPwd,
@@ -976,7 +956,7 @@ func (t *TextInput) showContextMenu(x, y int) {
 				t.mu.Lock()
 				if t.selActive() && !t.isPassword {
 					lo, hi := t.normSel()
-					ClipboardSetText(string(t.runes[lo:hi]))
+					base.ClipboardSetText(string(t.runes[lo:hi]))
 					t.deleteSel()
 					t.clampCaret()
 					text := string(t.runes)
@@ -998,7 +978,7 @@ func (t *TextInput) showContextMenu(x, y int) {
 				t.mu.Lock()
 				if t.selActive() && !t.isPassword {
 					lo, hi := t.normSel()
-					ClipboardSetText(string(t.runes[lo:hi]))
+					base.ClipboardSetText(string(t.runes[lo:hi]))
 				}
 				t.mu.Unlock()
 			},
@@ -1007,7 +987,7 @@ func (t *TextInput) showContextMenu(x, y int) {
 			Text:     "Paste",
 			Disabled: !hasClip,
 			OnClick: func() {
-				ct := ClipboardGetText()
+				ct := base.ClipboardGetText()
 				if len(ct) == 0 {
 					return
 				}
@@ -1090,7 +1070,7 @@ func (t *TextInput) OnMouseMove(x, y int) {
 	}
 
 	if t.isPassword {
-		b := t.bounds
+		b := t.Base.Bounds()
 		t.eyeHovered = x >= b.Max.X-eyeButtonWidth && x <= b.Max.X &&
 			y >= b.Min.Y && y <= b.Max.Y
 	}
@@ -1101,9 +1081,9 @@ func (t *TextInput) OnMouseMove(x, y int) {
 // eyeButtonWidth — ширина области кнопки-глазика для пароля.
 const eyeButtonWidth = 28
 
-func (t *TextInput) Draw(ctx DrawContext) {
-	sizePt := DefaultFontSize()
-	metricsRev := TextMetricsRev()
+func (t *TextInput) Draw(ctx base.DrawContext) {
+	sizePt := base.DefaultFontSize()
+	metricsRev := base.TextMetricsRev()
 
 	t.mu.Lock()
 	isFocused := t.focused
@@ -1144,19 +1124,19 @@ func (t *TextInput) Draw(ctx DrawContext) {
 	}
 	t.mu.Unlock()
 
-	b := t.bounds
+	b := t.Base.Bounds()
 	if b.Empty() {
 		return
 	}
 
-	st := currentStyle()
+	st := base.CurrentThemeStyle()
 
 	// Фон + рамка по стилю темы.
 	switch {
 	case st.Classic3D:
 		// Классика: утопленное поле (sunken bevel), прямые углы.
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.Background)
-		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		base.DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		if hasError {
 			ctx.DrawBorder(b.Min.X+2, b.Min.Y+2, b.Dx()-4, b.Dy()-4, t.ErrorBorder)
 		}
@@ -1238,7 +1218,7 @@ func (t *TextInput) Draw(ctx DrawContext) {
 
 	// Клиппинг по внутренней области поля (без зоны глазика и без значка)
 	inner := image.Rect(b.Min.X+leadPad, b.Min.Y+1, b.Max.X-rightPad, b.Max.Y-1)
-	restoreClip := PushClip(ctx, inner)
+	restoreClip := base.PushClip(ctx, inner)
 
 	textX := b.Min.X + leadPad - scrollX
 
@@ -1280,7 +1260,7 @@ func (t *TextInput) Draw(ctx DrawContext) {
 	// Мигающий курсор. Отрисованную фазу запоминаем — по ней NeedsAnimation
 	// решает, нужен ли кадр (PERF-11).
 	if isFocused {
-		caretVisible := caretPhaseAt(time.Now().UnixMilli())
+		caretVisible := base.CaretPhaseAt(time.Now().UnixMilli())
 		t.mu.Lock()
 		t.caretPhase, t.caretPhaseKnown = caretVisible, true
 		t.mu.Unlock()
@@ -1297,14 +1277,14 @@ func (t *TextInput) Draw(ctx DrawContext) {
 		t.drawEyeButton(ctx, b, textY, textH, showPwd, eyeHov)
 	}
 
-	t.drawChildren(ctx)
-	t.drawDisabledOverlay(ctx)
+	t.DrawChildren(ctx)
+	t.DrawDisabledOverlay(ctx)
 }
 
 // drawEyeButton рисует кнопку показа/скрытия пароля в правой части поля.
 // Иконка: упрощённый «глаз» — овал + зрачок.
 // Если пароль скрыт — перечёркнутый глаз (диагональная линия).
-func (t *TextInput) drawEyeButton(ctx DrawContext, b image.Rectangle, textY, textH int, showPwd, hovered bool) {
+func (t *TextInput) drawEyeButton(ctx base.DrawContext, b image.Rectangle, textY, textH int, showPwd, hovered bool) {
 	// Область кнопки
 	btnX := b.Max.X - eyeButtonWidth
 	btnY := b.Min.Y
@@ -1398,7 +1378,7 @@ func (t *TextInput) HasOverlay() bool {
 }
 
 // DrawOverlay рисует контекстное меню поверх всего UI.
-func (t *TextInput) DrawOverlay(ctx DrawContext) {
+func (t *TextInput) DrawOverlay(ctx base.DrawContext) {
 	if t.contextMenu != nil && t.contextMenu.IsOpen() {
 		t.contextMenu.DrawOverlay(ctx)
 	}
@@ -1422,21 +1402,21 @@ func (t *TextInput) Dismiss() {
 
 // ─── Themeable ───────────────────────────────────────────────────────────────
 
-func (t *TextInput) ApplyTheme(th *Theme) {
+func (t *TextInput) ApplyTheme(th *base.Theme) {
 	t.Background = th.InputBG
 	t.BorderColor = th.InputBorder
 	t.FocusBorder = th.InputFocus
 	t.TextColor = th.InputText
 	t.PlaceColor = th.InputPlaceholder
 	t.CaretColor = th.InputCaret
-	t.SelColor = premulAlpha(th.Accent, 110)
+	t.SelColor = base.PremulAlpha(th.Accent, 110)
 }
 
 // drawLeadingIcon рисует значок в начале поля.
 //
 // По центру отведённой зоны и по вертикали: значок меньше поля, и прижатый к
 // краю он читался бы как часть рамки, а не как часть содержимого.
-func (t *TextInput) drawLeadingIcon(ctx DrawContext, b image.Rectangle) {
+func (t *TextInput) drawLeadingIcon(ctx base.DrawContext, b image.Rectangle) {
 	if t.LeadingIcon == nil {
 		return
 	}
@@ -1455,8 +1435,8 @@ func (t *TextInput) drawLeadingIcon(ctx DrawContext, b image.Rectangle) {
 // (замечание WinLine после v3.38.0). '•' (U+2022) есть почти везде и рисуется
 // основным шрифтом, то есть цветом текста. Контекст, который не умеет
 // ответить про глиф, получает '•' — он надёжнее.
-func passwordMask(ctx DrawContext) rune {
-	if has, known := ContextHasGlyph(ctx, '●'); known && has {
+func passwordMask(ctx base.DrawContext) rune {
+	if has, known := base.ContextHasGlyph(ctx, '●'); known && has {
 		return '●'
 	}
 	return '•'

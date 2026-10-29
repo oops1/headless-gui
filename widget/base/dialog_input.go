@@ -13,7 +13,7 @@ import "image"
 type InputDialog struct {
 	eng   ModalShower
 	dlg   *Dialog
-	input *TextInput
+	input TextEditor
 	hint  *Label
 
 	hintText string // постоянная подсказка (возвращается после ошибки)
@@ -92,7 +92,7 @@ func (mb *MessageBox) ShowInputWidth(title, label, initial string, validate func
 	lbl.SetBounds(image.Rect(padX, labelY, dlgW-padX, labelY+18))
 	dlg.AddChild(lbl)
 
-	field := NewTextInput("")
+	field := newTextInputField("")
 	field.SetText(initial)
 	field.SetBounds(image.Rect(padX, fieldY, dlgW-padX, fieldY+fieldH))
 	dlg.AddChild(field)
@@ -163,7 +163,9 @@ func (id *InputDialog) confirm() {
 		if msg := id.validate(text); msg != "" {
 			id.hint.TextColor = severityColor(SeverityError)
 			id.hint.SetText(msg)
-			id.input.SetValidationError(msg)
+			if va, ok := id.input.(ValidationAware); ok {
+				va.SetValidationError(msg)
+			}
 			return
 		}
 	}

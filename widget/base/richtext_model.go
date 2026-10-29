@@ -210,13 +210,13 @@ func (d *richDoc) wordBounds(off int) (int, int) {
 	if off >= d.paraEnd(pi) {
 		off = d.paraEnd(pi) - 1
 	}
-	cls := isWordRune(d.runes[off])
+	cls := IsWordRune(d.runes[off])
 	lo, hi := off, off+1
 	end := d.paraEnd(pi)
-	for lo > d.paraStart[pi] && isWordRune(d.runes[lo-1]) == cls {
+	for lo > d.paraStart[pi] && IsWordRune(d.runes[lo-1]) == cls {
 		lo--
 	}
-	for hi < end && isWordRune(d.runes[hi]) == cls {
+	for hi < end && IsWordRune(d.runes[hi]) == cls {
 		hi++
 	}
 	return lo, hi

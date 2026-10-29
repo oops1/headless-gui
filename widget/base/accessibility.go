@@ -325,6 +325,14 @@ func buildAccessTree(root Widget, focused Widget, off image.Point, clip accessCl
 	return node
 }
 
+// AccessDescriber — виджет вне ядра сам дописывает к общей семантике
+// (границы, доступность, фокус, подсказка) роль, имя, значение и состояния —
+// то, что для виджетов ядра делают ветки accessInfoFor. Полную семантику
+// вместо общей задаёт Accessible.
+type AccessDescriber interface {
+	DescribeAccess(info *AccessInfo)
+}
+
 // accessInfoFor выводит семантику встроенного виджета.
 func accessInfoFor(w Widget) AccessInfo {
 	// Кастомная семантика имеет приоритет.
@@ -382,19 +390,8 @@ func accessInfoFor(w Widget) AccessInfo {
 	case *NumericUpDown:
 		info.Role = RoleSpinner
 		info.Value = fmt.Sprintf("%g", t.Value())
-	case *TextInput:
-		info.Role = RoleTextInput
-		if t.IsPasswordMode() {
-			info.States = append(info.States, StatePassword)
-		} else {
-			info.Value = t.GetText()
-		}
-	case *TextBox:
-		info.Role = RoleDocument
-		info.Value = t.GetText()
-		if t.ReadOnly {
-			info.States = append(info.States, StateReadOnly)
-		}
+	case AccessDescriber:
+		t.DescribeAccess(&info)
 	case *Label:
 		info.Role = RoleLabel
 		info.Name = t.Text()

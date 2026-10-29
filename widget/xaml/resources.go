@@ -1,6 +1,6 @@
 // resources.go — WPF Resources, Styles и markup-расширения (P0).
 //
-// Реализовано как пред-обработка дерева xElement ДО построения виджетов:
+// Реализовано как пред-обработка дерева Element ДО построения виджетов:
 //   1. collect  — собирает ResourceDictionary / <X.Resources>: скалярные
 //                 ресурсы (цвета/строки/числа) по x:Key и стили <Style>.
 //   2. process  — резолвит markup в атрибутах ({StaticResource},
@@ -55,7 +55,7 @@ type xamlEnv struct {
 	scalars        map[string]string     // x:Key → скалярное значение (цвет/строка/число)
 	keyedStyles    map[string]*xamlStyle // x:Key → стиль
 	implicitStyles map[string]*xamlStyle // TargetType → неявный стиль
-	templates      map[string]*xElement  // x:Key → <ControlTemplate>
+	templates      map[string]*Element  // x:Key → <ControlTemplate>
 
 	bindings []pendingBinding // собранные {Binding} для живой привязки
 	triggers []pendingTrigger // собранные DataTrigger для динамических сеттеров
@@ -73,12 +73,12 @@ type xamlEnv struct {
 // и СОБИРАЕТ {Binding}-выражения для последующей живой привязки.
 // ctx (DataContext) используется для начального резолва {Binding}; может быть nil.
 // Возвращает env (с собранными привязками/триггерами/ItemsControl'ами).
-func preprocessXAML(root *xElement, ctx interface{}) *xamlEnv {
+func preprocessXAML(root *Element, ctx interface{}) *xamlEnv {
 	env := &xamlEnv{
 		scalars:        map[string]string{},
 		keyedStyles:    map[string]*xamlStyle{},
 		implicitStyles: map[string]*xamlStyle{},
-		templates:      map[string]*xElement{},
+		templates:      map[string]*Element{},
 	}
 	env.collect(root, 0)
 	env.process(root, ctx)
@@ -105,8 +105,8 @@ func logTooDeep(what string) {
 
 // ensureName возвращает имя элемента, генерируя его при отсутствии (и записывая
 // в атрибуты, чтобы билдер зарегистрировал виджет в registry для привязки).
-func (env *xamlEnv) ensureName(el *xElement) string {
-	if n := el.name(); n != "" {
+func (env *xamlEnv) ensureName(el *Element) string {
+	if n := el.Name(); n != "" {
 		return n
 	}
 	env.nameSeq++
@@ -127,7 +127,7 @@ func isDataGridColumnTag(tag string) bool {
 	return strings.HasPrefix(tag, "datagrid") && strings.HasSuffix(tag, "column")
 }
 
-func (env *xamlEnv) collect(el *xElement, depth int) {
+func (env *xamlEnv) collect(el *Element, depth int) {
 	if depth > maxXAMLDepth {
 		logTooDeep("collect")
 		return
@@ -143,7 +143,7 @@ func (env *xamlEnv) collect(el *xElement, depth int) {
 }
 
 // addResource регистрирует один элемент-ресурс (скаляр или стиль).
-func (env *xamlEnv) addResource(el *xElement, depth int) {
+func (env *xamlEnv) addResource(el *Element, depth int) {
 	if depth > maxXAMLDepth {
 		logTooDeep("addResource")
 		return
@@ -160,13 +160,13 @@ func (env *xamlEnv) addResource(el *xElement, depth int) {
 		env.addStyle(el)
 		return
 	case tag == "controltemplate":
-		if key := el.attr("x:Key", "Key"); key != "" {
+		if key := el.Attr("x:Key", "Key"); key != "" {
 			clone := cloneXElement(el)
 			env.templates[key] = &clone
 		}
 		return
 	}
-	key := el.attr("x:Key", "Key")
+	key := el.Attr("x:Key", "Key")
 	if key == "" {
 		return
 	}
@@ -178,25 +178,25 @@ func (env *xamlEnv) addResource(el *xElement, depth int) {
 // scalarResourceValue извлекает строковое значение скалярного ресурса:
 // <SolidColorBrush Color="#FF0000"/>, <Color>#FF0000</Color>,
 // <sys:String>Hi</sys:String>, <sys:Double>20</sys:Double>.
-func scalarResourceValue(el *xElement) string {
-	if c := el.attr("Color"); c != "" {
+func scalarResourceValue(el *Element) string {
+	if c := el.Attr("Color"); c != "" {
 		return c
 	}
 	if v := strings.TrimSpace(el.Text); v != "" {
 		return v
 	}
-	if v := el.attr("Value"); v != "" {
+	if v := el.Attr("Value"); v != "" {
 		return v
 	}
 	return ""
 }
 
 // addStyle разбирает <Style> и регистрирует его.
-func (env *xamlEnv) addStyle(el *xElement) {
+func (env *xamlEnv) addStyle(el *Element) {
 	s := &xamlStyle{
-		target:  strings.ToLower(stripTypeName(el.attr("TargetType"))),
-		key:     el.attr("x:Key", "Key"),
-		basedOn: extractKey(el.attr("BasedOn")),
+		target:  strings.ToLower(stripTypeName(el.Attr("TargetType"))),
+		key:     el.Attr("x:Key", "Key"),
+		basedOn: extractKey(el.Attr("BasedOn")),
 		setters: map[string]string{},
 	}
 	collectSetters(el, s)
@@ -210,7 +210,7 @@ func (env *xamlEnv) addStyle(el *xElement) {
 }
 
 // collectStyleTriggers разбирает <Style.Triggers> → DataTrigger.
-func collectStyleTriggers(styleEl *xElement, s *xamlStyle) {
+func collectStyleTriggers(styleEl *Element, s *xamlStyle) {
 	for i := range styleEl.Children {
 		c := &styleEl.Children[i]
 		if !strings.HasSuffix(strings.ToLower(c.Tag), ".triggers") {
@@ -221,9 +221,9 @@ func collectStyleTriggers(styleEl *xElement, s *xamlStyle) {
 			tr := styleTrigger{setters: map[string]string{}}
 			switch strings.ToLower(t.Tag) {
 			case "datatrigger":
-				tr.conds = []triggerCond{{path: parseBindingPath(t.attr("Binding")), value: t.attr("Value")}}
+				tr.conds = []triggerCond{{path: parseBindingPath(t.Attr("Binding")), value: t.Attr("Value")}}
 			case "trigger":
-				tr.conds = []triggerCond{{property: stripPropName(t.attr("Property")), value: t.attr("Value")}}
+				tr.conds = []triggerCond{{property: stripPropName(t.Attr("Property")), value: t.Attr("Value")}}
 			case "multitrigger", "multidatatrigger":
 				tr.conds = collectTriggerConditions(t)
 			default:
@@ -239,7 +239,7 @@ func collectStyleTriggers(styleEl *xElement, s *xamlStyle) {
 
 // collectTriggerConditions собирает <Condition> из MultiTrigger.Conditions /
 // MultiDataTrigger.Conditions.
-func collectTriggerConditions(el *xElement) []triggerCond {
+func collectTriggerConditions(el *Element) []triggerCond {
 	var out []triggerCond
 	for i := range el.Children {
 		c := &el.Children[i]
@@ -251,10 +251,10 @@ func collectTriggerConditions(el *xElement) []triggerCond {
 			if !strings.EqualFold(cond.Tag, "Condition") {
 				continue
 			}
-			tc := triggerCond{value: cond.attr("Value")}
-			if bnd := cond.attr("Binding"); bnd != "" {
+			tc := triggerCond{value: cond.Attr("Value")}
+			if bnd := cond.Attr("Binding"); bnd != "" {
 				tc.path = parseBindingPath(bnd)
-			} else if p := cond.attr("Property"); p != "" {
+			} else if p := cond.Attr("Property"); p != "" {
 				tc.property = stripPropName(p)
 			}
 			if tc.path != "" || tc.property != "" {
@@ -266,32 +266,32 @@ func collectTriggerConditions(el *xElement) []triggerCond {
 }
 
 // collectSettersInto собирает <Setter Property Value> в переданную карту.
-func collectSettersInto(el *xElement, dst map[string]string) {
+func collectSettersInto(el *Element, dst map[string]string) {
 	for i := range el.Children {
 		c := &el.Children[i]
 		if !strings.EqualFold(c.Tag, "Setter") {
 			continue
 		}
-		prop := c.attr("Property")
+		prop := c.Attr("Property")
 		if prop == "" {
 			continue
 		}
-		dst[stripPropName(prop)] = c.attr("Value")
+		dst[stripPropName(prop)] = c.Attr("Value")
 	}
 }
 
 // collectSetters собирает <Setter Property Value> (в т.ч. внутри <Style.Setters>).
-func collectSetters(el *xElement, s *xamlStyle) {
+func collectSetters(el *Element, s *xamlStyle) {
 	for i := range el.Children {
 		child := &el.Children[i]
 		ctag := strings.ToLower(child.Tag)
 		switch {
 		case ctag == "setter":
-			prop := child.attr("Property")
+			prop := child.Attr("Property")
 			if prop == "" {
 				continue
 			}
-			val := child.attr("Value")
+			val := child.Attr("Value")
 			if val == "" {
 				// <Setter.Value> как вложенный элемент — берём Color/Text.
 				for j := range child.Children {
@@ -311,11 +311,11 @@ func collectSetters(el *xElement, s *xamlStyle) {
 
 // process — точка входа обработки поддерева (глубина 0). Сигнатуру используют
 // живые перестроения из binding.go, поэтому она сохранена как есть.
-func (env *xamlEnv) process(el *xElement, ctx interface{}) {
+func (env *xamlEnv) process(el *Element, ctx interface{}) {
 	env.processAt(el, ctx, 0)
 }
 
-func (env *xamlEnv) processAt(el *xElement, ctx interface{}, depth int) {
+func (env *xamlEnv) processAt(el *Element, ctx interface{}, depth int) {
 	if depth > maxXAMLDepth {
 		logTooDeep("process")
 		return
@@ -378,13 +378,13 @@ func (env *xamlEnv) processAt(el *xElement, ctx interface{}, depth int) {
 
 // registerVirtual сохраняет шаблон и путь источника VirtualizingItemsControl для
 // последующей ленивой материализации; удаляет ItemTemplate/ItemsSource из узла.
-func (env *xamlEnv) registerVirtual(el *xElement, ctx interface{}) {
+func (env *xamlEnv) registerVirtual(el *Element, ctx interface{}) {
 	tmpl := findDataTemplateRoot(el)
-	src := strings.TrimSpace(el.attr("ItemsSource"))
+	src := strings.TrimSpace(el.Attr("ItemsSource"))
 	name := env.ensureName(el)
 
 	// Убираем .ItemTemplate из детей — рантайм строит строки сам.
-	var keep []xElement
+	var keep []Element
 	for _, c := range el.Children {
 		if strings.HasSuffix(strings.ToLower(c.Tag), ".itemtemplate") {
 			continue
@@ -418,7 +418,7 @@ var liftableProps = map[string]bool{
 // (и <X.Prop>значение</X.Prop>) в атрибут Prop="значение" на самом X.
 // Структурные property-element'ы (RowDefinitions, Resources, Triggers, …) не
 // затрагиваются — поднимаются только скалярные свойства из whitelist.
-func (env *xamlEnv) liftPropertyElements(el *xElement) {
+func (env *xamlEnv) liftPropertyElements(el *Element) {
 	elTag := strings.ToLower(el.Tag)
 	for i := range el.Children {
 		c := &el.Children[i]
@@ -453,7 +453,7 @@ func (env *xamlEnv) liftPropertyElements(el *xElement) {
 
 // scalarFromPropertyElement извлекает скалярное значение из property-element:
 // вложенный <SolidColorBrush Color=.../>, <Color>, текст или Value.
-func scalarFromPropertyElement(c *xElement) string {
+func scalarFromPropertyElement(c *Element) string {
 	for j := range c.Children {
 		if v := scalarResourceValue(&c.Children[j]); v != "" {
 			return v
@@ -466,7 +466,7 @@ func scalarFromPropertyElement(c *xElement) string {
 }
 
 // resolveAttrs резолвит markup-расширения и регистрирует {Binding} в атрибутах.
-func (env *xamlEnv) resolveAttrs(el *xElement, ctx interface{}) {
+func (env *xamlEnv) resolveAttrs(el *Element, ctx interface{}) {
 	// Итерируем по снимку ключей: ensureName может добавить ключ "Name".
 	keys := make([]string, 0, len(el.attrs))
 	for k := range el.attrs {
@@ -522,9 +522,9 @@ func (env *xamlEnv) resolveAttrs(el *xElement, ctx interface{}) {
 // дочерним. Сам ItemsControl превращается в вертикальный StackPanel.
 //
 // Привязка одноразовая (на момент загрузки). Возвращает true, если развёрнут.
-func (env *xamlEnv) expandItemsControl(el *xElement, ctx interface{}) bool {
+func (env *xamlEnv) expandItemsControl(el *Element, ctx interface{}) bool {
 	tmpl := findDataTemplateRoot(el)
-	src := strings.TrimSpace(el.attr("ItemsSource"))
+	src := strings.TrimSpace(el.Attr("ItemsSource"))
 	if tmpl == nil || !strings.HasPrefix(src, "{Binding") || ctx == nil {
 		return false
 	}
@@ -538,7 +538,7 @@ func (env *xamlEnv) expandItemsControl(el *xElement, ctx interface{}) bool {
 	// Сохраняем СЫРОЙ шаблон (до обработки) для живого перестроения.
 	rawTmpl := cloneXElement(tmpl)
 
-	var kids []xElement
+	var kids []Element
 	prev := env.inItemTemplate
 	env.inItemTemplate = true
 	for _, it := range items {
@@ -568,7 +568,7 @@ func (env *xamlEnv) expandItemsControl(el *xElement, ctx interface{}) bool {
 }
 
 // findDataTemplateRoot ищет корневой элемент шаблона в ItemsControl.ItemTemplate.
-func findDataTemplateRoot(el *xElement) *xElement {
+func findDataTemplateRoot(el *Element) *Element {
 	for i := range el.Children {
 		c := &el.Children[i]
 		if !strings.HasSuffix(strings.ToLower(c.Tag), ".itemtemplate") {
@@ -590,14 +590,14 @@ func findDataTemplateRoot(el *xElement) *xElement {
 }
 
 // cloneXElement делает глубокую копию узла XAML-дерева.
-func cloneXElement(el *xElement) xElement {
+func cloneXElement(el *Element) Element {
 	return cloneXElementAt(el, 0)
 }
 
 // cloneXElementAt — рекурсивное тело cloneXElement с ограничением глубины
 // (SEC-7): поддерево глубже maxXAMLDepth не копируется.
-func cloneXElementAt(el *xElement, depth int) xElement {
-	c := xElement{Tag: el.Tag, Text: el.Text, attrs: make(map[string]string, len(el.attrs))}
+func cloneXElementAt(el *Element, depth int) Element {
+	c := Element{Tag: el.Tag, Text: el.Text, attrs: make(map[string]string, len(el.attrs))}
 	for k, v := range el.attrs {
 		c.attrs[k] = v
 	}
@@ -613,10 +613,10 @@ func cloneXElementAt(el *xElement, depth int) xElement {
 
 // applyStyleTo находит применимый стиль и вливает его Setter'ы в атрибуты
 // элемента (только те, что не заданы явно).
-func (env *xamlEnv) applyStyleTo(el *xElement, ctx interface{}) {
+func (env *xamlEnv) applyStyleTo(el *Element, ctx interface{}) {
 	tag := strings.ToLower(el.Tag)
 	var st *xamlStyle
-	if sref := el.attr("Style"); sref != "" {
+	if sref := el.Attr("Style"); sref != "" {
 		if key := extractKey(sref); key != "" {
 			st = env.keyedStyles[key]
 		}

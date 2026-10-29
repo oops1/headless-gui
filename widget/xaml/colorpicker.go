@@ -20,19 +20,19 @@ import (
 // цвета редактора темы у каждого приложения свои, а набор по умолчанию —
 // общий.
 
-func buildXAMLColorPicker(el xElement) base.Widget {
+func buildXAMLColorPicker(el Element) base.Widget {
 	p := base.NewColorPicker()
-	if v := el.attr("Value", "Color", "SelectedColor"); v != "" {
+	if v := el.Attr("Value", "Color", "SelectedColor"); v != "" {
 		if c, err := parseXAMLColor(v); err == nil {
 			p.SetValue(c)
 		}
 	}
-	if v := el.attr("Palette", "Colors"); v != "" {
+	if v := el.Attr("Palette", "Colors"); v != "" {
 		if cols := parseXAMLColorList(v); len(cols) > 0 {
 			p.SetPalette(cols)
 		}
 	}
-	if fs := el.attr("FontSize"); fs != "" {
+	if fs := el.Attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			p.FontSize = v
 		}
@@ -40,19 +40,19 @@ func buildXAMLColorPicker(el xElement) base.Widget {
 	return p
 }
 
-func buildXAMLSwatch(el xElement) base.Widget {
+func buildXAMLSwatch(el Element) base.Widget {
 	s := base.NewSwatch(color.RGBA{A: 255})
-	if v := el.attr("Color", "Value", "Fill", "Background"); v != "" {
+	if v := el.Attr("Color", "Value", "Fill", "Background"); v != "" {
 		if c, err := parseXAMLColor(v); err == nil {
 			s.Color = c
 		}
 	}
-	if v := el.attr("BorderBrush", "Border"); v != "" {
+	if v := el.Attr("BorderBrush", "Border"); v != "" {
 		if c, err := parseXAMLColor(v); err == nil {
 			s.Border = c
 		}
 	}
-	if v := el.attr("CornerRadius"); v != "" {
+	if v := el.Attr("CornerRadius"); v != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
 			s.CornerRadius = n
 		}

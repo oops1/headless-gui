@@ -49,6 +49,9 @@ type Config struct {
 	// Skip — экспортированные имена, которые фасад объявляет сам (не
 	// генерируются).
 	Skip map[string]bool
+	// Prelude — оператор, который обёртка функции name выполняет перед
+	// вызовом (например, ленивая регистрация); "" — ничего. nil — нигде.
+	Prelude func(name string) string
 	// Tool — как перегенерировать (в шапку файла).
 	Tool string
 }
@@ -467,6 +470,11 @@ func (g *gen) funcDecl(out *bytes.Buffer, d *ast.FuncDecl) {
 	call := fmt.Sprintf("%s.%s(%s)", g.cfg.Alias, d.Name.Name, strings.Join(args, ", "))
 	if res != "" {
 		call = "return " + call
+	}
+	if g.cfg.Prelude != nil {
+		if pre := g.cfg.Prelude(d.Name.Name); pre != "" {
+			call = pre + "\n" + call
+		}
 	}
 	fmt.Fprintf(out, "func %s(%s)%s { %s }\n\n", d.Name.Name, strings.Join(params, ", "), res, call)
 }

@@ -49,7 +49,7 @@ func TestFacade_Complete(t *testing.T) {
 			want[n] = kind
 		}
 	}
-	got := facadeNames(t)
+	got, hand := facadeNames(t)
 	var missing, extra, wrong []string
 	for n, kind := range want {
 		g, ok := got[n]
@@ -61,7 +61,7 @@ func TestFacade_Complete(t *testing.T) {
 		}
 	}
 	for n := range got {
-		if _, ok := want[n]; !ok {
+		if _, ok := want[n]; !ok && !hand[n] {
 			extra = append(extra, n)
 		}
 	}
@@ -148,9 +148,10 @@ func TestFacade_TypesIdentical(t *testing.T) {
 	}
 }
 
-// facadeNames — экспортированные имена пакета widget с видом; тип должен
-// быть алиасом.
-func facadeNames(t *testing.T) map[string]string {
+// facadeNames — экспортированные имена пакета widget с видом и множество
+// имён из рукописных файлов (не *_gen.go: JSON-загрузчик, регистрация XAML).
+// В сгенерированных файлах тип должен быть алиасом, методов нет.
+func facadeNames(t *testing.T) (map[string]string, map[string]bool) {
 	t.Helper()
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
@@ -158,10 +159,17 @@ func facadeNames(t *testing.T) map[string]string {
 		t.Fatal(err)
 	}
 	out := map[string]string{}
+	hand := map[string]bool{}
 	for _, e := range entries {
 		n := e.Name()
 		if !strings.HasSuffix(n, ".go") || strings.HasSuffix(n, "_test.go") {
 			continue
+		}
+		gen := strings.HasSuffix(n, "_gen.go")
+		mark := func(name string) {
+			if !gen {
+				hand[name] = true
+			}
 		}
 		f, err := parser.ParseFile(fset, filepath.Join(".", n), nil, 0)
 		if err != nil {
@@ -171,24 +179,29 @@ func facadeNames(t *testing.T) map[string]string {
 			switch d := d.(type) {
 			case *ast.FuncDecl:
 				if d.Recv != nil {
-					t.Errorf("%s: метод %s в фасаде — у фасада нет своих типов", n, d.Name.Name)
+					if gen {
+						t.Errorf("%s: метод %s в сгенерированном фасаде", n, d.Name.Name)
+					}
 				} else if d.Name.IsExported() {
 					out[d.Name.Name] = "func"
+					mark(d.Name.Name)
 				}
 			case *ast.GenDecl:
 				for _, s := range d.Specs {
 					switch s := s.(type) {
 					case *ast.TypeSpec:
-						if !s.Assign.IsValid() {
+						if gen && !s.Assign.IsValid() {
 							t.Errorf("%s: тип %s в фасаде не алиас", n, s.Name.Name)
 						}
 						if s.Name.IsExported() {
 							out[s.Name.Name] = "type"
+							mark(s.Name.Name)
 						}
 					case *ast.ValueSpec:
 						for _, id := range s.Names {
 							if id.IsExported() {
 								out[id.Name] = strings.ToLower(d.Tok.String())
+								mark(id.Name)
 							}
 						}
 					}
@@ -196,7 +209,7 @@ func facadeNames(t *testing.T) map[string]string {
 			}
 		}
 	}
-	return out
+	return out, hand
 }
 
 var updateAPI = flag.Bool("update-api", false, "переписать testdata/api.txt по фасаду")
@@ -208,7 +221,7 @@ var updateAPI = flag.Bool("update-api", false, "переписать testdata/ap
 // имён — осознанное, с правкой testdata/api.txt
 // (go test ./widget -run APISnapshot -update-api).
 func TestFacade_APISnapshot(t *testing.T) {
-	got := facadeNames(t)
+	got, _ := facadeNames(t)
 	lines := make([]string, 0, len(got))
 	for n, kind := range got {
 		lines = append(lines, kind+" "+n)
@@ -242,5 +255,53 @@ func TestFacade_APISnapshot(t *testing.T) {
 		if !have[l] {
 			t.Errorf("из фасада пропало: %s", l)
 		}
+	}
+}
+
+// Каждая обёртка xaml, которая строит виджеты (результат с Widget), сперва
+// регистрирует теги пакетов виджетов (registerXAML). Prelude генератора
+// выбирает их по имени; новый загрузчик с другим именем без регистрации
+// падал бы на <TextBox> «неизвестный элемент».
+func TestFacade_XAMLEntriesRegister(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "xaml_gen.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, d := range f.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || fd.Type.Results == nil {
+			continue
+		}
+		builds := false
+		for _, r := range fd.Type.Results.List {
+			ast.Inspect(r.Type, func(x ast.Node) bool {
+				if id, ok := x.(*ast.Ident); ok && id.Name == "Widget" {
+					builds = true
+				}
+				return true
+			})
+		}
+		if !builds {
+			continue
+		}
+		n++
+		first := ""
+		if len(fd.Body.List) > 0 {
+			if es, ok := fd.Body.List[0].(*ast.ExprStmt); ok {
+				if c, ok := es.X.(*ast.CallExpr); ok {
+					if id, ok := c.Fun.(*ast.Ident); ok {
+						first = id.Name
+					}
+				}
+			}
+		}
+		if first != "registerXAML" {
+			t.Errorf("%s строит виджеты, но не зовёт registerXAML() первым (Prelude в internal/facadegen/widget.go)", fd.Name.Name)
+		}
+	}
+	if n < 8 {
+		t.Errorf("обёрток загрузки XAML %d — ждали не меньше 8", n)
 	}
 }

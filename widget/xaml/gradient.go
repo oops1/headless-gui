@@ -13,12 +13,12 @@ import (
 
 // encodeGradient кодирует <LinearGradientBrush> в строку для передачи через
 // атрибут: "h|v;#RRGGBBAA@offset;...". Возвращает "" если не градиент.
-func encodeGradient(brush *xElement) string {
+func encodeGradient(brush *Element) string {
 	if !strings.EqualFold(brush.Tag, "LinearGradientBrush") {
 		return ""
 	}
 	orient := "v"
-	if gradientIsHorizontal(brush.attr("StartPoint"), brush.attr("EndPoint")) {
+	if gradientIsHorizontal(brush.Attr("StartPoint"), brush.Attr("EndPoint")) {
 		orient = "h"
 	}
 	var parts []string
@@ -28,8 +28,8 @@ func encodeGradient(brush *xElement) string {
 		if !strings.EqualFold(s.Tag, "GradientStop") {
 			continue
 		}
-		col := s.attr("Color")
-		off := s.attr("Offset")
+		col := s.Attr("Color")
+		off := s.Attr("Offset")
 		if col == "" {
 			continue
 		}

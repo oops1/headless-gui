@@ -235,7 +235,7 @@ func (btn *Button) drawChrome(ctx DrawContext, b image.Rectangle, bg, border col
 		// нажатой кнопки. Иначе в теме Win2000 состояние не видно вовсе:
 		// hover она не подсвечивает, и фон у обоих состояний один.
 		if pressed || btn.IsChecked() {
-			drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+			DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		} else {
 			drawBevelRaised(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		}

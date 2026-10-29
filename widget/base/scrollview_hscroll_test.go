@@ -588,7 +588,7 @@ func TestScrollViewH_DragThumb(t *testing.T) {
 
 	// Тянем на 20 px вправо — ровно так же должен уехать ползунок.
 	sv.OnMouseMove(grab+20, y+40) // курсор может уйти вниз за границу: drag идёт по x
-	want := int(hbarScrollForThumbX(track, th.Min.X+20, 400, 200, 600) + 0.5)
+	want := int(HBarScrollForThumbX(track, th.Min.X+20, 400, 200, 600) + 0.5)
 	if got := sv.ScrollX(); got != want || got == 0 {
 		t.Errorf("после сдвига ползунка на 20 px ScrollX=%d, ждал %d", got, want)
 	}
@@ -637,7 +637,7 @@ func TestScrollViewH_ClickTrackJumps(t *testing.T) {
 		t.Fatalf("подготовка: точка %d попала на ползунок %v", x, th)
 	}
 	sv.OnMouseButton(MouseEvent{X: x, Y: y, Button: MouseLeft, Pressed: true})
-	want := int(hbarScrollAt(track, x, 400, 200, 600) + 0.5)
+	want := int(HBarScrollAt(track, x, 400, 200, 600) + 0.5)
 	if got := sv.ScrollX(); got != want || got == 0 {
 		t.Errorf("прыжок по треку: ScrollX=%d, ждал %d", got, want)
 	}

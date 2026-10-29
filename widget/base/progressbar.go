@@ -194,7 +194,7 @@ func (pb *ProgressBar) drawThemed(ctx DrawContext, b image.Rectangle, v float64)
 	case st.Classic3D:
 		// Классика: утопленная дорожка, заполнение «блоками» Win2000.
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), pb.Background)
-		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 		innerW := b.Dx() - 6
 		blockW, gap := 8, 2
 		if pb.indeterminate.Load() {

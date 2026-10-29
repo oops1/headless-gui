@@ -694,7 +694,7 @@ func (m *MergeView) leftPressLocked(e MouseEvent) bool {
 		return true
 	}
 	if tr := m.hbarTrackLocked(m.geom()); !tr.Empty() &&
-		image.Pt(e.X, e.Y).In(tr.Inset(-dvHBarInsetX)) {
+		image.Pt(e.X, e.Y).In(tr.Inset(-HBarInsetX)) {
 		m.hbarPressLocked(e.X)
 		return true
 	}

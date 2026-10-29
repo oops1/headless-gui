@@ -254,7 +254,7 @@ func (m *MergeView) drawPane(ctx DrawContext, g mvGeom, side MergeSide, outer im
 			// Строки на этой стороне нет: место занято чужой. Полоса блока
 			// показывает, что участок к нему относится.
 			if marked {
-				ctx.FillRectAlpha(codeX-8, y, codeR-(codeX-8), dvLineH, premulAlpha(band, 120))
+				ctx.FillRectAlpha(codeX-8, y, codeR-(codeX-8), dvLineH, PremulAlpha(band, 120))
 			}
 			continue
 		}
@@ -387,7 +387,7 @@ func (m *MergeView) drawButtons(ctx DrawContext, g mvGeom, outer image.Rectangle
 				chosen := (slot == mvBtnOurs && m.res[ci] == MergeTakeOurs) ||
 					(slot == mvBtnTheirs && m.res[ci] == MergeTakeTheirs)
 				if !chosen {
-					col = premulAlpha(col, 90)
+					col = PremulAlpha(col, 90)
 				}
 			}
 			if m.hoverBtn == ci*mvBtnSlots+slot {
@@ -426,7 +426,7 @@ func (m *MergeView) drawHScroll(ctx DrawContext, g mvGeom) {
 		return
 	}
 	defer PushClip(ctx, tr.Inset(-2).Intersect(g.b))()
-	drawHBar(ctx, tr, th, m.pal.track, m.pal.thumb)
+	DrawHBar(ctx, tr, th, m.pal.track, m.pal.thumb)
 }
 
 // drawRuler — полоса-обзор: где по файлу стоят конфликты и что уже решено, и
@@ -464,7 +464,7 @@ func (m *MergeView) drawRuler(ctx DrawContext, g mvGeom) {
 		if m.rulerDrag {
 			alpha = 170 // схваченный ползунок плотнее — видно, что он в руке
 		}
-		ctx.FillRectAlpha(th.Min.X, th.Min.Y, th.Dx(), th.Dy(), premulAlpha(p.thumb, alpha))
+		ctx.FillRectAlpha(th.Min.X, th.Min.Y, th.Dx(), th.Dy(), PremulAlpha(p.thumb, alpha))
 	}
 }
 

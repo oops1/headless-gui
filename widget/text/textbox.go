@@ -1,4 +1,4 @@
-package base
+package text
 
 import (
 	"image"
@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // TextBox — многострочный текстовый редактор (WPF TextBox c
@@ -31,7 +33,7 @@ import (
 // измерителем движка дерева поля (ADR-0008); работает и вне Draw
 // (клавиатура/мышь), и в headless-режиме.
 type TextBox struct {
-	Base
+	base.Base
 
 	mu          sync.Mutex
 	runes       []rune
@@ -54,11 +56,11 @@ type TextBox struct {
 	runeOff   []int
 
 	dragging bool
-	capMgr   CaptureManager
+	capMgr   base.CaptureManager
 
-	contextMenu *PopupMenu
+	contextMenu *base.PopupMenu
 
-	clicks clickSeries // номер нажатия в серии, если движок его не прислал
+	clicks base.ClickSeries // номер нажатия в серии, если движок его не прислал
 
 	// ime — диапазон незавершённого ввода внутри runes (ime.go). Набираемое
 	// хранится прямо в тексте: так его видно без правок в отрисовке, а
@@ -156,7 +158,7 @@ type tbLayoutKey struct {
 	// ms — измеритель владельца дерева, которым посчитана раскладка
 	// (owner_services.go): поле, перенесённое в другой движок, раскладывается
 	// заново.
-	ms *MeasureSet
+	ms *base.MeasureSet
 	fs   float64
 	font string
 	tab  int // табуляция в пробелах; 0 — табстопов нет
@@ -168,31 +170,18 @@ func NewTextBox(placeholder string) *TextBox {
 	return &TextBox{
 		Placeholder: placeholder,
 		Wrap:        true,
-		Background:  win10.InputBG,
-		BorderColor: win10.InputBorder,
-		FocusBorder: win10.InputFocus,
-		TextColor:   win10.InputText,
-		PlaceColor:  win10.InputPlaceholder,
-		CaretColor:  win10.InputCaret,
-		SelColor:    premulAlpha(win10.Accent, 110),
+		Background:  base.ActiveTheme().InputBG,
+		BorderColor: base.ActiveTheme().InputBorder,
+		FocusBorder: base.ActiveTheme().InputFocus,
+		TextColor:   base.ActiveTheme().InputText,
+		PlaceColor:  base.ActiveTheme().InputPlaceholder,
+		CaretColor:  base.ActiveTheme().InputCaret,
+		SelColor:    base.PremulAlpha(base.ActiveTheme().Accent, 110),
 		PaddingX:    6,
 		PaddingY:    4,
 		selAnchor:   -1,
 		desiredX:    -1,
 		dirty:       true,
-	}
-}
-
-// premulAlpha возвращает корректный premultiplied-цвет: c с прозрачностью a.
-// color.RGBA в Go — альфа-премультиплицированный; каналы, превышающие альфу,
-// при Over-блендинге переполняются (артефакт «мадженты» на светлом фоне).
-func premulAlpha(c color.RGBA, a uint8) color.RGBA {
-	m := uint32(a)
-	return color.RGBA{
-		R: uint8(uint32(c.R) * m / 255),
-		G: uint8(uint32(c.G) * m / 255),
-		B: uint8(uint32(c.B) * m / 255),
-		A: a,
 	}
 }
 
@@ -343,20 +332,20 @@ func (t *TextBox) ScrollTop() int {
 }
 
 // Cursor — текстовый курсор (I-beam) над редактором.
-func (t *TextBox) Cursor(x, y int) Cursor {
+func (t *TextBox) Cursor(x, y int) base.Cursor {
 	if !t.IsEnabled() {
-		return CursorArrow
+		return base.CursorArrow
 	}
 	// Над полосой прокрутки — обычная стрелка: I-beam обещал бы текст там,
 	// где его нет.
 	t.mu.Lock()
 	t.ensureLayout()
-	onBar := t.hbarShown() && image.Pt(x, y).In(tbHBarHit(t.bounds, t.PaddingX, t.textAreaW()))
+	onBar := t.hbarShown() && image.Pt(x, y).In(tbHBarHit(t.Base.Bounds(), t.PaddingX, t.textAreaW()))
 	t.mu.Unlock()
 	if onBar {
-		return CursorArrow
+		return base.CursorArrow
 	}
-	return CursorIBeam
+	return base.CursorIBeam
 }
 
 // ─── Focusable / Animated ───────────────────────────────────────────────────
@@ -392,7 +381,7 @@ func (t *TextBox) IsFocused() bool {
 // увидит новое поколение инвалидации на следующем тике и нарисует частичный
 // кадр. Задержка в один тик на полупериод 530 мс глазу незаметна.
 func (t *TextBox) NeedsAnimation() bool {
-	phase := caretPhaseAt(time.Now().UnixMilli())
+	phase := base.CaretPhaseAt(time.Now().UnixMilli())
 	t.mu.Lock()
 	if !t.focused || (t.caretPhaseKnown && t.caretPhase == phase) {
 		t.mu.Unlock()
@@ -415,7 +404,7 @@ func (t *TextBox) fontSize() float64 {
 	if t.FontSize > 0 {
 		return t.FontSize
 	}
-	return DefaultFontSize()
+	return base.DefaultFontSize()
 }
 
 // lineHeight — высота визуальной строки в px.
@@ -424,7 +413,7 @@ func (t *TextBox) lineHeight() int {
 }
 
 // textAreaW — ширина области текста (внутри рамки, без скроллбара).
-func (t *TextBox) textAreaW() int { return t.textAreaWAt(t.bounds) }
+func (t *TextBox) textAreaW() int { return t.textAreaWAt(t.Base.Bounds()) }
 
 // textAreaWAt — то же для заданных границ: Draw работает с границами,
 // снятыми в начале кадра, и не должен перечитывать их по ходу.
@@ -439,7 +428,7 @@ func (t *TextBox) textAreaWAt(b image.Rectangle) int {
 // visibleLines — сколько строк помещается по высоте. Показанная полоса
 // горизонтальной прокрутки отнимает у текста свою высоту.
 func (t *TextBox) visibleLines() int {
-	h := t.bounds.Dy() - 2*t.PaddingY
+	h := t.Base.Bounds().Dy() - 2*t.PaddingY
 	if t.hbarShown() {
 		h -= tbHBarH
 	}
@@ -465,17 +454,17 @@ func (t *TextBox) effectiveTabSize() int {
 // раскладки (без Draw): тем же измерителем, что и всё остальное.
 func (t *TextBox) measureText(text string, fs float64) int {
 	if t.layoutKey.font == "" {
-		return MeasureTextFor(t, text, fs)
+		return base.MeasureTextFor(t, text, fs)
 	}
-	return MeasureTextFontFor(t, text, fs, t.layoutKey.font)
+	return base.MeasureTextFontFor(t, text, fs, t.layoutKey.font)
 }
 
 // ensureLayout перекомпоновывает строки при изменении текста, ширины, метрик
 // шрифта, самого шрифта или табстопов. Вызывать под t.mu.
 func (t *TextBox) ensureLayout() {
 	w := t.textAreaW()
-	rev := TextMetricsRev()
-	key := tbLayoutKey{ms: measureSetOf(t), fs: t.fontSize(), font: t.FontName, tab: t.effectiveTabSize(), wrap: t.Wrap}
+	rev := base.TextMetricsRev()
+	key := tbLayoutKey{ms: base.MeasureSetOf(t), fs: t.fontSize(), font: t.FontName, tab: t.effectiveTabSize(), wrap: t.Wrap}
 	if !t.dirty && t.layoutW == w && t.layoutRev == rev && t.layoutKey == key && t.lines != nil {
 		return
 	}
@@ -549,9 +538,9 @@ func (t *TextBox) measureRange(a, b int, fs float64) int {
 		// Прежний путь без изменений: кэшированный байтовый замер без
 		// аллокаций. Им идут все редакторы без шрифта и табуляций.
 		if fast {
-			return measureBytesFor(t, t.layoutBuf[t.runeOff[a]:t.runeOff[b]], fs)
+			return base.MeasureBytesFor(t, t.layoutBuf[t.runeOff[a]:t.runeOff[b]], fs)
 		}
-		return MeasureTextFor(t, string(t.runes[a:b]), fs)
+		return base.MeasureTextFor(t, string(t.runes[a:b]), fs)
 	}
 	var text string
 	if fast {
@@ -810,7 +799,7 @@ func (t *TextBox) clampScroll() {
 // Вызывать под t.mu.
 func (t *TextBox) charIndexAtPoint(absX, absY int) int {
 	t.ensureLayout()
-	b := t.bounds
+	b := t.Base.Bounds()
 	lh := t.lineHeight()
 	li := (absY - b.Min.Y - t.PaddingY + t.scrollY) / lh
 	if li < 0 {
@@ -885,10 +874,10 @@ func (t *TextBox) wordLeft(idx int) int {
 		return 0
 	}
 	i := idx - 1
-	for i > 0 && !isWordRune(t.runes[i]) {
+	for i > 0 && !base.IsWordRune(t.runes[i]) {
 		i--
 	}
-	for i > 0 && isWordRune(t.runes[i-1]) {
+	for i > 0 && base.IsWordRune(t.runes[i-1]) {
 		i--
 	}
 	return i
@@ -898,10 +887,10 @@ func (t *TextBox) wordLeft(idx int) int {
 func (t *TextBox) wordRight(idx int) int {
 	n := len(t.runes)
 	i := idx
-	for i < n && isWordRune(t.runes[i]) {
+	for i < n && base.IsWordRune(t.runes[i]) {
 		i++
 	}
-	for i < n && !isWordRune(t.runes[i]) {
+	for i < n && !base.IsWordRune(t.runes[i]) {
 		i++
 	}
 	return i
@@ -912,7 +901,7 @@ func (t *TextBox) wordRight(idx int) int {
 func (t *TextBox) copySelection() {
 	if t.selActive() {
 		lo, hi := t.normSel()
-		ClipboardSetText(string(t.runes[lo:hi]))
+		base.ClipboardSetText(string(t.runes[lo:hi]))
 	}
 }
 
@@ -923,7 +912,7 @@ func (t *TextBox) cutSelection() bool {
 		return false
 	}
 	lo, hi := t.normSel()
-	ClipboardSetText(string(t.runes[lo:hi]))
+	base.ClipboardSetText(string(t.runes[lo:hi]))
 	t.deleteSel()
 	return true
 }
@@ -935,7 +924,7 @@ func (t *TextBox) pasteFromClipboard() bool {
 	if t.ReadOnly {
 		return false
 	}
-	if clip := ClipboardGetText(); clip != "" {
+	if clip := base.ClipboardGetText(); clip != "" {
 		t.insertRunes([]rune(clip))
 		return true
 	}
@@ -944,7 +933,7 @@ func (t *TextBox) pasteFromClipboard() bool {
 
 // ─── KeyHandler ──────────────────────────────────────────────────────────────
 
-func (t *TextBox) OnKeyEvent(e KeyEvent) {
+func (t *TextBox) OnKeyEvent(e base.KeyEvent) {
 	if !t.IsEnabled() || !e.Pressed {
 		return
 	}
@@ -953,8 +942,8 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 		return
 	}
 
-	ctrl := e.Mod&ModCtrl != 0
-	shift := e.Mod&ModShift != 0
+	ctrl := e.Mod&base.ModCtrl != 0
+	shift := e.Mod&base.ModShift != 0
 
 	t.mu.Lock()
 	t.ensureLayout()
@@ -972,7 +961,7 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 	caret0, sel0, scr0, scr0x := t.caret, t.selAnchor, t.scrollY, t.scrollX
 
 	switch e.Code {
-	case KeyLeft:
+	case base.KeyLeft:
 		pos := t.caret
 		switch {
 		case ctrl:
@@ -984,7 +973,7 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 		}
 		t.moveCaret(pos, shift)
 
-	case KeyRight:
+	case base.KeyRight:
 		pos := t.caret
 		switch {
 		case ctrl:
@@ -996,13 +985,13 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 		}
 		t.moveCaret(pos, shift)
 
-	case KeyUp, KeyDown:
+	case base.KeyUp, base.KeyDown:
 		keepDesiredX = true
 		li, cx := t.caretPoint()
 		if t.desiredX < 0 {
 			t.desiredX = cx
 		}
-		if e.Code == KeyUp {
+		if e.Code == base.KeyUp {
 			li--
 		} else {
 			li++
@@ -1014,14 +1003,14 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 			t.selAnchor = -1
 		}
 
-	case KeyPageUp, KeyPageDown:
+	case base.KeyPageUp, base.KeyPageDown:
 		keepDesiredX = true
 		li, cx := t.caretPoint()
 		if t.desiredX < 0 {
 			t.desiredX = cx
 		}
 		page := t.visibleLines()
-		if e.Code == KeyPageUp {
+		if e.Code == base.KeyPageUp {
 			li -= page
 		} else {
 			li += page
@@ -1035,7 +1024,7 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 		col := t.colAtX(li, t.desiredX)
 		t.moveCaret(t.lines[li].start+col, shift)
 
-	case KeyHome:
+	case base.KeyHome:
 		if ctrl {
 			t.moveCaret(0, shift)
 		} else {
@@ -1043,7 +1032,7 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 			t.moveCaret(t.lines[li].start, shift)
 		}
 
-	case KeyEnd:
+	case base.KeyEnd:
 		if ctrl {
 			t.moveCaret(len(t.runes), shift)
 		} else {
@@ -1051,7 +1040,7 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 			t.moveCaret(t.lines[li].end, shift)
 		}
 
-	case KeyBackspace:
+	case base.KeyBackspace:
 		if t.ReadOnly {
 			break
 		}
@@ -1073,7 +1062,7 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 			changed = true
 		}
 
-	case KeyInsert:
+	case base.KeyInsert:
 		if ctrl {
 			// Ctrl+Insert = копировать (как Ctrl+C).
 			t.copySelection()
@@ -1084,7 +1073,7 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 			}
 		}
 
-	case KeyDelete:
+	case base.KeyDelete:
 		if shift {
 			// Shift+Delete = вырезать (как Ctrl+X) — приоритетнее обычного Delete
 			// (cutSelection сам блокирует ReadOnly).
@@ -1112,13 +1101,13 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 			changed = true
 		}
 
-	case KeyEnter:
+	case base.KeyEnter:
 		if !t.ReadOnly {
 			t.insertRunes([]rune{'\n'})
 			changed = true
 		}
 
-	case KeyTab:
+	case base.KeyTab:
 		// Tab до сюда доходит, только если AcceptsTab() сказал «да» (движок
 		// иначе уводит его в смену фокуса) либо событие подали напрямую.
 		// Вставляем сам символ: пробелы вместо него редактор кода выбирает
@@ -1132,7 +1121,7 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 	default:
 		if ctrl {
 			switch e.Code {
-			case KeyZ:
+			case base.KeyZ:
 				if t.ReadOnly {
 					break
 				}
@@ -1143,23 +1132,23 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 				}
 				isUndoRedo = true
 				changed = true
-			case KeyY:
+			case base.KeyY:
 				if t.ReadOnly {
 					break
 				}
 				t.redo()
 				isUndoRedo = true
 				changed = true
-			case KeyA:
+			case base.KeyA:
 				t.selAnchor = 0
 				t.caret = len(t.runes)
-			case KeyC:
+			case base.KeyC:
 				t.copySelection()
-			case KeyX:
+			case base.KeyX:
 				if t.cutSelection() {
 					changed = true
 				}
-			case KeyV:
+			case base.KeyV:
 				if t.pasteFromClipboard() {
 					changed = true
 				}
@@ -1200,21 +1189,21 @@ func (t *TextBox) OnKeyEvent(e KeyEvent) {
 // ─── Мышь ────────────────────────────────────────────────────────────────────
 
 // SetCaptureManager инжектится движком (drag-выделение за пределами bounds).
-func (t *TextBox) SetCaptureManager(cm CaptureManager) { t.capMgr = cm }
+func (t *TextBox) SetCaptureManager(cm base.CaptureManager) { t.capMgr = cm }
 
 // WantsCapture — захватываем мышь на ЛКМ внутри редактора.
-func (t *TextBox) WantsCapture(e MouseEvent) bool {
-	return e.Button == MouseLeft && e.Pressed
+func (t *TextBox) WantsCapture(e base.MouseEvent) bool {
+	return e.Button == base.MouseLeft && e.Pressed
 }
 
-func (t *TextBox) OnMouseButton(e MouseEvent) bool {
+func (t *TextBox) OnMouseButton(e base.MouseEvent) bool {
 	if !t.IsEnabled() {
 		return false
 	}
 
 	// Контекстное меню.
 	if t.contextMenu != nil && t.contextMenu.IsOpen() {
-		if e.Button == MouseRight && !e.Pressed {
+		if e.Button == base.MouseRight && !e.Pressed {
 			return true
 		}
 		if image.Pt(e.X, e.Y).In(t.contextMenu.Bounds()) {
@@ -1222,23 +1211,23 @@ func (t *TextBox) OnMouseButton(e MouseEvent) bool {
 		}
 		t.contextMenu.Close()
 	}
-	if e.Button == MouseRight && e.Pressed {
+	if e.Button == base.MouseRight && e.Pressed {
 		t.showContextMenu(e.X, e.Y)
 		return true
 	}
 
-	inside := image.Pt(e.X, e.Y).In(t.bounds)
+	inside := image.Pt(e.X, e.Y).In(t.Base.Bounds())
 
 	// Колесо — вертикальная прокрутка.
-	if inside && (e.Button == MouseWheelUp || e.Button == MouseWheelDown) && e.Pressed {
+	if inside && (e.Button == base.MouseWheelUp || e.Button == base.MouseWheelDown) && e.Pressed {
 		t.mu.Lock()
 		t.ensureLayout()
 		oldY, oldX := t.scrollY, t.scrollX
 		step := 3 * t.lineHeight()
-		if e.Button == MouseWheelUp {
+		if e.Button == base.MouseWheelUp {
 			step = -step
 		}
-		if e.Mod&ModShift != 0 && t.hbarShown() {
+		if e.Mod&base.ModShift != 0 && t.hbarShown() {
 			// Shift+колесо — вбок: на мыши без горизонтального колеса это
 			// единственный способ добраться до конца длинной строки без
 			// захвата ползунка. Нет полосы — Shift ничего не меняет.
@@ -1256,7 +1245,7 @@ func (t *TextBox) OnMouseButton(e MouseEvent) bool {
 		return true
 	}
 
-	if e.Button != MouseLeft {
+	if e.Button != base.MouseLeft {
 		return false
 	}
 
@@ -1279,7 +1268,7 @@ func (t *TextBox) OnMouseButton(e MouseEvent) bool {
 		idx := t.charIndexAtPoint(e.X, e.Y)
 
 		// Двойной щелчок выделяет слово, тройной — строку.
-		switch n := clicksOf(e, &t.clicks); {
+		switch n := base.ClicksOf(e, &t.clicks); {
 		case n == 2:
 			lo, hi := t.wordBounds(idx)
 			t.selAnchor = lo
@@ -1323,8 +1312,8 @@ func (t *TextBox) OnMouseWheelPixels(x, y int, dx, dy float64) bool {
 // OnMouseWheelPixelsMod — то же с модификаторами: Shift уводит вертикальную
 // дельту вбок. Горизонтальная дельта раньше не принималась вовсе — dx
 // молча терялся, и тачпад не двигал длинную строку.
-func (t *TextBox) OnMouseWheelPixelsMod(x, y int, dx, dy float64, mod KeyMod) bool {
-	if !image.Pt(x, y).In(t.bounds) {
+func (t *TextBox) OnMouseWheelPixelsMod(x, y int, dx, dy float64, mod base.KeyMod) bool {
+	if !image.Pt(x, y).In(t.Base.Bounds()) {
 		return false
 	}
 	t.mu.Lock()
@@ -1333,7 +1322,7 @@ func (t *TextBox) OnMouseWheelPixelsMod(x, y int, dx, dy float64, mod KeyMod) bo
 	consumed := false
 
 	hbar := t.hbarShown()
-	if mod&ModShift != 0 && hbar && dx == 0 {
+	if mod&base.ModShift != 0 && hbar && dx == 0 {
 		dx, dy = dy, 0
 	}
 	if dx != 0 && hbar {
@@ -1375,7 +1364,7 @@ func (t *TextBox) hbarThumbLocked() image.Rectangle {
 	}
 	vw := t.textAreaW()
 	cw := t.contentWidth()
-	return hbarThumb(tbHBarTrack(t.bounds, t.PaddingX, vw), float64(t.scrollX),
+	return base.HBarThumb(tbHBarTrack(t.Base.Bounds(), t.PaddingX, vw), float64(t.scrollX),
 		float64(tbScrollXMax(cw, vw)), float64(vw), float64(cw+tbCaretRoom))
 }
 
@@ -1388,7 +1377,7 @@ func (t *TextBox) hbarPressLocked(x, y int) bool {
 		return false
 	}
 	vw := t.textAreaW()
-	if !image.Pt(x, y).In(tbHBarHit(t.bounds, t.PaddingX, vw)) {
+	if !image.Pt(x, y).In(tbHBarHit(t.Base.Bounds(), t.PaddingX, vw)) {
 		return false
 	}
 	th := t.hbarThumbLocked()
@@ -1399,7 +1388,7 @@ func (t *TextBox) hbarPressLocked(x, y int) bool {
 		return true
 	}
 	cw := t.contentWidth()
-	t.scrollX = int(math.Round(hbarScrollAt(tbHBarTrack(t.bounds, t.PaddingX, vw), x,
+	t.scrollX = int(math.Round(base.HBarScrollAt(tbHBarTrack(t.Base.Bounds(), t.PaddingX, vw), x,
 		float64(tbScrollXMax(cw, vw)), float64(vw), float64(cw+tbCaretRoom))))
 	t.clampScrollX()
 	return true
@@ -1410,7 +1399,7 @@ func (t *TextBox) hbarDragToLocked(x int) {
 	t.ensureLayout()
 	vw := t.textAreaW()
 	cw := t.contentWidth()
-	t.scrollX = int(math.Round(hbarScrollForThumbX(tbHBarTrack(t.bounds, t.PaddingX, vw), x-t.hbarGrab,
+	t.scrollX = int(math.Round(base.HBarScrollForThumbX(tbHBarTrack(t.Base.Bounds(), t.PaddingX, vw), x-t.hbarGrab,
 		float64(tbScrollXMax(cw, vw)), float64(vw), float64(cw+tbCaretRoom))))
 	t.clampScrollX()
 }
@@ -1446,13 +1435,13 @@ func (t *TextBox) wordBounds(idx int) (int, int) {
 	if idx < 0 {
 		idx = 0
 	}
-	cls := isWordRune(t.runes[idx])
+	cls := base.IsWordRune(t.runes[idx])
 	lo := idx
-	for lo > 0 && isWordRune(t.runes[lo-1]) == cls && t.runes[lo-1] != '\n' {
+	for lo > 0 && base.IsWordRune(t.runes[lo-1]) == cls && t.runes[lo-1] != '\n' {
 		lo--
 	}
 	hi := idx + 1
-	for hi < n && isWordRune(t.runes[hi]) == cls && t.runes[hi] != '\n' {
+	for hi < n && base.IsWordRune(t.runes[hi]) == cls && t.runes[hi] != '\n' {
 		hi++
 	}
 	return lo, hi
@@ -1488,7 +1477,7 @@ func (t *TextBox) showContextMenu(x, y int) {
 	hasText := len(t.runes) > 0
 	ro := t.ReadOnly
 	t.mu.Unlock()
-	hasClip := ClipboardGetText() != ""
+	hasClip := base.ClipboardGetText() != ""
 
 	edit := func(action func()) func() {
 		return func() {
@@ -1513,14 +1502,14 @@ func (t *TextBox) showContextMenu(x, y int) {
 		}
 	}
 
-	menu := NewPopupMenu()
+	menu := base.NewPopupMenu()
 	menu.SetHost(t)
-	menu.SetItems([]MenuItem{
+	menu.SetItems([]base.MenuItem{
 		{Text: "Cut", Disabled: !hasSel || ro, OnClick: edit(func() {
 			t.mu.Lock()
 			if t.selActive() {
 				lo, hi := t.normSel()
-				ClipboardSetText(string(t.runes[lo:hi]))
+				base.ClipboardSetText(string(t.runes[lo:hi]))
 				t.deleteSel()
 			}
 			t.mu.Unlock()
@@ -1529,12 +1518,12 @@ func (t *TextBox) showContextMenu(x, y int) {
 			t.mu.Lock()
 			if t.selActive() {
 				lo, hi := t.normSel()
-				ClipboardSetText(string(t.runes[lo:hi]))
+				base.ClipboardSetText(string(t.runes[lo:hi]))
 			}
 			t.mu.Unlock()
 		}},
 		{Text: "Paste", Disabled: !hasClip || ro, OnClick: edit(func() {
-			if clip := ClipboardGetText(); clip != "" {
+			if clip := base.ClipboardGetText(); clip != "" {
 				t.mu.Lock()
 				t.insertRunes([]rune(clip))
 				t.mu.Unlock()
@@ -1719,8 +1708,8 @@ func (t *TextBox) fetchStyles(st *tbDrawState) {
 // по документу в сотни тысяч строк без единой правки.
 const tbStyleCacheMax = 4096
 
-func (t *TextBox) Draw(ctx DrawContext) {
-	b := t.bounds
+func (t *TextBox) Draw(ctx base.DrawContext) {
+	b := t.Base.Bounds()
 	if b.Empty() {
 		return
 	}
@@ -1730,13 +1719,13 @@ func (t *TextBox) Draw(ctx DrawContext) {
 	fs, lh := st.fs, st.lh
 	focused := st.focused
 
-	sty := currentStyle()
+	sty := base.CurrentThemeStyle()
 
 	// Фон и рамка — в стиле TextInput активной темы.
 	switch {
 	case sty.Classic3D:
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), t.Background)
-		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), sty)
+		base.DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), sty)
 	case sty.ControlCorner > 0:
 		cr := sty.ControlCorner
 		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, t.Background)
@@ -1872,7 +1861,7 @@ func (t *TextBox) Draw(ctx DrawContext) {
 
 	// Каретка. Рисуется, только если её строка в кадре: остальные всё равно
 	// срезал бы клип, а снимать для них текст строки незачем.
-	if focused && caretPhaseAt(time.Now().UnixMilli()) {
+	if focused && base.CaretPhaseAt(time.Now().UnixMilli()) {
 		if i := st.caretLi - st.first; i >= 0 && i < len(st.vis) {
 			vl := &st.vis[i]
 			cx := xAt(vl.rs, st.caret-vl.ln.start)
@@ -1896,21 +1885,21 @@ func (t *TextBox) Draw(ctx DrawContext) {
 		}
 		maxScroll := contentH - viewH
 		ty := b.Min.Y + 4 + (trackH-thumbH)*st.scrollY/maxScroll
-		ctx.FillRoundRect(b.Max.X-6, ty, 4, thumbH, 2, win10.ScrollThumbBG)
+		ctx.FillRoundRect(b.Max.X-6, ty, 4, thumbH, 2, base.ActiveTheme().ScrollThumbBG)
 	}
 
 	// Горизонтальная полоса прокрутки — геометрия общая со сравнением файлов.
 	if st.hbar && !st.thumb.Empty() {
 		tr := tbHBarTrack(b, t.PaddingX, t.textAreaWAt(b))
 		ctx.SetClip(tr.Inset(-2).Intersect(inner).Intersect(outer))
-		drawHBar(ctx, tr, st.thumb, win10.ScrollTrackBG, win10.ScrollThumbBG)
+		base.DrawHBar(ctx, tr, st.thumb, base.ActiveTheme().ScrollTrackBG, base.ActiveTheme().ScrollThumbBG)
 	}
 
 	// Возвращаем внешнюю область, а не снимаем отсечение: иначе соседи поля
 	// внутри прокрутки рисовали бы мимо неё.
 	ctx.SetClip(outer)
-	t.drawChildren(ctx)
-	t.drawDisabledOverlay(ctx)
+	t.DrawChildren(ctx)
+	t.DrawDisabledOverlay(ctx)
 }
 
 // ─── Bounds / Overlay (контекстное меню) ─────────────────────────────────────
@@ -1930,7 +1919,7 @@ func (t *TextBox) HasOverlay() bool {
 }
 
 // DrawOverlay рисует контекстное меню поверх всего UI.
-func (t *TextBox) DrawOverlay(ctx DrawContext) {
+func (t *TextBox) DrawOverlay(ctx base.DrawContext) {
 	if t.contextMenu != nil && t.contextMenu.IsOpen() {
 		t.contextMenu.DrawOverlay(ctx)
 	}
@@ -1954,12 +1943,12 @@ func (t *TextBox) Dismiss() {
 
 // ─── Themeable ───────────────────────────────────────────────────────────────
 
-func (t *TextBox) ApplyTheme(th *Theme) {
+func (t *TextBox) ApplyTheme(th *base.Theme) {
 	t.Background = th.InputBG
 	t.BorderColor = th.InputBorder
 	t.FocusBorder = th.InputFocus
 	t.TextColor = th.InputText
 	t.PlaceColor = th.InputPlaceholder
 	t.CaretColor = th.InputCaret
-	t.SelColor = premulAlpha(th.Accent, 110)
+	t.SelColor = base.PremulAlpha(th.Accent, 110)
 }

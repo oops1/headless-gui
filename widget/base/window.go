@@ -1150,7 +1150,7 @@ func (w *Window) drawClassicTitleButtons(ctx DrawContext, st ThemeStyle) {
 		ctx.FillRect(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), face)
 		pressed := w.armedBtn == kind
 		if pressed {
-			drawBevelSunken(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
+			DrawBevelSunken(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
 		} else {
 			drawBevelRaised(ctx, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), st)
 		}

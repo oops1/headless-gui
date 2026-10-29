@@ -17,21 +17,21 @@ func TestHBarThumb(t *testing.T) {
 	track := image.Rect(0, 0, 200, 8)
 
 	// Содержимое помещается — полоса не нужна.
-	if th := hbarThumb(track, 0, 0, 200, 150); !th.Empty() {
+	if th := HBarThumb(track, 0, 0, 200, 150); !th.Empty() {
 		t.Errorf("при maxScroll=0 ползунок %v, ждал пустой", th)
 	}
 	// Видна половина содержимого — ползунок в половину трека.
-	th := hbarThumb(track, 0, 200, 200, 400)
+	th := HBarThumb(track, 0, 200, 200, 400)
 	if th.Dx() != 100 || th.Min.X != 0 {
 		t.Errorf("ползунок %v, ждал ширину 100 у левого края", th)
 	}
 	// Смещение до упора — ползунок у правого края.
-	th = hbarThumb(track, 200, 200, 200, 400)
+	th = HBarThumb(track, 200, 200, 200, 400)
 	if th.Max.X != track.Max.X {
 		t.Errorf("при полном смещении ползунок %v, ждал у правого края %d", th, track.Max.X)
 	}
 	// Ползунок не ужимается в невидимую полоску, за которую не схватиться.
-	th = hbarThumb(track, 0, 10000, 200, 20000)
+	th = HBarThumb(track, 0, 10000, 200, 20000)
 	if th.Dx() < dvHBarMinW {
 		t.Errorf("ползунок шириной %d, минимум %d", th.Dx(), dvHBarMinW)
 	}
@@ -41,18 +41,18 @@ func TestHBarScrollAt(t *testing.T) {
 	track := image.Rect(0, 0, 200, 8)
 	const maxScroll, viewW, contentW = 200.0, 200.0, 400.0
 
-	if got := hbarScrollAt(track, 0, maxScroll, viewW, contentW); got != 0 {
+	if got := HBarScrollAt(track, 0, maxScroll, viewW, contentW); got != 0 {
 		t.Errorf("щелчок у левого края дал %v, ждал 0", got)
 	}
-	if got := hbarScrollAt(track, 200, maxScroll, viewW, contentW); got != maxScroll {
+	if got := HBarScrollAt(track, 200, maxScroll, viewW, contentW); got != maxScroll {
 		t.Errorf("щелчок у правого края дал %v, ждал %v", got, maxScroll)
 	}
 	// Середина трека — середина содержимого.
-	if got := hbarScrollAt(track, 100, maxScroll, viewW, contentW); got != 100 {
+	if got := HBarScrollAt(track, 100, maxScroll, viewW, contentW); got != 100 {
 		t.Errorf("щелчок в середине дал %v, ждал 100", got)
 	}
 	// За пределы содержимого не уводит.
-	if got := hbarScrollAt(track, 5000, maxScroll, viewW, contentW); got != maxScroll {
+	if got := HBarScrollAt(track, 5000, maxScroll, viewW, contentW); got != maxScroll {
 		t.Errorf("щелчок далеко справа дал %v, ждал %v", got, maxScroll)
 	}
 }
@@ -63,13 +63,13 @@ func TestHBarScrollForThumbX(t *testing.T) {
 	track := image.Rect(0, 0, 200, 8)
 	const maxScroll, viewW, contentW = 200.0, 200.0, 400.0
 
-	if got := hbarScrollForThumbX(track, 0, maxScroll, viewW, contentW); got != 0 {
+	if got := HBarScrollForThumbX(track, 0, maxScroll, viewW, contentW); got != 0 {
 		t.Errorf("левый край ползунка в нуле дал %v, ждал 0", got)
 	}
-	if got := hbarScrollForThumbX(track, 50, maxScroll, viewW, contentW); got != 100 {
+	if got := HBarScrollForThumbX(track, 50, maxScroll, viewW, contentW); got != 100 {
 		t.Errorf("левый край ползунка на 50 дал %v, ждал 100 (полтрека = полсодержимого)", got)
 	}
-	if got := hbarScrollForThumbX(track, 100, maxScroll, viewW, contentW); got != maxScroll {
+	if got := HBarScrollForThumbX(track, 100, maxScroll, viewW, contentW); got != maxScroll {
 		t.Errorf("левый край ползунка в конце дал %v, ждал %v", got, maxScroll)
 	}
 }

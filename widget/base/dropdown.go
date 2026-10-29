@@ -200,7 +200,7 @@ func (d *Dropdown) Draw(ctx DrawContext) {
 	case st.Classic3D:
 		// Классика: утопленное поле + выпуклая «кнопка» со стрелкой справа.
 		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
-		drawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+		DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
 	case st.ControlCorner > 0:
 		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st.ControlCorner, bg)
 		ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st.ControlCorner, border)
@@ -370,7 +370,7 @@ func drawDropSelBG(ctx DrawContext, x, y, w, h int) {
 		ctx.FillRect(x, y, w, h, c)
 		return
 	}
-	ctx.FillRectAlpha(x, y, w, h, premulAlpha(color.RGBA{R: c.R, G: c.G, B: c.B, A: 255}, c.A))
+	ctx.FillRectAlpha(x, y, w, h, PremulAlpha(color.RGBA{R: c.R, G: c.G, B: c.B, A: 255}, c.A))
 }
 
 // dropSelOpaque возвращает непрозрачный цвет подсветки выбора — для расчёта

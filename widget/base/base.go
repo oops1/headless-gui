@@ -440,6 +440,13 @@ func applyAlignmentRect(w Widget, r image.Rectangle) image.Rectangle {
 
 // ── Desired size (Auto-измерение) ───────────────────────────────────────────
 
+// DefaultSizer — размер виджета по умолчанию для авторазмера в Grid,
+// DockPanel и WrapPanel, когда разметка его не задала: виджет вне ядра
+// отвечает сам, вместо ветки по типу в desiredWidth и desiredHeight.
+type DefaultSizer interface {
+	DefaultSize() (w, h int)
+}
+
 // desiredHeight возвращает желаемую высоту виджета для Auto-измерения в Grid/DockPanel.
 // Для Label — высота текста + padding. Для контейнеров — максимум из детей.
 // Если не можем определить — возвращаем дефолт 26px.
@@ -464,8 +471,9 @@ func desiredHeight(w Widget) int {
 		return int(fs*1.5+0.5) + v.PaddingY*2
 	case *Button, *MenuButton:
 		return 32
-	case *TextInput:
-		return 26
+	case DefaultSizer:
+		_, h := v.DefaultSize()
+		return h
 	case *MenuBar:
 		return 28
 	case *StackPanel:
@@ -561,8 +569,9 @@ func desiredWidth(w Widget) int {
 		// Та же беда и то же лечение, что у флажка: подпись шире 80 ложилась
 		// на соседа.
 		return max(80, radioButtonContentWidth(v))
-	case *TextInput:
-		return 120
+	case DefaultSizer:
+		w, _ := v.DefaultSize()
+		return w
 	default:
 		return 80
 	}

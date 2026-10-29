@@ -1,6 +1,10 @@
-package base
+package text
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
+)
 
 // Скринридер выделяет диапазон через паттерн Text (ITextRangeProvider.Select):
 // поля обязаны принять отрезок, усечь его до длины текста и поставить каретку
@@ -13,8 +17,8 @@ func TestAccessSetSelection(t *testing.T) {
 	tb.SetText("привет мир")
 
 	for name, w := range map[string]interface {
-		AccessSelectionSetter
-		AccessTextProvider
+		base.AccessSelectionSetter
+		base.AccessTextProvider
 	}{"TextInput": ti, "TextBox": tb} {
 		if !w.AccessSetSelection(7, 10) {
 			t.Fatalf("%s: выделение отвергнуто", name)

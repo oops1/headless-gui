@@ -244,7 +244,7 @@ func (d *DiffView) drawPane(ctx DrawContext, g dvGeom, side DiffSide, top float6
 		if a != bnd || a < r0-1 || a > r1+1 {
 			continue
 		}
-		col := premulAlpha(p.accent, 150)
+		col := PremulAlpha(p.accent, 150)
 		if ci == d.current || ci == d.hoverChunk {
 			col = p.accent
 		}
@@ -303,7 +303,7 @@ func (d *DiffView) drawConnectors(ctx DrawContext, g dvGeom, lt, rt float64, con
 		if !ok {
 			return
 		}
-		col, thick := premulAlpha(p.accent, 130), 1.5
+		col, thick := PremulAlpha(p.accent, 130), 1.5
 		if active {
 			col, thick = p.accent, 2.2
 		}
@@ -380,7 +380,7 @@ func (d *DiffView) drawHScroll(ctx DrawContext, g dvGeom) {
 		return
 	}
 	defer PushClip(ctx, tr.Inset(-2).Intersect(g.b))()
-	drawHBar(ctx, tr, th, d.pal.track, d.pal.thumb)
+	DrawHBar(ctx, tr, th, d.pal.track, d.pal.thumb)
 }
 
 func (d *DiffView) drawRuler(ctx DrawContext, g dvGeom, viewH float64) {
@@ -416,7 +416,7 @@ func (d *DiffView) drawRuler(ctx DrawContext, g dvGeom, viewH float64) {
 	if d.maxScroll(viewH) > 0 {
 		ty := tr.Min.Y + int(d.scroll*scale)
 		th := max(18, int(viewH*scale))
-		ctx.FillRectAlpha(tr.Min.X, ty, tr.Dx(), min(th, tr.Max.Y-ty), premulAlpha(p.thumb, 110))
+		ctx.FillRectAlpha(tr.Min.X, ty, tr.Dx(), min(th, tr.Max.Y-ty), PremulAlpha(p.thumb, 110))
 	}
 }
 
