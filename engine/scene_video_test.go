@@ -226,3 +226,38 @@ func TestSceneVideo_OpaqueRegionOccludes(t *testing.T) {
 		t.Fatalf("после снятия у буфера с альфой OpaqueRegion %v", got)
 	}
 }
+
+// Видео чужого окна (поверхность в реестре процесса, но в другом дереве) не
+// стоит аллокаций при сборе видео для этого корня: прежде screenCover копил
+// покрытие соседа в срез до проверки дерева, и движок без видео аллоцировал
+// каждый кадр, пока видео соседа не остынет (TestPopupCache_NoAllocPerFrame
+// после TestSceneModal_CoversSurface под -shuffle=on).
+func TestSceneVideo_ForeignVideoNoAlloc(t *testing.T) {
+	testreset.Globals(t)
+	vs := newVideoScene(t)
+	// Окно над видео — у чужой поверхности непустое покрытие.
+	over := widget.NewPanel(color.RGBA{R: 200, A: 255})
+	over.ShowHeader = false
+	over.SetBounds(image.Rect(200, 200, 400, 300))
+	vs.windows.AddChild(over)
+	vs.play(30)
+
+	now := time.Now()
+	own := widget.CollectVideoSurfaces(vs.eng.Root(), now, VideoRate, VideoHold, nil)
+	if len(own) != 1 || len(own[0].Cover) == 0 {
+		t.Fatalf("своё видео с покрытием не найдено — тест не о том: %+v", own)
+	}
+
+	other := widget.NewPanel(color.RGBA{A: 255})
+	other.SetBounds(image.Rect(0, 0, 300, 300))
+	var buf []widget.VideoSurface
+	allocs := testing.AllocsPerRun(50, func() {
+		buf = widget.CollectVideoSurfaces(other, now, VideoRate, VideoHold, buf[:0])
+	})
+	if len(buf) != 0 {
+		t.Fatalf("чужое видео попало в чужое дерево: %+v", buf)
+	}
+	if allocs != 0 {
+		t.Fatalf("сбор видео для дерева без видео аллоцирует: %v на вызов", allocs)
+	}
+}
