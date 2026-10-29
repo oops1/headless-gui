@@ -28,8 +28,8 @@ import (
 // хост попапов, и возвращает картинку.
 func popupImageFor(t *testing.T, c *Canvas, od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
 	t.Helper()
-	ent := &popupEntry{}
-	oc := ent.overlayCanvas(c, r)
+	var a popupArena
+	oc := a.canvasFor(c, r)
 	return renderOverlayInto(oc, od, r)
 }
 

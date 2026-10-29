@@ -8,6 +8,7 @@ package raster
 
 import (
 	"image"
+	"math"
 
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/gobolditalic"
@@ -120,6 +121,63 @@ func (c *Canvas) SetShadowCacheEnabled(on bool) { c.shadowCacheOff, c.shadowCach
 
 // ShadowCacheEnabled сообщает, собираются ли тени из шаблона.
 func (c *Canvas) ShadowCacheEnabled() bool { return !c.shadowCacheOff }
+
+// ResizeScratch переводит клон оверлея (холст-заготовку арены попапов,
+// ADR-0009) на логический размер w×h при прежнем масштабе: физический размер
+// считается, как у NewCanvasScaled, буфер рисования переиспользуется, если
+// вмещает (иначе растёт), очищается, состояние — как у свежего клона (без
+// отсечений, признаки тайлов под новую сетку). Переднего буфера у заготовки
+// нет: её кадры не сравниваются, картинку забирают из Back. Собственные обои
+// клона (масштабированные под его первый размер) снимаются: Mica заготовки
+// берёт обои у холста движка (InheritWallpaper).
+func (c *Canvas) ResizeScratch(w, h int) {
+	pw, ph, w, h := c.scratchSize(w, h)
+	need := pw * ph * 4
+	pix := c.backOwn.Pix
+	if cap(pix) < need {
+		pix = make([]byte, need)
+	} else {
+		pix = pix[:need]
+		clear(pix)
+	}
+	// Структура буфера — на месте: заготовку перерисовывают на каждом
+	// изменении попапа.
+	c.backOwn.Pix, c.backOwn.Stride, c.backOwn.Rect = pix, pw*4, image.Rect(0, 0, pw, ph)
+	c.back = c.backOwn
+	c.format = c.formatOwn
+	if len(c.front.Pix) > 0 {
+		c.front = &image.RGBA{}
+	}
+	// Области размытия запоминаются для частичных кадров (backdropdamage.go);
+	// у заготовки кадров нет, и без сброса они копились бы с каждой
+	// перерисовкой.
+	c.backdrops, c.backdropsNext = c.backdrops[:0], c.backdropsNext[:0]
+	c.W, c.H = pw, ph
+	c.logicalW, c.logicalH = w, h
+	ts := output.TileSize
+	c.tilesX, c.tilesY = (pw+ts-1)/ts, (ph+ts-1)/ts
+	c.initTileMarks()
+	c.hasClip, c.hasBase = false, false
+	c.round.active = false
+	c.wallImg, c.wallScaled = nil, nil
+}
+
+// ScratchBytes — байт буфера рисования заготовки под логический размер w×h
+// (ResizeScratch).
+func (c *Canvas) ScratchBytes(w, h int) int {
+	pw, ph, _, _ := c.scratchSize(w, h)
+	return pw * ph * 4
+}
+
+// scratchSize — физический и логический размер заготовки, как у
+// NewCanvasScaled.
+func (c *Canvas) scratchSize(w, h int) (pw, ph, lw, lh int) {
+	w, h = ClampCanvasSize(w, h)
+	pw = int(math.Round(float64(w) * c.scale))
+	ph = int(math.Round(float64(h) * c.scale))
+	pw, ph = ClampCanvasSize(pw, ph)
+	return pw, ph, w, h
+}
 
 // ResetForRedraw готовит клон оверлея к новому рендеру: чистый буфер, без
 // отсечений.

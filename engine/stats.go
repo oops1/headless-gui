@@ -80,6 +80,10 @@ type Stats struct {
 	// значение. Окна воркеров, кэш размытия и буферы потребителя сюда не
 	// входят.
 	BufferBytes uint64
+	// PopupBytes — байт памяти хостовых попапов (SetPopupSink) после
+	// последнего кадра: общий холст-заготовка арены и картинки открытых и
+	// исчезающих попапов (ADR-0009). Не накопительный; ноль, пока попапов нет.
+	PopupBytes uint64
 }
 
 // engineStats — счётчики, из которых собирается Stats. Пишет их горутина
@@ -95,6 +99,7 @@ type engineStats struct {
 	blurHits, blurMisses    atomic.Uint64
 	tilesSkipped            atomic.Uint64
 	bufferBytes             atomic.Uint64
+	popupBytes              atomic.Uint64
 }
 
 // Stats возвращает снимок счётчиков движка. Безопасен из любой горутины и не
@@ -127,6 +132,7 @@ func (e *Engine) Stats() Stats {
 		BlurMisses:    s.blurMisses.Load(),
 		TilesSkipped:  s.tilesSkipped.Load(),
 		BufferBytes:   s.bufferBytes.Load(),
+		PopupBytes:    s.popupBytes.Load(),
 	}
 }
 

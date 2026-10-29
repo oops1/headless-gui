@@ -80,15 +80,14 @@ type popupItem struct {
 	off image.Point
 }
 
-// popupEntry — межкадровый кэш одного оверлея: канвас, готовая картинка и её хэш.
+// popupEntry — межкадровый кэш одного оверлея: готовая картинка и её хэш.
+// Холста у записи нет: все попапы рендерятся в один холст-заготовку арены
+// (popupArena, ADR-0009).
 type popupEntry struct {
-	canvas  *Canvas
-	src     *Canvas // канвас движка, из которого клонирован
-	fontRev uint64
-	rect    image.Rectangle
-	img     *image.RGBA
-	hash    uint64
-	seen    uint64
+	rect image.Rectangle
+	img  *image.RGBA
+	hash uint64
+	seen uint64
 
 	// Переход (popuptrans.go): trans — идёт, closing — оверлей уже закрыт,
 	// slide — сдвиг при доле 0 (логический). Доля и признак конца пишет тик.
@@ -117,6 +116,9 @@ func (e *Engine) SetPopupSink(sink func(frames []PopupFrame)) {
 	}
 	e.popupCache = nil
 	e.popupMu.Unlock()
+	// Заготовку арены трогает только кадр (под frameMu): без хоста её
+	// отпускает ближайший кадр (renderFrame), здесь замка кадра не берём —
+	// хост вправе снять сток из своего колбэка, а тот идёт внутри кадра.
 	widget.SetPopupsHosted(sink != nil)
 }
 
@@ -164,7 +166,7 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 		}
 		ent.seen = gen
 		if ent.img == nil || ent.rect != it.rect || dirtyAll || canvas.PhysRect(it.rect).Overlaps(damage) {
-			oc := ent.overlayCanvas(canvas, it.rect)
+			oc := e.popupArena.canvasFor(canvas, it.rect)
 			ent.img = renderOverlayShifted(oc, it.od, it.rect, it.off)
 			ent.hash = hashRGBA(ent.img)
 			ent.rect = it.rect
@@ -220,6 +222,12 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 	e.popupClosingBu = closing
 	e.popupSigBu = sig
 
+	// Арена живёт, пока есть открытые попапы (исчезающим она не нужна: у них
+	// готовая картинка), и держит размер самого большого из них — закрытое
+	// большое меню не оставляет её раздутой.
+	e.popupArena.trim(items)
+	e.stats.popupBytes.Store(uint64(e.popupBytesLocked()))
+
 	changed := !samePopupSig(e.lastPopupSig, sig)
 	var frames []PopupFrame
 	if changed {
@@ -239,24 +247,71 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 	}
 }
 
-// overlayCanvas отдаёт кэшированный канвас оверлея (или создаёт новый),
-// очищенный под новый рендер.
-func (ent *popupEntry) overlayCanvas(src *Canvas, r image.Rectangle) *Canvas {
-	oc := ent.canvas
-	if oc != nil {
-		if lw, lh := oc.LogicalSize(); ent.src != src || ent.fontRev != src.FontRev() ||
-			lw != r.Dx() || lh != r.Dy() || oc.Scale() != src.Scale() {
-			oc = nil
+// popupArena — арена попапов (ADR-0009): один холст-заготовка на все
+// открытые хостовые попапы движка вместо холста на каждый. Попапы
+// рендерятся в неё по очереди (горутина кадра, под frameMu), картинка каждого
+// копируется в его запись; заготовка держит только буфер рисования размером
+// с самый большой попап и переводится на размер очередного без новой памяти.
+type popupArena struct {
+	c       *Canvas
+	src     *Canvas // холст движка, с которого снят клон
+	fontRev uint64
+	scale   float64
+}
+
+// canvasFor отдаёт заготовку, переведённую на попап r (логический размер),
+// чистую, — как свежий клон холста src этого размера. Клон пересоздаётся при
+// смене холста движка, его шрифтов или масштаба.
+func (a *popupArena) canvasFor(src *Canvas, r image.Rectangle) *Canvas {
+	if a.c == nil || a.src != src || a.fontRev != src.FontRev() || a.scale != src.Scale() {
+		a.c = src.CloneForSize(r.Dx(), r.Dy(), src.Scale(), nil)
+		a.c.InheritWallpaper(src)
+		a.src, a.fontRev, a.scale = src, src.FontRev(), src.Scale()
+	}
+	a.c.ResizeScratch(r.Dx(), r.Dy())
+	return a.c
+}
+
+// release отдаёт заготовку сборщику (попапов нет, хост снят).
+func (a *popupArena) release() { *a = popupArena{} }
+
+// trim отпускает заготовку, если открытых попапов нет или её буфер больше
+// нужного самому большому из них: следующий рендер заведёт её по размеру.
+// Пока открыты попапы разного размера, буфер равен большему и не
+// перевыделяется от кадра к кадру.
+func (a *popupArena) trim(items []popupItem) {
+	if a.c == nil {
+		return
+	}
+	need := 0
+	for _, it := range items {
+		need = max(need, a.c.ScratchBytes(it.rect.Dx(), it.rect.Dy()))
+	}
+	if need == 0 || cap(a.c.Back().Pix) > need {
+		a.release()
+	}
+}
+
+// bytes — байт, занятых буферами заготовки: по ёмкости — буфер рисования
+// переведён на очередной попап срезом, а память держит размер самого
+// большого.
+func (a *popupArena) bytes() int {
+	if a.c == nil {
+		return 0
+	}
+	return cap(a.c.Back().Pix) + cap(a.c.Front().Pix)
+}
+
+// popupBytesLocked — память хостовых попапов: заготовка арены и картинки
+// записей (под popupMu).
+func (e *Engine) popupBytesLocked() int {
+	n := e.popupArena.bytes()
+	for _, ent := range e.popupCache {
+		if ent.img != nil {
+			n += len(ent.img.Pix)
 		}
 	}
-	if oc == nil {
-		oc = src.CloneForSize(r.Dx(), r.Dy(), src.Scale(), nil)
-		oc.InheritWallpaper(src)
-		ent.canvas, ent.src, ent.fontRev = oc, src, src.FontRev()
-		return oc
-	}
-	oc.ResetForRedraw()
-	return oc
+	return n
 }
 
 // collectPopups рекурсивно собирает хостируемые оверлеи дерева (без рендера).

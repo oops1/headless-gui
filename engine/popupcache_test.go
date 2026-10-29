@@ -152,8 +152,10 @@ func TestPopupCache_PixelIdentity(t *testing.T) {
 	if ent == nil || ent.img == nil {
 		t.Fatal("попап не попал в кэш")
 	}
-	// Повторный рендер в переиспользованный канвас.
-	got := renderOverlayInto(ent.overlayCanvas(e.canvas, r), dd, r)
+	// Повторный рендер в переиспользованную заготовку арены.
+	e.frameMu.Lock()
+	got := renderOverlayInto(e.popupArena.canvasFor(e.canvas, r), dd, r)
+	e.frameMu.Unlock()
 
 	if got.Rect != want.Rect {
 		t.Fatalf("размер %v != %v", got.Rect, want.Rect)

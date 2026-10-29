@@ -150,7 +150,10 @@ type Engine struct {
 	// набора попапов, отданного sink (для вызова sink только при изменениях).
 	popupSink    func([]PopupFrame)
 	lastPopupSig []popupSig
-	popupCache   map[uintptr]*popupEntry // кэш канваса/картинки на оверлей
+	popupCache   map[uintptr]*popupEntry // кэш картинки на оверлей
+	// popupArena — общий холст-заготовка хостовых попапов (ADR-0009); только
+	// горутина кадра, под frameMu.
+	popupArena popupArena
 	popupGen     uint64                  // поколение для отсева исчезнувших попапов
 	popupMu      sync.Mutex
 
@@ -2056,6 +2059,10 @@ func (e *Engine) renderFrame() output.Frame {
 	if hosted {
 		// !partial — рисовали весь кадр, значит перерисовываем и все попапы.
 		e.renderPopups(canvas, root, modals, popupDamage, !partial)
+	} else if e.popupArena.c != nil {
+		// Хост попапов снят: заготовку арены — сборщику (ADR-0009).
+		e.popupArena.release()
+		e.stats.popupBytes.Store(0)
 	}
 
 	// Всплывающая подсказка (поверх всего, включая модальные диалоги); на

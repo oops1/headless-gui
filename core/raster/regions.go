@@ -40,10 +40,23 @@ func (c *Canvas) initTileMarks() {
 		c.marks = make([]tileMark, n)
 	}
 	c.ResetTileMarks(image.Rect(0, 0, c.W, c.H))
-	// Таблицы одного буфера кадра (singlebuf.go) — под ту же сетку.
+	// Таблицы одного буфера кадра (singlebuf.go) — под ту же сетку; память
+	// прежних переиспользуется (заготовка попапов меняет сетку часто).
 	if len(c.touched) != n {
-		c.touched, c.changed, c.flushMark = make([]bool, n), make([]bool, n), make([]bool, n)
+		c.touched = resizeBools(c.touched, n)
+		c.changed = resizeBools(c.changed, n)
+		c.flushMark = resizeBools(c.flushMark, n)
 	}
+}
+
+// resizeBools — срез длины n из нулей, по возможности на прежней памяти.
+func resizeBools(b []bool, n int) []bool {
+	if cap(b) < n {
+		return make([]bool, n)
+	}
+	b = b[:n]
+	clear(b)
+	return b
 }
 
 // ResetTileMarks сбрасывает признаки тайлов, пересекающих r.

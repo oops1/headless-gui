@@ -58,6 +58,11 @@ func (e *Engine) SetPixelFormat(f PixelFormat) error {
 	e.mu.Lock()
 	changed := e.canvas.SetPixelFormat(f, e.bgSrc)
 	e.mu.Unlock()
+	if changed {
+		// Заготовка арены попапов — клон в прежнем формате (ADR-0009):
+		// следующий попап получит клон в новом.
+		e.popupArena.release()
+	}
 	e.frameMu.Unlock()
 	if !changed {
 		return nil
