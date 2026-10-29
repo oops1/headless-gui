@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/win32"
 	"github.com/oops1/headless-gui/v3/widget"
 	"golang.org/x/sys/windows"
 )
@@ -191,20 +192,20 @@ func TestUIAProviderThroughVTable(t *testing.T) {
 	// ── IUnknown ─────────────────────────────────────────────────────────────
 	var out uintptr
 	if hr := comCall(simple, slotQueryInterface, uintptr(unsafe.Pointer(&iidProviderSimple)),
-		uintptr(unsafe.Pointer(&out))); hr != sOK || out != simple {
+		uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != simple {
 		t.Fatalf("QueryInterface(Simple): hr=%#x out=%#x", hr, out)
 	}
 	if hr := comCall(simple, slotQueryInterface, uintptr(unsafe.Pointer(&iidProviderFragment)),
-		uintptr(unsafe.Pointer(&out))); hr != sOK || out != root.fragmentPtr() {
+		uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != root.fragmentPtr() {
 		t.Fatalf("QueryInterface(Fragment): hr=%#x", hr)
 	}
 	if hr := comCall(simple, slotQueryInterface, uintptr(unsafe.Pointer(&iidProviderFragmentRoot)),
-		uintptr(unsafe.Pointer(&out))); hr != sOK || out != root.rootPtr() {
+		uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != root.rootPtr() {
 		t.Fatalf("QueryInterface(FragmentRoot) у корня: hr=%#x", hr)
 	}
-	unknownIID := comGUID{Data1: 0xDEADBEEF}
+	unknownIID := win32.GUID{Data1: 0xDEADBEEF}
 	if hr := comCall(simple, slotQueryInterface, uintptr(unsafe.Pointer(&unknownIID)),
-		uintptr(unsafe.Pointer(&out))); hr != eNoInterface || out != 0 {
+		uintptr(unsafe.Pointer(&out))); hr != win32.ENoInterface || out != 0 {
 		t.Errorf("QueryInterface(чужой IID): hr=%#x out=%#x", hr, out)
 	}
 	before := root.refs.Load()
@@ -219,19 +220,19 @@ func TestUIAProviderThroughVTable(t *testing.T) {
 
 	// ── IRawElementProviderSimple ────────────────────────────────────────────
 	var opts int32
-	if hr := comCall(simple, slotProviderOptions, uintptr(unsafe.Pointer(&opts))); hr != sOK ||
+	if hr := comCall(simple, slotProviderOptions, uintptr(unsafe.Pointer(&opts))); hr != win32.SOK ||
 		opts != uiaProviderServerSide {
 		t.Errorf("ProviderOptions: hr=%#x opts=%d", hr, opts)
 	}
 	var pattern uintptr
-	if hr := comCall(simple, slotPatternProvider, uiaPatternInvoke, uintptr(unsafe.Pointer(&pattern))); hr != sOK ||
+	if hr := comCall(simple, slotPatternProvider, uiaPatternInvoke, uintptr(unsafe.Pointer(&pattern))); hr != win32.SOK ||
 		pattern != 0 {
 		t.Errorf("GetPatternProvider(Invoke) у окна: hr=%#x ptr=%#x (окно не нажимается)", hr, pattern)
 	}
 
 	prop := func(iface uintptr, id int32) comVariant {
 		var v comVariant
-		if hr := comCall(iface, slotPropertyValue, uintptr(id), uintptr(unsafe.Pointer(&v))); hr != sOK {
+		if hr := comCall(iface, slotPropertyValue, uintptr(id), uintptr(unsafe.Pointer(&v))); hr != win32.SOK {
 			t.Fatalf("GetPropertyValue(%d): hr=%#x", id, hr)
 		}
 		return v
@@ -249,7 +250,7 @@ func TestUIAProviderThroughVTable(t *testing.T) {
 	// ── Навигация ────────────────────────────────────────────────────────────
 	fragment := root.fragmentPtr()
 	var child uintptr
-	if hr := comCall(fragment, slotNavigate, uiaNavFirstChild, uintptr(unsafe.Pointer(&child))); hr != sOK ||
+	if hr := comCall(fragment, slotNavigate, uiaNavFirstChild, uintptr(unsafe.Pointer(&child))); hr != win32.SOK ||
 		child == 0 {
 		t.Fatalf("Navigate(FirstChild): hr=%#x child=%#x", hr, child)
 	}
@@ -267,7 +268,7 @@ func TestUIAProviderThroughVTable(t *testing.T) {
 	}
 
 	var parent uintptr
-	if hr := comCall(btn.fragmentPtr(), slotNavigate, uiaNavParent, uintptr(unsafe.Pointer(&parent))); hr != sOK ||
+	if hr := comCall(btn.fragmentPtr(), slotNavigate, uiaNavParent, uintptr(unsafe.Pointer(&parent))); hr != win32.SOK ||
 		parent != root.fragmentPtr() {
 		t.Errorf("Navigate(Parent) от кнопки: hr=%#x parent=%#x", hr, parent)
 	}
@@ -287,14 +288,14 @@ func TestUIAProviderThroughVTable(t *testing.T) {
 		t.Error("PreviousSibling не вернул кнопку")
 	}
 	var none uintptr
-	if hr := comCall(root.fragmentPtr(), slotNavigate, uiaNavParent, uintptr(unsafe.Pointer(&none))); hr != sOK ||
+	if hr := comCall(root.fragmentPtr(), slotNavigate, uiaNavParent, uintptr(unsafe.Pointer(&none))); hr != win32.SOK ||
 		none != 0 {
 		t.Errorf("родитель корня должен быть NULL: hr=%#x ptr=%#x", hr, none)
 	}
 
 	// ── RuntimeId и границы ──────────────────────────────────────────────────
 	var sa uintptr
-	if hr := comCall(btn.fragmentPtr(), slotRuntimeID, uintptr(unsafe.Pointer(&sa))); hr != sOK {
+	if hr := comCall(btn.fragmentPtr(), slotRuntimeID, uintptr(unsafe.Pointer(&sa))); hr != win32.SOK {
 		t.Fatalf("GetRuntimeId: hr=%#x", hr)
 	}
 	ids := safeArrayInts(t, sa)
@@ -303,7 +304,7 @@ func TestUIAProviderThroughVTable(t *testing.T) {
 	}
 
 	var rc uiaRect
-	if hr := comCall(btn.fragmentPtr(), slotBoundingRectangle, uintptr(unsafe.Pointer(&rc))); hr != sOK {
+	if hr := comCall(btn.fragmentPtr(), slotBoundingRectangle, uintptr(unsafe.Pointer(&rc))); hr != win32.SOK {
 		t.Fatalf("BoundingRectangle: hr=%#x", hr)
 	}
 	if rc.left != 10 || rc.top != 10 || rc.width != 110 || rc.height != 30 {
@@ -312,12 +313,12 @@ func TestUIAProviderThroughVTable(t *testing.T) {
 
 	// ── Фрагмент-корень и фокус ──────────────────────────────────────────────
 	var fr uintptr
-	if hr := comCall(btn.fragmentPtr(), slotFragmentRoot, uintptr(unsafe.Pointer(&fr))); hr != sOK ||
+	if hr := comCall(btn.fragmentPtr(), slotFragmentRoot, uintptr(unsafe.Pointer(&fr))); hr != win32.SOK ||
 		fr != root.rootPtr() {
 		t.Errorf("get_FragmentRoot: hr=%#x ptr=%#x", hr, fr)
 	}
 	var focus uintptr
-	if hr := comCall(root.rootPtr(), slotGetFocus, uintptr(unsafe.Pointer(&focus))); hr != sOK || focus == 0 {
+	if hr := comCall(root.rootPtr(), slotGetFocus, uintptr(unsafe.Pointer(&focus))); hr != win32.SOK || focus == 0 {
 		t.Fatalf("GetFocus: hr=%#x ptr=%#x", hr, focus)
 	}
 	focused := uiaLookup(focus)
@@ -376,7 +377,7 @@ func TestUIANoNativeWindowHandle(t *testing.T) {
 		}
 		var v comVariant
 		if hr := comCall(e.simplePtr(), slotPropertyValue, uiaPropNativeWindowHandle,
-			uintptr(unsafe.Pointer(&v))); hr != sOK {
+			uintptr(unsafe.Pointer(&v))); hr != win32.SOK {
 			t.Fatalf("GetPropertyValue(NativeWindowHandle): hr=%#x", hr)
 		}
 		if v.vt != vtEmpty {
@@ -499,7 +500,7 @@ func TestUIAPatternProviderByRole(t *testing.T) {
 		t.Helper()
 		var p uintptr
 		if hr := comCall(e.simplePtr(), slotPatternProvider, uintptr(id),
-			uintptr(unsafe.Pointer(&p))); hr != sOK {
+			uintptr(unsafe.Pointer(&p))); hr != win32.SOK {
 			t.Fatalf("GetPatternProvider(%d): hr=%#x", id, hr)
 		}
 		return p
@@ -534,19 +535,19 @@ func TestUIAPatternProviderByRole(t *testing.T) {
 	// клиент, получивший паттерн одним путём, не найдёт его другим.
 	var out uintptr
 	if hr := comCall(btn.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidInvokeProvider)),
-		uintptr(unsafe.Pointer(&out))); hr != sOK || out != btn.invokePtr() {
+		uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != btn.invokePtr() {
 		t.Errorf("QI(Invoke) у кнопки: hr=%#x out=%#x", hr, out)
 	}
 	if hr := comCall(lbl.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidInvokeProvider)),
-		uintptr(unsafe.Pointer(&out))); hr != eNoInterface || out != 0 {
+		uintptr(unsafe.Pointer(&out))); hr != win32.ENoInterface || out != 0 {
 		t.Errorf("QI(Invoke) у надписи: hr=%#x out=%#x, ожидался E_NOINTERFACE", hr, out)
 	}
 	if hr := comCall(cb.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidToggleProvider)),
-		uintptr(unsafe.Pointer(&out))); hr != sOK || out != cb.togglePtr() {
+		uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != cb.togglePtr() {
 		t.Errorf("QI(Toggle) у флажка: hr=%#x out=%#x", hr, out)
 	}
 	if hr := comCall(btn.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidToggleProvider)),
-		uintptr(unsafe.Pointer(&out))); hr != eNoInterface {
+		uintptr(unsafe.Pointer(&out))); hr != win32.ENoInterface {
 		t.Errorf("QI(Toggle) у кнопки: hr=%#x, ожидался E_NOINTERFACE", hr)
 	}
 }
@@ -562,13 +563,13 @@ func TestUIAInvokeClicksButton(t *testing.T) {
 	if invoke == 0 {
 		t.Fatal("кнопка не отдала IInvokeProvider")
 	}
-	if hr := comCall(invoke, slotInvoke); hr != sOK {
+	if hr := comCall(invoke, slotInvoke); hr != win32.SOK {
 		t.Fatalf("Invoke: hr=%#x", hr)
 	}
 	if sc.clicks != 1 {
 		t.Fatalf("нажатий %d, ожидалось 1", sc.clicks)
 	}
-	if hr := comCall(invoke, slotInvoke); hr != sOK || sc.clicks != 2 {
+	if hr := comCall(invoke, slotInvoke); hr != win32.SOK || sc.clicks != 2 {
 		t.Errorf("повторный Invoke: hr=%#x clicks=%d", hr, sc.clicks)
 	}
 
@@ -597,7 +598,7 @@ func TestUIAToggleCheckBox(t *testing.T) {
 		t.Helper()
 		sc.b.refresh(true)
 		var s int32
-		if hr := comCall(toggle, slotToggleState, uintptr(unsafe.Pointer(&s))); hr != sOK {
+		if hr := comCall(toggle, slotToggleState, uintptr(unsafe.Pointer(&s))); hr != win32.SOK {
 			t.Fatalf("get_ToggleState: hr=%#x", hr)
 		}
 		return s
@@ -606,7 +607,7 @@ func TestUIAToggleCheckBox(t *testing.T) {
 	if got := state(); got != uiaToggleOff {
 		t.Fatalf("исходное состояние = %d, ожидался Off", got)
 	}
-	if hr := comCall(toggle, slotToggle); hr != sOK {
+	if hr := comCall(toggle, slotToggle); hr != win32.SOK {
 		t.Fatalf("Toggle: hr=%#x", hr)
 	}
 	if !sc.cb.IsChecked() {
@@ -615,7 +616,7 @@ func TestUIAToggleCheckBox(t *testing.T) {
 	if got := state(); got != uiaToggleOn {
 		t.Errorf("после Toggle состояние = %d, ожидался On", got)
 	}
-	if hr := comCall(toggle, slotToggle); hr != sOK || sc.cb.IsChecked() {
+	if hr := comCall(toggle, slotToggle); hr != win32.SOK || sc.cb.IsChecked() {
 		t.Errorf("обратный Toggle: hr=%#x checked=%v", hr, sc.cb.IsChecked())
 	}
 	if got := state(); got != uiaToggleOff {
@@ -629,7 +630,7 @@ func TestUIASetFocusThroughVTable(t *testing.T) {
 	sc := newUIAActionScene(t)
 	btn, cb, lbl := sc.elem(t, 1), sc.elem(t, 2), sc.elem(t, 3)
 
-	if hr := comCall(btn.fragmentPtr(), slotSetFocus); hr != sOK {
+	if hr := comCall(btn.fragmentPtr(), slotSetFocus); hr != win32.SOK {
 		t.Fatalf("SetFocus у кнопки: hr=%#x", hr)
 	}
 	if !sc.btn.IsFocused() {
@@ -643,7 +644,7 @@ func TestUIASetFocusThroughVTable(t *testing.T) {
 		t.Errorf("HasKeyboardFocus у кнопки после SetFocus: vt=%d val=%d", v.vt, v.val[0])
 	}
 
-	if hr := comCall(cb.fragmentPtr(), slotSetFocus); hr != sOK {
+	if hr := comCall(cb.fragmentPtr(), slotSetFocus); hr != win32.SOK {
 		t.Fatalf("SetFocus у флажка: hr=%#x", hr)
 	}
 	if !sc.cb.IsFocused() || sc.btn.IsFocused() {
@@ -652,7 +653,7 @@ func TestUIASetFocusThroughVTable(t *testing.T) {
 
 	// Надпись фокус не принимает, но HRESULT всё равно S_OK: ошибка отсюда
 	// заставляет «Экранный диктор» считать провайдер сломанным.
-	if hr := comCall(lbl.fragmentPtr(), slotSetFocus); hr != sOK {
+	if hr := comCall(lbl.fragmentPtr(), slotSetFocus); hr != win32.SOK {
 		t.Errorf("SetFocus у надписи: hr=%#x, ожидался S_OK", hr)
 	}
 	if !sc.cb.IsFocused() {

@@ -24,13 +24,13 @@ import (
 // движке нет.
 
 // detectSystemTheme — на macOS всегда SystemThemeUnknown.
-func detectSystemTheme() SystemTheme {
-	return SystemThemeUnknown
+func detectSystemTheme() native.SystemTheme {
+	return native.SystemThemeUnknown
 }
 
 // watchSystemTheme — наблюдения за темой на macOS нет (см. выше); nil означает
 // «платформа наблюдать не умеет».
-func watchSystemTheme(nw native.NativeWindow, emit func(SystemTheme)) (stop func()) {
+func watchSystemTheme(nw native.NativeWindow, emit func(native.SystemTheme)) (stop func()) {
 	return nil
 }
 

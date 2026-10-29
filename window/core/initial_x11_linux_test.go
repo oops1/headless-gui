@@ -92,7 +92,7 @@ func createInitX11(t *testing.T, p native.InitialPlacement, minW, minH, width, h
 	}
 	w.screen.Root = tRoot
 	w.screen.WidthInPixels, w.screen.HeightInPixels = 1920, 1080
-	w.setInitialPlacement(p)
+	w.SetInitialPlacement(p)
 	if minW > 0 || minH > 0 {
 		w.SetMinSize(minW, minH)
 	}

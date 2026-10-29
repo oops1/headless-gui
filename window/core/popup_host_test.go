@@ -36,9 +36,9 @@ func (f *popupFakeNative) SetSize(int, int)                              {}
 func (f *popupFakeNative) SetPosition(int, int)                          {}
 func (f *popupFakeNative) Close()                                        {}
 
-// blitPopupRegion — выкройка окна: на Windows этот вызов синхронно ждёт, пока
+// BlitPopupRegion — выкройка окна: на Windows этот вызов синхронно ждёт, пока
 // поток окна разберёт сообщения.
-func (f *popupFakeNative) blitPopupRegion(img *image.RGBA, bands []image.Rectangle) {
+func (f *popupFakeNative) BlitPopupRegion(img *image.RGBA, bands []image.Rectangle) {
 	f.blits++
 	if f.blitHook != nil {
 		f.blitHook()

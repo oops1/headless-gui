@@ -24,6 +24,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oops1/headless-gui/v3/platform/win32"
 )
 
 // errUIAUnavailable — мост поднять не на чем: нет uiautomationcore.dll или
@@ -73,11 +75,6 @@ func uiaLog(format string, args ...any) {
 // ─── HRESULT ─────────────────────────────────────────────────────────────────
 
 const (
-	sOK          = uintptr(0)
-	eNoInterface = uintptr(0x80004002)
-	eInvalidArg  = uintptr(0x80070057)
-	eFail        = uintptr(0x80004005)
-	eNotImpl     = uintptr(0x80004001)
 	uiaEBadPoint = uintptr(0x80131515) // не используется, оставлено для полноты
 
 	// UIA_E_ELEMENTNOTENABLED / UIA_E_ELEMENTNOTAVAILABLE — штатные отказы
@@ -88,32 +85,6 @@ const (
 )
 
 // ─── GUID ────────────────────────────────────────────────────────────────────
-
-// comGUID — структура GUID в раскладке Windows.
-type comGUID struct {
-	Data1 uint32
-	Data2 uint16
-	Data3 uint16
-	Data4 [8]byte
-}
-
-func (g *comGUID) equals(o *comGUID) bool {
-	if g == nil || o == nil {
-		return false
-	}
-	return *g == *o
-}
-
-// String форматирует GUID как {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX} —
-// нужно, чтобы в журнале было видно, какой интерфейс просит клиент.
-func (g *comGUID) String() string {
-	if g == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
-		g.Data1, g.Data2, g.Data3, g.Data4[0], g.Data4[1],
-		g.Data4[2], g.Data4[3], g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7])
-}
 
 // comAddRef вызывает IUnknown::AddRef чужого COM-объекта (слот 1 в vtable).
 // Нужен, когда мы отдаём клиенту КЭШИРОВАННЫЙ указатель: без этого клиент
@@ -131,32 +102,31 @@ func comAddRef(obj uintptr) {
 }
 
 var (
-	iidIUnknown = comGUID{0x00000000, 0x0000, 0x0000, [8]byte{0xC0, 0, 0, 0, 0, 0, 0, 0x46}}
 	// IRawElementProviderSimple {D6DD68D1-86FD-4332-8666-9ABEDEA2D24C}
-	iidProviderSimple = comGUID{0xD6DD68D1, 0x86FD, 0x4332, [8]byte{0x86, 0x66, 0x9A, 0xBE, 0xDE, 0xA2, 0xD2, 0x4C}}
+	iidProviderSimple = win32.GUID{Data1: 0xD6DD68D1, Data2: 0x86FD, Data3: 0x4332, Data4: [8]byte{0x86, 0x66, 0x9A, 0xBE, 0xDE, 0xA2, 0xD2, 0x4C}}
 	// IRawElementProviderFragment {F7063DA8-8359-439C-9297-BBC5299A7D87}
-	iidProviderFragment = comGUID{0xF7063DA8, 0x8359, 0x439C, [8]byte{0x92, 0x97, 0xBB, 0xC5, 0x29, 0x9A, 0x7D, 0x87}}
+	iidProviderFragment = win32.GUID{Data1: 0xF7063DA8, Data2: 0x8359, Data3: 0x439C, Data4: [8]byte{0x92, 0x97, 0xBB, 0xC5, 0x29, 0x9A, 0x7D, 0x87}}
 	// IRawElementProviderFragmentRoot {620CE2A5-AB8F-40A9-86CB-DE3C75599B58}
-	iidProviderFragmentRoot = comGUID{0x620CE2A5, 0xAB8F, 0x40A9, [8]byte{0x86, 0xCB, 0xDE, 0x3C, 0x75, 0x59, 0x9B, 0x58}}
+	iidProviderFragmentRoot = win32.GUID{Data1: 0x620CE2A5, Data2: 0xAB8F, Data3: 0x40A9, Data4: [8]byte{0x86, 0xCB, 0xDE, 0x3C, 0x75, 0x59, 0x9B, 0x58}}
 	// IInvokeProvider {54FCB24B-E18E-47A2-B4D3-ECCBE77599A2} — паттерн Invoke.
-	iidInvokeProvider = comGUID{0x54FCB24B, 0xE18E, 0x47A2, [8]byte{0xB4, 0xD3, 0xEC, 0xCB, 0xE7, 0x75, 0x99, 0xA2}}
+	iidInvokeProvider = win32.GUID{Data1: 0x54FCB24B, Data2: 0xE18E, Data3: 0x47A2, Data4: [8]byte{0xB4, 0xD3, 0xEC, 0xCB, 0xE7, 0x75, 0x99, 0xA2}}
 	// IToggleProvider {56D00BD0-C4F4-433C-A836-1A52A57E0892} — паттерн Toggle.
-	iidToggleProvider = comGUID{0x56D00BD0, 0xC4F4, 0x433C, [8]byte{0xA8, 0x36, 0x1A, 0x52, 0xA5, 0x7E, 0x08, 0x92}}
+	iidToggleProvider = win32.GUID{Data1: 0x56D00BD0, Data2: 0xC4F4, Data3: 0x433C, Data4: [8]byte{0xA8, 0x36, 0x1A, 0x52, 0xA5, 0x7E, 0x08, 0x92}}
 	// ISelectionItemProvider {2ACAD808-B2D4-452D-A407-91FF1AD167B2} — паттерн
 	// SelectionItem: «выбрана ли» радиокнопка и выбор её.
-	iidSelectionItemProvider = comGUID{0x2ACAD808, 0xB2D4, 0x452D, [8]byte{0xA4, 0x07, 0x91, 0xFF, 0x1A, 0xD1, 0x67, 0xB2}}
+	iidSelectionItemProvider = win32.GUID{Data1: 0x2ACAD808, Data2: 0xB2D4, Data3: 0x452D, Data4: [8]byte{0xA4, 0x07, 0x91, 0xFF, 0x1A, 0xD1, 0x67, 0xB2}}
 	// IExpandCollapseProvider {D847D3A5-CAB0-4A98-8C32-ECB45C59AD24} — паттерн
 	// ExpandCollapse: раскрытие подменю.
-	iidExpandCollapseProvider = comGUID{0xD847D3A5, 0xCAB0, 0x4A98, [8]byte{0x8C, 0x32, 0xEC, 0xB4, 0x5C, 0x59, 0xAD, 0x24}}
+	iidExpandCollapseProvider = win32.GUID{Data1: 0xD847D3A5, Data2: 0xCAB0, Data3: 0x4A98, Data4: [8]byte{0x8C, 0x32, 0xEC, 0xB4, 0x5C, 0x59, 0xAD, 0x24}}
 	// IValueProvider {C7935180-6FB3-4201-B174-7DF73ADBF64A} — паттерн Value:
 	// содержимое поля ввода как строка.
-	iidValueProvider = comGUID{0xC7935180, 0x6FB3, 0x4201, [8]byte{0xB1, 0x74, 0x7D, 0xF7, 0x3A, 0xDB, 0xF6, 0x4A}}
+	iidValueProvider = win32.GUID{Data1: 0xC7935180, Data2: 0x6FB3, Data3: 0x4201, Data4: [8]byte{0xB1, 0x74, 0x7D, 0xF7, 0x3A, 0xDB, 0xF6, 0x4A}}
 	// ITextProvider {3589C92C-63F3-4367-99BB-ADA653B77CF2} — паттерн Text:
 	// содержимое как документ, читаемый кусками.
-	iidTextProvider = comGUID{0x3589C92C, 0x63F3, 0x4367, [8]byte{0x99, 0xBB, 0xAD, 0xA6, 0x53, 0xB7, 0x7C, 0xF2}}
+	iidTextProvider = win32.GUID{Data1: 0x3589C92C, Data2: 0x63F3, Data3: 0x4367, Data4: [8]byte{0x99, 0xBB, 0xAD, 0xA6, 0x53, 0xB7, 0x7C, 0xF2}}
 	// ITextRangeProvider {5347AD7B-C355-46F8-AFF5-909033582F63} — диапазон
 	// текста внутри паттерна Text.
-	iidTextRangeProvider = comGUID{0x5347AD7B, 0xC355, 0x46F8, [8]byte{0xAF, 0xF5, 0x90, 0x90, 0x33, 0x58, 0x2F, 0x63}}
+	iidTextRangeProvider = win32.GUID{Data1: 0x5347AD7B, Data2: 0xC355, Data3: 0x46F8, Data4: [8]byte{0xAF, 0xF5, 0x90, 0x90, 0x33, 0x58, 0x2F, 0x63}}
 )
 
 // ─── Импорты ─────────────────────────────────────────────────────────────────
@@ -279,23 +249,6 @@ func safeArrayOfInts(vals []int32) uintptr {
 }
 
 // ─── Таблицы виртуальных методов ─────────────────────────────────────────────
-
-var (
-	vtableMu   sync.Mutex
-	vtableKeep [][]uintptr // держим таблицы живыми: их адреса ушли в чужой код
-)
-
-// newVTable собирает vtable из указателей на функции и возвращает адрес
-// первого элемента. Слайс сохраняется глобально — сборщик мусора не должен
-// освободить память, на которую смотрит UIA.
-func newVTable(fns ...uintptr) uintptr {
-	tbl := make([]uintptr, len(fns))
-	copy(tbl, fns)
-	vtableMu.Lock()
-	vtableKeep = append(vtableKeep, tbl)
-	vtableMu.Unlock()
-	return uintptr(unsafe.Pointer(&tbl[0]))
-}
 
 // bstrToString читает строку COM (BSTR) — указатель на UTF-16 с длиной перед
 // ним. Нужен для входных параметров: SetValue приходит именно в таком виде.

@@ -12,8 +12,9 @@ import (
 // Начальное положение и «развёрнуто» (initial.go, задание PixGo E18).
 //
 // Чистая арифметика и порядок, в котором bringUp настраивает бэкенд, — на
-// любой платформе; живые окна — в initial_windows_test.go, провод X11 и
-// Wayland — в initial_x11_linux_test.go и initial_wayland_linux_test.go.
+// любой платформе; живые окна — в platform/win32/initial_windows_test.go,
+// провод X11 и Wayland — в initial_x11_linux_test.go и
+// initial_wayland_linux_test.go.
 
 // initFake — бэкенд, записывающий порядок вызовов: что получил до Create и с
 // каким размером его создали.
@@ -26,7 +27,7 @@ type initFake struct {
 	maximized bool
 }
 
-func (f *initFake) setInitialPlacement(p native.InitialPlacement) {
+func (f *initFake) SetInitialPlacement(p native.InitialPlacement) {
 	f.log = append(f.log, "placement")
 	f.placement, f.placed = p, f.placed+1
 }
@@ -172,7 +173,7 @@ func TestInitialBounds_PositionOnly(t *testing.T) {
 func TestInitial_NothingRequested(t *testing.T) {
 	_, f := initBringUp(t, "1", nil)
 	if f.placed != 0 {
-		t.Errorf("setInitialPlacement вызван %d раз без заказа", f.placed)
+		t.Errorf("SetInitialPlacement вызван %d раз без заказа", f.placed)
 	}
 	if f.createW != 800 || f.createH != 600 {
 		t.Errorf("Create(%d, %d), ждал 800x600", f.createW, f.createH)

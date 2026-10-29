@@ -51,7 +51,7 @@ func TestX11Popup_NoCompositorShapesToSolid(t *testing.T) {
 	}
 
 	img := shapeTestFrame()
-	w.blitPopupRegion(img, nil)
+	w.BlitPopupRegion(img, nil)
 	argbWaitReq(t, fx, 72, 1) // PutImage после формы — значит, форма уже у сервера
 	reqs := shapeRequests(fx)
 	if len(reqs) != 1 {
@@ -77,7 +77,7 @@ func TestX11Popup_NoCompositorShapesToSolid(t *testing.T) {
 		t.Error("щель между уровнями попала в форму")
 	}
 
-	w.blitPopupRegion(img, nil)
+	w.BlitPopupRegion(img, nil)
 	argbWaitReq(t, fx, 72, 2)
 	if n := len(shapeRequests(fx)); n != 1 {
 		t.Errorf("та же форма отправлена повторно: %d запросов", n)
@@ -88,7 +88,7 @@ func TestX11Popup_NoCompositorShapesToSolid(t *testing.T) {
 			img2.SetRGBA(x, y, color.RGBA{A: 255})
 		}
 	}
-	w.blitPopupRegion(img2, nil)
+	w.BlitPopupRegion(img2, nil)
 	argbWaitReq(t, fx, 72, 3)
 	if n := len(shapeRequests(fx)); n != 2 {
 		t.Errorf("изменившаяся форма не отправлена: %d запросов", n)
@@ -105,7 +105,7 @@ func TestX11Popup_CompositorKeepsAlpha(t *testing.T) {
 	if w.shapeMajor != 0 {
 		t.Fatalf("shapeMajor %d: с композитором форма не нужна", w.shapeMajor)
 	}
-	w.blitPopupRegion(shapeTestFrame(), nil)
+	w.BlitPopupRegion(shapeTestFrame(), nil)
 	argbWaitReq(t, fx, 72, 1)
 	if n := len(shapeRequests(fx)); n != 0 {
 		t.Errorf("ShapeRectangles при композиторе: %d", n)

@@ -102,7 +102,7 @@ type secondaryFake struct {
 	initFake
 }
 
-func (f *secondaryFake) markSecondary() { f.log = append(f.log, "secondary") }
+func (f *secondaryFake) MarkSecondary() { f.log = append(f.log, "secondary") }
 
 // Окно из OpenWindow помечается вторичным до создания окна ОС: на Win32 иначе
 // его закрытие (WM_DESTROY → PostQuitMessage) завершило бы цикл сообщений

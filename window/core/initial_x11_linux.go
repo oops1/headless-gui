@@ -15,9 +15,9 @@ import (
 	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
-// setInitialPlacement запоминает положение и «развёрнуто» до Create.
+// SetInitialPlacement запоминает положение и «развёрнуто» до Create.
 // Реализует initialPlaceBackend.
-func (w *X11Window) setInitialPlacement(p native.InitialPlacement) { w.initial = p }
+func (w *X11Window) SetInitialPlacement(p native.InitialPlacement) { w.initial = p }
 
 // x11ClampInt16 вписывает координату в INT16 запроса CreateWindow.
 func x11ClampInt16(v int) int16 {

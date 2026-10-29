@@ -39,10 +39,10 @@ import (
 // monitorChangeSource — бэкенд сообщает, что с мониторами что-то случилось.
 // Необязательная способность: без неё SetOnMonitorsChanged молчит.
 type monitorChangeSource interface {
-	// watchMonitors подписывается на изменения. notify вызывается из любого
+	// WatchMonitors подписывается на изменения. notify вызывается из любого
 	// потока, без замков и быстро; повторы и лишние вызовы допустимы.
 	// stop снимает подписку. nil — платформа наблюдать не умеет.
-	watchMonitors(notify func()) (stop func())
+	WatchMonitors(notify func()) (stop func())
 }
 
 // monitorChangeDebounce — сколько ждём тишины после последнего сообщения
@@ -114,7 +114,7 @@ func (win *Window) syncMonitorWatch() {
 		// подключение к серверу. Без него первое же сообщение с прежним
 		// составом мониторов сошло бы за перемену.
 		base := monitorListFunc()
-		stop := src.watchMonitors(win.monitorsEvent)
+		stop := src.WatchMonitors(win.monitorsEvent)
 		st.mu.Lock()
 		if st.stop != nil || st.fn == nil {
 			// Пока читали, подписку успели поднять или снять — вторая не нужна.

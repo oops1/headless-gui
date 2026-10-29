@@ -45,9 +45,9 @@ func TestNotifyAgainstRealDaemon(t *testing.T) {
 		t.Skip("демон уведомлений не запущен")
 	}
 	n := &linuxNotifier{}
-	n.setBalloonClickHandler(func() {})
-	if err := n.showBalloon("headless-gui", "Проверка уведомлений", 1); err != nil {
-		t.Fatalf("showBalloon: %v", err)
+	n.SetBalloonClickHandler(func() {})
+	if err := n.ShowBalloon("headless-gui", "Проверка уведомлений", 1); err != nil {
+		t.Fatalf("ShowBalloon: %v", err)
 	}
 	// Возможности демона читаются и кэшируются без ошибок.
 	if _, err := dbus.Session(); err != nil {
@@ -104,10 +104,10 @@ func TestNotifyAgainstFakeDaemon(t *testing.T) {
 
 	clicked := make(chan struct{}, 1)
 	n := &linuxNotifier{}
-	n.setBalloonClickHandler(func() { clicked <- struct{}{} })
+	n.SetBalloonClickHandler(func() { clicked <- struct{}{} })
 
-	if err := n.showBalloon("Заголовок", "Тело уведомления", 3); err != nil {
-		t.Fatalf("showBalloon: %v", err)
+	if err := n.ShowBalloon("Заголовок", "Тело уведомления", 3); err != nil {
+		t.Fatalf("ShowBalloon: %v", err)
 	}
 
 	var got notifyCall
@@ -170,8 +170,8 @@ func TestNotifyAgainstFakeDaemon(t *testing.T) {
 
 	// Без колбэка действия не регистрируем — демон не покажет лишнюю кнопку.
 	n2 := &linuxNotifier{}
-	if err := n2.showBalloon("Без клика", "текст", 1); err != nil {
-		t.Fatalf("showBalloon без колбэка: %v", err)
+	if err := n2.ShowBalloon("Без клика", "текст", 1); err != nil {
+		t.Fatalf("ShowBalloon без колбэка: %v", err)
 	}
 	select {
 	case got = <-calls:

@@ -35,8 +35,8 @@ type wlMonitorWatch struct {
 	notify atomic.Pointer[func()]
 }
 
-// watchMonitors подписывается на смену мониторов (monitorChangeSource).
-func (w *WaylandWindow) watchMonitors(notify func()) (stop func()) {
+// WatchMonitors подписывается на смену мониторов (monitorChangeSource).
+func (w *WaylandWindow) WatchMonitors(notify func()) (stop func()) {
 	if notify == nil {
 		return nil
 	}

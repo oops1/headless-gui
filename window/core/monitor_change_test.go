@@ -11,7 +11,7 @@ import (
 )
 
 // Событие смены мониторов (E5): общий слой окна без платформы. Платформенные
-// источники событий проверяются в monitor_change_windows_test.go,
+// источники событий проверяются в platform/win32/monitor_change_windows_test.go,
 // x11_monitor_change_linux_test.go, wayland_monitor_change_linux_test.go.
 
 // monTestSpy — бэкенд, умеющий сообщать о смене мониторов.
@@ -24,7 +24,7 @@ type monTestSpy struct {
 	noSource bool
 }
 
-func (m *monTestSpy) watchMonitors(notify func()) func() {
+func (m *monTestSpy) WatchMonitors(notify func()) func() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.watches++
@@ -147,6 +147,10 @@ func TestMonitorsChanged_NewMonitor(t *testing.T) {
 // Сообщения приходят пачкой: пережидаем паузу и сообщаем один раз.
 func TestMonitorsChanged_BurstCoalesced(t *testing.T) {
 	l := monTestUseList(t, monTestA)
+	// Пауза с запасом против промежутков между сообщениями: под нагрузкой
+	// (-race, параллельные пакеты) сон в 3 мс длится дольше 20 мс общей паузы
+	// тестов, и всплеск переставал склеиваться. Восстанавливает monTestUseList.
+	monitorChangeDebounce = 250 * time.Millisecond
 	win, spy := monTestWindow(t)
 	fn, ch := monTestFn()
 	win.SetOnMonitorsChanged(fn)

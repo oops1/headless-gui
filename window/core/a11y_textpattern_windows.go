@@ -57,6 +57,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/oops1/headless-gui/v3/platform/win32"
 	"github.com/oops1/headless-gui/v3/widget"
 	"golang.org/x/sys/windows"
 )
@@ -266,7 +267,7 @@ func uiaInitTextVTables() {
 		release := windows.NewCallback(uiaRelease)
 
 		// ITextProvider: порядок методов — по определению интерфейса.
-		uiaVTText = newVTable(qi, addRef, release,
+		uiaVTText = win32.NewVTable(qi, addRef, release,
 			windows.NewCallback(uiaTextGetSelection),
 			windows.NewCallback(uiaTextGetVisibleRanges),
 			windows.NewCallback(uiaTextRangeFromChild),
@@ -276,7 +277,7 @@ func uiaInitTextVTables() {
 		)
 
 		// ITextRangeProvider: у диапазона СВОЙ IUnknown — у него свой счётчик.
-		uiaVTTextRange = newVTable(
+		uiaVTTextRange = win32.NewVTable(
 			windows.NewCallback(uiaRangeQueryInterface),
 			windows.NewCallback(uiaRangeAddRef),
 			windows.NewCallback(uiaRangeRelease),
@@ -356,13 +357,13 @@ func safeArrayOfDoubles(vals []float64) uintptr {
 func uiaTextElement(this uintptr) (*uiaElement, widget.AccessTextProvider, uintptr) {
 	e := uiaLookup(this)
 	if e == nil {
-		return nil, nil, eFail
+		return nil, nil, win32.EFail
 	}
 	tp, ok := uiaTextOf(e)
 	if !ok {
 		return nil, nil, uiaEElementNotAvailable
 	}
-	return e, tp, sOK
+	return e, tp, win32.SOK
 }
 
 // uiaCurrentSelection — выделение виджета, усечённое до длины текста. Без
@@ -376,11 +377,11 @@ func uiaCurrentSelection(tp widget.AccessTextProvider, n int) a11yRange {
 // массив из одного диапазона; без выделения — пустой диапазон на каретке.
 func uiaTextGetSelection(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e, tp, hr := uiaTextElement(this)
-	if hr != sOK {
+	if hr != win32.SOK {
 		return hr
 	}
 	n := len([]rune(tp.AccessText()))
@@ -388,38 +389,38 @@ func uiaTextGetSelection(this uintptr, out *uintptr) uintptr {
 	if sa := safeArrayOfRanges([]*uiaTextRange{e.newTextRange(sel)}); sa != 0 {
 		*out = sa
 		uiaLog("Text.GetSelection(%d) → [%d,%d)", e.id, sel.Start, sel.End)
-		return sOK
+		return win32.SOK
 	}
-	return eFail
+	return win32.EFail
 }
 
 // uiaTextGetVisibleRanges — ITextProvider::GetVisibleRanges. Границ видимой
 // области виджет не публикует: считаем видимым весь текст.
 func uiaTextGetVisibleRanges(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e, tp, hr := uiaTextElement(this)
-	if hr != sOK {
+	if hr != win32.SOK {
 		return hr
 	}
 	n := len([]rune(tp.AccessText()))
 	if sa := safeArrayOfRanges([]*uiaTextRange{e.newTextRange(a11yRange{0, n})}); sa != 0 {
 		*out = sa
-		return sOK
+		return win32.SOK
 	}
-	return eFail
+	return win32.EFail
 }
 
 // uiaTextRangeFromChild — ITextProvider::RangeFromChild. Встроенных объектов
 // у простого текста нет, а значит, нет и детей, чей диапазон можно вернуть.
 func uiaTextRangeFromChild(this uintptr, child uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
-	return eInvalidArg
+	return win32.EInvalidArg
 }
 
 // uiaTextRangeFromPoint — ITextProvider::RangeFromPoint.
@@ -431,63 +432,63 @@ func uiaTextRangeFromChild(this uintptr, child uintptr, out *uintptr) uintptr {
 // определить по точке позицию нечем — отдаём пустой диапазон на каретке.
 func uiaTextRangeFromPoint(this uintptr, pt uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e, tp, hr := uiaTextElement(this)
-	if hr != sOK {
+	if hr != win32.SOK {
 		return hr
 	}
 	n := len([]rune(tp.AccessText()))
 	sel := uiaCurrentSelection(tp, n)
 	*out = e.newTextRange(a11yRange{sel.End, sel.End}).ptr()
-	return sOK
+	return win32.SOK
 }
 
 // uiaTextGetDocumentRange — ITextProvider::get_DocumentRange: весь текст.
 func uiaTextGetDocumentRange(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e, tp, hr := uiaTextElement(this)
-	if hr != sOK {
+	if hr != win32.SOK {
 		return hr
 	}
 	n := len([]rune(tp.AccessText()))
 	*out = e.newTextRange(a11yRange{0, n}).ptr()
 	uiaLog("Text.DocumentRange(%d) → [0,%d)", e.id, n)
-	return sOK
+	return win32.SOK
 }
 
 // uiaTextGetSupportedSelection — ITextProvider::get_SupportedTextSelection.
 func uiaTextGetSupportedSelection(this uintptr, out *int32) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = uiaSelectionSingle
-	return sOK
+	return win32.SOK
 }
 
 // ─── IUnknown диапазона ──────────────────────────────────────────────────────
 
-func uiaRangeQueryInterface(this uintptr, riid *comGUID, ppv *uintptr) uintptr {
+func uiaRangeQueryInterface(this uintptr, riid *win32.GUID, ppv *uintptr) uintptr {
 	if ppv == nil || riid == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*ppv = 0
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eNoInterface
+		return win32.ENoInterface
 	}
-	if !riid.equals(&iidIUnknown) && !riid.equals(&iidTextRangeProvider) {
-		return eNoInterface
+	if !riid.Equals(&win32.IIDIUnknown) && !riid.Equals(&iidTextRangeProvider) {
+		return win32.ENoInterface
 	}
 	if _, ok := tr.tryAddRef(); !ok {
-		return eNoInterface
+		return win32.ENoInterface
 	}
 	*ppv = tr.ptr()
-	return sOK
+	return win32.SOK
 }
 
 func uiaRangeAddRef(this uintptr) uintptr {
@@ -522,34 +523,34 @@ func uiaRangeRelease(this uintptr) uintptr {
 // uiaRangeClone — Clone: независимая копия с теми же границами.
 func uiaRangeClone(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	*out = tr.elem.newTextRange(tr.get()).ptr()
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeCompare — Compare: одинаковы ли диапазоны (тот же элемент, те же
 // границы). Диапазон другого элемента — не ошибка, а «не равен».
 func uiaRangeCompare(this uintptr, other uintptr, out *int32) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	o := uiaLookupRange(other)
 	if o == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	if o.elem != tr.elem {
-		return sOK
+		return win32.SOK
 	}
 	rs, r, _, ok := tr.load()
 	if !ok {
@@ -558,46 +559,46 @@ func uiaRangeCompare(this uintptr, other uintptr, out *int32) uintptr {
 	if r == a11yClampRange(o.get(), len(rs)) {
 		*out = 1
 	}
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeCompareEndpoints — CompareEndpoints.
 func uiaRangeCompareEndpoints(this uintptr, ep int32, other uintptr, oep int32, out *int32) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	o := uiaLookupRange(other)
 	if o == nil || o.elem != tr.elem || !a11yEndpoint(ep).valid() || !a11yEndpoint(oep).valid() {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	rs, r, _, ok := tr.load()
 	if !ok {
 		return uiaEElementNotAvailable
 	}
 	*out = int32(a11yCompareEndpoints(r, a11yEndpoint(ep), a11yClampRange(o.get(), len(rs)), a11yEndpoint(oep)))
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeExpandToEnclosingUnit — ExpandToEnclosingUnit.
 func uiaRangeExpandToEnclosingUnit(this uintptr, unit int32) uintptr {
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	if !a11yTextUnit(unit).valid() {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	rs, r, _, ok := tr.load()
 	if !ok {
 		return uiaEElementNotAvailable
 	}
 	tr.set(a11yExpandToUnit(rs, r, a11yTextUnit(unit)))
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeFindAttribute — FindAttribute. Ни один атрибут не поддерживается
@@ -608,28 +609,28 @@ func uiaRangeExpandToEnclosingUnit(this uintptr, unit int32) uintptr {
 // восьми байт на x64; читать его не нужно.
 func uiaRangeFindAttribute(this uintptr, attr int32, val uintptr, backward int32, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	if uiaLookupRange(this) == nil {
-		return eFail
+		return win32.EFail
 	}
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeFindText — FindText: поиск строки внутри диапазона.
 func uiaRangeFindText(this uintptr, bstr uintptr, backward, ignoreCase int32, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	needle := bstrToString(bstr)
 	if needle == "" {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	rs, r, _, ok := tr.load()
 	if !ok {
@@ -638,7 +639,7 @@ func uiaRangeFindText(this uintptr, bstr uintptr, backward, ignoreCase int32, ou
 	if found, ok := a11yFindText(rs, r, needle, backward != 0, ignoreCase != 0); ok {
 		*out = tr.elem.newTextRange(found).ptr()
 	}
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeGetAttributeValue — GetAttributeValue: любой атрибут отвечает
@@ -648,59 +649,59 @@ func uiaRangeFindText(this uintptr, bstr uintptr, backward, ignoreCase int32, ou
 // пустое», то есть неправду.
 func uiaRangeGetAttributeValue(this uintptr, attr int32, out *comVariant) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	out.setEmpty()
 	if uiaLookupRange(this) == nil {
-		return eFail
+		return win32.EFail
 	}
 	if uiaCore.Load() != nil || procUiaGetReservedNotSupported.Find() != nil {
-		return eNotImpl
+		return win32.ENotImpl
 	}
 	var punk uintptr
 	if hr, _, _ := procUiaGetReservedNotSupported.Call(uintptr(unsafe.Pointer(&punk))); hr != 0 || punk == 0 {
-		return eNotImpl
+		return win32.ENotImpl
 	}
 	// Синглтон статический: AddRef не нужен, клиентский VariantClear его
 	// Release'ом ничего не сломает.
 	out.vt = vtUnknown
 	out.val = [2]uintptr{punk, 0}
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeGetBoundingRectangles — GetBoundingRectangles: один прямоугольник —
 // весь элемент (почему не точный и не пустой массив — см. заголовок файла).
 func uiaRangeGetBoundingRectangles(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	rc := tr.elem.b.boundsOf(tr.elem.id)
 	sa := safeArrayOfDoubles([]float64{rc.left, rc.top, rc.width, rc.height})
 	if sa == 0 {
-		return eFail
+		return win32.EFail
 	}
 	*out = sa
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeGetEnclosingElement — GetEnclosingElement: элемент, внутри которого
 // лежит диапазон. Вложенных элементов у текста нет — это сам элемент.
 func uiaRangeGetEnclosingElement(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	*out = tr.elem.outSimple()
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeGetText — GetText: текст диапазона, не длиннее maxLen символов
@@ -709,15 +710,15 @@ func uiaRangeGetEnclosingElement(this uintptr, out *uintptr) uintptr {
 // (клиент просит «не больше N») безвредно.
 func uiaRangeGetText(this uintptr, maxLen int32, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	if maxLen < -1 {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	rs, r, _, ok := tr.load()
 	if !ok {
@@ -727,21 +728,21 @@ func uiaRangeGetText(this uintptr, maxLen int32, out *uintptr) uintptr {
 	var v comVariant
 	v.setString(text)
 	*out = v.val[0] // BSTR уходит клиенту во владение (пустая строка — NULL)
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeMove — Move: сдвиг всего диапазона на count единиц.
 func uiaRangeMove(this uintptr, unit, count int32, moved *int32) uintptr {
 	if moved == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*moved = 0
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	if !a11yTextUnit(unit).valid() {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	rs, r, _, ok := tr.load()
 	if !ok {
@@ -750,21 +751,21 @@ func uiaRangeMove(this uintptr, unit, count int32, moved *int32) uintptr {
 	nr, n := a11yMoveRange(rs, r, a11yTextUnit(unit), int(count))
 	tr.set(nr)
 	*moved = int32(n)
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeMoveEndpointByUnit — MoveEndpointByUnit: сдвиг одного конца.
 func uiaRangeMoveEndpointByUnit(this uintptr, ep, unit, count int32, moved *int32) uintptr {
 	if moved == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*moved = 0
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	if !a11yEndpoint(ep).valid() || !a11yTextUnit(unit).valid() {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	rs, r, _, ok := tr.load()
 	if !ok {
@@ -773,7 +774,7 @@ func uiaRangeMoveEndpointByUnit(this uintptr, ep, unit, count int32, moved *int3
 	nr, n := a11yMoveEndpoint(rs, r, a11yEndpoint(ep), a11yTextUnit(unit), int(count))
 	tr.set(nr)
 	*moved = int32(n)
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeMoveEndpointByRange — MoveEndpointByRange: конец этого диапазона
@@ -781,11 +782,11 @@ func uiaRangeMoveEndpointByUnit(this uintptr, ep, unit, count int32, moved *int3
 func uiaRangeMoveEndpointByRange(this uintptr, ep int32, target uintptr, tep int32) uintptr {
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	o := uiaLookupRange(target)
 	if o == nil || o.elem != tr.elem || !a11yEndpoint(ep).valid() || !a11yEndpoint(tep).valid() {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	rs, r, _, ok := tr.load()
 	if !ok {
@@ -793,7 +794,7 @@ func uiaRangeMoveEndpointByRange(this uintptr, ep int32, target uintptr, tep int
 	}
 	other := a11yClampRange(o.get(), len(rs))
 	tr.set(a11yMoveEndpointToRange(r, a11yEndpoint(ep), other, a11yEndpoint(tep)))
-	return sOK
+	return win32.SOK
 }
 
 // uiaSelectRange выделяет диапазон в виджете — на горутине движка: дерево
@@ -807,7 +808,7 @@ func uiaSelectRange(e *uiaElement, tp widget.AccessTextProvider, r a11yRange) ui
 	sel, canSel := tp.(widget.AccessSelectionSetter)
 	caret, canCaret := tp.(widget.AccessCaretSetter)
 	if !canSel && !canCaret {
-		return eNotImpl
+		return win32.ENotImpl
 	}
 	e.b.win.postToEngine(func() {
 		switch {
@@ -820,14 +821,14 @@ func uiaSelectRange(e *uiaElement, tp widget.AccessTextProvider, r a11yRange) ui
 		}
 	})
 	e.b.markDirty() // каретка переехала — пора поднять события
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeSelect — Select.
 func uiaRangeSelect(this uintptr) uintptr {
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	_, r, tp, ok := tr.load()
 	if !ok {
@@ -843,7 +844,7 @@ func uiaRangeSelect(this uintptr) uintptr {
 func uiaRangeAddToSelection(this uintptr) uintptr {
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	rs, r, tp, ok := tr.load()
 	if !ok {
@@ -862,7 +863,7 @@ func uiaRangeAddToSelection(this uintptr) uintptr {
 func uiaRangeRemoveFromSelection(this uintptr) uintptr {
 	tr := uiaLookupRange(this)
 	if tr == nil {
-		return eFail
+		return win32.EFail
 	}
 	rs, r, tp, ok := tr.load()
 	if !ok {
@@ -870,7 +871,7 @@ func uiaRangeRemoveFromSelection(this uintptr) uintptr {
 	}
 	sel := uiaCurrentSelection(tp, len(rs))
 	if sel.Empty() || sel != r {
-		return sOK
+		return win32.SOK
 	}
 	return uiaSelectRange(tr.elem, tp, a11yRange{sel.Start, sel.Start})
 }
@@ -879,26 +880,26 @@ func uiaRangeRemoveFromSelection(this uintptr) uintptr {
 // принимается и ничего не делает.
 func uiaRangeScrollIntoView(this uintptr, alignToTop int32) uintptr {
 	if uiaLookupRange(this) == nil {
-		return eFail
+		return win32.EFail
 	}
-	return sOK
+	return win32.SOK
 }
 
 // uiaRangeGetChildren — GetChildren: встроенных объектов нет, массив пуст.
 func uiaRangeGetChildren(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	if uiaLookupRange(this) == nil {
-		return eFail
+		return win32.EFail
 	}
 	sa := safeArrayOfRanges(nil)
 	if sa == 0 {
-		return eFail
+		return win32.EFail
 	}
 	*out = sa
-	return sOK
+	return win32.SOK
 }
 
 // ─── События паттерна Text ───────────────────────────────────────────────────

@@ -24,12 +24,12 @@ import (
 // Общается с X-сервером напрямую через Unix socket.
 type X11Window struct {
 	// linuxNotifier — системные уведомления через D-Bus (notify_linux.go).
-	// Встроен анонимно: его методы showBalloon/setBalloonClickHandler делают
+	// Встроен анонимно: его методы ShowBalloon/SetBalloonClickHandler делают
 	// окно balloonHost'ом, и Window.ShowBalloon работает без иконки в трее.
 	linuxNotifier
 
 	// linuxTray — иконка в системном трее по StatusNotifierItem
-	// (tray_sni_linux.go). Вместе с методами hideToTray/restoreFromTray ниже
+	// (tray_sni_linux.go). Вместе с методами HideToTray/RestoreFromTray ниже
 	// делает окно trayHost'ом (tray.go).
 	linuxTray
 

@@ -8,9 +8,9 @@ import "github.com/oops1/headless-gui/v3/platform/native"
 // (initial.go). Положение окна задаёт компоновщик, поэтому x, y из
 // SetInitialBounds игнорируются; размер приходит аргументами Create.
 
-// setInitialPlacement запоминает «развёрнуто» до Create. Реализует
+// SetInitialPlacement запоминает «развёрнуто» до Create. Реализует
 // initialPlaceBackend.
-func (w *WaylandWindow) setInitialPlacement(p native.InitialPlacement) { w.initial = p }
+func (w *WaylandWindow) SetInitialPlacement(p native.InitialPlacement) { w.initial = p }
 
 // restoreNormalSize подменяет размер из configure размером, с которым окно
 // создавалось, если оно начало жизнь развёрнутым и теперь возвращено в

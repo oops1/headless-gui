@@ -210,3 +210,22 @@ const (
 	VK_OEM_6      = native.VK_OEM_6      // ]}
 	VK_OEM_7      = native.VK_OEM_7      // '"
 )
+
+// ── systheme.go ──
+
+// SystemTheme — тема оформления, выбранная в ОС.
+type SystemTheme = native.SystemTheme
+
+const (
+	// SystemThemeUnknown — узнать не удалось: ОС без понятия темы (Windows до
+	// 10 1607), на Linux нет ни GTK_THEME, ни портала рабочего стола, macOS
+	// (см. window/core/systheme_darwin.go). Это не «светлая»: приложение вправе взять
+	// свою тему по умолчанию, и именно об этом ему и сообщается — подставить
+	// светлую молча значило бы показать белое окно человеку, у которого
+	// просто не работает портал.
+	SystemThemeUnknown = native.SystemThemeUnknown
+	// SystemThemeLight — светлая тема.
+	SystemThemeLight = native.SystemThemeLight
+	// SystemThemeDark — тёмная тема.
+	SystemThemeDark = native.SystemThemeDark
+)

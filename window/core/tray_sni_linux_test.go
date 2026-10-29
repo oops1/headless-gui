@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -44,8 +45,8 @@ func TestSNIARGB32(t *testing.T) {
 	}
 
 	// Порядок байт ОТЛИЧАЕТСЯ от буфера Windows-DIB (BGRA little-endian) —
-	// переиспользовать iconColorBuffer нельзя, проверяем это явно.
-	if bgra := iconColorBuffer(img); bgra[0] == got[0] && bgra[1] == got[1] &&
+	// переиспользовать native.IconColorBuffer нельзя, проверяем это явно.
+	if bgra := native.IconColorBuffer(img); bgra[0] == got[0] && bgra[1] == got[1] &&
 		bgra[2] == got[2] && bgra[3] == got[3] {
 		t.Error("ARGB32 совпал с BGRA-буфером Windows — один из конвертеров неверен")
 	}
@@ -436,8 +437,8 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 
 	trayClicks := make(chan int, 8)
 	tray := &linuxTray{}
-	t.Cleanup(tray.removeTrayIcon)
-	tray.setTrayClickHandler(func(button int, doubleClick bool) { trayClicks <- button })
+	t.Cleanup(tray.RemoveTrayIcon)
+	tray.SetTrayClickHandler(func(button int, doubleClick bool) { trayClicks <- button })
 	if !tray.setTrayMenuNative(menu) {
 		t.Fatal("setTrayMenuNative вернул false — Window показал бы своё меню")
 	}
@@ -447,8 +448,8 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 	for i := 0; i < len(icon.Pix); i += 4 {
 		icon.Pix[i+2], icon.Pix[i+3] = 255, 255 // B, A
 	}
-	if err := tray.setTrayIcon(icon, "headless-gui трей"); err != nil {
-		t.Fatalf("setTrayIcon: %v", err)
+	if err := tray.SetTrayIcon(icon, "headless-gui трей"); err != nil {
+		t.Fatalf("SetTrayIcon: %v", err)
 	}
 
 	var itemName string
@@ -643,13 +644,13 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 	}
 
 	// ── Снятие иконки: имя освобождается ─────────────────────────────────────
-	tray.removeTrayIcon()
+	tray.RemoveTrayIcon()
 	if de.NameHasOwner(itemName) {
-		t.Errorf("после removeTrayIcon имя %s всё ещё занято", itemName)
+		t.Errorf("после RemoveTrayIcon имя %s всё ещё занято", itemName)
 	}
 }
 
-// TestTrayWithoutWatcher — без службы трея setTrayIcon отдаёт понятную ошибку,
+// TestTrayWithoutWatcher — без службы трея SetTrayIcon отдаёт понятную ошибку,
 // а не молчит и не паникует. Если трей в системе есть — проверять нечего.
 func TestTrayWithoutWatcher(t *testing.T) {
 	c := dialTestBus(t)
@@ -657,9 +658,9 @@ func TestTrayWithoutWatcher(t *testing.T) {
 		t.Skip("в системе работает настоящий StatusNotifierWatcher")
 	}
 	tray := &linuxTray{}
-	err := tray.setTrayIcon(image.NewRGBA(image.Rect(0, 0, 4, 4)), "нет трея")
+	err := tray.SetTrayIcon(image.NewRGBA(image.Rect(0, 0, 4, 4)), "нет трея")
 	if err == nil {
-		t.Fatal("без Watcher'а setTrayIcon должен вернуть ошибку")
+		t.Fatal("без Watcher'а SetTrayIcon должен вернуть ошибку")
 	}
 	if !errors.Is(err, errNoTrayWatcher) {
 		t.Errorf("ошибка %v, want errNoTrayWatcher", err)

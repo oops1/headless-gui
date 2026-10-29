@@ -186,7 +186,7 @@ func createInitWayland(t *testing.T, p native.InitialPlacement, minW, minH, widt
 
 	w := &WaylandWindow{conn: client, nextID: 2, bufRelease: make(chan struct{}, 1), repeat: newWlRepeater()}
 	w.clip = newWlClipboard(w)
-	w.setInitialPlacement(p)
+	w.SetInitialPlacement(p)
 	if minW > 0 || minH > 0 {
 		w.SetMinSize(minW, minH)
 	}
@@ -256,8 +256,8 @@ func TestWaylandInitial_SetMaximizedBeforeFirstCommit(t *testing.T) {
 	if !w.IsMaximized() {
 		t.Error("IsMaximized false после первого configure с состоянием maximized")
 	}
-	if cw, ch := w.clientSize(); cw != 1920 || ch != 1080 {
-		t.Errorf("clientSize %dx%d, ждал 1920x1080 от компоновщика", cw, ch)
+	if cw, ch := w.ClientSize(); cw != 1920 || ch != 1080 {
+		t.Errorf("ClientSize %dx%d, ждал 1920x1080 от компоновщика", cw, ch)
 	}
 }
 
@@ -271,13 +271,13 @@ func TestWaylandInitial_RestoreReturnsToInitialSize(t *testing.T) {
 	if w.IsMaximized() {
 		t.Fatal("после configure без maximized окно считается развёрнутым")
 	}
-	if cw, ch := w.clientSize(); cw != 900 || ch != 650 {
+	if cw, ch := w.ClientSize(); cw != 900 || ch != 650 {
 		t.Errorf("после восстановления %dx%d, ждал размер создания 900x650", cw, ch)
 	}
 	// Запомненный размер израсходован: следующий 0×0 размера не трогает.
 	w.handleEvent(w.toplevelID, xdgToplevelEvConfigure, toplevelConfigure(1000, 700))
 	w.handleEvent(w.toplevelID, xdgToplevelEvConfigure, toplevelConfigure(0, 0))
-	if cw, ch := w.clientSize(); cw != 1000 || ch != 700 {
+	if cw, ch := w.ClientSize(); cw != 1000 || ch != 700 {
 		t.Errorf("повторное 0×0 изменило размер: %dx%d", cw, ch)
 	}
 }

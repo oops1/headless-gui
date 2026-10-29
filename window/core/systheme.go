@@ -20,35 +20,8 @@ import (
 	"sync"
 
 	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
-
-// SystemTheme — тема оформления, выбранная в ОС.
-type SystemTheme int
-
-const (
-	// SystemThemeUnknown — узнать не удалось: ОС без понятия темы (Windows до
-	// 10 1607), на Linux нет ни GTK_THEME, ни портала рабочего стола, macOS
-	// (см. systheme_darwin.go). Это не «светлая»: приложение вправе взять
-	// свою тему по умолчанию, и именно об этом ему и сообщается — подставить
-	// светлую молча значило бы показать белое окно человеку, у которого
-	// просто не работает портал.
-	SystemThemeUnknown SystemTheme = iota
-	// SystemThemeLight — светлая тема.
-	SystemThemeLight
-	// SystemThemeDark — тёмная тема.
-	SystemThemeDark
-)
-
-// String — имя темы для журналов и сообщений об ошибках.
-func (t SystemTheme) String() string {
-	switch t {
-	case SystemThemeLight:
-		return "light"
-	case SystemThemeDark:
-		return "dark"
-	}
-	return "unknown"
-}
 
 // DetectSystemTheme возвращает тему, выбранную в ОС прямо сейчас.
 //
@@ -60,14 +33,14 @@ func (t SystemTheme) String() string {
 // Безопасно звать из любой горутины и до создания окна — именно так выбирают
 // палитру для первого кадра. На Linux первый вызов может занять до нескольких
 // секунд, если шина есть, а портал не отвечает; без шины — мгновенно.
-func DetectSystemTheme() SystemTheme {
+func DetectSystemTheme() native.SystemTheme {
 	return detectSystemTheme()
 }
 
 // SystemAppearance — оформление, выбранное в ОС: тема и акцентный цвет.
 type SystemAppearance struct {
 	// Theme — светлая или тёмная тема приложений (см. DetectSystemTheme).
-	Theme SystemTheme
+	Theme native.SystemTheme
 	// Accent — акцентный цвет, выбранный пользователем (непрозрачный,
 	// A == 255). Осмыслен только при HasAccent.
 	Accent color.RGBA
@@ -114,7 +87,7 @@ func DetectSystemAppearance() SystemAppearance {
 // SettingChanged портала). На macOS наблюдения нет — как и чтения темы, см.
 // systheme_darwin.go. Дополнительные окна, открытые через OpenWindow,
 // подписку получают свою: колбэк задаётся каждому окну отдельно.
-func (win *Window) SetOnSystemThemeChanged(fn func(SystemTheme)) {
+func (win *Window) SetOnSystemThemeChanged(fn func(native.SystemTheme)) {
 	win.sysTheme.mu.Lock()
 	win.sysTheme.fn = fn
 	running := win.native != nil
@@ -159,7 +132,7 @@ func (win *Window) SetOnSystemAppearanceChanged(fn func(SystemAppearance)) {
 // systemThemeState — подписка окна на смену темы и оформления.
 type systemThemeState struct {
 	mu   sync.Mutex
-	fn   func(SystemTheme)
+	fn   func(native.SystemTheme)
 	stop func() // снятие платформенной подписки; nil — её нет
 	edge themeEdge
 
@@ -237,13 +210,13 @@ func (win *Window) stopSystemThemeWatch() {
 // systemThemeEvent принимает от платформы «тема, возможно, сменилась» — из
 // потока окна ОС или из читающей горутины D-Bus — и решает, стоит ли будить
 // приложение.
-func (win *Window) systemThemeEvent(t SystemTheme) {
+func (win *Window) systemThemeEvent(t native.SystemTheme) {
 	st := &win.sysTheme
 	st.mu.Lock()
 	fn := st.fn
 	changed := st.edge.update(t)
 	fire := fn != nil && changed
-	if t != SystemThemeUnknown {
+	if t != native.SystemThemeUnknown {
 		st.cur.Theme = t
 	}
 	app, appVal, fireApp := st.appearanceChangeLocked()
@@ -293,48 +266,21 @@ func (st *systemThemeState) appearanceChangeLocked() (fn func(SystemAppearance),
 // на каждый такой толчок перекрашивает всё дерево, мигает и тратит кадры
 // впустую.
 type themeEdge struct {
-	last SystemTheme
+	last native.SystemTheme
 }
 
 // reset запоминает тему, от которой считаются смены.
-func (e *themeEdge) reset(t SystemTheme) { e.last = t }
+func (e *themeEdge) reset(t native.SystemTheme) { e.last = t }
 
 // update сообщает, считать ли t сменой темы. «Неизвестно» не считается: если
 // портал на миг не ответил, окно не должно прыгать на тему по умолчанию, а
 // потом обратно.
-func (e *themeEdge) update(t SystemTheme) bool {
-	if t == SystemThemeUnknown || t == e.last {
+func (e *themeEdge) update(t native.SystemTheme) bool {
+	if t == native.SystemThemeUnknown || t == e.last {
 		return false
 	}
 	e.last = t
 	return true
-}
-
-// systemThemeFromAppsUseLight переводит значение AppsUseLightTheme из реестра
-// Windows в тему: 0 — тёмная, 1 — светлая.
-//
-// Любое другое число — Unknown, а не «светлая»: значение не документировано
-// шире нуля и единицы, и угадывать за систему, что значит двойка, значит
-// рисковать белым окном в тёмной теме.
-func systemThemeFromAppsUseLight(v uint64) SystemTheme {
-	switch v {
-	case 0:
-		return SystemThemeDark
-	case 1:
-		return SystemThemeLight
-	}
-	return SystemThemeUnknown
-}
-
-// isImmersiveColorSet — это сообщение WM_SETTINGCHANGE про смену цветовой
-// схемы?
-//
-// Сообщение приходит по любому поводу (смена раскладки, переменных среды,
-// рабочей области), и различает их только строка в lParam. Нужная нам строка —
-// ImmersiveColorSet: так Windows называет группу параметров, куда входят и
-// тема приложений, и акцентный цвет.
-func isImmersiveColorSet(s string) bool {
-	return s == "ImmersiveColorSet"
 }
 
 // Портал настроек рабочего стола (XDG Desktop Portal) и его настройка темы.
@@ -362,14 +308,14 @@ const (
 // контраст, свои ключи GNOME, — и шина доставляет их все, раз правило
 // подписки одно на пространство. ok=false — сигнал не про цветовую схему, и
 // будить приложение он не должен.
-func systemThemeFromPortalSignal(msg *dbus.Message) (t SystemTheme, ok bool) {
+func systemThemeFromPortalSignal(msg *dbus.Message) (t native.SystemTheme, ok bool) {
 	if msg == nil || msg.Interface != portalSettingsIface || msg.Member != "SettingChanged" || len(msg.Body) < 3 {
-		return SystemThemeUnknown, false
+		return native.SystemThemeUnknown, false
 	}
 	ns, _ := msg.Body[0].(string)
 	key, _ := msg.Body[1].(string)
 	if ns != portalAppearanceNS || key != portalColorSchemeKey {
-		return SystemThemeUnknown, false
+		return native.SystemThemeUnknown, false
 	}
 	return systemThemeFromPortalValue(msg.Body[2]), true
 }
@@ -385,7 +331,7 @@ func systemThemeFromPortalSignal(msg *dbus.Message) (t SystemTheme, ok bool) {
 //
 // 0 («нет предпочтения») — Unknown: человек ничего не выбирал, и тему решает
 // приложение.
-func systemThemeFromPortalValue(v any) SystemTheme {
+func systemThemeFromPortalValue(v any) native.SystemTheme {
 	for {
 		vr, ok := v.(dbus.Variant)
 		if !ok {
@@ -394,19 +340,19 @@ func systemThemeFromPortalValue(v any) SystemTheme {
 		v = vr.Val
 	}
 	if v == nil {
-		return SystemThemeUnknown
+		return native.SystemThemeUnknown
 	}
 	n, err := dbus.ToUint(v)
 	if err != nil {
-		return SystemThemeUnknown
+		return native.SystemThemeUnknown
 	}
 	switch n {
 	case portalSchemeDark:
-		return SystemThemeDark
+		return native.SystemThemeDark
 	case portalSchemeLight:
-		return SystemThemeLight
+		return native.SystemThemeLight
 	}
-	return SystemThemeUnknown
+	return native.SystemThemeUnknown
 }
 
 // systemThemeFromGTKTheme разбирает переменную GTK_THEME.
@@ -420,36 +366,22 @@ func systemThemeFromPortalValue(v any) SystemTheme {
 // набора (Nordic, Dracula) тёмная тема и без этой подсказки в названии, и по
 // одному имени нельзя сказать наверняка. Лучше отдать решение порталу, чем
 // угадать неверно.
-func systemThemeFromGTKTheme(s string) SystemTheme {
+func systemThemeFromGTKTheme(s string) native.SystemTheme {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if s == "" {
-		return SystemThemeUnknown
+		return native.SystemThemeUnknown
 	}
 	name, variant, _ := strings.Cut(s, ":")
 	switch strings.TrimSpace(variant) {
 	case "dark":
-		return SystemThemeDark
+		return native.SystemThemeDark
 	case "light":
-		return SystemThemeLight
+		return native.SystemThemeLight
 	}
 	if strings.Contains(name, "dark") {
-		return SystemThemeDark
+		return native.SystemThemeDark
 	}
-	return SystemThemeUnknown
-}
-
-// accentFromDWMAccent переводит значение DWM\AccentColor из реестра Windows в
-// цвет. Значение — DWORD в порядке байт ABGR (0xAABBGGRR), в отличие от
-// привычного ARGB: красный лежит в младшем байте. Альфа в нём почти всегда
-// 0xFF и ничего не значит: акцент непрозрачен.
-func accentFromDWMAccent(v uint32) color.RGBA {
-	return color.RGBA{R: uint8(v), G: uint8(v >> 8), B: uint8(v >> 16), A: 255}
-}
-
-// accentFromColorization переводит DWM\ColorizationColor (запасной источник
-// акцента на системах без AccentColor): DWORD в порядке 0xAARRGGBB.
-func accentFromColorization(v uint32) color.RGBA {
-	return color.RGBA{R: uint8(v >> 16), G: uint8(v >> 8), B: uint8(v), A: 255}
+	return native.SystemThemeUnknown
 }
 
 // accentFromPortalValue разбирает значение accent-color портала: структура из

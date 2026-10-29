@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/win32"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -83,7 +84,7 @@ func (sc *uiaValueScene) elemFor(t *testing.T, w widget.Widget) *uiaElement {
 func valueOf(t *testing.T, e *uiaElement) string {
 	t.Helper()
 	var bstr uintptr
-	if hr := comCall(e.valuePtr(), slotValueGet, uintptr(unsafe.Pointer(&bstr))); hr != sOK {
+	if hr := comCall(e.valuePtr(), slotValueGet, uintptr(unsafe.Pointer(&bstr))); hr != win32.SOK {
 		t.Fatalf("get_Value: hr=%#x", hr)
 	}
 	defer procSysFreeString.Call(bstr)
@@ -118,7 +119,7 @@ func TestUIAValue_ReadOnly(t *testing.T) {
 
 	readOnly := func(e *uiaElement) int32 {
 		var ro int32
-		if hr := comCall(e.valuePtr(), slotValueIsReadOnly, uintptr(unsafe.Pointer(&ro))); hr != sOK {
+		if hr := comCall(e.valuePtr(), slotValueIsReadOnly, uintptr(unsafe.Pointer(&ro))); hr != win32.SOK {
 			t.Fatalf("get_IsReadOnly: hr=%#x", hr)
 		}
 		return ro
@@ -141,7 +142,7 @@ func TestUIAValue_PatternByRole(t *testing.T) {
 
 	var p uintptr
 	if hr := comCall(e.simplePtr(), slotPatternProvider, uintptr(uiaPatternValue),
-		uintptr(unsafe.Pointer(&p))); hr != sOK {
+		uintptr(unsafe.Pointer(&p))); hr != win32.SOK {
 		t.Fatalf("GetPatternProvider: hr=%#x", hr)
 	}
 	if p != e.valuePtr() {
@@ -151,7 +152,7 @@ func TestUIAValue_PatternByRole(t *testing.T) {
 	// QueryInterface обязан отвечать так же, как GetPatternProvider.
 	var out uintptr
 	if hr := comCall(e.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidValueProvider)),
-		uintptr(unsafe.Pointer(&out))); hr != sOK || out != e.valuePtr() {
+		uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != e.valuePtr() {
 		t.Errorf("QI(Value) у поля ввода: hr=%#x out=%#x", hr, out)
 	}
 }

@@ -104,7 +104,7 @@ func (win *Window) SetInitialMaximized(v bool) {
 // NativeWindow менять нельзя. Бэкенд без него (Cocoa) просто создаёт окно как
 // раньше.
 type initialPlaceBackend interface {
-	setInitialPlacement(p native.InitialPlacement)
+	SetInitialPlacement(p native.InitialPlacement)
 }
 
 // placement собирает native.InitialPlacement из заданного приложением. ok=false —
@@ -129,7 +129,7 @@ func (win *Window) applyInitialPlacement() {
 		return
 	}
 	if b, ok := win.native.(initialPlaceBackend); ok {
-		b.setInitialPlacement(p)
+		b.SetInitialPlacement(p)
 	}
 }
 

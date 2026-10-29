@@ -7,6 +7,10 @@ package core
 // возможности под ОС (доступность, трей, DnD, оболочка — feature: их
 // отделяет 9.8); остальное — ядро (обвязка окна).
 //
+// Win32 с 9.2 — свой пакет platform/win32 (здесь только прослойка ядра
+// backend_windows.go: возможности ОС теми же именами, что на других
+// платформах, — это ядро, как и выбор бэкенда backend_linux.go).
+//
 // Правило (с 9.2b): бэкенд не зависит ни от ядра, ни от другого бэкенда —
 // общее у них в platform/native, platform/keyboard, platform/pointer,
 // platform/dbus. Ядро и возможности зависят от кого угодно. Сегодняшние
@@ -30,9 +34,7 @@ import (
 func TestDepMap_BackendOrder(t *testing.T) {
 	re := regexp.MustCompile
 	baseline := map[string][]string{
-		"windows": {
-			"win32 → feature",
-		},
+		"windows": {},
 		"linux": {
 			"wayland → feature",
 			"x11 → feature",
@@ -43,6 +45,7 @@ func TestDepMap_BackendOrder(t *testing.T) {
 		Dir:  ".",
 		Path: "window/core",
 		Groups: []depmap.Group{
+			{Name: "other", Match: re(`^backend_`)},
 			{Name: "feature", Match: re(`^(a11y|tray|dnd|openurl|systheme|syslang|notify)\w*_(windows|linux|darwin)\.go$`)},
 			{Name: "win32", Match: re(`_windows\.go$`)},
 			{Name: "x11", Match: re(`^(x11|native_linux)|_x11_linux\.go$|^icon_linux\.go$`)},

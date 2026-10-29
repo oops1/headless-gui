@@ -11,7 +11,11 @@ import (
 	"github.com/oops1/headless-gui/v3/window/core"
 )
 
-// ── activate_windows.go ──
+// ── backend_windows.go ──
+
+// Win32Window — реализация NativeWindow через Win32 API.
+// Чистый Go, без CGO. Работает через golang.org/x/sys/windows.
+type Win32Window = core.Win32Window
 
 // AllowForeground разрешает процессу pid выводить свои окна на передний план
 // (AllowSetForegroundWindow). Зовёт тот, у кого сейчас право на передний план
@@ -27,10 +31,5 @@ import (
 // действия передаётся токеном, см. TakeActivationToken): всегда false.
 func AllowForeground(pid int) bool { return core.AllowForeground(pid) }
 
-// ── native_windows.go ──
-
-// Win32Window — реализация NativeWindow через Win32 API.
-// Чистый Go, без CGO. Работает через golang.org/x/sys/windows.
-type Win32Window = core.Win32Window
-
+// NewNativeWindow создаёт окно ОС: на Windows — Win32.
 func NewNativeWindow() native.NativeWindow { return core.NewNativeWindow() }

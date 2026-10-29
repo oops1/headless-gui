@@ -1,7 +1,7 @@
 // tray.go — публичный, платформенно-независимый API иконки в трее,
 // системных balloon-уведомлений и восстановления окна из трея.
 //
-// Поддержаны Windows (Shell_NotifyIcon, tray_windows.go) и Linux — X11 и
+// Поддержаны Windows (Shell_NotifyIcon, platform/win32/tray_windows.go) и Linux — X11 и
 // Wayland (StatusNotifierItem по D-Bus, tray_sni_linux.go). Бэкенд реализует
 // приватный интерфейс trayHost; на прочих платформах (macOS/headless) окно его
 // не реализует — методы становятся вежливыми no-op'ами и возвращают
@@ -14,38 +14,35 @@
 package core
 
 import (
-	"errors"
 	"image"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
-// errTrayUnsupported возвращается методами трея на платформах без поддержки.
-var errTrayUnsupported = errors.New("window: иконка в трее поддерживается на Windows и Linux")
-
 // trayHost — приватная возможность бэкенда: иконка в области уведомлений,
 // balloon-уведомления и сворачивание/восстановление окна. Реализуется
-// Win32Window (tray_windows.go). Все методы вызываются на UI-потоке окна.
+// Win32Window (platform/win32/tray_windows.go). Все методы вызываются на UI-потоке окна.
 type trayHost interface {
-	// setTrayIcon добавляет/обновляет иконку в трее (NIM_ADD/NIM_MODIFY).
-	setTrayIcon(icon image.Image, tooltip string) error
-	// removeTrayIcon убирает иконку (NIM_DELETE).
-	removeTrayIcon()
-	// setTrayClickHandler регистрирует диспетчер кликов по иконке
+	// SetTrayIcon добавляет/обновляет иконку в трее (NIM_ADD/NIM_MODIFY).
+	SetTrayIcon(icon image.Image, tooltip string) error
+	// RemoveTrayIcon убирает иконку (NIM_DELETE).
+	RemoveTrayIcon()
+	// SetTrayClickHandler регистрирует диспетчер кликов по иконке
 	// (button: 0=left, 1=right, 2=middle; doubleClick — двойной клик).
-	setTrayClickHandler(fn func(button int, doubleClick bool))
-	// showBalloon показывает системное всплывающее уведомление (NIF_INFO).
+	SetTrayClickHandler(fn func(button int, doubleClick bool))
+	// ShowBalloon показывает системное всплывающее уведомление (NIF_INFO).
 	// infoFlag: 0=none, 1=info, 2=warning, 3=error (NIIF_*).
-	showBalloon(title, text string, infoFlag uint32) error
-	// setBalloonClickHandler регистрирует колбэк клика по balloon
+	ShowBalloon(title, text string, infoFlag uint32) error
+	// SetBalloonClickHandler регистрирует колбэк клика по balloon
 	// (NIN_BALLOONUSERCLICK).
-	setBalloonClickHandler(fn func())
-	// hideToTray прячет окно (SW_HIDE — исчезает из панели задач).
-	hideToTray()
-	// restoreFromTray показывает окно и передаёт ему фокус ОС.
-	restoreFromTray()
-	// cursorScreenPos возвращает позицию курсора в экранных координатах.
-	cursorScreenPos() (int, int)
+	SetBalloonClickHandler(fn func())
+	// HideToTray прячет окно (SW_HIDE — исчезает из панели задач).
+	HideToTray()
+	// RestoreFromTray показывает окно и передаёт ему фокус ОС.
+	RestoreFromTray()
+	// CursorScreenPos возвращает позицию курсора в экранных координатах.
+	CursorScreenPos() (int, int)
 	// SetForeground выводит окно-носитель на передний план (класс. трей-трюк).
 	SetForeground()
 }
@@ -69,11 +66,11 @@ type nativeTrayMenu interface {
 // у X11/Wayland-бэкендов пока нет. Win32Window реализует и trayHost, и этот
 // интерфейс; X11Window/WaylandWindow — только его (см. notify_linux.go).
 type balloonHost interface {
-	// showBalloon показывает системное уведомление.
+	// ShowBalloon показывает системное уведомление.
 	// infoFlag: 0=none, 1=info, 2=warning, 3=error.
-	showBalloon(title, text string, infoFlag uint32) error
-	// setBalloonClickHandler регистрирует колбэк клика по уведомлению.
-	setBalloonClickHandler(fn func())
+	ShowBalloon(title, text string, infoFlag uint32) error
+	// SetBalloonClickHandler регистрирует колбэк клика по уведомлению.
+	SetBalloonClickHandler(fn func())
 }
 
 // severityInfoFlag переводит widget.DialogSeverity в dwInfoFlags balloon'а
@@ -105,74 +102,6 @@ func trayButton(button int) widget.MouseButton {
 
 // ─── Чистые помощники (тестируются без ОС) ───────────────────────────────────
 
-// Коды мышиных сообщений Win32, продублированы здесь для платформенно-
-// независимого маппинга событий трея (uCallbackMessage несёт код события в
-// младшем слове lParam). См. trayEventToClick / handleTrayCallback.
-const (
-	trayEvtLButtonUp        = 0x0202 // WM_LBUTTONUP
-	trayEvtLButtonDblClk    = 0x0203 // WM_LBUTTONDBLCLK
-	trayEvtRButtonUp        = 0x0205 // WM_RBUTTONUP
-	trayEvtMButtonUp        = 0x0208 // WM_MBUTTONUP
-	trayEvtBalloonUserClick = 0x0405 // NIN_BALLOONUSERCLICK (WM_USER+5)
-)
-
-// trayEventToClick разбирает событие иконки трея (младшее слово lParam
-// callback-сообщения) в кнопку/двойной клик/клик-по-balloon. ok=false —
-// событие нас не интересует (move, down и т.п.).
-func trayEventToClick(ev uint32) (button int, doubleClick, balloon, ok bool) {
-	switch ev & 0xFFFF {
-	case trayEvtLButtonUp:
-		return 0, false, false, true
-	case trayEvtLButtonDblClk:
-		return 0, true, false, true
-	case trayEvtRButtonUp:
-		return 1, false, false, true
-	case trayEvtMButtonUp:
-		return 2, false, false, true
-	case trayEvtBalloonUserClick:
-		return 0, false, true, true
-	}
-	return 0, false, false, false
-}
-
-// iconColorBuffer конвертирует премультиплицированный RGBA в top-down 32bpp
-// BGRA-буфер цветного DIB иконки (длина = w*h*4). Порядок R,G,B,A → B,G,R,A.
-func iconColorBuffer(img *image.RGBA) []byte {
-	b := img.Bounds()
-	w, h := b.Dx(), b.Dy()
-	out := make([]byte, w*h*4)
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			si := img.PixOffset(b.Min.X+x, b.Min.Y+y)
-			di := (y*w + x) * 4
-			out[di+0] = img.Pix[si+2] // B
-			out[di+1] = img.Pix[si+1] // G
-			out[di+2] = img.Pix[si+0] // R
-			out[di+3] = img.Pix[si+3] // A
-		}
-	}
-	return out
-}
-
-// iconMaskBuffer строит 1-битную AND-маску иконки из альфы: бит=1 → пиксель
-// прозрачный (a < threshold). Сканлайны выровнены на границу WORD (16 бит),
-// как требует GDI CreateBitmap. Возвращает буфер и stride в байтах.
-func iconMaskBuffer(img *image.RGBA, threshold uint8) ([]byte, int) {
-	b := img.Bounds()
-	w, h := b.Dx(), b.Dy()
-	stride := ((w + 15) / 16) * 2
-	out := make([]byte, stride*h)
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			a := img.Pix[img.PixOffset(b.Min.X+x, b.Min.Y+y)+3]
-			if a < threshold {
-				out[y*stride+x/8] |= 0x80 >> (uint(x) % 8)
-			}
-		}
-	}
-	return out, stride
-}
-
 // ─── Публичный API (window.Window) ───────────────────────────────────────────
 
 // SetTrayIcon помещает иконку в область уведомлений (системный трей) с
@@ -185,7 +114,7 @@ func iconMaskBuffer(img *image.RGBA, threshold uint8) ([]byte, int) {
 //
 // Можно вызывать до Run() (состояние применится при создании окна) или из
 // обработчиков UI во время работы. На не-Windows платформах — no-op (до Run
-// возвращает nil, во время работы — errTrayUnsupported).
+// возвращает nil, во время работы — native.ErrTrayUnsupported).
 func (win *Window) SetTrayIcon(icon image.Image, tooltip string) error {
 	win.trayIcon = icon
 	win.trayTooltip = tooltip
@@ -195,10 +124,10 @@ func (win *Window) SetTrayIcon(icon image.Image, tooltip string) error {
 	}
 	th, ok := win.native.(trayHost)
 	if !ok {
-		return errTrayUnsupported
+		return native.ErrTrayUnsupported
 	}
 	win.ensureTrayDispatcher(th)
-	return th.setTrayIcon(icon, tooltip)
+	return th.SetTrayIcon(icon, tooltip)
 }
 
 // RemoveTrayIcon убирает иконку из трея.
@@ -208,7 +137,7 @@ func (win *Window) RemoveTrayIcon() {
 		return
 	}
 	if th, ok := win.native.(trayHost); ok {
-		th.removeTrayIcon()
+		th.RemoveTrayIcon()
 	}
 }
 
@@ -250,16 +179,16 @@ func (win *Window) SetTrayMenu(menu *widget.PopupMenu) {
 // Windows: требует ранее установленной иконки трея (SetTrayIcon) — уведомление
 // принадлежит ей. Linux: иконка не нужна, уведомление показывает демон рабочего
 // стола (org.freedesktop.Notifications); без демона возвращается ошибка.
-// macOS/headless — errTrayUnsupported.
+// macOS/headless — native.ErrTrayUnsupported.
 func (win *Window) ShowBalloon(title, text string, severity widget.DialogSeverity) error {
 	if win.native == nil {
-		return errTrayUnsupported
+		return native.ErrTrayUnsupported
 	}
 	bh, ok := win.native.(balloonHost)
 	if !ok {
-		return errTrayUnsupported
+		return native.ErrTrayUnsupported
 	}
-	return bh.showBalloon(title, text, severityInfoFlag(severity))
+	return bh.ShowBalloon(title, text, severityInfoFlag(severity))
 }
 
 // SetOnBalloonClick регистрирует колбэк клика пользователя по уведомлению
@@ -271,7 +200,7 @@ func (win *Window) SetOnBalloonClick(fn func()) {
 		return
 	}
 	if bh, ok := win.native.(balloonHost); ok {
-		bh.setBalloonClickHandler(win.onEngineFunc(fn))
+		bh.SetBalloonClickHandler(win.onEngineFunc(fn))
 	}
 }
 
@@ -283,7 +212,7 @@ func (win *Window) HideToTray() {
 	// Зовут из обработчиков, то есть с горутины движка, а окно ОС прячется на
 	// потоке своего цикла сообщений.
 	if th, ok := win.native.(trayHost); ok {
-		win.onNative(th.hideToTray)
+		win.onNative(th.HideToTray)
 	}
 }
 
@@ -293,7 +222,7 @@ func (win *Window) RestoreFromTray() {
 		return
 	}
 	if th, ok := win.native.(trayHost); ok {
-		win.onNative(th.restoreFromTray)
+		win.onNative(th.RestoreFromTray)
 	}
 }
 
@@ -329,7 +258,7 @@ func (win *Window) applyPendingTray() {
 	// Уведомления доступны шире трея (Linux — без иконки), поэтому колбэк
 	// клика применяем через balloonHost, до проверки полного trayHost.
 	if bh, ok := win.native.(balloonHost); ok && win.onBalloonClick != nil {
-		bh.setBalloonClickHandler(win.onEngineFunc(win.onBalloonClick))
+		bh.SetBalloonClickHandler(win.onEngineFunc(win.onBalloonClick))
 	}
 	th, ok := win.native.(trayHost)
 	if !ok {
@@ -341,7 +270,7 @@ func (win *Window) applyPendingTray() {
 	win.pushTrayMenuNative()
 	win.attachTrayMenu()
 	if win.trayIconWant && win.trayIcon != nil {
-		_ = th.setTrayIcon(win.trayIcon, win.trayTooltip)
+		_ = th.SetTrayIcon(win.trayIcon, win.trayTooltip)
 	}
 }
 
@@ -351,7 +280,7 @@ func (win *Window) ensureTrayDispatcher(th trayHost) {
 		return
 	}
 	win.trayDispatcherSet = true
-	th.setTrayClickHandler(win.dispatchTrayClick)
+	th.SetTrayClickHandler(win.dispatchTrayClick)
 	// Меню, которое показывает сама система (Linux), сообщает выбор пункта со
 	// своего потока — пункт выполняется на горутине движка.
 	if mr, ok := th.(interface{ setTrayMenuRunner(run func(fn func())) }); ok {
@@ -401,7 +330,7 @@ func (win *Window) showTrayMenu() {
 	if !ok || win.trayMenu == nil {
 		return
 	}
-	sx, sy := th.cursorScreenPos()
+	sx, sy := th.CursorScreenPos()
 	th.SetForeground()
 	cx, cy := win.native.GetPosition()
 	scale := win.scale

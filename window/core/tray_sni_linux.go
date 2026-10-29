@@ -17,11 +17,11 @@
 //
 // ОГРАНИЧЕНИЯ:
 //   - GNOME из коробки StatusNotifierWatcher НЕ поднимает: без расширения
-//     AppIndicator/AppIndicatorSupport иконки не будет (setTrayIcon вернёт
+//     AppIndicator/AppIndicatorSupport иконки не будет (SetTrayIcon вернёт
 //     errNoTrayWatcher). Это свойство среды, а не нашего кода.
-//   - Watcher, появившийся ПОЗЖЕ первого setTrayIcon, сам нас не подхватит:
+//   - Watcher, появившийся ПОЗЖЕ первого SetTrayIcon, сам нас не подхватит:
 //     нужен повторный SetTrayIcon (за NameOwnerChanged не следим).
-//   - Позиции иконки протокол не сообщает: cursorScreenPos отдаёт (0,0),
+//   - Позиции иконки протокол не сообщает: CursorScreenPos отдаёт (0,0),
 //     меню позиционирует панель.
 //   - Двойного клика в протоколе нет: Activate — это ОДИНАРНЫЙ левый клик,
 //     поэтому дефолт «двойной левый клик восстанавливает окно» (tray.go) на
@@ -87,7 +87,7 @@ var sniItemSeq atomic.Uint32
 // WaylandWindow (как linuxNotifier для уведомлений): его методы становятся их
 // методами, и окно превращается в trayHost (tray.go).
 //
-// Потокобезопасность: setTrayIcon/removeTrayIcon/… зовутся с UI-потока окна,
+// Потокобезопасность: SetTrayIcon/RemoveTrayIcon/… зовутся с UI-потока окна,
 // входящие вызовы D-Bus обрабатываются в горутинах соединения — всё состояние
 // под trayMu. Пользовательские колбэки вызываются вне блокировки, в отдельной
 // горутине (иначе долгий обработчик задержал бы ответ панели).
@@ -114,10 +114,10 @@ type linuxTray struct {
 
 // ─── trayHost: иконка ────────────────────────────────────────────────────────
 
-// setTrayIcon показывает/обновляет иконку в трее. Первый вызов поднимает
+// SetTrayIcon показывает/обновляет иконку в трее. Первый вызов поднимает
 // соединение и регистрируется у Watcher; последующие — обновляют пиксели и
 // подсказку и будят панель сигналами NewIcon/NewTitle/NewToolTip.
-func (t *linuxTray) setTrayIcon(icon image.Image, tooltip string) error {
+func (t *linuxTray) SetTrayIcon(icon image.Image, tooltip string) error {
 	w, h, argb := sniIconPixmap(icon)
 
 	t.trayMu.Lock()
@@ -166,9 +166,9 @@ func (t *linuxTray) register() error {
 	return nil
 }
 
-// removeTrayIcon убирает иконку: объявляем Passive (панель прячет её сразу),
-// отдаём имя и закрываем соединение. Повторный setTrayIcon поднимет всё заново.
-func (t *linuxTray) removeTrayIcon() {
+// RemoveTrayIcon убирает иконку: объявляем Passive (панель прячет её сразу),
+// отдаём имя и закрываем соединение. Повторный SetTrayIcon поднимет всё заново.
+func (t *linuxTray) RemoveTrayIcon() {
 	t.trayMu.Lock()
 	c, active, name := t.conn, t.active, t.name
 	t.conn, t.active, t.name = nil, false, ""
@@ -184,16 +184,16 @@ func (t *linuxTray) removeTrayIcon() {
 	c.Close()
 }
 
-// setTrayClickHandler регистрирует диспетчер кликов по иконке.
-func (t *linuxTray) setTrayClickHandler(fn func(button int, doubleClick bool)) {
+// SetTrayClickHandler регистрирует диспетчер кликов по иконке.
+func (t *linuxTray) SetTrayClickHandler(fn func(button int, doubleClick bool)) {
 	t.trayMu.Lock()
 	t.onTrayClick = fn
 	t.trayMu.Unlock()
 }
 
-// cursorScreenPos: у StatusNotifierItem нет понятия «позиция курсора» —
+// CursorScreenPos: у StatusNotifierItem нет понятия «позиция курсора» —
 // меню размещает панель. Возвращаем (0,0), нашим меню мы здесь не пользуемся.
-func (t *linuxTray) cursorScreenPos() (int, int) { return 0, 0 }
+func (t *linuxTray) CursorScreenPos() (int, int) { return 0, 0 }
 
 // ─── nativeTrayMenu: меню отдаём панели ──────────────────────────────────────
 
@@ -691,7 +691,7 @@ func sniFitIcon(w, h int) (int, int) {
 // sniARGB32 переводит RGBA в пиксели StatusNotifierItem: ARGB32 в СЕТЕВОМ
 // порядке байт (A,R,G,B), строки сверху вниз, без выравнивания.
 //
-// Внимание: это НЕ тот же буфер, что iconColorBuffer в tray.go (там BGRA
+// Внимание: это НЕ тот же буфер, что native.IconColorBuffer в tray.go (там BGRA
 // little-endian для Windows-DIB). Кроме порядка байт есть второе отличие:
 // image.RGBA в Go премультиплицирован, а хосты трея читают пиксели как
 // QImage::Format_ARGB32, то есть с ОБЫЧНОЙ альфой — поэтому здесь она
@@ -728,16 +728,16 @@ func sniUnpremul(c, a byte) byte {
 
 // ─── Привязка к бэкендам ─────────────────────────────────────────────────────
 
-// hideToTray прячет окно X11: UnmapWindow убирает его и с экрана, и из панели
+// HideToTray прячет окно X11: UnmapWindow убирает его и с экрана, и из панели
 // задач EWMH-WM (полный аналог SW_HIDE на Windows).
-func (w *X11Window) hideToTray() {
+func (w *X11Window) HideToTray() {
 	if w.wid != 0 {
 		w.x11UnmapWindow(w.wid)
 	}
 }
 
-// restoreFromTray показывает окно обратно и просит WM его активировать.
-func (w *X11Window) restoreFromTray() {
+// RestoreFromTray показывает окно обратно и просит WM его активировать.
+func (w *X11Window) RestoreFromTray() {
 	if w.wid == 0 {
 		return
 	}
@@ -746,13 +746,13 @@ func (w *X11Window) restoreFromTray() {
 	w.x11NetActiveWindow()
 }
 
-// hideToTray на Wayland — no-op: xdg_toplevel скрыть нельзя (нет ни unmap, ни
+// HideToTray на Wayland — no-op: xdg_toplevel скрыть нельзя (нет ни unmap, ни
 // «спрятать» в протоколе), а set_minimized лишь просит композитор свернуть окно
 // и на многих композиторах не реализован. Иконка в трее при этом работает.
-func (w *WaylandWindow) hideToTray() {}
+func (w *WaylandWindow) HideToTray() {}
 
-// restoreFromTray на Wayland — no-op: скрывать было нечего (см. hideToTray).
-func (w *WaylandWindow) restoreFromTray() {}
+// RestoreFromTray на Wayland — no-op: скрывать было нечего (см. HideToTray).
+func (w *WaylandWindow) RestoreFromTray() {}
 
 // SetForeground на Wayland — no-op: активацию окна раздаёт композитор. Вывод
 // окна на передний план по запросу приложения — Activate (xdg-activation-v1,

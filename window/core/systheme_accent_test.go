@@ -5,38 +5,13 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // Акцентный цвет ОС (E12): разбор значений реестра и портала на любой машине и
 // поток событий окна. Чтение реестра и шины — в systheme_windows_test.go и
 // systheme_linux_test.go.
-
-// DWM\AccentColor — DWORD в порядке ABGR, красный в младшем байте. Перепутать
-// с ARGB — получить красный вместо синего.
-func TestAccentFromDWMAccent(t *testing.T) {
-	cases := []struct {
-		v    uint32
-		want color.RGBA
-	}{
-		{0xFFD47800, color.RGBA{R: 0x00, G: 0x78, B: 0xD4, A: 255}}, // акцент Windows по умолчанию
-		{0xFF0000FF, color.RGBA{R: 0xFF, A: 255}},                   // красный — в младшем байте
-		{0xFFFF0000, color.RGBA{B: 0xFF, A: 255}},
-		{0x00112233, color.RGBA{R: 0x33, G: 0x22, B: 0x11, A: 255}}, // альфа игнорируется
-	}
-	for _, c := range cases {
-		if got := accentFromDWMAccent(c.v); got != c.want {
-			t.Errorf("AccentColor=%#x → %v, ждал %v", c.v, got, c.want)
-		}
-	}
-}
-
-// ColorizationColor, наоборот, ARGB.
-func TestAccentFromColorization(t *testing.T) {
-	if got, want := accentFromColorization(0xC40078D4), (color.RGBA{R: 0x00, G: 0x78, B: 0xD4, A: 255}); got != want {
-		t.Errorf("ColorizationColor → %v, ждал %v", got, want)
-	}
-}
 
 func accentTestVal(r, g, b float64) dbus.Variant {
 	return dbus.Variant{Sig: "(ddd)", Val: dbus.Struct{Fields: []any{r, g, b}}}
@@ -132,23 +107,23 @@ func TestWindowSystemAppearanceEvent(t *testing.T) {
 	win, eng := appearanceTestWin()
 	var got []SystemAppearance
 	win.SetOnSystemAppearanceChanged(func(a SystemAppearance) { got = append(got, a) })
-	base := SystemAppearance{Theme: SystemThemeLight, Accent: accentTestBlue, HasAccent: true}
+	base := SystemAppearance{Theme: native.SystemThemeLight, Accent: accentTestBlue, HasAccent: true}
 	win.sysTheme.edge.reset(base.Theme)
 	win.sysTheme.cur, win.sysTheme.last = base, base
 
-	win.systemAccentEvent(accentTestBlue, true)         // тот же акцент
-	win.systemThemeEvent(SystemThemeLight)       // та же тема
-	win.systemAccentEvent(accentTestRed, true)          // смена акцента
-	win.systemAccentEvent(accentTestRed, true)          // повтор
-	win.systemThemeEvent(SystemThemeDark)        // смена темы
-	win.systemThemeEvent(SystemThemeUnknown)     // портал не ответил — не смена
-	win.systemAccentEvent(color.RGBA{}, false)   // акцент неизвестен — не смена
-	win.systemAccentEvent(accentTestBlue, true)         // обратно
+	win.systemAccentEvent(accentTestBlue, true)     // тот же акцент
+	win.systemThemeEvent(native.SystemThemeLight)   // та же тема
+	win.systemAccentEvent(accentTestRed, true)      // смена акцента
+	win.systemAccentEvent(accentTestRed, true)      // повтор
+	win.systemThemeEvent(native.SystemThemeDark)    // смена темы
+	win.systemThemeEvent(native.SystemThemeUnknown) // портал не ответил — не смена
+	win.systemAccentEvent(color.RGBA{}, false)      // акцент неизвестен — не смена
+	win.systemAccentEvent(accentTestBlue, true)     // обратно
 
 	want := []SystemAppearance{
-		{SystemThemeLight, accentTestRed, true},
-		{SystemThemeDark, accentTestRed, true},
-		{SystemThemeDark, accentTestBlue, true},
+		{native.SystemThemeLight, accentTestRed, true},
+		{native.SystemThemeDark, accentTestRed, true},
+		{native.SystemThemeDark, accentTestBlue, true},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("колбэк получил %d событий, ждал %d: %+v", len(got), len(want), got)
@@ -175,11 +150,11 @@ func TestWindowSystemAppearanceEvent_FirstAccent(t *testing.T) {
 	win, _ := appearanceTestWin()
 	var got []SystemAppearance
 	win.SetOnSystemAppearanceChanged(func(a SystemAppearance) { got = append(got, a) })
-	base := SystemAppearance{Theme: SystemThemeDark}
+	base := SystemAppearance{Theme: native.SystemThemeDark}
 	win.sysTheme.cur, win.sysTheme.last = base, base
 
 	win.systemAccentEvent(accentTestBlue, true)
-	if len(got) != 1 || !got[0].HasAccent || got[0].Accent != accentTestBlue || got[0].Theme != SystemThemeDark {
+	if len(got) != 1 || !got[0].HasAccent || got[0].Accent != accentTestBlue || got[0].Theme != native.SystemThemeDark {
 		t.Errorf("получили %+v", got)
 	}
 }
@@ -188,11 +163,11 @@ func TestWindowSystemAppearanceEvent_FirstAccent(t *testing.T) {
 // будит, а смена темы будит оба.
 func TestWindowThemeAndAppearanceCallbacksIndependent(t *testing.T) {
 	win, _ := appearanceTestWin()
-	var themes []SystemTheme
+	var themes []native.SystemTheme
 	var apps []SystemAppearance
-	win.SetOnSystemThemeChanged(func(t SystemTheme) { themes = append(themes, t) })
+	win.SetOnSystemThemeChanged(func(t native.SystemTheme) { themes = append(themes, t) })
 	win.SetOnSystemAppearanceChanged(func(a SystemAppearance) { apps = append(apps, a) })
-	base := SystemAppearance{Theme: SystemThemeLight, Accent: accentTestBlue, HasAccent: true}
+	base := SystemAppearance{Theme: native.SystemThemeLight, Accent: accentTestBlue, HasAccent: true}
 	win.sysTheme.edge.reset(base.Theme)
 	win.sysTheme.cur, win.sysTheme.last = base, base
 
@@ -200,14 +175,14 @@ func TestWindowThemeAndAppearanceCallbacksIndependent(t *testing.T) {
 	if len(themes) != 0 || len(apps) != 1 {
 		t.Fatalf("смена акцента: тем %v, оформлений %v", themes, apps)
 	}
-	win.systemThemeEvent(SystemThemeDark)
-	if len(themes) != 1 || themes[0] != SystemThemeDark || len(apps) != 2 {
+	win.systemThemeEvent(native.SystemThemeDark)
+	if len(themes) != 1 || themes[0] != native.SystemThemeDark || len(apps) != 2 {
 		t.Errorf("смена темы: тем %v, оформлений %v", themes, apps)
 	}
 
 	// Снять один колбэк — второй работает.
 	win.SetOnSystemThemeChanged(nil)
-	win.systemThemeEvent(SystemThemeLight)
+	win.systemThemeEvent(native.SystemThemeLight)
 	if len(themes) != 1 || len(apps) != 3 {
 		t.Errorf("после снятия колбэка темы: тем %v, оформлений %v", themes, apps)
 	}
@@ -219,12 +194,12 @@ func TestWindowAppearanceWithoutThemeCallback(t *testing.T) {
 	win, _ := appearanceTestWin()
 	var apps []SystemAppearance
 	win.SetOnSystemAppearanceChanged(func(a SystemAppearance) { apps = append(apps, a) })
-	base := SystemAppearance{Theme: SystemThemeLight}
+	base := SystemAppearance{Theme: native.SystemThemeLight}
 	win.sysTheme.edge.reset(base.Theme)
 	win.sysTheme.cur, win.sysTheme.last = base, base
-	win.systemThemeEvent(SystemThemeDark)
-	win.systemThemeEvent(SystemThemeDark)
-	if len(apps) != 1 || apps[0].Theme != SystemThemeDark {
+	win.systemThemeEvent(native.SystemThemeDark)
+	win.systemThemeEvent(native.SystemThemeDark)
+	if len(apps) != 1 || apps[0].Theme != native.SystemThemeDark {
 		t.Errorf("получили %+v", apps)
 	}
 }

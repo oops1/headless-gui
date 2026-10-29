@@ -20,7 +20,7 @@ type InitialPlacement struct {
 }
 
 // Константы Win32, нужные чистой арифметике ниже (сами константы бэкенда живут
-// в native_windows.go под платформенным тегом).
+// в platform/win32/native_windows.go под платформенным тегом).
 const (
 	initWsVisible = 0x10000000 // WS_VISIBLE
 	initSwShowMax = 3          // SW_SHOWMAXIMIZED

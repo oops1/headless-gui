@@ -61,8 +61,8 @@ func wlDragTestImage() *image.RGBA {
 
 func TestWayland_DragImage_Wire(t *testing.T) {
 	c := wlImageSetup(t)
-	if !c.w.dragImageSupported() {
-		t.Fatal("dragImageSupported false при полном наборе глобалов")
+	if !c.w.DragImageSupported() {
+		t.Fatal("DragImageSupported false при полном наборе глобалов")
 	}
 	var got []native.DragEffect
 	if !c.w.BeginDragFilesImage([]string{"/tmp/a"}, native.DragEffectCopy, wlDragTestImage(), image.Pt(3, 1), func(e native.DragEffect) { got = append(got, e) }) {
@@ -197,8 +197,8 @@ func TestWayland_DragImage_Absent(t *testing.T) {
 	// Нет wl_shm — значок невозможен, перетаскивание всё равно идёт.
 	c = wlImageSetup(t)
 	c.w.shmID = 0
-	if c.w.dragImageSupported() {
-		t.Error("dragImageSupported true без wl_shm")
+	if c.w.DragImageSupported() {
+		t.Error("DragImageSupported true без wl_shm")
 	}
 	if !c.w.BeginDragFilesImage([]string{"/tmp/a"}, native.DragEffectCopy, wlDragTestImage(), image.Pt(0, 0), func(native.DragEffect) {}) {
 		t.Fatal("без wl_shm перетаскивание не началось")

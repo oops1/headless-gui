@@ -341,9 +341,9 @@ func (w *WaylandWindow) monitors() []native.Monitor {
 	return out
 }
 
-// monitorOfWindow — монитор, на который компоновщик вывел окно
+// MonitorOfWindow — монитор, на который компоновщик вывел окно
 // (wl_surface.enter). Реализует monitorSource.
-func (w *WaylandWindow) monitorOfWindow() (native.Monitor, bool) {
+func (w *WaylandWindow) MonitorOfWindow() (native.Monitor, bool) {
 	w.scale.mu.Lock()
 	entered := w.scale.entered
 	w.scale.mu.Unlock()

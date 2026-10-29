@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -13,11 +14,11 @@ import (
 // системе, поэтому разбор значений закреплён тестами на любой машине.
 
 func TestSystemTheme_String(t *testing.T) {
-	cases := map[SystemTheme]string{
-		SystemThemeUnknown: "unknown",
-		SystemThemeLight:   "light",
-		SystemThemeDark:    "dark",
-		SystemTheme(42):    "unknown",
+	cases := map[native.SystemTheme]string{
+		native.SystemThemeUnknown: "unknown",
+		native.SystemThemeLight:   "light",
+		native.SystemThemeDark:    "dark",
+		native.SystemTheme(42):    "unknown",
 	}
 	for th, want := range cases {
 		if got := th.String(); got != want {
@@ -29,29 +30,9 @@ func TestSystemTheme_String(t *testing.T) {
 // Нулевое значение типа обязано быть «неизвестно»: переменная, до которой
 // ответ ещё не дошёл, не должна выдавать себя за светлую или тёмную тему.
 func TestSystemTheme_ZeroValueIsUnknown(t *testing.T) {
-	var th SystemTheme
-	if th != SystemThemeUnknown {
+	var th native.SystemTheme
+	if th != native.SystemThemeUnknown {
 		t.Errorf("нулевая тема %v, ждал unknown", th)
-	}
-}
-
-func TestSystemThemeFromAppsUseLight(t *testing.T) {
-	cases := []struct {
-		v    uint64
-		want SystemTheme
-	}{
-		{0, SystemThemeDark},
-		{1, SystemThemeLight},
-		// Не 0 и не 1 — не «светлая по умолчанию»: что значит двойка, не
-		// знает никто, и белое окно в тёмной теме хуже, чем свой выбор
-		// приложения.
-		{2, SystemThemeUnknown},
-		{0xFFFFFFFF, SystemThemeUnknown},
-	}
-	for _, c := range cases {
-		if got := systemThemeFromAppsUseLight(c.v); got != c.want {
-			t.Errorf("AppsUseLightTheme=%d → %v, ждал %v", c.v, got, c.want)
-		}
 	}
 }
 
@@ -59,24 +40,24 @@ func TestSystemThemeFromPortalValue(t *testing.T) {
 	cases := []struct {
 		name string
 		v    any
-		want SystemTheme
+		want native.SystemTheme
 	}{
-		{"тёмная", uint32(1), SystemThemeDark},
-		{"светлая", uint32(2), SystemThemeLight},
-		{"нет предпочтения", uint32(0), SystemThemeUnknown},
-		{"значение из будущего", uint32(3), SystemThemeUnknown},
+		{"тёмная", uint32(1), native.SystemThemeDark},
+		{"светлая", uint32(2), native.SystemThemeLight},
+		{"нет предпочтения", uint32(0), native.SystemThemeUnknown},
+		{"значение из будущего", uint32(3), native.SystemThemeUnknown},
 		// ReadOne: один variant.
-		{"в variant", dbus.Variant{Sig: "u", Val: uint32(1)}, SystemThemeDark},
+		{"в variant", dbus.Variant{Sig: "u", Val: uint32(1)}, native.SystemThemeDark},
 		// Старый Read: variant в variant.
-		{"в двух variant", dbus.Variant{Sig: "v", Val: dbus.Variant{Sig: "u", Val: uint32(2)}}, SystemThemeLight},
+		{"в двух variant", dbus.Variant{Sig: "v", Val: dbus.Variant{Sig: "u", Val: uint32(2)}}, native.SystemThemeLight},
 		// Реализации портала, отдающие другой целый тип, встречаются; значение
 		// от этого не меняется.
-		{"int32", int32(1), SystemThemeDark},
-		{"байт", byte(2), SystemThemeLight},
-		{"отрицательное", int32(-1), SystemThemeUnknown},
-		{"строка", "dark", SystemThemeUnknown},
-		{"nil", nil, SystemThemeUnknown},
-		{"пустой variant", dbus.Variant{}, SystemThemeUnknown},
+		{"int32", int32(1), native.SystemThemeDark},
+		{"байт", byte(2), native.SystemThemeLight},
+		{"отрицательное", int32(-1), native.SystemThemeUnknown},
+		{"строка", "dark", native.SystemThemeUnknown},
+		{"nil", nil, native.SystemThemeUnknown},
+		{"пустой variant", dbus.Variant{}, native.SystemThemeUnknown},
 	}
 	for _, c := range cases {
 		if got := systemThemeFromPortalValue(c.v); got != c.want {
@@ -88,41 +69,28 @@ func TestSystemThemeFromPortalValue(t *testing.T) {
 func TestSystemThemeFromGTKTheme(t *testing.T) {
 	cases := []struct {
 		env  string
-		want SystemTheme
+		want native.SystemTheme
 	}{
-		{"Adwaita:dark", SystemThemeDark},
-		{"Adwaita:light", SystemThemeLight},
-		{"  Adwaita:Dark  ", SystemThemeDark},
-		{"Adwaita-dark", SystemThemeDark},
-		{"Yaru-dark", SystemThemeDark},
-		{"Materia-Dark-Compact", SystemThemeDark},
+		{"Adwaita:dark", native.SystemThemeDark},
+		{"Adwaita:light", native.SystemThemeLight},
+		{"  Adwaita:Dark  ", native.SystemThemeDark},
+		{"Adwaita-dark", native.SystemThemeDark},
+		{"Yaru-dark", native.SystemThemeDark},
+		{"Materia-Dark-Compact", native.SystemThemeDark},
 		// Вариант важнее имени: «dark» в названии набора не делает тёмным
 		// вариант, явно названный светлым.
-		{"Darkroom:light", SystemThemeLight},
+		{"Darkroom:light", native.SystemThemeLight},
 		// Имя без подсказки ничего не говорит: Adwaita бывает любой, а
 		// тёмный Nordic не содержит слова dark.
-		{"Adwaita", SystemThemeUnknown},
-		{"Nordic", SystemThemeUnknown},
-		{"", SystemThemeUnknown},
-		{"   ", SystemThemeUnknown},
-		{"Adwaita:hc", SystemThemeUnknown},
+		{"Adwaita", native.SystemThemeUnknown},
+		{"Nordic", native.SystemThemeUnknown},
+		{"", native.SystemThemeUnknown},
+		{"   ", native.SystemThemeUnknown},
+		{"Adwaita:hc", native.SystemThemeUnknown},
 	}
 	for _, c := range cases {
 		if got := systemThemeFromGTKTheme(c.env); got != c.want {
 			t.Errorf("GTK_THEME=%q → %v, ждал %v", c.env, got, c.want)
-		}
-	}
-}
-
-func TestIsImmersiveColorSet(t *testing.T) {
-	if !isImmersiveColorSet("ImmersiveColorSet") {
-		t.Error("ImmersiveColorSet не опознан")
-	}
-	// Остальные области WM_SETTINGCHANGE тему не меняют — на них перечитывать
-	// реестр незачем.
-	for _, s := range []string{"", "intl", "Environment", "Policy", "immersivecolorset", "ImmersiveColorSet2"} {
-		if isImmersiveColorSet(s) {
-			t.Errorf("%q принято за смену цветовой схемы", s)
 		}
 	}
 }
@@ -138,7 +106,7 @@ func TestSystemThemeFromPortalSignal(t *testing.T) {
 	}
 	dark := dbus.Variant{Sig: "u", Val: uint32(1)}
 
-	if th, ok := systemThemeFromPortalSignal(sig(portalAppearanceNS, portalColorSchemeKey, dark)); !ok || th != SystemThemeDark {
+	if th, ok := systemThemeFromPortalSignal(sig(portalAppearanceNS, portalColorSchemeKey, dark)); !ok || th != native.SystemThemeDark {
 		t.Errorf("сигнал color-scheme → %v, %v; ждал dark, true", th, ok)
 	}
 
@@ -172,18 +140,18 @@ func TestSystemThemeFromPortalSignal(t *testing.T) {
 // каждый раз.
 func TestThemeEdge(t *testing.T) {
 	var e themeEdge
-	e.reset(SystemThemeLight)
+	e.reset(native.SystemThemeLight)
 
 	steps := []struct {
-		in   SystemTheme
+		in   native.SystemTheme
 		want bool
 	}{
-		{SystemThemeLight, false},   // повтор прежней
-		{SystemThemeDark, true},     // настоящая смена
-		{SystemThemeDark, false},    // то же сообщение ещё раз
-		{SystemThemeUnknown, false}, // портал не ответил — не смена
-		{SystemThemeDark, false},    // и «неизвестно» не сбросило запомненную
-		{SystemThemeLight, true},    // обратно
+		{native.SystemThemeLight, false},   // повтор прежней
+		{native.SystemThemeDark, true},     // настоящая смена
+		{native.SystemThemeDark, false},    // то же сообщение ещё раз
+		{native.SystemThemeUnknown, false}, // портал не ответил — не смена
+		{native.SystemThemeDark, false},    // и «неизвестно» не сбросило запомненную
+		{native.SystemThemeLight, true},    // обратно
 	}
 	for i, s := range steps {
 		if got := e.update(s.in); got != s.want {
@@ -196,7 +164,7 @@ func TestThemeEdge(t *testing.T) {
 // приложение до этого рисовало свою тему по умолчанию.
 func TestThemeEdge_FromUnknown(t *testing.T) {
 	var e themeEdge
-	if !e.update(SystemThemeDark) {
+	if !e.update(native.SystemThemeDark) {
 		t.Error("первая известная тема после unknown не стала сменой")
 	}
 }
@@ -207,18 +175,18 @@ func TestWindowSystemThemeEvent(t *testing.T) {
 	eng := &postEngine{root: widget.NewWindow("T", 100, 100)}
 	win := New(eng, "T")
 
-	var got []SystemTheme
+	var got []native.SystemTheme
 	// Окна ОС ещё нет: подписка отложена до Run, а колбэк уже сохранён.
-	win.SetOnSystemThemeChanged(func(t SystemTheme) { got = append(got, t) })
-	win.sysTheme.edge.reset(SystemThemeLight)
+	win.SetOnSystemThemeChanged(func(t native.SystemTheme) { got = append(got, t) })
+	win.sysTheme.edge.reset(native.SystemThemeLight)
 
-	win.systemThemeEvent(SystemThemeLight)
-	win.systemThemeEvent(SystemThemeDark)
-	win.systemThemeEvent(SystemThemeDark)
-	win.systemThemeEvent(SystemThemeUnknown)
-	win.systemThemeEvent(SystemThemeLight)
+	win.systemThemeEvent(native.SystemThemeLight)
+	win.systemThemeEvent(native.SystemThemeDark)
+	win.systemThemeEvent(native.SystemThemeDark)
+	win.systemThemeEvent(native.SystemThemeUnknown)
+	win.systemThemeEvent(native.SystemThemeLight)
 
-	if len(got) != 2 || got[0] != SystemThemeDark || got[1] != SystemThemeLight {
+	if len(got) != 2 || got[0] != native.SystemThemeDark || got[1] != native.SystemThemeLight {
 		t.Errorf("колбэк получил %v, ждал [dark light]", got)
 	}
 	if eng.posts != 2 {
@@ -226,7 +194,7 @@ func TestWindowSystemThemeEvent(t *testing.T) {
 	}
 
 	win.SetOnSystemThemeChanged(nil)
-	win.systemThemeEvent(SystemThemeDark)
+	win.systemThemeEvent(native.SystemThemeDark)
 	if len(got) != 2 {
 		t.Errorf("колбэк снят, но вызван: %v", got)
 	}

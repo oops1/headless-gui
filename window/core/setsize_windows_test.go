@@ -7,11 +7,12 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testhook"
 )
 
 // Window.SetSize на настоящем окне Win32: MoveWindow → WM_SIZE → onResize →
 // холст движка. Окно создаётся в этом же потоке, а вызовы окну ОС
-// (InvokeOnUIThread) исполняет fsPumpMessages.
+// (InvokeOnUIThread) исполняет pumpWin32.
 
 // szWin32Window поднимает window.Window на настоящем Win32-окне. count —
 // сколько раз бэкенд сообщил движку о ресайзе.
@@ -29,19 +30,15 @@ func szWin32Window(t *testing.T, scale string, cw, ch int) (*Window, *Win32Windo
 	if !ok {
 		t.Skipf("бэкенд %T, ждал *Win32Window", win.native)
 	}
-	nw.noQuit = true
-	t.Cleanup(func() { procDestroyWindow.Call(uintptr(nw.hwnd)) })
+	testhook.Win32SetNoQuit(nw)
+	t.Cleanup(func() { procTestDestroyWindow.Call(nw.HWND()) })
 	// Опрос раскладки (localePoll) живёт, пока окно не закрыто: без этого он
 	// пережил бы тест и менял глобальную локаль в соседних.
 	t.Cleanup(func() { win.closeRequested.Store(true) })
-	fsPumpMessages()
+	pumpWin32()
 
 	count := new(int)
-	inner := nw.onResize
-	nw.onResize = func(w, h int) {
-		*count++
-		inner(w, h)
-	}
+	testhook.Win32AfterResize(nw, func(w, h int) { *count++ })
 	return win, nw, count
 }
 
@@ -54,7 +51,7 @@ func TestWin32WindowSetSize_RoundTrip(t *testing.T) {
 	}
 
 	win.SetSize(520, 370)
-	fsPumpMessages()
+	pumpWin32()
 	if cw, ch := nw.GetSize(); cw != 520 || ch != 370 {
 		t.Errorf("GetSize = %dx%d, ждал 520x370", cw, ch)
 	}
@@ -67,13 +64,13 @@ func TestWin32WindowSetSize_RoundTrip(t *testing.T) {
 
 	// Тот же размер — ничего не происходит.
 	win.SetSize(520, 370)
-	fsPumpMessages()
+	pumpWin32()
 	if *count != 1 {
 		t.Errorf("SetSize того же размера дал onResize: %d", *count)
 	}
 
 	win.SetSize(800, 600)
-	fsPumpMessages()
+	pumpWin32()
 	if cw, ch := nw.GetSize(); cw != 800 || ch != 600 {
 		t.Errorf("GetSize = %dx%d, ждал 800x600", cw, ch)
 	}
@@ -94,7 +91,7 @@ func TestWin32WindowSetSize_LogicalAtScale(t *testing.T) {
 	}
 
 	win.SetSize(300, 260)
-	fsPumpMessages()
+	pumpWin32()
 	if cw, ch := nw.GetSize(); cw != 600 || ch != 520 {
 		t.Errorf("GetSize = %dx%d, ждал физические 600x520", cw, ch)
 	}
@@ -111,7 +108,7 @@ func TestWin32WindowSetSize_LogicalAtScale(t *testing.T) {
 func TestWin32WindowSetSize_WhileMaximizedAppliesOnRestore(t *testing.T) {
 	win, nw, count := szWin32Window(t, "1", 800, 600)
 	nw.Maximize()
-	fsPumpMessages()
+	pumpWin32()
 	if !nw.IsMaximized() {
 		t.Skip("окно не развернулось")
 	}
@@ -119,7 +116,7 @@ func TestWin32WindowSetSize_WhileMaximizedAppliesOnRestore(t *testing.T) {
 	before := *count
 
 	win.SetSize(520, 370)
-	fsPumpMessages()
+	pumpWin32()
 	if !nw.IsMaximized() {
 		t.Error("SetSize снял «развёрнуто»")
 	}
@@ -128,7 +125,7 @@ func TestWin32WindowSetSize_WhileMaximizedAppliesOnRestore(t *testing.T) {
 	}
 
 	nw.Restore()
-	fsPumpMessages()
+	pumpWin32()
 	if nw.IsMaximized() {
 		t.Fatal("окно осталось развёрнутым")
 	}

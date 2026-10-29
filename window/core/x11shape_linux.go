@@ -57,10 +57,10 @@ func (w *X11Window) x11AlphaComposited() bool {
 	return binary.LittleEndian.Uint32(reply[8:12]) != 0
 }
 
-// blitPopupRegion выкраивает попап по сплошным точкам кадра и кладёт кадр.
+// BlitPopupRegion выкраивает попап по сплошным точкам кадра и кладёт кадр.
 // Реализует popupRegionSetter. bands (закрашенное с тенью) здесь не годятся:
 // форма из них оставила бы тень, которую некому смешать.
-func (w *X11Window) blitPopupRegion(img *image.RGBA, _ []image.Rectangle) {
+func (w *X11Window) BlitPopupRegion(img *image.RGBA, _ []image.Rectangle) {
 	if w.shapeMajor != 0 && img != nil {
 		solid := engine.SolidBands(img)
 		if o := img.Rect.Min; o != (image.Point{}) {

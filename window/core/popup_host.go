@@ -461,7 +461,7 @@ func (h *popupHost) syncCursorOverride() {
 // popupRegionSetter — бэкенд умеет выкроить окно по закрашенной части кадра.
 // Реализуется Win32; остальные просто блитят.
 type popupRegionSetter interface {
-	blitPopupRegion(img *image.RGBA, bands []image.Rectangle)
+	BlitPopupRegion(img *image.RGBA, bands []image.Rectangle)
 }
 
 // blitPopup кладёт кадр в окно-попап и, если бэкенд умеет, выкраивает окно по
@@ -478,7 +478,7 @@ func blitPopup(nw native.NativeWindow, img *image.RGBA) {
 		return
 	}
 	if rs, ok := nw.(popupRegionSetter); ok {
-		rs.blitPopupRegion(img, engine.OpaqueBands(img))
+		rs.BlitPopupRegion(img, engine.OpaqueBands(img))
 		return
 	}
 	nw.BlitRGBA(img)

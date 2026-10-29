@@ -441,7 +441,7 @@ type Window struct {
 	// Сеттеры трея вызываются до Run() (native ещё nil), поэтому желаемое
 	// состояние буферизуется и применяется в Run() после создания окна
 	// (applyPendingTray). На платформах без поддержки (native не trayHost) —
-	// тихий no-op. См. tray.go / tray_windows.go / tray_sni_linux.go.
+	// тихий no-op. См. tray.go, platform/win32/tray_windows.go, tray_sni_linux.go.
 	trayIcon          image.Image
 	trayTooltip       string
 	trayIconWant      bool
@@ -667,7 +667,7 @@ var newNativeWindow = NewNativeWindow
 func (win *Window) bringUp() error {
 	win.native = newNativeWindow()
 	if m, ok := win.native.(secondaryMarker); ok && win.secondary {
-		m.markSecondary()
+		m.MarkSecondary()
 	}
 
 	// Значок, заданный до Run(): отдаём бэкенду ДО создания окна ОС, чтобы он
@@ -1063,7 +1063,7 @@ func (win *Window) setupResizeClose() {
 
 // clientSizer — бэкенд, знающий размер окна, назначенный системой.
 type clientSizer interface {
-	clientSize() (w, h int)
+	ClientSize() (w, h int)
 }
 
 // adoptCreatedSize принимает размер, который система назначила окну ещё при
@@ -1079,7 +1079,7 @@ func (win *Window) adoptCreatedSize() {
 	if !ok {
 		return
 	}
-	cw, ch := cs.clientSize()
+	cw, ch := cs.ClientSize()
 	if cw <= 0 || ch <= 0 {
 		return // «размер выбирает программа» — оставляем свой
 	}

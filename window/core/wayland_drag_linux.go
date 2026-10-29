@@ -117,8 +117,8 @@ func (w *WaylandWindow) BeginDragFilesImage(paths []string, effect native.DragEf
 	return w.beginDrag(paths, effect, img, hotspot, done)
 }
 
-// dragImageSupported — у компоновщика есть всё для поверхности-значка.
-func (w *WaylandWindow) dragImageSupported() bool {
+// DragImageSupported — у компоновщика есть всё для поверхности-значка.
+func (w *WaylandWindow) DragImageSupported() bool {
 	return w.dataDevMgrID != 0 && w.dataDeviceID != 0 && w.dataDevVersion >= 3 &&
 		w.shmID != 0 && w.compositorID != 0
 }
@@ -150,7 +150,7 @@ func (w *WaylandWindow) beginDrag(paths []string, effect native.DragEffect, img 
 
 	// Значок: поверхность с буфером; без него (или если не вышло) — NULL.
 	var icon wlDragIcon
-	if img != nil && w.dragImageSupported() {
+	if img != nil && w.DragImageSupported() {
 		icon = w.dragIconCreate(img, hot)
 	}
 	d.mu.Lock()

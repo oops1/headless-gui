@@ -28,7 +28,7 @@ func (f *imgNative) BeginDragFilesImage(paths []string, effect native.DragEffect
 	return !f.refuse
 }
 
-func (f *imgNative) dragImageSupported() bool { return f.supprt }
+func (f *imgNative) DragImageSupported() bool { return f.supprt }
 
 func imgWindow() (*Window, *imgNative) {
 	fn := &imgNative{supprt: true}
@@ -125,7 +125,7 @@ func TestDragImageSupported(t *testing.T) {
 	}
 	fn.supprt = false // бэкенд умеет, но сейчас нет (Win32 без OLE)
 	if win.DragImageSupported() {
-		t.Error("dragImageSupported()==false не дошёл до окна")
+		t.Error("DragImageSupported()==false не дошёл до окна")
 	}
 }
 

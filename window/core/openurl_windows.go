@@ -20,7 +20,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-var procShellExecuteW = shell32.NewProc("ShellExecuteW")
+// shell32 загружается здесь своим LazyDLL: бэкенд Win32 (трей) держит свой,
+// а открытие ссылок — возможность вне бэкенда.
+var procShellExecuteW = windows.NewLazySystemDLL("shell32.dll").NewProc("ShellExecuteW")
 
 // winShellExecute — подменяемая точка вызова ShellExecute (verb "open", цель).
 var winShellExecute = shellExecuteOpen

@@ -33,7 +33,7 @@ type fadeCopyNative struct {
 }
 
 func (f *fadeCopyNative) PopupPixelAlpha() bool { return true }
-func (f *fadeCopyNative) blitPopupRegion(img *image.RGBA, _ []image.Rectangle) {
+func (f *fadeCopyNative) BlitPopupRegion(img *image.RGBA, _ []image.Rectangle) {
 	f.imgs = append(f.imgs, img)
 }
 

@@ -31,7 +31,7 @@ import (
 // выходе из полного экрана — и вместе с ними весь процесс). На X11 и Wayland
 // у второго окна свой насос, и маркер не нужен.
 type secondaryMarker interface {
-	markSecondary()
+	MarkSecondary()
 }
 
 // childWindows — окна, открытые из этого окна.

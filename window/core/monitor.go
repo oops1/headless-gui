@@ -34,7 +34,7 @@ import (
 // monitorSource — бэкенд знает, на каком мониторе его окно. Необязательная
 // способность: без неё MonitorOf ищет монитор по прямоугольнику окна.
 type monitorSource interface {
-	monitorOfWindow() (native.Monitor, bool)
+	MonitorOfWindow() (native.Monitor, bool)
 }
 
 // Monitors возвращает мониторы рабочего стола: основной первым, остальные в
@@ -54,7 +54,7 @@ func MonitorOf(win *Window) (native.Monitor, bool) {
 		return native.Monitor{}, false
 	}
 	if ms, ok := win.native.(monitorSource); ok {
-		if m, ok := ms.monitorOfWindow(); ok {
+		if m, ok := ms.MonitorOfWindow(); ok {
 			return m, true
 		}
 	}

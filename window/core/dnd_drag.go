@@ -177,8 +177,8 @@ func (win *Window) BeginDragFilesImage(paths []string, effect native.DragEffect,
 // BeginDragFilesImage. false — перетаскивание начнётся, но без значка (X11,
 // macOS); приложение может показать свою подсказку. До Run — false.
 func (win *Window) DragImageSupported() bool {
-	if ds, ok := win.native.(interface{ dragImageSupported() bool }); ok {
-		return ds.dragImageSupported()
+	if ds, ok := win.native.(interface{ DragImageSupported() bool }); ok {
+		return ds.DragImageSupported()
 	}
 	_, ok := win.native.(fileDragImageSource)
 	return ok

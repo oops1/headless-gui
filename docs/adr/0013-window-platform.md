@@ -137,7 +137,7 @@ window/core ← window/minimal
 `window.VK_*`, `window.Monitor`, `window.HitArea` и прочие — алиасы и обёртки
 в фасаде; методы `Window` приходят с алиасом. Программы (showcase,
 desktopdemo, Tandem, WinLine) не правятся. Видимое снаружи — как на этапе 8:
-имена типов в рефлексии — по пакету (`*core.Window`, `*win32.Window`).
+имена типов в рефлексии — по пакету (`*core.Window`, `*win32.Win32Window`).
 
 ### 3. Возможности через `import _`: точки расширения бэкендов
 
@@ -313,6 +313,46 @@ Linux есть).
   возможность» (оконная процедура Win32 зовёт обработчики трея, UIA и DnD;
   X11 — XDND; бэкенды Linux держат трей SNI и уведомления) остаются в базе
   до точек расширения 9.8.
+
+**9.2.** Бэкенд Win32 — пакет `platform/win32`:
+
+- Вместе с окном переехали файлы, живущие на его внутренностях: трей,
+  перетаскивание (OLE), системная тема и акцент, а также основа COM
+  (`GUID`, HRESULT, `NewVTable`), общая с UI Automation. В `window/core`
+  под Windows остались возможности, которым нужно ядро: UI Automation
+  (снимок доступности `Window`), открытие ссылок, языки системы.
+- Первая точка расширения §3 — `win32.AddMessageHook(msg, h)`: оконная
+  процедура спрашивает обработчики раньше своих; UI Automation отвечает так на
+  `WM_GETOBJECT`. Дескриптор окна — `Win32Window.HWND`.
+- Ядро зовёт возможности ОС одними именами на всех платформах
+  (`platformMonitors`, `detectSystemTheme`, `nativeDoubleClickTime`…); под
+  Windows их передаёт бэкенду прослойка `window/core/backend_windows.go`. Там
+  же открытые имена фасада: псевдоним `Win32Window = win32.Win32Window`,
+  `NewNativeWindow`, `AllowForeground`. Тип в `win32` назван `Win32Window`, а
+  не `Window`, — имя открытого типа `window.Win32Window` сохраняется без
+  переименования в генераторе фасада.
+- Интерфейсы ядра с неэкспортированными методами, которым удовлетворяли
+  бэкенды (`trayHost`, `balloonHost`, `monitorSource`, `monitorChangeSource`,
+  `initialPlaceBackend`, `clientSizer`, `popupRegionSetter`,
+  `secondaryMarker`) и анонимный интерфейс `DragImageSupported` в
+  `Window.DragImageSupported`, получили экспортированные методы у всех
+  бэкендов сразу:
+  тип из другого пакета иначе молча перестал бы им удовлетворять. Интерфейсы
+  остались в ядре: бэкенды на них по имени не ссылаются.
+- В `platform/native` — общее для бэкендов, что понадобилось Win32 вне
+  ядра: `SystemTheme` с константами (открытое имя, в фасаде), служебные
+  `ErrTrayUnsupported`, `IconColorBuffer`. `window.SystemTheme` теперь
+  псевдоним `native.SystemTheme`.
+- Интеграционные тесты ядра с живым окном Win32 (хост попапов, курсоры,
+  смена размера, тема) берут внутренности бэкенда через `internal/testhook`
+  (их ставит `platform/win32` при загрузке), а не через открытый API.
+- T1 и T2 исправлены ещё в v3.38 и v3.39 (буфер кадра одной резервацией
+  `VirtualAlloc`; прямые углы и рамка DWM в 1 px вместо скруглённого
+  региона). `win32.Caps` (версия по `RtlGetVersion`, `RoundCorners`,
+  `SplitDIBSource`) сводит различия версий в одно место: скругление DWM
+  больше не пробуется вызовом на Windows 10; `SplitDIBSource` справочное —
+  буфер одной резервацией и так выводится на любой версии. Блит через DIB-секцию не
+  понадобился: буфер одной резервацией выводится и на Windows 10.
 
 ## Последствия
 

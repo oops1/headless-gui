@@ -123,23 +123,6 @@ func SystemLanguages() []string { return core.SystemLanguages() }
 
 // ── systheme.go ──
 
-// SystemTheme — тема оформления, выбранная в ОС.
-type SystemTheme = core.SystemTheme
-
-const (
-	// SystemThemeUnknown — узнать не удалось: ОС без понятия темы (Windows до
-	// 10 1607), на Linux нет ни GTK_THEME, ни портала рабочего стола, macOS
-	// (см. systheme_darwin.go). Это не «светлая»: приложение вправе взять
-	// свою тему по умолчанию, и именно об этом ему и сообщается — подставить
-	// светлую молча значило бы показать белое окно человеку, у которого
-	// просто не работает портал.
-	SystemThemeUnknown = core.SystemThemeUnknown
-	// SystemThemeLight — светлая тема.
-	SystemThemeLight = core.SystemThemeLight
-	// SystemThemeDark — тёмная тема.
-	SystemThemeDark = core.SystemThemeDark
-)
-
 // DetectSystemTheme возвращает тему, выбранную в ОС прямо сейчас.
 //
 // Windows: параметр приложений AppsUseLightTheme в реестре пользователя (не
@@ -150,7 +133,7 @@ const (
 // Безопасно звать из любой горутины и до создания окна — именно так выбирают
 // палитру для первого кадра. На Linux первый вызов может занять до нескольких
 // секунд, если шина есть, а портал не отвечает; без шины — мгновенно.
-func DetectSystemTheme() SystemTheme { return core.DetectSystemTheme() }
+func DetectSystemTheme() native.SystemTheme { return core.DetectSystemTheme() }
 
 // SystemAppearance — оформление, выбранное в ОС: тема и акцентный цвет.
 type SystemAppearance = core.SystemAppearance

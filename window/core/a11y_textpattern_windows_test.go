@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/win32"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -68,7 +69,7 @@ func (sc *textScene) docRange(t *testing.T, e *uiaElement) uintptr {
 	// зовут тысячи раз подряд, и именно здесь рост стека под -race ловил
 	// ответ мимо переменной.
 	r := new(uintptr)
-	if hr := comCall(e.textPtr(), slotTextDocumentRange, uintptr(unsafe.Pointer(r))); hr != sOK || *r == 0 {
+	if hr := comCall(e.textPtr(), slotTextDocumentRange, uintptr(unsafe.Pointer(r))); hr != win32.SOK || *r == 0 {
 		t.Fatalf("get_DocumentRange: hr=%#x r=%#x", hr, *r)
 	}
 	return *r
@@ -82,7 +83,7 @@ func rangeText(t *testing.T, r uintptr) string {
 func rangeTextMax(t *testing.T, r uintptr, maxLen int32) string {
 	t.Helper()
 	var bstr uintptr
-	if hr := comCall(r, slotRangeGetText, uintptr(uint32(maxLen)), uintptr(unsafe.Pointer(&bstr))); hr != sOK {
+	if hr := comCall(r, slotRangeGetText, uintptr(uint32(maxLen)), uintptr(unsafe.Pointer(&bstr))); hr != win32.SOK {
 		t.Fatalf("GetText: hr=%#x", hr)
 	}
 	if bstr == 0 {
@@ -95,7 +96,7 @@ func rangeTextMax(t *testing.T, r uintptr, maxLen int32) string {
 func rangeMove(t *testing.T, r uintptr, unit, count int32) int32 {
 	t.Helper()
 	var moved int32
-	if hr := comCall(r, slotRangeMove, uintptr(unit), uintptr(uint32(count)), uintptr(unsafe.Pointer(&moved))); hr != sOK {
+	if hr := comCall(r, slotRangeMove, uintptr(unit), uintptr(uint32(count)), uintptr(unsafe.Pointer(&moved))); hr != win32.SOK {
 		t.Fatalf("Move: hr=%#x", hr)
 	}
 	return moved
@@ -103,7 +104,7 @@ func rangeMove(t *testing.T, r uintptr, unit, count int32) int32 {
 
 func rangeExpand(t *testing.T, r uintptr, unit int32) {
 	t.Helper()
-	if hr := comCall(r, slotRangeExpand, uintptr(unit)); hr != sOK {
+	if hr := comCall(r, slotRangeExpand, uintptr(unit)); hr != win32.SOK {
 		t.Fatalf("ExpandToEnclosingUnit: hr=%#x", hr)
 	}
 }
@@ -130,13 +131,13 @@ func TestUIAText_PatternByRole(t *testing.T) {
 		e := sc.elemFor(t, w)
 		var p uintptr
 		if hr := comCall(e.simplePtr(), slotPatternProvider, uintptr(uiaPatternText),
-			uintptr(unsafe.Pointer(&p))); hr != sOK || p != e.textPtr() {
+			uintptr(unsafe.Pointer(&p))); hr != win32.SOK || p != e.textPtr() {
 			t.Errorf("GetPatternProvider(Text): hr=%#x p=%#x, ждал %#x", hr, p, e.textPtr())
 		}
 		comCall(e.textPtr(), slotRelease) // GetPatternProvider отдал ссылку
 		var out uintptr
 		if hr := comCall(e.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidTextProvider)),
-			uintptr(unsafe.Pointer(&out))); hr != sOK || out != e.textPtr() {
+			uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != e.textPtr() {
 			t.Errorf("QI(Text): hr=%#x out=%#x", hr, out)
 		}
 		comCall(e.textPtr(), slotRelease)
@@ -156,12 +157,12 @@ func TestUIAText_NotOnButton(t *testing.T) {
 		e := b.element(v.id(int32(i)))
 		var p uintptr
 		if hr := comCall(e.simplePtr(), slotPatternProvider, uintptr(uiaPatternText),
-			uintptr(unsafe.Pointer(&p))); hr != sOK || p != 0 {
+			uintptr(unsafe.Pointer(&p))); hr != win32.SOK || p != 0 {
 			t.Errorf("у кнопки паттерн Text: hr=%#x p=%#x", hr, p)
 		}
 		var out uintptr
 		if hr := comCall(e.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidTextProvider)),
-			uintptr(unsafe.Pointer(&out))); hr != eNoInterface || out != 0 {
+			uintptr(unsafe.Pointer(&out))); hr != win32.ENoInterface || out != 0 {
 			t.Errorf("QI(Text) у кнопки: hr=%#x", hr)
 		}
 		return
@@ -197,12 +198,12 @@ func TestUIAText_NotOnPassword(t *testing.T) {
 	e := sc.elemFor(t, pw)
 	var p uintptr
 	if hr := comCall(e.simplePtr(), slotPatternProvider, uintptr(uiaPatternText),
-		uintptr(unsafe.Pointer(&p))); hr != sOK || p != 0 {
+		uintptr(unsafe.Pointer(&p))); hr != win32.SOK || p != 0 {
 		t.Errorf("у поля пароля паттерн Text: hr=%#x p=%#x", hr, p)
 	}
 	var out uintptr
 	if hr := comCall(e.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidTextProvider)),
-		uintptr(unsafe.Pointer(&out))); hr != eNoInterface {
+		uintptr(unsafe.Pointer(&out))); hr != win32.ENoInterface {
 		t.Errorf("QI(Text) у поля пароля: hr=%#x", hr)
 	}
 }
@@ -211,7 +212,7 @@ func TestUIAText_SupportedSelection(t *testing.T) {
 	sc := newTextScene(t)
 	e := sc.elemFor(t, sc.tb)
 	var v int32
-	if hr := comCall(e.textPtr(), slotTextSupportedSelect, uintptr(unsafe.Pointer(&v))); hr != sOK || v != uiaSelectionSingle {
+	if hr := comCall(e.textPtr(), slotTextSupportedSelect, uintptr(unsafe.Pointer(&v))); hr != win32.SOK || v != uiaSelectionSingle {
 		t.Errorf("SupportedTextSelection: hr=%#x v=%d", hr, v)
 	}
 }
@@ -230,7 +231,7 @@ func TestUIAText_DocumentRangeAndGetText(t *testing.T) {
 		t.Errorf("усечённый до 6 символов: %q", got)
 	}
 	var bstr uintptr
-	if hr := comCall(r, slotRangeGetText, uintptr(^uintptr(1)), uintptr(unsafe.Pointer(&bstr))); hr != eInvalidArg {
+	if hr := comCall(r, slotRangeGetText, uintptr(^uintptr(1)), uintptr(unsafe.Pointer(&bstr))); hr != win32.EInvalidArg {
 		t.Errorf("maxLength = -2: hr=%#x, ждал E_INVALIDARG", hr)
 	}
 }
@@ -284,7 +285,7 @@ func TestUIAText_ReadByLines(t *testing.T) {
 	}
 
 	// Чужое значение TextUnit — ошибка аргумента, а не молчаливый сдвиг.
-	if hr := comCall(r, slotRangeExpand, 99); hr != eInvalidArg {
+	if hr := comCall(r, slotRangeExpand, 99); hr != win32.EInvalidArg {
 		t.Errorf("ExpandToEnclosingUnit(99): hr=%#x", hr)
 	}
 }
@@ -296,7 +297,7 @@ func TestUIAText_SelectionFollowsWidget(t *testing.T) {
 
 	selection := func() (string, a11yRange) {
 		var sa uintptr
-		if hr := comCall(e.textPtr(), slotTextGetSelection, uintptr(unsafe.Pointer(&sa))); hr != sOK || sa == 0 {
+		if hr := comCall(e.textPtr(), slotTextGetSelection, uintptr(unsafe.Pointer(&sa))); hr != win32.SOK || sa == 0 {
 			t.Fatalf("GetSelection: hr=%#x", hr)
 		}
 		defer procSafeArrayDestroyTest.Call(sa)
@@ -327,7 +328,7 @@ func TestUIAText_CompareAndClone(t *testing.T) {
 	defer rangeRelease(a)
 
 	var c uintptr
-	if hr := comCall(a, slotRangeClone, uintptr(unsafe.Pointer(&c))); hr != sOK || c == 0 || c == a {
+	if hr := comCall(a, slotRangeClone, uintptr(unsafe.Pointer(&c))); hr != win32.SOK || c == 0 || c == a {
 		t.Fatalf("Clone: hr=%#x c=%#x", hr, c)
 	}
 	defer rangeRelease(c)
@@ -357,7 +358,7 @@ func TestUIAText_CompareAndClone(t *testing.T) {
 	if cmp != -1 {
 		t.Errorf("концы: %d, ждал -1", cmp)
 	}
-	if hr := comCall(c, slotRangeCompareEndpts, 5, a, 0, uintptr(unsafe.Pointer(&cmp))); hr != eInvalidArg {
+	if hr := comCall(c, slotRangeCompareEndpts, 5, a, 0, uintptr(unsafe.Pointer(&cmp))); hr != win32.EInvalidArg {
 		t.Errorf("чужой конец диапазона: hr=%#x", hr)
 	}
 
@@ -368,7 +369,7 @@ func TestUIAText_CompareAndClone(t *testing.T) {
 	if eq != 0 {
 		t.Error("диапазоны разных элементов признаны равными")
 	}
-	if hr := comCall(a, slotRangeCompareEndpts, 0, other, 0, uintptr(unsafe.Pointer(&cmp))); hr != eInvalidArg {
+	if hr := comCall(a, slotRangeCompareEndpts, 0, other, 0, uintptr(unsafe.Pointer(&cmp))); hr != win32.EInvalidArg {
 		t.Errorf("концы диапазонов разных элементов: hr=%#x", hr)
 	}
 }
@@ -392,7 +393,7 @@ func TestUIAText_MoveEndpoints(t *testing.T) {
 		t.Errorf("после сдвига конца: %q", got)
 	}
 	// Начало a — на конец b: MoveEndpointByRange.
-	if hr := comCall(a, slotRangeMoveEndpointRng, uintptr(a11yEndStart), b, uintptr(a11yEndEnd)); hr != sOK {
+	if hr := comCall(a, slotRangeMoveEndpointRng, uintptr(a11yEndStart), b, uintptr(a11yEndEnd)); hr != win32.SOK {
 		t.Fatalf("MoveEndpointByRange: hr=%#x", hr)
 	}
 	if got := rangeText(t, a); got != "вторая строка" {
@@ -411,7 +412,7 @@ func TestUIAText_FindText(t *testing.T) {
 		defer procSysFreeString.Call(bstr)
 		var out uintptr
 		if hr := comCall(r, slotRangeFindText, bstr, uintptr(backward), uintptr(ignoreCase),
-			uintptr(unsafe.Pointer(&out))); hr != sOK {
+			uintptr(unsafe.Pointer(&out))); hr != win32.SOK {
 			t.Fatalf("FindText(%q): hr=%#x", s, hr)
 		}
 		return out
@@ -448,7 +449,7 @@ func TestUIAText_AttributesNotSupported(t *testing.T) {
 	defer rangeRelease(r)
 
 	var v comVariant
-	if hr := comCall(r, slotRangeGetAttribute, 40005, uintptr(unsafe.Pointer(&v))); hr != sOK {
+	if hr := comCall(r, slotRangeGetAttribute, 40005, uintptr(unsafe.Pointer(&v))); hr != win32.SOK {
 		t.Fatalf("GetAttributeValue: hr=%#x", hr)
 	}
 	if v.vt != vtUnknown || v.val[0] == 0 {
@@ -459,7 +460,7 @@ func TestUIAText_AttributesNotSupported(t *testing.T) {
 	in.setI4(1)
 	var out uintptr = 0xDEAD
 	if hr := comCall(r, slotRangeFindAttribute, 40005, uintptr(unsafe.Pointer(&in)), 0,
-		uintptr(unsafe.Pointer(&out))); hr != sOK || out != 0 {
+		uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != 0 {
 		t.Errorf("FindAttribute: hr=%#x out=%#x, ждал S_OK и NULL", hr, out)
 	}
 }
@@ -471,7 +472,7 @@ func TestUIAText_BoundingRectanglesAreElementRect(t *testing.T) {
 	defer rangeRelease(r)
 
 	var sa uintptr
-	if hr := comCall(r, slotRangeBoundingRects, uintptr(unsafe.Pointer(&sa))); hr != sOK || sa == 0 {
+	if hr := comCall(r, slotRangeBoundingRects, uintptr(unsafe.Pointer(&sa))); hr != win32.SOK || sa == 0 {
 		t.Fatalf("GetBoundingRectangles: hr=%#x", hr)
 	}
 	defer procSafeArrayDestroyTest.Call(sa)
@@ -497,7 +498,7 @@ func TestUIAText_EnclosingElementAndChildren(t *testing.T) {
 
 	before := e.refs.Load()
 	var el uintptr
-	if hr := comCall(r, slotRangeEnclosing, uintptr(unsafe.Pointer(&el))); hr != sOK || el != e.simplePtr() {
+	if hr := comCall(r, slotRangeEnclosing, uintptr(unsafe.Pointer(&el))); hr != win32.SOK || el != e.simplePtr() {
 		t.Fatalf("GetEnclosingElement: hr=%#x el=%#x, ждал %#x", hr, el, e.simplePtr())
 	}
 	if e.refs.Load() != before+1 {
@@ -506,7 +507,7 @@ func TestUIAText_EnclosingElementAndChildren(t *testing.T) {
 	comCall(el, slotRelease)
 
 	var sa uintptr
-	if hr := comCall(r, slotRangeGetChildren, uintptr(unsafe.Pointer(&sa))); hr != sOK || sa == 0 {
+	if hr := comCall(r, slotRangeGetChildren, uintptr(unsafe.Pointer(&sa))); hr != win32.SOK || sa == 0 {
 		t.Fatalf("GetChildren: hr=%#x", hr)
 	}
 	defer procSafeArrayDestroyTest.Call(sa)
@@ -516,7 +517,7 @@ func TestUIAText_EnclosingElementAndChildren(t *testing.T) {
 
 	// RangeFromChild: детей нет — отказ аргумента.
 	var out uintptr
-	if hr := comCall(e.textPtr(), slotTextRangeFromChild, e.simplePtr(), uintptr(unsafe.Pointer(&out))); hr != eInvalidArg || out != 0 {
+	if hr := comCall(e.textPtr(), slotTextRangeFromChild, e.simplePtr(), uintptr(unsafe.Pointer(&out))); hr != win32.EInvalidArg || out != 0 {
 		t.Errorf("RangeFromChild: hr=%#x out=%#x", hr, out)
 	}
 }
@@ -530,7 +531,7 @@ func TestUIAText_RangeFromPointAndVisible(t *testing.T) {
 	// адрес и не разыменовывает.
 	pt := [2]float64{20, 60}
 	var r uintptr
-	if hr := comCall(e.textPtr(), slotTextRangeFromPoint, uintptr(unsafe.Pointer(&pt)), uintptr(unsafe.Pointer(&r))); hr != sOK || r == 0 {
+	if hr := comCall(e.textPtr(), slotTextRangeFromPoint, uintptr(unsafe.Pointer(&pt)), uintptr(unsafe.Pointer(&r))); hr != win32.SOK || r == 0 {
 		t.Fatalf("RangeFromPoint: hr=%#x", hr)
 	}
 	defer rangeRelease(r)
@@ -539,7 +540,7 @@ func TestUIAText_RangeFromPointAndVisible(t *testing.T) {
 	}
 
 	var sa uintptr
-	if hr := comCall(e.textPtr(), slotTextVisibleRanges, uintptr(unsafe.Pointer(&sa))); hr != sOK || sa == 0 {
+	if hr := comCall(e.textPtr(), slotTextVisibleRanges, uintptr(unsafe.Pointer(&sa))); hr != win32.SOK || sa == 0 {
 		t.Fatalf("GetVisibleRanges: hr=%#x", hr)
 	}
 	defer procSafeArrayDestroyTest.Call(sa)
@@ -562,12 +563,12 @@ func TestUIAText_Select(t *testing.T) {
 	bstr, _, _ := procSysAllocString.Call(uintptr(unsafe.Pointer(text)))
 	defer procSysFreeString.Call(bstr)
 	var found uintptr
-	if hr := comCall(r, slotRangeFindText, bstr, 0, 0, uintptr(unsafe.Pointer(&found))); hr != sOK || found == 0 {
+	if hr := comCall(r, slotRangeFindText, bstr, 0, 0, uintptr(unsafe.Pointer(&found))); hr != win32.SOK || found == 0 {
 		t.Fatalf("FindText: hr=%#x", hr)
 	}
 	defer rangeRelease(found)
 
-	if hr := comCall(found, slotRangeSelect); hr != sOK {
+	if hr := comCall(found, slotRangeSelect); hr != win32.SOK {
 		t.Fatalf("Select: hr=%#x", hr)
 	}
 	sc.flush()
@@ -582,7 +583,7 @@ func TestUIAText_Select(t *testing.T) {
 	var moved int32
 	comCall(found, slotRangeMoveEndpoint, uintptr(a11yEndEnd), uintptr(a11yUnitDocument),
 		uintptr(^uintptr(0)), uintptr(unsafe.Pointer(&moved)))
-	if hr := comCall(found, slotRangeSelect); hr != sOK {
+	if hr := comCall(found, slotRangeSelect); hr != win32.SOK {
 		t.Fatalf("Select (каретка): hr=%#x", hr)
 	}
 	sc.flush()
@@ -602,7 +603,7 @@ func TestUIAText_AddRemoveSelection(t *testing.T) {
 	defer rangeRelease(r)
 
 	sc.tb.SetCaretPosition(0)
-	if hr := comCall(r, slotRangeAddToSelection); hr != sOK {
+	if hr := comCall(r, slotRangeAddToSelection); hr != win32.SOK {
 		t.Fatalf("AddToSelection без выделения: hr=%#x", hr)
 	}
 	flush()
@@ -619,7 +620,7 @@ func TestUIAText_AddRemoveSelection(t *testing.T) {
 	var moved int32
 	comCall(other, slotRangeMoveEndpoint, uintptr(a11yEndEnd), uintptr(a11yUnitWord),
 		uintptr(^uintptr(0)), uintptr(unsafe.Pointer(&moved)))
-	if hr := comCall(other, slotRangeRemoveFromSel); hr != sOK {
+	if hr := comCall(other, slotRangeRemoveFromSel); hr != win32.SOK {
 		t.Fatalf("RemoveFromSelection чужого диапазона: hr=%#x", hr)
 	}
 	flush()
@@ -627,14 +628,14 @@ func TestUIAText_AddRemoveSelection(t *testing.T) {
 		t.Errorf("выделение изменилось: [%d,%d)", from, to)
 	}
 	// Совпадающий — снимает.
-	if hr := comCall(r, slotRangeRemoveFromSel); hr != sOK {
+	if hr := comCall(r, slotRangeRemoveFromSel); hr != win32.SOK {
 		t.Fatalf("RemoveFromSelection: hr=%#x", hr)
 	}
 	flush()
 	if from, to := sc.tb.AccessSelection(); from != to {
 		t.Errorf("выделение не снято: [%d,%d)", from, to)
 	}
-	if hr := comCall(r, slotRangeScrollIntoView, 1); hr != sOK {
+	if hr := comCall(r, slotRangeScrollIntoView, 1); hr != win32.SOK {
 		t.Errorf("ScrollIntoView: hr=%#x", hr)
 	}
 }
@@ -691,7 +692,7 @@ func TestUIAText_RangeReleaseFrees(t *testing.T) {
 	// vtable через этот адрес).
 	defer runtime.KeepAlive(tr0)
 	var bstr uintptr
-	if hr := comCall(r, slotRangeGetText, uintptr(^uintptr(0)), uintptr(unsafe.Pointer(&bstr))); hr != eFail {
+	if hr := comCall(r, slotRangeGetText, uintptr(^uintptr(0)), uintptr(unsafe.Pointer(&bstr))); hr != win32.EFail {
 		t.Errorf("GetText на освобождённом: hr=%#x, ждал E_FAIL", hr)
 	}
 	// Повторные Release и AddRef не воскрешают и не падают.
@@ -726,15 +727,15 @@ func TestUIAText_RangeQueryInterface(t *testing.T) {
 	r := sc.docRange(t, sc.elemFor(t, sc.tb))
 	defer rangeRelease(r)
 
-	for _, iid := range []*comGUID{&iidIUnknown, &iidTextRangeProvider} {
+	for _, iid := range []*win32.GUID{&win32.IIDIUnknown, &iidTextRangeProvider} {
 		var out uintptr
-		if hr := comCall(r, slotQueryInterface, uintptr(unsafe.Pointer(iid)), uintptr(unsafe.Pointer(&out))); hr != sOK || out != r {
+		if hr := comCall(r, slotQueryInterface, uintptr(unsafe.Pointer(iid)), uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != r {
 			t.Errorf("QI(%s): hr=%#x out=%#x", iid, hr, out)
 		}
 		comCall(r, slotRelease)
 	}
 	var out uintptr
-	if hr := comCall(r, slotQueryInterface, uintptr(unsafe.Pointer(&iidTextProvider)), uintptr(unsafe.Pointer(&out))); hr != eNoInterface || out != 0 {
+	if hr := comCall(r, slotQueryInterface, uintptr(unsafe.Pointer(&iidTextProvider)), uintptr(unsafe.Pointer(&out))); hr != win32.ENoInterface || out != 0 {
 		t.Errorf("QI(чужой): hr=%#x out=%#x", hr, out)
 	}
 }
@@ -747,7 +748,7 @@ func TestUIAText_SafeArrayOwnsRanges(t *testing.T) {
 	base := uiaLiveRanges()
 
 	var sa uintptr
-	if hr := comCall(e.textPtr(), slotTextGetSelection, uintptr(unsafe.Pointer(&sa))); hr != sOK {
+	if hr := comCall(e.textPtr(), slotTextGetSelection, uintptr(unsafe.Pointer(&sa))); hr != win32.SOK {
 		t.Fatalf("GetSelection: hr=%#x", hr)
 	}
 	if got := uiaLiveRanges(); got != base+1 {

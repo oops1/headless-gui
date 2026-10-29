@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/win32"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -82,7 +83,7 @@ func (sc *uiaScene) byRole(t *testing.T, role widget.AccessRole) *uiaElement {
 func uiaPattern(t *testing.T, e *uiaElement, id int32) uintptr {
 	t.Helper()
 	var p uintptr
-	if hr := comCall(e.simplePtr(), slotPatternProvider, uintptr(id), uintptr(unsafe.Pointer(&p))); hr != sOK {
+	if hr := comCall(e.simplePtr(), slotPatternProvider, uintptr(id), uintptr(unsafe.Pointer(&p))); hr != win32.SOK {
 		t.Fatalf("GetPatternProvider(%d): hr=%#x", id, hr)
 	}
 	return p
@@ -136,11 +137,11 @@ func TestUIARadio_SelectionItem(t *testing.T) {
 	}
 	var out uintptr
 	if hr := comCall(ea.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidSelectionItemProvider)),
-		uintptr(unsafe.Pointer(&out))); hr != sOK || out != ea.selItemPtr() {
+		uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != ea.selItemPtr() {
 		t.Errorf("QI(SelectionItem): hr=%#x out=%#x", hr, out)
 	}
 	if hr := comCall(ea.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidInvokeProvider)),
-		uintptr(unsafe.Pointer(&out))); hr != eNoInterface {
+		uintptr(unsafe.Pointer(&out))); hr != win32.ENoInterface {
 		t.Errorf("QI(Invoke) у радиокнопки: hr=%#x, ожидался E_NOINTERFACE", hr)
 	}
 
@@ -149,7 +150,7 @@ func TestUIARadio_SelectionItem(t *testing.T) {
 		sc.b.refresh(true)
 		sel := uiaPattern(t, e, uiaPatternSelectionItem)
 		var s int32
-		if hr := comCall(sel, slotIsSelected, uintptr(unsafe.Pointer(&s))); hr != sOK {
+		if hr := comCall(sel, slotIsSelected, uintptr(unsafe.Pointer(&s))); hr != win32.SOK {
 			t.Fatalf("get_IsSelected: hr=%#x", hr)
 		}
 		prop := uiaBoolProp(t, e, uiaPropSelectionItemIsSel)
@@ -164,7 +165,7 @@ func TestUIARadio_SelectionItem(t *testing.T) {
 
 	// Select второй: выбрана вторая, первая сброшена группой.
 	selB := uiaPattern(t, eb, uiaPatternSelectionItem)
-	if hr := comCall(selB, slotSelect); hr != sOK {
+	if hr := comCall(selB, slotSelect); hr != win32.SOK {
 		t.Fatalf("Select: hr=%#x", hr)
 	}
 	if !b.IsSelected() || a.IsSelected() {
@@ -175,23 +176,23 @@ func TestUIARadio_SelectionItem(t *testing.T) {
 	}
 
 	// AddToSelection выбранной — ничего; невыбранной — выбирает.
-	if hr := comCall(selB, slotAddToSelection); hr != sOK || !b.IsSelected() {
+	if hr := comCall(selB, slotAddToSelection); hr != win32.SOK || !b.IsSelected() {
 		t.Errorf("AddToSelection выбранной: hr=%#x", hr)
 	}
 	selA := uiaPattern(t, ea, uiaPatternSelectionItem)
-	if hr := comCall(selA, slotAddToSelection); hr != sOK || !a.IsSelected() {
+	if hr := comCall(selA, slotAddToSelection); hr != win32.SOK || !a.IsSelected() {
 		t.Errorf("AddToSelection невыбранной: hr=%#x выбрана=%v", hr, a.IsSelected())
 	}
 	// Снять выбор нельзя; для невыбранной это не операция.
 	if hr := comCall(selA, slotRemoveFromSel); hr != uiaEInvalidOperation {
 		t.Errorf("RemoveFromSelection выбранной: hr=%#x", hr)
 	}
-	if hr := comCall(selB, slotRemoveFromSel); hr != sOK {
+	if hr := comCall(selB, slotRemoveFromSel); hr != win32.SOK {
 		t.Errorf("RemoveFromSelection невыбранной: hr=%#x", hr)
 	}
 	// Контейнера выбора нет.
 	out = 1
-	if hr := comCall(selA, slotSelContainer, uintptr(unsafe.Pointer(&out))); hr != sOK || out != 0 {
+	if hr := comCall(selA, slotSelContainer, uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != 0 {
 		t.Errorf("SelectionContainer: hr=%#x out=%#x", hr, out)
 	}
 
@@ -370,11 +371,11 @@ func TestUIAMenuItems_PatternsAndProps(t *testing.T) {
 	}
 	var out uintptr
 	if hr := comCall(more.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidExpandCollapseProvider)),
-		uintptr(unsafe.Pointer(&out))); hr != sOK || out != more.expandPtr() {
+		uintptr(unsafe.Pointer(&out))); hr != win32.SOK || out != more.expandPtr() {
 		t.Errorf("QI(ExpandCollapse): hr=%#x", hr)
 	}
 	if hr := comCall(open.simplePtr(), slotQueryInterface, uintptr(unsafe.Pointer(&iidExpandCollapseProvider)),
-		uintptr(unsafe.Pointer(&out))); hr != eNoInterface {
+		uintptr(unsafe.Pointer(&out))); hr != win32.ENoInterface {
 		t.Errorf("QI(ExpandCollapse) у обычного пункта: hr=%#x", hr)
 	}
 }
@@ -388,7 +389,7 @@ func TestUIAMenuItems_ActionsReachTheItem(t *testing.T) {
 	// Раскрыть подменю через ExpandCollapse, прочитать состояние, нажать «Раз».
 	more := sc.named(t, "Ещё")
 	ec := uiaPattern(t, more, uiaPatternExpandCollapse)
-	if hr := comCall(ec, slotExpand); hr != sOK {
+	if hr := comCall(ec, slotExpand); hr != win32.SOK {
 		t.Fatalf("Expand: hr=%#x", hr)
 	}
 	sc.b.refresh(true)
@@ -398,7 +399,7 @@ func TestUIAMenuItems_ActionsReachTheItem(t *testing.T) {
 		t.Errorf("после Expand состояние = %d", st)
 	}
 	raz := sc.named(t, "Раз")
-	if hr := comCall(uiaPattern(t, raz, uiaPatternInvoke), slotInvoke); hr != sOK {
+	if hr := comCall(uiaPattern(t, raz, uiaPatternInvoke), slotInvoke); hr != win32.SOK {
 		t.Fatalf("Invoke пункта подменю: hr=%#x", hr)
 	}
 	if len(*log) != 1 || (*log)[0] != "Раз" {
@@ -413,7 +414,7 @@ func TestUIAMenuItems_ActionsReachTheItem(t *testing.T) {
 	m.Show(100, 100)
 	sc.b.refresh(true)
 	pin := sc.named(t, "Закрепить")
-	if hr := comCall(uiaPattern(t, pin, uiaPatternToggle), slotToggle); hr != sOK {
+	if hr := comCall(uiaPattern(t, pin, uiaPatternToggle), slotToggle); hr != win32.SOK {
 		t.Fatalf("Toggle пункта: hr=%#x", hr)
 	}
 	if len(*log) != 1 || (*log)[0] != "Закрепить" {
@@ -424,7 +425,7 @@ func TestUIAMenuItems_ActionsReachTheItem(t *testing.T) {
 	more = sc.named(t, "Ещё")
 	ec = uiaPattern(t, more, uiaPatternExpandCollapse)
 	comCall(ec, slotExpand)
-	if c := comCall(ec, slotCollapse); c != sOK {
+	if c := comCall(ec, slotCollapse); c != win32.SOK {
 		t.Fatalf("Collapse: hr=%#x", c)
 	}
 	sc.b.refresh(true)
@@ -445,7 +446,7 @@ func TestUIAMenuItems_FocusAndPoint(t *testing.T) {
 	m.Show(100, 100)
 	pin := sc.named(t, "Закрепить")
 
-	if hr := comCall(pin.fragmentPtr(), slotSetFocus); hr != sOK {
+	if hr := comCall(pin.fragmentPtr(), slotSetFocus); hr != win32.SOK {
 		t.Fatalf("SetFocus: hr=%#x", hr)
 	}
 	sc.b.refresh(true)
@@ -490,7 +491,7 @@ func TestUIANodeActions_ReachOwnerHandler(t *testing.T) {
 	sc := newUIAScene(t, root)
 	right := sc.named(t, "правая")
 
-	if hr := comCall(right.fragmentPtr(), slotSetFocus); hr != sOK {
+	if hr := comCall(right.fragmentPtr(), slotSetFocus); hr != win32.SOK {
 		t.Fatalf("SetFocus: hr=%#x", hr)
 	}
 	if len(o.calls) != 1 || o.calls[0] != "R:focus" {
@@ -499,7 +500,7 @@ func TestUIANodeActions_ReachOwnerHandler(t *testing.T) {
 
 	// У текстовой панели нет Invoke — действие по узлу идёт через Select у
 	// паттернов; проверим общий путь uiaDoNode напрямую.
-	if hr := uiaDoNode(right.invokePtr(), "Invoke", widget.AccessInvoke); hr != sOK {
+	if hr := uiaDoNode(right.invokePtr(), "Invoke", widget.AccessInvoke); hr != win32.SOK {
 		t.Fatalf("uiaDoNode: hr=%#x", hr)
 	}
 	if o.calls[len(o.calls)-1] != "R:invoke" {

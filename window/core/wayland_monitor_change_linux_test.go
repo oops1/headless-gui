@@ -25,7 +25,7 @@ func TestWaylandMonitorChange_NewOutputBoundLive(t *testing.T) {
 	c := newWlTestWindow(t)
 	c.w.outs.live.Store(true) // стартовая привязка выводов выполнена
 	var cnt wlMonCounter
-	c.w.watchMonitors(cnt.fn)
+	c.w.WatchMonitors(cnt.fn)
 
 	wlMonChgAnnounce(c, 50, 4)
 	if cnt.n != 1 {
@@ -64,7 +64,7 @@ func TestWaylandMonitorChange_NewOutputBoundLive(t *testing.T) {
 func TestWaylandMonitorChange_BeforeInitialBindNotLive(t *testing.T) {
 	c := newWlTestWindow(t)
 	var cnt wlMonCounter
-	c.w.watchMonitors(cnt.fn)
+	c.w.WatchMonitors(cnt.fn)
 	wlMonChgAnnounce(c, 50, 4)
 	if cnt.n != 0 {
 		t.Errorf("до стартовой привязки вызван подписчик: %d", cnt.n)
@@ -85,7 +85,7 @@ func TestWaylandMonitorChange_OutputRemoved(t *testing.T) {
 	c.w.scale.outputs = map[uint32]float64{30: 1}
 	c.w.scale.entered = 30
 	var cnt wlMonCounter
-	c.w.watchMonitors(cnt.fn)
+	c.w.WatchMonitors(cnt.fn)
 
 	c.w.handleEvent(2, wlRegistryEvGlobalRemove, wlU32(50))
 	if cnt.n != 1 {
@@ -133,7 +133,7 @@ func TestWaylandMonitorChange_XdgOutputEvents(t *testing.T) {
 	info := c.w.outs.add(1, 30)
 	info.xdgID = 31
 	var cnt wlMonCounter
-	c.w.watchMonitors(cnt.fn)
+	c.w.WatchMonitors(cnt.fn)
 	c.w.handleEvent(31, xdgOutEvLogicalPosition, wlU32(0, 0))
 	c.w.handleEvent(31, xdgOutEvLogicalSize, wlU32(1500, 1000))
 	if cnt.n != 2 {
@@ -148,13 +148,13 @@ func TestWaylandMonitorChange_StopAndNilNotify(t *testing.T) {
 	c.w.handleEvent(30, wlOutputEvGeometry, wlGeometry(0, 0, "A", "B", 0)) // без подписки — не падает
 
 	var cnt wlMonCounter
-	stop := c.w.watchMonitors(cnt.fn)
+	stop := c.w.WatchMonitors(cnt.fn)
 	stop()
 	c.w.handleEvent(30, wlOutputEvGeometry, wlGeometry(0, 0, "A", "B", 0))
 	if cnt.n != 0 {
 		t.Errorf("подписка снята, но вызов был: %d", cnt.n)
 	}
-	if c.w.watchMonitors(nil) != nil {
-		t.Error("watchMonitors(nil) должен вернуть nil")
+	if c.w.WatchMonitors(nil) != nil {
+		t.Error("WatchMonitors(nil) должен вернуть nil")
 	}
 }

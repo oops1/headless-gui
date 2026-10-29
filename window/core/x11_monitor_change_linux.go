@@ -79,8 +79,8 @@ func x11MonitorEvent(buf []byte, randrFirstEvent byte, workAreaAtom uint32) bool
 	return false
 }
 
-// watchMonitors подписывается на смену мониторов (monitorChangeSource).
-func (w *X11Window) watchMonitors(notify func()) (stop func()) {
+// WatchMonitors подписывается на смену мониторов (monitorChangeSource).
+func (w *X11Window) WatchMonitors(notify func()) (stop func()) {
 	return x11WatchMonitors(notify)
 }
 

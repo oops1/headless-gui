@@ -40,13 +40,13 @@ const portalCallTimeout = 3 * time.Second
 // Порядок такой, потому что GTK_THEME ставят нарочно — чтобы запустить
 // программу в чужой теме поверх настроек сессии (GTK_THEME=Adwaita:dark
 // myapp), и перебить это порталом значило бы ослушаться человека.
-func detectSystemTheme() SystemTheme {
-	if t := systemThemeFromGTKTheme(os.Getenv("GTK_THEME")); t != SystemThemeUnknown {
+func detectSystemTheme() native.SystemTheme {
+	if t := systemThemeFromGTKTheme(os.Getenv("GTK_THEME")); t != native.SystemThemeUnknown {
 		return t
 	}
 	c, err := dbus.Session()
 	if err != nil {
-		return SystemThemeUnknown
+		return native.SystemThemeUnknown
 	}
 	return readPortalColorScheme(c)
 }
@@ -59,10 +59,10 @@ func detectSystemTheme() SystemTheme {
 // (UnknownMethod), а на любую другую ошибку — нет портала, нет ключа, таймаут —
 // сразу отвечаем Unknown: второй вызов тем же путём не дал бы иного, а
 // таймаут удвоился бы.
-func readPortalColorScheme(c *dbus.Conn) SystemTheme {
+func readPortalColorScheme(c *dbus.Conn) native.SystemTheme {
 	v, ok := readPortalAppearance(c, portalColorSchemeKey)
 	if !ok {
-		return SystemThemeUnknown
+		return native.SystemThemeUnknown
 	}
 	return systemThemeFromPortalValue(v)
 }
@@ -111,7 +111,7 @@ type portalThemeHub struct {
 	attached bool
 
 	mu      sync.Mutex
-	subs    map[int]func(SystemTheme)
+	subs    map[int]func(native.SystemTheme)
 	accSubs map[int]func(color.RGBA, bool) // подписчики на акцентный цвет
 	next    int
 }
@@ -125,7 +125,7 @@ var portalThemes portalThemeHub
 // наблюдение на Linux есть, в отличие от macOS. Без шины или портала подписка
 // ничего не даёт, и возвращается nil: это не ошибка, тема просто не
 // меняется на глазах.
-func watchSystemTheme(nw native.NativeWindow, emit func(SystemTheme)) (stop func()) {
+func watchSystemTheme(nw native.NativeWindow, emit func(native.SystemTheme)) (stop func()) {
 	c, err := dbus.Session()
 	if err != nil {
 		return nil
@@ -166,11 +166,11 @@ func (h *portalThemeHub) attach(c *dbus.Conn) bool {
 	return true
 }
 
-func (h *portalThemeHub) add(fn func(SystemTheme)) int {
+func (h *portalThemeHub) add(fn func(native.SystemTheme)) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.subs == nil {
-		h.subs = map[int]func(SystemTheme){}
+		h.subs = map[int]func(native.SystemTheme){}
 	}
 	h.next++
 	h.subs[h.next] = fn
@@ -228,9 +228,9 @@ func watchSystemAccent(nw native.NativeWindow, emit func(color.RGBA, bool)) (sto
 // Список копируется и звать подписчиков приходится вне замка: подписчик может
 // снять подписку (закрыть окно) прямо из колбэка, и под замком это было бы
 // взаимной блокировкой.
-func (h *portalThemeHub) dispatch(t SystemTheme) {
+func (h *portalThemeHub) dispatch(t native.SystemTheme) {
 	h.mu.Lock()
-	fns := make([]func(SystemTheme), 0, len(h.subs))
+	fns := make([]func(native.SystemTheme), 0, len(h.subs))
 	for _, fn := range h.subs {
 		fns = append(fns, fn)
 	}

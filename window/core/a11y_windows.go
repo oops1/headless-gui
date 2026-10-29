@@ -76,6 +76,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/oops1/headless-gui/v3/platform/win32"
 	"github.com/oops1/headless-gui/v3/widget"
 	"golang.org/x/sys/windows"
 )
@@ -423,13 +424,13 @@ func uiaInitVTables() {
 		addRef := windows.NewCallback(uiaAddRef)
 		release := windows.NewCallback(uiaRelease)
 
-		uiaVTSimple = newVTable(qi, addRef, release,
+		uiaVTSimple = win32.NewVTable(qi, addRef, release,
 			windows.NewCallback(uiaGetProviderOptions),
 			windows.NewCallback(uiaGetPatternProvider),
 			windows.NewCallback(uiaGetPropertyValue),
 			windows.NewCallback(uiaGetHostProvider),
 		)
-		uiaVTFragment = newVTable(qi, addRef, release,
+		uiaVTFragment = win32.NewVTable(qi, addRef, release,
 			windows.NewCallback(uiaNavigate),
 			windows.NewCallback(uiaGetRuntimeID),
 			windows.NewCallback(uiaGetBoundingRectangle),
@@ -437,30 +438,30 @@ func uiaInitVTables() {
 			windows.NewCallback(uiaSetFocus),
 			windows.NewCallback(uiaGetFragmentRoot),
 		)
-		uiaVTRoot = newVTable(qi, addRef, release,
+		uiaVTRoot = win32.NewVTable(qi, addRef, release,
 			windows.NewCallback(uiaElementProviderFromPoint),
 			windows.NewCallback(uiaGetFocus),
 		)
-		uiaVTInvoke = newVTable(qi, addRef, release,
+		uiaVTInvoke = win32.NewVTable(qi, addRef, release,
 			windows.NewCallback(uiaInvoke),
 		)
-		uiaVTToggle = newVTable(qi, addRef, release,
+		uiaVTToggle = win32.NewVTable(qi, addRef, release,
 			windows.NewCallback(uiaToggle),
 			windows.NewCallback(uiaGetToggleState),
 		)
-		uiaVTValue = newVTable(qi, addRef, release,
+		uiaVTValue = win32.NewVTable(qi, addRef, release,
 			windows.NewCallback(uiaSetValue),
 			windows.NewCallback(uiaGetValue),
 			windows.NewCallback(uiaGetValueIsReadOnly),
 		)
-		uiaVTSelItem = newVTable(qi, addRef, release,
+		uiaVTSelItem = win32.NewVTable(qi, addRef, release,
 			windows.NewCallback(uiaSelect),
 			windows.NewCallback(uiaAddToSelection),
 			windows.NewCallback(uiaRemoveFromSelection),
 			windows.NewCallback(uiaGetIsSelected),
 			windows.NewCallback(uiaGetSelectionContainer),
 		)
-		uiaVTExpand = newVTable(qi, addRef, release,
+		uiaVTExpand = win32.NewVTable(qi, addRef, release,
 			windows.NewCallback(uiaExpand),
 			windows.NewCallback(uiaCollapse),
 			windows.NewCallback(uiaGetExpandCollapseState),
@@ -479,81 +480,81 @@ func uiaExpandVTable() uintptr   { uiaInitVTables(); return uiaVTExpand }
 
 // ─── IUnknown ────────────────────────────────────────────────────────────────
 
-func uiaQueryInterface(this uintptr, riid *comGUID, ppv *uintptr) uintptr {
+func uiaQueryInterface(this uintptr, riid *win32.GUID, ppv *uintptr) uintptr {
 	if ppv == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*ppv = 0
 	e := uiaLookup(this)
 	if e == nil {
-		return eNoInterface
+		return win32.ENoInterface
 	}
 	switch {
-	case riid.equals(&iidIUnknown), riid.equals(&iidProviderSimple):
+	case riid.Equals(&win32.IIDIUnknown), riid.Equals(&iidProviderSimple):
 		uiaLog("QI(%d, Simple)", e.id)
 		*ppv = e.simplePtr()
-	case riid.equals(&iidProviderFragment):
+	case riid.Equals(&iidProviderFragment):
 		uiaLog("QI(%d, Fragment)", e.id)
 		*ppv = e.fragmentPtr()
-	case riid.equals(&iidProviderFragmentRoot):
+	case riid.Equals(&iidProviderFragmentRoot):
 		if !e.isRoot() {
 			uiaLog("QI(%d, FragmentRoot) → не корень, E_NOINTERFACE", e.id)
-			return eNoInterface
+			return win32.ENoInterface
 		}
 		uiaLog("QI(%d, FragmentRoot)", e.id)
 		*ppv = e.rootPtr()
-	case riid.equals(&iidInvokeProvider):
+	case riid.Equals(&iidInvokeProvider):
 		// Отвечаем ТОЛЬКО если роль реально поддерживает паттерн: пустой
 		// IInvokeProvider на надписи заставил бы скринридер объявить её
 		// нажимаемой, а нажатие ничего бы не делало.
 		if !uiaSupportsInvoke(e.info()) {
 			uiaLog("QI(%d, Invoke) → роль не поддерживает, E_NOINTERFACE", e.id)
-			return eNoInterface
+			return win32.ENoInterface
 		}
 		uiaLog("QI(%d, Invoke)", e.id)
 		*ppv = e.invokePtr()
-	case riid.equals(&iidToggleProvider):
+	case riid.Equals(&iidToggleProvider):
 		if !uiaSupportsToggle(e.info()) {
 			uiaLog("QI(%d, Toggle) → роль не поддерживает, E_NOINTERFACE", e.id)
-			return eNoInterface
+			return win32.ENoInterface
 		}
 		uiaLog("QI(%d, Toggle)", e.id)
 		*ppv = e.togglePtr()
-	case riid.equals(&iidSelectionItemProvider):
+	case riid.Equals(&iidSelectionItemProvider):
 		if !uiaSupportsSelectionItem(e.info()) {
 			uiaLog("QI(%d, SelectionItem) → роль не поддерживает, E_NOINTERFACE", e.id)
-			return eNoInterface
+			return win32.ENoInterface
 		}
 		uiaLog("QI(%d, SelectionItem)", e.id)
 		*ppv = e.selItemPtr()
-	case riid.equals(&iidExpandCollapseProvider):
+	case riid.Equals(&iidExpandCollapseProvider):
 		if !uiaSupportsExpandCollapse(e.info()) {
 			uiaLog("QI(%d, ExpandCollapse) → не поддерживается, E_NOINTERFACE", e.id)
-			return eNoInterface
+			return win32.ENoInterface
 		}
 		uiaLog("QI(%d, ExpandCollapse)", e.id)
 		*ppv = e.expandPtr()
-	case riid.equals(&iidValueProvider):
+	case riid.Equals(&iidValueProvider):
 		if !uiaSupportsValue(e.role()) {
 			uiaLog("QI(%d, Value) → роль не поддерживает, E_NOINTERFACE", e.id)
-			return eNoInterface
+			return win32.ENoInterface
 		}
 		uiaLog("QI(%d, Value)", e.id)
 		*ppv = e.valuePtr()
-	case riid.equals(&iidTextProvider):
+	case riid.Equals(&iidTextProvider):
 		// Как и Value: только там, где у виджета есть текст, и не у пароля.
 		if !uiaSupportsText(e) {
 			uiaLog("QI(%d, Text) → не поддерживается, E_NOINTERFACE", e.id)
-			return eNoInterface
+			return win32.ENoInterface
 		}
 		uiaLog("QI(%d, Text)", e.id)
 		*ppv = e.textPtr()
 	default:
 		uiaLog("QI(%d, %s) → E_NOINTERFACE", e.id, riid)
-		return eNoInterface
+		return win32.ENoInterface
 	}
 	e.refs.Add(1)
-	return sOK
+	return win32.SOK
 }
 
 func uiaAddRef(this uintptr) uintptr {
@@ -580,10 +581,10 @@ func uiaRelease(this uintptr) uintptr {
 
 func uiaGetProviderOptions(this uintptr, out *int32) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = uiaProviderServerSide
-	return sOK
+	return win32.SOK
 }
 
 // uiaGetPatternProvider отдаёт провайдер паттерна управления по его id.
@@ -593,12 +594,12 @@ func uiaGetProviderOptions(this uintptr, out *int32) uintptr {
 // паттерн — NULL и S_OK: для UIA это штатный ответ «такого у меня нет».
 func uiaGetPatternProvider(this uintptr, patternID int32, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	info := e.info()
 	role := info.Role
@@ -635,33 +636,33 @@ func uiaGetPatternProvider(this uintptr, patternID int32, out *uintptr) uintptr 
 		}
 	}
 	uiaLog("Pattern(%d, %d, role=%s) → %#x", e.id, patternID, role, *out)
-	return sOK
+	return win32.SOK
 }
 
 func uiaGetPropertyValue(this uintptr, propID int32, out *comVariant) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	out.setEmpty()
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	e.b.fillProperty(e.id, propID, out)
 	uiaLog("Property(%d, %d) → vt=%d", e.id, propID, out.vt)
-	return sOK
+	return win32.SOK
 }
 
 // uiaGetHostProvider — у корня это провайдер самого окна (UIA доберёт из него
 // свойства HWND), у остальных элементов — NULL.
 func uiaGetHostProvider(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e := uiaLookup(this)
 	if e == nil || !e.isRoot() {
-		return sOK
+		return win32.SOK
 	}
 	// Хост-провайдер должен быть ОДНИМ И ТЕМ ЖЕ объектом при каждом запросе:
 	// UIA сверяет элементы по идентичности COM-объекта, и новый экземпляр на
@@ -669,26 +670,26 @@ func uiaGetHostProvider(this uintptr, out *uintptr) uintptr {
 	// с обязательным AddRef, потому что владение переходит клиенту.
 	*out = e.b.hostProvider()
 	uiaLog("HostProvider(%d) → %#x", e.id, *out)
-	return sOK
+	return win32.SOK
 }
 
 // ─── IRawElementProviderFragment ─────────────────────────────────────────────
 
 func uiaNavigate(this uintptr, direction int32, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	target := e.b.navigate(e.id, direction)
 	if target != nil {
 		*out = target.outFragment()
 	}
 	uiaLog("Navigate(%d, dir=%d) → %s", e.id, direction, uiaTargetName(target))
-	return sOK
+	return win32.SOK
 }
 
 // uiaTargetName — компактное описание элемента для журнала.
@@ -702,16 +703,16 @@ func uiaTargetName(e *uiaElement) string {
 // uiaGetRuntimeID — идентификатор элемента для клиента: [UiaAppendRuntimeId, id].
 func uiaGetRuntimeID(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	*out = safeArrayOfInts([]int32{uiaAppendRuntimeID, e.id})
 	uiaLog("RuntimeId(%d) → [%d %d] sa=%#x", e.id, uiaAppendRuntimeID, e.id, *out)
-	return sOK
+	return win32.SOK
 }
 
 // uiaRect — UiaRect (левый верхний угол, ширина, высота; экранные пиксели).
@@ -721,23 +722,23 @@ type uiaRect struct {
 
 func uiaGetBoundingRectangle(this uintptr, out *uiaRect) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = uiaRect{}
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	*out = e.b.boundsOf(e.id)
-	return sOK
+	return win32.SOK
 }
 
 func uiaGetEmbeddedFragmentRoots(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
-	return sOK
+	return win32.SOK
 }
 
 // uiaSetFocus — программная передача фокуса: скринридер просит сделать элемент
@@ -750,39 +751,39 @@ func uiaGetEmbeddedFragmentRoots(this uintptr, out *uintptr) uintptr {
 func uiaSetFocus(this uintptr) uintptr {
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	node := e.node()
 	if node == nil {
 		uiaLog("SetFocus(%d) → узла нет в снимке", e.id)
-		return sOK
+		return win32.SOK
 	}
 	// Узел из AccessChildren получает фокус сам (AccessActionHandler владельца),
 	// а не его владелец целиком.
 	if !e.b.win.accessibilityNodeAction(node, widget.AccessFocus) {
 		uiaLog("SetFocus(%d) → отказ (виджет не принимает фокус)", e.id)
-		return sOK
+		return win32.SOK
 	}
 	e.b.markDirty() // фокус переехал — снимок устарел
 	uiaLog("SetFocus(%d) → ок", e.id)
-	return sOK
+	return win32.SOK
 }
 
 func uiaGetFragmentRoot(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	root := e.b.element(e.b.rootID())
 	if root != nil {
 		*out = root.outRoot()
 	}
 	uiaLog("FragmentRoot(%d) → %s", e.id, uiaTargetName(root))
-	return sOK
+	return win32.SOK
 }
 
 // ─── IRawElementProviderFragmentRoot ─────────────────────────────────────────
@@ -795,38 +796,38 @@ func uiaGetFragmentRoot(this uintptr, out *uintptr) uintptr {
 // вызывают именно для «что под мышью», и координаты совпадают.
 func uiaElementProviderFromPoint(this uintptr, _, _ uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	x, y, ok := cursorScreenPoint()
 	if !ok {
-		return sOK
+		return win32.SOK
 	}
 	if hit := e.b.hitTestScreen(x, y); hit != nil {
 		*out = hit.outFragment()
 	}
-	return sOK
+	return win32.SOK
 }
 
 func uiaGetFocus(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	f := e.b.focusElement()
 	if f != nil {
 		*out = f.outFragment()
 	}
 	uiaLog("GetFocus(%d) → %s", e.id, uiaTargetName(f))
-	return sOK
+	return win32.SOK
 }
 
 // ─── Паттерны управления: IInvokeProvider и IToggleProvider ──────────────────
@@ -843,7 +844,7 @@ func uiaGetFocus(this uintptr, out *uintptr) uintptr {
 func uiaDoNode(this uintptr, what string, kind widget.AccessActionKind) uintptr {
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	node := e.node()
 	if node == nil {
@@ -860,7 +861,7 @@ func uiaDoNode(this uintptr, what string, kind widget.AccessActionKind) uintptr 
 	// вместе с циклом событий (ensureEventLoop).
 	e.b.markDirty()
 	uiaLog("%s(%d) → ок", what, e.id)
-	return sOK
+	return win32.SOK
 }
 
 // uiaInvoke — IInvokeProvider::Invoke.
@@ -892,14 +893,14 @@ func uiaSelected(node *a11yNode) bool {
 func uiaAddToSelection(this uintptr) uintptr {
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	node := e.node()
 	if node == nil {
 		return uiaEElementNotAvailable
 	}
 	if uiaSelected(node) {
-		return sOK
+		return win32.SOK
 	}
 	return uiaDoNode(this, "AddToSelection", widget.AccessSelect)
 }
@@ -910,7 +911,7 @@ func uiaAddToSelection(this uintptr) uintptr {
 func uiaRemoveFromSelection(this uintptr) uintptr {
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	node := e.node()
 	if node == nil {
@@ -919,18 +920,18 @@ func uiaRemoveFromSelection(this uintptr) uintptr {
 	if uiaSelected(node) {
 		return uiaEInvalidOperation
 	}
-	return sOK
+	return win32.SOK
 }
 
 // uiaGetIsSelected — ISelectionItemProvider::get_IsSelected.
 func uiaGetIsSelected(this uintptr, out *int32) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	node := e.node()
 	if node == nil {
@@ -940,17 +941,17 @@ func uiaGetIsSelected(this uintptr, out *int32) uintptr {
 		*out = 1 // здесь BOOL, а не VARIANT_BOOL: 1
 	}
 	uiaLog("IsSelected(%d) → %d", e.id, *out)
-	return sOK
+	return win32.SOK
 }
 
 // uiaGetSelectionContainer — ISelectionItemProvider::get_SelectionContainer.
 // Группы радиокнопок в дереве нет — контейнер пуст (допустимо спецификацией).
 func uiaGetSelectionContainer(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
-	return sOK
+	return win32.SOK
 }
 
 // ─── IExpandCollapseProvider: пункт меню с подменю ──────────────────────────
@@ -964,12 +965,12 @@ func uiaCollapse(this uintptr) uintptr { return uiaDoNode(this, "Collapse", widg
 // uiaGetExpandCollapseState — get_ExpandCollapseState.
 func uiaGetExpandCollapseState(this uintptr, out *int32) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = uiaExpandCollapsed
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	node := e.node()
 	if node == nil {
@@ -979,19 +980,19 @@ func uiaGetExpandCollapseState(this uintptr, out *int32) uintptr {
 		*out = uiaExpanded
 	}
 	uiaLog("ExpandCollapseState(%d) → %d", e.id, *out)
-	return sOK
+	return win32.SOK
 }
 
 // uiaGetToggleState — IToggleProvider::get_ToggleState.
 // Третьего состояния (ToggleState_Indeterminate) движок не публикует.
 func uiaGetToggleState(this uintptr, out *int32) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = uiaToggleOff
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	node := e.node()
 	if node == nil {
@@ -1001,13 +1002,13 @@ func uiaGetToggleState(this uintptr, out *int32) uintptr {
 		*out = uiaToggleOn
 	}
 	uiaLog("ToggleState(%d) → %d", e.id, *out)
-	return sOK
+	return win32.SOK
 }
 
 // cursorScreenPoint — позиция курсора в экранных координатах.
 func cursorScreenPoint() (int32, int32, bool) {
 	var pt struct{ X, Y int32 }
-	r, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+	r, _, _ := procUIAGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 	if r == 0 {
 		return 0, 0, false
 	}
@@ -1018,6 +1019,9 @@ func cursorScreenPoint() (int32, int32, bool) {
 
 func init() {
 	newA11yBridge = func(win *Window) a11yBridge { return &uiaBridge{win: win} }
+	// Запрос клиента доступности (скринридер, Инспектор UIA) приходит окну
+	// бэкенда сообщением WM_GETOBJECT; бэкенд спрашивает об этом нас.
+	win32.AddMessageHook(wmGetObject, uiaHandleGetObject)
 }
 
 // uiaBridge — состояние моста для одного окна.
@@ -1045,8 +1049,12 @@ type uiaBridge struct {
 	loopOnce sync.Once
 }
 
-// uiaBridges — мосты по hwnd: wndProc обрабатывает WM_GETOBJECT без правки
-// структуры Win32Window.
+// procUIAGetCursorPos — GetCursorPos для моста (свой LazyProc: user32 бэкенда
+// Win32 в его пакете).
+var procUIAGetCursorPos = windows.NewLazySystemDLL("user32.dll").NewProc("GetCursorPos")
+
+// uiaBridges — мосты по hwnd: обработчик WM_GETOBJECT (win32.AddMessageHook)
+// находит мост окна без правки структуры Win32Window.
 var (
 	uiaBridgeMu sync.RWMutex
 	uiaBridges  = map[uintptr]*uiaBridge{}
@@ -1059,10 +1067,10 @@ func (b *uiaBridge) start() error {
 		return errUIAUnavailable
 	}
 	nw, ok := b.win.native.(*Win32Window)
-	if !ok || nw.hwnd == 0 {
+	if !ok || nw.HWND() == 0 {
 		return errUIAUnavailable
 	}
-	b.hwnd = uintptr(nw.hwnd)
+	b.hwnd = nw.HWND()
 	b.createHostProvider()
 	b.elems = map[int32]*uiaElement{}
 	b.refresh(true)
@@ -1588,12 +1596,12 @@ func uiaTextOf(e *uiaElement) (widget.AccessTextProvider, bool) {
 // пересобирается раз в сто пятьдесят миллисекунд и отставал бы от набора.
 func uiaGetValue(this uintptr, out *uintptr) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 0
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	text := ""
 	if tp, ok := uiaTextOf(e); ok {
@@ -1607,24 +1615,24 @@ func uiaGetValue(this uintptr, out *uintptr) uintptr {
 	v.setString(text)
 	*out = v.val[0] // BSTR уходит клиенту во владение
 	uiaLog("get_Value(%d) → %d симв.", e.id, len([]rune(text)))
-	return sOK
+	return win32.SOK
 }
 
 // uiaGetValueIsReadOnly — IValueProvider::get_IsReadOnly.
 func uiaGetValueIsReadOnly(this uintptr, out *int32) uintptr {
 	if out == nil {
-		return eInvalidArg
+		return win32.EInvalidArg
 	}
 	*out = 1
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	if tp, ok := uiaTextOf(e); ok {
 		if !tp.AccessReadOnly() {
 			*out = 0
 		}
-		return sOK
+		return win32.SOK
 	}
 	node := e.node()
 	if node == nil {
@@ -1634,7 +1642,7 @@ func uiaGetValueIsReadOnly(this uintptr, out *int32) uintptr {
 		!a11yHasState(node.Info.States, widget.StateDisabled) {
 		*out = 0
 	}
-	return sOK
+	return win32.SOK
 }
 
 // uiaSetValue — IValueProvider::SetValue: средство автоматизации (или сам
@@ -1645,7 +1653,7 @@ func uiaGetValueIsReadOnly(this uintptr, out *int32) uintptr {
 func uiaSetValue(this uintptr, bstr uintptr) uintptr {
 	e := uiaLookup(this)
 	if e == nil {
-		return eFail
+		return win32.EFail
 	}
 	tp, ok := uiaTextOf(e)
 	if !ok {
@@ -1658,5 +1666,5 @@ func uiaSetValue(this uintptr, bstr uintptr) uintptr {
 	text := bstrToString(bstr)
 	e.b.win.postToEngine(func() { setter.AccessSetText(text) })
 	uiaLog("SetValue(%d, %d симв.)", e.id, len([]rune(text)))
-	return sOK
+	return win32.SOK
 }

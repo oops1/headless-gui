@@ -14,13 +14,6 @@ import (
 // Настоящее окно-попап Win32 на переходе (popup_fade.go): слоистое окно,
 // прозрачность целиком из PopupTransition.Opacity, сдвиг — положением окна.
 
-var (
-	procGetLayeredWindowAttributes = user32.NewProc("GetLayeredWindowAttributes")
-	procScreenGetDC                = user32.NewProc("GetDC")
-	procScreenReleaseDC            = user32.NewProc("ReleaseDC")
-	procScreenGetPixel             = gdi32.NewProc("GetPixel")
-)
-
 // screenPixel — цвет точки экрана (COLORREF 0x00BBGGRR); ok=false — экран
 // не читается (сеанс заблокирован, нет рабочего стола).
 func screenPixel(x, y int) (uint32, bool) {
@@ -36,7 +29,7 @@ func screenPixel(x, y int) (uint32, bool) {
 // settleScreen даёт DWM досмотреть анимацию показа окна.
 func settleScreen() {
 	for i := 0; i < 40; i++ {
-		fsPumpMessages()
+		pumpWin32()
 		time.Sleep(20 * time.Millisecond)
 	}
 }
@@ -47,7 +40,7 @@ func layeredAlpha(t *testing.T, w *Win32Window) int {
 	var key uint32
 	var alpha byte
 	var flags uint32
-	r, _, _ := procGetLayeredWindowAttributes.Call(uintptr(w.hwnd),
+	r, _, _ := procGetLayeredWindowAttributes.Call(w.HWND(),
 		uintptr(unsafe.Pointer(&key)), uintptr(unsafe.Pointer(&alpha)), uintptr(unsafe.Pointer(&flags)))
 	if r == 0 {
 		t.Fatal("GetLayeredWindowAttributes не прочитал окно — оно не слоистое?")
@@ -56,9 +49,9 @@ func layeredAlpha(t *testing.T, w *Win32Window) int {
 }
 
 func TestWin32PopupFade_Live(t *testing.T) {
-	carrier := newFsWindow(t)
+	carrier := newWin32TestWindow(t)
 	h := newPopupHost(carrier, carrier, &pcEngine{}, 1, nil)
-	t.Cleanup(func() { h.closeAll(); fsPumpMessages() })
+	t.Cleanup(func() { h.closeAll(); pumpWin32() })
 
 	img := image.NewRGBA(image.Rect(0, 0, 100, 80))
 	for i := range img.Pix {
@@ -70,7 +63,7 @@ func TestWin32PopupFade_Live(t *testing.T) {
 	}
 
 	h.apply(frame(&engine.PopupTransition{Opacity: 0, Offset: image.Pt(0, -6)}))
-	fsPumpMessages()
+	pumpWin32()
 	h.mu.Lock()
 	hp := h.windows[1]
 	h.mu.Unlock()
@@ -78,8 +71,8 @@ func TestWin32PopupFade_Live(t *testing.T) {
 		t.Skip("окно-попап не поднялось (нет рабочего стола?)")
 	}
 	pop := hp.native.(*Win32Window)
-	ex, _, _ := procGetWindowLongPtrW.Call(uintptr(pop.hwnd), gwlExstyleAOT)
-	if ex&wsExLayered == 0 {
+	ex, _, _ := procTestGetWindowLongPtrW.Call(pop.HWND(), testGWLExStyle)
+	if ex&testWSExLayered == 0 {
 		t.Fatal("окно-попап не слоистое")
 	}
 	if hp.fade != popupFadeWindow {
@@ -95,7 +88,7 @@ func TestWin32PopupFade_Live(t *testing.T) {
 	}
 
 	h.apply(frame(&engine.PopupTransition{Opacity: 0.5, Offset: image.Pt(0, -3)}))
-	fsPumpMessages()
+	pumpWin32()
 	if a := layeredAlpha(t, pop); a < 126 || a > 129 {
 		t.Fatalf("середина: прозрачность %d, ждали около 128", a)
 	}
@@ -104,7 +97,7 @@ func TestWin32PopupFade_Live(t *testing.T) {
 	}
 
 	h.apply(frame(nil))
-	fsPumpMessages()
+	pumpWin32()
 	if a := layeredAlpha(t, pop); a != 255 {
 		t.Fatalf("в покое прозрачность %d, ждали 255", a)
 	}
@@ -116,9 +109,9 @@ func TestWin32PopupFade_Live(t *testing.T) {
 // На экране: слоистое окно с прозрачностью 0 попапа не показывает, в покое —
 // показывает его картинку как прежде (StretchDIBits в слоистом окне).
 func TestWin32PopupFade_LivePixels(t *testing.T) {
-	carrier := newFsWindow(t)
+	carrier := newWin32TestWindow(t)
 	h := newPopupHost(carrier, carrier, &pcEngine{}, 1, nil)
-	t.Cleanup(func() { h.closeAll(); fsPumpMessages() })
+	t.Cleanup(func() { h.closeAll(); pumpWin32() })
 	img := image.NewRGBA(image.Rect(0, 0, 100, 80))
 	for i := 0; i < len(img.Pix); i += 4 {
 		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = 220, 30, 40, 255

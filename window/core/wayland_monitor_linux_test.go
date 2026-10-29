@@ -108,11 +108,11 @@ func TestWaylandMonitors_MonitorOfWindow(t *testing.T) {
 		c.w.handleEvent(id, wlOutputEvGeometry, wlGeometry(int32(id)*100, 0, "", "", 0))
 		c.w.handleEvent(id, wlOutputEvMode, wlU32(wlOutputModeCurrent, 1000, 500, 0))
 	}
-	if _, ok := c.w.monitorOfWindow(); ok {
+	if _, ok := c.w.MonitorOfWindow(); ok {
 		t.Error("окно нигде не показано, а мониторов два — монитор не определим")
 	}
 	c.w.handleEvent(c.w.surfaceID, wlSurfaceEvEnter, wlU32(40))
-	m, ok := c.w.monitorOfWindow()
+	m, ok := c.w.MonitorOfWindow()
 	if !ok || m.Bounds.Min.X != 4000 || m.Primary {
 		t.Errorf("монитор окна %+v %v, ждал второй (x=4000), не основной", m, ok)
 	}

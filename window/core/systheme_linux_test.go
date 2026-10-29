@@ -9,17 +9,18 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // GTK_THEME важнее портала и не требует шины вовсе: ответ приходит до того,
 // как мы к ней потянемся — иначе на машине без D-Bus эта проверка зависла бы.
 func TestDetectSystemTheme_GTKThemeEnv(t *testing.T) {
 	t.Setenv("GTK_THEME", "Adwaita:dark")
-	if got := DetectSystemTheme(); got != SystemThemeDark {
+	if got := DetectSystemTheme(); got != native.SystemThemeDark {
 		t.Errorf("GTK_THEME=Adwaita:dark → %v, ждал dark", got)
 	}
 	t.Setenv("GTK_THEME", "Adwaita:light")
-	if got := DetectSystemTheme(); got != SystemThemeLight {
+	if got := DetectSystemTheme(); got != native.SystemThemeLight {
 		t.Errorf("GTK_THEME=Adwaita:light → %v, ждал light", got)
 	}
 }
@@ -67,18 +68,18 @@ func TestReadPortalColorScheme_FakePortal(t *testing.T) {
 	client := dialTestBus(t)
 
 	scheme.Store(1)
-	if got := readPortalColorScheme(client); got != SystemThemeDark {
+	if got := readPortalColorScheme(client); got != native.SystemThemeDark {
 		t.Errorf("старый портал (только Read), color-scheme=1 → %v, ждал dark", got)
 	}
 
 	mode.Store(1)
 	scheme.Store(2)
-	if got := readPortalColorScheme(client); got != SystemThemeLight {
+	if got := readPortalColorScheme(client); got != native.SystemThemeLight {
 		t.Errorf("портал с ReadOne, color-scheme=2 → %v, ждал light", got)
 	}
 
 	scheme.Store(0)
-	if got := readPortalColorScheme(client); got != SystemThemeUnknown {
+	if got := readPortalColorScheme(client); got != native.SystemThemeUnknown {
 		t.Errorf("color-scheme=0 (нет предпочтения) → %v, ждал unknown", got)
 	}
 }
@@ -91,7 +92,7 @@ func TestReadPortalColorScheme_NoPortal(t *testing.T) {
 		t.Skip("портал в системе есть, проверять его отсутствие нечем")
 	}
 	start := time.Now()
-	if got := readPortalColorScheme(client); got != SystemThemeUnknown {
+	if got := readPortalColorScheme(client); got != native.SystemThemeUnknown {
 		t.Errorf("без портала → %v, ждал unknown", got)
 	}
 	if d := time.Since(start); d > portalCallTimeout {
@@ -105,8 +106,8 @@ func TestWatchSystemTheme_FakePortal(t *testing.T) {
 	var mode, scheme atomic.Int32
 	daemon := startFakePortal(t, &mode, &scheme)
 
-	got := make(chan SystemTheme, 4)
-	stop := watchSystemTheme(nil, func(th SystemTheme) { got <- th })
+	got := make(chan native.SystemTheme, 4)
+	stop := watchSystemTheme(nil, func(th native.SystemTheme) { got <- th })
 	if stop == nil {
 		t.Skip("сессионной шины нет")
 	}
@@ -127,7 +128,7 @@ func TestWatchSystemTheme_FakePortal(t *testing.T) {
 	emit(portalColorSchemeKey, 1)
 	select {
 	case th := <-got:
-		if th != SystemThemeDark {
+		if th != native.SystemThemeDark {
 			t.Errorf("подписчику пришло %v, ждал dark", th)
 		}
 	case <-time.After(3 * time.Second):
@@ -205,12 +206,12 @@ func TestWatchSystemAccent_FakePortal(t *testing.T) {
 		ok bool
 	}
 	gotA := make(chan acc, 4)
-	gotT := make(chan SystemTheme, 4)
+	gotT := make(chan native.SystemTheme, 4)
 	stopA := watchSystemAccent(nil, func(c color.RGBA, ok bool) { gotA <- acc{c, ok} })
 	if stopA == nil {
 		t.Skip("сессионной шины нет")
 	}
-	stopT := watchSystemTheme(nil, func(th SystemTheme) { gotT <- th })
+	stopT := watchSystemTheme(nil, func(th native.SystemTheme) { gotT <- th })
 	defer stopT()
 
 	emit := func(key string, v any) {
@@ -235,7 +236,7 @@ func TestWatchSystemAccent_FakePortal(t *testing.T) {
 	}
 	select {
 	case th := <-gotT:
-		if th != SystemThemeDark {
+		if th != native.SystemThemeDark {
 			t.Errorf("подписчик на тему получил %v, ждал dark", th)
 		}
 	case <-time.After(3 * time.Second):

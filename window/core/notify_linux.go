@@ -32,7 +32,7 @@ const (
 var errNoNotifyDaemon = errors.New("window: на сессионной шине нет демона уведомлений (org.freedesktop.Notifications)")
 
 // linuxNotifier — состояние уведомлений одного окна. Встраивается в бэкенды
-// X11/Wayland: методы showBalloon/setBalloonClickHandler становятся их
+// X11/Wayland: методы ShowBalloon/SetBalloonClickHandler становятся их
 // методами, и окно видит их через интерфейс balloonHost (tray.go).
 type linuxNotifier struct {
 	mu         sync.Mutex
@@ -42,16 +42,16 @@ type linuxNotifier struct {
 	caps       map[string]bool // GetCapabilities, читается один раз
 }
 
-// setBalloonClickHandler регистрирует колбэк клика по уведомлению.
-func (n *linuxNotifier) setBalloonClickHandler(fn func()) {
+// SetBalloonClickHandler регистрирует колбэк клика по уведомлению.
+func (n *linuxNotifier) SetBalloonClickHandler(fn func()) {
 	n.mu.Lock()
 	n.onClick = fn
 	n.mu.Unlock()
 }
 
-// showBalloon показывает уведомление. infoFlag — severity в кодировке tray.go
+// ShowBalloon показывает уведомление. infoFlag — severity в кодировке tray.go
 // (0 none, 1 info, 2 warning, 3 error): выбирает значок и «срочность».
-func (n *linuxNotifier) showBalloon(title, text string, infoFlag uint32) error {
+func (n *linuxNotifier) ShowBalloon(title, text string, infoFlag uint32) error {
 	c, err := dbus.Session()
 	if err != nil {
 		return fmt.Errorf("window: уведомления недоступны: %w", err)
